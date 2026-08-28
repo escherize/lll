@@ -22,6 +22,11 @@ PORT=$(( (RANDOM % 20000) + 20000 ))
 URL="http://127.0.0.1:$PORT"
 PB_LOG="$DATA_DIR/pb.log"
 
+# A superuser must exist or serve auto-opens the browser install wizard.
+"$PB_BIN" superuser upsert e2e@local.test e2e-password-123 \
+  --dir "$DATA_DIR/pb_data" >"$PB_LOG" 2>&1 \
+  || { echo "FAIL: creating PB superuser" >&2; cat "$PB_LOG" >&2; exit 1; }
+
 "$PB_BIN" serve --dir "$DATA_DIR/pb_data" \
   --migrationsDir pb/pb_migrations --hooksDir pb/pb_hooks \
   --http "127.0.0.1:$PORT" >"$PB_LOG" 2>&1 &
@@ -262,8 +267,9 @@ assert_contains "$out" "Created and switched to branch 'eng-6-roundtrip-issue'" 
 branch=$(git -C "$REPO" branch --show-current)
 [ "$branch" = "eng-6-roundtrip-issue" ] || fail "start: expected branch eng-6-roundtrip-issue, on '$branch'"
 
-# starting again switches to the existing branch instead of failing
-out=$(cd "$REPO" && LIN_URL=$URL "$LIN_ABS" issue start ENG-6)
+# starting again — ID inferred from the branch — switches instead of failing
+out=$(cd "$REPO" && LIN_URL=$URL "$LIN_ABS" issue start)
+assert_contains "$out" "Started ENG-6" "inferred start output"
 assert_contains "$out" "Switched to existing branch 'eng-6-roundtrip-issue'" "start reuses branch"
 
 # --- ID inference from the branch: view / update / close with no arg ---
