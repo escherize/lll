@@ -1,0 +1,45 @@
+import "go:fmt"
+import "go:os"
+
+import "commands"
+
+fn main() {
+  let Some(noun) = os.Args.get(1) else {
+    print_usage()
+    return
+  }
+
+  let result = match noun {
+    "issue" => commands.issue(os.Args),
+    "--help" => {
+      print_usage()
+      Ok(())
+    },
+    "-h" => {
+      print_usage()
+      Ok(())
+    },
+    "help" => {
+      print_usage()
+      Ok(())
+    },
+    other => Err(f"unknown command: '{other}'"),
+  }
+
+  if let Err(msg) = result {
+    fmt.Println(f"Error: {msg}")
+    os.Exit(1)
+  }
+}
+
+fn print_usage() {
+  fmt.Println("lin - a Linear-style issue tracker
+
+Usage:
+  lin issue <command>    work with issues (see 'lin issue --help')
+  lin --help             show this help
+
+Environment:
+  LIN_URL    PocketBase base URL (default http://127.0.0.1:8090)
+  LIN_TEAM   team key used by 'issue create' (e.g. ENG)")
+}

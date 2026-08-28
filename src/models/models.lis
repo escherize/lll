@@ -1,0 +1,32 @@
+#[json]
+pub struct Team {
+  pub id: string,
+  pub key: string,
+  pub name: string,
+}
+
+#[json]
+pub struct TeamList {
+  pub items: Slice<Team>,
+}
+
+#[json]
+pub struct Issue {
+  pub id: string,
+  pub team: string,
+  pub number: int,
+  pub title: string,
+  pub state: string,
+}
+
+#[json]
+pub struct IssueList {
+  pub items: Slice<Issue>,
+}
+
+#[json]
+pub struct NewIssue {
+  pub team: string,
+  pub title: string,
+  pub state: string,
+}

@@ -1,0 +1,5 @@
+.private/
+.private-remote
+target/
+pb/pocketbase
+pb/pb_data/

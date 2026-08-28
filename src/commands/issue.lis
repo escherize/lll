@@ -1,0 +1,109 @@
+import "go:encoding/json"
+import "go:fmt"
+import "go:net/url"
+import "go:os"
+
+import "models"
+import "pb"
+
+/// Dispatch `lin issue <verb>`.
+pub fn issue(args: Slice<string>) -> Result<(), string> {
+  let Some(verb) = args.get(2) else {
+    print_usage()
+    return Ok(())
+  }
+  match verb {
+    "create" => create(args),
+    "list" => list(),
+    "--help" => {
+      print_usage()
+      Ok(())
+    },
+    "-h" => {
+      print_usage()
+      Ok(())
+    },
+    other => Err(f"unknown issue command: '{other}' (see 'lin issue --help')"),
+  }
+}
+
+fn print_usage() {
+  fmt.Println("lin issue - work with issues
+
+Usage:
+  lin issue create -t \"title\"    create an issue in team $LIN_TEAM
+  lin issue list                 list issues (ID, state, title)")
+}
+
+fn create(args: Slice<string>) -> Result<(), string> {
+  let mut title = ""
+  let mut i = 3
+  while i < args.length() {
+    match args[i] {
+      "-t" => {
+        let Some(val) = args.get(i + 1) else {
+          return Err("-t requires a value")
+        }
+        title = val
+        i += 2
+      },
+      other => return Err(f"unknown flag: '{other}'"),
+    }
+  }
+  if title == "" {
+    return Err("usage: lin issue create -t \"title\"")
+  }
+
+  let team_key = os.Getenv("LIN_TEAM")
+  if team_key == "" {
+    return Err("set LIN_TEAM to your team key (e.g. ENG)")
+  }
+  let team = find_team(team_key)?
+
+  let new_issue = models.NewIssue { team: team.id, title, state: "todo" }
+  let payload = match json.Marshal(new_issue) {
+    Ok(p) => p,
+    Err(e) => return Err(f"encoding issue: {e}"),
+  }
+  let body = pb.post("/api/collections/issues/records", payload as string)?
+
+  let mut created = models.Issue { .. }
+  if let Err(e) = json.Unmarshal(body.bytes(), &created) {
+    return Err(f"decoding created issue: {e}")
+  }
+  fmt.Println(f"Created {team.key}-{created.number}: {created.title}")
+  Ok(())
+}
+
+fn list() -> Result<(), string> {
+  let teams_body = pb.get("/api/collections/teams/records?perPage=200")?
+  let mut teams = models.TeamList { .. }
+  if let Err(e) = json.Unmarshal(teams_body.bytes(), &teams) {
+    return Err(f"decoding teams: {e}")
+  }
+
+  let body = pb.get("/api/collections/issues/records?perPage=200&sort=created")?
+  let mut issues = models.IssueList { .. }
+  if let Err(e) = json.Unmarshal(body.bytes(), &issues) {
+    return Err(f"decoding issues: {e}")
+  }
+
+  for item in issues.items {
+    let key = teams.items.find(|t| t.id == item.team).map_or("?", |t| t.key)
+    fmt.Println(f"{key}-{item.number}\t{item.state}\t{item.title}")
+  }
+  Ok(())
+}
+
+fn find_team(key: string) -> Result<models.Team, string> {
+  let filter = url.QueryEscape(f"key='{key}'")
+  let body = pb.get(f"/api/collections/teams/records?filter={filter}")?
+  let mut result = models.TeamList { .. }
+  if let Err(e) = json.Unmarshal(body.bytes(), &result) {
+    return Err(f"decoding teams: {e}")
+  }
+  let Some(team) = result.items.find(|t| t.key == key) else {
+    return Err(f"no team with key '{key}' on the server")
+  }
+  Ok(team)
+}
