@@ -22,12 +22,14 @@ pub fn config_cmd(args: Slice<string>) -> Result<(), string> {
 }
 
 fn config_usage() {
-  fmt.Println("lin config - manage configuration
+  fmt.Println(
+    "lin config - manage configuration
 
 Usage:
   lin config init    write a commented .lin.toml template to the current directory
 
-Precedence: env vars (LIN_URL, LIN_TEAM, LIN_SORT) > ./.lin.toml > ~/.config/lin/lin.toml")
+Precedence: env vars (LIN_URL, LIN_TEAM, LIN_SORT) > ./.lin.toml > ~/.config/lin/lin.toml",
+  )
 }
 
 fn config_init() -> Result<(), string> {
@@ -44,7 +46,8 @@ fn config_init() -> Result<(), string> {
 # Default team key. Scopes 'lin issue list' and is required by 'lin issue create'.
 # team = \"ENG\"
 
-# Default sort for 'lin issue list' (not used yet).
+# Default sort for 'lin issue list': created, updated, priority, or number;
+# prefix - for descending (e.g. \"-updated\").
 # sort = \"created\"
 
 # Who you are. Identity placeholder until auth exists.

@@ -1,0 +1,39 @@
+import "go:strings"
+
+/// The six issue states, in workflow order.
+pub fn states() -> Slice<string> {
+  ["backlog", "todo", "in-progress", "in-review", "done", "cancelled"]
+}
+
+/// Sortable issue fields (PB record fields).
+pub fn sort_fields() -> Slice<string> {
+  ["created", "updated", "priority", "number"]
+}
+
+/// Build a PocketBase filter expression from optional criteria.
+/// Empty criteria are omitted; an empty result means "no filter".
+pub fn filter(team_id: string, state: string) -> string {
+  let mut clauses: Slice<string> = []
+  if team_id != "" { clauses = clauses.append(f"team={quote(team_id)}") }
+  if state != "" { clauses = clauses.append(f"state={quote(state)}") }
+  strings.Join(clauses, " && ")
+}
+
+/// Validate a sort spec ("field" or "-field" for descending) and return it
+/// in PB sort syntax, which is the same shape.
+pub fn sort(spec: string) -> Result<string, string> {
+  let field = strings.TrimPrefix(spec, "-")
+  if sort_fields().find(|f| f == field).is_none() {
+    return Err(
+      f"unknown sort field '{field}' (use one of: {strings.Join(sort_fields(), ", ")}; prefix - for descending)",
+    )
+  }
+  Ok(spec)
+}
+
+/// Single-quote a value for a PB filter, escaping backslashes and quotes.
+fn quote(value: string) -> string {
+  let mut escaped = strings.ReplaceAll(value, r"\", r"\\")
+  escaped = strings.ReplaceAll(escaped, "'", r"\'")
+  f"'{escaped}'"
+}

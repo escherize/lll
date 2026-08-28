@@ -17,12 +17,22 @@ pub struct NewTeam {
 }
 
 #[json]
+pub struct IssueExpand {
+  pub team: Team,
+}
+
+#[json]
 pub struct Issue {
   pub id: string,
   pub team: string,
   pub number: int,
   pub title: string,
+  pub description: string,
   pub state: string,
+  pub priority: int,
+  pub created: string,
+  pub updated: string,
+  pub expand: IssueExpand,
 }
 
 #[json]
@@ -37,4 +47,5 @@ pub struct NewIssue {
   pub team: string,
   pub title: string,
   pub state: string,
+  pub priority: int,
 }

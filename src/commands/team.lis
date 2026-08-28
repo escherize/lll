@@ -28,12 +28,14 @@ pub fn team(args: Slice<string>) -> Result<(), string> {
 }
 
 fn team_usage() {
-  fmt.Println("lin team - work with teams
+  fmt.Println(
+    "lin team - work with teams
 
 Usage:
   lin team list                      list teams (KEY, name)
   lin team create -k KEY -n \"Name\"   create a team
-  lin team view KEY                  show a team and its issue count")
+  lin team view KEY                  show a team and its issue count",
+  )
 }
 
 fn team_list() -> Result<(), string> {
@@ -94,10 +96,14 @@ fn team_view(args: Slice<string>) -> Result<(), string> {
   let Some(key) = args.get(3) else {
     return Err("usage: lin team view KEY")
   }
-  let t = find_team(key)?
+  let Some(t) = find_team(key)? else {
+    return Err(f"no team with key '{key}' on the server")
+  }
 
   let filter = url.QueryEscape(f"team='{t.id}'")
-  let body = pb.get(f"/api/collections/issues/records?filter={filter}&perPage=1")?
+  let body = pb.get(
+    f"/api/collections/issues/records?filter={filter}&perPage=1",
+  )?
   let mut issues = models.IssueList { .. }
   if let Err(e) = json.Unmarshal(body.bytes(), &issues) {
     return Err(f"decoding issues: {e}")

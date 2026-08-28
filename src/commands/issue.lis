@@ -1,10 +1,16 @@
 import "go:encoding/json"
 import "go:fmt"
 import "go:net/url"
+import "go:os"
+import "go:strconv"
+import "go:strings"
+import "go:text/tabwriter"
 
 import "config"
+import "display"
 import "models"
 import "pb"
+import "query"
 
 /// Dispatch `lin issue <verb>`.
 pub fn issue(args: Slice<string>) -> Result<(), string> {
@@ -14,7 +20,8 @@ pub fn issue(args: Slice<string>) -> Result<(), string> {
   }
   match verb {
     "create" => create(args),
-    "list" => list(),
+    "list" => list(args),
+    "view" => view(args),
     "--help" => {
       print_usage()
       Ok(())
@@ -28,17 +35,30 @@ pub fn issue(args: Slice<string>) -> Result<(), string> {
 }
 
 fn print_usage() {
-  fmt.Println("lin issue - work with issues
+  fmt.Println(
+    "lin issue - work with issues
 
 Usage:
-  lin issue create -t \"title\"    create an issue in the configured team
-  lin issue list                 list issues (ID, state, title); scoped to the configured team
+  lin issue create -t \"title\" [--priority 0-4]    create an issue in the configured team
+  lin issue list [--state s] [--sort f] [--json]  list issues; scoped to the configured team
+  lin issue view KEY-123 [--json]                 show one issue in full
 
-The team comes from LIN_TEAM or 'team' in .lin.toml (see 'lin config --help').")
+Flags:
+  --state     one of: backlog, todo, in-progress, in-review, done, cancelled
+  --sort      created, updated, priority, or number; prefix - for descending
+              (default: LIN_SORT or 'sort' in .lin.toml, else created)
+  --priority  0 none, 1 urgent (!!!), 2 high (!!), 3 medium (!), 4 low (·)
+  --json      raw PocketBase JSON (team expanded), pipe-friendly
+
+State glyphs: ◌ backlog  ○ todo  ◐ in-progress  ◉ in-review  ● done  ⊗ cancelled
+
+The team comes from LIN_TEAM or 'team' in .lin.toml (see 'lin config --help').",
+  )
 }
 
 fn create(args: Slice<string>) -> Result<(), string> {
   let mut title = ""
+  let mut priority = 0
   let mut i = 3
   while i < args.length() {
     match args[i] {
@@ -49,20 +69,44 @@ fn create(args: Slice<string>) -> Result<(), string> {
         title = val
         i += 2
       },
+      "--priority" => {
+        let Some(val) = args.get(i + 1) else {
+          return Err("--priority requires a value")
+        }
+        let Ok(p) = strconv.Atoi(val) else {
+          return Err(f"--priority must be a number 0-4, got '{val}'")
+        }
+        if p < 0 || p > 4 {
+          return Err(
+            f"--priority must be 0-4 (0 none, 1 urgent, 2 high, 3 medium, 4 low), got {p}",
+          )
+        }
+        priority = p
+        i += 2
+      },
       other => return Err(f"unknown flag: '{other}'"),
     }
   }
   if title == "" {
-    return Err("usage: lin issue create -t \"title\"")
+    return Err("usage: lin issue create -t \"title\" [--priority 0-4]")
   }
 
   let team_key = config.load()?.team
   if team_key == "" {
-    return Err("set LIN_TEAM or 'team' in .lin.toml to your team key (e.g. ENG)")
+    return Err(
+      "set LIN_TEAM or 'team' in .lin.toml to your team key (e.g. ENG)",
+    )
   }
-  let team = find_team(team_key)?
+  let Some(team) = find_team(team_key)? else {
+    return Err(f"no team with key '{team_key}' on the server")
+  }
 
-  let new_issue = models.NewIssue { team: team.id, title, state: "todo" }
+  let new_issue = models.NewIssue { 
+    team: team.id,
+    title,
+    state: "todo",
+    priority,
+  }
   let payload = match json.Marshal(new_issue) {
     Ok(p) => p,
     Err(e) => return Err(f"encoding issue: {e}"),
@@ -77,46 +121,160 @@ fn create(args: Slice<string>) -> Result<(), string> {
   Ok(())
 }
 
-fn list() -> Result<(), string> {
-  let teams_body = pb.get("/api/collections/teams/records?perPage=200")?
-  let mut teams = models.TeamList { .. }
-  if let Err(e) = json.Unmarshal(teams_body.bytes(), &teams) {
-    return Err(f"decoding teams: {e}")
+fn list(args: Slice<string>) -> Result<(), string> {
+  let mut state = ""
+  let mut sort_flag = ""
+  let mut json_mode = false
+  let mut i = 3
+  while i < args.length() {
+    match args[i] {
+      "--state" => {
+        let Some(val) = args.get(i + 1) else {
+          return Err("--state requires a value")
+        }
+        if query.states().find(|s| s == val).is_none() {
+          return Err(
+            f"unknown state '{val}' (use one of: {strings.Join(query.states(), ", ")})",
+          )
+        }
+        state = val
+        i += 2
+      },
+      "--sort" => {
+        let Some(val) = args.get(i + 1) else {
+          return Err("--sort requires a value")
+        }
+        sort_flag = val
+        i += 2
+      },
+      "--json" => {
+        json_mode = true
+        i += 1
+      },
+      other => return Err(f"unknown flag: '{other}'"),
+    }
   }
+
+  let cfg = config.load()?
 
   // A configured team (LIN_TEAM or .lin.toml) scopes the list by default.
-  let mut path = "/api/collections/issues/records?perPage=200&sort=created"
-  let team_key = config.load()?.team
-  if team_key != "" {
-    let Some(team) = teams.items.find(|t| t.key == team_key) else {
-      return Err(f"no team with key '{team_key}' on the server")
+  let mut team_id = ""
+  if cfg.team != "" {
+    let Some(team) = find_team(cfg.team)? else {
+      return Err(f"no team with key '{cfg.team}' on the server")
     }
-    let filter = url.QueryEscape(f"team='{team.id}'")
-    path = f"{path}&filter={filter}"
+    team_id = team.id
   }
 
+  let mut sort_spec = sort_flag
+  if sort_spec == "" { sort_spec = cfg.sort }
+  if sort_spec == "" { sort_spec = "created" }
+  let sort = query.sort(sort_spec)?
+
+  let mut path = f"/api/collections/issues/records?perPage=200&expand=team&sort={url.QueryEscape(sort)}"
+  let filter = query.filter(team_id, state)
+  if filter != "" { path = f"{path}&filter={url.QueryEscape(filter)}" }
+
   let body = pb.get(path)?
+  if json_mode {
+    fmt.Println(body)
+    return Ok(())
+  }
+
   let mut issues = models.IssueList { .. }
   if let Err(e) = json.Unmarshal(body.bytes(), &issues) {
     return Err(f"decoding issues: {e}")
   }
 
+  let w = tabwriter.NewWriter(os.Stdout, 0, 4, 2, ' ', 0)
   for item in issues.items {
-    let key = teams.items.find(|t| t.id == item.team).map_or("?", |t| t.key)
-    fmt.Println(f"{key}-{item.number}\t{item.state}\t{item.title}")
+    let key = item.expand.team.key
+    let line = f"{key}-{item.number}\t{display.glyph(item.state)} {item.state}\t{display.priority_marker(item.priority)}\t{item.title}\t{display.relative(item.updated)}"
+    if let Err(e) = fmt.Fprintln(w, line) { return Err(f"writing output: {e}") }
+  }
+  if let Err(e) = w.Flush() { return Err(f"writing output: {e}") }
+  Ok(())
+}
+
+fn view(args: Slice<string>) -> Result<(), string> {
+  let mut id = ""
+  let mut json_mode = false
+  let mut i = 3
+  while i < args.length() {
+    match args[i] {
+      "--json" => {
+        json_mode = true
+        i += 1
+      },
+      other => {
+        if id != "" { return Err(f"unexpected argument: '{other}'") }
+        id = other
+        i += 1
+      },
+    }
+  }
+  if id == "" { return Err("usage: lin issue view KEY-123 [--json]") }
+
+  let Some(dash) = strings.LastIndex(id, "-") else {
+    return Err(f"'{id}' is not an issue ID (expected KEY-123, e.g. ENG-1)")
+  }
+  if dash == 0 || dash == id.length() - 1 {
+    return Err(f"'{id}' is not an issue ID (expected KEY-123, e.g. ENG-1)")
+  }
+  let team_key = id.substring(0..dash)
+  let Ok(number) = strconv.Atoi(id.substring(dash + 1..id.length())) else {
+    return Err(f"'{id}' is not an issue ID (expected KEY-123, e.g. ENG-1)")
+  }
+
+  let not_found = f"issue {id} not found — check 'lin issue list' or LIN_TEAM"
+  let Some(team) = find_team(team_key)? else {
+    return Err(not_found)
+  }
+
+  let filter = url.QueryEscape(
+    f"{query.filter(team.id, "")} && number={number}",
+  )
+  let body = pb.get(
+    f"/api/collections/issues/records?filter={filter}&perPage=1",
+  )?
+  let mut issues = models.IssueList { .. }
+  if let Err(e) = json.Unmarshal(body.bytes(), &issues) {
+    return Err(f"decoding issues: {e}")
+  }
+  let Some(item) = issues.items.get(0) else {
+    return Err(not_found)
+  }
+
+  let record = pb.get(f"/api/collections/issues/records/{item.id}?expand=team")?
+  if json_mode {
+    fmt.Println(record)
+    return Ok(())
+  }
+
+  let mut full = models.Issue { .. }
+  if let Err(e) = json.Unmarshal(record.bytes(), &full) {
+    return Err(f"decoding issue: {e}")
+  }
+
+  fmt.Println(f"{team.key}-{full.number} {full.title}")
+  fmt.Println("")
+  fmt.Println(f"State:     {display.glyph(full.state)} {full.state}")
+  fmt.Println(f"Priority:  {display.priority_name(full.priority)}")
+  fmt.Println(f"Created:   {display.relative(full.created)}")
+  fmt.Println(f"Updated:   {display.relative(full.updated)}")
+  if full.description != "" {
+    fmt.Println("")
+    fmt.Println(full.description)
   }
   Ok(())
 }
 
-fn find_team(key: string) -> Result<models.Team, string> {
+fn find_team(key: string) -> Result<Option<models.Team>, string> {
   let filter = url.QueryEscape(f"key='{key}'")
   let body = pb.get(f"/api/collections/teams/records?filter={filter}")?
   let mut result = models.TeamList { .. }
   if let Err(e) = json.Unmarshal(body.bytes(), &result) {
     return Err(f"decoding teams: {e}")
   }
-  let Some(team) = result.items.find(|t| t.key == key) else {
-    return Err(f"no team with key '{key}' on the server")
-  }
-  Ok(team)
+  Ok(result.items.find(|t| t.key == key))
 }

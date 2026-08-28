@@ -1,0 +1,52 @@
+#[test]
+fn relative_under_a_minute_is_just_now() {
+  assert relative_seconds(0) == "just now"
+  assert relative_seconds(59) == "just now"
+}
+
+#[test]
+fn relative_minutes_hours_days() {
+  assert relative_seconds(60) == "1m ago"
+  assert relative_seconds(180) == "3m ago"
+  assert relative_seconds(3600) == "1h ago"
+  assert relative_seconds(10800) == "3h ago"
+  assert relative_seconds(86400) == "1d ago"
+  assert relative_seconds(176400) == "2d ago"
+}
+
+#[test]
+fn every_state_has_a_distinct_glyph() {
+  let glyphs = [
+      "backlog",
+      "todo",
+      "in-progress",
+      "in-review",
+      "done",
+      "cancelled",
+    ].map(
+    glyph,
+  )
+  for (i, g) in glyphs.enumerate() {
+    assert g != "?"
+    for (j, other) in glyphs.enumerate() {
+      assert i == j || g != other
+    }
+  }
+  assert glyph("bogus") == "?"
+}
+
+#[test]
+fn priority_markers_follow_linear_scale() {
+  assert priority_marker(0) == ""
+  assert priority_marker(1) == "!!!"
+  assert priority_marker(2) == "!!"
+  assert priority_marker(3) == "!"
+  assert priority_marker(4) == "·"
+}
+
+#[test]
+fn priority_names_follow_linear_scale() {
+  assert priority_name(0) == "none"
+  assert priority_name(1) == "urgent"
+  assert priority_name(4) == "low"
+}

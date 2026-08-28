@@ -1,0 +1,41 @@
+#[test]
+fn filter_empty_criteria_yields_empty_string() {
+  assert filter("", "") == ""
+}
+
+#[test]
+fn filter_team_only() {
+  assert filter("abc123", "") == "team='abc123'"
+}
+
+#[test]
+fn filter_state_only() {
+  assert filter("", "todo") == "state='todo'"
+}
+
+#[test]
+fn filter_combines_criteria_with_and() {
+  assert filter("abc123", "in-progress") ==
+  "team='abc123' && state='in-progress'"
+}
+
+#[test]
+fn filter_escapes_quotes_and_backslashes() {
+  assert filter("a'b", "") == r"team='a\'b'"
+  assert filter(r"a\b", "") == r"team='a\\b'"
+}
+
+#[test]
+fn sort_accepts_known_fields() {
+  let assert Ok(s) = sort("created")
+  assert s == "created"
+  let assert Ok(d) = sort("-priority")
+  assert d == "-priority"
+}
+
+#[test]
+fn sort_rejects_unknown_fields() {
+  let assert Err(msg) = sort("title")
+  assert msg.contains("unknown sort field 'title'")
+  let assert Err(_) = sort("-nope")
+}

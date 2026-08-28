@@ -1,0 +1,57 @@
+import "go:time"
+
+// Glyph legend (one per state, workflow order):
+//   ◌ backlog   ○ todo   ◐ in-progress   ◉ in-review   ● done   ⊗ cancelled
+
+/// Glyph for an issue state.
+pub fn glyph(state: string) -> string {
+  match state {
+    "backlog" => "◌",
+    "todo" => "○",
+    "in-progress" => "◐",
+    "in-review" => "◉",
+    "done" => "●",
+    "cancelled" => "⊗",
+    _ => "?",
+  }
+}
+
+/// Marker for a priority (Linear scale): 1 urgent !!!, 2 high !!, 3 medium !,
+/// 4 low ·, 0 none blank.
+pub fn priority_marker(priority: int) -> string {
+  match priority {
+    1 => "!!!",
+    2 => "!!",
+    3 => "!",
+    4 => "·",
+    _ => "",
+  }
+}
+
+/// Human name for a priority (Linear scale).
+pub fn priority_name(priority: int) -> string {
+  match priority {
+    0 => "none",
+    1 => "urgent",
+    2 => "high",
+    3 => "medium",
+    4 => "low",
+    _ => "?",
+  }
+}
+
+/// Render a PocketBase timestamp ("2026-08-28 18:20:00.123Z") as a relative
+/// age like "3h ago". Unparseable input is returned as-is.
+pub fn relative(timestamp: string) -> string {
+  time
+    .Parse("2006-01-02 15:04:05.999Z", timestamp)
+    .map_or(timestamp, |t| relative_seconds(time.Now().Unix() - t.Unix()))
+}
+
+/// Pure core of relative(): seconds-ago -> "3h ago".
+pub fn relative_seconds(seconds: int64) -> string {
+  if seconds < 60 { return "just now" }
+  if seconds < 3600 { return f"{seconds / 60}m ago" }
+  if seconds < 86400 { return f"{seconds / 3600}h ago" }
+  f"{seconds / 86400}d ago"
+}

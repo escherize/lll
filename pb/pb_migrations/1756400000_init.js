@@ -48,6 +48,8 @@ migrate(
           maxSelect: 1,
           values: ["backlog", "todo", "in-progress", "in-review", "done", "cancelled"],
         },
+        // Linear's priority scale: 0 none, 1 urgent, 2 high, 3 medium, 4 low.
+        { name: "priority", type: "number", onlyInt: true, min: 0, max: 4 },
         { name: "created", type: "autodate", onCreate: true },
         { name: "updated", type: "autodate", onCreate: true, onUpdate: true },
       ],

@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 # e2e: ephemeral PocketBase + compiled lin CLI.
 # Covers: create/list with ENG-1 style IDs, per-team numbering,
-# forged duplicate (team, number) rejection, --help output.
+# forged duplicate (team, number) rejection, issue view (fields, unknown IDs),
+# --json (jq roundtrips, expand.team), --state/--sort filters, glyph/priority
+# display, --help output.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
@@ -143,6 +145,105 @@ assert_not_contains "$out" "OPS-1" "project config beats home config"
 out=$(cd "$WORK" && env -u LIN_URL LIN_TEAM=OPS HOME="$FAKEHOME" "$LIN_ABS" issue list)
 assert_contains "$out" "OPS-1" "env scopes to OPS"
 assert_not_contains "$out" "ENG-1" "env beats project config"
+
+# --- issue view: full fields, glyphs, priority, relative dates, description ---
+out=$(LIN_URL=$URL LIN_TEAM=ENG "$LIN" issue create -t "Fix login flow" --priority 2)
+assert_contains "$out" "Created ENG-3: Fix login flow" "create with --priority"
+
+ENG3_ID=$(LIN_URL=$URL LIN_TEAM=ENG "$LIN" issue list --json | \
+  jq -r '.items[] | select(.title=="Fix login flow") | .id')
+[ -n "$ENG3_ID" ] || fail "resolving ENG-3 record id from --json"
+curl -sf -X PATCH "$URL/api/collections/issues/records/$ENG3_ID" \
+  -H 'Content-Type: application/json' \
+  -d '{"description":"First paragraph of the description.\n\nSecond paragraph."}' >/dev/null
+
+out=$(LIN_URL=$URL "$LIN" issue view ENG-3)
+assert_contains "$out" "ENG-3 Fix login flow" "view header"
+assert_contains "$out" "State:" "view state label"
+assert_contains "$out" "○ todo" "view state glyph"
+assert_contains "$out" "Priority:  high" "view priority"
+assert_contains "$out" "Created:   just now" "view relative created"
+assert_contains "$out" "Updated:   just now" "view relative updated"
+assert_contains "$out" "First paragraph of the description." "view description"
+assert_contains "$out" "Second paragraph." "view description second paragraph"
+
+# --- issue view: unknown IDs exit nonzero and name the fix ---
+set +e
+out=$(LIN_URL=$URL "$LIN" issue view OPS-99 2>&1)
+rc=$?
+set -e
+[ "$rc" -ne 0 ] || fail "view OPS-99: expected nonzero exit"
+assert_contains "$out" "issue OPS-99 not found" "view unknown number message"
+assert_contains "$out" "lin issue list" "view unknown ID names the fix"
+
+set +e
+out=$(LIN_URL=$URL "$LIN" issue view ZZZ-1 2>&1)
+rc=$?
+set -e
+[ "$rc" -ne 0 ] || fail "view ZZZ-1: expected nonzero exit"
+assert_contains "$out" "issue ZZZ-1 not found" "view unknown team message"
+
+set +e
+out=$(LIN_URL=$URL "$LIN" issue view not-an-id 2>&1)
+rc=$?
+set -e
+[ "$rc" -ne 0 ] || fail "view not-an-id: expected nonzero exit"
+assert_contains "$out" "not an issue ID" "view malformed ID message"
+
+# --- --json parses with jq and resolves expand.team ---
+title=$(LIN_URL=$URL LIN_TEAM=ENG "$LIN" issue list --json | jq -r '.items[0].title')
+[ -n "$title" ] && [ "$title" != "null" ] || fail "list --json: .items[0].title empty"
+key=$(LIN_URL=$URL LIN_TEAM=ENG "$LIN" issue list --json | jq -r '.items[0].expand.team.key')
+[ "$key" = "ENG" ] || fail "list --json: expected expand.team.key ENG, got '$key'"
+
+vtitle=$(LIN_URL=$URL "$LIN" issue view ENG-3 --json | jq -r '.title')
+[ "$vtitle" = "Fix login flow" ] || fail "view --json: expected title roundtrip, got '$vtitle'"
+vkey=$(LIN_URL=$URL "$LIN" issue view ENG-3 --json | jq -r '.expand.team.key')
+[ "$vkey" = "ENG" ] || fail "view --json: expected expand.team.key ENG, got '$vkey'"
+
+# --- --state filters; invalid state rejected ---
+curl -sf -X PATCH "$URL/api/collections/issues/records/$ENG3_ID" \
+  -H 'Content-Type: application/json' -d '{"state":"in-review"}' >/dev/null
+
+out=$(LIN_URL=$URL LIN_TEAM=ENG "$LIN" issue list --state in-review)
+assert_contains "$out" "ENG-3" "state filter shows in-review issue"
+assert_not_contains "$out" "ENG-1" "state filter hides todo issues"
+
+set +e
+out=$(LIN_URL=$URL "$LIN" issue list --state bogus 2>&1)
+rc=$?
+set -e
+[ "$rc" -ne 0 ] || fail "list --state bogus: expected nonzero exit"
+assert_contains "$out" "unknown state 'bogus'" "invalid state message"
+
+# --- --sort orders by priority; LIN_SORT sets the default ---
+out=$(LIN_URL=$URL LIN_TEAM=ENG "$LIN" issue create -t "Server on fire" --priority 1)
+assert_contains "$out" "Created ENG-4" "urgent issue created"
+out=$(LIN_URL=$URL LIN_TEAM=ENG "$LIN" issue create -t "Tidy readme" --priority 4)
+assert_contains "$out" "Created ENG-5" "low issue created"
+
+out=$(LIN_URL=$URL LIN_TEAM=ENG "$LIN" issue list --sort -priority)
+assert_contains "$(printf '%s\n' "$out" | head -1)" "ENG-5" "sort -priority puts low (4) first"
+out=$(LIN_URL=$URL LIN_TEAM=ENG "$LIN" issue list --sort priority)
+assert_contains "$(printf '%s\n' "$out" | tail -1)" "ENG-5" "sort priority puts low (4) last"
+
+out=$(LIN_URL=$URL LIN_TEAM=ENG LIN_SORT=-priority "$LIN" issue list)
+assert_contains "$(printf '%s\n' "$out" | head -1)" "ENG-5" "LIN_SORT is the default sort"
+
+set +e
+out=$(LIN_URL=$URL "$LIN" issue list --sort title 2>&1)
+rc=$?
+set -e
+[ "$rc" -ne 0 ] || fail "list --sort title: expected nonzero exit"
+assert_contains "$out" "unknown sort field 'title'" "invalid sort message"
+
+# --- list output: glyphs and priority markers, aligned columns ---
+out=$(LIN_URL=$URL LIN_TEAM=ENG "$LIN" issue list)
+assert_contains "$out" "○ todo" "list shows todo glyph"
+assert_contains "$out" "◉ in-review" "list shows in-review glyph"
+assert_contains "$out" "!!!" "list shows urgent marker"
+assert_contains "$out" "·" "list shows low marker"
+assert_contains "$out" "just now" "list shows relative dates"
 
 # --- help output ---
 out=$("$LIN" --help)
