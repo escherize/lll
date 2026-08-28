@@ -16,11 +16,20 @@ fi
 export PB_BIN
 
 DATA_DIR="$(mktemp -d)"
+
+# Hermetic: a developer's repo-root .lll.toml must not leak into assertions.
+if [ -f .lll.toml ]; then
+  mv .lll.toml "$DATA_DIR/.lll.toml.saved"
+  RESTORE_TOML=1
+fi
 DB_PORT=$(( (RANDOM % 20000) + 20000 ))
 WEB_PORT=$(( (RANDOM % 20000) + 40000 ))
 UP_LOG="$DATA_DIR/up.log"
 
 cleanup() {
+  if [ "${RESTORE_TOML:-}" = 1 ] && [ -f "$DATA_DIR/.lll.toml.saved" ]; then
+    mv "$DATA_DIR/.lll.toml.saved" .lll.toml
+  fi
   kill "${UP_PID:-}" "${BLOCK_PID:-}" "${EXT_PB_PID:-}" 2>/dev/null || true
   rm -rf "$DATA_DIR"
 }

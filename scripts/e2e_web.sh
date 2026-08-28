@@ -21,6 +21,12 @@ if [ -z "$PB_BIN" ]; then
 fi
 
 DATA_DIR="$(mktemp -d)"
+
+# Hermetic: a developer's repo-root .lll.toml must not leak into assertions.
+if [ -f .lll.toml ]; then
+  mv .lll.toml "$DATA_DIR/.lll.toml.saved"
+  RESTORE_TOML=1
+fi
 PB_PORT=$(( (RANDOM % 20000) + 20000 ))
 WEB_PORT=$(( (RANDOM % 20000) + 40000 ))
 export LLL_URL="http://127.0.0.1:$PB_PORT"
@@ -41,6 +47,9 @@ PB_PID=$!
 SERVE_PID=""
 CURL_PID=""
 cleanup() {
+  if [ "${RESTORE_TOML:-}" = 1 ] && [ -f "$DATA_DIR/.lll.toml.saved" ]; then
+    mv "$DATA_DIR/.lll.toml.saved" .lll.toml
+  fi
   if command -v playwright-cli >/dev/null 2>&1; then
     playwright-cli -s="$BROWSER_SESSION" close >/dev/null 2>&1 || true
   fi
@@ -125,15 +134,16 @@ curl -s -o /dev/null -w '%{http_code}' "$WEB/issue/ENG-99" | grep -q 404 \
   || fail "unknown issue is a 404"
 
 # --- actions persist to PB and show via the CLI ---
-code=$(curl -s -o /dev/null -w '%{http_code}' -X POST \
+out=$(curl -s -w '\n%{http_code}' -X POST \
   -d "title=Created from the board&state=todo" "$WEB/create")
-[ "$code" = 204 ] || fail "/create returned $code, want 204"
+printf '%s' "$out" | tail -1 | grep -q 200 || fail "/create should return 200"
+assert_contains "$out" 'id="flash" class="flash" hidden' "/create success clears flash"
 out=$("$LIN" issue list)
 assert_contains "$out" "Created from the board" "web-created issue in lll issue list"
 
 code=$(curl -s -o /dev/null -w '%{http_code}' -X POST \
   -d "key=ENG-3&state=in-review" "$WEB/state")
-[ "$code" = 204 ] || fail "/state returned $code, want 204"
+[ "$code" = 200 ] || fail "/state returned $code, want 200"
 out=$("$LIN" issue view ENG-3)
 assert_contains "$out" "in-review" "web state change in lll issue view"
 board=$(curl -sf "$WEB/")
@@ -141,17 +151,30 @@ assert_contains "$(column "$board" in-review)" "ENG-3" "ENG-3 moved to in-review
 
 code=$(curl -s -o /dev/null -w '%{http_code}' -X POST \
   -d "key=ENG-3&body=comment from the board" "$WEB/comment")
-[ "$code" = 204 ] || fail "/comment returned $code, want 204"
+[ "$code" = 200 ] || fail "/comment returned $code, want 200"
 out=$("$LIN" issue comment ENG-3)
 assert_contains "$out" "comment from the board" "web comment in lll issue comment"
 
-# --- validation ---
-code=$(curl -s -o /dev/null -w '%{http_code}' -X POST -d "title=&state=todo" "$WEB/create")
-[ "$code" = 400 ] || fail "empty title returned $code, want 400"
-code=$(curl -s -o /dev/null -w '%{http_code}' -X POST -d "key=ENG-3&state=bogus" "$WEB/state")
-[ "$code" = 400 ] || fail "bogus state returned $code, want 400"
-code=$(curl -s -o /dev/null -w '%{http_code}' -X POST -d "key=ENG-3&body=" "$WEB/comment")
-[ "$code" = 400 ] || fail "empty comment returned $code, want 400"
+# --- validation: errors arrive as visible flash patches, never silence ---
+out=$(curl -s -X POST -d "title=&state=todo" "$WEB/create")
+assert_contains "$out" "datastar-patch-elements" "empty title patches flash"
+assert_contains "$out" "title is required" "empty title message"
+out=$(curl -s -X POST -d "key=ENG-3&state=bogus" "$WEB/state")
+assert_contains "$out" "unknown state" "bogus state message"
+out=$(curl -s -X POST -d "key=ENG-3&body=" "$WEB/comment")
+assert_contains "$out" "comment body is required" "empty comment message"
+
+# --- no team configured: create error names the fix ---
+NOTEAM_PORT=$(( (RANDOM % 20000) + 40000 ))
+env -u LLL_TEAM LLL_TEAM="" "$LIN" serve --port "$NOTEAM_PORT" >/dev/null 2>&1 &
+NOTEAM_PID=$!
+for _ in $(seq 1 50); do
+  curl -sf "http://127.0.0.1:$NOTEAM_PORT/" >/dev/null 2>&1 && break
+  sleep 0.1
+done
+out=$(curl -s -X POST -d "title=x&state=todo" "http://127.0.0.1:$NOTEAM_PORT/create")
+kill $NOTEAM_PID 2>/dev/null || true
+assert_contains "$out" ".lll.toml" "no-team error names the config fix"
 
 # --- /events: board scope gets a patch frame after a CLI-driven update ---
 EVENTS_FILE="$DATA_DIR/events.txt"

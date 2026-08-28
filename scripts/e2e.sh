@@ -25,6 +25,12 @@ if [ -z "$PB_BIN" ]; then
 fi
 
 DATA_DIR="$(mktemp -d)"
+
+# Hermetic: a developer's repo-root .lll.toml must not leak into assertions.
+if [ -f .lll.toml ]; then
+  mv .lll.toml "$DATA_DIR/.lll.toml.saved"
+  RESTORE_TOML=1
+fi
 PORT=$(( (RANDOM % 20000) + 20000 ))
 URL="http://127.0.0.1:$PORT"
 PB_LOG="$DATA_DIR/pb.log"
@@ -39,7 +45,11 @@ PB_LOG="$DATA_DIR/pb.log"
   --http "127.0.0.1:$PORT" >"$PB_LOG" 2>&1 &
 PB_PID=$!
 WATCH_PIDS=""
-cleanup() { kill $WATCH_PIDS "$PB_PID" 2>/dev/null || true; rm -rf "$DATA_DIR"; }
+cleanup() {
+  if [ "${RESTORE_TOML:-}" = 1 ] && [ -f "$DATA_DIR/.lll.toml.saved" ]; then
+    mv "$DATA_DIR/.lll.toml.saved" .lll.toml
+  fi
+  kill $WATCH_PIDS "$PB_PID" 2>/dev/null || true; rm -rf "$DATA_DIR"; }
 trap cleanup EXIT
 
 fail() {

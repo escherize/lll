@@ -149,6 +149,16 @@ input:focus, textarea:focus, select:focus {
 
 .st-icon, .pri-icon { flex: none; vertical-align: -2px; }
 
+.flash {
+  margin: 10px 16px 0;
+  padding: 6px 10px;
+  border-radius: var(--radius);
+  border: 1px solid rgba(229, 83, 75, 0.4);
+  background: rgba(229, 83, 75, 0.12);
+  color: #f0827b;
+  font-size: 12.5px;
+}
+
 .avatar {
   width: 18px; height: 18px;
   flex: none;
