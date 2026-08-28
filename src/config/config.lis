@@ -22,7 +22,10 @@ pub fn load() -> Result<Config, string> {
       Err(e) => return Err(f"reading {path}: {e}"),
     }
     if let Err(e) = toml.Unmarshal(data, &cfg) {
-      return Err(f"parsing {path}: {e}")
+      return Err(
+        f"parsing {path}: {e}
+fix the TOML syntax in {path}, or remove it and rerun 'lll config init'",
+      )
     }
   }
 

@@ -33,13 +33,28 @@ fn main() {
       print_usage()
       Ok(())
     },
-    other => Err(f"unknown command: '{other}'"),
+    "--version" => {
+      fmt.Println(f"lll {version()}")
+      Ok(())
+    },
+    "version" => {
+      fmt.Println(f"lll {version()}")
+      Ok(())
+    },
+    other => Err(f"unknown command: '{other}' (see 'lll --help')"),
   }
 
   if let Err(msg) = result {
     fmt.Println(f"Error: {msg}")
     os.Exit(1)
   }
+}
+
+/// Keep in sync with [project] version in lisette.toml. `lis build` has no
+/// version-injection hook (only --go-flags pass-through, which cannot target
+/// generated identifiers reliably), so this is a hardcoded constant.
+fn version() -> string {
+  "0.1.0"
 }
 
 fn print_usage() {
@@ -59,6 +74,7 @@ Usage:
   lll board [-w]          print the web board URL; -w opens it (see 'lll board --help')
   lll completions <shell> completion script for bash, zsh, or fish
                           (see 'lll completions --help')
+  lll --version           print the version
   lll --help              show this help
 
 Configuration (env > ./.lll.toml > ~/.config/lll/lll.toml):

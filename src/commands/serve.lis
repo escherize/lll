@@ -239,7 +239,7 @@ pub fn run_server(port: int) -> Result<(), string> {
   let mut team_id = ""
   if cfg.team != "" {
     let Some(team) = find_team(cfg.team)? else {
-      return Err(f"no team with key '{cfg.team}' on the server")
+      return Err(unknown_team(cfg.team))
     }
     team_id = team.id
   }
@@ -336,7 +336,8 @@ fn render(name: string, data: Unknown) -> Result<string, string> {
     "web/templates/icons.html",
   ) {
     Ok(t) => t,
-    Err(e) => return Err(f"parsing web/templates: {e}"),
+    Err(e) => return Err(f"parsing web/templates: {e}
+run 'lll up' / 'lll serve' from the lll checkout root — web/templates/ and web/static/ are read from disk"),
   }
   let mut buf = bytes.Buffer { .. }
   if let Err(e) = tmpl.ExecuteTemplate(&buf, name, data) {

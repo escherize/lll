@@ -185,7 +185,7 @@ fn create(args: Slice<string>) -> Result<(), string> {
     )
   }
   let Some(team) = find_team(team_key)? else {
-    return Err(f"no team with key '{team_key}' on the server")
+    return Err(unknown_team(team_key))
   }
 
   let new_issue = models.NewIssue { 
@@ -295,7 +295,7 @@ fn list(args: Slice<string>) -> Result<(), string> {
   let mut team_id = ""
   if cfg.team != "" {
     let Some(team) = find_team(cfg.team)? else {
-      return Err(f"no team with key '{cfg.team}' on the server")
+      return Err(unknown_team(cfg.team))
     }
     team_id = team.id
   }

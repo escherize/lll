@@ -92,12 +92,18 @@ fn team_create(args: Slice<string>) -> Result<(), string> {
   Ok(())
 }
 
+/// Unknown-team message naming the fix. Shared by every command that
+/// resolves a team key (same package: src/commands).
+fn unknown_team(key: string) -> string {
+  f"no team with key '{key}' on the server — see 'lll team list', or create it with 'lll team create -k {key} -n \"Name\"'"
+}
+
 fn team_view(args: Slice<string>) -> Result<(), string> {
   let Some(key) = args.get(3) else {
     return Err("usage: lll team view KEY")
   }
   let Some(t) = find_team(key)? else {
-    return Err(f"no team with key '{key}' on the server")
+    return Err(unknown_team(key))
   }
 
   let filter = url.QueryEscape(f"team='{t.id}'")

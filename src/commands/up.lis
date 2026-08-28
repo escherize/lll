@@ -1,12 +1,11 @@
 import "go:fmt"
+import "go:github.com/escherize/lll/gopb"
 import "go:net"
 import "go:net/http"
 import "go:os"
 import "go:strconv"
 import "go:strings"
 import "go:time"
-
-import "go:github.com/escherize/lll/gopb"
 
 import "config"
 
@@ -27,7 +26,9 @@ pub fn up(args: Slice<string>) -> Result<(), string> {
   while i < args.length() {
     match args[i] {
       "--port" => {
-        let Some(val) = args.get(i + 1) else { return Err("--port requires a value") }
+        let Some(val) = args.get(i + 1) else {
+          return Err("--port requires a value")
+        }
         let Ok(p) = strconv.Atoi(val) else {
           return Err(f"--port must be a number, got '{val}'")
         }
@@ -35,7 +36,9 @@ pub fn up(args: Slice<string>) -> Result<(), string> {
         i += 2
       },
       "--pb-dir" => {
-        let Some(val) = args.get(i + 1) else { return Err("--pb-dir requires a value") }
+        let Some(val) = args.get(i + 1) else {
+          return Err("--pb-dir requires a value")
+        }
         pb_dir = val
         i += 2
       },
@@ -64,13 +67,25 @@ pub fn up(args: Slice<string>) -> Result<(), string> {
     if email == "" || pass == "" {
       email = "admin@local.dev"
       pass = "admin-local-123"
-      fmt.Println("LLL_ADMIN_EMAIL/LLL_ADMIN_PASSWORD not set — defaulting to admin@local.dev / admin-local-123")
+      fmt.Println(
+        "LLL_ADMIN_EMAIL/LLL_ADMIN_PASSWORD not set — defaulting to admin@local.dev / admin-local-123",
+      )
     }
 
     task {
-      match gopb.Serve(pb_dir, f"127.0.0.1:{db_port}", "pb/pb_migrations", "pb/pb_hooks", email, pass) {
+      match gopb.Serve(
+        pb_dir,
+        f"127.0.0.1:{db_port}",
+        "pb/pb_migrations",
+        "pb/pb_hooks",
+        email,
+        pass,
+      ) {
         Err(e) => {
-          fmt.Println(f"pocketbase: {e}")
+          fmt.Println(f"pocketbase failed to start: {e}")
+          fmt.Println(
+            f"check that the data dir '{pb_dir}' is writable, or pick another with --pb-dir",
+          )
           os.Exit(1)
         },
         // Graceful shutdown (Ctrl-C / SIGTERM caught by PocketBase) — take
@@ -88,7 +103,11 @@ pub fn up(args: Slice<string>) -> Result<(), string> {
       }
       time.Sleep(100 * time.Millisecond)
     }
-    if !ok { return Err(f"pocketbase did not come up on {db_url}") }
+    if !ok {
+      return Err(
+        f"pocketbase did not come up on {db_url} — check its output above",
+      )
+    }
     fmt.Println(f"pocketbase on {db_url} (admin UI: {db_url}/_/ as {email})")
   }
 
@@ -119,7 +138,9 @@ started; an externally-started PocketBase is left running.",
 fn healthy(base_url: string) -> bool {
   // Bounded: a non-PB listener on the port must fail fast, not hang us.
   let mut client = http.Client { Timeout: 2 * time.Second, .. }
-  let Ok(resp) = client.Get(f"{base_url}/api/health") else { return false }
+  let Ok(resp) = client.Get(f"{base_url}/api/health") else {
+    return false
+  }
   if let Some(body) = resp.Body { let _ = body.Close() }
   resp.StatusCode == 200
 }
@@ -140,7 +161,11 @@ fn free_port(start: int) -> int {
 
 /// Port from "http://127.0.0.1:8090", or `fallback`.
 fn port_of(base_url: string, fallback: int) -> int {
-  let Some(idx) = strings.LastIndex(base_url, ":") else { return fallback }
-  let Ok(p) = strconv.Atoi(base_url.substring(idx + 1..)) else { return fallback }
+  let Some(idx) = strings.LastIndex(base_url, ":") else {
+    return fallback
+  }
+  let Ok(p) = strconv.Atoi(base_url.substring(idx + 1..)) else {
+    return fallback
+  }
   p
 }

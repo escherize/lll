@@ -100,7 +100,7 @@ pub fn watch(args: Slice<string>) -> Result<(), string> {
   let mut team_id = ""
   if cfg.team != "" {
     let Some(team) = find_team(cfg.team)? else {
-      return Err(f"no team with key '{cfg.team}' on the server")
+      return Err(unknown_team(cfg.team))
     }
     team_id = team.id
   }

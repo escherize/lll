@@ -13,8 +13,9 @@
 # watch transitions and comments, --json NDJSON, reconnect across a PB
 # restart), completions (bash/zsh/fish parse smoke), issue url/id/title
 # (explicit + branch-inferred), board and -w opener (stubbed 'open' on PATH;
-# real gh runs for issue pr are manual), --limit, --help output, and the
-# lll serve web board (via e2e_web.sh).
+# real gh runs for issue pr are manual), --limit, --help output, --version,
+# fix-naming error messages (PB down, unknown team, broken .lll.toml,
+# unknown command), and the lll serve web board (via e2e_web.sh).
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
@@ -852,6 +853,61 @@ assert_contains "$out" "Usage:" "lll config --help"
 out=$("$LIN" serve --help)
 assert_contains "$out" "Usage:" "lll serve --help"
 assert_contains "$out" "--port" "serve --help mentions --port"
+
+# --- --version prints the lisette.toml version ---
+out=$("$LIN" --version)
+want="lll $(sed -n 's/^version = "\(.*\)"/\1/p' lisette.toml | head -1)"
+[ "$out" = "$want" ] || fail "--version: expected '$want', got '$out'"
+[ "$("$LIN" version)" = "$want" ] || fail "'lll version': expected '$want'"
+
+# --- error messages name the fix ---
+# unknown top-level command points at --help
+set +e
+out=$("$LIN" frobnicate 2>&1)
+rc=$?
+set -e
+[ "$rc" -ne 0 ] || fail "unknown command: expected nonzero exit"
+assert_contains "$out" "see 'lll --help'" "unknown command names the fix"
+
+# PB unreachable: names lll up and LLL_URL (request path and realtime path)
+set +e
+out=$(LLL_URL=http://127.0.0.1:1 "$LIN" issue list 2>&1)
+rc=$?
+set -e
+[ "$rc" -ne 0 ] || fail "issue list with PB down: expected nonzero exit"
+assert_contains "$out" "cannot reach PocketBase at http://127.0.0.1:1" "PB-down names the server"
+assert_contains "$out" "start everything with 'lll up'" "PB-down names lll up"
+assert_contains "$out" "LLL_URL" "PB-down names LLL_URL"
+set +e
+out=$(LLL_URL=http://127.0.0.1:1 LLL_TEAM= "$LIN" watch 2>&1)
+set -e
+assert_contains "$out" "start everything with 'lll up'" "watch PB-down names lll up"
+
+# unknown team names team list / team create
+set +e
+out=$(LLL_URL=$URL "$LIN" team view NOPE 2>&1)
+rc=$?
+set -e
+[ "$rc" -ne 0 ] || fail "team view NOPE: expected nonzero exit"
+assert_contains "$out" "no team with key 'NOPE'" "unknown team message"
+assert_contains "$out" "lll team create -k NOPE" "unknown team names the fix"
+set +e
+out=$(LLL_URL=$URL LLL_TEAM=NOPE "$LIN" issue create -t x 2>&1)
+rc=$?
+set -e
+[ "$rc" -ne 0 ] || fail "create with unknown team: expected nonzero exit"
+assert_contains "$out" "lll team create -k NOPE" "create unknown team names the fix"
+
+# broken config file names the file and the fix
+printf 'url = "unterminated\n' > "$WORK/.lll.toml"
+set +e
+out=$(cd "$WORK" && env -u LLL_URL HOME="$FAKEHOME" "$LLL_ABS" issue list 2>&1)
+rc=$?
+set -e
+[ "$rc" -ne 0 ] || fail "broken .lll.toml: expected nonzero exit"
+assert_contains "$out" "parsing .lll.toml" "broken config names the file"
+assert_contains "$out" "fix the TOML syntax" "broken config names the fix"
+rm "$WORK/.lll.toml"
 
 echo "e2e: all assertions passed"
 

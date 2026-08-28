@@ -10,12 +10,19 @@ pub fn base_url() -> Result<string, string> {
   Ok(cfg.url)
 }
 
+/// Connection-failure message that names the fix. Shared by every request
+/// path here and by the realtime client.
+pub fn unreachable(base: string, e: error) -> string {
+  f"cannot reach PocketBase at {base}: {e}
+is PocketBase running? start everything with 'lll up', or point LLL_URL (or 'url' in .lll.toml) at your server"
+}
+
 /// GET a path (joined to base_url) and return the response body.
 pub fn get(path: string) -> Result<string, string> {
   let base = base_url()?
   let resp = match http.Get(base + path) {
     Ok(r) => r,
-    Err(e) => return Err(f"cannot reach PocketBase at {base}: {e}"),
+    Err(e) => return Err(unreachable(base, e)),
   }
   read_body(resp, f"GET {path}")
 }
@@ -29,7 +36,7 @@ pub fn post(path: string, payload: string) -> Result<string, string> {
     bytes.NewReader(payload.bytes()),
   ) {
     Ok(r) => r,
-    Err(e) => return Err(f"cannot reach PocketBase at {base}: {e}"),
+    Err(e) => return Err(unreachable(base, e)),
   }
   read_body(resp, f"POST {path}")
 }
@@ -57,7 +64,7 @@ fn send(method: string, path: string, payload: string) -> Result<string, string>
   req.Header.Set("Content-Type", "application/json")
   let resp = match http.DefaultClient.Do(req) {
     Ok(r) => r,
-    Err(e) => return Err(f"cannot reach PocketBase at {base}: {e}"),
+    Err(e) => return Err(unreachable(base, e)),
   }
   read_body(resp, f"{method} {path}")
 }

@@ -6,6 +6,8 @@ import "go:net/url"
 import "go:strings"
 import "go:time"
 
+import "pb"
+
 /// A record event from a PocketBase realtime stream. `topic` is the
 /// subscription topic with any ?options= suffix stripped ("issues",
 /// "issues/RECORDID", "comments"); `data` is the raw JSON payload,
@@ -147,7 +149,7 @@ pub fn subscribe(base_url: string, topics: Slice<string>) -> Result<Channel<Even
 fn connect(base_url: string, topics: Slice<string>) -> Result<Ref<bufio.Reader>, string> {
   let resp = match http.Get(base_url + "/api/realtime") {
     Ok(r) => r,
-    Err(e) => return Err(f"cannot reach PocketBase at {base_url}: {e}"),
+    Err(e) => return Err(pb.unreachable(base_url, e)),
   }
   let Some(stream) = resp.Body else {
     return Err("GET /api/realtime: empty response body")
@@ -188,7 +190,7 @@ fn connect(base_url: string, topics: Slice<string>) -> Result<Ref<bufio.Reader>,
     bytes.NewReader(payload),
   ) {
     Ok(r) => r,
-    Err(e) => return Err(f"cannot reach PocketBase at {base_url}: {e}"),
+    Err(e) => return Err(pb.unreachable(base_url, e)),
   }
   if let Some(body) = sub_resp.Body { let _ = body.Close() }
   if sub_resp.StatusCode >= 300 {

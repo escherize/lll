@@ -94,7 +94,7 @@ fn label_create(args: Slice<string>) -> Result<(), string> {
   let mut team = ""
   if team_key != "" {
     let Some(t) = find_team(team_key)? else {
-      return Err(f"no team with key '{team_key}' on the server")
+      return Err(unknown_team(team_key))
     }
     team = t.id
   }
