@@ -1,0 +1,159 @@
+<!DOCTYPE html>
+<html lang="en">
+<!--
+THESIS: a live team board that reads like an instrument panel — every issue's
+state legible in one glance, refusing the airy marketing-card board of generic
+kanban tools.
+OWN-WORLD: Linear's grammar with lin's own orange — near-black #0e0f11 ground,
+hairline rgba borders, 13px Inter Variable, muted grays #9299a2/#757b84,
+orange #f0883e accent reserved for interactive + urgent, state colors
+(yellow progress, violet review, green done), drawn circle state icons, bar
+priority icons, initial avatars. Dense, quiet, tabular numerals.
+STORY: a developer glances, knows what moved, clicks a card to act; realtime
+morphs land without disturbing the reading.
+FIRST VIEWPORT: 220px rail left (workspace, Board active), 46px topbar with
+breadcrumb + orange New issue button, then six state columns filling the rest,
+cards dense with key/priority/title/labels/avatar.
+FORM: brief-pinned direction (Linear clone, user-directed); no concept roll —
+seed key: none/pinned.
+FINISH: unreviewed and undocumented is unfinished; this build ends with the
+finish review, the verdict, DESIGN.md, and every shipping raster carrying its
+provenance.
+-->
+<head>
+<meta charset="utf-8">
+<title>lin board — comp</title>
+<link rel="stylesheet" href="comp.css">
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+<defs>
+<!-- state icons: 14x14, drawn -->
+<g id="st-backlog"><circle cx="7" cy="7" r="5.5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-dasharray="2.2 2.4" stroke-linecap="round"/></g>
+<g id="st-todo"><circle cx="7" cy="7" r="5.5" fill="none" stroke="currentColor" stroke-width="1.6"/></g>
+<g id="st-progress"><circle cx="7" cy="7" r="5.5" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M7 3.8 A3.2 3.2 0 0 1 10.2 7 L7 7 Z" fill="currentColor"/></g>
+<g id="st-review"><circle cx="7" cy="7" r="5.5" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M7 3.8 A3.2 3.2 0 1 1 3.8 7 L7 7 Z" fill="currentColor"/></g>
+<g id="st-done"><circle cx="7" cy="7" r="6.2" fill="currentColor"/><path d="M4.6 7.2 L6.3 8.9 L9.6 5.4" fill="none" stroke="#0e0f11" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></g>
+<g id="st-cancelled"><circle cx="7" cy="7" r="6.2" fill="currentColor"/><path d="M4.9 4.9 L9.1 9.1 M9.1 4.9 L4.9 9.1" stroke="#0e0f11" stroke-width="1.5" stroke-linecap="round"/></g>
+<!-- priority icons: 14x14 bars -->
+<g id="pri-urgent"><rect x="1.5" y="1.5" width="11" height="11" rx="2.5" fill="var(--pri-urgent)"/><path d="M7 4.2 V7.8 M7 9.6 V9.8" stroke="#0e0f11" stroke-width="1.6" stroke-linecap="round"/></g>
+<g id="pri-high"><rect x="2" y="8" width="2.6" height="4" rx="1" fill="currentColor"/><rect x="5.7" y="5.5" width="2.6" height="6.5" rx="1" fill="currentColor"/><rect x="9.4" y="3" width="2.6" height="9" rx="1" fill="currentColor"/></g>
+<g id="pri-medium"><rect x="2" y="8" width="2.6" height="4" rx="1" fill="currentColor"/><rect x="5.7" y="5.5" width="2.6" height="6.5" rx="1" fill="currentColor"/><rect x="9.4" y="3" width="2.6" height="9" rx="1" fill="currentColor" opacity="0.25"/></g>
+<g id="pri-low"><rect x="2" y="8" width="2.6" height="4" rx="1" fill="currentColor"/><rect x="5.7" y="5.5" width="2.6" height="6.5" rx="1" fill="currentColor" opacity="0.25"/><rect x="9.4" y="3" width="2.6" height="9" rx="1" fill="currentColor" opacity="0.25"/></g>
+<!-- rail icons -->
+<g id="ic-board"><rect x="1.5" y="2.5" width="3.4" height="9" rx="1" fill="none" stroke="currentColor" stroke-width="1.3"/><rect x="5.8" y="2.5" width="3.4" height="6.5" rx="1" fill="none" stroke="currentColor" stroke-width="1.3"/><rect x="10.1" y="2.5" width="3.4" height="4.5" rx="1" fill="none" stroke="currentColor" stroke-width="1.3"/></g>
+<g id="ic-issues"><path d="M2.5 4 h9 M2.5 7 h9 M2.5 10 h6" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></g>
+</defs>
+</svg>
+
+<div class="app">
+  <nav class="rail">
+    <div class="workspace"><span class="mark">L</span> lin</div>
+    <a href="#" class="active"><svg width="14" height="14"><use href="#ic-board"/></svg> Board</a>
+    <a href="#"><svg width="14" height="14"><use href="#ic-issues"/></svg> Issues</a>
+    <div class="section">Teams</div>
+    <a href="#" class="active"><svg width="14" height="14"><use href="#ic-board"/></svg> Engineering</a>
+    <a href="#"><svg width="14" height="14"><use href="#ic-issues"/></svg> Operations</a>
+  </nav>
+
+  <div class="main">
+    <div class="topbar">
+      <div class="crumbs"><span>ENG</span><span class="sep">›</span><span class="here">Board</span></div>
+      <div class="spacer"></div>
+      <button class="btn primary"><svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true"><path d="M6 1.5 V10.5 M1.5 6 H10.5" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg> New issue</button>
+    </div>
+
+    <main class="board">
+      <section class="column" style="--st: var(--st-backlog)">
+        <h2><svg width="14" height="14" style="color:var(--st)"><use href="#st-backlog"/></svg> Backlog <span class="count">3</span></h2>
+        <a class="card" href="#">
+          <span class="row1">ENG-14 <span class="flex"></span><svg width="14" height="14" style="color:var(--text-3)"><use href="#pri-low"/></svg></span>
+          <span class="title">Shell completions derived from the command table</span>
+          <span class="row3"><span class="chip"><span class="dot" style="background:#8d7ce6"></span>cli</span></span>
+        </a>
+        <a class="card" href="#">
+          <span class="row1">ENG-15 <span class="flex"></span><svg width="14" height="14" style="color:var(--text-3)"><use href="#pri-medium"/></svg></span>
+          <span class="title">Light theme via prefers-color-scheme</span>
+          <span class="row3"><span class="chip"><span class="dot" style="background:#f0883e"></span>web</span></span>
+        </a>
+        <a class="card" href="#">
+          <span class="row1">ENG-16 <span class="flex"></span><svg width="14" height="14" style="color:var(--text-3)"><use href="#pri-low"/></svg></span>
+          <span class="title">Issue relations: blocks / duplicates</span>
+          <span class="row3"></span>
+        </a>
+      </section>
+
+      <section class="column" style="--st: var(--st-todo)">
+        <h2><svg width="14" height="14" style="color:var(--st)"><use href="#st-todo"/></svg> Todo <span class="count">2</span></h2>
+        <a class="card" href="#">
+          <span class="row1">ENG-10 <span class="flex"></span><svg width="14" height="14"><use href="#pri-urgent"/></svg></span>
+          <span class="title">Error-message sweep: every failure names the fix</span>
+          <span class="row3"><span class="chip"><span class="dot" style="background:#d7a63a"></span>polish</span><span class="avatar av-b">BM</span></span>
+        </a>
+        <a class="card" href="#">
+          <span class="row1">ENG-12 <span class="flex"></span><svg width="14" height="14" style="color:var(--text-3)"><use href="#pri-medium"/></svg></span>
+          <span class="title">README: two-binary setup from clean checkout</span>
+          <span class="row3"><span class="chip"><span class="dot" style="background:#d7a63a"></span>polish</span></span>
+        </a>
+      </section>
+
+      <section class="column" style="--st: var(--st-progress)">
+        <h2><svg width="14" height="14" style="color:var(--st)"><use href="#st-progress"/></svg> In progress <span class="count">2</span></h2>
+        <a class="card" href="#">
+          <span class="row1">ENG-9 <span class="flex"></span><svg width="14" height="14"><use href="#pri-urgent"/></svg></span>
+          <span class="title">Linear-style design pass on the web board</span>
+          <span class="row3"><span class="chip"><span class="dot" style="background:#f0883e"></span>web</span><span class="avatar av-f">FB</span></span>
+        </a>
+        <a class="card" href="#">
+          <span class="row1">ENG-11 <span class="flex"></span><svg width="14" height="14" style="color:var(--text-3)"><use href="#pri-high"/></svg></span>
+          <span class="title">Watch NDJSON schema notes for agent consumers</span>
+          <span class="row3"><span class="chip"><span class="dot" style="background:#8d7ce6"></span>cli</span><span class="avatar av-b">BM</span></span>
+        </a>
+      </section>
+
+      <section class="column" style="--st: var(--st-review)">
+        <h2><svg width="14" height="14" style="color:var(--st)"><use href="#st-review"/></svg> In review <span class="count">1</span></h2>
+        <a class="card" href="#">
+          <span class="row1">ENG-8 <span class="flex"></span><svg width="14" height="14" style="color:var(--text-3)"><use href="#pri-high"/></svg></span>
+          <span class="title">Web board: lin serve with Datastar over one SSE stream</span>
+          <span class="row3"><span class="chip"><span class="dot" style="background:#f0883e"></span>web</span><span class="avatar av-d">DA</span></span>
+        </a>
+      </section>
+
+      <section class="column" style="--st: var(--st-done)">
+        <h2><svg width="14" height="14" style="color:var(--st)"><use href="#st-done"/></svg> Done <span class="count">4</span></h2>
+        <a class="card" href="#">
+          <span class="row1">ENG-7 <span class="flex"></span><svg width="14" height="14" style="color:var(--text-3)"><use href="#pri-high"/></svg></span>
+          <span class="title">Realtime watch: lin issue watch and lin watch</span>
+          <span class="row3"><span class="avatar av-f">FB</span></span>
+        </a>
+        <a class="card" href="#">
+          <span class="row1">ENG-5 <span class="flex"></span><svg width="14" height="14" style="color:var(--text-3)"><use href="#pri-medium"/></svg></span>
+          <span class="title">Members and comments</span>
+          <span class="row3"><span class="avatar av-f">FB</span></span>
+        </a>
+        <a class="card" href="#">
+          <span class="row1">ENG-4 <span class="flex"></span><svg width="14" height="14" style="color:var(--text-3)"><use href="#pri-medium"/></svg></span>
+          <span class="title">Issue lifecycle: update, close, delete, start</span>
+          <span class="row3"><span class="avatar av-b">BM</span></span>
+        </a>
+        <a class="card" href="#">
+          <span class="row1">ENG-1 <span class="flex"></span><svg width="14" height="14" style="color:var(--text-3)"><use href="#pri-high"/></svg></span>
+          <span class="title">Walking skeleton: lin issue create/list against PocketBase</span>
+          <span class="row3"><span class="avatar av-f">FB</span></span>
+        </a>
+      </section>
+
+      <section class="column" style="--st: var(--st-cancelled)">
+        <h2><svg width="14" height="14" style="color:var(--st)"><use href="#st-cancelled"/></svg> Cancelled <span class="count">1</span></h2>
+        <a class="card" href="#">
+          <span class="row1">ENG-2 <span class="flex"></span><svg width="14" height="14" style="color:var(--text-3)"><use href="#pri-low"/></svg></span>
+          <span class="title">TUI spike (dropped: CLI + web only)</span>
+          <span class="row3"></span>
+        </a>
+      </section>
+    </main>
+  </div>
+</div>
+</body>
+</html>

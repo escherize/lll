@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>ENG-9 · lin — comp</title>
+<link rel="stylesheet" href="comp.css">
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+<defs>
+<g id="st-progress"><circle cx="7" cy="7" r="5.5" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M7 3.8 A3.2 3.2 0 0 1 10.2 7 L7 7 Z" fill="currentColor"/></g>
+<g id="pri-urgent"><rect x="1.5" y="1.5" width="11" height="11" rx="2.5" fill="var(--pri-urgent)"/><path d="M7 4.2 V7.8 M7 9.6 V9.8" stroke="#0e0f11" stroke-width="1.6" stroke-linecap="round"/></g>
+<g id="ic-board"><rect x="1.5" y="2.5" width="3.4" height="9" rx="1" fill="none" stroke="currentColor" stroke-width="1.3"/><rect x="5.8" y="2.5" width="3.4" height="6.5" rx="1" fill="none" stroke="currentColor" stroke-width="1.3"/><rect x="10.1" y="2.5" width="3.4" height="4.5" rx="1" fill="none" stroke="currentColor" stroke-width="1.3"/></g>
+<g id="ic-issues"><path d="M2.5 4 h9 M2.5 7 h9 M2.5 10 h6" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></g>
+</defs>
+</svg>
+
+<div class="app">
+  <nav class="rail">
+    <div class="workspace"><span class="mark">L</span> lin</div>
+    <a href="#"><svg width="14" height="14"><use href="#ic-board"/></svg> Board</a>
+    <a href="#"><svg width="14" height="14"><use href="#ic-issues"/></svg> Issues</a>
+    <div class="section">Teams</div>
+    <a href="#" class="active"><svg width="14" height="14"><use href="#ic-board"/></svg> Engineering</a>
+    <a href="#"><svg width="14" height="14"><use href="#ic-issues"/></svg> Operations</a>
+  </nav>
+
+  <div class="main">
+    <div class="topbar">
+      <div class="crumbs"><span>ENG</span><span class="sep">›</span><span>Board</span><span class="sep">›</span><span class="here">ENG-9</span></div>
+      <div class="spacer"></div>
+    </div>
+
+    <div class="issue-wrap">
+      <article class="issue-main">
+        <span class="key">ENG-9</span>
+        <h1>Linear-style design pass on the web board</h1>
+        <p class="desc">Clone Linear's visual style for the lin web UI using the
+        impeccable skill: dark-first muted palette, compact density, drawn
+        state and priority iconography, left-rail plus board layout. Design
+        tokens land as plain CSS custom properties — no build step, no
+        framework, no JS beyond Datastar.</p>
+
+        <section class="thread">
+          <h2>Comments <span class="count">3</span></h2>
+          <div class="comment">
+            <span class="avatar av-b">BM</span>
+            <div><p class="meta"><b>bryan</b> · 2h ago</p>
+            <p>Comp approved — teal accent reads great on the dark ground. Ship the tokens as custom properties.</p></div>
+          </div>
+          <div class="comment">
+            <span class="avatar av-f">FB</span>
+            <div><p class="meta"><b>fable</b> · 1h ago</p>
+            <p>Reproduction pass done at 1440. Cards, columns, rail, and props panel match the comp; moving to states and focus rings next.</p></div>
+          </div>
+          <div class="comment">
+            <span class="avatar av-b">BM</span>
+            <div><p class="meta"><b>bryan</b> · 20m ago</p>
+            <p>Watch the SSE morph on column counts — numbers should stay tabular so nothing shifts.</p></div>
+          </div>
+          <div class="composer">
+            <textarea placeholder="Leave a comment…"></textarea>
+            <button class="btn primary">Comment</button>
+          </div>
+        </section>
+      </article>
+
+      <aside class="props">
+        <h3>Properties</h3>
+        <div class="prop"><span class="k">State</span>
+          <span class="v"><svg width="14" height="14" style="color:var(--st-progress)"><use href="#st-progress"/></svg>
+          <select><option>In progress</option></select></span>
+        </div>
+        <div class="prop"><span class="k">Priority</span>
+          <span class="v"><svg width="14" height="14"><use href="#pri-urgent"/></svg> Urgent</span>
+        </div>
+        <div class="prop"><span class="k">Assignee</span>
+          <span class="v"><span class="avatar av-f" style="margin:0">FB</span> fable</span>
+        </div>
+        <div class="prop"><span class="k">Project</span>
+          <span class="v">lin v1</span>
+        </div>
+        <div class="prop"><span class="k">Labels</span>
+          <span class="v"><span class="chip"><span class="dot" style="background:#f0883e"></span>web</span></span>
+        </div>
+        <div class="prop"><span class="k">Created</span><span class="v">2d ago</span></div>
+        <div class="prop"><span class="k">Updated</span><span class="v">20m ago</span></div>
+      </aside>
+    </div>
+  </div>
+</div>
+</body>
+</html>

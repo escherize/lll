@@ -1,0 +1,15 @@
+{
+  "buildPath": "comp",
+  "detector": {
+    "ignoreRules": [],
+    "ignoreFiles": [],
+    "ignoreValues": [
+      {
+        "rule": "overused-font",
+        "value": "inter",
+        "createdAt": "2026-08-28T20:04:48.359Z",
+        "reason": "user confirmed: interview answer picked Inter Variable (it is what Linear uses; brief is a Linear clone)"
+      }
+    ]
+  }
+}

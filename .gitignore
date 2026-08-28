@@ -5,3 +5,6 @@ pb/pocketbase
 pb/pb_data/
 .lin.toml
 .playwright-cli/
+.impeccable/review/
+.impeccable/mocks/.playwright-cli/
+.impeccable/mocks/InterVariable.woff2

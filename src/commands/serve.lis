@@ -28,25 +28,46 @@ import "realtime"
 // render, so markup edits show on refresh with no rebuild (task-9's design
 // iteration loop depends on this). Run `lin serve` from the repo root.
 
+/// View model for one label chip.
+pub struct LabelVM {
+  pub name: string,
+  pub color: string,
+}
+
+/// A state <option>: slug value, humanized label.
+pub struct StateOpt {
+  pub value: string,
+  pub label: string,
+}
+
+/// View model for an avatar: initials plus a stable per-name color class.
+pub struct AvatarVM {
+  pub initials: string,
+  pub class: string,
+}
+
 /// View model for one issue card on the board.
 pub struct CardVM {
   pub id: string,
   pub key: string,
   pub title: string,
-  pub priority: string,
+  pub prio: string,
   pub assignee: string,
+  pub avatar: AvatarVM,
+  pub labels: Slice<LabelVM>,
 }
 
 /// View model for one board column (a state).
 pub struct ColumnVM {
   pub state: string,
+  pub label: string,
   pub glyph: string,
   pub cards: Slice<CardVM>,
 }
 
 /// View model for the board.
 pub struct BoardVM {
-  pub states: Slice<string>,
+  pub states: Slice<StateOpt>,
   pub columns: Slice<ColumnVM>,
 }
 
@@ -54,6 +75,7 @@ pub struct BoardVM {
 pub struct CommentVM {
   pub id: string,
   pub author: string,
+  pub avatar: AvatarVM,
   pub age: string,
   pub body: string,
 }
@@ -70,14 +92,15 @@ pub struct IssueVM {
   pub key: string,
   pub title: string,
   pub state: string,
-  pub priority: string,
+  pub prio: string,
   pub assignee: string,
+  pub avatar: AvatarVM,
   pub project: string,
-  pub labels: string,
+  pub labels: Slice<LabelVM>,
   pub description: string,
   pub created: string,
   pub updated: string,
-  pub states: Slice<string>,
+  pub states: Slice<StateOpt>,
   pub comments: Slice<CommentVM>,
 }
 
@@ -188,7 +211,7 @@ pub fn serve(args: Slice<string>) -> Result<(), string> {
   }
 
   // Fail fast on broken templates before accepting connections.
-  let _ = render("board", BoardVM { states: query.states(), columns: [] })?
+  let _ = render("board", BoardVM { states: state_opts(), columns: [] })?
 
   // One PB subscription for everything. Issues are team-scoped at most —
   // never state-filtered: PB emits nothing when an update moves a record out
@@ -269,6 +292,7 @@ fn render(name: string, data: Unknown) -> Result<string, string> {
   let tmpl = match template.ParseFiles(
     "web/templates/board.html",
     "web/templates/issue.html",
+    "web/templates/icons.html",
   ) {
     Ok(t) => t,
     Err(e) => return Err(f"parsing web/templates: {e}"),
@@ -288,13 +312,44 @@ fn patch_event(html: string) -> string {
   f"event: datastar-patch-elements\n{strings.Join(lines, "\n")}\n\n"
 }
 
+/// "in-progress" -> "In progress".
+fn state_label(state: string) -> string {
+  let words = strings.ReplaceAll(state, "-", " ")
+  strings.ToUpper(words.substring(0..1)) + words.substring(1..)
+}
+
+fn state_opts() -> Slice<StateOpt> {
+  query.states().map(|s| StateOpt { value: s, label: state_label(s) })
+}
+
+/// Initials plus a stable per-name color class (av-0..av-3), so different
+/// members scan differently on the board.
+fn avatar_vm(name: string) -> AvatarVM {
+  let words = strings.Fields(name)
+  let first = words.map(|w| strings.ToUpper(w.substring(0..1)))
+  let mut sum = 0
+  for b in name.bytes() {
+    sum += b as int
+  }
+  AvatarVM {
+    initials: strings.Join(first[..min(2, first.length())], ""),
+    class: f"av-{sum % 4}",
+  }
+}
+
+fn label_vms(labels: Slice<models.Label>) -> Slice<LabelVM> {
+  labels.map(|l| LabelVM { name: l.name, color: l.color })
+}
+
 fn card_vm(issue: models.Issue) -> CardVM {
-  CardVM { 
+  CardVM {
     id: issue.id,
     key: f"{issue.expand.team.key}-{issue.number}",
     title: issue.title,
-    priority: display.priority_marker(issue.priority),
+    prio: display.priority_name(issue.priority),
     assignee: issue.expand.assignee.name,
+    avatar: avatar_vm(issue.expand.assignee.name),
+    labels: label_vms(issue.expand.labels),
   }
 }
 
@@ -303,16 +358,17 @@ fn board_vm(team_id: string) -> Result<BoardVM, string> {
   let issues = fetch_board_issues(team_id)?
   let columns = query
     .states()
-    .map(|s| ColumnVM { 
+    .map(|s| ColumnVM {
       state: s,
+      label: state_label(s),
       glyph: display.glyph(s),
       cards: issues.filter(|i| i.state == s).map(card_vm),
     })
-  Ok(BoardVM { states: query.states(), columns })
+  Ok(BoardVM { states: state_opts(), columns })
 }
 
 fn fetch_board_issues(team_id: string) -> Result<Slice<models.Issue>, string> {
-  let mut path = "/api/collections/issues/records?perPage=200&expand=team,assignee&sort=created"
+  let mut path = "/api/collections/issues/records?perPage=200&expand=team,assignee,labels&sort=created"
   let filter = query.filter(team_id, "", "", "", "", "")
   if filter != "" { path = f"{path}&filter={url.QueryEscape(filter)}" }
   let body = pb.get(path)?
@@ -326,32 +382,36 @@ fn fetch_board_issues(team_id: string) -> Result<Slice<models.Issue>, string> {
 fn comment_vm(c: models.Comment) -> CommentVM {
   let mut author = c.expand.author.name
   if author == "" { author = "anon" }
-  CommentVM { id: c.id, author, age: display.relative(c.created), body: c.body }
+  CommentVM {
+    id: c.id,
+    author,
+    avatar: avatar_vm(author),
+    age: display.relative(c.created),
+    body: c.body,
+  }
 }
 
 /// Issue view model from a full record (expand: team, assignee, labels,
 /// project) — shared by the issue page and broadcast re-renders.
 fn issue_vm(issue: models.Issue, comments: Slice<models.Comment>) -> IssueVM {
-  let mut assignee = issue.expand.assignee.name
-  if assignee == "" { assignee = "none" }
+  let assignee = issue.expand.assignee.name
   let mut project = issue.expand.project.name
   if project == "" { project = "none" }
-  let mut labels = strings.Join(issue.expand.labels.map(|l| l.name), ", ")
-  if labels == "" { labels = "none" }
-  IssueVM { 
+  IssueVM {
     deleted: false,
     id: issue.id,
     key: f"{issue.expand.team.key}-{issue.number}",
     title: issue.title,
     state: issue.state,
-    priority: display.priority_name(issue.priority),
+    prio: display.priority_name(issue.priority),
     assignee,
+    avatar: avatar_vm(assignee),
     project,
-    labels,
+    labels: label_vms(issue.expand.labels),
     description: issue.description,
     created: display.relative(issue.created),
     updated: display.relative(issue.updated),
-    states: query.states(),
+    states: state_opts(),
     comments: comments.map(comment_vm),
   }
 }

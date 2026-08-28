@@ -1,35 +1,69 @@
 {{define "board-page"}}<!DOCTYPE html>
 <html lang="en">
+<!--
+THESIS: a live team board that reads like an instrument panel — every issue's
+state legible in one glance, refusing the airy marketing-card board of generic
+kanban tools.
+OWN-WORLD: Linear's grammar with lin's own orange — near-black #0e0f11 ground,
+hairline rgba borders, 13px Inter Variable, muted grays, orange #f0883e accent
+reserved for interactive + urgent, semantic state colors (yellow progress,
+violet review, green done), drawn circle state icons, bar priority icons,
+initial avatars. Dense, quiet, tabular numerals.
+STORY: a developer glances, knows what moved, clicks a card to act; realtime
+morphs land without disturbing the reading.
+FIRST VIEWPORT: 220px rail left (workspace, Board active), 46px topbar with
+breadcrumb + create form + orange New issue button, six state columns filling
+the rest, cards dense with key/priority/title/labels/avatar.
+FORM: brief-pinned direction (Linear clone, user-directed); no concept roll —
+seed key: none/pinned.
+FINISH: unreviewed and undocumented is unfinished; this build ends with the
+finish review, the verdict, DESIGN.md, and every shipping raster carrying its
+provenance.
+-->
 <head>
 <meta charset="utf-8">
 <title>lin board</title>
-<link rel="stylesheet" href="/static/skeleton.css">
+<link rel="stylesheet" href="/static/theme.css">
 <script type="module" src="https://cdn.jsdelivr.net/gh/starfederation/datastar@v1.0.3/bundles/datastar.js" integrity="sha384-yHqFPXJio1slWODLf67ZFfuDhhPUccOzGpGJF0d5fitjEfihEVrVvzMsfH8TxCiO" crossorigin="anonymous"></script>
 </head>
 <!-- data-init lives on <body>, which is never patched, so the SSE
      connection is opened exactly once per page load. -->
 <body data-init="@get('/events?page=board')">
-<header>
-<h1>lin board</h1>
-<form id="new-issue">
-<input name="title" placeholder="Issue title">
-<select name="state">
-{{range .States}}<option value="{{.}}"{{if eq . "todo"}} selected{{end}}>{{.}}</option>
-{{end}}</select>
-<button type="button" data-on:click="@post('/create', {contentType: 'form'})">Create</button>
-</form>
-</header>
-{{template "board" .}}
+{{template "icons"}}
+<div class="app">
+  <nav class="rail">
+    <div class="workspace"><span class="mark">L</span> lin</div>
+    <a href="/" class="active"><svg width="14" height="14"><use href="#ic-board"/></svg> Board</a>
+  </nav>
+  <div class="main">
+    <header class="topbar">
+      <div class="crumbs"><span class="here">Board</span></div>
+      <div class="spacer"></div>
+      <form id="new-issue" class="new-issue">
+        <input name="title" placeholder="Issue title" autocomplete="off">
+        <select name="state">
+        {{range .States}}<option value="{{.Value}}"{{if eq .Value "todo"}} selected{{end}}>{{.Label}}</option>
+        {{end}}</select>
+        <button type="button" class="btn primary" data-on:click="@post('/create', {contentType: 'form'})"><svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true"><path d="M6 1.5 V10.5 M1.5 6 H10.5" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg> New issue</button>
+      </form>
+    </header>
+    {{template "board" .}}
+  </div>
+</div>
 </body>
 </html>{{end}}
 
-{{define "board"}}<main id="board">
+{{define "board"}}<main id="board" class="board">
 {{range .Columns}}{{template "column" .}}
 {{end}}</main>{{end}}
 
 {{define "column"}}<section class="column" id="col-{{.State}}">
-<h2>{{.Glyph}} {{.State}} <span class="count">{{len .Cards}}</span></h2>
+<h2>{{template "state-icon" .State}} {{.Label}} <span class="count">{{len .Cards}}</span></h2>
 {{range .Cards}}{{template "card" .}}
 {{end}}</section>{{end}}
 
-{{define "card"}}<a class="card" id="issue-{{.Id}}" href="/issue/{{.Key}}"><span class="key">{{.Key}}</span> <span class="priority">{{.Priority}}</span> <span class="title">{{.Title}}</span>{{if .Assignee}} <span class="assignee">{{.Assignee}}</span>{{end}}</a>{{end}}
+{{define "card"}}<a class="card" id="issue-{{.Id}}" href="/issue/{{.Key}}">
+<span class="row1">{{.Key}}<span class="flex"></span>{{template "priority-icon" .Prio}}</span>
+<span class="title">{{.Title}}</span>
+{{if or .Labels .Assignee}}<span class="row3">{{range .Labels}}<span class="chip"><span class="dot" style="background:{{if .Color}}{{.Color}}{{else}}var(--text-3){{end}}"></span>{{.Name}}</span>{{end}}{{template "avatar" .Avatar}}</span>{{end}}
+</a>{{end}}

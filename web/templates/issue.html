@@ -3,47 +3,72 @@
 <head>
 <meta charset="utf-8">
 <title>{{.Key}} · lin</title>
-<link rel="stylesheet" href="/static/skeleton.css">
+<link rel="stylesheet" href="/static/theme.css">
 <script type="module" src="https://cdn.jsdelivr.net/gh/starfederation/datastar@v1.0.3/bundles/datastar.js" integrity="sha384-yHqFPXJio1slWODLf67ZFfuDhhPUccOzGpGJF0d5fitjEfihEVrVvzMsfH8TxCiO" crossorigin="anonymous"></script>
 </head>
 <body data-init="@get('/events?page=issue&key={{.Key}}')">
-<nav><a href="/">&larr; board</a></nav>
-{{template "issue-detail" .}}
-{{template "comments" .}}
-<form id="comment-form">
-<input type="hidden" name="key" value="{{.Key}}">
-<textarea name="body" placeholder="Add a comment"></textarea>
-<button type="button" data-on:click="@post('/comment', {contentType: 'form'})">Comment</button>
-</form>
+{{template "icons"}}
+<div class="app">
+  <nav class="rail">
+    <div class="workspace"><span class="mark">L</span> lin</div>
+    <a href="/"><svg width="14" height="14"><use href="#ic-board"/></svg> Board</a>
+  </nav>
+  <div class="main">
+    <header class="topbar">
+      <div class="crumbs"><a href="/">Board</a><span class="sep">›</span><span class="here">{{.Key}}</span></div>
+      <div class="spacer"></div>
+    </header>
+    <div class="issue-wrap">
+      <div class="issue-scroll">
+        {{template "issue-detail" .}}
+        {{template "comments" .}}
+        <form id="comment-form" class="composer">
+          <input type="hidden" name="key" value="{{.Key}}">
+          <textarea name="body" placeholder="Leave a comment…"></textarea>
+          <button type="button" class="btn primary" data-on:click="@post('/comment', {contentType: 'form'})">Comment</button>
+        </form>
+      </div>
+    </div>
+  </div>
+</div>
 </body>
 </html>{{end}}
 
-{{define "issue-detail"}}<article id="issue-detail">
+{{define "issue-detail"}}<article id="issue-detail" class="issue-detail">
 {{if .Deleted}}<p class="deleted">{{.Key}} was deleted.</p>
-{{else}}<h1><span class="key">{{.Key}}</span> {{.Title}}</h1>
-<form id="state-form">
-<input type="hidden" name="key" value="{{.Key}}">
-<label>State:
-<select name="state" data-on:change="@post('/state', {contentType: 'form'})">
-{{range .States}}<option value="{{.}}"{{if eq . $.State}} selected{{end}}>{{.}}</option>
-{{end}}</select>
-</label>
-</form>
-<dl>
-<dt>Priority</dt><dd>{{.Priority}}</dd>
-<dt>Assignee</dt><dd>{{.Assignee}}</dd>
-<dt>Project</dt><dd>{{.Project}}</dd>
-<dt>Labels</dt><dd>{{.Labels}}</dd>
-<dt>Created</dt><dd>{{.Created}}</dd>
-<dt>Updated</dt><dd>{{.Updated}}</dd>
-</dl>
-{{if .Description}}<p id="description">{{.Description}}</p>
-{{end}}{{end}}</article>{{end}}
+{{else}}<div class="issue-main">
+<span class="key">{{.Key}}</span>
+<h1>{{.Title}}</h1>
+{{if .Description}}<p class="desc">{{.Description}}</p>
+{{end}}</div>
+<aside class="props">
+<h3>Properties</h3>
+<div class="prop"><span class="k">State</span>
+  <span class="v">{{template "state-icon" .State}}
+  <form id="state-form"><input type="hidden" name="key" value="{{.Key}}"><select name="state" data-on:change="@post('/state', {contentType: 'form'})">
+  {{range .States}}<option value="{{.Value}}"{{if eq .Value $.State}} selected{{end}}>{{.Label}}</option>
+  {{end}}</select></form></span>
+</div>
+<div class="prop"><span class="k">Priority</span>
+  <span class="v cap">{{template "priority-icon" .Prio}} {{.Prio}}</span>
+</div>
+<div class="prop"><span class="k">Assignee</span>
+  <span class="v">{{if .Assignee}}{{template "avatar" .Avatar}} {{.Assignee}}{{else}}none{{end}}</span>
+</div>
+<div class="prop"><span class="k">Project</span><span class="v">{{.Project}}</span></div>
+<div class="prop"><span class="k">Labels</span>
+  <span class="v">{{if .Labels}}{{range .Labels}}<span class="chip"><span class="dot" style="background:{{if .Color}}{{.Color}}{{else}}var(--text-3){{end}}"></span>{{.Name}}</span>{{end}}{{else}}none{{end}}</span>
+</div>
+<div class="prop"><span class="k">Created</span><span class="v">{{.Created}}</span></div>
+<div class="prop"><span class="k">Updated</span><span class="v">{{.Updated}}</span></div>
+</aside>
+{{end}}</article>{{end}}
 
-{{define "comments"}}<section id="comments">
+{{define "comments"}}<section id="comments" class="thread">
 <h2>Comments <span class="count">{{len .Comments}}</span></h2>
 {{range .Comments}}<div class="comment" id="comment-{{.Id}}">
-<p class="meta">{{.Author}} · {{.Age}}</p>
-<p>{{.Body}}</p>
+{{template "avatar" .Avatar}}
+<div><p class="meta"><b>{{.Author}}</b> · {{.Age}}</p>
+<p>{{.Body}}</p></div>
 </div>
 {{end}}</section>{{end}}

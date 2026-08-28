@@ -112,7 +112,7 @@ assert_contains "$(column "$board" todo)" "Web board issue" "ENG-1 title on card
 assert_contains "$(column "$board" in-progress)" "ENG-2" "ENG-2 in in-progress column"
 assert_contains "$board" 'id="new-issue"' "board has new-issue form"
 assert_contains "$board" "datastar" "board loads Datastar"
-curl -sf "$WEB/static/skeleton.css" >/dev/null || fail "static css served"
+curl -sf "$WEB/static/theme.css" >/dev/null || fail "static css served"
 
 # --- issue page ---
 issue=$(curl -sf "$WEB/issue/ENG-1")
@@ -166,7 +166,7 @@ done
 kill $CURL_PID 2>/dev/null || true
 events=$(cat "$EVENTS_FILE")
 assert_contains "$events" "event: datastar-patch-elements" "SSE patch frame emitted"
-assert_contains "$events" 'data: elements <main id="board">' "patch morphs #board"
+assert_contains "$events" 'data: elements <main id="board"' "patch morphs #board"
 assert_contains "$events" 'id="col-done"' "patch contains the target column"
 
 # --- /events: issue scope gets comments patch after a CLI comment ---
