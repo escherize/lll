@@ -1,0 +1,129 @@
+import "go:encoding/json"
+import "go:fmt"
+import "go:net/url"
+
+import "models"
+import "pb"
+
+/// Dispatch `lin label <verb>`.
+pub fn label(args: Slice<string>) -> Result<(), string> {
+  let Some(verb) = args.get(2) else {
+    label_usage()
+    return Ok(())
+  }
+  match verb {
+    "list" => label_list(),
+    "create" => label_create(args),
+    "--help" => {
+      label_usage()
+      Ok(())
+    },
+    "-h" => {
+      label_usage()
+      Ok(())
+    },
+    other => Err(f"unknown label command: '{other}' (see 'lin label --help')"),
+  }
+}
+
+fn label_usage() {
+  fmt.Println(
+    "lin label - work with labels
+
+Usage:
+  lin label list                                 list labels (name, color, team)
+  lin label create -n \"name\" [-c \"#5e6ad2\"] [--team KEY]
+                                                 create a label (no --team means
+                                                 workspace-wide)",
+  )
+}
+
+fn label_list() -> Result<(), string> {
+  let body = pb.get(
+    "/api/collections/labels/records?perPage=200&sort=name&expand=team",
+  )?
+  let mut labels = models.LabelList { .. }
+  if let Err(e) = json.Unmarshal(body.bytes(), &labels) {
+    return Err(f"decoding labels: {e}")
+  }
+  for l in labels.items {
+    let mut team = l.expand.team.key
+    if team == "" { team = "workspace" }
+    fmt.Println(f"{l.name}\t{l.color}\t{team}")
+  }
+  Ok(())
+}
+
+fn label_create(args: Slice<string>) -> Result<(), string> {
+  let mut name = ""
+  let mut color = ""
+  let mut team_key = ""
+  let mut i = 3
+  while i < args.length() {
+    match args[i] {
+      "-n" => {
+        let Some(val) = args.get(i + 1) else {
+          return Err("-n requires a value")
+        }
+        name = val
+        i += 2
+      },
+      "-c" => {
+        let Some(val) = args.get(i + 1) else {
+          return Err("-c requires a value")
+        }
+        color = val
+        i += 2
+      },
+      "--team" => {
+        let Some(val) = args.get(i + 1) else {
+          return Err("--team requires a value")
+        }
+        team_key = val
+        i += 2
+      },
+      other => return Err(f"unknown flag: '{other}'"),
+    }
+  }
+  if name == "" {
+    return Err(
+      "usage: lin label create -n \"name\" [-c \"#5e6ad2\"] [--team KEY]",
+    )
+  }
+
+  let mut team = ""
+  if team_key != "" {
+    let Some(t) = find_team(team_key)? else {
+      return Err(f"no team with key '{team_key}' on the server")
+    }
+    team = t.id
+  }
+
+  let new_label = models.NewLabel { name, color, team }
+  let payload = match json.Marshal(new_label) {
+    Ok(p) => p,
+    Err(e) => return Err(f"encoding label: {e}"),
+  }
+  let body = pb.post("/api/collections/labels/records", payload as string)?
+
+  let mut created = models.Label { .. }
+  if let Err(e) = json.Unmarshal(body.bytes(), &created) {
+    return Err(f"decoding created label: {e}")
+  }
+  fmt.Println(f"Created label {created.name}")
+  Ok(())
+}
+
+/// Resolve a label by name; unknown names error with the fix.
+fn resolve_label(name: string) -> Result<models.Label, string> {
+  let filter = url.QueryEscape(f"name='{name}'")
+  let body = pb.get(f"/api/collections/labels/records?filter={filter}")?
+  let mut result = models.LabelList { .. }
+  if let Err(e) = json.Unmarshal(body.bytes(), &result) {
+    return Err(f"decoding labels: {e}")
+  }
+  let Some(l) = result.items.find(|l| l.name == name) else {
+    return Err(f"no label named '{name}' — see 'lin label list'")
+  }
+  Ok(l)
+}

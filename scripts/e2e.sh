@@ -6,7 +6,9 @@
 # display, write path (start/update/close/delete, git branch creation and
 # ID inference from the branch), members (add/list), comments (add via config
 # 'me', authorless, list, in issue view), --assignee (create/update/list
-# filter, unknown member, expand in --json), --help output.
+# filter, unknown member, expand in --json), projects and labels (create/list,
+# project view with its issues, --label/--project on issue create/update and
+# as list filters, --search, unknown names, expand in --json), --help output.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
@@ -455,11 +457,135 @@ assert_contains "$out" "From the branch" "inferred comment list"
 out=$(LIN_URL=$URL "$LIN" issue comment ENG-1)
 assert_contains "$out" "No comments." "empty comment list message"
 
+# --- projects: create + list ---
+out=$(LIN_URL=$URL "$LIN" project create -n "Auth Revamp" -d "Rework the login flow" --team ENG)
+assert_contains "$out" "Created project Auth Revamp (planned)" "project create output"
+out=$(LIN_URL=$URL "$LIN" project create -n "Perf Push" --status started)
+assert_contains "$out" "Created project Perf Push (started)" "project create with --status"
+out=$(LIN_URL=$URL "$LIN" project list)
+assert_contains "$out" "Auth Revamp" "project list has Auth Revamp"
+assert_contains "$out" "planned" "project list shows status"
+assert_contains "$out" "ENG" "project list shows team"
+assert_contains "$out" "workspace" "project list shows workspace scope"
+
+set +e
+out=$(LIN_URL=$URL "$LIN" project create -n "Bad" --status bogus 2>&1)
+rc=$?
+set -e
+[ "$rc" -ne 0 ] || fail "project create --status bogus: expected nonzero exit"
+assert_contains "$out" "unknown status 'bogus'" "invalid project status message"
+
+# --- labels: create + list ---
+out=$(LIN_URL=$URL "$LIN" label create -n bug -c "#ff0000" --team ENG)
+assert_contains "$out" "Created label bug" "label create output"
+out=$(LIN_URL=$URL "$LIN" label create -n chore)
+assert_contains "$out" "Created label chore" "label create without color/team"
+out=$(LIN_URL=$URL "$LIN" label list)
+assert_contains "$out" "bug" "label list has bug"
+assert_contains "$out" "#ff0000" "label list shows color"
+assert_contains "$out" "chore" "label list has chore"
+assert_contains "$out" "workspace" "label list shows workspace scope"
+
+# --- issue created with labels + project ---
+out=$(LIN_URL=$URL LIN_TEAM=ENG "$LIN" issue create -t "Labeled login fix" --label bug --label chore --project "Auth Revamp")
+assert_contains "$out" "Created ENG-8: Labeled login fix" "labeled create output"
+
+out=$(LIN_URL=$URL "$LIN" issue view ENG-8)
+assert_contains "$out" "Project:   Auth Revamp" "view shows project"
+assert_contains "$out" "Labels:    bug, chore" "view shows labels"
+out=$(LIN_URL=$URL "$LIN" issue view ENG-6)
+assert_contains "$out" "Project:   none" "view shows unset project as none"
+assert_contains "$out" "Labels:    none" "view shows unset labels as none"
+
+# --- --label / --project filter issue list ---
+out=$(LIN_URL=$URL LIN_TEAM=ENG "$LIN" issue list --label bug)
+assert_contains "$out" "ENG-8" "label filter shows labeled issue"
+assert_not_contains "$out" "ENG-6" "label filter hides unlabeled issues"
+out=$(LIN_URL=$URL LIN_TEAM=ENG "$LIN" issue list --project "Auth Revamp")
+assert_contains "$out" "ENG-8" "project filter shows project issue"
+assert_not_contains "$out" "ENG-6" "project filter hides other issues"
+
+# --- --label / --project on update ---
+out=$(LIN_URL=$URL "$LIN" issue update ENG-6 --project "Perf Push" --label chore)
+assert_contains "$out" "Updated ENG-6" "update --project/--label output"
+out=$(LIN_URL=$URL "$LIN" issue view ENG-6)
+assert_contains "$out" "Project:   Perf Push" "update set project"
+assert_contains "$out" "Labels:    chore" "update set labels"
+out=$(LIN_URL=$URL LIN_TEAM=ENG "$LIN" issue list --project "Perf Push")
+assert_contains "$out" "ENG-6" "project filter finds updated issue"
+assert_not_contains "$out" "ENG-8" "project filter scoped to Perf Push"
+out=$(LIN_URL=$URL LIN_TEAM=ENG "$LIN" issue list --label chore)
+assert_contains "$out" "ENG-6" "label filter finds updated issue"
+assert_contains "$out" "ENG-8" "label filter matches multi-relation membership"
+
+# --- project view lists its issues ---
+out=$(LIN_URL=$URL "$LIN" project view "Auth Revamp")
+assert_contains "$out" "Name:    Auth Revamp" "project view name"
+assert_contains "$out" "Status:  planned" "project view status"
+assert_contains "$out" "Team:    ENG" "project view team"
+assert_contains "$out" "Rework the login flow" "project view description"
+assert_contains "$out" "Issues:" "project view issues section"
+assert_contains "$out" "ENG-8" "project view lists its issue"
+assert_contains "$out" "Labeled login fix" "project view issue title"
+assert_not_contains "$out" "ENG-6" "project view scoped to its issues"
+
+# --- --search matches title substrings ---
+out=$(LIN_URL=$URL LIN_TEAM=ENG "$LIN" issue list --search "abeled login")
+assert_contains "$out" "ENG-8" "search matches title substring"
+assert_not_contains "$out" "ENG-6" "search hides non-matching titles"
+out=$(LIN_URL=$URL LIN_TEAM=ENG "$LIN" issue list --search "zz-no-such-title")
+assert_not_contains "$out" "ENG-" "non-matching search yields no issues"
+
+# --- unknown label / project names error with the fix ---
+set +e
+out=$(LIN_URL=$URL LIN_TEAM=ENG "$LIN" issue create -t "Nope" --label nosuch 2>&1)
+rc=$?
+set -e
+[ "$rc" -ne 0 ] || fail "create --label nosuch: expected nonzero exit"
+assert_contains "$out" "no label named 'nosuch'" "unknown label message"
+assert_contains "$out" "lin label list" "unknown label names the fix"
+
+set +e
+out=$(LIN_URL=$URL LIN_TEAM=ENG "$LIN" issue create -t "Nope" --project nosuch 2>&1)
+rc=$?
+set -e
+[ "$rc" -ne 0 ] || fail "create --project nosuch: expected nonzero exit"
+assert_contains "$out" "no project named 'nosuch'" "unknown project message"
+assert_contains "$out" "lin project list" "unknown project names the fix"
+
+set +e
+out=$(LIN_URL=$URL LIN_TEAM=ENG "$LIN" issue list --label nosuch 2>&1)
+rc=$?
+set -e
+[ "$rc" -ne 0 ] || fail "list --label nosuch: expected nonzero exit"
+assert_contains "$out" "no label named 'nosuch'" "list unknown label message"
+
+set +e
+out=$(LIN_URL=$URL "$LIN" project view nosuch 2>&1)
+rc=$?
+set -e
+[ "$rc" -ne 0 ] || fail "project view nosuch: expected nonzero exit"
+assert_contains "$out" "no project named 'nosuch'" "project view unknown name message"
+
+# --- --json resolves expand.project and expand.labels ---
+pname=$(LIN_URL=$URL "$LIN" issue view ENG-8 --json | jq -r '.expand.project.name')
+[ "$pname" = "Auth Revamp" ] || fail "view --json: expected expand.project.name Auth Revamp, got '$pname'"
+lname=$(LIN_URL=$URL "$LIN" issue view ENG-8 --json | jq -r '.expand.labels[0].name')
+[ "$lname" = "bug" ] || fail "view --json: expected expand.labels[0].name bug, got '$lname'"
+pname=$(LIN_URL=$URL LIN_TEAM=ENG "$LIN" issue list --label bug --json | \
+  jq -r '.items[0].expand.project.name')
+[ "$pname" = "Auth Revamp" ] || fail "list --json: expected expand.project.name Auth Revamp, got '$pname'"
+lname=$(LIN_URL=$URL LIN_TEAM=ENG "$LIN" issue list --label bug --json | \
+  jq -r '.items[0].expand.labels[0].name')
+[ "$lname" = "bug" ] || fail "list --json: expected expand.labels[0].name bug, got '$lname'"
+
 # --- help output ---
 out=$("$LIN" --help)
 assert_contains "$out" "Usage:" "lin --help"
 assert_contains "$out" "lin team" "lin --help mentions team"
 assert_contains "$out" "lin member" "lin --help mentions member"
+assert_contains "$out" "lin project" "lin --help mentions project"
+assert_contains "$out" "lin label" "lin --help mentions label"
 assert_contains "$out" "lin config" "lin --help mentions config"
 out=$("$LIN" issue --help)
 assert_contains "$out" "Usage:" "lin issue --help"
@@ -469,11 +595,20 @@ assert_contains "$out" "lin issue start" "issue --help mentions start"
 assert_contains "$out" "lin issue delete" "issue --help mentions delete"
 assert_contains "$out" "lin issue comment" "issue --help mentions comment"
 assert_contains "$out" "--assignee" "issue --help mentions --assignee"
+assert_contains "$out" "--label" "issue --help mentions --label"
+assert_contains "$out" "--project" "issue --help mentions --project"
+assert_contains "$out" "--search" "issue --help mentions --search"
 out=$("$LIN" member --help)
 assert_contains "$out" "Usage:" "lin member --help"
 assert_contains "$out" "lin member add" "member --help mentions add"
 out=$("$LIN" team --help)
 assert_contains "$out" "Usage:" "lin team --help"
+out=$("$LIN" project --help)
+assert_contains "$out" "Usage:" "lin project --help"
+assert_contains "$out" "lin project view" "project --help mentions view"
+out=$("$LIN" label --help)
+assert_contains "$out" "Usage:" "lin label --help"
+assert_contains "$out" "lin label create" "label --help mentions create"
 out=$("$LIN" config --help)
 assert_contains "$out" "Usage:" "lin config --help"
 

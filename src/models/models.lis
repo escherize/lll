@@ -36,9 +36,69 @@ pub struct NewMember {
 }
 
 #[json]
+pub struct ProjectExpand {
+  pub team: Team,
+}
+
+#[json]
+pub struct Project {
+  pub id: string,
+  pub name: string,
+  pub description: string,
+  pub status: string,
+  pub team: string,
+  pub expand: ProjectExpand,
+}
+
+#[json]
+pub struct ProjectList {
+  pub items: Slice<Project>,
+}
+
+#[json]
+pub struct NewProject {
+  pub name: string,
+  #[json(omitempty)]
+  pub description: string,
+  pub status: string,
+  #[json(omitempty)]
+  pub team: string,
+}
+
+#[json]
+pub struct LabelExpand {
+  pub team: Team,
+}
+
+#[json]
+pub struct Label {
+  pub id: string,
+  pub name: string,
+  pub color: string,
+  pub team: string,
+  pub expand: LabelExpand,
+}
+
+#[json]
+pub struct LabelList {
+  pub items: Slice<Label>,
+}
+
+#[json]
+pub struct NewLabel {
+  pub name: string,
+  #[json(omitempty)]
+  pub color: string,
+  #[json(omitempty)]
+  pub team: string,
+}
+
+#[json]
 pub struct IssueExpand {
   pub team: Team,
   pub assignee: Member,
+  pub project: Project,
+  pub labels: Slice<Label>,
 }
 
 #[json]
@@ -51,6 +111,8 @@ pub struct Issue {
   pub state: string,
   pub priority: int,
   pub assignee: string,
+  pub project: string,
+  pub labels: Slice<string>,
   pub created: string,
   pub updated: string,
   pub expand: IssueExpand,
@@ -71,6 +133,10 @@ pub struct NewIssue {
   pub priority: int,
   #[json(omitempty)]
   pub assignee: string,
+  #[json(omitempty)]
+  pub project: string,
+  #[json(omitempty)]
+  pub labels: Slice<string>,
 }
 
 #[json]

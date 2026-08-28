@@ -1,6 +1,7 @@
 /// <reference path="../pb_data/types.d.ts" />
 
-// Initial schema: teams, members, issues, comments. API rules are open (no auth in v1).
+// Initial schema: teams, members, projects, labels, issues, comments.
+// API rules are open (no auth in v1).
 migrate(
   (app) => {
     const teams = new Collection({
@@ -40,6 +41,62 @@ migrate(
     });
     app.save(members);
 
+    const projects = new Collection({
+      type: "base",
+      name: "projects",
+      listRule: "",
+      viewRule: "",
+      createRule: "",
+      updateRule: "",
+      deleteRule: "",
+      fields: [
+        { name: "name", type: "text", required: true },
+        { name: "description", type: "text" },
+        {
+          name: "status",
+          type: "select",
+          required: true,
+          maxSelect: 1,
+          values: ["planned", "started", "paused", "completed", "cancelled"],
+        },
+        {
+          name: "team",
+          type: "relation",
+          collectionId: teams.id,
+          maxSelect: 1,
+          cascadeDelete: false,
+        },
+        { name: "created", type: "autodate", onCreate: true },
+        { name: "updated", type: "autodate", onCreate: true, onUpdate: true },
+      ],
+    });
+    app.save(projects);
+
+    // An unset team means the label is workspace-wide.
+    const labels = new Collection({
+      type: "base",
+      name: "labels",
+      listRule: "",
+      viewRule: "",
+      createRule: "",
+      updateRule: "",
+      deleteRule: "",
+      fields: [
+        { name: "name", type: "text", required: true },
+        { name: "color", type: "text" },
+        {
+          name: "team",
+          type: "relation",
+          collectionId: teams.id,
+          maxSelect: 1,
+          cascadeDelete: false,
+        },
+        { name: "created", type: "autodate", onCreate: true },
+        { name: "updated", type: "autodate", onCreate: true, onUpdate: true },
+      ],
+    });
+    app.save(labels);
+
     const issues = new Collection({
       type: "base",
       name: "issues",
@@ -74,6 +131,20 @@ migrate(
           type: "relation",
           collectionId: members.id,
           maxSelect: 1,
+          cascadeDelete: false,
+        },
+        {
+          name: "project",
+          type: "relation",
+          collectionId: projects.id,
+          maxSelect: 1,
+          cascadeDelete: false,
+        },
+        {
+          name: "labels",
+          type: "relation",
+          collectionId: labels.id,
+          maxSelect: 999,
           cascadeDelete: false,
         },
         { name: "created", type: "autodate", onCreate: true },
@@ -119,6 +190,8 @@ migrate(
   (app) => {
     app.delete(app.findCollectionByNameOrId("comments"));
     app.delete(app.findCollectionByNameOrId("issues"));
+    app.delete(app.findCollectionByNameOrId("labels"));
+    app.delete(app.findCollectionByNameOrId("projects"));
     app.delete(app.findCollectionByNameOrId("members"));
     app.delete(app.findCollectionByNameOrId("teams"));
   }

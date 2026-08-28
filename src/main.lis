@@ -13,6 +13,8 @@ fn main() {
     "issue" => commands.issue(os.Args),
     "team" => commands.team(os.Args),
     "member" => commands.member(os.Args),
+    "project" => commands.project(os.Args),
+    "label" => commands.label(os.Args),
     "config" => commands.config_cmd(os.Args),
     "--help" => {
       print_usage()
@@ -43,6 +45,8 @@ Usage:
   lin issue <command>     work with issues (see 'lin issue --help')
   lin team <command>      work with teams (see 'lin team --help')
   lin member <command>    work with members (see 'lin member --help')
+  lin project <command>   work with projects (see 'lin project --help')
+  lin label <command>     work with labels (see 'lin label --help')
   lin config <command>    manage configuration (see 'lin config --help')
   lin --help              show this help
 

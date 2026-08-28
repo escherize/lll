@@ -47,8 +47,10 @@ fn print_usage() {
 
 Usage:
   lin issue create -t \"title\" [--priority 0-4] [--assignee name]
+                   [--label name]... [--project name]
                                                   create an issue in the configured team
-  lin issue list [--state s] [--assignee name] [--sort f] [--json]
+  lin issue list [--state s] [--assignee name] [--label name] [--project name]
+                 [--search q] [--sort f] [--json]
                                                   list issues; scoped to the configured team
   lin issue view [KEY-123] [--json]               show one issue in full, with comments
   lin issue update [KEY-123] <flags>              change fields (at least one flag)
@@ -62,12 +64,17 @@ Usage:
 Flags:
   --state        one of: backlog, todo, in-progress, in-review, done, cancelled
   --assignee     member name (see 'lin member list'); filters on list
+  --label        label name (see 'lin label list'); repeatable on create/update
+                 (update replaces the set); filters on list
+  --project      project name (see 'lin project list'); filters on list
+  --search       list only issues whose title contains q
   --sort         created, updated, priority, or number; prefix - for descending
                  (default: LIN_SORT or 'sort' in .lin.toml, else created)
   --priority     0 none, 1 urgent (!!!), 2 high (!!), 3 medium (!), 4 low (·)
   --title        new title (update)
   --description  new description (update)
-  --json         raw PocketBase JSON (team, assignee expanded), pipe-friendly
+  --json         raw PocketBase JSON (team, assignee, labels, project
+                 expanded), pipe-friendly
   --force        skip the delete confirmation
 
 When KEY-123 is omitted (except for delete), it is inferred from the current
@@ -83,6 +90,8 @@ fn create(args: Slice<string>) -> Result<(), string> {
   let mut title = ""
   let mut priority = 0
   let mut assignee_name = ""
+  let mut label_names: Slice<string> = []
+  let mut project_name = ""
   let mut i = 3
   while i < args.length() {
     match args[i] {
@@ -98,6 +107,20 @@ fn create(args: Slice<string>) -> Result<(), string> {
           return Err("--assignee requires a value")
         }
         assignee_name = val
+        i += 2
+      },
+      "--label" => {
+        let Some(val) = args.get(i + 1) else {
+          return Err("--label requires a value")
+        }
+        label_names = label_names.append(val)
+        i += 2
+      },
+      "--project" => {
+        let Some(val) = args.get(i + 1) else {
+          return Err("--project requires a value")
+        }
+        project_name = val
         i += 2
       },
       "--priority" => {
@@ -120,12 +143,20 @@ fn create(args: Slice<string>) -> Result<(), string> {
   }
   if title == "" {
     return Err(
-      "usage: lin issue create -t \"title\" [--priority 0-4] [--assignee name]",
+      "usage: lin issue create -t \"title\" [--priority 0-4] [--assignee name] [--label name]... [--project name]",
     )
   }
 
   let mut assignee = ""
   if assignee_name != "" { assignee = resolve_member(assignee_name)?.id }
+
+  let mut project = ""
+  if project_name != "" { project = resolve_project(project_name)?.id }
+
+  let mut labels: Slice<string> = []
+  for name in label_names {
+    labels = labels.append(resolve_label(name)?.id)
+  }
 
   let team_key = config.load()?.team
   if team_key == "" {
@@ -143,6 +174,8 @@ fn create(args: Slice<string>) -> Result<(), string> {
     state: "todo",
     priority,
     assignee,
+    project,
+    labels,
   }
   let payload = match json.Marshal(new_issue) {
     Ok(p) => p,
@@ -161,6 +194,9 @@ fn create(args: Slice<string>) -> Result<(), string> {
 fn list(args: Slice<string>) -> Result<(), string> {
   let mut state = ""
   let mut assignee_name = ""
+  let mut label_name = ""
+  let mut project_name = ""
+  let mut search = ""
   let mut sort_flag = ""
   let mut json_mode = false
   let mut i = 3
@@ -171,6 +207,27 @@ fn list(args: Slice<string>) -> Result<(), string> {
           return Err("--assignee requires a value")
         }
         assignee_name = val
+        i += 2
+      },
+      "--label" => {
+        let Some(val) = args.get(i + 1) else {
+          return Err("--label requires a value")
+        }
+        label_name = val
+        i += 2
+      },
+      "--project" => {
+        let Some(val) = args.get(i + 1) else {
+          return Err("--project requires a value")
+        }
+        project_name = val
+        i += 2
+      },
+      "--search" => {
+        let Some(val) = args.get(i + 1) else {
+          return Err("--search requires a value")
+        }
+        search = val
         i += 2
       },
       "--state" => {
@@ -214,13 +271,26 @@ fn list(args: Slice<string>) -> Result<(), string> {
   let mut assignee_id = ""
   if assignee_name != "" { assignee_id = resolve_member(assignee_name)?.id }
 
+  let mut label_id = ""
+  if label_name != "" { label_id = resolve_label(label_name)?.id }
+
+  let mut project_id = ""
+  if project_name != "" { project_id = resolve_project(project_name)?.id }
+
   let mut sort_spec = sort_flag
   if sort_spec == "" { sort_spec = cfg.sort }
   if sort_spec == "" { sort_spec = "created" }
   let sort = query.sort(sort_spec)?
 
-  let mut path = f"/api/collections/issues/records?perPage=200&expand=team,assignee&sort={url.QueryEscape(sort)}"
-  let filter = query.filter(team_id, state, assignee_id)
+  let mut path = f"/api/collections/issues/records?perPage=200&expand=team,assignee,labels,project&sort={url.QueryEscape(sort)}"
+  let filter = query.filter(
+    team_id,
+    state,
+    assignee_id,
+    project_id,
+    label_id,
+    search,
+  )
   if filter != "" { path = f"{path}&filter={url.QueryEscape(filter)}" }
 
   let body = pb.get(path)?
@@ -233,9 +303,14 @@ fn list(args: Slice<string>) -> Result<(), string> {
   if let Err(e) = json.Unmarshal(body.bytes(), &issues) {
     return Err(f"decoding issues: {e}")
   }
+  print_issue_table(issues.items)
+}
 
+/// The standard issue table (ID, state, priority, title, assignee, age),
+/// shared by `issue list` and `project view`.
+fn print_issue_table(issues: Slice<models.Issue>) -> Result<(), string> {
   let w = tabwriter.NewWriter(os.Stdout, 0, 4, 2, ' ', 0)
-  for item in issues.items {
+  for item in issues {
     let key = item.expand.team.key
     let line = f"{key}-{item.number}\t{display.glyph(item.state)} {item.state}\t{display.priority_marker(item.priority)}\t{item.title}\t{item.expand.assignee.name}\t{display.relative(item.updated)}"
     if let Err(e) = fmt.Fprintln(w, line) { return Err(f"writing output: {e}") }
@@ -277,11 +352,19 @@ fn view(args: Slice<string>) -> Result<(), string> {
   let mut assignee = full.expand.assignee.name
   if assignee == "" { assignee = "none" }
 
+  let mut project = full.expand.project.name
+  if project == "" { project = "none" }
+
+  let mut labels = strings.Join(full.expand.labels.map(|l| l.name), ", ")
+  if labels == "" { labels = "none" }
+
   fmt.Println(f"{full.expand.team.key}-{full.number} {full.title}")
   fmt.Println("")
   fmt.Println(f"State:     {display.glyph(full.state)} {full.state}")
   fmt.Println(f"Priority:  {display.priority_name(full.priority)}")
   fmt.Println(f"Assignee:  {assignee}")
+  fmt.Println(f"Project:   {project}")
+  fmt.Println(f"Labels:    {labels}")
   fmt.Println(f"Created:   {display.relative(full.created)}")
   fmt.Println(f"Updated:   {display.relative(full.updated)}")
   if full.description != "" {
@@ -300,11 +383,13 @@ fn view(args: Slice<string>) -> Result<(), string> {
 }
 
 fn update(args: Slice<string>) -> Result<(), string> {
-  let usage = "lin issue update [KEY-123] [--state s] [--priority 0-4] [--assignee name] [--title t] [--description d]"
+  let usage = "lin issue update [KEY-123] [--state s] [--priority 0-4] [--assignee name] [--label name]... [--project name] [--title t] [--description d]"
   let mut id = ""
   let mut state = ""
   let mut priority = -1
   let mut assignee_name = ""
+  let mut label_names: Slice<string> = []
+  let mut project_name = ""
   let mut title = ""
   let mut title_set = false
   let mut description = ""
@@ -317,6 +402,20 @@ fn update(args: Slice<string>) -> Result<(), string> {
           return Err("--assignee requires a value")
         }
         assignee_name = val
+        i += 2
+      },
+      "--label" => {
+        let Some(val) = args.get(i + 1) else {
+          return Err("--label requires a value")
+        }
+        label_names = label_names.append(val)
+        i += 2
+      },
+      "--project" => {
+        let Some(val) = args.get(i + 1) else {
+          return Err("--project requires a value")
+        }
+        project_name = val
         i += 2
       },
       "--state" => {
@@ -371,7 +470,10 @@ fn update(args: Slice<string>) -> Result<(), string> {
       },
     }
   }
-  if state == "" && priority < 0 && assignee_name == "" && !title_set &&
+  if state == "" && priority < 0 && assignee_name == "" &&
+  label_names.is_empty() &&
+  project_name == "" &&
+  !title_set &&
   !description_set {
     return Err(f"nothing to update — pass at least one flag\nusage: {usage}")
   }
@@ -385,6 +487,21 @@ fn update(args: Slice<string>) -> Result<(), string> {
   if assignee_name != "" {
     let member = resolve_member(assignee_name)?
     fields = fields.append("\"assignee\":" + json_quote(member.id)?)
+  }
+  if project_name != "" {
+    let project = resolve_project(project_name)?
+    fields = fields.append("\"project\":" + json_quote(project.id)?)
+  }
+  if !label_names.is_empty() {
+    let mut label_ids: Slice<string> = []
+    for name in label_names {
+      label_ids = label_ids.append(resolve_label(name)?.id)
+    }
+    let encoded = match json.Marshal(label_ids) {
+      Ok(b) => b as string,
+      Err(e) => return Err(f"encoding labels: {e}"),
+    }
+    fields = fields.append(f"\"labels\":{encoded}")
   }
   if title_set { fields = fields.append("\"title\":" + json_quote(title)?) }
   if description_set {
@@ -594,8 +711,8 @@ fn resolve_id(explicit: string, usage: string) -> Result<string, string> {
   Ok(id)
 }
 
-/// Fetch an issue by KEY-123 and return the raw PB record JSON (team and
-/// assignee expanded).
+/// Fetch an issue by KEY-123 and return the raw PB record JSON (team,
+/// assignee, labels, project expanded).
 fn fetch_issue_record(id: string) -> Result<string, string> {
   let bad_id = f"'{id}' is not an issue ID (expected KEY-123, e.g. ENG-1)"
   let Some(dash) = strings.LastIndex(id, "-") else {
@@ -613,7 +730,7 @@ fn fetch_issue_record(id: string) -> Result<string, string> {
   }
 
   let filter = url.QueryEscape(
-    f"{query.filter(team.id, "", "")} && number={number}",
+    f"{query.filter(team.id, "", "", "", "", "")} && number={number}",
   )
   let body = pb.get(
     f"/api/collections/issues/records?filter={filter}&perPage=1",
@@ -626,7 +743,9 @@ fn fetch_issue_record(id: string) -> Result<string, string> {
     return Err(not_found)
   }
 
-  pb.get(f"/api/collections/issues/records/{item.id}?expand=team,assignee")
+  pb.get(
+    f"/api/collections/issues/records/{item.id}?expand=team,assignee,labels,project",
+  )
 }
 
 /// fetch_issue_record, decoded.

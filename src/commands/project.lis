@@ -1,0 +1,190 @@
+import "go:encoding/json"
+import "go:fmt"
+import "go:net/url"
+import "go:strings"
+
+import "models"
+import "pb"
+
+/// Dispatch `lin project <verb>`.
+pub fn project(args: Slice<string>) -> Result<(), string> {
+  let Some(verb) = args.get(2) else {
+    project_usage()
+    return Ok(())
+  }
+  match verb {
+    "list" => project_list(),
+    "create" => project_create(args),
+    "view" => project_view(args),
+    "--help" => {
+      project_usage()
+      Ok(())
+    },
+    "-h" => {
+      project_usage()
+      Ok(())
+    },
+    other => Err(
+      f"unknown project command: '{other}' (see 'lin project --help')",
+    ),
+  }
+}
+
+/// Project statuses, in lifecycle order.
+fn project_statuses() -> Slice<string> {
+  ["planned", "started", "paused", "completed", "cancelled"]
+}
+
+fn project_usage() {
+  fmt.Println(
+    "lin project - work with projects
+
+Usage:
+  lin project list                    list projects (name, status, team)
+  lin project view NAME               show a project and its issues
+  lin project create -n \"name\" [-d desc] [--status s] [--team KEY]
+                                      create a project (status defaults to
+                                      planned; no --team means workspace-wide)
+
+Statuses: planned, started, paused, completed, cancelled",
+  )
+}
+
+fn project_list() -> Result<(), string> {
+  let body = pb.get(
+    "/api/collections/projects/records?perPage=200&sort=name&expand=team",
+  )?
+  let mut projects = models.ProjectList { .. }
+  if let Err(e) = json.Unmarshal(body.bytes(), &projects) {
+    return Err(f"decoding projects: {e}")
+  }
+  for p in projects.items {
+    let mut team = p.expand.team.key
+    if team == "" { team = "workspace" }
+    fmt.Println(f"{p.name}\t{p.status}\t{team}")
+  }
+  Ok(())
+}
+
+fn project_create(args: Slice<string>) -> Result<(), string> {
+  let mut name = ""
+  let mut description = ""
+  let mut status = "planned"
+  let mut team_key = ""
+  let mut i = 3
+  while i < args.length() {
+    match args[i] {
+      "-n" => {
+        let Some(val) = args.get(i + 1) else {
+          return Err("-n requires a value")
+        }
+        name = val
+        i += 2
+      },
+      "-d" => {
+        let Some(val) = args.get(i + 1) else {
+          return Err("-d requires a value")
+        }
+        description = val
+        i += 2
+      },
+      "--status" => {
+        let Some(val) = args.get(i + 1) else {
+          return Err("--status requires a value")
+        }
+        if project_statuses().find(|s| s == val).is_none() {
+          return Err(
+            f"unknown status '{val}' (use one of: {strings.Join(project_statuses(), ", ")})",
+          )
+        }
+        status = val
+        i += 2
+      },
+      "--team" => {
+        let Some(val) = args.get(i + 1) else {
+          return Err("--team requires a value")
+        }
+        team_key = val
+        i += 2
+      },
+      other => return Err(f"unknown flag: '{other}'"),
+    }
+  }
+  if name == "" {
+    return Err(
+      "usage: lin project create -n \"name\" [-d desc] [--status s] [--team KEY]",
+    )
+  }
+
+  let mut team = ""
+  if team_key != "" {
+    let Some(t) = find_team(team_key)? else {
+      return Err(f"no team with key '{team_key}' on the server")
+    }
+    team = t.id
+  }
+
+  let new_project = models.NewProject { name, description, status, team }
+  let payload = match json.Marshal(new_project) {
+    Ok(p) => p,
+    Err(e) => return Err(f"encoding project: {e}"),
+  }
+  let body = pb.post("/api/collections/projects/records", payload as string)?
+
+  let mut created = models.Project { .. }
+  if let Err(e) = json.Unmarshal(body.bytes(), &created) {
+    return Err(f"decoding created project: {e}")
+  }
+  fmt.Println(f"Created project {created.name} ({created.status})")
+  Ok(())
+}
+
+fn project_view(args: Slice<string>) -> Result<(), string> {
+  let Some(name) = args.get(3) else {
+    return Err("usage: lin project view NAME")
+  }
+  let p = resolve_project(name)?
+
+  let mut team = p.expand.team.key
+  if team == "" { team = "workspace" }
+
+  fmt.Println(f"Name:    {p.name}")
+  fmt.Println(f"Status:  {p.status}")
+  fmt.Println(f"Team:    {team}")
+  if p.description != "" {
+    fmt.Println("")
+    fmt.Println(p.description)
+  }
+
+  let filter = url.QueryEscape(f"project='{p.id}'")
+  let body = pb.get(
+    f"/api/collections/issues/records?filter={filter}&perPage=200&sort=created&expand=team,assignee",
+  )?
+  let mut issues = models.IssueList { .. }
+  if let Err(e) = json.Unmarshal(body.bytes(), &issues) {
+    return Err(f"decoding issues: {e}")
+  }
+  if issues.items.length() > 0 {
+    fmt.Println("")
+    fmt.Println("Issues:")
+    fmt.Println("")
+    print_issue_table(issues.items)?
+  }
+  Ok(())
+}
+
+/// Resolve a project by name; unknown names error with the fix.
+fn resolve_project(name: string) -> Result<models.Project, string> {
+  let filter = url.QueryEscape(f"name='{name}'")
+  let body = pb.get(
+    f"/api/collections/projects/records?filter={filter}&expand=team",
+  )?
+  let mut result = models.ProjectList { .. }
+  if let Err(e) = json.Unmarshal(body.bytes(), &result) {
+    return Err(f"decoding projects: {e}")
+  }
+  let Some(p) = result.items.find(|p| p.name == name) else {
+    return Err(f"no project named '{name}' — see 'lin project list'")
+  }
+  Ok(p)
+}

@@ -1,35 +1,58 @@
 #[test]
 fn filter_empty_criteria_yields_empty_string() {
-  assert filter("", "", "") == ""
+  assert filter("", "", "", "", "", "") == ""
 }
 
 #[test]
 fn filter_team_only() {
-  assert filter("abc123", "", "") == "team='abc123'"
+  assert filter("abc123", "", "", "", "", "") == "team='abc123'"
 }
 
 #[test]
 fn filter_state_only() {
-  assert filter("", "todo", "") == "state='todo'"
+  assert filter("", "todo", "", "", "", "") == "state='todo'"
 }
 
 #[test]
 fn filter_assignee_only() {
-  assert filter("", "", "mem456") == "assignee='mem456'"
+  assert filter("", "", "mem456", "", "", "") == "assignee='mem456'"
+}
+
+#[test]
+fn filter_project_only() {
+  assert filter("", "", "", "prj789", "", "") == "project='prj789'"
+}
+
+#[test]
+fn filter_label_uses_membership_operator() {
+  assert filter("", "", "", "", "lbl321", "") == "labels.id ?= 'lbl321'"
+}
+
+#[test]
+fn filter_search_matches_title_substring() {
+  assert filter("", "", "", "", "", "login") == "title ~ 'login'"
 }
 
 #[test]
 fn filter_combines_criteria_with_and() {
-  assert filter("abc123", "in-progress", "") ==
+  assert filter("abc123", "in-progress", "", "", "", "") ==
   "team='abc123' && state='in-progress'"
-  assert filter("abc123", "todo", "mem456") ==
+  assert filter("abc123", "todo", "mem456", "", "", "") ==
   "team='abc123' && state='todo' && assignee='mem456'"
+  assert filter("abc123", "", "", "prj789", "lbl321", "fix") ==
+  "team='abc123' && project='prj789' && labels.id ?= 'lbl321' && title ~ 'fix'"
 }
 
 #[test]
 fn filter_escapes_quotes_and_backslashes() {
-  assert filter("a'b", "", "") == r"team='a\'b'"
-  assert filter(r"a\b", "", "") == r"team='a\\b'"
+  assert filter("a'b", "", "", "", "", "") == r"team='a\'b'"
+  assert filter(r"a\b", "", "", "", "", "") == r"team='a\\b'"
+}
+
+#[test]
+fn filter_escapes_quotes_in_search() {
+  assert filter("", "", "", "", "", "it's") == r"title ~ 'it\'s'"
+  assert filter("", "", "", "", "", r"a\'b") == r"title ~ 'a\\\'b'"
 }
 
 #[test]

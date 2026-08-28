@@ -12,13 +12,29 @@ pub fn sort_fields() -> Slice<string> {
 
 /// Build a PocketBase filter expression from optional criteria.
 /// Empty criteria are omitted; an empty result means "no filter".
-pub fn filter(team_id: string, state: string, assignee_id: string) -> string {
+/// `label_id` matches multi-relation membership (`labels.id ?=`); `search`
+/// is a title substring match (`title ~`).
+pub fn filter(
+  team_id: string,
+  state: string,
+  assignee_id: string,
+  project_id: string,
+  label_id: string,
+  search: string,
+) -> string {
   let mut clauses: Slice<string> = []
   if team_id != "" { clauses = clauses.append(f"team={quote(team_id)}") }
   if state != "" { clauses = clauses.append(f"state={quote(state)}") }
   if assignee_id != "" {
     clauses = clauses.append(f"assignee={quote(assignee_id)}")
   }
+  if project_id != "" {
+    clauses = clauses.append(f"project={quote(project_id)}")
+  }
+  if label_id != "" {
+    clauses = clauses.append(f"labels.id ?= {quote(label_id)}")
+  }
+  if search != "" { clauses = clauses.append(f"title ~ {quote(search)}") }
   strings.Join(clauses, " && ")
 }
 
