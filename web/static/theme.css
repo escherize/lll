@@ -560,7 +560,11 @@ input:focus, textarea:focus, select:focus {
 }
 /* No popover while the mouse is down: drags start from :active, and the
    preview must never shadow a drag in progress. */
-.card:active .card-pop { opacity: 0; visibility: hidden; transition: none; }
+/* display:none, not opacity/visibility: the browser's drag snapshot paints
+   the element subtree including invisible fixed children, so anything short
+   of display:none inflates the drag ghost to card + popover (task-24).
+   mousedown (:active) precedes dragstart, so the snapshot excludes it. */
+.card:active .card-pop { display: none; }
 .card-pop .cp-row1 {
   display: flex; align-items: center; gap: 6px;
   color: var(--text-3);
