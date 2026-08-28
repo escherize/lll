@@ -110,6 +110,7 @@ pub struct Issue {
   pub description: string,
   pub state: string,
   pub priority: int,
+  pub sort: float64,
   pub assignee: string,
   pub project: string,
   pub labels: Slice<string>,

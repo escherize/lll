@@ -126,6 +126,9 @@ migrate(
         },
         // Linear's priority scale: 0 none, 1 urgent, 2 high, 3 medium, 4 low.
         { name: "priority", type: "number", onlyInt: true, min: 0, max: 4 },
+        // Manual board position within a column (fractional midpoints on
+        // reorder; defaulted to end-of-board by the create hook).
+        { name: "sort", type: "number" },
         {
           name: "assignee",
           type: "relation",

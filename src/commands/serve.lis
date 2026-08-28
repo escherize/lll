@@ -53,10 +53,18 @@ pub struct CardVM {
   pub key: string,
   pub title: string,
   pub state: string,
+  // Humanized state for the hover preview ("in-progress" -> "In progress").
+  pub state_label: string,
   pub prio: string,
+  // Priority for display: "No priority" for none, else capitalized slug.
+  pub prio_label: string,
   pub assignee: string,
   pub avatar: AvatarVM,
   pub labels: Slice<LabelVM>,
+  // Relative created age ("3h ago") for the card's bottom row.
+  pub created: string,
+  // First ~2 lines of the description, truncated, for the hover preview.
+  pub snippet: string,
 }
 
 /// One selectable filter value (chooser option / chip).
@@ -122,6 +130,7 @@ pub struct IssueVM {
   pub created: string,
   pub updated: string,
   pub states: Slice<StateOpt>,
+  pub prios: Slice<StateOpt>,
   pub comments: Slice<CommentVM>,
 }
 
@@ -276,7 +285,14 @@ pub fn run_server(port: int) -> Result<(), string> {
       create_action(w, r, team_id)
     },
   )
-  http.HandleFunc("POST /state", state_action)
+  http.HandleFunc(
+    "POST /state",
+    |w: http.ResponseWriter, r: Ref<http.Request>| {
+      state_action(w, r, team_id)
+    },
+  )
+  http.HandleFunc("POST /priority", priority_action)
+  http.HandleFunc("POST /title", title_action)
   http.HandleFunc("POST /comment", comment_action)
   http.Handle(
     "GET /static/",
@@ -347,6 +363,31 @@ fn state_opts() -> Slice<StateOpt> {
   query.states().map(|s| StateOpt { value: s, label: state_label(s) })
 }
 
+/// Web-facing priority label: the web reads priority 0 as "No priority"
+/// (CLI output keeps "none").
+fn prio_label(name: string) -> string {
+  if name == "none" { return "No priority" }
+  state_label(name)
+}
+
+/// Priority <option>s in Linear order, slug values, web labels.
+fn prio_opts() -> Slice<StateOpt> {
+  ["none", "urgent", "high", "medium", "low"]
+    .map(|p| StateOpt { value: p, label: prio_label(p) })
+}
+
+/// Priority slug -> Linear int (inverse of display.priority_name).
+fn prio_value(slug: string) -> Option<int> {
+  match slug {
+    "none" => Some(0),
+    "urgent" => Some(1),
+    "high" => Some(2),
+    "medium" => Some(3),
+    "low" => Some(4),
+    _ => None,
+  }
+}
+
 /// Initials plus a stable per-name color class (av-0..av-3), so different
 /// members scan differently on the board.
 fn avatar_vm(name: string) -> AvatarVM {
@@ -367,16 +408,31 @@ fn label_vms(labels: Slice<models.Label>) -> Slice<LabelVM> {
 }
 
 fn card_vm(issue: models.Issue) -> CardVM {
+  let prio = display.priority_name(issue.priority)
   CardVM {
     id: issue.id,
     key: f"{issue.expand.team.key}-{issue.number}",
     title: issue.title,
     state: issue.state,
-    prio: display.priority_name(issue.priority),
+    state_label: state_label(issue.state),
+    prio,
+    prio_label: prio_label(prio),
     assignee: issue.expand.assignee.name,
     avatar: avatar_vm(issue.expand.assignee.name),
     labels: label_vms(issue.expand.labels),
+    created: display.relative(issue.created),
+    snippet: snippet(issue.description),
   }
+}
+
+/// Description -> hover-preview snippet: the first two non-empty lines
+/// joined, capped at 160 chars with an ellipsis. The popover's CSS
+/// line-clamp handles the visual "~2 lines"; this keeps payloads small.
+fn snippet(desc: string) -> string {
+  let lines = desc.split("\n").map(strings.TrimSpace).filter(|l| l != "")
+  let text = strings.Join(lines[..min(2, lines.length())], " ")
+  if text.length() > 160 { return text.substring(0..159) + "…" }
+  text
 }
 
 /// First-seen-order distinct non-empty strings.
@@ -415,7 +471,7 @@ fn filter_groups(issues: Slice<models.Issue>) -> Slice<FilterGroupVM> {
     FilterGroupVM {
       dim: "prio",
       label: "Priority",
-      opts: prios.map(|p| FilterOptVM { value: p, label: state_label(p) }),
+      opts: prios.map(|p| FilterOptVM { value: p, label: prio_label(p) }),
     },
     FilterGroupVM {
       dim: "state",
@@ -442,7 +498,7 @@ fn board_vm(team_id: string) -> Result<BoardVM, string> {
 }
 
 fn fetch_board_issues(team_id: string) -> Result<Slice<models.Issue>, string> {
-  let mut path = "/api/collections/issues/records?perPage=200&expand=team,assignee,labels&sort=created"
+  let mut path = "/api/collections/issues/records?perPage=200&expand=team,assignee,labels&sort=sort,created"
   let filter = query.filter(team_id, "", "", "", "", "")
   if filter != "" { path = f"{path}&filter={url.QueryEscape(filter)}" }
   let body = pb.get(path)?
@@ -496,6 +552,7 @@ fn issue_vm(issue: models.Issue, comments: Slice<models.Comment>) -> IssueVM {
     created: display.relative(issue.created),
     updated: display.relative(issue.updated),
     states: state_opts(),
+    prios: prio_opts(),
     comments: comments.map(comment_vm),
   }
 }
@@ -722,10 +779,16 @@ fn create_action(w: http.ResponseWriter, r: Ref<http.Request>, team_id: string) 
   flash_clear(w)
 }
 
-fn state_action(w: http.ResponseWriter, r: Ref<http.Request>) {
+/// Patch payload for /state: target state plus manual board position.
+#[json]
+struct StatePatch { state: string, sort: float64 }
+
+fn state_action(w: http.ResponseWriter, r: Ref<http.Request>, team_id: string) {
   // FormValue, not PostFormValue: drag-and-drop posts key/state as query params.
   let key = r.FormValue("key")
   let state = r.FormValue("state")
+  // Record id of the card the drop lands before; "" means end of column.
+  let before = r.FormValue("before")
   if query.states().find(|s| s == state).is_none() {
     flash_error(w, f"unknown state '{state}'")
     return
@@ -737,7 +800,119 @@ fn state_action(w: http.ResponseWriter, r: Ref<http.Request>) {
       return
     },
   }
-  let payload = "{\"state\":\"" + state + "\"}"
+  let sort = match reorder_sort(issue, state, before, team_id) {
+    Ok(s) => s,
+    Err(e) => {
+      flash_error(w, e)
+      return
+    },
+  }
+  let payload = match json.Marshal(StatePatch { state, sort }) {
+    Ok(p) => p,
+    Err(e) => {
+      flash_error(w, f"encoding state change: {e}")
+      return
+    },
+  }
+  if let Err(e) = pb.patch(
+    f"/api/collections/issues/records/{issue.id}",
+    payload as string,
+  ) {
+    flash_error(w, e)
+    return
+  }
+  flash_clear(w)
+}
+
+/// New manual position for `issue` landing in `state` before the record id
+/// `before` ("" = end of column): the fractional midpoint of its neighbors'
+/// sorts, so a reorder patches exactly one record.
+fn reorder_sort(
+  issue: models.Issue,
+  state: string,
+  before: string,
+  team_id: string,
+) -> Result<float64, string> {
+  // Dropping a card onto itself moves nothing.
+  if before == issue.id { return Ok(issue.sort) }
+  let others = fetch_column_issues(team_id, state)?.filter(|i| i.id != issue.id)
+  if others.is_empty() { return Ok(issue.sort) }
+  let Some(target) = others.find(|i| i.id == before) else {
+    // End of column — also the fallback when `before` went stale (moved or
+    // deleted between the drop and this request).
+    return Ok(others[others.length() - 1].sort + 1.0)
+  }
+  // Sort of the card just above the drop slot; before the first card, a
+  // synthetic target.sort - 2 makes the midpoint land strictly first.
+  let mut prev_sort = target.sort - 2.0
+  for i in others {
+    if i.id == before { break }
+    prev_sort = i.sort
+  }
+  Ok((prev_sort + target.sort) / 2.0)
+}
+
+/// One column's issues in board order (no expands — reorder needs ids and
+/// sorts only).
+fn fetch_column_issues(team_id: string, state: string) -> Result<Slice<models.Issue>, string> {
+  let filter = query.filter(team_id, state, "", "", "", "")
+  let path = f"/api/collections/issues/records?perPage=200&sort=sort,created&filter={url.QueryEscape(filter)}"
+  let body = pb.get(path)?
+  let mut issues = models.IssueList { .. }
+  if let Err(e) = json.Unmarshal(body.bytes(), &issues) {
+    return Err(f"decoding issues: {e}")
+  }
+  Ok(issues.items)
+}
+
+fn priority_action(w: http.ResponseWriter, r: Ref<http.Request>) {
+  let key = r.FormValue("key")
+  let slug = r.FormValue("priority")
+  let Some(prio) = prio_value(slug) else {
+    flash_error(w, f"unknown priority '{slug}'")
+    return
+  }
+  let issue = match fetch_issue(key) {
+    Ok(i) => i,
+    Err(e) => {
+      flash_error(w, e)
+      return
+    },
+  }
+  let payload = "{\"priority\":" + strconv.Itoa(prio) + "}"
+  if let Err(e) = pb.patch(
+    f"/api/collections/issues/records/{issue.id}",
+    payload,
+  ) {
+    flash_error(w, e)
+    return
+  }
+  flash_clear(w)
+}
+
+fn title_action(w: http.ResponseWriter, r: Ref<http.Request>) {
+  let key = r.FormValue("key")
+  let title = strings.TrimSpace(r.FormValue("title"))
+  if title == "" {
+    flash_error(w, "title is required")
+    return
+  }
+  let issue = match fetch_issue(key) {
+    Ok(i) => i,
+    Err(e) => {
+      flash_error(w, e)
+      return
+    },
+  }
+  // Marshal the title itself so quotes/backslashes in it stay valid JSON.
+  let quoted = match json.Marshal(title) {
+    Ok(q) => q,
+    Err(e) => {
+      flash_error(w, f"encoding title: {e}")
+      return
+    },
+  }
+  let payload = "{\"title\":" + (quoted as string) + "}"
   if let Err(e) = pb.patch(
     f"/api/collections/issues/records/{issue.id}",
     payload,

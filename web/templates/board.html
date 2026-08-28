@@ -71,15 +71,30 @@ provenance.
 {{end}}</aside>
 </main>{{end}}
 
-{{define "column"}}<section class="column" id="col-{{.State}}" data-on:dragover="evt.preventDefault()" data-on:drop="evt.preventDefault(); @post('/state?key=' + evt.dataTransfer.getData('text/plain') + '&state={{.State}}')">
+{{/* Drop-position indicator: dragover marks the card the drop would land
+     before with .drop-before (or the column with .drop-end for end-of-column)
+     — transient classes, cleared on dragleave/drop/dragend and harmlessly
+     wiped by any mid-drag #board morph. The drop posts that card's record id
+     as `before` so the server can compute a fractional sort. */}}
+{{define "column"}}<section class="column" id="col-{{.State}}" data-on:dragover="evt.preventDefault(); const t = [...el.querySelectorAll('.card')].find(c => c.offsetParent && evt.clientY < c.getBoundingClientRect().top + c.getBoundingClientRect().height / 2); el.querySelectorAll('.card.drop-before').forEach(c => c !== t && c.classList.remove('drop-before')); t && t.classList.add('drop-before'); el.classList.toggle('drop-end', !t)" data-on:dragleave="!el.contains(evt.relatedTarget) && (el.classList.remove('drop-end'), el.querySelectorAll('.card.drop-before').forEach(c => c.classList.remove('drop-before')))" data-on:drop="evt.preventDefault(); const t = el.querySelector('.card.drop-before'); el.classList.remove('drop-end'); t && t.classList.remove('drop-before'); @post('/state?key=' + evt.dataTransfer.getData('text/plain') + '&state={{.State}}' + (t ? '&before=' + t.id.slice(6) : ''))">
 <h2>{{template "state-icon" .State}} {{.Label}} <span class="count" data-class:dim="$search != '' || $flt.length > 0">{{len .Cards}}</span><span class="hspace"></span><button type="button" class="col-hide" title="Hide column" aria-label="Hide {{.Label}} column" data-on:click="$hide_{{.Sig}} = true"><svg width="14" height="14"><use href="#ic-eye-off"/></svg></button></h2>
 {{range .Cards}}{{template "card" .}}
 {{end}}</section>{{end}}
 
-{{define "card"}}<a class="card" id="issue-{{.Id}}" href="/issue/{{.Key}}" draggable="true" data-search="{{.Key}} {{.Title}}{{range .Labels}} {{.Name}}{{end}}{{if .Assignee}} {{.Assignee}}{{end}}" data-fkeys="|state:{{.State}}|prio:{{.Prio}}{{if .Assignee}}|assignee:{{.Assignee}}{{end}}{{range .Labels}}|label:{{.Name}}{{end}}|" data-show="(!$search || el.dataset.search.toLowerCase().includes($search.toLowerCase())) && $flt.every(f => el.dataset.fkeys.includes('|' + f + '|'))" data-on:dragstart="evt.dataTransfer.setData('text/plain', '{{.Key}}'); evt.dataTransfer.effectAllowed = 'move'">
+{{define "card"}}<a class="card" id="issue-{{.Id}}" href="/issue/{{.Key}}" draggable="true" data-search="{{.Key}} {{.Title}}{{range .Labels}} {{.Name}}{{end}}{{if .Assignee}} {{.Assignee}}{{end}}" data-fkeys="|state:{{.State}}|prio:{{.Prio}}{{if .Assignee}}|assignee:{{.Assignee}}{{end}}{{range .Labels}}|label:{{.Name}}{{end}}|" data-show="(!$search || el.dataset.search.toLowerCase().includes($search.toLowerCase())) && $flt.every(f => el.dataset.fkeys.includes('|' + f + '|'))" data-on:dragstart="evt.dataTransfer.setData('text/plain', '{{.Key}}'); evt.dataTransfer.effectAllowed = 'move'" data-on:dragend="document.querySelectorAll('.card.drop-before').forEach(c => c.classList.remove('drop-before')); document.querySelectorAll('.column.drop-end').forEach(c => c.classList.remove('drop-end'))">
 <span class="row1">{{.Key}}<span class="flex"></span>{{template "priority-icon" .Prio}}</span>
 <span class="title">{{.Title}}</span>
 {{if or .Labels .Assignee}}<span class="row3">{{range .Labels}}<span class="chip"><span class="dot" style="background:{{if .Color}}{{.Color}}{{else}}var(--text-3){{end}}"></span>{{.Name}}</span>{{end}}{{template "avatar" .Avatar}}</span>{{end}}
+<span class="row4"><span class="age">{{.Created}}</span></span>
+{{/* Hover preview: pure CSS (:hover + transition-delay), no data-show — the
+     card's data-show is taken by search/filters. Docked position:fixed
+     escapes the column's overflow clipping; pointer-events:none keeps
+     click and drag on the card itself. */}}<span class="card-pop" aria-hidden="true">
+<span class="cp-row1">{{.Key}}<span class="flex"></span>{{template "priority-icon" .Prio}}</span>
+<span class="cp-title">{{.Title}}</span>
+<span class="cp-meta">{{template "state-icon" .State}} {{.StateLabel}}<span class="cp-sep">·</span>{{.PrioLabel}}{{if .Assignee}}<span class="cp-sep">·</span>{{.Assignee}}{{end}}</span>
+{{if .Snippet}}<span class="cp-desc">{{.Snippet}}</span>{{end}}
+</span>
 </a>{{end}}
 
 {{/* Filter bar: chips over signals. $flt is a list of "dim:value" keys ANDed

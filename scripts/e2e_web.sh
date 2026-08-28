@@ -123,6 +123,33 @@ assert_contains "$board" 'id="new-issue"' "board has new-issue form"
 assert_contains "$board" "datastar" "board loads Datastar"
 curl -sf "$WEB/static/theme.css" >/dev/null || fail "static css served"
 
+# --- card presentation: relative age + server-rendered hover preview ---
+assert_not_contains() { # haystack needle label
+  printf '%s' "$1" | grep -qF -- "$2" && fail "$3: did not expect '$2' in output:
+$1" || true
+}
+
+assert_contains "$board" 'class="age"' "cards carry an age row"
+assert_contains "$board" "just now" "card age is relative"
+assert_contains "$board" 'class="card-pop"' "cards carry a hover preview"
+
+ENG1_ID=$("$LIN" issue view ENG-1 --json | jq -r '.id')
+ENG2_ID=$("$LIN" issue view ENG-2 --json | jq -r '.id')
+[ -n "$ENG1_ID" ] && [ -n "$ENG2_ID" ] || fail "resolving issue ids for snippet seeds"
+curl -sf -X PATCH "$LLL_URL/api/collections/issues/records/$ENG1_ID" \
+  -H 'Content-Type: application/json' \
+  -d '{"description":"First preview line.\n\nSecond preview line.\nThird line never previewed."}' >/dev/null
+LONG_DESC=$(printf 'a%.0s' $(seq 1 200))
+curl -sf -X PATCH "$LLL_URL/api/collections/issues/records/$ENG2_ID" \
+  -H 'Content-Type: application/json' \
+  -d "{\"description\":\"$LONG_DESC\"}" >/dev/null
+
+board=$(curl -sf "$WEB/")
+assert_contains "$board" "First preview line. Second preview line." "snippet joins the first two non-empty lines"
+assert_not_contains "$board" "Third line never previewed" "snippet drops lines past the second"
+assert_contains "$board" "$(printf 'a%.0s' $(seq 1 159))…" "long snippet truncated with an ellipsis"
+assert_not_contains "$board" "$LONG_DESC" "full long description stays off the board"
+
 # --- issue page ---
 issue=$(curl -sf "$WEB/issue/ENG-1")
 assert_contains "$issue" 'id="issue-detail"' "issue page has detail"
@@ -154,6 +181,47 @@ code=$(curl -s -o /dev/null -w '%{http_code}' -X POST \
 [ "$code" = 200 ] || fail "/comment returned $code, want 200"
 out=$("$LIN" issue comment ENG-3)
 assert_contains "$out" "comment from the board" "web comment in lll issue comment"
+
+# --- issue detail editing: /priority and /title persist, validate, render ---
+code=$(curl -s -o /dev/null -w '%{http_code}' -X POST \
+  -d "key=ENG-3&priority=urgent" "$WEB/priority")
+[ "$code" = 200 ] || fail "/priority returned $code, want 200"
+out=$("$LIN" issue view ENG-3)
+assert_contains "$out" "Priority:  urgent" "web priority change in lll issue view"
+
+out=$(curl -s -X POST -d "key=ENG-3&priority=bogus" "$WEB/priority")
+assert_contains "$out" "unknown priority &#39;bogus&#39;" "bogus priority message"
+out=$(curl -s -X POST -d "key=ENG-99&priority=high" "$WEB/priority")
+assert_contains "$out" "not found" "/priority unknown issue message"
+
+code=$(curl -s -o /dev/null -w '%{http_code}' -X POST \
+  --data-urlencode "key=ENG-3" --data-urlencode "title=Renamed from the board" \
+  "$WEB/title")
+[ "$code" = 200 ] || fail "/title returned $code, want 200"
+out=$("$LIN" issue view ENG-3)
+assert_contains "$out" "ENG-3 Renamed from the board" "web title change in lll issue view"
+
+out=$(curl -s -X POST --data-urlencode "key=ENG-3" --data-urlencode "title=  " "$WEB/title")
+assert_contains "$out" "title is required" "blank title message"
+out=$("$LIN" issue view ENG-3)
+assert_contains "$out" "ENG-3 Renamed from the board" "blank title left the title alone"
+
+# titles with JSON-hostile characters survive the round trip
+code=$(curl -s -o /dev/null -w '%{http_code}' -X POST \
+  --data-urlencode "key=ENG-3" --data-urlencode 'title=Quote " and \ slash' \
+  "$WEB/title")
+[ "$code" = 200 ] || fail "/title with quotes returned $code, want 200"
+out=$("$LIN" issue view ENG-3)
+assert_contains "$out" 'Quote " and \ slash' "quoted title persisted verbatim"
+
+# issue page markup: priority select (No priority label) + title editor
+issue=$(curl -sf "$WEB/issue/ENG-3")
+assert_contains "$issue" 'id="prio-form"' "issue page has priority control"
+assert_contains "$issue" '>No priority</option>' "priority none reads No priority"
+assert_contains "$issue" 'value="urgent" selected' "priority select reflects current value"
+assert_contains "$issue" 'id="title-form"' "issue page has title editor"
+board=$(curl -sf "$WEB/")
+assert_contains "$board" '>No priority</button>' "board filter labels none as No priority"
 
 # --- drag-and-drop path: /state accepts query params with an empty body ---
 code=$(curl -s -o /dev/null -w '%{http_code}' -X POST "$WEB/state?key=ENG-3&state=done")
@@ -220,6 +288,64 @@ events=$(cat "$EVENTS_FILE")
 assert_contains "$events" "event: datastar-patch-elements" "issue-scope patch frame emitted"
 assert_contains "$events" 'id="comments"' "patch morphs #comments"
 assert_contains "$events" "live comment over sse" "patch carries the new comment"
+
+# --- dnd v2: manual ordering (sort field, /state?before=, fractional midpoints) ---
+# Card keys of a column in rendered order, e.g. "ENG-4,ENG-5".
+col_order() { # html state
+  column "$1" "$2" | grep -o 'ENG-[0-9]*' | awk '!seen[$0]++' | paste -sd, -
+}
+issue_id() { # title
+  "$LIN" issue list --json | jq -r ".items[] | select(.title==\"$1\") | .id"
+}
+
+# New issues land at the end of their column in creation order (hook default).
+"$LIN" issue create -t "Order A" >/dev/null # ENG-4
+"$LIN" issue create -t "Order B" >/dev/null # ENG-5
+"$LIN" issue create -t "Order C" >/dev/null # ENG-6
+board=$(curl -sf "$WEB/")
+got=$(col_order "$board" todo)
+[ "$got" = "ENG-4,ENG-5,ENG-6" ] || fail "new issues in creation order: got '$got'"
+
+A_ID=$(issue_id "Order A"); B_ID=$(issue_id "Order B")
+[ -n "$A_ID" ] && [ -n "$B_ID" ] || fail "resolving Order A/B record ids"
+
+# Reorder to the top of the column.
+code=$(curl -s -o /dev/null -w '%{http_code}' -X POST "$WEB/state?key=ENG-6&state=todo&before=$A_ID")
+[ "$code" = 200 ] || fail "/state with before returned $code, want 200"
+got=$(col_order "$(curl -sf "$WEB/")" todo)
+[ "$got" = "ENG-6,ENG-4,ENG-5" ] || fail "reorder to top: got '$got'"
+
+# Reorder to the middle (fractional midpoint between two neighbors).
+curl -s -o /dev/null -X POST "$WEB/state?key=ENG-6&state=todo&before=$B_ID"
+got=$(col_order "$(curl -sf "$WEB/")" todo)
+[ "$got" = "ENG-4,ENG-6,ENG-5" ] || fail "reorder to middle: got '$got'"
+
+# No `before` means end of column.
+curl -s -o /dev/null -X POST "$WEB/state?key=ENG-4&state=todo"
+got=$(col_order "$(curl -sf "$WEB/")" todo)
+[ "$got" = "ENG-6,ENG-5,ENG-4" ] || fail "reorder to end: got '$got'"
+
+# Cross-column drop with a position: state and sort change in one action.
+curl -s -o /dev/null -X POST "$WEB/state?key=ENG-2&state=todo&before=$B_ID"
+board=$(curl -sf "$WEB/")
+got=$(col_order "$board" todo)
+[ "$got" = "ENG-6,ENG-2,ENG-5,ENG-4" ] || fail "cross-column drop with position: got '$got'"
+printf '%s' "$(column "$board" in-progress)" | grep -qF "ENG-2" \
+  && fail "ENG-2 still in in-progress column after cross-column drop" || true
+
+# --json mirrors the board order: sort drives todo's rendered sequence.
+got=$("$LIN" issue list --json | jq -r '[.items[] | select(.state=="todo")] | sort_by(.sort) | map(.title) | join(",")')
+[ "$got" = "Order C,Already in progress,Order B,Order A" ] \
+  || fail "--json sort order: got '$got'"
+
+# A stale drop target (deleted between drop and request) falls back to column end.
+"$LIN" issue create -t "Doomed" >/dev/null # ENG-7
+DOOMED_ID=$(issue_id "Doomed")
+"$LIN" issue delete ENG-7 --force >/dev/null
+code=$(curl -s -o /dev/null -w '%{http_code}' -X POST "$WEB/state?key=ENG-6&state=todo&before=$DOOMED_ID")
+[ "$code" = 200 ] || fail "/state with stale before returned $code, want 200"
+got=$(col_order "$(curl -sf "$WEB/")" todo)
+[ "$got" = "ENG-2,ENG-5,ENG-4,ENG-6" ] || fail "stale before falls back to end: got '$got'"
 
 # --- browser-level: CLI create appears on an open board without reload ---
 if command -v playwright-cli >/dev/null 2>&1; then

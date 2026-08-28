@@ -19,7 +19,10 @@
       <div class="spacer"></div>
     </header>
     <div id="flash" class="flash" hidden></div>
-    <div class="issue-wrap">
+    <!-- Title-edit state lives here, OUTSIDE #issue-detail (the SSE morph
+         target): $edit_title / $title_draft survive every wholesale morph,
+         and data-bind repopulates the re-created input from $title_draft. -->
+    <div class="issue-wrap" data-signals:edit_title="false" data-signals:title_draft="''">
       <div class="issue-scroll">
         {{template "issue-detail" .}}
         {{template "comments" .}}
@@ -39,7 +42,8 @@
 {{if .Deleted}}<p class="deleted">{{.Key}} was deleted.</p>
 {{else}}<div class="issue-main">
 <span class="key">{{.Key}}</span>
-<h1>{{.Title}}</h1>
+<h1 title="Click to edit" data-show="!$edit_title" data-on:click="$title_draft = el.textContent; $edit_title = true">{{.Title}}</h1>
+<form id="title-form" class="title-edit" style="display:none" data-show="$edit_title"><input type="hidden" name="key" value="{{.Key}}"><input name="title" type="text" autocomplete="off" aria-label="Issue title" data-bind:title_draft data-effect="$edit_title && setTimeout(() => el.focus(), 0)" data-on:keydown="evt.key === 'Escape' ? ($edit_title = false) : evt.key === 'Enter' && (evt.preventDefault(), @post('/title', {contentType: 'form'}), evt.target.value.trim() && ($edit_title = false))" data-on:blur="$edit_title && ($edit_title = false, evt.target.value.trim() && @post('/title', {contentType: 'form'}))"></form>
 {{if .Description}}<p class="desc">{{.Description}}</p>
 {{end}}</div>
 <aside class="props">
@@ -51,7 +55,10 @@
   {{end}}</select></form></span>
 </div>
 <div class="prop"><span class="k">Priority</span>
-  <span class="v cap">{{template "priority-icon" .Prio}} {{.Prio}}</span>
+  <span class="v">{{template "priority-icon" .Prio}}
+  <form id="prio-form"><input type="hidden" name="key" value="{{.Key}}"><select name="priority" aria-label="Priority" data-on:change="@post('/priority', {contentType: 'form'})">
+  {{range .Prios}}<option value="{{.Value}}"{{if eq .Value $.Prio}} selected{{end}}>{{.Label}}</option>
+  {{end}}</select></form></span>
 </div>
 <div class="prop"><span class="k">Assignee</span>
   <span class="v">{{if .Assignee}}{{template "avatar" .Avatar}} {{.Assignee}}{{else}}none{{end}}</span>

@@ -8,3 +8,5 @@ pb/pb_data/
 .impeccable/review/
 .impeccable/mocks/.playwright-cli/
 .impeccable/mocks/InterVariable.woff2
+.private
+.claude/worktrees/
