@@ -1,32 +1,31 @@
 import "go:bytes"
 import "go:io"
 import "go:net/http"
-import "go:os"
 
-/// Base URL of the PocketBase server, from LIN_URL.
-pub fn base_url() -> string {
-  let url = os.Getenv("LIN_URL")
-  if url == "" {
-    "http://127.0.0.1:8090"
-  } else {
-    url
-  }
+import "config"
+
+/// Base URL of the PocketBase server, from config (LIN_URL > config files).
+pub fn base_url() -> Result<string, string> {
+  let cfg = config.load()?
+  Ok(cfg.url)
 }
 
 /// GET a path (joined to base_url) and return the response body.
 pub fn get(path: string) -> Result<string, string> {
-  let resp = match http.Get(base_url() + path) {
+  let base = base_url()?
+  let resp = match http.Get(base + path) {
     Ok(r) => r,
-    Err(e) => return Err(f"cannot reach PocketBase at {base_url()}: {e}"),
+    Err(e) => return Err(f"cannot reach PocketBase at {base}: {e}"),
   }
   read_body(resp, f"GET {path}")
 }
 
 /// POST a JSON payload to a path and return the response body.
 pub fn post(path: string, payload: string) -> Result<string, string> {
-  let resp = match http.Post(base_url() + path, "application/json", bytes.NewReader(payload.bytes())) {
+  let base = base_url()?
+  let resp = match http.Post(base + path, "application/json", bytes.NewReader(payload.bytes())) {
     Ok(r) => r,
-    Err(e) => return Err(f"cannot reach PocketBase at {base_url()}: {e}"),
+    Err(e) => return Err(f"cannot reach PocketBase at {base}: {e}"),
   }
   read_body(resp, f"POST {path}")
 }

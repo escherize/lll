@@ -3,3 +3,4 @@
 target/
 pb/pocketbase
 pb/pb_data/
+.lin.toml

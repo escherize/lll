@@ -11,6 +11,12 @@ pub struct TeamList {
 }
 
 #[json]
+pub struct NewTeam {
+  pub key: string,
+  pub name: string,
+}
+
+#[json]
 pub struct Issue {
   pub id: string,
   pub team: string,
@@ -22,6 +28,8 @@ pub struct Issue {
 #[json]
 pub struct IssueList {
   pub items: Slice<Issue>,
+  #[json("totalItems")]
+  pub total_items: int,
 }
 
 #[json]

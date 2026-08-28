@@ -89,10 +89,71 @@ status=$(curl -s -o "$DATA_DIR/forged.json" -w '%{http_code}' \
   -d "{\"team\":\"$ENG_ID\",\"number\":1,\"title\":\"forged\",\"state\":\"todo\"}")
 [ "$status" = "400" ] || fail "forged duplicate: expected HTTP 400, got $status: $(cat "$DATA_DIR/forged.json")"
 
+# --- team commands ---
+out=$(LIN_URL=$URL "$LIN" team list)
+assert_contains "$out" "ENG" "team list has ENG"
+assert_contains "$out" "Engineering" "team list has name"
+assert_contains "$out" "OPS" "team list has OPS"
+
+out=$(LIN_URL=$URL "$LIN" team create -k QA -n "Quality")
+assert_contains "$out" "Created team QA: Quality" "team create output"
+out=$(LIN_URL=$URL "$LIN" team list)
+assert_contains "$out" "QA" "team list has created QA"
+
+out=$(LIN_URL=$URL "$LIN" team view ENG)
+assert_contains "$out" "Key:    ENG" "team view key"
+assert_contains "$out" "Name:   Engineering" "team view name"
+assert_contains "$out" "Issues: 2" "team view issue count"
+
+# --- LIN_TEAM scopes issue list by default ---
+out=$(LIN_URL=$URL LIN_TEAM=ENG "$LIN" issue list)
+assert_contains "$out" "ENG-1" "scoped list has ENG-1"
+assert_not_contains "$out" "OPS-1" "scoped list hides OPS-1"
+
+# --- config init ---
+LIN_ABS="$PWD/$LIN"
+WORK="$DATA_DIR/work"
+FAKEHOME="$DATA_DIR/home"
+mkdir -p "$WORK" "$FAKEHOME/.config/lin"
+
+out=$(cd "$WORK" && "$LIN_ABS" config init)
+assert_contains "$out" "Wrote .lin.toml" "config init output"
+assert_contains "$(cat "$WORK/.lin.toml")" "url = " "template mentions url"
+assert_contains "$(cat "$WORK/.lin.toml")" "team = " "template mentions team"
+if (cd "$WORK" && "$LIN_ABS" config init >/dev/null 2>&1); then
+  fail "config init overwrote an existing .lin.toml"
+fi
+rm "$WORK/.lin.toml"
+
+# --- config precedence: env > ./.lin.toml > ~/.config/lin/lin.toml ---
+printf 'url = "%s"\nteam = "OPS"\n' "$URL" > "$FAKEHOME/.config/lin/lin.toml"
+
+# home file alone supplies url + team
+out=$(cd "$WORK" && env -u LIN_URL -u LIN_TEAM HOME="$FAKEHOME" "$LIN_ABS" issue list)
+assert_contains "$out" "OPS-1" "home config scopes to OPS"
+assert_not_contains "$out" "ENG-1" "home config hides ENG"
+
+# project file beats home file
+printf 'url = "%s"\nteam = "ENG"\n' "$URL" > "$WORK/.lin.toml"
+out=$(cd "$WORK" && env -u LIN_URL -u LIN_TEAM HOME="$FAKEHOME" "$LIN_ABS" issue list)
+assert_contains "$out" "ENG-1" "project config scopes to ENG"
+assert_not_contains "$out" "OPS-1" "project config beats home config"
+
+# env beats project file
+out=$(cd "$WORK" && env -u LIN_URL LIN_TEAM=OPS HOME="$FAKEHOME" "$LIN_ABS" issue list)
+assert_contains "$out" "OPS-1" "env scopes to OPS"
+assert_not_contains "$out" "ENG-1" "env beats project config"
+
 # --- help output ---
 out=$("$LIN" --help)
 assert_contains "$out" "Usage:" "lin --help"
+assert_contains "$out" "lin team" "lin --help mentions team"
+assert_contains "$out" "lin config" "lin --help mentions config"
 out=$("$LIN" issue --help)
 assert_contains "$out" "Usage:" "lin issue --help"
+out=$("$LIN" team --help)
+assert_contains "$out" "Usage:" "lin team --help"
+out=$("$LIN" config --help)
+assert_contains "$out" "Usage:" "lin config --help"
 
 echo "e2e: all assertions passed"

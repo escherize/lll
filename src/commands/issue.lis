@@ -1,8 +1,8 @@
 import "go:encoding/json"
 import "go:fmt"
 import "go:net/url"
-import "go:os"
 
+import "config"
 import "models"
 import "pb"
 
@@ -31,8 +31,10 @@ fn print_usage() {
   fmt.Println("lin issue - work with issues
 
 Usage:
-  lin issue create -t \"title\"    create an issue in team $LIN_TEAM
-  lin issue list                 list issues (ID, state, title)")
+  lin issue create -t \"title\"    create an issue in the configured team
+  lin issue list                 list issues (ID, state, title); scoped to the configured team
+
+The team comes from LIN_TEAM or 'team' in .lin.toml (see 'lin config --help').")
 }
 
 fn create(args: Slice<string>) -> Result<(), string> {
@@ -54,9 +56,9 @@ fn create(args: Slice<string>) -> Result<(), string> {
     return Err("usage: lin issue create -t \"title\"")
   }
 
-  let team_key = os.Getenv("LIN_TEAM")
+  let team_key = config.load()?.team
   if team_key == "" {
-    return Err("set LIN_TEAM to your team key (e.g. ENG)")
+    return Err("set LIN_TEAM or 'team' in .lin.toml to your team key (e.g. ENG)")
   }
   let team = find_team(team_key)?
 
@@ -82,7 +84,18 @@ fn list() -> Result<(), string> {
     return Err(f"decoding teams: {e}")
   }
 
-  let body = pb.get("/api/collections/issues/records?perPage=200&sort=created")?
+  // A configured team (LIN_TEAM or .lin.toml) scopes the list by default.
+  let mut path = "/api/collections/issues/records?perPage=200&sort=created"
+  let team_key = config.load()?.team
+  if team_key != "" {
+    let Some(team) = teams.items.find(|t| t.key == team_key) else {
+      return Err(f"no team with key '{team_key}' on the server")
+    }
+    let filter = url.QueryEscape(f"team='{team.id}'")
+    path = f"{path}&filter={filter}"
+  }
+
+  let body = pb.get(path)?
   let mut issues = models.IssueList { .. }
   if let Err(e) = json.Unmarshal(body.bytes(), &issues) {
     return Err(f"decoding issues: {e}")

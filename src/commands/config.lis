@@ -1,0 +1,58 @@
+import "go:fmt"
+import "go:os"
+
+/// Dispatch `lin config <verb>`.
+pub fn config_cmd(args: Slice<string>) -> Result<(), string> {
+  let Some(verb) = args.get(2) else {
+    config_usage()
+    return Ok(())
+  }
+  match verb {
+    "init" => config_init(),
+    "--help" => {
+      config_usage()
+      Ok(())
+    },
+    "-h" => {
+      config_usage()
+      Ok(())
+    },
+    other => Err(f"unknown config command: '{other}' (see 'lin config --help')"),
+  }
+}
+
+fn config_usage() {
+  fmt.Println("lin config - manage configuration
+
+Usage:
+  lin config init    write a commented .lin.toml template to the current directory
+
+Precedence: env vars (LIN_URL, LIN_TEAM, LIN_SORT) > ./.lin.toml > ~/.config/lin/lin.toml")
+}
+
+fn config_init() -> Result<(), string> {
+  if os.Stat(".lin.toml").is_ok() {
+    return Err(".lin.toml already exists; not overwriting")
+  }
+  let template = "# lin configuration
+# Precedence: env vars (LIN_URL, LIN_TEAM, LIN_SORT) > ./.lin.toml > ~/.config/lin/lin.toml
+# The first file found is used whole; env vars override individual fields.
+
+# PocketBase server URL.
+# url = \"http://127.0.0.1:8090\"
+
+# Default team key. Scopes 'lin issue list' and is required by 'lin issue create'.
+# team = \"ENG\"
+
+# Default sort for 'lin issue list' (not used yet).
+# sort = \"created\"
+
+# Who you are. Identity placeholder until auth exists.
+# me = \"bryan\"
+"
+  if let Err(e) = os.WriteFile(".lin.toml", template.bytes(), 0o644) {
+    return Err(f"writing .lin.toml: {e}")
+  }
+  fmt.Println("Wrote .lin.toml")
+  Ok(())
+}

@@ -1,0 +1,110 @@
+import "go:encoding/json"
+import "go:fmt"
+import "go:net/url"
+
+import "models"
+import "pb"
+
+/// Dispatch `lin team <verb>`.
+pub fn team(args: Slice<string>) -> Result<(), string> {
+  let Some(verb) = args.get(2) else {
+    team_usage()
+    return Ok(())
+  }
+  match verb {
+    "list" => team_list(),
+    "create" => team_create(args),
+    "view" => team_view(args),
+    "--help" => {
+      team_usage()
+      Ok(())
+    },
+    "-h" => {
+      team_usage()
+      Ok(())
+    },
+    other => Err(f"unknown team command: '{other}' (see 'lin team --help')"),
+  }
+}
+
+fn team_usage() {
+  fmt.Println("lin team - work with teams
+
+Usage:
+  lin team list                      list teams (KEY, name)
+  lin team create -k KEY -n \"Name\"   create a team
+  lin team view KEY                  show a team and its issue count")
+}
+
+fn team_list() -> Result<(), string> {
+  let body = pb.get("/api/collections/teams/records?perPage=200&sort=key")?
+  let mut teams = models.TeamList { .. }
+  if let Err(e) = json.Unmarshal(body.bytes(), &teams) {
+    return Err(f"decoding teams: {e}")
+  }
+  for t in teams.items {
+    fmt.Println(f"{t.key}\t{t.name}")
+  }
+  Ok(())
+}
+
+fn team_create(args: Slice<string>) -> Result<(), string> {
+  let mut key = ""
+  let mut name = ""
+  let mut i = 3
+  while i < args.length() {
+    match args[i] {
+      "-k" => {
+        let Some(val) = args.get(i + 1) else {
+          return Err("-k requires a value")
+        }
+        key = val
+        i += 2
+      },
+      "-n" => {
+        let Some(val) = args.get(i + 1) else {
+          return Err("-n requires a value")
+        }
+        name = val
+        i += 2
+      },
+      other => return Err(f"unknown flag: '{other}'"),
+    }
+  }
+  if key == "" || name == "" {
+    return Err("usage: lin team create -k KEY -n \"Name\"")
+  }
+
+  let new_team = models.NewTeam { key, name }
+  let payload = match json.Marshal(new_team) {
+    Ok(p) => p,
+    Err(e) => return Err(f"encoding team: {e}"),
+  }
+  let body = pb.post("/api/collections/teams/records", payload as string)?
+
+  let mut created = models.Team { .. }
+  if let Err(e) = json.Unmarshal(body.bytes(), &created) {
+    return Err(f"decoding created team: {e}")
+  }
+  fmt.Println(f"Created team {created.key}: {created.name}")
+  Ok(())
+}
+
+fn team_view(args: Slice<string>) -> Result<(), string> {
+  let Some(key) = args.get(3) else {
+    return Err("usage: lin team view KEY")
+  }
+  let t = find_team(key)?
+
+  let filter = url.QueryEscape(f"team='{t.id}'")
+  let body = pb.get(f"/api/collections/issues/records?filter={filter}&perPage=1")?
+  let mut issues = models.IssueList { .. }
+  if let Err(e) = json.Unmarshal(body.bytes(), &issues) {
+    return Err(f"decoding issues: {e}")
+  }
+
+  fmt.Println(f"Key:    {t.key}")
+  fmt.Println(f"Name:   {t.name}")
+  fmt.Println(f"Issues: {issues.total_items}")
+  Ok(())
+}

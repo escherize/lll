@@ -11,6 +11,8 @@ fn main() {
 
   let result = match noun {
     "issue" => commands.issue(os.Args),
+    "team" => commands.team(os.Args),
+    "config" => commands.config_cmd(os.Args),
     "--help" => {
       print_usage()
       Ok(())
@@ -36,10 +38,13 @@ fn print_usage() {
   fmt.Println("lin - a Linear-style issue tracker
 
 Usage:
-  lin issue <command>    work with issues (see 'lin issue --help')
-  lin --help             show this help
+  lin issue <command>     work with issues (see 'lin issue --help')
+  lin team <command>      work with teams (see 'lin team --help')
+  lin config <command>    manage configuration (see 'lin config --help')
+  lin --help              show this help
 
-Environment:
+Configuration (env > ./.lin.toml > ~/.config/lin/lin.toml):
   LIN_URL    PocketBase base URL (default http://127.0.0.1:8090)
-  LIN_TEAM   team key used by 'issue create' (e.g. ENG)")
+  LIN_TEAM   default team key (e.g. ENG); scopes 'issue list', used by 'issue create'
+  LIN_SORT   default sort for 'issue list' (not used yet)")
 }
