@@ -4,3 +4,51 @@ version = "0.1.0"
 
 [dependencies.go]
 "github.com/BurntSushi/toml" = "v1.6.0"
+"github.com/escherize/lll/gopb" = "v0.0.0-20260828210548-11804d3d2b7d"
+"cloud.google.com/go/compute/metadata" = { version = "v0.3.0", via = ["golang.org/x/oauth2"] }
+"github.com/asaskevich/govalidator" = { version = "v0.0.0-20230301143203-a9d515a09cc2", via = ["github.com/pocketbase/ozzo-validation/v4"] }
+"github.com/chzyer/readline" = { version = "v1.5.1", via = ["github.com/google/pprof"] }
+"github.com/cpuguy83/go-md2man/v2" = { version = "v2.0.6", via = ["github.com/spf13/cobra"] }
+"github.com/disintegration/imaging" = { version = "v1.6.2", via = ["github.com/pocketbase/pocketbase"] }
+"github.com/dlclark/regexp2/v2" = { version = "v2.7.1", via = ["github.com/dop251/goja"] }
+"github.com/domodwyer/mailyak/v3" = { version = "v3.6.2", via = ["github.com/pocketbase/pocketbase"] }
+"github.com/dop251/base64dec" = { version = "v0.0.0-20231022112746-c6c9f9a96217", via = ["github.com/dop251/goja_nodejs"] }
+"github.com/dop251/goja" = { version = "v0.0.0-20260806115107-493f22071ef6", via = ["github.com/dop251/goja_nodejs", "github.com/pocketbase/pocketbase"] }
+"github.com/dop251/goja_nodejs" = { version = "v0.0.0-20260212111938-1f56ff5bcf14", via = ["github.com/dop251/goja", "github.com/pocketbase/pocketbase"] }
+"github.com/dustin/go-humanize" = { version = "v1.0.1", via = ["modernc.org/libc"] }
+"github.com/fatih/color" = { version = "v1.19.0", via = ["github.com/pocketbase/pocketbase"] }
+"github.com/fsnotify/fsnotify" = { version = "v1.10.1", via = ["github.com/pocketbase/pocketbase"] }
+"github.com/gabriel-vasile/mimetype" = { version = "v1.4.15", via = ["github.com/pocketbase/pocketbase"] }
+"github.com/ganigeorgiev/fexpr" = { version = "v0.6.0", via = ["github.com/pocketbase/pocketbase"] }
+"github.com/go-sourcemap/sourcemap" = { version = "v2.1.4+incompatible", via = ["github.com/dop251/goja"] }
+"github.com/golang-jwt/jwt/v5" = { version = "v5.3.1", via = ["github.com/pocketbase/pocketbase"] }
+"github.com/google/pprof" = { version = "v0.0.0-20260802141513-ef3492d7dac3", via = ["github.com/dop251/goja"] }
+"github.com/google/uuid" = { version = "v1.6.0", via = ["modernc.org/libc"] }
+"github.com/mattn/go-colorable" = { version = "v0.1.15", via = ["github.com/fatih/color"] }
+"github.com/mattn/go-isatty" = { version = "v0.0.24", via = ["github.com/fatih/color", "github.com/mattn/go-colorable", "modernc.org/libc"] }
+"github.com/ncruces/go-strftime" = { version = "v1.0.0", via = ["modernc.org/libc"] }
+"github.com/pocketbase/dbx" = { version = "v1.12.0", via = ["github.com/pocketbase/pocketbase"] }
+"github.com/pocketbase/ozzo-validation/v4" = { version = "v4.3.0", via = ["github.com/pocketbase/pocketbase"] }
+"github.com/pocketbase/pocketbase" = { version = "v0.40.1", via = ["github.com/escherize/lll/gopb"] }
+"github.com/remyoudompheng/bigfft" = { version = "v0.0.0-20230129092748-24d4a6f8daec", via = ["modernc.org/mathutil"] }
+"github.com/russross/blackfriday/v2" = { version = "v2.1.0", via = ["github.com/cpuguy83/go-md2man/v2"] }
+"github.com/spf13/cast" = { version = "v1.10.0", via = ["github.com/pocketbase/pocketbase"] }
+"github.com/spf13/cobra" = { version = "v1.10.2", via = ["github.com/pocketbase/pocketbase"] }
+"github.com/spf13/pflag" = { version = "v1.0.10", via = ["github.com/spf13/cobra"] }
+"github.com/yuin/goldmark" = { version = "v1.4.13", via = ["golang.org/x/tools"] }
+"go.yaml.in/yaml/v3" = { version = "v3.0.4", via = ["github.com/spf13/cobra"] }
+"golang.org/x/crypto" = { version = "v0.55.0", via = ["github.com/pocketbase/pocketbase", "golang.org/x/net"] }
+"golang.org/x/image" = { version = "v0.45.0", via = ["github.com/disintegration/imaging", "github.com/pocketbase/pocketbase"] }
+"golang.org/x/mod" = { version = "v0.40.0", via = ["golang.org/x/telemetry", "golang.org/x/tools"] }
+"golang.org/x/net" = { version = "v0.58.0", via = ["github.com/dop251/goja_nodejs", "github.com/pocketbase/pocketbase", "golang.org/x/crypto", "golang.org/x/tools"] }
+"golang.org/x/oauth2" = { version = "v0.36.0", via = ["github.com/pocketbase/pocketbase"] }
+"golang.org/x/sync" = { version = "v0.22.0", via = ["github.com/pocketbase/pocketbase", "golang.org/x/telemetry", "golang.org/x/tools"] }
+"golang.org/x/sys" = { version = "v0.47.0", via = ["github.com/fsnotify/fsnotify", "github.com/mattn/go-isatty", "golang.org/x/crypto", "golang.org/x/net", "golang.org/x/telemetry", "golang.org/x/term", "modernc.org/libc", "modernc.org/memory", "modernc.org/sqlite"] }
+"golang.org/x/telemetry" = { version = "v0.0.0-20260811182544-a038080d80e5", via = ["golang.org/x/tools"] }
+"golang.org/x/term" = { version = "v0.45.0", via = ["golang.org/x/crypto", "golang.org/x/net"] }
+"golang.org/x/text" = { version = "v0.41.0", via = ["github.com/dop251/goja", "github.com/dop251/goja_nodejs", "golang.org/x/image", "golang.org/x/net"] }
+"golang.org/x/tools" = { version = "v0.49.0", via = ["golang.org/x/text"] }
+"modernc.org/libc" = { version = "v1.74.4", via = ["modernc.org/sqlite"] }
+"modernc.org/mathutil" = { version = "v1.7.1", via = ["modernc.org/libc"] }
+"modernc.org/memory" = { version = "v1.12.0", via = ["modernc.org/libc"] }
+"modernc.org/sqlite" = { version = "v1.57.0", via = ["github.com/pocketbase/pocketbase"] }

@@ -2,23 +2,23 @@ import "go:fmt"
 import "go:net"
 import "go:net/http"
 import "go:os"
-import "go:os/exec"
 import "go:strconv"
 import "go:strings"
 import "go:time"
 
+import "go:github.com/escherize/lll/gopb"
+
 import "config"
 
-// `lll up` — one command for local use: PocketBase + the web board.
+// `lll up` — one command for local use: PocketBase + the web board, one process.
 //
 // A PocketBase already healthy at the configured URL is reused (and never
-// killed on exit). Otherwise one is started as a child process on the first
-// free port from 8090 up, with the superuser upserted first so the admin UI
-// never shows the install wizard. Ctrl-C in a terminal delivers SIGINT to the
-// whole foreground process group, which takes the child PocketBase down with
-// us; on error returns the deferred kill covers it.
-// ponytail: a kill from outside the terminal (plain `kill <pid>`) can orphan
-// the child; add os/signal handling if that ever bites.
+// killed on exit). Otherwise one runs IN-PROCESS (via the gopb wrapper
+// module) on the first free port from 8090 up, with the superuser upserted
+// before it starts listening so the admin UI never shows the install wizard.
+// PocketBase installs its own SIGINT/SIGTERM handler and shuts down
+// gracefully; when its Serve returns we exit the process, which takes the
+// board down too — Ctrl-C or a plain `kill <pid>` stops everything.
 
 pub fn up(args: Slice<string>) -> Result<(), string> {
   let mut web_port = 8100
@@ -56,7 +56,6 @@ pub fn up(args: Slice<string>) -> Result<(), string> {
   if healthy(db_url) {
     fmt.Println(f"using running pocketbase at {db_url}")
   } else {
-    let pb_bin = find_pocketbase()?
     let db_port = free_port(port_of(db_url, 8090))
     db_url = f"http://127.0.0.1:{db_port}"
 
@@ -67,21 +66,18 @@ pub fn up(args: Slice<string>) -> Result<(), string> {
       pass = "admin-local-123"
       fmt.Println("LLL_ADMIN_EMAIL/LLL_ADMIN_PASSWORD not set — defaulting to admin@local.dev / admin-local-123")
     }
-    let upsert = exec.Command(pb_bin, "superuser", "upsert", email, pass, "--dir", pb_dir)
-    let _ = upsert.Run()
 
-    let cmd = exec.Command(
-      pb_bin, "serve",
-      "--http", f"127.0.0.1:{db_port}",
-      "--dir", pb_dir,
-      "--migrationsDir", "pb/pb_migrations",
-      "--hooksDir", "pb/pb_hooks",
-    )
-    if let Err(e) = cmd.Start() {
-      return Err(f"starting pocketbase: {e}")
-    }
-    defer {
-      if let Some(p) = cmd.Process { let _ = p.Kill() }
+    task {
+      match gopb.Serve(pb_dir, f"127.0.0.1:{db_port}", "pb/pb_migrations", "pb/pb_hooks", email, pass) {
+        Err(e) => {
+          fmt.Println(f"pocketbase: {e}")
+          os.Exit(1)
+        },
+        // Graceful shutdown (Ctrl-C / SIGTERM caught by PocketBase) — take
+        // the board down with us; PocketBase's signal handler suppressed the
+        // default process termination.
+        Ok(_) => os.Exit(0),
+      }
     }
 
     let mut ok = false
@@ -112,10 +108,10 @@ fn print_up_usage() {
 Usage:
   lll up [--port 8100] [--pb-dir pb/pb_data]
 
-Reuses a PocketBase already running at the configured URL; otherwise starts
-one (first free port from the configured port up) after upserting the
-superuser from LLL_ADMIN_EMAIL/LLL_ADMIN_PASSWORD (a logged default is used
-when unset). Taken ports auto-increment. Ctrl-C stops everything lll up
+Reuses a PocketBase already running at the configured URL; otherwise runs
+one in-process (first free port from the configured port up) after upserting
+the superuser from LLL_ADMIN_EMAIL/LLL_ADMIN_PASSWORD (a logged default is
+used when unset). Taken ports auto-increment. Ctrl-C stops everything lll up
 started; an externally-started PocketBase is left running.",
   )
 }
@@ -147,15 +143,4 @@ fn port_of(base_url: string, fallback: int) -> int {
   let Some(idx) = strings.LastIndex(base_url, ":") else { return fallback }
   let Ok(p) = strconv.Atoi(base_url.substring(idx + 1..)) else { return fallback }
   p
-}
-
-fn find_pocketbase() -> Result<string, string> {
-  let env_bin = os.Getenv("PB_BIN")
-  if env_bin != "" { return Ok(env_bin) }
-  if let Ok(_) = os.Stat("pb/pocketbase") { return Ok("pb/pocketbase") }
-  match exec.LookPath("pocketbase") {
-    Partial.Ok(p) => Ok(p),
-    Partial.Both(p, _) => Ok(p),
-    Partial.Err(_) => Err("pocketbase not found: brew install pocketbase (see pb/README.md)"),
-  }
 }

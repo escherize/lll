@@ -1,10 +1,11 @@
 #!/usr/bin/env bash
-# e2e: `lll up` — one-command runner. Covers: booting its own PB (isolated
-# --pb-dir, auto-increment from a taken configured port), the logged default
-# admin creds working against the admin API, web-port auto-increment with the
-# move printed, SIGINT to the process group stopping both processes, and the
-# reuse path (healthy PB at the configured URL is used, not restarted, and
-# survives lll up's exit).
+# e2e: `lll up` — one-command runner. Covers: booting its own in-process PB
+# (isolated --pb-dir, auto-increment from a taken configured port), the logged
+# default admin creds working against the admin API, web-port auto-increment
+# with the move printed, SIGINT stopping both servers (one process now: PB
+# shuts down gracefully, taking the board with it), and the reuse path (a
+# healthy external PB at the configured URL is used, not restarted, and
+# survives lll up's exit; PB_BIN is only needed to spawn that external PB).
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
@@ -71,14 +72,14 @@ curl -sf -X POST "http://127.0.0.1:$DB2/api/collections/_superusers/auth-with-pa
   -d '{"identity":"admin@local.dev","password":"admin-local-123"}' >/dev/null \
   || fail "default admin creds do not authenticate"
 
-# SIGINT the process group: both lll and its child PB must die.
+# SIGINT: the board and the in-process PB must both die with the process.
 kill -INT -- "-$UP_PID" 2>/dev/null || kill -INT "$UP_PID"
 for _ in $(seq 1 50); do
   curl -sf "http://127.0.0.1:$WEB2/" >/dev/null 2>&1 || break
   sleep 0.1
 done
 curl -sf "http://127.0.0.1:$WEB2/" >/dev/null 2>&1 && fail "board survived SIGINT"
-curl -sf "http://127.0.0.1:$DB2/api/health" >/dev/null 2>&1 && fail "child PB survived SIGINT"
+curl -sf "http://127.0.0.1:$DB2/api/health" >/dev/null 2>&1 && fail "in-process PB survived SIGINT"
 UP_PID=""
 
 # --- reuse path: healthy PB at the configured URL is used, and outlives up ---
