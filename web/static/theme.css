@@ -344,3 +344,141 @@ input:focus, textarea:focus, select:focus {
   .thread { margin: 0 16px; }
   .composer { margin: 14px 16px 20px; }
 }
+
+/* ── hide columns + hidden-columns panel ─────── */
+/* Visibility is driven by hc-<state> classes that Datastar keeps on .main
+   (outside the #board morph target), so it survives every SSE morph. */
+.column > h2 .hspace { flex: 1; }
+.col-hide {
+  display: inline-flex; align-items: center; justify-content: center;
+  border: none; background: none;
+  padding: 1px; margin: 0;
+  border-radius: 4px;
+  color: var(--text-3);
+  cursor: pointer;
+  opacity: 0;
+}
+.column:hover .col-hide, .col-hide:focus-visible { opacity: 1; }
+.col-hide:hover { color: var(--text); background: var(--bg-hover); }
+
+.hc-backlog #col-backlog, .hc-todo #col-todo,
+.hc-in-progress #col-in-progress, .hc-in-review #col-in-review,
+.hc-done #col-done, .hc-cancelled #col-cancelled { display: none; }
+
+.hidden-rail {
+  display: none;
+  flex: none;
+  width: 168px;
+  margin-left: auto;
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: 6px;
+}
+.hc-backlog .hidden-rail, .hc-todo .hidden-rail,
+.hc-in-progress .hidden-rail, .hc-in-review .hidden-rail,
+.hc-done .hidden-rail, .hc-cancelled .hidden-rail { display: block; }
+.hidden-rail > h2 {
+  margin: 0;
+  padding: 4px 6px 8px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-3);
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+.hr-entry {
+  display: none;
+  width: 100%;
+  align-items: center; gap: 7px;
+  border: none; background: none;
+  font: inherit; font-weight: 500;
+  color: var(--text-2);
+  padding: 5px 6px;
+  border-radius: var(--radius);
+  cursor: pointer;
+  text-align: left;
+}
+.hc-backlog .hr-backlog, .hc-todo .hr-todo,
+.hc-in-progress .hr-in-progress, .hc-in-review .hr-in-review,
+.hc-done .hr-done, .hc-cancelled .hr-cancelled { display: flex; }
+.hr-entry:hover { background: var(--bg-hover); color: var(--text); }
+.hr-entry .count { margin-left: auto; }
+
+/* ── Board search ─────────────────────────────────────── */
+.board-search {
+  display: flex; align-items: center; gap: 6px;
+  padding: 0 8px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  background: var(--bg-panel);
+  color: var(--text-3);
+}
+.board-search:focus-within {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-dim);
+  color: var(--text-2);
+}
+.board-search svg { flex: none; }
+.board-search input {
+  width: 170px;
+  padding: 5px 0;
+  border: none;
+  background: none;
+  border-radius: 0;
+}
+.board-search input:focus { outline: none; border: none; box-shadow: none; }
+.count.dim { opacity: 0.35; }
+
+/* ── filter bar (chips) ─────── */
+.filterbar { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 10px 16px 0; }
+.flt-add { position: relative; }
+.flt-plus {
+  display: inline-flex; align-items: center; gap: 5px;
+  background: none;
+  border: 1px dashed var(--border-strong);
+  border-radius: 999px;
+  color: var(--text-3);
+  font: inherit; font-size: 11.5px; font-weight: 500;
+  padding: 2px 9px;
+  cursor: pointer;
+}
+.flt-plus:hover { color: var(--text); background: var(--bg-hover); }
+.flt-menu {
+  position: absolute; top: calc(100% + 4px); left: 0; z-index: 20;
+  min-width: 150px;
+  background: var(--bg-raised);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  padding: 4px;
+}
+.flt-menu button {
+  display: block; width: 100%; text-align: left;
+  background: none; border: none;
+  color: var(--text-2);
+  font: inherit; font-size: 12.5px;
+  padding: 4px 8px;
+  border-radius: 4px;
+  cursor: pointer;
+}
+.flt-menu button:hover { background: var(--bg-hover); color: var(--text); }
+.flt-chip {
+  display: inline-flex; align-items: center; gap: 5px;
+  background: var(--bg-raised);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  color: var(--text-2);
+  font: inherit; font-size: 11.5px; font-weight: 500;
+  padding: 2px 9px;
+  cursor: pointer;
+}
+.flt-chip:hover { border-color: var(--border-strong); color: var(--text); }
+.flt-chip .dim { color: var(--text-3); }
+.flt-clear {
+  background: none; border: none;
+  color: var(--text-3);
+  font: inherit; font-size: 11.5px; font-weight: 500;
+  padding: 2px 6px;
+  cursor: pointer;
+}
+.flt-clear:hover { color: var(--text); }

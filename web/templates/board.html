@@ -35,10 +35,18 @@ provenance.
     <div class="workspace"><span class="mark">L</span> lll</div>
     <a href="/" class="active"><svg width="14" height="14"><use href="#ic-board"/></svg> Board</a>
   </nav>
-  <div class="main">
+  <!-- Hidden-columns state lives OUTSIDE #board (the SSE morph target): the
+       hide_* signals are seeded from localStorage here, and data-class keeps
+       hc-* classes on this never-morphed element, so CSS applies visibility
+       to whatever markup each morph delivers. -->
+  <div class="main" data-init="const s = JSON.parse(localStorage.getItem('lll-hidecol') || '{}'); {{range .Columns}}$hide_{{.Sig}} = !!s.hide_{{.Sig}}; {{end}}" data-class="{ {{range $i, $c := .Columns}}{{if $i}}, {{end}}'hc-{{$c.State}}': $hide_{{$c.Sig}}{{end}} }">
     <header class="topbar">
       <div class="crumbs"><span class="here">Board</span></div>
       <div class="spacer"></div>
+      <div id="board-search" class="board-search">
+        <svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true"><circle cx="6.2" cy="6.2" r="4.2" fill="none" stroke="currentColor" stroke-width="1.4"/><path d="M9.4 9.4 L12.3 12.3" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>
+        <input id="board-search-input" type="text" placeholder="Search" autocomplete="off" aria-label="Search board" data-bind:search data-on:keydown="evt.key === 'Escape' && ($search = '')">
+      </div>
       <form id="new-issue" class="new-issue">
         <input id="new-title" name="title" placeholder="Issue title" autocomplete="off" data-on:keydown="evt.key === 'Enter' && (evt.preventDefault(), evt.target.value.trim() && @post('/create', {contentType: 'form'}))">
         <select name="state">
@@ -48,6 +56,7 @@ provenance.
       </form>
     </header>
     <div id="flash" class="flash" hidden></div>
+    {{template "filterbar" .}}
     {{template "board" .}}
   </div>
 </div>
@@ -56,15 +65,38 @@ provenance.
 
 {{define "board"}}<main id="board" class="board">
 {{range .Columns}}{{template "column" .}}
-{{end}}</main>{{end}}
+{{end}}<aside id="hidden-rail" class="hidden-rail" aria-label="Hidden columns" data-effect="localStorage.setItem('lll-hidecol', JSON.stringify({ {{range $i, $c := .Columns}}{{if $i}}, {{end}}hide_{{$c.Sig}}: $hide_{{$c.Sig}}{{end}} }))">
+<h2>Hidden columns</h2>
+{{range .Columns}}<button type="button" class="hr-entry hr-{{.State}}" title="Show {{.Label}} column" data-on:click="$hide_{{.Sig}} = false">{{template "state-icon" .State}}<span class="hr-name">{{.Label}}</span><span class="count">{{len .Cards}}</span></button>
+{{end}}</aside>
+</main>{{end}}
 
 {{define "column"}}<section class="column" id="col-{{.State}}" data-on:dragover="evt.preventDefault()" data-on:drop="evt.preventDefault(); @post('/state?key=' + evt.dataTransfer.getData('text/plain') + '&state={{.State}}')">
-<h2>{{template "state-icon" .State}} {{.Label}} <span class="count">{{len .Cards}}</span></h2>
+<h2>{{template "state-icon" .State}} {{.Label}} <span class="count" data-class:dim="$search != '' || $flt.length > 0">{{len .Cards}}</span><span class="hspace"></span><button type="button" class="col-hide" title="Hide column" aria-label="Hide {{.Label}} column" data-on:click="$hide_{{.Sig}} = true"><svg width="14" height="14"><use href="#ic-eye-off"/></svg></button></h2>
 {{range .Cards}}{{template "card" .}}
 {{end}}</section>{{end}}
 
-{{define "card"}}<a class="card" id="issue-{{.Id}}" href="/issue/{{.Key}}" draggable="true" data-on:dragstart="evt.dataTransfer.setData('text/plain', '{{.Key}}'); evt.dataTransfer.effectAllowed = 'move'">
+{{define "card"}}<a class="card" id="issue-{{.Id}}" href="/issue/{{.Key}}" draggable="true" data-search="{{.Key}} {{.Title}}{{range .Labels}} {{.Name}}{{end}}{{if .Assignee}} {{.Assignee}}{{end}}" data-fkeys="|state:{{.State}}|prio:{{.Prio}}{{if .Assignee}}|assignee:{{.Assignee}}{{end}}{{range .Labels}}|label:{{.Name}}{{end}}|" data-show="(!$search || el.dataset.search.toLowerCase().includes($search.toLowerCase())) && $flt.every(f => el.dataset.fkeys.includes('|' + f + '|'))" data-on:dragstart="evt.dataTransfer.setData('text/plain', '{{.Key}}'); evt.dataTransfer.effectAllowed = 'move'">
 <span class="row1">{{.Key}}<span class="flex"></span>{{template "priority-icon" .Prio}}</span>
 <span class="title">{{.Title}}</span>
 {{if or .Labels .Assignee}}<span class="row3">{{range .Labels}}<span class="chip"><span class="dot" style="background:{{if .Color}}{{.Color}}{{else}}var(--text-3){{end}}"></span>{{.Name}}</span>{{end}}{{template "avatar" .Avatar}}</span>{{end}}
 </a>{{end}}
+
+{{/* Filter bar: chips over signals. $flt is a list of "dim:value" keys ANDed
+     against each card's data-* attributes; it lives outside #board so it
+     survives the wholesale board morph, and is mirrored to localStorage.
+     The init is a plain read (no DOM pruning: that raced mount order and
+     wiped saved chips); a stale saved key just leaves Clear visible. */}}
+{{define "filterbar"}}<div class="filterbar" data-signals:flt="JSON.parse(localStorage.getItem('lllFlt') || '[]')" data-signals:fltmenu="''" data-effect="localStorage.setItem('lllFlt', JSON.stringify($flt))">
+<div class="flt-add" data-on:click__outside="$fltmenu = ''">
+  <button type="button" class="flt-plus" data-on:click="$fltmenu = $fltmenu ? '' : 'root'"><svg width="10" height="10" viewBox="0 0 10 10" aria-hidden="true"><path d="M5 1.2 V8.8 M1.2 5 H8.8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg> Filter</button>
+  <div class="flt-menu" style="display:none" data-show="$fltmenu === 'root'">
+  {{range .FilterGroups}}<button type="button" data-on:click="$fltmenu = '{{.Dim}}'">{{.Label}}</button>
+  {{end}}</div>
+  {{range $g := .FilterGroups}}<div class="flt-menu" style="display:none" data-show="$fltmenu === '{{$g.Dim}}'">
+  {{range $g.Opts}}<button type="button" data-f="{{$g.Dim}}:{{.Value}}" data-on:click="$flt = $flt.includes(el.dataset.f) ? $flt : [...$flt, el.dataset.f]; $fltmenu = ''">{{.Label}}</button>
+  {{end}}</div>
+  {{end}}</div>
+{{range $g := .FilterGroups}}{{range $g.Opts}}<button type="button" class="flt-chip" style="display:none" data-f="{{$g.Dim}}:{{.Value}}" data-show="$flt.includes(el.dataset.f)" data-on:click="$flt = $flt.filter(x => x !== el.dataset.f)"><span class="dim">{{$g.Label}}</span> {{.Label}} <svg width="8" height="8" viewBox="0 0 8 8" aria-hidden="true"><path d="M1.5 1.5 L6.5 6.5 M6.5 1.5 L1.5 6.5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg></button>
+{{end}}{{end}}<button type="button" class="flt-clear" style="display:none" data-show="$flt.length > 0" data-on:click="$flt = []">Clear</button>
+</div>{{end}}

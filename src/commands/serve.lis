@@ -52,10 +52,25 @@ pub struct CardVM {
   pub id: string,
   pub key: string,
   pub title: string,
+  pub state: string,
   pub prio: string,
   pub assignee: string,
   pub avatar: AvatarVM,
   pub labels: Slice<LabelVM>,
+}
+
+/// One selectable filter value (chooser option / chip).
+pub struct FilterOptVM {
+  pub value: string,
+  pub label: string,
+}
+
+/// One filter dimension with its distinct values on the board. `dim` matches
+/// the card data-* attribute the client-side filter compares against.
+pub struct FilterGroupVM {
+  pub dim: string,
+  pub label: string,
+  pub opts: Slice<FilterOptVM>,
 }
 
 /// View model for one board column (a state).
@@ -63,6 +78,10 @@ pub struct ColumnVM {
   pub state: string,
   pub label: string,
   pub glyph: string,
+  // State as a Datastar signal name ("in-progress" -> "in_progress").
+  // template.JS so data-on:* (a JS context to html/template) gets the bare
+  // identifier instead of a quoted JS string.
+  pub sig: template.JS,
   pub cards: Slice<CardVM>,
 }
 
@@ -70,6 +89,7 @@ pub struct ColumnVM {
 pub struct BoardVM {
   pub states: Slice<StateOpt>,
   pub columns: Slice<ColumnVM>,
+  pub filter_groups: Slice<FilterGroupVM>,
 }
 
 /// View model for one comment.
@@ -216,7 +236,7 @@ pub fn run_server(port: int) -> Result<(), string> {
   }
 
   // Fail fast on broken templates before accepting connections.
-  let _ = render("board", BoardVM { states: state_opts(), columns: [] })?
+  let _ = render("board", BoardVM { states: state_opts(), columns: [], .. })?
 
   // One PB subscription for everything. Issues are team-scoped at most —
   // never state-filtered: PB emits nothing when an update moves a record out
@@ -351,11 +371,59 @@ fn card_vm(issue: models.Issue) -> CardVM {
     id: issue.id,
     key: f"{issue.expand.team.key}-{issue.number}",
     title: issue.title,
+    state: issue.state,
     prio: display.priority_name(issue.priority),
     assignee: issue.expand.assignee.name,
     avatar: avatar_vm(issue.expand.assignee.name),
     labels: label_vms(issue.expand.labels),
   }
+}
+
+/// First-seen-order distinct non-empty strings.
+fn distinct(vals: Slice<string>) -> Slice<string> {
+  let mut out: Slice<string> = []
+  for v in vals {
+    if v != "" && !out.contains(v) { out = out.append(v) }
+  }
+  out
+}
+
+/// The filter chooser's contents: distinct assignees, labels, priorities and
+/// states present on the board. Dimensions with no values are dropped.
+fn filter_groups(issues: Slice<models.Issue>) -> Slice<FilterGroupVM> {
+  let assignees = distinct(issues.map(|i| i.expand.assignee.name))
+  let mut label_names: Slice<string> = []
+  for i in issues {
+    label_names = label_names.append(i.expand.labels.map(|l| l.name)...)
+  }
+  let labels = distinct(label_names)
+  let present_prios = distinct(issues.map(|i| display.priority_name(i.priority)))
+  let prios = ["urgent", "high", "medium", "low", "none"]
+    .filter(|p| present_prios.contains(p))
+  let states = query.states().filter(|s| issues.any(|i| i.state == s))
+  let groups = [
+    FilterGroupVM {
+      dim: "assignee",
+      label: "Assignee",
+      opts: assignees.map(|a| FilterOptVM { value: a, label: a }),
+    },
+    FilterGroupVM {
+      dim: "label",
+      label: "Label",
+      opts: labels.map(|l| FilterOptVM { value: l, label: l }),
+    },
+    FilterGroupVM {
+      dim: "prio",
+      label: "Priority",
+      opts: prios.map(|p| FilterOptVM { value: p, label: state_label(p) }),
+    },
+    FilterGroupVM {
+      dim: "state",
+      label: "State",
+      opts: states.map(|s| FilterOptVM { value: s, label: state_label(s) }),
+    },
+  ]
+  groups.filter(|g| g.opts.length() > 0)
 }
 
 /// The full board, freshly fetched: six columns in workflow order.
@@ -367,9 +435,10 @@ fn board_vm(team_id: string) -> Result<BoardVM, string> {
       state: s,
       label: state_label(s),
       glyph: display.glyph(s),
+      sig: strings.ReplaceAll(s, "-", "_") as template.JS,
       cards: issues.filter(|i| i.state == s).map(card_vm),
     })
-  Ok(BoardVM { states: state_opts(), columns })
+  Ok(BoardVM { states: state_opts(), columns, filter_groups: filter_groups(issues) })
 }
 
 fn fetch_board_issues(team_id: string) -> Result<Slice<models.Issue>, string> {
