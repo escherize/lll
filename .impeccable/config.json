@@ -9,6 +9,12 @@
         "value": "inter",
         "createdAt": "2026-08-28T20:04:48.359Z",
         "reason": "user confirmed: interview answer picked Inter Variable (it is what Linear uses; brief is a Linear clone)"
+      },
+      {
+        "rule": "design-system-color",
+        "value": "#d7a63a",
+        "createdAt": "2026-08-28T21:12:40.408Z",
+        "reason": "frozen approval-record mock (.impeccable/mocks): pre-final amber used for label dots in the user-approved comp; superseded by #e0b13e in the shipped system"
       }
     ]
   }
