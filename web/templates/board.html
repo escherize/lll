@@ -1,0 +1,35 @@
+{{define "board-page"}}<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>lin board</title>
+<link rel="stylesheet" href="/static/skeleton.css">
+<script type="module" src="https://cdn.jsdelivr.net/gh/starfederation/datastar@v1.0.3/bundles/datastar.js" integrity="sha384-yHqFPXJio1slWODLf67ZFfuDhhPUccOzGpGJF0d5fitjEfihEVrVvzMsfH8TxCiO" crossorigin="anonymous"></script>
+</head>
+<!-- data-init lives on <body>, which is never patched, so the SSE
+     connection is opened exactly once per page load. -->
+<body data-init="@get('/events?page=board')">
+<header>
+<h1>lin board</h1>
+<form id="new-issue">
+<input name="title" placeholder="Issue title">
+<select name="state">
+{{range .States}}<option value="{{.}}"{{if eq . "todo"}} selected{{end}}>{{.}}</option>
+{{end}}</select>
+<button type="button" data-on:click="@post('/create', {contentType: 'form'})">Create</button>
+</form>
+</header>
+{{template "board" .}}
+</body>
+</html>{{end}}
+
+{{define "board"}}<main id="board">
+{{range .Columns}}{{template "column" .}}
+{{end}}</main>{{end}}
+
+{{define "column"}}<section class="column" id="col-{{.State}}">
+<h2>{{.Glyph}} {{.State}} <span class="count">{{len .Cards}}</span></h2>
+{{range .Cards}}{{template "card" .}}
+{{end}}</section>{{end}}
+
+{{define "card"}}<a class="card" id="issue-{{.Id}}" href="/issue/{{.Key}}"><span class="key">{{.Key}}</span> <span class="priority">{{.Priority}}</span> <span class="title">{{.Title}}</span>{{if .Assignee}} <span class="assignee">{{.Assignee}}</span>{{end}}</a>{{end}}

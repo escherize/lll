@@ -10,11 +10,19 @@ import "pb"
 import "query"
 import "realtime"
 
+// pub because serve.lis decodes the same event shapes; module-private
+// structs miscompile when their fields are read from another file.
 #[json]
-struct IssueEvent { action: string, record: models.Issue }
+pub struct IssueEvent {
+  pub action: string,
+  pub record: models.Issue,
+}
 
 #[json]
-struct CommentEvent { action: string, record: models.Comment }
+pub struct CommentEvent {
+  pub action: string,
+  pub record: models.Comment,
+}
 
 /// Dispatch `lin watch` — a live event stream for a query, one line per
 /// create/update/delete, filtered server-side with the same criteria as

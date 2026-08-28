@@ -1,0 +1,49 @@
+{{define "issue-page"}}<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>{{.Key}} · lin</title>
+<link rel="stylesheet" href="/static/skeleton.css">
+<script type="module" src="https://cdn.jsdelivr.net/gh/starfederation/datastar@v1.0.3/bundles/datastar.js" integrity="sha384-yHqFPXJio1slWODLf67ZFfuDhhPUccOzGpGJF0d5fitjEfihEVrVvzMsfH8TxCiO" crossorigin="anonymous"></script>
+</head>
+<body data-init="@get('/events?page=issue&key={{.Key}}')">
+<nav><a href="/">&larr; board</a></nav>
+{{template "issue-detail" .}}
+{{template "comments" .}}
+<form id="comment-form">
+<input type="hidden" name="key" value="{{.Key}}">
+<textarea name="body" placeholder="Add a comment"></textarea>
+<button type="button" data-on:click="@post('/comment', {contentType: 'form'})">Comment</button>
+</form>
+</body>
+</html>{{end}}
+
+{{define "issue-detail"}}<article id="issue-detail">
+{{if .Deleted}}<p class="deleted">{{.Key}} was deleted.</p>
+{{else}}<h1><span class="key">{{.Key}}</span> {{.Title}}</h1>
+<form id="state-form">
+<input type="hidden" name="key" value="{{.Key}}">
+<label>State:
+<select name="state" data-on:change="@post('/state', {contentType: 'form'})">
+{{range .States}}<option value="{{.}}"{{if eq . $.State}} selected{{end}}>{{.}}</option>
+{{end}}</select>
+</label>
+</form>
+<dl>
+<dt>Priority</dt><dd>{{.Priority}}</dd>
+<dt>Assignee</dt><dd>{{.Assignee}}</dd>
+<dt>Project</dt><dd>{{.Project}}</dd>
+<dt>Labels</dt><dd>{{.Labels}}</dd>
+<dt>Created</dt><dd>{{.Created}}</dd>
+<dt>Updated</dt><dd>{{.Updated}}</dd>
+</dl>
+{{if .Description}}<p id="description">{{.Description}}</p>
+{{end}}{{end}}</article>{{end}}
+
+{{define "comments"}}<section id="comments">
+<h2>Comments <span class="count">{{len .Comments}}</span></h2>
+{{range .Comments}}<div class="comment" id="comment-{{.Id}}">
+<p class="meta">{{.Author}} · {{.Age}}</p>
+<p>{{.Body}}</p>
+</div>
+{{end}}</section>{{end}}

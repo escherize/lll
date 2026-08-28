@@ -11,7 +11,7 @@
 # as list filters, --search, unknown names, expand in --json), realtime watch
 # (lin watch create/update/delete lines and server-side filters, lin issue
 # watch transitions and comments, --json NDJSON, reconnect across a PB
-# restart), --help output.
+# restart), --help output, and the lin serve web board (via e2e_web.sh).
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
@@ -730,5 +730,11 @@ assert_contains "$out" "Usage:" "lin label --help"
 assert_contains "$out" "lin label create" "label --help mentions create"
 out=$("$LIN" config --help)
 assert_contains "$out" "Usage:" "lin config --help"
+out=$("$LIN" serve --help)
+assert_contains "$out" "Usage:" "lin serve --help"
+assert_contains "$out" "--port" "serve --help mentions --port"
 
 echo "e2e: all assertions passed"
+
+# --- web board (own ephemeral PB; see e2e_web.sh) ---
+scripts/e2e_web.sh

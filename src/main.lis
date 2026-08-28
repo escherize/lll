@@ -17,6 +17,7 @@ fn main() {
     "label" => commands.label(os.Args),
     "config" => commands.config_cmd(os.Args),
     "watch" => commands.watch(os.Args),
+    "serve" => commands.serve(os.Args),
     "--help" => {
       print_usage()
       Ok(())
@@ -50,6 +51,7 @@ Usage:
   lin label <command>     work with labels (see 'lin label --help')
   lin config <command>    manage configuration (see 'lin config --help')
   lin watch [flags]       live event stream for a query (see 'lin watch --help')
+  lin serve [--port 8100] web board with realtime updates (see 'lin serve --help')
   lin --help              show this help
 
 Configuration (env > ./.lin.toml > ~/.config/lin/lin.toml):

@@ -1,0 +1,628 @@
+import "go:bytes"
+import "go:encoding/json"
+import "go:fmt"
+import "go:html/template"
+import "go:net/http"
+import "go:net/url"
+import "go:strconv"
+import "go:strings"
+
+import "config"
+import "display"
+import "models"
+import "pb"
+import "query"
+import "realtime"
+
+// `lin serve` — a server-rendered web board with realtime updates.
+//
+// Architecture: browsers hold ONE SSE connection to /events. The server holds
+// one unfiltered (team-scoped at most) PB realtime subscription to issues +
+// comments; on any event it re-renders the affected fragments and broadcasts
+// them as datastar-patch-elements SSE events, which Datastar morphs into the
+// DOM by element id. Actions (@post) write to PB and return 204 — the UI
+// updates via the same broadcast as CLI-driven changes, so there is no
+// swap-on-POST double-update race.
+//
+// Templates live in web/templates/ and are re-parsed from disk on every
+// render, so markup edits show on refresh with no rebuild (task-9's design
+// iteration loop depends on this). Run `lin serve` from the repo root.
+
+/// View model for one issue card on the board.
+pub struct CardVM {
+  pub id: string,
+  pub key: string,
+  pub title: string,
+  pub priority: string,
+  pub assignee: string,
+}
+
+/// View model for one board column (a state).
+pub struct ColumnVM {
+  pub state: string,
+  pub glyph: string,
+  pub cards: Slice<CardVM>,
+}
+
+/// View model for the board.
+pub struct BoardVM {
+  pub states: Slice<string>,
+  pub columns: Slice<ColumnVM>,
+}
+
+/// View model for one comment.
+pub struct CommentVM {
+  pub id: string,
+  pub author: string,
+  pub age: string,
+  pub body: string,
+}
+
+/// View model for the comments fragment alone (broadcast re-renders).
+pub struct CommentsVM {
+  pub comments: Slice<CommentVM>,
+}
+
+/// View model for the issue page / issue-detail fragment.
+pub struct IssueVM {
+  pub deleted: bool,
+  pub id: string,
+  pub key: string,
+  pub title: string,
+  pub state: string,
+  pub priority: string,
+  pub assignee: string,
+  pub project: string,
+  pub labels: string,
+  pub description: string,
+  pub created: string,
+  pub updated: string,
+  pub states: Slice<string>,
+  pub comments: Slice<CommentVM>,
+}
+
+/// One connected browser: its scope ("board" or "issue:KEY-1") and the
+/// channel its /events handler drains.
+struct SseClient { id: int, scope: string, ch: Channel<string> }
+
+/// A rendered SSE payload for every client with a matching scope.
+struct Broadcast { scope: string, payload: string }
+
+/// Fan-out hub. A single owner task holds the client registry and is fed
+/// exclusively through these channels — no shared mutable state.
+struct Hub {
+  register: Channel<SseClient>,
+  unregister: Channel<int>,
+  broadcast: Channel<Broadcast>,
+  ids: Channel<int>,
+}
+
+fn new_hub() -> Hub {
+  let hub = Hub { 
+    register: Channel.new<SseClient>(),
+    unregister: Channel.new<int>(),
+    broadcast: Channel.new<Broadcast>(),
+    ids: Channel.new<int>(),
+  }
+  // Client-id allocator: unique ids without shared counters.
+  task {
+    let mut n = 1
+    loop {
+      if !hub.ids.send(n) { break }
+      n += 1
+    }
+  }
+  // Registry owner.
+  task {
+    let mut clients: Slice<SseClient> = []
+    let mut running = true
+    while running {
+      select {
+        match hub.register.receive() {
+          Some(c) => clients = clients.append(c),
+          None => running = false,
+        },
+        match hub.unregister.receive() {
+          Some(id) => clients = clients.filter(|c| c.id != id),
+          None => running = false,
+        },
+        match hub.broadcast.receive() {
+          Some(msg) => deliver(clients, msg),
+          None => running = false,
+        },
+      }
+    }
+  }
+  hub
+}
+
+/// Send a broadcast to every matching client, dropping the payload for any
+/// client whose buffer is full (a stuck browser must not stall the hub).
+fn deliver(clients: Slice<SseClient>, msg: Broadcast) {
+  for c in clients {
+    if c.scope != msg.scope { continue }
+    select {
+      c.ch.send(msg.payload) => (),
+      _ => continue,
+    }
+  }
+}
+
+/// Dispatch `lin serve [--port 8100]`.
+pub fn serve(args: Slice<string>) -> Result<(), string> {
+  let mut port = 8100
+  let mut i = 2
+  while i < args.length() {
+    match args[i] {
+      "--port" => {
+        let Some(val) = args.get(i + 1) else {
+          return Err("--port requires a value")
+        }
+        let Ok(p) = strconv.Atoi(val) else {
+          return Err(f"--port must be a number, got '{val}'")
+        }
+        port = p
+        i += 2
+      },
+      "--help" => {
+        print_serve_usage()
+        return Ok(())
+      },
+      "-h" => {
+        print_serve_usage()
+        return Ok(())
+      },
+      other => return Err(f"unknown flag: '{other}'"),
+    }
+  }
+
+  // Resolve the team scope once; card/board fetches and the realtime
+  // subscription share it. No configured team means an unscoped board.
+  let cfg = config.load()?
+  let mut team_id = ""
+  if cfg.team != "" {
+    let Some(team) = find_team(cfg.team)? else {
+      return Err(f"no team with key '{cfg.team}' on the server")
+    }
+    team_id = team.id
+  }
+
+  // Fail fast on broken templates before accepting connections.
+  let _ = render("board", BoardVM { states: query.states(), columns: [] })?
+
+  // One PB subscription for everything. Issues are team-scoped at most —
+  // never state-filtered: PB emits nothing when an update moves a record out
+  // of a subscription filter, so filtered board columns would go stale.
+  let issues_topic = realtime.topic_with_options(
+    "issues",
+    query.filter(team_id, "", "", "", "", ""),
+    "team,assignee,labels,project",
+  )?
+  let comments_topic = realtime.topic_with_options("comments", "", "author")?
+  let events = realtime.subscribe(
+    pb.base_url()?,
+    [issues_topic, comments_topic],
+  )?
+
+  let hub = new_hub()
+  task {
+    bridge(events, hub, team_id)
+  }
+
+  http.HandleFunc(
+    "GET /{$}",
+    |w: http.ResponseWriter, _r: Ref<http.Request>| {
+      board_page(w, team_id)
+    },
+  )
+  http.HandleFunc("GET /issue/{key}", issue_page)
+  http.HandleFunc(
+    "GET /events",
+    |w: http.ResponseWriter, r: Ref<http.Request>| {
+      events_stream(w, r, hub)
+    },
+  )
+  http.HandleFunc(
+    "POST /create",
+    |w: http.ResponseWriter, r: Ref<http.Request>| {
+      create_action(w, r, team_id)
+    },
+  )
+  http.HandleFunc("POST /state", state_action)
+  http.HandleFunc("POST /comment", comment_action)
+  http.Handle(
+    "GET /static/",
+    http.StripPrefix("/static/", http.FileServer(http.Dir("web/static"))),
+  )
+
+  fmt.Println(f"lin serve listening on http://127.0.0.1:{port}")
+  match http.ListenAndServe(f"127.0.0.1:{port}", http.DefaultServeMux) {
+    Ok(_) => Ok(()),
+    Err(e) => Err(f"server: {e}"),
+  }
+}
+
+fn print_serve_usage() {
+  fmt.Println(
+    "lin serve - web board with realtime updates
+
+Usage:
+  lin serve [--port 8100]
+
+Serves a board page (/) grouped by state and issue pages (/issue/KEY-123).
+Changes made anywhere — the web UI, the CLI, other browsers — appear in every
+open page without reload, streamed over a single SSE connection per page.
+
+Templates and CSS are read from web/templates/ and web/static/ relative to
+the working directory on every request: edit and refresh, no rebuild.
+
+The board is scoped to the configured team (LIN_TEAM or 'team' in .lin.toml)
+when one is set; creating an issue from the board requires it.",
+  )
+}
+
+// ---------- rendering ----------
+
+/// Render a named template with web/templates/ re-parsed from disk, so
+/// markup edits show on refresh with no rebuild.
+fn render(name: string, data: Unknown) -> Result<string, string> {
+  let tmpl = match template.ParseFiles(
+    "web/templates/board.html",
+    "web/templates/issue.html",
+  ) {
+    Ok(t) => t,
+    Err(e) => return Err(f"parsing web/templates: {e}"),
+  }
+  let mut buf = bytes.Buffer { .. }
+  if let Err(e) = tmpl.ExecuteTemplate(&buf, name, data) {
+    return Err(f"rendering {name}: {e}")
+  }
+  Ok(buf.String())
+}
+
+/// Wrap a rendered fragment as a datastar-patch-elements SSE event. Each
+/// line of HTML becomes its own `data: elements` line; Datastar morphs the
+/// fragment into the DOM by element id (default mode `outer`).
+fn patch_event(html: string) -> string {
+  let lines = html.split("\n").map(|l| f"data: elements {l}")
+  f"event: datastar-patch-elements\n{strings.Join(lines, "\n")}\n\n"
+}
+
+fn card_vm(issue: models.Issue) -> CardVM {
+  CardVM { 
+    id: issue.id,
+    key: f"{issue.expand.team.key}-{issue.number}",
+    title: issue.title,
+    priority: display.priority_marker(issue.priority),
+    assignee: issue.expand.assignee.name,
+  }
+}
+
+/// The full board, freshly fetched: six columns in workflow order.
+fn board_vm(team_id: string) -> Result<BoardVM, string> {
+  let issues = fetch_board_issues(team_id)?
+  let columns = query
+    .states()
+    .map(|s| ColumnVM { 
+      state: s,
+      glyph: display.glyph(s),
+      cards: issues.filter(|i| i.state == s).map(card_vm),
+    })
+  Ok(BoardVM { states: query.states(), columns })
+}
+
+fn fetch_board_issues(team_id: string) -> Result<Slice<models.Issue>, string> {
+  let mut path = "/api/collections/issues/records?perPage=200&expand=team,assignee&sort=created"
+  let filter = query.filter(team_id, "", "", "", "", "")
+  if filter != "" { path = f"{path}&filter={url.QueryEscape(filter)}" }
+  let body = pb.get(path)?
+  let mut issues = models.IssueList { .. }
+  if let Err(e) = json.Unmarshal(body.bytes(), &issues) {
+    return Err(f"decoding issues: {e}")
+  }
+  Ok(issues.items)
+}
+
+fn comment_vm(c: models.Comment) -> CommentVM {
+  let mut author = c.expand.author.name
+  if author == "" { author = "anon" }
+  CommentVM { id: c.id, author, age: display.relative(c.created), body: c.body }
+}
+
+/// Issue view model from a full record (expand: team, assignee, labels,
+/// project) — shared by the issue page and broadcast re-renders.
+fn issue_vm(issue: models.Issue, comments: Slice<models.Comment>) -> IssueVM {
+  let mut assignee = issue.expand.assignee.name
+  if assignee == "" { assignee = "none" }
+  let mut project = issue.expand.project.name
+  if project == "" { project = "none" }
+  let mut labels = strings.Join(issue.expand.labels.map(|l| l.name), ", ")
+  if labels == "" { labels = "none" }
+  IssueVM { 
+    deleted: false,
+    id: issue.id,
+    key: f"{issue.expand.team.key}-{issue.number}",
+    title: issue.title,
+    state: issue.state,
+    priority: display.priority_name(issue.priority),
+    assignee,
+    project,
+    labels,
+    description: issue.description,
+    created: display.relative(issue.created),
+    updated: display.relative(issue.updated),
+    states: query.states(),
+    comments: comments.map(comment_vm),
+  }
+}
+
+// ---------- page handlers ----------
+
+fn board_page(w: http.ResponseWriter, team_id: string) {
+  let vm = match board_vm(team_id) {
+    Ok(v) => v,
+    Err(e) => {
+      http.Error(w, e, 500)
+      return
+    },
+  }
+  let html = match render("board-page", vm) {
+    Ok(h) => h,
+    Err(e) => {
+      http.Error(w, e, 500)
+      return
+    },
+  }
+  w.Header().Set("Content-Type", "text/html; charset=utf-8")
+  let _ = w.Write(html.bytes())
+}
+
+fn issue_page(w: http.ResponseWriter, r: Ref<http.Request>) {
+  let key = r.PathValue("key")
+  let issue = match fetch_issue(key) {
+    Ok(i) => i,
+    Err(e) => {
+      http.Error(w, e, 404)
+      return
+    },
+  }
+  let comments = match fetch_comments(issue.id) {
+    Ok(c) => c,
+    Err(e) => {
+      http.Error(w, e, 500)
+      return
+    },
+  }
+  let html = match render("issue-page", issue_vm(issue, comments)) {
+    Ok(h) => h,
+    Err(e) => {
+      http.Error(w, e, 500)
+      return
+    },
+  }
+  w.Header().Set("Content-Type", "text/html; charset=utf-8")
+  let _ = w.Write(html.bytes())
+}
+
+// ---------- /events ----------
+
+/// SSE endpoint: register with the hub under the page's scope and forward
+/// broadcast payloads until the browser disconnects.
+fn events_stream(w: http.ResponseWriter, r: Ref<http.Request>, hub: Hub) {
+  let mut page = ""
+  let mut key = ""
+  if let Some(u) = r.URL {
+    let q = u.Query()
+    page = q.Get("page")
+    key = q.Get("key")
+  }
+  let mut scope = "board"
+  if page == "issue" && key != "" { scope = f"issue:{key}" }
+
+  let Some(flusher) = assert_type<http.Flusher>(w) else {
+    http.Error(w, "streaming unsupported", 500)
+    return
+  }
+  w.Header().Set("Content-Type", "text/event-stream")
+  w.Header().Set("Cache-Control", "no-cache")
+  w.WriteHeader(200)
+  flusher.Flush()
+
+  let Some(id) = hub.ids.receive() else {
+    return
+  }
+  let ch = Channel.buffered<string>(64)
+  let _ = hub.register.send(SseClient { id, scope, ch })
+  let done = r.Context().Done()
+  loop {
+    let quit = select {
+      match ch.receive() {
+        Some(payload) => {
+          let _ = w.Write(payload.bytes())
+          flusher.Flush()
+          false
+        },
+        None => true,
+      },
+      match done.receive() {
+        Some(_) => true,
+        None => true,
+      },
+    }
+    if quit {
+      let _ = hub.unregister.send(id)
+      return
+    }
+  }
+}
+
+// ---------- PB realtime bridge ----------
+
+/// Consume PB realtime events forever; re-render and broadcast fragments.
+fn bridge(events: Channel<realtime.Event>, hub: Hub, team_id: string) {
+  loop {
+    let Some(ev) = events.receive() else {
+      return
+    }
+    if ev.topic == "comments" {
+      comment_broadcast(ev, hub)
+    } else {
+      issue_broadcast(ev, hub, team_id)
+    }
+  }
+}
+
+/// On any issues event: re-render the whole board fragment from a fresh
+/// fetch (laziest correct — a state change moves a card between two columns,
+/// and one #board morph covers create/update/delete alike), plus the
+/// issue-detail fragment for that issue's page, from the event record.
+fn issue_broadcast(ev: realtime.Event, hub: Hub, team_id: string) {
+  if let Ok(vm) = board_vm(team_id) {
+    if let Ok(html) = render("board", vm) {
+      let _ = hub.broadcast.send(
+        Broadcast { scope: "board", payload: patch_event(html) },
+      )
+    }
+  }
+
+  let mut event = IssueEvent { .. }
+  if json.Unmarshal(ev.data.bytes(), &event).is_err() { return }
+  let rec = event.record
+  let key = f"{rec.expand.team.key}-{rec.number}"
+  let mut vm = issue_vm(rec, [])
+  if event.action == "delete" { vm = IssueVM { deleted: true, key, .. } }
+  if let Ok(html) = render("issue-detail", vm) {
+    let _ = hub.broadcast.send(
+      Broadcast { scope: f"issue:{key}", payload: patch_event(html) },
+    )
+  }
+}
+
+/// On any comments event: re-render the comments fragment for the affected
+/// issue's page. The board shows no comments, so it is left alone.
+fn comment_broadcast(ev: realtime.Event, hub: Hub) {
+  let mut event = CommentEvent { .. }
+  if json.Unmarshal(ev.data.bytes(), &event).is_err() { return }
+  // Resolve the issue for the page scope; a comment whose issue is already
+  // deleted has no page to update.
+  let Ok(body) = pb.get(
+    f"/api/collections/issues/records/{event.record.issue}?expand=team",
+  ) else {
+    return
+  }
+  let mut issue = models.Issue { .. }
+  if json.Unmarshal(body.bytes(), &issue).is_err() { return }
+  let key = f"{issue.expand.team.key}-{issue.number}"
+  let Ok(comments) = fetch_comments(issue.id) else {
+    return
+  }
+  if let Ok(html) = render(
+    "comments",
+    CommentsVM { comments: comments.map(comment_vm) },
+  ) {
+    let _ = hub.broadcast.send(
+      Broadcast { scope: f"issue:{key}", payload: patch_event(html) },
+    )
+  }
+}
+
+// ---------- actions (write to PB, return 204 — UI updates via broadcast) ----------
+
+fn create_action(w: http.ResponseWriter, r: Ref<http.Request>, team_id: string) {
+  let title = strings.TrimSpace(r.PostFormValue("title"))
+  let state = r.PostFormValue("state")
+  if title == "" {
+    http.Error(w, "title is required", 400)
+    return
+  }
+  if query.states().find(|s| s == state).is_none() {
+    http.Error(w, f"unknown state '{state}'", 400)
+    return
+  }
+  if team_id == "" {
+    http.Error(
+      w,
+      "no team configured: set LIN_TEAM or 'team' in .lin.toml",
+      400,
+    )
+    return
+  }
+  let new_issue = models.NewIssue { team: team_id, title, state, .. }
+  let payload = match json.Marshal(new_issue) {
+    Ok(p) => p,
+    Err(e) => {
+      http.Error(w, f"encoding issue: {e}", 500)
+      return
+    },
+  }
+  if let Err(e) = pb.post("/api/collections/issues/records", payload as string) {
+    http.Error(w, e, 502)
+    return
+  }
+  w.WriteHeader(204)
+}
+
+fn state_action(w: http.ResponseWriter, r: Ref<http.Request>) {
+  let key = r.PostFormValue("key")
+  let state = r.PostFormValue("state")
+  if query.states().find(|s| s == state).is_none() {
+    http.Error(w, f"unknown state '{state}'", 400)
+    return
+  }
+  let issue = match fetch_issue(key) {
+    Ok(i) => i,
+    Err(e) => {
+      http.Error(w, e, 404)
+      return
+    },
+  }
+  let payload = "{\"state\":\"" + state + "\"}"
+  if let Err(e) = pb.patch(
+    f"/api/collections/issues/records/{issue.id}",
+    payload,
+  ) {
+    http.Error(w, e, 502)
+    return
+  }
+  w.WriteHeader(204)
+}
+
+fn comment_action(w: http.ResponseWriter, r: Ref<http.Request>) {
+  let key = r.PostFormValue("key")
+  let body = strings.TrimSpace(r.PostFormValue("body"))
+  if body == "" {
+    http.Error(w, "comment body is required", 400)
+    return
+  }
+  let issue = match fetch_issue(key) {
+    Ok(i) => i,
+    Err(e) => {
+      http.Error(w, e, 404)
+      return
+    },
+  }
+  // Same honor-system authorship as `lin issue comment`: the member named by
+  // 'me' in config, or authorless.
+  let mut author = ""
+  if let Ok(cfg) = config.load() {
+    if cfg.me != "" {
+      if let Ok(Some(m)) = find_member(cfg.me) { author = m.id }
+    }
+  }
+  let new_comment = models.NewComment { issue: issue.id, author, body }
+  let payload = match json.Marshal(new_comment) {
+    Ok(p) => p,
+    Err(e) => {
+      http.Error(w, f"encoding comment: {e}", 500)
+      return
+    },
+  }
+  if let Err(e) = pb.post(
+    "/api/collections/comments/records",
+    payload as string,
+  ) {
+    http.Error(w, e, 502)
+    return
+  }
+  w.WriteHeader(204)
+}
