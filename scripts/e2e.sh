@@ -8,7 +8,10 @@
 # 'me', authorless, list, in issue view), --assignee (create/update/list
 # filter, unknown member, expand in --json), projects and labels (create/list,
 # project view with its issues, --label/--project on issue create/update and
-# as list filters, --search, unknown names, expand in --json), --help output.
+# as list filters, --search, unknown names, expand in --json), realtime watch
+# (lin watch create/update/delete lines and server-side filters, lin issue
+# watch transitions and comments, --json NDJSON, reconnect across a PB
+# restart), --help output.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
@@ -35,7 +38,8 @@ PB_LOG="$DATA_DIR/pb.log"
   --migrationsDir pb/pb_migrations --hooksDir pb/pb_hooks \
   --http "127.0.0.1:$PORT" >"$PB_LOG" 2>&1 &
 PB_PID=$!
-cleanup() { kill "$PB_PID" 2>/dev/null || true; rm -rf "$DATA_DIR"; }
+WATCH_PIDS=""
+cleanup() { kill $WATCH_PIDS "$PB_PID" 2>/dev/null || true; rm -rf "$DATA_DIR"; }
 trap cleanup EXIT
 
 fail() {
@@ -579,6 +583,115 @@ lname=$(LIN_URL=$URL LIN_TEAM=ENG "$LIN" issue list --label bug --json | \
   jq -r '.items[0].expand.labels[0].name')
 [ "$lname" = "bug" ] || fail "list --json: expected expand.labels[0].name bug, got '$lname'"
 
+# --- watch: realtime event streams ---
+WATCH_ALL="$DATA_DIR/watch_all.txt"    # lin watch (team-scoped, no state filter)
+WATCH_TODO="$DATA_DIR/watch_todo.txt"  # lin watch --state todo
+WATCH_JSON="$DATA_DIR/watch_json.txt"  # lin watch --json
+WATCH_ISSUE="$DATA_DIR/watch_issue.txt"
+
+wait_for_line() { # file needle label [tries, at 0.1s each]
+  tries="${4:-100}"
+  for _ in $(seq 1 "$tries"); do
+    grep -qF -- "$2" "$1" 2>/dev/null && return 0
+    sleep 0.1
+  done
+  fail "$3: expected '$2' in $1:
+$(cat "$1" 2>/dev/null)"
+}
+
+LIN_URL=$URL LIN_TEAM=ENG "$LIN" watch > "$WATCH_ALL" &
+WATCH_PIDS="$WATCH_PIDS $!"
+LIN_URL=$URL LIN_TEAM=ENG "$LIN" watch --state todo > "$WATCH_TODO" &
+WATCH_PIDS="$WATCH_PIDS $!"
+LIN_URL=$URL LIN_TEAM=ENG "$LIN" watch --json > "$WATCH_JSON" &
+WATCH_PIDS="$WATCH_PIDS $!"
+sleep 2 # let the subscriptions establish
+
+# matching create (lin issue create starts issues in todo)
+out=$(LIN_URL=$URL LIN_TEAM=ENG "$LIN" issue create -t "Watched todo issue")
+WKEY=$(printf '%s' "$out" | sed -n 's/^Created \(ENG-[0-9]*\):.*/\1/p')
+[ -n "$WKEY" ] || fail "watched create: no issue key in: $out"
+wait_for_line "$WATCH_ALL" "$WKEY created: Watched todo issue" "watch sees matching create"
+wait_for_line "$WATCH_TODO" "$WKEY created: Watched todo issue" "watch --state todo sees todo create"
+
+# non-matching creates: wrong state (forged via curl) and wrong team
+curl -sf -X POST "$URL/api/collections/issues/records" \
+  -H 'Content-Type: application/json' \
+  -d "{\"team\":\"$ENG_ID\",\"title\":\"Backlog noise issue\",\"state\":\"backlog\"}" >/dev/null
+out=$(LIN_URL=$URL LIN_TEAM=OPS "$LIN" issue create -t "Ops noise issue")
+assert_contains "$out" "Created OPS-" "ops noise created"
+wait_for_line "$WATCH_ALL" "created: Backlog noise issue" "unfiltered watch sees backlog create"
+sleep 1
+assert_not_contains "$(cat "$WATCH_TODO")" "Backlog noise issue" "watch --state todo silent for non-matching state"
+assert_not_contains "$(cat "$WATCH_ALL")" "Ops noise issue" "team-scoped watch silent for other teams"
+
+# update rendered as a state transition (diffed against the seen create)
+out=$(LIN_URL=$URL "$LIN" issue update "$WKEY" --state in-progress)
+assert_contains "$out" "Updated $WKEY" "watched update output"
+wait_for_line "$WATCH_ALL" "$WKEY update state: todo -> in-progress" "watch renders state transition"
+# leaving the filter emits nothing: PB only delivers events whose record
+# matches the filter after the change, so todo -> in-progress is silent there
+sleep 1
+assert_not_contains "$(cat "$WATCH_TODO")" "in-progress" "watch --state todo silent when record leaves filter"
+
+# --- lin issue watch: one issue + its comments ---
+LIN_URL=$URL "$LIN" issue watch "$WKEY" > "$WATCH_ISSUE" &
+WATCH_PIDS="$WATCH_PIDS $!"
+# the header prints once the subscription is active
+wait_for_line "$WATCH_ISSUE" "Watching $WKEY" "issue watch header"
+
+out=$(LIN_URL=$URL "$LIN" issue update "$WKEY" --state in-review --assignee bryan)
+assert_contains "$out" "Updated $WKEY" "issue watch update output"
+wait_for_line "$WATCH_ISSUE" "state: in-progress -> in-review" "issue watch renders state transition"
+wait_for_line "$WATCH_ISSUE" "assignee: none -> bryan" "issue watch renders assignee transition"
+
+printf 'url = "%s"\nteam = "ENG"\nme = "bryan"\n' "$URL" > "$WORK/.lin.toml"
+out=$(cd "$WORK" && env -u LIN_URL -u LIN_TEAM HOME="$FAKEHOME" "$LIN_ABS" issue comment "$WKEY" -b "Watching closely")
+assert_contains "$out" "Commented on $WKEY" "watched comment output"
+wait_for_line "$WATCH_ISSUE" "comment by bryan: Watching closely" "issue watch sees the comment"
+
+# --- --json emits one jq-parseable object per line ---
+wait_for_line "$WATCH_JSON" "Watched todo issue" "watch --json captured the create"
+while IFS= read -r line; do
+  printf '%s' "$line" | jq -e '.topic and .action and .record.id' >/dev/null \
+    || fail "watch --json: line is not a PB event object: $line"
+done < "$WATCH_JSON"
+
+# --- reconnect: kill PB, restart on the same port and data dir ---
+WID=$(LIN_URL=$URL "$LIN" issue view "$WKEY" --json | jq -r '.id')
+[ -n "$WID" ] || fail "resolving $WKEY record id"
+kill "$PB_PID"
+wait "$PB_PID" 2>/dev/null || true
+"$PB_BIN" serve --dir "$DATA_DIR/pb_data" \
+  --migrationsDir pb/pb_migrations --hooksDir pb/pb_hooks \
+  --http "127.0.0.1:$PORT" >>"$PB_LOG" 2>&1 &
+PB_PID=$!
+for _ in $(seq 1 100); do
+  curl -sf "$URL/api/health" >/dev/null 2>&1 && break
+  sleep 0.1
+done
+curl -sf "$URL/api/health" >/dev/null || fail "PocketBase did not restart"
+# watchers resubscribe within ~1s; keep patching (each a fresh title
+# transition) until one lands, instead of trusting a fixed sleep
+for i in $(seq 1 20); do
+  curl -s -X PATCH "$URL/api/collections/issues/records/$WID" \
+    -H 'Content-Type: application/json' \
+    -d "{\"title\":\"Back after restart $i\"}" >/dev/null || true
+  sleep 1
+  grep -qF -- "Back after restart" "$WATCH_ALL" && break
+done
+wait_for_line "$WATCH_ALL" "Back after restart" "watch survives a PB restart" 10
+wait_for_line "$WATCH_ISSUE" "Back after restart" "issue watch survives a PB restart" 100
+
+# --- delete events; issue watch exits after its issue is deleted ---
+out=$(LIN_URL=$URL "$LIN" issue delete "$WKEY" --force)
+assert_contains "$out" "Deleted $WKEY" "watched delete output"
+wait_for_line "$WATCH_ALL" "$WKEY deleted" "watch sees the delete"
+wait_for_line "$WATCH_ISSUE" "$WKEY deleted" "issue watch sees the delete"
+
+kill $WATCH_PIDS 2>/dev/null || true
+WATCH_PIDS=""
+
 # --- help output ---
 out=$("$LIN" --help)
 assert_contains "$out" "Usage:" "lin --help"
@@ -587,6 +700,7 @@ assert_contains "$out" "lin member" "lin --help mentions member"
 assert_contains "$out" "lin project" "lin --help mentions project"
 assert_contains "$out" "lin label" "lin --help mentions label"
 assert_contains "$out" "lin config" "lin --help mentions config"
+assert_contains "$out" "lin watch" "lin --help mentions watch"
 out=$("$LIN" issue --help)
 assert_contains "$out" "Usage:" "lin issue --help"
 assert_contains "$out" "lin issue update" "issue --help mentions update"
@@ -598,6 +712,11 @@ assert_contains "$out" "--assignee" "issue --help mentions --assignee"
 assert_contains "$out" "--label" "issue --help mentions --label"
 assert_contains "$out" "--project" "issue --help mentions --project"
 assert_contains "$out" "--search" "issue --help mentions --search"
+assert_contains "$out" "lin issue watch" "issue --help mentions watch"
+out=$("$LIN" watch --help)
+assert_contains "$out" "Usage:" "lin watch --help"
+assert_contains "$out" "--state" "watch --help mentions --state"
+assert_contains "$out" "--json" "watch --help mentions --json"
 out=$("$LIN" member --help)
 assert_contains "$out" "Usage:" "lin member --help"
 assert_contains "$out" "lin member add" "member --help mentions add"

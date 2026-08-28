@@ -1,0 +1,347 @@
+import "go:encoding/json"
+import "go:fmt"
+import "go:strings"
+import "go:time"
+
+import "config"
+import "display"
+import "models"
+import "pb"
+import "query"
+import "realtime"
+
+#[json]
+struct IssueEvent { action: string, record: models.Issue }
+
+#[json]
+struct CommentEvent { action: string, record: models.Comment }
+
+/// Dispatch `lin watch` — a live event stream for a query, one line per
+/// create/update/delete, filtered server-side with the same criteria as
+/// `lin issue list`. Runs until interrupted (Ctrl-C).
+pub fn watch(args: Slice<string>) -> Result<(), string> {
+  let mut state = ""
+  let mut assignee_name = ""
+  let mut label_name = ""
+  let mut project_name = ""
+  let mut search = ""
+  let mut json_mode = false
+  let mut i = 2
+  while i < args.length() {
+    match args[i] {
+      "--assignee" => {
+        let Some(val) = args.get(i + 1) else {
+          return Err("--assignee requires a value")
+        }
+        assignee_name = val
+        i += 2
+      },
+      "--label" => {
+        let Some(val) = args.get(i + 1) else {
+          return Err("--label requires a value")
+        }
+        label_name = val
+        i += 2
+      },
+      "--project" => {
+        let Some(val) = args.get(i + 1) else {
+          return Err("--project requires a value")
+        }
+        project_name = val
+        i += 2
+      },
+      "--search" => {
+        let Some(val) = args.get(i + 1) else {
+          return Err("--search requires a value")
+        }
+        search = val
+        i += 2
+      },
+      "--state" => {
+        let Some(val) = args.get(i + 1) else {
+          return Err("--state requires a value")
+        }
+        if query.states().find(|s| s == val).is_none() {
+          return Err(
+            f"unknown state '{val}' (use one of: {strings.Join(query.states(), ", ")})",
+          )
+        }
+        state = val
+        i += 2
+      },
+      "--json" => {
+        json_mode = true
+        i += 1
+      },
+      "--help" => {
+        print_watch_usage()
+        return Ok(())
+      },
+      "-h" => {
+        print_watch_usage()
+        return Ok(())
+      },
+      other => return Err(f"unknown flag: '{other}'"),
+    }
+  }
+
+  let cfg = config.load()?
+
+  // A configured team (LIN_TEAM or .lin.toml) scopes the stream by default,
+  // same as `issue list`.
+  let mut team_id = ""
+  if cfg.team != "" {
+    let Some(team) = find_team(cfg.team)? else {
+      return Err(f"no team with key '{cfg.team}' on the server")
+    }
+    team_id = team.id
+  }
+
+  let mut assignee_id = ""
+  if assignee_name != "" { assignee_id = resolve_member(assignee_name)?.id }
+
+  let mut label_id = ""
+  if label_name != "" { label_id = resolve_label(label_name)?.id }
+
+  let mut project_id = ""
+  if project_name != "" { project_id = resolve_project(project_name)?.id }
+
+  let filter = query.filter(
+    team_id,
+    state,
+    assignee_id,
+    project_id,
+    label_id,
+    search,
+  )
+  let topic = realtime.topic_with_options("issues", filter, "team,assignee")?
+  let ch = realtime.subscribe(pb.base_url()?, [topic])?
+
+  // Last-seen records, keyed by record id, for rendering updates as field
+  // transitions. Seeded lazily: the first sight of a record is a plain
+  // "changed" line.
+  let mut last = Map.new<string, Snapshot>()
+  loop {
+    let Some(ev) = ch.receive() else {
+      return Ok(())
+    }
+    if json_mode {
+      fmt.Println(ndjson_line(ev))
+      continue
+    }
+    let mut event = IssueEvent { .. }
+    if let Err(e) = json.Unmarshal(ev.data.bytes(), &event) {
+      return Err(f"decoding realtime event: {e}")
+    }
+    let rec = event.record
+    let stamp = time.Now().Format("15:04:05")
+    let key = f"{rec.expand.team.key}-{rec.number}"
+    match event.action {
+      "create" => {
+        last[rec.id] = snapshot(rec)
+        fmt.Println(f"{stamp} {key} created: {rec.title}")
+      },
+      "delete" => {
+        last.delete(rec.id)
+        fmt.Println(f"{stamp} {key} deleted")
+      },
+      "update" => {
+        let cur = snapshot(rec)
+        let mut described = false
+        if let Some(prev) = last.get(rec.id) {
+          let diff = issue_diff(prev, cur)
+          if diff != "" {
+            fmt.Println(f"{stamp} {key} update {diff}")
+            described = true
+          }
+        }
+        if !described { fmt.Println(f"{stamp} {key} changed") }
+        last[rec.id] = cur
+      },
+      other => fmt.Println(f"{stamp} {key} {other}"),
+    }
+  }
+}
+
+fn print_watch_usage() {
+  fmt.Println(
+    "lin watch - live event stream for a query
+
+Usage:
+  lin watch [--state s] [--assignee name] [--label name] [--project name]
+            [--search q] [--json]
+
+Streams create/update/delete events for issues matching the criteria
+(filtered server-side; scoped to the configured team like 'lin issue list'),
+one timestamped line per event, until interrupted:
+
+  10:42:01 ENG-12 created: Fix login flow
+  10:42:07 ENG-12 update state: todo -> in-progress
+  10:42:09 ENG-12 deleted
+
+Updates are shown as field transitions (state, priority, title, assignee) by
+diffing against the last event seen for that record; a record's first update
+prints as 'changed'. Note: an update that moves a record out of the filter
+(e.g. state todo -> done under --state todo) emits nothing — PocketBase only
+delivers events for records matching the filter after the change.
+
+Flags:
+  --state     one of: backlog, todo, in-progress, in-review, done, cancelled
+  --assignee  member name (see 'lin member list')
+  --label     label name (see 'lin label list')
+  --project   project name (see 'lin project list')
+  --search    only issues whose title contains q
+  --json      NDJSON: one raw PocketBase event object per line, with a
+              \"topic\" field added",
+  )
+}
+
+/// Dispatch `lin issue watch [KEY-123]` — a live event stream for one issue
+/// and its comments. Runs until interrupted or the issue is deleted.
+pub fn issue_watch(args: Slice<string>) -> Result<(), string> {
+  let usage = "lin issue watch [KEY-123] [--json]"
+  let mut id = ""
+  let mut json_mode = false
+  let mut i = 3
+  while i < args.length() {
+    match args[i] {
+      "--json" => {
+        json_mode = true
+        i += 1
+      },
+      other => {
+        if other.starts_with("-") { return Err(f"unknown flag: '{other}'") }
+        if id != "" { return Err(f"unexpected argument: '{other}'") }
+        id = other
+        i += 1
+      },
+    }
+  }
+  let resolved = resolve_id(id, usage)?
+  let issue = fetch_issue(resolved)?
+  let key = f"{issue.expand.team.key}-{issue.number}"
+
+  let issue_topic = realtime.topic_with_options(
+    f"issues/{issue.id}",
+    "",
+    "team,assignee",
+  )?
+  // Comments are a collection-level subscription filtered server-side to
+  // this issue; record ids are alphanumeric, so inlining is quote-safe.
+  let comments_topic = realtime.topic_with_options(
+    "comments",
+    f"issue='{issue.id}'",
+    "author",
+  )?
+  let ch = realtime.subscribe(pb.base_url()?, [issue_topic, comments_topic])?
+  fmt.Println(f"Watching {key}: {issue.title}")
+
+  // The fetched issue seeds the diff, so the very first update already
+  // renders as a transition.
+  let mut prev = snapshot(issue)
+  loop {
+    let Some(ev) = ch.receive() else {
+      return Ok(())
+    }
+    if json_mode {
+      fmt.Println(ndjson_line(ev))
+      continue
+    }
+    let stamp = time.Now().Format("15:04:05")
+    if ev.topic == "comments" {
+      let mut event = CommentEvent { .. }
+      if let Err(e) = json.Unmarshal(ev.data.bytes(), &event) {
+        return Err(f"decoding realtime event: {e}")
+      }
+      // Only comment creates are narrated; edits and deletions of comments
+      // are not part of the issue's activity stream.
+      if event.action != "create" { continue }
+      let mut author = event.record.expand.author.name
+      if author == "" { author = "anon" }
+      fmt.Println(
+        f"{stamp} comment by {author}: {first_line(event.record.body)}",
+      )
+      continue
+    }
+    let mut event = IssueEvent { .. }
+    if let Err(e) = json.Unmarshal(ev.data.bytes(), &event) {
+      return Err(f"decoding realtime event: {e}")
+    }
+    match event.action {
+      "delete" => {
+        fmt.Println(f"{stamp} {key} deleted")
+        return Ok(())
+      },
+      "update" => {
+        let cur = snapshot(event.record)
+        let diff = issue_diff(prev, cur)
+        if diff == "" {
+          fmt.Println(f"{stamp} changed")
+        } else {
+          fmt.Println(f"{stamp} {diff}")
+        }
+        prev = cur
+      },
+      other => (),
+    }
+  }
+}
+
+/// The narrated fields of an issue, copied out to plain scalars so cached
+/// values own their data (whole records alias their slices/expand).
+struct Snapshot {
+  state: string,
+  priority: int,
+  title: string,
+  assignee: string,
+  assignee_name: string,
+}
+
+fn snapshot(issue: models.Issue) -> Snapshot {
+  Snapshot { 
+    state: issue.state,
+    priority: issue.priority,
+    title: issue.title,
+    assignee: issue.assignee,
+    assignee_name: issue.expand.assignee.name,
+  }
+}
+
+/// Comma-joined transitions for the narrated fields (state, priority, title,
+/// assignee); empty when none of them changed.
+fn issue_diff(prev: Snapshot, cur: Snapshot) -> string {
+  let mut parts: Slice<string> = []
+  if prev.state != cur.state {
+    parts = parts.append(f"state: {prev.state} -> {cur.state}")
+  }
+  if prev.priority != cur.priority {
+    parts = parts.append(
+      f"priority: {display.priority_name(prev.priority)} -> {display.priority_name(cur.priority)}",
+    )
+  }
+  if prev.title != cur.title {
+    parts = parts.append(f"title: {prev.title} -> {cur.title}")
+  }
+  if prev.assignee != cur.assignee {
+    parts = parts.append(
+      f"assignee: {assignee_display(prev)} -> {assignee_display(cur)}",
+    )
+  }
+  strings.Join(parts, ", ")
+}
+
+fn assignee_display(snap: Snapshot) -> string {
+  if snap.assignee_name == "" { "none" } else { snap.assignee_name }
+}
+
+/// The event's raw PB payload as one NDJSON line, with a "topic" field
+/// spliced in after the opening brace. Topics are collection names and
+/// record ids — no JSON escaping needed.
+fn ndjson_line(ev: realtime.Event) -> string {
+  if !ev.data.starts_with("{") { return ev.data }
+  "{\"topic\":\"" + ev.topic + "\"," + ev.data.substring(1..ev.data.length())
+}
+
+fn first_line(body: string) -> string {
+  body.split("\n")[0]
+}

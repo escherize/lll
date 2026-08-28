@@ -1,0 +1,223 @@
+import "go:bufio"
+import "go:bytes"
+import "go:encoding/json"
+import "go:net/http"
+import "go:net/url"
+import "go:strings"
+import "go:time"
+
+/// A record event from a PocketBase realtime stream. `topic` is the
+/// subscription topic with any ?options= suffix stripped ("issues",
+/// "issues/RECORDID", "comments"); `data` is the raw JSON payload,
+/// {"action":"create|update|delete","record":{...}}.
+pub struct Event {
+  pub topic: string,
+  pub data: string,
+}
+
+/// One complete SSE frame: the event name and its data payload
+/// (multi-line data joined with newlines).
+pub struct Frame {
+  pub event: string,
+  pub data: string,
+}
+
+/// Incremental SSE frame parser. Feed one line at a time (without the
+/// trailing newline); a blank line completes and returns the frame.
+/// Pure state machine — no IO.
+pub struct FrameParser { event: string, data: Slice<string> }
+
+impl FrameParser {
+  pub fn new() -> FrameParser {
+    FrameParser { event: "", data: [] }
+  }
+
+  /// Feed one line. Returns the completed frame at a blank-line delimiter,
+  /// None otherwise. Comment lines (leading ':') and fields other than
+  /// event/data (id, retry) are ignored; a stray blank line yields nothing.
+  pub fn push_line(self: Ref<FrameParser>, raw: string) -> Option<Frame> {
+    let line = strings.TrimSuffix(raw, "\r")
+    if line == "" {
+      if self.event == "" && self.data.is_empty() { return None }
+      let frame = Frame { 
+        event: self.event,
+        data: strings.Join(self.data, "\n"),
+      }
+      self.event = ""
+      self.data = []
+      return Some(frame)
+    }
+    if line.starts_with(":") { return None }
+    let (field, value) = split_field(line)
+    match field {
+      "event" => self.event = value,
+      "data" => self.data = self.data.append(value),
+      other => (),
+    }
+    None
+  }
+}
+
+/// Split an SSE line at the first colon; one leading space of the value is
+/// eaten per the SSE spec. A line without a colon is a field with no value.
+fn split_field(line: string) -> (string, string) {
+  let Some(colon) = strings.Index(line, ":") else {
+    return (line, "")
+  }
+  let field = line.substring(0..colon)
+  let value = strings.TrimPrefix(line.substring(colon + 1..line.length()), " ")
+  (field, value)
+}
+
+#[json]
+struct OptionsQuery {
+  #[json(omitempty)]
+  filter: string,
+  #[json(omitempty)]
+  expand: string,
+}
+
+#[json]
+struct TopicOptions { query: OptionsQuery }
+
+/// A subscription topic with server-side options attached:
+/// topic?options=<url-encoded {"query":{"filter":...,"expand":...}}>.
+/// The "query" wrapper is load-bearing: PB silently ignores a bare
+/// {"filter":...} object (verified against PB 0.40.1 — no error, no
+/// filtering). Empty filter and expand return the topic unchanged.
+pub fn topic_with_options(topic: string, filter: string, expand: string) -> Result<string, string> {
+  if filter == "" && expand == "" { return Ok(topic) }
+  let options = TopicOptions { query: OptionsQuery { filter, expand } }
+  let encoded = match json.Marshal(options) {
+    Ok(b) => b as string,
+    Err(e) => return Err(f"encoding topic options: {e}"),
+  }
+  Ok(f"{topic}?options={url.QueryEscape(encoded)}")
+}
+
+/// The topic without its ?options= suffix.
+fn strip_options(topic: string) -> string {
+  let Some(q) = strings.Index(topic, "?") else {
+    return topic
+  }
+  topic.substring(0..q)
+}
+
+#[json]
+struct ConnectMsg {
+  #[json("clientId")]
+  client_id: string,
+}
+
+#[json]
+struct SubscribeMsg {
+  #[json("clientId")]
+  client_id: string,
+  subscriptions: Slice<string>,
+}
+
+/// Subscribe to PB realtime topics and stream their record events.
+///
+/// The first connection is established synchronously so configuration errors
+/// (bad URL, PB down) surface immediately; after that a background task pumps
+/// events into the returned channel and, on any stream error (PB restart,
+/// idle disconnect), reconnects from scratch — new SSE connection, new client
+/// id, re-subscribe — retrying every second, silently, forever.
+///
+/// The protocol (verified live against PB 0.40.1): GET /api/realtime opens an
+/// SSE stream whose first event is PB_CONNECT carrying {"clientId":...};
+/// POSTing {"clientId","subscriptions":[...]} back to /api/realtime (204)
+/// activates the topics; record events then arrive named by topic, verbatim
+/// including any options suffix.
+pub fn subscribe(base_url: string, topics: Slice<string>) -> Result<Channel<Event>, string> {
+  let ch = Channel.new<Event>()
+  let reader = connect(base_url, topics)?
+  task {
+    pump(reader, ch)
+    loop {
+      time.Sleep(time.Second)
+      if let Ok(r) = connect(base_url, topics) { pump(r, ch) }
+    }
+  }
+  Ok(ch)
+}
+
+/// Open the SSE stream, wait for PB_CONNECT, and POST the subscriptions.
+/// Returns a reader positioned at the first record event.
+fn connect(base_url: string, topics: Slice<string>) -> Result<Ref<bufio.Reader>, string> {
+  let resp = match http.Get(base_url + "/api/realtime") {
+    Ok(r) => r,
+    Err(e) => return Err(f"cannot reach PocketBase at {base_url}: {e}"),
+  }
+  let Some(stream) = resp.Body else {
+    return Err("GET /api/realtime: empty response body")
+  }
+  if resp.StatusCode >= 300 {
+    let _ = stream.Close()
+    return Err(f"GET /api/realtime: {resp.Status}")
+  }
+
+  let reader = bufio.NewReader(stream)
+  let mut parser = FrameParser.new()
+  let mut client_id = ""
+  while client_id == "" {
+    let line = match reader.ReadString('\n') {
+      Partial.Ok(l) => l,
+      Partial.Both(_, e) => return Err(f"realtime handshake interrupted: {e}"),
+      Partial.Err(e) => return Err(f"realtime handshake interrupted: {e}"),
+    }
+    let Some(frame) = parser.push_line(strings.TrimSuffix(line, "\n")) else {
+      continue
+    }
+    if frame.event != "PB_CONNECT" { continue }
+    let mut msg = ConnectMsg { .. }
+    if let Err(e) = json.Unmarshal(frame.data.bytes(), &msg) {
+      return Err(f"decoding PB_CONNECT: {e}")
+    }
+    client_id = msg.client_id
+  }
+
+  let sub = SubscribeMsg { client_id, subscriptions: topics }
+  let payload = match json.Marshal(sub) {
+    Ok(b) => b,
+    Err(e) => return Err(f"encoding subscription: {e}"),
+  }
+  let sub_resp = match http.Post(
+    base_url + "/api/realtime",
+    "application/json",
+    bytes.NewReader(payload),
+  ) {
+    Ok(r) => r,
+    Err(e) => return Err(f"cannot reach PocketBase at {base_url}: {e}"),
+  }
+  if let Some(body) = sub_resp.Body { let _ = body.Close() }
+  if sub_resp.StatusCode >= 300 {
+    return Err(f"POST /api/realtime: {sub_resp.Status}")
+  }
+  Ok(reader)
+}
+
+/// Forward record events from an established stream into the channel.
+/// Returns when the stream errors; the caller reconnects. The dead
+/// connection's stream is abandoned (its socket is already gone).
+fn pump(reader: Ref<bufio.Reader>, ch: Channel<Event>) {
+  let mut parser = FrameParser.new()
+  loop {
+    let line = match reader.ReadString('\n') {
+      Partial.Ok(l) => l,
+      Partial.Both(_, _) => {
+        return
+      },
+      Partial.Err(_) => {
+        return
+      },
+    }
+    let Some(frame) = parser.push_line(strings.TrimSuffix(line, "\n")) else {
+      continue
+    }
+    if frame.event == "PB_CONNECT" { continue }
+    let _ = ch.send(
+      Event { topic: strip_options(frame.event), data: frame.data },
+    )
+  }
+}

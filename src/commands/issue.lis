@@ -29,6 +29,7 @@ pub fn issue(args: Slice<string>) -> Result<(), string> {
     "start" => start(args),
     "delete" => delete_issue(args),
     "comment" => comment(args),
+    "watch" => issue_watch(args),
     "--help" => {
       print_usage()
       Ok(())
@@ -60,6 +61,8 @@ Usage:
   lin issue delete KEY-123 [--force]              delete; asks [y/N] unless --force
   lin issue comment [KEY-123] [-b \"body\"]         add a comment (authored by 'me' in
                                                   .lin.toml); without -b, list comments
+  lin issue watch [KEY-123] [--json]              stream live events for the issue and
+                                                  its comments until interrupted
 
 Flags:
   --state        one of: backlog, todo, in-progress, in-review, done, cancelled

@@ -1,0 +1,97 @@
+#[test]
+fn push_line_assembles_an_event_data_frame() {
+  let mut p = FrameParser.new()
+  assert p.push_line("id:abc123").is_none()
+  assert p.push_line("event:issues").is_none()
+  assert p.push_line("data:{\"action\":\"create\"}").is_none()
+  let assert Some(frame) = p.push_line("")
+  assert frame.event == "issues"
+  assert frame.data == "{\"action\":\"create\"}"
+}
+
+#[test]
+fn push_line_resets_between_frames() {
+  let mut p = FrameParser.new()
+  let _ = p.push_line("event:first")
+  let _ = p.push_line("data:1")
+  let assert Some(_) = p.push_line("")
+  let _ = p.push_line("event:second")
+  let _ = p.push_line("data:2")
+  let assert Some(frame) = p.push_line("")
+  assert frame.event == "second"
+  assert frame.data == "2"
+}
+
+#[test]
+fn push_line_joins_multi_line_data() {
+  let mut p = FrameParser.new()
+  let _ = p.push_line("data:line one")
+  let _ = p.push_line("data:line two")
+  let assert Some(frame) = p.push_line("")
+  assert frame.data == "line one\nline two"
+}
+
+#[test]
+fn push_line_eats_one_leading_space_of_the_value() {
+  let mut p = FrameParser.new()
+  let _ = p.push_line("data:  two spaces")
+  let assert Some(frame) = p.push_line("")
+  assert frame.data == " two spaces"
+}
+
+#[test]
+fn push_line_strips_carriage_returns() {
+  let mut p = FrameParser.new()
+  let _ = p.push_line("event:issues\r")
+  let _ = p.push_line("data:x\r")
+  let assert Some(frame) = p.push_line("\r")
+  assert frame.event == "issues"
+  assert frame.data == "x"
+}
+
+#[test]
+fn push_line_ignores_comments_and_stray_blank_lines() {
+  let mut p = FrameParser.new()
+  assert p.push_line("").is_none()
+  assert p.push_line(": heartbeat").is_none()
+  assert p.push_line("").is_none()
+  let _ = p.push_line("data:x")
+  let assert Some(frame) = p.push_line("")
+  assert frame.data == "x"
+}
+
+#[test]
+fn split_field_handles_missing_colon_and_data_containing_colons() {
+  let (f1, v1) = split_field("data:a:b:c")
+  assert f1 == "data"
+  assert v1 == "a:b:c"
+  let (f2, v2) = split_field("naked")
+  assert f2 == "naked"
+  assert v2 == ""
+}
+
+#[test]
+fn topic_with_options_wraps_in_query_and_url_encodes() {
+  let assert Ok(topic) = topic_with_options("issues", "state='todo'", "")
+  assert topic ==
+  "issues?options=%7B%22query%22%3A%7B%22filter%22%3A%22state%3D%27todo%27%22%7D%7D"
+}
+
+#[test]
+fn topic_with_options_includes_expand() {
+  let assert Ok(topic) = topic_with_options("comments", "", "author")
+  assert topic ==
+  "comments?options=%7B%22query%22%3A%7B%22expand%22%3A%22author%22%7D%7D"
+}
+
+#[test]
+fn topic_with_options_without_options_is_the_bare_topic() {
+  let assert Ok(topic) = topic_with_options("issues", "", "")
+  assert topic == "issues"
+}
+
+#[test]
+fn strip_options_removes_the_suffix() {
+  assert strip_options("comments?options=%7B%7D") == "comments"
+  assert strip_options("issues/abc123") == "issues/abc123"
+}

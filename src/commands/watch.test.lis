@@ -1,0 +1,58 @@
+import "realtime"
+
+fn snap(state: string, priority: int, title: string) -> Snapshot {
+  Snapshot { state, priority, title, assignee: "", assignee_name: "" }
+}
+
+#[test]
+fn issue_diff_empty_when_nothing_tracked_changed() {
+  assert issue_diff(snap("todo", 2, "t"), snap("todo", 2, "t")) == ""
+}
+
+#[test]
+fn issue_diff_state_transition() {
+  assert issue_diff(snap("todo", 0, "t"), snap("in-progress", 0, "t")) ==
+  "state: todo -> in-progress"
+}
+
+#[test]
+fn issue_diff_priority_uses_names() {
+  assert issue_diff(snap("todo", 0, "t"), snap("todo", 1, "t")) ==
+  "priority: none -> urgent"
+}
+
+#[test]
+fn issue_diff_assignee_uses_names_with_none_fallback() {
+  let prev = Snapshot { state: "todo", title: "t", .. }
+  let cur = Snapshot { 
+    state: "todo",
+    priority: 0,
+    title: "t",
+    assignee: "mem1",
+    assignee_name: "bryan",
+  }
+  assert issue_diff(prev, cur) == "assignee: none -> bryan"
+}
+
+#[test]
+fn issue_diff_joins_multiple_transitions() {
+  assert issue_diff(snap("todo", 0, "old"), snap("done", 4, "new")) ==
+  "state: todo -> done, priority: none -> low, title: old -> new"
+}
+
+#[test]
+fn ndjson_line_splices_the_topic_into_the_payload() {
+  let ev = realtime.Event { 
+    topic: "issues",
+    data: "{\"action\":\"create\",\"record\":{}}",
+  }
+  assert ndjson_line(ev) ==
+  "{\"topic\":\"issues\",\"action\":\"create\",\"record\":{}}"
+}
+
+#[test]
+fn first_line_takes_up_to_the_first_newline() {
+  assert first_line("one\ntwo") == "one"
+  assert first_line("only") == "only"
+  assert first_line("") == ""
+}
