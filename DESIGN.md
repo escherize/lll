@@ -66,6 +66,7 @@ typography:
     base: "13px"
     title: "19px"
 rounded:
+  indicator: "1px"
   focus: "4px"
   mark: "5px"
   base: "6px"

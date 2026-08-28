@@ -136,6 +136,10 @@
       "mark": {
         "canonical": "5px",
         "purpose": "Workspace mark and scrollbar thumbs."
+      },
+      "indicator": {
+        "canonical": "1px",
+        "purpose": "Pill ends on 2px drop-indicator bars (half-height rounding)."
       }
     },
     "shadows": [
