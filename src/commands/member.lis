@@ -5,7 +5,7 @@ import "go:net/url"
 import "models"
 import "pb"
 
-/// Dispatch `lin member <verb>`.
+/// Dispatch `lll member <verb>`.
 pub fn member(args: Slice<string>) -> Result<(), string> {
   let Some(verb) = args.get(2) else {
     member_usage()
@@ -22,19 +22,19 @@ pub fn member(args: Slice<string>) -> Result<(), string> {
       member_usage()
       Ok(())
     },
-    other => Err(f"unknown member command: '{other}' (see 'lin member --help')"),
+    other => Err(f"unknown member command: '{other}' (see 'lll member --help')"),
   }
 }
 
 fn member_usage() {
   fmt.Println(
-    "lin member - work with members
+    "lll member - work with members
 
 Usage:
-  lin member list                       list members (name, email)
-  lin member add -n \"name\" [-e email]   add a member
+  lll member list                       list members (name, email)
+  lll member add -n \"name\" [-e email]   add a member
 
-Members are honor-system identities (no auth). 'me' in .lin.toml names the
+Members are honor-system identities (no auth). 'me' in .lll.toml names the
 member that authors your comments.",
   )
 }
@@ -74,7 +74,7 @@ fn member_add(args: Slice<string>) -> Result<(), string> {
       other => return Err(f"unknown flag: '{other}'"),
     }
   }
-  if name == "" { return Err("usage: lin member add -n \"name\" [-e email]") }
+  if name == "" { return Err("usage: lll member add -n \"name\" [-e email]") }
 
   let new_member = models.NewMember { name, email }
   let payload = match json.Marshal(new_member) {

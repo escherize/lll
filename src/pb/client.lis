@@ -4,7 +4,7 @@ import "go:net/http"
 
 import "config"
 
-/// Base URL of the PocketBase server, from config (LIN_URL > config files).
+/// Base URL of the PocketBase server, from config (LLL_URL > config files).
 pub fn base_url() -> Result<string, string> {
   let cfg = config.load()?
   Ok(cfg.url)

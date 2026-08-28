@@ -3,7 +3,7 @@
 target/
 pb/pocketbase
 pb/pb_data/
-.lin.toml
+.lll.toml
 .playwright-cli/
 .impeccable/review/
 .impeccable/mocks/.playwright-cli/

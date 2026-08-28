@@ -16,7 +16,7 @@ ambient light.
 
 ## Product Purpose
 
-`lin` is a Linear-style issue tracker over a self-hosted PocketBase: teams,
+`lll` is a Linear-style issue tracker over a self-hosted PocketBase: teams,
 ENG-123 identifiers, states, priorities, projects, labels, comments. The CLI is
 the primary interface; the web board is a live read-and-light-write surface.
 Success: state of work legible in seconds, updates visible in realtime without
@@ -48,7 +48,7 @@ re-read from disk per request.
   palette, compact density, state/priority iconography, left-rail + board
   layout. [user-directed]
 - Accent: orange #f0883e (not Linear's indigo; teal was considered and rejected
-  as played out) so lin keeps its own identity. [user-confirmed]
+  as played out) so lll keeps its own identity. [user-confirmed]
 - Dark-only for now. [user-confirmed]
 - Typeface: Inter Variable, self-hosted (web/static/fonts/InterVariable.woff2). [user-confirmed]
 

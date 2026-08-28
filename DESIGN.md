@@ -1,6 +1,6 @@
 ---
-name: lin
-description: Dark instrument-panel issue board — Linear's grammar with lin's own orange.
+name: lll
+description: Dark instrument-panel issue board — Linear's grammar with lll's own orange.
 colors:
   ink-ground: "#0e0f11"
   rail-ground: "#111316"
@@ -91,15 +91,15 @@ components:
     padding: "0 7px 0 5px"
 ---
 
-# Design System: lin
+# Design System: lll
 
 ## Overview
 
 **Creative North Star: "The Instrument Panel"**
 
-lin is a dark, dense, quiet issue board: every issue's state legible in one
+lll is a dark, dense, quiet issue board: every issue's state legible in one
 glance, refusing the airy marketing-card look of generic kanban tools. The
-world is Linear's grammar rebuilt in lin's own materials — a near-black ground,
+world is Linear's grammar rebuilt in lll's own materials — a near-black ground,
 hairline white-alpha borders, one small variable typeface at 13px, muted gray
 text, and semantic state color carried almost entirely by small drawn icons.
 Chrome recedes; the data is the interface.

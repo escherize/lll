@@ -5,7 +5,7 @@ import "go:net/url"
 import "models"
 import "pb"
 
-/// Dispatch `lin label <verb>`.
+/// Dispatch `lll label <verb>`.
 pub fn label(args: Slice<string>) -> Result<(), string> {
   let Some(verb) = args.get(2) else {
     label_usage()
@@ -22,17 +22,17 @@ pub fn label(args: Slice<string>) -> Result<(), string> {
       label_usage()
       Ok(())
     },
-    other => Err(f"unknown label command: '{other}' (see 'lin label --help')"),
+    other => Err(f"unknown label command: '{other}' (see 'lll label --help')"),
   }
 }
 
 fn label_usage() {
   fmt.Println(
-    "lin label - work with labels
+    "lll label - work with labels
 
 Usage:
-  lin label list                                 list labels (name, color, team)
-  lin label create -n \"name\" [-c \"#5e6ad2\"] [--team KEY]
+  lll label list                                 list labels (name, color, team)
+  lll label create -n \"name\" [-c \"#5e6ad2\"] [--team KEY]
                                                  create a label (no --team means
                                                  workspace-wide)",
   )
@@ -87,7 +87,7 @@ fn label_create(args: Slice<string>) -> Result<(), string> {
   }
   if name == "" {
     return Err(
-      "usage: lin label create -n \"name\" [-c \"#5e6ad2\"] [--team KEY]",
+      "usage: lll label create -n \"name\" [-c \"#5e6ad2\"] [--team KEY]",
     )
   }
 
@@ -123,7 +123,7 @@ fn resolve_label(name: string) -> Result<models.Label, string> {
     return Err(f"decoding labels: {e}")
   }
   let Some(l) = result.items.find(|l| l.name == name) else {
-    return Err(f"no label named '{name}' — see 'lin label list'")
+    return Err(f"no label named '{name}' — see 'lll label list'")
   }
   Ok(l)
 }

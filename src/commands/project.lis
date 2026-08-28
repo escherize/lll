@@ -6,7 +6,7 @@ import "go:strings"
 import "models"
 import "pb"
 
-/// Dispatch `lin project <verb>`.
+/// Dispatch `lll project <verb>`.
 pub fn project(args: Slice<string>) -> Result<(), string> {
   let Some(verb) = args.get(2) else {
     project_usage()
@@ -25,7 +25,7 @@ pub fn project(args: Slice<string>) -> Result<(), string> {
       Ok(())
     },
     other => Err(
-      f"unknown project command: '{other}' (see 'lin project --help')",
+      f"unknown project command: '{other}' (see 'lll project --help')",
     ),
   }
 }
@@ -37,12 +37,12 @@ fn project_statuses() -> Slice<string> {
 
 fn project_usage() {
   fmt.Println(
-    "lin project - work with projects
+    "lll project - work with projects
 
 Usage:
-  lin project list                    list projects (name, status, team)
-  lin project view NAME               show a project and its issues
-  lin project create -n \"name\" [-d desc] [--status s] [--team KEY]
+  lll project list                    list projects (name, status, team)
+  lll project view NAME               show a project and its issues
+  lll project create -n \"name\" [-d desc] [--status s] [--team KEY]
                                       create a project (status defaults to
                                       planned; no --team means workspace-wide)
 
@@ -112,7 +112,7 @@ fn project_create(args: Slice<string>) -> Result<(), string> {
   }
   if name == "" {
     return Err(
-      "usage: lin project create -n \"name\" [-d desc] [--status s] [--team KEY]",
+      "usage: lll project create -n \"name\" [-d desc] [--status s] [--team KEY]",
     )
   }
 
@@ -141,7 +141,7 @@ fn project_create(args: Slice<string>) -> Result<(), string> {
 
 fn project_view(args: Slice<string>) -> Result<(), string> {
   let Some(name) = args.get(3) else {
-    return Err("usage: lin project view NAME")
+    return Err("usage: lll project view NAME")
   }
   let p = resolve_project(name)?
 
@@ -184,7 +184,7 @@ fn resolve_project(name: string) -> Result<models.Project, string> {
     return Err(f"decoding projects: {e}")
   }
   let Some(p) = result.items.find(|p| p.name == name) else {
-    return Err(f"no project named '{name}' — see 'lin project list'")
+    return Err(f"no project named '{name}' — see 'lll project list'")
   }
   Ok(p)
 }

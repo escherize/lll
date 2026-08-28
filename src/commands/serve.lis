@@ -14,7 +14,7 @@ import "pb"
 import "query"
 import "realtime"
 
-// `lin serve` — a server-rendered web board with realtime updates.
+// `lll serve` — a server-rendered web board with realtime updates.
 //
 // Architecture: browsers hold ONE SSE connection to /events. The server holds
 // one unfiltered (team-scoped at most) PB realtime subscription to issues +
@@ -26,7 +26,7 @@ import "realtime"
 //
 // Templates live in web/templates/ and are re-parsed from disk on every
 // render, so markup edits show on refresh with no rebuild (task-9's design
-// iteration loop depends on this). Run `lin serve` from the repo root.
+// iteration loop depends on this). Run `lll serve` from the repo root.
 
 /// View model for one label chip.
 pub struct LabelVM {
@@ -171,7 +171,7 @@ fn deliver(clients: Slice<SseClient>, msg: Broadcast) {
   }
 }
 
-/// Dispatch `lin serve [--port 8100]`.
+/// Dispatch `lll serve [--port 8100]`.
 pub fn serve(args: Slice<string>) -> Result<(), string> {
   let mut port = 8100
   let mut i = 2
@@ -198,7 +198,11 @@ pub fn serve(args: Slice<string>) -> Result<(), string> {
       other => return Err(f"unknown flag: '{other}'"),
     }
   }
+  run_server(port)
+}
 
+/// Start the board server on `port`. Shared by `lll serve` and `lll up`.
+pub fn run_server(port: int) -> Result<(), string> {
   // Resolve the team scope once; card/board fetches and the realtime
   // subscription share it. No configured team means an unscoped board.
   let cfg = config.load()?
@@ -258,7 +262,7 @@ pub fn serve(args: Slice<string>) -> Result<(), string> {
     http.StripPrefix("/static/", http.FileServer(http.Dir("web/static"))),
   )
 
-  fmt.Println(f"lin serve listening on http://127.0.0.1:{port}")
+  fmt.Println(f"lll serve listening on http://127.0.0.1:{port}")
   match http.ListenAndServe(f"127.0.0.1:{port}", http.DefaultServeMux) {
     Ok(_) => Ok(()),
     Err(e) => Err(f"server: {e}"),
@@ -267,10 +271,10 @@ pub fn serve(args: Slice<string>) -> Result<(), string> {
 
 fn print_serve_usage() {
   fmt.Println(
-    "lin serve - web board with realtime updates
+    "lll serve - web board with realtime updates
 
 Usage:
-  lin serve [--port 8100]
+  lll serve [--port 8100]
 
 Serves a board page (/) grouped by state and issue pages (/issue/KEY-123).
 Changes made anywhere — the web UI, the CLI, other browsers — appear in every
@@ -279,7 +283,7 @@ open page without reload, streamed over a single SSE connection per page.
 Templates and CSS are read from web/templates/ and web/static/ relative to
 the working directory on every request: edit and refresh, no rebuild.
 
-The board is scoped to the configured team (LIN_TEAM or 'team' in .lin.toml)
+The board is scoped to the configured team (LLL_TEAM or 'team' in .lll.toml)
 when one is set; creating an issue from the board requires it.",
   )
 }
@@ -602,7 +606,7 @@ fn create_action(w: http.ResponseWriter, r: Ref<http.Request>, team_id: string) 
   if team_id == "" {
     http.Error(
       w,
-      "no team configured: set LIN_TEAM or 'team' in .lin.toml",
+      "no team configured: set LLL_TEAM or 'team' in .lll.toml",
       400,
     )
     return
@@ -661,7 +665,7 @@ fn comment_action(w: http.ResponseWriter, r: Ref<http.Request>) {
       return
     },
   }
-  // Same honor-system authorship as `lin issue comment`: the member named by
+  // Same honor-system authorship as `lll issue comment`: the member named by
   // 'me' in config, or authorless.
   let mut author = ""
   if let Ok(cfg) = config.load() {

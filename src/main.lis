@@ -18,6 +18,7 @@ fn main() {
     "config" => commands.config_cmd(os.Args),
     "watch" => commands.watch(os.Args),
     "serve" => commands.serve(os.Args),
+    "up" => commands.up(os.Args),
     "--help" => {
       print_usage()
       Ok(())
@@ -41,22 +42,23 @@ fn main() {
 
 fn print_usage() {
   fmt.Println(
-    "lin - a Linear-style issue tracker
+    "lll - a Linear-style issue tracker
 
 Usage:
-  lin issue <command>     work with issues (see 'lin issue --help')
-  lin team <command>      work with teams (see 'lin team --help')
-  lin member <command>    work with members (see 'lin member --help')
-  lin project <command>   work with projects (see 'lin project --help')
-  lin label <command>     work with labels (see 'lin label --help')
-  lin config <command>    manage configuration (see 'lin config --help')
-  lin watch [flags]       live event stream for a query (see 'lin watch --help')
-  lin serve [--port 8100] web board with realtime updates (see 'lin serve --help')
-  lin --help              show this help
+  lll issue <command>     work with issues (see 'lll issue --help')
+  lll team <command>      work with teams (see 'lll team --help')
+  lll member <command>    work with members (see 'lll member --help')
+  lll project <command>   work with projects (see 'lll project --help')
+  lll label <command>     work with labels (see 'lll label --help')
+  lll config <command>    manage configuration (see 'lll config --help')
+  lll watch [flags]       live event stream for a query (see 'lll watch --help')
+  lll serve [--port 8100] web board with realtime updates (see 'lll serve --help')
+  lll up [--port 8100]    start PocketBase + web board together (see 'lll up --help')
+  lll --help              show this help
 
-Configuration (env > ./.lin.toml > ~/.config/lin/lin.toml):
-  LIN_URL    PocketBase base URL (default http://127.0.0.1:8090)
-  LIN_TEAM   default team key (e.g. ENG); scopes 'issue list', used by 'issue create'
-  LIN_SORT   default sort for 'issue list': created, updated, priority, number; prefix - to descend",
+Configuration (env > ./.lll.toml > ~/.config/lll/lll.toml):
+  LLL_URL    PocketBase base URL (default http://127.0.0.1:8090)
+  LLL_TEAM   default team key (e.g. ENG); scopes 'issue list', used by 'issue create'
+  LLL_SORT   default sort for 'issue list': created, updated, priority, number; prefix - to descend",
   )
 }

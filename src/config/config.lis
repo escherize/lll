@@ -11,7 +11,7 @@ pub struct Config {
   pub me: string,
 }
 
-/// Load config: env vars > ./.lin.toml > ~/.config/lin/lin.toml.
+/// Load config: env vars > ./.lll.toml > ~/.config/lll/lll.toml.
 /// The first config file found is used whole; env vars override per field.
 pub fn load() -> Result<Config, string> {
   let mut cfg = Config { .. }
@@ -25,15 +25,15 @@ pub fn load() -> Result<Config, string> {
     }
   }
 
-  let url = os.Getenv("LIN_URL")
+  let url = os.Getenv("LLL_URL")
   if url != "" {
     cfg.url = url
   }
-  let team = os.Getenv("LIN_TEAM")
+  let team = os.Getenv("LLL_TEAM")
   if team != "" {
     cfg.team = team
   }
-  let sort = os.Getenv("LIN_SORT")
+  let sort = os.Getenv("LLL_SORT")
   if sort != "" {
     cfg.sort = sort
   }
@@ -44,15 +44,15 @@ pub fn load() -> Result<Config, string> {
   Ok(cfg)
 }
 
-/// First existing config file: ./.lin.toml, then ~/.config/lin/lin.toml.
+/// First existing config file: ./.lll.toml, then ~/.config/lll/lll.toml.
 fn config_file() -> Option<string> {
-  if exists(".lin.toml") {
-    return Some(".lin.toml")
+  if exists(".lll.toml") {
+    return Some(".lll.toml")
   }
   let Ok(home) = os.UserHomeDir() else {
     return None
   }
-  let path = filepath.Join(home, ".config", "lin", "lin.toml")
+  let path = filepath.Join(home, ".config", "lll", "lll.toml")
   if exists(path) {
     Some(path)
   } else {

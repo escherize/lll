@@ -1,7 +1,7 @@
 import "go:fmt"
 import "go:os"
 
-/// Dispatch `lin config <verb>`.
+/// Dispatch `lll config <verb>`.
 pub fn config_cmd(args: Slice<string>) -> Result<(), string> {
   let Some(verb) = args.get(2) else {
     config_usage()
@@ -17,45 +17,45 @@ pub fn config_cmd(args: Slice<string>) -> Result<(), string> {
       config_usage()
       Ok(())
     },
-    other => Err(f"unknown config command: '{other}' (see 'lin config --help')"),
+    other => Err(f"unknown config command: '{other}' (see 'lll config --help')"),
   }
 }
 
 fn config_usage() {
   fmt.Println(
-    "lin config - manage configuration
+    "lll config - manage configuration
 
 Usage:
-  lin config init    write a commented .lin.toml template to the current directory
+  lll config init    write a commented .lll.toml template to the current directory
 
-Precedence: env vars (LIN_URL, LIN_TEAM, LIN_SORT) > ./.lin.toml > ~/.config/lin/lin.toml",
+Precedence: env vars (LLL_URL, LLL_TEAM, LLL_SORT) > ./.lll.toml > ~/.config/lll/lll.toml",
   )
 }
 
 fn config_init() -> Result<(), string> {
-  if os.Stat(".lin.toml").is_ok() {
-    return Err(".lin.toml already exists; not overwriting")
+  if os.Stat(".lll.toml").is_ok() {
+    return Err(".lll.toml already exists; not overwriting")
   }
-  let template = "# lin configuration
-# Precedence: env vars (LIN_URL, LIN_TEAM, LIN_SORT) > ./.lin.toml > ~/.config/lin/lin.toml
+  let template = "# lll configuration
+# Precedence: env vars (LLL_URL, LLL_TEAM, LLL_SORT) > ./.lll.toml > ~/.config/lll/lll.toml
 # The first file found is used whole; env vars override individual fields.
 
 # PocketBase server URL.
 # url = \"http://127.0.0.1:8090\"
 
-# Default team key. Scopes 'lin issue list' and is required by 'lin issue create'.
+# Default team key. Scopes 'lll issue list' and is required by 'lll issue create'.
 # team = \"ENG\"
 
-# Default sort for 'lin issue list': created, updated, priority, or number;
+# Default sort for 'lll issue list': created, updated, priority, or number;
 # prefix - for descending (e.g. \"-updated\").
 # sort = \"created\"
 
 # Who you are. Identity placeholder until auth exists.
 # me = \"bryan\"
 "
-  if let Err(e) = os.WriteFile(".lin.toml", template.bytes(), 0o644) {
-    return Err(f"writing .lin.toml: {e}")
+  if let Err(e) = os.WriteFile(".lll.toml", template.bytes(), 0o644) {
+    return Err(f"writing .lll.toml: {e}")
   }
-  fmt.Println("Wrote .lin.toml")
+  fmt.Println("Wrote .lll.toml")
   Ok(())
 }

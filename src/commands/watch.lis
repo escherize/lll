@@ -24,9 +24,9 @@ pub struct CommentEvent {
   pub record: models.Comment,
 }
 
-/// Dispatch `lin watch` — a live event stream for a query, one line per
+/// Dispatch `lll watch` — a live event stream for a query, one line per
 /// create/update/delete, filtered server-side with the same criteria as
-/// `lin issue list`. Runs until interrupted (Ctrl-C).
+/// `lll issue list`. Runs until interrupted (Ctrl-C).
 pub fn watch(args: Slice<string>) -> Result<(), string> {
   let mut state = ""
   let mut assignee_name = ""
@@ -95,7 +95,7 @@ pub fn watch(args: Slice<string>) -> Result<(), string> {
 
   let cfg = config.load()?
 
-  // A configured team (LIN_TEAM or .lin.toml) scopes the stream by default,
+  // A configured team (LLL_TEAM or .lll.toml) scopes the stream by default,
   // same as `issue list`.
   let mut team_id = ""
   if cfg.team != "" {
@@ -173,14 +173,14 @@ pub fn watch(args: Slice<string>) -> Result<(), string> {
 
 fn print_watch_usage() {
   fmt.Println(
-    "lin watch - live event stream for a query
+    "lll watch - live event stream for a query
 
 Usage:
-  lin watch [--state s] [--assignee name] [--label name] [--project name]
+  lll watch [--state s] [--assignee name] [--label name] [--project name]
             [--search q] [--json]
 
 Streams create/update/delete events for issues matching the criteria
-(filtered server-side; scoped to the configured team like 'lin issue list'),
+(filtered server-side; scoped to the configured team like 'lll issue list'),
 one timestamped line per event, until interrupted:
 
   10:42:01 ENG-12 created: Fix login flow
@@ -195,19 +195,19 @@ delivers events for records matching the filter after the change.
 
 Flags:
   --state     one of: backlog, todo, in-progress, in-review, done, cancelled
-  --assignee  member name (see 'lin member list')
-  --label     label name (see 'lin label list')
-  --project   project name (see 'lin project list')
+  --assignee  member name (see 'lll member list')
+  --label     label name (see 'lll label list')
+  --project   project name (see 'lll project list')
   --search    only issues whose title contains q
   --json      NDJSON: one raw PocketBase event object per line, with a
               \"topic\" field added",
   )
 }
 
-/// Dispatch `lin issue watch [KEY-123]` — a live event stream for one issue
+/// Dispatch `lll issue watch [KEY-123]` — a live event stream for one issue
 /// and its comments. Runs until interrupted or the issue is deleted.
 pub fn issue_watch(args: Slice<string>) -> Result<(), string> {
-  let usage = "lin issue watch [KEY-123] [--json]"
+  let usage = "lll issue watch [KEY-123] [--json]"
   let mut id = ""
   let mut json_mode = false
   let mut i = 3

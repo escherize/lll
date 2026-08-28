@@ -14,7 +14,7 @@ import "models"
 import "pb"
 import "query"
 
-/// Dispatch `lin issue <verb>`.
+/// Dispatch `lll issue <verb>`.
 pub fn issue(args: Slice<string>) -> Result<(), string> {
   let Some(verb) = args.get(2) else {
     print_usage()
@@ -38,41 +38,41 @@ pub fn issue(args: Slice<string>) -> Result<(), string> {
       print_usage()
       Ok(())
     },
-    other => Err(f"unknown issue command: '{other}' (see 'lin issue --help')"),
+    other => Err(f"unknown issue command: '{other}' (see 'lll issue --help')"),
   }
 }
 
 fn print_usage() {
   fmt.Println(
-    "lin issue - work with issues
+    "lll issue - work with issues
 
 Usage:
-  lin issue create -t \"title\" [--priority 0-4] [--assignee name]
+  lll issue create -t \"title\" [--priority 0-4] [--assignee name]
                    [--label name]... [--project name]
                                                   create an issue in the configured team
-  lin issue list [--state s] [--assignee name] [--label name] [--project name]
+  lll issue list [--state s] [--assignee name] [--label name] [--project name]
                  [--search q] [--sort f] [--json]
                                                   list issues; scoped to the configured team
-  lin issue view [KEY-123] [--json]               show one issue in full, with comments
-  lin issue update [KEY-123] <flags>              change fields (at least one flag)
-  lin issue close [KEY-123]                       set state done
-  lin issue start [KEY-123]                       set state in-progress; print/create the
+  lll issue view [KEY-123] [--json]               show one issue in full, with comments
+  lll issue update [KEY-123] <flags>              change fields (at least one flag)
+  lll issue close [KEY-123]                       set state done
+  lll issue start [KEY-123]                       set state in-progress; print/create the
                                                   branch key-number-slug (git switch)
-  lin issue delete KEY-123 [--force]              delete; asks [y/N] unless --force
-  lin issue comment [KEY-123] [-b \"body\"]         add a comment (authored by 'me' in
-                                                  .lin.toml); without -b, list comments
-  lin issue watch [KEY-123] [--json]              stream live events for the issue and
+  lll issue delete KEY-123 [--force]              delete; asks [y/N] unless --force
+  lll issue comment [KEY-123] [-b \"body\"]         add a comment (authored by 'me' in
+                                                  .lll.toml); without -b, list comments
+  lll issue watch [KEY-123] [--json]              stream live events for the issue and
                                                   its comments until interrupted
 
 Flags:
   --state        one of: backlog, todo, in-progress, in-review, done, cancelled
-  --assignee     member name (see 'lin member list'); filters on list
-  --label        label name (see 'lin label list'); repeatable on create/update
+  --assignee     member name (see 'lll member list'); filters on list
+  --label        label name (see 'lll label list'); repeatable on create/update
                  (update replaces the set); filters on list
-  --project      project name (see 'lin project list'); filters on list
+  --project      project name (see 'lll project list'); filters on list
   --search       list only issues whose title contains q
   --sort         created, updated, priority, or number; prefix - for descending
-                 (default: LIN_SORT or 'sort' in .lin.toml, else created)
+                 (default: LLL_SORT or 'sort' in .lll.toml, else created)
   --priority     0 none, 1 urgent (!!!), 2 high (!!), 3 medium (!), 4 low (·)
   --title        new title (update)
   --description  new description (update)
@@ -85,7 +85,7 @@ git branch: eng-12-fix-login resolves to ENG-12.
 
 State glyphs: ◌ backlog  ○ todo  ◐ in-progress  ◉ in-review  ● done  ⊗ cancelled
 
-The team comes from LIN_TEAM or 'team' in .lin.toml (see 'lin config --help').",
+The team comes from LLL_TEAM or 'team' in .lll.toml (see 'lll config --help').",
   )
 }
 
@@ -146,7 +146,7 @@ fn create(args: Slice<string>) -> Result<(), string> {
   }
   if title == "" {
     return Err(
-      "usage: lin issue create -t \"title\" [--priority 0-4] [--assignee name] [--label name]... [--project name]",
+      "usage: lll issue create -t \"title\" [--priority 0-4] [--assignee name] [--label name]... [--project name]",
     )
   }
 
@@ -164,7 +164,7 @@ fn create(args: Slice<string>) -> Result<(), string> {
   let team_key = config.load()?.team
   if team_key == "" {
     return Err(
-      "set LIN_TEAM or 'team' in .lin.toml to your team key (e.g. ENG)",
+      "set LLL_TEAM or 'team' in .lll.toml to your team key (e.g. ENG)",
     )
   }
   let Some(team) = find_team(team_key)? else {
@@ -262,7 +262,7 @@ fn list(args: Slice<string>) -> Result<(), string> {
 
   let cfg = config.load()?
 
-  // A configured team (LIN_TEAM or .lin.toml) scopes the list by default.
+  // A configured team (LLL_TEAM or .lll.toml) scopes the list by default.
   let mut team_id = ""
   if cfg.team != "" {
     let Some(team) = find_team(cfg.team)? else {
@@ -339,7 +339,7 @@ fn view(args: Slice<string>) -> Result<(), string> {
       },
     }
   }
-  let resolved = resolve_id(id, "lin issue view [KEY-123] [--json]")?
+  let resolved = resolve_id(id, "lll issue view [KEY-123] [--json]")?
 
   let record = fetch_issue_record(resolved)?
   if json_mode {
@@ -386,7 +386,7 @@ fn view(args: Slice<string>) -> Result<(), string> {
 }
 
 fn update(args: Slice<string>) -> Result<(), string> {
-  let usage = "lin issue update [KEY-123] [--state s] [--priority 0-4] [--assignee name] [--label name]... [--project name] [--title t] [--description d]"
+  let usage = "lll issue update [KEY-123] [--state s] [--priority 0-4] [--assignee name] [--label name]... [--project name] [--title t] [--description d]"
   let mut id = ""
   let mut state = ""
   let mut priority = -1
@@ -519,7 +519,7 @@ fn update(args: Slice<string>) -> Result<(), string> {
 }
 
 fn close_issue(args: Slice<string>) -> Result<(), string> {
-  let usage = "lin issue close [KEY-123]"
+  let usage = "lll issue close [KEY-123]"
   let id = positional_id(args, usage)?
   let resolved = resolve_id(id, usage)?
   let issue = fetch_issue(resolved)?
@@ -532,7 +532,7 @@ fn close_issue(args: Slice<string>) -> Result<(), string> {
 }
 
 fn start(args: Slice<string>) -> Result<(), string> {
-  let usage = "lin issue start [KEY-123]"
+  let usage = "lll issue start [KEY-123]"
   let id = positional_id(args, usage)?
   let resolved = resolve_id(id, usage)?
   let issue = fetch_issue(resolved)?
@@ -575,7 +575,7 @@ fn delete_issue(args: Slice<string>) -> Result<(), string> {
     }
   }
   // Deleting by inferred branch is too dangerous; the ID must be explicit.
-  if id == "" { return Err("usage: lin issue delete KEY-123 [--force]") }
+  if id == "" { return Err("usage: lll issue delete KEY-123 [--force]") }
 
   let issue = fetch_issue(id)?
   let label = f"{issue.expand.team.key}-{issue.number}"
@@ -596,7 +596,7 @@ fn delete_issue(args: Slice<string>) -> Result<(), string> {
 }
 
 fn comment(args: Slice<string>) -> Result<(), string> {
-  let usage = "lin issue comment [KEY-123] [-b \"body\"]"
+  let usage = "lll issue comment [KEY-123] [-b \"body\"]"
   let mut id = ""
   let mut body = ""
   let mut body_set = false
@@ -676,7 +676,7 @@ fn print_comments(comments: Slice<models.Comment>) {
 /// Resolve a member by name; unknown names error with the fix.
 fn resolve_member(name: string) -> Result<models.Member, string> {
   let Some(m) = find_member(name)? else {
-    return Err(f"no member named '{name}' — see 'lin member list'")
+    return Err(f"no member named '{name}' — see 'lll member list'")
   }
   Ok(m)
 }
@@ -727,7 +727,7 @@ fn fetch_issue_record(id: string) -> Result<string, string> {
     return Err(bad_id)
   }
 
-  let not_found = f"issue {id} not found — check 'lin issue list' or LIN_TEAM"
+  let not_found = f"issue {id} not found — check 'lll issue list' or LLL_TEAM"
   let Some(team) = find_team(team_key)? else {
     return Err(not_found)
   }

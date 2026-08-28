@@ -1,0 +1,161 @@
+import "go:fmt"
+import "go:net"
+import "go:net/http"
+import "go:os"
+import "go:os/exec"
+import "go:strconv"
+import "go:strings"
+import "go:time"
+
+import "config"
+
+// `lll up` — one command for local use: PocketBase + the web board.
+//
+// A PocketBase already healthy at the configured URL is reused (and never
+// killed on exit). Otherwise one is started as a child process on the first
+// free port from 8090 up, with the superuser upserted first so the admin UI
+// never shows the install wizard. Ctrl-C in a terminal delivers SIGINT to the
+// whole foreground process group, which takes the child PocketBase down with
+// us; on error returns the deferred kill covers it.
+// ponytail: a kill from outside the terminal (plain `kill <pid>`) can orphan
+// the child; add os/signal handling if that ever bites.
+
+pub fn up(args: Slice<string>) -> Result<(), string> {
+  let mut web_port = 8100
+  let mut pb_dir = "pb/pb_data"
+  let mut i = 2
+  while i < args.length() {
+    match args[i] {
+      "--port" => {
+        let Some(val) = args.get(i + 1) else { return Err("--port requires a value") }
+        let Ok(p) = strconv.Atoi(val) else {
+          return Err(f"--port must be a number, got '{val}'")
+        }
+        web_port = p
+        i += 2
+      },
+      "--pb-dir" => {
+        let Some(val) = args.get(i + 1) else { return Err("--pb-dir requires a value") }
+        pb_dir = val
+        i += 2
+      },
+      "--help" => {
+        print_up_usage()
+        return Ok(())
+      },
+      "-h" => {
+        print_up_usage()
+        return Ok(())
+      },
+      other => return Err(f"unknown flag: '{other}'"),
+    }
+  }
+
+  let cfg = config.load()?
+  let mut db_url = cfg.url
+  if healthy(db_url) {
+    fmt.Println(f"using running pocketbase at {db_url}")
+  } else {
+    let pb_bin = find_pocketbase()?
+    let db_port = free_port(port_of(db_url, 8090))
+    db_url = f"http://127.0.0.1:{db_port}"
+
+    let mut email = os.Getenv("LLL_ADMIN_EMAIL")
+    let mut pass = os.Getenv("LLL_ADMIN_PASSWORD")
+    if email == "" || pass == "" {
+      email = "admin@local.dev"
+      pass = "admin-local-123"
+      fmt.Println("LLL_ADMIN_EMAIL/LLL_ADMIN_PASSWORD not set — defaulting to admin@local.dev / admin-local-123")
+    }
+    let upsert = exec.Command(pb_bin, "superuser", "upsert", email, pass, "--dir", pb_dir)
+    let _ = upsert.Run()
+
+    let cmd = exec.Command(
+      pb_bin, "serve",
+      "--http", f"127.0.0.1:{db_port}",
+      "--dir", pb_dir,
+      "--migrationsDir", "pb/pb_migrations",
+      "--hooksDir", "pb/pb_hooks",
+    )
+    if let Err(e) = cmd.Start() {
+      return Err(f"starting pocketbase: {e}")
+    }
+    defer {
+      if let Some(p) = cmd.Process { let _ = p.Kill() }
+    }
+
+    let mut ok = false
+    for _ in 0..50 {
+      if healthy(db_url) {
+        ok = true
+        break
+      }
+      time.Sleep(100 * time.Millisecond)
+    }
+    if !ok { return Err(f"pocketbase did not come up on {db_url}") }
+    fmt.Println(f"pocketbase on {db_url} (admin UI: {db_url}/_/ as {email})")
+  }
+
+  // The in-process board (and its PB client) must talk to the db we chose.
+  let _ = os.Setenv("LLL_URL", db_url)
+  let chosen = free_port(web_port)
+  if chosen != web_port {
+    fmt.Println(f"port {web_port} taken — board moving to {chosen}")
+  }
+  run_server(chosen)
+}
+
+fn print_up_usage() {
+  fmt.Println(
+    "lll up - start PocketBase and the web board together
+
+Usage:
+  lll up [--port 8100] [--pb-dir pb/pb_data]
+
+Reuses a PocketBase already running at the configured URL; otherwise starts
+one (first free port from the configured port up) after upserting the
+superuser from LLL_ADMIN_EMAIL/LLL_ADMIN_PASSWORD (a logged default is used
+when unset). Taken ports auto-increment. Ctrl-C stops everything lll up
+started; an externally-started PocketBase is left running.",
+  )
+}
+
+fn healthy(base_url: string) -> bool {
+  // Bounded: a non-PB listener on the port must fail fast, not hang us.
+  let mut client = http.Client { Timeout: 2 * time.Second, .. }
+  let Ok(resp) = client.Get(f"{base_url}/api/health") else { return false }
+  if let Some(body) = resp.Body { let _ = body.Close() }
+  resp.StatusCode == 200
+}
+
+/// First free TCP port at or above `start`.
+fn free_port(start: int) -> int {
+  let mut p = start
+  loop {
+    match net.Listen("tcp", f"127.0.0.1:{p}") {
+      Ok(l) => {
+        let _ = l.Close()
+        return p
+      },
+      Err(_) => p += 1,
+    }
+  }
+}
+
+/// Port from "http://127.0.0.1:8090", or `fallback`.
+fn port_of(base_url: string, fallback: int) -> int {
+  let Some(idx) = strings.LastIndex(base_url, ":") else { return fallback }
+  let Ok(p) = strconv.Atoi(base_url.substring(idx + 1..)) else { return fallback }
+  p
+}
+
+fn find_pocketbase() -> Result<string, string> {
+  let env_bin = os.Getenv("PB_BIN")
+  if env_bin != "" { return Ok(env_bin) }
+  if let Ok(_) = os.Stat("pb/pocketbase") { return Ok("pb/pocketbase") }
+  match exec.LookPath("pocketbase") {
+    Partial.Ok(p) => Ok(p),
+    Partial.Both(p, _) => Ok(p),
+    Partial.Err(_) => Err("pocketbase not found: brew install pocketbase (see pb/README.md)"),
+  }
+}

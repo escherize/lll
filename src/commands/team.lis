@@ -5,7 +5,7 @@ import "go:net/url"
 import "models"
 import "pb"
 
-/// Dispatch `lin team <verb>`.
+/// Dispatch `lll team <verb>`.
 pub fn team(args: Slice<string>) -> Result<(), string> {
   let Some(verb) = args.get(2) else {
     team_usage()
@@ -23,18 +23,18 @@ pub fn team(args: Slice<string>) -> Result<(), string> {
       team_usage()
       Ok(())
     },
-    other => Err(f"unknown team command: '{other}' (see 'lin team --help')"),
+    other => Err(f"unknown team command: '{other}' (see 'lll team --help')"),
   }
 }
 
 fn team_usage() {
   fmt.Println(
-    "lin team - work with teams
+    "lll team - work with teams
 
 Usage:
-  lin team list                      list teams (KEY, name)
-  lin team create -k KEY -n \"Name\"   create a team
-  lin team view KEY                  show a team and its issue count",
+  lll team list                      list teams (KEY, name)
+  lll team create -k KEY -n \"Name\"   create a team
+  lll team view KEY                  show a team and its issue count",
   )
 }
 
@@ -74,7 +74,7 @@ fn team_create(args: Slice<string>) -> Result<(), string> {
     }
   }
   if key == "" || name == "" {
-    return Err("usage: lin team create -k KEY -n \"Name\"")
+    return Err("usage: lll team create -k KEY -n \"Name\"")
   }
 
   let new_team = models.NewTeam { key, name }
@@ -94,7 +94,7 @@ fn team_create(args: Slice<string>) -> Result<(), string> {
 
 fn team_view(args: Slice<string>) -> Result<(), string> {
   let Some(key) = args.get(3) else {
-    return Err("usage: lin team view KEY")
+    return Err("usage: lll team view KEY")
   }
   let Some(t) = find_team(key)? else {
     return Err(f"no team with key '{key}' on the server")

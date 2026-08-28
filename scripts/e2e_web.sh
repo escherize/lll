@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# e2e: `lin serve` web board against an ephemeral PocketBase.
+# e2e: `lll serve` web board against an ephemeral PocketBase.
 # Covers: board page grouped by the six states with cards in the right
 # columns, issue page (detail, comments, forms), actions (/create, /state,
 # /comment) persisting to PB and visible via the CLI, server-side validation,
@@ -23,8 +23,8 @@ fi
 DATA_DIR="$(mktemp -d)"
 PB_PORT=$(( (RANDOM % 20000) + 20000 ))
 WEB_PORT=$(( (RANDOM % 20000) + 40000 ))
-export LIN_URL="http://127.0.0.1:$PB_PORT"
-export LIN_TEAM=ENG
+export LLL_URL="http://127.0.0.1:$PB_PORT"
+export LLL_TEAM=ENG
 WEB="http://127.0.0.1:$WEB_PORT"
 PB_LOG="$DATA_DIR/pb.log"
 SERVE_LOG="$DATA_DIR/serve.log"
@@ -77,17 +77,17 @@ except IndexError:
 }
 
 for _ in $(seq 1 100); do
-  curl -sf "$LIN_URL/api/health" >/dev/null 2>&1 && break
+  curl -sf "$LLL_URL/api/health" >/dev/null 2>&1 && break
   sleep 0.1
 done
-curl -sf "$LIN_URL/api/health" >/dev/null || fail "PocketBase did not start"
+curl -sf "$LLL_URL/api/health" >/dev/null || fail "PocketBase did not start"
 
-curl -sf -X POST "$LIN_URL/api/collections/teams/records" \
+curl -sf -X POST "$LLL_URL/api/collections/teams/records" \
   -H 'Content-Type: application/json' \
   -d '{"key":"ENG","name":"Engineering"}' >/dev/null || fail "seeding team"
 
 lis build >/dev/null
-LIN=target/bin/lin
+LIN=target/bin/lll
 
 "$LIN" issue create -t "Web board issue" --priority 2 >/dev/null
 "$LIN" issue create -t "Already in progress" >/dev/null
@@ -100,7 +100,7 @@ for _ in $(seq 1 100); do
   curl -sf "$WEB/" >/dev/null 2>&1 && break
   sleep 0.1
 done
-curl -sf "$WEB/" >/dev/null || fail "lin serve did not start"
+curl -sf "$WEB/" >/dev/null || fail "lll serve did not start"
 
 # --- board page: six columns, cards in the right ones ---
 board=$(curl -sf "$WEB/")
@@ -129,13 +129,13 @@ code=$(curl -s -o /dev/null -w '%{http_code}' -X POST \
   -d "title=Created from the board&state=todo" "$WEB/create")
 [ "$code" = 204 ] || fail "/create returned $code, want 204"
 out=$("$LIN" issue list)
-assert_contains "$out" "Created from the board" "web-created issue in lin issue list"
+assert_contains "$out" "Created from the board" "web-created issue in lll issue list"
 
 code=$(curl -s -o /dev/null -w '%{http_code}' -X POST \
   -d "key=ENG-3&state=in-review" "$WEB/state")
 [ "$code" = 204 ] || fail "/state returned $code, want 204"
 out=$("$LIN" issue view ENG-3)
-assert_contains "$out" "in-review" "web state change in lin issue view"
+assert_contains "$out" "in-review" "web state change in lll issue view"
 board=$(curl -sf "$WEB/")
 assert_contains "$(column "$board" in-review)" "ENG-3" "ENG-3 moved to in-review column"
 
@@ -143,7 +143,7 @@ code=$(curl -s -o /dev/null -w '%{http_code}' -X POST \
   -d "key=ENG-3&body=comment from the board" "$WEB/comment")
 [ "$code" = 204 ] || fail "/comment returned $code, want 204"
 out=$("$LIN" issue comment ENG-3)
-assert_contains "$out" "comment from the board" "web comment in lin issue comment"
+assert_contains "$out" "comment from the board" "web comment in lll issue comment"
 
 # --- validation ---
 code=$(curl -s -o /dev/null -w '%{http_code}' -X POST -d "title=&state=todo" "$WEB/create")
