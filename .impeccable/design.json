@@ -4,41 +4,158 @@
   "title": "Design System: lll",
   "extensions": {
     "colorMeta": {
-      "ember-orange": { "role": "primary", "displayName": "Ember Orange", "canonical": "#f0883e", "tonalRamp": ["oklch(25% 0.09 55)", "oklch(35% 0.12 55)", "oklch(45% 0.14 55)", "oklch(55% 0.15 55)", "oklch(65% 0.155 55)", "oklch(74% 0.155 55)", "oklch(85% 0.10 55)", "oklch(94% 0.04 55)"] },
-      "ember-orange-deep": { "role": "primary", "displayName": "Ember Orange Deep", "canonical": "#c96a25" },
-      "ink-ground": { "role": "neutral", "displayName": "Ink Ground", "canonical": "#0e0f11", "tonalRamp": ["#0e0f11", "#111316", "#141619", "#191c20", "#1d2126", "#828994", "#9299a2", "#e8eaed"] },
-      "text-primary": { "role": "neutral", "displayName": "Text Primary", "canonical": "#e8eaed" },
-      "text-secondary": { "role": "neutral", "displayName": "Text Secondary", "canonical": "#9299a2" },
-      "text-tertiary": { "role": "neutral", "displayName": "Text Tertiary", "canonical": "#828994" },
-      "state-in-progress": { "role": "secondary", "displayName": "State In-Progress (yellow)", "canonical": "#e0b13e" },
-      "state-in-review": { "role": "secondary", "displayName": "State In-Review (violet)", "canonical": "#8d7ce6" },
-      "state-done": { "role": "secondary", "displayName": "State Done (green)", "canonical": "#4cb782" },
-      "error-text": { "role": "error", "displayName": "Error Text", "canonical": "#f0827b" },
-      "error-border": { "role": "error", "displayName": "Error Border", "canonical": "rgba(229, 83, 75, 0.4)" },
-      "error-wash": { "role": "error", "displayName": "Error Wash", "canonical": "rgba(229, 83, 75, 0.12)" },
-      "avatar-sky": { "role": "tertiary", "displayName": "Avatar Sky", "canonical": "#7cc0e8" },
-      "avatar-sand": { "role": "tertiary", "displayName": "Avatar Sand", "canonical": "#d8b06a" },
-      "avatar-violet": { "role": "tertiary", "displayName": "Avatar Violet", "canonical": "#9d8fe0" },
-      "avatar-moss": { "role": "tertiary", "displayName": "Avatar Moss", "canonical": "#82c99a" },
-      "avatar-ink": { "role": "tertiary", "displayName": "Avatar Ink", "canonical": "#0a1620" }
+      "ember-orange": {
+        "role": "primary",
+        "displayName": "Ember Orange",
+        "canonical": "#f0883e",
+        "tonalRamp": [
+          "oklch(25% 0.09 55)",
+          "oklch(35% 0.12 55)",
+          "oklch(45% 0.14 55)",
+          "oklch(55% 0.15 55)",
+          "oklch(65% 0.155 55)",
+          "oklch(74% 0.155 55)",
+          "oklch(85% 0.10 55)",
+          "oklch(94% 0.04 55)"
+        ]
+      },
+      "ember-orange-deep": {
+        "role": "primary",
+        "displayName": "Ember Orange Deep",
+        "canonical": "#c96a25"
+      },
+      "ink-ground": {
+        "role": "neutral",
+        "displayName": "Ink Ground",
+        "canonical": "#0e0f11",
+        "tonalRamp": [
+          "#0e0f11",
+          "#111316",
+          "#141619",
+          "#191c20",
+          "#1d2126",
+          "#828994",
+          "#9299a2",
+          "#e8eaed"
+        ]
+      },
+      "text-primary": {
+        "role": "neutral",
+        "displayName": "Text Primary",
+        "canonical": "#e8eaed"
+      },
+      "text-secondary": {
+        "role": "neutral",
+        "displayName": "Text Secondary",
+        "canonical": "#9299a2"
+      },
+      "text-tertiary": {
+        "role": "neutral",
+        "displayName": "Text Tertiary",
+        "canonical": "#828994"
+      },
+      "state-in-progress": {
+        "role": "secondary",
+        "displayName": "State In-Progress (yellow)",
+        "canonical": "#e0b13e"
+      },
+      "state-in-review": {
+        "role": "secondary",
+        "displayName": "State In-Review (violet)",
+        "canonical": "#8d7ce6"
+      },
+      "state-done": {
+        "role": "secondary",
+        "displayName": "State Done (green)",
+        "canonical": "#4cb782"
+      },
+      "error-text": {
+        "role": "error",
+        "displayName": "Error Text",
+        "canonical": "#f0827b"
+      },
+      "error-border": {
+        "role": "error",
+        "displayName": "Error Border",
+        "canonical": "rgba(229, 83, 75, 0.4)"
+      },
+      "error-wash": {
+        "role": "error",
+        "displayName": "Error Wash",
+        "canonical": "rgba(229, 83, 75, 0.12)"
+      },
+      "avatar-sky": {
+        "role": "tertiary",
+        "displayName": "Avatar Sky",
+        "canonical": "#7cc0e8"
+      },
+      "avatar-sand": {
+        "role": "tertiary",
+        "displayName": "Avatar Sand",
+        "canonical": "#d8b06a"
+      },
+      "avatar-violet": {
+        "role": "tertiary",
+        "displayName": "Avatar Violet",
+        "canonical": "#9d8fe0"
+      },
+      "avatar-moss": {
+        "role": "tertiary",
+        "displayName": "Avatar Moss",
+        "canonical": "#82c99a"
+      },
+      "avatar-ink": {
+        "role": "tertiary",
+        "displayName": "Avatar Ink",
+        "canonical": "#0a1620"
+      }
     },
     "typographyMeta": {
-      "title": { "displayName": "Title", "purpose": "Issue page h1 only; the largest type in the product." },
-      "body": { "displayName": "Body", "purpose": "13px base for everything; headings differ by weight, not size." },
-      "label": { "displayName": "Label", "purpose": "Uppercase 11px sidebar section headers; the only uppercase register." },
-      "micro": { "displayName": "Micro", "purpose": "Metadata steps 8.5-12.5px: avatar initials (8.5), mark letter (10), chips (10.5), card key rows (11.5), comment meta/prop keys (12), selects and flash (12.5). Tabular numerals for keys/counts." }
+      "title": {
+        "displayName": "Title",
+        "purpose": "Issue page h1 only; the largest type in the product."
+      },
+      "body": {
+        "displayName": "Body",
+        "purpose": "13px base for everything; headings differ by weight, not size."
+      },
+      "label": {
+        "displayName": "Label",
+        "purpose": "Uppercase 11px sidebar section headers; the only uppercase register."
+      },
+      "micro": {
+        "displayName": "Micro",
+        "purpose": "Metadata steps 8.5-12.5px: avatar initials (8.5), mark letter (10), chips (10.5), card key rows (11.5), comment meta/prop keys (12), selects and flash (12.5). Tabular numerals for keys/counts."
+      }
     },
     "roundedMeta": {
-      "focus": { "canonical": "4px", "purpose": ":focus-visible outline rounding." },
-      "mark": { "canonical": "5px", "purpose": "Workspace mark and scrollbar thumbs." }
+      "focus": {
+        "canonical": "4px",
+        "purpose": ":focus-visible outline rounding."
+      },
+      "mark": {
+        "canonical": "5px",
+        "purpose": "Workspace mark and scrollbar thumbs."
+      }
     },
     "shadows": [
-      { "name": "card-whisper", "value": "0 1px 2px rgba(0, 0, 0, 0.25)", "purpose": "The only resting shadow; under board cards." },
-      { "name": "focus-glow", "value": "0 0 0 3px rgba(240, 136, 62, 0.16)", "purpose": "Input focus ring, paired with an orange border." }
+      {
+        "name": "card-whisper",
+        "value": "0 1px 2px rgba(0, 0, 0, 0.25)",
+        "purpose": "The only resting shadow; under board cards."
+      },
+      {
+        "name": "focus-glow",
+        "value": "0 0 0 3px rgba(240, 136, 62, 0.16)",
+        "purpose": "Input focus ring, paired with an orange border."
+      }
     ],
     "motion": [],
     "breakpoints": [
-      { "name": "compact", "value": "720px" }
+      {
+        "name": "compact",
+        "value": "720px"
+      }
     ]
   },
   "components": [
@@ -107,7 +224,7 @@
   ],
   "narrative": {
     "northStar": "The Instrument Panel",
-    "overview": "lll is a dark, dense, quiet issue board: every issue's state legible in one glance, refusing the airy marketing-card look of generic kanban tools. The world is Linear's grammar rebuilt in lll's own materials — a near-black ground, hairline white-alpha borders, one small variable typeface at 13px, muted gray text, and semantic state color carried almost entirely by small drawn icons. Color is rationed: the single ember orange accent appears only where the user can act and on urgent priority, and errors get one voice of their own — a muted red flash strip patched in over SSE. Depth is tonal, not shadowed: five closely-spaced dark surfaces layer the UI, and the one real shadow is a 1px whisper under cards.",
+    "overview": "lll is a dark, dense, quiet issue board: every issue's state legible in one glance, refusing the airy marketing-card look of generic kanban tools. The world is Linear's grammar rebuilt in lll's own materials \u2014 a near-black ground, hairline white-alpha borders, one small variable typeface at 13px, muted gray text, and semantic state color carried almost entirely by small drawn icons. Color is rationed: the single ember orange accent appears only where the user can act and on urgent priority, and errors get one voice of their own \u2014 a muted red flash strip patched in over SSE. Depth is tonal, not shadowed: five closely-spaced dark surfaces layer the UI, and the one real shadow is a 1px whisper under cards.",
     "keyCharacteristics": [
       "Dark-only; near-black tonal surfaces, no light theme.",
       "Compact density: 13px base type, 5-8px internal padding, 18px avatars.",
@@ -118,27 +235,63 @@
       "Server-rendered HTML morphed live over SSE; stable element ids are a design constraint."
     ],
     "rules": [
-      { "name": "The Ember Budget Rule", "body": "Orange means \"you can act here\" or \"urgent\" — nothing else. Never use it for decoration, emphasis, headings, or non-urgent data.", "section": "colors" },
-      { "name": "The One Error Voice Rule", "body": "Failure speaks only through the flash strip's muted red trio (#f0827b on rgba(229,83,75,0.12), rgba(229,83,75,0.4) border). No other red, no red text inline, no red icons.", "section": "colors" },
-      { "name": "The Icon-Carries-Color Rule", "body": "State color reaches the page only through the 14px state icon (color: var(--st-*) + currentColor). Text next to the icon stays gray; no colored text, no colored column headers, no tinted card backgrounds.", "section": "colors" },
-      { "name": "The White-Alpha Border Rule", "body": "Borders are translucent white (0.07 structural, 0.12 interactive), so they read correctly over every tonal surface. No opaque border grays. The one exception is the error flash, whose border is the red at 0.4 alpha — still translucent, never opaque.", "section": "colors" },
-      { "name": "The Weight-Not-Size Rule", "body": "Between 10.5px and 19px, hierarchy is expressed by weight and color voice (text/text-2/text-3), rarely by size. Do not introduce large display type.", "section": "typography" },
-      { "name": "The Tabular Numerals Rule", "body": "Issue keys, counts, and any aligned numbers set font-variant-numeric: tabular-nums.", "section": "typography" },
-      { "name": "The Stable Id Rule", "body": "#board, #issue-detail, and #comments are SSE morph boundaries; cards are #issue-{id}, columns #col-{state}, comments #comment-{id}. New surfaces must keep ids stable and semantic — Datastar morphs by id, and agents are first-class consumers of the markup.", "section": "layout" },
-      { "name": "The Tonal Ladder Rule", "body": "New surfaces pick a rung on the existing ladder; never invent a new dark gray, and never use large soft drop shadows.", "section": "elevation" },
-      { "name": "The Drawn Icon Rule", "body": "Icons are drawn inline SVG in the shared sprite — never icon fonts, emoji, or third-party icon packages. New icons match the 14px grid, ~1.5px round-capped strokes, and currentColor.", "section": "shapes" }
+      {
+        "name": "The Ember Budget Rule",
+        "body": "Orange means \"you can act here\" or \"urgent\" \u2014 nothing else. Never use it for decoration, emphasis, headings, or non-urgent data.",
+        "section": "colors"
+      },
+      {
+        "name": "The One Error Voice Rule",
+        "body": "Failure speaks only through the flash strip's muted red trio (#f0827b on rgba(229,83,75,0.12), rgba(229,83,75,0.4) border). No other red, no red text inline, no red icons.",
+        "section": "colors"
+      },
+      {
+        "name": "The Icon-Carries-Color Rule",
+        "body": "State color reaches the page only through the 14px state icon (color: var(--st-*) + currentColor). Text next to the icon stays gray; no colored text, no colored column headers, no tinted card backgrounds.",
+        "section": "colors"
+      },
+      {
+        "name": "The White-Alpha Border Rule",
+        "body": "Borders are translucent white (0.07 structural, 0.12 interactive), so they read correctly over every tonal surface. No opaque border grays. The one exception is the error flash, whose border is the red at 0.4 alpha \u2014 still translucent, never opaque.",
+        "section": "colors"
+      },
+      {
+        "name": "The Weight-Not-Size Rule",
+        "body": "Between 10.5px and 19px, hierarchy is expressed by weight and color voice (text/text-2/text-3), rarely by size. Do not introduce large display type.",
+        "section": "typography"
+      },
+      {
+        "name": "The Tabular Numerals Rule",
+        "body": "Issue keys, counts, and any aligned numbers set font-variant-numeric: tabular-nums.",
+        "section": "typography"
+      },
+      {
+        "name": "The Stable Id Rule",
+        "body": "#board, #issue-detail, and #comments are SSE morph boundaries; cards are #issue-{id}, columns #col-{state}, comments #comment-{id}. New surfaces must keep ids stable and semantic \u2014 Datastar morphs by id, and agents are first-class consumers of the markup.",
+        "section": "layout"
+      },
+      {
+        "name": "The Tonal Ladder Rule",
+        "body": "New surfaces pick a rung on the existing ladder; never invent a new dark gray, and never use large soft drop shadows.",
+        "section": "elevation"
+      },
+      {
+        "name": "The Drawn Icon Rule",
+        "body": "Icons are drawn inline SVG in the shared sprite \u2014 never icon fonts, emoji, or third-party icon packages. New icons match the 14px grid, ~1.5px round-capped strokes, and currentColor.",
+        "section": "shapes"
+      }
     ],
     "dos": [
       "Do route every color through the :root custom properties in theme.css; the tokens are the design system, and SSE-morphed fragments must inherit them.",
       "Do keep ids stable and semantic on any element inside a morph boundary (#board, #issue-detail, #comments).",
-      "Do express state with the drawn circle icons and priority with the bar icons — the icon carries the hue, the adjacent text stays gray.",
+      "Do express state with the drawn circle icons and priority with the bar icons \u2014 the icon carries the hue, the adjacent text stays gray.",
       "Do surface failures through the flash strip's single red voice; hide it when there is nothing to report.",
       "Do use font-variant-numeric: tabular-nums for keys and counts.",
       "Do step one rung up the tonal ladder for hover, and pair every surface with a white-alpha hairline."
     ],
     "donts": [
       "Don't spend orange on anything except interactive affordances and the urgent priority icon.",
-      "Don't use red outside the flash strip — no inline error text, no red icons, no second error treatment.",
+      "Don't use red outside the flash strip \u2014 no inline error text, no red icons, no second error treatment.",
       "Don't introduce a second typeface, type above 19px, or uppercase outside the sidebar section-label register.",
       "Don't add drop shadows beyond the card whisper, or invent new dark grays off the ladder.",
       "Don't use icon fonts, emoji glyphs, or imported icon packs; draw new icons into the shared sprite.",

@@ -52,6 +52,9 @@ typography:
     fontFamily: "Inter Variable, system-ui, sans-serif"
     fontSize: "11.5px"
     fontWeight: 500
+  code:
+    fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace"
+    fontSize: "12px"
   scale:
     avatar-initials: "8.5px"
     mark-letter: "10px"
