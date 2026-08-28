@@ -14,8 +14,12 @@ colors:
   text-tertiary: "#828994"
   ember-orange: "#f0883e"
   ember-orange-hover: "#f79b57"
+  ember-orange-deep: "#c96a25"
   ember-ink: "#1a0f06"
   ember-glow: "rgba(240, 136, 62, 0.16)"
+  error-text: "#f0827b"
+  error-border: "rgba(229, 83, 75, 0.4)"
+  error-wash: "rgba(229, 83, 75, 0.12)"
   state-backlog: "#828994"
   state-todo: "#9299a2"
   state-in-progress: "#e0b13e"
@@ -26,6 +30,7 @@ colors:
   avatar-sand: "#d8b06a"
   avatar-violet: "#9d8fe0"
   avatar-moss: "#82c99a"
+  avatar-ink: "#0a1620"
 typography:
   title:
     fontFamily: "Inter Variable, system-ui, sans-serif"
@@ -47,7 +52,19 @@ typography:
     fontFamily: "Inter Variable, system-ui, sans-serif"
     fontSize: "11.5px"
     fontWeight: 500
+  scale:
+    avatar-initials: "8.5px"
+    mark-letter: "10px"
+    chip: "10.5px"
+    props-heading: "11px"
+    card-key: "11.5px"
+    prop-key: "12px"
+    select-flash: "12.5px"
+    base: "13px"
+    title: "19px"
 rounded:
+  focus: "4px"
+  mark: "5px"
   base: "6px"
   lg: "8px"
   pill: "999px"
@@ -89,6 +106,11 @@ components:
     textColor: "{colors.text-secondary}"
     rounded: "{rounded.pill}"
     padding: "0 7px 0 5px"
+  flash:
+    backgroundColor: "{colors.error-wash}"
+    textColor: "{colors.error-text}"
+    rounded: "{rounded.base}"
+    padding: "6px 10px"
 ---
 
 # Design System: lll
@@ -106,10 +128,11 @@ Chrome recedes; the data is the interface.
 
 Color is rationed. The single accent, an ember orange (#f0883e), appears only
 where the user can act (primary buttons, focus rings, selection, the workspace
-mark) and on exactly one piece of data: urgent priority. Everything else speaks
-in three grays and the six semantic state hues. Depth is tonal, not shadowed:
-five closely-spaced dark surfaces layer the UI, and the one real shadow is a
-1px whisper under cards.
+mark) and on exactly one piece of data: urgent priority. Errors get one voice
+of their own — a muted red flash strip patched in over SSE. Everything else
+speaks in three grays and the six semantic state hues. Depth is tonal, not
+shadowed: five closely-spaced dark surfaces layer the UI, and the one real
+shadow is a 1px whisper under cards.
 
 Note: PRODUCT.md's brand commitment named a teal accent; the shipped build is
 orange throughout (tokens, comp, icons). Orange #f0883e is canonical.
@@ -118,6 +141,7 @@ orange throughout (tokens, comp, icons). Orange #f0883e is canonical.
 - Dark-only; near-black tonal surfaces, no light theme.
 - Compact density: 13px base type, 5-8px internal padding, 18px avatars.
 - One accent (ember orange), reserved for interactivity + urgent priority.
+- One error voice (muted red flash strip), server-patched, self-clearing.
 - Semantic state colors expressed through drawn 14px SVG circle icons.
 - Tabular numerals everywhere counts and keys appear.
 - Server-rendered HTML morphed live over SSE; stable element ids are a design constraint.
@@ -125,16 +149,18 @@ orange throughout (tokens, comp, icons). Orange #f0883e is canonical.
 ## Colors
 
 A near-black tonal ladder, three gray text voices, one rationed orange accent,
-and six semantic state hues.
+one muted error red, and six semantic state hues.
 
 ### Primary
 - **Ember Orange** (`--accent`, #f0883e): the only accent. Interactive
   affordances — primary buttons, input focus borders, `:focus-visible`
   outlines, the workspace mark gradient — plus one data meaning: the urgent
   priority icon's filled square. Hover shifts to **Ember Orange Hover**
-  (#f79b57). Text on orange is **Ember Ink** (#1a0f06), a near-black warm
-  brown, never white. **Ember Glow** (rgba(240,136,62,0.16)) is the soft form:
-  focus halo (`box-shadow: 0 0 0 3px`) and `::selection` background.
+  (#f79b57). The workspace mark's gradient deepens to **Ember Orange Deep**
+  (#c96a25) at its dark end. Text on orange is **Ember Ink** (#1a0f06), a
+  near-black warm brown, never white. **Ember Glow** (rgba(240,136,62,0.16))
+  is the soft form: focus halo (`box-shadow: 0 0 0 3px`) and `::selection`
+  background.
 
 ### Secondary
 Semantic state colors (`--st-*`), used only via the drawn state icons and their
@@ -145,12 +171,17 @@ Semantic state colors (`--st-*`), used only via the drawn state icons and their
 - **State Backlog / Todo / Cancelled** (#828994 / #9299a2 / #828994): gray;
   the resting and terminal states stay in the neutral register.
 
+The error voice lives beside them, confined to the flash strip:
+- **Error Text** (#f0827b) on **Error Wash** (rgba(229,83,75,0.12)) inside an
+  **Error Border** (rgba(229,83,75,0.4)) hairline — the system's only red,
+  and its only use of a tinted background.
+
 ### Tertiary
 Per-member avatar hues, assigned server-side by name hash (classes `av-0`
 through `av-3`) so a member's color is stable across sessions and surfaces:
 - **Avatar Sky** (#7cc0e8), **Avatar Sand** (#d8b06a), **Avatar Violet**
-  (#9d8fe0), **Avatar Moss** (#82c99a). All carry dark initials (#0a1620 on
-  the default sky).
+  (#9d8fe0), **Avatar Moss** (#82c99a). All carry **Avatar Ink** (#0a1620)
+  initials — dark, never white.
 
 ### Neutral
 - **Ink Ground** (`--bg`, #0e0f11): page background; also the "punch-through"
@@ -173,6 +204,10 @@ through `av-3`) so a member's color is stable across sessions and surfaces:
 nothing else. Never use it for decoration, emphasis, headings, or non-urgent
 data.
 
+**The One Error Voice Rule.** Failure speaks only through the flash strip's
+muted red trio (#f0827b on rgba(229,83,75,0.12), rgba(229,83,75,0.4) border).
+No other red, no red text inline, no red icons.
+
 **The Icon-Carries-Color Rule.** State color reaches the page only through the
 14px state icon (`color: var(--st-*)` + `currentColor`). Text next to the icon
 stays gray; no colored text, no colored column headers, no tinted card
@@ -180,7 +215,8 @@ backgrounds.
 
 **The White-Alpha Border Rule.** Borders are translucent white (0.07 structural,
 0.12 interactive), so they read correctly over every tonal surface. No opaque
-border grays.
+border grays. The one exception is the error flash, whose border is the red at
+0.4 alpha — still translucent, never opaque.
 
 ## Typography
 
@@ -199,9 +235,10 @@ anything countable. Antialiased, line-height 1.45 base.
   weight 600 (letter-spacing -0.005em); hierarchy comes from weight, not size.
 - **Label** (600, 11px, +0.02em, UPPERCASE): sidebar section headers
   ("Properties"). The only uppercase in the system.
-- **Micro** (500, 10.5-12.5px): metadata registers — card key rows (11.5px,
-  tabular-nums), chips (10.5px), comment meta (12px), prop keys (12px),
-  avatar initials (8.5px, 700).
+- **Micro** (500-800, 8.5-12.5px): the enumerated small steps — avatar
+  initials (8.5px, 700), workspace mark letter (10px, 800), chips (10.5px),
+  card key rows (11.5px, tabular-nums), comment meta and prop keys (12px),
+  prop selects and the flash strip (12.5px).
 - **Max measure:** descriptions 68ch, comments 65ch.
 
 ### Named Rules
@@ -227,6 +264,10 @@ independently scrollable. Cards stack with 5px gaps inside 6px column padding.
 760px, 28px/40px padding) plus a fixed 280px properties panel with a hairline
 left border running the full height. Comments thread and composer sit under
 the main column at max-width 680px, separated by a hairline top border.
+
+**Flash strip:** sits between topbar and content (`margin: 10px 16px 0`),
+patched over SSE by server actions and hidden when clear; it displaces
+content rather than overlaying it.
 
 **Spacing rhythm:** small steps, tightly packed — 2/5/6/8px inside components,
 10/12/14/16px between regions, 24-28px only for page-level breathing room on
@@ -264,10 +305,11 @@ never invent a new dark gray, and never use large soft drop shadows.
 ## Shapes
 
 Small consistent radii: 6px (`--radius`) on cards, buttons, inputs, selects,
-and rail links; 8px (`--radius-lg`) on board columns only; full pill (999px)
-on label chips; circles for avatars and state icons; 5px on the workspace
-mark. Everything is a hairline-bordered rounded rectangle — no sharp corners,
-no large radii, no clipping tricks.
+rail links, and the flash strip; 8px (`--radius-lg`) on board columns only;
+5px on the workspace mark and scrollbar thumbs; 4px on the `:focus-visible`
+outline's rounding; full pill (999px) on label chips; circles for avatars and
+state icons. Everything is a hairline-bordered rounded rectangle — no sharp
+corners, no large radii, no clipping tricks.
 
 Iconography is part of the form language: all icons are hand-drawn inline SVGs
 defined once in a `<defs>` sprite (icons.html) and referenced via `<use>`.
@@ -292,7 +334,8 @@ never icon fonts, emoji, or third-party icon packages. New icons match the
 - **Primary:** ember orange fill, borderless, ember-ink text at weight 600;
   hover lightens to #f79b57. Reserved for the main action per view ("New
   issue", "Comment"), usually with a small drawn glyph (e.g. a stroked plus).
-- **Focus:** the global 2px orange `:focus-visible` outline, offset 1px.
+- **Focus:** the global 2px orange `:focus-visible` outline, offset 1px, with
+  4px rounding.
 
 ### Cards / Containers
 - **Board card:** raised surface, hairline border, 6px radius, 6px 8px padding,
@@ -315,16 +358,26 @@ never icon fonts, emoji, or third-party icon packages. New icons match the
 - **Selects and textareas** share the treatment; the comment textarea is
   min-height 64px, vertically resizable.
 
+### Flash (error strip)
+- **The system's error voice.** A quiet red strip under the topbar
+  (`margin: 10px 16px 0`, 6px 10px padding, 6px radius): 0.4-alpha red border
+  (rgba(229,83,75,0.4)), 0.12-alpha red wash background (rgba(229,83,75,0.12)),
+  muted red text (#f0827b) at 12.5px.
+- **Behavior:** patched over SSE by server actions when a board action fails;
+  hidden entirely when there is nothing to say. No icons, no dismiss button,
+  no toast animation — it appears, states the failure, and clears.
+
 ### Navigation
 - **Rail:** 220px, rail surface, 14px 10px padding. Workspace row: 18px
-  orange-gradient rounded mark with an ember-ink letter, 600-weight name.
-  Links: 13px/500 text-2 with a 14px drawn icon, 6px radius; hover = hover
-  surface + primary text; active = raised surface + primary text.
+  orange-gradient rounded mark (5px radius, #f0883e → #c96a25 at 135deg) with
+  an ember-ink 10px/800 letter, 600-weight name. Links: 13px/500 text-2 with
+  a 14px drawn icon, 6px radius; hover = hover surface + primary text; active
+  = raised surface + primary text.
 - **Breadcrumbs:** 500-weight text-2 links, `›` separator in text-3, current
   page in primary text.
 
 ### Avatars (signature)
-- 18px circles with 8.5px/700 dark initials on a per-member pastel hue
+- 18px circles with 8.5px/700 avatar-ink initials on a per-member pastel hue
   (`av-0`..`av-3`), assigned server-side from a name hash so the color never
   shifts between renders, surfaces, or sessions. Appear on cards
   (right-aligned), comments, and the assignee prop.
@@ -344,6 +397,8 @@ never icon fonts, emoji, or third-party icon packages. New icons match the
   (`#board`, `#issue-detail`, `#comments`).
 - **Do** express state with the drawn circle icons and priority with the bar
   icons — the icon carries the hue, the adjacent text stays gray.
+- **Do** surface failures through the flash strip's single red voice; hide it
+  when there is nothing to report.
 - **Do** use `font-variant-numeric: tabular-nums` for keys and counts.
 - **Do** step one rung up the tonal ladder for hover, and pair every surface
   with a white-alpha hairline.
@@ -351,6 +406,8 @@ never icon fonts, emoji, or third-party icon packages. New icons match the
 ### Don't:
 - **Don't** spend orange on anything except interactive affordances and the
   urgent priority icon.
+- **Don't** use red outside the flash strip — no inline error text, no red
+  icons, no second error treatment.
 - **Don't** introduce a second typeface, type above 19px, or uppercase outside
   the sidebar section-label register.
 - **Don't** add drop shadows beyond the card whisper, or invent new dark grays
