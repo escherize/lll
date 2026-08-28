@@ -2,6 +2,7 @@ import "go:bytes"
 import "go:encoding/json"
 import "go:fmt"
 import "go:html/template"
+import goldmark "go:github.com/yuin/goldmark"
 import "go:net/http"
 import "go:net/url"
 import "go:strconv"
@@ -77,7 +78,7 @@ pub struct CommentVM {
   pub author: string,
   pub avatar: AvatarVM,
   pub age: string,
-  pub body: string,
+  pub body: template.HTML,
 }
 
 /// View model for the comments fragment alone (broadcast re-renders).
@@ -391,8 +392,18 @@ fn comment_vm(c: models.Comment) -> CommentVM {
     author,
     avatar: avatar_vm(author),
     age: display.relative(c.created),
-    body: c.body,
+    body: md_html(c.body),
   }
+}
+
+/// Comment markdown -> HTML. goldmark's default renderer drops raw HTML, so
+/// user input cannot inject markup; on parse failure fall back to escaped text.
+fn md_html(src: string) -> template.HTML {
+  let mut buf = bytes.Buffer { .. }
+  if let Err(_) = goldmark.Convert(src.bytes(), &buf) {
+    return template.HTMLEscapeString(src) as template.HTML
+  }
+  buf.String() as template.HTML
 }
 
 /// Issue view model from a full record (expand: team, assignee, labels,
@@ -437,6 +448,7 @@ fn board_page(w: http.ResponseWriter, team_id: string) {
       return
     },
   }
+  w.Header().Set("Cache-Control", "no-store")
   w.Header().Set("Content-Type", "text/html; charset=utf-8")
   let _ = w.Write(html.bytes())
 }
@@ -464,6 +476,7 @@ fn issue_page(w: http.ResponseWriter, r: Ref<http.Request>) {
       return
     },
   }
+  w.Header().Set("Cache-Control", "no-store")
   w.Header().Set("Content-Type", "text/html; charset=utf-8")
   let _ = w.Write(html.bytes())
 }
@@ -641,8 +654,9 @@ fn create_action(w: http.ResponseWriter, r: Ref<http.Request>, team_id: string) 
 }
 
 fn state_action(w: http.ResponseWriter, r: Ref<http.Request>) {
-  let key = r.PostFormValue("key")
-  let state = r.PostFormValue("state")
+  // FormValue, not PostFormValue: drag-and-drop posts key/state as query params.
+  let key = r.FormValue("key")
+  let state = r.FormValue("state")
   if query.states().find(|s| s == state).is_none() {
     flash_error(w, f"unknown state '{state}'")
     return

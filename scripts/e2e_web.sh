@@ -155,6 +155,19 @@ code=$(curl -s -o /dev/null -w '%{http_code}' -X POST \
 out=$("$LIN" issue comment ENG-3)
 assert_contains "$out" "comment from the board" "web comment in lll issue comment"
 
+# --- drag-and-drop path: /state accepts query params with an empty body ---
+code=$(curl -s -o /dev/null -w '%{http_code}' -X POST "$WEB/state?key=ENG-3&state=done")
+[ "$code" = 200 ] || fail "query-param /state returned $code, want 200"
+out=$("$LIN" issue view ENG-3)
+assert_contains "$out" "done" "query-param state change persisted"
+
+# --- markdown comments render; raw HTML stays inert ---
+"$LIN" issue comment ENG-1 -b "has **bold** and \`code\` <script>alert(1)</script>" >/dev/null
+issue=$(curl -sf "$WEB/issue/ENG-1")
+assert_contains "$issue" "<strong>bold</strong>" "markdown bold rendered"
+assert_contains "$issue" "<code>code</code>" "markdown code rendered"
+printf '%s' "$issue" | grep -qF "<script>alert(1)</script>" && fail "raw HTML not neutralized in comment"
+
 # --- validation: errors arrive as visible flash patches, never silence ---
 out=$(curl -s -X POST -d "title=&state=todo" "$WEB/create")
 assert_contains "$out" "datastar-patch-elements" "empty title patches flash"

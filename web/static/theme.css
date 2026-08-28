@@ -284,6 +284,24 @@ input:focus, textarea:focus, select:focus {
 .comment .meta { color: var(--text-3); font-size: 12px; margin: 0 0 2px; }
 .comment .meta b { color: var(--text-2); font-weight: 600; }
 .comment p { margin: 0; color: var(--text); max-width: 65ch; }
+.md { color: var(--text); max-width: 65ch; }
+.md p { margin: 0 0 6px; }
+.md p:last-child { margin-bottom: 0; }
+.md code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+  background: var(--bg-raised);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 1px 4px;
+}
+.md pre { background: var(--bg-raised); border: 1px solid var(--border); border-radius: var(--radius); padding: 8px 10px; overflow-x: auto; }
+.md pre code { border: none; background: none; padding: 0; }
+.md a { color: var(--accent); text-decoration: none; }
+.md a:hover { text-decoration: underline; }
+.md ul, .md ol { margin: 0 0 6px; padding-left: 20px; }
+.md blockquote { margin: 0 0 6px; padding-left: 10px; border-left: 2px solid var(--border-strong); color: var(--text-2); }
+.md h1, .md h2, .md h3 { font-size: 13px; font-weight: 600; margin: 8px 0 4px; }
 
 .composer { grid-area: comp; display: flex; gap: 10px; margin: 14px 40px 28px; max-width: 680px; align-items: flex-end; }
 .composer textarea { flex: 1; min-height: 64px; resize: vertical; }

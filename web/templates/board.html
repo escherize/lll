@@ -28,7 +28,7 @@ provenance.
 </head>
 <!-- data-init lives on <body>, which is never patched, so the SSE
      connection is opened exactly once per page load. -->
-<body data-init="@get('/events?page=board')">
+<body data-init="@get('/events?page=board')" data-on:pageshow__window="evt.persisted && window.location.reload()">
 {{template "icons"}}
 <div class="app">
   <nav class="rail">
@@ -40,11 +40,11 @@ provenance.
       <div class="crumbs"><span class="here">Board</span></div>
       <div class="spacer"></div>
       <form id="new-issue" class="new-issue">
-        <input name="title" placeholder="Issue title" autocomplete="off">
+        <input id="new-title" name="title" placeholder="Issue title" autocomplete="off" data-on:keydown="evt.key === 'Enter' && (evt.preventDefault(), evt.target.value.trim() && @post('/create', {contentType: 'form'}))">
         <select name="state">
         {{range .States}}<option value="{{.Value}}"{{if eq .Value "todo"}} selected{{end}}>{{.Label}}</option>
         {{end}}</select>
-        <button type="button" class="btn primary" data-on:click="@post('/create', {contentType: 'form'})"><svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true"><path d="M6 1.5 V10.5 M1.5 6 H10.5" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg> New issue</button>
+        <button type="button" class="btn primary" data-on:click="document.getElementById('new-title').value.trim() ? @post('/create', {contentType: 'form'}) : document.getElementById('new-title').focus()"><svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true"><path d="M6 1.5 V10.5 M1.5 6 H10.5" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg> New issue</button>
       </form>
     </header>
     <div id="flash" class="flash" hidden></div>
@@ -58,12 +58,12 @@ provenance.
 {{range .Columns}}{{template "column" .}}
 {{end}}</main>{{end}}
 
-{{define "column"}}<section class="column" id="col-{{.State}}">
+{{define "column"}}<section class="column" id="col-{{.State}}" data-on:dragover="evt.preventDefault()" data-on:drop="evt.preventDefault(); @post('/state?key=' + evt.dataTransfer.getData('text/plain') + '&state={{.State}}')">
 <h2>{{template "state-icon" .State}} {{.Label}} <span class="count">{{len .Cards}}</span></h2>
 {{range .Cards}}{{template "card" .}}
 {{end}}</section>{{end}}
 
-{{define "card"}}<a class="card" id="issue-{{.Id}}" href="/issue/{{.Key}}">
+{{define "card"}}<a class="card" id="issue-{{.Id}}" href="/issue/{{.Key}}" draggable="true" data-on:dragstart="evt.dataTransfer.setData('text/plain', '{{.Key}}'); evt.dataTransfer.effectAllowed = 'move'">
 <span class="row1">{{.Key}}<span class="flex"></span>{{template "priority-icon" .Prio}}</span>
 <span class="title">{{.Title}}</span>
 {{if or .Labels .Assignee}}<span class="row3">{{range .Labels}}<span class="chip"><span class="dot" style="background:{{if .Color}}{{.Color}}{{else}}var(--text-3){{end}}"></span>{{.Name}}</span>{{end}}{{template "avatar" .Avatar}}</span>{{end}}
