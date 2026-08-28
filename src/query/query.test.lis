@@ -1,28 +1,35 @@
 #[test]
 fn filter_empty_criteria_yields_empty_string() {
-  assert filter("", "") == ""
+  assert filter("", "", "") == ""
 }
 
 #[test]
 fn filter_team_only() {
-  assert filter("abc123", "") == "team='abc123'"
+  assert filter("abc123", "", "") == "team='abc123'"
 }
 
 #[test]
 fn filter_state_only() {
-  assert filter("", "todo") == "state='todo'"
+  assert filter("", "todo", "") == "state='todo'"
+}
+
+#[test]
+fn filter_assignee_only() {
+  assert filter("", "", "mem456") == "assignee='mem456'"
 }
 
 #[test]
 fn filter_combines_criteria_with_and() {
-  assert filter("abc123", "in-progress") ==
+  assert filter("abc123", "in-progress", "") ==
   "team='abc123' && state='in-progress'"
+  assert filter("abc123", "todo", "mem456") ==
+  "team='abc123' && state='todo' && assignee='mem456'"
 }
 
 #[test]
 fn filter_escapes_quotes_and_backslashes() {
-  assert filter("a'b", "") == r"team='a\'b'"
-  assert filter(r"a\b", "") == r"team='a\\b'"
+  assert filter("a'b", "", "") == r"team='a\'b'"
+  assert filter(r"a\b", "", "") == r"team='a\\b'"
 }
 
 #[test]

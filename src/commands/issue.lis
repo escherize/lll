@@ -28,6 +28,7 @@ pub fn issue(args: Slice<string>) -> Result<(), string> {
     "close" => close_issue(args),
     "start" => start(args),
     "delete" => delete_issue(args),
+    "comment" => comment(args),
     "--help" => {
       print_usage()
       Ok(())
@@ -45,23 +46,28 @@ fn print_usage() {
     "lin issue - work with issues
 
 Usage:
-  lin issue create -t \"title\" [--priority 0-4]    create an issue in the configured team
-  lin issue list [--state s] [--sort f] [--json]  list issues; scoped to the configured team
-  lin issue view [KEY-123] [--json]               show one issue in full
+  lin issue create -t \"title\" [--priority 0-4] [--assignee name]
+                                                  create an issue in the configured team
+  lin issue list [--state s] [--assignee name] [--sort f] [--json]
+                                                  list issues; scoped to the configured team
+  lin issue view [KEY-123] [--json]               show one issue in full, with comments
   lin issue update [KEY-123] <flags>              change fields (at least one flag)
   lin issue close [KEY-123]                       set state done
   lin issue start [KEY-123]                       set state in-progress; print/create the
                                                   branch key-number-slug (git switch)
   lin issue delete KEY-123 [--force]              delete; asks [y/N] unless --force
+  lin issue comment [KEY-123] [-b \"body\"]         add a comment (authored by 'me' in
+                                                  .lin.toml); without -b, list comments
 
 Flags:
   --state        one of: backlog, todo, in-progress, in-review, done, cancelled
+  --assignee     member name (see 'lin member list'); filters on list
   --sort         created, updated, priority, or number; prefix - for descending
                  (default: LIN_SORT or 'sort' in .lin.toml, else created)
   --priority     0 none, 1 urgent (!!!), 2 high (!!), 3 medium (!), 4 low (·)
   --title        new title (update)
   --description  new description (update)
-  --json         raw PocketBase JSON (team expanded), pipe-friendly
+  --json         raw PocketBase JSON (team, assignee expanded), pipe-friendly
   --force        skip the delete confirmation
 
 When KEY-123 is omitted (except for delete), it is inferred from the current
@@ -76,6 +82,7 @@ The team comes from LIN_TEAM or 'team' in .lin.toml (see 'lin config --help').",
 fn create(args: Slice<string>) -> Result<(), string> {
   let mut title = ""
   let mut priority = 0
+  let mut assignee_name = ""
   let mut i = 3
   while i < args.length() {
     match args[i] {
@@ -84,6 +91,13 @@ fn create(args: Slice<string>) -> Result<(), string> {
           return Err("-t requires a value")
         }
         title = val
+        i += 2
+      },
+      "--assignee" => {
+        let Some(val) = args.get(i + 1) else {
+          return Err("--assignee requires a value")
+        }
+        assignee_name = val
         i += 2
       },
       "--priority" => {
@@ -105,8 +119,13 @@ fn create(args: Slice<string>) -> Result<(), string> {
     }
   }
   if title == "" {
-    return Err("usage: lin issue create -t \"title\" [--priority 0-4]")
+    return Err(
+      "usage: lin issue create -t \"title\" [--priority 0-4] [--assignee name]",
+    )
   }
+
+  let mut assignee = ""
+  if assignee_name != "" { assignee = resolve_member(assignee_name)?.id }
 
   let team_key = config.load()?.team
   if team_key == "" {
@@ -123,6 +142,7 @@ fn create(args: Slice<string>) -> Result<(), string> {
     title,
     state: "todo",
     priority,
+    assignee,
   }
   let payload = match json.Marshal(new_issue) {
     Ok(p) => p,
@@ -140,11 +160,19 @@ fn create(args: Slice<string>) -> Result<(), string> {
 
 fn list(args: Slice<string>) -> Result<(), string> {
   let mut state = ""
+  let mut assignee_name = ""
   let mut sort_flag = ""
   let mut json_mode = false
   let mut i = 3
   while i < args.length() {
     match args[i] {
+      "--assignee" => {
+        let Some(val) = args.get(i + 1) else {
+          return Err("--assignee requires a value")
+        }
+        assignee_name = val
+        i += 2
+      },
       "--state" => {
         let Some(val) = args.get(i + 1) else {
           return Err("--state requires a value")
@@ -183,13 +211,16 @@ fn list(args: Slice<string>) -> Result<(), string> {
     team_id = team.id
   }
 
+  let mut assignee_id = ""
+  if assignee_name != "" { assignee_id = resolve_member(assignee_name)?.id }
+
   let mut sort_spec = sort_flag
   if sort_spec == "" { sort_spec = cfg.sort }
   if sort_spec == "" { sort_spec = "created" }
   let sort = query.sort(sort_spec)?
 
-  let mut path = f"/api/collections/issues/records?perPage=200&expand=team&sort={url.QueryEscape(sort)}"
-  let filter = query.filter(team_id, state)
+  let mut path = f"/api/collections/issues/records?perPage=200&expand=team,assignee&sort={url.QueryEscape(sort)}"
+  let filter = query.filter(team_id, state, assignee_id)
   if filter != "" { path = f"{path}&filter={url.QueryEscape(filter)}" }
 
   let body = pb.get(path)?
@@ -206,7 +237,7 @@ fn list(args: Slice<string>) -> Result<(), string> {
   let w = tabwriter.NewWriter(os.Stdout, 0, 4, 2, ' ', 0)
   for item in issues.items {
     let key = item.expand.team.key
-    let line = f"{key}-{item.number}\t{display.glyph(item.state)} {item.state}\t{display.priority_marker(item.priority)}\t{item.title}\t{display.relative(item.updated)}"
+    let line = f"{key}-{item.number}\t{display.glyph(item.state)} {item.state}\t{display.priority_marker(item.priority)}\t{item.title}\t{item.expand.assignee.name}\t{display.relative(item.updated)}"
     if let Err(e) = fmt.Fprintln(w, line) { return Err(f"writing output: {e}") }
   }
   if let Err(e) = w.Flush() { return Err(f"writing output: {e}") }
@@ -243,24 +274,37 @@ fn view(args: Slice<string>) -> Result<(), string> {
     return Err(f"decoding issue: {e}")
   }
 
+  let mut assignee = full.expand.assignee.name
+  if assignee == "" { assignee = "none" }
+
   fmt.Println(f"{full.expand.team.key}-{full.number} {full.title}")
   fmt.Println("")
   fmt.Println(f"State:     {display.glyph(full.state)} {full.state}")
   fmt.Println(f"Priority:  {display.priority_name(full.priority)}")
+  fmt.Println(f"Assignee:  {assignee}")
   fmt.Println(f"Created:   {display.relative(full.created)}")
   fmt.Println(f"Updated:   {display.relative(full.updated)}")
   if full.description != "" {
     fmt.Println("")
     fmt.Println(full.description)
   }
+
+  let comments = fetch_comments(full.id)?
+  if comments.length() > 0 {
+    fmt.Println("")
+    fmt.Println("Comments:")
+    fmt.Println("")
+    print_comments(comments)
+  }
   Ok(())
 }
 
 fn update(args: Slice<string>) -> Result<(), string> {
-  let usage = "lin issue update [KEY-123] [--state s] [--priority 0-4] [--title t] [--description d]"
+  let usage = "lin issue update [KEY-123] [--state s] [--priority 0-4] [--assignee name] [--title t] [--description d]"
   let mut id = ""
   let mut state = ""
   let mut priority = -1
+  let mut assignee_name = ""
   let mut title = ""
   let mut title_set = false
   let mut description = ""
@@ -268,6 +312,13 @@ fn update(args: Slice<string>) -> Result<(), string> {
   let mut i = 3
   while i < args.length() {
     match args[i] {
+      "--assignee" => {
+        let Some(val) = args.get(i + 1) else {
+          return Err("--assignee requires a value")
+        }
+        assignee_name = val
+        i += 2
+      },
       "--state" => {
         let Some(val) = args.get(i + 1) else {
           return Err("--state requires a value")
@@ -320,7 +371,8 @@ fn update(args: Slice<string>) -> Result<(), string> {
       },
     }
   }
-  if state == "" && priority < 0 && !title_set && !description_set {
+  if state == "" && priority < 0 && assignee_name == "" && !title_set &&
+  !description_set {
     return Err(f"nothing to update — pass at least one flag\nusage: {usage}")
   }
 
@@ -330,6 +382,10 @@ fn update(args: Slice<string>) -> Result<(), string> {
   let mut fields: Slice<string> = []
   if state != "" { fields = fields.append("\"state\":" + json_quote(state)?) }
   if priority >= 0 { fields = fields.append(f"\"priority\":{priority}") }
+  if assignee_name != "" {
+    let member = resolve_member(assignee_name)?
+    fields = fields.append("\"assignee\":" + json_quote(member.id)?)
+  }
   if title_set { fields = fields.append("\"title\":" + json_quote(title)?) }
   if description_set {
     fields = fields.append("\"description\":" + json_quote(description)?)
@@ -419,6 +475,92 @@ fn delete_issue(args: Slice<string>) -> Result<(), string> {
   Ok(())
 }
 
+fn comment(args: Slice<string>) -> Result<(), string> {
+  let usage = "lin issue comment [KEY-123] [-b \"body\"]"
+  let mut id = ""
+  let mut body = ""
+  let mut body_set = false
+  let mut i = 3
+  while i < args.length() {
+    match args[i] {
+      "-b" => {
+        let Some(val) = args.get(i + 1) else {
+          return Err("-b requires a value")
+        }
+        body = val
+        body_set = true
+        i += 2
+      },
+      other => {
+        if other.starts_with("-") { return Err(f"unknown flag: '{other}'") }
+        if id != "" { return Err(f"unexpected argument: '{other}'") }
+        id = other
+        i += 1
+      },
+    }
+  }
+
+  let resolved = resolve_id(id, usage)?
+  let issue = fetch_issue(resolved)?
+
+  if !body_set {
+    let comments = fetch_comments(issue.id)?
+    if comments.is_empty() {
+      fmt.Println("No comments.")
+      return Ok(())
+    }
+    print_comments(comments)
+    return Ok(())
+  }
+  if body == "" { return Err(f"-b cannot be empty\nusage: {usage}") }
+
+  // Author is the member named by 'me' in config; unset or unmatched 'me'
+  // makes the comment authorless (honor system, no auth).
+  let mut author = ""
+  let me = config.load()?.me
+  if me != "" { if let Some(m) = find_member(me)? { author = m.id } }
+
+  let new_comment = models.NewComment { issue: issue.id, author, body }
+  let payload = match json.Marshal(new_comment) {
+    Ok(p) => p,
+    Err(e) => return Err(f"encoding comment: {e}"),
+  }
+  let _ = pb.post("/api/collections/comments/records", payload as string)?
+  fmt.Println(f"Commented on {issue.expand.team.key}-{issue.number}")
+  Ok(())
+}
+
+/// An issue's comments, oldest first, author expanded.
+fn fetch_comments(issue_id: string) -> Result<Slice<models.Comment>, string> {
+  let filter = url.QueryEscape(f"issue='{issue_id}'")
+  let body = pb.get(
+    f"/api/collections/comments/records?filter={filter}&sort=created&expand=author&perPage=200",
+  )?
+  let mut comments = models.CommentList { .. }
+  if let Err(e) = json.Unmarshal(body.bytes(), &comments) {
+    return Err(f"decoding comments: {e}")
+  }
+  Ok(comments.items)
+}
+
+/// Print comments as "author (3h ago)" then the indented body.
+fn print_comments(comments: Slice<models.Comment>) {
+  for c in comments {
+    let mut author = c.expand.author.name
+    if author == "" { author = "anon" }
+    fmt.Println(f"{author} ({display.relative(c.created)})")
+    fmt.Println(f"  {c.body}")
+  }
+}
+
+/// Resolve a member by name; unknown names error with the fix.
+fn resolve_member(name: string) -> Result<models.Member, string> {
+  let Some(m) = find_member(name)? else {
+    return Err(f"no member named '{name}' — see 'lin member list'")
+  }
+  Ok(m)
+}
+
 /// Parse `[KEY-123]` as the only allowed argument (verbs without flags).
 fn positional_id(args: Slice<string>, usage: string) -> Result<string, string> {
   let mut id = ""
@@ -452,7 +594,8 @@ fn resolve_id(explicit: string, usage: string) -> Result<string, string> {
   Ok(id)
 }
 
-/// Fetch an issue by KEY-123 and return the raw PB record JSON (team expanded).
+/// Fetch an issue by KEY-123 and return the raw PB record JSON (team and
+/// assignee expanded).
 fn fetch_issue_record(id: string) -> Result<string, string> {
   let bad_id = f"'{id}' is not an issue ID (expected KEY-123, e.g. ENG-1)"
   let Some(dash) = strings.LastIndex(id, "-") else {
@@ -470,7 +613,7 @@ fn fetch_issue_record(id: string) -> Result<string, string> {
   }
 
   let filter = url.QueryEscape(
-    f"{query.filter(team.id, "")} && number={number}",
+    f"{query.filter(team.id, "", "")} && number={number}",
   )
   let body = pb.get(
     f"/api/collections/issues/records?filter={filter}&perPage=1",
@@ -483,7 +626,7 @@ fn fetch_issue_record(id: string) -> Result<string, string> {
     return Err(not_found)
   }
 
-  pb.get(f"/api/collections/issues/records/{item.id}?expand=team")
+  pb.get(f"/api/collections/issues/records/{item.id}?expand=team,assignee")
 }
 
 /// fetch_issue_record, decoded.

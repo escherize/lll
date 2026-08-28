@@ -17,8 +17,28 @@ pub struct NewTeam {
 }
 
 #[json]
+pub struct Member {
+  pub id: string,
+  pub name: string,
+  pub email: string,
+}
+
+#[json]
+pub struct MemberList {
+  pub items: Slice<Member>,
+}
+
+#[json]
+pub struct NewMember {
+  pub name: string,
+  #[json(omitempty)]
+  pub email: string,
+}
+
+#[json]
 pub struct IssueExpand {
   pub team: Team,
+  pub assignee: Member,
 }
 
 #[json]
@@ -30,6 +50,7 @@ pub struct Issue {
   pub description: string,
   pub state: string,
   pub priority: int,
+  pub assignee: string,
   pub created: string,
   pub updated: string,
   pub expand: IssueExpand,
@@ -48,4 +69,34 @@ pub struct NewIssue {
   pub title: string,
   pub state: string,
   pub priority: int,
+  #[json(omitempty)]
+  pub assignee: string,
+}
+
+#[json]
+pub struct CommentExpand {
+  pub author: Member,
+}
+
+#[json]
+pub struct Comment {
+  pub id: string,
+  pub issue: string,
+  pub author: string,
+  pub body: string,
+  pub created: string,
+  pub expand: CommentExpand,
+}
+
+#[json]
+pub struct CommentList {
+  pub items: Slice<Comment>,
+}
+
+#[json]
+pub struct NewComment {
+  pub issue: string,
+  #[json(omitempty)]
+  pub author: string,
+  pub body: string,
 }

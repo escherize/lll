@@ -4,7 +4,9 @@
 # forged duplicate (team, number) rejection, issue view (fields, unknown IDs),
 # --json (jq roundtrips, expand.team), --state/--sort filters, glyph/priority
 # display, write path (start/update/close/delete, git branch creation and
-# ID inference from the branch), --help output.
+# ID inference from the branch), members (add/list), comments (add via config
+# 'me', authorless, list, in issue view), --assignee (create/update/list
+# filter, unknown member, expand in --json), --help output.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
@@ -42,11 +44,11 @@ fail() {
 }
 
 assert_contains() { # haystack needle label
-  printf '%s' "$1" | grep -qF "$2" || fail "$3: expected '$2' in output:
+  printf '%s' "$1" | grep -qF -- "$2" || fail "$3: expected '$2' in output:
 $1"
 }
 assert_not_contains() {
-  printf '%s' "$1" | grep -qF "$2" && fail "$3: did not expect '$2' in output:
+  printf '%s' "$1" | grep -qF -- "$2" && fail "$3: did not expect '$2' in output:
 $1" || true
 }
 
@@ -350,10 +352,114 @@ assert_contains "$out" "Deleted ENG-7" "forced delete output"
 out=$(LIN_URL=$URL LIN_TEAM=ENG "$LIN" issue list)
 assert_not_contains "$out" "ENG-7" "forced delete removed the issue"
 
+# --- members: add + list ---
+out=$(LIN_URL=$URL "$LIN" member add -n bryan -e bryan@example.com)
+assert_contains "$out" "Added member bryan" "member add output"
+out=$(LIN_URL=$URL "$LIN" member add -n alice)
+assert_contains "$out" "Added member alice" "member add without email"
+out=$(LIN_URL=$URL "$LIN" member list)
+assert_contains "$out" "bryan" "member list has bryan"
+assert_contains "$out" "bryan@example.com" "member list shows email"
+assert_contains "$out" "alice" "member list has alice"
+
+# --- --assignee on create; assignee in list and view ---
+out=$(LIN_URL=$URL LIN_TEAM=ENG "$LIN" issue create -t "Assigned issue" --assignee bryan)
+assert_contains "$out" "Created ENG-7: Assigned issue" "assigned create output"
+out=$(LIN_URL=$URL LIN_TEAM=ENG "$LIN" issue list)
+assert_contains "$out" "bryan" "list shows assignee column"
+out=$(LIN_URL=$URL "$LIN" issue view ENG-7)
+assert_contains "$out" "Assignee:  bryan" "view shows assignee"
+out=$(LIN_URL=$URL "$LIN" issue view ENG-6)
+assert_contains "$out" "Assignee:  none" "view shows unassigned as none"
+
+# --- --assignee filter on list ---
+out=$(LIN_URL=$URL LIN_TEAM=ENG "$LIN" issue list --assignee bryan)
+assert_contains "$out" "ENG-7" "assignee filter shows assigned issue"
+assert_not_contains "$out" "ENG-6" "assignee filter hides unassigned issues"
+
+# --- --assignee on update ---
+out=$(LIN_URL=$URL "$LIN" issue update ENG-6 --assignee alice)
+assert_contains "$out" "Updated ENG-6" "update --assignee output"
+out=$(LIN_URL=$URL "$LIN" issue view ENG-6)
+assert_contains "$out" "Assignee:  alice" "update set assignee"
+out=$(LIN_URL=$URL LIN_TEAM=ENG "$LIN" issue list --assignee alice)
+assert_contains "$out" "ENG-6" "assignee filter finds updated issue"
+assert_not_contains "$out" "ENG-7" "assignee filter scoped to alice"
+
+# --- unknown member errors and names the fix ---
+set +e
+out=$(LIN_URL=$URL LIN_TEAM=ENG "$LIN" issue create -t "Nope" --assignee nobody 2>&1)
+rc=$?
+set -e
+[ "$rc" -ne 0 ] || fail "create --assignee nobody: expected nonzero exit"
+assert_contains "$out" "no member named 'nobody'" "unknown member message"
+assert_contains "$out" "lin member list" "unknown member names the fix"
+
+set +e
+out=$(LIN_URL=$URL "$LIN" issue update ENG-6 --assignee nobody 2>&1)
+rc=$?
+set -e
+[ "$rc" -ne 0 ] || fail "update --assignee nobody: expected nonzero exit"
+assert_contains "$out" "no member named 'nobody'" "update unknown member message"
+
+set +e
+out=$(LIN_URL=$URL LIN_TEAM=ENG "$LIN" issue list --assignee nobody 2>&1)
+rc=$?
+set -e
+[ "$rc" -ne 0 ] || fail "list --assignee nobody: expected nonzero exit"
+assert_contains "$out" "no member named 'nobody'" "list unknown member message"
+
+# --- --json resolves expand.assignee ---
+aname=$(LIN_URL=$URL "$LIN" issue view ENG-7 --json | jq -r '.expand.assignee.name')
+[ "$aname" = "bryan" ] || fail "view --json: expected expand.assignee.name bryan, got '$aname'"
+aname=$(LIN_URL=$URL LIN_TEAM=ENG "$LIN" issue list --assignee bryan --json | \
+  jq -r '.items[0].expand.assignee.name')
+[ "$aname" = "bryan" ] || fail "list --json: expected expand.assignee.name bryan, got '$aname'"
+
+# --- comment add authored by config 'me'; shown in view with relative date ---
+printf 'url = "%s"\nteam = "ENG"\nme = "bryan"\n' "$URL" > "$WORK/.lin.toml"
+out=$(cd "$WORK" && env -u LIN_URL -u LIN_TEAM HOME="$FAKEHOME" "$LIN_ABS" issue comment ENG-7 -b "Looks good to me")
+assert_contains "$out" "Commented on ENG-7" "comment add output"
+
+out=$(LIN_URL=$URL "$LIN" issue view ENG-7)
+assert_contains "$out" "Comments:" "view has comments section"
+assert_contains "$out" "bryan (just now)" "view comment author and relative date"
+assert_contains "$out" "Looks good to me" "view comment body"
+
+# --- comment list without -b ---
+out=$(LIN_URL=$URL "$LIN" issue comment ENG-7)
+assert_contains "$out" "bryan (just now)" "comment list author"
+assert_contains "$out" "Looks good to me" "comment list body"
+
+# --- authorless comments: me unset, and me naming no member ---
+out=$(LIN_URL=$URL "$LIN" issue comment ENG-7 -b "Anonymous note")
+assert_contains "$out" "Commented on ENG-7" "authorless comment (me unset) accepted"
+
+printf 'url = "%s"\nteam = "ENG"\nme = "ghost"\n' "$URL" > "$WORK/.lin.toml"
+out=$(cd "$WORK" && env -u LIN_URL -u LIN_TEAM HOME="$FAKEHOME" "$LIN_ABS" issue comment ENG-7 -b "Ghost note")
+assert_contains "$out" "Commented on ENG-7" "authorless comment (me unmatched) accepted"
+
+out=$(LIN_URL=$URL "$LIN" issue comment ENG-7)
+assert_contains "$out" "anon (just now)" "authorless comments render as anon"
+assert_contains "$out" "Anonymous note" "authorless body listed"
+assert_contains "$out" "Ghost note" "unmatched-me body listed"
+
+# --- comment ID inference from the git branch ---
+git -C "$REPO" switch -q eng-6-roundtrip-issue
+out=$(cd "$REPO" && LIN_URL=$URL "$LIN_ABS" issue comment -b "From the branch")
+assert_contains "$out" "Commented on ENG-6" "comment infers ID from branch"
+out=$(cd "$REPO" && LIN_URL=$URL "$LIN_ABS" issue comment)
+assert_contains "$out" "From the branch" "inferred comment list"
+
+# --- no comments ---
+out=$(LIN_URL=$URL "$LIN" issue comment ENG-1)
+assert_contains "$out" "No comments." "empty comment list message"
+
 # --- help output ---
 out=$("$LIN" --help)
 assert_contains "$out" "Usage:" "lin --help"
 assert_contains "$out" "lin team" "lin --help mentions team"
+assert_contains "$out" "lin member" "lin --help mentions member"
 assert_contains "$out" "lin config" "lin --help mentions config"
 out=$("$LIN" issue --help)
 assert_contains "$out" "Usage:" "lin issue --help"
@@ -361,6 +467,11 @@ assert_contains "$out" "lin issue update" "issue --help mentions update"
 assert_contains "$out" "lin issue close" "issue --help mentions close"
 assert_contains "$out" "lin issue start" "issue --help mentions start"
 assert_contains "$out" "lin issue delete" "issue --help mentions delete"
+assert_contains "$out" "lin issue comment" "issue --help mentions comment"
+assert_contains "$out" "--assignee" "issue --help mentions --assignee"
+out=$("$LIN" member --help)
+assert_contains "$out" "Usage:" "lin member --help"
+assert_contains "$out" "lin member add" "member --help mentions add"
 out=$("$LIN" team --help)
 assert_contains "$out" "Usage:" "lin team --help"
 out=$("$LIN" config --help)

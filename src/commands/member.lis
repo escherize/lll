@@ -1,0 +1,103 @@
+import "go:encoding/json"
+import "go:fmt"
+import "go:net/url"
+
+import "models"
+import "pb"
+
+/// Dispatch `lin member <verb>`.
+pub fn member(args: Slice<string>) -> Result<(), string> {
+  let Some(verb) = args.get(2) else {
+    member_usage()
+    return Ok(())
+  }
+  match verb {
+    "list" => member_list(),
+    "add" => member_add(args),
+    "--help" => {
+      member_usage()
+      Ok(())
+    },
+    "-h" => {
+      member_usage()
+      Ok(())
+    },
+    other => Err(f"unknown member command: '{other}' (see 'lin member --help')"),
+  }
+}
+
+fn member_usage() {
+  fmt.Println(
+    "lin member - work with members
+
+Usage:
+  lin member list                       list members (name, email)
+  lin member add -n \"name\" [-e email]   add a member
+
+Members are honor-system identities (no auth). 'me' in .lin.toml names the
+member that authors your comments.",
+  )
+}
+
+fn member_list() -> Result<(), string> {
+  let body = pb.get("/api/collections/members/records?perPage=200&sort=name")?
+  let mut members = models.MemberList { .. }
+  if let Err(e) = json.Unmarshal(body.bytes(), &members) {
+    return Err(f"decoding members: {e}")
+  }
+  for m in members.items {
+    fmt.Println(f"{m.name}\t{m.email}")
+  }
+  Ok(())
+}
+
+fn member_add(args: Slice<string>) -> Result<(), string> {
+  let mut name = ""
+  let mut email = ""
+  let mut i = 3
+  while i < args.length() {
+    match args[i] {
+      "-n" => {
+        let Some(val) = args.get(i + 1) else {
+          return Err("-n requires a value")
+        }
+        name = val
+        i += 2
+      },
+      "-e" => {
+        let Some(val) = args.get(i + 1) else {
+          return Err("-e requires a value")
+        }
+        email = val
+        i += 2
+      },
+      other => return Err(f"unknown flag: '{other}'"),
+    }
+  }
+  if name == "" { return Err("usage: lin member add -n \"name\" [-e email]") }
+
+  let new_member = models.NewMember { name, email }
+  let payload = match json.Marshal(new_member) {
+    Ok(p) => p,
+    Err(e) => return Err(f"encoding member: {e}"),
+  }
+  let body = pb.post("/api/collections/members/records", payload as string)?
+
+  let mut created = models.Member { .. }
+  if let Err(e) = json.Unmarshal(body.bytes(), &created) {
+    return Err(f"decoding created member: {e}")
+  }
+  fmt.Println(f"Added member {created.name}")
+  Ok(())
+}
+
+/// Find a member by exact name, or None.
+fn find_member(name: string) -> Result<Option<models.Member>, string> {
+  let filter = url.QueryEscape(f"name='{name}'")
+  let body = pb.get(f"/api/collections/members/records?filter={filter}")?
+  let mut result = models.MemberList { .. }
+  if let Err(e) = json.Unmarshal(body.bytes(), &result) {
+    return Err(f"decoding members: {e}")
+  }
+  Ok(result.items.find(|m| m.name == name))
+}

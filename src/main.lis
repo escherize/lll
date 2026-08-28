@@ -12,6 +12,7 @@ fn main() {
   let result = match noun {
     "issue" => commands.issue(os.Args),
     "team" => commands.team(os.Args),
+    "member" => commands.member(os.Args),
     "config" => commands.config_cmd(os.Args),
     "--help" => {
       print_usage()
@@ -41,6 +42,7 @@ fn print_usage() {
 Usage:
   lin issue <command>     work with issues (see 'lin issue --help')
   lin team <command>      work with teams (see 'lin team --help')
+  lin member <command>    work with members (see 'lin member --help')
   lin config <command>    manage configuration (see 'lin config --help')
   lin --help              show this help
 
