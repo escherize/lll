@@ -1,0 +1,70 @@
+import "go:fmt"
+import "go:os/exec"
+import "go:strings"
+
+import "config"
+
+/// `lll board` — print the web board URL; `-w` opens it in the browser.
+pub fn board(args: Slice<string>) -> Result<(), string> {
+  let mut open = false
+  let mut i = 2
+  while i < args.length() {
+    match args[i] {
+      "-w" => {
+        open = true
+        i += 1
+      },
+      "--help" => {
+        print_board_usage()
+        return Ok(())
+      },
+      "-h" => {
+        print_board_usage()
+        return Ok(())
+      },
+      other => return Err(f"unknown flag: '{other}'"),
+    }
+  }
+  let base = web_base()?
+  if open {
+    fmt.Println(f"Opening {base}")
+    return open_url(base)
+  }
+  fmt.Println(base)
+  Ok(())
+}
+
+fn print_board_usage() {
+  fmt.Println(
+    "lll board - the web board URL
+
+Usage:
+  lll board       print the board URL
+  lll board -w    open the board in the browser
+
+The URL comes from LLL_WEB_URL, 'web_url' in .lll.toml, or the default
+http://127.0.0.1:8100 (where 'lll up' serves the board).",
+  )
+}
+
+/// Web board base URL (env > config > default), without a trailing slash.
+fn web_base() -> Result<string, string> {
+  let cfg = config.load()?
+  Ok(strings.TrimSuffix(cfg.web_url, "/"))
+}
+
+/// Open a URL in the default browser: macOS `open`, else `xdg-open`.
+fn open_url(url: string) -> Result<(), string> {
+  let mut opener = ""
+  if let Partial.Ok(path) = exec.LookPath("open") { opener = path }
+  if opener == "" {
+    if let Partial.Ok(path) = exec.LookPath("xdg-open") { opener = path }
+  }
+  if opener == "" {
+    return Err("no browser opener found (need 'open' or 'xdg-open')")
+  }
+  if let Err(e) = exec.Command(opener, url).Start() {
+    return Err(f"opening {url}: {e}")
+  }
+  Ok(())
+}

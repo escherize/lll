@@ -11,7 +11,10 @@
 # as list filters, --search, unknown names, expand in --json), realtime watch
 # (lll watch create/update/delete lines and server-side filters, lll issue
 # watch transitions and comments, --json NDJSON, reconnect across a PB
-# restart), --help output, and the lll serve web board (via e2e_web.sh).
+# restart), completions (bash/zsh/fish parse smoke), issue url/id/title
+# (explicit + branch-inferred), board and -w opener (stubbed 'open' on PATH;
+# real gh runs for issue pr are manual), --limit, --help output, and the
+# lll serve web board (via e2e_web.sh).
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
@@ -702,6 +705,101 @@ wait_for_line "$WATCH_ISSUE" "$WKEY deleted" "issue watch sees the delete"
 kill $WATCH_PIDS 2>/dev/null || true
 WATCH_PIDS=""
 
+# --- completions: emit + parse smoke for each shell ---
+"$LIN" completions bash > "$DATA_DIR/comp.bash"
+bash -n "$DATA_DIR/comp.bash" || fail "bash completions do not parse"
+out=$(cat "$DATA_DIR/comp.bash")
+assert_contains "$out" "create list view update close start delete comment watch url id title pr" "bash completions list issue verbs"
+assert_contains "$out" "--limit" "bash completions know --limit"
+assert_contains "$out" "complete -F _lll lll" "bash completions register"
+"$LIN" completions zsh > "$DATA_DIR/comp.zsh"
+if command -v zsh >/dev/null; then
+  zsh -n "$DATA_DIR/comp.zsh" || fail "zsh completions do not parse"
+fi
+assert_contains "$(cat "$DATA_DIR/comp.zsh")" "compdef _lll lll" "zsh completions register"
+"$LIN" completions fish > "$DATA_DIR/comp.fish"
+if command -v fish >/dev/null; then
+  fish -n "$DATA_DIR/comp.fish" || fail "fish completions do not parse"
+fi
+assert_contains "$(cat "$DATA_DIR/comp.fish")" "complete -c lll" "fish completions complete lll"
+set +e
+out=$("$LIN" completions powershell 2>&1)
+rc=$?
+set -e
+[ "$rc" -ne 0 ] || fail "completions powershell: expected nonzero exit"
+assert_contains "$out" "unknown shell" "unknown shell message"
+
+# --- issue url / id / title: explicit arg ---
+out=$(HOME="$FAKEHOME" LLL_URL=$URL "$LIN" issue url ENG-6)
+[ "$out" = "http://127.0.0.1:8100/issue/ENG-6" ] || fail "issue url: got '$out'"
+out=$(LLL_URL=$URL LLL_WEB_URL=https://lll.example.com "$LIN" issue url ENG-6)
+[ "$out" = "https://lll.example.com/issue/ENG-6" ] || fail "issue url with LLL_WEB_URL: got '$out'"
+out=$(LLL_URL=$URL "$LIN" issue id ENG-6)
+[ "$out" = "ENG-6" ] || fail "issue id: got '$out'"
+out=$(LLL_URL=$URL "$LIN" issue title ENG-6)
+[ "$out" = "Roundtrip issue v2" ] || fail "issue title: got '$out'"
+
+set +e
+out=$(LLL_URL=$URL "$LIN" issue url ENG-99 2>&1)
+rc=$?
+set -e
+[ "$rc" -ne 0 ] || fail "issue url ENG-99: expected nonzero exit"
+assert_contains "$out" "issue ENG-99 not found" "issue url unknown ID message"
+
+# --- issue url / id / title: inferred from the git branch ---
+out=$(cd "$REPO" && HOME="$FAKEHOME" LLL_URL=$URL "$LLL_ABS" issue url)
+[ "$out" = "http://127.0.0.1:8100/issue/ENG-6" ] || fail "inferred issue url: got '$out'"
+out=$(cd "$REPO" && LLL_URL=$URL "$LLL_ABS" issue id)
+[ "$out" = "ENG-6" ] || fail "inferred issue id: got '$out'"
+out=$(cd "$REPO" && LLL_URL=$URL "$LLL_ABS" issue title)
+[ "$out" = "Roundtrip issue v2" ] || fail "inferred issue title: got '$out'"
+
+# --- board prints the web URL; LLL_WEB_URL env and web_url config override ---
+out=$(HOME="$FAKEHOME" "$LIN" board)
+[ "$out" = "http://127.0.0.1:8100" ] || fail "board URL: got '$out'"
+out=$(LLL_WEB_URL=https://lll.example.com/ "$LIN" board)
+[ "$out" = "https://lll.example.com" ] || fail "board URL trims trailing slash: got '$out'"
+printf 'url = "%s"\nweb_url = "https://cfg.example.com"\n' "$URL" > "$WORK/.lll.toml"
+out=$(cd "$WORK" && HOME="$FAKEHOME" "$LLL_ABS" board)
+[ "$out" = "https://cfg.example.com" ] || fail "board URL from config web_url: got '$out'"
+
+# --- -w opens via the first opener on PATH (stubbed; no real browser) ---
+mkdir -p "$DATA_DIR/bin"
+printf '#!/bin/sh\necho "$1" >> "%s/opened.txt"\n' "$DATA_DIR" > "$DATA_DIR/bin/open"
+chmod +x "$DATA_DIR/bin/open"
+out=$(HOME="$FAKEHOME" PATH="$DATA_DIR/bin:$PATH" LLL_URL=$URL "$LIN" issue view ENG-6 -w)
+assert_contains "$out" "Opening http://127.0.0.1:8100/issue/ENG-6" "view -w announces the URL"
+out=$(HOME="$FAKEHOME" PATH="$DATA_DIR/bin:$PATH" "$LIN" board -w)
+assert_contains "$out" "Opening http://127.0.0.1:8100" "board -w announces the URL"
+sleep 0.5
+assert_contains "$(cat "$DATA_DIR/opened.txt")" "/issue/ENG-6" "view -w invoked the opener"
+
+# --- issue pr: clear error when gh is missing ---
+# (a real gh run needs a pushed branch and GitHub auth — manual only)
+set +e
+out=$(PATH=/nonexistent LLL_URL=$URL "$LIN" issue pr ENG-6 2>&1)
+rc=$?
+set -e
+[ "$rc" -ne 0 ] || fail "issue pr without gh: expected nonzero exit"
+assert_contains "$out" "brew install gh" "pr without gh names the fix"
+
+# --- --limit on issue list (applied server-side via PB perPage) ---
+out=$(LLL_URL=$URL LLL_TEAM=ENG "$LIN" issue list --limit 1)
+[ "$(printf '%s\n' "$out" | wc -l | tr -d ' ')" = "1" ] || fail "--limit 1: expected one line:
+$out"
+set +e
+out=$(LLL_URL=$URL "$LIN" issue list --limit 0 2>&1)
+rc=$?
+set -e
+[ "$rc" -ne 0 ] || fail "list --limit 0: expected nonzero exit"
+assert_contains "$out" "--limit must be a positive integer" "invalid limit message"
+set +e
+out=$(LLL_URL=$URL "$LIN" issue list --limit abc 2>&1)
+rc=$?
+set -e
+[ "$rc" -ne 0 ] || fail "list --limit abc: expected nonzero exit"
+assert_contains "$out" "--limit must be a positive integer" "non-numeric limit message"
+
 # --- help output ---
 out=$("$LIN" --help)
 assert_contains "$out" "Usage:" "lll --help"
@@ -711,6 +809,8 @@ assert_contains "$out" "lll project" "lll --help mentions project"
 assert_contains "$out" "lll label" "lll --help mentions label"
 assert_contains "$out" "lll config" "lll --help mentions config"
 assert_contains "$out" "lll watch" "lll --help mentions watch"
+assert_contains "$out" "lll board" "lll --help mentions board"
+assert_contains "$out" "lll completions" "lll --help mentions completions"
 out=$("$LIN" issue --help)
 assert_contains "$out" "Usage:" "lll issue --help"
 assert_contains "$out" "lll issue update" "issue --help mentions update"
@@ -723,6 +823,15 @@ assert_contains "$out" "--label" "issue --help mentions --label"
 assert_contains "$out" "--project" "issue --help mentions --project"
 assert_contains "$out" "--search" "issue --help mentions --search"
 assert_contains "$out" "lll issue watch" "issue --help mentions watch"
+assert_contains "$out" "lll issue url" "issue --help mentions url"
+assert_contains "$out" "lll issue pr" "issue --help mentions pr"
+assert_contains "$out" "--limit" "issue --help mentions --limit"
+out=$("$LIN" board --help)
+assert_contains "$out" "Usage:" "lll board --help"
+assert_contains "$out" "-w" "board --help mentions -w"
+out=$("$LIN" completions --help)
+assert_contains "$out" "Usage:" "lll completions --help"
+assert_contains "$out" "eval" "completions --help shows the eval line"
 out=$("$LIN" watch --help)
 assert_contains "$out" "Usage:" "lll watch --help"
 assert_contains "$out" "--state" "watch --help mentions --state"

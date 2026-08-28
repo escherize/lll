@@ -28,7 +28,7 @@ fn config_usage() {
 Usage:
   lll config init    write a commented .lll.toml template to the current directory
 
-Precedence: env vars (LLL_URL, LLL_TEAM, LLL_SORT) > ./.lll.toml > ~/.config/lll/lll.toml",
+Precedence: env vars (LLL_URL, LLL_TEAM, LLL_SORT, LLL_WEB_URL) > ./.lll.toml > ~/.config/lll/lll.toml",
   )
 }
 
@@ -37,7 +37,7 @@ fn config_init() -> Result<(), string> {
     return Err(".lll.toml already exists; not overwriting")
   }
   let template = "# lll configuration
-# Precedence: env vars (LLL_URL, LLL_TEAM, LLL_SORT) > ./.lll.toml > ~/.config/lll/lll.toml
+# Precedence: env vars (LLL_URL, LLL_TEAM, LLL_SORT, LLL_WEB_URL) > ./.lll.toml > ~/.config/lll/lll.toml
 # The first file found is used whole; env vars override individual fields.
 
 # PocketBase server URL.
@@ -52,6 +52,9 @@ fn config_init() -> Result<(), string> {
 
 # Who you are. Identity placeholder until auth exists.
 # me = \"bryan\"
+
+# Web board base URL, used by 'lll board' and 'lll issue url' / 'view -w'.
+# web_url = \"http://127.0.0.1:8100\"
 "
   if let Err(e) = os.WriteFile(".lll.toml", template.bytes(), 0o644) {
     return Err(f"writing .lll.toml: {e}")

@@ -19,6 +19,8 @@ fn main() {
     "watch" => commands.watch(os.Args),
     "serve" => commands.serve(os.Args),
     "up" => commands.up(os.Args),
+    "board" => commands.board(os.Args),
+    "completions" => commands.completions(os.Args),
     "--help" => {
       print_usage()
       Ok(())
@@ -54,11 +56,15 @@ Usage:
   lll watch [flags]       live event stream for a query (see 'lll watch --help')
   lll serve [--port 8100] web board with realtime updates (see 'lll serve --help')
   lll up [--port 8100]    start PocketBase + web board together (see 'lll up --help')
+  lll board [-w]          print the web board URL; -w opens it (see 'lll board --help')
+  lll completions <shell> completion script for bash, zsh, or fish
+                          (see 'lll completions --help')
   lll --help              show this help
 
 Configuration (env > ./.lll.toml > ~/.config/lll/lll.toml):
-  LLL_URL    PocketBase base URL (default http://127.0.0.1:8090)
-  LLL_TEAM   default team key (e.g. ENG); scopes 'issue list', used by 'issue create'
-  LLL_SORT   default sort for 'issue list': created, updated, priority, number; prefix - to descend",
+  LLL_URL      PocketBase base URL (default http://127.0.0.1:8090)
+  LLL_TEAM     default team key (e.g. ENG); scopes 'issue list', used by 'issue create'
+  LLL_SORT     default sort for 'issue list': created, updated, priority, number; prefix - to descend
+  LLL_WEB_URL  web board base URL for 'board', 'issue url', 'view -w' (default http://127.0.0.1:8100)",
   )
 }

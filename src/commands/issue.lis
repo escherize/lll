@@ -3,6 +3,7 @@ import "go:encoding/json"
 import "go:fmt"
 import "go:net/url"
 import "go:os"
+import "go:os/exec"
 import "go:strconv"
 import "go:strings"
 import "go:text/tabwriter"
@@ -30,6 +31,10 @@ pub fn issue(args: Slice<string>) -> Result<(), string> {
     "delete" => delete_issue(args),
     "comment" => comment(args),
     "watch" => issue_watch(args),
+    "url" => url_cmd(args),
+    "id" => id_cmd(args),
+    "title" => title_cmd(args),
+    "pr" => pr_cmd(args),
     "--help" => {
       print_usage()
       Ok(())
@@ -51,9 +56,10 @@ Usage:
                    [--label name]... [--project name]
                                                   create an issue in the configured team
   lll issue list [--state s] [--assignee name] [--label name] [--project name]
-                 [--search q] [--sort f] [--json]
+                 [--search q] [--sort f] [--limit N] [--json]
                                                   list issues; scoped to the configured team
-  lll issue view [KEY-123] [--json]               show one issue in full, with comments
+  lll issue view [KEY-123] [--json] [-w]          show one issue in full, with comments;
+                                                  -w opens its web page instead
   lll issue update [KEY-123] <flags>              change fields (at least one flag)
   lll issue close [KEY-123]                       set state done
   lll issue start [KEY-123]                       set state in-progress; print/create the
@@ -63,6 +69,12 @@ Usage:
                                                   .lll.toml); without -b, list comments
   lll issue watch [KEY-123] [--json]              stream live events for the issue and
                                                   its comments until interrupted
+  lll issue url [KEY-123]                         print the issue's web page URL
+  lll issue id [KEY-123]                          print the issue's KEY-123 identifier
+  lll issue title [KEY-123]                       print the issue's title
+  lll issue pr [KEY-123]                          open a GitHub PR for the issue via
+                                                  'gh pr create' (title \"KEY-123: title\",
+                                                  body links the issue)
 
 Flags:
   --state        one of: backlog, todo, in-progress, in-review, done, cancelled
@@ -73,12 +85,17 @@ Flags:
   --search       list only issues whose title contains q
   --sort         created, updated, priority, or number; prefix - for descending
                  (default: LLL_SORT or 'sort' in .lll.toml, else created)
+  --limit        list at most N issues (positive integer)
   --priority     0 none, 1 urgent (!!!), 2 high (!!), 3 medium (!), 4 low (·)
   --title        new title (update)
   --description  new description (update)
   --json         raw PocketBase JSON (team, assignee, labels, project
                  expanded), pipe-friendly
   --force        skip the delete confirmation
+  -w             open the issue's web page in the browser (view)
+
+Web URLs come from LLL_WEB_URL, 'web_url' in .lll.toml, or the default
+http://127.0.0.1:8100 (where 'lll up' serves the board).
 
 When KEY-123 is omitted (except for delete), it is inferred from the current
 git branch: eng-12-fix-login resolves to ENG-12.
@@ -201,6 +218,7 @@ fn list(args: Slice<string>) -> Result<(), string> {
   let mut project_name = ""
   let mut search = ""
   let mut sort_flag = ""
+  let mut limit = 0
   let mut json_mode = false
   let mut i = 3
   while i < args.length() {
@@ -252,6 +270,17 @@ fn list(args: Slice<string>) -> Result<(), string> {
         sort_flag = val
         i += 2
       },
+      "--limit" => {
+        let Some(val) = args.get(i + 1) else {
+          return Err("--limit requires a value")
+        }
+        let Ok(n) = strconv.Atoi(val) else {
+          return Err(f"--limit must be a positive integer, got '{val}'")
+        }
+        if n < 1 { return Err(f"--limit must be a positive integer, got {n}") }
+        limit = n
+        i += 2
+      },
       "--json" => {
         json_mode = true
         i += 1
@@ -285,7 +314,10 @@ fn list(args: Slice<string>) -> Result<(), string> {
   if sort_spec == "" { sort_spec = "created" }
   let sort = query.sort(sort_spec)?
 
-  let mut path = f"/api/collections/issues/records?perPage=200&expand=team,assignee,labels,project&sort={url.QueryEscape(sort)}"
+  // --limit applies server-side via PB's perPage (capped by PB at 500).
+  let mut per_page = 200
+  if limit > 0 { per_page = limit }
+  let mut path = f"/api/collections/issues/records?perPage={per_page}&expand=team,assignee,labels,project&sort={url.QueryEscape(sort)}"
   let filter = query.filter(
     team_id,
     state,
@@ -325,11 +357,16 @@ fn print_issue_table(issues: Slice<models.Issue>) -> Result<(), string> {
 fn view(args: Slice<string>) -> Result<(), string> {
   let mut id = ""
   let mut json_mode = false
+  let mut open_web = false
   let mut i = 3
   while i < args.length() {
     match args[i] {
       "--json" => {
         json_mode = true
+        i += 1
+      },
+      "-w" => {
+        open_web = true
         i += 1
       },
       other => {
@@ -339,7 +376,13 @@ fn view(args: Slice<string>) -> Result<(), string> {
       },
     }
   }
-  let resolved = resolve_id(id, "lll issue view [KEY-123] [--json]")?
+  let resolved = resolve_id(id, "lll issue view [KEY-123] [--json] [-w]")?
+
+  if open_web {
+    let target = issue_url(fetch_issue(resolved)?)?
+    fmt.Println(f"Opening {target}")
+    return open_url(target)
+  }
 
   let record = fetch_issue_record(resolved)?
   if json_mode {
@@ -648,6 +691,75 @@ fn comment(args: Slice<string>) -> Result<(), string> {
   let _ = pb.post("/api/collections/comments/records", payload as string)?
   fmt.Println(f"Commented on {issue.expand.team.key}-{issue.number}")
   Ok(())
+}
+
+fn url_cmd(args: Slice<string>) -> Result<(), string> {
+  let usage = "lll issue url [KEY-123]"
+  let id = positional_id(args, usage)?
+  let resolved = resolve_id(id, usage)?
+  let target = issue_url(fetch_issue(resolved)?)?
+  fmt.Println(target)
+  Ok(())
+}
+
+fn id_cmd(args: Slice<string>) -> Result<(), string> {
+  let usage = "lll issue id [KEY-123]"
+  let id = positional_id(args, usage)?
+  let resolved = resolve_id(id, usage)?
+  let issue = fetch_issue(resolved)?
+  fmt.Println(f"{issue.expand.team.key}-{issue.number}")
+  Ok(())
+}
+
+fn title_cmd(args: Slice<string>) -> Result<(), string> {
+  let usage = "lll issue title [KEY-123]"
+  let id = positional_id(args, usage)?
+  let resolved = resolve_id(id, usage)?
+  let issue = fetch_issue(resolved)?
+  fmt.Println(issue.title)
+  Ok(())
+}
+
+/// Thin wrapper over the GitHub CLI: gh owns pushing checks, prompts, and
+/// errors — we only supply the KEY-prefixed title and an issue-linking body.
+fn pr_cmd(args: Slice<string>) -> Result<(), string> {
+  let usage = "lll issue pr [KEY-123]"
+  let id = positional_id(args, usage)?
+  let resolved = resolve_id(id, usage)?
+
+  let mut gh = ""
+  match exec.LookPath("gh") {
+    Partial.Ok(path) => gh = path,
+    _ => return Err(
+      "gh not found on PATH — install the GitHub CLI (brew install gh)",
+    ),
+  }
+
+  let issue = fetch_issue(resolved)?
+  let key = f"{issue.expand.team.key}-{issue.number}"
+  let mut body = issue_url(issue)?
+  if issue.description != "" { body = f"{body}\n\n{issue.description}" }
+
+  let cmd = exec.Command(
+    gh,
+    "pr",
+    "create",
+    "--title",
+    f"{key}: {issue.title}",
+    "--body",
+    body,
+  )
+  cmd.Stdin = Some(os.Stdin)
+  cmd.Stdout = Some(os.Stdout)
+  cmd.Stderr = Some(os.Stderr)
+  if let Err(e) = cmd.Run() { return Err(f"gh pr create: {e}") }
+  Ok(())
+}
+
+/// Web page URL for an issue: <web_url>/issue/KEY-123.
+fn issue_url(issue: models.Issue) -> Result<string, string> {
+  let base = web_base()?
+  Ok(f"{base}/issue/{issue.expand.team.key}-{issue.number}")
 }
 
 /// An issue's comments, oldest first, author expanded.

@@ -1,0 +1,285 @@
+import "go:fmt"
+import "go:strings"
+
+// `lll completions <shell>` — static completion scripts, all generated from
+// the one command table below (nouns, verbs per noun, flags per verb).
+
+pub fn completions(args: Slice<string>) -> Result<(), string> {
+  let Some(shell) = args.get(2) else {
+    print_completions_usage()
+    return Ok(())
+  }
+  match shell {
+    "bash" => {
+      fmt.Print(bash_script())
+      Ok(())
+    },
+    "zsh" => {
+      fmt.Print(zsh_script())
+      Ok(())
+    },
+    "fish" => {
+      fmt.Print(fish_script())
+      Ok(())
+    },
+    "--help" => {
+      print_completions_usage()
+      Ok(())
+    },
+    "-h" => {
+      print_completions_usage()
+      Ok(())
+    },
+    other => Err(f"unknown shell: '{other}' (expected bash, zsh, or fish)"),
+  }
+}
+
+fn print_completions_usage() {
+  fmt.Println(
+    "lll completions - shell completion scripts
+
+Usage:
+  lll completions bash    add to ~/.bashrc:   eval \"$(lll completions bash)\"
+  lll completions zsh     add to ~/.zshrc     eval \"$(lll completions zsh)\"
+                          (after compinit)
+  lll completions fish    add to ~/.config/fish/config.fish:
+                          lll completions fish | source
+
+Completes nouns, verbs per noun, and flags per verb.",
+  )
+}
+
+// --- command table ---
+
+fn nouns() -> Slice<string> {
+  [
+    "issue",
+    "team",
+    "member",
+    "project",
+    "label",
+    "config",
+    "watch",
+    "serve",
+    "up",
+    "board",
+    "completions",
+    "help",
+  ]
+}
+
+fn verbs(noun: string) -> Slice<string> {
+  match noun {
+    "issue" => [
+      "create",
+      "list",
+      "view",
+      "update",
+      "close",
+      "start",
+      "delete",
+      "comment",
+      "watch",
+      "url",
+      "id",
+      "title",
+      "pr",
+    ],
+    "team" => ["list", "create", "view"],
+    "member" => ["list", "add"],
+    "project" => ["list", "view", "create"],
+    "label" => ["list", "create"],
+    "config" => ["init"],
+    "completions" => ["bash", "zsh", "fish"],
+    _ => [],
+  }
+}
+
+/// Flags for a noun-verb pair (long flags, plus -w where it is the point).
+fn verb_flags(noun: string, verb: string) -> Slice<string> {
+  match f"{noun} {verb}" {
+    "issue create" => ["--priority", "--assignee", "--label", "--project"],
+    "issue list" => [
+      "--state",
+      "--assignee",
+      "--label",
+      "--project",
+      "--search",
+      "--sort",
+      "--limit",
+      "--json",
+    ],
+    "issue view" => ["--json", "-w"],
+    "issue update" => [
+      "--state",
+      "--priority",
+      "--assignee",
+      "--label",
+      "--project",
+      "--title",
+      "--description",
+    ],
+    "issue delete" => ["--force"],
+    "issue watch" => ["--json"],
+    "project create" => ["--status", "--team"],
+    "label create" => ["--team"],
+    _ => [],
+  }
+}
+
+/// Flags for verb-less nouns (watch, serve, up, board).
+fn noun_flags(noun: string) -> Slice<string> {
+  match noun {
+    "watch" => [
+      "--state",
+      "--assignee",
+      "--label",
+      "--project",
+      "--search",
+      "--json",
+    ],
+    "serve" => ["--port"],
+    "up" => ["--port", "--pb-dir"],
+    "board" => ["-w"],
+    _ => [],
+  }
+}
+
+// --- emitters ---
+
+fn bash_script() -> string {
+  let mut verb_cases = ""
+  let mut flag_cases = ""
+  for n in nouns() {
+    let vs = verbs(n)
+    if !vs.is_empty() {
+      let ws = strings.Join(vs, " ")
+      verb_cases += f"      {n}) words='{ws}' ;;\n"
+    } else if !noun_flags(n).is_empty() {
+      let ws = strings.Join(noun_flags(n), " ")
+      verb_cases += f"      {n}) words='{ws}' ;;\n"
+      flag_cases += f"      {n},*) words='{ws}' ;;\n"
+    }
+    for v in vs {
+      let fs = verb_flags(n, v)
+      if !fs.is_empty() {
+        let ws = strings.Join(fs, " ")
+        flag_cases += f"      {n},{v}) words='{ws}' ;;\n"
+      }
+    }
+  }
+  let all_nouns = strings.Join(nouns(), " ")
+  "# lll bash completions
+# Add to ~/.bashrc:  eval \"$(lll completions bash)\"
+_lll() {
+  local cur=${COMP_WORDS[COMP_CWORD]}
+  local noun=${COMP_WORDS[1]-}
+  local verb=${COMP_WORDS[2]-}
+  local words=
+  if [ $COMP_CWORD -eq 1 ]; then
+    words='" +
+  all_nouns +
+  "'
+  elif [ $COMP_CWORD -eq 2 ]; then
+    case $noun in
+" +
+  verb_cases +
+  "    esac
+  else
+    case $noun,$verb in
+" +
+  flag_cases +
+  "    esac
+  fi
+  COMPREPLY=($(compgen -W \"$words\" -- \"$cur\"))
+}
+complete -F _lll lll
+"
+}
+
+fn zsh_script() -> string {
+  let mut verb_cases = ""
+  let mut flag_cases = ""
+  for n in nouns() {
+    let vs = verbs(n)
+    if !vs.is_empty() {
+      let ws = strings.Join(vs, " ")
+      verb_cases += f"      {n}) comps=({ws}) ;;\n"
+    } else if !noun_flags(n).is_empty() {
+      let ws = strings.Join(noun_flags(n), " ")
+      verb_cases += f"      {n}) comps=({ws}) ;;\n"
+      flag_cases += f"      {n},*) comps=({ws}) ;;\n"
+    }
+    for v in vs {
+      let fs = verb_flags(n, v)
+      if !fs.is_empty() {
+        let ws = strings.Join(fs, " ")
+        flag_cases += f"      {n},{v}) comps=({ws}) ;;\n"
+      }
+    }
+  }
+  let all_nouns = strings.Join(nouns(), " ")
+  "# lll zsh completions
+# Add to ~/.zshrc (after compinit):  eval \"$(lll completions zsh)\"
+_lll() {
+  local -a comps
+  local noun=${words[2]-}
+  local verb=${words[3]-}
+  if (( CURRENT == 2 )); then
+    comps=(" +
+  all_nouns +
+  ")
+  elif (( CURRENT == 3 )); then
+    case $noun in
+" +
+  verb_cases +
+  "    esac
+  else
+    case $noun,$verb in
+" +
+  flag_cases +
+  "    esac
+  fi
+  compadd -- $comps
+}
+compdef _lll lll
+"
+}
+
+fn fish_script() -> string {
+  let all_nouns = strings.Join(nouns(), " ")
+  let mut out = "# lll fish completions
+# Add to ~/.config/fish/config.fish:  lll completions fish | source
+complete -c lll -f
+"
+  out += f"complete -c lll -n '__fish_use_subcommand' -a '{all_nouns}'\n"
+  for n in nouns() {
+    let vs = verbs(n)
+    if !vs.is_empty() {
+      let ws = strings.Join(vs, " ")
+      out += f"complete -c lll -n '__fish_seen_subcommand_from {n}; and not __fish_seen_subcommand_from {ws}' -a '{ws}'\n"
+    }
+    for fl in noun_flags(n) {
+      let spec = fish_flag(fl)
+      out += f"complete -c lll -n '__fish_seen_subcommand_from {n}' {spec}\n"
+    }
+    for v in vs {
+      for fl in verb_flags(n, v) {
+        let spec = fish_flag(fl)
+        out += f"complete -c lll -n '__fish_seen_subcommand_from {n}; and __fish_seen_subcommand_from {v}' {spec}\n"
+      }
+    }
+  }
+  out
+}
+
+/// "--limit" -> "-l limit", "-w" -> "-s w".
+fn fish_flag(flag: string) -> string {
+  if flag.starts_with("--") {
+    let name = flag.substring(2..flag.length())
+    f"-l {name}"
+  } else {
+    let name = flag.substring(1..flag.length())
+    f"-s {name}"
+  }
+}

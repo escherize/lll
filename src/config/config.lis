@@ -1,14 +1,15 @@
+import "go:github.com/BurntSushi/toml"
 import "go:os"
 import "go:path/filepath"
 
-import "go:github.com/BurntSushi/toml"
-
 #[json]
+#[toml]
 pub struct Config {
   pub url: string,
   pub team: string,
   pub sort: string,
   pub me: string,
+  pub web_url: string,
 }
 
 /// Load config: env vars > ./.lll.toml > ~/.config/lll/lll.toml.
@@ -26,38 +27,27 @@ pub fn load() -> Result<Config, string> {
   }
 
   let url = os.Getenv("LLL_URL")
-  if url != "" {
-    cfg.url = url
-  }
+  if url != "" { cfg.url = url }
   let team = os.Getenv("LLL_TEAM")
-  if team != "" {
-    cfg.team = team
-  }
+  if team != "" { cfg.team = team }
   let sort = os.Getenv("LLL_SORT")
-  if sort != "" {
-    cfg.sort = sort
-  }
+  if sort != "" { cfg.sort = sort }
+  let web_url = os.Getenv("LLL_WEB_URL")
+  if web_url != "" { cfg.web_url = web_url }
 
-  if cfg.url == "" {
-    cfg.url = "http://127.0.0.1:8090"
-  }
+  if cfg.url == "" { cfg.url = "http://127.0.0.1:8090" }
+  if cfg.web_url == "" { cfg.web_url = "http://127.0.0.1:8100" }
   Ok(cfg)
 }
 
 /// First existing config file: ./.lll.toml, then ~/.config/lll/lll.toml.
 fn config_file() -> Option<string> {
-  if exists(".lll.toml") {
-    return Some(".lll.toml")
-  }
+  if exists(".lll.toml") { return Some(".lll.toml") }
   let Ok(home) = os.UserHomeDir() else {
     return None
   }
   let path = filepath.Join(home, ".config", "lll", "lll.toml")
-  if exists(path) {
-    Some(path)
-  } else {
-    None
-  }
+  if exists(path) { Some(path) } else { None }
 }
 
 fn exists(path: string) -> bool {
