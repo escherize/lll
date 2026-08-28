@@ -1,0 +1,63 @@
+#[test]
+fn branch_with_slug_yields_uppercased_id() {
+  let assert Some(id) = issue_id_from_branch("eng-12-fix-login")
+  assert id == "ENG-12"
+}
+
+#[test]
+fn uppercase_and_mixed_case_branches_match() {
+  let assert Some(a) = issue_id_from_branch("ENG-12-FIX-LOGIN")
+  assert a == "ENG-12"
+  let assert Some(b) = issue_id_from_branch("Ops-3")
+  assert b == "OPS-3"
+}
+
+#[test]
+fn extra_dashes_and_digits_in_slug_are_ignored() {
+  let assert Some(a) = issue_id_from_branch("eng-12-fix--login--flow")
+  assert a == "ENG-12"
+  let assert Some(b) = issue_id_from_branch("eng-12-migrate-2-postgres-15")
+  assert b == "ENG-12"
+}
+
+#[test]
+fn bare_key_number_matches() {
+  let assert Some(id) = issue_id_from_branch("eng-7")
+  assert id == "ENG-7"
+}
+
+#[test]
+fn non_matching_branches_yield_none() {
+  assert issue_id_from_branch("main").is_none()
+  assert issue_id_from_branch("").is_none()
+  assert issue_id_from_branch("fix-login").is_none()
+  assert issue_id_from_branch("eng-").is_none()
+  assert issue_id_from_branch("-12").is_none()
+  assert issue_id_from_branch("eng2-12").is_none()
+  assert issue_id_from_branch("feature/eng-12").is_none()
+}
+
+#[test]
+fn slug_lowercases_and_joins_alphanumeric_words() {
+  assert slug("Fix the login flow") == "fix-the-login-flow"
+  assert slug("Fix login!  (again)") == "fix-login-again"
+  assert slug("v2 rollout") == "v2-rollout"
+}
+
+#[test]
+fn slug_caps_at_five_words() {
+  assert slug("one two three four five six seven") == "one-two-three-four-five"
+}
+
+#[test]
+fn slug_of_unsluggable_title_is_empty() {
+  assert slug("!!! ???") == ""
+  assert slug("") == ""
+}
+
+#[test]
+fn branch_name_combines_key_number_slug() {
+  assert branch_name("ENG", 12, "Fix the login flow") ==
+  "eng-12-fix-the-login-flow"
+  assert branch_name("OPS", 3, "") == "ops-3"
+}

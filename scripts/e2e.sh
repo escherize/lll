@@ -3,7 +3,8 @@
 # Covers: create/list with ENG-1 style IDs, per-team numbering,
 # forged duplicate (team, number) rejection, issue view (fields, unknown IDs),
 # --json (jq roundtrips, expand.team), --state/--sort filters, glyph/priority
-# display, --help output.
+# display, write path (start/update/close/delete, git branch creation and
+# ID inference from the branch), --help output.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
@@ -245,6 +246,104 @@ assert_contains "$out" "!!!" "list shows urgent marker"
 assert_contains "$out" "·" "list shows low marker"
 assert_contains "$out" "just now" "list shows relative dates"
 
+# --- write path round-trip: create -> start -> update -> close ---
+out=$(LIN_URL=$URL LIN_TEAM=ENG "$LIN" issue create -t "Roundtrip issue" --priority 3)
+assert_contains "$out" "Created ENG-6: Roundtrip issue" "roundtrip create"
+
+REPO="$DATA_DIR/repo"
+git init -q -b main "$REPO"
+git -C "$REPO" -c user.name=e2e -c user.email=e2e@example.com \
+  commit -q --allow-empty -m init
+
+out=$(cd "$REPO" && LIN_URL=$URL "$LIN_ABS" issue start ENG-6)
+assert_contains "$out" "Started ENG-6" "start output"
+assert_contains "$out" "Branch: eng-6-roundtrip-issue" "start prints branch name"
+assert_contains "$out" "Created and switched to branch 'eng-6-roundtrip-issue'" "start creates branch"
+branch=$(git -C "$REPO" branch --show-current)
+[ "$branch" = "eng-6-roundtrip-issue" ] || fail "start: expected branch eng-6-roundtrip-issue, on '$branch'"
+
+# starting again switches to the existing branch instead of failing
+out=$(cd "$REPO" && LIN_URL=$URL "$LIN_ABS" issue start ENG-6)
+assert_contains "$out" "Switched to existing branch 'eng-6-roundtrip-issue'" "start reuses branch"
+
+# --- ID inference from the branch: view / update / close with no arg ---
+out=$(cd "$REPO" && LIN_URL=$URL "$LIN_ABS" issue view)
+assert_contains "$out" "ENG-6 Roundtrip issue" "inferred view header"
+assert_contains "$out" "◐ in-progress" "start set in-progress"
+
+out=$(cd "$REPO" && LIN_URL=$URL "$LIN_ABS" issue update --priority 1 --title "Roundtrip issue v2")
+assert_contains "$out" "Updated ENG-6" "inferred update output"
+out=$(LIN_URL=$URL "$LIN" issue view ENG-6)
+assert_contains "$out" "ENG-6 Roundtrip issue v2" "update changed title"
+assert_contains "$out" "Priority:  urgent" "update changed priority"
+
+out=$(cd "$REPO" && LIN_URL=$URL "$LIN_ABS" issue close)
+assert_contains "$out" "Closed ENG-6" "inferred close output"
+out=$(LIN_URL=$URL LIN_TEAM=ENG "$LIN" issue list --state done)
+assert_contains "$out" "ENG-6" "closed issue listed as done"
+assert_contains "$out" "● done" "list shows done glyph"
+
+# inference fails helpfully off a conventional branch
+git -C "$REPO" switch -q -c not-an-issue-branch
+set +e
+out=$(cd "$REPO" && LIN_URL=$URL "$LIN_ABS" issue view 2>&1)
+rc=$?
+set -e
+[ "$rc" -ne 0 ] || fail "view on non-issue branch: expected nonzero exit"
+assert_contains "$out" "doesn't look like eng-123-" "inference failure names the convention"
+
+# --- update validation: no flags, bad state ---
+set +e
+out=$(LIN_URL=$URL "$LIN" issue update ENG-6 2>&1)
+rc=$?
+set -e
+[ "$rc" -ne 0 ] || fail "update with no flags: expected nonzero exit"
+assert_contains "$out" "nothing to update" "update requires a flag"
+
+set +e
+out=$(LIN_URL=$URL "$LIN" issue update ENG-6 --state bogus 2>&1)
+rc=$?
+set -e
+[ "$rc" -ne 0 ] || fail "update --state bogus: expected nonzero exit"
+assert_contains "$out" "unknown state 'bogus'" "update validates state"
+
+# --- unknown IDs: update / close exit nonzero ---
+set +e
+out=$(LIN_URL=$URL "$LIN" issue update ENG-99 --priority 2 2>&1)
+rc=$?
+set -e
+[ "$rc" -ne 0 ] || fail "update ENG-99: expected nonzero exit"
+assert_contains "$out" "issue ENG-99 not found" "update unknown ID message"
+
+set +e
+out=$(LIN_URL=$URL "$LIN" issue close ZZZ-9 2>&1)
+rc=$?
+set -e
+[ "$rc" -ne 0 ] || fail "close ZZZ-9: expected nonzero exit"
+assert_contains "$out" "issue ZZZ-9 not found" "close unknown ID message"
+
+# --- delete: declined without --force, explicit ID required, --force deletes ---
+out=$(LIN_URL=$URL LIN_TEAM=ENG "$LIN" issue create -t "Delete me")
+assert_contains "$out" "Created ENG-7" "delete target created"
+
+out=$(printf 'n\n' | LIN_URL=$URL "$LIN" issue delete ENG-7)
+assert_contains "$out" "delete ENG-7? [y/N]" "delete prompts"
+assert_contains "$out" "Aborted." "delete declined"
+out=$(LIN_URL=$URL LIN_TEAM=ENG "$LIN" issue list)
+assert_contains "$out" "ENG-7" "declined delete keeps the issue"
+
+set +e
+out=$(LIN_URL=$URL "$LIN" issue delete 2>&1)
+rc=$?
+set -e
+[ "$rc" -ne 0 ] || fail "delete without ID: expected nonzero exit"
+assert_contains "$out" "lin issue delete KEY-123" "delete requires explicit ID"
+
+out=$(LIN_URL=$URL "$LIN" issue delete ENG-7 --force)
+assert_contains "$out" "Deleted ENG-7" "forced delete output"
+out=$(LIN_URL=$URL LIN_TEAM=ENG "$LIN" issue list)
+assert_not_contains "$out" "ENG-7" "forced delete removed the issue"
+
 # --- help output ---
 out=$("$LIN" --help)
 assert_contains "$out" "Usage:" "lin --help"
@@ -252,6 +351,10 @@ assert_contains "$out" "lin team" "lin --help mentions team"
 assert_contains "$out" "lin config" "lin --help mentions config"
 out=$("$LIN" issue --help)
 assert_contains "$out" "Usage:" "lin issue --help"
+assert_contains "$out" "lin issue update" "issue --help mentions update"
+assert_contains "$out" "lin issue close" "issue --help mentions close"
+assert_contains "$out" "lin issue start" "issue --help mentions start"
+assert_contains "$out" "lin issue delete" "issue --help mentions delete"
 out=$("$LIN" team --help)
 assert_contains "$out" "Usage:" "lin team --help"
 out=$("$LIN" config --help)

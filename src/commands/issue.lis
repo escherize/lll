@@ -1,3 +1,4 @@
+import "go:bufio"
 import "go:encoding/json"
 import "go:fmt"
 import "go:net/url"
@@ -8,6 +9,7 @@ import "go:text/tabwriter"
 
 import "config"
 import "display"
+import "gitctx"
 import "models"
 import "pb"
 import "query"
@@ -22,6 +24,10 @@ pub fn issue(args: Slice<string>) -> Result<(), string> {
     "create" => create(args),
     "list" => list(args),
     "view" => view(args),
+    "update" => update(args),
+    "close" => close_issue(args),
+    "start" => start(args),
+    "delete" => delete_issue(args),
     "--help" => {
       print_usage()
       Ok(())
@@ -41,14 +47,25 @@ fn print_usage() {
 Usage:
   lin issue create -t \"title\" [--priority 0-4]    create an issue in the configured team
   lin issue list [--state s] [--sort f] [--json]  list issues; scoped to the configured team
-  lin issue view KEY-123 [--json]                 show one issue in full
+  lin issue view [KEY-123] [--json]               show one issue in full
+  lin issue update [KEY-123] <flags>              change fields (at least one flag)
+  lin issue close [KEY-123]                       set state done
+  lin issue start [KEY-123]                       set state in-progress; print/create the
+                                                  branch key-number-slug (git switch)
+  lin issue delete KEY-123 [--force]              delete; asks [y/N] unless --force
 
 Flags:
-  --state     one of: backlog, todo, in-progress, in-review, done, cancelled
-  --sort      created, updated, priority, or number; prefix - for descending
-              (default: LIN_SORT or 'sort' in .lin.toml, else created)
-  --priority  0 none, 1 urgent (!!!), 2 high (!!), 3 medium (!), 4 low (·)
-  --json      raw PocketBase JSON (team expanded), pipe-friendly
+  --state        one of: backlog, todo, in-progress, in-review, done, cancelled
+  --sort         created, updated, priority, or number; prefix - for descending
+                 (default: LIN_SORT or 'sort' in .lin.toml, else created)
+  --priority     0 none, 1 urgent (!!!), 2 high (!!), 3 medium (!), 4 low (·)
+  --title        new title (update)
+  --description  new description (update)
+  --json         raw PocketBase JSON (team expanded), pipe-friendly
+  --force        skip the delete confirmation
+
+When KEY-123 is omitted (except for delete), it is inferred from the current
+git branch: eng-12-fix-login resolves to ENG-12.
 
 State glyphs: ◌ backlog  ○ todo  ◐ in-progress  ◉ in-review  ● done  ⊗ cancelled
 
@@ -213,17 +230,238 @@ fn view(args: Slice<string>) -> Result<(), string> {
       },
     }
   }
-  if id == "" { return Err("usage: lin issue view KEY-123 [--json]") }
+  let resolved = resolve_id(id, "lin issue view [KEY-123] [--json]")?
 
+  let record = fetch_issue_record(resolved)?
+  if json_mode {
+    fmt.Println(record)
+    return Ok(())
+  }
+
+  let mut full = models.Issue { .. }
+  if let Err(e) = json.Unmarshal(record.bytes(), &full) {
+    return Err(f"decoding issue: {e}")
+  }
+
+  fmt.Println(f"{full.expand.team.key}-{full.number} {full.title}")
+  fmt.Println("")
+  fmt.Println(f"State:     {display.glyph(full.state)} {full.state}")
+  fmt.Println(f"Priority:  {display.priority_name(full.priority)}")
+  fmt.Println(f"Created:   {display.relative(full.created)}")
+  fmt.Println(f"Updated:   {display.relative(full.updated)}")
+  if full.description != "" {
+    fmt.Println("")
+    fmt.Println(full.description)
+  }
+  Ok(())
+}
+
+fn update(args: Slice<string>) -> Result<(), string> {
+  let usage = "lin issue update [KEY-123] [--state s] [--priority 0-4] [--title t] [--description d]"
+  let mut id = ""
+  let mut state = ""
+  let mut priority = -1
+  let mut title = ""
+  let mut title_set = false
+  let mut description = ""
+  let mut description_set = false
+  let mut i = 3
+  while i < args.length() {
+    match args[i] {
+      "--state" => {
+        let Some(val) = args.get(i + 1) else {
+          return Err("--state requires a value")
+        }
+        if query.states().find(|s| s == val).is_none() {
+          return Err(
+            f"unknown state '{val}' (use one of: {strings.Join(query.states(), ", ")})",
+          )
+        }
+        state = val
+        i += 2
+      },
+      "--priority" => {
+        let Some(val) = args.get(i + 1) else {
+          return Err("--priority requires a value")
+        }
+        let Ok(p) = strconv.Atoi(val) else {
+          return Err(f"--priority must be a number 0-4, got '{val}'")
+        }
+        if p < 0 || p > 4 {
+          return Err(
+            f"--priority must be 0-4 (0 none, 1 urgent, 2 high, 3 medium, 4 low), got {p}",
+          )
+        }
+        priority = p
+        i += 2
+      },
+      "--title" => {
+        let Some(val) = args.get(i + 1) else {
+          return Err("--title requires a value")
+        }
+        if val == "" { return Err("--title cannot be empty") }
+        title = val
+        title_set = true
+        i += 2
+      },
+      "--description" => {
+        let Some(val) = args.get(i + 1) else {
+          return Err("--description requires a value")
+        }
+        description = val
+        description_set = true
+        i += 2
+      },
+      other => {
+        if other.starts_with("-") { return Err(f"unknown flag: '{other}'") }
+        if id != "" { return Err(f"unexpected argument: '{other}'") }
+        id = other
+        i += 1
+      },
+    }
+  }
+  if state == "" && priority < 0 && !title_set && !description_set {
+    return Err(f"nothing to update — pass at least one flag\nusage: {usage}")
+  }
+
+  let resolved = resolve_id(id, usage)?
+  let issue = fetch_issue(resolved)?
+
+  let mut fields: Slice<string> = []
+  if state != "" { fields = fields.append("\"state\":" + json_quote(state)?) }
+  if priority >= 0 { fields = fields.append(f"\"priority\":{priority}") }
+  if title_set { fields = fields.append("\"title\":" + json_quote(title)?) }
+  if description_set {
+    fields = fields.append("\"description\":" + json_quote(description)?)
+  }
+  let _ = pb.patch(
+    f"/api/collections/issues/records/{issue.id}",
+    "{" + strings.Join(fields, ",") + "}",
+  )?
+  fmt.Println(f"Updated {issue.expand.team.key}-{issue.number}")
+  Ok(())
+}
+
+fn close_issue(args: Slice<string>) -> Result<(), string> {
+  let usage = "lin issue close [KEY-123]"
+  let id = positional_id(args, usage)?
+  let resolved = resolve_id(id, usage)?
+  let issue = fetch_issue(resolved)?
+  let _ = pb.patch(
+    f"/api/collections/issues/records/{issue.id}",
+    "{\"state\":\"done\"}",
+  )?
+  fmt.Println(f"Closed {issue.expand.team.key}-{issue.number} ● done")
+  Ok(())
+}
+
+fn start(args: Slice<string>) -> Result<(), string> {
+  let usage = "lin issue start [KEY-123]"
+  let id = positional_id(args, usage)?
+  let resolved = resolve_id(id, usage)?
+  let issue = fetch_issue(resolved)?
+  let _ = pb.patch(
+    f"/api/collections/issues/records/{issue.id}",
+    "{\"state\":\"in-progress\"}",
+  )?
+  let key = issue.expand.team.key
+  fmt.Println(f"Started {key}-{issue.number}: {issue.title} (◐ in-progress)")
+
+  let branch = gitctx.branch_name(key, issue.number, issue.title)
+  fmt.Println(f"Branch: {branch}")
+  if gitctx.in_repo() {
+    let created = gitctx.switch_branch(branch)?
+    if created {
+      fmt.Println(f"Created and switched to branch '{branch}'")
+    } else {
+      fmt.Println(f"Switched to existing branch '{branch}'")
+    }
+  }
+  Ok(())
+}
+
+fn delete_issue(args: Slice<string>) -> Result<(), string> {
+  let mut id = ""
+  let mut force = false
+  let mut i = 3
+  while i < args.length() {
+    match args[i] {
+      "--force" => {
+        force = true
+        i += 1
+      },
+      other => {
+        if other.starts_with("-") { return Err(f"unknown flag: '{other}'") }
+        if id != "" { return Err(f"unexpected argument: '{other}'") }
+        id = other
+        i += 1
+      },
+    }
+  }
+  // Deleting by inferred branch is too dangerous; the ID must be explicit.
+  if id == "" { return Err("usage: lin issue delete KEY-123 [--force]") }
+
+  let issue = fetch_issue(id)?
+  let label = f"{issue.expand.team.key}-{issue.number}"
+  if !force {
+    fmt.Print(f"delete {label}? [y/N] ")
+    let scanner = bufio.NewScanner(os.Stdin)
+    let mut answer = ""
+    if scanner.Scan() { answer = strings.TrimSpace(scanner.Text()) }
+    let a = strings.ToLower(answer)
+    if a != "y" && a != "yes" {
+      fmt.Println("Aborted.")
+      return Ok(())
+    }
+  }
+  let _ = pb.delete(f"/api/collections/issues/records/{issue.id}")?
+  fmt.Println(f"Deleted {label}")
+  Ok(())
+}
+
+/// Parse `[KEY-123]` as the only allowed argument (verbs without flags).
+fn positional_id(args: Slice<string>, usage: string) -> Result<string, string> {
+  let mut id = ""
+  let mut i = 3
+  while i < args.length() {
+    let arg = args[i]
+    if arg.starts_with("-") {
+      return Err(f"unknown flag: '{arg}'\nusage: {usage}")
+    }
+    if id != "" { return Err(f"unexpected argument: '{arg}'") }
+    id = arg
+    i += 1
+  }
+  Ok(id)
+}
+
+/// Resolution order: explicit arg > current git branch (eng-12-slug -> ENG-12)
+/// > error with a hint.
+fn resolve_id(explicit: string, usage: string) -> Result<string, string> {
+  if explicit != "" { return Ok(explicit) }
+  let Some(branch) = gitctx.current_branch() else {
+    return Err(
+      f"no issue ID given and no git branch to infer one from\nusage: {usage}",
+    )
+  }
+  let Some(id) = gitctx.issue_id_from_branch(branch) else {
+    return Err(
+      f"no issue ID given and current branch '{branch}' doesn't look like eng-123-...\nusage: {usage}",
+    )
+  }
+  Ok(id)
+}
+
+/// Fetch an issue by KEY-123 and return the raw PB record JSON (team expanded).
+fn fetch_issue_record(id: string) -> Result<string, string> {
+  let bad_id = f"'{id}' is not an issue ID (expected KEY-123, e.g. ENG-1)"
   let Some(dash) = strings.LastIndex(id, "-") else {
-    return Err(f"'{id}' is not an issue ID (expected KEY-123, e.g. ENG-1)")
+    return Err(bad_id)
   }
-  if dash == 0 || dash == id.length() - 1 {
-    return Err(f"'{id}' is not an issue ID (expected KEY-123, e.g. ENG-1)")
-  }
+  if dash == 0 || dash == id.length() - 1 { return Err(bad_id) }
   let team_key = id.substring(0..dash)
   let Ok(number) = strconv.Atoi(id.substring(dash + 1..id.length())) else {
-    return Err(f"'{id}' is not an issue ID (expected KEY-123, e.g. ENG-1)")
+    return Err(bad_id)
   }
 
   let not_found = f"issue {id} not found — check 'lin issue list' or LIN_TEAM"
@@ -245,28 +483,25 @@ fn view(args: Slice<string>) -> Result<(), string> {
     return Err(not_found)
   }
 
-  let record = pb.get(f"/api/collections/issues/records/{item.id}?expand=team")?
-  if json_mode {
-    fmt.Println(record)
-    return Ok(())
-  }
+  pb.get(f"/api/collections/issues/records/{item.id}?expand=team")
+}
 
+/// fetch_issue_record, decoded.
+fn fetch_issue(id: string) -> Result<models.Issue, string> {
+  let record = fetch_issue_record(id)?
   let mut full = models.Issue { .. }
   if let Err(e) = json.Unmarshal(record.bytes(), &full) {
     return Err(f"decoding issue: {e}")
   }
+  Ok(full)
+}
 
-  fmt.Println(f"{team.key}-{full.number} {full.title}")
-  fmt.Println("")
-  fmt.Println(f"State:     {display.glyph(full.state)} {full.state}")
-  fmt.Println(f"Priority:  {display.priority_name(full.priority)}")
-  fmt.Println(f"Created:   {display.relative(full.created)}")
-  fmt.Println(f"Updated:   {display.relative(full.updated)}")
-  if full.description != "" {
-    fmt.Println("")
-    fmt.Println(full.description)
+/// JSON-encode a string value (quotes + escaping).
+fn json_quote(value: string) -> Result<string, string> {
+  match json.Marshal(value) {
+    Ok(b) => Ok(b as string),
+    Err(e) => Err(f"encoding value: {e}"),
   }
-  Ok(())
 }
 
 fn find_team(key: string) -> Result<Option<models.Team>, string> {

@@ -23,11 +23,43 @@ pub fn get(path: string) -> Result<string, string> {
 /// POST a JSON payload to a path and return the response body.
 pub fn post(path: string, payload: string) -> Result<string, string> {
   let base = base_url()?
-  let resp = match http.Post(base + path, "application/json", bytes.NewReader(payload.bytes())) {
+  let resp = match http.Post(
+    base + path,
+    "application/json",
+    bytes.NewReader(payload.bytes()),
+  ) {
     Ok(r) => r,
     Err(e) => return Err(f"cannot reach PocketBase at {base}: {e}"),
   }
   read_body(resp, f"POST {path}")
+}
+
+/// PATCH a JSON payload to a path and return the response body.
+pub fn patch(path: string, payload: string) -> Result<string, string> {
+  send("PATCH", path, payload)
+}
+
+/// DELETE a path and return the (usually empty) response body.
+pub fn delete(path: string) -> Result<string, string> {
+  send("DELETE", path, "")
+}
+
+fn send(method: string, path: string, payload: string) -> Result<string, string> {
+  let base = base_url()?
+  let req = match http.NewRequest(
+    method,
+    base + path,
+    bytes.NewReader(payload.bytes()),
+  ) {
+    Ok(r) => r,
+    Err(e) => return Err(f"{method} {path}: {e}"),
+  }
+  req.Header.Set("Content-Type", "application/json")
+  let resp = match http.DefaultClient.Do(req) {
+    Ok(r) => r,
+    Err(e) => return Err(f"cannot reach PocketBase at {base}: {e}"),
+  }
+  read_body(resp, f"{method} {path}")
 }
 
 fn read_body(resp: Ref<http.Response>, what: string) -> Result<string, string> {

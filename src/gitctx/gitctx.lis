@@ -1,0 +1,75 @@
+import "go:os/exec"
+import "go:strings"
+
+/// Extract an issue ID from a branch name, matching the conventional
+/// `key-number[-slug]` prefix case-insensitively: "eng-12-fix-login" -> "ENG-12".
+/// Pure; returns None when the branch does not start with letters-dash-digits.
+pub fn issue_id_from_branch(branch: string) -> Option<string> {
+  let parts = branch.split("-")
+  if parts.length() < 2 { return None }
+  let key = parts[0]
+  let number = parts[1]
+  if key == "" || !key.runes().all(is_letter) { return None }
+  if number == "" || !number.runes().all(is_digit) { return None }
+  Some(f"{strings.ToUpper(key)}-{number}")
+}
+
+/// Slug for a branch name: lowercased title reduced to alphanumeric words
+/// joined by dashes, capped at 5 words. "Fix the login flow!" -> "fix-the-login-flow".
+pub fn slug(title: string) -> string {
+  let mut words = strings.FieldsFunc(
+    strings.ToLower(title),
+    |r| !is_letter(r) && !is_digit(r),
+  )
+  if words.length() > 5 { words = words[..5] }
+  strings.Join(words, "-")
+}
+
+/// Conventional branch name for an issue: "eng-12-fix-login-flow".
+/// A title with no sluggable characters yields just "eng-12".
+pub fn branch_name(team_key: string, number: int, title: string) -> string {
+  let base = f"{strings.ToLower(team_key)}-{number}"
+  let s = slug(title)
+  if s == "" { base } else { f"{base}-{s}" }
+}
+
+fn is_letter(r: rune) -> bool {
+  ('a' <= r && r <= 'z') || ('A' <= r && r <= 'Z')
+}
+
+fn is_digit(r: rune) -> bool {
+  '0' <= r && r <= '9'
+}
+
+/// Current git branch, or None when not in a repo, detached, or git is missing.
+pub fn current_branch() -> Option<string> {
+  let Ok(out) = exec.Command("git", "branch", "--show-current").Output() else {
+    return None
+  }
+  let branch = strings.TrimSpace(out as string)
+  if branch == "" { None } else { Some(branch) }
+}
+
+/// Whether the working directory is inside a git repository.
+pub fn in_repo() -> bool {
+  exec.Command("git", "rev-parse", "--is-inside-work-tree").Output().is_ok()
+}
+
+/// Switch to a branch, creating it if needed. Returns true when the branch
+/// was created, false when it already existed.
+pub fn switch_branch(name: string) -> Result<bool, string> {
+  let exists = exec
+    .Command("git", "rev-parse", "--verify", "--quiet", f"refs/heads/{name}")
+    .Output()
+    .is_ok()
+  if exists {
+    if let Err(e) = exec.Command("git", "switch", name).Output() {
+      return Err(f"git switch {name}: {e}")
+    }
+    return Ok(false)
+  }
+  if let Err(e) = exec.Command("git", "switch", "-c", name).Output() {
+    return Err(f"git switch -c {name}: {e}")
+  }
+  Ok(true)
+}
