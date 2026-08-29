@@ -22,6 +22,10 @@ import (
 func Serve(dataDir, addr, migrationsDir, hooksDir, adminEmail, adminPassword string) error {
 	app := pocketbase.NewWithConfig(pocketbase.Config{
 		DefaultDataDir: dataDir,
+		// lll prints its own admin/board summary; PocketBase's three-line
+		// "Server started at" banner would duplicate it. Only the banner is
+		// suppressed -- startup errors still reach stdout.
+		HideStartBanner: true,
 	})
 
 	jsvm.MustRegister(app, jsvm.Config{
