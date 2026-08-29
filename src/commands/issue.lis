@@ -84,7 +84,8 @@ Usage:
   lll issue list [--state s] [--assignee name] [--label name] [--project name]
                  [--search q] [--sort f] [--limit N] [--json]
                                                   list issues; scoped to the configured team
-  lll issue view [KEY-123] [--json] [-w]          show one issue in full, with comments;
+  lll issue view [KEY-123] [--json] [--raw] [-w]  show one issue in full, with comments;
+                                                  --raw prints it as plain markdown;
                                                   -w opens its web page instead
   lll issue update [KEY-123] <flags>              change fields (at least one flag)
   lll issue close [KEY-123]                       set state done
@@ -399,12 +400,17 @@ fn print_issue_table(issues: Slice<models.Issue>) -> Result<(), string> {
 fn view(args: Slice<string>) -> Result<(), string> {
   let mut id = ""
   let mut json_mode = false
+  let mut raw_mode = false
   let mut open_web = false
   let mut i = 3
   while i < args.length() {
     match args[i] {
       "--json" => {
         json_mode = true
+        i += 1
+      },
+      "--raw" => {
+        raw_mode = true
         i += 1
       },
       "-w" => {
@@ -418,7 +424,7 @@ fn view(args: Slice<string>) -> Result<(), string> {
       },
     }
   }
-  let resolved = resolve_id(id, "lll issue view [KEY-123] [--json] [-w]")?
+  let resolved = resolve_id(id, "lll issue view [KEY-123] [--json] [--raw] [-w]")?
 
   if open_web {
     let target = issue_url(fetch_issue(resolved)?)?
@@ -435,6 +441,17 @@ fn view(args: Slice<string>) -> Result<(), string> {
   let mut full = models.Issue { .. }
   if let Err(e) = json.Unmarshal(record.bytes(), &full) {
     return Err(f"decoding issue: {e}")
+  }
+
+  // --raw: the issue as markdown, no chrome. For piping, and for an agent that
+  // wants the text rather than a rendered table.
+  if raw_mode {
+    fmt.Println(f"# {full.expand.team.key}-{full.number}: {full.title}")
+    if full.description != "" {
+      fmt.Println("")
+      fmt.Println(full.description)
+    }
+    return Ok(())
   }
 
   let mut assignee = full.expand.assignee.name
@@ -853,8 +870,34 @@ fn positional_id(args: Slice<string>, usage: string) -> Result<string, string> {
 
 /// Resolution order: explicit arg > current git branch (eng-12-slug -> ENG-12)
 /// > error with a hint.
+/// Accept a pasted board URL anywhere a KEY-123 is expected — the same courtesy
+/// mb-shares' `share` extends to its slugs. Strips `scheme://host/`, an
+/// `issue/` path prefix and a trailing slash; anything that is not shaped like
+/// a URL is returned untouched, so a bare key stays a bare key and a bad value
+/// still fails downstream with the usual "not an issue ID" message.
+fn deslug(arg: string) -> string {
+  let mut a = arg
+  if let Some(idx) = strings.Index(a, "://") {
+    a = a.substring(idx + 3..)
+    let Some(slash) = strings.Index(a, "/") else {
+      return arg
+    }
+    a = a.substring(slash + 1..)
+  } else if strings.Contains(a, "/") {
+    // a bare path like issue/ENG-1, but never a Windows-ish or odd value
+    a = a
+  } else {
+    return arg
+  }
+  a = strings.TrimSuffix(a, "/")
+  a = strings.TrimPrefix(a, "issue/")
+  if strings.Contains(a, "/") { return arg }
+  if a == "" { return arg }
+  a
+}
+
 fn resolve_id(explicit: string, usage: string) -> Result<string, string> {
-  if explicit != "" { return Ok(explicit) }
+  if explicit != "" { return Ok(deslug(explicit)) }
   let Some(branch) = gitctx.current_branch() else {
     return Err(
       f"no issue ID given and no git branch to infer one from\nusage: {usage}",
