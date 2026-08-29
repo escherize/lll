@@ -39,6 +39,7 @@ fail() { echo "FAIL: $1" >&2; tail -20 "$UP_LOG" >&2 || true; exit 1; }
 
 lis build >/dev/null
 LLL=target/.lisette/bin/lll
+LLL_ABS="$PWD/$LLL"
 
 # Occupy the configured db port and the web port so both must auto-increment.
 python3 -c "
@@ -106,5 +107,20 @@ sleep 0.5
 UP_PID=""
 curl -sf "http://127.0.0.1:$EXT_PORT/api/health" >/dev/null \
   || fail "external PB was killed by lll up's exit"
+
+# --- outside the checkout: fail fast, do not boot an unmigrated PB (task-30) ---
+OUTSIDE="$DATA_DIR/outside"
+mkdir -p "$OUTSIDE"
+if out=$(cd "$OUTSIDE" && LLL_TEAM=E2E "$LLL_ABS" up --no-open --port 45999 </dev/null 2>&1); then
+  fail "lll up outside the checkout should exit non-zero, got: $out"
+fi
+printf '%s' "$out" | grep -qF "pb/pb_migrations/ not found" \
+  || fail "outside the checkout should name the missing path, got: $out"
+printf '%s' "$out" | grep -qF "checkout root" \
+  || fail "outside the checkout should name the fix, got: $out"
+if printf '%s' "$out" | grep -qF "Missing collection context"; then
+  fail "a 404 leaked through instead of the guard: $out"
+fi
+[ -z "$(ls -A "$OUTSIDE")" ] || fail "lll up outside the checkout must not create anything, found: $(ls -A "$OUTSIDE")"
 
 echo "e2e_up: all assertions passed"

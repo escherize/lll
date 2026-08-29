@@ -62,6 +62,12 @@ pub fn up(args: Slice<string>) -> Result<(), string> {
     }
   }
 
+  // PocketBase reads these from disk relative to the working directory. Missing
+  // them does not fail loudly — it boots an unmigrated database whose first API
+  // call returns 404 "Missing collection context", a long way from the cause.
+  check_pb_dir("pb/pb_migrations")?
+  check_pb_dir("pb/pb_hooks")?
+
   let cfg = config.load()?
   let mut db_url = cfg.url
   let mut admin_line = f"admin  {db_url}/_/  (already running)"
@@ -138,6 +144,16 @@ pub fn up(args: Slice<string>) -> Result<(), string> {
     }
   }
   run_server(chosen)
+}
+
+/// PocketBase's migrations and hooks are cwd-relative, so `lll up` only works
+/// from the checkout root. Say so before starting anything, rather than letting
+/// an unmigrated database 404 later.
+fn check_pb_dir(path: string) -> Result<(), string> {
+  if os.Stat(path).is_ok() { return Ok(()) }
+  Err(
+    f"{path}/ not found — run 'lll up' from the lll checkout root; PocketBase's migrations and hooks are read from disk",
+  )
 }
 
 fn print_up_usage() {
