@@ -367,4 +367,17 @@ else
   echo "e2e_web: playwright-cli not found — skipped browser-level check" >&2
 fi
 
+# --- issue descriptions render markdown, like comments (task-21) ---
+"$LIN" issue update ENG-1 --description '## Heading
+
+Some **bold** text and `code`.
+
+<script>alert(1)</script>' >/dev/null
+page=$(curl -sf "$WEB/issue/ENG-1")
+assert_contains "$page" '<div class="desc md">' "description uses the shared markdown container"
+assert_contains "$page" "<h2>Heading</h2>" "description renders a markdown heading"
+assert_contains "$page" "<strong>bold</strong>" "description renders bold"
+assert_contains "$page" "<code>code</code>" "description renders inline code"
+assert_not_contains "$page" "<script>alert" "raw HTML in a description stays out of the page"
+
 echo "e2e_web: all assertions passed"

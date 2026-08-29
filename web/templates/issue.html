@@ -44,7 +44,7 @@
 <span class="key">{{.Key}}</span>
 <h1 title="Click to edit" data-show="!$edit_title" data-on:click="$title_draft = el.textContent; $edit_title = true">{{.Title}}</h1>
 <form id="title-form" class="title-edit" style="display:none" data-show="$edit_title"><input type="hidden" name="key" value="{{.Key}}"><input name="title" type="text" autocomplete="off" aria-label="Issue title" data-bind:title_draft data-effect="$edit_title && setTimeout(() => el.focus(), 0)" data-on:keydown="evt.key === 'Escape' ? ($edit_title = false) : evt.key === 'Enter' && (evt.preventDefault(), @post('/title', {contentType: 'form'}), evt.target.value.trim() && ($edit_title = false))" data-on:blur="$edit_title && ($edit_title = false, evt.target.value.trim() && @post('/title', {contentType: 'form'}))"></form>
-{{if .Description}}<p class="desc">{{.Description}}</p>
+{{if .Description}}<div class="desc md">{{.Description}}</div>
 {{end}}</div>
 <aside class="props">
 <h3>Properties</h3>
