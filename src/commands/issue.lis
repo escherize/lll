@@ -1,5 +1,6 @@
 import "go:bufio"
 import "go:encoding/json"
+import "go:io"
 import "go:fmt"
 import "go:net/url"
 import "go:os"
@@ -14,6 +15,30 @@ import "gitctx"
 import "models"
 import "pb"
 import "query"
+
+/// A flag value of `-` means "read it from stdin", the convention `gh gist` and
+/// mb-shares' `share -f` use. Reading from a terminal would hang until Ctrl-D,
+/// so that is refused with a message instead. `< /dev/null` also reads as a
+/// character device, and an empty body is not what anyone meant either way.
+fn value_or_stdin(val: string, flag: string) -> Result<string, string> {
+  if val != "-" { return Ok(val) }
+
+  if let Ok(info) = os.Stdin.Stat() {
+    if info.Mode() & os.ModeCharDevice != 0 {
+      return Err(
+        f"{flag} - reads the body from stdin, but nothing is piped in (try: echo \"text\" | lll issue ... {flag} -)",
+      )
+    }
+  }
+
+  let Ok(data) = io.ReadAll(os.Stdin) else {
+    return Err(f"{flag} -: reading stdin")
+  }
+  // One trailing newline is the shell's, not the author's: `echo hi` means "hi".
+  let text = strings.TrimSuffix(data as string, "\n")
+  if text == "" { return Err(f"{flag} -: nothing on stdin") }
+  Ok(text)
+}
 
 /// Dispatch `lll issue <verb>`.
 pub fn issue(args: Slice<string>) -> Result<(), string> {
@@ -52,9 +77,10 @@ fn print_usage() {
     "lll issue - work with issues
 
 Usage:
-  lll issue create -t \"title\" [--priority 0-4] [--assignee name]
+  lll issue create -t \"title\" [-d desc] [--priority 0-4] [--assignee name]
                    [--label name]... [--project name]
-                                                  create an issue in the configured team
+                                                  create an issue in the configured team;
+                                                  -d - reads the description from stdin
   lll issue list [--state s] [--assignee name] [--label name] [--project name]
                  [--search q] [--sort f] [--limit N] [--json]
                                                   list issues; scoped to the configured team
@@ -108,6 +134,7 @@ The team comes from LLL_TEAM or 'team' in .lll.toml (see 'lll config --help').",
 
 fn create(args: Slice<string>) -> Result<(), string> {
   let mut title = ""
+  let mut description = ""
   let mut priority = 0
   let mut assignee_name = ""
   let mut label_names: Slice<string> = []
@@ -120,6 +147,20 @@ fn create(args: Slice<string>) -> Result<(), string> {
           return Err("-t requires a value")
         }
         title = val
+        i += 2
+      },
+      "-d" => {
+        let Some(val) = args.get(i + 1) else {
+          return Err("-d requires a value")
+        }
+        description = value_or_stdin(val, "-d")?
+        i += 2
+      },
+      "--description" => {
+        let Some(val) = args.get(i + 1) else {
+          return Err("--description requires a value")
+        }
+        description = value_or_stdin(val, "--description")?
         i += 2
       },
       "--assignee" => {
@@ -163,7 +204,7 @@ fn create(args: Slice<string>) -> Result<(), string> {
   }
   if title == "" {
     return Err(
-      "usage: lll issue create -t \"title\" [--priority 0-4] [--assignee name] [--label name]... [--project name]",
+      "usage: lll issue create -t \"title\" [-d desc] [--priority 0-4] [--assignee name] [--label name]... [--project name]",
     )
   }
 
@@ -191,6 +232,7 @@ fn create(args: Slice<string>) -> Result<(), string> {
   let new_issue = models.NewIssue { 
     team: team.id,
     title,
+    description,
     state: "todo",
     priority,
     assignee,
@@ -504,7 +546,7 @@ fn update(args: Slice<string>) -> Result<(), string> {
         let Some(val) = args.get(i + 1) else {
           return Err("--description requires a value")
         }
-        description = val
+        description = value_or_stdin(val, "--description")?
         description_set = true
         i += 2
       },
@@ -650,7 +692,7 @@ fn comment(args: Slice<string>) -> Result<(), string> {
         let Some(val) = args.get(i + 1) else {
           return Err("-b requires a value")
         }
-        body = val
+        body = value_or_stdin(val, "-b")?
         body_set = true
         i += 2
       },

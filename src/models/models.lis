@@ -133,6 +133,8 @@ pub struct NewIssue {
   pub state: string,
   pub priority: int,
   #[json(omitempty)]
+  pub description: string,
+  #[json(omitempty)]
   pub assignee: string,
   #[json(omitempty)]
   pub project: string,
