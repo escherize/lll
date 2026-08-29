@@ -772,8 +772,15 @@ out=$(HOME="$FAKEHOME" PATH="$DATA_DIR/bin:$PATH" LLL_URL=$URL "$LIN" issue view
 assert_contains "$out" "Opening http://127.0.0.1:8100/issue/ENG-6" "view -w announces the URL"
 out=$(HOME="$FAKEHOME" PATH="$DATA_DIR/bin:$PATH" "$LIN" board -w)
 assert_contains "$out" "Opening http://127.0.0.1:8100" "board -w announces the URL"
-sleep 0.5
-assert_contains "$(cat "$DATA_DIR/opened.txt")" "/issue/ENG-6" "view -w invoked the opener"
+# -w is fire-and-forget by design (the CLI must not block on a browser), so poll
+# for the opener's output instead of assuming it lands within a fixed sleep.
+opened=""
+for _ in $(seq 1 100); do
+  opened="$(cat "$DATA_DIR/opened.txt" 2>/dev/null || true)"
+  case "$opened" in *"/issue/ENG-6"*) break ;; esac
+  sleep 0.1
+done
+assert_contains "$opened" "/issue/ENG-6" "view -w invoked the opener"
 
 # --- issue pr: clear error when gh is missing ---
 # (a real gh run needs a pushed branch and GitHub auth — manual only)
