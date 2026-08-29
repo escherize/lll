@@ -16,8 +16,8 @@ Requires [lis](https://github.com/ivov/lisette) (the Lisette toolchain) and
 Go 1.25+. No separate PocketBase install — it is embedded.
 
 ```sh
-lis build                # binary at target/bin/lll
-./target/bin/lll up      # PocketBase (:8090) + web board (:8100)
+lis build                # binary at target/.lisette/bin/lll
+./target/.lisette/bin/lll up      # PocketBase (:8090) + web board (:8100), opens the board
 ```
 
 Run `lll up` from the checkout root — the board reads `web/templates/` and
@@ -88,7 +88,7 @@ Server-rendered board at `/`, issue pages at `/issue/KEY-123`.
 ```sh
 lis check          # type check
 lis test           # unit tests
-lis build          # binary at target/bin/lll
+lis build          # binary at target/.lisette/bin/lll
 bash scripts/e2e.sh   # full e2e: CLI + watch + web board + lll up
 ```
 
@@ -112,11 +112,11 @@ Layout:
 ```
 lll CLI ── REST ──> PocketBase (embedded; sqlite + migrations + hooks)
                         │ realtime SSE (JSON records)
-browser <── HTML/SSE ── lll serve (Datastar fragment morphing)
+browser <── HTML/SSE ── lll up web board (Datastar fragment morphing)
 ```
 
 One Lisette codebase compiled to Go. The CLI talks to PocketBase's REST API
-directly — no SDK. `lll serve` renders html/templates, holds one subscription
+directly — no SDK. The board renders html/templates, holds one subscription
 to PocketBase realtime, and pushes re-rendered fragments to every open page
 over SSE; [Datastar](https://data-star.dev) morphs them into the DOM by
 element id. `lll up` runs PocketBase in-process (see `gopb/`) and the board

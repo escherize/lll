@@ -1,10 +1,13 @@
+import "go:bufio"
 import "go:fmt"
 import "go:github.com/escherize/lll/gopb"
 import "go:net"
 import "go:net/http"
 import "go:os"
+import "go:path/filepath"
 import "go:strconv"
 import "go:strings"
+import "go:unicode"
 import "go:time"
 
 import "config"
@@ -22,6 +25,7 @@ import "config"
 pub fn up(args: Slice<string>) -> Result<(), string> {
   let mut web_port = 8100
   let mut pb_dir = "pb/pb_data"
+  let mut open = true
   let mut i = 2
   while i < args.length() {
     match args[i] {
@@ -34,6 +38,10 @@ pub fn up(args: Slice<string>) -> Result<(), string> {
         }
         web_port = p
         i += 2
+      },
+      "--no-open" => {
+        open = false
+        i += 1
       },
       "--pb-dir" => {
         let Some(val) = args.get(i + 1) else {
@@ -56,9 +64,8 @@ pub fn up(args: Slice<string>) -> Result<(), string> {
 
   let cfg = config.load()?
   let mut db_url = cfg.url
-  if healthy(db_url) {
-    fmt.Println(f"using running pocketbase at {db_url}")
-  } else {
+  let mut admin_line = f"admin  {db_url}/_/  (already running)"
+  if !healthy(db_url) {
     let db_port = free_port(port_of(db_url, 8090))
     db_url = f"http://127.0.0.1:{db_port}"
 
@@ -67,9 +74,6 @@ pub fn up(args: Slice<string>) -> Result<(), string> {
     if email == "" || pass == "" {
       email = "admin@local.dev"
       pass = "admin-local-123"
-      fmt.Println(
-        "LLL_ADMIN_EMAIL/LLL_ADMIN_PASSWORD not set — defaulting to admin@local.dev / admin-local-123",
-      )
     }
 
     task {
@@ -108,14 +112,30 @@ pub fn up(args: Slice<string>) -> Result<(), string> {
         f"pocketbase did not come up on {db_url} — check its output above",
       )
     }
-    fmt.Println(f"pocketbase on {db_url} (admin UI: {db_url}/_/ as {email})")
+    admin_line = f"admin  {db_url}/_/  {email} / {pass}"
   }
 
   // The in-process board (and its PB client) must talk to the db we chose.
   let _ = os.Setenv("LLL_URL", db_url)
+
+  // An unscoped board cannot create issues, and a configured-but-missing
+  // team is fatal further down, so settle the team here: `lll up` on a fresh
+  // data dir must just work.
+  let team = ensure_team(cfg.team)?
+  let _ = os.Setenv("LLL_TEAM", team)
   let chosen = free_port(web_port)
   if chosen != web_port {
     fmt.Println(f"port {web_port} taken — board moving to {chosen}")
+  }
+  fmt.Println(admin_line)
+  fmt.Println(f"team   {team}")
+  // The board binds in microseconds; a browser takes far longer to launch,
+  // so opening before run_server blocks is not a race worth guarding.
+  let board_url = f"http://127.0.0.1:{chosen}"
+  if open {
+    if let Err(e) = open_url(board_url) {
+      fmt.Println(f"could not open a browser: {e}")
+    }
   }
   run_server(chosen)
 }
@@ -125,14 +145,111 @@ fn print_up_usage() {
     "lll up - start PocketBase and the web board together
 
 Usage:
-  lll up [--port 8100] [--pb-dir pb/pb_data]
+  lll up [--port 8100] [--pb-dir pb/pb_data] [--no-open]
 
-Reuses a PocketBase already running at the configured URL; otherwise runs
-one in-process (first free port from the configured port up) after upserting
-the superuser from LLL_ADMIN_EMAIL/LLL_ADMIN_PASSWORD (a logged default is
-used when unset). Taken ports auto-increment. Ctrl-C stops everything lll up
-started; an externally-started PocketBase is left running.",
+Reuses a PocketBase already running at the configured URL; otherwise runs one
+in-process (first free port from the configured port up) after upserting the
+superuser from LLL_ADMIN_EMAIL/LLL_ADMIN_PASSWORD (a printed default is used
+when unset). The board opens in your browser unless --no-open. Taken ports
+auto-increment. Ctrl-C stops everything lll up started; an externally-started
+PocketBase is left running.
+
+The board needs a team. A configured team (LLL_TEAM or 'team' in .lll.toml)
+is created on the server if it is missing. With none configured lll up asks
+for one and writes the answer to ./.lll.toml, so the board and the CLI always
+agree; with nothing on stdin to answer with (scripts, agents, CI) it refuses
+to start rather than run on a team only this process knows about.",
   )
+}
+
+/// The team the board writes to. A team the config names is created if the
+/// server lacks it. With none configured we ask and write the answer to
+/// .lll.toml — the board and the CLI must not disagree about the team, so a
+/// team that lives only in this process is not an option. No one to ask
+/// (stdin is not a terminal: scripts, agents, CI) means no boot.
+fn ensure_team(want: string) -> Result<string, string> {
+  if want != "" {
+    if let Some(t) = find_team(want)? {
+      return Ok(t.key)
+    }
+    let created = create_team(want, want)?
+    fmt.Println(f"created team {created.key}")
+    return Ok(created.key)
+  }
+
+  let teams = list_teams()?
+  let mut suggested = default_team_key()
+  if let Some(t) = teams.items.get(0) { suggested = t.key }
+
+  let key = ask_team(suggested)?
+  let existing = find_team(key)?
+  if existing.is_none() {
+    let created = create_team(key, key)?
+    fmt.Println(f"created team {created.key} — issues will be {created.key}-1, {created.key}-2, ...")
+  }
+  save_team(key)?
+  Ok(key)
+}
+
+/// Ask for a team key on stdin, defaulting to `suggested`. Errs when stdin
+/// has no answer to give (scripts, agents, CI).
+fn ask_team(suggested: string) -> Result<string, string> {
+  fmt.Print(f"no team configured — team key [{suggested}]: ")
+  let newline = 10 as byte
+  let Partial.Ok(line) = bufio.NewReader(os.Stdin).ReadString(newline) else {
+    fmt.Println("")
+    return Err(
+      f"no team configured and no answer on stdin — set LLL_TEAM={suggested}, or add team = \"{suggested}\" to .lll.toml (see 'lll config init')",
+    )
+  }
+  let typed = clean_key(strings.TrimSpace(line))
+  if typed == "" { Ok(suggested) } else { Ok(typed) }
+}
+
+/// Persist the team to ./.lll.toml so the next boot and the CLI agree.
+fn save_team(key: string) -> Result<(), string> {
+  let line = f"team = \"{key}\"\n"
+  if !os.Stat(".lll.toml").is_ok() {
+    if let Err(e) = os.WriteFile(".lll.toml", line.bytes(), 0o644) {
+      return Err(f"writing .lll.toml: {e}")
+    }
+    fmt.Println(f"wrote .lll.toml with team = \"{key}\"")
+    return Ok(())
+  }
+
+  let Ok(data) = os.ReadFile(".lll.toml") else {
+    return Err("reading .lll.toml")
+  }
+  let Ok(f) = os.OpenFile(".lll.toml", os.O_APPEND | os.O_WRONLY, 0o644) else {
+    return Err("opening .lll.toml to append the team")
+  }
+  if !strings.HasSuffix(data as string, "\n") { let _ = f.WriteString("\n") }
+  let _ = f.WriteString(line)
+  let _ = f.Close()
+  fmt.Println(f"appended team = \"{key}\" to .lll.toml")
+  Ok(())
+}
+
+/// Team key for a first boot: the working directory's name, letters and
+/// digits only, uppercased, at most 5 characters.
+fn default_team_key() -> string {
+  let Ok(dir) = os.Getwd() else {
+    return "TEAM"
+  }
+  let key = clean_key(filepath.Base(dir))
+  if key == "" { "TEAM" } else { key }
+}
+
+/// A team key: letters and digits only, uppercased, at most 5 characters.
+fn clean_key(raw: string) -> string {
+  let mut key = ""
+  for r in raw.runes() {
+    if unicode.IsLetter(r) || unicode.IsDigit(r) {
+      key += strings.ToUpper(r as string)
+    }
+    if key.length() == 5 { break }
+  }
+  key
 }
 
 fn healthy(base_url: string) -> bool {

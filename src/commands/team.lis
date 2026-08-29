@@ -39,11 +39,7 @@ Usage:
 }
 
 fn team_list() -> Result<(), string> {
-  let body = pb.get("/api/collections/teams/records?perPage=200&sort=key")?
-  let mut teams = models.TeamList { .. }
-  if let Err(e) = json.Unmarshal(body.bytes(), &teams) {
-    return Err(f"decoding teams: {e}")
-  }
+  let teams = list_teams()?
   for t in teams.items {
     fmt.Println(f"{t.key}\t{t.name}")
   }
@@ -77,6 +73,14 @@ fn team_create(args: Slice<string>) -> Result<(), string> {
     return Err("usage: lll team create -k KEY -n \"Name\"")
   }
 
+  let created = create_team(key, name)?
+  fmt.Println(f"Created team {created.key}: {created.name}")
+  Ok(())
+}
+
+/// Create a team. Shared by `lll team create` and `lll up`'s first-boot
+/// bootstrap.
+pub fn create_team(key: string, name: string) -> Result<models.Team, string> {
   let new_team = models.NewTeam { key, name }
   let payload = match json.Marshal(new_team) {
     Ok(p) => p,
@@ -88,8 +92,17 @@ fn team_create(args: Slice<string>) -> Result<(), string> {
   if let Err(e) = json.Unmarshal(body.bytes(), &created) {
     return Err(f"decoding created team: {e}")
   }
-  fmt.Println(f"Created team {created.key}: {created.name}")
-  Ok(())
+  Ok(created)
+}
+
+/// Every team, key-sorted. Shared by `lll team list` and `lll up`.
+pub fn list_teams() -> Result<models.TeamList, string> {
+  let body = pb.get("/api/collections/teams/records?perPage=200&sort=key")?
+  let mut teams = models.TeamList { .. }
+  if let Err(e) = json.Unmarshal(body.bytes(), &teams) {
+    return Err(f"decoding teams: {e}")
+  }
+  Ok(teams)
 }
 
 /// Unknown-team message naming the fix. Shared by every command that

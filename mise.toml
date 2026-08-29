@@ -1,0 +1,17 @@
+# Toolchain for lll. `mise install` provisions everything the build and the e2e
+# scripts shell out to.
+#
+# python3 is NOT here either: mise's build fails on this machine and the
+# system python3 is what the scripts use.
+#
+# `lis` is NOT here: Lisette ships as a GitHub release, not a mise plugin.
+# Install it with the upstream installer and keep it on PATH:
+#   curl -LsSf https://github.com/ivov/lisette/releases/latest/download/lisette-installer.sh | sh
+# lll is built and verified against lis 0.11.3.
+
+[tools]
+go = "1.26"
+jq = "1.8"
+# scripts/e2e*.sh drive a standalone PocketBase. lll itself embeds PB via gopb/
+# and needs no external binary -- this is only for the test harness.
+"ubi:pocketbase/pocketbase" = "0.40.1"

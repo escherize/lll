@@ -17,7 +17,6 @@ fn main() {
     "label" => commands.label(os.Args),
     "config" => commands.config_cmd(os.Args),
     "watch" => commands.watch(os.Args),
-    "serve" => commands.serve(os.Args),
     "up" => commands.up(os.Args),
     "board" => commands.board(os.Args),
     "completions" => commands.completions(os.Args),
@@ -69,7 +68,6 @@ Usage:
   lll label <command>     work with labels (see 'lll label --help')
   lll config <command>    manage configuration (see 'lll config --help')
   lll watch [flags]       live event stream for a query (see 'lll watch --help')
-  lll serve [--port 8100] web board with realtime updates (see 'lll serve --help')
   lll up [--port 8100]    start PocketBase + web board together (see 'lll up --help')
   lll board [-w]          print the web board URL; -w opens it (see 'lll board --help')
   lll completions <shell> completion script for bash, zsh, or fish

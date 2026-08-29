@@ -38,7 +38,7 @@ trap cleanup EXIT
 fail() { echo "FAIL: $1" >&2; tail -20 "$UP_LOG" >&2 || true; exit 1; }
 
 lis build >/dev/null
-LLL=target/bin/lll
+LLL=target/.lisette/bin/lll
 
 # Occupy the configured db port and the web port so both must auto-increment.
 python3 -c "
@@ -53,8 +53,8 @@ sleep 0.5
 # --- own path: boots PB on DB_PORT+1, board on WEB_PORT+1, default creds ---
 set -m
 env -u LLL_ADMIN_EMAIL -u LLL_ADMIN_PASSWORD \
-  LLL_URL="http://127.0.0.1:$DB_PORT" LLL_TEAM="" \
-  "$LLL" up --port "$WEB_PORT" --pb-dir "$DATA_DIR/pb_data" >"$UP_LOG" 2>&1 &
+  LLL_URL="http://127.0.0.1:$DB_PORT" LLL_TEAM=E2E \
+  "$LLL" up --no-open --port "$WEB_PORT" --pb-dir "$DATA_DIR/pb_data" >"$UP_LOG" 2>&1 &
 UP_PID=$!
 set +m
 
@@ -65,7 +65,7 @@ for _ in $(seq 1 100); do
 done
 curl -sf "http://127.0.0.1:$DB2/api/health" >/dev/null || fail "own PB not on incremented port $DB2"
 curl -sf "http://127.0.0.1:$WEB2/" >/dev/null || fail "board not on incremented port $WEB2"
-grep -q "defaulting to admin@local.dev" "$UP_LOG" || fail "default creds not logged"
+grep -q "admin@local.dev / admin-local-123" "$UP_LOG" || fail "default creds not logged"
 grep -q "port $WEB_PORT taken" "$UP_LOG" || fail "web port move not printed"
 curl -sf -X POST "http://127.0.0.1:$DB2/api/collections/_superusers/auth-with-password" \
   -H 'Content-Type: application/json' \
@@ -92,15 +92,15 @@ for _ in $(seq 1 100); do
   sleep 0.1
 done
 set -m
-LLL_URL="http://127.0.0.1:$EXT_PORT" LLL_TEAM="" \
-  "$LLL" up --port "$WEB_PORT" --pb-dir "$DATA_DIR/pb_data" >"$UP_LOG" 2>&1 &
+LLL_URL="http://127.0.0.1:$EXT_PORT" LLL_TEAM=E2E \
+  "$LLL" up --no-open --port "$WEB_PORT" --pb-dir "$DATA_DIR/pb_data" >"$UP_LOG" 2>&1 &
 UP_PID=$!
 set +m
 for _ in $(seq 1 100); do
   curl -sf "http://127.0.0.1:$WEB2/" >/dev/null 2>&1 && break
   sleep 0.1
 done
-grep -q "using running pocketbase" "$UP_LOG" || fail "reuse path not taken"
+grep -q "(already running)" "$UP_LOG" || fail "reuse path not taken"
 kill -INT -- "-$UP_PID" 2>/dev/null || kill -INT "$UP_PID"
 sleep 0.5
 UP_PID=""

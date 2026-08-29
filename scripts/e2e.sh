@@ -15,7 +15,7 @@
 # (explicit + branch-inferred), board and -w opener (stubbed 'open' on PATH;
 # real gh runs for issue pr are manual), --limit, --help output, --version,
 # fix-naming error messages (PB down, unknown team, broken .lll.toml,
-# unknown command), and the lll serve web board (via e2e_web.sh).
+# unknown command), and the lll up web board (via e2e_web.sh).
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
@@ -89,7 +89,7 @@ OPS_ID=$(curl -sf -X POST "$URL/api/collections/teams/records" \
 [ -n "$ENG_ID" ] && [ -n "$OPS_ID" ] || fail "seeding teams"
 
 lis build >/dev/null
-LIN=target/bin/lll
+LIN=target/.lisette/bin/lll
 
 # --- create + list shows ENG-1 style identifier ---
 out=$(LLL_URL=$URL LLL_TEAM=ENG "$LIN" issue create -t "First engineering issue")
@@ -850,9 +850,9 @@ assert_contains "$out" "Usage:" "lll label --help"
 assert_contains "$out" "lll label create" "label --help mentions create"
 out=$("$LIN" config --help)
 assert_contains "$out" "Usage:" "lll config --help"
-out=$("$LIN" serve --help)
-assert_contains "$out" "Usage:" "lll serve --help"
-assert_contains "$out" "--port" "serve --help mentions --port"
+out=$("$LIN" up --help)
+assert_contains "$out" "Usage:" "lll up --help"
+assert_contains "$out" "--port" "up --help mentions --port"
 
 # --- --version prints the lisette.toml version ---
 out=$("$LIN" --version)

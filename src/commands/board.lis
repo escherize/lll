@@ -53,8 +53,9 @@ fn web_base() -> Result<string, string> {
   Ok(strings.TrimSuffix(cfg.web_url, "/"))
 }
 
-/// Open a URL in the default browser: macOS `open`, else `xdg-open`.
-fn open_url(url: string) -> Result<(), string> {
+/// Open a URL in the default browser (macOS `open`, else `xdg-open`).
+/// Shared with `lll up`.
+pub fn open_url(url: string) -> Result<(), string> {
   let mut opener = ""
   if let Partial.Ok(path) = exec.LookPath("open") { opener = path }
   if opener == "" {

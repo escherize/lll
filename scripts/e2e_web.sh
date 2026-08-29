@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# e2e: `lll serve` web board against an ephemeral PocketBase.
+# e2e: the `lll up` web board against an ephemeral PocketBase.
 # Covers: board page grouped by the six states with cards in the right
 # columns, issue page (detail, comments, forms), actions (/create, /state,
 # /comment) persisting to PB and visible via the CLI, server-side validation,
@@ -96,20 +96,20 @@ curl -sf -X POST "$LLL_URL/api/collections/teams/records" \
   -d '{"key":"ENG","name":"Engineering"}' >/dev/null || fail "seeding team"
 
 lis build >/dev/null
-LIN=target/bin/lll
+LIN=target/.lisette/bin/lll
 
 "$LIN" issue create -t "Web board issue" --priority 2 >/dev/null
 "$LIN" issue create -t "Already in progress" >/dev/null
 "$LIN" issue update ENG-2 --state in-progress >/dev/null
 "$LIN" issue comment ENG-1 -b "seed comment" >/dev/null
 
-"$LIN" serve --port "$WEB_PORT" >"$SERVE_LOG" 2>&1 &
+"$LIN" up --no-open --port "$WEB_PORT" >"$SERVE_LOG" 2>&1 &
 SERVE_PID=$!
 for _ in $(seq 1 100); do
   curl -sf "$WEB/" >/dev/null 2>&1 && break
   sleep 0.1
 done
-curl -sf "$WEB/" >/dev/null || fail "lll serve did not start"
+curl -sf "$WEB/" >/dev/null || fail "lll up board did not start"
 
 # --- board page: six columns, cards in the right ones ---
 board=$(curl -sf "$WEB/")
@@ -245,17 +245,14 @@ assert_contains "$out" "unknown state" "bogus state message"
 out=$(curl -s -X POST -d "key=ENG-3&body=" "$WEB/comment")
 assert_contains "$out" "comment body is required" "empty comment message"
 
-# --- no team configured: create error names the fix ---
+# --- no team configured: up refuses rather than booting half-configured ---
 NOTEAM_PORT=$(( (RANDOM % 20000) + 40000 ))
-env -u LLL_TEAM LLL_TEAM="" "$LIN" serve --port "$NOTEAM_PORT" >/dev/null 2>&1 &
-NOTEAM_PID=$!
-for _ in $(seq 1 50); do
-  curl -sf "http://127.0.0.1:$NOTEAM_PORT/" >/dev/null 2>&1 && break
-  sleep 0.1
-done
-out=$(curl -s -X POST -d "title=x&state=todo" "http://127.0.0.1:$NOTEAM_PORT/create")
-kill $NOTEAM_PID 2>/dev/null || true
-assert_contains "$out" ".lll.toml" "no-team error names the config fix"
+if out=$(env -u LLL_TEAM LLL_TEAM="" "$LIN" up --no-open --port "$NOTEAM_PORT" </dev/null 2>&1); then
+  fail "lll up with no team should exit non-zero, got: $out"
+fi
+assert_contains "$out" "no team configured" "no-team boot refused"
+assert_contains "$out" "LLL_TEAM=ENG" "refusal suggests the existing team"
+[ -f .lll.toml ] && fail "refused boot must not write .lll.toml"
 
 # --- /events: board scope gets a patch frame after a CLI-driven update ---
 EVENTS_FILE="$DATA_DIR/events.txt"

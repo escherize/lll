@@ -15,7 +15,8 @@ import "pb"
 import "query"
 import "realtime"
 
-// `lll serve` — a server-rendered web board with realtime updates.
+// The web board — a server-rendered board with realtime updates, started by
+// `lll up`.
 //
 // Architecture: browsers hold ONE SSE connection to /events. The server holds
 // one unfiltered (team-scoped at most) PB realtime subscription to issues +
@@ -27,7 +28,7 @@ import "realtime"
 //
 // Templates live in web/templates/ and are re-parsed from disk on every
 // render, so markup edits show on refresh with no rebuild (task-9's design
-// iteration loop depends on this). Run `lll serve` from the repo root.
+// iteration loop depends on this). Run `lll up` from the repo root.
 
 /// View model for one label chip.
 pub struct LabelVM {
@@ -201,37 +202,7 @@ fn deliver(clients: Slice<SseClient>, msg: Broadcast) {
   }
 }
 
-/// Dispatch `lll serve [--port 8100]`.
-pub fn serve(args: Slice<string>) -> Result<(), string> {
-  let mut port = 8100
-  let mut i = 2
-  while i < args.length() {
-    match args[i] {
-      "--port" => {
-        let Some(val) = args.get(i + 1) else {
-          return Err("--port requires a value")
-        }
-        let Ok(p) = strconv.Atoi(val) else {
-          return Err(f"--port must be a number, got '{val}'")
-        }
-        port = p
-        i += 2
-      },
-      "--help" => {
-        print_serve_usage()
-        return Ok(())
-      },
-      "-h" => {
-        print_serve_usage()
-        return Ok(())
-      },
-      other => return Err(f"unknown flag: '{other}'"),
-    }
-  }
-  run_server(port)
-}
-
-/// Start the board server on `port`. Shared by `lll serve` and `lll up`.
+/// Start the board server on `port`. The board is `lll up`'s web half.
 pub fn run_server(port: int) -> Result<(), string> {
   // Resolve the team scope once; card/board fetches and the realtime
   // subscription share it. No configured team means an unscoped board.
@@ -299,30 +270,11 @@ pub fn run_server(port: int) -> Result<(), string> {
     http.StripPrefix("/static/", http.FileServer(http.Dir("web/static"))),
   )
 
-  fmt.Println(f"lll serve listening on http://127.0.0.1:{port}")
+  fmt.Println(f"board  http://127.0.0.1:{port}")
   match http.ListenAndServe(f"127.0.0.1:{port}", http.DefaultServeMux) {
     Ok(_) => Ok(()),
     Err(e) => Err(f"server: {e}"),
   }
-}
-
-fn print_serve_usage() {
-  fmt.Println(
-    "lll serve - web board with realtime updates
-
-Usage:
-  lll serve [--port 8100]
-
-Serves a board page (/) grouped by state and issue pages (/issue/KEY-123).
-Changes made anywhere — the web UI, the CLI, other browsers — appear in every
-open page without reload, streamed over a single SSE connection per page.
-
-Templates and CSS are read from web/templates/ and web/static/ relative to
-the working directory on every request: edit and refresh, no rebuild.
-
-The board is scoped to the configured team (LLL_TEAM or 'team' in .lll.toml)
-when one is set; creating an issue from the board requires it.",
-  )
 }
 
 // ---------- rendering ----------
@@ -337,7 +289,7 @@ fn render(name: string, data: Unknown) -> Result<string, string> {
   ) {
     Ok(t) => t,
     Err(e) => return Err(f"parsing web/templates: {e}
-run 'lll up' / 'lll serve' from the lll checkout root — web/templates/ and web/static/ are read from disk"),
+run 'lll up' from the lll checkout root — web/templates/ and web/static/ are read from disk"),
   }
   let mut buf = bytes.Buffer { .. }
   if let Err(e) = tmpl.ExecuteTemplate(&buf, name, data) {
