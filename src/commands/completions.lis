@@ -109,7 +109,7 @@ fn verb_flags(noun: string, verb: string) -> Slice<string> {
       "--limit",
       "--json",
     ],
-    "issue view" => ["--json", "-w"],
+    "issue view" => ["--json", "--raw", "-w"],
     "issue update" => [
       "--state",
       "--priority",

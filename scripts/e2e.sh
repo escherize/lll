@@ -945,6 +945,24 @@ if out=$(env $E "$LIN" issue create -t "no stdin" -d - </dev/null 2>&1); then
 fi
 assert_contains "$out" "nothing is piped in" "-d - with no pipe names the fix"
 
+# --- agent read path: --raw, and a pasted board URL anywhere a key goes (task-36) ---
+out=$(env $E "$LIN" issue view "$key" --raw)
+assert_contains "$out" "# $key: From stdin" "--raw prints a markdown heading"
+assert_contains "$out" "literal again" "--raw prints the description verbatim"
+printf '%s' "$out" | grep -qF "Assignee" && fail "--raw should not print the property table"
+
+# a pasted board URL is accepted anywhere the key is
+assert_contains "$(env $E "$LIN" issue title "http://127.0.0.1:8100/issue/$key")" "From stdin" \
+  "issue title accepts a pasted board URL"
+[ "$(env $E "$LIN" issue id "http://127.0.0.1:8100/issue/$key/")" = "$key" ] \
+  || fail "issue id should accept a URL with a trailing slash"
+[ "$(env $E "$LIN" issue id "$key")" = "$key" ] || fail "a bare key must still work"
+
+# a URL that is not an issue page is not silently misparsed
+if env $E "$LIN" issue view "http://example.com/a/b/c/NOPE-9" >/dev/null 2>&1; then
+  fail "a non-issue URL should not resolve"
+fi
+
 echo "e2e: all assertions passed"
 
 # --- web board (own ephemeral PB; see e2e_web.sh) ---
