@@ -127,7 +127,7 @@ pub struct IssueVM {
   pub avatar: AvatarVM,
   pub project: string,
   pub labels: Slice<LabelVM>,
-  pub description: string,
+  pub description: template.HTML,
   pub created: string,
   pub updated: string,
   pub states: Slice<StateOpt>,
@@ -474,8 +474,9 @@ fn comment_vm(c: models.Comment) -> CommentVM {
   }
 }
 
-/// Comment markdown -> HTML. goldmark's default renderer drops raw HTML, so
-/// user input cannot inject markup; on parse failure fall back to escaped text.
+/// Markdown -> HTML for comment bodies and issue descriptions. goldmark's
+/// default renderer drops raw HTML, so user input cannot inject markup; on
+/// parse failure fall back to escaped text.
 fn md_html(src: string) -> template.HTML {
   let mut buf = bytes.Buffer { .. }
   if let Err(_) = goldmark.Convert(src.bytes(), &buf) {
@@ -501,7 +502,7 @@ fn issue_vm(issue: models.Issue, comments: Slice<models.Comment>) -> IssueVM {
     avatar: avatar_vm(assignee),
     project,
     labels: label_vms(issue.expand.labels),
-    description: issue.description,
+    description: md_html(issue.description),
     created: display.relative(issue.created),
     updated: display.relative(issue.updated),
     states: state_opts(),

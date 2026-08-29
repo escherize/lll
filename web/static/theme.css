@@ -274,7 +274,7 @@ input:focus, textarea:focus, select:focus {
   letter-spacing: -0.012em;
   line-height: 1.3;
 }
-.desc { color: var(--text-2); max-width: 68ch; margin: 0 0 24px; white-space: pre-wrap; }
+.desc { color: var(--text-2); max-width: 68ch; margin: 0 0 24px; }
 .deleted { grid-area: main; padding: 28px 40px; color: var(--text-2); }
 
 .thread { grid-area: thread; margin: 0 40px; max-width: 680px; border-top: 1px solid var(--border); padding-top: 18px; }
