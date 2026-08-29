@@ -916,6 +916,35 @@ assert_contains "$out" "parsing .lll.toml" "broken config names the file"
 assert_contains "$out" "fix the TOML syntax" "broken config names the fix"
 rm "$WORK/.lll.toml"
 
+# --- bodies from stdin: `-d -` and `-b -` (task-37) ---
+# The config section above removed .lll.toml, so pass the scope explicitly.
+E="LLL_URL=$URL LLL_TEAM=ENG"
+out=$(printf 'piped description' | env $E "$LIN" issue create -t "From stdin" -d -)
+key=$(printf '%s' "$out" | sed -n 's/^Created \([A-Z]*-[0-9]*\).*/\1/p')
+[ -n "$key" ] || fail "stdin create did not print a key: $out"
+got=$(env $E "$LIN" issue view "$key" --json | jq -r .description)
+[ "$got" = "piped description" ] || fail "-d - description: got '$got'"
+
+# one trailing newline is the shell's, not the author's
+out=$(echo "trailing" | env $E "$LIN" issue create -t "Stdin newline" -d -)
+key2=$(printf '%s' "$out" | sed -n 's/^Created \([A-Z]*-[0-9]*\).*/\1/p')
+got=$(env $E "$LIN" issue view "$key2" --json | jq -r .description)
+[ "$got" = "trailing" ] || fail "-d - should strip the trailing newline: got '$got'"
+
+printf 'piped comment body' | env $E "$LIN" issue comment "$key" -b - >/dev/null
+assert_contains "$(env $E "$LIN" issue comment "$key")" "piped comment body" "-b - reads the comment from stdin"
+
+# a literal value still works, and only an exact "-" means stdin
+env $E "$LIN" issue update "$key" --description "literal again" >/dev/null
+got=$(env $E "$LIN" issue view "$key" --json | jq -r .description)
+[ "$got" = "literal again" ] || fail "literal --description regressed: got '$got'"
+
+# nothing piped in: refuse rather than hang
+if out=$(env $E "$LIN" issue create -t "no stdin" -d - </dev/null 2>&1); then
+  fail "-d - with no pipe should exit non-zero, got: $out"
+fi
+assert_contains "$out" "nothing is piped in" "-d - with no pipe names the fix"
+
 echo "e2e: all assertions passed"
 
 # --- web board (own ephemeral PB; see e2e_web.sh) ---
