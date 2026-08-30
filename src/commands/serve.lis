@@ -100,11 +100,11 @@ pub fn run_server(port: int) -> Result<(), string> {
       settings_page(w, r, team_id, cfg.me)
     },
   )
+  // Every POST is a write returning Result; `flashing` (serve_actions.lis) is
+  // the one place an Err becomes the flash strip.
   http.HandleFunc(
     "POST /settings/{kind}",
-    |w: http.ResponseWriter, r: Ref<http.Request>| {
-      settings_action(w, r, team_id, cfg.me)
-    },
+    flashing(|r: Ref<http.Request>| settings_write(r, team_id, cfg.me)),
   )
   http.HandleFunc(
     "GET /search",
@@ -120,21 +120,17 @@ pub fn run_server(port: int) -> Result<(), string> {
   )
   http.HandleFunc(
     "POST /create",
-    |w: http.ResponseWriter, r: Ref<http.Request>| {
-      create_action(w, r, team_id)
-    },
+    flashing(|r: Ref<http.Request>| create_write(r, team_id)),
   )
   http.HandleFunc(
     "POST /state",
-    |w: http.ResponseWriter, r: Ref<http.Request>| {
-      state_action(w, r, team_id)
-    },
+    flashing(|r: Ref<http.Request>| state_write(r, team_id)),
   )
-  http.HandleFunc("POST /favorite", favorite_action)
-  http.HandleFunc("POST /priority", priority_action)
-  http.HandleFunc("POST /emoji", emoji_action)
-  http.HandleFunc("POST /title", title_action)
-  http.HandleFunc("POST /comment", comment_action)
+  http.HandleFunc("POST /favorite", flashing(favorite_write))
+  http.HandleFunc("POST /priority", flashing(priority_write))
+  http.HandleFunc("POST /emoji", flashing(emoji_write))
+  http.HandleFunc("POST /title", flashing(title_write))
+  http.HandleFunc("POST /comment", flashing(comment_write))
   // The embedded tree keeps its repo paths, so "/static/theme.css" resolves to
   // "static/theme.css" with no prefix surgery.
   http.Handle("GET /static/", http.FileServerFS(web.Assets()))
