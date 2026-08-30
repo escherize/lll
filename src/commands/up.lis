@@ -231,11 +231,8 @@ fn ensure_me(want: string) -> Result<string, string> {
       f"guessed me = \"{name}\" from $USER, wrote it to .lll.toml — 'lll config set me <name>' to change it",
     )
   }
-  let existing = find_member(name)?
-  if existing.is_none() {
-    let created = create_member(name, "")?
-    fmt.Println(f"created member {created.name}")
-  }
+  let created = ensure_member(name)?
+  if created { fmt.Println(f"created member {name}") }
   Ok(name)
 }
 

@@ -35,7 +35,7 @@ Usage:
 $USER on first boot, which is wrong on a shared machine — this is how you fix
 it. A name with no member yet: 'lll member add -n NAME'.
 
-Precedence: env vars (LLL_URL, LLL_TEAM, LLL_SORT, LLL_WEB_URL) > ./.lll.toml > ~/.config/lll/lll.toml",
+Precedence: env vars (LLL_URL, LLL_TEAM, LLL_ME, LLL_SORT, LLL_WEB_URL) > ./.lll.toml > ~/.config/lll/lll.toml",
   )
 }
 
@@ -59,7 +59,18 @@ fn config_set(args: Slice<string>) -> Result<(), string> {
 
   set_toml_key("me", name)?
   fmt.Println(f"me = \"{name}\" in .lll.toml")
-  fmt.Println(f"if {name} is not a member yet: lll member add -n \"{name}\"")
+
+  // Seed the member too, so the new identity can be assigned to and can author
+  // a comment immediately rather than after the next `lll up`. PocketBase being
+  // unreachable is not a reason to fail: the config write is the point, and
+  // `lll up` seeds the member anyway.
+  match ensure_member(name) {
+    Ok(true) => fmt.Println(f"created member {name}"),
+    Ok(false) => (),
+    Err(_) => fmt.Println(
+      f"could not reach PocketBase to create the member — 'lll member add -n \"{name}\"' once it is up",
+    ),
+  }
   Ok(())
 }
 
@@ -111,7 +122,7 @@ fn config_init() -> Result<(), string> {
     return Err(".lll.toml already exists; not overwriting")
   }
   let template = "# lll configuration
-# Precedence: env vars (LLL_URL, LLL_TEAM, LLL_SORT, LLL_WEB_URL) > ./.lll.toml > ~/.config/lll/lll.toml
+# Precedence: env vars (LLL_URL, LLL_TEAM, LLL_ME, LLL_SORT, LLL_WEB_URL) > ./.lll.toml > ~/.config/lll/lll.toml
 # The first file found is used whole; env vars override individual fields.
 
 # PocketBase server URL.

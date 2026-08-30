@@ -99,6 +99,18 @@ pub fn create_member(name: string, email: string) -> Result<models.Member, strin
 }
 
 /// Find a member by exact name, or None.
+/// Create the member if the server does not have one by that name. Returns
+/// true when it created one. Shared by `lll up`'s first-boot seeding and
+/// `lll config set me`, which both need an identity to exist before it can be
+/// assigned to.
+pub fn ensure_member(name: string) -> Result<bool, string> {
+  if name == "" { return Ok(false) }
+  let existing = find_member(name)?
+  if existing.is_some() { return Ok(false) }
+  let _ = create_member(name, "")?
+  Ok(true)
+}
+
 fn find_member(name: string) -> Result<Option<models.Member>, string> {
   let filter = url.QueryEscape(f"name='{name}'")
   let body = pb.get(f"/api/collections/members/records?filter={filter}")?

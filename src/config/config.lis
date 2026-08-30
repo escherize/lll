@@ -33,6 +33,8 @@ fix the TOML syntax in {path}, or remove it and rerun 'lll config init'",
   if url != "" { cfg.url = url }
   let team = os.Getenv("LLL_TEAM")
   if team != "" { cfg.team = team }
+  let me = os.Getenv("LLL_ME")
+  if me != "" { cfg.me = me }
   let sort = os.Getenv("LLL_SORT")
   if sort != "" { cfg.sort = sort }
   let web_url = os.Getenv("LLL_WEB_URL")
