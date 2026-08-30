@@ -223,6 +223,13 @@ assert_contains "$issue" "<strong>bold</strong>" "markdown bold rendered"
 assert_contains "$issue" "<code>code</code>" "markdown code rendered"
 printf '%s' "$issue" | grep -qF "<script>alert(1)</script>" && fail "raw HTML not neutralized in comment"
 
+# --- hard wraps: one newline is a line break, the way GitHub comments do it
+# (task-45). CommonMark would collapse it to a space.
+"$LIN" issue comment ENG-1 -b "wrapped line one
+wrapped line two" >/dev/null
+issue=$(curl -sf "$WEB/issue/ENG-1")
+assert_contains "$issue" "wrapped line one<br>" "single newline in a comment becomes a line break"
+
 # --- validation: errors arrive as visible flash patches, never silence ---
 out=$(curl -s -X POST -d "title=&state=todo" "$WEB/create")
 assert_contains "$out" "datastar-patch-elements" "empty title patches flash"
@@ -370,5 +377,14 @@ assert_contains "$page" "<h2>Heading</h2>" "description renders a markdown headi
 assert_contains "$page" "<strong>bold</strong>" "description renders bold"
 assert_contains "$page" "<code>code</code>" "description renders inline code"
 assert_not_contains "$page" "<script>alert" "raw HTML in a description stays out of the page"
+
+# --- descriptions hard-wrap too, and raw HTML stays dropped (task-45) ---
+"$LIN" issue update ENG-1 --description 'desc line one
+desc line two
+
+<b>raw</b> markup' >/dev/null
+page=$(curl -sf "$WEB/issue/ENG-1")
+assert_contains "$page" "desc line one<br>" "single newline in a description becomes a line break"
+assert_not_contains "$page" "<b>raw</b>" "raw HTML in a description is still dropped with hard wraps on"
 
 echo "e2e_web: all assertions passed"
