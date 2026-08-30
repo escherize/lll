@@ -144,6 +144,17 @@ struct EmojiPatch { emoji: string }
 #[json]
 struct TitlePatch { title: string }
 
+/// Patch bodies for the issue page's Properties editors. `Issue` prefixed:
+/// serve_settings.lis already owns ProjectPatch and friends for /settings.
+#[json]
+struct IssueProjectPatch { project: string }
+
+#[json]
+struct IssueAssigneePatch { assignee: string }
+
+#[json]
+struct IssueLabelsPatch { labels: Slice<string> }
+
 fn state_write(r: Ref<http.Request>, team_id: string) -> Result<string, string> {
   // FormValue, not PostFormValue: drag-and-drop posts key/state as query params.
   let key = r.FormValue("key")
@@ -250,6 +261,52 @@ fn title_write(r: Ref<http.Request>) -> Result<string, string> {
   if title == "" { return Err("title is required") }
   let issue = fetch_issue(key)?
   patch_issue(issue.id, TitlePatch { title })
+}
+
+fn project_write(r: Ref<http.Request>) -> Result<string, string> {
+  let key = r.FormValue("key")
+  let id = r.FormValue("project")
+  if id != "" {
+    let projects = fetch_projects()?
+    if projects.find(|p| p.id == id).is_none() {
+      return Err(f"unknown project '{id}' — reload the page for the current list")
+    }
+  }
+  let issue = fetch_issue(key)?
+  patch_issue(issue.id, IssueProjectPatch { project: id })
+}
+
+fn assignee_write(r: Ref<http.Request>) -> Result<string, string> {
+  let key = r.FormValue("key")
+  let id = r.FormValue("assignee")
+  if id != "" {
+    let members = fetch_members()?
+    if members.find(|m| m.id == id).is_none() {
+      return Err(f"unknown member '{id}' — reload the page for the current list")
+    }
+  }
+  let issue = fetch_issue(key)?
+  patch_issue(issue.id, IssueAssigneePatch { assignee: id })
+}
+
+/// Replace the issue's whole label set from the checkbox chips. Labels is a
+/// rel-multi, so the form posts every checked id and this is one PATCH —
+/// the same whole-list write `lll issue update --label` does. Unchecking
+/// everything posts no labels at all, which is the way back to none.
+fn labels_write(r: Ref<http.Request>) -> Result<string, string> {
+  let key = r.FormValue("key")
+  let known = fetch_labels()?
+  // FormValue above has already parsed the body, so PostForm is populated;
+  // labels is the one field that repeats (one checkbox per label).
+  let form = r.PostForm as Map<string, Slice<string>>
+  let ids = form["labels"].filter(|id| id != "")
+  for id in ids {
+    if known.find(|l| l.id == id).is_none() {
+      return Err(f"unknown label '{id}' — reload the page for the current list")
+    }
+  }
+  let issue = fetch_issue(key)?
+  patch_issue(issue.id, IssueLabelsPatch { labels: ids })
 }
 
 fn comment_write(r: Ref<http.Request>) -> Result<string, string> {

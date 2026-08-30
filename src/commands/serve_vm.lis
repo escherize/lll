@@ -19,10 +19,14 @@ pub struct PickVM {
 
 /// One selectable label in the create dialog. Same shape as LabelVM plus the
 /// id, because a chip on a card is read-only and this one is a checkbox.
+/// `on` marks the labels an issue already carries: false in the create
+/// dialog (nothing is checked yet), set by issue_vm on the issue page,
+/// where the same chips are the Properties panel's label editor.
 pub struct LabelPickVM {
   pub id: string,
   pub name: string,
   pub color: string,
+  pub on: bool,
 }
 
 /// Everything the create dialog offers beyond title and state — the same set
@@ -250,6 +254,15 @@ pub struct IssueVM {
   pub updated: string,
   pub states: Slice<StateOpt>,
   pub prios: Slice<StateOpt>,
+  // The Properties panel's editors. states/prios above ride every
+  // issue-detail broadcast because the selects live inside the morph
+  // boundary; these three catalogues ride it for the same reason — a
+  // select wiped by a morph with no options is a control that cannot act.
+  pub project_id: string,
+  pub assignee_id: string,
+  pub member_opts: Slice<PickVM>,
+  pub project_opts: Slice<PickVM>,
+  pub label_opts: Slice<LabelPickVM>,
   pub comments: Slice<CommentVM>,
   // Seeds the topbar star's $fav signal. Only the page handler sets it: the
   // star lives outside #issue-detail, so no broadcast re-renders it.

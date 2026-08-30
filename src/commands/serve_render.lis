@@ -244,6 +244,7 @@ fn compose_vm() -> Result<ComposeVM, string> {
       id: l.id,
       name: l.name,
       color: theme.normalize_hex(l.color),
+      on: false,
     }),
   })
 }
@@ -271,7 +272,7 @@ fn comment_vm(c: models.Comment) -> CommentVM {
 
 /// Issue view model from a full record (expand: team, assignee, labels,
 /// project) — shared by the issue page and broadcast re-renders.
-fn issue_vm(issue: models.Issue, comments: Slice<models.Comment>) -> IssueVM {
+fn issue_vm(issue: models.Issue, comments: Slice<models.Comment>) -> Result<IssueVM, string> {
   let assignee = issue.expand.assignee.name
   let mut project = issue.expand.project.name
   let mut project_href = ""
@@ -279,7 +280,7 @@ fn issue_vm(issue: models.Issue, comments: Slice<models.Comment>) -> IssueVM {
     project_href = f"/issues?project={url.QueryEscape(project)}"
   }
   if project == "" { project = "none" }
-  IssueVM {
+  Ok(IssueVM {
     deleted: false,
     id: issue.id,
     key: f"{issue.expand.team.key}-{issue.number}",
@@ -297,6 +298,19 @@ fn issue_vm(issue: models.Issue, comments: Slice<models.Comment>) -> IssueVM {
     updated: display.relative(issue.updated),
     states: state_opts(),
     prios: prio_opts(),
+    // The three editor catalogues. Small fetches, paid per render — the
+    // selects live inside the #issue-detail morph boundary, so a broadcast
+    // that shipped no options would wipe the controls mid-edit.
+    project_id: issue.project,
+    assignee_id: issue.assignee,
+    member_opts: fetch_members()?.map(|m| PickVM { id: m.id, name: m.name }),
+    project_opts: fetch_projects()?.map(|p| PickVM { id: p.id, name: p.name }),
+    label_opts: fetch_labels()?.map(|l| LabelPickVM {
+      id: l.id,
+      name: l.name,
+      color: theme.normalize_hex(l.color),
+      on: issue.labels.contains(l.id),
+    }),
     comments: comments.map(comment_vm),
     // Left false here on purpose: only issue_page knows, and only it renders
     // the star. Broadcasts of #issue-detail must not carry a stale answer.
@@ -304,5 +318,5 @@ fn issue_vm(issue: models.Issue, comments: Slice<models.Comment>) -> IssueVM {
     // Left empty for the same reason: the picker is page-only, so a
     // broadcast of this fragment carries no catalogue.
     emojis: [],
-  }
+  })
 }
