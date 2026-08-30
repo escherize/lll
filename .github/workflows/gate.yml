@@ -37,9 +37,12 @@ jobs:
         run: mise install
 
       # lis ships as a GitHub release, not a mise plugin (see mise.toml).
-      - name: Install lis
+      # Pinned to 0.11.3, the version mise.toml says lll is verified against —
+      # the `latest` installer now ships 0.12.0, whose stricter mut rules fail
+      # the build.
+      - name: Install lis 0.11.3
         run: |
-          curl -LsSf https://github.com/ivov/lisette/releases/latest/download/lisette-installer.sh | sh
+          curl -LsSf https://github.com/ivov/lisette/releases/download/lisette-v0.11.3/lisette-installer.sh | sh
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
 
       # THE failing step: build + unit tests + full e2e (~75s). A red gate
