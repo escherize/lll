@@ -45,6 +45,28 @@ printf '%s' "$analysis" | lll issue create -t "Title" -d -
 git log --oneline -20 | lll issue comment KEY-12 -b -
 ```
 
+**Set an emoji on every issue you create.** The board is scanned, not read, and an emoji
+is the only thing legible at card size. This is not decoration: it is how a human sees at
+a glance what a column is full of.
+
+```sh
+lll issue create -t "e2e flakes on a random port" --emoji 🐛
+```
+
+Use the kind of work, not your mood. A small vocabulary beats a large one, because the
+value is in the pattern being recognisable:
+
+| emoji | kind |
+|---|---|
+| 🐛 | bug |
+| ✨ | feature |
+| ♻ | refactor |
+| 📝 | docs |
+| 🔧 | tooling, build, CI |
+| 🧪 | tests |
+| ⚡ | performance |
+| 🔒 | security |
+
 **Filter server-side.** `--state`, `--assignee`, `--label`, `--project`,
 `--search`, `--sort`, `--limit`, and `--json` on every read command.
 

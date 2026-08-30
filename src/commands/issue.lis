@@ -89,7 +89,7 @@ fn print_usage() {
     "lll issue - work with issues
 
 Usage:
-  lll issue create -t \"title\" [-d desc] [--priority 0-4] [--assignee name]
+  lll issue create -t \"title\" [-d desc] [--emoji X] [--priority 0-4] [--assignee name]
                    [--label name]... [--project name] [--emoji e]
                                                   create an issue in the configured team;
                                                   -d - reads the description from stdin
@@ -227,7 +227,7 @@ fn create(args: Slice<string>) -> Result<(), string> {
   }
   if title == "" {
     return Err(
-      "usage: lll issue create -t \"title\" [-d desc] [--priority 0-4] [--assignee name] [--label name]... [--project name]",
+      "usage: lll issue create -t \"title\" [-d desc] [--emoji X] [--priority 0-4] [--assignee name] [--label name]... [--project name]",
     )
   }
 
