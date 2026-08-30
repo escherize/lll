@@ -13,8 +13,9 @@
 # /issues table (server-side sort and filter through query params, honest row
 # count, bad params degrading to the flash strip), /search filtering as it is
 # typed (results patched in with no page load, the address bar following the
-# query, the X clearing both), and the /projects list with its rail row, issue
-# counts and project filter on /issues.
+# query, the X clearing both), the /projects list with its rail row, issue
+# counts and project filter on /issues, and the create-more dialog keeping
+# its state through back-to-back creates (task-159).
 # Standalone (boots its own PB), also invoked by e2e.sh.
 set -euo pipefail
 . "$(dirname "$0")/lib.sh"   # free_port, wait_ok, fail, assert_*, e2e_begin/end
@@ -725,6 +726,84 @@ if command -v playwright-cli >/dev/null 2>&1; then
   assert_contains "$clicked_view" '"url":"/?prio=urgent"' \
     "browser: clicking a saved view navigates to its URL"
 
+  # --- create more: the dialog stays open for the next issue (task-159) ---
+  # The toggle is a preference signal on #ni-modal, outside the morph and
+  # the form reset. Submitting with it on posts the SAME /create, the
+  # server closes the dialog as always, and the client reopens it ---
+  # clearing title and description, keeping the scoping fields. The board
+  # repaint is the existing broadcast: navs stays 1 throughout.
+  seq_goto "$WEB/"
+  more_js="() => JSON.stringify({open: getComputedStyle(document.querySelector('.ni-shade')).display !== 'none', title: document.getElementById('ni-title').value, desc: document.getElementById('ni-desc').value, focused: document.activeElement === document.getElementById('ni-title'), more: document.getElementById('ni-more').checked, assignee: document.querySelector('#ni-form select[name=assignee]').value, one: [...document.querySelectorAll('.card .title')].some(e => e.textContent === 'Create more one'), two: [...document.querySelectorAll('.card .title')].some(e => e.textContent === 'Create more two'), off: [...document.querySelectorAll('.card .title')].some(e => e.textContent === 'Create more off'), navs: performance.getEntriesByType('navigation').length, flash: document.getElementById('flash').textContent})"
+  # A submit click can be swallowed while the page is still settling after
+  # the last-view restore redirect (seen under e2e load: playwright reports
+  # the click, the button's handler never runs, the POST is never sent).
+  # Click again until the probe shows the POST went through --- an extra
+  # click is harmless, an empty title just refocuses the field.
+  ni_submit() { # needle --- click create until the probe matches
+    local out=""
+    for _ in 1 2 3 4; do
+      playwright-cli -s="$BROWSER_SESSION" click "#ni-create" >/dev/null 2>&1 || true
+      out=$(page_until "$more_js" "$1")
+      case "$out" in *"$1"*) break ;; esac
+    done
+    printf '%s' "$out"
+  }
+  playwright-cli -s="$BROWSER_SESSION" click "#ni-expand" >/dev/null 2>&1 \
+    || fail "playwright: opening the create dialog"
+  sleep 0.4
+  playwright-cli -s="$BROWSER_SESSION" click "#ni-more" >/dev/null 2>&1 \
+    || fail "playwright: enabling Create more"
+  scoped=$(playwright-cli -s="$BROWSER_SESSION" eval \
+    "() => { const s = document.querySelector('#ni-form select[name=assignee]'); if (s.options.length > 1) s.selectedIndex = 1; s.dispatchEvent(new Event('change', {bubbles: true})); return s.value }" \
+    | sed -n '/### Result/{n;p;}' | tr -d '\\' | tr -d '"')
+  playwright-cli -s="$BROWSER_SESSION" fill "#ni-title" "Create more one" >/dev/null 2>&1 \
+    || fail "playwright: typing the first Create-more title"
+  first=$(ni_submit '"one":true,"navs":1')
+  assert_contains "$first" '"open":true' "task-159: submitting with Create more keeps the dialog open"
+  assert_contains "$first" '"title":""' "task-159: the title is cleared for the next issue"
+  assert_contains "$first" '"desc":""' "task-159: the description is cleared for the next issue"
+  assert_contains "$first" "\"assignee\":\"$scoped\"" "task-159: the scoping select survives the submit"
+  assert_contains "$first" '"one":true' "task-159: the new card repainted behind the open dialog"
+  assert_contains "$first" '"navs":1' "task-159: the repaint came from the broadcast, not a reload"
+  playwright-cli -s="$BROWSER_SESSION" fill "#ni-title" "Create more two" >/dev/null 2>&1 \
+    || fail "playwright: typing the second Create-more title"
+  second=$(ni_submit '"two":true')
+  assert_contains "$second" '"open":true' "task-159: the dialog is still open for a third entry"
+  assert_contains "$second" "\"assignee\":\"$scoped\"" "task-159: the scoping select survives the second submit"
+  # Toggle off: the old behavior returns --- submit closes the dialog.
+  playwright-cli -s="$BROWSER_SESSION" click "#ni-more" >/dev/null 2>&1 \
+    || fail "playwright: disabling Create more"
+  playwright-cli -s="$BROWSER_SESSION" fill "#ni-title" "Create more off" >/dev/null 2>&1 \
+    || fail "playwright: typing the toggle-off title"
+  turned_off=$(ni_submit '"off":true')
+  assert_contains "$turned_off" '"open":false' "task-159: with the toggle off the dialog closes as before"
+  # The preference is a signal, not a form field: it outlives opens and
+  # closes without a reload (el.reset() re-applies it on every open).
+  playwright-cli -s="$BROWSER_SESSION" click "#ni-expand" >/dev/null 2>&1 \
+    || fail "playwright: reopening the create dialog"
+  sleep 0.4
+  playwright-cli -s="$BROWSER_SESSION" click "#ni-more" >/dev/null 2>&1 \
+    || fail "playwright: re-enabling Create more"
+  playwright-cli -s="$BROWSER_SESSION" press Escape >/dev/null 2>&1
+  sleep 0.3
+  playwright-cli -s="$BROWSER_SESSION" click "#ni-expand" >/dev/null 2>&1 \
+    || fail "playwright: reopening the create dialog"
+  sleep 0.4
+  assert_contains "$(page_until "$more_js" '"open":true')" '"more":true' \
+    "task-159: the toggle keeps its state across dialog opens"
+  # A failed create must not clear anything: a hidden first `state` field
+  # makes the server answer "unknown state 'bogus'" through the flash.
+  playwright-cli -s="$BROWSER_SESSION" eval \
+    "() => { const h = document.createElement('input'); h.type = 'hidden'; h.name = 'state'; h.value = 'bogus'; document.getElementById('ni-form').prepend(h); return 'ok' }" >/dev/null 2>&1
+  playwright-cli -s="$BROWSER_SESSION" fill "#ni-title" "Create more doomed" >/dev/null 2>&1 \
+    || fail "playwright: typing the doomed title"
+  rejected=$(ni_submit 'unknown state')
+  assert_contains "$rejected" '"title":"Create more doomed"' "task-159: a failed create keeps the typed title"
+  assert_contains "$rejected" '"open":true' "task-159: a failed create keeps the dialog open"
+  assert_contains "$rejected" '"focused":true' "task-159: a failed create returns focus to the title"
+  "$LIN" issue list | grep -q "Create more doomed" \
+    && fail "task-159: a failed Create-more submit wrote a record" || true
+
   playwright-cli -s="$BROWSER_SESSION" close >/dev/null 2>&1 || true
   echo "e2e_web: browser-level realtime check passed"
   echo "e2e_web: browser-level /search live-typing check passed"
@@ -1231,5 +1310,26 @@ out=$(curl -s -X POST -d "title=Never written" -d "priority=bogus" "$WEB/create"
 assert_contains "$out" "unknown priority &#39;bogus&#39;" "a bad priority answers through the flash"
 assert_not_contains "$out" "ni_open" "a failed create does not close the dialog"
 "$LIN" issue list | grep -q "Never written" && fail "a refused create still wrote a record" || true
+
+# task-159: the handler is stateless — two creates back to back both land,
+# each on its own closing the dialog (the same one write path, unchanged).
+for n in 1 2; do
+  out=$(curl -s -w '\n%{http_code}' -X POST -d "title=Create more curl $n" "$WEB/create")
+  printf '%s' "$out" | tail -1 | grep -q 200 || fail "/create number $n of two back-to-back should return 200"
+  assert_contains "$out" 'signals {"ni_open": false' "create number $n of two back-to-back closes the dialog"
+done
+# Assert against the PB records API — the write's source of truth — not a
+# CLI rendering pass; poll briefly so a loaded runner cannot read stale.
+back_to_back_written() { # n --- the record exists in PocketBase
+  for _ in 1 2 3 4 5; do
+    curl -sf --get "$LLL_URL/api/collections/issues/records" \
+      --data-urlencode "filter=title='Create more curl $1'" \
+      --data-urlencode "perPage=1" | jq -e '.items | length == 1' >/dev/null && return 0
+    sleep 0.5
+  done
+  return 1
+}
+back_to_back_written 1 || fail "the first back-to-back create wrote nothing"
+back_to_back_written 2 || fail "the second back-to-back create wrote nothing"
 
 echo "e2e_web: all assertions passed"

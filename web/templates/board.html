@@ -153,16 +153,27 @@ provenance.
 
      Opening resets the form and copies the topbar's title over, so the two
      composers are one flow rather than two drafts.
+     Create more (TASK-159) is a checkbox beside the submit. The server
+     still closes the dialog on success — one write path, no special case —
+     so with the toggle on the client awaits the POST and, only when the
+     server did close it, raises $ni_reopen and flips $ni_open back: the
+     open effect then takes the reopen branch, clearing title and
+     description, leaving the scoping fields and labels standing, and
+     returning focus to the title. A rejected create never closes the
+     dialog, so the await finds $ni_open still true and keeps every
+     keystroke. $ni_more and $ni_reopen live on #ni-modal — outside the
+     #board morph and outside el.reset() — so the preference survives both
+     dialog opens and board repaints.
 
      Class names are ni-* on purpose. Template define names AND CSS class
      names are global here (TASK-106), so a new surface namespaces both.
 
      TASK-72's emoji picker slots in beside the title input when it lands. */}}
-{{define "new-issue-dialog"}}<div id="ni-modal" data-signals:ni_open="false">
+{{define "new-issue-dialog"}}<div id="ni-modal" data-signals:ni_open="false" data-signals:ni_more="false" data-signals:ni_reopen="false">
 <div class="ni-shade" style="display:none" data-show="$ni_open" data-on:click="evt.target === el && ($ni_open = false)" data-on:keydown__window="evt.key === 'Escape' ? ($ni_open = false) : (evt.key === 'c' && !evt.metaKey && !evt.ctrlKey && !evt.altKey && evt.target === document.body && (evt.preventDefault(), $ni_open = true))">
-<form id="ni-form" class="ni-dialog" aria-label="New issue" data-effect="$ni_open && setTimeout(() => { el.reset(); const t = document.getElementById('ni-title'); t.value = document.getElementById('new-title').value; t.focus(); t.select() }, 0)">
+<form id="ni-form" class="ni-dialog" aria-label="New issue" data-effect="$ni_open && setTimeout(() => { const t = document.getElementById('ni-title'); if ($ni_reopen) { $ni_reopen = false; t.value = ''; document.getElementById('ni-desc').value = ''; t.focus() } else { el.reset(); document.getElementById('ni-more').checked = $ni_more; t.value = document.getElementById('new-title').value; t.focus(); t.select() } }, 0)">
 <div class="ni-head">New issue<span class="ni-flex"></span><button type="button" class="ni-x" aria-label="Close" data-on:click="$ni_open = false"><svg width="10" height="10" viewBox="0 0 10 10" aria-hidden="true"><path d="M2 2 L8 8 M8 2 L2 8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg></button></div>
-<input id="ni-title" name="title" placeholder="Issue title" autocomplete="off" aria-label="Issue title" data-on:keydown="evt.key === 'Enter' && (evt.preventDefault(), el.value.trim() && @post('/create', {contentType: 'form'}))">
+<input id="ni-title" name="title" placeholder="Issue title" autocomplete="off" aria-label="Issue title" data-on:keydown="evt.key === 'Enter' && (evt.preventDefault(), el.value.trim() && document.getElementById('ni-create').click())">
 <textarea id="ni-desc" class="ni-desc" name="description" aria-label="Description" placeholder="Description — markdown, code fences and mermaid all render"></textarea>
 <div class="ni-props">
   <select name="state" aria-label="State">{{range .States}}<option value="{{.Value}}"{{if eq .Value "todo"}} selected{{end}}>{{.Label}}</option>{{end}}</select>
@@ -171,7 +182,7 @@ provenance.
   <select name="project" aria-label="Project"><option value="">No project</option>{{range .Compose.Projects}}<option value="{{.Id}}">{{.Name}}</option>{{end}}</select>
 </div>
 {{if .Compose.Labels}}<div class="ni-labels"><span class="ni-key">Labels</span>{{range .Compose.Labels}}<label class="ni-lab"><input type="checkbox" name="labels" value="{{.Id}}"><span class="chip"><span class="dot" style="background:{{if .Color}}{{.Color}}{{else}}var(--text-3){{end}}"></span>{{.Name}}</span></label>{{end}}</div>
-{{end}}<div class="ni-foot"><span class="ni-hint">Enter to create · Esc to close</span><button type="button" class="btn" data-on:click="$ni_open = false">Cancel</button><button type="button" class="btn primary" data-on:click="document.getElementById('ni-title').value.trim() ? @post('/create', {contentType: 'form'}) : document.getElementById('ni-title').focus()">Create issue</button></div>
+{{end}}<div class="ni-foot"><span class="ni-hint">Enter to create · Esc to close</span><label class="ni-more" title="Keep this dialog open to file the next issue"><input id="ni-more" type="checkbox" data-bind:ni_more><span>Create more</span></label><button type="button" class="btn" data-on:click="$ni_open = false">Cancel</button><button type="button" id="ni-create" class="btn primary" data-on:click="if (!document.getElementById('ni-title').value.trim()) { document.getElementById('ni-title').focus() } else if (!$ni_more) { @post('/create', {contentType: 'form'}) } else { (async () => { await @post('/create', {contentType: 'form'}); if (!$ni_open) { $ni_reopen = true; $ni_open = true } else { document.getElementById('ni-title').focus() } })() }">Create issue</button></div>
 </form>
 </div>
 </div>{{end}}
