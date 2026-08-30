@@ -1,0 +1,18 @@
+// The web's two priority orders are derived from display.priorities() rather
+// than written out, so these pin the order and the labels a reader sees.
+
+#[test]
+fn priority_options_are_the_linear_scale_with_web_labels() {
+  let opts = prio_opts()
+  assert opts
+    .map(|o| o.value)
+    .equals(["none", "urgent", "high", "medium", "low"])
+  assert opts
+    .map(|o| o.label)
+    .equals(["No priority", "Urgent", "High", "Medium", "Low"])
+}
+
+#[test]
+fn the_filter_chooser_lists_priorities_most_urgent_first() {
+  assert prios_by_urgency().equals(["urgent", "high", "medium", "low", "none"])
+}

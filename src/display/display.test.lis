@@ -42,11 +42,42 @@ fn priority_markers_follow_linear_scale() {
   assert priority_marker(2) == "!!"
   assert priority_marker(3) == "!"
   assert priority_marker(4) == "·"
+  assert priority_marker(5) == ""
+  assert priority_marker(-1) == ""
 }
 
 #[test]
 fn priority_names_follow_linear_scale() {
   assert priority_name(0) == "none"
   assert priority_name(1) == "urgent"
+  assert priority_name(2) == "high"
+  assert priority_name(3) == "medium"
   assert priority_name(4) == "low"
+  assert priority_name(5) == "?"
+  assert priority_name(-1) == "?"
+}
+
+// The scale is one table now, so what needs guarding is that the derived
+// views agree with it: a name that maps back to the value it came from.
+#[test]
+fn priority_round_trips_value_to_name_to_value() {
+  assert priorities().length() == 5
+  for (value, name) in priorities().enumerate() {
+    assert priority_name(value) == name
+    assert priority_value(name).unwrap_or(-1) == value
+  }
+}
+
+#[test]
+fn priority_round_trips_name_to_value_to_name() {
+  for name in priorities() {
+    assert priority_name(priority_value(name).unwrap_or(-1)) == name
+  }
+}
+
+#[test]
+fn priority_value_rejects_names_off_the_scale() {
+  assert priority_value("critical").is_none()
+  assert priority_value("Urgent").is_none()
+  assert priority_value("").is_none()
 }
