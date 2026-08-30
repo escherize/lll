@@ -1,3 +1,15 @@
+# The gate runs on macos-14 (darwin/arm64), NOT ubuntu — do not "fix" this back
+# to linux without first fixing lisette upstream. Two reasons, in order:
+#
+# 1. lisette v0.12.0 (what the `latest` installer ships) is a breaking release;
+#    lll is verified against lis 0.11.3 (see mise.toml), which we pin below.
+# 2. On linux, lis 0.11.3's bindgen panics while generating Go typedefs for
+#    github.com/escherize/lll/gopb — "panic: unexpected expr: *ast.KeyValueExpr"
+#    in golang.org/x/tools/go/ssa — so `lis test` cannot run on ubuntu at all.
+#    The identical toolchain (lis 0.11.3, go 1.27.0, cold module + build caches)
+#    passes on darwin/arm64. Repro: escherize/lll Actions run 33320568185.
+#    Upstream issue: https://github.com/ivov/lisette/issues/1360
+
 name: gate
 
 on:
@@ -15,7 +27,7 @@ permissions:
 jobs:
   gate:
     name: gate
-    runs-on: ubuntu-latest
+    runs-on: macos-14
     steps:
       - uses: actions/checkout@v4
 
@@ -30,9 +42,7 @@ jobs:
       - name: Trust repo config
         run: mise trust
 
-      # Provisions go 1.27 and jq from mise.toml. python3 is not in mise.toml
-      # (its build fails under mise) but ubuntu-latest ships a system python3,
-      # which scripts/lib.sh uses.
+      # Provisions go 1.27 and jq from mise.toml.
       - name: Install tools
         run: mise install
 
