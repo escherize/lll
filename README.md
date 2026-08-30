@@ -24,8 +24,10 @@ mise run dev             # build, then PocketBase (:8090) + web board (:8100)
 ```
 
 `mise run dev` builds first and runs from the checkout root for you, from any
-subdirectory. The board reads `web/templates/` and `web/static/` from disk;
-taken ports auto-increment; Ctrl-C stops everything.
+subdirectory, because PocketBase reads `pb/pb_migrations/` and `pb/pb_hooks/`
+from disk. `web/templates/` and `web/static/` are compiled into the binary, so
+markup and CSS edits need a rebuild. Taken ports auto-increment; Ctrl-C stops
+everything.
 
 Then, in another shell — with mise activated, `lll` anywhere under the
 checkout is the binary you just built, so there is nothing to install or

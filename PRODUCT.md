@@ -32,8 +32,8 @@ file trackers for multi-agent development.
 
 Changes arrive continuously from CLI, agents, and other browsers over one SSE
 stream; the board must absorb live morphs (cards moving columns) without
-disorienting the viewer. Server-rendered Go templates + Datastar; templates
-re-read from disk per request.
+disorienting the viewer. Server-rendered Go templates + Datastar; templates and
+static assets are embedded in the binary.
 
 ## Capabilities and Constraints
 
