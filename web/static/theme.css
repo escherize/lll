@@ -658,3 +658,115 @@ input:focus, textarea:focus, select:focus {
   user-select: none;
   -webkit-user-select: none;
 }
+
+/* ── Issues table (/issues) ─────────────────────────────── */
+/* A dense read view: no accent anywhere, state colour carried by the icon
+   alone, hierarchy by weight and the three grey voices. Sorting and
+   filtering are links and a GET form, so nothing here needs a signal. */
+.itbl-count {
+  color: var(--text-3);
+  font-size: 11.5px;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+}
+.itbl-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  padding: 10px 16px 0;
+}
+.itbl-bar label {
+  color: var(--text-3);
+  font-size: 11.5px;
+  font-weight: 500;
+  margin-left: 6px;
+}
+.itbl-bar label:first-of-type { margin-left: 0; }
+.itbl-bar select { font-size: 12.5px; padding: 3px 6px; }
+.itbl-bar .btn { font-size: 12.5px; padding: 3px 10px; margin-left: 4px; }
+.itbl-clear {
+  color: var(--text-3);
+  font-size: 11.5px;
+  font-weight: 500;
+  text-decoration: none;
+  padding: 2px 6px;
+}
+.itbl-clear:hover { color: var(--text); }
+
+/* The table scrolls itself; the page never does. */
+.itbl-scroll { flex: 1; min-height: 0; overflow: auto; padding: 12px 16px 16px; }
+.itbl { width: 100%; border-collapse: collapse; }
+.itbl th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--bg);
+  text-align: left;
+  font-weight: 600;
+  letter-spacing: -0.005em;
+  color: var(--text-3);
+  white-space: nowrap;
+  /* Symmetric padding, not 0 on top: the header is sticky, and rows scrolling
+     under a zero-padding cell show a sliver above the label. */
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--border);
+}
+.itbl th a { color: inherit; text-decoration: none; white-space: nowrap; }
+.itbl th a:hover { color: var(--text); }
+.itbl th a.on { color: var(--text); }
+/* The caret previews what a click does: it points down (descending) and only
+   turns solid on the column that is actually sorting. */
+/* cr-asc / cr-desc, not asc / desc: class names are global, and `.desc` is
+   already the issue description's block (margin-bottom 24px), which lands on
+   an inline icon as a 24px gap under it. */
+.itbl th .cr { margin-left: 2px; vertical-align: -3px; opacity: 0; }
+.itbl th a:hover .cr { opacity: 0.4; }
+.itbl th .cr-asc, .itbl th .cr-desc { opacity: 1; }
+.itbl th .cr-asc { transform: rotate(180deg); }
+.itbl td {
+  padding: 5px 10px;
+  border-top: 1px solid var(--border);
+  color: var(--text-2);
+  vertical-align: middle;
+}
+.itbl tbody tr:hover { background: var(--bg-hover); }
+.itbl td a { color: inherit; text-decoration: none; }
+.itbl .c-id { width: 1%; white-space: nowrap; }
+.itbl .c-id a { color: var(--text-3); font-size: 11.5px; font-variant-numeric: tabular-nums; }
+.itbl tbody tr:hover .c-id a { color: var(--text-2); }
+/* Titles never collapse into a four-line stack: below this the whole table
+   overflows and .itbl-scroll scrolls sideways, the way the board's columns do. */
+.itbl .c-title { min-width: 260px; }
+.itbl .c-title a { color: var(--text); font-weight: 500; }
+.itbl .c-title .emoji { margin-left: 6px; }
+.itbl .c-state, .itbl .c-prio, .itbl .c-assignee {
+  width: 1%;
+  white-space: nowrap;
+}
+.itbl .c-state, .itbl .c-prio, .itbl .c-assignee { display: table-cell; }
+.itbl .c-state span, .itbl .c-prio span, .itbl .c-assignee span:not(.avatar) {
+  margin-left: 6px;
+  vertical-align: middle;
+}
+/* A fixed slot keeps the priority text aligned even where "none" draws no
+   icon, without inventing an icon for the empty case. */
+.itbl .pri-slot { display: inline-block; width: 14px; vertical-align: middle; }
+.itbl .c-labels { width: 1%; }
+.itbl .c-labels .chip { margin-right: 4px; vertical-align: middle; }
+.itbl .c-assignee .none { color: var(--text-3); }
+.itbl .c-age {
+  width: 1%;
+  white-space: nowrap;
+  color: var(--text-3);
+  font-variant-numeric: tabular-nums;
+}
+.itbl-empty td { color: var(--text-3); padding: 20px 10px; text-align: center; }
+
+/* Below the breakpoint the table keeps its width and scrolls sideways inside
+   its own pane, the way the board's columns do — squeezing eight columns into
+   a phone turns every title into a four-line stack. */
+@media (max-width: 720px) {
+  .itbl-scroll { padding: 10px 12px 12px; }
+  .itbl-bar { padding: 10px 12px 0; }
+}

@@ -54,7 +54,7 @@ pub struct AvatarVM {
   pub class: string,
 }
 
-/// View model for one issue card on the board.
+/// View model for one issue: a board card, or one row of the /issues table.
 pub struct CardVM {
   pub id: string,
   pub key: string,
@@ -72,6 +72,9 @@ pub struct CardVM {
   pub emoji: string,
   // Relative created age ("3h ago") for the card's bottom row.
   pub created: string,
+  // Relative updated age. Board cards do not show it; the /issues table
+  // sorts on it by default, so the column has to exist somewhere.
+  pub updated: string,
   // First ~2 lines of the description, truncated, for the hover preview.
   pub snippet: string,
 }
@@ -122,7 +125,7 @@ pub struct BoardVM {
 /// construct a rail it must never render. Page handlers compose the two
 /// halves into a PageVM instead; a fragment cannot carry shell by accident.
 pub struct RailVM {
-  // Which row reads as current: "board" or "mine".
+  // Which row reads as current: "board", "mine" or "issues".
   pub active: string,
   // Config's `me`. Empty means there is no member to be, so no "My issues"
   // row — a rail link that leads nowhere is worse than no rail link.
@@ -172,6 +175,55 @@ pub struct IssueVM {
   pub states: Slice<StateOpt>,
   pub prios: Slice<StateOpt>,
   pub comments: Slice<CommentVM>,
+}
+
+/// One column heading in the /issues table. `href` empty means the column has
+/// no PB field behind it and does not sort; `dir` is "asc" or "desc" only on
+/// the column currently doing the sorting.
+pub struct IssueColVM {
+  pub label: string,
+  pub href: string,
+  pub dir: string,
+  pub cls: string,
+}
+
+/// View model for the /issues table.
+///
+/// Everything the page can be is in the URL, so this is a pure projection of
+/// four query params. `shown` and `total` are kept apart on purpose: PB is
+/// asked for 200 rows and reports how many matched, so the page can say
+/// "showing 200 of 340" instead of silently ending at 200.
+pub struct IssuesVM {
+  // Header cells, in the order the row cells below them are written.
+  pub cols: Slice<IssueColVM>,
+  pub rows: Slice<CardVM>,
+  pub shown: int,
+  pub total: int,
+  pub truncated: bool,
+  // The per-request row ceiling, named in the count when it bites.
+  pub limit: int,
+  // Filter chooser contents and the values currently selected.
+  pub states: Slice<StateOpt>,
+  pub members: Slice<string>,
+  pub label_names: Slice<string>,
+  pub state: string,
+  pub assignee: string,
+  pub label: string,
+  pub sort: string,
+  // URL with every filter dropped and the sort kept, for "Clear".
+  pub clear_href: string,
+  // A rejected query param, said out loud in the flash strip rather than
+  // served as a 500 or silently ignored.
+  pub error: string,
+}
+
+/// The /issues URL state: three filters plus the sort spec. Held together so
+/// a header link can rebuild the URL with only the sort changed.
+struct IssuesQuery {
+  state: string,
+  assignee: string,
+  label: string,
+  sort: string,
 }
 
 /// One connected browser: its scope ("board" or "issue:KEY-1") and the
@@ -262,6 +314,7 @@ pub fn run_server(port: int) -> Result<(), string> {
     PageVM { rail: shell, page: BoardVM { states: state_opts(), columns: [], .. } },
   )?
   let _ = render("issue-page", PageVM { rail: shell, page: IssueVM { .. } })?
+  let _ = render("issues-page", PageVM { rail: shell, page: IssuesVM { .. } })?
 
   // One PB subscription for everything. Issues are team-scoped at most —
   // never state-filtered: PB emits nothing when an update moves a record out
@@ -286,6 +339,12 @@ pub fn run_server(port: int) -> Result<(), string> {
     "GET /{$}",
     |w: http.ResponseWriter, r: Ref<http.Request>| {
       board_page(w, r, team_id, cfg.me)
+    },
+  )
+  http.HandleFunc(
+    "GET /issues",
+    |w: http.ResponseWriter, r: Ref<http.Request>| {
+      issues_page(w, r, team_id, cfg.me)
     },
   )
   http.HandleFunc(
@@ -418,6 +477,7 @@ fn card_vm(issue: models.Issue) -> CardVM {
     labels: label_vms(issue.expand.labels),
     emoji: issue.emoji,
     created: display.relative(issue.created),
+    updated: display.relative(issue.updated),
     snippet: snippet(issue.description),
   }
 }
@@ -670,6 +730,206 @@ fn issue_page(w: http.ResponseWriter, r: Ref<http.Request>, me: string) {
     page: issue_vm(issue, comments),
   }
   let html = match render("issue-page", vm) {
+    Ok(h) => h,
+    Err(e) => {
+      http.Error(w, e, 500)
+      return
+    },
+  }
+  w.Header().Set("Cache-Control", "no-store")
+  w.Header().Set("Content-Type", "text/html; charset=utf-8")
+  let _ = w.Write(html.bytes())
+}
+
+// ---------- /issues ----------
+
+/// Rebuild the /issues URL from its four parts. Filters and sort travel
+/// together, so a header link keeps the filters and "Clear" keeps the sort:
+/// the URL is the whole page state, and every link on the page is this
+/// function with one part changed.
+fn issues_href(q: IssuesQuery) -> string {
+  let mut parts: Slice<string> = []
+  if q.state != "" { parts = parts.append(f"state={url.QueryEscape(q.state)}") }
+  if q.assignee != "" {
+    parts = parts.append(f"assignee={url.QueryEscape(q.assignee)}")
+  }
+  if q.label != "" { parts = parts.append(f"label={url.QueryEscape(q.label)}") }
+  if q.sort != "" { parts = parts.append(f"sort={url.QueryEscape(q.sort)}") }
+  if parts.is_empty() { return "/issues" }
+  f"/issues?{strings.Join(parts, "&")}"
+}
+
+/// One column heading. `field` is the PB field the header sorts on, or "" for
+/// a column with nothing to sort by (title, labels, assignee — none of them
+/// are in query.sort_fields()). First click on a column sorts it descending;
+/// clicking the column that is already sorting flips it.
+fn issue_col(label: string, field: string, cls: string, q: IssuesQuery) -> IssueColVM {
+  if field == "" {
+    return IssueColVM { label, cls, .. }
+  }
+  let mut dir = ""
+  let mut next = f"-{field}"
+  if q.sort == field {
+    dir = "asc"
+  }
+  if q.sort == f"-{field}" {
+    dir = "desc"
+    next = field
+  }
+  let mut nq = q
+  nq.sort = next
+  IssueColVM { label, cls, dir, href: issues_href(nq) }
+}
+
+/// The eight columns, in the order issues.html writes the row cells.
+fn issue_cols(q: IssuesQuery) -> Slice<IssueColVM> {
+  [
+    issue_col("ID", "number", "c-id", q),
+    issue_col("Title", "", "c-title", q),
+    issue_col("State", "", "c-state", q),
+    issue_col("Priority", "priority", "c-prio", q),
+    issue_col("Labels", "", "c-labels", q),
+    issue_col("Assignee", "", "c-assignee", q),
+    issue_col("Created", "created", "c-age", q),
+    issue_col("Updated", "updated", "c-age", q),
+  ]
+}
+
+/// Rows per request. The same 200 the board and `lll issue list` use; the
+/// table shows the number rather than pretending it is the whole set.
+fn table_page_size() -> int {
+  200
+}
+
+/// One page of the issues table: at most `table_page_size()` rows plus PB's
+/// total for the same filter, so the count can be honest about the ceiling.
+fn fetch_issue_rows(
+  team_id: string,
+  state: string,
+  assignee_id: string,
+  label_id: string,
+  sort: string,
+) -> Result<models.IssueList, string> {
+  let mut path = f"/api/collections/issues/records?perPage={table_page_size()}&expand=team,assignee,labels&sort={url.QueryEscape(sort)}"
+  let filter = query.filter(team_id, state, assignee_id, "", label_id, "")
+  if filter != "" { path = f"{path}&filter={url.QueryEscape(filter)}" }
+  let body = pb.get(path)?
+  let mut issues = models.IssueList { .. }
+  if let Err(e) = json.Unmarshal(body.bytes(), &issues) {
+    return Err(f"decoding issues: {e}")
+  }
+  Ok(issues)
+}
+
+/// Every member's name, for the assignee chooser.
+fn fetch_member_names() -> Result<Slice<string>, string> {
+  let body = pb.get("/api/collections/members/records?perPage=200&sort=name")?
+  let mut result = models.MemberList { .. }
+  if let Err(e) = json.Unmarshal(body.bytes(), &result) {
+    return Err(f"decoding members: {e}")
+  }
+  Ok(result.items.map(|m| m.name))
+}
+
+/// Every label name, for the label chooser. Unfiltered by team on purpose:
+/// labels created without --team are workspace-wide, and resolve_label — the
+/// same lookup the filter itself goes through — does not scope by team either.
+fn fetch_label_names() -> Result<Slice<string>, string> {
+  let body = pb.get("/api/collections/labels/records?perPage=200&sort=name")?
+  let mut result = models.LabelList { .. }
+  if let Err(e) = json.Unmarshal(body.bytes(), &result) {
+    return Err(f"decoding labels: {e}")
+  }
+  Ok(result.items.map(|l| l.name))
+}
+
+/// The issues table: one sortable, filterable, bookmarkable list.
+///
+/// ZERO JavaScript. Column headers are <a href="?sort=-updated">, the filter
+/// chooser is a plain GET <form>, and both land back here as query params fed
+/// to query.sort() and query.filter(). So the URL is the entire page state:
+/// bookmarkable in a browser, and `curl '/issues?state=todo&sort=-priority'`
+/// gets an agent exactly what a person sees.
+///
+/// No SSE either. /events broadcasts ONE unfiltered #board fragment to every
+/// board-scoped client, so a server-filtered page that subscribed would be
+/// morphed into the full board on the next realtime event. A table whose
+/// state lives in its URL reloads honestly instead.
+///
+/// A rejected query param is said out loud in the flash strip and dropped,
+/// never served as a 500: a stale bookmark should still show issues.
+fn issues_page(w: http.ResponseWriter, r: Ref<http.Request>, team_id: string, me: string) {
+  let mut err = ""
+
+  let mut sort = query_param(r, "sort")
+  if sort == "" { sort = "-updated" }
+  if let Err(e) = query.sort(sort) {
+    err = e
+    sort = "-updated"
+  }
+
+  let mut state = query_param(r, "state")
+  if state != "" && query.states().find(|s| s == state).is_none() {
+    err = f"unknown state '{state}' (use one of: {strings.Join(query.states(), ", ")})"
+    state = ""
+  }
+
+  let mut assignee = query_param(r, "assignee")
+  let mut assignee_id = ""
+  if assignee != "" {
+    match resolve_member(assignee) {
+      Ok(m) => { assignee_id = m.id },
+      Err(e) => {
+        err = e
+        assignee = ""
+      },
+    }
+  }
+
+  let mut label = query_param(r, "label")
+  let mut label_id = ""
+  if label != "" {
+    match resolve_label(label) {
+      Ok(l) => { label_id = l.id },
+      Err(e) => {
+        err = e
+        label = ""
+      },
+    }
+  }
+
+  let q = IssuesQuery { state, assignee, label, sort }
+  let list = match fetch_issue_rows(team_id, state, assignee_id, label_id, sort) {
+    Ok(l) => l,
+    Err(e) => {
+      http.Error(w, e, 500)
+      return
+    },
+  }
+  // The choosers offer the whole workspace, not just what this filter
+  // matched: a filter you cannot widen out of is a dead end.
+  let members = fetch_member_names().unwrap_or([])
+  let label_names = fetch_label_names().unwrap_or([])
+
+  let rows = list.items.map(card_vm)
+  let vm = IssuesVM {
+    cols: issue_cols(q),
+    rows,
+    shown: rows.length(),
+    total: list.total_items,
+    truncated: rows.length() < list.total_items,
+    limit: table_page_size(),
+    states: state_opts(),
+    members,
+    label_names,
+    state,
+    assignee,
+    label,
+    sort,
+    clear_href: issues_href(IssuesQuery { sort, .. }),
+    error: err,
+  }
+  let html = match render("issues-page", PageVM { rail: rail_vm("issues", me), page: vm }) {
     Ok(h) => h,
     Err(e) => {
       http.Error(w, e, 500)
