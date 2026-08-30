@@ -74,8 +74,19 @@ except Exception: print("")')
     done
     [ -n "$id" ] || fail "seeding team $1: neither create nor lookup produced an id"
   else
-    curl -sf -X PATCH "$URL/api/collections/teams/records/$id" \
-      -H 'Content-Type: application/json' -d "{\"name\":\"$2\"}" >/dev/null
+    # The rename must actually stick before the suite moves on: on a loaded
+    # runner a swallowed PATCH failure left the boot's default name in place
+    # and 'team list has name' failed half a suite later (run 33340875034).
+    named=""
+    for _ in 1 2 3 4 5; do
+      curl -sf -X PATCH "$URL/api/collections/teams/records/$id" \
+        -H 'Content-Type: application/json' -d "{\"name\":\"$2\"}" >/dev/null
+      named=$(curl -sf "$URL/api/collections/teams/records/$id" \
+        | python3 -c 'import json,sys; print(json.load(sys.stdin)["name"])')
+      [ "$named" = "$2" ] && break
+      sleep 0.2
+    done
+    [ "$named" = "$2" ] || fail "seeding team $1: rename to '$2' never stuck (saw '$named')"
   fi
   printf '%s' "$id"
 }
