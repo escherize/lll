@@ -658,7 +658,7 @@ if command -v playwright-cli >/dev/null 2>&1; then
     || fail "playwright: enabling Create more"
   scoped=$(playwright-cli -s="$BROWSER_SESSION" eval \
     "() => { const s = document.querySelector('#ni-form select[name=assignee]'); if (s.options.length > 1) s.selectedIndex = 1; s.dispatchEvent(new Event('change', {bubbles: true})); return s.value }" \
-    | sed -n '/### Result/{n;p;}' | tr -d '\\')
+    | sed -n '/### Result/{n;p;}' | tr -d '\\' | tr -d '"')
   playwright-cli -s="$BROWSER_SESSION" fill "#ni-title" "Create more one" >/dev/null 2>&1 \
     || fail "playwright: typing the first Create-more title"
   first=$(ni_submit '"one":true,"navs":1')
