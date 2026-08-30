@@ -271,6 +271,7 @@ fn issue_page(w: http.ResponseWriter, r: Ref<http.Request>, team_id: string, me:
       return
     },
   }
+  if let Ok(Some(_)) = fetch_favorite(issue.id) { page.favorited = true }
   page.emojis = emoji_catalog()
   let vm = PageVM { rail: rail_vm("board", me, shell_team(team_id)), page }
   let html = match render("issue-page", vm) {
