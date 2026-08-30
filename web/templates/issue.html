@@ -29,7 +29,7 @@
     <!-- Title-edit state lives here, OUTSIDE #issue-detail (the SSE morph
          target): $edit_title / $title_draft survive every wholesale morph,
          and data-bind repopulates the re-created input from $title_draft. -->
-    <div class="issue-wrap" data-signals:edit_title="false" data-signals:title_draft="''">
+    <div class="issue-wrap" data-signals:edit_title="false" data-signals:title_draft="''" data-signals:emo_open="false" data-signals:emo_q="''">
       <div class="issue-scroll">
         {{template "issue-detail" .Page}}
         {{template "comments" .Page}}
@@ -39,6 +39,7 @@
           <button type="button" class="btn primary" data-on:click="@post('/comment', {contentType: 'form'})">Comment</button>
         </form>
       </div>
+      {{template "emoji-picker" .Page}}
     </div>
   </div>
 </div>
@@ -67,6 +68,13 @@
   {{range .Prios}}<option value="{{.Value}}"{{if eq .Value $.Prio}} selected{{end}}>{{.Label}}</option>
   {{end}}</select></form></span>
 </div>
+<!-- The picker's trigger, not the picker: the panel itself is rendered once
+     per page load OUTSIDE this fragment, so 241 candidates never ride an
+     issue-detail broadcast. This button only reflects the current marker and
+     toggles $emo_open, positioning the fixed panel under itself. -->
+<div class="prop"><span class="k">Emoji</span>
+  <span class="v"><button type="button" class="emo-trigger" aria-label="Set the issue emoji" title="Set the issue emoji" data-attr:aria-expanded="$emo_open ? 'true' : 'false'" data-on:click="if ($emo_open) { $emo_open = false } else { const r = el.getBoundingClientRect(), p = document.getElementById('emo-pop'); p.style.left = Math.max(8, Math.min(r.left, innerWidth - 252)) + 'px'; p.style.top = Math.max(8, Math.min(r.bottom + 6, innerHeight - 340)) + 'px'; $emo_q = ''; $emo_open = true }">{{if .Emoji}}<span class="emoji">{{.Emoji}}</span>{{else}}<span class="emo-blank">none</span>{{end}}</button></span>
+</div>
 <div class="prop"><span class="k">Assignee</span>
   <span class="v">{{if .Assignee}}{{template "avatar" .Avatar}} {{.Assignee}}{{else}}none{{end}}</span>
 </div>
@@ -78,6 +86,39 @@
 <div class="prop"><span class="k">Updated</span><span class="v">{{.Updated}}</span></div>
 </aside>
 {{end}}</article>{{end}}
+
+{{/* The emoji picker.
+
+     Rendered ONCE per page load and deliberately outside #issue-detail: the
+     catalogue is 241 candidates, and inside the morph boundary every issue
+     event would re-send all of them to every open copy of this page. Being
+     position:fixed, its place in the DOM costs nothing — the trigger measures
+     itself and drops the panel under itself, exactly as .card-pop escapes the
+     column's clipping.
+
+     Filtering is the board's card-search idiom, not a new one: each candidate
+     carries its search words in data-n and its own data-show, so typing
+     narrows the grid with no client-side loop (Datastar v1 has none) and no
+     round trip. One data-on:click on the grid delegates for all of them and
+     reads the glyph off the button's own text, which is what holds the
+     rendered markup to ~138 bytes a cell (33KB for the grid).
+
+     The picker's own chrome obeys the Drawn Icon Rule — sprite magnifier,
+     sprite close, sprite remove. Only the candidates are glyphs, which is the
+     one exception DESIGN.md carves out (the author's per-issue marker).
+
+     "Remove emoji" is the way back to none. Posting an empty `emoji` is the
+     same clear as `lll issue update --emoji ""`. */}}
+{{define "emoji-picker"}}<div id="emo-pop" class="emo-pop" role="dialog" aria-label="Choose an emoji" style="display:none" data-computed:emo_lc="$emo_q.trim().toLowerCase()" data-show="$emo_open" data-on:click__outside="!evt.target.closest('.emo-trigger') && ($emo_open = false)" data-on:keydown="evt.key === 'Escape' && ($emo_open = false)">
+<div class="emo-head">
+  <span class="emo-search"><svg width="14" height="14"><use href="#ic-search"/></svg><input type="text" placeholder="Search by name" autocomplete="off" aria-label="Search emoji by name" data-bind:emo_q data-effect="$emo_open && setTimeout(() => el.focus(), 0)"></span>
+  <button type="button" class="emo-x" aria-label="Close the emoji picker" title="Close" data-on:click="$emo_open = false"><svg width="14" height="14"><use href="#ic-close"/></svg></button>
+</div>
+<div class="emo-grid" data-on:click="evt.target.dataset.n && ($emo_open = false, @post('/emoji?key={{.Key}}&emoji=' + encodeURIComponent(evt.target.textContent)))">
+{{range .Emojis}}<button type="button" class="emo-cell" data-n="{{.Terms}}" data-show="!$emo_lc || el.dataset.n.includes($emo_lc)">{{.Glyph}}</button>
+{{end}}</div>
+<button type="button" class="emo-none" data-on:click="$emo_open = false; @post('/emoji?key={{.Key}}&emoji=')"><svg width="14" height="14"><use href="#ic-close"/></svg> Remove emoji</button>
+</div>{{end}}
 
 {{define "comments"}}<section id="comments" class="thread">
 <h2>Comments <span class="count">{{len .Comments}}</span></h2>

@@ -243,6 +243,11 @@ pub struct IssueVM {
   // Seeds the topbar star's $fav signal. Only the page handler sets it: the
   // star lives outside #issue-detail, so no broadcast re-renders it.
   pub favorited: bool,
+  // The emoji picker's candidates. Filled by issue_page ONLY, for the same
+  // reason as `favorited`: the picker panel is rendered once per page load,
+  // outside #issue-detail, so keeping the catalogue out of issue_vm keeps
+  // 241 candidates out of every issue-detail broadcast.
+  pub emojis: Slice<EmojiOpt>,
 }
 
 /// One column heading in the /issues table. `href` empty means the column has
@@ -552,6 +557,7 @@ pub fn run_server(port: int) -> Result<(), string> {
   )
   http.HandleFunc("POST /favorite", favorite_action)
   http.HandleFunc("POST /priority", priority_action)
+  http.HandleFunc("POST /emoji", emoji_action)
   http.HandleFunc("POST /title", title_action)
   http.HandleFunc("POST /comment", comment_action)
   // The embedded tree keeps its repo paths, so "/static/theme.css" resolves to
@@ -858,6 +864,9 @@ fn issue_vm(issue: models.Issue, comments: Slice<models.Comment>) -> IssueVM {
     // Left false here on purpose: only issue_page knows, and only it renders
     // the star. Broadcasts of #issue-detail must not carry a stale answer.
     favorited: false,
+    // Left empty for the same reason: the picker is page-only, so a
+    // broadcast of this fragment carries no catalogue.
+    emojis: [],
   }
 }
 
@@ -1126,6 +1135,7 @@ fn issue_page(w: http.ResponseWriter, r: Ref<http.Request>, team_id: string, me:
   // current — which also makes the rail byte-identical to the board's.
   let mut page = issue_vm(issue, comments)
   if let Ok(Some(_)) = fetch_favorite(issue.id) { page.favorited = true }
+  page.emojis = emoji_catalog()
   let vm = PageVM { rail: rail_vm("board", me, shell_team(team_id)), page }
   let html = match render("issue-page", vm) {
     Ok(h) => h,
@@ -2159,6 +2169,45 @@ fn priority_action(w: http.ResponseWriter, r: Ref<http.Request>) {
     },
   }
   let payload = "{\"priority\":" + strconv.Itoa(prio) + "}"
+  if let Err(e) = pb.patch(
+    f"/api/collections/issues/records/{issue.id}",
+    payload,
+  ) {
+    flash_error(w, e)
+    return
+  }
+  flash_clear(w)
+}
+
+/// Set or clear the issue's marker from the web picker.
+///
+/// An empty `emoji` is the way back to "none" — a picker with no way to
+/// unset would be a one-way trap — so this keys off the parameter being
+/// present, exactly as `lll issue update --emoji ""` keys off the flag.
+/// Validation is the CLI's `check_emoji`: the picker only ever posts one of
+/// its own candidates, but the endpoint is curl-able like every other.
+fn emoji_action(w: http.ResponseWriter, r: Ref<http.Request>) {
+  let key = r.FormValue("key")
+  let Ok(emoji) = check_emoji(r.FormValue("emoji")) else {
+    flash_error(w, "an issue takes one emoji, or none")
+    return
+  }
+  let issue = match fetch_issue(key) {
+    Ok(i) => i,
+    Err(e) => {
+      flash_error(w, e)
+      return
+    },
+  }
+  // Marshal the glyph so a multi-rune sequence stays valid JSON.
+  let quoted = match json.Marshal(emoji) {
+    Ok(q) => q,
+    Err(e) => {
+      flash_error(w, f"encoding emoji: {e}")
+      return
+    },
+  }
+  let payload = "{\"emoji\":" + (quoted as string) + "}"
   if let Err(e) = pb.patch(
     f"/api/collections/issues/records/{issue.id}",
     payload,
