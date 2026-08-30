@@ -11,7 +11,9 @@
 # when playwright-cli is available — a real-browser check that a CLI-created
 # issue appears on an open board without reload, and the zero-JavaScript
 # /issues table (server-side sort and filter through query params, honest row
-# count, bad params degrading to the flash strip).
+# count, bad params degrading to the flash strip), and /search filtering as it
+# is typed (results patched in with no page load, the address bar following
+# the query, the X clearing both).
 # Standalone (boots its own PB), also invoked by e2e.sh.
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -243,6 +245,23 @@ assert_contains "$empty" "No issue title matches" "an empty result says so"
 assert_not_contains "$empty" "ENG-1" "an empty result lists nothing"
 assert_contains "$(curl -sf "$WEB/search")" 'class="search-bar"' \
   "/search with no query still renders the field"
+
+# Typing (task-110) asks the SAME handler for the results fragment alone, as
+# one datastar-patch-elements event, so the list on screen and the list that
+# URL serves are rendered from one q by one code path.
+assert_contains "$search" "data-bind:q" "the field binds the query to a signal"
+assert_contains "$search" 'class="search-clear" href="/search"' \
+  "the field carries an X back to the empty page"
+frag=$(curl -sf "$WEB/search?fragment=1&q=Already")
+assert_contains "$frag" "event: datastar-patch-elements" \
+  "the live fragment is a datastar patch"
+assert_contains "$frag" 'id="search-results"' \
+  "the live fragment patches the results by id"
+assert_contains "$frag" "ENG-2" "the live fragment carries the match"
+assert_not_contains "$frag" "ENG-1" "the live fragment omits non-matching issues"
+assert_not_contains "$frag" 'class="rail"' "the live fragment is not a whole page"
+assert_contains "$(curl -sf "$WEB/search?fragment=1")" "Searches every issue" \
+  "the live fragment with an empty query is the empty state"
 
 # --- actions persist to PB and show via the CLI ---
 out=$(curl -s -w '\n%{http_code}' -X POST \
@@ -512,8 +531,55 @@ if command -v playwright-cli >/dev/null 2>&1; then
   seq_goto "$WEB/"
   assert_contains "$(seq_probe)" '"chips":1' "task-109: a hand-set chip survives a My issues detour"
 
+  # --- /search filters as you type, and the X clears it (task-110) ---
+  # A SEQUENCE, not an end state: the probe on <body> survives a fragment
+  # morph and dies in a page load, so it is what tells "typed and the list
+  # was patched" apart from "the form submitted and the page came back".
+  #
+  # Polled, not slept: the patch lands on the browser's schedule, and a fixed
+  # sleep is how a green suite turns red on a loaded machine. The poll only
+  # decides WHEN to look; the assertions below still judge what it saw.
+  page_state() { # js -> the eval's result line
+    playwright-cli -s="$BROWSER_SESSION" eval "$1" \
+      | sed -n '/### Result/{n;p;}' | tr -d '\\'
+  }
+  page_until() { # js needle
+    local out=""
+    for _ in $(seq 1 40); do
+      out=$(page_state "$1")
+      case "$out" in *"$2"*) break ;; esac
+      sleep 0.25
+    done
+    printf '%s' "$out"
+  }
+  playwright-cli -s="$BROWSER_SESSION" goto "$WEB/search" >/dev/null 2>&1 \
+    || fail "playwright: opening /search"
+  playwright-cli -s="$BROWSER_SESSION" eval \
+    "() => { document.body.dataset.probe = 'kept'; return 'ok' }" >/dev/null 2>&1
+  playwright-cli -s="$BROWSER_SESSION" type "Already" >/dev/null 2>&1 \
+    || fail "playwright: typing in the search field"
+  typed=$(page_until \
+    "() => JSON.stringify({url: location.pathname + location.search, doc: document.body.dataset.probe || 'RELOADED', rows: [...document.querySelectorAll('.sr-title')].map(e => e.textContent), x: getComputedStyle(document.querySelector('.search-clear')).display})" \
+    "Already in progress")
+  assert_contains "$typed" "Already in progress" "browser: typing filtered without Enter"
+  assert_not_contains "$typed" "Web board issue" "browser: non-matching issues stay out of the list"
+  assert_contains "$typed" '"doc":"kept"' "browser: typing patched the results, it did not reload"
+  assert_contains "$typed" '"url":"/search?q=Already"' "browser: the address bar carries what was typed"
+  assert_not_contains "$typed" '"x":"none"' "browser: the clear X shows once there is a query"
+  # The X is a link to the empty page, so this navigation IS the behaviour:
+  # it empties the field and puts the URL back to a bare /search.
+  playwright-cli -s="$BROWSER_SESSION" click ".search-clear" >/dev/null 2>&1 \
+    || fail "playwright: clicking the clear X"
+  cleared=$(page_until \
+    "() => JSON.stringify({url: location.pathname + location.search, field: document.querySelector('.search-bar input').value, rows: document.querySelectorAll('.sr-title').length, note: document.querySelector('.search-note').textContent})" \
+    '"field":""')
+  assert_contains "$cleared" '"url":"/search"' "browser: the X returns to the bare /search URL"
+  assert_contains "$cleared" '"field":""' "browser: the X empties the field"
+  assert_contains "$cleared" '"rows":0' "browser: the X clears the results"
+  assert_contains "$cleared" "Searches every issue in the team" "browser: the X returns the empty state"
   playwright-cli -s="$BROWSER_SESSION" close >/dev/null 2>&1 || true
   echo "e2e_web: browser-level realtime check passed"
+  echo "e2e_web: browser-level /search live-typing check passed"
 else
   echo "e2e_web: playwright-cli not found — skipped browser-level check" >&2
 fi
