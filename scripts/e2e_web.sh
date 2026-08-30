@@ -1221,7 +1221,18 @@ for n in 1 2; do
   printf '%s' "$out" | tail -1 | grep -q 200 || fail "/create number $n of two back-to-back should return 200"
   assert_contains "$out" 'signals {"ni_open": false' "create number $n of two back-to-back closes the dialog"
 done
-"$LIN" issue list | grep -q "Create more curl 1" || fail "the first back-to-back create wrote nothing"
-"$LIN" issue list | grep -q "Create more curl 2" || fail "the second back-to-back create wrote nothing"
+# Assert against the PB records API — the write's source of truth — not a
+# CLI rendering pass; poll briefly so a loaded runner cannot read stale.
+back_to_back_written() { # n --- the record exists in PocketBase
+  for _ in 1 2 3 4 5; do
+    curl -sf --get "$LLL_URL/api/collections/issues/records" \
+      --data-urlencode "filter=title='Create more curl $1'" \
+      --data-urlencode "perPage=1" | jq -e '.items | length == 1' >/dev/null && return 0
+    sleep 0.5
+  done
+  return 1
+}
+back_to_back_written 1 || fail "the first back-to-back create wrote nothing"
+back_to_back_written 2 || fail "the second back-to-back create wrote nothing"
 
 echo "e2e_web: all assertions passed"
