@@ -3,13 +3,33 @@ import "go:strings"
 import "query"
 
 #[test]
-fn issues_href_omits_empty_parts_and_escapes_values() {
-  assert issues_href(IssuesQuery { .. }) == "/issues"
-  assert issues_href(IssuesQuery { sort: "-updated", .. }) == "/issues?sort=-updated"
-  assert issues_href(
-      IssuesQuery { state: "in-progress", assignee: "Ada L", sort: "created", .. },
+fn view_query_href_omits_empty_parts_and_escapes_values() {
+  assert view_query_href("/issues", ViewQuery { .. }) == "/issues"
+  assert view_query_href("/issues", ViewQuery { sort: "-updated", .. })
+    == "/issues?sort=-updated"
+  assert view_query_href(
+      "/issues",
+      ViewQuery { state: "in-progress", assignee: "Ada L", sort: "created", .. },
     )
     == "/issues?state=in-progress&assignee=Ada+L&sort=created"
+}
+
+#[test]
+fn the_board_and_the_table_share_one_encoding() {
+  // Same encoder, same param names, same fixed part order — the board only
+  // adds the dimensions /issues does not have (prio, hide).
+  assert view_query_href("/", ViewQuery { state: "todo", assignee: "bcm", .. })
+    == "/?state=todo&assignee=bcm"
+  assert view_query_href("/issues", ViewQuery { state: "todo", assignee: "bcm", .. })
+    == "/issues?state=todo&assignee=bcm"
+}
+
+#[test]
+fn several_values_in_one_dimension_are_comma_joined() {
+  assert view_query_string(ViewQuery { state: "todo,done", .. })
+    == "?state=todo%2Cdone"
+  assert view_query_string(ViewQuery { hide: "done,cancelled", .. })
+    == "?hide=done%2Ccancelled"
 }
 
 #[test]
@@ -18,7 +38,7 @@ fn a_header_link_changes_the_sort_and_keeps_the_filters() {
     "Created",
     "created",
     "c-age",
-    IssuesQuery { state: "todo", sort: "-updated", .. },
+    ViewQuery { state: "todo", sort: "-updated", .. },
   )
   assert col.href == "/issues?state=todo&sort=-created"
   assert col.dir == ""
@@ -30,28 +50,54 @@ fn clicking_the_sorting_column_flips_its_direction() {
     "Created",
     "created",
     "c-age",
-    IssuesQuery { sort: "-created", .. },
+    ViewQuery { sort: "-created", .. },
   )
   assert desc.dir == "desc"
   assert desc.href == "/issues?sort=created"
-  let asc = issue_col("Created", "created", "c-age", IssuesQuery { sort: "created", .. })
+  let asc = issue_col("Created", "created", "c-age", ViewQuery { sort: "created", .. })
   assert asc.dir == "asc"
   assert asc.href == "/issues?sort=-created"
 }
 
 #[test]
 fn a_column_with_no_pb_field_behind_it_does_not_sort() {
-  let col = issue_col("Title", "", "c-title", IssuesQuery { sort: "-updated", .. })
+  let col = issue_col("Title", "", "c-title", ViewQuery { sort: "-updated", .. })
   assert col.href == ""
   assert col.dir == ""
 }
 
 #[test]
 fn every_sortable_column_asks_for_a_field_query_sort_accepts() {
-  for col in issue_cols(IssuesQuery { sort: "-updated", .. }) {
+  for col in issue_cols(ViewQuery { sort: "-updated", .. }) {
     if col.href != "" {
       let spec = strings.Split(col.href, "sort=")[1]
       assert query.sort(spec).is_ok()
     }
   }
+}
+
+#[test]
+fn toggle_adds_and_removes_one_value_keeping_the_rest() {
+  let q = ViewQuery { state: "todo", label: "web", .. }
+  let added = view_query_toggle(q, "state", "done")
+  assert added.state == "todo,done"
+  assert added.label == "web"
+  let removed = view_query_toggle(added, "state", "todo")
+  assert removed.state == "done"
+  assert removed.label == "web"
+  // A value that is already there toggles OFF, so a chip removes itself.
+  assert view_query_toggle(removed, "state", "done").state == ""
+  // An unknown dimension is a no-op, not a second encoding.
+  assert view_query_toggle(q, "bogus", "x") == q
+}
+
+#[test]
+fn parse_raw_round_trips_through_the_encoder() {
+  let q = view_query_parse_raw("?state=todo&hide=done%2Ccancelled&junk=1").unwrap_or(ViewQuery { .. })
+  assert q.state == "todo"
+  assert q.hide == "done,cancelled"
+  // Unknown keys are ignored, not stored.
+  assert view_query_string(q) == "?state=todo&hide=done%2Ccancelled"
+  // A leading "?" is optional; "" is an empty view.
+  assert view_query_string(view_query_parse_raw("").unwrap_or(ViewQuery { .. })) == ""
 }

@@ -8,30 +8,20 @@ import "query"
 
 // GET /issues - the sortable, filterable table whose whole state is its URL.
 
-/// Rebuild the /issues URL from its four parts. Filters and sort travel
+/// Rebuild the /issues URL from its view state. Filters and sort travel
 /// together, so a header link keeps the filters and "Clear" keeps the sort:
-/// the URL is the whole page state, and every link on the page is this
-/// function with one part changed.
-fn issues_href(q: IssuesQuery) -> string {
-  let mut parts: Slice<string> = []
-  if q.state != "" { parts = parts.append(f"state={url.QueryEscape(q.state)}") }
-  if q.assignee != "" {
-    parts = parts.append(f"assignee={url.QueryEscape(q.assignee)}")
-  }
-  if q.label != "" { parts = parts.append(f"label={url.QueryEscape(q.label)}") }
-  if q.project != "" {
-    parts = parts.append(f"project={url.QueryEscape(q.project)}")
-  }
-  if q.sort != "" { parts = parts.append(f"sort={url.QueryEscape(q.sort)}") }
-  if parts.is_empty() { return "/issues" }
-  f"/issues?{strings.Join(parts, "&")}"
+/// the URL is the whole page state, and every link on the page is the shared
+/// encoder (serve_url.lis) with one part changed — the same encoder the
+/// board's chips are made of (TASK-94 AC#3).
+fn issues_href(q: ViewQuery) -> string {
+  view_query_href("/issues", q)
 }
 
 /// One column heading. `field` is the PB field the header sorts on, or "" for
 /// a column with nothing to sort by (title, labels, assignee — none of them
 /// are in query.sort_fields()). First click on a column sorts it descending;
 /// clicking the column that is already sorting flips it.
-fn issue_col(label: string, field: string, cls: string, q: IssuesQuery) -> IssueColVM {
+fn issue_col(label: string, field: string, cls: string, q: ViewQuery) -> IssueColVM {
   if field == "" {
     return IssueColVM { label, cls, .. }
   }
@@ -49,8 +39,9 @@ fn issue_col(label: string, field: string, cls: string, q: IssuesQuery) -> Issue
   IssueColVM { label, cls, dir, href: issues_href(nq) }
 }
 
+
 /// The eight columns, in the order issues.html writes the row cells.
-fn issue_cols(q: IssuesQuery) -> Slice<IssueColVM> {
+fn issue_cols(q: ViewQuery) -> Slice<IssueColVM> {
   [
     issue_col("ID", "number", "c-id", q),
     issue_col("Title", "", "c-title", q),
@@ -127,21 +118,22 @@ fn fetch_project_names() -> Result<Slice<string>, string> {
 /// never served as a 500: a stale bookmark should still show issues.
 fn issues_page(w: http.ResponseWriter, r: Ref<http.Request>, team_id: string, me: string) {
   let mut err = ""
+  let raw = view_query(r)
 
-  let mut sort = query_param(r, "sort")
+  let mut sort = raw.sort
   if sort == "" { sort = "-updated" }
   if let Err(e) = query.sort(sort) {
     err = e
     sort = "-updated"
   }
 
-  let mut state = query_param(r, "state")
+  let mut state = raw.state
   if state != "" && query.states().find(|s| s == state).is_none() {
     err = f"unknown state '{state}' (use one of: {strings.Join(query.states(), ", ")})"
     state = ""
   }
 
-  let mut assignee = query_param(r, "assignee")
+  let mut assignee = raw.assignee
   let mut assignee_id = ""
   if assignee != "" {
     match resolve_member(assignee) {
@@ -153,7 +145,7 @@ fn issues_page(w: http.ResponseWriter, r: Ref<http.Request>, team_id: string, me
     }
   }
 
-  let mut label = query_param(r, "label")
+  let mut label = raw.label
   let mut label_id = ""
   if label != "" {
     match resolve_label(label) {
@@ -165,7 +157,7 @@ fn issues_page(w: http.ResponseWriter, r: Ref<http.Request>, team_id: string, me
     }
   }
 
-  let mut project = query_param(r, "project")
+  let mut project = raw.project
   let mut project_id = ""
   if project != "" {
     match resolve_project(project) {
@@ -177,7 +169,7 @@ fn issues_page(w: http.ResponseWriter, r: Ref<http.Request>, team_id: string, me
     }
   }
 
-  let q = IssuesQuery { state, assignee, label, project, sort }
+  let q = ViewQuery { state, assignee, label, project, sort, .. }
   let list = match fetch_issue_rows(team_id, state, assignee_id, label_id, project_id, sort) {
     Ok(l) => l,
     Err(e) => {
@@ -208,7 +200,7 @@ fn issues_page(w: http.ResponseWriter, r: Ref<http.Request>, team_id: string, me
     label,
     project,
     sort,
-    clear_href: issues_href(IssuesQuery { sort, .. }),
+    clear_href: issues_href(ViewQuery { sort, .. }),
     error: err,
   }
   let html = match render("issues-page", PageVM { rail: rail_vm("issues", me, shell_team(team_id)), page: vm }) {

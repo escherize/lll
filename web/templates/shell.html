@@ -17,10 +17,11 @@
 <div class="workspace"><span class="mark">L</span> lll</div>
 <a href="/"{{if eq .Active "board"}} class="active"{{end}}><svg width="14" height="14"><use href="#ic-board"/></svg> Board</a>
 <a href="/issues"{{if eq .Active "issues"}} class="active"{{end}}><svg width="14" height="14"><use href="#ic-issues"/></svg> All issues</a>
-{{if .Me}}<a href="/?mine=1" title="Issues assigned to {{.Me}}"{{if eq .Active "mine"}} class="active"{{end}}><svg width="14" height="14"><use href="#ic-me"/></svg> My issues</a>
+{{if .Me}}<a href="/?assignee={{.Me}}" title="Issues assigned to {{.Me}}"{{if eq .Active "mine"}} class="active"{{end}}><svg width="14" height="14"><use href="#ic-me"/></svg> My issues</a>
 {{end}}<a href="/projects"{{if eq .Active "projects"}} class="active"{{end}}><svg width="14" height="14"><use href="#ic-project"/></svg> Projects</a>
 <a href="/search"{{if eq .Active "search"}} class="active"{{end}}><svg width="14" height="14"><use href="#ic-search"/></svg> Search</a>
 {{template "rail-favorites" .Favorites}}
+{{template "rail-views" .Views}}
 <a href="/settings"{{if eq .Active "settings"}} class="active"{{end}}><svg width="14" height="14"><use href="#ic-settings"/></svg> Settings</a>
 <div class="rail-foot">v{{.Version}}</div>
 </nav>{{end}}
@@ -49,4 +50,20 @@
 <p class="rg-note">Shared by everyone here</p>
 {{range .}}<a href="/issue/{{.Key}}" title="{{.Key}} · {{.Title}}">{{template "state-icon" .State}} <span class="rg-title">{{.Title}}</span></a>
 {{else}}<p class="rg-empty">Star an issue to pin it here for the whole workspace.</p>
+{{end}}</div>{{end}}
+
+{{/* The SAVED VIEWS group — the rail's second live region, with its own
+     morph boundary id so a views event patches this group alone (same
+     bargain as rail-favorites). Its dot is the Slice<ViewVM> the bridge
+     re-renders it from.
+
+     A view is a name plus the board query string it stands for (TASK-94):
+     clicking one navigates to the board at that URL, which is the whole
+     mechanism. Auth is deferred (task-32), so a view is workspace-wide and
+     the subtitle says so, exactly as favorites does. */}}
+{{define "rail-views"}}<div id="rail-views" class="rail-group">
+<h2>Saved views</h2>
+<p class="rg-note">Shared by everyone here</p>
+{{range .}}<a href="{{.Href}}" title="{{.Name}}"><svg width="14" height="14"><use href="#ic-board"/></svg> <span class="rg-title">{{.Name}}</span></a>
+{{else}}<p class="rg-empty">Use the board's "Save view" to pin a filtered board here for the whole workspace.</p>
 {{end}}</div>{{end}}

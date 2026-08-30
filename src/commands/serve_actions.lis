@@ -269,3 +269,32 @@ fn comment_write(r: Ref<http.Request>) -> Result<string, string> {
   let _ = pb.post("/api/collections/comments/records", payload)?
   Ok("")
 }
+
+/// Save the board's current view under a name (TASK-94, half two): one row
+/// in `views` holding the query string it stands for. The rail renders the
+/// row as the board URL that query string reproduces, so a saved view is a
+/// name plus a query string and nothing else.
+///
+/// The query is canonicalized through the shared encoder before it is
+/// stored — the form posts the board page's own rendering of the URL, but
+/// the endpoint is curl-able like every other, and a view must always be
+/// exactly the URL it will navigate to.
+fn views_save(r: Ref<http.Request>) -> Result<string, string> {
+  let name = strings.TrimSpace(r.PostFormValue("name"))
+  if name == "" { return Err("a view needs a name") }
+  if name.length() > 80 { return Err("view names are capped at 80 characters") }
+  let raw_q = view_query_parse_raw(r.PostFormValue("query"))?
+  let query_str = view_query_string(raw_q)
+  if query_str.length() > 500 { return Err("this view's query string is too long to save") }
+  // The unique index is the backstop; this pre-check is what makes the
+  // flash strip say something a human can read.
+  let mut existing = models.ViewList { .. }
+  pb.fetch("/api/collections/views/records?perPage=200", "views", &existing)?
+  if existing.items.any(|v| v.name == name) {
+    return Err(f"a view named '{name}' already exists")
+  }
+  // member stays empty: workspace-wide until auth (task-32) lands.
+  let payload = marshal(models.NewView { name, query: strings.TrimPrefix(query_str, "?"), .. })?
+  let _ = pb.post("/api/collections/views/records", payload)?
+  Ok("")
+}

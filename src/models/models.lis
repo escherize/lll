@@ -206,3 +206,28 @@ pub struct NewFavorite {
   #[json(omitempty)]
   pub member: string,
 }
+
+/// One saved view (TASK-94): a name plus the board query string it stands
+/// for. `member` is "" for every row written before auth (TASK-32) lands:
+/// a view is workspace-wide, not personal.
+#[json]
+pub struct View {
+  pub id: string,
+  pub name: string,
+  pub query: string,
+  pub member: string,
+  pub created: string,
+}
+
+#[json]
+pub struct ViewList {
+  pub items: Slice<View>,
+}
+
+#[json]
+pub struct NewView {
+  pub name: string,
+  pub query: string,
+  #[json(omitempty)]
+  pub member: string,
+}

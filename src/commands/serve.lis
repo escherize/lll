@@ -58,11 +58,11 @@ pub fn run_server(port: int) -> Result<(), string> {
     "team,assignee,labels,project",
   )?
   let comments_topic = realtime.topic_with_options("comments", "", "author")?
-  // Favorites drive the rail's FAVORITES group, which every page shows, so
-  // this topic is unfiltered too.
+  // Favorites and saved views drive their own rail groups, which every
+  // page shows, so these topics are unfiltered too.
   let events = realtime.subscribe(
     pb.base_url()?,
-    [issues_topic, comments_topic, "favorites"],
+    [issues_topic, comments_topic, "favorites", "views"],
   )?
 
   let hub = new_hub()
@@ -131,6 +131,7 @@ pub fn run_server(port: int) -> Result<(), string> {
   http.HandleFunc("POST /emoji", flashing(emoji_write))
   http.HandleFunc("POST /title", flashing(title_write))
   http.HandleFunc("POST /comment", flashing(comment_write))
+  http.HandleFunc("POST /views/save", flashing(views_save))
   // The embedded tree keeps its repo paths, so "/static/theme.css" resolves to
   // "static/theme.css" with no prefix surgery.
   http.Handle("GET /static/", http.FileServerFS(web.Assets()))
