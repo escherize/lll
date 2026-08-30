@@ -21,6 +21,9 @@
   --accent-hover: #f79b57;
   --accent-ink: #1a0f06;
   --accent-dim: rgba(240, 136, 62, 0.16);
+  /* The mark gradient's dark end. A token, not a literal, so a team accent
+     can carry the workspace mark with it (see "accent-head" in shell.html). */
+  --accent-deep: #c96a25;
   --st-backlog: #828994;
   --st-todo: #9299a2;
   --st-in-progress: #e0b13e;
@@ -75,7 +78,7 @@ html, body {
 .workspace .mark {
   width: 18px; height: 18px;
   border-radius: 5px;
-  background: linear-gradient(135deg, var(--accent) 0%, #c96a25 100%);
+  background: linear-gradient(135deg, var(--accent) 0%, var(--accent-deep) 100%);
   display: inline-flex; align-items: center; justify-content: center;
   color: var(--accent-ink);
   font-size: 10px; font-weight: 800;
@@ -394,6 +397,10 @@ input:focus, textarea:focus, select:focus {
   .props { border-left: none; border-top: 1px solid var(--border); border-bottom: 1px solid var(--border); padding: 16px; }
   .thread { margin: 0 16px; }
   .composer { margin: 14px 16px 20px; }
+  .set-scroll { padding: 16px 12px 24px; }
+  .set-row { flex-wrap: wrap; }
+  .set-field { flex-wrap: wrap; }
+  .set-hint { flex-basis: 100%; padding-left: 82px; }
 }
 
 /* ── hide columns + hidden-columns panel ─────── */
@@ -647,6 +654,100 @@ input:focus, textarea:focus, select:focus {
   display: -webkit-box;
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
+}
+
+/* ── Settings ──────────────────────────────────────────── */
+/* A reading column, not a board: issue-page page padding, prose measure on
+   the prose, and one raised row per record so a list of twenty labels still
+   scans. Every row is its own form; the only orange on the page is the one
+   Save that changes the whole workspace's colour, plus the focus rings. */
+.set-scroll { flex: 1; overflow-y: auto; padding: 28px 40px 40px; }
+.settings { max-width: 760px; }
+.set-lede { margin: 0 0 22px; max-width: 68ch; color: var(--text-2); }
+.set-sec { border-top: 1px solid var(--border); padding: 20px 0; }
+.set-sec:first-of-type { border-top: none; padding-top: 0; }
+.set-sec > h2 {
+  display: flex; align-items: center; gap: 7px;
+  margin: 0 0 10px;
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: -0.005em;
+}
+.set-note, .set-empty {
+  margin: 0 0 10px;
+  max-width: 68ch;
+  color: var(--text-3);
+  font-size: 12px;
+}
+.set-empty { margin: 0; }
+.set-lede code, .set-note code, .set-empty code, .set-hint code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+  color: var(--text-2);
+}
+
+.set-rows { display: flex; flex-direction: column; gap: 5px; }
+.set-row {
+  display: flex; align-items: center; gap: 8px;
+  background: var(--bg-raised);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 6px 8px;
+}
+.set-row input[name="name"] { flex: 1; min-width: 0; }
+.set-row .set-second { flex: 0 1 200px; min-width: 0; }
+.set-row select { flex: none; }
+/* The create row sits one rung down the ladder: it holds nothing yet. */
+.set-new { margin-top: 8px; background: var(--bg-panel); }
+/* Fixed width and right-aligned so "ENG" and "workspace" leave every row's
+   inputs and buttons on the same two vertical edges. */
+.set-scope {
+  flex: none;
+  min-width: 66px;
+  text-align: right;
+  color: var(--text-3);
+  font-size: 11.5px;
+  font-weight: 500;
+}
+.set-del {
+  flex: none;
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 26px; height: 26px;
+  padding: 0;
+  border: 1px solid transparent;
+  background: none;
+  border-radius: var(--radius);
+  color: var(--text-3);
+  cursor: pointer;
+}
+.set-del:hover { background: var(--bg-hover); border-color: var(--border-strong); color: var(--text); }
+/* The native colour well, trimmed to swatch size: its own chrome is the
+   browser's, so only the frame around it is ours. */
+.set-swatch {
+  flex: none;
+  width: 26px; height: 26px;
+  padding: 2px;
+  cursor: pointer;
+}
+
+.set-form { display: flex; flex-direction: column; align-items: flex-start; gap: 12px; }
+.set-field { display: flex; align-items: center; gap: 10px; }
+.set-field > label {
+  width: 72px;
+  flex: none;
+  color: var(--text-3);
+  font-size: 12px;
+}
+.set-field input[readonly] {
+  background: var(--bg);
+  color: var(--text-2);
+  cursor: default;
+}
+.set-hint {
+  max-width: 46ch;
+  color: var(--text-3);
+  font-size: 11.5px;
+  line-height: 1.4;
 }
 
 /* Board chrome is not prose: selecting it fights dragging and scanning.

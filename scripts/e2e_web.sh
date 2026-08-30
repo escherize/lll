@@ -551,4 +551,98 @@ assert_contains "$issues_rail" 'href="/issues"' "the rail has an All issues row"
 assert_contains "$board_rail" 'href="/issues"' "the board's rail has it too"
 assert_contains "$issues_rail" '<a href="/issues" class="active">' "the All issues row is current on its own page"
 assert_not_contains "$issues_rail" '<a href="/" class="active">' "and the board row is not"
+# --- /settings: server-side, shared, CLI-only things (task-83) ---
+# The id of the row a section rendered for a named record, so the assertions
+# below can edit and delete the record the page itself is showing.
+row_id() { # html kind name
+  printf '%s' "$1" | python3 -c '
+import re, sys
+html, kind, name = sys.stdin.read(), sys.argv[1], sys.argv[2]
+m = re.search(r"id=\"set-%s-([a-z0-9]+)\" data-name=\"%s\"" % (kind, re.escape(name)), html)
+print(m.group(1) if m else "")
+' "$2" "$3"
+}
+
+settings=$(curl -sf "$WEB/settings") || fail "/settings did not respond"
+assert_contains "$settings" 'id="settings"' "settings page has its morph target"
+assert_contains "$(rail "$settings")" 'href="/settings" class="active"' \
+  "the rail's Settings row is current on /settings"
+assert_contains "$settings" 'id="team-form"' "settings page edits the team"
+assert_contains "$settings" 'name="accent"' "settings page edits the team accent"
+# Per-browser state and unwritable config must not appear here.
+assert_not_contains "$settings" "Hidden columns" "settings does not duplicate the board's per-browser column state"
+assert_not_contains "$settings" "pb-dir" "settings does not offer config the running process cannot change"
+assert_not_contains "$settings" "$WEB" "settings does not offer the port it is served on"
+
+# Labels, members and projects are creatable and editable from the page.
+curl -sf -X POST "$WEB/settings/label" -d 'name=web-made' -d 'color=#4cb782' >/dev/null
+"$LIN" label list | grep -q '^web-made	#4cb782' || fail "creating a label from /settings did not reach PocketBase"
+LABEL_ID=$(row_id "$(curl -sf "$WEB/settings")" label web-made)
+[ -n "$LABEL_ID" ] || fail "/settings did not render the label it just created"
+curl -sf -X POST "$WEB/settings/label" -d "id=$LABEL_ID" -d 'name=web-renamed' -d 'color=#8d7ce6' >/dev/null
+"$LIN" label list | grep -q '^web-renamed	#8d7ce6' || fail "renaming and recoloring a label from /settings did not persist"
+curl -sf -X POST "$WEB/settings/label?del=1" -d "id=$LABEL_ID" >/dev/null
+"$LIN" label list | grep -q 'web-renamed' && fail "deleting a label from /settings did not persist" || true
+
+curl -sf -X POST "$WEB/settings/member" -d 'name=Web Member' -d 'email=web@example.com' >/dev/null
+"$LIN" member list | grep -q '^Web Member	web@example.com' || fail "creating a member from /settings did not persist"
+MEMBER_ID=$(row_id "$(curl -sf "$WEB/settings")" member "Web Member")
+curl -sf -X POST "$WEB/settings/member" -d "id=$MEMBER_ID" -d 'name=Web Member' -d 'email=moved@example.com' >/dev/null
+"$LIN" member list | grep -q '^Web Member	moved@example.com' || fail "editing a member from /settings did not persist"
+
+curl -sf -X POST "$WEB/settings/project" -d 'name=Web Project' -d 'status=planned' >/dev/null
+"$LIN" project list | grep -q '^Web Project	planned' || fail "creating a project from /settings did not persist"
+PROJECT_ID=$(row_id "$(curl -sf "$WEB/settings")" project "Web Project")
+curl -sf -X POST "$WEB/settings/project" -d "id=$PROJECT_ID" -d 'name=Web Project' -d 'status=started' >/dev/null
+"$LIN" project list | grep -q '^Web Project	started' || fail "changing a project status from /settings did not persist"
+
+# Validation speaks through the one flash strip, and writes nothing.
+assert_contains "$(curl -sf -X POST "$WEB/settings/label" -d 'name=   ')" \
+  'id="flash"' "an empty label name answers with the flash strip"
+assert_contains "$(curl -sf -X POST "$WEB/settings/label" -d 'name=x' -d 'color=nope')" \
+  'not a #rrggbb colour' "a malformed colour is refused"
+assert_contains "$(curl -sf -X POST "$WEB/settings/project" -d "id=$PROJECT_ID" -d 'name=Web Project' -d 'status=bogus')" \
+  "unknown project status" "an unknown project status is refused"
+"$LIN" label list | grep -q '^x	' && fail "a refused label write still created a record" || true
+
+# --- the team accent drives --accent and the favicon (task-83) ---
+# Nothing stored means DESIGN.md's canonical orange, so theme.css's own
+# tokens are left byte-identical: the injected rule is empty.
+assert_contains "$(curl -sf "$WEB/")" '<style id="accent"></style>' \
+  "an unset accent overrides nothing"
+assert_contains "$(curl -sf "$WEB/")" 'id="favicon"' "the board carries a generated favicon"
+
+curl -sf -X POST "$WEB/settings/team" -d 'name=Engineering' -d 'accent=#3ea0f0' >/dev/null
+for page in "/" "/issue/ENG-1" "/settings"; do
+  html=$(curl -sf "$WEB$page")
+  assert_contains "$html" '--accent:#3ea0f0' "$page wears the team accent"
+  # The whole family is derived from that one hex, so hover, ink, deep and
+  # dim move with it instead of staying orange.
+  assert_contains "$html" '--accent-hover:#55abf2' "$page derives the hover accent"
+  assert_contains "$html" '--accent-ink:#061018' "$page derives the ink accent"
+  assert_contains "$html" '--accent-dim:rgba(62,160,240,0.16)' "$page derives the dim accent"
+  assert_contains "$html" 'fill=%27%233ea0f0%27' "$page draws its favicon in the team accent"
+  assert_not_contains "$html" 'fill=%27%23f0883e%27' "$page's favicon is not the default orange"
+done
+
+# A save answers with the head fragment too, so an open page recolors without
+# a reload.
+saved=$(curl -sf -X POST "$WEB/settings/team" -d 'name=Engineering' -d 'accent=#3ea0f0')
+assert_contains "$saved" 'id="settings"' "a settings save patches the page body back"
+assert_contains "$saved" 'id="accent"' "a settings save patches the head's accent rule"
+
+# An unparseable stored accent falls back rather than emitting broken CSS.
+# The field's max of 7 already keeps a whole CSS rule from fitting, so this
+# writes the longest junk PocketBase will accept.
+TEAM_ID=$(curl -sf "$LLL_URL/api/collections/teams/records?filter=$(python3 -c "import urllib.parse;print(urllib.parse.quote(\"key='ENG'\"))")" | jq -r '.items[0].id')
+curl -sf -X PATCH "$LLL_URL/api/collections/teams/records/$TEAM_ID" \
+  -H 'Content-Type: application/json' -d '{"accent":"};z{a:b"}' >/dev/null
+assert_contains "$(curl -sf "$WEB/")" '<style id="accent"></style>' \
+  "an unparseable stored accent falls back to the canonical orange"
+
+# Choosing the canonical orange back stores nothing, so theme.css decides again.
+curl -sf -X POST "$WEB/settings/team" -d 'name=Engineering' -d 'accent=#f0883e' >/dev/null
+assert_contains "$(curl -sf "$WEB/")" '<style id="accent"></style>' \
+  "picking the default orange clears the stored accent"
+
 echo "e2e_web: all assertions passed"

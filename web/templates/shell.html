@@ -18,5 +18,16 @@
 <a href="/"{{if eq .Active "board"}} class="active"{{end}}><svg width="14" height="14"><use href="#ic-board"/></svg> Board</a>
 <a href="/issues"{{if eq .Active "issues"}} class="active"{{end}}><svg width="14" height="14"><use href="#ic-issues"/></svg> All issues</a>
 {{if .Me}}<a href="/?mine=1" title="Issues assigned to {{.Me}}"{{if eq .Active "mine"}} class="active"{{end}}><svg width="14" height="14"><use href="#ic-me"/></svg> My issues</a>
-{{end}}<div class="rail-foot">v{{.Version}}</div>
+{{end}}<a href="/settings"{{if eq .Active "settings"}} class="active"{{end}}><svg width="14" height="14"><use href="#ic-settings"/></svg> Settings</a>
+<div class="rail-foot">v{{.Version}}</div>
 </nav>{{end}}
+
+{{/* The shell's other half: what every page wears in its <head>.
+
+     The team's accent overrides theme.css's five accent tokens, and the same
+     colour draws the tab icon. Both carry ids because they sit OUTSIDE every
+     morph boundary but still have to change: /settings patches #accent and
+     #favicon in the response to its own save, so picking a colour recolors
+     the open page. An empty AccentCss means nobody chose one — the <style>
+     stays empty and theme.css's canonical orange is left byte-identical. */}}
+{{define "accent-head"}}<style id="accent">{{.AccentCss}}</style><link id="favicon" rel="icon" href="{{.Favicon}}">{{end}}
