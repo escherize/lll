@@ -26,7 +26,7 @@ mise run dev             # build, then PocketBase (:8090) + web board (:8100)
 `mise run dev` builds first and runs from the checkout root for you, from any
 subdirectory, because PocketBase reads `pb/pb_migrations/` and `pb/pb_hooks/`
 from disk. `web/templates/` and `web/static/` are compiled into the binary, so
-markup and CSS edits need a rebuild. Taken ports auto-increment; Ctrl-C stops
+markup and CSS edits need a rebuild (`mise run dev` does it for you). Taken ports auto-increment; Ctrl-C stops
 everything.
 
 Then, in another shell — with mise activated, `lll` anywhere under the
@@ -116,8 +116,8 @@ Layout:
   `config/`, `display/`, `gitctx/`, `models/`.
 - `pb/` — PocketBase schema as code: `pb_migrations/`, applied on start.
 - `gopb/` — tiny Go module embedding PocketBase behind one `Serve` function.
-- `web/` — `templates/` (html/template) and `static/` (plain CSS), read from
-  disk on every request: edit and refresh, no rebuild.
+- `web/` — `templates/` (html/template) and `static/` (plain CSS), compiled
+  into the binary via a `//go:embed` in `web/embed.go`: edits need a rebuild.
 
 ## Architecture
 
