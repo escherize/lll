@@ -33,11 +33,10 @@ jobs:
 
       # Install the mise binary only. The repo's mise.toml is untrusted in a
       # fresh checkout (hit locally in TASK-150), so the action must not read
-      # it (install/env off) — the next step trusts it first.
+      # it (install off) — the next step trusts it first.
       - uses: jdx/mise-action@v2
         with:
           install: false
-          env: false
 
       - name: Trust repo config
         run: mise trust
