@@ -491,7 +491,8 @@ fn create(args: Slice<string>) -> Result<(), string> {
 
 fn list(args: Slice<string>) -> Result<(), string> {
   let p = flags.parse(issue_list_spec(), args, 3, false, "")?
-  let state = check_state(p.one("--state"))?
+  let mut state = ""
+  if p.given("--state") { state = check_state(p.one("--state"))? }
   let assignee_name = p.one("--assignee")
   let label_name = p.one("--label")
   let project_name = p.one("--project")

@@ -9,6 +9,7 @@ import "models"
 import "pb"
 import "query"
 import "realtime"
+import "flags"
 
 // pub because serve.lis decodes the same event shapes; module-private
 // structs miscompile when their fields are read from another file.
@@ -27,71 +28,39 @@ pub struct CommentEvent {
 /// Dispatch `lll watch` — a live event stream for a query, one line per
 /// create/update/delete, filtered server-side with the same criteria as
 /// `lll issue list`. Runs until interrupted (Ctrl-C).
+fn watch_spec() -> Slice<flags.Flag> {
+  [
+    flags.Flag { name: "--state", value: true, hint: "s", help: "one of: backlog, todo, in-progress, in-review, done, cancelled", .. },
+    flags.Flag { name: "--assignee", value: true, hint: "name", help: "member name (see 'lll member list')", .. },
+    flags.Flag { name: "--label", value: true, hint: "name", help: "label name (see 'lll label list')", .. },
+    flags.Flag { name: "--project", value: true, hint: "name", help: "project name (see 'lll project list')", .. },
+    flags.Flag { name: "--search", value: true, hint: "q", help: "only issues whose title contains q", .. },
+    flags.Flag { name: "--json", help: "NDJSON: one raw PocketBase event object per line, with a\n\"topic\" field added", .. },
+    flags.Flag { name: "--help", alias: "-h", hidden: true, help: "show this help", .. },
+  ]
+}
+
+/// The flag table of the watch noun (one verbless stream); empty for other
+/// names. Read by `lll completions` so the scripts complete exactly what the
+/// parser accepts.
+pub fn watch_verb_spec(_verb: string) -> Slice<flags.Flag> {
+  watch_spec()
+}
+
 pub fn watch(args: Slice<string>) -> Result<(), string> {
-  let mut state = ""
-  let mut assignee_name = ""
-  let mut label_name = ""
-  let mut project_name = ""
-  let mut search = ""
-  let mut json_mode = false
-  let mut i = 2
-  while i < args.length() {
-    match args[i] {
-      "--assignee" => {
-        let Some(val) = args.get(i + 1) else {
-          return Err("--assignee requires a value")
-        }
-        assignee_name = val
-        i += 2
-      },
-      "--label" => {
-        let Some(val) = args.get(i + 1) else {
-          return Err("--label requires a value")
-        }
-        label_name = val
-        i += 2
-      },
-      "--project" => {
-        let Some(val) = args.get(i + 1) else {
-          return Err("--project requires a value")
-        }
-        project_name = val
-        i += 2
-      },
-      "--search" => {
-        let Some(val) = args.get(i + 1) else {
-          return Err("--search requires a value")
-        }
-        search = val
-        i += 2
-      },
-      "--state" => {
-        let Some(val) = args.get(i + 1) else {
-          return Err("--state requires a value")
-        }
-        if query.states().find(|s| s == val).is_none() {
-          return Err(
-            f"unknown state '{val}' (use one of: {strings.Join(query.states(), ", ")})",
-          )
-        }
-        state = val
-        i += 2
-      },
-      "--json" => {
-        json_mode = true
-        i += 1
-      },
-      "--help" => {
-        print_watch_usage()
-        return Ok(())
-      },
-      "-h" => {
-        print_watch_usage()
-        return Ok(())
-      },
-      other => return Err(f"unknown flag: '{other}'"),
-    }
+  let spec = watch_spec()
+  let p = flags.parse(spec, args, 2, false, flags.usage("lll watch", spec, ""))?
+  if p.given("--help") {
+    print_watch_usage()
+    return Ok(())
   }
+  let mut state = ""
+  if p.given("--state") { state = check_state(p.one("--state"))? }
+  let assignee_name = p.one("--assignee")
+  let label_name = p.one("--label")
+  let project_name = p.one("--project")
+  let search = p.one("--search")
+  let json_mode = p.given("--json")
 
   let cfg = config.load()?
 
@@ -176,8 +145,7 @@ fn print_watch_usage() {
     "lll watch - live event stream for a query
 
 Usage:
-  lll watch [--state s] [--assignee name] [--label name] [--project name]
-            [--search q] [--json]
+  " + flags.usage("lll watch", watch_spec(), "") + "
 
 Streams create/update/delete events for issues matching the criteria
 (filtered server-side; scoped to the configured team like 'lll issue list'),
@@ -192,15 +160,7 @@ diffing against the last event seen for that record; a record's first update
 prints as 'changed'. Note: an update that moves a record out of the filter
 (e.g. state todo -> done under --state todo) emits nothing — PocketBase only
 delivers events for records matching the filter after the change.
-
-Flags:
-  --state     one of: backlog, todo, in-progress, in-review, done, cancelled
-  --assignee  member name (see 'lll member list')
-  --label     label name (see 'lll label list')
-  --project   project name (see 'lll project list')
-  --search    only issues whose title contains q
-  --json      NDJSON: one raw PocketBase event object per line, with a
-              \"topic\" field added",
+" + flags.section(watch_spec())
   )
 }
 
@@ -208,23 +168,9 @@ Flags:
 /// and its comments. Runs until interrupted or the issue is deleted.
 pub fn issue_watch(args: Slice<string>) -> Result<(), string> {
   let usage = "lll issue watch [KEY-123] [--json]"
-  let mut id = ""
-  let mut json_mode = false
-  let mut i = 3
-  while i < args.length() {
-    match args[i] {
-      "--json" => {
-        json_mode = true
-        i += 1
-      },
-      other => {
-        if other.starts_with("-") { return Err(f"unknown flag: '{other}'") }
-        if id != "" { return Err(f"unexpected argument: '{other}'") }
-        id = other
-        i += 1
-      },
-    }
-  }
+  let p = flags.parse(issue_watch_spec(), args, 3, true, "")?
+  let id = p.first()
+  let json_mode = p.given("--json")
   let resolved = resolve_id(id, usage)?
   let issue = fetch_issue(resolved)?
   let key = f"{issue.expand.team.key}-{issue.number}"
