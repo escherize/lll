@@ -11,6 +11,29 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
+# A random port that is actually free. Binding proves it, unlike a liveness
+# probe: an occupied port makes a health poll succeed against a STRANGER's
+# server, and the suite then dies much later naming something unrelated.
+free_port() { # low high
+  python3 -c '
+import random, socket, sys
+lo, hi = int(sys.argv[1]), int(sys.argv[2])
+for _ in range(200):
+    p = random.randint(lo, hi)
+    s = socket.socket()
+    try:
+        s.bind(("127.0.0.1", p))
+    except OSError:
+        continue
+    finally:
+        s.close()
+    print(p)
+    sys.exit(0)
+sys.exit("no free port in range")
+' "$1" "$2"
+}
+
+
 
 DATA_DIR="$(mktemp -d)"
 
@@ -19,8 +42,8 @@ if [ -f .lll.toml ]; then
   mv .lll.toml "$DATA_DIR/.lll.toml.saved"
   RESTORE_TOML=1
 fi
-DB_PORT=$(( (RANDOM % 20000) + 20000 ))
-WEB_PORT=$(( (RANDOM % 20000) + 40000 ))
+DB_PORT=$(free_port 20000 39999)
+WEB_PORT=$(free_port 40000 59999)
 UP_LOG="$DATA_DIR/up.log"
 
 cleanup() {
