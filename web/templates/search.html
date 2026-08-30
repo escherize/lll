@@ -1,0 +1,55 @@
+{{define "search-page"}}<!DOCTYPE html>
+<html lang="en">
+{{/* A page's dot is a PageVM: `.Rail` is the shell, `.Page` this page's own
+     view model.
+
+     Search is a URL. The query lives in ?q=, so a result is shareable and an
+     agent can curl it — and that makes the page a plain GET form with no
+     Datastar, no signals and no /events connection. Nothing here subscribes
+     to the board scope, so the unfiltered #board broadcast has no way to
+     morph a server-filtered list back into the full board. */}}
+<head>
+<meta charset="utf-8">
+<title>{{if .Page.Q}}{{.Page.Q}} · {{end}}Search · lll</title>
+<link rel="stylesheet" href="/static/theme.css">
+</head>
+<body>
+{{template "icons"}}
+<div class="app">
+  {{template "rail" .Rail}}
+  <div class="main">
+    <header class="topbar">
+      <div class="crumbs"><a href="/">Board</a><span class="sep">›</span><span class="here">Search</span></div>
+    </header>
+    <form class="search-bar" action="/search" method="get" role="search">
+      <svg width="14" height="14" aria-hidden="true"><use href="#ic-search"/></svg>
+      <input name="q" type="text" value="{{.Page.Q}}" placeholder="Search every issue by title" aria-label="Search every issue by title" autocomplete="off" autofocus>
+    </form>
+    {{template "search-results" .Page}}
+  </div>
+</div>
+</body>
+</html>{{end}}
+
+{{define "search-results"}}<div id="search-results" class="search-body">
+{{if not .Q}}<p class="search-note">Searches every issue in the team, including the ones the board is not showing.</p>
+{{else if not .Results}}<p class="search-note">No issue title matches <b>{{.Q}}</b>.</p>
+{{else}}<p class="search-note"><span class="count">{{len .Results}}</span> matching <b>{{.Q}}</b>, most recently updated first</p>
+<ol class="results">
+{{range .Results}}<li>{{template "search-row" .}}</li>
+{{end}}</ol>
+{{end}}</div>{{end}}
+
+{{/* One result row: the card's data on one line, because a hit is scanned in
+     a list and not dragged in a column. */}}
+{{define "search-row"}}<a class="sr" id="result-{{.Id}}" href="/issue/{{.Key}}">
+<span class="sr-key">{{.Key}}</span>
+{{template "state-icon" .State}}
+<span class="sr-title">{{.Title}}</span>{{if .Emoji}}<span class="emoji">{{.Emoji}}</span>{{end}}
+{{range .Labels}}<span class="chip"><span class="dot" style="background:{{if .Color}}{{.Color}}{{else}}var(--text-3){{end}}"></span>{{.Name}}</span>{{end}}
+{{/* Priority, age and assignee sit in fixed-width slots that stay reserved
+     when the issue has none, so the right edge of the list is a column and
+     not a ragged margin. */}}<span class="sr-prio">{{template "priority-icon" .Prio}}</span>
+<span class="sr-age">{{.Created}}</span>
+<span class="sr-who">{{template "avatar" .Avatar}}</span>
+</a>{{end}}
