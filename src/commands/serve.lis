@@ -1477,10 +1477,16 @@ fn save_record(coll: string, id: string, value: Unknown) -> Result<(), string> {
 /// already rendered, this one asks PocketBase.
 ///
 /// The query is the URL, so a result is shareable and an agent can curl it.
-/// That also keeps the page a plain GET form with no Datastar and no /events
-/// subscription: issue_broadcast sends one unfiltered #board to every
-/// board-scoped client, and a server-filtered list must never be a client it
-/// can reach.
+/// `?fragment=1` asks the same handler for the #search-results fragment
+/// alone, as one datastar-patch-elements event: that is what the field's
+/// debounced @get calls on every keystroke, and the browser rewrites its
+/// address bar to the plain URL for the same q, so typing never separates
+/// what is on screen from what the URL serves.
+///
+/// The page still opens no /events subscription: issue_broadcast sends one
+/// unfiltered #board to every board-scoped client, and a server-filtered
+/// list must never be a client it can reach. A one-shot answer to the page's
+/// own request is not that.
 fn search_page(
   w: http.ResponseWriter,
   r: Ref<http.Request>,
@@ -1498,7 +1504,21 @@ fn search_page(
       },
     }
   }
-  let vm = PageVM { rail: rail_vm("search", me, shell_team(team_id)), page: SearchVM { q, results } }
+  let page = SearchVM { q, results }
+  if query_param(r, "fragment") == "1" {
+    let frag = match render("search-results", page) {
+      Ok(h) => h,
+      Err(e) => {
+        http.Error(w, e, 500)
+        return
+      },
+    }
+    w.Header().Set("Cache-Control", "no-store")
+    w.Header().Set("Content-Type", "text/event-stream")
+    let _ = w.Write(patch_event(frag).bytes())
+    return
+  }
+  let vm = PageVM { rail: rail_vm("search", me, shell_team(team_id)), page }
   let html = match render("search-page", vm) {
     Ok(h) => h,
     Err(e) => {
