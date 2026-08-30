@@ -76,6 +76,14 @@ fn member_add(args: Slice<string>) -> Result<(), string> {
   }
   if name == "" { return Err("usage: lll member add -n \"name\" [-e email]") }
 
+  let created = create_member(name, email)?
+  fmt.Println(f"Added member {created.name}")
+  Ok(())
+}
+
+/// Create a member. Names are unique server-side, so callers that may race
+/// or repeat check with find_member first.
+pub fn create_member(name: string, email: string) -> Result<models.Member, string> {
   let new_member = models.NewMember { name, email }
   let payload = match json.Marshal(new_member) {
     Ok(p) => p,
@@ -87,8 +95,7 @@ fn member_add(args: Slice<string>) -> Result<(), string> {
   if let Err(e) = json.Unmarshal(body.bytes(), &created) {
     return Err(f"decoding created member: {e}")
   }
-  fmt.Println(f"Added member {created.name}")
-  Ok(())
+  Ok(created)
 }
 
 /// Find a member by exact name, or None.

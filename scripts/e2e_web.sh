@@ -32,12 +32,16 @@ BROWSER_SESSION="e2e-web-$$"
 lis build >/dev/null
 LIN=target/.lisette/bin/lll
 
-"$LIN" up --no-open --pb-dir "$DATA_DIR/pb_data" --port "$WEB_PORT" \
+# USER is pinned: a first boot seeds a member named after it (task-31), and
+# the board assertions must not depend on who runs this suite.
+USER=e2e "$LIN" up --no-open --pb-dir "$DATA_DIR/pb_data" --port "$WEB_PORT" \
   </dev/null >"$PB_LOG" 2>&1 &
 PB_PID=$!
 SERVE_PID=""
 CURL_PID=""
 cleanup() {
+  # `lll up` writes one on a first boot; the developer's own goes back on top.
+  rm -f .lll.toml
   if [ "${RESTORE_TOML:-}" = 1 ] && [ -f "$DATA_DIR/.lll.toml.saved" ]; then
     mv "$DATA_DIR/.lll.toml.saved" .lll.toml
   fi
@@ -230,12 +234,16 @@ assert_contains "$out" "comment body is required" "empty comment message"
 
 # --- no team configured: up refuses rather than booting half-configured ---
 NOTEAM_PORT=$(( (RANDOM % 20000) + 40000 ))
+# The boot above legitimately wrote 'me' (task-31), so the invariant is that
+# the refusal changes nothing — not that the file is absent.
+TOML_BEFORE=$(cat .lll.toml 2>/dev/null || true)
 if out=$(env -u LLL_TEAM LLL_TEAM="" "$LIN" up --no-open --port "$NOTEAM_PORT" </dev/null 2>&1); then
   fail "lll up with no team should exit non-zero, got: $out"
 fi
 assert_contains "$out" "no team configured" "no-team boot refused"
 assert_contains "$out" "LLL_TEAM=ENG" "refusal suggests the existing team"
-[ -f .lll.toml ] && fail "refused boot must not write .lll.toml"
+[ "$(cat .lll.toml 2>/dev/null || true)" = "$TOML_BEFORE" ] \
+  || fail "refused boot wrote to .lll.toml: $(cat .lll.toml)"
 
 # --- /events: board scope gets a patch frame after a CLI-driven update ---
 EVENTS_FILE="$DATA_DIR/events.txt"
