@@ -1,4 +1,3 @@
-import "go:encoding/json"
 import "go:net/http"
 import "go:net/url"
 
@@ -88,10 +87,7 @@ fn project_tone(status: string) -> string {
 fn project_count(team_id: string, project_id: string) -> int {
   let filter = query.filter(team_id, "", "", project_id, "", "")
   let path = f"/api/collections/issues/records?perPage=1&fields=id&filter={url.QueryEscape(filter)}"
-  let Ok(body) = pb.get(path) else {
-    return 0
-  }
   let mut list = models.IssueList { .. }
-  if json.Unmarshal(body.bytes(), &list).is_err() { return 0 }
+  if pb.fetch(path, "issues", &list).is_err() { return 0 }
   list.total_items
 }

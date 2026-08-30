@@ -867,13 +867,12 @@ fn issue_url(issue: models.Issue) -> Result<string, string> {
 /// An issue's comments, oldest first, author expanded.
 fn fetch_comments(issue_id: string) -> Result<Slice<models.Comment>, string> {
   let filter = url.QueryEscape(f"issue='{issue_id}'")
-  let body = pb.get(
-    f"/api/collections/comments/records?filter={filter}&sort=created&expand=author&perPage=200",
-  )?
   let mut comments = models.CommentList { .. }
-  if let Err(e) = json.Unmarshal(body.bytes(), &comments) {
-    return Err(f"decoding comments: {e}")
-  }
+  pb.fetch(
+    f"/api/collections/comments/records?filter={filter}&sort=created&expand=author&perPage=200",
+    "comments",
+    &comments,
+  )?
   Ok(comments.items)
 }
 
@@ -982,13 +981,12 @@ fn fetch_issue_record(id: string) -> Result<string, string> {
   let filter = url.QueryEscape(
     f"{query.filter(team.id, "", "", "", "", "")} && number={number}",
   )
-  let body = pb.get(
-    f"/api/collections/issues/records?filter={filter}&perPage=1",
-  )?
   let mut issues = models.IssueList { .. }
-  if let Err(e) = json.Unmarshal(body.bytes(), &issues) {
-    return Err(f"decoding issues: {e}")
-  }
+  pb.fetch(
+    f"/api/collections/issues/records?filter={filter}&perPage=1",
+    "issues",
+    &issues,
+  )?
   let Some(item) = issues.items.get(0) else {
     return Err(not_found)
   }
@@ -1018,10 +1016,7 @@ fn json_quote(value: string) -> Result<string, string> {
 
 fn find_team(key: string) -> Result<Option<models.Team>, string> {
   let filter = url.QueryEscape(f"key='{key}'")
-  let body = pb.get(f"/api/collections/teams/records?filter={filter}")?
   let mut result = models.TeamList { .. }
-  if let Err(e) = json.Unmarshal(body.bytes(), &result) {
-    return Err(f"decoding teams: {e}")
-  }
+  pb.fetch(f"/api/collections/teams/records?filter={filter}", "teams", &result)?
   Ok(result.items.find(|t| t.key == key))
 }

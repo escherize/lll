@@ -191,11 +191,8 @@ fn reorder_sort(
 fn fetch_column_issues(team_id: string, state: string) -> Result<Slice<models.Issue>, string> {
   let filter = query.filter(team_id, state, "", "", "", "")
   let path = f"/api/collections/issues/records?perPage=200&sort=sort,created&filter={url.QueryEscape(filter)}"
-  let body = pb.get(path)?
   let mut issues = models.IssueList { .. }
-  if let Err(e) = json.Unmarshal(body.bytes(), &issues) {
-    return Err(f"decoding issues: {e}")
-  }
+  pb.fetch(path, "issues", &issues)?
   Ok(issues.items)
 }
 

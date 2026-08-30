@@ -1,4 +1,3 @@
-import "go:encoding/json"
 import "go:net/http"
 import "go:net/url"
 import "go:strings"
@@ -83,34 +82,25 @@ fn fetch_issue_rows(
   let mut path = f"/api/collections/issues/records?perPage={table_page_size()}&expand=team,assignee,labels&sort={url.QueryEscape(sort)}"
   let filter = query.filter(team_id, state, assignee_id, project_id, label_id, "")
   if filter != "" { path = f"{path}&filter={url.QueryEscape(filter)}" }
-  let body = pb.get(path)?
   let mut issues = models.IssueList { .. }
-  if let Err(e) = json.Unmarshal(body.bytes(), &issues) {
-    return Err(f"decoding issues: {e}")
-  }
+  pb.fetch(path, "issues", &issues)?
   Ok(issues)
 }
 
 /// Every member's name, for the assignee chooser.
 fn fetch_member_names() -> Result<Slice<string>, string> {
-  let body = pb.get("/api/collections/members/records?perPage=200&sort=name")?
-  let mut result = models.MemberList { .. }
-  if let Err(e) = json.Unmarshal(body.bytes(), &result) {
-    return Err(f"decoding members: {e}")
-  }
-  Ok(result.items.map(|m| m.name))
+  Ok(fetch_members()?.map(|m| m.name))
 }
 
 /// Every label name, for the label chooser. Unfiltered by team on purpose:
 /// labels created without --team are workspace-wide, and resolve_label — the
 /// same lookup the filter itself goes through — does not scope by team either.
+///
+/// Shares the settings page's request, which also asks for expand=team. The
+/// expand is wasted here, but one label query beats two that drift apart —
+/// the same trade fetch_project_names already makes.
 fn fetch_label_names() -> Result<Slice<string>, string> {
-  let body = pb.get("/api/collections/labels/records?perPage=200&sort=name")?
-  let mut result = models.LabelList { .. }
-  if let Err(e) = json.Unmarshal(body.bytes(), &result) {
-    return Err(f"decoding labels: {e}")
-  }
-  Ok(result.items.map(|l| l.name))
+  Ok(fetch_labels()?.map(|l| l.name))
 }
 
 /// Every project name, for the project chooser. Unscoped by team for the

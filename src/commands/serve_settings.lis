@@ -76,33 +76,28 @@ fn scope_label(key: string) -> string {
 }
 
 fn fetch_labels() -> Result<Slice<models.Label>, string> {
-  let body = pb.get(
-    "/api/collections/labels/records?perPage=200&sort=name&expand=team",
-  )?
   let mut list = models.LabelList { .. }
-  if let Err(e) = json.Unmarshal(body.bytes(), &list) {
-    return Err(f"decoding labels: {e}")
-  }
+  pb.fetch(
+    "/api/collections/labels/records?perPage=200&sort=name&expand=team",
+    "labels",
+    &list,
+  )?
   Ok(list.items)
 }
 
 fn fetch_members() -> Result<Slice<models.Member>, string> {
-  let body = pb.get("/api/collections/members/records?perPage=200&sort=name")?
   let mut list = models.MemberList { .. }
-  if let Err(e) = json.Unmarshal(body.bytes(), &list) {
-    return Err(f"decoding members: {e}")
-  }
+  pb.fetch("/api/collections/members/records?perPage=200&sort=name", "members", &list)?
   Ok(list.items)
 }
 
 fn fetch_projects() -> Result<Slice<models.Project>, string> {
-  let body = pb.get(
-    "/api/collections/projects/records?perPage=200&sort=name&expand=team",
-  )?
   let mut list = models.ProjectList { .. }
-  if let Err(e) = json.Unmarshal(body.bytes(), &list) {
-    return Err(f"decoding projects: {e}")
-  }
+  pb.fetch(
+    "/api/collections/projects/records?perPage=200&sort=name&expand=team",
+    "projects",
+    &list,
+  )?
   Ok(list.items)
 }
 

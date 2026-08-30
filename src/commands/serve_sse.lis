@@ -196,13 +196,12 @@ fn comment_broadcast(ev: realtime.Event, hub: Hub) {
   if json.Unmarshal(ev.data.bytes(), &event).is_err() { return }
   // Resolve the issue for the page scope; a comment whose issue is already
   // deleted has no page to update.
-  let Ok(body) = pb.get(
-    f"/api/collections/issues/records/{event.record.issue}?expand=team",
-  ) else {
-    return
-  }
   let mut issue = models.Issue { .. }
-  if json.Unmarshal(body.bytes(), &issue).is_err() { return }
+  if pb.fetch(
+    f"/api/collections/issues/records/{event.record.issue}?expand=team",
+    "issue",
+    &issue,
+  ).is_err() { return }
   let key = f"{issue.expand.team.key}-{issue.number}"
   let Ok(comments) = fetch_comments(issue.id) else {
     return

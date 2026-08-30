@@ -40,11 +40,12 @@ member that authors your comments.",
 }
 
 fn member_list() -> Result<(), string> {
-  let body = pb.get("/api/collections/members/records?perPage=200&sort=name")?
   let mut members = models.MemberList { .. }
-  if let Err(e) = json.Unmarshal(body.bytes(), &members) {
-    return Err(f"decoding members: {e}")
-  }
+  pb.fetch(
+    "/api/collections/members/records?perPage=200&sort=name",
+    "members",
+    &members,
+  )?
   for m in members.items {
     fmt.Println(f"{m.name}\t{m.email}")
   }
@@ -113,10 +114,7 @@ pub fn ensure_member(name: string) -> Result<bool, string> {
 
 fn find_member(name: string) -> Result<Option<models.Member>, string> {
   let filter = url.QueryEscape(f"name='{name}'")
-  let body = pb.get(f"/api/collections/members/records?filter={filter}")?
   let mut result = models.MemberList { .. }
-  if let Err(e) = json.Unmarshal(body.bytes(), &result) {
-    return Err(f"decoding members: {e}")
-  }
+  pb.fetch(f"/api/collections/members/records?filter={filter}", "members", &result)?
   Ok(result.items.find(|m| m.name == name))
 }

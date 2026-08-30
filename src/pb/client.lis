@@ -1,4 +1,5 @@
 import "go:bytes"
+import "go:encoding/json"
 import "go:io"
 import "go:net/http"
 
@@ -25,6 +26,22 @@ pub fn get(path: string) -> Result<string, string> {
     Err(e) => return Err(unreachable(base, e)),
   }
   read_body(resp, f"GET {path}")
+}
+
+/// GET a path and decode the JSON body into `out`, naming `what` in the
+/// decode error ("decoding issues: ...").
+///
+/// The out-parameter is forced, not chosen. Lisette 0.11.3 has generic
+/// functions, but a type parameter cannot be *constructed*: `T { .. }` inside
+/// a generic body fails to resolve. So the tidier `fetch<T>(path) ->
+/// Result<T, string>` is not expressible, and the caller declares the zero
+/// value it wants filled.
+pub fn fetch<T>(path: string, what: string, out: Ref<T>) -> Result<(), string> {
+  let body = get(path)?
+  if let Err(e) = json.Unmarshal(body.bytes(), out) {
+    return Err(f"decoding {what}: {e}")
+  }
+  Ok(())
 }
 
 /// POST a JSON payload to a path and return the response body.

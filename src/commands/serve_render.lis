@@ -1,5 +1,4 @@
 import "go:bytes"
-import "go:encoding/json"
 import "go:html/template"
 import "go:github.com/escherize/lll/web"
 import "go:net/url"
@@ -204,11 +203,8 @@ fn fetch_board_issues(team_id: string) -> Result<Slice<models.Issue>, string> {
   let mut path = "/api/collections/issues/records?perPage=200&expand=team,assignee,labels&sort=sort,created"
   let filter = query.filter(team_id, "", "", "", "", "")
   if filter != "" { path = f"{path}&filter={url.QueryEscape(filter)}" }
-  let body = pb.get(path)?
   let mut issues = models.IssueList { .. }
-  if let Err(e) = json.Unmarshal(body.bytes(), &issues) {
-    return Err(f"decoding issues: {e}")
-  }
+  pb.fetch(path, "issues", &issues)?
   Ok(issues.items)
 }
 
