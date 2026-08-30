@@ -731,6 +731,31 @@ if command -v fish >/dev/null; then
   fish -n "$DATA_DIR/comp.fish" || fail "fish completions do not parse"
 fi
 assert_contains "$(cat "$DATA_DIR/comp.fish")" "complete -c lll" "fish completions complete lll"
+
+# task-127: help, completions and the parser read ONE table, so the gate
+# enforces what used to be reviewed — a flag one surface knows, they all
+# know. `lll watch --help` is generated from the watch spec; the completions
+# entry for the verb-less watch noun reads the same table.
+comp_watch=$("$LIN" completions bash | grep -F "watch,*)" | head -1 | sed "s/.*words='//;s/'.*//")
+assert_contains "$comp_watch" "--state --assignee --label --project --search --json" \
+  "watch completions carry exactly the watch spec's flags"
+help_watch=$("$LIN" watch --help)
+for fl in '--state' '--assignee' '--label' '--project' '--search' '--json'; do
+  assert_contains "$help_watch" "$fl" "watch help lists $fl, as its completions entry does"
+done
+# The reverse direction: --emoji is in the parser and the completions, and
+# a flag in the completions entry but not the parser would make this error
+# impossible — the two are one table now, so assert both surfaces agree on
+# the flag that once drifted.
+assert_contains "$(cat "$DATA_DIR/comp.bash")" "issue,create) words='-t -d --description --emoji" \
+  "completions offer the parser's own issue create flags"
+set +e
+out=$("$LIN" issue create --bogus 2>&1)
+rc=$?
+set -e
+[ "$rc" -ne 0 ] || fail "issue create --bogus: expected nonzero exit"
+assert_contains "$out" "unknown flag: '--bogus'" "unknown flag names the flag"
+assert_contains "$out" "usage: lll issue create" "unknown flag error carries the generated usage line"
 set +e
 out=$("$LIN" completions powershell 2>&1)
 rc=$?

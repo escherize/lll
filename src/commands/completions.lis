@@ -1,6 +1,8 @@
 import "go:fmt"
 import "go:strings"
 
+import "flags"
+
 // `lll completions <shell>` — static completion scripts, all generated from
 // the one command table below (nouns, verbs per noun, flags per verb).
 
@@ -95,54 +97,27 @@ fn verbs(noun: string) -> Slice<string> {
   }
 }
 
-/// Flags for a noun-verb pair (long flags, plus -w where it is the point).
+/// Flags for a noun-verb pair, read from the verb's OWN flag table (the
+/// `*_verb_spec` accessors) through flags.tokens() — the same table the
+/// parser, help and completions read, so the three cannot drift (TASK-127).
+/// Every spelling is offered: completions teach what the parser accepts.
 fn verb_flags(noun: string, verb: string) -> Slice<string> {
-  match f"{noun} {verb}" {
-    "issue create" => ["-d", "--description", "--emoji", "--priority", "--assignee", "--label", "--project"],
-    "issue list" => [
-      "--state",
-      "--assignee",
-      "--label",
-      "--project",
-      "--search",
-      "--sort",
-      "--limit",
-      "--json",
-    ],
-    "issue view" => ["--json", "--raw", "-w"],
-    "issue update" => [
-      "--state",
-      "--emoji",
-      "--priority",
-      "--assignee",
-      "--label",
-      "--project",
-      "--title",
-      "--description",
-    ],
-    "issue delete" => ["--force"],
-    "issue watch" => ["--json"],
-    "project create" => ["--status", "--team"],
-    "label create" => ["--team"],
+  match noun {
+    "issue" => flags.tokens(issue_verb_spec(verb)),
+    "team" => flags.tokens(team_verb_spec(verb)),
+    "member" => flags.tokens(member_verb_spec(verb)),
+    "project" => flags.tokens(project_verb_spec(verb)),
+    "label" => flags.tokens(label_verb_spec(verb)),
+    "watch" => flags.tokens(watch_verb_spec(verb)),
+    "up" => flags.tokens(up_verb_spec("")),
+    "board" => flags.tokens(board_verb_spec(verb)),
     _ => [],
   }
 }
 
-/// Flags for verb-less nouns (watch, up, board).
+/// Flags for verb-less nouns: the noun itself is the verb.
 fn noun_flags(noun: string) -> Slice<string> {
-  match noun {
-    "watch" => [
-      "--state",
-      "--assignee",
-      "--label",
-      "--project",
-      "--search",
-      "--json",
-    ],
-    "up" => ["--port", "--pb-dir", "--no-open"],
-    "board" => ["-w"],
-    _ => [],
-  }
+  verb_flags(noun, "")
 }
 
 // --- emitters ---

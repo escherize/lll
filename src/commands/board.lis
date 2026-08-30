@@ -1,30 +1,30 @@
 import "go:fmt"
 import "go:os/exec"
 import "go:strings"
-
 import "config"
+import "flags"
 
 /// `lll board` — print the web board URL; `-w` opens it in the browser.
+fn board_spec() -> Slice<flags.Flag> {
+  [
+    flags.Flag { name: "-w", help: "open the board in the browser", .. },
+    flags.Flag { name: "--help", alias: "-h", hidden: true, help: "show this help", .. },
+  ]
+}
+
+/// The flag table of the board verb; read by `lll completions`.
+pub fn board_verb_spec(_verb: string) -> Slice<flags.Flag> {
+  board_spec()
+}
+
 pub fn board(args: Slice<string>) -> Result<(), string> {
-  let mut open = false
-  let mut i = 2
-  while i < args.length() {
-    match args[i] {
-      "-w" => {
-        open = true
-        i += 1
-      },
-      "--help" => {
-        print_board_usage()
-        return Ok(())
-      },
-      "-h" => {
-        print_board_usage()
-        return Ok(())
-      },
-      other => return Err(f"unknown flag: '{other}'"),
-    }
+  let spec = board_spec()
+  let p = flags.parse(spec, args, 2, false, "")?
+  if p.given("--help") {
+    print_board_usage()
+    return Ok(())
   }
+  let open = p.given("-w")
   let base = web_base()?
   if open {
     fmt.Println(f"Opening {base}")
