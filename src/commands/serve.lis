@@ -117,6 +117,14 @@ pub struct BoardVM {
   pub flt_seed: template.JS,
 }
 
+/// View model for the search page. `q` echoes back the URL's query so the
+/// field stays filled and the page reloads to itself; `results` is what the
+/// DATABASE returned for it, never what the board happened to be holding.
+pub struct SearchVM {
+  pub q: string,
+  pub results: Slice<CardVM>,
+}
+
 /// View model for the app shell's left rail.
 ///
 /// Shell data lives here and nowhere else. The SSE bridge broadcasts
@@ -126,6 +134,7 @@ pub struct BoardVM {
 /// halves into a PageVM instead; a fragment cannot carry shell by accident.
 pub struct RailVM {
   // Which row reads as current: "board", "mine", "issues" or "settings".
+  // Which row reads as current: "board", "mine" or "search".
   pub active: string,
   // Config's `me`. Empty means there is no member to be, so no "My issues"
   // row — a rail link that leads nowhere is worse than no rail link.
@@ -394,6 +403,7 @@ pub fn run_server(port: int) -> Result<(), string> {
   let _ = render("issue-page", PageVM { rail: shell, page: IssueVM { .. } })?
   let _ = render("issues-page", PageVM { rail: shell, page: IssuesVM { .. } })?
   let _ = render("settings-page", PageVM { rail: shell, page: SettingsVM { .. } })?
+  let _ = render("search-page", PageVM { rail: shell, page: SearchVM { .. } })?
 
   // One PB subscription for everything. Issues are team-scoped at most —
   // never state-filtered: PB emits nothing when an update moves a record out
@@ -444,6 +454,12 @@ pub fn run_server(port: int) -> Result<(), string> {
     "POST /settings/{kind}",
     |w: http.ResponseWriter, r: Ref<http.Request>| {
       settings_action(w, r, team_id, cfg.me)
+    },
+  )
+  http.HandleFunc(
+    "GET /search",
+    |w: http.ResponseWriter, r: Ref<http.Request>| {
+      search_page(w, r, team_id, cfg.me)
     },
   )
   http.HandleFunc(
@@ -1454,6 +1470,62 @@ fn save_record(coll: string, id: string, value: Unknown) -> Result<(), string> {
     let _ = pb.patch(f"/api/collections/{coll}/records/{id}", payload)?
   }
   Ok(())
+}
+
+/// GET /search?q=… — a search over every issue in the team, which is the
+/// whole difference from the board's search box: that one filters the cards
+/// already rendered, this one asks PocketBase.
+///
+/// The query is the URL, so a result is shareable and an agent can curl it.
+/// That also keeps the page a plain GET form with no Datastar and no /events
+/// subscription: issue_broadcast sends one unfiltered #board to every
+/// board-scoped client, and a server-filtered list must never be a client it
+/// can reach.
+fn search_page(
+  w: http.ResponseWriter,
+  r: Ref<http.Request>,
+  team_id: string,
+  me: string,
+) {
+  let q = strings.TrimSpace(query_param(r, "q"))
+  let mut results: Slice<CardVM> = []
+  if q != "" {
+    match fetch_search_issues(team_id, q) {
+      Ok(issues) => results = issues.map(card_vm),
+      Err(e) => {
+        http.Error(w, e, 500)
+        return
+      },
+    }
+  }
+  let vm = PageVM { rail: rail_vm("search", me, shell_team(team_id)), page: SearchVM { q, results } }
+  let html = match render("search-page", vm) {
+    Ok(h) => h,
+    Err(e) => {
+      http.Error(w, e, 500)
+      return
+    },
+  }
+  w.Header().Set("Cache-Control", "no-store")
+  w.Header().Set("Content-Type", "text/html; charset=utf-8")
+  let _ = w.Write(html.bytes())
+}
+
+/// Issues matching `q`, most recently touched first. The filter is the same
+/// clause `lll issue list --search` builds, so the page and the CLI agree on
+/// what "matches" means instead of each having its own idea of search.
+fn fetch_search_issues(
+  team_id: string,
+  q: string,
+) -> Result<Slice<models.Issue>, string> {
+  let filter = query.filter(team_id, "", "", "", "", q)
+  let path = f"/api/collections/issues/records?perPage=200&expand=team,assignee,labels&sort=-updated&filter={url.QueryEscape(filter)}"
+  let body = pb.get(path)?
+  let mut issues = models.IssueList { .. }
+  if let Err(e) = json.Unmarshal(body.bytes(), &issues) {
+    return Err(f"decoding issues: {e}")
+  }
+  Ok(issues.items)
 }
 
 // ---------- /events ----------

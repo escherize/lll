@@ -214,6 +214,27 @@ assert_contains "$mine" 'data-signals:flt="[&#34;assignee:e2e&#34;]"' \
   "?mine=1 seeds the assignee filter chip"
 assert_contains "$(column "$mine" todo)" "ENG-1" "?mine=1 leaves the board fragment unfiltered"
 
+# --- /search: server-side search over the database (task-85) ---
+# The board's box filters the cards already rendered; this asks PocketBase.
+# The query lives in the URL, so a result is shareable and curl-able.
+search=$(curl -sf "$WEB/search?q=Already")
+assert_contains "$search" "ENG-2" "search finds the matching issue"
+assert_contains "$search" "Already in progress" "search result carries the title"
+# The proof that this is not the board's client-side filter: a non-matching
+# issue is ABSENT from the markup, not shipped and hidden with CSS.
+assert_not_contains "$search" "ENG-1" "search omits non-matching issues from the markup"
+assert_not_contains "$search" 'id="board"' "search results are not the board fragment"
+assert_not_contains "$search" "/events" "the search page opens no SSE stream to be morphed by"
+assert_contains "$search" 'value="Already"' "the query round-trips into the field"
+assert_contains "$board_rail" 'href="/search"' "rail has a Search row"
+assert_contains "$(rail "$search")" 'href="/search" class="active"' \
+  "the search page marks its own rail row current"
+empty=$(curl -sf "$WEB/search?q=zzzznope")
+assert_contains "$empty" "No issue title matches" "an empty result says so"
+assert_not_contains "$empty" "ENG-1" "an empty result lists nothing"
+assert_contains "$(curl -sf "$WEB/search")" 'class="search-bar"' \
+  "/search with no query still renders the field"
+
 # --- actions persist to PB and show via the CLI ---
 out=$(curl -s -w '\n%{http_code}' -X POST \
   -d "title=Created from the board&state=todo" "$WEB/create")

@@ -86,12 +86,15 @@ Issue IDs resolve: explicit arg, else the current git branch
 
 ## Web board
 
-Server-rendered board at `/`, issue pages at `/issue/KEY-123`.
+Server-rendered board at `/`, issue pages at `/issue/KEY-123`, search at
+`/search?q=…`.
 
 - Realtime: changes from the CLI, other browsers, or the board itself appear
   everywhere without reload, over one SSE connection per page.
 - Drag-and-drop between state columns and reorder within them.
 - Live search, filter chips (assignee/label/priority/state), hideable columns.
+- `/search?q=…` searches the database, not the rendered board, so the query is
+  a shareable URL and `curl` gets the same answer the browser does.
 - Issue pages: inline field editing, markdown comments.
 
 ## Development
