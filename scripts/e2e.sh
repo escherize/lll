@@ -58,8 +58,21 @@ seed_team() { # key name -> prints the record id
   id=$(curl -sf "$URL/api/collections/teams/records?filter=$q" \
        | python3 -c 'import json,sys; it=json.load(sys.stdin)["items"]; print(it[0]["id"] if it else "")')
   if [ -z "$id" ]; then
+    # `lll up` seeds the configured team itself, concurrently. Losing that race
+    # means a 400 on the unique key, which curl -sf swallows into an empty body
+    # and json_id then chokes on. Whoever won, look it up again.
     id=$(curl -sf -X POST "$URL/api/collections/teams/records" \
-      -H 'Content-Type: application/json' -d "{\"key\":\"$1\",\"name\":\"$2\"}" | json_id)
+      -H 'Content-Type: application/json' -d "{\"key\":\"$1\",\"name\":\"$2\"}" \
+      | python3 -c 'import json,sys
+try: print(json.load(sys.stdin)["id"])
+except Exception: print("")')
+    for _ in 1 2 3 4 5; do
+      [ -n "$id" ] && break
+      sleep 0.2
+      id=$(curl -sf "$URL/api/collections/teams/records?filter=$q" \
+           | python3 -c 'import json,sys; it=json.load(sys.stdin)["items"]; print(it[0]["id"] if it else "")')
+    done
+    [ -n "$id" ] || fail "seeding team $1: neither create nor lookup produced an id"
   else
     curl -sf -X PATCH "$URL/api/collections/teams/records/$id" \
       -H 'Content-Type: application/json' -d "{\"name\":\"$2\"}" >/dev/null
@@ -135,11 +148,16 @@ fi
 rm "$WORK/.lll.toml"
 
 # --- config set me (task-31): creates, then replaces rather than appends ---
-out=$(cd "$WORK" && "$LLL_ABS" config set me alice)
+# LLL_URL pinned: without it this reaches whatever owns the default port 8090,
+# which on a machine running a dev board is somebody else's database.
+out=$(cd "$WORK" && LLL_URL=$URL "$LLL_ABS" config set me alice)
 assert_contains "$out" 'me = "alice"' "config set me output"
-assert_contains "$out" "lll member add" "config set me names the member fix"
+# With PocketBase reachable, config set me SEEDS the member (task-63) rather
+# than printing the add-it-yourself hint. This assertion used to pass only
+# because LLL_URL was unpinned and the command could not reach a server.
+assert_contains "$out" "created member alice" "config set me seeds the member"
 assert_contains "$(cat "$WORK/.lll.toml")" 'me = "alice"' "config set me wrote the key"
-(cd "$WORK" && "$LLL_ABS" config set me bob >/dev/null)
+(cd "$WORK" && LLL_URL=$URL "$LLL_ABS" config set me bob >/dev/null)
 [ "$(grep -c '^me = ' "$WORK/.lll.toml")" = 1 ] \
   || fail "config set me appended a duplicate key: $(cat "$WORK/.lll.toml")"
 assert_contains "$(cat "$WORK/.lll.toml")" 'me = "bob"' "config set me replaced the value"
@@ -370,12 +388,15 @@ assert_not_contains "$out" "ENG-7" "forced delete removed the issue"
 # --- members: add + list ---
 out=$(LLL_URL=$URL "$LIN" member add -n bryan -e bryan@example.com)
 assert_contains "$out" "Added member bryan" "member add output"
-out=$(LLL_URL=$URL "$LIN" member add -n alice)
-assert_contains "$out" "Added member alice" "member add without email"
+# NOT alice: `config set me alice` above now seeds that member for real, so
+# adding it again hits the unique index. This case is about the no-email path.
+out=$(LLL_URL=$URL "$LIN" member add -n carol)
+assert_contains "$out" "Added member carol" "member add without email"
 out=$(LLL_URL=$URL "$LIN" member list)
 assert_contains "$out" "bryan" "member list has bryan"
 assert_contains "$out" "bryan@example.com" "member list shows email"
-assert_contains "$out" "alice" "member list has alice"
+assert_contains "$out" "carol" "member list has carol"
+assert_contains "$out" "alice" "member list has the member config set me seeded"
 
 # --- --assignee on create; assignee in list and view ---
 out=$(LLL_URL=$URL LLL_TEAM=ENG "$LIN" issue create -t "Assigned issue" --assignee bryan)
