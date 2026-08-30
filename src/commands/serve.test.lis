@@ -1,0 +1,66 @@
+import "go:strings"
+
+fn md(src: string) -> string {
+  md_html(src) as string
+}
+
+#[test]
+fn gfm_table_renders_as_a_table_not_literal_pipes() {
+  let out = md("| a | b |
+| --- | --- |
+| 1 | 2 |
+")
+  assert strings.Contains(out, "<table>")
+  assert strings.Contains(out, "<th>a</th>")
+  assert strings.Contains(out, "<td>2</td>")
+  assert !strings.Contains(out, "| a | b |")
+}
+
+#[test]
+fn gfm_strikethrough_autolink_and_task_lists() {
+  let out = md("~~gone~~ https://example.com/x
+
+- [ ] todo
+- [x] done
+")
+  assert strings.Contains(out, "<del>gone</del>")
+  assert strings.Contains(out, "<a href=\"https://example.com/x\">")
+  assert strings.Contains(out, "type=\"checkbox\"")
+  assert strings.Contains(out, "checked=\"\"")
+}
+
+#[test]
+fn fenced_code_is_tokenized_into_classes_not_inline_colors() {
+  let out = md("```go
+func f() {}
+```
+")
+  assert strings.Contains(out, "class=\"chroma\"")
+  assert strings.Contains(out, "class=\"kd\"")
+  // WithClasses(true) means chroma never writes a hex color into the markup;
+  // theme.css owns the palette.
+  assert !strings.Contains(out, "style=\"color:")
+}
+
+#[test]
+fn mermaid_fences_stay_plain_for_the_client_to_draw() {
+  let out = md("```mermaid
+graph TD; A-->B;
+```
+")
+  assert strings.Contains(out, "<code class=\"language-mermaid\">")
+  assert strings.Contains(out, "graph TD; A--&gt;B;")
+  assert !strings.Contains(out, "class=\"chroma\"")
+}
+
+#[test]
+fn hard_wraps_survive_the_gfm_and_highlighting_extensions() {
+  assert strings.Contains(md("one
+two
+"), "one<br>")
+}
+
+#[test]
+fn raw_html_is_still_dropped() {
+  assert !strings.Contains(md("<script>alert(1)</script>"), "<script>")
+}

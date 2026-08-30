@@ -11,7 +11,7 @@ version = "0.1.0"
 "github.com/chzyer/readline" = { version = "v1.5.1", via = ["github.com/google/pprof"] }
 "github.com/cpuguy83/go-md2man/v2" = { version = "v2.0.6", via = ["github.com/spf13/cobra"] }
 "github.com/disintegration/imaging" = { version = "v1.6.2", via = ["github.com/pocketbase/pocketbase"] }
-"github.com/dlclark/regexp2/v2" = { version = "v2.7.1", via = ["github.com/dop251/goja"] }
+"github.com/dlclark/regexp2/v2" = { version = "v2.7.1", via = ["github.com/dlclark/regexp2", "github.com/dop251/goja"] }
 "github.com/domodwyer/mailyak/v3" = { version = "v3.6.2", via = ["github.com/pocketbase/pocketbase"] }
 "github.com/dop251/base64dec" = { version = "v0.0.0-20231022112746-c6c9f9a96217", via = ["github.com/dop251/goja_nodejs"] }
 "github.com/dop251/goja" = { version = "v0.0.0-20260806115107-493f22071ef6", via = ["github.com/dop251/goja_nodejs", "github.com/pocketbase/pocketbase"] }
@@ -53,3 +53,6 @@ version = "0.1.0"
 "modernc.org/mathutil" = { version = "v1.7.1", via = ["modernc.org/libc"] }
 "modernc.org/memory" = { version = "v1.12.0", via = ["modernc.org/libc"] }
 "modernc.org/sqlite" = { version = "v1.57.0", via = ["github.com/pocketbase/pocketbase"] }
+"github.com/yuin/goldmark-highlighting/v2" = "v2.0.0-20230729083705-37449abec8cc"
+"github.com/alecthomas/chroma/v2" = { version = "v2.2.0", via = ["github.com/yuin/goldmark-highlighting/v2"] }
+"github.com/dlclark/regexp2" = { version = "v1.11.4", via = ["github.com/alecthomas/chroma/v2"] }

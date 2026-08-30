@@ -2,8 +2,11 @@ import "go:bytes"
 import "go:encoding/json"
 import "go:fmt"
 import "go:html/template"
+import chromahtml "go:github.com/alecthomas/chroma/v2/formatters/html"
 import "go:github.com/escherize/lll/web"
 import goldmark "go:github.com/yuin/goldmark"
+import "go:github.com/yuin/goldmark-highlighting/v2"
+import "go:github.com/yuin/goldmark/extension"
 import "go:github.com/yuin/goldmark/renderer"
 import mdhtml "go:github.com/yuin/goldmark/renderer/html"
 import "go:net/http"
@@ -470,14 +473,25 @@ fn comment_vm(c: models.Comment) -> CommentVM {
   }
 }
 
-/// Markdown -> HTML for comment bodies and issue descriptions. Hard wraps are
-/// on, so every newline becomes a <br> the way GitHub comments do and pasted
-/// plain text keeps its shape. WithUnsafe stays off, so the renderer still
-/// drops raw HTML in user input; on parse failure fall back to escaped text.
+/// Markdown -> HTML for comment bodies and issue descriptions. GitHub-flavored
+/// (tables, strikethrough, autolinks, task lists) with hard wraps on, so every
+/// newline becomes a <br> the way GitHub comments do and pasted plain text
+/// keeps its shape. WithUnsafe stays off, so the renderer still drops raw HTML
+/// in user input; on parse failure fall back to escaped text.
+///
+/// Fenced code is tokenized server-side by chroma. WithClasses(true) makes it
+/// emit bare class names instead of inline hex, so the colors come from
+/// theme.css tokens and DESIGN.md's ladder stays the only palette.
+///
+/// A ```mermaid fence has no chroma lexer, and guessing is off, so highlighting
+/// hands it back to goldmark's plain renderer as
+/// <pre><code class="language-mermaid">. web/static/mermaid-init.js finds those
+/// and draws them. That is the whole mermaid integration on this side.
 ///
 /// The renderer is rebuilt per call because lis has no package-level composite
-/// bindings. Measured at 11.6us/call vs 3.6us for a shared one — 8us that no
-/// render path here can feel.
+/// bindings. Measured at 13.5us/call for prose and 70us when the body carries a
+/// code fence (chroma builds its lexer each time). A page renders a description
+/// and its comments, so that is microseconds against a PocketBase round trip.
 fn md_html(src: string) -> template.HTML {
   let mut buf = bytes.Buffer { .. }
   // WithHardWraps() returns an anonymous Go interface, which binds as Unknown,
@@ -485,7 +499,18 @@ fn md_html(src: string) -> template.HTML {
   let Some(hard_wraps) = assert_type<renderer.Option>(mdhtml.WithHardWraps()) else {
     return template.HTMLEscapeString(src) as template.HTML
   }
-  let md = goldmark.New(goldmark.WithRendererOptions(hard_wraps))
+  // extension.GFM is a package var of an unexported type, so lis binds it as
+  // Unit; assert_type narrows it back to the interface goldmark wants.
+  let Some(gfm) = assert_type<goldmark.Extender>(extension.GFM) else {
+    return template.HTMLEscapeString(src) as template.HTML
+  }
+  let code = highlighting.NewHighlighting(
+    highlighting.WithFormatOptions(chromahtml.WithClasses(true)),
+  )
+  let md = goldmark.New(
+    goldmark.WithExtensions(gfm, code),
+    goldmark.WithRendererOptions(hard_wraps),
+  )
   if let Err(_) = md.Convert(src.bytes(), &buf) {
     return template.HTMLEscapeString(src) as template.HTML
   }
