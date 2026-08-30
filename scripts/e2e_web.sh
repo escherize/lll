@@ -948,4 +948,67 @@ count=$(curl -sf "$LLL_URL/api/collections/favorites/records?perPage=200" | jq '
 [ "$count" = 1 ] || fail "cascade left $count favorites, want 1 (ENG-1's)"
 curl -s -o /dev/null -X POST "$WEB/favorite?key=ENG-1&on=false"
 
+# --- task-114: /create takes everything `lll issue create` does ------------
+# The board's full create form is a modal over the board, and it posts to the
+# SAME POST /create as the topbar's one-line composer. One path is what keeps
+# the CLI and the web in agreement and avoids a second update racing the
+# broadcast, so the assertions below are all against /create.
+# The label row only renders when the workspace has labels, and /settings
+# deleted the one it made above, so seed one first.
+"$LIN" label create -n dialog-label -c '#8d7ce6' >/dev/null
+board=$(curl -sf "$WEB/")
+assert_contains "$board" 'id="ni-modal"' "board carries the create dialog"
+assert_contains "$board" 'id="ni-form"' "the dialog is a form"
+assert_contains "$board" 'name="description"' "the dialog takes a description"
+assert_contains "$board" 'name="labels"' "the dialog takes labels"
+assert_contains "$board" '>Unassigned</option>' "the dialog offers an assignee"
+assert_contains "$board" '>No project</option>' "the dialog offers a project"
+assert_contains "$board" 'id="new-issue"' "the one-line composer is still there"
+
+DL_LABEL=$(curl -sf "$LLL_URL/api/collections/labels/records?perPage=200" \
+  | jq -r '.items[] | select(.name=="dialog-label") | .id')
+DL_MEMBER=$(curl -sf "$LLL_URL/api/collections/members/records?perPage=200" \
+  | jq -r '.items[] | select(.name=="Web Member") | .id')
+DL_PROJECT=$(curl -sf "$LLL_URL/api/collections/projects/records?perPage=200" \
+  | jq -r '.items[] | select(.name=="Web Project") | .id')
+[ -n "$DL_LABEL" ] && [ -n "$DL_MEMBER" ] && [ -n "$DL_PROJECT" ] \
+  || fail "seeding the create-dialog assertions"
+
+out=$(curl -s -w '\n%{http_code}' -X POST \
+  --data-urlencode "title=Created from the dialog" \
+  --data-urlencode "description=A **real** description." \
+  -d "state=in-progress" -d "priority=high" \
+  -d "assignee=$DL_MEMBER" -d "project=$DL_PROJECT" -d "labels=$DL_LABEL" \
+  "$WEB/create")
+printf '%s' "$out" | tail -1 | grep -q 200 || fail "/create with every field should return 200"
+assert_contains "$out" 'id="flash" class="flash" hidden' "a full create clears the flash"
+# Only a success closes the dialog, and the server is what says so.
+assert_contains "$out" 'signals {"ni_open": false' "a successful create closes the dialog"
+
+DIALOG_KEY=$("$LIN" issue list --json \
+  | jq -r '.items[] | select(.title=="Created from the dialog") | "ENG-" + (.number|tostring)')
+[ -n "$DIALOG_KEY" ] || fail "the dialog's issue is not in lll issue list"
+view=$("$LIN" issue view "$DIALOG_KEY")
+assert_contains "$view" "A **real** description." "description reached PocketBase"
+assert_contains "$view" "in-progress" "state reached PocketBase"
+assert_contains "$view" "Priority:  high" "priority reached PocketBase"
+assert_contains "$view" "Web Member" "assignee reached PocketBase"
+assert_contains "$view" "Web Project" "project reached PocketBase"
+assert_contains "$view" "dialog-label" "labels reached PocketBase"
+
+# The fast path is the point of not making everyone pay for the full form:
+# a title on its own is a complete request, and lands in todo like the CLI's.
+out=$(curl -s -w '\n%{http_code}' -X POST -d "title=Title and nothing else" "$WEB/create")
+printf '%s' "$out" | tail -1 | grep -q 200 || fail "/create with only a title should return 200"
+FAST_KEY=$("$LIN" issue list --json \
+  | jq -r '.items[] | select(.title=="Title and nothing else") | "ENG-" + (.number|tostring)')
+assert_contains "$("$LIN" issue view "$FAST_KEY")" "todo" "a title-only create defaults to todo"
+
+# A rejected create writes nothing AND leaves the dialog open, so a typed
+# description survives the failure.
+out=$(curl -s -X POST -d "title=Never written" -d "priority=bogus" "$WEB/create")
+assert_contains "$out" "unknown priority &#39;bogus&#39;" "a bad priority answers through the flash"
+assert_not_contains "$out" "ni_open" "a failed create does not close the dialog"
+"$LIN" issue list | grep -q "Never written" && fail "a refused create still wrote a record" || true
+
 echo "e2e_web: all assertions passed"

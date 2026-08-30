@@ -42,6 +42,35 @@ pub struct LabelVM {
   pub color: string,
 }
 
+/// One relation option in the create dialog: the record id the form posts,
+/// and the name a human picks by.
+pub struct PickVM {
+  pub id: string,
+  pub name: string,
+}
+
+/// One selectable label in the create dialog. Same shape as LabelVM plus the
+/// id, because a chip on a card is read-only and this one is a checkbox.
+pub struct LabelPickVM {
+  pub id: string,
+  pub name: string,
+  pub color: string,
+}
+
+/// Everything the create dialog offers beyond title and state — the same set
+/// `lll issue create` takes as flags, resolved to record ids at page render.
+///
+/// Filled by board_page ONLY. The broadcast path re-renders the `board`
+/// fragment, which never reads .Compose, so a repaint still costs one issues
+/// fetch and not four. The lists are therefore as old as the page: a label
+/// added elsewhere shows up on the next load, same bargain as the rail.
+pub struct ComposeVM {
+  pub prios: Slice<StateOpt>,
+  pub members: Slice<PickVM>,
+  pub projects: Slice<PickVM>,
+  pub labels: Slice<LabelPickVM>,
+}
+
 /// A state <option>: slug value, humanized label.
 pub struct StateOpt {
   pub value: string,
@@ -115,6 +144,9 @@ pub struct BoardVM {
   // the browser saved", which is every other board load, broadcasts
   // included: the filter bar lives outside #board and is never re-rendered.
   pub flt_seed: template.JS,
+  // Pickers for the create dialog. Zero-valued on the broadcast path — the
+  // `board` fragment does not read it. See ComposeVM.
+  pub compose: ComposeVM,
 }
 
 /// View model for the search page. `q` echoes back the URL's query so the
@@ -556,6 +588,12 @@ fn patch_event(html: string) -> string {
   f"event: datastar-patch-elements\n{strings.Join(lines, "\n")}\n\n"
 }
 
+/// Wrap a signal update as a datastar-patch-signals SSE event. `json_text` is
+/// a JSON object; Datastar merges it into the page's signals.
+fn signals_event(json_text: string) -> string {
+  f"event: datastar-patch-signals\ndata: signals {json_text}\n\n"
+}
+
 /// "in-progress" -> "In progress".
 fn state_label(state: string) -> string {
   let words = strings.ReplaceAll(state, "-", " ")
@@ -700,6 +738,24 @@ fn board_vm(team_id: string) -> Result<BoardVM, string> {
       cards: issues.filter(|i| i.state == s).map(card_vm),
     })
   Ok(BoardVM { states: state_opts(), columns, filter_groups: filter_groups(issues), .. })
+}
+
+/// The create dialog's pickers, freshly fetched. Three extra PB reads, paid
+/// once per board page load and never on a broadcast.
+fn compose_vm() -> Result<ComposeVM, string> {
+  let members = fetch_members()?
+  let projects = fetch_projects()?
+  let labels = fetch_labels()?
+  Ok(ComposeVM {
+    prios: prio_opts(),
+    members: members.map(|m| PickVM { id: m.id, name: m.name }),
+    projects: projects.map(|p| PickVM { id: p.id, name: p.name }),
+    labels: labels.map(|l| LabelPickVM {
+      id: l.id,
+      name: l.name,
+      color: normalize_hex(l.color),
+    }),
+  })
 }
 
 fn fetch_board_issues(team_id: string) -> Result<Slice<models.Issue>, string> {
@@ -1008,6 +1064,13 @@ fn query_param(r: Ref<http.Request>, name: string) -> string {
 fn board_page(w: http.ResponseWriter, r: Ref<http.Request>, team_id: string, me: string) {
   let mut vm = match board_vm(team_id) {
     Ok(v) => v,
+    Err(e) => {
+      http.Error(w, e, 500)
+      return
+    },
+  }
+  match compose_vm() {
+    Ok(c) => vm.compose = c,
     Err(e) => {
       http.Error(w, e, 500)
       return
@@ -1869,13 +1932,25 @@ fn respond_flash(w: http.ResponseWriter, html: string) {
   let _ = w.Write(patch_event(html).bytes())
 }
 
+/// The board's one write path for new issues, shared by the topbar's
+/// one-line composer and the full create dialog. Everything past `title` is
+/// optional, so a request carrying only a title is byte-for-byte what it
+/// always was and the fast path pays nothing for the dialog's existence.
+///
+/// Relation ids (assignee, project, labels) are handed to PocketBase
+/// unchecked: the form only ever offers ids that exist, and PB rejects a
+/// bogus one with a message the flash strip already knows how to show.
+/// Re-validating here would mean three more fetches per create.
 fn create_action(w: http.ResponseWriter, r: Ref<http.Request>, team_id: string) {
   let title = strings.TrimSpace(r.PostFormValue("title"))
-  let state = r.PostFormValue("state")
   if title == "" {
     flash_error(w, "title is required")
     return
   }
+  // Absent state means todo, the same default `lll issue create` uses, so
+  // `curl -d title=...` is a complete request.
+  let mut state = r.PostFormValue("state")
+  if state == "" { state = "todo" }
   if query.states().find(|s| s == state).is_none() {
     flash_error(w, f"unknown state '{state}'")
     return
@@ -1884,7 +1959,30 @@ fn create_action(w: http.ResponseWriter, r: Ref<http.Request>, team_id: string) 
     flash_error(w, "no team configured: set LLL_TEAM or 'team' in .lll.toml")
     return
   }
-  let new_issue = models.NewIssue { team: team_id, title, state, .. }
+  let mut priority = 0
+  let prio_slug = r.PostFormValue("priority")
+  if prio_slug != "" {
+    let Some(p) = prio_value(prio_slug) else {
+      flash_error(w, f"unknown priority '{prio_slug}'")
+      return
+    }
+    priority = p
+  }
+  // PostFormValue above has already parsed the body, so PostForm is populated;
+  // labels is the one field that repeats (one checkbox per label).
+  let form = r.PostForm as Map<string, Slice<string>>
+  let labels = form["labels"].filter(|id| id != "")
+  let new_issue = models.NewIssue {
+    team: team_id,
+    title,
+    state,
+    priority,
+    description: r.PostFormValue("description"),
+    assignee: r.PostFormValue("assignee"),
+    project: r.PostFormValue("project"),
+    labels,
+    ..
+  }
   let payload = match json.Marshal(new_issue) {
     Ok(p) => p,
     Err(e) => {
@@ -1897,6 +1995,15 @@ fn create_action(w: http.ResponseWriter, r: Ref<http.Request>, team_id: string) 
     return
   }
   flash_clear(w)
+  // Only a success closes the dialog and empties the composers, and the
+  // server is what says so. If the client cleared optimistically, a rejected
+  // create would take a typed description down with it — the field this whole
+  // dialog exists for. Clearing new_title matters because the dialog opens
+  // carrying the topbar's text: leaving it behind would arm a duplicate the
+  // next time someone pressed Enter up there.
+  let _ = w.Write(
+    signals_event("{\"ni_open\": false, \"new_title\": \"\"}").bytes(),
+  )
 }
 
 /// Patch payload for /state: target state plus manual board position.
