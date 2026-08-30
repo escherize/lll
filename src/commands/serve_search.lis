@@ -42,6 +42,12 @@ fn search_page(
     }
   }
   let page = SearchVM { q, results }
+  // ?raw beats ?fragment: a raw fetch is a one-shot answer, not a datastar
+  // event, so it short-circuits before the fragment branch.
+  if wants_raw(r) {
+    write_raw(w, search_raw(page))
+    return
+  }
   if query_param(r, "fragment") == "1" {
     let frag = match render("search-results", page) {
       Ok(h) => h,

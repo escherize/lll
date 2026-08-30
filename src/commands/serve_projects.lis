@@ -25,7 +25,7 @@ fn projects_page(
   w: http.ResponseWriter,
   // Nothing on this page is scoped by query string: it is every project the
   // workspace has.
-  _r: Ref<http.Request>,
+  r: Ref<http.Request>,
   team_id: string,
   me: string,
 ) {
@@ -35,6 +35,10 @@ fn projects_page(
       http.Error(w, e, 500)
       return
     },
+  }
+  if wants_raw(r) {
+    write_raw(w, projects_raw(vm))
+    return
   }
   let page = PageVM { rail: rail_vm("projects", me, shell_team(team_id)), page: vm }
   let html = match render("projects-page", page) {

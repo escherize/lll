@@ -203,6 +203,12 @@ fn issues_page(w: http.ResponseWriter, r: Ref<http.Request>, team_id: string, me
     clear_href: issues_href(ViewQuery { sort, .. }),
     error: err,
   }
+  // ?raw: the same table, as markdown. The choosers and sort links are
+  // browser chrome; the rows are the contract.
+  if wants_raw(r) {
+    write_raw(w, issues_raw(vm))
+    return
+  }
   let html = match render("issues-page", PageVM { rail: rail_vm("issues", me, shell_team(team_id)), page: vm }) {
     Ok(h) => h,
     Err(e) => {

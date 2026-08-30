@@ -267,6 +267,7 @@ fn comment_vm(c: models.Comment) -> CommentVM {
     avatar: avatar_vm(author),
     age: display.relative(c.created),
     body: markdown.md_html(c.body),
+    body_md: c.body,
   }
 }
 
@@ -294,6 +295,7 @@ fn issue_vm(issue: models.Issue, comments: Slice<models.Comment>) -> Result<Issu
     labels: label_vms(issue.expand.labels),
     emoji: issue.emoji,
     description: markdown.md_html(issue.description),
+    description_md: issue.description,
     created: display.relative(issue.created),
     updated: display.relative(issue.updated),
     states: state_opts(),
