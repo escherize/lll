@@ -138,6 +138,8 @@ fn bridge(events: Channel<realtime.Event>, hub: Hub, team_id: string) {
       comment_broadcast(ev, hub)
     } else if ev.topic == "favorites" {
       favorites_broadcast(hub)
+    } else if ev.topic == "views" {
+      views_broadcast(hub)
     } else {
       issue_broadcast(ev, hub, team_id)
     }
@@ -149,7 +151,7 @@ fn bridge(events: Channel<realtime.Event>, hub: Hub, team_id: string) {
 /// and one #board morph covers create/update/delete alike), plus the
 /// issue-detail fragment for that issue's page, from the event record.
 fn issue_broadcast(ev: realtime.Event, hub: Hub, team_id: string) {
-  if let Ok(vm) = board_vm(team_id) {
+  if let Ok(vm) = board_vm(team_id, BoardFilter { .. }) {
     if let Ok(html) = render("board", vm) {
       let _ = hub.broadcast.send(
         Broadcast { scope: "board", payload: patch_event(html) },
@@ -183,6 +185,17 @@ fn issue_broadcast(ev: realtime.Event, hub: Hub, team_id: string) {
 /// fetch is cheaper than reconciling a create against a delete.
 fn favorites_broadcast(hub: Hub) {
   if let Ok(html) = render("rail-favorites", fav_vms()) {
+    let _ = hub.broadcast.send(
+      Broadcast { scope: "*", payload: patch_event(html) },
+    )
+  }
+}
+
+/// On any views event: re-render the rail's SAVED VIEWS group from a fresh
+/// fetch and patch it into every open page — same shape as
+/// favorites_broadcast, since a view is the workspace's like a star is.
+fn views_broadcast(hub: Hub) {
+  if let Ok(html) = render("rail-views", view_vms()) {
     let _ = hub.broadcast.send(
       Broadcast { scope: "*", payload: patch_event(html) },
     )

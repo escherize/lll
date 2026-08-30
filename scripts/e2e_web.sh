@@ -74,6 +74,9 @@ curl -sf -X POST "$LLL_URL/api/collections/teams/records" \
 "$LIN" issue create -t "Already in progress" >/dev/null
 "$LIN" issue update ENG-2 --state in-progress >/dev/null
 "$LIN" issue comment ENG-1 -b "seed comment" >/dev/null
+# A member with no issues, for the filter-that-matches-nothing assertions:
+# a valid value the catalogue can name, carrying zero board cards (task-116).
+"$LIN" member add -n "No Issues Here" >/dev/null
 
 # the board came up with PocketBase above
 curl -sf "$WEB/" >/dev/null || fail "lll up board did not start"
@@ -139,7 +142,9 @@ board_rail=$(rail "$board")
 [ -n "$board_rail" ] || fail "board page has no rail"
 [ "$board_rail" = "$(rail "$issue")" ] || fail "the rail differs between the board and issue pages:
 $(diff <(printf '%s' "$board_rail") <(rail "$issue") || true)"
-assert_contains "$board_rail" 'href="/?mine=1"' "rail has a My issues row"
+assert_contains "$board_rail" 'href="/?assignee=e2e"' \
+  "rail has a My issues row (the board's own URL encoding)"
+assert_contains "$board_rail" 'id="rail-views"' "rail carries the saved views group"
 assert_contains "$board_rail" "v0.1.0" "rail footer carries the version"
 
 # The FAVORITES group ships in the rail even when empty, and says out loud
@@ -150,28 +155,50 @@ assert_contains "$board_rail" "Shared by everyone here" "favorites are labelled 
 assert_contains "$board_rail" "Star an issue to pin it here for the whole workspace." \
   "empty favorites group explains the star"
 
-# ?mine=1 marks the row current and seeds one filter chip. The board fragment
-# itself stays unfiltered on purpose: /events broadcasts one #board to every
-# board client, so a server-filtered page would be morphed back on the next
-# realtime event.
-mine=$(curl -sf "$WEB/?mine=1")
-assert_contains "$mine" 'title="Issues assigned to e2e" class="active"' \
-  "?mine=1 marks the My issues row current"
+# My issues is a URL, not a special mode: the rail row is the board at
+# /?assignee=e2e (the board's own query-param encoding — there is no
+# ?mine=1 any more). The page marks the row current and seeds the chip the
+# URL implies.
+mine=$(curl -sf "$WEB/?assignee=e2e")
+assert_contains "$mine" '<a href="/?assignee=e2e" title="Issues assigned to e2e" class="active">' \
+  "the My issues URL marks the My issues row current"
 assert_contains "$mine" 'data-signals:flt="[&#34;assignee:e2e&#34;]"' \
-  "?mine=1 seeds the assignee filter chip"
-# ...and the seeded chip is NOT written back to localStorage (task-109): the
-# seed belongs to the URL, so the write-back effect is rendered only on an
-# unseeded board. Without this, Board / My issues / Board came back filtered
-# by a person you had stopped looking at, and read as an empty board.
-assert_contains "$(curl -sf "$WEB/")" "data-effect=\"localStorage.setItem('lllFlt'" \
-  "the unseeded board persists its chips"
-case "$mine" in
-  *"localStorage.setItem('lllFlt'"*) fail "?mine=1 persists its seeded chip to localStorage" ;;
-esac
-assert_contains "$(column "$mine" todo)" "ENG-1" "?mine=1 leaves the board fragment unfiltered"
+  "the My issues URL seeds the assignee filter chip"
+# ...and because the columns are server-filtered by the URL's filter, an
+# issue outside the filter is absent from the fragment entirely — the
+# client-side $flt data-show guard exists for the SSE morphs, not the
+# first paint.
+assert_not_contains "$(column "$mine" todo)" "ENG-1" \
+  "a URL-filtered board filters its own columns"
 
-# --- /search: server-side search over the database (task-85) ---
-# The board's box filters the cards already rendered; this asks PocketBase.
+# A filter whose valid value matches nothing still renders its chip (active,
+# count 0) and the bar says so out loud — the rescue affordance lives
+# wherever the URL can point. "No Issues Here" is a real member; the board
+# just carries no card for them (task-116's ?mine=1 scenario).
+nomatch=$(curl -sf "$WEB/?assignee=No+Issues+Here")
+assert_contains "$nomatch" 'No issues match these filters.' \
+  "a filter matching nothing says so in the filter bar"
+assert_contains "$nomatch" '<span class="dim">Assignee</span> No Issues Here <svg' \
+  "a filter matching nothing still renders its own chip"
+
+# A value the catalogue cannot name is dropped with a readable flash, never
+# a 500 and never a silently half-applied filter.
+nomember=$(curl -sf "$WEB/?assignee=nobody")
+assert_contains "$nomember" "no member named &#39;nobody&#39;" \
+  "an unknown assignee is said out loud in the flash"
+
+
+# Hidden lanes ride the same URL: ?hide=done hides the done lane, and the
+# lane's hide signal is seeded from the query param, not localStorage.
+hidden=$(curl -sf "$WEB/?hide=done")
+unhidden=$(curl -sf "$WEB/")
+assert_contains "$unhidden" 'class="main"' "an unhidden board renders no lane hidden"
+assert_not_contains "$unhidden" 'class="main hc-done"' \
+  "the done lane is present on an unhidden board"
+# The binding expression for the hidden class is rendered on every board;
+# what differs is the class attribute and the seeded signal value.
+assert_contains "$unhidden" "'hc-done': \$hide_done" "the lane's hide binding exists"
+assert_contains "$hidden" "\$hide_done = true" "?hide=done seeds the lane's hide signal"
 # The query lives in the URL, so a result is shareable and curl-able.
 search=$(curl -sf "$WEB/search?q=Already")
 assert_contains "$search" "ENG-2" "search finds the matching issue"
@@ -308,7 +335,8 @@ assert_contains "$issue" '>No priority</option>' "priority none reads No priorit
 assert_contains "$issue" 'value="urgent" selected' "priority select reflects current value"
 assert_contains "$issue" 'id="title-form"' "issue page has title editor"
 board=$(curl -sf "$WEB/")
-assert_contains "$board" '>No priority</button>' "board filter labels none as No priority"
+assert_contains "$board" 'Priority</span> No priority <span class="count">' \
+  "board filter labels none as No priority (a navigation, not a button)"
 
 # --- drag-and-drop path: /state accepts query params with an empty body ---
 code=$(curl -s -o /dev/null -w '%{http_code}' -X POST "$WEB/state?key=ENG-3&state=done")
@@ -466,9 +494,11 @@ if command -v playwright-cli >/dev/null 2>&1; then
     *"\"cards\":$((before + 1))"*) ;;
     *) fail "browser: card count did not go from $before to $((before + 1)): $result" ;;
   esac
-  # --- Board, My issues, Board leaves every card visible (task-109) ---
-  # A SEQUENCE, not an end state: the bug only exists because step 2 wrote a
-  # chip that step 3 restored, so a single-page assertion cannot see it.
+  # --- Board, My issues, Board (task-109) in the URL era ---
+  # The original bug: a seeded chip hid every card while rendering NO chip to
+  # explain or undo it. Chip and filter signal are both derived from the URL
+  # now, so the sequence asserts the affordance survives the whole round
+  # trip: filter, leave, come back, clear.
   seq_probe() { # -> {visible, chips}
     playwright-cli -s="$BROWSER_SESSION" eval \
       "() => JSON.stringify({visible: [...document.querySelectorAll('.card')].filter(c => c.offsetParent !== null).length, chips: [...document.querySelectorAll('.flt-chip')].filter(c => c.offsetParent !== null).length})" \
@@ -478,9 +508,7 @@ if command -v playwright-cli >/dev/null 2>&1; then
   # read the chips before the signals exist.
   seq_goto() { playwright-cli -s="$BROWSER_SESSION" goto "$1" >/dev/null 2>&1 || fail "playwright: goto $1"; sleep 0.5; }
 
-  # One issue actually assigned to `me`: the chip elements are built from the
-  # values PRESENT on the board (filter_groups), so with nobody assigned the
-  # assignee chip does not exist to be counted (task-116).
+  # One issue actually assigned to `me`, so the filter has something to match.
   "$LIN" issue create -t "Assigned to me" --assignee e2e >/dev/null
 
   seq_goto "$WEB/"
@@ -491,29 +519,42 @@ if command -v playwright-cli >/dev/null 2>&1; then
   [ "${all:-0}" -gt 0 ] || fail "task-109 step 1: board opened with no visible cards ($step1)"
   assert_contains "$step1" '"chips":0' "task-109 step 1: Board opens unfiltered"
 
-  seq_goto "$WEB/?mine=1"
+  seq_goto "$WEB/?assignee=e2e"
   step2=$(seq_probe)
   assert_contains "$step2" '"chips":1' "task-109 step 2: My issues shows the assignee chip"
   mine_visible=$(printf '%s' "$step2" | sed -n 's/.*"visible":\([0-9]*\).*/\1/p')
   [ "${mine_visible:-0}" -lt "$all" ] \
     || fail "task-109 step 2: My issues did not actually filter ($step2 vs $all)"
 
+  # Coming back to a bare / restores the LAST VIEW from localStorage — a
+  # convenience only, and the chip comes back WITH it, visibly. The URL is
+  # what is restored, so the address bar says what the board is filtered by.
   seq_goto "$WEB/"
   step3=$(seq_probe)
-  assert_contains "$step3" '"chips":0' "task-109 step 3: back on Board the chip is gone"
-  assert_contains "$step3" "\"visible\":$all" "task-109 step 3: back on Board every card is visible again"
+  assert_contains "$step3" '"chips":1' \
+    "task-109 step 3: the restored view brings its chip back, visibly"
+  restored=$(playwright-cli -s="$BROWSER_SESSION" eval "() => location.pathname + location.search" \
+    | sed -n '/### Result/{n;p;}' | tr -d '\\')
+  assert_contains "$restored" "/?assignee=e2e" \
+    "task-109 step 3: the restore lands on the view's own URL"
+  assert_contains "$step3" "\"visible\":$mine_visible" \
+    "task-109 step 3: the restored view actually filters"
 
-  # The other half: persistence still earns its keep. A chip set BY HAND on
-  # the board survives a reload and a detour through /?mine=1 — which is why
-  # the fix suppresses the SEED's write rather than clearing on arrival.
-  playwright-cli -s="$BROWSER_SESSION" eval \
-    "() => document.querySelector('.flt-menu button[data-f^=\"assignee:\"]').click()" >/dev/null 2>&1
-  playwright-cli -s="$BROWSER_SESSION" reload >/dev/null 2>&1 || fail "playwright: reload"
+  # The chip IS the undo: clicking it toggles its value out of the URL.
+  playwright-cli -s="$BROWSER_SESSION" click ".flt-chip" >/dev/null 2>&1 \
+    || fail "playwright: clicking the chip"
   sleep 0.5
-  assert_contains "$(seq_probe)" '"chips":1' "task-109: a hand-set chip survives a reload"
-  seq_goto "$WEB/?mine=1"
+  assert_contains "$(seq_probe)" '"chips":0' "clicking the chip clears the filter"
+  assert_contains "$(seq_probe)" "\"visible\":$all" "clearing the chip brings every card back"
+
+  # Clear removes the last-view record too, so the next bare / stays bare.
+  seq_goto "$WEB/?assignee=e2e"
+  playwright-cli -s="$BROWSER_SESSION" click ".flt-clear" >/dev/null 2>&1 \
+    || fail "playwright: clicking Clear"
+  sleep 0.5
+  assert_contains "$(seq_probe)" '"chips":0' "Clear resets the board"
   seq_goto "$WEB/"
-  assert_contains "$(seq_probe)" '"chips":1' "task-109: a hand-set chip survives a My issues detour"
+  assert_contains "$(seq_probe)" '"chips":0' "Clear also cleared the last-view record"
 
   # --- /search filters as you type, and the X clears it (task-110) ---
   # A SEQUENCE, not an end state: the probe on <body> survives a fragment
@@ -561,6 +602,32 @@ if command -v playwright-cli >/dev/null 2>&1; then
   assert_contains "$cleared" '"field":""' "browser: the X empties the field"
   assert_contains "$cleared" '"rows":0' "browser: the X clears the results"
   assert_contains "$cleared" "Searches every issue in the team" "browser: the X returns the empty state"
+  # --- task-94: the save-view affordance in a real browser -----------------
+  # Reveal the form, name the view, submit: the rail gains the view without
+  # a reload (the SSE patch does the pinning), and clicking the view
+  # navigates to the filtered board.
+  seq_goto "$WEB/?prio=urgent"
+  playwright-cli -s="$BROWSER_SESSION" eval "() => localStorage.clear()" >/dev/null 2>&1
+  seq_goto "$WEB/?prio=urgent"
+  playwright-cli -s="$BROWSER_SESSION" click ".flt-save" >/dev/null 2>&1 \
+    || fail "playwright: clicking Save view"
+  # The reveal is a signal flip; give Datastar a beat before typing.
+  sleep 0.3
+  playwright-cli -s="$BROWSER_SESSION" click ".sv-form input[name=name]" >/dev/null 2>&1 \
+    || fail "playwright: focusing the view name field"
+  playwright-cli -s="$BROWSER_SESSION" type "Browser urgent" >/dev/null 2>&1 \
+    || fail "playwright: naming the view"
+  playwright-cli -s="$BROWSER_SESSION" click ".sv-form button[type=submit]" >/dev/null 2>&1 \
+    || fail "playwright: submitting the view"
+  saved_view=$(page_until "() => JSON.stringify({rail: document.getElementById('rail-views').textContent, navs: performance.getEntriesByType('navigation').length})" "Browser urgent")
+  assert_contains "$saved_view" "Browser urgent" "browser: saving a view pins it in the rail"
+  assert_contains "$saved_view" '"navs":1' "browser: saving a view did not reload the page"
+  playwright-cli -s="$BROWSER_SESSION" eval "() => document.querySelector('#rail-views a').click()" >/dev/null 2>&1 \
+    || fail "playwright: clicking the saved view"
+  clicked_view=$(page_until "() => JSON.stringify({url: location.pathname + location.search, chips: [...document.querySelectorAll('.flt-chip')].length})" '"chips":1')
+  assert_contains "$clicked_view" '"url":"/?prio=urgent"' \
+    "browser: clicking a saved view navigates to its URL"
+
   playwright-cli -s="$BROWSER_SESSION" close >/dev/null 2>&1 || true
   echo "e2e_web: browser-level realtime check passed"
   echo "e2e_web: browser-level /search live-typing check passed"
@@ -682,9 +749,13 @@ assert_contains "$bad_state" "unknown state" "an unknown state is reported too"
 # reads as current. Adding this page did not touch the board's template.
 issues_rail=$(rail "$issues")
 rail_rows() { printf '%s' "$1" | grep -o 'href="[^"]*"' | sort; }
-[ "$(rail_rows "$issues_rail")" = "$(rail_rows "$board_rail")" ] \
+# The rail is live data now (favorites, saved views), so both sides are
+# fetched at the same moment — a snapshot from before the browser block
+# would legitimately differ by the views saved since.
+board_rail_now=$(rail "$(curl -sf "$WEB/")")
+[ "$(rail_rows "$issues_rail")" = "$(rail_rows "$board_rail_now")" ] \
   || fail "the board and issues rails offer different destinations:
-$(diff <(rail_rows "$board_rail") <(rail_rows "$issues_rail") || true)"
+$(diff <(rail_rows "$board_rail_now") <(rail_rows "$issues_rail") || true)"
 assert_contains "$issues_rail" 'href="/issues"' "the rail has an All issues row"
 assert_contains "$board_rail" 'href="/issues"' "the board's rail has it too"
 assert_contains "$issues_rail" '<a href="/issues" class="active">' "the All issues row is current on its own page"
@@ -719,10 +790,11 @@ assert_not_contains "$projects" "data-init" "the projects page opens no SSE conn
 
 # The rail row is what makes a project reachable from the board at all.
 projects_rail=$(rail "$projects")
-assert_contains "$board_rail" 'href="/projects"' "the board's rail has a Projects row"
+assert_contains "$board_rail_now" 'href="/projects"' "the board's rail has a Projects row"
 assert_contains "$projects_rail" '<a href="/projects" class="active">' \
   "the Projects row is current on its own page"
-[ "$(rail_rows "$projects_rail")" = "$(rail_rows "$board_rail")" ] \
+board_rail_projects=$(rail "$(curl -sf "$WEB/")")
+[ "$(rail_rows "$projects_rail")" = "$(rail_rows "$board_rail_projects")" ] \
   || fail "the board and projects rails offer different destinations"
 
 # The project filter is one more param on the encoding /issues already has,
@@ -930,6 +1002,75 @@ assert_not_contains "$(favgroup "$(curl -sf "$WEB/")")" "Starred then deleted" \
 count=$(curl -sf "$LLL_URL/api/collections/favorites/records?perPage=200" | jq '.items | length')
 [ "$count" = 1 ] || fail "cascade left $count favorites, want 1 (ENG-1's)"
 curl -s -o /dev/null -X POST "$WEB/favorite?key=ENG-1&on=false"
+
+
+# --- task-94 half two: a saved view is a NAME plus a QUERY STRING -----------
+# The rail group, for asserting its contents.
+viewgroup() { # html
+  printf '%s' "$1" | python3 -c '
+import sys
+html = sys.stdin.read()
+try:
+    print(html.split("id=\"rail-views\"")[1].split("</div>")[0])
+except IndexError:
+    pass
+'
+}
+
+# The browser block above saved "Browser urgent", so the group already has a
+# row: the group header and its shared-by-everyone note still render.
+assert_contains "$(viewgroup "$(curl -sf "$WEB/")")" "Shared by everyone here" \
+  "the views group labels itself shared, not personal"
+
+# The flashing() wrapper answers every POST with a flash-strip fragment;
+# success is the empty flash, errors carry the message (asserted below).
+curl -s -o /dev/null -X POST "$WEB/views/save" \
+  -d "name=Todo lane" --data-urlencode "query=?state=todo"
+
+# Saving captures the query string, not a filter model: the record is two
+# fields, and the rail navigates back to the URL.
+vg=$(viewgroup "$(curl -sf "$WEB/")")
+assert_contains "$vg" "Todo lane" "a saved view appears in the rail"
+assert_contains "$vg" 'href="/?state=todo"' "the saved view navigates to its URL"
+
+# Navigating to the view's URL reproduces the filter, in a fresh fetch —
+# the same assertion a bookmark, a link, or an agent's curl makes. Fresh
+# fixtures, because earlier suites moved the seeds between lanes.
+"$LIN" issue create -t "Views fixture todo" >/dev/null
+"$LIN" issue create -t "Views fixture other" >/dev/null
+OTHER_KEY=$("$LIN" issue list --json | jq -r '.items[] | select(.title=="Views fixture other") | "ENG-" + (.number|tostring)')
+"$LIN" issue update "$OTHER_KEY" --state in-progress >/dev/null
+view_page=$(curl -sf "$WEB/?state=todo")
+assert_contains "$(column "$view_page" todo)" "Views fixture todo" \
+  "a saved view reproduces its filter (matching issue present)"
+assert_not_contains "$(column "$view_page" todo)" "Views fixture other" \
+  "a saved view reproduces its filter (other states stay out)"
+
+# Views are workspace-wide until auth (task-32): member is empty on the row.
+row=$(curl -sf "$LLL_URL/api/collections/views/records?perPage=200" | jq -c '.items[0]')
+[ "$(printf '%s' "$row" | jq -r '.member')" = "" ] || fail "a view is not workspace-wide"
+
+# A duplicate name is a readable error in the flash strip, not a 500.
+dup=$(curl -s -X POST "$WEB/views/save" -d "name=Todo lane" --data-urlencode "query=?state=todo")
+assert_contains "$dup" "already exists" "a duplicate view name is said out loud"
+
+# The SSE bridge patches the views group alone on every open board page.
+curl -sN "$WEB/events?page=board" >"$EVENTS_FILE" &
+CURL_PID=$!
+sleep 0.5
+curl -s -o /dev/null -X POST "$WEB/views/save" -d "name=Urgent lane" --data-urlencode "query=?prio=urgent"
+for _ in $(seq 1 50); do
+  grep -q "rail-views" "$EVENTS_FILE" 2>/dev/null && break
+  sleep 0.1
+done
+kill $CURL_PID 2>/dev/null || true
+CURL_PID=""
+events=$(cat "$EVENTS_FILE")
+assert_contains "$events" 'data: elements <div id="rail-views"' \
+  "saving a view patches the rail's views group into a board-scope client"
+assert_contains "$events" "Urgent lane" "the patched group carries the new view"
+assert_not_contains "$events" 'id="rail"' "the views patch carries no shell"
+
 
 # --- task-114: /create takes everything `lll issue create` does ------------
 # The board's full create form is a modal over the board, and it posts to the

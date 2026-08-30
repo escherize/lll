@@ -802,6 +802,38 @@ input:focus, textarea:focus, select:focus {
   cursor: pointer;
 }
 .flt-clear:hover { color: var(--text); }
+.flt-save {
+  background: none; border: none;
+  color: var(--text-3);
+  font: inherit; font-size: 11.5px; font-weight: 500;
+  padding: 2px 6px;
+  cursor: pointer;
+}
+.flt-save:hover { color: var(--text); }
+/* The name-this-view row, revealed beside Clear only while a view is
+   filtered. Input matches the app's small-control voice; the submit is a
+   quiet primary, not a second big button. */
+.sv-form { display: inline-flex; align-items: center; gap: 6px; }
+.sv-form input[name="name"] {
+  font: inherit; font-size: 12px;
+  background: var(--bg-raised);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 3px 8px;
+  width: 150px;
+}
+.sv-form input[name="name"]:focus { outline: none; border-color: var(--accent, var(--text-3)); }
+.sv-form button[type="submit"] {
+  font: inherit; font-size: 11.5px; font-weight: 600;
+  background: var(--bg-raised);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 3px 10px;
+  cursor: pointer;
+}
+.sv-form button[type="submit"]:hover { border-color: var(--border-strong); }
 
 /* ── dnd v2: full-height drop zones + drop indicator ─────── */
 /* Columns stretch to the board's full height, so the empty space below the

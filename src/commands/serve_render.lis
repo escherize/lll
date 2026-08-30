@@ -120,65 +120,114 @@ fn snippet(desc: string) -> string {
   text
 }
 
-/// First-seen-order distinct non-empty strings.
-fn distinct(vals: Slice<string>) -> Slice<string> {
-  let mut out: Slice<string> = []
-  for v in vals {
-    if v != "" && !out.contains(v) { out = out.append(v) }
-  }
-  out
+/// The board's resolved filter: values the page handler already validated
+/// against the catalogue. An empty dimension does not filter.
+struct BoardFilter {
+  states: Slice<string>,
+  assignees: Slice<string>,
+  labels: Slice<string>,
+  prios: Slice<string>,
 }
 
-/// The filter chooser's contents: distinct assignees, labels, priorities and
-/// states present on the board. Dimensions with no values are dropped.
-fn filter_groups(issues: Slice<models.Issue>) -> Slice<FilterGroupVM> {
-  let assignees = distinct(issues.map(|i| i.expand.assignee.name))
-  let mut label_names: Slice<string> = []
-  for i in issues {
-    label_names = label_names.append(i.expand.labels.map(|l| l.name)...)
+/// Does one issue pass the board's current filter? Every dimension ANDs;
+/// an empty dimension lets everything through.
+fn issue_matches(i: models.Issue, f: BoardFilter) -> bool {
+  (f.states.is_empty() || f.states.contains(i.state))
+    && (f.assignees.is_empty() || f.assignees.contains(i.expand.assignee.name))
+    && (f.labels.is_empty() || issue_has_any_label(i, f.labels))
+    && (f.prios.is_empty() || f.prios.contains(display.priority_name(i.priority)))
+}
+
+fn issue_has_any_label(i: models.Issue, names: Slice<string>) -> bool {
+  i.expand.labels.any(|l| names.contains(l.name))
+}
+
+/// One chooser dimension: every value the workspace can name, each with the
+/// count of board issues carrying it and the href of the same URL with that
+/// value toggled — a navigation, because the URL is the whole filter state.
+fn opt_group(
+  dim: string,
+  label: string,
+  values: Slice<string>,
+  issues: Slice<models.Issue>,
+  q: ViewQuery,
+  carries: fn(models.Issue, string) -> bool,
+  show: fn(string) -> string,
+) -> FilterGroupVM {
+  let opts = values.map(|v| FilterOptVM {
+    value: v,
+    label: show(v),
+    href: view_query_href("/", view_query_toggle(q, dim, v)),
+    active: view_query_has(q, dim, v),
+    count: issues.filter(|i| carries(i, v)).length(),
+  })
+  FilterGroupVM { dim, label, opts }
+}
+
+/// The filter chooser's contents: every value the workspace can name, not
+/// just the ones PRESENT on the board. filter_groups used to be built from
+/// the board alone, so a filter that matched nothing — the rail's "My
+/// issues" with nobody assigned to you — hid every card while rendering no
+/// chip to explain or undo itself (TASK-116, TASK-109). With the URL as the
+/// source of truth the affordance has to exist wherever the URL can point,
+/// so the catalogue comes from the workspace and the board only counts.
+fn filter_groups(
+  issues: Slice<models.Issue>,
+  q: ViewQuery,
+  members: Slice<string>,
+  labels: Slice<string>,
+) -> Slice<FilterGroupVM> {
+  let mut assignees: Slice<string> = []
+  assignees = assignees.append(members...)
+  for a in csv(q.assignee) {
+    if !assignees.contains(a) { assignees = assignees.append(a) }
   }
-  let labels = distinct(label_names)
-  let present_prios = distinct(issues.map(|i| display.priority_name(i.priority)))
-  let prios = prios_by_urgency().filter(|p| present_prios.contains(p))
-  let states = query.states().filter(|s| issues.any(|i| i.state == s))
+  let mut label_names: Slice<string> = []
+  label_names = label_names.append(labels...)
+  for l in csv(q.label) {
+    if !label_names.contains(l) { label_names = label_names.append(l) }
+  }
+  let mut prios = prios_by_urgency()
+  for p in csv(q.prio) {
+    if !prios.contains(p) { prios = prios.append(p) }
+  }
   let groups = [
-    FilterGroupVM {
-      dim: "assignee",
-      label: "Assignee",
-      opts: assignees.map(|a| FilterOptVM { value: a, label: a }),
-    },
-    FilterGroupVM {
-      dim: "label",
-      label: "Label",
-      opts: labels.map(|l| FilterOptVM { value: l, label: l }),
-    },
-    FilterGroupVM {
-      dim: "prio",
-      label: "Priority",
-      opts: prios.map(|p| FilterOptVM { value: p, label: prio_label(p) }),
-    },
-    FilterGroupVM {
-      dim: "state",
-      label: "State",
-      opts: states.map(|s| FilterOptVM { value: s, label: state_label(s) }),
-    },
+    opt_group("assignee", "Assignee", assignees, issues, q,
+      |i, v| i.expand.assignee.name == v, |v| v),
+    opt_group("label", "Label", label_names, issues, q,
+      |i, v| i.expand.labels.any(|l| l.name == v), |v| v),
+    opt_group("prio", "Priority", prios, issues, q,
+      |i, v| display.priority_name(i.priority) == v, prio_label),
+    opt_group("state", "State", query.states(), issues, q,
+      |i, v| i.state == v, state_label),
   ]
   groups.filter(|g| g.opts.length() > 0)
 }
 
-/// The full board, freshly fetched: six columns in workflow order.
-fn board_vm(team_id: string) -> Result<BoardVM, string> {
-  let issues = fetch_board_issues(team_id)?
-  let columns = query
+/// The six columns in workflow order. Each column renders only the cards
+/// its state holds that the filter admits; `total` keeps the unfiltered
+/// count, so the column's number is the same on a filtered page and inside
+/// a broadcast morph instead of flickering between the two.
+fn board_columns(issues: Slice<models.Issue>, flt: BoardFilter) -> Slice<ColumnVM> {
+  query
     .states()
     .map(|s| ColumnVM {
       state: s,
       label: state_label(s),
       glyph: display.glyph(s),
       sig: strings.ReplaceAll(s, "-", "_") as template.JS,
-      cards: issues.filter(|i| i.state == s).map(card_vm),
+      cards: issues.filter(|i| i.state == s && issue_matches(i, flt)).map(card_vm),
+      total: issues.filter(|i| i.state == s).length(),
     })
-  Ok(BoardVM { states: state_opts(), columns, filter_groups: filter_groups(issues), .. })
+}
+
+/// A whole board, freshly fetched. The broadcast path's renderer, which
+/// must stay UNFILTERED: /events sends one #board fragment to every
+/// board-scoped client, so the per-URL filter is applied by the page
+/// handler (and guarded client-side by the cards' data-show), never here.
+fn board_vm(team_id: string, flt: BoardFilter) -> Result<BoardVM, string> {
+  let issues = fetch_board_issues(team_id)?
+  Ok(BoardVM { states: state_opts(), columns: board_columns(issues, flt), .. })
 }
 
 /// The create dialog's pickers, freshly fetched. Three extra PB reads, paid

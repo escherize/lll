@@ -2,9 +2,12 @@ import "go:encoding/json"
 import "go:html/template"
 import "go:net/http"
 import "go:net/url"
+import "go:strings"
 
+import "display"
 import "models"
 import "pb"
+import "query"
 import "theme"
 
 // The app shell and the two board pages: the rail every page wears, GET / and
@@ -22,7 +25,24 @@ fn rail_vm(active: string, me: string, team: models.Team) -> RailVM {
     accent_css: theme.accent_css(hex),
     favicon: theme.favicon_url(hex, theme.mark_letter(team.key)),
     favorites: fav_vms(),
+    views: view_vms(),
   }
+}
+
+/// The rail's SAVED VIEWS group. Same bargain as fav_vms: a failed fetch
+/// renders an empty group rather than a 500.
+fn view_vms() -> Slice<ViewVM> {
+  let mut list = models.ViewList { .. }
+  if pb.fetch("/api/collections/views/records?perPage=200&sort=-created", "views", &list).is_err() {
+    return []
+  }
+  // A view is a name plus a query string, nothing more: the rail row is the
+  // board URL that query string reproduces.
+  list.items.map(|v| {
+    let mut href = "/"
+    if v.query != "" { href = f"/?{v.query}" }
+    ViewVM { name: v.name, href }
+  })
 }
 
 /// The rail's FAVORITES group. A failed fetch renders an empty group rather
@@ -78,30 +98,113 @@ fn query_param(r: Ref<http.Request>, name: string) -> string {
   u.Query().Get(name)
 }
 
-/// The board, optionally opened on the rail's "My issues" filter (?mine=1).
-/// The filter is a client-side chip, not a server-side query: /events
-/// broadcasts one unfiltered #board fragment to every board client, so a
-/// server-filtered page would be morphed back to the full board on the next
-/// realtime event.
+/// The board: whose whole view state — filter chips AND hidden lanes — is
+/// its query string (TASK-94). The server reads the params, validates them,
+/// and renders the filtered board; every control that changes a filter is a
+/// navigation, so a filtered URL reproduces the view in a fresh browser and
+/// the back button walks between filter states for free.
+///
+/// A rejected param is dropped and said out loud in the flash strip, never
+/// a 500 — the same contract /issues runs on: a stale bookmark must still
+/// show a board.
+///
+/// /events still broadcasts ONE unfiltered #board fragment to every
+/// board-scoped client, so the URL filter is guarded client-side too: each
+/// card's data-show checks the $flt signal the page seeds from its own URL.
 fn board_page(w: http.ResponseWriter, r: Ref<http.Request>, team_id: string, me: string) {
-  let mut vm = match board_vm(team_id) {
-    Ok(v) => v,
+  let mut err = ""
+  let raw = view_query(r)
+
+  // Validate every value against the catalogue before it filters anything.
+  let mut states: Slice<string> = []
+  for s in csv(raw.state) {
+    if query.states().find(|x| x == s).is_some() {
+      states = states.append(s)
+    } else if err == "" {
+      err = f"unknown state '{s}' (use one of: {strings.Join(query.states(), ", ")})"
+    }
+  }
+  let mut assignees: Slice<string> = []
+  for a in csv(raw.assignee) {
+    match resolve_member(a) {
+      Ok(_) => assignees = assignees.append(a),
+      Err(e) => { if err == "" { err = e } },
+    }
+  }
+  let mut labels: Slice<string> = []
+  for l in csv(raw.label) {
+    match resolve_label(l) {
+      Ok(_) => labels = labels.append(l),
+      Err(e) => { if err == "" { err = e } },
+    }
+  }
+  let mut prios: Slice<string> = []
+  for p in csv(raw.prio) {
+    if display.priority_value(p).is_some() {
+      prios = prios.append(p)
+    } else if err == "" {
+      err = f"unknown priority '{p}'"
+    }
+  }
+  let mut hidden: Slice<string> = []
+  for h in csv(raw.hide) {
+    if query.states().find(|x| x == h).is_some() {
+      hidden = hidden.append(h)
+    } else if err == "" {
+      err = f"unknown state '{h}' in hide (use one of: {strings.Join(query.states(), ", ")})"
+    }
+  }
+
+  let q = ViewQuery {
+    state: join_csv(states),
+    assignee: join_csv(assignees),
+    label: join_csv(labels),
+    prio: join_csv(prios),
+    hide: join_csv(hidden),
+    .. // `project` and `sort` are /issues dimensions; the board drops them.
+  }
+  let flt = BoardFilter { states, assignees, labels, prios }
+
+  let issues = match fetch_board_issues(team_id) {
+    Ok(i) => i,
     Err(e) => {
       http.Error(w, e, 500)
       return
     },
   }
-  match compose_vm() {
-    Ok(c) => vm.compose = c,
+  let compose = match compose_vm() {
+    Ok(c) => c,
     Err(e) => {
       http.Error(w, e, 500)
       return
     },
   }
+
+  let mut pairs: Slice<string> = []
+  for s in states { pairs = pairs.append(f"state:{s}") }
+  for a in assignees { pairs = pairs.append(f"assignee:{a}") }
+  for l in labels { pairs = pairs.append(f"label:{l}") }
+  for p in prios { pairs = pairs.append(f"prio:{p}") }
+
   let mut active = "board"
-  if me != "" && query_param(r, "mine") != "" {
-    active = "mine"
-    vm.flt_seed = assignee_chip(me)
+  if me != "" && assignees.contains(me) { active = "mine" }
+
+  let vm = BoardVM {
+    states: state_opts(),
+    columns: board_columns(issues, flt),
+    filter_groups: filter_groups(
+      issues,
+      q,
+      fetch_member_names().unwrap_or([]),
+      fetch_label_names().unwrap_or([]),
+    ),
+    flt_seed: flt_seed_js(pairs),
+    query_str: view_query_string(q),
+    hidden,
+    hide_seed: hide_seed_js(hidden),
+    error: err,
+    no_match: view_query_filtered(q) && !issues.any(|i| issue_matches(i, flt)),
+    compose,
   }
   let rail = rail_vm(active, me, shell_team(team_id))
   let html = match render("board-page", PageVM { rail, page: vm }) {
@@ -116,16 +219,31 @@ fn board_page(w: http.ResponseWriter, r: Ref<http.Request>, team_id: string, me:
   let _ = w.Write(html.bytes())
 }
 
-/// One filter chip, JSON-encoded, for the filter bar's opening signal. JSON
-/// rather than string interpolation because the value is a member's name:
-/// html/template escapes the attribute, the browser unescapes it, and a name
-/// with an apostrophe in it would otherwise land as broken JS.
-fn assignee_chip(name: string) -> template.JS {
-  let Ok(json_bytes) = json.Marshal([f"assignee:{name}"]) else {
-    return "" as template.JS
+/// The active filter as a JSON array of "dim:value" keys, seeding the card
+/// data-show's $flt signal. JSON rather than string interpolation because
+/// the values are member and label names: html/template escapes the
+/// attribute, the browser unescapes it, and a name with an apostrophe in it
+/// would otherwise land as broken JS.
+fn flt_seed_js(pairs: Slice<string>) -> template.JS {
+  let Ok(json_bytes) = json.Marshal(pairs) else {
+    return "[]" as template.JS
   }
   let text = json_bytes as string
   text as template.JS
+}
+
+/// One `$hide_<sig> = ...` assignment per state, so the data-class on .main
+/// always reads defined signals: the states hidden by ?hide= get true, the
+/// rest false.
+fn hide_seed_js(hidden: Slice<string>) -> template.JS {
+  let mut parts: Slice<string> = []
+  for s in query.states() {
+    let sig = strings.ReplaceAll(s, "-", "_")
+    let mut on = "false"
+    if hidden.contains(s) { on = "true" }
+    parts = parts.append(f"$hide_{sig} = {on};")
+  }
+  strings.Join(parts, " ") as template.JS
 }
 
 fn issue_page(w: http.ResponseWriter, r: Ref<http.Request>, team_id: string, me: string) {

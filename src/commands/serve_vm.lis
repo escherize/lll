@@ -76,21 +76,32 @@ pub struct CardVM {
   pub snippet: string,
 }
 
-/// One selectable filter value (chooser option / chip).
+/// One selectable filter value in the board's chooser and chip row. `href`
+/// is the board URL with this value toggled — a navigation, because the URL
+/// is the whole filter state (TASK-94). `active` marks the values the current
+/// URL asked for; `count` is how many board issues carry the value, so a
+/// filter that matches nothing still renders with a count of 0 (TASK-116).
 pub struct FilterOptVM {
   pub value: string,
   pub label: string,
+  pub href: string,
+  pub active: bool,
+  pub count: int,
 }
 
-/// One filter dimension with its distinct values on the board. `dim` matches
-/// the card data-* attribute the client-side filter compares against.
+/// One filter dimension with its distinct values. `dim` matches both the
+/// query param name and the card data-* attribute the client-side guard
+/// compares against.
 pub struct FilterGroupVM {
   pub dim: string,
   pub label: string,
   pub opts: Slice<FilterOptVM>,
 }
 
-/// View model for one board column (a state).
+/// View model for one board column (a state). `cards` carries only the
+/// cards the current URL's filter admits; `total` is the unfiltered count,
+/// so the column's number stays stable across SSE morphs and dims while a
+/// filter is active instead of flickering between the two views.
 pub struct ColumnVM {
   pub state: string,
   pub label: string,
@@ -100,18 +111,39 @@ pub struct ColumnVM {
   // identifier instead of a quoted JS string.
   pub sig: template.JS,
   pub cards: Slice<CardVM>,
+  pub total: int,
 }
 
-/// View model for the board.
+/// View model for the board page.
+///
+/// Since TASK-94 the URL is the source of truth for the board's view state:
+/// the server renders the filtered board straight from the query params, the
+/// filter chips and column-hide buttons are navigations, and localStorage
+/// holds only the last view's query string to restore on a param-less
+/// arrival. The broadcast path fills only `states` and `columns`.
 pub struct BoardVM {
   pub states: Slice<StateOpt>,
   pub columns: Slice<ColumnVM>,
   pub filter_groups: Slice<FilterGroupVM>,
-  // The filter chips the page opens with, as a JS array literal — set only
-  // by the rail's "My issues" link (?mine=1). Empty means "restore whatever
-  // the browser saved", which is every other board load, broadcasts
-  // included: the filter bar lives outside #board and is never re-rendered.
+  // The active filter as a JSON array of "dim:value" keys for the card
+  // data-show — the client-side guard that keeps a broadcast's unfiltered
+  // cards honest on a filtered page. "[]" when the URL carries no filter.
   pub flt_seed: template.JS,
+  // This request's canonical query string ("" or "?state=todo"), for the
+  // save-view form's hidden field and for the restore-on-arrival check.
+  pub query_str: string,
+  // The state slugs hidden by ?hide=, rendered as hc-* classes on .main so
+  // a curl of the URL sees the same board a browser does.
+  pub hidden: Slice<string>,
+  // One `$hide_<sig> = true/false` assignment per state, seeding the signals
+  // data-class reads on .main.
+  pub hide_seed: template.JS,
+  // A rejected query param, said out loud in the flash strip rather than
+  // silently dropped — the same contract /issues runs on.
+  pub error: string,
+  // True when a filter is active and matched nothing: the filter bar says
+  // so instead of showing a silently empty board (TASK-116).
+  pub no_match: bool,
   // Pickers for the create dialog. Zero-valued on the broadcast path — the
   // `board` fragment does not read it. See ComposeVM.
   pub compose: ComposeVM,
@@ -153,6 +185,9 @@ pub struct RailVM {
   // The starred issues, newest first. The one part of the rail that is also
   // broadcast on its own (see favorites_broadcast).
   pub favorites: Slice<FavVM>,
+  // The workspace's saved views (TASK-94, half two): a name plus the board
+  // query string it stands for, rendered as a rail group beside favorites.
+  pub views: Slice<ViewVM>,
 }
 
 /// One starred issue in the rail's FAVORITES group.
@@ -160,6 +195,14 @@ pub struct FavVM {
   pub key: string,
   pub title: string,
   pub state: string,
+}
+
+
+/// One saved view row in the rail. `href` is the board URL the view
+/// navigates to; a view is a name plus a query string, nothing more.
+pub struct ViewVM {
+  pub name: string,
+  pub href: string,
 }
 
 /// A whole page: the shell plus that page's own view model. Page templates
@@ -253,22 +296,14 @@ pub struct IssuesVM {
   pub label: string,
   pub project: string,
   pub sort: string,
-  // URL with every filter dropped and the sort kept, for "Clear".
+  // URL with every filter dropped and the sort kept, for "Clear". Built by
+  // the shared encoder (serve_url.lis), the one the board uses too.
   pub clear_href: string,
   // A rejected query param, said out loud in the flash strip rather than
   // served as a 500 or silently ignored.
   pub error: string,
 }
 
-/// The /issues URL state: four filters plus the sort spec. Held together so
-/// a header link can rebuild the URL with only the sort changed.
-struct IssuesQuery {
-  state: string,
-  assignee: string,
-  label: string,
-  project: string,
-  sort: string,
-}
 
 /// One label row on /settings. `scope` is the owning team's key, or
 /// "workspace" — shown, never edited: which team owns a label is a CLI
