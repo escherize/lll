@@ -109,8 +109,7 @@ Layout:
 - `src/` — Lisette source: `main.lis` dispatch, `commands/` one file per
   noun, `pb/` REST client, `realtime/` SSE client, `query/` filter builder,
   `config/`, `display/`, `gitctx/`, `models/`.
-- `pb/` — PocketBase schema as code: `pb_migrations/` (applied on start) and
-  `pb_hooks/main.pb.js` (per-team issue numbering).
+- `pb/` — PocketBase schema as code: `pb_migrations/`, applied on start.
 - `gopb/` — tiny Go module embedding PocketBase behind one `Serve` function.
 - `web/` — `templates/` (html/template) and `static/` (plain CSS), read from
   disk on every request: edit and refresh, no rebuild.
@@ -118,7 +117,7 @@ Layout:
 ## Architecture
 
 ```
-lll CLI ── REST ──> PocketBase (embedded; sqlite + migrations + hooks)
+lll CLI ── REST ──> PocketBase (embedded; sqlite + migrations)
                         │ realtime SSE (JSON records)
 browser <── HTML/SSE ── lll up web board (Datastar fragment morphing)
 ```
