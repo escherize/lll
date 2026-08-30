@@ -1,0 +1,179 @@
+import "go:strings"
+
+/// One source of truth for a CLI flag (TASK-127). The verb's parser loop,
+/// its --help output and the shell completions all read this table, so a
+/// flag is declared exactly once and the three surfaces cannot drift.
+///
+/// `name` is the canonical spelling — the one shown in help and usage lines.
+/// `alias` is an additional accepted spelling (`-d` for `--description`);
+/// parsed values always land under `name`. A flag with no long form (-t,
+/// -w, -k) simply has the short spelling as its name.
+pub struct Flag {
+  pub name: string,
+  pub alias: string,
+  pub value: bool,    // consumes the next argument
+  pub hint: string,   // placeholder shown in usage lines, "" for booleans
+  pub required: bool, // parse errors with the usage line when never given
+  pub repeat: bool,   // may be given more than once (values accumulate)
+  pub hidden: bool,   // kept out of help and completions (--help itself)
+  pub help: string,   // one help line; "\n" continues on an aligned line
+}
+
+pub struct Parsed {
+  spec: Slice<Flag>,                // kept for alias resolution on lookup
+  vals: Map<string, Slice<string>>, // canonical name -> occurrences in order
+  pos: Slice<string>,               // bare arguments, in order
+}
+
+/// Parse `args` from `start` against `spec`.
+///
+/// Bare arguments become positionals when `allow_positional` (at most one,
+/// as every verb here takes), else they are rejected as unknown flags —
+/// which is how `issue create` rejects a stray word. Unknown dash-prefixed
+/// arguments always error with `unknown flag: '<arg>'`, suffixed with
+/// `usage` when one is given. A value flag consumes the next argument
+/// without looking at it; missing values error naming the typed spelling.
+/// A required flag that never appeared errors with `usage: <usage>`.
+pub fn parse(
+  spec: Slice<Flag>,
+  args: Slice<string>,
+  start: int,
+  allow_positional: bool,
+  usage: string,
+) -> Result<Parsed, string> {
+  let mut vals = Map.new<string, Slice<string>>()
+  let mut pos: Slice<string> = []
+  let mut i = start
+  while i < args.length() {
+    let arg = args[i]
+    let Some(fl) = spec.find(|f| f.name == arg || (f.alias != "" && f.alias == arg)) else {
+      if arg.starts_with("-") || !allow_positional {
+        return Err(unknown_flag(arg, usage))
+      }
+      if !pos.is_empty() {
+        return Err(f"unexpected argument: '{arg}'")
+      }
+      pos = pos.append(arg)
+      i += 1
+      continue
+    }
+    if fl.value {
+      let Some(val) = args.get(i + 1) else {
+        return Err(f"{arg} requires a value")
+      }
+      vals[fl.name] = vals.get(fl.name).unwrap_or([]).append(val)
+      i += 2
+    } else {
+      vals[fl.name] = vals.get(fl.name).unwrap_or([]).append("")
+      i += 1
+    }
+  }
+  for fl in spec {
+    if fl.required && vals.get(fl.name).is_none() {
+      return Err(f"usage: {usage}")
+    }
+  }
+  Ok(Parsed { spec, vals, pos })
+}
+
+fn unknown_flag(arg: string, usage: string) -> string {
+  if usage == "" { return f"unknown flag: '{arg}'" }
+  f"unknown flag: '{arg}'\nusage: {usage}"
+}
+
+impl Parsed {
+  /// The canonical name for a spelling, or the name itself when unknown.
+  fn canon(self, name: string) -> string {
+    let Some(fl) = self.spec.find(|f| f.name == name || (f.alias != "" && f.alias == name)) else {
+      return name
+    }
+    fl.name
+  }
+
+  /// True when the flag (by either spelling) appeared, boolean or not.
+  pub fn given(self, name: string) -> bool {
+    self.vals.get(self.canon(name)).is_some()
+  }
+
+  /// The flag's last value, "" when it never appeared. Later occurrences
+  /// overwrite earlier ones, as every hand-written loop did.
+  pub fn one(self, name: string) -> string {
+    let vals = self.all(name)
+    let Some(last) = vals.get(vals.length() - 1) else {
+      return ""
+    }
+    last
+  }
+
+  /// Every value the flag was given, in order.
+  pub fn all(self, name: string) -> Slice<string> {
+    self.vals.get(self.canon(name)).unwrap_or([])
+  }
+
+  /// The first positional argument, "" when there is none.
+  pub fn first(self) -> string {
+    let Some(f) = self.pos.get(0) else {
+      return ""
+    }
+    f
+  }
+}
+
+/// A usage line fragment: "lll issue create -t \"title\" [-d desc] ...".
+/// Required flags render bare, optional ones bracketed; a repeated flag
+/// trails "..."; `positional` (e.g. "[KEY-123]") sits after the command.
+pub fn usage(cmd: string, spec: Slice<Flag>, positional: string) -> string {
+  let mut out = cmd
+  if positional != "" { out += f" {positional}" }
+  for fl in spec {
+    if fl.hidden { continue }
+    if fl.required {
+      out += f" {fl.name} {fl.hint}"
+    } else if fl.hint != "" {
+      out += f" [{fl.name} {fl.hint}]"
+    } else {
+      out += f" [{fl.name}]"
+    }
+    if fl.repeat { out += "..." }
+  }
+  out
+}
+
+/// The "Flags:" block for --help, aligned from the spec. Empty when the
+/// spec has no visible flags. Continuation lines (a "\n" in help) indent
+/// to the help column.
+pub fn section(spec: Slice<Flag>) -> string {
+  let visible = spec.filter(|f| !f.hidden)
+  if visible.is_empty() { return "" }
+  let mut width = 0
+  for fl in visible {
+    if fl.name.length() > width { width = fl.name.length() }
+  }
+  let cont = strings.Repeat(" ", width + 4)
+  let mut out = "\nFlags:"
+  for fl in visible {
+    let pad = strings.Repeat(" ", width - fl.name.length() + 2)
+    let mut first = true
+    for l in fl.help.split("\n") {
+      if first {
+        out += f"\n  {fl.name}{pad}{l}"
+        first = false
+      } else {
+        out += f"\n{cont}{l}"
+      }
+    }
+  }
+  out
+}
+
+/// Completion tokens for a spec: every accepted spelling, hidden flags
+/// excluded. This is what the shell scripts source.
+pub fn tokens(spec: Slice<Flag>) -> Slice<string> {
+  let mut out: Slice<string> = []
+  for fl in spec {
+    if fl.hidden { continue }
+    out = out.append(fl.name)
+    if fl.alias != "" { out = out.append(fl.alias) }
+  }
+  out
+}

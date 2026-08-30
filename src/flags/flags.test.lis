@@ -1,0 +1,188 @@
+// Unit cover for the shared flag parser, usage/section generators and the
+// completion token emitter — the three surfaces that used to be maintained
+// by hand in three places (TASK-127).
+
+fn spec() -> Slice<Flag> {
+  [
+    Flag { name: "-t", value: true, hint: "\"title\"", help: "title", .. },
+    Flag { name: "--state", value: true, hint: "s", help: "state", .. },
+    Flag { name: "-d", alias: "--description", value: true, hint: "desc", help: "description", .. },
+    Flag { name: "--label", value: true, hint: "name", repeat: true, help: "label", .. },
+    Flag { name: "--json", help: "raw JSON", .. },
+    Flag { name: "--help", alias: "-h", hidden: true, help: "help", .. },
+  ]
+}
+
+fn argv(rest: Slice<string>) -> Slice<string> {
+  ["lll", "issue", "list"].append(rest...)
+}
+
+// ------------------------------------------------------------------ parse
+
+#[test]
+fn parse_collects_values_and_booleans() {
+  let assert Ok(p) = parse(spec(), argv(["--json", "-t", "hi"]), 3, false, "")
+  assert p.given("--json")
+  assert p.one("-t") == "hi"
+  assert !p.given("--state")
+  assert p.one("--state") == ""
+}
+
+#[test]
+fn parse_resolves_aliases_under_the_canonical_name() {
+  let assert Ok(long) = parse(spec(), argv(["--description", "x"]), 3, false, "")
+  let assert Ok(short) = parse(spec(), argv(["-d", "x"]), 3, false, "")
+  assert long.given("-d") && long.given("--description")
+  assert short.given("-d") && short.given("--description")
+  assert short.one("-d") == "x"
+}
+
+#[test]
+fn parse_accepts_a_hidden_flag_by_either_spelling() {
+  let assert Ok(p) = parse(spec(), argv(["--help"]), 3, false, "")
+  assert p.given("--help") && p.given("-h")
+  let assert Ok(short) = parse(spec(), argv(["-h"]), 3, false, "")
+  assert short.given("--help")
+}
+
+#[test]
+fn parse_repeats_accumulate_and_single_values_take_the_last() {
+  let assert Ok(p) = parse(spec(), argv(["--label", "a", "--label", "b"]), 3, false, "")
+  assert p.all("--label").equals(["a", "b"])
+  let assert Ok(twice) = parse(spec(), argv(["-t", "one", "-t", "two"]), 3, false, "")
+  assert twice.one("-t") == "two"
+}
+
+#[test]
+fn parse_errors_on_unknown_flags() {
+  let assert Err(msg) = parse(spec(), argv(["--nope"]), 3, false, "")
+  assert msg == "unknown flag: '--nope'"
+  // A bad flag after a good one is still an error.
+  let assert Err(later) = parse(spec(), argv(["--json", "--nope"]), 3, false, "")
+  assert later.contains("unknown flag: '--nope'")
+}
+
+#[test]
+fn parse_errors_on_a_missing_value() {
+  let assert Err(msg) = parse(spec(), argv(["-t"]), 3, false, "")
+  assert msg == "-t requires a value"
+  // The error names the spelling the user typed, not the canonical name.
+  let assert Err(alias) = parse(spec(), argv(["--description"]), 3, false, "")
+  assert alias == "--description requires a value"
+}
+
+#[test]
+fn parse_appends_the_usage_line_to_unknown_flag_errors() {
+  let assert Err(msg) = parse(spec(), argv(["--nope"]), 3, false, "lll issue list")
+  assert msg.contains("unknown flag: '--nope'")
+  assert msg.contains("usage: lll issue list")
+  // No usage line given: the message stays bare.
+  let assert Err(bare) = parse(spec(), argv(["--nope"]), 3, false, "")
+  assert bare == "unknown flag: '--nope'"
+}
+
+#[test]
+fn parse_errors_when_a_required_flag_is_missing() {
+  let required = [Flag { name: "-t", value: true, hint: "\"title\"", required: true, help: "title", .. }]
+  let assert Err(msg) = parse(required, argv([]), 3, false, "lll issue create -t \"title\"")
+  assert msg == "usage: lll issue create -t \"title\""
+  // A bad flag is reported before the missing requirement.
+  let assert Err(bad) = parse(required, argv(["--nope"]), 3, false, "usage")
+  assert bad.contains("unknown flag")
+  let assert Ok(p) = parse(required, argv(["-t", "hi"]), 3, false, "usage")
+  assert p.given("-t")
+}
+
+#[test]
+fn parse_collects_a_single_positional_when_allowed() {
+  let assert Ok(p) = parse(spec(), argv(["--json", "ENG-6"]), 3, true, "")
+  assert p.first() == "ENG-6"
+  // A second positional is rejected, naming the stray argument.
+  let assert Err(msg) = parse(spec(), argv(["ENG-6", "ENG-7"]), 3, true, "")
+  assert msg == "unexpected argument: 'ENG-7'"
+}
+
+#[test]
+fn parse_rejects_positionals_when_disallowed() {
+  let assert Err(msg) = parse(spec(), argv(["stray"]), 3, false, "usage line")
+  assert msg == "unknown flag: 'stray'\nusage: usage line"
+}
+
+#[test]
+fn parse_treats_a_bare_dash_as_an_unknown_flag() {
+  let assert Err(msg) = parse(spec(), argv(["-"]), 3, true, "")
+  assert msg == "unknown flag: '-'"
+}
+
+#[test]
+fn parse_never_matches_an_empty_alias() {
+  // A bare word is a positional, not a match for some flag's empty alias.
+  let assert Ok(p) = parse(spec(), argv(["ENG-6"]), 3, true, "")
+  assert p.first() == "ENG-6"
+}
+
+#[test]
+fn parse_swallows_the_next_argument_as_a_value_without_looking_at_it() {
+  // A value flag consumes blindly, even when the value looks like a flag.
+  let assert Ok(p) = parse(spec(), argv(["-t", "--json"]), 3, false, "")
+  assert p.one("-t") == "--json"
+  assert !p.given("--json")
+}
+
+// ------------------------------------------------------------------ usage
+
+#[test]
+fn usage_renders_required_optional_and_repeated_flags() {
+  let required = [Flag { name: "-t", value: true, hint: "\"title\"", required: true, help: "title", .. }]
+  let tail = [
+    Flag { name: "-d", alias: "--description", value: true, hint: "desc", help: "description", .. },
+    Flag { name: "--label", value: true, hint: "name", repeat: true, help: "label", .. },
+    Flag { name: "--json", help: "raw JSON", .. },
+  ]
+  let mixed = required.append(tail...)
+  assert usage("lll issue create", mixed, "") ==
+  "lll issue create -t \"title\" [-d desc] [--label name]... [--json]"
+  assert usage("lll issue view", tail, "[KEY-123]") ==
+  "lll issue view [KEY-123] [-d desc] [--label name]... [--json]"
+}
+
+#[test]
+fn usage_skips_hidden_flags() {
+  assert !usage("lll watch", spec(), "").contains("--help")
+}
+
+// ---------------------------------------------------------------- section
+
+#[test]
+fn section_lists_every_visible_flag_and_skips_hidden_ones() {
+  let s = section(spec())
+  assert s.contains("Flags:")
+  for fl in spec() {
+    if fl.hidden {
+      assert !s.contains(fl.name)
+    } else {
+      assert s.contains(fl.name)
+    }
+  }
+}
+
+#[test]
+fn section_aligns_continuation_lines_to_the_help_column() {
+  let spec = [Flag { name: "--emoji", value: true, hint: "X", help: "one emoji\nsecond line", .. }]
+  let s = section(spec)
+  assert s.contains("\n  --emoji  one emoji")
+  assert s.contains("\n           second line")
+}
+
+#[test]
+fn section_is_empty_without_visible_flags() {
+  let spec = [Flag { name: "--help", alias: "-h", hidden: true, help: "help", .. }]
+  assert section(spec) == ""
+}
+
+// ----------------------------------------------------------------- tokens
+
+#[test]
+fn tokens_list_every_spelling_and_skip_hidden_flags() {
+  assert tokens(spec()).equals(["-t", "--state", "-d", "--description", "--label", "--json"])
+}

@@ -1,7 +1,7 @@
 import "go:bufio"
 import "go:encoding/json"
-import "go:io"
 import "go:fmt"
+import "go:io"
 import "go:net/url"
 import "go:os"
 import "go:os/exec"
@@ -12,6 +12,7 @@ import "go:unicode/utf8"
 
 import "config"
 import "display"
+import "flags"
 import "gitctx"
 import "models"
 import "pb"
@@ -47,9 +48,307 @@ fn value_or_stdin(val: string, flag: string) -> Result<string, string> {
 fn check_emoji(val: string) -> Result<string, string> {
   let trimmed = strings.TrimSpace(val)
   if utf8.RuneCountInString(trimmed) > 8 {
-    return Err(f"--emoji takes one emoji, got '{trimmed}' (pass \"\" to clear it)")
+    return Err(
+      f"--emoji takes one emoji, got '{trimmed}' (pass \"\" to clear it)",
+    )
   }
   Ok(trimmed)
+}
+
+/// Shared validators, applied after flags.parse collects the raw values.
+/// They live beside the specs so the error wording has exactly one home.
+fn check_state(val: string) -> Result<string, string> {
+  if query.states().find(|s| s == val).is_none() {
+    return Err(
+      f"unknown state '{val}' (use one of: {strings.Join(query.states(), ", ")})",
+    )
+  }
+  Ok(val)
+}
+
+fn check_priority(val: string) -> Result<int, string> {
+  let Ok(p) = strconv.Atoi(val) else {
+    return Err(f"--priority must be a number 0-4, got '{val}'")
+  }
+  if p < 0 || p > 4 {
+    return Err(
+      f"--priority must be 0-4 (0 none, 1 urgent, 2 high, 3 medium, 4 low), got {p}",
+    )
+  }
+  Ok(p)
+}
+
+// ---------------------------------------------------------------------
+// Flag tables. One entry per flag: the parser, `lll issue --help` and
+// `lll completions` all read them (TASK-127). `name` is the spelling shown
+// in usage lines; `alias` is also accepted.
+
+fn issue_create_spec() -> Slice<flags.Flag> {
+  [
+    flags.Flag {
+      name: "-t",
+      value: true,
+      hint: "\"title\"",
+      required: true,
+      help: "title of the issue",
+      ..
+    },
+    flags.Flag {
+      name: "-d",
+      alias: "--description",
+      value: true,
+      hint: "desc",
+      help: "description ('-d -' reads it from stdin)",
+      ..
+    },
+    flags.Flag {
+      name: "--emoji",
+      value: true,
+      hint: "X",
+      help: "one emoji for the issue, shown on the card, the issue page and\nthe list; pass \"\" to clear it",
+      ..
+    },
+    flags.Flag {
+      name: "--priority",
+      value: true,
+      hint: "0-4",
+      help: "0 none, 1 urgent (!!!), 2 high (!!), 3 medium (!), 4 low (·)",
+      ..
+    },
+    flags.Flag {
+      name: "--assignee",
+      value: true,
+      hint: "name",
+      help: "member name (see 'lll member list'); filters on list",
+      ..
+    },
+    flags.Flag {
+      name: "--label",
+      value: true,
+      hint: "name",
+      repeat: true,
+      help: "label name (see 'lll label list'); repeatable on create/update\n(update replaces the set); filters on list",
+      ..
+    },
+    flags.Flag {
+      name: "--project",
+      value: true,
+      hint: "name",
+      help: "project name (see 'lll project list'); filters on list",
+      ..
+    },
+  ]
+}
+
+fn issue_list_spec() -> Slice<flags.Flag> {
+  [
+    flags.Flag {
+      name: "--state",
+      value: true,
+      hint: "s",
+      help: "one of: backlog, todo, in-progress, in-review, done, cancelled",
+      ..
+    },
+    flags.Flag {
+      name: "--assignee",
+      value: true,
+      hint: "name",
+      help: "member name (see 'lll member list'); filters on list",
+      ..
+    },
+    flags.Flag {
+      name: "--label",
+      value: true,
+      hint: "name",
+      repeat: true,
+      help: "label name (see 'lll label list'); repeatable on create/update\n(update replaces the set); filters on list",
+      ..
+    },
+    flags.Flag {
+      name: "--project",
+      value: true,
+      hint: "name",
+      help: "project name (see 'lll project list'); filters on list",
+      ..
+    },
+    flags.Flag {
+      name: "--search",
+      value: true,
+      hint: "q",
+      help: "list only issues whose title contains q",
+      ..
+    },
+    flags.Flag {
+      name: "--sort",
+      value: true,
+      hint: "f",
+      help: "created, updated, priority, or number; prefix - for descending\n(default: LLL_SORT or 'sort' in .lll.toml, else created)",
+      ..
+    },
+    flags.Flag {
+      name: "--limit",
+      value: true,
+      hint: "N",
+      help: "list at most N issues (positive integer)",
+      ..
+    },
+    flags.Flag {
+      name: "--json",
+      help: "raw PocketBase JSON (team, assignee, labels, project\nexpanded), pipe-friendly",
+      ..
+    },
+  ]
+}
+
+fn issue_view_spec() -> Slice<flags.Flag> {
+  [
+    flags.Flag {
+      name: "--json",
+      help: "raw PocketBase JSON (team, assignee, labels, project\nexpanded), pipe-friendly",
+      ..
+    },
+    flags.Flag {
+      name: "--raw",
+      help: "print the issue as plain markdown (view)",
+      ..
+    },
+    flags.Flag {
+      name: "-w",
+      help: "open the issue's web page in the browser (view)",
+      ..
+    },
+  ]
+}
+
+fn issue_update_spec() -> Slice<flags.Flag> {
+  [
+    flags.Flag {
+      name: "--state",
+      value: true,
+      hint: "s",
+      help: "one of: backlog, todo, in-progress, in-review, done, cancelled",
+      ..
+    },
+    flags.Flag {
+      name: "--priority",
+      value: true,
+      hint: "0-4",
+      help: "0 none, 1 urgent (!!!), 2 high (!!), 3 medium (!), 4 low (·)",
+      ..
+    },
+    flags.Flag {
+      name: "--assignee",
+      value: true,
+      hint: "name",
+      help: "member name (see 'lll member list'); filters on list",
+      ..
+    },
+    flags.Flag {
+      name: "--label",
+      value: true,
+      hint: "name",
+      repeat: true,
+      help: "label name (see 'lll label list'); repeatable on create/update\n(update replaces the set); filters on list",
+      ..
+    },
+    flags.Flag {
+      name: "--project",
+      value: true,
+      hint: "name",
+      help: "project name (see 'lll project list'); filters on list",
+      ..
+    },
+    flags.Flag {
+      name: "--title",
+      value: true,
+      hint: "t",
+      help: "new title (update)",
+      ..
+    },
+    flags.Flag {
+      name: "--description",
+      value: true,
+      hint: "d",
+      help: "new description (update; '-d -' reads it from stdin)",
+      ..
+    },
+    flags.Flag {
+      name: "--emoji",
+      value: true,
+      hint: "e",
+      help: "one emoji for the issue, shown on the card, the issue page and\nthe list; pass \"\" to clear it",
+      ..
+    },
+  ]
+}
+
+fn issue_delete_spec() -> Slice<flags.Flag> {
+  [flags.Flag { name: "--force", help: "skip the delete confirmation", .. }]
+}
+
+fn issue_comment_spec() -> Slice<flags.Flag> {
+  [
+    flags.Flag {
+      name: "-b",
+      value: true,
+      hint: "\"body\"",
+      help: "comment body ('-b -' reads it from stdin)",
+      ..
+    },
+  ]
+}
+
+pub fn issue_watch_spec() -> Slice<flags.Flag> {
+  [
+    flags.Flag {
+      name: "--json",
+      help: "NDJSON: one raw PocketBase event object per line, with a\n\"topic\" field added",
+      ..
+    },
+  ]
+}
+
+/// The flag table of one issue verb; empty for the verbs without flags.
+/// Read by `lll completions` — the shell scripts complete exactly what the
+/// parser accepts because they read the same table.
+pub fn issue_verb_spec(verb: string) -> Slice<flags.Flag> {
+  match verb {
+    "create" => issue_create_spec(),
+    "list" => issue_list_spec(),
+    "view" => issue_view_spec(),
+    "update" => issue_update_spec(),
+    "delete" => issue_delete_spec(),
+    "comment" => issue_comment_spec(),
+    "watch" => issue_watch_spec(),
+    _ => [],
+  }
+}
+
+/// Every flag across the issue verbs, deduplicated by canonical name
+/// (first wording wins), in the order the verbs declare them. This is the
+/// Flags: block `lll issue --help` renders.
+fn issue_union_spec() -> Slice<flags.Flag> {
+  let mut out: Slice<flags.Flag> = []
+  for verb in [
+    "create",
+    "list",
+    "view",
+    "update",
+    "delete",
+    "comment",
+    "watch",
+    "close",
+    "start",
+    "url",
+    "id",
+    "title",
+    "pr",
+  ] {
+    for fl in issue_verb_spec(verb) {
+      if out.find(|f| f.name == fl.name).is_none() { out = out.append(fl) }
+    }
+  }
+  out
 }
 
 /// Dispatch `lll issue <verb>`.
@@ -114,26 +413,9 @@ Usage:
   lll issue pr [KEY-123]                          open a GitHub PR for the issue via
                                                   'gh pr create' (title \"KEY-123: title\",
                                                   body links the issue)
-
-Flags:
-  --state        one of: backlog, todo, in-progress, in-review, done, cancelled
-  --assignee     member name (see 'lll member list'); filters on list
-  --label        label name (see 'lll label list'); repeatable on create/update
-                 (update replaces the set); filters on list
-  --project      project name (see 'lll project list'); filters on list
-  --search       list only issues whose title contains q
-  --sort         created, updated, priority, or number; prefix - for descending
-                 (default: LLL_SORT or 'sort' in .lll.toml, else created)
-  --limit        list at most N issues (positive integer)
-  --priority     0 none, 1 urgent (!!!), 2 high (!!), 3 medium (!), 4 low (·)
-  --title        new title (update)
-  --description  new description (update)
-  --emoji        one emoji for the issue, shown on the card, the issue page and
-                 the list; pass \"\" to clear it
-  --json         raw PocketBase JSON (team, assignee, labels, project
-                 expanded), pipe-friendly
-  --force        skip the delete confirmation
-  -w             open the issue's web page in the browser (view)
+" +
+    flags.section(issue_union_spec()) +
+    "
 
 Web URLs come from LLL_WEB_URL, 'web_url' in .lll.toml, or the default
 http://127.0.0.1:8100 (where 'lll up' serves the board).
@@ -148,88 +430,18 @@ The team comes from LLL_TEAM or 'team' in .lll.toml (see 'lll config --help').",
 }
 
 fn create(args: Slice<string>) -> Result<(), string> {
-  let mut title = ""
+  let spec = issue_create_spec()
+  let usage = flags.usage("lll issue create", spec, "")
+  let p = flags.parse(spec, args, 3, false, usage)?
+  let title = p.one("-t")
   let mut description = ""
-  let mut emoji = ""
+  if p.given("-d") { description = value_or_stdin(p.one("-d"), "-d")? }
+  let emoji = check_emoji(p.one("--emoji"))?
   let mut priority = 0
-  let mut assignee_name = ""
-  let mut label_names: Slice<string> = []
-  let mut project_name = ""
-  let mut i = 3
-  while i < args.length() {
-    match args[i] {
-      "-t" => {
-        let Some(val) = args.get(i + 1) else {
-          return Err("-t requires a value")
-        }
-        title = val
-        i += 2
-      },
-      "-d" => {
-        let Some(val) = args.get(i + 1) else {
-          return Err("-d requires a value")
-        }
-        description = value_or_stdin(val, "-d")?
-        i += 2
-      },
-      "--description" => {
-        let Some(val) = args.get(i + 1) else {
-          return Err("--description requires a value")
-        }
-        description = value_or_stdin(val, "--description")?
-        i += 2
-      },
-      "--emoji" => {
-        let Some(val) = args.get(i + 1) else {
-          return Err("--emoji requires a value")
-        }
-        emoji = check_emoji(val)?
-        i += 2
-      },
-      "--assignee" => {
-        let Some(val) = args.get(i + 1) else {
-          return Err("--assignee requires a value")
-        }
-        assignee_name = val
-        i += 2
-      },
-      "--label" => {
-        let Some(val) = args.get(i + 1) else {
-          return Err("--label requires a value")
-        }
-        label_names = label_names.append(val)
-        i += 2
-      },
-      "--project" => {
-        let Some(val) = args.get(i + 1) else {
-          return Err("--project requires a value")
-        }
-        project_name = val
-        i += 2
-      },
-      "--priority" => {
-        let Some(val) = args.get(i + 1) else {
-          return Err("--priority requires a value")
-        }
-        let Ok(p) = strconv.Atoi(val) else {
-          return Err(f"--priority must be a number 0-4, got '{val}'")
-        }
-        if p < 0 || p > 4 {
-          return Err(
-            f"--priority must be 0-4 (0 none, 1 urgent, 2 high, 3 medium, 4 low), got {p}",
-          )
-        }
-        priority = p
-        i += 2
-      },
-      other => return Err(f"unknown flag: '{other}'"),
-    }
-  }
-  if title == "" {
-    return Err(
-      "usage: lll issue create -t \"title\" [-d desc] [--emoji X] [--priority 0-4] [--assignee name] [--label name]... [--project name]",
-    )
-  }
+  if p.given("--priority") { priority = check_priority(p.one("--priority"))? }
+  let assignee_name = p.one("--assignee")
+  let label_names = p.all("--label")
+  let project_name = p.one("--project")
 
   let mut assignee = ""
   if assignee_name != "" { assignee = resolve_member(assignee_name)?.id }
@@ -252,7 +464,7 @@ fn create(args: Slice<string>) -> Result<(), string> {
     return Err(unknown_team(team_key))
   }
 
-  let new_issue = models.NewIssue { 
+  let new_issue = models.NewIssue {
     team: team.id,
     title,
     description,
@@ -278,82 +490,24 @@ fn create(args: Slice<string>) -> Result<(), string> {
 }
 
 fn list(args: Slice<string>) -> Result<(), string> {
+  let p = flags.parse(issue_list_spec(), args, 3, false, "")?
   let mut state = ""
-  let mut assignee_name = ""
-  let mut label_name = ""
-  let mut project_name = ""
-  let mut search = ""
-  let mut sort_flag = ""
+  if p.given("--state") { state = check_state(p.one("--state"))? }
+  let assignee_name = p.one("--assignee")
+  let label_name = p.one("--label")
+  let project_name = p.one("--project")
+  let search = p.one("--search")
+  let sort_flag = p.one("--sort")
   let mut limit = 0
-  let mut json_mode = false
-  let mut i = 3
-  while i < args.length() {
-    match args[i] {
-      "--assignee" => {
-        let Some(val) = args.get(i + 1) else {
-          return Err("--assignee requires a value")
-        }
-        assignee_name = val
-        i += 2
-      },
-      "--label" => {
-        let Some(val) = args.get(i + 1) else {
-          return Err("--label requires a value")
-        }
-        label_name = val
-        i += 2
-      },
-      "--project" => {
-        let Some(val) = args.get(i + 1) else {
-          return Err("--project requires a value")
-        }
-        project_name = val
-        i += 2
-      },
-      "--search" => {
-        let Some(val) = args.get(i + 1) else {
-          return Err("--search requires a value")
-        }
-        search = val
-        i += 2
-      },
-      "--state" => {
-        let Some(val) = args.get(i + 1) else {
-          return Err("--state requires a value")
-        }
-        if query.states().find(|s| s == val).is_none() {
-          return Err(
-            f"unknown state '{val}' (use one of: {strings.Join(query.states(), ", ")})",
-          )
-        }
-        state = val
-        i += 2
-      },
-      "--sort" => {
-        let Some(val) = args.get(i + 1) else {
-          return Err("--sort requires a value")
-        }
-        sort_flag = val
-        i += 2
-      },
-      "--limit" => {
-        let Some(val) = args.get(i + 1) else {
-          return Err("--limit requires a value")
-        }
-        let Ok(n) = strconv.Atoi(val) else {
-          return Err(f"--limit must be a positive integer, got '{val}'")
-        }
-        if n < 1 { return Err(f"--limit must be a positive integer, got {n}") }
-        limit = n
-        i += 2
-      },
-      "--json" => {
-        json_mode = true
-        i += 1
-      },
-      other => return Err(f"unknown flag: '{other}'"),
+  if p.given("--limit") {
+    let raw = p.one("--limit")
+    let Ok(n) = strconv.Atoi(raw) else {
+      return Err(f"--limit must be a positive integer, got '{raw}'")
     }
+    if n < 1 { return Err(f"--limit must be a positive integer, got {n}") }
+    limit = n
   }
+  let json_mode = p.given("--json")
 
   let cfg = config.load()?
 
@@ -427,33 +581,16 @@ fn print_issue_table(issues: Slice<models.Issue>) -> Result<(), string> {
 }
 
 fn view(args: Slice<string>) -> Result<(), string> {
-  let mut id = ""
-  let mut json_mode = false
-  let mut raw_mode = false
-  let mut open_web = false
-  let mut i = 3
-  while i < args.length() {
-    match args[i] {
-      "--json" => {
-        json_mode = true
-        i += 1
-      },
-      "--raw" => {
-        raw_mode = true
-        i += 1
-      },
-      "-w" => {
-        open_web = true
-        i += 1
-      },
-      other => {
-        if id != "" { return Err(f"unexpected argument: '{other}'") }
-        id = other
-        i += 1
-      },
-    }
-  }
-  let resolved = resolve_id(id, "lll issue view [KEY-123] [--json] [--raw] [-w]")?
+  let spec = issue_view_spec()
+  let p = flags.parse(spec, args, 3, true, "")?
+  let id = p.first()
+  let json_mode = p.given("--json")
+  let raw_mode = p.given("--raw")
+  let open_web = p.given("-w")
+  let resolved = resolve_id(
+    id,
+    flags.usage("lll issue view", spec, "[KEY-123]"),
+  )?
 
   if open_web {
     let target = issue_url(fetch_issue(resolved)?)?
@@ -518,109 +655,27 @@ fn view(args: Slice<string>) -> Result<(), string> {
 }
 
 fn update(args: Slice<string>) -> Result<(), string> {
-  let usage = "lll issue update [KEY-123] [--state s] [--priority 0-4] [--assignee name] [--label name]... [--project name] [--title t] [--description d] [--emoji e]"
-  let mut id = ""
+  let spec = issue_update_spec()
+  let usage = flags.usage("lll issue update", spec, "[KEY-123]")
+  let p = flags.parse(spec, args, 3, true, "")?
+  let id = p.first()
   let mut state = ""
+  if p.given("--state") { state = check_state(p.one("--state"))? }
   let mut priority = -1
-  let mut assignee_name = ""
-  let mut label_names: Slice<string> = []
-  let mut project_name = ""
-  let mut title = ""
-  let mut title_set = false
+  if p.given("--priority") { priority = check_priority(p.one("--priority"))? }
+  let assignee_name = p.one("--assignee")
+  let label_names = p.all("--label")
+  let project_name = p.one("--project")
+  let title = p.one("--title")
+  let title_set = p.given("--title")
   let mut description = ""
-  let mut description_set = false
-  let mut emoji = ""
-  let mut emoji_set = false
-  let mut i = 3
-  while i < args.length() {
-    match args[i] {
-      "--assignee" => {
-        let Some(val) = args.get(i + 1) else {
-          return Err("--assignee requires a value")
-        }
-        assignee_name = val
-        i += 2
-      },
-      "--label" => {
-        let Some(val) = args.get(i + 1) else {
-          return Err("--label requires a value")
-        }
-        label_names = label_names.append(val)
-        i += 2
-      },
-      "--project" => {
-        let Some(val) = args.get(i + 1) else {
-          return Err("--project requires a value")
-        }
-        project_name = val
-        i += 2
-      },
-      "--state" => {
-        let Some(val) = args.get(i + 1) else {
-          return Err("--state requires a value")
-        }
-        if query.states().find(|s| s == val).is_none() {
-          return Err(
-            f"unknown state '{val}' (use one of: {strings.Join(query.states(), ", ")})",
-          )
-        }
-        state = val
-        i += 2
-      },
-      "--priority" => {
-        let Some(val) = args.get(i + 1) else {
-          return Err("--priority requires a value")
-        }
-        let Ok(p) = strconv.Atoi(val) else {
-          return Err(f"--priority must be a number 0-4, got '{val}'")
-        }
-        if p < 0 || p > 4 {
-          return Err(
-            f"--priority must be 0-4 (0 none, 1 urgent, 2 high, 3 medium, 4 low), got {p}",
-          )
-        }
-        priority = p
-        i += 2
-      },
-      "--title" => {
-        let Some(val) = args.get(i + 1) else {
-          return Err("--title requires a value")
-        }
-        if val == "" { return Err("--title cannot be empty") }
-        title = val
-        title_set = true
-        i += 2
-      },
-      "--description" => {
-        let Some(val) = args.get(i + 1) else {
-          return Err("--description requires a value")
-        }
-        description = value_or_stdin(val, "--description")?
-        description_set = true
-        i += 2
-      },
-      "--emoji" => {
-        let Some(val) = args.get(i + 1) else {
-          return Err("--emoji requires a value")
-        }
-        emoji = check_emoji(val)?
-        emoji_set = true
-        i += 2
-      },
-      other => {
-        if other.starts_with("-") { return Err(f"unknown flag: '{other}'") }
-        if id != "" { return Err(f"unexpected argument: '{other}'") }
-        id = other
-        i += 1
-      },
-    }
+  if p.given("--description") {
+    description = value_or_stdin(p.one("--description"), "--description")?
   }
-  if state == "" && priority < 0 && assignee_name == "" &&
-  label_names.is_empty() &&
-  project_name == "" &&
-  !title_set &&
-  !description_set &&
-  !emoji_set {
+  let description_set = p.given("--description")
+  let emoji = check_emoji(p.one("--emoji"))?
+  let emoji_set = p.given("--emoji")
+  if state == "" && priority < 0 && assignee_name == "" && label_names.is_empty() && project_name == "" && !title_set && !description_set && !emoji_set {
     return Err(f"nothing to update — pass at least one flag\nusage: {usage}")
   }
 
@@ -702,23 +757,9 @@ fn start(args: Slice<string>) -> Result<(), string> {
 }
 
 fn delete_issue(args: Slice<string>) -> Result<(), string> {
-  let mut id = ""
-  let mut force = false
-  let mut i = 3
-  while i < args.length() {
-    match args[i] {
-      "--force" => {
-        force = true
-        i += 1
-      },
-      other => {
-        if other.starts_with("-") { return Err(f"unknown flag: '{other}'") }
-        if id != "" { return Err(f"unexpected argument: '{other}'") }
-        id = other
-        i += 1
-      },
-    }
-  }
+  let p = flags.parse(issue_delete_spec(), args, 3, true, "")?
+  let id = p.first()
+  let force = p.given("--force")
   // Deleting by inferred branch is too dangerous; the ID must be explicit.
   if id == "" { return Err("usage: lll issue delete KEY-123 [--force]") }
 
@@ -741,29 +782,13 @@ fn delete_issue(args: Slice<string>) -> Result<(), string> {
 }
 
 fn comment(args: Slice<string>) -> Result<(), string> {
-  let usage = "lll issue comment [KEY-123] [-b \"body\"]"
-  let mut id = ""
+  let spec = issue_comment_spec()
+  let usage = flags.usage("lll issue comment", spec, "[KEY-123]")
+  let p = flags.parse(spec, args, 3, true, "")?
+  let id = p.first()
   let mut body = ""
-  let mut body_set = false
-  let mut i = 3
-  while i < args.length() {
-    match args[i] {
-      "-b" => {
-        let Some(val) = args.get(i + 1) else {
-          return Err("-b requires a value")
-        }
-        body = value_or_stdin(val, "-b")?
-        body_set = true
-        i += 2
-      },
-      other => {
-        if other.starts_with("-") { return Err(f"unknown flag: '{other}'") }
-        if id != "" { return Err(f"unexpected argument: '{other}'") }
-        id = other
-        i += 1
-      },
-    }
-  }
+  if p.given("-b") { body = value_or_stdin(p.one("-b"), "-b")? }
+  let body_set = p.given("-b")
 
   let resolved = resolve_id(id, usage)?
   let issue = fetch_issue(resolved)?
@@ -925,9 +950,7 @@ fn deslug(arg: string) -> string {
     let after_scheme = strings.SplitN(a, "://", 2)[1]
     if !strings.Contains(after_scheme, "/") { return arg }
     a = strings.SplitN(after_scheme, "/", 2)[1]
-  } else if !strings.Contains(a, "/") {
-    return arg
-  }
+  } else if !strings.Contains(a, "/") { return arg }
   a = strings.TrimSuffix(a, "/")
   a = strings.TrimPrefix(a, "issue/")
   if strings.Contains(a, "/") { return arg }

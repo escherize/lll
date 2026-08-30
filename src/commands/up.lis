@@ -11,6 +11,7 @@ import "go:unicode"
 import "go:time"
 
 import "config"
+import "flags"
 
 // `lll up` — one command for local use: PocketBase + the web board, one process.
 //
@@ -21,46 +22,38 @@ import "config"
 // PocketBase installs its own SIGINT/SIGTERM handler and shuts down
 // gracefully; when its Serve returns we exit the process, which takes the
 // board down too — Ctrl-C or a plain `kill <pid>` stops everything.
+fn up_spec() -> Slice<flags.Flag> {
+  [
+    flags.Flag { name: "--port", value: true, hint: "8100", help: "preferred web-board port; taken ports auto-increment", .. },
+    flags.Flag { name: "--pb-dir", value: true, hint: "pb/pb_data", help: "PocketBase data directory (migrations stay cwd-relative)", .. },
+    flags.Flag { name: "--no-open", help: "do not open the board in the browser", .. },
+    flags.Flag { name: "--help", alias: "-h", hidden: true, help: "show this help", .. },
+  ]
+}
+
+/// The flag table of the up verb; read by `lll completions`.
+pub fn up_verb_spec(_verb: string) -> Slice<flags.Flag> {
+  up_spec()
+}
 
 pub fn up(args: Slice<string>) -> Result<(), string> {
-  let mut web_port = 8100
-  let mut pb_dir = "pb/pb_data"
-  let mut open = true
-  let mut i = 2
-  while i < args.length() {
-    match args[i] {
-      "--port" => {
-        let Some(val) = args.get(i + 1) else {
-          return Err("--port requires a value")
-        }
-        let Ok(p) = strconv.Atoi(val) else {
-          return Err(f"--port must be a number, got '{val}'")
-        }
-        web_port = p
-        i += 2
-      },
-      "--no-open" => {
-        open = false
-        i += 1
-      },
-      "--pb-dir" => {
-        let Some(val) = args.get(i + 1) else {
-          return Err("--pb-dir requires a value")
-        }
-        pb_dir = val
-        i += 2
-      },
-      "--help" => {
-        print_up_usage()
-        return Ok(())
-      },
-      "-h" => {
-        print_up_usage()
-        return Ok(())
-      },
-      other => return Err(f"unknown flag: '{other}'"),
-    }
+  let spec = up_spec()
+  let p = flags.parse(spec, args, 2, false, "")?
+  if p.given("--help") {
+    print_up_usage()
+    return Ok(())
   }
+  let mut web_port = 8100
+  let raw_port = p.one("--port")
+  if raw_port != "" {
+    let Ok(pn) = strconv.Atoi(raw_port) else {
+      return Err(f"--port must be a number, got '{raw_port}'")
+    }
+    web_port = pn
+  }
+  let pb_dir = p.one("--pb-dir")
+  let pb_dir = if pb_dir == "" { "pb/pb_data" } else { pb_dir }
+  let open = !p.given("--no-open")
 
   // PocketBase reads these from disk relative to the working directory. Missing
   // them does not fail loudly — it boots an unmigrated database whose first API
@@ -193,9 +186,22 @@ fn ensure_team(want: string) -> Result<string, string> {
     if let Some(t) = find_team(want)? {
       return Ok(t.key)
     }
-    let created = create_team(want, want)?
-    fmt.Println(f"created team {created.key}")
-    return Ok(created.key)
+    // Another lll up pointed at the same fresh server may create the team
+    // between our find and our create; the unique index rejects the loser,
+    // and the loser re-looks-up whoever won rather than failing the boot
+    // (the same bargain e2e.sh's seed_team runs on).
+    match create_team(want, want) {
+      Ok(created) => {
+        fmt.Println(f"created team {created.key}")
+        return Ok(created.key)
+      },
+      Err(_) => {
+        if let Some(t) = find_team(want)? {
+          return Ok(t.key)
+        }
+        return Err(f"could not create team '{want}' and none exists to reuse")
+      },
+    }
   }
 
   let teams = list_teams()?
@@ -205,8 +211,17 @@ fn ensure_team(want: string) -> Result<string, string> {
   let key = ask_team(suggested)?
   let existing = find_team(key)?
   if existing.is_none() {
-    let created = create_team(key, key)?
-    fmt.Println(f"created team {created.key} — issues will be {created.key}-1, {created.key}-2, ...")
+    match create_team(key, key) {
+      Ok(created) => {
+        let _ = fmt.Println(f"created team {created.key} — issues will be {created.key}-1, {created.key}-2, ...")
+      },
+      Err(_) => {
+        let existing = find_team(key)?
+        if existing.is_none() {
+          return Err(f"could not create team '{key}' and none exists to reuse")
+        }
+      },
+    }
   }
   save_team(key)?
   Ok(key)

@@ -2,6 +2,7 @@ import "go:encoding/json"
 import "go:fmt"
 import "go:net/url"
 
+import "flags"
 import "models"
 import "pb"
 
@@ -46,32 +47,42 @@ fn team_list() -> Result<(), string> {
   Ok(())
 }
 
+fn team_create_spec() -> Slice<flags.Flag> {
+  [
+    flags.Flag {
+      name: "-k",
+      value: true,
+      hint: "KEY",
+      required: true,
+      help: "team key (e.g. ENG)",
+      ..
+    },
+    flags.Flag {
+      name: "-n",
+      value: true,
+      hint: "\"Name\"",
+      required: true,
+      help: "team name",
+      ..
+    },
+  ]
+}
+
+/// The flag table of one team verb; empty for verbs without flags. Read by
+/// `lll completions` so the scripts complete exactly what the parser accepts.
+pub fn team_verb_spec(verb: string) -> Slice<flags.Flag> {
+  match verb {
+    "create" => team_create_spec(),
+    _ => [],
+  }
+}
+
 fn team_create(args: Slice<string>) -> Result<(), string> {
-  let mut key = ""
-  let mut name = ""
-  let mut i = 3
-  while i < args.length() {
-    match args[i] {
-      "-k" => {
-        let Some(val) = args.get(i + 1) else {
-          return Err("-k requires a value")
-        }
-        key = val
-        i += 2
-      },
-      "-n" => {
-        let Some(val) = args.get(i + 1) else {
-          return Err("-n requires a value")
-        }
-        name = val
-        i += 2
-      },
-      other => return Err(f"unknown flag: '{other}'"),
-    }
-  }
-  if key == "" || name == "" {
-    return Err("usage: lll team create -k KEY -n \"Name\"")
-  }
+  let spec = team_create_spec()
+  let usage = flags.usage("lll team create", spec, "")
+  let p = flags.parse(spec, args, 3, false, usage)?
+  let key = p.one("-k")
+  let name = p.one("-n")
 
   let created = create_team(key, name)?
   fmt.Println(f"Created team {created.key}: {created.name}")
@@ -98,7 +109,11 @@ pub fn create_team(key: string, name: string) -> Result<models.Team, string> {
 /// Every team, key-sorted. Shared by `lll team list` and `lll up`.
 pub fn list_teams() -> Result<models.TeamList, string> {
   let mut teams = models.TeamList { .. }
-  pb.fetch("/api/collections/teams/records?perPage=200&sort=key", "teams", &teams)?
+  pb.fetch(
+    "/api/collections/teams/records?perPage=200&sort=key",
+    "teams",
+    &teams,
+  )?
   Ok(teams)
 }
 
