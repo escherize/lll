@@ -632,10 +632,25 @@ if command -v playwright-cli >/dev/null 2>&1; then
   # --- create more: the dialog stays open for the next issue (task-159) ---
   # The toggle is a preference signal on #ni-modal, outside the morph and
   # the form reset. Submitting with it on posts the SAME /create, the
-  # server closes the dialog as always, and the client reopens it —
+  # server closes the dialog as always, and the client reopens it ---
   # clearing title and description, keeping the scoping fields. The board
   # repaint is the existing broadcast: navs stays 1 throughout.
   seq_goto "$WEB/"
+  more_js="() => JSON.stringify({open: getComputedStyle(document.querySelector('.ni-shade')).display !== 'none', title: document.getElementById('ni-title').value, desc: document.getElementById('ni-desc').value, focused: document.activeElement === document.getElementById('ni-title'), more: document.getElementById('ni-more').checked, assignee: document.querySelector('#ni-form select[name=assignee]').value, one: [...document.querySelectorAll('.card .title')].some(e => e.textContent === 'Create more one'), two: [...document.querySelectorAll('.card .title')].some(e => e.textContent === 'Create more two'), off: [...document.querySelectorAll('.card .title')].some(e => e.textContent === 'Create more off'), navs: performance.getEntriesByType('navigation').length, flash: document.getElementById('flash').textContent})"
+  # A submit click can be swallowed while the page is still settling after
+  # the last-view restore redirect (seen under e2e load: playwright reports
+  # the click, the button's handler never runs, the POST is never sent).
+  # Click again until the probe shows the POST went through --- an extra
+  # click is harmless, an empty title just refocuses the field.
+  ni_submit() { # needle --- click create until the probe matches
+    local out=""
+    for _ in 1 2 3 4; do
+      playwright-cli -s="$BROWSER_SESSION" click "#ni-create" >/dev/null 2>&1 || true
+      out=$(page_until "$more_js" "$1")
+      case "$out" in *"$1"*) break ;; esac
+    done
+    printf '%s' "$out"
+  }
   playwright-cli -s="$BROWSER_SESSION" click "#ni-expand" >/dev/null 2>&1 \
     || fail "playwright: opening the create dialog"
   sleep 0.4
@@ -644,10 +659,9 @@ if command -v playwright-cli >/dev/null 2>&1; then
   scoped=$(playwright-cli -s="$BROWSER_SESSION" eval \
     "() => { const s = document.querySelector('#ni-form select[name=assignee]'); if (s.options.length > 1) s.selectedIndex = 1; s.dispatchEvent(new Event('change', {bubbles: true})); return s.value }" \
     | sed -n '/### Result/{n;p;}' | tr -d '\\')
-  more_js="() => JSON.stringify({open: getComputedStyle(document.querySelector('.ni-shade')).display !== 'none', title: document.getElementById('ni-title').value, desc: document.getElementById('ni-desc').value, focused: document.activeElement === document.getElementById('ni-title'), more: document.getElementById('ni-more').checked, assignee: document.querySelector('#ni-form select[name=assignee]').value, one: [...document.querySelectorAll('.card .title')].some(e => e.textContent === 'Create more one'), two: [...document.querySelectorAll('.card .title')].some(e => e.textContent === 'Create more two'), off: [...document.querySelectorAll('.card .title')].some(e => e.textContent === 'Create more off'), navs: performance.getEntriesByType('navigation').length})"
   playwright-cli -s="$BROWSER_SESSION" fill "#ni-title" "Create more one" >/dev/null 2>&1 \
     || fail "playwright: typing the first Create-more title"
-  first=$(page_until "$more_js" '"one":true,"navs":1')
+  first=$(ni_submit '"one":true,"navs":1')
   assert_contains "$first" '"open":true' "task-159: submitting with Create more keeps the dialog open"
   assert_contains "$first" '"title":""' "task-159: the title is cleared for the next issue"
   assert_contains "$first" '"desc":""' "task-159: the description is cleared for the next issue"
@@ -656,19 +670,15 @@ if command -v playwright-cli >/dev/null 2>&1; then
   assert_contains "$first" '"navs":1' "task-159: the repaint came from the broadcast, not a reload"
   playwright-cli -s="$BROWSER_SESSION" fill "#ni-title" "Create more two" >/dev/null 2>&1 \
     || fail "playwright: typing the second Create-more title"
-  playwright-cli -s="$BROWSER_SESSION" click "#ni-create" >/dev/null 2>&1 \
-    || fail "playwright: submitting the second Create-more issue"
-  second=$(page_until "$more_js" '"two":true')
+  second=$(ni_submit '"two":true')
   assert_contains "$second" '"open":true' "task-159: the dialog is still open for a third entry"
   assert_contains "$second" "\"assignee\":\"$scoped\"" "task-159: the scoping select survives the second submit"
-  # Toggle off: the old behavior returns — submit closes the dialog.
+  # Toggle off: the old behavior returns --- submit closes the dialog.
   playwright-cli -s="$BROWSER_SESSION" click "#ni-more" >/dev/null 2>&1 \
     || fail "playwright: disabling Create more"
   playwright-cli -s="$BROWSER_SESSION" fill "#ni-title" "Create more off" >/dev/null 2>&1 \
     || fail "playwright: typing the toggle-off title"
-  playwright-cli -s="$BROWSER_SESSION" click "#ni-create" >/dev/null 2>&1 \
-    || fail "playwright: submitting with the toggle off"
-  turned_off=$(page_until "$more_js" '"off":true')
+  turned_off=$(ni_submit '"off":true')
   assert_contains "$turned_off" '"open":false' "task-159: with the toggle off the dialog closes as before"
   # The preference is a signal, not a form field: it outlives opens and
   # closes without a reload (el.reset() re-applies it on every open).
@@ -690,9 +700,7 @@ if command -v playwright-cli >/dev/null 2>&1; then
     "() => { const h = document.createElement('input'); h.type = 'hidden'; h.name = 'state'; h.value = 'bogus'; document.getElementById('ni-form').prepend(h); return 'ok' }" >/dev/null 2>&1
   playwright-cli -s="$BROWSER_SESSION" fill "#ni-title" "Create more doomed" >/dev/null 2>&1 \
     || fail "playwright: typing the doomed title"
-  playwright-cli -s="$BROWSER_SESSION" click "#ni-create" >/dev/null 2>&1 \
-    || fail "playwright: submitting the doomed create"
-  rejected=$(page_until "() => JSON.stringify({open: getComputedStyle(document.querySelector('.ni-shade')).display !== 'none', title: document.getElementById('ni-title').value, focused: document.activeElement === document.getElementById('ni-title'), flash: document.getElementById('flash').textContent})" 'unknown state')
+  rejected=$(ni_submit 'unknown state')
   assert_contains "$rejected" '"title":"Create more doomed"' "task-159: a failed create keeps the typed title"
   assert_contains "$rejected" '"open":true' "task-159: a failed create keeps the dialog open"
   assert_contains "$rejected" '"focused":true' "task-159: a failed create returns focus to the title"
