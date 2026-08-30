@@ -318,6 +318,45 @@ code=$(curl -s -o /dev/null -w '%{http_code}' -X POST \
 out=$("$LIN" issue view ENG-3)
 assert_contains "$out" 'Quote " and \ slash' "quoted title persisted verbatim"
 
+# --- /emoji: the picker's write path, including the way back to none ---
+code=$(curl -s -o /dev/null -w '%{http_code}' -X POST \
+  --data-urlencode "key=ENG-3" --data-urlencode "emoji=🚀" "$WEB/emoji")
+[ "$code" = 200 ] || fail "/emoji returned $code, want 200"
+out=$("$LIN" issue view ENG-3)
+assert_contains "$out" "Emoji:     🚀" "web emoji change in lll issue view"
+
+# A picker with no way back to none is a trap: an empty value clears it.
+code=$(curl -s -o /dev/null -w '%{http_code}' -X POST \
+  --data-urlencode "key=ENG-3" --data-urlencode "emoji=" "$WEB/emoji")
+[ "$code" = 200 ] || fail "/emoji clear returned $code, want 200"
+out=$("$LIN" issue view ENG-3)
+if printf '%s' "$out" | grep -q "^Emoji:"; then
+  fail "empty emoji did not clear the marker"
+fi
+
+out=$(curl -s -X POST --data-urlencode "key=ENG-3" \
+  --data-urlencode "emoji=not one emoji" "$WEB/emoji")
+assert_contains "$out" "an issue takes one emoji" "sentence-shaped emoji rejected"
+out=$(curl -s -X POST --data-urlencode "key=ENG-99" --data-urlencode "emoji=🚀" "$WEB/emoji")
+assert_contains "$out" "not found" "/emoji unknown issue message"
+
+# issue page markup: the picker ships with the page, searchable by name, and
+# its chrome is sprite icons — the glyphs are only the candidates themselves.
+issue=$(curl -sf "$WEB/issue/ENG-3")
+assert_contains "$issue" 'id="emo-pop"' "issue page carries the emoji picker"
+assert_contains "$issue" 'class="emo-trigger"' "properties panel has the picker trigger"
+assert_contains "$issue" 'placeholder="Search by name"' "picker searches by name"
+assert_contains "$issue" 'data-n="bug insect beetle broken"' "candidates carry search terms"
+assert_contains "$issue" 'Remove emoji' "picker offers the way back to none"
+assert_contains "$issue" 'href="#ic-close"' "picker chrome uses the shared sprite"
+# The catalogue is page-only: a broadcast of #issue-detail must not carry it.
+assert_contains "$(printf '%s' "$issue" | sed -n '/id="issue-detail"/,/<\/article>/p')" \
+  "class=\"emo-trigger\"" "the trigger is inside the morph boundary"
+if printf '%s' "$issue" | sed -n '/id="issue-detail"/,/<\/article>/p' | grep -q 'emo-cell'
+then
+  fail "the emoji grid leaked inside #issue-detail"
+fi
+
 # issue page markup: priority select (No priority label) + title editor
 issue=$(curl -sf "$WEB/issue/ENG-3")
 assert_contains "$issue" 'id="prio-form"' "issue page has priority control"
