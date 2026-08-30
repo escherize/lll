@@ -269,6 +269,9 @@ independently scrollable. Cards stack with 5px gaps inside 6px column padding.
 left border running the full height. Comments thread and composer sit under
 the main column at max-width 680px, separated by a hairline top border.
 
+**Create dialog:** a fixed overlay over the whole frame (z-index 60), the one
+surface in the product that floats. Everything else displaces content.
+
 **Flash strip:** sits between topbar and content (`margin: 10px 16px 0`),
 patched over SSE by server actions and hidden when clear; it displaces
 content rather than overlaying it.
@@ -361,6 +364,26 @@ never icon fonts, emoji, or third-party icon packages. New icons match the
 - **Focus:** orange border + 3px ember-glow ring (`outline: none`).
 - **Selects and textareas** share the treatment; the comment textarea is
   min-height 64px, vertically resizable.
+
+### Dialog (create issue)
+- **Surface:** the panel rung (#141619) with a strong hairline and the 6px
+  radius — `--radius-lg` stays the board columns' alone. Max-width 600px,
+  8vh from the top, 84vh tall at most and scrolling inside itself.
+- **Depth:** tonal, not shadowed. Separation comes from a plain dim
+  (`rgba(6, 7, 8, 0.62)`) over the board, never a drop shadow. The board stays
+  legible behind it, which is the reason it is a dialog and not a page.
+- **Anatomy:** 13px/600 heading row with a text-3 close glyph, then the title
+  input, the description textarea (min-height 108px, resizable), one wrapping
+  row of 12.5px property selects, one wrapping row of label chips, and a
+  footer with a hairline top border carrying a text-3 hint and the actions.
+- **Labels are the one control that needs telling,** because the four selects
+  say their own name and a chip does not; it gets a 12px text-3 key in the
+  properties-panel register. A checked chip spends the accent (orange border,
+  ember-dim wash) — chips are read-only metadata everywhere else, but here the
+  chip *is* the affordance, so it is inside the Ember Budget.
+- **Behavior:** Escape and a scrim click close it, `c` opens it from the board.
+  Nothing in it closes on its own: the SERVER patches the open signal, and
+  only on success, so a rejected create keeps everything typed.
 
 ### Flash (error strip)
 - **The system's error voice.** A quiet red strip under the topbar

@@ -48,7 +48,11 @@ provenance.
         <input id="board-search-input" type="text" placeholder="Search" autocomplete="off" aria-label="Search board" data-bind:search data-on:keydown="evt.key === 'Escape' && ($search = '')">
       </div>
       <form id="new-issue" class="new-issue">
-        <input id="new-title" name="title" placeholder="Issue title" autocomplete="off" data-on:keydown="evt.key === 'Enter' && (evt.preventDefault(), evt.target.value.trim() && @post('/create', {contentType: 'form'}))">
+        <input id="new-title" name="title" placeholder="Issue title" autocomplete="off" data-bind:new_title data-on:keydown="evt.key === 'Enter' && (evt.preventDefault(), evt.target.value.trim() && @post('/create', {contentType: 'form'}))">
+        <!-- The one-line composer is the fast path and stays exactly as it
+             was: type, Enter, done. This button is the escape hatch to the
+             full form, carrying whatever is already typed with it. -->
+        <button type="button" id="ni-expand" class="ni-expand" title="Full form (c)" aria-label="Open the full create form" data-on:click="$ni_open = true"><svg width="14" height="14"><use href="#ic-expand"/></svg></button>
         <select name="state">
         {{range .Page.States}}<option value="{{.Value}}"{{if eq .Value "todo"}} selected{{end}}>{{.Label}}</option>
         {{end}}</select>
@@ -57,6 +61,7 @@ provenance.
     </header>
     <div id="flash" class="flash" hidden></div>
     {{template "filterbar" .Page}}
+    {{template "new-issue-dialog" .Page}}
     {{template "board" .Page}}
   </div>
 </div>
@@ -121,4 +126,39 @@ provenance.
   {{end}}</div>
 {{range $g := .FilterGroups}}{{range $g.Opts}}<button type="button" class="flt-chip" style="display:none" data-f="{{$g.Dim}}:{{.Value}}" data-show="$flt.includes(el.dataset.f)" data-on:click="$flt = $flt.filter(x => x !== el.dataset.f)"><span class="dim">{{$g.Label}}</span> {{.Label}} <svg width="8" height="8" viewBox="0 0 8 8" aria-hidden="true"><path d="M1.5 1.5 L6.5 6.5 M6.5 1.5 L1.5 6.5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg></button>
 {{end}}{{end}}<button type="button" class="flt-clear" style="display:none" data-show="$flt.length > 0" data-on:click="$flt = []">Clear</button>
+</div>{{end}}
+
+{{/* The full create form: a modal over the board, not a page, so nothing is
+     lost behind it. It posts to the SAME POST /create as the topbar's
+     one-line composer — one server path, one broadcast, no double update —
+     and every field past the title is optional there.
+
+     $ni_open lives here, outside #board (the SSE morph target), so a repaint
+     mid-typing cannot close the dialog or wipe a field. The server closes it
+     by patching $ni_open, on success only: a rejected create keeps the
+     description you typed, which is the field this whole dialog exists for.
+
+     Opening resets the form and copies the topbar's title over, so the two
+     composers are one flow rather than two drafts.
+
+     Class names are ni-* on purpose. Template define names AND CSS class
+     names are global here (TASK-106), so a new surface namespaces both.
+
+     TASK-72's emoji picker slots in beside the title input when it lands. */}}
+{{define "new-issue-dialog"}}<div id="ni-modal" data-signals:ni_open="false">
+<div class="ni-shade" style="display:none" data-show="$ni_open" data-on:click="evt.target === el && ($ni_open = false)" data-on:keydown__window="evt.key === 'Escape' ? ($ni_open = false) : (evt.key === 'c' && !evt.metaKey && !evt.ctrlKey && !evt.altKey && evt.target === document.body && (evt.preventDefault(), $ni_open = true))">
+<form id="ni-form" class="ni-dialog" aria-label="New issue" data-effect="$ni_open && setTimeout(() => { el.reset(); const t = document.getElementById('ni-title'); t.value = document.getElementById('new-title').value; t.focus(); t.select() }, 0)">
+<div class="ni-head">New issue<span class="ni-flex"></span><button type="button" class="ni-x" aria-label="Close" data-on:click="$ni_open = false"><svg width="10" height="10" viewBox="0 0 10 10" aria-hidden="true"><path d="M2 2 L8 8 M8 2 L2 8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg></button></div>
+<input id="ni-title" name="title" placeholder="Issue title" autocomplete="off" aria-label="Issue title" data-on:keydown="evt.key === 'Enter' && (evt.preventDefault(), el.value.trim() && @post('/create', {contentType: 'form'}))">
+<textarea id="ni-desc" class="ni-desc" name="description" aria-label="Description" placeholder="Description — markdown, code fences and mermaid all render"></textarea>
+<div class="ni-props">
+  <select name="state" aria-label="State">{{range .States}}<option value="{{.Value}}"{{if eq .Value "todo"}} selected{{end}}>{{.Label}}</option>{{end}}</select>
+  <select name="priority" aria-label="Priority">{{range .Compose.Prios}}<option value="{{.Value}}">{{.Label}}</option>{{end}}</select>
+  <select name="assignee" aria-label="Assignee"><option value="">Unassigned</option>{{range .Compose.Members}}<option value="{{.Id}}">{{.Name}}</option>{{end}}</select>
+  <select name="project" aria-label="Project"><option value="">No project</option>{{range .Compose.Projects}}<option value="{{.Id}}">{{.Name}}</option>{{end}}</select>
+</div>
+{{if .Compose.Labels}}<div class="ni-labels"><span class="ni-key">Labels</span>{{range .Compose.Labels}}<label class="ni-lab"><input type="checkbox" name="labels" value="{{.Id}}"><span class="chip"><span class="dot" style="background:{{if .Color}}{{.Color}}{{else}}var(--text-3){{end}}"></span>{{.Name}}</span></label>{{end}}</div>
+{{end}}<div class="ni-foot"><span class="ni-hint">Enter to create · Esc to close</span><button type="button" class="btn" data-on:click="$ni_open = false">Cancel</button><button type="button" class="btn primary" data-on:click="document.getElementById('ni-title').value.trim() ? @post('/create', {contentType: 'form'}) : document.getElementById('ni-title').focus()">Create issue</button></div>
+</form>
+</div>
 </div>{{end}}

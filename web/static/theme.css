@@ -452,12 +452,106 @@ input:focus, textarea:focus, select:focus {
 .prop select { padding: 3px 6px; font-size: 12.5px; }
 .prop form { display: inline-flex; }
 
+/* ── New-issue dialog ──────────────────────────────────── */
+/* A modal over the board, because losing the board behind a create page is
+   exactly what this borrows from Linear. Depth stays tonal: panel surface and
+   a hairline over a plain dim, no drop shadow. Radius is 6px — --radius-lg is
+   the board columns' alone. Every class here is ni-*: CSS names are as global
+   as template names (TASK-106). */
+.ni-expand {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  background: var(--bg-raised);
+  color: var(--text-3);
+  cursor: pointer;
+}
+.ni-expand:hover { background: var(--bg-hover); color: var(--text); }
+
+.ni-shade {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding: 8vh 16px 16px;
+  background: rgba(6, 7, 8, 0.62);
+}
+.ni-dialog {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  width: 100%;
+  max-width: 600px;
+  max-height: 84vh;
+  overflow-y: auto;
+  padding: 14px;
+  background: var(--bg-panel);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+}
+.ni-head { display: flex; align-items: center; font-weight: 600; letter-spacing: -0.005em; }
+.ni-flex { flex: 1; }
+.ni-x {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: none;
+  border-radius: var(--radius);
+  background: transparent;
+  color: var(--text-3);
+  cursor: pointer;
+}
+.ni-x:hover { background: var(--bg-hover); color: var(--text); }
+.ni-dialog > input { width: 100%; }
+.ni-desc { width: 100%; min-height: 108px; resize: vertical; }
+.ni-props { display: flex; flex-wrap: wrap; gap: 6px; }
+.ni-props select { padding: 3px 6px; font-size: 12.5px; }
+
+/* Label chips are read-only metadata everywhere else; here they are the
+   control, so the checked one may spend the ember accent. */
+.ni-labels { display: flex; flex-wrap: wrap; align-items: center; gap: 5px; }
+/* The four selects say what they are; the chips are the one control that
+   needs telling, in the properties-panel key register. */
+.ni-key { margin-right: 3px; color: var(--text-3); font-size: 12px; }
+.ni-lab { display: inline-flex; cursor: pointer; }
+.ni-lab input { position: absolute; width: 0; height: 0; opacity: 0; }
+.ni-lab .chip { cursor: pointer; }
+.ni-lab:hover .chip { border-color: var(--border-strong); color: var(--text); }
+.ni-lab input:checked + .chip {
+  border-color: var(--accent);
+  background: var(--accent-dim);
+  color: var(--text);
+}
+.ni-lab input:focus-visible + .chip { outline: 2px solid var(--accent); outline-offset: 1px; }
+
+.ni-foot {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border);
+}
+.ni-hint { flex: 1; color: var(--text-3); font-size: 11.5px; }
+
 /* ── Small screens ─────────────────────────────────────── */
 @media (max-width: 720px) {
   .rail { display: none; }
   .topbar { flex-wrap: wrap; height: auto; padding: 8px 12px; }
   .new-issue { width: 100%; }
   .new-issue input { flex: 1; width: auto; min-width: 0; }
+  .ni-shade { padding: 4vh 10px 10px; }
+  .ni-dialog { max-height: 92vh; }
   .board { padding: 10px 12px; }
   .column { flex: 0 0 240px; min-width: 240px; }
   .issue-scroll {
