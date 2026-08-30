@@ -9,54 +9,19 @@
 # first-boot identity (me guessed from $USER, written to .lll.toml, seeded as
 # a member, and not re-guessed once configured).
 set -euo pipefail
-cd "$(dirname "$0")/.."
+. "$(dirname "$0")/lib.sh"   # free_port, wait_ok, fail, assert_*, e2e_begin/end
+e2e_begin
 
-# A random port that is actually free. Binding proves it, unlike a liveness
-# probe: an occupied port makes a health poll succeed against a STRANGER's
-# server, and the suite then dies much later naming something unrelated.
-free_port() { # low high
-  python3 -c '
-import random, socket, sys
-lo, hi = int(sys.argv[1]), int(sys.argv[2])
-for _ in range(200):
-    p = random.randint(lo, hi)
-    s = socket.socket()
-    try:
-        s.bind(("127.0.0.1", p))
-    except OSError:
-        continue
-    finally:
-        s.close()
-    print(p)
-    sys.exit(0)
-sys.exit("no free port in range")
-' "$1" "$2"
-}
-
-
-
-DATA_DIR="$(mktemp -d)"
-
-# Hermetic: a developer's repo-root .lll.toml must not leak into assertions.
-if [ -f .lll.toml ]; then
-  mv .lll.toml "$DATA_DIR/.lll.toml.saved"
-  RESTORE_TOML=1
-fi
 DB_PORT=$(free_port 20000 39999)
 WEB_PORT=$(free_port 40000 59999)
 UP_LOG="$DATA_DIR/up.log"
+E2E_LOGS="$UP_LOG"
 
 cleanup() {
-  # A first boot writes one; the developer's own file goes back on top.
-  rm -f .lll.toml
-  if [ "${RESTORE_TOML:-}" = 1 ] && [ -f "$DATA_DIR/.lll.toml.saved" ]; then
-    mv "$DATA_DIR/.lll.toml.saved" .lll.toml
-  fi
   kill "${UP_PID:-}" "${BLOCK_PID:-}" "${EXT_PB_PID:-}" 2>/dev/null || true
-  rm -rf "$DATA_DIR"
+  e2e_end
 }
 trap cleanup EXIT
-fail() { echo "FAIL: $1" >&2; tail -20 "$UP_LOG" >&2 || true; exit 1; }
 
 lis build >/dev/null
 LLL=target/.lisette/bin/lll
@@ -81,10 +46,7 @@ UP_PID=$!
 set +m
 
 DB2=$((DB_PORT + 1)); WEB2=$((WEB_PORT + 1))
-for _ in $(seq 1 100); do
-  curl -sf "http://127.0.0.1:$WEB2/" >/dev/null 2>&1 && break
-  sleep 0.1
-done
+wait_ok "http://127.0.0.1:$WEB2/" || true
 curl -sf "http://127.0.0.1:$DB2/api/health" >/dev/null || fail "own PB not on incremented port $DB2"
 curl -sf "http://127.0.0.1:$WEB2/" >/dev/null || fail "board not on incremented port $WEB2"
 grep -q "admin@local.dev / admin-local-123" "$UP_LOG" || fail "default creds not logged"
@@ -126,19 +88,13 @@ LLL_URL="http://127.0.0.1:$EXT_PORT" LLL_TEAM=E2E \
   "$LLL_ABS" up --no-open --port "$EXT_WEB" --pb-dir "$DATA_DIR/ext_pb_data" \
   </dev/null >/dev/null 2>&1 &
 EXT_PB_PID=$!
-for _ in $(seq 1 100); do
-  curl -sf "http://127.0.0.1:$EXT_PORT/api/health" >/dev/null 2>&1 && break
-  sleep 0.1
-done
+wait_ok "http://127.0.0.1:$EXT_PORT/api/health" || fail "the external PB never came up"
 set -m
 LLL_URL="http://127.0.0.1:$EXT_PORT" LLL_TEAM=E2E \
   "$LLL" up --no-open --port "$WEB_PORT" --pb-dir "$DATA_DIR/pb_data" >"$UP_LOG" 2>&1 &
 UP_PID=$!
 set +m
-for _ in $(seq 1 100); do
-  curl -sf "http://127.0.0.1:$WEB2/" >/dev/null 2>&1 && break
-  sleep 0.1
-done
+wait_ok "http://127.0.0.1:$WEB2/" || true
 grep -q "(already running)" "$UP_LOG" || fail "reuse path not taken"
 # .lll.toml now names me, so a later boot must use it, not guess again.
 grep -q "guessed me" "$UP_LOG" && fail "me re-guessed with one already configured"

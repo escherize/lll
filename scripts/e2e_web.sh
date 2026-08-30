@@ -17,38 +17,9 @@
 # counts and project filter on /issues.
 # Standalone (boots its own PB), also invoked by e2e.sh.
 set -euo pipefail
-cd "$(dirname "$0")/.."
+. "$(dirname "$0")/lib.sh"   # free_port, wait_ok, fail, assert_*, e2e_begin/end
+e2e_begin
 
-# A random port that is actually free. Binding proves it, unlike a liveness
-# probe: an occupied port makes a health poll succeed against a STRANGER's
-# server, and the suite then dies much later naming something unrelated.
-free_port() { # low high
-  python3 -c '
-import random, socket, sys
-lo, hi = int(sys.argv[1]), int(sys.argv[2])
-for _ in range(200):
-    p = random.randint(lo, hi)
-    s = socket.socket()
-    try:
-        s.bind(("127.0.0.1", p))
-    except OSError:
-        continue
-    finally:
-        s.close()
-    print(p)
-    sys.exit(0)
-sys.exit("no free port in range")
-' "$1" "$2"
-}
-
-
-DATA_DIR="$(mktemp -d)"
-
-# Hermetic: a developer's repo-root .lll.toml must not leak into assertions.
-if [ -f .lll.toml ]; then
-  mv .lll.toml "$DATA_DIR/.lll.toml.saved"
-  RESTORE_TOML=1
-fi
 PB_PORT=$(free_port 20000 39999)
 WEB_PORT=$(free_port 40000 59999)
 export LLL_URL="http://127.0.0.1:$PB_PORT"
@@ -56,6 +27,7 @@ export LLL_TEAM=ENG
 WEB="http://127.0.0.1:$WEB_PORT"
 PB_LOG="$DATA_DIR/pb.log"
 SERVE_LOG="$DATA_DIR/serve.log"
+E2E_LOGS="$SERVE_LOG $PB_LOG"
 BROWSER_SESSION="e2e-web-$$"
 
 # PocketBase is embedded in lll; one `lll up` is both the database and the
@@ -71,32 +43,13 @@ PB_PID=$!
 SERVE_PID=""
 CURL_PID=""
 cleanup() {
-  # `lll up` writes one on a first boot; the developer's own goes back on top.
-  rm -f .lll.toml
-  if [ "${RESTORE_TOML:-}" = 1 ] && [ -f "$DATA_DIR/.lll.toml.saved" ]; then
-    mv "$DATA_DIR/.lll.toml.saved" .lll.toml
-  fi
   if command -v playwright-cli >/dev/null 2>&1; then
     playwright-cli -s="$BROWSER_SESSION" close >/dev/null 2>&1 || true
   fi
   kill $CURL_PID $SERVE_PID $PB_PID 2>/dev/null || true
-  rm -rf "$DATA_DIR"
+  e2e_end
 }
 trap cleanup EXIT
-
-fail() {
-  echo "FAIL: $1" >&2
-  echo "--- serve log ---" >&2
-  tail -20 "$SERVE_LOG" >&2 || true
-  echo "--- pocketbase log ---" >&2
-  tail -20 "$PB_LOG" >&2 || true
-  exit 1
-}
-
-assert_contains() { # haystack needle label
-  printf '%s' "$1" | grep -qF -- "$2" || fail "$3: expected '$2' in output:
-$1"
-}
 
 # The column's section markup for a state, for asserting card placement.
 column() { # html state
@@ -111,11 +64,7 @@ except IndexError:
 ' "$2"
 }
 
-for _ in $(seq 1 100); do
-  curl -sf "$LLL_URL/api/health" >/dev/null 2>&1 && break
-  sleep 0.1
-done
-curl -sf "$LLL_URL/api/health" >/dev/null || fail "PocketBase did not start"
+wait_ok "$LLL_URL/api/health" || fail "PocketBase did not start"
 
 curl -sf -X POST "$LLL_URL/api/collections/teams/records" \
   -H 'Content-Type: application/json' \
@@ -142,11 +91,6 @@ assert_contains "$board" "datastar" "board loads Datastar"
 curl -sf "$WEB/static/theme.css" >/dev/null || fail "static css served"
 
 # --- card presentation: relative age + server-rendered hover preview ---
-assert_not_contains() { # haystack needle label
-  printf '%s' "$1" | grep -qF -- "$2" && fail "$3: did not expect '$2' in output:
-$1" || true
-}
-
 assert_contains "$board" 'class="age"' "cards carry an age row"
 assert_contains "$board" "just now" "card age is relative"
 assert_contains "$board" 'class="card-pop"' "cards carry a hover preview"

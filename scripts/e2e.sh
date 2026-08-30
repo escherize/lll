@@ -17,42 +17,14 @@
 # fix-naming error messages (PB down, unknown team, broken .lll.toml,
 # unknown command), and the lll up web board (via e2e_web.sh).
 set -euo pipefail
-cd "$(dirname "$0")/.."
+. "$(dirname "$0")/lib.sh"   # free_port, wait_ok, fail, assert_*, e2e_begin/end
+e2e_begin
 
-# A random port that is actually free. Binding proves it, unlike a liveness
-# probe: an occupied port makes a health poll succeed against a STRANGER's
-# server, and the suite then dies much later naming something unrelated.
-free_port() { # low high
-  python3 -c '
-import random, socket, sys
-lo, hi = int(sys.argv[1]), int(sys.argv[2])
-for _ in range(200):
-    p = random.randint(lo, hi)
-    s = socket.socket()
-    try:
-        s.bind(("127.0.0.1", p))
-    except OSError:
-        continue
-    finally:
-        s.close()
-    print(p)
-    sys.exit(0)
-sys.exit("no free port in range")
-' "$1" "$2"
-}
-
-
-DATA_DIR="$(mktemp -d)"
-
-# Hermetic: a developer's repo-root .lll.toml must not leak into assertions.
-if [ -f .lll.toml ]; then
-  mv .lll.toml "$DATA_DIR/.lll.toml.saved"
-  RESTORE_TOML=1
-fi
 PORT=$(free_port 20000 39999)
 URL="http://127.0.0.1:$PORT"
 WEB_PORT=$(free_port 40000 59999)
 PB_LOG="$DATA_DIR/pb.log"
+E2E_LOGS="$PB_LOG"
 
 lis build >/dev/null
 LIN=target/.lisette/bin/lll
@@ -67,38 +39,15 @@ start_pb() {
   LLL_URL="$URL" LLL_TEAM=ENG USER=e2e "$LIN" up --no-open \
     --pb-dir "$DATA_DIR/pb_data" --port "$WEB_PORT" </dev/null >>"$PB_LOG" 2>&1 &
   PB_PID=$!
-  for _ in $(seq 1 150); do
-    curl -sf "$URL/api/health" >/dev/null 2>&1 && return 0
-    sleep 0.1
-  done
-  return 1
+  wait_ok "$URL/api/health" 150
 }
 start_pb || { echo "FAIL: lll up did not start" >&2; cat "$PB_LOG" >&2; exit 1; }
 WATCH_PIDS=""
 cleanup() {
-  # `lll up` writes one on a first boot; the developer's own goes back on top.
-  rm -f .lll.toml
-  if [ "${RESTORE_TOML:-}" = 1 ] && [ -f "$DATA_DIR/.lll.toml.saved" ]; then
-    mv "$DATA_DIR/.lll.toml.saved" .lll.toml
-  fi
-  kill $WATCH_PIDS "$PB_PID" 2>/dev/null || true; rm -rf "$DATA_DIR"; }
+  kill $WATCH_PIDS "$PB_PID" 2>/dev/null || true
+  e2e_end
+}
 trap cleanup EXIT
-
-fail() {
-  echo "FAIL: $1" >&2
-  echo "--- pocketbase log ---" >&2
-  tail -20 "$PB_LOG" >&2 || true
-  exit 1
-}
-
-assert_contains() { # haystack needle label
-  printf '%s' "$1" | grep -qF -- "$2" || fail "$3: expected '$2' in output:
-$1"
-}
-assert_not_contains() {
-  printf '%s' "$1" | grep -qF -- "$2" && fail "$3: did not expect '$2' in output:
-$1" || true
-}
 
 json_id() { python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])'; }
 
