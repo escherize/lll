@@ -4,6 +4,7 @@ import "go:net/url"
 
 import "models"
 import "pb"
+import "flags"
 
 /// Dispatch `lll label <verb>`.
 pub fn label(args: Slice<string>) -> Result<(), string> {
@@ -53,42 +54,30 @@ fn label_list() -> Result<(), string> {
   Ok(())
 }
 
+fn label_create_spec() -> Slice<flags.Flag> {
+  [
+    flags.Flag { name: "-n", value: true, hint: "\"name\"", required: true, help: "label name", .. },
+    flags.Flag { name: "-c", value: true, hint: "\"#5e6ad2\"", help: "hex color for the label", .. },
+    flags.Flag { name: "--team", value: true, hint: "KEY", help: "team key; no --team means workspace-wide", .. },
+  ]
+}
+
+/// The flag table of one label verb; empty for verbs without flags. Read by
+/// `lll completions` so the scripts complete exactly what the parser accepts.
+pub fn label_verb_spec(verb: string) -> Slice<flags.Flag> {
+  match verb {
+    "create" => label_create_spec(),
+    _ => [],
+  }
+}
+
 fn label_create(args: Slice<string>) -> Result<(), string> {
-  let mut name = ""
-  let mut color = ""
-  let mut team_key = ""
-  let mut i = 3
-  while i < args.length() {
-    match args[i] {
-      "-n" => {
-        let Some(val) = args.get(i + 1) else {
-          return Err("-n requires a value")
-        }
-        name = val
-        i += 2
-      },
-      "-c" => {
-        let Some(val) = args.get(i + 1) else {
-          return Err("-c requires a value")
-        }
-        color = val
-        i += 2
-      },
-      "--team" => {
-        let Some(val) = args.get(i + 1) else {
-          return Err("--team requires a value")
-        }
-        team_key = val
-        i += 2
-      },
-      other => return Err(f"unknown flag: '{other}'"),
-    }
-  }
-  if name == "" {
-    return Err(
-      "usage: lll label create -n \"name\" [-c \"#5e6ad2\"] [--team KEY]",
-    )
-  }
+  let spec = label_create_spec()
+  let usage = flags.usage("lll label create", spec, "")
+  let p = flags.parse(spec, args, 3, false, usage)?
+  let name = p.one("-n")
+  let color = p.one("-c")
+  let team_key = p.one("--team")
 
   let mut team = ""
   if team_key != "" {
