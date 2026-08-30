@@ -76,11 +76,24 @@
   <span class="v"><button type="button" class="emo-trigger" aria-label="Set the issue emoji" title="Set the issue emoji" data-attr:aria-expanded="$emo_open ? 'true' : 'false'" data-on:click="if ($emo_open) { $emo_open = false } else { const r = el.getBoundingClientRect(), p = document.getElementById('emo-pop'); p.style.left = Math.max(8, Math.min(r.left, innerWidth - 252)) + 'px'; p.style.top = Math.max(8, Math.min(r.bottom + 6, innerHeight - 340)) + 'px'; $emo_q = ''; $emo_open = true }">{{if .Emoji}}<span class="emoji">{{.Emoji}}</span>{{else}}<span class="emo-blank">none</span>{{end}}</button></span>
 </div>
 <div class="prop"><span class="k">Assignee</span>
-  <span class="v">{{if .Assignee}}{{template "avatar" .Avatar}} {{.Assignee}}{{else}}none{{end}}</span>
+  <span class="v">{{if .Assignee}}{{template "avatar" .Avatar}}{{end}}
+  <form id="assignee-form"><input type="hidden" name="key" value="{{.Key}}"><select name="assignee" aria-label="Assignee" data-on:change="@post('/assignee', {contentType: 'form'})"><option value=""{{if eq $.AssigneeId ""}} selected{{end}}>Unassigned</option>
+  {{range .MemberOpts}}<option value="{{.Id}}"{{if eq .Id $.AssigneeId}} selected{{end}}>{{.Name}}</option>
+  {{end}}</select></form></span>
 </div>
-<div class="prop"><span class="k">Project</span><span class="v">{{if .ProjectHref}}<a href="{{.ProjectHref}}">{{.Project}}</a>{{else}}{{.Project}}{{end}}</span></div>
+<div class="prop"><span class="k">Project</span>
+  <!-- The link stays: it is the way into that project's issues, which the
+       select's selected option cannot be. -->
+  <span class="v">{{if .ProjectHref}}<a href="{{.ProjectHref}}">{{.Project}}</a>{{end}}
+  <form id="project-form"><input type="hidden" name="key" value="{{.Key}}"><select name="project" aria-label="Project" data-on:change="@post('/project', {contentType: 'form'})"><option value=""{{if eq $.ProjectId ""}} selected{{end}}>No project</option>
+  {{range .ProjectOpts}}<option value="{{.Id}}"{{if eq .Id $.ProjectId}} selected{{end}}>{{.Name}}</option>
+  {{end}}</select></form></span>
+</div>
 <div class="prop"><span class="k">Labels</span>
-  <span class="v">{{if .Labels}}{{range .Labels}}<span class="chip"><span class="dot" style="background:{{if .Color}}{{.Color}}{{else}}var(--text-3){{end}}"></span>{{.Name}}</span>{{end}}{{else}}none{{end}}</span>
+  <!-- The create dialog's chip-as-control idiom: every workspace label
+       renders, the ones the issue carries checked. One change posts the
+       whole set — labels is a rel-multi, so the form is the payload. -->
+  <span class="v">{{if .LabelOpts}}<form id="labels-form" class="labs">{{range .LabelOpts}}<label class="lab"><input type="checkbox" name="labels" value="{{.Id}}"{{if .On}} checked{{end}} data-on:change="@post('/labels', {contentType: 'form'})"><span class="chip"><span class="dot" style="background:{{if .Color}}{{.Color}}{{else}}var(--text-3){{end}}"></span>{{.Name}}</span></label>{{end}}</form>{{else}}none{{end}}</span>
 </div>
 <div class="prop"><span class="k">Created</span><span class="v">{{.Created}}</span></div>
 <div class="prop"><span class="k">Updated</span><span class="v">{{.Updated}}</span></div>

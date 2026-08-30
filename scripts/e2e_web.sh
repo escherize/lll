@@ -338,6 +338,103 @@ board=$(curl -sf "$WEB/")
 assert_contains "$board" 'Priority</span> No priority <span class="count">' \
   "board filter labels none as No priority (a navigation, not a button)"
 
+# --- TASK-151: the issue page edits Assignee, Project and Labels ---
+# The Properties panel gets the same controls the create dialog has: a
+# select per scalar relation, chip checkboxes for the rel-multi. Every
+# write below is re-verified by re-fetching the page — and the page only
+# ever changes through the /events issue-detail broadcast, so those
+# re-fetches are the repaint proof (AC#4); the POST itself answers with
+# the flash strip alone.
+"$LIN" project create -n "Panel Project" --status planned >/dev/null
+"$LIN" label create -n "props-label" -c '#4cb782' >/dev/null
+"$LIN" member add -n "Panel Member" >/dev/null
+PANEL_PROJECT=$(curl -sf "$LLL_URL/api/collections/projects/records?perPage=200" \
+  | jq -r '.items[] | select(.name=="Panel Project") | .id')
+PANEL_MEMBER=$(curl -sf "$LLL_URL/api/collections/members/records?perPage=200" \
+  | jq -r '.items[] | select(.name=="Panel Member") | .id')
+PANEL_LABEL=$(curl -sf "$LLL_URL/api/collections/labels/records?perPage=200" \
+  | jq -r '.items[] | select(.name=="props-label") | .id')
+[ -n "$PANEL_PROJECT" ] && [ -n "$PANEL_MEMBER" ] && [ -n "$PANEL_LABEL" ] \
+  || fail "resolving Panel fixtures (project/member/label) for the issue page tests"
+
+# AC#1: POST /project moves ENG-3 into a project; the re-fetched page
+# links the new project.
+code=$(curl -s -o /dev/null -w '%{http_code}' -X POST \
+  --data-urlencode "key=ENG-3" --data-urlencode "project=$PANEL_PROJECT" "$WEB/project")
+[ "$code" = 200 ] || fail "/project returned $code, want 200"
+issue=$(curl -sf "$WEB/issue/ENG-3")
+assert_contains "$issue" 'href="/issues?project=Panel&#43;Project"' "issue page links the new project"
+assert_contains "$issue" "value=\"$PANEL_PROJECT\" selected" "project select reflects the move"
+assert_contains "$("$LIN" issue view ENG-3)" "Project:   Panel Project" "POST /project persisted"
+
+# AC#2: the assignee is changeable from the issue page, and back to none.
+code=$(curl -s -o /dev/null -w '%{http_code}' -X POST \
+  --data-urlencode "key=ENG-3" --data-urlencode "assignee=$PANEL_MEMBER" "$WEB/assignee")
+[ "$code" = 200 ] || fail "/assignee returned $code, want 200"
+issue=$(curl -sf "$WEB/issue/ENG-3")
+assert_contains "$issue" "value=\"$PANEL_MEMBER\" selected" "assignee select reflects the change"
+assert_contains "$("$LIN" issue view ENG-3)" "Assignee:  Panel Member" "POST /assignee persisted"
+code=$(curl -s -o /dev/null -w '%{http_code}' -X POST \
+  --data-urlencode "key=ENG-3" --data-urlencode "assignee=" "$WEB/assignee")
+[ "$code" = 200 ] || fail "/assignee clear returned $code, want 200"
+assert_contains "$("$LIN" issue view ENG-3)" "Assignee:  none" "empty assignee unassigns"
+
+# The page renders all three editors from the catalogues.
+issue=$(curl -sf "$WEB/issue/ENG-3")
+assert_contains "$issue" 'id="assignee-form"' "issue page has an assignee select"
+assert_contains "$issue" 'id="project-form"' "issue page has a project select"
+assert_contains "$issue" 'id="labels-form"' "issue page has the label chips"
+
+# AC#3: add a label, then remove it — the form posts the whole set, so
+# removal is a POST with no labels at all.
+code=$(curl -s -o /dev/null -w '%{http_code}' -X POST \
+  --data-urlencode "key=ENG-3" --data-urlencode "labels=$PANEL_LABEL" "$WEB/labels")
+[ "$code" = 200 ] || fail "/labels add returned $code, want 200"
+issue=$(curl -sf "$WEB/issue/ENG-3")
+assert_contains "$issue" ">props-label</span>" "the added label renders as a chip"
+assert_contains "$issue" "value=\"$PANEL_LABEL\" checked" "the added label comes back checked"
+assert_contains "$("$LIN" issue view ENG-3)" "Labels:    props-label" "POST /labels persisted"
+code=$(curl -s -o /dev/null -w '%{http_code}' -X POST \
+  --data-urlencode "key=ENG-3" "$WEB/labels")
+[ "$code" = 200 ] || fail "/labels clear returned $code, want 200"
+assert_contains "$("$LIN" issue view ENG-3)" "Labels:    none" "empty /labels removed the label"
+issue=$(curl -sf "$WEB/issue/ENG-3")
+if printf '%s' "$issue" | grep -q "value=\"$PANEL_LABEL\" checked"; then
+  fail "empty /labels left the chip checked"
+fi
+
+# Unknown ids are refused, in the flash strip's voice.
+out=$(curl -s -X POST --data-urlencode "key=ENG-3" --data-urlencode "project=bogus" "$WEB/project")
+assert_contains "$out" "unknown project" "unknown project message"
+out=$(curl -s -X POST --data-urlencode "key=ENG-3" --data-urlencode "assignee=nosuchid" "$WEB/assignee")
+assert_contains "$out" "unknown member" "unknown member message"
+out=$(curl -s -X POST --data-urlencode "key=ENG-3" --data-urlencode "labels=nosuchid" "$WEB/labels")
+assert_contains "$out" "unknown label" "unknown label message"
+
+# AC#4: the repaint is the existing broadcast. The write path (the POST)
+# answers with the flash strip alone — no markup, so the page cannot have
+# been repainted by the response — and the issue-scope SSE frame is what
+# carries the new value to the open page.
+PANEL_EVENTS="$DATA_DIR/events-panel.txt"
+curl -sN "$WEB/events?page=issue&key=ENG-3" >"$PANEL_EVENTS" &
+PANEL_PID=$!
+sleep 0.5
+curl -s -o /dev/null -X POST --data-urlencode "key=ENG-3" \
+  --data-urlencode "project=$PANEL_PROJECT" "$WEB/project"
+for _ in $(seq 1 50); do
+  grep -q 'id="project-form"' "$PANEL_EVENTS" 2>/dev/null && break
+  sleep 0.1
+done
+kill $PANEL_PID 2>/dev/null || true
+PANEL_PID=""
+panel_events=$(cat "$PANEL_EVENTS")
+assert_contains "$panel_events" 'id="issue-detail"' "issue broadcast morphs #issue-detail"
+assert_contains "$panel_events" "value=\"$PANEL_PROJECT\" selected" \
+  "the broadcast carries the repainted editor"
+resp=$(curl -s -X POST --data-urlencode "key=ENG-3" --data-urlencode "assignee=$PANEL_MEMBER" "$WEB/assignee")
+assert_contains "$resp" 'id="flash"' "the write path answers with the flash strip"
+assert_not_contains "$resp" 'id="issue-detail"' "the POST ships no markup — no double update"
+
 # --- drag-and-drop path: /state accepts query params with an empty body ---
 code=$(curl -s -o /dev/null -w '%{http_code}' -X POST "$WEB/state?key=ENG-3&state=done")
 [ "$code" = 200 ] || fail "query-param /state returned $code, want 200"
@@ -823,8 +920,8 @@ pj_issue=$(curl -sf "$WEB/issue/$pj_key")
 assert_contains "$pj_issue" '<a href="/issues?project=Ship&#43;the&#43;board">Ship the board</a>' \
   "the issue page links its project to that project's issues"
 assert_contains "$(curl -sf "$WEB/issue/ENG-1")" \
-  '<span class="k">Project</span><span class="v">none' \
-  "an issue with no project says so plainly, with nothing to click"
+  '<option value="" selected>No project</option>' \
+  "an issue with no project says so in its select"
 
 # --- /settings: server-side, shared, CLI-only things (task-83) ---
 # The id of the row a section rendered for a named record, so the assertions

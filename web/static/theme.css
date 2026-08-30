@@ -518,22 +518,23 @@ input:focus, textarea:focus, select:focus {
 .ni-props { display: flex; flex-wrap: wrap; gap: 6px; }
 .ni-props select { padding: 3px 6px; font-size: 12.5px; }
 
-/* Label chips are read-only metadata everywhere else; here they are the
-   control, so the checked one may spend the ember accent. */
-.ni-labels { display: flex; flex-wrap: wrap; align-items: center; gap: 5px; }
+/* Label chips are read-only metadata everywhere else; here (the create
+   dialog) and in the issue page's Properties panel they are the control,
+   so the checked one may spend the ember accent. */
+.ni-labels, .props .labs { display: flex; flex-wrap: wrap; align-items: center; gap: 5px; }
 /* The four selects say what they are; the chips are the one control that
    needs telling, in the properties-panel key register. */
 .ni-key { margin-right: 3px; color: var(--text-3); font-size: 12px; }
-.ni-lab { display: inline-flex; cursor: pointer; }
-.ni-lab input { position: absolute; width: 0; height: 0; opacity: 0; }
-.ni-lab .chip { cursor: pointer; }
-.ni-lab:hover .chip { border-color: var(--border-strong); color: var(--text); }
-.ni-lab input:checked + .chip {
+.ni-lab, .props .lab { display: inline-flex; cursor: pointer; }
+.ni-lab input, .props .lab input { position: absolute; width: 0; height: 0; opacity: 0; }
+.ni-lab .chip, .props .lab .chip { cursor: pointer; }
+.ni-lab:hover .chip, .props .lab:hover .chip { border-color: var(--border-strong); color: var(--text); }
+.ni-lab input:checked + .chip, .props .lab input:checked + .chip {
   border-color: var(--accent);
   background: var(--accent-dim);
   color: var(--text);
 }
-.ni-lab input:focus-visible + .chip { outline: 2px solid var(--accent); outline-offset: 1px; }
+.ni-lab input:focus-visible + .chip, .props .lab input:focus-visible + .chip { outline: 2px solid var(--accent); outline-offset: 1px; }
 
 .ni-foot {
   display: flex;

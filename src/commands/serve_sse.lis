@@ -163,7 +163,12 @@ fn issue_broadcast(ev: realtime.Event, hub: Hub, team_id: string) {
   if json.Unmarshal(ev.data.bytes(), &event).is_err() { return }
   let rec = event.record
   let key = f"{rec.expand.team.key}-{rec.number}"
-  let mut vm = issue_vm(rec, [])
+  let mut vm = match issue_vm(rec, []) {
+    Ok(v) => v,
+    // A catalogue fetch failing is no reason to leave the page stale for
+    // everything else; the board fragment above already went out.
+    Err(_) => { return },
+  }
   if event.action == "delete" { vm = IssueVM { deleted: true, key, .. } }
   if let Ok(html) = render("issue-detail", vm) {
     let _ = hub.broadcast.send(

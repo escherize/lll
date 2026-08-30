@@ -130,6 +130,9 @@ pub fn run_server(port: int) -> Result<(), string> {
   http.HandleFunc("POST /priority", flashing(priority_write))
   http.HandleFunc("POST /emoji", flashing(emoji_write))
   http.HandleFunc("POST /title", flashing(title_write))
+  http.HandleFunc("POST /project", flashing(project_write))
+  http.HandleFunc("POST /assignee", flashing(assignee_write))
+  http.HandleFunc("POST /labels", flashing(labels_write))
   http.HandleFunc("POST /comment", flashing(comment_write))
   http.HandleFunc("POST /views/save", flashing(views_save))
   // The embedded tree keeps its repo paths, so "/static/theme.css" resolves to
