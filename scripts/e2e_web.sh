@@ -6,7 +6,8 @@
 # (/create, /state,
 # /comment) persisting to PB and visible via the CLI, server-side validation,
 # the /events SSE stream emitting datastar-patch-elements frames on
-# CLI-driven changes (board scope and issue scope), static CSS serving, and —
+# CLI-driven changes (board scope and issue scope), workspace-wide favorites
+# patching the rail's own group on every open page, static CSS serving, and —
 # when playwright-cli is available — a real-browser check that a CLI-created
 # issue appears on an open board without reload, and the zero-JavaScript
 # /issues table (server-side sort and filter through query params, honest row
@@ -193,6 +194,14 @@ board_rail=$(rail "$board")
 $(diff <(printf '%s' "$board_rail") <(rail "$issue") || true)"
 assert_contains "$board_rail" 'href="/?mine=1"' "rail has a My issues row"
 assert_contains "$board_rail" "v0.1.0" "rail footer carries the version"
+
+# The FAVORITES group ships in the rail even when empty, and says out loud
+# that a star belongs to the workspace — auth is deferred (task-32), so the
+# UI must not imply these are private.
+assert_contains "$board_rail" 'id="rail-favorites"' "rail carries the favorites group"
+assert_contains "$board_rail" "Shared by everyone here" "favorites are labelled shared, not personal"
+assert_contains "$board_rail" "Star an issue to pin it here for the whole workspace." \
+  "empty favorites group explains the star"
 
 # ?mine=1 marks the row current and seeds one filter chip. The board fragment
 # itself stays unfiltered on purpose: /events broadcasts one #board to every
@@ -644,5 +653,88 @@ assert_contains "$(curl -sf "$WEB/")" '<style id="accent"></style>' \
 curl -sf -X POST "$WEB/settings/team" -d 'name=Engineering' -d 'accent=#f0883e' >/dev/null
 assert_contains "$(curl -sf "$WEB/")" '<style id="accent"></style>' \
   "picking the default orange clears the stored accent"
+
+# --- favorites (task-84): a workspace-wide star, pinned into the rail ---
+# The rail group, for asserting its contents.
+favgroup() { # html
+  printf '%s' "$1" | python3 -c '
+import sys
+html = sys.stdin.read()
+try:
+    print(html.split("id=\"rail-favorites\"")[1].split("</div>")[0])
+except IndexError:
+    pass
+'
+}
+
+# The star is a set, not a toggle: the button posts the state it just moved
+# to, so a repeat is a no-op instead of an unstar.
+code=$(curl -s -o /dev/null -w '%{http_code}' -X POST "$WEB/favorite?key=ENG-1&on=true")
+[ "$code" = 200 ] || fail "/favorite on returned $code, want 200"
+board=$(curl -sf "$WEB/")
+assert_contains "$(favgroup "$board")" 'href="/issue/ENG-1"' "starred issue is in the rail"
+assert_not_contains "$(favgroup "$board")" "Star an issue to pin it here" \
+  "a non-empty group drops the empty-state line"
+# The issue page seeds the star's signal from the server.
+assert_contains "$(curl -sf "$WEB/issue/ENG-1")" 'data-signals:fav="true"' \
+  "issue page opens with the star lit"
+
+curl -s -o /dev/null -X POST "$WEB/favorite?key=ENG-1&on=true"
+count=$(curl -sf "$LLL_URL/api/collections/favorites/records?perPage=200" | jq '.items | length')
+[ "$count" = 1 ] || fail "starring twice made $count rows, want 1"
+
+# The record shape is what makes per-user favorites (task-32) a migration
+# rather than a redesign: the member relation already exists, and is empty
+# because a star currently belongs to the workspace.
+row=$(curl -sf "$LLL_URL/api/collections/favorites/records?perPage=1" | jq -r '.items[0]')
+printf '%s' "$row" | jq -e 'has("member")' >/dev/null || fail "favorite has no member field"
+[ "$(printf '%s' "$row" | jq -r '.member')" = "" ] || fail "favorite is not workspace-wide"
+
+# Unstarring removes the row, and is equally idempotent.
+curl -s -o /dev/null -X POST "$WEB/favorite?key=ENG-1&on=false"
+curl -s -o /dev/null -X POST "$WEB/favorite?key=ENG-1&on=false"
+count=$(curl -sf "$LLL_URL/api/collections/favorites/records?perPage=200" | jq '.items | length')
+[ "$count" = 0 ] || fail "unstarring left $count rows, want 0"
+assert_contains "$(favgroup "$(curl -sf "$WEB/")")" "Star an issue to pin it here" \
+  "the group is empty again after unstarring"
+assert_contains "$(curl -sf "$WEB/issue/ENG-1")" 'data-signals:fav="false"' \
+  "issue page opens with the star dark"
+
+out=$(curl -s -X POST "$WEB/favorite?key=ENG-99&on=true")
+assert_contains "$out" "not found" "/favorite unknown issue message"
+
+# The rail is outside every morph boundary, but the favorites group is its
+# OWN boundary inside it, so a star patches the group alone on every open
+# page — board scope included, which is why the broadcast scope is "*".
+curl -sN "$WEB/events?page=board" >"$EVENTS_FILE" &
+CURL_PID=$!
+sleep 0.5
+curl -s -o /dev/null -X POST "$WEB/favorite?key=ENG-1&on=true"
+for _ in $(seq 1 50); do
+  grep -q "rail-favorites" "$EVENTS_FILE" 2>/dev/null && break
+  sleep 0.1
+done
+kill $CURL_PID 2>/dev/null || true
+CURL_PID=""
+events=$(cat "$EVENTS_FILE")
+assert_contains "$events" 'data: elements <div id="rail-favorites"' \
+  "a star patches the rail's favorites group into a board-scope client"
+assert_contains "$events" 'href="/issue/ENG-1"' "the patched group carries the starred issue"
+# Still a fragment, never the shell: the rail around the group is untouched.
+assert_not_contains "$events" 'id="rail"' "the favorites patch carries no shell"
+
+# Deleting the issue cascades the star away, and that reaches the rail too.
+"$LIN" issue create -t "Starred then deleted" >/dev/null
+STARRED_KEY=$("$LIN" issue list --json | jq -r '.items[] | select(.title=="Starred then deleted") | "ENG-" + (.number|tostring)')
+curl -s -o /dev/null -X POST "$WEB/favorite?key=$STARRED_KEY&on=true"
+assert_contains "$(favgroup "$(curl -sf "$WEB/")")" "Starred then deleted" "second star pinned"
+"$LIN" issue delete "$STARRED_KEY" --force >/dev/null
+assert_not_contains "$(favgroup "$(curl -sf "$WEB/")")" "Starred then deleted" \
+  "deleting an issue cascades its star out of the rail"
+# ...and it is really gone from PB, not merely filtered out of the render:
+# cascadeDelete is what keeps the rail from accumulating dead links.
+count=$(curl -sf "$LLL_URL/api/collections/favorites/records?perPage=200" | jq '.items | length')
+[ "$count" = 1 ] || fail "cascade left $count favorites, want 1 (ENG-1's)"
+curl -s -o /dev/null -X POST "$WEB/favorite?key=ENG-1&on=false"
 
 echo "e2e_web: all assertions passed"

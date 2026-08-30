@@ -176,3 +176,33 @@ pub struct NewComment {
   pub author: string,
   pub body: string,
 }
+
+/// A favorite's expanded issue. Fetched with `expand=issue.team`, so the
+/// nested Issue carries its own expand.team and the rail can build a key.
+#[json]
+pub struct FavoriteExpand {
+  pub issue: Issue,
+}
+
+/// One starred issue. `member` is "" for every row written before auth
+/// (TASK-32) lands: a favorite is workspace-wide, not personal.
+#[json]
+pub struct Favorite {
+  pub id: string,
+  pub issue: string,
+  pub member: string,
+  pub created: string,
+  pub expand: FavoriteExpand,
+}
+
+#[json]
+pub struct FavoriteList {
+  pub items: Slice<Favorite>,
+}
+
+#[json]
+pub struct NewFavorite {
+  pub issue: string,
+  #[json(omitempty)]
+  pub member: string,
+}

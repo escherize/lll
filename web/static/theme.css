@@ -94,10 +94,52 @@ html, body {
 .rail a:hover { background: var(--bg-hover); color: var(--text); }
 .rail a.active { background: var(--bg-raised); color: var(--text); }
 .rail a svg { flex: none; }
+
+/* FAVORITES — the rail's one live region. #rail-favorites is its own morph
+   boundary, patched over SSE when a star changes; everything else in the
+   rail is frozen at page load. margin-top:auto pins the group to the bottom,
+   above the version footer, and min-height:0 lets a long list scroll itself
+   instead of pushing the nav rows off the top. */
+.rail-group {
+  margin-top: auto;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-height: 0;
+  overflow-y: auto;
+}
+.rail-group > h2 {
+  margin: 0;
+  padding: 0 8px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  color: var(--text-3);
+}
+/* Auth is deferred (task-32), so a star belongs to the workspace, not to
+   you. The group says so rather than letting the heading imply otherwise. */
+.rg-note {
+  margin: 2px 0 6px;
+  padding: 0 8px;
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--text-3);
+}
+.rg-empty {
+  margin: 0;
+  padding: 0 8px 4px;
+  font-size: 11.5px;
+  color: var(--text-3);
+}
+.rg-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
 /* Pinned bottom-left: which build is serving this page. The rail's flex
    column pushes it down; a page with more rows just moves it. */
 .rail-foot {
-  margin-top: auto;
+  margin-top: 0;
   padding: 8px;
   color: var(--text-3);
   font-size: 11.5px;
@@ -123,6 +165,30 @@ html, body {
 .crumbs .here { color: var(--text); }
 .crumbs .sep { color: var(--text-3); }
 .topbar .spacer { flex: 1; }
+
+/* Topbar star. A control, so its "on" state may spend the ember accent —
+   the Ember Budget covers interactive affordances. Off it is chrome gray.
+   The glyph is one sprite path with no fill attribute, so fill inherits into
+   the <use> shadow tree and outline/solid is a CSS switch, not a second icon. */
+.fav-star {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  background: var(--bg-raised);
+  color: var(--text-3);
+  cursor: pointer;
+}
+.fav-star svg { fill: none; }
+.fav-star:hover { background: var(--bg-hover); color: var(--text); }
+.fav-star.on { color: var(--accent); }
+.fav-star.on svg { fill: currentColor; }
+.fav-star.on:hover { color: var(--accent-hover); }
 .new-issue { display: flex; align-items: center; gap: 8px; }
 .new-issue input { width: 220px; }
 
