@@ -12,6 +12,3 @@
 [tools]
 go = "1.27"   # PocketBase v0.40.1 and gopb both declare go 1.27
 jq = "1.8"
-# scripts/e2e*.sh drive a standalone PocketBase. lll itself embeds PB via gopb/
-# and needs no external binary -- this is only for the test harness.
-"ubi:pocketbase/pocketbase" = "0.40.1"

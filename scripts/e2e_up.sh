@@ -5,16 +5,10 @@
 # with the move printed, SIGINT stopping both servers (one process now: PB
 # shuts down gracefully, taking the board with it), and the reuse path (a
 # healthy external PB at the configured URL is used, not restarted, and
-# survives lll up's exit; PB_BIN is only needed to spawn that external PB).
+# survives lll up's exit; that external PB is a second lll up instance).
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-PB_BIN="${PB_BIN:-pb/pocketbase}"
-if [ ! -x "$PB_BIN" ]; then
-  PB_BIN="$(command -v pocketbase || true)"
-fi
-[ -n "$PB_BIN" ] || { echo "pocketbase not found" >&2; exit 1; }
-export PB_BIN
 
 DATA_DIR="$(mktemp -d)"
 
@@ -85,8 +79,12 @@ UP_PID=""
 
 # --- reuse path: healthy PB at the configured URL is used, and outlives up ---
 EXT_PORT=$((DB_PORT + 5))
-"$PB_BIN" serve --dir "$DATA_DIR/pb_data" --migrationsDir pb/pb_migrations \
-  --hooksDir pb/pb_hooks --http "127.0.0.1:$EXT_PORT" >/dev/null 2>&1 &
+# A genuinely separate server, so the reuse path is tested against a PocketBase
+# this `lll up` did not start: a second lll up, its own process and data dir.
+EXT_WEB=$((WEB_PORT + 7))
+LLL_URL="http://127.0.0.1:$EXT_PORT" LLL_TEAM=E2E \
+  "$LLL_ABS" up --no-open --port "$EXT_WEB" --pb-dir "$DATA_DIR/ext_pb_data" \
+  </dev/null >/dev/null 2>&1 &
 EXT_PB_PID=$!
 for _ in $(seq 1 100); do
   curl -sf "http://127.0.0.1:$EXT_PORT/api/health" >/dev/null 2>&1 && break
