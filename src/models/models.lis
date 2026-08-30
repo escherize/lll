@@ -231,3 +231,39 @@ pub struct NewView {
   #[json(omitempty)]
   pub member: string,
 }
+
+/// One doc (TASK-86): a wiki page, finding, decision or PRD. The `issues`
+/// relation is the doc -> issue direction; the issue -> doc direction is a
+/// `issues.id ?= 'x'` filter, no stored back-reference.
+#[json]
+pub struct DocExpand {
+  pub issues: Slice<Issue>,
+}
+
+#[json]
+pub struct Doc {
+  pub id: string,
+  pub slug: string,
+  pub title: string,
+  pub kind: string,
+  pub body: string,
+  pub issues: Slice<string>,
+  pub created: string,
+  pub updated: string,
+  pub expand: DocExpand,
+}
+
+#[json]
+pub struct DocList {
+  pub items: Slice<Doc>,
+}
+
+#[json]
+pub struct NewDoc {
+  pub slug: string,
+  pub title: string,
+  pub kind: string,
+  pub body: string,
+  #[json(omitempty)]
+  pub issues: Slice<string>,
+}
