@@ -3,6 +3,9 @@ pub struct Team {
   pub id: string,
   pub key: string,
   pub name: string,
+  // The team's accent colour as "#rrggbb". Empty means DESIGN.md's canonical
+  // ember orange, which theme.css already hard-codes.
+  pub accent: string,
 }
 
 #[json]

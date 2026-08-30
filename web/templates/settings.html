@@ -1,0 +1,124 @@
+{{define "settings-page"}}<!DOCTYPE html>
+<html lang="en">
+{{/* A page's dot is a PageVM: `.Rail` is the shell, `.Page` this page's own
+     view model. #settings below is rendered from `.Page`'s type alone, so the
+     save actions can patch it back without building a shell.
+
+     There is no data-init here on purpose: /settings holds no SSE connection.
+     The bridge broadcasts one unfiltered #board to every board-scoped client,
+     so a page on that scope would have to defend against fragments meant for
+     a different view. Saves answer in their own response instead. */}}
+<head>
+<meta charset="utf-8">
+<title>Settings · lll</title>
+<link rel="stylesheet" href="/static/theme.css">
+{{template "accent-head" .Rail}}
+<script type="module" src="https://cdn.jsdelivr.net/gh/starfederation/datastar@v1.0.3/bundles/datastar.js" integrity="sha384-yHqFPXJio1slWODLf67ZFfuDhhPUccOzGpGJF0d5fitjEfihEVrVvzMsfH8TxCiO" crossorigin="anonymous"></script>
+</head>
+<body>
+{{template "icons"}}
+<div class="app">
+  {{template "rail" .Rail}}
+  <div class="main">
+    <header class="topbar">
+      <div class="crumbs"><span class="here">Settings</span></div>
+      <div class="spacer"></div>
+    </header>
+    <div id="flash" class="flash" hidden></div>
+    <div class="set-scroll">{{template "settings" .Page}}</div>
+  </div>
+</div>
+</body>
+</html>{{end}}
+
+{{/* Every save posts its own row's form and gets this whole block back, so a
+     rename and its knock-on (a label's colour on the board's chips, a
+     project's status in a select) land together. Row forms carry the record
+     id; the trailing "new" form carries none, which is what makes it a
+     create. Delete travels as ?del=1 so the same form body serves both. */}}
+{{define "settings"}}<div id="settings" class="settings">
+<p class="set-lede">lll has no accounts, so everything here belongs to the workspace: everyone who opens this board sees the same labels, members, projects and colour. Per-browser choices (hidden columns, filter chips) stay on the board where you set them.</p>
+
+<section class="set-sec">
+<h2>Team</h2>
+{{if .TeamKey}}<form class="set-form" id="team-form">
+  <div class="set-field"><label for="set-key">Key</label><input id="set-key" value="{{.TeamKey}}" readonly aria-readonly="true" title="Every issue key and every checkout's .lll.toml names this. Rename a team with the CLI."><span class="set-hint">Names every issue: {{.TeamKey}}-1, {{.TeamKey}}-2.</span></div>
+  <div class="set-field"><label for="set-name">Name</label><input id="set-name" name="name" value="{{.TeamName}}" autocomplete="off"></div>
+  <div class="set-field"><label for="set-accent">Accent</label><input id="set-accent" name="accent" type="color" class="set-swatch" value="{{.Accent}}"><span class="set-hint"><code>{{.Accent}}</code>, {{if .AccentSet}}this team's own colour{{else}}the default ember orange{{end}}. It colours every button, focus ring and tab icon, so two boards open side by side never blur together.</span></div>
+  <button type="button" class="btn primary" data-on:click="@post('/settings/team', {contentType: 'form'})">Save team</button>
+</form>
+{{else}}<p class="set-empty">No team is configured, so there is nothing to name or colour. Set <code>team</code> in <code>.lll.toml</code> (or <code>LLL_TEAM</code>) and restart <code>lll up</code>.</p>
+{{end}}</section>
+
+<section class="set-sec">
+<h2>Labels <span class="count">{{len .Labels}}</span></h2>
+<div class="set-rows">
+{{range .Labels}}<form class="set-row" id="set-label-{{.Id}}" data-name="{{.Name}}">
+<input type="hidden" name="id" value="{{.Id}}">
+<input name="color" type="color" class="set-swatch" value="{{if .Color}}{{.Color}}{{else}}#828994{{end}}" aria-label="Colour">
+<input name="name" value="{{.Name}}" autocomplete="off" aria-label="Label name">
+<span class="set-scope">{{.Scope}}</span>
+<button type="button" class="btn" data-on:click="@post('/settings/label', {contentType: 'form'})">Save</button>
+{{template "set-del" "label"}}
+</form>
+{{end}}{{if not .Labels}}<p class="set-empty">No labels yet.</p>
+{{end}}</div>
+<form class="set-row set-new">
+<input name="color" type="color" class="set-swatch" value="#828994" aria-label="Colour for the new label">
+<input name="name" placeholder="New label" autocomplete="off" aria-label="New label name">
+<button type="button" class="btn" data-on:click="@post('/settings/label', {contentType: 'form'})">Add label</button>
+</form>
+</section>
+
+<section class="set-sec">
+<h2>Members <span class="count">{{len .Members}}</span></h2>
+<p class="set-note">Honor-system identities; there is no sign-in. A member is who a comment is attributed to and who an issue is assigned to.</p>
+<div class="set-rows">
+{{range .Members}}<form class="set-row" id="set-member-{{.Id}}" data-name="{{.Name}}">
+<input type="hidden" name="id" value="{{.Id}}">
+<input name="name" value="{{.Name}}" autocomplete="off" aria-label="Member name">
+<input name="email" value="{{.Email}}" placeholder="Email" autocomplete="off" aria-label="Member email" class="set-second">
+<button type="button" class="btn" data-on:click="@post('/settings/member', {contentType: 'form'})">Save</button>
+{{template "set-del" "member"}}
+</form>
+{{end}}{{if not .Members}}<p class="set-empty">No members yet.</p>
+{{end}}</div>
+<form class="set-row set-new">
+<input name="name" placeholder="New member" autocomplete="off" aria-label="New member name">
+<input name="email" placeholder="Email" autocomplete="off" aria-label="New member email" class="set-second">
+<button type="button" class="btn" data-on:click="@post('/settings/member', {contentType: 'form'})">Add member</button>
+</form>
+</section>
+
+<section class="set-sec">
+<h2>Projects <span class="count">{{len .Projects}}</span></h2>
+<div class="set-rows">
+{{range $p := .Projects}}<form class="set-row" id="set-project-{{$p.Id}}" data-name="{{$p.Name}}">
+<input type="hidden" name="id" value="{{$p.Id}}">
+<input name="name" value="{{$p.Name}}" autocomplete="off" aria-label="Project name">
+<select name="status" aria-label="Project status">
+{{range $.Statuses}}<option value="{{.Value}}"{{if eq .Value $p.Status}} selected{{end}}>{{.Label}}</option>
+{{end}}</select>
+<span class="set-scope">{{$p.Scope}}</span>
+<button type="button" class="btn" data-on:click="@post('/settings/project', {contentType: 'form'})">Save</button>
+{{template "set-del" "project"}}
+</form>
+{{end}}{{if not .Projects}}<p class="set-empty">No projects yet.</p>
+{{end}}</div>
+<form class="set-row set-new">
+<input name="name" placeholder="New project" autocomplete="off" aria-label="New project name">
+<select name="status" aria-label="Status for the new project">
+{{range .Statuses}}<option value="{{.Value}}">{{.Label}}</option>
+{{end}}</select>
+<button type="button" class="btn" data-on:click="@post('/settings/project', {contentType: 'form'})">Add project</button>
+</form>
+<p class="set-note">Descriptions are long-form, so they stay with <code>lll project create -d</code>.</p>
+</section>
+</div>{{end}}
+
+{{/* The row's delete control. The record's name reaches the confirm through
+     data-name rather than the expression: html/template escapes an attribute
+     correctly, and a name with an apostrophe in it would otherwise land as
+     broken JS — the same trap the board's filter seed hit. Dot is the section
+     name, which is also the route segment. */}}
+{{define "set-del"}}<button type="button" class="set-del" title="Delete" aria-label="Delete" data-on:click="confirm('Delete ' + el.form.dataset.name + '?') && @post('/settings/{{.}}?del=1', {contentType: 'form'})"><svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true"><path d="M2.5 2.5 L9.5 9.5 M9.5 2.5 L2.5 9.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg></button>{{end}}

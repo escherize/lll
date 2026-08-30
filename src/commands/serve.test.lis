@@ -122,3 +122,85 @@ fn every_sortable_column_asks_for_a_field_query_sort_accepts() {
     }
   }
 }
+
+// ---------- team accent (task-83) ----------
+
+#[test]
+fn normalize_hex_accepts_a_six_digit_hex_in_either_case() {
+  assert normalize_hex("#F0883E") == "#f0883e"
+  assert normalize_hex("  #a1b2c3  ") == "#a1b2c3"
+}
+
+#[test]
+fn normalize_hex_rejects_anything_that_is_not_rrggbb() {
+  // Every one of these would otherwise reach a :root rule on every page.
+  assert normalize_hex("") == ""
+  assert normalize_hex("#abc") == ""
+  assert normalize_hex("red") == ""
+  assert normalize_hex("#12345g") == ""
+  // ParseInt alone would take this one: "+12345" is a valid base-16 number.
+  assert normalize_hex("#+12345") == ""
+  assert normalize_hex("#f0883e; } body { display:none") == ""
+}
+
+#[test]
+fn accent_css_is_empty_for_the_canonical_orange() {
+  // No stored colour means theme.css's own tokens, untouched.
+  assert (accent_css("") as string) == ""
+}
+
+#[test]
+fn accent_css_derives_the_whole_family_from_one_hex() {
+  let css = accent_css("#f0883e") as string
+  assert strings.Contains(css, ":root{")
+  assert strings.Contains(css, "--accent:#f0883e;")
+  assert strings.Contains(css, "--accent-dim:rgba(240,136,62,0.16)")
+  // Fed DESIGN.md's own orange, the derivation lands within a few values of
+  // the shipped #f79b57 / #1a0f06 / #c96a25.
+  assert strings.Contains(css, "--accent-hover:#f29655")
+  assert strings.Contains(css, "--accent-ink:#180e06")
+  assert strings.Contains(css, "--accent-deep:#c06d32")
+}
+
+#[test]
+fn accent_css_keeps_two_digits_per_channel() {
+  // A channel below 16 must not collapse to one digit and shift the hex:
+  // "#18" + "17" + "1" would read as #18171 and swallow the next token.
+  let css = accent_css("#f0e80d") as string
+  assert strings.Contains(css, "--accent-ink:#181701")
+  assert strings.Contains(css, "--accent-hover:#f2eb2a")
+}
+
+#[test]
+fn accent_ink_flips_to_light_on_a_dark_accent() {
+  // A colour picker hands out navy as readily as orange, and 10% of navy on
+  // navy is an unreadable button.
+  assert strings.Contains(accent_css("#102040") as string, "--accent-ink:#e7e9ec")
+  assert strings.Contains(accent_css("#f0883e") as string, "--accent-ink:#180e06")
+}
+
+#[test]
+fn mark_letter_takes_the_team_initial_or_falls_back() {
+  assert mark_letter("ENG") == "E"
+  assert mark_letter("") == "L"
+  // The letter lands unescaped inside an SVG document, so only ASCII
+  // alphanumerics get through.
+  assert mark_letter("<script") == "L"
+  assert mark_letter("'/>") == "L"
+}
+
+#[test]
+fn favicon_url_is_an_escaped_data_url_in_the_accent() {
+  let icon = favicon_url("#3ea0f0", "E") as string
+  assert strings.HasPrefix(icon, "data:image/svg+xml,")
+  // Raw angle brackets or a bare # would break the href.
+  assert !strings.Contains(icon, "<")
+  assert !strings.Contains(icon, ">")
+  assert strings.Contains(icon, "%3Csvg")
+  assert strings.Contains(icon, "%233ea0f0")
+}
+
+#[test]
+fn favicon_url_falls_back_to_the_canonical_orange() {
+  assert strings.Contains(favicon_url("", "L") as string, "%23f0883e")
+}
