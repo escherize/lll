@@ -11,6 +11,29 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
+# A random port that is actually free. Binding proves it, unlike a liveness
+# probe: an occupied port makes a health poll succeed against a STRANGER's
+# server, and the suite then dies much later naming something unrelated.
+free_port() { # low high
+  python3 -c '
+import random, socket, sys
+lo, hi = int(sys.argv[1]), int(sys.argv[2])
+for _ in range(200):
+    p = random.randint(lo, hi)
+    s = socket.socket()
+    try:
+        s.bind(("127.0.0.1", p))
+    except OSError:
+        continue
+    finally:
+        s.close()
+    print(p)
+    sys.exit(0)
+sys.exit("no free port in range")
+' "$1" "$2"
+}
+
+
 DATA_DIR="$(mktemp -d)"
 
 # Hermetic: a developer's repo-root .lll.toml must not leak into assertions.
@@ -18,8 +41,8 @@ if [ -f .lll.toml ]; then
   mv .lll.toml "$DATA_DIR/.lll.toml.saved"
   RESTORE_TOML=1
 fi
-PB_PORT=$(( (RANDOM % 20000) + 20000 ))
-WEB_PORT=$(( (RANDOM % 20000) + 40000 ))
+PB_PORT=$(free_port 20000 39999)
+WEB_PORT=$(free_port 40000 59999)
 export LLL_URL="http://127.0.0.1:$PB_PORT"
 export LLL_TEAM=ENG
 WEB="http://127.0.0.1:$WEB_PORT"
@@ -240,7 +263,7 @@ out=$(curl -s -X POST -d "key=ENG-3&body=" "$WEB/comment")
 assert_contains "$out" "comment body is required" "empty comment message"
 
 # --- no team configured: up refuses rather than booting half-configured ---
-NOTEAM_PORT=$(( (RANDOM % 20000) + 40000 ))
+NOTEAM_PORT=$(free_port 40000 59999)
 # The boot above legitimately wrote 'me' (task-31), so the invariant is that
 # the refusal changes nothing — not that the file is absent.
 TOML_BEFORE=$(cat .lll.toml 2>/dev/null || true)
