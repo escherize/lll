@@ -77,7 +77,7 @@
 </div>
 <div class="prop"><span class="k">Assignee</span>
   <span class="v">{{if .Assignee}}{{template "avatar" .Avatar}}{{end}}
-  <form id="assignee-form"><input type="hidden" name="key" value="{{.Key}}"><select name="assignee" aria-label="Assignee" data-on:change="@post('/assignee', {contentType: 'form'})"><option value="">Unassigned</option>
+  <form id="assignee-form"><input type="hidden" name="key" value="{{.Key}}"><select name="assignee" aria-label="Assignee" data-on:change="@post('/assignee', {contentType: 'form'})"><option value=""{{if eq $.AssigneeId ""}} selected{{end}}>Unassigned</option>
   {{range .MemberOpts}}<option value="{{.Id}}"{{if eq .Id $.AssigneeId}} selected{{end}}>{{.Name}}</option>
   {{end}}</select></form></span>
 </div>
@@ -85,7 +85,7 @@
   <!-- The link stays: it is the way into that project's issues, which the
        select's selected option cannot be. -->
   <span class="v">{{if .ProjectHref}}<a href="{{.ProjectHref}}">{{.Project}}</a>{{end}}
-  <form id="project-form"><input type="hidden" name="key" value="{{.Key}}"><select name="project" aria-label="Project" data-on:change="@post('/project', {contentType: 'form'})"><option value="">No project</option>
+  <form id="project-form"><input type="hidden" name="key" value="{{.Key}}"><select name="project" aria-label="Project" data-on:change="@post('/project', {contentType: 'form'})"><option value=""{{if eq $.ProjectId ""}} selected{{end}}>No project</option>
   {{range .ProjectOpts}}<option value="{{.Id}}"{{if eq .Id $.ProjectId}} selected{{end}}>{{.Name}}</option>
   {{end}}</select></form></span>
 </div>
