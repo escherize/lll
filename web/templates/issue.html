@@ -1,22 +1,21 @@
 {{define "issue-page"}}<!DOCTYPE html>
 <html lang="en">
+{{/* A page's dot is a PageVM: `.Rail` is the shell, `.Page` this page's own
+     view model. Fragments below are rendered from `.Page`'s type alone. */}}
 <head>
 <meta charset="utf-8">
-<title>{{.Key}} · lll</title>
+<title>{{.Page.Key}} · lll</title>
 <link rel="stylesheet" href="/static/theme.css">
 <script type="module" src="https://cdn.jsdelivr.net/gh/starfederation/datastar@v1.0.3/bundles/datastar.js" integrity="sha384-yHqFPXJio1slWODLf67ZFfuDhhPUccOzGpGJF0d5fitjEfihEVrVvzMsfH8TxCiO" crossorigin="anonymous"></script>
 <script src="/static/mermaid-init.js" defer></script>
 </head>
-<body data-init="@get('/events?page=issue&key={{.Key}}')" data-on:pageshow__window="evt.persisted && window.location.reload()">
+<body data-init="@get('/events?page=issue&key={{.Page.Key}}')" data-on:pageshow__window="evt.persisted && window.location.reload()">
 {{template "icons"}}
 <div class="app">
-  <nav class="rail">
-    <div class="workspace"><span class="mark">L</span> lll</div>
-    <a href="/"><svg width="14" height="14"><use href="#ic-board"/></svg> Board</a>
-  </nav>
+  {{template "rail" .Rail}}
   <div class="main">
     <header class="topbar">
-      <div class="crumbs"><a href="/">Board</a><span class="sep">›</span><span class="here">{{.Key}}</span></div>
+      <div class="crumbs"><a href="/">Board</a><span class="sep">›</span><span class="here">{{.Page.Key}}</span></div>
       <div class="spacer"></div>
     </header>
     <div id="flash" class="flash" hidden></div>
@@ -25,10 +24,10 @@
          and data-bind repopulates the re-created input from $title_draft. -->
     <div class="issue-wrap" data-signals:edit_title="false" data-signals:title_draft="''">
       <div class="issue-scroll">
-        {{template "issue-detail" .}}
-        {{template "comments" .}}
+        {{template "issue-detail" .Page}}
+        {{template "comments" .Page}}
         <form id="comment-form" class="composer">
-          <input type="hidden" name="key" value="{{.Key}}">
+          <input type="hidden" name="key" value="{{.Page.Key}}">
           <textarea name="body" placeholder="Leave a comment…"></textarea>
           <button type="button" class="btn primary" data-on:click="@post('/comment', {contentType: 'form'})">Comment</button>
         </form>

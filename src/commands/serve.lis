@@ -107,6 +107,35 @@ pub struct BoardVM {
   pub states: Slice<StateOpt>,
   pub columns: Slice<ColumnVM>,
   pub filter_groups: Slice<FilterGroupVM>,
+  // The filter chips the page opens with, as a JS array literal — set only
+  // by the rail's "My issues" link (?mine=1). Empty means "restore whatever
+  // the browser saved", which is every other board load, broadcasts
+  // included: the filter bar lives outside #board and is never re-rendered.
+  pub flt_seed: template.JS,
+}
+
+/// View model for the app shell's left rail.
+///
+/// Shell data lives here and nowhere else. The SSE bridge broadcasts
+/// FRAGMENTS rendered straight from BoardVM / IssueVM / CommentsVM, so
+/// hanging the rail off those view models would make every broadcast
+/// construct a rail it must never render. Page handlers compose the two
+/// halves into a PageVM instead; a fragment cannot carry shell by accident.
+pub struct RailVM {
+  // Which row reads as current: "board" or "mine".
+  pub active: string,
+  // Config's `me`. Empty means there is no member to be, so no "My issues"
+  // row — a rail link that leads nowhere is worse than no rail link.
+  pub me: string,
+  pub version: string,
+}
+
+/// A whole page: the shell plus that page's own view model. Page templates
+/// take one of these and reach the page through `.Page`; adding a page means
+/// a handler and a `{{define}}`, never an edit to another page's template.
+pub struct PageVM {
+  pub rail: RailVM,
+  pub page: Unknown,
 }
 
 /// View model for one comment.
@@ -225,8 +254,14 @@ pub fn run_server(port: int) -> Result<(), string> {
     team_id = team.id
   }
 
-  // Fail fast on broken templates before accepting connections.
-  let _ = render("board", BoardVM { states: state_opts(), columns: [], .. })?
+  // Fail fast on broken templates before accepting connections — both
+  // pages, because they share the rail and a typo in it breaks every page.
+  let shell = rail_vm("board", cfg.me)
+  let _ = render(
+    "board-page",
+    PageVM { rail: shell, page: BoardVM { states: state_opts(), columns: [], .. } },
+  )?
+  let _ = render("issue-page", PageVM { rail: shell, page: IssueVM { .. } })?
 
   // One PB subscription for everything. Issues are team-scoped at most —
   // never state-filtered: PB emits nothing when an update moves a record out
@@ -249,11 +284,16 @@ pub fn run_server(port: int) -> Result<(), string> {
 
   http.HandleFunc(
     "GET /{$}",
-    |w: http.ResponseWriter, _r: Ref<http.Request>| {
-      board_page(w, team_id)
+    |w: http.ResponseWriter, r: Ref<http.Request>| {
+      board_page(w, r, team_id, cfg.me)
     },
   )
-  http.HandleFunc("GET /issue/{key}", issue_page)
+  http.HandleFunc(
+    "GET /issue/{key}",
+    |w: http.ResponseWriter, r: Ref<http.Request>| {
+      issue_page(w, r, cfg.me)
+    },
+  )
   http.HandleFunc(
     "GET /events",
     |w: http.ResponseWriter, r: Ref<http.Request>| {
@@ -451,7 +491,7 @@ fn board_vm(team_id: string) -> Result<BoardVM, string> {
       sig: strings.ReplaceAll(s, "-", "_") as template.JS,
       cards: issues.filter(|i| i.state == s).map(card_vm),
     })
-  Ok(BoardVM { states: state_opts(), columns, filter_groups: filter_groups(issues) })
+  Ok(BoardVM { states: state_opts(), columns, filter_groups: filter_groups(issues), .. })
 }
 
 fn fetch_board_issues(team_id: string) -> Result<Slice<models.Issue>, string> {
@@ -551,15 +591,39 @@ fn issue_vm(issue: models.Issue, comments: Slice<models.Comment>) -> IssueVM {
 
 // ---------- page handlers ----------
 
-fn board_page(w: http.ResponseWriter, team_id: string) {
-  let vm = match board_vm(team_id) {
+/// The rail for one page: `active` names the current row, `me` decides
+/// whether "My issues" has anywhere to point.
+fn rail_vm(active: string, me: string) -> RailVM {
+  RailVM { active, me, version: version() }
+}
+
+/// One query parameter, or "" when there is no URL to ask.
+fn query_param(r: Ref<http.Request>, name: string) -> string {
+  let Some(u) = r.URL else {
+    return ""
+  }
+  u.Query().Get(name)
+}
+
+/// The board, optionally opened on the rail's "My issues" filter (?mine=1).
+/// The filter is a client-side chip, not a server-side query: /events
+/// broadcasts one unfiltered #board fragment to every board client, so a
+/// server-filtered page would be morphed back to the full board on the next
+/// realtime event.
+fn board_page(w: http.ResponseWriter, r: Ref<http.Request>, team_id: string, me: string) {
+  let mut vm = match board_vm(team_id) {
     Ok(v) => v,
     Err(e) => {
       http.Error(w, e, 500)
       return
     },
   }
-  let html = match render("board-page", vm) {
+  let mut active = "board"
+  if me != "" && query_param(r, "mine") != "" {
+    active = "mine"
+    vm.flt_seed = assignee_chip(me)
+  }
+  let html = match render("board-page", PageVM { rail: rail_vm(active, me), page: vm }) {
     Ok(h) => h,
     Err(e) => {
       http.Error(w, e, 500)
@@ -571,7 +635,19 @@ fn board_page(w: http.ResponseWriter, team_id: string) {
   let _ = w.Write(html.bytes())
 }
 
-fn issue_page(w: http.ResponseWriter, r: Ref<http.Request>) {
+/// One filter chip, JSON-encoded, for the filter bar's opening signal. JSON
+/// rather than string interpolation because the value is a member's name:
+/// html/template escapes the attribute, the browser unescapes it, and a name
+/// with an apostrophe in it would otherwise land as broken JS.
+fn assignee_chip(name: string) -> template.JS {
+  let Ok(json_bytes) = json.Marshal([f"assignee:{name}"]) else {
+    return "" as template.JS
+  }
+  let text = json_bytes as string
+  text as template.JS
+}
+
+fn issue_page(w: http.ResponseWriter, r: Ref<http.Request>, me: string) {
   let key = r.PathValue("key")
   let issue = match fetch_issue(key) {
     Ok(i) => i,
@@ -587,7 +663,13 @@ fn issue_page(w: http.ResponseWriter, r: Ref<http.Request>) {
       return
     },
   }
-  let html = match render("issue-page", issue_vm(issue, comments)) {
+  // An issue is a detail view under the board, so the board row stays
+  // current — which also makes the rail byte-identical to the board's.
+  let vm = PageVM {
+    rail: rail_vm("board", me),
+    page: issue_vm(issue, comments),
+  }
+  let html = match render("issue-page", vm) {
     Ok(h) => h,
     Err(e) => {
       http.Error(w, e, 500)

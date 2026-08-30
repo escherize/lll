@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 # e2e: the `lll up` web board against an ephemeral PocketBase.
 # Covers: board page grouped by the six states with cards in the right
-# columns, issue page (detail, comments, forms), actions (/create, /state,
+# columns, issue page (detail, comments, forms), the app shell's rail (one
+# template, same on every page, absent from every broadcast), actions
+# (/create, /state,
 # /comment) persisting to PB and visible via the CLI, server-side validation,
 # the /events SSE stream emitting datastar-patch-elements frames on
 # CLI-driven changes (board scope and issue scope), static CSS serving, and —
@@ -170,6 +172,37 @@ assert_contains "$issue" 'id="state-form"' "issue page has state control"
 curl -s -o /dev/null -w '%{http_code}' "$WEB/issue/ENG-99" | grep -q 404 \
   || fail "unknown issue is a 404"
 
+# --- app shell: one rail template, the same on every page (task-81) ---
+# The <nav id="rail"> block, for diffing one page's shell against another's.
+rail() { # html
+  printf '%s' "$1" | python3 -c '
+import sys
+html = sys.stdin.read()
+try:
+    print(html.split("<nav id=\"rail\"")[1].split("</nav>")[0])
+except IndexError:
+    pass
+'
+}
+board=$(curl -sf "$WEB/")
+board_rail=$(rail "$board")
+[ -n "$board_rail" ] || fail "board page has no rail"
+[ "$board_rail" = "$(rail "$issue")" ] || fail "the rail differs between the board and issue pages:
+$(diff <(printf '%s' "$board_rail") <(rail "$issue") || true)"
+assert_contains "$board_rail" 'href="/?mine=1"' "rail has a My issues row"
+assert_contains "$board_rail" "v0.1.0" "rail footer carries the version"
+
+# ?mine=1 marks the row current and seeds one filter chip. The board fragment
+# itself stays unfiltered on purpose: /events broadcasts one #board to every
+# board client, so a server-filtered page would be morphed back on the next
+# realtime event.
+mine=$(curl -sf "$WEB/?mine=1")
+assert_contains "$mine" 'title="Issues assigned to e2e" class="active"' \
+  "?mine=1 marks the My issues row current"
+assert_contains "$mine" 'data-signals:flt="[&#34;assignee:e2e&#34;]"' \
+  "?mine=1 seeds the assignee filter chip"
+assert_contains "$(column "$mine" todo)" "ENG-1" "?mine=1 leaves the board fragment unfiltered"
+
 # --- actions persist to PB and show via the CLI ---
 out=$(curl -s -w '\n%{http_code}' -X POST \
   -d "title=Created from the board&state=todo" "$WEB/create")
@@ -290,6 +323,9 @@ events=$(cat "$EVENTS_FILE")
 assert_contains "$events" "event: datastar-patch-elements" "SSE patch frame emitted"
 assert_contains "$events" 'data: elements <main id="board"' "patch morphs #board"
 assert_contains "$events" 'id="col-done"' "patch contains the target column"
+# Broadcasts are fragments, never pages: the shell is composed by the page
+# handlers alone, so no broadcast path can construct a rail (task-81).
+assert_not_contains "$events" 'id="rail"' "broadcast fragments carry no shell"
 
 # --- /events: issue scope gets comments patch after a CLI comment ---
 curl -sN "$WEB/events?page=issue&key=ENG-1" >"$EVENTS_FILE" &
@@ -369,15 +405,19 @@ got=$(col_order "$(curl -sf "$WEB/")" todo)
 if command -v playwright-cli >/dev/null 2>&1; then
   playwright-cli -s="$BROWSER_SESSION" open "$WEB/" >/dev/null 2>&1 \
     || fail "playwright: opening board"
+  # The probe marks the live rail node: a morph that replaced or re-rendered
+  # the rail would take the attribute with it (task-81).
   before=$(playwright-cli -s="$BROWSER_SESSION" eval \
-    "() => document.querySelectorAll('.card').length" | sed -n '/### Result/{n;p;}')
+    "() => { document.getElementById('rail').dataset.probe = 'kept'; return document.querySelectorAll('.card').length }" \
+    | sed -n '/### Result/{n;p;}')
   "$LIN" issue create -t "Born while browser open" >/dev/null
   sleep 2
   result=$(playwright-cli -s="$BROWSER_SESSION" eval \
-    "() => JSON.stringify({cards: document.querySelectorAll('.card').length, navs: performance.getEntriesByType('navigation').length, titles: [...document.querySelectorAll('.card .title')].map(e => e.textContent)})" \
+    "() => JSON.stringify({cards: document.querySelectorAll('.card').length, navs: performance.getEntriesByType('navigation').length, rail: document.getElementById('rail').dataset.probe || 'LOST', titles: [...document.querySelectorAll('.card .title')].map(e => e.textContent)})" \
     | sed -n '/### Result/{n;p;}' | tr -d '\\')
   assert_contains "$result" "Born while browser open" "browser: new card appeared"
   assert_contains "$result" '"navs":1' "browser: no reload happened"
+  assert_contains "$result" '"rail":"kept"' "browser: the SSE morph left the rail alone"
   case "$result" in
     *"\"cards\":$((before + 1))"*) ;;
     *) fail "browser: card count did not go from $before to $((before + 1)): $result" ;;
