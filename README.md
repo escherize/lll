@@ -12,12 +12,14 @@ Written in [Lisette](https://github.com/ivov/lisette), which compiles to Go.
 
 ## Quickstart
 
-Requires [lis](https://github.com/ivov/lisette) (the Lisette toolchain) and
-Go 1.27 (pinned in `mise.toml`). No separate PocketBase install — it is
-embedded, and the test suite drives it through `lll up`.
+No separate PocketBase install — it is embedded, and the test suite drives it
+through `lll up`. Go 1.27 is pinned in `mise.toml`; `lis`, the Lisette
+toolchain, ships as a GitHub release rather than a mise plugin, so it is the
+one tool you install yourself:
 
 ```sh
-mise install             # go, jq  (lis: see below)
+curl -LsSf https://github.com/ivov/lisette/releases/latest/download/lisette-installer.sh | sh
+mise install             # go, jq
 mise run dev             # build, then PocketBase (:8090) + web board (:8100)
 ```
 
@@ -25,7 +27,9 @@ mise run dev             # build, then PocketBase (:8090) + web board (:8100)
 subdirectory. The board reads `web/templates/` and `web/static/` from disk;
 taken ports auto-increment; Ctrl-C stops everything.
 
-Then, in another shell:
+Then, in another shell — with mise activated, `lll` anywhere under the
+checkout is the binary you just built, so there is nothing to install or
+symlink:
 
 ```sh
 lll team create -k ENG -n "Engineering"

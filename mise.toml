@@ -13,6 +13,11 @@
 go = "1.27"   # PocketBase v0.40.1 and gopb both declare go 1.27
 jq = "1.8"
 
+# The binary lis builds, on PATH. With mise activated, `lll` in any shell under
+# the checkout is the freshly built one — no install step, nothing to go stale.
+[env]
+_.path = ["{{config_root}}/target/.lisette/bin"]
+
 # Tasks. `mise tasks` lists them. Each pins dir to the checkout root, because
 # lll up reads pb/ and web/ relative to the working directory.
 #
@@ -21,7 +26,10 @@ jq = "1.8"
 [tasks.build]
 description = "Compile lll to target/.lisette/bin/lll"
 dir = "{{config_root}}"
-run = "lis build"
+run = """
+command -v lis >/dev/null || { echo "lis not found. Install it:" >&2; echo "  curl -LsSf https://github.com/ivov/lisette/releases/latest/download/lisette-installer.sh | sh" >&2; exit 1; }
+lis build
+"""
 
 [tasks.dev]
 description = "Build, then run PocketBase + the web board"
@@ -32,7 +40,10 @@ run = "target/.lisette/bin/lll up"
 [tasks.test]
 description = "Unit tests"
 dir = "{{config_root}}"
-run = "lis test"
+run = """
+command -v lis >/dev/null || { echo "lis not found. Install it:" >&2; echo "  curl -LsSf https://github.com/ivov/lisette/releases/latest/download/lisette-installer.sh | sh" >&2; exit 1; }
+lis test
+"""
 
 [tasks.e2e]
 description = "Full end-to-end suite (CLI, web board, lll up)"
