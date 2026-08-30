@@ -1,0 +1,275 @@
+// Unit cover for the pure helpers in issue.lis. Everything here is a function
+// of its arguments alone — no PocketBase, no config, no git.
+//
+// Multi-byte input is deliberate throughout. Byte offsets and rune indices
+// disagree, and that confusion panicked in five places in this codebase
+// (see realtime.split_field). An all-ASCII suite is how that reached
+// production, so every helper that walks a string is fed non-ASCII here.
+
+// ---------------------------------------------------------------- deslug
+
+#[test]
+fn deslug_returns_a_bare_key_untouched() {
+  assert deslug("ENG-12") == "ENG-12"
+  assert deslug("") == ""
+  assert deslug("nonsense") == "nonsense"
+}
+
+#[test]
+fn deslug_strips_scheme_host_and_issue_prefix() {
+  assert deslug("http://127.0.0.1:8100/issue/ENG-12") == "ENG-12"
+  assert deslug("https://board.example.com/issue/ENG-12") == "ENG-12"
+  assert deslug("https://board.example.com/ENG-12") == "ENG-12"
+}
+
+#[test]
+fn deslug_ignores_a_trailing_slash() {
+  assert deslug("http://127.0.0.1:8100/issue/ENG-12/") == "ENG-12"
+}
+
+#[test]
+fn deslug_accepts_a_relative_issue_path() {
+  assert deslug("issue/ENG-12") == "ENG-12"
+}
+
+/// The whole reason deslug is all splitting and no index arithmetic.
+#[test]
+fn deslug_survives_multi_byte_hosts_paths_and_keys() {
+  assert deslug("http://exämple.test/issue/ÉNG-12") == "ÉNG-12"
+  assert deslug("https://日本.example/issue/日本-3") == "日本-3"
+  assert deslug("http://board.test/issue/🐛-1") == "🐛-1"
+  assert deslug("héllo") == "héllo"
+}
+
+#[test]
+fn deslug_returns_the_argument_when_it_is_not_key_shaped() {
+  // No path at all: nothing to strip.
+  assert deslug("http://127.0.0.1:8100") == "http://127.0.0.1:8100"
+  // Path is empty once the host is gone.
+  assert deslug("http://127.0.0.1:8100/") == "http://127.0.0.1:8100/"
+  // More path than an issue page has; left alone so the caller's "not an
+  // issue ID" message quotes what the user actually typed.
+  assert deslug("http://127.0.0.1:8100/a/b/c") == "http://127.0.0.1:8100/a/b/c"
+}
+
+/// Pins today's behaviour, which is not the behaviour anyone wants: a query
+/// string or fragment rides along into the issue ID and fails downstream with
+/// "'ENG-12?tab=comments' is not an issue ID". Filed as TASK-144; update this
+/// test when it lands.
+#[test]
+fn deslug_currently_keeps_a_query_string_or_fragment() {
+  assert deslug("http://127.0.0.1:8100/issue/ENG-12?tab=comments") ==
+  "ENG-12?tab=comments"
+  assert deslug("http://127.0.0.1:8100/issue/ENG-12#c1") == "ENG-12#c1"
+  // And an issue page with no key at all degrades to the literal "issue",
+  // so the error quotes that rather than what the user pasted.
+  assert deslug("http://127.0.0.1:8100/issue/") == "issue"
+}
+
+// ----------------------------------------------------------- check_emoji
+
+#[test]
+fn check_emoji_trims_surrounding_space() {
+  let assert Ok(e) = check_emoji("  🐛  ")
+  assert e == "🐛"
+}
+
+#[test]
+fn check_emoji_clears_with_an_empty_string() {
+  let assert Ok(e) = check_emoji("")
+  assert e == ""
+  let assert Ok(blank) = check_emoji("   ")
+  assert blank == ""
+}
+
+#[test]
+fn check_emoji_allows_the_longest_single_emoji() {
+  // ZWJ family: 7 runes, 25 bytes. Regional-indicator flag: 2 runes, 8 bytes.
+  let assert Ok(family) = check_emoji("👨‍👩‍👧‍👦")
+  assert family == "👨‍👩‍👧‍👦"
+  let assert Ok(flag) = check_emoji("🇺🇸")
+  assert flag == "🇺🇸"
+}
+
+/// The limit is 8 RUNES. A byte-length check would reject a single emoji
+/// (4 bytes each) long before it rejected a sentence.
+#[test]
+fn check_emoji_counts_runes_not_bytes() {
+  // 4 runes, 16 bytes — passes.
+  let assert Ok(bugs) = check_emoji("🐛🐛🐛🐛")
+  assert bugs == "🐛🐛🐛🐛"
+  // 8 runes, 8 bytes — passes on the same budget.
+  let assert Ok(ascii) = check_emoji("abcdefgh")
+  assert ascii == "abcdefgh"
+}
+
+#[test]
+fn check_emoji_rejects_more_than_eight_runes() {
+  let assert Err(msg) = check_emoji("abcdefghi")
+  assert msg.contains("--emoji takes one emoji")
+  assert msg.contains("abcdefghi")
+  let assert Err(_) = check_emoji("in progress")
+  // 9 runes of non-ASCII is over the line too, bytes notwithstanding.
+  let assert Err(_) = check_emoji("🐛🐛🐛🐛🐛🐛🐛🐛🐛")
+}
+
+#[test]
+fn check_emoji_reports_the_trimmed_value() {
+  let assert Err(msg) = check_emoji("  in progress  ")
+  assert msg.contains("'in progress'")
+}
+
+// --------------------------------------------------------- positional_id
+
+fn view_args(rest: Slice<string>) -> Slice<string> {
+  ["lll", "issue", "view"].append(rest...)
+}
+
+#[test]
+fn positional_id_is_empty_when_nothing_is_passed() {
+  let assert Ok(id) = positional_id(view_args([]), "usage")
+  assert id == ""
+}
+
+#[test]
+fn positional_id_takes_the_single_argument() {
+  let assert Ok(id) = positional_id(view_args(["ENG-12"]), "usage")
+  assert id == "ENG-12"
+}
+
+#[test]
+fn positional_id_passes_multi_byte_arguments_through() {
+  // No key validation here; deslug and split_issue_key own that.
+  let assert Ok(id) = positional_id(view_args(["ÉNG-12"]), "usage")
+  assert id == "ÉNG-12"
+}
+
+#[test]
+fn positional_id_rejects_flags_with_the_usage_line() {
+  let assert Err(msg) = positional_id(view_args(["--json"]), "lll issue view")
+  assert msg.contains("unknown flag: '--json'")
+  assert msg.contains("usage: lll issue view")
+  // A flag after a valid id is still a flag.
+  let assert Err(after) =
+    positional_id(view_args(["ENG-12", "--json"]), "lll issue view")
+  assert after.contains("unknown flag")
+  // A bare dash is not a positional argument either.
+  let assert Err(dash) = positional_id(view_args(["-"]), "lll issue view")
+  assert dash.contains("unknown flag: '-'")
+}
+
+#[test]
+fn positional_id_rejects_a_second_argument() {
+  let assert Err(msg) = positional_id(view_args(["ENG-12", "ENG-13"]), "usage")
+  assert msg.contains("unexpected argument: 'ENG-13'")
+}
+
+// -------------------------------------------------------- value_or_stdin
+
+/// Only a lone `-` reaches for stdin; everything else is returned verbatim,
+/// including values that merely start with a dash.
+#[test]
+fn value_or_stdin_returns_a_plain_value_unchanged() {
+  let assert Ok(v) = value_or_stdin("a description", "-d")
+  assert v == "a description"
+  let assert Ok(empty) = value_or_stdin("", "-d")
+  assert empty == ""
+  let assert Ok(dashed) = value_or_stdin("-not-stdin", "-d")
+  assert dashed == "-not-stdin"
+  let assert Ok(utf8) = value_or_stdin("café — 日本 🐛", "-d")
+  assert utf8 == "café — 日本 🐛"
+  // No trailing-newline trimming on this path; that belongs to stdin only.
+  let assert Ok(nl) = value_or_stdin("line\n", "-d")
+  assert nl == "line\n"
+}
+
+// ------------------------------------------------------- split_issue_key
+
+#[test]
+fn split_issue_key_splits_key_and_number() {
+  let assert Ok(parsed) = split_issue_key("ENG-12")
+  let (key, number) = parsed
+  assert key == "ENG"
+  assert number == 12
+}
+
+/// The number is the LAST segment, so a team key may contain hyphens.
+#[test]
+fn split_issue_key_keeps_hyphenated_team_keys() {
+  let assert Ok(parsed) = split_issue_key("ENG-DEV-12")
+  let (key, number) = parsed
+  assert key == "ENG-DEV"
+  assert number == 12
+}
+
+/// TrimSuffix on the whole id, not a byte offset into it.
+#[test]
+fn split_issue_key_handles_multi_byte_team_keys() {
+  let assert Ok(accented) = split_issue_key("ÉNG-12")
+  let (k1, n1) = accented
+  assert k1 == "ÉNG"
+  assert n1 == 12
+
+  let assert Ok(cjk) = split_issue_key("日本-3")
+  let (k2, n2) = cjk
+  assert k2 == "日本"
+  assert n2 == 3
+
+  let assert Ok(emoji) = split_issue_key("🐛-7")
+  let (k3, n3) = emoji
+  assert k3 == "🐛"
+  assert n3 == 7
+}
+
+#[test]
+fn split_issue_key_rejects_ids_without_both_halves() {
+  let assert Err(_) = split_issue_key("ENG")
+  let assert Err(_) = split_issue_key("")
+  let assert Err(_) = split_issue_key("ENG-")
+  let assert Err(_) = split_issue_key("-12")
+}
+
+#[test]
+fn split_issue_key_rejects_a_non_numeric_tail() {
+  let assert Err(_) = split_issue_key("ENG-abc")
+  let assert Err(_) = split_issue_key("ENG-12x")
+  // Digits, but not ones strconv.Atoi accepts.
+  let assert Err(_) = split_issue_key("ENG-١٢")
+  let assert Err(_) = split_issue_key("ENG-１２")
+}
+
+#[test]
+fn split_issue_key_error_quotes_the_input_and_the_expected_shape() {
+  let assert Err(msg) = split_issue_key("héllo")
+  assert msg.contains("'héllo' is not an issue ID")
+  assert msg.contains("expected KEY-123")
+}
+
+// ------------------------------------------------------------ json_quote
+
+#[test]
+fn json_quote_wraps_and_escapes() {
+  let assert Ok(plain) = json_quote("hi")
+  assert plain == "\"hi\""
+  let assert Ok(quoted) = json_quote("say \"hi\"")
+  assert quoted == "\"say \\\"hi\\\"\""
+  let assert Ok(nl) = json_quote("one\ntwo")
+  assert nl == "\"one\\ntwo\""
+  let assert Ok(bs) = json_quote("a\\b")
+  assert bs == "\"a\\\\b\""
+}
+
+/// encoding/json escapes <, > and & so a PocketBase payload can be embedded in
+/// HTML. Anything comparing issue bodies byte-for-byte has to expect it.
+#[test]
+fn json_quote_escapes_html_delimiters() {
+  let assert Ok(q) = json_quote("<b>&</b>")
+  assert q == "\"\\u003cb\\u003e\\u0026\\u003c/b\\u003e\""
+}
+
+/// Non-ASCII is NOT escaped: it stays literal UTF-8 in the request body.
+#[test]
+fn json_quote_keeps_multi_byte_text_literal() {
+  let assert Ok(q) = json_quote("café — 日本 🐛")
+  assert q == "\"café — 日本 🐛\""
+}
