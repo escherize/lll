@@ -5,6 +5,7 @@ import "go:strings"
 
 import "models"
 import "pb"
+import "flags"
 
 /// Dispatch `lll project <verb>`.
 pub fn project(args: Slice<string>) -> Result<(), string> {
@@ -65,55 +66,45 @@ fn project_list() -> Result<(), string> {
   Ok(())
 }
 
-fn project_create(args: Slice<string>) -> Result<(), string> {
-  let mut name = ""
-  let mut description = ""
-  let mut status = "planned"
-  let mut team_key = ""
-  let mut i = 3
-  while i < args.length() {
-    match args[i] {
-      "-n" => {
-        let Some(val) = args.get(i + 1) else {
-          return Err("-n requires a value")
-        }
-        name = val
-        i += 2
-      },
-      "-d" => {
-        let Some(val) = args.get(i + 1) else {
-          return Err("-d requires a value")
-        }
-        description = val
-        i += 2
-      },
-      "--status" => {
-        let Some(val) = args.get(i + 1) else {
-          return Err("--status requires a value")
-        }
-        if project_statuses().find(|s| s == val).is_none() {
-          return Err(
-            f"unknown status '{val}' (use one of: {strings.Join(project_statuses(), ", ")})",
-          )
-        }
-        status = val
-        i += 2
-      },
-      "--team" => {
-        let Some(val) = args.get(i + 1) else {
-          return Err("--team requires a value")
-        }
-        team_key = val
-        i += 2
-      },
-      other => return Err(f"unknown flag: '{other}'"),
-    }
+fn project_create_spec() -> Slice<flags.Flag> {
+  [
+    flags.Flag { name: "-n", value: true, hint: "\"name\"", required: true, help: "project name", .. },
+    flags.Flag { name: "-d", value: true, hint: "desc", help: "project description", .. },
+    flags.Flag { name: "--status", value: true, hint: "s", help: "planned, started, paused, completed, or cancelled\n(defaults to planned)", .. },
+    flags.Flag { name: "--team", value: true, hint: "KEY", help: "team key; no --team means workspace-wide", .. },
+  ]
+}
+
+/// The flag table of one project verb; empty for verbs without flags. Read
+/// by `lll completions` so the scripts complete exactly what the parser
+/// accepts.
+pub fn project_verb_spec(verb: string) -> Slice<flags.Flag> {
+  match verb {
+    "create" => project_create_spec(),
+    _ => [],
   }
-  if name == "" {
+}
+
+fn check_status(val: string) -> Result<string, string> {
+  if project_statuses().find(|s| s == val).is_none() {
     return Err(
-      "usage: lll project create -n \"name\" [-d desc] [--status s] [--team KEY]",
+      f"unknown status '{val}' (use one of: {strings.Join(project_statuses(), ", ")})",
     )
   }
+  Ok(val)
+}
+
+fn project_create(args: Slice<string>) -> Result<(), string> {
+  let spec = project_create_spec()
+  let usage = flags.usage("lll project create", spec, "")
+  let p = flags.parse(spec, args, 3, false, usage)?
+  let name = p.one("-n")
+  let description = p.one("-d")
+  let mut status = "planned"
+  if p.given("--status") {
+    status = check_status(p.one("--status"))?
+  }
+  let team_key = p.one("--team")
 
   let mut team = ""
   if team_key != "" {
