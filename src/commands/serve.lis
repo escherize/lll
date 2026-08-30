@@ -68,6 +68,8 @@ pub struct CardVM {
   pub assignee: string,
   pub avatar: AvatarVM,
   pub labels: Slice<LabelVM>,
+  // The author's marker, or "" for most issues.
+  pub emoji: string,
   // Relative created age ("3h ago") for the card's bottom row.
   pub created: string,
   // First ~2 lines of the description, truncated, for the hover preview.
@@ -133,6 +135,8 @@ pub struct IssueVM {
   pub avatar: AvatarVM,
   pub project: string,
   pub labels: Slice<LabelVM>,
+  // The author's marker, or "" for most issues.
+  pub emoji: string,
   pub description: template.HTML,
   pub created: string,
   pub updated: string,
@@ -372,6 +376,7 @@ fn card_vm(issue: models.Issue) -> CardVM {
     assignee: issue.expand.assignee.name,
     avatar: avatar_vm(issue.expand.assignee.name),
     labels: label_vms(issue.expand.labels),
+    emoji: issue.emoji,
     created: display.relative(issue.created),
     snippet: snippet(issue.description),
   }
@@ -534,6 +539,7 @@ fn issue_vm(issue: models.Issue, comments: Slice<models.Comment>) -> IssueVM {
     avatar: avatar_vm(assignee),
     project,
     labels: label_vms(issue.expand.labels),
+    emoji: issue.emoji,
     description: md_html(issue.description),
     created: display.relative(issue.created),
     updated: display.relative(issue.updated),
