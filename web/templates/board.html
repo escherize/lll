@@ -103,8 +103,13 @@ provenance.
      The init is a plain read (no DOM pruning: that raced mount order and
      wiped saved chips); a stale saved key just leaves Clear visible.
      FltSeed is the rail's "My issues" link arriving as ?mine=1: the server
-     hands over one JSON-encoded chip, which then persists like any other. */}}
-{{define "filterbar"}}<div class="filterbar" data-signals:flt="{{if .FltSeed}}{{.FltSeed}}{{else}}JSON.parse(localStorage.getItem('lllFlt') || '[]'){{end}}" data-signals:fltmenu="''" data-effect="localStorage.setItem('lllFlt', JSON.stringify($flt))">
+     hands over one JSON-encoded chip. A seeded page does NOT persist, so the
+     write-back effect is rendered only when there is no seed (task-109). The
+     seed belongs to the URL, not to the board: letting it save made Board,
+     My issues, Board come back filtered by a person you had stopped looking
+     at, reading as an empty, broken board. Chips YOU set on / still survive
+     a reload; chips the URL set for you die with the URL. */}}
+{{define "filterbar"}}<div class="filterbar" data-signals:flt="{{if .FltSeed}}{{.FltSeed}}{{else}}JSON.parse(localStorage.getItem('lllFlt') || '[]'){{end}}" data-signals:fltmenu="''"{{if not .FltSeed}} data-effect="localStorage.setItem('lllFlt', JSON.stringify($flt))"{{end}}>
 <div class="flt-add" data-on:click__outside="$fltmenu = ''">
   <button type="button" class="flt-plus" data-on:click="$fltmenu = $fltmenu ? '' : 'root'"><svg width="10" height="10" viewBox="0 0 10 10" aria-hidden="true"><path d="M5 1.2 V8.8 M1.2 5 H8.8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg> Filter</button>
   <div class="flt-menu" style="display:none" data-show="$fltmenu === 'root'">
