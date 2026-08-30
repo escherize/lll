@@ -1,0 +1,57 @@
+import "go:strings"
+
+import "query"
+
+#[test]
+fn issues_href_omits_empty_parts_and_escapes_values() {
+  assert issues_href(IssuesQuery { .. }) == "/issues"
+  assert issues_href(IssuesQuery { sort: "-updated", .. }) == "/issues?sort=-updated"
+  assert issues_href(
+      IssuesQuery { state: "in-progress", assignee: "Ada L", sort: "created", .. },
+    )
+    == "/issues?state=in-progress&assignee=Ada+L&sort=created"
+}
+
+#[test]
+fn a_header_link_changes_the_sort_and_keeps_the_filters() {
+  let col = issue_col(
+    "Created",
+    "created",
+    "c-age",
+    IssuesQuery { state: "todo", sort: "-updated", .. },
+  )
+  assert col.href == "/issues?state=todo&sort=-created"
+  assert col.dir == ""
+}
+
+#[test]
+fn clicking_the_sorting_column_flips_its_direction() {
+  let desc = issue_col(
+    "Created",
+    "created",
+    "c-age",
+    IssuesQuery { sort: "-created", .. },
+  )
+  assert desc.dir == "desc"
+  assert desc.href == "/issues?sort=created"
+  let asc = issue_col("Created", "created", "c-age", IssuesQuery { sort: "created", .. })
+  assert asc.dir == "asc"
+  assert asc.href == "/issues?sort=-created"
+}
+
+#[test]
+fn a_column_with_no_pb_field_behind_it_does_not_sort() {
+  let col = issue_col("Title", "", "c-title", IssuesQuery { sort: "-updated", .. })
+  assert col.href == ""
+  assert col.dir == ""
+}
+
+#[test]
+fn every_sortable_column_asks_for_a_field_query_sort_accepts() {
+  for col in issue_cols(IssuesQuery { sort: "-updated", .. }) {
+    if col.href != "" {
+      let spec = strings.Split(col.href, "sort=")[1]
+      assert query.sort(spec).is_ok()
+    }
+  }
+}

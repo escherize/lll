@@ -1,0 +1,180 @@
+import "go:encoding/json"
+import "go:html/template"
+import "go:net/http"
+import "go:net/url"
+
+import "models"
+import "pb"
+import "theme"
+
+// The app shell and the two board pages: the rail every page wears, GET / and
+// GET /issue/{key}.
+
+/// The rail for one page: `active` names the current row, `me` decides
+/// whether "My issues" has anywhere to point, and `team` carries the accent
+/// every page wears.
+fn rail_vm(active: string, me: string, team: models.Team) -> RailVM {
+  let hex = theme.normalize_hex(team.accent)
+  RailVM {
+    active,
+    me,
+    version: version(),
+    accent_css: theme.accent_css(hex),
+    favicon: theme.favicon_url(hex, theme.mark_letter(team.key)),
+    favorites: fav_vms(),
+  }
+}
+
+/// The rail's FAVORITES group. A failed fetch renders an empty group rather
+/// than a 500: a missing star list must not cost you the board.
+fn fav_vms() -> Slice<FavVM> {
+  let Ok(favs) = fetch_favorites() else {
+    return []
+  }
+  favs.map(|f| {
+    let issue = f.expand.issue
+    FavVM {
+      key: f"{issue.expand.team.key}-{issue.number}",
+      title: issue.title,
+      state: issue.state,
+    }
+  })
+}
+
+/// Every favorite, newest first, with its issue and that issue's team.
+///
+/// Unscoped by member on purpose: auth is deferred (task-32), so every row
+/// carries member="" and a star belongs to the workspace. When members
+/// arrive this grows a filter, not a new shape.
+fn fetch_favorites() -> Result<Slice<models.Favorite>, string> {
+  let body = pb.get(
+    "/api/collections/favorites/records?perPage=200&sort=-created&expand=issue.team",
+  )?
+  let mut list = models.FavoriteList { .. }
+  if let Err(e) = json.Unmarshal(body.bytes(), &list) {
+    return Err(f"decoding favorites: {e}")
+  }
+  // A favorite whose issue expand came back empty (issue deleted between the
+  // list and the expand) has no link to render.
+  Ok(list.items.filter(|f| f.expand.issue.id != ""))
+}
+
+/// The workspace's favorite row for one issue, if it has one.
+fn fetch_favorite(issue_id: string) -> Result<Option<models.Favorite>, string> {
+  let filter = url.QueryEscape(f"issue='{issue_id}' && member=''")
+  let body = pb.get(
+    f"/api/collections/favorites/records?perPage=1&filter={filter}",
+  )?
+  let mut list = models.FavoriteList { .. }
+  if let Err(e) = json.Unmarshal(body.bytes(), &list) {
+    return Err(f"decoding favorites: {e}")
+  }
+  Ok(list.items.get(0))
+}
+
+/// One query parameter, or "" when there is no URL to ask.
+fn query_param(r: Ref<http.Request>, name: string) -> string {
+  let Some(u) = r.URL else {
+    return ""
+  }
+  u.Query().Get(name)
+}
+
+/// The board, optionally opened on the rail's "My issues" filter (?mine=1).
+/// The filter is a client-side chip, not a server-side query: /events
+/// broadcasts one unfiltered #board fragment to every board client, so a
+/// server-filtered page would be morphed back to the full board on the next
+/// realtime event.
+fn board_page(w: http.ResponseWriter, r: Ref<http.Request>, team_id: string, me: string) {
+  let mut vm = match board_vm(team_id) {
+    Ok(v) => v,
+    Err(e) => {
+      http.Error(w, e, 500)
+      return
+    },
+  }
+  match compose_vm() {
+    Ok(c) => vm.compose = c,
+    Err(e) => {
+      http.Error(w, e, 500)
+      return
+    },
+  }
+  let mut active = "board"
+  if me != "" && query_param(r, "mine") != "" {
+    active = "mine"
+    vm.flt_seed = assignee_chip(me)
+  }
+  let rail = rail_vm(active, me, shell_team(team_id))
+  let html = match render("board-page", PageVM { rail, page: vm }) {
+    Ok(h) => h,
+    Err(e) => {
+      http.Error(w, e, 500)
+      return
+    },
+  }
+  w.Header().Set("Cache-Control", "no-store")
+  w.Header().Set("Content-Type", "text/html; charset=utf-8")
+  let _ = w.Write(html.bytes())
+}
+
+/// One filter chip, JSON-encoded, for the filter bar's opening signal. JSON
+/// rather than string interpolation because the value is a member's name:
+/// html/template escapes the attribute, the browser unescapes it, and a name
+/// with an apostrophe in it would otherwise land as broken JS.
+fn assignee_chip(name: string) -> template.JS {
+  let Ok(json_bytes) = json.Marshal([f"assignee:{name}"]) else {
+    return "" as template.JS
+  }
+  let text = json_bytes as string
+  text as template.JS
+}
+
+fn issue_page(w: http.ResponseWriter, r: Ref<http.Request>, team_id: string, me: string) {
+  let key = r.PathValue("key")
+  let issue = match fetch_issue(key) {
+    Ok(i) => i,
+    Err(e) => {
+      http.Error(w, e, 404)
+      return
+    },
+  }
+  let comments = match fetch_comments(issue.id) {
+    Ok(c) => c,
+    Err(e) => {
+      http.Error(w, e, 500)
+      return
+    },
+  }
+  // An issue is a detail view under the board, so the board row stays
+  // current — which also makes the rail byte-identical to the board's.
+  let mut page = issue_vm(issue, comments)
+  if let Ok(Some(_)) = fetch_favorite(issue.id) { page.favorited = true }
+  page.emojis = emoji_catalog()
+  let vm = PageVM { rail: rail_vm("board", me, shell_team(team_id)), page }
+  let html = match render("issue-page", vm) {
+    Ok(h) => h,
+    Err(e) => {
+      http.Error(w, e, 500)
+      return
+    },
+  }
+  w.Header().Set("Cache-Control", "no-store")
+  w.Header().Set("Content-Type", "text/html; charset=utf-8")
+  let _ = w.Write(html.bytes())
+}
+
+/// The configured team record, re-read per page load. /settings can change
+/// the accent at any moment, so a value cached at startup would leave every
+/// open tab on a stale colour; this is one small GET beside the fetches the
+/// page already makes. A missing or unreadable team yields a blank record,
+/// which renders as the canonical orange.
+fn shell_team(team_id: string) -> models.Team {
+  let mut team = models.Team { .. }
+  if team_id == "" { return team }
+  let Ok(body) = pb.get(f"/api/collections/teams/records/{team_id}") else {
+    return models.Team { .. }
+  }
+  if json.Unmarshal(body.bytes(), &team).is_err() { return models.Team { .. } }
+  team
+}

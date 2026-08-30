@@ -1,0 +1,118 @@
+import "go:html/template"
+import "go:net/url"
+import "go:strconv"
+import "go:strings"
+
+// The team accent: one stored hex, derived into the five theme tokens and the
+// tab icon.
+//
+// Its own module because it needs nothing from the web board - no PocketBase,
+// no hub, no template set - and the board calls only four of these functions.
+// The channel arithmetic below them is now unreachable from outside, which is
+// the point: it was never anyone else's to call.
+
+/// "#RRGGBB" -> "#rrggbb"; anything else -> "", meaning DESIGN.md's canonical
+/// orange. A stored value that cannot be parsed must fall back rather than
+/// emit broken CSS into every page.
+pub fn normalize_hex(raw: string) -> string {
+  let v = strings.ToLower(strings.TrimSpace(raw))
+  if v.length() != 7 || !strings.HasPrefix(v, "#") { return "" }
+  for byte in v.substring(1..).bytes() {
+    let c = byte as int
+    if !((c >= 48 && c <= 57) || (c >= 97 && c <= 102)) { return "" }
+  }
+  v
+}
+
+/// One channel of "#rrggbb" as 0-255. Only ever called on a normalized hex.
+fn hex_channel(hex: string, at: int) -> int {
+  let Ok(n) = strconv.ParseInt(hex.substring(at..at + 2), 16, 64) else {
+    return 0
+  }
+  n as int
+}
+
+/// Two-digit lowercase hex for a clamped channel.
+fn hex2(n: int) -> string {
+  let mut v = n
+  if v < 0 { v = 0 }
+  if v > 255 { v = 255 }
+  let s = strconv.FormatInt(v as int64, 16)
+  if s.length() < 2 { return "0" + s }
+  s
+}
+
+/// Move one channel `amount` of the way toward `target` (0 black, 255 white).
+/// Rounds rather than truncates: 240 mixed 90% toward black is 23.999999997
+/// in float64, and a truncating cast would spend that whole rounding error on
+/// the visible colour.
+fn mix_channel(c: int, target: int, amount: float64) -> int {
+  ((c as float64) + ((target - c) as float64) * amount + 0.5) as int
+}
+
+/// "#rrggbb" mixed `amount` of the way toward `target`.
+fn mix_hex(r: int, g: int, b: int, target: int, amount: float64) -> string {
+  "#"
+    + hex2(mix_channel(r, target, amount))
+    + hex2(mix_channel(g, target, amount))
+    + hex2(mix_channel(b, target, amount))
+}
+
+/// The text colour that goes ON the accent. DESIGN.md's ember ink is the
+/// accent kept at 10% of each channel, which reads only because the ember
+/// orange is bright; a colour picker hands out dark colours too, and
+/// near-black ink on a navy button is an unreadable button. Below the
+/// perceptual midpoint the same 90% mix runs toward white instead.
+fn ink_hex(r: int, g: int, b: int) -> string {
+  let lum = (r * 299 + g * 587 + b * 114) / 1000
+  if lum < 110 { return mix_hex(r, g, b, 255, 0.90) }
+  mix_hex(r, g, b, 0, 0.90)
+}
+
+/// The team accent as a `:root` rule overriding theme.css's five accent
+/// tokens; "" for the canonical orange, so the shipped tokens stay
+/// byte-identical when nobody has chosen a colour.
+///
+/// One stored hex derives the whole family with plain channel maths: hover
+/// mixes 12% white, deep 20% black, ink keeps 10% of each channel, dim is the
+/// accent at 0.16 alpha. Fed DESIGN.md's own #f0883e it lands within a few
+/// values of the shipped #f79b57 / #c96a25 / #1a0f06, so a chosen colour
+/// behaves the way the original does — light-on-hover, dark ink on fills.
+pub fn accent_css(hex: string) -> template.CSS {
+  if hex == "" { return "" as template.CSS }
+  let r = hex_channel(hex, 1)
+  let g = hex_channel(hex, 3)
+  let b = hex_channel(hex, 5)
+  let hover = mix_hex(r, g, b, 255, 0.12)
+  let deep = mix_hex(r, g, b, 0, 0.20)
+  let ink = ink_hex(r, g, b)
+  let body = f"--accent:{hex};--accent-hover:{hover};--accent-ink:{ink};--accent-deep:{deep};--accent-dim:rgba({r},{g},{b},0.16)"
+  (":root{" + body + "}") as template.CSS
+}
+
+/// The mark's letter for the favicon: the team key's initial, or lll's own L.
+/// One ASCII alphanumeric and nothing else — it lands inside an SVG document
+/// that carries no escaping of its own.
+pub fn mark_letter(key: string) -> string {
+  if key == "" { return "L" }
+  let c = strings.ToUpper(key.substring(0..1))
+  let b = c.bytes()[0] as int
+  if (b >= 65 && b <= 90) || (b >= 48 && b <= 57) { c } else { "L" }
+}
+
+/// The tab icon: the workspace mark redrawn as an inline SVG data: URL in the
+/// team's accent, so two boards open side by side differ in the tab strip as
+/// well as on the page.
+pub fn favicon_url(hex: string, letter: string) -> template.URL {
+  let mut fill = hex
+  if fill == "" { fill = "#f0883e" }
+  let r = hex_channel(fill, 1)
+  let g = hex_channel(fill, 3)
+  let b = hex_channel(fill, 5)
+  let ink = ink_hex(r, g, b)
+  let svg = "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'>"
+    + "<rect width='32' height='32' rx='7' fill='" + fill + "'/>"
+    + "<text x='16' y='23' text-anchor='middle' font-family='system-ui,sans-serif'"
+    + " font-size='19' font-weight='800' fill='" + ink + "'>" + letter + "</text></svg>"
+  f"data:image/svg+xml,{url.PathEscape(svg)}" as template.URL
+}

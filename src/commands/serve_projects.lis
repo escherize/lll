@@ -1,0 +1,97 @@
+import "go:encoding/json"
+import "go:net/http"
+import "go:net/url"
+
+import "models"
+import "pb"
+import "query"
+
+// GET /projects - the project list, with each issue count linking to the
+// /issues filter that produced it.
+
+/// The projects list: the read path a project has never had.
+///
+/// A project is created by `lll project create` or the Projects section of
+/// /settings, and until now that settings row was the only place one was ever
+/// shown — the relation was write-only, which is worse than no relation
+/// because it accumulates data nobody can check. This page is the cheapest
+/// honest read path: name, status, scope, and the issue count, with the count
+/// linking to /issues pre-filtered to that project.
+///
+/// No SSE, for the reason /issues and /settings have none: the bridge
+/// broadcasts one unfiltered #board to every board-scoped client, so a page
+/// that subscribed would be morphed into the board. Nothing here changes
+/// often enough to pay for a second scope.
+fn projects_page(
+  w: http.ResponseWriter,
+  // Nothing on this page is scoped by query string: it is every project the
+  // workspace has.
+  _r: Ref<http.Request>,
+  team_id: string,
+  me: string,
+) {
+  let vm = match projects_vm(team_id) {
+    Ok(v) => v,
+    Err(e) => {
+      http.Error(w, e, 500)
+      return
+    },
+  }
+  let page = PageVM { rail: rail_vm("projects", me, shell_team(team_id)), page: vm }
+  let html = match render("projects-page", page) {
+    Ok(h) => h,
+    Err(e) => {
+      http.Error(w, e, 500)
+      return
+    },
+  }
+  w.Header().Set("Cache-Control", "no-store")
+  w.Header().Set("Content-Type", "text/html; charset=utf-8")
+  let _ = w.Write(html.bytes())
+}
+
+fn projects_vm(team_id: string) -> Result<ProjectsVM, string> {
+  let projects = fetch_projects()?
+  Ok(ProjectsVM {
+    projects: projects.map(|p| ProjectVM {
+      name: p.name,
+      description: snippet(p.description),
+      status: p.status,
+      status_label: state_label(p.status),
+      tone: project_tone(p.status),
+      scope: scope_label(p.expand.team.key),
+      count: project_count(team_id, p.id),
+      href: f"/issues?project={url.QueryEscape(p.name)}",
+    }),
+  })
+}
+
+/// The state hue a project status borrows for its dot. It reuses the six
+/// --st-* tokens rather than minting five more: a project lifecycle is the
+/// issue lifecycle at a coarser grain, and DESIGN.md rations colour hard.
+fn project_tone(status: string) -> string {
+  match status {
+    "started" => "in-progress",
+    "completed" => "done",
+    "cancelled" => "cancelled",
+    "paused" => "backlog",
+    _ => "todo",
+  }
+}
+
+/// How many issues point at one project. Scoped by the same team the table
+/// scopes by, so the count and the /issues link it labels always agree — a
+/// project owned by another team reads 0 rather than a number no page shows.
+///
+/// perPage=1: PocketBase reports totalItems for the filter regardless, so the
+/// count costs one tiny request per project and never a page of records.
+fn project_count(team_id: string, project_id: string) -> int {
+  let filter = query.filter(team_id, "", "", project_id, "", "")
+  let path = f"/api/collections/issues/records?perPage=1&fields=id&filter={url.QueryEscape(filter)}"
+  let Ok(body) = pb.get(path) else {
+    return 0
+  }
+  let mut list = models.IssueList { .. }
+  if json.Unmarshal(body.bytes(), &list).is_err() { return 0 }
+  list.total_items
+}
