@@ -1,0 +1,218 @@
+import "go:encoding/json"
+import "go:net/http"
+
+import "models"
+import "pb"
+import "realtime"
+
+// Realtime: the fan-out hub, the /events endpoint each browser holds open, and
+// the bridge that turns PocketBase events into broadcast fragments.
+
+/// One connected browser: its scope ("board" or "issue:KEY-1") and the
+/// channel its /events handler drains.
+struct SseClient { id: int, scope: string, ch: Channel<string> }
+
+/// A rendered SSE payload for every client with a matching scope.
+struct Broadcast { scope: string, payload: string }
+
+/// Fan-out hub. A single owner task holds the client registry and is fed
+/// exclusively through these channels — no shared mutable state.
+struct Hub {
+  register: Channel<SseClient>,
+  unregister: Channel<int>,
+  broadcast: Channel<Broadcast>,
+  ids: Channel<int>,
+}
+
+fn new_hub() -> Hub {
+  let hub = Hub { 
+    register: Channel.new<SseClient>(),
+    unregister: Channel.new<int>(),
+    broadcast: Channel.new<Broadcast>(),
+    ids: Channel.new<int>(),
+  }
+  // Client-id allocator: unique ids without shared counters.
+  task {
+    let mut n = 1
+    loop {
+      if !hub.ids.send(n) { break }
+      n += 1
+    }
+  }
+  // Registry owner.
+  task {
+    let mut clients: Slice<SseClient> = []
+    let mut running = true
+    while running {
+      select {
+        match hub.register.receive() {
+          Some(c) => clients = clients.append(c),
+          None => running = false,
+        },
+        match hub.unregister.receive() {
+          Some(id) => clients = clients.filter(|c| c.id != id),
+          None => running = false,
+        },
+        match hub.broadcast.receive() {
+          Some(msg) => deliver(clients, msg),
+          None => running = false,
+        },
+      }
+    }
+  }
+  hub
+}
+
+/// Send a broadcast to every matching client, dropping the payload for any
+/// client whose buffer is full (a stuck browser must not stall the hub).
+///
+/// Scope "*" matches every client. The rail is on every page, so its
+/// favorites group is the one fragment with no single scope to belong to.
+fn deliver(clients: Slice<SseClient>, msg: Broadcast) {
+  for c in clients {
+    if msg.scope != "*" && c.scope != msg.scope { continue }
+    select {
+      c.ch.send(msg.payload) => (),
+      _ => continue,
+    }
+  }
+}
+
+/// SSE endpoint: register with the hub under the page's scope and forward
+/// broadcast payloads until the browser disconnects.
+fn events_stream(w: http.ResponseWriter, r: Ref<http.Request>, hub: Hub) {
+  let mut page = ""
+  let mut key = ""
+  if let Some(u) = r.URL {
+    let q = u.Query()
+    page = q.Get("page")
+    key = q.Get("key")
+  }
+  let mut scope = "board"
+  if page == "issue" && key != "" { scope = f"issue:{key}" }
+
+  let Some(flusher) = assert_type<http.Flusher>(w) else {
+    http.Error(w, "streaming unsupported", 500)
+    return
+  }
+  w.Header().Set("Content-Type", "text/event-stream")
+  w.Header().Set("Cache-Control", "no-cache")
+  w.WriteHeader(200)
+  flusher.Flush()
+
+  let Some(id) = hub.ids.receive() else {
+    return
+  }
+  let ch = Channel.buffered<string>(64)
+  let _ = hub.register.send(SseClient { id, scope, ch })
+  let done = r.Context().Done()
+  loop {
+    let quit = select {
+      match ch.receive() {
+        Some(payload) => {
+          let _ = w.Write(payload.bytes())
+          flusher.Flush()
+          false
+        },
+        None => true,
+      },
+      match done.receive() {
+        Some(_) => true,
+        None => true,
+      },
+    }
+    if quit {
+      let _ = hub.unregister.send(id)
+      return
+    }
+  }
+}
+
+/// Consume PB realtime events forever; re-render and broadcast fragments.
+fn bridge(events: Channel<realtime.Event>, hub: Hub, team_id: string) {
+  loop {
+    let Some(ev) = events.receive() else {
+      return
+    }
+    if ev.topic == "comments" {
+      comment_broadcast(ev, hub)
+    } else if ev.topic == "favorites" {
+      favorites_broadcast(hub)
+    } else {
+      issue_broadcast(ev, hub, team_id)
+    }
+  }
+}
+
+/// On any issues event: re-render the whole board fragment from a fresh
+/// fetch (laziest correct — a state change moves a card between two columns,
+/// and one #board morph covers create/update/delete alike), plus the
+/// issue-detail fragment for that issue's page, from the event record.
+fn issue_broadcast(ev: realtime.Event, hub: Hub, team_id: string) {
+  if let Ok(vm) = board_vm(team_id) {
+    if let Ok(html) = render("board", vm) {
+      let _ = hub.broadcast.send(
+        Broadcast { scope: "board", payload: patch_event(html) },
+      )
+    }
+  }
+
+  let mut event = IssueEvent { .. }
+  if json.Unmarshal(ev.data.bytes(), &event).is_err() { return }
+  let rec = event.record
+  let key = f"{rec.expand.team.key}-{rec.number}"
+  let mut vm = issue_vm(rec, [])
+  if event.action == "delete" { vm = IssueVM { deleted: true, key, .. } }
+  if let Ok(html) = render("issue-detail", vm) {
+    let _ = hub.broadcast.send(
+      Broadcast { scope: f"issue:{key}", payload: patch_event(html) },
+    )
+  }
+}
+
+/// On any favorites event: re-render the rail's FAVORITES group from a fresh
+/// fetch and patch it into every open page.
+///
+/// This is the one fragment that reaches inside #rail. It is legal because
+/// the group is its own morph boundary with its own id: the shell itself is
+/// still never rendered into a broadcast, so a page keeps the rail it was
+/// served and only this group is replaced. Everything else in the rail stays
+/// frozen at page load, by design.
+///
+/// The event's own record is ignored — the group is the whole list, and one
+/// fetch is cheaper than reconciling a create against a delete.
+fn favorites_broadcast(hub: Hub) {
+  if let Ok(html) = render("rail-favorites", fav_vms()) {
+    let _ = hub.broadcast.send(
+      Broadcast { scope: "*", payload: patch_event(html) },
+    )
+  }
+}
+
+/// On any comments event: re-render the comments fragment for the affected
+/// issue's page. The board shows no comments, so it is left alone.
+fn comment_broadcast(ev: realtime.Event, hub: Hub) {
+  let mut event = CommentEvent { .. }
+  if json.Unmarshal(ev.data.bytes(), &event).is_err() { return }
+  // Resolve the issue for the page scope; a comment whose issue is already
+  // deleted has no page to update.
+  let Ok(body) = pb.get(
+    f"/api/collections/issues/records/{event.record.issue}?expand=team",
+  ) else {
+    return
+  }
+  let mut issue = models.Issue { .. }
+  if json.Unmarshal(body.bytes(), &issue).is_err() { return }
+  let key = f"{issue.expand.team.key}-{issue.number}"
+  let Ok(comments) = fetch_comments(issue.id) else {
+    return
+  }
+  if let Ok(html) = render(
+    "comments",
+    CommentsVM { comments: comments.map(comment_vm) },
+  ) {
+    let _ = hub.broadcast.send(
+      Broadcast { scope: f"issue:{key}", payload: patch_event(html) },
+    )
+  }
+}

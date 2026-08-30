@@ -1,0 +1,269 @@
+import "go:bytes"
+import "go:encoding/json"
+import "go:html/template"
+import "go:github.com/escherize/lll/web"
+import "go:net/url"
+import "go:strings"
+
+import "display"
+import "markdown"
+import "models"
+import "pb"
+import "query"
+import "theme"
+
+// Rendering: the one template entry point, the SSE event wrappers, and the
+// record -> view model mappers that every page and every broadcast shares.
+
+/// Render a named template from the embedded web/templates/ tree.
+fn render(name: string, data: Unknown) -> Result<string, string> {
+  let tmpl = match template.ParseFS(web.Assets(), "templates/*.html") {
+    Ok(t) => t,
+    Err(e) => return Err(f"parsing web/templates: {e}"),
+  }
+  let mut buf = bytes.Buffer { .. }
+  if let Err(e) = tmpl.ExecuteTemplate(&buf, name, data) {
+    return Err(f"rendering {name}: {e}")
+  }
+  Ok(buf.String())
+}
+
+/// Wrap a rendered fragment as a datastar-patch-elements SSE event. Each
+/// line of HTML becomes its own `data: elements` line; Datastar morphs the
+/// fragment into the DOM by element id (default mode `outer`).
+fn patch_event(html: string) -> string {
+  let lines = html.split("\n").map(|l| f"data: elements {l}")
+  f"event: datastar-patch-elements\n{strings.Join(lines, "\n")}\n\n"
+}
+
+/// Wrap a signal update as a datastar-patch-signals SSE event. `json_text` is
+/// a JSON object; Datastar merges it into the page's signals.
+fn signals_event(json_text: string) -> string {
+  f"event: datastar-patch-signals\ndata: signals {json_text}\n\n"
+}
+
+/// "in-progress" -> "In progress".
+fn state_label(state: string) -> string {
+  let words = strings.ReplaceAll(state, "-", " ")
+  strings.ToUpper(words.substring(0..1)) + words.substring(1..)
+}
+
+fn state_opts() -> Slice<StateOpt> {
+  query.states().map(|s| StateOpt { value: s, label: state_label(s) })
+}
+
+/// Web-facing priority label: the web reads priority 0 as "No priority"
+/// (CLI output keeps "none").
+fn prio_label(name: string) -> string {
+  if name == "none" { return "No priority" }
+  state_label(name)
+}
+
+/// Priority <option>s in Linear order, slug values, web labels.
+fn prio_opts() -> Slice<StateOpt> {
+  ["none", "urgent", "high", "medium", "low"]
+    .map(|p| StateOpt { value: p, label: prio_label(p) })
+}
+
+/// Priority slug -> Linear int (inverse of display.priority_name).
+fn prio_value(slug: string) -> Option<int> {
+  match slug {
+    "none" => Some(0),
+    "urgent" => Some(1),
+    "high" => Some(2),
+    "medium" => Some(3),
+    "low" => Some(4),
+    _ => None,
+  }
+}
+
+/// Initials plus a stable per-name color class (av-0..av-3), so different
+/// members scan differently on the board.
+fn avatar_vm(name: string) -> AvatarVM {
+  let words = strings.Fields(name)
+  let first = words.map(|w| strings.ToUpper(w.substring(0..1)))
+  let mut sum = 0
+  for b in name.bytes() {
+    sum += b as int
+  }
+  AvatarVM {
+    initials: strings.Join(first[..min(2, first.length())], ""),
+    class: f"av-{sum % 4}",
+  }
+}
+
+fn label_vms(labels: Slice<models.Label>) -> Slice<LabelVM> {
+  labels.map(|l| LabelVM { name: l.name, color: l.color })
+}
+
+fn card_vm(issue: models.Issue) -> CardVM {
+  let prio = display.priority_name(issue.priority)
+  CardVM {
+    id: issue.id,
+    key: f"{issue.expand.team.key}-{issue.number}",
+    title: issue.title,
+    state: issue.state,
+    state_label: state_label(issue.state),
+    prio,
+    prio_label: prio_label(prio),
+    assignee: issue.expand.assignee.name,
+    avatar: avatar_vm(issue.expand.assignee.name),
+    labels: label_vms(issue.expand.labels),
+    emoji: issue.emoji,
+    created: display.relative(issue.created),
+    updated: display.relative(issue.updated),
+    snippet: snippet(issue.description),
+  }
+}
+
+/// Description -> hover-preview snippet: the first two non-empty lines
+/// joined, capped at 160 chars with an ellipsis. The popover's CSS
+/// line-clamp handles the visual "~2 lines"; this keeps payloads small.
+fn snippet(desc: string) -> string {
+  let lines = desc.split("\n").map(strings.TrimSpace).filter(|l| l != "")
+  let text = strings.Join(lines[..min(2, lines.length())], " ")
+  if text.length() > 160 { return text.substring(0..159) + "…" }
+  text
+}
+
+/// First-seen-order distinct non-empty strings.
+fn distinct(vals: Slice<string>) -> Slice<string> {
+  let mut out: Slice<string> = []
+  for v in vals {
+    if v != "" && !out.contains(v) { out = out.append(v) }
+  }
+  out
+}
+
+/// The filter chooser's contents: distinct assignees, labels, priorities and
+/// states present on the board. Dimensions with no values are dropped.
+fn filter_groups(issues: Slice<models.Issue>) -> Slice<FilterGroupVM> {
+  let assignees = distinct(issues.map(|i| i.expand.assignee.name))
+  let mut label_names: Slice<string> = []
+  for i in issues {
+    label_names = label_names.append(i.expand.labels.map(|l| l.name)...)
+  }
+  let labels = distinct(label_names)
+  let present_prios = distinct(issues.map(|i| display.priority_name(i.priority)))
+  let prios = ["urgent", "high", "medium", "low", "none"]
+    .filter(|p| present_prios.contains(p))
+  let states = query.states().filter(|s| issues.any(|i| i.state == s))
+  let groups = [
+    FilterGroupVM {
+      dim: "assignee",
+      label: "Assignee",
+      opts: assignees.map(|a| FilterOptVM { value: a, label: a }),
+    },
+    FilterGroupVM {
+      dim: "label",
+      label: "Label",
+      opts: labels.map(|l| FilterOptVM { value: l, label: l }),
+    },
+    FilterGroupVM {
+      dim: "prio",
+      label: "Priority",
+      opts: prios.map(|p| FilterOptVM { value: p, label: prio_label(p) }),
+    },
+    FilterGroupVM {
+      dim: "state",
+      label: "State",
+      opts: states.map(|s| FilterOptVM { value: s, label: state_label(s) }),
+    },
+  ]
+  groups.filter(|g| g.opts.length() > 0)
+}
+
+/// The full board, freshly fetched: six columns in workflow order.
+fn board_vm(team_id: string) -> Result<BoardVM, string> {
+  let issues = fetch_board_issues(team_id)?
+  let columns = query
+    .states()
+    .map(|s| ColumnVM {
+      state: s,
+      label: state_label(s),
+      glyph: display.glyph(s),
+      sig: strings.ReplaceAll(s, "-", "_") as template.JS,
+      cards: issues.filter(|i| i.state == s).map(card_vm),
+    })
+  Ok(BoardVM { states: state_opts(), columns, filter_groups: filter_groups(issues), .. })
+}
+
+/// The create dialog's pickers, freshly fetched. Three extra PB reads, paid
+/// once per board page load and never on a broadcast.
+fn compose_vm() -> Result<ComposeVM, string> {
+  let members = fetch_members()?
+  let projects = fetch_projects()?
+  let labels = fetch_labels()?
+  Ok(ComposeVM {
+    prios: prio_opts(),
+    members: members.map(|m| PickVM { id: m.id, name: m.name }),
+    projects: projects.map(|p| PickVM { id: p.id, name: p.name }),
+    labels: labels.map(|l| LabelPickVM {
+      id: l.id,
+      name: l.name,
+      color: theme.normalize_hex(l.color),
+    }),
+  })
+}
+
+fn fetch_board_issues(team_id: string) -> Result<Slice<models.Issue>, string> {
+  let mut path = "/api/collections/issues/records?perPage=200&expand=team,assignee,labels&sort=sort,created"
+  let filter = query.filter(team_id, "", "", "", "", "")
+  if filter != "" { path = f"{path}&filter={url.QueryEscape(filter)}" }
+  let body = pb.get(path)?
+  let mut issues = models.IssueList { .. }
+  if let Err(e) = json.Unmarshal(body.bytes(), &issues) {
+    return Err(f"decoding issues: {e}")
+  }
+  Ok(issues.items)
+}
+
+fn comment_vm(c: models.Comment) -> CommentVM {
+  let mut author = c.expand.author.name
+  if author == "" { author = "anon" }
+  CommentVM {
+    id: c.id,
+    author,
+    avatar: avatar_vm(author),
+    age: display.relative(c.created),
+    body: markdown.md_html(c.body),
+  }
+}
+
+/// Issue view model from a full record (expand: team, assignee, labels,
+/// project) — shared by the issue page and broadcast re-renders.
+fn issue_vm(issue: models.Issue, comments: Slice<models.Comment>) -> IssueVM {
+  let assignee = issue.expand.assignee.name
+  let mut project = issue.expand.project.name
+  let mut project_href = ""
+  if project != "" {
+    project_href = f"/issues?project={url.QueryEscape(project)}"
+  }
+  if project == "" { project = "none" }
+  IssueVM {
+    deleted: false,
+    id: issue.id,
+    key: f"{issue.expand.team.key}-{issue.number}",
+    title: issue.title,
+    state: issue.state,
+    prio: display.priority_name(issue.priority),
+    assignee,
+    avatar: avatar_vm(assignee),
+    project,
+    project_href,
+    labels: label_vms(issue.expand.labels),
+    emoji: issue.emoji,
+    description: markdown.md_html(issue.description),
+    created: display.relative(issue.created),
+    updated: display.relative(issue.updated),
+    states: state_opts(),
+    prios: prio_opts(),
+    comments: comments.map(comment_vm),
+    // Left false here on purpose: only issue_page knows, and only it renders
+    // the star. Broadcasts of #issue-detail must not carry a stale answer.
+    favorited: false,
+    // Left empty for the same reason: the picker is page-only, so a
+    // broadcast of this fragment carries no catalogue.
+    emojis: [],
+  }
+}

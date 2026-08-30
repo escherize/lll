@@ -1,0 +1,87 @@
+import "go:encoding/json"
+import "go:net/http"
+import "go:net/url"
+import "go:strings"
+
+import "models"
+import "pb"
+import "query"
+
+// GET /search - a search over every issue in the team, served as a page or as
+// the results fragment alone.
+
+/// GET /search?q=… — a search over every issue in the team, which is the
+/// whole difference from the board's search box: that one filters the cards
+/// already rendered, this one asks PocketBase.
+///
+/// The query is the URL, so a result is shareable and an agent can curl it.
+/// `?fragment=1` asks the same handler for the #search-results fragment
+/// alone, as one datastar-patch-elements event: that is what the field's
+/// debounced @get calls on every keystroke, and the browser rewrites its
+/// address bar to the plain URL for the same q, so typing never separates
+/// what is on screen from what the URL serves.
+///
+/// The page still opens no /events subscription: issue_broadcast sends one
+/// unfiltered #board to every board-scoped client, and a server-filtered
+/// list must never be a client it can reach. A one-shot answer to the page's
+/// own request is not that.
+fn search_page(
+  w: http.ResponseWriter,
+  r: Ref<http.Request>,
+  team_id: string,
+  me: string,
+) {
+  let q = strings.TrimSpace(query_param(r, "q"))
+  let mut results: Slice<CardVM> = []
+  if q != "" {
+    match fetch_search_issues(team_id, q) {
+      Ok(issues) => results = issues.map(card_vm),
+      Err(e) => {
+        http.Error(w, e, 500)
+        return
+      },
+    }
+  }
+  let page = SearchVM { q, results }
+  if query_param(r, "fragment") == "1" {
+    let frag = match render("search-results", page) {
+      Ok(h) => h,
+      Err(e) => {
+        http.Error(w, e, 500)
+        return
+      },
+    }
+    w.Header().Set("Cache-Control", "no-store")
+    w.Header().Set("Content-Type", "text/event-stream")
+    let _ = w.Write(patch_event(frag).bytes())
+    return
+  }
+  let vm = PageVM { rail: rail_vm("search", me, shell_team(team_id)), page }
+  let html = match render("search-page", vm) {
+    Ok(h) => h,
+    Err(e) => {
+      http.Error(w, e, 500)
+      return
+    },
+  }
+  w.Header().Set("Cache-Control", "no-store")
+  w.Header().Set("Content-Type", "text/html; charset=utf-8")
+  let _ = w.Write(html.bytes())
+}
+
+/// Issues matching `q`, most recently touched first. The filter is the same
+/// clause `lll issue list --search` builds, so the page and the CLI agree on
+/// what "matches" means instead of each having its own idea of search.
+fn fetch_search_issues(
+  team_id: string,
+  q: string,
+) -> Result<Slice<models.Issue>, string> {
+  let filter = query.filter(team_id, "", "", "", "", q)
+  let path = f"/api/collections/issues/records?perPage=200&expand=team,assignee,labels&sort=-updated&filter={url.QueryEscape(filter)}"
+  let body = pb.get(path)?
+  let mut issues = models.IssueList { .. }
+  if let Err(e) = json.Unmarshal(body.bytes(), &issues) {
+    return Err(f"decoding issues: {e}")
+  }
+  Ok(issues.items)
+}

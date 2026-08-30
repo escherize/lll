@@ -1,0 +1,382 @@
+import "go:encoding/json"
+import "go:html/template"
+import "go:net/http"
+import "go:net/url"
+import "go:strconv"
+import "go:strings"
+
+import "config"
+import "models"
+import "pb"
+import "query"
+
+// Actions: the endpoints the board posts to. Each writes to PocketBase and
+// answers with a flash; the data itself comes back through the broadcast, the
+// same way a CLI-driven change does.
+
+/// Respond to a Datastar action by patching the #flash strip. Always 200
+/// with an SSE body: Datastar does not reliably process non-2xx bodies, so
+/// errors travel in-band; success clears the strip and the data itself
+/// arrives via the broadcast, same as CLI-driven changes.
+fn flash_error(w: http.ResponseWriter, msg: string) {
+  let safe = template.HTMLEscapeString(msg)
+  respond_flash(w, f"<div id=\"flash\" class=\"flash\">{safe}</div>")
+}
+
+fn flash_clear(w: http.ResponseWriter) {
+  respond_flash(w, "<div id=\"flash\" class=\"flash\" hidden></div>")
+}
+
+fn respond_flash(w: http.ResponseWriter, html: string) {
+  w.Header().Set("Content-Type", "text/event-stream")
+  let _ = w.Write(patch_event(html).bytes())
+}
+
+/// The board's one write path for new issues, shared by the topbar's
+/// one-line composer and the full create dialog. Everything past `title` is
+/// optional, so a request carrying only a title is byte-for-byte what it
+/// always was and the fast path pays nothing for the dialog's existence.
+///
+/// Relation ids (assignee, project, labels) are handed to PocketBase
+/// unchecked: the form only ever offers ids that exist, and PB rejects a
+/// bogus one with a message the flash strip already knows how to show.
+/// Re-validating here would mean three more fetches per create.
+fn create_action(w: http.ResponseWriter, r: Ref<http.Request>, team_id: string) {
+  let title = strings.TrimSpace(r.PostFormValue("title"))
+  if title == "" {
+    flash_error(w, "title is required")
+    return
+  }
+  // Absent state means todo, the same default `lll issue create` uses, so
+  // `curl -d title=...` is a complete request.
+  let mut state = r.PostFormValue("state")
+  if state == "" { state = "todo" }
+  if query.states().find(|s| s == state).is_none() {
+    flash_error(w, f"unknown state '{state}'")
+    return
+  }
+  if team_id == "" {
+    flash_error(w, "no team configured: set LLL_TEAM or 'team' in .lll.toml")
+    return
+  }
+  let mut priority = 0
+  let prio_slug = r.PostFormValue("priority")
+  if prio_slug != "" {
+    let Some(p) = prio_value(prio_slug) else {
+      flash_error(w, f"unknown priority '{prio_slug}'")
+      return
+    }
+    priority = p
+  }
+  // PostFormValue above has already parsed the body, so PostForm is populated;
+  // labels is the one field that repeats (one checkbox per label).
+  let form = r.PostForm as Map<string, Slice<string>>
+  let labels = form["labels"].filter(|id| id != "")
+  let new_issue = models.NewIssue {
+    team: team_id,
+    title,
+    state,
+    priority,
+    description: r.PostFormValue("description"),
+    assignee: r.PostFormValue("assignee"),
+    project: r.PostFormValue("project"),
+    labels,
+    ..
+  }
+  let payload = match json.Marshal(new_issue) {
+    Ok(p) => p,
+    Err(e) => {
+      flash_error(w, f"encoding issue: {e}")
+      return
+    },
+  }
+  if let Err(e) = pb.post("/api/collections/issues/records", payload as string) {
+    flash_error(w, e)
+    return
+  }
+  flash_clear(w)
+  // Only a success closes the dialog and empties the composers, and the
+  // server is what says so. If the client cleared optimistically, a rejected
+  // create would take a typed description down with it — the field this whole
+  // dialog exists for. Clearing new_title matters because the dialog opens
+  // carrying the topbar's text: leaving it behind would arm a duplicate the
+  // next time someone pressed Enter up there.
+  let _ = w.Write(
+    signals_event("{\"ni_open\": false, \"new_title\": \"\"}").bytes(),
+  )
+}
+
+/// Patch payload for /state: target state plus manual board position.
+#[json]
+struct StatePatch { state: string, sort: float64 }
+
+fn state_action(w: http.ResponseWriter, r: Ref<http.Request>, team_id: string) {
+  // FormValue, not PostFormValue: drag-and-drop posts key/state as query params.
+  let key = r.FormValue("key")
+  let state = r.FormValue("state")
+  // Record id of the card the drop lands before; "" means end of column.
+  let before = r.FormValue("before")
+  if query.states().find(|s| s == state).is_none() {
+    flash_error(w, f"unknown state '{state}'")
+    return
+  }
+  let issue = match fetch_issue(key) {
+    Ok(i) => i,
+    Err(e) => {
+      flash_error(w, e)
+      return
+    },
+  }
+  let sort = match reorder_sort(issue, state, before, team_id) {
+    Ok(s) => s,
+    Err(e) => {
+      flash_error(w, e)
+      return
+    },
+  }
+  let payload = match json.Marshal(StatePatch { state, sort }) {
+    Ok(p) => p,
+    Err(e) => {
+      flash_error(w, f"encoding state change: {e}")
+      return
+    },
+  }
+  if let Err(e) = pb.patch(
+    f"/api/collections/issues/records/{issue.id}",
+    payload as string,
+  ) {
+    flash_error(w, e)
+    return
+  }
+  flash_clear(w)
+}
+
+/// New manual position for `issue` landing in `state` before the record id
+/// `before` ("" = end of column): the fractional midpoint of its neighbors'
+/// sorts, so a reorder patches exactly one record.
+fn reorder_sort(
+  issue: models.Issue,
+  state: string,
+  before: string,
+  team_id: string,
+) -> Result<float64, string> {
+  // Dropping a card onto itself moves nothing.
+  if before == issue.id { return Ok(issue.sort) }
+  let others = fetch_column_issues(team_id, state)?.filter(|i| i.id != issue.id)
+  if others.is_empty() { return Ok(issue.sort) }
+  let Some(target) = others.find(|i| i.id == before) else {
+    // End of column — also the fallback when `before` went stale (moved or
+    // deleted between the drop and this request).
+    return Ok(others[others.length() - 1].sort + 1.0)
+  }
+  // Sort of the card just above the drop slot; before the first card, a
+  // synthetic target.sort - 2 makes the midpoint land strictly first.
+  let mut prev_sort = target.sort - 2.0
+  for i in others {
+    if i.id == before { break }
+    prev_sort = i.sort
+  }
+  Ok((prev_sort + target.sort) / 2.0)
+}
+
+/// One column's issues in board order (no expands — reorder needs ids and
+/// sorts only).
+fn fetch_column_issues(team_id: string, state: string) -> Result<Slice<models.Issue>, string> {
+  let filter = query.filter(team_id, state, "", "", "", "")
+  let path = f"/api/collections/issues/records?perPage=200&sort=sort,created&filter={url.QueryEscape(filter)}"
+  let body = pb.get(path)?
+  let mut issues = models.IssueList { .. }
+  if let Err(e) = json.Unmarshal(body.bytes(), &issues) {
+    return Err(f"decoding issues: {e}")
+  }
+  Ok(issues.items)
+}
+
+/// Star or unstar an issue for the workspace: `on=true` adds, anything else
+/// removes.
+///
+/// A set, not a toggle. The button posts the state it just moved to, so a
+/// double click or a stale page converges on what the user sees instead of
+/// flipping the row out from under them. Both directions are idempotent.
+fn favorite_action(w: http.ResponseWriter, r: Ref<http.Request>) {
+  let key = r.FormValue("key")
+  let on = r.FormValue("on") == "true"
+  let issue = match fetch_issue(key) {
+    Ok(i) => i,
+    Err(e) => {
+      flash_error(w, e)
+      return
+    },
+  }
+  let existing = match fetch_favorite(issue.id) {
+    Ok(f) => f,
+    Err(e) => {
+      flash_error(w, e)
+      return
+    },
+  }
+  if on {
+    if existing.is_some() {
+      flash_clear(w)
+      return
+    }
+    // member stays empty: workspace-wide until auth (task-32) lands.
+    let payload = match json.Marshal(models.NewFavorite { issue: issue.id, .. }) {
+      Ok(p) => p,
+      Err(e) => {
+        flash_error(w, f"encoding favorite: {e}")
+        return
+      },
+    }
+    if let Err(e) = pb.post(
+      "/api/collections/favorites/records",
+      payload as string,
+    ) {
+      flash_error(w, e)
+      return
+    }
+  } else if let Some(fav) = existing {
+    if let Err(e) = pb.delete(f"/api/collections/favorites/records/{fav.id}") {
+      flash_error(w, e)
+      return
+    }
+  }
+  flash_clear(w)
+}
+
+fn priority_action(w: http.ResponseWriter, r: Ref<http.Request>) {
+  let key = r.FormValue("key")
+  let slug = r.FormValue("priority")
+  let Some(prio) = prio_value(slug) else {
+    flash_error(w, f"unknown priority '{slug}'")
+    return
+  }
+  let issue = match fetch_issue(key) {
+    Ok(i) => i,
+    Err(e) => {
+      flash_error(w, e)
+      return
+    },
+  }
+  let payload = "{\"priority\":" + strconv.Itoa(prio) + "}"
+  if let Err(e) = pb.patch(
+    f"/api/collections/issues/records/{issue.id}",
+    payload,
+  ) {
+    flash_error(w, e)
+    return
+  }
+  flash_clear(w)
+}
+
+/// Set or clear the issue's marker from the web picker.
+///
+/// An empty `emoji` is the way back to "none" — a picker with no way to
+/// unset would be a one-way trap — so this keys off the parameter being
+/// present, exactly as `lll issue update --emoji ""` keys off the flag.
+/// Validation is the CLI's `check_emoji`: the picker only ever posts one of
+/// its own candidates, but the endpoint is curl-able like every other.
+fn emoji_action(w: http.ResponseWriter, r: Ref<http.Request>) {
+  let key = r.FormValue("key")
+  let Ok(emoji) = check_emoji(r.FormValue("emoji")) else {
+    flash_error(w, "an issue takes one emoji, or none")
+    return
+  }
+  let issue = match fetch_issue(key) {
+    Ok(i) => i,
+    Err(e) => {
+      flash_error(w, e)
+      return
+    },
+  }
+  // Marshal the glyph so a multi-rune sequence stays valid JSON.
+  let quoted = match json.Marshal(emoji) {
+    Ok(q) => q,
+    Err(e) => {
+      flash_error(w, f"encoding emoji: {e}")
+      return
+    },
+  }
+  let payload = "{\"emoji\":" + (quoted as string) + "}"
+  if let Err(e) = pb.patch(
+    f"/api/collections/issues/records/{issue.id}",
+    payload,
+  ) {
+    flash_error(w, e)
+    return
+  }
+  flash_clear(w)
+}
+
+fn title_action(w: http.ResponseWriter, r: Ref<http.Request>) {
+  let key = r.FormValue("key")
+  let title = strings.TrimSpace(r.FormValue("title"))
+  if title == "" {
+    flash_error(w, "title is required")
+    return
+  }
+  let issue = match fetch_issue(key) {
+    Ok(i) => i,
+    Err(e) => {
+      flash_error(w, e)
+      return
+    },
+  }
+  // Marshal the title itself so quotes/backslashes in it stay valid JSON.
+  let quoted = match json.Marshal(title) {
+    Ok(q) => q,
+    Err(e) => {
+      flash_error(w, f"encoding title: {e}")
+      return
+    },
+  }
+  let payload = "{\"title\":" + (quoted as string) + "}"
+  if let Err(e) = pb.patch(
+    f"/api/collections/issues/records/{issue.id}",
+    payload,
+  ) {
+    flash_error(w, e)
+    return
+  }
+  flash_clear(w)
+}
+
+fn comment_action(w: http.ResponseWriter, r: Ref<http.Request>) {
+  let key = r.PostFormValue("key")
+  let body = strings.TrimSpace(r.PostFormValue("body"))
+  if body == "" {
+    flash_error(w, "comment body is required")
+    return
+  }
+  let issue = match fetch_issue(key) {
+    Ok(i) => i,
+    Err(e) => {
+      flash_error(w, e)
+      return
+    },
+  }
+  // Same honor-system authorship as `lll issue comment`: the member named by
+  // 'me' in config, or authorless.
+  let mut author = ""
+  if let Ok(cfg) = config.load() {
+    if cfg.me != "" {
+      if let Ok(Some(m)) = find_member(cfg.me) { author = m.id }
+    }
+  }
+  let new_comment = models.NewComment { issue: issue.id, author, body }
+  let payload = match json.Marshal(new_comment) {
+    Ok(p) => p,
+    Err(e) => {
+      flash_error(w, f"encoding comment: {e}")
+      return
+    },
+  }
+  if let Err(e) = pb.post(
+    "/api/collections/comments/records",
+    payload as string,
+  ) {
+    flash_error(w, e)
+    return
+  }
+  flash_clear(w)
+}
