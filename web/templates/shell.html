@@ -18,7 +18,8 @@
 <a href="/"{{if eq .Active "board"}} class="active"{{end}}><svg width="14" height="14"><use href="#ic-board"/></svg> Board</a>
 <a href="/issues"{{if eq .Active "issues"}} class="active"{{end}}><svg width="14" height="14"><use href="#ic-issues"/></svg> All issues</a>
 {{if .Me}}<a href="/?mine=1" title="Issues assigned to {{.Me}}"{{if eq .Active "mine"}} class="active"{{end}}><svg width="14" height="14"><use href="#ic-me"/></svg> My issues</a>
-{{end}}<a href="/settings"{{if eq .Active "settings"}} class="active"{{end}}><svg width="14" height="14"><use href="#ic-settings"/></svg> Settings</a>
+{{end}}{{template "rail-favorites" .Favorites}}
+<a href="/settings"{{if eq .Active "settings"}} class="active"{{end}}><svg width="14" height="14"><use href="#ic-settings"/></svg> Settings</a>
 <div class="rail-foot">v{{.Version}}</div>
 </nav>{{end}}
 
@@ -31,3 +32,19 @@
      the open page. An empty AccentCss means nobody chose one — the <style>
      stays empty and theme.css's canonical orange is left byte-identical. */}}
 {{define "accent-head"}}<style id="accent">{{.AccentCss}}</style><link id="favicon" rel="icon" href="{{.Favicon}}">{{end}}
+
+{{/* The favorites group — the one live region of the rail, and the reason
+     #rail carries an id. It is its OWN morph boundary (#rail-favorites), so
+     a favorites event patches this group alone; the rail around it is still
+     never rendered into a broadcast. Its dot is the Slice<FavVM> the bridge
+     re-renders it from, exactly as `board` takes a BoardVM.
+
+     Auth is deferred (task-32), so a star is workspace-wide. The subtitle
+     says that outright: a bare "Favorites" heading would read as personal,
+     which these are not. */}}
+{{define "rail-favorites"}}<div id="rail-favorites" class="rail-group">
+<h2>Favorites</h2>
+<p class="rg-note">Shared by everyone here</p>
+{{range .}}<a href="/issue/{{.Key}}" title="{{.Key}} · {{.Title}}">{{template "state-icon" .State}} <span class="rg-title">{{.Title}}</span></a>
+{{else}}<p class="rg-empty">Star an issue to pin it here for the whole workspace.</p>
+{{end}}</div>{{end}}

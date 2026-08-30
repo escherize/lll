@@ -141,6 +141,16 @@ pub struct RailVM {
   // same reason ColumnVM.sig is template.JS: html/template will not emit a
   // data: URL typed as a plain string.
   pub favicon: template.URL,
+  // The starred issues, newest first. The one part of the rail that is also
+  // broadcast on its own (see favorites_broadcast).
+  pub favorites: Slice<FavVM>,
+}
+
+/// One starred issue in the rail's FAVORITES group.
+pub struct FavVM {
+  pub key: string,
+  pub title: string,
+  pub state: string,
 }
 
 /// A whole page: the shell plus that page's own view model. Page templates
@@ -185,6 +195,9 @@ pub struct IssueVM {
   pub states: Slice<StateOpt>,
   pub prios: Slice<StateOpt>,
   pub comments: Slice<CommentVM>,
+  // Seeds the topbar star's $fav signal. Only the page handler sets it: the
+  // star lives outside #issue-detail, so no broadcast re-renders it.
+  pub favorited: bool,
 }
 
 /// One column heading in the /issues table. `href` empty means the column has
@@ -345,9 +358,12 @@ fn new_hub() -> Hub {
 
 /// Send a broadcast to every matching client, dropping the payload for any
 /// client whose buffer is full (a stuck browser must not stall the hub).
+///
+/// Scope "*" matches every client. The rail is on every page, so its
+/// favorites group is the one fragment with no single scope to belong to.
 fn deliver(clients: Slice<SseClient>, msg: Broadcast) {
   for c in clients {
-    if c.scope != msg.scope { continue }
+    if msg.scope != "*" && c.scope != msg.scope { continue }
     select {
       c.ch.send(msg.payload) => (),
       _ => continue,
@@ -388,9 +404,11 @@ pub fn run_server(port: int) -> Result<(), string> {
     "team,assignee,labels,project",
   )?
   let comments_topic = realtime.topic_with_options("comments", "", "author")?
+  // Favorites drive the rail's FAVORITES group, which every page shows, so
+  // this topic is unfiltered too.
   let events = realtime.subscribe(
     pb.base_url()?,
-    [issues_topic, comments_topic],
+    [issues_topic, comments_topic, "favorites"],
   )?
 
   let hub = new_hub()
@@ -446,6 +464,7 @@ pub fn run_server(port: int) -> Result<(), string> {
       state_action(w, r, team_id)
     },
   )
+  http.HandleFunc("POST /favorite", favorite_action)
   http.HandleFunc("POST /priority", priority_action)
   http.HandleFunc("POST /title", title_action)
   http.HandleFunc("POST /comment", comment_action)
@@ -721,6 +740,9 @@ fn issue_vm(issue: models.Issue, comments: Slice<models.Comment>) -> IssueVM {
     states: state_opts(),
     prios: prio_opts(),
     comments: comments.map(comment_vm),
+    // Left false here on purpose: only issue_page knows, and only it renders
+    // the star. Broadcasts of #issue-detail must not carry a stale answer.
+    favorited: false,
   }
 }
 
@@ -860,7 +882,55 @@ fn rail_vm(active: string, me: string, team: models.Team) -> RailVM {
     version: version(),
     accent_css: accent_css(hex),
     favicon: favicon_url(hex, mark_letter(team.key)),
+    favorites: fav_vms(),
   }
+}
+
+/// The rail's FAVORITES group. A failed fetch renders an empty group rather
+/// than a 500: a missing star list must not cost you the board.
+fn fav_vms() -> Slice<FavVM> {
+  let Ok(favs) = fetch_favorites() else {
+    return []
+  }
+  favs.map(|f| {
+    let issue = f.expand.issue
+    FavVM {
+      key: f"{issue.expand.team.key}-{issue.number}",
+      title: issue.title,
+      state: issue.state,
+    }
+  })
+}
+
+/// Every favorite, newest first, with its issue and that issue's team.
+///
+/// Unscoped by member on purpose: auth is deferred (task-32), so every row
+/// carries member="" and a star belongs to the workspace. When members
+/// arrive this grows a filter, not a new shape.
+fn fetch_favorites() -> Result<Slice<models.Favorite>, string> {
+  let body = pb.get(
+    "/api/collections/favorites/records?perPage=200&sort=-created&expand=issue.team",
+  )?
+  let mut list = models.FavoriteList { .. }
+  if let Err(e) = json.Unmarshal(body.bytes(), &list) {
+    return Err(f"decoding favorites: {e}")
+  }
+  // A favorite whose issue expand came back empty (issue deleted between the
+  // list and the expand) has no link to render.
+  Ok(list.items.filter(|f| f.expand.issue.id != ""))
+}
+
+/// The workspace's favorite row for one issue, if it has one.
+fn fetch_favorite(issue_id: string) -> Result<Option<models.Favorite>, string> {
+  let filter = url.QueryEscape(f"issue='{issue_id}' && member=''")
+  let body = pb.get(
+    f"/api/collections/favorites/records?perPage=1&filter={filter}",
+  )?
+  let mut list = models.FavoriteList { .. }
+  if let Err(e) = json.Unmarshal(body.bytes(), &list) {
+    return Err(f"decoding favorites: {e}")
+  }
+  Ok(list.items.get(0))
 }
 
 /// One query parameter, or "" when there is no URL to ask.
@@ -932,10 +1002,9 @@ fn issue_page(w: http.ResponseWriter, r: Ref<http.Request>, team_id: string, me:
   }
   // An issue is a detail view under the board, so the board row stays
   // current — which also makes the rail byte-identical to the board's.
-  let vm = PageVM {
-    rail: rail_vm("board", me, shell_team(team_id)),
-    page: issue_vm(issue, comments),
-  }
+  let mut page = issue_vm(issue, comments)
+  if let Ok(Some(_)) = fetch_favorite(issue.id) { page.favorited = true }
+  let vm = PageVM { rail: rail_vm("board", me, shell_team(team_id)), page }
   let html = match render("issue-page", vm) {
     Ok(h) => h,
     Err(e) => {
@@ -1449,6 +1518,8 @@ fn bridge(events: Channel<realtime.Event>, hub: Hub, team_id: string) {
     }
     if ev.topic == "comments" {
       comment_broadcast(ev, hub)
+    } else if ev.topic == "favorites" {
+      favorites_broadcast(hub)
     } else {
       issue_broadcast(ev, hub, team_id)
     }
@@ -1477,6 +1548,25 @@ fn issue_broadcast(ev: realtime.Event, hub: Hub, team_id: string) {
   if let Ok(html) = render("issue-detail", vm) {
     let _ = hub.broadcast.send(
       Broadcast { scope: f"issue:{key}", payload: patch_event(html) },
+    )
+  }
+}
+
+/// On any favorites event: re-render the rail's FAVORITES group from a fresh
+/// fetch and patch it into every open page.
+///
+/// This is the one fragment that reaches inside #rail. It is legal because
+/// the group is its own morph boundary with its own id: the shell itself is
+/// still never rendered into a broadcast, so a page keeps the rail it was
+/// served and only this group is replaced. Everything else in the rail stays
+/// frozen at page load, by design.
+///
+/// The event's own record is ignored — the group is the whole list, and one
+/// fetch is cheaper than reconciling a create against a delete.
+fn favorites_broadcast(hub: Hub) {
+  if let Ok(html) = render("rail-favorites", fav_vms()) {
+    let _ = hub.broadcast.send(
+      Broadcast { scope: "*", payload: patch_event(html) },
     )
   }
 }
@@ -1643,6 +1733,58 @@ fn fetch_column_issues(team_id: string, state: string) -> Result<Slice<models.Is
     return Err(f"decoding issues: {e}")
   }
   Ok(issues.items)
+}
+
+/// Star or unstar an issue for the workspace: `on=true` adds, anything else
+/// removes.
+///
+/// A set, not a toggle. The button posts the state it just moved to, so a
+/// double click or a stale page converges on what the user sees instead of
+/// flipping the row out from under them. Both directions are idempotent.
+fn favorite_action(w: http.ResponseWriter, r: Ref<http.Request>) {
+  let key = r.FormValue("key")
+  let on = r.FormValue("on") == "true"
+  let issue = match fetch_issue(key) {
+    Ok(i) => i,
+    Err(e) => {
+      flash_error(w, e)
+      return
+    },
+  }
+  let existing = match fetch_favorite(issue.id) {
+    Ok(f) => f,
+    Err(e) => {
+      flash_error(w, e)
+      return
+    },
+  }
+  if on {
+    if existing.is_some() {
+      flash_clear(w)
+      return
+    }
+    // member stays empty: workspace-wide until auth (task-32) lands.
+    let payload = match json.Marshal(models.NewFavorite { issue: issue.id, .. }) {
+      Ok(p) => p,
+      Err(e) => {
+        flash_error(w, f"encoding favorite: {e}")
+        return
+      },
+    }
+    if let Err(e) = pb.post(
+      "/api/collections/favorites/records",
+      payload as string,
+    ) {
+      flash_error(w, e)
+      return
+    }
+  } else if let Some(fav) = existing {
+    if let Err(e) = pb.delete(f"/api/collections/favorites/records/{fav.id}") {
+      flash_error(w, e)
+      return
+    }
+  }
+  flash_clear(w)
 }
 
 fn priority_action(w: http.ResponseWriter, r: Ref<http.Request>) {
