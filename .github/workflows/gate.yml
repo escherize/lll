@@ -50,6 +50,9 @@ jobs:
       # Pinned to 0.11.3, the version mise.toml says lll is verified against —
       # the `latest` installer now ships 0.12.0, whose stricter mut rules fail
       # the build.
+      # TEMPORARY diagnostic for the grep mismatch seen in run 33321964484.
+      - name: grep repro
+        run: bash scripts/ci-debug/grep-repro.sh
       - name: Install lis 0.11.3
         run: |
           curl -LsSf https://github.com/ivov/lisette/releases/download/lisette-v0.11.3/lisette-installer.sh | sh
