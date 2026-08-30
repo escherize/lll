@@ -63,12 +63,14 @@ impl FrameParser {
 /// Split an SSE line at the first colon; one leading space of the value is
 /// eaten per the SSE spec. A line without a colon is a field with no value.
 fn split_field(line: string) -> (string, string) {
-  let Some(colon) = strings.Index(line, ":") else {
+  // SplitN, not Index + substring: strings.Index returns a BYTE offset while
+  // substring takes RUNE indices, so any multi-byte character in the line made
+  // the two disagree and panicked with "substring index out of range".
+  let parts = strings.SplitN(line, ":", 2)
+  let Some(value) = parts.get(1) else {
     return (line, "")
   }
-  let field = line.substring(0..colon)
-  let value = strings.TrimPrefix(line.substring(colon + 1..line.length()), " ")
-  (field, value)
+  (parts[0], strings.TrimPrefix(value, " "))
 }
 
 #[json]
@@ -99,10 +101,8 @@ pub fn topic_with_options(topic: string, filter: string, expand: string) -> Resu
 
 /// The topic without its ?options= suffix.
 fn strip_options(topic: string) -> string {
-  let Some(q) = strings.Index(topic, "?") else {
-    return topic
-  }
-  topic.substring(0..q)
+  // SplitN keeps this byte-safe; see split_field.
+  strings.SplitN(topic, "?", 2)[0]
 }
 
 #[json]

@@ -95,3 +95,16 @@ fn strip_options_removes_the_suffix() {
   assert strip_options("comments?options=%7B%7D") == "comments"
   assert strip_options("issues/abc123") == "issues/abc123"
 }
+
+#[test]
+fn split_field_handles_multi_byte_characters() {
+  // strings.Index gives a byte offset; substring takes rune indices. Anything
+  // non-ASCII before the colon used to panic instead of parsing.
+  let (field, value) = split_field("data: an em-dash — and an arrow →")
+  assert field == "data"
+  assert value == "an em-dash — and an arrow →"
+
+  let (f2, v2) = split_field("é: café")
+  assert f2 == "é"
+  assert v2 == "café"
+}

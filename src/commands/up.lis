@@ -294,10 +294,9 @@ fn free_port(start: int) -> int {
 
 /// Port from "http://127.0.0.1:8090", or `fallback`.
 fn port_of(base_url: string, fallback: int) -> int {
-  let Some(idx) = strings.LastIndex(base_url, ":") else {
-    return fallback
-  }
-  let Ok(p) = strconv.Atoi(base_url.substring(idx + 1..)) else {
+  // Split, not LastIndex + substring; see realtime.split_field.
+  let parts = strings.Split(base_url, ":")
+  let Ok(p) = strconv.Atoi(parts[parts.length() - 1]) else {
     return fallback
   }
   p

@@ -10,3 +10,4 @@ pb/pb_data/
 .impeccable/mocks/InterVariable.woff2
 .private
 .claude/worktrees/
+.lll-demo/

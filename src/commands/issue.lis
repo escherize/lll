@@ -876,17 +876,14 @@ fn positional_id(args: Slice<string>, usage: string) -> Result<string, string> {
 /// a URL is returned untouched, so a bare key stays a bare key and a bad value
 /// still fails downstream with the usual "not an issue ID" message.
 fn deslug(arg: string) -> string {
+  // All splitting, no index arithmetic: byte offsets and rune indices disagree
+  // on non-ASCII input and panic. See realtime.split_field.
   let mut a = arg
-  if let Some(idx) = strings.Index(a, "://") {
-    a = a.substring(idx + 3..)
-    let Some(slash) = strings.Index(a, "/") else {
-      return arg
-    }
-    a = a.substring(slash + 1..)
-  } else if strings.Contains(a, "/") {
-    // a bare path like issue/ENG-1, but never a Windows-ish or odd value
-    a = a
-  } else {
+  if strings.Contains(a, "://") {
+    let after_scheme = strings.SplitN(a, "://", 2)[1]
+    if !strings.Contains(after_scheme, "/") { return arg }
+    a = strings.SplitN(after_scheme, "/", 2)[1]
+  } else if !strings.Contains(a, "/") {
     return arg
   }
   a = strings.TrimSuffix(a, "/")
@@ -915,12 +912,14 @@ fn resolve_id(explicit: string, usage: string) -> Result<string, string> {
 /// assignee, labels, project expanded).
 fn fetch_issue_record(id: string) -> Result<string, string> {
   let bad_id = f"'{id}' is not an issue ID (expected KEY-123, e.g. ENG-1)"
-  let Some(dash) = strings.LastIndex(id, "-") else {
-    return Err(bad_id)
-  }
-  if dash == 0 || dash == id.length() - 1 { return Err(bad_id) }
-  let team_key = id.substring(0..dash)
-  let Ok(number) = strconv.Atoi(id.substring(dash + 1..id.length())) else {
+  // Split, not LastIndex + substring: index arithmetic mixes byte offsets with
+  // rune indices and panics on non-ASCII input. See realtime.split_field.
+  let parts = strings.Split(id, "-")
+  if parts.length() < 2 { return Err(bad_id) }
+  let number_part = parts[parts.length() - 1]
+  let team_key = strings.TrimSuffix(id, f"-{number_part}")
+  if team_key == "" || number_part == "" { return Err(bad_id) }
+  let Ok(number) = strconv.Atoi(number_part) else {
     return Err(bad_id)
   }
 
