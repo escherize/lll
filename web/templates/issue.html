@@ -70,7 +70,7 @@
 <div class="prop"><span class="k">Assignee</span>
   <span class="v">{{if .Assignee}}{{template "avatar" .Avatar}} {{.Assignee}}{{else}}none{{end}}</span>
 </div>
-<div class="prop"><span class="k">Project</span><span class="v">{{.Project}}</span></div>
+<div class="prop"><span class="k">Project</span><span class="v">{{if .ProjectHref}}<a href="{{.ProjectHref}}">{{.Project}}</a>{{else}}{{.Project}}{{end}}</span></div>
 <div class="prop"><span class="k">Labels</span>
   <span class="v">{{if .Labels}}{{range .Labels}}<span class="chip"><span class="dot" style="background:{{if .Color}}{{.Color}}{{else}}var(--text-3){{end}}"></span>{{.Name}}</span>{{end}}{{else}}none{{end}}</span>
 </div>

@@ -443,6 +443,12 @@ input:focus, textarea:focus, select:focus {
 .prop .k { width: 72px; flex: none; color: var(--text-3); font-size: 12px; }
 .prop .v { display: inline-flex; align-items: center; gap: 6px; color: var(--text-2); font-weight: 500; }
 .prop .v.cap { text-transform: capitalize; }
+/* The project is the one property that leads somewhere (/issues filtered
+   to it), so it wears the same accent the description's links wear —
+   otherwise the browser's default blue lands in a panel with no blue in
+   it, which is what shipped before this rule existed. */
+.prop .v a { color: var(--accent); text-decoration: none; }
+.prop .v a:hover { text-decoration: underline; }
 .prop select { padding: 3px 6px; font-size: 12.5px; }
 .prop form { display: inline-flex; }
 
@@ -1022,3 +1028,69 @@ input:focus, textarea:focus, select:focus {
   font-variant-numeric: tabular-nums;
 }
 .sr-who { flex: none; width: 18px; display: flex; }
+
+/* ── Projects page (/projects) ──────────────────────────── */
+/* One row per project, the whole row a link into /issues?project=NAME: the
+   list says what exists, the table it points at does the drilling. Class
+   names are namespaced pj- because CSS class names are global here too
+   (task-106); .desc already means the issue description.
+
+   No new colour: the status dot borrows an --st-* hue (see project_tone),
+   and the count sits in the same tertiary grey as every other tally. */
+.pj-count {
+  color: var(--text-3);
+  font-size: 11.5px;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+}
+.pj-body { flex: 1; min-height: 0; overflow-y: auto; padding: 14px 16px 16px; }
+.pj-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px;
+  border-radius: var(--radius);
+  color: inherit;
+  text-decoration: none;
+}
+.pj-row + .pj-row { border-top: 1px solid var(--border); }
+.pj-row:hover { background: var(--bg-hover); }
+.pj-dot {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+}
+/* Name over description, so a long description wraps under the name instead
+   of pushing the status and count off the right edge. */
+.pj-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.pj-name { font-weight: 500; color: var(--text); }
+.pj-desc {
+  color: var(--text-3);
+  font-size: 11.5px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.pj-status { flex: none; width: 84px; color: var(--text-2); font-size: 11.5px; }
+.pj-scope {
+  flex: none;
+  width: 84px;
+  color: var(--text-3);
+  font-size: 11px;
+  font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+/* The issue count, in the same team scope /issues filters by — so a project
+   owned by another team honestly reads 0 rather than a number no page shows. */
+.pj-n {
+  flex: none;
+  width: 62px;
+  text-align: right;
+  color: var(--text-3);
+  font-size: 11.5px;
+  font-variant-numeric: tabular-nums;
+}
+.pj-empty { color: var(--text-2); margin: 6px 0; max-width: 68ch; }
