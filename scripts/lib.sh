@@ -53,12 +53,18 @@ fail() { # message
 }
 
 assert_contains() { # haystack needle label
-  printf '%s' "$1" | grep -qF -- "$2" || fail "$3: expected '$2' in output:
+  # No -q: with pipefail, grep -q exits on the first match and the writer
+  # eats EPIPE for the bytes after it — a matching haystack then FAILS when
+  # the needle sits early in a large page (seen on a loaded CI runner, where
+  # the scheduler widens that window). Reading everything is the fix; the
+  # match status is unchanged.
+  printf '%s' "$1" | grep -F -- "$2" >/dev/null || fail "$3: expected '$2' in output:
 $1"
 }
 
 assert_not_contains() { # haystack needle label
-  printf '%s' "$1" | grep -qF -- "$2" && fail "$3: did not expect '$2' in output:
+  printf '%s' "$1" | grep -F -- "$2" >/dev/null &&
+    fail "$3: did not expect '$2' in output:
 $1" || true
 }
 

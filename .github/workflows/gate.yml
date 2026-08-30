@@ -1,0 +1,60 @@
+# The gate runs on macos-14 (darwin/arm64), NOT ubuntu — do not "fix" this back
+# to linux without first fixing lisette upstream. Two reasons, in order:
+#
+# 1. lisette v0.12.0 (what the `latest` installer ships) is a breaking release;
+#    lll is verified against lis 0.11.3 (see mise.toml), which we pin below.
+# 2. On linux, lis 0.11.3's bindgen panics while generating Go typedefs for
+#    github.com/escherize/lll/gopb — "panic: unexpected expr: *ast.KeyValueExpr"
+#    in golang.org/x/tools/go/ssa — so `lis test` cannot run on ubuntu at all.
+#    The identical toolchain (lis 0.11.3, go 1.27.0, cold module + build caches)
+#    passes on darwin/arm64. Repro: escherize/lll Actions run 33320568185.
+#    Upstream issue: https://github.com/ivov/lisette/issues/1360
+
+name: gate
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: gate-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  gate:
+    name: gate
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+
+      # Install the mise binary only. The repo's mise.toml is untrusted in a
+      # fresh checkout (hit locally in TASK-150), so the action must not read
+      # it (install off) — the next step trusts it first.
+      - uses: jdx/mise-action@v2
+        with:
+          install: false
+
+      - name: Trust repo config
+        run: mise trust
+
+      # Provisions go 1.27 and jq from mise.toml.
+      - name: Install tools
+        run: mise install
+
+      # lis ships as a GitHub release, not a mise plugin (see mise.toml).
+      # Pinned to 0.11.3, the version mise.toml says lll is verified against —
+      # the `latest` installer now ships 0.12.0, whose stricter mut rules fail
+      # the build.
+      - name: Install lis 0.11.3
+        run: |
+          curl -LsSf https://github.com/ivov/lisette/releases/download/lisette-v0.11.3/lisette-installer.sh | sh
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      # THE failing step: build + unit tests + full e2e (~75s). A red gate
+      # blocks the PR.
+      - name: gate
+        run: mise run gate
