@@ -98,7 +98,7 @@ fn verbs(noun: string) -> Slice<string> {
 /// Flags for a noun-verb pair (long flags, plus -w where it is the point).
 fn verb_flags(noun: string, verb: string) -> Slice<string> {
   match f"{noun} {verb}" {
-    "issue create" => ["-d", "--description", "--priority", "--assignee", "--label", "--project"],
+    "issue create" => ["-d", "--description", "--emoji", "--priority", "--assignee", "--label", "--project"],
     "issue list" => [
       "--state",
       "--assignee",
@@ -112,6 +112,7 @@ fn verb_flags(noun: string, verb: string) -> Slice<string> {
     "issue view" => ["--json", "--raw", "-w"],
     "issue update" => [
       "--state",
+      "--emoji",
       "--priority",
       "--assignee",
       "--label",
