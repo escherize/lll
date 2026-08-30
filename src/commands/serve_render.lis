@@ -177,11 +177,13 @@ fn filter_groups(
   members: Slice<string>,
   labels: Slice<string>,
 ) -> Slice<FilterGroupVM> {
-  let mut assignees: Slice<string> = members[..]
+  let mut assignees: Slice<string> = []
+  assignees = assignees.append(members...)
   for a in csv(q.assignee) {
     if !assignees.contains(a) { assignees = assignees.append(a) }
   }
-  let mut label_names: Slice<string> = labels[..]
+  let mut label_names: Slice<string> = []
+  label_names = label_names.append(labels...)
   for l in csv(q.label) {
     if !label_names.contains(l) { label_names = label_names.append(l) }
   }
