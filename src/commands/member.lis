@@ -4,6 +4,7 @@ import "go:net/url"
 
 import "models"
 import "pb"
+import "flags"
 
 /// Dispatch `lll member <verb>`.
 pub fn member(args: Slice<string>) -> Result<(), string> {
@@ -52,30 +53,28 @@ fn member_list() -> Result<(), string> {
   Ok(())
 }
 
-fn member_add(args: Slice<string>) -> Result<(), string> {
-  let mut name = ""
-  let mut email = ""
-  let mut i = 3
-  while i < args.length() {
-    match args[i] {
-      "-n" => {
-        let Some(val) = args.get(i + 1) else {
-          return Err("-n requires a value")
-        }
-        name = val
-        i += 2
-      },
-      "-e" => {
-        let Some(val) = args.get(i + 1) else {
-          return Err("-e requires a value")
-        }
-        email = val
-        i += 2
-      },
-      other => return Err(f"unknown flag: '{other}'"),
-    }
+fn member_add_spec() -> Slice<flags.Flag> {
+  [
+    flags.Flag { name: "-n", value: true, hint: "\"name\"", required: true, help: "member name", .. },
+    flags.Flag { name: "-e", value: true, hint: "email", help: "member email", .. },
+  ]
+}
+
+/// The flag table of one member verb; empty for verbs without flags. Read by
+/// `lll completions` so the scripts complete exactly what the parser accepts.
+pub fn member_verb_spec(verb: string) -> Slice<flags.Flag> {
+  match verb {
+    "add" => member_add_spec(),
+    _ => [],
   }
-  if name == "" { return Err("usage: lll member add -n \"name\" [-e email]") }
+}
+
+fn member_add(args: Slice<string>) -> Result<(), string> {
+  let spec = member_add_spec()
+  let usage = flags.usage("lll member add", spec, "")
+  let p = flags.parse(spec, args, 3, false, usage)?
+  let name = p.one("-n")
+  let email = p.one("-e")
 
   let created = create_member(name, email)?
   fmt.Println(f"Added member {created.name}")
@@ -115,6 +114,10 @@ pub fn ensure_member(name: string) -> Result<bool, string> {
 fn find_member(name: string) -> Result<Option<models.Member>, string> {
   let filter = url.QueryEscape(f"name='{name}'")
   let mut result = models.MemberList { .. }
-  pb.fetch(f"/api/collections/members/records?filter={filter}", "members", &result)?
+  pb.fetch(
+    f"/api/collections/members/records?filter={filter}",
+    "members",
+    &result,
+  )?
   Ok(result.items.find(|m| m.name == name))
 }
