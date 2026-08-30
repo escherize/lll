@@ -2,7 +2,6 @@ import "go:encoding/json"
 import "go:html/template"
 import "go:net/http"
 import "go:net/url"
-import "go:strconv"
 import "go:strings"
 
 import "config"
@@ -14,6 +13,47 @@ import "query"
 // Actions: the endpoints the board posts to. Each writes to PocketBase and
 // answers with a flash; the data itself comes back through the broadcast, the
 // same way a CLI-driven change does.
+
+/// Turn a write into the handler that registration wants.
+///
+/// http.HandleFunc fixes the handler signature, so a write cannot return its
+/// own Result to the mux — something has to consume one, and applying this
+/// once per route is that something. It buys every action below the right to
+/// spend a `?` where it used to spend a six-line match, and it puts the only
+/// two answers an action can give, flash the error or clear the strip, in the
+/// one place instead of once per fallible step.
+///
+/// The Ok value is any extra SSE the action owes the page past the cleared
+/// flash. Almost none owes any and returns "".
+fn flashing(
+  write: fn(Ref<http.Request>) -> Result<string, string>,
+) -> fn(http.ResponseWriter, Ref<http.Request>) {
+  |w: http.ResponseWriter, r: Ref<http.Request>| {
+    match write(r) {
+      Ok(extra) => {
+        flash_clear(w)
+        if extra != "" { let _ = w.Write(extra.bytes()) }
+      },
+      Err(e) => flash_error(w, e),
+    }
+  }
+}
+
+/// A PocketBase request body, from a `#[json]` struct. Every write goes
+/// through here, so no endpoint has to spell JSON by hand to save a line.
+fn marshal(value: Unknown) -> Result<string, string> {
+  match json.Marshal(value) {
+    Ok(p) => Ok(p as string),
+    Err(e) => Err(f"encoding request: {e}"),
+  }
+}
+
+/// PATCH one field group onto an issue. Every caller knows the record id, so
+/// this is a plain update, not a create-or-update.
+fn patch_issue(id: string, value: Unknown) -> Result<string, string> {
+  let _ = pb.patch(f"/api/collections/issues/records/{id}", marshal(value)?)?
+  Ok("")
+}
 
 /// Respond to a Datastar action by patching the #flash strip. Always 200
 /// with an SSE body: Datastar does not reliably process non-2xx bodies, so
@@ -42,30 +82,24 @@ fn respond_flash(w: http.ResponseWriter, html: string) {
 /// unchecked: the form only ever offers ids that exist, and PB rejects a
 /// bogus one with a message the flash strip already knows how to show.
 /// Re-validating here would mean three more fetches per create.
-fn create_action(w: http.ResponseWriter, r: Ref<http.Request>, team_id: string) {
+fn create_write(r: Ref<http.Request>, team_id: string) -> Result<string, string> {
   let title = strings.TrimSpace(r.PostFormValue("title"))
-  if title == "" {
-    flash_error(w, "title is required")
-    return
-  }
+  if title == "" { return Err("title is required") }
   // Absent state means todo, the same default `lll issue create` uses, so
   // `curl -d title=...` is a complete request.
   let mut state = r.PostFormValue("state")
   if state == "" { state = "todo" }
   if query.states().find(|s| s == state).is_none() {
-    flash_error(w, f"unknown state '{state}'")
-    return
+    return Err(f"unknown state '{state}'")
   }
   if team_id == "" {
-    flash_error(w, "no team configured: set LLL_TEAM or 'team' in .lll.toml")
-    return
+    return Err("no team configured: set LLL_TEAM or 'team' in .lll.toml")
   }
   let mut priority = 0
   let prio_slug = r.PostFormValue("priority")
   if prio_slug != "" {
     let Some(p) = display.priority_value(prio_slug) else {
-      flash_error(w, f"unknown priority '{prio_slug}'")
-      return
+      return Err(f"unknown priority '{prio_slug}'")
     }
     priority = p
   }
@@ -84,72 +118,44 @@ fn create_action(w: http.ResponseWriter, r: Ref<http.Request>, team_id: string) 
     labels,
     ..
   }
-  let payload = match json.Marshal(new_issue) {
-    Ok(p) => p,
-    Err(e) => {
-      flash_error(w, f"encoding issue: {e}")
-      return
-    },
-  }
-  if let Err(e) = pb.post("/api/collections/issues/records", payload as string) {
-    flash_error(w, e)
-    return
-  }
-  flash_clear(w)
+  let _ = pb.post("/api/collections/issues/records", marshal(new_issue)?)?
   // Only a success closes the dialog and empties the composers, and the
   // server is what says so. If the client cleared optimistically, a rejected
   // create would take a typed description down with it — the field this whole
   // dialog exists for. Clearing new_title matters because the dialog opens
   // carrying the topbar's text: leaving it behind would arm a duplicate the
   // next time someone pressed Enter up there.
-  let _ = w.Write(
-    signals_event("{\"ni_open\": false, \"new_title\": \"\"}").bytes(),
-  )
+  Ok(signals_event("{\"ni_open\": false, \"new_title\": \"\"}"))
 }
 
-/// Patch payload for /state: target state plus manual board position.
+/// Patch bodies, one per editable field group. PocketBase replaces every
+/// field it is handed, so each carries exactly what its endpoint edits and no
+/// more. Going through a struct is also what keeps a quote, a backslash or a
+/// multi-rune glyph in a title from having to be escaped by hand.
 #[json]
 struct StatePatch { state: string, sort: float64 }
 
-fn state_action(w: http.ResponseWriter, r: Ref<http.Request>, team_id: string) {
+#[json]
+struct PriorityPatch { priority: int }
+
+#[json]
+struct EmojiPatch { emoji: string }
+
+#[json]
+struct TitlePatch { title: string }
+
+fn state_write(r: Ref<http.Request>, team_id: string) -> Result<string, string> {
   // FormValue, not PostFormValue: drag-and-drop posts key/state as query params.
   let key = r.FormValue("key")
   let state = r.FormValue("state")
   // Record id of the card the drop lands before; "" means end of column.
   let before = r.FormValue("before")
   if query.states().find(|s| s == state).is_none() {
-    flash_error(w, f"unknown state '{state}'")
-    return
+    return Err(f"unknown state '{state}'")
   }
-  let issue = match fetch_issue(key) {
-    Ok(i) => i,
-    Err(e) => {
-      flash_error(w, e)
-      return
-    },
-  }
-  let sort = match reorder_sort(issue, state, before, team_id) {
-    Ok(s) => s,
-    Err(e) => {
-      flash_error(w, e)
-      return
-    },
-  }
-  let payload = match json.Marshal(StatePatch { state, sort }) {
-    Ok(p) => p,
-    Err(e) => {
-      flash_error(w, f"encoding state change: {e}")
-      return
-    },
-  }
-  if let Err(e) = pb.patch(
-    f"/api/collections/issues/records/{issue.id}",
-    payload as string,
-  ) {
-    flash_error(w, e)
-    return
-  }
-  flash_clear(w)
+  let issue = fetch_issue(key)?
+  let sort = reorder_sort(issue, state, before, team_id)?
+  patch_issue(issue.id, StatePatch { state, sort })
 }
 
 /// New manual position for `issue` landing in `state` before the record id
@@ -199,75 +205,30 @@ fn fetch_column_issues(team_id: string, state: string) -> Result<Slice<models.Is
 /// A set, not a toggle. The button posts the state it just moved to, so a
 /// double click or a stale page converges on what the user sees instead of
 /// flipping the row out from under them. Both directions are idempotent.
-fn favorite_action(w: http.ResponseWriter, r: Ref<http.Request>) {
+fn favorite_write(r: Ref<http.Request>) -> Result<string, string> {
   let key = r.FormValue("key")
   let on = r.FormValue("on") == "true"
-  let issue = match fetch_issue(key) {
-    Ok(i) => i,
-    Err(e) => {
-      flash_error(w, e)
-      return
-    },
-  }
-  let existing = match fetch_favorite(issue.id) {
-    Ok(f) => f,
-    Err(e) => {
-      flash_error(w, e)
-      return
-    },
-  }
+  let issue = fetch_issue(key)?
+  let existing = fetch_favorite(issue.id)?
   if on {
-    if existing.is_some() {
-      flash_clear(w)
-      return
-    }
+    if existing.is_some() { return Ok("") }
     // member stays empty: workspace-wide until auth (task-32) lands.
-    let payload = match json.Marshal(models.NewFavorite { issue: issue.id, .. }) {
-      Ok(p) => p,
-      Err(e) => {
-        flash_error(w, f"encoding favorite: {e}")
-        return
-      },
-    }
-    if let Err(e) = pb.post(
-      "/api/collections/favorites/records",
-      payload as string,
-    ) {
-      flash_error(w, e)
-      return
-    }
+    let payload = marshal(models.NewFavorite { issue: issue.id, .. })?
+    let _ = pb.post("/api/collections/favorites/records", payload)?
   } else if let Some(fav) = existing {
-    if let Err(e) = pb.delete(f"/api/collections/favorites/records/{fav.id}") {
-      flash_error(w, e)
-      return
-    }
+    let _ = pb.delete(f"/api/collections/favorites/records/{fav.id}")?
   }
-  flash_clear(w)
+  Ok("")
 }
 
-fn priority_action(w: http.ResponseWriter, r: Ref<http.Request>) {
+fn priority_write(r: Ref<http.Request>) -> Result<string, string> {
   let key = r.FormValue("key")
   let slug = r.FormValue("priority")
   let Some(prio) = display.priority_value(slug) else {
-    flash_error(w, f"unknown priority '{slug}'")
-    return
+    return Err(f"unknown priority '{slug}'")
   }
-  let issue = match fetch_issue(key) {
-    Ok(i) => i,
-    Err(e) => {
-      flash_error(w, e)
-      return
-    },
-  }
-  let payload = "{\"priority\":" + strconv.Itoa(prio) + "}"
-  if let Err(e) = pb.patch(
-    f"/api/collections/issues/records/{issue.id}",
-    payload,
-  ) {
-    flash_error(w, e)
-    return
-  }
-  flash_clear(w)
+  let issue = fetch_issue(key)?
+  patch_issue(issue.id, PriorityPatch { priority: prio })
 }
 
 /// Set or clear the issue's marker from the web picker.
@@ -277,85 +238,28 @@ fn priority_action(w: http.ResponseWriter, r: Ref<http.Request>) {
 /// present, exactly as `lll issue update --emoji ""` keys off the flag.
 /// Validation is the CLI's `check_emoji`: the picker only ever posts one of
 /// its own candidates, but the endpoint is curl-able like every other.
-fn emoji_action(w: http.ResponseWriter, r: Ref<http.Request>) {
+fn emoji_write(r: Ref<http.Request>) -> Result<string, string> {
   let key = r.FormValue("key")
   let Ok(emoji) = check_emoji(r.FormValue("emoji")) else {
-    flash_error(w, "an issue takes one emoji, or none")
-    return
+    return Err("an issue takes one emoji, or none")
   }
-  let issue = match fetch_issue(key) {
-    Ok(i) => i,
-    Err(e) => {
-      flash_error(w, e)
-      return
-    },
-  }
-  // Marshal the glyph so a multi-rune sequence stays valid JSON.
-  let quoted = match json.Marshal(emoji) {
-    Ok(q) => q,
-    Err(e) => {
-      flash_error(w, f"encoding emoji: {e}")
-      return
-    },
-  }
-  let payload = "{\"emoji\":" + (quoted as string) + "}"
-  if let Err(e) = pb.patch(
-    f"/api/collections/issues/records/{issue.id}",
-    payload,
-  ) {
-    flash_error(w, e)
-    return
-  }
-  flash_clear(w)
+  let issue = fetch_issue(key)?
+  patch_issue(issue.id, EmojiPatch { emoji })
 }
 
-fn title_action(w: http.ResponseWriter, r: Ref<http.Request>) {
+fn title_write(r: Ref<http.Request>) -> Result<string, string> {
   let key = r.FormValue("key")
   let title = strings.TrimSpace(r.FormValue("title"))
-  if title == "" {
-    flash_error(w, "title is required")
-    return
-  }
-  let issue = match fetch_issue(key) {
-    Ok(i) => i,
-    Err(e) => {
-      flash_error(w, e)
-      return
-    },
-  }
-  // Marshal the title itself so quotes/backslashes in it stay valid JSON.
-  let quoted = match json.Marshal(title) {
-    Ok(q) => q,
-    Err(e) => {
-      flash_error(w, f"encoding title: {e}")
-      return
-    },
-  }
-  let payload = "{\"title\":" + (quoted as string) + "}"
-  if let Err(e) = pb.patch(
-    f"/api/collections/issues/records/{issue.id}",
-    payload,
-  ) {
-    flash_error(w, e)
-    return
-  }
-  flash_clear(w)
+  if title == "" { return Err("title is required") }
+  let issue = fetch_issue(key)?
+  patch_issue(issue.id, TitlePatch { title })
 }
 
-fn comment_action(w: http.ResponseWriter, r: Ref<http.Request>) {
+fn comment_write(r: Ref<http.Request>) -> Result<string, string> {
   let key = r.PostFormValue("key")
   let body = strings.TrimSpace(r.PostFormValue("body"))
-  if body == "" {
-    flash_error(w, "comment body is required")
-    return
-  }
-  let issue = match fetch_issue(key) {
-    Ok(i) => i,
-    Err(e) => {
-      flash_error(w, e)
-      return
-    },
-  }
+  if body == "" { return Err("comment body is required") }
+  let issue = fetch_issue(key)?
   // Same honor-system authorship as `lll issue comment`: the member named by
   // 'me' in config, or authorless.
   let mut author = ""
@@ -364,20 +268,7 @@ fn comment_action(w: http.ResponseWriter, r: Ref<http.Request>) {
       if let Ok(Some(m)) = find_member(cfg.me) { author = m.id }
     }
   }
-  let new_comment = models.NewComment { issue: issue.id, author, body }
-  let payload = match json.Marshal(new_comment) {
-    Ok(p) => p,
-    Err(e) => {
-      flash_error(w, f"encoding comment: {e}")
-      return
-    },
-  }
-  if let Err(e) = pb.post(
-    "/api/collections/comments/records",
-    payload as string,
-  ) {
-    flash_error(w, e)
-    return
-  }
-  flash_clear(w)
+  let payload = marshal(models.NewComment { issue: issue.id, author, body })?
+  let _ = pb.post("/api/collections/comments/records", payload)?
+  Ok("")
 }

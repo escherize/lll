@@ -122,7 +122,7 @@ struct MemberPatch { name: string, email: string }
 #[json]
 struct ProjectPatch { name: string, status: string }
 
-/// One handler for every settings write: `kind` picks the section, an `id`
+/// One write for every settings section: `kind` picks the section, an `id`
 /// picks update over create, and `?del=1` picks removal.
 ///
 /// The reply is the action's own SSE body — /settings opens no /events
@@ -130,34 +130,32 @@ struct ProjectPatch { name: string, status: string }
 /// board-scoped client, so a settings page on that scope would have to defend
 /// against fragments meant for a different view; answering in the response
 /// needs no defence, and the page has no realtime story to get wrong.
-fn settings_action(
-  w: http.ResponseWriter,
+///
+/// The redrawn page rides back as `flashing`'s extra SSE, after the cleared
+/// flash. A fragment that fails to render is dropped rather than failed on:
+/// the record is already written, and a flash saying otherwise would be a
+/// lie about the database.
+fn settings_write(
   r: Ref<http.Request>,
   team_id: string,
   me: string,
-) {
-  if let Err(e) = settings_write(r, team_id) {
-    flash_error(w, e)
-    return
-  }
-  w.Header().Set("Content-Type", "text/event-stream")
-  let _ = w.Write(
-    patch_event("<div id=\"flash\" class=\"flash\" hidden></div>").bytes(),
-  )
+) -> Result<string, string> {
+  settings_apply(r, team_id)?
   let team = shell_team(team_id)
+  let mut extra = ""
   if let Ok(vm) = settings_vm(team) {
-    if let Ok(html) = render("settings", vm) {
-      let _ = w.Write(patch_event(html).bytes())
-    }
+    if let Ok(html) = render("settings", vm) { extra += patch_event(html) }
   }
   // The accent lives in <head>, outside #settings: patch it by id too, so a
   // new colour lands on the open page instead of waiting for a reload.
   if let Ok(html) = render("accent-head", rail_vm("settings", me, team)) {
-    let _ = w.Write(patch_event(html).bytes())
+    extra += patch_event(html)
   }
+  Ok(extra)
 }
 
-fn settings_write(r: Ref<http.Request>, team_id: string) -> Result<(), string> {
+/// The record this request names: created, updated, or deleted.
+fn settings_apply(r: Ref<http.Request>, team_id: string) -> Result<(), string> {
   let kind = r.PathValue("kind")
   let id = strings.TrimSpace(r.PostFormValue("id"))
   let name = strings.TrimSpace(r.PostFormValue("name"))
@@ -178,10 +176,7 @@ fn settings_write(r: Ref<http.Request>, team_id: string) -> Result<(), string> {
       }
       if name == "" { return Err("team name is required") }
       let accent = form_hex(r, "accent")?
-      let payload = match json.Marshal(TeamPatch { name, accent }) {
-        Ok(p) => p as string,
-        Err(e) => return Err(f"encoding team: {e}"),
-      }
+      let payload = marshal(TeamPatch { name, accent })?
       let _ = pb.patch(f"/api/collections/teams/records/{team_id}", payload)?
       Ok(())
     },
@@ -234,10 +229,7 @@ fn settings_collection(kind: string) -> Result<string, string> {
 
 /// Create (no id) or update (id) one record.
 fn save_record(coll: string, id: string, value: Unknown) -> Result<(), string> {
-  let payload = match json.Marshal(value) {
-    Ok(p) => p as string,
-    Err(e) => return Err(f"encoding {coll}: {e}"),
-  }
+  let payload = marshal(value)?
   if id == "" {
     let _ = pb.post(f"/api/collections/{coll}/records", payload)?
   } else {
