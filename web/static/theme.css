@@ -91,6 +91,16 @@ html, body {
 .rail a:hover { background: var(--bg-hover); color: var(--text); }
 .rail a.active { background: var(--bg-raised); color: var(--text); }
 .rail a svg { flex: none; }
+/* Pinned bottom-left: which build is serving this page. The rail's flex
+   column pushes it down; a page with more rows just moves it. */
+.rail-foot {
+  margin-top: auto;
+  padding: 8px;
+  color: var(--text-3);
+  font-size: 11.5px;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+}
 
 /* ── Main column ───────────────────────────────────────── */
 .main { flex: 1; min-width: 0; display: flex; flex-direction: column; }

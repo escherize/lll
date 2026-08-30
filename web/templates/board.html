@@ -20,9 +20,11 @@ FINISH: unreviewed and undocumented is unfinished; this build ends with the
 finish review, the verdict, DESIGN.md, and every shipping raster carrying its
 provenance.
 -->
+{{/* A page's dot is a PageVM: `.Rail` is the shell, `.Page` this page's own
+     view model. Fragments below are rendered from `.Page`'s type alone. */}}
 <head>
 <meta charset="utf-8">
-<title>lll board</title>
+<title>{{if eq .Rail.Active "mine"}}My issues{{else}}Board{{end}} · lll</title>
 <link rel="stylesheet" href="/static/theme.css">
 <script type="module" src="https://cdn.jsdelivr.net/gh/starfederation/datastar@v1.0.3/bundles/datastar.js" integrity="sha384-yHqFPXJio1slWODLf67ZFfuDhhPUccOzGpGJF0d5fitjEfihEVrVvzMsfH8TxCiO" crossorigin="anonymous"></script>
 </head>
@@ -31,17 +33,14 @@ provenance.
 <body data-init="@get('/events?page=board')" data-on:pageshow__window="evt.persisted && window.location.reload()">
 {{template "icons"}}
 <div class="app">
-  <nav class="rail">
-    <div class="workspace"><span class="mark">L</span> lll</div>
-    <a href="/" class="active"><svg width="14" height="14"><use href="#ic-board"/></svg> Board</a>
-  </nav>
+  {{template "rail" .Rail}}
   <!-- Hidden-columns state lives OUTSIDE #board (the SSE morph target): the
        hide_* signals are seeded from localStorage here, and data-class keeps
        hc-* classes on this never-morphed element, so CSS applies visibility
        to whatever markup each morph delivers. -->
-  <div class="main" data-init="const s = JSON.parse(localStorage.getItem('lll-hidecol') || '{}'); {{range .Columns}}$hide_{{.Sig}} = !!s.hide_{{.Sig}}; {{end}}" data-class="{ {{range $i, $c := .Columns}}{{if $i}}, {{end}}'hc-{{$c.State}}': $hide_{{$c.Sig}}{{end}} }">
+  <div class="main" data-init="const s = JSON.parse(localStorage.getItem('lll-hidecol') || '{}'); {{range .Page.Columns}}$hide_{{.Sig}} = !!s.hide_{{.Sig}}; {{end}}" data-class="{ {{range $i, $c := .Page.Columns}}{{if $i}}, {{end}}'hc-{{$c.State}}': $hide_{{$c.Sig}}{{end}} }">
     <header class="topbar">
-      <div class="crumbs"><span class="here">Board</span></div>
+      <div class="crumbs"><span class="here">{{if eq .Rail.Active "mine"}}My issues{{else}}Board{{end}}</span></div>
       <div class="spacer"></div>
       <div id="board-search" class="board-search">
         <svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true"><circle cx="6.2" cy="6.2" r="4.2" fill="none" stroke="currentColor" stroke-width="1.4"/><path d="M9.4 9.4 L12.3 12.3" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>
@@ -50,14 +49,14 @@ provenance.
       <form id="new-issue" class="new-issue">
         <input id="new-title" name="title" placeholder="Issue title" autocomplete="off" data-on:keydown="evt.key === 'Enter' && (evt.preventDefault(), evt.target.value.trim() && @post('/create', {contentType: 'form'}))">
         <select name="state">
-        {{range .States}}<option value="{{.Value}}"{{if eq .Value "todo"}} selected{{end}}>{{.Label}}</option>
+        {{range .Page.States}}<option value="{{.Value}}"{{if eq .Value "todo"}} selected{{end}}>{{.Label}}</option>
         {{end}}</select>
         <button type="button" class="btn primary" data-on:click="document.getElementById('new-title').value.trim() ? @post('/create', {contentType: 'form'}) : document.getElementById('new-title').focus()"><svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true"><path d="M6 1.5 V10.5 M1.5 6 H10.5" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg> New issue</button>
       </form>
     </header>
     <div id="flash" class="flash" hidden></div>
-    {{template "filterbar" .}}
-    {{template "board" .}}
+    {{template "filterbar" .Page}}
+    {{template "board" .Page}}
   </div>
 </div>
 </body>
@@ -101,8 +100,10 @@ provenance.
      against each card's data-* attributes; it lives outside #board so it
      survives the wholesale board morph, and is mirrored to localStorage.
      The init is a plain read (no DOM pruning: that raced mount order and
-     wiped saved chips); a stale saved key just leaves Clear visible. */}}
-{{define "filterbar"}}<div class="filterbar" data-signals:flt="JSON.parse(localStorage.getItem('lllFlt') || '[]')" data-signals:fltmenu="''" data-effect="localStorage.setItem('lllFlt', JSON.stringify($flt))">
+     wiped saved chips); a stale saved key just leaves Clear visible.
+     FltSeed is the rail's "My issues" link arriving as ?mine=1: the server
+     hands over one JSON-encoded chip, which then persists like any other. */}}
+{{define "filterbar"}}<div class="filterbar" data-signals:flt="{{if .FltSeed}}{{.FltSeed}}{{else}}JSON.parse(localStorage.getItem('lllFlt') || '[]'){{end}}" data-signals:fltmenu="''" data-effect="localStorage.setItem('lllFlt', JSON.stringify($flt))">
 <div class="flt-add" data-on:click__outside="$fltmenu = ''">
   <button type="button" class="flt-plus" data-on:click="$fltmenu = $fltmenu ? '' : 'root'"><svg width="10" height="10" viewBox="0 0 10 10" aria-hidden="true"><path d="M5 1.2 V8.8 M1.2 5 H8.8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg> Filter</button>
   <div class="flt-menu" style="display:none" data-show="$fltmenu === 'root'">

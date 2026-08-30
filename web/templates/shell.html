@@ -1,0 +1,21 @@
+{{/* The app shell.
+
+     ONE rail template, included by every page. Its dot is a RailVM and
+     never a page's view model: the SSE bridge broadcasts FRAGMENTS
+     (`board`, `issue-detail`, `comments`) rendered straight from those page
+     view models, so keeping shell data in a struct of its own is what stops
+     a broadcast from constructing a rail it must never render.
+
+     #rail sits outside every morph boundary (#board, #issue-detail and
+     #comments all live inside .main), so no morph disturbs it — and the id
+     is here for the day favorites patch a group into it.
+
+     Rows exist only where a destination does. "My issues" is the board
+     pre-filtered to config's `me`, so it needs a configured `me`; the rest
+     arrive with the pages they lead to. */}}
+{{define "rail"}}<nav id="rail" class="rail">
+<div class="workspace"><span class="mark">L</span> lll</div>
+<a href="/"{{if eq .Active "board"}} class="active"{{end}}><svg width="14" height="14"><use href="#ic-board"/></svg> Board</a>
+{{if .Me}}<a href="/?mine=1" title="Issues assigned to {{.Me}}"{{if eq .Active "mine"}} class="active"{{end}}><svg width="14" height="14"><use href="#ic-me"/></svg> My issues</a>
+{{end}}<div class="rail-foot">v{{.Version}}</div>
+</nav>{{end}}

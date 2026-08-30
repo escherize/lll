@@ -1,0 +1,10 @@
+/// The build's version, printed by `lll --version` and shown in the board's
+/// rail footer — the browser is lll's second interface, so it says which
+/// build is serving it.
+///
+/// Keep in sync with [project] version in lisette.toml. `lis build` has no
+/// version-injection hook (only --go-flags pass-through, which cannot target
+/// generated identifiers reliably), so this is a hardcoded constant.
+pub fn version() -> string {
+  "0.1.0"
+}

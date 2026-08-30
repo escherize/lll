@@ -33,11 +33,11 @@ fn main() {
       Ok(())
     },
     "--version" => {
-      fmt.Println(f"lll {version()}")
+      fmt.Println(f"lll {commands.version()}")
       Ok(())
     },
     "version" => {
-      fmt.Println(f"lll {version()}")
+      fmt.Println(f"lll {commands.version()}")
       Ok(())
     },
     other => Err(f"unknown command: '{other}' (see 'lll --help')"),
@@ -47,13 +47,6 @@ fn main() {
     fmt.Println(f"Error: {msg}")
     os.Exit(1)
   }
-}
-
-/// Keep in sync with [project] version in lisette.toml. `lis build` has no
-/// version-injection hook (only --go-flags pass-through, which cannot target
-/// generated identifiers reliably), so this is a hardcoded constant.
-fn version() -> string {
-  "0.1.0"
 }
 
 fn print_usage() {
