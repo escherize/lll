@@ -387,4 +387,33 @@ page=$(curl -sf "$WEB/issue/ENG-1")
 assert_contains "$page" "desc line one<br>" "single newline in a description becomes a line break"
 assert_not_contains "$page" "<b>raw</b>" "raw HTML in a description is still dropped with hard wraps on"
 
+# --- GFM, syntax highlighting, and mermaid (task-42) ---
+"$LIN" issue update ENG-1 --description '| pick | why |
+| --- | --- |
+| goldmark | GFM |
+
+~~dropped~~ and https://example.com/gfm and
+
+- [x] shipped
+
+```go
+func main() {}
+```
+
+```mermaid
+graph TD; A-->B;
+```' >/dev/null
+page=$(curl -sf "$WEB/issue/ENG-1")
+assert_contains "$page" "<th>pick</th>" "GFM table renders as a table"
+assert_not_contains "$page" "| pick | why |" "GFM table is not left as literal pipes"
+assert_contains "$page" "<del>dropped</del>" "GFM strikethrough renders"
+assert_contains "$page" '<a href="https://example.com/gfm">' "GFM autolink renders"
+assert_contains "$page" 'type="checkbox"' "GFM task list renders a checkbox"
+assert_contains "$page" 'class="chroma"' "fenced code is highlighted server-side"
+assert_not_contains "$page" 'style="color:#' "chroma emits classes, not inline colors"
+assert_contains "$page" '<code class="language-mermaid">' "a mermaid fence is left plain for the client"
+assert_contains "$page" '/static/mermaid-init.js' "the issue page loads the mermaid initializer"
+curl -sfI "$WEB/static/mermaid.min.js" >/dev/null || fail "vendored mermaid.min.js is not served"
+curl -sfI "$WEB/static/mermaid-init.js" >/dev/null || fail "mermaid-init.js is not served"
+
 echo "e2e_web: all assertions passed"

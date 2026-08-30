@@ -303,6 +303,40 @@ input:focus, textarea:focus, select:focus {
 .md blockquote { margin: 0 0 6px; padding-left: 10px; border-left: 2px solid var(--border-strong); color: var(--text-2); }
 .md h1, .md h2, .md h3 { font-size: 13px; font-weight: 600; margin: 8px 0 4px; }
 
+/* GFM tables, task lists, and strikethrough (task-42). Tables scroll inside the
+   65ch measure rather than pushing the column wide. */
+.md table { display: block; width: max-content; max-width: 100%; overflow-x: auto; margin: 0 0 6px; border-collapse: collapse; }
+.md th, .md td { padding: 4px 10px; border: 1px solid var(--border); text-align: left; }
+.md th { color: var(--text-2); font-weight: 600; background: var(--bg-panel); }
+.md del { color: var(--text-3); }
+.md li:has(> input[type="checkbox"]) { list-style: none; margin-left: -20px; }
+.md input[type="checkbox"] { accent-color: var(--text-3); margin: 0 5px 0 0; vertical-align: -1px; }
+
+/* Server-side syntax highlighting (chroma, WithClasses). Three text voices and
+   weight — no new hues, per DESIGN.md: code is structure, not a palette. */
+.md pre.chroma { tab-size: 2; }
+.md pre.chroma code { color: var(--text-2); }
+.md .chroma .c, .md .chroma .ch, .md .chroma .cm, .md .chroma .c1,
+.md .chroma .cs, .md .chroma .cp, .md .chroma .cpf { color: var(--text-3); font-style: italic; }
+.md .chroma .k, .md .chroma .kc, .md .chroma .kd, .md .chroma .kn,
+.md .chroma .kp, .md .chroma .kr, .md .chroma .kt { color: var(--text); font-weight: 600; }
+.md .chroma .nf, .md .chroma .fm, .md .chroma .nc, .md .chroma .nt,
+.md .chroma .nd, .md .chroma .ne, .md .chroma .nb, .md .chroma .bp { color: var(--text); }
+.md .chroma .s, .md .chroma .sa, .md .chroma .sb, .md .chroma .sc, .md .chroma .dl,
+.md .chroma .sd, .md .chroma .s2, .md .chroma .se, .md .chroma .sh, .md .chroma .si,
+.md .chroma .sx, .md .chroma .sr, .md .chroma .s1, .md .chroma .ss,
+.md .chroma .m, .md .chroma .mb, .md .chroma .mf, .md .chroma .mh,
+.md .chroma .mi, .md .chroma .mo, .md .chroma .il { color: var(--text); }
+.md .chroma .o, .md .chroma .ow, .md .chroma .p { color: var(--text-3); }
+.md .chroma .gh, .md .chroma .gu, .md .chroma .gs { color: var(--text); font-weight: 600; }
+.md .chroma .ge { font-style: italic; }
+.md .chroma .gd { color: var(--text-3); }
+.md .chroma .gi { color: var(--text); }
+
+/* Mermaid draws into a bare div; the <pre> chrome is removed by mermaid-init. */
+.md .mermaid { margin: 0 0 6px; }
+.md .mermaid svg { max-width: 100%; height: auto; }
+
 .composer { grid-area: comp; display: flex; gap: 10px; margin: 14px 40px 28px; max-width: 680px; align-items: flex-end; }
 .composer textarea { flex: 1; min-height: 64px; resize: vertical; }
 
