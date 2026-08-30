@@ -61,20 +61,15 @@ fn prio_label(name: string) -> string {
 
 /// Priority <option>s in Linear order, slug values, web labels.
 fn prio_opts() -> Slice<StateOpt> {
-  ["none", "urgent", "high", "medium", "low"]
-    .map(|p| StateOpt { value: p, label: prio_label(p) })
+  display.priorities().map(|p| StateOpt { value: p, label: prio_label(p) })
 }
 
-/// Priority slug -> Linear int (inverse of display.priority_name).
-fn prio_value(slug: string) -> Option<int> {
-  match slug {
-    "none" => Some(0),
-    "urgent" => Some(1),
-    "high" => Some(2),
-    "medium" => Some(3),
-    "low" => Some(4),
-    _ => None,
-  }
+/// The priority scale most-urgent-first, which is how the filter chooser lists
+/// it: the Linear scale rotated, because "none" is the least urgent level and
+/// belongs at the tail rather than at the head where its value 0 puts it.
+fn prios_by_urgency() -> Slice<string> {
+  let scale = display.priorities()
+  scale[1..].append(scale[0])
 }
 
 /// Initials plus a stable per-name color class (av-0..av-3), so different
@@ -145,8 +140,7 @@ fn filter_groups(issues: Slice<models.Issue>) -> Slice<FilterGroupVM> {
   }
   let labels = distinct(label_names)
   let present_prios = distinct(issues.map(|i| display.priority_name(i.priority)))
-  let prios = ["urgent", "high", "medium", "low", "none"]
-    .filter(|p| present_prios.contains(p))
+  let prios = prios_by_urgency().filter(|p| present_prios.contains(p))
   let states = query.states().filter(|s| issues.any(|i| i.state == s))
   let groups = [
     FilterGroupVM {

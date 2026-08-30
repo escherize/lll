@@ -16,28 +16,32 @@ pub fn glyph(state: string) -> string {
   }
 }
 
-/// Marker for a priority (Linear scale): 1 urgent !!!, 2 high !!, 3 medium !,
-/// 4 low ·, 0 none blank.
-pub fn priority_marker(priority: int) -> string {
-  match priority {
-    1 => "!!!",
-    2 => "!!",
-    3 => "!",
-    4 => "·",
-    _ => "",
-  }
+/// The priority scale, in Linear order: the index is the stored value and a
+/// lower value is more urgent. This is the only place the scale is written
+/// down — priority_name, priority_value, and the web's <option> lists all
+/// derive from it, so adding or renaming a level is a one-line edit here.
+pub fn priorities() -> Slice<string> {
+  ["none", "urgent", "high", "medium", "low"]
 }
 
-/// Human name for a priority (Linear scale).
+/// Marker for a priority, one per priorities() entry: 1 urgent !!!, 2 high !!,
+/// 3 medium !, 4 low ·, 0 none blank. Off-scale values are blank too.
+pub fn priority_marker(priority: int) -> string {
+  ["", "!!!", "!!", "!", "·"].get(priority).unwrap_or("")
+}
+
+/// Human name for a priority (Linear scale); "?" for an off-scale value.
 pub fn priority_name(priority: int) -> string {
-  match priority {
-    0 => "none",
-    1 => "urgent",
-    2 => "high",
-    3 => "medium",
-    4 => "low",
-    _ => "?",
+  priorities().get(priority).unwrap_or("?")
+}
+
+/// Priority name -> Linear value, the inverse of priority_name; None for a
+/// name that is not on the scale. Five entries, so the scan is a formality.
+pub fn priority_value(name: string) -> Option<int> {
+  for (value, slug) in priorities().enumerate() {
+    if slug == name { return Some(value) }
   }
+  None
 }
 
 /// Render a PocketBase timestamp ("2026-08-28 18:20:00.123Z") as a relative

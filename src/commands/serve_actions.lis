@@ -6,6 +6,7 @@ import "go:strconv"
 import "go:strings"
 
 import "config"
+import "display"
 import "models"
 import "pb"
 import "query"
@@ -62,7 +63,7 @@ fn create_action(w: http.ResponseWriter, r: Ref<http.Request>, team_id: string) 
   let mut priority = 0
   let prio_slug = r.PostFormValue("priority")
   if prio_slug != "" {
-    let Some(p) = prio_value(prio_slug) else {
+    let Some(p) = display.priority_value(prio_slug) else {
       flash_error(w, f"unknown priority '{prio_slug}'")
       return
     }
@@ -247,7 +248,7 @@ fn favorite_action(w: http.ResponseWriter, r: Ref<http.Request>) {
 fn priority_action(w: http.ResponseWriter, r: Ref<http.Request>) {
   let key = r.FormValue("key")
   let slug = r.FormValue("priority")
-  let Some(prio) = prio_value(slug) else {
+  let Some(prio) = display.priority_value(slug) else {
     flash_error(w, f"unknown priority '{slug}'")
     return
   }
