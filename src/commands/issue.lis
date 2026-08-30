@@ -951,9 +951,10 @@ fn resolve_id(explicit: string, usage: string) -> Result<string, string> {
   Ok(id)
 }
 
-/// Fetch an issue by KEY-123 and return the raw PB record JSON (team,
-/// assignee, labels, project expanded).
-fn fetch_issue_record(id: string) -> Result<string, string> {
+/// Split a KEY-123 identifier into its team key and issue number. The key may
+/// itself contain hyphens (`ENG-DEV-12` is team `ENG-DEV`, issue 12), so the
+/// number is the last segment and the key is everything before it.
+fn split_issue_key(id: string) -> Result<(string, int), string> {
   let bad_id = f"'{id}' is not an issue ID (expected KEY-123, e.g. ENG-1)"
   // Split, not LastIndex + substring: index arithmetic mixes byte offsets with
   // rune indices and panics on non-ASCII input. See realtime.split_field.
@@ -965,6 +966,13 @@ fn fetch_issue_record(id: string) -> Result<string, string> {
   let Ok(number) = strconv.Atoi(number_part) else {
     return Err(bad_id)
   }
+  Ok((team_key, number))
+}
+
+/// Fetch an issue by KEY-123 and return the raw PB record JSON (team,
+/// assignee, labels, project expanded).
+fn fetch_issue_record(id: string) -> Result<string, string> {
+  let (team_key, number) = split_issue_key(id)?
 
   let not_found = f"issue {id} not found — check 'lll issue list' or LLL_TEAM"
   let Some(team) = find_team(team_key)? else {
