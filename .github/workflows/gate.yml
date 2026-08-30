@@ -1,0 +1,48 @@
+name: gate
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: gate-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  gate:
+    name: gate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Install the mise binary only. The repo's mise.toml is untrusted in a
+      # fresh checkout (hit locally in TASK-150), so the action must not read
+      # it (install/env off) — the next step trusts it first.
+      - uses: jdx/mise-action@v2
+        with:
+          install: false
+          env: false
+
+      - name: Trust repo config
+        run: mise trust
+
+      # Provisions go 1.27 and jq from mise.toml. python3 is not in mise.toml
+      # (its build fails under mise) but ubuntu-latest ships a system python3,
+      # which scripts/lib.sh uses.
+      - name: Install tools
+        run: mise install
+
+      # lis ships as a GitHub release, not a mise plugin (see mise.toml).
+      - name: Install lis
+        run: |
+          curl -LsSf https://github.com/ivov/lisette/releases/latest/download/lisette-installer.sh | sh
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      # THE failing step: build + unit tests + full e2e (~75s). A red gate
+      # blocks the PR.
+      - name: gate
+        run: mise run gate
