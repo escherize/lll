@@ -8,6 +8,7 @@ import "go:os/exec"
 import "go:strconv"
 import "go:strings"
 import "go:text/tabwriter"
+import "go:unicode/utf8"
 
 import "config"
 import "display"
@@ -38,6 +39,17 @@ fn value_or_stdin(val: string, flag: string) -> Result<string, string> {
   let text = strings.TrimSuffix(data as string, "\n")
   if text == "" { return Err(f"{flag} -: nothing on stdin") }
   Ok(text)
+}
+
+/// One marker per issue, so anything sentence-shaped is a mistake. Graphemes
+/// need x/text; rune count is the lazy stand-in that still passes the longest
+/// single emoji anyone types (the 7-rune ZWJ family) and stops "in progress".
+fn check_emoji(val: string) -> Result<string, string> {
+  let trimmed = strings.TrimSpace(val)
+  if utf8.RuneCountInString(trimmed) > 8 {
+    return Err(f"--emoji takes one emoji, got '{trimmed}' (pass \"\" to clear it)")
+  }
+  Ok(trimmed)
 }
 
 /// Dispatch `lll issue <verb>`.
@@ -78,7 +90,7 @@ fn print_usage() {
 
 Usage:
   lll issue create -t \"title\" [-d desc] [--priority 0-4] [--assignee name]
-                   [--label name]... [--project name]
+                   [--label name]... [--project name] [--emoji e]
                                                   create an issue in the configured team;
                                                   -d - reads the description from stdin
   lll issue list [--state s] [--assignee name] [--label name] [--project name]
@@ -116,6 +128,8 @@ Flags:
   --priority     0 none, 1 urgent (!!!), 2 high (!!), 3 medium (!), 4 low (·)
   --title        new title (update)
   --description  new description (update)
+  --emoji        one emoji for the issue, shown on the card, the issue page and
+                 the list; pass \"\" to clear it
   --json         raw PocketBase JSON (team, assignee, labels, project
                  expanded), pipe-friendly
   --force        skip the delete confirmation
@@ -136,6 +150,7 @@ The team comes from LLL_TEAM or 'team' in .lll.toml (see 'lll config --help').",
 fn create(args: Slice<string>) -> Result<(), string> {
   let mut title = ""
   let mut description = ""
+  let mut emoji = ""
   let mut priority = 0
   let mut assignee_name = ""
   let mut label_names: Slice<string> = []
@@ -162,6 +177,13 @@ fn create(args: Slice<string>) -> Result<(), string> {
           return Err("--description requires a value")
         }
         description = value_or_stdin(val, "--description")?
+        i += 2
+      },
+      "--emoji" => {
+        let Some(val) = args.get(i + 1) else {
+          return Err("--emoji requires a value")
+        }
+        emoji = check_emoji(val)?
         i += 2
       },
       "--assignee" => {
@@ -234,6 +256,7 @@ fn create(args: Slice<string>) -> Result<(), string> {
     team: team.id,
     title,
     description,
+    emoji,
     state: "todo",
     priority,
     assignee,
@@ -390,7 +413,13 @@ fn print_issue_table(issues: Slice<models.Issue>) -> Result<(), string> {
   let w = tabwriter.NewWriter(os.Stdout, 0, 4, 2, ' ', 0)
   for item in issues {
     let key = item.expand.team.key
-    let line = f"{key}-{item.number}\t{display.glyph(item.state)} {item.state}\t{display.priority_marker(item.priority)}\t{item.title}\t{item.expand.assignee.name}\t{display.relative(item.updated)}"
+    // The marker goes last. tabwriter measures a cell in runes while a
+    // terminal draws emoji two cells wide — and a ZWJ sequence is seven runes
+    // in two cells — so a marker anywhere earlier drags every column after it
+    // out of true. Nothing follows the final column, so nothing can shift.
+    let mut tail = ""
+    if item.emoji != "" { tail = f"\t{item.emoji}" }
+    let line = f"{key}-{item.number}\t{display.glyph(item.state)} {item.state}\t{display.priority_marker(item.priority)}\t{item.title}\t{item.expand.assignee.name}\t{display.relative(item.updated)}{tail}"
     if let Err(e) = fmt.Fprintln(w, line) { return Err(f"writing output: {e}") }
   }
   if let Err(e) = w.Flush() { return Err(f"writing output: {e}") }
@@ -470,6 +499,7 @@ fn view(args: Slice<string>) -> Result<(), string> {
   fmt.Println(f"Assignee:  {assignee}")
   fmt.Println(f"Project:   {project}")
   fmt.Println(f"Labels:    {labels}")
+  if full.emoji != "" { fmt.Println(f"Emoji:     {full.emoji}") }
   fmt.Println(f"Created:   {display.relative(full.created)}")
   fmt.Println(f"Updated:   {display.relative(full.updated)}")
   if full.description != "" {
@@ -488,7 +518,7 @@ fn view(args: Slice<string>) -> Result<(), string> {
 }
 
 fn update(args: Slice<string>) -> Result<(), string> {
-  let usage = "lll issue update [KEY-123] [--state s] [--priority 0-4] [--assignee name] [--label name]... [--project name] [--title t] [--description d]"
+  let usage = "lll issue update [KEY-123] [--state s] [--priority 0-4] [--assignee name] [--label name]... [--project name] [--title t] [--description d] [--emoji e]"
   let mut id = ""
   let mut state = ""
   let mut priority = -1
@@ -499,6 +529,8 @@ fn update(args: Slice<string>) -> Result<(), string> {
   let mut title_set = false
   let mut description = ""
   let mut description_set = false
+  let mut emoji = ""
+  let mut emoji_set = false
   let mut i = 3
   while i < args.length() {
     match args[i] {
@@ -567,6 +599,14 @@ fn update(args: Slice<string>) -> Result<(), string> {
         description_set = true
         i += 2
       },
+      "--emoji" => {
+        let Some(val) = args.get(i + 1) else {
+          return Err("--emoji requires a value")
+        }
+        emoji = check_emoji(val)?
+        emoji_set = true
+        i += 2
+      },
       other => {
         if other.starts_with("-") { return Err(f"unknown flag: '{other}'") }
         if id != "" { return Err(f"unexpected argument: '{other}'") }
@@ -579,7 +619,8 @@ fn update(args: Slice<string>) -> Result<(), string> {
   label_names.is_empty() &&
   project_name == "" &&
   !title_set &&
-  !description_set {
+  !description_set &&
+  !emoji_set {
     return Err(f"nothing to update — pass at least one flag\nusage: {usage}")
   }
 
@@ -612,6 +653,8 @@ fn update(args: Slice<string>) -> Result<(), string> {
   if description_set {
     fields = fields.append("\"description\":" + json_quote(description)?)
   }
+  // `--emoji ""` clears the marker, so this one keys off the flag, not the value.
+  if emoji_set { fields = fields.append("\"emoji\":" + json_quote(emoji)?) }
   let _ = pb.patch(
     f"/api/collections/issues/records/{issue.id}",
     "{" + strings.Join(fields, ",") + "}",

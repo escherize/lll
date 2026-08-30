@@ -235,6 +235,12 @@ input:focus, textarea:focus, select:focus {
   font-variant-numeric: tabular-nums;
 }
 .card .row1 .flex { flex: 1; }
+/* The per-issue emoji: the single exception to the sprite-only icon rule (see
+   DESIGN.md Don'ts). It sits in the empty middle of row 1, so the key keeps
+   the left edge and the priority icon keeps the right. font-size below the
+   14px icons plus line-height 1 means the row, and the card, keep their
+   height whether an issue carries a marker or not. */
+.emoji { font-size: 12px; line-height: 1; }
 .card .title {
   margin-top: 2px;
   line-height: 1.35;
@@ -267,6 +273,7 @@ input:focus, textarea:focus, select:focus {
 .issue-detail { display: contents; }
 .issue-main { grid-area: main; padding: 28px 40px 0; max-width: 760px; }
 .issue-main .key { color: var(--text-3); font-weight: 500; font-variant-numeric: tabular-nums; }
+.issue-main .emoji { margin-left: 6px; font-size: 14px; }
 .issue-main h1 {
   margin: 4px 0 14px;
   font-size: 19px;

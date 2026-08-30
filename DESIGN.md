@@ -417,5 +417,12 @@ never icon fonts, emoji, or third-party icon packages. New icons match the
 - **Don't** add drop shadows beyond the card whisper, or invent new dark grays
   off the ladder.
 - **Don't** use icon fonts, emoji glyphs, or imported icon packs; draw new
-  icons into the shared sprite.
+  icons into the shared sprite. One exception: the per-issue emoji, a marker
+  the author picks for one issue. System iconography — state, priority,
+  navigation — must inherit `currentColor` for the Icon-Carries-Color Rule and
+  stay legible at 14px next to hairline strokes, and emoji are full-colour
+  bitmaps that ignore the palette and redraw themselves per platform. A
+  personal marker is the opposite category: arbitrary colour is the whole
+  point of it, and it spends nothing from the Ember Budget because it is not
+  an affordance. The exception covers that field and nothing else.
 - **Don't** add a light theme or theme switching; the world is dark-only.
