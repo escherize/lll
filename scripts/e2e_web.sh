@@ -11,15 +11,6 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-PB_BIN="${PB_BIN:-pb/pocketbase}"
-if [ ! -x "$PB_BIN" ]; then
-  PB_BIN="$(command -v pocketbase || true)"
-fi
-if [ -z "$PB_BIN" ]; then
-  echo "pocketbase not found: brew install pocketbase (see pb/README.md)" >&2
-  exit 1
-fi
-
 DATA_DIR="$(mktemp -d)"
 
 # Hermetic: a developer's repo-root .lll.toml must not leak into assertions.
@@ -36,13 +27,13 @@ PB_LOG="$DATA_DIR/pb.log"
 SERVE_LOG="$DATA_DIR/serve.log"
 BROWSER_SESSION="e2e-web-$$"
 
-"$PB_BIN" superuser upsert e2e@local.test e2e-password-123 \
-  --dir "$DATA_DIR/pb_data" >"$PB_LOG" 2>&1 \
-  || { echo "FAIL: creating PB superuser" >&2; cat "$PB_LOG" >&2; exit 1; }
+# PocketBase is embedded in lll; one `lll up` is both the database and the
+# board this suite exercises. Built here because it has to exist first.
+lis build >/dev/null
+LIN=target/.lisette/bin/lll
 
-"$PB_BIN" serve --dir "$DATA_DIR/pb_data" \
-  --migrationsDir pb/pb_migrations --hooksDir pb/pb_hooks \
-  --http "127.0.0.1:$PB_PORT" >"$PB_LOG" 2>&1 &
+"$LIN" up --no-open --pb-dir "$DATA_DIR/pb_data" --port "$WEB_PORT" \
+  </dev/null >"$PB_LOG" 2>&1 &
 PB_PID=$!
 SERVE_PID=""
 CURL_PID=""
@@ -93,22 +84,14 @@ curl -sf "$LLL_URL/api/health" >/dev/null || fail "PocketBase did not start"
 
 curl -sf -X POST "$LLL_URL/api/collections/teams/records" \
   -H 'Content-Type: application/json' \
-  -d '{"key":"ENG","name":"Engineering"}' >/dev/null || fail "seeding team"
-
-lis build >/dev/null
-LIN=target/.lisette/bin/lll
+  -d '{"key":"ENG","name":"Engineering"}' >/dev/null || true   # lll up already created ENG
 
 "$LIN" issue create -t "Web board issue" --priority 2 >/dev/null
 "$LIN" issue create -t "Already in progress" >/dev/null
 "$LIN" issue update ENG-2 --state in-progress >/dev/null
 "$LIN" issue comment ENG-1 -b "seed comment" >/dev/null
 
-"$LIN" up --no-open --port "$WEB_PORT" >"$SERVE_LOG" 2>&1 &
-SERVE_PID=$!
-for _ in $(seq 1 100); do
-  curl -sf "$WEB/" >/dev/null 2>&1 && break
-  sleep 0.1
-done
+# the board came up with PocketBase above
 curl -sf "$WEB/" >/dev/null || fail "lll up board did not start"
 
 # --- board page: six columns, cards in the right ones ---

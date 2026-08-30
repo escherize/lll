@@ -19,15 +19,6 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-PB_BIN="${PB_BIN:-pb/pocketbase}"
-if [ ! -x "$PB_BIN" ]; then
-  PB_BIN="$(command -v pocketbase || true)"
-fi
-if [ -z "$PB_BIN" ]; then
-  echo "pocketbase not found: brew install pocketbase (see pb/README.md)" >&2
-  exit 1
-fi
-
 DATA_DIR="$(mktemp -d)"
 
 # Hermetic: a developer's repo-root .lll.toml must not leak into assertions.
@@ -37,17 +28,26 @@ if [ -f .lll.toml ]; then
 fi
 PORT=$(( (RANDOM % 20000) + 20000 ))
 URL="http://127.0.0.1:$PORT"
+WEB_PORT=$(( (RANDOM % 20000) + 40000 ))
 PB_LOG="$DATA_DIR/pb.log"
 
-# A superuser must exist or serve auto-opens the browser install wizard.
-"$PB_BIN" superuser upsert e2e@local.test e2e-password-123 \
-  --dir "$DATA_DIR/pb_data" >"$PB_LOG" 2>&1 \
-  || { echo "FAIL: creating PB superuser" >&2; cat "$PB_LOG" >&2; exit 1; }
+lis build >/dev/null
+LIN=target/.lisette/bin/lll
 
-"$PB_BIN" serve --dir "$DATA_DIR/pb_data" \
-  --migrationsDir pb/pb_migrations --hooksDir pb/pb_hooks \
-  --http "127.0.0.1:$PORT" >"$PB_LOG" 2>&1 &
-PB_PID=$!
+# PocketBase is embedded in lll (gopb), so there is no external binary to
+# install. `lll up` needs a team and refuses to start without one; ENG is the
+# one this suite uses anyway, and seed_team below fixes up its display name.
+start_pb() {
+  LLL_URL="$URL" LLL_TEAM=ENG "$LIN" up --no-open \
+    --pb-dir "$DATA_DIR/pb_data" --port "$WEB_PORT" </dev/null >>"$PB_LOG" 2>&1 &
+  PB_PID=$!
+  for _ in $(seq 1 150); do
+    curl -sf "$URL/api/health" >/dev/null 2>&1 && return 0
+    sleep 0.1
+  done
+  return 1
+}
+start_pb || { echo "FAIL: lll up did not start" >&2; cat "$PB_LOG" >&2; exit 1; }
 WATCH_PIDS=""
 cleanup() {
   if [ "${RESTORE_TOML:-}" = 1 ] && [ -f "$DATA_DIR/.lll.toml.saved" ]; then
@@ -72,24 +72,26 @@ assert_not_contains() {
 $1" || true
 }
 
-for _ in $(seq 1 100); do
-  curl -sf "$URL/api/health" >/dev/null 2>&1 && break
-  sleep 0.1
-done
-curl -sf "$URL/api/health" >/dev/null || fail "PocketBase did not start"
-
 json_id() { python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])'; }
 
-ENG_ID=$(curl -sf -X POST "$URL/api/collections/teams/records" \
-  -H 'Content-Type: application/json' \
-  -d '{"key":"ENG","name":"Engineering"}' | json_id)
-OPS_ID=$(curl -sf -X POST "$URL/api/collections/teams/records" \
-  -H 'Content-Type: application/json' \
-  -d '{"key":"OPS","name":"Operations"}' | json_id)
+# `lll up` created ENG with name "ENG"; create-or-fetch, then set the name the
+# assertions expect. Idempotent so the mid-suite restart cannot double-create.
+seed_team() { # key name -> prints the record id
+  q=$(python3 -c 'import urllib.parse,sys; print(urllib.parse.quote(f"key=\x27{sys.argv[1]}\x27"))' "$1")
+  id=$(curl -sf "$URL/api/collections/teams/records?filter=$q" \
+       | python3 -c 'import json,sys; it=json.load(sys.stdin)["items"]; print(it[0]["id"] if it else "")')
+  if [ -z "$id" ]; then
+    id=$(curl -sf -X POST "$URL/api/collections/teams/records" \
+      -H 'Content-Type: application/json' -d "{\"key\":\"$1\",\"name\":\"$2\"}" | json_id)
+  else
+    curl -sf -X PATCH "$URL/api/collections/teams/records/$id" \
+      -H 'Content-Type: application/json' -d "{\"name\":\"$2\"}" >/dev/null
+  fi
+  printf '%s' "$id"
+}
+ENG_ID=$(seed_team ENG Engineering)
+OPS_ID=$(seed_team OPS Operations)
 [ -n "$ENG_ID" ] && [ -n "$OPS_ID" ] || fail "seeding teams"
-
-lis build >/dev/null
-LIN=target/.lisette/bin/lll
 
 # --- create + list shows ENG-1 style identifier ---
 out=$(LLL_URL=$URL LLL_TEAM=ENG "$LIN" issue create -t "First engineering issue")
@@ -676,15 +678,7 @@ WID=$(LLL_URL=$URL "$LIN" issue view "$WKEY" --json | jq -r '.id')
 [ -n "$WID" ] || fail "resolving $WKEY record id"
 kill "$PB_PID"
 wait "$PB_PID" 2>/dev/null || true
-"$PB_BIN" serve --dir "$DATA_DIR/pb_data" \
-  --migrationsDir pb/pb_migrations --hooksDir pb/pb_hooks \
-  --http "127.0.0.1:$PORT" >>"$PB_LOG" 2>&1 &
-PB_PID=$!
-for _ in $(seq 1 100); do
-  curl -sf "$URL/api/health" >/dev/null 2>&1 && break
-  sleep 0.1
-done
-curl -sf "$URL/api/health" >/dev/null || fail "PocketBase did not restart"
+start_pb || fail "PocketBase did not restart"
 # watchers resubscribe within ~1s; keep patching (each a fresh title
 # transition) until one lands, instead of trusting a fixed sleep
 for i in $(seq 1 20); do
