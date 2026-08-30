@@ -212,6 +212,15 @@ assert_contains "$mine" 'title="Issues assigned to e2e" class="active"' \
   "?mine=1 marks the My issues row current"
 assert_contains "$mine" 'data-signals:flt="[&#34;assignee:e2e&#34;]"' \
   "?mine=1 seeds the assignee filter chip"
+# ...and the seeded chip is NOT written back to localStorage (task-109): the
+# seed belongs to the URL, so the write-back effect is rendered only on an
+# unseeded board. Without this, Board / My issues / Board came back filtered
+# by a person you had stopped looking at, and read as an empty board.
+assert_contains "$(curl -sf "$WEB/")" "data-effect=\"localStorage.setItem('lllFlt'" \
+  "the unseeded board persists its chips"
+case "$mine" in
+  *"localStorage.setItem('lllFlt'"*) fail "?mine=1 persists its seeded chip to localStorage" ;;
+esac
 assert_contains "$(column "$mine" todo)" "ENG-1" "?mine=1 leaves the board fragment unfiltered"
 
 # --- /search: server-side search over the database (task-85) ---
@@ -454,6 +463,55 @@ if command -v playwright-cli >/dev/null 2>&1; then
     *"\"cards\":$((before + 1))"*) ;;
     *) fail "browser: card count did not go from $before to $((before + 1)): $result" ;;
   esac
+  # --- Board, My issues, Board leaves every card visible (task-109) ---
+  # A SEQUENCE, not an end state: the bug only exists because step 2 wrote a
+  # chip that step 3 restored, so a single-page assertion cannot see it.
+  seq_probe() { # -> {visible, chips}
+    playwright-cli -s="$BROWSER_SESSION" eval \
+      "() => JSON.stringify({visible: [...document.querySelectorAll('.card')].filter(c => c.offsetParent !== null).length, chips: [...document.querySelectorAll('.flt-chip')].filter(c => c.offsetParent !== null).length})" \
+      | sed -n '/### Result/{n;p;}' | tr -d '\\'
+  }
+  # Datastar mounts on load; settle before probing so a slow box does not
+  # read the chips before the signals exist.
+  seq_goto() { playwright-cli -s="$BROWSER_SESSION" goto "$1" >/dev/null 2>&1 || fail "playwright: goto $1"; sleep 0.5; }
+
+  # One issue actually assigned to `me`: the chip elements are built from the
+  # values PRESENT on the board (filter_groups), so with nobody assigned the
+  # assignee chip does not exist to be counted (task-116).
+  "$LIN" issue create -t "Assigned to me" --assignee e2e >/dev/null
+
+  seq_goto "$WEB/"
+  playwright-cli -s="$BROWSER_SESSION" eval "() => localStorage.clear()" >/dev/null 2>&1
+  seq_goto "$WEB/"
+  step1=$(seq_probe)
+  all=$(printf '%s' "$step1" | sed -n 's/.*"visible":\([0-9]*\).*/\1/p')
+  [ "${all:-0}" -gt 0 ] || fail "task-109 step 1: board opened with no visible cards ($step1)"
+  assert_contains "$step1" '"chips":0' "task-109 step 1: Board opens unfiltered"
+
+  seq_goto "$WEB/?mine=1"
+  step2=$(seq_probe)
+  assert_contains "$step2" '"chips":1' "task-109 step 2: My issues shows the assignee chip"
+  mine_visible=$(printf '%s' "$step2" | sed -n 's/.*"visible":\([0-9]*\).*/\1/p')
+  [ "${mine_visible:-0}" -lt "$all" ] \
+    || fail "task-109 step 2: My issues did not actually filter ($step2 vs $all)"
+
+  seq_goto "$WEB/"
+  step3=$(seq_probe)
+  assert_contains "$step3" '"chips":0' "task-109 step 3: back on Board the chip is gone"
+  assert_contains "$step3" "\"visible\":$all" "task-109 step 3: back on Board every card is visible again"
+
+  # The other half: persistence still earns its keep. A chip set BY HAND on
+  # the board survives a reload and a detour through /?mine=1 — which is why
+  # the fix suppresses the SEED's write rather than clearing on arrival.
+  playwright-cli -s="$BROWSER_SESSION" eval \
+    "() => document.querySelector('.flt-menu button[data-f^=\"assignee:\"]').click()" >/dev/null 2>&1
+  playwright-cli -s="$BROWSER_SESSION" reload >/dev/null 2>&1 || fail "playwright: reload"
+  sleep 0.5
+  assert_contains "$(seq_probe)" '"chips":1' "task-109: a hand-set chip survives a reload"
+  seq_goto "$WEB/?mine=1"
+  seq_goto "$WEB/"
+  assert_contains "$(seq_probe)" '"chips":1' "task-109: a hand-set chip survives a My issues detour"
+
   playwright-cli -s="$BROWSER_SESSION" close >/dev/null 2>&1 || true
   echo "e2e_web: browser-level realtime check passed"
 else
