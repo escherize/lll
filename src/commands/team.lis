@@ -97,11 +97,8 @@ pub fn create_team(key: string, name: string) -> Result<models.Team, string> {
 
 /// Every team, key-sorted. Shared by `lll team list` and `lll up`.
 pub fn list_teams() -> Result<models.TeamList, string> {
-  let body = pb.get("/api/collections/teams/records?perPage=200&sort=key")?
   let mut teams = models.TeamList { .. }
-  if let Err(e) = json.Unmarshal(body.bytes(), &teams) {
-    return Err(f"decoding teams: {e}")
-  }
+  pb.fetch("/api/collections/teams/records?perPage=200&sort=key", "teams", &teams)?
   Ok(teams)
 }
 
@@ -120,13 +117,12 @@ fn team_view(args: Slice<string>) -> Result<(), string> {
   }
 
   let filter = url.QueryEscape(f"team='{t.id}'")
-  let body = pb.get(
-    f"/api/collections/issues/records?filter={filter}&perPage=1",
-  )?
   let mut issues = models.IssueList { .. }
-  if let Err(e) = json.Unmarshal(body.bytes(), &issues) {
-    return Err(f"decoding issues: {e}")
-  }
+  pb.fetch(
+    f"/api/collections/issues/records?filter={filter}&perPage=1",
+    "issues",
+    &issues,
+  )?
 
   fmt.Println(f"Key:    {t.key}")
   fmt.Println(f"Name:   {t.name}")

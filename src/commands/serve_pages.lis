@@ -47,13 +47,12 @@ fn fav_vms() -> Slice<FavVM> {
 /// carries member="" and a star belongs to the workspace. When members
 /// arrive this grows a filter, not a new shape.
 fn fetch_favorites() -> Result<Slice<models.Favorite>, string> {
-  let body = pb.get(
-    "/api/collections/favorites/records?perPage=200&sort=-created&expand=issue.team",
-  )?
   let mut list = models.FavoriteList { .. }
-  if let Err(e) = json.Unmarshal(body.bytes(), &list) {
-    return Err(f"decoding favorites: {e}")
-  }
+  pb.fetch(
+    "/api/collections/favorites/records?perPage=200&sort=-created&expand=issue.team",
+    "favorites",
+    &list,
+  )?
   // A favorite whose issue expand came back empty (issue deleted between the
   // list and the expand) has no link to render.
   Ok(list.items.filter(|f| f.expand.issue.id != ""))
@@ -62,13 +61,12 @@ fn fetch_favorites() -> Result<Slice<models.Favorite>, string> {
 /// The workspace's favorite row for one issue, if it has one.
 fn fetch_favorite(issue_id: string) -> Result<Option<models.Favorite>, string> {
   let filter = url.QueryEscape(f"issue='{issue_id}' && member=''")
-  let body = pb.get(
-    f"/api/collections/favorites/records?perPage=1&filter={filter}",
-  )?
   let mut list = models.FavoriteList { .. }
-  if let Err(e) = json.Unmarshal(body.bytes(), &list) {
-    return Err(f"decoding favorites: {e}")
-  }
+  pb.fetch(
+    f"/api/collections/favorites/records?perPage=1&filter={filter}",
+    "favorites",
+    &list,
+  )?
   Ok(list.items.get(0))
 }
 
@@ -172,9 +170,7 @@ fn issue_page(w: http.ResponseWriter, r: Ref<http.Request>, team_id: string, me:
 fn shell_team(team_id: string) -> models.Team {
   let mut team = models.Team { .. }
   if team_id == "" { return team }
-  let Ok(body) = pb.get(f"/api/collections/teams/records/{team_id}") else {
-    return models.Team { .. }
-  }
-  if json.Unmarshal(body.bytes(), &team).is_err() { return models.Team { .. } }
+  let path = f"/api/collections/teams/records/{team_id}"
+  if pb.fetch(path, "team", &team).is_err() { return models.Team { .. } }
   team
 }

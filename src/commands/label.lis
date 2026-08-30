@@ -39,13 +39,12 @@ Usage:
 }
 
 fn label_list() -> Result<(), string> {
-  let body = pb.get(
-    "/api/collections/labels/records?perPage=200&sort=name&expand=team",
-  )?
   let mut labels = models.LabelList { .. }
-  if let Err(e) = json.Unmarshal(body.bytes(), &labels) {
-    return Err(f"decoding labels: {e}")
-  }
+  pb.fetch(
+    "/api/collections/labels/records?perPage=200&sort=name&expand=team",
+    "labels",
+    &labels,
+  )?
   for l in labels.items {
     let mut team = l.expand.team.key
     if team == "" { team = "workspace" }
@@ -117,11 +116,8 @@ fn label_create(args: Slice<string>) -> Result<(), string> {
 /// Resolve a label by name; unknown names error with the fix.
 fn resolve_label(name: string) -> Result<models.Label, string> {
   let filter = url.QueryEscape(f"name='{name}'")
-  let body = pb.get(f"/api/collections/labels/records?filter={filter}")?
   let mut result = models.LabelList { .. }
-  if let Err(e) = json.Unmarshal(body.bytes(), &result) {
-    return Err(f"decoding labels: {e}")
-  }
+  pb.fetch(f"/api/collections/labels/records?filter={filter}", "labels", &result)?
   let Some(l) = result.items.find(|l| l.name == name) else {
     return Err(f"no label named '{name}' — see 'lll label list'")
   }

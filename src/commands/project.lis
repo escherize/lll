@@ -51,13 +51,12 @@ Statuses: planned, started, paused, completed, cancelled",
 }
 
 fn project_list() -> Result<(), string> {
-  let body = pb.get(
-    "/api/collections/projects/records?perPage=200&sort=name&expand=team",
-  )?
   let mut projects = models.ProjectList { .. }
-  if let Err(e) = json.Unmarshal(body.bytes(), &projects) {
-    return Err(f"decoding projects: {e}")
-  }
+  pb.fetch(
+    "/api/collections/projects/records?perPage=200&sort=name&expand=team",
+    "projects",
+    &projects,
+  )?
   for p in projects.items {
     let mut team = p.expand.team.key
     if team == "" { team = "workspace" }
@@ -157,13 +156,12 @@ fn project_view(args: Slice<string>) -> Result<(), string> {
   }
 
   let filter = url.QueryEscape(f"project='{p.id}'")
-  let body = pb.get(
-    f"/api/collections/issues/records?filter={filter}&perPage=200&sort=created&expand=team,assignee",
-  )?
   let mut issues = models.IssueList { .. }
-  if let Err(e) = json.Unmarshal(body.bytes(), &issues) {
-    return Err(f"decoding issues: {e}")
-  }
+  pb.fetch(
+    f"/api/collections/issues/records?filter={filter}&perPage=200&sort=created&expand=team,assignee",
+    "issues",
+    &issues,
+  )?
   if issues.items.length() > 0 {
     fmt.Println("")
     fmt.Println("Issues:")
@@ -176,13 +174,12 @@ fn project_view(args: Slice<string>) -> Result<(), string> {
 /// Resolve a project by name; unknown names error with the fix.
 fn resolve_project(name: string) -> Result<models.Project, string> {
   let filter = url.QueryEscape(f"name='{name}'")
-  let body = pb.get(
-    f"/api/collections/projects/records?filter={filter}&expand=team",
-  )?
   let mut result = models.ProjectList { .. }
-  if let Err(e) = json.Unmarshal(body.bytes(), &result) {
-    return Err(f"decoding projects: {e}")
-  }
+  pb.fetch(
+    f"/api/collections/projects/records?filter={filter}&expand=team",
+    "projects",
+    &result,
+  )?
   let Some(p) = result.items.find(|p| p.name == name) else {
     return Err(f"no project named '{name}' — see 'lll project list'")
   }
