@@ -13,15 +13,17 @@ Written in [Lisette](https://github.com/ivov/lisette), which compiles to Go.
 ## Quickstart
 
 Requires [lis](https://github.com/ivov/lisette) (the Lisette toolchain) and
-Go 1.25+. No separate PocketBase install — it is embedded.
+Go 1.27 (pinned in `mise.toml`). No separate PocketBase install — it is
+embedded, and the test suite drives it through `lll up`.
 
 ```sh
-lis build                # binary at target/.lisette/bin/lll
-./target/.lisette/bin/lll up      # PocketBase (:8090) + web board (:8100), opens the board
+mise install             # go, jq  (lis: see below)
+mise run dev             # build, then PocketBase (:8090) + web board (:8100)
 ```
 
-Run `lll up` from the checkout root — the board reads `web/templates/` and
-`web/static/` from disk. Taken ports auto-increment. Ctrl-C stops everything.
+`mise run dev` builds first and runs from the checkout root for you, from any
+subdirectory. The board reads `web/templates/` and `web/static/` from disk;
+taken ports auto-increment; Ctrl-C stops everything.
 
 Then, in another shell:
 
@@ -88,13 +90,15 @@ Server-rendered board at `/`, issue pages at `/issue/KEY-123`.
 ```sh
 lis check          # type check
 lis test           # unit tests
-lis build          # binary at target/.lisette/bin/lll
-bash scripts/e2e.sh   # full e2e: CLI + watch + web board + lll up
+mise run build     # binary at target/.lisette/bin/lll
+mise run test      # unit tests
+mise run e2e       # full e2e: CLI + watch + web board + lll up
+mise run gate      # all three -- what a change must pass before it lands
 ```
 
-`scripts/e2e.sh` runs an ephemeral PocketBase on a random port and needs an
-external `pocketbase` binary (`brew install pocketbase`), plus `jq` and
-`python3`. It never touches your data.
+`scripts/e2e.sh` runs an ephemeral PocketBase on a random port via `lll up`
+itself — no external binary — plus `jq` and `python3`. It never touches your
+data.
 
 Layout:
 

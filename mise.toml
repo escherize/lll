@@ -12,3 +12,36 @@
 [tools]
 go = "1.27"   # PocketBase v0.40.1 and gopb both declare go 1.27
 jq = "1.8"
+
+# Tasks. `mise tasks` lists them. Each pins dir to the checkout root, because
+# lll up reads pb/ and web/ relative to the working directory.
+#
+# Note: not named `up` — `mise run up` collides with mise's own `mise up`.
+
+[tasks.build]
+description = "Compile lll to target/.lisette/bin/lll"
+dir = "{{config_root}}"
+run = "lis build"
+
+[tasks.dev]
+description = "Build, then run PocketBase + the web board"
+depends = ["build"]
+dir = "{{config_root}}"
+run = "target/.lisette/bin/lll up"
+
+[tasks.test]
+description = "Unit tests"
+dir = "{{config_root}}"
+run = "lis test"
+
+[tasks.e2e]
+description = "Full end-to-end suite (CLI, web board, lll up)"
+depends = ["build"]
+dir = "{{config_root}}"
+run = "bash scripts/e2e.sh"
+
+[tasks.gate]
+description = "Everything a change must pass before it lands"
+depends = ["build", "test", "e2e"]
+dir = "{{config_root}}"
+run = "echo 'gate green'"
