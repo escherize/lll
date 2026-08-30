@@ -16,6 +16,7 @@
 {{define "rail"}}<nav id="rail" class="rail">
 <div class="workspace"><span class="mark">L</span> lll</div>
 <a href="/"{{if eq .Active "board"}} class="active"{{end}}><svg width="14" height="14"><use href="#ic-board"/></svg> Board</a>
+<a href="/issues"{{if eq .Active "issues"}} class="active"{{end}}><svg width="14" height="14"><use href="#ic-issues"/></svg> All issues</a>
 {{if .Me}}<a href="/?mine=1" title="Issues assigned to {{.Me}}"{{if eq .Active "mine"}} class="active"{{end}}><svg width="14" height="14"><use href="#ic-me"/></svg> My issues</a>
 {{end}}<div class="rail-foot">v{{.Version}}</div>
 </nav>{{end}}

@@ -8,7 +8,9 @@
 # the /events SSE stream emitting datastar-patch-elements frames on
 # CLI-driven changes (board scope and issue scope), static CSS serving, and —
 # when playwright-cli is available — a real-browser check that a CLI-created
-# issue appears on an open board without reload.
+# issue appears on an open board without reload, and the zero-JavaScript
+# /issues table (server-side sort and filter through query params, honest row
+# count, bad params degrading to the flash strip).
 # Standalone (boots its own PB), also invoked by e2e.sh.
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -479,4 +481,74 @@ assert_contains "$page" '/static/mermaid-init.js' "the issue page loads the merm
 curl -sfI "$WEB/static/mermaid.min.js" >/dev/null || fail "vendored mermaid.min.js is not served"
 curl -sfI "$WEB/static/mermaid-init.js" >/dev/null || fail "mermaid-init.js is not served"
 
+
+# --- /issues: a sortable, filterable, bookmarkable table (task-82) ---
+# The point of the table is that its whole state is in the URL, so every
+# assertion below is one curl of a URL an agent could type.
+issues=$(curl -sf "$WEB/issues") || fail "/issues did not serve"
+assert_contains "$issues" '<table id="issues" class="itbl">' "the issues page renders a table"
+assert_contains "$issues" 'href="/issue/ENG-1"' "the table links rows to their issue pages"
+assert_contains "$issues" 'href="/issues?sort=-created"' "column headers sort server-side through the URL"
+assert_contains "$issues" 'href="/issues?sort=-priority"' "priority is a sortable column"
+assert_contains "$issues" 'aria-sort="descending"' "the sorting column says so to a screen reader"
+
+# ZERO JavaScript: no script tag, no datastar attributes, no SSE connection.
+# A page that subscribed would be morphed into the unfiltered #board.
+assert_not_contains "$issues" "<script" "the issues page loads no script"
+assert_not_contains "$issues" "data-on:" "the issues page binds no client-side handlers"
+assert_not_contains "$issues" "data-init" "the issues page opens no SSE connection"
+
+# Sorting is server-side: ascending and descending disagree about the first row.
+first_row() { # url
+  curl -sf "$WEB$1" | python3 -c '
+import re, sys
+keys = re.findall(r"class=\"c-id\"><a href=\"/issue/([A-Z]+-[0-9]+)\"", sys.stdin.read())
+print(keys[0] if keys else "")
+'
+}
+asc=$(first_row "/issues?sort=number")
+desc=$(first_row "/issues?sort=-number")
+[ -n "$asc" ] && [ -n "$desc" ] || fail "the sorted table returned no rows: '$asc' / '$desc'"
+[ "$asc" != "$desc" ] || fail "?sort=number and ?sort=-number both start at $asc"
+[ "$asc" = "ENG-1" ] || fail "?sort=number should start at ENG-1, got $asc"
+
+# Filters are query params, so a filtered view is a shareable URL.
+todo=$(curl -sf "$WEB/issues?state=todo")
+assert_contains "$todo" '<option value="todo" selected>' "the chooser shows the filter the URL asked for"
+assert_contains "$todo" 'class="itbl-clear"' "a filtered table offers a way back to all issues"
+# A dedicated pair, so the filter assertion does not depend on what earlier
+# sections left the shared issues in.
+"$LIN" issue create -t "Table filter subject" >/dev/null
+subject=$("$LIN" issue list --search "Table filter subject" | awk '{print $1}' | head -1)
+"$LIN" issue update "$subject" --state in-review >/dev/null
+in_review=$(curl -sf "$WEB/issues?state=in-review")
+assert_contains "$in_review" "Table filter subject" "?state=in-review keeps the in-review issue"
+assert_contains "$in_review" 'value="in-review" selected' "the state chooser reflects the URL"
+"$LIN" issue update "$subject" --state done >/dev/null
+gone=$(curl -sf "$WEB/issues?state=in-review")
+assert_not_contains "$gone" "Table filter subject" "?state=in-review drops it once it moves on"
+
+# The count is honest rather than a bare row tally.
+assert_contains "$issues" 'class="itbl-count"' "the table states how many issues it is showing"
+
+# A stale bookmark degrades to the unfiltered table plus the flash strip — the
+# system's one error voice — never a 500.
+bad=$(curl -sf "$WEB/issues?sort=bogus") || fail "a bad sort param returned an error status"
+assert_contains "$bad" 'class="flash"' "an unknown sort field is reported in the flash strip"
+assert_contains "$bad" "unknown sort field" "the flash names the rejected field"
+assert_contains "$bad" '<table id="issues"' "an unknown sort field still serves the table"
+bad_state=$(curl -sf "$WEB/issues?state=nope") || fail "a bad state param returned an error status"
+assert_contains "$bad_state" "unknown state" "an unknown state is reported too"
+
+# One rail template: the same rows on every page, differing only in which row
+# reads as current. Adding this page did not touch the board's template.
+issues_rail=$(rail "$issues")
+rail_rows() { printf '%s' "$1" | grep -o 'href="[^"]*"' | sort; }
+[ "$(rail_rows "$issues_rail")" = "$(rail_rows "$board_rail")" ] \
+  || fail "the board and issues rails offer different destinations:
+$(diff <(rail_rows "$board_rail") <(rail_rows "$issues_rail") || true)"
+assert_contains "$issues_rail" 'href="/issues"' "the rail has an All issues row"
+assert_contains "$board_rail" 'href="/issues"' "the board's rail has it too"
+assert_contains "$issues_rail" '<a href="/issues" class="active">' "the All issues row is current on its own page"
+assert_not_contains "$issues_rail" '<a href="/" class="active">' "and the board row is not"
 echo "e2e_web: all assertions passed"

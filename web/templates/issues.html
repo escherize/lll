@@ -1,0 +1,78 @@
+{{/* The issues table — every issue in one sortable, filterable list.
+
+     ZERO JavaScript, deliberately. Column headers are plain <a> tags carrying
+     ?sort=, the filter chooser is a plain GET <form>, and navigation is a full
+     page load. So the URL is the entire state of this page: bookmarkable in a
+     browser, diffable in a commit, and fetchable with curl by an agent that
+     wants "todo issues, urgent first" as one request.
+
+     No datastar script and no /events connection either. The bridge broadcasts
+     ONE unfiltered #board fragment to every board-scoped client, so a page that
+     server-filters its rows and then subscribes would be morphed into the full
+     board by the next realtime event. This page reloads instead.
+
+     Its dot is a PageVM: `.Rail` is the shell, `.Page` this page's own view
+     model. */}}
+{{define "issues-page"}}<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>All issues · lll</title>
+<link rel="stylesheet" href="/static/theme.css">
+</head>
+<body>
+{{template "icons"}}
+<div class="app">
+  {{template "rail" .Rail}}
+  <div class="main">
+    <header class="topbar">
+      <div class="crumbs"><span class="here">All issues</span></div>
+      <div class="spacer"></div>
+      {{/* Honest about the ceiling: PB reports how many records matched, so a
+           truncated page says so instead of ending quietly at the limit. */}}
+      <span class="itbl-count">{{if .Page.Truncated}}Showing {{.Page.Shown}} of {{.Page.Total}} · {{.Page.Limit}}-row limit{{else}}{{.Page.Total}} issue{{if ne .Page.Total 1}}s{{end}}{{end}}</span>
+    </header>
+    {{if .Page.Error}}<div id="flash" class="flash">{{.Page.Error}}</div>{{end}}
+    <form class="itbl-bar" method="get" action="/issues">
+      {{/* The sort rides along as a hidden field, so filtering keeps the
+           column you were sorting by. */}}
+      <input type="hidden" name="sort" value="{{.Page.Sort}}">
+      <label for="f-state">State</label>
+      <select id="f-state" name="state"><option value="">Any</option>{{range .Page.States}}<option value="{{.Value}}"{{if eq .Value $.Page.State}} selected{{end}}>{{.Label}}</option>{{end}}</select>
+      <label for="f-assignee">Assignee</label>
+      <select id="f-assignee" name="assignee"><option value="">Anyone</option>{{range .Page.Members}}<option value="{{.}}"{{if eq . $.Page.Assignee}} selected{{end}}>{{.}}</option>{{end}}</select>
+      <label for="f-label">Label</label>
+      <select id="f-label" name="label"><option value="">Any</option>{{range .Page.LabelNames}}<option value="{{.}}"{{if eq . $.Page.Label}} selected{{end}}>{{.}}</option>{{end}}</select>
+      <button type="submit" class="btn">Filter</button>
+      {{if or .Page.State .Page.Assignee .Page.Label}}<a class="itbl-clear" href="{{.Page.ClearHref}}">Clear</a>{{end}}
+    </form>
+    {{template "issues-table" .Page}}
+  </div>
+</div>
+</body>
+</html>{{end}}
+
+{{/* #issues is this page's stable id, matching the board's #board — it is not
+     a morph target (nothing morphs here), but agents read the markup and the
+     Stable Id Rule holds for every surface.
+
+     .Cols and the row cells below share one column order; changing one means
+     changing the other. */}}
+{{define "issues-table"}}<div class="itbl-scroll">
+<table id="issues" class="itbl">
+<thead><tr>{{range .Cols}}<th class="{{.Cls}}"{{if eq .Dir "asc"}} aria-sort="ascending"{{else if eq .Dir "desc"}} aria-sort="descending"{{end}}>{{if .Href}}<a href="{{.Href}}"{{if .Dir}} class="on"{{end}}>{{.Label}}<svg class="cr{{if .Dir}} cr-{{.Dir}}{{end}}" width="14" height="14" aria-hidden="true"><use href="#ic-sort"/></svg></a>{{else}}{{.Label}}{{end}}</th>{{end}}</tr></thead>
+<tbody>
+{{range .Rows}}<tr id="issue-{{.Id}}">
+<td class="c-id"><a href="/issue/{{.Key}}">{{.Key}}</a></td>
+<td class="c-title"><a href="/issue/{{.Key}}">{{.Title}}</a>{{if .Emoji}}<span class="emoji">{{.Emoji}}</span>{{end}}</td>
+<td class="c-state">{{template "state-icon" .State}}<span>{{.StateLabel}}</span></td>
+<td class="c-prio"><span class="pri-slot">{{template "priority-icon" .Prio}}</span><span>{{.PrioLabel}}</span></td>
+<td class="c-labels">{{range .Labels}}<span class="chip"><span class="dot" style="background:{{if .Color}}{{.Color}}{{else}}var(--text-3){{end}}"></span>{{.Name}}</span>{{end}}</td>
+<td class="c-assignee">{{if .Assignee}}{{template "avatar" .Avatar}}<span>{{.Assignee}}</span>{{else}}<span class="none">—</span>{{end}}</td>
+<td class="c-age">{{.Created}}</td>
+<td class="c-age">{{.Updated}}</td>
+</tr>
+{{else}}<tr class="itbl-empty"><td colspan="8">No issues match this filter.</td></tr>
+{{end}}</tbody>
+</table>
+</div>{{end}}
