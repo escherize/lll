@@ -2,6 +2,7 @@ import "go:bytes"
 import "go:encoding/json"
 import "go:fmt"
 import "go:html/template"
+import "go:github.com/escherize/lll/web"
 import goldmark "go:github.com/yuin/goldmark"
 import "go:net/http"
 import "go:net/url"
@@ -26,9 +27,9 @@ import "realtime"
 // updates via the same broadcast as CLI-driven changes, so there is no
 // swap-on-POST double-update race.
 //
-// Templates live in web/templates/ and are re-parsed from disk on every
-// render, so markup edits show on refresh with no rebuild (task-9's design
-// iteration loop depends on this). Run `lll up` from the repo root.
+// Templates and static assets are compiled into the binary (see web/embed.go),
+// so the board serves from any working directory. Markup edits need a rebuild:
+// edit, `mise run dev`, refresh.
 
 /// View model for one label chip.
 pub struct LabelVM {
@@ -265,10 +266,9 @@ pub fn run_server(port: int) -> Result<(), string> {
   http.HandleFunc("POST /priority", priority_action)
   http.HandleFunc("POST /title", title_action)
   http.HandleFunc("POST /comment", comment_action)
-  http.Handle(
-    "GET /static/",
-    http.StripPrefix("/static/", http.FileServer(http.Dir("web/static"))),
-  )
+  // The embedded tree keeps its repo paths, so "/static/theme.css" resolves to
+  // "static/theme.css" with no prefix surgery.
+  http.Handle("GET /static/", http.FileServerFS(web.Assets()))
 
   fmt.Println(f"board  http://127.0.0.1:{port}")
   match http.ListenAndServe(f"127.0.0.1:{port}", http.DefaultServeMux) {
@@ -279,17 +279,11 @@ pub fn run_server(port: int) -> Result<(), string> {
 
 // ---------- rendering ----------
 
-/// Render a named template with web/templates/ re-parsed from disk, so
-/// markup edits show on refresh with no rebuild.
+/// Render a named template from the embedded web/templates/ tree.
 fn render(name: string, data: Unknown) -> Result<string, string> {
-  let tmpl = match template.ParseFiles(
-    "web/templates/board.html",
-    "web/templates/issue.html",
-    "web/templates/icons.html",
-  ) {
+  let tmpl = match template.ParseFS(web.Assets(), "templates/*.html") {
     Ok(t) => t,
-    Err(e) => return Err(f"parsing web/templates: {e}
-run 'lll up' from the lll checkout root — web/templates/ and web/static/ are read from disk"),
+    Err(e) => return Err(f"parsing web/templates: {e}"),
   }
   let mut buf = bytes.Buffer { .. }
   if let Err(e) = tmpl.ExecuteTemplate(&buf, name, data) {
