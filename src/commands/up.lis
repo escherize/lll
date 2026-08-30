@@ -186,9 +186,22 @@ fn ensure_team(want: string) -> Result<string, string> {
     if let Some(t) = find_team(want)? {
       return Ok(t.key)
     }
-    let created = create_team(want, want)?
-    fmt.Println(f"created team {created.key}")
-    return Ok(created.key)
+    // Another lll up pointed at the same fresh server may create the team
+    // between our find and our create; the unique index rejects the loser,
+    // and the loser re-looks-up whoever won rather than failing the boot
+    // (the same bargain e2e.sh's seed_team runs on).
+    match create_team(want, want) {
+      Ok(created) => {
+        fmt.Println(f"created team {created.key}")
+        return Ok(created.key)
+      },
+      Err(_) => {
+        if let Some(t) = find_team(want)? {
+          return Ok(t.key)
+        }
+        return Err(f"could not create team '{want}' and none exists to reuse")
+      },
+    }
   }
 
   let teams = list_teams()?
@@ -198,8 +211,17 @@ fn ensure_team(want: string) -> Result<string, string> {
   let key = ask_team(suggested)?
   let existing = find_team(key)?
   if existing.is_none() {
-    let created = create_team(key, key)?
-    fmt.Println(f"created team {created.key} — issues will be {created.key}-1, {created.key}-2, ...")
+    match create_team(key, key) {
+      Ok(created) => {
+        let _ = fmt.Println(f"created team {created.key} — issues will be {created.key}-1, {created.key}-2, ...")
+      },
+      Err(_) => {
+        let existing = find_team(key)?
+        if existing.is_none() {
+          return Err(f"could not create team '{key}' and none exists to reuse")
+        }
+      },
+    }
   }
   save_team(key)?
   Ok(key)
