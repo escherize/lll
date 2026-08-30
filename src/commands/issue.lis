@@ -343,6 +343,8 @@ fn issue_union_spec() -> Slice<flags.Flag> {
     "id",
     "title",
     "pr",
+    "link",
+    "unlink",
   ] {
     for fl in issue_verb_spec(verb) {
       if out.find(|f| f.name == fl.name).is_none() { out = out.append(fl) }
@@ -371,6 +373,8 @@ pub fn issue(args: Slice<string>) -> Result<(), string> {
     "id" => id_cmd(args),
     "title" => title_cmd(args),
     "pr" => pr_cmd(args),
+    "link" => link(args),
+    "unlink" => unlink(args),
     "--help" => {
       print_usage()
       Ok(())
@@ -413,6 +417,8 @@ Usage:
   lll issue pr [KEY-123]                          open a GitHub PR for the issue via
                                                   'gh pr create' (title \"KEY-123: title\",
                                                   body links the issue)
+  lll issue link KEY-123 SLUG                     link the issue to a doc (see 'lll doc --help')
+  lll issue unlink KEY-123 SLUG                   remove that link
 " +
     flags.section(issue_union_spec()) +
     "
@@ -636,6 +642,11 @@ fn view(args: Slice<string>) -> Result<(), string> {
   fmt.Println(f"Assignee:  {assignee}")
   fmt.Println(f"Project:   {project}")
   fmt.Println(f"Labels:    {labels}")
+  let linked_docs = fetch_issue_docs(full.id)?
+  if linked_docs.length() > 0 {
+    let slugs = linked_docs.map(|d| d.slug)
+    fmt.Println(f"Docs:      {strings.Join(slugs, ", ")}")
+  }
   if full.emoji != "" { fmt.Println(f"Emoji:     {full.emoji}") }
   fmt.Println(f"Created:   {display.relative(full.created)}")
   fmt.Println(f"Updated:   {display.relative(full.updated)}")
@@ -1042,4 +1053,95 @@ fn find_team(key: string) -> Result<Option<models.Team>, string> {
   let mut result = models.TeamList { .. }
   pb.fetch(f"/api/collections/teams/records?filter={filter}", "teams", &result)?
   Ok(result.items.find(|t| t.key == key))
+}
+
+// ------------------------------------------------------------- doc links
+
+/// Parse the two positional arguments `KEY SLUG` (link/unlink take no
+/// flags; positional_id handles only one).
+fn two_positional(
+  args: Slice<string>,
+  usage: string,
+) -> Result<(string, string), string> {
+  let mut first = ""
+  let mut second = ""
+  let mut i = 3
+  while i < args.length() {
+    let arg = args[i]
+    if arg.starts_with("-") {
+      return Err(f"unknown flag: '{arg}'\nusage: {usage}")
+    }
+    if second != "" { return Err(f"unexpected argument: '{arg}'") }
+    if first == "" { first = arg } else { second = arg }
+    i += 1
+  }
+  Ok((first, second))
+}
+
+/// Docs linked to an issue. The issue -> doc direction is not stored: it is
+/// one `?=` filter over docs.issues, which is the whole reason links are a
+/// relation and not a write-once reference on the issue.
+fn fetch_issue_docs(issue_id: string) -> Result<Slice<models.Doc>, string> {
+  let filter = url.QueryEscape(f"issues.id ?= '{issue_id}'")
+  let mut docs = models.DocList { .. }
+  pb.fetch(
+    f"/api/collections/docs/records?filter={filter}&sort=slug&perPage=200",
+    "docs",
+    &docs,
+  )?
+  Ok(docs.items)
+}
+
+fn set_doc_issues(
+  doc: models.Doc,
+  issue_ids: Slice<string>,
+) -> Result<(), string> {
+  let encoded = match json.Marshal(issue_ids) {
+    Ok(b) => b as string,
+    Err(e) => return Err(f"encoding issues: {e}"),
+  }
+  let _ = pb.patch(
+    f"/api/collections/docs/records/{doc.id}",
+    "{\"issues\":" + encoded + "}",
+  )?
+  Ok(())
+}
+
+fn link(args: Slice<string>) -> Result<(), string> {
+  let usage = "lll issue link KEY-123 SLUG"
+  let (id, slug) = two_positional(args, usage)?
+  if id == "" || slug == "" { return Err(f"usage: {usage}") }
+  let resolved = resolve_id(id, usage)?
+  let issue = fetch_issue(resolved)?
+  let key = f"{issue.expand.team.key}-{issue.number}"
+  let d = fetch_doc(slug)?
+
+  if d.issues.find(|x| x == issue.id).is_some() {
+    fmt.Println(f"{key} is already linked to {d.slug}")
+    return Ok(())
+  }
+  set_doc_issues(d, d.issues.append(issue.id))?
+  fmt.Println(f"Linked {key} -> {d.slug}")
+  Ok(())
+}
+
+fn unlink(args: Slice<string>) -> Result<(), string> {
+  let usage = "lll issue unlink KEY-123 SLUG"
+  let (id, slug) = two_positional(args, usage)?
+  if id == "" || slug == "" { return Err(f"usage: {usage}") }
+  let resolved = resolve_id(id, usage)?
+  let issue = fetch_issue(resolved)?
+  let key = f"{issue.expand.team.key}-{issue.number}"
+  let d = fetch_doc(slug)?
+
+  let mut remaining: Slice<string> = []
+  for x in d.issues {
+    if x != issue.id { remaining = remaining.append(x) }
+  }
+  if remaining.length() == d.issues.length() {
+    return Err(f"{key} is not linked to {d.slug} — see 'lll doc view {d.slug}'")
+  }
+  set_doc_issues(d, remaining)?
+  fmt.Println(f"Unlinked {key} from {d.slug}")
+  Ok(())
 }
