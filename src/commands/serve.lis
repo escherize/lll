@@ -133,8 +133,8 @@ pub struct SearchVM {
 /// construct a rail it must never render. Page handlers compose the two
 /// halves into a PageVM instead; a fragment cannot carry shell by accident.
 pub struct RailVM {
-  // Which row reads as current: "board", "mine", "issues" or "settings".
-  // Which row reads as current: "board", "mine" or "search".
+  // Which row reads as current: "board", "mine", "issues", "projects",
+  // "search" or "settings".
   pub active: string,
   // Config's `me`. Empty means there is no member to be, so no "My issues"
   // row — a rail link that leads nowhere is worse than no rail link.
@@ -195,6 +195,10 @@ pub struct IssueVM {
   pub assignee: string,
   pub avatar: AvatarVM,
   pub project: string,
+  // /issues filtered to this project, or "" when the issue has none. The
+  // name alone cannot answer that: a project may legitimately be called
+  // "none", which is also what the empty case prints.
+  pub project_href: string,
   pub labels: Slice<LabelVM>,
   // The author's marker, or "" for most issues.
   pub emoji: string,
@@ -238,9 +242,11 @@ pub struct IssuesVM {
   pub states: Slice<StateOpt>,
   pub members: Slice<string>,
   pub label_names: Slice<string>,
+  pub project_names: Slice<string>,
   pub state: string,
   pub assignee: string,
   pub label: string,
+  pub project: string,
   pub sort: string,
   // URL with every filter dropped and the sort kept, for "Clear".
   pub clear_href: string,
@@ -249,12 +255,13 @@ pub struct IssuesVM {
   pub error: string,
 }
 
-/// The /issues URL state: three filters plus the sort spec. Held together so
+/// The /issues URL state: four filters plus the sort spec. Held together so
 /// a header link can rebuild the URL with only the sort changed.
 struct IssuesQuery {
   state: string,
   assignee: string,
   label: string,
+  project: string,
   sort: string,
 }
 
@@ -308,6 +315,30 @@ pub struct SettingsVM {
   pub members: Slice<SetMemberVM>,
   pub projects: Slice<SetProjectVM>,
   pub statuses: Slice<StateOpt>,
+}
+
+/// One project on /projects: what it is, how far along it is, and how many
+/// issues point at it.
+pub struct ProjectVM {
+  pub name: string,
+  // The first ~2 lines of the description. Projects are the one record whose
+  // long text the web could never show; the CLI writes it with -d.
+  pub description: string,
+  pub status: string,
+  pub status_label: string,
+  // The --st-* token the status dot borrows. See project_tone.
+  pub tone: string,
+  pub scope: string,
+  // Issues pointing here, under the same team scope /issues filters by, so
+  // the number and the link it labels can never disagree.
+  pub count: int,
+  // /issues pre-filtered to this project — the count made clickable.
+  pub href: string,
+}
+
+/// View model for /projects.
+pub struct ProjectsVM {
+  pub projects: Slice<ProjectVM>,
 }
 
 /// One connected browser: its scope ("board" or "issue:KEY-1") and the
@@ -404,6 +435,7 @@ pub fn run_server(port: int) -> Result<(), string> {
   let _ = render("issues-page", PageVM { rail: shell, page: IssuesVM { .. } })?
   let _ = render("settings-page", PageVM { rail: shell, page: SettingsVM { .. } })?
   let _ = render("search-page", PageVM { rail: shell, page: SearchVM { .. } })?
+  let _ = render("projects-page", PageVM { rail: shell, page: ProjectsVM { .. } })?
 
   // One PB subscription for everything. Issues are team-scoped at most —
   // never state-filtered: PB emits nothing when an update moves a record out
@@ -442,6 +474,12 @@ pub fn run_server(port: int) -> Result<(), string> {
     "GET /issue/{key}",
     |w: http.ResponseWriter, r: Ref<http.Request>| {
       issue_page(w, r, team_id, cfg.me)
+    },
+  )
+  http.HandleFunc(
+    "GET /projects",
+    |w: http.ResponseWriter, r: Ref<http.Request>| {
+      projects_page(w, r, team_id, cfg.me)
     },
   )
   http.HandleFunc(
@@ -737,6 +775,10 @@ fn md_html(src: string) -> template.HTML {
 fn issue_vm(issue: models.Issue, comments: Slice<models.Comment>) -> IssueVM {
   let assignee = issue.expand.assignee.name
   let mut project = issue.expand.project.name
+  let mut project_href = ""
+  if project != "" {
+    project_href = f"/issues?project={url.QueryEscape(project)}"
+  }
   if project == "" { project = "none" }
   IssueVM {
     deleted: false,
@@ -748,6 +790,7 @@ fn issue_vm(issue: models.Issue, comments: Slice<models.Comment>) -> IssueVM {
     assignee,
     avatar: avatar_vm(assignee),
     project,
+    project_href,
     labels: label_vms(issue.expand.labels),
     emoji: issue.emoji,
     description: md_html(issue.description),
@@ -1046,6 +1089,9 @@ fn issues_href(q: IssuesQuery) -> string {
     parts = parts.append(f"assignee={url.QueryEscape(q.assignee)}")
   }
   if q.label != "" { parts = parts.append(f"label={url.QueryEscape(q.label)}") }
+  if q.project != "" {
+    parts = parts.append(f"project={url.QueryEscape(q.project)}")
+  }
   if q.sort != "" { parts = parts.append(f"sort={url.QueryEscape(q.sort)}") }
   if parts.is_empty() { return "/issues" }
   f"/issues?{strings.Join(parts, "&")}"
@@ -1100,10 +1146,11 @@ fn fetch_issue_rows(
   state: string,
   assignee_id: string,
   label_id: string,
+  project_id: string,
   sort: string,
 ) -> Result<models.IssueList, string> {
   let mut path = f"/api/collections/issues/records?perPage={table_page_size()}&expand=team,assignee,labels&sort={url.QueryEscape(sort)}"
-  let filter = query.filter(team_id, state, assignee_id, "", label_id, "")
+  let filter = query.filter(team_id, state, assignee_id, project_id, label_id, "")
   if filter != "" { path = f"{path}&filter={url.QueryEscape(filter)}" }
   let body = pb.get(path)?
   let mut issues = models.IssueList { .. }
@@ -1133,6 +1180,13 @@ fn fetch_label_names() -> Result<Slice<string>, string> {
     return Err(f"decoding labels: {e}")
   }
   Ok(result.items.map(|l| l.name))
+}
+
+/// Every project name, for the project chooser. Unscoped by team for the
+/// same reason labels are: a project created without --team is
+/// workspace-wide, and resolve_project does not scope by team either.
+fn fetch_project_names() -> Result<Slice<string>, string> {
+  Ok(fetch_projects()?.map(|p| p.name))
 }
 
 /// The issues table: one sortable, filterable, bookmarkable list.
@@ -1190,8 +1244,20 @@ fn issues_page(w: http.ResponseWriter, r: Ref<http.Request>, team_id: string, me
     }
   }
 
-  let q = IssuesQuery { state, assignee, label, sort }
-  let list = match fetch_issue_rows(team_id, state, assignee_id, label_id, sort) {
+  let mut project = query_param(r, "project")
+  let mut project_id = ""
+  if project != "" {
+    match resolve_project(project) {
+      Ok(p) => { project_id = p.id },
+      Err(e) => {
+        err = e
+        project = ""
+      },
+    }
+  }
+
+  let q = IssuesQuery { state, assignee, label, project, sort }
+  let list = match fetch_issue_rows(team_id, state, assignee_id, label_id, project_id, sort) {
     Ok(l) => l,
     Err(e) => {
       http.Error(w, e, 500)
@@ -1202,6 +1268,7 @@ fn issues_page(w: http.ResponseWriter, r: Ref<http.Request>, team_id: string, me
   // matched: a filter you cannot widen out of is a dead end.
   let members = fetch_member_names().unwrap_or([])
   let label_names = fetch_label_names().unwrap_or([])
+  let project_names = fetch_project_names().unwrap_or([])
 
   let rows = list.items.map(card_vm)
   let vm = IssuesVM {
@@ -1214,9 +1281,11 @@ fn issues_page(w: http.ResponseWriter, r: Ref<http.Request>, team_id: string, me
     states: state_opts(),
     members,
     label_names,
+    project_names,
     state,
     assignee,
     label,
+    project,
     sort,
     clear_href: issues_href(IssuesQuery { sort, .. }),
     error: err,
@@ -1231,6 +1300,95 @@ fn issues_page(w: http.ResponseWriter, r: Ref<http.Request>, team_id: string, me
   w.Header().Set("Cache-Control", "no-store")
   w.Header().Set("Content-Type", "text/html; charset=utf-8")
   let _ = w.Write(html.bytes())
+}
+
+// ---------- /projects ----------
+
+/// The projects list: the read path a project has never had.
+///
+/// A project is created by `lll project create` or the Projects section of
+/// /settings, and until now that settings row was the only place one was ever
+/// shown — the relation was write-only, which is worse than no relation
+/// because it accumulates data nobody can check. This page is the cheapest
+/// honest read path: name, status, scope, and the issue count, with the count
+/// linking to /issues pre-filtered to that project.
+///
+/// No SSE, for the reason /issues and /settings have none: the bridge
+/// broadcasts one unfiltered #board to every board-scoped client, so a page
+/// that subscribed would be morphed into the board. Nothing here changes
+/// often enough to pay for a second scope.
+fn projects_page(
+  w: http.ResponseWriter,
+  // Nothing on this page is scoped by query string: it is every project the
+  // workspace has.
+  _r: Ref<http.Request>,
+  team_id: string,
+  me: string,
+) {
+  let vm = match projects_vm(team_id) {
+    Ok(v) => v,
+    Err(e) => {
+      http.Error(w, e, 500)
+      return
+    },
+  }
+  let page = PageVM { rail: rail_vm("projects", me, shell_team(team_id)), page: vm }
+  let html = match render("projects-page", page) {
+    Ok(h) => h,
+    Err(e) => {
+      http.Error(w, e, 500)
+      return
+    },
+  }
+  w.Header().Set("Cache-Control", "no-store")
+  w.Header().Set("Content-Type", "text/html; charset=utf-8")
+  let _ = w.Write(html.bytes())
+}
+
+fn projects_vm(team_id: string) -> Result<ProjectsVM, string> {
+  let projects = fetch_projects()?
+  Ok(ProjectsVM {
+    projects: projects.map(|p| ProjectVM {
+      name: p.name,
+      description: snippet(p.description),
+      status: p.status,
+      status_label: state_label(p.status),
+      tone: project_tone(p.status),
+      scope: scope_label(p.expand.team.key),
+      count: project_count(team_id, p.id),
+      href: f"/issues?project={url.QueryEscape(p.name)}",
+    }),
+  })
+}
+
+/// The state hue a project status borrows for its dot. It reuses the six
+/// --st-* tokens rather than minting five more: a project lifecycle is the
+/// issue lifecycle at a coarser grain, and DESIGN.md rations colour hard.
+fn project_tone(status: string) -> string {
+  match status {
+    "started" => "in-progress",
+    "completed" => "done",
+    "cancelled" => "cancelled",
+    "paused" => "backlog",
+    _ => "todo",
+  }
+}
+
+/// How many issues point at one project. Scoped by the same team the table
+/// scopes by, so the count and the /issues link it labels always agree — a
+/// project owned by another team reads 0 rather than a number no page shows.
+///
+/// perPage=1: PocketBase reports totalItems for the filter regardless, so the
+/// count costs one tiny request per project and never a page of records.
+fn project_count(team_id: string, project_id: string) -> int {
+  let filter = query.filter(team_id, "", "", project_id, "", "")
+  let path = f"/api/collections/issues/records?perPage=1&fields=id&filter={url.QueryEscape(filter)}"
+  let Ok(body) = pb.get(path) else {
+    return 0
+  }
+  let mut list = models.IssueList { .. }
+  if json.Unmarshal(body.bytes(), &list).is_err() { return 0 }
+  list.total_items
 }
 
 // ---------- /settings ----------

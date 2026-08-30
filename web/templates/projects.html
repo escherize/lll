@@ -1,0 +1,60 @@
+{{/* The projects list — the read path a project never had.
+
+     A project is created by `lll project create` or the Projects section of
+     /settings, and until this page the settings row that manages one was the
+     only place a project was ever shown. A relation nobody can see is worse
+     than no relation: it accumulates data no one can check.
+
+     Zero JavaScript and no /events connection, for the same reason /issues
+     and /settings have none: the bridge broadcasts ONE unfiltered #board
+     fragment to every board-scoped client, so a page that subscribed would be
+     morphed into the board. A project's name, status and issue count do not
+     move often enough to pay for a second SSE scope.
+
+     Every row links into /issues?project=NAME, so the count is the thing you
+     click — the list answers "what is there" and hands the drilldown to the
+     table that already knows how to filter.
+
+     Its dot is a PageVM: `.Rail` is the shell, `.Page` this page's own view
+     model. Class names are namespaced `pj-` because template names and CSS
+     class names are both global here (task-106). */}}
+{{define "projects-page"}}<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Projects · lll</title>
+<link rel="stylesheet" href="/static/theme.css">
+{{template "accent-head" .Rail}}
+</head>
+<body>
+{{template "icons"}}
+<div class="app">
+  {{template "rail" .Rail}}
+  <div class="main">
+    <header class="topbar">
+      <div class="crumbs"><span class="here">Projects</span></div>
+      <div class="spacer"></div>
+      <span class="pj-count">{{len .Page.Projects}} project{{if ne (len .Page.Projects) 1}}s{{end}}</span>
+    </header>
+    {{template "projects-list" .Page}}
+  </div>
+</div>
+</body>
+</html>{{end}}
+
+{{/* #projects is this page's stable id, matching #board and #issues. Nothing
+     morphs it today, but the Stable Id Rule holds for every surface.
+
+     The status dot borrows an --st-* hue rather than minting five project
+     colours: a project lifecycle is the issue lifecycle at a coarser grain,
+     and DESIGN.md rations colour. See project_tone in serve.lis. */}}
+{{define "projects-list"}}<div id="projects" class="pj-body">
+{{range .Projects}}<a class="pj-row" href="{{.Href}}" title="Show the issues in {{.Name}}">
+<span class="pj-dot" style="background:var(--st-{{.Tone}})"></span>
+<span class="pj-main"><span class="pj-name">{{.Name}}</span>{{if .Description}}<span class="pj-desc">{{.Description}}</span>{{end}}</span>
+<span class="pj-status">{{.StatusLabel}}</span>
+<span class="pj-scope">{{.Scope}}</span>
+<span class="pj-n">{{.Count}} issue{{if ne .Count 1}}s{{end}}</span>
+</a>
+{{else}}<p class="pj-empty">No projects yet. Add one under Projects in <a href="/settings">Settings</a>, or run <code>lll project create -n "name"</code>.</p>
+{{end}}</div>{{end}}

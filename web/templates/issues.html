@@ -43,8 +43,10 @@
       <select id="f-assignee" name="assignee"><option value="">Anyone</option>{{range .Page.Members}}<option value="{{.}}"{{if eq . $.Page.Assignee}} selected{{end}}>{{.}}</option>{{end}}</select>
       <label for="f-label">Label</label>
       <select id="f-label" name="label"><option value="">Any</option>{{range .Page.LabelNames}}<option value="{{.}}"{{if eq . $.Page.Label}} selected{{end}}>{{.}}</option>{{end}}</select>
+      <label for="f-project">Project</label>
+      <select id="f-project" name="project"><option value="">Any</option>{{range .Page.ProjectNames}}<option value="{{.}}"{{if eq . $.Page.Project}} selected{{end}}>{{.}}</option>{{end}}</select>
       <button type="submit" class="btn">Filter</button>
-      {{if or .Page.State .Page.Assignee .Page.Label}}<a class="itbl-clear" href="{{.Page.ClearHref}}">Clear</a>{{end}}
+      {{if or .Page.State .Page.Assignee .Page.Label .Page.Project}}<a class="itbl-clear" href="{{.Page.ClearHref}}">Clear</a>{{end}}
     </form>
     {{template "issues-table" .Page}}
   </div>

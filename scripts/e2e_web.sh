@@ -11,9 +11,10 @@
 # when playwright-cli is available — a real-browser check that a CLI-created
 # issue appears on an open board without reload, and the zero-JavaScript
 # /issues table (server-side sort and filter through query params, honest row
-# count, bad params degrading to the flash strip), and /search filtering as it
-# is typed (results patched in with no page load, the address bar following
-# the query, the X clearing both).
+# count, bad params degrading to the flash strip), /search filtering as it is
+# typed (results patched in with no page load, the address bar following the
+# query, the X clearing both), and the /projects list with its rail row, issue
+# counts and project filter on /issues.
 # Standalone (boots its own PB), also invoked by e2e.sh.
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -705,6 +706,71 @@ assert_contains "$issues_rail" 'href="/issues"' "the rail has an All issues row"
 assert_contains "$board_rail" 'href="/issues"' "the board's rail has it too"
 assert_contains "$issues_rail" '<a href="/issues" class="active">' "the All issues row is current on its own page"
 assert_not_contains "$issues_rail" '<a href="/" class="active">' "and the board row is not"
+# --- /projects: the read path a project never had (task-113) ---
+# Projects have been in the schema since the start and issues have always
+# related to them, but until this page the only place one was ever SHOWN was
+# the settings row that manages it. Every assertion here is a read path.
+"$LIN" project create -n "Ship the board" --status started \
+  -d "The web board and everything it needs." >/dev/null
+"$LIN" issue create -t "Project member issue" --project "Ship the board" >/dev/null
+pj_key=$("$LIN" issue list --search "Project member issue" | awk '{print $1}' | head -1)
+[ -n "$pj_key" ] || fail "the issue created into a project was not found"
+
+projects=$(curl -sf "$WEB/projects") || fail "/projects did not serve"
+assert_contains "$projects" 'id="projects"' "the projects page carries its stable id"
+assert_contains "$projects" "Ship the board" "the project is listed by name"
+assert_contains "$projects" "Started" "the list shows the project status"
+assert_contains "$projects" "The web board and everything it needs." \
+  "the list shows the description only the CLI could write"
+assert_contains "$projects" 'href="/issues?project=Ship&#43;the&#43;board"' \
+  "each row links into the issues table filtered to that project"
+assert_contains "$projects" "1 issue" "the row counts the issues pointing at it"
+assert_contains "$projects" 'var(--st-in-progress)' \
+  "a started project borrows a state hue rather than a new colour"
+
+# Same reasoning as /issues and /settings: the bridge broadcasts one
+# unfiltered #board to every board-scoped client, so this page subscribes to
+# nothing and loads no script to subscribe with.
+assert_not_contains "$projects" "<script" "the projects page loads no script"
+assert_not_contains "$projects" "data-init" "the projects page opens no SSE connection"
+
+# The rail row is what makes a project reachable from the board at all.
+projects_rail=$(rail "$projects")
+assert_contains "$board_rail" 'href="/projects"' "the board's rail has a Projects row"
+assert_contains "$projects_rail" '<a href="/projects" class="active">' \
+  "the Projects row is current on its own page"
+[ "$(rail_rows "$projects_rail")" = "$(rail_rows "$board_rail")" ] \
+  || fail "the board and projects rails offer different destinations"
+
+# The project filter is one more param on the encoding /issues already has,
+# so it composes with the others and survives a sort link.
+pj_filtered=$(curl -sf "$WEB/issues?project=Ship+the+board")
+assert_contains "$pj_filtered" "Project member issue" "?project= keeps the issue in that project"
+assert_contains "$pj_filtered" '<option value="Ship the board" selected>' \
+  "the project chooser reflects the URL"
+assert_contains "$pj_filtered" 'href="/issues?project=Ship&#43;the&#43;board&amp;sort=-created"' \
+  "a sort link keeps the project filter"
+assert_not_contains "$(curl -sf "$WEB/issues?project=Ship+the+board&state=done")" \
+  "Project member issue" "?project= composes with ?state= instead of replacing it"
+assert_not_contains "$(curl -sf "$WEB/issues?project=Ship+the+board")" \
+  "Table filter subject" "?project= drops issues in no project"
+
+# A stale bookmark degrades to the flash strip, never a 500 — same contract as
+# every other rejected param on this page.
+bad_pj=$(curl -sf "$WEB/issues?project=nosuchproject") \
+  || fail "an unknown project param returned an error status"
+assert_contains "$bad_pj" 'class="flash"' "an unknown project is reported in the flash strip"
+assert_contains "$bad_pj" "no project named" "the flash names the rejected project"
+assert_contains "$bad_pj" '<table id="issues"' "an unknown project still serves the table"
+
+# An issue says which project it belongs to, and the name is the way in.
+pj_issue=$(curl -sf "$WEB/issue/$pj_key")
+assert_contains "$pj_issue" '<a href="/issues?project=Ship&#43;the&#43;board">Ship the board</a>' \
+  "the issue page links its project to that project's issues"
+assert_contains "$(curl -sf "$WEB/issue/ENG-1")" \
+  '<span class="k">Project</span><span class="v">none' \
+  "an issue with no project says so plainly, with nothing to click"
+
 # --- /settings: server-side, shared, CLI-only things (task-83) ---
 # The id of the row a section rendered for a named record, so the assertions
 # below can edit and delete the record the page itself is showing.
