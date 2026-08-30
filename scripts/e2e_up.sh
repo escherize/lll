@@ -5,7 +5,9 @@
 # with the move printed, SIGINT stopping both servers (one process now: PB
 # shuts down gracefully, taking the board with it), and the reuse path (a
 # healthy external PB at the configured URL is used, not restarted, and
-# survives lll up's exit; that external PB is a second lll up instance).
+# survives lll up's exit; that external PB is a second lll up instance), and
+# first-boot identity (me guessed from $USER, written to .lll.toml, seeded as
+# a member, and not re-guessed once configured).
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
@@ -22,6 +24,8 @@ WEB_PORT=$(( (RANDOM % 20000) + 40000 ))
 UP_LOG="$DATA_DIR/up.log"
 
 cleanup() {
+  # A first boot writes one; the developer's own file goes back on top.
+  rm -f .lll.toml
   if [ "${RESTORE_TOML:-}" = 1 ] && [ -f "$DATA_DIR/.lll.toml.saved" ]; then
     mv "$DATA_DIR/.lll.toml.saved" .lll.toml
   fi
@@ -48,7 +52,7 @@ sleep 0.5
 # --- own path: boots PB on DB_PORT+1, board on WEB_PORT+1, default creds ---
 set -m
 env -u LLL_ADMIN_EMAIL -u LLL_ADMIN_PASSWORD \
-  LLL_URL="http://127.0.0.1:$DB_PORT" LLL_TEAM=E2E \
+  LLL_URL="http://127.0.0.1:$DB_PORT" LLL_TEAM=E2E USER=e2euser \
   "$LLL" up --no-open --port "$WEB_PORT" --pb-dir "$DATA_DIR/pb_data" >"$UP_LOG" 2>&1 &
 UP_PID=$!
 set +m
@@ -66,6 +70,19 @@ curl -sf -X POST "http://127.0.0.1:$DB2/api/collections/_superusers/auth-with-pa
   -H 'Content-Type: application/json' \
   -d '{"identity":"admin@local.dev","password":"admin-local-123"}' >/dev/null \
   || fail "default admin creds do not authenticate"
+
+# --- first boot settles an identity without asking (task-31) ---
+grep -q 'guessed me = "e2euser" from $USER' "$UP_LOG" || fail "first boot did not guess me from \$USER"
+grep -q 'created member e2euser' "$UP_LOG" || fail "first boot did not seed the member"
+grep -q '^me     e2euser' "$UP_LOG" || fail "first boot did not print me"
+grep -q 'me = "e2euser"' .lll.toml || fail "me not written to .lll.toml: $(cat .lll.toml 2>&1)"
+curl -sf "http://127.0.0.1:$DB2/api/collections/members/records?filter=name%3D%27e2euser%27" \
+  | grep -q '"name":"e2euser"' || fail "seeded member not in the members collection"
+
+# The seeded member is usable as an assignee straight away: the point of it.
+out=$(LLL_URL="http://127.0.0.1:$DB2" LLL_TEAM=E2E \
+  "$LLL" issue create -t "assign on first boot" --assignee e2euser)
+printf '%s' "$out" | grep -q "Created E2E-" || fail "assignment to the seeded member failed: $out"
 
 # SIGINT: the board and the in-process PB must both die with the process.
 kill -INT -- "-$UP_PID" 2>/dev/null || kill -INT "$UP_PID"
@@ -100,6 +117,9 @@ for _ in $(seq 1 100); do
   sleep 0.1
 done
 grep -q "(already running)" "$UP_LOG" || fail "reuse path not taken"
+# .lll.toml now names me, so a later boot must use it, not guess again.
+grep -q "guessed me" "$UP_LOG" && fail "me re-guessed with one already configured"
+grep -q "^me     e2euser" "$UP_LOG" || fail "configured me not used on a later boot"
 kill -INT -- "-$UP_PID" 2>/dev/null || kill -INT "$UP_PID"
 sleep 0.5
 UP_PID=""

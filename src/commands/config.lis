@@ -1,5 +1,6 @@
 import "go:fmt"
 import "go:os"
+import "go:strings"
 
 /// Dispatch `lll config <verb>`.
 pub fn config_cmd(args: Slice<string>) -> Result<(), string> {
@@ -9,6 +10,7 @@ pub fn config_cmd(args: Slice<string>) -> Result<(), string> {
   }
   match verb {
     "init" => config_init(),
+    "set" => config_set(args),
     "--help" => {
       config_usage()
       Ok(())
@@ -26,10 +28,82 @@ fn config_usage() {
     "lll config - manage configuration
 
 Usage:
-  lll config init    write a commented .lll.toml template to the current directory
+  lll config init          write a commented .lll.toml template to the current directory
+  lll config set me NAME   set who you are, in ./.lll.toml
+
+'me' names the member that authors your comments. 'lll up' guesses it from
+$USER on first boot, which is wrong on a shared machine — this is how you fix
+it. A name with no member yet: 'lll member add -n NAME'.
 
 Precedence: env vars (LLL_URL, LLL_TEAM, LLL_SORT, LLL_WEB_URL) > ./.lll.toml > ~/.config/lll/lll.toml",
   )
+}
+
+/// `lll config set me <name>`. Only 'me' is settable: it is the one key a
+/// machine-specific guess gets wrong, and everything else is easier to read
+/// and edit in the commented template than through a CLI.
+fn config_set(args: Slice<string>) -> Result<(), string> {
+  let Some(key) = args.get(3) else {
+    return Err("usage: lll config set me <name>")
+  }
+  if key != "me" {
+    return Err(
+      f"cannot set '{key}' — only 'me' is settable; edit .lll.toml for the rest (see 'lll config init')",
+    )
+  }
+  let Some(value) = args.get(4) else {
+    return Err("usage: lll config set me <name>")
+  }
+  let name = strings.TrimSpace(value)
+  if name == "" { return Err("usage: lll config set me <name>") }
+
+  set_toml_key("me", name)?
+  fmt.Println(f"me = \"{name}\" in .lll.toml")
+  fmt.Println(f"if {name} is not a member yet: lll member add -n \"{name}\"")
+  Ok(())
+}
+
+/// Set `key = "value"` in ./.lll.toml, creating the file if needed. Replaces
+/// an existing assignment instead of appending a second one — duplicate keys
+/// make the file unparseable, and the whole point of these keys is that they
+/// get edited more than once.
+pub fn set_toml_key(key: string, value: string) -> Result<(), string> {
+  let line = f"{key} = \"{value}\""
+  let mut text = ""
+  if os.Stat(".lll.toml").is_ok() {
+    let Ok(data) = os.ReadFile(".lll.toml") else {
+      return Err("reading .lll.toml")
+    }
+    text = data as string
+  }
+
+  let mut lines: Slice<string> = []
+  let mut replaced = false
+  for l in text.split("\n") {
+    if !replaced && assigns(l, key) {
+      lines = lines.append(line)
+      replaced = true
+    } else {
+      lines = lines.append(l)
+    }
+  }
+  let mut out = strings.Join(lines, "\n")
+  if !replaced {
+    if out != "" && !strings.HasSuffix(out, "\n") { out += "\n" }
+    out += line + "\n"
+  }
+  if let Err(e) = os.WriteFile(".lll.toml", out.bytes(), 0o644) {
+    return Err(f"writing .lll.toml: {e}")
+  }
+  Ok(())
+}
+
+/// True for an uncommented `key = ...` line. The commented keys the template
+/// ships with must be left alone, or setting one would silently uncomment it.
+fn assigns(line: string, key: string) -> bool {
+  let trimmed = strings.TrimSpace(line)
+  if !strings.HasPrefix(trimmed, key) { return false }
+  strings.HasPrefix(strings.TrimSpace(strings.TrimPrefix(trimmed, key)), "=")
 }
 
 fn config_init() -> Result<(), string> {
@@ -50,7 +124,8 @@ fn config_init() -> Result<(), string> {
 # prefix - for descending (e.g. \"-updated\").
 # sort = \"created\"
 
-# Who you are. Identity placeholder until auth exists.
+# Who you are. Identity placeholder until auth exists. 'lll up' guesses this
+# from $USER on first boot; fix it with 'lll config set me <name>'.
 # me = \"bryan\"
 
 # Web board base URL, used by 'lll board' and 'lll issue url' / 'view -w'.

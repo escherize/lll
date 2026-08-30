@@ -38,7 +38,10 @@ LIN=target/.lisette/bin/lll
 # install. `lll up` needs a team and refuses to start without one; ENG is the
 # one this suite uses anyway, and seed_team below fixes up its display name.
 start_pb() {
-  LLL_URL="$URL" LLL_TEAM=ENG "$LIN" up --no-open \
+  # USER is pinned: `lll up` seeds a member named after it on first boot
+  # (task-31), and the member assertions below must not depend on who runs
+  # this suite.
+  LLL_URL="$URL" LLL_TEAM=ENG USER=e2e "$LIN" up --no-open \
     --pb-dir "$DATA_DIR/pb_data" --port "$WEB_PORT" </dev/null >>"$PB_LOG" 2>&1 &
   PB_PID=$!
   for _ in $(seq 1 150); do
@@ -50,6 +53,8 @@ start_pb() {
 start_pb || { echo "FAIL: lll up did not start" >&2; cat "$PB_LOG" >&2; exit 1; }
 WATCH_PIDS=""
 cleanup() {
+  # `lll up` writes one on a first boot; the developer's own goes back on top.
+  rm -f .lll.toml
   if [ "${RESTORE_TOML:-}" = 1 ] && [ -f "$DATA_DIR/.lll.toml.saved" ]; then
     mv "$DATA_DIR/.lll.toml.saved" .lll.toml
   fi
@@ -155,6 +160,22 @@ assert_contains "$(cat "$WORK/.lll.toml")" "team = " "template mentions team"
 if (cd "$WORK" && "$LLL_ABS" config init >/dev/null 2>&1); then
   fail "config init overwrote an existing .lll.toml"
 fi
+rm "$WORK/.lll.toml"
+
+# --- config set me (task-31): creates, then replaces rather than appends ---
+out=$(cd "$WORK" && "$LLL_ABS" config set me alice)
+assert_contains "$out" 'me = "alice"' "config set me output"
+assert_contains "$out" "lll member add" "config set me names the member fix"
+assert_contains "$(cat "$WORK/.lll.toml")" 'me = "alice"' "config set me wrote the key"
+(cd "$WORK" && "$LLL_ABS" config set me bob >/dev/null)
+[ "$(grep -c '^me = ' "$WORK/.lll.toml")" = 1 ] \
+  || fail "config set me appended a duplicate key: $(cat "$WORK/.lll.toml")"
+assert_contains "$(cat "$WORK/.lll.toml")" 'me = "bob"' "config set me replaced the value"
+# A duplicate key would make the file unparseable; prove it still loads.
+out=$(cd "$WORK" && LLL_URL=$URL LLL_TEAM=ENG "$LLL_ABS" issue list)
+assert_contains "$out" "ENG-1" "config still parses after two config set me"
+out=$(cd "$WORK" && "$LLL_ABS" config set url http://x 2>&1) && fail "config set accepted a key other than me"
+assert_contains "$out" "only 'me' is settable" "config set rejects other keys"
 rm "$WORK/.lll.toml"
 
 # --- config precedence: env > ./.lll.toml > ~/.config/lll/lll.toml ---

@@ -89,7 +89,7 @@ fn verbs(noun: string) -> Slice<string> {
     "member" => ["list", "add"],
     "project" => ["list", "view", "create"],
     "label" => ["list", "create"],
-    "config" => ["init"],
+    "config" => ["init", "set"],
     "completions" => ["bash", "zsh", "fish"],
     _ => [],
   }

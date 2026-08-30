@@ -50,10 +50,13 @@ file found is used whole; env vars override individual fields.
 | `LLL_TEAM` | `team` | Default team key; scopes `issue list`, required by `issue create` |
 | `LLL_SORT` | `sort` | Default sort: `created`, `updated`, `priority`, `number`; `-` prefix descends |
 | `LLL_WEB_URL` | `web_url` | Web board base URL for `board`, `issue url`, `view -w` |
-| — | `me` | Your member name; authors your comments |
+| — | `me` | Your member name; authors your comments and receives assignments |
 | `LLL_ADMIN_EMAIL` / `LLL_ADMIN_PASSWORD` | — | PocketBase superuser for `lll up` (a logged default is used when unset) |
 
-`lll config init` writes a commented template.
+`lll config init` writes a commented template. On its first boot `lll up`
+guesses `me` from `$USER`, writes it to `./.lll.toml` and seeds a matching
+member, so assignment works immediately — no prompt. That guess is wrong on a
+shared machine: `lll config set me <name>` fixes it.
 
 ## CLI tour
 

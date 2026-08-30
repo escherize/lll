@@ -127,12 +127,14 @@ pub fn up(args: Slice<string>) -> Result<(), string> {
   // data dir must just work.
   let team = ensure_team(cfg.team)?
   let _ = os.Setenv("LLL_TEAM", team)
+  let me = ensure_me(cfg.me)?
   let chosen = free_port(web_port)
   if chosen != web_port {
     fmt.Println(f"port {web_port} taken — board moving to {chosen}")
   }
   fmt.Println(admin_line)
   fmt.Println(f"team   {team}")
+  if me != "" { fmt.Println(f"me     {me}") }
   // The board binds in microseconds; a browser takes far longer to launch,
   // so opening before run_server blocks is not a race worth guarding.
   let board_url = f"http://127.0.0.1:{chosen}"
@@ -172,7 +174,12 @@ The board needs a team. A configured team (LLL_TEAM or 'team' in .lll.toml)
 is created on the server if it is missing. With none configured lll up asks
 for one and writes the answer to ./.lll.toml, so the board and the CLI always
 agree; with nothing on stdin to answer with (scripts, agents, CI) it refuses
-to start rather than run on a team only this process knows about.",
+to start rather than run on a team only this process knows about.
+
+It also needs to know who you are. On first boot 'me' is guessed from $USER,
+written to ./.lll.toml and seeded as a member so assignment and comments work
+straight away — no second prompt. That guess is wrong on a shared machine:
+'lll config set me <name>' fixes it.",
   )
 }
 
@@ -205,6 +212,33 @@ fn ensure_team(want: string) -> Result<string, string> {
   Ok(key)
 }
 
+/// Who the board and the CLI think you are. `lll up` already asks for a team
+/// and a second prompt is worse than a wrong default, so a missing 'me' is
+/// taken from $USER, written to .lll.toml where it is visible, and changed
+/// with 'lll config set me <name>'. Wrong on a shared machine; one command to
+/// fix. The matching member is seeded either way, so assignment and comment
+/// authorship work on the first boot rather than the second.
+/// (ADR-1: this all goes away when members becomes an auth collection.)
+fn ensure_me(want: string) -> Result<string, string> {
+  let mut name = strings.TrimSpace(want)
+  if name == "" {
+    name = strings.TrimSpace(os.Getenv("USER"))
+    // No $USER to guess from is not worth failing a boot over: comments go
+    // authorless and 'lll config set me' still works.
+    if name == "" { return Ok("") }
+    set_toml_key("me", name)?
+    fmt.Println(
+      f"guessed me = \"{name}\" from $USER, wrote it to .lll.toml — 'lll config set me <name>' to change it",
+    )
+  }
+  let existing = find_member(name)?
+  if existing.is_none() {
+    let created = create_member(name, "")?
+    fmt.Println(f"created member {created.name}")
+  }
+  Ok(name)
+}
+
 /// Ask for a team key on stdin, defaulting to `suggested`. Errs when stdin
 /// has no answer to give (scripts, agents, CI).
 fn ask_team(suggested: string) -> Result<string, string> {
@@ -222,25 +256,8 @@ fn ask_team(suggested: string) -> Result<string, string> {
 
 /// Persist the team to ./.lll.toml so the next boot and the CLI agree.
 fn save_team(key: string) -> Result<(), string> {
-  let line = f"team = \"{key}\"\n"
-  if !os.Stat(".lll.toml").is_ok() {
-    if let Err(e) = os.WriteFile(".lll.toml", line.bytes(), 0o644) {
-      return Err(f"writing .lll.toml: {e}")
-    }
-    fmt.Println(f"wrote .lll.toml with team = \"{key}\"")
-    return Ok(())
-  }
-
-  let Ok(data) = os.ReadFile(".lll.toml") else {
-    return Err("reading .lll.toml")
-  }
-  let Ok(f) = os.OpenFile(".lll.toml", os.O_APPEND | os.O_WRONLY, 0o644) else {
-    return Err("opening .lll.toml to append the team")
-  }
-  if !strings.HasSuffix(data as string, "\n") { let _ = f.WriteString("\n") }
-  let _ = f.WriteString(line)
-  let _ = f.Close()
-  fmt.Println(f"appended team = \"{key}\" to .lll.toml")
+  set_toml_key("team", key)?
+  fmt.Println(f"wrote team = \"{key}\" to .lll.toml")
   Ok(())
 }
 
