@@ -153,6 +153,20 @@ mise run gate      # all three -- what a change must pass before it lands
 itself — no external binary — plus `jq` and `python3`. It never touches your
 data.
 
+`scripts/import_sidecar.py` imports this project's own `.private` sidecar
+tracker (Backlog.md tasks + wiki/decisions/findings) into an lll instance as
+team `LLL`. It is idempotent — every record carries an `Origin: sidecar ...`
+body line and a re-run creates nothing that is already there — so re-running
+it is safe and is how new sidecar records get picked up:
+
+```sh
+LLL_TOKEN=<token> python3 scripts/import_sidecar.py --url <instance-url>
+```
+
+`--url` is required (it never guesses an instance) and the token comes from
+`lll token create` (superuser-gated). Worklogs are not imported; the sidecar
+stays their archive.
+
 Layout:
 
 - `src/` — Lisette source: `main.lis` dispatch, `commands/` one file per
