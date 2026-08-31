@@ -83,7 +83,7 @@ pub fn watch(args: Slice<string>) -> Result<(), string> {
     search,
   )
   let topic = realtime.topic_with_options("issues", filter, "team,assignee")?
-  let ch = realtime.subscribe(pb.base_url()?, [topic])?
+  let ch = realtime.subscribe(pb.base_url()?, [topic], None)?
 
   // Last-seen records, keyed by record id, for rendering updates as field
   // transitions. Seeded lazily: the first sight of a record is a plain
@@ -178,7 +178,9 @@ pub fn issue_watch(args: Slice<string>) -> Result<(), string> {
     f"issue='{issue.id}'",
     "author",
   )?
-  let ch = realtime.subscribe(pb.base_url()?, [issue_topic, comments_topic])?
+  // No refresh hook: watch rides the operator's LLL_TOKEN and cannot
+  // re-mint anything; the reconnect loop retries loudly instead.
+  let ch = realtime.subscribe(pb.base_url()?, [issue_topic, comments_topic], None)?
   fmt.Println(f"Watching {key}: {issue.title}")
 
   // The fetched issue seeds the diff, so the very first update already

@@ -25,7 +25,15 @@ import "realtime"
 // edit, `mise run dev`, refresh.
 
 /// Start the board server on `port`. The board is `lll up`'s web half.
-pub fn run_server(port: int) -> Result<(), string> {
+///
+/// `refresh` re-mints the process's PocketBase token after an auth-shaped
+/// realtime reconnect failure (the boot passes its superuser credentials'
+/// minter when it owns the token; None when the caller brought a member
+/// token the process cannot renew). See realtime.subscribe.
+pub fn run_server(port: int, refresh: Option<fn() -> Result<string, string>>) -> Result<(), string> {
+  // The gate's env token, resolved (and generated when unset) before any
+  // request can arrive — the handlers and the banner below must agree.
+  let board_tok = resolve_board_token()
   // Resolve the team scope once; card/board fetches and the realtime
   // subscription share it. No configured team means an unscoped board.
   let cfg = config.load()?
@@ -58,6 +66,7 @@ pub fn run_server(port: int) -> Result<(), string> {
   let events = realtime.subscribe(
     pb.base_url()?,
     [issues_topic, comments_topic, "favorites", "views"],
+    refresh,
   )?
 
   let hub = new_hub()
@@ -65,74 +74,81 @@ pub fn run_server(port: int) -> Result<(), string> {
     bridge(events, hub, team_id)
   }
 
+  // Every route sits behind the board gate (serve_gate.lis): pages, writes,
+  // the SSE stream and static assets alike answer only board-token requests.
   http.HandleFunc(
     "GET /{$}",
-    |w: http.ResponseWriter, r: Ref<http.Request>| {
+    gated(|w: http.ResponseWriter, r: Ref<http.Request>| {
       board_page(w, r, team_id, cfg.me)
-    },
+    }),
   )
   http.HandleFunc(
     "GET /issues",
-    |w: http.ResponseWriter, r: Ref<http.Request>| {
+    gated(|w: http.ResponseWriter, r: Ref<http.Request>| {
       issues_page(w, r, team_id, cfg.me)
-    },
+    }),
   )
   http.HandleFunc(
     "GET /issue/{key}",
-    |w: http.ResponseWriter, r: Ref<http.Request>| {
+    gated(|w: http.ResponseWriter, r: Ref<http.Request>| {
       issue_page(w, r, team_id, cfg.me)
-    },
+    }),
   )
   http.HandleFunc(
     "GET /projects",
-    |w: http.ResponseWriter, r: Ref<http.Request>| {
+    gated(|w: http.ResponseWriter, r: Ref<http.Request>| {
       projects_page(w, r, team_id, cfg.me)
-    },
+    }),
   )
   http.HandleFunc(
     "GET /settings",
-    |w: http.ResponseWriter, r: Ref<http.Request>| {
+    gated(|w: http.ResponseWriter, r: Ref<http.Request>| {
       settings_page(w, r, team_id, cfg.me)
-    },
+    }),
   )
   // Every POST is a write returning Result; `flashing` (serve_actions.lis) is
   // the one place an Err becomes the flash strip.
   http.HandleFunc(
     "POST /settings/{kind}",
-    flashing(|r: Ref<http.Request>| settings_write(r, team_id, cfg.me)),
+    gated(flashing(|r: Ref<http.Request>| settings_write(r, team_id, cfg.me))),
   )
   http.HandleFunc(
     "GET /search",
-    |w: http.ResponseWriter, r: Ref<http.Request>| {
+    gated(|w: http.ResponseWriter, r: Ref<http.Request>| {
       search_page(w, r, team_id, cfg.me)
-    },
+    }),
   )
   http.HandleFunc(
     "GET /events",
-    |w: http.ResponseWriter, r: Ref<http.Request>| {
+    gated(|w: http.ResponseWriter, r: Ref<http.Request>| {
       events_stream(w, r, hub)
-    },
+    }),
   )
   http.HandleFunc(
     "POST /create",
-    flashing(|r: Ref<http.Request>| create_write(r, team_id)),
+    gated(flashing(|r: Ref<http.Request>| create_write(r, team_id))),
   )
   http.HandleFunc(
     "POST /state",
-    flashing(|r: Ref<http.Request>| state_write(r, team_id)),
+    gated(flashing(|r: Ref<http.Request>| state_write(r, team_id))),
   )
-  http.HandleFunc("POST /favorite", flashing(favorite_write))
-  http.HandleFunc("POST /priority", flashing(priority_write))
-  http.HandleFunc("POST /emoji", flashing(emoji_write))
-  http.HandleFunc("POST /title", flashing(title_write))
-  http.HandleFunc("POST /project", flashing(project_write))
-  http.HandleFunc("POST /assignee", flashing(assignee_write))
-  http.HandleFunc("POST /labels", flashing(labels_write))
-  http.HandleFunc("POST /comment", flashing(comment_write))
-  http.HandleFunc("POST /views/save", flashing(views_save))
+  http.HandleFunc("POST /favorite", gated(flashing(favorite_write)))
+  http.HandleFunc("POST /priority", gated(flashing(priority_write)))
+  http.HandleFunc("POST /emoji", gated(flashing(emoji_write)))
+  http.HandleFunc("POST /title", gated(flashing(title_write)))
+  http.HandleFunc("POST /project", gated(flashing(project_write)))
+  http.HandleFunc("POST /assignee", gated(flashing(assignee_write)))
+  http.HandleFunc("POST /labels", gated(flashing(labels_write)))
+  http.HandleFunc("POST /comment", gated(flashing(comment_write)))
+  http.HandleFunc("POST /views/save", gated(flashing(views_save)))
   // The embedded tree keeps its repo paths, so "/static/theme.css" resolves to
   // "static/theme.css" with no prefix surgery.
-  http.Handle("GET /static/", http.FileServerFS(web.Assets()))
+  let assets = http.FileServerFS(web.Assets())
+  http.HandleFunc("GET /static/", |w: http.ResponseWriter, r: Ref<http.Request>| {
+    if admit(w, r) {
+      assets.ServeHTTP(w, r)
+    }
+  })
 
   // Bind BEFORE announcing: "board <url>" is the promise that the board is
   // accepting connections, and e2e_web.sh curls the URL the moment the line
@@ -143,6 +159,9 @@ pub fn run_server(port: int) -> Result<(), string> {
     Err(e) => return Err(f"server: {e}"),
   }
   fmt.Println(f"board  http://127.0.0.1:{port}")
+  fmt.Println(
+    f"board  login http://127.0.0.1:{port}/?board_token={board_tok} (sets a cookie; LLL_BOARD_TOKEN pins it)",
+  )
   match http.Serve(listener, http.DefaultServeMux) {
     Ok(_) => Ok(()),
     Err(e) => Err(f"server: {e}"),
