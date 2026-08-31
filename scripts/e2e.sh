@@ -1651,9 +1651,13 @@ out=$(LLL_TOKEN="$MINT_TOK" HOME="$E2E_HOME" LLL_URL=$URL "$LIN" member list)
 assert_contains "$out" "e2e-agent" "the minted token authenticates a GET"
 
 # ...and the gate is superuser-only: a member token and no credentials at all
-# are both refused, naming the fix.
+# are both refused, naming the fix. The member token is minted fresh — the
+# password PATCH above rotated e2e-agent's tokenKey, so the bootstrap token
+# no longer counts.
+REFUSE_TOK=$(pb_member_token "$URL" e2e-agent e2e-agent@lll.test "$LOGIN_PASS") \
+  || fail "minting the member token for the refusal test"
 set +e
-out=$(env -u LLL_ADMIN_EMAIL -u LLL_ADMIN_PASSWORD LLL_TOKEN="$E2E_TOKEN" HOME="$E2E_HOME" LLL_URL=$URL "$LIN" token create e2e-agent 2>&1)
+out=$(env -u LLL_ADMIN_EMAIL -u LLL_ADMIN_PASSWORD LLL_TOKEN="$REFUSE_TOK" HOME="$E2E_HOME" LLL_URL=$URL "$LIN" token create e2e-agent 2>&1)
 rc=$?
 set -e
 [ "$rc" -ne 0 ] || fail "token create with a member token: expected nonzero exit"
