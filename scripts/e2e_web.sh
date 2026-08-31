@@ -37,8 +37,9 @@ lis build >/dev/null
 LIN=target/.lisette/bin/lll
 
 # USER is pinned: a first boot seeds a member named after it (task-31), and
-# the board assertions must not depend on who runs this suite.
-USER=e2e "$LIN" up --no-open --pb-dir "$DATA_DIR/pb_data" --port "$WEB_PORT" \
+# the board assertions must not depend on who runs this suite. HOME is pinned
+# because that first boot WRITES 'me' to the home config now (TASK-168).
+USER=e2e HOME="$E2E_HOME" "$LIN" up --no-open --pb-dir "$DATA_DIR/pb_data" --port "$WEB_PORT" \
   </dev/null >"$PB_LOG" 2>&1 &
 PB_PID=$!
 SERVE_PID=""
@@ -496,10 +497,11 @@ assert_contains "$out" "comment body is required" "empty comment message"
 
 # --- no team configured: up refuses rather than booting half-configured ---
 NOTEAM_PORT=$(free_port 40000 59999)
-# The boot above legitimately wrote 'me' (task-31), so the invariant is that
-# the refusal changes nothing — not that the file is absent.
+# The invariant is that the refusal changes nothing — not that the file is
+# absent. HOME is pinned so the developer's own config cannot supply a team
+# and turn the refusal into a boot: config layers now (TASK-168).
 TOML_BEFORE=$(cat .lll.toml 2>/dev/null || true)
-if out=$(env -u LLL_TEAM LLL_TEAM="" "$LIN" up --no-open --port "$NOTEAM_PORT" </dev/null 2>&1); then
+if out=$(env -u LLL_TEAM LLL_TEAM="" HOME="$E2E_HOME" "$LIN" up --no-open --port "$NOTEAM_PORT" </dev/null 2>&1); then
   fail "lll up with no team should exit non-zero, got: $out"
 fi
 assert_contains "$out" "no team configured" "no-team boot refused"

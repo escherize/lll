@@ -6,8 +6,13 @@
 # shuts down gracefully, taking the board with it), and the reuse path (a
 # healthy external PB at the configured URL is used, not restarted, and
 # survives lll up's exit; that external PB is a second lll up instance), and
-# first-boot identity (me guessed from $USER, written to .lll.toml, seeded as
-# a member, and not re-guessed once configured).
+# first-boot identity (me guessed from $USER, written to the HOME config —
+# never the repo's committed .lll.toml — seeded as a member, and not
+# re-guessed once configured).
+#
+# Every lll up here runs with HOME="$E2E_HOME": a first boot writes 'me' to
+# the home config now (TASK-168), and a suite must not rewrite the
+# developer's own.
 set -euo pipefail
 . "$(dirname "$0")/lib.sh"   # free_port, wait_ok, fail, assert_*, e2e_begin/end
 e2e_begin
@@ -40,7 +45,7 @@ sleep 0.5
 # --- own path: boots PB on DB_PORT+1, board on WEB_PORT+1, default creds ---
 set -m
 env -u LLL_ADMIN_EMAIL -u LLL_ADMIN_PASSWORD \
-  LLL_URL="http://127.0.0.1:$DB_PORT" LLL_TEAM=E2E USER=e2euser \
+  LLL_URL="http://127.0.0.1:$DB_PORT" LLL_TEAM=E2E USER=e2euser HOME="$E2E_HOME" \
   "$LLL" up --no-open --port "$WEB_PORT" --pb-dir "$DATA_DIR/pb_data" >"$UP_LOG" 2>&1 &
 UP_PID=$!
 set +m
@@ -60,7 +65,12 @@ curl -sf -X POST "http://127.0.0.1:$DB2/api/collections/_superusers/auth-with-pa
 grep -q 'guessed me = "e2euser" from $USER' "$UP_LOG" || fail "first boot did not guess me from \$USER"
 grep -q 'created member e2euser' "$UP_LOG" || fail "first boot did not seed the member"
 grep -q '^me     e2euser' "$UP_LOG" || fail "first boot did not print me"
-grep -q 'me = "e2euser"' .lll.toml || fail "me not written to .lll.toml: $(cat .lll.toml 2>&1)"
+# The HOME config, not the repo's: .lll.toml is committed now (TASK-168), and
+# booting a server must not put a username into someone else's checkout.
+HOME_TOML="$E2E_HOME/.config/lll/lll.toml"
+grep -q 'me = "e2euser"' "$HOME_TOML" \
+  || fail "me not written to the home config: $(cat "$HOME_TOML" 2>&1)"
+[ ! -e .lll.toml ] || fail "first boot wrote the repo's .lll.toml: $(cat .lll.toml)"
 curl -sf "http://127.0.0.1:$DB2/api/collections/members/records?filter=name%3D%27e2euser%27" \
   | grep -q '"name":"e2euser"' || fail "seeded member not in the members collection"
 
@@ -84,19 +94,19 @@ EXT_PORT=$((DB_PORT + 5))
 # A genuinely separate server, so the reuse path is tested against a PocketBase
 # this `lll up` did not start: a second lll up, its own process and data dir.
 EXT_WEB=$((WEB_PORT + 7))
-LLL_URL="http://127.0.0.1:$EXT_PORT" LLL_TEAM=E2E \
+LLL_URL="http://127.0.0.1:$EXT_PORT" LLL_TEAM=E2E HOME="$E2E_HOME" \
   "$LLL_ABS" up --no-open --port "$EXT_WEB" --pb-dir "$DATA_DIR/ext_pb_data" \
   </dev/null >/dev/null 2>&1 &
 EXT_PB_PID=$!
 wait_ok "http://127.0.0.1:$EXT_PORT/api/health" || fail "the external PB never came up"
 set -m
-LLL_URL="http://127.0.0.1:$EXT_PORT" LLL_TEAM=E2E \
+LLL_URL="http://127.0.0.1:$EXT_PORT" LLL_TEAM=E2E HOME="$E2E_HOME" \
   "$LLL" up --no-open --port "$WEB_PORT" --pb-dir "$DATA_DIR/pb_data" >"$UP_LOG" 2>&1 &
 UP_PID=$!
 set +m
 wait_ok "http://127.0.0.1:$WEB2/" || true
 grep -q "(already running)" "$UP_LOG" || fail "reuse path not taken"
-# .lll.toml now names me, so a later boot must use it, not guess again.
+# The home config now names me, so a later boot must use it, not guess again.
 grep -q "guessed me" "$UP_LOG" && fail "me re-guessed with one already configured"
 grep -q "^me     e2euser" "$UP_LOG" || fail "configured me not used on a later boot"
 kill -INT -- "-$UP_PID" 2>/dev/null || kill -INT "$UP_PID"
@@ -108,7 +118,7 @@ curl -sf "http://127.0.0.1:$EXT_PORT/api/health" >/dev/null \
 # --- outside the checkout: fail fast, do not boot an unmigrated PB (task-30) ---
 OUTSIDE="$DATA_DIR/outside"
 mkdir -p "$OUTSIDE"
-if out=$(cd "$OUTSIDE" && LLL_TEAM=E2E "$LLL_ABS" up --no-open --port 45999 </dev/null 2>&1); then
+if out=$(cd "$OUTSIDE" && LLL_TEAM=E2E HOME="$E2E_HOME" "$LLL_ABS" up --no-open --port 45999 </dev/null 2>&1); then
   fail "lll up outside the checkout should exit non-zero, got: $out"
 fi
 printf '%s' "$out" | grep -qF "pb/pb_migrations/ not found" \

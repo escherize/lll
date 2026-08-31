@@ -34,17 +34,48 @@ checkout is the binary you just built, so there is nothing to install or
 symlink:
 
 ```sh
-lll team create -k ENG -n "Engineering"
-lll config init                          # writes .lll.toml; set team = "ENG"
+lll attach                               # writes .lll.toml; commit it
 lll issue create -t "First issue" --priority 2
 lll issue list
 open http://127.0.0.1:8100               # or: lll board -w
 ```
 
+## Attaching a repo
+
+`lll attach` creates a team and writes one line — `team = "KEY"` — to
+`.lll.toml` at the repo root. Commit that file. The key defaults to the repo
+directory name; `-k KEY` overrides it.
+
+That is the whole attachment, because the two halves of the config live in
+different places:
+
+| Half | Where | Keys |
+|---|---|---|
+| Which tracker | the repo's committed `.lll.toml` | `team` |
+| How to reach it | `~/.config/lll/lll.toml`, once per machine | `url`, `me` |
+
+So attaching a new repo on a machine already set up is `lll attach`, and an
+already-attached repo on a new machine is `git clone` — no lll step at all.
+Every worktree of that checkout is attached the moment it exists.
+
 ## Configuration
 
-Precedence: env vars > `./.lll.toml` > `~/.config/lll/lll.toml`. The first
-file found is used whole; env vars override individual fields.
+Precedence: env vars > the repo's `.lll.toml` > `~/.config/lll/lll.toml`. The
+files **layer**: each supplies the keys it names, so a repo file carrying
+`team` alone still gets `url` and `me` from the machine's. `.lll.toml` is
+found by walking up from the working directory to the repo root — and no
+higher, so a stray file above a checkout cannot capture it.
+
+`lll config --list` prints every effective value and the file it came from,
+after `git config --list --show-origin`:
+
+```
+file:/Users/you/.config/lll/lll.toml	url=http://127.0.0.1:8090
+file:.lll.toml	team=ENG
+unset	sort=
+file:/Users/you/.config/lll/lll.toml	me=you
+default	web_url=http://127.0.0.1:8100
+```
 
 | Env | TOML key | Meaning |
 |---|---|---|
@@ -56,9 +87,11 @@ file found is used whole; env vars override individual fields.
 | `LLL_ADMIN_EMAIL` / `LLL_ADMIN_PASSWORD` | — | PocketBase superuser for `lll up` (a logged default is used when unset) |
 
 `lll config init` writes a commented template. On its first boot `lll up`
-guesses `me` from `$USER`, writes it to `./.lll.toml` and seeds a matching
-member, so assignment works immediately — no prompt. That guess is wrong on a
-shared machine: `lll config set me <name>` fixes it.
+guesses `me` from `$USER`, writes it to `~/.config/lll/lll.toml` and seeds a
+matching member, so assignment works immediately — no prompt. It writes the
+home config, never the repo's, because the repo's file is committed. That
+guess is wrong on a shared machine: `lll config set me <name>` fixes it, in
+the same file.
 
 ## CLI tour
 
@@ -77,6 +110,8 @@ lll watch --state in-review   # live NDJSON-able event stream for a query
 lll issue watch ENG-12        # one issue + its comments, until Ctrl-C
 
 lll team|member|project|label list      # the other nouns: list/create/view/add
+lll attach                    # point this repo at a team, once
+lll config --list             # every value and the file it came from
 lll board -w                  # open the web board
 lll completions zsh           # bash, zsh, fish
 ```

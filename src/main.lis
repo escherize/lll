@@ -18,6 +18,7 @@ fn main() {
     "doc" => commands.doc(os.Args),
     "finding" => commands.finding(os.Args),
     "config" => commands.config_cmd(os.Args),
+    "attach" => commands.attach(os.Args),
     "watch" => commands.watch(os.Args),
     "up" => commands.up(os.Args),
     "board" => commands.board(os.Args),
@@ -66,6 +67,8 @@ Usage:
   lll finding <command>   retrieve findings by area or path
                           (see 'lll finding --help')
   lll config <command>    manage configuration (see 'lll config --help')
+  lll attach [-k KEY]     point this repo at a team, once, in a committed
+                          .lll.toml (see 'lll attach --help')
   lll watch [flags]       live event stream for a query (see 'lll watch --help')
   lll up [--port 8100]    start PocketBase + web board together (see 'lll up --help')
   lll board [-w]          print the web board URL; -w opens it (see 'lll board --help')
@@ -74,7 +77,8 @@ Usage:
   lll --version           print the version
   lll --help              show this help
 
-Configuration (env > ./.lll.toml > ~/.config/lll/lll.toml):
+Configuration (env > the repo's .lll.toml > ~/.config/lll/lll.toml; the files
+layer, each supplying the keys it names — 'lll config --list' shows which won):
   LLL_URL      PocketBase base URL (default http://127.0.0.1:8090)
   LLL_TEAM     default team key (e.g. ENG); scopes 'issue list', used by 'issue create'
   LLL_SORT     default sort for 'issue list': created, updated, priority, number; prefix - to descend

@@ -15,7 +15,9 @@
 # (explicit + branch-inferred), board and -w opener (stubbed 'open' on PATH;
 # real gh runs for issue pr are manual), --limit, --help output, --version,
 # fix-naming error messages (PB down, unknown team, broken .lll.toml,
-# unknown command), and the lll up web board (via e2e_web.sh).
+# unknown command), config layering and its origins (config --list, the
+# upward walk stopping at the git root, lll attach), and the lll up web board
+# (via e2e_web.sh).
 set -euo pipefail
 . "$(dirname "$0")/lib.sh"   # free_port, wait_ok, fail, assert_*, e2e_begin/end
 e2e_begin
@@ -35,8 +37,9 @@ LIN=target/.lisette/bin/lll
 start_pb() {
   # USER is pinned: `lll up` seeds a member named after it on first boot
   # (task-31), and the member assertions below must not depend on who runs
-  # this suite.
-  LLL_URL="$URL" LLL_TEAM=ENG USER=e2e "$LIN" up --no-open \
+  # this suite. HOME is pinned because that first boot WRITES 'me' to the home
+  # config now (TASK-168), and a suite must not rewrite the developer's own.
+  LLL_URL="$URL" LLL_TEAM=ENG USER=e2e HOME="$E2E_HOME" "$LIN" up --no-open \
     --pb-dir "$DATA_DIR/pb_data" --port "$WEB_PORT" </dev/null >>"$PB_LOG" 2>&1 &
   PB_PID=$!
   wait_ok "$URL/api/health" 150
@@ -161,23 +164,92 @@ rm "$WORK/.lll.toml"
 # --- config set me (task-31): creates, then replaces rather than appends ---
 # LLL_URL pinned: without it this reaches whatever owns the default port 8090,
 # which on a machine running a dev board is somebody else's database.
-out=$(cd "$WORK" && LLL_URL=$URL "$LLL_ABS" config set me alice)
+# It writes the HOME config, not the repo file (TASK-168): 'me' is a fact
+# about a person, and the repo's .lll.toml is committed.
+SET_HOME="$DATA_DIR/sethome"
+mkdir -p "$SET_HOME"
+HOME_TOML="$SET_HOME/.config/lll/lll.toml"
+out=$(cd "$WORK" && HOME="$SET_HOME" LLL_URL=$URL "$LLL_ABS" config set me alice)
 assert_contains "$out" 'me = "alice"' "config set me output"
+assert_contains "$out" "$HOME_TOML" "config set me names the file it wrote"
 # With PocketBase reachable, config set me SEEDS the member (task-63) rather
 # than printing the add-it-yourself hint. This assertion used to pass only
 # because LLL_URL was unpinned and the command could not reach a server.
 assert_contains "$out" "created member alice" "config set me seeds the member"
-assert_contains "$(cat "$WORK/.lll.toml")" 'me = "alice"' "config set me wrote the key"
-(cd "$WORK" && LLL_URL=$URL "$LLL_ABS" config set me bob >/dev/null)
-[ "$(grep -c '^me = ' "$WORK/.lll.toml")" = 1 ] \
-  || fail "config set me appended a duplicate key: $(cat "$WORK/.lll.toml")"
-assert_contains "$(cat "$WORK/.lll.toml")" 'me = "bob"' "config set me replaced the value"
+assert_contains "$(cat "$HOME_TOML")" 'me = "alice"' "config set me wrote the key"
+[ ! -e "$WORK/.lll.toml" ] || fail "config set me wrote the repo file: $(cat "$WORK/.lll.toml")"
+(cd "$WORK" && HOME="$SET_HOME" LLL_URL=$URL "$LLL_ABS" config set me bob >/dev/null)
+[ "$(grep -c '^me = ' "$HOME_TOML")" = 1 ] \
+  || fail "config set me appended a duplicate key: $(cat "$HOME_TOML")"
+assert_contains "$(cat "$HOME_TOML")" 'me = "bob"' "config set me replaced the value"
 # A duplicate key would make the file unparseable; prove it still loads.
-out=$(cd "$WORK" && LLL_URL=$URL LLL_TEAM=ENG "$LLL_ABS" issue list)
+out=$(cd "$WORK" && HOME="$SET_HOME" LLL_URL=$URL LLL_TEAM=ENG "$LLL_ABS" issue list)
 assert_contains "$out" "ENG-1" "config still parses after two config set me"
 out=$(cd "$WORK" && "$LLL_ABS" config set url http://x 2>&1) && fail "config set accepted a key other than me"
 assert_contains "$out" "only 'me' is settable" "config set rejects other keys"
-rm "$WORK/.lll.toml"
+
+# --- config --list: every value and the file it came from (TASK-168) ---
+# The failure this answers is silent, so it has to name origins, not values.
+printf 'url = "%s"\nme = "homer"\n' "$URL" > "$HOME_TOML"
+printf 'team = "ENG"\n' > "$WORK/.lll.toml"
+out=$(cd "$WORK" && env -u LLL_URL -u LLL_TEAM -u LLL_ME -u LLL_SORT -u LLL_WEB_URL \
+  HOME="$SET_HOME" "$LLL_ABS" config --list)
+assert_contains "$out" "file:$HOME_TOML	url=$URL" "--list attributes url to the home file"
+assert_contains "$out" "file:.lll.toml	team=ENG" "--list attributes team to the repo file"
+assert_contains "$out" "file:$HOME_TOML	me=homer" "--list attributes me to the home file"
+assert_contains "$out" "default	web_url=http://127.0.0.1:8100" "--list marks an unset key with a default"
+assert_contains "$out" "unset	sort=" "--list marks a key nothing set"
+out=$(cd "$WORK" && LLL_TEAM=FROMENV HOME="$SET_HOME" "$LLL_ABS" config --list)
+assert_contains "$out" "env:LLL_TEAM	team=FROMENV" "--list attributes an override to the env var"
+
+# --- layering: the repo file supplies team, the home file keeps url and me ---
+# First-wins made a committed repo file impossible; this is what replaced it.
+out=$(cd "$WORK" && env -u LLL_URL -u LLL_TEAM HOME="$SET_HOME" "$LLL_ABS" issue list)
+assert_contains "$out" "ENG-1" "repo team layered over the home url"
+assert_not_contains "$out" "OPS-1" "repo team scopes the list"
+out=$(cd "$WORK" && env -u LLL_URL -u LLL_TEAM HOME="$SET_HOME" "$LLL_ABS" config --list)
+assert_contains "$out" "me=homer" "the home file's me survives a repo file"
+
+# --- discovery walks up to the repo root, not just the cwd (TASK-168) ---
+# Running from a subdirectory used to fall through to the home config and use
+# the wrong team, silently. The walk stops AT the git root: a .lll.toml above
+# it must stay out of reach, or one stray file captures every repo beneath it.
+WALK="$DATA_DIR/walk"
+mkdir -p "$WALK/repo/deep/deeper"
+printf 'team = "STRAY"\n' > "$WALK/.lll.toml"
+git -C "$WALK/repo" init -q
+printf 'team = "ENG"\n' > "$WALK/repo/.lll.toml"
+out=$(cd "$WALK/repo/deep/deeper" && env -u LLL_TEAM HOME="$SET_HOME" "$LLL_ABS" issue list)
+assert_contains "$out" "ENG-1" "a subdirectory finds the repo root's team"
+rm "$WALK/repo/.lll.toml"
+out=$(cd "$WALK/repo/deep/deeper" && env -u LLL_TEAM HOME="$SET_HOME" "$LLL_ABS" config --list)
+assert_contains "$out" "unset	team=" "the walk stops at the git root"
+assert_not_contains "$out" "STRAY" "a .lll.toml above the repo root is never read"
+
+# --- attach: one command, one line, the team created (TASK-168) ---
+ATTACH="$DATA_DIR/attach/lllattachdemo"
+mkdir -p "$ATTACH/sub"
+git -C "$ATTACH" init -q
+out=$(cd "$ATTACH/sub" && LLL_URL=$URL HOME="$SET_HOME" "$LLL_ABS" attach)
+# The repo root, not the subdirectory it was run from. Matched on the tail
+# because git reports the path with symlinks resolved and $DATA_DIR is not.
+assert_contains "$out" "lllattachdemo/.lll.toml" "attach names the file at the repo root"
+assert_contains "$out" "created team LLLAT" "attach created the derived team"
+[ "$(cat "$ATTACH/.lll.toml")" = 'team = "LLLAT"' ] \
+  || fail "attach wrote more than the team: $(cat "$ATTACH/.lll.toml")"
+# Idempotent, and -k overrides the derived key.
+out=$(cd "$ATTACH" && LLL_URL=$URL HOME="$SET_HOME" "$LLL_ABS" attach -k ENG)
+assert_contains "$out" "team ENG already exists" "attach reuses an existing team"
+[ "$(cat "$ATTACH/.lll.toml")" = 'team = "ENG"' ] \
+  || fail "attach -k did not replace the key: $(cat "$ATTACH/.lll.toml")"
+# And that one committed line is the whole attachment: no url, no me needed.
+out=$(cd "$ATTACH/sub" && env -u LLL_TEAM LLL_URL=$URL HOME="$SET_HOME" "$LLL_ABS" issue list)
+assert_contains "$out" "ENG-1" "an attached repo is scoped from its committed file"
+out=$(cd "$DATA_DIR" && LLL_URL=$URL HOME="$SET_HOME" "$LLL_ABS" attach 2>&1) \
+  && fail "attach outside a git repository should exit non-zero"
+assert_contains "$out" "not inside a git repository" "attach outside a repo names why"
+
+rm -f "$WORK/.lll.toml"
 
 # --- config precedence: env > ./.lll.toml > ~/.config/lll/lll.toml ---
 printf 'url = "%s"\nteam = "OPS"\n' "$URL" > "$FAKEHOME/.config/lll/lll.toml"

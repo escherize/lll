@@ -1,0 +1,99 @@
+import "go:fmt"
+import "go:path/filepath"
+
+import "config"
+import "flags"
+
+// `lll attach` — point a repo at a team, once, in a file the repo keeps.
+//
+// One instance, one team per repo. The repo says WHICH tracker (team, in a
+// committed .lll.toml at its root); the machine says HOW to reach it (url,
+// me, in ~/.config/lll/lll.toml). Because config layers rather than shadows,
+// those two halves compose, and that is what makes the next clone — and every
+// worktree — attached already, with nothing to run.
+
+fn attach_spec() -> Slice<flags.Flag> {
+  [
+    flags.Flag {
+      name: "-k",
+      value: true,
+      hint: "KEY",
+      help: "team key to attach to (default: the repo directory name)",
+      ..
+    },
+    flags.Flag { name: "--help", alias: "-h", hidden: true, help: "show this help", .. },
+  ]
+}
+
+/// The flag table of the attach verb; read by `lll completions`.
+pub fn attach_verb_spec(_verb: string) -> Slice<flags.Flag> {
+  attach_spec()
+}
+
+pub fn attach(args: Slice<string>) -> Result<(), string> {
+  let spec = attach_spec()
+  let p = flags.parse(spec, args, 2, false, flags.usage("lll attach", spec, ""))?
+  if p.given("--help") {
+    print_attach_usage()
+    return Ok(())
+  }
+
+  // The git root, not the working directory: attaching from src/commands must
+  // write the same file as attaching from the top, or the walk that finds it
+  // would look past what we just wrote.
+  let Some(root) = config.git_root() else {
+    return Err(
+      "not inside a git repository — 'lll attach' writes .lll.toml at the repo root; run it in a checkout, or set LLL_TEAM",
+    )
+  }
+
+  let name = filepath.Base(root)
+  let given = p.one("-k")
+  let key = if given == "" { clean_key(name) } else { clean_key(given) }
+  if key == "" {
+    return Err(f"no team key in '{name}' to derive one from — pass it: lll attach -k KEY")
+  }
+
+  let path = filepath.Join(root, ".lll.toml")
+  set_key_in(path, "team", key)?
+  fmt.Println(f"team = \"{key}\" in {path}")
+  fmt.Println(ensure_attached_team(key))
+  fmt.Println(
+    "commit .lll.toml — every clone and worktree of this repo is attached from then on",
+  )
+  Ok(())
+}
+
+/// Create the team unless the server already has it, and say which happened.
+/// A server that is down is not a reason to fail: the committed file is the
+/// point, and `lll up` creates a configured-but-missing team on its next boot.
+fn ensure_attached_team(key: string) -> string {
+  let Ok(found) = find_team(key) else {
+    return f"could not reach PocketBase — 'lll up' will create team {key} on the next boot"
+  }
+  if found.is_some() { return f"team {key} already exists" }
+  let Ok(created) = create_team(key, key) else {
+    return f"could not create team {key} — 'lll up' will create it on the next boot"
+  }
+  f"created team {created.key} — issues will be {created.key}-1, {created.key}-2, ..."
+}
+
+fn print_attach_usage() {
+  fmt.Println(
+    "lll attach - point this repo at a team, once
+
+Usage:
+  lll attach [-k KEY]
+
+Writes team = \"KEY\" to .lll.toml at the repo root and creates the team on the
+server if it is missing. The key defaults to the repo directory name reduced
+to letters and digits, uppercased, at most 5 characters.
+
+Commit that file. Config layers — the repo's .lll.toml supplies 'team', your
+~/.config/lll/lll.toml supplies 'url' and 'me' — so on the next machine an
+already-attached repo needs a 'git clone' and nothing else, and every worktree
+of it is attached the moment it is created.
+
+'lll config --list' shows every effective value and the file it came from.",
+  )
+}

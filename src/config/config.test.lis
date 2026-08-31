@@ -1,0 +1,159 @@
+import "go:os"
+import "go:os/exec"
+import "go:path/filepath"
+
+// Cover for the two rules TASK-168 turns on: config files LAYER, and the
+// search for the repo file stops at the git root.
+//
+// These tests touch the filesystem, $HOME and the working directory, because
+// that is exactly what they are about — a pure test of load() would prove
+// nothing about which file it reads.
+
+// ----------------------------------------------------------------- ceiling
+
+#[test]
+fn within_accepts_the_root_and_what_is_under_it() {
+  assert within("/a/repo", "/a/repo")
+  assert within("/a/repo/src", "/a/repo")
+  assert within("/a/repo/src/commands", "/a/repo")
+}
+
+#[test]
+fn within_rejects_parents_and_prefix_lookalikes() {
+  assert !within("/a", "/a/repo")
+  assert !within("/", "/a/repo")
+  // The one a bare HasPrefix would get wrong: a sibling whose name starts
+  // with the root's.
+  assert !within("/a/repository", "/a/repo")
+}
+
+// ---------------------------------------------------------------- fixtures
+
+/// A temp tree: a git repo carrying `repo_toml`, a home config carrying
+/// `home_toml` (either skipped when ""), and a stray `.lll.toml` one level
+/// ABOVE the repo root — the trap the ceiling exists for. Yields (root, home).
+fn fixture(repo_toml: string, home_toml: string) -> Result<(string, string), string> {
+  let Ok(tmp) = os.MkdirTemp("", "lll-config") else {
+    return Err("making a temp dir")
+  }
+  // Resolved, so the walk's comparisons match what git reports on a machine
+  // whose temp directory is itself a symlink (macOS /tmp).
+  let Ok(base) = filepath.EvalSymlinks(tmp) else {
+    return Err(f"resolving {tmp}")
+  }
+
+  let home = filepath.Join(base, "home")
+  write(filepath.Join(home, ".config", "lll", "lll.toml"), home_toml)?
+  write(filepath.Join(base, ".lll.toml"), "team = \"STRAY\"\n")?
+
+  let root = filepath.Join(base, "repo")
+  if let Err(e) = os.MkdirAll(filepath.Join(root, "src", "commands"), 0o755) {
+    return Err(f"making {root}: {e}")
+  }
+  if let Err(e) = exec.Command("git", "-C", root, "init", "-q").Run() {
+    return Err(f"git init in {root}: {e}")
+  }
+  write(filepath.Join(root, ".lll.toml"), repo_toml)?
+  Ok((root, home))
+}
+
+/// Write `text` to `path`, creating its directory. Empty text writes nothing:
+/// an absent file is a case these tests need.
+fn write(path: string, text: string) -> Result<(), string> {
+  let dir = filepath.Dir(path)
+  if let Err(e) = os.MkdirAll(dir, 0o755) {
+    return Err(f"making {dir}: {e}")
+  }
+  if text == "" { return Ok(()) }
+  if let Err(e) = os.WriteFile(path, text.bytes(), 0o644) {
+    return Err(f"writing {path}: {e}")
+  }
+  Ok(())
+}
+
+/// Run `load_traced()` from `dir` with `home` as $HOME, restoring both after.
+fn traced_from(dir: string, home: string) -> Result<(Config, Sources), string> {
+  let Ok(prev_dir) = os.Getwd() else {
+    return Err("reading the working directory")
+  }
+  let prev_home = os.Getenv("HOME")
+  if let Err(e) = os.Chdir(dir) {
+    return Err(f"entering {dir}: {e}")
+  }
+  let _ = os.Setenv("HOME", home)
+  defer restore(prev_dir, prev_home)
+  load_traced()
+}
+
+fn load_from(dir: string, home: string) -> Result<Config, string> {
+  let (cfg, _) = traced_from(dir, home)?
+  Ok(cfg)
+}
+
+fn restore(dir: string, home: string) {
+  let _ = os.Chdir(dir)
+  let _ = os.Setenv("HOME", home)
+}
+
+// ---------------------------------------------------------------- layering
+
+#[test]
+fn repo_file_supplies_team_without_losing_the_home_url_and_me() {
+  let assert Ok((root, home)) = fixture(
+    "team = \"REPO\"\n",
+    "url = \"http://home:9999\"\nme = \"homer\"\nsort = \"-updated\"\n",
+  )
+  let assert Ok(cfg) = load_from(root, home)
+  assert cfg.team == "REPO"
+  // First-wins threw all three away the moment a repo file existed, which is
+  // what made a committed repo file impossible.
+  assert cfg.url == "http://home:9999"
+  assert cfg.me == "homer"
+  assert cfg.sort == "-updated"
+}
+
+#[test]
+fn the_repo_file_overrides_the_home_file_key_by_key() {
+  let assert Ok((root, home)) = fixture(
+    "team = \"REPO\"\n",
+    "url = \"http://home:9999\"\nteam = \"HOME\"\n",
+  )
+  let assert Ok(cfg) = load_from(filepath.Join(root, "src"), home)
+  assert cfg.team == "REPO"
+  assert cfg.url == "http://home:9999"
+}
+
+// -------------------------------------------------------------- the walk
+
+#[test]
+fn a_subdirectory_finds_the_repo_root_file() {
+  let assert Ok((root, home)) = fixture("team = \"REPO\"\n", "url = \"http://home:9999\"\n")
+  let assert Ok(cfg) = load_from(filepath.Join(root, "src", "commands"), home)
+  assert cfg.team == "REPO"
+}
+
+#[test]
+fn the_walk_stops_at_the_git_root() {
+  // No repo file at all: the stray one directory above the root must stay out
+  // of reach, or it would silently capture every repo beneath it — a worse
+  // bug than the cwd-only lookup the walk replaces.
+  let assert Ok((root, home)) = fixture("", "url = \"http://home:9999\"\n")
+  let assert Ok(from_root) = load_from(root, home)
+  assert from_root.team == ""
+  let assert Ok(from_sub) = load_from(filepath.Join(root, "src", "commands"), home)
+  assert from_sub.team == ""
+}
+
+// --------------------------------------------------------------- origins
+
+#[test]
+fn load_traced_names_the_file_each_value_came_from() {
+  let assert Ok((root, home)) = fixture("team = \"REPO\"\n", "url = \"http://home:9999\"\n")
+  let assert Ok((cfg, src)) = traced_from(root, home)
+  assert cfg.team == "REPO"
+  assert src.team.contains(".lll.toml")
+  assert src.url.contains(filepath.Join("home", ".config", "lll", "lll.toml"))
+  // Nothing named web_url, so `--list` must attribute it to the default.
+  assert src.web_url == "default"
+  assert src.me == ""
+}
