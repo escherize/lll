@@ -842,6 +842,11 @@ done
 # the flag that once drifted.
 assert_contains "$(cat "$DATA_DIR/comp.bash")" "issue,create) words='-t -d --description --emoji" \
   "completions offer the parser's own issue create flags"
+
+# TASK-177: create --json joined the spec, so its completions entry carries
+# it automatically — one table (TASK-127), asserted like watch's entry above.
+comp_create=$("$LIN" completions bash | grep -F "issue,create)" | head -1 | sed "s/.*words='//;s/'.*//")
+assert_contains "$comp_create" "--json" "issue create completions carry --json"
 set +e
 out=$("$LIN" issue create --bogus 2>&1)
 rc=$?
@@ -1286,6 +1291,21 @@ if out=$(env $E "$LIN" issue create -t "no stdin" -d - </dev/null 2>&1); then
   fail "-d - with no pipe should exit non-zero, got: $out"
 fi
 assert_contains "$out" "nothing is piped in" "-d - with no pipe names the fix"
+
+# --- create --json (TASK-177): the raw record, pipe-safe and keyable ---
+# Scripts used to parse the "Created KEY-N" sentence for the key; --json
+# hands them the record itself instead — same shape as `view --json`.
+out=$(env $E "$LIN" issue create -t "Create json target" --json)
+case "$out" in *Created*) fail "create --json must replace the sentence, got: $out";; esac
+cj_id=$(printf '%s' "$out" | jq -r .id)
+cj_num=$(printf '%s' "$out" | jq -r .number)
+cj_team=$(printf '%s' "$out" | jq -r .team)
+[ -n "$cj_id" ] && [ "$cj_id" != "null" ] || fail "create --json: .id missing"
+[ -n "$cj_num" ] && [ "$cj_num" != "null" ] || fail "create --json: .number missing"
+[ -n "$cj_team" ] && [ "$cj_team" != "null" ] || fail "create --json: .team missing"
+cj_key=$(printf '%s' "$out" | jq -r '.expand.team.key')-$cj_num
+vid=$(env $E "$LIN" issue view "$cj_key" --json | jq -r .id)
+[ "$vid" = "$cj_id" ] || fail "create --json: .id $cj_id does not match view --json id $vid"
 
 # --- agent read path: --raw, and a pasted board URL anywhere a key goes (task-36) ---
 out=$(env $E "$LIN" issue view "$key" --raw)
