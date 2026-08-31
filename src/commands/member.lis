@@ -128,8 +128,18 @@ pub fn ensure_member(name: string) -> Result<bool, string> {
   if name == "" { return Ok(false) }
   let existing = find_member(name)?
   if existing.is_some() { return Ok(false) }
-  let _ = create_member(name, "")?
-  Ok(true)
+  // Two actors seeding the same fresh server race here: both find nothing,
+  // both POST. The unique name (and now email) indexes admit one and reject
+  // the other, and the loser re-looks-up whoever won instead of failing the
+  // boot — the same bargain ensure_team and e2e.sh's seed_team run.
+  match create_member(name, "") {
+    Ok(_) => Ok(true),
+    Err(_) => {
+      let raced = find_member(name)?
+      if raced.is_some() { return Ok(false) }
+      Err(f"could not create member '{name}' and none exists to reuse")
+    },
+  }
 }
 
 fn find_member(name: string) -> Result<Option<models.Member>, string> {
