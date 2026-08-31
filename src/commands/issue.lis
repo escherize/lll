@@ -339,6 +339,8 @@ fn issue_union_spec() -> Slice<flags.Flag> {
     "watch",
     "close",
     "start",
+    "claim",
+    "release",
     "url",
     "id",
     "title",
@@ -366,6 +368,8 @@ pub fn issue(args: Slice<string>) -> Result<(), string> {
     "update" => update(args),
     "close" => close_issue(args),
     "start" => start(args),
+    "claim" => claim(args),
+    "release" => release(args),
     "delete" => delete_issue(args),
     "comment" => comment(args),
     "watch" => issue_watch(args),
@@ -406,6 +410,10 @@ Usage:
   lll issue close [KEY-123]                       set state done
   lll issue start [KEY-123]                       set state in-progress; print/create the
                                                   branch key-number-slug (git switch)
+  lll issue claim [KEY-123]                       take it exclusively for 'me' and assign
+                                                  it; exits non-zero, changing nothing,
+                                                  when someone already holds it
+  lll issue release [KEY-123]                     give a claim back
   lll issue delete KEY-123 [--force]              delete; asks [y/N] unless --force
   lll issue comment [KEY-123] [-b \"body\"]         add a comment (authored by 'me' in
                                                   .lll.toml); without -b, list comments
@@ -641,6 +649,14 @@ fn view(args: Slice<string>) -> Result<(), string> {
   fmt.Println(f"State:     {display.glyph(full.state)} {full.state}")
   fmt.Println(f"Priority:  {display.priority_name(full.priority)}")
   fmt.Println(f"Assignee:  {assignee}")
+  // The one place the second collection is read on a plain view: assignee says
+  // who it is for, Claimed says who is holding it right now, and only the
+  // latter is exclusive.
+  if let Some(held) = fetch_claim(full.id)? {
+    let mut holder = held.expand.member.name
+    if holder == "" { holder = "an unknown member" }
+    fmt.Println(f"Claimed:   {holder} ({display.relative(held.created)})")
+  }
   fmt.Println(f"Project:   {project}")
   fmt.Println(f"Labels:    {labels}")
   let linked_docs = fetch_issue_docs(full.id)?
@@ -797,6 +813,106 @@ fn start(args: Slice<string>) -> Result<(), string> {
     }
   }
   Ok(())
+}
+
+/// Take an issue exclusively. The arbitration is a single INSERT into
+/// `claims`, which is UNIQUE on `issue`: two agents racing both POST the row
+/// and SQLite admits exactly one, so the loser learns it lost. Nothing here
+/// reads the collection before writing to it — a "is it free?" GET followed by
+/// a POST is not a claim, it is the race with extra steps.
+///
+/// Winning then sets the assignee, so the board, `issue list` and `issue view`
+/// show the holder without joining a second collection. That PATCH is a
+/// consequence of having won, never the thing that decides it: `issue update
+/// --assignee` remains last-write-wins and is not a claim.
+fn claim(args: Slice<string>) -> Result<(), string> {
+  let usage = "lll issue claim [KEY-123]"
+  let id = positional_id(args, usage)?
+  let resolved = resolve_id(id, usage)?
+  let me = config.load()?.me
+  if me == "" {
+    return Err(
+      "claiming needs a name: set 'me' with 'lll config set me <name>', or pass LLL_ME",
+    )
+  }
+  let member = resolve_member(me)?
+  let issue = fetch_issue(resolved)?
+  let key = f"{issue.expand.team.key}-{issue.number}"
+
+  let payload = match json.Marshal(
+    models.NewClaim { issue: issue.id, member: member.id },
+  ) {
+    Ok(p) => p as string,
+    Err(e) => return Err(f"encoding claim: {e}"),
+  }
+  if let Err(e) = pb.post("/api/collections/claims/records", payload) {
+    // Ask who holds it rather than parsing PocketBase's error body: the index
+    // rejects a duplicate with one shape and its pre-flight validator with
+    // another, and a holder is the answer in both. No holder means the POST
+    // failed for some other reason, so the raw error is what to report.
+    let Ok(held) = fetch_claim(issue.id) else {
+      return Err(e)
+    }
+    let Some(holder) = held else {
+      return Err(e)
+    }
+    let mut name = holder.expand.member.name
+    if name == "" { name = "someone else" }
+    return Err(
+      f"{key} is already claimed by {name} ({display.relative(holder.created)}) — 'lll issue release {key}' gives it back",
+    )
+  }
+  let _ = pb.patch(
+    f"/api/collections/issues/records/{issue.id}",
+    "{\"assignee\":" + json_quote(member.id)? + "}",
+  )?
+  fmt.Println(f"Claimed {key} for {member.name}")
+  Ok(())
+}
+
+/// Give a claim back: delete the row, and clear the assignee the claim set.
+///
+/// Unowned on purpose — anyone can release anyone's claim, and the message
+/// says whose it was. There is no auth yet (ADR-1, task-32), so an ownership
+/// check would be honour-system anyway, and refusing would strand every issue
+/// whose holder never came back. Exclusivity is a property of `claim`; this is
+/// how a hold ends.
+fn release(args: Slice<string>) -> Result<(), string> {
+  let usage = "lll issue release [KEY-123]"
+  let id = positional_id(args, usage)?
+  let resolved = resolve_id(id, usage)?
+  let issue = fetch_issue(resolved)?
+  let key = f"{issue.expand.team.key}-{issue.number}"
+
+  let Some(held) = fetch_claim(issue.id)? else {
+    return Err(f"{key} is not claimed")
+  }
+  let _ = pb.delete(f"/api/collections/claims/records/{held.id}")?
+  // Only the assignee this claim wrote: an assignment made some other way is
+  // not the claim's to erase.
+  if issue.assignee == held.member {
+    let _ = pb.patch(
+      f"/api/collections/issues/records/{issue.id}",
+      "{\"assignee\":\"\"}",
+    )?
+  }
+  let mut name = held.expand.member.name
+  if name == "" { name = "an unknown member" }
+  fmt.Println(f"Released {key} (was {name}'s)")
+  Ok(())
+}
+
+/// The claim on one issue, if it has one, with its holder expanded. `claims`
+/// is UNIQUE on `issue`, so there is at most one row to find.
+fn fetch_claim(issue_id: string) -> Result<Option<models.Claim>, string> {
+  let filter = url.QueryEscape(f"issue='{issue_id}'")
+  let mut list = models.ClaimList { .. }
+  pb.fetch(
+    f"/api/collections/claims/records?perPage=1&filter={filter}&expand=member",
+    "claims",
+    &list,
+  )?
+  Ok(list.items.get(0))
 }
 
 fn delete_issue(args: Slice<string>) -> Result<(), string> {

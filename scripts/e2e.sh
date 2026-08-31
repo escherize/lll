@@ -729,7 +729,7 @@ WATCH_PIDS=""
 "$LIN" completions bash > "$DATA_DIR/comp.bash"
 bash -n "$DATA_DIR/comp.bash" || fail "bash completions do not parse"
 out=$(cat "$DATA_DIR/comp.bash")
-assert_contains "$out" "create list view update close start delete comment watch url id title pr" "bash completions list issue verbs"
+assert_contains "$out" "create list view update close start claim release delete comment watch url id title pr link unlink" "bash completions list issue verbs"
 assert_contains "$out" "--limit" "bash completions know --limit"
 assert_contains "$out" "complete -F _lll lll" "bash completions register"
 "$LIN" completions zsh > "$DATA_DIR/comp.zsh"
@@ -1171,6 +1171,125 @@ assert_contains "$(env $E "$LIN" issue title "http://127.0.0.1:8100/issue/$key")
 if env $E "$LIN" issue view "http://example.com/a/b/c/NOPE-9" >/dev/null 2>&1; then
   fail "a non-issue URL should not resolve"
 fi
+
+# --- claims (TASK-175): exclusive, atomic, released ---
+# `issue update --assignee` is a last-write-wins PATCH: two agents both
+# "win" and neither is told. `issue claim` is an INSERT into a collection
+# that is UNIQUE on issue, so the database arbitrates.
+CKEY=$(env $E "$LIN" issue create -t "Claimable" | sed -n 's/^Created \([A-Z]*-[0-9]*\).*/\1/p')
+[ -n "$CKEY" ] || fail "claim fodder create did not print a key"
+
+out=$(env $E LLL_ME=bryan "$LIN" issue claim "$CKEY")
+assert_contains "$out" "Claimed $CKEY for bryan" "claim output"
+out=$(env $E "$LIN" issue view "$CKEY")
+assert_contains "$out" "Claimed:   bryan" "issue view shows the holder"
+assert_contains "$out" "Assignee:  bryan" "claiming assigns the issue"
+
+# AC#1: a held issue refuses the second claim and changes nothing.
+set +e
+out=$(env $E LLL_ME=carol "$LIN" issue claim "$CKEY" 2>&1)
+rc=$?
+set -e
+[ "$rc" -ne 0 ] || fail "claiming a held issue: expected nonzero exit"
+assert_contains "$out" "already claimed by bryan" "refusal names the holder"
+assert_contains "$out" "lll issue release $CKEY" "refusal names the fix"
+out=$(env $E "$LIN" issue view "$CKEY")
+assert_contains "$out" "Assignee:  bryan" "a refused claim leaves the assignee alone"
+assert_contains "$out" "Claimed:   bryan" "a refused claim leaves the holder alone"
+
+# Held is held, including by you: re-claiming is not a silent no-op.
+set +e
+out=$(env $E LLL_ME=bryan "$LIN" issue claim "$CKEY" 2>&1)
+rc=$?
+set -e
+[ "$rc" -ne 0 ] || fail "re-claiming your own hold: expected nonzero exit"
+assert_contains "$out" "already claimed by bryan" "re-claim names the holder"
+
+# AC#3: release gives it back, and the next claim succeeds.
+out=$(env $E "$LIN" issue release "$CKEY")
+assert_contains "$out" "Released $CKEY (was bryan's)" "release output"
+out=$(env $E "$LIN" issue view "$CKEY")
+assert_not_contains "$out" "Claimed:" "release removes the hold"
+assert_contains "$out" "Assignee:  none" "release clears the assignee the claim set"
+out=$(env $E LLL_ME=carol "$LIN" issue claim "$CKEY")
+assert_contains "$out" "Claimed $CKEY for carol" "a released issue can be claimed again"
+
+# Releasing what nobody holds is an error, not a no-op.
+env $E "$LIN" issue release "$CKEY" >/dev/null
+set +e
+out=$(env $E "$LIN" issue release "$CKEY" 2>&1)
+rc=$?
+set -e
+[ "$rc" -ne 0 ] || fail "releasing an unclaimed issue: expected nonzero exit"
+assert_contains "$out" "$CKEY is not claimed" "double release names the state"
+
+# No 'me' to claim as: refuse and name the fix. $WORK has no .lll.toml and
+# $FAKEHOME no user config, so 'me' is genuinely unset here.
+set +e
+out=$(cd "$WORK" && env LLL_URL=$URL HOME="$FAKEHOME" "$LLL_ABS" issue claim "$CKEY" 2>&1)
+rc=$?
+set -e
+[ "$rc" -ne 0 ] || fail "claim without 'me': expected nonzero exit"
+assert_contains "$out" "lll config set me" "claim without 'me' names the fix"
+
+# AC#2, at the REST layer: fire N creates at one issue at once and count the
+# survivors. This is the atomicity claim itself — the unique index, with no
+# lll process in the way to serialise anything.
+RKEY=$(env $E "$LIN" issue create -t "Race target" | sed -n 's/^Created \([A-Z]*-[0-9]*\).*/\1/p')
+RID=$(env $E "$LIN" issue view "$RKEY" --json | jq -r .id)
+MID=$(curl -sf "$URL/api/collections/members/records?perPage=1" | jq -r '.items[0].id')
+RACE="$DATA_DIR/race"
+mkdir -p "$RACE"
+# Wait on these pids by name, never bare `wait`: the suite's own `lll up`
+# is a background job of this shell and would never return.
+race_pids=""
+for i in $(seq 1 16); do
+  (curl -s -o /dev/null -w '%{http_code}\n' -X POST "$URL/api/collections/claims/records" \
+     -H 'Content-Type: application/json' \
+     -d "{\"issue\":\"$RID\",\"member\":\"$MID\"}" > "$RACE/$i.code") &
+  race_pids="$race_pids $!"
+done
+wait $race_pids || true
+won=$(cat "$RACE"/*.code | grep -c '^2' || true)
+[ "$won" = 1 ] || fail "16 concurrent claim inserts: expected exactly 1 to succeed, got $won
+$(cat "$RACE"/*.code | sort | uniq -c)"
+rows=$(curl -sf "$URL/api/collections/claims/records?perPage=200" | \
+  jq --arg id "$RID" '[.items[] | select(.issue==$id)] | length')
+[ "$rows" = 1 ] || fail "after the race the issue should hold exactly 1 claim row, got $rows"
+
+# The winning row is not editable, or a loser has a second door: PATCH the
+# holder's `member` to itself, which an index on `issue` alone would allow.
+WON_ID=$(curl -sf "$URL/api/collections/claims/records?perPage=200" | \
+  jq -r --arg id "$RID" '[.items[] | select(.issue==$id)][0].id')
+code=$(curl -s -o /dev/null -w '%{http_code}' -X PATCH \
+  "$URL/api/collections/claims/records/$WON_ID" \
+  -H 'Content-Type: application/json' -d "{\"member\":\"$MID\"}")
+case "$code" in 2*) fail "PATCH on a claim should be refused, got $code";; esac
+
+# AC#2, through the CLI: three real `lll issue claim` processes, one issue.
+CRKEY=$(env $E "$LIN" issue create -t "CLI race target" | sed -n 's/^Created \([A-Z]*-[0-9]*\).*/\1/p')
+CRACE="$DATA_DIR/clirace"
+mkdir -p "$CRACE"
+cli_pids=""
+for m in bryan carol alice; do
+  # set +e inside: two of these three MUST fail, and errexit is inherited by
+  # a subshell — without it the losers die before recording their status.
+  (set +e
+   env $E LLL_ME="$m" "$LIN" issue claim "$CRKEY" > "$CRACE/$m.out" 2>&1
+   echo $? > "$CRACE/$m.rc") &
+  cli_pids="$cli_pids $!"
+done
+wait $cli_pids || true
+wins=$(cat "$CRACE"/*.rc | grep -c '^0$' || true)
+[ "$wins" = 1 ] || fail "3 concurrent 'lll issue claim': expected exactly 1 winner, got $wins
+$(head -100 "$CRACE"/*.out)"
+losers=$(cat "$CRACE"/*.out | grep -c 'already claimed by' || true)
+[ "$losers" = 2 ] || fail "the 2 losers should each be told who holds it, got $losers"
+
+out=$("$LIN" issue --help)
+assert_contains "$out" "lll issue claim" "issue --help mentions claim"
+assert_contains "$out" "lll issue release" "issue --help mentions release"
+assert_contains "$("$LIN" completions bash)" "claim" "bash completions offer claim"
 
 echo "e2e: all assertions passed"
 

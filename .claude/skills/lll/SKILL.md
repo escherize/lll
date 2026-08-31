@@ -37,11 +37,19 @@ Two rules carry most of the value:
 ```sh
 lll issue list --state todo            # what is open
 lll issue view KEY-12                  # read it FULLY before you touch anything
-lll issue update KEY-12 --state in-progress --assignee "$(whoami)"
+lll issue claim KEY-12                 # exits non-zero if someone got there first
+lll issue update KEY-12 --state in-progress
 # ... work ...
 lll issue comment KEY-12 -b "what changed and why"
 lll issue close KEY-12
 ```
+
+`claim` is the one command whose failure you must not ignore. It inserts a row
+into a collection that is UNIQUE on the issue, so when two agents claim the
+same issue at the same moment the database picks one and tells the other whose
+it is. `--assignee` cannot do that: it is a PATCH, so both agents "succeed" and
+neither finds out. Claim as the `me` in your config; `lll issue release KEY-12`
+hands it back.
 
 `lll issue start KEY-12` sets in-progress and creates the branch
 `key-12-slug`, after which every command infers the issue from the branch:
