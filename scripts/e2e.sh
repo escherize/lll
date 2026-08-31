@@ -1653,7 +1653,7 @@ assert_contains "$out" "e2e-agent" "the minted token authenticates a GET"
 # ...and the gate is superuser-only: a member token and no credentials at all
 # are both refused, naming the fix.
 set +e
-out=$(env LLL_TOKEN="$E2E_TOKEN" -u LLL_ADMIN_EMAIL -u LLL_ADMIN_PASSWORD HOME="$E2E_HOME" LLL_URL=$URL "$LIN" token create e2e-agent 2>&1)
+out=$(env -u LLL_ADMIN_EMAIL -u LLL_ADMIN_PASSWORD LLL_TOKEN="$E2E_TOKEN" HOME="$E2E_HOME" LLL_URL=$URL "$LIN" token create e2e-agent 2>&1)
 rc=$?
 set -e
 [ "$rc" -ne 0 ] || fail "token create with a member token: expected nonzero exit"
