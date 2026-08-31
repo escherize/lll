@@ -1068,7 +1068,9 @@ assert_contains "$raw_search" "Raw todo subject" "search raw lists the hit"
 assert_not_contains "$(curl -sf "$WEB/search?q=zzzznope&raw")" "Raw todo subject" \
   "a no-hit search raw lists nothing"
 raw_settings=$(curl -sf "$WEB/settings?raw") || fail "settings ?raw did not serve"
-assert_contains "$raw_settings" "Engineering" "settings raw lists the team"
+# The display name rides a seed race (`lll up` may create ENG before the
+# rename POST lands), so assert on the stable key, not the name.
+assert_contains "$raw_settings" "(ENG)" "settings raw lists the team"
 assert_contains "$raw_settings" "No Issues Here" "settings raw lists the members"
 
 # --- /settings: server-side, shared, CLI-only things (task-83) ---
