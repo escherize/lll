@@ -68,7 +68,18 @@ except IndexError:
 
 wait_ok "$LLL_URL/api/health" || fail "PocketBase did not start"
 
-curl -sf -X POST "$LLL_URL/api/collections/teams/records" \
+# --- TASK-181: the suite rides a member token --------------------------------
+# The rules refuse tokenless requests now. The board itself keeps rendering
+# because `lll up` defaults ITS process to the superuser token (the TASK-182
+# handoff); the CLI verbs and the direct PB fixtures below use the member
+# token a human login would get.
+WEB_TOKEN=$(pb_member_token "$LLL_URL" web-e2e web-e2e@lll.test web-e2e-pass-123) \
+  || fail "bootstrapping the web e2e member token"
+[ -n "$WEB_TOKEN" ] && [ "$WEB_TOKEN" != "null" ] || fail "pb_member_token returned no token"
+export LLL_TOKEN="$WEB_TOKEN"
+AUTH_HDR="Authorization: Bearer $WEB_TOKEN"
+
+curl -sf -H "$AUTH_HDR" -X POST "$LLL_URL/api/collections/teams/records" \
   -H 'Content-Type: application/json' \
   -d '{"key":"ENG","name":"Engineering"}' >/dev/null || true   # lll up already created ENG
 
@@ -103,11 +114,11 @@ assert_contains "$board" 'class="card-pop"' "cards carry a hover preview"
 ENG1_ID=$("$LIN" issue view ENG-1 --json | jq -r '.id')
 ENG2_ID=$("$LIN" issue view ENG-2 --json | jq -r '.id')
 [ -n "$ENG1_ID" ] && [ -n "$ENG2_ID" ] || fail "resolving issue ids for snippet seeds"
-curl -sf -X PATCH "$LLL_URL/api/collections/issues/records/$ENG1_ID" \
+curl -sf -H "$AUTH_HDR" -X PATCH "$LLL_URL/api/collections/issues/records/$ENG1_ID" \
   -H 'Content-Type: application/json' \
   -d '{"description":"First preview line.\n\nSecond preview line.\nThird line never previewed."}' >/dev/null
 LONG_DESC=$(printf 'a%.0s' $(seq 1 200))
-curl -sf -X PATCH "$LLL_URL/api/collections/issues/records/$ENG2_ID" \
+curl -sf -H "$AUTH_HDR" -X PATCH "$LLL_URL/api/collections/issues/records/$ENG2_ID" \
   -H 'Content-Type: application/json' \
   -d "{\"description\":\"$LONG_DESC\"}" >/dev/null
 
@@ -350,11 +361,11 @@ assert_contains "$board" 'Priority</span> No priority <span class="count">' \
 "$LIN" project create -n "Panel Project" --status planned >/dev/null
 "$LIN" label create -n "props-label" -c '#4cb782' >/dev/null
 "$LIN" member add -n "Panel Member" >/dev/null
-PANEL_PROJECT=$(curl -sf "$LLL_URL/api/collections/projects/records?perPage=200" \
+PANEL_PROJECT=$(curl -sf -H "$AUTH_HDR" "$LLL_URL/api/collections/projects/records?perPage=200" \
   | jq -r '.items[] | select(.name=="Panel Project") | .id')
-PANEL_MEMBER=$(curl -sf "$LLL_URL/api/collections/members/records?perPage=200" \
+PANEL_MEMBER=$(curl -sf -H "$AUTH_HDR" "$LLL_URL/api/collections/members/records?perPage=200" \
   | jq -r '.items[] | select(.name=="Panel Member") | .id')
-PANEL_LABEL=$(curl -sf "$LLL_URL/api/collections/labels/records?perPage=200" \
+PANEL_LABEL=$(curl -sf -H "$AUTH_HDR" "$LLL_URL/api/collections/labels/records?perPage=200" \
   | jq -r '.items[] | select(.name=="props-label") | .id')
 [ -n "$PANEL_PROJECT" ] && [ -n "$PANEL_MEMBER" ] && [ -n "$PANEL_LABEL" ] \
   || fail "resolving Panel fixtures (project/member/label) for the issue page tests"
@@ -1191,8 +1202,8 @@ assert_contains "$saved" 'id="accent"' "a settings save patches the head's accen
 # An unparseable stored accent falls back rather than emitting broken CSS.
 # The field's max of 7 already keeps a whole CSS rule from fitting, so this
 # writes the longest junk PocketBase will accept.
-TEAM_ID=$(curl -sf "$LLL_URL/api/collections/teams/records?filter=$(python3 -c "import urllib.parse;print(urllib.parse.quote(\"key='ENG'\"))")" | jq -r '.items[0].id')
-curl -sf -X PATCH "$LLL_URL/api/collections/teams/records/$TEAM_ID" \
+TEAM_ID=$(curl -sf -H "$AUTH_HDR" "$LLL_URL/api/collections/teams/records?filter=$(python3 -c "import urllib.parse;print(urllib.parse.quote(\"key='ENG'\"))")" | jq -r '.items[0].id')
+curl -sf -H "$AUTH_HDR" -X PATCH "$LLL_URL/api/collections/teams/records/$TEAM_ID" \
   -H 'Content-Type: application/json' -d '{"accent":"};z{a:b"}' >/dev/null
 assert_contains "$(curl -sf "$WEB/")" '<style id="accent"></style>' \
   "an unparseable stored accent falls back to the canonical orange"
@@ -1228,20 +1239,20 @@ assert_contains "$(curl -sf "$WEB/issue/ENG-1")" 'data-signals:fav="true"' \
   "issue page opens with the star lit"
 
 curl -s -o /dev/null -X POST "$WEB/favorite?key=ENG-1&on=true"
-count=$(curl -sf "$LLL_URL/api/collections/favorites/records?perPage=200" | jq '.items | length')
+count=$(curl -sf -H "$AUTH_HDR" "$LLL_URL/api/collections/favorites/records?perPage=200" | jq '.items | length')
 [ "$count" = 1 ] || fail "starring twice made $count rows, want 1"
 
 # The record shape is what makes per-user favorites (task-32) a migration
 # rather than a redesign: the member relation already exists, and is empty
 # because a star currently belongs to the workspace.
-row=$(curl -sf "$LLL_URL/api/collections/favorites/records?perPage=1" | jq -r '.items[0]')
+row=$(curl -sf -H "$AUTH_HDR" "$LLL_URL/api/collections/favorites/records?perPage=1" | jq -r '.items[0]')
 printf '%s' "$row" | jq -e 'has("member")' >/dev/null || fail "favorite has no member field"
 [ "$(printf '%s' "$row" | jq -r '.member')" = "" ] || fail "favorite is not workspace-wide"
 
 # Unstarring removes the row, and is equally idempotent.
 curl -s -o /dev/null -X POST "$WEB/favorite?key=ENG-1&on=false"
 curl -s -o /dev/null -X POST "$WEB/favorite?key=ENG-1&on=false"
-count=$(curl -sf "$LLL_URL/api/collections/favorites/records?perPage=200" | jq '.items | length')
+count=$(curl -sf -H "$AUTH_HDR" "$LLL_URL/api/collections/favorites/records?perPage=200" | jq '.items | length')
 [ "$count" = 0 ] || fail "unstarring left $count rows, want 0"
 assert_contains "$(favgroup "$(curl -sf "$WEB/")")" "Star an issue to pin it here" \
   "the group is empty again after unstarring"
@@ -1281,7 +1292,7 @@ assert_not_contains "$(favgroup "$(curl -sf "$WEB/")")" "Starred then deleted" \
   "deleting an issue cascades its star out of the rail"
 # ...and it is really gone from PB, not merely filtered out of the render:
 # cascadeDelete is what keeps the rail from accumulating dead links.
-count=$(curl -sf "$LLL_URL/api/collections/favorites/records?perPage=200" | jq '.items | length')
+count=$(curl -sf -H "$AUTH_HDR" "$LLL_URL/api/collections/favorites/records?perPage=200" | jq '.items | length')
 [ "$count" = 1 ] || fail "cascade left $count favorites, want 1 (ENG-1's)"
 curl -s -o /dev/null -X POST "$WEB/favorite?key=ENG-1&on=false"
 
@@ -1329,7 +1340,7 @@ assert_not_contains "$(column "$view_page" todo)" "Views fixture other" \
   "a saved view reproduces its filter (other states stay out)"
 
 # Views are workspace-wide until auth (task-32): member is empty on the row.
-row=$(curl -sf "$LLL_URL/api/collections/views/records?perPage=200" | jq -c '.items[0]')
+row=$(curl -sf -H "$AUTH_HDR" "$LLL_URL/api/collections/views/records?perPage=200" | jq -c '.items[0]')
 [ "$(printf '%s' "$row" | jq -r '.member')" = "" ] || fail "a view is not workspace-wide"
 
 # A duplicate name is a readable error in the flash strip, not a 500.
@@ -1371,9 +1382,9 @@ assert_not_contains "$(curl -sf "$WEB/issue/ENG-1")" "foreign-label" "issue page
 
 # A posted id from the other team is as unknown as a deleted one, whatever
 # markup it came from.
-FOREIGN_LABEL=$(curl -sf "$LLL_URL/api/collections/labels/records?perPage=200" \
+FOREIGN_LABEL=$(curl -sf -H "$AUTH_HDR" "$LLL_URL/api/collections/labels/records?perPage=200" \
   | jq -r '.items[] | select(.name=="foreign-label") | .id')
-FOREIGN_PROJECT=$(curl -sf "$LLL_URL/api/collections/projects/records?perPage=200" \
+FOREIGN_PROJECT=$(curl -sf -H "$AUTH_HDR" "$LLL_URL/api/collections/projects/records?perPage=200" \
   | jq -r '.items[] | select(.name=="Foreign Project") | .id')
 assert_contains "$(curl -s -X POST --data-urlencode "key=ENG-1" \
   --data-urlencode "labels=$FOREIGN_LABEL" "$WEB/labels")" \
@@ -1385,13 +1396,13 @@ assert_contains "$(curl -s -X POST --data-urlencode "key=ENG-1" \
 # Labels and projects are required to name a team, so the settings writes
 # have to supply one — and an update must not blank it.
 curl -sf -X POST "$WEB/settings/label" -d 'name=scoped-label' -d 'color=#4cb782' >/dev/null
-SCOPED=$(curl -sf "$LLL_URL/api/collections/labels/records?perPage=200&expand=team" \
+SCOPED=$(curl -sf -H "$AUTH_HDR" "$LLL_URL/api/collections/labels/records?perPage=200&expand=team" \
   | jq -r '.items[] | select(.name=="scoped-label") | .expand.team.key')
 [ "$SCOPED" = "ENG" ] || fail "a web-created label landed on team '$SCOPED', want ENG"
-SCOPED_ID=$(curl -sf "$LLL_URL/api/collections/labels/records?perPage=200" \
+SCOPED_ID=$(curl -sf -H "$AUTH_HDR" "$LLL_URL/api/collections/labels/records?perPage=200" \
   | jq -r '.items[] | select(.name=="scoped-label") | .id')
 curl -sf -X POST "$WEB/settings/label" -d "id=$SCOPED_ID" -d 'name=scoped-label' -d 'color=#8d7ce6' >/dev/null
-KEPT=$(curl -sf "$LLL_URL/api/collections/labels/records/$SCOPED_ID?expand=team" | jq -r '.expand.team.key')
+KEPT=$(curl -sf -H "$AUTH_HDR" "$LLL_URL/api/collections/labels/records/$SCOPED_ID?expand=team" | jq -r '.expand.team.key')
 [ "$KEPT" = "ENG" ] || fail "a settings update blanked the label's team (got '$KEPT')"
 curl -sf -X POST "$WEB/settings/label?del=1" -d "id=$SCOPED_ID" >/dev/null
 
@@ -1413,11 +1424,11 @@ assert_contains "$board" '>Unassigned</option>' "the dialog offers an assignee"
 assert_contains "$board" '>No project</option>' "the dialog offers a project"
 assert_contains "$board" 'id="new-issue"' "the one-line composer is still there"
 
-DL_LABEL=$(curl -sf "$LLL_URL/api/collections/labels/records?perPage=200" \
+DL_LABEL=$(curl -sf -H "$AUTH_HDR" "$LLL_URL/api/collections/labels/records?perPage=200" \
   | jq -r '.items[] | select(.name=="dialog-label") | .id')
-DL_MEMBER=$(curl -sf "$LLL_URL/api/collections/members/records?perPage=200" \
+DL_MEMBER=$(curl -sf -H "$AUTH_HDR" "$LLL_URL/api/collections/members/records?perPage=200" \
   | jq -r '.items[] | select(.name=="Web Member Renamed") | .id')
-DL_PROJECT=$(curl -sf "$LLL_URL/api/collections/projects/records?perPage=200" \
+DL_PROJECT=$(curl -sf -H "$AUTH_HDR" "$LLL_URL/api/collections/projects/records?perPage=200" \
   | jq -r '.items[] | select(.name=="Web Project") | .id')
 [ -n "$DL_LABEL" ] && [ -n "$DL_MEMBER" ] && [ -n "$DL_PROJECT" ] \
   || fail "seeding the create-dialog assertions"
@@ -1470,7 +1481,7 @@ done
 # CLI rendering pass; poll briefly so a loaded runner cannot read stale.
 back_to_back_written() { # n --- the record exists in PocketBase
   for _ in 1 2 3 4 5; do
-    curl -sf --get "$LLL_URL/api/collections/issues/records" \
+    curl -sf -H "$AUTH_HDR" --get "$LLL_URL/api/collections/issues/records" \
       --data-urlencode "filter=title='Create more curl $1'" \
       --data-urlencode "perPage=1" | jq -e '.items | length == 1' >/dev/null && return 0
     sleep 0.5

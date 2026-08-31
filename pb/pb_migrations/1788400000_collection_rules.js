@@ -25,6 +25,12 @@
 // 2. _superusers is PocketBase's own collection and is not touched here. Its
 //    rules are already null (superuser only).
 //
+// 3. PocketBase's stock `users` collection (every fresh install gets one;
+//    lll never reads or writes it) ships with createRule "" — a standing
+//    public self-registration nobody asked for. It goes to null: nothing in
+//    lll authenticates as a users record, so even members have no business
+//    in it. The down migration restores the stock rules verbatim.
+//
 // Members: createRule flips too — NO public self-registration exception.
 // First-boot seeding does not need it: `lll up` authenticates as the
 // superuser (the same credentials gopb.Serve upserted) before it seeds the
@@ -38,9 +44,9 @@
 // rendering and acting; TASK-182 replaces that with per-session member
 // tokens.
 //
-// Idempotent (re-applying writes the same rules) and reversible (the down
-// migration restores the exact pre-TASK-181 rules: "" everywhere except
-// claims.updateRule, which was null).
+// Idempotent (re-applying writes the same rules) and reversible: the down
+// migration restores the exact pre-TASK-181 state — "" everywhere except
+// claims.updateRule (null) and `users` (PocketBase's stock rules).
 const AUTH = "@request.auth.id != \"\"";
 
 // name -> [listRule, viewRule, createRule, updateRule, deleteRule]
@@ -56,6 +62,19 @@ const RULES = {
   favorites: [AUTH, AUTH, AUTH, AUTH, AUTH],
   claims: [AUTH, AUTH, AUTH, null, AUTH],
 };
+
+// Superuser only: lll does not use this collection, so nobody else should.
+const USERS_RULES = [null, null, null, null, null];
+
+// PocketBase's stock rules for `users`, restored verbatim by the down
+// migration (the stock create is public — the hole being closed here).
+const USERS_STOCK = [
+  "id = @request.auth.id",
+  "id = @request.auth.id",
+  "",
+  "id = @request.auth.id",
+  "id = @request.auth.id",
+];
 
 // The pre-TASK-181 state, restored verbatim by the down migration.
 const PUBLIC = "";
@@ -83,6 +102,17 @@ migrate(
       c.deleteRule = RULES[name][4];
       app.save(c);
     }
+    try {
+      const users = app.findCollectionByNameOrId("users");
+      users.listRule = USERS_RULES[0];
+      users.viewRule = USERS_RULES[1];
+      users.createRule = USERS_RULES[2];
+      users.updateRule = USERS_RULES[3];
+      users.deleteRule = USERS_RULES[4];
+      app.save(users);
+    } catch (_) {
+      // no stock users collection on this database; nothing to lock
+    }
   },
   (app) => {
     for (const name of Object.keys(BEFORE)) {
@@ -93,6 +123,17 @@ migrate(
       c.updateRule = BEFORE[name][3];
       c.deleteRule = BEFORE[name][4];
       app.save(c);
+    }
+    try {
+      const users = app.findCollectionByNameOrId("users");
+      users.listRule = USERS_STOCK[0];
+      users.viewRule = USERS_STOCK[1];
+      users.createRule = USERS_STOCK[2];
+      users.updateRule = USERS_STOCK[3];
+      users.deleteRule = USERS_STOCK[4];
+      app.save(users);
+    } catch (_) {
+      // no stock users collection on this database; nothing to restore
     }
   },
 );
