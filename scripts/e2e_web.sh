@@ -1140,8 +1140,12 @@ curl -sf -X POST "$WEB/settings/label?del=1" -d "id=$LABEL_ID" >/dev/null
 curl -sf -X POST "$WEB/settings/member" -d 'name=Web Member' -d 'email=web@example.com' >/dev/null
 "$LIN" member list | grep -q '^Web Member	web@example.com' || fail "creating a member from /settings did not persist"
 MEMBER_ID=$(row_id "$(curl -sf "$WEB/settings")" member "Web Member")
-curl -sf -X POST "$WEB/settings/member" -d "id=$MEMBER_ID" -d 'name=Web Member' -d 'email=moved@example.com' >/dev/null
-"$LIN" member list | grep -q '^Web Member	moved@example.com' || fail "editing a member from /settings did not persist"
+# The name is the settings-editable half; the email is the member's login
+# identity (task-180) and the page says so when a row tries to move it.
+curl -sf -X POST "$WEB/settings/member" -d "id=$MEMBER_ID" -d 'name=Web Member Renamed' -d 'email=web@example.com' >/dev/null
+"$LIN" member list | grep -q '^Web Member Renamed	web@example.com' || fail "editing a member from /settings did not persist"
+curl -sf -X POST "$WEB/settings/member" -d "id=$MEMBER_ID" -d 'name=Web Member Renamed' -d 'email=moved@example.com' | grep -q 'login identity' \
+  || fail "moving a member's email from /settings should be refused with the reason"
 
 curl -sf -X POST "$WEB/settings/project" -d 'name=Web Project' -d 'status=planned' >/dev/null
 "$LIN" project list | grep -q '^Web Project	planned' || fail "creating a project from /settings did not persist"
@@ -1412,7 +1416,7 @@ assert_contains "$board" 'id="new-issue"' "the one-line composer is still there"
 DL_LABEL=$(curl -sf "$LLL_URL/api/collections/labels/records?perPage=200" \
   | jq -r '.items[] | select(.name=="dialog-label") | .id')
 DL_MEMBER=$(curl -sf "$LLL_URL/api/collections/members/records?perPage=200" \
-  | jq -r '.items[] | select(.name=="Web Member") | .id')
+  | jq -r '.items[] | select(.name=="Web Member Renamed") | .id')
 DL_PROJECT=$(curl -sf "$LLL_URL/api/collections/projects/records?perPage=200" \
   | jq -r '.items[] | select(.name=="Web Project") | .id')
 [ -n "$DL_LABEL" ] && [ -n "$DL_MEMBER" ] && [ -n "$DL_PROJECT" ] \

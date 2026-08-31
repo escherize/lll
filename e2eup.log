@@ -1,0 +1,20 @@
+
+  ✕ `?` cannot be used inside a condition
+     ╭─[src/commands/member.lis:138:11]
+ 137 │     Err(_) => {
+ 138 │       if (find_member(name)?).is_some() { return Ok(false) }
+     ·           ─────────┬────────
+     ·                    ╰── `?` inside condition
+ 139 │       Err(f"could not create member '{name}' and none exists to reuse")
+     ╰────
+  help: Bind the result first: `let val = expression?; if val { ... }` · code: [infer.propagate_in_condition]
+
+  ▲ Unused import
+   ╭─[src/commands/serve_settings.lis:1:8]
+ 1 │ import "go:encoding/json"
+   ·        ─────────┬────────
+   ·                 ╰── never used
+ 2 │ import "go:crypto/rand"
+   ╰────
+  help: Use or remove this import · code: [lint.unused_import]
+

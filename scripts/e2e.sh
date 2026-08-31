@@ -481,6 +481,41 @@ assert_contains "$out" "bryan@example.com" "member list shows email"
 assert_contains "$out" "carol" "member list has carol"
 assert_contains "$out" "alice" "member list has the member config set me seeded"
 
+# --- task-180: members is an auth collection -------------------------------
+# carol was created without an email, so the CLI synthesized the reserved
+# identity; the record carries a random password nobody knows, which is what
+# makes the record creatable without making it log-in-able.
+carol_email=$(curl -sf "$URL/api/collections/members/records?perPage=200" | jq -r '.items[] | select(.name=="carol") | .email')
+assert_contains "$carol_email" "@members.invalid" \
+  "an email-less member got the reserved synthetic identity"
+
+# PocketBase's own auth-with-password issues tokens for members that HAVE a
+# real password. bryan was created with -e; give him one via the admin API
+# and walk the full auth round trip.
+# Setting a member's password is a superuser operation: PocketBase refuses a
+# password change without the old password unless the caller is an admin.
+ADMIN=$(curl -s -X POST "$URL/api/collections/_superusers/auth-with-password" \
+  -H 'Content-Type: application/json' \
+  -d '{"identity":"admin@local.dev","password":"admin-local-123"}' | jq -r '.token')
+[ -n "$ADMIN" ] && [ "$ADMIN" != "null" ] || fail "admin auth-with-password returned no token"
+BRYAN_ID=$(curl -sf "$URL/api/collections/members/records?perPage=200" | jq -r '.items[] | select(.name=="bryan") | .id')
+curl -sf -X PATCH "$URL/api/collections/members/records/$BRYAN_ID" \
+  -H 'Content-Type: application/json' -H "Authorization: Bearer $ADMIN" \
+  -d '{"password":"bryan-pass-123","passwordConfirm":"bryan-pass-123"}' >/dev/null \
+  || fail "setting bryan's password via the admin API"
+AUTH=$(set +e; curl -s -X POST "$URL/api/collections/members/auth-with-password" \
+  -H 'Content-Type: application/json' \
+  -d '{"identity":"bryan@example.com","password":"bryan-pass-123"}'; set -e)
+assert_contains "$AUTH" '"token"' "auth-with-password returns a token"
+TOKEN=$(printf '%s' "$AUTH" | jq -r '.token')
+[ -n "$TOKEN" ] && [ "$TOKEN" != "null" ] || fail "auth token is empty"
+# The token authenticates a GET the (still public) rules allow.
+code=$(curl -s -o /dev/null -w '%{http_code}' -H "Authorization: Bearer $TOKEN" \
+  "$URL/api/collections/issues/records?perPage=1")
+[ "$code" = 200 ] || fail "authenticated GET with the member token returned $code"
+# The assignee/author paths are asserted unchanged further below, where the
+# issues they point at exist (ENG-7: 'assignee relation' + comment author).
+
 # --- --assignee on create; assignee in list and view ---
 out=$(LLL_URL=$URL LLL_TEAM=ENG "$LIN" issue create -t "Assigned issue" --assignee bryan)
 assert_contains "$out" "Created ENG-7: Assigned issue" "assigned create output"

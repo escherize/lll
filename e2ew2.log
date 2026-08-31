@@ -1,0 +1,22 @@
+
+  ▲ Unused import
+   ╭─[src/commands/serve_settings.lis:1:8]
+ 1 │ import "go:encoding/json"
+   ·        ─────────┬────────
+   ·                 ╰── never used
+ 2 │ import "go:crypto/rand"
+   ╰────
+  help: Use or remove this import · code: [lint.unused_import]
+
+  ✓ Emit completed `lll` v0.1.0 (76ms)
+  ✓ Binary at `target/.lisette/bin/lll`
+e2e_web: browser-level realtime check passed
+e2e_web: browser-level /search live-typing check passed
+FAIL: seeding the create-dialog assertions
+--- pb.log ---
+guessed me = "e2e" from $USER, wrote it to /var/folders/dw/_2dd8rzs1_1dvtbbt2tdsxy80000gn/T/tmp.4TK1HT0mUq/e2e_home/.config/lll/lll.toml — 'lll config set me <name>' to change it
+created member e2e
+admin  http://127.0.0.1:28271/_/  admin@local.dev / admin-local-123
+team   ENG
+me     e2e
+board  http://127.0.0.1:56481
