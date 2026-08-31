@@ -137,6 +137,11 @@ fn issue_create_spec() -> Slice<flags.Flag> {
       help: "project name (see 'lll project list'); filters on list",
       ..
     },
+    flags.Flag {
+      name: "--json",
+      help: "raw PocketBase JSON (team, assignee, labels, project\nexpanded), pipe-friendly",
+      ..
+    },
   ]
 }
 
@@ -397,7 +402,7 @@ fn print_usage() {
 
 Usage:
   lll issue create -t \"title\" [-d desc] [--emoji X] [--priority 0-4] [--assignee name]
-                   [--label name]... [--project name] [--emoji e]
+                   [--label name]... [--project name] [--emoji e] [--json]
                                                   create an issue in the configured team;
                                                   -d - reads the description from stdin
   lll issue list [--state s] [--assignee name] [--label name] [--project name]
@@ -492,6 +497,16 @@ fn create(args: Slice<string>) -> Result<(), string> {
   let mut created = models.Issue { .. }
   if let Err(e) = json.Unmarshal(body.bytes(), &created) {
     return Err(f"decoding created issue: {e}")
+  }
+  // The POST response has no expand, so --json re-fetches the record the
+  // way view does — one GET with the same expand list, same shape out.
+  if p.given("--json") {
+    fmt.Println(
+      pb.get(
+        f"/api/collections/issues/records/{created.id}?expand=team,assignee,labels,project",
+      )?,
+    )
+    return Ok(())
   }
   fmt.Println(f"Created {team.key}-{created.number}: {created.title}")
   Ok(())

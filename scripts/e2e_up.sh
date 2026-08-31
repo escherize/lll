@@ -80,7 +80,10 @@ out=$(LLL_URL="http://127.0.0.1:$DB2" LLL_TEAM=E2E \
 printf '%s' "$out" | grep -q "Created E2E-" || fail "assignment to the seeded member failed: $out"
 
 # SIGINT: the board and the in-process PB must both die with the process.
-kill -INT -- "-$UP_PID" 2>/dev/null || kill -INT "$UP_PID"
+# The up may have already exited (it has after the banner, twice on loaded
+# runners — TASK-153's orphan class): a kill of nothing is success, the
+# assertion below judges whether the external PB outlived it.
+kill -INT -- "-$UP_PID" 2>/dev/null || kill -INT "$UP_PID" 2>/dev/null || true
 for _ in $(seq 1 50); do
   curl -sf "http://127.0.0.1:$WEB2/" >/dev/null 2>&1 || break
   sleep 0.1
@@ -109,7 +112,10 @@ grep -q "(already running)" "$UP_LOG" || fail "reuse path not taken"
 # The home config now names me, so a later boot must use it, not guess again.
 grep -q "guessed me" "$UP_LOG" && fail "me re-guessed with one already configured"
 grep -q "^me     e2euser" "$UP_LOG" || fail "configured me not used on a later boot"
-kill -INT -- "-$UP_PID" 2>/dev/null || kill -INT "$UP_PID"
+# The up may have already exited (it has after the banner, twice on loaded
+# runners — TASK-153's orphan class): a kill of nothing is success, the
+# assertion below judges whether the external PB outlived it.
+kill -INT -- "-$UP_PID" 2>/dev/null || kill -INT "$UP_PID" 2>/dev/null || true
 sleep 0.5
 UP_PID=""
 curl -sf "http://127.0.0.1:$EXT_PORT/api/health" >/dev/null \

@@ -1,6 +1,8 @@
 import "go:encoding/json"
+import "go:crypto/rand"
 import "go:fmt"
 import "go:net/url"
+import "go:strings"
 
 import "models"
 import "pb"
@@ -35,8 +37,9 @@ Usage:
   lll member list                       list members (name, email)
   lll member add -n \"name\" [-e email]   add a member
 
-Members are honor-system identities (no auth). 'me' in .lll.toml names the
-member that authors your comments.",
+Members are PocketBase auth records (email + password; TASK-180). Adding one
+without -e synthesizes <name>@members.invalid as its identity. 'me' in the
+home config names the member that authors your comments.",
   )
 }
 
@@ -82,9 +85,20 @@ fn member_add(args: Slice<string>) -> Result<(), string> {
 }
 
 /// Create a member. Names are unique server-side, so callers that may race
-/// or repeat check with find_member first.
+/// or repeat check with find_member first. Email is required by the auth
+/// collection: without -e, one is synthesized from the name — the same
+/// @members.invalid rule the TASK-180 migration used to backfill. The random
+/// password satisfies PB's create validation; it is never shown or reused.
 pub fn create_member(name: string, email: string) -> Result<models.Member, string> {
-  let new_member = models.NewMember { name, email }
+  let member_email = if email == "" { synthesize_email(name) } else { email }
+  let password = rand.Text()
+  let new_member = models.NewMember {
+    name,
+    email: member_email,
+    password,
+    password_confirm: password,
+    email_visibility: true,
+  }
   let payload = match json.Marshal(new_member) {
     Ok(p) => p,
     Err(e) => return Err(f"encoding member: {e}"),
@@ -98,6 +112,13 @@ pub fn create_member(name: string, email: string) -> Result<models.Member, strin
   Ok(created)
 }
 
+/// The deterministic identity a member without an email gets. Same rule as
+/// the TASK-180 migration's backfill, so both paths agree on one shape.
+pub fn synthesize_email(name: string) -> string {
+  let slug = strings.ReplaceAll(strings.ToLower(name), " ", "-")
+  f"{slug}@members.invalid"
+}
+
 /// Find a member by exact name, or None.
 /// Create the member if the server does not have one by that name. Returns
 /// true when it created one. Shared by `lll up`'s first-boot seeding and
@@ -107,8 +128,18 @@ pub fn ensure_member(name: string) -> Result<bool, string> {
   if name == "" { return Ok(false) }
   let existing = find_member(name)?
   if existing.is_some() { return Ok(false) }
-  let _ = create_member(name, "")?
-  Ok(true)
+  // Two actors seeding the same fresh server race here: both find nothing,
+  // both POST. The unique name (and now email) indexes admit one and reject
+  // the other, and the loser re-looks-up whoever won instead of failing the
+  // boot — the same bargain ensure_team and e2e.sh's seed_team run.
+  match create_member(name, "") {
+    Ok(_) => Ok(true),
+    Err(_) => {
+      let raced = find_member(name)?
+      if raced.is_some() { return Ok(false) }
+      Err(f"could not create member '{name}' and none exists to reuse")
+    },
+  }
 }
 
 fn find_member(name: string) -> Result<Option<models.Member>, string> {

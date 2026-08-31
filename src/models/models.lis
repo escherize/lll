@@ -36,6 +36,16 @@ pub struct NewMember {
   pub name: string,
   #[json(omitempty)]
   pub email: string,
+  // members is an auth collection (TASK-180): PB requires the password pair
+  // on create. Random and never printed — nobody logs in until a real
+  // password is set by an admin or the member.
+  pub password: string,
+  #[json("passwordConfirm")]
+  pub password_confirm: string,
+  // keeps emails visible to `lll member list` and the board, as they were
+  // before the collection became an auth one.
+  #[json("emailVisibility")]
+  pub email_visibility: bool,
 }
 
 #[json]

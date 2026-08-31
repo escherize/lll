@@ -1,4 +1,5 @@
 import "go:encoding/json"
+import "go:crypto/rand"
 import "go:net/http"
 import "go:net/url"
 import "go:strings"
@@ -134,8 +135,23 @@ struct TeamPatch { name: string, accent: string }
 #[json]
 struct LabelPatch { name: string, color: string, team: string }
 
+/// The create payload members needs now that the collection is an auth one
+/// (TASK-180): email identity, password pair, visibility. The update patch
+/// stays name+email — a password change is an admin operation, not a
+/// settings row.
 #[json]
-struct MemberPatch { name: string, email: string }
+struct MemberCreate {
+  name: string,
+  email: string,
+  password: string,
+  #[json("passwordConfirm")]
+  password_confirm: string,
+  #[json("emailVisibility")]
+  email_visibility: bool,
+}
+
+#[json]
+struct MemberPatch { name: string }
 
 #[json]
 struct ProjectPatch { name: string, status: string, team: string }
@@ -209,7 +225,42 @@ fn settings_apply(r: Ref<http.Request>, team_id: string) -> Result<(), string> {
     "member" => {
       if name == "" { return Err("member name is required") }
       let email = strings.TrimSpace(r.PostFormValue("email"))
-      save_record("members", id, MemberPatch { name, email })
+      if id == "" {
+        // members is an auth collection (TASK-180): a create needs an email
+        // identity and a password. The synthesized identity and the random
+        // never-shown password are the same bargain the CLI's member add
+        // runs; nobody can log in as one until a password is set.
+        let member_email = if email == "" { synthesize_email(name) } else { email }
+        // One value for both password fields: two rand.Text() calls would
+        // disagree with each other and fail PB's confirm check.
+        let password = rand.Text()
+        save_record(
+          "members",
+          id,
+          MemberCreate {
+            name,
+            email: member_email,
+            password,
+            password_confirm: password,
+            email_visibility: true,
+          },
+        )?
+        return Ok(())
+      }
+      let known = fetch_members()?
+      let Some(existing) = known.find(|m| m.id == id) else {
+        return Err(f"unknown member '{id}' — reload the page for the current list")
+      }
+      // Email is the member's login identity now (TASK-180): PocketBase
+      // refuses an email change on an auth record without its password, so
+      // the settings row edits the name and says so when the email moved.
+      let posted_email = strings.TrimSpace(email)
+      if posted_email != "" && posted_email != existing.email {
+        return Err(
+          f"'{existing.name}'s email is their login identity now — edit it in the auth flow, not here (name saved)",
+        )
+      }
+      save_record("members", id, MemberPatch { name })
     },
     "project" => {
       if name == "" { return Err("project name is required") }
