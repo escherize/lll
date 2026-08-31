@@ -108,6 +108,10 @@
         "role": "tertiary",
         "displayName": "Avatar Ink",
         "canonical": "#0a1620"
+      },
+      "scrim": {
+        "canonical": "rgba(6, 7, 8, 0.62)",
+        "purpose": "modal/dialog backdrop scrim (new-issue dialog)"
       }
     },
     "typographyMeta": {

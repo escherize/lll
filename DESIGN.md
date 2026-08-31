@@ -31,6 +31,7 @@ colors:
   avatar-violet: "#9d8fe0"
   avatar-moss: "#82c99a"
   avatar-ink: "#0a1620"
+  scrim: "rgba(6, 7, 8, 0.62)"
 typography:
   title:
     fontFamily: "Inter Variable, system-ui, sans-serif"
@@ -55,6 +56,10 @@ typography:
   code:
     fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace"
     fontSize: "12px"
+  emoji:
+    fontSize: "14px"
+  dialog-glyph:
+    fontSize: "16px"
   scale:
     avatar-initials: "8.5px"
     mark-letter: "10px"
