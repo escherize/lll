@@ -32,6 +32,7 @@
     <div class="issue-wrap" data-signals:edit_title="false" data-signals:title_draft="''" data-signals:emo_open="false" data-signals:emo_q="''">
       <div class="issue-scroll">
         {{template "issue-detail" .Page}}
+        {{template "related-findings" .Page}}
         {{template "comments" .Page}}
         <form id="comment-form" class="composer">
           <input type="hidden" name="key" value="{{.Page.Key}}">
@@ -141,3 +142,17 @@
 <div class="md">{{.Body}}</div></div>
 </div>
 {{end}}</section>{{end}}
+{{/* Related findings (TASK-103): docs of kind=finding whose area names one
+     of the issue's labels, plus every finding explicitly linked to the
+     issue. Filled by the page handler only and rendered OUTSIDE the
+     #issue-detail morph boundary — like the emoji picker — so an SSE
+     broadcast re-renders #issue-detail and #comments and never this
+     section. No matches, no section: an empty RELATED FINDINGS heading
+     would be exactly the clutter this block exists to avoid. */}}
+{{define "related-findings"}}{{if .Findings}}<section id="related-findings" class="thread">
+<h2>Related findings <span class="count">{{len .Findings}}</span></h2>
+{{range .Findings}}<div class="comment">
+<div><p class="meta"><b>{{.Slug}}</b>{{if .Area}} · {{.Area}}{{end}}</p>
+<p>{{.Title}}</p></div>
+</div>
+{{end}}</section>{{end}}{{end}}

@@ -404,6 +404,35 @@ if printf '%s' "$issue" | grep -q "value=\"$PANEL_LABEL\" checked"; then
   fail "empty /labels left the chip checked"
 fi
 
+# --- related findings on the issue page (TASK-103): unprompted, server-
+# rendered with the page. A finding whose area names a label the issue
+# carries surfaces with no link and no click; a finding explicitly linked
+# to the issue always shows; an issue with no matches renders no section at
+# all — no empty-heading clutter.
+printf 'Migrations collide when two agents mint one.' | "$LIN" doc new \
+  -s web-migrations -t "Migration collisions" -k finding -a props -p "pb/pb_migrations" -b - >/dev/null
+printf 'Bindgen needs darwin.' | "$LIN" doc new -s darwin-only -t "Gate is darwin-only" -k finding -p "gopb" -b - >/dev/null
+"$LIN" issue link ENG-2 darwin-only >/dev/null
+"$LIN" label create -n props >/dev/null
+"$LIN" issue update ENG-1 --label props >/dev/null
+
+issue=$(curl -sf "$WEB/issue/ENG-1")
+assert_contains "$issue" 'id="related-findings"' "issue page renders the related findings section"
+assert_contains "$issue" "web-migrations" "an area-matched finding surfaces unprompted"
+assert_not_contains "$issue" "darwin-only" "an unlinked, unmatched finding stays off the issue"
+issue=$(curl -sf "$WEB/issue/ENG-2")
+assert_contains "$issue" "darwin-only" "a linked finding shows on its own issue's page"
+
+# The raw form carries the same list — everything is curl-able (task-104).
+raw=$(curl -sf "$WEB/issue/ENG-1?raw")
+assert_contains "$raw" "## Related findings" "issue raw carries related findings"
+assert_contains "$raw" "web-migrations (props): Migration collisions" "issue raw lists the finding"
+
+issue=$(curl -sf "$WEB/issue/ENG-3")
+if printf '%s' "$issue" | grep -q 'id="related-findings"'; then
+  fail "an issue with no matches renders no findings section"
+fi
+
 # Unknown ids are refused, in the flash strip's voice.
 out=$(curl -s -X POST --data-urlencode "key=ENG-3" --data-urlencode "project=bogus" "$WEB/project")
 assert_contains "$out" "unknown project" "unknown project message"

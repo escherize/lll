@@ -1,0 +1,152 @@
+import "go:fmt"
+import "go:net/url"
+import "go:strings"
+
+import "flags"
+import "models"
+import "pb"
+
+/// `lll finding` (TASK-103) — the retrieval side of docs. A finding is a doc
+/// with kind=finding; `lll doc new -k finding` stays the authoring path, and
+/// these verbs answer "what do we know about THIS file / area". Surfacing is
+/// by area and path — a filter over kind='finding' — never full-text luck.
+pub fn finding(args: Slice<string>) -> Result<(), string> {
+  let Some(verb) = args.get(2) else {
+    finding_usage()
+    return Ok(())
+  }
+  match verb {
+    "near" => finding_near(args),
+    "list" => finding_list(args),
+    "--help" => {
+      finding_usage()
+      Ok(())
+    },
+    "-h" => {
+      finding_usage()
+      Ok(())
+    },
+    other => Err(f"unknown finding command: '{other}' (see 'lll finding --help')"),
+  }
+}
+
+fn finding_usage() {
+  fmt.Println(
+    "lll finding - retrieve findings (docs with kind=finding) by area or path
+
+Usage:
+  lll finding near <path>          findings about a file or directory,
+                                   matched by directory containment in both
+                                   directions (a finding filed on 'src/pb'
+                                   answers both 'near src' and
+                                   'near src/pb/records.lis')
+  lll finding list [--area X]      every finding, or one area's, one line
+                                   each (slug, area, title)
+
+Author findings with 'lll doc new -k finding -a <area> -p \"<paths>\"'.
+`area` is conventionally the NAME of an existing label: an issue whose labels
+contain the area surfaces the finding — on its web page and in
+'lll issue view'. `paths` is comma-separated file or directory paths, the
+coordinates 'lll finding near' matches by.",
+  )
+}
+
+// ------------------------------------------------------------------ specs
+
+fn finding_list_spec() -> Slice<flags.Flag> {
+  [
+    flags.Flag {
+      name: "-a",
+      alias: "--area",
+      value: true,
+      hint: "area",
+      help: "only findings whose area equals this",
+      ..
+    },
+  ]
+}
+
+/// The flag table of one finding verb; read by `lll completions` so the
+/// scripts complete exactly what the parser accepts (TASK-127).
+pub fn finding_verb_spec(verb: string) -> Slice<flags.Flag> {
+  match verb {
+    "near" => [],
+    "list" => finding_list_spec(),
+    _ => [],
+  }
+}
+
+// ----------------------------------------------------------------- shared
+
+/// Every finding, slug order. One kind filter — retrieval never searches
+/// bodies or titles, it filters coordinates.
+pub fn fetch_findings() -> Result<Slice<models.Doc>, string> {
+  let filter = url.QueryEscape("kind='finding'")
+  let mut docs = models.DocList { .. }
+  pb.fetch(
+    f"/api/collections/docs/records?filter={filter}&sort=slug&perPage=500",
+    "docs",
+    &docs,
+  )?
+  Ok(docs.items)
+}
+
+/// Does the doc's stored paths list touch the path being asked about?
+fn doc_paths_touch(d: models.Doc, path: string) -> bool {
+  d.paths.split(",").any(|entry| path_touches(entry, path))
+}
+
+/// The findings related to one issue: every finding explicitly linked to it
+/// (the issues relation always shows), plus every finding whose `area` names
+/// one of the issue's labels. Shared by 'lll issue view' and the issue page.
+pub fn findings_for_issue(issue: models.Issue) -> Result<Slice<models.Doc>, string> {
+  let findings = fetch_findings()?
+  Ok(findings.filter(|d| {
+    let linked = d.issues.find(|x| x == issue.id).is_some()
+    let area_hit = d.area != "" && issue.expand.labels.any(|l| l.name == d.area)
+    linked || area_hit
+  }))
+}
+
+// ------------------------------------------------------------------ verbs
+
+fn finding_near(args: Slice<string>) -> Result<(), string> {
+  let p = flags.parse([], args, 3, true, "")?
+  let path = p.first()
+  if path == "" { return Err("usage: lll finding near <path>") }
+  let findings = fetch_findings()?
+  let hits = findings.filter(|d| doc_paths_touch(d, path))
+  if hits.is_empty() {
+    fmt.Println(f"No findings for {path}.")
+    return Ok(())
+  }
+  print_finding_lines(hits)
+  Ok(())
+}
+
+fn finding_list(args: Slice<string>) -> Result<(), string> {
+  let spec = finding_list_spec()
+  let usage = flags.usage("lll finding list", spec, "")
+  let p = flags.parse(spec, args, 3, false, usage)?
+  let area = strings.TrimSpace(p.one("-a"))
+  let mut findings = fetch_findings()?
+  if area != "" {
+    findings = findings.filter(|d| strings.TrimSpace(d.area) == area)
+  }
+  if findings.is_empty() {
+    fmt.Println("No findings.")
+    return Ok(())
+  }
+  print_finding_lines(findings)
+  Ok(())
+}
+
+/// One line per finding, tab-separated like 'lll doc list': slug, area,
+/// title. An empty area prints as "-" so columns stay aligned.
+fn print_finding_lines(docs: Slice<models.Doc>) {
+  for d in docs {
+    let mut area = d.area
+    if area == "" { area = "-" }
+    fmt.Println(f"{d.slug}\t{area}\t{d.title}")
+  }
+}

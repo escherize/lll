@@ -623,6 +623,7 @@ fn view(args: Slice<string>) -> Result<(), string> {
       fmt.Println("")
       fmt.Println(full.description)
     }
+    print_findings_raw(full)?
     return Ok(())
   }
 
@@ -655,12 +656,43 @@ fn view(args: Slice<string>) -> Result<(), string> {
     fmt.Println(full.description)
   }
 
+  // The brief mechanism (TASK-103 AC#3): an agent's task brief carries the
+  // findings for the work it is about to do without a human choosing them.
+  let findings = findings_for_issue(full)?
+  if findings.length() > 0 {
+    fmt.Println("")
+    fmt.Println("Related findings:")
+    fmt.Println("")
+    for f in findings {
+      let mut area = f.area
+      if area == "" { area = "-" }
+      fmt.Println(f"{f.slug} ({area}) — {f.title}")
+    }
+  }
+
   let comments = fetch_comments(full.id)?
   if comments.length() > 0 {
     fmt.Println("")
     fmt.Println("Comments:")
     fmt.Println("")
     print_comments(comments)
+  }
+  Ok(())
+}
+
+/// The '## Related findings' block of `lll issue view --raw` — same list
+/// findings_for_issue serves the rendered view, as plain markdown so an
+/// agent's piped brief carries the findings too.
+fn print_findings_raw(full: models.Issue) -> Result<(), string> {
+  let findings = findings_for_issue(full)?
+  if findings.is_empty() { return Ok(()) }
+  fmt.Println("")
+  fmt.Println("## Related findings")
+  fmt.Println("")
+  for f in findings {
+    let mut area = f.area
+    if area == "" { area = "-" }
+    fmt.Println(f"- {f.slug} ({area}): {f.title}")
   }
   Ok(())
 }

@@ -276,9 +276,15 @@ fn issue_page(w: http.ResponseWriter, r: Ref<http.Request>, team_id: string, me:
       return
     },
   }
-  // ?raw answers before the page-only extras (star state, emoji catalogue)
-  // are fetched: none of them are markdown's business. An unknown key never
-  // gets here — fetch_issue already 404'd above, raw or not.
+  // Related findings (TASK-103) are fetched BEFORE ?raw answers, unlike the
+  // star and emoji catalogue: the raw form carries them too — "everything
+  // is curl-able" includes the unprompted part. A failed fetch renders no
+  // section rather than a 500 (same bargain as the rail's groups).
+  page.findings = findings_for_issue(issue).map_or([], |f| f.map(finding_vm))
+  // ?raw answers before the remaining page-only extras (star state, emoji
+  // catalogue) are fetched: none of them are markdown's business. An
+  // unknown key never gets here — fetch_issue already 404'd above, raw or
+  // not.
   if wants_raw(r) {
     write_raw(w, issue_raw(page))
     return

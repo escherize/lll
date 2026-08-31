@@ -314,6 +314,11 @@ fn issue_vm(issue: models.Issue, comments: Slice<models.Comment>) -> Result<Issu
       on: issue.labels.contains(l.id),
     }),
     comments: comments.map(comment_vm),
+    // Left empty on purpose: the RELATED FINDINGS block is page-only (set by
+    // issue_page), like the star and the emoji catalogue below — the section
+    // sits outside the #issue-detail morph boundary, so broadcasts never
+    // re-render it.
+    findings: [],
     // Left false here on purpose: only issue_page knows, and only it renders
     // the star. Broadcasts of #issue-detail must not carry a stale answer.
     favorited: false,
@@ -321,4 +326,9 @@ fn issue_vm(issue: models.Issue, comments: Slice<models.Comment>) -> Result<Issu
     // broadcast of this fragment carries no catalogue.
     emojis: [],
   })
+}
+
+/// A finding doc -> its issue-page block (TASK-103).
+fn finding_vm(d: models.Doc) -> FindingVM {
+  FindingVM { slug: d.slug, title: d.title, area: d.area }
 }

@@ -56,7 +56,12 @@ Usage:
       "
 
 Docs link to issues with 'lll issue link KEY-123 SLUG' and unlink with
-'lll issue unlink KEY-123 SLUG' (see 'lll issue --help').",
+'lll issue unlink KEY-123 SLUG' (see 'lll issue --help').
+
+Findings surface by area and path, not by search: 'lll finding near <path>'
+lists what is filed about a file or directory, 'lll finding list [--area X]'
+lists one area. An issue page shows the findings whose area names one of its
+labels (see 'lll finding --help').",
   )
 }
 
@@ -101,6 +106,32 @@ pub fn check_kind(val: string) -> Result<string, string> {
   Ok(kind)
 }
 
+/// Normalize a comma-separated paths value: trim each entry, drop empties
+/// and duplicates, join back with ", ". Never errors — a path is free text
+/// and retrieval matches by containment, so "./src/pb" and "src/pb" land
+/// the same.
+pub fn parse_paths(val: string) -> string {
+  let mut out: Slice<string> = []
+  for raw in strings.Split(val, ",") {
+    let p = strings.Trim(strings.TrimSpace(raw), "/")
+    if p == "" { continue }
+    if out.find(|x| x == p).is_some() { continue }
+    out = out.append(p)
+  }
+  strings.Join(out, ", ")
+}
+
+/// Does one stored path entry "touch" the path being asked about? True when
+/// they are equal, or either one sits under the other's directory — a
+/// finding filed on `src/pb` answers `lll finding near src/pb/records.lis`
+/// AND `lll finding near src` (asking broadly finds the specific note).
+pub fn path_touches(entry: string, path: string) -> bool {
+  let e = strings.Trim(strings.TrimSpace(entry), "/")
+  let p = strings.Trim(strings.TrimSpace(path), "/")
+  if e == "" || p == "" { return false }
+  e == p || p.starts_with(f"{e}/") || e.starts_with(f"{p}/")
+}
+
 // ----------------------------------------------------------------- specs
 
 fn doc_new_spec() -> Slice<flags.Flag> {
@@ -137,6 +168,22 @@ fn doc_new_spec() -> Slice<flags.Flag> {
       value: true,
       hint: "body",
       help: "body text ('-b -' reads it from stdin)",
+      ..
+    },
+    flags.Flag {
+      name: "-a",
+      alias: "--area",
+      value: true,
+      hint: "area",
+      help: "workspace area the doc is about — conventionally a label's name,\nso issues carrying that label surface the doc",
+      ..
+    },
+    flags.Flag {
+      name: "-p",
+      alias: "--paths",
+      value: true,
+      hint: "paths",
+      help: "comma-separated file/directory paths the doc is about, e.g.\nsrc/pb, pb/pb_migrations ('lll finding near' matches by them)",
       ..
     },
   ]
@@ -183,6 +230,22 @@ fn doc_edit_spec() -> Slice<flags.Flag> {
       help: "wiki, finding, decision, or prd",
       ..
     },
+    flags.Flag {
+      name: "-a",
+      alias: "--area",
+      value: true,
+      hint: "area",
+      help: "new area — pass \"\" to clear it",
+      ..
+    },
+    flags.Flag {
+      name: "-p",
+      alias: "--paths",
+      value: true,
+      hint: "paths",
+      help: "replacement comma-separated paths — the WHOLE set\n(pass \"\" to clear it)",
+      ..
+    },
   ]
 }
 
@@ -225,6 +288,8 @@ fn doc_new(args: Slice<string>) -> Result<(), string> {
   let slug = check_slug(p.one("-s"))?
   let title = p.one("-t")
   let kind = check_kind(p.one("-k"))?
+  let area = strings.TrimSpace(p.one("-a"))
+  let paths = parse_paths(p.one("-p"))
   let mut body = ""
   if p.given("-b") { body = value_or_stdin(p.one("-b"), "-b")? }
 
@@ -236,7 +301,7 @@ fn doc_new(args: Slice<string>) -> Result<(), string> {
     )
   }
 
-  let new_doc = models.NewDoc { slug, title, kind, body, issues: [] }
+  let new_doc = models.NewDoc { slug, title, kind, body, area, paths, issues: [] }
   let payload = match json.Marshal(new_doc) {
     Ok(p) => p,
     Err(e) => return Err(f"encoding doc: {e}"),
@@ -298,6 +363,8 @@ fn doc_view(args: Slice<string>) -> Result<(), string> {
   fmt.Println(f"{d.slug} {d.title}")
   fmt.Println("")
   fmt.Println(f"Kind:      {d.kind}")
+  if d.area != "" { fmt.Println(f"Area:      {d.area}") }
+  if d.paths != "" { fmt.Println(f"Paths:     {d.paths}") }
   fmt.Println(f"Created:   {display.relative(d.created)}")
   fmt.Println(f"Updated:   {display.relative(d.updated)}")
   if d.expand.issues.length() > 0 {
@@ -324,7 +391,11 @@ fn doc_edit(args: Slice<string>) -> Result<(), string> {
   let title_set = p.given("-t")
   let kind_raw = p.one("-k")
   let kind_set = p.given("-k")
-  if !body_set && !title_set && !kind_set {
+  let area_raw = p.one("-a")
+  let area_set = p.given("-a")
+  let paths_raw = p.one("-p")
+  let paths_set = p.given("-p")
+  if !body_set && !title_set && !kind_set && !area_set && !paths_set {
     return Err(f"nothing to edit — pass at least one flag\nusage: {usage}")
   }
 
@@ -336,6 +407,14 @@ fn doc_edit(args: Slice<string>) -> Result<(), string> {
   if kind_set {
     let kind = check_kind(kind_raw)?
     fields = fields.append("\"kind\":" + json_quote(kind)?)
+  }
+  if area_set {
+    let area = strings.TrimSpace(area_raw)
+    fields = fields.append("\"area\":" + json_quote(area)?)
+  }
+  if paths_set {
+    let paths = parse_paths(paths_raw)
+    fields = fields.append("\"paths\":" + json_quote(paths)?)
   }
   let _ = pb.patch(
     f"/api/collections/docs/records/{d.id}",
