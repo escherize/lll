@@ -513,9 +513,8 @@ TOKEN=$(printf '%s' "$AUTH" | jq -r '.token')
 code=$(curl -s -o /dev/null -w '%{http_code}' -H "Authorization: Bearer $TOKEN" \
   "$URL/api/collections/issues/records?perPage=1")
 [ "$code" = 200 ] || fail "authenticated GET with the member token returned $code"
-# And the assignee/author paths are untouched by the collection conversion:
-out=$(LLL_URL=$URL "$LIN" issue view ENG-7)
-assert_contains "$out" "Assignee:  bryan" "assignee relation survives the auth conversion"
+# The assignee/author paths are asserted unchanged further below, where the
+# issues they point at exist (ENG-7: 'assignee relation' + comment author).
 
 # --- --assignee on create; assignee in list and view ---
 out=$(LLL_URL=$URL LLL_TEAM=ENG "$LIN" issue create -t "Assigned issue" --assignee bryan)
