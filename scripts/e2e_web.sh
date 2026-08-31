@@ -136,6 +136,15 @@ assert_contains "$login_hdrs" "Set-Cookie: lll_board=$BOARD_TOKEN" \
   "query-param login sets the board cookie"
 assert_not_contains "$login_hdrs" "board_token=$BOARD_TOKEN" "redirect URL drops the token"
 
+# TASK-202: a stale cookie must not veto a valid ?board_token= (and the valid
+# link refreshes the cookie); a stale cookie alone stays refused.
+stale=$(curl -s -o /dev/null -w '%{http_code}' -H "Cookie: lll_board=STALE_TOKEN_FROM_A_PAST_BOOT" "$WEB/?board_token=$BOARD_TOKEN")
+[ "$stale" = "303" ] || fail "stale cookie + valid token: expected 303, got $stale"
+curl -s -D - -o /dev/null -H "Cookie: lll_board=STALE_TOKEN_FROM_A_PAST_BOOT" "$WEB/?board_token=$BOARD_TOKEN" \
+  | grep -qi "^set-cookie: lll_board=$BOARD_TOKEN" || fail "valid token did not refresh the stale cookie"
+stale_only=$(curl -s -o /dev/null -w '%{http_code}' -H "Cookie: lll_board=STALE_TOKEN_FROM_A_PAST_BOOT" "$WEB/")
+[ "$stale_only" = "401" ] || fail "stale cookie alone: expected 401, got $stale_only"
+
 # With the cookie, the gate lets everything through — the first authenticated
 # fetch below is the suite's own liveness probe.
 

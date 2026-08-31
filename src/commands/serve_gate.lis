@@ -15,7 +15,7 @@ import "go:os"
 //
 // A browser presents the token as the `lll_board` cookie, set once by
 // visiting the banner's login URL; a terminal presents it as the same cookie
-// or as ?board_token=… on the URL. Cookie over query-only: one login per
+// or as ?board_token=… on the URL. A valid query token always wins over a\n// stale cookie and refreshes it: one login per
 // browser, the token stays out of URLs, history and Referer, and EventSource
 // picks the cookie up automatically — the query param is only the bootstrap
 // handoff, and a GET that logs in with it is redirected to the same URL
@@ -51,15 +51,18 @@ pub fn gated(
 /// the token out of the address bar.
 fn admit(w: http.ResponseWriter, r: Ref<http.Request>) -> bool {
   let want = os.Getenv("LLL_BOARD_TOKEN")
-  let mut got = ""
-  let mut via_query = false
-  if let Some(c) = cookie_named(r, "lll_board") { got = c }
-  if got == "" {
-    via_query = true
-    got = query_param(r, "board_token")
+  let mut cookie = ""
+  if let Some(c) = cookie_named(r, "lll_board") { cookie = c }
+  let query = query_param(r, "board_token")
+  // A VALID credential admits, wherever it lives. The cookie is only ever a
+  // convenience copy of the token, so a stale one must never veto a fresh
+  // ?board_token= link (TASK-202: rotated tokens locked out every saved
+  // cookie until the browser was cleared).
+  if want != "" && subtle.ConstantTimeCompare(cookie.bytes(), want.bytes()) == 1 {
+    return true
   }
-  if want != "" && subtle.ConstantTimeCompare(got.bytes(), want.bytes()) == 1 {
-    if via_query && r.Method == "GET" {
+  if want != "" && subtle.ConstantTimeCompare(query.bytes(), want.bytes()) == 1 {
+    if r.Method == "GET" {
       set_board_cookie(w, want)
       http.Redirect(w, r, without_board_token(r), 303)
       return false
