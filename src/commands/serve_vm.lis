@@ -224,6 +224,9 @@ pub struct CommentVM {
   pub avatar: AvatarVM,
   pub age: string,
   pub body: template.HTML,
+  // The comment's markdown source for ?raw — same bargain as IssueVM's
+  // description_md.
+  pub body_md: string,
 }
 
 /// View model for the comments fragment alone (broadcast re-renders).
@@ -250,6 +253,10 @@ pub struct IssueVM {
   // The author's marker, or "" for most issues.
   pub emoji: string,
   pub description: template.HTML,
+  // The description's markdown source, for the ?raw branch (serve_raw.lis):
+  // the field above is what a browser gets, this is what curl gets. Both
+  // come off the same record in issue_vm, so the two forms cannot disagree.
+  pub description_md: string,
   pub created: string,
   pub updated: string,
   pub states: Slice<StateOpt>,

@@ -15,7 +15,7 @@ fn settings_page(
   w: http.ResponseWriter,
   // The page takes no parameters: everything on it is the workspace's, and
   // there is nothing here to scope by query string.
-  _r: Ref<http.Request>,
+  r: Ref<http.Request>,
   team_id: string,
   me: string,
 ) {
@@ -26,6 +26,10 @@ fn settings_page(
       http.Error(w, e, 500)
       return
     },
+  }
+  if wants_raw(r) {
+    write_raw(w, settings_raw(vm))
+    return
   }
   let page = PageVM { rail: rail_vm("settings", me, team), page: vm }
   let html = match render("settings-page", page) {

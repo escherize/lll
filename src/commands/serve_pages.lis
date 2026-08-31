@@ -172,6 +172,7 @@ fn board_page(w: http.ResponseWriter, r: Ref<http.Request>, team_id: string, me:
       return
     },
   }
+  let raw_mode = wants_raw(r)
   let compose = match compose_vm() {
     Ok(c) => c,
     Err(e) => {
@@ -205,6 +206,10 @@ fn board_page(w: http.ResponseWriter, r: Ref<http.Request>, team_id: string, me:
     error: err,
     no_match: view_query_filtered(q) && !issues.any(|i| issue_matches(i, flt)),
     compose,
+  }
+  if raw_mode {
+    write_raw(w, board_raw(vm))
+    return
   }
   let rail = rail_vm(active, me, shell_team(team_id))
   let html = match render("board-page", PageVM { rail, page: vm }) {
@@ -270,6 +275,13 @@ fn issue_page(w: http.ResponseWriter, r: Ref<http.Request>, team_id: string, me:
       http.Error(w, e, 500)
       return
     },
+  }
+  // ?raw answers before the page-only extras (star state, emoji catalogue)
+  // are fetched: none of them are markdown's business. An unknown key never
+  // gets here — fetch_issue already 404'd above, raw or not.
+  if wants_raw(r) {
+    write_raw(w, issue_raw(page))
+    return
   }
   if let Ok(Some(_)) = fetch_favorite(issue.id) { page.favorited = true }
   page.emojis = emoji_catalog()

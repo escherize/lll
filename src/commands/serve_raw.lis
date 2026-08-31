@@ -1,0 +1,183 @@
+import "go:net/http"
+import "go:strings"
+
+// The URL is the API; ?raw is the address bar's view source.
+//
+// One mechanism, no content negotiation: any HTML route answers the SAME URL
+// with a `raw` query param in markdown (a plain list where markdown would be
+// theatre, i.e. /settings). No Accept-header matrix, no router abstraction —
+// each handler builds the view model it always built and grows exactly one
+// branch: if the request wants raw, render THAT view model as text. Because
+// the raw form is a projection of the same struct the HTML renders, the two
+// can never disagree, and because a raw page is a one-shot fetch, none of
+// this ever subscribes to /events.
+
+/// Does this request want the raw form? Presence of the param is the switch
+/// — `curl '/issues?state=todo&raw'` reads left to right as the filtered URL
+/// it mirrors, no value required.
+fn wants_raw(r: Ref<http.Request>) -> bool {
+  let Some(u) = r.URL else {
+    return false
+  }
+  u.Query().Has("raw")
+}
+
+/// Serve the raw form. text/markdown, no-store like the pages it mirrors.
+fn write_raw(w: http.ResponseWriter, md: string) {
+  w.Header().Set("Cache-Control", "no-store")
+  w.Header().Set("Content-Type", "text/markdown; charset=utf-8")
+  let _ = w.Write(md.bytes())
+}
+
+/// One markdown-table cell: escape the pipe the table grammar would eat.
+fn cell(s: string) -> string {
+  strings.ReplaceAll(s, "|", "\\|")
+}
+
+/// One card as a markdown list line — the one shape every route's raw cards
+/// share, so an agent parses a board column, an issues row and a search hit
+/// with the same eye: linked key, then pipe-joined fields in a fixed order.
+fn card_line(c: CardVM) -> string {
+  let labels = strings.Join(c.labels.map(|l| l.name), ", ")
+  let state = c.state
+  let prio = c.prio_label
+  let assignee = cell(c.assignee)
+  f"- [{c.key}](/issue/{c.key}) | {cell(c.title)} | {state} | {prio} | {assignee} | {cell(labels)} | {c.created} | {c.updated}"
+}
+
+/// GET /?raw — the board as markdown: one `## {State} ({n})` heading per
+/// non-hidden column, the URL-filtered cards under it. It reads the columns
+/// the page handler already built, so a filter or hidden lane in the URL
+/// shows up here exactly as it does in a browser.
+fn board_raw(vm: BoardVM) -> string {
+  let mut lines: Slice<string> = ["# Board"]
+  if vm.error != "" {
+    lines = lines.append(f"> {vm.error}")
+  }
+  for col in vm.columns {
+    if vm.hidden.contains(col.state) { continue }
+    lines = lines.append(f"## {col.label} ({col.cards.length()})")
+    for c in col.cards {
+      lines = lines.append(card_line(c))
+    }
+  }
+  strings.Join(lines, "\n")
+}
+
+/// GET /issues?raw — the table as a markdown table: the same columns in the
+/// same order the HTML writes them, the same rows the URL's filter and sort
+/// produced, and the same honest count.
+fn issues_raw(vm: IssuesVM) -> string {
+  let mut lines: Slice<string> = ["# Issues"]
+  if vm.error != "" {
+    lines = lines.append(f"> {vm.error}")
+  }
+  lines = lines.append(f"Showing {vm.shown} of {vm.total}.")
+  let heads = vm.cols.map(|c| c.label)
+  let rules = vm.cols.map(|_c| "---")
+  lines = lines.append(f"| {strings.Join(heads, " | ")} |")
+  lines = lines.append(f"| {strings.Join(rules, " | ")} |")
+  for r in vm.rows {
+    let labels = strings.Join(r.labels.map(|l| l.name), ", ")
+    let cells = [
+      f"[{r.key}](/issue/{r.key})",
+      cell(r.title),
+      r.state,
+      r.prio_label,
+      cell(labels),
+      cell(r.assignee),
+      r.created,
+      r.updated,
+    ]
+    lines = lines.append(f"| {strings.Join(cells, " | ")} |")
+  }
+  strings.Join(lines, "\n")
+}
+
+/// GET /issue/{key}?raw — the issue as markdown, in the same spirit as
+/// `lll issue view --raw`: properties as a list, the description as-is (the
+/// markdown source the VM carries beside its rendered HTML), then comments.
+fn issue_raw(vm: IssueVM) -> string {
+  let mut lines: Slice<string> = [f"# {vm.key}: {vm.title}"]
+  lines = lines.append("")
+  lines = lines.append(f"- State: {vm.state}")
+  lines = lines.append(f"- Priority: {vm.prio}")
+  let mut assignee = vm.assignee
+  if assignee == "" { assignee = "none" }
+  lines = lines.append(f"- Assignee: {assignee}")
+  lines = lines.append(f"- Project: {vm.project}")
+  let mut labels = strings.Join(vm.labels.map(|l| l.name), ", ")
+  if labels == "" { labels = "none" }
+  lines = lines.append(f"- Labels: {labels}")
+  lines = lines.append(f"- Created: {vm.created}")
+  lines = lines.append(f"- Updated: {vm.updated}")
+  if vm.description_md != "" {
+    lines = lines.append("")
+    lines = lines.append(vm.description_md)
+  }
+  if vm.comments.length() > 0 {
+    lines = lines.append("")
+    lines = lines.append("## Comments")
+    lines = lines.append("")
+    for c in vm.comments {
+      let age = c.age
+      let body = c.body_md
+      lines = lines.append(f"- **{c.author}** ({age}): {body}")
+    }
+  }
+  strings.Join(lines, "\n")
+}
+
+/// GET /projects?raw — one line per project, the same fields the HTML row
+/// shows, in the same order.
+fn projects_raw(vm: ProjectsVM) -> string {
+  let mut lines: Slice<string> = [f"# Projects ({vm.projects.length()})"]
+  for p in vm.projects {
+    lines = lines.append(f"- {cell(p.name)} — {p.status_label} · {p.scope} · {p.count} issues — {p.href}")
+    if p.description != "" {
+      lines = lines.append(f"  {p.description}")
+    }
+  }
+  strings.Join(lines, "\n")
+}
+
+/// GET /search?raw — the result list as the same card lines every other raw
+/// route uses. An empty query lists nothing, like the empty page.
+fn search_raw(vm: SearchVM) -> string {
+  let mut lines: Slice<string> = [f"# Search: {vm.q} ({vm.results.length()})"]
+  if vm.q == "" {
+    lines = lines.append("Give the URL a ?q= term to search.")
+  }
+  for c in vm.results {
+    lines = lines.append(card_line(c))
+  }
+  strings.Join(lines, "\n")
+}
+
+/// GET /settings?raw — the page is forms, and markdown around forms would be
+/// theatre, so the raw form is a plain list of what the records say right
+/// now: the team, then labels, members, projects.
+fn settings_raw(vm: SettingsVM) -> string {
+  let mut lines: Slice<string> = ["# Settings"]
+  if vm.team_key == "" {
+    lines = lines.append("- Team: none configured")
+  } else {
+    lines = lines.append(f"- Team: {vm.team_name} ({vm.team_key}) — accent {vm.accent}")
+  }
+  lines = lines.append("")
+  lines = lines.append("## Labels")
+  for l in vm.labels {
+    lines = lines.append(f"- {cell(l.name)} #{l.color} ({l.scope})")
+  }
+  lines = lines.append("")
+  lines = lines.append("## Members")
+  for m in vm.members {
+    lines = lines.append(f"- {cell(m.name)} <{m.email}>")
+  }
+  lines = lines.append("")
+  lines = lines.append("## Projects")
+  for p in vm.projects {
+    lines = lines.append(f"- {cell(p.name)} — {p.status} ({p.scope})")
+  }
+  strings.Join(lines, "\n")
+}
