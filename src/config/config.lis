@@ -1,6 +1,8 @@
 import "go:github.com/BurntSushi/toml"
 import "go:os"
+import "go:os/exec"
 import "go:path/filepath"
+import "go:strings"
 
 #[json]
 #[toml]
@@ -12,47 +14,180 @@ pub struct Config {
   pub web_url: string,
 }
 
-/// Load config: env vars > ./.lll.toml > ~/.config/lll/lll.toml.
-/// The first config file found is used whole; env vars override per field.
+/// Where each field's winning value came from: "file:<path>", "env:LLL_X",
+/// "default", or "" when nothing set it. Filled in lockstep with the Config
+/// it explains and printed by `lll config --list`. The failure it exists for
+/// is silent — a repo pointed at the wrong team lists the wrong issues and
+/// reports no error — so "which file won?" has to be a question you can ask.
+pub struct Sources {
+  pub url: string,
+  pub team: string,
+  pub sort: string,
+  pub me: string,
+  pub web_url: string,
+}
+
+/// Load config: env vars > the repo's .lll.toml > ~/.config/lll/lll.toml.
+/// The files LAYER rather than shadow: each supplies the keys it names, so a
+/// committed repo file can carry `team` alone and still inherit `url` and
+/// `me` from the machine. Env vars override per field.
 pub fn load() -> Result<Config, string> {
+  let (cfg, _) = load_traced()?
+  Ok(cfg)
+}
+
+/// `load()`, plus the origin of every field. Same code path, so `--list`
+/// cannot disagree with what the rest of the CLI actually uses.
+pub fn load_traced() -> Result<(Config, Sources), string> {
   let mut cfg = Config { .. }
-  if let Some(path) = config_file() {
+  let mut src = Sources { .. }
+
+  for path in config_files() {
     let data = match os.ReadFile(path) {
       Ok(d) => d,
       Err(e) => return Err(f"reading {path}: {e}"),
     }
+    let was = cfg
+    // Decoding into an already-populated struct overwrites only the keys the
+    // document names. That, plus the order of config_files(), IS the layering
+    // — there is no merge step to keep in sync with the struct.
     if let Err(e) = toml.Unmarshal(data, &cfg) {
       return Err(
         f"parsing {path}: {e}
 fix the TOML syntax in {path}, or remove it and rerun 'lll config init'",
       )
     }
+    let from = f"file:{path}"
+    if cfg.url != was.url { src.url = from }
+    if cfg.team != was.team { src.team = from }
+    if cfg.sort != was.sort { src.sort = from }
+    if cfg.me != was.me { src.me = from }
+    if cfg.web_url != was.web_url { src.web_url = from }
   }
 
   let url = os.Getenv("LLL_URL")
-  if url != "" { cfg.url = url }
+  if url != "" {
+    cfg.url = url
+    src.url = "env:LLL_URL"
+  }
   let team = os.Getenv("LLL_TEAM")
-  if team != "" { cfg.team = team }
+  if team != "" {
+    cfg.team = team
+    src.team = "env:LLL_TEAM"
+  }
   let me = os.Getenv("LLL_ME")
-  if me != "" { cfg.me = me }
+  if me != "" {
+    cfg.me = me
+    src.me = "env:LLL_ME"
+  }
   let sort = os.Getenv("LLL_SORT")
-  if sort != "" { cfg.sort = sort }
+  if sort != "" {
+    cfg.sort = sort
+    src.sort = "env:LLL_SORT"
+  }
   let web_url = os.Getenv("LLL_WEB_URL")
-  if web_url != "" { cfg.web_url = web_url }
+  if web_url != "" {
+    cfg.web_url = web_url
+    src.web_url = "env:LLL_WEB_URL"
+  }
 
-  if cfg.url == "" { cfg.url = "http://127.0.0.1:8090" }
-  if cfg.web_url == "" { cfg.web_url = "http://127.0.0.1:8100" }
-  Ok(cfg)
+  if cfg.url == "" {
+    cfg.url = "http://127.0.0.1:8090"
+    src.url = "default"
+  }
+  if cfg.web_url == "" {
+    cfg.web_url = "http://127.0.0.1:8100"
+    src.web_url = "default"
+  }
+  Ok((cfg, src))
 }
 
-/// First existing config file: ./.lll.toml, then ~/.config/lll/lll.toml.
-fn config_file() -> Option<string> {
-  if exists(".lll.toml") { return Some(".lll.toml") }
+/// The files to layer, lowest precedence first: the machine's config, then
+/// the repo's. Either may be absent.
+fn config_files() -> Slice<string> {
+  let mut files: Slice<string> = []
+  if let Some(home) = home_file() { files = files.append(home) }
+  if let Some(repo) = repo_file() { files = files.append(repo) }
+  files
+}
+
+/// Path of the machine's config, whether or not it exists. `url` and `me`
+/// belong here: how THIS machine reaches the tracker, and who is at it.
+pub fn home_path() -> Result<string, string> {
   let Ok(home) = os.UserHomeDir() else {
+    return Err("no home directory to read config from — $HOME is unset")
+  }
+  Ok(filepath.Join(home, ".config", "lll", "lll.toml"))
+}
+
+fn home_file() -> Option<string> {
+  let Ok(path) = home_path() else {
     return None
   }
-  let path = filepath.Join(home, ".config", "lll", "lll.toml")
   if exists(path) { Some(path) } else { None }
+}
+
+/// The repo's `.lll.toml`: the nearest one at or above the working directory,
+/// searching no higher than the git root. Stopping at the root is the point —
+/// an unbounded parent walk would let one stray ~/dv/.lll.toml capture every
+/// repo beneath it, silently and with the wrong team, which is worse than the
+/// cwd-only lookup it replaces.
+pub fn repo_file() -> Option<string> {
+  // The working directory's own file keeps its short name, so error messages
+  // read `.lll.toml` and a directory outside any repo still has a config.
+  if exists(".lll.toml") { return Some(".lll.toml") }
+  let Some(root) = git_root() else {
+    return None
+  }
+  let Ok(start) = os.Getwd() else {
+    return None
+  }
+  // Both ends resolved, or they disagree the moment any parent is a symlink:
+  // git reports /private/var/..., Getwd prefers $PWD's /var/..., and the walk
+  // would give up at the first comparison. macOS /tmp alone is enough.
+  let mut dir = filepath.Dir(no_symlinks(start))
+  let root = no_symlinks(root)
+  loop {
+    // The ceiling, and the guard that keeps a stray file above the repo — or
+    // a working directory git does not agree is inside one — out of reach.
+    if !within(dir, root) { return None }
+    let path = filepath.Join(dir, ".lll.toml")
+    if exists(path) { return Some(path) }
+    if dir == root { return None }
+    let parent = filepath.Dir(dir)
+    if parent == dir { return None }
+    dir = parent
+  }
+}
+
+/// Where a repo-level key gets written: the repo file already in play, else
+/// a new one at the git root, else here.
+pub fn repo_path() -> string {
+  if let Some(path) = repo_file() { return path }
+  if let Some(root) = git_root() { return filepath.Join(root, ".lll.toml") }
+  ".lll.toml"
+}
+
+/// The repository root, or None outside a repo (or without git on PATH).
+pub fn git_root() -> Option<string> {
+  let Ok(out) = exec.Command("git", "rev-parse", "--show-toplevel").Output() else {
+    return None
+  }
+  let root = strings.TrimSpace(out as string)
+  if root == "" { None } else { Some(root) }
+}
+
+/// `path` with symlinks resolved, or unchanged when it cannot be resolved.
+fn no_symlinks(path: string) -> string {
+  let Ok(resolved) = filepath.EvalSymlinks(path) else {
+    return path
+  }
+  resolved
+}
+
+/// True when `dir` is `root` or a directory under it.
+fn within(dir: string, root: string) -> bool {
+  dir == root || strings.HasPrefix(dir, root + "/")
 }
 
 fn exists(path: string) -> bool {

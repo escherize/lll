@@ -1,6 +1,9 @@
 import "go:fmt"
 import "go:os"
+import "go:path/filepath"
 import "go:strings"
+
+import "config"
 
 /// Dispatch `lll config <verb>`.
 pub fn config_cmd(args: Slice<string>) -> Result<(), string> {
@@ -11,6 +14,7 @@ pub fn config_cmd(args: Slice<string>) -> Result<(), string> {
   match verb {
     "init" => config_init(),
     "set" => config_set(args),
+    "--list" | "-l" => config_list(),
     "--help" => {
       config_usage()
       Ok(())
@@ -28,14 +32,18 @@ fn config_usage() {
     "lll config - manage configuration
 
 Usage:
+  lll config --list        every effective value and the file it came from
   lll config init          write a commented .lll.toml template to the current directory
-  lll config set me NAME   set who you are, in ./.lll.toml
+  lll config set me NAME   set who you are, in ~/.config/lll/lll.toml
 
 'me' names the member that authors your comments. 'lll up' guesses it from
 $USER on first boot, which is wrong on a shared machine — this is how you fix
 it. A name with no member yet: 'lll member add -n NAME'.
 
-Precedence: env vars (LLL_URL, LLL_TEAM, LLL_ME, LLL_SORT, LLL_WEB_URL) > ./.lll.toml > ~/.config/lll/lll.toml",
+Precedence: env vars (LLL_URL, LLL_TEAM, LLL_ME, LLL_SORT, LLL_WEB_URL) > the
+repo's .lll.toml > ~/.config/lll/lll.toml. The files layer: each supplies the
+keys it names, so the committed repo file carries 'team' and nothing else
+while 'url' and 'me' stay per-machine. 'lll attach' writes the repo file.",
   )
 }
 
@@ -48,7 +56,7 @@ fn config_set(args: Slice<string>) -> Result<(), string> {
   }
   if key != "me" {
     return Err(
-      f"cannot set '{key}' — only 'me' is settable; edit .lll.toml for the rest (see 'lll config init')",
+      f"cannot set '{key}' — only 'me' is settable; 'lll attach' sets the team, and 'lll config --list' names the file to edit for the rest",
     )
   }
   let Some(value) = args.get(4) else {
@@ -57,8 +65,10 @@ fn config_set(args: Slice<string>) -> Result<(), string> {
   let name = strings.TrimSpace(value)
   if name == "" { return Err("usage: lll config set me <name>") }
 
-  set_toml_key("me", name)?
-  fmt.Println(f"me = \"{name}\" in .lll.toml")
+  // The home config, not the repo's: the repo file is committed, and whose
+  // machine this is has no business travelling with it.
+  let path = set_home_key("me", name)?
+  fmt.Println(f"me = \"{name}\" in {path}")
 
   // Seed the member too, so the new identity can be assigned to and can author
   // a comment immediately rather than after the next `lll up`. PocketBase being
@@ -74,16 +84,39 @@ fn config_set(args: Slice<string>) -> Result<(), string> {
   Ok(())
 }
 
-/// Set `key = "value"` in ./.lll.toml, creating the file if needed. Replaces
-/// an existing assignment instead of appending a second one — duplicate keys
+/// Set a repo-level key in the repo's .lll.toml — the one already in play,
+/// else a new one at the git root. Returns the path written. `team` is the
+/// only key that belongs here: it is a fact about the repo, and so the only
+/// one worth committing.
+pub fn set_repo_key(key: string, value: string) -> Result<string, string> {
+  let path = config.repo_path()
+  set_key_in(path, key, value)?
+  Ok(path)
+}
+
+/// Set a machine-level key in ~/.config/lll/lll.toml, creating the directory
+/// if needed. Returns the path written. `url` and `me` belong here: the repo
+/// file is committed, and neither of those travels.
+pub fn set_home_key(key: string, value: string) -> Result<string, string> {
+  let path = config.home_path()?
+  let dir = filepath.Dir(path)
+  if let Err(e) = os.MkdirAll(dir, 0o755) {
+    return Err(f"creating {dir}: {e}")
+  }
+  set_key_in(path, key, value)?
+  Ok(path)
+}
+
+/// Set `key = "value"` in `path`, creating the file if needed. Replaces an
+/// existing assignment instead of appending a second one — duplicate keys
 /// make the file unparseable, and the whole point of these keys is that they
 /// get edited more than once.
-pub fn set_toml_key(key: string, value: string) -> Result<(), string> {
+fn set_key_in(path: string, key: string, value: string) -> Result<(), string> {
   let line = f"{key} = \"{value}\""
   let mut text = ""
-  if os.Stat(".lll.toml").is_ok() {
-    let Ok(data) = os.ReadFile(".lll.toml") else {
-      return Err("reading .lll.toml")
+  if os.Stat(path).is_ok() {
+    let Ok(data) = os.ReadFile(path) else {
+      return Err(f"reading {path}")
     }
     text = data as string
   }
@@ -103,10 +136,29 @@ pub fn set_toml_key(key: string, value: string) -> Result<(), string> {
     if out != "" && !strings.HasSuffix(out, "\n") { out += "\n" }
     out += line + "\n"
   }
-  if let Err(e) = os.WriteFile(".lll.toml", out.bytes(), 0o644) {
-    return Err(f"writing .lll.toml: {e}")
+  if let Err(e) = os.WriteFile(path, out.bytes(), 0o644) {
+    return Err(f"writing {path}: {e}")
   }
   Ok(())
+}
+
+/// `lll config --list` — every effective value and where it came from, after
+/// `git config --list --show-origin`. The failure this answers is silent: a
+/// repo reading the wrong team lists the wrong issues and reports nothing, so
+/// being able to ask which file won is the whole debugging affordance.
+fn config_list() -> Result<(), string> {
+  let (cfg, src) = config.load_traced()?
+  print_origin(src.url, "url", cfg.url)
+  print_origin(src.team, "team", cfg.team)
+  print_origin(src.sort, "sort", cfg.sort)
+  print_origin(src.me, "me", cfg.me)
+  print_origin(src.web_url, "web_url", cfg.web_url)
+  Ok(())
+}
+
+fn print_origin(source: string, key: string, value: string) {
+  let from = if source == "" { "unset" } else { source }
+  fmt.Println(f"{from}\t{key}={value}")
 }
 
 /// True for an uncommented `key = ...` line. The commented keys the template
@@ -122,8 +174,14 @@ fn config_init() -> Result<(), string> {
     return Err(".lll.toml already exists; not overwriting")
   }
   let template = "# lll configuration
-# Precedence: env vars (LLL_URL, LLL_TEAM, LLL_ME, LLL_SORT, LLL_WEB_URL) > ./.lll.toml > ~/.config/lll/lll.toml
-# The first file found is used whole; env vars override individual fields.
+# Precedence: env vars (LLL_URL, LLL_TEAM, LLL_ME, LLL_SORT, LLL_WEB_URL) > this
+# file > ~/.config/lll/lll.toml. The files layer: each supplies the keys it
+# names, so a key left commented out here is inherited from the home config.
+# 'lll config --list' shows every effective value and the file it came from.
+#
+# Committed at a repo root this file should carry 'team' and nothing else —
+# 'lll attach' writes exactly that. 'url' and 'me' are facts about a machine
+# and a person: set them once in ~/.config/lll/lll.toml.
 
 # PocketBase server URL.
 # url = \"http://127.0.0.1:8090\"

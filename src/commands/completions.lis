@@ -63,6 +63,7 @@ fn nouns() -> Slice<string> {
     "doc",
     "finding",
     "config",
+    "attach",
     "watch",
     "up",
     "board",
@@ -99,7 +100,7 @@ fn verbs(noun: string) -> Slice<string> {
     "label" => ["list", "create"],
     "doc" => ["new", "list", "view", "edit", "delete"],
     "finding" => ["near", "list"],
-    "config" => ["init", "set"],
+    "config" => ["init", "set", "--list"],
     "completions" => ["bash", "zsh", "fish"],
     _ => [],
   }
@@ -120,6 +121,7 @@ fn verb_flags(noun: string, verb: string) -> Slice<string> {
     "finding" => flags.tokens(finding_verb_spec(verb)),
     "watch" => flags.tokens(watch_verb_spec(verb)),
     "up" => flags.tokens(up_verb_spec("")),
+    "attach" => flags.tokens(attach_verb_spec("")),
     "board" => flags.tokens(board_verb_spec(verb)),
     _ => [],
   }

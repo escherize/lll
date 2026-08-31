@@ -68,11 +68,19 @@ assert_not_contains() { # haystack needle label
 $1" || true
 }
 
-# A scratch DATA_DIR, and hermeticity: a developer's repo-root .lll.toml must
-# not leak into assertions. It is announced by name because the reverse — a
-# stray config quietly steering a run — once cost hours (TASK-143).
+# A scratch DATA_DIR, a scratch E2E_HOME, and hermeticity: a developer's own
+# config must not leak into assertions. It is announced by name because the
+# reverse — a stray config quietly steering a run — once cost hours (TASK-143).
+#
+# E2E_HOME exists because config now LAYERS (TASK-168): ~/.config/lll/lll.toml
+# is read on every run, under the repo file rather than instead of it, and
+# `lll up` WRITES 'me' there on a first boot. Any invocation that boots lll up
+# or asserts on config must pass HOME="$E2E_HOME", so a suite neither reads
+# nor rewrites the developer's own.
 e2e_begin() {
   DATA_DIR="$(mktemp -d)"
+  E2E_HOME="$DATA_DIR/e2e_home"
+  mkdir -p "$E2E_HOME/.config/lll"
   if [ -f .lll.toml ]; then
     echo "e2e: repo-root .lll.toml moved aside for this run, restored on exit" >&2
     mv .lll.toml "$DATA_DIR/.lll.toml.saved"
@@ -80,12 +88,20 @@ e2e_begin() {
   fi
 }
 
-# The tail of every suite's EXIT trap: `lll up` writes a .lll.toml on a first
-# boot, so drop it and put the developer's own back on top.
+# The tail of every suite's EXIT trap: put the repo's own .lll.toml back.
+#
+# It restores rather than deletes because .lll.toml is TRACKED now (TASK-168):
+# `rm -f` on a committed file leaves git status dirty after every run, and on
+# a checkout whose copy is already missing it deletes it for good. The bare
+# `rm` is kept only for the case where there was nothing to move aside, where
+# any file present was written by this run.
 e2e_end() {
-  rm -f .lll.toml
-  if [ "${RESTORE_TOML:-}" = 1 ] && [ -f "$DATA_DIR/.lll.toml.saved" ]; then
-    mv "$DATA_DIR/.lll.toml.saved" .lll.toml
+  if [ "${RESTORE_TOML:-}" != 1 ]; then
+    rm -f .lll.toml
+  elif [ -f "$DATA_DIR/.lll.toml.saved" ]; then
+    mv -f "$DATA_DIR/.lll.toml.saved" .lll.toml
+  else
+    echo "e2e: the saved .lll.toml is gone; restore it with 'git checkout .lll.toml'" >&2
   fi
   rm -rf "$DATA_DIR"
 }

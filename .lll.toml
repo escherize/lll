@@ -1,0 +1,8 @@
+# Which tracker this repo uses. Committed on purpose: one team per repo, so a
+# fresh clone — and every worktree — is attached with nothing to run.
+#
+# Only 'team' belongs here. How to REACH the tracker ('url') and who you are
+# ('me') are facts about a machine and a person: they live in
+# ~/.config/lll/lll.toml and layer under this file.
+# 'lll config --list' shows every effective value and the file it came from.
+team = "CDDVL"

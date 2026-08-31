@@ -165,14 +165,16 @@ PocketBase is left running.
 
 The board needs a team. A configured team (LLL_TEAM or 'team' in .lll.toml)
 is created on the server if it is missing. With none configured lll up asks
-for one and writes the answer to ./.lll.toml, so the board and the CLI always
-agree; with nothing on stdin to answer with (scripts, agents, CI) it refuses
-to start rather than run on a team only this process knows about.
+for one and writes the answer to the repo's .lll.toml, so the board and the
+CLI always agree; with nothing on stdin to answer with (scripts, agents, CI)
+it refuses to start rather than run on a team only this process knows about.
+'lll attach' settles the same question up front, without a boot.
 
 It also needs to know who you are. On first boot 'me' is guessed from $USER,
-written to ./.lll.toml and seeded as a member so assignment and comments work
-straight away — no second prompt. That guess is wrong on a shared machine:
-'lll config set me <name>' fixes it.",
+written to ~/.config/lll/lll.toml and seeded as a member so assignment and
+comments work straight away — no second prompt. It goes to the home config,
+not the repo's, because the repo's file is committed. That guess is wrong on
+a shared machine: 'lll config set me <name>' fixes it.",
   )
 }
 
@@ -241,9 +243,11 @@ fn ensure_me(want: string) -> Result<string, string> {
     // No $USER to guess from is not worth failing a boot over: comments go
     // authorless and 'lll config set me' still works.
     if name == "" { return Ok("") }
-    set_toml_key("me", name)?
+    // The home config, never the repo's: .lll.toml is committed, and booting
+    // a server is no reason to put your username in someone else's checkout.
+    let path = set_home_key("me", name)?
     fmt.Println(
-      f"guessed me = \"{name}\" from $USER, wrote it to .lll.toml — 'lll config set me <name>' to change it",
+      f"guessed me = \"{name}\" from $USER, wrote it to {path} — 'lll config set me <name>' to change it",
     )
   }
   let created = ensure_member(name)?
@@ -266,10 +270,12 @@ fn ask_team(suggested: string) -> Result<string, string> {
   if typed == "" { Ok(suggested) } else { Ok(typed) }
 }
 
-/// Persist the team to ./.lll.toml so the next boot and the CLI agree.
+/// Persist the team to the repo's .lll.toml so the next boot and the CLI
+/// agree. The team is the one key that belongs in the repo — `lll attach`
+/// writes the same line, deliberately.
 fn save_team(key: string) -> Result<(), string> {
-  set_toml_key("team", key)?
-  fmt.Println(f"wrote team = \"{key}\" to .lll.toml")
+  let path = set_repo_key("team", key)?
+  fmt.Println(f"wrote team = \"{key}\" to {path}")
   Ok(())
 }
 
