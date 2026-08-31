@@ -83,22 +83,24 @@ fn fetch_member_names() -> Result<Slice<string>, string> {
   Ok(fetch_members()?.map(|m| m.name))
 }
 
-/// Every label name, for the label chooser. Unfiltered by team on purpose:
-/// labels created without --team are workspace-wide, and resolve_label — the
-/// same lookup the filter itself goes through — does not scope by team either.
+/// This team's label names, for the label chooser. Scoped, because a label
+/// belongs to exactly one team (TASK-173): on a server holding four projects
+/// an unscoped chooser is every project's labels in one dropdown, and every
+/// foreign entry filters the board to nothing. resolve_label — the same
+/// lookup the chosen name then goes through — scopes by the same team, so
+/// what the chooser offers is exactly what the filter can find.
 ///
 /// Shares the settings page's request, which also asks for expand=team. The
 /// expand is wasted here, but one label query beats two that drift apart —
 /// the same trade fetch_project_names already makes.
-fn fetch_label_names() -> Result<Slice<string>, string> {
-  Ok(fetch_labels()?.map(|l| l.name))
+fn fetch_label_names(team_id: string) -> Result<Slice<string>, string> {
+  Ok(fetch_labels(team_id)?.map(|l| l.name))
 }
 
-/// Every project name, for the project chooser. Unscoped by team for the
-/// same reason labels are: a project created without --team is
-/// workspace-wide, and resolve_project does not scope by team either.
-fn fetch_project_names() -> Result<Slice<string>, string> {
-  Ok(fetch_projects()?.map(|p| p.name))
+/// This team's project names, for the project chooser. Scoped for the same
+/// reason labels are, and paired with the same scoped resolve_project.
+fn fetch_project_names(team_id: string) -> Result<Slice<string>, string> {
+  Ok(fetch_projects(team_id)?.map(|p| p.name))
 }
 
 /// The issues table: one sortable, filterable, bookmarkable list.
@@ -148,7 +150,7 @@ fn issues_page(w: http.ResponseWriter, r: Ref<http.Request>, team_id: string, me
   let mut label = raw.label
   let mut label_id = ""
   if label != "" {
-    match resolve_label(label) {
+    match resolve_label(team_id, label) {
       Ok(l) => { label_id = l.id },
       Err(e) => {
         err = e
@@ -160,7 +162,7 @@ fn issues_page(w: http.ResponseWriter, r: Ref<http.Request>, team_id: string, me
   let mut project = raw.project
   let mut project_id = ""
   if project != "" {
-    match resolve_project(project) {
+    match resolve_project(team_id, project) {
       Ok(p) => { project_id = p.id },
       Err(e) => {
         err = e
@@ -177,11 +179,12 @@ fn issues_page(w: http.ResponseWriter, r: Ref<http.Request>, team_id: string, me
       return
     },
   }
-  // The choosers offer the whole workspace, not just what this filter
-  // matched: a filter you cannot widen out of is a dead end.
+  // The choosers offer the whole team, not just what this filter matched: a
+  // filter you cannot widen out of is a dead end. The whole TEAM, though —
+  // another project's labels would only ever filter this board to nothing.
   let members = fetch_member_names().unwrap_or([])
-  let label_names = fetch_label_names().unwrap_or([])
-  let project_names = fetch_project_names().unwrap_or([])
+  let label_names = fetch_label_names(team_id).unwrap_or([])
+  let project_names = fetch_project_names(team_id).unwrap_or([])
 
   let rows = list.items.map(card_vm)
   let vm = IssuesVM {

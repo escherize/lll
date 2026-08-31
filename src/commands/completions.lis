@@ -82,6 +82,8 @@ fn verbs(noun: string) -> Slice<string> {
       "update",
       "close",
       "start",
+      "claim",
+      "release",
       "delete",
       "comment",
       "watch",

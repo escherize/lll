@@ -101,6 +101,8 @@ Every command has `--help`; every read takes `--json`.
 lll issue create -t "Fix login" --priority 1 --assignee bryan --label bug
 lll issue list --state todo --sort -updated
 lll issue start ENG-12        # state -> in-progress, creates branch eng-12-fix-login
+lll issue claim ENG-12        # take it exclusively; non-zero if someone holds it
+lll issue release ENG-12      # give it back
 lll issue view                # ID inferred from the git branch
 lll issue comment -b "done in abc123"   # markdown; renders on the web board
 lll issue close

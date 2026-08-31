@@ -266,13 +266,16 @@ fn title_write(r: Ref<http.Request>) -> Result<string, string> {
 fn project_write(r: Ref<http.Request>) -> Result<string, string> {
   let key = r.FormValue("key")
   let id = r.FormValue("project")
+  // The issue first: its own team is what the posted id has to belong to,
+  // and a project from another team is as unknown here as a deleted one
+  // (TASK-173).
+  let issue = fetch_issue(key)?
   if id != "" {
-    let projects = fetch_projects()?
+    let projects = fetch_projects(issue.team)?
     if projects.find(|p| p.id == id).is_none() {
       return Err(f"unknown project '{id}' — reload the page for the current list")
     }
   }
-  let issue = fetch_issue(key)?
   patch_issue(issue.id, IssueProjectPatch { project: id })
 }
 
@@ -295,7 +298,14 @@ fn assignee_write(r: Ref<http.Request>) -> Result<string, string> {
 /// everything posts no labels at all, which is the way back to none.
 fn labels_write(r: Ref<http.Request>) -> Result<string, string> {
   let key = r.FormValue("key")
-  let known = fetch_labels()?
+  if key == "" {
+    return Err("labels_write got no issue key — reload the page; if it keeps happening, this is a bug in the labels form")
+  }
+  // The issue first, for its team: a label from another team is as unknown
+  // here as a deleted one, which is what stops a POST crossing tenancy
+  // however the checkbox got its id (TASK-173).
+  let issue = fetch_issue(key)?
+  let known = fetch_labels(issue.team)?
   // FormValue above has already parsed the body, so PostForm is populated;
   // labels is the one field that repeats (one checkbox per label).
   let form = r.PostForm as Map<string, Slice<string>>
@@ -305,7 +315,6 @@ fn labels_write(r: Ref<http.Request>) -> Result<string, string> {
       return Err(f"unknown label '{id}' — reload the page for the current list")
     }
   }
-  let issue = fetch_issue(key)?
   patch_issue(issue.id, IssueLabelsPatch { labels: ids })
 }
 

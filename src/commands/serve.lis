@@ -29,13 +29,7 @@ pub fn run_server(port: int) -> Result<(), string> {
   // Resolve the team scope once; card/board fetches and the realtime
   // subscription share it. No configured team means an unscoped board.
   let cfg = config.load()?
-  let mut team_id = ""
-  if cfg.team != "" {
-    let Some(team) = find_team(cfg.team)? else {
-      return Err(unknown_team(cfg.team))
-    }
-    team_id = team.id
-  }
+  let team_id = configured_team_id()?
 
   // Fail fast on broken templates before accepting connections — both
   // pages, because they share the rail and a typo in it breaks every page.

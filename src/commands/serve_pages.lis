@@ -133,7 +133,7 @@ fn board_page(w: http.ResponseWriter, r: Ref<http.Request>, team_id: string, me:
   }
   let mut labels: Slice<string> = []
   for l in csv(raw.label) {
-    match resolve_label(l) {
+    match resolve_label(team_id, l) {
       Ok(_) => labels = labels.append(l),
       Err(e) => { if err == "" { err = e } },
     }
@@ -173,7 +173,7 @@ fn board_page(w: http.ResponseWriter, r: Ref<http.Request>, team_id: string, me:
     },
   }
   let raw_mode = wants_raw(r)
-  let compose = match compose_vm() {
+  let compose = match compose_vm(team_id) {
     Ok(c) => c,
     Err(e) => {
       http.Error(w, e, 500)
@@ -197,7 +197,7 @@ fn board_page(w: http.ResponseWriter, r: Ref<http.Request>, team_id: string, me:
       issues,
       q,
       fetch_member_names().unwrap_or([]),
-      fetch_label_names().unwrap_or([]),
+      fetch_label_names(team_id).unwrap_or([]),
     ),
     flt_seed: flt_seed_js(pairs),
     query_str: view_query_string(q),

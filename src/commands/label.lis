@@ -5,6 +5,7 @@ import "go:net/url"
 import "models"
 import "pb"
 import "flags"
+import "query"
 
 /// Dispatch `lll label <verb>`.
 pub fn label(args: Slice<string>) -> Result<(), string> {
@@ -32,17 +33,25 @@ fn label_usage() {
     "lll label - work with labels
 
 Usage:
-  lll label list                                 list labels (name, color, team)
+  lll label list                                 list labels (name, color, team);
+                                                 this team's, or every team's
+                                                 when none is configured
   lll label create -n \"name\" [-c \"#5e6ad2\"] [--team KEY]
-                                                 create a label (no --team means
-                                                 workspace-wide)",
+                                                 create a label (--team defaults
+                                                 to LLL_TEAM)",
   )
 }
 
 fn label_list() -> Result<(), string> {
+  // Scoped when a team is configured, every team's when not: a label belongs
+  // to one team (TASK-173), so the unscoped list is an admin's view, not a
+  // working one.
+  let filter = url.QueryEscape(
+    query.filter(configured_team_id()?, "", "", "", "", ""),
+  )
   let mut labels = models.LabelList { .. }
   pb.fetch(
-    "/api/collections/labels/records?perPage=200&sort=name&expand=team",
+    f"/api/collections/labels/records?perPage=200&sort=name&expand=team&filter={filter}",
     "labels",
     &labels,
   )?
@@ -58,7 +67,7 @@ fn label_create_spec() -> Slice<flags.Flag> {
   [
     flags.Flag { name: "-n", value: true, hint: "\"name\"", required: true, help: "label name", .. },
     flags.Flag { name: "-c", value: true, hint: "\"#5e6ad2\"", help: "hex color for the label", .. },
-    flags.Flag { name: "--team", value: true, hint: "KEY", help: "team key; no --team means workspace-wide", .. },
+    flags.Flag { name: "--team", value: true, hint: "KEY", help: "team key the label belongs to (defaults to LLL_TEAM)", .. },
   ]
 }
 
@@ -77,17 +86,9 @@ fn label_create(args: Slice<string>) -> Result<(), string> {
   let p = flags.parse(spec, args, 3, false, usage)?
   let name = p.one("-n")
   let color = p.one("-c")
-  let team_key = p.one("--team")
+  let team = team_flag_or_current(p.one("--team"))?
 
-  let mut team = ""
-  if team_key != "" {
-    let Some(t) = find_team(team_key)? else {
-      return Err(unknown_team(team_key))
-    }
-    team = t.id
-  }
-
-  let new_label = models.NewLabel { name, color, team }
+  let new_label = models.NewLabel { name, color, team: team.id }
   let payload = match json.Marshal(new_label) {
     Ok(p) => p,
     Err(e) => return Err(f"encoding label: {e}"),
@@ -102,9 +103,14 @@ fn label_create(args: Slice<string>) -> Result<(), string> {
   Ok(())
 }
 
-/// Resolve a label by name; unknown names error with the fix.
-fn resolve_label(name: string) -> Result<models.Label, string> {
-  let filter = url.QueryEscape(f"name='{name}'")
+/// Resolve one team's label by name; unknown names error with the fix. An
+/// empty `team_id` searches every team, which only the unscoped board wants.
+///
+/// Names are unique within a team, not across them (TASK-173): two projects
+/// may both call something "bug", and attaching one team's to the other
+/// team's issue is the leak team scoping exists to stop.
+fn resolve_label(team_id: string, name: string) -> Result<models.Label, string> {
+  let filter = url.QueryEscape(query.scoped(team_id, "name", name))
   let mut result = models.LabelList { .. }
   pb.fetch(f"/api/collections/labels/records?filter={filter}", "labels", &result)?
   let Some(l) = result.items.find(|l| l.name == name) else {

@@ -64,7 +64,6 @@ pub struct NewProject {
   #[json(omitempty)]
   pub description: string,
   pub status: string,
-  #[json(omitempty)]
   pub team: string,
 }
 
@@ -92,7 +91,6 @@ pub struct NewLabel {
   pub name: string,
   #[json(omitempty)]
   pub color: string,
-  #[json(omitempty)]
   pub team: string,
 }
 
@@ -207,6 +205,35 @@ pub struct NewFavorite {
   pub member: string,
 }
 
+/// A claim's holder, fetched with `expand=member` so a refusal can name them.
+#[json]
+pub struct ClaimExpand {
+  pub member: Member,
+}
+
+/// One exclusive hold on an issue (TASK-175). `claims` is UNIQUE on `issue`,
+/// so the row IS the arbitration: two agents racing both POST one and the
+/// index admits exactly one. `created` is the claim's age.
+#[json]
+pub struct Claim {
+  pub id: string,
+  pub issue: string,
+  pub member: string,
+  pub created: string,
+  pub expand: ClaimExpand,
+}
+
+#[json]
+pub struct ClaimList {
+  pub items: Slice<Claim>,
+}
+
+#[json]
+pub struct NewClaim {
+  pub issue: string,
+  pub member: string,
+}
+
 /// One saved view (TASK-94): a name plus the board query string it stands
 /// for. `member` is "" for every row written before auth (TASK-32) lands:
 /// a view is workspace-wide, not personal.
@@ -243,6 +270,9 @@ pub struct DocExpand {
 #[json]
 pub struct Doc {
   pub id: string,
+  // Required (TASK-173): a doc belongs to exactly one team, and slugs are
+  // unique per team, not per server — GRDN and LLL both get an `index`.
+  pub team: string,
   pub slug: string,
   pub title: string,
   pub kind: string,
@@ -267,6 +297,7 @@ pub struct DocList {
 
 #[json]
 pub struct NewDoc {
+  pub team: string,
   pub slug: string,
   pub title: string,
   pub kind: string,

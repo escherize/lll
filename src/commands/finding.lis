@@ -5,6 +5,7 @@ import "go:strings"
 import "flags"
 import "models"
 import "pb"
+import "query"
 
 /// `lll finding` (TASK-103) — the retrieval side of docs. A finding is a doc
 /// with kind=finding; `lll doc new -k finding` stays the authoring path, and
@@ -43,6 +44,9 @@ Usage:
   lll finding list [--area X]      every finding, or one area's, one line
                                    each (slug, area, title)
 
+Both verbs answer for ONE team — the one LLL_TEAM or .lll.toml names. Every
+project has a src/, so an unscoped answer would be another codebase's.
+
 Author findings with 'lll doc new -k finding -a <area> -p \"<paths>\"'.
 `area` is conventionally the NAME of an existing label: an issue whose labels
 contain the area surfaces the finding — on its web page and in
@@ -78,10 +82,16 @@ pub fn finding_verb_spec(verb: string) -> Slice<flags.Flag> {
 
 // ----------------------------------------------------------------- shared
 
-/// Every finding, slug order. One kind filter — retrieval never searches
-/// bodies or titles, it filters coordinates.
-pub fn fetch_findings() -> Result<Slice<models.Doc>, string> {
-  let filter = url.QueryEscape("kind='finding'")
+/// One team's findings, slug order. Two clauses and no more — retrieval
+/// never searches bodies or titles, it filters coordinates.
+///
+/// The team clause is not optional (TASK-173). Every project has a `src/`,
+/// so an unscoped `finding near src/` answers with another codebase's notes,
+/// formatted identically to a correct hit. Findings exist to say what is
+/// known about THIS file; confidently answering about a different repo is
+/// worse than answering nothing.
+pub fn fetch_findings(team_id: string) -> Result<Slice<models.Doc>, string> {
+  let filter = url.QueryEscape(f"kind='finding' && team={query.quote(team_id)}")
   let mut docs = models.DocList { .. }
   pb.fetch(
     f"/api/collections/docs/records?filter={filter}&sort=slug&perPage=500",
@@ -100,7 +110,9 @@ fn doc_paths_touch(d: models.Doc, path: string) -> bool {
 /// (the issues relation always shows), plus every finding whose `area` names
 /// one of the issue's labels. Shared by 'lll issue view' and the issue page.
 pub fn findings_for_issue(issue: models.Issue) -> Result<Slice<models.Doc>, string> {
-  let findings = fetch_findings()?
+  // The ISSUE's team, not the configured one: this answers for one issue,
+  // and the board can be showing an issue from a team nobody configured.
+  let findings = fetch_findings(issue.team)?
   Ok(findings.filter(|d| {
     let linked = d.issues.find(|x| x == issue.id).is_some()
     let area_hit = d.area != "" && issue.expand.labels.any(|l| l.name == d.area)
@@ -114,7 +126,7 @@ fn finding_near(args: Slice<string>) -> Result<(), string> {
   let p = flags.parse([], args, 3, true, "")?
   let path = p.first()
   if path == "" { return Err("usage: lll finding near <path>") }
-  let findings = fetch_findings()?
+  let findings = fetch_findings(current_team()?.id)?
   let hits = findings.filter(|d| doc_paths_touch(d, path))
   if hits.is_empty() {
     fmt.Println(f"No findings for {path}.")
@@ -129,7 +141,7 @@ fn finding_list(args: Slice<string>) -> Result<(), string> {
   let usage = flags.usage("lll finding list", spec, "")
   let p = flags.parse(spec, args, 3, false, usage)?
   let area = strings.TrimSpace(p.one("-a"))
-  let mut findings = fetch_findings()?
+  let mut findings = fetch_findings(current_team()?.id)?
   if area != "" {
     findings = findings.filter(|d| strings.TrimSpace(d.area) == area)
   }

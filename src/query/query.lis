@@ -50,8 +50,21 @@ pub fn sort(spec: string) -> Result<string, string> {
   Ok(spec)
 }
 
+/// A PB filter for one team-owned record found by a unique-per-team field:
+/// a label or project by `name`, a doc by `slug`. An empty `team_id` means
+/// "every team" — the answer `lll label list` and an unconfigured board
+/// still need, and the only way to say it.
+///
+/// This exists so no caller ever concatenates a team key into a filter by
+/// hand: both halves go through `quote` (TASK-134).
+pub fn scoped(team_id: string, field: string, value: string) -> string {
+  let clause = f"{field}={quote(value)}"
+  if team_id == "" { return clause }
+  f"team={quote(team_id)} && {clause}"
+}
+
 /// Single-quote a value for a PB filter, escaping backslashes and quotes.
-fn quote(value: string) -> string {
+pub fn quote(value: string) -> string {
   let mut escaped = strings.ReplaceAll(value, r"\", r"\\")
   escaped = strings.ReplaceAll(escaped, "'", r"\'")
   f"'{escaped}'"

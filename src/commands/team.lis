@@ -2,6 +2,7 @@ import "go:encoding/json"
 import "go:fmt"
 import "go:net/url"
 
+import "config"
 import "flags"
 import "models"
 import "pb"
@@ -115,6 +116,53 @@ pub fn list_teams() -> Result<models.TeamList, string> {
     &teams,
   )?
   Ok(teams)
+}
+
+/// The team `LLL_TEAM` (or `team` in .lll.toml) names, or None when no key
+/// is set. A key naming a team the server does not have is an error either
+/// way — silently falling back to "every team" is how a scoped command ends
+/// up answering for all of them.
+fn configured_team() -> Result<Option<models.Team>, string> {
+  let cfg = config.load()?
+  if cfg.team == "" { return Ok(None) }
+  let Some(t) = find_team(cfg.team)? else {
+    return Err(unknown_team(cfg.team))
+  }
+  Ok(Some(t))
+}
+
+/// The configured team, insisted upon. Docs, findings, labels and projects
+/// each belong to exactly one team (TASK-173), so the verbs that write or
+/// read them cannot proceed without a key and must not guess one.
+fn current_team() -> Result<models.Team, string> {
+  let Some(t) = configured_team()? else {
+    return Err(no_team())
+  }
+  Ok(t)
+}
+
+/// The team a `--team KEY` flag names, or the configured one when the flag
+/// is absent. Labels and projects each belong to exactly one team, so
+/// neither `create` may leave it unset.
+fn team_flag_or_current(key: string) -> Result<models.Team, string> {
+  if key == "" { return current_team() }
+  let Some(t) = find_team(key)? else {
+    return Err(unknown_team(key))
+  }
+  Ok(t)
+}
+
+/// The configured team's id, or "" for "every team". Only the listing verbs
+/// and the unscoped web board tolerate that second answer; anything that
+/// writes a team-owned record uses current_team.
+fn configured_team_id() -> Result<string, string> {
+  Ok(configured_team()?.map_or("", |t| t.id))
+}
+
+/// Missing-team message naming the fix. Shared by every command that needs a
+/// team and was given none (same package: src/commands).
+fn no_team() -> string {
+  "set LLL_TEAM or 'team' in .lll.toml to your team key (e.g. ENG)"
 }
 
 /// Unknown-team message naming the fix. Shared by every command that
