@@ -492,9 +492,15 @@ assert_contains "$carol_email" "@members.invalid" \
 # PocketBase's own auth-with-password issues tokens for members that HAVE a
 # real password. bryan was created with -e; give him one via the admin API
 # and walk the full auth round trip.
+# Setting a member's password is a superuser operation: PocketBase refuses a
+# password change without the old password unless the caller is an admin.
+ADMIN=$(curl -s -X POST "$URL/api/collections/_superusers/auth-with-password" \
+  -H 'Content-Type: application/json' \
+  -d '{"identity":"admin@local.dev","password":"admin-local-123"}' | jq -r '.token')
+[ -n "$ADMIN" ] && [ "$ADMIN" != "null" ] || fail "admin auth-with-password returned no token"
 BRYAN_ID=$(curl -sf "$URL/api/collections/members/records?perPage=200" | jq -r '.items[] | select(.name=="bryan") | .id')
 curl -sf -X PATCH "$URL/api/collections/members/records/$BRYAN_ID" \
-  -H 'Content-Type: application/json' \
+  -H 'Content-Type: application/json' -H "Authorization: Bearer $ADMIN" \
   -d '{"password":"bryan-pass-123","passwordConfirm":"bryan-pass-123"}' >/dev/null \
   || fail "setting bryan's password via the admin API"
 AUTH=$(set +e; curl -s -X POST "$URL/api/collections/members/auth-with-password" \
