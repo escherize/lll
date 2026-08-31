@@ -457,25 +457,19 @@ fn create(args: Slice<string>) -> Result<(), string> {
   let label_names = p.all("--label")
   let project_name = p.one("--project")
 
+  // The team first: it scopes the label and project names below, which are
+  // unique per team and not across them (TASK-173).
+  let team = current_team()?
+
   let mut assignee = ""
   if assignee_name != "" { assignee = resolve_member(assignee_name)?.id }
 
   let mut project = ""
-  if project_name != "" { project = resolve_project(project_name)?.id }
+  if project_name != "" { project = resolve_project(team.id, project_name)?.id }
 
   let mut labels: Slice<string> = []
   for name in label_names {
-    labels = labels.append(resolve_label(name)?.id)
-  }
-
-  let team_key = config.load()?.team
-  if team_key == "" {
-    return Err(
-      "set LLL_TEAM or 'team' in .lll.toml to your team key (e.g. ENG)",
-    )
-  }
-  let Some(team) = find_team(team_key)? else {
-    return Err(unknown_team(team_key))
+    labels = labels.append(resolve_label(team.id, name)?.id)
   }
 
   let new_issue = models.NewIssue {
@@ -525,23 +519,18 @@ fn list(args: Slice<string>) -> Result<(), string> {
 
   let cfg = config.load()?
 
-  // A configured team (LLL_TEAM or .lll.toml) scopes the list by default.
-  let mut team_id = ""
-  if cfg.team != "" {
-    let Some(team) = find_team(cfg.team)? else {
-      return Err(unknown_team(cfg.team))
-    }
-    team_id = team.id
-  }
+  // A configured team (LLL_TEAM or .lll.toml) scopes the list by default,
+  // and with it the label and project names the list filters by.
+  let team_id = configured_team_id()?
 
   let mut assignee_id = ""
   if assignee_name != "" { assignee_id = resolve_member(assignee_name)?.id }
 
   let mut label_id = ""
-  if label_name != "" { label_id = resolve_label(label_name)?.id }
+  if label_name != "" { label_id = resolve_label(team_id, label_name)?.id }
 
   let mut project_id = ""
-  if project_name != "" { project_id = resolve_project(project_name)?.id }
+  if project_name != "" { project_id = resolve_project(team_id, project_name)?.id }
 
   let mut sort_spec = sort_flag
   if sort_spec == "" { sort_spec = cfg.sort }
@@ -748,14 +737,17 @@ fn update(args: Slice<string>) -> Result<(), string> {
     let member = resolve_member(assignee_name)?
     fields = fields.append("\"assignee\":" + json_quote(member.id)?)
   }
+  // The ISSUE's team scopes both name lookups, not the configured one:
+  // `lll issue update GRDN-4 --label bug` must mean GRDN's bug even when
+  // LLL_TEAM says otherwise.
   if project_name != "" {
-    let project = resolve_project(project_name)?
+    let project = resolve_project(issue.team, project_name)?
     fields = fields.append("\"project\":" + json_quote(project.id)?)
   }
   if !label_names.is_empty() {
     let mut label_ids: Slice<string> = []
     for name in label_names {
-      label_ids = label_ids.append(resolve_label(name)?.id)
+      label_ids = label_ids.append(resolve_label(issue.team, name)?.id)
     }
     let encoded = match json.Marshal(label_ids) {
       Ok(b) => b as string,
@@ -1255,6 +1247,22 @@ fn set_doc_issues(
   Ok(())
 }
 
+/// Refuse a link whose two ends live in different teams (TASK-173). The doc
+/// is looked up in the CONFIGURED team, the issue is whatever KEY-123 names,
+/// so `LLL_TEAM=LLL lll issue link GRDN-4 index` would otherwise quietly
+/// stitch the two boards' link graphs together.
+fn cross_team_link(
+  issue: models.Issue,
+  team: models.Team,
+  d: models.Doc,
+) -> Result<(), string> {
+  if d.team == issue.team { return Ok(()) }
+  let key = f"{issue.expand.team.key}-{issue.number}"
+  Err(
+    f"{key} is in {issue.expand.team.key} and doc '{d.slug}' is in {team.key} — a link stays inside one team",
+  )
+}
+
 fn link(args: Slice<string>) -> Result<(), string> {
   let usage = "lll issue link KEY-123 SLUG"
   let (id, slug) = two_positional(args, usage)?
@@ -1262,7 +1270,9 @@ fn link(args: Slice<string>) -> Result<(), string> {
   let resolved = resolve_id(id, usage)?
   let issue = fetch_issue(resolved)?
   let key = f"{issue.expand.team.key}-{issue.number}"
-  let d = fetch_doc(slug)?
+  let team = current_team()?
+  let d = fetch_doc(team, slug)?
+  cross_team_link(issue, team, d)?
 
   if d.issues.find(|x| x == issue.id).is_some() {
     fmt.Println(f"{key} is already linked to {d.slug}")
@@ -1280,7 +1290,9 @@ fn unlink(args: Slice<string>) -> Result<(), string> {
   let resolved = resolve_id(id, usage)?
   let issue = fetch_issue(resolved)?
   let key = f"{issue.expand.team.key}-{issue.number}"
-  let d = fetch_doc(slug)?
+  let team = current_team()?
+  let d = fetch_doc(team, slug)?
+  cross_team_link(issue, team, d)?
 
   let mut remaining: Slice<string> = []
   for x in d.issues {

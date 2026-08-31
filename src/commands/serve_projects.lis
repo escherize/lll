@@ -54,7 +54,7 @@ fn projects_page(
 }
 
 fn projects_vm(team_id: string) -> Result<ProjectsVM, string> {
-  let projects = fetch_projects()?
+  let projects = fetch_projects(team_id)?
   Ok(ProjectsVM {
     projects: projects.map(|p| ProjectVM {
       name: p.name,

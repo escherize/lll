@@ -64,7 +64,6 @@ pub struct NewProject {
   #[json(omitempty)]
   pub description: string,
   pub status: string,
-  #[json(omitempty)]
   pub team: string,
 }
 
@@ -92,7 +91,6 @@ pub struct NewLabel {
   pub name: string,
   #[json(omitempty)]
   pub color: string,
-  #[json(omitempty)]
   pub team: string,
 }
 
@@ -272,6 +270,9 @@ pub struct DocExpand {
 #[json]
 pub struct Doc {
   pub id: string,
+  // Required (TASK-173): a doc belongs to exactly one team, and slugs are
+  // unique per team, not per server — GRDN and LLL both get an `index`.
+  pub team: string,
   pub slug: string,
   pub title: string,
   pub kind: string,
@@ -296,6 +297,7 @@ pub struct DocList {
 
 #[json]
 pub struct NewDoc {
+  pub team: string,
   pub slug: string,
   pub title: string,
   pub kind: string,

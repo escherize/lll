@@ -69,3 +69,27 @@ fn sort_rejects_unknown_fields() {
   assert msg.contains("unknown sort field 'title'")
   let assert Err(_) = sort("-nope")
 }
+
+#[test]
+fn scoped_without_a_team_is_the_bare_clause() {
+  assert scoped("", "name", "bug") == "name='bug'"
+  assert scoped("", "slug", "index") == "slug='index'"
+}
+
+#[test]
+fn scoped_with_a_team_leads_with_it() {
+  assert scoped("t1", "slug", "index") == "team='t1' && slug='index'"
+}
+
+#[test]
+fn scoped_escapes_both_halves() {
+  assert scoped("a'b", "name", "it's") == r"team='a\'b' && name='it\'s'"
+  assert scoped(r"a\b", "name", r"c\d") == r"team='a\\b' && name='c\\d'"
+}
+
+#[test]
+fn quote_wraps_and_escapes() {
+  assert quote("plain") == "'plain'"
+  assert quote("it's") == r"'it\'s'"
+  assert quote(r"a\b") == r"'a\\b'"
+}

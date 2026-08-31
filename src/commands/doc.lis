@@ -10,6 +10,7 @@ import "display"
 import "flags"
 import "models"
 import "pb"
+import "query"
 
 /// Dispatch `lll doc <verb>`.
 pub fn doc(args: Slice<string>) -> Result<(), string> {
@@ -55,8 +56,13 @@ Usage:
       flags.section(doc_union_spec()) +
       "
 
+Every verb works inside ONE team — the one LLL_TEAM or .lll.toml names. A
+slug is unique per team, so two projects sharing a server both get an
+'index'; read the other one with LLL_TEAM=THEIRS lll doc view index.
+
 Docs link to issues with 'lll issue link KEY-123 SLUG' and unlink with
-'lll issue unlink KEY-123 SLUG' (see 'lll issue --help').
+'lll issue unlink KEY-123 SLUG' (see 'lll issue --help'). A link stays
+inside one team: the doc and the issue must belong to the same one.
 
 Findings surface by area and path, not by search: 'lll finding near <path>'
 lists what is filed about a file or directory, 'lll finding list [--area X]'
@@ -293,15 +299,27 @@ fn doc_new(args: Slice<string>) -> Result<(), string> {
   let mut body = ""
   if p.given("-b") { body = value_or_stdin(p.one("-b"), "-b")? }
 
+  let team = current_team()?
+
   // The unique index would catch this too, but the fix belongs in the
-  // message, not a raw 400.
-  if let Some(_) = find_doc(slug)? {
+  // message, not a raw 400. It is UNIQUE (team, slug) now, so the clash is
+  // only ever with this team's own docs.
+  if let Some(_) = find_doc(team, slug)? {
     return Err(
-      f"there is already a doc with slug '{slug}' — see 'lll doc view {slug}' or 'lll doc list'",
+      f"{team.key} already has a doc with slug '{slug}' — see 'lll doc view {slug}' or 'lll doc list'",
     )
   }
 
-  let new_doc = models.NewDoc { slug, title, kind, body, area, paths, issues: [] }
+  let new_doc = models.NewDoc {
+    team: team.id,
+    slug,
+    title,
+    kind,
+    body,
+    area,
+    paths,
+    issues: [],
+  }
   let payload = match json.Marshal(new_doc) {
     Ok(p) => p,
     Err(e) => return Err(f"encoding doc: {e}"),
@@ -319,9 +337,11 @@ fn doc_new(args: Slice<string>) -> Result<(), string> {
 fn doc_list(args: Slice<string>) -> Result<(), string> {
   let p = flags.parse([], args, 3, false, "lll doc list")?
   let _ = p
+  let team = current_team()?
+  let filter = url.QueryEscape(query.filter(team.id, "", "", "", "", ""))
   let mut docs = models.DocList { .. }
   pb.fetch(
-    "/api/collections/docs/records?perPage=500&sort=kind,slug",
+    f"/api/collections/docs/records?perPage=500&sort=kind,slug&filter={filter}",
     "docs",
     &docs,
   )?
@@ -342,7 +362,7 @@ fn doc_view(args: Slice<string>) -> Result<(), string> {
   let json_mode = p.given("--json")
   let raw_mode = p.given("--raw")
 
-  let record = fetch_doc_record(slug)?
+  let record = fetch_doc_record(current_team()?, slug)?
   if json_mode {
     fmt.Println(record)
     return Ok(())
@@ -399,7 +419,7 @@ fn doc_edit(args: Slice<string>) -> Result<(), string> {
     return Err(f"nothing to edit — pass at least one flag\nusage: {usage}")
   }
 
-  let d = fetch_doc(slug)?
+  let d = fetch_doc(current_team()?, slug)?
   let mut fields: Slice<string> = []
   // `-b -` replaces the whole body; there is deliberately no append mode.
   if body_set { fields = fields.append("\"body\":" + json_quote(body)?) }
@@ -431,7 +451,7 @@ fn doc_delete(args: Slice<string>) -> Result<(), string> {
   let force = p.given("--force")
   if slug == "" { return Err("usage: lll doc delete SLUG [--force]") }
 
-  let d = fetch_doc(slug)?
+  let d = fetch_doc(current_team()?, slug)?
   if !force {
     fmt.Print(f"delete doc {d.slug}? [y/N] ")
     let scanner = bufio.NewScanner(os.Stdin)
@@ -450,26 +470,23 @@ fn doc_delete(args: Slice<string>) -> Result<(), string> {
 
 // --------------------------------------------------------------- lookups
 
-/// Fetch a doc by slug and return the raw PB record JSON, with its linked
-/// issues (and their teams, for KEY-123 keys) expanded.
-pub fn fetch_doc_record(slug: string) -> Result<string, string> {
-  let slug = check_slug(slug)?
-  let filter = url.QueryEscape(f"slug='{slug}'")
-  let mut docs = models.DocList { .. }
-  pb.fetch(
-    f"/api/collections/docs/records?filter={filter}&perPage=1",
-    "docs",
-    &docs,
-  )?
-  let Some(item) = docs.items.get(0) else {
-    return Err(f"no doc with slug '{slug}' — see 'lll doc list'")
+/// Fetch a doc by slug WITHIN one team and return the raw PB record JSON,
+/// with its linked issues (and their teams, for KEY-123 keys) expanded.
+///
+/// A slug is unique per team, not per server (TASK-173): GRDN and LLL both
+/// get an `index`, so every lookup names the team it means. There is no
+/// cross-team form — `LLL_TEAM=GRDN lll doc view index` is how you read the
+/// other board's page.
+pub fn fetch_doc_record(team: models.Team, slug: string) -> Result<string, string> {
+  let Some(item) = find_doc(team, slug)? else {
+    return Err(unknown_doc(team, slug))
   }
   pb.get(f"/api/collections/docs/records/{item.id}?expand=issues.team")
 }
 
 /// fetch_doc_record, decoded.
-pub fn fetch_doc(slug: string) -> Result<models.Doc, string> {
-  let record = fetch_doc_record(slug)?
+pub fn fetch_doc(team: models.Team, slug: string) -> Result<models.Doc, string> {
+  let record = fetch_doc_record(team, slug)?
   let mut d = models.Doc { .. }
   if let Err(e) = json.Unmarshal(record.bytes(), &d) {
     return Err(f"decoding doc: {e}")
@@ -477,11 +494,11 @@ pub fn fetch_doc(slug: string) -> Result<models.Doc, string> {
   Ok(d)
 }
 
-/// A doc id by slug, or None. Lets callers distinguish "unknown slug" from
-/// a failed write.
-pub fn find_doc(slug: string) -> Result<Option<models.Doc>, string> {
+/// One team's doc by slug, or None. Lets callers distinguish "unknown slug"
+/// from a failed write.
+pub fn find_doc(team: models.Team, slug: string) -> Result<Option<models.Doc>, string> {
   let slug = check_slug(slug)?
-  let filter = url.QueryEscape(f"slug='{slug}'")
+  let filter = url.QueryEscape(query.scoped(team.id, "slug", slug))
   let mut docs = models.DocList { .. }
   pb.fetch(
     f"/api/collections/docs/records?filter={filter}&perPage=1",
@@ -489,4 +506,10 @@ pub fn find_doc(slug: string) -> Result<Option<models.Doc>, string> {
     &docs,
   )?
   Ok(docs.items.find(|d| d.slug == slug))
+}
+
+/// Unknown-slug message. It names the team, because the same slug may well
+/// exist on another board and "no doc with slug 'index'" would be a lie.
+fn unknown_doc(team: models.Team, slug: string) -> string {
+  f"no doc with slug '{slug}' in {team.key} — see 'lll doc list'"
 }

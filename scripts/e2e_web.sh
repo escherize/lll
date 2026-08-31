@@ -1348,6 +1348,48 @@ assert_contains "$events" "Urgent lane" "the patched group carries the new view"
 assert_not_contains "$events" 'id="rail"' "the views patch carries no shell"
 
 
+# --- TASK-173: one server, many projects — the web scopes past issues -----
+# OPS is the second project sharing this server. A chooser, a chip list or a
+# settings row that offered its records would either filter this board to
+# nothing or write a record no view can explain.
+env LLL_TEAM=OPS "$LIN" team create -k OPS -n Operations >/dev/null 2>&1 || true
+env LLL_TEAM=OPS "$LIN" label create -n foreign-label -c '#ff0000' >/dev/null
+env LLL_TEAM=OPS "$LIN" project create -n "Foreign Project" >/dev/null
+
+page=$(curl -sf "$WEB/issues")
+assert_not_contains "$page" 'value="foreign-label"' "/issues label chooser is team-scoped"
+assert_not_contains "$page" 'value="Foreign Project"' "/issues project chooser is team-scoped"
+assert_not_contains "$(curl -sf "$WEB/settings")" "foreign-label" "/settings is team-scoped"
+assert_not_contains "$(curl -sf "$WEB/projects")" "Foreign Project" "/projects is team-scoped"
+assert_not_contains "$(curl -sf "$WEB/issue/ENG-1")" "foreign-label" "issue page label chips are team-scoped"
+
+# A posted id from the other team is as unknown as a deleted one, whatever
+# markup it came from.
+FOREIGN_LABEL=$(curl -sf "$LLL_URL/api/collections/labels/records?perPage=200" \
+  | jq -r '.items[] | select(.name=="foreign-label") | .id')
+FOREIGN_PROJECT=$(curl -sf "$LLL_URL/api/collections/projects/records?perPage=200" \
+  | jq -r '.items[] | select(.name=="Foreign Project") | .id')
+assert_contains "$(curl -s -X POST --data-urlencode "key=ENG-1" \
+  --data-urlencode "labels=$FOREIGN_LABEL" "$WEB/labels")" \
+  "unknown label" "POST /labels refuses another team's label"
+assert_contains "$(curl -s -X POST --data-urlencode "key=ENG-1" \
+  --data-urlencode "project=$FOREIGN_PROJECT" "$WEB/project")" \
+  "unknown project" "POST /project refuses another team's project"
+
+# Labels and projects are required to name a team, so the settings writes
+# have to supply one — and an update must not blank it.
+curl -sf -X POST "$WEB/settings/label" -d 'name=scoped-label' -d 'color=#4cb782' >/dev/null
+SCOPED=$(curl -sf "$LLL_URL/api/collections/labels/records?perPage=200&expand=team" \
+  | jq -r '.items[] | select(.name=="scoped-label") | .expand.team.key')
+[ "$SCOPED" = "ENG" ] || fail "a web-created label landed on team '$SCOPED', want ENG"
+SCOPED_ID=$(curl -sf "$LLL_URL/api/collections/labels/records?perPage=200" \
+  | jq -r '.items[] | select(.name=="scoped-label") | .id')
+curl -sf -X POST "$WEB/settings/label" -d "id=$SCOPED_ID" -d 'name=scoped-label' -d 'color=#8d7ce6' >/dev/null
+KEPT=$(curl -sf "$LLL_URL/api/collections/labels/records/$SCOPED_ID?expand=team" | jq -r '.expand.team.key')
+[ "$KEPT" = "ENG" ] || fail "a settings update blanked the label's team (got '$KEPT')"
+curl -sf -X POST "$WEB/settings/label?del=1" -d "id=$SCOPED_ID" >/dev/null
+
+
 # --- task-114: /create takes everything `lll issue create` does ------------
 # The board's full create form is a modal over the board, and it posts to the
 # SAME POST /create as the topbar's one-line composer. One path is what keeps

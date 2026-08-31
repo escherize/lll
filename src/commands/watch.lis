@@ -3,7 +3,6 @@ import "go:fmt"
 import "go:strings"
 import "go:time"
 
-import "config"
 import "display"
 import "models"
 import "pb"
@@ -62,26 +61,18 @@ pub fn watch(args: Slice<string>) -> Result<(), string> {
   let search = p.one("--search")
   let json_mode = p.given("--json")
 
-  let cfg = config.load()?
-
   // A configured team (LLL_TEAM or .lll.toml) scopes the stream by default,
-  // same as `issue list`.
-  let mut team_id = ""
-  if cfg.team != "" {
-    let Some(team) = find_team(cfg.team)? else {
-      return Err(unknown_team(cfg.team))
-    }
-    team_id = team.id
-  }
+  // same as `issue list`, and with it the label and project names.
+  let team_id = configured_team_id()?
 
   let mut assignee_id = ""
   if assignee_name != "" { assignee_id = resolve_member(assignee_name)?.id }
 
   let mut label_id = ""
-  if label_name != "" { label_id = resolve_label(label_name)?.id }
+  if label_name != "" { label_id = resolve_label(team_id, label_name)?.id }
 
   let mut project_id = ""
-  if project_name != "" { project_id = resolve_project(project_name)?.id }
+  if project_name != "" { project_id = resolve_project(team_id, project_name)?.id }
 
   let filter = query.filter(
     team_id,

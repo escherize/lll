@@ -6,6 +6,7 @@ import "go:strings"
 import "models"
 import "pb"
 import "flags"
+import "query"
 
 /// Dispatch `lll project <verb>`.
 pub fn project(args: Slice<string>) -> Result<(), string> {
@@ -41,20 +42,27 @@ fn project_usage() {
     "lll project - work with projects
 
 Usage:
-  lll project list                    list projects (name, status, team)
+  lll project list                    list projects (name, status, team); this
+                                      team's, or every team's when none is
+                                      configured
   lll project view NAME               show a project and its issues
   lll project create -n \"name\" [-d desc] [--status s] [--team KEY]
                                       create a project (status defaults to
-                                      planned; no --team means workspace-wide)
+                                      planned; --team defaults to LLL_TEAM)
 
 Statuses: planned, started, paused, completed, cancelled",
   )
 }
 
 fn project_list() -> Result<(), string> {
+  // Scoped when a team is configured, every team's when not: a project
+  // belongs to one team (TASK-173), so the unscoped list is an admin's view.
+  let filter = url.QueryEscape(
+    query.filter(configured_team_id()?, "", "", "", "", ""),
+  )
   let mut projects = models.ProjectList { .. }
   pb.fetch(
-    "/api/collections/projects/records?perPage=200&sort=name&expand=team",
+    f"/api/collections/projects/records?perPage=200&sort=name&expand=team&filter={filter}",
     "projects",
     &projects,
   )?
@@ -71,7 +79,7 @@ fn project_create_spec() -> Slice<flags.Flag> {
     flags.Flag { name: "-n", value: true, hint: "\"name\"", required: true, help: "project name", .. },
     flags.Flag { name: "-d", value: true, hint: "desc", help: "project description", .. },
     flags.Flag { name: "--status", value: true, hint: "s", help: "planned, started, paused, completed, or cancelled\n(defaults to planned)", .. },
-    flags.Flag { name: "--team", value: true, hint: "KEY", help: "team key; no --team means workspace-wide", .. },
+    flags.Flag { name: "--team", value: true, hint: "KEY", help: "team key the project belongs to (defaults to LLL_TEAM)", .. },
   ]
 }
 
@@ -104,17 +112,9 @@ fn project_create(args: Slice<string>) -> Result<(), string> {
   if p.given("--status") {
     status = check_status(p.one("--status"))?
   }
-  let team_key = p.one("--team")
+  let team = team_flag_or_current(p.one("--team"))?
 
-  let mut team = ""
-  if team_key != "" {
-    let Some(t) = find_team(team_key)? else {
-      return Err(unknown_team(team_key))
-    }
-    team = t.id
-  }
-
-  let new_project = models.NewProject { name, description, status, team }
+  let new_project = models.NewProject { name, description, status, team: team.id }
   let payload = match json.Marshal(new_project) {
     Ok(p) => p,
     Err(e) => return Err(f"encoding project: {e}"),
@@ -133,7 +133,7 @@ fn project_view(args: Slice<string>) -> Result<(), string> {
   let Some(name) = args.get(3) else {
     return Err("usage: lll project view NAME")
   }
-  let p = resolve_project(name)?
+  let p = resolve_project(configured_team_id()?, name)?
 
   let mut team = p.expand.team.key
   if team == "" { team = "workspace" }
@@ -162,9 +162,11 @@ fn project_view(args: Slice<string>) -> Result<(), string> {
   Ok(())
 }
 
-/// Resolve a project by name; unknown names error with the fix.
-fn resolve_project(name: string) -> Result<models.Project, string> {
-  let filter = url.QueryEscape(f"name='{name}'")
+/// Resolve one team's project by name; unknown names error with the fix. An
+/// empty `team_id` searches every team, which only the unscoped board wants.
+/// Names are unique within a team, not across them (TASK-173).
+fn resolve_project(team_id: string, name: string) -> Result<models.Project, string> {
+  let filter = url.QueryEscape(query.scoped(team_id, "name", name))
   let mut result = models.ProjectList { .. }
   pb.fetch(
     f"/api/collections/projects/records?filter={filter}&expand=team",
