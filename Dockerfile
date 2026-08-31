@@ -13,8 +13,12 @@
 # --- build stage: compile lll with the pinned lis toolchain ---
 FROM golang:1.27-alpine AS build
 RUN apk add --no-cache curl git
-# lis via the upstream installer (not a mise plugin; see mise.toml).
-RUN curl -LsSf https://github.com/ivov/lisette/releases/download/lisette-v0.11.3/lisette-installer.sh | sh
+# lis via the upstream installer (not a mise plugin; see mise.toml). The
+# installer picks its own prefix per platform, so resolve the binary and pin
+# it where every later RUN sees it.
+RUN curl -LsSf https://github.com/ivov/lisette/releases/download/lisette-v0.11.3/lisette-installer.sh | sh \
+ && LIS_BIN=$(find / -type f -name lis 2>/dev/null | head -1) \
+ && ln -sf "$LIS_BIN" /usr/local/bin/lis
 WORKDIR /src
 COPY . .
 # TASK-168: a first boot writes 'me' to the home config, never the repo's
