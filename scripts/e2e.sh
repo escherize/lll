@@ -503,33 +503,38 @@ out=$(LLL_URL=$URL "$LIN" issue comment ENG-1)
 assert_contains "$out" "No comments." "empty comment list message"
 
 # --- projects: create + list ---
-out=$(LLL_URL=$URL "$LIN" project create -n "Auth Revamp" -d "Rework the login flow" --team ENG)
+out=$(LLL_URL=$URL LLL_TEAM=ENG "$LIN" project create -n "Auth Revamp" -d "Rework the login flow" --team ENG)
 assert_contains "$out" "Created project Auth Revamp (planned)" "project create output"
-out=$(LLL_URL=$URL "$LIN" project create -n "Perf Push" --status started)
+out=$(LLL_URL=$URL LLL_TEAM=ENG "$LIN" project create -n "Perf Push" --status started)
 assert_contains "$out" "Created project Perf Push (started)" "project create with --status"
-out=$(LLL_URL=$URL "$LIN" project list)
+out=$(LLL_URL=$URL LLL_TEAM=ENG "$LIN" project list)
 assert_contains "$out" "Auth Revamp" "project list has Auth Revamp"
 assert_contains "$out" "planned" "project list shows status"
 assert_contains "$out" "ENG" "project list shows team"
-assert_contains "$out" "workspace" "project list shows workspace scope"
+# Every project belongs to exactly one team now (TASK-173), so a --team-less
+# create takes LLL_TEAM and there is no "workspace" scope left to print.
+out=$(LLL_URL=$URL LLL_TEAM=OPS "$LIN" project list)
+assert_not_contains "$out" "Auth Revamp" "project list is scoped to the configured team"
 
 set +e
-out=$(LLL_URL=$URL "$LIN" project create -n "Bad" --status bogus 2>&1)
+out=$(LLL_URL=$URL LLL_TEAM=ENG "$LIN" project create -n "Bad" --status bogus 2>&1)
 rc=$?
 set -e
 [ "$rc" -ne 0 ] || fail "project create --status bogus: expected nonzero exit"
 assert_contains "$out" "unknown status 'bogus'" "invalid project status message"
 
 # --- labels: create + list ---
-out=$(LLL_URL=$URL "$LIN" label create -n bug -c "#ff0000" --team ENG)
+out=$(LLL_URL=$URL LLL_TEAM=ENG "$LIN" label create -n bug -c "#ff0000" --team ENG)
 assert_contains "$out" "Created label bug" "label create output"
-out=$(LLL_URL=$URL "$LIN" label create -n chore)
-assert_contains "$out" "Created label chore" "label create without color/team"
-out=$(LLL_URL=$URL "$LIN" label list)
+out=$(LLL_URL=$URL LLL_TEAM=ENG "$LIN" label create -n chore)
+assert_contains "$out" "Created label chore" "label create without color takes LLL_TEAM"
+out=$(LLL_URL=$URL LLL_TEAM=ENG "$LIN" label list)
 assert_contains "$out" "bug" "label list has bug"
 assert_contains "$out" "#ff0000" "label list shows color"
 assert_contains "$out" "chore" "label list has chore"
-assert_contains "$out" "workspace" "label list shows workspace scope"
+# Labels are team-owned too, so the other team's list is empty of ours.
+out=$(LLL_URL=$URL LLL_TEAM=OPS "$LIN" label list)
+assert_not_contains "$out" "chore" "label list is scoped to the configured team"
 
 # --- issue created with labels + project ---
 out=$(LLL_URL=$URL LLL_TEAM=ENG "$LIN" issue create -t "Labeled login fix" --label bug --label chore --project "Auth Revamp")
@@ -564,7 +569,7 @@ assert_contains "$out" "ENG-6" "label filter finds updated issue"
 assert_contains "$out" "ENG-8" "label filter matches multi-relation membership"
 
 # --- project view lists its issues ---
-out=$(LLL_URL=$URL "$LIN" project view "Auth Revamp")
+out=$(LLL_URL=$URL LLL_TEAM=ENG "$LIN" project view "Auth Revamp")
 assert_contains "$out" "Name:    Auth Revamp" "project view name"
 assert_contains "$out" "Status:  planned" "project view status"
 assert_contains "$out" "Team:    ENG" "project view team"
@@ -606,7 +611,7 @@ set -e
 assert_contains "$out" "no label named 'nosuch'" "list unknown label message"
 
 set +e
-out=$(LLL_URL=$URL "$LIN" project view nosuch 2>&1)
+out=$(LLL_URL=$URL LLL_TEAM=ENG "$LIN" project view nosuch 2>&1)
 rc=$?
 set -e
 [ "$rc" -ne 0 ] || fail "project view nosuch: expected nonzero exit"
@@ -859,86 +864,86 @@ assert_contains "$out" "--limit must be a positive integer" "non-numeric limit m
 
 # --- docs (TASK-86): new/list/view/edit round trip, issue link + unlink ---
 set +e
-out=$(LLL_URL=$URL "$LIN" doc view nosuch 2>&1)
+out=$(LLL_URL=$URL LLL_TEAM=ENG "$LIN" doc view nosuch 2>&1)
 rc=$?
 set -e
 [ "$rc" -ne 0 ] || fail "doc view nosuch: expected nonzero exit"
 assert_contains "$out" "no doc with slug 'nosuch'" "unknown doc message"
 assert_contains "$out" "lll doc list" "unknown doc names the fix"
 
-out=$(printf 'The port plan.\n\nStep two.' | env LLL_URL=$URL "$LIN" doc new -s port-notes -t "Port notes" -k wiki -b -)
+out=$(printf 'The port plan.\n\nStep two.' | env LLL_URL=$URL LLL_TEAM=ENG "$LIN" doc new -s port-notes -t "Port notes" -k wiki -b -)
 assert_contains "$out" "Created doc port-notes" "doc new from stdin"
 
 set +e
-out=$(LLL_URL=$URL "$LIN" doc new -s port-notes -t "Again" 2>&1)
+out=$(LLL_URL=$URL LLL_TEAM=ENG "$LIN" doc new -s port-notes -t "Again" 2>&1)
 rc=$?
 set -e
 [ "$rc" -ne 0 ] || fail "duplicate doc slug: expected nonzero exit"
-assert_contains "$out" "already a doc with slug 'port-notes'" "duplicate slug message"
+assert_contains "$out" "ENG already has a doc with slug 'port-notes'" "duplicate slug message names the team"
 
 set +e
-out=$(LLL_URL=$URL "$LIN" doc new -s "Bad Slug" -t x 2>&1)
+out=$(LLL_URL=$URL LLL_TEAM=ENG "$LIN" doc new -s "Bad Slug" -t x 2>&1)
 rc=$?
 set -e
 [ "$rc" -ne 0 ] || fail "invalid slug: expected nonzero exit"
 assert_contains "$out" "invalid slug 'Bad Slug'" "invalid slug message"
 
-out=$(printf 'raw finding body' | env LLL_URL=$URL "$LIN" doc new -s race-found -t "Race found" -k finding -b -)
+out=$(printf 'raw finding body' | env LLL_URL=$URL LLL_TEAM=ENG "$LIN" doc new -s race-found -t "Race found" -k finding -b -)
 assert_contains "$out" "Created doc race-found" "doc new with kind finding"
 
-out=$(LLL_URL=$URL "$LIN" doc list)
+out=$(LLL_URL=$URL LLL_TEAM=ENG "$LIN" doc list)
 assert_contains "$out" "port-notes	wiki	Port notes" "doc list shows slug, kind, title"
 assert_contains "$out" "race-found	finding	Race found" "doc list shows second doc"
 
-out=$(LLL_URL=$URL "$LIN" doc view port-notes)
+out=$(LLL_URL=$URL LLL_TEAM=ENG "$LIN" doc view port-notes)
 assert_contains "$out" "port-notes Port notes" "doc view header"
 assert_contains "$out" "Kind:      wiki" "doc view kind"
 assert_contains "$out" "The port plan." "doc view body"
 
-out=$(LLL_URL=$URL "$LIN" doc view port-notes --raw)
+out=$(LLL_URL=$URL LLL_TEAM=ENG "$LIN" doc view port-notes --raw)
 [ "$out" = "The port plan.
 
 Step two." ] || fail "doc view --raw should print only the body, got: $out"
 
 # edit replaces the whole body from stdin
-out=$(printf 'Replaced body' | env LLL_URL=$URL "$LIN" doc edit port-notes -b -)
+out=$(printf 'Replaced body' | env LLL_URL=$URL LLL_TEAM=ENG "$LIN" doc edit port-notes -b -)
 assert_contains "$out" "Updated doc port-notes" "doc edit from stdin"
-got=$(LLL_URL=$URL "$LIN" doc view port-notes --raw)
+got=$(LLL_URL=$URL LLL_TEAM=ENG "$LIN" doc view port-notes --raw)
 [ "$got" = "Replaced body" ] || fail "doc edit should replace the whole body, got: '$got'"
 
 # issue link: doc view shows the issue, issue view shows the doc
 ENG1_ID=$(LLL_URL=$URL "$LIN" issue view ENG-1 --json | jq -r .id)
 set +e
-out=$(LLL_URL=$URL "$LIN" issue link ENG-1 nosuch 2>&1)
+out=$(LLL_URL=$URL LLL_TEAM=ENG "$LIN" issue link ENG-1 nosuch 2>&1)
 rc=$?
 set -e
 [ "$rc" -ne 0 ] || fail "issue link unknown slug: expected nonzero exit"
 assert_contains "$out" "no doc with slug 'nosuch'" "link unknown doc names the fix"
 
-out=$(LLL_URL=$URL "$LIN" issue link ENG-1 port-notes)
+out=$(LLL_URL=$URL LLL_TEAM=ENG "$LIN" issue link ENG-1 port-notes)
 assert_contains "$out" "Linked ENG-1 -> port-notes" "issue link output"
 
-out=$(LLL_URL=$URL "$LIN" doc view port-notes)
+out=$(LLL_URL=$URL LLL_TEAM=ENG "$LIN" doc view port-notes)
 assert_contains "$out" "Issues:    ENG-1" "doc view shows linked issue"
 out=$(LLL_URL=$URL "$LIN" issue view ENG-1)
 assert_contains "$out" "Docs:      port-notes" "issue view shows linked doc"
-rid=$(LLL_URL=$URL "$LIN" doc view port-notes --json | jq -r '.issues[0]')
+rid=$(LLL_URL=$URL LLL_TEAM=ENG "$LIN" doc view port-notes --json | jq -r '.issues[0]')
 [ "$rid" = "$ENG1_ID" ] || fail "doc record issues relation: expected $ENG1_ID, got '$rid'"
 
 # linking twice is idempotent
-out=$(LLL_URL=$URL "$LIN" issue link ENG-1 port-notes)
+out=$(LLL_URL=$URL LLL_TEAM=ENG "$LIN" issue link ENG-1 port-notes)
 assert_contains "$out" "already linked" "double link is idempotent"
 
 # relink corrects a wrong link: unlink the wrong issue, keep the right one
-out=$(LLL_URL=$URL "$LIN" issue link ENG-2 port-notes)
+out=$(LLL_URL=$URL LLL_TEAM=ENG "$LIN" issue link ENG-2 port-notes)
 assert_contains "$out" "Linked ENG-2 -> port-notes" "second issue links"
-out=$(LLL_URL=$URL "$LIN" issue unlink ENG-1 port-notes)
+out=$(LLL_URL=$URL LLL_TEAM=ENG "$LIN" issue unlink ENG-1 port-notes)
 assert_contains "$out" "Unlinked ENG-1 from port-notes" "issue unlink output"
-out=$(LLL_URL=$URL "$LIN" doc view port-notes)
+out=$(LLL_URL=$URL LLL_TEAM=ENG "$LIN" doc view port-notes)
 assert_contains "$out" "ENG-2" "relinked doc shows ENG-2"
 assert_not_contains "$out" "ENG-1" "relinked doc no longer shows ENG-1"
 set +e
-out=$(LLL_URL=$URL "$LIN" issue unlink ENG-1 port-notes 2>&1)
+out=$(LLL_URL=$URL LLL_TEAM=ENG "$LIN" issue unlink ENG-1 port-notes 2>&1)
 rc=$?
 set -e
 [ "$rc" -ne 0 ] || fail "unlink not-linked: expected nonzero exit"
@@ -947,50 +952,50 @@ assert_contains "$out" "is not linked to" "unlink not-linked message"
 # deleting a linked issue unsets the relation; the doc survives
 key=$(LLL_URL=$URL LLL_TEAM=ENG "$LIN" issue create -t "Doc link fodder" | sed -n 's/^Created \([A-Z]*-[0-9]*\).*/\1/p')
 [ -n "$key" ] || fail "doc-link fodder create did not print a key"
-env LLL_URL=$URL "$LIN" issue link "$key" race-found >/dev/null
+env LLL_URL=$URL LLL_TEAM=ENG "$LIN" issue link "$key" race-found >/dev/null
 env LLL_URL=$URL "$LIN" issue delete "$key" --force >/dev/null
-n=$(LLL_URL=$URL "$LIN" doc view race-found --json | jq -r '.issues | length')
+n=$(LLL_URL=$URL LLL_TEAM=ENG "$LIN" doc view race-found --json | jq -r '.issues | length')
 [ "$n" = "0" ] || fail "deleting a linked issue should unset the relation, got: $n"
-assert_contains "$(LLL_URL=$URL "$LIN" doc view race-found)" "race-found Race found" "doc survives a linked issue's deletion"
+assert_contains "$(LLL_URL=$URL LLL_TEAM=ENG "$LIN" doc view race-found)" "race-found Race found" "doc survives a linked issue's deletion"
 
 # --- findings (TASK-103): authorship with area/paths, near by path, list,
 # issue view surfacing. A finding is a doc with kind=finding; retrieval is
 # by area and path — a filter, never a body search.
-out=$(printf 'Migrations are a merge hazard.' | env LLL_URL=$URL "$LIN" doc new -s migration-hazard -t "Migration collisions" -k finding -a pb -p "pb/pb_migrations, src/pb" -b -)
+out=$(printf 'Migrations are a merge hazard.' | env LLL_URL=$URL LLL_TEAM=ENG "$LIN" doc new -s migration-hazard -t "Migration collisions" -k finding -a pb -p "pb/pb_migrations, src/pb" -b -)
 assert_contains "$out" "Created doc migration-hazard" "doc new takes area and paths"
 
-out=$(LLL_URL=$URL "$LIN" doc view migration-hazard)
+out=$(LLL_URL=$URL LLL_TEAM=ENG "$LIN" doc view migration-hazard)
 assert_contains "$out" "Kind:      finding" "finding view shows kind"
 assert_contains "$out" "Area:      pb" "finding view shows area"
 assert_contains "$out" "Paths:     pb/pb_migrations, src/pb" "finding view shows paths"
 
 # near: exact path, parent directory, and a file inside a stored directory —
 # containment matches in both directions.
-out=$(LLL_URL=$URL "$LIN" finding near src/pb)
+out=$(LLL_URL=$URL LLL_TEAM=ENG "$LIN" finding near src/pb)
 assert_contains "$out" "migration-hazard" "finding near matches the exact path"
-out=$(LLL_URL=$URL "$LIN" finding near src)
+out=$(LLL_URL=$URL LLL_TEAM=ENG "$LIN" finding near src)
 assert_contains "$out" "migration-hazard" "finding near matches the parent directory"
-out=$(LLL_URL=$URL "$LIN" finding near src/pb/up.lis)
+out=$(LLL_URL=$URL LLL_TEAM=ENG "$LIN" finding near src/pb/up.lis)
 assert_contains "$out" "migration-hazard" "finding near matches a file inside a stored directory"
-out=$(LLL_URL=$URL "$LIN" finding near web/templates)
+out=$(LLL_URL=$URL LLL_TEAM=ENG "$LIN" finding near web/templates)
 assert_contains "$out" "No findings for web/templates." "finding near with no match says so"
 
-out=$(LLL_URL=$URL "$LIN" finding list)
+out=$(LLL_URL=$URL LLL_TEAM=ENG "$LIN" finding list)
 assert_contains "$out" "migration-hazard	pb	Migration collisions" "finding list prints slug, area, title"
-out=$(LLL_URL=$URL "$LIN" finding list --area pb)
+out=$(LLL_URL=$URL LLL_TEAM=ENG "$LIN" finding list --area pb)
 assert_contains "$out" "migration-hazard" "finding list --area matches"
-out=$(LLL_URL=$URL "$LIN" finding list --area nothing)
+out=$(LLL_URL=$URL LLL_TEAM=ENG "$LIN" finding list --area nothing)
 assert_contains "$out" "No findings." "finding list --area without a match"
 
 # Issue view surfaces related findings (the brief mechanism, AC#3): a
 # finding linked to the issue always shows; a finding whose area names one
 # of the issue's labels shows without any link.
-env LLL_URL=$URL "$LIN" issue link ENG-1 race-found >/dev/null
+env LLL_URL=$URL LLL_TEAM=ENG "$LIN" issue link ENG-1 race-found >/dev/null
 out=$(LLL_URL=$URL "$LIN" issue view ENG-1)
 assert_contains "$out" "Related findings:" "issue view has a related findings section"
 assert_contains "$out" "race-found (-) — Race found" "a linked finding always shows"
 
-LLL_URL=$URL "$LIN" label create -n pb >/dev/null
+LLL_URL=$URL LLL_TEAM=ENG "$LIN" label create -n pb >/dev/null
 env LLL_URL=$URL "$LIN" issue update ENG-1 --label pb >/dev/null
 out=$(LLL_URL=$URL "$LIN" issue view ENG-1)
 assert_contains "$out" "migration-hazard (pb) — Migration collisions" "an area-matched finding surfaces by label"
@@ -998,6 +1003,62 @@ assert_contains "$out" "migration-hazard (pb) — Migration collisions" "an area
 out=$(env LLL_URL=$URL "$LIN" issue view ENG-1 --raw)
 assert_contains "$out" "## Related findings" "issue view --raw carries related findings"
 assert_contains "$out" "- migration-hazard (pb): Migration collisions" "issue view --raw lists the finding"
+
+# --- team scoping past issues (TASK-173): one server, many projects ---
+# OPS is the second project on this server. Everything below is what breaks
+# when only issues honour the tenancy boundary.
+
+# A slug is unique per TEAM, not per server: without this, the second project
+# to write a wiki page called "port-notes" fails on a global unique index.
+out=$(LLL_URL=$URL LLL_TEAM=OPS "$LIN" doc new -s port-notes -t "OPS port notes" -b "ops body")
+assert_contains "$out" "Created doc port-notes" "two teams both hold a doc slugged port-notes"
+out=$(LLL_URL=$URL LLL_TEAM=OPS "$LIN" doc view port-notes --raw)
+assert_contains "$out" "ops body" "doc view resolves inside the configured team"
+out=$(LLL_URL=$URL LLL_TEAM=OPS "$LIN" doc list)
+assert_not_contains "$out" "Port notes" "doc list does not show the other team's doc"
+
+# finding near answers about THIS codebase. Every project has a src/, so an
+# unscoped filter would return another repo's notes, formatted identically.
+env LLL_URL=$URL LLL_TEAM=OPS "$LIN" doc new -s ops-hazard -t "OPS hazard" -k finding \
+  -a pb -p "pb/pb_migrations, src/pb" -b "ops" >/dev/null
+out=$(LLL_URL=$URL LLL_TEAM=ENG "$LIN" finding near src/pb)
+assert_contains "$out" "migration-hazard" "finding near still finds this team's finding"
+assert_not_contains "$out" "ops-hazard" "finding near never surfaces another team's finding"
+out=$(LLL_URL=$URL LLL_TEAM=OPS "$LIN" finding list)
+assert_not_contains "$out" "migration-hazard" "finding list is scoped too"
+
+# With no team there is nothing to scope to, so the answer is a refusal
+# rather than every project's findings at once.
+set +e
+out=$(env -u LLL_TEAM LLL_URL=$URL "$LIN" finding near src 2>&1)
+rc=$?
+set -e
+[ "$rc" -ne 0 ] || fail "finding near without a team: expected nonzero exit"
+assert_contains "$out" "set LLL_TEAM" "unscoped finding near names the fix"
+
+# A link crossing tenancy is refused, not silently stitched.
+set +e
+out=$(LLL_URL=$URL LLL_TEAM=OPS "$LIN" issue link ENG-1 port-notes 2>&1)
+rc=$?
+set -e
+[ "$rc" -ne 0 ] || fail "cross-team issue link: expected nonzero exit"
+assert_contains "$out" "a link stays inside one team" "cross-team link is refused"
+
+# Labels are team-owned, so the same name on two boards is two labels and an
+# issue takes its own team's.
+LLL_URL=$URL LLL_TEAM=OPS "$LIN" label create -n pb >/dev/null
+out=$(LLL_URL=$URL LLL_TEAM=ENG "$LIN" label list)
+assert_contains "$out" "pb" "ENG still has its own pb label"
+# The id ENG's issue carries is ENG's pb, not OPS's same-named one. Two
+# labels now answer to "pb"; only one may reach an ENG issue.
+eng_pb=$(curl -sf "$URL/api/collections/labels/records?perPage=200&expand=team" | \
+  jq -r '.items[] | select(.name == "pb" and .expand.team.key == "ENG") | .id')
+got=$(LLL_URL=$URL LLL_TEAM=ENG "$LIN" issue view ENG-1 --json | jq -r --arg id "$eng_pb" '.labels | index($id) // "missing"')
+[ "$got" != "missing" ] || fail "ENG-1 does not carry ENG's pb label ($eng_pb)"
+ops_pb=$(curl -sf "$URL/api/collections/labels/records?perPage=200&expand=team" | \
+  jq -r '.items[] | select(.name == "pb" and .expand.team.key == "OPS") | .id')
+got=$(LLL_URL=$URL LLL_TEAM=ENG "$LIN" issue view ENG-1 --json | jq -r --arg id "$ops_pb" '.labels | index($id) // "absent"')
+[ "$got" = "absent" ] || fail "ENG-1 picked up OPS's pb label ($ops_pb)"
 out=$(env LLL_URL=$URL "$LIN" issue view ENG-2 --raw)
 assert_not_contains "$out" "Related findings" "an issue with no matches renders no findings section"
 

@@ -1,9 +1,11 @@
 import "go:encoding/json"
 import "go:net/http"
+import "go:net/url"
 import "go:strings"
 
 import "models"
 import "pb"
+import "query"
 import "theme"
 
 // /settings - the workspace records the web can edit, and the one handler
@@ -48,9 +50,11 @@ fn settings_vm(team: models.Team) -> Result<SettingsVM, string> {
   let hex = theme.normalize_hex(team.accent)
   let mut accent = hex
   if accent == "" { accent = "#f0883e" }
-  let labels = fetch_labels()?
+  // Members stay unscoped on purpose: one person or agent works across many
+  // projects, which is what makes a member meaningful on every board.
+  let labels = fetch_labels(team.id)?
   let members = fetch_members()?
-  let projects = fetch_projects()?
+  let projects = fetch_projects(team.id)?
   Ok(SettingsVM {
     team_key: team.key,
     team_name: team.name,
@@ -79,14 +83,24 @@ fn scope_label(key: string) -> string {
   key
 }
 
-fn fetch_labels() -> Result<Slice<models.Label>, string> {
+/// One team's labels. Labels belong to exactly one team (TASK-173), so
+/// every chooser, chip list and validator built on this is scoped by
+/// construction. An empty `team_id` is the unscoped board, which has no team
+/// to scope to.
+fn fetch_labels(team_id: string) -> Result<Slice<models.Label>, string> {
   let mut list = models.LabelList { .. }
   pb.fetch(
-    "/api/collections/labels/records?perPage=200&sort=name&expand=team",
+    f"/api/collections/labels/records?perPage=200&sort=name&expand=team&filter={team_param(team_id)}",
     "labels",
     &list,
   )?
   Ok(list.items)
+}
+
+/// A `team=<id>` filter for a records URL, URL-escaped, or "" for every
+/// team. Built through query.filter so the id is escaped once, in one place.
+fn team_param(team_id: string) -> string {
+  url.QueryEscape(query.filter(team_id, "", "", "", "", ""))
 }
 
 fn fetch_members() -> Result<Slice<models.Member>, string> {
@@ -95,10 +109,11 @@ fn fetch_members() -> Result<Slice<models.Member>, string> {
   Ok(list.items)
 }
 
-fn fetch_projects() -> Result<Slice<models.Project>, string> {
+/// One team's projects, scoped for the same reason labels are.
+fn fetch_projects(team_id: string) -> Result<Slice<models.Project>, string> {
   let mut list = models.ProjectList { .. }
   pb.fetch(
-    "/api/collections/projects/records?perPage=200&sort=name&expand=team",
+    f"/api/collections/projects/records?perPage=200&sort=name&expand=team&filter={team_param(team_id)}",
     "projects",
     &list,
   )?
@@ -112,14 +127,18 @@ fn fetch_projects() -> Result<Slice<models.Project>, string> {
 #[json]
 struct TeamPatch { name: string, accent: string }
 
+// Labels and projects carry their team: it is required (TASK-173), and PB
+// replaces every field a patch hands it, so an update that omitted the team
+// would blank it. The page only ever lists this team's rows, so the value is
+// the same one going out as came in.
 #[json]
-struct LabelPatch { name: string, color: string }
+struct LabelPatch { name: string, color: string, team: string }
 
 #[json]
 struct MemberPatch { name: string, email: string }
 
 #[json]
-struct ProjectPatch { name: string, status: string }
+struct ProjectPatch { name: string, status: string, team: string }
 
 /// One write for every settings section: `kind` picks the section, an `id`
 /// picks update over create, and `?del=1` picks removal.
@@ -168,11 +187,14 @@ fn settings_apply(r: Ref<http.Request>, team_id: string) -> Result<(), string> {
     return Ok(())
   }
 
+  // Labels and projects are team-owned too, so every section below the
+  // delete needs the same configured team the team section does.
+  if team_id == "" {
+    return Err("no team configured: set LLL_TEAM or 'team' in .lll.toml")
+  }
+
   match kind {
     "team" => {
-      if team_id == "" {
-        return Err("no team configured: set LLL_TEAM or 'team' in .lll.toml")
-      }
       if name == "" { return Err("team name is required") }
       let accent = form_hex(r, "accent")?
       let payload = marshal(TeamPatch { name, accent })?
@@ -182,7 +204,7 @@ fn settings_apply(r: Ref<http.Request>, team_id: string) -> Result<(), string> {
     "label" => {
       if name == "" { return Err("label name is required") }
       let color = form_hex(r, "color")?
-      save_record("labels", id, LabelPatch { name, color })
+      save_record("labels", id, LabelPatch { name, color, team: team_id })
     },
     "member" => {
       if name == "" { return Err("member name is required") }
@@ -195,7 +217,7 @@ fn settings_apply(r: Ref<http.Request>, team_id: string) -> Result<(), string> {
       if project_statuses().find(|s| s == status).is_none() {
         return Err(f"unknown project status '{status}'")
       }
-      save_record("projects", id, ProjectPatch { name, status })
+      save_record("projects", id, ProjectPatch { name, status, team: team_id })
     },
     other => Err(f"unknown settings section '{other}'"),
   }
