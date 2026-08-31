@@ -1,8 +1,8 @@
 import "go:fmt"
 import "go:github.com/escherize/lll/web"
+import "go:net"
 import "go:net/http"
 import "go:os"
-import "go:net"
 
 import "config"
 import "models"
@@ -40,7 +40,10 @@ pub fn bind_addr() -> string {
   if b == "" { "127.0.0.1" } else { b }
 }
 
-pub fn run_server(port: int, refresh: Option<fn() -> Result<string, string>>) -> Result<(), string> {
+pub fn run_server(
+  port: int,
+  refresh: Option<fn() -> Result<string, string>>,
+) -> Result<(), string> {
   // The gate's env token, resolved (and generated when unset) before any
   // request can arrive — the handlers and the banner below must agree.
   let board_tok = resolve_board_token()
@@ -54,13 +57,22 @@ pub fn run_server(port: int, refresh: Option<fn() -> Result<string, string>>) ->
   let shell = rail_vm("board", cfg.me, models.Team { .. })
   let _ = render(
     "board-page",
-    PageVM { rail: shell, page: BoardVM { states: state_opts(), columns: [], .. } },
+    PageVM {
+      rail: shell,
+      page: BoardVM { states: state_opts(), columns: [], .. },
+    },
   )?
   let _ = render("issue-page", PageVM { rail: shell, page: IssueVM { .. } })?
   let _ = render("issues-page", PageVM { rail: shell, page: IssuesVM { .. } })?
-  let _ = render("settings-page", PageVM { rail: shell, page: SettingsVM { .. } })?
+  let _ = render(
+    "settings-page",
+    PageVM { rail: shell, page: SettingsVM { .. } },
+  )?
   let _ = render("search-page", PageVM { rail: shell, page: SearchVM { .. } })?
-  let _ = render("projects-page", PageVM { rail: shell, page: ProjectsVM { .. } })?
+  let _ = render(
+    "projects-page",
+    PageVM { rail: shell, page: ProjectsVM { .. } },
+  )?
 
   // One PB subscription for everything. Issues are team-scoped at most —
   // never state-filtered: PB emits nothing when an update moves a record out
@@ -120,7 +132,7 @@ pub fn run_server(port: int, refresh: Option<fn() -> Result<string, string>>) ->
   // the one place an Err becomes the flash strip.
   http.HandleFunc(
     "POST /settings/{kind}",
-    gated(flashing(|r: Ref<http.Request>| settings_write(r, team_id, cfg.me))),
+    gated(flashing(|r: mut Ref<http.Request>| settings_write(r, team_id, cfg.me))),
   )
   http.HandleFunc(
     "GET /search",
@@ -136,11 +148,11 @@ pub fn run_server(port: int, refresh: Option<fn() -> Result<string, string>>) ->
   )
   http.HandleFunc(
     "POST /create",
-    gated(flashing(|r: Ref<http.Request>| create_write(r, team_id))),
+    gated(flashing(|r: mut Ref<http.Request>| create_write(r, team_id))),
   )
   http.HandleFunc(
     "POST /state",
-    gated(flashing(|r: Ref<http.Request>| state_write(r, team_id))),
+    gated(flashing(|r: mut Ref<http.Request>| state_write(r, team_id))),
   )
   http.HandleFunc("POST /favorite", gated(flashing(favorite_write)))
   http.HandleFunc("POST /priority", gated(flashing(priority_write)))
@@ -154,11 +166,17 @@ pub fn run_server(port: int, refresh: Option<fn() -> Result<string, string>>) ->
   // The embedded tree keeps its repo paths, so "/static/theme.css" resolves to
   // "static/theme.css" with no prefix surgery.
   let assets = http.FileServerFS(web.Assets())
-  http.HandleFunc("GET /static/", |w: http.ResponseWriter, r: Ref<http.Request>| {
-    if admit(w, r) {
-      assets.ServeHTTP(w, r)
-    }
-  })
+  http.HandleFunc(
+    "GET /static/",
+    |w: http.ResponseWriter, r: Ref<http.Request>| {
+      if admit(w, r) {
+        // FileServer's ServeHTTP wants a writable request; the mux hands out
+        // read-only ones, so serve a clone (see `flashing`).
+        let mut rc = r.Clone(r.Context())
+        assets.ServeHTTP(w, rc)
+      }
+    },
+  )
 
   // Bind BEFORE announcing: "board <url>" is the promise that the board is
   // accepting connections, and e2e_web.sh curls the URL the moment the line

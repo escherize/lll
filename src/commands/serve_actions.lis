@@ -26,10 +26,14 @@ import "query"
 /// The Ok value is any extra SSE the action owes the page past the cleared
 /// flash. Almost none owes any and returns "".
 fn flashing(
-  write: fn(Ref<http.Request>) -> Result<string, string>,
+  write: fn(mut Ref<http.Request>) -> Result<string, string>,
 ) -> fn(http.ResponseWriter, Ref<http.Request>) {
   |w: http.ResponseWriter, r: Ref<http.Request>| {
-    match write(r) {
+    // The mux hands out read-only requests; parsing a form body is a write
+    // (it caches into r.Form). Clone is the sanctioned upgrade: the copy is
+    // ours to parse, and it shares the one Body stream each action reads once.
+    let mut wr = r.Clone(r.Context())
+    match write(wr) {
       Ok(extra) => {
         flash_clear(w)
         if extra != "" { let _ = w.Write(extra.bytes()) }
@@ -82,7 +86,10 @@ fn respond_flash(w: http.ResponseWriter, html: string) {
 /// unchecked: the form only ever offers ids that exist, and PB rejects a
 /// bogus one with a message the flash strip already knows how to show.
 /// Re-validating here would mean three more fetches per create.
-fn create_write(r: Ref<http.Request>, team_id: string) -> Result<string, string> {
+fn create_write(
+  r: mut Ref<http.Request>,
+  team_id: string,
+) -> Result<string, string> {
   let title = strings.TrimSpace(r.PostFormValue("title"))
   if title == "" { return Err("title is required") }
   // Absent state means todo, the same default `lll issue create` uses, so
@@ -105,8 +112,9 @@ fn create_write(r: Ref<http.Request>, team_id: string) -> Result<string, string>
   }
   // PostFormValue above has already parsed the body, so PostForm is populated;
   // labels is the one field that repeats (one checkbox per label).
-  let form = r.PostForm as Map<string, Slice<string>>
-  let labels = form["labels"].filter(|id| id != "")
+  let labels = r.PostForm.map_or([], |form| {
+    (form as Map<string, Slice<string>>)["labels"].filter(|id| id != "")
+  })
   let new_issue = models.NewIssue {
     team: team_id,
     title,
@@ -116,7 +124,7 @@ fn create_write(r: Ref<http.Request>, team_id: string) -> Result<string, string>
     assignee: r.PostFormValue("assignee"),
     project: r.PostFormValue("project"),
     labels,
-    ..
+    ..,
   }
   let _ = pb.post("/api/collections/issues/records", marshal(new_issue)?)?
   // Only a success closes the dialog and empties the composers, and the
@@ -155,7 +163,10 @@ struct IssueAssigneePatch { assignee: string }
 #[json]
 struct IssueLabelsPatch { labels: Slice<string> }
 
-fn state_write(r: Ref<http.Request>, team_id: string) -> Result<string, string> {
+fn state_write(
+  r: mut Ref<http.Request>,
+  team_id: string,
+) -> Result<string, string> {
   // FormValue, not PostFormValue: drag-and-drop posts key/state as query params.
   let key = r.FormValue("key")
   let state = r.FormValue("state")
@@ -199,7 +210,10 @@ fn reorder_sort(
 
 /// One column's issues in board order (no expands — reorder needs ids and
 /// sorts only).
-fn fetch_column_issues(team_id: string, state: string) -> Result<Slice<models.Issue>, string> {
+fn fetch_column_issues(
+  team_id: string,
+  state: string,
+) -> Result<Slice<models.Issue>, string> {
   let filter = query.filter(team_id, state, "", "", "", "")
   let path = f"/api/collections/issues/records?perPage=200&sort=sort,created&filter={url.QueryEscape(filter)}"
   let mut issues = models.IssueList { .. }
@@ -213,7 +227,7 @@ fn fetch_column_issues(team_id: string, state: string) -> Result<Slice<models.Is
 /// A set, not a toggle. The button posts the state it just moved to, so a
 /// double click or a stale page converges on what the user sees instead of
 /// flipping the row out from under them. Both directions are idempotent.
-fn favorite_write(r: Ref<http.Request>) -> Result<string, string> {
+fn favorite_write(r: mut Ref<http.Request>) -> Result<string, string> {
   let key = r.FormValue("key")
   let on = r.FormValue("on") == "true"
   let issue = fetch_issue(key)?
@@ -229,7 +243,7 @@ fn favorite_write(r: Ref<http.Request>) -> Result<string, string> {
   Ok("")
 }
 
-fn priority_write(r: Ref<http.Request>) -> Result<string, string> {
+fn priority_write(r: mut Ref<http.Request>) -> Result<string, string> {
   let key = r.FormValue("key")
   let slug = r.FormValue("priority")
   let Some(prio) = display.priority_value(slug) else {
@@ -246,7 +260,7 @@ fn priority_write(r: Ref<http.Request>) -> Result<string, string> {
 /// present, exactly as `lll issue update --emoji ""` keys off the flag.
 /// Validation is the CLI's `check_emoji`: the picker only ever posts one of
 /// its own candidates, but the endpoint is curl-able like every other.
-fn emoji_write(r: Ref<http.Request>) -> Result<string, string> {
+fn emoji_write(r: mut Ref<http.Request>) -> Result<string, string> {
   let key = r.FormValue("key")
   let Ok(emoji) = check_emoji(r.FormValue("emoji")) else {
     return Err("an issue takes one emoji, or none")
@@ -255,7 +269,7 @@ fn emoji_write(r: Ref<http.Request>) -> Result<string, string> {
   patch_issue(issue.id, EmojiPatch { emoji })
 }
 
-fn title_write(r: Ref<http.Request>) -> Result<string, string> {
+fn title_write(r: mut Ref<http.Request>) -> Result<string, string> {
   let key = r.FormValue("key")
   let title = strings.TrimSpace(r.FormValue("title"))
   if title == "" { return Err("title is required") }
@@ -263,7 +277,7 @@ fn title_write(r: Ref<http.Request>) -> Result<string, string> {
   patch_issue(issue.id, TitlePatch { title })
 }
 
-fn project_write(r: Ref<http.Request>) -> Result<string, string> {
+fn project_write(r: mut Ref<http.Request>) -> Result<string, string> {
   let key = r.FormValue("key")
   let id = r.FormValue("project")
   // The issue first: its own team is what the posted id has to belong to,
@@ -273,19 +287,23 @@ fn project_write(r: Ref<http.Request>) -> Result<string, string> {
   if id != "" {
     let projects = fetch_projects(issue.team)?
     if projects.find(|p| p.id == id).is_none() {
-      return Err(f"unknown project '{id}' — reload the page for the current list")
+      return Err(
+        f"unknown project '{id}' — reload the page for the current list",
+      )
     }
   }
   patch_issue(issue.id, IssueProjectPatch { project: id })
 }
 
-fn assignee_write(r: Ref<http.Request>) -> Result<string, string> {
+fn assignee_write(r: mut Ref<http.Request>) -> Result<string, string> {
   let key = r.FormValue("key")
   let id = r.FormValue("assignee")
   if id != "" {
     let members = fetch_members()?
     if members.find(|m| m.id == id).is_none() {
-      return Err(f"unknown member '{id}' — reload the page for the current list")
+      return Err(
+        f"unknown member '{id}' — reload the page for the current list",
+      )
     }
   }
   let issue = fetch_issue(key)?
@@ -296,10 +314,12 @@ fn assignee_write(r: Ref<http.Request>) -> Result<string, string> {
 /// rel-multi, so the form posts every checked id and this is one PATCH —
 /// the same whole-list write `lll issue update --label` does. Unchecking
 /// everything posts no labels at all, which is the way back to none.
-fn labels_write(r: Ref<http.Request>) -> Result<string, string> {
+fn labels_write(r: mut Ref<http.Request>) -> Result<string, string> {
   let key = r.FormValue("key")
   if key == "" {
-    return Err("labels_write got no issue key — reload the page; if it keeps happening, this is a bug in the labels form")
+    return Err(
+      "labels_write got no issue key — reload the page; if it keeps happening, this is a bug in the labels form",
+    )
   }
   // The issue first, for its team: a label from another team is as unknown
   // here as a deleted one, which is what stops a POST crossing tenancy
@@ -308,8 +328,9 @@ fn labels_write(r: Ref<http.Request>) -> Result<string, string> {
   let known = fetch_labels(issue.team)?
   // FormValue above has already parsed the body, so PostForm is populated;
   // labels is the one field that repeats (one checkbox per label).
-  let form = r.PostForm as Map<string, Slice<string>>
-  let ids = form["labels"].filter(|id| id != "")
+  let ids = r.PostForm.map_or([], |form| {
+    (form as Map<string, Slice<string>>)["labels"].filter(|id| id != "")
+  })
   for id in ids {
     if known.find(|l| l.id == id).is_none() {
       return Err(f"unknown label '{id}' — reload the page for the current list")
@@ -318,7 +339,7 @@ fn labels_write(r: Ref<http.Request>) -> Result<string, string> {
   patch_issue(issue.id, IssueLabelsPatch { labels: ids })
 }
 
-fn comment_write(r: Ref<http.Request>) -> Result<string, string> {
+fn comment_write(r: mut Ref<http.Request>) -> Result<string, string> {
   let key = r.PostFormValue("key")
   let body = strings.TrimSpace(r.PostFormValue("body"))
   if body == "" { return Err("comment body is required") }
@@ -345,13 +366,15 @@ fn comment_write(r: Ref<http.Request>) -> Result<string, string> {
 /// stored — the form posts the board page's own rendering of the URL, but
 /// the endpoint is curl-able like every other, and a view must always be
 /// exactly the URL it will navigate to.
-fn views_save(r: Ref<http.Request>) -> Result<string, string> {
+fn views_save(r: mut Ref<http.Request>) -> Result<string, string> {
   let name = strings.TrimSpace(r.PostFormValue("name"))
   if name == "" { return Err("a view needs a name") }
   if name.length() > 80 { return Err("view names are capped at 80 characters") }
   let raw_q = view_query_parse_raw(r.PostFormValue("query"))?
   let query_str = view_query_string(raw_q)
-  if query_str.length() > 500 { return Err("this view's query string is too long to save") }
+  if query_str.length() > 500 {
+    return Err("this view's query string is too long to save")
+  }
   // The unique index is the backstop; this pre-check is what makes the
   // flash strip say something a human can read.
   let mut existing = models.ViewList { .. }
@@ -360,7 +383,9 @@ fn views_save(r: Ref<http.Request>) -> Result<string, string> {
     return Err(f"a view named '{name}' already exists")
   }
   // member stays empty: workspace-wide until auth (task-32) lands.
-  let payload = marshal(models.NewView { name, query: strings.TrimPrefix(query_str, "?"), .. })?
+  let payload = marshal(
+    models.NewView { name, query: strings.TrimPrefix(query_str, "?"), .. },
+  )?
   let _ = pb.post("/api/collections/views/records", payload)?
   Ok("")
 }

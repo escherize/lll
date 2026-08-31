@@ -2,7 +2,7 @@
 // so `lll up` runs from any directory instead of only the lll checkout root.
 //
 // This file is Go, not Lisette, because `//go:embed` only applies to a
-// package-level var and Lisette 0.11.3 has no package-level var (its @rawgo
+// package-level var and Lisette (still true in 0.12.0) has no package-level var (its @rawgo
 // escape hatch is statement-scoped). Lisette consumes the result natively:
 // embed.FS satisfies fs.FS, which template.ParseFS and http.FileServerFS take.
 package web

@@ -39,7 +39,7 @@ escapes the lexer rejects). Do not try to `lis add` PocketBase itself — see
 2026-08-28, lis had no local-path dependencies, so every edit to `gopb/gopb.go`
 required commit + push of the public repo + `lis add
 github.com/escherize/lll/gopb@<new-commit>` to re-pin the pseudo-version.
-**lis 0.11.3 ships `lis add --path <dir>`** (verified: `lis add --help` shows
+**lis ships `lis add --path <dir>`** (verified on 0.11.3 and 0.12.0: `lis add --help` shows
 `--path <dir>  Add a local Go module`), which removes that loop entirely.
 `lisette.toml` still carries the pinned pseudo-version
 `v0.0.0-20260828210548-11804d3d2b7d`; converting it to a path dep is filed

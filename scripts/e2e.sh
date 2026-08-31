@@ -29,6 +29,7 @@ WEB_PORT=$(free_port 40000 59999)
 PB_LOG="$DATA_DIR/pb.log"
 E2E_LOGS="$PB_LOG"
 
+bash scripts/lis-typedefs-workaround.sh
 lis build >/dev/null
 LIN=target/.lisette/bin/lll
 

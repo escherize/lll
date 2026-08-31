@@ -7,7 +7,7 @@
 # `lis` is NOT here: Lisette ships as a GitHub release, not a mise plugin.
 # Install it with the upstream installer and keep it on PATH:
 #   curl -LsSf https://github.com/ivov/lisette/releases/latest/download/lisette-installer.sh | sh
-# lll is built and verified against lis 0.11.3.
+# lll is built and verified against lis 0.12.0.
 
 [tools]
 go = "1.27"   # PocketBase v0.40.1 and gopb both declare go 1.27
@@ -28,6 +28,7 @@ description = "Compile lll to target/.lisette/bin/lll"
 dir = "{{config_root}}"
 run = """
 command -v lis >/dev/null || { echo "lis not found. Install it:" >&2; echo "  curl -LsSf https://github.com/ivov/lisette/releases/latest/download/lisette-installer.sh | sh" >&2; exit 1; }
+bash scripts/lis-typedefs-workaround.sh
 lis build
 """
 
@@ -42,6 +43,7 @@ description = "Unit tests"
 dir = "{{config_root}}"
 run = """
 command -v lis >/dev/null || { echo "lis not found. Install it:" >&2; echo "  curl -LsSf https://github.com/ivov/lisette/releases/latest/download/lisette-installer.sh | sh" >&2; exit 1; }
+bash scripts/lis-typedefs-workaround.sh
 lis test
 """
 

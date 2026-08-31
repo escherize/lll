@@ -1,14 +1,11 @@
 # The gate runs on macos-14 (darwin/arm64), NOT ubuntu — do not "fix" this back
-# to linux without first fixing lisette upstream. Two reasons, in order:
-#
-# 1. lisette v0.12.0 (what the `latest` installer ships) is a breaking release;
-#    lll is verified against lis 0.11.3 (see mise.toml), which we pin below.
-# 2. On linux, lis 0.11.3's bindgen panics while generating Go typedefs for
-#    github.com/escherize/lll/gopb — "panic: unexpected expr: *ast.KeyValueExpr"
-#    in golang.org/x/tools/go/ssa — so `lis test` cannot run on ubuntu at all.
-#    The identical toolchain (lis 0.11.3, go 1.27.0, cold module + build caches)
-#    passes on darwin/arm64. Repro: escherize/lll Actions run 33320568185.
-#    Upstream issue: https://github.com/ivov/lisette/issues/1360
+# to linux without first fixing lisette upstream: lis bindgen panics on linux
+# while generating Go typedefs for github.com/escherize/lll/gopb — "panic:
+# unexpected expr: *ast.KeyValueExpr" in golang.org/x/tools/go/ssa — so
+# `lis test` cannot run on ubuntu at all. Confirmed on 0.11.3 AND 0.12.0
+# (finding filed 2026-08-31). The identical toolchain (go 1.27.0, cold module
+# + build caches) passes on darwin/arm64. Repro: escherize/lll Actions run
+# 33320568185. Upstream issue: https://github.com/ivov/lisette/issues/1360
 
 name: gate
 
@@ -46,12 +43,10 @@ jobs:
         run: mise install
 
       # lis ships as a GitHub release, not a mise plugin (see mise.toml).
-      # Pinned to 0.11.3, the version mise.toml says lll is verified against —
-      # the `latest` installer now ships 0.12.0, whose stricter mut rules fail
-      # the build.
-      - name: Install lis 0.11.3
+      # Pinned to 0.12.0, the version mise.toml says lll is verified against.
+      - name: Install lis 0.12.0
         run: |
-          curl -LsSf https://github.com/ivov/lisette/releases/download/lisette-v0.11.3/lisette-installer.sh | sh
+          curl -LsSf https://github.com/ivov/lisette/releases/download/lisette-v0.12.0/lisette-installer.sh | sh
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
 
       # THE failing step: build + unit tests + full e2e (~75s). A red gate

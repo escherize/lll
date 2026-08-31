@@ -1,4 +1,3 @@
-import "go:encoding/json"
 import "go:crypto/rand"
 import "go:net/http"
 import "go:net/url"
@@ -56,26 +55,35 @@ fn settings_vm(team: models.Team) -> Result<SettingsVM, string> {
   let labels = fetch_labels(team.id)?
   let members = fetch_members()?
   let projects = fetch_projects(team.id)?
-  Ok(SettingsVM {
-    team_key: team.key,
-    team_name: team.name,
-    accent,
-    accent_set: hex != "",
-    labels: labels.map(|l| SetLabelVM {
-      id: l.id,
-      name: l.name,
-      color: theme.normalize_hex(l.color),
-      scope: scope_label(l.expand.team.key),
-    }),
-    members: members.map(|m| SetMemberVM { id: m.id, name: m.name, email: m.email }),
-    projects: projects.map(|p| SetProjectVM {
-      id: p.id,
-      name: p.name,
-      status: p.status,
-      scope: scope_label(p.expand.team.key),
-    }),
-    statuses: project_statuses().map(|s| StateOpt { value: s, label: state_label(s) }),
-  })
+  Ok(
+    SettingsVM {
+      team_key: team.key,
+      team_name: team.name,
+      accent,
+      accent_set: hex != "",
+      labels: labels.map(|l| SetLabelVM {
+        id: l.id,
+        name: l.name,
+        color: theme.normalize_hex(l.color),
+        scope: scope_label(l.expand.team.key),
+      }),
+      members: members.map(|m| SetMemberVM {
+        id: m.id,
+        name: m.name,
+        email: m.email,
+      }),
+      projects: projects.map(|p| SetProjectVM {
+        id: p.id,
+        name: p.name,
+        status: p.status,
+        scope: scope_label(p.expand.team.key),
+      }),
+      statuses: project_statuses().map(|s| StateOpt {
+        value: s,
+        label: state_label(s),
+      }),
+    },
+  )
 }
 
 /// A record's owning team key, or the word for "owned by no team".
@@ -106,7 +114,11 @@ fn team_param(team_id: string) -> string {
 
 fn fetch_members() -> Result<Slice<models.Member>, string> {
   let mut list = models.MemberList { .. }
-  pb.fetch("/api/collections/members/records?perPage=200&sort=name", "members", &list)?
+  pb.fetch(
+    "/api/collections/members/records?perPage=200&sort=name",
+    "members",
+    &list,
+  )?
   Ok(list.items)
 }
 
@@ -170,7 +182,7 @@ struct ProjectPatch { name: string, status: string, team: string }
 /// the record is already written, and a flash saying otherwise would be a
 /// lie about the database.
 fn settings_write(
-  r: Ref<http.Request>,
+  r: mut Ref<http.Request>,
   team_id: string,
   me: string,
 ) -> Result<string, string> {
@@ -189,7 +201,10 @@ fn settings_write(
 }
 
 /// The record this request names: created, updated, or deleted.
-fn settings_apply(r: Ref<http.Request>, team_id: string) -> Result<(), string> {
+fn settings_apply(
+  r: mut Ref<http.Request>,
+  team_id: string,
+) -> Result<(), string> {
   let kind = r.PathValue("kind")
   let id = strings.TrimSpace(r.PostFormValue("id"))
   let name = strings.TrimSpace(r.PostFormValue("name"))
@@ -230,7 +245,11 @@ fn settings_apply(r: Ref<http.Request>, team_id: string) -> Result<(), string> {
         // identity and a password. The synthesized identity and the random
         // never-shown password are the same bargain the CLI's member add
         // runs; nobody can log in as one until a password is set.
-        let member_email = if email == "" { synthesize_email(name) } else { email }
+        let member_email = if email == "" {
+          synthesize_email(name)
+        } else {
+          email
+        }
         // One value for both password fields: two rand.Text() calls would
         // disagree with each other and fail PB's confirm check.
         let password = rand.Text()
@@ -249,7 +268,9 @@ fn settings_apply(r: Ref<http.Request>, team_id: string) -> Result<(), string> {
       }
       let known = fetch_members()?
       let Some(existing) = known.find(|m| m.id == id) else {
-        return Err(f"unknown member '{id}' — reload the page for the current list")
+        return Err(
+          f"unknown member '{id}' — reload the page for the current list",
+        )
       }
       // Email is the member's login identity now (TASK-180): PocketBase
       // refuses an email change on an auth record without its password, so
@@ -277,7 +298,7 @@ fn settings_apply(r: Ref<http.Request>, team_id: string) -> Result<(), string> {
 /// A "#rrggbb" form field: "" clears the colour, anything unparseable is a
 /// user error rather than a silent fallback — a typed hex that quietly did
 /// nothing would be the worst of both.
-fn form_hex(r: Ref<http.Request>, field: string) -> Result<string, string> {
+fn form_hex(r: mut Ref<http.Request>, field: string) -> Result<string, string> {
   let raw = strings.TrimSpace(r.PostFormValue(field))
   if raw == "" { return Ok("") }
   let hex = theme.normalize_hex(raw)

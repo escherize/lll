@@ -1,6 +1,7 @@
 import "go:crypto/rand"
 import "go:crypto/subtle"
 import "go:net/http"
+import "go:net/url"
 import "go:os"
 
 // The board gate (TASK-182): every route the board serves — pages, POSTs,
@@ -40,9 +41,7 @@ pub fn gated(
   page: fn(http.ResponseWriter, Ref<http.Request>),
 ) -> fn(http.ResponseWriter, Ref<http.Request>) {
   |w: http.ResponseWriter, r: Ref<http.Request>| {
-    if admit(w, r) {
-      page(w, r)
-    }
+    if admit(w, r) { page(w, r) }
   }
 }
 
@@ -81,7 +80,6 @@ fn cookie_named(r: Ref<http.Request>, name: string) -> Option<string> {
 
 /// One query parameter: the helper lives in serve_pages.lis; the gate shares
 /// it rather than growing a second dialect.
-
 /// Hand the browser a week-long board cookie. HttpOnly: the page's scripts
 /// never need the token, so none of them can leak it.
 fn set_board_cookie(w: http.ResponseWriter, tok: string) {
@@ -91,8 +89,9 @@ fn set_board_cookie(w: http.ResponseWriter, tok: string) {
     Path: "/",
     HttpOnly: true,
     MaxAge: 7 * 24 * 3600,
-    .. // SameSite zero-fills to the default, which browsers treat as Lax.
+    ..,
   }
+  // SameSite zero-fills to the default, which browsers treat as Lax.
   http.SetCookie(w, &cookie)
 }
 
@@ -103,9 +102,11 @@ fn without_board_token(r: Ref<http.Request>) -> string {
   let Some(u) = r.URL else {
     return "/"
   }
-  let mut q = u.Query()
-  q.Del("board_token")
-  let qs = q.Encode()
+  // Query() hands out a read-only Values; clone the underlying map to get a
+  // copy this function may edit.
+  let mut q = (u.Query() as Map<string, Slice<string>>).clone()
+  q.delete("board_token")
+  let qs = (q as url.Values).Encode()
   if qs == "" { return u.Path }
   f"{u.Path}?{qs}"
 }

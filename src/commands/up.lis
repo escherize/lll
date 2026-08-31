@@ -10,8 +10,8 @@ import "go:os"
 import "go:path/filepath"
 import "go:strconv"
 import "go:strings"
-import "go:unicode"
 import "go:time"
+import "go:unicode"
 
 import "config"
 import "flags"
@@ -27,10 +27,32 @@ import "flags"
 // board down too — Ctrl-C or a plain `kill <pid>` stops everything.
 fn up_spec() -> Slice<flags.Flag> {
   [
-    flags.Flag { name: "--port", value: true, hint: "8100", help: "preferred web-board port; taken ports auto-increment", .. },
-    flags.Flag { name: "--pb-dir", value: true, hint: "pb/pb_data", help: "PocketBase data directory (migrations stay cwd-relative)", .. },
-    flags.Flag { name: "--no-open", help: "do not open the board in the browser", .. },
-    flags.Flag { name: "--help", alias: "-h", hidden: true, help: "show this help", .. },
+    flags.Flag {
+      name: "--port",
+      value: true,
+      hint: "8100",
+      help: "preferred web-board port; taken ports auto-increment",
+      ..,
+    },
+    flags.Flag {
+      name: "--pb-dir",
+      value: true,
+      hint: "pb/pb_data",
+      help: "PocketBase data directory (migrations stay cwd-relative)",
+      ..,
+    },
+    flags.Flag {
+      name: "--no-open",
+      help: "do not open the board in the browser",
+      ..,
+    },
+    flags.Flag {
+      name: "--help",
+      alias: "-h",
+      hidden: true,
+      help: "show this help",
+      ..,
+    },
   ]
 }
 
@@ -133,7 +155,9 @@ pub fn up(args: Slice<string>) -> Result<(), string> {
       Ok(tok) => {
         let _ = os.Setenv("LLL_TOKEN", tok)
         refresh = Some(|| superuser_token(db_url, email, pass))
-        fmt.Println("auth   rules are authenticated-only; this process's PocketBase calls (seeding, the board) ride the superuser token, re-minted if refused")
+        fmt.Println(
+          "auth   rules are authenticated-only; this process's PocketBase calls (seeding, the board) ride the superuser token, re-minted if refused",
+        )
       },
       Err(e) => {
         return Err(
@@ -214,7 +238,7 @@ It also needs to know who you are. On first boot 'me' is guessed from $USER,
 written to ~/.config/lll/lll.toml and seeded as a member so assignment and
 comments work straight away — no second prompt. It goes to the home config,
 not the repo's, because the repo's file is committed. That guess is wrong on
-a shared machine: 'lll config set me <name>' fixes it."
+a shared machine: 'lll config set me <name>' fixes it.",
   )
 }
 
@@ -225,9 +249,7 @@ a shared machine: 'lll config set me <name>' fixes it."
 /// (stdin is not a terminal: scripts, agents, CI) means no boot.
 fn ensure_team(want: string) -> Result<string, string> {
   if want != "" {
-    if let Some(t) = find_team(want)? {
-      return Ok(t.key)
-    }
+    if let Some(t) = find_team(want)? { return Ok(t.key) }
     // Another lll up pointed at the same fresh server may create the team
     // between our find and our create; the unique index rejects the loser,
     // and the loser re-looks-up whoever won rather than failing the boot
@@ -238,9 +260,7 @@ fn ensure_team(want: string) -> Result<string, string> {
         return Ok(created.key)
       },
       Err(_) => {
-        if let Some(t) = find_team(want)? {
-          return Ok(t.key)
-        }
+        if let Some(t) = find_team(want)? { return Ok(t.key) }
         return Err(f"could not create team '{want}' and none exists to reuse")
       },
     }
@@ -255,7 +275,9 @@ fn ensure_team(want: string) -> Result<string, string> {
   if existing.is_none() {
     match create_team(key, key) {
       Ok(created) => {
-        let _ = fmt.Println(f"created team {created.key} — issues will be {created.key}-1, {created.key}-2, ...")
+        let _ = fmt.Println(
+          f"created team {created.key} — issues will be {created.key}-1, {created.key}-2, ...",
+        )
       },
       Err(_) => {
         let existing = find_team(key)?
@@ -343,7 +365,7 @@ fn clean_key(raw: string) -> string {
 
 fn healthy(base_url: string) -> bool {
   // Bounded: a non-PB listener on the port must fail fast, not hang us.
-  let mut client = http.Client { Timeout: 2 * time.Second, .. }
+  let client = http.Client { Timeout: 2 * time.Second, .. }
   let Ok(resp) = client.Get(f"{base_url}/api/health") else {
     return false
   }
@@ -376,26 +398,27 @@ fn port_of(base_url: string, fallback: int) -> int {
 }
 
 #[json]
-struct AuthRequest {
-  identity: string,
-  password: string,
-}
+struct AuthRequest { identity: string, password: string }
 
 #[json]
-struct AuthToken {
-  token: string,
-}
+struct AuthToken { token: string }
 
 /// Authenticate as the PocketBase superuser and return the auth token.
 /// The same credentials Serve upserted, through PocketBase's own
 /// auth-with-password endpoint — the admin API, not a shortcut past the
 /// rules, so what the boot does is exactly what a member with a token does.
-fn superuser_token(base: string, email: string, pass: string) -> Result<string, string> {
-  let payload = match json.Marshal(AuthRequest { identity: email, password: pass }) {
+fn superuser_token(
+  base: string,
+  email: string,
+  pass: string,
+) -> Result<string, string> {
+  let payload = match json.Marshal(
+    AuthRequest { identity: email, password: pass },
+  ) {
     Ok(b) => b,
     Err(e) => return Err(f"encoding credentials: {e}"),
   }
-  let req = match http.NewRequest(
+  let mut req = match http.NewRequest(
     "POST",
     base + "/api/collections/_superusers/auth-with-password",
     bytes.NewReader(payload),
@@ -403,7 +426,11 @@ fn superuser_token(base: string, email: string, pass: string) -> Result<string, 
     Ok(r) => r,
     Err(e) => return Err(f"building the request: {e}"),
   }
-  req.Header.Set("Content-Type", "application/json")
+  // NewRequest always populates Header; the unwrap is the Option field's toll.
+  if let Some(h) = req.Header {
+    let mut h = h
+    h.Set("Content-Type", "application/json")
+  }
   let resp = match http.DefaultClient.Do(req) {
     Ok(r) => r,
     Err(e) => return Err(f"{e}"),
@@ -417,15 +444,11 @@ fn superuser_token(base: string, email: string, pass: string) -> Result<string, 
     Partial.Both(b, _) => b,
     Partial.Err(e) => return Err(f"reading response: {e}"),
   }
-  if resp.StatusCode >= 300 {
-    return Err(f"{resp.Status}: {body as string}")
-  }
+  if resp.StatusCode >= 300 { return Err(f"{resp.Status}: {body as string}") }
   let mut out = AuthToken { .. }
   if let Err(e) = json.Unmarshal(body, &out) {
     return Err(f"decoding the auth response: {e}")
   }
-  if out.token == "" {
-    return Err("the response carried no token")
-  }
+  if out.token == "" { return Err("the response carried no token") }
   Ok(out.token)
 }

@@ -26,12 +26,16 @@ pub fn get(path: string) -> Result<string, string> {
 /// GET a path and decode the JSON body into `out`, naming `what` in the
 /// decode error ("decoding issues: ...").
 ///
-/// The out-parameter is forced, not chosen. Lisette 0.11.3 has generic
+/// The out-parameter is forced, not chosen. Lisette (still true in 0.12.0) has generic
 /// functions, but a type parameter cannot be *constructed*: `T { .. }` inside
 /// a generic body fails to resolve. So the tidier `fetch<T>(path) ->
 /// Result<T, string>` is not expressible, and the caller declares the zero
 /// value it wants filled.
-pub fn fetch<T>(path: string, what: string, out: Ref<T>) -> Result<(), string> {
+pub fn fetch<T>(
+  path: string,
+  what: string,
+  out: mut Ref<T>,
+) -> Result<(), string> {
   let body = get(path)?
   if let Err(e) = json.Unmarshal(body.bytes(), out) {
     return Err(f"decoding {what}: {e}")
@@ -70,7 +74,11 @@ pub fn get_as(path: string, tok: string) -> Result<string, string> {
 }
 
 /// POST riding `tok` instead of the configured token (impersonation).
-pub fn post_as(path: string, payload: string, tok: string) -> Result<string, string> {
+pub fn post_as(
+  path: string,
+  payload: string,
+  tok: string,
+) -> Result<string, string> {
   let cfg = config.load()?
   request(cfg.url, "POST", path, payload, bearer(tok))
 }
@@ -100,7 +108,7 @@ fn request(
   payload: string,
   auth: string,
 ) -> Result<string, string> {
-  let req = match http.NewRequest(
+  let mut req = match http.NewRequest(
     method,
     base + path,
     bytes.NewReader(payload.bytes()),
@@ -108,11 +116,12 @@ fn request(
     Ok(r) => r,
     Err(e) => return Err(f"{method} {path}: {e}"),
   }
-  if payload != "" {
-    req.Header.Set("Content-Type", "application/json")
-  }
-  if auth != "" {
-    req.Header.Set("Authorization", auth)
+  // http.NewRequest always populates Header, so None cannot happen; the
+  // unwrap is the Option<Header> field type's toll, not a real branch.
+  if let Some(h) = req.Header {
+    let mut h = h
+    if payload != "" { h.Set("Content-Type", "application/json") }
+    if auth != "" { h.Set("Authorization", auth) }
   }
   let resp = match http.DefaultClient.Do(req) {
     Ok(r) => r,

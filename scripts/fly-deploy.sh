@@ -15,7 +15,7 @@ trap 'rm -rf "$CTX"' EXIT
 git archive HEAD | tar -x -C "$CTX"
 
 echo "emitting Go into the deploy context..."
-(cd "$CTX" && lis emit >/dev/null)
+(cd "$CTX" && bash scripts/lis-typedefs-workaround.sh && lis emit >/dev/null)
 
 # relative replace paths: the container's module lives at /src/target, the
 # path deps at /src/gopb and /src/web.

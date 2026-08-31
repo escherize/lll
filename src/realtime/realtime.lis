@@ -40,11 +40,11 @@ impl FrameParser {
   /// Feed one line. Returns the completed frame at a blank-line delimiter,
   /// None otherwise. Comment lines (leading ':') and fields other than
   /// event/data (id, retry) are ignored; a stray blank line yields nothing.
-  pub fn push_line(self: Ref<FrameParser>, raw: string) -> Option<Frame> {
+  pub fn push_line(self: mut Ref<FrameParser>, raw: string) -> Option<Frame> {
     let line = strings.TrimSuffix(raw, "\r")
     if line == "" {
       if self.event == "" && self.data.is_empty() { return None }
-      let frame = Frame { 
+      let frame = Frame {
         event: self.event,
         data: strings.Join(self.data, "\n"),
       }
@@ -92,7 +92,11 @@ struct TopicOptions { query: OptionsQuery }
 /// The "query" wrapper is load-bearing: PB silently ignores a bare
 /// {"filter":...} object (verified against PB 0.40.1 — no error, no
 /// filtering). Empty filter and expand return the topic unchanged.
-pub fn topic_with_options(topic: string, filter: string, expand: string) -> Result<string, string> {
+pub fn topic_with_options(
+  topic: string,
+  filter: string,
+  expand: string,
+) -> Result<string, string> {
   if filter == "" && expand == "" { return Ok(topic) }
   let options = TopicOptions { query: OptionsQuery { filter, expand } }
   let encoded = match json.Marshal(options) {
@@ -151,7 +155,7 @@ pub fn subscribe(
   refresh: Option<fn() -> Result<string, string>>,
 ) -> Result<Channel<Event>, string> {
   let ch = Channel.new<Event>()
-  let reader = connect(base_url, topics)?
+  let mut reader = connect(base_url, topics)?
   task {
     pump(reader, ch)
     reconnect(base_url, topics, refresh, ch)
@@ -191,7 +195,9 @@ fn reconnect(
           if let Some(mint) = refresh {
             if let Ok(tok) = mint() {
               let _ = os.Setenv("LLL_TOKEN", tok)
-              fmt.Println("realtime: re-minted the PocketBase token after an auth failure")
+              fmt.Println(
+                "realtime: re-minted the PocketBase token after an auth failure",
+              )
             }
           }
         }
@@ -204,7 +210,8 @@ fn reconnect(
 /// errors are "GET|POST /api/realtime: <status>", so matching the path plus
 /// code cannot confuse a port number for a status.
 fn auth_failure(e: string) -> bool {
-  strings.Contains(e, "/api/realtime: 401") || strings.Contains(e, "/api/realtime: 403")
+  strings.Contains(e, "/api/realtime: 401") ||
+  strings.Contains(e, "/api/realtime: 403")
 }
 
 /// Open the SSE stream, wait for PB_CONNECT, and POST the subscriptions.
@@ -215,10 +222,13 @@ fn auth_failure(e: string) -> bool {
 /// from the connect request (apis/realtime.go reads the standard
 /// Authorization header), and the subscription POST must present the same
 /// identity or the upgrade from guest is refused.
-fn connect(base_url: string, topics: Slice<string>) -> Result<Ref<bufio.Reader>, string> {
+fn connect(
+  base_url: string,
+  topics: Slice<string>,
+) -> Result<mut Ref<bufio.Reader>, string> {
   let cfg = config.load()?
   let auth = pb.bearer(cfg.token)
-  let req = match http.NewRequest(
+  let mut req = match http.NewRequest(
     "GET",
     base_url + "/api/realtime",
     bytes.NewReader("".bytes()),
@@ -227,7 +237,11 @@ fn connect(base_url: string, topics: Slice<string>) -> Result<Ref<bufio.Reader>,
     Err(e) => return Err(f"GET /api/realtime: {e}"),
   }
   if auth != "" {
-    req.Header.Set("Authorization", auth)
+    // NewRequest always populates Header; the unwrap is the Option field's toll.
+    if let Some(h) = req.Header {
+      let mut h = h
+      h.Set("Authorization", auth)
+    }
   }
   let resp = match http.DefaultClient.Do(req) {
     Ok(r) => r,
@@ -241,7 +255,7 @@ fn connect(base_url: string, topics: Slice<string>) -> Result<Ref<bufio.Reader>,
     return Err(f"GET /api/realtime: {resp.Status}")
   }
 
-  let reader = bufio.NewReader(stream)
+  let mut reader = bufio.NewReader(stream)
   let mut parser = FrameParser.new()
   let mut client_id = ""
   while client_id == "" {
@@ -266,7 +280,7 @@ fn connect(base_url: string, topics: Slice<string>) -> Result<Ref<bufio.Reader>,
     Ok(b) => b,
     Err(e) => return Err(f"encoding subscription: {e}"),
   }
-  let sub_req = match http.NewRequest(
+  let mut sub_req = match http.NewRequest(
     "POST",
     base_url + "/api/realtime",
     bytes.NewReader(payload),
@@ -274,9 +288,11 @@ fn connect(base_url: string, topics: Slice<string>) -> Result<Ref<bufio.Reader>,
     Ok(r) => r,
     Err(e) => return Err(f"POST /api/realtime: {e}"),
   }
-  sub_req.Header.Set("Content-Type", "application/json")
-  if auth != "" {
-    sub_req.Header.Set("Authorization", auth)
+  // NewRequest always populates Header; the unwrap is the Option field's toll.
+  if let Some(h) = sub_req.Header {
+    let mut h = h
+    h.Set("Content-Type", "application/json")
+    if auth != "" { h.Set("Authorization", auth) }
   }
   let sub_resp = match http.DefaultClient.Do(sub_req) {
     Ok(r) => r,
@@ -292,7 +308,7 @@ fn connect(base_url: string, topics: Slice<string>) -> Result<Ref<bufio.Reader>,
 /// Forward record events from an established stream into the channel.
 /// Returns when the stream errors; the caller reconnects. The dead
 /// connection's stream is abandoned (its socket is already gone).
-fn pump(reader: Ref<bufio.Reader>, ch: Channel<Event>) {
+fn pump(reader: mut Ref<bufio.Reader>, ch: Channel<Event>) {
   let mut parser = FrameParser.new()
   loop {
     let line = match reader.ReadString('\n') {

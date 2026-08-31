@@ -1,9 +1,9 @@
 import "go:bufio"
 import "go:encoding/json"
 import "go:fmt"
+import "go:golang.org/x/term"
 import "go:os"
 import "go:strings"
-import "go:golang.org/x/term"
 
 import "config"
 import "flags"
@@ -17,8 +17,21 @@ import "pb"
 
 fn login_spec() -> Slice<flags.Flag> {
   [
-    flags.Flag { name: "--email", alias: "-e", value: true, hint: "email", help: "member email; omit to be prompted", .. },
-    flags.Flag { name: "--help", alias: "-h", hidden: true, help: "show this help", .. },
+    flags.Flag {
+      name: "--email",
+      alias: "-e",
+      value: true,
+      hint: "email",
+      help: "member email; omit to be prompted",
+      ..,
+    },
+    flags.Flag {
+      name: "--help",
+      alias: "-h",
+      hidden: true,
+      help: "show this help",
+      ..,
+    },
   ]
 }
 
@@ -39,7 +52,7 @@ pub fn login(args: Slice<string>) -> Result<(), string> {
 
   // One reader for the whole flow: a second bufio.Reader would race the
   // first's read-ahead and could lose the password line behind the email.
-  let input = bufio.NewReader(os.Stdin)
+  let mut input = bufio.NewReader(os.Stdin)
   let mut email = p.one("--email")
   if email == "" {
     fmt.Print("Email: ")
@@ -50,11 +63,11 @@ pub fn login(args: Slice<string>) -> Result<(), string> {
     return Err("no email — pass --email <email> or answer the prompt")
   }
   let password = read_password(input)?
-  if password == "" {
-    return Err("empty password")
-  }
+  if password == "" { return Err("empty password") }
 
-  let payload = match json.Marshal(models.AuthRequest { identity: email, password }) {
+  let payload = match json.Marshal(
+    models.AuthRequest { identity: email, password },
+  ) {
     Ok(b) => b,
     Err(e) => return Err(f"encoding credentials: {e}"),
   }
@@ -71,9 +84,7 @@ pub fn login(args: Slice<string>) -> Result<(), string> {
   if let Err(e) = json.Unmarshal(body.bytes(), &auth) {
     return Err(f"decoding the auth response: {e}")
   }
-  if auth.token == "" {
-    return Err("the response carried no token")
-  }
+  if auth.token == "" { return Err("the response carried no token") }
 
   // The home config, never the repo's: .lll.toml is committed (TASK-168) and
   // a token must not travel with it. The value is written here and printed
@@ -113,7 +124,7 @@ pub fn logout(args: Slice<string>) -> Result<(), string> {
 /// so it never lands in scrollback; as a plain line otherwise, because piped
 /// input (scripts, agents, e2e) has nothing to hide it from. The newline is
 /// not part of the password on either path.
-fn read_password(input: Ref<bufio.Reader>) -> Result<string, string> {
+fn read_password(input: mut Ref<bufio.Reader>) -> Result<string, string> {
   fmt.Print("Password: ")
   let fd = os.Stdin.Fd() as int
   if term.IsTerminal(fd) {
@@ -131,7 +142,7 @@ fn read_password(input: Ref<bufio.Reader>) -> Result<string, string> {
 
 /// One line from stdin, EOL stripped. Partial.Both (data, then EOF with no
 /// newline) is an answer too — `printf 'pw' | lll login` ships one.
-fn read_line(input: Ref<bufio.Reader>) -> Result<string, string> {
+fn read_line(input: mut Ref<bufio.Reader>) -> Result<string, string> {
   let newline = 10 as byte
   match input.ReadString(newline) {
     Partial.Ok(line) => Ok(strip_eol(line)),

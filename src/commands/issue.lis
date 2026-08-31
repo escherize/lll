@@ -91,7 +91,7 @@ fn issue_create_spec() -> Slice<flags.Flag> {
       hint: "\"title\"",
       required: true,
       help: "title of the issue",
-      ..
+      ..,
     },
     flags.Flag {
       name: "-d",
@@ -99,28 +99,28 @@ fn issue_create_spec() -> Slice<flags.Flag> {
       value: true,
       hint: "desc",
       help: "description ('-d -' reads it from stdin)",
-      ..
+      ..,
     },
     flags.Flag {
       name: "--emoji",
       value: true,
       hint: "X",
       help: "one emoji for the issue, shown on the card, the issue page and\nthe list; pass \"\" to clear it",
-      ..
+      ..,
     },
     flags.Flag {
       name: "--priority",
       value: true,
       hint: "0-4",
       help: "0 none, 1 urgent (!!!), 2 high (!!), 3 medium (!), 4 low (·)",
-      ..
+      ..,
     },
     flags.Flag {
       name: "--assignee",
       value: true,
       hint: "name",
       help: "member name (see 'lll member list'); filters on list",
-      ..
+      ..,
     },
     flags.Flag {
       name: "--label",
@@ -128,19 +128,19 @@ fn issue_create_spec() -> Slice<flags.Flag> {
       hint: "name",
       repeat: true,
       help: "label name (see 'lll label list'); repeatable on create/update\n(update replaces the set); filters on list",
-      ..
+      ..,
     },
     flags.Flag {
       name: "--project",
       value: true,
       hint: "name",
       help: "project name (see 'lll project list'); filters on list",
-      ..
+      ..,
     },
     flags.Flag {
       name: "--json",
       help: "raw PocketBase JSON (team, assignee, labels, project\nexpanded), pipe-friendly",
-      ..
+      ..,
     },
   ]
 }
@@ -152,14 +152,14 @@ fn issue_list_spec() -> Slice<flags.Flag> {
       value: true,
       hint: "s",
       help: "one of: backlog, todo, in-progress, in-review, done, cancelled",
-      ..
+      ..,
     },
     flags.Flag {
       name: "--assignee",
       value: true,
       hint: "name",
       help: "member name (see 'lll member list'); filters on list",
-      ..
+      ..,
     },
     flags.Flag {
       name: "--label",
@@ -167,40 +167,40 @@ fn issue_list_spec() -> Slice<flags.Flag> {
       hint: "name",
       repeat: true,
       help: "label name (see 'lll label list'); repeatable on create/update\n(update replaces the set); filters on list",
-      ..
+      ..,
     },
     flags.Flag {
       name: "--project",
       value: true,
       hint: "name",
       help: "project name (see 'lll project list'); filters on list",
-      ..
+      ..,
     },
     flags.Flag {
       name: "--search",
       value: true,
       hint: "q",
       help: "list only issues whose title contains q",
-      ..
+      ..,
     },
     flags.Flag {
       name: "--sort",
       value: true,
       hint: "f",
       help: "created, updated, priority, or number; prefix - for descending\n(default: LLL_SORT or 'sort' in .lll.toml, else created)",
-      ..
+      ..,
     },
     flags.Flag {
       name: "--limit",
       value: true,
       hint: "N",
       help: "list at most N issues (positive integer)",
-      ..
+      ..,
     },
     flags.Flag {
       name: "--json",
       help: "raw PocketBase JSON (team, assignee, labels, project\nexpanded), pipe-friendly",
-      ..
+      ..,
     },
   ]
 }
@@ -210,17 +210,17 @@ fn issue_view_spec() -> Slice<flags.Flag> {
     flags.Flag {
       name: "--json",
       help: "raw PocketBase JSON (team, assignee, labels, project\nexpanded), pipe-friendly",
-      ..
+      ..,
     },
     flags.Flag {
       name: "--raw",
       help: "print the issue as plain markdown (view)",
-      ..
+      ..,
     },
     flags.Flag {
       name: "-w",
       help: "open the issue's web page in the browser (view)",
-      ..
+      ..,
     },
   ]
 }
@@ -232,21 +232,21 @@ fn issue_update_spec() -> Slice<flags.Flag> {
       value: true,
       hint: "s",
       help: "one of: backlog, todo, in-progress, in-review, done, cancelled",
-      ..
+      ..,
     },
     flags.Flag {
       name: "--priority",
       value: true,
       hint: "0-4",
       help: "0 none, 1 urgent (!!!), 2 high (!!), 3 medium (!), 4 low (·)",
-      ..
+      ..,
     },
     flags.Flag {
       name: "--assignee",
       value: true,
       hint: "name",
       help: "member name (see 'lll member list'); filters on list",
-      ..
+      ..,
     },
     flags.Flag {
       name: "--label",
@@ -254,35 +254,35 @@ fn issue_update_spec() -> Slice<flags.Flag> {
       hint: "name",
       repeat: true,
       help: "label name (see 'lll label list'); repeatable on create/update\n(update replaces the set); filters on list",
-      ..
+      ..,
     },
     flags.Flag {
       name: "--project",
       value: true,
       hint: "name",
       help: "project name (see 'lll project list'); filters on list",
-      ..
+      ..,
     },
     flags.Flag {
       name: "--title",
       value: true,
       hint: "t",
       help: "new title (update)",
-      ..
+      ..,
     },
     flags.Flag {
       name: "--description",
       value: true,
       hint: "d",
       help: "new description (update; '-d -' reads it from stdin)",
-      ..
+      ..,
     },
     flags.Flag {
       name: "--emoji",
       value: true,
       hint: "e",
       help: "one emoji for the issue, shown on the card, the issue page and\nthe list; pass \"\" to clear it",
-      ..
+      ..,
     },
   ]
 }
@@ -298,7 +298,7 @@ fn issue_comment_spec() -> Slice<flags.Flag> {
       value: true,
       hint: "\"body\"",
       help: "comment body ('-b -' reads it from stdin)",
-      ..
+      ..,
     },
   ]
 }
@@ -308,7 +308,7 @@ pub fn issue_watch_spec() -> Slice<flags.Flag> {
     flags.Flag {
       name: "--json",
       help: "NDJSON: one raw PocketBase event object per line, with a\n\"topic\" field added",
-      ..
+      ..,
     },
   ]
 }
@@ -545,7 +545,9 @@ fn list(args: Slice<string>) -> Result<(), string> {
   if label_name != "" { label_id = resolve_label(team_id, label_name)?.id }
 
   let mut project_id = ""
-  if project_name != "" { project_id = resolve_project(team_id, project_name)?.id }
+  if project_name != "" {
+    project_id = resolve_project(team_id, project_name)?.id
+  }
 
   let mut sort_spec = sort_flag
   if sort_spec == "" { sort_spec = cfg.sort }
@@ -582,7 +584,7 @@ fn list(args: Slice<string>) -> Result<(), string> {
 /// The standard issue table (ID, state, priority, title, assignee, age),
 /// shared by `issue list` and `project view`.
 fn print_issue_table(issues: Slice<models.Issue>) -> Result<(), string> {
-  let w = tabwriter.NewWriter(os.Stdout, 0, 4, 2, ' ', 0)
+  let mut w = tabwriter.NewWriter(os.Stdout, 0, 4, 2, ' ', 0)
   for item in issues {
     let key = item.expand.team.key
     // The marker goes last. tabwriter measures a cell in runes while a
@@ -642,7 +644,9 @@ fn view(args: Slice<string>) -> Result<(), string> {
       for cm in comments {
         let mut author = cm.expand.author.name
         if author == "" { author = "ghost" }
-        fmt.Println(f"- **{author}** ({display.relative(cm.created)}): {cm.body}")
+        fmt.Println(
+          f"- **{author}** ({display.relative(cm.created)}): {cm.body}",
+        )
       }
     }
     print_findings_raw(full)?
@@ -943,7 +947,7 @@ fn delete_issue(args: Slice<string>) -> Result<(), string> {
   let label = f"{issue.expand.team.key}-{issue.number}"
   if !force {
     fmt.Print(f"delete {label}? [y/N] ")
-    let scanner = bufio.NewScanner(os.Stdin)
+    let mut scanner = bufio.NewScanner(os.Stdin)
     let mut answer = ""
     if scanner.Scan() { answer = strings.TrimSpace(scanner.Text()) }
     let a = strings.ToLower(answer)
@@ -1043,7 +1047,7 @@ fn pr_cmd(args: Slice<string>) -> Result<(), string> {
   let mut body = issue_url(issue)?
   if issue.description != "" { body = f"{body}\n\n{issue.description}" }
 
-  let cmd = exec.Command(
+  let mut cmd = exec.Command(
     gh,
     "pr",
     "create",
