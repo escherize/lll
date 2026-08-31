@@ -298,6 +298,9 @@ fn assignee_write(r: Ref<http.Request>) -> Result<string, string> {
 /// everything posts no labels at all, which is the way back to none.
 fn labels_write(r: Ref<http.Request>) -> Result<string, string> {
   let key = r.FormValue("key")
+  if key == "" {
+    return Err("labels_write got no issue key — reload the page; if it keeps happening, this is a bug in the labels form")
+  }
   // The issue first, for its team: a label from another team is as unknown
   // here as a deleted one, which is what stops a POST crossing tenancy
   // however the checkbox got its id (TASK-173).

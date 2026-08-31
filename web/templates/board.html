@@ -92,8 +92,8 @@ provenance.
 {{define "card"}}<a class="card" id="issue-{{.Id}}" href="/issue/{{.Key}}" draggable="true" data-search="{{.Key}} {{.Title}}{{range .Labels}} {{.Name}}{{end}}{{if .Assignee}} {{.Assignee}}{{end}}" data-fkeys="|state:{{.State}}|prio:{{.Prio}}{{if .Assignee}}|assignee:{{.Assignee}}{{end}}{{range .Labels}}|label:{{.Name}}{{end}}|" data-show="(!$search || el.dataset.search.toLowerCase().includes($search.toLowerCase())) && $flt.every(f => el.dataset.fkeys.includes('|' + f + '|'))" data-on:dragstart="evt.dataTransfer.setData('text/plain', '{{.Key}}'); evt.dataTransfer.effectAllowed = 'move'" data-on:dragend="document.querySelectorAll('.card.drop-before').forEach(c => c.classList.remove('drop-before')); document.querySelectorAll('.column.drop-end').forEach(c => c.classList.remove('drop-end'))">
 <span class="row1">{{.Key}}{{if .Emoji}}<span class="emoji">{{.Emoji}}</span>{{end}}<span class="flex"></span>{{template "priority-icon" .Prio}}</span>
 <span class="title">{{.Title}}</span>
-{{if or .Labels .Assignee}}<span class="row3">{{range .Labels}}<span class="chip"><span class="dot" style="background:{{if .Color}}{{.Color}}{{else}}var(--text-3){{end}}"></span>{{.Name}}</span>{{end}}{{template "avatar" .Avatar}}</span>{{end}}
-<span class="row4"><span class="age">{{.Created}}</span></span>
+{{if .Labels}}<span class="row3">{{range .Labels}}<span class="chip"><span class="dot" style="background:{{if .Color}}{{.Color}}{{else}}var(--text-3){{end}}"></span>{{.Name}}</span>{{end}}</span>{{end}}
+<span class="row4"><span class="age">{{.Created}}</span>{{if .Assignee}}{{template "avatar" .Avatar}}{{end}}</span>
 {{/* Hover preview: pure CSS (:hover + transition-delay), no data-show — the
      card's data-show is taken by search/filters. Docked position:fixed
      escapes the column's overflow clipping; pointer-events:none keeps
