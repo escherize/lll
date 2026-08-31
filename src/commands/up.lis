@@ -1,6 +1,9 @@
 import "go:bufio"
+import "go:bytes"
+import "go:encoding/json"
 import "go:fmt"
 import "go:github.com/escherize/lll/gopb"
+import "go:io"
 import "go:net"
 import "go:net/http"
 import "go:os"
@@ -63,16 +66,20 @@ pub fn up(args: Slice<string>) -> Result<(), string> {
   let cfg = config.load()?
   let mut db_url = cfg.url
   let mut admin_line = f"admin  {db_url}/_/  (already running)"
+
+  // The superuser identity: upserted on a fresh boot, and used for the
+  // process token further down. The printed default keeps `lll up` from
+  // ever showing PocketBase's install wizard.
+  let mut email = os.Getenv("LLL_ADMIN_EMAIL")
+  let mut pass = os.Getenv("LLL_ADMIN_PASSWORD")
+  if email == "" || pass == "" {
+    email = "admin@local.dev"
+    pass = "admin-local-123"
+  }
+
   if !healthy(db_url) {
     let db_port = free_port(port_of(db_url, 8090))
     db_url = f"http://127.0.0.1:{db_port}"
-
-    let mut email = os.Getenv("LLL_ADMIN_EMAIL")
-    let mut pass = os.Getenv("LLL_ADMIN_PASSWORD")
-    if email == "" || pass == "" {
-      email = "admin@local.dev"
-      pass = "admin-local-123"
-    }
 
     task {
       match gopb.Serve(
@@ -110,6 +117,29 @@ pub fn up(args: Slice<string>) -> Result<(), string> {
       )
     }
     admin_line = f"admin  {db_url}/_/  {email} / {pass}"
+  }
+  // TASK-181: PocketBase's collection rules refuse unauthenticated requests
+  // now, so the boot's seeding (team, member) and the board's own writes
+  // both need a token. A caller-provided LLL_TOKEN — a member token — wins;
+  // otherwise this process defaults to the superuser token, which the
+  // credentials above can always get. The board's browser cannot
+  // authenticate yet: its writes are server-side, and TASK-182 replaces the
+  // process-wide default with per-session member tokens.
+  if cfg.token == "" {
+    match superuser_token(db_url, email, pass) {
+      Ok(tok) => {
+        let _ = os.Setenv("LLL_TOKEN", tok)
+        fmt.Println("auth   rules are authenticated-only; this process's PocketBase calls (seeding, the board) use the superuser token until TASK-182")
+      },
+      Err(e) => {
+        return Err(
+          f"could not authenticate as the PocketBase superuser at {db_url}: {e}
+collection rules now refuse unauthenticated requests, so the boot cannot even
+create its team. Point LLL_ADMIN_EMAIL/LLL_ADMIN_PASSWORD at this server's
+superuser credentials, or set LLL_TOKEN to a member token.",
+        )
+      },
+    }
   }
 
   // The in-process board (and its PB client) must talk to the db we chose.
@@ -333,4 +363,59 @@ fn port_of(base_url: string, fallback: int) -> int {
     return fallback
   }
   p
+}
+
+#[json]
+struct AuthRequest {
+  identity: string,
+  password: string,
+}
+
+#[json]
+struct AuthToken {
+  token: string,
+}
+
+/// Authenticate as the PocketBase superuser and return the auth token.
+/// The same credentials Serve upserted, through PocketBase's own
+/// auth-with-password endpoint — the admin API, not a shortcut past the
+/// rules, so what the boot does is exactly what a member with a token does.
+fn superuser_token(base: string, email: string, pass: string) -> Result<string, string> {
+  let payload = match json.Marshal(AuthRequest { identity: email, password: pass }) {
+    Ok(b) => b,
+    Err(e) => return Err(f"encoding credentials: {e}"),
+  }
+  let req = match http.NewRequest(
+    "POST",
+    base + "/api/collections/_superusers/auth-with-password",
+    bytes.NewReader(payload),
+  ) {
+    Ok(r) => r,
+    Err(e) => return Err(f"building the request: {e}"),
+  }
+  req.Header.Set("Content-Type", "application/json")
+  let resp = match http.DefaultClient.Do(req) {
+    Ok(r) => r,
+    Err(e) => return Err(f"{e}"),
+  }
+  let Some(stream) = resp.Body else {
+    return Err("empty response body")
+  }
+  defer stream.Close()
+  let body = match io.ReadAll(stream) {
+    Partial.Ok(b) => b,
+    Partial.Both(b, _) => b,
+    Partial.Err(e) => return Err(f"reading response: {e}"),
+  }
+  if resp.StatusCode >= 300 {
+    return Err(f"{resp.Status}: {body as string}")
+  }
+  let mut out = AuthToken { .. }
+  if let Err(e) = json.Unmarshal(body, &out) {
+    return Err(f"decoding the auth response: {e}")
+  }
+  if out.token == "" {
+    return Err("the response carried no token")
+  }
+  Ok(out.token)
 }

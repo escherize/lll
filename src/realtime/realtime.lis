@@ -6,6 +6,7 @@ import "go:net/url"
 import "go:strings"
 import "go:time"
 
+import "config"
 import "pb"
 
 /// A record event from a PocketBase realtime stream. `topic` is the
@@ -146,8 +147,27 @@ pub fn subscribe(base_url: string, topics: Slice<string>) -> Result<Channel<Even
 
 /// Open the SSE stream, wait for PB_CONNECT, and POST the subscriptions.
 /// Returns a reader positioned at the first record event.
+///
+/// Both requests carry the configured token: the rules make every topic
+/// authenticated-only now, PocketBase derives the client's authorization
+/// from the connect request (apis/realtime.go reads the standard
+/// Authorization header), and the subscription POST must present the same
+/// identity or the upgrade from guest is refused.
 fn connect(base_url: string, topics: Slice<string>) -> Result<Ref<bufio.Reader>, string> {
-  let resp = match http.Get(base_url + "/api/realtime") {
+  let cfg = config.load()?
+  let auth = pb.bearer(cfg.token)
+  let req = match http.NewRequest(
+    "GET",
+    base_url + "/api/realtime",
+    bytes.NewReader("".bytes()),
+  ) {
+    Ok(r) => r,
+    Err(e) => return Err(f"GET /api/realtime: {e}"),
+  }
+  if auth != "" {
+    req.Header.Set("Authorization", auth)
+  }
+  let resp = match http.DefaultClient.Do(req) {
     Ok(r) => r,
     Err(e) => return Err(pb.unreachable(base_url, e)),
   }
@@ -184,11 +204,19 @@ fn connect(base_url: string, topics: Slice<string>) -> Result<Ref<bufio.Reader>,
     Ok(b) => b,
     Err(e) => return Err(f"encoding subscription: {e}"),
   }
-  let sub_resp = match http.Post(
+  let sub_req = match http.NewRequest(
+    "POST",
     base_url + "/api/realtime",
-    "application/json",
     bytes.NewReader(payload),
   ) {
+    Ok(r) => r,
+    Err(e) => return Err(f"POST /api/realtime: {e}"),
+  }
+  sub_req.Header.Set("Content-Type", "application/json")
+  if auth != "" {
+    sub_req.Header.Set("Authorization", auth)
+  }
+  let sub_resp = match http.DefaultClient.Do(sub_req) {
     Ok(r) => r,
     Err(e) => return Err(pb.unreachable(base_url, e)),
   }

@@ -68,6 +68,44 @@ assert_not_contains() { # haystack needle label
 $1" || true
 }
 
+# --- TASK-181: every collection rule is authenticated-only now --------------
+# PocketBase answers nothing useful to a tokenless request, so every suite
+# drives the server with a member token. pb_superuser_token is the admin API
+# (the credentials `lll up` prints and upserts); pb_member_token runs the
+# same auth-with-password round trip a human login does: find-or-create a
+# member whose password the suite knows, then exchange identity+password for
+# the member token the CLI itself sends as LLL_TOKEN.
+pb_superuser_token() { # url
+  curl -sf -X POST "$1/api/collections/_superusers/auth-with-password" \
+    -H 'Content-Type: application/json' \
+    -d '{"identity":"admin@local.dev","password":"admin-local-123"}' | jq -r '.token'
+}
+
+pb_member_token() { # url name email password -> prints the member token
+  local url=$1 name=$2 email=$3 pass=$4 atok id
+  atok=$(pb_superuser_token "$url")
+  [ -n "$atok" ] && [ "$atok" != "null" ] || return 1
+  id=$(curl -sf -G "$url/api/collections/members/records" \
+    --data-urlencode "filter=(name='$name')" -H "Authorization: Bearer $atok" \
+    | jq -r '(.items[0] // {}).id // ""')
+  if [ -z "$id" ]; then
+    id=$(curl -sf -X POST "$url/api/collections/members/records" \
+      -H 'Content-Type: application/json' -H "Authorization: Bearer $atok" \
+      -d "{\"name\":\"$name\",\"email\":\"$email\",\"password\":\"$pass\",\"passwordConfirm\":\"$pass\"}" \
+      | jq -r '.id // ""')
+  else
+    # Left over from an earlier run of this suite: reset to the known
+    # password so auth-with-password below always succeeds.
+    curl -sf -X PATCH "$url/api/collections/members/records/$id" \
+      -H 'Content-Type: application/json' -H "Authorization: Bearer $atok" \
+      -d "{\"password\":\"$pass\",\"passwordConfirm\":\"$pass\"}" >/dev/null
+  fi
+  [ -n "$id" ] && [ "$id" != "null" ] || return 1
+  curl -sf -X POST "$url/api/collections/members/auth-with-password" \
+    -H 'Content-Type: application/json' \
+    -d "{\"identity\":\"$email\",\"password\":\"$pass\"}" | jq -r '.token'
+}
+
 # A scratch DATA_DIR, a scratch E2E_HOME, and hermeticity: a developer's own
 # config must not leak into assertions. It is announced by name because the
 # reverse — a stray config quietly steering a run — once cost hours (TASK-143).

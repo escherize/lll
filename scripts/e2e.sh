@@ -53,19 +53,31 @@ cleanup() {
 }
 trap cleanup EXIT
 
+# --- TASK-181: the suite rides a member token --------------------------------
+# The rules refuse tokenless requests now, so bootstrap one before anything
+# else talks to PocketBase: the superuser API creates e2e-agent with a known
+# password, auth-with-password issues the member token, and every CLI verb
+# below inherits it through the environment. The direct curls further down
+# name the header explicitly, each with a reason.
+E2E_TOKEN=$(pb_member_token "$URL" e2e-agent e2e-agent@lll.test e2e-agent-pass-123) \
+  || fail "bootstrapping the e2e member token"
+[ -n "$E2E_TOKEN" ] && [ "$E2E_TOKEN" != "null" ] || fail "pb_member_token returned no token"
+export LLL_TOKEN="$E2E_TOKEN"
+AUTH_HDR="Authorization: Bearer $E2E_TOKEN"
+
 json_id() { python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])'; }
 
 # `lll up` created ENG with name "ENG"; create-or-fetch, then set the name the
 # assertions expect. Idempotent so the mid-suite restart cannot double-create.
 seed_team() { # key name -> prints the record id
   q=$(python3 -c 'import urllib.parse,sys; print(urllib.parse.quote(f"key=\x27{sys.argv[1]}\x27"))' "$1")
-  id=$(curl -sf "$URL/api/collections/teams/records?filter=$q" \
+  id=$(curl -sf -H "$AUTH_HDR" "$URL/api/collections/teams/records?filter=$q" \
        | python3 -c 'import json,sys; it=json.load(sys.stdin)["items"]; print(it[0]["id"] if it else "")')
   if [ -z "$id" ]; then
     # `lll up` seeds the configured team itself, concurrently. Losing that race
     # means a 400 on the unique key, which curl -sf swallows into an empty body
     # and json_id then chokes on. Whoever won, look it up again.
-    id=$(curl -sf -X POST "$URL/api/collections/teams/records" \
+    id=$(curl -sf -X POST -H "$AUTH_HDR" "$URL/api/collections/teams/records" \
       -H 'Content-Type: application/json' -d "{\"key\":\"$1\",\"name\":\"$2\"}" \
       | python3 -c 'import json,sys
 try: print(json.load(sys.stdin)["id"])
@@ -73,7 +85,7 @@ except Exception: print("")')
     for _ in 1 2 3 4 5; do
       [ -n "$id" ] && break
       sleep 0.2
-      id=$(curl -sf "$URL/api/collections/teams/records?filter=$q" \
+      id=$(curl -sf -H "$AUTH_HDR" "$URL/api/collections/teams/records?filter=$q" \
            | python3 -c 'import json,sys; it=json.load(sys.stdin)["items"]; print(it[0]["id"] if it else "")')
     done
     [ -n "$id" ] || fail "seeding team $1: neither create nor lookup produced an id"
@@ -84,9 +96,9 @@ except Exception: print("")')
   # 'team list has name' failed (seen on a loaded runner, twice in a row).
   named=""
   for _ in 1 2 3 4 5; do
-    curl -sf -X PATCH "$URL/api/collections/teams/records/$id" \
+    curl -sf -X PATCH -H "$AUTH_HDR" "$URL/api/collections/teams/records/$id" \
       -H 'Content-Type: application/json' -d "{\"name\":\"$2\"}" >/dev/null
-    named=$(curl -sf "$URL/api/collections/teams/records/$id" \
+    named=$(curl -sf -H "$AUTH_HDR" "$URL/api/collections/teams/records/$id" \
       | python3 -c 'import json,sys; print(json.load(sys.stdin)["name"])')
     [ "$named" = "$2" ] && break
     sleep 0.2
@@ -97,6 +109,50 @@ except Exception: print("")')
 ENG_ID=$(seed_team ENG Engineering)
 OPS_ID=$(seed_team OPS Operations)
 [ -n "$ENG_ID" ] && [ -n "$OPS_ID" ] || fail "seeding teams"
+
+# --- TASK-181: unauthenticated requests are refused, per verb ---------------
+# PocketBase applies rules as FILTERS, so the refusal codes are deliberate
+# and not all 401 (verified in v0.40.1 apis/record_crud.go): a guest listing
+# gets 200 with zero items — no existence leak; view/update/delete cannot
+# resolve the record, so 404; create fails the rule check, so 400. Whatever
+# shape the refusal takes, the property under test is: no data, no mutation.
+anon=$(curl -s "$URL/api/collections/issues/records")
+[ "$(printf '%s' "$anon" | jq '.items | length')" = 0 ] \
+  || fail "an unauthenticated issue list leaked records: $anon"
+code=$(curl -s -o /dev/null -w '%{http_code}' "$URL/api/collections/issues/records?perPage=1")
+[ "$code" = 200 ] || fail "unauthenticated list: expected 200-empty, got $code"
+code=$(curl -s -o /dev/null -w '%{http_code}' "$URL/api/collections/issues/records/$ENG_ID")
+[ "$code" = 404 ] || fail "unauthenticated view: expected 404, got $code"
+code=$(curl -s -o /dev/null -w '%{http_code}' -X POST \
+  "$URL/api/collections/issues/records" -H 'Content-Type: application/json' \
+  -d "{\"team\":\"$ENG_ID\",\"title\":\"anonymous create\",\"state\":\"todo\"}")
+[ "$code" = 400 ] || fail "unauthenticated create: expected 400, got $code"
+code=$(curl -s -o /dev/null -w '%{http_code}' -X PATCH \
+  "$URL/api/collections/issues/records/$ENG_ID" -H 'Content-Type: application/json' \
+  -d '{"title":"anonymous patch"}')
+[ "$code" = 404 ] || fail "unauthenticated update: expected 404, got $code"
+code=$(curl -s -o /dev/null -w '%{http_code}' -X DELETE \
+  "$URL/api/collections/issues/records/$ENG_ID")
+[ "$code" = 404 ] || fail "unauthenticated delete: expected 404, got $code"
+
+# The same sweep across every collection: a guest list comes back empty and
+# a guest create is refused. The browser-shaped version of this request —
+# what a page or script would fire at PocketBase directly — is the same
+# tokenless call, so it is covered by exactly this assertion.
+for coll in teams members projects labels issues comments docs views favorites claims; do
+  anon=$(curl -s "$URL/api/collections/$coll/records")
+  [ "$(printf '%s' "$anon" | jq '.items | length')" = 0 ] \
+    || fail "an unauthenticated list of $coll leaked records: $anon"
+  code=$(curl -s -o /dev/null -w '%{http_code}' -X POST \
+    "$URL/api/collections/$coll/records" -H 'Content-Type: application/json' -d '{}')
+  [ "$code" = 400 ] || fail "unauthenticated create on $coll: expected 400, got $code"
+done
+
+# The token flips every one of those answers: a member list is 200 with
+# whatever is there.
+code=$(curl -s -o /dev/null -w '%{http_code}' -H "$AUTH_HDR" \
+  "$URL/api/collections/issues/records?perPage=1")
+[ "$code" = 200 ] || fail "authenticated member list: expected 200, got $code"
 
 # --- create + list shows ENG-1 style identifier ---
 out=$(LLL_URL=$URL LLL_TEAM=ENG "$LIN" issue create -t "First engineering issue")
@@ -120,7 +176,7 @@ assert_contains "$out" "OPS-1" "list has OPS-1"
 assert_not_contains "$out" "OPS-2" "no OPS-2"
 
 # --- forged duplicate (team, number) rejected by unique index ---
-status=$(curl -s -o "$DATA_DIR/forged.json" -w '%{http_code}' \
+status=$(curl -s -o "$DATA_DIR/forged.json" -w '%{http_code}' -H "$AUTH_HDR" \
   -X POST "$URL/api/collections/issues/records" \
   -H 'Content-Type: application/json' \
   -d "{\"team\":\"$ENG_ID\",\"number\":1,\"title\":\"forged\",\"state\":\"todo\"}")
@@ -278,7 +334,7 @@ assert_contains "$out" "Created ENG-3: Fix login flow" "create with --priority"
 ENG3_ID=$(LLL_URL=$URL LLL_TEAM=ENG "$LIN" issue list --json | \
   jq -r '.items[] | select(.title=="Fix login flow") | .id')
 [ -n "$ENG3_ID" ] || fail "resolving ENG-3 record id from --json"
-curl -sf -X PATCH "$URL/api/collections/issues/records/$ENG3_ID" \
+curl -sf -X PATCH "$URL/api/collections/issues/records/$ENG3_ID" -H "$AUTH_HDR" \
   -H 'Content-Type: application/json' \
   -d '{"description":"First paragraph of the description.\n\nSecond paragraph."}' >/dev/null
 
@@ -327,7 +383,7 @@ vkey=$(LLL_URL=$URL "$LIN" issue view ENG-3 --json | jq -r '.expand.team.key')
 [ "$vkey" = "ENG" ] || fail "view --json: expected expand.team.key ENG, got '$vkey'"
 
 # --- --state filters; invalid state rejected ---
-curl -sf -X PATCH "$URL/api/collections/issues/records/$ENG3_ID" \
+curl -sf -X PATCH "$URL/api/collections/issues/records/$ENG3_ID" -H "$AUTH_HDR" \
   -H 'Content-Type: application/json' -d '{"state":"in-review"}' >/dev/null
 
 out=$(LLL_URL=$URL LLL_TEAM=ENG "$LIN" issue list --state in-review)
@@ -486,7 +542,7 @@ assert_contains "$out" "alice" "member list has the member config set me seeded"
 # carol was created without an email, so the CLI synthesized the reserved
 # identity; the record carries a random password nobody knows, which is what
 # makes the record creatable without making it log-in-able.
-carol_email=$(curl -sf "$URL/api/collections/members/records?perPage=200" | jq -r '.items[] | select(.name=="carol") | .email')
+carol_email=$(curl -sf -H "$AUTH_HDR" "$URL/api/collections/members/records?perPage=200" | jq -r '.items[] | select(.name=="carol") | .email')
 assert_contains "$carol_email" "@members.invalid" \
   "an email-less member got the reserved synthetic identity"
 
@@ -499,7 +555,7 @@ ADMIN=$(curl -s -X POST "$URL/api/collections/_superusers/auth-with-password" \
   -H 'Content-Type: application/json' \
   -d '{"identity":"admin@local.dev","password":"admin-local-123"}' | jq -r '.token')
 [ -n "$ADMIN" ] && [ "$ADMIN" != "null" ] || fail "admin auth-with-password returned no token"
-BRYAN_ID=$(curl -sf "$URL/api/collections/members/records?perPage=200" | jq -r '.items[] | select(.name=="bryan") | .id')
+BRYAN_ID=$(curl -sf -H "$AUTH_HDR" "$URL/api/collections/members/records?perPage=200" | jq -r '.items[] | select(.name=="bryan") | .id')
 curl -sf -X PATCH "$URL/api/collections/members/records/$BRYAN_ID" \
   -H 'Content-Type: application/json' -H "Authorization: Bearer $ADMIN" \
   -d '{"password":"bryan-pass-123","passwordConfirm":"bryan-pass-123"}' >/dev/null \
@@ -510,7 +566,7 @@ AUTH=$(set +e; curl -s -X POST "$URL/api/collections/members/auth-with-password"
 assert_contains "$AUTH" '"token"' "auth-with-password returns a token"
 TOKEN=$(printf '%s' "$AUTH" | jq -r '.token')
 [ -n "$TOKEN" ] && [ "$TOKEN" != "null" ] || fail "auth token is empty"
-# The token authenticates a GET the (still public) rules allow.
+# The token authenticates a GET the new rules now require it for.
 code=$(curl -s -o /dev/null -w '%{http_code}' -H "Authorization: Bearer $TOKEN" \
   "$URL/api/collections/issues/records?perPage=1")
 [ "$code" = 200 ] || fail "authenticated GET with the member token returned $code"
@@ -769,7 +825,7 @@ wait_for_line "$WATCH_ALL" "$WKEY created: Watched todo issue" "watch sees match
 wait_for_line "$WATCH_TODO" "$WKEY created: Watched todo issue" "watch --state todo sees todo create"
 
 # non-matching creates: wrong state (forged via curl) and wrong team
-curl -sf -X POST "$URL/api/collections/issues/records" \
+curl -sf -X POST "$URL/api/collections/issues/records" -H "$AUTH_HDR" \
   -H 'Content-Type: application/json' \
   -d "{\"team\":\"$ENG_ID\",\"title\":\"Backlog noise issue\",\"state\":\"backlog\"}" >/dev/null
 out=$(LLL_URL=$URL LLL_TEAM=OPS "$LIN" issue create -t "Ops noise issue")
@@ -820,7 +876,7 @@ start_pb || fail "PocketBase did not restart"
 # watchers resubscribe within ~1s; keep patching (each a fresh title
 # transition) until one lands, instead of trusting a fixed sleep
 for i in $(seq 1 20); do
-  curl -s -X PATCH "$URL/api/collections/issues/records/$WID" \
+  curl -s -X PATCH "$URL/api/collections/issues/records/$WID" -H "$AUTH_HDR" \
     -H 'Content-Type: application/json' \
     -d "{\"title\":\"Back after restart $i\"}" >/dev/null || true
   sleep 1
@@ -1164,11 +1220,11 @@ out=$(LLL_URL=$URL LLL_TEAM=ENG "$LIN" label list)
 assert_contains "$out" "pb" "ENG still has its own pb label"
 # The id ENG's issue carries is ENG's pb, not OPS's same-named one. Two
 # labels now answer to "pb"; only one may reach an ENG issue.
-eng_pb=$(curl -sf "$URL/api/collections/labels/records?perPage=200&expand=team" | \
+eng_pb=$(curl -sf -H "$AUTH_HDR" "$URL/api/collections/labels/records?perPage=200&expand=team" | \
   jq -r '.items[] | select(.name == "pb" and .expand.team.key == "ENG") | .id')
 got=$(LLL_URL=$URL LLL_TEAM=ENG "$LIN" issue view ENG-1 --json | jq -r --arg id "$eng_pb" '.labels | index($id) // "missing"')
 [ "$got" != "missing" ] || fail "ENG-1 does not carry ENG's pb label ($eng_pb)"
-ops_pb=$(curl -sf "$URL/api/collections/labels/records?perPage=200&expand=team" | \
+ops_pb=$(curl -sf -H "$AUTH_HDR" "$URL/api/collections/labels/records?perPage=200&expand=team" | \
   jq -r '.items[] | select(.name == "pb" and .expand.team.key == "OPS") | .id')
 got=$(LLL_URL=$URL LLL_TEAM=ENG "$LIN" issue view ENG-1 --json | jq -r --arg id "$ops_pb" '.labels | index($id) // "absent"')
 [ "$got" = "absent" ] || fail "ENG-1 picked up OPS's pb label ($ops_pb)"
@@ -1473,7 +1529,7 @@ assert_contains "$out" "lll config set me" "claim without 'me' names the fix"
 # lll process in the way to serialise anything.
 RKEY=$(env $E "$LIN" issue create -t "Race target" | sed -n 's/^Created \([A-Z]*-[0-9]*\).*/\1/p')
 RID=$(env $E "$LIN" issue view "$RKEY" --json | jq -r .id)
-MID=$(curl -sf "$URL/api/collections/members/records?perPage=1" | jq -r '.items[0].id')
+MID=$(curl -sf -H "$AUTH_HDR" "$URL/api/collections/members/records?perPage=1" | jq -r '.items[0].id')
 RACE="$DATA_DIR/race"
 mkdir -p "$RACE"
 # Wait on these pids by name, never bare `wait`: the suite's own `lll up`
@@ -1481,6 +1537,7 @@ mkdir -p "$RACE"
 race_pids=""
 for i in $(seq 1 16); do
   (curl -s -o /dev/null -w '%{http_code}\n' -X POST "$URL/api/collections/claims/records" \
+     -H "$AUTH_HDR" \
      -H 'Content-Type: application/json' \
      -d "{\"issue\":\"$RID\",\"member\":\"$MID\"}" > "$RACE/$i.code") &
   race_pids="$race_pids $!"
@@ -1489,18 +1546,20 @@ wait $race_pids || true
 won=$(cat "$RACE"/*.code | grep -c '^2' || true)
 [ "$won" = 1 ] || fail "16 concurrent claim inserts: expected exactly 1 to succeed, got $won
 $(cat "$RACE"/*.code | sort | uniq -c)"
-rows=$(curl -sf "$URL/api/collections/claims/records?perPage=200" | \
+rows=$(curl -sf -H "$AUTH_HDR" "$URL/api/collections/claims/records?perPage=200" | \
   jq --arg id "$RID" '[.items[] | select(.issue==$id)] | length')
 [ "$rows" = 1 ] || fail "after the race the issue should hold exactly 1 claim row, got $rows"
 
+WON_ID=$(curl -sf -H "$AUTH_HDR" "$URL/api/collections/claims/records?perPage=200" | \
+  jq -r --arg id "$RID" '[.items[] | select(.issue==$id)][0].id')
 # The winning row is not editable, or a loser has a second door: PATCH the
 # holder's `member` to itself, which an index on `issue` alone would allow.
-WON_ID=$(curl -sf "$URL/api/collections/claims/records?perPage=200" | \
-  jq -r --arg id "$RID" '[.items[] | select(.issue==$id)][0].id')
+# With the rules on, this is a MEMBER token and claims.updateRule is still
+# null (superuser only, TASK-175): the refusal is exactly 403.
 code=$(curl -s -o /dev/null -w '%{http_code}' -X PATCH \
   "$URL/api/collections/claims/records/$WON_ID" \
-  -H 'Content-Type: application/json' -d "{\"member\":\"$MID\"}")
-case "$code" in 2*) fail "PATCH on a claim should be refused, got $code";; esac
+  -H 'Content-Type: application/json' -H "$AUTH_HDR" -d "{\"member\":\"$MID\"}")
+[ "$code" = 403 ] || fail "PATCH on a claim should be superuser-only (updateRule null), got $code"
 
 # AC#2, through the CLI: three real `lll issue claim` processes, one issue.
 CRKEY=$(env $E "$LIN" issue create -t "CLI race target" | sed -n 's/^Created \([A-Z]*-[0-9]*\).*/\1/p')
