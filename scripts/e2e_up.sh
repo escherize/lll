@@ -8,7 +8,9 @@
 # survives lll up's exit; that external PB is a second lll up instance), and
 # first-boot identity (me guessed from $USER, written to the HOME config —
 # never the repo's committed .lll.toml — seeded as a member, and not
-# re-guessed once configured).
+# re-guessed once configured), and the TASK-182 board gate: with no
+# LLL_BOARD_TOKEN the boot generates one, prints its login URL in the banner,
+# and refuses every anonymous request with a 401 that names the fix.
 #
 # Every lll up here runs with HOME="$E2E_HOME": a first boot writes 'me' to
 # the home config now (TASK-168), and a suite must not rewrite the
@@ -51,9 +53,25 @@ UP_PID=$!
 set +m
 
 DB2=$((DB_PORT + 1)); WEB2=$((WEB_PORT + 1))
-wait_ok "http://127.0.0.1:$WEB2/" || true
-curl -sf "http://127.0.0.1:$DB2/api/health" >/dev/null || fail "own PB not on incremented port $DB2"
-curl -sf "http://127.0.0.1:$WEB2/" >/dev/null || fail "board not on incremented port $WEB2"
+wait_ok "http://127.0.0.1:$DB2/api/health" || fail "own PB not on incremented port $DB2"
+
+# --- TASK-182: no LLL_BOARD_TOKEN here — the boot generates one per boot and
+# prints its login URL in the banner. Parse it out; the gate refuses every
+# other request, so the suite's own liveness probes must log in like a
+# browser does.
+BOARD_TOKEN=""
+for _ in $(seq 1 100); do
+  BOARD_TOKEN=$(sed -n 's/.*[?&]board_token=\([^ )]*\).*/\1/p' "$UP_LOG" | head -1)
+  [ -n "$BOARD_TOKEN" ] && break
+  sleep 0.1
+done
+[ -n "$BOARD_TOKEN" ] || fail "banner did not print a board login URL"
+BOARD_COOKIE="Cookie: lll_board=$BOARD_TOKEN"
+anon=$(curl -s -o /dev/null -w '%{http_code}' "http://127.0.0.1:$WEB2/")
+[ "$anon" = "401" ] || fail "anonymous board fetch: expected 401, got $anon"
+anon_page=$(curl -s "http://127.0.0.1:$WEB2/")
+printf '%s' "$anon_page" | grep -q "board_token" || fail "401 page does not say how to get in"
+curl -sf -H "$BOARD_COOKIE" "http://127.0.0.1:$WEB2/" >/dev/null || fail "board not on incremented port $WEB2"
 grep -q "admin@local.dev / admin-local-123" "$UP_LOG" || fail "default creds not logged"
 grep -q "port $WEB_PORT taken" "$UP_LOG" || fail "web port move not printed"
 curl -sf -X POST "http://127.0.0.1:$DB2/api/collections/_superusers/auth-with-password" \
@@ -96,10 +114,10 @@ printf '%s' "$out" | grep -q "Created E2E-" || fail "assignment to the seeded me
 # assertion below judges whether the external PB outlived it.
 kill -INT -- "-$UP_PID" 2>/dev/null || kill -INT "$UP_PID" 2>/dev/null || true
 for _ in $(seq 1 50); do
-  curl -sf "http://127.0.0.1:$WEB2/" >/dev/null 2>&1 || break
+  curl -sf -H "$BOARD_COOKIE" "http://127.0.0.1:$WEB2/" >/dev/null 2>&1 || break
   sleep 0.1
 done
-curl -sf "http://127.0.0.1:$WEB2/" >/dev/null 2>&1 && fail "board survived SIGINT"
+curl -sf -H "$BOARD_COOKIE" "http://127.0.0.1:$WEB2/" >/dev/null 2>&1 && fail "board survived SIGINT"
 curl -sf "http://127.0.0.1:$DB2/api/health" >/dev/null 2>&1 && fail "in-process PB survived SIGINT"
 UP_PID=""
 
@@ -118,7 +136,15 @@ env -u LLL_TOKEN LLL_URL="http://127.0.0.1:$EXT_PORT" LLL_TEAM=E2E HOME="$E2E_HO
   "$LLL" up --no-open --port "$WEB_PORT" --pb-dir "$DATA_DIR/pb_data" >"$UP_LOG" 2>&1 &
 UP_PID=$!
 set +m
-wait_ok "http://127.0.0.1:$WEB2/" || true
+BOARD_TOKEN2=""
+for _ in $(seq 1 100); do
+  BOARD_TOKEN2=$(sed -n 's/.*[?&]board_token=\([^ )]*\).*/\1/p' "$UP_LOG" | head -1)
+  [ -n "$BOARD_TOKEN2" ] && break
+  sleep 0.1
+done
+[ -n "$BOARD_TOKEN2" ] || fail "the reuse boot did not print a board login URL"
+curl -sf -H "Cookie: lll_board=$BOARD_TOKEN2" "http://127.0.0.1:$WEB2/" >/dev/null \
+  || fail "reuse-path board not serving (or gate broke)"
 grep -q "(already running)" "$UP_LOG" || fail "reuse path not taken"
 grep -q "auth   rules are authenticated-only" "$UP_LOG" \
   || fail "the reuse path did not authenticate against the external server"
