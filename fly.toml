@@ -5,7 +5,7 @@
 # app = the Fly app name; set it once with `fly apps create <name>` and keep
 # this file's `app =` in agreement (or delete the line and pass --app).
 
-app = "lll"
+app = "escherize-lll"
 primary_region = "ord"
 
 [build]

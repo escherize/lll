@@ -1,0 +1,16 @@
+# The container builds and runs from the checkout; these are machine state,
+# build artifacts, and private data that must not poison the linux build
+# (a stale target/ or the dev database in the context once made the fly
+# build resolve bindings differently than a clean checkout does).
+target/
+.git/
+.private/
+.private-remote
+.playwright-cli/
+.claude/
+.impeccable/
+.lll.toml
+.lll-demo/
+pb/pb_data/
+pb/pb_data
+*.log
