@@ -32,6 +32,21 @@ lll issue list
 open http://127.0.0.1:8100               # or: lll board -w
 ```
 
+## Setup, exactly
+
+Four actors, each configured once, none written twice:
+
+| Actor | Once | Writes |
+|---|---|---|
+| Server | `lll up` with `LLL_ADMIN_*`, `LLL_TEAM`, `LLL_BIND`, `LLL_BOARD_TOKEN` in env (Fly: secrets) | nothing on disk but the database |
+| Your machine | `lll login` (put `url` in `~/.config/lll/lll.toml` first for a remote server) | `url`, `me`, `token` in the home config |
+| Each repo | `lll attach`, commit the file | `team = "KEY"` in the repo's `.lll.toml` |
+| Each agent | superuser mints `lll token create <name>` | nothing — `LLL_TOKEN` (+ `LLL_URL`) in its env |
+
+Clones and git worktrees of an attached repo need no step at all; env beats
+files, repo file beats home file, and each key resolves independently
+(`lll config --list` shows every winner and its origin).
+
 ## Attaching a repo
 
 `lll attach` creates a team and writes one line — `team = "KEY"` — to
