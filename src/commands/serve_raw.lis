@@ -133,7 +133,9 @@ fn issue_raw(vm: IssueVM) -> string {
 fn projects_raw(vm: ProjectsVM) -> string {
   let mut lines: Slice<string> = [f"# Projects ({vm.projects.length()})"]
   for p in vm.projects {
-    lines = lines.append(f"- {cell(p.name)} — {p.status_label} · {p.scope} · {p.count} issues — {p.href}")
+    let mut noun = "issues"
+    if p.count == 1 { noun = "issue" }
+    lines = lines.append(f"- {cell(p.name)} — {p.status_label} · {p.scope} · {p.count} {noun} — {p.href}")
     if p.description != "" {
       lines = lines.append(f"  {p.description}")
     }
