@@ -26,6 +26,16 @@ WEB_PORT=$(free_port 40000 59999)
 export LLL_URL="http://127.0.0.1:$PB_PORT"
 export LLL_TEAM=ENG
 WEB="http://127.0.0.1:$WEB_PORT"
+# --- TASK-182: the board is gated --------------------------------------------
+# Every route — pages, POSTs, /events, /static — answers only requests that
+# carry the board token. The suite pins its own (LLL_BOARD_TOKEN) so the
+# assertions are deterministic; the generated-token path (a fresh token per
+# boot, printed as a login URL in the banner) is e2e_up.sh's section. The
+# cookie is the browser's one login; wcurl is every authenticated request
+# below. Anonymous curls stay plain `curl`.
+BOARD_TOKEN=lll-web-e2e-board-token
+BOARD_COOKIE="Cookie: lll_board=$BOARD_TOKEN"
+wcurl() { curl -H "$BOARD_COOKIE" "$@"; }
 PB_LOG="$DATA_DIR/pb.log"
 SERVE_LOG="$DATA_DIR/serve.log"
 E2E_LOGS="$SERVE_LOG $PB_LOG"
@@ -39,7 +49,8 @@ LIN=target/.lisette/bin/lll
 # USER is pinned: a first boot seeds a member named after it (task-31), and
 # the board assertions must not depend on who runs this suite. HOME is pinned
 # because that first boot WRITES 'me' to the home config now (TASK-168).
-env -u LLL_TOKEN USER=e2e HOME="$E2E_HOME" "$LIN" up --no-open --pb-dir "$DATA_DIR/pb_data" --port "$WEB_PORT" \
+env -u LLL_TOKEN LLL_BOARD_TOKEN="$BOARD_TOKEN" USER=e2e HOME="$E2E_HOME" "$LIN" up --no-open \
+  --pb-dir "$DATA_DIR/pb_data" --port "$WEB_PORT" \
   </dev/null >"$PB_LOG" 2>&1 &
 PB_PID=$!
 SERVE_PID=""
@@ -92,10 +103,44 @@ curl -sf -H "$AUTH_HDR" -X POST "$LLL_URL/api/collections/teams/records" \
 "$LIN" member add -n "No Issues Here" >/dev/null
 
 # the board came up with PocketBase above
-curl -sf "$WEB/" >/dev/null || fail "lll up board did not start"
+wcurl -sf "$WEB/" >/dev/null || fail "lll up board did not start"
+
+# --- TASK-182: the gate refuses the anonymous and admits the cookie ----------
+anon_code=$(curl -s -o /dev/null -w '%{http_code}' "$WEB/")
+[ "$anon_code" = "401" ] || fail "anonymous board fetch: expected 401, got $anon_code"
+anon_page=$(curl -s "$WEB/")
+assert_contains "$anon_page" "board_token" "401 page says how to get in"
+assert_contains "$anon_page" "LLL_BOARD_TOKEN" "401 page names the env override"
+
+# A POST with no token is refused before any write happens.
+anon_post=$(curl -s -o /dev/null -w '%{http_code}' -X POST \
+  -d "key=ENG-1&body=anonymous comment" "$WEB/comment")
+[ "$anon_post" = "401" ] || fail "anonymous POST: expected 401, got $anon_post"
+
+# The SSE endpoint sits behind the same gate.
+anon_sse=$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 "$WEB/events?page=board")
+[ "$anon_sse" = "401" ] || fail "anonymous /events: expected 401, got $anon_sse"
+
+# Static assets too: the 401 page is self-contained, so nothing else serves.
+anon_static=$(curl -s -o /dev/null -w '%{http_code}' "$WEB/static/theme.css")
+[ "$anon_static" = "401" ] || fail "anonymous /static: expected 401, got $anon_static"
+
+# The query param is the bootstrap handoff: a GET that logs in with it is
+# handed the cookie and redirected to the same URL without the token, so the
+# token does not linger in the address bar.
+login=$(curl -s -o /dev/null -w '%{http_code} %{redirect_url}' "$WEB/?board_token=$BOARD_TOKEN")
+assert_contains "$login" "303" "query-param login redirects"
+assert_contains "$login" "$WEB/" "redirect strips the token from the URL"
+login_hdrs=$(curl -si "$WEB/?board_token=$BOARD_TOKEN")
+assert_contains "$login_hdrs" "Set-Cookie: lll_board=$BOARD_TOKEN" \
+  "query-param login sets the board cookie"
+assert_not_contains "$login_hdrs" "board_token=$BOARD_TOKEN" "redirect URL drops the token"
+
+# With the cookie, the gate lets everything through — the first authenticated
+# fetch below is the suite's own liveness probe.
 
 # --- board page: six columns, cards in the right ones ---
-board=$(curl -sf "$WEB/")
+board=$(wcurl -sf "$WEB/")
 for state in backlog todo in-progress in-review done cancelled; do
   assert_contains "$board" "id=\"col-$state\"" "board has column $state"
 done
@@ -104,7 +149,7 @@ assert_contains "$(column "$board" todo)" "Web board issue" "ENG-1 title on card
 assert_contains "$(column "$board" in-progress)" "ENG-2" "ENG-2 in in-progress column"
 assert_contains "$board" 'id="new-issue"' "board has new-issue form"
 assert_contains "$board" "datastar" "board loads Datastar"
-curl -sf "$WEB/static/theme.css" >/dev/null || fail "static css served"
+wcurl -sf "$WEB/static/theme.css" >/dev/null || fail "static css served"
 
 # --- card presentation: relative age + server-rendered hover preview ---
 assert_contains "$board" 'class="age"' "cards carry an age row"
@@ -122,20 +167,20 @@ curl -sf -H "$AUTH_HDR" -X PATCH "$LLL_URL/api/collections/issues/records/$ENG2_
   -H 'Content-Type: application/json' \
   -d "{\"description\":\"$LONG_DESC\"}" >/dev/null
 
-board=$(curl -sf "$WEB/")
+board=$(wcurl -sf "$WEB/")
 assert_contains "$board" "First preview line. Second preview line." "snippet joins the first two non-empty lines"
 assert_not_contains "$board" "Third line never previewed" "snippet drops lines past the second"
 assert_contains "$board" "$(printf 'a%.0s' $(seq 1 159))…" "long snippet truncated with an ellipsis"
 assert_not_contains "$board" "$LONG_DESC" "full long description stays off the board"
 
 # --- issue page ---
-issue=$(curl -sf "$WEB/issue/ENG-1")
+issue=$(wcurl -sf "$WEB/issue/ENG-1")
 assert_contains "$issue" 'id="issue-detail"' "issue page has detail"
 assert_contains "$issue" "Web board issue" "issue page has title"
 assert_contains "$issue" "seed comment" "issue page has seed comment"
 assert_contains "$issue" 'id="comment-form"' "issue page has comment form"
 assert_contains "$issue" 'id="state-form"' "issue page has state control"
-curl -s -o /dev/null -w '%{http_code}' "$WEB/issue/ENG-99" | grep -q 404 \
+wcurl -s -o /dev/null -w '%{http_code}' "$WEB/issue/ENG-99" | grep -q 404 \
   || fail "unknown issue is a 404"
 
 # --- app shell: one rail template, the same on every page (task-81) ---
@@ -150,7 +195,7 @@ except IndexError:
     pass
 '
 }
-board=$(curl -sf "$WEB/")
+board=$(wcurl -sf "$WEB/")
 board_rail=$(rail "$board")
 [ -n "$board_rail" ] || fail "board page has no rail"
 [ "$board_rail" = "$(rail "$issue")" ] || fail "the rail differs between the board and issue pages:
@@ -172,7 +217,7 @@ assert_contains "$board_rail" "Star an issue to pin it here for the whole worksp
 # /?assignee=e2e (the board's own query-param encoding — there is no
 # ?mine=1 any more). The page marks the row current and seeds the chip the
 # URL implies.
-mine=$(curl -sf "$WEB/?assignee=e2e")
+mine=$(wcurl -sf "$WEB/?assignee=e2e")
 assert_contains "$mine" '<a href="/?assignee=e2e" title="Issues assigned to e2e" class="active">' \
   "the My issues URL marks the My issues row current"
 assert_contains "$mine" 'data-signals:flt="[&#34;assignee:e2e&#34;]"' \
@@ -188,7 +233,7 @@ assert_not_contains "$(column "$mine" todo)" "ENG-1" \
 # count 0) and the bar says so out loud — the rescue affordance lives
 # wherever the URL can point. "No Issues Here" is a real member; the board
 # just carries no card for them (task-116's ?mine=1 scenario).
-nomatch=$(curl -sf "$WEB/?assignee=No+Issues+Here")
+nomatch=$(wcurl -sf "$WEB/?assignee=No+Issues+Here")
 assert_contains "$nomatch" 'No issues match these filters.' \
   "a filter matching nothing says so in the filter bar"
 assert_contains "$nomatch" '<span class="dim">Assignee</span> No Issues Here <svg' \
@@ -196,15 +241,15 @@ assert_contains "$nomatch" '<span class="dim">Assignee</span> No Issues Here <sv
 
 # A value the catalogue cannot name is dropped with a readable flash, never
 # a 500 and never a silently half-applied filter.
-nomember=$(curl -sf "$WEB/?assignee=nobody")
+nomember=$(wcurl -sf "$WEB/?assignee=nobody")
 assert_contains "$nomember" "no member named &#39;nobody&#39;" \
   "an unknown assignee is said out loud in the flash"
 
 
 # Hidden lanes ride the same URL: ?hide=done hides the done lane, and the
 # lane's hide signal is seeded from the query param, not localStorage.
-hidden=$(curl -sf "$WEB/?hide=done")
-unhidden=$(curl -sf "$WEB/")
+hidden=$(wcurl -sf "$WEB/?hide=done")
+unhidden=$(wcurl -sf "$WEB/")
 assert_contains "$unhidden" 'class="main"' "an unhidden board renders no lane hidden"
 assert_not_contains "$unhidden" 'class="main hc-done"' \
   "the done lane is present on an unhidden board"
@@ -213,7 +258,7 @@ assert_not_contains "$unhidden" 'class="main hc-done"' \
 assert_contains "$unhidden" "'hc-done': \$hide_done" "the lane's hide binding exists"
 assert_contains "$hidden" "\$hide_done = true" "?hide=done seeds the lane's hide signal"
 # The query lives in the URL, so a result is shareable and curl-able.
-search=$(curl -sf "$WEB/search?q=Already")
+search=$(wcurl -sf "$WEB/search?q=Already")
 assert_contains "$search" "ENG-2" "search finds the matching issue"
 assert_contains "$search" "Already in progress" "search result carries the title"
 # The proof that this is not the board's client-side filter: a non-matching
@@ -225,10 +270,10 @@ assert_contains "$search" 'value="Already"' "the query round-trips into the fiel
 assert_contains "$board_rail" 'href="/search"' "rail has a Search row"
 assert_contains "$(rail "$search")" 'href="/search" class="active"' \
   "the search page marks its own rail row current"
-empty=$(curl -sf "$WEB/search?q=zzzznope")
+empty=$(wcurl -sf "$WEB/search?q=zzzznope")
 assert_contains "$empty" "No issue title matches" "an empty result says so"
 assert_not_contains "$empty" "ENG-1" "an empty result lists nothing"
-assert_contains "$(curl -sf "$WEB/search")" 'class="search-bar"' \
+assert_contains "$(wcurl -sf "$WEB/search")" 'class="search-bar"' \
   "/search with no query still renders the field"
 
 # Typing (task-110) asks the SAME handler for the results fragment alone, as
@@ -237,7 +282,7 @@ assert_contains "$(curl -sf "$WEB/search")" 'class="search-bar"' \
 assert_contains "$search" "data-bind:q" "the field binds the query to a signal"
 assert_contains "$search" 'class="search-clear" href="/search"' \
   "the field carries an X back to the empty page"
-frag=$(curl -sf "$WEB/search?fragment=1&q=Already")
+frag=$(wcurl -sf "$WEB/search?fragment=1&q=Already")
 assert_contains "$frag" "event: datastar-patch-elements" \
   "the live fragment is a datastar patch"
 assert_contains "$frag" 'id="search-results"' \
@@ -245,57 +290,57 @@ assert_contains "$frag" 'id="search-results"' \
 assert_contains "$frag" "ENG-2" "the live fragment carries the match"
 assert_not_contains "$frag" "ENG-1" "the live fragment omits non-matching issues"
 assert_not_contains "$frag" 'class="rail"' "the live fragment is not a whole page"
-assert_contains "$(curl -sf "$WEB/search?fragment=1")" "Searches every issue" \
+assert_contains "$(wcurl -sf "$WEB/search?fragment=1")" "Searches every issue" \
   "the live fragment with an empty query is the empty state"
 
 # --- actions persist to PB and show via the CLI ---
-out=$(curl -s -w '\n%{http_code}' -X POST \
+out=$(wcurl -s -w '\n%{http_code}' -X POST \
   -d "title=Created from the board&state=todo" "$WEB/create")
 printf '%s' "$out" | tail -1 | grep -q 200 || fail "/create should return 200"
 assert_contains "$out" 'id="flash" class="flash" hidden' "/create success clears flash"
 out=$("$LIN" issue list)
 assert_contains "$out" "Created from the board" "web-created issue in lll issue list"
 
-code=$(curl -s -o /dev/null -w '%{http_code}' -X POST \
+code=$(wcurl -s -o /dev/null -w '%{http_code}' -X POST \
   -d "key=ENG-3&state=in-review" "$WEB/state")
 [ "$code" = 200 ] || fail "/state returned $code, want 200"
 out=$("$LIN" issue view ENG-3)
 assert_contains "$out" "in-review" "web state change in lll issue view"
-board=$(curl -sf "$WEB/")
+board=$(wcurl -sf "$WEB/")
 assert_contains "$(column "$board" in-review)" "ENG-3" "ENG-3 moved to in-review column"
 
-code=$(curl -s -o /dev/null -w '%{http_code}' -X POST \
+code=$(wcurl -s -o /dev/null -w '%{http_code}' -X POST \
   -d "key=ENG-3&body=comment from the board" "$WEB/comment")
 [ "$code" = 200 ] || fail "/comment returned $code, want 200"
 out=$("$LIN" issue comment ENG-3)
 assert_contains "$out" "comment from the board" "web comment in lll issue comment"
 
 # --- issue detail editing: /priority and /title persist, validate, render ---
-code=$(curl -s -o /dev/null -w '%{http_code}' -X POST \
+code=$(wcurl -s -o /dev/null -w '%{http_code}' -X POST \
   -d "key=ENG-3&priority=urgent" "$WEB/priority")
 [ "$code" = 200 ] || fail "/priority returned $code, want 200"
 out=$("$LIN" issue view ENG-3)
 assert_contains "$out" "Priority:  urgent" "web priority change in lll issue view"
 
-out=$(curl -s -X POST -d "key=ENG-3&priority=bogus" "$WEB/priority")
+out=$(wcurl -s -X POST -d "key=ENG-3&priority=bogus" "$WEB/priority")
 assert_contains "$out" "unknown priority &#39;bogus&#39;" "bogus priority message"
-out=$(curl -s -X POST -d "key=ENG-99&priority=high" "$WEB/priority")
+out=$(wcurl -s -X POST -d "key=ENG-99&priority=high" "$WEB/priority")
 assert_contains "$out" "not found" "/priority unknown issue message"
 
-code=$(curl -s -o /dev/null -w '%{http_code}' -X POST \
+code=$(wcurl -s -o /dev/null -w '%{http_code}' -X POST \
   --data-urlencode "key=ENG-3" --data-urlencode "title=Renamed from the board" \
   "$WEB/title")
 [ "$code" = 200 ] || fail "/title returned $code, want 200"
 out=$("$LIN" issue view ENG-3)
 assert_contains "$out" "ENG-3 Renamed from the board" "web title change in lll issue view"
 
-out=$(curl -s -X POST --data-urlencode "key=ENG-3" --data-urlencode "title=  " "$WEB/title")
+out=$(wcurl -s -X POST --data-urlencode "key=ENG-3" --data-urlencode "title=  " "$WEB/title")
 assert_contains "$out" "title is required" "blank title message"
 out=$("$LIN" issue view ENG-3)
 assert_contains "$out" "ENG-3 Renamed from the board" "blank title left the title alone"
 
 # titles with JSON-hostile characters survive the round trip
-code=$(curl -s -o /dev/null -w '%{http_code}' -X POST \
+code=$(wcurl -s -o /dev/null -w '%{http_code}' -X POST \
   --data-urlencode "key=ENG-3" --data-urlencode 'title=Quote " and \ slash' \
   "$WEB/title")
 [ "$code" = 200 ] || fail "/title with quotes returned $code, want 200"
@@ -303,14 +348,14 @@ out=$("$LIN" issue view ENG-3)
 assert_contains "$out" 'Quote " and \ slash' "quoted title persisted verbatim"
 
 # --- /emoji: the picker's write path, including the way back to none ---
-code=$(curl -s -o /dev/null -w '%{http_code}' -X POST \
+code=$(wcurl -s -o /dev/null -w '%{http_code}' -X POST \
   --data-urlencode "key=ENG-3" --data-urlencode "emoji=🚀" "$WEB/emoji")
 [ "$code" = 200 ] || fail "/emoji returned $code, want 200"
 out=$("$LIN" issue view ENG-3)
 assert_contains "$out" "Emoji:     🚀" "web emoji change in lll issue view"
 
 # A picker with no way back to none is a trap: an empty value clears it.
-code=$(curl -s -o /dev/null -w '%{http_code}' -X POST \
+code=$(wcurl -s -o /dev/null -w '%{http_code}' -X POST \
   --data-urlencode "key=ENG-3" --data-urlencode "emoji=" "$WEB/emoji")
 [ "$code" = 200 ] || fail "/emoji clear returned $code, want 200"
 out=$("$LIN" issue view ENG-3)
@@ -318,15 +363,15 @@ if printf '%s' "$out" | grep -q "^Emoji:"; then
   fail "empty emoji did not clear the marker"
 fi
 
-out=$(curl -s -X POST --data-urlencode "key=ENG-3" \
+out=$(wcurl -s -X POST --data-urlencode "key=ENG-3" \
   --data-urlencode "emoji=not one emoji" "$WEB/emoji")
 assert_contains "$out" "an issue takes one emoji" "sentence-shaped emoji rejected"
-out=$(curl -s -X POST --data-urlencode "key=ENG-99" --data-urlencode "emoji=🚀" "$WEB/emoji")
+out=$(wcurl -s -X POST --data-urlencode "key=ENG-99" --data-urlencode "emoji=🚀" "$WEB/emoji")
 assert_contains "$out" "not found" "/emoji unknown issue message"
 
 # issue page markup: the picker ships with the page, searchable by name, and
 # its chrome is sprite icons — the glyphs are only the candidates themselves.
-issue=$(curl -sf "$WEB/issue/ENG-3")
+issue=$(wcurl -sf "$WEB/issue/ENG-3")
 assert_contains "$issue" 'id="emo-pop"' "issue page carries the emoji picker"
 assert_contains "$issue" 'class="emo-trigger"' "properties panel has the picker trigger"
 assert_contains "$issue" 'placeholder="Search by name"' "picker searches by name"
@@ -342,12 +387,12 @@ then
 fi
 
 # issue page markup: priority select (No priority label) + title editor
-issue=$(curl -sf "$WEB/issue/ENG-3")
+issue=$(wcurl -sf "$WEB/issue/ENG-3")
 assert_contains "$issue" 'id="prio-form"' "issue page has priority control"
 assert_contains "$issue" '>No priority</option>' "priority none reads No priority"
 assert_contains "$issue" 'value="urgent" selected' "priority select reflects current value"
 assert_contains "$issue" 'id="title-form"' "issue page has title editor"
-board=$(curl -sf "$WEB/")
+board=$(wcurl -sf "$WEB/")
 assert_contains "$board" 'Priority</span> No priority <span class="count">' \
   "board filter labels none as No priority (a navigation, not a button)"
 
@@ -372,46 +417,46 @@ PANEL_LABEL=$(curl -sf -H "$AUTH_HDR" "$LLL_URL/api/collections/labels/records?p
 
 # AC#1: POST /project moves ENG-3 into a project; the re-fetched page
 # links the new project.
-code=$(curl -s -o /dev/null -w '%{http_code}' -X POST \
+code=$(wcurl -s -o /dev/null -w '%{http_code}' -X POST \
   --data-urlencode "key=ENG-3" --data-urlencode "project=$PANEL_PROJECT" "$WEB/project")
 [ "$code" = 200 ] || fail "/project returned $code, want 200"
-issue=$(curl -sf "$WEB/issue/ENG-3")
+issue=$(wcurl -sf "$WEB/issue/ENG-3")
 assert_contains "$issue" 'href="/issues?project=Panel&#43;Project"' "issue page links the new project"
 assert_contains "$issue" "value=\"$PANEL_PROJECT\" selected" "project select reflects the move"
 assert_contains "$("$LIN" issue view ENG-3)" "Project:   Panel Project" "POST /project persisted"
 
 # AC#2: the assignee is changeable from the issue page, and back to none.
-code=$(curl -s -o /dev/null -w '%{http_code}' -X POST \
+code=$(wcurl -s -o /dev/null -w '%{http_code}' -X POST \
   --data-urlencode "key=ENG-3" --data-urlencode "assignee=$PANEL_MEMBER" "$WEB/assignee")
 [ "$code" = 200 ] || fail "/assignee returned $code, want 200"
-issue=$(curl -sf "$WEB/issue/ENG-3")
+issue=$(wcurl -sf "$WEB/issue/ENG-3")
 assert_contains "$issue" "value=\"$PANEL_MEMBER\" selected" "assignee select reflects the change"
 assert_contains "$("$LIN" issue view ENG-3)" "Assignee:  Panel Member" "POST /assignee persisted"
-code=$(curl -s -o /dev/null -w '%{http_code}' -X POST \
+code=$(wcurl -s -o /dev/null -w '%{http_code}' -X POST \
   --data-urlencode "key=ENG-3" --data-urlencode "assignee=" "$WEB/assignee")
 [ "$code" = 200 ] || fail "/assignee clear returned $code, want 200"
 assert_contains "$("$LIN" issue view ENG-3)" "Assignee:  none" "empty assignee unassigns"
 
 # The page renders all three editors from the catalogues.
-issue=$(curl -sf "$WEB/issue/ENG-3")
+issue=$(wcurl -sf "$WEB/issue/ENG-3")
 assert_contains "$issue" 'id="assignee-form"' "issue page has an assignee select"
 assert_contains "$issue" 'id="project-form"' "issue page has a project select"
 assert_contains "$issue" 'id="labels-form"' "issue page has the label chips"
 
 # AC#3: add a label, then remove it — the form posts the whole set, so
 # removal is a POST with no labels at all.
-code=$(curl -s -o /dev/null -w '%{http_code}' -X POST \
+code=$(wcurl -s -o /dev/null -w '%{http_code}' -X POST \
   --data-urlencode "key=ENG-3" --data-urlencode "labels=$PANEL_LABEL" "$WEB/labels")
 [ "$code" = 200 ] || fail "/labels add returned $code, want 200"
-issue=$(curl -sf "$WEB/issue/ENG-3")
+issue=$(wcurl -sf "$WEB/issue/ENG-3")
 assert_contains "$issue" ">props-label</span>" "the added label renders as a chip"
 assert_contains "$issue" "value=\"$PANEL_LABEL\" checked" "the added label comes back checked"
 assert_contains "$("$LIN" issue view ENG-3)" "Labels:    props-label" "POST /labels persisted"
-code=$(curl -s -o /dev/null -w '%{http_code}' -X POST \
+code=$(wcurl -s -o /dev/null -w '%{http_code}' -X POST \
   --data-urlencode "key=ENG-3" "$WEB/labels")
 [ "$code" = 200 ] || fail "/labels clear returned $code, want 200"
 assert_contains "$("$LIN" issue view ENG-3)" "Labels:    none" "empty /labels removed the label"
-issue=$(curl -sf "$WEB/issue/ENG-3")
+issue=$(wcurl -sf "$WEB/issue/ENG-3")
 if printf '%s' "$issue" | grep -q "value=\"$PANEL_LABEL\" checked"; then
   fail "empty /labels left the chip checked"
 fi
@@ -428,29 +473,29 @@ printf 'Bindgen needs darwin.' | "$LIN" doc new -s darwin-only -t "Gate is darwi
 "$LIN" label create -n props >/dev/null
 "$LIN" issue update ENG-1 --label props >/dev/null
 
-issue=$(curl -sf "$WEB/issue/ENG-1")
+issue=$(wcurl -sf "$WEB/issue/ENG-1")
 assert_contains "$issue" 'id="related-findings"' "issue page renders the related findings section"
 assert_contains "$issue" "web-migrations" "an area-matched finding surfaces unprompted"
 assert_not_contains "$issue" "darwin-only" "an unlinked, unmatched finding stays off the issue"
-issue=$(curl -sf "$WEB/issue/ENG-2")
+issue=$(wcurl -sf "$WEB/issue/ENG-2")
 assert_contains "$issue" "darwin-only" "a linked finding shows on its own issue's page"
 
 # The raw form carries the same list — everything is curl-able (task-104).
-raw=$(curl -sf "$WEB/issue/ENG-1?raw")
+raw=$(wcurl -sf "$WEB/issue/ENG-1?raw")
 assert_contains "$raw" "## Related findings" "issue raw carries related findings"
 assert_contains "$raw" "web-migrations (props): Migration collisions" "issue raw lists the finding"
 
-issue=$(curl -sf "$WEB/issue/ENG-3")
+issue=$(wcurl -sf "$WEB/issue/ENG-3")
 if printf '%s' "$issue" | grep -q 'id="related-findings"'; then
   fail "an issue with no matches renders no findings section"
 fi
 
 # Unknown ids are refused, in the flash strip's voice.
-out=$(curl -s -X POST --data-urlencode "key=ENG-3" --data-urlencode "project=bogus" "$WEB/project")
+out=$(wcurl -s -X POST --data-urlencode "key=ENG-3" --data-urlencode "project=bogus" "$WEB/project")
 assert_contains "$out" "unknown project" "unknown project message"
-out=$(curl -s -X POST --data-urlencode "key=ENG-3" --data-urlencode "assignee=nosuchid" "$WEB/assignee")
+out=$(wcurl -s -X POST --data-urlencode "key=ENG-3" --data-urlencode "assignee=nosuchid" "$WEB/assignee")
 assert_contains "$out" "unknown member" "unknown member message"
-out=$(curl -s -X POST --data-urlencode "key=ENG-3" --data-urlencode "labels=nosuchid" "$WEB/labels")
+out=$(wcurl -s -X POST --data-urlencode "key=ENG-3" --data-urlencode "labels=nosuchid" "$WEB/labels")
 assert_contains "$out" "unknown label" "unknown label message"
 
 # AC#4: the repaint is the existing broadcast. The write path (the POST)
@@ -458,10 +503,10 @@ assert_contains "$out" "unknown label" "unknown label message"
 # been repainted by the response — and the issue-scope SSE frame is what
 # carries the new value to the open page.
 PANEL_EVENTS="$DATA_DIR/events-panel.txt"
-curl -sN "$WEB/events?page=issue&key=ENG-3" >"$PANEL_EVENTS" &
+wcurl -sN "$WEB/events?page=issue&key=ENG-3" >"$PANEL_EVENTS" &
 PANEL_PID=$!
 sleep 0.5
-curl -s -o /dev/null -X POST --data-urlencode "key=ENG-3" \
+wcurl -s -o /dev/null -X POST --data-urlencode "key=ENG-3" \
   --data-urlencode "project=$PANEL_PROJECT" "$WEB/project"
 for _ in $(seq 1 50); do
   grep -q 'id="project-form"' "$PANEL_EVENTS" 2>/dev/null && break
@@ -473,19 +518,19 @@ panel_events=$(cat "$PANEL_EVENTS")
 assert_contains "$panel_events" 'id="issue-detail"' "issue broadcast morphs #issue-detail"
 assert_contains "$panel_events" "value=\"$PANEL_PROJECT\" selected" \
   "the broadcast carries the repainted editor"
-resp=$(curl -s -X POST --data-urlencode "key=ENG-3" --data-urlencode "assignee=$PANEL_MEMBER" "$WEB/assignee")
+resp=$(wcurl -s -X POST --data-urlencode "key=ENG-3" --data-urlencode "assignee=$PANEL_MEMBER" "$WEB/assignee")
 assert_contains "$resp" 'id="flash"' "the write path answers with the flash strip"
 assert_not_contains "$resp" 'id="issue-detail"' "the POST ships no markup — no double update"
 
 # --- drag-and-drop path: /state accepts query params with an empty body ---
-code=$(curl -s -o /dev/null -w '%{http_code}' -X POST "$WEB/state?key=ENG-3&state=done")
+code=$(wcurl -s -o /dev/null -w '%{http_code}' -X POST "$WEB/state?key=ENG-3&state=done")
 [ "$code" = 200 ] || fail "query-param /state returned $code, want 200"
 out=$("$LIN" issue view ENG-3)
 assert_contains "$out" "done" "query-param state change persisted"
 
 # --- markdown comments render; raw HTML stays inert ---
 "$LIN" issue comment ENG-1 -b "has **bold** and \`code\` <script>alert(1)</script>" >/dev/null
-issue=$(curl -sf "$WEB/issue/ENG-1")
+issue=$(wcurl -sf "$WEB/issue/ENG-1")
 assert_contains "$issue" "<strong>bold</strong>" "markdown bold rendered"
 assert_contains "$issue" "<code>code</code>" "markdown code rendered"
 printf '%s' "$issue" | grep -qF "<script>alert(1)</script>" && fail "raw HTML not neutralized in comment"
@@ -494,16 +539,16 @@ printf '%s' "$issue" | grep -qF "<script>alert(1)</script>" && fail "raw HTML no
 # (task-45). CommonMark would collapse it to a space.
 "$LIN" issue comment ENG-1 -b "wrapped line one
 wrapped line two" >/dev/null
-issue=$(curl -sf "$WEB/issue/ENG-1")
+issue=$(wcurl -sf "$WEB/issue/ENG-1")
 assert_contains "$issue" "wrapped line one<br>" "single newline in a comment becomes a line break"
 
 # --- validation: errors arrive as visible flash patches, never silence ---
-out=$(curl -s -X POST -d "title=&state=todo" "$WEB/create")
+out=$(wcurl -s -X POST -d "title=&state=todo" "$WEB/create")
 assert_contains "$out" "datastar-patch-elements" "empty title patches flash"
 assert_contains "$out" "title is required" "empty title message"
-out=$(curl -s -X POST -d "key=ENG-3&state=bogus" "$WEB/state")
+out=$(wcurl -s -X POST -d "key=ENG-3&state=bogus" "$WEB/state")
 assert_contains "$out" "unknown state" "bogus state message"
-out=$(curl -s -X POST -d "key=ENG-3&body=" "$WEB/comment")
+out=$(wcurl -s -X POST -d "key=ENG-3&body=" "$WEB/comment")
 assert_contains "$out" "comment body is required" "empty comment message"
 
 # --- no team configured: up refuses rather than booting half-configured ---
@@ -522,7 +567,7 @@ assert_contains "$out" "LLL_TEAM=ENG" "refusal suggests the existing team"
 
 # --- /events: board scope gets a patch frame after a CLI-driven update ---
 EVENTS_FILE="$DATA_DIR/events.txt"
-curl -sN "$WEB/events?page=board" >"$EVENTS_FILE" &
+wcurl -sN "$WEB/events?page=board" >"$EVENTS_FILE" &
 CURL_PID=$!
 sleep 0.5
 "$LIN" issue update ENG-1 --state done >/dev/null
@@ -540,7 +585,7 @@ assert_contains "$events" 'id="col-done"' "patch contains the target column"
 assert_not_contains "$events" 'id="rail"' "broadcast fragments carry no shell"
 
 # --- /events: issue scope gets comments patch after a CLI comment ---
-curl -sN "$WEB/events?page=issue&key=ENG-1" >"$EVENTS_FILE" &
+wcurl -sN "$WEB/events?page=issue&key=ENG-1" >"$EVENTS_FILE" &
 CURL_PID=$!
 sleep 0.5
 "$LIN" issue comment ENG-1 -b "live comment over sse" >/dev/null
@@ -568,7 +613,7 @@ issue_id() { # title
 "$LIN" issue create -t "Order A" >/dev/null # ENG-4
 "$LIN" issue create -t "Order B" >/dev/null # ENG-5
 "$LIN" issue create -t "Order C" >/dev/null # ENG-6
-board=$(curl -sf "$WEB/")
+board=$(wcurl -sf "$WEB/")
 got=$(col_order "$board" todo)
 [ "$got" = "ENG-4,ENG-5,ENG-6" ] || fail "new issues in creation order: got '$got'"
 
@@ -576,24 +621,24 @@ A_ID=$(issue_id "Order A"); B_ID=$(issue_id "Order B")
 [ -n "$A_ID" ] && [ -n "$B_ID" ] || fail "resolving Order A/B record ids"
 
 # Reorder to the top of the column.
-code=$(curl -s -o /dev/null -w '%{http_code}' -X POST "$WEB/state?key=ENG-6&state=todo&before=$A_ID")
+code=$(wcurl -s -o /dev/null -w '%{http_code}' -X POST "$WEB/state?key=ENG-6&state=todo&before=$A_ID")
 [ "$code" = 200 ] || fail "/state with before returned $code, want 200"
-got=$(col_order "$(curl -sf "$WEB/")" todo)
+got=$(col_order "$(wcurl -sf "$WEB/")" todo)
 [ "$got" = "ENG-6,ENG-4,ENG-5" ] || fail "reorder to top: got '$got'"
 
 # Reorder to the middle (fractional midpoint between two neighbors).
-curl -s -o /dev/null -X POST "$WEB/state?key=ENG-6&state=todo&before=$B_ID"
-got=$(col_order "$(curl -sf "$WEB/")" todo)
+wcurl -s -o /dev/null -X POST "$WEB/state?key=ENG-6&state=todo&before=$B_ID"
+got=$(col_order "$(wcurl -sf "$WEB/")" todo)
 [ "$got" = "ENG-4,ENG-6,ENG-5" ] || fail "reorder to middle: got '$got'"
 
 # No `before` means end of column.
-curl -s -o /dev/null -X POST "$WEB/state?key=ENG-4&state=todo"
-got=$(col_order "$(curl -sf "$WEB/")" todo)
+wcurl -s -o /dev/null -X POST "$WEB/state?key=ENG-4&state=todo"
+got=$(col_order "$(wcurl -sf "$WEB/")" todo)
 [ "$got" = "ENG-6,ENG-5,ENG-4" ] || fail "reorder to end: got '$got'"
 
 # Cross-column drop with a position: state and sort change in one action.
-curl -s -o /dev/null -X POST "$WEB/state?key=ENG-2&state=todo&before=$B_ID"
-board=$(curl -sf "$WEB/")
+wcurl -s -o /dev/null -X POST "$WEB/state?key=ENG-2&state=todo&before=$B_ID"
+board=$(wcurl -sf "$WEB/")
 got=$(col_order "$board" todo)
 [ "$got" = "ENG-6,ENG-2,ENG-5,ENG-4" ] || fail "cross-column drop with position: got '$got'"
 printf '%s' "$(column "$board" in-progress)" | grep -qF "ENG-2" \
@@ -608,14 +653,16 @@ got=$("$LIN" issue list --json | jq -r '[.items[] | select(.state=="todo")] | so
 "$LIN" issue create -t "Doomed" >/dev/null # ENG-7
 DOOMED_ID=$(issue_id "Doomed")
 "$LIN" issue delete ENG-7 --force >/dev/null
-code=$(curl -s -o /dev/null -w '%{http_code}' -X POST "$WEB/state?key=ENG-6&state=todo&before=$DOOMED_ID")
+code=$(wcurl -s -o /dev/null -w '%{http_code}' -X POST "$WEB/state?key=ENG-6&state=todo&before=$DOOMED_ID")
 [ "$code" = 200 ] || fail "/state with stale before returned $code, want 200"
-got=$(col_order "$(curl -sf "$WEB/")" todo)
+got=$(col_order "$(wcurl -sf "$WEB/")" todo)
 [ "$got" = "ENG-2,ENG-5,ENG-4,ENG-6" ] || fail "stale before falls back to end: got '$got'"
 
 # --- browser-level: CLI create appears on an open board without reload ---
 if command -v playwright-cli >/dev/null 2>&1; then
-  playwright-cli -s="$BROWSER_SESSION" open "$WEB/" >/dev/null 2>&1 \
+  # The gate: the browser logs in through the banner's handoff URL once —
+  # the 303 sets the cookie — and every later navigation rides it.
+  playwright-cli -s="$BROWSER_SESSION" open "$WEB/?board_token=$BOARD_TOKEN" >/dev/null 2>&1 \
     || fail "playwright: opening board"
   # The probe marks the live rail node: a morph that replaced or re-rendered
   # the rail would take the attribute with it (task-81).
@@ -859,7 +906,7 @@ fi
 Some **bold** text and `code`.
 
 <script>alert(1)</script>' >/dev/null
-page=$(curl -sf "$WEB/issue/ENG-1")
+page=$(wcurl -sf "$WEB/issue/ENG-1")
 assert_contains "$page" '<div class="desc md">' "description uses the shared markdown container"
 assert_contains "$page" "<h2>Heading</h2>" "description renders a markdown heading"
 assert_contains "$page" "<strong>bold</strong>" "description renders bold"
@@ -871,7 +918,7 @@ assert_not_contains "$page" "<script>alert" "raw HTML in a description stays out
 desc line two
 
 <b>raw</b> markup' >/dev/null
-page=$(curl -sf "$WEB/issue/ENG-1")
+page=$(wcurl -sf "$WEB/issue/ENG-1")
 assert_contains "$page" "desc line one<br>" "single newline in a description becomes a line break"
 assert_not_contains "$page" "<b>raw</b>" "raw HTML in a description is still dropped with hard wraps on"
 
@@ -891,7 +938,7 @@ func main() {}
 ```mermaid
 graph TD; A-->B;
 ```' >/dev/null
-page=$(curl -sf "$WEB/issue/ENG-1")
+page=$(wcurl -sf "$WEB/issue/ENG-1")
 assert_contains "$page" "<th>pick</th>" "GFM table renders as a table"
 assert_not_contains "$page" "| pick | why |" "GFM table is not left as literal pipes"
 assert_contains "$page" "<del>dropped</del>" "GFM strikethrough renders"
@@ -901,14 +948,14 @@ assert_contains "$page" 'class="chroma"' "fenced code is highlighted server-side
 assert_not_contains "$page" 'style="color:#' "chroma emits classes, not inline colors"
 assert_contains "$page" '<code class="language-mermaid">' "a mermaid fence is left plain for the client"
 assert_contains "$page" '/static/mermaid-init.js' "the issue page loads the mermaid initializer"
-curl -sfI "$WEB/static/mermaid.min.js" >/dev/null || fail "vendored mermaid.min.js is not served"
-curl -sfI "$WEB/static/mermaid-init.js" >/dev/null || fail "mermaid-init.js is not served"
+wcurl -sfI "$WEB/static/mermaid.min.js" >/dev/null || fail "vendored mermaid.min.js is not served"
+wcurl -sfI "$WEB/static/mermaid-init.js" >/dev/null || fail "mermaid-init.js is not served"
 
 
 # --- /issues: a sortable, filterable, bookmarkable table (task-82) ---
 # The point of the table is that its whole state is in the URL, so every
 # assertion below is one curl of a URL an agent could type.
-issues=$(curl -sf "$WEB/issues") || fail "/issues did not serve"
+issues=$(wcurl -sf "$WEB/issues") || fail "/issues did not serve"
 assert_contains "$issues" '<table id="issues" class="itbl">' "the issues page renders a table"
 assert_contains "$issues" 'href="/issue/ENG-1"' "the table links rows to their issue pages"
 assert_contains "$issues" 'href="/issues?sort=-created"' "column headers sort server-side through the URL"
@@ -923,7 +970,7 @@ assert_not_contains "$issues" "data-init" "the issues page opens no SSE connecti
 
 # Sorting is server-side: ascending and descending disagree about the first row.
 first_row() { # url
-  curl -sf "$WEB$1" | python3 -c '
+  wcurl -sf "$WEB$1" | python3 -c '
 import re, sys
 keys = re.findall(r"class=\"c-id\"><a href=\"/issue/([A-Z]+-[0-9]+)\"", sys.stdin.read())
 print(keys[0] if keys else "")
@@ -936,7 +983,7 @@ desc=$(first_row "/issues?sort=-number")
 [ "$asc" = "ENG-1" ] || fail "?sort=number should start at ENG-1, got $asc"
 
 # Filters are query params, so a filtered view is a shareable URL.
-todo=$(curl -sf "$WEB/issues?state=todo")
+todo=$(wcurl -sf "$WEB/issues?state=todo")
 assert_contains "$todo" '<option value="todo" selected>' "the chooser shows the filter the URL asked for"
 assert_contains "$todo" 'class="itbl-clear"' "a filtered table offers a way back to all issues"
 # A dedicated pair, so the filter assertion does not depend on what earlier
@@ -944,11 +991,11 @@ assert_contains "$todo" 'class="itbl-clear"' "a filtered table offers a way back
 "$LIN" issue create -t "Table filter subject" >/dev/null
 subject=$("$LIN" issue list --search "Table filter subject" | awk '{print $1}' | head -1)
 "$LIN" issue update "$subject" --state in-review >/dev/null
-in_review=$(curl -sf "$WEB/issues?state=in-review")
+in_review=$(wcurl -sf "$WEB/issues?state=in-review")
 assert_contains "$in_review" "Table filter subject" "?state=in-review keeps the in-review issue"
 assert_contains "$in_review" 'value="in-review" selected' "the state chooser reflects the URL"
 "$LIN" issue update "$subject" --state done >/dev/null
-gone=$(curl -sf "$WEB/issues?state=in-review")
+gone=$(wcurl -sf "$WEB/issues?state=in-review")
 assert_not_contains "$gone" "Table filter subject" "?state=in-review drops it once it moves on"
 
 # The count is honest rather than a bare row tally.
@@ -956,11 +1003,11 @@ assert_contains "$issues" 'class="itbl-count"' "the table states how many issues
 
 # A stale bookmark degrades to the unfiltered table plus the flash strip — the
 # system's one error voice — never a 500.
-bad=$(curl -sf "$WEB/issues?sort=bogus") || fail "a bad sort param returned an error status"
+bad=$(wcurl -sf "$WEB/issues?sort=bogus") || fail "a bad sort param returned an error status"
 assert_contains "$bad" 'class="flash"' "an unknown sort field is reported in the flash strip"
 assert_contains "$bad" "unknown sort field" "the flash names the rejected field"
 assert_contains "$bad" '<table id="issues"' "an unknown sort field still serves the table"
-bad_state=$(curl -sf "$WEB/issues?state=nope") || fail "a bad state param returned an error status"
+bad_state=$(wcurl -sf "$WEB/issues?state=nope") || fail "a bad state param returned an error status"
 assert_contains "$bad_state" "unknown state" "an unknown state is reported too"
 
 # One rail template: the same rows on every page, differing only in which row
@@ -970,7 +1017,7 @@ rail_rows() { printf '%s' "$1" | grep -o 'href="[^"]*"' | sort; }
 # The rail is live data now (favorites, saved views), so both sides are
 # fetched at the same moment — a snapshot from before the browser block
 # would legitimately differ by the views saved since.
-board_rail_now=$(rail "$(curl -sf "$WEB/")")
+board_rail_now=$(rail "$(wcurl -sf "$WEB/")")
 [ "$(rail_rows "$issues_rail")" = "$(rail_rows "$board_rail_now")" ] \
   || fail "the board and issues rails offer different destinations:
 $(diff <(rail_rows "$board_rail_now") <(rail_rows "$issues_rail") || true)"
@@ -988,7 +1035,7 @@ assert_not_contains "$issues_rail" '<a href="/" class="active">' "and the board 
 pj_key=$("$LIN" issue list --search "Project member issue" | awk '{print $1}' | head -1)
 [ -n "$pj_key" ] || fail "the issue created into a project was not found"
 
-projects=$(curl -sf "$WEB/projects") || fail "/projects did not serve"
+projects=$(wcurl -sf "$WEB/projects") || fail "/projects did not serve"
 assert_contains "$projects" 'id="projects"' "the projects page carries its stable id"
 assert_contains "$projects" "Ship the board" "the project is listed by name"
 assert_contains "$projects" "Started" "the list shows the project status"
@@ -1011,36 +1058,36 @@ projects_rail=$(rail "$projects")
 assert_contains "$board_rail_now" 'href="/projects"' "the board's rail has a Projects row"
 assert_contains "$projects_rail" '<a href="/projects" class="active">' \
   "the Projects row is current on its own page"
-board_rail_projects=$(rail "$(curl -sf "$WEB/")")
+board_rail_projects=$(rail "$(wcurl -sf "$WEB/")")
 [ "$(rail_rows "$projects_rail")" = "$(rail_rows "$board_rail_projects")" ] \
   || fail "the board and projects rails offer different destinations"
 
 # The project filter is one more param on the encoding /issues already has,
 # so it composes with the others and survives a sort link.
-pj_filtered=$(curl -sf "$WEB/issues?project=Ship+the+board")
+pj_filtered=$(wcurl -sf "$WEB/issues?project=Ship+the+board")
 assert_contains "$pj_filtered" "Project member issue" "?project= keeps the issue in that project"
 assert_contains "$pj_filtered" '<option value="Ship the board" selected>' \
   "the project chooser reflects the URL"
 assert_contains "$pj_filtered" 'href="/issues?project=Ship&#43;the&#43;board&amp;sort=-created"' \
   "a sort link keeps the project filter"
-assert_not_contains "$(curl -sf "$WEB/issues?project=Ship+the+board&state=done")" \
+assert_not_contains "$(wcurl -sf "$WEB/issues?project=Ship+the+board&state=done")" \
   "Project member issue" "?project= composes with ?state= instead of replacing it"
-assert_not_contains "$(curl -sf "$WEB/issues?project=Ship+the+board")" \
+assert_not_contains "$(wcurl -sf "$WEB/issues?project=Ship+the+board")" \
   "Table filter subject" "?project= drops issues in no project"
 
 # A stale bookmark degrades to the flash strip, never a 500 — same contract as
 # every other rejected param on this page.
-bad_pj=$(curl -sf "$WEB/issues?project=nosuchproject") \
+bad_pj=$(wcurl -sf "$WEB/issues?project=nosuchproject") \
   || fail "an unknown project param returned an error status"
 assert_contains "$bad_pj" 'class="flash"' "an unknown project is reported in the flash strip"
 assert_contains "$bad_pj" "no project named" "the flash names the rejected project"
 assert_contains "$bad_pj" '<table id="issues"' "an unknown project still serves the table"
 
 # An issue says which project it belongs to, and the name is the way in.
-pj_issue=$(curl -sf "$WEB/issue/$pj_key")
+pj_issue=$(wcurl -sf "$WEB/issue/$pj_key")
 assert_contains "$pj_issue" '<a href="/issues?project=Ship&#43;the&#43;board">Ship the board</a>' \
   "the issue page links its project to that project's issues"
-assert_contains "$(curl -sf "$WEB/issue/ENG-1")" \
+assert_contains "$(wcurl -sf "$WEB/issue/ENG-1")" \
   '<option value="" selected>No project</option>' \
   "an issue with no project says so in its select"
 
@@ -1061,36 +1108,36 @@ raw_done=$("$LIN" issue list --search "Raw done subject" | awk '{print $1}' | he
 [ -n "$raw_done" ] || fail "the raw done fixture was not found"
 "$LIN" issue update "$raw_done" --state done >/dev/null
 
-raw_board=$(curl -sf "$WEB/?raw") || fail "board ?raw did not serve"
+raw_board=$(wcurl -sf "$WEB/?raw") || fail "board ?raw did not serve"
 assert_contains "$raw_board" "# Board" "board raw opens with a markdown heading"
 assert_contains "$raw_board" "## Todo" "board raw carries columns as headings"
 assert_contains "$raw_board" "- [$raw_todo](/issue/$raw_todo) | Raw todo subject | todo |" \
   "board raw card lines have the stable shape"
 
 # A filtered board's raw output honors the URL's filter.
-raw_filtered=$(curl -sf "$WEB/?state=todo&raw") || fail "filtered board ?raw did not serve"
+raw_filtered=$(wcurl -sf "$WEB/?state=todo&raw") || fail "filtered board ?raw did not serve"
 assert_contains "$raw_filtered" "Raw todo subject" "filtered board raw keeps the matching card"
 assert_not_contains "$raw_filtered" "Raw done subject" "filtered board raw drops the non-matching card"
 
 # Hidden lanes honor ?hide= exactly as the HTML columns do.
-raw_hidden=$(curl -sf "$WEB/?hide=todo&raw") || fail "hidden-lane ?raw did not serve"
+raw_hidden=$(wcurl -sf "$WEB/?hide=todo&raw") || fail "hidden-lane ?raw did not serve"
 assert_not_contains "$raw_hidden" "## Todo" "a hidden lane gets no raw column"
 assert_not_contains "$raw_hidden" "Raw todo subject" "a hidden lane's cards are not listed"
 
 # The issues table as markdown: the HTML's columns, the URL's filter, and a
 # row shape an agent can parse without reading the HTML first.
-raw_issues=$(curl -sf "$WEB/issues?state=todo&raw") || fail "issues ?raw did not serve"
+raw_issues=$(wcurl -sf "$WEB/issues?state=todo&raw") || fail "issues ?raw did not serve"
 assert_contains "$raw_issues" "| ID | Title | State | Priority | Labels | Assignee | Created | Updated |" \
   "issues raw is a markdown table with the HTML's columns"
 assert_contains "$raw_issues" "| [$raw_todo](/issue/$raw_todo) | Raw todo subject | todo |" \
   "issues raw rows have the stable shape"
 assert_not_contains "$raw_issues" "Raw done subject" "issues raw honors the URL's state filter"
-ct=$(curl -s -o /dev/null -w '%{content_type}' "$WEB/issues?state=todo&raw")
+ct=$(wcurl -s -o /dev/null -w '%{content_type}' "$WEB/issues?state=todo&raw")
 printf '%s' "$ct" | grep -q "text/markdown" || fail "raw answers as text/markdown, got: $ct"
 
 # The issue page: the same spirit as lll issue view --raw — properties as a
 # list, the full description (not the hover snippet), then comments.
-raw_issue=$(curl -sf "$WEB/issue/$raw_todo?raw") || fail "issue ?raw did not serve"
+raw_issue=$(wcurl -sf "$WEB/issue/$raw_todo?raw") || fail "issue ?raw did not serve"
 assert_contains "$raw_issue" "# $raw_todo: Raw todo subject" "issue raw opens with a markdown H1"
 assert_contains "$raw_issue" "- State: todo" "issue raw lists properties"
 assert_contains "$raw_issue" "Raw description line three." \
@@ -1098,18 +1145,18 @@ assert_contains "$raw_issue" "Raw description line three." \
 assert_contains "$raw_issue" "raw seed comment" "issue raw carries comments"
 
 # Unknown issue is a 404 in raw mode too.
-code=$(curl -s -o /dev/null -w '%{http_code}' "$WEB/issue/ENG-99?raw")
+code=$(wcurl -s -o /dev/null -w '%{http_code}' "$WEB/issue/ENG-99?raw")
 [ "$code" = "404" ] || fail "unknown issue in raw mode is a $code, not a 404"
 
 # Projects, search, settings.
-raw_projects=$(curl -sf "$WEB/projects?raw") || fail "projects ?raw did not serve"
+raw_projects=$(wcurl -sf "$WEB/projects?raw") || fail "projects ?raw did not serve"
 assert_contains "$raw_projects" "Ship the board" "projects raw lists the project"
 assert_contains "$raw_projects" "1 issue" "projects raw carries the issue count"
-raw_search=$(curl -sf "$WEB/search?q=Raw+todo&raw") || fail "search ?raw did not serve"
+raw_search=$(wcurl -sf "$WEB/search?q=Raw+todo&raw") || fail "search ?raw did not serve"
 assert_contains "$raw_search" "Raw todo subject" "search raw lists the hit"
-assert_not_contains "$(curl -sf "$WEB/search?q=zzzznope&raw")" "Raw todo subject" \
+assert_not_contains "$(wcurl -sf "$WEB/search?q=zzzznope&raw")" "Raw todo subject" \
   "a no-hit search raw lists nothing"
-raw_settings=$(curl -sf "$WEB/settings?raw") || fail "settings ?raw did not serve"
+raw_settings=$(wcurl -sf "$WEB/settings?raw") || fail "settings ?raw did not serve"
 # The display name rides a seed race (`lll up` may create ENG before the
 # rename POST lands), so assert on the stable key, not the name.
 assert_contains "$raw_settings" "(ENG)" "settings raw lists the team"
@@ -1127,7 +1174,7 @@ print(m.group(1) if m else "")
 ' "$2" "$3"
 }
 
-settings=$(curl -sf "$WEB/settings") || fail "/settings did not respond"
+settings=$(wcurl -sf "$WEB/settings") || fail "/settings did not respond"
 assert_contains "$settings" 'id="settings"' "settings page has its morph target"
 assert_contains "$(rail "$settings")" 'href="/settings" class="active"' \
   "the rail's Settings row is current on /settings"
@@ -1139,50 +1186,50 @@ assert_not_contains "$settings" "pb-dir" "settings does not offer config the run
 assert_not_contains "$settings" "$WEB" "settings does not offer the port it is served on"
 
 # Labels, members and projects are creatable and editable from the page.
-curl -sf -X POST "$WEB/settings/label" -d 'name=web-made' -d 'color=#4cb782' >/dev/null
+wcurl -sf -X POST "$WEB/settings/label" -d 'name=web-made' -d 'color=#4cb782' >/dev/null
 "$LIN" label list | grep -q '^web-made	#4cb782' || fail "creating a label from /settings did not reach PocketBase"
-LABEL_ID=$(row_id "$(curl -sf "$WEB/settings")" label web-made)
+LABEL_ID=$(row_id "$(wcurl -sf "$WEB/settings")" label web-made)
 [ -n "$LABEL_ID" ] || fail "/settings did not render the label it just created"
-curl -sf -X POST "$WEB/settings/label" -d "id=$LABEL_ID" -d 'name=web-renamed' -d 'color=#8d7ce6' >/dev/null
+wcurl -sf -X POST "$WEB/settings/label" -d "id=$LABEL_ID" -d 'name=web-renamed' -d 'color=#8d7ce6' >/dev/null
 "$LIN" label list | grep -q '^web-renamed	#8d7ce6' || fail "renaming and recoloring a label from /settings did not persist"
-curl -sf -X POST "$WEB/settings/label?del=1" -d "id=$LABEL_ID" >/dev/null
+wcurl -sf -X POST "$WEB/settings/label?del=1" -d "id=$LABEL_ID" >/dev/null
 "$LIN" label list | grep -q 'web-renamed' && fail "deleting a label from /settings did not persist" || true
 
-curl -sf -X POST "$WEB/settings/member" -d 'name=Web Member' -d 'email=web@example.com' >/dev/null
+wcurl -sf -X POST "$WEB/settings/member" -d 'name=Web Member' -d 'email=web@example.com' >/dev/null
 "$LIN" member list | grep -q '^Web Member	web@example.com' || fail "creating a member from /settings did not persist"
-MEMBER_ID=$(row_id "$(curl -sf "$WEB/settings")" member "Web Member")
+MEMBER_ID=$(row_id "$(wcurl -sf "$WEB/settings")" member "Web Member")
 # The name is the settings-editable half; the email is the member's login
 # identity (task-180) and the page says so when a row tries to move it.
-curl -sf -X POST "$WEB/settings/member" -d "id=$MEMBER_ID" -d 'name=Web Member Renamed' -d 'email=web@example.com' >/dev/null
+wcurl -sf -X POST "$WEB/settings/member" -d "id=$MEMBER_ID" -d 'name=Web Member Renamed' -d 'email=web@example.com' >/dev/null
 "$LIN" member list | grep -q '^Web Member Renamed	web@example.com' || fail "editing a member from /settings did not persist"
-curl -sf -X POST "$WEB/settings/member" -d "id=$MEMBER_ID" -d 'name=Web Member Renamed' -d 'email=moved@example.com' | grep -q 'login identity' \
+wcurl -sf -X POST "$WEB/settings/member" -d "id=$MEMBER_ID" -d 'name=Web Member Renamed' -d 'email=moved@example.com' | grep -q 'login identity' \
   || fail "moving a member's email from /settings should be refused with the reason"
 
-curl -sf -X POST "$WEB/settings/project" -d 'name=Web Project' -d 'status=planned' >/dev/null
+wcurl -sf -X POST "$WEB/settings/project" -d 'name=Web Project' -d 'status=planned' >/dev/null
 "$LIN" project list | grep -q '^Web Project	planned' || fail "creating a project from /settings did not persist"
-PROJECT_ID=$(row_id "$(curl -sf "$WEB/settings")" project "Web Project")
-curl -sf -X POST "$WEB/settings/project" -d "id=$PROJECT_ID" -d 'name=Web Project' -d 'status=started' >/dev/null
+PROJECT_ID=$(row_id "$(wcurl -sf "$WEB/settings")" project "Web Project")
+wcurl -sf -X POST "$WEB/settings/project" -d "id=$PROJECT_ID" -d 'name=Web Project' -d 'status=started' >/dev/null
 "$LIN" project list | grep -q '^Web Project	started' || fail "changing a project status from /settings did not persist"
 
 # Validation speaks through the one flash strip, and writes nothing.
-assert_contains "$(curl -sf -X POST "$WEB/settings/label" -d 'name=   ')" \
+assert_contains "$(wcurl -sf -X POST "$WEB/settings/label" -d 'name=   ')" \
   'id="flash"' "an empty label name answers with the flash strip"
-assert_contains "$(curl -sf -X POST "$WEB/settings/label" -d 'name=x' -d 'color=nope')" \
+assert_contains "$(wcurl -sf -X POST "$WEB/settings/label" -d 'name=x' -d 'color=nope')" \
   'not a #rrggbb colour' "a malformed colour is refused"
-assert_contains "$(curl -sf -X POST "$WEB/settings/project" -d "id=$PROJECT_ID" -d 'name=Web Project' -d 'status=bogus')" \
+assert_contains "$(wcurl -sf -X POST "$WEB/settings/project" -d "id=$PROJECT_ID" -d 'name=Web Project' -d 'status=bogus')" \
   "unknown project status" "an unknown project status is refused"
 "$LIN" label list | grep -q '^x	' && fail "a refused label write still created a record" || true
 
 # --- the team accent drives --accent and the favicon (task-83) ---
 # Nothing stored means DESIGN.md's canonical orange, so theme.css's own
 # tokens are left byte-identical: the injected rule is empty.
-assert_contains "$(curl -sf "$WEB/")" '<style id="accent"></style>' \
+assert_contains "$(wcurl -sf "$WEB/")" '<style id="accent"></style>' \
   "an unset accent overrides nothing"
-assert_contains "$(curl -sf "$WEB/")" 'id="favicon"' "the board carries a generated favicon"
+assert_contains "$(wcurl -sf "$WEB/")" 'id="favicon"' "the board carries a generated favicon"
 
-curl -sf -X POST "$WEB/settings/team" -d 'name=Engineering' -d 'accent=#3ea0f0' >/dev/null
+wcurl -sf -X POST "$WEB/settings/team" -d 'name=Engineering' -d 'accent=#3ea0f0' >/dev/null
 for page in "/" "/issue/ENG-1" "/settings"; do
-  html=$(curl -sf "$WEB$page")
+  html=$(wcurl -sf "$WEB$page")
   assert_contains "$html" '--accent:#3ea0f0' "$page wears the team accent"
   # The whole family is derived from that one hex, so hover, ink, deep and
   # dim move with it instead of staying orange.
@@ -1195,7 +1242,7 @@ done
 
 # A save answers with the head fragment too, so an open page recolors without
 # a reload.
-saved=$(curl -sf -X POST "$WEB/settings/team" -d 'name=Engineering' -d 'accent=#3ea0f0')
+saved=$(wcurl -sf -X POST "$WEB/settings/team" -d 'name=Engineering' -d 'accent=#3ea0f0')
 assert_contains "$saved" 'id="settings"' "a settings save patches the page body back"
 assert_contains "$saved" 'id="accent"' "a settings save patches the head's accent rule"
 
@@ -1205,12 +1252,12 @@ assert_contains "$saved" 'id="accent"' "a settings save patches the head's accen
 TEAM_ID=$(curl -sf -H "$AUTH_HDR" "$LLL_URL/api/collections/teams/records?filter=$(python3 -c "import urllib.parse;print(urllib.parse.quote(\"key='ENG'\"))")" | jq -r '.items[0].id')
 curl -sf -H "$AUTH_HDR" -X PATCH "$LLL_URL/api/collections/teams/records/$TEAM_ID" \
   -H 'Content-Type: application/json' -d '{"accent":"};z{a:b"}' >/dev/null
-assert_contains "$(curl -sf "$WEB/")" '<style id="accent"></style>' \
+assert_contains "$(wcurl -sf "$WEB/")" '<style id="accent"></style>' \
   "an unparseable stored accent falls back to the canonical orange"
 
 # Choosing the canonical orange back stores nothing, so theme.css decides again.
-curl -sf -X POST "$WEB/settings/team" -d 'name=Engineering' -d 'accent=#f0883e' >/dev/null
-assert_contains "$(curl -sf "$WEB/")" '<style id="accent"></style>' \
+wcurl -sf -X POST "$WEB/settings/team" -d 'name=Engineering' -d 'accent=#f0883e' >/dev/null
+assert_contains "$(wcurl -sf "$WEB/")" '<style id="accent"></style>' \
   "picking the default orange clears the stored accent"
 
 # --- favorites (task-84): a workspace-wide star, pinned into the rail ---
@@ -1228,17 +1275,17 @@ except IndexError:
 
 # The star is a set, not a toggle: the button posts the state it just moved
 # to, so a repeat is a no-op instead of an unstar.
-code=$(curl -s -o /dev/null -w '%{http_code}' -X POST "$WEB/favorite?key=ENG-1&on=true")
+code=$(wcurl -s -o /dev/null -w '%{http_code}' -X POST "$WEB/favorite?key=ENG-1&on=true")
 [ "$code" = 200 ] || fail "/favorite on returned $code, want 200"
-board=$(curl -sf "$WEB/")
+board=$(wcurl -sf "$WEB/")
 assert_contains "$(favgroup "$board")" 'href="/issue/ENG-1"' "starred issue is in the rail"
 assert_not_contains "$(favgroup "$board")" "Star an issue to pin it here" \
   "a non-empty group drops the empty-state line"
 # The issue page seeds the star's signal from the server.
-assert_contains "$(curl -sf "$WEB/issue/ENG-1")" 'data-signals:fav="true"' \
+assert_contains "$(wcurl -sf "$WEB/issue/ENG-1")" 'data-signals:fav="true"' \
   "issue page opens with the star lit"
 
-curl -s -o /dev/null -X POST "$WEB/favorite?key=ENG-1&on=true"
+wcurl -s -o /dev/null -X POST "$WEB/favorite?key=ENG-1&on=true"
 count=$(curl -sf -H "$AUTH_HDR" "$LLL_URL/api/collections/favorites/records?perPage=200" | jq '.items | length')
 [ "$count" = 1 ] || fail "starring twice made $count rows, want 1"
 
@@ -1250,25 +1297,25 @@ printf '%s' "$row" | jq -e 'has("member")' >/dev/null || fail "favorite has no m
 [ "$(printf '%s' "$row" | jq -r '.member')" = "" ] || fail "favorite is not workspace-wide"
 
 # Unstarring removes the row, and is equally idempotent.
-curl -s -o /dev/null -X POST "$WEB/favorite?key=ENG-1&on=false"
-curl -s -o /dev/null -X POST "$WEB/favorite?key=ENG-1&on=false"
+wcurl -s -o /dev/null -X POST "$WEB/favorite?key=ENG-1&on=false"
+wcurl -s -o /dev/null -X POST "$WEB/favorite?key=ENG-1&on=false"
 count=$(curl -sf -H "$AUTH_HDR" "$LLL_URL/api/collections/favorites/records?perPage=200" | jq '.items | length')
 [ "$count" = 0 ] || fail "unstarring left $count rows, want 0"
-assert_contains "$(favgroup "$(curl -sf "$WEB/")")" "Star an issue to pin it here" \
+assert_contains "$(favgroup "$(wcurl -sf "$WEB/")")" "Star an issue to pin it here" \
   "the group is empty again after unstarring"
-assert_contains "$(curl -sf "$WEB/issue/ENG-1")" 'data-signals:fav="false"' \
+assert_contains "$(wcurl -sf "$WEB/issue/ENG-1")" 'data-signals:fav="false"' \
   "issue page opens with the star dark"
 
-out=$(curl -s -X POST "$WEB/favorite?key=ENG-99&on=true")
+out=$(wcurl -s -X POST "$WEB/favorite?key=ENG-99&on=true")
 assert_contains "$out" "not found" "/favorite unknown issue message"
 
 # The rail is outside every morph boundary, but the favorites group is its
 # OWN boundary inside it, so a star patches the group alone on every open
 # page — board scope included, which is why the broadcast scope is "*".
-curl -sN "$WEB/events?page=board" >"$EVENTS_FILE" &
+wcurl -sN "$WEB/events?page=board" >"$EVENTS_FILE" &
 CURL_PID=$!
 sleep 0.5
-curl -s -o /dev/null -X POST "$WEB/favorite?key=ENG-1&on=true"
+wcurl -s -o /dev/null -X POST "$WEB/favorite?key=ENG-1&on=true"
 for _ in $(seq 1 50); do
   grep -q "rail-favorites" "$EVENTS_FILE" 2>/dev/null && break
   sleep 0.1
@@ -1285,16 +1332,16 @@ assert_not_contains "$events" 'id="rail"' "the favorites patch carries no shell"
 # Deleting the issue cascades the star away, and that reaches the rail too.
 "$LIN" issue create -t "Starred then deleted" >/dev/null
 STARRED_KEY=$("$LIN" issue list --json | jq -r '.items[] | select(.title=="Starred then deleted") | "ENG-" + (.number|tostring)')
-curl -s -o /dev/null -X POST "$WEB/favorite?key=$STARRED_KEY&on=true"
-assert_contains "$(favgroup "$(curl -sf "$WEB/")")" "Starred then deleted" "second star pinned"
+wcurl -s -o /dev/null -X POST "$WEB/favorite?key=$STARRED_KEY&on=true"
+assert_contains "$(favgroup "$(wcurl -sf "$WEB/")")" "Starred then deleted" "second star pinned"
 "$LIN" issue delete "$STARRED_KEY" --force >/dev/null
-assert_not_contains "$(favgroup "$(curl -sf "$WEB/")")" "Starred then deleted" \
+assert_not_contains "$(favgroup "$(wcurl -sf "$WEB/")")" "Starred then deleted" \
   "deleting an issue cascades its star out of the rail"
 # ...and it is really gone from PB, not merely filtered out of the render:
 # cascadeDelete is what keeps the rail from accumulating dead links.
 count=$(curl -sf -H "$AUTH_HDR" "$LLL_URL/api/collections/favorites/records?perPage=200" | jq '.items | length')
 [ "$count" = 1 ] || fail "cascade left $count favorites, want 1 (ENG-1's)"
-curl -s -o /dev/null -X POST "$WEB/favorite?key=ENG-1&on=false"
+wcurl -s -o /dev/null -X POST "$WEB/favorite?key=ENG-1&on=false"
 
 
 # --- task-94 half two: a saved view is a NAME plus a QUERY STRING -----------
@@ -1312,17 +1359,17 @@ except IndexError:
 
 # The browser block above saved "Browser urgent", so the group already has a
 # row: the group header and its shared-by-everyone note still render.
-assert_contains "$(viewgroup "$(curl -sf "$WEB/")")" "Shared by everyone here" \
+assert_contains "$(viewgroup "$(wcurl -sf "$WEB/")")" "Shared by everyone here" \
   "the views group labels itself shared, not personal"
 
 # The flashing() wrapper answers every POST with a flash-strip fragment;
 # success is the empty flash, errors carry the message (asserted below).
-curl -s -o /dev/null -X POST "$WEB/views/save" \
+wcurl -s -o /dev/null -X POST "$WEB/views/save" \
   -d "name=Todo lane" --data-urlencode "query=?state=todo"
 
 # Saving captures the query string, not a filter model: the record is two
 # fields, and the rail navigates back to the URL.
-vg=$(viewgroup "$(curl -sf "$WEB/")")
+vg=$(viewgroup "$(wcurl -sf "$WEB/")")
 assert_contains "$vg" "Todo lane" "a saved view appears in the rail"
 assert_contains "$vg" 'href="/?state=todo"' "the saved view navigates to its URL"
 
@@ -1333,7 +1380,7 @@ assert_contains "$vg" 'href="/?state=todo"' "the saved view navigates to its URL
 "$LIN" issue create -t "Views fixture other" >/dev/null
 OTHER_KEY=$("$LIN" issue list --json | jq -r '.items[] | select(.title=="Views fixture other") | "ENG-" + (.number|tostring)')
 "$LIN" issue update "$OTHER_KEY" --state in-progress >/dev/null
-view_page=$(curl -sf "$WEB/?state=todo")
+view_page=$(wcurl -sf "$WEB/?state=todo")
 assert_contains "$(column "$view_page" todo)" "Views fixture todo" \
   "a saved view reproduces its filter (matching issue present)"
 assert_not_contains "$(column "$view_page" todo)" "Views fixture other" \
@@ -1344,14 +1391,14 @@ row=$(curl -sf -H "$AUTH_HDR" "$LLL_URL/api/collections/views/records?perPage=20
 [ "$(printf '%s' "$row" | jq -r '.member')" = "" ] || fail "a view is not workspace-wide"
 
 # A duplicate name is a readable error in the flash strip, not a 500.
-dup=$(curl -s -X POST "$WEB/views/save" -d "name=Todo lane" --data-urlencode "query=?state=todo")
+dup=$(wcurl -s -X POST "$WEB/views/save" -d "name=Todo lane" --data-urlencode "query=?state=todo")
 assert_contains "$dup" "already exists" "a duplicate view name is said out loud"
 
 # The SSE bridge patches the views group alone on every open board page.
-curl -sN "$WEB/events?page=board" >"$EVENTS_FILE" &
+wcurl -sN "$WEB/events?page=board" >"$EVENTS_FILE" &
 CURL_PID=$!
 sleep 0.5
-curl -s -o /dev/null -X POST "$WEB/views/save" -d "name=Urgent lane" --data-urlencode "query=?prio=urgent"
+wcurl -s -o /dev/null -X POST "$WEB/views/save" -d "name=Urgent lane" --data-urlencode "query=?prio=urgent"
 for _ in $(seq 1 50); do
   grep -q "rail-views" "$EVENTS_FILE" 2>/dev/null && break
   sleep 0.1
@@ -1373,12 +1420,12 @@ env LLL_TEAM=OPS "$LIN" team create -k OPS -n Operations >/dev/null 2>&1 || true
 env LLL_TEAM=OPS "$LIN" label create -n foreign-label -c '#ff0000' >/dev/null
 env LLL_TEAM=OPS "$LIN" project create -n "Foreign Project" >/dev/null
 
-page=$(curl -sf "$WEB/issues")
+page=$(wcurl -sf "$WEB/issues")
 assert_not_contains "$page" 'value="foreign-label"' "/issues label chooser is team-scoped"
 assert_not_contains "$page" 'value="Foreign Project"' "/issues project chooser is team-scoped"
-assert_not_contains "$(curl -sf "$WEB/settings")" "foreign-label" "/settings is team-scoped"
-assert_not_contains "$(curl -sf "$WEB/projects")" "Foreign Project" "/projects is team-scoped"
-assert_not_contains "$(curl -sf "$WEB/issue/ENG-1")" "foreign-label" "issue page label chips are team-scoped"
+assert_not_contains "$(wcurl -sf "$WEB/settings")" "foreign-label" "/settings is team-scoped"
+assert_not_contains "$(wcurl -sf "$WEB/projects")" "Foreign Project" "/projects is team-scoped"
+assert_not_contains "$(wcurl -sf "$WEB/issue/ENG-1")" "foreign-label" "issue page label chips are team-scoped"
 
 # A posted id from the other team is as unknown as a deleted one, whatever
 # markup it came from.
@@ -1386,25 +1433,25 @@ FOREIGN_LABEL=$(curl -sf -H "$AUTH_HDR" "$LLL_URL/api/collections/labels/records
   | jq -r '.items[] | select(.name=="foreign-label") | .id')
 FOREIGN_PROJECT=$(curl -sf -H "$AUTH_HDR" "$LLL_URL/api/collections/projects/records?perPage=200" \
   | jq -r '.items[] | select(.name=="Foreign Project") | .id')
-assert_contains "$(curl -s -X POST --data-urlencode "key=ENG-1" \
+assert_contains "$(wcurl -s -X POST --data-urlencode "key=ENG-1" \
   --data-urlencode "labels=$FOREIGN_LABEL" "$WEB/labels")" \
   "unknown label" "POST /labels refuses another team's label"
-assert_contains "$(curl -s -X POST --data-urlencode "key=ENG-1" \
+assert_contains "$(wcurl -s -X POST --data-urlencode "key=ENG-1" \
   --data-urlencode "project=$FOREIGN_PROJECT" "$WEB/project")" \
   "unknown project" "POST /project refuses another team's project"
 
 # Labels and projects are required to name a team, so the settings writes
 # have to supply one — and an update must not blank it.
-curl -sf -X POST "$WEB/settings/label" -d 'name=scoped-label' -d 'color=#4cb782' >/dev/null
+wcurl -sf -X POST "$WEB/settings/label" -d 'name=scoped-label' -d 'color=#4cb782' >/dev/null
 SCOPED=$(curl -sf -H "$AUTH_HDR" "$LLL_URL/api/collections/labels/records?perPage=200&expand=team" \
   | jq -r '.items[] | select(.name=="scoped-label") | .expand.team.key')
 [ "$SCOPED" = "ENG" ] || fail "a web-created label landed on team '$SCOPED', want ENG"
 SCOPED_ID=$(curl -sf -H "$AUTH_HDR" "$LLL_URL/api/collections/labels/records?perPage=200" \
   | jq -r '.items[] | select(.name=="scoped-label") | .id')
-curl -sf -X POST "$WEB/settings/label" -d "id=$SCOPED_ID" -d 'name=scoped-label' -d 'color=#8d7ce6' >/dev/null
+wcurl -sf -X POST "$WEB/settings/label" -d "id=$SCOPED_ID" -d 'name=scoped-label' -d 'color=#8d7ce6' >/dev/null
 KEPT=$(curl -sf -H "$AUTH_HDR" "$LLL_URL/api/collections/labels/records/$SCOPED_ID?expand=team" | jq -r '.expand.team.key')
 [ "$KEPT" = "ENG" ] || fail "a settings update blanked the label's team (got '$KEPT')"
-curl -sf -X POST "$WEB/settings/label?del=1" -d "id=$SCOPED_ID" >/dev/null
+wcurl -sf -X POST "$WEB/settings/label?del=1" -d "id=$SCOPED_ID" >/dev/null
 
 
 # --- task-114: /create takes everything `lll issue create` does ------------
@@ -1415,7 +1462,7 @@ curl -sf -X POST "$WEB/settings/label?del=1" -d "id=$SCOPED_ID" >/dev/null
 # The label row only renders when the workspace has labels, and /settings
 # deleted the one it made above, so seed one first.
 "$LIN" label create -n dialog-label -c '#8d7ce6' >/dev/null
-board=$(curl -sf "$WEB/")
+board=$(wcurl -sf "$WEB/")
 assert_contains "$board" 'id="ni-modal"' "board carries the create dialog"
 assert_contains "$board" 'id="ni-form"' "the dialog is a form"
 assert_contains "$board" 'name="description"' "the dialog takes a description"
@@ -1433,7 +1480,7 @@ DL_PROJECT=$(curl -sf -H "$AUTH_HDR" "$LLL_URL/api/collections/projects/records?
 [ -n "$DL_LABEL" ] && [ -n "$DL_MEMBER" ] && [ -n "$DL_PROJECT" ] \
   || fail "seeding the create-dialog assertions"
 
-out=$(curl -s -w '\n%{http_code}' -X POST \
+out=$(wcurl -s -w '\n%{http_code}' -X POST \
   --data-urlencode "title=Created from the dialog" \
   --data-urlencode "description=A **real** description." \
   -d "state=in-progress" -d "priority=high" \
@@ -1457,7 +1504,7 @@ assert_contains "$view" "dialog-label" "labels reached PocketBase"
 
 # The fast path is the point of not making everyone pay for the full form:
 # a title on its own is a complete request, and lands in todo like the CLI's.
-out=$(curl -s -w '\n%{http_code}' -X POST -d "title=Title and nothing else" "$WEB/create")
+out=$(wcurl -s -w '\n%{http_code}' -X POST -d "title=Title and nothing else" "$WEB/create")
 printf '%s' "$out" | tail -1 | grep -q 200 || fail "/create with only a title should return 200"
 FAST_KEY=$("$LIN" issue list --json \
   | jq -r '.items[] | select(.title=="Title and nothing else") | "ENG-" + (.number|tostring)')
@@ -1465,7 +1512,7 @@ assert_contains "$("$LIN" issue view "$FAST_KEY")" "todo" "a title-only create d
 
 # A rejected create writes nothing AND leaves the dialog open, so a typed
 # description survives the failure.
-out=$(curl -s -X POST -d "title=Never written" -d "priority=bogus" "$WEB/create")
+out=$(wcurl -s -X POST -d "title=Never written" -d "priority=bogus" "$WEB/create")
 assert_contains "$out" "unknown priority &#39;bogus&#39;" "a bad priority answers through the flash"
 assert_not_contains "$out" "ni_open" "a failed create does not close the dialog"
 "$LIN" issue list | grep -q "Never written" && fail "a refused create still wrote a record" || true
@@ -1473,7 +1520,7 @@ assert_not_contains "$out" "ni_open" "a failed create does not close the dialog"
 # task-159: the handler is stateless — two creates back to back both land,
 # each on its own closing the dialog (the same one write path, unchanged).
 for n in 1 2; do
-  out=$(curl -s -w '\n%{http_code}' -X POST -d "title=Create more curl $n" "$WEB/create")
+  out=$(wcurl -s -w '\n%{http_code}' -X POST -d "title=Create more curl $n" "$WEB/create")
   printf '%s' "$out" | tail -1 | grep -q 200 || fail "/create number $n of two back-to-back should return 200"
   assert_contains "$out" 'signals {"ni_open": false' "create number $n of two back-to-back closes the dialog"
 done

@@ -122,14 +122,18 @@ pub fn up(args: Slice<string>) -> Result<(), string> {
   // now, so the boot's seeding (team, member) and the board's own writes
   // both need a token. A caller-provided LLL_TOKEN — a member token — wins;
   // otherwise this process defaults to the superuser token, which the
-  // credentials above can always get. The board's browser cannot
-  // authenticate yet: its writes are server-side, and TASK-182 replaces the
-  // process-wide default with per-session member tokens.
+  // credentials above can always get — and, owning those credentials, the
+  // boot can re-mint the token if the realtime bridge ever sees it refused.
+  // The board's BROWSER side is gated separately (serve_gate.lis): a board
+  // token admits a browser, but web writes still author as this process's
+  // identity until browser sessions exist (TASK-182's ADR).
+  let mut refresh: Option<fn() -> Result<string, string>> = None
   if cfg.token == "" {
     match superuser_token(db_url, email, pass) {
       Ok(tok) => {
         let _ = os.Setenv("LLL_TOKEN", tok)
-        fmt.Println("auth   rules are authenticated-only; this process's PocketBase calls (seeding, the board) use the superuser token until TASK-182")
+        refresh = Some(|| superuser_token(db_url, email, pass))
+        fmt.Println("auth   rules are authenticated-only; this process's PocketBase calls (seeding, the board) ride the superuser token, re-minted if refused")
       },
       Err(e) => {
         return Err(
@@ -166,7 +170,7 @@ superuser credentials, or set LLL_TOKEN to a member token.",
       fmt.Println(f"could not open a browser: {e}")
     }
   }
-  run_server(chosen)
+  run_server(chosen, refresh)
 }
 
 /// PocketBase's migrations are cwd-relative, so `lll up` only works
@@ -200,11 +204,17 @@ CLI always agree; with nothing on stdin to answer with (scripts, agents, CI)
 it refuses to start rather than run on a team only this process knows about.
 'lll attach' settles the same question up front, without a boot.
 
+The board is gated: it answers only requests carrying its board token.
+LLL_BOARD_TOKEN sets that token; otherwise one is generated per boot and
+printed in the banner as a login URL — open it once and the browser keeps
+access in a cookie. From a terminal, send the same cookie: curl
+-H 'Cookie: lll_board=<token>' http://127.0.0.1:<port>/.
+
 It also needs to know who you are. On first boot 'me' is guessed from $USER,
 written to ~/.config/lll/lll.toml and seeded as a member so assignment and
 comments work straight away — no second prompt. It goes to the home config,
 not the repo's, because the repo's file is committed. That guess is wrong on
-a shared machine: 'lll config set me <name>' fixes it.",
+a shared machine: 'lll config set me <name>' fixes it."
   )
 }
 

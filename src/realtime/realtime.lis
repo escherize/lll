@@ -1,8 +1,10 @@
 import "go:bufio"
 import "go:bytes"
 import "go:encoding/json"
+import "go:fmt"
 import "go:net/http"
 import "go:net/url"
+import "go:os"
 import "go:strings"
 import "go:time"
 
@@ -125,24 +127,84 @@ struct SubscribeMsg {
 /// (bad URL, PB down) surface immediately; after that a background task pumps
 /// events into the returned channel and, on any stream error (PB restart,
 /// idle disconnect), reconnects from scratch — new SSE connection, new client
-/// id, re-subscribe — retrying every second, silently, forever.
+/// id, re-subscribe — retrying every second, forever. The loop is honest
+/// about state instead of silently stopping: a lost stream and every distinct
+/// reconnect error are printed, and a recovery is too.
+///
+/// `refresh` re-mints the PocketBase token after an auth-shaped reconnect
+/// failure (401/403): `lll up` passes its superuser credentials' minter when
+/// it minted the process token itself, so an expired token heals instead of
+/// wedging the board; None (a caller-provided member token the process cannot
+/// renew) leaves the loop retrying with whatever the config says, loudly.
+/// Every attempt re-reads the config, so a token rotated in a config file is
+/// picked up without a restart — an env token is frozen for the process's
+/// life, which only the refresh hook can unlock.
 ///
 /// The protocol (verified live against PB 0.40.1): GET /api/realtime opens an
 /// SSE stream whose first event is PB_CONNECT carrying {"clientId":...};
 /// POSTing {"clientId","subscriptions":[...]} back to /api/realtime (204)
 /// activates the topics; record events then arrive named by topic, verbatim
 /// including any options suffix.
-pub fn subscribe(base_url: string, topics: Slice<string>) -> Result<Channel<Event>, string> {
+pub fn subscribe(
+  base_url: string,
+  topics: Slice<string>,
+  refresh: Option<fn() -> Result<string, string>>,
+) -> Result<Channel<Event>, string> {
   let ch = Channel.new<Event>()
   let reader = connect(base_url, topics)?
   task {
     pump(reader, ch)
-    loop {
-      time.Sleep(time.Second)
-      if let Ok(r) = connect(base_url, topics) { pump(r, ch) }
-    }
+    reconnect(base_url, topics, refresh, ch)
   }
   Ok(ch)
+}
+
+/// The reconnect loop after the first stream is lost. Retries every second
+/// forever; prints each state change once, so a long outage cannot spam the
+/// log with a line a second, but a board whose subscription died is never
+/// indistinguishable from a live one.
+fn reconnect(
+  base_url: string,
+  topics: Slice<string>,
+  refresh: Option<fn() -> Result<string, string>>,
+  ch: Channel<Event>,
+) {
+  fmt.Println("realtime: PocketBase stream lost — reconnecting")
+  let mut last_err = ""
+  loop {
+    time.Sleep(time.Second)
+    match connect(base_url, topics) {
+      Ok(r) => {
+        if last_err != "" {
+          fmt.Println("realtime: reconnected to PocketBase")
+          last_err = ""
+        }
+        pump(r, ch)
+        fmt.Println("realtime: PocketBase stream lost — reconnecting")
+      },
+      Err(e) => {
+        if e != last_err {
+          fmt.Println(f"realtime: reconnect failed: {e}")
+          last_err = e
+        }
+        if auth_failure(e) {
+          if let Some(mint) = refresh {
+            if let Ok(tok) = mint() {
+              let _ = os.Setenv("LLL_TOKEN", tok)
+              fmt.Println("realtime: re-minted the PocketBase token after an auth failure")
+            }
+          }
+        }
+      },
+    }
+  }
+}
+
+/// Does a connect error name an authorization refusal? connect's status
+/// errors are "GET|POST /api/realtime: <status>", so matching the path plus
+/// code cannot confuse a port number for a status.
+fn auth_failure(e: string) -> bool {
+  strings.Contains(e, "/api/realtime: 401") || strings.Contains(e, "/api/realtime: 403")
 }
 
 /// Open the SSE stream, wait for PB_CONNECT, and POST the subscriptions.

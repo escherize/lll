@@ -1,0 +1,142 @@
+import "go:crypto/rand"
+import "go:crypto/subtle"
+import "go:net/http"
+import "go:os"
+
+// The board gate (TASK-182): every route the board serves — pages, POSTs,
+// /events, /static — answers only requests that carry the board token.
+//
+// The token is a boot-local secret, not a PocketBase credential: it admits a
+// BROWSER to the board, while the board's own PocketBase identity rides the
+// process token (the ADR in TASK-182's report — option (b), service identity,
+// until browser sessions exist). LLL_BOARD_TOKEN sets it; otherwise one is
+// generated per boot and `lll up` prints the login URL in its banner.
+//
+// A browser presents the token as the `lll_board` cookie, set once by
+// visiting the banner's login URL; a terminal presents it as the same cookie
+// or as ?board_token=… on the URL. Cookie over query-only: one login per
+// browser, the token stays out of URLs, history and Referer, and EventSource
+// picks the cookie up automatically — the query param is only the bootstrap
+// handoff, and a GET that logs in with it is redirected to the same URL
+// without the token so it does not linger in the address bar.
+
+/// The board token, resolved once per process: LLL_BOARD_TOKEN wins, else a
+/// fresh random token is generated and pinned into the environment so every
+/// later read — the gate's checks and the banner's login URL — agrees.
+pub fn resolve_board_token() -> string {
+  let set = os.Getenv("LLL_BOARD_TOKEN")
+  if set != "" { return set }
+  // crypto/rand.Text: 26 base32 characters, ~130 bits. A board token is
+  // compared against every anonymous request that arrives, so it must not be
+  // guessable.
+  let made = rand.Text()
+  let _ = os.Setenv("LLL_BOARD_TOKEN", made)
+  made
+}
+
+/// Wrap a page handler with the gate: admit(w, r) decides, and when it says
+/// no it has already written the response (401 page or login redirect).
+pub fn gated(
+  page: fn(http.ResponseWriter, Ref<http.Request>),
+) -> fn(http.ResponseWriter, Ref<http.Request>) {
+  |w: http.ResponseWriter, r: Ref<http.Request>| {
+    if admit(w, r) {
+      page(w, r)
+    }
+  }
+}
+
+/// True when the request may proceed. When false, the response is already
+/// written: a 401 page naming how to get in, or — a GET that logged in with
+/// the query param — the 303 that hands the browser its cookie and cleans
+/// the token out of the address bar.
+fn admit(w: http.ResponseWriter, r: Ref<http.Request>) -> bool {
+  let want = os.Getenv("LLL_BOARD_TOKEN")
+  let mut got = ""
+  let mut via_query = false
+  if let Some(c) = cookie_named(r, "lll_board") { got = c }
+  if got == "" {
+    via_query = true
+    got = query_param(r, "board_token")
+  }
+  if want != "" && subtle.ConstantTimeCompare(got.bytes(), want.bytes()) == 1 {
+    if via_query && r.Method == "GET" {
+      set_board_cookie(w, want)
+      http.Redirect(w, r, without_board_token(r), 303)
+      return false
+    }
+    return true
+  }
+  refused(w)
+  false
+}
+
+/// The named cookie's value, or None when absent.
+fn cookie_named(r: Ref<http.Request>, name: string) -> Option<string> {
+  for c in r.Cookies() {
+    if c.Name == name { return Some(c.Value) }
+  }
+  None
+}
+
+/// One query parameter: the helper lives in serve_pages.lis; the gate shares
+/// it rather than growing a second dialect.
+
+/// Hand the browser a week-long board cookie. HttpOnly: the page's scripts
+/// never need the token, so none of them can leak it.
+fn set_board_cookie(w: http.ResponseWriter, tok: string) {
+  let cookie = http.Cookie {
+    Name: "lll_board",
+    Value: tok,
+    Path: "/",
+    HttpOnly: true,
+    MaxAge: 7 * 24 * 3600,
+    .. // SameSite zero-fills to the default, which browsers treat as Lax.
+  }
+  http.SetCookie(w, &cookie)
+}
+
+/// The request path and query with board_token stripped — the redirect
+/// target after a query-param login, so the token is not re-sent on every
+/// navigation or pasted into a bookmark.
+fn without_board_token(r: Ref<http.Request>) -> string {
+  let Some(u) = r.URL else {
+    return "/"
+  }
+  let mut q = u.Query()
+  q.Del("board_token")
+  let qs = q.Encode()
+  if qs == "" { return u.Path }
+  f"{u.Path}?{qs}"
+}
+
+/// The 401 page. Self-contained (inline styles, no /static — the gate refuses
+/// that too), and it says how to get in: the rule-as-filter spirit — an
+/// anonymous viewer is told the fix, not just refused. HTML attributes are
+/// single-quoted so the lis string stays a plain multi-line literal.
+fn refused(w: http.ResponseWriter) {
+  w.Header().Set("Content-Type", "text/html; charset=utf-8")
+  w.Header().Set("Cache-Control", "no-store")
+  w.WriteHeader(401)
+  let page = "<!doctype html>
+<html lang='en'>
+<head>
+<meta charset='utf-8'>
+<meta name='viewport' content='width=device-width, initial-scale=1'>
+<title>lll board — 401</title>
+</head>
+<body style='font-family: ui-sans-serif, system-ui, sans-serif; max-width: 42rem; margin: 4rem auto; padding: 0 1rem; color: #1c1c1e; line-height: 1.5;'>
+<h1 style='font-size: 1.4rem;'>401 &mdash; this board is gated</h1>
+<p>The lll board only answers requests that carry its board token.</p>
+<p>To get in: open the board URL that <code>lll up</code> printed in its
+banner &mdash; it carries <code>?board_token=&hellip;</code> once, and visiting
+it hands your browser a cookie that keeps it in. The token comes from
+<code>LLL_BOARD_TOKEN</code>, or <code>lll up</code> generates one each boot
+and prints it next to the admin line.</p>
+<p style='color: #666;'>From a terminal:
+<code>curl -H 'Cookie: lll_board=&lt;token&gt;' &lt;board-url&gt;</code></p>
+</body>
+</html>
+"
+  let _ = w.Write(page.bytes())
+}
