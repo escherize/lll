@@ -94,7 +94,7 @@
   <!-- The create dialog's chip-as-control idiom: every workspace label
        renders, the ones the issue carries checked. One change posts the
        whole set — labels is a rel-multi, so the form is the payload. -->
-  <span class="v">{{if .LabelOpts}}<form id="labels-form" class="labs">{{range .LabelOpts}}<label class="lab"><input type="checkbox" name="labels" value="{{.Id}}"{{if .On}} checked{{end}} data-on:change="@post('/labels', {contentType: 'form'})"><span class="chip"><span class="dot" style="background:{{if .Color}}{{.Color}}{{else}}var(--text-3){{end}}"></span>{{.Name}}</span></label>{{end}}</form>{{else}}none{{end}}</span>
+  <span class="v">{{if .LabelOpts}}<form id="labels-form" class="labs"><input type="hidden" name="key" value="{{.Key}}">{{range .LabelOpts}}<label class="lab"><input type="checkbox" name="labels" value="{{.Id}}"{{if .On}} checked{{end}} data-on:change="@post('/labels', {contentType: 'form'})"><span class="chip"><span class="dot" style="background:{{if .Color}}{{.Color}}{{else}}var(--text-3){{end}}"></span>{{.Name}}</span></label>{{end}}</form>{{else}}none{{end}}</span>
 </div>
 <div class="prop"><span class="k">Created</span><span class="v">{{.Created}}</span></div>
 <div class="prop"><span class="k">Updated</span><span class="v">{{.Updated}}</span></div>
