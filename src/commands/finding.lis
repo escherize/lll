@@ -1,3 +1,4 @@
+import "go:encoding/json"
 import "go:fmt"
 import "go:net/url"
 import "go:strings"
@@ -67,6 +68,7 @@ fn finding_list_spec() -> Slice<flags.Flag> {
       help: "only findings whose area equals this",
       ..
     },
+    flags.Flag { name: "--json", help: "print the raw record list as JSON", .. },
   ]
 }
 
@@ -144,6 +146,14 @@ fn finding_list(args: Slice<string>) -> Result<(), string> {
   let mut findings = fetch_findings(current_team()?.id)?
   if area != "" {
     findings = findings.filter(|d| strings.TrimSpace(d.area) == area)
+  }
+  if p.given("--json") {
+    let body = match json.Marshal(findings) {
+      Ok(b) => b as string,
+      Err(e) => return Err(f"encoding findings: {e}"),
+    }
+    fmt.Println(body)
+    return Ok(())
   }
   if findings.is_empty() {
     fmt.Println("No findings.")

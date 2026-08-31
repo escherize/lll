@@ -15,7 +15,7 @@ pub fn project(args: Slice<string>) -> Result<(), string> {
     return Ok(())
   }
   match verb {
-    "list" => project_list(),
+    "list" => project_list(args),
     "create" => project_create(args),
     "view" => project_view(args),
     "--help" => {
@@ -54,7 +54,8 @@ Statuses: planned, started, paused, completed, cancelled",
   )
 }
 
-fn project_list() -> Result<(), string> {
+fn project_list(args: Slice<string>) -> Result<(), string> {
+  let p = flags.parse(project_list_spec(), args, 3, false, "")?
   // Scoped when a team is configured, every team's when not: a project
   // belongs to one team (TASK-173), so the unscoped list is an admin's view.
   let filter = url.QueryEscape(
@@ -66,12 +67,24 @@ fn project_list() -> Result<(), string> {
     "projects",
     &projects,
   )?
+  if p.given("--json") {
+    let body = match json.Marshal(projects) {
+      Ok(b) => b as string,
+      Err(e) => return Err(f"encoding project list: {e}"),
+    }
+    fmt.Println(body)
+    return Ok(())
+  }
   for p in projects.items {
     let mut team = p.expand.team.key
     if team == "" { team = "workspace" }
     fmt.Println(f"{p.name}\t{p.status}\t{team}")
   }
   Ok(())
+}
+
+fn project_list_spec() -> Slice<flags.Flag> {
+  [flags.Flag { name: "--json", help: "print the raw record list as JSON", .. }]
 }
 
 fn project_create_spec() -> Slice<flags.Flag> {
@@ -89,6 +102,7 @@ fn project_create_spec() -> Slice<flags.Flag> {
 pub fn project_verb_spec(verb: string) -> Slice<flags.Flag> {
   match verb {
     "create" => project_create_spec(),
+    "list" => project_list_spec(),
     _ => [],
   }
 }

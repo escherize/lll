@@ -14,7 +14,7 @@ pub fn label(args: Slice<string>) -> Result<(), string> {
     return Ok(())
   }
   match verb {
-    "list" => label_list(),
+    "list" => label_list(args),
     "create" => label_create(args),
     "--help" => {
       label_usage()
@@ -42,7 +42,8 @@ Usage:
   )
 }
 
-fn label_list() -> Result<(), string> {
+fn label_list(args: Slice<string>) -> Result<(), string> {
+  let p = flags.parse(label_list_spec(), args, 3, false, "")?
   // Scoped when a team is configured, every team's when not: a label belongs
   // to one team (TASK-173), so the unscoped list is an admin's view, not a
   // working one.
@@ -55,12 +56,24 @@ fn label_list() -> Result<(), string> {
     "labels",
     &labels,
   )?
+  if p.given("--json") {
+    let body = match json.Marshal(labels) {
+      Ok(b) => b as string,
+      Err(e) => return Err(f"encoding label list: {e}"),
+    }
+    fmt.Println(body)
+    return Ok(())
+  }
   for l in labels.items {
     let mut team = l.expand.team.key
     if team == "" { team = "workspace" }
     fmt.Println(f"{l.name}\t{l.color}\t{team}")
   }
   Ok(())
+}
+
+fn label_list_spec() -> Slice<flags.Flag> {
+  [flags.Flag { name: "--json", help: "print the raw record list as JSON", .. }]
 }
 
 fn label_create_spec() -> Slice<flags.Flag> {
@@ -76,6 +89,7 @@ fn label_create_spec() -> Slice<flags.Flag> {
 pub fn label_verb_spec(verb: string) -> Slice<flags.Flag> {
   match verb {
     "create" => label_create_spec(),
+    "list" => label_list_spec(),
     _ => [],
   }
 }

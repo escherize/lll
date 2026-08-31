@@ -16,7 +16,7 @@ pub fn member(args: Slice<string>) -> Result<(), string> {
     return Ok(())
   }
   match verb {
-    "list" => member_list(),
+    "list" => member_list(args),
     "add" => member_add(args),
     "--help" => {
       member_usage()
@@ -44,17 +44,30 @@ home config names the member that authors your comments.",
   )
 }
 
-fn member_list() -> Result<(), string> {
+fn member_list(args: Slice<string>) -> Result<(), string> {
+  let p = flags.parse(member_list_spec(), args, 3, false, "")?
   let mut members = models.MemberList { .. }
   pb.fetch(
     "/api/collections/members/records?perPage=200&sort=name",
     "members",
     &members,
   )?
+  if p.given("--json") {
+    let body = match json.Marshal(members) {
+      Ok(b) => b as string,
+      Err(e) => return Err(f"encoding member list: {e}"),
+    }
+    fmt.Println(body)
+    return Ok(())
+  }
   for m in members.items {
     fmt.Println(f"{m.name}\t{m.email}")
   }
   Ok(())
+}
+
+fn member_list_spec() -> Slice<flags.Flag> {
+  [flags.Flag { name: "--json", help: "print the raw record list as JSON", .. }]
 }
 
 fn member_add_spec() -> Slice<flags.Flag> {
@@ -69,6 +82,7 @@ fn member_add_spec() -> Slice<flags.Flag> {
 pub fn member_verb_spec(verb: string) -> Slice<flags.Flag> {
   match verb {
     "add" => member_add_spec(),
+    "list" => member_list_spec(),
     _ => [],
   }
 }

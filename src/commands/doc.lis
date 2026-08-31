@@ -265,6 +265,7 @@ fn doc_delete_spec() -> Slice<flags.Flag> {
 pub fn doc_verb_spec(verb: string) -> Slice<flags.Flag> {
   match verb {
     "new" => doc_new_spec(),
+    "list" => doc_list_spec(),
     "view" => doc_view_spec(),
     "edit" => doc_edit_spec(),
     "delete" => doc_delete_spec(),
@@ -334,9 +335,13 @@ fn doc_new(args: Slice<string>) -> Result<(), string> {
   Ok(())
 }
 
+fn doc_list_spec() -> Slice<flags.Flag> {
+  [flags.Flag { name: "--json", help: "print the raw record list as JSON", .. }]
+}
+
 fn doc_list(args: Slice<string>) -> Result<(), string> {
-  let p = flags.parse([], args, 3, false, "lll doc list")?
-  let _ = p
+  let spec = doc_list_spec()
+  let p = flags.parse(spec, args, 3, false, "lll doc list")?
   let team = current_team()?
   let filter = url.QueryEscape(query.filter(team.id, "", "", "", "", ""))
   let mut docs = models.DocList { .. }
@@ -345,6 +350,14 @@ fn doc_list(args: Slice<string>) -> Result<(), string> {
     "docs",
     &docs,
   )?
+  if p.given("--json") {
+    let body = match json.Marshal(docs) {
+      Ok(b) => b as string,
+      Err(e) => return Err(f"encoding docs: {e}"),
+    }
+    fmt.Println(body)
+    return Ok(())
+  }
   for d in docs.items {
     let mut kind = d.kind
     if kind == "" { kind = "-" }

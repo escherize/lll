@@ -14,7 +14,7 @@ pub fn team(args: Slice<string>) -> Result<(), string> {
     return Ok(())
   }
   match verb {
-    "list" => team_list(),
+    "list" => team_list(args),
     "create" => team_create(args),
     "view" => team_view(args),
     "--help" => {
@@ -40,12 +40,25 @@ Usage:
   )
 }
 
-fn team_list() -> Result<(), string> {
+fn team_list(args: Slice<string>) -> Result<(), string> {
+  let p = flags.parse(team_list_spec(), args, 3, false, "")?
   let teams = list_teams()?
+  if p.given("--json") {
+    let body = match json.Marshal(teams) {
+      Ok(b) => b as string,
+      Err(e) => return Err(f"encoding team list: {e}"),
+    }
+    fmt.Println(body)
+    return Ok(())
+  }
   for t in teams.items {
     fmt.Println(f"{t.key}\t{t.name}")
   }
   Ok(())
+}
+
+fn team_list_spec() -> Slice<flags.Flag> {
+  [flags.Flag { name: "--json", help: "print the raw record list as JSON", .. }]
 }
 
 fn team_create_spec() -> Slice<flags.Flag> {
@@ -74,6 +87,7 @@ fn team_create_spec() -> Slice<flags.Flag> {
 pub fn team_verb_spec(verb: string) -> Slice<flags.Flag> {
   match verb {
     "create" => team_create_spec(),
+    "list" => team_list_spec(),
     _ => [],
   }
 }
