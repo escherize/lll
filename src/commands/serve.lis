@@ -1,6 +1,7 @@
 import "go:fmt"
 import "go:github.com/escherize/lll/web"
 import "go:net/http"
+import "go:os"
 import "go:net"
 
 import "config"
@@ -30,6 +31,15 @@ import "realtime"
 /// realtime reconnect failure (the boot passes its superuser credentials'
 /// minter when it owns the token; None when the caller brought a member
 /// token the process cannot renew). See realtime.subscribe.
+/// The address the board and the embedded PocketBase listen on: LLL_BIND,
+/// defaulting to 127.0.0.1. A container deploy sets 0.0.0.0 (the proxy
+/// cannot reach a loopback bind); the default keeps a laptop's board
+/// private. TASK-171.
+pub fn bind_addr() -> string {
+  let b = os.Getenv("LLL_BIND")
+  if b == "" { "127.0.0.1" } else { b }
+}
+
 pub fn run_server(port: int, refresh: Option<fn() -> Result<string, string>>) -> Result<(), string> {
   // The gate's env token, resolved (and generated when unset) before any
   // request can arrive — the handlers and the banner below must agree.
@@ -154,7 +164,11 @@ pub fn run_server(port: int, refresh: Option<fn() -> Result<string, string>>) ->
   // accepting connections, and e2e_web.sh curls the URL the moment the line
   // is printed — announcing before the listen made that a race that fast
   // runners lose (CI run 33343854995).
-  let listener = match net.Listen("tcp", f"127.0.0.1:{port}") {
+  // LLL_BIND (default 127.0.0.1): inside a container the proxy can only
+  // reach a loopback bind from outside it, so deploys set 0.0.0.0 — and a
+  // laptop keeps its default, which is how it avoids serving the internet.
+  let bind = bind_addr()
+  let listener = match net.Listen("tcp", f"{bind}:{port}") {
     Ok(l) => l,
     Err(e) => return Err(f"server: {e}"),
   }

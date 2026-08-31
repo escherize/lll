@@ -79,12 +79,12 @@ pub fn up(args: Slice<string>) -> Result<(), string> {
 
   if !healthy(db_url) {
     let db_port = free_port(port_of(db_url, 8090))
-    db_url = f"http://127.0.0.1:{db_port}"
+    db_url = f"http://{bind_addr()}:{db_port}"
 
     task {
       match gopb.Serve(
         pb_dir,
-        f"127.0.0.1:{db_port}",
+        f"{bind_addr()}:{db_port}",
         "pb/pb_migrations",
         email,
         pass,

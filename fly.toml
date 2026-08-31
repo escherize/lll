@@ -1,0 +1,35 @@
+# TASK-171: Fly configuration. Two ports — the CLI talks to PocketBase (8090),
+# the board links (8100) — and one volume, because the machine filesystem is
+# ephemeral and pb/pb_data is the backlog.
+#
+# app = the Fly app name; set it once with `fly apps create <name>` and keep
+# this file's `app =` in agreement (or delete the line and pass --app).
+
+app = "lll"
+primary_region = "ord"
+
+[build]
+
+[env]
+  LLL_BIND = "0.0.0.0"
+  LLL_TEAM = "ENG"
+
+[http_service]
+  internal_port = 8100
+  force_https = true
+  auto_stop_machines = "suspend"
+  auto_start_machines = true
+  [http_service.concurrency]
+    type = "requests"
+    soft_limit = 200
+    hard_limit = 250
+
+[[services]]
+  internal_port = 8090
+  protocol = "tcp"
+  [[services.ports]]
+    port = 8091
+
+[mounts]
+  source = "lll_data"
+  destination = "/data/pb_data"
