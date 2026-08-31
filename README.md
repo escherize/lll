@@ -69,15 +69,25 @@ file:/Users/you/.config/lll/lll.toml	me=you
 default	web_url=http://127.0.0.1:8100
 ```
 
+Client settings — what every `lll` command reads:
+
 | Env | TOML key | Meaning |
 |---|---|---|
 | `LLL_URL` | `url` | PocketBase base URL (default `http://127.0.0.1:8090`) |
 | `LLL_TEAM` | `team` | Default team key; scopes `issue list`, required by `issue create` |
+| `LLL_ME` | `me` | Your member name; authors your comments and receives assignments |
 | `LLL_SORT` | `sort` | Default sort: `created`, `updated`, `priority`, `number`; `-` prefix descends |
 | `LLL_WEB_URL` | `web_url` | Web board base URL for `board`, `issue url`, `view -w` |
-| — | `me` | Your member name; authors your comments and receives assignments |
 | `LLL_TOKEN` | `token` | PocketBase auth token sent as `Authorization: Bearer` on every request. A secret: `lll login` writes it to the home config, `lll token create` mints agent tokens — never the repo's .lll.toml |
-| `LLL_ADMIN_EMAIL` / `LLL_ADMIN_PASSWORD` | — | PocketBase superuser for `lll up` and `lll token create` (a logged default is used when unset) |
+
+Server settings — read only by `lll up` (env only, no TOML key; on a host,
+set them as secrets):
+
+| Env | Meaning |
+|---|---|
+| `LLL_ADMIN_EMAIL` / `LLL_ADMIN_PASSWORD` | PocketBase superuser, upserted at boot (a logged default is used when unset) |
+| `LLL_BIND` | Bind address for both ports (default `127.0.0.1`; `0.0.0.0` when hosting) |
+| `LLL_BOARD_TOKEN` | Pins the web board's access token; unset, each boot mints and prints a fresh one |
 
 `lll config init` writes a commented template. On its first boot `lll up`
 guesses `me` from `$USER`, writes it to `~/.config/lll/lll.toml` and seeds a
