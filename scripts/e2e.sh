@@ -48,6 +48,7 @@ start_pb || { echo "FAIL: lll up did not start" >&2; cat "$PB_LOG" >&2; exit 1; 
 WATCH_PIDS=""
 cleanup() {
   kill $WATCH_PIDS "$PB_PID" 2>/dev/null || true
+  for pid in ${SPY_PIDS:-}; do kill "$pid" 2>/dev/null || true; done
   e2e_end
 }
 trap cleanup EXIT
@@ -1182,6 +1183,53 @@ assert_contains "$out" "lll finding" "lll --help mentions finding"
 out=$("$LIN" doc --help)
 assert_contains "$out" "-a" "doc --help mentions the area flag"
 assert_contains "$out" "-p" "doc --help mentions the paths flag"
+
+# --- task-179: the pb client sends the configured token --------------------
+# A scratch HTTP listener records the Authorization header of whatever the
+# CLI sends it; LLL_TOKEN is machine state, so it rides the env, and the
+# response is PB-shaped JSON so the command itself succeeds. The listener is
+# generated once and told per-run whether a header is expected.
+SPY="$DATA_DIR/spy_server.py"
+cat > "$SPY" <<'SPY_EOF'
+import http.server, socketserver, sys
+port, rec, body_mode = int(sys.argv[1]), sys.argv[2], sys.argv[3]
+class H(http.server.BaseHTTPRequestHandler):
+    def do_GET(self):
+        with open(rec, "a") as f:
+            f.write((self.headers.get("Authorization") or "<none>") + "\n")
+        body = b'{"items":[],"totalItems":0,"page":1,"perPage":200}'
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+    def log_message(self, *a): pass
+socketserver.TCPServer(("127.0.0.1", port), H).serve_forever()
+SPY_EOF
+
+run_spy() { # rec port -> records one GET's Authorization header
+  python3 "$SPY" "$2" "$1" x >/dev/null 2>&1 &
+  SPY_PIDS="${SPY_PIDS:-} $!"
+  sleep 0.4
+}
+SPY_PIDS=""
+
+REC="$DATA_DIR/auth-header.txt"
+SPY_PORT=$(free_port 20000 39999)
+run_spy "$REC" "$SPY_PORT"
+out=$(LLL_URL="http://127.0.0.1:$SPY_PORT" LLL_TOKEN="spy-token-123" "$LIN" team list)
+assert_contains "$(cat "$REC")" "Bearer spy-token-123" \
+  "the pb client sends the configured token as its Authorization header"
+
+REC2="$DATA_DIR/auth-header-none.txt"
+SPY2_PORT=$(free_port 20000 39999)
+run_spy "$REC2" "$SPY2_PORT"
+out=$(env -u LLL_TOKEN LLL_URL="http://127.0.0.1:$SPY2_PORT" "$LIN" team list)
+assert_contains "$(cat "$REC2")" "<none>" \
+  "no token configured sends no Authorization header"
+
+for pid in $SPY_PIDS; do kill "$pid" 2>/dev/null || true; done
+SPY_PIDS=""
 
 # --- help output ---
 out=$("$LIN" --help)
