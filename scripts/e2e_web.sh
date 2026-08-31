@@ -1002,6 +1002,75 @@ assert_contains "$(curl -sf "$WEB/issue/ENG-1")" \
   '<option value="" selected>No project</option>' \
   "an issue with no project says so in its select"
 
+# --- ?raw: every view answers its URL with markdown (task-104) ------------
+# The URL is the API: the same URL with ?raw is the view in markdown, built
+# from the same view models the HTML renders. One-shot fetches; nothing here
+# subscribes. Dedicated fixtures, because earlier sections moved the shared
+# issues between states.
+"$LIN" issue create -t "Raw todo subject" \
+  -d "Raw description line one.
+
+Raw description line three." >/dev/null
+raw_todo=$("$LIN" issue list --search "Raw todo subject" | awk '{print $1}' | head -1)
+[ -n "$raw_todo" ] || fail "the raw fixture issue was not found"
+"$LIN" issue comment "$raw_todo" -b "raw seed comment" >/dev/null
+"$LIN" issue create -t "Raw done subject" >/dev/null
+raw_done=$("$LIN" issue list --search "Raw done subject" | awk '{print $1}' | head -1)
+[ -n "$raw_done" ] || fail "the raw done fixture was not found"
+"$LIN" issue update "$raw_done" --state done >/dev/null
+
+raw_board=$(curl -sf "$WEB/?raw") || fail "board ?raw did not serve"
+assert_contains "$raw_board" "# Board" "board raw opens with a markdown heading"
+assert_contains "$raw_board" "## Todo" "board raw carries columns as headings"
+assert_contains "$raw_board" "- [$raw_todo](/issue/$raw_todo) | Raw todo subject | todo |" \
+  "board raw card lines have the stable shape"
+
+# A filtered board's raw output honors the URL's filter.
+raw_filtered=$(curl -sf "$WEB/?state=todo&raw") || fail "filtered board ?raw did not serve"
+assert_contains "$raw_filtered" "Raw todo subject" "filtered board raw keeps the matching card"
+assert_not_contains "$raw_filtered" "Raw done subject" "filtered board raw drops the non-matching card"
+
+# Hidden lanes honor ?hide= exactly as the HTML columns do.
+raw_hidden=$(curl -sf "$WEB/?hide=todo&raw") || fail "hidden-lane ?raw did not serve"
+assert_not_contains "$raw_hidden" "## Todo" "a hidden lane gets no raw column"
+assert_not_contains "$raw_hidden" "Raw todo subject" "a hidden lane's cards are not listed"
+
+# The issues table as markdown: the HTML's columns, the URL's filter, and a
+# row shape an agent can parse without reading the HTML first.
+raw_issues=$(curl -sf "$WEB/issues?state=todo&raw") || fail "issues ?raw did not serve"
+assert_contains "$raw_issues" "| ID | Title | State | Priority | Labels | Assignee | Created | Updated |" \
+  "issues raw is a markdown table with the HTML's columns"
+assert_contains "$raw_issues" "| [$raw_todo](/issue/$raw_todo) | Raw todo subject | todo |" \
+  "issues raw rows have the stable shape"
+assert_not_contains "$raw_issues" "Raw done subject" "issues raw honors the URL's state filter"
+ct=$(curl -s -o /dev/null -w '%{content_type}' "$WEB/issues?state=todo&raw")
+printf '%s' "$ct" | grep -q "text/markdown" || fail "raw answers as text/markdown, got: $ct"
+
+# The issue page: the same spirit as lll issue view --raw — properties as a
+# list, the full description (not the hover snippet), then comments.
+raw_issue=$(curl -sf "$WEB/issue/$raw_todo?raw") || fail "issue ?raw did not serve"
+assert_contains "$raw_issue" "# $raw_todo: Raw todo subject" "issue raw opens with a markdown H1"
+assert_contains "$raw_issue" "- State: todo" "issue raw lists properties"
+assert_contains "$raw_issue" "Raw description line three." \
+  "issue raw carries the description as-is, not the snippet"
+assert_contains "$raw_issue" "raw seed comment" "issue raw carries comments"
+
+# Unknown issue is a 404 in raw mode too.
+code=$(curl -s -o /dev/null -w '%{http_code}' "$WEB/issue/ENG-99?raw")
+[ "$code" = "404" ] || fail "unknown issue in raw mode is a $code, not a 404"
+
+# Projects, search, settings.
+raw_projects=$(curl -sf "$WEB/projects?raw") || fail "projects ?raw did not serve"
+assert_contains "$raw_projects" "Ship the board" "projects raw lists the project"
+assert_contains "$raw_projects" "1 issue" "projects raw carries the issue count"
+raw_search=$(curl -sf "$WEB/search?q=Raw+todo&raw") || fail "search ?raw did not serve"
+assert_contains "$raw_search" "Raw todo subject" "search raw lists the hit"
+assert_not_contains "$(curl -sf "$WEB/search?q=zzzznope&raw")" "Raw todo subject" \
+  "a no-hit search raw lists nothing"
+raw_settings=$(curl -sf "$WEB/settings?raw") || fail "settings ?raw did not serve"
+assert_contains "$raw_settings" "Engineering" "settings raw lists the team"
+assert_contains "$raw_settings" "No Issues Here" "settings raw lists the members"
+
 # --- /settings: server-side, shared, CLI-only things (task-83) ---
 # The id of the row a section rendered for a named record, so the assertions
 # below can edit and delete the record the page itself is showing.
