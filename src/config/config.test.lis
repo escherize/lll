@@ -157,3 +157,65 @@ fn load_traced_names_the_file_each_value_came_from() {
   assert src.web_url == "default"
   assert src.me == ""
 }
+
+// ----------------------------------------------------------------- token
+
+#[test]
+fn a_repo_file_without_token_keeps_the_home_one() {
+  // TASK-179: token layers exactly like url and me — a committed repo file
+  // carrying 'team' alone must not throw away the machine's secret.
+  let assert Ok((root, home)) = fixture(
+    "team = \"REPO\"\n",
+    "url = \"http://home:9999\"\ntoken = \"home-token\"\n",
+  )
+  let assert Ok((cfg, src)) = traced_from(root, home)
+  assert cfg.token == "home-token"
+  assert src.token.contains(filepath.Join("home", ".config", "lll", "lll.toml"))
+}
+
+#[test]
+fn the_repo_file_overrides_the_home_token() {
+  let assert Ok((root, home)) = fixture(
+    "token = \"repo-token\"\n",
+    "token = \"home-token\"\n",
+  )
+  let assert Ok(cfg) = load_from(root, home)
+  assert cfg.token == "repo-token"
+}
+
+#[test]
+fn lll_token_beats_both_files_and_is_traced_to_the_env() {
+  let assert Ok((root, home)) = fixture(
+    "token = \"repo-token\"\n",
+    "token = \"home-token\"\n",
+  )
+  let assert Ok((cfg, src)) = traced_with_token(root, home, "env-token")
+  assert cfg.token == "env-token"
+  assert src.token == "env:LLL_TOKEN"
+}
+
+/// `traced_from` with LLL_TOKEN also set, all three restored after.
+fn traced_with_token(
+  dir: string,
+  home: string,
+  token: string,
+) -> Result<(Config, Sources), string> {
+  let Ok(prev_dir) = os.Getwd() else {
+    return Err("reading the working directory")
+  }
+  let prev_home = os.Getenv("HOME")
+  let prev_token = os.Getenv("LLL_TOKEN")
+  if let Err(e) = os.Chdir(dir) {
+    return Err(f"entering {dir}: {e}")
+  }
+  let _ = os.Setenv("HOME", home)
+  let _ = os.Setenv("LLL_TOKEN", token)
+  defer restore_token(prev_dir, prev_home, prev_token)
+  load_traced()
+}
+
+fn restore_token(dir: string, home: string, token: string) {
+  let _ = os.Chdir(dir)
+  let _ = os.Setenv("HOME", home)
+  let _ = os.Setenv("LLL_TOKEN", token)
+}

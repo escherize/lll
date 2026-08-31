@@ -1,0 +1,21 @@
+// The bearer decision is the pure seam of TASK-179: every verb asks bearer()
+// what to put in Authorization, and "" means today's request, untouched. The
+// rest — the header actually reaching the wire — is covered by the e2e suite's
+// scratch HTTP listener, which is the only honest proof of a header.
+
+#[test]
+fn no_token_means_no_authorization_value() {
+  assert bearer("") == ""
+}
+
+#[test]
+fn a_token_becomes_a_bearer_value() {
+  assert bearer("abc123") == "Bearer abc123"
+}
+
+#[test]
+fn only_an_empty_token_means_absent() {
+  // Whitespace is a value like any other: trimming here would silently
+  // "fix" a config typo that the user should see fail against the server.
+  assert bearer(" ") == "Bearer  "
+}

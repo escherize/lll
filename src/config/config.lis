@@ -12,6 +12,7 @@ pub struct Config {
   pub sort: string,
   pub me: string,
   pub web_url: string,
+  pub token: string,
 }
 
 /// Where each field's winning value came from: "file:<path>", "env:LLL_X",
@@ -25,6 +26,7 @@ pub struct Sources {
   pub sort: string,
   pub me: string,
   pub web_url: string,
+  pub token: string,
 }
 
 /// Load config: env vars > the repo's .lll.toml > ~/.config/lll/lll.toml.
@@ -63,6 +65,7 @@ fix the TOML syntax in {path}, or remove it and rerun 'lll config init'",
     if cfg.sort != was.sort { src.sort = from }
     if cfg.me != was.me { src.me = from }
     if cfg.web_url != was.web_url { src.web_url = from }
+    if cfg.token != was.token { src.token = from }
   }
 
   let url = os.Getenv("LLL_URL")
@@ -90,7 +93,11 @@ fix the TOML syntax in {path}, or remove it and rerun 'lll config init'",
     cfg.web_url = web_url
     src.web_url = "env:LLL_WEB_URL"
   }
-
+  let token = os.Getenv("LLL_TOKEN")
+  if token != "" {
+    cfg.token = token
+    src.token = "env:LLL_TOKEN"
+  }
   if cfg.url == "" {
     cfg.url = "http://127.0.0.1:8090"
     src.url = "default"

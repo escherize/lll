@@ -40,10 +40,11 @@ Usage:
 $USER on first boot, which is wrong on a shared machine — this is how you fix
 it. A name with no member yet: 'lll member add -n NAME'.
 
-Precedence: env vars (LLL_URL, LLL_TEAM, LLL_ME, LLL_SORT, LLL_WEB_URL) > the
-repo's .lll.toml > ~/.config/lll/lll.toml. The files layer: each supplies the
-keys it names, so the committed repo file carries 'team' and nothing else
-while 'url' and 'me' stay per-machine. 'lll attach' writes the repo file.",
+Precedence: env vars (LLL_URL, LLL_TEAM, LLL_ME, LLL_SORT, LLL_WEB_URL,
+LLL_TOKEN) > the repo's .lll.toml > ~/.config/lll/lll.toml. The files layer:
+each supplies the keys it names, so the committed repo file carries 'team' and
+nothing else while 'url' and 'me' stay per-machine. 'lll attach' writes the
+repo file.",
   )
 }
 
@@ -153,6 +154,11 @@ fn config_list() -> Result<(), string> {
   print_origin(src.sort, "sort", cfg.sort)
   print_origin(src.me, "me", cfg.me)
   print_origin(src.web_url, "web_url", cfg.web_url)
+  // The token is a secret, so --list answers where it came from, never what
+  // it is. The origin column is the debugging affordance; the value would
+  // only leak into terminals and scrollback.
+  let tok = if cfg.token == "" { "" } else { "••••" }
+  print_origin(src.token, "token", tok)
   Ok(())
 }
 
@@ -174,10 +180,11 @@ fn config_init() -> Result<(), string> {
     return Err(".lll.toml already exists; not overwriting")
   }
   let template = "# lll configuration
-# Precedence: env vars (LLL_URL, LLL_TEAM, LLL_ME, LLL_SORT, LLL_WEB_URL) > this
-# file > ~/.config/lll/lll.toml. The files layer: each supplies the keys it
-# names, so a key left commented out here is inherited from the home config.
-# 'lll config --list' shows every effective value and the file it came from.
+# Precedence: env vars (LLL_URL, LLL_TEAM, LLL_ME, LLL_SORT, LLL_WEB_URL,
+# LLL_TOKEN) > this file > ~/.config/lll/lll.toml. The files layer: each
+# supplies the keys it names, so a key left commented out here is inherited
+# from the home config. 'lll config --list' shows every effective value and
+# the file it came from.
 #
 # Committed at a repo root this file should carry 'team' and nothing else —
 # 'lll attach' writes exactly that. 'url' and 'me' are facts about a machine
@@ -199,6 +206,11 @@ fn config_init() -> Result<(), string> {
 
 # Web board base URL, used by 'lll board' and 'lll issue url' / 'view -w'.
 # web_url = \"http://127.0.0.1:8100\"
+
+# PocketBase auth token, sent as Authorization: Bearer on every request.
+# A secret: set it in ~/.config/lll/lll.toml or LLL_TOKEN, never here —
+# this file gets committed.
+# token = \"\"
 "
   if let Err(e) = os.WriteFile(".lll.toml", template.bytes(), 0o644) {
     return Err(f"writing .lll.toml: {e}")

@@ -20,12 +20,7 @@ is PocketBase running? start everything with 'lll up', or point LLL_URL (or 'url
 
 /// GET a path (joined to base_url) and return the response body.
 pub fn get(path: string) -> Result<string, string> {
-  let base = base_url()?
-  let resp = match http.Get(base + path) {
-    Ok(r) => r,
-    Err(e) => return Err(unreachable(base, e)),
-  }
-  read_body(resp, f"GET {path}")
+  send("GET", path, "")
 }
 
 /// GET a path and decode the JSON body into `out`, naming `what` in the
@@ -46,16 +41,7 @@ pub fn fetch<T>(path: string, what: string, out: Ref<T>) -> Result<(), string> {
 
 /// POST a JSON payload to a path and return the response body.
 pub fn post(path: string, payload: string) -> Result<string, string> {
-  let base = base_url()?
-  let resp = match http.Post(
-    base + path,
-    "application/json",
-    bytes.NewReader(payload.bytes()),
-  ) {
-    Ok(r) => r,
-    Err(e) => return Err(unreachable(base, e)),
-  }
-  read_body(resp, f"POST {path}")
+  send("POST", path, payload)
 }
 
 /// PATCH a JSON payload to a path and return the response body.
@@ -68,8 +54,20 @@ pub fn delete(path: string) -> Result<string, string> {
   send("DELETE", path, "")
 }
 
+/// The value of an Authorization header for `tok`, or "" when there is no
+/// token to send. Pure so the decision is testable without the network: every
+/// verb asks it, and an empty answer means today's request, untouched.
+pub fn bearer(tok: string) -> string {
+  if tok == "" { return "" }
+  f"Bearer {tok}"
+}
+
+/// Every verb's single path to the wire. One place decides the headers, so a
+/// token configured anywhere in the layering reaches PocketBase on every
+/// request — GET included, which is why `get` no longer calls http.Get.
 fn send(method: string, path: string, payload: string) -> Result<string, string> {
-  let base = base_url()?
+  let cfg = config.load()?
+  let base = cfg.url
   let req = match http.NewRequest(
     method,
     base + path,
@@ -78,7 +76,13 @@ fn send(method: string, path: string, payload: string) -> Result<string, string>
     Ok(r) => r,
     Err(e) => return Err(f"{method} {path}: {e}"),
   }
-  req.Header.Set("Content-Type", "application/json")
+  if payload != "" {
+    req.Header.Set("Content-Type", "application/json")
+  }
+  let auth = bearer(cfg.token)
+  if auth != "" {
+    req.Header.Set("Authorization", auth)
+  }
   let resp = match http.DefaultClient.Do(req) {
     Ok(r) => r,
     Err(e) => return Err(unreachable(base, e)),
