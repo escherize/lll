@@ -953,6 +953,63 @@ n=$(LLL_URL=$URL "$LIN" doc view race-found --json | jq -r '.issues | length')
 [ "$n" = "0" ] || fail "deleting a linked issue should unset the relation, got: $n"
 assert_contains "$(LLL_URL=$URL "$LIN" doc view race-found)" "race-found Race found" "doc survives a linked issue's deletion"
 
+# --- findings (TASK-103): authorship with area/paths, near by path, list,
+# issue view surfacing. A finding is a doc with kind=finding; retrieval is
+# by area and path — a filter, never a body search.
+out=$(printf 'Migrations are a merge hazard.' | env LLL_URL=$URL "$LIN" doc new -s migration-hazard -t "Migration collisions" -k finding -a pb -p "pb/pb_migrations, src/pb" -b -)
+assert_contains "$out" "Created doc migration-hazard" "doc new takes area and paths"
+
+out=$(LLL_URL=$URL "$LIN" doc view migration-hazard)
+assert_contains "$out" "Kind:      finding" "finding view shows kind"
+assert_contains "$out" "Area:      pb" "finding view shows area"
+assert_contains "$out" "Paths:     pb/pb_migrations, src/pb" "finding view shows paths"
+
+# near: exact path, parent directory, and a file inside a stored directory —
+# containment matches in both directions.
+out=$(LLL_URL=$URL "$LIN" finding near src/pb)
+assert_contains "$out" "migration-hazard" "finding near matches the exact path"
+out=$(LLL_URL=$URL "$LIN" finding near src)
+assert_contains "$out" "migration-hazard" "finding near matches the parent directory"
+out=$(LLL_URL=$URL "$LIN" finding near src/pb/up.lis)
+assert_contains "$out" "migration-hazard" "finding near matches a file inside a stored directory"
+out=$(LLL_URL=$URL "$LIN" finding near web/templates)
+assert_contains "$out" "No findings for web/templates." "finding near with no match says so"
+
+out=$(LLL_URL=$URL "$LIN" finding list)
+assert_contains "$out" "migration-hazard	pb	Migration collisions" "finding list prints slug, area, title"
+out=$(LLL_URL=$URL "$LIN" finding list --area pb)
+assert_contains "$out" "migration-hazard" "finding list --area matches"
+out=$(LLL_URL=$URL "$LIN" finding list --area nothing)
+assert_contains "$out" "No findings." "finding list --area without a match"
+
+# Issue view surfaces related findings (the brief mechanism, AC#3): a
+# finding linked to the issue always shows; a finding whose area names one
+# of the issue's labels shows without any link.
+env LLL_URL=$URL "$LIN" issue link ENG-1 race-found >/dev/null
+out=$(LLL_URL=$URL "$LIN" issue view ENG-1)
+assert_contains "$out" "Related findings:" "issue view has a related findings section"
+assert_contains "$out" "race-found (-) — Race found" "a linked finding always shows"
+
+LLL_URL=$URL "$LIN" label create -n pb >/dev/null
+env LLL_URL=$URL "$LIN" issue update ENG-1 --label pb >/dev/null
+out=$(LLL_URL=$URL "$LIN" issue view ENG-1)
+assert_contains "$out" "migration-hazard (pb) — Migration collisions" "an area-matched finding surfaces by label"
+
+out=$(env LLL_URL=$URL "$LIN" issue view ENG-1 --raw)
+assert_contains "$out" "## Related findings" "issue view --raw carries related findings"
+assert_contains "$out" "- migration-hazard (pb): Migration collisions" "issue view --raw lists the finding"
+out=$(env LLL_URL=$URL "$LIN" issue view ENG-2 --raw)
+assert_not_contains "$out" "Related findings" "an issue with no matches renders no findings section"
+
+out=$("$LIN" finding --help)
+assert_contains "$out" "lll finding near" "finding --help mentions near"
+assert_contains "$out" "lll finding list" "finding --help mentions list"
+out=$("$LIN" --help)
+assert_contains "$out" "lll finding" "lll --help mentions finding"
+out=$("$LIN" doc --help)
+assert_contains "$out" "-a" "doc --help mentions the area flag"
+assert_contains "$out" "-p" "doc --help mentions the paths flag"
+
 # --- help output ---
 out=$("$LIN" --help)
 assert_contains "$out" "Usage:" "lll --help"

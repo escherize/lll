@@ -234,6 +234,15 @@ pub struct CommentsVM {
   pub comments: Slice<CommentVM>,
 }
 
+/// One related finding in the issue page's RELATED FINDINGS block
+/// (TASK-103). Docs have no web route, so a finding renders as its own
+/// block — slug, area, title — read here, followed in the CLI.
+pub struct FindingVM {
+  pub slug: string,
+  pub title: string,
+  pub area: string,
+}
+
 /// View model for the issue page / issue-detail fragment.
 pub struct IssueVM {
   pub deleted: bool,
@@ -271,6 +280,11 @@ pub struct IssueVM {
   pub project_opts: Slice<PickVM>,
   pub label_opts: Slice<LabelPickVM>,
   pub comments: Slice<CommentVM>,
+  // The RELATED FINDINGS block. Filled by issue_page ONLY (like favorited
+  // and emojis): the section renders once per page load, outside the
+  // #issue-detail morph boundary, so a broadcast never re-renders it and
+  // issue_vm leaves it empty.
+  pub findings: Slice<FindingVM>,
   // Seeds the topbar star's $fav signal. Only the page handler sets it: the
   // star lives outside #issue-detail, so no broadcast re-renders it.
   pub favorited: bool,

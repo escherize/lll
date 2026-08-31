@@ -247,6 +247,13 @@ pub struct Doc {
   pub title: string,
   pub kind: string,
   pub body: string,
+  // TASK-103: the retrieval coordinates. `area` is one workspace area,
+  // conventionally a label's name — an issue whose labels contain it
+  // surfaces the doc. `paths` is comma-separated file/directory paths the
+  // doc is about; `lll finding near <path>` matches by directory
+  // containment. Empty on docs that name neither.
+  pub area: string,
+  pub paths: string,
   pub issues: Slice<string>,
   pub created: string,
   pub updated: string,
@@ -264,6 +271,10 @@ pub struct NewDoc {
   pub title: string,
   pub kind: string,
   pub body: string,
+  #[json(omitempty)]
+  pub area: string,
+  #[json(omitempty)]
+  pub paths: string,
   #[json(omitempty)]
   pub issues: Slice<string>,
 }

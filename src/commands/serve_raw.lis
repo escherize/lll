@@ -115,6 +115,18 @@ fn issue_raw(vm: IssueVM) -> string {
     lines = lines.append("")
     lines = lines.append(vm.description_md)
   }
+  // The unprompted part rides the raw form too (TASK-103): a curl of an
+  // issue page is as good a brief as `lll issue view --raw`.
+  if vm.findings.length() > 0 {
+    lines = lines.append("")
+    lines = lines.append("## Related findings")
+    lines = lines.append("")
+    for f in vm.findings {
+      let mut area = f.area
+      if area == "" { area = "-" }
+      lines = lines.append(f"- {f.slug} ({area}): {f.title}")
+    }
+  }
   if vm.comments.length() > 0 {
     lines = lines.append("")
     lines = lines.append("## Comments")
