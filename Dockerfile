@@ -2,37 +2,35 @@
 # not just the binary: `lll up` reads pb/pb_migrations and pb/pb_hooks from
 # disk relative to the WORKDIR, so those paths must exist at runtime.
 #
+# The build stage is PLAIN `go build` over Go that `lis emit` produced on the
+# deploying machine — lis never runs in the container, because lis (0.11.3 and
+# 0.12.0) cannot bindgen on linux: typedef generation fails for x/term, the
+# local path modules, and goldmark-highlighting (finding filed 2026-08-31).
+# Consequence: DO NOT `fly deploy` from the checkout — the context must carry
+# a fresh `target/` emit with relative replace paths. scripts/fly-deploy.sh
+# builds that context; use it.
+#
 # Deploy (bcm, needs the Fly account):
 #   fly apps create <app>
 #   fly volumes create lll_data --size 3 --region <region>
 #   fly secrets set LLL_TEAM=<key> LLL_ADMIN_EMAIL=<email> LLL_ADMIN_PASSWORD=<pw>
-#   fly deploy
+#   scripts/fly-deploy.sh
 # The volume mounts at /data/pb_data (see fly.toml) — without it, every deploy
 # wipes the backlog (the single most common way to lose everything here).
 
-# --- build stage: compile lll with the pinned lis toolchain ---
+# --- build stage: plain go build of the pre-emitted Go ---
+# go.mod says `go 1.27`, so the toolchain must be at least that even though
+# lis itself runs go 1.25.
 FROM golang:1.27-alpine AS build
-RUN apk add --no-cache curl git
-# lis via the upstream installer (not a mise plugin; see mise.toml). The
-# installer picks its own prefix per platform, so resolve the binary and pin
-# it where every later RUN sees it.
-RUN curl -LsSf https://github.com/ivov/lisette/releases/download/lisette-v0.11.3/lisette-installer.sh | sh \
- && LIS_BIN=$(find / -type f -name lis 2>/dev/null | head -1) \
- && ln -sf "$LIS_BIN" /usr/local/bin/lis
-WORKDIR /src
-COPY . .
-# TASK-168: a first boot writes 'me' to the home config, never the repo's
-# committed .lll.toml; the build itself needs no config.
-RUN lis build
+COPY . /src
+WORKDIR /src/target
+RUN go build -o .lisette/bin/lll .
 
 # --- runtime stage: the checkout paths + the built binary ---
 FROM alpine:3.20
 RUN apk add --no-cache ca-certificates curl
 COPY --from=build /src /app
-COPY --from=build /root/.local/bin/lis /usr/local/bin/lis
 WORKDIR /app
-# The binary is rebuilt at boot so the checkout and the binary cannot drift.
-RUN true
 
 ENV LLL_BIND=0.0.0.0
 # LLL_TEAM / LLL_ADMIN_EMAIL / LLL_ADMIN_PASSWORD come from fly secrets.
