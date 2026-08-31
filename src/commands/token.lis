@@ -1,0 +1,193 @@
+import "go:encoding/json"
+import "go:fmt"
+import "go:os"
+import "go:strconv"
+import "go:strings"
+
+import "config"
+import "flags"
+import "models"
+import "pb"
+
+// `lll token` (TASK-183) — the agent entry point for auth. Agents do not
+// have passwords to type; a superuser mints them a static, non-refreshable
+// PocketBase token (the impersonate endpoint, verified in v0.40.1), which the
+// agent sends as LLL_TOKEN or persists in the home config.
+
+/// Dispatch `lll token <verb>`.
+pub fn token(args: Slice<string>) -> Result<(), string> {
+  let Some(verb) = args.get(2) else {
+    token_usage()
+    return Ok(())
+  }
+  match verb {
+    "create" => token_create(args),
+    "--help" => {
+      token_usage()
+      Ok(())
+    },
+    "-h" => {
+      token_usage()
+      Ok(())
+    },
+    other => Err(f"unknown token command: '{other}' (see 'lll token --help')"),
+  }
+}
+
+fn token_usage() {
+  fmt.Println(
+    "lll token - work with agent tokens
+
+Usage:
+  lll token create <member> [--duration seconds]
+
+Mints a static, non-refreshable PocketBase token that authenticates as
+<member> — the agent credential, superuser-only. The token is printed once,
+when it is created; nothing else ever shows it. Use it as LLL_TOKEN=<token>,
+or persist it as token = \"...\" in ~/.config/lll/lll.toml (never the repo's
+.lll.toml, which is committed).",
+  )
+}
+
+fn token_create_spec() -> Slice<flags.Flag> {
+  [
+    flags.Flag { name: "--duration", value: true, hint: "seconds", help: "token lifetime in seconds; 0 uses the members collection's duration", .. },
+    flags.Flag { name: "--help", alias: "-h", hidden: true, help: "show this help", .. },
+  ]
+}
+
+/// The flag table of one token verb; empty for verbs without flags. Read by
+/// `lll completions` so the scripts complete exactly what the parser accepts.
+pub fn token_verb_spec(verb: string) -> Slice<flags.Flag> {
+  match verb {
+    "create" => token_create_spec(),
+    _ => [],
+  }
+}
+
+fn token_create(args: Slice<string>) -> Result<(), string> {
+  let spec = token_create_spec()
+  let usage = flags.usage("lll token create", spec, "<member>")
+  let p = flags.parse(spec, args, 3, true, usage)?
+  if p.given("--help") {
+    print_token_create_usage()
+    return Ok(())
+  }
+  let name = p.first()
+  if name == "" {
+    return Err(f"usage: {usage}")
+  }
+  let mut duration = 0
+  let raw = p.one("--duration")
+  if raw != "" {
+    let Ok(d) = strconv.Atoi(raw) else {
+      return Err(f"--duration must be a number of seconds, got '{raw}'")
+    }
+    // PocketBase validates duration >= 0 (v0.40.1 impersonateForm), so a
+    // negative value is refused here rather than round-tripped into a 400.
+    if d < 0 {
+      return Err("--duration must be 0 or more; 0 uses the members collection's duration")
+    }
+    duration = d
+  }
+
+  let su = superuser_auth()?
+  let found = find_member_as(su, name)?
+  let Some(member) = found else {
+    return Err(f"no member named '{name}' — see 'lll member add'")
+  }
+  let payload = match json.Marshal(models.ImpersonateRequest { duration }) {
+    Ok(b) => b,
+    Err(e) => return Err(f"encoding the request: {e}"),
+  }
+  let body = match pb.post_as(
+    f"/api/collections/members/impersonate/{member.id}",
+    payload as string,
+    su,
+  ) {
+    Ok(b) => b,
+    Err(e) => {
+      // A member token (or a guest) gets PocketBase's 403; say what to set.
+      if strings.Contains(e, "403") || strings.Contains(e, "401") {
+        return Err(
+          "token create is superuser-only and the configured token is not one
+set LLL_ADMIN_EMAIL/LLL_ADMIN_PASSWORD to the credentials 'lll up' prints",
+        )
+      }
+      return Err(f"impersonating {name}: {e}")
+    },
+  }
+  let tok = decode_auth(body, "the impersonate response")?
+
+  // The one place a token is ever printed: it is the agent's credential,
+  // delivered exactly once, in the env form it is used in. Every other
+  // surface — login, config --list, the board — redacts it.
+  fmt.Println(f"LLL_TOKEN={tok}")
+  fmt.Println(
+    f"one-time agent token for {member.name} — shown only here; to persist it, put token = \"...\" in ~/.config/lll/lll.toml (never .lll.toml, which is committed)",
+  )
+  Ok(())
+}
+
+/// A superuser token for the impersonation call. Env credentials win and
+/// authenticate fresh through PocketBase's own endpoint; without them the
+/// configured token is tried as-is — if it is not a superuser token, the
+/// impersonate call itself refuses, and the error names what to set.
+fn superuser_auth() -> Result<string, string> {
+  let email = os.Getenv("LLL_ADMIN_EMAIL")
+  let pass = os.Getenv("LLL_ADMIN_PASSWORD")
+  if email != "" && pass != "" {
+    let payload = match json.Marshal(models.AuthRequest { identity: email, password: pass }) {
+      Ok(b) => b,
+      Err(e) => return Err(f"encoding credentials: {e}"),
+    }
+    let body = match pb.post_anon(
+      "/api/collections/_superusers/auth-with-password",
+      payload as string,
+    ) {
+      Ok(b) => b,
+      Err(e) => return Err(f"authenticating as the superuser: {e}"),
+    }
+    return decode_auth(body, "the superuser auth response")
+  }
+  let cfg = config.load()?
+  if cfg.token != "" {
+    return Ok(cfg.token)
+  }
+  Err(
+    "token create is superuser-only and nothing here can authenticate as one
+set LLL_ADMIN_EMAIL/LLL_ADMIN_PASSWORD (the credentials 'lll up' prints), or
+put a superuser token in LLL_TOKEN",
+  )
+}
+
+/// Pull the token out of an auth-with-password / impersonate response body
+/// (both answer {token, record}; verified in v0.40.1 apis/record_helpers.go).
+fn decode_auth(body: string, what: string) -> Result<string, string> {
+  let mut auth = models.AuthResponse { .. }
+  if let Err(e) = json.Unmarshal(body.bytes(), &auth) {
+    return Err(f"decoding {what}: {e}")
+  }
+  if auth.token == "" {
+    return Err(f"{what} carried no token")
+  }
+  Ok(auth.token)
+}
+
+fn print_token_create_usage() {
+  fmt.Println(
+    "lll token create - mint a static agent token (superuser only)
+
+Usage:
+  lll token create <member> [--duration seconds]
+
+Authenticates as the PocketBase superuser — from LLL_ADMIN_EMAIL and
+LLL_ADMIN_PASSWORD (the credentials 'lll up' prints), or the configured token
+when it already is one — and asks PocketBase to impersonate <member>: a
+static, non-refreshable token sent as LLL_TOKEN. --duration caps the token's
+lifetime in seconds; 0 (the default) uses the members collection's duration.
+
+The token is printed exactly once. Agents persist it with
+token = \"...\" in ~/.config/lll/lll.toml — never .lll.toml, which is committed.",
+  )
+}
