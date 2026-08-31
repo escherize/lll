@@ -10,3 +10,4 @@ pb/pb_data/
 .private
 .claude/worktrees/
 .lll-demo/
+*.log
