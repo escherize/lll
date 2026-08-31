@@ -39,7 +39,7 @@ LIN=target/.lisette/bin/lll
 # USER is pinned: a first boot seeds a member named after it (task-31), and
 # the board assertions must not depend on who runs this suite. HOME is pinned
 # because that first boot WRITES 'me' to the home config now (TASK-168).
-USER=e2e HOME="$E2E_HOME" "$LIN" up --no-open --pb-dir "$DATA_DIR/pb_data" --port "$WEB_PORT" \
+env -u LLL_TOKEN USER=e2e HOME="$E2E_HOME" "$LIN" up --no-open --pb-dir "$DATA_DIR/pb_data" --port "$WEB_PORT" \
   </dev/null >"$PB_LOG" 2>&1 &
 PB_PID=$!
 SERVE_PID=""
