@@ -481,6 +481,36 @@ assert_contains "$out" "bryan@example.com" "member list shows email"
 assert_contains "$out" "carol" "member list has carol"
 assert_contains "$out" "alice" "member list has the member config set me seeded"
 
+# --- task-180: members is an auth collection -------------------------------
+# carol was created without an email, so the CLI synthesized the reserved
+# identity; the record carries a random password nobody knows, which is what
+# makes the record creatable without making it log-in-able.
+carol_email=$(curl -sf "$URL/api/collections/members/records?perPage=200" | jq -r '.items[] | select(.name=="carol") | .email')
+assert_contains "$carol_email" "@members.invalid" \
+  "an email-less member got the reserved synthetic identity"
+
+# PocketBase's own auth-with-password issues tokens for members that HAVE a
+# real password. bryan was created with -e; give him one via the admin API
+# and walk the full auth round trip.
+BRYAN_ID=$(curl -sf "$URL/api/collections/members/records?perPage=200" | jq -r '.items[] | select(.name=="bryan") | .id')
+curl -sf -X PATCH "$URL/api/collections/members/records/$BRYAN_ID" \
+  -H 'Content-Type: application/json' \
+  -d '{"password":"bryan-pass-123","passwordConfirm":"bryan-pass-123"}' >/dev/null \
+  || fail "setting bryan's password via the admin API"
+AUTH=$(set +e; curl -s -X POST "$URL/api/collections/members/auth-with-password" \
+  -H 'Content-Type: application/json' \
+  -d '{"identity":"bryan@example.com","password":"bryan-pass-123"}'; set -e)
+assert_contains "$AUTH" '"token"' "auth-with-password returns a token"
+TOKEN=$(printf '%s' "$AUTH" | jq -r '.token')
+[ -n "$TOKEN" ] && [ "$TOKEN" != "null" ] || fail "auth token is empty"
+# The token authenticates a GET the (still public) rules allow.
+code=$(curl -s -o /dev/null -w '%{http_code}' -H "Authorization: Bearer $TOKEN" \
+  "$URL/api/collections/issues/records?perPage=1")
+[ "$code" = 200 ] || fail "authenticated GET with the member token returned $code"
+# And the assignee/author paths are untouched by the collection conversion:
+out=$(LLL_URL=$URL "$LIN" issue view ENG-7)
+assert_contains "$out" "Assignee:  bryan" "assignee relation survives the auth conversion"
+
 # --- --assignee on create; assignee in list and view ---
 out=$(LLL_URL=$URL LLL_TEAM=ENG "$LIN" issue create -t "Assigned issue" --assignee bryan)
 assert_contains "$out" "Created ENG-7: Assigned issue" "assigned create output"
