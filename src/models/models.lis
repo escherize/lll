@@ -319,3 +319,29 @@ pub struct NewDoc {
   #[json(omitempty)]
   pub issues: Slice<string>,
 }
+
+/// POST body for PocketBase's auth-with-password (members and _superusers
+/// alike): `identity` is the account's email.
+#[json]
+pub struct AuthRequest {
+  pub identity: string,
+  pub password: string,
+}
+
+/// The shape both auth-with-password and impersonate answer with (verified
+/// in v0.40.1 apis/record_helpers.go): the token to send as Bearer and the
+/// member record it belongs to. `record.name` is who a login is.
+#[json]
+pub struct AuthResponse {
+  pub token: string,
+  pub record: Member,
+}
+
+/// POST body for /api/collections/members/impersonate/{id} (TASK-183): a
+/// static, non-refreshable agent token. 0 uses the collection's token
+/// duration; the endpoint validates duration >= 0 (v0.40.1
+/// apis/record_auth_impersonate.go).
+#[json]
+pub struct ImpersonateRequest {
+  pub duration: int,
+}

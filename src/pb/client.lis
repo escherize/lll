@@ -54,6 +54,27 @@ pub fn delete(path: string) -> Result<string, string> {
   send("DELETE", path, "")
 }
 
+/// POST without the configured token — for the auth endpoints themselves
+/// (member login, superuser auth), where the request must stand on the
+/// credentials in its body and a stale or unrelated token must not ride along.
+pub fn post_anon(path: string, payload: string) -> Result<string, string> {
+  let cfg = config.load()?
+  request(cfg.url, "POST", path, payload, "")
+}
+
+/// GET riding `tok` instead of the configured token — for flows that act as
+/// a specific actor (token create's superuser-gated member lookup).
+pub fn get_as(path: string, tok: string) -> Result<string, string> {
+  let cfg = config.load()?
+  request(cfg.url, "GET", path, "", bearer(tok))
+}
+
+/// POST riding `tok` instead of the configured token (impersonation).
+pub fn post_as(path: string, payload: string, tok: string) -> Result<string, string> {
+  let cfg = config.load()?
+  request(cfg.url, "POST", path, payload, bearer(tok))
+}
+
 /// The value of an Authorization header for `tok`, or "" when there is no
 /// token to send. Pure so the decision is testable without the network: every
 /// verb asks it, and an empty answer means today's request, untouched.
@@ -67,7 +88,18 @@ pub fn bearer(tok: string) -> string {
 /// request — GET included, which is why `get` no longer calls http.Get.
 fn send(method: string, path: string, payload: string) -> Result<string, string> {
   let cfg = config.load()?
-  let base = cfg.url
+  request(cfg.url, method, path, payload, bearer(cfg.token))
+}
+
+/// The request `send`, `post_anon`, `get_as` and `post_as` all share; `auth`
+/// is the Authorization header value ("" sends none).
+fn request(
+  base: string,
+  method: string,
+  path: string,
+  payload: string,
+  auth: string,
+) -> Result<string, string> {
   let req = match http.NewRequest(
     method,
     base + path,
@@ -79,7 +111,6 @@ fn send(method: string, path: string, payload: string) -> Result<string, string>
   if payload != "" {
     req.Header.Set("Content-Type", "application/json")
   }
-  let auth = bearer(cfg.token)
   if auth != "" {
     req.Header.Set("Authorization", auth)
   }
