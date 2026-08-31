@@ -1,6 +1,7 @@
 import "go:fmt"
 import "go:github.com/escherize/lll/web"
 import "go:net/http"
+import "go:net"
 
 import "config"
 import "models"
@@ -139,8 +140,16 @@ pub fn run_server(port: int) -> Result<(), string> {
   // "static/theme.css" with no prefix surgery.
   http.Handle("GET /static/", http.FileServerFS(web.Assets()))
 
+  // Bind BEFORE announcing: "board <url>" is the promise that the board is
+  // accepting connections, and e2e_web.sh curls the URL the moment the line
+  // is printed — announcing before the listen made that a race that fast
+  // runners lose (CI run 33343854995).
+  let listener = match net.Listen("tcp", f"127.0.0.1:{port}") {
+    Ok(l) => l,
+    Err(e) => return Err(f"server: {e}"),
+  }
   fmt.Println(f"board  http://127.0.0.1:{port}")
-  match http.ListenAndServe(f"127.0.0.1:{port}", http.DefaultServeMux) {
+  match http.Serve(listener, http.DefaultServeMux) {
     Ok(_) => Ok(()),
     Err(e) => Err(f"server: {e}"),
   }
