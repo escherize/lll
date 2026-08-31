@@ -635,6 +635,16 @@ fn view(args: Slice<string>) -> Result<(), string> {
       fmt.Println("")
       fmt.Println(full.description)
     }
+    let comments = fetch_comments(full.id)?
+    if comments.length() > 0 {
+      fmt.Println("")
+      fmt.Println("## Comments")
+      for cm in comments {
+        let mut author = cm.expand.author.name
+        if author == "" { author = "ghost" }
+        fmt.Println(f"- **{author}** ({display.relative(cm.created)}): {cm.body}")
+      }
+    }
     print_findings_raw(full)?
     return Ok(())
   }

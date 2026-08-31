@@ -1,0 +1,42 @@
+#!/usr/bin/env bash
+# bin/lll-export — a one-way markdown mirror of the database (TASK-89).
+#
+# Wipes and rewrites the target directory from the live server: one file per
+# issue (issues/KEY-N.md via `lll issue view --raw`), one per doc
+# (docs/SLUG.md via `lll doc view --raw`). The mirror is a build artifact:
+# never read back, never reconciled, no tombstones — a deleted issue simply
+# vanishes from the next export. git makes it durable; grep makes it useful
+# with no server running.
+#
+# Usage: bin/lll-export [TARGET_DIR]   (default: mirror/, at the repo root)
+# Config flows through the usual plumbing: LLL_URL, LLL_TEAM, LLL_TOKEN (or
+# the home config's token), HOME.
+#
+# TASK-89. The volume is not a backup; this mirror pushed to git is.
+set -euo pipefail
+
+TARGET="${1:-mirror}"
+LLL="${LLL_BIN:-target/.lisette/bin/lll}"
+[ -x "$LLL" ] || LLL="$(command -v lll)"
+
+command -v jq >/dev/null || { echo "lll-export needs jq on PATH" >&2; exit 1; }
+
+WORK="$(mktemp -d)"
+trap 'rm -rf "$WORK"' EXIT
+
+# --- enumerate ---
+issues=$("$LLL" issue list --json | jq -r '.items[] | "\(.expand.team.key)-\(.number)"')
+docs=$("$LLL" doc list --json | jq -r '.items[] | .slug' 2>/dev/null || true)
+
+# --- wipe and rewrite, one way ---
+rm -rf "$TARGET"
+mkdir -p "$TARGET/issues" "$TARGET/docs"
+
+for key in $issues; do
+  "$LLL" issue view "$key" --raw > "$TARGET/issues/$key.md"
+done
+for slug in $docs; do
+  "$LLL" doc view "$slug" --raw > "$TARGET/docs/$slug.md"
+done
+
+echo "lll-export: $(ls "$TARGET/issues" | wc -l | tr -d ' ') issues, $(ls "$TARGET/docs" | wc -l | tr -d ' ') docs -> $TARGET"
