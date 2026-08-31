@@ -76,21 +76,21 @@ except Exception: print("")')
            | python3 -c 'import json,sys; it=json.load(sys.stdin)["items"]; print(it[0]["id"] if it else "")')
     done
     [ -n "$id" ] || fail "seeding team $1: neither create nor lookup produced an id"
-  else
-    # The rename must actually stick before the suite moves on: on a loaded
-    # runner a swallowed PATCH failure left the boot's default name in place
-    # and 'team list has name' failed half a suite later (run 33340875034).
-    named=""
-    for _ in 1 2 3 4 5; do
-      curl -sf -X PATCH "$URL/api/collections/teams/records/$id" \
-        -H 'Content-Type: application/json' -d "{\"name\":\"$2\"}" >/dev/null
-      named=$(curl -sf "$URL/api/collections/teams/records/$id" \
-        | python3 -c 'import json,sys; print(json.load(sys.stdin)["name"])')
-      [ "$named" = "$2" ] && break
-      sleep 0.2
-    done
-    [ "$named" = "$2" ] || fail "seeding team $1: rename to '$2' never stuck (saw '$named')"
   fi
+  # The rename must actually stick before the suite moves on, on EVERY path:
+  # `lll up` names a fresh team after its key, so losing the create race above
+  # used to leave the boot's "ENG" in place — half a suite later
+  # 'team list has name' failed (seen on a loaded runner, twice in a row).
+  named=""
+  for _ in 1 2 3 4 5; do
+    curl -sf -X PATCH "$URL/api/collections/teams/records/$id" \
+      -H 'Content-Type: application/json' -d "{\"name\":\"$2\"}" >/dev/null
+    named=$(curl -sf "$URL/api/collections/teams/records/$id" \
+      | python3 -c 'import json,sys; print(json.load(sys.stdin)["name"])')
+    [ "$named" = "$2" ] && break
+    sleep 0.2
+  done
+  [ "$named" = "$2" ] || fail "seeding team $1: rename to '$2' never stuck (saw '$named')"
   printf '%s' "$id"
 }
 ENG_ID=$(seed_team ENG Engineering)
