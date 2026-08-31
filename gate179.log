@@ -1,0 +1,260 @@
+[test] $ command -v lis >/dev/null || { echo "lis not found. Install it:" >&2; echo "  curl -LsSf https://github.com/ivov/lisette/releases/latest/download/lisette-installer.sh | sh" >&2; exit 1; }
+[build] $ command -v lis >/dev/null || { echo "lis not found. Install it:" >&2; echo "  curl -LsSf https://github.com/ivov/lisette/releases/latest/download/lisette-installer.sh | sh" >&2; exit 1; }
+[test] 
+[test]   ! Test runner is in early preview · Bug reports are welcome
+[test] 
+[test]   ▲ Unused import
+[test]    ╭─[src/commands/serve_settings.lis:1:8]
+[test]  1 │ import "go:encoding/json"
+[test]    ·        ─────────┬────────
+[test]    ·                 ╰── never used
+[test]  2 │ import "go:crypto/rand"
+[test]    ╰────
+[test]   help: Use or remove this import · code: [lint.unused_import]
+[test] 
+[test]   ✓ Compiled `lll` v0.1.0 (250ms)
+[test] 
+[test]   src/commands/
+[test]     doc.test.lis
+[test]       ├── ✓ check_slug_accepts_the_usual_shapes
+[test]       ├── ✓ check_slug_trims_surrounding_space
+[test]       ├── ✓ check_slug_rejects_empty_and_blank
+[test]       ├── ✓ check_slug_rejects_uppercase_and_punctuation
+[test]       ├── ✓ check_slug_rejects_leading_or_trailing_hyphen
+[test]       ├── ✓ check_slug_rejects_over_eighty_characters
+[test]       ├── ✓ check_slug_error_quotes_the_input_and_names_the_fix
+[test]       ├── ✓ check_kind_defaults_empty_to_wiki
+[test]       ├── ✓ check_kind_accepts_each_kind_case_insensitively
+[test]       └── ✓ check_kind_rejects_unknown_kinds_with_the_list
+[test]     issue.test.lis
+[test]       ├── ✓ deslug_returns_a_bare_key_untouched
+[test]       ├── ✓ deslug_strips_scheme_host_and_issue_prefix
+[test]       ├── ✓ deslug_ignores_a_trailing_slash
+[test]       ├── ✓ deslug_accepts_a_relative_issue_path
+[test]       ├── ✓ deslug_survives_multi_byte_hosts_paths_and_keys
+[test]       ├── ✓ deslug_returns_the_argument_when_it_is_not_key_shaped
+[test]       ├── ✓ deslug_currently_keeps_a_query_string_or_fragment
+[test]       ├── ✓ check_emoji_trims_surrounding_space
+[test]       ├── ✓ check_emoji_clears_with_an_empty_string
+[test]       ├── ✓ check_emoji_allows_the_longest_single_emoji
+[test]       ├── ✓ check_emoji_counts_runes_not_bytes
+[test]       ├── ✓ check_emoji_rejects_more_than_eight_runes
+[test]       ├── ✓ check_emoji_reports_the_trimmed_value
+[test]       ├── ✓ positional_id_is_empty_when_nothing_is_passed
+[test]       ├── ✓ positional_id_takes_the_single_argument
+[test]       ├── ✓ positional_id_passes_multi_byte_arguments_through
+[test]       ├── ✓ positional_id_rejects_flags_with_the_usage_line
+[test]       ├── ✓ positional_id_rejects_a_second_argument
+[test]       ├── ✓ value_or_stdin_returns_a_plain_value_unchanged
+[test]       ├── ✓ split_issue_key_splits_key_and_number
+[test]       ├── ✓ split_issue_key_keeps_hyphenated_team_keys
+[test]       ├── ✓ split_issue_key_handles_multi_byte_team_keys
+[test]       ├── ✓ split_issue_key_rejects_ids_without_both_halves
+[test]       ├── ✓ split_issue_key_rejects_a_non_numeric_tail
+[test]       ├── ✓ split_issue_key_error_quotes_the_input_and_the_expected_shape
+[test]       ├── ✓ json_quote_wraps_and_escapes
+[test]       ├── ✓ json_quote_escapes_html_delimiters
+[test]       └── ✓ json_quote_keeps_multi_byte_text_literal
+[test]     serve_issues.test.lis
+[test]       ├── ✓ view_query_href_omits_empty_parts_and_escapes_values
+[test]       ├── ✓ the_board_and_the_table_share_one_encoding
+[test]       ├── ✓ several_values_in_one_dimension_are_comma_joined
+[test]       ├── ✓ a_header_link_changes_the_sort_and_keeps_the_filters
+[test]       ├── ✓ clicking_the_sorting_column_flips_its_direction
+[test]       ├── ✓ a_column_with_no_pb_field_behind_it_does_not_sort
+[test]       ├── ✓ every_sortable_column_asks_for_a_field_query_sort_accepts
+[test]       ├── ✓ toggle_adds_and_removes_one_value_keeping_the_rest
+[test]       └── ✓ parse_raw_round_trips_through_the_encoder
+[test]     serve_render.test.lis
+[test]       ├── ✓ priority_options_are_the_linear_scale_with_web_labels
+[test]       └── ✓ the_filter_chooser_lists_priorities_most_urgent_first
+[test]     watch.test.lis
+[test]       ├── ✓ issue_diff_empty_when_nothing_tracked_changed
+[test]       ├── ✓ issue_diff_state_transition
+[test]       ├── ✓ issue_diff_priority_uses_names
+[test]       ├── ✓ issue_diff_assignee_uses_names_with_none_fallback
+[test]       ├── ✓ issue_diff_joins_multiple_transitions
+[test]       ├── ✓ ndjson_line_splices_the_topic_into_the_payload
+[test]       └── ✓ first_line_takes_up_to_the_first_newline
+[test] 
+[test]   src/config/
+[test]     config.test.lis
+[test]       ├── ✓ within_accepts_the_root_and_what_is_under_it
+[test]       ├── ✓ within_rejects_parents_and_prefix_lookalikes
+[test]       ├── ✓ repo_file_supplies_team_without_losing_the_home_url_and_me (10ms)
+[test]       ├── ✓ the_repo_file_overrides_the_home_file_key_by_key (20ms)
+[test]       ├── ✓ a_subdirectory_finds_the_repo_root_file (20ms)
+[test]       ├── ✓ the_walk_stops_at_the_git_root (20ms)
+[test]       ├── ✓ load_traced_names_the_file_each_value_came_from (10ms)
+[test]       ├── ✓ a_repo_file_without_token_keeps_the_home_one (10ms)
+[test]       ├── ✓ the_repo_file_overrides_the_home_token (10ms)
+[test]       └── ✓ lll_token_beats_both_files_and_is_traced_to_the_env (10ms)
+[test] 
+[test]   src/display/
+[test]     display.test.lis
+[test]       ├── ✓ relative_under_a_minute_is_just_now
+[test]       ├── ✓ relative_minutes_hours_days
+[test]       ├── ✓ every_state_has_a_distinct_glyph
+[test]       ├── ✓ priority_markers_follow_linear_scale
+[test]       ├── ✓ priority_names_follow_linear_scale
+[test]       ├── ✓ priority_round_trips_value_to_name_to_value
+[test]       ├── ✓ priority_round_trips_name_to_value_to_name
+[test]       └── ✓ priority_value_rejects_names_off_the_scale
+[test] 
+[test]   src/flags/
+[test]     flags.test.lis
+[test]       ├── ✓ parse_collects_values_and_booleans
+[test]       ├── ✓ parse_resolves_aliases_under_the_canonical_name
+[test]       ├── ✓ parse_accepts_a_hidden_flag_by_either_spelling
+[test]       ├── ✓ parse_repeats_accumulate_and_single_values_take_the_last
+[test]       ├── ✓ parse_errors_on_unknown_flags
+[test]       ├── ✓ parse_errors_on_a_missing_value
+[test]       ├── ✓ parse_appends_the_usage_line_to_unknown_flag_errors
+[test]       ├── ✓ parse_errors_when_a_required_flag_is_missing
+[test]       ├── ✓ parse_collects_a_single_positional_when_allowed
+[test]       ├── ✓ parse_rejects_positionals_when_disallowed
+[test]       ├── ✓ parse_treats_a_bare_dash_as_an_unknown_flag
+[test]       ├── ✓ parse_never_matches_an_empty_alias
+[test]       ├── ✓ parse_swallows_the_next_argument_as_a_value_without_looking_at_it
+[test]       ├── ✓ usage_renders_required_optional_and_repeated_flags
+[test]       ├── ✓ usage_skips_hidden_flags
+[test]       ├── ✓ section_lists_every_visible_flag_and_skips_hidden_ones
+[test]       ├── ✓ section_aligns_continuation_lines_to_the_help_column
+[test]       ├── ✓ section_is_empty_without_visible_flags
+[test]       └── ✓ tokens_list_every_spelling_and_skip_hidden_flags
+[test] 
+[test]   src/gitctx/
+[test]     gitctx.test.lis
+[test]       ├── ✓ branch_with_slug_yields_uppercased_id
+[test]       ├── ✓ uppercase_and_mixed_case_branches_match
+[test]       ├── ✓ extra_dashes_and_digits_in_slug_are_ignored
+[test]       ├── ✓ bare_key_number_matches
+[test]       ├── ✓ non_matching_branches_yield_none
+[test]       ├── ✓ slug_lowercases_and_joins_alphanumeric_words
+[test]       ├── ✓ slug_caps_at_five_words
+[test]       ├── ✓ slug_of_unsluggable_title_is_empty
+[test]       └── ✓ branch_name_combines_key_number_slug
+[test] 
+[test]   src/markdown/
+[test]     markdown.test.lis
+[test]       ├── ✓ gfm_table_renders_as_a_table_not_literal_pipes
+[test]       ├── ✓ gfm_strikethrough_autolink_and_task_lists
+[test]       ├── ✓ fenced_code_is_tokenized_into_classes_not_inline_colors
+[test]       ├── ✓ mermaid_fences_stay_plain_for_the_client_to_draw
+[test]       ├── ✓ hard_wraps_survive_the_gfm_and_highlighting_extensions
+[test]       └── ✓ raw_html_is_still_dropped
+[test] 
+[test]   src/pb/
+[test]     client.test.lis
+[test]       ├── ✓ no_token_means_no_authorization_value
+[test]       ├── ✓ a_token_becomes_a_bearer_value
+[test]       └── ✓ only_an_empty_token_means_absent
+[test] 
+[test]   src/query/
+[test]     query.test.lis
+[test]       ├── ✓ filter_empty_criteria_yields_empty_string
+[test]       ├── ✓ filter_team_only
+[test]       ├── ✓ filter_state_only
+[test]       ├── ✓ filter_assignee_only
+[test]       ├── ✓ filter_project_only
+[test]       ├── ✓ filter_label_uses_membership_operator
+[test]       ├── ✓ filter_search_matches_title_substring
+[test]       ├── ✓ filter_combines_criteria_with_and
+[test]       ├── ✓ filter_escapes_quotes_and_backslashes
+[test]       ├── ✓ filter_escapes_quotes_in_search
+[test]       ├── ✓ sort_accepts_known_fields
+[test]       ├── ✓ sort_rejects_unknown_fields
+[test]       ├── ✓ scoped_without_a_team_is_the_bare_clause
+[test]       ├── ✓ scoped_with_a_team_leads_with_it
+[test]       ├── ✓ scoped_escapes_both_halves
+[test]       └── ✓ quote_wraps_and_escapes
+[test] 
+[test]   src/realtime/
+[test]     realtime.test.lis
+[test]       ├── ✓ push_line_assembles_an_event_data_frame
+[test]       ├── ✓ push_line_resets_between_frames
+[test]       ├── ✓ push_line_joins_multi_line_data
+[test]       ├── ✓ push_line_eats_one_leading_space_of_the_value
+[test]       ├── ✓ push_line_strips_carriage_returns
+[test]       ├── ✓ push_line_ignores_comments_and_stray_blank_lines
+[test]       ├── ✓ split_field_handles_missing_colon_and_data_containing_colons
+[test]       ├── ✓ topic_with_options_wraps_in_query_and_url_encodes
+[test]       ├── ✓ topic_with_options_includes_expand
+[test]       ├── ✓ topic_with_options_without_options_is_the_bare_topic
+[test]       ├── ✓ strip_options_removes_the_suffix
+[test]       └── ✓ split_field_handles_multi_byte_characters
+[test] 
+[test]   src/theme/
+[test]     theme.test.lis
+[test]       ├── ✓ normalize_hex_accepts_a_six_digit_hex_in_either_case
+[test]       ├── ✓ normalize_hex_rejects_anything_that_is_not_rrggbb
+[test]       ├── ✓ accent_css_is_empty_for_the_canonical_orange
+[test]       ├── ✓ accent_css_derives_the_whole_family_from_one_hex
+[test]       ├── ✓ accent_css_keeps_two_digits_per_channel
+[test]       ├── ✓ accent_ink_flips_to_light_on_a_dark_accent
+[test]       ├── ✓ mark_letter_takes_the_team_initial_or_falls_back
+[test]       ├── ✓ favicon_url_is_an_escaped_data_url_in_the_accent
+[test]       └── ✓ favicon_url_falls_back_to_the_canonical_orange
+[test] 
+[test]   ✓ 148 passed (2.65s)
+[test] Finished in 4.13s
+[build] 
+[build]   ▲ Unused import
+[build]    ╭─[src/commands/serve_settings.lis:1:8]
+[build]  1 │ import "go:encoding/json"
+[build]    ·        ─────────┬────────
+[build]    ·                 ╰── never used
+[build]  2 │ import "go:crypto/rand"
+[build]    ╰────
+[build]   help: Use or remove this import · code: [lint.unused_import]
+[build] 
+[build]   ✓ Emit completed `lll` v0.1.0 (213ms)
+[build]   ✓ Binary at `target/.lisette/bin/lll`
+[build] Finished in 4.66s
+[e2e] $ bash scripts/e2e.sh
+[e2e] 
+[e2e]   ▲ Unused import
+[e2e]    ╭─[src/commands/serve_settings.lis:1:8]
+[e2e]  1 │ import "go:encoding/json"
+[e2e]    ·        ─────────┬────────
+[e2e]    ·                 ╰── never used
+[e2e]  2 │ import "go:crypto/rand"
+[e2e]    ╰────
+[e2e]   help: Use or remove this import · code: [lint.unused_import]
+[e2e] 
+[e2e]   ✓ Emit completed `lll` v0.1.0 (76ms)
+[e2e]   ✓ Binary at `target/.lisette/bin/lll`
+[e2e] e2e: all assertions passed
+[e2e] 
+[e2e]   ▲ Unused import
+[e2e]    ╭─[src/commands/serve_settings.lis:1:8]
+[e2e]  1 │ import "go:encoding/json"
+[e2e]    ·        ─────────┬────────
+[e2e]    ·                 ╰── never used
+[e2e]  2 │ import "go:crypto/rand"
+[e2e]    ╰────
+[e2e]   help: Use or remove this import · code: [lint.unused_import]
+[e2e] 
+[e2e]   ✓ Emit completed `lll` v0.1.0 (78ms)
+[e2e]   ✓ Binary at `target/.lisette/bin/lll`
+[e2e] e2e_web: browser-level realtime check passed
+[e2e] e2e_web: browser-level /search live-typing check passed
+[e2e] e2e_web: all assertions passed
+[e2e] 
+[e2e]   ▲ Unused import
+[e2e]    ╭─[src/commands/serve_settings.lis:1:8]
+[e2e]  1 │ import "go:encoding/json"
+[e2e]    ·        ─────────┬────────
+[e2e]    ·                 ╰── never used
+[e2e]  2 │ import "go:crypto/rand"
+[e2e]    ╰────
+[e2e]   help: Use or remove this import · code: [lint.unused_import]
+[e2e] 
+[e2e]   ✓ Emit completed `lll` v0.1.0 (77ms)
+[e2e]   ✓ Binary at `target/.lisette/bin/lll`
+[e2e] e2e_up: all assertions passed
+[e2e] Finished in 329.14s
+[gate] $ echo 'gate green'
+[gate] gate green
+[gate] Finished in 6.7ms
+Finished in 333.82s
