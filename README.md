@@ -12,26 +12,18 @@ Written in [Lisette](https://github.com/ivov/lisette), which compiles to Go.
 
 ## Quickstart
 
-No separate PocketBase install — it is embedded, and the test suite drives it
-through `lll up`. Go 1.27 is pinned in `mise.toml`; `lis`, the Lisette
-toolchain, ships as a GitHub release rather than a mise plugin, so it is the
-one tool you install yourself:
-
 ```sh
 curl -LsSf https://github.com/ivov/lisette/releases/latest/download/lisette-installer.sh | sh
-mise install             # go, jq
-mise run dev             # build, then PocketBase (:8090) + web board (:8100)
+mise install && mise run dev   # build, then PocketBase (:8090) + web board (:8100)
 ```
 
-`mise run dev` builds first and runs from the checkout root for you, from any
-subdirectory, because PocketBase reads `pb/pb_migrations/` and `pb/pb_hooks/`
-from disk. `web/templates/` and `web/static/` are compiled into the binary, so
-markup and CSS edits need a rebuild (`mise run dev` does it for you). Taken ports auto-increment; Ctrl-C stops
-everything.
+That is everything — PocketBase is embedded in the binary. `lis` (the Lisette
+toolchain) is the one tool mise cannot install; the rest (go, jq) it pins.
+Taken ports auto-increment; Ctrl-C stops everything; markup/CSS edits need a
+rebuild (`mise run dev` does it).
 
 Then, in another shell — with mise activated, `lll` anywhere under the
-checkout is the binary you just built, so there is nothing to install or
-symlink:
+checkout is the binary you just built:
 
 ```sh
 lll attach                               # writes .lll.toml; commit it
