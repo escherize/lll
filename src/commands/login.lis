@@ -1,0 +1,178 @@
+import "go:bufio"
+import "go:encoding/json"
+import "go:fmt"
+import "go:os"
+import "go:strings"
+import "go:golang.org/x/term"
+
+import "config"
+import "flags"
+import "models"
+import "pb"
+
+// `lll login` / `lll logout` (TASK-183) — the human entry point for auth.
+// A human authenticates with email + password through PocketBase's own
+// auth-with-password endpoint and keeps the token in the home config, where
+// TASK-179's layered plumbing picks it up on every later request.
+
+fn login_spec() -> Slice<flags.Flag> {
+  [
+    flags.Flag { name: "--email", alias: "-e", value: true, hint: "email", help: "member email; omit to be prompted", .. },
+    flags.Flag { name: "--help", alias: "-h", hidden: true, help: "show this help", .. },
+  ]
+}
+
+/// The flag table of the verb-less login noun; read by `lll completions`.
+pub fn login_verb_spec(_verb: string) -> Slice<flags.Flag> {
+  login_spec()
+}
+
+/// Dispatch `lll login`.
+pub fn login(args: Slice<string>) -> Result<(), string> {
+  let spec = login_spec()
+  let usage = flags.usage("lll login", spec, "")
+  let p = flags.parse(spec, args, 2, false, usage)?
+  if p.given("--help") {
+    print_login_usage()
+    return Ok(())
+  }
+
+  // One reader for the whole flow: a second bufio.Reader would race the
+  // first's read-ahead and could lose the password line behind the email.
+  let input = bufio.NewReader(os.Stdin)
+  let mut email = p.one("--email")
+  if email == "" {
+    fmt.Print("Email: ")
+    email = read_line(input)?
+  }
+  email = strings.TrimSpace(email)
+  if email == "" {
+    return Err("no email — pass --email <email> or answer the prompt")
+  }
+  let password = read_password(input)?
+  if password == "" {
+    return Err("empty password")
+  }
+
+  let payload = match json.Marshal(models.AuthRequest { identity: email, password }) {
+    Ok(b) => b,
+    Err(e) => return Err(f"encoding credentials: {e}"),
+  }
+  // post_anon, not post: a stale token in the config must not ride on a
+  // request whose whole job is to mint a fresh one.
+  let body = match pb.post_anon(
+    "/api/collections/members/auth-with-password",
+    payload as string,
+  ) {
+    Ok(b) => b,
+    Err(e) => return Err(f"login failed: {e}"),
+  }
+  let mut auth = models.AuthResponse { .. }
+  if let Err(e) = json.Unmarshal(body.bytes(), &auth) {
+    return Err(f"decoding the auth response: {e}")
+  }
+  if auth.token == "" {
+    return Err("the response carried no token")
+  }
+
+  // The home config, never the repo's: .lll.toml is committed (TASK-168) and
+  // a token must not travel with it. The value is written here and printed
+  // nowhere — even success output names the member and the file, not the key.
+  let path = set_home_key("token", auth.token)?
+  fmt.Println(f"logged in as {auth.record.name}")
+  fmt.Println(f"token saved to {path}")
+  if os.Getenv("LLL_TOKEN") != "" {
+    fmt.Println(
+      "note: LLL_TOKEN is set in this shell and overrides the saved token until it is unset",
+    )
+  }
+  Ok(())
+}
+
+/// Dispatch `lll logout`: forget the token the home config holds. Env vars
+/// and the repo file are not ours to touch, and nothing else gets unset.
+pub fn logout(args: Slice<string>) -> Result<(), string> {
+  if let Some(verb) = args.get(2) {
+    if verb == "--help" || verb == "-h" {
+      print_logout_usage()
+      return Ok(())
+    }
+    return Err(f"unknown logout command: '{verb}' (see 'lll logout --help')")
+  }
+  let path = config.home_path()?
+  let cleared = clear_home_key("token")?
+  if cleared {
+    fmt.Println(f"token cleared from {path}")
+  } else {
+    fmt.Println(f"no token in {path} — nothing to clear")
+  }
+  Ok(())
+}
+
+/// The password. With echo off when stdin is a terminal — term.ReadPassword,
+/// so it never lands in scrollback; as a plain line otherwise, because piped
+/// input (scripts, agents, e2e) has nothing to hide it from. The newline is
+/// not part of the password on either path.
+fn read_password(input: Ref<bufio.Reader>) -> Result<string, string> {
+  fmt.Print("Password: ")
+  let fd = os.Stdin.Fd() as int
+  if term.IsTerminal(fd) {
+    let bytes = match term.ReadPassword(fd) {
+      Ok(b) => b,
+      Err(e) => return Err(f"reading the password: {e}"),
+    }
+    fmt.Println("")
+    return Ok(bytes as string)
+  }
+  let line = read_line(input)?
+  fmt.Println("")
+  Ok(line)
+}
+
+/// One line from stdin, EOL stripped. Partial.Both (data, then EOF with no
+/// newline) is an answer too — `printf 'pw' | lll login` ships one.
+fn read_line(input: Ref<bufio.Reader>) -> Result<string, string> {
+  let newline = 10 as byte
+  match input.ReadString(newline) {
+    Partial.Ok(line) => Ok(strip_eol(line)),
+    Partial.Both(line, _) => Ok(strip_eol(line)),
+    Partial.Err(_) => Err("no answer on stdin"),
+  }
+}
+
+/// The line ReadString returned, without its end-of-line — "\n" as piped, or
+/// "\r\n" when the source writes Windows endings.
+fn strip_eol(line: string) -> string {
+  let line = strings.TrimSuffix(line, "\n")
+  strings.TrimSuffix(line, "\r")
+}
+
+fn print_login_usage() {
+  fmt.Println(
+    "lll login - authenticate as a member
+
+Usage:
+  lll login [--email email]
+
+Prompts for the email (unless --email/-e) and reads the password with echo
+off when stdin is a terminal; piped input is read as a plain line. On success
+the PocketBase token is stored in ~/.config/lll/lll.toml — never in the
+repo's .lll.toml, which is committed — and every later lll call rides it.
+An LLL_TOKEN in the environment still wins (see 'lll config --list').
+
+'lll logout' clears the token again.",
+  )
+}
+
+fn print_logout_usage() {
+  fmt.Println(
+    "lll logout - clear the stored token
+
+Usage:
+  lll logout
+
+Removes token = \"...\" from ~/.config/lll/lll.toml — the file 'lll login'
+wrote — and unsets nothing else. An LLL_TOKEN in the environment is not
+affected: unset it in the shell that has it.",
+  )
+}
