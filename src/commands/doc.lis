@@ -1,0 +1,413 @@
+import "go:bufio"
+import "go:encoding/json"
+import "go:fmt"
+import "go:net/url"
+import "go:os"
+import "go:regexp"
+import "go:strings"
+
+import "display"
+import "flags"
+import "models"
+import "pb"
+
+/// Dispatch `lll doc <verb>`.
+pub fn doc(args: Slice<string>) -> Result<(), string> {
+  let Some(verb) = args.get(2) else {
+    doc_usage()
+    return Ok(())
+  }
+  match verb {
+    "new" => doc_new(args),
+    "list" => doc_list(args),
+    "view" => doc_view(args),
+    "edit" => doc_edit(args),
+    "delete" => doc_delete(args),
+    "--help" => {
+      doc_usage()
+      Ok(())
+    },
+    "-h" => {
+      doc_usage()
+      Ok(())
+    },
+    other => Err(f"unknown doc command: '{other}' (see 'lll doc --help')"),
+  }
+}
+
+fn doc_usage() {
+  fmt.Println(
+    "lll doc - work with docs (wiki pages, findings, decisions, PRDs)
+
+Usage:
+  lll doc new -s \"slug\" -t \"title\" [-k kind] [-b \"body\"]
+                                                  create a doc; -b - reads the body
+                                                  from stdin
+  lll doc list                                    list docs (slug, kind, title), one
+                                                  line each
+  lll doc view SLUG [--raw] [--json]              show one doc with its linked issues;
+                                                  --raw prints only the body;
+                                                  --json prints the raw record
+  lll doc edit SLUG [-b \"body\"] [-t \"title\"] [-k kind]
+                                                  replace fields (at least one flag);
+                                                  -b - reads the whole body from stdin
+  lll doc delete SLUG [--force]                   delete; asks [y/N] unless --force" +
+      flags.section(doc_union_spec()) +
+      "
+
+Docs link to issues with 'lll issue link KEY-123 SLUG' and unlink with
+'lll issue unlink KEY-123 SLUG' (see 'lll issue --help').",
+  )
+}
+
+// ------------------------------------------------------------- validation
+
+/// Slugs are lowercase letters, digits and hyphens, starting and ending with
+/// a letter or digit — safe in URLs, unambiguous in shell commands, stable
+/// as bare words in grep.
+pub fn check_slug(val: string) -> Result<string, string> {
+  let slug = strings.TrimSpace(val)
+  if slug == "" { return Err("slug cannot be empty (e.g. port-notes)") }
+  if slug.length() > 80 {
+    return Err(f"slug must be at most 80 characters, got {slug.length()}")
+  }
+  let shaped = "^[a-z0-9]([a-z0-9-]*[a-z0-9])?$"
+  let matched = match regexp.MatchString(shaped, slug) {
+    Ok(m) => m,
+    Err(e) => return Err(f"validating slug: {e}"),
+  }
+  if !matched {
+    return Err(
+      f"invalid slug '{slug}' (use lowercase letters, digits and hyphens, starting and ending with a letter or digit, e.g. port-notes)",
+    )
+  }
+  Ok(slug)
+}
+
+fn doc_kinds() -> Slice<string> {
+  ["wiki", "finding", "decision", "prd"]
+}
+
+/// An empty kind defaults to wiki, the reading-room kind; anything else
+/// must be one of the four words.
+pub fn check_kind(val: string) -> Result<string, string> {
+  let kind = strings.TrimSpace(strings.ToLower(val))
+  if kind == "" { return Ok("wiki") }
+  if doc_kinds().find(|k| k == kind).is_none() {
+    return Err(
+      f"unknown kind '{kind}' (use one of: {strings.Join(doc_kinds(), ", ")})",
+    )
+  }
+  Ok(kind)
+}
+
+// ----------------------------------------------------------------- specs
+
+fn doc_new_spec() -> Slice<flags.Flag> {
+  [
+    flags.Flag {
+      name: "-s",
+      alias: "--slug",
+      value: true,
+      hint: "slug",
+      required: true,
+      help: "URL-safe name for the doc, e.g. port-notes",
+      ..
+    },
+    flags.Flag {
+      name: "-t",
+      alias: "--title",
+      value: true,
+      hint: "\"title\"",
+      required: true,
+      help: "human-readable title",
+      ..
+    },
+    flags.Flag {
+      name: "-k",
+      alias: "--kind",
+      value: true,
+      hint: "kind",
+      help: "wiki (default), finding, decision, or prd",
+      ..
+    },
+    flags.Flag {
+      name: "-b",
+      alias: "--body",
+      value: true,
+      hint: "body",
+      help: "body text ('-b -' reads it from stdin)",
+      ..
+    },
+  ]
+}
+
+fn doc_view_spec() -> Slice<flags.Flag> {
+  [
+    flags.Flag {
+      name: "--raw",
+      help: "print only the body, no chrome",
+      ..
+    },
+    flags.Flag {
+      name: "--json",
+      help: "raw PocketBase JSON (linked issues expanded), pipe-friendly",
+      ..
+    },
+  ]
+}
+
+fn doc_edit_spec() -> Slice<flags.Flag> {
+  [
+    flags.Flag {
+      name: "-b",
+      alias: "--body",
+      value: true,
+      hint: "body",
+      help: "replacement body — the WHOLE body, not a patch\n('-b -' reads it from stdin)",
+      ..
+    },
+    flags.Flag {
+      name: "-t",
+      alias: "--title",
+      value: true,
+      hint: "\"title\"",
+      help: "new title",
+      ..
+    },
+    flags.Flag {
+      name: "-k",
+      alias: "--kind",
+      value: true,
+      hint: "kind",
+      help: "wiki, finding, decision, or prd",
+      ..
+    },
+  ]
+}
+
+fn doc_delete_spec() -> Slice<flags.Flag> {
+  [flags.Flag { name: "--force", help: "skip the delete confirmation", .. }]
+}
+
+/// The flag table of one doc verb; empty for the verbs without flags. Read
+/// by `lll completions` so the scripts complete exactly what the parser
+/// accepts (TASK-127).
+pub fn doc_verb_spec(verb: string) -> Slice<flags.Flag> {
+  match verb {
+    "new" => doc_new_spec(),
+    "view" => doc_view_spec(),
+    "edit" => doc_edit_spec(),
+    "delete" => doc_delete_spec(),
+    _ => [],
+  }
+}
+
+/// Every flag across the doc verbs, deduplicated by canonical name, in the
+/// order the verbs declare them. This is the Flags: block `lll doc --help`
+/// renders.
+fn doc_union_spec() -> Slice<flags.Flag> {
+  let mut out: Slice<flags.Flag> = []
+  for verb in ["new", "list", "view", "edit", "delete"] {
+    for fl in doc_verb_spec(verb) {
+      if out.find(|f| f.name == fl.name).is_none() { out = out.append(fl) }
+    }
+  }
+  out
+}
+
+// ----------------------------------------------------------------- verbs
+
+fn doc_new(args: Slice<string>) -> Result<(), string> {
+  let spec = doc_new_spec()
+  let usage = flags.usage("lll doc new", spec, "")
+  let p = flags.parse(spec, args, 3, false, usage)?
+  let slug = check_slug(p.one("-s"))?
+  let title = p.one("-t")
+  let kind = check_kind(p.one("-k"))?
+  let mut body = ""
+  if p.given("-b") { body = value_or_stdin(p.one("-b"), "-b")? }
+
+  // The unique index would catch this too, but the fix belongs in the
+  // message, not a raw 400.
+  if let Some(_) = find_doc(slug)? {
+    return Err(
+      f"there is already a doc with slug '{slug}' — see 'lll doc view {slug}' or 'lll doc list'",
+    )
+  }
+
+  let new_doc = models.NewDoc { slug, title, kind, body, issues: [] }
+  let payload = match json.Marshal(new_doc) {
+    Ok(p) => p,
+    Err(e) => return Err(f"encoding doc: {e}"),
+  }
+  let resp = pb.post("/api/collections/docs/records", payload as string)?
+
+  let mut created = models.Doc { .. }
+  if let Err(e) = json.Unmarshal(resp.bytes(), &created) {
+    return Err(f"decoding created doc: {e}")
+  }
+  fmt.Println(f"Created doc {created.slug}")
+  Ok(())
+}
+
+fn doc_list(args: Slice<string>) -> Result<(), string> {
+  let p = flags.parse([], args, 3, false, "lll doc list")?
+  let _ = p
+  let mut docs = models.DocList { .. }
+  pb.fetch(
+    "/api/collections/docs/records?perPage=500&sort=kind,slug",
+    "docs",
+    &docs,
+  )?
+  for d in docs.items {
+    let mut kind = d.kind
+    if kind == "" { kind = "-" }
+    fmt.Println(f"{d.slug}\t{kind}\t{d.title}")
+  }
+  Ok(())
+}
+
+fn doc_view(args: Slice<string>) -> Result<(), string> {
+  let spec = doc_view_spec()
+  let p = flags.parse(spec, args, 3, true, "")?
+  let slug = p.first()
+  let usage = flags.usage("lll doc view", spec, "SLUG")
+  if slug == "" { return Err(f"usage: {usage}") }
+  let json_mode = p.given("--json")
+  let raw_mode = p.given("--raw")
+
+  let record = fetch_doc_record(slug)?
+  if json_mode {
+    fmt.Println(record)
+    return Ok(())
+  }
+
+  let mut d = models.Doc { .. }
+  if let Err(e) = json.Unmarshal(record.bytes(), &d) {
+    return Err(f"decoding doc: {e}")
+  }
+
+  // --raw: the body and nothing else. For piping, and for an agent that
+  // wants the text rather than the property table.
+  if raw_mode {
+    if d.body != "" { fmt.Println(d.body) }
+    return Ok(())
+  }
+
+  fmt.Println(f"{d.slug} {d.title}")
+  fmt.Println("")
+  fmt.Println(f"Kind:      {d.kind}")
+  fmt.Println(f"Created:   {display.relative(d.created)}")
+  fmt.Println(f"Updated:   {display.relative(d.updated)}")
+  if d.expand.issues.length() > 0 {
+    let keys = d.expand.issues.map(|i| f"{i.expand.team.key}-{i.number}")
+    fmt.Println(f"Issues:    {strings.Join(keys, ", ")}")
+  }
+  if d.body != "" {
+    fmt.Println("")
+    fmt.Println(d.body)
+  }
+  Ok(())
+}
+
+fn doc_edit(args: Slice<string>) -> Result<(), string> {
+  let spec = doc_edit_spec()
+  let usage = flags.usage("lll doc edit", spec, "SLUG")
+  let p = flags.parse(spec, args, 3, true, "")?
+  let slug = p.first()
+  if slug == "" { return Err(f"usage: {usage}") }
+  let mut body = ""
+  if p.given("-b") { body = value_or_stdin(p.one("-b"), "-b")? }
+  let body_set = p.given("-b")
+  let title = p.one("-t")
+  let title_set = p.given("-t")
+  let kind_raw = p.one("-k")
+  let kind_set = p.given("-k")
+  if !body_set && !title_set && !kind_set {
+    return Err(f"nothing to edit — pass at least one flag\nusage: {usage}")
+  }
+
+  let d = fetch_doc(slug)?
+  let mut fields: Slice<string> = []
+  // `-b -` replaces the whole body; there is deliberately no append mode.
+  if body_set { fields = fields.append("\"body\":" + json_quote(body)?) }
+  if title_set { fields = fields.append("\"title\":" + json_quote(title)?) }
+  if kind_set {
+    let kind = check_kind(kind_raw)?
+    fields = fields.append("\"kind\":" + json_quote(kind)?)
+  }
+  let _ = pb.patch(
+    f"/api/collections/docs/records/{d.id}",
+    "{" + strings.Join(fields, ",") + "}",
+  )?
+  fmt.Println(f"Updated doc {d.slug}")
+  Ok(())
+}
+
+fn doc_delete(args: Slice<string>) -> Result<(), string> {
+  let spec = doc_delete_spec()
+  let p = flags.parse(spec, args, 3, true, "")?
+  let slug = p.first()
+  let force = p.given("--force")
+  if slug == "" { return Err("usage: lll doc delete SLUG [--force]") }
+
+  let d = fetch_doc(slug)?
+  if !force {
+    fmt.Print(f"delete doc {d.slug}? [y/N] ")
+    let scanner = bufio.NewScanner(os.Stdin)
+    let mut answer = ""
+    if scanner.Scan() { answer = strings.TrimSpace(scanner.Text()) }
+    let a = strings.ToLower(answer)
+    if a != "y" && a != "yes" {
+      fmt.Println("Aborted.")
+      return Ok(())
+    }
+  }
+  let _ = pb.delete(f"/api/collections/docs/records/{d.id}")?
+  fmt.Println(f"Deleted doc {d.slug}")
+  Ok(())
+}
+
+// --------------------------------------------------------------- lookups
+
+/// Fetch a doc by slug and return the raw PB record JSON, with its linked
+/// issues (and their teams, for KEY-123 keys) expanded.
+pub fn fetch_doc_record(slug: string) -> Result<string, string> {
+  let slug = check_slug(slug)?
+  let filter = url.QueryEscape(f"slug='{slug}'")
+  let mut docs = models.DocList { .. }
+  pb.fetch(
+    f"/api/collections/docs/records?filter={filter}&perPage=1",
+    "docs",
+    &docs,
+  )?
+  let Some(item) = docs.items.get(0) else {
+    return Err(f"no doc with slug '{slug}' — see 'lll doc list'")
+  }
+  pb.get(f"/api/collections/docs/records/{item.id}?expand=issues.team")
+}
+
+/// fetch_doc_record, decoded.
+pub fn fetch_doc(slug: string) -> Result<models.Doc, string> {
+  let record = fetch_doc_record(slug)?
+  let mut d = models.Doc { .. }
+  if let Err(e) = json.Unmarshal(record.bytes(), &d) {
+    return Err(f"decoding doc: {e}")
+  }
+  Ok(d)
+}
+
+/// A doc id by slug, or None. Lets callers distinguish "unknown slug" from
+/// a failed write.
+pub fn find_doc(slug: string) -> Result<Option<models.Doc>, string> {
+  let slug = check_slug(slug)?
+  let filter = url.QueryEscape(f"slug='{slug}'")
+  let mut docs = models.DocList { .. }
+  pb.fetch(
+    f"/api/collections/docs/records?filter={filter}&perPage=1",
+    "docs",
+    &docs,
+  )?
+  Ok(docs.items.find(|d| d.slug == slug))
+}

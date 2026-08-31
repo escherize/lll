@@ -750,6 +750,11 @@ assert_contains "$(cat "$DATA_DIR/comp.fish")" "complete -c lll" "fish completio
 comp_watch=$("$LIN" completions bash | grep -F "watch,*)" | head -1 | sed "s/.*words='//;s/'.*//")
 assert_contains "$comp_watch" "--state --assignee --label --project --search --json" \
   "watch completions carry exactly the watch spec's flags"
+comp_doc=$("$LIN" completions bash | grep -F "doc,new" | head -1 | sed "s/.*words='//;s/'.*//")
+assert_contains "$comp_doc" "-s --slug -t --title -k --kind -b --body" \
+  "doc new completions carry exactly the doc new spec's flags"
+comp_issue=$("$LIN" completions bash | grep -F "issue)" | head -1 | sed "s/.*words='//;s/'.*//")
+assert_contains "$comp_issue" "link unlink" "issue completions include link and unlink"
 help_watch=$("$LIN" watch --help)
 for fl in '--state' '--assignee' '--label' '--project' '--search' '--json'; do
   assert_contains "$help_watch" "$fl" "watch help lists $fl, as its completions entry does"
@@ -852,6 +857,102 @@ set -e
 [ "$rc" -ne 0 ] || fail "list --limit abc: expected nonzero exit"
 assert_contains "$out" "--limit must be a positive integer" "non-numeric limit message"
 
+# --- docs (TASK-86): new/list/view/edit round trip, issue link + unlink ---
+set +e
+out=$(LLL_URL=$URL "$LIN" doc view nosuch 2>&1)
+rc=$?
+set -e
+[ "$rc" -ne 0 ] || fail "doc view nosuch: expected nonzero exit"
+assert_contains "$out" "no doc with slug 'nosuch'" "unknown doc message"
+assert_contains "$out" "lll doc list" "unknown doc names the fix"
+
+out=$(printf 'The port plan.\n\nStep two.' | env LLL_URL=$URL "$LIN" doc new -s port-notes -t "Port notes" -k wiki -b -)
+assert_contains "$out" "Created doc port-notes" "doc new from stdin"
+
+set +e
+out=$(LLL_URL=$URL "$LIN" doc new -s port-notes -t "Again" 2>&1)
+rc=$?
+set -e
+[ "$rc" -ne 0 ] || fail "duplicate doc slug: expected nonzero exit"
+assert_contains "$out" "already a doc with slug 'port-notes'" "duplicate slug message"
+
+set +e
+out=$(LLL_URL=$URL "$LIN" doc new -s "Bad Slug" -t x 2>&1)
+rc=$?
+set -e
+[ "$rc" -ne 0 ] || fail "invalid slug: expected nonzero exit"
+assert_contains "$out" "invalid slug 'Bad Slug'" "invalid slug message"
+
+out=$(printf 'raw finding body' | env LLL_URL=$URL "$LIN" doc new -s race-found -t "Race found" -k finding -b -)
+assert_contains "$out" "Created doc race-found" "doc new with kind finding"
+
+out=$(LLL_URL=$URL "$LIN" doc list)
+assert_contains "$out" "port-notes	wiki	Port notes" "doc list shows slug, kind, title"
+assert_contains "$out" "race-found	finding	Race found" "doc list shows second doc"
+
+out=$(LLL_URL=$URL "$LIN" doc view port-notes)
+assert_contains "$out" "port-notes Port notes" "doc view header"
+assert_contains "$out" "Kind:      wiki" "doc view kind"
+assert_contains "$out" "The port plan." "doc view body"
+
+out=$(LLL_URL=$URL "$LIN" doc view port-notes --raw)
+[ "$out" = "The port plan.
+
+Step two." ] || fail "doc view --raw should print only the body, got: $out"
+
+# edit replaces the whole body from stdin
+out=$(printf 'Replaced body' | env LLL_URL=$URL "$LIN" doc edit port-notes -b -)
+assert_contains "$out" "Updated doc port-notes" "doc edit from stdin"
+got=$(LLL_URL=$URL "$LIN" doc view port-notes --raw)
+[ "$got" = "Replaced body" ] || fail "doc edit should replace the whole body, got: '$got'"
+
+# issue link: doc view shows the issue, issue view shows the doc
+ENG1_ID=$(LLL_URL=$URL "$LIN" issue view ENG-1 --json | jq -r .id)
+set +e
+out=$(LLL_URL=$URL "$LIN" issue link ENG-1 nosuch 2>&1)
+rc=$?
+set -e
+[ "$rc" -ne 0 ] || fail "issue link unknown slug: expected nonzero exit"
+assert_contains "$out" "no doc with slug 'nosuch'" "link unknown doc names the fix"
+
+out=$(LLL_URL=$URL "$LIN" issue link ENG-1 port-notes)
+assert_contains "$out" "Linked ENG-1 -> port-notes" "issue link output"
+
+out=$(LLL_URL=$URL "$LIN" doc view port-notes)
+assert_contains "$out" "Issues:    ENG-1" "doc view shows linked issue"
+out=$(LLL_URL=$URL "$LIN" issue view ENG-1)
+assert_contains "$out" "Docs:      port-notes" "issue view shows linked doc"
+rid=$(LLL_URL=$URL "$LIN" doc view port-notes --json | jq -r '.issues[0]')
+[ "$rid" = "$ENG1_ID" ] || fail "doc record issues relation: expected $ENG1_ID, got '$rid'"
+
+# linking twice is idempotent
+out=$(LLL_URL=$URL "$LIN" issue link ENG-1 port-notes)
+assert_contains "$out" "already linked" "double link is idempotent"
+
+# relink corrects a wrong link: unlink the wrong issue, keep the right one
+out=$(LLL_URL=$URL "$LIN" issue link ENG-2 port-notes)
+assert_contains "$out" "Linked ENG-2 -> port-notes" "second issue links"
+out=$(LLL_URL=$URL "$LIN" issue unlink ENG-1 port-notes)
+assert_contains "$out" "Unlinked ENG-1 from port-notes" "issue unlink output"
+out=$(LLL_URL=$URL "$LIN" doc view port-notes)
+assert_contains "$out" "ENG-2" "relinked doc shows ENG-2"
+assert_not_contains "$out" "ENG-1" "relinked doc no longer shows ENG-1"
+set +e
+out=$(LLL_URL=$URL "$LIN" issue unlink ENG-1 port-notes 2>&1)
+rc=$?
+set -e
+[ "$rc" -ne 0 ] || fail "unlink not-linked: expected nonzero exit"
+assert_contains "$out" "is not linked to" "unlink not-linked message"
+
+# deleting a linked issue unsets the relation; the doc survives
+key=$(LLL_URL=$URL LLL_TEAM=ENG "$LIN" issue create -t "Doc link fodder" | sed -n 's/^Created \([A-Z]*-[0-9]*\).*/\1/p')
+[ -n "$key" ] || fail "doc-link fodder create did not print a key"
+env LLL_URL=$URL "$LIN" issue link "$key" race-found >/dev/null
+env LLL_URL=$URL "$LIN" issue delete "$key" --force >/dev/null
+n=$(LLL_URL=$URL "$LIN" doc view race-found --json | jq -r '.issues | length')
+[ "$n" = "0" ] || fail "deleting a linked issue should unset the relation, got: $n"
+assert_contains "$(LLL_URL=$URL "$LIN" doc view race-found)" "race-found Race found" "doc survives a linked issue's deletion"
+
 # --- help output ---
 out=$("$LIN" --help)
 assert_contains "$out" "Usage:" "lll --help"
@@ -859,6 +960,7 @@ assert_contains "$out" "lll team" "lll --help mentions team"
 assert_contains "$out" "lll member" "lll --help mentions member"
 assert_contains "$out" "lll project" "lll --help mentions project"
 assert_contains "$out" "lll label" "lll --help mentions label"
+assert_contains "$out" "lll doc" "lll --help mentions doc"
 assert_contains "$out" "lll config" "lll --help mentions config"
 assert_contains "$out" "lll watch" "lll --help mentions watch"
 assert_contains "$out" "lll board" "lll --help mentions board"
@@ -899,6 +1001,12 @@ assert_contains "$out" "lll project view" "project --help mentions view"
 out=$("$LIN" label --help)
 assert_contains "$out" "Usage:" "lll label --help"
 assert_contains "$out" "lll label create" "label --help mentions create"
+out=$("$LIN" doc --help)
+assert_contains "$out" "Usage:" "lll doc --help"
+assert_contains "$out" "lll doc new" "doc --help mentions new"
+assert_contains "$out" "lll doc edit" "doc --help mentions edit"
+assert_contains "$out" "--raw" "doc --help mentions --raw"
+assert_contains "$out" "-b" "doc --help mentions -b"
 out=$("$LIN" config --help)
 assert_contains "$out" "Usage:" "lll config --help"
 out=$("$LIN" up --help)

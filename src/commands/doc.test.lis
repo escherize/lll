@@ -1,0 +1,94 @@
+import "go:strings"
+
+// Unit cover for the pure helpers in doc.lis: check_slug and check_kind.
+// Everything here is a function of its arguments alone — no PocketBase.
+
+// ------------------------------------------------------------- check_slug
+
+#[test]
+fn check_slug_accepts_the_usual_shapes() {
+  let assert Ok(s) = check_slug("port-notes")
+  assert s == "port-notes"
+  let assert Ok(one) = check_slug("a")
+  assert one == "a"
+  let assert Ok(digits) = check_slug("r2d2-2026")
+  assert digits == "r2d2-2026"
+  // Hyphens inside are fine; the single character case needs no pair.
+  let assert Ok(hyphens) = check_slug("a-b-c-d")
+  assert hyphens == "a-b-c-d"
+}
+
+#[test]
+fn check_slug_trims_surrounding_space() {
+  let assert Ok(s) = check_slug("  port-notes  ")
+  assert s == "port-notes"
+}
+
+#[test]
+fn check_slug_rejects_empty_and_blank() {
+  let assert Err(msg) = check_slug("")
+  assert msg.contains("slug cannot be empty")
+  let assert Err(_) = check_slug("   ")
+}
+
+#[test]
+fn check_slug_rejects_uppercase_and_punctuation() {
+  let assert Err(_) = check_slug("Port-Notes")
+  let assert Err(_) = check_slug("port_notes")
+  let assert Err(_) = check_slug("port notes")
+  let assert Err(_) = check_slug("port.notes")
+  let assert Err(_) = check_slug("日本")
+  let assert Err(_) = check_slug("🐛")
+}
+
+#[test]
+fn check_slug_rejects_leading_or_trailing_hyphen() {
+  let assert Err(_) = check_slug("-port")
+  let assert Err(_) = check_slug("port-")
+  // And a lone hyphen is neither a leading nor a trailing letter.
+  let assert Err(_) = check_slug("-")
+}
+
+#[test]
+fn check_slug_rejects_over_eighty_characters() {
+  let assert Ok(exactly) = check_slug("a" + strings.Repeat("b", 78) + "c")
+  assert exactly.length() == 80
+  let assert Err(msg) = check_slug(strings.Repeat("a", 81))
+  assert msg.contains("at most 80")
+}
+
+#[test]
+fn check_slug_error_quotes_the_input_and_names_the_fix() {
+  let assert Err(msg) = check_slug("Bad Slug!")
+  assert msg.contains("'Bad Slug!'")
+  assert msg.contains("lowercase letters, digits and hyphens")
+}
+
+// ------------------------------------------------------------- check_kind
+
+#[test]
+fn check_kind_defaults_empty_to_wiki() {
+  let assert Ok(k) = check_kind("")
+  assert k == "wiki"
+  // Whitespace-only is the same as absent.
+  let assert Ok(blank) = check_kind("   ")
+  assert blank == "wiki"
+}
+
+#[test]
+fn check_kind_accepts_each_kind_case_insensitively() {
+  for k in ["wiki", "finding", "decision", "prd"] {
+    let assert Ok(lower) = check_kind(k)
+    assert lower == k
+    let assert Ok(upper) = check_kind(strings.ToUpper(k))
+    assert upper == k
+  }
+}
+
+#[test]
+fn check_kind_rejects_unknown_kinds_with_the_list() {
+  let assert Err(msg) = check_kind("memo")
+  assert msg.contains("unknown kind 'memo'")
+  assert msg.contains("wiki, finding, decision, prd")
+  let assert Err(_) = check_kind("wiki finding")
+}

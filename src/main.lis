@@ -15,6 +15,7 @@ fn main() {
     "member" => commands.member(os.Args),
     "project" => commands.project(os.Args),
     "label" => commands.label(os.Args),
+    "doc" => commands.doc(os.Args),
     "config" => commands.config_cmd(os.Args),
     "watch" => commands.watch(os.Args),
     "up" => commands.up(os.Args),
@@ -59,6 +60,8 @@ Usage:
   lll member <command>    work with members (see 'lll member --help')
   lll project <command>   work with projects (see 'lll project --help')
   lll label <command>     work with labels (see 'lll label --help')
+  lll doc <command>       work with docs: wiki, findings, decisions, PRDs
+                          (see 'lll doc --help')
   lll config <command>    manage configuration (see 'lll config --help')
   lll watch [flags]       live event stream for a query (see 'lll watch --help')
   lll up [--port 8100]    start PocketBase + web board together (see 'lll up --help')
