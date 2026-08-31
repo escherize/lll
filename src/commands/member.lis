@@ -7,6 +7,7 @@ import "go:strings"
 import "models"
 import "pb"
 import "flags"
+import "config"
 
 /// Dispatch `lll member <verb>`.
 pub fn member(args: Slice<string>) -> Result<(), string> {
@@ -142,13 +143,24 @@ pub fn ensure_member(name: string) -> Result<bool, string> {
   }
 }
 
+/// Find a member by exact name, riding the configured token.
 fn find_member(name: string) -> Result<Option<models.Member>, string> {
+  let cfg = config.load()?
+  find_member_as(cfg.token, name)
+}
+
+/// Find a member by exact name, riding `tok` instead of the configured
+/// token — token create looks its member up as the superuser it has just
+/// authenticated, not as whoever happens to be configured.
+pub fn find_member_as(tok: string, name: string) -> Result<Option<models.Member>, string> {
   let filter = url.QueryEscape(f"name='{name}'")
   let mut result = models.MemberList { .. }
-  pb.fetch(
+  let body = pb.get_as(
     f"/api/collections/members/records?filter={filter}",
-    "members",
-    &result,
+    tok,
   )?
+  if let Err(e) = json.Unmarshal(body.bytes(), &result) {
+    return Err(f"decoding members: {e}")
+  }
   Ok(result.items.find(|m| m.name == name))
 }

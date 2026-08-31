@@ -16,7 +16,8 @@
 # real gh runs for issue pr are manual), --limit, --help output, --version,
 # fix-naming error messages (PB down, unknown team, broken .lll.toml,
 # unknown command), config layering and its origins (config --list, the
-# upward walk stopping at the git root, lll attach), and the lll up web board
+# upward walk stopping at the git root, lll attach), login/logout and the
+# superuser-gated token create (task-183), and the lll up web board
 # (via e2e_web.sh).
 set -euo pipefail
 . "$(dirname "$0")/lib.sh"   # free_port, wait_ok, fail, assert_*, e2e_begin/end
@@ -1585,6 +1586,102 @@ out=$("$LIN" issue --help)
 assert_contains "$out" "lll issue claim" "issue --help mentions claim"
 assert_contains "$out" "lll issue release" "issue --help mentions release"
 assert_contains "$("$LIN" completions bash)" "claim" "bash completions offer claim"
+
+# --- task-183: login / logout / token create ---------------------------------
+# The human and agent entry points for auth. e2e-agent's password is set the
+# superuser way (the same PATCH lib.sh's pb_member_token does on reuse), then
+# the CLI's own auth-with-password round trip stores a token in the HOME
+# config — and nothing else ever prints it.
+SU_TOKEN=$(pb_superuser_token "$URL") || fail "bootstrapping the superuser token"
+AGENT_ID=$(curl -sf -G "$URL/api/collections/members/records" \
+  --data-urlencode "filter=(name='e2e-agent')" -H "Authorization: Bearer $SU_TOKEN" \
+  | jq -r '(.items[0] // {}).id // ""')
+[ -n "$AGENT_ID" ] && [ "$AGENT_ID" != "null" ] || fail "finding e2e-agent for task-183"
+LOGIN_PASS="e2e-login-pass-456"
+curl -sf -X PATCH "$URL/api/collections/members/records/$AGENT_ID" \
+  -H 'Content-Type: application/json' -H "Authorization: Bearer $SU_TOKEN" \
+  -d "{\"password\":\"$LOGIN_PASS\",\"passwordConfirm\":\"$LOGIN_PASS\"}" >/dev/null \
+  || fail "setting e2e-agent's password as the superuser"
+
+# AC#1: login stores a token in the home config and prints who you are and
+# which file — never the token itself.
+login_out=$(printf '%s\n' "$LOGIN_PASS" | env -u LLL_TOKEN HOME="$E2E_HOME" LLL_URL=$URL "$LIN" login -e e2e-agent@lll.test) \
+  || fail "lll login exited nonzero: $login_out"
+assert_contains "$login_out" "logged in as e2e-agent" "login says who you are"
+assert_contains "$login_out" "token saved to" "login names the file the token landed in"
+assert_contains "$login_out" "$E2E_HOME" "the file login names is the home config"
+HOME_TOK=$(sed -n 's/^token = "\(.*\)"$/\1/p' "$E2E_HOME/.config/lll/lll.toml")
+[ -n "$HOME_TOK" ] || fail "login stored no token in the home config"
+assert_not_contains "$login_out" "$HOME_TOK" "login output never echoes the token"
+if [ -f .lll.toml ]; then
+  assert_not_contains "$(cat .lll.toml)" "$HOME_TOK" "the repo's .lll.toml holds no token"
+fi
+
+# AC#3: config --list shows where the token came from, never its value — and
+# the saved token still authenticates through the TASK-179 plumbing.
+list_out=$(env -u LLL_TOKEN HOME="$E2E_HOME" LLL_URL=$URL "$LIN" config --list)
+assert_contains "$list_out" "token=••••" "config --list redacts the token"
+assert_not_contains "$list_out" "$HOME_TOK" "config --list never prints the token"
+out=$(env -u LLL_TOKEN HOME="$E2E_HOME" LLL_URL=$URL "$LIN" member list)
+assert_contains "$out" "e2e-agent" "the home-config token authenticates a member list"
+
+# logout clears exactly the token: the me line the boot wrote stays.
+env -u LLL_TOKEN HOME="$E2E_HOME" LLL_URL=$URL "$LIN" logout > "$DATA_DIR/logout.out" \
+  || fail "lll logout exited nonzero"
+assert_contains "$(cat "$DATA_DIR/logout.out")" "token cleared from" "logout output"
+grep -q '^token = ' "$E2E_HOME/.config/lll/lll.toml" \
+  && fail "logout left the token line in the home config"
+grep -q '^me = ' "$E2E_HOME/.config/lll/lll.toml" \
+  || fail "logout unset something else (the me line is gone)"
+out=$(env -u LLL_TOKEN HOME="$E2E_HOME" LLL_URL=$URL "$LIN" logout)
+assert_contains "$out" "nothing to clear" "a second logout is a no-op, not an error"
+
+# AC#2: token create mints a static agent token, printed exactly once, that
+# really authenticates.
+create_out=$(env -u LLL_TOKEN HOME="$E2E_HOME" LLL_URL=$URL \
+  LLL_ADMIN_EMAIL=admin@local.dev LLL_ADMIN_PASSWORD=admin-local-123 \
+  "$LIN" token create e2e-agent --duration 3600) \
+  || fail "token create exited nonzero: $create_out"
+MINT_TOK=$(printf '%s\n' "$create_out" | sed -n 's/^LLL_TOKEN=//p')
+[ -n "$MINT_TOK" ] || fail "token create printed no LLL_TOKEN line: $create_out"
+[ "$(printf '%s\n' "$create_out" | grep -oF "$MINT_TOK" | wc -l | tr -d ' ')" = 1 ] \
+  || fail "token create printed the token more than once"
+assert_contains "$create_out" "one-time agent token for e2e-agent" "token create says who it minted for"
+out=$(LLL_TOKEN="$MINT_TOK" HOME="$E2E_HOME" LLL_URL=$URL "$LIN" member list)
+assert_contains "$out" "e2e-agent" "the minted token authenticates a GET"
+
+# ...and the gate is superuser-only: a member token and no credentials at all
+# are both refused, naming the fix. The member token is minted fresh — the
+# password PATCH above rotated e2e-agent's tokenKey, so the bootstrap token
+# no longer counts.
+REFUSE_TOK=$(pb_member_token "$URL" e2e-agent e2e-agent@lll.test "$LOGIN_PASS") \
+  || fail "minting the member token for the refusal test"
+set +e
+out=$(env -u LLL_ADMIN_EMAIL -u LLL_ADMIN_PASSWORD LLL_TOKEN="$REFUSE_TOK" HOME="$E2E_HOME" LLL_URL=$URL "$LIN" token create e2e-agent 2>&1)
+rc=$?
+set -e
+[ "$rc" -ne 0 ] || fail "token create with a member token: expected nonzero exit"
+assert_contains "$out" "superuser" "a member token create names the superuser requirement"
+set +e
+out=$(env -u LLL_TOKEN -u LLL_ADMIN_EMAIL -u LLL_ADMIN_PASSWORD HOME="$E2E_HOME" LLL_URL=$URL "$LIN" token create e2e-agent 2>&1)
+rc=$?
+set -e
+[ "$rc" -ne 0 ] || fail "token create with no credentials: expected nonzero exit"
+assert_contains "$out" "LLL_ADMIN_EMAIL" "credential-less token create names what to set"
+
+# the three nouns show up where TASK-127's table feeds help and completions.
+out=$("$LIN" --help)
+assert_contains "$out" "lll login" "lll --help mentions login"
+assert_contains "$out" "lll logout" "lll --help mentions logout"
+assert_contains "$out" "lll token" "lll --help mentions token"
+out=$("$LIN" login --help)
+assert_contains "$out" "--email" "login --help mentions --email"
+out=$("$LIN" token --help)
+assert_contains "$out" "lll token create" "token --help mentions create"
+comp_login=$("$LIN" completions bash | grep -F "login,*)" | head -1 | sed "s/.*words='//;s/'.*//")
+assert_contains "$comp_login" "--email -e" "login completions carry the email flag and alias"
+comp_token=$("$LIN" completions bash | grep -F "token)" | head -1 | sed "s/.*words='//;s/'.*//")
+assert_contains "$comp_token" "create" "token completions offer create"
 
 echo "e2e: all assertions passed"
 

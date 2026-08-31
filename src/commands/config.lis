@@ -108,6 +108,34 @@ pub fn set_home_key(key: string, value: string) -> Result<string, string> {
   Ok(path)
 }
 
+/// Remove every `key = ...` line from the home config — the inverse of
+/// set_home_key, and exactly as narrow: `lll logout` clears the token and
+/// unsets nothing else. Returns true when a line was removed. Only the home
+/// file is touched — the repo's .lll.toml is committed and must never hold a
+/// token, and an env var is not ours to unset.
+pub fn clear_home_key(key: string) -> Result<bool, string> {
+  let path = config.home_path()?
+  if !os.Stat(path).is_ok() { return Ok(false) }
+  let Ok(data) = os.ReadFile(path) else {
+    return Err(f"reading {path}")
+  }
+  let mut lines: Slice<string> = []
+  let mut removed = false
+  for l in (data as string).split("\n") {
+    if assigns(l, key) {
+      removed = true
+    } else {
+      lines = lines.append(l)
+    }
+  }
+  if !removed { return Ok(false) }
+  let out = strings.Join(lines, "\n")
+  if let Err(e) = os.WriteFile(path, out.bytes(), 0o644) {
+    return Err(f"writing {path}: {e}")
+  }
+  Ok(true)
+}
+
 /// Set `key = "value"` in `path`, creating the file if needed. Replaces an
 /// existing assignment instead of appending a second one — duplicate keys
 /// make the file unparseable, and the whole point of these keys is that they

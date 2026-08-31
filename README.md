@@ -1,7 +1,7 @@
 # lll
 
 A Linear-style issue tracker in one binary: CLI-first, with a realtime web
-board. Self-hosted — PocketBase runs embedded in-process, no SaaS, no auth.
+board. Self-hosted — PocketBase runs embedded in-process, no SaaS.
 Written in [Lisette](https://github.com/ivov/lisette), which compiles to Go.
 
 - Teams, `ENG-123` identifiers, states, priorities, projects, labels,
@@ -84,7 +84,8 @@ default	web_url=http://127.0.0.1:8100
 | `LLL_SORT` | `sort` | Default sort: `created`, `updated`, `priority`, `number`; `-` prefix descends |
 | `LLL_WEB_URL` | `web_url` | Web board base URL for `board`, `issue url`, `view -w` |
 | — | `me` | Your member name; authors your comments and receives assignments |
-| `LLL_ADMIN_EMAIL` / `LLL_ADMIN_PASSWORD` | — | PocketBase superuser for `lll up` (a logged default is used when unset) |
+| `LLL_TOKEN` | `token` | PocketBase auth token sent as `Authorization: Bearer` on every request. A secret: `lll login` writes it to the home config, `lll token create` mints agent tokens — never the repo's .lll.toml |
+| `LLL_ADMIN_EMAIL` / `LLL_ADMIN_PASSWORD` | — | PocketBase superuser for `lll up` and `lll token create` (a logged default is used when unset) |
 
 `lll config init` writes a commented template. On its first boot `lll up`
 guesses `me` from `$USER`, writes it to `~/.config/lll/lll.toml` and seeds a
@@ -114,6 +115,9 @@ lll issue watch ENG-12        # one issue + its comments, until Ctrl-C
 lll team|member|project|label list      # the other nouns: list/create/view/add
 lll attach                    # point this repo at a team, once
 lll config --list             # every value and the file it came from
+lll login                     # as a member; the token goes to the home config
+lll token create bryan        # a static agent token (superuser only), printed once
+lll logout                    # clear the stored token
 lll board -w                  # open the web board
 lll completions zsh           # bash, zsh, fish
 ```
