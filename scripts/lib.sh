@@ -116,6 +116,17 @@ pb_member_token() { # url name email password -> prints the member token
 # or asserts on config must pass HOME="$E2E_HOME", so a suite neither reads
 # nor rewrites the developer's own.
 e2e_begin() {
+  # The suites write fixtures into whatever LLL_URL names. An inherited
+  # non-local LLL_URL would run the whole write-heavy gate against a live
+  # server (the deployed board, TASK-171), so an allowlist of loopback hosts
+  # is the guard: anything unrecognizable is refused, named, up front.
+  case "${LLL_URL:-}" in
+    "" | http://127.0.0.1:* | http://localhost:* | http://\[::1\]:* | http://\[::1\]) ;;
+    *)
+      echo "refusing non-local LLL_URL '$LLL_URL' — the gate writes fixtures; unset it or point it at 127.0.0.1" >&2
+      exit 1
+      ;;
+  esac
   DATA_DIR="$(mktemp -d)"
   E2E_HOME="$DATA_DIR/e2e_home"
   mkdir -p "$E2E_HOME/.config/lll"
