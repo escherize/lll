@@ -114,7 +114,7 @@ pub fn create_member(name: string, email: string) -> Result<models.Member, strin
 
 /// The deterministic identity a member without an email gets. Same rule as
 /// the TASK-180 migration's backfill, so both paths agree on one shape.
-fn synthesize_email(name: string) -> string {
+pub fn synthesize_email(name: string) -> string {
   let slug = strings.ReplaceAll(strings.ToLower(name), " ", "-")
   f"{slug}@members.invalid"
 }
