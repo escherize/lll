@@ -60,14 +60,18 @@ env -u LLL_TOKEN LLL_BOARD_TOKEN="$BOARD_TOKEN" USER=e2e HOME="$E2E_HOME" "$LIN"
 PB_PID=$!
 SERVE_PID=""
 CURL_PID=""
-cleanup() {
+cleanup() { # exit-status
+  # Diagnose first: e2e_diagnose reads the logs, and e2e_end deletes the
+  # directory they live in (TASK-121). e2e_reap kills AND waits, so the
+  # server is gone before its --pb-dir is (TASK-153).
+  e2e_diagnose "$1"
   if command -v playwright-cli >/dev/null 2>&1; then
     playwright-cli -s="$BROWSER_SESSION" close >/dev/null 2>&1 || true
   fi
-  kill $CURL_PID $SERVE_PID $PB_PID 2>/dev/null || true
+  e2e_reap $CURL_PID $SERVE_PID $PB_PID
   e2e_end
 }
-trap cleanup EXIT
+e2e_trap_cleanup cleanup
 
 # The column's section markup for a state, for asserting card placement.
 column() { # html state
@@ -173,11 +177,13 @@ assert_contains "$board" 'class="card-pop"' "cards carry a hover preview"
 ENG1_ID=$("$LIN" issue view ENG-1 --json | jq -r '.id')
 ENG2_ID=$("$LIN" issue view ENG-2 --json | jq -r '.id')
 [ -n "$ENG1_ID" ] && [ -n "$ENG2_ID" ] || fail "resolving issue ids for snippet seeds"
-curl -sf -H "$AUTH_HDR" -X PATCH "$LLL_URL/api/collections/issues/records/$ENG1_ID" \
+seed "ENG-1 snippet description" -H "$AUTH_HDR" \
+  -X PATCH "$LLL_URL/api/collections/issues/records/$ENG1_ID" \
   -H 'Content-Type: application/json' \
   -d '{"description":"First preview line.\n\nSecond preview line.\nThird line never previewed."}' >/dev/null
 LONG_DESC=$(printf 'a%.0s' $(seq 1 200))
-curl -sf -H "$AUTH_HDR" -X PATCH "$LLL_URL/api/collections/issues/records/$ENG2_ID" \
+seed "ENG-2 long description" -H "$AUTH_HDR" \
+  -X PATCH "$LLL_URL/api/collections/issues/records/$ENG2_ID" \
   -H 'Content-Type: application/json' \
   -d "{\"description\":\"$LONG_DESC\"}" >/dev/null
 
@@ -204,7 +210,8 @@ wcurl -s -o /dev/null -w '%{http_code}' "$WEB/issue/ENG-99" | grep -q 404 \
 # seeded the fixture way (a direct PATCH) — the start->stamp write path is
 # e2e.sh's section. Without a claim the site is history and renders dimmed
 # "(last seen)"; a claim row makes it current.
-curl -sf -H "$AUTH_HDR" -X PATCH "$LLL_URL/api/collections/issues/records/$ENG2_ID" \
+seed "ENG-2 work site" -H "$AUTH_HDR" \
+  -X PATCH "$LLL_URL/api/collections/issues/records/$ENG2_ID" \
   -H 'Content-Type: application/json' \
   -d '{"work_branch":"eng-2-already-in-progress","work_host":"webhost","work_path":"/tmp/wt-eng-2"}' >/dev/null
 issue=$(wcurl -sf "$WEB/issue/ENG-2")
@@ -217,7 +224,8 @@ assert_contains "$board" "eng-2-already-in-progress" "hover preview shows the br
 
 # a claim makes the site current: no dimming on either surface
 W205_MID=$(curl -sf -H "$AUTH_HDR" "$LLL_URL/api/collections/members/records?perPage=1" | jq -r '.items[0].id')
-W205_CLAIM=$(curl -sf -H "$AUTH_HDR" -X POST "$LLL_URL/api/collections/claims/records" \
+W205_CLAIM=$(seed "work-site claim" -H "$AUTH_HDR" \
+  -X POST "$LLL_URL/api/collections/claims/records" \
   -H 'Content-Type: application/json' \
   -d "{\"issue\":\"$ENG2_ID\",\"member\":\"$W205_MID\"}" | jq -r '.id')
 [ -n "$W205_CLAIM" ] && [ "$W205_CLAIM" != "null" ] || fail "seeding the work-site claim"
@@ -227,7 +235,8 @@ assert_not_contains "$issue" "(last seen)" "a claimed site is not dimmed"
 board=$(wcurl -sf "$WEB/")
 assert_contains "$board" 'class="cp-work"' "hover branch is undimmed while claimed"
 # put the claim back so later sections see the board they always saw
-curl -sf -H "$AUTH_HDR" -X DELETE "$LLL_URL/api/collections/claims/records/$W205_CLAIM" >/dev/null
+seed "releasing the work-site claim" -H "$AUTH_HDR" \
+  -X DELETE "$LLL_URL/api/collections/claims/records/$W205_CLAIM" >/dev/null
 
 # --- app shell: one rail template, the same on every page (task-81) ---
 # The <nav id="rail"> block, for diffing one page's shell against another's.
@@ -805,6 +814,31 @@ got=$(col_order "$(tr -d '\0' <"$EVENTS_FILE")" todo)
 
 # --- browser-level: CLI create appears on an open board without reload ---
 if command -v playwright-cli >/dev/null 2>&1; then
+  # Read the page, and read it again until it says what we are waiting for.
+  #
+  # Polled, not slept: a browser-side change (an SSE morph, a fragment patch,
+  # a navigation settling) lands on the browser's schedule, and a fixed sleep
+  # is how a green suite turns red on a loaded machine (TASK-120). The poll
+  # only decides WHEN to look; the assertions below still judge what it saw,
+  # so a timed-out poll fails on the assertion rather than passing by default.
+  #
+  # page_until is also what keeps a mid-navigation eval from being believed:
+  # such an eval returns no `### Result` line at all, so page_state yields the
+  # empty string, the needle cannot match, and the loop looks again instead of
+  # asserting against nothing and blaming the feature.
+  page_state() { # js -> the eval's result line
+    playwright-cli -s="$BROWSER_SESSION" eval "$1" \
+      | sed -n '/### Result/{n;p;}' | tr -d '\\'
+  }
+  page_until() { # js needle -> the last result seen, after up to 10s of polling
+    local out=""
+    for _ in $(seq 1 40); do
+      out=$(page_state "$1")
+      case "$out" in *"$2"*) break ;; esac
+      sleep 0.25
+    done
+    printf '%s' "$out"
+  }
   # The gate: the browser logs in through the banner's handoff URL once —
   # the 303 sets the cookie — and every later navigation rides it.
   playwright-cli -s="$BROWSER_SESSION" open "$WEB/?board_token=$BOARD_TOKEN" >/dev/null 2>&1 \
@@ -815,10 +849,13 @@ if command -v playwright-cli >/dev/null 2>&1; then
     "() => { document.getElementById('rail').dataset.probe = 'kept'; return document.querySelectorAll('.card').length }" \
     | sed -n '/### Result/{n;p;}')
   "$LIN" issue create -t "Born while browser open" >/dev/null
-  sleep 2
-  result=$(playwright-cli -s="$BROWSER_SESSION" eval \
+  # The morph arrives over SSE, so wait for the card by name rather than for a
+  # fixed two seconds (TASK-120): the old sleep was long enough on an idle box
+  # and short enough to lose on a loaded one, and losing it read as "the board
+  # did not update" rather than "we looked too early".
+  result=$(page_until \
     "() => JSON.stringify({cards: document.querySelectorAll('.card').length, navs: performance.getEntriesByType('navigation').length, rail: document.getElementById('rail').dataset.probe || 'LOST', titles: [...document.querySelectorAll('.card .title')].map(e => e.textContent)})" \
-    | sed -n '/### Result/{n;p;}' | tr -d '\\')
+    "Born while browser open")
   assert_contains "$result" "Born while browser open" "browser: new card appeared"
   assert_contains "$result" '"navs":1' "browser: no reload happened"
   assert_contains "$result" '"rail":"kept"' "browser: the SSE morph left the rail alone"
@@ -892,23 +929,8 @@ if command -v playwright-cli >/dev/null 2>&1; then
   # A SEQUENCE, not an end state: the probe on <body> survives a fragment
   # morph and dies in a page load, so it is what tells "typed and the list
   # was patched" apart from "the form submitted and the page came back".
-  #
-  # Polled, not slept: the patch lands on the browser's schedule, and a fixed
-  # sleep is how a green suite turns red on a loaded machine. The poll only
-  # decides WHEN to look; the assertions below still judge what it saw.
-  page_state() { # js -> the eval's result line
-    playwright-cli -s="$BROWSER_SESSION" eval "$1" \
-      | sed -n '/### Result/{n;p;}' | tr -d '\\'
-  }
-  page_until() { # js needle
-    local out=""
-    for _ in $(seq 1 40); do
-      out=$(page_state "$1")
-      case "$out" in *"$2"*) break ;; esac
-      sleep 0.25
-    done
-    printf '%s' "$out"
-  }
+  # The patch lands on the browser's schedule, so this block reads through
+  # page_until (defined at the top of the browser section) rather than sleeping.
   playwright-cli -s="$BROWSER_SESSION" goto "$WEB/search" >/dev/null 2>&1 \
     || fail "playwright: opening /search"
   playwright-cli -s="$BROWSER_SESSION" eval \
@@ -1478,7 +1500,8 @@ assert_contains "$saved" 'id="accent"' "a settings save patches the head's accen
 # The field's max of 7 already keeps a whole CSS rule from fitting, so this
 # writes the longest junk PocketBase will accept.
 TEAM_ID=$(curl -sf -H "$AUTH_HDR" "$LLL_URL/api/collections/teams/records?filter=$(python3 -c "import urllib.parse;print(urllib.parse.quote(\"key='ENG'\"))")" | jq -r '.items[0].id')
-curl -sf -H "$AUTH_HDR" -X PATCH "$LLL_URL/api/collections/teams/records/$TEAM_ID" \
+seed "unparseable stored accent" -H "$AUTH_HDR" \
+  -X PATCH "$LLL_URL/api/collections/teams/records/$TEAM_ID" \
   -H 'Content-Type: application/json' -d '{"accent":"};z{a:b"}' >/dev/null
 assert_contains "$(wcurl -sf "$WEB/")" '<style id="accent"></style>' \
   "an unparseable stored accent falls back to the canonical orange"

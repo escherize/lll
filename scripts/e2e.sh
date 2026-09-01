@@ -34,6 +34,20 @@ bash scripts/lis-typedefs-workaround.sh
 lis build >/dev/null
 LIN=target/.lisette/bin/lll
 
+# TASK-187: from here on the suite runs under a scratch HOME. Config LAYERS
+# (TASK-168), so every plain `"$LIN" ...` below was reading the developer's own
+# ~/.config/lll/lll.toml; most survive only because they pin LLL_URL/LLL_TEAM
+# in env and env outranks files. That is luck, not hermeticity: a home config
+# with 'me' or 'sort' steers any assertion pinning neither, and one with a
+# deployed 'url' and 'token' points an unpinned command at a live server
+# (verified: `lll board` with a real HOME printed a fly.dev url).
+#
+# AFTER `lis build`, deliberately: the lis/go/mise caches live under HOME, and
+# pinning it first makes every run recompile from scratch. The explicit
+# HOME="$E2E_HOME" spellings further down are now redundant rather than wrong,
+# so they stay - they document the requirement at the calls that most need it.
+e2e_pin_home
+
 # PocketBase is embedded in lll (gopb), so there is no external binary to
 # install. `lll up` needs a team and refuses to start without one; ENG is the
 # one this suite uses anyway, and seed_team below fixes up its display name.
@@ -49,12 +63,15 @@ start_pb() {
 }
 start_pb || { echo "FAIL: lll up did not start" >&2; cat "$PB_LOG" >&2; exit 1; }
 WATCH_PIDS=""
-cleanup() {
-  kill $WATCH_PIDS "$PB_PID" 2>/dev/null || true
-  for pid in ${SPY_PIDS:-}; do kill "$pid" 2>/dev/null || true; done
+cleanup() { # exit-status
+  # Diagnose first: e2e_diagnose reads the logs, and e2e_end deletes the
+  # directory they live in (TASK-121). e2e_reap kills AND waits, so the
+  # server is gone before its --pb-dir is (TASK-153).
+  e2e_diagnose "$1"
+  e2e_reap $WATCH_PIDS ${SPY_PIDS:-} "$PB_PID"
   e2e_end
 }
-trap cleanup EXIT
+e2e_trap_cleanup cleanup
 
 # --- TASK-181: the suite rides a member token --------------------------------
 # The rules refuse tokenless requests now, so bootstrap one before anything
@@ -1985,8 +2002,14 @@ assert_contains "$comp_member" "set-password" "member completions offer set-pass
 
 echo "e2e: all assertions passed"
 
+# Both children run their own `lis build` before pinning their own scratch
+# HOME, so they get the REAL one back (TASK-187): inheriting this suite's
+# scratch HOME would move the build cache and make each of them recompile from
+# scratch. They are no less hermetic for it - each pins HOME itself, exactly as
+# it did before this suite started pinning anything.
+
 # --- web board (own ephemeral PB; see e2e_web.sh) ---
-scripts/e2e_web.sh
+HOME="$E2E_REAL_HOME" scripts/e2e_web.sh
 
 # --- lll up runner (own ephemeral PB; see e2e_up.sh) ---
-scripts/e2e_up.sh
+HOME="$E2E_REAL_HOME" scripts/e2e_up.sh

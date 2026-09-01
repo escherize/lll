@@ -24,11 +24,17 @@ WEB_PORT=$(free_port 40000 59999)
 UP_LOG="$DATA_DIR/up.log"
 E2E_LOGS="$UP_LOG"
 
-cleanup() {
-  kill "${UP_PID:-}" "${BLOCK_PID:-}" "${EXT_PB_PID:-}" 2>/dev/null || true
+cleanup() { # exit-status
+  # Diagnose first: e2e_diagnose reads the logs, and e2e_end deletes the
+  # directory they live in (TASK-121). e2e_reap kills AND waits, so the
+  # servers are gone before their --pb-dir is (TASK-153) - this suite runs
+  # two `lll up` processes at once, and it is the one whose orphans were
+  # actually observed still holding their ports minutes later.
+  e2e_diagnose "$1"
+  e2e_reap "${UP_PID:-}" "${BLOCK_PID:-}" "${EXT_PB_PID:-}"
   e2e_end
 }
-trap cleanup EXIT
+e2e_trap_cleanup cleanup
 
 lis build >/dev/null
 LLL=target/.lisette/bin/lll
