@@ -59,6 +59,15 @@ fn patch_issue(id: string, value: Unknown) -> Result<string, string> {
   Ok("")
 }
 
+/// An archived team's board is read-only (TASK-210): every write that
+/// mutates its records — creates and the issue editors alike — refuses with
+/// the flash naming the way back. Free at the issue endpoints: each already
+/// fetches the issue with its team expanded.
+fn require_active_team(t: models.Team) -> Result<(), string> {
+  if t.archived { return Err(archived_hint(t.key)) }
+  Ok(())
+}
+
 /// Respond to a Datastar action by patching the #flash strip. Always 200
 /// with an SSE body: Datastar does not reliably process non-2xx bodies, so
 /// errors travel in-band; success clears the strip and the data itself
@@ -107,7 +116,13 @@ fn create_write(
     let Some(t) = find_team(team_key)? else {
       return Err(unknown_team(team_key))
     }
+    // New issues do not land in an archived team (TASK-210), same refusal as
+    // `lll issue create`. The boot-team fallback is checked fresh too: teams
+    // archive from /settings while the server runs.
+    require_active_team(t)?
     team = t.id
+  } else {
+    require_active_team(shell_team(team))?
   }
   if team == "" {
     return Err("no team configured: set LLL_TEAM or 'team' in .lll.toml")
@@ -183,6 +198,7 @@ fn state_write(r: mut Ref<http.Request>) -> Result<string, string> {
     return Err(f"unknown state '{state}'")
   }
   let issue = fetch_issue(key)?
+  require_active_team(issue.expand.team)?
   // The issue's OWN team scopes the reorder (TASK-198): a drop on any
   // team's board must compute the midpoint against that team's column, not
   // the boot team's.
@@ -260,6 +276,7 @@ fn priority_write(r: mut Ref<http.Request>) -> Result<string, string> {
     return Err(f"unknown priority '{slug}'")
   }
   let issue = fetch_issue(key)?
+  require_active_team(issue.expand.team)?
   patch_issue(issue.id, PriorityPatch { priority: prio })
 }
 
@@ -276,6 +293,7 @@ fn emoji_write(r: mut Ref<http.Request>) -> Result<string, string> {
     return Err("an issue takes one emoji, or none")
   }
   let issue = fetch_issue(key)?
+  require_active_team(issue.expand.team)?
   patch_issue(issue.id, EmojiPatch { emoji })
 }
 
@@ -284,6 +302,7 @@ fn title_write(r: mut Ref<http.Request>) -> Result<string, string> {
   let title = strings.TrimSpace(r.FormValue("title"))
   if title == "" { return Err("title is required") }
   let issue = fetch_issue(key)?
+  require_active_team(issue.expand.team)?
   patch_issue(issue.id, TitlePatch { title })
 }
 
@@ -294,6 +313,7 @@ fn project_write(r: mut Ref<http.Request>) -> Result<string, string> {
   // and a project from another team is as unknown here as a deleted one
   // (TASK-173).
   let issue = fetch_issue(key)?
+  require_active_team(issue.expand.team)?
   if id != "" {
     let projects = fetch_projects(issue.team)?
     if projects.find(|p| p.id == id).is_none() {
@@ -317,6 +337,7 @@ fn assignee_write(r: mut Ref<http.Request>) -> Result<string, string> {
     }
   }
   let issue = fetch_issue(key)?
+  require_active_team(issue.expand.team)?
   patch_issue(issue.id, IssueAssigneePatch { assignee: id })
 }
 
@@ -335,6 +356,7 @@ fn labels_write(r: mut Ref<http.Request>) -> Result<string, string> {
   // here as a deleted one, which is what stops a POST crossing tenancy
   // however the checkbox got its id (TASK-173).
   let issue = fetch_issue(key)?
+  require_active_team(issue.expand.team)?
   let known = fetch_labels(issue.team)?
   // FormValue above has already parsed the body, so PostForm is populated;
   // labels is the one field that repeats (one checkbox per label).
@@ -354,6 +376,7 @@ fn comment_write(r: mut Ref<http.Request>) -> Result<string, string> {
   let body = strings.TrimSpace(r.PostFormValue("body"))
   if body == "" { return Err("comment body is required") }
   let issue = fetch_issue(key)?
+  require_active_team(issue.expand.team)?
   // Same honor-system authorship as `lll issue comment`: the member named by
   // 'me' in config, or authorless.
   let mut author = ""

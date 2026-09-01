@@ -115,6 +115,29 @@
 <p class="set-note">Descriptions are long-form, so they stay with <code>lll project create -d</code>.</p>
 </section>
 
+{{/* Teams (TASK-210): every team on the server — the one web surface where
+     an archived team stays visible, which is what makes unarchiving from
+     here possible. Archive/unarchive run the Access sections' per-action
+     admin re-auth: /settings is board-token-reachable, and removing a team
+     from every list and rail is destructive-adjacent even though it deletes
+     nothing. The row posts the state it wants (archived=1/0), so a stale
+     page converges instead of toggling blind. */}}
+<section class="set-sec" id="set-teams">
+<h2>Teams <span class="count">{{len .Teams}}</span></h2>
+<p class="set-note">Every team on this server. Archiving hides a team from the rail's switcher and default lists; its board stays readable at <code>/t/KEY/</code> and nothing is deleted. It asks for the admin password — the credentials <code>lll up</code> prints in its banner — verified per action and never stored. New teams come from <code>lll team create</code> or <code>lll attach</code>.</p>
+<div class="set-rows">
+{{range .Teams}}<form class="set-row" id="set-team-{{.Id}}" data-name="{{.Key}}">
+<input type="hidden" name="id" value="{{.Id}}">
+<span class="rt-key">{{.Key}}</span>
+<span class="rg-title">{{.Name}}</span>
+<span class="set-scope">{{.Issues}} issues{{if .Archived}} · archived{{end}}</span>
+<input name="admin_password" type="password" placeholder="Admin password" autocomplete="off" aria-label="Admin password" class="set-second">
+{{if .Archived}}<input type="hidden" name="archived" value="0"><button type="button" class="btn" data-on:click="@post('/settings/teams/archive', {contentType: 'form'})">Unarchive</button>
+{{else}}<input type="hidden" name="archived" value="1"><button type="button" class="btn" data-on:click="confirm('Archive ' + el.form.dataset.name + '? Lists and the rail hide it; its board stays readable.') && @post('/settings/teams/archive', {contentType: 'form'})">Archive</button>
+{{end}}</form>
+{{end}}</div>
+</section>
+
 {{/* Access (TASK-204): superuser-power actions behind per-action re-auth.
      Every form here carries the admin password; the server verifies it
      against the superuser per request and never stores it — the board token

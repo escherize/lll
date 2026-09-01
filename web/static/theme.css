@@ -238,6 +238,18 @@ input:focus, textarea:focus, select:focus {
   font-size: 12.5px;
 }
 
+/* The archived-team banner (TASK-210): the flash strip's shape in a muted
+   gray — informational, not an error, and quieter than the cards below. */
+.archived-banner {
+  margin: 10px 16px 0;
+  padding: 6px 10px;
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  background: var(--bg-raised);
+  color: var(--text-2);
+  font-size: 12.5px;
+}
+
 .avatar {
   width: 18px; height: 18px;
   flex: none;

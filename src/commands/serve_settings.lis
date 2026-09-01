@@ -57,6 +57,7 @@ fn settings_vm(team: models.Team) -> Result<SettingsVM, string> {
   let labels = fetch_labels(team.id)?
   let members = fetch_members()?
   let projects = fetch_projects(team.id)?
+  let teams = team_rows()?
   Ok(
     SettingsVM {
       team_key: team.key,
@@ -84,8 +85,37 @@ fn settings_vm(team: models.Team) -> Result<SettingsVM, string> {
         value: s,
         label: state_label(s),
       }),
+      teams,
     },
   )
+}
+
+/// The Teams section's rows (TASK-210): every team on the server, archived
+/// ones included — this is the one web surface an archived team stays
+/// visible on, which is what makes unarchiving from here possible. One
+/// perPage=1 count fetch per team, paid per settings render like the
+/// section's other fetches.
+fn team_rows() -> Result<Slice<SetTeamVM>, string> {
+  let mut rows: Slice<SetTeamVM> = []
+  for t in list_teams()?.items {
+    let filter = url.QueryEscape(f"team='{t.id}'")
+    let mut issues = models.IssueList { .. }
+    pb.fetch(
+      f"/api/collections/issues/records?filter={filter}&perPage=1",
+      "issues",
+      &issues,
+    )?
+    rows = rows.append(
+      SetTeamVM {
+        id: t.id,
+        key: t.key,
+        name: t.name,
+        issues: issues.total_items,
+        archived: t.archived,
+      },
+    )
+  }
+  Ok(rows)
 }
 
 /// A record's owning team key, or the word for "owned by no team".
@@ -477,4 +507,41 @@ fn access_credential_write(
 fn flash_ok_event(msg: string) -> string {
   let safe = template.HTMLEscapeString(msg)
   patch_event(f"<div id=\"flash\" class=\"flash flash-ok\">{safe}</div>")
+}
+
+// ── Teams (TASK-210) ─────────────────────────────────────────────────────
+// Archive / unarchive from the web. DECISION: the same per-action admin
+// re-auth as Access, for the same reason — /settings is reachable with the
+// board token alone, and while archiving deletes nothing, it removes a team
+// from every list and rail on the server (destructive-adjacent). The form
+// carries the admin password, verified server-side per request; the write
+// rides the superuser token that verification minted, never the board token.
+
+/// Archive or unarchive one team from the settings page. `archived=1`
+/// archives, anything else unarchives — the row's form posts the state it
+/// wants, so a stale page converges instead of toggling blind.
+fn teams_archive_write(
+  r: mut Ref<http.Request>,
+  team_id: string,
+) -> Result<string, string> {
+  let id = strings.TrimSpace(r.PostFormValue("id"))
+  if id == "" { return Err("pick a team") }
+  let known = list_teams()?
+  let Some(t) = known.items.find(|x| x.id == id) else {
+    return Err("unknown team — reload the page for the current list")
+  }
+  let archived = r.PostFormValue("archived") == "1"
+  let su = verify_admin(r.PostFormValue("admin_password"))?
+  let payload = marshal(TeamArchivedPatch { archived })?
+  let _ = pb.patch_as(f"/api/collections/teams/records/{id}", payload, su)?
+  // The page shows the row's state, so patch the section back and say the
+  // success out loud — same shape as access_credential_write.
+  let mut extra = ""
+  if let Ok(vm) = settings_vm(shell_team(team_id)) {
+    if let Ok(html) = render("settings", vm) { extra += patch_event(html) }
+  }
+  let mut msg = f"team {t.key} archived — its board stays readable at /t/{t.key}/"
+  if !archived { msg = f"team {t.key} unarchived" }
+  extra += flash_ok_event(msg)
+  Ok(extra)
 }

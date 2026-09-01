@@ -6,6 +6,10 @@ pub struct Team {
   // The team's accent colour as "#rrggbb". Empty means DESIGN.md's canonical
   // ember orange, which theme.css already hard-codes.
   pub accent: string,
+  // The lifecycle end (TASK-210): an archived team leaves the rail switcher
+  // and default team lists; its board stays readable at /t/KEY/ and its data
+  // is untouched. 'lll team unarchive KEY' brings it back.
+  pub archived: bool,
 }
 
 #[json]

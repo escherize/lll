@@ -97,7 +97,7 @@ fn verbs(noun: string) -> Slice<string> {
       "link",
       "unlink",
     ],
-    "team" => ["list", "create", "view"],
+    "team" => ["list", "create", "view", "archive", "unarchive"],
     "member" => ["list", "add", "set-password"],
     "project" => ["list", "view", "create"],
     "label" => ["list", "create"],

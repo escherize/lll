@@ -161,6 +161,10 @@ pub struct BoardVM {
   // /events URL carries it. Filled by board_page ONLY — the broadcast `board`
   // fragment never reads it, same bargain as compose.
   pub team_key: string,
+  // Whether the routed team is archived (TASK-210): the page renders a
+  // banner and its writes refuse server-side. Filled by board_page ONLY,
+  // same bargain as team_key.
+  pub team_archived: bool,
 }
 
 /// View model for the search page. `q` echoes back the URL's query so the
@@ -399,6 +403,16 @@ pub struct SetProjectVM {
   pub scope: string,
 }
 
+/// One team row on /settings (TASK-210): what it is, how much it holds, and
+/// whether it is archived — the page's archive controls act on this row.
+pub struct SetTeamVM {
+  pub id: string,
+  pub key: string,
+  pub name: string,
+  pub issues: int,
+  pub archived: bool,
+}
+
 /// View model for /settings, and for the #settings fragment its actions patch
 /// back.
 ///
@@ -421,6 +435,10 @@ pub struct SettingsVM {
   pub members: Slice<SetMemberVM>,
   pub projects: Slice<SetProjectVM>,
   pub statuses: Slice<StateOpt>,
+  // Every team on the server, archived ones included and marked (TASK-210):
+  // this section is where an archived team is still visible on the web,
+  // which is what makes unarchiving from here possible at all.
+  pub teams: Slice<SetTeamVM>,
 }
 
 /// One project on /projects: what it is, how far along it is, and how many

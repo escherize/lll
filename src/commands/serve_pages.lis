@@ -41,11 +41,13 @@ fn board_base(key: string) -> string {
 /// The rail's team switcher rows (TASK-198): every team on the server,
 /// key-sorted, the current page's marked. A failed fetch renders no switcher
 /// rather than a 500 — the same bargain as the rail's other groups.
+/// Archived teams stay off the switcher (TASK-210) — even the one the page
+/// is scoped to: its board says "archived" in its own banner instead.
 fn rail_teams(current: string) -> Slice<RailTeamVM> {
   let Ok(teams) = list_teams() else {
     return []
   }
-  teams.items.map(|t| RailTeamVM {
+  teams.items.filter(|t| !t.archived).map(|t| RailTeamVM {
     key: t.key,
     name: t.name,
     href: board_base(t.key),
@@ -235,6 +237,7 @@ fn board_page(w: http.ResponseWriter, r: Ref<http.Request>, team: models.Team, m
     no_match: view_query_filtered(q) && !issues.any(|i| issue_matches(i, flt)),
     compose,
     team_key: team.key,
+    team_archived: team.archived,
   }
   if raw_mode {
     write_raw(w, board_raw(vm))

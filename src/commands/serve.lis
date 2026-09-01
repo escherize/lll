@@ -192,6 +192,13 @@ pub fn run_server(
     "POST /settings/access/member",
     gated(flashing(|r: mut Ref<http.Request>| access_credential_write(r, team_id))),
   )
+  // The Teams section's archive lifecycle (TASK-210): its own route, not a
+  // {kind}, because it runs the Access sections' per-action admin re-auth —
+  // the board token alone must not archive a team.
+  http.HandleFunc(
+    "POST /settings/teams/archive",
+    gated(flashing(|r: mut Ref<http.Request>| teams_archive_write(r, team_id))),
+  )
   http.HandleFunc(
     "GET /search",
     gated(|w: http.ResponseWriter, r: Ref<http.Request>| {

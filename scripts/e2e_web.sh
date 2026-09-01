@@ -1721,4 +1721,71 @@ assert_not_contains "$ops_events" "Eng realtime probe" "an ENG event stays off t
 assert_contains "$eng_events" "Eng realtime probe" "an ENG event morphs the ENG board view"
 assert_not_contains "$eng_events" "Ops realtime probe" "an OPS event stays off the ENG view"
 
+# --- TASK-210: archived teams — off the rail, readable by URL, read-only ---
+# Archive OPS: the switcher and default lists drop it, /t/OPS/ still renders
+# with the banner and its data, and every write against it refuses with the
+# unarchive hint. The Settings Teams section is where the web archives and
+# unarchives, behind the Access sections' per-action admin re-auth.
+out=$(env LLL_TEAM=OPS "$LIN" issue create -t "Archived probe")
+ARCH_KEY=$(printf '%s' "$out" | sed -n 's/^Created \(OPS-[0-9]*\):.*/\1/p')
+[ -n "$ARCH_KEY" ] || fail "could not create the archive probe issue: $out"
+env LLL_TEAM=OPS "$LIN" team archive OPS >/dev/null
+
+eng_board=$(wcurl -sf "$WEB/t/ENG/")
+assert_not_contains "$(rail "$eng_board")" 'href="/t/OPS/"' \
+  "an archived team leaves the rail switcher"
+assert_not_contains "$eng_board" 'id="archived-banner"' \
+  "a live team's board wears no archive banner"
+ops_board=$(wcurl -sf "$WEB/t/OPS/") || fail "/t/OPS/ stopped rendering after archive"
+assert_contains "$ops_board" 'id="archived-banner"' \
+  "an archived board still renders, wearing the banner"
+assert_contains "$ops_board" "lll team unarchive OPS" "the banner names the way back"
+assert_contains "$ops_board" "Archived probe" "the archived board still shows its cards"
+assert_contains "$(wcurl -sf "$WEB/t/OPS/?raw")" "archived" "the raw board says archived too"
+
+# Writes refuse with the hint, and nothing lands.
+out=$(wcurl -s -X POST -d "title=never written" -d "team=OPS" "$WEB/create")
+assert_contains "$out" "team OPS is archived" "creating into an archived team is refused"
+env LLL_TEAM=OPS "$LIN" issue list | grep -q "never written" \
+  && fail "a refused create still landed in the archived team" || true
+out=$(wcurl -s -X POST "$WEB/state?key=$ARCH_KEY&state=done")
+assert_contains "$out" "team OPS is archived" \
+  "a state write on an archived team's issue is refused"
+env LLL_TEAM=OPS "$LIN" issue list --state done | grep -q "$ARCH_KEY" \
+  && fail "the refused state write still landed" || true
+out=$(wcurl -s -X POST -d "key=$ARCH_KEY" -d "body=nope" "$WEB/comment")
+assert_contains "$out" "team OPS is archived" \
+  "a comment on an archived team's issue is refused"
+
+# The Settings Teams section: every team, archived marked, counts shown.
+settings=$(wcurl -sf "$WEB/settings")
+assert_contains "$settings" 'id="set-teams"' "settings page carries the Teams section"
+assert_contains "$settings" "· archived" "the archived team's row is marked"
+OPS_TEAM_ID=$(row_id "$settings" team OPS)
+[ -n "$OPS_TEAM_ID" ] || fail "the settings Teams section did not render the OPS row"
+
+# Unarchive from settings runs the Access re-auth: no admin password and a
+# wrong one both refuse and change nothing; the right one unarchives.
+out=$(wcurl -sf -X POST "$WEB/settings/teams/archive" -d "id=$OPS_TEAM_ID" -d 'archived=0')
+assert_contains "$out" "admin password is required" \
+  "unarchiving without the admin password is refused"
+out=$(wcurl -sf -X POST "$WEB/settings/teams/archive" -d "id=$OPS_TEAM_ID" -d 'archived=0' \
+  -d 'admin_password=not-the-password')
+assert_contains "$out" "wrong admin password" \
+  "unarchiving with a wrong admin password is refused"
+"$LIN" team list | grep -q OPS && fail "a refused unarchive still unarchived" || true
+out=$(wcurl -sf -X POST "$WEB/settings/teams/archive" -d "id=$OPS_TEAM_ID" -d 'archived=0' \
+  -d "admin_password=$ADMIN_PASS")
+assert_contains "$out" 'flash-ok' "an unarchive says its success in the flash strip"
+assert_contains "$out" 'id="settings"' "an unarchive patches the settings body back"
+"$LIN" team list | grep -q OPS || fail "unarchiving from settings did not persist"
+
+# And archive from settings, the same gate.
+out=$(wcurl -sf -X POST "$WEB/settings/teams/archive" -d "id=$OPS_TEAM_ID" -d 'archived=1' \
+  -d "admin_password=$ADMIN_PASS")
+assert_contains "$out" 'flash-ok' "an archive says its success in the flash strip"
+"$LIN" team list | grep -q OPS && fail "archiving from settings did not persist" || true
+"$LIN" team list --archived | grep -q OPS || fail "the settings-archived team is gone entirely"
+env LLL_TEAM=OPS "$LIN" team unarchive OPS >/dev/null   # leave the suite as it found OPS
+
 echo "e2e_web: all assertions passed"

@@ -51,6 +51,11 @@ fn card_line(c: CardVM) -> string {
 /// shows up here exactly as it does in a browser.
 fn board_raw(vm: BoardVM) -> string {
   let mut lines: Slice<string> = ["# Board"]
+  if vm.team_archived {
+    lines = lines.append(
+      f"> This team is archived — the board is read-only. 'lll team unarchive {vm.team_key}' brings it back.",
+    )
+  }
   if vm.error != "" {
     lines = lines.append(f"> {vm.error}")
   }
@@ -192,6 +197,13 @@ fn settings_raw(vm: SettingsVM) -> string {
   lines = lines.append("## Projects")
   for p in vm.projects {
     lines = lines.append(f"- {cell(p.name)} — {p.status} ({p.scope})")
+  }
+  lines = lines.append("")
+  lines = lines.append("## Teams")
+  for t in vm.teams {
+    let mut mark = ""
+    if t.archived { mark = " — archived" }
+    lines = lines.append(f"- {t.key} {cell(t.name)} ({t.issues} issues){mark}")
   }
   strings.Join(lines, "\n")
 }

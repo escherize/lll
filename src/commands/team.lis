@@ -17,6 +17,8 @@ pub fn team(args: Slice<string>) -> Result<(), string> {
     "list" => team_list(args),
     "create" => team_create(args),
     "view" => team_view(args),
+    "archive" => team_set_archived(args, true),
+    "unarchive" => team_set_archived(args, false),
     "--help" => {
       team_usage()
       Ok(())
@@ -34,15 +36,23 @@ fn team_usage() {
     "lll team - work with teams
 
 Usage:
-  lll team list                      list teams (KEY, name)
+  lll team list [--archived]         list teams (KEY, name); --archived includes archived ones
   lll team create -k KEY -n \"Name\"   create a team
-  lll team view KEY                  show a team and its issue count",
+  lll team view KEY                  show a team and its issue count
+  lll team archive KEY               hide the team from lists and the board rail (data kept)
+  lll team unarchive KEY             bring an archived team back",
   )
 }
 
 fn team_list(args: Slice<string>) -> Result<(), string> {
   let p = flags.parse(team_list_spec(), args, 3, false, "")?
-  let teams = list_teams()?
+  let mut teams = list_teams()?
+  // Archived teams are hidden by default — everywhere a team list renders
+  // (here, the rail switcher) an archived team is finished work, not a
+  // choice. --archived includes them, marked.
+  if !p.given("--archived") {
+    teams.items = teams.items.filter(|t| !t.archived)
+  }
   if p.given("--json") {
     let body = match json.Marshal(teams) {
       Ok(b) => b as string,
@@ -52,13 +62,18 @@ fn team_list(args: Slice<string>) -> Result<(), string> {
     return Ok(())
   }
   for t in teams.items {
-    fmt.Println(f"{t.key}\t{t.name}")
+    let mut mark = ""
+    if t.archived { mark = "\t(archived)" }
+    fmt.Println(f"{t.key}\t{t.name}{mark}")
   }
   Ok(())
 }
 
 fn team_list_spec() -> Slice<flags.Flag> {
-  [flags.Flag { name: "--json", help: "print the raw record list as JSON", .. }]
+  [
+    flags.Flag { name: "--json", help: "print the raw record list as JSON", .. },
+    flags.Flag { name: "--archived", help: "include archived teams (marked)", .. },
+  ]
 }
 
 fn team_create_spec() -> Slice<flags.Flag> {
@@ -185,6 +200,45 @@ fn unknown_team(key: string) -> string {
   f"no team with key '{key}' on the server — see 'lll team list', or create it with 'lll team create -k {key} -n \"Name\"'"
 }
 
+/// Archived-team refusal naming the fix. Shared by everything that refuses
+/// to write into an archived team (same package: src/commands): the CLI's
+/// attach and issue create, and the web board's write endpoints.
+fn archived_hint(key: string) -> string {
+  f"team {key} is archived — 'lll team unarchive {key}' first"
+}
+
+/// The one PATCH body the archive lifecycle needs: PocketBase replaces every
+/// field it is handed, so the patch carries `archived` and nothing else.
+#[json]
+struct TeamArchivedPatch { archived: bool }
+
+/// `lll team archive KEY` / `lll team unarchive KEY` — the team lifecycle.
+/// Archiving hides, never deletes: issues, comments and the /t/KEY/ board
+/// all stay, so the command can afford to be one word with no confirm.
+fn team_set_archived(args: Slice<string>, archived: bool) -> Result<(), string> {
+  let mut verb = "archive"
+  if !archived { verb = "unarchive" }
+  let Some(key) = args.get(3) else {
+    return Err(f"usage: lll team {verb} KEY")
+  }
+  let Some(t) = find_team(key)? else {
+    return Err(unknown_team(key))
+  }
+  let payload = match json.Marshal(TeamArchivedPatch { archived }) {
+    Ok(p) => p as string,
+    Err(e) => return Err(f"encoding team patch: {e}"),
+  }
+  let _ = pb.patch(f"/api/collections/teams/records/{t.id}", payload)?
+  if archived {
+    fmt.Println(
+      f"Archived team {t.key} — hidden from team lists and the board rail; /t/{t.key}/ stays readable. 'lll team unarchive {t.key}' brings it back.",
+    )
+  } else {
+    fmt.Println(f"Unarchived team {t.key}")
+  }
+  Ok(())
+}
+
 fn team_view(args: Slice<string>) -> Result<(), string> {
   let Some(key) = args.get(3) else {
     return Err("usage: lll team view KEY")
@@ -204,5 +258,8 @@ fn team_view(args: Slice<string>) -> Result<(), string> {
   fmt.Println(f"Key:    {t.key}")
   fmt.Println(f"Name:   {t.name}")
   fmt.Println(f"Issues: {issues.total_items}")
+  if t.archived {
+    fmt.Println("Archived: yes ('lll team unarchive' brings it back)")
+  }
   Ok(())
 }

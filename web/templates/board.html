@@ -64,7 +64,12 @@ provenance.
       </form>
     </header>
     <div id="flash" class="flash"{{if not .Page.Error}} hidden{{end}}>{{if .Page.Error}}{{.Page.Error}}{{end}}</div>
-    {{template "filterbar" .Page}}
+    {{/* The archive banner (TASK-210): an archived team's board still renders
+         — reads are preserved, data untouched — but every write refuses, so
+         the banner says both halves and names the way back. Outside every
+         morph boundary, like the rail: no broadcast re-renders it. */}}
+    {{if .Page.TeamArchived}}<div id="archived-banner" class="archived-banner">This team is archived — the board is read-only. <code>lll team unarchive {{.Page.TeamKey}}</code> brings it back.</div>
+    {{end}}{{template "filterbar" .Page}}
     {{template "new-issue-dialog" .Page}}
     {{template "board" .Page}}
   </div>

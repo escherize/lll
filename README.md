@@ -71,6 +71,23 @@ So attaching a new repo on a machine already set up is `lll attach`, and an
 already-attached repo on a new machine is `git clone` — no lll step at all.
 Every worktree of that checkout is attached the moment it exists.
 
+### The side-project loop
+
+A team is cheap, so give every side project its own and archive it when the
+work is done:
+
+```sh
+lll attach                    # once: creates team KEY, writes .lll.toml
+lll issue create -t "..."     # work, tracked under KEY-1, KEY-2, ...
+lll team archive KEY          # done: leaves team lists and the board rail
+```
+
+Archiving hides, never deletes: `/t/KEY/` still renders (with an "archived"
+banner) and every issue and comment stays readable. New writes refuse —
+`lll issue create`, `lll attach`, and the archived board's editors all answer
+with the fix — and `lll team unarchive KEY` brings the team back whole.
+`lll team list --archived` shows what is parked.
+
 ## Configuration
 
 Precedence: env vars > the repo's `.lll.toml` > `~/.config/lll/lll.toml`. The
@@ -136,6 +153,7 @@ lll watch --state in-review   # live NDJSON-able event stream for a query
 lll issue watch ENG-12        # one issue + its comments, until Ctrl-C
 
 lll team|member|project|label list      # the other nouns: list/create/view/add
+lll team archive KEY          # park a finished team; unarchive brings it back
 lll attach                    # point this repo at a team, once
 lll config --list             # every value and the file it came from
 lll login --url https://host:8091   # one-command machine setup: auth + persist url/token/me

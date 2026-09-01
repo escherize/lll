@@ -465,6 +465,9 @@ fn create(args: Slice<string>) -> Result<(), string> {
   // The team first: it scopes the label and project names below, which are
   // unique per team and not across them (TASK-173).
   let team = current_team()?
+  // New issues do not land in an archived team (TASK-210): archived is the
+  // lifecycle's end, and reviving it is a deliberate one-command act.
+  if team.archived { return Err(archived_hint(team.key)) }
 
   let mut assignee = ""
   if assignee_name != "" { assignee = resolve_member(assignee_name)?.id }

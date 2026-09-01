@@ -200,6 +200,44 @@ out=$(LLL_URL=$URL "$LIN" team view ENG)
 assert_contains "$out" "Key:    ENG" "team view key"
 assert_contains "$out" "Name:   Engineering" "team view name"
 assert_contains "$out" "Issues: 2" "team view issue count"
+assert_not_contains "$out" "Archived" "team view says nothing about archive for a live team"
+
+# --- TASK-210: team archive / unarchive — the lifecycle end ---
+out=$(LLL_URL=$URL "$LIN" team archive QA)
+assert_contains "$out" "Archived team QA" "team archive says what it did"
+assert_contains "$out" "lll team unarchive QA" "team archive names the way back"
+out=$(LLL_URL=$URL "$LIN" team list)
+assert_not_contains "$out" "QA" "team list hides archived teams by default"
+out=$(LLL_URL=$URL "$LIN" team list --archived)
+assert_contains "$out" "QA	Quality	(archived)" "team list --archived shows archived teams, marked"
+assert_contains "$out" "ENG" "team list --archived still shows live teams"
+out=$(LLL_URL=$URL "$LIN" team list --archived --json)
+printf '%s' "$out" | jq -e '.items[] | select(.key == "QA") | .archived == true' >/dev/null \
+  || fail "team list --json does not carry the archived flag"
+out=$(LLL_URL=$URL "$LIN" team view QA)
+assert_contains "$out" "Archived: yes" "team view says the team is archived"
+
+# Archived teams take no new work: create and attach refuse with the fix.
+out=$(LLL_URL=$URL LLL_TEAM=QA "$LIN" issue create -t "never created" 2>&1) \
+  && fail "issue create in an archived team should exit non-zero"
+assert_contains "$out" "team QA is archived — 'lll team unarchive QA' first" \
+  "create against an archived team names the fix"
+ARCHDIR="$DATA_DIR/attach-archived"
+LLL_HERE="$PWD/$LIN"
+mkdir -p "$ARCHDIR"
+git -C "$ARCHDIR" init -q
+out=$(cd "$ARCHDIR" && LLL_URL=$URL HOME="$E2E_HOME" "$LLL_HERE" attach -k QA 2>&1) \
+  && fail "attaching to an archived team should exit non-zero"
+assert_contains "$out" "team QA is archived" "attach against an archived team names the fix"
+[ ! -f "$ARCHDIR/.lll.toml" ] || fail "a refused attach still wrote .lll.toml"
+
+# Unarchive brings it back — the data was there all along.
+out=$(LLL_URL=$URL "$LIN" team unarchive QA)
+assert_contains "$out" "Unarchived team QA" "team unarchive says what it did"
+out=$(LLL_URL=$URL "$LIN" team list)
+assert_contains "$out" "QA" "an unarchived team is back in the default list"
+out=$(LLL_URL=$URL LLL_TEAM=QA "$LIN" issue create -t "QA lives again")
+assert_contains "$out" "Created QA-1" "an unarchived team takes new issues again"
 
 # --- LLL_TEAM scopes issue list by default ---
 out=$(LLL_URL=$URL LLL_TEAM=ENG "$LIN" issue list)

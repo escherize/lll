@@ -144,6 +144,23 @@ the next person will think of them too.
 Good decisions name what was NOT chosen and why. "Used X" is worthless. "Used X
 because Y needs a reconciler and two writable copies" is worth the file.
 
+## Side projects: attach, work, archive
+
+A team is cheap — give every side project its own instead of piling issues
+into a shared one:
+
+```sh
+lll attach                 # once, in the repo: creates team KEY, writes .lll.toml
+lll issue create -t "..."  # work, tracked as KEY-1, KEY-2, ...
+lll team archive KEY       # done: leaves team lists and the board rail
+```
+
+Archiving hides, never deletes: `/t/KEY/` still renders with an "archived"
+banner and everything stays readable, but new writes refuse and name the fix
+(`lll team unarchive KEY`). `lll team list --archived` shows what is parked.
+Archive rather than abandon — a board that lists only live teams is one you
+can actually scan.
+
 ## Conventions that keep a parallel backlog honest
 
 - **Push a claim immediately.** A claim nobody can see protects nobody.

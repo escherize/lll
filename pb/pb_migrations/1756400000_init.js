@@ -15,6 +15,7 @@ migrate(
       fields: [
         { name: "key", type: "text", required: true },
         { name: "name", type: "text" },
+        { name: "archived", type: "bool" },
         { name: "created", type: "autodate", onCreate: true },
         { name: "updated", type: "autodate", onCreate: true, onUpdate: true },
       ],

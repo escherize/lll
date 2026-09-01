@@ -54,6 +54,13 @@ pub fn attach(args: Slice<string>) -> Result<(), string> {
     return Err(f"no team key in '{name}' to derive one from — pass it: lll attach -k KEY")
   }
 
+  // Attaching to an archived team is refused, not silently revived: archive
+  // is a deliberate lifecycle act, and unarchive is one command (TASK-210).
+  // A server that is down still attaches — same bargain as the create below.
+  if let Ok(Some(t)) = find_team(key) {
+    if t.archived { return Err(archived_hint(key)) }
+  }
+
   let path = filepath.Join(root, ".lll.toml")
   set_key_in(path, "team", key)?
   fmt.Println(f"team = \"{key}\" in {path}")
