@@ -27,17 +27,17 @@
   {{template "rail" .Rail}}
   <div class="main">
     <header class="topbar">
-      <div class="crumbs"><a href="/">Board</a><span class="sep">›</span><span class="here">Search</span></div>
+      <div class="crumbs"><a href="{{.Rail.BoardBase}}">Board</a><span class="sep">›</span><span class="here">Search</span></div>
     </header>
     {{/* $q is seeded from the field's own value by data-bind, so a page
          loaded with ?q= starts with the signal already filled and the X
          already showing. The X is a plain link to the empty page rather
          than a signal reset: clearing IS a query change, and the query is
          the URL. */}}
-    <form class="search-bar" action="/search" method="get" role="search">
+    <form class="search-bar" action="{{.Rail.BoardBase}}search" method="get" role="search">
       <svg width="14" height="14" aria-hidden="true"><use href="#ic-search"/></svg>
-      <input name="q" type="text" value="{{.Page.Q}}" placeholder="Search every issue by title" aria-label="Search every issue by title" autocomplete="off" autofocus data-bind:q data-on:input__debounce.250ms="@get('/search?fragment=1&q=' + encodeURIComponent($q)); history.replaceState(null, '', $q ? '/search?q=' + encodeURIComponent($q) : '/search')">
-      <a class="search-clear" href="/search" title="Clear search" aria-label="Clear search" style="display:none" data-show="$q !== ''"><svg width="10" height="10" viewBox="0 0 10 10" aria-hidden="true"><path d="M2 2 L8 8 M8 2 L2 8" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg></a>
+      <input name="q" type="text" value="{{.Page.Q}}" placeholder="Search every issue by title" aria-label="Search every issue by title" autocomplete="off" autofocus data-bind:q data-on:input__debounce.250ms="@get('{{.Rail.BoardBase}}search?fragment=1&q=' + encodeURIComponent($q)); history.replaceState(null, '', $q ? '{{.Rail.BoardBase}}search?q=' + encodeURIComponent($q) : '{{.Rail.BoardBase}}search')">
+      <a class="search-clear" href="{{.Rail.BoardBase}}search" title="Clear search" aria-label="Clear search" style="display:none" data-show="$q !== ''"><svg width="10" height="10" viewBox="0 0 10 10" aria-hidden="true"><path d="M2 2 L8 8 M8 2 L2 8" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg></a>
     </form>
     {{template "search-results" .Page}}
   </div>

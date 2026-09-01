@@ -16,7 +16,7 @@
   {{template "rail" .Rail}}
   <div class="main">
     <header class="topbar">
-      <div class="crumbs"><a href="/">Board</a><span class="sep">›</span><span class="here">{{.Page.Key}}</span></div>
+      <div class="crumbs"><a href="{{.Rail.BoardBase}}">Board</a><span class="sep">›</span><span class="here">{{.Page.Key}}</span></div>
       <div class="spacer"></div>
       <!-- The star sits in the topbar, OUTSIDE #issue-detail, so $fav is
            never wiped by an issue morph. It posts the state it just moved to

@@ -24,9 +24,33 @@ fn rail_vm(active: string, me: string, team: models.Team) -> RailVM {
     version: version(),
     accent_css: theme.accent_css(hex),
     favicon: theme.favicon_url(hex, theme.mark_letter(team.key)),
+    board_base: board_base(team.key),
+    teams: rail_teams(team.key),
     favorites: fav_vms(),
     views: view_vms(),
   }
+}
+
+/// The board path for a team key: "/t/KEY/", or "/" when no key scopes the
+/// page (defensive — run_server insists on a boot team). TASK-198.
+fn board_base(key: string) -> string {
+  if key == "" { return "/" }
+  f"/t/{key}/"
+}
+
+/// The rail's team switcher rows (TASK-198): every team on the server,
+/// key-sorted, the current page's marked. A failed fetch renders no switcher
+/// rather than a 500 — the same bargain as the rail's other groups.
+fn rail_teams(current: string) -> Slice<RailTeamVM> {
+  let Ok(teams) = list_teams() else {
+    return []
+  }
+  teams.items.map(|t| RailTeamVM {
+    key: t.key,
+    name: t.name,
+    href: board_base(t.key),
+    active: t.key == current,
+  })
 }
 
 /// The rail's SAVED VIEWS group. Same bargain as fav_vms: a failed fetch
@@ -111,7 +135,10 @@ fn query_param(r: Ref<http.Request>, name: string) -> string {
 /// /events still broadcasts ONE unfiltered #board fragment to every
 /// board-scoped client, so the URL filter is guarded client-side too: each
 /// card's data-show checks the $flt signal the page seeds from its own URL.
-fn board_page(w: http.ResponseWriter, r: Ref<http.Request>, team_id: string, me: string) {
+/// `team` is the ROUTED team (TASK-198): /t/{team}/ resolved it before this
+/// handler ran, so every fetch and every generated URL below is that team's.
+fn board_page(w: http.ResponseWriter, r: Ref<http.Request>, team: models.Team, me: string) {
+  let team_id = team.id
   let mut err = ""
   let raw = view_query(r)
 
@@ -194,6 +221,7 @@ fn board_page(w: http.ResponseWriter, r: Ref<http.Request>, team_id: string, me:
     states: state_opts(),
     columns: board_columns(issues, flt, fetch_claimed_issue_ids().unwrap_or([])),
     filter_groups: filter_groups(
+      board_base(team.key),
       issues,
       q,
       fetch_member_names().unwrap_or([]),
@@ -206,12 +234,13 @@ fn board_page(w: http.ResponseWriter, r: Ref<http.Request>, team_id: string, me:
     error: err,
     no_match: view_query_filtered(q) && !issues.any(|i| issue_matches(i, flt)),
     compose,
+    team_key: team.key,
   }
   if raw_mode {
     write_raw(w, board_raw(vm))
     return
   }
-  let rail = rail_vm(active, me, shell_team(team_id))
+  let rail = rail_vm(active, me, team)
   let html = match render("board-page", PageVM { rail, page: vm }) {
     Ok(h) => h,
     Err(e) => {
@@ -251,7 +280,11 @@ fn hide_seed_js(hidden: Slice<string>) -> template.JS {
   strings.Join(parts, " ") as template.JS
 }
 
-fn issue_page(w: http.ResponseWriter, r: Ref<http.Request>, team_id: string, me: string) {
+/// `team` is the ROUTED team (TASK-198), carried by the rail (accent, links)
+/// only: the issue itself renders from its own record, whichever team owns
+/// it, and the canonical URL — the bare /issue/{key} redirect builds it —
+/// routes through the issue's own team.
+fn issue_page(w: http.ResponseWriter, r: Ref<http.Request>, team: models.Team, me: string) {
   let key = r.PathValue("key")
   let issue = match fetch_issue(key) {
     Ok(i) => i,
@@ -291,7 +324,7 @@ fn issue_page(w: http.ResponseWriter, r: Ref<http.Request>, team_id: string, me:
   }
   if let Ok(Some(_)) = fetch_favorite(issue.id) { page.favorited = true }
   page.emojis = emoji_catalog()
-  let vm = PageVM { rail: rail_vm("board", me, shell_team(team_id)), page }
+  let vm = PageVM { rail: rail_vm("board", me, team), page }
   let html = match render("issue-page", vm) {
     Ok(h) => h,
     Err(e) => {

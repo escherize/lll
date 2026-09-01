@@ -3,11 +3,11 @@ import "go:github.com/escherize/lll/web"
 import "go:net"
 import "go:net/http"
 import "go:os"
+import "go:strings"
 
 import "config"
 import "models"
 import "pb"
-import "query"
 import "realtime"
 
 // The web board — a server-rendered board with realtime updates, started by
@@ -47,10 +47,17 @@ pub fn run_server(
   // The gate's env token, resolved (and generated when unset) before any
   // request can arrive — the handlers and the banner below must agree.
   let board_tok = resolve_board_token()
-  // Resolve the team scope once; card/board fetches and the realtime
-  // subscription share it. No configured team means an unscoped board.
   let cfg = config.load()?
-  let team_id = configured_team_id()?
+  // The BOOT team (TASK-198): the server hosts every team — the board views
+  // one per URL under /t/KEY/ — and the configured team is only where the
+  // bare / redirect and the compatibility routes land. `lll up` (the one
+  // caller) has already settled a team, so a missing one here is a real
+  // misconfiguration, not the old "unscoped board".
+  let Some(boot) = configured_team()? else {
+    return Err(no_team())
+  }
+  let team_id = boot.id
+  let boot_key = boot.key
 
   // Fail fast on broken templates before accepting connections — both
   // pages, because they share the rail and a typo in it breaks every page.
@@ -74,12 +81,14 @@ pub fn run_server(
     PageVM { rail: shell, page: ProjectsVM { .. } },
   )?
 
-  // One PB subscription for everything. Issues are team-scoped at most —
-  // never state-filtered: PB emits nothing when an update moves a record out
-  // of a subscription filter, so filtered board columns would go stale.
+  // One PB subscription for everything. Issues are UNSCOPED (TASK-198): the
+  // server hosts every team, and the bridge routes each event to the clients
+  // viewing that record's team ("board:KEY" scopes). Never state-filtered
+  // either: PB emits nothing when an update moves a record out of a
+  // subscription filter, so filtered board columns would go stale.
   let issues_topic = realtime.topic_with_options(
     "issues",
-    query.filter(team_id, "", "", "", "", ""),
+    "",
     "team,assignee,labels,project",
   )?
   let comments_topic = realtime.topic_with_options("comments", "", "author")?
@@ -93,15 +102,46 @@ pub fn run_server(
 
   let hub = new_hub()
   task {
-    bridge(events, hub, team_id)
+    bridge(events, hub)
   }
 
   // Every route sits behind the board gate (serve_gate.lis): pages, writes,
   // the SSE stream and static assets alike answer only board-token requests.
+  //
+  // The board, its issue pages and its search live under /t/KEY/ (TASK-198):
+  // one server, every team, each team's board a shareable URL. The bare
+  // legacy paths stay as redirects — bookmarks, the CLI's printed URLs and
+  // the rail's favorites all speak them — landing on the boot team (or, for
+  // an issue, on the team its key names).
   http.HandleFunc(
     "GET /{$}",
     gated(|w: http.ResponseWriter, r: Ref<http.Request>| {
-      board_page(w, r, team_id, cfg.me)
+      redirect_with_query(w, r, f"/t/{boot_key}/")
+    }),
+  )
+  http.HandleFunc(
+    "GET /t/{team}",
+    gated(|w: http.ResponseWriter, r: Ref<http.Request>| {
+      let key = r.PathValue("team")
+      redirect_with_query(w, r, f"/t/{key}/")
+    }),
+  )
+  http.HandleFunc(
+    "GET /t/{team}/{$}",
+    gated(|w: http.ResponseWriter, r: Ref<http.Request>| {
+      if let Some(t) = routed_team(w, r) { board_page(w, r, t, cfg.me) }
+    }),
+  )
+  http.HandleFunc(
+    "GET /t/{team}/issue/{key}",
+    gated(|w: http.ResponseWriter, r: Ref<http.Request>| {
+      if let Some(t) = routed_team(w, r) { issue_page(w, r, t, cfg.me) }
+    }),
+  )
+  http.HandleFunc(
+    "GET /t/{team}/search",
+    gated(|w: http.ResponseWriter, r: Ref<http.Request>| {
+      if let Some(t) = routed_team(w, r) { search_page(w, r, t, cfg.me) }
     }),
   )
   http.HandleFunc(
@@ -113,7 +153,14 @@ pub fn run_server(
   http.HandleFunc(
     "GET /issue/{key}",
     gated(|w: http.ResponseWriter, r: Ref<http.Request>| {
-      issue_page(w, r, team_id, cfg.me)
+      // The issue key names its own team (ENG-3 -> ENG), so the canonical
+      // team-routed URL needs no lookup; an unknown key 404s over there.
+      let key = r.PathValue("key")
+      let mut tk = boot_key
+      if let Some(i) = strings.LastIndex(key, "-") {
+        if i > 0 { tk = key.substring(0..i) }
+      }
+      redirect_with_query(w, r, f"/t/{tk}/issue/{key}")
     }),
   )
   http.HandleFunc(
@@ -148,23 +195,20 @@ pub fn run_server(
   http.HandleFunc(
     "GET /search",
     gated(|w: http.ResponseWriter, r: Ref<http.Request>| {
-      search_page(w, r, team_id, cfg.me)
+      redirect_with_query(w, r, f"/t/{boot_key}/search")
     }),
   )
   http.HandleFunc(
     "GET /events",
     gated(|w: http.ResponseWriter, r: Ref<http.Request>| {
-      events_stream(w, r, hub)
+      events_stream(w, r, hub, boot_key)
     }),
   )
   http.HandleFunc(
     "POST /create",
     gated(flashing(|r: mut Ref<http.Request>| create_write(r, team_id))),
   )
-  http.HandleFunc(
-    "POST /state",
-    gated(flashing(|r: mut Ref<http.Request>| state_write(r, team_id))),
-  )
+  http.HandleFunc("POST /state", gated(flashing(state_write)))
   http.HandleFunc("POST /favorite", gated(flashing(favorite_write)))
   http.HandleFunc("POST /priority", gated(flashing(priority_write)))
   http.HandleFunc("POST /emoji", gated(flashing(emoji_write)))
@@ -208,5 +252,35 @@ pub fn run_server(
   match http.Serve(listener, http.DefaultServeMux) {
     Ok(_) => Ok(()),
     Err(e) => Err(f"server: {e}"),
+  }
+}
+
+/// 303 to `path`, carrying the request's query string over — the bare board
+/// and search paths redirect to their team-routed twins (TASK-198), and a
+/// filtered URL must stay filtered across the hop.
+fn redirect_with_query(w: http.ResponseWriter, r: Ref<http.Request>, path: string) {
+  let mut target = path
+  if let Some(u) = r.URL {
+    if u.RawQuery != "" { target = f"{path}?{u.RawQuery}" }
+  }
+  http.Redirect(w, r, target, 303)
+}
+
+/// The team a /t/{team}/... URL names, freshly fetched (the accent it
+/// carries can change under /settings at any moment — shell_team's bargain).
+/// None means the response is already written: a 404 naming the key, or a
+/// 500 for a lookup the database refused.
+fn routed_team(w: http.ResponseWriter, r: Ref<http.Request>) -> Option<models.Team> {
+  let key = r.PathValue("team")
+  match find_team(key) {
+    Ok(Some(t)) => Some(t),
+    Ok(None) => {
+      http.Error(w, f"no team with key '{key}' on this server — see the rail's team switcher", 404)
+      None
+    },
+    Err(e) => {
+      http.Error(w, e, 500)
+      None
+    },
   }
 }

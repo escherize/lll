@@ -157,6 +157,10 @@ pub struct BoardVM {
   // Pickers for the create dialog. Zero-valued on the broadcast path — the
   // `board` fragment does not read it. See ComposeVM.
   pub compose: ComposeVM,
+  // The routed team's key (TASK-198): the create forms post it and the page's
+  // /events URL carries it. Filled by board_page ONLY — the broadcast `board`
+  // fragment never reads it, same bargain as compose.
+  pub team_key: string,
 }
 
 /// View model for the search page. `q` echoes back the URL's query so the
@@ -165,6 +169,15 @@ pub struct BoardVM {
 pub struct SearchVM {
   pub q: string,
   pub results: Slice<CardVM>,
+}
+
+/// One row of the rail's team switcher (TASK-198): a team on the server,
+/// its board URL, and whether it is the team this page is scoped to.
+pub struct RailTeamVM {
+  pub key: string,
+  pub name: string,
+  pub href: string,
+  pub active: bool,
 }
 
 /// View model for the app shell's left rail.
@@ -178,6 +191,13 @@ pub struct RailVM {
   // Which row reads as current: "board", "mine", "issues", "projects",
   // "search" or "settings".
   pub active: string,
+  // The board path this page's team-scoped links hang off: "/t/KEY/" for the
+  // page's team, "/" when no team scopes the page (TASK-198). The Board and
+  // Search rows and the issue page's crumb all build on it.
+  pub board_base: string,
+  // The team switcher: every team on the server, this page's marked. Rendered
+  // per page load like the rest of the rail — never broadcast.
+  pub teams: Slice<RailTeamVM>,
   // Config's `me`. Empty means there is no member to be, so no "My issues"
   // row — a rail link that leads nowhere is worse than no rail link.
   pub me: string,

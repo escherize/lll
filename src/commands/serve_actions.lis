@@ -99,7 +99,17 @@ fn create_write(
   if query.states().find(|s| s == state).is_none() {
     return Err(f"unknown state '{state}'")
   }
-  if team_id == "" {
+  // The board posts the team it is viewing (TASK-198); a request naming
+  // none — a bare `curl -d title=...` — keeps landing in the boot team.
+  let mut team = team_id
+  let team_key = strings.TrimSpace(r.PostFormValue("team"))
+  if team_key != "" {
+    let Some(t) = find_team(team_key)? else {
+      return Err(unknown_team(team_key))
+    }
+    team = t.id
+  }
+  if team == "" {
     return Err("no team configured: set LLL_TEAM or 'team' in .lll.toml")
   }
   let mut priority = 0
@@ -116,7 +126,7 @@ fn create_write(
     (form as Map<string, Slice<string>>)["labels"].filter(|id| id != "")
   })
   let new_issue = models.NewIssue {
-    team: team_id,
+    team,
     title,
     state,
     priority,
@@ -163,10 +173,7 @@ struct IssueAssigneePatch { assignee: string }
 #[json]
 struct IssueLabelsPatch { labels: Slice<string> }
 
-fn state_write(
-  r: mut Ref<http.Request>,
-  team_id: string,
-) -> Result<string, string> {
+fn state_write(r: mut Ref<http.Request>) -> Result<string, string> {
   // FormValue, not PostFormValue: drag-and-drop posts key/state as query params.
   let key = r.FormValue("key")
   let state = r.FormValue("state")
@@ -176,7 +183,10 @@ fn state_write(
     return Err(f"unknown state '{state}'")
   }
   let issue = fetch_issue(key)?
-  let sort = reorder_sort(issue, state, before, team_id)?
+  // The issue's OWN team scopes the reorder (TASK-198): a drop on any
+  // team's board must compute the midpoint against that team's column, not
+  // the boot team's.
+  let sort = reorder_sort(issue, state, before, issue.team)?
   patch_issue(issue.id, StatePatch { state, sort })
 }
 

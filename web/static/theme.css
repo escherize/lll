@@ -1378,4 +1378,25 @@ input:focus, textarea:focus, select:focus {
   border-color: rgba(76, 183, 130, 0.4);
   background: rgba(76, 183, 130, 0.12);
   color: var(--st-done);
+
+/* ── team switcher (TASK-198) ─────────────────────────────────────────────
+   Rail rows for the /t/KEY/ boards. The key wears a small bordered tag so a
+   switcher row scans as "which board", not as another issue link; the
+   active row's tag borrows the accent the same way the active nav row
+   borrows the raised background. */
+.rt-key {
+  flex: none;
+  min-width: 28px;
+  padding: 1px 4px;
+  border: 1px solid var(--border-strong);
+  border-radius: 4px;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-align: center;
+  color: var(--text-2);
+}
+.rail a.active .rt-key {
+  color: var(--accent);
+  border-color: var(--accent);
 }

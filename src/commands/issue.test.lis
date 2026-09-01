@@ -28,6 +28,14 @@ fn deslug_ignores_a_trailing_slash() {
 }
 
 #[test]
+fn deslug_strips_a_team_route_prefix() {
+  // TASK-198: the board's canonical issue URLs live under /t/KEY/.
+  assert deslug("http://127.0.0.1:8100/t/ENG/issue/ENG-12") == "ENG-12"
+  assert deslug("t/ENG/issue/ENG-12") == "ENG-12"
+  assert deslug("https://board.example.com/t/日本/issue/日本-3") == "日本-3"
+}
+
+#[test]
 fn deslug_accepts_a_relative_issue_path() {
   assert deslug("issue/ENG-12") == "ENG-12"
 }

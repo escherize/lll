@@ -150,6 +150,7 @@ fn issue_has_any_label(i: models.Issue, names: Slice<string>) -> bool {
 /// count of board issues carrying it and the href of the same URL with that
 /// value toggled — a navigation, because the URL is the whole filter state.
 fn opt_group(
+  base: string,
   dim: string,
   label: string,
   values: Slice<string>,
@@ -161,7 +162,7 @@ fn opt_group(
   let opts = values.map(|v| FilterOptVM {
     value: v,
     label: show(v),
-    href: view_query_href("/", view_query_toggle(q, dim, v)),
+    href: view_query_href(base, view_query_toggle(q, dim, v)),
     active: view_query_has(q, dim, v),
     count: issues.filter(|i| carries(i, v)).length(),
   })
@@ -175,7 +176,10 @@ fn opt_group(
 /// chip to explain or undo itself (TASK-116, TASK-109). With the URL as the
 /// source of truth the affordance has to exist wherever the URL can point,
 /// so the catalogue comes from the workspace and the board only counts.
+/// `base` is the routed team's board path (TASK-198): a chip is the current
+/// URL with one value toggled, and the current URL lives under /t/KEY/.
 fn filter_groups(
+  base: string,
   issues: Slice<models.Issue>,
   q: ViewQuery,
   members: Slice<string>,
@@ -196,13 +200,13 @@ fn filter_groups(
     if !prios.contains(p) { prios = prios.append(p) }
   }
   let groups = [
-    opt_group("assignee", "Assignee", assignees, issues, q,
+    opt_group(base, "assignee", "Assignee", assignees, issues, q,
       |i, v| i.expand.assignee.name == v, |v| v),
-    opt_group("label", "Label", label_names, issues, q,
+    opt_group(base, "label", "Label", label_names, issues, q,
       |i, v| i.expand.labels.any(|l| l.name == v), |v| v),
-    opt_group("prio", "Priority", prios, issues, q,
+    opt_group(base, "prio", "Priority", prios, issues, q,
       |i, v| display.priority_name(i.priority) == v, prio_label),
-    opt_group("state", "State", query.states(), issues, q,
+    opt_group(base, "state", "State", query.states(), issues, q,
       |i, v| i.state == v, state_label),
   ]
   groups.filter(|g| g.opts.length() > 0)

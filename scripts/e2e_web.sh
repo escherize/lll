@@ -35,7 +35,10 @@ WEB="http://127.0.0.1:$WEB_PORT"
 # below. Anonymous curls stay plain `curl`.
 BOARD_TOKEN=lll-web-e2e-board-token
 BOARD_COOKIE="Cookie: lll_board=$BOARD_TOKEN"
-wcurl() { curl -H "$BOARD_COOKIE" "$@"; }
+# -L: the bare board/issue/search paths 303 to their team-routed twins
+# (/t/ENG/..., TASK-198); every authenticated fetch follows the hop. The
+# redirect itself is asserted in the TASK-198 section below.
+wcurl() { curl -L -H "$BOARD_COOKIE" "$@"; }
 PB_LOG="$DATA_DIR/pb.log"
 SERVE_LOG="$DATA_DIR/serve.log"
 E2E_LOGS="$SERVE_LOG $PB_LOG"
@@ -241,8 +244,8 @@ board_rail=$(rail "$board")
 [ -n "$board_rail" ] || fail "board page has no rail"
 [ "$board_rail" = "$(rail "$issue")" ] || fail "the rail differs between the board and issue pages:
 $(diff <(printf '%s' "$board_rail") <(rail "$issue") || true)"
-assert_contains "$board_rail" 'href="/?assignee=e2e"' \
-  "rail has a My issues row (the board's own URL encoding)"
+assert_contains "$board_rail" 'href="/t/ENG/?assignee=e2e"' \
+  "rail has a My issues row (the board's own URL encoding, team-routed)"
 assert_contains "$board_rail" 'id="rail-views"' "rail carries the saved views group"
 assert_contains "$board_rail" "v0.1.0" "rail footer carries the version"
 
@@ -259,7 +262,7 @@ assert_contains "$board_rail" "Star an issue to pin it here for the whole worksp
 # ?mine=1 any more). The page marks the row current and seeds the chip the
 # URL implies.
 mine=$(wcurl -sf "$WEB/?assignee=e2e")
-assert_contains "$mine" '<a href="/?assignee=e2e" title="Issues assigned to e2e" class="active">' \
+assert_contains "$mine" '<a href="/t/ENG/?assignee=e2e" title="Issues assigned to e2e" class="active">' \
   "the My issues URL marks the My issues row current"
 assert_contains "$mine" 'data-signals:flt="[&#34;assignee:e2e&#34;]"' \
   "the My issues URL seeds the assignee filter chip"
@@ -308,8 +311,8 @@ assert_not_contains "$search" "ENG-1" "search omits non-matching issues from the
 assert_not_contains "$search" 'id="board"' "search results are not the board fragment"
 assert_not_contains "$search" "/events" "the search page opens no SSE stream to be morphed by"
 assert_contains "$search" 'value="Already"' "the query round-trips into the field"
-assert_contains "$board_rail" 'href="/search"' "rail has a Search row"
-assert_contains "$(rail "$search")" 'href="/search" class="active"' \
+assert_contains "$board_rail" 'href="/t/ENG/search"' "rail has a Search row"
+assert_contains "$(rail "$search")" 'href="/t/ENG/search" class="active"' \
   "the search page marks its own rail row current"
 empty=$(wcurl -sf "$WEB/search?q=zzzznope")
 assert_contains "$empty" "No issue title matches" "an empty result says so"
@@ -321,7 +324,7 @@ assert_contains "$(wcurl -sf "$WEB/search")" 'class="search-bar"' \
 # one datastar-patch-elements event, so the list on screen and the list that
 # URL serves are rendered from one q by one code path.
 assert_contains "$search" "data-bind:q" "the field binds the query to a signal"
-assert_contains "$search" 'class="search-clear" href="/search"' \
+assert_contains "$search" 'class="search-clear" href="/t/ENG/search"' \
   "the field carries an X back to the empty page"
 frag=$(wcurl -sf "$WEB/search?fragment=1&q=Already")
 assert_contains "$frag" "event: datastar-patch-elements" \
@@ -817,7 +820,7 @@ if command -v playwright-cli >/dev/null 2>&1; then
   assert_contains "$typed" "Already in progress" "browser: typing filtered without Enter"
   assert_not_contains "$typed" "Web board issue" "browser: non-matching issues stay out of the list"
   assert_contains "$typed" '"doc":"kept"' "browser: typing patched the results, it did not reload"
-  assert_contains "$typed" '"url":"/search?q=Already"' "browser: the address bar carries what was typed"
+  assert_contains "$typed" '"url":"/t/ENG/search?q=Already"' "browser: the address bar carries what was typed"
   assert_not_contains "$typed" '"x":"none"' "browser: the clear X shows once there is a query"
   # The X is a link to the empty page, so this navigation IS the behaviour:
   # it empties the field and puts the URL back to a bare /search.
@@ -826,7 +829,7 @@ if command -v playwright-cli >/dev/null 2>&1; then
   cleared=$(page_until \
     "() => JSON.stringify({url: location.pathname + location.search, field: document.querySelector('.search-bar input').value, rows: document.querySelectorAll('.sr-title').length, note: document.querySelector('.search-note').textContent})" \
     '"field":""')
-  assert_contains "$cleared" '"url":"/search"' "browser: the X returns to the bare /search URL"
+  assert_contains "$cleared" '"url":"/t/ENG/search"' "browser: the X returns to the bare /search URL"
   assert_contains "$cleared" '"field":""' "browser: the X empties the field"
   assert_contains "$cleared" '"rows":0' "browser: the X clears the results"
   assert_contains "$cleared" "Searches every issue in the team" "browser: the X returns the empty state"
@@ -853,8 +856,8 @@ if command -v playwright-cli >/dev/null 2>&1; then
   playwright-cli -s="$BROWSER_SESSION" eval "() => document.querySelector('#rail-views a').click()" >/dev/null 2>&1 \
     || fail "playwright: clicking the saved view"
   clicked_view=$(page_until "() => JSON.stringify({url: location.pathname + location.search, chips: [...document.querySelectorAll('.flt-chip')].length})" '"chips":1')
-  assert_contains "$clicked_view" '"url":"/?prio=urgent"' \
-    "browser: clicking a saved view navigates to its URL"
+  assert_contains "$clicked_view" '"url":"/t/ENG/?prio=urgent"' \
+    "browser: clicking a saved view navigates to its URL (via the boot-team redirect)"
 
   # --- create more: the dialog stays open for the next issue (task-159) ---
   # The toggle is a preference signal on #ni-modal, outside the morph and
@@ -1637,5 +1640,85 @@ back_to_back_written() { # n --- the record exists in PocketBase
 }
 back_to_back_written 1 || fail "the first back-to-back create wrote nothing"
 back_to_back_written 2 || fail "the second back-to-back create wrote nothing"
+
+# --- TASK-198: one server, every team — /t/KEY/ routes and per-team SSE ---
+# The server has always been multi-team; the board now views one team per
+# URL. Bare / is a shareable 303 to the boot team's board, /t/KEY/ is any
+# team's, the rail switcher lists them all, and the SSE bridge scopes each
+# #board morph to the clients viewing that record's team. OPS exists from
+# the TASK-173 section above; the create-or-ignore keeps this section
+# standalone-ordered anyway.
+env LLL_TEAM=OPS "$LIN" team create -k OPS -n Operations >/dev/null 2>&1 || true
+env LLL_TEAM=OPS "$LIN" issue create -t "Ops only card" >/dev/null
+
+# Bare paths are 303s to their team-routed twins, query string kept. Plain
+# curl (no -L): the hop itself is the assertion.
+redir=$(curl -s -o /dev/null -w '%{http_code} %{redirect_url}' -H "$BOARD_COOKIE" "$WEB/")
+assert_contains "$redir" "303 $WEB/t/ENG/" "bare / redirects to the boot team's board"
+redir=$(curl -s -o /dev/null -w '%{redirect_url}' -H "$BOARD_COOKIE" "$WEB/?state=todo")
+assert_contains "$redir" "/t/ENG/?state=todo" "the redirect keeps the query string"
+redir=$(curl -s -o /dev/null -w '%{redirect_url}' -H "$BOARD_COOKIE" "$WEB/issue/OPS-1")
+assert_contains "$redir" "/t/OPS/issue/OPS-1" "a bare issue URL routes to the team its key names"
+redir=$(curl -s -o /dev/null -w '%{redirect_url}' -H "$BOARD_COOKIE" "$WEB/search?q=x")
+assert_contains "$redir" "/t/ENG/search?q=x" "a bare search URL routes to the boot team's"
+
+# Each team's board carries its own cards and no other team's.
+eng_board=$(wcurl -sf "$WEB/t/ENG/")
+ops_board=$(wcurl -sf "$WEB/t/OPS/")
+assert_contains "$ops_board" "Ops only card" "the routed team's cards render"
+assert_not_contains "$ops_board" "Web board issue" "another team's cards stay off the routed board"
+assert_not_contains "$eng_board" "Ops only card" "the boot team's board stays scoped too"
+code=$(wcurl -s -o /dev/null -w '%{http_code}' "$WEB/t/NOPE/")
+[ "$code" = "404" ] || fail "an unknown team key should 404, got $code"
+# The gate still fronts the team routes (TASK-182 unchanged).
+code=$(curl -s -o /dev/null -w '%{http_code}' "$WEB/t/OPS/")
+[ "$code" = "401" ] || fail "anonymous /t/OPS/: expected 401, got $code"
+
+# The rail switcher lists every team, marking the routed one, on every team.
+assert_contains "$eng_board" 'id="rail-teams"' "the rail carries the team switcher"
+assert_contains "$eng_board" 'href="/t/OPS/"' "the switcher links the other team's board"
+assert_contains "$ops_board" 'href="/t/OPS/" title="OPS · Operations" class="active"' \
+  "the switcher marks the routed team current"
+assert_not_contains "$eng_board" 'href="/t/OPS/" title="OPS · Operations" class="active"' \
+  "the boot team's board does not mark OPS current"
+
+# The board posts the team it is viewing: a create from /t/OPS/ lands in
+# OPS, and an unknown team answers through the flash, not a write.
+wcurl -s -o /dev/null -X POST -d "title=Created on the ops board" -d "team=OPS" "$WEB/create"
+env LLL_TEAM=OPS "$LIN" issue list | grep -q "Created on the ops board" \
+  || fail "a create carrying team=OPS did not land in OPS"
+env LLL_TEAM=ENG "$LIN" issue list | grep -q "Created on the ops board" \
+  && fail "a create carrying team=OPS leaked into ENG" || true
+out=$(wcurl -s -X POST -d "title=never written" -d "team=NOPE" "$WEB/create")
+assert_contains "$out" "no team with key &#39;NOPE&#39;" \
+  "an unknown create team answers through the flash"
+
+# Realtime lands on the right team's view: two board streams, one CLI-driven
+# event per team, each morph reaching only its own team's clients.
+OPS_EVENTS="$DATA_DIR/events-ops.txt"
+ENG_EVENTS="$DATA_DIR/events-eng.txt"
+wcurl -sN "$WEB/events?page=board&team=OPS" >"$OPS_EVENTS" &
+OPS_SSE_PID=$!
+wcurl -sN "$WEB/events?page=board&team=ENG" >"$ENG_EVENTS" &
+ENG_SSE_PID=$!
+sleep 0.5
+env LLL_TEAM=OPS "$LIN" issue create -t "Ops realtime probe" >/dev/null
+for _ in $(seq 1 50); do
+  grep -q "Ops realtime probe" "$OPS_EVENTS" 2>/dev/null && break
+  sleep 0.1
+done
+env LLL_TEAM=ENG "$LIN" issue create -t "Eng realtime probe" >/dev/null
+for _ in $(seq 1 50); do
+  grep -q "Eng realtime probe" "$ENG_EVENTS" 2>/dev/null && break
+  sleep 0.1
+done
+kill $OPS_SSE_PID $ENG_SSE_PID 2>/dev/null || true
+ops_events=$(cat "$OPS_EVENTS")
+eng_events=$(cat "$ENG_EVENTS")
+assert_contains "$ops_events" 'data: elements <main id="board"' "the OPS stream carries #board morphs"
+assert_contains "$ops_events" "Ops realtime probe" "an OPS event morphs the OPS board view"
+assert_not_contains "$ops_events" "Eng realtime probe" "an ENG event stays off the OPS view"
+assert_contains "$eng_events" "Eng realtime probe" "an ENG event morphs the ENG board view"
+assert_not_contains "$eng_events" "Ops realtime probe" "an OPS event stays off the ENG view"
 
 echo "e2e_web: all assertions passed"

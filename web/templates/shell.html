@@ -15,11 +15,12 @@
      arrive with the pages they lead to. */}}
 {{define "rail"}}<nav id="rail" class="rail">
 <div class="workspace"><span class="mark">L</span> lll</div>
-<a href="/"{{if eq .Active "board"}} class="active"{{end}}><svg width="14" height="14"><use href="#ic-board"/></svg> Board</a>
+<a href="{{.BoardBase}}"{{if eq .Active "board"}} class="active"{{end}}><svg width="14" height="14"><use href="#ic-board"/></svg> Board</a>
 <a href="/issues"{{if eq .Active "issues"}} class="active"{{end}}><svg width="14" height="14"><use href="#ic-issues"/></svg> All issues</a>
-{{if .Me}}<a href="/?assignee={{.Me}}" title="Issues assigned to {{.Me}}"{{if eq .Active "mine"}} class="active"{{end}}><svg width="14" height="14"><use href="#ic-me"/></svg> My issues</a>
+{{if .Me}}<a href="{{.BoardBase}}?assignee={{.Me}}" title="Issues assigned to {{.Me}}"{{if eq .Active "mine"}} class="active"{{end}}><svg width="14" height="14"><use href="#ic-me"/></svg> My issues</a>
 {{end}}<a href="/projects"{{if eq .Active "projects"}} class="active"{{end}}><svg width="14" height="14"><use href="#ic-project"/></svg> Projects</a>
-<a href="/search"{{if eq .Active "search"}} class="active"{{end}}><svg width="14" height="14"><use href="#ic-search"/></svg> Search</a>
+<a href="{{.BoardBase}}search"{{if eq .Active "search"}} class="active"{{end}}><svg width="14" height="14"><use href="#ic-search"/></svg> Search</a>
+{{template "rail-teams" .Teams}}
 {{template "rail-favorites" .Favorites}}
 {{template "rail-views" .Views}}
 <a href="/settings"{{if eq .Active "settings"}} class="active"{{end}}><svg width="14" height="14"><use href="#ic-settings"/></svg> Settings</a>
@@ -35,6 +36,18 @@
      the open page. An empty AccentCss means nobody chose one — the <style>
      stays empty and theme.css's canonical orange is left byte-identical. */}}
 {{define "accent-head"}}<style id="accent">{{.AccentCss}}</style><link id="favicon" rel="icon" href="{{.Favicon}}">{{end}}
+
+{{/* The team switcher (TASK-198): every team on the server, this page's own
+     marked. One server hosts every team now, so the rail is where a browser
+     reaches the others — each row is a plain navigation to that team's board
+     URL (/t/KEY/), which is also what makes a team's board shareable.
+     Server-rendered per page load like the rest of the rail: the rail sits
+     outside every morph boundary, so no broadcast ever re-renders it. */}}
+{{define "rail-teams"}}<div id="rail-teams" class="rail-group">
+<h2>Teams</h2>
+{{range .}}<a href="{{.Href}}" title="{{.Key}} · {{.Name}}"{{if .Active}} class="active"{{end}}><span class="rt-key">{{.Key}}</span> <span class="rg-title">{{.Name}}</span></a>
+{{else}}<p class="rg-empty">No teams on this server yet.</p>
+{{end}}</div>{{end}}
 
 {{/* The favorites group — the one live region of the rail, and the reason
      #rail carries an id. It is its OWN morph boundary (#rail-favorites), so

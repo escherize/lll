@@ -8,8 +8,8 @@ import "realtime"
 // Realtime: the fan-out hub, the /events endpoint each browser holds open, and
 // the bridge that turns PocketBase events into broadcast fragments.
 
-/// One connected browser: its scope ("board" or "issue:KEY-1") and the
-/// channel its /events handler drains.
+/// One connected browser: its scope ("board:KEY" for a team's board view, or
+/// "issue:KEY-1") and the channel its /events handler drains.
 struct SseClient { id: int, scope: string, ch: Channel<string> }
 
 /// A rendered SSE payload for every client with a matching scope.
@@ -80,15 +80,28 @@ fn deliver(clients: Slice<SseClient>, msg: Broadcast) {
 
 /// SSE endpoint: register with the hub under the page's scope and forward
 /// broadcast payloads until the browser disconnects.
-fn events_stream(w: http.ResponseWriter, r: Ref<http.Request>, hub: Hub) {
+///
+/// A board page names its team (?team=KEY, TASK-198) so its client only
+/// receives that team's #board morphs; a request naming none — an old
+/// bookmark, a bare curl — is scoped to the boot team, which is what the
+/// bare / redirect lands a browser on anyway.
+fn events_stream(
+  w: http.ResponseWriter,
+  r: Ref<http.Request>,
+  hub: Hub,
+  boot_key: string,
+) {
   let mut page = ""
   let mut key = ""
+  let mut team = ""
   if let Some(u) = r.URL {
     let q = u.Query()
     page = q.Get("page")
     key = q.Get("key")
+    team = q.Get("team")
   }
-  let mut scope = "board"
+  if team == "" { team = boot_key }
+  let mut scope = f"board:{team}"
   if page == "issue" && key != "" { scope = f"issue:{key}" }
 
   let Some(flusher) = assert_type<http.Flusher>(w) else {
@@ -129,7 +142,7 @@ fn events_stream(w: http.ResponseWriter, r: Ref<http.Request>, hub: Hub) {
 }
 
 /// Consume PB realtime events forever; re-render and broadcast fragments.
-fn bridge(events: Channel<realtime.Event>, hub: Hub, team_id: string) {
+fn bridge(events: Channel<realtime.Event>, hub: Hub) {
   loop {
     let Some(ev) = events.receive() else {
       return
@@ -141,7 +154,7 @@ fn bridge(events: Channel<realtime.Event>, hub: Hub, team_id: string) {
     } else if ev.topic == "views" {
       views_broadcast(hub)
     } else {
-      issue_broadcast(ev, hub, team_id)
+      issue_broadcast(ev, hub)
     }
   }
 }
@@ -150,19 +163,26 @@ fn bridge(events: Channel<realtime.Event>, hub: Hub, team_id: string) {
 /// fetch (laziest correct — a state change moves a card between two columns,
 /// and one #board morph covers create/update/delete alike), plus the
 /// issue-detail fragment for that issue's page, from the event record.
-fn issue_broadcast(ev: realtime.Event, hub: Hub, team_id: string) {
-  if let Ok(vm) = board_vm(team_id, BoardFilter { .. }) {
+///
+/// The subscription is UNSCOPED (TASK-198): the server hosts every team, so
+/// each event re-renders the board of the team the record belongs to and
+/// lands only on clients scoped to that team ("board:KEY"). One render per
+/// event, exactly as before — the team just comes from the record instead of
+/// the boot config.
+fn issue_broadcast(ev: realtime.Event, hub: Hub) {
+  let mut event = IssueEvent { .. }
+  if json.Unmarshal(ev.data.bytes(), &event).is_err() { return }
+  let rec = event.record
+  let team_key = rec.expand.team.key
+  if let Ok(vm) = board_vm(rec.team, BoardFilter { .. }) {
     if let Ok(html) = render("board", vm) {
       let _ = hub.broadcast.send(
-        Broadcast { scope: "board", payload: patch_event(html) },
+        Broadcast { scope: f"board:{team_key}", payload: patch_event(html) },
       )
     }
   }
 
-  let mut event = IssueEvent { .. }
-  if json.Unmarshal(ev.data.bytes(), &event).is_err() { return }
-  let rec = event.record
-  let key = f"{rec.expand.team.key}-{rec.number}"
+  let key = f"{team_key}-{rec.number}"
   let mut vm = match issue_vm(rec, []) {
     Ok(v) => v,
     // A catalogue fetch failing is no reason to leave the page stale for

@@ -31,7 +31,7 @@ provenance.
 </head>
 <!-- data-init lives on <body>, which is never patched, so the SSE
      connection is opened exactly once per page load. -->
-<body data-init="@get('/events?page=board')" data-on:pageshow__window="evt.persisted && window.location.reload()">
+<body data-init="@get('/events?page=board&team={{.Page.TeamKey}}')" data-on:pageshow__window="evt.persisted && window.location.reload()">
 {{template "icons"}}
 <div class="app">
   {{template "rail" .Rail}}
@@ -42,7 +42,7 @@ provenance.
        params restores the last view from localStorage — convenience only,
        never the source of truth — by replacing the URL, so the server then
        renders the view it stands for. -->
-  <div class="main{{range .Page.Hidden}} hc-{{.}}{{end}}" data-init="{{if eq .Page.QueryStr ""}}const v = localStorage.getItem('lllView'); if (v) location.replace('/' + v); {{end}}{{.Page.HideSeed}}" data-class="{ {{range $i, $c := .Page.Columns}}{{if $i}}, {{end}}'hc-{{$c.State}}': $hide_{{$c.Sig}}{{end}} }">
+  <div class="main{{range .Page.Hidden}} hc-{{.}}{{end}}" data-init="{{if eq .Page.QueryStr ""}}const v = localStorage.getItem('lllView'); if (v) location.replace(location.pathname + v); {{end}}{{.Page.HideSeed}}" data-class="{ {{range $i, $c := .Page.Columns}}{{if $i}}, {{end}}'hc-{{$c.State}}': $hide_{{$c.Sig}}{{end}} }">
     <header class="topbar">
       <div class="crumbs"><span class="here">{{if eq .Rail.Active "mine"}}My issues{{else}}Board{{end}}</span></div>
       <div class="spacer"></div>
@@ -51,6 +51,7 @@ provenance.
         <input id="board-search-input" type="text" placeholder="Search" autocomplete="off" aria-label="Search board" data-bind:search data-on:keydown="evt.key === 'Escape' && ($search = '')">
       </div>
       <form id="new-issue" class="new-issue">
+        <input type="hidden" name="team" value="{{.Page.TeamKey}}">
         <input id="new-title" name="title" placeholder="Issue title" autocomplete="off" data-bind:new_title data-on:keydown="evt.key === 'Enter' && (evt.preventDefault(), evt.target.value.trim() && @post('/create', {contentType: 'form'}))">
         <!-- The one-line composer is the fast path and stays exactly as it
              was: type, Enter, done. This button is the escape hatch to the
@@ -134,7 +135,7 @@ provenance.
   {{end}}</div>
 {{range $g := .FilterGroups}}{{range $g.Opts}}{{if .Active}}<a class="flt-chip" href="{{.Href}}" data-on:click="localStorage.removeItem('lllView')"><span class="dim">{{$g.Label}}</span> {{.Label}} <svg width="8" height="8" viewBox="0 0 8 8" aria-hidden="true"><path d="M1.5 1.5 L6.5 6.5 M6.5 1.5 L1.5 6.5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg></a>
 {{end}}{{end}}{{end}}{{if .NoMatch}}<span class="flt-none">No issues match these filters.</span>{{end}}
-{{if .QueryStr}}<button type="button" class="flt-clear" data-on:click="localStorage.removeItem('lllView'); location.assign('/')">Clear</button><button type="button" class="flt-save" data-on:click="$sv = !$sv" data-attr:aria-expanded="$sv ? 'true' : 'false'">Save view</button>
+{{if .QueryStr}}<button type="button" class="flt-clear" data-on:click="localStorage.removeItem('lllView'); location.assign(location.pathname)">Clear</button><button type="button" class="flt-save" data-on:click="$sv = !$sv" data-attr:aria-expanded="$sv ? 'true' : 'false'">Save view</button>
 <form id="sv-form" class="sv-form" style="display:none" data-show="$sv" data-on:submit__prevent="@post('/views/save', {contentType: 'form'})">
   <input type="hidden" name="query" value="{{.QueryStr}}">
   <input name="name" placeholder="Name this view" aria-label="Name this view" autocomplete="off" maxlength="80" data-effect="$sv && setTimeout(() => el.focus(), 0)">
@@ -174,6 +175,7 @@ provenance.
 <div class="ni-shade" style="display:none" data-show="$ni_open" data-on:click="evt.target === el && ($ni_open = false)" data-on:keydown__window="evt.key === 'Escape' ? ($ni_open = false) : (evt.key === 'c' && !evt.metaKey && !evt.ctrlKey && !evt.altKey && evt.target === document.body && (evt.preventDefault(), $ni_open = true))">
 <form id="ni-form" class="ni-dialog" aria-label="New issue" data-effect="$ni_open && setTimeout(() => { const t = document.getElementById('ni-title'); if ($ni_reopen) { $ni_reopen = false; t.value = ''; document.getElementById('ni-desc').value = ''; t.focus() } else { el.reset(); document.getElementById('ni-more').checked = $ni_more; t.value = document.getElementById('new-title').value; t.focus(); t.select() } }, 0)">
 <div class="ni-head">New issue<span class="ni-flex"></span><button type="button" class="ni-x" aria-label="Close" data-on:click="$ni_open = false"><svg width="10" height="10" viewBox="0 0 10 10" aria-hidden="true"><path d="M2 2 L8 8 M8 2 L2 8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg></button></div>
+<input type="hidden" name="team" value="{{.TeamKey}}">
 <input id="ni-title" name="title" placeholder="Issue title" autocomplete="off" aria-label="Issue title" data-on:keydown="evt.key === 'Enter' && (evt.preventDefault(), el.value.trim() && document.getElementById('ni-create').click())">
 <textarea id="ni-desc" class="ni-desc" name="description" aria-label="Description" placeholder="Description — markdown, code fences and mermaid all render"></textarea>
 <div class="ni-props">

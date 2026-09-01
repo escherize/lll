@@ -1198,6 +1198,12 @@ fn deslug(arg: string) -> string {
     a = strings.SplitN(after_scheme, "/", 2)[1]
   } else if !strings.Contains(a, "/") { return arg }
   a = strings.TrimSuffix(a, "/")
+  // Team-routed board URLs (TASK-198): /t/KEY/issue/ENG-12. The /t/KEY/
+  // prefix carries nothing the issue key does not — drop it.
+  if strings.HasPrefix(a, "t/") {
+    let parts = strings.SplitN(a, "/", 3)
+    if parts.length() == 3 { a = parts[2] }
+  }
   a = strings.TrimPrefix(a, "issue/")
   if strings.Contains(a, "/") { return arg }
   if a == "" { return arg }

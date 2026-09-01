@@ -24,16 +24,18 @@ import "query"
 /// unfiltered #board to every board-scoped client, and a server-filtered
 /// list must never be a client it can reach. A one-shot answer to the page's
 /// own request is not that.
+/// `team` is the ROUTED team (TASK-198): /t/{team}/search resolved it before
+/// this handler ran, so the search runs over that team's issues.
 fn search_page(
   w: http.ResponseWriter,
   r: Ref<http.Request>,
-  team_id: string,
+  team: models.Team,
   me: string,
 ) {
   let q = strings.TrimSpace(query_param(r, "q"))
   let mut results: Slice<CardVM> = []
   if q != "" {
-    match fetch_search_issues(team_id, q) {
+    match fetch_search_issues(team.id, q) {
       Ok(issues) => results = issues.map(card_vm),
       Err(e) => {
         http.Error(w, e, 500)
@@ -61,7 +63,7 @@ fn search_page(
     let _ = w.Write(patch_event(frag).bytes())
     return
   }
-  let vm = PageVM { rail: rail_vm("search", me, shell_team(team_id)), page }
+  let vm = PageVM { rail: rail_vm("search", me, team), page }
   let html = match render("search-page", vm) {
     Ok(h) => h,
     Err(e) => {
