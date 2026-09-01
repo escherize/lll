@@ -14,7 +14,11 @@
 #   fly apps create <app>
 #   fly volumes create lll_data --size 3 --region <region>
 #   fly secrets set LLL_TEAM=<key> LLL_ADMIN_EMAIL=<email> LLL_ADMIN_PASSWORD=<pw>
+#   fly ips allocate-v4 -a <app>   # dedicated IPv4 (~$2/mo): the tls+http
+#                                  # :8091 stanza in fly.toml rides only this
 #   scripts/fly-deploy.sh
+# The hosted PocketBase API is then https://<app>.fly.dev:8091 (what
+# 'lll login --url' and LLL_URL take); the board stays on 443.
 # The volume mounts at /data/pb_data (see fly.toml) — without it, every deploy
 # wipes the backlog (the single most common way to lose everything here).
 

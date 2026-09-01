@@ -24,11 +24,18 @@ primary_region = "ord"
     soft_limit = 200
     hard_limit = 250
 
+# The PocketBase API, for the CLI: https://<host>:8091, TLS terminated at the
+# Fly edge (TASK-201/TASK-203). The tls+http handlers only ride a DEDICATED
+# IPv4 — the shared IPv4 carries nothing but the 80/443 http_service, which is
+# why the earlier raw-TCP stanza was IPv6-only. Operator steps, once:
+#   fly ips allocate-v4 -a <app>        # ~$2/mo, then
+#   scripts/fly-deploy.sh               # picks up this stanza
 [[services]]
   internal_port = 8090
   protocol = "tcp"
   [[services.ports]]
     port = 8091
+    handlers = ["tls", "http"]
 
 [mounts]
   source = "lll_data"
