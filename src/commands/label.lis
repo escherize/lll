@@ -38,7 +38,9 @@ Usage:
                                                  when none is configured
   lll label create -n \"name\" [-c \"#5e6ad2\"] [--team KEY]
                                                  create a label (--team defaults
-                                                 to LLL_TEAM)",
+                                                 to LLL_TEAM); check 'lll label
+                                                 list' first — reuse over
+                                                 near-duplicates (bug/bugs/defect)",
   )
 }
 
@@ -96,7 +98,10 @@ pub fn label_verb_spec(verb: string) -> Slice<flags.Flag> {
 
 fn label_create(args: Slice<string>) -> Result<(), string> {
   let spec = label_create_spec()
-  let usage = flags.usage("lll label create", spec, "")
+  // The check-first note rides the usage string (TASK-208), so every surface
+  // that prints it — --help included — says to reuse before creating.
+  let usage = flags.usage("lll label create", spec, "") +
+  "\n       (check 'lll label list' first; reuse over near-duplicates like bug/bugs/defect)"
   let p = flags.parse(spec, args, 3, false, usage)?
   let name = p.one("-n")
   let color = p.one("-c")

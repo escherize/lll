@@ -183,12 +183,26 @@ fn board_page(w: http.ResponseWriter, r: Ref<http.Request>, team: models.Team, m
       err = f"unknown state '{h}' in hide (use one of: {strings.Join(query.states(), ", ")})"
     }
   }
+  // Card ordering (TASK-209): "manual" is the default and never a URL param,
+  // so ?order=manual normalizes back to the bare URL. An unknown value flashes
+  // and falls back to manual, the same contract the filters run on.
+  let mut order = raw.order
+  if order == "" { order = "manual" }
+  if board_orders().find(|o| o == order).is_none() {
+    if err == "" {
+      err = f"unknown order '{raw.order}' (use one of: {strings.Join(board_orders(), ", ")})"
+    }
+    order = "manual"
+  }
+  let mut order_param = order
+  if order == "manual" { order_param = "" }
 
   let q = ViewQuery {
     state: join_csv(states),
     assignee: join_csv(assignees),
     label: join_csv(labels),
     prio: join_csv(prios),
+    order: order_param,
     hide: join_csv(hidden),
     .. // `project` and `sort` are /issues dimensions; the board drops them.
   }
@@ -221,7 +235,7 @@ fn board_page(w: http.ResponseWriter, r: Ref<http.Request>, team: models.Team, m
 
   let vm = BoardVM {
     states: state_opts(),
-    columns: board_columns(issues, flt, fetch_claimed_issue_ids().unwrap_or([])),
+    columns: board_columns(issues, flt, fetch_claimed_issue_ids().unwrap_or([]), order),
     filter_groups: filter_groups(
       board_base(team.key),
       issues,
@@ -238,6 +252,8 @@ fn board_page(w: http.ResponseWriter, r: Ref<http.Request>, team: models.Team, m
     compose,
     team_key: team.key,
     team_archived: team.archived,
+    order,
+    orders: order_opts(board_base(team.key), q, order),
   }
   if raw_mode {
     write_raw(w, board_raw(vm))
@@ -254,6 +270,24 @@ fn board_page(w: http.ResponseWriter, r: Ref<http.Request>, team: models.Team, m
   w.Header().Set("Cache-Control", "no-store")
   w.Header().Set("Content-Type", "text/html; charset=utf-8")
   let _ = w.Write(html.bytes())
+}
+
+/// The ordering picker's options (TASK-209): each is the current URL with
+/// ?order= swapped — a navigation, like the filter chips, so an ordering is
+/// shareable and rides the same localStorage view restore. Manual drops the
+/// param: the default needs no URL to say so.
+fn order_opts(base: string, q: ViewQuery, active: string) -> Slice<OrderOptVM> {
+  board_orders().map(|o| {
+    let mut nq = q
+    nq.order = o
+    if o == "manual" { nq.order = "" }
+    OrderOptVM {
+      value: o,
+      label: state_label(o),
+      href: view_query_href(base, nq),
+      active: o == active,
+    }
+  })
 }
 
 /// The active filter as a JSON array of "dim:value" keys, seeding the card

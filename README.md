@@ -10,6 +10,22 @@ Written in [Lisette](https://github.com/ivov/lisette), which compiles to Go.
   agents as much as for humans.
 - `lll up` starts everything: embedded PocketBase + the web board.
 
+## Install
+
+Prebuilt binaries — no checkout, no toolchain:
+
+```sh
+mkdir -p ~/bin && curl -LsSf -o ~/bin/lll \
+  https://github.com/escherize/lll/releases/latest/download/lll-darwin-arm64 \
+  && chmod +x ~/bin/lll
+```
+
+Linux: swap in `lll-linux-amd64` or `lll-linux-arm64`. Binaries are attached
+to [GitHub releases](https://github.com/escherize/lll/releases) by the
+release workflow on every `v*` tag; `lll --version` names the release. This
+covers every client command; `lll up` (the server) reads `pb/` from disk and
+still wants a checkout.
+
 ## Quickstart
 
 ```sh

@@ -52,12 +52,16 @@
 
 <section class="set-sec">
 <h2>Labels <span class="count">{{len .Labels}}</span></h2>
+{{/* TASK-208: the label inventory. Each row carries how many issues wear the
+     label, sorted busiest first, so a near-duplicate sits next to the label
+     it duplicates instead of hiding alphabetically. */}}
+<p class="set-note">Every label this team has, busiest first, with how many issues carry it.</p>
 <div class="set-rows">
 {{range .Labels}}<form class="set-row" id="set-label-{{.Id}}" data-name="{{.Name}}">
 <input type="hidden" name="id" value="{{.Id}}">
 <input name="color" type="color" class="set-swatch" value="{{if .Color}}{{.Color}}{{else}}#828994{{end}}" aria-label="Colour">
 <input name="name" value="{{.Name}}" autocomplete="off" aria-label="Label name">
-<span class="set-scope">{{.Scope}}</span>
+<span class="set-scope">{{.Usage}} issues · {{.Scope}}</span>
 <button type="button" class="btn" data-on:click="@post('/settings/label', {contentType: 'form'})">Save</button>
 {{template "set-del" "label"}}
 </form>
@@ -68,6 +72,7 @@
 <input name="name" placeholder="New label" autocomplete="off" aria-label="New label name">
 <button type="button" class="btn" data-on:click="@post('/settings/label', {contentType: 'form'})">Add label</button>
 </form>
+<p class="set-note">Check the list first — reuse beats near-duplicates (bug/bugs/defect). The CLI view is <code>lll label list</code>.</p>
 </section>
 
 <section class="set-sec">

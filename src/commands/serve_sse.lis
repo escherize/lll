@@ -8,8 +8,9 @@ import "realtime"
 // Realtime: the fan-out hub, the /events endpoint each browser holds open, and
 // the bridge that turns PocketBase events into broadcast fragments.
 
-/// One connected browser: its scope ("board:KEY" for a team's board view, or
-/// "issue:KEY-1") and the channel its /events handler drains.
+/// One connected browser: its scope ("board:KEY:ORDER" for a team's board
+/// view in one card ordering, or "issue:KEY-1") and the channel its /events
+/// handler drains.
 struct SseClient { id: int, scope: string, ch: Channel<string> }
 
 /// A rendered SSE payload for every client with a matching scope.
@@ -85,6 +86,11 @@ fn deliver(clients: Slice<SseClient>, msg: Broadcast) {
 /// receives that team's #board morphs; a request naming none — an old
 /// bookmark, a bare curl — is scoped to the boot team, which is what the
 /// bare / redirect lands a browser on anyway.
+///
+/// A board page also names its card ordering (?order=updated, TASK-209),
+/// threaded into the scope the same way team is: issue_broadcast renders one
+/// #board per ordering, so the morph this client receives is already in the
+/// order its URL asked for. Absent or unknown means manual.
 fn events_stream(
   w: http.ResponseWriter,
   r: Ref<http.Request>,
@@ -94,14 +100,17 @@ fn events_stream(
   let mut page = ""
   let mut key = ""
   let mut team = ""
+  let mut order = ""
   if let Some(u) = r.URL {
     let q = u.Query()
     page = q.Get("page")
     key = q.Get("key")
     team = q.Get("team")
+    order = q.Get("order")
   }
   if team == "" { team = boot_key }
-  let mut scope = f"board:{team}"
+  if board_orders().find(|o| o == order).is_none() { order = "manual" }
+  let mut scope = f"board:{team}:{order}"
   if page == "issue" && key != "" { scope = f"issue:{key}" }
 
   let Some(flusher) = assert_type<http.Flusher>(w) else {
@@ -166,19 +175,34 @@ fn bridge(events: Channel<realtime.Event>, hub: Hub) {
 ///
 /// The subscription is UNSCOPED (TASK-198): the server hosts every team, so
 /// each event re-renders the board of the team the record belongs to and
-/// lands only on clients scoped to that team ("board:KEY"). One render per
-/// event, exactly as before — the team just comes from the record instead of
-/// the boot config.
+/// lands only on clients scoped to that team ("board:KEY:ORDER").
+///
+/// One FETCH per event, one render per ordering (TASK-209): a client's scope
+/// names the card order its URL asked for, so the board is sorted and
+/// rendered once for each of the four orderings and each variant lands only
+/// on the clients that requested it. Four renders over one in-memory issue
+/// list beat teaching the hub to inventory its clients' scopes.
 fn issue_broadcast(ev: realtime.Event, hub: Hub) {
   let mut event = IssueEvent { .. }
   if json.Unmarshal(ev.data.bytes(), &event).is_err() { return }
   let rec = event.record
   let team_key = rec.expand.team.key
-  if let Ok(vm) = board_vm(rec.team, BoardFilter { .. }) {
-    if let Ok(html) = render("board", vm) {
-      let _ = hub.broadcast.send(
-        Broadcast { scope: f"board:{team_key}", payload: patch_event(html) },
-      )
+  if let Ok(issues) = fetch_board_issues(rec.team) {
+    let claimed = fetch_claimed_issue_ids().unwrap_or([])
+    for order in board_orders() {
+      // UNFILTERED on purpose: /events sends one #board per (team, order) to
+      // every matching client, so the per-URL filter is applied by the page
+      // handler and guarded client-side by the cards' data-show, never here.
+      let vm = BoardVM {
+        states: state_opts(),
+        columns: board_columns(issues, BoardFilter { .. }, claimed, order),
+        ..
+      }
+      if let Ok(html) = render("board", vm) {
+        let _ = hub.broadcast.send(
+          Broadcast { scope: f"board:{team_key}:{order}", payload: patch_event(html) },
+        )
+      }
     }
   }
 

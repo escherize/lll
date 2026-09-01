@@ -31,7 +31,7 @@ provenance.
 </head>
 <!-- data-init lives on <body>, which is never patched, so the SSE
      connection is opened exactly once per page load. -->
-<body data-init="@get('/events?page=board&team={{.Page.TeamKey}}')" data-on:pageshow__window="evt.persisted && window.location.reload()">
+<body data-init="@get('/events?page=board&team={{.Page.TeamKey}}&order={{.Page.Order}}')" data-on:pageshow__window="evt.persisted && window.location.reload()">
 {{template "icons"}}
 <div class="app">
   {{template "rail" .Rail}}
@@ -89,13 +89,20 @@ provenance.
      before with .drop-before (or the column with .drop-end for end-of-column)
      — transient classes, cleared on dragleave/drop/dragend and harmlessly
      wiped by any mid-drag #board morph. The drop posts that card's record id
-     as `before` so the server can compute a fractional sort. */}}
-{{define "column"}}<section class="column" id="col-{{.State}}" data-on:dragover="evt.preventDefault(); const t = [...el.querySelectorAll('.card')].find(c => c.offsetParent && evt.clientY < c.getBoundingClientRect().top + c.getBoundingClientRect().height / 2); el.querySelectorAll('.card.drop-before').forEach(c => c !== t && c.classList.remove('drop-before')); t && t.classList.add('drop-before'); el.classList.toggle('drop-end', !t)" data-on:dragleave="!el.contains(evt.relatedTarget) && (el.classList.remove('drop-end'), el.querySelectorAll('.card.drop-before').forEach(c => c.classList.remove('drop-before')))" data-on:drop="evt.preventDefault(); const t = el.querySelector('.card.drop-before'); el.classList.remove('drop-end'); t && t.classList.remove('drop-before'); @post('/state?key=' + evt.dataTransfer.getData('text/plain') + '&state={{.State}}' + (t ? '&before=' + t.id.slice(6) : ''))">
+     as `before` so the server can compute a fractional sort.
+
+     Under a non-manual ordering (TASK-209) positional drops are DISABLED,
+     like Linear: the column's rendered order belongs to the ordering, not to
+     the drag. A drop still changes state — it posts /state with no `before`,
+     appending per manual order — and the dragover feedback is the whole
+     column (.drop-append), never an indicator line, so the difference is
+     visible mid-drag. */}}
+{{define "column"}}<section class="column" id="col-{{.State}}"{{if .Manual}} data-on:dragover="evt.preventDefault(); const t = [...el.querySelectorAll('.card')].find(c => c.offsetParent && evt.clientY < c.getBoundingClientRect().top + c.getBoundingClientRect().height / 2); el.querySelectorAll('.card.drop-before').forEach(c => c !== t && c.classList.remove('drop-before')); t && t.classList.add('drop-before'); el.classList.toggle('drop-end', !t)" data-on:dragleave="!el.contains(evt.relatedTarget) && (el.classList.remove('drop-end'), el.querySelectorAll('.card.drop-before').forEach(c => c.classList.remove('drop-before')))" data-on:drop="evt.preventDefault(); const t = el.querySelector('.card.drop-before'); el.classList.remove('drop-end'); t && t.classList.remove('drop-before'); @post('/state?key=' + evt.dataTransfer.getData('text/plain') + '&state={{.State}}' + (t ? '&before=' + t.id.slice(6) : ''))"{{else}} data-on:dragover="evt.preventDefault(); el.classList.add('drop-append')" data-on:dragleave="!el.contains(evt.relatedTarget) && el.classList.remove('drop-append')" data-on:drop="evt.preventDefault(); el.classList.remove('drop-append'); @post('/state?key=' + evt.dataTransfer.getData('text/plain') + '&state={{.State}}')"{{end}}>
 <h2>{{template "state-icon" .State}} {{.Label}} <span class="count" data-class:dim="$search != '' || $flt.length > 0">{{.Total}}</span><span class="hspace"></span><button type="button" class="col-hide" title="Hide column" aria-label="Hide {{.Label}} column" data-on:click="const u = new URL(location.href); const cur = (u.searchParams.get('hide') || '').split(',').filter(s => s); if (!cur.includes('{{.State}}')) cur.push('{{.State}}'); u.searchParams.set('hide', cur.join(',')); location.assign(u)"><svg width="14" height="14"><use href="#ic-eye-off"/></svg></button></h2>
 {{range .Cards}}{{template "card" .}}
 {{end}}</section>{{end}}
 
-{{define "card"}}<a class="card" id="issue-{{.Id}}" href="/issue/{{.Key}}" draggable="true" data-search="{{.Key}} {{.Title}}{{range .Labels}} {{.Name}}{{end}}{{if .Assignee}} {{.Assignee}}{{end}}" data-fkeys="|state:{{.State}}|prio:{{.Prio}}{{if .Assignee}}|assignee:{{.Assignee}}{{end}}{{range .Labels}}|label:{{.Name}}{{end}}|" data-show="(!$search || el.dataset.search.toLowerCase().includes($search.toLowerCase())) && $flt.every(f => el.dataset.fkeys.includes('|' + f + '|'))" data-on:dragstart="evt.dataTransfer.setData('text/plain', '{{.Key}}'); evt.dataTransfer.effectAllowed = 'move'" data-on:dragend="document.querySelectorAll('.card.drop-before').forEach(c => c.classList.remove('drop-before')); document.querySelectorAll('.column.drop-end').forEach(c => c.classList.remove('drop-end'))">
+{{define "card"}}<a class="card" id="issue-{{.Id}}" href="/issue/{{.Key}}" draggable="true" data-search="{{.Key}} {{.Title}}{{range .Labels}} {{.Name}}{{end}}{{if .Assignee}} {{.Assignee}}{{end}}" data-fkeys="|state:{{.State}}|prio:{{.Prio}}{{if .Assignee}}|assignee:{{.Assignee}}{{end}}{{range .Labels}}|label:{{.Name}}{{end}}|" data-show="(!$search || el.dataset.search.toLowerCase().includes($search.toLowerCase())) && $flt.every(f => el.dataset.fkeys.includes('|' + f + '|'))" data-on:dragstart="evt.dataTransfer.setData('text/plain', '{{.Key}}'); evt.dataTransfer.effectAllowed = 'move'" data-on:dragend="document.querySelectorAll('.card.drop-before').forEach(c => c.classList.remove('drop-before')); document.querySelectorAll('.column.drop-end').forEach(c => c.classList.remove('drop-end')); document.querySelectorAll('.column.drop-append').forEach(c => c.classList.remove('drop-append'))">
 <span class="row1">{{.Key}}{{if .Emoji}}<span class="emoji">{{.Emoji}}</span>{{end}}<span class="flex"></span>{{template "priority-icon" .Prio}}</span>
 <span class="title">{{.Title}}</span>
 {{if .Labels}}<span class="row3">{{range .Labels}}<span class="chip"><span class="dot" style="background:{{if .Color}}{{.Color}}{{else}}var(--text-3){{end}}"></span>{{.Name}}</span>{{end}}</span>{{end}}
@@ -146,6 +153,14 @@ provenance.
   <input name="name" placeholder="Name this view" aria-label="Name this view" autocomplete="off" maxlength="80" data-effect="$sv && setTimeout(() => el.focus(), 0)">
   <button type="submit" title="Pin this view into the rail for the whole workspace">Save</button>
 </form>{{end}}
+{{/* Ordering picker (TASK-209): per-column card order, right-docked in the
+     same bar. Options are NAVIGATIONS like the chips — each href is the
+     current URL with ?order= swapped — so an ordering is shareable, rides
+     saved views, and the data-effect above persists it with the rest of the
+     view. Manual is the default and carries no param. */}}
+<nav class="order-picker" aria-label="Card ordering"><span class="op-label">Order</span>
+{{range .Orders}}<a class="op-opt{{if .Active}} on{{end}}" href="{{.Href}}"{{if .Active}} aria-current="true"{{end}} data-on:click="localStorage.removeItem('lllView')">{{.Label}}</a>
+{{end}}</nav>
 </div>{{end}}
 
 {{/* The full create form: a modal over the board, not a page, so nothing is

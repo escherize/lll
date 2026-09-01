@@ -54,7 +54,7 @@ fn settings_vm(team: models.Team) -> Result<SettingsVM, string> {
   if accent == "" { accent = "#f0883e" }
   // Members stay unscoped on purpose: one person or agent works across many
   // projects, which is what makes a member meaningful on every board.
-  let labels = fetch_labels(team.id)?
+  let labels = label_rows(team.id)?
   let members = fetch_members()?
   let projects = fetch_projects(team.id)?
   let teams = team_rows()?
@@ -64,12 +64,7 @@ fn settings_vm(team: models.Team) -> Result<SettingsVM, string> {
       team_name: team.name,
       accent,
       accent_set: hex != "",
-      labels: labels.map(|l| SetLabelVM {
-        id: l.id,
-        name: l.name,
-        color: theme.normalize_hex(l.color),
-        scope: scope_label(l.expand.team.key),
-      }),
+      labels,
       members: members.map(|m| SetMemberVM {
         id: m.id,
         name: m.name,
@@ -136,6 +131,46 @@ fn fetch_labels(team_id: string) -> Result<Slice<models.Label>, string> {
     &list,
   )?
   Ok(list.items)
+}
+
+/// The Labels section's rows (TASK-208): each label with how many issues
+/// carry it, busiest first. One perPage=1 count fetch per label — the same
+/// per-row price the Teams section pays, per settings render. Usage-descending
+/// order is what makes the inventory readable as "what this team actually
+/// uses", so a near-duplicate (bug/bugs/defect) is visible next to the label
+/// it duplicates before someone creates another one.
+fn label_rows(team_id: string) -> Result<Slice<SetLabelVM>, string> {
+  let mut rows: Slice<SetLabelVM> = []
+  // fetch_labels answers name-sorted; the strict > below keeps equal-usage
+  // rows in that order, so ties stay alphabetical.
+  for l in fetch_labels(team_id)? {
+    let filter = url.QueryEscape(query.filter("", "", "", "", l.id, ""))
+    let mut issues = models.IssueList { .. }
+    pb.fetch(
+      f"/api/collections/issues/records?filter={filter}&perPage=1",
+      "issues",
+      &issues,
+    )?
+    let row = SetLabelVM {
+      id: l.id,
+      name: l.name,
+      color: theme.normalize_hex(l.color),
+      scope: scope_label(l.expand.team.key),
+      usage: issues.total_items,
+    }
+    let mut sorted: Slice<SetLabelVM> = []
+    let mut placed = false
+    for r in rows {
+      if !placed && row.usage > r.usage {
+        sorted = sorted.append(row)
+        placed = true
+      }
+      sorted = sorted.append(r)
+    }
+    if !placed { sorted = sorted.append(row) }
+    rows = sorted
+  }
+  Ok(rows)
 }
 
 /// A `team=<id>` filter for a records URL, URL-escaped, or "" for every

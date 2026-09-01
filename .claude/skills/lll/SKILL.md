@@ -171,6 +171,11 @@ can actually scan.
 - **Check criteria against evidence you actually ran.** Not code presence, not
   grep output, not intent. If it is a UI change, look at it.
 - **One task per change.** If you find a second problem, file it.
+- **Check `lll label list` before creating a label.** Reuse over
+  near-duplicates (bug/bugs/defect): agents create most labels, and every
+  synonym splits the filters that make the board searchable. The web's
+  Settings page lists every label with its usage count, busiest first — a
+  label already carrying issues is the one to attach yours to.
 
 ## Verification, before you claim anything works
 

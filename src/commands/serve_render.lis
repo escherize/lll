@@ -212,15 +212,74 @@ fn filter_groups(
   groups.filter(|g| g.opts.length() > 0)
 }
 
+/// The board's ordering vocabulary (TASK-209). "manual" is the fetch order
+/// (sort, then created) that drag-and-drop maintains; the rest re-sort the
+/// fetched issues at render time. Same names as /issues' sort fields where
+/// they overlap — one vocabulary, two surfaces.
+fn board_orders() -> Slice<string> {
+  ["manual", "created", "updated", "priority"]
+}
+
+/// Re-sort fetched issues per the requested ordering; anything else — which
+/// after validation is only "manual" — keeps the fetch order. PB timestamps
+/// are zero-padded ("2026-08-28 18:20:00.123Z"), so string comparison is
+/// time comparison; created/updated render newest first.
+fn order_issues(issues: Slice<models.Issue>, order: string) -> Slice<models.Issue> {
+  match order {
+    "created" => sort_issues(issues, |a, b| strings.Compare(a.created, b.created) > 0),
+    "updated" => sort_issues(issues, |a, b| strings.Compare(a.updated, b.updated) > 0),
+    "priority" => sort_issues(issues, |a, b| prio_rank(a.priority) < prio_rank(b.priority)),
+    _ => issues,
+  }
+}
+
+/// Priority value -> urgency rank: 1 urgent .. 4 low, with none (0) last —
+/// the same rotation prios_by_urgency makes for the filter chooser.
+fn prio_rank(priority: int) -> int {
+  if priority == 0 { return 5 }
+  priority
+}
+
+/// Stable insertion sort. `before` must be a STRICT ordering, so equal keys
+/// keep their incoming — manual — order as the tiebreak. A board fetch caps
+/// at 200 issues, so quadratic is fine and explicit beats clever here.
+fn sort_issues(
+  issues: Slice<models.Issue>,
+  before: fn(models.Issue, models.Issue) -> bool,
+) -> Slice<models.Issue> {
+  let mut out: Slice<models.Issue> = []
+  for issue in issues {
+    let mut pos = out.length()
+    for (j, placed) in out.enumerate() {
+      if before(issue, placed) {
+        pos = j
+        break
+      }
+    }
+    let mut next: Slice<models.Issue> = []
+    next = next.append(out[..pos]...)
+    next = next.append(issue)
+    out = next.append(out[pos..]...)
+  }
+  out
+}
+
 /// The six columns in workflow order. Each column renders only the cards
-/// its state holds that the filter admits; `total` keeps the unfiltered
-/// count, so the column's number is the same on a filtered page and inside
-/// a broadcast morph instead of flickering between the two.
+/// its state holds that the filter admits, in the requested `order`
+/// (TASK-209); `total` keeps the unfiltered count, so the column's number is
+/// the same on a filtered page and inside a broadcast morph instead of
+/// flickering between the two.
 ///
 /// `claimed` is the currently-claimed issue ids (TASK-205): a card whose
 /// issue holds no claim renders its work site as "(last seen)" — card_vm
 /// alone only knows the state half of that rule.
-fn board_columns(issues: Slice<models.Issue>, flt: BoardFilter, claimed: Slice<string>) -> Slice<ColumnVM> {
+fn board_columns(
+  issues: Slice<models.Issue>,
+  flt: BoardFilter,
+  claimed: Slice<string>,
+  order: string,
+) -> Slice<ColumnVM> {
+  let ordered = order_issues(issues, order)
   query
     .states()
     .map(|s| ColumnVM {
@@ -228,10 +287,11 @@ fn board_columns(issues: Slice<models.Issue>, flt: BoardFilter, claimed: Slice<s
       label: state_label(s),
       glyph: display.glyph(s),
       sig: strings.ReplaceAll(s, "-", "_") as template.JS,
-      cards: issues
+      cards: ordered
         .filter(|i| i.state == s && issue_matches(i, flt))
         .map(|i| board_card(i, claimed)),
       total: issues.filter(|i| i.state == s).length(),
+      manual: order == "manual",
     })
 }
 
@@ -250,20 +310,6 @@ fn fetch_claimed_issue_ids() -> Result<Slice<string>, string> {
   let mut claims = models.ClaimList { .. }
   pb.fetch("/api/collections/claims/records?perPage=500", "claims", &claims)?
   Ok(claims.items.map(|c| c.issue))
-}
-
-/// A whole board, freshly fetched. The broadcast path's renderer, which
-/// must stay UNFILTERED: /events sends one #board fragment to every
-/// board-scoped client, so the per-URL filter is applied by the page
-/// handler (and guarded client-side by the cards' data-show), never here.
-fn board_vm(team_id: string, flt: BoardFilter) -> Result<BoardVM, string> {
-  let issues = fetch_board_issues(team_id)?
-  let claimed = fetch_claimed_issue_ids().unwrap_or([])
-  Ok(BoardVM {
-    states: state_opts(),
-    columns: board_columns(issues, flt, claimed),
-    ..
-  })
 }
 
 /// The create dialog's pickers, freshly fetched. Three extra PB reads, paid
@@ -286,6 +332,7 @@ fn compose_vm(team_id: string) -> Result<ComposeVM, string> {
       name: l.name,
       color: theme.normalize_hex(l.color),
       on: false,
+      terms: "",
     }),
   })
 }
@@ -366,6 +413,7 @@ fn issue_vm(issue: models.Issue, comments: Slice<models.Comment>) -> Result<Issu
       name: l.name,
       color: theme.normalize_hex(l.color),
       on: issue.labels.contains(l.id),
+      terms: strings.ToLower(l.name),
     }),
     comments: comments.map(comment_vm),
     // Left empty on purpose: the RELATED FINDINGS block is page-only (set by

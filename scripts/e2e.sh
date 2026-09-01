@@ -741,6 +741,14 @@ assert_contains "$out" "chore" "label list has chore"
 out=$(LLL_URL=$URL LLL_TEAM=OPS "$LIN" label list)
 assert_not_contains "$out" "chore" "label list is scoped to the configured team"
 
+# --- TASK-208: every label-create surface says check-first, reuse ---
+out=$(LLL_URL=$URL LLL_TEAM=ENG "$LIN" label --help)
+assert_contains "$out" "reuse over" "label help carries the check-first note"
+set +e
+out=$(LLL_URL=$URL LLL_TEAM=ENG "$LIN" label create --help 2>&1)
+set -e
+assert_contains "$out" "check 'lll label list' first" "label create --help carries the check-first note"
+
 # --- issue created with labels + project ---
 out=$(LLL_URL=$URL LLL_TEAM=ENG "$LIN" issue create -t "Labeled login fix" --label bug --label chore --project "Auth Revamp")
 assert_contains "$out" "Created ENG-8: Labeled login fix" "labeled create output"
@@ -1321,7 +1329,10 @@ assert_contains "$(cat "$REC")" "Bearer spy-token-123" \
 REC2="$DATA_DIR/auth-header-none.txt"
 SPY2_PORT=$(free_port 20000 39999)
 run_spy "$REC2" "$SPY2_PORT"
-out=$(env -u LLL_TOKEN LLL_URL="http://127.0.0.1:$SPY2_PORT" "$LIN" team list)
+# HOME is pinned like every other hermeticity-sensitive invocation: config
+# layers (TASK-168), so a developer's own ~/.config/lll/lll.toml token would
+# otherwise supply the header this test asserts absent.
+out=$(env -u LLL_TOKEN HOME="$E2E_HOME" LLL_URL="http://127.0.0.1:$SPY2_PORT" "$LIN" team list)
 assert_contains "$(cat "$REC2")" "<none>" \
   "no token configured sends no Authorization header"
 

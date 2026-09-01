@@ -27,6 +27,10 @@ pub struct LabelPickVM {
   pub name: string,
   pub color: string,
   pub on: bool,
+  // The issue page's type-to-filter words (TASK-207): the lowercased name,
+  // precomputed so each candidate's data-show stays one .includes() call.
+  // The board's create dialog does not filter and leaves it empty.
+  pub terms: string,
 }
 
 /// Everything the create dialog offers beyond title and state — the same set
@@ -122,6 +126,20 @@ pub struct ColumnVM {
   pub sig: template.JS,
   pub cards: Slice<CardVM>,
   pub total: int,
+  // True under manual ordering (TASK-209): only then do the column's drag
+  // handlers offer positional drops. Under any other ordering a drop still
+  // changes state but lands per the active order, indicator-free.
+  pub manual: bool,
+}
+
+/// One option in the board's ordering picker (TASK-209). A navigation, like
+/// the filter chips: `href` is the current URL with ?order= swapped, so an
+/// ordering is shareable and composes with /t/KEY/ routes and saved views.
+pub struct OrderOptVM {
+  pub value: string,
+  pub label: string,
+  pub href: string,
+  pub active: bool,
 }
 
 /// View model for the board page.
@@ -165,6 +183,13 @@ pub struct BoardVM {
   // banner and its writes refuse server-side. Filled by board_page ONLY,
   // same bargain as team_key.
   pub team_archived: bool,
+  // The validated card ordering (TASK-209), "manual" by default. Filled by
+  // board_page ONLY: the page's /events URL carries it so the SSE scope —
+  // and therefore every broadcast morph — respects this client's order.
+  pub order: string,
+  // The ordering picker's options. Filled by board_page ONLY, same bargain
+  // as compose.
+  pub orders: Slice<OrderOptVM>,
 }
 
 /// View model for the search page. `q` echoes back the URL's query so the
@@ -385,6 +410,9 @@ pub struct SetLabelVM {
   pub name: string,
   pub color: string,
   pub scope: string,
+  // How many issues carry the label (TASK-208). Shown so near-duplicates
+  // (bug/bugs/defect) are visible before someone creates another one.
+  pub usage: int,
 }
 
 /// One member row on /settings. Members are honor-system identities (ADR-1:

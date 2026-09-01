@@ -14,8 +14,10 @@
 # count, bad params degrading to the flash strip), /search filtering as it is
 # typed (results patched in with no page load, the address bar following the
 # query, the X clearing both), the /projects list with its rail row, issue
-# counts and project filter on /issues, and the create-more dialog keeping
-# its state through back-to-back creates (task-159).
+# counts and project filter on /issues, the create-more dialog keeping
+# its state through back-to-back creates (task-159), and the board ordering
+# picker (?order=, TASK-209: per-column server-side ordering, order-scoped
+# SSE morphs, positional drops disabled off-manual).
 # Standalone (boots its own PB), also invoked by e2e.sh.
 set -euo pipefail
 . "$(dirname "$0")/lib.sh"   # free_port, wait_ok, fail, assert_*, e2e_begin/end
@@ -505,6 +507,37 @@ if printf '%s' "$issue" | grep -q "value=\"$PANEL_LABEL\" checked"; then
   fail "empty /labels left the chip checked"
 fi
 
+# --- scalable label picker (TASK-207): the labels row defaults to the
+# issue's own chips plus one "+" affordance; the full candidate list rides
+# every render (so morphs re-carry it) but sits in a hidden panel, narrowed
+# client-side by each candidate's lowercased data-n terms. Curl-level: the
+# split between checked chips and unchecked candidates, and the terms.
+"$LIN" label create -n "Picker-Extra" -c '#8d7ce6' >/dev/null
+code=$(wcurl -s -o /dev/null -w '%{http_code}' -X POST \
+  --data-urlencode "key=ENG-3" --data-urlencode "labels=$PANEL_LABEL" "$WEB/labels")
+[ "$code" = 200 ] || fail "/labels picker re-add returned $code, want 200"
+issue=$(wcurl -sf "$WEB/issue/ENG-3")
+assert_contains "$issue" 'class="lab-add"' "labels row has the add affordance"
+assert_contains "$issue" 'class="lab-pick"' "labels row carries the picker panel"
+assert_contains "$issue" 'data-bind:lab_q' "the picker has the type-to-filter input"
+assert_contains "$issue" 'data-n="picker-extra"' "candidates carry lowercased filter terms"
+cands=$(printf '%s' "$issue" | grep 'class="lab-cands"')
+assert_contains "$cands" 'data-show="!$lab_lc || el.dataset.n.includes($lab_lc)"' \
+  "candidates filter client-side via their own data-show"
+if printf '%s' "$cands" | grep -q "value=\"$PANEL_LABEL\""; then
+  fail "a label the issue carries leaked into the candidate list"
+fi
+chips=$(printf '%s' "$issue" | grep 'id="labels-form"')
+assert_contains "$chips" "value=\"$PANEL_LABEL\" checked" "the issue's own label renders as a checked chip"
+if printf '%s' "$chips" | grep -q 'data-n='; then
+  fail "a candidate leaked onto the chips row"
+fi
+# Restore the fixtures: ENG-3 back to no labels, the extra label gone.
+wcurl -s -o /dev/null -X POST --data-urlencode "key=ENG-3" "$WEB/labels"
+PICKER_EXTRA=$(curl -sf -H "$AUTH_HDR" "$LLL_URL/api/collections/labels/records?perPage=200" \
+  | jq -r '.items[] | select(.name=="Picker-Extra") | .id')
+wcurl -sf -X POST "$WEB/settings/label?del=1" -d "id=$PICKER_EXTRA" >/dev/null
+
 # --- related findings on the issue page (TASK-103): unprompted, server-
 # rendered with the page. A finding whose area names a label the issue
 # carries surfaces with no link and no click; a finding explicitly linked
@@ -562,6 +595,8 @@ panel_events=$(cat "$PANEL_EVENTS")
 assert_contains "$panel_events" 'id="issue-detail"' "issue broadcast morphs #issue-detail"
 assert_contains "$panel_events" "value=\"$PANEL_PROJECT\" selected" \
   "the broadcast carries the repainted editor"
+assert_contains "$panel_events" 'class="lab-cands"' \
+  "the broadcast re-carries the label candidates (TASK-207)"
 resp=$(wcurl -s -X POST --data-urlencode "key=ENG-3" --data-urlencode "assignee=$PANEL_MEMBER" "$WEB/assignee")
 assert_contains "$resp" 'id="flash"' "the write path answers with the flash strip"
 assert_not_contains "$resp" 'id="issue-detail"' "the POST ships no markup — no double update"
@@ -701,6 +736,72 @@ code=$(wcurl -s -o /dev/null -w '%{http_code}' -X POST "$WEB/state?key=ENG-6&sta
 [ "$code" = 200 ] || fail "/state with stale before returned $code, want 200"
 got=$(col_order "$(wcurl -sf "$WEB/")" todo)
 [ "$got" = "ENG-2,ENG-5,ENG-4,ENG-6" ] || fail "stale before falls back to end: got '$got'"
+
+# --- TASK-209: board ordering (?order=) ---------------------------------------
+# The ordering lives in the URL, like every other piece of board view state:
+# the server renders each column in the requested order, the picker's options
+# are navigations, and the /events scope carries the order so a broadcast
+# morph arrives already sorted for this client.
+#
+# Priorities are set in a known sequence, so all three non-manual orders are
+# deterministic against the manual baseline just asserted (ENG-2,5,4,6):
+# updated-desc is the update sequence reversed, and ENG-2 (last touched by the
+# cross-column drop above) trails every ordering it has no rank in.
+"$LIN" issue update ENG-4 --priority 1 >/dev/null
+"$LIN" issue update ENG-6 --priority 2 >/dev/null
+"$LIN" issue update ENG-5 --priority 4 >/dev/null
+
+got=$(col_order "$(wcurl -sf "$WEB/?order=priority")" todo)
+[ "$got" = "ENG-4,ENG-6,ENG-5,ENG-2" ] || fail "?order=priority: got '$got'"
+got=$(col_order "$(wcurl -sf "$WEB/?order=created")" todo)
+[ "$got" = "ENG-6,ENG-5,ENG-4,ENG-2" ] || fail "?order=created (newest first): got '$got'"
+got=$(col_order "$(wcurl -sf "$WEB/?order=updated")" todo)
+[ "$got" = "ENG-5,ENG-6,ENG-4,ENG-2" ] || fail "?order=updated (newest first): got '$got'"
+got=$(col_order "$(wcurl -sf "$WEB/")" todo)
+[ "$got" = "ENG-2,ENG-5,ENG-4,ENG-6" ] || fail "bare board keeps manual order: got '$got'"
+
+# The picker: four options, the active one marked, Manual dropping the param
+# (the default needs no URL to say so), and a filter riding along unharmed.
+ordered=$(wcurl -sf "$WEB/?state=todo&order=priority")
+assert_contains "$ordered" 'class="op-opt on" href="/t/ENG/?state=todo&amp;order=priority"' \
+  "order picker marks the active option"
+assert_contains "$ordered" 'class="op-opt" href="/t/ENG/?state=todo"' \
+  "order picker's Manual option drops the param and keeps the filter"
+assert_contains "$ordered" "order=created" "order picker offers created"
+assert_contains "$ordered" "order=updated" "order picker offers updated"
+
+# Positional drops are disabled under a non-manual order (Linear's choice):
+# the columns render append-only drag handlers — no drop-position indicator,
+# whole-column .drop-append feedback, a drop posting /state WITHOUT `before`
+# — while the manual board keeps the positional ones. "&before=" is the
+# marker: it appears only in the positional column drop handler.
+assert_not_contains "$ordered" "&before=" "non-manual board has no positional drop handlers"
+assert_contains "$ordered" "drop-append" "non-manual board signals append-only drops"
+assert_contains "$(wcurl -sf "$WEB/")" "&before=" "manual board keeps positional drop handlers"
+
+# A bad value flashes and falls back to manual instead of 500ing.
+bad=$(wcurl -sf "$WEB/?order=zorp")
+assert_contains "$bad" "unknown order &#39;zorp&#39;" "bad order value says so in the flash"
+got=$(col_order "$bad" todo)
+[ "$got" = "ENG-2,ENG-5,ENG-4,ENG-6" ] || fail "bad order falls back to manual: got '$got'"
+
+# The SSE morph respects the connected client's order: a client whose /events
+# URL asked for priority receives a #board fragment already in priority order.
+wcurl -sN "$WEB/events?page=board&team=ENG&order=priority" >"$EVENTS_FILE" &
+CURL_PID=$!
+sleep 0.5
+"$LIN" issue update ENG-2 --title "Already in progress (renamed)" >/dev/null
+for _ in $(seq 1 50); do
+  grep -q "datastar-patch-elements" "$EVENTS_FILE" 2>/dev/null && break
+  sleep 0.1
+done
+kill $CURL_PID 2>/dev/null || true
+CURL_PID=""
+# tr strips the stray NUL a killed curl can leave mid-frame, which bash's
+# command substitution would otherwise warn about.
+got=$(col_order "$(tr -d '\0' <"$EVENTS_FILE")" todo)
+[ "$got" = "ENG-4,ENG-6,ENG-5,ENG-2" ] \
+  || fail "priority-scoped SSE morph not in priority order: got '$got'"
 
 # --- browser-level: CLI create appears on an open board without reload ---
 if command -v playwright-cli >/dev/null 2>&1; then
@@ -936,6 +1037,30 @@ if command -v playwright-cli >/dev/null 2>&1; then
   assert_contains "$rejected" '"focused":true' "task-159: a failed create returns focus to the title"
   "$LIN" issue list | grep -q "Create more doomed" \
     && fail "task-159: a failed Create-more submit wrote a record" || true
+
+  # --- task-206: props-panel controls stay inside the panel ---------------
+  # A select sizes to its widest option, so one long member or project name
+  # used to push the Assignee/Project controls past the panel's right edge.
+  # Measured in a real browser, at desktop width and the 720px stacked
+  # layout, against names built to be absurd.
+  "$LIN" member add -n "task-206 member with an absurdly long display name for the overflow probe" >/dev/null
+  "$LIN" project create -n "task-206 project with an equally absurd name for the same overflow probe" >/dev/null
+  out=$("$LIN" issue create -t "task-206 overflow probe" \
+    --assignee "task-206 member with an absurdly long display name for the overflow probe" \
+    --project "task-206 project with an equally absurd name for the same overflow probe")
+  key206=$(printf '%s' "$out" | sed -n 's/^Created \([A-Z][A-Z0-9]*-[0-9]*\):.*/\1/p')
+  [ -n "$key206" ] || fail "task-206: could not create the overflow-probe issue: $out"
+  seq_goto "$WEB/issue/$key206"
+  overflow_js='() => { const p = document.querySelector(".props").getBoundingClientRect(); const n = [...document.querySelectorAll(".prop, .prop *")].filter(el => el.getBoundingClientRect().right > p.right + 1).length; return JSON.stringify({w: innerWidth, overflow: n}) }'
+  for w in 1280 700; do
+    playwright-cli -s="$BROWSER_SESSION" resize "$w" 900 >/dev/null 2>&1 \
+      || fail "playwright: resizing to ${w}px"
+    assert_contains "$(page_state "$overflow_js")" '"overflow":0' \
+      "task-206: props controls stay inside the panel at ${w}px"
+  done
+  playwright-cli -s="$BROWSER_SESSION" resize 1280 800 >/dev/null 2>&1
+  # The probe issue would skew the count-sensitive table sections below.
+  "$LIN" issue delete "$key206" --force >/dev/null
 
   playwright-cli -s="$BROWSER_SESSION" close >/dev/null 2>&1 || true
   echo "e2e_web: browser-level realtime check passed"
@@ -1787,5 +1912,40 @@ assert_contains "$out" 'flash-ok' "an archive says its success in the flash stri
 "$LIN" team list | grep -q OPS && fail "archiving from settings did not persist" || true
 "$LIN" team list --archived | grep -q OPS || fail "the settings-archived team is gone entirely"
 env LLL_TEAM=OPS "$LIN" team unarchive OPS >/dev/null   # leave the suite as it found OPS
+
+# --- TASK-208: the Labels section is an inventory — usage counts, busiest ---
+# first, and the create form says check-first. Fresh fixtures with distinct
+# counts, so the assertions do not depend on what earlier sections labeled.
+"$LIN" label create -n usage-hot >/dev/null
+"$LIN" label create -n usage-cold >/dev/null
+"$LIN" issue create -t "Usage probe one" --label usage-hot >/dev/null
+"$LIN" issue create -t "Usage probe two" --label usage-hot >/dev/null
+# One label row's whole markup, so the count assertion cannot match another
+# row's span.
+label_row() { # html name
+  printf '%s' "$1" | python3 -c '
+import re, sys
+html, name = sys.stdin.read(), sys.argv[1]
+m = re.search(r"<form class=\"set-row\" id=\"set-label-[a-z0-9]+\" data-name=\"%s\">.*?</form>" % re.escape(name), html, re.S)
+print(m.group(0) if m else "")
+' "$2"
+}
+settings=$(wcurl -sf "$WEB/settings")
+assert_contains "$(label_row "$settings" usage-hot)" "2 issues" \
+  "a label row counts the issues carrying it"
+assert_contains "$(label_row "$settings" usage-cold)" "0 issues" \
+  "an unused label row says 0 issues"
+printf '%s' "$settings" | python3 -c '
+import sys
+html = sys.stdin.read()
+hot = html.find("data-name=\"usage-hot\"")
+cold = html.find("data-name=\"usage-cold\"")
+sys.exit(0 if 0 <= hot < cold else 1)
+' || fail "the Labels section is not sorted busiest first"
+assert_contains "$settings" "reuse beats near-duplicates" \
+  "the web label-create form carries the check-first hint"
+# The raw twin carries the same counts, on the label's own line.
+assert_contains "$(wcurl -sf "$WEB/settings?raw")" "usage-hot # (ENG, 2 issues)" \
+  "settings raw carries the label's usage count"
 
 echo "e2e_web: all assertions passed"

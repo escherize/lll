@@ -29,7 +29,7 @@
     <!-- Title-edit state lives here, OUTSIDE #issue-detail (the SSE morph
          target): $edit_title / $title_draft survive every wholesale morph,
          and data-bind repopulates the re-created input from $title_draft. -->
-    <div class="issue-wrap" data-signals:edit_title="false" data-signals:title_draft="''" data-signals:emo_open="false" data-signals:emo_q="''">
+    <div class="issue-wrap" data-signals:edit_title="false" data-signals:title_draft="''" data-signals:emo_open="false" data-signals:emo_q="''" data-signals:lab_open="false" data-signals:lab_q="''" data-computed:lab_lc="$lab_q.trim().toLowerCase()">
       <div class="issue-scroll">
         {{template "issue-detail" .Page}}
         {{template "related-findings" .Page}}
@@ -97,10 +97,27 @@
   {{end}}</select></form></span>
 </div>
 <div class="prop"><span class="k">Labels</span>
-  <!-- The create dialog's chip-as-control idiom: every workspace label
-       renders, the ones the issue carries checked. One change posts the
-       whole set — labels is a rel-multi, so the form is the payload. -->
-  <span class="v">{{if .LabelOpts}}<form id="labels-form" class="labs"><input type="hidden" name="key" value="{{.Key}}">{{range .LabelOpts}}<label class="lab"><input type="checkbox" name="labels" value="{{.Id}}"{{if .On}} checked{{end}} data-on:change="@post('/labels', {contentType: 'form'})"><span class="chip"><span class="dot" style="background:{{if .Color}}{{.Color}}{{else}}var(--text-3){{end}}"></span>{{.Name}}</span></label>{{end}}</form>{{else}}none{{end}}</span>
+  <!-- The scalable picker (TASK-207). The row shows only the labels the
+       issue carries, as removable chips, plus one "+" affordance. Every
+       candidate still renders on every pass — so each #issue-detail morph
+       re-carries the list with fresh checked state — but the panel stays
+       hidden until $lab_open, and typing narrows it client-side via each
+       candidate's own data-show ($lab_open/$lab_q/$lab_lc live on
+       .issue-wrap, outside the morph boundary, so an SSE morph under an
+       open picker disturbs nothing). Chips and candidates are one checkbox
+       set in one form: any change posts the whole set to /labels, the
+       rel-multi idiom unchanged. Enter adds the first still-visible
+       candidate; Escape closes. -->
+  <span class="v">{{if .LabelOpts}}<form id="labels-form" class="labs"><input type="hidden" name="key" value="{{.Key}}">{{range .LabelOpts}}{{if .On}}<label class="lab" id="lab-o-{{.Id}}" title="Remove {{.Name}}"><input type="checkbox" name="labels" value="{{.Id}}" checked data-on:change="@post('/labels', {contentType: 'form'})"><span class="chip"><span class="dot" style="background:{{if .Color}}{{.Color}}{{else}}var(--text-3){{end}}"></span>{{.Name}}</span></label>{{end}}{{end}}<button type="button" class="lab-add" title="Add a label" aria-label="Add a label" data-attr:aria-expanded="$lab_open ? 'true' : 'false'" data-on:click="$lab_open ? ($lab_open = false) : ($lab_q = '', $lab_open = true)"><svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true"><path d="M6 1.5 V10.5 M1.5 6 H10.5" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg></button>
+  <div class="lab-pick" style="display:none" data-show="$lab_open" data-on:click__outside="!evt.target.closest('.lab-add') && ($lab_open = false)" data-on:keydown="evt.key === 'Escape' && ($lab_open = false)">
+  <span class="lab-search"><svg width="14" height="14"><use href="#ic-search"/></svg><input type="text" placeholder="Filter labels" autocomplete="off" aria-label="Filter labels" data-bind:lab_q data-effect="$lab_open && setTimeout(() => el.focus(), 0)" data-on:keydown="evt.key === 'Enter' && (evt.preventDefault(), [...el.closest('.lab-pick').querySelectorAll('.lab-cands label')].find(l => l.style.display !== 'none')?.querySelector('input').click())"></span>
+  {{/* Every chip and candidate wears a stable id: idiomorph matches by id,
+       so a morph that moves a label between the two sets cannot shift
+       content under its neighbours — a shifted candidate would keep the
+       display its OLD data-show computed (no signal changed, so nothing
+       re-evaluates) and the filter would go visibly stale. */}}
+  <div class="lab-cands">{{range .LabelOpts}}{{if not .On}}<label class="lab" id="lab-c-{{.Id}}" data-n="{{.Terms}}" data-show="!$lab_lc || el.dataset.n.includes($lab_lc)"><input type="checkbox" name="labels" value="{{.Id}}" data-on:change="@post('/labels', {contentType: 'form'})"><span class="chip"><span class="dot" style="background:{{if .Color}}{{.Color}}{{else}}var(--text-3){{end}}"></span>{{.Name}}</span></label>{{end}}{{end}}</div>
+  </div></form>{{else}}none{{end}}</span>
 </div>
 <div class="prop"><span class="k">Created</span><span class="v">{{.Created}}</span></div>
 <div class="prop"><span class="k">Updated</span><span class="v">{{.Updated}}</span></div>

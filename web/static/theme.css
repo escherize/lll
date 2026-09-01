@@ -1390,6 +1390,7 @@ input:focus, textarea:focus, select:focus {
   border-color: rgba(76, 183, 130, 0.4);
   background: rgba(76, 183, 130, 0.12);
   color: var(--st-done);
+}
 
 /* ── team switcher (TASK-198) ─────────────────────────────────────────────
    Rail rows for the /t/KEY/ boards. The key wears a small bordered tag so a
@@ -1411,4 +1412,116 @@ input:focus, textarea:focus, select:focus {
 .rail a.active .rt-key {
   color: var(--accent);
   border-color: var(--accent);
+}
+
+/* ── props panel overflow (TASK-206) ───────────────────── */
+/* A select sizes to its widest option, so one long member or project name
+   pushed the whole control past the panel edge. Flex only lets an item
+   shrink below its content when min-width is 0, so the chain the controls
+   sit in (.v -> form -> select) gets exactly that; the select then
+   ellipsizes its displayed option instead of overflowing. The same rules
+   carry the 720px stacked layout — same flex chain, wider panel. */
+.prop .v { min-width: 0; max-width: 100%; }
+.prop form { min-width: 0; }
+.prop select { min-width: 0; max-width: 100%; text-overflow: ellipsis; }
+/* The state/priority icons and the avatar share the shrinking row; they are
+   decoration-sized and must not be squeezed by a long neighbour. */
+.prop .v > svg { flex: none; }
+/* The project link shares its row with the select: a long name truncates on
+   its own line instead of wrapping word-per-line or squeezing the select. */
+.prop .v a { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* ── scalable label picker (TASK-207) ────────────────────── */
+/* The Labels row wears only the issue's chips plus one "+" affordance; the
+   candidate panel below rides every morph but shows only while picking.
+   The candidate strip is capped and scrolls, so 100+ labels stay one panel
+   tall instead of a wall. */
+.lab-add {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  background: none;
+  color: var(--text-2);
+  cursor: pointer;
+}
+.lab-add:hover { background: var(--bg-hover); color: var(--text); }
+.lab-add[aria-expanded="true"] { color: var(--accent); border-color: var(--accent); }
+.lab-pick {
+  flex: 1 0 100%;
+  min-width: 0;
+  margin-top: 4px;
+  padding: 8px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  background: var(--bg-raised);
+}
+/* The emoji picker's search affordance, reused verbatim in the panel. */
+.lab-search {
+  display: flex; align-items: center; gap: 6px;
+  padding: 0 8px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  background: var(--bg-panel);
+  color: var(--text-3);
+}
+.lab-search:focus-within {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-dim);
+  color: var(--text-2);
+}
+.lab-search svg { flex: none; }
+.lab-search input {
+  width: 100%; min-width: 0;
+  padding: 5px 0;
+  border: none;
+  background: none;
+  border-radius: 0;
+}
+.lab-search input:focus { outline: none; border: none; box-shadow: none; }
+.lab-cands {
+  display: flex;
+  flex-wrap: wrap;
+  align-content: flex-start;
+  gap: 5px;
+  margin-top: 8px;
+  max-height: 176px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+/* ── board ordering picker (TASK-209) ─────── */
+/* Right-docked in the filter bar: a quiet segmented control, same 11.5px
+   voice as the chips. The active option raises like a pressed chip. */
+.order-picker {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  margin-left: auto;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 1px 3px;
+}
+.op-label { color: var(--text-3); font-size: 11px; font-weight: 500; padding: 0 5px; }
+.op-opt {
+  color: var(--text-3);
+  font-size: 11.5px;
+  font-weight: 500;
+  padding: 1px 8px;
+  border-radius: 999px;
+  text-decoration: none;
+}
+.op-opt:hover { color: var(--text); background: var(--bg-hover); }
+.op-opt.on { color: var(--text); background: var(--bg-raised); }
+/* Non-manual ordering: no drop-position line — the whole column signals
+   "this drop changes state; it lands where the ordering puts it". */
+.column.drop-append {
+  outline: 1px dashed var(--accent);
+  outline-offset: -3px;
+  border-radius: var(--radius);
 }

@@ -1,0 +1,89 @@
+# Release binaries on tag push (v*). Runs on macos-14 for the same reason as
+# gate.yml: lis cannot bindgen on linux. darwin-arm64 is a native `lis build`;
+# the linux binaries are `GOOS=linux go build` over a darwin `lis emit`
+# (scripts/emit-relative.sh) — the same pipeline scripts/fly-deploy.sh proves
+# on every deploy. Pure-Go deps (modernc sqlite), so CGO_ENABLED=0 cross
+# builds are static and portable.
+#
+# Cutting a release:
+#   1. bump [project] version in lisette.toml AND src/commands/version.lis
+#      (they are checked against the tag below; a mismatch fails the run)
+#   2. git tag v<version> && git push origin v<version>
+
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: release
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+
+      # Fail fast, before any toolchain install: the tag must equal the
+      # version lisette.toml declares.
+      - name: Tag matches lisette.toml version
+        run: |
+          tag="${GITHUB_REF_NAME#v}"
+          ver="$(sed -n 's/^version = "\(.*\)"$/\1/p' lisette.toml | head -1)"
+          if [ "$tag" != "$ver" ]; then
+            echo "tag v$tag disagrees with lisette.toml version $ver — bump lisette.toml (and src/commands/version.lis) or retag" >&2
+            exit 1
+          fi
+
+      # Toolchain setup: identical to gate.yml (see comments there).
+      - uses: jdx/mise-action@v2
+        with:
+          install: false
+
+      - name: Trust repo config
+        run: mise trust
+
+      - name: Install tools
+        run: mise install
+
+      - name: Install lis 0.12.0
+        run: |
+          curl -LsSf https://github.com/ivov/lisette/releases/download/lisette-v0.12.0/lisette-installer.sh | sh
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      - name: Build darwin-arm64 (native lis)
+        run: |
+          mise exec -- bash scripts/lis-typedefs-workaround.sh
+          mise exec -- lis build
+          mkdir -p dist
+          cp target/.lisette/bin/lll dist/lll-darwin-arm64
+
+      # `lll --version` is a hardcoded constant (src/commands/version.lis) —
+      # lis has no version-injection hook — so check the built binary too.
+      - name: lll --version matches the tag
+        run: |
+          tag="${GITHUB_REF_NAME#v}"
+          out="$(dist/lll-darwin-arm64 --version)"
+          if [ "$out" != "lll $tag" ]; then
+            echo "built binary says '$out', tag wants 'lll $tag' — bump src/commands/version.lis" >&2
+            exit 1
+          fi
+
+      - name: Emit Go for the linux builds
+        run: mise exec -- bash scripts/emit-relative.sh
+
+      - name: Build linux amd64 + arm64
+        run: |
+          cd target
+          for arch in amd64 arm64; do
+            GOOS=linux GOARCH="$arch" CGO_ENABLED=0 mise exec -- go build -o "../dist/lll-linux-$arch" .
+          done
+
+      - name: Attach binaries to the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" dist/lll-* --title "$GITHUB_REF_NAME" --generate-notes ||
+            gh release upload "$GITHUB_REF_NAME" dist/lll-* --clobber

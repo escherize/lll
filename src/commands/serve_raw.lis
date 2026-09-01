@@ -186,7 +186,7 @@ fn settings_raw(vm: SettingsVM) -> string {
   lines = lines.append("")
   lines = lines.append("## Labels")
   for l in vm.labels {
-    lines = lines.append(f"- {cell(l.name)} #{l.color} ({l.scope})")
+    lines = lines.append(f"- {cell(l.name)} #{l.color} ({l.scope}, {l.usage} issues)")
   }
   lines = lines.append("")
   lines = lines.append("## Members")

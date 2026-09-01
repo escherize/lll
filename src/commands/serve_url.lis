@@ -19,6 +19,10 @@ struct ViewQuery {
   prio: string,
   project: string,
   sort: string,
+  // Board card ordering (TASK-209): "created", "updated" or "priority".
+  // Empty means manual (sort-then-created), which is why "manual" itself is
+  // never written into a URL — the default needs no param.
+  order: string,
   hide: string,
 }
 
@@ -35,6 +39,7 @@ fn view_query(r: Ref<http.Request>) -> ViewQuery {
     prio: q.Get("prio"),
     project: q.Get("project"),
     sort: q.Get("sort"),
+    order: q.Get("order"),
     hide: q.Get("hide"),
   }
 }
@@ -60,6 +65,7 @@ fn view_query_parse_raw(raw: string) -> Result<ViewQuery, string> {
       "prio" => q.prio = v,
       "project" => q.project = v,
       "sort" => q.sort = v,
+      "order" => q.order = v,
       "hide" => q.hide = v,
       _ => (),
     }
@@ -80,6 +86,7 @@ fn view_query_string(q: ViewQuery) -> string {
     parts = parts.append(f"project={url.QueryEscape(q.project)}")
   }
   if q.sort != "" { parts = parts.append(f"sort={url.QueryEscape(q.sort)}") }
+  if q.order != "" { parts = parts.append(f"order={url.QueryEscape(q.order)}") }
   if q.hide != "" { parts = parts.append(f"hide={url.QueryEscape(q.hide)}") }
   if parts.is_empty() { return "" }
   f"?{strings.Join(parts, "&")}"
@@ -124,13 +131,14 @@ fn view_query_field(q: ViewQuery, dim: string) -> string {
     "prio" => q.prio,
     "project" => q.project,
     "sort" => q.sort,
+    "order" => q.order,
     "hide" => q.hide,
     _ => "",
   }
 }
 
-/// True when any filter dimension of `q` is set. `hide` and `sort` are
-/// presentation, not filters, so they do not count.
+/// True when any filter dimension of `q` is set. `hide`, `sort` and `order`
+/// are presentation, not filters, so they do not count.
 fn view_query_filtered(q: ViewQuery) -> bool {
   q.state != "" || q.assignee != "" || q.label != "" || q.prio != "" || q.project != ""
 }
