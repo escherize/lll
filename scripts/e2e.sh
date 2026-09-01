@@ -343,9 +343,34 @@ assert_contains "$out" "team ENG already exists" "attach reuses an existing team
 # And that one committed line is the whole attachment: no url, no me needed.
 out=$(cd "$ATTACH/sub" && env -u LLL_TEAM LLL_URL=$URL HOME="$SET_HOME" "$LLL_ABS" issue list)
 assert_contains "$out" "ENG-1" "an attached repo is scoped from its committed file"
-out=$(cd "$DATA_DIR" && LLL_URL=$URL HOME="$SET_HOME" "$LLL_ABS" attach 2>&1) \
-  && fail "attach outside a git repository should exit non-zero"
-assert_contains "$out" "not inside a git repository" "attach outside a repo names why"
+# --- attach outside a repo: plain directories attach too (TASK-212) ---
+# Its own subtree, never $DATA_DIR: a .lll.toml at the top would be inherited
+# by every later assertion run from $WORK, which sits under it.
+PLAIN="$DATA_DIR/plain/scratchpad"
+mkdir -p "$PLAIN/sub"
+out=$(cd "$PLAIN" && LLL_URL=$URL HOME="$SET_HOME" "$LLL_ABS" attach -k ENG)
+assert_contains "$out" "scratchpad/.lll.toml" "attach in a plain dir writes at the cwd"
+assert_contains "$out" "every subdirectory" "attach in a plain dir says subdirs inherit"
+[ "$(cat "$PLAIN/.lll.toml")" = 'team = "ENG"' ] \
+  || fail "plain-dir attach wrote more than the team: $(cat "$PLAIN/.lll.toml")"
+# Inheritance: the subtree resolves the team with nothing of its own.
+out=$(cd "$PLAIN/sub" && env -u LLL_TEAM LLL_URL=$URL HOME="$SET_HOME" "$LLL_ABS" issue list)
+assert_contains "$out" "ENG-1" "a subdirectory of a plain dir inherits its team"
+# A checkout under that plain dir is a boundary: the walk stops at .git rather
+# than handing someone's repo a team from a directory above it.
+mkdir -p "$PLAIN/inner"
+git -C "$PLAIN/inner" init -q
+out=$(cd "$PLAIN/inner" && env -u LLL_TEAM HOME="$SET_HOME" "$LLL_ABS" config --list)
+assert_not_contains "$out" "ENG" "a .git boundary stops the plain-dir walk"
+# $HOME is exclusive, from below it and from home itself: ~/.config/lll/lll.toml
+# is the deliberate way to set a machine-wide team.
+printf 'team = "HOMET"\n' > "$SET_HOME/.lll.toml"
+mkdir -p "$SET_HOME/scratch"
+out=$(cd "$SET_HOME/scratch" && env -u LLL_TEAM HOME="$SET_HOME" "$LLL_ABS" config --list)
+assert_not_contains "$out" "HOMET" "a .lll.toml directly in \$HOME captures nothing"
+out=$(cd "$SET_HOME" && env -u LLL_TEAM HOME="$SET_HOME" "$LLL_ABS" config --list)
+assert_not_contains "$out" "HOMET" "a .lll.toml in \$HOME captures nothing from \$HOME itself"
+rm -f "$SET_HOME/.lll.toml"
 
 rm -f "$WORK/.lll.toml"
 

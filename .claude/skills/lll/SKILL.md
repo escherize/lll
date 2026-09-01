@@ -147,10 +147,12 @@ because Y needs a reconciler and two writable copies" is worth the file.
 ## Side projects: attach, work, archive
 
 A team is cheap — give every side project its own instead of piling issues
-into a shared one:
+into a shared one. It does not have to be a repo: `lll attach` in a plain
+directory writes `.lll.toml` there and every subdirectory inherits it, so a
+folder of notes gets tracked without a `git init`.
 
 ```sh
-lll attach                 # once, in the repo: creates team KEY, writes .lll.toml
+lll attach                 # once, repo or plain dir: creates KEY, writes .lll.toml
 lll issue create -t "..."  # work, tracked as KEY-1, KEY-2, ...
 lll team archive KEY       # done: leaves team lists and the board rail
 ```
@@ -171,11 +173,6 @@ can actually scan.
 - **Check criteria against evidence you actually ran.** Not code presence, not
   grep output, not intent. If it is a UI change, look at it.
 - **One task per change.** If you find a second problem, file it.
-- **Check `lll label list` before creating a label.** Reuse over
-  near-duplicates (bug/bugs/defect): agents create most labels, and every
-  synonym splits the filters that make the board searchable. The web's
-  Settings page lists every label with its usage count, busiest first — a
-  label already carrying issues is the one to attach yours to.
 
 ## Verification, before you claim anything works
 

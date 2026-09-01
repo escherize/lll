@@ -156,13 +156,21 @@ fn home_file() -> Option<string> {
 /// an unbounded parent walk would let one stray ~/dv/.lll.toml capture every
 /// repo beneath it, silently and with the wrong team, which is worse than the
 /// cwd-only lookup it replaces.
+///
+/// Outside any repo the ceiling is `plain_dir_file()`'s instead: there is no
+/// git root to stop at, but a plain directory still deserves the inheritance
+/// a checkout gets (TASK-212).
 pub fn repo_file() -> Option<string> {
-  // The working directory's own file keeps its short name, so error messages
-  // read `.lll.toml` and a directory outside any repo still has a config.
-  if exists(".lll.toml") { return Some(".lll.toml") }
+  // Outside a repo the whole decision belongs to plain_dir_file(), cwd
+  // included. Short-circuiting on the working directory's own file first
+  // would read a ~/.lll.toml whenever the cwd IS home — the one file the
+  // HOME-exclusive rule exists to ignore.
   let Some(root) = git_root() else {
-    return None
+    return plain_dir_file()
   }
+  // In a repo the working directory's own file keeps its short name, so error
+  // messages read `.lll.toml` rather than an absolute path.
+  if exists(".lll.toml") { return Some(".lll.toml") }
   let Ok(start) = os.Getwd() else {
     return None
   }
@@ -178,6 +186,44 @@ pub fn repo_file() -> Option<string> {
     let path = filepath.Join(dir, ".lll.toml")
     if exists(path) { return Some(path) }
     if dir == root { return None }
+    let parent = filepath.Dir(dir)
+    if parent == dir { return None }
+    dir = parent
+  }
+}
+
+/// The nearest `.lll.toml` at or above the working directory when no git root
+/// bounds the walk. Two stops besides finding the file, both there so a
+/// scratch directory cannot be captured by a stranger's config:
+///
+///   - a directory holding `.git`. Above a plain dir sits, often, someone's
+///     checkout; its committed team is not this directory's team, and the
+///     repo's own walk already refuses to look past its root.
+///   - $HOME, EXCLUSIVE. A `.lll.toml` sitting directly in the home directory
+///     would silently claim every project under it. Machine-wide defaults have
+///     a place already: ~/.config/lll/lll.toml, which layers underneath.
+fn plain_dir_file() -> Option<string> {
+  let Ok(start) = os.Getwd() else {
+    return None
+  }
+  // Resolved for the same reason the repo walk resolves: on macOS a plain dir
+  // under /tmp is reached through a symlink, and $HOME is reported unresolved.
+  let mut dir = no_symlinks(start)
+  let home = os.UserHomeDir().map_or("", no_symlinks)
+  let mut first = true
+  loop {
+    if dir == home { return None }
+    if exists(filepath.Join(dir, ".git")) { return None }
+    let path = filepath.Join(dir, ".lll.toml")
+    // The working directory's own file keeps its short name, as it does inside
+    // a repo, so `--list` names it the same way wherever it was found. Only
+    // the cwd earns that: anything walked up to is named in full, or the
+    // origin would not say which directory won.
+    if exists(path) {
+      let named = if first { ".lll.toml" } else { path }
+      return Some(named)
+    }
+    first = false
     let parent = filepath.Dir(dir)
     if parent == dir { return None }
     dir = parent

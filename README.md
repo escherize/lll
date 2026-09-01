@@ -56,7 +56,7 @@ Four actors, each configured once, none written twice:
 |---|---|---|
 | Server | `lll up` with `LLL_ADMIN_*`, `LLL_TEAM`, `LLL_BIND`, `LLL_BOARD_TOKEN` in env (Fly: secrets) | nothing on disk but the database |
 | Your machine (human path) | `lll login --url https://your-host:8091` — prompts for email + password | `url`, `token`, and `me` (when unset) in the home config |
-| Each repo | `lll attach`, commit the file | `team = "KEY"` in the repo's `.lll.toml` |
+| Each repo or directory | `lll attach`, commit the file if it is a repo | `team = "KEY"` in `.lll.toml`, at the repo root or in the working directory |
 | Each agent (agent path) | superuser mints `lll token create <name>` | nothing — `LLL_TOKEN` (+ `LLL_URL`) in its env |
 
 Humans log in with email + password; agents ride minted tokens. A new or
@@ -65,22 +65,29 @@ imported member has a random password nobody knows, so a superuser first runs
 --url ...` works. On a local `lll up`, plain `lll login` (the url default is
 `http://127.0.0.1:8090`) is enough.
 
+Inviting someone is those two halves in one command: `lll member invite NAME
+--email their@email` creates the member, generates a temporary password, and
+prints the exact lines they run. The password is shown once and stored
+nowhere, so send it before you close the terminal.
+
 Clones and git worktrees of an attached repo need no step at all; env beats
 files, repo file beats home file, and each key resolves independently
 (`lll config --list` shows every winner and its origin).
 
-## Attaching a repo
+## Attaching a repo, or any directory
 
 `lll attach` creates a team and writes one line — `team = "KEY"` — to
-`.lll.toml` at the repo root. Commit that file. The key defaults to the repo
-directory name; `-k KEY` overrides it.
+`.lll.toml`. Inside a git repository that file goes at the repo root; commit
+it. Outside one it goes in the working directory, and every subdirectory
+inherits it — a scratch project needs no `git init` to be tracked. The key
+defaults to the directory name; `-k KEY` overrides it.
 
 That is the whole attachment, because the two halves of the config live in
 different places:
 
 | Half | Where | Keys |
 |---|---|---|
-| Which tracker | the repo's committed `.lll.toml` | `team` |
+| Which tracker | the directory's `.lll.toml`, committed when it is a repo | `team` |
 | How to reach it | `~/.config/lll/lll.toml`, once per machine | `url`, `me` |
 
 So attaching a new repo on a machine already set up is `lll attach`, and an
@@ -90,10 +97,11 @@ Every worktree of that checkout is attached the moment it exists.
 ### The side-project loop
 
 A team is cheap, so give every side project its own and archive it when the
-work is done:
+work is done. A repo is not required — a plain directory of notes attaches the
+same way, and its subdirectories inherit the team:
 
 ```sh
-lll attach                    # once: creates team KEY, writes .lll.toml
+lll attach                    # once, repo or plain dir: creates KEY, writes .lll.toml
 lll issue create -t "..."     # work, tracked under KEY-1, KEY-2, ...
 lll team archive KEY          # done: leaves team lists and the board rail
 ```
@@ -109,8 +117,13 @@ with the fix — and `lll team unarchive KEY` brings the team back whole.
 Precedence: env vars > the repo's `.lll.toml` > `~/.config/lll/lll.toml`. The
 files **layer**: each supplies the keys it names, so a repo file carrying
 `team` alone still gets `url` and `me` from the machine's. `.lll.toml` is
-found by walking up from the working directory to the repo root — and no
-higher, so a stray file above a checkout cannot capture it.
+found by walking up from the working directory. Inside a repo the walk stops
+at the repo root — and no higher, so a stray file above a checkout cannot
+capture it. Outside any repo it stops at the first of: the file, a directory
+holding `.git` (someone's checkout is not this directory's tracker), or your
+home directory **exclusive** — a `.lll.toml` sitting directly in `$HOME` is
+never read, because `~/.config/lll/lll.toml` is how you set machine-wide
+defaults on purpose.
 
 `lll config --list` prints every effective value and the file it came from,
 after `git config --list --show-origin`:
@@ -123,11 +136,17 @@ file:/Users/you/.config/lll/lll.toml	me=you
 default	web_url=http://127.0.0.1:8100
 ```
 
+A hosted instance answers on two ports, and `url` wants the API one. The board
+rides 443 (`https://your-host`), the API rides `:8091` — so
+`url = "https://your-host"` reaches the board, which 404s every API call.
+`lll config check` asks the configured url whether it is a PocketBase API and
+answers in one line.
+
 Client settings — what every `lll` command reads:
 
 | Env | TOML key | Meaning |
 |---|---|---|
-| `LLL_URL` | `url` | PocketBase base URL (default `http://127.0.0.1:8090`) |
+| `LLL_URL` | `url` | PocketBase **API** base URL (default `http://127.0.0.1:8090`; hosted, `https://your-host:8091` — not the board's bare host) |
 | `LLL_TEAM` | `team` | Default team key; scopes `issue list`, required by `issue create` |
 | `LLL_ME` | `me` | Your member name; authors your comments and receives assignments |
 | `LLL_SORT` | `sort` | Default sort: `created`, `updated`, `priority`, `number`; `-` prefix descends |
@@ -172,10 +191,12 @@ lll team|member|project|label list      # the other nouns: list/create/view/add
 lll team archive KEY          # park a finished team; unarchive brings it back
 lll attach                    # point this repo at a team, once
 lll config --list             # every value and the file it came from
+lll config check              # does the configured url answer as a PocketBase API?
 lll login --url https://host:8091   # one-command machine setup: auth + persist url/token/me
 lll login                     # as a member, against the configured url
+lll member invite NAME --email e@x.com  # add a colleague + temp password, in one
 lll member set-password NAME --email e@x.com  # superuser gives a member credentials
-lll token create bryan        # a static agent token (superuser only), printed once
+lll token create bryan        # a one-year agent token (superuser only), printed once
 lll logout                    # clear the stored token
 lll board -w                  # open the web board
 lll completions zsh           # bash, zsh, fish

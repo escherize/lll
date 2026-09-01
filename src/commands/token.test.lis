@@ -1,0 +1,65 @@
+import "go:time"
+
+// Unit cover for TASK-214's pure halves in token.lis: the expiry line printed
+// under a mint, and the refusal classifier. Both are functions of their
+// arguments alone — expiry_line takes `now` precisely so this suite can pin a
+// date instead of racing the clock.
+
+// ------------------------------------------------------------ expiry_line
+
+fn at_noon() -> time.Time {
+  time.Date(2026, time.January, 15, 12, 0, 0, 0, time.UTC)
+}
+
+#[test]
+fn expiry_line_dates_the_default_year_out() {
+  let line = expiry_line(default_token_duration(), at_noon())
+  assert line.contains("expires 2027-01-15")
+  assert line.contains("lll token create")
+}
+
+#[test]
+fn expiry_line_dates_a_short_duration() {
+  // An hour still lands on the same day; the seconds are what disambiguate.
+  let line = expiry_line(3600, at_noon())
+  assert line.contains("expires 2026-01-15")
+  assert line.contains("3600s from now")
+}
+
+#[test]
+fn expiry_line_refuses_to_guess_for_the_collection_default() {
+  let line = expiry_line(0, at_noon())
+  assert !line.contains("2026-")
+  assert line.contains("--duration")
+}
+
+#[test]
+fn default_token_duration_is_a_year_of_seconds() {
+  assert default_token_duration() == 31536000
+}
+
+// ------------------------------------------------------- impersonate_error
+
+#[test]
+fn a_401_blames_expiry_and_names_the_re_mint() {
+  let msg = impersonate_error("bryan", "POST http://h/api/...: 401 Unauthorized: {}")
+  assert msg.contains("expired")
+  assert msg.contains("lll token create")
+}
+
+#[test]
+fn a_403_still_names_the_superuser_gate() {
+  let msg = impersonate_error("bryan", "POST http://h/api/...: 403 Forbidden: {}")
+  assert msg.contains("superuser-only")
+  assert msg.contains("LLL_ADMIN_EMAIL")
+  // 403 is authenticated-but-unauthorized; blaming expiry here would send a
+  // member off to re-mint a token that was never the problem.
+  assert !msg.contains("expired")
+}
+
+#[test]
+fn any_other_failure_keeps_the_raw_error() {
+  let msg = impersonate_error("bryan", "POST http://h/api/...: 500 Internal Server Error: {}")
+  assert msg.contains("impersonating bryan")
+  assert msg.contains("500")
+}

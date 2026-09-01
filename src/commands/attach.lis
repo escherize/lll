@@ -1,4 +1,5 @@
 import "go:fmt"
+import "go:os"
 import "go:path/filepath"
 
 import "config"
@@ -40,11 +41,18 @@ pub fn attach(args: Slice<string>) -> Result<(), string> {
 
   // The git root, not the working directory: attaching from src/commands must
   // write the same file as attaching from the top, or the walk that finds it
-  // would look past what we just wrote.
-  let Some(root) = config.git_root() else {
-    return Err(
-      "not inside a git repository — 'lll attach' writes .lll.toml at the repo root; run it in a checkout, or set LLL_TEAM",
-    )
+  // would look past what we just wrote. Outside a repo there is no such root,
+  // and the cwd is the only defensible answer — so a plain directory attaches
+  // too (TASK-212). Refusing it only pushed people to 'git init' a scratch dir
+  // or hand-write the file the command exists to write.
+  let (root, in_repo) = match config.git_root() {
+    Some(r) => (r, true),
+    None => {
+      let Ok(cwd) = os.Getwd() else {
+        return Err("no working directory to attach — could not read it")
+      }
+      (cwd, false)
+    },
   }
 
   let name = filepath.Base(root)
@@ -65,9 +73,18 @@ pub fn attach(args: Slice<string>) -> Result<(), string> {
   set_key_in(path, "team", key)?
   fmt.Println(f"team = \"{key}\" in {path}")
   fmt.Println(ensure_attached_team(key))
-  fmt.Println(
-    "commit .lll.toml — every clone and worktree of this repo is attached from then on",
-  )
+  // A plain directory has no clone to inherit the file; what it has instead is
+  // its own subtree, so say that rather than tell someone to commit a file in
+  // a directory git does not track.
+  if in_repo {
+    fmt.Println(
+      "commit .lll.toml — every clone and worktree of this repo is attached from then on",
+    )
+  } else {
+    fmt.Println(
+      f"not a git repository — wrote {path}; every subdirectory of it inherits this team",
+    )
+  }
   Ok(())
 }
 
@@ -87,19 +104,21 @@ fn ensure_attached_team(key: string) -> string {
 
 fn print_attach_usage() {
   fmt.Println(
-    "lll attach - point this repo at a team, once
+    "lll attach - point this directory at a team, once
 
 Usage:
   lll attach [-k KEY]
 
-Writes team = \"KEY\" to .lll.toml at the repo root and creates the team on the
-server if it is missing. The key defaults to the repo directory name reduced
-to letters and digits, uppercased, at most 5 characters.
+Writes team = \"KEY\" to .lll.toml and creates the team on the server if it is
+missing. Inside a git repository that file goes at the repo root; outside one
+it goes in the working directory, and every subdirectory inherits it. The key
+defaults to the directory name reduced to letters and digits, uppercased, at
+most 5 characters.
 
-Commit that file. Config layers — the repo's .lll.toml supplies 'team', your
-~/.config/lll/lll.toml supplies 'url' and 'me' — so on the next machine an
-already-attached repo needs a 'git clone' and nothing else, and every worktree
-of it is attached the moment it is created.
+In a repo, commit that file. Config layers — the repo's .lll.toml supplies
+'team', your ~/.config/lll/lll.toml supplies 'url' and 'me' — so on the next
+machine an already-attached repo needs a 'git clone' and nothing else, and
+every worktree of it is attached the moment it is created.
 
 'lll config --list' shows every effective value and the file it came from.",
   )

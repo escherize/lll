@@ -2,6 +2,7 @@ import "go:bytes"
 import "go:encoding/json"
 import "go:io"
 import "go:net/http"
+import "go:strings"
 
 import "config"
 
@@ -176,7 +177,30 @@ fn read_body(resp: Ref<http.Response>, what: string) -> Result<string, string> {
     Partial.Err(e) => return Err(f"{what}: reading response: {e}"),
   }
   if resp.StatusCode >= 300 {
-    return Err(f"{what}: {resp.Status}: {body as string}")
+    return Err(
+      f"{what}: {resp.Status}: {body as string}" +
+        wrong_port_hint(what, resp.StatusCode, body as string),
+    )
   }
   Ok(body as string)
+}
+
+/// The suffix for a 404 that came from something other than PocketBase's API.
+/// "" for every other failure — a genuine missing record is a 404 too, and
+/// telling someone to check their port when the record simply does not exist
+/// would be worse than saying nothing.
+///
+/// The transcript this exists for: `url` set to the hosted board's bare host,
+/// with no `:8091`. Every request then reaches the web board, which answers
+/// Go's own plain-text `404 page not found`, and the CLI reported that verbatim
+/// — a whole debugging loop with nothing anywhere naming the port.
+///
+/// The tell is the body, not the status: PocketBase answers every API error
+/// with a JSON object, so a 404 at an /api/ path whose body is not JSON came
+/// from a listener that has never heard of the API.
+fn wrong_port_hint(what: string, status: int, body: string) -> string {
+  if status != 404 { return "" }
+  if !strings.Contains(what, "/api/") { return "" }
+  if strings.HasPrefix(strings.TrimSpace(body), "{") { return "" }
+  "\nthis looks like the web board, not the API - the hosted API is usually https://host:8091; check 'lll config --list'"
 }

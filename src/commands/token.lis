@@ -3,6 +3,7 @@ import "go:fmt"
 import "go:os"
 import "go:strconv"
 import "go:strings"
+import "go:time"
 
 import "config"
 import "flags"
@@ -10,9 +11,16 @@ import "models"
 import "pb"
 
 // `lll token` (TASK-183) — the agent entry point for auth. Agents do not
-// have passwords to type; a superuser mints them a static, non-refreshable
+// have passwords to type; a superuser mints them a non-refreshable
 // PocketBase token (the impersonate endpoint, verified in v0.40.1), which the
 // agent sends as LLL_TOKEN or persists in the home config.
+//
+// TASK-214: these tokens used to ride PocketBase's collection duration (5
+// days) while the help called them "static". The failure was silent and
+// delayed — a colleague onboarded on Monday, worked all week, and hit a bare
+// 401 the following week with nothing connecting it to the mint. So the
+// duration is now explicit and long by default, the expiry is printed next
+// to the token, and a 401 here names expiry as the likely cause.
 
 /// Dispatch `lll token <verb>`.
 pub fn token(args: Slice<string>) -> Result<(), string> {
@@ -41,17 +49,26 @@ fn token_usage() {
 Usage:
   lll token create <member> [--duration seconds]
 
-Mints a static, non-refreshable PocketBase token that authenticates as
-<member> — the agent credential, superuser-only. The token is printed once,
-when it is created; nothing else ever shows it. Use it as LLL_TOKEN=<token>,
-or persist it as token = \"...\" in ~/.config/lll/lll.toml (never the repo's
-.lll.toml, which is committed).",
+Mints a long-lived, non-refreshable PocketBase token that authenticates as
+<member> — the agent credential, superuser-only. It lasts a year unless
+--duration says otherwise, and the expiry is printed with it. The token is
+printed once, when it is created; nothing else ever shows it. Use it as
+LLL_TOKEN=<token>, or persist it as token = \"...\" in ~/.config/lll/lll.toml
+(never the repo's .lll.toml, which is committed).",
   )
+}
+
+/// The lifetime a mint gets when --duration is not given: one year in
+/// seconds. Long on purpose. An agent credential has no refresh path and no
+/// human watching it, so the only thing a short life buys is an outage
+/// nobody can attribute; rotation is a deliberate re-mint, not an expiry.
+fn default_token_duration() -> int {
+  365 * 24 * 60 * 60
 }
 
 fn token_create_spec() -> Slice<flags.Flag> {
   [
-    flags.Flag { name: "--duration", value: true, hint: "seconds", help: "token lifetime in seconds; 0 uses the members collection's duration", .. },
+    flags.Flag { name: "--duration", value: true, hint: "seconds", help: "token lifetime in seconds (default one year);\n0 uses the members collection's duration", .. },
     flags.Flag { name: "--help", alias: "-h", hidden: true, help: "show this help", .. },
   ]
 }
@@ -77,7 +94,10 @@ fn token_create(args: Slice<string>) -> Result<(), string> {
   if name == "" {
     return Err(f"usage: {usage}")
   }
-  let mut duration = 0
+  // Absent --duration means the explicit default, not PocketBase's: leaving
+  // it at 0 is what silently handed out 5-day tokens. 0 stays reachable, but
+  // only by asking for it.
+  let mut duration = default_token_duration()
   let raw = p.one("--duration")
   if raw != "" {
     let Ok(d) = strconv.Atoi(raw) else {
@@ -106,16 +126,7 @@ fn token_create(args: Slice<string>) -> Result<(), string> {
     su,
   ) {
     Ok(b) => b,
-    Err(e) => {
-      // A member token (or a guest) gets PocketBase's 403; say what to set.
-      if strings.Contains(e, "403") || strings.Contains(e, "401") {
-        return Err(
-          "token create is superuser-only and the configured token is not one
-set LLL_ADMIN_EMAIL/LLL_ADMIN_PASSWORD to the credentials 'lll up' prints",
-        )
-      }
-      return Err(f"impersonating {name}: {e}")
-    },
+    Err(e) => return Err(impersonate_error(name, e)),
   }
   let tok = decode_auth(body, "the impersonate response")?
 
@@ -126,7 +137,47 @@ set LLL_ADMIN_EMAIL/LLL_ADMIN_PASSWORD to the credentials 'lll up' prints",
   fmt.Println(
     f"one-time agent token for {member.name} — shown only here; to persist it, put token = \"...\" in ~/.config/lll/lll.toml (never .lll.toml, which is committed)",
   )
+  // The expiry belongs next to the token because it is the only moment
+  // anyone will ever see it: impersonate tokens are stateless, so nothing
+  // records the mint and no later command can answer "when does this die?".
+  fmt.Println(expiry_line(duration, time.Now()))
   Ok(())
+}
+
+/// The "expires ..." line printed under a freshly minted token. `now` is
+/// passed in so the formatting is a function of its arguments alone.
+///
+/// A 0 duration hands the decision to the members collection, which this
+/// process cannot read the value of, so the line says that instead of
+/// guessing a date.
+fn expiry_line(duration: int, now: time.Time) -> string {
+  if duration == 0 {
+    return "expires: whenever the members collection's token duration says — pass --duration to pin it"
+  }
+  let at = now.Add(time.Duration(duration as int64) * time.Second)
+  let day = at.Format("2006-01-02")
+  f"expires {day} ({duration}s from now) — re-mint with 'lll token create'"
+}
+
+/// What to say when the impersonate call is refused. `e` is the pb client's
+/// error string, which carries the status line.
+///
+/// 401 and 403 are different refusals and used to share one message. 403 is
+/// PocketBase saying "authenticated, but not a superuser" — a member token in
+/// the gate. 401 is the token being rejected outright, and the way that
+/// happens to someone who was working yesterday is expiry, which the old
+/// shared wording never named (TASK-214). Anything else keeps the raw error.
+fn impersonate_error(name: string, e: string) -> string {
+  if strings.Contains(e, "401") {
+    return "the token this ran with was rejected (401) - most likely it expired
+mint a new one with 'lll token create', or set LLL_ADMIN_EMAIL/LLL_ADMIN_PASSWORD
+to the credentials 'lll up' prints"
+  }
+  if strings.Contains(e, "403") {
+    return "token create is superuser-only and the configured token is not one
+set LLL_ADMIN_EMAIL/LLL_ADMIN_PASSWORD to the credentials 'lll up' prints"
+  }
+  f"impersonating {name}: {e}"
 }
 
 /// A superuser token for the superuser-gated commands (token create, member
@@ -177,7 +228,7 @@ fn decode_auth(body: string, what: string) -> Result<string, string> {
 
 fn print_token_create_usage() {
   fmt.Println(
-    "lll token create - mint a static agent token (superuser only)
+    "lll token create - mint a long-lived agent token (superuser only)
 
 Usage:
   lll token create <member> [--duration seconds]
@@ -185,8 +236,13 @@ Usage:
 Authenticates as the PocketBase superuser — from LLL_ADMIN_EMAIL and
 LLL_ADMIN_PASSWORD (the credentials 'lll up' prints), or the configured token
 when it already is one — and asks PocketBase to impersonate <member>: a
-static, non-refreshable token sent as LLL_TOKEN. --duration caps the token's
-lifetime in seconds; 0 (the default) uses the members collection's duration.
+non-refreshable token sent as LLL_TOKEN. It does expire. --duration sets the
+lifetime in seconds and defaults to one year; 0 hands the decision to the
+members collection's own duration (5 days out of the box).
+
+The expiry is printed with the token, because nothing records the mint and no
+later command can tell you when it dies. When it does, the 401 says so and the
+fix is another 'lll token create'.
 
 The token is printed exactly once. Agents persist it with
 token = \"...\" in ~/.config/lll/lll.toml — never .lll.toml, which is committed.",

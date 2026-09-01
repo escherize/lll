@@ -4,6 +4,7 @@ import "go:path/filepath"
 import "go:strings"
 
 import "config"
+import "pb"
 
 /// Dispatch `lll config <verb>`.
 pub fn config_cmd(args: Slice<string>) -> Result<(), string> {
@@ -14,6 +15,7 @@ pub fn config_cmd(args: Slice<string>) -> Result<(), string> {
   match verb {
     "init" => config_init(),
     "set" => config_set(args),
+    "check" => config_check(),
     "--list" | "-l" => config_list(),
     "--help" => {
       config_usage()
@@ -33,6 +35,7 @@ fn config_usage() {
 
 Usage:
   lll config --list        every effective value and the file it came from
+  lll config check         ask the configured url whether it is a PocketBase API
   lll config init          write a commented .lll.toml template to the current directory
   lll config set me NAME   set who you are, in ~/.config/lll/lll.toml
 
@@ -187,7 +190,46 @@ fn config_list() -> Result<(), string> {
   // only leak into terminals and scrollback.
   let tok = if cfg.token == "" { "" } else { "••••" }
   print_origin(src.token, "token", tok)
+  if let Some(warning) = committed_token_warning(src.token) {
+    fmt.Println(warning)
+  }
   Ok(())
+}
+
+/// `lll config check` — one line saying whether the configured url answers as
+/// a PocketBase API. The failure it exists for is a url with no port: the
+/// hosted board answers on 443, so every command 404s and nothing tells you
+/// the host you reached is the wrong one of the two things at that address.
+/// /api/health is the endpoint because it needs no auth and no collection, so
+/// a failure here is about reachability alone.
+fn config_check() -> Result<(), string> {
+  let (cfg, src) = config.load_traced()?
+  match pb.get("/api/health") {
+    Ok(_) => fmt.Println(f"ok\t{cfg.url} answers as a PocketBase API"),
+    // The error already names the url, the status, and (for a board-shaped
+    // 404) the port hint from pb.read_body. Prefixing it is all that is left.
+    Err(e) => return Err(f"{cfg.url} is not a reachable PocketBase API: {e}"),
+  }
+  if let Some(warning) = committed_token_warning(src.token) {
+    fmt.Println(warning)
+  }
+  Ok(())
+}
+
+/// The warning for a token that came from a repo `.lll.toml`, else None.
+/// That file is committed, so a token in it is a secret in everyone's clone
+/// and in every future checkout of the history. Naming the home config makes
+/// the warning actionable rather than a scold.
+fn committed_token_warning(source: string) -> Option<string> {
+  if !strings.HasPrefix(source, "file:") { return None }
+  let path = strings.TrimPrefix(source, "file:")
+  let Ok(home) = config.home_path() else {
+    return None
+  }
+  if path == home { return None }
+  Some(
+    f"warning: the token comes from {path}, which is committed - move it to {home} (or LLL_TOKEN) and mint a fresh one, since this one is in the repo's history",
+  )
 }
 
 fn print_origin(source: string, key: string, value: string) {

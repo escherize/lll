@@ -144,6 +144,90 @@ fn the_walk_stops_at_the_git_root() {
   assert from_sub.team == ""
 }
 
+// -------------------------------------------------- the plain-directory walk
+
+/// A temp tree with NO repo anywhere above it, standing in for a scratch
+/// directory: `home/` is $HOME, `home/work/` the attached plain dir, and
+/// `home/work/co/` a checkout inside it. Yields (base, home).
+fn plain_fixture() -> Result<(string, string), string> {
+  let Ok(tmp) = os.MkdirTemp("", "lll-plain") else {
+    return Err("making a temp dir")
+  }
+  let Ok(base) = filepath.EvalSymlinks(tmp) else {
+    return Err(f"resolving {tmp}")
+  }
+  let home = filepath.Join(base, "home")
+  write(filepath.Join(home, ".config", "lll", "lll.toml"), "url = \"http://home:9999\"\n")?
+  write(filepath.Join(home, "work", ".lll.toml"), "team = \"PLAIN\"\n")?
+  if let Err(e) = os.MkdirAll(filepath.Join(home, "work", "sub", "deep"), 0o755) {
+    return Err(f"making the subtree: {e}")
+  }
+  let co = filepath.Join(home, "work", "co")
+  if let Err(e) = os.MkdirAll(filepath.Join(co, "src"), 0o755) {
+    return Err(f"making {co}: {e}")
+  }
+  if let Err(e) = exec.Command("git", "-C", co, "init", "-q").Run() {
+    return Err(f"git init in {co}: {e}")
+  }
+  Ok((base, home))
+}
+
+#[test]
+fn a_plain_directory_inherits_its_team_down_the_subtree() {
+  // TASK-212: outside a repo there is no git root to bound the walk, but a
+  // scratch project's subdirectories still have to see the file attach wrote.
+  let assert Ok((_, home)) = plain_fixture()
+  let work = filepath.Join(home, "work")
+  let assert Ok(here) = load_from(work, home)
+  assert here.team == "PLAIN"
+  let assert Ok(deep) = load_from(filepath.Join(work, "sub", "deep"), home)
+  assert deep.team == "PLAIN"
+  // And the home config still layers under it, as it does inside a repo.
+  assert deep.url == "http://home:9999"
+}
+
+#[test]
+fn the_plain_walk_stops_at_a_git_boundary() {
+  // A checkout under an attached plain dir keeps its own answer: the repo's
+  // committed team is the repo's business, and inheriting the enclosing
+  // directory's would point a real project at a scratch team.
+  let assert Ok((_, home)) = plain_fixture()
+  let co = filepath.Join(home, "work", "co")
+  let assert Ok(from_root) = load_from(co, home)
+  assert from_root.team == ""
+  let assert Ok(from_sub) = load_from(filepath.Join(co, "src"), home)
+  assert from_sub.team == ""
+}
+
+#[test]
+fn a_toml_directly_in_home_captures_nothing() {
+  // $HOME is EXCLUSIVE: a file there would claim every project on the machine
+  // by accident. ~/.config/lll/lll.toml is the deliberate way to say that.
+  let assert Ok((_, home)) = plain_fixture()
+  let assert Ok(()) = write(filepath.Join(home, ".lll.toml"), "team = \"HOMETOML\"\n")
+  // A directory under $HOME but outside `work`, so the only .lll.toml above it
+  // is the excluded one.
+  let scratch = filepath.Join(home, "scratch")
+  assert os.MkdirAll(scratch, 0o755).is_ok()
+  let assert Ok(cfg) = load_from(scratch, home)
+  assert cfg.team == ""
+  // The machine config underneath it is untouched by that exclusion.
+  assert cfg.url == "http://home:9999"
+}
+
+#[test]
+fn a_toml_in_home_captures_nothing_from_home_itself() {
+  // The exclusion has to hold when the working directory IS home, not just
+  // when it is somewhere below: a cwd-first lookup would read the file the
+  // rule above exists to skip, and every command run from ~ would silently
+  // take that team.
+  let assert Ok((_, home)) = plain_fixture()
+  let assert Ok(()) = write(filepath.Join(home, ".lll.toml"), "team = \"HOMETOML\"\n")
+  let assert Ok(cfg) = load_from(home, home)
+  assert cfg.team == ""
+  assert cfg.url == "http://home:9999"
+}
+
 // --------------------------------------------------------------- origins
 
 #[test]

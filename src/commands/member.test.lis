@@ -1,0 +1,67 @@
+import "go:strings"
+
+// Unit cover for the pure helpers in member.lis. Everything here is a
+// function of its arguments alone — no PocketBase, no config.
+//
+// invite_lines is what the inviter forwards verbatim (TASK-217), so its
+// literal shape IS the feature: a colleague who gets a paste missing --url,
+// or carrying a placeholder email, comes straight back to the inviter. That
+// round trip is the thing being prevented, and only an assertion on the text
+// prevents it.
+
+// ---------------------------------------------------------- invite_lines
+
+fn joined(email: string, password: string, base: string, team: string) -> string {
+  strings.Join(invite_lines(email, password, base, team), "\n")
+}
+
+#[test]
+fn invite_lines_carry_the_password_url_and_email() {
+  let out = joined("kim@example.com", "SECRET26", "https://tracker.example.com:8091", "ENG")
+  assert strings.Contains(out, "temporary password: SECRET26")
+  assert strings.Contains(
+    out,
+    "lll login --url https://tracker.example.com:8091 --email kim@example.com",
+  )
+}
+
+/// The port is the part people drop (TASK-213's whole failure), so the login
+/// line must reproduce the configured url exactly, not a tidied-up host.
+#[test]
+fn invite_lines_do_not_rewrite_the_configured_url() {
+  let out = joined("kim@example.com", "pw", "http://127.0.0.1:8090", "ENG")
+  assert strings.Contains(out, "--url http://127.0.0.1:8090 ")
+}
+
+#[test]
+fn invite_lines_name_the_team_when_the_inviter_has_one() {
+  let out = joined("kim@example.com", "pw", "http://127.0.0.1:8090", "ENG")
+  assert strings.Contains(out, "lll attach -k ENG")
+}
+
+/// An unattached inviter must not paste a blank key: 'lll attach -k ' is a
+/// command the colleague would run and be confused by.
+#[test]
+fn invite_lines_omit_the_key_when_no_team_is_configured() {
+  let out = joined("kim@example.com", "pw", "http://127.0.0.1:8090", "")
+  assert !strings.Contains(out, "-k ")
+  assert strings.Contains(out, "lll attach")
+}
+
+/// The whole handoff is two commands for the colleague. Counting them is how
+/// that promise stays true if the text is edited later.
+#[test]
+fn invite_lines_are_exactly_two_commands_for_the_colleague() {
+  let lines = invite_lines("kim@example.com", "pw", "http://127.0.0.1:8090", "ENG")
+  let commands = lines.filter(|l| strings.Contains(l, "lll "))
+  assert commands.length() == 2
+}
+
+// ------------------------------------------------------------- real_email
+
+#[test]
+fn real_email_rejects_the_synthesized_placeholder() {
+  assert !real_email(synthesize_email("Kim Ng"))
+  assert !real_email("")
+  assert real_email("kim@example.com")
+}

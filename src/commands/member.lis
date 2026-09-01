@@ -20,6 +20,7 @@ pub fn member(args: Slice<string>) -> Result<(), string> {
   match verb {
     "list" => member_list(args),
     "add" => member_add(args),
+    "invite" => member_invite(args),
     "set-password" => member_set_password(args),
     "--help" => {
       member_usage()
@@ -40,6 +41,8 @@ fn member_usage() {
 Usage:
   lll member list                              list members (name, email)
   lll member add -n \"name\" [-e email]          add a member
+  lll member invite NAME --email email         add + temp password + the lines
+                                               they run (superuser only)
   lll member set-password NAME [--email email] set a member's login password
                                                (superuser only)
 
@@ -49,7 +52,8 @@ home config names the member that authors your comments.
 
 A freshly added or imported member has a random password nobody knows;
 'lll member set-password' is how a superuser gives them one, after which
-'lll login' works.",
+'lll login' works. 'lll member invite' is those two steps plus the handoff
+text, for onboarding somebody who is not here to type a password.",
   )
 }
 
@@ -86,6 +90,21 @@ fn member_add_spec() -> Slice<flags.Flag> {
   ]
 }
 
+fn member_invite_spec() -> Slice<flags.Flag> {
+  [
+    flags.Flag {
+      name: "--email",
+      alias: "-e",
+      value: true,
+      hint: "email",
+      required: true,
+      help: "the colleague's real email; it is the identity 'lll login' asks for",
+      ..,
+    },
+    flags.Flag { name: "--help", alias: "-h", hidden: true, help: "show this help", .. },
+  ]
+}
+
 fn set_password_spec() -> Slice<flags.Flag> {
   [
     flags.Flag {
@@ -104,6 +123,7 @@ fn set_password_spec() -> Slice<flags.Flag> {
 pub fn member_verb_spec(verb: string) -> Slice<flags.Flag> {
   match verb {
     "add" => member_add_spec(),
+    "invite" => member_invite_spec(),
     "list" => member_list_spec(),
     "set-password" => set_password_spec(),
     _ => [],
@@ -186,10 +206,116 @@ set LLL_ADMIN_EMAIL/LLL_ADMIN_PASSWORD to the credentials 'lll up' prints",
   Ok(())
 }
 
+/// `lll member invite NAME --email E` — the whole colleague handoff in one
+/// command (TASK-217). It was three: member add, a superuser-env token create,
+/// and a hand-written config carried by hand along with a token that expired
+/// in days. Nothing here is new machinery; it is create_member and the same
+/// superuser gate set-password runs, plus the part that actually got skipped —
+/// telling the inviter the literal lines to paste to the colleague.
+fn member_invite(args: Slice<string>) -> Result<(), string> {
+  let spec = member_invite_spec()
+  let usage = flags.usage("lll member invite", spec, "NAME")
+  // --help before parse would still trip the required --email, so the help
+  // check reads the raw argument instead of the parsed table.
+  if args.find(|a| a == "--help" || a == "-h").is_some() {
+    print_invite_usage()
+    return Ok(())
+  }
+  let p = flags.parse(spec, args, 3, true, usage)?
+  let name = p.first()
+  if name == "" {
+    return Err(f"usage: {usage}")
+  }
+  let email = strings.TrimSpace(p.one("--email"))
+  if !real_email(email) {
+    return Err(
+      f"--email must be a real address the colleague can type into 'lll login', not '{email}'",
+    )
+  }
+
+  // Superuser first: the create rides it, and an existing name is caught here
+  // rather than as PocketBase's bare 400 on the unique index.
+  let su = superuser_auth()?
+  if let Some(existing) = find_member_as(su, name)? {
+    return Err(
+      f"member '{name}' already exists ({existing.email}) — 'lll member set-password {name}' gives them a new password without disturbing their issues",
+    )
+  }
+
+  // Generated, not prompted: an invite is written down and sent, so the
+  // inviter never types it, and a password nobody chose is one nobody reuses.
+  // rand.Text is 26 base32 characters (~130 bits), the same source the board
+  // token and create_member's throwaway use. It goes in on the create rather
+  // than as a follow-up patch, so a failure leaves no member behind holding a
+  // password nobody knows — the exact dead record set-password exists to fix.
+  let password = rand.Text()
+  let created = create_member_as(su, name, email, password)?
+
+  let cfg = config.load()?
+  fmt.Println(f"invited {created.name} <{email}>")
+  fmt.Println("")
+  fmt.Println("send them this — the password is shown once and stored nowhere:")
+  fmt.Println("")
+  for line in invite_lines(email, password, cfg.url, cfg.team) {
+    fmt.Println(line)
+  }
+  Ok(())
+}
+
+/// The literal text the inviter forwards: the temp password, then the two
+/// commands the colleague runs. Pure, so the handoff can be asserted without
+/// a server — and it is the part worth pinning, because a wrong url or a
+/// missing --url is exactly the paste that sends them back to the inviter.
+/// `team` is "" when the inviter is not attached to one; the attach line then
+/// says so rather than printing a blank key.
+fn invite_lines(
+  email: string,
+  password: string,
+  base: string,
+  team: string,
+) -> Slice<string> {
+  let attach = if team == "" {
+    "  # then, in the repo you both work in: lll attach"
+  } else {
+    f"  # then, in a clone of the repo: lll attach -k {team} (or just 'git clone' it — .lll.toml is committed)"
+  }
+  [
+    f"  temporary password: {password}",
+    "",
+    f"  lll login --url {base} --email {email}",
+    attach,
+  ]
+}
+
 /// True for an email a human can log in with — anything but empty and the
 /// synthesized @members.invalid placeholder.
 fn real_email(email: string) -> bool {
   email != "" && !strings.HasSuffix(email, "@members.invalid")
+}
+
+fn print_invite_usage() {
+  fmt.Println(
+    "lll member invite - add a colleague and hand them a working login
+(superuser only)
+
+Usage:
+  lll member invite NAME --email email
+
+One command for you, two for them. Creates NAME as a member with the email
+given, sets a generated temporary password, and prints that password once
+together with the exact 'lll login --url ...' line the colleague runs. The
+password is stored nowhere else: lose it and reissue with
+'lll member set-password NAME'.
+
+--email is required and must be a real address — it is the identity
+'lll login' asks for, so the synthesized @members.invalid placeholder
+'lll member add' falls back to would be a dead door.
+
+Authenticates as the PocketBase superuser, exactly like 'lll token create'
+and 'lll member set-password': from LLL_ADMIN_EMAIL and LLL_ADMIN_PASSWORD
+(the credentials 'lll up' prints), or the configured token when it already is
+one. An existing member is refused rather than overwritten.",
+  )
 }
 
 fn print_set_password_usage() {
@@ -229,8 +355,23 @@ fn member_add(args: Slice<string>) -> Result<(), string> {
 /// @members.invalid rule the TASK-180 migration used to backfill. The random
 /// password satisfies PB's create validation; it is never shown or reused.
 pub fn create_member(name: string, email: string) -> Result<models.Member, string> {
+  let cfg = config.load()?
+  create_member_as(cfg.token, name, email, rand.Text())
+}
+
+/// create_member, riding `tok` and a caller-chosen password. Invite needs
+/// both: it authenticates as the superuser before it creates anything (the
+/// members collection's createRule is `@request.auth.id != ""`, so an inviter
+/// whose only credential is LLL_ADMIN_* would otherwise POST anonymously and
+/// get a bare 400), and the password it hands the colleague has to be the one
+/// the record is created with.
+fn create_member_as(
+  tok: string,
+  name: string,
+  email: string,
+  password: string,
+) -> Result<models.Member, string> {
   let member_email = if email == "" { synthesize_email(name) } else { email }
-  let password = rand.Text()
   let new_member = models.NewMember {
     name,
     email: member_email,
@@ -242,7 +383,11 @@ pub fn create_member(name: string, email: string) -> Result<models.Member, strin
     Ok(p) => p,
     Err(e) => return Err(f"encoding member: {e}"),
   }
-  let body = pb.post("/api/collections/members/records", payload as string)?
+  let body = pb.post_as(
+    "/api/collections/members/records",
+    payload as string,
+    tok,
+  )?
 
   let mut created = models.Member { .. }
   if let Err(e) = json.Unmarshal(body.bytes(), &created) {

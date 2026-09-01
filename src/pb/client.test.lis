@@ -41,3 +41,36 @@ fn a_refused_configured_url_is_named_without_the_fresh_machine_hint() {
   assert msg.contains("tracker.example.com:8091")
   assert !msg.contains("lll login --url")
 }
+
+// The third pure seam (TASK-213): which 404s get told about the port. The
+// whole value of the hint is that it stays quiet on the common 404, so the
+// silent cases matter more here than the loud one.
+
+#[test]
+fn a_plain_text_404_from_the_board_names_the_api_port() {
+  let msg = wrong_port_hint(
+    "GET https://escherize-lll.fly.dev/api/collections/issues/records",
+    404,
+    "404 page not found\n",
+  )
+  assert msg.contains(":8091")
+  assert msg.contains("lll config --list")
+}
+
+#[test]
+fn a_missing_record_keeps_its_own_message() {
+  // PocketBase's own 404. Suggesting a port here would send someone hunting
+  // config over a record that simply is not there.
+  let msg = wrong_port_hint(
+    "GET http://127.0.0.1:8090/api/collections/issues/records/abc",
+    404,
+    "{\"code\":404,\"message\":\"The requested resource wasn't found.\"}",
+  )
+  assert msg == ""
+}
+
+#[test]
+fn only_404s_at_an_api_path_are_suspected() {
+  assert wrong_port_hint("GET https://host/", 404, "404 page not found") == ""
+  assert wrong_port_hint("GET https://host/api/health", 500, "boom") == ""
+}
