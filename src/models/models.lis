@@ -337,6 +337,19 @@ pub struct AuthResponse {
   pub record: Member,
 }
 
+/// PATCH body for `lll member set-password` (TASK-203): the password pair
+/// PocketBase requires, plus the email when the member needs a real one to
+/// log in with (a synthesized @members.invalid identity is not typable in
+/// good conscience).
+#[json]
+pub struct PasswordPatch {
+  pub password: string,
+  #[json("passwordConfirm")]
+  pub password_confirm: string,
+  #[json(omitempty)]
+  pub email: string,
+}
+
 /// POST body for /api/collections/members/impersonate/{id} (TASK-183): a
 /// static, non-refreshable agent token. 0 uses the collection's token
 /// duration; the endpoint validates duration >= 0 (v0.40.1

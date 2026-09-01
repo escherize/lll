@@ -39,9 +39,15 @@ Four actors, each configured once, none written twice:
 | Actor | Once | Writes |
 |---|---|---|
 | Server | `lll up` with `LLL_ADMIN_*`, `LLL_TEAM`, `LLL_BIND`, `LLL_BOARD_TOKEN` in env (Fly: secrets) | nothing on disk but the database |
-| Your machine | `lll login` (put `url` in `~/.config/lll/lll.toml` first for a remote server) | `url`, `me`, `token` in the home config |
+| Your machine (human path) | `lll login --url https://your-host:8091` — prompts for email + password | `url`, `token`, and `me` (when unset) in the home config |
 | Each repo | `lll attach`, commit the file | `team = "KEY"` in the repo's `.lll.toml` |
-| Each agent | superuser mints `lll token create <name>` | nothing — `LLL_TOKEN` (+ `LLL_URL`) in its env |
+| Each agent (agent path) | superuser mints `lll token create <name>` | nothing — `LLL_TOKEN` (+ `LLL_URL`) in its env |
+
+Humans log in with email + password; agents ride minted tokens. A new or
+imported member has a random password nobody knows, so a superuser first runs
+`lll member set-password NAME --email their@email` — then their `lll login
+--url ...` works. On a local `lll up`, plain `lll login` (the url default is
+`http://127.0.0.1:8090`) is enough.
 
 Clones and git worktrees of an attached repo need no step at all; env beats
 files, repo file beats home file, and each key resolves independently
@@ -92,7 +98,7 @@ Client settings — what every `lll` command reads:
 | `LLL_TEAM` | `team` | Default team key; scopes `issue list`, required by `issue create` |
 | `LLL_ME` | `me` | Your member name; authors your comments and receives assignments |
 | `LLL_SORT` | `sort` | Default sort: `created`, `updated`, `priority`, `number`; `-` prefix descends |
-| `LLL_WEB_URL` | `web_url` | Web board base URL for `board`, `issue url`, `view -w` |
+| `LLL_WEB_URL` | `web_url` | Web board base URL for `board`, `issue url`, `view -w`. Unset, it derives from `url`: `https://<url-host>` (port dropped — the hosted board rides 443) when the url is non-local, else `http://127.0.0.1:8100` |
 | `LLL_TOKEN` | `token` | PocketBase auth token sent as `Authorization: Bearer` on every request. A secret: `lll login` writes it to the home config, `lll token create` mints agent tokens — never the repo's .lll.toml |
 
 Server settings — read only by `lll up` (env only, no TOML key; on a host,
@@ -132,7 +138,9 @@ lll issue watch ENG-12        # one issue + its comments, until Ctrl-C
 lll team|member|project|label list      # the other nouns: list/create/view/add
 lll attach                    # point this repo at a team, once
 lll config --list             # every value and the file it came from
-lll login                     # as a member; the token goes to the home config
+lll login --url https://host:8091   # one-command machine setup: auth + persist url/token/me
+lll login                     # as a member, against the configured url
+lll member set-password NAME --email e@x.com  # superuser gives a member credentials
 lll token create bryan        # a static agent token (superuser only), printed once
 lll logout                    # clear the stored token
 lll board -w                  # open the web board

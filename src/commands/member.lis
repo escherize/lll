@@ -1,7 +1,9 @@
+import "go:bufio"
 import "go:encoding/json"
 import "go:crypto/rand"
 import "go:fmt"
 import "go:net/url"
+import "go:os"
 import "go:strings"
 
 import "models"
@@ -18,6 +20,7 @@ pub fn member(args: Slice<string>) -> Result<(), string> {
   match verb {
     "list" => member_list(args),
     "add" => member_add(args),
+    "set-password" => member_set_password(args),
     "--help" => {
       member_usage()
       Ok(())
@@ -35,12 +38,18 @@ fn member_usage() {
     "lll member - work with members
 
 Usage:
-  lll member list                       list members (name, email)
-  lll member add -n \"name\" [-e email]   add a member
+  lll member list                              list members (name, email)
+  lll member add -n \"name\" [-e email]          add a member
+  lll member set-password NAME [--email email] set a member's login password
+                                               (superuser only)
 
 Members are PocketBase auth records (email + password; TASK-180). Adding one
 without -e synthesizes <name>@members.invalid as its identity. 'me' in the
-home config names the member that authors your comments.",
+home config names the member that authors your comments.
+
+A freshly added or imported member has a random password nobody knows;
+'lll member set-password' is how a superuser gives them one, after which
+'lll login' works.",
   )
 }
 
@@ -77,14 +86,129 @@ fn member_add_spec() -> Slice<flags.Flag> {
   ]
 }
 
+fn set_password_spec() -> Slice<flags.Flag> {
+  [
+    flags.Flag {
+      name: "--email",
+      value: true,
+      hint: "email",
+      help: "real email to set alongside the password; required when the member has only a synthesized one",
+      ..,
+    },
+    flags.Flag { name: "--help", alias: "-h", hidden: true, help: "show this help", .. },
+  ]
+}
+
 /// The flag table of one member verb; empty for verbs without flags. Read by
 /// `lll completions` so the scripts complete exactly what the parser accepts.
 pub fn member_verb_spec(verb: string) -> Slice<flags.Flag> {
   match verb {
     "add" => member_add_spec(),
     "list" => member_list_spec(),
+    "set-password" => set_password_spec(),
     _ => [],
   }
+}
+
+/// `lll member set-password NAME` — the superuser gives a member login
+/// credentials (TASK-203). Needed because created and imported members carry
+/// a random password nobody knows, so 'lll login' is a dead door until this
+/// runs. Gated exactly like token create: LLL_ADMIN_* env credentials, or a
+/// configured superuser token.
+fn member_set_password(args: Slice<string>) -> Result<(), string> {
+  let spec = set_password_spec()
+  let usage = flags.usage("lll member set-password", spec, "NAME")
+  let p = flags.parse(spec, args, 3, true, usage)?
+  if p.given("--help") {
+    print_set_password_usage()
+    return Ok(())
+  }
+  let name = p.first()
+  if name == "" {
+    return Err(f"usage: {usage}")
+  }
+
+  let su = superuser_auth()?
+  let found = find_member_as(su, name)?
+  let Some(member) = found else {
+    return Err(f"no member named '{name}' — see 'lll member add'")
+  }
+
+  // The email IS the login identity. A member carrying only the synthesized
+  // @members.invalid placeholder has nothing a human can honestly type, so
+  // setting a password without fixing the email would leave login broken —
+  // the exact dead end this command exists to remove.
+  let email = strings.TrimSpace(p.one("--email"))
+  if email == "" && !real_email(member.email) {
+    return Err(
+      f"member '{name}' has no real email (only the synthesized {member.email}), and the email is what 'lll login' asks for
+rerun with --email <email> to set one alongside the password",
+    )
+  }
+
+  let mut input = bufio.NewReader(os.Stdin)
+  let password = read_password(input, "New password: ")?
+  if password == "" { return Err("empty password") }
+  let confirm = read_password(input, "Confirm password: ")?
+  if password != confirm { return Err("the passwords do not match") }
+
+  let payload = match json.Marshal(models.PasswordPatch {
+    password,
+    password_confirm: password,
+    email,
+  }) {
+    Ok(b) => b,
+    Err(e) => return Err(f"encoding the patch: {e}"),
+  }
+  if let Err(e) = pb.patch_as(
+    f"/api/collections/members/records/{member.id}",
+    payload as string,
+    su,
+  ) {
+    // A member token (or a guest) is refused by PocketBase — 401/403 outright,
+    // or a 400 demanding oldPassword, which only a superuser may omit. All
+    // three mean the same thing here: say what to set.
+    if strings.Contains(e, "403") || strings.Contains(e, "401") || strings.Contains(e, "oldPassword") {
+      return Err(
+        "member set-password is superuser-only and the configured token is not one
+set LLL_ADMIN_EMAIL/LLL_ADMIN_PASSWORD to the credentials 'lll up' prints",
+      )
+    }
+    return Err(f"setting {name}'s password: {e}")
+  }
+
+  let identity = if email == "" { member.email } else { email }
+  if email != "" && email != member.email {
+    fmt.Println(f"email set to {email}")
+  }
+  fmt.Println(f"password set for {member.name}")
+  fmt.Println(f"they log in with: lll login --email {identity} (plus --url <server> on a fresh machine)")
+  Ok(())
+}
+
+/// True for an email a human can log in with — anything but empty and the
+/// synthesized @members.invalid placeholder.
+fn real_email(email: string) -> bool {
+  email != "" && !strings.HasSuffix(email, "@members.invalid")
+}
+
+fn print_set_password_usage() {
+  fmt.Println(
+    "lll member set-password - set a member's login password (superuser only)
+
+Usage:
+  lll member set-password NAME [--email email]
+
+Authenticates as the PocketBase superuser — from LLL_ADMIN_EMAIL and
+LLL_ADMIN_PASSWORD (the credentials 'lll up' prints), or the configured token
+when it already is one — and sets NAME's password: prompted twice with echo
+off when stdin is a terminal, read as two lines when piped.
+
+--email also sets the member's email, and is required when the member only
+has a synthesized @members.invalid one: the email is the identity
+'lll login' asks for. After this, the member logs in with
+'lll login --url <server>'.",
+  )
 }
 
 fn member_add(args: Slice<string>) -> Result<(), string> {

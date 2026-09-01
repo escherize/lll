@@ -18,6 +18,16 @@ pub fn unreachable(base: string, e: error) -> string {
 is PocketBase running? start everything with 'lll up', or point LLL_URL (or 'url' in .lll.toml) at your server"
 }
 
+/// unreachable(), plus — when the url that refused was nobody's choice but
+/// the built-in default — the pointer a fresh machine needs. The transcript
+/// failure this exists for: a new machine with no config runs any command,
+/// the default 127.0.0.1:8090 refuses, and nothing says how to connect.
+fn unreachable_hint(base: string, defaulted: bool, e: error) -> string {
+  let msg = unreachable(base, e)
+  if !defaulted { return msg }
+  msg + "\nno url is configured on this machine — connect with: lll login --url https://your-server"
+}
+
 /// GET a path (joined to base_url) and return the response body.
 pub fn get(path: string) -> Result<string, string> {
   send("GET", path, "")
@@ -62,15 +72,25 @@ pub fn delete(path: string) -> Result<string, string> {
 /// (member login, superuser auth), where the request must stand on the
 /// credentials in its body and a stale or unrelated token must not ride along.
 pub fn post_anon(path: string, payload: string) -> Result<string, string> {
-  let cfg = config.load()?
-  request(cfg.url, "POST", path, payload, "")
+  let (cfg, src) = config.load_traced()?
+  request(cfg.url, "POST", path, payload, "", src.url == "default")
+}
+
+/// POST without any token to an explicit base — `lll login --url`, which must
+/// authenticate against the url it was handed, never whatever is configured.
+pub fn post_anon_to(
+  base: string,
+  path: string,
+  payload: string,
+) -> Result<string, string> {
+  request(base, "POST", path, payload, "", false)
 }
 
 /// GET riding `tok` instead of the configured token — for flows that act as
 /// a specific actor (token create's superuser-gated member lookup).
 pub fn get_as(path: string, tok: string) -> Result<string, string> {
-  let cfg = config.load()?
-  request(cfg.url, "GET", path, "", bearer(tok))
+  let (cfg, src) = config.load_traced()?
+  request(cfg.url, "GET", path, "", bearer(tok), src.url == "default")
 }
 
 /// POST riding `tok` instead of the configured token (impersonation).
@@ -79,8 +99,19 @@ pub fn post_as(
   payload: string,
   tok: string,
 ) -> Result<string, string> {
-  let cfg = config.load()?
-  request(cfg.url, "POST", path, payload, bearer(tok))
+  let (cfg, src) = config.load_traced()?
+  request(cfg.url, "POST", path, payload, bearer(tok), src.url == "default")
+}
+
+/// PATCH riding `tok` instead of the configured token — member set-password,
+/// which acts as the superuser it has just authenticated.
+pub fn patch_as(
+  path: string,
+  payload: string,
+  tok: string,
+) -> Result<string, string> {
+  let (cfg, src) = config.load_traced()?
+  request(cfg.url, "PATCH", path, payload, bearer(tok), src.url == "default")
 }
 
 /// The value of an Authorization header for `tok`, or "" when there is no
@@ -95,18 +126,21 @@ pub fn bearer(tok: string) -> string {
 /// token configured anywhere in the layering reaches PocketBase on every
 /// request — GET included, which is why `get` no longer calls http.Get.
 fn send(method: string, path: string, payload: string) -> Result<string, string> {
-  let cfg = config.load()?
-  request(cfg.url, method, path, payload, bearer(cfg.token))
+  let (cfg, src) = config.load_traced()?
+  request(cfg.url, method, path, payload, bearer(cfg.token), src.url == "default")
 }
 
-/// The request `send`, `post_anon`, `get_as` and `post_as` all share; `auth`
-/// is the Authorization header value ("" sends none).
+/// The request every verb here shares; `auth` is the Authorization header
+/// value ("" sends none), `defaulted` says nothing configured the url. Every
+/// error names the base url — a bare "POST /api/...: 500" once hid which
+/// server a login was failing against.
 fn request(
   base: string,
   method: string,
   path: string,
   payload: string,
   auth: string,
+  defaulted: bool,
 ) -> Result<string, string> {
   let mut req = match http.NewRequest(
     method,
@@ -114,7 +148,7 @@ fn request(
     bytes.NewReader(payload.bytes()),
   ) {
     Ok(r) => r,
-    Err(e) => return Err(f"{method} {path}: {e}"),
+    Err(e) => return Err(f"{method} {base}{path}: {e}"),
   }
   // http.NewRequest always populates Header, so None cannot happen; the
   // unwrap is the Option<Header> field type's toll, not a real branch.
@@ -125,9 +159,9 @@ fn request(
   }
   let resp = match http.DefaultClient.Do(req) {
     Ok(r) => r,
-    Err(e) => return Err(unreachable(base, e)),
+    Err(e) => return Err(unreachable_hint(base, defaulted, e)),
   }
-  read_body(resp, f"{method} {path}")
+  read_body(resp, f"{method} {base}{path}")
 }
 
 fn read_body(resp: Ref<http.Response>, what: string) -> Result<string, string> {

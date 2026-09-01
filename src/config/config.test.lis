@@ -158,6 +158,40 @@ fn load_traced_names_the_file_each_value_came_from() {
   assert src.me == ""
 }
 
+// ------------------------------------------------------------- web_url
+
+#[test]
+fn derive_web_url_keeps_the_local_board_for_local_urls() {
+  assert derive_web_url("http://127.0.0.1:8090") == "http://127.0.0.1:8100"
+  assert derive_web_url("http://localhost:8090") == "http://127.0.0.1:8100"
+  assert derive_web_url("http://127.0.0.1:48091") == "http://127.0.0.1:8100"
+  assert derive_web_url("") == "http://127.0.0.1:8100"
+  assert derive_web_url("not a url") == "http://127.0.0.1:8100"
+}
+
+#[test]
+fn derive_web_url_drops_the_port_and_rides_443_for_hosted_urls() {
+  // The hosted layout: the API takes :8091, the board is the 443 http_service
+  // at the same host — so the port goes and the scheme is always https.
+  assert derive_web_url("https://escherize-lll.fly.dev:8091")
+    == "https://escherize-lll.fly.dev"
+  assert derive_web_url("http://tracker.example.com:8091")
+    == "https://tracker.example.com"
+  assert derive_web_url("https://tracker.example.com")
+    == "https://tracker.example.com"
+}
+
+#[test]
+fn an_unset_web_url_derives_from_a_hosted_url() {
+  let assert Ok((root, home)) = fixture(
+    "team = \"REPO\"\n",
+    "url = \"https://tracker.example.com:8091\"\n",
+  )
+  let assert Ok((cfg, src)) = traced_from(root, home)
+  assert cfg.web_url == "https://tracker.example.com"
+  assert src.web_url == "default"
+}
+
 // ----------------------------------------------------------------- token
 
 #[test]

@@ -70,8 +70,10 @@ Usage:
   lll finding <command>   retrieve findings by area or path
                           (see 'lll finding --help')
   lll config <command>    manage configuration (see 'lll config --help')
-  lll login [-e EMAIL]    authenticate as a member; the token goes to
-                          ~/.config/lll/lll.toml (see 'lll login --help')
+  lll login [--url URL]   authenticate as a member; the token goes to
+                          ~/.config/lll/lll.toml, and --url persists the
+                          server url too — the one-command machine setup
+                          (see 'lll login --help')
   lll logout              clear the stored token (see 'lll logout --help')
   lll token create        mint a static agent token (superuser only)
                           (see 'lll token --help')

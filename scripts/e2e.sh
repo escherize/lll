@@ -17,8 +17,9 @@
 # fix-naming error messages (PB down, unknown team, broken .lll.toml,
 # unknown command), config layering and its origins (config --list, the
 # upward walk stopping at the git root, lll attach), login/logout and the
-# superuser-gated token create (task-183), and the lll up web board
-# (via e2e_web.sh).
+# superuser-gated token create (task-183), the one-command machine setup
+# (login --url, member set-password, web_url derivation, errors naming the
+# server; task-203/195), and the lll up web board (via e2e_web.sh).
 set -euo pipefail
 . "$(dirname "$0")/lib.sh"   # free_port, wait_ok, fail, assert_*, e2e_begin/end
 e2e_begin
@@ -1683,6 +1684,169 @@ comp_login=$("$LIN" completions bash | grep -F "login,*)" | head -1 | sed "s/.*w
 assert_contains "$comp_login" "--email -e" "login completions carry the email flag and alias"
 comp_token=$("$LIN" completions bash | grep -F "token)" | head -1 | sed "s/.*words='//;s/'.*//")
 assert_contains "$comp_token" "create" "token completions offer create"
+
+# --- TASK-203 / TASK-195: one-command machine setup ---------------------------
+# The onboarding overhaul, from a real second-machine transcript: a superuser
+# credentials a human (member set-password), a fresh machine runs exactly one
+# command (login --url persists url + token + me), and every error names the
+# server it failed against.
+
+# A member the CLI itself created carries a synthesized identity and a random
+# password: exactly the dead door set-password exists to open. REFUSE_TOK, not
+# the exported LLL_TOKEN: the task-183 password PATCH rotated e2e-agent's
+# tokenKey, so the suite-wide token no longer authenticates.
+LLL_URL=$URL LLL_TOKEN="$REFUSE_TOK" HOME="$E2E_HOME" "$LIN" member add -n onboard >/dev/null \
+  || fail "adding the onboard member"
+
+# Without --email it refuses: the synthesized @members.invalid identity is not
+# something a human logs in with, and a password alone would leave login broken.
+set +e
+out=$(printf 'irrelevant\nirrelevant\n' | env HOME="$E2E_HOME" LLL_URL=$URL \
+  LLL_ADMIN_EMAIL=admin@local.dev LLL_ADMIN_PASSWORD=admin-local-123 \
+  "$LIN" member set-password onboard 2>&1)
+rc=$?
+set -e
+[ "$rc" -ne 0 ] || fail "set-password without --email on a synthesized-email member: expected refusal"
+assert_contains "$out" "--email" "the email refusal names the flag to pass"
+
+# Mismatched confirmation is caught before anything reaches the server.
+ONBOARD_PASS="onboard-pass-12345"
+set +e
+out=$(printf 'aaaaaaaaaa\nbbbbbbbbbb\n' | env HOME="$E2E_HOME" LLL_URL=$URL \
+  LLL_ADMIN_EMAIL=admin@local.dev LLL_ADMIN_PASSWORD=admin-local-123 \
+  "$LIN" member set-password onboard --email onboard@lll.test 2>&1)
+rc=$?
+set -e
+[ "$rc" -ne 0 ] || fail "set-password with mismatched confirmation: expected refusal"
+assert_contains "$out" "do not match" "the mismatch refusal says what happened"
+
+# The success path: two echo-off prompts (two lines when piped), email +
+# password PATCHed as the superuser, and the password echoed nowhere.
+out=$(printf '%s\n%s\n' "$ONBOARD_PASS" "$ONBOARD_PASS" | env HOME="$E2E_HOME" LLL_URL=$URL \
+  LLL_ADMIN_EMAIL=admin@local.dev LLL_ADMIN_PASSWORD=admin-local-123 \
+  "$LIN" member set-password onboard --email onboard@lll.test) \
+  || fail "member set-password exited nonzero: $out"
+assert_contains "$out" "email set to onboard@lll.test" "set-password reports the email"
+assert_contains "$out" "password set for onboard" "set-password reports success"
+assert_contains "$out" "lll login" "set-password points at login"
+assert_not_contains "$out" "$ONBOARD_PASS" "set-password never echoes the password"
+
+# ...and it is superuser-gated: a member token is refused by PocketBase (the
+# password PATCH demands oldPassword from non-superusers — verified against
+# v0.40.1), and no credentials at all are refused before any prompt.
+set +e
+out=$(printf 'zzzzzzzzzz\nzzzzzzzzzz\n' | env -u LLL_ADMIN_EMAIL -u LLL_ADMIN_PASSWORD \
+  LLL_TOKEN="$REFUSE_TOK" HOME="$E2E_HOME" LLL_URL=$URL \
+  "$LIN" member set-password onboard 2>&1)
+rc=$?
+set -e
+[ "$rc" -ne 0 ] || fail "set-password with a member token: expected refusal"
+assert_contains "$out" "superuser" "a member-token set-password names the superuser requirement"
+set +e
+out=$(env -u LLL_TOKEN -u LLL_ADMIN_EMAIL -u LLL_ADMIN_PASSWORD HOME="$E2E_HOME" LLL_URL=$URL \
+  "$LIN" member set-password onboard </dev/null 2>&1)
+rc=$?
+set -e
+[ "$rc" -ne 0 ] || fail "set-password with no credentials: expected refusal"
+assert_contains "$out" "LLL_ADMIN_EMAIL" "credential-less set-password names what to set"
+
+# TASK-195 AC#1/#3: the fresh machine. An empty HOME, a directory outside any
+# repo, no LLL_* in the env — one login --url leaves url, token AND me in the
+# home config, and the next command just works.
+LOGIN_HOME="$DATA_DIR/login_home"
+NEUTRAL="$DATA_DIR/neutral"
+mkdir -p "$LOGIN_HOME" "$NEUTRAL"
+LOGIN_TOML="$LOGIN_HOME/.config/lll/lll.toml"
+out=$(cd "$NEUTRAL" && printf '%s\n' "$ONBOARD_PASS" | \
+  env -u LLL_URL -u LLL_TOKEN -u LLL_TEAM -u LLL_ME HOME="$LOGIN_HOME" \
+  "$LLL_ABS" login --url "$URL" -e onboard@lll.test) \
+  || fail "login --url exited nonzero: $out"
+assert_contains "$out" "url = \"$URL\"" "login --url reports the persisted url"
+assert_contains "$out" "logged in as onboard" "login --url says who you are"
+assert_contains "$out" "me = \"onboard\"" "login --url sets an unset me"
+grep -q "^url = \"$URL\"\$" "$LOGIN_TOML" || fail "login --url did not persist the url: $(cat "$LOGIN_TOML")"
+grep -q '^token = ' "$LOGIN_TOML" || fail "login --url did not persist the token"
+grep -q '^me = "onboard"$' "$LOGIN_TOML" || fail "login --url did not persist me"
+out=$(cd "$NEUTRAL" && env -u LLL_URL -u LLL_TOKEN LLL_TEAM=ENG HOME="$LOGIN_HOME" "$LLL_ABS" issue list) \
+  || fail "issue list on the freshly logged-in machine failed: $out"
+assert_contains "$out" "ENG-" "the one-command machine lists issues"
+
+# A 'me' somebody already chose is not overwritten.
+ME_HOME="$DATA_DIR/me_home"
+mkdir -p "$ME_HOME/.config/lll"
+printf 'me = "zed"\n' > "$ME_HOME/.config/lll/lll.toml"
+(cd "$NEUTRAL" && printf '%s\n' "$ONBOARD_PASS" | \
+  env -u LLL_URL -u LLL_TOKEN -u LLL_ME HOME="$ME_HOME" \
+  "$LLL_ABS" login --url "$URL" -e onboard@lll.test >/dev/null) \
+  || fail "login --url with a configured me failed"
+grep -q '^me = "zed"$' "$ME_HOME/.config/lll/lll.toml" \
+  || fail "login --url overwrote a configured me: $(cat "$ME_HOME/.config/lll/lll.toml")"
+
+# --url takes a base url, not a hostname; the refusal shows the shape.
+set +e
+out=$(cd "$NEUTRAL" && env -u LLL_URL -u LLL_TOKEN HOME="$LOGIN_HOME" \
+  "$LLL_ABS" login --url tracker.example.com -e a@b.c </dev/null 2>&1)
+rc=$?
+set -e
+[ "$rc" -ne 0 ] || fail "login --url without a scheme: expected refusal"
+assert_contains "$out" "http" "the --url refusal names the scheme"
+
+# TASK-203 AC#4: errors name the server. A wrong password carries the base url
+# in the HTTP-status error; an unreachable configured url is named without the
+# fresh-machine hint (somebody configured it — it is not missing).
+set +e
+out=$(cd "$NEUTRAL" && printf 'not-the-password\n' | \
+  env -u LLL_URL -u LLL_TOKEN HOME="$LOGIN_HOME" "$LLL_ABS" login -e onboard@lll.test 2>&1)
+rc=$?
+set -e
+[ "$rc" -ne 0 ] || fail "login with a wrong password: expected failure"
+assert_contains "$out" "$URL" "an HTTP-status error names the server"
+DEAD_PORT=$(free_port 20000 39999)
+set +e
+out=$(cd "$NEUTRAL" && env -u LLL_TOKEN LLL_URL="http://127.0.0.1:$DEAD_PORT" LLL_TEAM=ENG \
+  HOME="$LOGIN_HOME" "$LLL_ABS" issue list 2>&1)
+rc=$?
+set -e
+[ "$rc" -ne 0 ] || fail "issue list against a dead url: expected failure"
+assert_contains "$out" "127.0.0.1:$DEAD_PORT" "the unreachable error names the url"
+assert_not_contains "$out" "lll login --url" "a configured url gets no fresh-machine hint"
+
+# TASK-195 AC#2: with NOTHING configured, the refused built-in default names
+# 'lll login --url'. Only assertable when :8090 is actually dead — a developer
+# machine may be running its own lll up there.
+EMPTY_HOME="$DATA_DIR/empty_home"
+mkdir -p "$EMPTY_HOME"
+if curl -s --max-time 1 -o /dev/null http://127.0.0.1:8090/api/health; then
+  echo "e2e: skipping the no-url hint assert — something answers on :8090" >&2
+else
+  set +e
+  out=$(cd "$NEUTRAL" && env -u LLL_URL -u LLL_TOKEN -u LLL_TEAM HOME="$EMPTY_HOME" \
+    "$LLL_ABS" issue list 2>&1)
+  rc=$?
+  set -e
+  [ "$rc" -ne 0 ] || fail "issue list with nothing configured and :8090 dead: expected failure"
+  assert_contains "$out" "127.0.0.1:8090" "the default url is named"
+  assert_contains "$out" "lll login --url" "the no-url error names the fresh-machine fix"
+fi
+
+# TASK-203 AC#3: web_url derives from a hosted url — https, port dropped —
+# while a local url keeps the local board default. `lll board` only prints,
+# so the hosted url never receives a request.
+out=$(cd "$NEUTRAL" && env -u LLL_WEB_URL -u LLL_TOKEN LLL_URL="https://tracker.example.com:8091" \
+  HOME="$EMPTY_HOME" "$LLL_ABS" board)
+[ "$out" = "https://tracker.example.com" ] || fail "board did not derive the hosted web url: $out"
+out=$(cd "$NEUTRAL" && env -u LLL_WEB_URL -u LLL_TOKEN LLL_URL=$URL HOME="$EMPTY_HOME" "$LLL_ABS" board)
+[ "$out" = "http://127.0.0.1:8100" ] || fail "board lost the local default: $out"
+
+# Help and completions carry the new surface.
+out=$("$LIN" login --help)
+assert_contains "$out" "--url" "login --help mentions --url"
+out=$("$LIN" member --help)
+assert_contains "$out" "set-password" "member --help mentions set-password"
+comp_login=$("$LIN" completions bash | grep -F "login,*)" | head -1 | sed "s/.*words='//;s/'.*//")
+assert_contains "$comp_login" "--url" "login completions carry --url"
+comp_member=$("$LIN" completions bash | grep -F "member)" | head -1 | sed "s/.*words='//;s/'.*//")
+assert_contains "$comp_member" "set-password" "member completions offer set-password"
 
 echo "e2e: all assertions passed"
 

@@ -26,6 +26,13 @@ fn login_spec() -> Slice<flags.Flag> {
       ..,
     },
     flags.Flag {
+      name: "--url",
+      value: true,
+      hint: "url",
+      help: "server base url; authenticated against and persisted to the home config",
+      ..,
+    },
+    flags.Flag {
       name: "--help",
       alias: "-h",
       hidden: true,
@@ -50,6 +57,16 @@ pub fn login(args: Slice<string>) -> Result<(), string> {
     return Ok(())
   }
 
+  // --url is the fresh-machine path (TASK-195): authenticate against the url
+  // given, then persist it next to the token, so machine setup is exactly one
+  // command. Without it, login rides whatever url is already configured.
+  let target = strings.TrimSuffix(strings.TrimSpace(p.one("--url")), "/")
+  if p.given("--url") && !strings.HasPrefix(target, "http://") && !strings.HasPrefix(target, "https://") {
+    return Err(
+      "--url must be a full base url starting with http:// or https:// (e.g. https://tracker.example.com:8091)",
+    )
+  }
+
   // One reader for the whole flow: a second bufio.Reader would race the
   // first's read-ahead and could lose the password line behind the email.
   let mut input = bufio.NewReader(os.Stdin)
@@ -62,7 +79,7 @@ pub fn login(args: Slice<string>) -> Result<(), string> {
   if email == "" {
     return Err("no email — pass --email <email> or answer the prompt")
   }
-  let password = read_password(input)?
+  let password = read_password(input, "Password: ")?
   if password == "" { return Err("empty password") }
 
   let payload = match json.Marshal(
@@ -73,10 +90,13 @@ pub fn login(args: Slice<string>) -> Result<(), string> {
   }
   // post_anon, not post: a stale token in the config must not ride on a
   // request whose whole job is to mint a fresh one.
-  let body = match pb.post_anon(
-    "/api/collections/members/auth-with-password",
-    payload as string,
-  ) {
+  let auth_path = "/api/collections/members/auth-with-password"
+  let sent = if target == "" {
+    pb.post_anon(auth_path, payload as string)
+  } else {
+    pb.post_anon_to(target, auth_path, payload as string)
+  }
+  let body = match sent {
     Ok(b) => b,
     Err(e) => return Err(f"login failed: {e}"),
   }
@@ -89,9 +109,23 @@ pub fn login(args: Slice<string>) -> Result<(), string> {
   // The home config, never the repo's: .lll.toml is committed (TASK-168) and
   // a token must not travel with it. The value is written here and printed
   // nowhere — even success output names the member and the file, not the key.
+  if target != "" {
+    let url_path = set_home_key("url", target)?
+    fmt.Println(f"url = \"{target}\" in {url_path}")
+  }
   let path = set_home_key("token", auth.token)?
   fmt.Println(f"logged in as {auth.record.name}")
   fmt.Println(f"token saved to {path}")
+  // On the fresh-machine path, an unset 'me' gets the member just logged in —
+  // one command leaves the machine fully set up. A 'me' already configured
+  // anywhere (env, repo file, home file) is somebody's choice; keep it.
+  if target != "" && auth.record.name != "" {
+    let cfg = config.load()?
+    if cfg.me == "" {
+      let me_path = set_home_key("me", auth.record.name)?
+      fmt.Println(f"me = \"{auth.record.name}\" in {me_path}")
+    }
+  }
   if os.Getenv("LLL_TOKEN") != "" {
     fmt.Println(
       "note: LLL_TOKEN is set in this shell and overrides the saved token until it is unset",
@@ -120,12 +154,13 @@ pub fn logout(args: Slice<string>) -> Result<(), string> {
   Ok(())
 }
 
-/// The password. With echo off when stdin is a terminal — term.ReadPassword,
-/// so it never lands in scrollback; as a plain line otherwise, because piped
-/// input (scripts, agents, e2e) has nothing to hide it from. The newline is
-/// not part of the password on either path.
-fn read_password(input: mut Ref<bufio.Reader>) -> Result<string, string> {
-  fmt.Print("Password: ")
+/// A password, prompted with `prompt`. With echo off when stdin is a terminal
+/// — term.ReadPassword, so it never lands in scrollback; as a plain line
+/// otherwise, because piped input (scripts, agents, e2e) has nothing to hide
+/// it from. The newline is not part of the password on either path. Shared
+/// with `lll member set-password`, which prompts twice.
+fn read_password(input: mut Ref<bufio.Reader>, prompt: string) -> Result<string, string> {
+  fmt.Print(prompt)
   let fd = os.Stdin.Fd() as int
   if term.IsTerminal(fd) {
     let bytes = match term.ReadPassword(fd) {
@@ -163,13 +198,22 @@ fn print_login_usage() {
     "lll login - authenticate as a member
 
 Usage:
-  lll login [--email email]
+  lll login [--email email] [--url url]
 
 Prompts for the email (unless --email/-e) and reads the password with echo
 off when stdin is a terminal; piped input is read as a plain line. On success
 the PocketBase token is stored in ~/.config/lll/lll.toml — never in the
 repo's .lll.toml, which is committed — and every later lll call rides it.
 An LLL_TOKEN in the environment still wins (see 'lll config --list').
+
+--url is the fresh-machine setup: it authenticates against that server and
+persists url (and 'me', when unset) next to the token, so
+
+  lll login --url https://tracker.example.com:8091
+
+is the only step a new machine needs. Without --url, login uses the
+configured url. No password yet? A superuser sets one:
+'lll member set-password <name>'.
 
 'lll logout' clears the token again.",
   )

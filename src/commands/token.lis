@@ -129,10 +129,11 @@ set LLL_ADMIN_EMAIL/LLL_ADMIN_PASSWORD to the credentials 'lll up' prints",
   Ok(())
 }
 
-/// A superuser token for the impersonation call. Env credentials win and
-/// authenticate fresh through PocketBase's own endpoint; without them the
-/// configured token is tried as-is — if it is not a superuser token, the
-/// impersonate call itself refuses, and the error names what to set.
+/// A superuser token for the superuser-gated commands (token create, member
+/// set-password). Env credentials win and authenticate fresh through
+/// PocketBase's own endpoint; without them the configured token is tried
+/// as-is — if it is not a superuser token, the gated call itself refuses,
+/// and the caller's error names what to set.
 fn superuser_auth() -> Result<string, string> {
   let email = os.Getenv("LLL_ADMIN_EMAIL")
   let pass = os.Getenv("LLL_ADMIN_PASSWORD")
@@ -155,7 +156,7 @@ fn superuser_auth() -> Result<string, string> {
     return Ok(cfg.token)
   }
   Err(
-    "token create is superuser-only and nothing here can authenticate as one
+    "this command is superuser-only and nothing here can authenticate as one
 set LLL_ADMIN_EMAIL/LLL_ADMIN_PASSWORD (the credentials 'lll up' prints), or
 put a superuser token in LLL_TOKEN",
   )

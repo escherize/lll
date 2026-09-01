@@ -1,4 +1,5 @@
 import "go:github.com/BurntSushi/toml"
+import "go:net/url"
 import "go:os"
 import "go:os/exec"
 import "go:path/filepath"
@@ -68,9 +69,9 @@ fix the TOML syntax in {path}, or remove it and rerun 'lll config init'",
     if cfg.token != was.token { src.token = from }
   }
 
-  let url = os.Getenv("LLL_URL")
-  if url != "" {
-    cfg.url = url
+  let env_url = os.Getenv("LLL_URL")
+  if env_url != "" {
+    cfg.url = env_url
     src.url = "env:LLL_URL"
   }
   let team = os.Getenv("LLL_TEAM")
@@ -103,10 +104,26 @@ fix the TOML syntax in {path}, or remove it and rerun 'lll config init'",
     src.url = "default"
   }
   if cfg.web_url == "" {
-    cfg.web_url = "http://127.0.0.1:8100"
+    cfg.web_url = derive_web_url(cfg.url)
     src.web_url = "default"
   }
   Ok((cfg, src))
+}
+
+/// The web_url to assume when nothing configures one, derived from the
+/// resolved `url`. A local PocketBase means the local board `lll up` serves
+/// (:8100). A hosted url means the board rides 443 at the same host —
+/// https://<host>, port dropped — which is where fly.toml's http_service
+/// puts it while the API takes :8091. Without this, `lll board` on a machine
+/// set up by 'lll login --url' printed the localhost default.
+pub fn derive_web_url(base: string) -> string {
+  let local = "http://127.0.0.1:8100"
+  let Ok(u) = url.Parse(base) else {
+    return local
+  }
+  let host = u.Hostname()
+  if host == "" || host == "127.0.0.1" || host == "localhost" { return local }
+  f"https://{host}"
 }
 
 /// The files to layer, lowest precedence first: the machine's config, then
