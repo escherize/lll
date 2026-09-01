@@ -1,3 +1,5 @@
+import "go:errors"
+
 // The bearer decision is the pure seam of TASK-179: every verb asks bearer()
 // what to put in Authorization, and "" means today's request, untouched. The
 // rest — the header actually reaching the wire — is covered by the e2e suite's
@@ -18,4 +20,24 @@ fn only_an_empty_token_means_absent() {
   // Whitespace is a value like any other: trimming here would silently
   // "fix" a config typo that the user should see fail against the server.
   assert bearer(" ") == "Bearer  "
+}
+
+// The other pure seam (TASK-195/203): what an unreachable server says. The
+// e2e assert for the defaulted case is guarded on :8090 being dead, so this
+// is the check that always runs.
+
+#[test]
+fn a_refused_default_url_points_at_login_url() {
+  let e = errors.New("connection refused")
+  let msg = unreachable_hint("http://127.0.0.1:8090", true, e)
+  assert msg.contains("127.0.0.1:8090")
+  assert msg.contains("lll login --url")
+}
+
+#[test]
+fn a_refused_configured_url_is_named_without_the_fresh_machine_hint() {
+  let e = errors.New("connection refused")
+  let msg = unreachable_hint("http://tracker.example.com:8091", false, e)
+  assert msg.contains("tracker.example.com:8091")
+  assert !msg.contains("lll login --url")
 }
