@@ -1,0 +1,37 @@
+// Unit cover for TASK-218's predicate. `is_loopback` is what stands between a
+// throwaway `lll up --pb-dir` and a write to production: the old code asked
+// `healthy()` whether something answered at the configured url, which a live
+// prod instance does, and adopted it. This asks the question that actually
+// matters — is that url this machine — so it has to be right about the forms a
+// url really takes, brackets and trailing slashes included.
+
+#[test]
+fn loopback_recognises_the_local_forms() {
+  assert is_loopback("http://127.0.0.1:8090")
+  assert is_loopback("http://localhost:8090")
+  assert is_loopback("https://localhost")
+  // Trailing path: the host ends at the first slash after the scheme.
+  assert is_loopback("http://127.0.0.1:8090/")
+  // No scheme at all, as an LLL_URL might be typed.
+  assert is_loopback("localhost:8090")
+  assert is_loopback("127.0.0.1")
+  // An IPv6 literal wears brackets.
+  assert is_loopback("http://[::1]:8090")
+}
+
+#[test]
+fn loopback_rejects_remote_hosts() {
+  // The exact url that caused the incident.
+  assert !is_loopback("https://escherize-lll.fly.dev:8091")
+  assert !is_loopback("https://escherize-lll.fly.dev")
+  assert !is_loopback("http://192.168.1.10:8090")
+  assert !is_loopback("http://[2606:4700::1111]:8090")
+}
+
+#[test]
+fn loopback_is_not_fooled_by_a_hostname_that_merely_starts_local() {
+  // Substring matching would call these local; splitting on the port colon
+  // and comparing whole names does not.
+  assert !is_loopback("http://localhost.evil.example:8090")
+  assert !is_loopback("http://127.0.0.1.evil.example")
+}

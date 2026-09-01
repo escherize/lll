@@ -87,6 +87,27 @@ pub fn up(args: Slice<string>) -> Result<(), string> {
 
   let cfg = config.load()?
   let mut db_url = cfg.url
+
+  // A configured REMOTE url plus local-data flags is a contradiction, and the
+  // silent reading of it wrote to production: `healthy()` answers "is something
+  // running there", not "is that mine", so a live prod instance was adopted by
+  // a boot that asked for a throwaway one and `--pb-dir` was never read
+  // (TASK-218). Refuse instead of guessing which half the user meant.
+  if db_url != "" && !is_loopback(db_url) {
+    if p.one("--pb-dir") != "" {
+      return Err(
+        f"--pb-dir asks for a local instance but the configured url is {db_url}, which is remote
+'lll up' would have served that remote database and written to it, not to '{pb_dir}'
+run against it deliberately with 'lll up' and no --pb-dir, or pin a local one: LLL_URL=http://127.0.0.1:8090 lll up --pb-dir {pb_dir}",
+      )
+    }
+    return Err(
+      f"the configured url is {db_url}, which is not this machine
+'lll up' serves and seeds a database — pointed at a remote one it writes there
+check 'lll config --list', or pin a local url: LLL_URL=http://127.0.0.1:8090 lll up",
+    )
+  }
+
   let mut admin_line = f"admin  {db_url}/_/  (already running)"
 
   // The superuser identity: upserted on a fresh boot, and used for the
@@ -371,6 +392,24 @@ fn healthy(base_url: string) -> bool {
   }
   if let Some(body) = resp.Body { let _ = body.Close() }
   resp.StatusCode == 200
+}
+
+/// Whether `base_url` names this machine. The question `healthy()` cannot
+/// answer: production answers /api/health perfectly, which is exactly why an
+/// already-configured remote url gets adopted by a boot that meant to be local.
+pub fn is_loopback(base_url: string) -> bool {
+  // SplitN throughout, not Index + substring: strings.Index returns a BYTE
+  // offset while substring takes rune indices (see realtime.split_field).
+  let after_scheme = strings.SplitN(base_url, "://", 2)
+  let mut host = after_scheme[after_scheme.length() - 1]
+  host = strings.SplitN(host, "/", 2)[0]
+  // An IPv6 literal wears brackets: "[::1]:8090".
+  if host.starts_with("[") {
+    let inner = strings.SplitN(strings.TrimPrefix(host, "["), "]", 2)[0]
+    return inner == "::1"
+  }
+  let name = strings.SplitN(host, ":", 2)[0]
+  name == "127.0.0.1" || name == "localhost" || name == "::1" || name == ""
 }
 
 /// First free TCP port at or above `start`.
