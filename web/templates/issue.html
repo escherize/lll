@@ -82,7 +82,13 @@
   {{range .MemberOpts}}<option value="{{.Id}}"{{if eq .Id $.AssigneeId}} selected{{end}}>{{.Name}}</option>
   {{end}}</select></form></span>
 </div>
-<div class="prop"><span class="k">Project</span>
+{{/* The work-site slot (TASK-205): where the branch is checked out, stamped
+     by `lll issue start`. Read-only, from the issue's own fields, so every
+     #issue-detail morph carries it. Dimmed once the site is only history. */}}
+{{if .Work}}<div class="prop"><span class="k">Work</span>
+  <span class="v"><span class="work-site{{if .WorkStale}} work-stale{{end}}">{{.Work}}{{if .WorkStale}} <span class="work-seen">(last seen)</span>{{end}}</span></span>
+</div>
+{{end}}<div class="prop"><span class="k">Project</span>
   <!-- The link stays: it is the way into that project's issues, which the
        select's selected option cannot be. -->
   <span class="v">{{if .ProjectHref}}<a href="{{.ProjectHref}}">{{.Project}}</a>{{end}}

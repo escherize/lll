@@ -134,6 +134,17 @@ pub fn run_server(
     "POST /settings/{kind}",
     gated(flashing(|r: mut Ref<http.Request>| settings_write(r, team_id, cfg.me))),
   )
+  // The Access section's superuser-power actions (TASK-204). Their own
+  // routes, not a {kind}: each verifies the form's admin password against
+  // the superuser before writing — the board token alone must not suffice.
+  http.HandleFunc(
+    "POST /settings/access/token",
+    gated(flashing(access_token_write)),
+  )
+  http.HandleFunc(
+    "POST /settings/access/member",
+    gated(flashing(|r: mut Ref<http.Request>| access_credential_write(r, team_id))),
+  )
   http.HandleFunc(
     "GET /search",
     gated(|w: http.ResponseWriter, r: Ref<http.Request>| {

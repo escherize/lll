@@ -1,6 +1,8 @@
 import "go:crypto/rand"
+import "go:html/template"
 import "go:net/http"
 import "go:net/url"
+import "go:os"
 import "go:strings"
 
 import "models"
@@ -329,4 +331,150 @@ fn save_record(coll: string, id: string, value: Unknown) -> Result<(), string> {
     let _ = pb.patch(f"/api/collections/{coll}/records/{id}", payload)?
   }
   Ok(())
+}
+
+// ── Access (TASK-204) ────────────────────────────────────────────────────
+// The settings page is reachable with the board token alone, but minting an
+// agent token and credentialing a member are superuser-power actions — the
+// server's own PocketBase identity rides the superuser token, so answering
+// these on the board token would promote every board-token holder to admin.
+// DECISION (per-action re-auth): each Access form carries the admin password,
+// verified server-side through PocketBase's own _superusers auth-with-password
+// endpoint per request; the token that auth answers with is what rides the
+// write, and the password itself is never stored. A separate admin session
+// was the alternative — rejected because a session is a second credential
+// store to build, expire and steal, while re-auth adds one form field and
+// leaves nothing behind.
+
+/// The one-shown-once token, as the mint action's response patch.
+pub struct AccessTokenVM {
+  pub name: string,
+  pub token: string,
+}
+
+/// PATCH body for credentialing a member: the login identity and the
+/// password pair, nothing else — PB replaces every field it is handed.
+#[json]
+struct MemberCredentialPatch {
+  email: string,
+  password: string,
+  #[json("passwordConfirm")]
+  password_confirm: string,
+}
+
+/// The superuser identity Access actions verify against: LLL_ADMIN_EMAIL, or
+/// the same printed default `lll up` upserts when the env is unset.
+fn admin_email() -> string {
+  let e = os.Getenv("LLL_ADMIN_EMAIL")
+  if e == "" { "admin@local.dev" } else { e }
+}
+
+/// Verify the form's admin password against the superuser and return the
+/// superuser token that verification minted — the credential the action's
+/// own write rides, so board token + admin password suffices no matter what
+/// identity the process holds. The password is checked per action through
+/// PocketBase's own endpoint and never stored.
+fn verify_admin(pass: string) -> Result<string, string> {
+  if pass == "" {
+    return Err(
+      "the admin password is required: this is a superuser action, and the board token alone must not grant it",
+    )
+  }
+  let payload = marshal(models.AuthRequest { identity: admin_email(), password: pass })?
+  let body = match pb.post_anon(
+    "/api/collections/_superusers/auth-with-password",
+    payload,
+  ) {
+    Ok(b) => b,
+    Err(e) => {
+      // PocketBase answers a bad credential pair with 400.
+      if strings.Contains(e, "400") {
+        return Err(
+          "wrong admin password — the superuser credentials are what 'lll up' prints in its banner",
+        )
+      }
+      return Err(f"verifying the admin password: {e}")
+    },
+  }
+  decode_auth(body, "the superuser auth response")
+}
+
+/// The named member, from the current list — so the flash can say "reload"
+/// instead of relaying a PB 404.
+fn access_member(r: mut Ref<http.Request>) -> Result<models.Member, string> {
+  let id = strings.TrimSpace(r.PostFormValue("member"))
+  if id == "" { return Err("pick a member") }
+  let known = fetch_members()?
+  let Some(member) = known.find(|m| m.id == id) else {
+    return Err(f"unknown member '{id}' — reload the page for the current list")
+  }
+  Ok(member)
+}
+
+/// Mint an agent token for a member — the web face of `lll token create`.
+/// The token rides back in the response patch and is shown exactly once:
+/// impersonate tokens are stateless (nothing records a mint), so no list of
+/// minted tokens exists to show, here or anywhere.
+fn access_token_write(r: mut Ref<http.Request>) -> Result<string, string> {
+  let member = access_member(r)?
+  let su = verify_admin(r.PostFormValue("admin_password"))?
+  let payload = marshal(models.ImpersonateRequest { duration: 0 })?
+  let body = pb.post_as(
+    f"/api/collections/members/impersonate/{member.id}",
+    payload,
+    su,
+  )?
+  let tok = decode_auth(body, "the impersonate response")?
+  let html = render(
+    "access-token-result",
+    AccessTokenVM { name: member.name, token: tok },
+  )?
+  Ok(patch_event(html))
+}
+
+/// Give a member a login credential (email + password) — the admin
+/// counterpart of the CLI's honor-system member row. The email is the login
+/// identity, so this is the one place the web may change it: the write rides
+/// the just-verified superuser token, which is exactly the authority the
+/// settings row's rename lacks.
+fn access_credential_write(
+  r: mut Ref<http.Request>,
+  team_id: string,
+) -> Result<string, string> {
+  let member = access_member(r)?
+  let password = r.PostFormValue("password")
+  if password == "" { return Err("a password is required") }
+  if password != r.PostFormValue("password_confirm") {
+    return Err("the two passwords do not match")
+  }
+  let su = verify_admin(r.PostFormValue("admin_password"))?
+  // A blank email keeps the member's current identity (often the
+  // synthesized @members.invalid one) and just sets the password.
+  let mut email = strings.TrimSpace(r.PostFormValue("email"))
+  if email == "" { email = member.email }
+  let payload = marshal(
+    MemberCredentialPatch { email, password, password_confirm: password },
+  )?
+  let _ = pb.patch_as(
+    f"/api/collections/members/records/{member.id}",
+    payload,
+    su,
+  )?
+  // The page shows the member's email, so patch the section back — and say
+  // the success out loud in the flash strip, after the redraw, so the morph
+  // cannot swallow it.
+  let mut extra = ""
+  if let Ok(vm) = settings_vm(shell_team(team_id)) {
+    if let Ok(html) = render("settings", vm) { extra += patch_event(html) }
+  }
+  extra += flash_ok_event(f"{member.name} can now sign in as {email}")
+  Ok(extra)
+}
+
+/// A green flash: the same strip errors use, patched with a success tone.
+/// Rides AFTER flashing's flash_clear in the response body, so the strip
+/// ends up showing the message.
+fn flash_ok_event(msg: string) -> string {
+  let safe = template.HTMLEscapeString(msg)
+  patch_event(f"<div id=\"flash\" class=\"flash flash-ok\">{safe}</div>")
 }

@@ -192,6 +192,38 @@ assert_contains "$issue" 'id="state-form"' "issue page has state control"
 wcurl -s -o /dev/null -w '%{http_code}' "$WEB/issue/ENG-99" | grep -q 404 \
   || fail "unknown issue is a 404"
 
+# --- TASK-205: the work-site slot on the web surfaces -------------------------
+# `issue start` stamps work_branch/work_host/work_path; the props panel shows
+# the whole site and the board hover shows the branch, both straight off the
+# issue's own fields (so SSE morphs carry them for free). The fields are
+# seeded the fixture way (a direct PATCH) — the start->stamp write path is
+# e2e.sh's section. Without a claim the site is history and renders dimmed
+# "(last seen)"; a claim row makes it current.
+curl -sf -H "$AUTH_HDR" -X PATCH "$LLL_URL/api/collections/issues/records/$ENG2_ID" \
+  -H 'Content-Type: application/json' \
+  -d '{"work_branch":"eng-2-already-in-progress","work_host":"webhost","work_path":"/tmp/wt-eng-2"}' >/dev/null
+issue=$(wcurl -sf "$WEB/issue/ENG-2")
+assert_contains "$issue" '>Work</span>' "props panel has a Work row"
+assert_contains "$issue" "eng-2-already-in-progress @ webhost:/tmp/wt-eng-2" "props panel shows the site"
+assert_contains "$issue" "(last seen)" "an unclaimed site renders as last seen"
+board=$(wcurl -sf "$WEB/")
+assert_contains "$board" 'class="cp-work work-stale"' "hover preview carries the branch, dimmed"
+assert_contains "$board" "eng-2-already-in-progress" "hover preview shows the branch"
+
+# a claim makes the site current: no dimming on either surface
+W205_MID=$(curl -sf -H "$AUTH_HDR" "$LLL_URL/api/collections/members/records?perPage=1" | jq -r '.items[0].id')
+W205_CLAIM=$(curl -sf -H "$AUTH_HDR" -X POST "$LLL_URL/api/collections/claims/records" \
+  -H 'Content-Type: application/json' \
+  -d "{\"issue\":\"$ENG2_ID\",\"member\":\"$W205_MID\"}" | jq -r '.id')
+[ -n "$W205_CLAIM" ] && [ "$W205_CLAIM" != "null" ] || fail "seeding the work-site claim"
+issue=$(wcurl -sf "$WEB/issue/ENG-2")
+assert_contains "$issue" "eng-2-already-in-progress @ webhost:/tmp/wt-eng-2" "props panel keeps the site"
+assert_not_contains "$issue" "(last seen)" "a claimed site is not dimmed"
+board=$(wcurl -sf "$WEB/")
+assert_contains "$board" 'class="cp-work"' "hover branch is undimmed while claimed"
+# put the claim back so later sections see the board they always saw
+curl -sf -H "$AUTH_HDR" -X DELETE "$LLL_URL/api/collections/claims/records/$W205_CLAIM" >/dev/null
+
 # --- app shell: one rail template, the same on every page (task-81) ---
 # The <nav id="rail"> block, for diffing one page's shell against another's.
 rail() { # html
@@ -1228,6 +1260,65 @@ assert_contains "$(wcurl -sf -X POST "$WEB/settings/label" -d 'name=x' -d 'color
 assert_contains "$(wcurl -sf -X POST "$WEB/settings/project" -d "id=$PROJECT_ID" -d 'name=Web Project' -d 'status=bogus')" \
   "unknown project status" "an unknown project status is refused"
 "$LIN" label list | grep -q '^x	' && fail "a refused label write still created a record" || true
+
+# --- Access (task-204): superuser actions behind per-action re-auth ---------
+# /settings is board-token-reachable, but minting an agent token and
+# credentialing a member are superuser-power actions: each form carries the
+# admin password, verified server-side per action, so the board cookie alone
+# must refuse. `lll up` above booted without LLL_ADMIN_*, so the superuser is
+# the printed default pair.
+ADMIN_PASS="${LLL_ADMIN_PASSWORD:-admin-local-123}"
+
+settings=$(wcurl -sf "$WEB/settings")
+assert_contains "$settings" 'id="access-token-form"' "settings page carries the mint form"
+assert_contains "$settings" 'id="access-credential-form"' "settings page carries the credential form"
+assert_contains "$settings" 'id="access-token-result"' "settings page carries the token result placeholder"
+
+# Refusals first: no admin password, then a wrong one. Neither may answer a token.
+out=$(wcurl -sf -X POST "$WEB/settings/access/token" -d "member=$MEMBER_ID")
+assert_contains "$out" "admin password is required" "minting without the admin password is refused"
+assert_not_contains "$out" "access-token-value" "a refused mint shows no token"
+out=$(wcurl -sf -X POST "$WEB/settings/access/token" -d "member=$MEMBER_ID" -d 'admin_password=not-the-password')
+assert_contains "$out" "wrong admin password" "minting with a wrong admin password is refused"
+assert_not_contains "$out" "access-token-value" "a wrong-password mint shows no token"
+
+# The right password mints a working member token: shown once in the response
+# patch, and honored by PocketBase's authenticated-only rules.
+out=$(wcurl -sf -X POST "$WEB/settings/access/token" -d "member=$MEMBER_ID" -d "admin_password=$ADMIN_PASS")
+assert_contains "$out" 'id="access-token-result"' "a mint answers with the token patch"
+MINTED=$(printf '%s' "$out" | python3 -c '
+import re, sys
+m = re.search(r"access-token-value\">([^<]+)<", sys.stdin.read())
+print(m.group(1) if m else "")
+')
+[ -n "$MINTED" ] || fail "the mint response carried no token"
+curl -sf -H "Authorization: Bearer $MINTED" "$LLL_URL/api/collections/members/records?perPage=1" >/dev/null \
+  || fail "the minted token is not honored by PocketBase"
+
+# Credential a member. Without the admin password: refused, and the login it
+# tried to set must not work.
+out=$(wcurl -sf -X POST "$WEB/settings/access/member" -d "member=$MEMBER_ID" \
+  -d 'email=cred@example.com' -d 'password=cred-pass-12345' -d 'password_confirm=cred-pass-12345')
+assert_contains "$out" "admin password is required" "credentialing without the admin password is refused"
+curl -s "$LLL_URL/api/collections/members/auth-with-password" -H 'Content-Type: application/json' \
+  -d '{"identity":"cred@example.com","password":"cred-pass-12345"}' | grep -q '"token"' \
+  && fail "a refused credential still changed the member's login" || true
+
+# Mismatched passwords are refused before anything is verified or written.
+out=$(wcurl -sf -X POST "$WEB/settings/access/member" -d "member=$MEMBER_ID" \
+  -d 'password=cred-pass-12345' -d 'password_confirm=other' -d "admin_password=$ADMIN_PASS")
+assert_contains "$out" "do not match" "mismatched passwords are refused"
+
+# The right admin password credentials the member: the settings patch and the
+# success flash ride back, and the member auth round-trip answers a token.
+out=$(wcurl -sf -X POST "$WEB/settings/access/member" -d "member=$MEMBER_ID" \
+  -d 'email=cred@example.com' -d 'password=cred-pass-12345' -d 'password_confirm=cred-pass-12345' \
+  -d "admin_password=$ADMIN_PASS")
+assert_contains "$out" 'id="settings"' "a credential patches the settings body back"
+assert_contains "$out" 'flash-ok' "a credential says its success in the flash strip"
+curl -sf "$LLL_URL/api/collections/members/auth-with-password" -H 'Content-Type: application/json' \
+  -d '{"identity":"cred@example.com","password":"cred-pass-12345"}' | grep -q '"token"' \
+  || fail "the credentialed member cannot log in"
 
 # --- the team accent drives --accent and the favicon (task-83) ---
 # Nothing stored means DESIGN.md's canonical orange, so theme.css's own

@@ -1589,6 +1589,67 @@ assert_contains "$out" "lll issue claim" "issue --help mentions claim"
 assert_contains "$out" "lll issue release" "issue --help mentions release"
 assert_contains "$("$LIN" completions bash)" "claim" "bash completions offer claim"
 
+# --- TASK-205: the work-site slot (branch/host/path stamped by start) --------
+# `issue start` records WHERE the work happens: branch, host, worktree root.
+# The slot holds the current site only — a start from a second site replaces
+# it and leaves an auto-comment trail — and nothing ever clears it; a site
+# that is no longer being worked (state done/cancelled or claim gone) renders
+# as "(last seen)". LLL_WORK_HOST is the test seam faking a second machine.
+WKEY=$(env $E "$LIN" issue create -t "Work site fodder" | sed -n 's/^Created \([A-Z]*-[0-9]*\).*/\1/p')
+[ -n "$WKEY" ] || fail "work-site fodder create did not print a key"
+
+WREPO_A="$DATA_DIR/wsite_a"
+git init -q -b main "$WREPO_A"
+git -C "$WREPO_A" -c user.name=e2e -c user.email=e2e@example.com \
+  commit -q --allow-empty -m init
+out=$(env $E LLL_ME=bryan "$LIN" issue claim "$WKEY")
+out=$(cd "$WREPO_A" && env $E LLL_WORK_HOST=site-a "$LLL_ABS" issue start "$WKEY")
+WBRANCH=$(git -C "$WREPO_A" branch --show-current)
+WROOT_A=$(cd "$WREPO_A" && git rev-parse --show-toplevel)
+
+# start-then-view round trip: the slot renders under the claim holder, fresh
+out=$(env $E "$LIN" issue view "$WKEY")
+assert_contains "$out" "Work:      $WBRANCH @ site-a:$WROOT_A" "start records the work site"
+assert_not_contains "$out" "last seen" "a claimed in-progress site is not dimmed"
+got=$(env $E "$LIN" issue view "$WKEY" --json | jq -r '"\(.work_branch)|\(.work_host)|\(.work_path)"')
+[ "$got" = "$WBRANCH|site-a|$WROOT_A" ] || fail "work fields in --json: got '$got'"
+
+# a same-site restart is silent: the slot stands, no auto-comment
+out=$(cd "$WREPO_A" && env $E LLL_WORK_HOST=site-a "$LLL_ABS" issue start "$WKEY")
+out=$(env $E "$LIN" issue view "$WKEY")
+assert_not_contains "$out" "work moved" "same-site restart leaves no comment"
+
+# a start from a second site replaces the slot and records the displaced one
+WREPO_B="$DATA_DIR/wsite_b"
+git init -q -b main "$WREPO_B"
+git -C "$WREPO_B" -c user.name=e2e -c user.email=e2e@example.com \
+  commit -q --allow-empty -m init
+out=$(cd "$WREPO_B" && env $E LLL_WORK_HOST=site-b "$LLL_ABS" issue start "$WKEY")
+WROOT_B=$(cd "$WREPO_B" && git rev-parse --show-toplevel)
+out=$(env $E "$LIN" issue view "$WKEY")
+assert_contains "$out" "Work:      $WBRANCH @ site-b:$WROOT_B" "a second site replaces the slot"
+# scoped to the Work line: the displaced site legitimately survives in the
+# auto-comment trail below it
+assert_not_contains "$(printf '%s' "$out" | grep '^Work:')" "site-a:" "the old site left the slot"
+assert_contains "$out" \
+  "work moved: $WBRANCH @ site-a:$WROOT_A -> $WBRANCH @ site-b:$WROOT_B" \
+  "displacement leaves the auto-comment trail"
+
+# close clears nothing; the site renders as history
+out=$(env $E "$LIN" issue close "$WKEY")
+out=$(env $E "$LIN" issue view "$WKEY")
+assert_contains "$out" "Work:      $WBRANCH @ site-b:$WROOT_B (last seen)" \
+  "a done issue keeps the slot, dimmed to last seen"
+
+# releasing the claim dims it too, even while in-progress
+out=$(env $E "$LIN" issue update "$WKEY" --state in-progress)
+out=$(env $E "$LIN" issue view "$WKEY")
+assert_not_contains "$out" "last seen" "reopened and still claimed: fresh again"
+out=$(env $E "$LIN" issue release "$WKEY")
+out=$(env $E "$LIN" issue view "$WKEY")
+assert_contains "$out" "Work:      $WBRANCH @ site-b:$WROOT_B (last seen)" \
+  "a released claim renders the site as last seen"
+
 # --- task-183: login / logout / token create ---------------------------------
 # The human and agent entry points for auth. e2e-agent's password is set the
 # superuser way (the same PATCH lib.sh's pb_member_token does on reuse), then

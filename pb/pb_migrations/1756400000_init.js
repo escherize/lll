@@ -129,6 +129,13 @@ migrate(
         // Manual board position within a column (fractional midpoints on
         // reorder; defaulted to end-of-board by the create hook).
         { name: "sort", type: "number" },
+        // TASK-205 work-site slot: the CURRENT checkout of this issue's
+        // branch, stamped by `issue start` (branch, hostname, worktree root).
+        // Never cleared — staleness is a presentation rule. Live data dirs
+        // get these from 1788500000_add_issue_work_site.js.
+        { name: "work_branch", type: "text" },
+        { name: "work_host", type: "text" },
+        { name: "work_path", type: "text" },
         {
           name: "assignee",
           type: "relation",

@@ -124,6 +124,13 @@ pub struct Issue {
   pub sort: float64,
   // One author-chosen marker. Empty for most issues.
   pub emoji: string,
+  // TASK-205 work-site slot: where the branch is checked out RIGHT NOW.
+  // Written by `issue start` after the branch exists; a start from a
+  // different site overwrites it (and leaves an auto-comment recording the
+  // displaced one). Never cleared — staleness is a presentation rule.
+  pub work_branch: string,
+  pub work_host: string,
+  pub work_path: string,
   pub assignee: string,
   pub project: string,
   pub labels: Slice<string>,

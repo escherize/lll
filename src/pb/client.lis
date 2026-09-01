@@ -103,8 +103,9 @@ pub fn post_as(
   request(cfg.url, "POST", path, payload, bearer(tok), src.url == "default")
 }
 
-/// PATCH riding `tok` instead of the configured token — member set-password,
-/// which acts as the superuser it has just authenticated.
+/// PATCH riding `tok` instead of the configured token — writes that must
+/// stand on a just-verified credential (member set-password, the settings
+/// Access section's re-auth), not whatever identity the process holds.
 pub fn patch_as(
   path: string,
   payload: string,

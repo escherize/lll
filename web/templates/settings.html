@@ -114,6 +114,49 @@
 </form>
 <p class="set-note">Descriptions are long-form, so they stay with <code>lll project create -d</code>.</p>
 </section>
+
+{{/* Access (TASK-204): superuser-power actions behind per-action re-auth.
+     Every form here carries the admin password; the server verifies it
+     against the superuser per request and never stores it — the board token
+     alone must not grant these. The minted token answers in the response
+     patch (#access-token-result) and is shown exactly once: impersonate
+     tokens are stateless, so no list of minted tokens exists to render. */}}
+<section class="set-sec" id="access">
+<h2>Access</h2>
+<p class="set-note">Superuser actions. Each asks for the admin password — the credentials <code>lll up</code> prints in its banner — verified per action and never stored. The board token alone does not grant these.</p>
+
+<h3 class="access-h">Agent token</h3>
+<p class="set-note">The web face of <code>lll token create</code>: a static PocketBase token that authenticates as the member. It is shown exactly once, below; tokens are stateless, so nothing can list them afterwards. Setting the member's password cuts old tokens off.</p>
+<form class="set-row set-new" id="access-token-form">
+<select name="member" aria-label="Member the token authenticates as">
+{{range .Members}}<option value="{{.Id}}">{{.Name}}</option>
+{{end}}</select>
+<input name="admin_password" type="password" placeholder="Admin password" autocomplete="off" aria-label="Admin password" class="set-second">
+<button type="button" class="btn" data-on:click="@post('/settings/access/token', {contentType: 'form'})">Mint token</button>
+</form>
+<div id="access-token-result"></div>
+
+<h3 class="access-h">Member sign-in</h3>
+<p class="set-note">Give a member an email and password so they can log in. A blank email keeps their current identity.</p>
+<form class="set-row set-new" id="access-credential-form">
+<select name="member" aria-label="Member to credential">
+{{range .Members}}<option value="{{.Id}}">{{.Name}}</option>
+{{end}}</select>
+<input name="email" placeholder="Email" autocomplete="off" aria-label="New email" class="set-second">
+<input name="password" type="password" placeholder="Password" autocomplete="new-password" aria-label="New password" class="set-second">
+<input name="password_confirm" type="password" placeholder="Confirm" autocomplete="new-password" aria-label="Confirm the new password" class="set-second">
+<input name="admin_password" type="password" placeholder="Admin password" autocomplete="off" aria-label="Admin password" class="set-second">
+<button type="button" class="btn" data-on:click="@post('/settings/access/member', {contentType: 'form'})">Set credential</button>
+</form>
+</section>
+</div>{{end}}
+
+{{/* The mint action's response patch: the one time the token is ever shown.
+     Any later #settings morph redraws the empty placeholder over it, which
+     is the show-it-once bargain, not a bug. */}}
+{{define "access-token-result"}}<div id="access-token-result" class="access-token">
+<p class="set-note">One-time agent token for <strong>{{.Name}}</strong> — shown only here. Use it as <code>LLL_TOKEN=…</code>, or persist it as <code>token = "…"</code> in <code>~/.config/lll/lll.toml</code> (never the committed <code>.lll.toml</code>).</p>
+<code class="access-token-value">{{.Token}}</code>
 </div>{{end}}
 
 {{/* The row's delete control. The record's name reaches the confirm through

@@ -1324,3 +1324,58 @@ input:focus, textarea:focus, select:focus {
   font-variant-numeric: tabular-nums;
 }
 .pj-empty { color: var(--text-2); margin: 6px 0; max-width: 68ch; }
+
+/* ── work-site ─────────────────────────────────────────── */
+/* TASK-205: where the branch is checked out, stamped by `lll issue start`.
+   Monospace because it is branch @ host:path; text-3 + italic "(last seen)"
+   once the site is only history (state done/cancelled or claim gone). */
+.work-site {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px;
+  word-break: break-all;
+}
+.card-pop .cp-work {
+  display: block;
+  margin-top: 6px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px;
+  color: var(--text-2);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.work-stale { color: var(--text-3); }
+.work-seen { color: var(--text-3); font-style: italic; }
+
+/* ── Access (settings) ──────────────────────────────────── */
+/* The Access section's sub-headings sit between the section h2 and its
+   forms; same label voice as the section titles, one step quieter. */
+.set-sec .access-h {
+  margin: 18px 0 4px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  color: var(--text-2);
+}
+/* The one-time token: monospace, selectable in one triple-click, and framed
+   like the raised rows around it. Empty placeholder renders nothing. */
+.access-token { margin-top: 8px; }
+.access-token:empty { margin: 0; }
+.access-token-value {
+  display: block;
+  padding: 8px 10px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  background: var(--bg-raised);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+  word-break: break-all;
+  user-select: all;
+}
+/* A success flash: the same strip errors use, in the done green. */
+.flash.flash-ok {
+  border-color: rgba(76, 183, 130, 0.4);
+  background: rgba(76, 183, 130, 0.12);
+  color: var(--st-done);
+}

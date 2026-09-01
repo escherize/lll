@@ -192,7 +192,7 @@ fn board_page(w: http.ResponseWriter, r: Ref<http.Request>, team_id: string, me:
 
   let vm = BoardVM {
     states: state_opts(),
-    columns: board_columns(issues, flt),
+    columns: board_columns(issues, flt, fetch_claimed_issue_ids().unwrap_or([])),
     filter_groups: filter_groups(
       issues,
       q,

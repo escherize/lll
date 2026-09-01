@@ -50,6 +50,17 @@ pub fn current_branch() -> Option<string> {
   if branch == "" { None } else { Some(branch) }
 }
 
+/// Absolute path of the working tree's root (`git rev-parse --show-toplevel`),
+/// or None outside a repo. For a worktree this is the worktree's own root,
+/// which is the "where is the checkout" answer TASK-205 stores.
+pub fn repo_root() -> Option<string> {
+  let Ok(out) = exec.Command("git", "rev-parse", "--show-toplevel").Output() else {
+    return None
+  }
+  let root = strings.TrimSpace(out as string)
+  if root == "" { None } else { Some(root) }
+}
+
 /// Whether the working directory is inside a git repository.
 pub fn in_repo() -> bool {
   exec.Command("git", "rev-parse", "--is-inside-work-tree").Output().is_ok()

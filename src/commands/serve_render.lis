@@ -107,6 +107,10 @@ fn card_vm(issue: models.Issue) -> CardVM {
     created: display.relative(issue.created),
     updated: display.relative(issue.updated),
     snippet: snippet(issue.description),
+    work_branch: issue.work_branch,
+    // The state half of the staleness rule; board_card ORs in the claim
+    // half. Rows built straight from card_vm never show the site anyway.
+    work_stale: work_site_stale(issue.state, true),
   }
 }
 
@@ -208,7 +212,11 @@ fn filter_groups(
 /// its state holds that the filter admits; `total` keeps the unfiltered
 /// count, so the column's number is the same on a filtered page and inside
 /// a broadcast morph instead of flickering between the two.
-fn board_columns(issues: Slice<models.Issue>, flt: BoardFilter) -> Slice<ColumnVM> {
+///
+/// `claimed` is the currently-claimed issue ids (TASK-205): a card whose
+/// issue holds no claim renders its work site as "(last seen)" — card_vm
+/// alone only knows the state half of that rule.
+fn board_columns(issues: Slice<models.Issue>, flt: BoardFilter, claimed: Slice<string>) -> Slice<ColumnVM> {
   query
     .states()
     .map(|s| ColumnVM {
@@ -216,9 +224,28 @@ fn board_columns(issues: Slice<models.Issue>, flt: BoardFilter) -> Slice<ColumnV
       label: state_label(s),
       glyph: display.glyph(s),
       sig: strings.ReplaceAll(s, "-", "_") as template.JS,
-      cards: issues.filter(|i| i.state == s && issue_matches(i, flt)).map(card_vm),
+      cards: issues
+        .filter(|i| i.state == s && issue_matches(i, flt))
+        .map(|i| board_card(i, claimed)),
       total: issues.filter(|i| i.state == s).length(),
     })
+}
+
+/// A board card: card_vm plus the claim half of the work-site staleness
+/// rule, which only the board fetches claims for.
+fn board_card(issue: models.Issue, claimed: Slice<string>) -> CardVM {
+  let mut card = card_vm(issue)
+  if !claimed.contains(issue.id) { card.work_stale = true }
+  card
+}
+
+/// Issue ids that currently hold a claim — one list fetch per board render,
+/// so the hover preview can dim a released site. Board-only on purpose: the
+/// /issues table and /search rows never render the work site.
+fn fetch_claimed_issue_ids() -> Result<Slice<string>, string> {
+  let mut claims = models.ClaimList { .. }
+  pb.fetch("/api/collections/claims/records?perPage=500", "claims", &claims)?
+  Ok(claims.items.map(|c| c.issue))
 }
 
 /// A whole board, freshly fetched. The broadcast path's renderer, which
@@ -227,7 +254,12 @@ fn board_columns(issues: Slice<models.Issue>, flt: BoardFilter) -> Slice<ColumnV
 /// handler (and guarded client-side by the cards' data-show), never here.
 fn board_vm(team_id: string, flt: BoardFilter) -> Result<BoardVM, string> {
   let issues = fetch_board_issues(team_id)?
-  Ok(BoardVM { states: state_opts(), columns: board_columns(issues, flt), .. })
+  let claimed = fetch_claimed_issue_ids().unwrap_or([])
+  Ok(BoardVM {
+    states: state_opts(),
+    columns: board_columns(issues, flt, claimed),
+    ..
+  })
 }
 
 /// The create dialog's pickers, freshly fetched. Three extra PB reads, paid
@@ -286,6 +318,14 @@ fn issue_vm(issue: models.Issue, comments: Slice<models.Comment>) -> Result<Issu
     project_href = f"/issues?project={url.QueryEscape(project)}"
   }
   if project == "" { project = "none" }
+  // The work-site slot (TASK-205). The claim read is paid per render like
+  // the catalogues below, and only when a site exists to dim.
+  let mut work = ""
+  let mut work_stale = false
+  if issue.work_branch != "" {
+    work = f"{issue.work_branch} @ {issue.work_host}:{issue.work_path}"
+    work_stale = work_site_stale(issue.state, fetch_claim(issue.id)?.is_some())
+  }
   Ok(IssueVM {
     deleted: false,
     id: issue.id,
@@ -299,6 +339,8 @@ fn issue_vm(issue: models.Issue, comments: Slice<models.Comment>) -> Result<Issu
     project_href,
     labels: label_vms(issue.expand.labels),
     emoji: issue.emoji,
+    work,
+    work_stale,
     description: markdown.md_html(issue.description),
     description_md: issue.description,
     created: display.relative(issue.created),

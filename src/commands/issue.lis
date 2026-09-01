@@ -670,10 +670,20 @@ fn view(args: Slice<string>) -> Result<(), string> {
   // The one place the second collection is read on a plain view: assignee says
   // who it is for, Claimed says who is holding it right now, and only the
   // latter is exclusive.
-  if let Some(held) = fetch_claim(full.id)? {
+  let claim = fetch_claim(full.id)?
+  if let Some(held) = claim {
     let mut holder = held.expand.member.name
     if holder == "" { holder = "an unknown member" }
     fmt.Println(f"Claimed:   {holder} ({display.relative(held.created)})")
+  }
+  // The work-site slot (TASK-205), under the claim holder: the claim says
+  // who, this says where. "(last seen)" once the work is over.
+  if full.work_branch != "" {
+    let mut work = f"{full.work_branch} @ {full.work_host}:{full.work_path}"
+    if work_site_stale(full.state, claim.is_some()) {
+      work = f"{work} (last seen)"
+    }
+    fmt.Println(f"Work:      {work}")
   }
   fmt.Println(f"Project:   {project}")
   fmt.Println(f"Labels:    {labels}")
@@ -832,8 +842,64 @@ fn start(args: Slice<string>) -> Result<(), string> {
     } else {
       fmt.Println(f"Switched to existing branch '{branch}'")
     }
+    record_work_site(issue, branch)?
   }
   Ok(())
+}
+
+/// TASK-205: stamp the work-site slot (work_branch/work_host/work_path) onto
+/// the issue, after the branch exists. The slot holds the CURRENT site only:
+/// a start from a different site overwrites it and leaves an auto-comment
+/// recording the displaced one, a same-site restart is silent, and nothing
+/// ever clears the slot — a done issue keeps which branch shipped it, and
+/// views render a stale site as "(last seen)" instead.
+///
+/// Host comes from os.Hostname; LLL_WORK_HOST overrides it (a test seam —
+/// e2e fakes a second machine without owning one). Path is the worktree
+/// root, so multiple worktrees of one branch on one host stay distinct.
+fn record_work_site(issue: models.Issue, branch: string) -> Result<(), string> {
+  let mut host = os.Getenv("LLL_WORK_HOST")
+  if host == "" { host = os.Hostname().unwrap_or("") }
+  let Some(path) = gitctx.repo_root() else {
+    return Ok(())
+  }
+  if issue.work_branch == branch && issue.work_host == host && issue.work_path == path {
+    return Ok(())
+  }
+  if issue.work_branch != "" {
+    // Author resolution mirrors `issue comment`: 'me' if it names a member,
+    // authorless otherwise. Member identity is not duplicated into the slot;
+    // this comment (and the claim holder) carry the who.
+    let mut author = ""
+    let me = config.load()?.me
+    if me != "" { if let Some(m) = find_member(me)? { author = m.id } }
+    let moved = f"work moved: {issue.work_branch} @ {issue.work_host}:{issue.work_path} -> {branch} @ {host}:{path}"
+    let payload = match json.Marshal(
+      models.NewComment { issue: issue.id, author, body: moved },
+    ) {
+      Ok(p) => p as string,
+      Err(e) => return Err(f"encoding work-moved comment: {e}"),
+    }
+    let _ = pb.post("/api/collections/comments/records", payload)?
+  }
+  let fields = [
+    "\"work_branch\":" + json_quote(branch)?,
+    "\"work_host\":" + json_quote(host)?,
+    "\"work_path\":" + json_quote(path)?,
+  ]
+  let _ = pb.patch(
+    f"/api/collections/issues/records/{issue.id}",
+    "{" + strings.Join(fields, ",") + "}",
+  )?
+  Ok(())
+}
+
+/// TASK-205's presentation rule: a work site is only "current" while the
+/// issue is being worked — once the state is done/cancelled or the claim is
+/// gone, the site renders as "(last seen)". A read, never a write: the slot
+/// itself is not cleared.
+fn work_site_stale(state: string, claimed: bool) -> bool {
+  state == "done" || state == "cancelled" || !claimed
 }
 
 /// Take an issue exclusively. The arbitration is a single INSERT into

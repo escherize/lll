@@ -78,6 +78,12 @@ pub struct CardVM {
   pub updated: string,
   // First ~2 lines of the description, truncated, for the hover preview.
   pub snippet: string,
+  // The work-site slot's branch (TASK-205), for the hover preview. Empty
+  // until an `issue start` stamps it.
+  pub work_branch: string,
+  // Whether the site is only "(last seen)": state done/cancelled, or — on
+  // the board, where board_columns knows the claims — the claim is gone.
+  pub work_stale: bool,
 }
 
 /// One selectable filter value in the board's chooser and chip row. `href`
@@ -261,6 +267,12 @@ pub struct IssueVM {
   pub labels: Slice<LabelVM>,
   // The author's marker, or "" for most issues.
   pub emoji: string,
+  // The work-site slot (TASK-205), preformatted "branch @ host:path" for the
+  // Properties panel; "" until an `issue start` stamps it. `work_stale`
+  // marks a site that is only "(last seen)" — state done/cancelled or claim
+  // gone. Set by issue_vm, so SSE morphs of #issue-detail carry it.
+  pub work: string,
+  pub work_stale: bool,
   pub description: template.HTML,
   // The description's markdown source, for the ?raw branch (serve_raw.lis):
   // the field above is what a browser gets, this is what curl gets. Both

@@ -101,6 +101,7 @@ provenance.
 <span class="cp-row1">{{.Key}}{{if .Emoji}}<span class="emoji">{{.Emoji}}</span>{{end}}<span class="flex"></span>{{template "priority-icon" .Prio}}</span>
 <span class="cp-title">{{.Title}}</span>
 <span class="cp-meta">{{template "state-icon" .State}} {{.StateLabel}}<span class="cp-sep">·</span>{{.PrioLabel}}{{if .Assignee}}<span class="cp-sep">·</span>{{.Assignee}}{{end}}</span>
+{{/* The work-site branch (TASK-205), from the issue's own fields. */}}{{if .WorkBranch}}<span class="cp-work{{if .WorkStale}} work-stale{{end}}">{{.WorkBranch}}{{if .WorkStale}} <span class="work-seen">(last seen)</span>{{end}}</span>{{end}}
 {{if .Snippet}}<span class="cp-desc">{{.Snippet}}</span>{{end}}
 </span>
 </a>{{end}}
