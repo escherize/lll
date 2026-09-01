@@ -1,0 +1,42 @@
+import "go:time"
+
+// Unit cover for TASK-219: the Access panel's mint used to send
+// `duration: 0`, which is not "no expiry" but "whatever the members
+// collection says" — five days in PocketBase v0.40.1. The bug was in the
+// number that reached the wire and in nothing being said about it, so that is
+// what these pin: the body access_token_write posts, and the expiry it puts
+// on the flash strip after the token.
+
+fn minted() -> string {
+  match mint_payload() {
+    Ok(p) => p,
+    Err(e) => e,
+  }
+}
+
+#[test]
+fn the_web_mint_asks_for_the_cli_s_default_duration() {
+  // The literal year is spelled out once, here, as the tripwire: if the
+  // shared default moves, this fails loudly rather than the board quietly
+  // handing out a different lifetime than `lll token create` does.
+  assert minted() == "{\"duration\":31536000}"
+  assert default_token_duration() == 31536000
+}
+
+#[test]
+fn the_web_mint_no_longer_defers_to_the_collection() {
+  // The exact shape of the old bug: 0 hands the lifetime to PocketBase.
+  assert !minted().contains("\"duration\":0")
+}
+
+#[test]
+fn a_minted_token_says_when_it_dies() {
+  // The flash the mint appends past the token patch. Impersonate tokens are
+  // recorded nowhere, so this line is the only place the expiry is ever
+  // visible — a mint that answered with the token alone is the silent failure
+  // TASK-214 fixed on the CLI side.
+  let at = time.Date(2026, time.January, 15, 12, 0, 0, 0, time.UTC)
+  let flash = mint_expiry_event(at)
+  assert flash.contains("expires 2027-01-15")
+  assert flash.contains("flash-ok")
+}

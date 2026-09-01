@@ -106,7 +106,7 @@ fn fetch_favorites() -> Result<Slice<models.Favorite>, string> {
 
 /// The workspace's favorite row for one issue, if it has one.
 fn fetch_favorite(issue_id: string) -> Result<Option<models.Favorite>, string> {
-  let filter = url.QueryEscape(f"issue='{issue_id}' && member=''")
+  let filter = url.QueryEscape(f"issue={query.quote(issue_id)} && member=''")
   let mut list = models.FavoriteList { .. }
   pb.fetch(
     f"/api/collections/favorites/records?perPage=1&filter={filter}",

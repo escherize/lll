@@ -995,7 +995,7 @@ fn release(args: Slice<string>) -> Result<(), string> {
 /// The claim on one issue, if it has one, with its holder expanded. `claims`
 /// is UNIQUE on `issue`, so there is at most one row to find.
 fn fetch_claim(issue_id: string) -> Result<Option<models.Claim>, string> {
-  let filter = url.QueryEscape(f"issue='{issue_id}'")
+  let filter = url.QueryEscape(f"issue={query.quote(issue_id)}")
   let mut list = models.ClaimList { .. }
   pb.fetch(
     f"/api/collections/claims/records?perPage=1&filter={filter}&expand=member",
@@ -1140,7 +1140,7 @@ fn issue_url(issue: models.Issue) -> Result<string, string> {
 
 /// An issue's comments, oldest first, author expanded.
 fn fetch_comments(issue_id: string) -> Result<Slice<models.Comment>, string> {
-  let filter = url.QueryEscape(f"issue='{issue_id}'")
+  let filter = url.QueryEscape(f"issue={query.quote(issue_id)}")
   let mut comments = models.CommentList { .. }
   pb.fetch(
     f"/api/collections/comments/records?filter={filter}&sort=created&expand=author&perPage=200",
@@ -1188,9 +1188,10 @@ fn positional_id(args: Slice<string>, usage: string) -> Result<string, string> {
 /// > error with a hint.
 /// Accept a pasted board URL anywhere a KEY-123 is expected — the same courtesy
 /// mb-shares' `share` extends to its slugs. Strips `scheme://host/`, an
-/// `issue/` path prefix and a trailing slash; anything that is not shaped like
-/// a URL is returned untouched, so a bare key stays a bare key and a bad value
-/// still fails downstream with the usual "not an issue ID" message.
+/// `issue/` path prefix, a query string, a fragment and a trailing slash;
+/// anything that is not shaped like a URL is returned untouched, so a bare key
+/// stays a bare key and a bad value still fails downstream with the usual "not
+/// an issue ID" message.
 fn deslug(arg: string) -> string {
   // All splitting, no index arithmetic: byte offsets and rune indices disagree
   // on non-ASCII input and panic. See realtime.split_field.
@@ -1200,6 +1201,14 @@ fn deslug(arg: string) -> string {
     if !strings.Contains(after_scheme, "/") { return arg }
     a = strings.SplitN(after_scheme, "/", 2)[1]
   } else if !strings.Contains(a, "/") { return arg }
+  // TASK-144: a URL copied out of a browser carries `?utm_source=...` and
+  // `#comment-3`, and neither names the issue. Cut them here, after the host
+  // is gone (so a `?` cannot be read as path) and before the trailing slash
+  // is trimmed (a share link puts the slash between the key and the query).
+  // Fragment first: it may itself contain a `?`, and everything after `#` is
+  // fragment.
+  a = strings.SplitN(a, "#", 2)[0]
+  a = strings.SplitN(a, "?", 2)[0]
   a = strings.TrimSuffix(a, "/")
   // Team-routed board URLs (TASK-198): /t/KEY/issue/ENG-12. The /t/KEY/
   // prefix carries nothing the issue key does not — drop it.
@@ -1293,7 +1302,7 @@ fn json_quote(value: string) -> Result<string, string> {
 }
 
 fn find_team(key: string) -> Result<Option<models.Team>, string> {
-  let filter = url.QueryEscape(f"key='{key}'")
+  let filter = url.QueryEscape(f"key={query.quote(key)}")
   let mut result = models.TeamList { .. }
   pb.fetch(f"/api/collections/teams/records?filter={filter}", "teams", &result)?
   Ok(result.items.find(|t| t.key == key))
@@ -1326,7 +1335,7 @@ fn two_positional(
 /// one `?=` filter over docs.issues, which is the whole reason links are a
 /// relation and not a write-once reference on the issue.
 fn fetch_issue_docs(issue_id: string) -> Result<Slice<models.Doc>, string> {
-  let filter = url.QueryEscape(f"issues.id ?= '{issue_id}'")
+  let filter = url.QueryEscape(f"issues.id ?= {query.quote(issue_id)}")
   let mut docs = models.DocList { .. }
   pb.fetch(
     f"/api/collections/docs/records?filter={filter}&sort=slug&perPage=200",

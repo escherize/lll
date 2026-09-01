@@ -160,7 +160,7 @@ fn project_view(args: Slice<string>) -> Result<(), string> {
     fmt.Println(p.description)
   }
 
-  let filter = url.QueryEscape(f"project='{p.id}'")
+  let filter = url.QueryEscape(f"project={query.quote(p.id)}")
   let mut issues = models.IssueList { .. }
   pb.fetch(
     f"/api/collections/issues/records?filter={filter}&perPage=200&sort=created&expand=team,assignee",

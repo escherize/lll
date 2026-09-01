@@ -60,18 +60,46 @@ fn deslug_returns_the_argument_when_it_is_not_key_shaped() {
   assert deslug("http://127.0.0.1:8100/a/b/c") == "http://127.0.0.1:8100/a/b/c"
 }
 
-/// Pins today's behaviour, which is not the behaviour anyone wants: a query
-/// string or fragment rides along into the issue ID and fails downstream with
-/// "'ENG-12?tab=comments' is not an issue ID". Filed as TASK-144; update this
-/// test when it lands.
+/// TASK-144: a URL copied out of a browser carries tracking params and an
+/// anchor, and both used to ride into the issue ID ("'ENG-12?tab=comments' is
+/// not an issue ID"). Neither names the issue, so both come off.
 #[test]
-fn deslug_currently_keeps_a_query_string_or_fragment() {
-  assert deslug("http://127.0.0.1:8100/issue/ENG-12?tab=comments") ==
-  "ENG-12?tab=comments"
-  assert deslug("http://127.0.0.1:8100/issue/ENG-12#c1") == "ENG-12#c1"
-  // And an issue page with no key at all degrades to the literal "issue",
-  // so the error quotes that rather than what the user pasted.
+fn deslug_drops_a_query_string_or_fragment() {
+  assert deslug("http://127.0.0.1:8100/issue/ENG-12?tab=comments") == "ENG-12"
+  assert deslug("http://127.0.0.1:8100/issue/ENG-12#c1") == "ENG-12"
+  // Both at once, in the order a browser writes them.
+  assert deslug("http://127.0.0.1:8100/issue/ENG-12?utm_source=slack#comment-3")
+  == "ENG-12"
+  // A fragment before a literal "?" is still all fragment: the first
+  // delimiter wins, so nothing after "#" can be mistaken for a key.
+  assert deslug("http://127.0.0.1:8100/issue/ENG-12#c1?x=1") == "ENG-12"
+  // The trailing slash a share link often carries sits between the key and
+  // the query string, so it has to be trimmed after the split, not before.
+  assert deslug("http://127.0.0.1:8100/t/ENG/issue/ENG-12/?utm_source=slack")
+  == "ENG-12"
+  // Multi-byte keys keep working with the delimiters attached.
+  assert deslug("https://日本.example/issue/日本-3?tab=comments") == "日本-3"
+}
+
+/// The delimiters do not create keys out of paths that have none: a stripped
+/// URL that is still not key-shaped comes back untouched, so the caller's
+/// error quotes what the user actually pasted.
+#[test]
+fn deslug_keeps_the_argument_when_only_a_query_string_is_left() {
+  assert deslug("http://127.0.0.1:8100/?utm_source=slack") ==
+  "http://127.0.0.1:8100/?utm_source=slack"
+  assert deslug("http://127.0.0.1:8100/a/b/c?x=1") ==
+  "http://127.0.0.1:8100/a/b/c?x=1"
+  // An issue page with no key at all degrades to the literal "issue".
   assert deslug("http://127.0.0.1:8100/issue/") == "issue"
+  assert deslug("http://127.0.0.1:8100/issue/?x=1") == "issue"
+}
+
+/// Neither delimiter present: the untouched path must not regress.
+#[test]
+fn deslug_leaves_a_url_without_a_query_string_or_fragment_alone() {
+  assert deslug("http://127.0.0.1:8100/issue/ENG-12") == "ENG-12"
+  assert deslug("ENG-12") == "ENG-12"
 }
 
 // ----------------------------------------------------------- check_emoji

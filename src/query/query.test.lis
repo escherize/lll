@@ -93,3 +93,21 @@ fn quote_wraps_and_escapes() {
   assert quote("it's") == r"'it\'s'"
   assert quote(r"a\b") == r"'a\\b'"
 }
+
+/// The payload that made TASK-134 a security bug rather than a tidy-up. The
+/// old call sites built `name='<value>'` by interpolation, so this value
+/// closed the clause and appended its own: `name='x' || name!=''` matches
+/// EVERY row instead of one. Reached from the board's `/issues?assignee=`,
+/// which is unauthenticated and unsanitized.
+///
+/// `quote` has to leave the `'` escaped and inside the literal. Asserting the
+/// whole clause, not just `quote`'s output, is deliberate: the defect lived in
+/// how callers assembled the clause, so the clause is what must be pinned.
+#[test]
+fn quote_contains_a_filter_breakout_payload() {
+  let payload = "x' || name!='"
+  assert quote(payload) == r"'x\' || name!=\''"
+  // What member.lis's find_member_as now sends. The `||` survives as text
+  // inside the string literal; it never becomes an operator.
+  assert f"name={quote(payload)}" == r"name='x\' || name!=\''"
+}

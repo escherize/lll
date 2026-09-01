@@ -6,6 +6,7 @@ import "config"
 import "flags"
 import "models"
 import "pb"
+import "query"
 
 /// Dispatch `lll team <verb>`.
 pub fn team(args: Slice<string>) -> Result<(), string> {
@@ -247,7 +248,7 @@ fn team_view(args: Slice<string>) -> Result<(), string> {
     return Err(unknown_team(key))
   }
 
-  let filter = url.QueryEscape(f"team='{t.id}'")
+  let filter = url.QueryEscape(f"team={query.quote(t.id)}")
   let mut issues = models.IssueList { .. }
   pb.fetch(
     f"/api/collections/issues/records?filter={filter}&perPage=1",

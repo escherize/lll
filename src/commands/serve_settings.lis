@@ -4,6 +4,7 @@ import "go:net/http"
 import "go:net/url"
 import "go:os"
 import "go:strings"
+import "go:time"
 
 import "models"
 import "pb"
@@ -93,7 +94,7 @@ fn settings_vm(team: models.Team) -> Result<SettingsVM, string> {
 fn team_rows() -> Result<Slice<SetTeamVM>, string> {
   let mut rows: Slice<SetTeamVM> = []
   for t in list_teams()?.items {
-    let filter = url.QueryEscape(f"team='{t.id}'")
+    let filter = url.QueryEscape(f"team={query.quote(t.id)}")
     let mut issues = models.IssueList { .. }
     pb.fetch(
       f"/api/collections/issues/records?filter={filter}&perPage=1",
@@ -480,13 +481,19 @@ fn access_member(r: mut Ref<http.Request>) -> Result<models.Member, string> {
 /// The token rides back in the response patch and is shown exactly once:
 /// impersonate tokens are stateless (nothing records a mint), so no list of
 /// minted tokens exists to show, here or anywhere.
+///
+/// TASK-219: this was the second door onto TASK-214's bug. The CLI stopped
+/// minting with duration 0 — which hands the lifetime to the members
+/// collection, five days out of the box — but the Access panel kept doing it,
+/// so a token minted from the board still died in under a week, silently. It
+/// borrows the CLI's `default_token_duration` rather than restating a year in
+/// seconds: two doors onto one mint should not be able to drift apart.
 fn access_token_write(r: mut Ref<http.Request>) -> Result<string, string> {
   let member = access_member(r)?
   let su = verify_admin(r.PostFormValue("admin_password"))?
-  let payload = marshal(models.ImpersonateRequest { duration: 0 })?
   let body = pb.post_as(
     f"/api/collections/members/impersonate/{member.id}",
-    payload,
+    mint_payload()?,
     su,
   )?
   let tok = decode_auth(body, "the impersonate response")?
@@ -494,7 +501,24 @@ fn access_token_write(r: mut Ref<http.Request>) -> Result<string, string> {
     "access-token-result",
     AccessTokenVM { name: member.name, token: tok },
   )?
-  Ok(patch_event(html))
+  Ok(patch_event(html) + mint_expiry_event(time.Now()))
+}
+
+/// The impersonate request body the Access mint sends, duration included.
+/// The lifetime is chosen here rather than at the call site so a test can
+/// read the number that actually reaches PocketBase — the whole bug was a
+/// duration nobody could see without watching the wire.
+fn mint_payload() -> Result<string, string> {
+  marshal(models.ImpersonateRequest { duration: default_token_duration() })
+}
+
+/// The expiry the mint says out loud, as the flash that rides after the token
+/// patch. It goes on the strip rather than into the token block for the same
+/// reason the CLI prints it next to the token: this is the only moment anyone
+/// sees it, since impersonate tokens are stateless and nothing records a mint.
+/// `now` is a parameter so the wording is a function of its arguments alone.
+fn mint_expiry_event(now: time.Time) -> string {
+  flash_ok_event(expiry_line(default_token_duration(), now))
 }
 
 /// Give a member a login credential (email + password) — the admin

@@ -10,6 +10,7 @@ import "models"
 import "pb"
 import "flags"
 import "config"
+import "query"
 
 /// Dispatch `lll member <verb>`.
 pub fn member(args: Slice<string>) -> Result<(), string> {
@@ -436,7 +437,11 @@ fn find_member(name: string) -> Result<Option<models.Member>, string> {
 /// token — token create looks its member up as the superuser it has just
 /// authenticated, not as whoever happens to be configured.
 pub fn find_member_as(tok: string, name: string) -> Result<Option<models.Member>, string> {
-  let filter = url.QueryEscape(f"name='{name}'")
+  // `name` arrives unsanitized from the board's `/issues?assignee=` query
+  // parameter, so it goes through `quote` and not into the filter raw: the
+  // QueryEscape below makes it safe in a URL, which is a different layer and
+  // does nothing about a `'` closing the clause early (TASK-134).
+  let filter = url.QueryEscape(f"name={query.quote(name)}")
   let mut result = models.MemberList { .. }
   let body = pb.get_as(
     f"/api/collections/members/records?filter={filter}",
