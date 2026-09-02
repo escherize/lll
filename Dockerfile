@@ -20,8 +20,11 @@
 #   fly ips allocate-v4 -a <app>   # dedicated IPv4 (~$2/mo): the tls+http
 #                                  # :8091 stanza in fly.toml rides only this
 #   scripts/fly-deploy.sh
-# The hosted PocketBase API is then https://<app>.fly.dev:8091 (what
-# 'lll login --url' and LLL_URL take); the board stays on 443.
+# The API and the board share ONE address: https://<app>.fly.dev, which is what
+# 'lll login --url' and LLL_URL take (TASK-241 - the board proxies /api/ and
+# /_/ to the PocketBase it runs in-process). The :8091 stanza and its dedicated
+# IPv4 still answer, for configs written before that landed; retiring them is a
+# separate decision.
 # The volume mounts at /data/pb_data (see fly.toml) — without it, every deploy
 # wipes the backlog (the single most common way to lose everything here).
 
