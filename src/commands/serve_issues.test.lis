@@ -1,3 +1,5 @@
+import "go:io/fs"
+import "go:github.com/escherize/lll/web"
 import "go:strings"
 
 import "query"
@@ -74,6 +76,63 @@ fn every_sortable_column_asks_for_a_field_query_sort_accepts() {
       assert query.sort(spec).is_ok()
     }
   }
+}
+
+// TASK-164: issue_cols() is the one ordered table of the table's columns, and
+// three places copy it by hand — the ?raw body cells, the HTML row cells, and
+// the empty state's colspan. Every one of them drifts SILENTLY: a ninth column
+// gives ?raw a 9-cell header over 8-cell bodies (a malformed markdown table,
+// from the surface whose whole promise is that an agent can parse it), and
+// gives the HTML short rows under a wide header.
+//
+// The link is these three assertions rather than a generator. Two of the three
+// copies CANNOT be derived: each <td> carries its own markup, and Go templates
+// have no way to count a slice into an attribute. So the cheapest thing that
+// actually goes red is a test that reads the copies and counts them, and it
+// stays readable in six months, which a generator would not.
+
+/// The column count every copy has to agree with.
+fn expected_col_count() -> int {
+  issue_cols(ViewQuery { sort: "-updated", .. }).length()
+}
+
+/// The text of the embedded issues.html — the same bytes render() parses, so
+/// this reads the template that actually ships, not a file on disk.
+fn issues_template_text() -> string {
+  let data = fs.ReadFile(web.Assets(), "templates/issues.html").unwrap_or([])
+  data as string
+}
+
+#[test]
+fn the_raw_markdown_row_has_one_cell_per_column() {
+  // issues_raw derives its header and its rule row from vm.cols and writes
+  // the body by hand. Unequal lengths here IS the malformed table.
+  let cells = issue_row_cells(CardVM { key: "TST-1", title: "t", .. })
+  assert cells.length() == expected_col_count()
+}
+
+#[test]
+fn the_html_row_has_one_td_per_column() {
+  let text = issues_template_text()
+  // The row block is everything the range over .Rows emits before the empty
+  // state. Split rather than index arithmetic, because strings.Index gives
+  // byte offsets and substring takes runes. The closing "</tr>" is the
+  // boundary, NOT the range's own {{else}}: the label and assignee cells
+  // carry {{else}}es of their own, and splitting on the bare token stops
+  // inside the row and counts 5.
+  let after_range = strings.SplitN(text, "{{range .Rows}}", 2)
+  assert after_range.length() == 2
+  let row_block = strings.SplitN(after_range[1], "</tr>", 2)[0]
+  assert strings.Count(row_block, "<td ") == expected_col_count()
+}
+
+#[test]
+fn the_empty_state_spans_every_column() {
+  let text = issues_template_text()
+  let after = strings.SplitN(text, "<td colspan=\"", 2)
+  assert after.length() == 2
+  let n = strings.SplitN(after[1], "\"", 2)[0]
+  assert n == f"{expected_col_count()}"
 }
 
 #[test]

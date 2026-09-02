@@ -58,8 +58,14 @@
      a morph target (nothing morphs here), but agents read the markup and the
      Stable Id Rule holds for every surface.
 
-     .Cols and the row cells below share one column order; changing one means
-     changing the other. */}}
+     .Cols and the row cells below share one column order, and the empty
+     state's colspan is that same count a third time. Nothing here can be
+     derived from .Cols — each cell has its own markup — so the link is an
+     assertion instead (TASK-164): serve_issues.test.lis reads THIS FILE out
+     of the embedded FS, counts the <td>s in the row-range block below, reads
+     the colspan number off the empty state, and pins both to
+     issue_cols().length(). Add a ninth column and that test goes red rather
+     than the table rendering one cell short forever. */}}
 {{define "issues-table"}}<div class="itbl-scroll">
 <table id="issues" class="itbl">
 <thead><tr>{{range .Cols}}<th class="{{.Cls}}"{{if eq .Dir "asc"}} aria-sort="ascending"{{else if eq .Dir "desc"}} aria-sort="descending"{{end}}>{{if .Href}}<a href="{{.Href}}"{{if .Dir}} class="on"{{end}}>{{.Label}}<svg class="cr{{if .Dir}} cr-{{.Dir}}{{end}}" width="14" height="14" aria-hidden="true"><use href="#ic-sort"/></svg></a>{{else}}{{.Label}}{{end}}</th>{{end}}</tr></thead>

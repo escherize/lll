@@ -131,11 +131,26 @@ pub fn parse_paths(val: string) -> string {
 /// they are equal, or either one sits under the other's directory — a
 /// finding filed on `src/pb` answers `lll finding near src/pb/records.lis`
 /// AND `lll finding near src` (asking broadly finds the specific note).
+///
+/// Matching is on whole path SEGMENTS, not on the raw string: `src/comm`
+/// does not touch `src/commands`, because a prefix of a name is not a
+/// parent of it (TASK-166).
 pub fn path_touches(entry: string, path: string) -> bool {
-  let e = strings.Trim(strings.TrimSpace(entry), "/")
-  let p = strings.Trim(strings.TrimSpace(path), "/")
+  let e = norm_path(entry)
+  let p = norm_path(path)
   if e == "" || p == "" { return false }
   e == p || p.starts_with(f"{e}/") || e.starts_with(f"{p}/")
+}
+
+/// Trim space and surrounding slashes, and drop a leading `./` (TASK-166).
+/// The query side of `lll finding near <path>` is raw argv, and shell path
+/// completion hands over `./src/pb` routinely; `./x` and `x` name the same
+/// place, so a stored entry on `src/pb` has to answer for both. `parse_paths`
+/// already promises this in its doc comment - this is what makes it true.
+fn norm_path(val: string) -> string {
+  let mut s = strings.TrimSpace(val)
+  while strings.HasPrefix(s, "./") { s = strings.TrimPrefix(s, "./") }
+  strings.Trim(s, "/")
 }
 
 // ----------------------------------------------------------------- specs

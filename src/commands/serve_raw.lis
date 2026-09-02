@@ -69,6 +69,29 @@ fn board_raw(vm: BoardVM) -> string {
   strings.Join(lines, "\n")
 }
 
+/// One /issues row as markdown cells, in issue_cols() order.
+///
+/// Named rather than inlined so a test can count it against issue_cols()
+/// without booting a server (TASK-164). The header and the rule row are
+/// derived from vm.cols; these cells are written by hand, so a ninth column
+/// added to issue_cols() would give a 9-cell header over 8-cell bodies — a
+/// malformed table emitted silently, from the surface whose whole promise is
+/// that an agent can parse it. serve_issues.test.lis pins the two lengths
+/// equal, so the drift fails a test instead of a parser.
+fn issue_row_cells(r: CardVM) -> Slice<string> {
+  let labels = strings.Join(r.labels.map(|l| l.name), ", ")
+  [
+    f"[{r.key}](/issue/{r.key})",
+    cell(r.title),
+    r.state,
+    r.prio_label,
+    cell(labels),
+    cell(r.assignee),
+    r.created,
+    r.updated,
+  ]
+}
+
 /// GET /issues?raw — the table as a markdown table: the same columns in the
 /// same order the HTML writes them, the same rows the URL's filter and sort
 /// produced, and the same honest count.
@@ -83,18 +106,7 @@ fn issues_raw(vm: IssuesVM) -> string {
   lines = lines.append(f"| {strings.Join(heads, " | ")} |")
   lines = lines.append(f"| {strings.Join(rules, " | ")} |")
   for r in vm.rows {
-    let labels = strings.Join(r.labels.map(|l| l.name), ", ")
-    let cells = [
-      f"[{r.key}](/issue/{r.key})",
-      cell(r.title),
-      r.state,
-      r.prio_label,
-      cell(labels),
-      cell(r.assignee),
-      r.created,
-      r.updated,
-    ]
-    lines = lines.append(f"| {strings.Join(cells, " | ")} |")
+    lines = lines.append(f"| {strings.Join(issue_row_cells(r), " | ")} |")
   }
   strings.Join(lines, "\n")
 }

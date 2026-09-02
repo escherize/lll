@@ -1,7 +1,8 @@
 import "go:strings"
 
-// Unit cover for the pure helpers in doc.lis: check_slug and check_kind.
-// Everything here is a function of its arguments alone — no PocketBase.
+// Unit cover for the pure helpers in doc.lis: check_slug, check_kind and
+// path_touches. Everything here is a function of its arguments alone — no
+// PocketBase.
 
 // ------------------------------------------------------------- check_slug
 
@@ -91,4 +92,90 @@ fn check_kind_rejects_unknown_kinds_with_the_list() {
   assert msg.contains("unknown kind 'memo'")
   assert msg.contains("wiki, finding, decision, prd")
   let assert Err(_) = check_kind("wiki finding")
+}
+
+// ----------------------------------------------------------- path_touches
+//
+// path_touches decides every hit 'lll finding near <path>' returns and every
+// row of the issue page's related-findings block, and had no cover at all
+// (TASK-166). The argument order is (stored entry, path being asked about);
+// the relation is symmetric, so most cases below are asserted both ways.
+
+#[test]
+fn path_touches_matches_a_path_against_itself() {
+  assert path_touches("src/commands/doc.lis", "src/commands/doc.lis")
+  assert path_touches("src", "src")
+}
+
+#[test]
+fn path_touches_finds_a_file_under_the_entrys_directory() {
+  // A finding filed on 'src' answers a question about a file inside it.
+  assert path_touches("src", "src/commands/serve.lis")
+  assert path_touches("src/commands", "src/commands/serve.lis")
+}
+
+#[test]
+fn path_touches_runs_in_the_ancestor_direction_too() {
+  // The reverse: asking broadly about 'src/commands' surfaces the specific
+  // note filed on 'src/commands/serve.lis', and asking about 'src' surfaces
+  // everything below it.
+  assert path_touches("src/commands/serve.lis", "src/commands")
+  assert path_touches("src/commands", "src")
+}
+
+#[test]
+fn path_touches_does_not_match_a_partial_segment_name() {
+  // The near-miss that makes this a real predicate rather than a
+  // strings.HasPrefix: 'src/comm' is a prefix of the STRING 'src/commands'
+  // but is not a parent DIRECTORY of it, so neither direction is a hit.
+  assert !path_touches("src/commands", "src/comm")
+  assert !path_touches("src/comm", "src/commands")
+  // Same shape one level up, and on a file extension.
+  assert !path_touches("source", "src")
+  assert !path_touches("src/doc.lis", "src/doc.lisette")
+}
+
+#[test]
+fn path_touches_ignores_unrelated_paths() {
+  assert !path_touches("web/templates", "src/commands")
+  assert !path_touches("src/commands", "web/templates")
+}
+
+#[test]
+fn path_touches_ignores_surrounding_space_and_slashes() {
+  // Entries arrive from a comma-split of the stored list, so the leading
+  // space in "src/pb, web" reaches this function verbatim.
+  assert path_touches(" src/pb ", "src/pb")
+  assert path_touches("/src/pb/", "src/pb")
+  assert path_touches("src/pb", "  /src/pb/  ")
+  // Trimming the slashes must not turn a near-miss into a hit.
+  assert !path_touches("/src/comm/", "/src/commands/")
+}
+
+#[test]
+fn path_touches_treats_a_dot_slash_prefix_as_the_same_place() {
+  // Decided in TASK-166: './x' and 'x' name one location, and the query side
+  // is raw argv where shell completion supplies './src/pb' routinely. The
+  // leading './' is notation, so it is stripped on both sides.
+  assert path_touches("src/pb", "./src/pb")
+  assert path_touches("./src/pb", "src/pb")
+  assert path_touches("./src", "./src/pb/records.lis")
+  // Stripping is not a licence to match across segments.
+  assert !path_touches("./src/comm", "./src/commands")
+}
+
+#[test]
+fn path_touches_is_false_when_either_side_is_empty() {
+  // 'lll finding near ""' must not match every finding on file.
+  assert !path_touches("", "src")
+  assert !path_touches("src", "")
+  assert !path_touches("   ", "src")
+  // A path that is nothing but separators normalizes to empty, not to root.
+  assert !path_touches("/", "src")
+  assert !path_touches("./", "src")
+  // Both sides empty is the case the guard actually exists for: without it
+  // the equality arm fires and a doc carrying a blank paths entry answers
+  // every query. Two empties are not a location, so they touch nothing.
+  assert !path_touches("", "")
+  assert !path_touches("  ", "/")
 }

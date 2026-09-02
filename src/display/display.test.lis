@@ -1,3 +1,65 @@
+import "go:io/fs"
+import "go:github.com/escherize/lll/web"
+
+import "query"
+
+// TASK-158: the SVG symbols in web/templates/icons.html are coupled to the two
+// scales - display.priorities() and query.states() - by string, through
+// `<use href="#pri-{{.}}">` and `<use href="#st-{{.}}">`. Nothing else checks
+// the coupling: rename a level and the <use> points at a symbol that does not
+// exist, which draws NOTHING and raises no error - not at compile time, not at
+// runtime, and the e2e assertions look at the option label rather than the
+// icon. So the drift is silent in every layer that could have caught it.
+//
+// The link is these two tests. They read the same embedded template the server
+// renders (web.Assets(), not a path on disk, so they cannot go stale against a
+// moved file) and compare the symbol ids to the scale in BOTH directions:
+// a slug with no symbol fails, and a symbol with no slug fails. One direction
+// alone would let a rename pass by leaving the old symbol behind.
+
+/// Every `id="<prefix>-..."` in the icons template, with the prefix stripped:
+/// symbol_slugs("pri-") over `<g id="pri-urgent">` yields ["urgent"].
+/// Written here rather than in display.lis because it exists only to check
+/// the markup - nothing at runtime needs to know what symbols the file holds.
+fn symbol_slugs(prefix: string) -> Slice<string> {
+  let Ok(data) = fs.ReadFile(web.Assets(), "templates/icons.html") else {
+    return []
+  }
+  // The opening delimiter only - `id="pri-`, no closing quote - so the slug
+  // itself is what follows, up to the next quote.
+  let quote = "\""
+  let mut found: Slice<string> = []
+  for (i, chunk) in (data as string).split(f"id={quote}{prefix}").enumerate() {
+    // Chunk 0 is the text before the first marker, not an id.
+    if i > 0 { found = found.append(chunk.split(quote)[0]) }
+  }
+  found
+}
+
+#[test]
+fn every_priority_has_an_icon_symbol_and_no_symbol_is_orphaned() {
+  let symbols = symbol_slugs("pri-")
+  assert symbols.length() > 0   // the template was found and parsed at all
+  for slug in priorities() {
+    assert symbols.contains(slug)
+  }
+  for slug in symbols {
+    assert priorities().contains(slug)
+  }
+}
+
+#[test]
+fn every_state_has_an_icon_symbol_and_no_symbol_is_orphaned() {
+  let symbols = symbol_slugs("st-")
+  assert symbols.length() > 0
+  for slug in query.states() {
+    assert symbols.contains(slug)
+  }
+  for slug in symbols {
+    assert query.states().contains(slug)
+  }
+}
+
 #[test]
 fn relative_under_a_minute_is_just_now() {
   assert relative_seconds(0) == "just now"
