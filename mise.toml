@@ -38,6 +38,41 @@ depends = ["build"]
 dir = "{{config_root}}"
 run = "target/.lisette/bin/lll up"
 
+[tasks.scratch]
+description = "A throwaway board on free ports and a temp data dir - safe to run alongside others"
+depends = ["build"]
+dir = "{{config_root}}"
+run = """
+# TASK-119: `mise run dev` hardcodes port 8100 and pb/pb_data, so a second
+# person (or a second agent) running it collides on both and the loser gets a
+# corrupt-looking database rather than an error. The recipe that does NOT
+# collide was known only to the e2e scripts; this is that recipe, named.
+#
+# free_port comes from scripts/lib.sh rather than a second copy: it BINDS the
+# port to prove it is free, which a liveness probe cannot do - probing an
+# occupied port succeeds against a stranger's server and the collision is
+# discovered much later, blamed on something unrelated.
+. scripts/lib.sh   # free_port; sourcing also cds to the checkout root
+
+DB_PORT=$(free_port 20000 39999)
+WEB_PORT=$(free_port 40000 59999)
+SCRATCH=$(mktemp -d)
+
+# Stays in the checkout root on purpose: PocketBase's migrations are read from
+# pb/pb_migrations relative to the working directory, so `lll up` still refuses
+# to run anywhere else (TASK-80 is the fix for that). Isolation comes from
+# --pb-dir and the two free ports instead of from the cwd.
+#
+# --pb-dir is also what keeps this board from writing a team into the checkout:
+# `lll up` persists a settled team (TASK-115) EXCEPT on a --pb-dir boot, whose
+# team belongs to the throwaway database and not to this directory. So a
+# scratch board leaves no .lll.toml behind (TASK-143).
+echo "scratch board: db :$DB_PORT, web :$WEB_PORT, data $SCRATCH"
+echo "  temporary - delete the data dir when you are done: rm -rf $SCRATCH"
+LLL_URL="http://127.0.0.1:$DB_PORT" LLL_TEAM="${LLL_TEAM:-SCRAT}" \\
+  target/.lisette/bin/lll up --port "$WEB_PORT" --pb-dir "$SCRATCH/pb_data" "$@"
+"""
+
 [tasks.test]
 description = "Unit tests"
 dir = "{{config_root}}"
@@ -52,6 +87,19 @@ description = "Full end-to-end suite (CLI, web board, lll up)"
 depends = ["build"]
 dir = "{{config_root}}"
 run = "bash scripts/e2e.sh"
+
+# TASK-79: a board with data on it, for looking at. Boots its own throwaway
+# server on free ports under .lll-demo/ and leaves it running, so `mise run dev`
+# (port 8100, pb/pb_data) is untouched and two people can seed at once.
+#
+# depends on build rather than building inside the script: seed.sh moves HOME
+# aside to keep the developer's own config out of the fixtures, and the lis and
+# go caches live under the real HOME.
+[tasks.seed]
+description = "Boot a throwaway board seeded with demo issues, projects and labels"
+depends = ["build"]
+dir = "{{config_root}}"
+run = "bash scripts/seed.sh"
 
 [tasks.gate]
 description = "Everything a change must pass before it lands"

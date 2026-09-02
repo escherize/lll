@@ -27,7 +27,12 @@ provenance.
 <title>{{if eq .Rail.Active "mine"}}My issues{{else}}Board{{end}} · lll</title>
 <link rel="stylesheet" href="/static/theme.css">
 {{template "accent-head" .Rail}}
-<script type="module" src="https://cdn.jsdelivr.net/gh/starfederation/datastar@v1.0.3/bundles/datastar.js" integrity="sha384-yHqFPXJio1slWODLf67ZFfuDhhPUccOzGpGJF0d5fitjEfihEVrVvzMsfH8TxCiO" crossorigin="anonymous"></script>
+<!-- Vendored, not CDN (TASK-74): the board is local-first and has to work with
+     no network, the way mermaid already does since TASK-42. The file in
+     web/static is byte-for-byte datastar@v1.0.3 - its sha384 matches the
+     integrity hash this tag used to carry - and web/embed.go pulls all of
+     web/static into the binary, so no integrity attribute is needed here. -->
+<script type="module" src="/static/datastar.js"></script>
 </head>
 <!-- data-init lives on <body>, which is never patched, so the SSE
      connection is opened exactly once per page load. -->

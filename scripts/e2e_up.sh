@@ -166,19 +166,43 @@ UP_PID=""
 curl -sf "http://127.0.0.1:$EXT_PORT/api/health" >/dev/null \
   || fail "external PB was killed by lll up's exit"
 
-# --- outside the checkout: fail fast, do not boot an unmigrated PB (task-30) ---
+# --- outside the checkout: BOOTS, because the migrations ship in the binary ---
+# task-30 asserted the opposite here: `lll up` outside the checkout had to fail
+# fast, naming pb/pb_migrations, rather than boot a database with no collections
+# whose first API call returned 404 "Missing collection context". TASK-80 keeps
+# that goal and removes the need for the guard - pb/embed.go carries the
+# migrations, so there is no directory to be missing. The property under test is
+# unchanged (never an unmigrated database); only the mechanism moved, so the
+# assertion is inverted rather than deleted.
 OUTSIDE="$DATA_DIR/outside"
 mkdir -p "$OUTSIDE"
-if out=$(cd "$OUTSIDE" && LLL_TEAM=E2E HOME="$E2E_HOME" "$LLL_ABS" up --no-open --port 45999 </dev/null 2>&1); then
-  fail "lll up outside the checkout should exit non-zero, got: $out"
-fi
-printf '%s' "$out" | grep -qF "pb/pb_migrations/ not found" \
-  || fail "outside the checkout should name the missing path, got: $out"
-printf '%s' "$out" | grep -qF "checkout root" \
-  || fail "outside the checkout should name the fix, got: $out"
-if printf '%s' "$out" | grep -qF "Missing collection context"; then
-  fail "a 404 leaked through instead of the guard: $out"
-fi
-[ -z "$(ls -A "$OUTSIDE")" ] || fail "lll up outside the checkout must not create anything, found: $(ls -A "$OUTSIDE")"
+# Two ports, because they are two servers: --port is the BOARD, and PocketBase
+# takes the one LLL_URL names. Passing one number for both makes `lll up` print
+# "port N taken - board moving to N+1" and the assertions then talk to whichever
+# server answered first.
+OUT_PB_PORT=$(free_port 40000 49999)
+OUT_WEB_PORT=$(free_port 50000 59999)
+OUT_URL="http://127.0.0.1:$OUT_PB_PORT"
+OUT_LOG="$DATA_DIR/outside.log"
+# `env -u LLL_TOKEN` like the blocks above: the suite is still carrying a token
+# minted against an EARLIER PocketBase, and this boot is a different server. A
+# stale token does not fail as an auth error - `up` gets refused while seeding
+# and reports "could not create team 'E2E' and none exists to reuse", which
+# names the team and never mentions auth. Filed separately; here, just do not
+# hand it a token from another database.
+( cd "$OUTSIDE" && env -u LLL_TOKEN LLL_TEAM=E2E HOME="$E2E_HOME" LLL_URL="$OUT_URL" \
+    "$LLL_ABS" up --no-open --port "$OUT_WEB_PORT" --pb-dir "$OUTSIDE/pb_data" </dev/null ) \
+  >"$OUT_LOG" 2>&1 &
+OUTSIDE_PID=$!
+wait_ok "$OUT_URL/api/health" 150 \
+  || fail "lll up outside the checkout should boot now that migrations are embedded: $(cat "$OUT_LOG")"
+# Migrated, not merely listening: an empty database answers /api/health too, and
+# a collection query is what task-30's 404 actually came from.
+out=$(curl -sf "$OUT_URL/api/collections/teams/records" \
+  -H "Authorization: Bearer $(pb_superuser_token "$OUT_URL")" 2>&1) \
+  || fail "the teams collection should exist outside the checkout, got: $out (log: $(cat "$OUT_LOG"))"
+printf '%s' "$out" | grep -qF "Missing collection context" \
+  && fail "booted unmigrated outside the checkout: $out"
+e2e_reap "$OUTSIDE_PID"
 
 echo "e2e_up: all assertions passed"

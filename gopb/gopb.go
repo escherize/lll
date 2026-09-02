@@ -7,8 +7,13 @@
 package gopb
 
 import (
+	"fmt"
+	"io/fs"
 	"math"
+	"os"
+	"path/filepath"
 
+	"github.com/escherize/lll/pb"
 	"github.com/pocketbase/dbx"
 	"github.com/pocketbase/pocketbase"
 	"github.com/pocketbase/pocketbase/core"
@@ -22,7 +27,16 @@ import (
 // migrations are registered, and migrations auto-apply before the server
 // starts listening. The superuser is upserted right before listening, same
 // semantics as `pocketbase superuser upsert` followed by `serve`.
-func Serve(dataDir, addr, migrationsDir, adminEmail, adminPassword string) error {
+//
+// The migrations come from the binary (pb.Migrations), not the working
+// directory, so a copied `lll` boots anywhere -- TASK-80. The caller no longer
+// passes a migrations path.
+func Serve(dataDir, addr, adminEmail, adminPassword string) error {
+	migrationsDir, err := materializeMigrations(dataDir)
+	if err != nil {
+		return err
+	}
+
 	app := pocketbase.NewWithConfig(pocketbase.Config{
 		DefaultDataDir: dataDir,
 		// lll prints its own admin/board summary; PocketBase's three-line
@@ -33,7 +47,9 @@ func Serve(dataDir, addr, migrationsDir, adminEmail, adminPassword string) error
 
 	// jsvm is what applies pb_migrations/*.js -- without it the database boots
 	// with no collections. It also loads JS hooks, but there are none: the two
-	// issue-create hooks are Go, below.
+	// issue-create hooks are Go, below. MigrationsDir is the unpacked copy of
+	// the embedded tree, since jsvm reads the directory with os.ReadDir and
+	// takes no fs.FS.
 	jsvm.MustRegister(app, jsvm.Config{
 		MigrationsDir: migrationsDir,
 	})
@@ -68,6 +84,63 @@ func Serve(dataDir, addr, migrationsDir, adminEmail, adminPassword string) error
 	// inherit its exact behavior, including RunAllMigrations before listening.
 	app.RootCmd.SetArgs([]string{"serve", "--http", addr})
 	return app.Start()
+}
+
+// materializeMigrations writes the embedded migrations to a directory beside
+// the data dir and returns its path.
+//
+// Unpacking rather than handing PocketBase an fs.FS is forced by the plugin:
+// jsvm.Config takes MigrationsDir as a string and loads it with os.ReadDir
+// (plugins/jsvm/jsvm.go, filesContent), so there is no fs.FS seam. Worse,
+// filesContent treats a MISSING directory as an empty one and returns no
+// error, which is how a wrong path used to produce a collection-less database
+// that only failed later with 404 "Missing collection context" -- the failure
+// mode up.lis's check_pb_dir guard existed to pre-empt. Unpacking makes the
+// directory always exist, so the guard is gone (TASK-80).
+//
+// It lives INSIDE the data dir, not beside it and not in os.TempDir. Beside it
+// is what PocketBase defaults to, but with the default --pb-dir of pb/pb_data
+// that resolves to the checkout's own pb/pb_migrations, and rewriting the
+// tracked source of the embed from the embed is a loop nobody wants to debug.
+// Inside means the copy shares the database's lifetime, so a throwaway
+// --pb-dir throws the copy away with it.
+//
+// The directory is REPLACED, not written over, every boot. Overwriting alone
+// leaves any file the embed no longer contains -- a migration deleted or
+// renamed in a later release stays behind and keeps being applied. That matters
+// most exactly where it is hardest to see: the Fly deployment runs with
+// --pb-dir /data/pb_data, a durable mounted volume (fly.toml [mounts]), so a
+// stale file there survives every deploy until someone notices. Removing first
+// makes the directory an exact mirror of the binary that booted it. The files
+// are small and there are 15 of them; the write cost is not worth reasoning
+// about, the drift is.
+func materializeMigrations(dataDir string) (string, error) {
+	dir := filepath.Join(dataDir, "pb_migrations")
+	if err := os.RemoveAll(dir); err != nil {
+		return "", fmt.Errorf("clearing the migrations directory %s: %w", dir, err)
+	}
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return "", fmt.Errorf("creating the migrations directory %s: %w", dir, err)
+	}
+
+	entries, err := fs.ReadDir(pb.Migrations(), ".")
+	if err != nil {
+		return "", fmt.Errorf("reading the embedded migrations: %w", err)
+	}
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		content, err := fs.ReadFile(pb.Migrations(), entry.Name())
+		if err != nil {
+			return "", fmt.Errorf("reading the embedded migration %s: %w", entry.Name(), err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, entry.Name()), content, 0o644); err != nil {
+			return "", fmt.Errorf("writing the migration %s: %w", entry.Name(), err)
+		}
+	}
+
+	return dir, nil
 }
 
 // issueDefaults assigns the per-team issue number and the default board

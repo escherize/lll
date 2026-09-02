@@ -38,7 +38,7 @@ fn up_spec() -> Slice<flags.Flag> {
       name: "--pb-dir",
       value: true,
       hint: "pb/pb_data",
-      help: "PocketBase data directory (migrations stay cwd-relative)",
+      help: "PocketBase data directory (migrations ship in the binary)",
       ..,
     },
     flags.Flag {
@@ -80,12 +80,11 @@ pub fn up(args: Slice<string>) -> Result<(), string> {
   let pb_dir = if pb_dir == "" { "pb/pb_data" } else { pb_dir }
   let open = !p.given("--no-open")
 
-  // PocketBase reads these from disk relative to the working directory. Missing
-  // them does not fail loudly — it boots an unmigrated database whose first API
-  // call returns 404 "Missing collection context", a long way from the cause.
-  check_pb_dir("pb/pb_migrations")?
-
-  let cfg = config.load()?
+  // Traced, not plain `load()`: TASK-115 needs to know not just WHICH team was
+  // configured but where it came from. A team already written in a config file
+  // needs no persisting; one that came from LLL_TEAM (or from the prompt) does,
+  // or the next boot in this directory asks the same question again.
+  let (cfg, src) = config.load_traced()?
   let mut db_url = cfg.url
 
   // A configured REMOTE url plus local-data flags is a contradiction, and the
@@ -125,13 +124,7 @@ check 'lll config --list', or pin a local url: LLL_URL=http://127.0.0.1:8090 lll
     db_url = f"http://{bind_addr()}:{db_port}"
 
     task {
-      match gopb.Serve(
-        pb_dir,
-        f"{bind_addr()}:{db_port}",
-        "pb/pb_migrations",
-        email,
-        pass,
-      ) {
+      match gopb.Serve(pb_dir, f"{bind_addr()}:{db_port}", email, pass) {
         Err(e) => {
           fmt.Println(f"pocketbase failed to start: {e}")
           fmt.Println(
@@ -197,7 +190,13 @@ superuser credentials, or set LLL_TOKEN to a member token.",
   // An unscoped board cannot create issues, and a configured-but-missing
   // team is fatal further down, so settle the team here: `lll up` on a fresh
   // data dir must just work.
-  let team = ensure_team(cfg.team)?
+  // A boot that named its own data directory is a throwaway or a scratch board
+  // (that is what e2e and `mise run scratch` pass), and the team it settles is
+  // a fact about that database, not about this checkout - so it is not
+  // persisted. Persisting it would put a .lll.toml into whatever directory the
+  // scratch board ran in, which is the TASK-143 stray exactly.
+  let throwaway = p.one("--pb-dir") != ""
+  let team = ensure_team(cfg.team, src.team, throwaway)?
   let _ = os.Setenv("LLL_TEAM", team)
   let me = ensure_me(cfg.me)?
   let chosen = free_port(web_port)
@@ -216,16 +215,6 @@ superuser credentials, or set LLL_TOKEN to a member token.",
     }
   }
   run_server(chosen, refresh)
-}
-
-/// PocketBase's migrations are cwd-relative, so `lll up` only works
-/// from the checkout root. Say so before starting anything, rather than letting
-/// an unmigrated database 404 later.
-fn check_pb_dir(path: string) -> Result<(), string> {
-  if os.Stat(path).is_ok() { return Ok(()) }
-  Err(
-    f"{path}/ not found — run 'lll up' from the lll checkout root; PocketBase's migrations are read from disk",
-  )
 }
 
 fn print_up_usage() {
@@ -249,6 +238,10 @@ CLI always agree; with nothing on stdin to answer with (scripts, agents, CI)
 it refuses to start rather than run on a team only this process knows about.
 'lll attach' settles the same question up front, without a boot.
 
+Whichever way the team was settled, it is written to .lll.toml unless a
+config file already supplies it, so the NEXT boot in this directory needs no
+LLL_TEAM and no prompt.
+
 The board is gated: it answers only requests carrying its board token.
 LLL_BOARD_TOKEN sets that token; otherwise one is generated per boot and
 printed in the banner as a login URL — open it once and the browser keeps
@@ -268,23 +261,32 @@ a shared machine: 'lll config set me <name>' fixes it.",
 /// .lll.toml — the board and the CLI must not disagree about the team, so a
 /// team that lives only in this process is not an option. No one to ask
 /// (stdin is not a terminal: scripts, agents, CI) means no boot.
-fn ensure_team(want: string) -> Result<string, string> {
+///
+/// `source` is where `want` came from, as `config.load_traced` reports it;
+/// `throwaway` is true when the boot named its own --pb-dir.
+///
+/// TASK-115: a boot that settles a team must leave it settled. `LLL_TEAM=X
+/// lll up` used to create the team, boot happily and persist NOTHING - the
+/// env var satisfied the config, so the code that writes .lll.toml was never
+/// reached, and the next boot without that env var failed with "no team
+/// configured" all over again. Persisting closes that loop, under two
+/// conditions that keep it from becoming TASK-143's stray-file bug:
+///
+///   - a `file:` source has persisted it already, so there is nothing to do
+///     and rewriting a committed .lll.toml on every boot would be churn;
+///   - a --pb-dir boot is a throwaway or a scratch board, and the team it
+///     settled is a fact about that database rather than about this
+///     directory. It is also the one kind of boot that runs in directories
+///     nobody attached on purpose, which is where a stray .lll.toml hurts.
+fn ensure_team(
+  want: string,
+  source: string,
+  throwaway: bool,
+) -> Result<string, string> {
   if want != "" {
-    if let Some(t) = find_team(want)? { return Ok(t.key) }
-    // Another lll up pointed at the same fresh server may create the team
-    // between our find and our create; the unique index rejects the loser,
-    // and the loser re-looks-up whoever won rather than failing the boot
-    // (the same bargain e2e.sh's seed_team runs on).
-    match create_team(want, want) {
-      Ok(created) => {
-        fmt.Println(f"created team {created.key}")
-        return Ok(created.key)
-      },
-      Err(_) => {
-        if let Some(t) = find_team(want)? { return Ok(t.key) }
-        return Err(f"could not create team '{want}' and none exists to reuse")
-      },
-    }
+    let key = resolve_team(want)?
+    if should_save_team(source, throwaway) { save_team(key)? }
+    return Ok(key)
   }
 
   let teams = list_teams()?
@@ -308,8 +310,42 @@ fn ensure_team(want: string) -> Result<string, string> {
       },
     }
   }
-  save_team(key)?
+  // Same bargain as the configured branch above. The source is "" here — the
+  // key was just typed, so no file supplies it yet and it is worth writing
+  // unless this is a scratch board (TASK-143).
+  if should_save_team("", throwaway) { save_team(key)? }
   Ok(key)
+}
+
+/// Whether a settled team key is worth writing to .lll.toml (TASK-115).
+/// Pure, and split out from ensure_team because it is the whole of the
+/// TASK-143 guard: a wrong answer here is a config file appearing in a
+/// directory nobody attached, which is a bug that shows up hours later
+/// somewhere else entirely.
+fn should_save_team(source: string, throwaway: bool) -> bool {
+  // A --pb-dir boot's team belongs to that database, not to this directory.
+  if throwaway { return false }
+  // A file already carries it; rewriting it every boot is churn.
+  !strings.HasPrefix(source, "file:")
+}
+
+/// A configured team key, created on the server if it is missing. Another
+/// lll up pointed at the same fresh server may create the team between our
+/// find and our create; the unique index rejects the loser, and the loser
+/// re-looks-up whoever won rather than failing the boot (the same bargain
+/// e2e.sh's seed_team runs on).
+fn resolve_team(want: string) -> Result<string, string> {
+  if let Some(t) = find_team(want)? { return Ok(t.key) }
+  match create_team(want, want) {
+    Ok(created) => {
+      fmt.Println(f"created team {created.key}")
+      Ok(created.key)
+    },
+    Err(_) => {
+      if let Some(t) = find_team(want)? { return Ok(t.key) }
+      Err(f"could not create team '{want}' and none exists to reuse")
+    },
+  }
 }
 
 /// Who the board and the CLI think you are. `lll up` already asks for a team

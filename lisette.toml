@@ -6,6 +6,7 @@ version = "0.1.0"
 "github.com/BurntSushi/toml" = "v1.6.0"
 "github.com/escherize/lll/gopb" = { path = "gopb" }
 "github.com/escherize/lll/web" = { path = "web" }
+"github.com/escherize/lll/pb" = { path = "pb" }
 "cloud.google.com/go/compute/metadata" = { version = "v0.3.0", via = ["golang.org/x/oauth2"] }
 "github.com/asaskevich/govalidator" = { version = "v0.0.0-20230301143203-a9d515a09cc2", via = ["github.com/pocketbase/ozzo-validation/v4"] }
 "github.com/chzyer/readline" = { version = "v1.5.1", via = ["github.com/google/pprof"] }

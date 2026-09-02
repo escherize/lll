@@ -19,7 +19,8 @@
 <meta charset="utf-8">
 <title>{{if .Page.Q}}{{.Page.Q}} · {{end}}Search · lll</title>
 <link rel="stylesheet" href="/static/theme.css">
-<script type="module" src="https://cdn.jsdelivr.net/gh/starfederation/datastar@v1.0.3/bundles/datastar.js" integrity="sha384-yHqFPXJio1slWODLf67ZFfuDhhPUccOzGpGJF0d5fitjEfihEVrVvzMsfH8TxCiO" crossorigin="anonymous"></script>
+<!-- Vendored rather than CDN (TASK-74); see board.html for why. -->
+<script type="module" src="/static/datastar.js"></script>
 </head>
 <body>
 {{template "icons"}}

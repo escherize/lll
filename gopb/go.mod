@@ -3,9 +3,15 @@ module github.com/escherize/lll/gopb
 go 1.27
 
 require (
+	github.com/escherize/lll/pb v0.0.0
 	github.com/pocketbase/dbx v1.12.0
 	github.com/pocketbase/pocketbase v0.40.1
 )
+
+// pb holds the embedded migrations. It is a sibling directory, never published,
+// and gopb is its only importer -- Lisette does not import it, so unlike web it
+// needs no lisette.toml entry, only this replace (TASK-80).
+replace github.com/escherize/lll/pb => ../pb
 
 require (
 	github.com/asaskevich/govalidator v0.0.0-20230301143203-a9d515a09cc2 // indirect

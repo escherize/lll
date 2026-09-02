@@ -7,7 +7,8 @@
 <title>{{.Page.Key}} · lll</title>
 <link rel="stylesheet" href="/static/theme.css">
 {{template "accent-head" .Rail}}
-<script type="module" src="https://cdn.jsdelivr.net/gh/starfederation/datastar@v1.0.3/bundles/datastar.js" integrity="sha384-yHqFPXJio1slWODLf67ZFfuDhhPUccOzGpGJF0d5fitjEfihEVrVvzMsfH8TxCiO" crossorigin="anonymous"></script>
+<!-- Vendored rather than CDN (TASK-74); see board.html for why. -->
+<script type="module" src="/static/datastar.js"></script>
 <script src="/static/mermaid-init.js" defer></script>
 </head>
 <body data-init="@get('/events?page=issue&key={{.Page.Key}}')" data-on:pageshow__window="evt.persisted && window.location.reload()">

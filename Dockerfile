@@ -1,6 +1,9 @@
-# TASK-171: the container lll runs in on Fly. The image carries the checkout,
-# not just the binary: `lll up` reads pb/pb_migrations and pb/pb_hooks from
-# disk relative to the WORKDIR, so those paths must exist at runtime.
+# TASK-171: the container lll runs in on Fly. The image carries the checkout
+# rather than just the binary, for the web assets' sake; pb_migrations no longer
+# needs it. TASK-80 embedded them in the binary (pb/embed.go) and `lll up`
+# unpacks them into the data dir on boot, so no pb/ path has to exist at
+# runtime. (pb/pb_hooks named here has not existed for a while either - those
+# hooks are Go now, in gopb.)
 #
 # The build stage is PLAIN `go build` over Go that `lis emit` produced on the
 # deploying machine — lis never runs in the container, because lis (0.11.3 and

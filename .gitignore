@@ -1,5 +1,11 @@
 .private/
-.private-remote
+# TASK-88: .private-remote is NOT ignored. It holds the sidecar's git URL and
+# nothing else - the repo it names is private and access is controlled by SSH
+# keys, so the URL is not a credential. Ignoring it made CLAUDE.md's bootstrap
+# line `git clone "$(cat .private-remote)" .private` unrunnable in exactly the
+# situation it exists for: a fresh clone, where the file it reads was never
+# committed. That happened for real; the remote had to be recovered by listing
+# GitHub repos and guessing.
 target/
 pb/pocketbase
 pb/pb_data/

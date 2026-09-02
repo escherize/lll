@@ -186,8 +186,24 @@ If a failure looks unrelated to your change, **re-run the same tree two or three
 times before concluding you caused it.** A flaky assertion here once caused
 finished work to be parked as broken.
 
-If you run a server by hand while others might be running one too, isolate it:
-`LLL_URL=http://127.0.0.1:<free-port> lll up --port <free-port> --pb-dir <your-own-dir> --no-open`.
+If you run a server by hand while others might be running one too, do not
+hand-roll the isolation — `mise run scratch` is it:
+
+```sh
+mise run scratch              # free ports, a temp --pb-dir, safe in parallel
+mise run scratch -- --no-open # extra flags pass straight through to lll up
+```
+
+It picks both ports by BINDING them (a liveness probe cannot tell a free port
+from a stranger's server), puts the database in a fresh temp directory, and
+prints all three so you can point a CLI at it:
+`LLL_URL=http://127.0.0.1:<db-port> lll issue list`. The data dir is temporary
+and is not cleaned up for you; the banner shows the `rm -rf` to run.
+
+`mise run dev` is the OTHER thing: it hardcodes port 8100 and `pb/pb_data`, so
+it is the shared local board and two of them collide. Use it when you want the
+persistent one, `scratch` when you want a board to poke at.
+
 Never `pkill -f "bin/lll up"` — the pattern matches every worktree's identical
 binary path and kills every sibling agent's server. Kill only PIDs you started.
 
