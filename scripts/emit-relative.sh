@@ -12,8 +12,26 @@ set -euo pipefail
 bash scripts/lis-typedefs-workaround.sh
 lis emit >/dev/null
 
-# relative replace paths: target/../gopb and target/../web hold the path
-# deps wherever target/ lands. -i.bak + rm works with BSD and GNU sed.
-sed -i.bak -E 's|replace (github.com/escherize/lll/[a-z]+) => .*/(gopb\|web)$|replace \1 => ../\2|' target/go.mod
+# relative replace paths: target/../<mod> holds each path dep wherever target/
+# lands. -i.bak + rm works with BSD and GNU sed.
+#
+# The module name comes from the LEFT side, not from a list of known
+# directories. An earlier version matched `(gopb|web)` on the right and so
+# silently skipped `pb` when TASK-80 added it, which got as far as a Fly build
+# failing on `replacement directory /var/folders/.../pb does not exist`.
+# Enumerating the modules here means every new one is a deploy-time surprise;
+# deriving it means there is nothing to keep in sync. (Matching on the right
+# would also be a trap: `gopb` ends with `pb`, so a careless alternation
+# rewrites the tail of the wrong path.)
+sed -i.bak -E 's|^replace (github.com/escherize/lll/([a-z]+)) => /.*$|replace \1 => ../\2|' target/go.mod
 rm -f target/go.mod.bak
+
+# Nothing absolute may survive: a leftover path is a macOS path inside a linux
+# container, and the failure lands minutes later in a Docker layer rather than
+# here. Fail at the source instead.
+if grep -qE '^replace .* => /' target/go.mod; then
+  echo "emit-relative: an absolute replace path survived the rewrite:" >&2
+  grep -nE '^replace .* => /' target/go.mod >&2
+  exit 1
+fi
 grep -n "replace" target/go.mod
