@@ -34,6 +34,10 @@ pub struct Parsed {
 /// `usage` when one is given. A value flag consumes the next argument
 /// without looking at it; missing values error naming the typed spelling.
 /// A required flag that never appeared errors with `usage: <usage>`.
+///
+/// A dash-prefixed argument may also carry its value inline as
+/// `--flag=value` (TASK-165), split at the FIRST equals so the value may
+/// contain more. A boolean spelt that way (`--json=1`) is an error.
 pub fn parse(
   spec: Slice<Flag>,
   args: Slice<string>,
@@ -46,6 +50,25 @@ pub fn parse(
   let mut i = start
   while i < args.length() {
     let arg = args[i]
+    // `--flag=value` (TASK-165). Split ONCE, so a value may itself contain
+    // an equals sign: `--filter=a=b` is the value `a=b`. SplitN, not Index +
+    // substring: strings.Index returns a BYTE offset while substring takes
+    // RUNE indices, and the two disagree on any multi-byte character.
+    if arg.starts_with("-") && arg.contains("=") {
+      let parts = strings.SplitN(arg, "=", 2)
+      let spelling = parts[0]
+      let Some(fl) = spec.find(|f| f.name == spelling || (f.alias != "" && f.alias == spelling)) else {
+        return Err(unknown_flag(arg, usage))
+      }
+      // A boolean given a value is a mistake, not a truthy string: `--json=0`
+      // would otherwise read as "json on". Reject it naming the flag.
+      if !fl.value {
+        return Err(f"{spelling} takes no value")
+      }
+      vals[fl.name] = vals.get(fl.name).unwrap_or([]).append(parts[1])
+      i += 1
+      continue
+    }
     let Some(fl) = spec.find(|f| f.name == arg || (f.alias != "" && f.alias == arg)) else {
       if arg.starts_with("-") || !allow_positional {
         return Err(unknown_flag(arg, usage))

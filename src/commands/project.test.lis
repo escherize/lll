@@ -1,0 +1,55 @@
+import "go:strings"
+
+import "flags"
+
+// Unit cover for the pure helpers behind `lll project edit|delete`
+// (TASK-131). The shared delete guard is asserted in label.test.lis; what is
+// here is what is specific to projects.
+
+/// A status typo must be caught before anything is written, so `--status
+/// stated` cannot half-apply a rename that shipped in the same command.
+#[test]
+fn check_status_rejects_a_typo_and_lists_the_real_ones() {
+  let Err(msg) = check_status("stated") else {
+    assert false
+    return
+  }
+  assert strings.Contains(msg, "unknown status 'stated'")
+  assert strings.Contains(msg, "planned")
+  assert strings.Contains(msg, "cancelled")
+}
+
+#[test]
+fn check_status_accepts_every_lifecycle_status() {
+  for s in project_statuses() {
+    assert check_status(s).is_ok()
+  }
+}
+
+/// completions and --help both read the spec table, so a verb missing from it
+/// is a verb the shell cannot complete (TASK-127's whole point).
+#[test]
+fn project_verb_spec_covers_the_new_verbs() {
+  assert strings.Join(flags.tokens(project_verb_spec("edit")), " ") == "-n -d --status"
+  assert strings.Join(flags.tokens(project_verb_spec("delete")), " ") == "--force"
+}
+
+/// --force takes no value: `lll project delete Apollo --force` must not
+/// swallow a following argument.
+#[test]
+fn project_force_is_a_boolean_flag() {
+  let Some(force) = project_delete_spec().find(|f| f.name == "--force") else {
+    assert false
+    return
+  }
+  assert !force.value
+}
+
+/// Unlike create, edit's -n is optional - `lll project edit Apollo --status
+/// started` re-statuses without renaming.
+#[test]
+fn project_edit_requires_no_flag_by_itself() {
+  for fl in project_edit_spec() {
+    assert !fl.required
+  }
+}

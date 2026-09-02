@@ -1,6 +1,7 @@
 import "go:encoding/json"
 import "go:fmt"
 import "go:net/url"
+import "go:strings"
 
 import "models"
 import "pb"
@@ -16,6 +17,8 @@ pub fn label(args: Slice<string>) -> Result<(), string> {
   match verb {
     "list" => label_list(args),
     "create" => label_create(args),
+    "edit" => label_edit(args),
+    "delete" => label_delete(args),
     "--help" => {
       label_usage()
       Ok(())
@@ -40,7 +43,14 @@ Usage:
                                                  create a label (--team defaults
                                                  to LLL_TEAM); check 'lll label
                                                  list' first — reuse over
-                                                 near-duplicates (bug/bugs/defect)",
+                                                 near-duplicates (bug/bugs/defect)
+  lll label edit NAME [-n \"new name\"] [-c \"#5e6ad2\"]
+                                                 rename or recolor a label; the
+                                                 label keeps its issues
+  lll label delete NAME [--force]                delete a label; refuses while
+                                                 issues still carry it, and
+                                                 --force drops it off all of
+                                                 them",
   )
 }
 
@@ -86,12 +96,27 @@ fn label_create_spec() -> Slice<flags.Flag> {
   ]
 }
 
+fn label_edit_spec() -> Slice<flags.Flag> {
+  [
+    flags.Flag { name: "-n", value: true, hint: "\"name\"", help: "new label name", .. },
+    flags.Flag { name: "-c", value: true, hint: "\"#5e6ad2\"", help: "new hex color for the label", .. },
+  ]
+}
+
+fn label_delete_spec() -> Slice<flags.Flag> {
+  [
+    flags.Flag { name: "--force", help: "delete even while issues carry the label", .. },
+  ]
+}
+
 /// The flag table of one label verb; empty for verbs without flags. Read by
 /// `lll completions` so the scripts complete exactly what the parser accepts.
 pub fn label_verb_spec(verb: string) -> Slice<flags.Flag> {
   match verb {
     "create" => label_create_spec(),
     "list" => label_list_spec(),
+    "edit" => label_edit_spec(),
+    "delete" => label_delete_spec(),
     _ => [],
   }
 }
@@ -120,6 +145,83 @@ fn label_create(args: Slice<string>) -> Result<(), string> {
   }
   fmt.Println(f"Created label {created.name}")
   Ok(())
+}
+
+fn label_edit(args: Slice<string>) -> Result<(), string> {
+  let spec = label_edit_spec()
+  let usage = flags.usage("lll label edit", spec, "NAME")
+  let p = flags.parse(spec, args, 3, true, usage)?
+  let Some(name) = nonempty(p.first()) else {
+    return Err(f"usage: {usage}")
+  }
+  if !p.given("-n") && !p.given("-c") {
+    return Err(f"nothing to update — pass -n or -c\nusage: {usage}")
+  }
+  let label = resolve_label(configured_team_id()?, name)?
+
+  let mut fields: Slice<string> = []
+  if p.given("-n") { fields = fields.append("\"name\":" + json_quote(p.one("-n"))?) }
+  if p.given("-c") { fields = fields.append("\"color\":" + json_quote(p.one("-c"))?) }
+  let _ = pb.patch(
+    f"/api/collections/labels/records/{label.id}",
+    "{" + strings.Join(fields, ",") + "}",
+  )?
+  fmt.Println(f"Updated label {name}")
+  Ok(())
+}
+
+/// TASK-131. `/settings` deletes a label with a bare `pb.delete` and no
+/// reference check (serve_settings.lis:282), so every issue still carrying it
+/// silently loses a label nobody asked to remove. Parity is about
+/// capabilities, not about copying that: the CLI counts first, always says
+/// the number, and refuses unless --force says the loss is intended.
+fn label_delete(args: Slice<string>) -> Result<(), string> {
+  let spec = label_delete_spec()
+  let usage = flags.usage("lll label delete", spec, "NAME")
+  let p = flags.parse(spec, args, 3, true, usage)?
+  let Some(name) = nonempty(p.first()) else {
+    return Err(f"usage: {usage}")
+  }
+  let label = resolve_label(configured_team_id()?, name)?
+  let used = issue_count(query.filter("", "", "", "", label.id, ""))?
+  if used > 0 && !p.given("--force") {
+    return Err(refuse_delete("label", name, used))
+  }
+  let _ = pb.delete(f"/api/collections/labels/records/{label.id}")?
+  fmt.Println(deleted_line("label", name, used))
+  Ok(())
+}
+
+/// The positional argument, or None when it was absent or blank. `flags`
+/// answers "" for both, and a blank name must not reach a name lookup.
+fn nonempty(value: string) -> Option<string> {
+  if strings.TrimSpace(value) == "" { return None }
+  Some(value)
+}
+
+/// How many issues match a filter. perPage=1 so PocketBase answers the count
+/// without a page of records, the same trick the settings sections use.
+fn issue_count(filter: string) -> Result<int, string> {
+  let mut list = models.IssueList { .. }
+  pb.fetch(
+    f"/api/collections/issues/records?perPage=1&fields=id&filter={url.QueryEscape(filter)}",
+    "issues",
+    &list,
+  )?
+  Ok(list.total_items)
+}
+
+/// The refusal a guarded delete answers with. Names the count and the exact
+/// command that overrides it, so the user never has to guess the flag.
+fn refuse_delete(kind: string, name: string, used: int) -> string {
+  f"{used} issue(s) still reference the {kind} '{name}' — deleting it drops the {kind} off them.\nRun 'lll {kind} delete {name} --force' to delete it anyway, or reassign those issues first."
+}
+
+/// What a completed delete prints. The count rides along even on the forced
+/// path, because "how many issues just changed" is the thing worth knowing.
+fn deleted_line(kind: string, name: string, used: int) -> string {
+  if used == 0 { return f"Deleted {kind} {name}" }
+  f"Deleted {kind} {name} (dropped from {used} issue(s))"
 }
 
 /// Resolve one team's label by name; unknown names error with the fix. An

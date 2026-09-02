@@ -1,12 +1,14 @@
 import "go:encoding/json"
 import "go:fmt"
 import "go:net/url"
+import "go:strings"
 
 import "config"
 import "flags"
 import "models"
 import "pb"
 import "query"
+import "theme"
 
 /// Dispatch `lll team <verb>`.
 pub fn team(args: Slice<string>) -> Result<(), string> {
@@ -18,6 +20,8 @@ pub fn team(args: Slice<string>) -> Result<(), string> {
     "list" => team_list(args),
     "create" => team_create(args),
     "view" => team_view(args),
+    "rename" => team_rename(args),
+    "set-accent" => team_set_accent(args),
     "archive" => team_set_archived(args, true),
     "unarchive" => team_set_archived(args, false),
     "--help" => {
@@ -39,9 +43,18 @@ fn team_usage() {
 Usage:
   lll team list [--archived]         list teams (KEY, name); --archived includes archived ones
   lll team create -k KEY -n \"Name\"   create a team
-  lll team view KEY                  show a team and its issue count
+  lll team view KEY                  show a team, its accent and its issue count
+  lll team rename KEY [-k NEW] [-n \"Name\"]  change a team's key, its name, or both
+  lll team set-accent KEY #rrggbb    set the board accent colour ('' clears it)
   lll team archive KEY               hide the team from lists and the board rail (data kept)
-  lll team unarchive KEY             bring an archived team back",
+  lll team unarchive KEY             bring an archived team back
+
+Renaming the key rewrites nothing else, because issue keys are derived from it
+(team key + number), so every key on the board and in the CLI follows at once.
+Three things do NOT follow (TASK-87):
+  - the 'team =' line in .lll.toml, and LLL_TEAM — rerun 'lll attach -k NEW'
+  - git branches already named eng-12-slug keep the old key
+  - OLD-1 mentions inside descriptions and comment bodies are stored text",
   )
 }
 
@@ -98,11 +111,28 @@ fn team_create_spec() -> Slice<flags.Flag> {
   ]
 }
 
+/// `rename` takes the same two fields `create` does, both optional: they are
+/// different things (KEY is the derived-issue-key prefix, name is prose), and
+/// a rename that insisted on both would force a no-op edit of the other.
+fn team_rename_spec() -> Slice<flags.Flag> {
+  [
+    flags.Flag {
+      name: "-k",
+      value: true,
+      hint: "KEY",
+      help: "new team key (e.g. ENG); issue keys follow immediately",
+      ..
+    },
+    flags.Flag { name: "-n", value: true, hint: "\"Name\"", help: "new team name", .. },
+  ]
+}
+
 /// The flag table of one team verb; empty for verbs without flags. Read by
 /// `lll completions` so the scripts complete exactly what the parser accepts.
 pub fn team_verb_spec(verb: string) -> Slice<flags.Flag> {
   match verb {
     "create" => team_create_spec(),
+    "rename" => team_rename_spec(),
     "list" => team_list_spec(),
     _ => [],
   }
@@ -118,6 +148,157 @@ fn team_create(args: Slice<string>) -> Result<(), string> {
   let created = create_team(key, name)?
   fmt.Println(f"Created team {created.key}: {created.name}")
   Ok(())
+}
+
+/// The rename PATCH body. PocketBase replaces every field it is handed, so
+/// each rename sends only the fields it was asked to change: a `-n`-only
+/// rename must not carry `key` and blank it.
+#[json]
+struct TeamKeyPatch { key: string }
+
+#[json]
+struct TeamNamePatch { name: string }
+
+#[json]
+struct TeamRenamePatch { key: string, name: string }
+
+/// `lll team rename KEY [-k NEW] [-n "Name"]` — TASK-87.
+///
+/// The rename itself is one PATCH to one record: issue keys are DERIVED
+/// (team key + number) and never stored, so ENG-1 becomes PLAT-1 on the
+/// board, in `issue list` and in every URL the moment the PATCH lands. What
+/// does not follow is stored text, and the caller has to be told which
+/// (see team_rename_collateral).
+fn team_rename(args: Slice<string>) -> Result<(), string> {
+  let spec = team_rename_spec()
+  let usage = flags.usage("lll team rename", spec, "KEY")
+  let p = flags.parse(spec, args, 3, true, usage)?
+  let key = p.first()
+  if key == "" {
+    return Err(f"usage: {usage}")
+  }
+  let new_key = p.one("-k")
+  let new_name = p.one("-n")
+  if new_key == "" && new_name == "" {
+    return Err(f"nothing to rename — give -k, -n, or both\nusage: {usage}")
+  }
+  let Some(t) = find_team(key)? else {
+    return Err(unknown_team(key))
+  }
+  // teams.key carries a unique index, so a collision would otherwise surface
+  // as a raw PocketBase validation error. Saying which key is taken is the
+  // more useful answer: the fix is a different key, not a retry.
+  if new_key != "" && new_key != t.key {
+    let taken = find_team(new_key)?
+    if taken.is_some() {
+      return Err(f"a team with key '{new_key}' already exists — see 'lll team list'")
+    }
+  }
+
+  let payload = rename_payload(new_key, new_name)?
+  let _ = pb.patch(f"/api/collections/teams/records/{t.id}", payload)?
+
+  let mut final_key = t.key
+  if new_key != "" { final_key = new_key }
+  let mut final_name = t.name
+  if new_name != "" { final_name = new_name }
+  fmt.Println(f"Renamed team {t.key}: {final_key} — {final_name}")
+  for line in team_rename_collateral(t.key, final_key) {
+    fmt.Println(line)
+  }
+  Ok(())
+}
+
+/// The PATCH body for whichever of key/name was given. "" means "not given",
+/// which is why neither field can be cleared by rename: a team with no key
+/// has no issue keys, and a nameless team is a blank row in the rail.
+fn rename_payload(new_key: string, new_name: string) -> Result<string, string> {
+  let marshalled = if new_key != "" && new_name != "" {
+    json.Marshal(TeamRenamePatch { key: new_key, name: new_name })
+  } else if new_key != "" {
+    json.Marshal(TeamKeyPatch { key: new_key })
+  } else {
+    json.Marshal(TeamNamePatch { name: new_name })
+  }
+  match marshalled {
+    Ok(p) => Ok(p as string),
+    Err(e) => Err(f"encoding team patch: {e}"),
+  }
+}
+
+/// What a KEY change does NOT rewrite (TASK-87). Derived issue keys follow
+/// instantly; stored text does not, and every line here is a thing the user
+/// must go fix by hand. A name-only rename has no collateral at all, so it
+/// prints none.
+fn team_rename_collateral(old_key: string, new_key: string) -> Slice<string> {
+  if old_key == new_key { return [] }
+  [
+    f"Issue keys follow immediately ({old_key}-1 is now {new_key}-1). These do not:",
+    f"  - .lll.toml / LLL_TEAM still say {old_key} — 'lll attach -k {new_key}'",
+    f"  - git branches already named {strings.ToLower(old_key)}-12-slug keep the old key",
+    f"  - {old_key}-1 mentions inside descriptions and comment bodies are stored text",
+  ]
+}
+
+/// `lll team set-accent KEY #rrggbb` — TASK-100. The accent was the one
+/// shared field only the web could write (TASK-83's colour picker), which
+/// inverts the rule TASK-83 was built on.
+fn team_set_accent(args: Slice<string>) -> Result<(), string> {
+  let Some(key) = args.get(3) else {
+    return Err("usage: lll team set-accent KEY #rrggbb (empty '' clears it)")
+  }
+  let Some(raw) = args.get(4) else {
+    return Err("usage: lll team set-accent KEY #rrggbb (empty '' clears it)")
+  }
+  // The colour is checked before the lookup: a typo is the likelier mistake
+  // of the two, and it should not cost a round trip to hear about.
+  let hex = accent_value(raw)?
+  let Some(t) = find_team(key)? else {
+    return Err(unknown_team(key))
+  }
+  let payload = match json.Marshal(TeamAccentPatch { accent: hex }) {
+    Ok(p) => p as string,
+    Err(e) => return Err(f"encoding team patch: {e}"),
+  }
+  let _ = pb.patch(f"/api/collections/teams/records/{t.id}", payload)?
+  if hex == "" {
+    fmt.Println(f"Cleared the accent for {t.key} — back to the canonical orange")
+  } else {
+    fmt.Println(f"Accent for {t.key} is now {hex}")
+  }
+  Ok(())
+}
+
+/// The accent to store for a typed argument, matching what /settings stores
+/// (serve_settings.lis form_hex): "" clears, an unparseable colour is a user
+/// error rather than a silent fallback, and the canonical orange is stored as
+/// "no choice" so a team that picks it back gets theme.css's exact tokens.
+/// Validation is theme.normalize_hex, the same one the board renders with —
+/// a second hex parser here is how the two surfaces would come to disagree.
+fn accent_value(raw: string) -> Result<string, string> {
+  let trimmed = strings.TrimSpace(raw)
+  if trimmed == "" { return Ok("") }
+  let hex = theme.normalize_hex(trimmed)
+  if hex == "" {
+    return Err(f"'{raw}' is not a #rrggbb colour (e.g. #f0883e)")
+  }
+  if hex == "#f0883e" { return Ok("") }
+  Ok(hex)
+}
+
+/// The one PATCH body set-accent needs: PocketBase replaces every field it is
+/// handed, so the patch carries `accent` and nothing else.
+#[json]
+struct TeamAccentPatch { accent: string }
+
+/// The accent line for `team view`. A stored value that theme.normalize_hex
+/// refuses is what the board falls back on too, so the CLI says so rather
+/// than printing a colour no page is actually using.
+fn view_accent(stored: string) -> string {
+  if stored == "" { return "#f0883e (default)" }
+  let hex = theme.normalize_hex(stored)
+  if hex == "" { return f"#f0883e (default; stored '{stored}' is not a #rrggbb colour)" }
+  hex
 }
 
 /// Create a team. Shared by `lll team create` and `lll up`'s first-boot
@@ -258,6 +439,9 @@ fn team_view(args: Slice<string>) -> Result<(), string> {
 
   fmt.Println(f"Key:    {t.key}")
   fmt.Println(f"Name:   {t.name}")
+  // The stored value is what /settings wrote, so it goes through the same
+  // normalizer the board renders with; "" is the canonical orange (TASK-100).
+  fmt.Println(f"Accent: {view_accent(t.accent)}")
   fmt.Println(f"Issues: {issues.total_items}")
   if t.archived {
     fmt.Println("Archived: yes ('lll team unarchive' brings it back)")

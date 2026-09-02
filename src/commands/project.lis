@@ -18,6 +18,8 @@ pub fn project(args: Slice<string>) -> Result<(), string> {
     "list" => project_list(args),
     "create" => project_create(args),
     "view" => project_view(args),
+    "edit" => project_edit(args),
+    "delete" => project_delete(args),
     "--help" => {
       project_usage()
       Ok(())
@@ -49,6 +51,12 @@ Usage:
   lll project create -n \"name\" [-d desc] [--status s] [--team KEY]
                                       create a project (status defaults to
                                       planned; --team defaults to LLL_TEAM)
+  lll project edit NAME [-n \"new name\"] [-d desc] [--status s]
+                                      rename, re-describe or re-status a
+                                      project; it keeps its issues
+  lll project delete NAME [--force]   delete a project; refuses while issues
+                                      still belong to it, and --force drops it
+                                      off all of them
 
 Statuses: planned, started, paused, completed, cancelled",
   )
@@ -96,6 +104,20 @@ fn project_create_spec() -> Slice<flags.Flag> {
   ]
 }
 
+fn project_edit_spec() -> Slice<flags.Flag> {
+  [
+    flags.Flag { name: "-n", value: true, hint: "\"name\"", help: "new project name", .. },
+    flags.Flag { name: "-d", value: true, hint: "desc", help: "new project description", .. },
+    flags.Flag { name: "--status", value: true, hint: "s", help: "planned, started, paused, completed, or cancelled", .. },
+  ]
+}
+
+fn project_delete_spec() -> Slice<flags.Flag> {
+  [
+    flags.Flag { name: "--force", help: "delete even while issues belong to the project", .. },
+  ]
+}
+
 /// The flag table of one project verb; empty for verbs without flags. Read
 /// by `lll completions` so the scripts complete exactly what the parser
 /// accepts.
@@ -103,6 +125,8 @@ pub fn project_verb_spec(verb: string) -> Slice<flags.Flag> {
   match verb {
     "create" => project_create_spec(),
     "list" => project_list_spec(),
+    "edit" => project_edit_spec(),
+    "delete" => project_delete_spec(),
     _ => [],
   }
 }
@@ -140,6 +164,55 @@ fn project_create(args: Slice<string>) -> Result<(), string> {
     return Err(f"decoding created project: {e}")
   }
   fmt.Println(f"Created project {created.name} ({created.status})")
+  Ok(())
+}
+
+fn project_edit(args: Slice<string>) -> Result<(), string> {
+  let spec = project_edit_spec()
+  let usage = flags.usage("lll project edit", spec, "NAME")
+  let p = flags.parse(spec, args, 3, true, usage)?
+  let Some(name) = nonempty(p.first()) else {
+    return Err(f"usage: {usage}")
+  }
+  if !p.given("-n") && !p.given("-d") && !p.given("--status") {
+    return Err(f"nothing to update — pass -n, -d or --status\nusage: {usage}")
+  }
+  // Validate before the lookup: a typo'd status should cost no round trip and
+  // must not leave a half-applied patch behind.
+  let mut status = ""
+  if p.given("--status") { status = check_status(p.one("--status"))? }
+  let project = resolve_project(configured_team_id()?, name)?
+
+  let mut fields: Slice<string> = []
+  if p.given("-n") { fields = fields.append("\"name\":" + json_quote(p.one("-n"))?) }
+  if p.given("-d") { fields = fields.append("\"description\":" + json_quote(p.one("-d"))?) }
+  if status != "" { fields = fields.append("\"status\":" + json_quote(status)?) }
+  let _ = pb.patch(
+    f"/api/collections/projects/records/{project.id}",
+    "{" + strings.Join(fields, ",") + "}",
+  )?
+  fmt.Println(f"Updated project {name}")
+  Ok(())
+}
+
+/// TASK-131, same guard as `label delete` and for the same reason: the web's
+/// delete (serve_settings.lis:282) is a bare `pb.delete`, so an issue's
+/// project quietly disappears from underneath it. Count, say the number,
+/// refuse unless --force.
+fn project_delete(args: Slice<string>) -> Result<(), string> {
+  let spec = project_delete_spec()
+  let usage = flags.usage("lll project delete", spec, "NAME")
+  let p = flags.parse(spec, args, 3, true, usage)?
+  let Some(name) = nonempty(p.first()) else {
+    return Err(f"usage: {usage}")
+  }
+  let project = resolve_project(configured_team_id()?, name)?
+  let used = issue_count(query.filter("", "", "", project.id, "", ""))?
+  if used > 0 && !p.given("--force") {
+    return Err(refuse_delete("project", name, used))
+  }
+  let _ = pb.delete(f"/api/collections/projects/records/{project.id}")?
+  fmt.Println(deleted_line("project", name, used))
   Ok(())
 }
 

@@ -110,9 +110,20 @@ fn issue_create_spec() -> Slice<flags.Flag> {
     },
     flags.Flag {
       name: "--priority",
+      alias: "-p",
       value: true,
       hint: "0-4",
       help: "0 none, 1 urgent (!!!), 2 high (!!), 3 medium (!), 4 low (·)",
+      ..,
+    },
+    // TASK-125: without this, every created issue landed in the default state
+    // and needed a follow-up 'issue update KEY --state x', so seeding a
+    // five-column board cost ten commands instead of five.
+    flags.Flag {
+      name: "--state",
+      value: true,
+      hint: "s",
+      help: "one of: backlog, todo, in-progress, in-review, done, cancelled\n(create defaults to todo)",
       ..,
     },
     flags.Flag {
@@ -142,6 +153,7 @@ fn issue_create_spec() -> Slice<flags.Flag> {
       help: "raw PocketBase JSON (team, assignee, labels, project\nexpanded), pipe-friendly",
       ..,
     },
+    flags.Flag { name: "--help", alias: "-h", hidden: true, help: "show this help", .. },
   ]
 }
 
@@ -401,10 +413,11 @@ fn print_usage() {
     "lll issue - work with issues
 
 Usage:
-  lll issue create -t \"title\" [-d desc] [--emoji X] [--priority 0-4] [--assignee name]
-                   [--label name]... [--project name] [--emoji e] [--json]
+  lll issue create -t \"title\" [-d desc] [--emoji X] [--priority 0-4] [--state s]
+                   [--assignee name] [--label name]... [--project name] [--json]
                                                   create an issue in the configured team;
-                                                  -d - reads the description from stdin
+                                                  -d - reads the description from stdin;
+                                                  without --state it starts in todo
   lll issue list [--state s] [--assignee name] [--label name] [--project name]
                  [--search q] [--sort f] [--limit N] [--json]
                                                   list issues; scoped to the configured team
@@ -448,9 +461,31 @@ The team comes from LLL_TEAM or 'team' in .lll.toml (see 'lll config --help').",
   )
 }
 
+fn print_create_usage() {
+  fmt.Println(
+    "lll issue create - create an issue in the configured team
+
+Usage:
+  " + flags.usage("lll issue create", issue_create_spec(), "") + "
+" +
+    flags.section(issue_create_spec()) +
+    "
+
+The team comes from LLL_TEAM or 'team' in .lll.toml (see 'lll config --help').
+Without --state the issue starts in todo; --label may be repeated.",
+  )
+}
+
 fn create(args: Slice<string>) -> Result<(), string> {
   let spec = issue_create_spec()
   let usage = flags.usage("lll issue create", spec, "")
+  // --help before parse, because -t is required and the required check would
+  // otherwise answer 'usage:' to somebody who asked for the help (TASK-125).
+  // Same reason and same shape as 'lll member invite'.
+  if args.find(|a| a == "--help" || a == "-h").is_some() {
+    print_create_usage()
+    return Ok(())
+  }
   let p = flags.parse(spec, args, 3, false, usage)?
   let title = p.one("-t")
   let mut description = ""
@@ -458,6 +493,10 @@ fn create(args: Slice<string>) -> Result<(), string> {
   let emoji = check_emoji(p.one("--emoji"))?
   let mut priority = 0
   if p.given("--priority") { priority = check_priority(p.one("--priority"))? }
+  // Same validator update calls, so create and update cannot disagree about
+  // what a state is; the list itself lives once in query.states().
+  let mut state = "todo"
+  if p.given("--state") { state = check_state(p.one("--state"))? }
   let assignee_name = p.one("--assignee")
   let label_names = p.all("--label")
   let project_name = p.one("--project")
@@ -485,7 +524,7 @@ fn create(args: Slice<string>) -> Result<(), string> {
     title,
     description,
     emoji,
-    state: "todo",
+    state,
     priority,
     assignee,
     project,

@@ -1,0 +1,134 @@
+import "go:strings"
+
+// Unit cover for the pure helpers behind `lll team set-accent` and
+// `lll team rename` (TASK-100, TASK-87). Everything here is a function of its
+// arguments alone — no PocketBase, no config.
+
+// ----------------------------------------------------------- accent_value
+
+/// The CLI must accept exactly what /settings accepts, because the two write
+/// the same column. normalize_hex is that shared rule; these assertions pin
+/// the wrapper around it, not a second parser.
+#[test]
+fn accent_value_takes_a_hex_in_either_case() {
+  let assert Ok(v) = accent_value("#A1B2C3")
+  assert v == "#a1b2c3"
+  let assert Ok(padded) = accent_value("  #a1b2c3  ")
+  assert padded == "#a1b2c3"
+}
+
+/// An unparseable colour is a user error rather than a silent fallback: a
+/// typed hex that quietly did nothing would be the worst of both, and the
+/// message has to name what was typed for the typo to be findable.
+#[test]
+fn accent_value_rejects_anything_that_is_not_rrggbb() {
+  let assert Err(e) = accent_value("notacolor")
+  assert strings.Contains(e, "notacolor")
+  assert strings.Contains(e, "#rrggbb")
+  assert accent_value("#abc").is_err()
+  assert accent_value("#12345g").is_err()
+  assert accent_value("#f0883e; } body { display:none").is_err()
+}
+
+/// "" clears the colour, matching the empty form field on /settings.
+#[test]
+fn accent_value_treats_an_empty_argument_as_clear() {
+  let assert Ok(v) = accent_value("")
+  assert v == ""
+  let assert Ok(blank) = accent_value("   ")
+  assert blank == ""
+}
+
+/// The canonical orange is stored as "no choice" so a team that picks it back
+/// renders theme.css's exact tokens instead of a derived copy of them — the
+/// same rule serve_settings.lis form_hex applies.
+#[test]
+fn accent_value_stores_the_canonical_orange_as_no_choice() {
+  let assert Ok(v) = accent_value("#f0883e")
+  assert v == ""
+  let assert Ok(upper) = accent_value("#F0883E")
+  assert upper == ""
+}
+
+// ------------------------------------------------------------ view_accent
+
+#[test]
+fn view_accent_names_the_default_when_nothing_is_stored() {
+  assert view_accent("") == "#f0883e (default)"
+}
+
+#[test]
+fn view_accent_shows_a_stored_colour_normalized() {
+  assert view_accent("#A1B2C3") == "#a1b2c3"
+}
+
+/// The board falls back to the default for a value it cannot parse, so
+/// `team view` must not print a colour no page is actually using.
+#[test]
+fn view_accent_reports_a_stored_value_the_board_cannot_use() {
+  let line = view_accent("bogus")
+  assert strings.Contains(line, "#f0883e (default")
+  assert strings.Contains(line, "bogus")
+}
+
+// --------------------------------------------------------- rename_payload
+
+/// PocketBase replaces every field the patch carries, so a name-only rename
+/// must not send `key` and blank it — that would delete every issue key on
+/// the board. The absence of the field is the whole test.
+#[test]
+fn rename_payload_sends_only_the_field_that_was_given() {
+  let assert Ok(name_only) = rename_payload("", "Platform")
+  assert strings.Contains(name_only, "\"name\":\"Platform\"")
+  assert !strings.Contains(name_only, "key")
+
+  let assert Ok(key_only) = rename_payload("PLAT", "")
+  assert strings.Contains(key_only, "\"key\":\"PLAT\"")
+  assert !strings.Contains(key_only, "name")
+}
+
+#[test]
+fn rename_payload_sends_both_when_both_were_given() {
+  let assert Ok(both) = rename_payload("PLAT", "Platform")
+  assert strings.Contains(both, "\"key\":\"PLAT\"")
+  assert strings.Contains(both, "\"name\":\"Platform\"")
+}
+
+// -------------------------------------------------- team_rename_collateral
+
+/// The collateral is the whole hazard of TASK-87: the key change itself is
+/// one PATCH, and what bites is the stored text that does not follow. Each
+/// line names one thing the user must go fix by hand.
+#[test]
+fn rename_collateral_names_the_three_things_that_do_not_follow() {
+  let lines = team_rename_collateral("ENG", "PLAT")
+  let out = strings.Join(lines, "\n")
+  assert strings.Contains(out, ".lll.toml")
+  assert strings.Contains(out, "LLL_TEAM")
+  assert strings.Contains(out, "lll attach -k PLAT")
+  assert strings.Contains(out, "git branches")
+  assert strings.Contains(out, "comment bodies")
+}
+
+/// Branch names are lowercased (eng-12-slug), so quoting the key verbatim
+/// would send the reader looking for a branch that never existed.
+#[test]
+fn rename_collateral_lowercases_the_key_in_the_branch_example() {
+  let out = strings.Join(team_rename_collateral("ENG", "PLAT"), "\n")
+  assert strings.Contains(out, "eng-12-slug")
+}
+
+/// Derived issue keys DO follow, and saying so is what stops the reader
+/// hunting for a migration that does not exist.
+#[test]
+fn rename_collateral_says_issue_keys_follow() {
+  let out = strings.Join(team_rename_collateral("ENG", "PLAT"), "\n")
+  assert strings.Contains(out, "ENG-1 is now PLAT-1")
+}
+
+/// A name-only rename touches no derived key, so there is nothing to warn
+/// about and a warning would be noise.
+#[test]
+fn rename_collateral_is_empty_when_the_key_did_not_change() {
+  assert team_rename_collateral("ENG", "ENG").is_empty()
+}

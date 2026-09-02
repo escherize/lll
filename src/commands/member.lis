@@ -20,7 +20,11 @@ pub fn member(args: Slice<string>) -> Result<(), string> {
   }
   match verb {
     "list" => member_list(args),
-    "add" => member_add(args),
+    // TASK-130: every sibling noun creates with `create` (label create -n,
+    // project create -n, team create -k, issue create -t), so member was the
+    // odd one out and a seed script guesses `create` every time. `add` stays
+    // the documented spelling; `create` is a second door onto the same room.
+    "add" | "create" => member_add(args),
     "invite" => member_invite(args),
     "set-password" => member_set_password(args),
     "--help" => {
@@ -42,6 +46,7 @@ fn member_usage() {
 Usage:
   lll member list                              list members (name, email)
   lll member add -n \"name\" [-e email]          add a member
+                                               ('create' is the same command)
   lll member invite NAME --email email         add + temp password + the lines
                                                they run (superuser only)
   lll member set-password NAME [--email email] set a member's login password
@@ -123,7 +128,7 @@ fn set_password_spec() -> Slice<flags.Flag> {
 /// `lll completions` so the scripts complete exactly what the parser accepts.
 pub fn member_verb_spec(verb: string) -> Slice<flags.Flag> {
   match verb {
-    "add" => member_add_spec(),
+    "add" | "create" => member_add_spec(),
     "invite" => member_invite_spec(),
     "list" => member_list_spec(),
     "set-password" => set_password_spec(),
@@ -340,7 +345,11 @@ has a synthesized @members.invalid one: the email is the identity
 
 fn member_add(args: Slice<string>) -> Result<(), string> {
   let spec = member_add_spec()
-  let usage = flags.usage("lll member add", spec, "")
+  // The usage line echoes the verb the user actually typed, so somebody who
+  // reached this through the TASK-130 `create` alias is not told to rerun a
+  // command they did not run.
+  let verb = args.get(2).unwrap_or("add")
+  let usage = flags.usage(f"lll member {verb}", spec, "")
   let p = flags.parse(spec, args, 3, false, usage)?
   let name = p.one("-n")
   let email = p.one("-e")

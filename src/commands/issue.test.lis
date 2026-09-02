@@ -1,3 +1,6 @@
+import "flags"
+import "query"
+
 // Unit cover for the pure helpers in issue.lis. Everything here is a function
 // of its arguments alone — no PocketBase, no config, no git.
 //
@@ -279,6 +282,88 @@ fn split_issue_key_error_quotes_the_input_and_the_expected_shape() {
   let assert Err(msg) = split_issue_key("héllo")
   assert msg.contains("'héllo' is not an issue ID")
   assert msg.contains("expected KEY-123")
+}
+
+// -------------------------------------------------- issue_create_spec
+
+/// TASK-125: create could not set a state, so every issue landed in the
+/// default and needed a follow-up 'issue update KEY --state x'.
+#[test]
+fn issue_create_spec_accepts_a_state() {
+  let spec = issue_create_spec()
+  let assert Some(state) = spec.find(|f| f.name == "--state")
+  assert state.value
+  // The parser has to see it, not just help: parse is what returned
+  // "unknown flag: '--state'".
+  let assert Ok(p) =
+    flags.parse(spec, ["lll", "issue", "create", "-t", "x", "--state", "done"], 3, false, "")
+  assert p.given("--state")
+  assert p.one("--state") == "done"
+}
+
+/// create and update validate against ONE list — query.states() — so the two
+/// verbs cannot drift about what a state is.
+#[test]
+fn create_and_update_share_one_state_validator() {
+  let assert Ok(ok) = check_state("in-review")
+  assert ok == "in-review"
+  let assert Err(msg) = check_state("nope")
+  assert msg.contains("unknown state 'nope'")
+  // The message enumerates query.states() rather than a second hand-written
+  // list, so adding a state cannot leave create behind.
+  for s in query.states() {
+    assert msg.contains(s)
+    let assert Ok(accepted) = check_state(s)
+    assert accepted == s
+  }
+}
+
+/// The default when --state is absent stays todo, so TASK-125 adds a door
+/// rather than moving where issues land.
+#[test]
+fn issue_create_without_a_state_flag_is_not_given() {
+  let assert Ok(p) =
+    flags.parse(issue_create_spec(), ["lll", "issue", "create", "-t", "x"], 3, false, "")
+  assert !p.given("--state")
+}
+
+/// TASK-125: the short -p every other value flag has a habit of offering.
+#[test]
+fn issue_create_spec_takes_p_as_short_for_priority() {
+  let spec = issue_create_spec()
+  let assert Ok(p) =
+    flags.parse(spec, ["lll", "issue", "create", "-t", "x", "-p", "2"], 3, false, "")
+  // The alias lands under the canonical name, so create reads one spelling.
+  assert p.one("--priority") == "2"
+  let assert Ok(two) = check_priority(p.one("--priority"))
+  assert two == 2
+}
+
+/// --help is hidden: it is a parser entry so 'issue create --help' is not an
+/// unknown flag, but it must not appear in help output or completions.
+#[test]
+fn issue_create_help_flag_is_hidden_from_help_and_completions() {
+  let spec = issue_create_spec()
+  let assert Some(help) = spec.find(|f| f.name == "--help")
+  assert help.hidden
+  assert flags.tokens(spec).find(|t| t == "--help").is_none()
+  assert !flags.usage("lll issue create", spec, "").contains("--help")
+  assert !flags.section(spec).contains("--help")
+}
+
+// ------------------------------------------------------- member create
+
+/// TASK-130: `member create` is an alias for `member add`, so both spellings
+/// resolve to the same flag table. Lives here rather than in member.test.lis
+/// because this shard's file list does not include that file.
+#[test]
+fn member_create_is_an_alias_for_member_add() {
+  let add = flags.tokens(member_verb_spec("add"))
+  let create = flags.tokens(member_verb_spec("create"))
+  assert create.equals(add)
+  // add is not weakened by the alias: it still carries the required -n.
+  let assert Some(n) = member_verb_spec("add").find(|f| f.name == "-n")
+  assert n.required
 }
 
 // ------------------------------------------------------------ json_quote

@@ -1,0 +1,97 @@
+import "go:strings"
+
+import "flags"
+
+// Unit cover for the pure helpers behind `lll label edit|delete` (TASK-131).
+// The network halves need a live PocketBase and are covered by e2e; what is
+// asserted here is the part that decides whether a delete happens at all.
+//
+// The guard IS the feature. `/settings` deletes a label with a bare pb.delete
+// and no reference check (serve_settings.lis:282), so issues carrying it lose
+// it silently. Parity with the web means the same capability, not the same
+// unsafety, and only an assertion on the refusal keeps it that way.
+
+// ------------------------------------------------------------- the guard
+
+/// A used label must not be deletable by accident, and the refusal has to
+/// carry both facts the user needs: how many issues, and the exact escape.
+#[test]
+fn refuse_delete_names_the_count_the_noun_and_the_override() {
+  let msg = refuse_delete("label", "bug", 7)
+  assert strings.Contains(msg, "7 issue(s)")
+  assert strings.Contains(msg, "'bug'")
+  assert strings.Contains(msg, "lll label delete bug --force")
+}
+
+/// The same helper serves projects, so the command it prints must follow the
+/// noun rather than hardcode 'label' - a copied-out wrong command is worse
+/// than no suggestion.
+#[test]
+fn refuse_delete_follows_the_noun() {
+  let msg = refuse_delete("project", "Apollo", 2)
+  assert strings.Contains(msg, "lll project delete Apollo --force")
+  assert !strings.Contains(msg, "lll label")
+}
+
+/// A forced delete still reports what it cost. Silence here would be the
+/// web's behaviour with an extra flag typed.
+#[test]
+fn deleted_line_reports_the_issues_a_forced_delete_touched() {
+  assert deleted_line("label", "bug", 3) == "Deleted label bug (dropped from 3 issue(s))"
+}
+
+/// Nothing referenced it, so there is nothing to warn about.
+#[test]
+fn deleted_line_is_plain_when_nothing_referenced_it() {
+  assert deleted_line("project", "Apollo", 0) == "Deleted project Apollo"
+}
+
+// ---------------------------------------------------------------- nonempty
+
+/// `flags` answers "" for both an absent positional and a blank one, and a
+/// blank name reaching resolve_label would query for the empty string and
+/// report "no label named ''". Both must be the usage error instead.
+#[test]
+fn nonempty_rejects_absent_and_blank_names() {
+  assert nonempty("").is_none()
+  assert nonempty("   ").is_none()
+}
+
+#[test]
+fn nonempty_keeps_a_real_name_verbatim() {
+  let Some(name) = nonempty("needs triage") else {
+    assert false
+    return
+  }
+  assert name == "needs triage"
+}
+
+// -------------------------------------------------------------- the specs
+
+/// completions and --help both read the spec table, so a verb missing from it
+/// is a verb the shell cannot complete (TASK-127's whole point).
+#[test]
+fn label_verb_spec_covers_the_new_verbs() {
+  assert strings.Join(flags.tokens(label_verb_spec("edit")), " ") == "-n -c"
+  assert strings.Join(flags.tokens(label_verb_spec("delete")), " ") == "--force"
+}
+
+/// --force takes no value: `lll label delete bug --force` must not swallow a
+/// following argument.
+#[test]
+fn force_is_a_boolean_flag() {
+  let Some(force) = label_delete_spec().find(|f| f.name == "--force") else {
+    assert false
+    return
+  }
+  assert !force.value
+}
+
+/// Unlike create, edit's -n is optional - `lll label edit bug -c "#f00"`
+/// recolors without renaming. A required -n would make that impossible.
+#[test]
+fn label_edit_requires_no_flag_by_itself() {
+  for fl in label_edit_spec() {
+    assert !fl.required
+  }
+}
