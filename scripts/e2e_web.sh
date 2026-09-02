@@ -1971,4 +1971,23 @@ assert_contains "$settings" "reuse beats near-duplicates" \
 assert_contains "$(wcurl -sf "$WEB/settings?raw")" "usage-hot # (ENG, 2 issues)" \
   "settings raw carries the label's usage count"
 
+# --- TASK-241: the API answers on the board's port, ungated ------------------
+# The failure this pins is TASK-213's: a user set url to the BOARD host, got a
+# bare "404 page not found" from a host that plainly answers, and burned a
+# debugging loop. There is one address now, so pointing a client at the board
+# has to work rather than 404.
+#
+# No cookie on purpose. /api/ is deliberately outside the board gate - see
+# serve.lis api_proxy - because PocketBase's collection rules are the
+# authorization, and gating it would break every non-browser client instead.
+assert_contains "$(curl -sf "$WEB/api/health")" '"code":200' \
+  "the API answers on the board's port with no board cookie"
+# Proxied, not reimplemented: the same request to PocketBase directly must give
+# the same answer, or the two addresses have started to disagree.
+assert_contains "$(curl -sf "$WEB/api/collections/issues/records?perPage=1" -H "Authorization: Bearer $WEB_TOKEN")" \
+  '"items"' "an authed API request works through the board's port"
+# The gate is still on for BOARD routes - the proxy must not have opened those.
+code=$(curl -s -o /dev/null -w '%{http_code}' "$WEB/")
+[ "$code" = 401 ] || fail "the board itself must still be gated, got $code"
+
 echo "e2e_web: all assertions passed"

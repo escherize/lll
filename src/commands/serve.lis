@@ -2,6 +2,8 @@ import "go:fmt"
 import "go:github.com/escherize/lll/web"
 import "go:net"
 import "go:net/http"
+import "go:net/http/httputil"
+import "go:net/url"
 import "go:os"
 import "go:strings"
 
@@ -38,6 +40,40 @@ import "realtime"
 pub fn bind_addr() -> string {
   let b = os.Getenv("LLL_BIND")
   if b == "" { "127.0.0.1" } else { b }
+}
+
+/// Serve PocketBase's own routes from the board's port, so the API and the
+/// board share one address (TASK-241).
+///
+/// `base` is where PocketBase actually listens - the same url the pb client
+/// and the CLI use, which `lll up` set to its in-process server. Proxying to
+/// it rather than reaching into PocketBase directly keeps ONE data path: the
+/// board, the CLI and a remote agent all go through the same endpoints under
+/// the same collection rules, which is the property TASK-114 and TASK-131
+/// were both about.
+///
+/// UNGATED, deliberately. Every other route requires the board-token cookie
+/// (serve_gate.lis); these do not, because PocketBase's per-collection rules
+/// are the authorization here and they are the same rules that answered on
+/// :8091 before this existed. So this is a MOVE, not a widening: the same
+/// requests reach the same checks at a different address, and an agent's
+/// LLL_TOKEN keeps working untouched. Gating it behind the board cookie would
+/// instead BREAK every non-browser caller, since none of them has one.
+///
+/// The port was never the boundary. Anyone who could reach :8091 could always
+/// reach these routes; all that changes is that they no longer have to guess
+/// a port number to do it.
+fn api_proxy(base: string) -> Result<(), string> {
+  let Ok(target) = url.Parse(base) else {
+    return Err(f"cannot proxy the API: '{base}' is not a url")
+  }
+  let proxy = httputil.NewSingleHostReverseProxy(target)
+  // Both of PocketBase's namespaces: /api/ is the REST surface every client
+  // speaks, /_/ is the admin UI `lll up` prints a link to. Neither collides
+  // with a board route - the board owns /t/, /issue/, /static/ and friends.
+  http.Handle("/api/", proxy)
+  http.Handle("/_/", proxy)
+  Ok(())
 }
 
 pub fn run_server(
@@ -105,8 +141,21 @@ pub fn run_server(
     bridge(events, hub)
   }
 
-  // Every route sits behind the board gate (serve_gate.lis): pages, writes,
-  // the SSE stream and static assets alike answer only board-token requests.
+  // TASK-241: the API answers here too, so there is ONE address. The hosted
+  // deployment used to split them - the board on 443, PocketBase on :8091 -
+  // and the port was invisible: a user who set url to the board host got a
+  // bare "404 page not found" from a host that answers, which is TASK-213 and
+  // cost a real debugging loop. Fly needed a dedicated IPv4 to make :8091
+  // reachable at all (TASK-201, which listed this proxy as the alternative it
+  // deferred rather than rejected).
+  //
+  // Registered FIRST so the board's own routes cannot shadow /api/.
+  api_proxy(cfg.url)?
+  //
+  // Every BOARD route sits behind the board gate (serve_gate.lis): pages,
+  // writes, the SSE stream and static assets alike answer only board-token
+  // requests. /api/ and /_/ are the exception and are proxied ungated - see
+  // api_proxy for why that is a move rather than a hole.
   //
   // The board, its issue pages and its search live under /t/KEY/ (TASK-198):
   // one server, every team, each team's board a shareable URL. The bare
