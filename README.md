@@ -55,7 +55,7 @@ Four actors, each configured once, none written twice:
 | Actor | Once | Writes |
 |---|---|---|
 | Server | `lll up` with `LLL_ADMIN_*`, `LLL_TEAM`, `LLL_BIND`, `LLL_BOARD_TOKEN` in env (Fly: secrets) | nothing on disk but the database |
-| Your machine (human path) | `lll login --url https://your-host:8091` — prompts for email + password | `url`, `token`, and `me` (when unset) in the home config |
+| Your machine (human path) | `lll login --url https://your-host` — prompts for email + password | `url`, `token`, and `me` (when unset) in the home config |
 | Each repo or directory | `lll attach`, commit the file if it is a repo | `team = "KEY"` in `.lll.toml`, at the repo root or in the working directory |
 | Each agent (agent path) | superuser mints `lll token create <name>` | nothing — `LLL_TOKEN` (+ `LLL_URL`) in its env |
 
@@ -136,17 +136,22 @@ file:/Users/you/.config/lll/lll.toml	me=you
 default	web_url=http://127.0.0.1:8100
 ```
 
-A hosted instance answers on two ports, and `url` wants the API one. The board
-rides 443 (`https://your-host`), the API rides `:8091` — so
-`url = "https://your-host"` reaches the board, which 404s every API call.
-`lll config check` asks the configured url whether it is a PocketBase API and
-answers in one line.
+A hosted instance serves the board and the API at **one address**: point `url`
+at `https://your-host` and both work. The board proxies `/api/` to the
+PocketBase it runs in-process, so there is no port to know.
+
+It did not always. Instances deployed before that landed answer the API on
+`:8091` only, and `url = "https://your-host"` gets a bare `404 page not found`
+from a host that plainly answers — a confusing failure that cost a real
+debugging session. `lll config check` asks the configured url whether it is a
+PocketBase API and answers in one line; if it says no against a bare host, the
+server is older than this document and `:8091` is the url to use.
 
 Client settings — what every `lll` command reads:
 
 | Env | TOML key | Meaning |
 |---|---|---|
-| `LLL_URL` | `url` | PocketBase **API** base URL (default `http://127.0.0.1:8090`; hosted, `https://your-host:8091` — not the board's bare host) |
+| `LLL_URL` | `url` | PocketBase **API** base URL (default `http://127.0.0.1:8090`; hosted, `https://your-host` — the board's address, which now serves the API too) |
 | `LLL_TEAM` | `team` | Default team key; scopes `issue list`, required by `issue create` |
 | `LLL_ME` | `me` | Your member name; authors your comments and receives assignments |
 | `LLL_SORT` | `sort` | Default sort: `created`, `updated`, `priority`, `number`; `-` prefix descends |
@@ -192,7 +197,7 @@ lll team archive KEY          # park a finished team; unarchive brings it back
 lll attach                    # point this repo at a team, once
 lll config --list             # every value and the file it came from
 lll config check              # does the configured url answer as a PocketBase API?
-lll login --url https://host:8091   # one-command machine setup: auth + persist url/token/me
+lll login --url https://host        # one-command machine setup: auth + persist url/token/me
 lll login                     # as a member, against the configured url
 lll member invite NAME --email e@x.com  # add a colleague + temp password, in one
 lll member set-password NAME --email e@x.com  # superuser gives a member credentials

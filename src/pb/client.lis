@@ -195,6 +195,13 @@ fn read_body(resp: Ref<http.Response>, what: string) -> Result<string, string> {
 /// Go's own plain-text `404 page not found`, and the CLI reported that verbatim
 /// — a whole debugging loop with nothing anywhere naming the port.
 ///
+/// TASK-241 removed that cause: the board proxies /api/ to its own PocketBase,
+/// so the bare host is now the RIGHT url and the config that used to fail is
+/// the one we document. The detection still holds - a non-JSON 404 at /api/
+/// still means the listener is not a PocketBase API - but the remedy moved.
+/// Telling someone to add :8091 would now point them away from the fix, since
+/// their url is fine and the server is the thing that is behind.
+///
 /// The tell is the body, not the status: PocketBase answers every API error
 /// with a JSON object, so a 404 at an /api/ path whose body is not JSON came
 /// from a listener that has never heard of the API.
@@ -202,5 +209,5 @@ fn wrong_port_hint(what: string, status: int, body: string) -> string {
   if status != 404 { return "" }
   if !strings.Contains(what, "/api/") { return "" }
   if strings.HasPrefix(strings.TrimSpace(body), "{") { return "" }
-  "\nthis looks like the web board, not the API - the hosted API is usually https://host:8091; check 'lll config --list'"
+  "\nthis host answers but is not serving the API. A current lll serves it at the same address as the board, so this is usually an older deployment - try https://host:8091, and check 'lll config --list'"
 }

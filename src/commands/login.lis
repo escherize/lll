@@ -63,7 +63,7 @@ pub fn login(args: Slice<string>) -> Result<(), string> {
   let target = strings.TrimSuffix(strings.TrimSpace(p.one("--url")), "/")
   if p.given("--url") && !strings.HasPrefix(target, "http://") && !strings.HasPrefix(target, "https://") {
     return Err(
-      "--url must be a full base url starting with http:// or https:// (e.g. https://tracker.example.com:8091)",
+      "--url must be a full base url starting with http:// or https:// (e.g. https://tracker.example.com)",
     )
   }
 
@@ -209,7 +209,7 @@ An LLL_TOKEN in the environment still wins (see 'lll config --list').
 --url is the fresh-machine setup: it authenticates against that server and
 persists url (and 'me', when unset) next to the token, so
 
-  lll login --url https://tracker.example.com:8091
+  lll login --url https://tracker.example.com
 
 is the only step a new machine needs. Without --url, login uses the
 configured url. No password yet? A superuser sets one:
