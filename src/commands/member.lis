@@ -27,6 +27,7 @@ pub fn member(args: Slice<string>) -> Result<(), string> {
     "add" | "create" => member_add(args),
     "invite" => member_invite(args),
     "set-password" => member_set_password(args),
+    "remove" | "delete" => member_remove(args),
     "--help" => {
       member_usage()
       Ok(())
@@ -50,6 +51,8 @@ Usage:
   lll member invite NAME --email email         add + temp password + the lines
                                                they run (any member; the
                                                admin credentials work too)
+  lll member remove NAME                       remove a member with no issues
+                                               ('delete' is the same command)
   lll member set-password NAME [--email email] set a member's login password
                                                (superuser only)
 
@@ -98,7 +101,7 @@ fn member_add_spec() -> Slice<flags.Flag> {
 }
 
 fn member_invite_spec() -> Slice<flags.Flag> {
-  [
+  with_admin_flags([
     flags.Flag {
       name: "--url",
       value: true,
@@ -116,11 +119,19 @@ fn member_invite_spec() -> Slice<flags.Flag> {
       ..,
     },
     flags.Flag { name: "--help", alias: "-h", hidden: true, help: "show this help", .. },
-  ]
+  ])
 }
 
 fn set_password_spec() -> Slice<flags.Flag> {
-  [
+  with_admin_flags([
+    flags.Flag {
+      name: "--password",
+      alias: "-p",
+      value: true,
+      hint: "pw",
+      help: "the new password; omit to be prompted twice",
+      ..,
+    },
     flags.Flag {
       name: "--url",
       value: true,
@@ -136,7 +147,7 @@ fn set_password_spec() -> Slice<flags.Flag> {
       ..,
     },
     flags.Flag { name: "--help", alias: "-h", hidden: true, help: "show this help", .. },
-  ]
+  ])
 }
 
 /// The flag table of one member verb; empty for verbs without flags. Read by
@@ -147,8 +158,91 @@ pub fn member_verb_spec(verb: string) -> Slice<flags.Flag> {
     "invite" => member_invite_spec(),
     "list" => member_list_spec(),
     "set-password" => set_password_spec(),
+    "remove" | "delete" => member_remove_spec(),
     _ => [],
   }
+}
+
+/// `lll member remove NAME` — delete a member nothing points at (TASK-245).
+///
+/// There was no removal verb at all, so every mistyped name, every test
+/// account and every departed colleague stayed on the list forever. Refuses a
+/// member holding assigned issues: PocketBase's relation would blank the
+/// assignee silently, and "remove the account I created by accident" does not
+/// mean "quietly unassign somebody's work".
+///
+/// Superuser-gated like set-password, because it is destructive and because
+/// deleting an auth record is not something one member should do to another
+/// on a shared board.
+fn member_remove(args: Slice<string>) -> Result<(), string> {
+  let spec = member_remove_spec()
+  let usage = flags.usage("lll member remove", spec, "NAME")
+  if args.find(|a| a == "--help" || a == "-h").is_some() {
+    fmt.Println(
+      "lll member remove - remove a member who has no issues assigned
+
+Usage:
+  " + usage + "
+
+Refuses a member with assigned issues: reassign them first
+('lll issue update KEY --assignee SOMEBODY'). Authenticates as the superuser,
+exactly like 'lll member set-password'.",
+    )
+    return Ok(())
+  }
+  let p = flags.parse(spec, args, 3, true, usage)?
+  let name = p.first()
+  if name == "" { return Err(f"usage: {usage}") }
+
+  point_at_url(p.one("--url"))?
+  apply_admin_flags(p.one("--admin-email"), p.one("--admin-password"))?
+  // Insisted on, not merely preferred. superuser_auth falls back to the
+  // configured token when no admin credentials are set, and the members
+  // collection lets any authenticated member delete a record — so without
+  // this check the "superuser only" in the help above would be the same
+  // false claim TASK-243 was filed for. Deleting somebody else's account is
+  // not a thing one member should be able to do to another.
+  if os.Getenv("LLL_ADMIN_EMAIL") == "" || os.Getenv("LLL_ADMIN_PASSWORD") == "" {
+    return Err(
+      "removing a member needs the server's admin credentials
+pass --admin-email and --admin-password, or set LLL_ADMIN_EMAIL/LLL_ADMIN_PASSWORD",
+    )
+  }
+  let su = superuser_auth()?
+  let Some(member) = find_member_as(su, name)? else {
+    return Err(f"no member named '{name}' — see 'lll member list'")
+  }
+
+  let filter = url.QueryEscape(f"assignee={query.quote(member.id)}")
+  let mut assigned = models.IssueList { .. }
+  pb.fetch(
+    f"/api/collections/issues/records?filter={filter}&perPage=1",
+    "issues",
+    &assigned,
+  )?
+  if assigned.total_items > 0 {
+    return Err(
+      f"{member.name} has {assigned.total_items} issue(s) assigned — removing them would blank the assignee
+reassign first: lll issue update <KEY> --assignee <somebody>",
+    )
+  }
+
+  let _ = pb.delete_as(f"/api/collections/members/records/{member.id}", su)?
+  fmt.Println(f"removed member {member.name}")
+  Ok(())
+}
+
+fn member_remove_spec() -> Slice<flags.Flag> {
+  with_admin_flags([
+    flags.Flag {
+      name: "--url",
+      value: true,
+      hint: "url",
+      help: "server base url; without it the configured one",
+      ..,
+    },
+    flags.Flag { name: "--help", alias: "-h", hidden: true, help: "show this help", .. },
+  ])
 }
 
 /// Point this process at `url` for the rest of the command, when one was
@@ -188,6 +282,7 @@ fn member_set_password(args: Slice<string>) -> Result<(), string> {
   }
 
   point_at_url(p.one("--url"))?
+  apply_admin_flags(p.one("--admin-email"), p.one("--admin-password"))?
   let su = superuser_auth()?
   let found = find_member_as(su, name)?
   let Some(member) = found else {
@@ -206,11 +301,26 @@ rerun with --email <email> to set one alongside the password",
     )
   }
 
-  let mut input = bufio.NewReader(os.Stdin)
-  let password = read_password(input, "New password: ")?
-  if password == "" { return Err("empty password") }
-  let confirm = read_password(input, "Confirm password: ")?
-  if password != confirm { return Err("the passwords do not match") }
+  // A flag, not only the two prompts: provisioning a colleague from a script
+  // or a deploy step had no non-interactive path at all (TASK-246), and the
+  // pipe form was documented only in this command's own --help.
+  let password = if p.given("--password") {
+    p.one("--password")
+  } else {
+    let mut input = bufio.NewReader(os.Stdin)
+    let typed = read_password(input, f"New password for {member.name}: ")?
+    let confirm = read_password(input, "Confirm password: ")?
+    if typed != confirm { return Err("the passwords do not match") }
+    typed
+  }
+  if password == "" {
+    return Err("no password — pass --password <pw>, or answer the two prompts")
+  }
+  if password.length() < 8 {
+    return Err(
+      f"PocketBase requires at least 8 characters (got {password.length()})",
+    )
+  }
 
   let payload = match json.Marshal(models.PasswordPatch {
     password,
@@ -279,6 +389,7 @@ fn member_invite(args: Slice<string>) -> Result<(), string> {
   // were perfectly good. Four of the six usability runs lost commands to
   // exactly that, and half of them guessed LLL_URL rather than being told.
   point_at_url(p.one("--url"))?
+  apply_admin_flags(p.one("--admin-email"), p.one("--admin-password"))?
   // Superuser first: the create rides it, and an existing name is caught here
   // rather than as PocketBase's bare 400 on the unique index.
   let su = superuser_auth()?

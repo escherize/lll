@@ -24,6 +24,7 @@ pub fn team(args: Slice<string>) -> Result<(), string> {
     "set-accent" => team_set_accent(args),
     "archive" => team_set_archived(args, true),
     "unarchive" => team_set_archived(args, false),
+    "delete" => team_delete(args),
     "--help" => {
       team_usage()
       Ok(())
@@ -48,6 +49,7 @@ Usage:
   lll team set-accent KEY #rrggbb    set the board accent colour ('' clears it)
   lll team archive KEY               hide the team from lists and the board rail (data kept)
   lll team unarchive KEY             bring an archived team back
+  lll team delete KEY                delete a team that holds no issues
 
 Renaming the key rewrites nothing else, because issue keys are derived from it
 (team key + number), so every key on the board and in the CLI follows at once.
@@ -368,6 +370,55 @@ fn team_flag_or_current(key: string) -> Result<models.Team, string> {
 /// writes a team-owned record uses current_team.
 fn configured_team_id() -> Result<string, string> {
   Ok(configured_team()?.map_or("", |t| t.id))
+}
+
+/// `lll team delete KEY` — remove a team that has nothing in it (TASK-245).
+///
+/// Archive is the right answer for a team with history: it keeps the issue
+/// ids resolvable. But archive was the ONLY answer, so a team created by
+/// accident could never be removed — and `lll attach` used to create those by
+/// accident, from a directory name, at exit 0. Every onboarding usability run
+/// left one behind on a shared server with no way to clean it up.
+///
+/// Refuses a team holding issues rather than cascading: deleting issues is
+/// not what "delete the team I just made by mistake" means, and PocketBase
+/// would happily orphan them.
+fn team_delete(args: Slice<string>) -> Result<(), string> {
+  let Some(key) = args.get(3) else {
+    return Err("usage: lll team delete KEY")
+  }
+  if key == "--help" || key == "-h" {
+    fmt.Println(
+      "lll team delete - delete a team that holds no issues
+
+Usage:
+  lll team delete KEY
+
+Refuses a team with issues in it; 'lll team archive KEY' is the answer there,
+and it keeps the issue ids resolvable. Deleting is for a team created by
+mistake.",
+    )
+    return Ok(())
+  }
+  let Some(t) = find_team(key)? else {
+    return Err(unknown_team(key))
+  }
+  let filter = url.QueryEscape(f"team={query.quote(t.id)}")
+  let mut issues = models.IssueList { .. }
+  pb.fetch(
+    f"/api/collections/issues/records?filter={filter}&perPage=1",
+    "issues",
+    &issues,
+  )?
+  if issues.total_items > 0 {
+    return Err(
+      f"team {t.key} holds {issues.total_items} issue(s) — deleting it would orphan them
+'lll team archive {t.key}' hides it and keeps their ids working",
+    )
+  }
+  let _ = pb.delete(f"/api/collections/teams/records/{t.id}")?
+  fmt.Println(f"deleted team {t.key}")
+  Ok(())
 }
 
 /// Missing-team message naming the fix. Shared by every command that needs a

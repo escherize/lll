@@ -31,7 +31,7 @@ cleanup() { # exit-status
   # two `lll up` processes at once, and it is the one whose orphans were
   # actually observed still holding their ports minutes later.
   e2e_diagnose "$1"
-  e2e_reap "${UP_PID:-}" "${BLOCK_PID:-}" "${EXT_PB_PID:-}"
+  e2e_reap "${UP_PID:-}" "${BLOCK_PID:-}" "${EXT_PB_PID:-}" "${OUTSIDE_PID:-}"
   e2e_end
 }
 e2e_trap_cleanup cleanup
@@ -190,7 +190,11 @@ OUT_LOG="$DATA_DIR/outside.log"
 # and reports "could not create team 'E2E' and none exists to reuse", which
 # names the team and never mentions auth. Filed separately; here, just do not
 # hand it a token from another database.
-( cd "$OUTSIDE" && env -u LLL_TOKEN LLL_TEAM=E2E HOME="$E2E_HOME" LLL_URL="$OUT_URL" \
+# TASK-250: `exec`, so $! is the SERVER and not the subshell wrapping it.
+# Without it, e2e_reap killed the subshell and left `lll up` running with a
+# --pb-dir that e2e_end then deleted — orphans holding ports indefinitely,
+# four of them found alive on a developer machine after a day of runs.
+( cd "$OUTSIDE" && exec env -u LLL_TOKEN LLL_TEAM=E2E HOME="$E2E_HOME" LLL_URL="$OUT_URL" \
     "$LLL_ABS" up --no-open --port "$OUT_WEB_PORT" --pb-dir "$OUTSIDE/pb_data" </dev/null ) \
   >"$OUT_LOG" 2>&1 &
 OUTSIDE_PID=$!

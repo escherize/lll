@@ -185,6 +185,53 @@ set LLL_ADMIN_EMAIL/LLL_ADMIN_PASSWORD to the credentials 'lll up' prints"
 /// PocketBase's own endpoint; without them the configured token is tried
 /// as-is — if it is not a superuser token, the gated call itself refuses,
 /// and the caller's error names what to set.
+/// The two flags every superuser-gated command accepts, so the credentials can
+/// ride the command line instead of the environment (TASK-249). Four of six
+/// agents in the round-4/5 usability runs reached for them.
+pub fn admin_flags() -> Slice<flags.Flag> {
+  [
+    flags.Flag {
+      name: "--admin-email",
+      value: true,
+      hint: "email",
+      help: "superuser email (else LLL_ADMIN_EMAIL)",
+      ..,
+    },
+    flags.Flag {
+      name: "--admin-password",
+      value: true,
+      hint: "pw",
+      help: "superuser password (else LLL_ADMIN_PASSWORD)",
+      ..,
+    },
+  ]
+}
+
+/// `spec` plus the two admin flags. Slices append one element at a time here,
+/// so the concatenation lives in one place rather than in every caller.
+pub fn with_admin_flags(spec: Slice<flags.Flag>) -> Slice<flags.Flag> {
+  let mut out = spec
+  for fl in admin_flags() { out = out.append(fl) }
+  out
+}
+
+/// Apply --admin-email/--admin-password for the rest of this process, so
+/// superuser_auth and everything under it see them the same way they see the
+/// environment. Same shape and same reason as member.lis's point_at_url.
+pub fn apply_admin_flags(email: string, pass: string) -> Result<(), string> {
+  if email != "" {
+    if let Err(e) = os.Setenv("LLL_ADMIN_EMAIL", email) {
+      return Err(f"reading --admin-email: {e}")
+    }
+  }
+  if pass != "" {
+    if let Err(e) = os.Setenv("LLL_ADMIN_PASSWORD", pass) {
+      return Err(f"reading --admin-password: {e}")
+    }
+  }
+  Ok(())
+}
+
 fn superuser_auth() -> Result<string, string> {
   let email = os.Getenv("LLL_ADMIN_EMAIL")
   let pass = os.Getenv("LLL_ADMIN_PASSWORD")
@@ -208,9 +255,10 @@ fn superuser_auth() -> Result<string, string> {
   }
   Err(
     "this command is superuser-only and nothing here can authenticate as one
-set LLL_ADMIN_EMAIL/LLL_ADMIN_PASSWORD (the credentials 'lll up' prints, or
-whoever deployed the server set as secrets), or put a superuser token in
-LLL_TOKEN — and name the server with --url if it is not the configured one",
+pass --admin-email and --admin-password, or set LLL_ADMIN_EMAIL/LLL_ADMIN_PASSWORD
+(the credentials 'lll up' prints, or whoever deployed the server set as
+secrets), or put a superuser token in LLL_TOKEN — and name the server with
+--url if it is not the configured one",
   )
 }
 

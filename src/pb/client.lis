@@ -116,6 +116,13 @@ pub fn patch_as(
   request(cfg.url, "PATCH", path, payload, bearer(tok), src.url == "default")
 }
 
+/// DELETE riding `tok` instead of the configured token — superuser-gated
+/// removals (member remove), which a member token must not be able to make.
+pub fn delete_as(path: string, tok: string) -> Result<string, string> {
+  let (cfg, src) = config.load_traced()?
+  request(cfg.url, "DELETE", path, "", bearer(tok), src.url == "default")
+}
+
 /// The value of an Authorization header for `tok`, or "" when there is no
 /// token to send. Pure so the decision is testable without the network: every
 /// verb asks it, and an empty answer means today's request, untouched.
@@ -132,7 +139,54 @@ fn send(method: string, path: string, payload: string) -> Result<string, string>
   if cfg.token == "" && strings.HasPrefix(path, "/api/collections/") {
     return Err(not_logged_in(cfg.url, src.url == "default"))
   }
-  request(cfg.url, method, path, payload, bearer(cfg.token), src.url == "default")
+  let body = request(cfg.url, method, path, payload, bearer(cfg.token), src.url == "default")?
+  // TASK-247: the same filter-not-gate semantics that hid a MISSING token also
+  // hide a DEAD one. PocketBase rotates a record's tokenKey on every password
+  // change, so a token issued before a reset stops matching — and the list rule
+  // then filters everything out, answering 200 with an empty array. The reads
+  // just go quiet, exactly as they did before anyone logged in.
+  //
+  // An empty list is the only case worth paying for, and it costs one extra
+  // request in the case where the command was about to print nothing anyway.
+  if is_empty_list(method, body) && cfg.token != "" && !token_still_valid(cfg.url, cfg.token) {
+    return Err(stale_token(cfg.url))
+  }
+  Ok(body)
+}
+
+/// True for a list response that matched nothing. `totalItems` is the list
+/// envelope's own field, so a single-record GET never looks like one.
+fn is_empty_list(method: string, body: string) -> bool {
+  method == "GET" && strings.Contains(body, "\"totalItems\":0")
+}
+
+/// Does `tok` still authenticate? auth-refresh is the cheapest call a live
+/// token can make. Both collections are tried, because the token here is not
+/// always a member's: `lll up` seeds and serves on the SUPERUSER token, and
+/// checking only /members/auth-refresh declared that valid token dead — on an
+/// empty database, which is precisely what a first boot is seeding. Uses
+/// request() rather than a verb, so the empty-list check cannot recurse.
+fn token_still_valid(base: string, tok: string) -> bool {
+  for collection in ["members", "_superusers"] {
+    let refreshed = request(
+      base,
+      "POST",
+      f"/api/collections/{collection}/auth-refresh",
+      "",
+      bearer(tok),
+      false,
+    )
+    if refreshed.is_ok() { return true }
+  }
+  false
+}
+
+/// The refusal for a token the server no longer accepts.
+fn stale_token(base: string) -> string {
+  f"your saved token is no longer valid at {base}
+it was rejected, so every read comes back empty rather than failing — most
+likely somebody reset your password, which retires the tokens issued before it
+log in again: lll login --email <your email>"
 }
 
 /// Refusal for a collection request with no token anywhere in the layering.

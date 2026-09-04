@@ -1352,15 +1352,22 @@ cat > "$SPY" <<'SPY_EOF'
 import http.server, socketserver, sys
 port, rec, body_mode = int(sys.argv[1]), sys.argv[2], sys.argv[3]
 class H(http.server.BaseHTTPRequestHandler):
-    def do_GET(self):
-        with open(rec, "a") as f:
-            f.write((self.headers.get("Authorization") or "<none>") + "\n")
-        body = b'{"items":[],"totalItems":0,"page":1,"perPage":200}'
+    def _json(self, body):
         self.send_response(200)
         self.send_header("Content-Type", "application/json")
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
         self.wfile.write(body)
+    def do_GET(self):
+        with open(rec, "a") as f:
+            f.write((self.headers.get("Authorization") or "<none>") + "\n")
+        self._json(b'{"items":[],"totalItems":0,"page":1,"perPage":200}')
+    # TASK-247: an empty list makes the client probe auth-refresh, to tell a
+    # genuinely empty board apart from a token the server has stopped
+    # accepting. This stub stands in for PocketBase, so it answers that too —
+    # otherwise the probe fails and the empty list reads as a dead token.
+    def do_POST(self):
+        self._json(b'{"token":"spy-token-123","record":{"id":"spy","name":"spy"}}')
     def log_message(self, *a): pass
 socketserver.TCPServer(("127.0.0.1", port), H).serve_forever()
 SPY_EOF
@@ -2114,6 +2121,79 @@ echo "e2e: all assertions passed"
 # scratch HOME would move the build cache and make each of them recompile from
 # scratch. They are no less hermetic for it - each pins HOME itself, exactly as
 # it did before this suite started pinning anything.
+
+# --- TASK-245: removal, which did not exist -------------------------------
+# The login section above PATCHed e2e-agent's password, and PocketBase retires
+# every token issued before a password change, so the exported LLL_TOKEN is
+# dead by here. Re-mint before asserting anything.
+E2E_TOKEN=$(pb_member_token "$URL" e2e-agent e2e-agent@lll.test e2e-agent-pass-123) \
+  || fail "re-minting the e2e member token before the removal assertions"
+export LLL_TOKEN="$E2E_TOKEN"
+
+# Every onboarding usability run left junk members and teams on shared servers
+# with no way to clean up; archive was the only verb.
+LLL_URL=$URL "$LIN" team create -k GONE -n "Disposable" >/dev/null \
+  || fail "creating the disposable team"
+out=$(LLL_URL=$URL "$LIN" team delete GONE) || fail "deleting an empty team: $out"
+assert_contains "$out" "deleted team GONE" "an empty team can be deleted"
+LLL_URL=$URL "$LIN" team list | grep -q "GONE" && fail "the deleted team is still listed"
+# A team with issues is refused, and told about archive instead.
+out=$(LLL_URL=$URL "$LIN" team delete ENG 2>&1) && fail "deleting a team with issues should refuse"
+assert_contains "$out" "team archive ENG" "the refusal names archive"
+
+# Members: removable when nothing points at them, superuser-gated because it
+# is destructive (and the gate is ENFORCED, not just claimed — TASK-243).
+LLL_URL=$URL "$LIN" member add -n "Disposable Person" >/dev/null \
+  || fail "adding the disposable member"
+out=$(LLL_URL=$URL "$LIN" member remove "Disposable Person" 2>&1) \
+  && fail "member remove without admin credentials should refuse"
+assert_contains "$out" "needs the server's admin credentials" "remove is superuser-gated"
+out=$(LLL_URL=$URL "$LIN" member remove "Disposable Person" \
+  --admin-email admin@local.dev --admin-password admin-local-123) \
+  || fail "member remove with admin credentials: $out"
+assert_contains "$out" "removed member Disposable Person" "an unassigned member is removed"
+# A member holding issues is refused rather than silently blanking them. The
+# fixture is explicit: a member of its own with an issue of its own, so the
+# assertion cannot pass or fail on whatever the suite happened to assign
+# earlier — and cannot delete an account the rest of the run depends on.
+LLL_URL=$URL "$LIN" member add -n "Busy Person" >/dev/null \
+  || fail "adding the assigned member"
+LLL_URL=$URL LLL_TEAM=ENG "$LIN" issue create "work for Busy Person" \
+  --assignee "Busy Person" >/dev/null || fail "assigning an issue to Busy Person"
+out=$(LLL_URL=$URL "$LIN" member remove "Busy Person" \
+  --admin-email admin@local.dev --admin-password admin-local-123 2>&1) \
+  && fail "removing an assigned member should refuse"
+assert_contains "$out" "issue(s) assigned" "the refusal counts the assigned issues"
+LLL_URL=$URL "$LIN" member list | grep -q "Busy Person" \
+  || fail "the refused removal deleted the member anyway"
+
+# --- TASK-246/248/249: the superuser commands are scriptable ---------------
+# set-password took no password flag and the admin credentials could only ride
+# the environment, so provisioning a colleague could not be automated at all.
+out=$(LLL_URL=$URL "$LIN" member set-password e2e-agent \
+  --password rotated-pass-123 \
+  --admin-email admin@local.dev --admin-password admin-local-123) \
+  || fail "scripted set-password: $out"
+assert_contains "$out" "password set for e2e-agent" "set-password takes --password and admin flags"
+out=$(env -u LLL_TOKEN HOME="$CREATE_HOME" LLL_URL=$URL "$LIN" login \
+  -e e2e-agent@lll.test --password rotated-pass-123) \
+  || fail "the rotated password does not log in: $out"
+# Too short is one sentence, not a raw PocketBase validation blob.
+out=$(LLL_URL=$URL "$LIN" member set-password e2e-agent --password tiny \
+  --admin-email admin@local.dev --admin-password admin-local-123 2>&1) \
+  && fail "a short password should refuse"
+assert_contains "$out" "at least 8 characters" "set-password checks the length"
+
+# --- TASK-247: a STALE token must not go quiet ------------------------------
+# The rotation above retired every token issued before it, including the one
+# this suite exported. A list rule filters rather than gates, so the reads
+# would answer 200-and-empty exactly as they did before anyone logged in.
+out=$(LLL_URL=$URL "$LIN" issue list 2>&1) && fail "a stale token should be refused, not answered emptily"
+assert_contains "$out" "no longer valid" "a stale token is named"
+assert_contains "$out" "lll login" "the stale-token refusal names the fix"
+E2E_TOKEN=$(pb_member_token "$URL" e2e-agent e2e-agent@lll.test e2e-agent-pass-123) \
+  || fail "re-minting the e2e member token after the rotation"
+export LLL_TOKEN="$E2E_TOKEN"
 
 # --- TASK-242: a bare title is accepted alongside -t -------------------------
 # Every onboarding usability run typed `lll issue create "Some title"` first
