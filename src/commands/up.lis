@@ -203,6 +203,7 @@ superuser credentials, or set LLL_TOKEN to a member token.",
   if chosen != web_port {
     fmt.Println(f"port {web_port} taken — board moving to {chosen}")
   }
+  fmt.Println(f"lll    {version()}")
   fmt.Println(admin_line)
   fmt.Println(f"team   {team}")
   if me != "" { fmt.Println(f"me     {me}") }

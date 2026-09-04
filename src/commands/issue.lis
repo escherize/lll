@@ -89,8 +89,7 @@ fn issue_create_spec() -> Slice<flags.Flag> {
       name: "-t",
       value: true,
       hint: "\"title\"",
-      required: true,
-      help: "title of the issue",
+      help: "title of the issue (or give it as the bare argument)",
       ..,
     },
     flags.Flag {
@@ -466,28 +465,37 @@ fn print_create_usage() {
     "lll issue create - create an issue in the configured team
 
 Usage:
-  " + flags.usage("lll issue create", issue_create_spec(), "") + "
+  " + flags.usage("lll issue create", issue_create_spec(), "[\"title\"]") + "
 " +
     flags.section(issue_create_spec()) +
     "
 
-The team comes from LLL_TEAM or 'team' in .lll.toml (see 'lll config --help').
+The title is the bare argument or -t; give either, not both.
+
+The team comes from 'lll attach' ('team' in .lll.toml), or LLL_TEAM.
 Without --state the issue starts in todo; --label may be repeated.",
   )
 }
 
 fn create(args: Slice<string>) -> Result<(), string> {
   let spec = issue_create_spec()
-  let usage = flags.usage("lll issue create", spec, "")
-  // --help before parse, because -t is required and the required check would
-  // otherwise answer 'usage:' to somebody who asked for the help (TASK-125).
-  // Same reason and same shape as 'lll member invite'.
+  let usage = flags.usage("lll issue create", spec, "[\"title\"]")
+  // --help before parse, so somebody who asked for the help gets it rather
+  // than the missing-title refusal below (TASK-125). Same shape as
+  // 'lll member invite'.
   if args.find(|a| a == "--help" || a == "-h").is_some() {
     print_create_usage()
     return Ok(())
   }
-  let p = flags.parse(spec, args, 3, false, usage)?
-  let title = p.one("-t")
+  // A bare title is accepted alongside -t: `gh issue create`, `linear` and
+  // `jira` all take one, and every usability run reached for it first and got
+  // "unknown flag: 'Hello'". -t stays the documented spelling, so no script
+  // breaks; the positional is the guess that now lands.
+  let p = flags.parse(spec, args, 3, true, usage)?
+  let title = if p.one("-t") != "" { p.one("-t") } else { p.first() }
+  if title == "" {
+    return Err(f"no title — give it as the bare argument or with -t\n{usage}")
+  }
   let mut description = ""
   if p.given("-d") { description = value_or_stdin(p.one("-d"), "-d")? }
   let emoji = check_emoji(p.one("--emoji"))?
@@ -626,6 +634,15 @@ fn list(args: Slice<string>) -> Result<(), string> {
 /// The standard issue table (ID, state, priority, title, assignee, age),
 /// shared by `issue list` and `project view`.
 fn print_issue_table(issues: Slice<models.Issue>) -> Result<(), string> {
+  // An empty board printed zero bytes, which a newcomer cannot tell apart
+  // from a silently broken read — the exact doubt the not-logged-in refusal
+  // warns about, landing one command later. Says so on STDERR: stdout stays
+  // empty so pipes and `| wc -l` are unchanged, and --json returns before
+  // ever reaching here.
+  if issues.is_empty() {
+    let _ = fmt.Fprintln(os.Stderr, "no issues")
+    return Ok(())
+  }
   let mut w = tabwriter.NewWriter(os.Stdout, 0, 4, 2, ' ', 0)
   for item in issues {
     let key = item.expand.team.key

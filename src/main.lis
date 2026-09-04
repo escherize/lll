@@ -20,6 +20,7 @@ fn main() {
     "config" => commands.config_cmd(os.Args),
     "login" => commands.login(os.Args),
     "logout" => commands.logout(os.Args),
+    "whoami" => commands.whoami(os.Args),
     "token" => commands.token(os.Args),
     "attach" => commands.attach(os.Args),
     "watch" => commands.watch(os.Args),
@@ -39,6 +40,10 @@ fn main() {
       Ok(())
     },
     "--version" => {
+      fmt.Println(f"lll {commands.version()}")
+      Ok(())
+    },
+    "-v" => {
       fmt.Println(f"lll {commands.version()}")
       Ok(())
     },
@@ -75,6 +80,7 @@ Usage:
                           server url too — the one-command machine setup
                           (see 'lll login --help')
   lll logout              clear the stored token (see 'lll logout --help')
+  lll whoami              which member, server and team you are acting as
   lll token create        mint a static agent token (superuser only)
                           (see 'lll token --help')
   lll attach [-k KEY]     point this repo at a team, once, in a committed
@@ -84,7 +90,7 @@ Usage:
   lll board [-w]          print the web board URL; -w opens it (see 'lll board --help')
   lll completions <shell> completion script for bash, zsh, or fish
                           (see 'lll completions --help')
-  lll --version           print the version
+  lll --version, -v       print the version
   lll --help              show this help
 
 Configuration (env > the repo's .lll.toml > ~/.config/lll/lll.toml; the files

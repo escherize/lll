@@ -198,7 +198,7 @@ fn superuser_auth() -> Result<string, string> {
       payload as string,
     ) {
       Ok(b) => b,
-      Err(e) => return Err(f"authenticating as the superuser: {e}"),
+      Err(e) => return Err(superuser_auth_failed(e)),
     }
     return decode_auth(body, "the superuser auth response")
   }
@@ -208,9 +208,31 @@ fn superuser_auth() -> Result<string, string> {
   }
   Err(
     "this command is superuser-only and nothing here can authenticate as one
-set LLL_ADMIN_EMAIL/LLL_ADMIN_PASSWORD (the credentials 'lll up' prints), or
-put a superuser token in LLL_TOKEN",
+set LLL_ADMIN_EMAIL/LLL_ADMIN_PASSWORD (the credentials 'lll up' prints, or
+whoever deployed the server set as secrets), or put a superuser token in
+LLL_TOKEN — and name the server with --url if it is not the configured one",
   )
+}
+
+/// A failed superuser auth, with the wrong-server reading spelled out.
+///
+/// PocketBase answers 400 "Failed to authenticate" for bad credentials AND
+/// for correct credentials sent to a server that has no such superuser. Four
+/// usability runs read it the first way, re-checked an admin password that
+/// was perfectly good, and lost commands — the real fault was the default
+/// url, printed mid-line as incidental request detail. So when the url was
+/// nobody's choice, say that first.
+fn superuser_auth_failed(e: string) -> string {
+  let msg = f"authenticating as the superuser: {e}"
+  if !strings.Contains(e, "400") { return msg }
+  let Ok((_, src)) = config.load_traced() else { return msg }
+  if src.url != "default" {
+    return msg + "
+if LLL_ADMIN_EMAIL/LLL_ADMIN_PASSWORD are right, check the server: --url names another one"
+  }
+  msg + "
+that url is the built-in default — nothing here configured one, so the credentials
+were almost certainly sent to the wrong server. Name it: --url <your server url>"
 }
 
 /// Pull the token out of an auth-with-password / impersonate response body

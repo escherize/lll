@@ -373,7 +373,12 @@ fn configured_team_id() -> Result<string, string> {
 /// Missing-team message naming the fix. Shared by every command that needs a
 /// team and was given none (same package: src/commands).
 fn no_team() -> string {
-  "set LLL_TEAM or 'team' in .lll.toml to your team key (e.g. ENG)"
+  // Names the command, not just the file. Every usability run read the old
+  // wording as "go hand-edit a file", and none of them found 'lll attach' —
+  // the command whose whole job is writing this key — from it. It follows
+  // unknown_team's shape for the same reason: say the fix, not the setting.
+  "no team configured — 'lll attach' picks the server's team and writes it to .lll.toml
+'lll team list' shows the keys; 'lll attach -k KEY' takes one directly"
 }
 
 /// Unknown-team message naming the fix. Shared by every command that

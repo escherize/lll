@@ -1,10 +1,21 @@
+import "go:os/exec"
+import "go:strings"
+
 /// The build's version, printed by `lll --version` and shown in the board's
 /// rail footer — the browser is lll's second interface, so it says which
 /// build is serving it.
 ///
-/// Keep in sync with [project] version in lisette.toml. `lis build` has no
-/// version-injection hook (only --go-flags pass-through, which cannot target
-/// generated identifiers reliably), so this is a hardcoded constant.
+/// Derived from git: `git describe --tags --match 'v*' --always --dirty`
+/// names the tag on a tag checkout and auto-increments the commit count in a
+/// working checkout (`0.1.0-3-gabc123`, or a bare short hash before the first
+/// tag). `lis build` has no version-injection hook (only --go-flags
+/// pass-through, which cannot target generated identifiers reliably), so a
+/// binary outside a checkout falls back to the released version below — bump
+/// it (and [project] version in lisette.toml) when you tag.
 pub fn version() -> string {
-  "0.1.0"
+  let Ok(out) = exec.Command("git", "describe", "--tags", "--match", "v*", "--always", "--dirty").Output() else {
+    return "0.1.0"
+  }
+  let desc = strings.TrimPrefix(strings.TrimSpace(out as string), "v")
+  if desc == "" { "0.1.0" } else { desc }
 }

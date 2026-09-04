@@ -6,8 +6,9 @@
 # builds are static and portable.
 #
 # Cutting a release:
-#   1. bump [project] version in lisette.toml AND src/commands/version.lis
-#      (they are checked against the tag below; a mismatch fails the run)
+#   1. bump [project] version in lisette.toml (checked against the tag below)
+#      and the fallback in src/commands/version.lis (what an installed binary
+#      reports outside a checkout)
 #   2. git tag v<version> && git push origin v<version>
 
 name: release
@@ -25,6 +26,11 @@ jobs:
     runs-on: macos-14
     steps:
       - uses: actions/checkout@v4
+        with:
+          # `lll --version` now derives from `git describe --tags`, which
+          # needs the tag history present. A shallow checkout can report a
+          # bare SHA and fail the version check below.
+          fetch-depth: 0
 
       # Fail fast, before any toolchain install: the tag must equal the
       # version lisette.toml declares.
@@ -60,8 +66,8 @@ jobs:
           mkdir -p dist
           cp target/.lisette/bin/lll dist/lll-darwin-arm64
 
-      # `lll --version` is a hardcoded constant (src/commands/version.lis) —
-      # lis has no version-injection hook — so check the built binary too.
+      # `lll --version` derives from `git describe --tags`, so at this tag
+      # checkout the built binary must answer the tag itself — check it.
       - name: lll --version matches the tag
         run: |
           tag="${GITHUB_REF_NAME#v}"

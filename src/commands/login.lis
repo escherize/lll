@@ -33,6 +33,26 @@ fn login_spec() -> Slice<flags.Flag> {
       ..,
     },
     flags.Flag {
+      name: "--password",
+      alias: "-p",
+      value: true,
+      hint: "pw",
+      help: "password; omit to be prompted (a terminal reads it with echo off)",
+      ..,
+    },
+    flags.Flag {
+      name: "--create",
+      help: "no account yet: create the member first, using LLL_ADMIN_EMAIL/LLL_ADMIN_PASSWORD",
+      ..,
+    },
+    flags.Flag {
+      name: "--name",
+      value: true,
+      hint: "name",
+      help: "member name for --create (default: the part of the email before @)",
+      ..,
+    },
+    flags.Flag {
       name: "--help",
       alias: "-h",
       hidden: true,
@@ -79,8 +99,45 @@ pub fn login(args: Slice<string>) -> Result<(), string> {
   if email == "" {
     return Err("no email — pass --email <email> or answer the prompt")
   }
-  let password = read_password(input, "Password: ")?
-  if password == "" { return Err("empty password") }
+  // A flag, not only a prompt: setting up an agent or a CI machine is exactly
+  // the case with no terminal to type into, and every usability run reached
+  // for --password before finding that piping stdin was the only way.
+  let prompt = if p.given("--create") {
+    f"New password for {email}: "
+  } else {
+    f"Password for {email}: "
+  }
+  let password = if p.given("--password") {
+    p.one("--password")
+  } else {
+    read_password(input, prompt)?
+  }
+  if password == "" {
+    let whose = if p.given("--create") {
+      f"no password — --create needs one to give {email}"
+    } else {
+      "no password"
+    }
+    return Err(
+      f"{whose} — pass --password <pw>, or pipe it: printf '%s\\n' \"$PW\" | lll login ...",
+    )
+  }
+
+  // --create is the fresh-server path: the operator holds the superuser
+  // credentials and no member record exists yet, which is the dead end every
+  // usability run hit — 'Failed to authenticate' with nothing naming the
+  // command that makes an account. The provisioning is 'lll member invite'
+  // minus the paperwork, and it runs BEFORE the auth below so the same
+  // command that creates the account is the one that logs into it.
+  if p.given("--create") {
+    let name = if p.one("--name") != "" {
+      p.one("--name")
+    } else {
+      strings.Split(email, "@")[0]
+    }
+    create_for_login(name, email, password, target)?
+    fmt.Println(f"created member {name} <{email}>")
+  }
 
   let payload = match json.Marshal(
     models.AuthRequest { identity: email, password },
@@ -98,7 +155,7 @@ pub fn login(args: Slice<string>) -> Result<(), string> {
   }
   let body = match sent {
     Ok(b) => b,
-    Err(e) => return Err(f"login failed: {e}"),
+    Err(e) => return Err(login_failed(e, email, target)),
   }
   let mut auth = models.AuthResponse { .. }
   if let Err(e) = json.Unmarshal(body.bytes(), &auth) {
@@ -131,7 +188,166 @@ pub fn login(args: Slice<string>) -> Result<(), string> {
       "note: LLL_TOKEN is set in this shell and overrides the saved token until it is unset",
     )
   }
+  // A team is what 'issue create' asks for next, and every usability run hit
+  // it as a fresh dead end several commands after logging in. When the server
+  // leaves no choice — exactly one team — settle it here so the machine is
+  // actually set up when this command says it is.
+  //
+  // The HOME config, not the repo's .lll.toml: that file is committed and
+  // belongs to 'lll attach'. Config layers rather than shadows (TASK-179), so
+  // a home 'team' is a machine-wide default that any attached repo overrides
+  // — which is what the layering documents it for.
+  settle_team()
   Ok(())
+}
+
+/// Settle a team on the home config when there is nothing to decide, and say
+/// what to run when there is. Never an error: the login itself succeeded, and
+/// a server that cannot answer about teams does not un-log-you-in.
+fn settle_team() {
+  let Ok(cfg) = config.load() else { return }
+  if cfg.team != "" {
+    fmt.Println(f"team {cfg.team} — ready: lll issue create \"a title\"")
+    return
+  }
+  let Ok(teams) = list_teams() else {
+    fmt.Println("next: lll attach — picks this directory's team and writes it to .lll.toml")
+    return
+  }
+  let live = teams.items.filter(|t| !t.archived)
+  if live.length() == 1 {
+    let key = live[0].key
+    let Ok(path) = set_home_key("team", key) else {
+      fmt.Println(f"next: lll attach -k {key} — the server's only team")
+      return
+    }
+    fmt.Println(f"team = \"{key}\" in {path} (the server's only team)")
+    fmt.Println("ready: lll issue create \"a title\"")
+    fmt.Println("in a shared repo, 'lll attach' commits the team so every clone inherits it")
+    return
+  }
+  if live.length() > 1 {
+    let keys = live.map(|t| t.key).join(", ")
+    fmt.Println(f"next: lll attach -k KEY — the server has {live.length()} teams ({keys})")
+    return
+  }
+  fmt.Println("next: lll attach -k KEY — the server has no teams yet; this creates one")
+}
+
+/// `lll whoami` — the identity every other command is acting as, confirmed
+/// against the server rather than read off the config.
+///
+/// 'lll config --list' shows the token as bullets and never says whose it is,
+/// so the one question a person actually has — am I logged in, as whom, to
+/// which server — had no command. auth-refresh is the check because it is the
+/// cheapest call that only a valid member token can make.
+pub fn whoami(args: Slice<string>) -> Result<(), string> {
+  if let Some(flag) = args.get(2) {
+    if flag == "--help" || flag == "-h" {
+      fmt.Println(
+        "lll whoami - show which member, server and team this machine is acting as
+
+Usage:
+  lll whoami
+
+Confirms the stored token against the server. 'lll config --list' shows where
+each value came from; 'lll login' replaces the token.",
+      )
+      return Ok(())
+    }
+    return Err(f"unknown whoami argument: '{flag}' (see 'lll whoami --help')")
+  }
+  let cfg = config.load()?
+  // pb.post refuses an untokened collection call with the message that names
+  // the fix, so there is no second copy of it here.
+  let body = pb.post("/api/collections/members/auth-refresh", "")?
+  let mut auth = models.AuthResponse { .. }
+  if let Err(e) = json.Unmarshal(body.bytes(), &auth) {
+    return Err(f"decoding the identity response: {e}")
+  }
+  fmt.Println(f"{auth.record.name} <{auth.record.email}>")
+  fmt.Println(f"server  {cfg.url}")
+  let team = if cfg.team == "" { "(none — run 'lll attach')" } else { cfg.team }
+  fmt.Println(f"team    {team}")
+  if cfg.me != "" && cfg.me != auth.record.name {
+    fmt.Println(
+      f"note: 'me' is set to \"{cfg.me}\", which is not the member this token belongs to — 'lll config set me {auth.record.name}' fixes it",
+    )
+  }
+  Ok(())
+}
+
+/// Provision the member `lll login --create` is about to authenticate as.
+///
+/// Rides the same superuser gate as 'lll member invite' and 'lll token
+/// create' — LLL_ADMIN_EMAIL/LLL_ADMIN_PASSWORD, the credentials 'lll up'
+/// prints and a deployment sets as secrets. The password is the caller's, not
+/// a generated one, because unlike invite there is nobody to hand it to: the
+/// person creating this account is the person about to log into it.
+///
+/// `base` is --url's server when given, so --create works on a machine that
+/// has never been configured. superuser_auth reads the configured url, which
+/// is why LLL_URL is set for the duration rather than passed down: the gate is
+/// shared with two other commands and neither needs a base argument.
+fn create_for_login(
+  name: string,
+  email: string,
+  password: string,
+  base: string,
+) -> Result<(), string> {
+  let restore = os.Getenv("LLL_URL")
+  if base != "" {
+    if let Err(e) = os.Setenv("LLL_URL", base) {
+      return Err(f"pointing at {base}: {e}")
+    }
+  }
+  let out = create_as_superuser(name, email, password)
+  if base != "" { let _ = os.Setenv("LLL_URL", restore) }
+  out
+}
+
+/// The superuser-gated half, split out so the LLL_URL above is restored on
+/// every path including the failures.
+fn create_as_superuser(
+  name: string,
+  email: string,
+  password: string,
+) -> Result<(), string> {
+  let su = superuser_auth()?
+  if let Some(existing) = find_member_as(su, name)? {
+    return Err(
+      f"member '{name}' already exists ({existing.email}) — drop --create and log in, or reset it with 'lll member set-password {name}'",
+    )
+  }
+  let _ = create_member_as(su, name, email, password)?
+  Ok(())
+}
+
+/// What a failed login should say. PocketBase answers the same 400 for "no
+/// such account" and "wrong password", and the raw body says only "Failed to
+/// authenticate" — three usability runs read it as a password problem when
+/// the account had never existed, and none of them found 'member invite' or
+/// --create from it. Both branches are named here because the server does not
+/// tell us which one it is.
+fn login_failed(e: string, email: string, target: string) -> string {
+  if !strings.Contains(e, "400") {
+    return f"login failed: {e}"
+  }
+  // The server is named on every failure (TASK-203 AC#4): "wrong password"
+  // against the wrong host is the transcript that rule exists for, and it is
+  // exactly the shape of the 400 being rewritten here.
+  let base = if target != "" {
+    target
+  } else {
+    pb.base_url().unwrap_or("the configured server")
+  }
+  let url_flag = if target == "" { "" } else { f" --url {target}" }
+  f"login failed at {base}: no member with email {email}, or the password is wrong
+if the account exists, check the password — a superuser can reset it:
+  lll member set-password <name> --email {email}
+if it does not exist yet, and you hold the server's admin credentials
+(LLL_ADMIN_EMAIL/LLL_ADMIN_PASSWORD), create it as you log in:
+  lll login{url_flag} --email {email} --create"
 }
 
 /// Dispatch `lll logout`: forget the token the home config holds. Env vars
@@ -200,8 +416,9 @@ fn print_login_usage() {
 Usage:
   lll login [--email email] [--url url]
 
-Prompts for the email (unless --email/-e) and reads the password with echo
-off when stdin is a terminal; piped input is read as a plain line. On success
+Prompts for the email (unless --email/-e) and the password (unless
+--password/-p), reading it with echo off when stdin is a terminal; piped
+input is read as a plain line. --password is what scripts, CI and agents use. On success
 the PocketBase token is stored in ~/.config/lll/lll.toml — never in the
 repo's .lll.toml, which is committed — and every later lll call rides it.
 An LLL_TOKEN in the environment still wins (see 'lll config --list').
@@ -209,10 +426,27 @@ An LLL_TOKEN in the environment still wins (see 'lll config --list').
 --url is the fresh-machine setup: it authenticates against that server and
 persists url (and 'me', when unset) next to the token, so
 
-  lll login --url https://tracker.example.com
+  lll login --url https://tracker.example.com --email you@example.com
 
 is the only step a new machine needs. Without --url, login uses the
-configured url. No password yet? A superuser sets one:
+configured url. It finishes by naming what is still missing here — a team,
+which 'lll attach' writes to the repo's .lll.toml.
+
+No account on the server yet? If you hold the admin credentials
+(LLL_ADMIN_EMAIL/LLL_ADMIN_PASSWORD, the ones 'lll up' prints and a
+deployment sets as secrets), --create makes the member and logs into it in
+one command:
+
+  lll login --url https://tracker.example.com --email you@example.com --create \\
+    --password <pick one>
+
+The member is named after the part of the email before @ unless --name says
+otherwise, and the password is the one you will log in with from then on --
+not the admin password.
+
+Otherwise ask whoever deployed the server for an account; they run
+'lll member invite <name> --email <you>' and send you what it prints. An
+existing account whose password is lost is reset with
 'lll member set-password <name>'.
 
 'lll logout' clears the token again.",

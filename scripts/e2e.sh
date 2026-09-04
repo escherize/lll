@@ -342,14 +342,25 @@ assert_contains "$out" "unset	team=" "the walk stops at the git root"
 assert_not_contains "$out" "STRAY" "a .lll.toml above the repo root is never read"
 
 # --- attach: one command, one line, the team created (TASK-168) ---
+# TASK-242: bare `lll attach` asks the server before inventing a key. This
+# server has several teams by now, so it must refuse and name them rather than
+# create a team from the directory name — the behaviour that put a junk team
+# on all three servers of the onboarding usability runs. The derived key is
+# still the answer on an EMPTY server, asserted further down.
 ATTACH="$DATA_DIR/attach/lllattachdemo"
 mkdir -p "$ATTACH/sub"
 git -C "$ATTACH" init -q
-out=$(cd "$ATTACH/sub" && LLL_URL=$URL HOME="$SET_HOME" "$LLL_ABS" attach)
-# The repo root, not the subdirectory it was run from. Matched on the tail
-# because git reports the path with symlinks resolved and $DATA_DIR is not.
+out=$(cd "$ATTACH/sub" && LLL_URL=$URL HOME="$SET_HOME" "$LLL_ABS" attach 2>&1) && \
+  fail "bare attach succeeded on a multi-team server"
+assert_contains "$out" "say which: lll attach -k KEY" "bare attach refuses to guess"
+assert_contains "$out" "ENG" "bare attach names the teams it found"
+[ -f "$ATTACH/.lll.toml" ] && fail "a refused attach still wrote .lll.toml"
+# -k is the answer it asked for. The repo root, not the subdirectory it was
+# run from: matched on the tail because git reports the path with symlinks
+# resolved and $DATA_DIR is not.
+out=$(cd "$ATTACH/sub" && LLL_URL=$URL HOME="$SET_HOME" "$LLL_ABS" attach -k LLLAT)
 assert_contains "$out" "lllattachdemo/.lll.toml" "attach names the file at the repo root"
-assert_contains "$out" "created team LLLAT" "attach created the derived team"
+assert_contains "$out" "created team LLLAT" "attach -k created the team"
 [ "$(cat "$ATTACH/.lll.toml")" = 'team = "LLLAT"' ] \
   || fail "attach wrote more than the team: $(cat "$ATTACH/.lll.toml")"
 # Idempotent, and -k overrides the derived key.
@@ -1294,7 +1305,7 @@ out=$(env -u LLL_TEAM LLL_URL=$URL "$LIN" finding near src 2>&1)
 rc=$?
 set -e
 [ "$rc" -ne 0 ] || fail "finding near without a team: expected nonzero exit"
-assert_contains "$out" "set LLL_TEAM" "unscoped finding near names the fix"
+assert_contains "$out" "lll attach" "unscoped finding near names the fix"
 
 # A link crossing tenancy is refused, not silently stitched.
 set +e
@@ -1368,15 +1379,27 @@ out=$(LLL_URL="http://127.0.0.1:$SPY_PORT" LLL_TOKEN="spy-token-123" "$LIN" team
 assert_contains "$(cat "$REC")" "Bearer spy-token-123" \
   "the pb client sends the configured token as its Authorization header"
 
+# TASK-242: with no token anywhere, the request never reaches the wire. It
+# used to be sent bare, and because PocketBase applies a LIST rule as a filter
+# rather than a gate, the answer was 200 with an empty array — three
+# onboarding usability runs each opened with `lll issue list`, read that
+# silence as an empty backlog, and lost several commands to it. The spy is
+# still here to prove the request is not sent: its record file stays empty.
 REC2="$DATA_DIR/auth-header-none.txt"
 SPY2_PORT=$(free_port 20000 39999)
 run_spy "$REC2" "$SPY2_PORT"
 # HOME is pinned like every other hermeticity-sensitive invocation: config
 # layers (TASK-168), so a developer's own ~/.config/lll/lll.toml token would
-# otherwise supply the header this test asserts absent.
-out=$(env -u LLL_TOKEN HOME="$E2E_HOME" LLL_URL="http://127.0.0.1:$SPY2_PORT" "$LIN" team list)
-assert_contains "$(cat "$REC2")" "<none>" \
-  "no token configured sends no Authorization header"
+# otherwise satisfy the check this test asserts refuses.
+out=$(env -u LLL_TOKEN HOME="$E2E_HOME" LLL_URL="http://127.0.0.1:$SPY2_PORT" "$LIN" team list 2>&1) && \
+  fail "a tokenless collection request was not refused"
+assert_contains "$out" "not logged in" "a tokenless collection request is refused by name"
+assert_contains "$out" "lll login --url" "the refusal names the command that fixes it"
+[ -s "$REC2" ] && fail "the tokenless request reached the server anyway: $(cat "$REC2")"
+# The health endpoint is not a collection, so it still answers without a token
+# — 'lll config check' is the one thing a brand-new machine can run.
+out=$(env -u LLL_TOKEN HOME="$E2E_HOME" LLL_URL=$URL "$LIN" config check)
+assert_contains "$out" "answers as a PocketBase API" "config check works without a token"
 
 for pid in $SPY_PIDS; do kill "$pid" 2>/dev/null || true; done
 SPY_PIDS=""
@@ -1441,11 +1464,20 @@ out=$("$LIN" up --help)
 assert_contains "$out" "Usage:" "lll up --help"
 assert_contains "$out" "--port" "up --help mentions --port"
 
-# --- --version prints the lisette.toml version ---
-out=$("$LIN" --version)
-want="lll $(sed -n 's/^version = "\(.*\)"/\1/p' lisette.toml | head -1)"
-[ "$out" = "$want" ] || fail "--version: expected '$want', got '$out'"
-[ "$("$LIN" version)" = "$want" ] || fail "'lll version': expected '$want'"
+# --- --version reports the build ---
+# version() derives from `git describe --tags`, so in a working checkout this
+# is a tag-relative description ("0.1.0-3-gabc123", "-dirty" when the tree has
+# edits) and only equals lisette.toml's bare version at a clean tag checkout.
+# Asserting the exact string here would fail on every commit between tags, so
+# the assertion is the shape: prefixed "lll ", non-empty, and the same answer
+# from all three spellings.
+want=$("$LIN" --version)
+case "$want" in
+  "lll "?*) ;;
+  *) fail "--version: expected 'lll <version>', got '$want'" ;;
+esac
+[ "$("$LIN" version)" = "$want" ] || fail "'lll version' disagrees with --version"
+[ "$("$LIN" -v)" = "$want" ] || fail "'lll -v' disagrees with --version"
 
 # --- error messages name the fix ---
 # unknown top-level command points at --help
@@ -1779,6 +1811,58 @@ assert_not_contains "$list_out" "$HOME_TOK" "config --list never prints the toke
 out=$(env -u LLL_TOKEN HOME="$E2E_HOME" LLL_URL=$URL "$LIN" member list)
 assert_contains "$out" "e2e-agent" "the home-config token authenticates a member list"
 
+# TASK-242 AC: --password is a flag, not only a prompt. Agents and CI machines
+# have no terminal to type into, and piping stdin was the undocumented answer.
+out=$(env -u LLL_TOKEN HOME="$E2E_HOME" LLL_URL=$URL "$LIN" login \
+  -e e2e-agent@lll.test --password "$LOGIN_PASS") \
+  || fail "login --password exited nonzero: $out"
+assert_contains "$out" "logged in as e2e-agent" "login takes the password as a flag"
+# It also says what is still missing here. This directory has no team.
+assert_contains "$out" "lll attach" "login names the next step"
+
+# TASK-242 AC: whoami answers the question config --list cannot — which member
+# this token belongs to, confirmed against the server.
+out=$(env -u LLL_TOKEN HOME="$E2E_HOME" LLL_URL=$URL "$LIN" whoami) \
+  || fail "lll whoami exited nonzero: $out"
+assert_contains "$out" "e2e-agent@lll.test" "whoami names the member's email"
+assert_contains "$out" "$URL" "whoami names the server"
+out=$(env -u LLL_TOKEN -u LLL_URL HOME="$DATA_DIR/nowhere" "$LIN" whoami 2>&1) \
+  && fail "whoami without a token should fail"
+assert_contains "$out" "not logged in" "whoami with no token says so"
+
+# TASK-242 AC: --create provisions the member and logs into it in one command,
+# gated on the superuser credentials 'lll up' prints. This is the fresh-server
+# dead end every usability run hit: 'Failed to authenticate' for an account
+# that had never existed, with nothing naming the command that makes one.
+CREATE_HOME="$DATA_DIR/createhome"
+mkdir -p "$CREATE_HOME"
+out=$(env -u LLL_TOKEN HOME="$CREATE_HOME" LLL_URL=$URL \
+  LLL_ADMIN_EMAIL=admin@local.dev LLL_ADMIN_PASSWORD=admin-local-123 \
+  "$LIN" login -e newcomer@lll.test --password newcomer-pass-789 --create) \
+  || fail "login --create exited nonzero: $out"
+assert_contains "$out" "created member newcomer" "--create says it made the account"
+assert_contains "$out" "logged in as newcomer" "--create logs into what it made"
+# The account is real: a second login without --create authenticates it.
+out=$(env -u LLL_TOKEN HOME="$CREATE_HOME" LLL_URL=$URL "$LIN" login \
+  -e newcomer@lll.test --password newcomer-pass-789) \
+  || fail "the --create account does not log in again: $out"
+# And --create on a name that exists refuses rather than clobbering.
+out=$(env -u LLL_TOKEN HOME="$CREATE_HOME" LLL_URL=$URL \
+  LLL_ADMIN_EMAIL=admin@local.dev LLL_ADMIN_PASSWORD=admin-local-123 \
+  "$LIN" login -e newcomer@lll.test --password other --create 2>&1) \
+  && fail "--create on an existing member should refuse"
+assert_contains "$out" "already exists" "--create refuses an existing member"
+
+# TASK-242 AC: the 400 that told nobody anything now names both causes and the
+# command for each. PocketBase answers the same 400 for a missing account and
+# a wrong password, so both branches are printed.
+out=$(env -u LLL_TOKEN HOME="$CREATE_HOME" LLL_URL=$URL "$LIN" login \
+  -e nobody@lll.test --password whatever 2>&1) \
+  && fail "login as a nonexistent member should fail"
+assert_contains "$out" "no member with email nobody@lll.test" "login names the identity it tried"
+assert_contains "$out" "--create" "the login failure names --create"
+assert_contains "$out" "set-password" "the login failure names the password reset"
+
 # logout clears exactly the token: the me line the boot wrote stays.
 env -u LLL_TOKEN HOME="$E2E_HOME" LLL_URL=$URL "$LIN" logout > "$DATA_DIR/logout.out" \
   || fail "lll logout exited nonzero"
@@ -2007,6 +2091,32 @@ echo "e2e: all assertions passed"
 # scratch HOME would move the build cache and make each of them recompile from
 # scratch. They are no less hermetic for it - each pins HOME itself, exactly as
 # it did before this suite started pinning anything.
+
+# --- TASK-242: a bare title is accepted alongside -t -------------------------
+# Every onboarding usability run typed `lll issue create "Some title"` first
+# and got "unknown flag: 'Some title'". Last in the suite on purpose: it adds
+# an issue to ENG, and the per-team numbering above is asserted by exact id.
+# Its own team: ENG has been archived by the lifecycle assertions above, and
+# the per-team numbering earlier in the suite is asserted by exact id, so this
+# must not add issues to a team anything else counts.
+# The exported LLL_TOKEN is dead by now: the login section PATCHed e2e-agent's
+# password, and PocketBase rotates a record's tokenKey on a password change,
+# invalidating every token issued before it. Re-mint before asserting anything
+# — and note that a stale token FAILS SILENTLY on reads (the list rule filters
+# rather than gates, so you get 200 and an empty array), which is TASK-247.
+E2E_TOKEN=$(pb_member_token "$URL" e2e-agent e2e-agent@lll.test e2e-agent-pass-123) \
+  || fail "re-minting the e2e member token after the password change"
+export LLL_TOKEN="$E2E_TOKEN"
+pos_out=$(LLL_URL=$URL "$LIN" team create -k POS -n "Positional" 2>&1) \
+  || fail "creating the POS team for the positional-title assertions: $pos_out"
+out=$(LLL_URL=$URL LLL_TEAM=POS "$LIN" issue create "Positional title works")
+assert_contains "$out" "Positional title works" "a bare argument is the title"
+out=$(LLL_URL=$URL LLL_TEAM=POS "$LIN" issue create 2>&1) \
+  && fail "create with no title should fail"
+assert_contains "$out" "no title" "a titleless create says so"
+# -t still works and still wins, so nothing scripted against it breaks.
+out=$(LLL_URL=$URL LLL_TEAM=POS "$LIN" issue create -t "Flag title still works")
+assert_contains "$out" "Flag title still works" "-t remains the documented spelling"
 
 # --- web board (own ephemeral PB; see e2e_web.sh) ---
 HOME="$E2E_REAL_HOME" scripts/e2e_web.sh

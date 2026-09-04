@@ -71,8 +71,10 @@ fn nouns() -> Slice<string> {
     "logout",
     "token",
     "completions",
+    "whoami",
     "help",
     "--version",
+    "-v",
   ]
 }
 

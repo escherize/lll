@@ -258,7 +258,11 @@ $(diff <(printf '%s' "$board_rail") <(rail "$issue") || true)"
 assert_contains "$board_rail" 'href="/t/ENG/?assignee=e2e"' \
   "rail has a My issues row (the board's own URL encoding, team-routed)"
 assert_contains "$board_rail" 'id="rail-views"' "rail carries the saved views group"
-assert_contains "$board_rail" "v0.1.0" "rail footer carries the version"
+# The version is derived from `git describe` (see src/commands/version.lis),
+# so assert the shape the footer renders, not a pinned number that only holds
+# at a clean tag checkout.
+assert_contains "$board_rail" "v$("$LIN" --version | sed 's/^lll //')" \
+  "rail footer carries the version"
 
 # The FAVORITES group ships in the rail even when empty, and says out loud
 # that a star belongs to the workspace — auth is deferred (task-32), so the

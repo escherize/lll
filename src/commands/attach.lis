@@ -19,7 +19,7 @@ fn attach_spec() -> Slice<flags.Flag> {
       name: "-k",
       value: true,
       hint: "KEY",
-      help: "team key to attach to (default: the repo directory name)",
+      help: "team key to attach to (default: the server's team, if it has exactly one)",
       ..
     },
     flags.Flag { name: "--help", alias: "-h", hidden: true, help: "show this help", .. },
@@ -57,7 +57,18 @@ pub fn attach(args: Slice<string>) -> Result<(), string> {
 
   let name = filepath.Base(root)
   let given = p.one("-k")
-  let key = if given == "" { clean_key(name) } else { clean_key(given) }
+  let key = if given != "" {
+    clean_key(given)
+  } else {
+    // Ask the server before inventing anything. Bare `lll attach` reads as
+    // "connect me to the tracker", and every usability run typed it against a
+    // server that already had exactly one team — and got a brand-new team
+    // named after their working directory, written to shared state, at exit
+    // 0, with no delete command to undo it. The directory name is a fine
+    // guess for the FIRST team on an empty server; it is a bad guess for any
+    // other case, so it is now the fallback rather than the rule.
+    derive_key_from_server(name)?
+  }
   if key == "" {
     return Err(f"no team key in '{name}' to derive one from — pass it: lll attach -k KEY")
   }
@@ -88,6 +99,27 @@ pub fn attach(args: Slice<string>) -> Result<(), string> {
   Ok(())
 }
 
+/// The team key bare `lll attach` should use, asked of the server first.
+/// One team is the answer; several is a choice only the operator can make;
+/// none (or a server that cannot be reached) falls back to the directory
+/// name, which is the empty-server bootstrap this command was written for.
+fn derive_key_from_server(dir_name: string) -> Result<string, string> {
+  let Ok(teams) = list_teams() else { return Ok(clean_key(dir_name)) }
+  let live = teams.items.filter(|t| !t.archived)
+  if live.length() == 1 {
+    let key = live[0].key
+    fmt.Println(f"the server has one team, {key} — attaching to it")
+    return Ok(key)
+  }
+  if live.length() > 1 {
+    let keys = live.map(|t| t.key).join(", ")
+    return Err(
+      f"the server has {live.length()} teams ({keys}) — say which: lll attach -k KEY",
+    )
+  }
+  Ok(clean_key(dir_name))
+}
+
 /// Create the team unless the server already has it, and say which happened.
 /// A server that is down is not a reason to fail: the committed file is the
 /// point, and `lll up` creates a configured-but-missing team on its next boot.
@@ -111,9 +143,12 @@ Usage:
 
 Writes team = \"KEY\" to .lll.toml and creates the team on the server if it is
 missing. Inside a git repository that file goes at the repo root; outside one
-it goes in the working directory, and every subdirectory inherits it. The key
-defaults to the directory name reduced to letters and digits, uppercased, at
-most 5 characters.
+it goes in the working directory, and every subdirectory inherits it.
+
+Without -k, the server decides: one team means that team, several means you
+have to say which. Only when the server has no teams at all does the key come
+from the directory name, reduced to letters and digits, uppercased, at most 5
+characters -- the first team on a new server.
 
 In a repo, commit that file. Config layers — the repo's .lll.toml supplies
 'team', your ~/.config/lll/lll.toml supplies 'url' and 'me' — so on the next

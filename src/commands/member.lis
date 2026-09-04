@@ -99,6 +99,13 @@ fn member_add_spec() -> Slice<flags.Flag> {
 fn member_invite_spec() -> Slice<flags.Flag> {
   [
     flags.Flag {
+      name: "--url",
+      value: true,
+      hint: "url",
+      help: "server base url; without it the configured one (LLL_URL, 'url' in .lll.toml)",
+      ..,
+    },
+    flags.Flag {
       name: "--email",
       alias: "-e",
       value: true,
@@ -113,6 +120,13 @@ fn member_invite_spec() -> Slice<flags.Flag> {
 
 fn set_password_spec() -> Slice<flags.Flag> {
   [
+    flags.Flag {
+      name: "--url",
+      value: true,
+      hint: "url",
+      help: "server base url; without it the configured one (LLL_URL, 'url' in .lll.toml)",
+      ..,
+    },
     flags.Flag {
       name: "--email",
       value: true,
@@ -136,6 +150,24 @@ pub fn member_verb_spec(verb: string) -> Slice<flags.Flag> {
   }
 }
 
+/// Point this process at `url` for the rest of the command, when one was
+/// given. The gated helpers all read the configured url; setting the env var
+/// is how a flag reaches them without threading a base argument through
+/// superuser_auth, find_member_as and create_member_as.
+fn point_at_url(given: string) -> Result<(), string> {
+  let base = strings.TrimSuffix(strings.TrimSpace(given), "/")
+  if base == "" { return Ok(()) }
+  if !strings.HasPrefix(base, "http://") && !strings.HasPrefix(base, "https://") {
+    return Err(
+      f"--url must be a full base url starting with http:// or https:// (got '{base}')",
+    )
+  }
+  if let Err(e) = os.Setenv("LLL_URL", base) {
+    return Err(f"pointing at {base}: {e}")
+  }
+  Ok(())
+}
+
 /// `lll member set-password NAME` — the superuser gives a member login
 /// credentials (TASK-203). Needed because created and imported members carry
 /// a random password nobody knows, so 'lll login' is a dead door until this
@@ -154,6 +186,7 @@ fn member_set_password(args: Slice<string>) -> Result<(), string> {
     return Err(f"usage: {usage}")
   }
 
+  point_at_url(p.one("--url"))?
   let su = superuser_auth()?
   let found = find_member_as(su, name)?
   let Some(member) = found else {
@@ -239,6 +272,12 @@ fn member_invite(args: Slice<string>) -> Result<(), string> {
     )
   }
 
+  // --url before the gate: superuser_auth and every call under it read the
+  // CONFIGURED url, so on a machine that has never been set up they went to
+  // the default and answered "Failed to authenticate" for credentials that
+  // were perfectly good. Four of the six usability runs lost commands to
+  // exactly that, and half of them guessed LLL_URL rather than being told.
+  point_at_url(p.one("--url"))?
   // Superuser first: the create rides it, and an existing name is caught here
   // rather than as PocketBase's bare 400 on the unique index.
   let su = superuser_auth()?

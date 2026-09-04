@@ -129,7 +129,44 @@ pub fn bearer(tok: string) -> string {
 /// request — GET included, which is why `get` no longer calls http.Get.
 fn send(method: string, path: string, payload: string) -> Result<string, string> {
   let (cfg, src) = config.load_traced()?
+  if cfg.token == "" && strings.HasPrefix(path, "/api/collections/") {
+    return Err(not_logged_in(cfg.url, src.url == "default"))
+  }
   request(cfg.url, method, path, payload, bearer(cfg.token), src.url == "default")
+}
+
+/// Refusal for a collection request with no token anywhere in the layering.
+///
+/// Every collection rule is `@request.auth.id != ""` (ADR-1), and PocketBase
+/// applies a LIST rule as a filter rather than a gate — so an unauthenticated
+/// `issue list` gets 200 and an empty array, not a 401. Three separate
+/// usability runs each opened with `lll issue list`, read the silence as an
+/// empty backlog, and lost several commands before discovering they had never
+/// authenticated. Writes were no better: `member add` answered PocketBase's
+/// bare "Failed to create record" 400, which reads as a bad payload.
+///
+/// So the check happens here, before the wire, where it can say the true
+/// thing once for every verb. `defaulted` matters because a default url is
+/// the other half of that transcript: nothing was configured, and the
+/// request was about to go to whatever happens to be on 127.0.0.1:8090.
+fn not_logged_in(base: string, defaulted: bool) -> string {
+  // The url in the remedy is a PLACEHOLDER when nothing configured one. It
+  // used to be the default itself, which reads as a discovered fact and
+  // copy-pastes into the same failure — all three second-round usability runs
+  // called that out, and it is the only line here that actively wasted them.
+  let (where_, url_arg) = if defaulted {
+    (f"{base} (the default — nothing here configured a url)", "<your server url>")
+  } else {
+    (base, base)
+  }
+  f"not logged in to {where_}
+every collection is authenticated-only, so reads would come back empty and writes refused
+log in with: lll login --url {url_arg} --email <your email>
+no account yet?
+  you hold the server's admin credentials (LLL_ADMIN_EMAIL/LLL_ADMIN_PASSWORD):
+    lll login --url {url_arg} --email <your email> --create --password <pick one>
+  somebody else deployed it — ask them to run:
+    lll member invite <name> --email <your email>"
 }
 
 /// The request every verb here shares; `auth` is the Authorization header
