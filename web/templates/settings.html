@@ -38,7 +38,7 @@
      id; the trailing "new" form carries none, which is what makes it a
      create. Delete travels as ?del=1 so the same form body serves both. */}}
 {{define "settings"}}<div id="settings" class="settings">
-<p class="set-lede">lll has no accounts, so everything here belongs to the workspace: everyone who opens this board sees the same labels, members, projects and colour. Per-browser choices (hidden columns, filter chips) stay on the board where you set them.</p>
+<p class="set-lede">Everything here belongs to the workspace: every member who opens this board sees the same labels, members, projects and colour. Per-browser choices (hidden columns, filter chips) stay on the board where you set them.</p>
 
 <section class="set-sec">
 <h2>Team</h2>
@@ -78,7 +78,7 @@
 
 <section class="set-sec">
 <h2>Members <span class="count">{{len .Members}}</span></h2>
-<p class="set-note">Honor-system identities; there is no sign-in. A member is who a comment is attributed to and who an issue is assigned to.</p>
+<p class="set-note">A member is an account: who a comment is attributed to, who an issue is assigned to, and who can sign in. Added here, a member has no password yet &mdash; give them one under Access below, or run <code>lll member invite NAME --email them@example.com</code>, which creates and credentials in one step.</p>
 <div class="set-rows">
 {{range .Members}}<form class="set-row" id="set-member-{{.Id}}" data-name="{{.Name}}">
 <input type="hidden" name="id" value="{{.Id}}">

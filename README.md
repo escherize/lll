@@ -12,6 +12,10 @@ Written in [Lisette](https://github.com/ivov/lisette), which compiles to Go.
 
 ## Install
 
+> **No release is cut yet** — the repository carries no `v*` tag, so the
+> download below 404s today. Until the first tag, build from source with the
+> [Quickstart](#quickstart). Remove this note when a release exists.
+
 Prebuilt binaries — no checkout, no toolchain:
 
 ```sh
@@ -43,7 +47,7 @@ checkout is the binary you just built:
 
 ```sh
 lll attach                               # writes .lll.toml; commit it
-lll issue create -t "First issue" --priority 2
+lll issue create "First issue" --priority 2   # -t "First issue" also works
 lll issue list
 open http://127.0.0.1:8100               # or: lll board -w
 ```
@@ -55,20 +59,45 @@ Four actors, each configured once, none written twice:
 | Actor | Once | Writes |
 |---|---|---|
 | Server | `lll up` with `LLL_ADMIN_*`, `LLL_TEAM`, `LLL_BIND`, `LLL_BOARD_TOKEN` in env (Fly: secrets) | nothing on disk but the database |
-| Your machine (human path) | `lll login --url https://your-host` — prompts for email + password | `url`, `token`, and `me` (when unset) in the home config |
+| Your machine (human path) | `lll login --url https://your-host --email you@example.com` — prompts for the password, or pass `--password` | `url`, `token`, `me` and `team` (each when unset) in the home config |
 | Each repo or directory | `lll attach`, commit the file if it is a repo | `team = "KEY"` in `.lll.toml`, at the repo root or in the working directory |
 | Each agent (agent path) | superuser mints `lll token create <name>` | nothing — `LLL_TOKEN` (+ `LLL_URL`) in its env |
 
-Humans log in with email + password; agents ride minted tokens. A new or
-imported member has a random password nobody knows, so a superuser first runs
-`lll member set-password NAME --email their@email` — then their `lll login
---url ...` works. On a local `lll up`, plain `lll login` (the url default is
-`http://127.0.0.1:8090`) is enough.
+Humans log in with email + password; agents ride minted tokens. A member has
+to exist before `lll login` will work — `lll login` authenticates members and
+never creates them, and the superuser is not a member, so its credentials do
+not log you into the board.
 
-Inviting someone is those two halves in one command: `lll member invite NAME
---email their@email` creates the member, generates a temporary password, and
-prints the exact lines they run. The password is shown once and stored
-nowhere, so send it before you close the terminal.
+**If you hold the server's admin credentials, setting up your own machine is
+one command:**
+
+```sh
+lll login --url https://your-host --email you@example.com \
+  --create --password <pick one> \
+  --admin-email <admin> --admin-password <admin pw>
+```
+
+`--create` makes the member and logs into it in the same call. The admin
+credentials can ride `LLL_ADMIN_EMAIL`/`LLL_ADMIN_PASSWORD` instead of the
+flags. The member is named after the part of your email before `@` unless
+`--name` says otherwise, and if the server has exactly one team, `login`
+settles that too — so `lll issue create "a title"` works immediately.
+
+**If somebody else deployed it**, they run one command and send you what it
+prints:
+
+```sh
+lll member invite NAME --email their@email --url https://your-host
+```
+
+That creates the member, generates a temporary password, and prints the exact
+lines they run. The password is shown once and stored nowhere, so send it
+before you close the terminal. A member who has lost their password gets a new
+one from `lll member set-password NAME --password <pw>` (superuser only —
+`--admin-email`/`--admin-password` or the environment).
+
+On a local `lll up`, plain `lll login` (the url default is
+`http://127.0.0.1:8090`) is enough.
 
 Clones and git worktrees of an attached repo need no step at all; env beats
 files, repo file beats home file, and each key resolves independently
@@ -194,13 +223,17 @@ lll issue watch ENG-12        # one issue + its comments, until Ctrl-C
 
 lll team|member|project|label list      # the other nouns: list/create/view/add
 lll team archive KEY          # park a finished team; unarchive brings it back
-lll attach                    # point this repo at a team, once
+lll team delete KEY           # delete a team holding no issues (archive keeps ids working)
+lll member remove NAME        # remove a member with nothing assigned (superuser only)
+lll attach                    # the server's team if it has one, else -k KEY
 lll config --list             # every value and the file it came from
 lll config check              # does the configured url answer as a PocketBase API?
-lll login --url https://host        # one-command machine setup: auth + persist url/token/me
+lll login --url https://host --email you@x.com --create --password <pw>
+                              # one command: make the member, log in, settle the team
 lll login                     # as a member, against the configured url
+lll whoami                    # which member, server and team you are acting as
 lll member invite NAME --email e@x.com  # add a colleague + temp password, in one
-lll member set-password NAME --email e@x.com  # superuser gives a member credentials
+lll member set-password NAME --password <pw>  # superuser gives a member credentials
 lll token create bryan        # a one-year agent token (superuser only), printed once
 lll logout                    # clear the stored token
 lll board -w                  # open the web board
