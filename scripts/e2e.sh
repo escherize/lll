@@ -1849,9 +1849,32 @@ out=$(env -u LLL_TOKEN HOME="$CREATE_HOME" LLL_URL=$URL "$LIN" login \
 # And --create on a name that exists refuses rather than clobbering.
 out=$(env -u LLL_TOKEN HOME="$CREATE_HOME" LLL_URL=$URL \
   LLL_ADMIN_EMAIL=admin@local.dev LLL_ADMIN_PASSWORD=admin-local-123 \
-  "$LIN" login -e newcomer@lll.test --password other --create 2>&1) \
+  "$LIN" login -e newcomer@lll.test --password another-pass-987 --create 2>&1) \
   && fail "--create on an existing member should refuse"
 assert_contains "$out" "already exists" "--create refuses an existing member"
+
+# TASK-242 follow-up: --create must refuse the ADMIN's own email. A
+# dumber-model run logged in with it, hit "no member with that email", added
+# --create as the message suggested, and minted a member shadowing the
+# superuser identity with whatever password it typed.
+out=$(env -u LLL_TOKEN HOME="$CREATE_HOME" LLL_URL=$URL \
+  LLL_ADMIN_EMAIL=admin@local.dev LLL_ADMIN_PASSWORD=admin-local-123 \
+  "$LIN" login -e admin@local.dev --password whatever-123 --create 2>&1) \
+  && fail "--create with the admin email should refuse"
+assert_contains "$out" "admin identity, not a member" "--create refuses the admin's email"
+
+# Too short is one sentence, not PocketBase's raw validation blob.
+out=$(env -u LLL_TOKEN HOME="$CREATE_HOME" LLL_URL=$URL \
+  LLL_ADMIN_EMAIL=admin@local.dev LLL_ADMIN_PASSWORD=admin-local-123 \
+  "$LIN" login -e shorty@lll.test --password short --create 2>&1) \
+  && fail "--create with a short password should refuse"
+assert_contains "$out" "at least 8 characters" "--create checks the password length"
+assert_not_contains "$out" "validation_min_text_constraint" "no raw PocketBase blob"
+
+# With no terminal to prompt at, every missing credential is named at once.
+out=$(env -u LLL_TOKEN HOME="$CREATE_HOME" LLL_URL=$URL "$LIN" login </dev/null 2>&1) \
+  && fail "login with nothing on a closed stdin should refuse"
+assert_contains "$out" "no terminal to prompt at" "login names both missing credentials at once"
 
 # TASK-242 AC: the 400 that told nobody anything now names both causes and the
 # command for each. PocketBase answers the same 400 for a missing account and

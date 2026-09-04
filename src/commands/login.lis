@@ -90,6 +90,16 @@ pub fn login(args: Slice<string>) -> Result<(), string> {
   // One reader for the whole flow: a second bufio.Reader would race the
   // first's read-ahead and could lose the password line behind the email.
   let mut input = bufio.NewReader(os.Stdin)
+  // Nothing to prompt at: say what is missing in one go rather than one
+  // refusal per flag. Scripts, CI and agents are exactly the callers with no
+  // terminal, and they are the ones who cannot answer a prompt.
+  let interactive = term.IsTerminal(os.Stdin.Fd() as int)
+  if !interactive && p.one("--email") == "" && !p.given("--password") {
+    return Err(
+      "no email and no password, and no terminal to prompt at — pass both:
+  lll login --url <server> --email <your email> --password <pw>",
+    )
+  }
   let mut email = p.one("--email")
   if email == "" {
     fmt.Print("Email: ")
@@ -130,6 +140,26 @@ pub fn login(args: Slice<string>) -> Result<(), string> {
   // minus the paperwork, and it runs BEFORE the auth below so the same
   // command that creates the account is the one that logs into it.
   if p.given("--create") {
+    // The admin identity is not a member identity. A dumber-model run logged
+    // in with the ADMIN email, hit "no member with that email", added
+    // --create as the message suggested, and minted a member shadowing the
+    // superuser — same address, and whatever password it typed. Nothing in
+    // the flow objected. Refuse it: this is the one email --create must not
+    // take, and the person running it already has a real one.
+    if email == os.Getenv("LLL_ADMIN_EMAIL") {
+      return Err(
+        f"{email} is the server's admin identity, not a member — creating a member with it
+would put a second account on that address. --create makes YOUR login: pass
+--email <your own address>. The admin credentials stay in the environment.",
+      )
+    }
+    // PocketBase's own minimum, checked here so a too-short password is one
+    // sentence rather than a raw validation blob from the create round trip.
+    if password.length() < 8 {
+      return Err(
+        f"--create needs a password of at least 8 characters (got {password.length()})",
+      )
+    }
     let name = if p.one("--name") != "" {
       p.one("--name")
     } else {

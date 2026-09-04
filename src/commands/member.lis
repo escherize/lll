@@ -48,7 +48,8 @@ Usage:
   lll member add -n \"name\" [-e email]          add a member
                                                ('create' is the same command)
   lll member invite NAME --email email         add + temp password + the lines
-                                               they run (superuser only)
+                                               they run (any member; the
+                                               admin credentials work too)
   lll member set-password NAME [--email email] set a member's login password
                                                (superuser only)
 
@@ -341,7 +342,6 @@ fn real_email(email: string) -> bool {
 fn print_invite_usage() {
   fmt.Println(
     "lll member invite - add a colleague and hand them a working login
-(superuser only)
 
 Usage:
   lll member invite NAME --email email
