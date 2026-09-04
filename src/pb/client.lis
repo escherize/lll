@@ -163,8 +163,10 @@ fn not_logged_in(base: string, defaulted: bool) -> string {
 every collection is authenticated-only, so reads would come back empty and writes refused
 log in with: lll login --url {url_arg} --email <your email>
 no account yet?
-  you hold the server's admin credentials (LLL_ADMIN_EMAIL/LLL_ADMIN_PASSWORD):
-    lll login --url {url_arg} --email <your email> --create --password <pick one>
+  you hold the server's admin credentials — one command, paste it whole:
+    LLL_ADMIN_EMAIL=<admin email> LLL_ADMIN_PASSWORD=<admin password> \\
+      lll login --url {url_arg} --email <your email> --create --password <pick one>
+    (add --name <name> unless the part of your email before @ is the name you want)
   somebody else deployed it — ask them to run:
     lll member invite <name> --email <your email>"
 }
