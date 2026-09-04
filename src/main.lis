@@ -100,4 +100,6 @@ layer, each supplying the keys it names — 'lll config --list' shows which won)
   LLL_SORT     default sort for 'issue list': created, updated, priority, number; prefix - to descend
   LLL_WEB_URL  web board base URL for 'board', 'issue url', 'view -w' (default http://127.0.0.1:8100)",
   )
+  let hint = commands.setup_hint()
+  if hint != "" { fmt.Println(hint) }
 }

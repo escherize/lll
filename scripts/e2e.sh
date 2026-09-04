@@ -2122,6 +2122,35 @@ echo "e2e: all assertions passed"
 # scratch. They are no less hermetic for it - each pins HOME itself, exactly as
 # it did before this suite started pinning anything.
 
+# --- fleet-run findings: the messages that manufactured their own mistakes --
+# 29 of 50 agents put the ADMIN email in --email, because the login failure
+# recommended --create with whatever address had just failed. A superuser is
+# not a member, so that case says so instead.
+out=$(env -u LLL_TOKEN HOME="$CREATE_HOME" LLL_URL=$URL \
+  LLL_ADMIN_EMAIL=admin@local.dev LLL_ADMIN_PASSWORD=admin-local-123 \
+  "$LIN" login -e admin@local.dev --password admin-local-123 2>&1) \
+  && fail "logging in as the superuser should fail"
+assert_contains "$out" "admin identity, not a member" "the admin email is named as such on login"
+assert_not_contains "$out" "--email admin@local.dev --create" "it must not recommend --create with the admin email"
+
+# 7 agents guessed --admin-email/--admin-password on login, having seen them
+# on the sibling commands, where they existed and here they did not.
+out=$(env -u LLL_TOKEN HOME="$DATA_DIR/adminflag" LLL_URL=$URL "$LIN" login \
+  -e flagged@lll.test --password flagged-pass-123 --create \
+  --admin-email admin@local.dev --admin-password admin-local-123) \
+  || fail "login --create with admin flags: $out"
+assert_contains "$out" "created member flagged" "login --create takes the admin flags"
+
+# Two thirds of them opened with `lll` or `lll --help`, never running a real
+# command, so they never saw the refusal that carries the setup recipe.
+out=$(env -u LLL_TOKEN -u LLL_URL HOME="$DATA_DIR/nohint" "$LIN" --help)
+assert_contains "$out" "Not set up on a server yet" "--help carries the setup recipe when no token is configured"
+assert_contains "$out" "<your server url>" "the recipe does not print a defaulted url as fact"
+assert_not_contains "$out" "--url http://127.0.0.1:8090 --email" "no plausible-wrong url in a runnable line"
+# Once a token is configured the block is gone: it is onboarding, not chrome.
+out=$(HOME="$E2E_HOME" LLL_URL=$URL "$LIN" --help)
+assert_not_contains "$out" "Not set up on a server yet" "the setup block disappears once logged in"
+
 # --- TASK-245: removal, which did not exist -------------------------------
 # The login section above PATCHed e2e-agent's password, and PocketBase retires
 # every token issued before a password change, so the exported LLL_TOKEN is

@@ -41,6 +41,20 @@ fn login_spec() -> Slice<flags.Flag> {
       ..,
     },
     flags.Flag {
+      name: "--admin-email",
+      value: true,
+      hint: "email",
+      help: "superuser email for --create (else LLL_ADMIN_EMAIL)",
+      ..,
+    },
+    flags.Flag {
+      name: "--admin-password",
+      value: true,
+      hint: "pw",
+      help: "superuser password for --create (else LLL_ADMIN_PASSWORD)",
+      ..,
+    },
+    flags.Flag {
       name: "--create",
       help: "no account yet: create the member first, using LLL_ADMIN_EMAIL/LLL_ADMIN_PASSWORD",
       ..,
@@ -80,6 +94,10 @@ pub fn login(args: Slice<string>) -> Result<(), string> {
   // --url is the fresh-machine path (TASK-195): authenticate against the url
   // given, then persist it next to the token, so machine setup is exactly one
   // command. Without it, login rides whatever url is already configured.
+  // Applied for the whole command, not just --create: login_failed reads
+  // LLL_ADMIN_EMAIL to recognise the admin identity, and it has to see the
+  // flags too or the flag-users get the generic advice.
+  apply_admin_flags(p.one("--admin-email"), p.one("--admin-password"))?
   let target = strings.TrimSuffix(strings.TrimSpace(p.one("--url")), "/")
   if p.given("--url") && !strings.HasPrefix(target, "http://") && !strings.HasPrefix(target, "https://") {
     return Err(
@@ -264,6 +282,28 @@ fn settle_team() {
   fmt.Println("next: lll attach -k KEY — the server has no teams yet; this creates one")
 }
 
+/// The "you are not set up yet" block for `lll --help`, or "" once a token is
+/// configured. Two thirds of a fifty-agent onboarding run opened with `lll`,
+/// `lll --help` or `lll --version` rather than a real command, so they never
+/// saw the refusal that carries the setup recipe. Help is where they looked;
+/// the recipe belongs there too.
+pub fn setup_hint() -> string {
+  let Ok((cfg, src)) = config.load_traced() else { return "" }
+  if cfg.token != "" { return "" }
+  // A defaulted url is not an answer, it is the absence of one. Printing it
+  // into a runnable line is the same mistake three usability rounds caught in
+  // the not-logged-in refusal: it reads as discovered fact and pastes into a
+  // failure against a server nobody named.
+  let url = if src.url == "default" { "<your server url>" } else { cfg.url }
+  f"
+Not set up on a server yet — nothing here holds a login token.
+  lll login --url {url} --email <your email> --password <pw>
+No account on it, but you hold the server's admin credentials?
+  lll login --url {url} --email <your email> --create --password <pick one> \\
+    --admin-email <admin email> --admin-password <admin password>
+Someone else deployed it? Ask them for 'lll member invite <name> --email <you>'."
+}
+
 /// `lll whoami` — the identity every other command is acting as, confirmed
 /// against the server rather than read off the config.
 ///
@@ -372,6 +412,19 @@ fn login_failed(e: string, email: string, target: string) -> string {
     pb.base_url().unwrap_or("the configured server")
   }
   let url_flag = if target == "" { "" } else { f" --url {target}" }
+  // 29 of 50 agents in the fleet run wasted a command putting the ADMIN email
+  // in --email, and this message is why: it recommended --create with
+  // whatever address had just failed, the admin's included. The guard in
+  // login() then refused it — catching a mistake this text had handed them.
+  // A superuser is not a member, so say that instead of the generic advice.
+  if email == os.Getenv("LLL_ADMIN_EMAIL") && email != "" {
+    return f"login failed at {base}: {email} is the server's admin identity, not a member
+'lll login' authenticates MEMBERS; the superuser has no board account to log into.
+log in as yourself, and let the admin credentials create that account:
+  lll login{url_flag} --email <your own address> --create --password <pick one>
+they ride the environment (LLL_ADMIN_EMAIL/LLL_ADMIN_PASSWORD) or the flags
+--admin-email/--admin-password."
+  }
   f"login failed at {base}: no member with email {email}, or the password is wrong
 if the account exists, check the password — a superuser can reset it:
   lll member set-password <name> --email {email}
