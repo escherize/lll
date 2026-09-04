@@ -1,0 +1,441 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="description" content="lll is a Linear-style issue tracker in one binary: CLI-first, self-hosted, with a live web board. Teams, ENG-123 identifiers, states, projects, labels and markdown comments.">
+<meta name="color-scheme" content="dark">
+<meta property="og:title" content="lll">
+<meta property="og:description" content="A Linear-style issue tracker in one binary. Terminal first, browser second.">
+<meta property="og:type" content="website">
+<meta property="og:url" content="https://escherize.com/lll/">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%23f0883e'/%3E%3Ctext x='16' y='23' font-family='system-ui,sans-serif' font-size='19' font-weight='800' fill='%231a0f06' text-anchor='middle'%3EL%3C/text%3E%3C/svg%3E">
+<style>
+  html { -webkit-text-size-adjust: 100%; }
+  body { margin: 0; }
+  img { max-width: 100%; }
+</style>
+<title>lll</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap">
+<style>
+  /* Built on the project's own design system (DESIGN.md), not a new one:
+     the exact tonal ladder, Inter, white-alpha hairlines, the rationed ember
+     accent, the real state hues, 6px radii.
+
+     Two deliberate deviations, both because this is a page rather than the
+     product surface DESIGN.md governs:
+       1. Display type above the 19px ceiling. The Weight-Not-Size Rule keeps
+          the board dense; a landing page has one thing to say first. Kept
+          modest and carried by weight (800) and tighter tracking, which is
+          the system's own character.
+       2. Nothing else. The monospace is the system's own declared `code`
+          role (ui-monospace stack, 12px) — not a new face.
+
+     Single-theme dark, deliberately: DESIGN.md is a near-black system with no
+     light mode, and PRODUCT.md pins the viewing context as "dark rooms,
+     editor-adjacent". Every colour is painted explicitly so the page holds on
+     any host ground. */
+  :root {
+    --bg:          #0e0f11;
+    --bg-rail:     #111316;
+    --bg-panel:    #141619;
+    --bg-raised:   #191c20;
+    --bg-hover:    #1d2126;
+    --text:        #e8eaed;
+    --text-2:      #9299a2;
+    --text-3:      #828994;
+    --accent:      #f0883e;
+    --accent-hover:#f79b57;
+    --accent-deep: #c96a25;
+    --accent-dim:  rgba(240,136,62,0.16);
+    --ember-ink:   #1a0f06;
+    --border:      rgba(255,255,255,0.07);
+    --border-str:  rgba(255,255,255,0.12);
+    --st-todo:     #9299a2;
+    --st-progress: #e0b13e;
+    --st-review:   #8d7ce6;
+    --st-done:     #4cb782;
+    --radius:      6px;
+    --card-shadow: 0 1px 2px rgba(0,0,0,0.25);
+  }
+
+  *, *::before, *::after { box-sizing: border-box; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: "Inter", system-ui, sans-serif;
+    font-size: 15px;
+    line-height: 1.55;
+    font-weight: 400;
+    -webkit-font-smoothing: antialiased;
+  }
+  ::selection { background: var(--accent-dim); }
+
+  .wrap { max-width: 900px; margin: 0 auto; padding: 0 26px; }
+
+  code, pre, .mono {
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  }
+  p code {
+    font-size: 12.5px;
+    color: var(--text);
+    background: var(--bg-panel);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 1px 5px;
+  }
+
+  /* The system's only uppercase: 11px, 600, +0.02em */
+  .label {
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+    text-transform: uppercase;
+    color: var(--text-3);
+  }
+
+  /* ---------- masthead ---------- */
+  header.top { border-bottom: 1px solid var(--border); }
+  .top-in {
+    display: flex; align-items: center; justify-content: space-between;
+    gap: 20px; flex-wrap: wrap; padding: 16px 0;
+  }
+  .mark { display: flex; align-items: center; gap: 9px; }
+  .mark-badge {
+    width: 22px; height: 22px; border-radius: 5px;
+    background: linear-gradient(160deg, var(--accent), var(--accent-deep));
+    color: var(--ember-ink);
+    font-size: 10px; font-weight: 800; line-height: 22px; text-align: center;
+    flex: none;
+  }
+  .mark-name { font-size: 13px; font-weight: 600; letter-spacing: -0.005em; }
+  .top-links { display: flex; gap: 18px; }
+  .top-links a {
+    font-size: 13px; color: var(--text-2); text-decoration: none;
+    font-weight: 500;
+    display: inline-flex; align-items: center; min-height: 44px;
+  }
+  .top-links a:hover { color: var(--text); }
+
+  /* ---------- hero ---------- */
+  .hero { padding: 72px 0 4px; }
+  h1 {
+    font-size: clamp(33px, 5.2vw, 50px);
+    font-weight: 800;
+    line-height: 1.06;
+    letter-spacing: -0.032em;
+    margin: 14px 0 0;
+    text-wrap: balance;
+    color: var(--text);
+  }
+  h1 .quiet { color: var(--text-3); display: block; }
+  .lede {
+    margin: 20px 0 0; max-width: 56ch;
+    font-size: 17px; line-height: 1.55; color: var(--text-2);
+  }
+  .lede strong { color: var(--text); font-weight: 500; }
+
+  /* ---------- terminal ---------- */
+  .term {
+    background: var(--bg-panel);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    box-shadow: var(--card-shadow);
+    margin: 26px 0;
+    overflow: hidden;
+  }
+  .term-head {
+    padding: 8px 13px;
+    border-bottom: 1px solid var(--border);
+    background: var(--bg-rail);
+  }
+  .term-body { padding: 14px 16px; overflow-x: auto; }
+  pre {
+    margin: 0; font-size: 12.5px; line-height: 1.72;
+    white-space: pre; color: var(--text-2);
+    font-variant-numeric: tabular-nums;
+  }
+  pre .cmd { color: var(--text); font-weight: 500; }
+  pre .sig { color: var(--text-3); }
+  pre .key { color: var(--text); }
+
+  /* The Icon-Carries-Color Rule: state colour reaches the page only through
+     the drawn icon; the text beside it stays gray. */
+  .st { display: inline-block; vertical-align: -2px; margin-right: 5px; }
+  .st-todo     { color: var(--st-todo); }
+  .st-progress { color: var(--st-progress); }
+  .st-done     { color: var(--st-done); }
+
+  /* ---------- sections ---------- */
+  section { padding: 56px 0; border-top: 1px solid var(--border); }
+  h2 {
+    font-size: 13px; font-weight: 600; letter-spacing: -0.005em;
+    margin: 0 0 6px; color: var(--text);
+  }
+  .sec-note { margin: 0 0 4px; color: var(--text-2); font-size: 15px; max-width: 60ch; }
+  h3 { font-size: 15px; font-weight: 600; letter-spacing: -0.005em; margin: 0; color: var(--text); }
+
+  /* Numbered because install → sign in → attach genuinely is ordered. */
+  .step { display: grid; grid-template-columns: 2.4em 1fr; gap: 0 18px; align-items: start; }
+  .step + .step { margin-top: 44px; }
+  .step-n {
+    font-size: 11.5px; font-weight: 600; color: var(--text-3);
+    font-variant-numeric: tabular-nums; padding-top: 3px;
+  }
+  .step p { margin: 7px 0 0; color: var(--text-2); max-width: 58ch; }
+  .step .term { margin: 18px 0 0; }
+
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(228px, 1fr)); gap: 30px 36px; margin-top: 30px; }
+  .feat h4 { font-size: 13px; font-weight: 600; margin: 0 0 5px; color: var(--text); letter-spacing: -0.005em; }
+  .feat p { margin: 0; font-size: 14px; line-height: 1.55; color: var(--text-2); }
+
+  p.body { color: var(--text-2); max-width: 62ch; }
+  p.body strong { color: var(--text); font-weight: 500; }
+
+  /* Ember Budget Rule: orange means "you can act here". Downloads and links
+     are actions; headings, numbers and rules are not. */
+  a.act {
+    font-size: 12.5px; font-weight: 500; text-decoration: none;
+    color: var(--accent);
+    background: var(--bg-raised);
+    border: 1px solid var(--border-str);
+    border-radius: var(--radius);
+    padding: 0 14px;
+    min-height: 44px;
+    display: inline-flex;
+    align-items: center;
+  }
+  a.act:hover { color: var(--accent-hover); background: var(--bg-hover); }
+  .dl { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 22px; }
+  a.link { color: var(--accent); text-decoration: none; font-weight: 500; }
+  a.link:hover { color: var(--accent-hover); }
+
+  footer {
+    border-top: 1px solid var(--border);
+    padding: 26px 0 64px;
+    font-size: 12.5px; color: var(--text-3);
+    display: flex; justify-content: space-between; gap: 16px; flex-wrap: wrap;
+  }
+  footer a { color: var(--text-2); text-decoration: none; }
+  footer a:hover { color: var(--text); }
+
+  a:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+    border-radius: 4px;
+  }
+  @media (prefers-reduced-motion: reduce) { * { transition: none !important; animation: none !important; } }
+  @media (max-width: 600px) {
+    .step { grid-template-columns: 1fr; }
+    .step-n { padding-top: 0; margin-bottom: 4px; }
+    pre { font-size: 11px; }
+  }
+</style>
+</head>
+<body>
+<!-- State icons: the 14px circle grammar from DESIGN.md, drawn once and
+     referenced with <use>, currentColor throughout. -->
+<svg width="0" height="0" style="position:absolute" aria-hidden="true" focusable="false"><defs>
+  <g id="i-todo"><circle cx="7" cy="7" r="5.6" fill="none" stroke="currentColor" stroke-width="1.5"></circle></g>
+  <g id="i-progress">
+    <circle cx="7" cy="7" r="5.6" fill="none" stroke="currentColor" stroke-width="1.5"></circle>
+    <path d="M7 2.6 A4.4 4.4 0 0 1 7 11.4 Z" fill="currentColor"></path>
+  </g>
+  <g id="i-done">
+    <circle cx="7" cy="7" r="6.3" fill="currentColor"></circle>
+    <path d="M4.3 7.1 L6.2 9 L9.7 5.2" fill="none" stroke="var(--bg)" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"></path>
+  </g>
+</defs></svg>
+
+<header class="top">
+  <div class="wrap top-in">
+    <div class="mark">
+      <div class="mark-badge">L</div>
+      <div class="mark-name">lll</div>
+    </div>
+    <nav class="top-links">
+      <a href="https://github.com/escherize/lll">Source</a>
+      <a href="https://github.com/escherize/lll#readme">Docs</a>
+      <a href="https://github.com/escherize/lll/releases/tag/v0.1.0">v0.1.0</a>
+    </nav>
+  </div>
+</header>
+
+<main class="wrap">
+
+  <div class="hero">
+    <div class="label">Self-hosted issue tracking</div>
+    <h1>Terminal first.<span class="quiet">Browser second.</span></h1>
+    <p class="lede">
+      Teams, <code>ENG-123</code> identifiers, states, priorities, projects, labels and
+      markdown comments — driven from the command line, with a live board for the glance.
+      <strong>One binary, with the database compiled into it.</strong>
+    </p>
+
+    <div class="term">
+      <div class="term-head"><span class="label">Install</span></div>
+      <div class="term-body"><pre><span class="sig">$</span> <span class="cmd">mkdir -p ~/bin &amp;&amp; curl -LsSf -o ~/bin/lll \
+    https://github.com/escherize/lll/releases/latest/download/lll-darwin-arm64 \
+    &amp;&amp; chmod +x ~/bin/lll</span>
+
+<span class="sig">$</span> <span class="cmd">lll --version</span>
+lll 0.1.0</pre></div>
+    </div>
+
+    <div class="dl">
+      <a class="act mono" href="https://github.com/escherize/lll/releases/download/v0.1.0/lll-darwin-arm64">darwin-arm64</a>
+      <a class="act mono" href="https://github.com/escherize/lll/releases/download/v0.1.0/lll-linux-amd64">linux-amd64</a>
+      <a class="act mono" href="https://github.com/escherize/lll/releases/download/v0.1.0/lll-linux-arm64">linux-arm64</a>
+    </div>
+  </div>
+
+  <section>
+    <h2>From nothing to a board</h2>
+    <p class="sec-note">Three commands, in this order.</p>
+
+    <div class="step">
+      <div class="step-n">01</div>
+      <div>
+        <h3>Point at a server</h3>
+        <p>
+          Holding the server's admin credentials, one command makes your account and logs
+          into it — writing the url, the token, your name, and, when the server has exactly
+          one team, that too.
+        </p>
+        <div class="term">
+          <div class="term-head"><span class="label">lll login</span></div>
+          <div class="term-body"><pre><span class="sig">$</span> <span class="cmd">lll login --url https://tracker.example.com --email you@example.com \
+    --create --password &lt;pick one&gt; \
+    --admin-email &lt;admin&gt; --admin-password &lt;admin pw&gt;</span>
+created member you &lt;you@example.com&gt;
+url = "https://tracker.example.com" in ~/.config/lll/lll.toml
+logged in as you
+token saved to ~/.config/lll/lll.toml
+me = "you" in ~/.config/lll/lll.toml
+team = "ENG" in ~/.config/lll/lll.toml (the server's only team)
+ready: lll issue create "a title"</pre></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="step">
+      <div class="step-n">02</div>
+      <div>
+        <h3>Work</h3>
+        <p>
+          Every command takes <code>--help</code>; every read takes <code>--json</code>.
+          Issue ids resolve from the current git branch, so <code>eng-1-fix-login</code>
+          means <code>ENG-1</code> without your typing it.
+        </p>
+        <div class="term">
+          <div class="term-head"><span class="label">lll issue</span></div>
+          <div class="term-body"><pre><span class="sig">$</span> <span class="cmd">lll issue create "Fix the login flow" --priority 1 --label bug</span>
+Created ENG-1: Fix the login flow
+
+<span class="sig">$</span> <span class="cmd">lll issue list</span>
+<span class="key">ENG-1</span>   <svg class="st st-progress" width="14" height="14" viewBox="0 0 14 14" aria-hidden="true"><use href="#i-progress"></use></svg>in-progress   <span class="key">Fix the login flow</span>    just now
+<span class="key">ENG-2</span>   <svg class="st st-todo" width="14" height="14" viewBox="0 0 14 14" aria-hidden="true"><use href="#i-todo"></use></svg>todo          <span class="key">Board rail spacing</span>    2h ago
+<span class="key">ENG-3</span>   <svg class="st st-done" width="14" height="14" viewBox="0 0 14 14" aria-hidden="true"><use href="#i-done"></use></svg>done          <span class="key">Portless url</span>          yesterday</pre></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="step">
+      <div class="step-n">03</div>
+      <div>
+        <h3>Attach the repo, once</h3>
+        <p>
+          <code>lll attach</code> writes <code>team = "ENG"</code> into a committed
+          <code>.lll.toml</code>. Every later clone and every git worktree arrives
+          configured — nothing to run, nothing to paste.
+        </p>
+        <div class="term">
+          <div class="term-head"><span class="label">lll attach</span></div>
+          <div class="term-body"><pre><span class="sig">$</span> <span class="cmd">lll attach</span>
+the server has one team, ENG — attaching to it
+team = "ENG" in /work/api/.lll.toml
+commit .lll.toml — every clone and worktree of this repo is attached from then on</pre></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <h2>What you get</h2>
+    <p class="body">
+      <strong>A tracker that runs where you run.</strong> PocketBase is compiled into the
+      binary and served in-process, so a deployment is one file and one volume — no database
+      to provision, no broker, no second service to keep alive.
+    </p>
+
+    <div class="grid">
+      <div class="feat">
+        <h4>A live board</h4>
+        <p>Server-rendered, with drag-and-drop between states. Changes from the CLI, another browser, or the board itself land everywhere over one SSE connection — no reload.</p>
+      </div>
+      <div class="feat">
+        <h4>Search that is a URL</h4>
+        <p><code>/search?q=…</code> queries the database rather than the rendered page, so the query is shareable and curl gets the same answer the browser does.</p>
+      </div>
+      <div class="feat">
+        <h4>Config that layers</h4>
+        <p>Environment beats the repo file beats your home file, and every key resolves on its own. <code>lll config --list</code> names every winner and the file it came from.</p>
+      </div>
+      <div class="feat">
+        <h4>Branch-aware</h4>
+        <p><code>lll issue start</code> creates the branch; later commands infer the id back from it. <code>lll issue pr</code> opens the pull request already titled.</p>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <h2>For the agents</h2>
+    <p class="body">
+      <strong>The CLI is the API.</strong> Reads take <code>--json</code>. Changes arrive as a
+      newline-delimited event stream you can pipe straight into something. An agent gets its own
+      member record and a long-lived token, so authorship is a fact the server knows rather than
+      a convention everyone remembers.
+    </p>
+    <div class="term">
+      <div class="term-head"><span class="label">Streams and tokens</span></div>
+      <div class="term-body"><pre><span class="sig">$</span> <span class="cmd">lll watch --state in-review --json | jq -r '.record.title'</span>
+Fix the login flow
+Board rail spacing
+
+<span class="sig">$</span> <span class="cmd">lll token create deploy-bot</span>
+token for deploy-bot, shown once:
+  eyJhbGciOi…
+set it as LLL_TOKEN in the agent's environment</pre></div>
+  </section>
+
+  <section>
+    <h2>Run it</h2>
+    <p class="body">
+      <code>lll up</code> starts PocketBase and the board together, picks free ports when the
+      ones it wants are taken, and prints the credentials it just upserted. Locally that is the
+      whole setup; on a host it is the same command with secrets in the environment and a volume
+      for the database.
+    </p>
+    <div class="term">
+      <div class="term-head"><span class="label">lll up</span></div>
+      <div class="term-body"><pre><span class="sig">$</span> <span class="cmd">lll up</span>
+lll    0.1.0
+admin  http://127.0.0.1:8090/_/  admin@local.dev / admin-local-123
+team   ENG
+me     bryan
+board  http://127.0.0.1:8100</pre></div>
+    <p class="body" style="margin-top:22px">
+      All of it is in the <a class="link" href="https://github.com/escherize/lll#readme">README</a>, at length.
+    </p>
+  </section>
+</main>
+
+<footer class="wrap">
+  <div>lll v0.1.0 — a Linear-style tracker over embedded PocketBase</div>
+  <div><a href="https://github.com/escherize/lll">github.com/escherize/lll</a></div>
+</footer>
+</body>
+</html>

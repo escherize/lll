@@ -24,9 +24,10 @@ reload.
 
 ## Positioning
 
-Linear's model without Linear's SaaS: local-first, two binaries, agent-friendly
-(`--json`, NDJSON watch streams). Long-term it replaces Backlog.md-style
-file trackers for multi-agent development.
+Linear's model without Linear's SaaS: self-hosted, ONE binary with PocketBase
+compiled in and served in-process, agent-friendly (`--json`, NDJSON watch
+streams). Long-term it replaces Backlog.md-style file trackers for multi-agent
+development.
 
 ## Operating Context
 
@@ -39,7 +40,16 @@ static assets are embedded in the binary.
 
 - Fixed six-state workflow: backlog, todo, in-progress, in-review, done, cancelled.
 - Priorities 0-4 (none/urgent/high/medium/low). Assignees, projects, labels, comments exist.
-- Web actions today: create issue (title+state), change state, comment. No auth, no filtering UI yet.
+- Web actions: create issue, change state (drag between columns, reorder within
+  one), inline field edits on issue pages, markdown comments, and a settings
+  page for labels, members, projects and the team accent.
+- Filtering exists: filter chips (assignee/label/priority/state), hideable
+  columns, saved views, favorites, and `/search?q=…` which queries the database
+  rather than the rendered page.
+- Auth exists (ADR-1, 2026-08-29): `members` is a PocketBase auth collection,
+  every collection rule is `@request.auth.id != ""`, humans sign in with email
+  + password and agents ride static impersonate tokens. The board is separately
+  gated by a board token.
 - No build step, no JS beyond Datastar, CSS custom properties for tokens. [user-confirmed]
 
 ## Brand Commitments
@@ -56,5 +66,5 @@ static assets are embedded in the binary.
 
 - Reading is the product; density and scanability beat expression.
 - Everything the CLI can see, the board shows live; no stale views.
-- Two binaries, no pipelines: assets ship as plain files.
+- One binary, no pipelines: templates and assets are embedded in it.
 - Agents are first-class users; keep markup/ids stable for morphing.
