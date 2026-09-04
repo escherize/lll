@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="description" content="lll is a Linear-style issue tracker in one binary: CLI-first, self-hosted, with a live web board. Teams, ENG-123 identifiers, states, projects, labels and markdown comments.">
 <meta name="color-scheme" content="dark">
+<meta name="theme-color" content="#f0883e">
 <meta property="og:title" content="lll">
 <meta property="og:description" content="A Linear-style issue tracker in one binary. Terminal first, browser second.">
 <meta property="og:type" content="website">
@@ -31,7 +32,7 @@
           modest and carried by weight (800) and tighter tracking, which is
           the system's own character.
        2. Nothing else. The monospace is the system's own declared `code`
-          role (ui-monospace stack, 12px) — not a new face.
+          role (ui-monospace stack, 12px), not a new face.
 
      Single-theme dark, deliberately: DESIGN.md is a near-black system with no
      light mode, and PRODUCT.md pins the viewing context as "dark rooms,
@@ -51,6 +52,7 @@
     --accent-deep: #c96a25;
     --accent-dim:  rgba(240,136,62,0.16);
     --ember-ink:   #1a0f06;
+    --ember-ink-2: #3b2a18;   /* 5.42:1 on ember orange, verified */
     --border:      rgba(255,255,255,0.07);
     --border-str:  rgba(255,255,255,0.12);
     --st-todo:     #9299a2;
@@ -98,45 +100,69 @@
   }
 
   /* ---------- masthead ---------- */
-  header.top { border-bottom: 1px solid var(--border); }
+  header.top { border-bottom: 1px solid rgba(26,15,6,0.18); }
   .top-in {
     display: flex; align-items: center; justify-content: space-between;
-    gap: 20px; flex-wrap: wrap; padding: 16px 0;
+    /* padding-block, not the shorthand: `padding: 16px 0` on this element
+       silently zeroed .wrap's own 26px inline padding (both classes sit on the
+       same div), so the masthead ran 18px past every other row on the page. */
+    gap: 20px; flex-wrap: wrap; padding-block: 16px;
   }
   .mark { display: flex; align-items: center; gap: 9px; }
   .mark-badge {
     width: 22px; height: 22px; border-radius: 5px;
-    background: linear-gradient(160deg, var(--accent), var(--accent-deep));
-    color: var(--ember-ink);
+    background: var(--ember-ink);
+    color: var(--accent);
     font-size: 10px; font-weight: 800; line-height: 22px; text-align: center;
     flex: none;
   }
-  .mark-name { font-size: 13px; font-weight: 600; letter-spacing: -0.005em; }
-  .top-links { display: flex; gap: 18px; }
+  .mark-name { font-size: 14px; font-weight: 700; letter-spacing: -0.01em; color: var(--ember-ink); }
+  .top-links { display: flex; gap: 18px; flex-wrap: wrap; min-width: 0; }
   .top-links a {
-    font-size: 13px; color: var(--text-2); text-decoration: none;
-    font-weight: 500;
+    font-size: 13px; color: var(--ember-ink-2); text-decoration: none;
+    font-weight: 600;
     display: inline-flex; align-items: center; min-height: 44px;
   }
-  .top-links a:hover { color: var(--text); }
+  .top-links a:hover { color: var(--ember-ink); }
 
-  /* ---------- hero ---------- */
-  .hero { padding: 72px 0 4px; }
+  /* ---------- hero ----------
+     Committed, not Restrained: the brand register gives a Persuade surface
+     permission to let one saturated colour own the page, and a dark-and-muted
+     landing page ignores that as surely as a beige one does. The colour is the
+     product's own ember orange and the type on it is the ember ink DESIGN.md
+     already defines for exactly this pairing (7.44:1, verified). Everything
+     below the fold stays instrument-panel dark, so this is one focal moment
+     rather than a page-wide effect. */
+  .hero-band {
+    background: var(--accent);
+    color: var(--ember-ink);
+    border-bottom: 1px solid rgba(26,15,6,0.22);
+  }
+  .hero { padding: 84px 0 76px; }
+  .hero .label { color: var(--ember-ink-2); }
   h1 {
-    font-size: clamp(33px, 5.2vw, 50px);
+    font-size: clamp(46px, 8.6vw, 88px);
     font-weight: 800;
-    line-height: 1.06;
-    letter-spacing: -0.032em;
-    margin: 14px 0 0;
+    line-height: 0.98;
+    letter-spacing: -0.035em;
+    margin: 16px 0 0;
     text-wrap: balance;
-    color: var(--text);
+    color: var(--ember-ink);
   }
-  h1 .quiet { color: var(--text-3); display: block; }
+  h1 .quiet { color: var(--ember-ink-2); display: block; font-weight: 300; }
   .lede {
-    margin: 20px 0 0; max-width: 56ch;
-    font-size: 17px; line-height: 1.55; color: var(--text-2);
+    margin: 26px 0 0; max-width: 46ch;
+    font-size: 19px; line-height: 1.5; color: var(--ember-ink-2);
+    text-wrap: pretty;
   }
-  .lede strong { color: var(--text); font-weight: 500; }
+  .lede strong { color: var(--ember-ink); font-weight: 600; }
+  .hero p code {
+    background: rgba(26,15,6,0.10);
+    border-color: rgba(26,15,6,0.22);
+    color: var(--ember-ink);
+  }
+  /* The terminal on orange: the dark block is the hero's second voice. */
+  .hero .term { border-color: rgba(26,15,6,0.28); box-shadow: 0 6px 24px rgba(26,15,6,0.18); }
 
   /* ---------- terminal ---------- */
   .term {
@@ -170,45 +196,55 @@
   .st-done     { color: var(--st-done); }
 
   /* ---------- sections ---------- */
-  section { padding: 56px 0; border-top: 1px solid var(--border); }
+  section { padding: 76px 0; border-top: 1px solid var(--border); }
+  section:first-of-type { border-top: 0; }
   h2 {
-    font-size: 13px; font-weight: 600; letter-spacing: -0.005em;
-    margin: 0 0 6px; color: var(--text);
+    font-size: clamp(26px, 3.4vw, 34px); font-weight: 700;
+    letter-spacing: -0.025em; line-height: 1.1;
+    margin: 0 0 10px; color: var(--text); text-wrap: balance;
   }
-  .sec-note { margin: 0 0 4px; color: var(--text-2); font-size: 15px; max-width: 60ch; }
-  h3 { font-size: 15px; font-weight: 600; letter-spacing: -0.005em; margin: 0; color: var(--text); }
+  .sec-note { margin: 0; color: var(--text-2); font-size: 17px; max-width: 58ch; }
+  h3 { font-size: 19px; font-weight: 600; letter-spacing: -0.012em; margin: 0; color: var(--text); }
 
   /* Numbered because install → sign in → attach genuinely is ordered. */
-  .step { display: grid; grid-template-columns: 2.4em 1fr; gap: 0 18px; align-items: start; }
-  .step + .step { margin-top: 44px; }
+  .steps { margin-top: 44px; }
+  /* Grid and flex children default to min-width:auto, so they refuse to
+     shrink below the widest unbroken line in the transcripts and push the
+     whole document sideways. The scroll belongs to .term-body alone. */
+  .step > *, .grid > *, .term, .term-body { min-width: 0; }
+  .step { display: grid; grid-template-columns: 2.6em 1fr; gap: 0 20px; align-items: start; }
+  .step + .step { margin-top: 56px; }
   .step-n {
-    font-size: 11.5px; font-weight: 600; color: var(--text-3);
-    font-variant-numeric: tabular-nums; padding-top: 3px;
+    font-size: 28px; font-weight: 800; color: var(--accent);
+    font-variant-numeric: tabular-nums; letter-spacing: -0.04em;
+    line-height: 1; padding-top: 1px;
   }
-  .step p { margin: 7px 0 0; color: var(--text-2); max-width: 58ch; }
+  .step p { margin: 9px 0 0; color: var(--text-2); max-width: 58ch; font-size: 16px; text-wrap: pretty; }
   .step .term { margin: 18px 0 0; }
 
   .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(228px, 1fr)); gap: 30px 36px; margin-top: 30px; }
-  .feat h4 { font-size: 13px; font-weight: 600; margin: 0 0 5px; color: var(--text); letter-spacing: -0.005em; }
-  .feat p { margin: 0; font-size: 14px; line-height: 1.55; color: var(--text-2); }
+  .feat h4 { font-size: 15px; font-weight: 600; margin: 0 0 6px; color: var(--text); letter-spacing: -0.01em; }
+  .feat p { margin: 0; font-size: 15px; line-height: 1.55; color: var(--text-2); text-wrap: pretty; }
 
-  p.body { color: var(--text-2); max-width: 62ch; }
+  p.body { color: var(--text-2); max-width: 62ch; font-size: 17px; text-wrap: pretty; }
   p.body strong { color: var(--text); font-weight: 500; }
 
   /* Ember Budget Rule: orange means "you can act here". Downloads and links
      are actions; headings, numbers and rules are not. */
   a.act {
-    font-size: 12.5px; font-weight: 500; text-decoration: none;
+    font-size: 13px; font-weight: 600; text-decoration: none;
     color: var(--accent);
-    background: var(--bg-raised);
-    border: 1px solid var(--border-str);
+    background: var(--ember-ink);
+    border: 1px solid var(--ember-ink);
     border-radius: var(--radius);
-    padding: 0 14px;
+    padding: 0 16px;
     min-height: 44px;
     display: inline-flex;
     align-items: center;
+    transition: transform 160ms cubic-bezier(0.22,1,0.36,1), background-color 160ms;
   }
-  a.act:hover { color: var(--accent-hover); background: var(--bg-hover); }
+  a.act:hover { background: #2b1d0f; transform: translateY(-1px); }
+  a.act:active { transform: none; }
   .dl { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 22px; }
   a.link { color: var(--accent); text-decoration: none; font-weight: 500; }
   a.link:hover { color: var(--accent-hover); }
@@ -222,13 +258,19 @@
   footer a { color: var(--text-2); text-decoration: none; }
   footer a:hover { color: var(--text); }
 
+  .top-links a, a.link, footer a { transition: color 140ms cubic-bezier(0.22,1,0.36,1); }
   a:focus-visible {
     outline: 2px solid var(--accent);
     outline-offset: 2px;
     border-radius: 4px;
   }
-  @media (prefers-reduced-motion: reduce) { * { transition: none !important; animation: none !important; } }
+  /* Reduced motion keeps the colour feedback and drops only the movement. */
+  @media (prefers-reduced-motion: reduce) {
+    a.act { transition: background-color 140ms; }
+    a.act:hover { transform: none; }
+  }
   @media (max-width: 600px) {
+    .top-links { gap: 14px; }
     .step { grid-template-columns: 1fr; }
     .step-n { padding-top: 0; margin-bottom: 4px; }
     pre { font-size: 11px; }
@@ -250,6 +292,7 @@
   </g>
 </defs></svg>
 
+<div class="hero-band">
 <header class="top">
   <div class="wrap top-in">
     <div class="mark">
@@ -264,14 +307,13 @@
   </div>
 </header>
 
-<main class="wrap">
-
+<div class="wrap">
   <div class="hero">
     <div class="label">Self-hosted issue tracking</div>
     <h1>Terminal first.<span class="quiet">Browser second.</span></h1>
     <p class="lede">
       Teams, <code>ENG-123</code> identifiers, states, priorities, projects, labels and
-      markdown comments — driven from the command line, with a live board for the glance.
+      markdown comments. Driven from the command line, with a live board for the glance.
       <strong>One binary, with the database compiled into it.</strong>
     </p>
 
@@ -291,18 +333,22 @@ lll 0.1.0</pre></div>
       <a class="act mono" href="https://github.com/escherize/lll/releases/download/v0.1.0/lll-linux-arm64">linux-arm64</a>
     </div>
   </div>
+</div>
+</div>
 
+<main class="wrap">
   <section>
     <h2>From nothing to a board</h2>
     <p class="sec-note">Three commands, in this order.</p>
 
+    <div class="steps">
     <div class="step">
       <div class="step-n">01</div>
       <div>
         <h3>Point at a server</h3>
         <p>
           Holding the server's admin credentials, one command makes your account and logs
-          into it — writing the url, the token, your name, and, when the server has exactly
+          into it, writing the url, the token, your name, and, when the server has exactly
           one team, that too.
         </p>
         <div class="term">
@@ -350,7 +396,7 @@ Created ENG-1: Fix the login flow
         <p>
           <code>lll attach</code> writes <code>team = "ENG"</code> into a committed
           <code>.lll.toml</code>. Every later clone and every git worktree arrives
-          configured — nothing to run, nothing to paste.
+          configured: nothing to run, nothing to paste.
         </p>
         <div class="term">
           <div class="term-head"><span class="label">lll attach</span></div>
@@ -361,20 +407,21 @@ commit .lll.toml — every clone and worktree of this repo is attached from then
         </div>
       </div>
     </div>
+    </div>
   </section>
 
   <section>
     <h2>What you get</h2>
     <p class="body">
       <strong>A tracker that runs where you run.</strong> PocketBase is compiled into the
-      binary and served in-process, so a deployment is one file and one volume — no database
+      binary and served in-process, so a deployment is one file and one volume. No database
       to provision, no broker, no second service to keep alive.
     </p>
 
     <div class="grid">
       <div class="feat">
         <h4>A live board</h4>
-        <p>Server-rendered, with drag-and-drop between states. Changes from the CLI, another browser, or the board itself land everywhere over one SSE connection — no reload.</p>
+        <p>Server-rendered, with drag-and-drop between states. Changes from the CLI, another browser, or the board itself land everywhere over one SSE connection, with no reload.</p>
       </div>
       <div class="feat">
         <h4>Search that is a URL</h4>
@@ -409,6 +456,7 @@ Board rail spacing
 token for deploy-bot, shown once:
   eyJhbGciOi…
 set it as LLL_TOKEN in the agent's environment</pre></div>
+    </div>
   </section>
 
   <section>
@@ -427,6 +475,7 @@ admin  http://127.0.0.1:8090/_/  admin@local.dev / admin-local-123
 team   ENG
 me     bryan
 board  http://127.0.0.1:8100</pre></div>
+    </div>
     <p class="body" style="margin-top:22px">
       All of it is in the <a class="link" href="https://github.com/escherize/lll#readme">README</a>, at length.
     </p>
@@ -434,7 +483,7 @@ board  http://127.0.0.1:8100</pre></div>
 </main>
 
 <footer class="wrap">
-  <div>lll v0.1.0 — a Linear-style tracker over embedded PocketBase</div>
+  <div>lll v0.1.0 · a Linear-style tracker over embedded PocketBase</div>
   <div><a href="https://github.com/escherize/lll">github.com/escherize/lll</a></div>
 </footer>
 </body>
