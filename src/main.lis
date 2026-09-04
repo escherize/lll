@@ -1,7 +1,9 @@
 import "go:fmt"
 import "go:os"
+import "go:strings"
 
 import "commands"
+import "flags"
 
 fn main() {
   let Some(noun) = os.Args.get(1) else {
@@ -55,6 +57,14 @@ fn main() {
   }
 
   if let Err(msg) = result {
+    // A help request travels as an error so it short-circuits the verb before
+    // it can act (flags.parse, TASK-237). It is not a failure: print it bare
+    // and exit 0, or `lll issue list -h` in a script reads as a broken command.
+    let marker = flags.help_marker()
+    if strings.HasPrefix(msg, marker) {
+      fmt.Println(strings.TrimPrefix(msg, marker))
+      return
+    }
     fmt.Println(f"Error: {msg}")
     os.Exit(1)
   }

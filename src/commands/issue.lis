@@ -563,7 +563,8 @@ fn create(args: Slice<string>) -> Result<(), string> {
 }
 
 fn list(args: Slice<string>) -> Result<(), string> {
-  let p = flags.parse(issue_list_spec(), args, 3, false, "")?
+  let spec = issue_list_spec()
+  let p = flags.parse(spec, args, 3, false, flags.usage("lll issue list", spec, ""))?
   let mut state = ""
   if p.given("--state") { state = check_state(p.one("--state"))? }
   let assignee_name = p.one("--assignee")
@@ -661,7 +662,7 @@ fn print_issue_table(issues: Slice<models.Issue>) -> Result<(), string> {
 
 fn view(args: Slice<string>) -> Result<(), string> {
   let spec = issue_view_spec()
-  let p = flags.parse(spec, args, 3, true, "")?
+  let p = flags.parse(spec, args, 3, true, flags.usage("lll issue view", spec, "[KEY-123]"))?
   let id = p.first()
   let json_mode = p.given("--json")
   let raw_mode = p.given("--raw")
@@ -803,7 +804,7 @@ fn print_findings_raw(full: models.Issue) -> Result<(), string> {
 fn update(args: Slice<string>) -> Result<(), string> {
   let spec = issue_update_spec()
   let usage = flags.usage("lll issue update", spec, "[KEY-123]")
-  let p = flags.parse(spec, args, 3, true, "")?
+  let p = flags.parse(spec, args, 3, true, usage)?
   let id = p.first()
   let mut state = ""
   if p.given("--state") { state = check_state(p.one("--state"))? }
@@ -1062,7 +1063,8 @@ fn fetch_claim(issue_id: string) -> Result<Option<models.Claim>, string> {
 }
 
 fn delete_issue(args: Slice<string>) -> Result<(), string> {
-  let p = flags.parse(issue_delete_spec(), args, 3, true, "")?
+  let spec = issue_delete_spec()
+  let p = flags.parse(spec, args, 3, true, flags.usage("lll issue delete", spec, "KEY-123"))?
   let id = p.first()
   let force = p.given("--force")
   // Deleting by inferred branch is too dangerous; the ID must be explicit.

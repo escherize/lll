@@ -47,6 +47,35 @@ pub fn parse(
 ) -> Result<Parsed, string> {
   let mut vals = Map.new<string, Slice<string>>()
   let mut pos: Slice<string> = []
+  // `--help` and `-h` on every verb, before anything else can refuse them
+  // (TASK-237). Only 10 of 37 specs declared the flag, so `lll issue list -h`
+  // answered `unknown flag: '-h'` - help denied by the machinery that would
+  // have printed it. Two orderings are load-bearing: this must sit BEFORE the
+  // unknown-flag error, and before the required-flag check at the end, or
+  // asking for help while missing a required flag reports the missing flag.
+  //
+  // It returns through the ERROR channel, which looks odd and is the point.
+  // Every caller already writes `flags.parse(...)?`, so a help request
+  // short-circuits the verb the same way a bad flag does - it cannot fall
+  // through into the command body. Recording it as a parsed value instead
+  // would make `lll label create -h` PARSE happily and then run, which is a
+  // write. main.lis strips the marker, prints the rest, and exits 0.
+  // Only when the spec does NOT declare --help. A verb that declares it has
+  // its own richer help to print and checks `p.given("--help")` after parse
+  // (`lll board`, `lll issue create`); intercepting those would replace a
+  // hand-written page with a bare flags block, which the gate caught. So this
+  // fills the gap rather than overriding intent: declared means the caller
+  // handles it, undeclared means nobody did.
+  let declares_help = spec
+    .find(|f| f.name == "--help" || f.alias == "--help" || f.name == "-h" || f.alias == "-h")
+    .is_some()
+  if !declares_help {
+    for a in args[start..] {
+      if a == "--help" || a == "-h" {
+        return Err(f"{help_marker()}{usage_help(usage, spec)}")
+      }
+    }
+  }
   let mut i = start
   while i < args.length() {
     let arg = args[i]
@@ -97,6 +126,32 @@ pub fn parse(
     }
   }
   Ok(Parsed { spec, vals, pos })
+}
+
+/// The prefix that marks a parse "error" as a help request rather than a
+/// failure (TASK-237). A control character, so no real error message can
+/// collide with it and no user can type it.
+pub fn help_marker() -> string {
+  "\u{1}help\u{1}"
+}
+
+/// The help text for a verb: its usage line, then the flags block the spec
+/// already knows how to render. Verbs with richer prose keep their own
+/// hand-written help by checking --help before they call parse - this is the
+/// floor, not a ceiling.
+fn usage_help(usage: string, spec: Slice<Flag>) -> string {
+  let head = if usage == "" { "" } else { f"usage: {usage}" }
+  let flags_block = section(spec)
+  // A verb with no flags and no usage line would otherwise print a blank
+  // line, which reads as "help is broken" rather than "there is nothing to
+  // configure here". `team list` and `member list` are both like this.
+  if head == "" && flags_block == "" {
+    return "this command takes no flags (see 'lll --help')"
+  }
+  // section() leads with a newline so it can be appended to a usage line.
+  // Without a usage line it would open on a blank, so trim it.
+  if head == "" { return strings.TrimPrefix(flags_block, "\n") }
+  f"{head}{flags_block}"
 }
 
 fn unknown_flag(arg: string, usage: string) -> string {

@@ -12,6 +12,14 @@ pub fn config_cmd(args: Slice<string>) -> Result<(), string> {
     config_usage()
     return Ok(())
   }
+  // `lll config check -h` used to RUN the check - a network call - because
+  // this dispatches on args[2] and never looks past it, so flags.parse's
+  // help handling (TASK-237) never gets a chance. Asking for help must not
+  // execute the thing you were asking about.
+  if args[3..].find(|a| a == "--help" || a == "-h").is_some() {
+    config_usage()
+    return Ok(())
+  }
   match verb {
     "init" => config_init(),
     "set" => config_set(args),

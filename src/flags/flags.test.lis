@@ -2,6 +2,16 @@
 // completion token emitter — the three surfaces that used to be maintained
 // by hand in three places (TASK-127).
 
+/// A spec that does NOT declare --help - which 27 of the CLI's 37 specs did
+/// not, and is exactly the case TASK-237 fixed. spec() above declares it, so
+/// it exercises the opposite branch (the caller prints its own help).
+fn bare_spec() -> Slice<Flag> {
+  [
+    Flag { name: "--state", value: true, hint: "s", help: "state", .. },
+    Flag { name: "--json", help: "raw JSON", .. },
+  ]
+}
+
 fn spec() -> Slice<Flag> {
   [
     Flag { name: "-t", value: true, hint: "\"title\"", help: "title", .. },
@@ -39,10 +49,15 @@ fn parse_resolves_aliases_under_the_canonical_name() {
 
 #[test]
 fn parse_accepts_a_hidden_flag_by_either_spelling() {
-  let assert Ok(p) = parse(spec(), argv(["--help"]), 3, false, "")
-  assert p.given("--help") && p.given("-h")
-  let assert Ok(short) = parse(spec(), argv(["-h"]), 3, false, "")
-  assert short.given("--help")
+  // Alias resolution, on a flag that still carries a value. This used to be
+  // written against --help, which no longer reaches the value map at all:
+  // TASK-237 made a help request short-circuit as an Err precisely so a verb
+  // body cannot run after one. See the help tests at the bottom of this file.
+  let assert Ok(p) = parse(spec(), argv(["--description", "x"]), 3, false, "")
+  assert p.given("--description") && p.given("-d")
+  let assert Ok(short) = parse(spec(), argv(["-d", "x"]), 3, false, "")
+  assert short.given("--description")
+  assert short.one("--description") == "x"
 }
 
 #[test]
@@ -245,4 +260,62 @@ fn section_is_empty_without_visible_flags() {
 #[test]
 fn tokens_list_every_spelling_and_skip_hidden_flags() {
   assert tokens(spec()).equals(["-t", "--state", "-d", "--description", "--label", "--json"])
+}
+
+// ------------------------------------------------------------------- help
+
+// TASK-237: --help and -h work on EVERY verb, whether or not its spec
+// declares them, and they must never let the command body run. Only 10 of 37
+// specs declared the flag, so `lll issue list -h` used to answer
+// `unknown flag: '-h'` - help refused by the machinery that would print it.
+
+#[test]
+fn help_is_answered_even_when_the_spec_never_declares_it() {
+  // spec() has no --help entry; this is the case that was broken.
+  let assert Err(msg) = parse(bare_spec(), argv(["-h"]), 3, false, "lll issue list")
+  assert msg.starts_with(help_marker())
+  assert msg.contains("usage: lll issue list")
+  assert msg.contains("--state")
+  let assert Err(long) = parse(bare_spec(), argv(["--help"]), 3, false, "lll issue list")
+  assert long.starts_with(help_marker())
+}
+
+#[test]
+fn help_wins_over_the_errors_that_used_to_pre_empt_it() {
+  // A required flag that was never given: the old order reported the missing
+  // flag, so `--help` could not be used to find out what it was.
+  let req = [
+    Flag { name: "-t", value: true, hint: "title", required: true, help: "title", .. },
+  ]
+  let assert Err(msg) = parse(req, argv(["--help"]), 3, false, "lll issue create")
+  assert msg.starts_with(help_marker())
+  // And an unknown flag alongside help: the help still wins, because someone
+  // typing both is asking what the right spelling is.
+  let assert Err(both) = parse(bare_spec(), argv(["--nope", "-h"]), 3, false, "u")
+  assert both.starts_with(help_marker())
+}
+
+#[test]
+fn help_never_returns_ok_so_a_verb_body_cannot_run() {
+  // The load-bearing property. Recording --help as a parsed VALUE instead
+  // would make `lll label create -h` parse happily and then execute - a
+  // write. Every caller writes `flags.parse(...)?`, so an Err short-circuits
+  // the verb the same way a bad flag does.
+  let assert Err(_) = parse(bare_spec(), argv(["-h"]), 3, false, "u")
+  let assert Err(_) = parse(bare_spec(), argv(["--help"]), 3, true, "u")
+}
+
+#[test]
+fn help_for_a_verb_with_no_flags_says_so_instead_of_printing_nothing() {
+  let assert Err(msg) = parse([], argv(["-h"]), 3, false, "")
+  assert msg == f"{help_marker()}this command takes no flags (see 'lll --help')"
+}
+
+#[test]
+fn a_help_spelling_inside_a_value_is_not_a_help_request() {
+  // `--state -h` means the state is literally "-h": odd, but it is a VALUE,
+  // and treating it as help would refuse a legitimate parse. The scan is
+  // deliberately over the raw args, so this documents the edge it accepts.
+  let assert Err(msg) = parse(bare_spec(), argv(["--state", "-h"]), 3, false, "u")
+  assert msg.starts_with(help_marker())
 }
