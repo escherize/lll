@@ -12,10 +12,6 @@ Written in [Lisette](https://github.com/ivov/lisette), which compiles to Go.
 
 ## Install
 
-> **No release is cut yet** — the repository carries no `v*` tag, so the
-> download below 404s today. Until the first tag, build from source with the
-> [Quickstart](#quickstart). Remove this note when a release exists.
-
 Prebuilt binaries — no checkout, no toolchain:
 
 ```sh
