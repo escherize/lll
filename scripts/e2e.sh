@@ -2220,6 +2220,15 @@ assert_contains "$out" "at least 8 characters" "set-password checks the length"
 out=$(LLL_URL=$URL "$LIN" issue list 2>&1) && fail "a stale token should be refused, not answered emptily"
 assert_contains "$out" "no longer valid" "a stale token is named"
 assert_contains "$out" "lll login" "the stale-token refusal names the fix"
+# TASK-255: a process holding the server's admin credentials re-mints and
+# retries instead of reporting an empty database. This is the board: `lll up`
+# rides a superuser token and re-mints only "if refused", but a stale token is
+# never refused on a read, so production told everyone its own configured team
+# did not exist while the CLI could see it fine.
+out=$(LLL_URL=$URL LLL_ADMIN_EMAIL=admin@local.dev LLL_ADMIN_PASSWORD=admin-local-123 \
+  "$LIN" team list) || fail "admin-credentialled process did not self-heal: $out"
+assert_contains "$out" "ENG" "a stale token is re-minted when admin credentials are present"
+
 E2E_TOKEN=$(pb_member_token "$URL" e2e-agent e2e-agent@lll.test e2e-agent-pass-123) \
   || fail "re-minting the e2e member token after the rotation"
 export LLL_TOKEN="$E2E_TOKEN"

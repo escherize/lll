@@ -2,6 +2,7 @@ import "go:bytes"
 import "go:encoding/json"
 import "go:io"
 import "go:net/http"
+import "go:os"
 import "go:strings"
 
 import "config"
@@ -149,10 +150,55 @@ fn send(method: string, path: string, payload: string) -> Result<string, string>
   // An empty list is the only case worth paying for, and it costs one extra
   // request in the case where the command was about to print nothing anyway.
   if is_empty_list(method, body) && cfg.token != "" && !token_still_valid(cfg.url, cfg.token) {
+    // A process holding the server's admin credentials can fix this itself.
+    // That is the board (TASK-255): `lll up` mints a superuser token at boot
+    // and re-mints it "if refused", but a stale token is never refused on a
+    // read, so the board silently saw an empty database and told everyone its
+    // own configured team did not exist. Re-mint once and repeat the request;
+    // a plain CLI user has no admin credentials and gets the message instead.
+    if let Some(fresh) = remint_from_admin_credentials(cfg.url) {
+      let _ = os.Setenv("LLL_TOKEN", fresh)
+      return request(
+        cfg.url, method, path, payload, bearer(fresh), src.url == "default",
+      )
+    }
     return Err(stale_token(cfg.url))
   }
   Ok(body)
 }
+
+/// A fresh superuser token from LLL_ADMIN_EMAIL/LLL_ADMIN_PASSWORD, or None
+/// when this process holds no admin credentials.
+///
+/// Deliberately narrow: only a process that was given the server's own
+/// credentials may re-authenticate silently. Everyone else is told their
+/// token is dead, which is the honest answer for a person.
+fn remint_from_admin_credentials(base: string) -> Option<string> {
+  let email = os.Getenv("LLL_ADMIN_EMAIL")
+  let pass = os.Getenv("LLL_ADMIN_PASSWORD")
+  if email == "" || pass == "" { return None }
+  let Ok(payload) = json.Marshal(AdminAuth { identity: email, password: pass }) else {
+    return None
+  }
+  let Ok(body) = request(
+    base,
+    "POST",
+    "/api/collections/_superusers/auth-with-password",
+    payload as string,
+    "",
+    false,
+  ) else { return None }
+  let mut auth = TokenOnly { .. }
+  if let Err(_e) = json.Unmarshal(body.bytes(), &auth) { return None }
+  if auth.token == "" { return None }
+  Some(auth.token)
+}
+
+#[json]
+struct AdminAuth { identity: string, password: string }
+
+#[json]
+struct TokenOnly { token: string }
 
 /// True for a list response that matched nothing. `totalItems` is the list
 /// envelope's own field, so a single-record GET never looks like one.
