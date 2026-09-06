@@ -360,9 +360,8 @@ pub fn issue_verb_spec(verb: string) -> Slice<flags.Flag> {
 /// Every flag across the issue verbs, deduplicated by canonical name
 /// (first wording wins), in the order the verbs declare them. This is the
 /// Flags: block `lll issue --help` renders.
-fn issue_union_spec() -> Slice<flags.Flag> {
-  let mut out: Slice<flags.Flag> = []
-  for verb in [
+fn issue_verbs() -> Slice<string> {
+  [
     "create",
     "list",
     "view",
@@ -381,7 +380,12 @@ fn issue_union_spec() -> Slice<flags.Flag> {
     "pr",
     "link",
     "unlink",
-  ] {
+  ]
+}
+
+fn issue_union_spec() -> Slice<flags.Flag> {
+  let mut out: Slice<flags.Flag> = []
+  for verb in issue_verbs() {
     for fl in issue_verb_spec(verb) {
       if out.find(|f| f.name == fl.name).is_none() { out = out.append(fl) }
     }
@@ -389,10 +393,32 @@ fn issue_union_spec() -> Slice<flags.Flag> {
   out
 }
 
+/// Help is read-only, even after an issue ID. Values such as `-b --help`
+/// remain literal input, and an end-of-options marker ends flag detection.
+fn issue_help_requested(args: Slice<string>, verb: string) -> bool {
+  if !issue_verbs().contains(verb) { return false }
+  let spec = issue_verb_spec(verb)
+  let mut index = 3
+  while let Some(arg) = args.get(index) {
+    if arg == "--" { return false }
+    if arg == "--help" || arg == "-h" { return true }
+    if spec.find(|f| f.value && (f.name == arg || f.alias == arg)).is_some() {
+      index += 2
+    } else {
+      index += 1
+    }
+  }
+  false
+}
+
 /// Dispatch `lll issue <verb>`.
 pub fn issue(args: Slice<string>) -> Result<(), string> {
   let Some(verb) = args.get(2) else {
     print_usage()
+    return Ok(())
+  }
+  if issue_help_requested(args, verb) {
+    if verb == "create" { print_create_usage() } else { print_usage() }
     return Ok(())
   }
   match verb {
@@ -450,12 +476,13 @@ Usage:
                                                   --raw prints it as plain markdown;
                                                   -w opens its web page instead
   lll issue update [KEY-123] <flags>              change fields (at least one flag)
-  lll issue close [KEY-123]                       set state done
+  lll issue close [KEY-123]                       set state done; retain any claim
   lll issue start [KEY-123]                       set state in-progress; never change Git
   lll issue claim [KEY-123]                       take it exclusively for 'me' and assign
                                                   it; exits non-zero, changing nothing,
                                                   when someone already holds it
-  lll issue release [KEY-123]                     give a claim back
+  lll issue release [KEY-123]                     remove the claim; also clear assignee
+                                                  if it still matches the claim holder
   lll issue delete KEY-123 [--force]              delete; asks [y/N] unless --force
   lll issue comment [KEY-123] [-b \"body\"]         add a comment (authored by 'me' in
                                                   .lll.toml); without -b, list comments
@@ -481,6 +508,8 @@ Set the deployed board address with 'lll config set web_url URL';
 
 Full view --json preserves the issue record and adds comments (oldest first,
 author expanded) and claim (member expanded, or null when unclaimed).
+State changes (including review and close) retain claims. Release explicitly
+ends the hold; an assignment to someone other than the holder is preserved.
 
 When KEY-123 is omitted (except for delete), it is inferred from the current
 git branch: eng-12-fix-login resolves to ENG-12.
@@ -513,13 +542,6 @@ Without --state the issue starts in todo; --label may be repeated.",
 fn create(args: Slice<string>) -> Result<(), string> {
   let spec = issue_create_spec()
   let usage = flags.usage("lll issue create", spec, "[\"title\"]")
-  // --help before parse, so somebody who asked for the help gets it rather
-  // than the missing-title refusal below (TASK-125). Same shape as
-  // 'lll member invite'.
-  if args.find(|a| a == "--help" || a == "-h").is_some() {
-    print_create_usage()
-    return Ok(())
-  }
   // A bare title is accepted alongside -t: `gh issue create`, `linear` and
   // `jira` all take one, and every usability run reached for it first and got
   // "unknown flag: 'Hello'". -t stays the documented spelling, so no script
@@ -1103,7 +1125,8 @@ fn release(args: Slice<string>) -> Result<(), string> {
   let _ = pb.delete(f"/api/collections/claims/records/{held.id}")?
   // Only the assignee this claim wrote: an assignment made some other way is
   // not the claim's to erase.
-  if issue.assignee == held.member {
+  let cleared_assignee = issue.assignee == held.member
+  if cleared_assignee {
     let _ = pb.patch(
       f"/api/collections/issues/records/{issue.id}",
       "{\"assignee\":\"\"}",
@@ -1111,7 +1134,8 @@ fn release(args: Slice<string>) -> Result<(), string> {
   }
   let mut name = held.expand.member.name
   if name == "" { name = "an unknown member" }
-  fmt.Println(f"Released {key} (was {name}'s)")
+  let assignment = if cleared_assignee { "cleared assignee" } else { "assignment unchanged" }
+  fmt.Println(f"Released {key} (was {name}'s); {assignment}")
   Ok(())
 }
 

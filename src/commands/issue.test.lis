@@ -427,3 +427,22 @@ fn issue_json_exposes_authored_comments_and_current_holder() {
   assert out.contains("\"member\":\"bob-id\"")
   let assert Err(_) = issue_view_json("broken", [], None)
 }
+
+#[test]
+fn issue_help_accepts_each_known_verb_before_or_after_an_identifier() {
+  for verb in issue_verbs() {
+    assert issue_help_requested(["lll", "issue", verb, "--help"], verb)
+    assert issue_help_requested(["lll", "issue", verb, "DX-1", "-h"], verb)
+  }
+  assert !issue_help_requested(["lll", "issue", "bogus", "--help"], "bogus")
+}
+
+#[test]
+fn issue_help_preserves_literal_flag_values_and_end_of_options() {
+  assert !issue_help_requested(["lll", "issue", "create", "-d", "--help"], "create")
+  assert !issue_help_requested(["lll", "issue", "update", "-d", "--help"], "update")
+  assert !issue_help_requested(["lll", "issue", "comment", "-b", "-h"], "comment")
+  assert !issue_help_requested(["lll", "issue", "create", "--description=--help"], "create")
+  assert !issue_help_requested(["lll", "issue", "create", "--", "--help"], "create")
+  assert issue_help_requested(["lll", "issue", "create", "-d", "--help", "--help"], "create")
+}

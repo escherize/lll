@@ -1697,6 +1697,7 @@ assert_contains "$out" "already claimed by bryan" "re-claim names the holder"
 # AC#3: release gives it back, and the next claim succeeds.
 out=$(env $E "$LIN" issue release "$CKEY")
 assert_contains "$out" "Released $CKEY (was bryan's)" "release output"
+assert_contains "$out" "cleared assignee" "release reports assignment removal"
 out=$(env $E "$LIN" issue view "$CKEY")
 assert_not_contains "$out" "Claimed:" "release removes the hold"
 assert_contains "$out" "Assignee:  none" "release clears the assignee the claim set"
@@ -1712,6 +1713,11 @@ rc=$?
 set -e
 [ "$rc" -ne 0 ] || fail "releasing an unclaimed issue: expected nonzero exit"
 assert_contains "$out" "$CKEY is not claimed" "double release names the state"
+env $E LLL_ME=bryan "$LIN" issue claim "$CKEY" >/dev/null
+env $E "$LIN" issue update "$CKEY" --assignee carol >/dev/null
+out=$(env $E "$LIN" issue release "$CKEY")
+assert_contains "$out" "assignment unchanged" "release reports preserved independent assignment"
+env $E "$LIN" issue view "$CKEY" --json | python3 -c 'import json,sys; d=json.load(sys.stdin); assert d["claim"] is None; assert d["expand"]["assignee"]["name"] == "carol"'
 
 # Full issue JSON must not silently stop at the first 200 comments.
 env $E python3 - "$LLL_ABS" "$CKEY" <<'PY'
