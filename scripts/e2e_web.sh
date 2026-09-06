@@ -145,6 +145,15 @@ assert_contains "$login_hdrs" "Set-Cookie: lll_board=$BOARD_TOKEN" \
   "query-param login sets the board cookie"
 assert_not_contains "$login_hdrs" "board_token=$BOARD_TOKEN" "redirect URL drops the token"
 
+# Reopening a handoff with a current cookie must still clean the URL. An
+# obsolete query token also gets removed when the cookie admits the browser.
+for query_token in "$BOARD_TOKEN" OBSOLETE_TOKEN; do
+  repeat_login=$(curl -s -o /dev/null -w '%{http_code} %{redirect_url}' \
+    -H "$BOARD_COOKIE" "$WEB/t/ENG/?board_token=$query_token&order=priority")
+  [ "$repeat_login" = "303 $WEB/t/ENG/?order=priority" ] \
+    || fail "authenticated handoff did not strip token and preserve order"
+done
+
 # TASK-202: a stale cookie must not veto a valid ?board_token= (and the valid
 # link refreshes the cookie); a stale cookie alone stays refused.
 stale=$(curl -s -o /dev/null -w '%{http_code}' -H "Cookie: lll_board=STALE_TOKEN_FROM_A_PAST_BOOT" "$WEB/?board_token=$BOARD_TOKEN")
@@ -847,6 +856,29 @@ if command -v playwright-cli >/dev/null 2>&1; then
   # the 303 sets the cookie — and every later navigation rides it.
   playwright-cli -s="$BROWSER_SESSION" open "$WEB/?board_token=$BOARD_TOKEN" >/dev/null 2>&1 \
     || fail "playwright: opening board"
+  # Shared navigation must remain reachable on a phone, including keyboard close.
+  mobile_nav=$(playwright-cli -s="$BROWSER_SESSION" run-code 'async page => {
+    await page.setViewportSize({width:390,height:844});
+    const toggle = page.getByRole("button", {name:"Navigation",exact:true});
+    if (await page.locator("meta[name=viewport]").getAttribute("content") !== "width=device-width, initial-scale=1") throw new Error("missing device viewport");
+    if (await page.locator("#rail").isVisible()) throw new Error("mobile navigation starts open");
+    await toggle.click();
+    await page.locator("#rail").waitFor({state:"visible"});
+    await page.locator("#rail").getByRole("link", {name:"Projects",exact:true}).click();
+    await page.waitForURL("**/projects");
+    await toggle.click();
+    await page.locator("#rail").getByRole("link", {name:"Settings",exact:true}).focus();
+    await page.keyboard.press("Escape");
+    await page.locator("#rail").waitFor({state:"hidden"});
+    if (await toggle.getAttribute("aria-expanded") !== "false" || !await toggle.evaluate(el => el === document.activeElement)) throw new Error("navigation close focus");
+    await toggle.click();
+    await page.locator("#rail").getByRole("link", {name:"Board",exact:true}).click();
+    await page.setViewportSize({width:1440,height:900});
+    await page.locator("#rail").waitFor({state:"visible"});
+    if (await toggle.isVisible()) throw new Error("mobile toggle visible on desktop");
+    return "phone navigation passed";
+  }' 2>&1)
+  assert_contains "$mobile_nav" 'phone navigation passed' "browser: phone navigation"
   # The probe marks the live rail node: a morph that replaced or re-rendered
   # the rail would take the attribute with it (task-81).
   before=$(playwright-cli -s="$BROWSER_SESSION" eval \
@@ -1157,9 +1189,10 @@ assert_contains "$issues" 'href="/issues?sort=-created"' "column headers sort se
 assert_contains "$issues" 'href="/issues?sort=-priority"' "priority is a sortable column"
 assert_contains "$issues" 'aria-sort="descending"' "the sorting column says so to a screen reader"
 
-# ZERO JavaScript: no script tag, no datastar attributes, no SSE connection.
+# Table data needs no JavaScript: only the shared navigation script loads.
 # A page that subscribed would be morphed into the unfiltered #board.
-assert_not_contains "$issues" "<script" "the issues page loads no script"
+assert_not_contains "$issues" "/static/datastar.js" "the issues page loads no Datastar"
+assert_contains "$issues" "/static/navigation.js" "the issues page has phone navigation"
 assert_not_contains "$issues" "data-on:" "the issues page binds no client-side handlers"
 assert_not_contains "$issues" "data-init" "the issues page opens no SSE connection"
 
@@ -1244,8 +1277,9 @@ assert_contains "$projects" 'var(--st-in-progress)' \
 
 # Same reasoning as /issues and /settings: the bridge broadcasts one
 # unfiltered #board to every board-scoped client, so this page subscribes to
-# nothing and loads no script to subscribe with.
-assert_not_contains "$projects" "<script" "the projects page loads no script"
+# nothing; the shared navigation script makes no data requests.
+assert_not_contains "$projects" "/static/datastar.js" "the projects page loads no Datastar"
+assert_contains "$projects" "/static/navigation.js" "the projects page has phone navigation"
 assert_not_contains "$projects" "data-init" "the projects page opens no SSE connection"
 
 # The rail row is what makes a project reachable from the board at all.

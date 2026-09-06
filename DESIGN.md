@@ -285,7 +285,10 @@ content rather than overlaying it.
 10/12/14/16px between regions, 24-28px only for page-level breathing room on
 the issue page.
 
-**Responsive (single breakpoint, 720px):** the rail disappears; the topbar
+**Responsive (single breakpoint, 720px):** a compact Navigation disclosure
+replaces the permanent rail. It opens the same links in a scrollable region;
+Escape closes it and returns focus to its button. Pages use device-width
+viewport metadata. The topbar
 wraps and the create form goes full-width; board columns become fixed 240px
 and scroll horizontally; the issue grid stacks to one column with the
 properties panel moving between title and comments (hairline top+bottom

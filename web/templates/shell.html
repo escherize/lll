@@ -13,7 +13,8 @@
      Rows exist only where a destination does. "My issues" is the board
      pre-filtered to config's `me`, so it needs a configured `me`; the rest
      arrive with the pages they lead to. */}}
-{{define "rail"}}<nav id="rail" class="rail">
+{{define "rail"}}<button id="nav-toggle" class="nav-toggle" type="button" aria-controls="rail" aria-expanded="false">Navigation</button>
+<nav id="rail" class="rail" aria-label="Workspace">
 <div class="workspace"><span class="mark">L</span> lll</div>
 <a href="{{.BoardBase}}"{{if eq .Active "board"}} class="active"{{end}}><svg width="14" height="14"><use href="#ic-board"/></svg> Board</a>
 <a href="/issues"{{if eq .Active "issues"}} class="active"{{end}}><svg width="14" height="14"><use href="#ic-issues"/></svg> All issues</a>
@@ -35,7 +36,7 @@
      #favicon in the response to its own save, so picking a colour recolors
      the open page. An empty AccentCss means nobody chose one — the <style>
      stays empty and theme.css's canonical orange is left byte-identical. */}}
-{{define "accent-head"}}<style id="accent">{{.AccentCss}}</style><link id="favicon" rel="icon" href="{{.Favicon}}">{{end}}
+{{define "accent-head"}}<meta name="viewport" content="width=device-width, initial-scale=1"><script src="/static/navigation.js" defer></script><style id="accent">{{.AccentCss}}</style><link id="favicon" rel="icon" href="{{.Favicon}}">{{end}}
 
 {{/* The team switcher (TASK-198): every team on the server, this page's own
      marked. One server hosts every team now, so the rail is where a browser
