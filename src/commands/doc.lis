@@ -400,7 +400,7 @@ fn doc_view(args: Slice<string>) -> Result<(), string> {
   // --raw: the body and nothing else. For piping, and for an agent that
   // wants the text rather than the property table.
   if raw_mode {
-    if d.body != "" { fmt.Println(d.body) }
+    fmt.Print(d.body)
     return Ok(())
   }
 

@@ -1228,12 +1228,14 @@ out=$(LLL_URL=$URL LLL_TEAM=ENG "$LIN" doc view port-notes --raw)
 [ "$out" = "The port plan.
 
 Step two." ] || fail "doc view --raw should print only the body, got: $out"
+LLL_URL=$URL LLL_TEAM=ENG "$LIN" doc view port-notes --raw | python3 -c 'import sys; assert sys.stdin.read() == "The port plan.\n\nStep two."'
 
 # edit replaces the whole body from stdin
-out=$(printf 'Replaced body' | env LLL_URL=$URL LLL_TEAM=ENG "$LIN" doc edit port-notes -b -)
+out=$(printf 'Replaced body\n' | env LLL_URL=$URL LLL_TEAM=ENG "$LIN" doc edit port-notes -b -)
 assert_contains "$out" "Updated doc port-notes" "doc edit from stdin"
 got=$(LLL_URL=$URL LLL_TEAM=ENG "$LIN" doc view port-notes --raw)
 [ "$got" = "Replaced body" ] || fail "doc edit should replace the whole body, got: '$got'"
+LLL_URL=$URL LLL_TEAM=ENG "$LIN" doc view port-notes --raw | python3 -c 'import sys; assert sys.stdin.read() == "Replaced body\n"'
 
 # issue link: doc view shows the issue, issue view shows the doc
 ENG1_ID=$(LLL_URL=$URL "$LIN" issue view ENG-1 --json | jq -r .id)
