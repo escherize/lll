@@ -301,7 +301,7 @@ assert_contains "$(cat "$HOME_TOML")" 'me = "bob"' "config set me replaced the v
 out=$(cd "$WORK" && HOME="$SET_HOME" LLL_URL=$URL LLL_TEAM=ENG "$LLL_ABS" issue list)
 assert_contains "$out" "ENG-1" "config still parses after two config set me"
 out=$(cd "$WORK" && "$LLL_ABS" config set url http://x 2>&1) && fail "config set accepted a key other than me"
-assert_contains "$out" "only 'me' is settable" "config set rejects other keys"
+assert_contains "$out" "supported keys: me, web_url" "config set rejects other keys"
 
 # --- config --list: every value and the file it came from (TASK-168) ---
 # The failure this answers is silent, so it has to name origins, not values.
@@ -312,7 +312,7 @@ out=$(cd "$WORK" && env -u LLL_URL -u LLL_TEAM -u LLL_ME -u LLL_SORT -u LLL_WEB_
 assert_contains "$out" "file:$HOME_TOML	url=$URL" "--list attributes url to the home file"
 assert_contains "$out" "file:.lll.toml	team=ENG" "--list attributes team to the repo file"
 assert_contains "$out" "file:$HOME_TOML	me=homer" "--list attributes me to the home file"
-assert_contains "$out" "default	web_url=http://127.0.0.1:8100" "--list marks an unset key with a default"
+assert_contains "$out" "unset	web_url=" "--list marks an unset key with a default"
 assert_contains "$out" "unset	sort=" "--list marks a key nothing set"
 out=$(cd "$WORK" && LLL_TEAM=FROMENV HOME="$SET_HOME" "$LLL_ABS" config --list)
 assert_contains "$out" "env:LLL_TEAM	team=FROMENV" "--list attributes an override to the env var"
@@ -1109,7 +1109,7 @@ set -e
 assert_contains "$out" "unknown shell" "unknown shell message"
 
 # --- issue url / id / title: explicit arg ---
-out=$(HOME="$FAKEHOME" LLL_URL=$URL "$LIN" issue url ENG-6)
+out=$(HOME="$FAKEHOME" LLL_WEB_URL=http://127.0.0.1:8100 LLL_URL=$URL "$LIN" issue url ENG-6)
 [ "$out" = "http://127.0.0.1:8100/issue/ENG-6" ] || fail "issue url: got '$out'"
 out=$(LLL_URL=$URL LLL_WEB_URL=https://lll.example.com "$LIN" issue url ENG-6)
 [ "$out" = "https://lll.example.com/issue/ENG-6" ] || fail "issue url with LLL_WEB_URL: got '$out'"
@@ -1126,7 +1126,7 @@ set -e
 assert_contains "$out" "issue ENG-99 not found" "issue url unknown ID message"
 
 # --- issue url / id / title: inferred from the git branch ---
-out=$(cd "$REPO" && HOME="$FAKEHOME" LLL_URL=$URL "$LLL_ABS" issue url)
+out=$(cd "$REPO" && HOME="$FAKEHOME" LLL_WEB_URL=http://127.0.0.1:8100 LLL_URL=$URL "$LLL_ABS" issue url)
 [ "$out" = "http://127.0.0.1:8100/issue/ENG-6" ] || fail "inferred issue url: got '$out'"
 out=$(cd "$REPO" && LLL_URL=$URL "$LLL_ABS" issue id)
 [ "$out" = "ENG-6" ] || fail "inferred issue id: got '$out'"
@@ -1134,7 +1134,7 @@ out=$(cd "$REPO" && LLL_URL=$URL "$LLL_ABS" issue title)
 [ "$out" = "Roundtrip issue v2" ] || fail "inferred issue title: got '$out'"
 
 # --- board prints the web URL; LLL_WEB_URL env and web_url config override ---
-out=$(HOME="$FAKEHOME" "$LIN" board)
+out=$(HOME="$FAKEHOME" LLL_WEB_URL=http://127.0.0.1:8100 "$LIN" board)
 [ "$out" = "http://127.0.0.1:8100" ] || fail "board URL: got '$out'"
 out=$(LLL_WEB_URL=https://lll.example.com/ "$LIN" board)
 [ "$out" = "https://lll.example.com" ] || fail "board URL trims trailing slash: got '$out'"
@@ -1146,9 +1146,9 @@ out=$(cd "$WORK" && HOME="$FAKEHOME" "$LLL_ABS" board)
 mkdir -p "$DATA_DIR/bin"
 printf '#!/bin/sh\necho "$1" >> "%s/opened.txt"\n' "$DATA_DIR" > "$DATA_DIR/bin/open"
 chmod +x "$DATA_DIR/bin/open"
-out=$(HOME="$FAKEHOME" PATH="$DATA_DIR/bin:$PATH" LLL_URL=$URL "$LIN" issue view ENG-6 -w)
+out=$(HOME="$FAKEHOME" LLL_WEB_URL=http://127.0.0.1:8100 PATH="$DATA_DIR/bin:$PATH" LLL_URL=$URL "$LIN" issue view ENG-6 -w)
 assert_contains "$out" "Opening http://127.0.0.1:8100/issue/ENG-6" "view -w announces the URL"
-out=$(HOME="$FAKEHOME" PATH="$DATA_DIR/bin:$PATH" "$LIN" board -w)
+out=$(HOME="$FAKEHOME" LLL_WEB_URL=http://127.0.0.1:8100 PATH="$DATA_DIR/bin:$PATH" "$LIN" board -w)
 assert_contains "$out" "Opening http://127.0.0.1:8100" "board -w announces the URL"
 # -w is fire-and-forget by design (the CLI must not block on a browser), so poll
 # for the opener's output instead of assuming it lands within a fixed sleep.
@@ -2155,14 +2155,12 @@ else
   assert_contains "$out" "lll login --url" "the no-url error names the fresh-machine fix"
 fi
 
-# TASK-203 AC#3: web_url derives from a hosted url — https, port dropped —
-# while a local url keeps the local board default. `lll board` only prints,
-# so the hosted url never receives a request.
-out=$(cd "$NEUTRAL" && env -u LLL_WEB_URL -u LLL_TOKEN LLL_URL="https://tracker.example.com:8091" \
-  HOME="$EMPTY_HOME" "$LLL_ABS" board)
-[ "$out" = "https://tracker.example.com" ] || fail "board did not derive the hosted web url: $out"
-out=$(cd "$NEUTRAL" && env -u LLL_WEB_URL -u LLL_TOKEN LLL_URL=$URL HOME="$EMPTY_HOME" "$LLL_ABS" board)
-[ "$out" = "http://127.0.0.1:8100" ] || fail "board lost the local default: $out"
+# API addresses alone cannot identify a separately deployed web endpoint.
+for api_endpoint in "$URL" https://tracker.example.com:8091; do
+  out=$(cd "$NEUTRAL" && env -u LLL_WEB_URL -u LLL_TOKEN LLL_URL="$api_endpoint" HOME="$EMPTY_HOME" "$LLL_ABS" board 2>&1) \
+    && fail "board invented a URL from an API endpoint"
+  assert_contains "$out" "lll config set web_url URL" "missing board endpoint names the setter"
+done
 
 # Help and completions carry the new surface.
 out=$("$LIN" login --help)
@@ -2318,6 +2316,55 @@ assert_contains "$out" "no title" "a titleless create says so"
 # -t still works and still wins, so nothing scripted against it breaks.
 out=$(LLL_URL=$URL LLL_TEAM=POS "$LIN" issue create -t "Flag title still works")
 assert_contains "$out" "Flag title still works" "-t remains the documented spelling"
+
+# --- Oracle regressions: predictable setup and explicit inputs ---
+export LLL_URL="$URL"
+ORACLE_HOME="$DATA_DIR/oracle-home"
+ORACLE_REPO="$DATA_DIR/oracle-repo"
+mkdir -p "$ORACLE_HOME" "$ORACLE_REPO"
+git -C "$ORACLE_REPO" init -q
+# Configuration remains offline, persistent, and safely encoded.
+(cd "$ORACLE_REPO" && HOME="$ORACLE_HOME" "$LLL_ABS" config set web_url https://board.example.test/base/ >/dev/null)
+out=$(cd "$ORACLE_REPO" && env -u LLL_WEB_URL HOME="$ORACLE_HOME" "$LLL_ABS" board)
+[ "$out" = https://board.example.test/base ] || fail "board endpoint did not persist"
+out=$(cd "$ORACLE_REPO" && HOME="$ORACLE_HOME" "$LLL_ABS" config set web_url ftp://wrong 2>&1) && fail "accepted invalid web URL"
+assert_contains "$out" 'http://' "invalid web URL explains supported schemes"
+out=$(cd "$ORACLE_REPO" && HOME="$ORACLE_HOME" "$LLL_ABS" config set web_url https://wrong extra 2>&1) && fail "accepted trailing config argument"
+# Offline attach must not turn into false readiness after authentication.
+(cd "$ORACLE_REPO" && env -u LLL_TOKEN -u LLL_TEAM HOME="$ORACLE_HOME" LLL_URL=http://127.0.0.1:1 "$LLL_ABS" attach -k DXOFF >/dev/null)
+out=$(cd "$ORACLE_REPO" && env -u LLL_TOKEN -u LLL_TEAM -u LLL_URL HOME="$ORACLE_HOME" "$LLL_ABS" login --url "$URL" --email e2e-agent@lll.test --password e2e-agent-pass-123)
+assert_contains "$out" 'team DXOFF is missing' "login verifies attached team"
+assert_not_contains "$out" 'ready:' "missing team is not ready"
+(cd "$ORACLE_REPO" && env -u LLL_TOKEN -u LLL_TEAM -u LLL_URL HOME="$ORACLE_HOME" "$LLL_ABS" attach -k DXOFF >/dev/null)
+out=$(cd "$ORACLE_REPO" && env -u LLL_TOKEN -u LLL_TEAM -u LLL_URL HOME="$ORACLE_HOME" "$LLL_ABS" issue create 'Recovered offline attachment')
+assert_contains "$out" 'DXOFF-1' "explicit recovery makes team usable"
+# Each create takes a positional name or --name; mixed forms fail before mutation.
+LLL_TEAM=POS "$LIN" project create 'Oracle project' >/dev/null
+LLL_TEAM=POS "$LIN" label create 'oracle-label' >/dev/null
+for noun in project label member; do
+  out=$(LLL_TEAM=POS "$LIN" "$noun" create 'Ambiguous oracle' --name 'Other name' 2>&1) && fail "$noun accepted ambiguous name"
+  assert_contains "$out" 'not both' "$noun rejects name ambiguity"
+done
+out=$(LLL_TEAM=POS "$LIN" issue create 'Named priority oracle' --priority high --label oracle-label --project 'Oracle project' --json)
+[ "$(printf '%s' "$out" | jq -r .priority)" = 2 ] || fail 'named priority did not store high'
+# Real colleague credentials work in a separate HOME and an existing invite cannot reset them.
+"$LIN" member create oracle-colleague --email oracle-colleague@lll.test --password oracle-colleague-pass-123 >/dev/null
+out=$(env -u LLL_TOKEN HOME="$DATA_DIR/oracle-colleague-home" "$LIN" login --url "$URL" --email oracle-colleague@lll.test --password oracle-colleague-pass-123)
+assert_contains "$out" 'logged in as oracle-colleague' 'explicit colleague credentials authenticate'
+out=$(LLL_ADMIN_EMAIL=admin@local.dev LLL_ADMIN_PASSWORD=admin-local-123 "$LIN" member invite oracle-colleague --email oracle-colleague@lll.test 2>&1) && fail 'invite silently reset an existing colleague'
+assert_contains "$out" 'member set-password oracle-colleague --email' 'existing invite gives recovery'
+# Alphanumeric and hyphenated keys infer without ambiguity; conflicting prefixes refuse.
+"$LIN" team create -k DX2 -n 'Oracle digits' >/dev/null
+LLL_TEAM=DX2 "$LIN" issue create 'Digits infer' >/dev/null
+git -C "$ORACLE_REPO" switch -c dx2-1-digits -q
+out=$(cd "$ORACLE_REPO" && LLL_URL="$URL" "$LLL_ABS" issue view)
+assert_contains "$out" 'DX2-1' 'alphanumeric branch inference'
+(cd "$ORACLE_REPO" && LLL_URL="$URL" "$LLL_ABS" issue comment -b 'Alphanumeric branch comment' >/dev/null)
+"$LIN" team create -k DX2-1 -n 'Ambiguous prefix' >/dev/null
+LLL_TEAM=DX2-1 "$LIN" issue create 'Nested prefix' >/dev/null
+git -C "$ORACLE_REPO" switch -c dx2-1-1-title -q
+out=$(cd "$ORACLE_REPO" && LLL_URL="$URL" "$LLL_ABS" issue start 2>&1) && fail 'ambiguous branch selected an issue'
+assert_contains "$out" 'ambiguous' 'ambiguous branch requires explicit ID'
 
 # --- web board (own ephemeral PB; see e2e_web.sh) ---
 HOME="$E2E_REAL_HOME" scripts/e2e_web.sh

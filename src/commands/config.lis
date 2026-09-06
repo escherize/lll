@@ -1,4 +1,6 @@
 import "go:fmt"
+import "go:encoding/json"
+import "go:net/url"
 import "go:os"
 import "go:path/filepath"
 import "go:strings"
@@ -46,6 +48,7 @@ Usage:
   lll config check         ask the configured url whether it is a PocketBase API
   lll config init          write a commented .lll.toml template to the current directory
   lll config set me NAME   set who you are, in ~/.config/lll/lll.toml
+  lll config set web_url URL  save the actual board endpoint in the same file
 
 'me' names the member that authors your comments. 'lll up' guesses it from
 $USER on first boot, which is wrong on a shared machine — this is how you fix
@@ -59,23 +62,25 @@ repo file.",
   )
 }
 
-/// `lll config set me <name>`. Only 'me' is settable: it is the one key a
-/// machine-specific guess gets wrong, and everything else is easier to read
-/// and edit in the commented template than through a CLI.
+/// Set a machine-level identity or board endpoint, without changing repo config.
 fn config_set(args: Slice<string>) -> Result<(), string> {
-  let Some(key) = args.get(3) else {
-    return Err("usage: lll config set me <name>")
+  let usage = "usage: lll config set <me|web_url> VALUE"
+  if args.length() != 5 { return Err(usage) }
+  let key = args[3]
+  let value = strings.TrimSpace(args[4])
+  if value == "" { return Err(usage) }
+  if key == "web_url" {
+    let endpoint = checked_web_url(value)?
+    let path = set_home_key(key, endpoint)?
+    fmt.Println(f"web_url = {endpoint} in {path}")
+    let (cfg, src) = config.load_traced()?
+    if cfg.web_url != endpoint {
+      fmt.Println(f"note: {src.web_url} overrides this setting; 'lll config --list' shows the effective configuration")
+    }
+    return Ok(())
   }
-  if key != "me" {
-    return Err(
-      f"cannot set '{key}' — only 'me' is settable; 'lll attach' sets the team, and 'lll config --list' names the file to edit for the rest",
-    )
-  }
-  let Some(value) = args.get(4) else {
-    return Err("usage: lll config set me <name>")
-  }
-  let name = strings.TrimSpace(value)
-  if name == "" { return Err("usage: lll config set me <name>") }
+  if key != "me" { return Err(f"cannot set '{key}'; supported keys: me, web_url") }
+  let name = value
 
   // The home config, not the repo's: the repo file is committed, and whose
   // machine this is has no business travelling with it.
@@ -152,7 +157,8 @@ pub fn clear_home_key(key: string) -> Result<bool, string> {
 /// make the file unparseable, and the whole point of these keys is that they
 /// get edited more than once.
 fn set_key_in(path: string, key: string, value: string) -> Result<(), string> {
-  let line = f"{key} = \"{value}\""
+  let Ok(encoded) = json.Marshal(value) else { return Err("could not encode config value") }
+  let line = f"{key} = {encoded as string}"
   let mut text = ""
   if os.Stat(path).is_ok() {
     let Ok(data) = os.ReadFile(path) else {
@@ -295,4 +301,14 @@ fn config_init() -> Result<(), string> {
   }
   fmt.Println("Wrote .lll.toml")
   Ok(())
+}
+
+/// Board base URLs must be explicit HTTP(S) endpoints, with no credentials.
+fn checked_web_url(value: string) -> Result<string, string> {
+  let parsed = url.Parse(value)
+  let Ok(u) = parsed else { return Err("web_url must be an absolute http:// or https:// URL") }
+  if (u.Scheme != "http" && u.Scheme != "https") || u.Hostname() == "" || u.User.is_some() || u.RawQuery != "" || u.Fragment != "" {
+    return Err("web_url must be an absolute http:// or https:// URL without credentials, query or fragment")
+  }
+  Ok(strings.TrimRight(value, "/"))
 }

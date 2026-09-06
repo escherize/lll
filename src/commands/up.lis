@@ -210,6 +210,7 @@ superuser credentials, or set LLL_TOKEN to a member token.",
   // The board binds in microseconds; a browser takes far longer to launch,
   // so opening before run_server blocks is not a race worth guarding.
   let board_url = f"http://127.0.0.1:{chosen}"
+  let _ = set_home_key("web_url", board_url)?
   if open {
     if let Err(e) = open_url(board_url) {
       fmt.Println(f"could not open a browser: {e}")

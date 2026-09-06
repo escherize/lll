@@ -164,7 +164,7 @@ file:/Users/you/.config/lll/lll.toml	url=http://127.0.0.1:8090
 file:.lll.toml	team=ENG
 unset	sort=
 file:/Users/you/.config/lll/lll.toml	me=you
-default	web_url=http://127.0.0.1:8100
+unset	web_url=
 ```
 
 A hosted instance serves the board and the API at **one address**: point `url`
@@ -185,7 +185,7 @@ Client settings, read by every `lll` command:
 | `LLL_TEAM` | `team` | Default team key; scopes `issue list`, required by `issue create` |
 | `LLL_ME` | `me` | Your member name; authors your comments and receives assignments |
 | `LLL_SORT` | `sort` | Default sort: `created`, `updated`, `priority`, `number`; `-` prefix descends |
-| `LLL_WEB_URL` | `web_url` | Web board base URL for `board`, `issue url`, `view -w`. Unset, it derives from `url`: `https://<url-host>` (the port is dropped, because the hosted board rides 443) when the url is non-local, else `http://127.0.0.1:8100` |
+| `LLL_WEB_URL` | `web_url` | Web board base URL for `board`, `issue url`, `view -w`. Set it with `lll config set web_url URL` or `lll login --web-url URL`. `lll up` saves its actual local board endpoint; the API URL alone does not identify the board. |
 | `LLL_TOKEN` | `token` | PocketBase auth token sent as `Authorization: Bearer` on every request. A secret: `lll login` writes it to the home config, `lll token create` mints agent tokens; never the repo's .lll.toml |
 
 Server settings, read only by `lll up` (env only, no TOML key; on a host,

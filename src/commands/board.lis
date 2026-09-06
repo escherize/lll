@@ -42,15 +42,19 @@ Usage:
   lll board       print the board URL
   lll board -w    open the board in the browser
 
-The URL comes from LLL_WEB_URL, 'web_url' in .lll.toml, or the default
-http://127.0.0.1:8100 (where 'lll up' serves the board).",
+Set the board endpoint with 'lll config set web_url URL'. LLL_WEB_URL
+and repo configuration override the machine setting. 'lll up' saves its
+actual local endpoint. The API URL alone does not identify a board URL.",
   )
 }
 
 /// Web board base URL (env > config > default), without a trailing slash.
 fn web_base() -> Result<string, string> {
   let cfg = config.load()?
-  Ok(strings.TrimSuffix(cfg.web_url, "/"))
+  if cfg.web_url == "" {
+    return Err("board URL is not configured; run 'lll config set web_url URL' with the board address supplied by your deployer (or set LLL_WEB_URL)")
+  }
+  Ok(strings.TrimRight(cfg.web_url, "/"))
 }
 
 /// Open a URL in the default browser (macOS `open`, else `xdg-open`).

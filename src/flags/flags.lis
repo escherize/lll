@@ -103,7 +103,8 @@ pub fn parse(
         return Err(unknown_flag(arg, usage))
       }
       if !pos.is_empty() {
-        return Err(f"unexpected argument: '{arg}'")
+        if usage == "" { return Err(f"unexpected argument: '{arg}'") }
+        return Err(f"unexpected argument: '{arg}'\nusage: {usage}")
       }
       pos = pos.append(arg)
       i += 1
@@ -254,4 +255,14 @@ pub fn tokens(spec: Slice<Flag>) -> Slice<string> {
     if fl.alias != "" { out = out.append(fl.alias) }
   }
   out
+}
+
+/// One entity name, supplied positionally or by its named flag.
+pub fn entity_name(p: Parsed, flag: string, usage: string) -> Result<string, string> {
+  if p.first() != "" && p.given(flag) {
+    return Err(f"give the name as a positional argument or {flag}, not both\nusage: {usage}")
+  }
+  let value = if p.given(flag) { p.one(flag) } else { p.first() }
+  if strings.TrimSpace(value) == "" { return Err(f"a name is required\nusage: {usage}") }
+  Ok(value)
 }

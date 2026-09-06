@@ -46,8 +46,10 @@ fn member_usage() {
 
 Usage:
   lll member list                              list members (name, email)
-  lll member add -n \"name\" [-e email]          add a member
+  lll member create NAME [-e email] [--password pw]
+                                               create a record; add is an alias
                                                ('create' is the same command)
+  lll member add NAME                         alias for member create
   lll member invite NAME --email email         add + temp password + the lines
                                                they run (any member; the
                                                admin credentials work too)
@@ -95,8 +97,9 @@ fn member_list_spec() -> Slice<flags.Flag> {
 
 fn member_add_spec() -> Slice<flags.Flag> {
   [
-    flags.Flag { name: "-n", value: true, hint: "\"name\"", required: true, help: "member name", .. },
-    flags.Flag { name: "-e", value: true, hint: "email", help: "member email", .. },
+    flags.Flag { name: "-n", alias: "--name", value: true, hint: "\"name\"", help: "member name", .. },
+    flags.Flag { name: "-e", alias: "--email", value: true, hint: "email", help: "member email", .. },
+    flags.Flag { name: "--password", value: true, hint: "pw", help: "set a usable login password with a real --email; otherwise creates a record only", .. },
   ]
 }
 
@@ -395,7 +398,7 @@ fn member_invite(args: Slice<string>) -> Result<(), string> {
   let su = superuser_auth()?
   if let Some(existing) = find_member_as(su, name)? {
     return Err(
-      f"member '{name}' already exists ({existing.email}) — 'lll member set-password {name}' gives them a new password without disturbing their issues",
+      f"member '{name}' already exists ({existing.email}) — run 'lll member set-password {name} --email {email} --password PASSWORD' with administrator credentials to enable login; existing credentials are unchanged",
     )
   }
 
@@ -434,7 +437,7 @@ fn invite_lines(
   let attach = if team == "" {
     "  # then, in the repo you both work in: lll attach"
   } else {
-    f"  # then, in a clone of the repo: lll attach -k {team} (or just 'git clone' it — .lll.toml is committed)"
+    f"  # then, in a clone of the repo: lll attach -k {team} (skip attach only if the clone already contains a committed .lll.toml)"
   }
   [
     f"  temporary password: {password}",
@@ -499,13 +502,25 @@ fn member_add(args: Slice<string>) -> Result<(), string> {
   // reached this through the TASK-130 `create` alias is not told to rerun a
   // command they did not run.
   let verb = args.get(2).unwrap_or("add")
-  let usage = flags.usage(f"lll member {verb}", spec, "")
-  let p = flags.parse(spec, args, 3, false, usage)?
-  let name = p.one("-n")
+  let usage = flags.usage(f"lll member {verb}", spec, "[NAME]")
+  let p = flags.parse(spec, args, 3, true, usage)?
+  let name = flags.entity_name(p, "-n", usage)?
   let email = p.one("-e")
 
-  let created = create_member(name, email)?
+  let password = p.one("--password")
+  if p.given("--password") && (password == "" || !real_email(email)) {
+    return Err("--password requires a nonempty password and a real --email; use 'lll member invite NAME --email EMAIL' for a generated login handoff")
+  }
+  let created = if p.given("--password") {
+    let cfg = config.load()?
+    create_member_as(cfg.token, name, email, password)?
+  } else { create_member(name, email)? }
   fmt.Println(f"Added member {created.name}")
+  if p.given("--password") {
+    fmt.Println(f"login enabled: lll login --email {email} --url {(config.load()?).url} (use the supplied password)")
+  } else {
+    fmt.Println(f"record only: no known login password. An administrator can enable login with 'lll member set-password {name} --email EMAIL --password PASSWORD'. For a new colleague, use 'lll member invite NAME --email EMAIL' instead.")
+  }
   Ok(())
 }
 

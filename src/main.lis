@@ -65,7 +65,7 @@ fn main() {
       fmt.Println(strings.TrimPrefix(msg, marker))
       return
     }
-    fmt.Println(f"Error: {msg}")
+    fmt.Fprintln(os.Stderr, f"Error: {msg}")
     os.Exit(1)
   }
 }
@@ -93,7 +93,7 @@ Usage:
   lll whoami              which member, server and team you are acting as
   lll token create        mint a static agent token (superuser only)
                           (see 'lll token --help')
-  lll attach [-k KEY]     point this repo at a team, once, in a committed
+  lll attach [-k KEY]     write this repo's team to a shareable
                           .lll.toml (see 'lll attach --help')
   lll watch [flags]       live event stream for a query (see 'lll watch --help')
   lll up [--port 8100]    start PocketBase + web board together (see 'lll up --help')
@@ -103,12 +103,16 @@ Usage:
   lll --version, -v       print the version
   lll --help              show this help
 
+Examples:
+  lll issue list --search checkout
+  lll issue update ENG-1 --assignee alice --state in-review
+
 Configuration (env > the repo's .lll.toml > ~/.config/lll/lll.toml; the files
 layer, each supplying the keys it names — 'lll config --list' shows which won):
   LLL_URL      PocketBase base URL (default http://127.0.0.1:8090)
   LLL_TEAM     default team key (e.g. ENG); scopes 'issue list', used by 'issue create'
   LLL_SORT     default sort for 'issue list': created, updated, priority, number; prefix - to descend
-  LLL_WEB_URL  web board base URL for 'board', 'issue url', 'view -w' (default http://127.0.0.1:8100)",
+  LLL_WEB_URL  web board base URL for 'board', 'issue url', 'view -w' (set with 'lll config set web_url URL')",
   )
   let hint = commands.setup_hint()
   if hint != "" { fmt.Println(hint) }

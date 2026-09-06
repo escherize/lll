@@ -48,7 +48,7 @@ Usage:
                                       team's, or every team's when none is
                                       configured
   lll project view NAME               show a project and its issues
-  lll project create -n \"name\" [-d desc] [--status s] [--team KEY]
+  lll project create NAME (or -n NAME) [-d desc] [--status s] [--team KEY]
                                       create a project (status defaults to
                                       planned; --team defaults to LLL_TEAM)
   lll project edit NAME [-n \"new name\"] [-d desc] [--status s]
@@ -97,7 +97,7 @@ fn project_list_spec() -> Slice<flags.Flag> {
 
 fn project_create_spec() -> Slice<flags.Flag> {
   [
-    flags.Flag { name: "-n", value: true, hint: "\"name\"", required: true, help: "project name", .. },
+    flags.Flag { name: "-n", alias: "--name", value: true, hint: "\"name\"", help: "project name", .. },
     flags.Flag { name: "-d", value: true, hint: "desc", help: "project description", .. },
     flags.Flag { name: "--status", value: true, hint: "s", help: "planned, started, paused, completed, or cancelled\n(defaults to planned)", .. },
     flags.Flag { name: "--team", value: true, hint: "KEY", help: "team key the project belongs to (defaults to LLL_TEAM)", .. },
@@ -142,9 +142,9 @@ fn check_status(val: string) -> Result<string, string> {
 
 fn project_create(args: Slice<string>) -> Result<(), string> {
   let spec = project_create_spec()
-  let usage = flags.usage("lll project create", spec, "")
-  let p = flags.parse(spec, args, 3, false, usage)?
-  let name = p.one("-n")
+  let usage = flags.usage("lll project create", spec, "[NAME]")
+  let p = flags.parse(spec, args, 3, true, usage)?
+  let name = flags.entity_name(p, "-n", usage)?
   let description = p.one("-d")
   let mut status = "planned"
   if p.given("--status") {

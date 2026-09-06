@@ -44,10 +44,15 @@ to a temporary file and rename them into place when complete. If a reviewer
 cannot finish, stop the harness; do not leave it waiting indefinitely. Interrupt
 or terminate it to stop its reviewers and servers. Preserve the run directory.
 
+Set `LLL_DX_BINARY` to an absolute executable path to review a frozen copy
+while other validation runs. Record its checksum alongside the run.
+
 Other flags: `-n` agent count (default 6), `--task FILE` to replace the task,
 `--keep` to leave the servers up, `--root DIR` to choose where it all lands.
 
-Exit code is 0 only when every agent completed every step.
+Exit code is 0 only when every agent completed every step and independently
+reported a clean usability verdict with no actionable friction. Legacy reports
+without a verdict remain readable, but cannot satisfy this gate.
 Missing or malformed reports, duplicate step IDs, and reviewer process failures
 produce a nonzero exit. A new run requires a new or empty directory; existing
 transcripts and databases are never overwritten.

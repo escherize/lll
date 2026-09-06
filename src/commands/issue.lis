@@ -67,8 +67,17 @@ fn check_state(val: string) -> Result<string, string> {
 }
 
 fn check_priority(val: string) -> Result<int, string> {
+  let named = strings.ToLower(val)
+  match named {
+    "none" => return Ok(0),
+    "urgent" => return Ok(1),
+    "high" => return Ok(2),
+    "medium" => return Ok(3),
+    "low" => return Ok(4),
+    _ => (),
+  }
   let Ok(p) = strconv.Atoi(val) else {
-    return Err(f"--priority must be a number 0-4, got '{val}'")
+    return Err(f"unknown priority '{val}' (use none, urgent, high, medium, low, or 0-4)")
   }
   if p < 0 || p > 4 {
     return Err(
@@ -111,7 +120,7 @@ fn issue_create_spec() -> Slice<flags.Flag> {
       name: "--priority",
       alias: "-p",
       value: true,
-      hint: "0-4",
+      hint: "name|0-4",
       help: "0 none, 1 urgent (!!!), 2 high (!!), 3 medium (!), 4 low (·)",
       ..,
     },
@@ -254,7 +263,7 @@ fn issue_update_spec() -> Slice<flags.Flag> {
     flags.Flag {
       name: "--priority",
       value: true,
-      hint: "0-4",
+      hint: "name|0-4",
       help: "0 none, 1 urgent (!!!), 2 high (!!), 3 medium (!), 4 low (·)",
       ..,
     },
@@ -411,6 +420,9 @@ pub fn issue(args: Slice<string>) -> Result<(), string> {
       print_usage()
       Ok(())
     },
+    "search" => Err("use 'lll issue list --search WORD' to search issue titles"),
+    "assign" => Err("use 'lll issue update KEY --assignee NAME' to assign an issue"),
+    "move" => Err("use 'lll issue update KEY --state in-review' (states: backlog, todo, in-progress, in-review, done, cancelled)"),
     other => Err(f"unknown issue command: '{other}' (see 'lll issue --help')"),
   }
 }
@@ -419,8 +431,12 @@ fn print_usage() {
   fmt.Println(
     "lll issue - work with issues
 
+Examples:
+  lll issue list --search checkout
+  lll issue update ENG-1 --assignee alice --state in-review
+
 Usage:
-  lll issue create -t \"title\" [-d desc] [--emoji X] [--priority 0-4] [--state s]
+  lll issue create -t \"title\" [-d desc] [--emoji X] [--priority name|0-4] [--state s]
                    [--assignee name] [--label name]... [--project name] [--json]
                                                   create an issue in the configured team;
                                                   -d - reads the description from stdin;
@@ -921,9 +937,7 @@ fn start(args: Slice<string>) -> Result<(), string> {
   // Starting an explicit issue from main or another issue's branch must not
   // falsely record that branch as this issue's work site.
   if let Some(branch) = gitctx.current_branch() {
-    if gitctx.issue_id_from_branch(branch) == Some(strings.ToUpper(
-      f"{key}-{issue.number}",
-    )) {
+    if gitctx.issue_id_for_team(branch, key) == Some(f"{key}-{issue.number}") {
       record_work_site(issue, branch)?
     }
   }
@@ -1120,8 +1134,11 @@ fn delete_issue(args: Slice<string>) -> Result<(), string> {
 fn comment(args: Slice<string>) -> Result<(), string> {
   let spec = issue_comment_spec()
   let usage = flags.usage("lll issue comment", spec, "[KEY-123]")
-  let p = flags.parse(spec, args, 3, true, "")?
+  let p = flags.parse(spec, args, 3, true, usage + " (write a comment with -b BODY)")?
   let id = p.first()
+  if id != "" && split_issue_key(deslug(id)).is_err() {
+    return Err(f"expected an issue ID; supply comment text with -b BODY\nusage: {usage}")
+  }
   let mut body = ""
   if p.given("-b") { body = value_or_stdin(p.one("-b"), "-b")? }
   let body_set = p.given("-b")
@@ -1329,6 +1346,15 @@ fn resolve_id(explicit: string, usage: string) -> Result<string, string> {
       f"no issue ID given and no git branch to infer one from\nusage: {usage}",
     )
   }
+  let teams = list_teams()?
+  let mut matches: Slice<string> = []
+  for team in teams.items {
+    if let Some(id) = gitctx.issue_id_for_team(branch, team.key) { matches = matches.append(id) }
+  }
+  if matches.length() > 1 {
+    return Err(f"branch '{branch}' is ambiguous between {strings.Join(matches, ", ")}; pass the issue ID explicitly")
+  }
+  if matches.length() == 1 { return Ok(matches[0]) }
   let Some(id) = gitctx.issue_id_from_branch(branch) else {
     return Err(
       f"no issue ID given and current branch '{branch}' doesn't look like eng-123-...\nusage: {usage}",

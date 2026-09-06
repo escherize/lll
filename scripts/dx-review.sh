@@ -74,7 +74,11 @@ command -v git >/dev/null || { echo "git is required" >&2; exit 1; }
 # ceiling is memory, not CPU; 50 fits comfortably in 32 GB.
 echo "dx-review: $N agents"
 
-LLL="$REPO/target/.lisette/bin/lll"
+LLL="${LLL_DX_BINARY:-$REPO/target/.lisette/bin/lll}"
+if [ -n "${LLL_DX_BINARY:-}" ] && [ ! -x "$LLL" ]; then
+  echo "review binary is not executable: $LLL" >&2
+  exit 1
+fi
 if [ ! -x "$LLL" ]; then
   echo "building lll..."
   bash scripts/lis-typedefs-workaround.sh >/dev/null 2>&1
@@ -259,10 +263,21 @@ Use these keys:
       "misleading_messages": ["quote any message that sent you somewhere useless"],
       "helpful_messages": ["quote any message that told you exactly what to run next"],
       "surprises": ["anything that did not work the way you assumed"],
-      "worst_moment": "the single biggest obstacle, in one sentence"
+      "worst_moment": "the single biggest obstacle, in one sentence",
+      "avoidable_friction": ["actionable product problem, with command evidence and expected behavior"],
+      "clean_bill_of_health": false
     }
 
 A failed step is a valid and useful result. Report it honestly.
+
+Give an independent usability verdict. Set clean_bill_of_health true only
+when all 14 outcomes are verified and no actionable product problem remains.
+List every avoidable problem in avoidable_friction, even if you worked around
+it. Ordinary discovery of supported syntax, successful help use, explicit
+credentials, and deliberate target choices are not automatically defects;
+assess whether the tool provided clear, truthful and sufficient guidance.
+Do not optimize the verdict to satisfy the coordinator. An honest negative
+verdict is the purpose of this review.
 EOF
   } > "$BRIEF"
 

@@ -39,7 +39,7 @@ Usage:
   lll label list                                 list labels (name, color, team);
                                                  this team's, or every team's
                                                  when none is configured
-  lll label create -n \"name\" [-c \"#5e6ad2\"] [--team KEY]
+  lll label create NAME (or -n NAME) [-c \"#5e6ad2\"] [--team KEY]
                                                  create a label (--team defaults
                                                  to LLL_TEAM); check 'lll label
                                                  list' first — reuse over
@@ -90,7 +90,7 @@ fn label_list_spec() -> Slice<flags.Flag> {
 
 fn label_create_spec() -> Slice<flags.Flag> {
   [
-    flags.Flag { name: "-n", value: true, hint: "\"name\"", required: true, help: "label name", .. },
+    flags.Flag { name: "-n", alias: "--name", value: true, hint: "\"name\"", help: "label name", .. },
     flags.Flag { name: "-c", value: true, hint: "\"#5e6ad2\"", help: "hex color for the label", .. },
     flags.Flag { name: "--team", value: true, hint: "KEY", help: "team key the label belongs to (defaults to LLL_TEAM)", .. },
   ]
@@ -125,10 +125,10 @@ fn label_create(args: Slice<string>) -> Result<(), string> {
   let spec = label_create_spec()
   // The check-first note rides the usage string (TASK-208), so every surface
   // that prints it — --help included — says to reuse before creating.
-  let usage = flags.usage("lll label create", spec, "") +
+  let usage = flags.usage("lll label create", spec, "[NAME]") +
   "\n       (check 'lll label list' first; reuse over near-duplicates like bug/bugs/defect)"
-  let p = flags.parse(spec, args, 3, false, usage)?
-  let name = p.one("-n")
+  let p = flags.parse(spec, args, 3, true, usage)?
+  let name = flags.entity_name(p, "-n", usage)?
   let color = p.one("-c")
   let team = team_flag_or_current(p.one("--team"))?
 

@@ -80,6 +80,9 @@ printf '%s' "$anon_page" | grep -q "board_token" || fail "401 page does not say 
 curl -sf -H "$BOARD_COOKIE" "http://127.0.0.1:$WEB2/" >/dev/null || fail "board not on incremented port $WEB2"
 grep -q "admin@local.dev / admin-local-123" "$UP_LOG" || fail "default creds not logged"
 grep -q "port $WEB_PORT taken" "$UP_LOG" || fail "web port move not printed"
+resolved_board=$(env -u LLL_WEB_URL HOME="$E2E_HOME" "$LLL" board)
+[ "$resolved_board" = "http://127.0.0.1:$WEB2" ] || fail "up did not save the actual board port"
+
 curl -sf -X POST "http://127.0.0.1:$DB2/api/collections/_superusers/auth-with-password" \
   -H 'Content-Type: application/json' \
   -d '{"identity":"admin@local.dev","password":"admin-local-123"}' >/dev/null \

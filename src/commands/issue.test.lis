@@ -361,9 +361,9 @@ fn member_create_is_an_alias_for_member_add() {
   let add = flags.tokens(member_verb_spec("add"))
   let create = flags.tokens(member_verb_spec("create"))
   assert create.equals(add)
-  // add is not weakened by the alias: it still carries the required -n.
+  // The same name flag supports either positional or explicit input.
   let assert Some(n) = member_verb_spec("add").find(|f| f.name == "-n")
-  assert n.required
+  assert n.alias == "--name"
 }
 
 // ------------------------------------------------------------ json_quote
@@ -393,4 +393,16 @@ fn json_quote_escapes_html_delimiters() {
 fn json_quote_keeps_multi_byte_text_literal() {
   let assert Ok(q) = json_quote("café — 日本 🐛")
   assert q == "\"café — 日本 🐛\""
+}
+
+#[test]
+fn named_priorities_round_trip_with_numeric_compatibility() {
+  for name in ["none", "urgent", "high", "medium", "low"] {
+    let assert Ok(value) = check_priority(name)
+    let assert Ok(numeric) = check_priority(f"{value}")
+    assert numeric == value
+  }
+  let assert Ok(high) = check_priority("HIGH")
+  assert high == 2
+  assert check_priority("critical").is_err()
 }
