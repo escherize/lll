@@ -214,7 +214,8 @@ fn issue_count(filter: string) -> Result<int, string> {
 /// The refusal a guarded delete answers with. Names the count and the exact
 /// command that overrides it, so the user never has to guess the flag.
 fn refuse_delete(kind: string, name: string, used: int) -> string {
-  f"{used} issue(s) still reference the {kind} '{name}' — deleting it drops the {kind} off them.\nRun 'lll {kind} delete {name} --force' to delete it anyway, or reassign those issues first."
+  let argument = cli_argument(name)
+  f"{used} issue(s) still reference the {kind} '{name}' — deleting it drops the {kind} off them.\nTo delete it anyway, run:\n  lll {kind} delete {argument} --force\nOr reassign those issues first."
 }
 
 /// What a completed delete prints. The count rides along even on the forced

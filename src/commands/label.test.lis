@@ -33,6 +33,12 @@ fn refuse_delete_follows_the_noun() {
   assert !strings.Contains(msg, "lll label")
 }
 
+#[test]
+fn refuse_delete_quotes_multiword_and_apostrophe_names() {
+  assert refuse_delete("project", "Current release", 2).contains("\n  lll project delete 'Current release' --force\n")
+  assert refuse_delete("label", "owner's queue", 1).contains("\n  lll label delete 'owner'\\''s queue' --force\n")
+}
+
 /// A forced delete still reports what it cost. Silence here would be the
 /// web's behaviour with an extra flag typed.
 #[test]
