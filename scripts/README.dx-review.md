@@ -135,6 +135,16 @@ remain in the private run directory.
 The standard task and aggregator use exactly 14 numbered steps. A custom task
 must keep that numbering for its reports to validate.
 
+Ten additional outcome-based briefs live in `scripts/dx-tasks/`, numbered from
+easy to hard: editing/reopening, filtered exports, label/project reorganization,
+knowledge retrieval, claim handoffs, team isolation, worktree handoffs,
+configuration recovery, credential rotation, and concurrent live streams.
+For example, pass `--task scripts/dx-tasks/01-edit-reopen.md` to the harness.
+Each has 14 verifiable outcomes and uses the same independent clean-verdict
+gate. Run a fresh cohort after repairs, preserve negative reports, and require
+all six clean before advancing to the next workflow. Freeze and record each
+binary so ongoing reviews cannot silently pick up implementation changes.
+
 A finding reported by one agent is a lead. A finding reported by most of them
 is a bug, and the count belongs in the commit message that fixes it.
 

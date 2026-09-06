@@ -473,8 +473,9 @@ Usage:
     flags.section(issue_union_spec()) +
     "
 
-Web URLs come from LLL_WEB_URL, 'web_url' in .lll.toml, or the default
-http://127.0.0.1:8100 (where 'lll up' serves the board).
+Web URLs come from LLL_WEB_URL, then 'web_url' in the repo or home config.
+Set the deployed board address with 'lll config set web_url URL';
+'lll up' saves the actual endpoint when it starts the board.
 
 When KEY-123 is omitted (except for delete), it is inferred from the current
 git branch: eng-12-fix-login resolves to ENG-12.
