@@ -50,12 +50,15 @@ Usage:
   lll label delete NAME [--force]                delete a label; refuses while
                                                  issues still carry it, and
                                                  --force drops it off all of
-                                                 them",
+                                                 them
+
+For any command, prefix LLL_TEAM=KEY to select its scope for that invocation.
+This leaves the saved attachment unchanged; --team on create sets ownership.",
   )
 }
 
 fn label_list(args: Slice<string>) -> Result<(), string> {
-  let p = flags.parse(label_list_spec(), args, 3, false, "")?
+  let p = flags.parse(label_list_spec(), args, 3, false, "lll label list [--json]")?
   // Scoped when a team is configured, every team's when not: a label belongs
   // to one team (TASK-173), so the unscoped list is an admin's view, not a
   // working one.

@@ -286,7 +286,7 @@ fn settle_team() {
           fmt.Println(f"team {cfg.team} — ready: lll issue create \"a title\"")
         }
       },
-      None => fmt.Println(f"authenticated, but team {cfg.team} is missing on this server; run 'lll attach -k {cfg.team}' to create it explicitly"),
+      None => fmt.Println(f"authenticated, but team {cfg.team} is missing on this server. Check 'lll team list --archived' and reattach with 'lll attach -k EXISTING_KEY'. Only if you intend a new team, run 'lll attach -k {cfg.team}'."),
     }
     return
   }
@@ -591,7 +591,5 @@ fn login_identity_notice(me: string, authenticated: string, source: string, home
 
 /// Render a literal argument for the recovery command, including display names.
 fn cli_argument(value: string) -> string {
-  if value != "" && value.runes().all(|r| ('a' <= r && r <= 'z') || ('A' <= r && r <= 'Z') || ('0' <= r && r <= '9') || r == '_' || r == '-' || r == '.') { return value }
-  let escaped = strings.ReplaceAll(value, "'", "'\\''")
-  f"'{escaped}'"
+  flags.shell_argument(value)
 }

@@ -435,7 +435,7 @@ fn no_team() -> string {
 /// Unknown-team message naming the fix. Shared by every command that
 /// resolves a team key (same package: src/commands).
 fn unknown_team(key: string) -> string {
-  f"no team with key '{key}' on the server — see 'lll team list', or create it with 'lll team create -k {key} -n \"Name\"'"
+  f"no team with key '{key}' on the server. First inspect 'lll team list --archived'; the team may have been renamed.\nFor an existing team, use 'lll attach -k EXISTING_KEY' to update the attachment, or prefix one command with LLL_TEAM=EXISTING_KEY.\nOnly if you intend a new team, create it with 'lll team create -k {key} -n \"Name\"'."
 }
 
 /// Archived-team refusal naming the fix. Shared by everything that refuses

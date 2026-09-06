@@ -397,18 +397,7 @@ fn issue_union_spec() -> Slice<flags.Flag> {
 /// remain literal input, and an end-of-options marker ends flag detection.
 fn issue_help_requested(args: Slice<string>, verb: string) -> bool {
   if !issue_verbs().contains(verb) { return false }
-  let spec = issue_verb_spec(verb)
-  let mut index = 3
-  while let Some(arg) = args.get(index) {
-    if arg == "--" { return false }
-    if arg == "--help" || arg == "-h" { return true }
-    if spec.find(|f| f.value && (f.name == arg || f.alias == arg)).is_some() {
-      index += 2
-    } else {
-      index += 1
-    }
-  }
-  false
+  flags.help_requested(issue_verb_spec(verb), args, 3)
 }
 
 /// Dispatch `lll issue <verb>`.

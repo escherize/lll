@@ -69,12 +69,8 @@ pub fn parse(
   let declares_help = spec
     .find(|f| f.name == "--help" || f.alias == "--help" || f.name == "-h" || f.alias == "-h")
     .is_some()
-  if !declares_help {
-    for a in args[start..] {
-      if a == "--help" || a == "-h" {
-        return Err(f"{help_marker()}{usage_help(usage, spec)}")
-      }
-    }
+  if !declares_help && help_requested(spec, args, start) {
+    return Err(f"{help_marker()}{usage_help(usage, spec)}")
   }
   let mut i = start
   while i < args.length() {
@@ -87,6 +83,7 @@ pub fn parse(
       let parts = strings.SplitN(arg, "=", 2)
       let spelling = parts[0]
       let Some(fl) = spec.find(|f| f.name == spelling || (f.alias != "" && f.alias == spelling)) else {
+        if spelling == "--team" { return Err(team_scope_error(arg, parts[1], usage)) }
         return Err(unknown_flag(arg, usage))
       }
       // A boolean given a value is a mistake, not a truthy string: `--json=0`
@@ -99,6 +96,7 @@ pub fn parse(
       continue
     }
     let Some(fl) = spec.find(|f| f.name == arg || (f.alias != "" && f.alias == arg)) else {
+      if arg == "--team" { return Err(team_scope_error(arg, args.get(i + 1).unwrap_or("KEY"), usage)) }
       if arg.starts_with("-") || !allow_positional {
         return Err(unknown_flag(arg, usage))
       }
@@ -127,6 +125,32 @@ pub fn parse(
     }
   }
   Ok(Parsed { spec, vals, pos })
+}
+
+/// Find help switches while respecting values consumed by declared flags.
+pub fn help_requested(spec: Slice<Flag>, args: Slice<string>, start: int) -> bool {
+  let mut index = start
+  while let Some(arg) = args.get(index) {
+    if arg == "--" { return false }
+    if arg == "--help" || arg == "-h" { return true }
+    if spec.find(|f| f.value && (f.name == arg || (f.alias != "" && f.alias == arg))).is_some() {
+      index += 2
+    } else {
+      index += 1
+    }
+  }
+  false
+}
+
+pub fn shell_argument(value: string) -> string {
+  if value != "" && value.runes().all(|r| ('a' <= r && r <= 'z') || ('A' <= r && r <= 'Z') || ('0' <= r && r <= '9') || r == '_' || r == '-' || r == '.') { return value }
+  let escaped = strings.ReplaceAll(value, "'", "'\\''")
+  f"'{escaped}'"
+}
+
+fn team_scope_error(arg: string, key: string, usage: string) -> string {
+  let value = shell_argument(key)
+  unknown_flag(arg, usage) + f"\nFor a one-command team override, prefix your command with LLL_TEAM={value}.\nThis leaves the saved attachment unchanged (see 'lll config --help')."
 }
 
 /// The prefix that marks a parse "error" as a help request rather than a

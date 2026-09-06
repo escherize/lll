@@ -58,12 +58,15 @@ Usage:
                                       still belong to it, and --force drops it
                                       off all of them
 
-Statuses: planned, started, paused, completed, cancelled",
+Statuses: planned, started, paused, completed, cancelled
+
+For any command, prefix LLL_TEAM=KEY to select its scope for that invocation.
+This leaves the saved attachment unchanged; --team on create sets ownership.",
   )
 }
 
 fn project_list(args: Slice<string>) -> Result<(), string> {
-  let p = flags.parse(project_list_spec(), args, 3, false, "")?
+  let p = flags.parse(project_list_spec(), args, 3, false, "lll project list [--json]")?
   // Scoped when a team is configured, every team's when not: a project
   // belongs to one team (TASK-173), so the unscoped list is an admin's view.
   let filter = url.QueryEscape(

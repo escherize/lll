@@ -1617,6 +1617,11 @@ assert_contains "$(env $E "$LIN" issue comment "$key")" "piped comment body" "-b
 env $E "$LIN" issue update "$key" --description "literal again" >/dev/null
 got=$(env $E "$LIN" issue view "$key" --json | jq -r .description)
 [ "$got" = "literal again" ] || fail "literal --description regressed: got '$got'"
+env $E "$LIN" issue update "$key" -d --help >/dev/null
+env $E "$LIN" issue view "$key" --json | python3 -c 'import json,sys; assert json.load(sys.stdin)["description"] == "--help"'
+env $E LLL_ME=bryan "$LIN" issue comment "$key" -b --help >/dev/null
+env $E "$LIN" issue view "$key" --json | python3 -c 'import json,sys; assert json.load(sys.stdin)["comments"][-1]["body"] == "--help"'
+env $E "$LIN" issue update "$key" --description 'literal again' >/dev/null
 
 # nothing piped in: refuse rather than hang
 if out=$(env $E "$LIN" issue create -t "no stdin" -d - </dev/null 2>&1); then
