@@ -206,12 +206,15 @@ the same file.
 
 ## CLI tour
 
-Every command has `--help`; every read takes `--json`.
+Use `--help` for command syntax. Issue lists and views support `--json`;
+scalar reads such as `branch-name` print a single value for shell composition.
 
 ```sh
 lll issue create -t "Fix login" --priority 1 --assignee bryan --label bug
 lll issue list --state todo --sort -updated
-lll issue start ENG-12        # state -> in-progress, creates branch eng-12-fix-login
+lll issue branch-name ENG-12  # print eng-12-fix-login; changes nothing
+git switch -c "$(lll issue branch-name ENG-12)"  # optional, explicit Git action
+lll issue start ENG-12        # state -> in-progress; leaves Git untouched
 lll issue claim ENG-12        # take it exclusively; non-zero if someone holds it
 lll issue release ENG-12      # give it back
 lll issue view                # ID inferred from the git branch
@@ -243,6 +246,12 @@ lll completions zsh           # bash, zsh, fish
 
 Issue IDs resolve: explicit arg, else the current git branch
 (`eng-12-fix-login` -> `ENG-12`).
+
+`issue start` works without Git. On an existing matching issue branch, it also
+records the branch, host, and checkout/worktree path on the issue. Starting from
+another matching worktree replaces that current location and leaves the previous
+one in a comment. Starting from `main` or outside Git leaves any recorded location
+unchanged. Branch creation and switching are always explicit Git operations.
 
 ## Web board
 

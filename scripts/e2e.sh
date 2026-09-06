@@ -3,7 +3,7 @@
 # Covers: create/list with ENG-1 style IDs, per-team numbering,
 # forged duplicate (team, number) rejection, issue view (fields, unknown IDs),
 # --json (jq roundtrips, expand.team), --state/--sort filters, glyph/priority
-# display, write path (start/update/close/delete, git branch creation and
+# display, write path (start/update/close/delete, explicit git branch creation and
 # ID inference from the branch), members (add/list), comments (add via config
 # 'me', authorless, list, in issue view), --assignee (create/update/list
 # filter, unknown member, expand in --json), projects and labels (create/list,
@@ -526,20 +526,73 @@ assert_contains "$out" "Created ENG-6: Roundtrip issue" "roundtrip create"
 
 REPO="$DATA_DIR/repo"
 git init -q -b main "$REPO"
+printf 'tracked\n' > "$REPO/tracked.txt"
+git -C "$REPO" add tracked.txt
 git -C "$REPO" -c user.name=e2e -c user.email=e2e@example.com \
-  commit -q --allow-empty -m init
+  commit -q -m init
+printf 'unstaged change\n' >> "$REPO/tracked.txt"
+printf 'staged change\n' > "$REPO/staged.txt"
+git -C "$REPO" add staged.txt
+printf 'untracked content\n' > "$REPO/untracked.txt"
+
+# TASK-263: observe refs, HEAD, staged/unstaged edits and untracked content.
+# Dirty work is deliberate: starting an issue must not disturb any of it.
+start_git_snapshot() {
+  git -C "$REPO" symbolic-ref HEAD
+  git -C "$REPO" show-ref
+  git -C "$REPO" status --porcelain=v1
+  git -C "$REPO" diff
+  git -C "$REPO" diff --cached
+  cat "$REPO/untracked.txt"
+}
+git_before=$(start_git_snapshot)
+issue_before=$(LLL_URL=$URL "$LIN" issue view ENG-6 --json)
+out=$(cd "$REPO" && LLL_URL=$URL "$LLL_ABS" issue branch-name ENG-6)
+[ "$out" = "eng-6-roundtrip-issue" ] || fail "branch-name must print only the suggested name"
+[ "$(start_git_snapshot)" = "$git_before" ] || fail "branch-name changed Git"
+[ "$(LLL_URL=$URL "$LIN" issue view ENG-6 --json)" = "$issue_before" ] || fail "branch-name changed the issue"
+
+# Help and malformed input must not start an issue or change Git.
+for verb in start branch-name; do
+  for help in --help -h; do
+    out=$(cd "$REPO" && LLL_URL=http://127.0.0.1:1 "$LLL_ABS" issue "$verb" ENG-6 "$help")
+    assert_contains "$out" "lll issue $verb" "$verb help needs no server"
+  done
+  if out=$(cd "$REPO" && LLL_URL=$URL "$LLL_ABS" issue "$verb" ENG-6 extra 2>&1); then
+    fail "$verb accepted an extra argument"
+  fi
+  assert_contains "$out" "unexpected argument" "$verb rejects extra arguments"
+done
+[ "$(start_git_snapshot)" = "$git_before" ] || fail "help or invalid input changed Git"
+[ "$(LLL_URL=$URL "$LIN" issue view ENG-6 --json)" = "$issue_before" ] || fail "help or invalid input changed the issue"
 
 out=$(cd "$REPO" && LLL_URL=$URL "$LLL_ABS" issue start ENG-6)
 assert_contains "$out" "Started ENG-6" "start output"
-assert_contains "$out" "Branch: eng-6-roundtrip-issue" "start prints branch name"
-assert_contains "$out" "Created and switched to branch 'eng-6-roundtrip-issue'" "start creates branch"
-branch=$(git -C "$REPO" branch --show-current)
-[ "$branch" = "eng-6-roundtrip-issue" ] || fail "start: expected branch eng-6-roundtrip-issue, on '$branch'"
+[ "$(start_git_snapshot)" = "$git_before" ] || fail "start changed Git"
+out=$(LLL_URL=$URL "$LIN" issue view ENG-6 --json)
+[ "$(printf '%s' "$out" | jq -r .state)" = "in-progress" ] || fail "start did not set in-progress"
+[ "$(printf '%s' "$out" | jq -r '.work_branch // ""')" = "" ] || fail "start recorded unrelated main branch"
 
-# starting again — ID inferred from the branch — switches instead of failing
+# Explicit IDs also work without a Git repository.
+NO_GIT="$DATA_DIR/no-git"
+mkdir -p "$NO_GIT"
+LLL_URL=$URL "$LIN" issue update ENG-6 --state todo >/dev/null
+out=$(cd "$NO_GIT" && LLL_URL=$URL "$LLL_ABS" issue branch-name ENG-6)
+[ "$out" = "eng-6-roundtrip-issue" ] || fail "branch-name outside Git"
+out=$(cd "$NO_GIT" && LLL_URL=$URL "$LLL_ABS" issue start ENG-6)
+assert_contains "$out" "Started ENG-6" "start outside Git"
+[ ! -e "$NO_GIT/.git" ] || fail "start initialized a repository"
+[ "$(LLL_URL=$URL "$LIN" issue view ENG-6 --json | jq -r .state)" = "in-progress" ] || fail "start outside Git did not change state"
+
+# Branch creation is the caller's explicit Git operation.
+branch=$(cd "$REPO" && LLL_URL=$URL "$LLL_ABS" issue branch-name ENG-6)
+git -C "$REPO" switch -q -c "$branch"
+git_before=$(start_git_snapshot)
+out=$(cd "$REPO" && LLL_URL=$URL "$LLL_ABS" issue branch-name)
+[ "$out" = "$branch" ] || fail "branch-name infers the issue"
 out=$(cd "$REPO" && LLL_URL=$URL "$LLL_ABS" issue start)
 assert_contains "$out" "Started ENG-6" "inferred start output"
-assert_contains "$out" "Switched to existing branch 'eng-6-roundtrip-issue'" "start reuses branch"
+[ "$(start_git_snapshot)" = "$git_before" ] || fail "inferred start changed Git"
 
 # --- ID inference from the branch: view / update / close with no arg ---
 out=$(cd "$REPO" && LLL_URL=$URL "$LLL_ABS" issue view)
@@ -1000,7 +1053,7 @@ WATCH_PIDS=""
 "$LIN" completions bash > "$DATA_DIR/comp.bash"
 bash -n "$DATA_DIR/comp.bash" || fail "bash completions do not parse"
 out=$(cat "$DATA_DIR/comp.bash")
-assert_contains "$out" "create list view update close start claim release delete comment watch url id title pr link unlink" "bash completions list issue verbs"
+assert_contains "$out" "create list view update close start claim release delete comment watch url id title branch-name pr link unlink" "bash completions list issue verbs"
 assert_contains "$out" "--limit" "bash completions know --limit"
 assert_contains "$out" "complete -F _lll lll" "bash completions register"
 "$LIN" completions zsh > "$DATA_DIR/comp.zsh"
@@ -1428,6 +1481,10 @@ assert_contains "$out" "Usage:" "lll issue --help"
 assert_contains "$out" "lll issue update" "issue --help mentions update"
 assert_contains "$out" "lll issue close" "issue --help mentions close"
 assert_contains "$out" "lll issue start" "issue --help mentions start"
+assert_contains "$out" "lll issue branch-name" "issue --help mentions branch-name"
+for shell in bash zsh fish; do
+  assert_contains "$("$LIN" completions "$shell")" "branch-name" "$shell completes branch-name"
+done
 assert_contains "$out" "lll issue delete" "issue --help mentions delete"
 assert_contains "$out" "lll issue comment" "issue --help mentions comment"
 assert_contains "$out" "--assignee" "issue --help mentions --assignee"
@@ -1720,7 +1777,7 @@ assert_contains "$out" "lll issue release" "issue --help mentions release"
 assert_contains "$("$LIN" completions bash)" "claim" "bash completions offer claim"
 
 # --- TASK-205: the work-site slot (branch/host/path stamped by start) --------
-# `issue start` records WHERE the work happens: branch, host, worktree root.
+# `issue start` on an existing matching branch records WHERE the work happens.
 # The slot holds the current site only — a start from a second site replaces
 # it and leaves an auto-comment trail — and nothing ever clears it; a site
 # that is no longer being worked (state done/cancelled or claim gone) renders
@@ -1733,6 +1790,8 @@ git init -q -b main "$WREPO_A"
 git -C "$WREPO_A" -c user.name=e2e -c user.email=e2e@example.com \
   commit -q --allow-empty -m init
 out=$(env $E LLL_ME=bryan "$LIN" issue claim "$WKEY")
+WBRANCH=$(env $E "$LIN" issue branch-name "$WKEY")
+git -C "$WREPO_A" switch -q -c "$WBRANCH"
 out=$(cd "$WREPO_A" && env $E LLL_WORK_HOST=site-a "$LLL_ABS" issue start "$WKEY")
 WBRANCH=$(git -C "$WREPO_A" branch --show-current)
 WROOT_A=$(cd "$WREPO_A" && git rev-parse --show-toplevel)
@@ -1754,6 +1813,7 @@ WREPO_B="$DATA_DIR/wsite_b"
 git init -q -b main "$WREPO_B"
 git -C "$WREPO_B" -c user.name=e2e -c user.email=e2e@example.com \
   commit -q --allow-empty -m init
+git -C "$WREPO_B" switch -q -c "$WBRANCH"
 out=$(cd "$WREPO_B" && env $E LLL_WORK_HOST=site-b "$LLL_ABS" issue start "$WKEY")
 WROOT_B=$(cd "$WREPO_B" && git rev-parse --show-toplevel)
 out=$(env $E "$LIN" issue view "$WKEY")

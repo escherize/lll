@@ -51,8 +51,10 @@ it is. `--assignee` cannot do that: it is a PATCH, so both agents "succeed" and
 neither finds out. Claim as the `me` in your config; `lll issue release KEY-12`
 hands it back.
 
-`lll issue start KEY-12` sets in-progress and creates the branch
-`key-12-slug`, after which every command infers the issue from the branch:
+`lll issue start KEY-12` sets in-progress without changing Git. To create a
+branch explicitly, use `git switch -c "$(lll issue branch-name KEY-12)"`.
+`branch-name` only prints the suggested name; it changes nothing. Once you
+are on an issue branch, commands can infer the issue from it:
 `lll issue view` with no argument is the issue you are on.
 
 ## What agents specifically need

@@ -152,7 +152,13 @@ fn issue_create_spec() -> Slice<flags.Flag> {
       help: "raw PocketBase JSON (team, assignee, labels, project\nexpanded), pipe-friendly",
       ..,
     },
-    flags.Flag { name: "--help", alias: "-h", hidden: true, help: "show this help", .. },
+    flags.Flag {
+      name: "--help",
+      alias: "-h",
+      hidden: true,
+      help: "show this help",
+      ..,
+    },
   ]
 }
 
@@ -360,6 +366,7 @@ fn issue_union_spec() -> Slice<flags.Flag> {
     "url",
     "id",
     "title",
+    "branch-name",
     "pr",
     "link",
     "unlink",
@@ -392,6 +399,7 @@ pub fn issue(args: Slice<string>) -> Result<(), string> {
     "url" => url_cmd(args),
     "id" => id_cmd(args),
     "title" => title_cmd(args),
+    "branch-name" => branch_name_cmd(args),
     "pr" => pr_cmd(args),
     "link" => link(args),
     "unlink" => unlink(args),
@@ -425,8 +433,7 @@ Usage:
                                                   -w opens its web page instead
   lll issue update [KEY-123] <flags>              change fields (at least one flag)
   lll issue close [KEY-123]                       set state done
-  lll issue start [KEY-123]                       set state in-progress; print/create the
-                                                  branch key-number-slug (git switch)
+  lll issue start [KEY-123]                       set state in-progress; never change Git
   lll issue claim [KEY-123]                       take it exclusively for 'me' and assign
                                                   it; exits non-zero, changing nothing,
                                                   when someone already holds it
@@ -439,6 +446,8 @@ Usage:
   lll issue url [KEY-123]                         print the issue's web page URL
   lll issue id [KEY-123]                          print the issue's KEY-123 identifier
   lll issue title [KEY-123]                       print the issue's title
+  lll issue branch-name [KEY-123]                 print a suggested Git branch name;
+                                                  read-only, creates nothing
   lll issue pr [KEY-123]                          open a GitHub PR for the issue via
                                                   'gh pr create' (title \"KEY-123: title\",
                                                   body links the issue)
@@ -465,7 +474,9 @@ fn print_create_usage() {
     "lll issue create - create an issue in the configured team
 
 Usage:
-  " + flags.usage("lll issue create", issue_create_spec(), "[\"title\"]") + "
+  " +
+    flags.usage("lll issue create", issue_create_spec(), "[\"title\"]") +
+    "
 " +
     flags.section(issue_create_spec()) +
     "
@@ -564,7 +575,13 @@ fn create(args: Slice<string>) -> Result<(), string> {
 
 fn list(args: Slice<string>) -> Result<(), string> {
   let spec = issue_list_spec()
-  let p = flags.parse(spec, args, 3, false, flags.usage("lll issue list", spec, ""))?
+  let p = flags.parse(
+    spec,
+    args,
+    3,
+    false,
+    flags.usage("lll issue list", spec, ""),
+  )?
   let mut state = ""
   if p.given("--state") { state = check_state(p.one("--state"))? }
   let assignee_name = p.one("--assignee")
@@ -662,7 +679,13 @@ fn print_issue_table(issues: Slice<models.Issue>) -> Result<(), string> {
 
 fn view(args: Slice<string>) -> Result<(), string> {
   let spec = issue_view_spec()
-  let p = flags.parse(spec, args, 3, true, flags.usage("lll issue view", spec, "[KEY-123]"))?
+  let p = flags.parse(
+    spec,
+    args,
+    3,
+    true,
+    flags.usage("lll issue view", spec, "[KEY-123]"),
+  )?
   let id = p.first()
   let json_mode = p.given("--json")
   let raw_mode = p.given("--raw")
@@ -883,7 +906,8 @@ fn close_issue(args: Slice<string>) -> Result<(), string> {
 
 fn start(args: Slice<string>) -> Result<(), string> {
   let usage = "lll issue start [KEY-123]"
-  let id = positional_id(args, usage)?
+  let p = flags.parse([], args, 3, true, usage)?
+  let id = p.first()
   let resolved = resolve_id(id, usage)?
   let issue = fetch_issue(resolved)?
   let _ = pb.patch(
@@ -893,22 +917,21 @@ fn start(args: Slice<string>) -> Result<(), string> {
   let key = issue.expand.team.key
   fmt.Println(f"Started {key}-{issue.number}: {issue.title} (◐ in-progress)")
 
-  let branch = gitctx.branch_name(key, issue.number, issue.title)
-  fmt.Println(f"Branch: {branch}")
-  if gitctx.in_repo() {
-    let created = gitctx.switch_branch(branch)?
-    if created {
-      fmt.Println(f"Created and switched to branch '{branch}'")
-    } else {
-      fmt.Println(f"Switched to existing branch '{branch}'")
+  // Observe an existing matching issue branch; never create or switch one.
+  // Starting an explicit issue from main or another issue's branch must not
+  // falsely record that branch as this issue's work site.
+  if let Some(branch) = gitctx.current_branch() {
+    if gitctx.issue_id_from_branch(branch) == Some(strings.ToUpper(
+      f"{key}-{issue.number}",
+    )) {
+      record_work_site(issue, branch)?
     }
-    record_work_site(issue, branch)?
   }
   Ok(())
 }
 
 /// TASK-205: stamp the work-site slot (work_branch/work_host/work_path) onto
-/// the issue, after the branch exists. The slot holds the CURRENT site only:
+/// the issue when starting on an existing matching branch. The slot holds the CURRENT site only:
 /// a start from a different site overwrites it and leaves an auto-comment
 /// recording the displaced one, a same-site restart is silent, and nothing
 /// ever clears the slot — a done issue keeps which branch shipped it, and
@@ -1064,7 +1087,13 @@ fn fetch_claim(issue_id: string) -> Result<Option<models.Claim>, string> {
 
 fn delete_issue(args: Slice<string>) -> Result<(), string> {
   let spec = issue_delete_spec()
-  let p = flags.parse(spec, args, 3, true, flags.usage("lll issue delete", spec, "KEY-123"))?
+  let p = flags.parse(
+    spec,
+    args,
+    3,
+    true,
+    flags.usage("lll issue delete", spec, "KEY-123"),
+  )?
   let id = p.first()
   let force = p.given("--force")
   // Deleting by inferred branch is too dangerous; the ID must be explicit.
@@ -1151,6 +1180,19 @@ fn title_cmd(args: Slice<string>) -> Result<(), string> {
   let resolved = resolve_id(id, usage)?
   let issue = fetch_issue(resolved)?
   fmt.Println(issue.title)
+  Ok(())
+}
+
+fn branch_name_cmd(args: Slice<string>) -> Result<(), string> {
+  let usage = "lll issue branch-name [KEY-123]"
+  let p = flags.parse([], args, 3, true, usage)?
+  let resolved = resolve_id(p.first(), usage)?
+  let issue = fetch_issue(resolved)?
+  fmt.Println(gitctx.branch_name(
+    issue.expand.team.key,
+    issue.number,
+    issue.title,
+  ))
   Ok(())
 }
 

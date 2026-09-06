@@ -128,9 +128,11 @@ the next one; a partial run is a useful result, a fabricated one is not.
 5.  Create three issues. At least one must carry a priority, one the `bug`
     label, and one must belong to the project from step 3.
 6.  List the issues and confirm all three are there.
-7.  Begin work on one issue so that a git branch is created for it. Confirm
-    you are on that branch.
-8.  While on that branch, and WITHOUT naming the issue explicitly, view the
+7.  Begin work on one issue. Verify its state changed to in-progress and that
+    your Git branch, refs, and working tree stayed unchanged.
+8.  Obtain the tool's suggested branch name without changing issue state or
+    Git, then explicitly create and switch to that branch using Git yourself.
+    While on that branch, and WITHOUT naming the issue explicitly, view the
     issue and add a comment to it.
 9.  Assign that issue to yourself and move it to a review state.
 10. Close it.

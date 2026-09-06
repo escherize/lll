@@ -72,7 +72,7 @@ server one agent's setup silently changes the next agent's starting conditions,
 and the results stop being comparable.
 
 **A fresh `git init`, never a worktree of this repo.** The branch verbs
-(`issue start`, branch-inferred ids, `issue pr`) need a real repository, so a
+(`git switch`, branch-inferred ids, `issue pr`) need a real repository, so a
 plain directory skips a large part of the surface. A worktree of this checkout
 is the wrong repository: it inherits the committed `.lll.toml`, which starts
 every agent pre-attached and pointed at the real server, and it writes their
@@ -94,7 +94,8 @@ being a stranger and starts being a second author.
 Fourteen ordered steps, each depending on the last, so the step an agent stops
 at names the surface that failed: authenticate, attach a repo, create a project
 and labels, create issues with priority and label and project, list them, start
-one so a branch is created, use the branch to infer the issue for a view and a
+one without changing Git, obtain a branch name and explicitly create it with
+Git, use the branch to infer the issue for a view and a
 comment, assign, change state, close, search, add a colleague, print the board
 URL, and emit machine-readable output.
 
