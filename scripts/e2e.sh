@@ -1670,6 +1670,11 @@ out=$(env $E "$LIN" issue view "$CKEY")
 assert_contains "$out" "Claimed:   bryan" "issue view shows the holder"
 assert_contains "$out" "Assignee:  bryan" "claiming assigns the issue"
 env $E "$LIN" issue view "$CKEY" --json | python3 -c 'import json,sys; d=json.load(sys.stdin); assert d["claim"]["expand"]["member"]["name"] == "bryan"; assert d["comments"] == []'
+out=$(env $E "$LIN" issue close "$CKEY")
+assert_contains "$out" "Claim retained by bryan" "close reports the live claim"
+assert_contains "$out" "lll issue release $CKEY" "close supplies explicit release command"
+assert_contains "$out" "if it still matches" "close explains conditional release assignment effect"
+env $E "$LIN" issue view "$CKEY" --json | python3 -c 'import json,sys; d=json.load(sys.stdin); assert d["state"] == "done"; assert d["claim"]["expand"]["member"]["name"] == "bryan"'
 env $E LLL_ME=bryan "$LIN" issue comment "$CKEY" -b 'handoff for carol' >/dev/null
 env $E LLL_ME=carol "$LIN" issue comment "$CKEY" -b 'acknowledged' >/dev/null
 env $E "$LIN" issue view "$CKEY" --json | python3 -c 'import json,sys; d=json.load(sys.stdin); assert [(c["body"],c["expand"]["author"]["name"]) for c in d["comments"]] == [("handoff for carol","bryan"),("acknowledged","carol")]'

@@ -963,11 +963,19 @@ fn close_issue(args: Slice<string>) -> Result<(), string> {
   let id = positional_id(args, usage)?
   let resolved = resolve_id(id, usage)?
   let issue = fetch_issue(resolved)?
+  let claim = fetch_claim(issue.id)?
   let _ = pb.patch(
     f"/api/collections/issues/records/{issue.id}",
     "{\"state\":\"done\"}",
   )?
   fmt.Println(f"Closed {issue.expand.team.key}-{issue.number} ● done")
+  if let Some(held) = claim {
+    let mut holder = held.expand.member.name
+    if holder == "" { holder = "an unknown member" }
+    fmt.Println(f"Claim retained by {holder}. To release it explicitly:")
+    fmt.Println(f"  lll issue release {issue.expand.team.key}-{issue.number}")
+    fmt.Println("Release also clears the assignee if it still matches the claim holder.")
+  }
   Ok(())
 }
 
