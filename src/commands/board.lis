@@ -19,7 +19,7 @@ pub fn board_verb_spec(_verb: string) -> Slice<flags.Flag> {
 
 pub fn board(args: Slice<string>) -> Result<(), string> {
   let spec = board_spec()
-  let p = flags.parse(spec, args, 2, false, "")?
+  let p = flags.parse(spec, args, 2, false, "lll board [-w] (prints the URL; no subcommand is needed)")?
   if p.given("--help") {
     print_board_usage()
     return Ok(())

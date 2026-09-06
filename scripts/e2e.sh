@@ -2366,6 +2366,18 @@ git -C "$ORACLE_REPO" switch -c dx2-1-1-title -q
 out=$(cd "$ORACLE_REPO" && LLL_URL="$URL" "$LLL_ABS" issue start 2>&1) && fail 'ambiguous branch selected an issue'
 assert_contains "$out" 'ambiguous' 'ambiguous branch requires explicit ID'
 
+# Account switches preserve deliberate identity config but explain the mismatch.
+out=$(cd "$ORACLE_REPO" && env -u LLL_TOKEN -u LLL_ME HOME="$ORACLE_HOME" "$LLL_ABS" login --url "$URL" --email oracle-colleague@lll.test --password oracle-colleague-pass-123)
+assert_contains "$out" 'comments are authored as e2e-agent' 'login explains retained comment author'
+assert_contains "$out" 'lll config set me oracle-colleague' 'login gives identity recovery'
+"$LIN" board url >"$DATA_DIR/board-stdout" 2>"$DATA_DIR/board-stderr" && fail 'board accepted an unknown subcommand'
+[ ! -s "$DATA_DIR/board-stdout" ] || fail 'command errors contaminate stdout'
+assert_contains "$(cat "$DATA_DIR/board-stderr")" 'unexpected argument' 'board classifies a positional argument accurately'
+assert_contains "$(cat "$DATA_DIR/board-stderr")" 'lll board [-w]' 'board names canonical usage'
+# A normal authenticated member can invite a new colleague; reset is separate.
+out=$(env -u LLL_ADMIN_EMAIL -u LLL_ADMIN_PASSWORD "$LIN" member invite oracle-invited --email oracle-invited@lll.test)
+assert_contains "$out" 'invited oracle-invited' 'member token can invite a new colleague'
+
 # --- web board (own ephemeral PB; see e2e_web.sh) ---
 HOME="$E2E_REAL_HOME" scripts/e2e_web.sh
 

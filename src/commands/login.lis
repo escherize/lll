@@ -254,6 +254,9 @@ would put a second account on that address. --create makes YOUR login: pass
   // belongs to 'lll attach'. Config layers rather than shadows (TASK-179), so
   // a home 'team' is a machine-wide default that any attached repo overrides
   // — which is what the layering documents it for.
+  let (identity_cfg, identity_src) = config.load_traced()?
+  let identity_note = login_identity_notice(identity_cfg.me, auth.record.name, identity_src.me, config.home_path()?)
+  if identity_note != "" { fmt.Println(identity_note) }
   settle_team()
   let saved_cfg = config.load()?
   if saved_cfg.web_url == "" {
@@ -352,7 +355,7 @@ each value came from; 'lll login' replaces the token.",
     }
     return Err(f"unknown whoami argument: '{flag}' (see 'lll whoami --help')")
   }
-  let cfg = config.load()?
+  let (cfg, src) = config.load_traced()?
   // pb.post refuses an untokened collection call with the message that names
   // the fix, so there is no second copy of it here.
   let body = pb.post("/api/collections/members/auth-refresh", "")?
@@ -364,11 +367,8 @@ each value came from; 'lll login' replaces the token.",
   fmt.Println(f"server  {cfg.url}")
   let team = if cfg.team == "" { "(none — run 'lll attach')" } else { cfg.team }
   fmt.Println(f"team    {team}")
-  if cfg.me != "" && cfg.me != auth.record.name {
-    fmt.Println(
-      f"note: 'me' is set to \"{cfg.me}\", which is not the member this token belongs to — 'lll config set me {auth.record.name}' fixes it",
-    )
-  }
+  let notice = login_identity_notice(cfg.me, auth.record.name, src.me, config.home_path()?)
+  if notice != "" { fmt.Println(notice) }
   Ok(())
 }
 
@@ -573,4 +573,25 @@ Removes token = \"...\" from ~/.config/lll/lll.toml — the file 'lll login'
 wrote — and unsets nothing else. An LLL_TOKEN in the environment is not
 affected: unset it in the shell that has it.",
   )
+}
+
+/// Authentication and the configured comment author may deliberately differ.
+/// Never silently rewrite that choice, but make the difference actionable.
+fn login_identity_notice(me: string, authenticated: string, source: string, home: string) -> string {
+  if me == "" || authenticated == "" || me == authenticated { return "" }
+  let argument = cli_argument(authenticated)
+  let mut recovery = f"lll config set me {argument}"
+  if source == "env:LLL_ME" {
+    recovery = f"unset LLL_ME; {recovery}"
+  } else if strings.HasPrefix(source, "file:") && source != f"file:{home}" {
+    recovery = f"remove or change 'me' in {strings.TrimPrefix(source, "file:")}, then run '{recovery}'"
+  }
+  f"note: authenticated as {authenticated}, but comments are authored as {me} ({source}). To use {authenticated} for comments: {recovery}"
+}
+
+/// Render a literal argument for the recovery command, including display names.
+fn cli_argument(value: string) -> string {
+  if value != "" && value.runes().all(|r| ('a' <= r && r <= 'z') || ('A' <= r && r <= 'Z') || ('0' <= r && r <= '9') || r == '_' || r == '-' || r == '.') { return value }
+  let escaped = strings.ReplaceAll(value, "'", "'\\''")
+  f"'{escaped}'"
 }

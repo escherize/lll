@@ -156,8 +156,9 @@ fn usage_help(usage: string, spec: Slice<Flag>) -> string {
 }
 
 fn unknown_flag(arg: string, usage: string) -> string {
-  if usage == "" { return f"unknown flag: '{arg}'" }
-  f"unknown flag: '{arg}'\nusage: {usage}"
+  let kind = if strings.HasPrefix(arg, "-") { "unknown flag" } else { "unexpected argument" }
+  if usage == "" { return f"{kind}: '{arg}'" }
+  f"{kind}: '{arg}'\nusage: {usage}"
 }
 
 impl Parsed {

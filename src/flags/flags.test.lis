@@ -120,7 +120,7 @@ fn parse_collects_a_single_positional_when_allowed() {
 #[test]
 fn parse_rejects_positionals_when_disallowed() {
   let assert Err(msg) = parse(spec(), argv(["stray"]), 3, false, "usage line")
-  assert msg == "unknown flag: 'stray'\nusage: usage line"
+  assert msg == "unexpected argument: 'stray'\nusage: usage line"
 }
 
 #[test]

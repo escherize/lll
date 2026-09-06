@@ -48,7 +48,6 @@ Usage:
   lll member list                              list members (name, email)
   lll member create NAME [-e email] [--password pw]
                                                create a record; add is an alias
-                                               ('create' is the same command)
   lll member add NAME                         alias for member create
   lll member invite NAME --email email         add + temp password + the lines
                                                they run (any member; the
@@ -470,10 +469,11 @@ password is stored nowhere else: lose it and reissue with
 'lll login' asks for, so the synthesized @members.invalid placeholder
 'lll member add' falls back to would be a dead door.
 
-Authenticates as the PocketBase superuser, exactly like 'lll token create'
-and 'lll member set-password': from LLL_ADMIN_EMAIL and LLL_ADMIN_PASSWORD
-(the credentials 'lll up' prints), or the configured token when it already is
-one. An existing member is refused rather than overwritten.",
+Uses the configured member token to create a new colleague, or administrator
+credentials from --admin-email/--admin-password or LLL_ADMIN_EMAIL and
+LLL_ADMIN_PASSWORD when supplied. An existing member is refused rather than
+overwritten; resetting an existing password with 'lll member set-password'
+requires administrator credentials.",
   )
 }
 
