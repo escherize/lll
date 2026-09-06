@@ -1,5 +1,6 @@
 import "flags"
 import "query"
+import "models"
 
 // Unit cover for the pure helpers in issue.lis. Everything here is a function
 // of its arguments alone — no PocketBase, no config, no git.
@@ -405,4 +406,24 @@ fn named_priorities_round_trip_with_numeric_compatibility() {
   let assert Ok(high) = check_priority("HIGH")
   assert high == 2
   assert check_priority("critical").is_err()
+}
+
+#[test]
+fn issue_json_preserves_server_fields_and_exposes_empty_handoff_context() {
+  let assert Ok(out) = issue_view_json("{\"id\":\"record\",\"future\":9007199254740993,\"extra\":{\"flag\":true}}", [], None)
+  assert out.contains("\"future\":9007199254740993")
+  assert out.contains("\"extra\":{\"flag\":true}")
+  assert out.contains("\"comments\":[]")
+  assert out.contains("\"claim\":null")
+}
+
+#[test]
+fn issue_json_exposes_authored_comments_and_current_holder() {
+  let comments = [models.Comment { body: "handoff\nnext step", author: "alice-id", .. }]
+  let claim = models.Claim { member: "bob-id", .. }
+  let assert Ok(out) = issue_view_json("{\"id\":\"record\"}", comments, Some(claim))
+  assert out.contains("\"body\":\"handoff\\nnext step\"")
+  assert out.contains("\"author\":\"alice-id\"")
+  assert out.contains("\"member\":\"bob-id\"")
+  let assert Err(_) = issue_view_json("broken", [], None)
 }

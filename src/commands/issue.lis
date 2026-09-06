@@ -235,7 +235,7 @@ fn issue_view_spec() -> Slice<flags.Flag> {
   [
     flags.Flag {
       name: "--json",
-      help: "raw PocketBase JSON (team, assignee, labels, project\nexpanded), pipe-friendly",
+      help: "issue JSON with expanded relations, comments (oldest first,\nauthor expanded), and claim (member expanded, or null)",
       ..,
     },
     flags.Flag {
@@ -479,6 +479,9 @@ Web URLs come from LLL_WEB_URL, then 'web_url' in the repo or home config.
 Set the deployed board address with 'lll config set web_url URL';
 'lll up' saves the actual endpoint when it starts the board.
 
+Full view --json preserves the issue record and adds comments (oldest first,
+author expanded) and claim (member expanded, or null when unclaimed).
+
 When KEY-123 is omitted (except for delete), it is inferred from the current
 git branch: eng-12-fix-login resolves to ENG-12.
 
@@ -721,14 +724,13 @@ fn view(args: Slice<string>) -> Result<(), string> {
   }
 
   let record = fetch_issue_record(resolved)?
-  if json_mode {
-    fmt.Println(record)
-    return Ok(())
-  }
-
   let mut full = models.Issue { .. }
   if let Err(e) = json.Unmarshal(record.bytes(), &full) {
     return Err(f"decoding issue: {e}")
+  }
+  if json_mode {
+    fmt.Println(issue_view_json(record, fetch_comments(full.id)?, fetch_claim(full.id)?)?)
+    return Ok(())
   }
 
   // --raw: the issue as markdown, no chrome. For piping, and for an agent that
@@ -824,6 +826,30 @@ fn view(args: Slice<string>) -> Result<(), string> {
     print_comments(comments)
   }
   Ok(())
+}
+
+/// Keep every server field intact while exposing the handoff context that
+/// the normal view already shows. RawMessage preserves unknown fields and
+/// exact numbers instead of decoding arbitrary records through float64.
+fn issue_view_json(record: string, comments: Slice<models.Comment>, claim: Option<models.Claim>) -> Result<string, string> {
+  let mut fields = Map.new<string, json.RawMessage>()
+  if let Err(e) = json.Unmarshal(record.bytes(), &fields) { return Err(f"decoding issue JSON: {e}") }
+  let comments_json = match json.Marshal(comments) {
+    Ok(data) => data as json.RawMessage,
+    Err(e) => return Err(f"encoding comments: {e}"),
+  }
+  fields["comments"] = if comments.is_empty() { "[]".bytes() as json.RawMessage } else { comments_json }
+  fields["claim"] = match claim {
+    Some(held) => match json.Marshal(held) {
+      Ok(data) => data as json.RawMessage,
+      Err(e) => return Err(f"encoding claim: {e}"),
+    },
+    None => "null".bytes() as json.RawMessage,
+  }
+  match json.Marshal(fields) {
+    Ok(data) => Ok(data as string),
+    Err(e) => Err(f"encoding issue JSON: {e}"),
+  }
 }
 
 /// The '## Related findings' block of `lll issue view --raw` — same list
@@ -1261,13 +1287,20 @@ fn issue_url(issue: models.Issue) -> Result<string, string> {
 /// An issue's comments, oldest first, author expanded.
 fn fetch_comments(issue_id: string) -> Result<Slice<models.Comment>, string> {
   let filter = url.QueryEscape(f"issue={query.quote(issue_id)}")
-  let mut comments = models.CommentList { .. }
-  pb.fetch(
-    f"/api/collections/comments/records?filter={filter}&sort=created&expand=author&perPage=200",
-    "comments",
-    &comments,
-  )?
-  Ok(comments.items)
+  let mut result: Slice<models.Comment> = []
+  let mut page = 1
+  loop {
+    let mut comments = models.CommentList { .. }
+    pb.fetch(
+      f"/api/collections/comments/records?filter={filter}&sort=created,id&expand=author&perPage=200&page={page}",
+      "comments",
+      &comments,
+    )?
+    for comment in comments.items { result = result.append(comment) }
+    if page >= comments.totalPages { break }
+    page += 1
+  }
+  Ok(result)
 }
 
 /// Print comments as "author (3h ago)" then the indented body.

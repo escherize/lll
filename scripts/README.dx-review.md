@@ -131,6 +131,9 @@ from an outage into product friction or rewrite the original transcript.
 Reports must omit credentials. Exact colleague login commands belong in a
 separate local artifact. Raw transcripts can contain credentials and should
 remain in the private run directory.
+For `first_command`, replace secret values with `<redacted>` while retaining
+the first guess's syntax; retain the exact command in the private transcript.
+A private-artifact pointer is also acceptable when safe redaction is impractical.
 
 The standard task and aggregator use exactly 14 numbered steps. A custom task
 must keep that numbering for its reports to validate.

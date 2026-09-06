@@ -259,7 +259,7 @@ Use these keys:
       "total_commands": 0,
       "wasted_commands": 0,
       "consulted_help": false,
-      "first_command": "the very first lll command you ran, verbatim",
+      "first_command": "the first lll command, with credential values replaced by <redacted>",
       "misleading_messages": ["quote any message that sent you somewhere useless"],
       "helpful_messages": ["quote any message that told you exactly what to run next"],
       "surprises": ["anything that did not work the way you assumed"],
@@ -269,6 +269,12 @@ Use these keys:
     }
 
 A failed step is a valid and useful result. Report it honestly.
+
+Keep the exact first command in the private transcript. In first_command,
+redact only secret values while preserving the command, flags and other
+arguments so the first guess remains assessable. If safely redacting a command
+is impractical, reference a separate private artifact instead. The no-secrets
+rule takes precedence over verbatim reporting.
 
 Give an independent usability verdict. Set clean_bill_of_health true only
 when all 14 outcomes are verified and no actionable product problem remains.

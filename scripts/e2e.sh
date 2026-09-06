@@ -1669,6 +1669,10 @@ assert_contains "$out" "Claimed $CKEY for bryan" "claim output"
 out=$(env $E "$LIN" issue view "$CKEY")
 assert_contains "$out" "Claimed:   bryan" "issue view shows the holder"
 assert_contains "$out" "Assignee:  bryan" "claiming assigns the issue"
+env $E "$LIN" issue view "$CKEY" --json | python3 -c 'import json,sys; d=json.load(sys.stdin); assert d["claim"]["expand"]["member"]["name"] == "bryan"; assert d["comments"] == []'
+env $E LLL_ME=bryan "$LIN" issue comment "$CKEY" -b 'handoff for carol' >/dev/null
+env $E LLL_ME=carol "$LIN" issue comment "$CKEY" -b 'acknowledged' >/dev/null
+env $E "$LIN" issue view "$CKEY" --json | python3 -c 'import json,sys; d=json.load(sys.stdin); assert [(c["body"],c["expand"]["author"]["name"]) for c in d["comments"]] == [("handoff for carol","bryan"),("acknowledged","carol")]'
 
 # AC#1: a held issue refuses the second claim and changes nothing.
 set +e
@@ -1696,6 +1700,7 @@ assert_contains "$out" "Released $CKEY (was bryan's)" "release output"
 out=$(env $E "$LIN" issue view "$CKEY")
 assert_not_contains "$out" "Claimed:" "release removes the hold"
 assert_contains "$out" "Assignee:  none" "release clears the assignee the claim set"
+env $E "$LIN" issue view "$CKEY" --json | python3 -c 'import json,sys; d=json.load(sys.stdin); assert d["claim"] is None; assert len(d["comments"]) == 2'
 out=$(env $E LLL_ME=carol "$LIN" issue claim "$CKEY")
 assert_contains "$out" "Claimed $CKEY for carol" "a released issue can be claimed again"
 
@@ -1707,6 +1712,26 @@ rc=$?
 set -e
 [ "$rc" -ne 0 ] || fail "releasing an unclaimed issue: expected nonzero exit"
 assert_contains "$out" "$CKEY is not claimed" "double release names the state"
+
+# Full issue JSON must not silently stop at the first 200 comments.
+env $E python3 - "$LLL_ABS" "$CKEY" <<'PY'
+import json, os, subprocess, sys, urllib.request
+binary, key = sys.argv[1:]
+def view():
+    return json.loads(subprocess.check_output([binary, 'issue', 'view', key, '--json']))
+issue = view()
+for i in range(199):
+    payload = json.dumps({'issue': issue['id'], 'body': f'pagination {i}'}).encode()
+    request = urllib.request.Request(os.environ['LLL_URL'] + '/api/collections/comments/records', data=payload,
+        headers={'Authorization': 'Bearer ' + os.environ['LLL_TOKEN'], 'Content-Type': 'application/json'})
+    with urllib.request.urlopen(request) as response:
+        assert response.status == 200
+comments = view()['comments']
+assert len(comments) == 201
+assert len({c['id'] for c in comments}) == 201
+assert [(c['created'], c['id']) for c in comments] == sorted((c['created'], c['id']) for c in comments)
+assert {c['body'] for c in comments} >= {f'pagination {i}' for i in range(199)}
+PY
 
 # No 'me' to claim as: refuse and name the fix. $WORK has no .lll.toml and
 # $FAKEHOME no user config, so 'me' is genuinely unset here.
