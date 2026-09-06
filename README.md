@@ -1,18 +1,24 @@
 # lll
 
 A Linear-style issue tracker in one binary: CLI-first, with a realtime web
-board. Self-hosted — PocketBase runs embedded in-process, no SaaS.
+board. Self-hosted: PocketBase runs embedded in-process, no SaaS.
 Written in [Lisette](https://github.com/ivov/lisette), which compiles to Go.
 
 - Teams, `ENG-123` identifiers, states, priorities, projects, labels,
   markdown comments.
-- `--json` on reads and NDJSON event streams — built for scripts and coding
+- `--json` on reads and NDJSON event streams, built for scripts and coding
   agents as much as for humans.
-- `lll up` starts everything: embedded PocketBase + the web board.
+- `lll up` starts everything: embedded PocketBase and the web board.
+
+![The lll board: six state columns with issue cards, a left rail, and a search
+field](docs/board.png)
+
+The board above is `mise run seed`, which boots a throwaway instance with demo
+issues on free ports. Nothing there is a mockup.
 
 ## Install
 
-Prebuilt binaries — no checkout, no toolchain:
+Prebuilt binaries, no checkout and no toolchain:
 
 ```sh
 mkdir -p ~/bin && curl -LsSf -o ~/bin/lll \
@@ -33,12 +39,12 @@ curl -LsSf https://github.com/ivov/lisette/releases/latest/download/lisette-inst
 mise install && mise run dev   # build, then PocketBase (:8090) + web board (:8100)
 ```
 
-That is everything — PocketBase is embedded in the binary. `lis` (the Lisette
+That is everything. PocketBase is embedded in the binary. `lis` (the Lisette
 toolchain) is the one tool mise cannot install; the rest (go, jq) it pins.
 Taken ports auto-increment; Ctrl-C stops everything; markup/CSS edits need a
 rebuild (`mise run dev` does it).
 
-Then, in another shell — with mise activated, `lll` anywhere under the
+Then, in another shell. With mise activated, `lll` anywhere under the
 checkout is the binary you just built:
 
 ```sh
@@ -55,12 +61,12 @@ Four actors, each configured once, none written twice:
 | Actor | Once | Writes |
 |---|---|---|
 | Server | `lll up` with `LLL_ADMIN_*`, `LLL_TEAM`, `LLL_BIND`, `LLL_BOARD_TOKEN` in env (Fly: secrets) | nothing on disk but the database |
-| Your machine (human path) | `lll login --url https://your-host --email you@example.com` — prompts for the password, or pass `--password` | `url`, `token`, `me` and `team` (each when unset) in the home config |
+| Your machine (human path) | `lll login --url https://your-host --email you@example.com`, which prompts for the password unless you pass `--password` | `url`, `token`, `me` and `team` (each when unset) in the home config |
 | Each repo or directory | `lll attach`, commit the file if it is a repo | `team = "KEY"` in `.lll.toml`, at the repo root or in the working directory |
-| Each agent (agent path) | superuser mints `lll token create <name>` | nothing — `LLL_TOKEN` (+ `LLL_URL`) in its env |
+| Each agent (agent path) | superuser mints `lll token create <name>` | nothing; `LLL_TOKEN` and `LLL_URL` in its env |
 
 Humans log in with email + password; agents ride minted tokens. A member has
-to exist before `lll login` will work — `lll login` authenticates members and
+to exist before `lll login` will work. `lll login` authenticates members and
 never creates them, and the superuser is not a member, so its credentials do
 not log you into the board.
 
@@ -75,9 +81,9 @@ lll login --url https://your-host --email you@example.com \
 
 `--create` makes the member and logs into it in the same call. The admin
 credentials can ride `LLL_ADMIN_EMAIL`/`LLL_ADMIN_PASSWORD` instead of the
-flags. The member is named after the part of your email before `@` unless
-`--name` says otherwise, and if the server has exactly one team, `login`
-settles that too — so `lll issue create "a title"` works immediately.
+flags. The member is named after the part of your email before `@`, unless `--name`
+says otherwise. If the server has exactly one team, `login` settles that too, so
+`lll issue create "a title"` works immediately.
 
 **If somebody else deployed it**, they run one command and send you what it
 prints:
@@ -89,8 +95,8 @@ lll member invite NAME --email their@email --url https://your-host
 That creates the member, generates a temporary password, and prints the exact
 lines they run. The password is shown once and stored nowhere, so send it
 before you close the terminal. A member who has lost their password gets a new
-one from `lll member set-password NAME --password <pw>` (superuser only —
-`--admin-email`/`--admin-password` or the environment).
+one from `lll member set-password NAME --password <pw>` (superuser only:
+pass `--admin-email` and `--admin-password`, or set them in the environment).
 
 On a local `lll up`, plain `lll login` (the url default is
 `http://127.0.0.1:8090`) is enough.
@@ -101,14 +107,14 @@ files, repo file beats home file, and each key resolves independently
 
 ## Attaching a repo, or any directory
 
-`lll attach` creates a team and writes one line — `team = "KEY"` — to
+`lll attach` creates a team and writes one line, `team = "KEY"`, to
 `.lll.toml`. Inside a git repository that file goes at the repo root; commit
 it. Outside one it goes in the working directory, and every subdirectory
-inherits it — a scratch project needs no `git init` to be tracked. The key
+inherits it. A scratch project needs no `git init` to be tracked. The key
 defaults to the directory name; `-k KEY` overrides it.
 
-That is the whole attachment, because the two halves of the config live in
-different places:
+That is the whole attachment. The two halves of the config live in different
+places:
 
 | Half | Where | Keys |
 |---|---|---|
@@ -116,13 +122,13 @@ different places:
 | How to reach it | `~/.config/lll/lll.toml`, once per machine | `url`, `me` |
 
 So attaching a new repo on a machine already set up is `lll attach`, and an
-already-attached repo on a new machine is `git clone` — no lll step at all.
+already-attached repo on a new machine is `git clone`, with no lll step at all.
 Every worktree of that checkout is attached the moment it exists.
 
 ### The side-project loop
 
 A team is cheap, so give every side project its own and archive it when the
-work is done. A repo is not required — a plain directory of notes attaches the
+work is done. A repo is not required. A plain directory of notes attaches the
 same way, and its subdirectories inherit the team:
 
 ```sh
@@ -132,9 +138,9 @@ lll team archive KEY          # done: leaves team lists and the board rail
 ```
 
 Archiving hides, never deletes: `/t/KEY/` still renders (with an "archived"
-banner) and every issue and comment stays readable. New writes refuse —
-`lll issue create`, `lll attach`, and the archived board's editors all answer
-with the fix — and `lll team unarchive KEY` brings the team back whole.
+banner) and every issue and comment stays readable. New writes refuse: `lll issue create`, `lll attach`, and the archived board's
+editors all answer with the fix. `lll team unarchive KEY` brings the team back
+whole.
 `lll team list --archived` shows what is parked.
 
 ## Configuration
@@ -143,10 +149,10 @@ Precedence: env vars > the repo's `.lll.toml` > `~/.config/lll/lll.toml`. The
 files **layer**: each supplies the keys it names, so a repo file carrying
 `team` alone still gets `url` and `me` from the machine's. `.lll.toml` is
 found by walking up from the working directory. Inside a repo the walk stops
-at the repo root — and no higher, so a stray file above a checkout cannot
+at the repo root and no higher, so a stray file above a checkout cannot
 capture it. Outside any repo it stops at the first of: the file, a directory
 holding `.git` (someone's checkout is not this directory's tracker), or your
-home directory **exclusive** — a `.lll.toml` sitting directly in `$HOME` is
+home directory **exclusive**. A `.lll.toml` sitting directly in `$HOME` is
 never read, because `~/.config/lll/lll.toml` is how you set machine-wide
 defaults on purpose.
 
@@ -165,25 +171,24 @@ A hosted instance serves the board and the API at **one address**: point `url`
 at `https://your-host` and both work. The board proxies `/api/` to the
 PocketBase it runs in-process, so there is no port to know.
 
-It did not always. Instances deployed before that landed answer the API on
-`:8091` only, and `url = "https://your-host"` gets a bare `404 page not found`
-from a host that plainly answers — a confusing failure that cost a real
-debugging session. `lll config check` asks the configured url whether it is a
-PocketBase API and answers in one line; if it says no against a bare host, the
-server is older than this document and `:8091` is the url to use.
+An instance deployed before that change answers the API on `:8091` only. There,
+`url = "https://your-host"` returns a bare `404 page not found` from a host that
+otherwise responds. Run `lll config check`: it asks the configured url whether it
+is a PocketBase API and answers in one line. If it says no against a bare host,
+use `:8091`.
 
-Client settings — what every `lll` command reads:
+Client settings, read by every `lll` command:
 
 | Env | TOML key | Meaning |
 |---|---|---|
-| `LLL_URL` | `url` | PocketBase **API** base URL (default `http://127.0.0.1:8090`; hosted, `https://your-host` — the board's address, which now serves the API too) |
+| `LLL_URL` | `url` | PocketBase **API** base URL (default `http://127.0.0.1:8090`; hosted, `https://your-host`, the board's address, which serves the API too) |
 | `LLL_TEAM` | `team` | Default team key; scopes `issue list`, required by `issue create` |
 | `LLL_ME` | `me` | Your member name; authors your comments and receives assignments |
 | `LLL_SORT` | `sort` | Default sort: `created`, `updated`, `priority`, `number`; `-` prefix descends |
-| `LLL_WEB_URL` | `web_url` | Web board base URL for `board`, `issue url`, `view -w`. Unset, it derives from `url`: `https://<url-host>` (port dropped — the hosted board rides 443) when the url is non-local, else `http://127.0.0.1:8100` |
-| `LLL_TOKEN` | `token` | PocketBase auth token sent as `Authorization: Bearer` on every request. A secret: `lll login` writes it to the home config, `lll token create` mints agent tokens — never the repo's .lll.toml |
+| `LLL_WEB_URL` | `web_url` | Web board base URL for `board`, `issue url`, `view -w`. Unset, it derives from `url`: `https://<url-host>` (the port is dropped, because the hosted board rides 443) when the url is non-local, else `http://127.0.0.1:8100` |
+| `LLL_TOKEN` | `token` | PocketBase auth token sent as `Authorization: Bearer` on every request. A secret: `lll login` writes it to the home config, `lll token create` mints agent tokens; never the repo's .lll.toml |
 
-Server settings — read only by `lll up` (env only, no TOML key; on a host,
+Server settings, read only by `lll up` (env only, no TOML key; on a host,
 set them as secrets):
 
 | Env | Meaning |
@@ -194,7 +199,7 @@ set them as secrets):
 
 `lll config init` writes a commented template. On its first boot `lll up`
 guesses `me` from `$USER`, writes it to `~/.config/lll/lll.toml` and seeds a
-matching member, so assignment works immediately — no prompt. It writes the
+matching member, so assignment works immediately, with no prompt. It writes the
 home config, never the repo's, because the repo's file is committed. That
 guess is wrong on a shared machine: `lll config set me <name>` fixes it, in
 the same file.
@@ -264,14 +269,14 @@ mise run gate      # all three -- what a change must pass before it lands
 ```
 
 `scripts/e2e.sh` runs an ephemeral PocketBase on a random port via `lll up`
-itself — no external binary — plus `jq` and `python3`. It never touches your
+itself (no external binary), plus `jq` and `python3`. It never touches your
 data.
 
 `scripts/import_sidecar.py` imports this project's own `.private` sidecar
 tracker (Backlog.md tasks + wiki/decisions/findings) into an lll instance as
-team `LLL`. It is idempotent — every record carries an `Origin: sidecar ...`
-body line and a re-run creates nothing that is already there — so re-running
-it is safe and is how new sidecar records get picked up:
+team `LLL`. It is idempotent. Every record carries an `Origin: sidecar ...` body line, and
+a re-run creates nothing that is already there. Re-running it is safe, and is
+how new sidecar records get picked up:
 
 ```sh
 LLL_TOKEN=<token> python3 scripts/import_sidecar.py --url <instance-url>
@@ -283,12 +288,12 @@ stays their archive.
 
 Layout:
 
-- `src/` — Lisette source: `main.lis` dispatch, `commands/` one file per
+- `src/`: Lisette source, `main.lis` dispatch, `commands/` one file per
   noun, `pb/` REST client, `realtime/` SSE client, `query/` filter builder,
   `config/`, `display/`, `gitctx/`, `models/`.
-- `pb/` — PocketBase schema as code: `pb_migrations/`, applied on start.
-- `gopb/` — tiny Go module embedding PocketBase behind one `Serve` function.
-- `web/` — `templates/` (html/template) and `static/` (plain CSS), compiled
+- `pb/`: PocketBase schema as code, `pb_migrations/`, applied on start.
+- `gopb/`: a tiny Go module embedding PocketBase behind one `Serve` function.
+- `web/`: `templates/` (html/template) and `static/` (plain CSS), compiled
   into the binary via a `//go:embed` in `web/embed.go`: edits need a rebuild.
 
 ## Architecture
@@ -300,7 +305,7 @@ browser <── HTML/SSE ── lll up web board (Datastar fragment morphing)
 ```
 
 One Lisette codebase compiled to Go. The CLI talks to PocketBase's REST API
-directly — no SDK. The board renders html/templates, holds one subscription
+directly, with no SDK. The board renders html/templates, holds one subscription
 to PocketBase realtime, and pushes re-rendered fragments to every open page
 over SSE; [Datastar](https://data-star.dev) morphs them into the DOM by
 element id. `lll up` runs PocketBase in-process (see `gopb/`) and the board
