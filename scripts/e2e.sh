@@ -1601,11 +1601,12 @@ key=$(printf '%s' "$out" | sed -n 's/^Created \([A-Z]*-[0-9]*\).*/\1/p')
 got=$(env $E "$LIN" issue view "$key" --json | jq -r .description)
 [ "$got" = "piped description" ] || fail "-d - description: got '$got'"
 
-# one trailing newline is the shell's, not the author's
+# Stdin preserves the author's exact trailing newline.
 out=$(echo "trailing" | env $E "$LIN" issue create -t "Stdin newline" -d -)
 key2=$(printf '%s' "$out" | sed -n 's/^Created \([A-Z]*-[0-9]*\).*/\1/p')
-got=$(env $E "$LIN" issue view "$key2" --json | jq -r .description)
-[ "$got" = "trailing" ] || fail "-d - should strip the trailing newline: got '$got'"
+env $E "$LIN" issue view "$key2" --json | python3 -c 'import json,sys; assert json.load(sys.stdin)["description"] == "trailing\n"'
+printf '  first line\n\nsecond line\n' | env $E "$LIN" issue update "$key2" -d - >/dev/null
+env $E "$LIN" issue view "$key2" --json | python3 -c 'import json,sys; assert json.load(sys.stdin)["description"] == "  first line\n\nsecond line\n"'
 
 printf 'piped comment body' | env $E "$LIN" issue comment "$key" -b - >/dev/null
 assert_contains "$(env $E "$LIN" issue comment "$key")" "piped comment body" "-b - reads the comment from stdin"

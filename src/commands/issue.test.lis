@@ -217,7 +217,7 @@ fn value_or_stdin_returns_a_plain_value_unchanged() {
   assert dashed == "-not-stdin"
   let assert Ok(utf8) = value_or_stdin("café — 日本 🐛", "-d")
   assert utf8 == "café — 日本 🐛"
-  // No trailing-newline trimming on this path; that belongs to stdin only.
+  // Preserve the author's trailing newline.
   let assert Ok(nl) = value_or_stdin("line\n", "-d")
   assert nl == "line\n"
 }

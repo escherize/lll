@@ -36,9 +36,9 @@ fn value_or_stdin(val: string, flag: string) -> Result<string, string> {
   let Ok(data) = io.ReadAll(os.Stdin) else {
     return Err(f"{flag} -: reading stdin")
   }
-  // One trailing newline is the shell's, not the author's: `echo hi` means "hi".
-  let text = strings.TrimSuffix(data as string, "\n")
-  if text == "" { return Err(f"{flag} -: nothing on stdin") }
+  // Stdin is the author's input, including any final newline or indentation.
+  let text = data as string
+  if strings.TrimSpace(text) == "" { return Err(f"{flag} -: nothing on stdin") }
   Ok(text)
 }
 
@@ -291,6 +291,7 @@ fn issue_update_spec() -> Slice<flags.Flag> {
     },
     flags.Flag {
       name: "--title",
+      alias: "-t",
       value: true,
       hint: "t",
       help: "new title (update)",
@@ -298,6 +299,7 @@ fn issue_update_spec() -> Slice<flags.Flag> {
     },
     flags.Flag {
       name: "--description",
+      alias: "-d",
       value: true,
       hint: "d",
       help: "new description (update; '-d -' reads it from stdin)",
