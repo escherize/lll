@@ -24,7 +24,7 @@
 #   {n}       agent number
 #
 # Exit code is 0 when every agent reported success, 1 otherwise.
-set -uo pipefail
+set -euo pipefail
 
 N=6
 AGENT_CMD=""
@@ -82,17 +82,32 @@ if [ ! -x "$LLL" ]; then
 fi
 
 [ -n "$ROOT" ] || ROOT=$(mktemp -d "${TMPDIR:-/tmp}/lll-dx.XXXXXX")
+if [ -d "$ROOT" ] && [ -n "$(ls -A "$ROOT")" ]; then
+  echo "refusing to overwrite a nonempty run directory: $ROOT" >&2
+  exit 1
+fi
 mkdir -p "$ROOT"
 PIDS_FILE="$ROOT/servers.pids"
 : > "$PIDS_FILE"
+AGENT_PIDS=()
 
 teardown() {
+  if [ "${#AGENT_PIDS[@]}" -gt 0 ]; then
+    e2e_reap "${AGENT_PIDS[@]}"
+  fi
   [ "$KEEP" -eq 1 ] && { echo; echo "servers left running; stop them with:"; echo "  kill \$(cat $PIDS_FILE)"; echo "  rm -rf $ROOT"; return 0; }
-  while read -r pid; do [ -n "$pid" ] && kill "$pid" 2>/dev/null; done < "$PIDS_FILE"
-  sleep 1
-  while read -r pid; do [ -n "$pid" ] && kill -9 "$pid" 2>/dev/null; done < "$PIDS_FILE"
+  local server_pids=()
+  while read -r pid; do
+    [ -z "$pid" ] || server_pids+=("$pid")
+  done < "$PIDS_FILE"
+  if [ "${#server_pids[@]}" -gt 0 ]; then
+    e2e_reap "${server_pids[@]}"
+  fi
 }
 trap teardown EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
+trap 'exit 129' HUP
 
 # ---------------------------------------------------------------- the task
 # One task that reaches most of what lll does. Ordered so each step depends on
@@ -146,8 +161,8 @@ for i in $(seq 1 "$N"); do
   git -C "$DIR/repo" add -A
   git -C "$DIR/repo" -c commit.gpgsign=false commit -qm "initial" 2>/dev/null
 
-  DB=$(free_port 20000 39999)
-  WEB=$(free_port 40000 59999)
+  DB=$(free_port 20000 39999) || { echo "agent $i: could not allocate API port" >&2; exit 1; }
+  WEB=$(free_port 40000 59999) || { echo "agent $i: could not allocate board port" >&2; exit 1; }
   ADMIN_EMAIL="admin$i@local.dev"
   ADMIN_PASS="admin-pw-$i-$RANDOM"
 
@@ -163,7 +178,7 @@ for i in $(seq 1 "$N"); do
   echo "$!" >> "$PIDS_FILE"
 
   # The agent's own HOME, empty of any config, is what makes step 1 real.
-  rm -rf "$DIR/agenthome"; mkdir -p "$DIR/agenthome"
+  mkdir -p "$DIR/agenthome"
 
   BRIEF="$DIR/BRIEF.md"
   REPORT="$DIR/report.json"
@@ -206,9 +221,22 @@ Wherever the task says \`AGENT\`, use \`agent$i\`. Wherever it says
 2.  Try what you would naturally try FIRST, before consulting \`--help\`.
     Your untrained instinct is the measurement. When a guess fails, record it
     and try the next one.
-3.  Count every \`lll\` command you run and whether it worked.
+3.  Record every \`lll\` invocation in \`$DIR/transcript.jsonl\`, one JSON
+    object per invocation with \`command\`, \`exit_code\`, and \`output\`.
+    Preserve the full command and output. Count every invocation, including
+    help and retries. \`wasted_commands\` means invocations with nonzero exit
+    codes; successful help calls count only toward \`total_commands\`.
 4.  Verify before claiming success. Run the command and read its output. Do
     not report a step as done because it should have worked.
+5.  If the execution sandbox blocks localhost, retry with the required runtime
+    permission and mark the denied invocation \`infrastructure: true\` in the
+    transcript. Exclude only marked infrastructure invocations from both
+    command totals. If the server is unavailable after that retry, STOP and
+    notify the coordinator; do not continue a run with broken infrastructure.
+6.  Do not include passwords or tokens in report.json. Keep exact colleague
+    login commands in a separate local file, and refer to that file in the
+    report. Transcripts are private raw artifacts; never rewrite earlier
+    observations to make the run appear successful.
 
 ## Report
 
@@ -277,13 +305,19 @@ for i in $(seq 1 "$N"); do
   cmd=${cmd//\{report\}/$DIR/report.json}
   cmd=${cmd//\{n\}/$i}
   ( cd "$DIR/repo" && eval "$cmd" ) > "$DIR/agent.log" 2>&1 &
+  AGENT_PIDS+=("$!")
 done
-wait
+agent_rc=0
+for pid in "${AGENT_PIDS[@]}"; do
+  wait "$pid" || agent_rc=1
+done
+AGENT_PIDS=()
 echo "all agents finished"
 
 # ------------------------------------------------------------- aggregation
-python3 "$REPO/scripts/dx-aggregate.py" "$ROOT" "$N"
-rc=$?
+rc=0
+python3 "$REPO/scripts/dx-aggregate.py" "$ROOT" "$N" || rc=$?
+[ "$agent_rc" -eq 0 ] || rc=1
 echo
 echo "raw reports and logs: $ROOT"
 exit $rc

@@ -30,10 +30,27 @@ stops, so any runtime can drive the briefs. Aggregate afterwards:
 scripts/dx-review.sh --root /tmp/lll-dx.XXXX --report-only
 ```
 
+Some agent runtimes reap background processes when a tool call exits. In those
+runtimes, keep the harness running while external reviewers work:
+
+```sh
+scripts/dx-review.sh -n 6 --agent-cmd 'while [ ! -f "{report}" ]; do sleep 1; done'
+```
+
+Wait for `running 6 agents in parallel`, then give fresh reviewers the printed
+run directory's `agent-N/BRIEF.md` files. The placeholder commands keep the
+servers supervised until every report exists. Reviewers should write reports
+to a temporary file and rename them into place when complete. If a reviewer
+cannot finish, stop the harness; do not leave it waiting indefinitely. Interrupt
+or terminate it to stop its reviewers and servers. Preserve the run directory.
+
 Other flags: `-n` agent count (default 6), `--task FILE` to replace the task,
 `--keep` to leave the servers up, `--root DIR` to choose where it all lands.
 
 Exit code is 0 only when every agent completed every step.
+Missing or malformed reports, duplicate step IDs, and reviewer process failures
+produce a nonzero exit. A new run requires a new or empty directory; existing
+transcripts and databases are never overwritten.
 
 ## Use a weaker model than you think you need
 
@@ -96,6 +113,21 @@ Read in this order.
 3. **Messages that misled.** Higher value than the failures, because a message
    that sends someone somewhere useless costs every future user.
 4. **Wasted commands.** The blunt number. Track the median across runs.
+
+Each reviewer records every invocation in `transcript.jsonl` using `command`,
+`exit_code`, and `output`. Count all invocations, including successful help,
+in `total_commands`; count nonzero exits in `wasted_commands`. Mark sandbox-only
+denials with `infrastructure: true` and exclude those entries from both totals.
+If a server remains unavailable after the permitted retry, stop the run and
+repair infrastructure before starting fresh. Do not fold prerequisite failures
+from an outage into product friction or rewrite the original transcript.
+
+Reports must omit credentials. Exact colleague login commands belong in a
+separate local artifact. Raw transcripts can contain credentials and should
+remain in the private run directory.
+
+The standard task and aggregator use exactly 14 numbered steps. A custom task
+must keep that numbering for its reports to validate.
 
 A finding reported by one agent is a lead. A finding reported by most of them
 is a bug, and the count belongs in the commit message that fixes it.
