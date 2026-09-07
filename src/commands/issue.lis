@@ -1126,6 +1126,18 @@ fn claim(args: Slice<string>) -> Result<(), string> {
     let Some(holder) = held else {
       return Err(e)
     }
+    // Held by the caller already: that is success, not a conflict. The
+    // fleet replay hit this when task 7 cleared the assignee under a claim
+    // task 3 had made, and every later claim by the holder was refused.
+    // Re-setting the assignee is the point of claiming again.
+    if holder.member == member.id {
+      let _ = pb.patch(
+        f"/api/collections/issues/records/{issue.id}",
+        "{\"assignee\":" + json_quote(member.id)? + "}",
+      )?
+      fmt.Println(f"Claimed {key} for {member.name} (already yours since {display.relative(holder.created)})")
+      return Ok(())
+    }
     let mut name = holder.expand.member.name
     if name == "" { name = "someone else" }
     return Err(

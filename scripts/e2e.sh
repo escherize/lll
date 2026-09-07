@@ -1390,6 +1390,11 @@ out=$(env LLL_URL=$URL LLL_TEAM=ENG "$LIN" finding list -a pb)
 assert_contains "$out" "fleet-new" "finding new sets kind=finding (it lists as a finding)"
 out=$(env LLL_URL=$URL LLL_TEAM=ENG "$LIN" doc read fleet-new --raw)
 assert_contains "$out" "kind set by the verb" "doc read is view"
+out=$(env LLL_URL=$URL LLL_TEAM=ENG "$LIN" finding list --search hazard)
+assert_contains "$out" "migration-hazard" "finding list --search matches slug"
+assert_not_contains "$out" "fleet-new" "finding list --search excludes the rest"
+out=$(env LLL_URL=$URL LLL_TEAM=ENG "$LIN" finding list -p src/pb/records.lis)
+assert_contains "$out" "migration-hazard" "finding list -p matches by containment like near"
 out=$("$LIN" --help)
 assert_contains "$out" "lll finding" "lll --help mentions finding"
 out=$("$LIN" doc --help)
@@ -1711,17 +1716,22 @@ set -e
 [ "$rc" -ne 0 ] || fail "claiming a held issue: expected nonzero exit"
 assert_contains "$out" "already claimed by bryan" "refusal names the holder"
 assert_contains "$out" "lll issue release $CKEY" "refusal names the fix"
+
+# the holder claiming again is success, not a conflict (fleet replay, task 9:
+# a claim survived --assignee none and every re-claim by its holder was refused)
+out=$(env $E LLL_ME=bryan "$LIN" issue claim "$CKEY")
+assert_contains "$out" "Claimed $CKEY for bryan (already yours" "re-claim by the holder succeeds and says so"
+got=$(env $E "$LIN" issue view "$CKEY" --json | jq -r '.expand.assignee.name')
+[ "$got" = "bryan" ] || fail "re-claim: assignee should be bryan, got '$got'"
 out=$(env $E "$LIN" issue view "$CKEY")
 assert_contains "$out" "Assignee:  bryan" "a refused claim leaves the assignee alone"
 assert_contains "$out" "Claimed:   bryan" "a refused claim leaves the holder alone"
 
-# Held is held, including by you: re-claiming is not a silent no-op.
-set +e
-out=$(env $E LLL_ME=bryan "$LIN" issue claim "$CKEY" 2>&1)
-rc=$?
-set -e
-[ "$rc" -ne 0 ] || fail "re-claiming your own hold: expected nonzero exit"
-assert_contains "$out" "already claimed by bryan" "re-claim names the holder"
+# The rule used to be "held is held, including by you: re-claiming is not
+# a silent no-op". The fleet replay found the cost: a claim outlives
+# --assignee none, and 18 of 30 agents were refused their own issue. The
+# re-claim is not silent - it says "already yours" - and it re-sets the
+# assignee, which is what claiming again is for. Pinned above.
 
 # AC#3: release gives it back, and the next claim succeeds.
 out=$(env $E "$LIN" issue release "$CKEY")

@@ -105,6 +105,22 @@ fn finding_list_spec() -> Slice<flags.Flag> {
       help: "only findings whose area equals this",
       ..
     },
+    flags.Flag {
+      name: "--search",
+      alias: "--query",
+      value: true,
+      hint: "text",
+      help: "only findings whose slug or title contains text",
+      ..,
+    },
+    flags.Flag {
+      name: "-p",
+      alias: "--path",
+      value: true,
+      hint: "path",
+      help: "only findings about this file or directory (what 'finding near' answers)",
+      ..,
+    },
     flags.Flag { name: "--json", help: "print the raw record list as JSON", .. },
   ]
 }
@@ -170,9 +186,19 @@ fn finding_list(args: Slice<string>) -> Result<(), string> {
   let usage = flags.usage("lll finding list", spec, "")
   let p = flags.parse(spec, args, 3, false, usage)?
   let area = strings.TrimSpace(p.one("-a"))
+  // --search and -p exist because eight of thirty fleet agents asked list
+  // for them and none reached for 'near' from here.
+  let search = strings.ToLower(strings.TrimSpace(p.one("--search")))
+  let path = strings.TrimSpace(p.one("-p"))
   let mut findings = fetch_findings(current_team()?.id)?
   if area != "" {
     findings = findings.filter(|d| strings.TrimSpace(d.area) == area)
+  }
+  if search != "" {
+    findings = findings.filter(|d| strings.Contains(strings.ToLower(d.slug), search) || strings.Contains(strings.ToLower(d.title), search))
+  }
+  if path != "" {
+    findings = findings.filter(|d| doc_paths_touch(d, path))
   }
   if p.given("--json") {
     let body = match json.Marshal(findings) {
