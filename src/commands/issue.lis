@@ -87,6 +87,7 @@ fn issue_create_spec() -> Slice<flags.Flag> {
   [
     flags.Flag {
       name: "-t",
+      alias: "--title",
       value: true,
       hint: "\"title\"",
       help: "title of the issue (or give it as the bare argument)",
@@ -349,6 +350,14 @@ pub fn issue_commands() -> Slice<flags.Command> {
     flags.Command {
       name: "create",
       summary: "create an issue in the configured team; -d - reads the description from stdin; without --state it starts in todo",
+      page: issue_create_page(),
+      spec: issue_create_spec(),
+      positional: "[\"title\"]",
+      run: create,
+    },
+    flags.Command {
+      name: "new",
+      summary: "the same command as 'create'",
       page: issue_create_page(),
       spec: issue_create_spec(),
       positional: "[\"title\"]",
@@ -832,15 +841,33 @@ fn view(args: Slice<string>) -> Result<(), string> {
 
   // The brief mechanism (TASK-103 AC#3): an agent's task brief carries the
   // findings for the work it is about to do without a human choosing them.
+  // Fifteen of thirty fleet agents lost the two docs they had linked in a
+  // list of ninety area matches. Linked findings come first and always show
+  // (the brief contract, TASK-103 AC#3); the area matches stop at a handful
+  // with a pointer. The --raw brief keeps the whole list on purpose.
+  let linked = linked_docs.map(|d| d.slug)
   let findings = findings_for_issue(full)?
   if findings.length() > 0 {
     fmt.Println("")
     fmt.Println("Related findings:")
     fmt.Println("")
+    let mut area_matches = 0
+    let mut hidden = 0
     for f in findings {
+      let is_linked = linked.contains(f.slug)
+      if !is_linked {
+        area_matches += 1
+        if area_matches > 5 {
+          hidden += 1
+          continue
+        }
+      }
       let mut area = f.area
       if area == "" { area = "-" }
       fmt.Println(f"{f.slug} ({area}) — {f.title}")
+    }
+    if hidden > 0 {
+      fmt.Println(f"... and {hidden} more by area — 'lll finding list -a AREA' lists an area, 'lll issue view --raw' prints them all")
     }
   }
 

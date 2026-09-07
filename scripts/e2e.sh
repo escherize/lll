@@ -1035,7 +1035,7 @@ WATCH_PIDS=""
 "$LIN" completions bash > "$DATA_DIR/comp.bash"
 bash -n "$DATA_DIR/comp.bash" || fail "bash completions do not parse"
 out=$(cat "$DATA_DIR/comp.bash")
-assert_contains "$out" "create list view show read update close start claim release delete comment watch url id title pr link unlink" "bash completions list issue verbs"
+assert_contains "$out" "create new list view show read update close start claim release delete comment watch url id title pr link unlink" "bash completions list issue verbs"
 assert_contains "$out" "--limit" "bash completions know --limit"
 assert_contains "$out" "complete -F _lll lll" "bash completions register"
 "$LIN" completions zsh > "$DATA_DIR/comp.zsh"
@@ -1069,7 +1069,7 @@ done
 # a flag in the completions entry but not the parser would make this error
 # impossible — the two are one table now, so assert both surfaces agree on
 # the flag that once drifted.
-assert_contains "$(cat "$DATA_DIR/comp.bash")" "issue,create) words='-t -d --description --emoji" \
+assert_contains "$(cat "$DATA_DIR/comp.bash")" "issue,create) words='-t --title -d --description --emoji" \
   "completions offer the parser's own issue create flags"
 
 # TASK-177: create --json joined the spec, so its completions entry carries
@@ -1380,6 +1380,12 @@ out=$(env LLL_URL=$URL LLL_TEAM=ENG "$LIN" finding view migration-hazard --raw)
 assert_contains "$out" "Migrations are a merge hazard." "finding view reads a finding by slug"
 out=$(env LLL_URL=$URL LLL_TEAM=ENG "$LIN" finding read migration-hazard --raw)
 assert_contains "$out" "Migrations are a merge hazard." "finding read is view"
+out=$(env LLL_URL=$URL LLL_TEAM=ENG "$LIN" finding new -s fleet-new -t "Filed from finding new" -a pb -b "kind set by the verb")
+assert_contains "$out" "Created doc fleet-new" "finding new files a doc"
+out=$(env LLL_URL=$URL LLL_TEAM=ENG "$LIN" finding list -a pb)
+assert_contains "$out" "fleet-new" "finding new sets kind=finding (it lists as a finding)"
+out=$(env LLL_URL=$URL LLL_TEAM=ENG "$LIN" doc read fleet-new --raw)
+assert_contains "$out" "kind set by the verb" "doc read is view"
 out=$("$LIN" --help)
 assert_contains "$out" "lll finding" "lll --help mentions finding"
 out=$("$LIN" doc --help)
@@ -1569,6 +1575,8 @@ out=$(LLL_URL=$URL "$LIN" issue comment ENG-6 --body "alias body")
 assert_contains "$out" "Commented on ENG-6" "comment takes --body for -b"
 out=$(LLL_URL=$URL LLL_TEAM=ENG "$LIN" issue list --query "Roundtrip")
 assert_contains "$out" "ENG-6" "list takes --query for --search"
+out=$(LLL_URL=$URL LLL_TEAM=ENG "$LIN" issue new --title "Made with issue new" --priority 4)
+assert_contains "$out" "Made with issue new" "issue new is create, and create takes --title"
 
 # PB unreachable: names lll up and LLL_URL (request path and realtime path)
 set +e

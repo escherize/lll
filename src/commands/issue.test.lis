@@ -408,7 +408,7 @@ fn json_quote_keeps_multi_byte_text_literal() {
 fn issue_commands_lists_every_verb_once_with_a_one_line_summary() {
   let cmds = issue_commands()
   assert cmds.map(|c| c.name).equals([
-    "create", "list", "view", "show", "read", "update", "close", "start", "claim",
+    "create", "new", "list", "view", "show", "read", "update", "close", "start", "claim",
     "release", "delete", "comment", "watch", "url", "id", "title", "pr", "link",
     "unlink",
   ])
@@ -418,12 +418,13 @@ fn issue_commands_lists_every_verb_once_with_a_one_line_summary() {
   }
 }
 
-/// create is the one issue verb with a hand-written page; every other verb
-/// generates usage + flags from its spec, so a page there would be invented.
+/// create is the one issue verb with a hand-written page (its alias new
+/// carries the same one); every other verb generates usage + flags from
+/// its spec, so a page there would be invented.
 #[test]
 fn only_issue_create_has_a_hand_written_page() {
   for c in issue_commands() {
-    assert (c.page != "") == (c.name == "create")
+    assert (c.page != "") == (c.name == "create" || c.name == "new")
   }
   let assert Some(create) = issue_commands().find(|c| c.name == "create")
   assert create.page.contains("The title is the bare argument or -t")

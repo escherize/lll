@@ -189,7 +189,7 @@ fn path_touches_is_false_when_either_side_is_empty() {
 #[test]
 fn doc_commands_declares_every_verb_once_with_a_summary() {
   let names = doc_commands().map(|c| c.name)
-  assert strings.Join(names, " ") == "new list view edit delete"
+  assert strings.Join(names, " ") == "new create list view show read edit delete"
   for c in doc_commands() {
     assert c.summary != ""
     // No doc verb has a hand-written page; help is generated from spec.
@@ -200,7 +200,7 @@ fn doc_commands_declares_every_verb_once_with_a_summary() {
 #[test]
 fn doc_commands_slug_verbs_take_a_positional() {
   for c in doc_commands() {
-    let takes_slug = c.name == "view" || c.name == "edit" || c.name == "delete"
+    let takes_slug = c.name == "view" || c.name == "read" || c.name == "show" || c.name == "edit" || c.name == "delete"
     assert (c.positional == "SLUG") == takes_slug
   }
 }

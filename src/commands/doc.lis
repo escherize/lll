@@ -34,6 +34,14 @@ pub fn doc_commands() -> Slice<flags.Command> {
       run: doc_new,
     },
     flags.Command {
+      name: "create",
+      summary: "the same command as 'new'",
+      page: "",
+      spec: doc_new_spec(),
+      positional: "",
+      run: doc_new,
+    },
+    flags.Command {
       name: "list",
       summary: "list docs (slug, kind, title), one line each",
       page: "",
@@ -44,6 +52,22 @@ pub fn doc_commands() -> Slice<flags.Command> {
     flags.Command {
       name: "view",
       summary: "show one doc with its linked issues; --raw prints only the body; --json prints the raw record",
+      page: "",
+      spec: doc_view_spec(),
+      positional: "SLUG",
+      run: doc_view,
+    },
+    flags.Command {
+      name: "show",
+      summary: "the same command as 'view'",
+      page: "",
+      spec: doc_view_spec(),
+      positional: "SLUG",
+      run: doc_view,
+    },
+    flags.Command {
+      name: "read",
+      summary: "the same command as 'view'",
       page: "",
       spec: doc_view_spec(),
       positional: "SLUG",

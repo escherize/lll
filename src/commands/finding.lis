@@ -49,6 +49,22 @@ pub fn finding_commands() -> Slice<flags.Command> {
       run: doc_view,
     },
     flags.Command {
+      name: "new",
+      summary: "file a finding: 'lll doc new -k finding' with the kind already set",
+      page: "",
+      spec: doc_new_spec(),
+      positional: "",
+      run: finding_new,
+    },
+    flags.Command {
+      name: "create",
+      summary: "the same command as 'new'",
+      page: "",
+      spec: doc_new_spec(),
+      positional: "",
+      run: finding_new,
+    },
+    flags.Command {
       name: "list",
       summary: "every finding, or one area's, one line each (slug, area, title)",
       page: "",
@@ -182,4 +198,17 @@ fn print_finding_lines(docs: Slice<models.Doc>) {
     if area == "" { area = "-" }
     fmt.Println(f"{d.slug}\t{area}\t{d.title}")
   }
+}
+
+/// `lll finding new ...` is `lll doc new -k finding ...`: five of thirty
+/// fleet agents typed the former, since the noun they were working in was
+/// finding. The kind is appended unless the caller spelled one.
+fn finding_new(args: Slice<string>) -> Result<(), string> {
+  let mut has_kind = false
+  for a in args {
+    if a == "-k" || a == "--kind" || a.starts_with("-k=") || a.starts_with("--kind=") { has_kind = true }
+  }
+  let mut forwarded = args
+  if !has_kind { forwarded = forwarded.append("-k").append("finding") }
+  doc_new(forwarded)
 }
