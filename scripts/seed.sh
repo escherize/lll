@@ -48,6 +48,14 @@ E2E_LOGS="$SEED_LOG"
 # a seed run is precisely the kind of thing that would do it again.
 export LLL_TEAM=DEMO
 export LLL_ME=demo
+# The demo owns its superuser. `lll up` upserts whatever LLL_ADMIN_* name, and
+# a developer shell exporting the PRODUCTION pair made this script boot a
+# throwaway board with the prod admin, then die at pb_member_token, which
+# still logs in as admin@local.dev. Same pin e2e_begin carries; a script that
+# boots `lll up` must own both halves of that pair or it is at the mercy of
+# whatever the shell happens to export.
+export LLL_ADMIN_EMAIL=admin@local.dev
+export LLL_ADMIN_PASSWORD=admin-local-123
 
 # A scratch HOME, for the same reason the e2e suites use one (lib.sh
 # e2e_pin_home), and it is not optional here - it is the difference between
