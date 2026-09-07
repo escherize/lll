@@ -1,5 +1,6 @@
 import "go:encoding/json"
 import "go:fmt"
+import "go:os"
 import "go:strings"
 import "go:time"
 
@@ -84,6 +85,7 @@ pub fn watch(args: Slice<string>) -> Result<(), string> {
   )
   let topic = realtime.topic_with_options("issues", filter, "team,assignee")?
   let ch = realtime.subscribe(pb.base_url()?, [topic], None)?
+  fmt.Fprintln(os.Stderr, "watch: ready (query subscription accepted)")
 
   // Last-seen records, keyed by record id, for rendering updates as field
   // transitions. Seeded lazily: the first sight of a record is a plain
@@ -151,6 +153,10 @@ diffing against the last event seen for that record; a record's first update
 prints as 'changed'. Note: an update that moves a record out of the filter
 (e.g. state todo -> done under --state todo) emits nothing — PocketBase only
 delivers events for records matching the filter after the change.
+
+Startup is acknowledged on stderr as 'watch: ready' only after the server
+accepts the subscription. With --json, stdout contains only NDJSON events;
+connection loss and reconnection messages also go to stderr.
 " + flags.section(watch_spec())
   )
 }
@@ -181,7 +187,8 @@ pub fn issue_watch(args: Slice<string>) -> Result<(), string> {
   // No refresh hook: watch rides the operator's LLL_TOKEN and cannot
   // re-mint anything; the reconnect loop retries loudly instead.
   let ch = realtime.subscribe(pb.base_url()?, [issue_topic, comments_topic], None)?
-  fmt.Println(f"Watching {key}: {issue.title}")
+  fmt.Fprintln(os.Stderr, f"watch: ready for {key} (issue and comment subscriptions accepted)")
+  if !json_mode { fmt.Println(f"Watching {key}: {issue.title}") }
 
   // The fetched issue seeds the diff, so the very first update already
   // renders as a transition.
@@ -192,6 +199,13 @@ pub fn issue_watch(args: Slice<string>) -> Result<(), string> {
     }
     if json_mode {
       fmt.Println(ndjson_line(ev))
+      if ev.topic != "comments" {
+        let mut event = IssueEvent { .. }
+        if let Err(e) = json.Unmarshal(ev.data.bytes(), &event) {
+          return Err(f"decoding realtime event: {e}")
+        }
+        if event.action == "delete" { return Ok(()) }
+      }
       continue
     }
     let stamp = time.Now().Format("15:04:05")

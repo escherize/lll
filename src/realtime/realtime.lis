@@ -173,29 +173,27 @@ fn reconnect(
   refresh: Option<fn() -> Result<string, string>>,
   ch: Channel<Event>,
 ) {
-  fmt.Println("realtime: PocketBase stream lost — reconnecting")
+  fmt.Fprintln(os.Stderr, "realtime: PocketBase stream lost — reconnecting")
   let mut last_err = ""
   loop {
     time.Sleep(time.Second)
     match connect(base_url, topics) {
       Ok(r) => {
-        if last_err != "" {
-          fmt.Println("realtime: reconnected to PocketBase")
-          last_err = ""
-        }
+        fmt.Fprintln(os.Stderr, "realtime: reconnected to PocketBase (subscriptions accepted)")
+        last_err = ""
         pump(r, ch)
-        fmt.Println("realtime: PocketBase stream lost — reconnecting")
+        fmt.Fprintln(os.Stderr, "realtime: PocketBase stream lost — reconnecting")
       },
       Err(e) => {
         if e != last_err {
-          fmt.Println(f"realtime: reconnect failed: {e}")
+          fmt.Fprintln(os.Stderr, f"realtime: reconnect failed: {e}")
           last_err = e
         }
         if auth_failure(e) {
           if let Some(mint) = refresh {
             if let Ok(tok) = mint() {
               let _ = os.Setenv("LLL_TOKEN", tok)
-              fmt.Println(
+              fmt.Fprintln(os.Stderr,
                 "realtime: re-minted the PocketBase token after an auth failure",
               )
             }

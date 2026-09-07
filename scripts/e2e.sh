@@ -952,6 +952,7 @@ WATCH_ALL="$DATA_DIR/watch_all.txt"    # lll watch (team-scoped, no state filter
 WATCH_TODO="$DATA_DIR/watch_todo.txt"  # lll watch --state todo
 WATCH_JSON="$DATA_DIR/watch_json.txt"  # lll watch --json
 WATCH_ISSUE="$DATA_DIR/watch_issue.txt"
+WATCH_ISSUE_JSON="$DATA_DIR/watch_issue_json.txt"
 
 wait_for_line() { # file needle label [tries, at 0.1s each]
   tries="${4:-100}"
@@ -963,13 +964,15 @@ wait_for_line() { # file needle label [tries, at 0.1s each]
 $(cat "$1" 2>/dev/null)"
 }
 
-LLL_URL=$URL LLL_TEAM=ENG "$LIN" watch > "$WATCH_ALL" &
+LLL_URL=$URL LLL_TEAM=ENG "$LIN" watch > "$WATCH_ALL" 2> "$WATCH_ALL.err" &
 WATCH_PIDS="$WATCH_PIDS $!"
-LLL_URL=$URL LLL_TEAM=ENG "$LIN" watch --state todo > "$WATCH_TODO" &
+LLL_URL=$URL LLL_TEAM=ENG "$LIN" watch --state todo > "$WATCH_TODO" 2> "$WATCH_TODO.err" &
 WATCH_PIDS="$WATCH_PIDS $!"
-LLL_URL=$URL LLL_TEAM=ENG "$LIN" watch --json > "$WATCH_JSON" &
+LLL_URL=$URL LLL_TEAM=ENG "$LIN" watch --json > "$WATCH_JSON" 2> "$WATCH_JSON.err" &
 WATCH_PIDS="$WATCH_PIDS $!"
-sleep 2 # let the subscriptions establish
+for stream in "$WATCH_ALL" "$WATCH_TODO" "$WATCH_JSON"; do
+  wait_for_line "$stream.err" 'watch: ready' 'query subscription acknowledgment'
+done
 
 # matching create (lll issue create starts issues in todo)
 out=$(LLL_URL=$URL LLL_TEAM=ENG "$LIN" issue create -t "Watched todo issue")
@@ -1003,6 +1006,11 @@ LLL_URL=$URL "$LIN" issue watch "$WKEY" > "$WATCH_ISSUE" &
 WATCH_PIDS="$WATCH_PIDS $!"
 # the header prints once the subscription is active
 wait_for_line "$WATCH_ISSUE" "Watching $WKEY" "issue watch header"
+LLL_URL=$URL "$LIN" issue watch "$WKEY" --json > "$WATCH_ISSUE_JSON" 2> "$WATCH_ISSUE_JSON.err" &
+ISSUE_JSON_PID=$!
+WATCH_PIDS="$WATCH_PIDS $ISSUE_JSON_PID"
+wait_for_line "$WATCH_ISSUE_JSON.err" 'watch: ready' 'issue JSON subscription acknowledgment'
+[ ! -s "$WATCH_ISSUE_JSON" ] || fail 'issue JSON stream printed a startup banner'
 
 out=$(LLL_URL=$URL "$LIN" issue update "$WKEY" --state in-review --assignee bryan)
 assert_contains "$out" "Updated $WKEY" "issue watch update output"
@@ -1013,6 +1021,7 @@ printf 'url = "%s"\nteam = "ENG"\nme = "bryan"\n' "$URL" > "$WORK/.lll.toml"
 out=$(cd "$WORK" && env -u LLL_URL -u LLL_TEAM HOME="$FAKEHOME" "$LLL_ABS" issue comment "$WKEY" -b "Watching closely")
 assert_contains "$out" "Commented on $WKEY" "watched comment output"
 wait_for_line "$WATCH_ISSUE" "comment by bryan: Watching closely" "issue watch sees the comment"
+wait_for_line "$WATCH_ISSUE_JSON" 'Watching closely' 'issue JSON stream sees the comment'
 
 # --- --json emits one jq-parseable object per line ---
 wait_for_line "$WATCH_JSON" "Watched todo issue" "watch --json captured the create"
@@ -1038,15 +1047,31 @@ for i in $(seq 1 20); do
 done
 wait_for_line "$WATCH_ALL" "Back after restart" "watch survives a PB restart" 10
 wait_for_line "$WATCH_ISSUE" "Back after restart" "issue watch survives a PB restart" 100
+wait_for_line "$WATCH_ISSUE_JSON" "Back after restart" "issue JSON watch survives a PB restart" 100
+wait_for_line "$WATCH_JSON.err" 'reconnected to PocketBase' 'query stream acknowledges reconnection'
 
 # --- delete events; issue watch exits after its issue is deleted ---
 out=$(LLL_URL=$URL "$LIN" issue delete "$WKEY" --force)
 assert_contains "$out" "Deleted $WKEY" "watched delete output"
 wait_for_line "$WATCH_ALL" "$WKEY deleted" "watch sees the delete"
 wait_for_line "$WATCH_ISSUE" "$WKEY deleted" "issue watch sees the delete"
+wait_for_line "$WATCH_ISSUE_JSON" '"action":"delete"' 'issue JSON watch sees the delete'
+for _ in $(seq 1 50); do
+  kill -0 "$ISSUE_JSON_PID" 2>/dev/null || break
+  sleep 0.1
+done
+kill -0 "$ISSUE_JSON_PID" 2>/dev/null && fail 'issue JSON watch remained alive after deletion'
+wait "$ISSUE_JSON_PID" || fail 'issue JSON watch did not exit successfully after deletion'
 
-kill $WATCH_PIDS 2>/dev/null || true
+e2e_reap $WATCH_PIDS
 WATCH_PIDS=""
+python3 - "$WATCH_JSON" "$WATCH_ISSUE_JSON" <<'PY'
+import json, pathlib, sys
+for name in sys.argv[1:]:
+    rows = [json.loads(line) for line in pathlib.Path(name).read_text().splitlines()]
+    assert rows and all(r['topic'] and r['action'] and r['record']['id'] for r in rows)
+    assert rows[-1]['action'] == 'delete', name
+PY
 
 # --- completions: emit + parse smoke for each shell ---
 "$LIN" completions bash > "$DATA_DIR/comp.bash"
@@ -2498,6 +2523,37 @@ run('label', 'delete', 'scope-label', '--force', '--team', 'SCB')
 run('project', 'delete', 'Scoped rename', '--force', '--team', 'SCB')
 assert before == [(p.exists(), p.read_bytes() if p.exists() else None) for p in paths]
 PY_SCOPE
+
+# Concurrent callers must not read the same maximum number before insertion.
+# Exercise both CLI and raw API callers; explicit duplicate-number rejection
+# is covered earlier, so the unique constraint remains part of the contract.
+python3 - "$LLL_ABS" <<'PY_RACE'
+import concurrent.futures, json, os, subprocess, sys, urllib.request
+binary = sys.argv[1]
+def cli(*args):
+    result = subprocess.run([binary, *args], text=True, capture_output=True, timeout=30)
+    assert result.returncode == 0, (args, result.stderr)
+    return result.stdout
+cli('team', 'create', '-k', 'RACE', '-n', 'Concurrent allocation')
+def create_cli(index):
+    return json.loads(cli('issue', 'create', f'Parallel CLI {index}', '--team', 'RACE', '--json'))
+with concurrent.futures.ThreadPoolExecutor(max_workers=8) as pool:
+    created = list(pool.map(create_cli, range(32)))
+team_id = created[0]['team']
+def create_api(index):
+    request = urllib.request.Request(os.environ['LLL_URL']+'/api/collections/issues/records',
+        data=json.dumps({'team': team_id, 'title': f'Parallel API {index}', 'state': 'todo'}).encode(),
+        headers={'Authorization': 'Bearer '+os.environ['LLL_TOKEN'], 'Content-Type': 'application/json'})
+    with urllib.request.urlopen(request, timeout=30) as response:
+        return json.load(response)
+with concurrent.futures.ThreadPoolExecutor(max_workers=8) as pool:
+    created += list(pool.map(create_api, range(8)))
+assert len({row['id'] for row in created}) == 40
+assert sorted(row['number'] for row in created) == list(range(1, 41))
+final = json.loads(cli('issue', 'list', '--team', 'RACE', '--limit', '100', '--json'))['items']
+assert {row['id'] for row in final} == {row['id'] for row in created}
+print('Concurrent CLI/API allocation: 40 successful creates, 40 unique IDs and numbers')
+PY_RACE
 
 # --- web board (own ephemeral PB; see e2e_web.sh) ---
 HOME="$E2E_REAL_HOME" scripts/e2e_web.sh

@@ -478,7 +478,9 @@ Usage:
   lll issue comment [KEY-123] [-b \"body\"]         add a comment (authored by 'me' in
                                                   .lll.toml); without -b, list comments
   lll issue watch [KEY-123] [--json]              stream live events for the issue and
-                                                  its comments until interrupted
+                                                  its comments until interrupted or deleted;
+                                                  stderr says 'watch: ready' after subscribing;
+                                                  --json keeps stdout as NDJSON events only
   lll issue url [KEY-123]                         print the issue's web page URL
   lll issue id [KEY-123]                          print the issue's KEY-123 identifier
   lll issue title [KEY-123]                       print the issue's title

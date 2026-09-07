@@ -55,10 +55,18 @@ func Serve(dataDir, addr, adminEmail, adminPassword string) error {
 	})
 
 	app.OnRecordCreate("issues").BindFunc(func(e *core.RecordEvent) error {
-		if err := issueDefaults(e.App, e.Record); err != nil {
-			return err
-		}
-		return e.Next()
+		// Keep the max-number read and record insertion on PocketBase's
+		// serialized writer connection. Reading before that transaction lets
+		// concurrent requests choose the same otherwise-valid number.
+		originalApp := e.App
+		defer func() { e.App = originalApp }()
+		return originalApp.RunInTransaction(func(txApp core.App) error {
+			e.App = txApp
+			if err := issueDefaults(txApp, e.Record); err != nil {
+				return err
+			}
+			return e.Next()
+		})
 	})
 
 	migratecmd.MustRegister(app, app.RootCmd, migratecmd.Config{
