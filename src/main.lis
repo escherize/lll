@@ -117,6 +117,13 @@ layer, each supplying the keys it names — 'lll config --list' shows which won)
 /// An issue verb typed as a noun ('lll comment ...') is the most common
 /// unknown command (three of thirty fleet agents); name where it lives.
 fn unknown_command(noun: string) -> string {
+  // 'lll issues' for 'lll issue': the plural is the natural guess.
+  let singular = strings.TrimSuffix(noun, "s")
+  for n in ["issue", "team", "member", "project", "label", "doc", "finding", "token"] {
+    if singular == n && noun != n {
+      return f"unknown command: '{noun}' — did you mean 'lll {n}'? (see 'lll {n} -h')"
+    }
+  }
   for c in commands.issue_commands() {
     if c.name == noun {
       return f"unknown command: '{noun}' — it is an issue verb: 'lll issue {noun} ...' (see 'lll issue {noun} -h')"

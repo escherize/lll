@@ -1541,6 +1541,12 @@ set -e
 [ "$rc" -ne 0 ] || fail "lll comment: expected nonzero exit"
 assert_contains "$out" "lll issue comment" "misplaced issue verb names its noun"
 
+# the plural of a noun is pointed at the noun
+set +e
+out=$("$LIN" issues list 2>&1)
+set -e
+assert_contains "$out" "did you mean 'lll issue'" "plural noun names the singular"
+
 # a sub-verb where the ID goes is told the ID comes first (fleet task 4: 3/30)
 set +e
 out=$(LLL_URL=$URL "$LIN" issue comment add ENG-1 -b "hi" 2>&1)
