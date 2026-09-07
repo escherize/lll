@@ -213,6 +213,17 @@ impl Parsed {
     }
     f
   }
+
+  /// The i-th positional argument (0-based), "" when there is none. Two
+  /// verbs take two: `issue link KEY SLUG`, and `issue comment KEY [body]`
+  /// since TASK-309's fleet showed a third of first-time agents type the body
+  /// bare, the way `create` takes a bare title.
+  pub fn nth(self, i: int) -> string {
+    let Some(v) = self.pos.get(i) else {
+      return ""
+    }
+    v
+  }
 }
 
 /// One verb of a noun, as a value (TASK-307). Dispatch, the noun's help

@@ -319,3 +319,22 @@ fn a_help_spelling_inside_a_value_is_not_a_help_request() {
   let assert Err(msg) = parse(bare_spec(), argv(["--state", "-h"]), 3, false, "u")
   assert msg.starts_with(help_marker())
 }
+
+// TASK-309, fleet run 4: ten of thirty agents typed `lll issue comment DEMO-1
+// "the body"` and were refused for a bare word, while create takes a bare
+// title and member add a bare name. parse_n admits N positionals; this pins
+// that two of them survive a flag between them and keep their order.
+
+#[test]
+fn parse_n_keeps_two_positionals_in_order_around_a_flag() {
+  let assert Ok(p) = parse_n(spec(), argv(["DEMO-1", "--json", "the body"]), 3, 2, "")
+  assert p.first() == "DEMO-1"
+  assert p.nth(1) == "the body"
+  assert p.given("--json")
+  // A third bare word is still refused, so a stray token cannot become a body.
+  let assert Err(msg) = parse_n(spec(), argv(["DEMO-1", "the body", "extra"]), 3, 2, "")
+  assert msg == "unexpected argument: 'extra'"
+  // Absent second positional reads as empty, not as an error.
+  let assert Ok(q) = parse_n(spec(), argv(["DEMO-1"]), 3, 2, "")
+  assert q.nth(1) == ""
+}

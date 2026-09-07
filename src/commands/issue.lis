@@ -428,7 +428,7 @@ pub fn issue_commands() -> Slice<flags.Command> {
       summary: "add a comment (authored by 'me' in .lll.toml); without -b, list comments",
       page: "",
       spec: issue_comment_spec(),
-      positional: "[KEY-123]",
+      positional: "[KEY-123] [\"body\"]",
       run: comment,
     },
     flags.Command {
@@ -1143,12 +1143,23 @@ fn delete_issue(args: Slice<string>) -> Result<(), string> {
 
 fn comment(args: Slice<string>) -> Result<(), string> {
   let spec = issue_comment_spec()
-  let usage = flags.usage("lll issue comment", spec, "[KEY-123]")
-  let p = flags.parse(spec, args, 3, true, "")?
+  let usage = flags.usage("lll issue comment", spec, "[KEY-123] [\"body\"]")
+  let p = flags.parse_n(spec, args, 3, 2, "")?
   let id = p.first()
+  // A bare second word is the body, as `create` takes a bare title and
+  // `member add` a bare name. Ten of thirty first-time agents in one fleet run
+  // (TASK-309) typed `issue comment DEMO-1 "text"` and were refused for it. -b
+  // stays the documented spelling and wins when both are given; `-b -` still
+  // reads stdin, which a positional cannot express.
   let mut body = ""
-  if p.given("-b") { body = value_or_stdin(p.one("-b"), "-b")? }
-  let body_set = p.given("-b")
+  let mut body_set = false
+  if p.given("-b") {
+    body = value_or_stdin(p.one("-b"), "-b")?
+    body_set = true
+  } else if p.nth(1) != "" {
+    body = p.nth(1)
+    body_set = true
+  }
 
   let resolved = resolve_id(id, usage)?
   let issue = fetch_issue(resolved)?
