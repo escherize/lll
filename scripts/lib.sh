@@ -190,7 +190,16 @@ e2e_begin() {
   # (LLL_ADMIN_*, then LLL_ME) is the class; this closes it.
   unset LLL_ME LLL_TOKEN LLL_SORT LLL_WEB_URL LLL_BOARD_TOKEN LLL_BIND LLL_WORK_HOST
   mkdir -p "$E2E_HOME/.config/lll"
-  if [ -f .lll.toml ]; then
+  # TASK-311: e2e.sh runs e2e_web.sh and e2e_up.sh as children in the SAME
+  # checkout while it holds the moved-aside .lll.toml. A child that ran this
+  # block saw no file, left RESTORE_TOML unset, and its e2e_end then removed
+  # a .lll.toml on the assumption none existed at start - deleting the TRACKED
+  # copy once the parent's restore raced it. The parent exports the marker;
+  # a child that sees it does not touch the file at all.
+  if [ "${E2E_TOML_HELD:-}" = 1 ]; then
+    RESTORE_TOML=skip
+  elif [ -f .lll.toml ]; then
+    export E2E_TOML_HELD=1
     # TASK-143: the move alone is not the report. A stray file written by an
     # earlier demo (`lll up` with no configured team writes .lll.toml into the
     # CURRENT directory) once made the gate die at 'FAIL: seeding teams' with a
@@ -334,8 +343,16 @@ e2e_end() {
     echo "e2e:   $(tr '\n' ' ' < .lll.toml)" >&2
     echo "e2e:   the run's saved copy is restored over it; see TASK-143/TASK-115" >&2
   fi
-  if [ "${RESTORE_TOML:-}" != 1 ]; then
-    rm -f .lll.toml
+  if [ "${RESTORE_TOML:-}" = skip ]; then
+    : # a parent holds the file; nothing here to restore or remove
+  elif [ "${RESTORE_TOML:-}" != 1 ]; then
+    # No file at start. One present now was WRITTEN during the run; report it
+    # and leave it - `git status` will show it, and a silent rm is how a
+    # tracked file went missing (TASK-311).
+    if [ -f .lll.toml ]; then
+      echo "e2e: a .lll.toml appeared at the repo root during this run and was left in place:" >&2
+      echo "e2e:   $(tr '\n' ' ' < .lll.toml)" >&2
+    fi
   elif [ -f "$DATA_DIR/.lll.toml.saved" ]; then
     mv -f "$DATA_DIR/.lll.toml.saved" .lll.toml
   else
