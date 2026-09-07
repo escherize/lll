@@ -736,18 +736,31 @@ out=$(LLL_URL=$URL "$LIN" issue comment ENG-7)
 assert_contains "$out" "bryan (just now)" "comment list author"
 assert_contains "$out" "Looks good to me" "comment list body"
 
-# --- authorless comments: me unset, and me naming no member ---
-out=$(LLL_URL=$URL "$LIN" issue comment ENG-7 -b "Anonymous note")
+# --- authorless comments: me unset is accepted; me naming NO member is refused ---
+# A genuinely unset 'me' needs a home with no me key: the suite's own
+# E2E_HOME carries me = "e2e" from the boot, which authored this comment for
+# years while the assertion below was satisfied by a DIFFERENT comment's line.
+NOME_HOME="$DATA_DIR/nome_home"; mkdir -p "$NOME_HOME/.config/lll"
+out=$(env -u LLL_ME HOME="$NOME_HOME" LLL_URL=$URL LLL_TEAM=ENG "$LIN" issue comment ENG-7 -b "Anonymous note")
 assert_contains "$out" "Commented on ENG-7" "authorless comment (me unset) accepted"
 
+# TASK-309, fleet run 1: thirty agents each set me = "shard-NN", no such
+# members existed, and every one of their comments landed as "anon" with no
+# warning. The one shard that noticed wrote "the me field correctly identifies
+# the author under the hood" - it did not; the silence had told it so. This
+# block used to PIN that silence as accepted behaviour. A me that names nobody
+# is now an error naming the fix, and the comment must not land.
 printf 'url = "%s"\nteam = "ENG"\nme = "ghost"\n' "$URL" > "$WORK/.lll.toml"
-out=$(cd "$WORK" && env -u LLL_URL -u LLL_TEAM HOME="$FAKEHOME" "$LLL_ABS" issue comment ENG-7 -b "Ghost note")
-assert_contains "$out" "Commented on ENG-7" "authorless comment (me unmatched) accepted"
+if out=$(cd "$WORK" && env -u LLL_URL -u LLL_TEAM HOME="$FAKEHOME" "$LLL_ABS" issue comment ENG-7 -b "Ghost note" 2>&1); then
+  fail "a 'me' naming no member should refuse, got: $out"
+fi
+assert_contains "$out" "no such member exists" "unmatched me is refused, not silently anonymous"
+assert_contains "$out" "lll member add" "the refusal names the fix"
 
 out=$(LLL_URL=$URL "$LIN" issue comment ENG-7)
-assert_contains "$out" "anon (just now)" "authorless comments render as anon"
+assert_contains "$out" "anon (just now)" "an unset-me comment renders as anon"
 assert_contains "$out" "Anonymous note" "authorless body listed"
-assert_contains "$out" "Ghost note" "unmatched-me body listed"
+assert_not_contains "$out" "Ghost note" "the refused comment did not land"
 
 # --- comment ID inference from the git branch ---
 git -C "$REPO" switch -q eng-6-roundtrip-issue
@@ -1362,12 +1375,15 @@ class H(http.server.BaseHTTPRequestHandler):
         with open(rec, "a") as f:
             f.write((self.headers.get("Authorization") or "<none>") + "\n")
         self._json(b'{"items":[],"totalItems":0,"page":1,"perPage":200}')
-    # TASK-247: an empty list makes the client probe auth-refresh, to tell a
-    # genuinely empty board apart from a token the server has stopped
-    # accepting. This stub stands in for PocketBase, so it answers that too —
-    # otherwise the probe fails and the empty list reads as a dead token.
+    # TASK-247/309: an empty list makes the client check whether its token
+    # is still accepted, to tell a genuinely empty board apart from a dead
+    # token. The probe is a GET of the token's own record by the id in its
+    # JWT (auth-refresh was the old probe; it refuses live impersonation
+    # tokens, which is what the fleet found). This stub's do_GET answers 200
+    # to every path, so the probe passes here and the empty list stays an
+    # empty list. do_POST is kept only so a stray POST is not a stack trace.
     def do_POST(self):
-        self._json(b'{"token":"spy-token-123","record":{"id":"spy","name":"spy"}}')
+        self._json(b'{}')
     def log_message(self, *a): pass
 socketserver.TCPServer(("127.0.0.1", port), H).serve_forever()
 SPY_EOF

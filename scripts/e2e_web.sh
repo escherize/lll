@@ -49,6 +49,15 @@ BROWSER_SESSION="e2e-web-$$"
 # PocketBase is embedded in lll; one `lll up` is both the database and the
 # board this suite exercises. Built here because it has to exist first.
 lis build >/dev/null
+
+# TASK-227 (the half of TASK-187 this suite never got): pin HOME for the rest
+# of the run, AFTER lis build so the lis/go/mise caches under the real HOME
+# stay warm. Without it every plain CLI call here read the developer's own
+# ~/.config/lll/lll.toml - which on this machine names a member that does not
+# exist in the scratch database. That was silent while an unmatched 'me' was
+# accepted as anon; TASK-309 made it a refusal and this suite died at its
+# first comment, naming the developer's own identity.
+e2e_pin_home
 LIN=target/.lisette/bin/lll
 
 # USER is pinned: a first boot seeds a member named after it (task-31), and

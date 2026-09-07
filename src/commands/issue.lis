@@ -1152,11 +1152,20 @@ fn comment(args: Slice<string>) -> Result<(), string> {
   }
   if body == "" { return Err(f"-b cannot be empty\nusage: {usage}") }
 
-  // Author is the member named by 'me' in config; unset or unmatched 'me'
-  // makes the comment authorless (honor system, no auth).
+  // Author is the member named by 'me' in config. Unset 'me' makes the
+  // comment authorless (honor system). A 'me' that names NOBODY is refused:
+  // the first fleet run (TASK-309) had thirty agents each set me = "shard-NN",
+  // and every one of their comments went out as "anon" with no warning, which
+  // defeats the point of a comment as a record of who learned what. The four
+  // sibling verbs already say this; comment was the one that stayed quiet.
   let mut author = ""
   let me = config.load()?.me
-  if me != "" { if let Some(m) = find_member(me)? { author = m.id } }
+  if me != "" {
+    let Some(m) = find_member(me)? else {
+      return Err(f"'me' is set to '{me}' but no such member exists — see 'lll member add', or 'lll config set me <name>' to change who you are")
+    }
+    author = m.id
+  }
 
   let new_comment = models.NewComment { issue: issue.id, author, body }
   let payload = match json.Marshal(new_comment) {

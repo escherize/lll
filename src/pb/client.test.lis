@@ -74,3 +74,28 @@ fn only_404s_at_an_api_path_are_suspected() {
   assert wrong_port_hint("GET https://host/", 404, "404 page not found") == ""
   assert wrong_port_hint("GET https://host/api/health", 500, "boom") == ""
 }
+
+// TASK-309: the stale-token probe reads the token's own id out of the JWT and
+// fetches that record, because auth-refresh refuses live impersonation
+// tokens and a filtered list answers 200 to dead ones. token_subject is the
+// pure half; it must read a real payload and must NOT accuse what it cannot
+// read.
+
+#[test]
+fn token_subject_reads_the_id_from_a_pocketbase_auth_jwt() {
+  // header.payload.sig, payload = {"collectionId":"pbc_3572739349","exp":1,"id":"abc123def456ghi","refreshable":false,"type":"auth"}
+  let tok = "eyJhbGciOiJIUzI1NiJ9.eyJjb2xsZWN0aW9uSWQiOiJwYmNfMzU3MjczOTM0OSIsImV4cCI6MSwiaWQiOiJhYmMxMjNkZWY0NTZnaGkiLCJyZWZyZXNoYWJsZSI6ZmFsc2UsInR5cGUiOiJhdXRoIn0.sig"
+  let assert Some(id) = token_subject(tok)
+  assert id == "abc123def456ghi"
+}
+
+#[test]
+fn token_subject_declines_what_it_cannot_read() {
+  // Not three segments; a payload that is not JSON; a payload with no id.
+  assert token_subject("not-a-jwt").is_none()
+  assert token_subject("a.b").is_none()
+  assert token_subject("h.!!!notbase64!!!.s").is_none()
+  // {"exp":1} - valid JSON, no id: still None, so no record can be fetched
+  // and the token is treated as valid rather than accused.
+  assert token_subject("h.eyJleHAiOjF9.s").is_none()
+}

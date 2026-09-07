@@ -180,6 +180,15 @@ e2e_begin() {
   # lib.sh sends, so the two cannot disagree.
   export LLL_ADMIN_EMAIL=admin@local.dev
   export LLL_ADMIN_PASSWORD=admin-local-123
+  # And NOT its identity: env beats every file, so exporting LLL_ME here
+  # would override the home-file 'me' that the precedence assertions test.
+  # The developer's own LLL_ME is the leak (it reached e2e_web.sh's plain CLI
+  # calls, named a member absent from the scratch database, and after TASK-309
+  # made an unmatched 'me' a refusal the suite died at its first comment). The
+  # suite must start from a KNOWN environment, not a pinned-one-var-at-a-time
+  # one: unset every LLL_* it does not set itself. Three leaks in one session
+  # (LLL_ADMIN_*, then LLL_ME) is the class; this closes it.
+  unset LLL_ME LLL_TOKEN LLL_SORT LLL_WEB_URL LLL_BOARD_TOKEN LLL_BIND LLL_WORK_HOST
   mkdir -p "$E2E_HOME/.config/lll"
   if [ -f .lll.toml ]; then
     # TASK-143: the move alone is not the report. A stray file written by an
