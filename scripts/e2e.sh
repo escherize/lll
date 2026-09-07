@@ -1723,6 +1723,14 @@ out=$(env $E LLL_ME=bryan "$LIN" issue claim "$CKEY")
 assert_contains "$out" "Claimed $CKEY for bryan (already yours" "re-claim by the holder succeeds and says so"
 got=$(env $E "$LIN" issue view "$CKEY" --json | jq -r '.expand.assignee.name')
 [ "$got" = "bryan" ] || fail "re-claim: assignee should be bryan, got '$got'"
+# --assignee none under a claim releases the claim too: held-but-unassigned
+# is not a state (fleet replay, task 9)
+out=$(env $E "$LIN" issue update "$CKEY" --assignee none)
+assert_contains "$out" "released bryan's claim" "clearing the assignee under a claim releases it and says so"
+out=$(env $E "$LIN" issue view "$CKEY")
+assert_not_contains "$out" "Claimed:   bryan" "the claim is gone with the assignee"
+out=$(env $E LLL_ME=bryan "$LIN" issue claim "$CKEY")
+assert_contains "$out" "Claimed $CKEY for bryan" "and it can be claimed afresh"
 out=$(env $E "$LIN" issue view "$CKEY")
 assert_contains "$out" "Assignee:  bryan" "a refused claim leaves the assignee alone"
 assert_contains "$out" "Claimed:   bryan" "a refused claim leaves the holder alone"

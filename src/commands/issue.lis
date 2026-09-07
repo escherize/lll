@@ -970,7 +970,19 @@ fn update(args: Slice<string>) -> Result<(), string> {
     f"/api/collections/issues/records/{issue.id}",
     "{" + strings.Join(fields, ",") + "}",
   )?
-  fmt.Println(f"Updated {issue.expand.team.key}-{issue.number}")
+  // Clearing the assignee under a claim used to leave "Claimed: NAME" with
+  // nobody assigned: held but unowned, a state the fleet replay found three
+  // agents reading as "already mine". The claim goes with the assignee.
+  let mut released = ""
+  if assignee_name == "none" {
+    if let Some(held) = fetch_claim(issue.id)? {
+      let _ = pb.delete(f"/api/collections/claims/records/{held.id}")?
+      let mut name = held.expand.member.name
+      if name == "" { name = "someone" }
+      released = f" (released {name}'s claim)"
+    }
+  }
+  fmt.Println(f"Updated {issue.expand.team.key}-{issue.number}{released}")
   Ok(())
 }
 
