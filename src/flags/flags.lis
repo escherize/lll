@@ -291,3 +291,45 @@ pub fn entity_name(p: Parsed, flag: string, usage: string) -> Result<string, str
   if strings.TrimSpace(value) == "" { return Err(f"a name is required\nusage: {usage}") }
   Ok(value)
 }
+
+/// Team selection is shared by every team-scoped command; existing create
+/// metadata keeps its spelling while other verbs gain the same selector.
+pub fn with_team(spec: Slice<Flag>) -> Slice<Flag> {
+  if spec.find(|f| f.name == "--team").is_some() { return spec }
+  spec.append(Flag { name: "--team", value: true, hint: "KEY", help: "team for this invocation (overrides LLL_TEAM; never writes config)", .. })
+}
+
+/// Strip only actual --team options, preserving bodies and other flag values
+/// literally. Return the selection separately so parsing has no side effects.
+pub fn extract_team(args: Slice<string>, start: int, spec: Slice<Flag>) -> Result<(Slice<string>, Option<string>), string> {
+  let mut cleaned = args[..start].clone()
+  let mut team: Option<string> = None
+  let mut i = start
+  while let Some(arg) = args.get(i) {
+    if arg == "--" {
+      for rest in args[i..] { cleaned = cleaned.append(rest) }
+      break
+    }
+    if arg == "--team" || arg.starts_with("--team=") {
+      let value = if arg == "--team" {
+        let Some(value) = args.get(i + 1) else { return Err("--team requires a team key") }
+        i += 1
+        value
+      } else {
+        strings.TrimPrefix(arg, "--team=")
+      }
+      if strings.TrimSpace(value) == "" { return Err("--team requires a nonempty team key") }
+      team = Some(value)
+    } else {
+      cleaned = cleaned.append(arg)
+      if spec.find(|f| f.value && (f.name == arg || (f.alias != "" && f.alias == arg))).is_some() {
+        if let Some(value) = args.get(i + 1) {
+          cleaned = cleaned.append(value)
+          i += 1
+        }
+      }
+    }
+    i += 1
+  }
+  Ok((cleaned, team))
+}

@@ -1,0 +1,24 @@
+import "go:os"
+import "flags"
+
+/// --team selects this process's default scope. No configuration file is
+/// rewritten, and explicit issue identifiers still resolve their own team.
+pub fn scoped_args(args: Slice<string>) -> Result<Slice<string>, string> {
+  let noun = args.get(1).unwrap_or("")
+  let verb = args.get(2).unwrap_or("")
+  let (start, spec) = match noun {
+    "issue" => (3, issue_verb_spec(verb)),
+    "project" => (3, project_verb_spec(verb)),
+    "label" => (3, label_verb_spec(verb)),
+    "doc" => (3, doc_verb_spec(verb)),
+    "finding" => (3, finding_verb_spec(verb)),
+    "watch" => (2, watch_verb_spec("")),
+    _ => return Ok(args),
+  }
+  if args.length() < start { return Ok(args) }
+  let (cleaned, team) = flags.extract_team(args, start, spec)?
+  if let Some(key) = team {
+    if let Err(e) = os.Setenv("LLL_TEAM", key) { return Err(f"setting command team: {e}") }
+  }
+  Ok(cleaned)
+}

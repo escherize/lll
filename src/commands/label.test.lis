@@ -78,8 +78,8 @@ fn nonempty_keeps_a_real_name_verbatim() {
 /// is a verb the shell cannot complete (TASK-127's whole point).
 #[test]
 fn label_verb_spec_covers_the_new_verbs() {
-  assert strings.Join(flags.tokens(label_verb_spec("edit")), " ") == "-n -c"
-  assert strings.Join(flags.tokens(label_verb_spec("delete")), " ") == "--force"
+  assert strings.Join(flags.tokens(label_verb_spec("edit")), " ") == "-n -c --team"
+  assert strings.Join(flags.tokens(label_verb_spec("delete")), " ") == "--force --team"
 }
 
 /// --force takes no value: `lll label delete bug --force` must not swallow a

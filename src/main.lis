@@ -11,24 +11,44 @@ fn main() {
     return
   }
 
-  let result = match noun {
-    "issue" => commands.issue(os.Args),
-    "team" => commands.team(os.Args),
-    "member" => commands.member(os.Args),
-    "project" => commands.project(os.Args),
-    "label" => commands.label(os.Args),
-    "doc" => commands.doc(os.Args),
-    "finding" => commands.finding(os.Args),
-    "config" => commands.config_cmd(os.Args),
-    "login" => commands.login(os.Args),
-    "logout" => commands.logout(os.Args),
-    "whoami" => commands.whoami(os.Args),
-    "token" => commands.token(os.Args),
-    "attach" => commands.attach(os.Args),
-    "watch" => commands.watch(os.Args),
-    "up" => commands.up(os.Args),
-    "board" => commands.board(os.Args),
-    "completions" => commands.completions(os.Args),
+  let result = match commands.scoped_args(os.Args) {
+    Ok(args) => dispatch(noun, args),
+    Err(msg) => Err(msg),
+  }
+
+  if let Err(msg) = result {
+    // A help request travels as an error so it short-circuits the verb before
+    // it can act (flags.parse, TASK-237). It is not a failure: print it bare
+    // and exit 0, or `lll issue list -h` in a script reads as a broken command.
+    let marker = flags.help_marker()
+    if strings.HasPrefix(msg, marker) {
+      fmt.Println(strings.TrimPrefix(msg, marker))
+      return
+    }
+    fmt.Fprintln(os.Stderr, f"Error: {msg}")
+    os.Exit(1)
+  }
+}
+
+fn dispatch(noun: string, args: Slice<string>) -> Result<(), string> {
+  match noun {
+    "issue" => commands.issue(args),
+    "team" => commands.team(args),
+    "member" => commands.member(args),
+    "project" => commands.project(args),
+    "label" => commands.label(args),
+    "doc" => commands.doc(args),
+    "finding" => commands.finding(args),
+    "config" => commands.config_cmd(args),
+    "login" => commands.login(args),
+    "logout" => commands.logout(args),
+    "whoami" => commands.whoami(args),
+    "token" => commands.token(args),
+    "attach" => commands.attach(args),
+    "watch" => commands.watch(args),
+    "up" => commands.up(args),
+    "board" => commands.board(args),
+    "completions" => commands.completions(args),
     "--help" => {
       print_usage()
       Ok(())
@@ -54,19 +74,6 @@ fn main() {
       Ok(())
     },
     other => Err(f"unknown command: '{other}' (see 'lll --help')"),
-  }
-
-  if let Err(msg) = result {
-    // A help request travels as an error so it short-circuits the verb before
-    // it can act (flags.parse, TASK-237). It is not a failure: print it bare
-    // and exit 0, or `lll issue list -h` in a script reads as a broken command.
-    let marker = flags.help_marker()
-    if strings.HasPrefix(msg, marker) {
-      fmt.Println(strings.TrimPrefix(msg, marker))
-      return
-    }
-    fmt.Fprintln(os.Stderr, f"Error: {msg}")
-    os.Exit(1)
   }
 }
 
@@ -103,8 +110,12 @@ Usage:
   lll --version, -v       print the version
   lll --help              show this help
 
+Scoped commands (issue, project, label, doc, finding, watch) accept --team KEY.
+It overrides LLL_TEAM for this invocation and never writes configuration.
+Explicit issue IDs still target their own team.
+
 Examples:
-  lll issue list --search checkout
+  lll issue list --team ENG --search checkout
   lll issue update ENG-1 --assignee alice --state in-review
 
 Configuration (env > the repo's .lll.toml > ~/.config/lll/lll.toml; the files

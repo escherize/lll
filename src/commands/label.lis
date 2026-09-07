@@ -52,13 +52,13 @@ Usage:
                                                  --force drops it off all of
                                                  them
 
-For any command, prefix LLL_TEAM=KEY to select its scope for that invocation.
-This leaves the saved attachment unchanged; --team on create sets ownership.",
+Every command accepts --team KEY to select its team for this invocation,
+overriding LLL_TEAM and the saved attachment without rewriting configuration.",
   )
 }
 
 fn label_list(args: Slice<string>) -> Result<(), string> {
-  let p = flags.parse(label_list_spec(), args, 3, false, "lll label list [--json]")?
+  let p = flags.parse(label_list_spec(), args, 3, false, flags.usage("lll label list", label_list_spec(), ""))?
   // Scoped when a team is configured, every team's when not: a label belongs
   // to one team (TASK-173), so the unscoped list is an admin's view, not a
   // working one.
@@ -88,40 +88,42 @@ fn label_list(args: Slice<string>) -> Result<(), string> {
 }
 
 fn label_list_spec() -> Slice<flags.Flag> {
-  [flags.Flag { name: "--json", help: "print the raw record list as JSON", .. }]
+  flags.with_team([flags.Flag { name: "--json", help: "print the raw record list as JSON", .. }])
 }
 
 fn label_create_spec() -> Slice<flags.Flag> {
-  [
+  flags.with_team([
     flags.Flag { name: "-n", alias: "--name", value: true, hint: "\"name\"", help: "label name", .. },
     flags.Flag { name: "-c", value: true, hint: "\"#5e6ad2\"", help: "hex color for the label", .. },
     flags.Flag { name: "--team", value: true, hint: "KEY", help: "team key the label belongs to (defaults to LLL_TEAM)", .. },
-  ]
+  ])
 }
 
 fn label_edit_spec() -> Slice<flags.Flag> {
-  [
+  flags.with_team([
     flags.Flag { name: "-n", value: true, hint: "\"name\"", help: "new label name", .. },
     flags.Flag { name: "-c", value: true, hint: "\"#5e6ad2\"", help: "new hex color for the label", .. },
-  ]
+  ])
 }
 
 fn label_delete_spec() -> Slice<flags.Flag> {
-  [
+  flags.with_team([
     flags.Flag { name: "--force", help: "delete even while issues carry the label", .. },
-  ]
+  ])
 }
 
 /// The flag table of one label verb; empty for verbs without flags. Read by
 /// `lll completions` so the scripts complete exactly what the parser accepts.
 pub fn label_verb_spec(verb: string) -> Slice<flags.Flag> {
-  match verb {
+  if !["create", "list", "edit", "delete"].contains(verb) { return [] }
+  let spec = match verb {
     "create" => label_create_spec(),
     "list" => label_list_spec(),
     "edit" => label_edit_spec(),
     "delete" => label_delete_spec(),
     _ => [],
   }
+  flags.with_team(spec)
 }
 
 fn label_create(args: Slice<string>) -> Result<(), string> {

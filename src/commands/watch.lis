@@ -28,7 +28,7 @@ pub struct CommentEvent {
 /// create/update/delete, filtered server-side with the same criteria as
 /// `lll issue list`. Runs until interrupted (Ctrl-C).
 fn watch_spec() -> Slice<flags.Flag> {
-  [
+  flags.with_team([
     flags.Flag { name: "--state", value: true, hint: "s", help: "one of: backlog, todo, in-progress, in-review, done, cancelled", .. },
     flags.Flag { name: "--assignee", value: true, hint: "name", help: "member name (see 'lll member list')", .. },
     flags.Flag { name: "--label", value: true, hint: "name", help: "label name (see 'lll label list')", .. },
@@ -36,14 +36,14 @@ fn watch_spec() -> Slice<flags.Flag> {
     flags.Flag { name: "--search", value: true, hint: "q", help: "only issues whose title contains q", .. },
     flags.Flag { name: "--json", help: "NDJSON: one raw PocketBase event object per line, with a\n\"topic\" field added", .. },
     flags.Flag { name: "--help", alias: "-h", hidden: true, help: "show this help", .. },
-  ]
+  ])
 }
 
 /// The flag table of the watch noun (one verbless stream); empty for other
 /// names. Read by `lll completions` so the scripts complete exactly what the
 /// parser accepts.
 pub fn watch_verb_spec(_verb: string) -> Slice<flags.Flag> {
-  watch_spec()
+  flags.with_team(watch_spec())
 }
 
 pub fn watch(args: Slice<string>) -> Result<(), string> {

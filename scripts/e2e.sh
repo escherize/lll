@@ -2422,6 +2422,43 @@ assert_contains "$(cat "$DATA_DIR/board-stderr")" 'lll board [-w]' 'board names 
 out=$(env -u LLL_ADMIN_EMAIL -u LLL_ADMIN_PASSWORD "$LIN" member invite oracle-invited --email oracle-invited@lll.test)
 assert_contains "$out" 'invited oracle-invited' 'member token can invite a new colleague'
 
+# Invocation-only --team works consistently without rewriting config.
+env LLL_URL="$URL" LLL_TEAM=ENG python3 - "$LLL_ABS" <<'PY_SCOPE'
+import json, os, pathlib, subprocess, sys
+binary = sys.argv[1]
+def run(*args):
+    return subprocess.check_output([binary, *args], text=True)
+def record(*args):
+    return json.loads(run(*args))
+paths = [pathlib.Path('.lll.toml'), pathlib.Path.home()/'.config/lll/lll.toml']
+before = [(p.exists(), p.read_bytes() if p.exists() else None) for p in paths]
+for key in ('SCA', 'SCB'):
+    run('team', 'create', '-k', key, '-n', key)
+run('project', 'create', 'Shared scope project', '--team', 'SCB')
+run('label', 'create', 'scope-label', '--team=SCB')
+issue = record('issue', 'create', 'Scoped issue', '--project', 'Shared scope project', '--label', 'scope-label', '--team', 'SCB', '--json')
+assert issue['expand']['team']['key'] == 'SCB'
+key = 'SCB-' + str(issue['number'])
+assert record('issue', 'view', key, '--team', 'SCA', '--json')['id'] == issue['id']
+run('issue', 'update', key, '--team', 'SCA', '--description', '--team')
+assert record('issue', 'view', key, '--json')['description'] == '--team'
+assert len(record('issue', 'list', '--team', 'SCB', '--json')['items']) == 1
+assert record('issue', 'list', '--team', 'SCA', '--json')['items'] == []
+assert all(i['team'] != issue['team'] for i in record('issue', 'list', '--json')['items'])
+assert len(record('project', 'list', '--team', 'SCB', '--json')['items']) == 1
+assert len(record('label', 'list', '--team', 'SCB', '--json')['items']) == 1
+run('project', 'edit', 'Shared scope project', '-n', 'Scoped rename', '--team', 'SCB')
+assert 'Scoped rename' in run('project', 'view', 'Scoped rename', '--team', 'SCB')
+run('doc', 'new', '-s', 'scope-finding', '-t', 'Scoped finding', '-k', 'finding', '-a', 'scope-label', '-p', 'src/cache', '-b', 'scope body', '--team', 'SCB')
+assert record('doc', 'view', 'scope-finding', '--team', 'SCB', '--json')['body'] == 'scope body'
+assert 'scope-finding' in run('finding', 'near', 'src/cache/file.lis', '--team', 'SCB')
+assert 'scope-finding' not in run('finding', 'list', '--team', 'SCA')
+run('doc', 'delete', 'scope-finding', '--force', '--team', 'SCB')
+run('label', 'delete', 'scope-label', '--force', '--team', 'SCB')
+run('project', 'delete', 'Scoped rename', '--force', '--team', 'SCB')
+assert before == [(p.exists(), p.read_bytes() if p.exists() else None) for p in paths]
+PY_SCOPE
+
 # --- web board (own ephemeral PB; see e2e_web.sh) ---
 HOME="$E2E_REAL_HOME" scripts/e2e_web.sh
 

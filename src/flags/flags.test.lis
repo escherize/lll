@@ -337,3 +337,21 @@ fn unsupported_team_flag_supplies_the_requested_environment_override() {
   let assert Err(quoted) = parse([], argv(["--team", "owner's team"]), 3, false, "test")
   assert quoted.contains("LLL_TEAM='owner'\\''s team'")
 }
+
+#[test]
+fn team_extraction_preserves_literal_values_and_accepts_both_spellings() {
+  let input = ["lll", "issue", "create", "-t", "--team", "-d", "--team=literal", "--team", "DX", "--team=OPS"]
+  let assert Ok((cleaned, team)) = extract_team(input, 3, with_team(spec()))
+  assert team == Some("OPS")
+  assert cleaned.equals(["lll", "issue", "create", "-t", "--team", "-d", "--team=literal"])
+  let assert Ok((ended, absent)) = extract_team(["lll", "issue", "create", "--", "--team", "DX"], 3, with_team(spec()))
+  assert absent.is_none()
+  assert ended.equals(["lll", "issue", "create", "--", "--team", "DX"])
+}
+
+#[test]
+fn team_extraction_rejects_missing_or_empty_keys() {
+  assert extract_team(argv(["--team"]), 3, []).is_err()
+  assert extract_team(argv(["--team="]), 3, []).is_err()
+  assert extract_team(argv(["--team", " "]), 3, []).is_err()
+}

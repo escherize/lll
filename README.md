@@ -145,6 +145,11 @@ whole.
 
 ## Configuration
 
+Scoped commands (`issue`, `project`, `label`, `doc`, `finding`, and `watch`)
+accept `--team KEY` for a single invocation, for example
+`lll issue list --team OPS`. This overrides `LLL_TEAM` without rewriting any
+configuration. An explicit issue identifier still targets its own team.
+
 Precedence: env vars > the repo's `.lll.toml` > `~/.config/lll/lll.toml`. The
 files **layer**: each supplies the keys it names, so a repo file carrying
 `team` alone still gets `url` and `me` from the machine's. `.lll.toml` is

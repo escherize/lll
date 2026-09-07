@@ -56,7 +56,8 @@ Usage:
     flags.section(doc_union_spec()) +
     "
 
-Every verb works inside ONE team — the one LLL_TEAM or .lll.toml names. A
+Every verb accepts --team KEY for this invocation, overriding LLL_TEAM or
+.lll.toml without rewriting configuration. Each works inside ONE team. A
 slug is unique per team, so two projects sharing a server both get an
 'index'; read the other one with LLL_TEAM=THEIRS lll doc view index.
 
@@ -156,7 +157,7 @@ fn norm_path(val: string) -> string {
 // ----------------------------------------------------------------- specs
 
 fn doc_new_spec() -> Slice<flags.Flag> {
-  [
+  flags.with_team([
     flags.Flag {
       name: "-s",
       alias: "--slug",
@@ -207,22 +208,22 @@ fn doc_new_spec() -> Slice<flags.Flag> {
       help: "comma-separated file/directory paths the doc is about, e.g.\nsrc/pb, pb/pb_migrations ('lll finding near' matches by them)",
       ..,
     },
-  ]
+  ])
 }
 
 fn doc_view_spec() -> Slice<flags.Flag> {
-  [
+  flags.with_team([
     flags.Flag { name: "--raw", help: "print only the body, no chrome", .. },
     flags.Flag {
       name: "--json",
       help: "raw PocketBase JSON (linked issues expanded), pipe-friendly",
       ..,
     },
-  ]
+  ])
 }
 
 fn doc_edit_spec() -> Slice<flags.Flag> {
-  [
+  flags.with_team([
     flags.Flag {
       name: "-b",
       alias: "--body",
@@ -263,18 +264,19 @@ fn doc_edit_spec() -> Slice<flags.Flag> {
       help: "replacement comma-separated paths — the WHOLE set\n(pass \"\" to clear it)",
       ..,
     },
-  ]
+  ])
 }
 
 fn doc_delete_spec() -> Slice<flags.Flag> {
-  [flags.Flag { name: "--force", help: "skip the delete confirmation", .. }]
+  flags.with_team([flags.Flag { name: "--force", help: "skip the delete confirmation", .. }])
 }
 
 /// The flag table of one doc verb; empty for the verbs without flags. Read
 /// by `lll completions` so the scripts complete exactly what the parser
 /// accepts (TASK-127).
 pub fn doc_verb_spec(verb: string) -> Slice<flags.Flag> {
-  match verb {
+  if !["new", "list", "view", "edit", "delete"].contains(verb) { return [] }
+  let spec = match verb {
     "new" => doc_new_spec(),
     "list" => doc_list_spec(),
     "view" => doc_view_spec(),
@@ -282,6 +284,7 @@ pub fn doc_verb_spec(verb: string) -> Slice<flags.Flag> {
     "delete" => doc_delete_spec(),
     _ => [],
   }
+  flags.with_team(spec)
 }
 
 /// Every flag across the doc verbs, deduplicated by canonical name, in the
@@ -347,7 +350,7 @@ fn doc_new(args: Slice<string>) -> Result<(), string> {
 }
 
 fn doc_list_spec() -> Slice<flags.Flag> {
-  [flags.Flag { name: "--json", help: "print the raw record list as JSON", .. }]
+  flags.with_team([flags.Flag { name: "--json", help: "print the raw record list as JSON", .. }])
 }
 
 fn doc_list(args: Slice<string>) -> Result<(), string> {

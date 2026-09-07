@@ -186,7 +186,8 @@ pub struct Comment {
 #[json]
 pub struct CommentList {
   pub items: Slice<Comment>,
-  pub totalPages: int,
+  #[json("totalPages")]
+  pub total_pages: int,
 }
 
 #[json]

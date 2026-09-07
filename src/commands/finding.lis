@@ -45,7 +45,8 @@ Usage:
   lll finding list [--area X]      every finding, or one area's, one line
                                    each (slug, area, title)
 
-Both verbs answer for ONE team — the one LLL_TEAM or .lll.toml names. Every
+Both verbs accept --team KEY for this invocation, overriding LLL_TEAM or
+.lll.toml without rewriting configuration. They answer for ONE team. Every
 project has a src/, so an unscoped answer would be another codebase's.
 
 Author findings with 'lll doc new -k finding -a <area> -p \"<paths>\"'.
@@ -59,7 +60,7 @@ coordinates 'lll finding near' matches by.",
 // ------------------------------------------------------------------ specs
 
 fn finding_list_spec() -> Slice<flags.Flag> {
-  [
+  flags.with_team([
     flags.Flag {
       name: "-a",
       alias: "--area",
@@ -69,17 +70,19 @@ fn finding_list_spec() -> Slice<flags.Flag> {
       ..
     },
     flags.Flag { name: "--json", help: "print the raw record list as JSON", .. },
-  ]
+  ])
 }
 
 /// The flag table of one finding verb; read by `lll completions` so the
 /// scripts complete exactly what the parser accepts (TASK-127).
 pub fn finding_verb_spec(verb: string) -> Slice<flags.Flag> {
-  match verb {
+  if !["near", "list"].contains(verb) { return [] }
+  let spec = match verb {
     "near" => [],
     "list" => finding_list_spec(),
     _ => [],
   }
+  flags.with_team(spec)
 }
 
 // ----------------------------------------------------------------- shared

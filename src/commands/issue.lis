@@ -93,7 +93,7 @@ fn check_priority(val: string) -> Result<int, string> {
 // in usage lines; `alias` is also accepted.
 
 fn issue_create_spec() -> Slice<flags.Flag> {
-  [
+  flags.with_team([
     flags.Flag {
       name: "-t",
       value: true,
@@ -168,11 +168,11 @@ fn issue_create_spec() -> Slice<flags.Flag> {
       help: "show this help",
       ..,
     },
-  ]
+  ])
 }
 
 fn issue_list_spec() -> Slice<flags.Flag> {
-  [
+  flags.with_team([
     flags.Flag {
       name: "--state",
       value: true,
@@ -228,11 +228,11 @@ fn issue_list_spec() -> Slice<flags.Flag> {
       help: "raw PocketBase JSON (team, assignee, labels, project\nexpanded), pipe-friendly",
       ..,
     },
-  ]
+  ])
 }
 
 fn issue_view_spec() -> Slice<flags.Flag> {
-  [
+  flags.with_team([
     flags.Flag {
       name: "--json",
       help: "issue JSON with expanded relations, comments (oldest first,\nauthor expanded), and claim (member expanded, or null)",
@@ -248,11 +248,11 @@ fn issue_view_spec() -> Slice<flags.Flag> {
       help: "open the issue's web page in the browser (view)",
       ..,
     },
-  ]
+  ])
 }
 
 fn issue_update_spec() -> Slice<flags.Flag> {
-  [
+  flags.with_team([
     flags.Flag {
       name: "--state",
       value: true,
@@ -312,15 +312,15 @@ fn issue_update_spec() -> Slice<flags.Flag> {
       help: "one emoji for the issue, shown on the card, the issue page and\nthe list; pass \"\" to clear it",
       ..,
     },
-  ]
+  ])
 }
 
 fn issue_delete_spec() -> Slice<flags.Flag> {
-  [flags.Flag { name: "--force", help: "skip the delete confirmation", .. }]
+  flags.with_team([flags.Flag { name: "--force", help: "skip the delete confirmation", .. }])
 }
 
 fn issue_comment_spec() -> Slice<flags.Flag> {
-  [
+  flags.with_team([
     flags.Flag {
       name: "-b",
       value: true,
@@ -328,7 +328,7 @@ fn issue_comment_spec() -> Slice<flags.Flag> {
       help: "comment body ('-b -' reads it from stdin)",
       ..,
     },
-  ]
+  ])
 }
 
 pub fn issue_watch_spec() -> Slice<flags.Flag> {
@@ -345,7 +345,8 @@ pub fn issue_watch_spec() -> Slice<flags.Flag> {
 /// Read by `lll completions` — the shell scripts complete exactly what the
 /// parser accepts because they read the same table.
 pub fn issue_verb_spec(verb: string) -> Slice<flags.Flag> {
-  match verb {
+  if !["create", "list", "view", "update", "delete", "comment", "watch", "close", "start", "claim", "release", "url", "id", "title", "branch-name", "pr", "link", "unlink"].contains(verb) { return [] }
+  let spec = match verb {
     "create" => issue_create_spec(),
     "list" => issue_list_spec(),
     "view" => issue_view_spec(),
@@ -355,6 +356,7 @@ pub fn issue_verb_spec(verb: string) -> Slice<flags.Flag> {
     "watch" => issue_watch_spec(),
     _ => [],
   }
+  flags.with_team(spec)
 }
 
 /// Every flag across the issue verbs, deduplicated by canonical name
@@ -505,7 +507,8 @@ git branch: eng-12-fix-login resolves to ENG-12.
 
 State glyphs: ◌ backlog  ○ todo  ◐ in-progress  ◉ in-review  ● done  ⊗ cancelled
 
-The team comes from LLL_TEAM or 'team' in .lll.toml (see 'lll config --help').",
+Every issue command accepts --team KEY as an invocation-only default scope,
+overriding LLL_TEAM and saved config. Explicit issue IDs keep their own team.",
   )
 }
 
@@ -515,15 +518,15 @@ fn print_create_usage() {
 
 Usage:
   " +
-    flags.usage("lll issue create", issue_create_spec(), "[\"title\"]") +
+    flags.usage("lll issue create", issue_verb_spec("create"), "[\"title\"]") +
     "
 " +
-    flags.section(issue_create_spec()) +
+    flags.section(issue_verb_spec("create")) +
     "
 
 The title is the bare argument or -t; give either, not both.
 
-The team comes from 'lll attach' ('team' in .lll.toml), or LLL_TEAM.
+Use --team KEY for this invocation, or default to LLL_TEAM / 'lll attach'.
 Without --state the issue starts in todo; --label may be repeated.",
   )
 }
@@ -1318,7 +1321,7 @@ fn fetch_comments(issue_id: string) -> Result<Slice<models.Comment>, string> {
       &comments,
     )?
     for comment in comments.items { result = result.append(comment) }
-    if page >= comments.totalPages { break }
+    if page >= comments.total_pages { break }
     page += 1
   }
   Ok(result)
