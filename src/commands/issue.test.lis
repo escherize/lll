@@ -408,7 +408,7 @@ fn json_quote_keeps_multi_byte_text_literal() {
 fn issue_commands_lists_every_verb_once_with_a_one_line_summary() {
   let cmds = issue_commands()
   assert cmds.map(|c| c.name).equals([
-    "create", "list", "view", "read", "update", "close", "start", "claim",
+    "create", "list", "view", "show", "read", "update", "close", "start", "claim",
     "release", "delete", "comment", "watch", "url", "id", "title", "pr", "link",
     "unlink",
   ])

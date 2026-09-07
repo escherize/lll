@@ -367,6 +367,16 @@ pub fn issue_commands() -> Slice<flags.Command> {
     // fleet run (TASK-309), and the count went UP as other noise was removed -
     // it is the word people reach for. One table entry; `view` stays the
     // documented spelling, and the summary says so.
+    // `show` is `view` too. Two of thirty first-time agents typed it on the
+    // first clean fleet run of task 2 (TASK-309), the same shape as `read`.
+    flags.Command {
+      name: "show",
+      summary: "the same command as 'view'",
+      page: "",
+      spec: issue_view_spec(),
+      positional: "[KEY-123]",
+      run: view,
+    },
     flags.Command {
       name: "read",
       summary: "the same command as 'view'",

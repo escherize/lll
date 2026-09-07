@@ -1013,7 +1013,7 @@ WATCH_PIDS=""
 "$LIN" completions bash > "$DATA_DIR/comp.bash"
 bash -n "$DATA_DIR/comp.bash" || fail "bash completions do not parse"
 out=$(cat "$DATA_DIR/comp.bash")
-assert_contains "$out" "create list view read update close start claim release delete comment watch url id title pr link unlink" "bash completions list issue verbs"
+assert_contains "$out" "create list view show read update close start claim release delete comment watch url id title pr link unlink" "bash completions list issue verbs"
 assert_contains "$out" "--limit" "bash completions know --limit"
 assert_contains "$out" "complete -F _lll lll" "bash completions register"
 "$LIN" completions zsh > "$DATA_DIR/comp.zsh"
