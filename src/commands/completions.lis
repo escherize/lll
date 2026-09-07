@@ -106,7 +106,10 @@ fn verbs(noun: string) -> Slice<string> {
     "doc" => ["new", "list", "view", "edit", "delete"],
     "finding" => ["near", "list"],
     "config" => ["init", "set", "check", "--list"],
-    "token" => ["create"],
+    // TASK-307: nouns converted to a Command table are read from it, so a verb
+    // added to the table is completed with no edit here. The others are still
+    // hand-listed until their shard lands, and go one by one as they do.
+    "token" => token_commands().map(|c| c.name),
     "completions" => ["bash", "zsh", "fish"],
     _ => [],
   }

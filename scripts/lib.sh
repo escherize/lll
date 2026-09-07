@@ -170,6 +170,16 @@ e2e_begin() {
   esac
   DATA_DIR="$(mktemp -d)"
   E2E_HOME="$DATA_DIR/e2e_home"
+  # The suite owns its superuser identity. `lll up` upserts whatever
+  # LLL_ADMIN_EMAIL/LLL_ADMIN_PASSWORD name, and a developer shell that exports
+  # the PRODUCTION pair (as this machine's does) made every e2e boot upsert the
+  # prod admin into a scratch database, while pb_superuser_token still logged in
+  # as admin@local.dev - "Failed to authenticate" at the very first step, on a
+  # tree where nothing had changed. Same class as the HOME pin below: an env
+  # var the gate never asked for steering an assertion. Pinned to the values
+  # lib.sh sends, so the two cannot disagree.
+  export LLL_ADMIN_EMAIL=admin@local.dev
+  export LLL_ADMIN_PASSWORD=admin-local-123
   mkdir -p "$E2E_HOME/.config/lll"
   if [ -f .lll.toml ]; then
     # TASK-143: the move alone is not the report. A stray file written by an

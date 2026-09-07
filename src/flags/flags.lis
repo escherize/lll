@@ -197,6 +197,82 @@ impl Parsed {
   }
 }
 
+/// One verb of a noun, as a value (TASK-307). Dispatch, the noun's help
+/// table and shell completions all read the same slice of these, so a verb is
+/// declared exactly once and the three cannot drift. Before this, nine nouns
+/// each carried a hand-rolled `match verb`, eleven files their own copy of the
+/// `--help` arm, and completions.verbs() was a fourth list that drifted twice
+/// in one wave.
+///
+/// `summary` is one line and required: it is the row in `lll <noun> --help`.
+/// `page` is the verb's own help when it has a hand-written one; "" means
+/// generate usage + flags from `spec`, which is the floor, not a ceiling.
+/// `positional` is the shape after the verb: "" for none, "[KEY-123]" for
+/// optional, "KEY-123" for required - it feeds the usage line only; the verb
+/// still reads its positional through Parsed.first().
+pub struct Command {
+  pub name: string,
+  pub summary: string,
+  pub page: string,
+  pub spec: Slice<Flag>,
+  pub positional: string,
+  pub run: fn(Slice<string>) -> Result<(), string>,
+}
+
+/// Route `lll <noun> <verb> ...` through a noun's Command table.
+///
+/// The order is the point. Args are parsed against the entry's spec BEFORE
+/// `run` is called, so a trailing `-h` on any verb is answered by parse and
+/// never reaches the verb body. Thirty verb arms used to call a zero-arg
+/// function and discard argv; `lll config check -h` RAN the health check. No
+/// table entry can do that now, because the dispatcher does not let it.
+///
+/// `intro` is prose that belongs to the noun rather than to any verb - the
+/// rename collateral under `lll team --help`, the precedence paragraph under
+/// `lll config --help`. Printed after the verb table; "" prints nothing.
+pub fn dispatch(
+  noun: string,
+  intro: string,
+  cmds: Slice<Command>,
+  args: Slice<string>,
+) -> Result<(), string> {
+  let Some(verb) = args.get(2) else {
+    return Err(f"{help_marker()}{noun_help(noun, intro, cmds)}")
+  }
+  if verb == "--help" || verb == "-h" {
+    return Err(f"{help_marker()}{noun_help(noun, intro, cmds)}")
+  }
+  let Some(c) = cmds.find(|c| c.name == verb) else {
+    return Err(f"unknown {noun} command: '{verb}' (see 'lll {noun} --help')")
+  }
+  // A verb with its own page answers --help with it; the generic parse-time
+  // help would otherwise replace a written page with a bare flags block.
+  if c.page != "" && args[3..].find(|a| a == "--help" || a == "-h").is_some() {
+    return Err(f"{help_marker()}{c.page}")
+  }
+  let cmd = f"lll {noun} {c.name}"
+  let _ = parse(c.spec, args, 3, c.positional != "", usage(cmd, c.spec, c.positional))?
+  (c.run)(args)
+}
+
+/// `lll <noun> --help`: every verb's usage line and summary, aligned, then the
+/// noun's intro. Generated from the table so a verb cannot be missing from it.
+fn noun_help(noun: string, intro: string, cmds: Slice<Command>) -> string {
+  let mut width = 0
+  let lines = cmds.map(|c| usage(f"lll {noun} {c.name}", c.spec, c.positional))
+  for l in lines {
+    if l.length() > width { width = l.length() }
+  }
+  let mut out = f"lll {noun}\n\nUsage:"
+  for (i, c) in cmds.enumerate() {
+    let l = lines[i]
+    let pad = strings.Repeat(" ", width - l.length() + 2)
+    out += f"\n  {l}{pad}{c.summary}"
+  }
+  if intro != "" { out += f"\n\n{intro}" }
+  out
+}
+
 /// A usage line fragment: "lll issue create -t \"title\" [-d desc] ...".
 /// Required flags render bare, optional ones bracketed; a repeated flag
 /// trails "..."; `positional` (e.g. "[KEY-123]") sits after the command.

@@ -2174,7 +2174,10 @@ assert_contains "$out" "team archive ENG" "the refusal names archive"
 # is destructive (and the gate is ENFORCED, not just claimed — TASK-243).
 LLL_URL=$URL "$LIN" member add -n "Disposable Person" >/dev/null \
   || fail "adding the disposable member"
-out=$(LLL_URL=$URL "$LIN" member remove "Disposable Person" 2>&1) \
+# `env -u` the admin pair, as the token-create refusals above do: e2e_begin now
+# exports it for every boot (the suite owns its superuser), so "no credentials"
+# has to be constructed here rather than assumed from the developer's shell.
+out=$(env -u LLL_ADMIN_EMAIL -u LLL_ADMIN_PASSWORD LLL_URL=$URL "$LIN" member remove "Disposable Person" 2>&1) \
   && fail "member remove without admin credentials should refuse"
 assert_contains "$out" "needs the server's admin credentials" "remove is superuser-gated"
 out=$(LLL_URL=$URL "$LIN" member remove "Disposable Person" \
@@ -2217,7 +2220,10 @@ assert_contains "$out" "at least 8 characters" "set-password checks the length"
 # The rotation above retired every token issued before it, including the one
 # this suite exported. A list rule filters rather than gates, so the reads
 # would answer 200-and-empty exactly as they did before anyone logged in.
-out=$(LLL_URL=$URL "$LIN" issue list 2>&1) && fail "a stale token should be refused, not answered emptily"
+# `env -u` the admin pair: e2e_begin exports it for every boot, and a process
+# holding it HEALS a stale token (TASK-255, asserted just below) instead of
+# refusing. "A plain user with a dead token" has to be constructed.
+out=$(env -u LLL_ADMIN_EMAIL -u LLL_ADMIN_PASSWORD LLL_URL=$URL "$LIN" issue list 2>&1) && fail "a stale token should be refused, not answered emptily"
 assert_contains "$out" "no longer valid" "a stale token is named"
 assert_contains "$out" "lll login" "the stale-token refusal names the fix"
 # TASK-255: a process holding the server's admin credentials re-mints and
