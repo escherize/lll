@@ -635,6 +635,15 @@ assert_not_contains "$out" "ENG-7" "forced delete removed the issue"
 # --- members: add + list ---
 out=$(LLL_URL=$URL "$LIN" member add -n bryan -e bryan@example.com)
 assert_contains "$out" "Added member bryan" "member add output"
+
+# --assignee none clears the assignee: the only way to, and the word view
+# prints for the empty slot (fleet task 7)
+out=$(cd "$REPO" && LLL_URL=$URL "$LLL_ABS" issue update ENG-6 --assignee bryan)
+got=$(LLL_URL=$URL "$LIN" issue view ENG-6 --json | jq -r '.assignee')
+[ -n "$got" ] || fail "update --assignee bryan: assignee still empty"
+out=$(cd "$REPO" && LLL_URL=$URL "$LLL_ABS" issue update ENG-6 --assignee none)
+got=$(LLL_URL=$URL "$LIN" issue view ENG-6 --json | jq -r '.assignee')
+[ "$got" = "" ] || fail "update --assignee none: assignee is '$got'"
 # NOT alice: `config set me alice` above now seeds that member for real, so
 # adding it again hits the unique index. This case is about the no-email path.
 out=$(LLL_URL=$URL "$LIN" member add -n carol)

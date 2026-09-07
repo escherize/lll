@@ -259,7 +259,7 @@ fn issue_update_spec() -> Slice<flags.Flag> {
       alias: "--assign",
       value: true,
       hint: "name",
-      help: "member name (see 'lll member list'); filters on list",
+      help: "member name (see 'lll member list'); 'none' clears it (update)",
       ..,
     },
     flags.Flag {
@@ -900,7 +900,11 @@ fn update(args: Slice<string>) -> Result<(), string> {
   let mut fields: Slice<string> = []
   if state != "" { fields = fields.append("\"state\":" + json_quote(state)?) }
   if priority >= 0 { fields = fields.append(f"\"priority\":{priority}") }
-  if assignee_name != "" {
+  if assignee_name == "none" {
+    // 'none' is what view prints for no assignee; the same word clears it.
+    // Nothing else could: an empty --assignee reads as the flag not given.
+    fields = fields.append("\"assignee\":\"\"")
+  } else if assignee_name != "" {
     let member = resolve_member(assignee_name)?
     fields = fields.append("\"assignee\":" + json_quote(member.id)?)
   }
