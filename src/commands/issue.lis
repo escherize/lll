@@ -1261,7 +1261,11 @@ fn comment(args: Slice<string>) -> Result<(), string> {
     Err(e) => return Err(f"encoding comment: {e}"),
   }
   let _ = pb.post("/api/collections/comments/records", payload as string)?
-  fmt.Println(f"Commented on {issue.expand.team.key}-{issue.number}")
+  // Names who it went out as. A stale home config carried one agent's 'me'
+  // into six others' comments (fleet replay); the write line is where that
+  // has to show, not a later read-back.
+  let as_who = if me == "" { "with no author" } else { f"as {me}" }
+  fmt.Println(f"Commented on {issue.expand.team.key}-{issue.number} {as_who}")
   Ok(())
 }
 

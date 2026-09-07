@@ -764,7 +764,7 @@ assert_contains "$out" "Looks good to me" "comment list body"
 # years while the assertion below was satisfied by a DIFFERENT comment's line.
 NOME_HOME="$DATA_DIR/nome_home"; mkdir -p "$NOME_HOME/.config/lll"
 out=$(env -u LLL_ME HOME="$NOME_HOME" LLL_URL=$URL LLL_TEAM=ENG "$LIN" issue comment ENG-7 -b "Anonymous note")
-assert_contains "$out" "Commented on ENG-7" "authorless comment (me unset) accepted"
+assert_contains "$out" "Commented on ENG-7 with no author" "authorless comment (me unset) accepted, and says so"
 
 # TASK-309, fleet run 1: thirty agents each set me = "shard-NN", no such
 # members existed, and every one of their comments landed as "anon" with no
