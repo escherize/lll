@@ -373,12 +373,29 @@ pub fn list_teams() -> Result<models.TeamList, string> {
 /// way — silently falling back to "every team" is how a scoped command ends
 /// up answering for all of them.
 fn configured_team() -> Result<Option<models.Team>, string> {
-  let cfg = config.load()?
+  let (cfg, src) = config.load_traced()?
   if cfg.team == "" { return Ok(None) }
   let Some(t) = find_team(cfg.team)? else {
-    return Err(unknown_team(cfg.team))
+    return Err(unknown_configured_team(cfg.team, src.team))
   }
   Ok(Some(t))
+}
+
+/// unknown_team, for the CONFIGURED key: says where the key came from. A
+/// fleet agent (TASK-309, task 4) ran `lll` from inside a checkout whose
+/// committed .lll.toml said team = LLL, against a server with no such team,
+/// and got "no team with key 'LLL'" - true, and useless, because it had never
+/// typed LLL and did not know which file had. `config --list` knows; so does
+/// this message now.
+fn unknown_configured_team(key: string, origin: string) -> string {
+  let from = if strings.HasPrefix(origin, "env:") {
+    f" (from {strings.TrimPrefix(origin, "env:")})"
+  } else if strings.HasPrefix(origin, "file:") {
+    f" (from {strings.TrimPrefix(origin, "file:")})"
+  } else {
+    ""
+  }
+  f"no team with key '{key}'{from} on the server — 'lll team list' shows the keys; 'lll attach -k KEY' points this directory at one, 'lll config --list' shows every value and the file it came from, or create it with 'lll team create -k {key} -n \"Name\"'"
 }
 
 /// The configured team, insisted upon. Docs, findings, labels and projects
