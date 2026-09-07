@@ -213,7 +213,7 @@ wcurl -s -o /dev/null -w '%{http_code}' "$WEB/issue/ENG-99" | grep -q 404 \
   || fail "unknown issue is a 404"
 
 # --- TASK-205: the work-site slot on the web surfaces -------------------------
-# `issue start` stamps work_branch/work_host/work_path; the props panel shows
+# `issue start --branch` stamps work_branch/work_host/work_path; the props panel shows
 # the whole site and the board hover shows the branch, both straight off the
 # issue's own fields (so SSE morphs carry them for free). The fields are
 # seeded the fixture way (a direct PATCH) — the start->stamp write path is

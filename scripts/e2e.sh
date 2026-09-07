@@ -529,7 +529,20 @@ git init -q -b main "$REPO"
 git -C "$REPO" -c user.name=e2e -c user.email=e2e@example.com \
   commit -q --allow-empty -m init
 
+# a plain start touches the board only: no branch, no work site (TASK-310).
+# Fleet task 3b ran start from the wrong checkout and it switched that
+# checkout's branch; the branch is what --branch is for.
 out=$(cd "$REPO" && LLL_URL=$URL "$LLL_ABS" issue start ENG-6)
+assert_contains "$out" "Started ENG-6" "plain start output"
+assert_not_contains "$out" "Branch:" "plain start names no branch"
+branch=$(git -C "$REPO" branch --show-current)
+[ "$branch" = "main" ] || fail "plain start: expected to stay on main, on '$branch'"
+out=$(LLL_URL=$URL "$LIN" issue view ENG-6 --json | jq -r '.work_branch')
+[ "$out" = "" ] || fail "plain start stamped a work site: '$out'"
+out=$(cd "$DATA_DIR" && LLL_URL=$URL "$LLL_ABS" issue start --branch ENG-6 2>&1 || true)
+assert_contains "$out" "--branch needs a git repository" "start --branch outside a repo says so"
+
+out=$(cd "$REPO" && LLL_URL=$URL "$LLL_ABS" issue start --branch ENG-6)
 assert_contains "$out" "Started ENG-6" "start output"
 assert_contains "$out" "Branch: eng-6-roundtrip-issue" "start prints branch name"
 assert_contains "$out" "Created and switched to branch 'eng-6-roundtrip-issue'" "start creates branch"
@@ -537,7 +550,7 @@ branch=$(git -C "$REPO" branch --show-current)
 [ "$branch" = "eng-6-roundtrip-issue" ] || fail "start: expected branch eng-6-roundtrip-issue, on '$branch'"
 
 # starting again — ID inferred from the branch — switches instead of failing
-out=$(cd "$REPO" && LLL_URL=$URL "$LLL_ABS" issue start)
+out=$(cd "$REPO" && LLL_URL=$URL "$LLL_ABS" issue start --branch)
 assert_contains "$out" "Started ENG-6" "inferred start output"
 assert_contains "$out" "Switched to existing branch 'eng-6-roundtrip-issue'" "start reuses branch"
 
@@ -1736,7 +1749,7 @@ assert_contains "$out" "lll issue release" "issue --help mentions release"
 assert_contains "$("$LIN" completions bash)" "claim" "bash completions offer claim"
 
 # --- TASK-205: the work-site slot (branch/host/path stamped by start) --------
-# `issue start` records WHERE the work happens: branch, host, worktree root.
+# `issue start --branch` records WHERE the work happens: branch, host, worktree root.
 # The slot holds the current site only — a start from a second site replaces
 # it and leaves an auto-comment trail — and nothing ever clears it; a site
 # that is no longer being worked (state done/cancelled or claim gone) renders
@@ -1749,7 +1762,7 @@ git init -q -b main "$WREPO_A"
 git -C "$WREPO_A" -c user.name=e2e -c user.email=e2e@example.com \
   commit -q --allow-empty -m init
 out=$(env $E LLL_ME=bryan "$LIN" issue claim "$WKEY")
-out=$(cd "$WREPO_A" && env $E LLL_WORK_HOST=site-a "$LLL_ABS" issue start "$WKEY")
+out=$(cd "$WREPO_A" && env $E LLL_WORK_HOST=site-a "$LLL_ABS" issue start --branch "$WKEY")
 WBRANCH=$(git -C "$WREPO_A" branch --show-current)
 WROOT_A=$(cd "$WREPO_A" && git rev-parse --show-toplevel)
 
@@ -1761,7 +1774,7 @@ got=$(env $E "$LIN" issue view "$WKEY" --json | jq -r '"\(.work_branch)|\(.work_
 [ "$got" = "$WBRANCH|site-a|$WROOT_A" ] || fail "work fields in --json: got '$got'"
 
 # a same-site restart is silent: the slot stands, no auto-comment
-out=$(cd "$WREPO_A" && env $E LLL_WORK_HOST=site-a "$LLL_ABS" issue start "$WKEY")
+out=$(cd "$WREPO_A" && env $E LLL_WORK_HOST=site-a "$LLL_ABS" issue start --branch "$WKEY")
 out=$(env $E "$LIN" issue view "$WKEY")
 assert_not_contains "$out" "work moved" "same-site restart leaves no comment"
 
@@ -1770,7 +1783,7 @@ WREPO_B="$DATA_DIR/wsite_b"
 git init -q -b main "$WREPO_B"
 git -C "$WREPO_B" -c user.name=e2e -c user.email=e2e@example.com \
   commit -q --allow-empty -m init
-out=$(cd "$WREPO_B" && env $E LLL_WORK_HOST=site-b "$LLL_ABS" issue start "$WKEY")
+out=$(cd "$WREPO_B" && env $E LLL_WORK_HOST=site-b "$LLL_ABS" issue start --branch "$WKEY")
 WROOT_B=$(cd "$WREPO_B" && git rev-parse --show-toplevel)
 out=$(env $E "$LIN" issue view "$WKEY")
 assert_contains "$out" "Work:      $WBRANCH @ site-b:$WROOT_B" "a second site replaces the slot"

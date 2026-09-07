@@ -55,7 +55,7 @@ server one agent's setup silently changes the next agent's starting conditions,
 and the results stop being comparable.
 
 **A fresh `git init`, never a worktree of this repo.** The branch verbs
-(`issue start`, branch-inferred ids, `issue pr`) need a real repository, so a
+(`issue start --branch`, branch-inferred ids, `issue pr`) need a real repository, so a
 plain directory skips a large part of the surface. A worktree of this checkout
 is the wrong repository: it inherits the committed `.lll.toml`, which starts
 every agent pre-attached and pointed at the real server, and it writes their

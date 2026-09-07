@@ -407,9 +407,9 @@ pub fn issue_commands() -> Slice<flags.Command> {
     },
     flags.Command {
       name: "start",
-      summary: "set state in-progress; print/create the branch key-number-slug (git switch)",
+      summary: "set state in-progress; --branch also git-switches to key-number-slug and records the work site",
       page: "",
-      spec: [],
+      spec: issue_start_spec(),
       positional: "[KEY-123]",
       run: start,
     },
@@ -948,10 +948,25 @@ fn close_issue(args: Slice<string>) -> Result<(), string> {
   Ok(())
 }
 
+/// `--branch` is opt-in (TASK-310). Fleet task 3b ran `start` from a checkout
+/// that was not the work's and it switched that checkout's branch; agents whose
+/// job is "record that I am on this" never wanted git touched. The state
+/// change is the command; the branch and the work-site stamp are the extra.
+fn issue_start_spec() -> Slice<flags.Flag> {
+  [
+    flags.Flag {
+      name: "--branch",
+      help: "also git switch -c key-number-slug in the current repo and\nrecord the work site (branch, host, path) on the issue",
+      ..,
+    },
+  ]
+}
+
 fn start(args: Slice<string>) -> Result<(), string> {
-  let usage = "lll issue start [KEY-123]"
-  let id = positional_id(args, usage)?
-  let resolved = resolve_id(id, usage)?
+  let spec = issue_start_spec()
+  let usage = flags.usage("lll issue start", spec, "[KEY-123]")
+  let p = flags.parse(spec, args, 3, true, usage)?
+  let resolved = resolve_id(p.first(), usage)?
   let issue = fetch_issue(resolved)?
   let _ = pb.patch(
     f"/api/collections/issues/records/{issue.id}",
@@ -959,18 +974,20 @@ fn start(args: Slice<string>) -> Result<(), string> {
   )?
   let key = issue.expand.team.key
   fmt.Println(f"Started {key}-{issue.number}: {issue.title} (◐ in-progress)")
+  if !p.given("--branch") { return Ok(()) }
 
+  if !gitctx.in_repo() {
+    return Err("--branch needs a git repository: run it from inside the one the work happens in")
+  }
   let branch = gitctx.branch_name(key, issue.number, issue.title)
   fmt.Println(f"Branch: {branch}")
-  if gitctx.in_repo() {
-    let created = gitctx.switch_branch(branch)?
-    if created {
-      fmt.Println(f"Created and switched to branch '{branch}'")
-    } else {
-      fmt.Println(f"Switched to existing branch '{branch}'")
-    }
-    record_work_site(issue, branch)?
+  let created = gitctx.switch_branch(branch)?
+  if created {
+    fmt.Println(f"Created and switched to branch '{branch}'")
+  } else {
+    fmt.Println(f"Switched to existing branch '{branch}'")
   }
+  record_work_site(issue, branch)?
   Ok(())
 }
 

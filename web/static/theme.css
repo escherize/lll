@@ -1338,7 +1338,7 @@ input:focus, textarea:focus, select:focus {
 .pj-empty { color: var(--text-2); margin: 6px 0; max-width: 68ch; }
 
 /* ── work-site ─────────────────────────────────────────── */
-/* TASK-205: where the branch is checked out, stamped by `lll issue start`.
+/* TASK-205: where the branch is checked out, stamped by `lll issue start --branch`.
    Monospace because it is branch @ host:path; text-3 + italic "(last seen)"
    once the site is only history (state done/cancelled or claim gone). */
 .work-site {
