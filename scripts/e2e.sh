@@ -2022,6 +2022,19 @@ assert_contains "$create_out" "one-time agent token for e2e-agent" "token create
 out=$(LLL_TOKEN="$MINT_TOK" HOME="$E2E_HOME" LLL_URL=$URL "$LIN" member list)
 assert_contains "$out" "e2e-agent" "the minted token authenticates a GET"
 
+# Explicit authority and endpoint flags use the same gate without persisting
+# credentials or replacing the caller's configured server.
+cp "$E2E_HOME/.config/lll/lll.toml" "$DATA_DIR/pre-token-flags.toml"
+create_out=$(env -u LLL_TOKEN -u LLL_ADMIN_EMAIL -u LLL_ADMIN_PASSWORD \
+  HOME="$E2E_HOME" LLL_URL=http://127.0.0.1:1 "$LIN" token create e2e-agent \
+  --url "$URL" --duration 600 --admin-email admin@local.dev --admin-password admin-local-123)
+FLAG_MINT_TOK=$(printf '%s\n' "$create_out" | sed -n 's/^LLL_TOKEN=//p')
+[ -n "$FLAG_MINT_TOK" ] || fail 'explicit token flags produced no credential'
+out=$(LLL_TOKEN="$FLAG_MINT_TOK" HOME="$E2E_HOME" LLL_URL=$URL "$LIN" whoami)
+assert_contains "$out" 'e2e-agent' 'flag-minted token authenticates the intended member'
+cmp -s "$E2E_HOME/.config/lll/lll.toml" "$DATA_DIR/pre-token-flags.toml" \
+  || fail 'token authority flags modified saved configuration'
+
 # ...and the gate is superuser-only: a member token and no credentials at all
 # are both refused, naming the fix. The member token is minted fresh — the
 # password PATCH above rotated e2e-agent's tokenKey, so the bootstrap token

@@ -43,11 +43,13 @@ pub fn token(args: Slice<string>) -> Result<(), string> {
 }
 
 fn token_usage() {
+  let spec = token_create_spec()
+  let usage = flags.usage("lll token create", spec, "<member>")
   fmt.Println(
-    "lll token - work with agent tokens
+    f"lll token - work with agent tokens
 
 Usage:
-  lll token create <member> [--duration seconds]
+  {usage}
 
 Mints a long-lived, non-refreshable PocketBase token that authenticates as
 <member> — the agent credential, superuser-only. It lasts a year unless
@@ -56,6 +58,8 @@ printed once, when it is created; nothing else ever shows it. Use it as
 LLL_TOKEN=<token>, or persist it as token = \"...\" in ~/.config/lll/lll.toml
 (never the repo's .lll.toml, which is committed).",
   )
+  fmt.Println("Administrator credentials: --admin-email/--admin-password or LLL_ADMIN_EMAIL/LLL_ADMIN_PASSWORD; a configured superuser token also works.")
+  fmt.Println(flags.section(spec))
 }
 
 /// The lifetime a mint gets when --duration is not given: one year in
@@ -67,10 +71,11 @@ fn default_token_duration() -> int {
 }
 
 fn token_create_spec() -> Slice<flags.Flag> {
-  [
+  with_admin_flags([
     flags.Flag { name: "--duration", value: true, hint: "seconds", help: "token lifetime in seconds (default one year);\n0 uses the members collection's duration", .. },
+    flags.Flag { name: "--url", value: true, hint: "url", help: "server base url for this invocation (otherwise the configured server)", .. },
     flags.Flag { name: "--help", alias: "-h", hidden: true, help: "show this help", .. },
-  ]
+  ])
 }
 
 /// The flag table of one token verb; empty for verbs without flags. Read by
@@ -111,6 +116,8 @@ fn token_create(args: Slice<string>) -> Result<(), string> {
     duration = d
   }
 
+  point_at_url(p.one("--url"))?
+  apply_admin_flags(p.one("--admin-email"), p.one("--admin-password"))?
   let su = superuser_auth()?
   let found = find_member_as(su, name)?
   let Some(member) = found else {
@@ -297,14 +304,16 @@ fn decode_auth(body: string, what: string) -> Result<string, string> {
 }
 
 fn print_token_create_usage() {
+  let spec = token_create_spec()
+  let usage = flags.usage("lll token create", spec, "<member>")
   fmt.Println(
-    "lll token create - mint a long-lived agent token (superuser only)
+    f"lll token create - mint a long-lived agent token (superuser only)
 
 Usage:
-  lll token create <member> [--duration seconds]
+  {usage}
 
-Authenticates as the PocketBase superuser — from LLL_ADMIN_EMAIL and
-LLL_ADMIN_PASSWORD (the credentials 'lll up' prints), or the configured token
+Authenticates as the PocketBase superuser — from --admin-email/--admin-password,
+LLL_ADMIN_EMAIL/LLL_ADMIN_PASSWORD, or the configured token
 when it already is one — and asks PocketBase to impersonate <member>: a
 non-refreshable token sent as LLL_TOKEN. It does expire. --duration sets the
 lifetime in seconds and defaults to one year; 0 hands the decision to the
@@ -317,4 +326,5 @@ fix is another 'lll token create'.
 The token is printed exactly once. Agents persist it with
 token = \"...\" in ~/.config/lll/lll.toml — never .lll.toml, which is committed.",
   )
+  fmt.Println(flags.section(spec))
 }

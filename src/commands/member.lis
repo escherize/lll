@@ -54,7 +54,8 @@ Usage:
                                                admin credentials work too)
   lll member remove NAME                       remove a member with no issues
                                                ('delete' is the same command)
-  lll member set-password NAME [--email email] set a member's login password
+  lll member set-password NAME [--email email] [--password pw]
+                                               set a member's login password
                                                (superuser only)
 
 Members are PocketBase auth records (email + password; TASK-180). Adding one
@@ -478,22 +479,26 @@ requires administrator credentials.",
 }
 
 fn print_set_password_usage() {
+  let spec = set_password_spec()
+  let usage = flags.usage("lll member set-password", spec, "NAME")
   fmt.Println(
-    "lll member set-password - set a member's login password (superuser only)
+    f"lll member set-password - set a member's login password (superuser only)
 
 Usage:
-  lll member set-password NAME [--email email]
+  {usage}
 
-Authenticates as the PocketBase superuser — from LLL_ADMIN_EMAIL and
-LLL_ADMIN_PASSWORD (the credentials 'lll up' prints), or the configured token
-when it already is one — and sets NAME's password: prompted twice with echo
-off when stdin is a terminal, read as two lines when piped.
+Authenticates as the PocketBase superuser using --admin-email/--admin-password,
+LLL_ADMIN_EMAIL/LLL_ADMIN_PASSWORD, or a configured superuser token.
+Sets NAME's password to --password (alias -p) when supplied. Otherwise prompts
+twice with echo off when stdin is a terminal, or reads two lines when piped.
+The replacement password must contain at least 8 characters.
 
 --email also sets the member's email, and is required when the member only
 has a synthesized @members.invalid one: the email is the identity
 'lll login' asks for. After this, the member logs in with
 'lll login --url <server>'.",
   )
+  fmt.Println(flags.section(spec))
 }
 
 fn member_add(args: Slice<string>) -> Result<(), string> {
