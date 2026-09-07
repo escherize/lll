@@ -1549,6 +1549,12 @@ set -e
 [ "$rc" -ne 0 ] || fail "issue comment add: expected nonzero exit"
 assert_contains "$out" "the ID comes right after the verb" "sub-verb error names the position"
 
+# aliases agents guessed at a steady rate across fleet runs (TASK-309)
+out=$(LLL_URL=$URL "$LIN" issue comment ENG-6 --body "alias body")
+assert_contains "$out" "Commented on ENG-6" "comment takes --body for -b"
+out=$(LLL_URL=$URL LLL_TEAM=ENG "$LIN" issue list --query "Roundtrip")
+assert_contains "$out" "ENG-6" "list takes --query for --search"
+
 # PB unreachable: names lll up and LLL_URL (request path and realtime path)
 set +e
 out=$(LLL_URL=http://127.0.0.1:1 "$LIN" issue list 2>&1)
