@@ -26,7 +26,7 @@ import "pb"
 /// The table is the one place a verb is declared: dispatch, `lll token --help`
 /// and shell completions all read it, so none of the three can drift.
 pub fn token(args: Slice<string>) -> Result<(), string> {
-  flags.dispatch("token", token_intro(), token_commands(), args)
+  flags.dispatch("token", "work with agent tokens", token_intro(), token_commands(), args)
 }
 
 /// Every token verb, as a value. `page` is the hand-written help `token
@@ -70,15 +70,6 @@ fn token_create_spec() -> Slice<flags.Flag> {
     flags.Flag { name: "--duration", value: true, hint: "seconds", help: "token lifetime in seconds (default one year);\n0 uses the members collection's duration", .. },
     flags.Flag { name: "--help", alias: "-h", hidden: true, help: "show this help", .. },
   ]
-}
-
-/// The flag table of one token verb; empty for verbs without flags. Read by
-/// `lll completions` so the scripts complete exactly what the parser accepts.
-pub fn token_verb_spec(verb: string) -> Slice<flags.Flag> {
-  match verb {
-    "create" => token_create_spec(),
-    _ => [],
-  }
 }
 
 fn token_create(args: Slice<string>) -> Result<(), string> {

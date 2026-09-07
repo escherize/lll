@@ -10,54 +10,95 @@ import "pb"
 import "query"
 import "theme"
 
-/// Dispatch `lll team <verb>`.
+/// Dispatch `lll team <verb>` through the noun's Command table (TASK-307).
+/// The table is the one place a verb is declared: dispatch, `lll team --help`
+/// and shell completions all read it, so none of the three can drift.
 pub fn team(args: Slice<string>) -> Result<(), string> {
-  let Some(verb) = args.get(2) else {
-    team_usage()
-    return Ok(())
-  }
-  match verb {
-    "list" => team_list(args),
-    "create" => team_create(args),
-    "view" => team_view(args),
-    "rename" => team_rename(args),
-    "set-accent" => team_set_accent(args),
-    "archive" => team_set_archived(args, true),
-    "unarchive" => team_set_archived(args, false),
-    "delete" => team_delete(args),
-    "--help" => {
-      team_usage()
-      Ok(())
-    },
-    "-h" => {
-      team_usage()
-      Ok(())
-    },
-    other => Err(f"unknown team command: '{other}' (see 'lll team --help')"),
-  }
+  flags.dispatch("team", "work with teams", team_intro(), team_commands(), args)
 }
 
-fn team_usage() {
-  fmt.Println(
-    "lll team - work with teams
+/// Every team verb, as a value. `page` is the hand-written help `team delete`
+/// already had; its former in-verb `--help` check is gone because dispatch
+/// answers it now, and parses args against `spec` before `run` so a trailing
+/// -h can never reach the verb body.
+pub fn team_commands() -> Slice<flags.Command> {
+  [
+    flags.Command {
+      name: "list",
+      summary: "list teams (KEY, name); --archived includes archived ones",
+      page: "",
+      spec: team_list_spec(),
+      positional: "",
+      run: team_list,
+    },
+    flags.Command {
+      name: "create",
+      summary: "create a team",
+      page: "",
+      spec: team_create_spec(),
+      positional: "",
+      run: team_create,
+    },
+    flags.Command {
+      name: "view",
+      summary: "show a team, its accent and its issue count",
+      page: "",
+      spec: [],
+      positional: "KEY",
+      run: team_view,
+    },
+    flags.Command {
+      name: "rename",
+      summary: "change a team's key, its name, or both",
+      page: "",
+      spec: team_rename_spec(),
+      positional: "KEY",
+      run: team_rename,
+    },
+    flags.Command {
+      name: "set-accent",
+      summary: "set the board accent colour ('' clears it)",
+      page: "",
+      spec: [],
+      positional: "KEY #rrggbb",
+      run: team_set_accent,
+    },
+    flags.Command {
+      name: "archive",
+      summary: "hide the team from lists and the board rail (data kept)",
+      page: "",
+      spec: [],
+      positional: "KEY",
+      run: team_archive,
+    },
+    flags.Command {
+      name: "unarchive",
+      summary: "bring an archived team back",
+      page: "",
+      spec: [],
+      positional: "KEY",
+      run: team_unarchive,
+    },
+    flags.Command {
+      name: "delete",
+      summary: "delete a team that holds no issues",
+      page: team_delete_page(),
+      spec: [],
+      positional: "KEY",
+      run: team_delete,
+    },
+  ]
+}
 
-Usage:
-  lll team list [--archived]         list teams (KEY, name); --archived includes archived ones
-  lll team create -k KEY -n \"Name\"   create a team
-  lll team view KEY                  show a team, its accent and its issue count
-  lll team rename KEY [-k NEW] [-n \"Name\"]  change a team's key, its name, or both
-  lll team set-accent KEY #rrggbb    set the board accent colour ('' clears it)
-  lll team archive KEY               hide the team from lists and the board rail (data kept)
-  lll team unarchive KEY             bring an archived team back
-  lll team delete KEY                delete a team that holds no issues
-
-Renaming the key rewrites nothing else, because issue keys are derived from it
+/// Prose that belongs to the noun rather than to any one verb; dispatch
+/// prints it under the verb table for `lll team --help`.
+fn team_intro() -> string {
+  "Renaming the key rewrites nothing else, because issue keys are derived from it
 (team key + number), so every key on the board and in the CLI follows at once.
 Three things do NOT follow (TASK-87):
   - the 'team =' line in .lll.toml, and LLL_TEAM — rerun 'lll attach -k NEW'
   - git branches already named eng-12-slug keep the old key
-  - OLD-1 mentions inside descriptions and comment bodies are stored text",
-  )
+  - OLD-1 mentions inside descriptions and comment bodies are stored text"
 }
 
 fn team_list(args: Slice<string>) -> Result<(), string> {
@@ -127,17 +168,6 @@ fn team_rename_spec() -> Slice<flags.Flag> {
     },
     flags.Flag { name: "-n", value: true, hint: "\"Name\"", help: "new team name", .. },
   ]
-}
-
-/// The flag table of one team verb; empty for verbs without flags. Read by
-/// `lll completions` so the scripts complete exactly what the parser accepts.
-pub fn team_verb_spec(verb: string) -> Slice<flags.Flag> {
-  match verb {
-    "create" => team_create_spec(),
-    "rename" => team_rename_spec(),
-    "list" => team_list_spec(),
-    _ => [],
-  }
 }
 
 fn team_create(args: Slice<string>) -> Result<(), string> {
@@ -246,6 +276,13 @@ fn team_rename_collateral(old_key: string, new_key: string) -> Slice<string> {
 /// shared field only the web could write (TASK-83's colour picker), which
 /// inverts the rule TASK-83 was built on.
 fn team_set_accent(args: Slice<string>) -> Result<(), string> {
+  // This verb does not pass through dispatch's parse (see `team`), so the
+  // -h guard every other verb inherits is spelled out here: help must answer
+  // before find_team, which is a network call, and before the PATCH.
+  let usage = flags.usage("lll team set-accent", [], "KEY #rrggbb")
+  if args[3..].find(|a| a == "--help" || a == "-h").is_some() {
+    return Err(f"{flags.help_marker()}usage: {usage} (empty '' clears it)")
+  }
   let Some(key) = args.get(3) else {
     return Err("usage: lll team set-accent KEY #rrggbb (empty '' clears it)")
   }
@@ -387,19 +424,6 @@ fn team_delete(args: Slice<string>) -> Result<(), string> {
   let Some(key) = args.get(3) else {
     return Err("usage: lll team delete KEY")
   }
-  if key == "--help" || key == "-h" {
-    fmt.Println(
-      "lll team delete - delete a team that holds no issues
-
-Usage:
-  lll team delete KEY
-
-Refuses a team with issues in it; 'lll team archive KEY' is the answer there,
-and it keeps the issue ids resolvable. Deleting is for a team created by
-mistake.",
-    )
-    return Ok(())
-  }
   let Some(t) = find_team(key)? else {
     return Err(unknown_team(key))
   }
@@ -419,6 +443,17 @@ mistake.",
   let _ = pb.delete(f"/api/collections/teams/records/{t.id}")?
   fmt.Println(f"deleted team {t.key}")
   Ok(())
+}
+
+fn team_delete_page() -> string {
+  "lll team delete - delete a team that holds no issues
+
+Usage:
+  lll team delete KEY
+
+Refuses a team with issues in it; 'lll team archive KEY' is the answer there,
+and it keeps the issue ids resolvable. Deleting is for a team created by
+mistake."
 }
 
 /// Missing-team message naming the fix. Shared by every command that needs a
@@ -449,6 +484,16 @@ fn archived_hint(key: string) -> string {
 /// field it is handed, so the patch carries `archived` and nothing else.
 #[json]
 struct TeamArchivedPatch { archived: bool }
+
+/// The two archive verbs as `run` entries: Command.run takes args alone, so
+/// the direction each one means is fixed here rather than at the call site.
+fn team_archive(args: Slice<string>) -> Result<(), string> {
+  team_set_archived(args, true)
+}
+
+fn team_unarchive(args: Slice<string>) -> Result<(), string> {
+  team_set_archived(args, false)
+}
 
 /// `lll team archive KEY` / `lll team unarchive KEY` — the team lifecycle.
 /// Archiving hides, never deletes: issues, comments and the /t/KEY/ board

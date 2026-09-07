@@ -79,36 +79,18 @@ fn nouns() -> Slice<string> {
 }
 
 fn verbs(noun: string) -> Slice<string> {
+  // TASK-307: every noun with a Command table is read FROM it, so a verb
+  // added to a table is completed with no edit here. This was a fourth
+  // hand-kept list of the same verbs, and it drifted twice in one wave.
   match noun {
-    "issue" => [
-      "create",
-      "list",
-      "view",
-      "update",
-      "close",
-      "start",
-      "claim",
-      "release",
-      "delete",
-      "comment",
-      "watch",
-      "url",
-      "id",
-      "title",
-      "pr",
-      "link",
-      "unlink",
-    ],
-    "team" => ["list", "create", "view", "rename", "set-accent", "archive", "unarchive"],
-    "member" => ["list", "add", "create", "invite", "set-password"],
-    "project" => ["list", "view", "create", "edit", "delete"],
-    "label" => ["list", "create", "edit", "delete"],
-    "doc" => ["new", "list", "view", "edit", "delete"],
-    "finding" => ["near", "list"],
-    "config" => ["init", "set", "check", "--list"],
-    // TASK-307: nouns converted to a Command table are read from it, so a verb
-    // added to the table is completed with no edit here. The others are still
-    // hand-listed until their shard lands, and go one by one as they do.
+    "issue" => issue_commands().map(|c| c.name),
+    "team" => team_commands().map(|c| c.name),
+    "member" => member_commands().map(|c| c.name),
+    "project" => project_commands().map(|c| c.name),
+    "label" => label_commands().map(|c| c.name),
+    "doc" => doc_commands().map(|c| c.name),
+    "finding" => finding_commands().map(|c| c.name),
+    "config" => config_commands().map(|c| c.name),
     "token" => token_commands().map(|c| c.name),
     "completions" => ["bash", "zsh", "fish"],
     _ => [],
@@ -120,20 +102,31 @@ fn verbs(noun: string) -> Slice<string> {
 /// parser, help and completions read, so the three cannot drift (TASK-127).
 /// Every spelling is offered: completions teach what the parser accepts.
 fn verb_flags(noun: string, verb: string) -> Slice<string> {
+  // A table noun's flags come off the same Command entry its verb name did,
+  // so the *_verb_spec accessors (one more hand-kept match per noun) retire.
+  // The verb-less nouns keep their single spec fn: they have no table.
+  let table: Slice<flags.Command> = match noun {
+    "issue" => issue_commands(),
+    "team" => team_commands(),
+    "member" => member_commands(),
+    "project" => project_commands(),
+    "label" => label_commands(),
+    "doc" => doc_commands(),
+    "finding" => finding_commands(),
+    "config" => config_commands(),
+    "token" => token_commands(),
+    _ => [],
+  }
+  if !table.is_empty() {
+    let Some(c) = table.find(|c| c.name == verb) else { return [] }
+    return flags.tokens(c.spec)
+  }
   match noun {
-    "issue" => flags.tokens(issue_verb_spec(verb)),
-    "team" => flags.tokens(team_verb_spec(verb)),
-    "member" => flags.tokens(member_verb_spec(verb)),
-    "project" => flags.tokens(project_verb_spec(verb)),
-    "label" => flags.tokens(label_verb_spec(verb)),
-    "doc" => flags.tokens(doc_verb_spec(verb)),
-    "finding" => flags.tokens(finding_verb_spec(verb)),
     "watch" => flags.tokens(watch_verb_spec(verb)),
     "up" => flags.tokens(up_verb_spec("")),
     "attach" => flags.tokens(attach_verb_spec("")),
     "board" => flags.tokens(board_verb_spec(verb)),
     "login" => flags.tokens(login_verb_spec("")),
-    "token" => flags.tokens(token_verb_spec(verb)),
     _ => [],
   }
 }

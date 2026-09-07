@@ -45,6 +45,24 @@ pub fn parse(
   allow_positional: bool,
   usage: string,
 ) -> Result<Parsed, string> {
+  let limit = if allow_positional { 1 } else { 0 }
+  parse_n(spec, args, start, limit, usage)
+}
+
+/// `parse`, with the positional limit as a COUNT. Three verbs take two bare
+/// words (`issue link KEY SLUG`, `team set-accent KEY #hex`, `config set me
+/// NAME`) and a bool cannot say so; each of them had grown a bypass around the
+/// dispatcher rather than a second positional. `dispatch` reads the count off
+/// the Command's `positional` string (its word count), so a table entry
+/// declares its arity in the same place it declares its usage line and the
+/// two cannot disagree.
+pub fn parse_n(
+  spec: Slice<Flag>,
+  args: Slice<string>,
+  start: int,
+  max_positional: int,
+  usage: string,
+) -> Result<Parsed, string> {
   let mut vals = Map.new<string, Slice<string>>()
   let mut pos: Slice<string> = []
   // `--help` and `-h` on every verb, before anything else can refuse them
@@ -99,10 +117,10 @@ pub fn parse(
       continue
     }
     let Some(fl) = spec.find(|f| f.name == arg || (f.alias != "" && f.alias == arg)) else {
-      if arg.starts_with("-") || !allow_positional {
+      if arg.starts_with("-") || max_positional == 0 {
         return Err(unknown_flag(arg, usage))
       }
-      if !pos.is_empty() {
+      if pos.length() >= max_positional {
         return Err(f"unexpected argument: '{arg}'")
       }
       pos = pos.append(arg)
@@ -232,15 +250,16 @@ pub struct Command {
 /// `lll config --help`. Printed after the verb table; "" prints nothing.
 pub fn dispatch(
   noun: string,
+  tagline: string,
   intro: string,
   cmds: Slice<Command>,
   args: Slice<string>,
 ) -> Result<(), string> {
   let Some(verb) = args.get(2) else {
-    return Err(f"{help_marker()}{noun_help(noun, intro, cmds)}")
+    return Err(f"{help_marker()}{noun_help(noun, tagline, intro, cmds)}")
   }
   if verb == "--help" || verb == "-h" {
-    return Err(f"{help_marker()}{noun_help(noun, intro, cmds)}")
+    return Err(f"{help_marker()}{noun_help(noun, tagline, intro, cmds)}")
   }
   let Some(c) = cmds.find(|c| c.name == verb) else {
     return Err(f"unknown {noun} command: '{verb}' (see 'lll {noun} --help')")
@@ -251,23 +270,26 @@ pub fn dispatch(
     return Err(f"{help_marker()}{c.page}")
   }
   let cmd = f"lll {noun} {c.name}"
-  let _ = parse(c.spec, args, 3, c.positional != "", usage(cmd, c.spec, c.positional))?
+  // Arity is the positional string's word count: "KEY-123 SLUG" admits two.
+  let words = strings.Fields(c.positional)
+  let arity = words.length()
+  let _ = parse_n(c.spec, args, 3, arity, usage(cmd, c.spec, c.positional))?
   (c.run)(args)
 }
 
 /// `lll <noun> --help`: every verb's usage line and summary, aligned, then the
 /// noun's intro. Generated from the table so a verb cannot be missing from it.
-fn noun_help(noun: string, intro: string, cmds: Slice<Command>) -> string {
-  let mut width = 0
-  let lines = cmds.map(|c| usage(f"lll {noun} {c.name}", c.spec, c.positional))
-  for l in lines {
-    if l.length() > width { width = l.length() }
-  }
-  let mut out = f"lll {noun}\n\nUsage:"
-  for (i, c) in cmds.enumerate() {
-    let l = lines[i]
-    let pad = strings.Repeat(" ", width - l.length() + 2)
-    out += f"\n  {l}{pad}{c.summary}"
+fn noun_help(noun: string, tagline: string, intro: string, cmds: Slice<Command>) -> string {
+  let mut out = if tagline == "" { f"lll {noun}" } else { f"lll {noun} - {tagline}" }
+  out += "\n\nUsage:"
+  // One row per verb: the usage line, then the summary on the next line,
+  // indented. The hand-written pages aligned summaries into a right-hand
+  // column, but a generated usage line can run to 110 characters (member
+  // set-password), and padding every row to the widest made the whole table
+  // 150 columns. Two lines per verb reads in any terminal.
+  for c in cmds {
+    let l = usage(f"lll {noun} {c.name}", c.spec, c.positional)
+    out += f"\n  {l}\n      {c.summary}"
   }
   if intro != "" { out += f"\n\n{intro}" }
   out

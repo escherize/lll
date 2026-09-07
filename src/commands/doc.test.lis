@@ -179,3 +179,28 @@ fn path_touches_is_false_when_either_side_is_empty() {
   assert !path_touches("", "")
   assert !path_touches("  ", "/")
 }
+
+// ----------------------------------------------------------- doc_commands
+//
+// The Command table is what dispatch, `lll doc --help` and completions read
+// (TASK-307), so the five verbs and their summaries are pinned here: a verb
+// dropped from the table vanishes from all three at once.
+
+#[test]
+fn doc_commands_declares_every_verb_once_with_a_summary() {
+  let names = doc_commands().map(|c| c.name)
+  assert strings.Join(names, " ") == "new list view edit delete"
+  for c in doc_commands() {
+    assert c.summary != ""
+    // No doc verb has a hand-written page; help is generated from spec.
+    assert c.page == ""
+  }
+}
+
+#[test]
+fn doc_commands_slug_verbs_take_a_positional() {
+  for c in doc_commands() {
+    let takes_slug = c.name == "view" || c.name == "edit" || c.name == "delete"
+    assert (c.positional == "SLUG") == takes_slug
+  }
+}

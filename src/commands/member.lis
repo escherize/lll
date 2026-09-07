@@ -12,59 +12,95 @@ import "flags"
 import "config"
 import "query"
 
-/// Dispatch `lll member <verb>`.
+/// Dispatch `lll member <verb>` through the noun's Command table (TASK-307).
+/// The table is the one place a verb is declared: dispatch, `lll member
+/// --help` and shell completions all read it, so none of the three can drift.
 pub fn member(args: Slice<string>) -> Result<(), string> {
-  let Some(verb) = args.get(2) else {
-    member_usage()
-    return Ok(())
-  }
-  match verb {
-    "list" => member_list(args),
-    // TASK-130: every sibling noun creates with `create` (label create -n,
-    // project create -n, team create -k, issue create -t), so member was the
-    // odd one out and a seed script guesses `create` every time. `add` stays
-    // the documented spelling; `create` is a second door onto the same room.
-    "add" | "create" => member_add(args),
-    "invite" => member_invite(args),
-    "set-password" => member_set_password(args),
-    "remove" | "delete" => member_remove(args),
-    "--help" => {
-      member_usage()
-      Ok(())
-    },
-    "-h" => {
-      member_usage()
-      Ok(())
-    },
-    other => Err(f"unknown member command: '{other}' (see 'lll member --help')"),
-  }
+  flags.dispatch("member", "work with members", member_intro(), member_commands(), args)
 }
 
-fn member_usage() {
-  fmt.Println(
-    "lll member - work with members
+/// Every member verb, as a value. `page` is the hand-written help invite,
+/// remove and set-password already had; their former pre-parse `--help`
+/// checks are gone because dispatch answers them now, and parses args against
+/// `spec` before `run` so a trailing -h can never reach the verb body.
+///
+/// `create` and `delete` are second entries onto the same run fn. TASK-130:
+/// every sibling noun creates with `create` (label create -n, project create
+/// -n, team create -k, issue create -t), so member was the odd one out and a
+/// seed script guesses `create` every time. `add` and `remove` stay the
+/// documented spellings.
+pub fn member_commands() -> Slice<flags.Command> {
+  [
+    flags.Command {
+      name: "list",
+      summary: "list members (name, email)",
+      page: "",
+      spec: member_list_spec(),
+      positional: "",
+      run: member_list,
+    },
+    flags.Command {
+      name: "add",
+      summary: "add a member ('create' is the same command)",
+      page: "",
+      spec: member_add_spec(),
+      positional: "",
+      run: member_add,
+    },
+    flags.Command {
+      name: "create",
+      summary: "add a member (the same command as 'add')",
+      page: "",
+      spec: member_add_spec(),
+      positional: "",
+      run: member_add,
+    },
+    flags.Command {
+      name: "invite",
+      summary: "add + temp password + the lines they run (any member; the admin credentials work too)",
+      page: member_invite_page(),
+      spec: member_invite_spec(),
+      positional: "NAME",
+      run: member_invite,
+    },
+    flags.Command {
+      name: "remove",
+      summary: "remove a member with no issues ('delete' is the same command)",
+      page: member_remove_page(),
+      spec: member_remove_spec(),
+      positional: "NAME",
+      run: member_remove,
+    },
+    flags.Command {
+      name: "delete",
+      summary: "remove a member with no issues (the same command as 'remove')",
+      page: member_remove_page(),
+      spec: member_remove_spec(),
+      positional: "NAME",
+      run: member_remove,
+    },
+    flags.Command {
+      name: "set-password",
+      summary: "set a member's login password (superuser only)",
+      page: member_set_password_page(),
+      spec: set_password_spec(),
+      positional: "NAME",
+      run: member_set_password,
+    },
+  ]
+}
 
-Usage:
-  lll member list                              list members (name, email)
-  lll member add -n \"name\" [-e email]          add a member
-                                               ('create' is the same command)
-  lll member invite NAME --email email         add + temp password + the lines
-                                               they run (any member; the
-                                               admin credentials work too)
-  lll member remove NAME                       remove a member with no issues
-                                               ('delete' is the same command)
-  lll member set-password NAME [--email email] set a member's login password
-                                               (superuser only)
-
-Members are PocketBase auth records (email + password; TASK-180). Adding one
+/// Prose that belongs to the noun rather than to any one verb; dispatch
+/// prints it under the verb table for `lll member --help`.
+fn member_intro() -> string {
+  "Members are PocketBase auth records (email + password; TASK-180). Adding one
 without -e synthesizes <name>@members.invalid as its identity. 'me' in the
 home config names the member that authors your comments.
 
 A freshly added or imported member has a random password nobody knows;
 'lll member set-password' is how a superuser gives them one, after which
 'lll login' works. 'lll member invite' is those two steps plus the handoff
-text, for onboarding somebody who is not here to type a password.",
-  )
+text, for onboarding somebody who is not here to type a password."
 }
 
 fn member_list(args: Slice<string>) -> Result<(), string> {
@@ -177,19 +213,6 @@ pub fn member_verb_spec(verb: string) -> Slice<flags.Flag> {
 fn member_remove(args: Slice<string>) -> Result<(), string> {
   let spec = member_remove_spec()
   let usage = flags.usage("lll member remove", spec, "NAME")
-  if args.find(|a| a == "--help" || a == "-h").is_some() {
-    fmt.Println(
-      "lll member remove - remove a member who has no issues assigned
-
-Usage:
-  " + usage + "
-
-Refuses a member with assigned issues: reassign them first
-('lll issue update KEY --assignee SOMEBODY'). Authenticates as the superuser,
-exactly like 'lll member set-password'.",
-    )
-    return Ok(())
-  }
   let p = flags.parse(spec, args, 3, true, usage)?
   let name = p.first()
   if name == "" { return Err(f"usage: {usage}") }
@@ -245,6 +268,21 @@ fn member_remove_spec() -> Slice<flags.Flag> {
   ])
 }
 
+/// The hand-written page for `lll member remove` (and its `delete` alias).
+/// The usage line is generated from the spec so it cannot drift from what
+/// the parser accepts.
+fn member_remove_page() -> string {
+  let usage = flags.usage("lll member remove", member_remove_spec(), "NAME")
+  "lll member remove - remove a member who has no issues assigned
+
+Usage:
+  " + usage + "
+
+Refuses a member with assigned issues: reassign them first
+('lll issue update KEY --assignee SOMEBODY'). Authenticates as the superuser,
+exactly like 'lll member set-password'."
+}
+
 /// Point this process at `url` for the rest of the command, when one was
 /// given. The gated helpers all read the configured url; setting the env var
 /// is how a flag reaches them without threading a base argument through
@@ -272,10 +310,6 @@ fn member_set_password(args: Slice<string>) -> Result<(), string> {
   let spec = set_password_spec()
   let usage = flags.usage("lll member set-password", spec, "NAME")
   let p = flags.parse(spec, args, 3, true, usage)?
-  if p.given("--help") {
-    print_set_password_usage()
-    return Ok(())
-  }
   let name = p.first()
   if name == "" {
     return Err(f"usage: {usage}")
@@ -365,12 +399,6 @@ set LLL_ADMIN_EMAIL/LLL_ADMIN_PASSWORD to the credentials 'lll up' prints",
 fn member_invite(args: Slice<string>) -> Result<(), string> {
   let spec = member_invite_spec()
   let usage = flags.usage("lll member invite", spec, "NAME")
-  // --help before parse would still trip the required --email, so the help
-  // check reads the raw argument instead of the parsed table.
-  if args.find(|a| a == "--help" || a == "-h").is_some() {
-    print_invite_usage()
-    return Ok(())
-  }
   let p = flags.parse(spec, args, 3, true, usage)?
   let name = p.first()
   if name == "" {
@@ -450,9 +478,10 @@ fn real_email(email: string) -> bool {
   email != "" && !strings.HasSuffix(email, "@members.invalid")
 }
 
-fn print_invite_usage() {
-  fmt.Println(
-    "lll member invite - add a colleague and hand them a working login
+/// The hand-written page for `lll member invite`; dispatch prints it for
+/// --help/-h before parse, which would otherwise trip the required --email.
+fn member_invite_page() -> string {
+  "lll member invite - add a colleague and hand them a working login
 
 Usage:
   lll member invite NAME --email email
@@ -470,13 +499,12 @@ password is stored nowhere else: lose it and reissue with
 Authenticates as the PocketBase superuser, exactly like 'lll token create'
 and 'lll member set-password': from LLL_ADMIN_EMAIL and LLL_ADMIN_PASSWORD
 (the credentials 'lll up' prints), or the configured token when it already is
-one. An existing member is refused rather than overwritten.",
-  )
+one. An existing member is refused rather than overwritten."
 }
 
-fn print_set_password_usage() {
-  fmt.Println(
-    "lll member set-password - set a member's login password (superuser only)
+/// The hand-written page for `lll member set-password`.
+fn member_set_password_page() -> string {
+  "lll member set-password - set a member's login password (superuser only)
 
 Usage:
   lll member set-password NAME [--email email]
@@ -489,8 +517,7 @@ off when stdin is a terminal, read as two lines when piped.
 --email also sets the member's email, and is required when the member only
 has a synthesized @members.invalid one: the email is the identity
 'lll login' asks for. After this, the member logs in with
-'lll login --url <server>'.",
-  )
+'lll login --url <server>'."
 }
 
 fn member_add(args: Slice<string>) -> Result<(), string> {

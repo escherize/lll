@@ -4,50 +4,62 @@ import "go:path/filepath"
 import "go:strings"
 
 import "config"
+import "flags"
 import "pb"
 
-/// Dispatch `lll config <verb>`.
+/// Dispatch `lll config <verb>` through the noun's Command table (TASK-307).
+/// Dispatch parses args against the verb's spec BEFORE calling it, which is
+/// what stops `lll config check -h` from RUNNING the check - a network call -
+/// the way the old `match verb` did when it handed a zero-arg fn nothing.
 pub fn config_cmd(args: Slice<string>) -> Result<(), string> {
-  let Some(verb) = args.get(2) else {
-    config_usage()
-    return Ok(())
-  }
-  // `lll config check -h` used to RUN the check - a network call - because
-  // this dispatches on args[2] and never looks past it, so flags.parse's
-  // help handling (TASK-237) never gets a chance. Asking for help must not
-  // execute the thing you were asking about.
-  if args[3..].find(|a| a == "--help" || a == "-h").is_some() {
-    config_usage()
-    return Ok(())
-  }
-  match verb {
-    "init" => config_init(),
-    "set" => config_set(args),
-    "check" => config_check(),
-    "--list" | "-l" => config_list(),
-    "--help" => {
-      config_usage()
-      Ok(())
-    },
-    "-h" => {
-      config_usage()
-      Ok(())
-    },
-    other => Err(f"unknown config command: '{other}' (see 'lll config --help')"),
-  }
+  flags.dispatch("config", "manage configuration", config_intro(), config_commands(), args)
 }
 
-fn config_usage() {
-  fmt.Println(
-    "lll config - manage configuration
+/// Every config verb, as a value. `--list` is spelled like a flag but IS the
+/// verb - `git config --list` is the model - so it dispatches by that name.
+/// No verb here has a hand-written page; each `page` is "" and help is the
+/// usage line plus flags, generated from `spec`.
+pub fn config_commands() -> Slice<flags.Command> {
+  [
+    flags.Command {
+      name: "--list",
+      summary: "every effective value and the file it came from",
+      page: "",
+      spec: [],
+      positional: "",
+      run: config_list,
+    },
+    flags.Command {
+      name: "check",
+      summary: "ask the configured url whether it is a PocketBase API",
+      page: "",
+      spec: [],
+      positional: "",
+      run: config_check,
+    },
+    flags.Command {
+      name: "init",
+      summary: "write a commented .lll.toml template to the current directory",
+      page: "",
+      spec: [],
+      positional: "",
+      run: config_init,
+    },
+    flags.Command {
+      name: "set",
+      summary: "set who you are, in ~/.config/lll/lll.toml",
+      page: "",
+      spec: [],
+      positional: "me NAME",
+      run: config_set,
+    },
+  ]
+}
 
-Usage:
-  lll config --list        every effective value and the file it came from
-  lll config check         ask the configured url whether it is a PocketBase API
-  lll config init          write a commented .lll.toml template to the current directory
-  lll config set me NAME   set who you are, in ~/.config/lll/lll.toml
-
-'me' names the member that authors your comments. 'lll up' guesses it from
+/// Prose that belongs to the noun rather than to any one verb; dispatch
+/// prints it under the verb table for `lll config --help`.
+fn config_intro() -> string {
+  "'me' names the member that authors your comments. 'lll up' guesses it from
 $USER on first boot, which is wrong on a shared machine — this is how you fix
 it. A name with no member yet: 'lll member add -n NAME'.
 
@@ -55,27 +67,22 @@ Precedence: env vars (LLL_URL, LLL_TEAM, LLL_ME, LLL_SORT, LLL_WEB_URL,
 LLL_TOKEN) > the repo's .lll.toml > ~/.config/lll/lll.toml. The files layer:
 each supplies the keys it names, so the committed repo file carries 'team' and
 nothing else while 'url' and 'me' stay per-machine. 'lll attach' writes the
-repo file.",
-  )
+repo file."
 }
 
-/// `lll config set me <name>`. Only 'me' is settable: it is the one key a
-/// machine-specific guess gets wrong, and everything else is easier to read
-/// and edit in the commented template than through a CLI.
+
+/// `lll config set me <name>`: write 'me' to the home config and seed the
+/// member.
 fn config_set(args: Slice<string>) -> Result<(), string> {
-  let Some(key) = args.get(3) else {
-    return Err("usage: lll config set me <name>")
-  }
-  if key != "me" {
-    return Err(
-      f"cannot set '{key}' — only 'me' is settable; 'lll attach' sets the team, and 'lll config --list' names the file to edit for the rest",
-    )
-  }
-  let Some(value) = args.get(4) else {
-    return Err("usage: lll config set me <name>")
-  }
-  let name = strings.TrimSpace(value)
-  if name == "" { return Err("usage: lll config set me <name>") }
+  // Two bare words, `me NAME`, admitted by dispatch's arity (TASK-307). Only
+  // 'me' is settable: it is the one key a machine-specific guess gets wrong,
+  // and everything else is easier to read and edit in the commented template
+  // than through a CLI.
+  let usage = "lll config set me NAME"
+  let key = args.get(3).unwrap_or("")
+  let name = strings.TrimSpace(args.get(4).unwrap_or(""))
+  if key != "me" { return Err(f"only 'me' is settable - got '{key}'; 'lll attach' sets the team, and 'lll config --list' names the file to edit for the rest") }
+  if name == "" { return Err(f"usage: {usage}") }
 
   // The home config, not the repo's: the repo file is committed, and whose
   // machine this is has no business travelling with it.
@@ -186,7 +193,8 @@ fn set_key_in(path: string, key: string, value: string) -> Result<(), string> {
 /// `git config --list --show-origin`. The failure this answers is silent: a
 /// repo reading the wrong team lists the wrong issues and reports nothing, so
 /// being able to ask which file won is the whole debugging affordance.
-fn config_list() -> Result<(), string> {
+/// `_args` is unread: dispatch already parsed it (TASK-307).
+fn config_list(_args: Slice<string>) -> Result<(), string> {
   let (cfg, src) = config.load_traced()?
   print_origin(src.url, "url", cfg.url)
   print_origin(src.team, "team", cfg.team)
@@ -210,7 +218,8 @@ fn config_list() -> Result<(), string> {
 /// the host you reached is the wrong one of the two things at that address.
 /// /api/health is the endpoint because it needs no auth and no collection, so
 /// a failure here is about reachability alone.
-fn config_check() -> Result<(), string> {
+/// `_args` is unread: dispatch already parsed it (TASK-307).
+fn config_check(_args: Slice<string>) -> Result<(), string> {
   let (cfg, src) = config.load_traced()?
   match pb.get("/api/health") {
     Ok(_) => fmt.Println(f"ok\t{cfg.url} answers as a PocketBase API"),
@@ -253,7 +262,8 @@ fn assigns(line: string, key: string) -> bool {
   strings.HasPrefix(strings.TrimSpace(strings.TrimPrefix(trimmed, key)), "=")
 }
 
-fn config_init() -> Result<(), string> {
+/// `lll config init`. `_args` is unread: dispatch already parsed it (TASK-307).
+fn config_init(_args: Slice<string>) -> Result<(), string> {
   if os.Stat(".lll.toml").is_ok() {
     return Err(".lll.toml already exists; not overwriting")
   }

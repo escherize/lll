@@ -1,5 +1,7 @@
 import "go:strings"
 
+import "flags"
+
 // Unit cover for the pure helpers in member.lis. Everything here is a
 // function of its arguments alone — no PocketBase, no config.
 //
@@ -64,4 +66,51 @@ fn real_email_rejects_the_synthesized_placeholder() {
   assert !real_email(synthesize_email("Kim Ng"))
   assert !real_email("")
   assert real_email("kim@example.com")
+}
+
+// -------------------------------------------------------- member_commands
+
+/// TASK-307: the Command table is the one declaration of every member verb.
+/// Both alias spellings (TASK-130's `create`, TASK-245's `delete`) must be
+/// rows of their own, or dispatch answers them "unknown member command".
+#[test]
+fn member_commands_declare_every_verb_and_alias() {
+  let names = member_commands().map(|c| c.name)
+  for want in ["list", "add", "create", "invite", "remove", "delete", "set-password"] {
+    assert names.find(|n| n == want).is_some()
+  }
+  assert names.length() == 7
+}
+
+/// A summary is the verb's row in `lll member --help`; an empty one is a
+/// blank row, which the table cannot tell from a missing verb.
+#[test]
+fn member_commands_all_carry_a_summary() {
+  for c in member_commands() {
+    assert c.summary != ""
+    assert !c.summary.contains("\n")
+  }
+}
+
+/// The three verbs that had hand-written pages keep them; the rest generate
+/// usage + flags from spec. A page invented for `list` or `add` would replace
+/// the flags block that already documents them.
+#[test]
+fn member_commands_keep_only_the_hand_written_pages() {
+  for c in member_commands() {
+    let want_page = match c.name {
+      "invite" | "remove" | "delete" | "set-password" => true,
+      _ => false,
+    }
+    assert (c.page != "") == want_page
+  }
+}
+
+/// The table's spec and the completions lookup are the same flag tables, so
+/// what dispatch parses is exactly what the shell completes.
+#[test]
+fn member_commands_specs_match_the_completion_lookup() {
+  for c in member_commands() {
+    assert flags.tokens(c.spec).equals(flags.tokens(member_verb_spec(c.name)))
+  }
 }

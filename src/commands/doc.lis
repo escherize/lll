@@ -12,49 +12,71 @@ import "models"
 import "pb"
 import "query"
 
-/// Dispatch `lll doc <verb>`.
+/// Dispatch `lll doc <verb>` through the noun's Command table (TASK-307).
+/// The table is the one place a verb is declared: dispatch, `lll doc --help`
+/// and shell completions all read it, so none of the three can drift.
 pub fn doc(args: Slice<string>) -> Result<(), string> {
-  let Some(verb) = args.get(2) else {
-    doc_usage()
-    return Ok(())
-  }
-  match verb {
-    "new" => doc_new(args),
-    "list" => doc_list(args),
-    "view" => doc_view(args),
-    "edit" => doc_edit(args),
-    "delete" => doc_delete(args),
-    "--help" => {
-      doc_usage()
-      Ok(())
-    },
-    "-h" => {
-      doc_usage()
-      Ok(())
-    },
-    other => Err(f"unknown doc command: '{other}' (see 'lll doc --help')"),
-  }
+  flags.dispatch("doc", "work with docs (wiki pages, findings, decisions, PRDs)", doc_intro(), doc_commands(), args)
 }
 
-fn doc_usage() {
-  fmt.Println(
-    "lll doc - work with docs (wiki pages, findings, decisions, PRDs)
+/// Every doc verb, as a value. No verb has a hand-written page, so `page` is
+/// "" throughout and help is generated from `spec`. Dispatch parses args
+/// against `spec` before `run`, so a trailing -h on `delete` or `edit` is
+/// answered before the verb body can reach the server.
+pub fn doc_commands() -> Slice<flags.Command> {
+  [
+    flags.Command {
+      name: "new",
+      summary: "create a doc; -b - reads the body from stdin",
+      page: "",
+      spec: doc_new_spec(),
+      positional: "",
+      run: doc_new,
+    },
+    flags.Command {
+      name: "list",
+      summary: "list docs (slug, kind, title), one line each",
+      page: "",
+      spec: doc_list_spec(),
+      positional: "",
+      run: doc_list,
+    },
+    flags.Command {
+      name: "view",
+      summary: "show one doc with its linked issues; --raw prints only the body; --json prints the raw record",
+      page: "",
+      spec: doc_view_spec(),
+      positional: "SLUG",
+      run: doc_view,
+    },
+    flags.Command {
+      name: "edit",
+      summary: "replace fields (at least one flag); -b - reads the whole body from stdin",
+      page: "",
+      spec: doc_edit_spec(),
+      positional: "SLUG",
+      run: doc_edit,
+    },
+    flags.Command {
+      name: "delete",
+      summary: "delete; asks [y/N] unless --force",
+      page: "",
+      spec: doc_delete_spec(),
+      positional: "SLUG",
+      run: doc_delete,
+    },
+  ]
+}
 
-Usage:
-  lll doc new -s \"slug\" -t \"title\" [-k kind] [-b \"body\"]
-                                                  create a doc; -b - reads the body
-                                                  from stdin
-  lll doc list                                    list docs (slug, kind, title), one
-                                                  line each
-  lll doc view SLUG [--raw] [--json]              show one doc with its linked issues;
-                                                  --raw prints only the body;
-                                                  --json prints the raw record
-  lll doc edit SLUG [-b \"body\"] [-t \"title\"] [-k kind]
-                                                  replace fields (at least one flag);
-                                                  -b - reads the whole body from stdin
-  lll doc delete SLUG [--force]                   delete; asks [y/N] unless --force" +
-    flags.section(doc_union_spec()) +
+/// Prose that belongs to the noun rather than to any one verb; dispatch
+/// prints it under the verb table for `lll doc --help`. The union Flags:
+/// block leads it so the noun page keeps every flag's line, as it did before
+/// the table (each verb's own --help repeats its share).
+fn doc_intro() -> string {
+  strings.TrimPrefix(flags.section(doc_union_spec()), "\n") +
     "
+
+lll doc works with docs (wiki pages, findings, decisions, PRDs).
 
 Every verb works inside ONE team — the one LLL_TEAM or .lll.toml names. A
 slug is unique per team, so two projects sharing a server both get an
@@ -67,8 +89,7 @@ inside one team: the doc and the issue must belong to the same one.
 Findings surface by area and path, not by search: 'lll finding near <path>'
 lists what is filed about a file or directory, 'lll finding list [--area X]'
 lists one area. An issue page shows the findings whose area names one of its
-labels (see 'lll finding --help').",
-  )
+labels (see 'lll finding --help')."
 }
 
 // ------------------------------------------------------------- validation

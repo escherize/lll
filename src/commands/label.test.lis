@@ -95,3 +95,30 @@ fn label_edit_requires_no_flag_by_itself() {
     assert !fl.required
   }
 }
+
+// ------------------------------------------------------------- the table
+
+/// The Command table is what dispatch, `lll label --help` and completions
+/// read (TASK-307): every verb is in it, in the order help lists them, and
+/// none is missing the one-line summary that is its row in the help table.
+#[test]
+fn label_commands_covers_every_verb_with_a_summary() {
+  let cmds = label_commands()
+  assert strings.Join(cmds.map(|c| c.name), " ") == "list create edit delete"
+  for c in cmds {
+    assert c.summary != ""
+  }
+}
+
+/// `lll label create --help` keeps the check-first note (TASK-208). The
+/// generic page dispatch would generate uses the bare usage line, so create
+/// carries its own page and that page must still say to reuse.
+#[test]
+fn label_create_page_keeps_the_check_first_note() {
+  let Some(create) = label_commands().find(|c| c.name == "create") else {
+    assert false
+    return
+  }
+  assert strings.Contains(create.page, "check 'lll label list' first")
+  assert strings.Contains(create.page, "--team  team key the label belongs to")
+}

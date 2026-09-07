@@ -8,58 +8,71 @@ import "pb"
 import "flags"
 import "query"
 
-/// Dispatch `lll project <verb>`.
+/// Dispatch `lll project <verb>` through the noun's Command table (TASK-307).
+/// The table is the one place a verb is declared: dispatch, `lll project
+/// --help` and shell completions all read it, so none of the three can drift.
 pub fn project(args: Slice<string>) -> Result<(), string> {
-  let Some(verb) = args.get(2) else {
-    project_usage()
-    return Ok(())
-  }
-  match verb {
-    "list" => project_list(args),
-    "create" => project_create(args),
-    "view" => project_view(args),
-    "edit" => project_edit(args),
-    "delete" => project_delete(args),
-    "--help" => {
-      project_usage()
-      Ok(())
+  flags.dispatch("project", "work with projects", project_intro(), project_commands(), args)
+}
+
+/// Every project verb, as a value. No verb has a hand-written page, so every
+/// `page` is "" and help is generated from `spec`. Dispatch parses args
+/// against `spec` before `run`, so a trailing -h can never reach a verb body
+/// - `lll project view --help` used to look up a project named "--help".
+pub fn project_commands() -> Slice<flags.Command> {
+  [
+    flags.Command {
+      name: "list",
+      summary: "list projects (name, status, team); this team's, or every team's when none is configured",
+      page: "",
+      spec: project_list_spec(),
+      positional: "",
+      run: project_list,
     },
-    "-h" => {
-      project_usage()
-      Ok(())
+    flags.Command {
+      name: "view",
+      summary: "show a project and its issues",
+      page: "",
+      spec: [],
+      positional: "NAME",
+      run: project_view,
     },
-    other => Err(
-      f"unknown project command: '{other}' (see 'lll project --help')",
-    ),
-  }
+    flags.Command {
+      name: "create",
+      summary: "create a project (status defaults to planned; --team defaults to LLL_TEAM)",
+      page: "",
+      spec: project_create_spec(),
+      positional: "",
+      run: project_create,
+    },
+    flags.Command {
+      name: "edit",
+      summary: "rename, re-describe or re-status a project; it keeps its issues",
+      page: "",
+      spec: project_edit_spec(),
+      positional: "NAME",
+      run: project_edit,
+    },
+    flags.Command {
+      name: "delete",
+      summary: "delete a project; refuses while issues still belong to it, and --force drops it off all of them",
+      page: "",
+      spec: project_delete_spec(),
+      positional: "NAME",
+      run: project_delete,
+    },
+  ]
+}
+
+/// Prose that belongs to the noun rather than to any one verb; dispatch
+/// prints it under the verb table for `lll project --help`.
+fn project_intro() -> string {
+  "Statuses: planned, started, paused, completed, cancelled"
 }
 
 /// Project statuses, in lifecycle order.
 fn project_statuses() -> Slice<string> {
   ["planned", "started", "paused", "completed", "cancelled"]
-}
-
-fn project_usage() {
-  fmt.Println(
-    "lll project - work with projects
-
-Usage:
-  lll project list                    list projects (name, status, team); this
-                                      team's, or every team's when none is
-                                      configured
-  lll project view NAME               show a project and its issues
-  lll project create -n \"name\" [-d desc] [--status s] [--team KEY]
-                                      create a project (status defaults to
-                                      planned; --team defaults to LLL_TEAM)
-  lll project edit NAME [-n \"new name\"] [-d desc] [--status s]
-                                      rename, re-describe or re-status a
-                                      project; it keeps its issues
-  lll project delete NAME [--force]   delete a project; refuses while issues
-                                      still belong to it, and --force drops it
-                                      off all of them
-
-Statuses: planned, started, paused, completed, cancelled",
-  )
 }
 
 fn project_list(args: Slice<string>) -> Result<(), string> {

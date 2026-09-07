@@ -394,3 +394,41 @@ fn json_quote_keeps_multi_byte_text_literal() {
   let assert Ok(q) = json_quote("café — 日本 🐛")
   assert q == "\"café — 日本 🐛\""
 }
+
+// -------------------------------------------------------- issue_commands
+
+/// TASK-307: the table is what dispatch, `lll issue --help` and completions
+/// read, so every verb the old match knew is in it, once, with a one-line
+/// summary - a blank or multi-line summary breaks the noun's help table.
+#[test]
+fn issue_commands_lists_every_verb_once_with_a_one_line_summary() {
+  let cmds = issue_commands()
+  assert cmds.map(|c| c.name).equals([
+    "create", "list", "view", "update", "close", "start", "claim", "release",
+    "delete", "comment", "watch", "url", "id", "title", "pr", "link", "unlink",
+  ])
+  for c in cmds {
+    assert c.summary != ""
+    assert !c.summary.contains("\n")
+  }
+}
+
+/// create is the one issue verb with a hand-written page; every other verb
+/// generates usage + flags from its spec, so a page there would be invented.
+#[test]
+fn only_issue_create_has_a_hand_written_page() {
+  for c in issue_commands() {
+    assert (c.page != "") == (c.name == "create")
+  }
+  let assert Some(create) = issue_commands().find(|c| c.name == "create")
+  assert create.page.contains("The title is the bare argument or -t")
+}
+
+/// link and unlink are the two-positional verbs issue() routes around
+/// flags.dispatch (its parse admits one positional). The route keys off this
+/// exact positional shape, so nothing else may carry it by accident.
+#[test]
+fn only_link_and_unlink_take_two_positionals() {
+  let two = issue_commands().filter(|c| c.positional == "KEY-123 SLUG")
+  assert two.map(|c| c.name).equals(["link", "unlink"])
+}

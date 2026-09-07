@@ -12,38 +12,44 @@ import "query"
 /// with kind=finding; `lll doc new -k finding` stays the authoring path, and
 /// these verbs answer "what do we know about THIS file / area". Surfacing is
 /// by area and path — a filter over kind='finding' — never full-text luck.
+///
+/// Dispatched through the noun's Command table (TASK-307): dispatch, `lll
+/// finding --help` and shell completions all read it, so none can drift.
 pub fn finding(args: Slice<string>) -> Result<(), string> {
-  let Some(verb) = args.get(2) else {
-    finding_usage()
-    return Ok(())
-  }
-  match verb {
-    "near" => finding_near(args),
-    "list" => finding_list(args),
-    "--help" => {
-      finding_usage()
-      Ok(())
-    },
-    "-h" => {
-      finding_usage()
-      Ok(())
-    },
-    other => Err(f"unknown finding command: '{other}' (see 'lll finding --help')"),
-  }
+  flags.dispatch("finding", "retrieve findings near a path", finding_intro(), finding_commands(), args)
 }
 
-fn finding_usage() {
-  fmt.Println(
-    "lll finding - retrieve findings (docs with kind=finding) by area or path
+/// Every finding verb, as a value. Neither verb had a hand-written page, so
+/// `page` is "" and help is generated from `spec` - and dispatch parses args
+/// against `spec` before `run`, so a trailing -h never reaches the verb body.
+pub fn finding_commands() -> Slice<flags.Command> {
+  [
+    flags.Command {
+      name: "near",
+      summary: "findings about a file or directory",
+      page: "",
+      spec: [],
+      positional: "<path>",
+      run: finding_near,
+    },
+    flags.Command {
+      name: "list",
+      summary: "every finding, or one area's, one line each (slug, area, title)",
+      page: "",
+      spec: finding_list_spec(),
+      positional: "",
+      run: finding_list,
+    },
+  ]
+}
 
-Usage:
-  lll finding near <path>          findings about a file or directory,
-                                   matched by directory containment in both
-                                   directions (a finding filed on 'src/pb'
-                                   answers both 'near src' and
-                                   'near src/pb/records.lis')
-  lll finding list [--area X]      every finding, or one area's, one line
-                                   each (slug, area, title)
+/// Prose that belongs to the noun rather than to any one verb; dispatch
+/// prints it under the verb table for `lll finding --help`.
+fn finding_intro() -> string {
+  "Retrieve findings (docs with kind=finding) by area or path.
+
+'near' matches by directory containment in both directions: a finding filed
+on 'src/pb' answers both 'near src' and 'near src/pb/records.lis'.
 
 Both verbs answer for ONE team — the one LLL_TEAM or .lll.toml names. Every
 project has a src/, so an unscoped answer would be another codebase's.
@@ -52,8 +58,7 @@ Author findings with 'lll doc new -k finding -a <area> -p \"<paths>\"'.
 `area` is conventionally the NAME of an existing label: an issue whose labels
 contain the area surfaces the finding — on its web page and in
 'lll issue view'. `paths` is comma-separated file or directory paths, the
-coordinates 'lll finding near' matches by.",
-  )
+coordinates 'lll finding near' matches by."
 }
 
 // ------------------------------------------------------------------ specs
@@ -70,16 +75,6 @@ fn finding_list_spec() -> Slice<flags.Flag> {
     },
     flags.Flag { name: "--json", help: "print the raw record list as JSON", .. },
   ]
-}
-
-/// The flag table of one finding verb; read by `lll completions` so the
-/// scripts complete exactly what the parser accepts (TASK-127).
-pub fn finding_verb_spec(verb: string) -> Slice<flags.Flag> {
-  match verb {
-    "near" => [],
-    "list" => finding_list_spec(),
-    _ => [],
-  }
 }
 
 // ----------------------------------------------------------------- shared

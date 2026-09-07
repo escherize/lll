@@ -324,128 +324,179 @@ pub fn issue_watch_spec() -> Slice<flags.Flag> {
   ]
 }
 
-/// The flag table of one issue verb; empty for the verbs without flags.
-/// Read by `lll completions` — the shell scripts complete exactly what the
-/// parser accepts because they read the same table.
-pub fn issue_verb_spec(verb: string) -> Slice<flags.Flag> {
-  match verb {
-    "create" => issue_create_spec(),
-    "list" => issue_list_spec(),
-    "view" => issue_view_spec(),
-    "update" => issue_update_spec(),
-    "delete" => issue_delete_spec(),
-    "comment" => issue_comment_spec(),
-    "watch" => issue_watch_spec(),
-    _ => [],
-  }
+/// Dispatch `lll issue <verb>` through the noun's Command table (TASK-307).
+/// The table is the one place a verb is declared: dispatch, `lll issue --help`
+/// and shell completions all read it, so none of the three can drift.
+pub fn issue(args: Slice<string>) -> Result<(), string> {
+  let cmds = issue_commands()
+  flags.dispatch("issue", "work with issues", issue_intro(), cmds, args)
+}
+
+/// Every issue verb, as a value. `page` is the hand-written help `issue
+/// create` already had; its former pre-parse `--help` check is gone because
+/// dispatch answers it now, and parses args against `spec` before `run` so a
+/// trailing -h can never reach the verb body. The summaries are the old
+/// print_usage rows, one line each.
+pub fn issue_commands() -> Slice<flags.Command> {
+  [
+    flags.Command {
+      name: "create",
+      summary: "create an issue in the configured team; -d - reads the description from stdin; without --state it starts in todo",
+      page: issue_create_page(),
+      spec: issue_create_spec(),
+      positional: "[\"title\"]",
+      run: create,
+    },
+    flags.Command {
+      name: "list",
+      summary: "list issues; scoped to the configured team",
+      page: "",
+      spec: issue_list_spec(),
+      positional: "",
+      run: list,
+    },
+    flags.Command {
+      name: "view",
+      summary: "show one issue in full, with comments; --raw prints it as plain markdown; -w opens its web page instead",
+      page: "",
+      spec: issue_view_spec(),
+      positional: "[KEY-123]",
+      run: view,
+    },
+    flags.Command {
+      name: "update",
+      summary: "change fields (at least one flag)",
+      page: "",
+      spec: issue_update_spec(),
+      positional: "[KEY-123]",
+      run: update,
+    },
+    flags.Command {
+      name: "close",
+      summary: "set state done",
+      page: "",
+      spec: [],
+      positional: "[KEY-123]",
+      run: close_issue,
+    },
+    flags.Command {
+      name: "start",
+      summary: "set state in-progress; print/create the branch key-number-slug (git switch)",
+      page: "",
+      spec: [],
+      positional: "[KEY-123]",
+      run: start,
+    },
+    flags.Command {
+      name: "claim",
+      summary: "take it exclusively for 'me' and assign it; exits non-zero, changing nothing, when someone already holds it",
+      page: "",
+      spec: [],
+      positional: "[KEY-123]",
+      run: claim,
+    },
+    flags.Command {
+      name: "release",
+      summary: "give a claim back",
+      page: "",
+      spec: [],
+      positional: "[KEY-123]",
+      run: release,
+    },
+    flags.Command {
+      name: "delete",
+      summary: "delete; asks [y/N] unless --force",
+      page: "",
+      spec: issue_delete_spec(),
+      positional: "KEY-123",
+      run: delete_issue,
+    },
+    flags.Command {
+      name: "comment",
+      summary: "add a comment (authored by 'me' in .lll.toml); without -b, list comments",
+      page: "",
+      spec: issue_comment_spec(),
+      positional: "[KEY-123]",
+      run: comment,
+    },
+    flags.Command {
+      name: "watch",
+      summary: "stream live events for the issue and its comments until interrupted",
+      page: "",
+      spec: issue_watch_spec(),
+      positional: "[KEY-123]",
+      run: issue_watch,
+    },
+    flags.Command {
+      name: "url",
+      summary: "print the issue's web page URL",
+      page: "",
+      spec: [],
+      positional: "[KEY-123]",
+      run: url_cmd,
+    },
+    flags.Command {
+      name: "id",
+      summary: "print the issue's KEY-123 identifier",
+      page: "",
+      spec: [],
+      positional: "[KEY-123]",
+      run: id_cmd,
+    },
+    flags.Command {
+      name: "title",
+      summary: "print the issue's title",
+      page: "",
+      spec: [],
+      positional: "[KEY-123]",
+      run: title_cmd,
+    },
+    flags.Command {
+      name: "pr",
+      summary: "open a GitHub PR for the issue via 'gh pr create' (title \"KEY-123: title\", body links the issue)",
+      page: "",
+      spec: [],
+      positional: "[KEY-123]",
+      run: pr_cmd,
+    },
+    flags.Command {
+      name: "link",
+      summary: "link the issue to a doc (see 'lll doc --help')",
+      page: "",
+      spec: [],
+      positional: "KEY-123 SLUG",
+      run: link,
+    },
+    flags.Command {
+      name: "unlink",
+      summary: "remove that link",
+      page: "",
+      spec: [],
+      positional: "KEY-123 SLUG",
+      run: unlink,
+    },
+  ]
 }
 
 /// Every flag across the issue verbs, deduplicated by canonical name
-/// (first wording wins), in the order the verbs declare them. This is the
-/// Flags: block `lll issue --help` renders.
+/// (first wording wins), in the order the table declares them. This is the
+/// Flags: block `lll issue --help` renders under the verb rows.
 fn issue_union_spec() -> Slice<flags.Flag> {
   let mut out: Slice<flags.Flag> = []
-  for verb in [
-    "create",
-    "list",
-    "view",
-    "update",
-    "delete",
-    "comment",
-    "watch",
-    "close",
-    "start",
-    "claim",
-    "release",
-    "url",
-    "id",
-    "title",
-    "pr",
-    "link",
-    "unlink",
-  ] {
-    for fl in issue_verb_spec(verb) {
+  for c in issue_commands() {
+    for fl in c.spec {
       if out.find(|f| f.name == fl.name).is_none() { out = out.append(fl) }
     }
   }
   out
 }
 
-/// Dispatch `lll issue <verb>`.
-pub fn issue(args: Slice<string>) -> Result<(), string> {
-  let Some(verb) = args.get(2) else {
-    print_usage()
-    return Ok(())
-  }
-  match verb {
-    "create" => create(args),
-    "list" => list(args),
-    "view" => view(args),
-    "update" => update(args),
-    "close" => close_issue(args),
-    "start" => start(args),
-    "claim" => claim(args),
-    "release" => release(args),
-    "delete" => delete_issue(args),
-    "comment" => comment(args),
-    "watch" => issue_watch(args),
-    "url" => url_cmd(args),
-    "id" => id_cmd(args),
-    "title" => title_cmd(args),
-    "pr" => pr_cmd(args),
-    "link" => link(args),
-    "unlink" => unlink(args),
-    "--help" => {
-      print_usage()
-      Ok(())
-    },
-    "-h" => {
-      print_usage()
-      Ok(())
-    },
-    other => Err(f"unknown issue command: '{other}' (see 'lll issue --help')"),
-  }
-}
-
-fn print_usage() {
-  fmt.Println(
-    "lll issue - work with issues
-
-Usage:
-  lll issue create -t \"title\" [-d desc] [--emoji X] [--priority 0-4] [--state s]
-                   [--assignee name] [--label name]... [--project name] [--json]
-                                                  create an issue in the configured team;
-                                                  -d - reads the description from stdin;
-                                                  without --state it starts in todo
-  lll issue list [--state s] [--assignee name] [--label name] [--project name]
-                 [--search q] [--sort f] [--limit N] [--json]
-                                                  list issues; scoped to the configured team
-  lll issue view [KEY-123] [--json] [--raw] [-w]  show one issue in full, with comments;
-                                                  --raw prints it as plain markdown;
-                                                  -w opens its web page instead
-  lll issue update [KEY-123] <flags>              change fields (at least one flag)
-  lll issue close [KEY-123]                       set state done
-  lll issue start [KEY-123]                       set state in-progress; print/create the
-                                                  branch key-number-slug (git switch)
-  lll issue claim [KEY-123]                       take it exclusively for 'me' and assign
-                                                  it; exits non-zero, changing nothing,
-                                                  when someone already holds it
-  lll issue release [KEY-123]                     give a claim back
-  lll issue delete KEY-123 [--force]              delete; asks [y/N] unless --force
-  lll issue comment [KEY-123] [-b \"body\"]         add a comment (authored by 'me' in
-                                                  .lll.toml); without -b, list comments
-  lll issue watch [KEY-123] [--json]              stream live events for the issue and
-                                                  its comments until interrupted
-  lll issue url [KEY-123]                         print the issue's web page URL
-  lll issue id [KEY-123]                          print the issue's KEY-123 identifier
-  lll issue title [KEY-123]                       print the issue's title
-  lll issue pr [KEY-123]                          open a GitHub PR for the issue via
-                                                  'gh pr create' (title \"KEY-123: title\",
-                                                  body links the issue)
-  lll issue link KEY-123 SLUG                     link the issue to a doc (see 'lll doc --help')
-  lll issue unlink KEY-123 SLUG                   remove that link
-" +
-    flags.section(issue_union_spec()) +
+/// Prose that belongs to the noun rather than to any one verb; dispatch
+/// prints it under the verb table for `lll issue --help`. The union Flags:
+/// block leads, as it did before the table, so no flag's help line is lost
+/// from the noun page.
+fn issue_intro() -> string {
+  strings.TrimPrefix(flags.section(issue_union_spec()), "\n") +
     "
 
 Web URLs come from LLL_WEB_URL, 'web_url' in .lll.toml, or the default
@@ -456,13 +507,11 @@ git branch: eng-12-fix-login resolves to ENG-12.
 
 State glyphs: ◌ backlog  ○ todo  ◐ in-progress  ◉ in-review  ● done  ⊗ cancelled
 
-The team comes from LLL_TEAM or 'team' in .lll.toml (see 'lll config --help').",
-  )
+The team comes from LLL_TEAM or 'team' in .lll.toml (see 'lll config --help')."
 }
 
-fn print_create_usage() {
-  fmt.Println(
-    "lll issue create - create an issue in the configured team
+fn issue_create_page() -> string {
+  "lll issue create - create an issue in the configured team
 
 Usage:
   " + flags.usage("lll issue create", issue_create_spec(), "[\"title\"]") + "
@@ -473,20 +522,12 @@ Usage:
 The title is the bare argument or -t; give either, not both.
 
 The team comes from 'lll attach' ('team' in .lll.toml), or LLL_TEAM.
-Without --state the issue starts in todo; --label may be repeated.",
-  )
+Without --state the issue starts in todo; --label may be repeated."
 }
 
 fn create(args: Slice<string>) -> Result<(), string> {
   let spec = issue_create_spec()
   let usage = flags.usage("lll issue create", spec, "[\"title\"]")
-  // --help before parse, so somebody who asked for the help gets it rather
-  // than the missing-title refusal below (TASK-125). Same shape as
-  // 'lll member invite'.
-  if args.find(|a| a == "--help" || a == "-h").is_some() {
-    print_create_usage()
-    return Ok(())
-  }
   // A bare title is accepted alongside -t: `gh issue create`, `linear` and
   // `jira` all take one, and every usability run reached for it first and got
   // "unknown flag: 'Hello'". -t stays the documented spelling, so no script
