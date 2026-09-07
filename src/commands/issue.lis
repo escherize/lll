@@ -313,7 +313,7 @@ fn issue_comment_spec() -> Slice<flags.Flag> {
   [
     flags.Flag {
       name: "-b",
-      alias: "--body",
+      alias: "--body -m --message",
       value: true,
       hint: "\"body\"",
       help: "comment body ('-b -' reads it from stdin)",

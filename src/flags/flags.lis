@@ -5,7 +5,8 @@ import "go:strings"
 /// flag is declared exactly once and the three surfaces cannot drift.
 ///
 /// `name` is the canonical spelling — the one shown in help and usage lines.
-/// `alias` is an additional accepted spelling (`-d` for `--description`);
+/// `alias` is any further accepted spellings, space-separated (`-d` for
+/// `--description`; `--body -m --message` for `-b`);
 /// parsed values always land under `name`. A flag with no long form (-t,
 /// -w, -k) simply has the short spelling as its name.
 pub struct Flag {
@@ -85,7 +86,7 @@ pub fn parse_n(
   // fills the gap rather than overriding intent: declared means the caller
   // handles it, undeclared means nobody did.
   let declares_help = spec
-    .find(|f| f.name == "--help" || f.alias == "--help" || f.name == "-h" || f.alias == "-h")
+    .find(|f| spells(f, "--help") || spells(f, "-h"))
     .is_some()
   if !declares_help {
     for a in args[start..] {
@@ -104,7 +105,7 @@ pub fn parse_n(
     if arg.starts_with("-") && arg.contains("=") {
       let parts = strings.SplitN(arg, "=", 2)
       let spelling = parts[0]
-      let Some(fl) = spec.find(|f| f.name == spelling || (f.alias != "" && f.alias == spelling)) else {
+      let Some(fl) = spec.find(|f| spells(f, spelling)) else {
         return Err(unknown_flag(arg, usage, spec))
       }
       // A boolean given a value is a mistake, not a truthy string: `--json=0`
@@ -116,7 +117,7 @@ pub fn parse_n(
       i += 1
       continue
     }
-    let Some(fl) = spec.find(|f| f.name == arg || (f.alias != "" && f.alias == arg)) else {
+    let Some(fl) = spec.find(|f| spells(f, arg)) else {
       if arg.starts_with("-") || max_positional == 0 {
         return Err(unknown_flag(arg, usage, spec))
       }
@@ -183,7 +184,7 @@ fn unknown_flag(arg: string, usage: string, spec: Slice<Flag>) -> string {
 impl Parsed {
   /// The canonical name for a spelling, or the name itself when unknown.
   fn canon(self, name: string) -> string {
-    let Some(fl) = self.spec.find(|f| f.name == name || (f.alias != "" && f.alias == name)) else {
+    let Some(fl) = self.spec.find(|f| spells(f, name)) else {
       return name
     }
     fl.name
@@ -359,9 +360,16 @@ pub fn section(spec: Slice<Flag>) -> string {
   out
 }
 
+/// True when `s` is the flag's name or one of its aliases.
+fn spells(fl: Flag, s: string) -> bool {
+  if fl.name == s { return true }
+  for a in strings.Fields(fl.alias) { if a == s { return true } }
+  false
+}
+
 fn flag_label(fl: Flag) -> string {
   if fl.alias == "" { return fl.name }
-  f"{fl.name}, {fl.alias}"
+  f"{fl.name}, {strings.Join(strings.Fields(fl.alias), ", ")}"
 }
 
 /// Completion tokens for a spec: every accepted spelling, hidden flags
@@ -371,7 +379,7 @@ pub fn tokens(spec: Slice<Flag>) -> Slice<string> {
   for fl in spec {
     if fl.hidden { continue }
     out = out.append(fl.name)
-    if fl.alias != "" { out = out.append(fl.alias) }
+    for a in strings.Fields(fl.alias) { out = out.append(a) }
   }
   out
 }

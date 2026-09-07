@@ -1085,7 +1085,7 @@ assert_contains "$out" "unknown flag: '--bogus'" "unknown flag names the flag"
 assert_contains "$out" "usage: lll issue create" "unknown flag error carries the generated usage line"
 assert_contains "$out" "Flags:" "unknown flag error carries the flag table (fleet task 8)"
 # the table labels aliases, so the long form an agent guesses is visible
-out=$(LLL_URL=$URL "$LIN" issue comment ENG-6 --message "x" 2>&1 || true)
+out=$(LLL_URL=$URL "$LIN" issue comment ENG-6 --text "x" 2>&1 || true)
 assert_contains "$out" "-b, --body" "unknown flag error shows -b with its --body alias"
 set +e
 out=$("$LIN" completions powershell 2>&1)
@@ -1573,6 +1573,10 @@ assert_contains "$out" "the ID comes right after the verb" "sub-verb error names
 # aliases agents guessed at a steady rate across fleet runs (TASK-309)
 out=$(LLL_URL=$URL "$LIN" issue comment ENG-6 --body "alias body")
 assert_contains "$out" "Commented on ENG-6" "comment takes --body for -b"
+out=$(LLL_URL=$URL "$LIN" issue comment ENG-6 -m "alias m")
+assert_contains "$out" "Commented on ENG-6" "comment takes -m for -b (three shards across two replays)"
+out=$(LLL_URL=$URL "$LIN" issue comment ENG-6 --nope 2>&1 || true)
+assert_contains "$out" "-b, --body, -m, --message" "the flag table lists every alias"
 out=$(LLL_URL=$URL LLL_TEAM=ENG "$LIN" issue list --query "Roundtrip")
 assert_contains "$out" "ENG-6" "list takes --query for --search"
 out=$(LLL_URL=$URL LLL_TEAM=ENG "$LIN" issue new --title "Made with issue new" --priority 4)
