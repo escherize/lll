@@ -1564,7 +1564,7 @@ assert_contains "$out" "lll issue comment" "misplaced issue verb names its noun"
 set +e
 out=$("$LIN" issues list 2>&1)
 set -e
-assert_contains "$out" "did you mean 'lll issue'" "plural noun names the singular"
+assert_contains "$out" "did you mean 'lll issue list'" "plural noun names the singular and keeps the verb (fleet replay: 7/30)"
 out=$("$LIN" --help)
 assert_contains "$out" "There is no 'lll list' or 'lll comment'" "top-level help states the noun-verb shape (fleet replay: 5/30)"
 

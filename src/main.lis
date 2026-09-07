@@ -53,7 +53,7 @@ fn main() {
       fmt.Println(f"lll {commands.version()}")
       Ok(())
     },
-    other => Err(unknown_command(other)),
+    other => Err(unknown_command(other, os.Args.get(2).unwrap_or(""))),
   }
 
   if let Err(msg) = result {
@@ -119,12 +119,16 @@ layer, each supplying the keys it names — 'lll config --list' shows which won)
 
 /// An issue verb typed as a noun ('lll comment ...') is the most common
 /// unknown command (three of thirty fleet agents); name where it lives.
-fn unknown_command(noun: string) -> string {
-  // 'lll issues' for 'lll issue': the plural is the natural guess.
+fn unknown_command(noun: string, verb: string) -> string {
+  // 'lll issues list' for 'lll issue list': the plural is the natural guess.
+  // The verb rides along - seven of thirty fleet agents rated the bare
+  // "did you mean 'lll issue'" the least helpful message, since it dropped
+  // the half they had right.
   let singular = strings.TrimSuffix(noun, "s")
   for n in ["issue", "team", "member", "project", "label", "doc", "finding", "token"] {
     if singular == n && noun != n {
-      return f"unknown command: '{noun}' — did you mean 'lll {n}'? (see 'lll {n} -h')"
+      let rest = if verb == "" || verb.starts_with("-") { "" } else { f" {verb}" }
+      return f"unknown command: '{noun}' — did you mean 'lll {n}{rest}'? (see 'lll {n} -h')"
     }
   }
   for c in commands.issue_commands() {
