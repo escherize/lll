@@ -24,6 +24,16 @@ set -euo pipefail
 . "$(dirname "$0")/lib.sh"   # free_port, wait_ok, fail, assert_*, e2e_begin/end
 e2e_begin
 
+# Install cleanup before compilation or server startup can fail. The repo
+# configuration has already been moved aside by e2e_begin.
+WATCH_PIDS=""
+cleanup() { # exit-status
+  e2e_diagnose "$1"
+  e2e_reap $WATCH_PIDS ${SPY_PIDS:-} ${PB_PID:-}
+  e2e_end
+}
+e2e_trap_cleanup cleanup
+
 PORT=$(free_port 20000 39999)
 URL="http://127.0.0.1:$PORT"
 WEB_PORT=$(free_port 40000 59999)
@@ -62,17 +72,6 @@ start_pb() {
   wait_ok "$URL/api/health" 150
 }
 start_pb || { echo "FAIL: lll up did not start" >&2; cat "$PB_LOG" >&2; exit 1; }
-WATCH_PIDS=""
-cleanup() { # exit-status
-  # Diagnose first: e2e_diagnose reads the logs, and e2e_end deletes the
-  # directory they live in (TASK-121). e2e_reap kills AND waits, so the
-  # server is gone before its --pb-dir is (TASK-153).
-  e2e_diagnose "$1"
-  e2e_reap $WATCH_PIDS ${SPY_PIDS:-} "$PB_PID"
-  e2e_end
-}
-e2e_trap_cleanup cleanup
-
 # --- TASK-181: the suite rides a member token --------------------------------
 # The rules refuse tokenless requests now, so bootstrap one before anything
 # else talks to PocketBase: the superuser API creates e2e-agent with a known
