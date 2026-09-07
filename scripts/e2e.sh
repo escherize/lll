@@ -1570,6 +1570,12 @@ set +e
 out=$("$LIN" issues list 2>&1)
 set -e
 assert_contains "$out" "did you mean 'lll issue list'" "plural noun names the singular and keeps the verb (fleet replay: 7/30)"
+set +e
+out=$("$LIN" issue assign ENG-1 bob 2>&1)
+set -e
+assert_contains "$out" "lll issue claim KEY-123" "a synonym verb is pointed at the verb (fleet replay: assign, 5/30)"
+out=$(env LLL_URL=$URL LLL_TEAM=ENG "$LIN" doc new --slug long-forms --title "Long forms" --kind finding --area pb --path "src/pb" --body "every short flag has a long one")
+assert_contains "$out" "Created doc long-forms" "doc new takes the long form of every flag, --path included"
 out=$("$LIN" --help)
 assert_contains "$out" "There is no 'lll list' or 'lll comment'" "top-level help states the noun-verb shape (fleet replay: 5/30)"
 

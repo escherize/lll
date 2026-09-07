@@ -246,7 +246,7 @@ fn doc_new_spec() -> Slice<flags.Flag> {
     },
     flags.Flag {
       name: "-p",
-      alias: "--paths",
+      alias: "--paths --path",
       value: true,
       hint: "paths",
       help: "comma-separated file/directory paths the doc is about, e.g.\nsrc/pb, pb/pb_migrations ('lll finding near' matches by them)",
@@ -302,7 +302,7 @@ fn doc_edit_spec() -> Slice<flags.Flag> {
     },
     flags.Flag {
       name: "-p",
-      alias: "--paths",
+      alias: "--paths --path",
       value: true,
       hint: "paths",
       help: "replacement comma-separated paths — the WHOLE set\n(pass \"\" to clear it)",

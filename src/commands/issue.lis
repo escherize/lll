@@ -337,7 +337,34 @@ pub fn issue_watch_spec() -> Slice<flags.Flag> {
 /// and shell completions all read it, so none of the three can drift.
 pub fn issue(args: Slice<string>) -> Result<(), string> {
   let cmds = issue_commands()
+  if let Some(hint) = issue_synonym(args.get(2).unwrap_or("")) {
+    return Err(hint)
+  }
   flags.dispatch("issue", "work with issues", issue_intro(), cmds, args)
+}
+
+/// Verbs agents reach for that are not verbs here, each pointed at the
+/// one that is. Counts are from the fleet replay: 'assign' five times in
+/// thirty-shard runs, the rest once or twice.
+fn issue_synonym(verb: string) -> Option<string> {
+  let hint = match verb {
+    "assign" => "take it for yourself with 'lll issue claim KEY-123'; assign someone else with 'lll issue update KEY-123 --assignee NAME'",
+    "unassign" => "'lll issue release KEY-123' gives a claim back; 'lll issue update KEY-123 --assignee none' clears the assignee",
+    "move" => "'lll issue start KEY-123' sets in-progress; any state: 'lll issue update KEY-123 --state s'",
+    "transition" => "'lll issue start KEY-123' sets in-progress; any state: 'lll issue update KEY-123 --state s'",
+    "status" => "'lll issue view KEY-123' shows the state; 'lll issue update KEY-123 --state s' sets it",
+    "edit" => "'lll issue update KEY-123 ...' changes fields",
+    "get" => "'lll issue view KEY-123'",
+    "find" => "'lll issue list --search text'",
+    "search" => "'lll issue list --search text'",
+    "ls" => "'lll issue list'",
+    "rm" => "'lll issue delete KEY-123'",
+    "remove" => "'lll issue delete KEY-123'",
+    "comments" => "'lll issue comment KEY-123' lists them; add one with a body after the key",
+    _ => "",
+  }
+  if hint == "" { return None }
+  Some(f"unknown issue command: '{verb}' — {hint} (see 'lll issue -h')")
 }
 
 /// Every issue verb, as a value. `page` is the hand-written help `issue
