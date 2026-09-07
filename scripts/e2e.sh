@@ -2375,13 +2375,20 @@ out=$(cd "$ORACLE_REPO" && HOME="$ORACLE_HOME" "$LLL_ABS" config set web_url ftp
 assert_contains "$out" 'http://' "invalid web URL explains supported schemes"
 out=$(cd "$ORACLE_REPO" && HOME="$ORACLE_HOME" "$LLL_ABS" config set web_url https://wrong extra 2>&1) && fail "accepted trailing config argument"
 # Offline attach must not turn into false readiness after authentication.
-(cd "$ORACLE_REPO" && env -u LLL_TOKEN -u LLL_TEAM HOME="$ORACLE_HOME" LLL_URL=http://127.0.0.1:1 "$LLL_ABS" attach -k DXOFF >/dev/null)
+out=$(cd "$ORACLE_REPO" && env -u LLL_TOKEN -u LLL_TEAM HOME="$ORACLE_HOME" LLL_URL=http://127.0.0.1:1 "$LLL_ABS" attach -k OFFLINE)
+assert_contains "$out" 'saved local attachment only' 'offline attach distinguishes saved config'
+assert_contains "$out" 'lll attach -k OFFLINE' 'offline attach gives explicit reconciliation'
+assert_not_contains "$out" 'lll up' 'offline client recovery does not start a server'
+[ "$(cat "$ORACLE_REPO/.lll.toml")" = 'team = "OFFLINE"' ] || fail 'explicit long key was changed'
+out=$(cd "$ORACLE_REPO" && HOME="$ORACLE_HOME" "$LLL_ABS" attach -k '' 2>&1) && fail 'empty explicit attachment accepted'
+assert_contains "$out" 'nonempty team key' 'empty key rejected before config mutation'
+[ "$(cat "$ORACLE_REPO/.lll.toml")" = 'team = "OFFLINE"' ] || fail 'empty key changed attachment'
 out=$(cd "$ORACLE_REPO" && env -u LLL_TOKEN -u LLL_TEAM -u LLL_URL HOME="$ORACLE_HOME" "$LLL_ABS" login --url "$URL" --email e2e-agent@lll.test --password e2e-agent-pass-123)
-assert_contains "$out" 'team DXOFF is missing' "login verifies attached team"
+assert_contains "$out" 'team OFFLINE is missing' "login verifies attached team"
 assert_not_contains "$out" 'ready:' "missing team is not ready"
-(cd "$ORACLE_REPO" && env -u LLL_TOKEN -u LLL_TEAM -u LLL_URL HOME="$ORACLE_HOME" "$LLL_ABS" attach -k DXOFF >/dev/null)
+(cd "$ORACLE_REPO" && env -u LLL_TOKEN -u LLL_TEAM -u LLL_URL HOME="$ORACLE_HOME" "$LLL_ABS" attach -k OFFLINE >/dev/null)
 out=$(cd "$ORACLE_REPO" && env -u LLL_TOKEN -u LLL_TEAM -u LLL_URL HOME="$ORACLE_HOME" "$LLL_ABS" issue create 'Recovered offline attachment')
-assert_contains "$out" 'DXOFF-1' "explicit recovery makes team usable"
+assert_contains "$out" 'OFFLINE-1' "explicit recovery makes team usable"
 # Each create takes a positional name or --name; mixed forms fail before mutation.
 LLL_TEAM=POS "$LIN" project create 'Oracle project' >/dev/null
 LLL_TEAM=POS "$LIN" label create 'oracle-label' >/dev/null

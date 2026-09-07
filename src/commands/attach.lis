@@ -57,8 +57,9 @@ pub fn attach(args: Slice<string>) -> Result<(), string> {
 
   let name = filepath.Base(root)
   let given = p.one("-k")
-  let key = if given != "" {
-    clean_key(given)
+  let key = if p.given("-k") {
+    if given == "" { return Err("-k requires a nonempty team key") }
+    given
   } else {
     // Ask the server before inventing anything. Bare `lll attach` reads as
     // "connect me to the tracker", and every usability run typed it against a
@@ -121,15 +122,18 @@ fn derive_key_from_server(dir_name: string) -> Result<string, string> {
 }
 
 /// Create the team unless the server already has it, and say which happened.
-/// A server that is down is not a reason to fail: the committed file is the
-/// point, and `lll up` creates a configured-but-missing team on its next boot.
+/// A server that is down is not a reason to undo the local attachment.
+/// Reconciliation is explicit once access to the configured server returns.
 fn ensure_attached_team(key: string) -> string {
-  let Ok(found) = find_team(key) else {
-    return f"could not reach PocketBase — 'lll up' will create team {key} on the next boot"
+  let retry = f"lll attach -k {flags.shell_argument(key)}"
+  let found = match find_team(key) {
+    Ok(found) => found,
+    Err(e) => return f"saved local attachment only; could not verify team {key} on the configured server:\n{e}\nRestore server access, then reconcile this attachment:\n  {retry}",
   }
   if found.is_some() { return f"team {key} already exists" }
-  let Ok(created) = create_team(key, key) else {
-    return f"could not create team {key} — 'lll up' will create it on the next boot"
+  let created = match create_team(key, key) {
+    Ok(created) => created,
+    Err(e) => return f"saved local attachment only; could not create team {key} on the configured server:\n{e}\nResolve the server error, then reconcile this attachment:\n  {retry}",
   }
   f"created team {created.key} — issues will be {created.key}-1, {created.key}-2, ..."
 }
@@ -145,10 +149,15 @@ Writes team = \"KEY\" to .lll.toml and creates the team on the server if it is
 missing. Inside a git repository that file goes at the repo root; outside one
 it goes in the working directory, and every subdirectory inherits it.
 
+An explicit -k KEY is saved exactly as supplied, without shortening it.
 Without -k, the server decides: one team means that team, several means you
-have to say which. Only when the server has no teams at all does the key come
-from the directory name, reduced to letters and digits, uppercased, at most 5
-characters -- the first team on a new server.
+have to say which. When the server has no teams or cannot be reached, the
+suggested key comes from the directory name, reduced to letters and digits,
+uppercased, at most 5 characters.
+
+If server access or team creation fails, only the local attachment is saved.
+Restore access or resolve the reported error, then rerun lll attach -k KEY
+to reconcile it with the configured server.
 
 In a repo, commit that file. Config layers — the repo's .lll.toml supplies
 'team', your ~/.config/lll/lll.toml supplies 'url' and 'me' — so on the next
