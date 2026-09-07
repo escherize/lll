@@ -283,6 +283,7 @@ fn issue_update_spec() -> Slice<flags.Flag> {
     },
     flags.Flag {
       name: "--description",
+      alias: "-d",
       value: true,
       hint: "d",
       help: "new description (update; '-d -' reads it from stdin)",
