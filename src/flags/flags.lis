@@ -105,7 +105,7 @@ pub fn parse_n(
       let parts = strings.SplitN(arg, "=", 2)
       let spelling = parts[0]
       let Some(fl) = spec.find(|f| f.name == spelling || (f.alias != "" && f.alias == spelling)) else {
-        return Err(unknown_flag(arg, usage))
+        return Err(unknown_flag(arg, usage, spec))
       }
       // A boolean given a value is a mistake, not a truthy string: `--json=0`
       // would otherwise read as "json on". Reject it naming the flag.
@@ -118,7 +118,7 @@ pub fn parse_n(
     }
     let Some(fl) = spec.find(|f| f.name == arg || (f.alias != "" && f.alias == arg)) else {
       if arg.starts_with("-") || max_positional == 0 {
-        return Err(unknown_flag(arg, usage))
+        return Err(unknown_flag(arg, usage, spec))
       }
       if pos.length() >= max_positional {
         return Err(f"unexpected argument: '{arg}'")
@@ -172,9 +172,12 @@ fn usage_help(usage: string, spec: Slice<Flag>) -> string {
   f"{head}{flags_block}"
 }
 
-fn unknown_flag(arg: string, usage: string) -> string {
+/// The flag table travels with the error: 26 of 30 fleet agents named the
+/// bare "unknown flag + usage line" the least helpful message lll has, since
+/// it says what was wrong and nothing about what would be right.
+fn unknown_flag(arg: string, usage: string, spec: Slice<Flag>) -> string {
   if usage == "" { return f"unknown flag: '{arg}'" }
-  f"unknown flag: '{arg}'\nusage: {usage}"
+  f"unknown flag: '{arg}'\nusage: {usage}{section(spec)}"
 }
 
 impl Parsed {
@@ -332,18 +335,21 @@ pub fn usage(cmd: string, spec: Slice<Flag>, positional: string) -> string {
 pub fn section(spec: Slice<Flag>) -> string {
   let visible = spec.filter(|f| !f.hidden)
   if visible.is_empty() { return "" }
+  // The label carries the alias ("-b, --body"): the long form guessed at a
+  // steady rate across fleet runs was never shown anywhere.
   let mut width = 0
   for fl in visible {
-    if fl.name.length() > width { width = fl.name.length() }
+    if flag_label(fl).length() > width { width = flag_label(fl).length() }
   }
   let cont = strings.Repeat(" ", width + 4)
   let mut out = "\nFlags:"
   for fl in visible {
-    let pad = strings.Repeat(" ", width - fl.name.length() + 2)
+    let label = flag_label(fl)
+    let pad = strings.Repeat(" ", width - label.length() + 2)
     let mut first = true
     for l in fl.help.split("\n") {
       if first {
-        out += f"\n  {fl.name}{pad}{l}"
+        out += f"\n  {label}{pad}{l}"
         first = false
       } else {
         out += f"\n{cont}{l}"
@@ -351,6 +357,11 @@ pub fn section(spec: Slice<Flag>) -> string {
     }
   }
   out
+}
+
+fn flag_label(fl: Flag) -> string {
+  if fl.alias == "" { return fl.name }
+  f"{fl.name}, {fl.alias}"
 }
 
 /// Completion tokens for a spec: every accepted spelling, hidden flags

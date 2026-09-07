@@ -194,7 +194,7 @@ fn issue_list_spec() -> Slice<flags.Flag> {
       alias: "--query",
       value: true,
       hint: "q",
-      help: "list only issues whose title contains q (or --query)",
+      help: "list only issues whose title contains q",
       ..,
     },
     flags.Flag {
@@ -315,7 +315,7 @@ fn issue_comment_spec() -> Slice<flags.Flag> {
       alias: "--body",
       value: true,
       hint: "\"body\"",
-      help: "comment body (or --body; '-b -' reads it from stdin)",
+      help: "comment body ('-b -' reads it from stdin)",
       ..,
     },
   ]

@@ -1083,6 +1083,10 @@ set -e
 [ "$rc" -ne 0 ] || fail "issue create --bogus: expected nonzero exit"
 assert_contains "$out" "unknown flag: '--bogus'" "unknown flag names the flag"
 assert_contains "$out" "usage: lll issue create" "unknown flag error carries the generated usage line"
+assert_contains "$out" "Flags:" "unknown flag error carries the flag table (fleet task 8)"
+# the table labels aliases, so the long form an agent guesses is visible
+out=$(LLL_URL=$URL "$LIN" issue comment ENG-6 --message "x" 2>&1 || true)
+assert_contains "$out" "-b, --body" "unknown flag error shows -b with its --body alias"
 set +e
 out=$("$LIN" completions powershell 2>&1)
 rc=$?
