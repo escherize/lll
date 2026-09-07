@@ -127,6 +127,7 @@ fn issue_create_spec() -> Slice<flags.Flag> {
     },
     flags.Flag {
       name: "--assignee",
+      alias: "--assign",
       value: true,
       hint: "name",
       help: "member name (see 'lll member list'); filters on list",
@@ -167,6 +168,7 @@ fn issue_list_spec() -> Slice<flags.Flag> {
     },
     flags.Flag {
       name: "--assignee",
+      alias: "--assign",
       value: true,
       hint: "name",
       help: "member name (see 'lll member list'); filters on list",
@@ -254,6 +256,7 @@ fn issue_update_spec() -> Slice<flags.Flag> {
     },
     flags.Flag {
       name: "--assignee",
+      alias: "--assign",
       value: true,
       hint: "name",
       help: "member name (see 'lll member list'); filters on list",
