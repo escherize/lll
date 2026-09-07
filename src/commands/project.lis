@@ -5,6 +5,7 @@ import "go:strings"
 
 import "models"
 import "pb"
+import "config"
 import "flags"
 import "query"
 
@@ -274,6 +275,12 @@ fn resolve_project(team_id: string, name: string) -> Result<models.Project, stri
     &result,
   )?
   let Some(p) = result.items.find(|p| p.name == name) else {
+    // Four of thirty fleet agents passed the TEAM key here: the team scopes
+    // the command already, so the flag they wanted was no flag at all.
+    let team_key = config.load()?.team
+    if team_key != "" && strings.EqualFold(name, team_key) {
+      return Err(f"'{name}' is the team, not a project — the team scopes every command already, so drop --project, or pick one from 'lll project list'")
+    }
     return Err(f"no project named '{name}' — see 'lll project list'")
   }
   Ok(p)

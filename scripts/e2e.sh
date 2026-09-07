@@ -644,6 +644,10 @@ got=$(LLL_URL=$URL "$LIN" issue view ENG-6 --json | jq -r '.assignee')
 out=$(cd "$REPO" && LLL_URL=$URL "$LLL_ABS" issue update ENG-6 --assignee none)
 got=$(LLL_URL=$URL "$LIN" issue view ENG-6 --json | jq -r '.assignee')
 [ "$got" = "" ] || fail "update --assignee none: assignee is '$got'"
+out=$(LLL_URL=$URL "$LIN" issue update ENG-6 --assignee "" 2>&1 || true)
+assert_contains "$out" "or 'none' to clear it" "an empty --assignee names none"
+out=$(LLL_URL=$URL LLL_TEAM=ENG "$LIN" issue list --project ENG 2>&1 || true)
+assert_contains "$out" "'ENG' is the team, not a project" "the team key passed as a project is told so"
 # NOT alice: `config set me alice` above now seeds that member for real, so
 # adding it again hits the unique index. This case is about the no-email path.
 out=$(LLL_URL=$URL "$LIN" member add -n carol)
@@ -1561,6 +1565,8 @@ set +e
 out=$("$LIN" issues list 2>&1)
 set -e
 assert_contains "$out" "did you mean 'lll issue'" "plural noun names the singular"
+out=$("$LIN" --help)
+assert_contains "$out" "There is no 'lll list' or 'lll comment'" "top-level help states the noun-verb shape (fleet replay: 5/30)"
 
 # a sub-verb where the ID goes is told the ID comes first (fleet task 4: 3/30)
 set +e

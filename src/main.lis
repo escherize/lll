@@ -74,6 +74,9 @@ fn print_usage() {
   fmt.Println(
     "lll - a Linear-style issue tracker
 
+Every verb lives under a noun: 'lll issue list', 'lll issue comment KEY \"body\"',
+'lll doc view SLUG'. There is no 'lll list' or 'lll comment'.
+
 Usage:
   lll issue <command>     work with issues (see 'lll issue --help')
   lll team <command>      work with teams (see 'lll team --help')

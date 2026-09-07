@@ -919,6 +919,11 @@ fn update(args: Slice<string>) -> Result<(), string> {
   let description_set = p.given("--description")
   let emoji = check_emoji(p.one("--emoji"))?
   let emoji_set = p.given("--emoji")
+  // An empty --assignee is the natural guess for "clear it" (two of thirty
+  // fleet agents); the word is 'none', and this is where to say so.
+  if p.given("--assignee") && assignee_name == "" {
+    return Err("--assignee needs a member name, or 'none' to clear it")
+  }
   if state == "" && priority < 0 && assignee_name == "" && label_names.is_empty() && project_name == "" && !title_set && !description_set && !emoji_set {
     return Err(f"nothing to update — pass at least one flag\nusage: {usage}")
   }
