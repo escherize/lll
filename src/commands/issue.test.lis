@@ -361,9 +361,13 @@ fn member_create_is_an_alias_for_member_add() {
   let add = flags.tokens(member_verb_spec("add"))
   let create = flags.tokens(member_verb_spec("create"))
   assert create.equals(add)
-  // add is not weakened by the alias: it still carries the required -n.
+  // add is not weakened by the alias: both carry -n. It is optional now, not
+  // required - TASK-309's fleet had agents type a bare name the way `issue
+  // create` takes a bare title, and the body refuses only when BOTH are
+  // absent, so the flag layer must not demand -n on its own.
   let assert Some(n) = member_verb_spec("add").find(|f| f.name == "-n")
-  assert n.required
+  assert !n.required
+  assert n.value
 }
 
 // ------------------------------------------------------------ json_quote

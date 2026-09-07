@@ -114,3 +114,25 @@ fn member_commands_specs_match_the_completion_lookup() {
     assert flags.tokens(c.spec).equals(flags.tokens(member_verb_spec(c.name)))
   }
 }
+
+// TASK-309, fleet run 2: two of thirty agents typed `lll member add shard-23`
+// and were refused for a bare word, while `issue create` takes a bare title.
+// The table entries now admit one positional and the body falls back to it.
+
+#[test]
+fn member_add_takes_a_bare_name_and_n_still_wins() {
+  let spec = member_add_spec()
+  // The positional alone parses and is the name.
+  let assert Ok(p) = flags.parse(spec, ["lll", "member", "add", "shard-23"], 3, true, "")
+  assert p.first() == "shard-23"
+  assert p.one("-n") == ""
+  // -n alone still parses; the spec no longer marks it required, because the
+  // body refuses only when BOTH are absent.
+  let assert Ok(q) = flags.parse(spec, ["lll", "member", "add", "-n", "ada"], 3, true, "")
+  assert q.one("-n") == "ada"
+  // Neither: parse succeeds (nothing is required at the flag layer) and the
+  // body is what says usage. Pinned here so a future 'required' does not
+  // quietly reject the bare form.
+  let assert Ok(r) = flags.parse(spec, ["lll", "member", "add"], 3, true, "")
+  assert r.first() == "" && r.one("-n") == ""
+}

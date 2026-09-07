@@ -308,7 +308,13 @@ for want in backlog todo in-progress in-review done cancelled; do
 done
 
 echo
-echo "seeded $count issues, 2 projects, 5 labels, 3 members into a throwaway board"
+# TASK-309: thirty fleet members, so a shard's me = "shard-NN" names someone.
+# Run 2 of the first fleet task had 22 of 30 shards fail on exactly this: the
+# rules said to set that identity and the board had never heard of it.
+for i in $(seq -w 1 30); do
+  lll_idem member add -n "shard-$i" >/dev/null
+done
+echo "seeded $count issues, 2 projects, 5 labels, 33 members into a throwaway board"
 echo
 echo "  board   $BOARD_URL"
 echo "  db      $URL/_/"

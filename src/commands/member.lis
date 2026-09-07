@@ -44,7 +44,7 @@ pub fn member_commands() -> Slice<flags.Command> {
       summary: "add a member ('create' is the same command)",
       page: "",
       spec: member_add_spec(),
-      positional: "",
+      positional: "[\"name\"]",
       run: member_add,
     },
     flags.Command {
@@ -52,7 +52,7 @@ pub fn member_commands() -> Slice<flags.Command> {
       summary: "add a member (the same command as 'add')",
       page: "",
       spec: member_add_spec(),
-      positional: "",
+      positional: "[\"name\"]",
       run: member_add,
     },
     flags.Command {
@@ -131,7 +131,7 @@ fn member_list_spec() -> Slice<flags.Flag> {
 
 fn member_add_spec() -> Slice<flags.Flag> {
   [
-    flags.Flag { name: "-n", value: true, hint: "\"name\"", required: true, help: "member name", .. },
+    flags.Flag { name: "-n", value: true, hint: "\"name\"", help: "member name", .. },
     flags.Flag { name: "-e", value: true, hint: "email", help: "member email", .. },
   ]
 }
@@ -526,11 +526,25 @@ fn member_add(args: Slice<string>) -> Result<(), string> {
   // reached this through the TASK-130 `create` alias is not told to rerun a
   // command they did not run.
   let verb = args.get(2).unwrap_or("add")
-  let usage = flags.usage(f"lll member {verb}", spec, "")
-  let p = flags.parse(spec, args, 3, false, usage)?
-  let name = p.one("-n")
+  let usage = flags.usage(f"lll member {verb}", spec, "[\"name\"]")
+  let p = flags.parse(spec, args, 3, true, usage)?
+  // A bare name is accepted alongside -n, as `issue create` takes a bare
+  // title: fleet run 2 (TASK-309) had two of thirty agents type
+  // `lll member add shard-23` and get "unknown flag" for a word. -n stays
+  // the documented spelling so no script breaks; the positional is the guess
+  // that now lands. Both given, -n wins, so a caller who wrote both is not
+  // silently split between two names.
+  let name = if p.one("-n") != "" { p.one("-n") } else { p.first() }
+  if name == "" { return Err(f"usage: {usage}") }
   let email = p.one("-e")
 
+  // A name that already exists is the most common way this fails, and it used
+  // to surface as PocketBase's bare "400 Bad Request: Failed to create record"
+  // - fleet run 2 (TASK-309) had an agent unable to tell a collision from a
+  // validation rule from a permissions problem. Look first, and say so.
+  if let Some(existing) = find_member(name)? {
+    return Err(f"a member named '{name}' already exists <{existing.email}> — pick another name, or use it as-is ('lll config set me {name}')")
+  }
   let created = create_member(name, email)?
   fmt.Println(f"Added member {created.name}")
   Ok(())
