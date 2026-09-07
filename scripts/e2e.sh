@@ -1013,7 +1013,7 @@ WATCH_PIDS=""
 "$LIN" completions bash > "$DATA_DIR/comp.bash"
 bash -n "$DATA_DIR/comp.bash" || fail "bash completions do not parse"
 out=$(cat "$DATA_DIR/comp.bash")
-assert_contains "$out" "create list view update close start claim release delete comment watch url id title pr link unlink" "bash completions list issue verbs"
+assert_contains "$out" "create list view read update close start claim release delete comment watch url id title pr link unlink" "bash completions list issue verbs"
 assert_contains "$out" "--limit" "bash completions know --limit"
 assert_contains "$out" "complete -F _lll lll" "bash completions register"
 "$LIN" completions zsh > "$DATA_DIR/comp.zsh"
@@ -2240,7 +2240,11 @@ assert_contains "$out" "at least 8 characters" "set-password checks the length"
 # holding it HEALS a stale token (TASK-255, asserted just below) instead of
 # refusing. "A plain user with a dead token" has to be constructed.
 out=$(env -u LLL_ADMIN_EMAIL -u LLL_ADMIN_PASSWORD LLL_URL=$URL "$LIN" issue list 2>&1) && fail "a stale token should be refused, not answered emptily"
-assert_contains "$out" "no longer valid" "a stale token is named"
+# The wording changed with TASK-309: a rejected token names WHERE it came from
+# and puts "copied wrong" first, because ten of thirty fleet agents had hand-
+# copied theirs and every one of them went looking for a revoked credential.
+assert_contains "$out" "was rejected by" "a stale token is named"
+assert_contains "$out" "copied wrong" "the rejection lists the cheap local cause first"
 assert_contains "$out" "lll login" "the stale-token refusal names the fix"
 # TASK-255: a process holding the server's admin credentials re-mints and
 # retries instead of reporting an empty database. This is the board: `lll up`

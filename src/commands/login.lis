@@ -328,20 +328,39 @@ each value came from; 'lll login' replaces the token.",
     return Err(f"unknown whoami argument: '{flag}' (see 'lll whoami --help')")
   }
   let cfg = config.load()?
-  // pb.post refuses an untokened collection call with the message that names
-  // the fix, so there is no second copy of it here.
-  let body = pb.post("/api/collections/members/auth-refresh", "")?
-  let mut auth = models.AuthResponse { .. }
-  if let Err(e) = json.Unmarshal(body.bytes(), &auth) {
+  // NOT auth-refresh, which this used to POST. A refresh is refused for every
+  // non-refreshable token - and `lll token create` mints exactly those, the
+  // whole agent credential - so `lll whoami` answered "401 Unauthorized" to
+  // every agent that ever ran it, which is the first command an agent reaches
+  // for when it is unsure who it is. Fleet run 3 (TASK-309) hit it. The record
+  // the token names is fetched by the id in the JWT instead, which every kind
+  // of token can do. pb.get refuses an untokened call with the message that
+  // names the fix, so there is no second copy of it here.
+  // No token at all is its own answer, the same one every read gives; the
+  // classification below is for a token that IS set but cannot be read.
+  if cfg.token == "" {
+    return Err(pb.not_logged_in_message())
+  }
+  // Same classification the reads use, so a corrupted token gets the same
+  // words here as everywhere else, instead of a third phrasing.
+  let Some(id) = pb.token_subject(cfg.token) else {
+    if strings.Split(cfg.token, ".").length() == 3 {
+      return Err(pb.corrupted_token_message())
+    }
+    return Err("the configured token is not a PocketBase auth token — 'lll login', or 'lll token create' for an agent")
+  }
+  let body = pb.get(f"/api/collections/members/records/{id}")?
+  let mut me = models.Member { .. }
+  if let Err(e) = json.Unmarshal(body.bytes(), &me) {
     return Err(f"decoding the identity response: {e}")
   }
-  fmt.Println(f"{auth.record.name} <{auth.record.email}>")
+  fmt.Println(f"{me.name} <{me.email}>")
   fmt.Println(f"server  {cfg.url}")
   let team = if cfg.team == "" { "(none — run 'lll attach')" } else { cfg.team }
   fmt.Println(f"team    {team}")
-  if cfg.me != "" && cfg.me != auth.record.name {
+  if cfg.me != "" && cfg.me != me.name {
     fmt.Println(
-      f"note: 'me' is set to \"{cfg.me}\", which is not the member this token belongs to — 'lll config set me {auth.record.name}' fixes it",
+      f"note: 'me' is set to \"{cfg.me}\", which is not the member this token belongs to — 'lll config set me {me.name}' fixes it",
     )
   }
   Ok(())

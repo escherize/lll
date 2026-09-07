@@ -1,4 +1,5 @@
 import "go:errors"
+import "go:strings"
 
 // The bearer decision is the pure seam of TASK-179: every verb asks bearer()
 // what to put in Authorization, and "" means today's request, untouched. The
@@ -98,4 +99,19 @@ fn token_subject_declines_what_it_cannot_read() {
   // {"exp":1} - valid JSON, no id: still None, so no record can be fetched
   // and the token is treated as valid rather than accused.
   assert token_subject("h.eyJleHAiOjF9.s").is_none()
+}
+
+#[test]
+fn token_subject_declines_a_three_segment_token_with_a_broken_payload() {
+  // A JWT with one character altered inside its payload segment: the shape
+  // fleet run 3 produced ten times over by hand-copying. token_subject cannot
+  // read an id from it, and token_verdict must call that "corrupted" rather
+  // than shrug it through as valid - the whole point is to send the agent
+  // back to the file instead of leaving it staring at an empty list.
+  let good = "eyJhbGciOiJIUzI1NiJ9.eyJjb2xsZWN0aW9uSWQiOiJwYmNfMzU3MjczOTM0OSIsImV4cCI6MSwiaWQiOiJhYmMxMjNkZWY0NTZnaGkiLCJyZWZyZXNoYWJsZSI6ZmFsc2UsInR5cGUiOiJhdXRoIn0.sig"
+  assert token_subject(good).is_some()
+  // Flip one payload character. Still three segments; no longer decodable.
+  let broken = "eyJhbGciOiJIUzI1NiJ9.eyJjb2xsZWN0aW9uSWQiOiJwYmNfMzU3MjczOTM0OSIsImV4cCI6MSwiaWQiOiJhYmMxMjNkZWY0NTZnaGkiLCJyZWZyZXNoYWJsZSI6ZmFsc2UsInR5cGUiOiJhdXRoIn0!.sig"
+  assert token_subject(broken).is_none()
+  assert strings.Split(broken, ".").length() == 3
 }

@@ -363,6 +363,18 @@ pub fn issue_commands() -> Slice<flags.Command> {
       positional: "[KEY-123]",
       run: view,
     },
+    // `read` is `view`. Seven of thirty first-time agents typed it in one
+    // fleet run (TASK-309), and the count went UP as other noise was removed -
+    // it is the word people reach for. One table entry; `view` stays the
+    // documented spelling, and the summary says so.
+    flags.Command {
+      name: "read",
+      summary: "the same command as 'view'",
+      page: "",
+      spec: issue_view_spec(),
+      positional: "[KEY-123]",
+      run: view,
+    },
     flags.Command {
       name: "update",
       summary: "change fields (at least one flag)",
