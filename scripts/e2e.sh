@@ -300,8 +300,8 @@ assert_contains "$(cat "$HOME_TOML")" 'me = "bob"' "config set me replaced the v
 # A duplicate key would make the file unparseable; prove it still loads.
 out=$(cd "$WORK" && HOME="$SET_HOME" LLL_URL=$URL LLL_TEAM=ENG "$LLL_ABS" issue list)
 assert_contains "$out" "ENG-1" "config still parses after two config set me"
-out=$(cd "$WORK" && "$LLL_ABS" config set url http://x 2>&1) && fail "config set accepted a key other than me"
-assert_contains "$out" "supported keys: me, web_url" "config set rejects other keys"
+out=$(cd "$WORK" && "$LLL_ABS" config set unsupported http://x 2>&1) && fail "config set accepted an unsupported key"
+assert_contains "$out" "supported keys: me, url, web_url" "config set rejects unsupported keys"
 
 # --- config --list: every value and the file it came from (TASK-168) ---
 # The failure this answers is silent, so it has to name origins, not values.
@@ -2034,6 +2034,27 @@ out=$(LLL_TOKEN="$FLAG_MINT_TOK" HOME="$E2E_HOME" LLL_URL=$URL "$LIN" whoami)
 assert_contains "$out" 'e2e-agent' 'flag-minted token authenticates the intended member'
 cmp -s "$E2E_HOME/.config/lll/lll.toml" "$DATA_DIR/pre-token-flags.toml" \
   || fail 'token authority flags modified saved configuration'
+
+# A static-token receiver can persist its endpoint without a login or live
+# connection; the next process reads it without an endpoint environment value.
+STATIC_HOME="$DATA_DIR/static-token-home"
+mkdir -p "$STATIC_HOME"
+out=$(cd "$STATIC_HOME" && env -u LLL_TOKEN HOME="$STATIC_HOME" LLL_URL=http://127.0.0.1:1 \
+  "$LLL_ABS" config set url "$URL/")
+assert_contains "$out" 'overrides this setting' 'URL setter explains an environment override'
+cp "$STATIC_HOME/.config/lll/lll.toml" "$DATA_DIR/static-endpoint.toml"
+for invalid_endpoint in ftp://invalid https://invalid/path?query=yes https://invalid/path#fragment; do
+  out=$(cd "$STATIC_HOME" && env -u LLL_URL HOME="$STATIC_HOME" "$LLL_ABS" config set url "$invalid_endpoint" 2>&1) \
+    && fail 'accepted an invalid API endpoint'
+  assert_contains "$out" 'url must be an absolute' 'invalid API endpoint guidance'
+  cmp -s "$STATIC_HOME/.config/lll/lll.toml" "$DATA_DIR/static-endpoint.toml" \
+    || fail 'invalid endpoint changed saved configuration'
+done
+out=$(cd "$STATIC_HOME" && env -u LLL_URL HOME="$STATIC_HOME" LLL_TOKEN="$FLAG_MINT_TOK" "$LLL_ABS" whoami)
+assert_contains "$out" 'e2e-agent' 'static receiver reads the persisted endpoint'
+out=$(cd "$STATIC_HOME" && env -u LLL_URL HOME="$STATIC_HOME" LLL_TOKEN="$FLAG_MINT_TOK" "$LLL_ABS" member list)
+assert_contains "$out" 'e2e-agent' 'static receiver authenticates a read without URL override'
+[ ! -f "$STATIC_HOME/.lll.toml" ] || fail 'API endpoint setter wrote repository config'
 
 # ...and the gate is superuser-only: a member token and no credentials at all
 # are both refused, naming the fix. The member token is minted fresh — the

@@ -48,6 +48,7 @@ Usage:
   lll config check         ask the configured url whether it is a PocketBase API
   lll config init          write a commented .lll.toml template to the current directory
   lll config set me NAME   set who you are, in ~/.config/lll/lll.toml
+  lll config set url URL   save the API endpoint in the same file; no login required
   lll config set web_url URL  save the actual board endpoint in the same file
 
 'me' names the member that authors your comments. 'lll up' guesses it from
@@ -62,24 +63,26 @@ repo file.",
   )
 }
 
-/// Set a machine-level identity or board endpoint, without changing repo config.
+/// Set a machine-level identity or endpoint, without changing repo config.
 fn config_set(args: Slice<string>) -> Result<(), string> {
-  let usage = "usage: lll config set <me|web_url> VALUE"
+  let usage = "usage: lll config set <me|url|web_url> VALUE"
   if args.length() != 5 { return Err(usage) }
   let key = args[3]
   let value = strings.TrimSpace(args[4])
   if value == "" { return Err(usage) }
-  if key == "web_url" {
-    let endpoint = checked_web_url(value)?
+  if key == "url" || key == "web_url" {
+    let endpoint = checked_endpoint(key, value)?
     let path = set_home_key(key, endpoint)?
-    fmt.Println(f"web_url = {endpoint} in {path}")
+    fmt.Println(f"{key} = {endpoint} in {path}")
     let (cfg, src) = config.load_traced()?
-    if cfg.web_url != endpoint {
-      fmt.Println(f"note: {src.web_url} overrides this setting; 'lll config --list' shows the effective configuration")
+    let effective = if key == "url" { cfg.url } else { cfg.web_url }
+    let origin = if key == "url" { src.url } else { src.web_url }
+    if effective != endpoint {
+      fmt.Println(f"note: {origin} overrides this setting; 'lll config --list' shows the effective configuration")
     }
     return Ok(())
   }
-  if key != "me" { return Err(f"cannot set '{key}'; supported keys: me, web_url") }
+  if key != "me" { return Err(f"cannot set '{key}'; supported keys: me, url, web_url") }
   let name = value
 
   // The home config, not the repo's: the repo file is committed, and whose
@@ -303,12 +306,16 @@ fn config_init() -> Result<(), string> {
   Ok(())
 }
 
-/// Board base URLs must be explicit HTTP(S) endpoints, with no credentials.
+/// API and board base URLs must be explicit HTTP(S) endpoints, with no credentials.
 fn checked_web_url(value: string) -> Result<string, string> {
+  checked_endpoint("web_url", value)
+}
+
+fn checked_endpoint(key: string, value: string) -> Result<string, string> {
   let parsed = url.Parse(value)
-  let Ok(u) = parsed else { return Err("web_url must be an absolute http:// or https:// URL") }
+  let Ok(u) = parsed else { return Err(f"{key} must be an absolute http:// or https:// URL") }
   if (u.Scheme != "http" && u.Scheme != "https") || u.Hostname() == "" || u.User.is_some() || u.RawQuery != "" || u.Fragment != "" {
-    return Err("web_url must be an absolute http:// or https:// URL without credentials, query or fragment")
+    return Err(f"{key} must be an absolute http:// or https:// URL without credentials, query or fragment")
   }
   Ok(strings.TrimRight(value, "/"))
 }

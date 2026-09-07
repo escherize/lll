@@ -186,7 +186,7 @@ Client settings, read by every `lll` command:
 
 | Env | TOML key | Meaning |
 |---|---|---|
-| `LLL_URL` | `url` | PocketBase **API** base URL (default `http://127.0.0.1:8090`; hosted, `https://your-host`, the board's address, which serves the API too) |
+| `LLL_URL` | `url` | PocketBase **API** base URL (default `http://127.0.0.1:8090`; hosted, `https://your-host`, the board's address, which serves the API too). Persist it without logging in using `lll config set url URL`. |
 | `LLL_TEAM` | `team` | Default team key; scopes `issue list`, required by `issue create` |
 | `LLL_ME` | `me` | Your member name; authors your comments and receives assignments |
 | `LLL_SORT` | `sort` | Default sort: `created`, `updated`, `priority`, `number`; `-` prefix descends |

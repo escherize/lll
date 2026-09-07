@@ -56,7 +56,9 @@ Mints a long-lived, non-refreshable PocketBase token that authenticates as
 --duration says otherwise, and the expiry is printed with it. The token is
 printed once, when it is created; nothing else ever shows it. Use it as
 LLL_TOKEN=<token>, or persist it as token = \"...\" in ~/.config/lll/lll.toml
-(never the repo's .lll.toml, which is committed).",
+(never the repo's .lll.toml, which is committed).
+On the receiving machine, save the API endpoint with 'lll config set url URL',
+or supply LLL_URL for the invocation.",
   )
   fmt.Println("Administrator credentials: --admin-email/--admin-password or LLL_ADMIN_EMAIL/LLL_ADMIN_PASSWORD; a configured superuser token also works.")
   fmt.Println(flags.section(spec))
@@ -326,5 +328,6 @@ fix is another 'lll token create'.
 The token is printed exactly once. Agents persist it with
 token = \"...\" in ~/.config/lll/lll.toml — never .lll.toml, which is committed.",
   )
+  fmt.Println("On the receiving machine, save the API endpoint with 'lll config set url URL', or supply LLL_URL for the invocation.")
   fmt.Println(flags.section(spec))
 }
