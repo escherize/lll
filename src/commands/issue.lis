@@ -193,8 +193,8 @@ fn issue_list_spec() -> Slice<flags.Flag> {
       name: "--search",
       alias: "--query",
       value: true,
-      hint: "q",
-      help: "list only issues whose title contains q",
+      hint: "text",
+      help: "list only issues whose title contains text",
       ..,
     },
     flags.Flag {

@@ -1375,6 +1375,11 @@ assert_not_contains "$out" "Related findings" "an issue with no matches renders 
 out=$("$LIN" finding --help)
 assert_contains "$out" "lll finding near" "finding --help mentions near"
 assert_contains "$out" "lll finding list" "finding --help mentions list"
+assert_contains "$out" "lll finding view" "finding --help mentions view (fleet task 9: 6/30 guessed it)"
+out=$(env LLL_URL=$URL LLL_TEAM=ENG "$LIN" finding view migration-hazard --raw)
+assert_contains "$out" "Migrations are a merge hazard." "finding view reads a finding by slug"
+out=$(env LLL_URL=$URL LLL_TEAM=ENG "$LIN" finding read migration-hazard --raw)
+assert_contains "$out" "Migrations are a merge hazard." "finding read is view"
 out=$("$LIN" --help)
 assert_contains "$out" "lll finding" "lll --help mentions finding"
 out=$("$LIN" doc --help)

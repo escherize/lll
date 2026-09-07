@@ -33,6 +33,22 @@ pub fn finding_commands() -> Slice<flags.Command> {
       run: finding_near,
     },
     flags.Command {
+      name: "view",
+      summary: "show one finding by slug - a finding is a doc, so this is 'lll doc view'",
+      page: "",
+      spec: doc_view_spec(),
+      positional: "SLUG",
+      run: doc_view,
+    },
+    flags.Command {
+      name: "read",
+      summary: "the same command as 'view'",
+      page: "",
+      spec: doc_view_spec(),
+      positional: "SLUG",
+      run: doc_view,
+    },
+    flags.Command {
       name: "list",
       summary: "every finding, or one area's, one line each (slug, area, title)",
       page: "",
