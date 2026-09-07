@@ -559,7 +559,7 @@ out=$(cd "$REPO" && LLL_URL=$URL "$LLL_ABS" issue view)
 assert_contains "$out" "ENG-6 Roundtrip issue" "inferred view header"
 assert_contains "$out" "◐ in-progress" "start set in-progress"
 
-out=$(cd "$REPO" && LLL_URL=$URL "$LLL_ABS" issue update --priority 1 --title "Roundtrip issue v2")
+out=$(cd "$REPO" && LLL_URL=$URL "$LLL_ABS" issue update --priority 1 -t "Roundtrip issue v2")
 assert_contains "$out" "Updated ENG-6" "inferred update output"
 out=$(LLL_URL=$URL "$LIN" issue view ENG-6)
 assert_contains "$out" "ENG-6 Roundtrip issue v2" "update changed title"
@@ -1523,6 +1523,22 @@ rc=$?
 set -e
 [ "$rc" -ne 0 ] || fail "unknown command: expected nonzero exit"
 assert_contains "$out" "see 'lll --help'" "unknown command names the fix"
+
+# an issue verb typed as a noun is pointed at its noun (fleet task 4: 3/30)
+set +e
+out=$("$LIN" comment ENG-1 "hi" 2>&1)
+rc=$?
+set -e
+[ "$rc" -ne 0 ] || fail "lll comment: expected nonzero exit"
+assert_contains "$out" "lll issue comment" "misplaced issue verb names its noun"
+
+# a sub-verb where the ID goes is told the ID comes first (fleet task 4: 3/30)
+set +e
+out=$(LLL_URL=$URL "$LIN" issue comment add ENG-1 -b "hi" 2>&1)
+rc=$?
+set -e
+[ "$rc" -ne 0 ] || fail "issue comment add: expected nonzero exit"
+assert_contains "$out" "the ID comes right after the verb" "sub-verb error names the position"
 
 # PB unreachable: names lll up and LLL_URL (request path and realtime path)
 set +e

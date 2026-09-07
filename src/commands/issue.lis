@@ -279,9 +279,10 @@ fn issue_update_spec() -> Slice<flags.Flag> {
     },
     flags.Flag {
       name: "--title",
+      alias: "-t",
       value: true,
       hint: "t",
-      help: "new title (update)",
+      help: "new title (update; -t, as create spells it)",
       ..,
     },
     flags.Flag {
@@ -1403,7 +1404,9 @@ fn resolve_id(explicit: string, usage: string) -> Result<string, string> {
 /// itself contain hyphens (`ENG-DEV-12` is team `ENG-DEV`, issue 12), so the
 /// number is the last segment and the key is everything before it.
 fn split_issue_key(id: string) -> Result<(string, int), string> {
-  let bad_id = f"'{id}' is not an issue ID (expected KEY-123, e.g. ENG-1)"
+  // Names the shape AND the position: three of thirty fleet agents typed
+  // 'lll issue comment add KEY ...' and read this as the key being wrong.
+  let bad_id = f"'{id}' is not an issue ID (expected KEY-123, e.g. ENG-1); the ID comes right after the verb, no sub-verb — 'lll issue <verb> -h' shows the form"
   // Split, not LastIndex + substring: index arithmetic mixes byte offsets with
   // rune indices and panics on non-ASCII input. See realtime.split_field.
   let parts = strings.Split(id, "-")

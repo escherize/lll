@@ -53,7 +53,7 @@ fn main() {
       fmt.Println(f"lll {commands.version()}")
       Ok(())
     },
-    other => Err(f"unknown command: '{other}' (see 'lll --help')"),
+    other => Err(unknown_command(other)),
   }
 
   if let Err(msg) = result {
@@ -112,4 +112,15 @@ layer, each supplying the keys it names — 'lll config --list' shows which won)
   )
   let hint = commands.setup_hint()
   if hint != "" { fmt.Println(hint) }
+}
+
+/// An issue verb typed as a noun ('lll comment ...') is the most common
+/// unknown command (three of thirty fleet agents); name where it lives.
+fn unknown_command(noun: string) -> string {
+  for c in commands.issue_commands() {
+    if c.name == noun {
+      return f"unknown command: '{noun}' — it is an issue verb: 'lll issue {noun} ...' (see 'lll issue {noun} -h')"
+    }
+  }
+  f"unknown command: '{noun}' (see 'lll --help')"
 }
