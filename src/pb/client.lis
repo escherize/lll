@@ -142,7 +142,20 @@ fn send(method: string, path: string, payload: string) -> Result<string, string>
   if cfg.token == "" && strings.HasPrefix(path, "/api/collections/") {
     return Err(not_logged_in(cfg.url, src.url == "default"))
   }
-  let body = request(cfg.url, method, path, payload, bearer(cfg.token), src.url == "default")?
+  // TASK-319: the server answers 401 to a record request whose token it
+  // could not load, which is how an expired, corrupted or disowned token now
+  // arrives - one step earlier than the empty list below, same verdicts.
+  let body = match request(cfg.url, method, path, payload, bearer(cfg.token), src.url == "default") {
+    Ok(b) => b,
+    Err(e) => {
+      if cfg.token != "" && strings.Contains(e, ": 401 ") {
+        if let Some(refused) = refused_token(cfg, src, method, path, payload) {
+          return refused
+        }
+      }
+      return Err(e)
+    },
+  }
   // TASK-247: the same filter-not-gate semantics that hid a MISSING token also
   // hide a DEAD one. PocketBase rotates a record's tokenKey on every password
   // change, so a token issued before a reset stops matching — and the list rule
@@ -151,29 +164,45 @@ fn send(method: string, path: string, payload: string) -> Result<string, string>
   //
   // An empty list is the only case worth paying for, and it costs one extra
   // request in the case where the command was about to print nothing anyway.
-  let verdict = if is_empty_list(method, body) && cfg.token != "" { token_verdict(cfg.url, cfg.token) } else { "valid" }
-  if verdict == "corrupted" {
-    return Err(corrupted_token(src.token))
+  if is_empty_list(method, body) && cfg.token != "" {
+    if let Some(refused) = refused_token(cfg, src, method, path, payload) {
+      return refused
+    }
   }
-  if verdict == "expired" {
-    return Err(expired_token(cfg.token, src.token))
-  }
+  Ok(body)
+}
+
+/// The answer for a token the server did not honour, by verdict: corrupted
+/// and expired are named from the token itself; rejected re-mints and
+/// repeats when this process holds the admin credentials (the board,
+/// TASK-255) and is named otherwise. None when the token is valid after
+/// all - an empty list that really is empty.
+fn refused_token(
+  cfg: config.Config,
+  src: config.Sources,
+  method: string,
+  path: string,
+  payload: string,
+) -> Option<Result<string, string>> {
+  let verdict = token_verdict(cfg.url, cfg.token)
+  if verdict == "corrupted" { return Some(Err(corrupted_token(src.token))) }
+  if verdict == "expired" { return Some(Err(expired_token(cfg.token, src.token))) }
   if verdict == "rejected" {
     // A process holding the server's admin credentials can fix this itself.
     // That is the board (TASK-255): `lll up` mints a superuser token at boot
-    // and re-mints it "if refused", but a stale token is never refused on a
+    // and re-mints it "if refused", but a stale token was never refused on a
     // read, so the board silently saw an empty database and told everyone its
     // own configured team did not exist. Re-mint once and repeat the request;
     // a plain CLI user has no admin credentials and gets the message instead.
     if let Some(fresh) = remint_from_admin_credentials(cfg.url) {
       let _ = os.Setenv("LLL_TOKEN", fresh)
-      return request(
+      return Some(request(
         cfg.url, method, path, payload, bearer(fresh), src.url == "default",
-      )
+      ))
     }
-    return Err(stale_token(cfg.url, src.token))
+    return Some(Err(stale_token(cfg.url, src.token)))
   }
-  Ok(body)
+  None
 }
 
 /// A fresh superuser token from LLL_ADMIN_EMAIL/LLL_ADMIN_PASSWORD, or None

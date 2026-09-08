@@ -130,42 +130,42 @@ ENG_ID=$(seed_team ENG Engineering)
 OPS_ID=$(seed_team OPS Operations)
 [ -n "$ENG_ID" ] && [ -n "$OPS_ID" ] || fail "seeding teams"
 
-# --- TASK-181: unauthenticated requests are refused, per verb ---------------
-# PocketBase applies rules as FILTERS, so the refusal codes are deliberate
-# and not all 401 (verified in v0.40.1 apis/record_crud.go): a guest listing
-# gets 200 with zero items — no existence leak; view/update/delete cannot
-# resolve the record, so 404; create fails the rule check, so 400. Whatever
-# shape the refusal takes, the property under test is: no data, no mutation.
+# --- TASK-181 + TASK-319: unauthenticated requests are refused, as 401 -----
+# PocketBase applies rules as FILTERS: a guest list used to get 200 with zero
+# items, view/update/delete 404, create 400 - no data, no mutation, but
+# silence every client except lll's own read as "no issues". gopb's request
+# hooks now answer 401 to any record request with no auth at all, before the
+# lookup, so nothing about existence leaks and nobody mistakes a refusal
+# for an empty board. The property under test stays: no data, no mutation.
 anon=$(curl -s "$URL/api/collections/issues/records")
-[ "$(printf '%s' "$anon" | jq '.items | length')" = 0 ] \
+[ "$(printf '%s' "$anon" | jq '.items // [] | length')" = 0 ] \
   || fail "an unauthenticated issue list leaked records: $anon"
 code=$(curl -s -o /dev/null -w '%{http_code}' "$URL/api/collections/issues/records?perPage=1")
-[ "$code" = 200 ] || fail "unauthenticated list: expected 200-empty, got $code"
+[ "$code" = 401 ] || fail "unauthenticated list: expected 401, got $code"
+assert_contains "$anon" "Authentication required" "the 401 names the fix"
 code=$(curl -s -o /dev/null -w '%{http_code}' "$URL/api/collections/issues/records/$ENG_ID")
-[ "$code" = 404 ] || fail "unauthenticated view: expected 404, got $code"
+[ "$code" = 401 ] || fail "unauthenticated view: expected 401, got $code"
 code=$(curl -s -o /dev/null -w '%{http_code}' -X POST \
   "$URL/api/collections/issues/records" -H 'Content-Type: application/json' \
   -d "{\"team\":\"$ENG_ID\",\"title\":\"anonymous create\",\"state\":\"todo\"}")
-[ "$code" = 400 ] || fail "unauthenticated create: expected 400, got $code"
+[ "$code" = 401 ] || fail "unauthenticated create: expected 401, got $code"
 code=$(curl -s -o /dev/null -w '%{http_code}' -X PATCH \
   "$URL/api/collections/issues/records/$ENG_ID" -H 'Content-Type: application/json' \
   -d '{"title":"anonymous patch"}')
-[ "$code" = 404 ] || fail "unauthenticated update: expected 404, got $code"
+[ "$code" = 401 ] || fail "unauthenticated update: expected 401, got $code"
 code=$(curl -s -o /dev/null -w '%{http_code}' -X DELETE \
   "$URL/api/collections/issues/records/$ENG_ID")
-[ "$code" = 404 ] || fail "unauthenticated delete: expected 404, got $code"
+[ "$code" = 401 ] || fail "unauthenticated delete: expected 401, got $code"
 
-# The same sweep across every collection: a guest list comes back empty and
-# a guest create is refused. The browser-shaped version of this request —
-# what a page or script would fire at PocketBase directly — is the same
-# tokenless call, so it is covered by exactly this assertion.
+# The same sweep across every collection: a guest list and a guest create
+# are both 401. The browser-shaped version of this request - what a page or
+# script would fire at PocketBase directly - is the same tokenless call.
 for coll in teams members projects labels issues comments docs views favorites claims; do
-  anon=$(curl -s "$URL/api/collections/$coll/records")
-  [ "$(printf '%s' "$anon" | jq '.items | length')" = 0 ] \
-    || fail "an unauthenticated list of $coll leaked records: $anon"
+  code=$(curl -s -o /dev/null -w '%{http_code}' "$URL/api/collections/$coll/records")
+  [ "$code" = 401 ] || fail "unauthenticated list of $coll: expected 401, got $code"
   code=$(curl -s -o /dev/null -w '%{http_code}' -X POST \
     "$URL/api/collections/$coll/records" -H 'Content-Type: application/json' -d '{}')
-  [ "$code" = 400 ] || fail "unauthenticated create on $coll: expected 400, got $code"
+  [ "$code" = 401 ] || fail "unauthenticated create on $coll: expected 401, got $code"
 done
 
 # The token flips every one of those answers: a member list is 200 with
