@@ -1090,8 +1090,7 @@ fn record_work_site(issue: models.Issue, branch: string) -> Result<(), string> {
     // authorless otherwise. Member identity is not duplicated into the slot;
     // this comment (and the claim holder) carry the who.
     let mut author = ""
-    let me = config.load()?.me
-    if me != "" { if let Some(m) = find_member(me)? { author = m.id } }
+    if let Some(a) = actor()? { author = a.id }
     let moved = f"work moved: {issue.work_branch} @ {issue.work_host}:{issue.work_path} -> {branch} @ {host}:{path}"
     let payload = match json.Marshal(
       models.NewComment { issue: issue.id, author, body: moved },
@@ -1121,6 +1120,45 @@ fn work_site_stale(state: string, claimed: bool) -> bool {
   state == "done" || state == "cancelled" || !claimed
 }
 
+/// Who a write goes out as (TASK-317). The token decides: a member token
+/// names its member, and 'me' may only agree. A superuser token names
+/// nobody, so 'me' attributes there as it always did; no token, no 'me':
+/// nobody. The fleet showed why: every shard wrote under one shared token
+/// with me = "shard-NN" doing the attribution, and a stale home config sent
+/// six agents' comments out as one member. Identity is now what the server
+/// will also enforce, not a string in a file.
+struct Actor {
+  id: string,
+  name: string,
+}
+
+fn actor() -> Result<Option<Actor>, string> {
+  let cfg = config.load()?
+  if cfg.token != "" {
+    if let Some(id) = pb.token_subject(cfg.token) {
+      // A members record for the subject means a member token. A 404 means
+      // a superuser (or a stranger's) token: fall through to 'me'.
+      if let Ok(body) = pb.get(f"/api/collections/members/records/{id}") {
+        let mut m = models.Member { .. }
+        let decoded = json.Unmarshal(body.bytes(), &m).is_ok()
+        if decoded && m.id != "" {
+          if cfg.me != "" && cfg.me != m.name {
+            return Err(
+              f"this token is {m.name}'s, but 'me' is set to '{cfg.me}' — writes go out as the token's member; 'lll config set me {m.name}' (or unset LLL_ME) to agree, or use {cfg.me}'s own token ('lll token create {cfg.me}')",
+            )
+          }
+          return Ok(Some(Actor { id: m.id, name: m.name }))
+        }
+      }
+    }
+  }
+  if cfg.me == "" { return Ok(None) }
+  let Some(m) = find_member(cfg.me)? else {
+    return Err(f"'me' is set to '{cfg.me}' but no such member exists — see 'lll member add', or 'lll config set me <name>' to change who you are")
+  }
+  Ok(Some(Actor { id: m.id, name: m.name }))
+}
+
 /// Take an issue exclusively. The arbitration is a single INSERT into
 /// `claims`, which is UNIQUE on `issue`: two agents racing both POST the row
 /// and SQLite admits exactly one, so the loser learns it lost. Nothing here
@@ -1135,13 +1173,11 @@ fn claim(args: Slice<string>) -> Result<(), string> {
   let usage = "lll issue claim [KEY-123]"
   let id = positional_id(args, usage)?
   let resolved = resolve_id(id, usage)?
-  let me = config.load()?.me
-  if me == "" {
+  let Some(member) = actor()? else {
     return Err(
-      "claiming needs a name: set 'me' with 'lll config set me <name>', or pass LLL_ME",
+      "claiming needs a name: a member token names you; with a superuser token set 'me' ('lll config set me <name>' or LLL_ME)",
     )
   }
-  let member = resolve_member(me)?
   let issue = fetch_issue(resolved)?
   let key = f"{issue.expand.team.key}-{issue.number}"
 
@@ -1300,12 +1336,10 @@ fn comment(args: Slice<string>) -> Result<(), string> {
   // defeats the point of a comment as a record of who learned what. The four
   // sibling verbs already say this; comment was the one that stayed quiet.
   let mut author = ""
-  let me = config.load()?.me
-  if me != "" {
-    let Some(m) = find_member(me)? else {
-      return Err(f"'me' is set to '{me}' but no such member exists — see 'lll member add', or 'lll config set me <name>' to change who you are")
-    }
-    author = m.id
+  let mut me = ""
+  if let Some(a) = actor()? {
+    author = a.id
+    me = a.name
   }
 
   let new_comment = models.NewComment { issue: issue.id, author, body }

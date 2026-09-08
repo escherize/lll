@@ -363,7 +363,7 @@ each value came from; 'lll login' replaces the token.",
   fmt.Println(f"team    {team}")
   if cfg.me != "" && cfg.me != me.name {
     fmt.Println(
-      f"note: 'me' is set to \"{cfg.me}\", which is not the member this token belongs to — 'lll config set me {me.name}' fixes it",
+      f"note: 'me' is set to \"{cfg.me}\", which is not the member this token belongs to — writes are refused until they agree: 'lll config set me {me.name}' (or unset LLL_ME)",
     )
   }
   Ok(())

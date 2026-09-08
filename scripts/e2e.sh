@@ -84,6 +84,11 @@ E2E_TOKEN=$(pb_member_token "$URL" e2e-agent e2e-agent@lll.test e2e-agent-pass-1
 [ -n "$E2E_TOKEN" ] && [ "$E2E_TOKEN" != "null" ] || fail "pb_member_token returned no token"
 export LLL_TOKEN="$E2E_TOKEN"
 AUTH_HDR="Authorization: Bearer $E2E_TOKEN"
+# TASK-317: the token decides identity and 'me' may only agree. The boot
+# guessed me = "e2e" from $USER; the suite's token is e2e-agent's, so the
+# home config says so too, or every write below would be refused.
+HOME="$E2E_HOME" LLL_URL="$URL" "$LIN" config set me e2e-agent >/dev/null \
+  || fail "pointing the suite's home config at the token's member"
 
 json_id() { python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])'; }
 
@@ -693,6 +698,20 @@ code=$(curl -s -o /dev/null -w '%{http_code}' -H "Authorization: Bearer $TOKEN" 
 # The assignee/author paths are asserted unchanged further below, where the
 # issues they point at exist (ENG-7: 'assignee relation' + comment author).
 
+# Per-member tokens (TASK-317): identity is the token's member now, so a test
+# that writes as bryan carries bryan's token rather than LLL_ME=bryan. Minted
+# by the superuser (the suite exports the admin pair); a member token cannot.
+# Minted AFTER bryan's password is set below: PocketBase rotates a record's
+# token key on a password change, which kills every token minted before it.
+mint_tok() { env -u LLL_TOKEN LLL_URL=$URL "$LIN" token create "$1" --duration 3600 | sed -n 's/^LLL_TOKEN=//p'; }
+BRYAN_TOK=$(mint_tok bryan); CAROL_TOK=$(mint_tok carol); ALICE_TOK=$(mint_tok alice)
+[ -n "$BRYAN_TOK" ] && [ -n "$CAROL_TOK" ] && [ -n "$ALICE_TOK" ] || fail "per-member tokens: a mint printed nothing"
+tok_for() { case "$1" in bryan) printf '%s' "$BRYAN_TOK";; carol) printf '%s' "$CAROL_TOK";; alice) printf '%s' "$ALICE_TOK";; *) fail "no token for $1";; esac; }
+SU_TOK=$(pb_superuser_token "$URL") || fail "superuser token for the authorless cases"
+out=$(env -u LLL_ME LLL_URL=$URL LLL_TOKEN="$BRYAN_TOK" LLL_ME=bryan "$LIN" whoami 2>&1)
+assert_contains "$out" "bryan <" "the minted token is bryan's (whoami: $out)"
+
+
 # --- --assignee on create; assignee in list and view ---
 out=$(LLL_URL=$URL LLL_TEAM=ENG "$LIN" issue create -t "Assigned issue" --assignee bryan)
 assert_contains "$out" "Created ENG-7: Assigned issue" "assigned create output"
@@ -749,8 +768,8 @@ aname=$(LLL_URL=$URL LLL_TEAM=ENG "$LIN" issue list --assignee bryan --json | \
 
 # --- comment add authored by config 'me'; shown in view with relative date ---
 printf 'url = "%s"\nteam = "ENG"\nme = "bryan"\n' "$URL" > "$WORK/.lll.toml"
-out=$(cd "$WORK" && env -u LLL_URL -u LLL_TEAM HOME="$FAKEHOME" "$LLL_ABS" issue comment ENG-7 -b "Looks good to me")
-assert_contains "$out" "Commented on ENG-7" "comment add output"
+out=$(cd "$WORK" && env -u LLL_URL -u LLL_TEAM LLL_TOKEN="$BRYAN_TOK" LLL_ME=bryan HOME="$FAKEHOME" "$LLL_ABS" issue comment ENG-7 -b "Looks good to me")
+assert_contains "$out" "Commented on ENG-7 as bryan" "comment add output names the token's member, which 'me' agrees with"
 
 out=$(LLL_URL=$URL "$LIN" issue view ENG-7)
 assert_contains "$out" "Comments:" "view has comments section"
@@ -767,8 +786,10 @@ assert_contains "$out" "Looks good to me" "comment list body"
 # E2E_HOME carries me = "e2e" from the boot, which authored this comment for
 # years while the assertion below was satisfied by a DIFFERENT comment's line.
 NOME_HOME="$DATA_DIR/nome_home"; mkdir -p "$NOME_HOME/.config/lll"
-out=$(env -u LLL_ME HOME="$NOME_HOME" LLL_URL=$URL LLL_TEAM=ENG "$LIN" issue comment ENG-7 -b "Anonymous note")
-assert_contains "$out" "Commented on ENG-7 with no author" "authorless comment (me unset) accepted, and says so"
+# A member token always names its member (TASK-317), so "no author" needs a
+# token that names nobody: the superuser's, with no 'me' anywhere.
+out=$(env -u LLL_ME LLL_TOKEN="$SU_TOK" HOME="$NOME_HOME" LLL_URL=$URL LLL_TEAM=ENG "$LIN" issue comment ENG-7 -b "Anonymous note")
+assert_contains "$out" "Commented on ENG-7 with no author" "authorless comment (superuser token, me unset) accepted, and says so"
 
 # TASK-309, fleet run 1: thirty agents each set me = "shard-NN", no such
 # members existed, and every one of their comments landed as "anon" with no
@@ -777,11 +798,22 @@ assert_contains "$out" "Commented on ENG-7 with no author" "authorless comment (
 # block used to PIN that silence as accepted behaviour. A me that names nobody
 # is now an error naming the fix, and the comment must not land.
 printf 'url = "%s"\nteam = "ENG"\nme = "ghost"\n' "$URL" > "$WORK/.lll.toml"
-if out=$(cd "$WORK" && env -u LLL_URL -u LLL_TEAM HOME="$FAKEHOME" "$LLL_ABS" issue comment ENG-7 -b "Ghost note" 2>&1); then
+if out=$(cd "$WORK" && env -u LLL_URL -u LLL_TEAM LLL_TOKEN="$SU_TOK" HOME="$FAKEHOME" "$LLL_ABS" issue comment ENG-7 -b "Ghost note" 2>&1); then
   fail "a 'me' naming no member should refuse, got: $out"
 fi
 assert_contains "$out" "no such member exists" "unmatched me is refused, not silently anonymous"
 assert_contains "$out" "lll member add" "the refusal names the fix"
+
+# TASK-317: the token decides. A member token whose member is not 'me' is
+# refused with both names, and the comment must not land.
+if out=$(LLL_URL=$URL LLL_TOKEN="$BRYAN_TOK" LLL_ME=carol "$LIN" issue comment ENG-7 -b "Wrong hat" 2>&1); then
+  fail "a token and a disagreeing 'me' should refuse, got: $out
+"
+fi
+assert_contains "$out" "this token is bryan's, but 'me' is set to 'carol'" "a disagreeing me is refused with both names"
+assert_contains "$out" "lll config set me bryan" "the refusal names the fix"
+out=$(LLL_URL=$URL "$LIN" issue comment ENG-7)
+assert_not_contains "$out" "Wrong hat" "the refused comment did not land"
 
 out=$(LLL_URL=$URL "$LIN" issue comment ENG-7)
 assert_contains "$out" "anon (just now)" "an unset-me comment renders as anon"
@@ -997,7 +1029,7 @@ wait_for_line "$WATCH_ISSUE" "state: in-progress -> in-review" "issue watch rend
 wait_for_line "$WATCH_ISSUE" "assignee: none -> bryan" "issue watch renders assignee transition"
 
 printf 'url = "%s"\nteam = "ENG"\nme = "bryan"\n' "$URL" > "$WORK/.lll.toml"
-out=$(cd "$WORK" && env -u LLL_URL -u LLL_TEAM HOME="$FAKEHOME" "$LLL_ABS" issue comment "$WKEY" -b "Watching closely")
+out=$(cd "$WORK" && env -u LLL_URL -u LLL_TEAM LLL_TOKEN="$BRYAN_TOK" LLL_ME=bryan HOME="$FAKEHOME" "$LLL_ABS" issue comment "$WKEY" -b "Watching closely")
 assert_contains "$out" "Commented on $WKEY" "watched comment output"
 wait_for_line "$WATCH_ISSUE" "comment by bryan: Watching closely" "issue watch sees the comment"
 
@@ -1708,7 +1740,7 @@ fi
 CKEY=$(env $E "$LIN" issue create -t "Claimable" | sed -n 's/^Created \([A-Z]*-[0-9]*\).*/\1/p')
 [ -n "$CKEY" ] || fail "claim fodder create did not print a key"
 
-out=$(env $E LLL_ME=bryan "$LIN" issue claim "$CKEY")
+out=$(env $E LLL_TOKEN="$BRYAN_TOK" LLL_ME=bryan "$LIN" issue claim "$CKEY")
 assert_contains "$out" "Claimed $CKEY for bryan" "claim output"
 out=$(env $E "$LIN" issue view "$CKEY")
 assert_contains "$out" "Claimed:   bryan" "issue view shows the holder"
@@ -1716,7 +1748,7 @@ assert_contains "$out" "Assignee:  bryan" "claiming assigns the issue"
 
 # AC#1: a held issue refuses the second claim and changes nothing.
 set +e
-out=$(env $E LLL_ME=carol "$LIN" issue claim "$CKEY" 2>&1)
+out=$(env $E LLL_TOKEN="$CAROL_TOK" LLL_ME=carol "$LIN" issue claim "$CKEY" 2>&1)
 rc=$?
 set -e
 [ "$rc" -ne 0 ] || fail "claiming a held issue: expected nonzero exit"
@@ -1725,7 +1757,7 @@ assert_contains "$out" "lll issue release $CKEY" "refusal names the fix"
 
 # the holder claiming again is success, not a conflict (fleet replay, task 9:
 # a claim survived --assignee none and every re-claim by its holder was refused)
-out=$(env $E LLL_ME=bryan "$LIN" issue claim "$CKEY")
+out=$(env $E LLL_TOKEN="$BRYAN_TOK" LLL_ME=bryan "$LIN" issue claim "$CKEY")
 assert_contains "$out" "Claimed $CKEY for bryan (already yours" "re-claim by the holder succeeds and says so"
 got=$(env $E "$LIN" issue view "$CKEY" --json | jq -r '.expand.assignee.name')
 [ "$got" = "bryan" ] || fail "re-claim: assignee should be bryan, got '$got'"
@@ -1735,7 +1767,7 @@ out=$(env $E "$LIN" issue update "$CKEY" --assignee none)
 assert_contains "$out" "released bryan's claim" "clearing the assignee under a claim releases it and says so"
 out=$(env $E "$LIN" issue view "$CKEY")
 assert_not_contains "$out" "Claimed:   bryan" "the claim is gone with the assignee"
-out=$(env $E LLL_ME=bryan "$LIN" issue claim "$CKEY")
+out=$(env $E LLL_TOKEN="$BRYAN_TOK" LLL_ME=bryan "$LIN" issue claim "$CKEY")
 assert_contains "$out" "Claimed $CKEY for bryan" "and it can be claimed afresh"
 out=$(env $E "$LIN" issue view "$CKEY")
 assert_contains "$out" "Assignee:  bryan" "a refused claim leaves the assignee alone"
@@ -1753,7 +1785,7 @@ assert_contains "$out" "Released $CKEY (was bryan's)" "release output"
 out=$(env $E "$LIN" issue view "$CKEY")
 assert_not_contains "$out" "Claimed:" "release removes the hold"
 assert_contains "$out" "Assignee:  none" "release clears the assignee the claim set"
-out=$(env $E LLL_ME=carol "$LIN" issue claim "$CKEY")
+out=$(env $E LLL_TOKEN="$CAROL_TOK" LLL_ME=carol "$LIN" issue claim "$CKEY")
 assert_contains "$out" "Claimed $CKEY for carol" "a released issue can be claimed again"
 
 # Releasing what nobody holds is an error, not a no-op.
@@ -1766,9 +1798,11 @@ set -e
 assert_contains "$out" "$CKEY is not claimed" "double release names the state"
 
 # No 'me' to claim as: refuse and name the fix. $WORK has no .lll.toml and
-# $FAKEHOME no user config, so 'me' is genuinely unset here.
+# $FAKEHOME no user config, so 'me' is genuinely unset here - and the token
+# is the superuser's, which names nobody (a member token would name you,
+# TASK-317).
 set +e
-out=$(cd "$WORK" && env LLL_URL=$URL HOME="$FAKEHOME" "$LLL_ABS" issue claim "$CKEY" 2>&1)
+out=$(cd "$WORK" && env LLL_URL=$URL LLL_TOKEN="$SU_TOK" HOME="$FAKEHOME" "$LLL_ABS" issue claim "$CKEY" 2>&1)
 rc=$?
 set -e
 [ "$rc" -ne 0 ] || fail "claim without 'me': expected nonzero exit"
@@ -1820,7 +1854,7 @@ for m in bryan carol alice; do
   # set +e inside: two of these three MUST fail, and errexit is inherited by
   # a subshell — without it the losers die before recording their status.
   (set +e
-   env $E LLL_ME="$m" "$LIN" issue claim "$CRKEY" > "$CRACE/$m.out" 2>&1
+   env $E LLL_TOKEN="$(tok_for "$m")" LLL_ME="$m" "$LIN" issue claim "$CRKEY" > "$CRACE/$m.out" 2>&1
    echo $? > "$CRACE/$m.rc") &
   cli_pids="$cli_pids $!"
 done
@@ -1849,7 +1883,7 @@ WREPO_A="$DATA_DIR/wsite_a"
 git init -q -b main "$WREPO_A"
 git -C "$WREPO_A" -c user.name=e2e -c user.email=e2e@example.com \
   commit -q --allow-empty -m init
-out=$(env $E LLL_ME=bryan "$LIN" issue claim "$WKEY")
+out=$(env $E LLL_TOKEN="$BRYAN_TOK" LLL_ME=bryan "$LIN" issue claim "$WKEY")
 out=$(cd "$WREPO_A" && env $E LLL_WORK_HOST=site-a "$LLL_ABS" issue start --branch "$WKEY")
 WBRANCH=$(git -C "$WREPO_A" branch --show-current)
 WROOT_A=$(cd "$WREPO_A" && git rev-parse --show-toplevel)
