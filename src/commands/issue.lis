@@ -330,6 +330,21 @@ pub fn issue_watch_spec() -> Slice<flags.Flag> {
       help: "NDJSON: one raw PocketBase event object per line, with a\n\"topic\" field added",
       ..,
     },
+    flags.Flag {
+      name: "--until",
+      alias: "--for",
+      value: true,
+      hint: "text",
+      help: "exit 0 once a comment containing text arrives (or is already\nthere) - the blocking primitive for waiting on a partner",
+      ..,
+    },
+    flags.Flag {
+      name: "--timeout",
+      value: true,
+      hint: "seconds",
+      help: "with --until: give up after this many seconds, exit non-zero",
+      ..,
+    },
   ]
 }
 
@@ -1338,6 +1353,11 @@ fn comment(args: Slice<string>) -> Result<(), string> {
       return Ok(())
     }
     print_comments(comments)
+    // Fleet tasks 4 and 5: every waiting agent re-read this list five times
+    // ten seconds apart. The verb that blocks instead is named where the
+    // polling happens.
+    let key = f"{issue.expand.team.key}-{issue.number}"
+    fmt.Println(f"(waiting for the next one? 'lll issue watch {key} --until TEXT' blocks until a comment containing TEXT arrives)")
     return Ok(())
   }
   if body == "" { return Err(f"-b cannot be empty\nusage: {usage}") }

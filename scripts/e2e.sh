@@ -1070,6 +1070,24 @@ out=$(cd "$WORK" && env -u LLL_URL -u LLL_TEAM LLL_TOKEN="$BRYAN_TOK" LLL_ME=bry
 assert_contains "$out" "Commented on $WKEY" "watched comment output"
 wait_for_line "$WATCH_ISSUE" "comment by bryan: Watching closely" "issue watch sees the comment"
 
+# --- issue watch --until: the blocking primitive (TASK-322) ---
+out=$(LLL_URL=$URL "$LIN" issue watch "$WKEY" --until "Watching clos")
+assert_contains "$out" "already there: #" "--until returns at once when the comment already exists"
+WATCH_UNTIL="$DATA_DIR/watch_until.txt"
+(LLL_URL=$URL "$LIN" issue watch "$WKEY" --until "t9-partner:" --timeout 30 > "$WATCH_UNTIL" 2>&1; echo "rc=$?" >> "$WATCH_UNTIL") &
+wait_for_line "$WATCH_UNTIL" "Watching $WKEY until" "--until header"
+out=$(LLL_URL=$URL LLL_TOKEN="$CAROL_TOK" LLL_ME=carol "$LIN" issue comment "$WKEY" -b "t9-partner: done, over to you")
+wait_for_line "$WATCH_UNTIL" "rc=0" "--until exits 0 once the comment arrives" 100
+assert_contains "$(cat "$WATCH_UNTIL")" "comment by carol: t9-partner: done" "--until printed the comment it waited for"
+set +e
+out=$(LLL_URL=$URL "$LIN" issue watch "$WKEY" --until "never-coming" --timeout 1 2>&1)
+rc=$?
+set -e
+[ "$rc" -ne 0 ] || fail "--until with --timeout: expected nonzero exit"
+assert_contains "$out" "no comment containing 'never-coming'" "--timeout names what did not arrive"
+out=$(LLL_URL=$URL "$LIN" issue comment "$WKEY")
+assert_contains "$out" "lll issue watch $WKEY --until TEXT" "a comment listing points at watch --until"
+
 # --- --json emits one jq-parseable object per line ---
 wait_for_line "$WATCH_JSON" "Watched todo issue" "watch --json captured the create"
 while IFS= read -r line; do
