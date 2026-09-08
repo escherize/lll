@@ -349,6 +349,9 @@ each value came from; 'lll login' replaces the token.",
     }
     return Err("the configured token is not a PocketBase auth token — 'lll login', or 'lll token create' for an agent")
   }
+  if pb.token_expired(cfg.token) {
+    return Err(pb.expired_token_message())
+  }
   let body = pb.get(f"/api/collections/members/records/{id}")?
   let mut me = models.Member { .. }
   if let Err(e) = json.Unmarshal(body.bytes(), &me) {

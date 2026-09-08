@@ -2035,6 +2035,23 @@ assert_contains "$create_out" "one-time agent token for e2e-agent" "token create
 out=$(LLL_TOKEN="$MINT_TOK" HOME="$E2E_HOME" LLL_URL=$URL "$LIN" member list)
 assert_contains "$out" "e2e-agent" "the minted token authenticates a GET"
 
+# An expired token is named exactly, from its own payload (TASK-318): a
+# 2-second token lists inside its lifetime and is refused after it, by exp.
+# PocketBase honours exp on impersonation tokens; this pins that the CLI
+# says so rather than listing likelihoods.
+SHORT_TOK=$(env -u LLL_TOKEN HOME="$E2E_HOME" LLL_URL=$URL \
+  LLL_ADMIN_EMAIL=admin@local.dev LLL_ADMIN_PASSWORD=admin-local-123 \
+  "$LIN" token create e2e-agent --duration 2 | sed -n 's/^LLL_TOKEN=//p')
+[ -n "$SHORT_TOK" ] || fail "short-lived token: nothing minted"
+out=$(LLL_TOKEN="$SHORT_TOK" HOME="$E2E_HOME" LLL_URL=$URL "$LIN" member list)
+assert_contains "$out" "e2e-agent" "a 2s token authenticates inside its lifetime"
+sleep 3
+out=$(LLL_TOKEN="$SHORT_TOK" HOME="$E2E_HOME" LLL_URL=$URL LLL_TEAM=ENG "$LIN" issue list --limit 1 2>&1 || true)
+assert_contains "$out" "expired at" "an expired token is named as expired, with the time"
+assert_contains "$out" "lll token create" "and the re-mint is named"
+out=$(LLL_TOKEN="$SHORT_TOK" HOME="$E2E_HOME" LLL_URL=$URL "$LIN" whoami 2>&1 || true)
+assert_contains "$out" "expired at" "whoami on an expired token says expired, not 404"
+
 # ...and the gate is superuser-only: a member token and no credentials at all
 # are both refused, naming the fix. The member token is minted fresh — the
 # password PATCH above rotated e2e-agent's tokenKey, so the bootstrap token

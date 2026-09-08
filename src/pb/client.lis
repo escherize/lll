@@ -5,6 +5,7 @@ import "go:io"
 import "go:net/http"
 import "go:os"
 import "go:strings"
+import "go:time"
 
 import "config"
 
@@ -154,6 +155,9 @@ fn send(method: string, path: string, payload: string) -> Result<string, string>
   if verdict == "corrupted" {
     return Err(corrupted_token(src.token))
   }
+  if verdict == "expired" {
+    return Err(expired_token(cfg.token, src.token))
+  }
   if verdict == "rejected" {
     // A process holding the server's admin credentials can fix this itself.
     // That is the board (TASK-255): `lll up` mints a superuser token at boot
@@ -240,7 +244,7 @@ fn token_still_valid(base: string, tok: string) -> bool {
   token_verdict(base, tok) == "valid"
 }
 
-/// Why a token is or is not usable: "valid", "corrupted", "rejected", or
+/// Why a token is or is not usable: "valid", "corrupted", "expired", "rejected", or
 /// "opaque". The last is a token this cannot read as a JWT at all - not three
 /// segments - which is left alone, because it may be a credential of a kind
 /// this client does not model. "corrupted" is the case fleet run 3 (TASK-309)
@@ -253,6 +257,7 @@ fn token_verdict(base: string, tok: string) -> string {
   let parts = strings.Split(tok, ".")
   if parts.length() != 3 { return "opaque" }
   let Some(id) = token_subject(tok) else { return "corrupted" }
+  if token_expired(tok) { return "expired" }
   for coll in ["members", "_superusers"] {
     let found = request(
       base,
@@ -283,6 +288,27 @@ pub fn token_subject(tok: string) -> Option<string> {
 #[json]
 struct TokenClaims {
   id: string,
+  exp: int,
+}
+
+/// The unix time a PocketBase auth JWT expires, from its payload; None when
+/// the token cannot be read or carries no exp. PocketBase honours exp on
+/// impersonation tokens (verified: a 4-second token lists inside its
+/// lifetime and is refused after), so a past exp is a verdict on its own.
+pub fn token_expiry(tok: string) -> Option<int> {
+  let parts = strings.Split(tok, ".")
+  if parts.length() != 3 { return None }
+  let Ok(raw) = base64.RawURLEncoding.DecodeString(parts[1]) else { return None }
+  let mut claims = TokenClaims { .. }
+  if json.Unmarshal(raw, &claims).is_err() { return None }
+  if claims.exp == 0 { return None }
+  Some(claims.exp)
+}
+
+/// True when the token carries an exp that has passed.
+pub fn token_expired(tok: string) -> bool {
+  let Some(exp) = token_expiry(tok) else { return false }
+  exp < time.Now().Unix() as int
 }
 
 /// The refusal for a token the server no longer accepts.
@@ -328,6 +354,28 @@ pub fn corrupted_token_message() -> string {
 /// anywhere - and every one of them went looking for a revoked credential,
 /// because the message told them to. The three causes are listed in the order
 /// an agent should check them: the cheap local one first.
+/// The refusal for a token whose own payload says it has expired: exact,
+/// because the payload is. Fleet shard 24 reported expired tokens keep
+/// working; the probe said otherwise, and this is what it says now.
+fn expired_token(tok: string, origin: string) -> string {
+  let from = if strings.HasPrefix(origin, "env:") {
+    "the token in LLL_TOKEN"
+  } else if strings.HasPrefix(origin, "file:") {
+    f"the token in {strings.TrimPrefix(origin, "file:")}"
+  } else {
+    "your token"
+  }
+  let exp = token_expiry(tok).unwrap_or(0)
+  let when = time.Unix(exp as int64, 0).UTC().Format("2006-01-02 15:04:05 UTC")
+  let ago = time.Now().Unix() as int - exp
+  f"{from} expired at {when} ({ago}s ago) — every read comes back empty and every write is refused until it is replaced: 'lll token create <member>' (an agent's, minted by a superuser) or 'lll login --email <your email>' (a person)"
+}
+
+pub fn expired_token_message() -> string {
+  let (cfg, src) = config.load_traced().unwrap_or((config.Config { .. }, config.Sources { .. }))
+  expired_token(cfg.token, src.token)
+}
+
 fn stale_token(base: string, origin: string) -> string {
   let from = if strings.HasPrefix(origin, "env:") {
     "the token in LLL_TOKEN"
