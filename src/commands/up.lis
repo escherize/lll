@@ -168,6 +168,10 @@ check 'lll config --list', or pin a local url: LLL_URL=http://127.0.0.1:8090 lll
     match superuser_token(db_url, email, pass) {
       Ok(tok) => {
         let _ = os.Setenv("LLL_TOKEN", tok)
+        // Only this process may re-mint a refused token silently (TASK-323):
+        // a CLI holding the admin pair used to re-mint too, and whoami then
+        // named a dead member token's member as alive.
+        let _ = os.Setenv("LLL_REMINT", "1")
         refresh = Some(|| superuser_token(db_url, email, pass))
         fmt.Println(
           "auth   rules are authenticated-only; this process's PocketBase calls (seeding, the board) ride the superuser token, re-minted if refused",

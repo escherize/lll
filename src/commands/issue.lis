@@ -319,6 +319,7 @@ fn issue_comment_spec() -> Slice<flags.Flag> {
       help: "comment body ('-b -' reads it from stdin)",
       ..,
     },
+    flags.Flag { name: "--force", help: "with edit/delete: change a comment that is not yours", .. },
   ]
 }
 
@@ -475,10 +476,10 @@ pub fn issue_commands() -> Slice<flags.Command> {
     },
     flags.Command {
       name: "comment",
-      summary: "add a comment (authored by 'me' in .lll.toml); without -b, list comments",
+      summary: "add a comment (bare body or -b); 'comment KEY' lists them numbered; 'comment edit KEY N -b' and 'comment delete KEY N' change your own",
       page: "",
       spec: issue_comment_spec(),
-      positional: "[KEY-123] [\"body\"]",
+      positional: "[edit|delete] [KEY-123] [N] [\"body\"]",
       run: comment,
     },
     flags.Command {
@@ -956,15 +957,20 @@ fn update(args: Slice<string>) -> Result<(), string> {
   let issue = fetch_issue(resolved)?
 
   let mut fields: Slice<string> = []
-  if state != "" { fields = fields.append("\"state\":" + json_quote(state)?) }
-  if priority >= 0 { fields = fields.append(f"\"priority\":{priority}") }
+  // What this update set, for the success line: two fleet agents read
+  // the issue back after 'Updated KEY' because it said nothing else.
+  let mut changed: Slice<string> = []
+  if state != "" { fields = fields.append("\"state\":" + json_quote(state)?); changed = changed.append(f"state={state}") }
+  if priority >= 0 { fields = fields.append(f"\"priority\":{priority}"); changed = changed.append(f"priority={priority}") }
   if assignee_name == "none" {
     // 'none' is what view prints for no assignee; the same word clears it.
     // Nothing else could: an empty --assignee reads as the flag not given.
     fields = fields.append("\"assignee\":\"\"")
+    changed = changed.append("assignee=none")
   } else if assignee_name != "" {
     let member = resolve_member(assignee_name)?
     fields = fields.append("\"assignee\":" + json_quote(member.id)?)
+    changed = changed.append(f"assignee={member.name}")
   }
   // The ISSUE's team scopes both name lookups, not the configured one:
   // `lll issue update GRDN-4 --label bug` must mean GRDN's bug even when
@@ -972,6 +978,7 @@ fn update(args: Slice<string>) -> Result<(), string> {
   if project_name != "" {
     let project = resolve_project(issue.team, project_name)?
     fields = fields.append("\"project\":" + json_quote(project.id)?)
+    changed = changed.append(f"project={project.name}")
   }
   if !label_names.is_empty() {
     let mut label_ids: Slice<string> = []
@@ -983,13 +990,15 @@ fn update(args: Slice<string>) -> Result<(), string> {
       Err(e) => return Err(f"encoding labels: {e}"),
     }
     fields = fields.append(f"\"labels\":{encoded}")
+    changed = changed.append(f"labels={strings.Join(label_names, "+")}")
   }
-  if title_set { fields = fields.append("\"title\":" + json_quote(title)?) }
+  if title_set { fields = fields.append("\"title\":" + json_quote(title)?); changed = changed.append("title") }
   if description_set {
     fields = fields.append("\"description\":" + json_quote(description)?)
+    changed = changed.append("description")
   }
   // `--emoji ""` clears the marker, so this one keys off the flag, not the value.
-  if emoji_set { fields = fields.append("\"emoji\":" + json_quote(emoji)?) }
+  if emoji_set { fields = fields.append("\"emoji\":" + json_quote(emoji)?); changed = changed.append(f"emoji={emoji}") }
   let _ = pb.patch(
     f"/api/collections/issues/records/{issue.id}",
     "{" + strings.Join(fields, ",") + "}",
@@ -1006,7 +1015,7 @@ fn update(args: Slice<string>) -> Result<(), string> {
       released = f" (released {name}'s claim)"
     }
   }
-  fmt.Println(f"Updated {issue.expand.team.key}-{issue.number}{released}")
+  fmt.Println(f"Updated {issue.expand.team.key}-{issue.number}: {strings.Join(changed, ", ")}{released}")
   Ok(())
 }
 
@@ -1296,6 +1305,10 @@ fn delete_issue(args: Slice<string>) -> Result<(), string> {
 }
 
 fn comment(args: Slice<string>) -> Result<(), string> {
+  // 'comment edit KEY N ...' and 'comment delete KEY N' (TASK-320) are the
+  // two sub-forms; everything else is add-or-list, below.
+  let sub = args.get(3).unwrap_or("")
+  if sub == "edit" || sub == "delete" { return comment_mutate(sub, args) }
   let spec = issue_comment_spec()
   let usage = flags.usage("lll issue comment", spec, "[KEY-123] [\"body\"]")
   let p = flags.parse_n(spec, args, 3, 2, "")?
@@ -1439,12 +1452,84 @@ fn fetch_comments(issue_id: string) -> Result<Slice<models.Comment>, string> {
 
 /// Print comments as "author (3h ago)" then the indented body.
 fn print_comments(comments: Slice<models.Comment>) {
+  // Numbered so 'comment edit KEY N' and 'comment delete KEY N' have a
+  // handle (TASK-320): position in creation order, not the record id.
+  let mut n = 0
   for c in comments {
+    n += 1
     let mut author = c.expand.author.name
     if author == "" { author = "anon" }
-    fmt.Println(f"{author} ({display.relative(c.created)})")
+    fmt.Println(f"#{n} {author} ({display.relative(c.created)})")
     fmt.Println(f"  {c.body}")
   }
+}
+
+/// `lll issue comment edit KEY N -b "body"` and `... delete KEY N`. N is the
+/// position 'comment KEY' prints. Your own comments only, unless --force:
+/// the author is the token's member (or 'me' under a superuser token), and
+/// a superuser token with no 'me' may change anything.
+fn comment_mutate(verb: string, args: Slice<string>) -> Result<(), string> {
+  let spec = comment_mutate_spec(verb)
+  let usage = flags.usage(f"lll issue comment {verb}", spec, "KEY-123 N")
+  let p = flags.parse_n(spec, args, 4, 2, usage)?
+  if p.first() == "" || p.nth(1) == "" { return Err(f"usage: {usage}") }
+  let resolved = resolve_id(p.first(), usage)?
+  let issue = fetch_issue(resolved)?
+  let key = f"{issue.expand.team.key}-{issue.number}"
+  let Ok(n) = strconv.Atoi(p.nth(1)) else {
+    return Err(f"'{p.nth(1)}' is not a comment number — 'lll issue comment {key}' numbers them")
+  }
+  let comments = fetch_comments(issue.id)?
+  if n < 1 || n > comments.length() {
+    return Err(f"{key} has {comments.length()} comments; there is no #{n} — 'lll issue comment {key}' numbers them")
+  }
+  let c = comments[n - 1]
+  let mut whose = c.expand.author.name
+  if whose == "" { whose = "anon" }
+  if !p.given("--force") {
+    if let Some(a) = actor()? {
+      if c.author != a.id {
+        return Err(f"comment #{n} on {key} is {whose}'s, not yours — --force changes it anyway")
+      }
+    }
+  }
+  if verb == "delete" {
+    let _ = pb.delete(f"/api/collections/comments/records/{c.id}")?
+    fmt.Println(f"Deleted comment #{n} on {key} (was {whose}'s)")
+    return Ok(())
+  }
+  let mut body = ""
+  if p.given("-b") {
+    body = value_or_stdin(p.one("-b"), "-b")?
+  } else if p.nth(2) != "" {
+    body = p.nth(2)
+  }
+  if strings.TrimSpace(body) == "" {
+    return Err(f"comment edit needs the new body: -b \"...\" (or '-b -' from stdin)\nusage: {usage}")
+  }
+  let _ = pb.patch(
+    f"/api/collections/comments/records/{c.id}",
+    "{\"body\":" + json_quote(body)? + "}",
+  )?
+  fmt.Println(f"Edited comment #{n} on {key}")
+  Ok(())
+}
+
+fn comment_mutate_spec(verb: string) -> Slice<flags.Flag> {
+  let mut spec = [
+    flags.Flag { name: "--force", help: "change a comment that is not yours", .. },
+  ]
+  if verb == "edit" {
+    spec = spec.append(flags.Flag {
+      name: "-b",
+      alias: "--body -m --message",
+      value: true,
+      hint: "\"body\"",
+      help: "the new body ('-b -' reads it from stdin)",
+      ..,
+    })
+  }
+  spec
 }
 
 /// Resolve a member by name; unknown names error with the fix.

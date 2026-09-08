@@ -711,6 +711,19 @@ SU_TOK=$(pb_superuser_token "$URL") || fail "superuser token for the authorless 
 out=$(env -u LLL_ME LLL_URL=$URL LLL_TOKEN="$BRYAN_TOK" LLL_ME=bryan "$LIN" whoami 2>&1)
 assert_contains "$out" "bryan <" "the minted token is bryan's (whoami: $out)"
 
+# TASK-323: a dead member token stays dead in a CLI that holds the admin
+# pair. Only the board re-mints for itself (LLL_REMINT, set by lll up).
+# Kill alice's token by rotating her password, then ask who she is.
+ALICE_ID=$(curl -sf -H "Authorization: Bearer $SU_TOK" "$URL/api/collections/members/records?perPage=200" | jq -r '.items[] | select(.name=="alice") | .id')
+curl -sf -X PATCH -H "Authorization: Bearer $SU_TOK" "$URL/api/collections/members/records/$ALICE_ID" \
+  -H 'Content-Type: application/json' -d '{"password":"alice-rotated-123","passwordConfirm":"alice-rotated-123"}' >/dev/null \
+  || fail "rotating alice's password"
+out=$(env -u LLL_ME LLL_URL=$URL LLL_TOKEN="$ALICE_TOK" "$LIN" whoami 2>&1 || true)
+assert_contains "$out" "was rejected" "whoami on a dead token says rejected, admin pair or not"
+assert_not_contains "$out" "alice <" "and does not name the member as alive"
+ALICE_TOK=$(mint_tok alice)
+[ -n "$ALICE_TOK" ] || fail "re-minting alice"
+
 
 # --- --assignee on create; assignee in list and view ---
 out=$(LLL_URL=$URL LLL_TEAM=ENG "$LIN" issue create -t "Assigned issue" --assignee bryan)
@@ -780,6 +793,30 @@ assert_contains "$out" "Looks good to me" "view comment body"
 out=$(LLL_URL=$URL "$LIN" issue comment ENG-7)
 assert_contains "$out" "bryan (just now)" "comment list author"
 assert_contains "$out" "Looks good to me" "comment list body"
+assert_contains "$out" "#1 bryan (just now)" "comments are numbered (TASK-320)"
+
+# --- comment edit / delete: your own, or --force (TASK-320) ---
+out=$(LLL_URL=$URL LLL_TOKEN="$BRYAN_TOK" LLL_ME=bryan "$LIN" issue comment edit ENG-7 1 -b "Looks good to me, edited")
+assert_contains "$out" "Edited comment #1 on ENG-7" "comment edit output"
+out=$(LLL_URL=$URL "$LIN" issue comment ENG-7)
+assert_contains "$out" "Looks good to me, edited" "the edited body landed"
+set +e
+out=$(LLL_URL=$URL LLL_TOKEN="$CAROL_TOK" LLL_ME=carol "$LIN" issue comment delete ENG-7 1 2>&1)
+rc=$?
+set -e
+[ "$rc" -ne 0 ] || fail "deleting someone else's comment: expected nonzero exit"
+assert_contains "$out" "is bryan's, not yours" "another member's comment is refused and named"
+assert_contains "$out" "--force" "the refusal names the override"
+out=$(LLL_URL=$URL LLL_TOKEN="$CAROL_TOK" LLL_ME=carol "$LIN" issue comment delete ENG-7 1 --force)
+assert_contains "$out" "Deleted comment #1 on ENG-7 (was bryan's)" "--force deletes and says whose it was"
+out=$(LLL_URL=$URL "$LIN" issue comment ENG-7)
+assert_not_contains "$out" "Looks good to me, edited" "the deleted comment is gone"
+set +e
+out=$(LLL_URL=$URL "$LIN" issue comment delete ENG-7 9 2>&1)
+set -e
+assert_contains "$out" "there is no #9" "an out-of-range number is told the count"
+# put the comment back for the assertions that follow
+out=$(LLL_URL=$URL LLL_TOKEN="$BRYAN_TOK" LLL_ME=bryan "$LIN" issue comment ENG-7 -b "Looks good to me")
 
 # --- authorless comments: me unset is accepted; me naming NO member is refused ---
 # A genuinely unset 'me' needs a home with no me key: the suite's own
@@ -1765,6 +1802,7 @@ got=$(env $E "$LIN" issue view "$CKEY" --json | jq -r '.expand.assignee.name')
 # is not a state (fleet replay, task 9)
 out=$(env $E "$LIN" issue update "$CKEY" --assignee none)
 assert_contains "$out" "released bryan's claim" "clearing the assignee under a claim releases it and says so"
+assert_contains "$out" "assignee=none" "update names what it set (TASK-320)"
 out=$(env $E "$LIN" issue view "$CKEY")
 assert_not_contains "$out" "Claimed:   bryan" "the claim is gone with the assignee"
 out=$(env $E LLL_TOKEN="$BRYAN_TOK" LLL_ME=bryan "$LIN" issue claim "$CKEY")
@@ -2403,9 +2441,19 @@ assert_contains "$out" "lll login" "the stale-token refusal names the fix"
 # rides a superuser token and re-mints only "if refused", but a stale token is
 # never refused on a read, so production told everyone its own configured team
 # did not exist while the CLI could see it fine.
-out=$(LLL_URL=$URL LLL_ADMIN_EMAIL=admin@local.dev LLL_ADMIN_PASSWORD=admin-local-123 \
-  "$LIN" team list) || fail "admin-credentialled process did not self-heal: $out"
-assert_contains "$out" "ENG" "a stale token is re-minted when admin credentials are present"
+# TASK-323 narrowed it: the admin pair alone no longer heals - a fleet or a
+# developer shell holding it would otherwise upgrade a dead member token to
+# the superuser silently and whoami would name the dead member as alive.
+# The board declares itself with LLL_REMINT=1 (set by lll up for itself).
+set +e
+out=$(LLL_URL=$URL LLL_ADMIN_EMAIL=admin@local.dev LLL_ADMIN_PASSWORD=admin-local-123 "$LIN" team list 2>&1)
+rc=$?
+set -e
+[ "$rc" -ne 0 ] || fail "the admin pair alone should not self-heal any more (TASK-323): $out"
+assert_contains "$out" "was rejected by" "a CLI with the admin pair still gets the honest refusal"
+out=$(LLL_URL=$URL LLL_REMINT=1 LLL_ADMIN_EMAIL=admin@local.dev LLL_ADMIN_PASSWORD=admin-local-123 \
+  "$LIN" team list) || fail "the board (LLL_REMINT=1) did not self-heal: $out"
+assert_contains "$out" "ENG" "a stale token is re-minted by the board, which holds the admin pair and says so"
 
 E2E_TOKEN=$(pb_member_token "$URL" e2e-agent e2e-agent@lll.test e2e-agent-pass-123) \
   || fail "re-minting the e2e member token after the rotation"

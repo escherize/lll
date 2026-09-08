@@ -212,6 +212,10 @@ fn refused_token(
 /// credentials may re-authenticate silently. Everyone else is told their
 /// token is dead, which is the honest answer for a person.
 fn remint_from_admin_credentials(base: string) -> Option<string> {
+  // The board sets LLL_REMINT for itself at boot (up.lis). Anyone else
+  // holding the admin pair - a fleet, the e2e suite, a developer shell -
+  // gets the honest refusal instead of a silent superuser upgrade.
+  if os.Getenv("LLL_REMINT") != "1" { return None }
   let email = os.Getenv("LLL_ADMIN_EMAIL")
   let pass = os.Getenv("LLL_ADMIN_PASSWORD")
   if email == "" || pass == "" { return None }
