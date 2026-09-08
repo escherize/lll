@@ -1,15 +1,3 @@
 {
-  "hooks": {
-    "SessionStart": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "mise trust .private/mise.toml >/dev/null 2>&1 || true",
-            "statusMessage": "Trusting .private/mise.toml"
-          }
-        ]
-      }
-    ]
-  }
+  "hooks": {}
 }

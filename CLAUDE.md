@@ -1,29 +1,25 @@
 
-<!-- private-sync pointer -->
-## Project knowledge lives in .private/
+<!-- tracker pointer -->
+## Project knowledge lives on the lll board
 
-Sidecar git repo (gitignored, own remote, synced via plain git). Use the
-`private-sync` skill for full conventions. Quick map:
+This project tracks itself with lll, the tool it builds, on the hosted board
+(team `LLL`, url in `.lll.toml`). There is no sidecar any more: the old
+`.private/` notes repo is archived at the URL in `.private-remote` and is
+read-only history. Use the `lll` skill for the working loop; the short form:
 
-- `.private/wiki/` - current truth, start at wiki/index.md
-- `.private/decisions/` - ADRs, immutable, supersede-only
-- `.private/findings/<agent>/` - things learned the hard way, append-only
-- `.private/worklogs/<agent>/` - session logs, append-only
-- `.private/backlog/` - tasks, via the backlog CLI only
+- `lll issue list` - this project's real work; `lll issue view KEY` before
+  touching anything, its Docs and Related findings are the context.
+- **Before writing any code for nontrivial work: claim an issue.** Find or
+  create it (`lll issue create "..."`), then `lll issue claim KEY` and
+  `lll issue start KEY`. Work nobody claimed gets duplicated.
+- Be noisy: file every issue you pass (`lll issue create "..."`) instead of
+  fixing or ignoring it, then return to your claimed issue.
+- Record what you learned where the next agent will find it:
+  `lll issue comment KEY "..."` for the running log, `lll finding new -s
+  slug -t "title" -a AREA -p "paths" -b -` for a finding, `lll doc new -k
+  decision ...` for a decision, then `lll issue link KEY SLUG`.
+- When the work lands: `lll issue close KEY`.
 
-**Before writing any code for nontrivial work: claim a task.** Find or create
-it (`backlog task create "..."`), then
-`backlog task edit <id> -a @<agent-id> -s "In Progress"` and push the sidecar
-immediately. Work nobody claimed gets duplicated; a claim nobody pushed
-protects no one. When the work lands: `-s Done`, worklog, push.
-
-Be noisy: file every issue you pass (`backlog task create "..."`) instead of
-fixing or ignoring it, then return to your claimed task. Deal-with-later is
-the point; silent discoveries are lost.
-
-Before starting: read `.private/wiki/index.md`, then
-`git -C .private log --oneline -20`. Commit and push sidecar changes
-separately: `git -C .private add -A && git -C .private commit && git -C .private push`.
-If `.private/` is missing: `git clone "$(cat .private-remote)" .private`.
-Never commit `.private/` contents or secret values to the public repo.
-<!-- /private-sync pointer -->
+Identity comes from your token (`lll whoami`); `me` may only agree. Never
+commit a token: it lives in `~/.config/lll/lll.toml` or `LLL_TOKEN`.
+<!-- /tracker pointer -->

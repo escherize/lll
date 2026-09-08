@@ -272,7 +272,7 @@ mise run gate      # all three -- what a change must pass before it lands
 itself (no external binary), plus `jq` and `python3`. It never touches your
 data.
 
-`scripts/import_sidecar.py` imports this project's own `.private` sidecar
+`scripts/import_sidecar.py` imported this project's former `.private` sidecar
 tracker (Backlog.md tasks + wiki/decisions/findings) into an lll instance as
 team `LLL`. It is idempotent. Every record carries an `Origin: sidecar ...` body line, and
 a re-run creates nothing that is already there. Re-running it is safe, and is

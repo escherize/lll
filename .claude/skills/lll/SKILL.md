@@ -9,28 +9,18 @@ lll is the tracker AND the record. The point is not project management: it is
 that six months from now, someone (probably an agent) can ask *why is this like
 this* and get an answer instead of a guess.
 
-## Two trackers, know which one you are in
+## One tracker: this project runs on its own board
 
-This skill covers the lll CLI, which is the product under development. When
-you run `lll issue list` you are reading the lll board — in this checkout that
-board is the FIXTURE (the seeded ENG demo data), not this project's work list.
+This skill covers the lll CLI, which is the product under development, and
+the lll board is also where THIS project's work is tracked: team `LLL` on
+the hosted instance named in `.lll.toml`. `lll issue list` from the checkout
+is this project's real work list. (A seeded demo board - `mise run seed` -
+is the fixture for exercising the tool; it is a different url and team.)
 
-Work on the lll project itself is claimed from the sidecar backlog:
-
-```sh
-cd .private && backlog task list --plain   # THIS project's real work
-```
-
-Every `lll` command below applies to whatever lll board you are pointed at —
-use it when building lll, when exercising the board, or when a task tells you
-to. It does NOT track this repo's engineering work; see
-`.claude/skills/private-sync/SKILL.md` for that.
-
-Two rules carry most of the value:
-
-1. **Claim before you code.** Work nobody claimed gets done twice.
-2. **Nothing lives only in your head.** If you learned it the hard way, write it
-   down where the next person will trip over the same thing.
+The sidecar notes repo that used to hold the backlog, findings and decisions
+was imported here and archived; its url is in `.private-remote`, read-only.
+Findings are `lll finding list` / `lll finding near PATH`, decisions are
+`lll doc list` (kind decision), the backlog is the issue list.
 
 ## The loop
 
