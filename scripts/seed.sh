@@ -327,6 +327,9 @@ echo
 echo "the server is still running as pid $UP_PID - Ctrl-C it, or:  kill $UP_PID"
 echo "to drive the CLI against it in another shell:"
 echo "  export LLL_URL=$URL LLL_TEAM=DEMO LLL_TOKEN=$LLL_TOKEN"
+echo "that token is the member 'seed'; writes go out as the token's member (TASK-317),"
+echo "so an agent that should write as shard-NN needs its own:"
+echo "  LLL_ADMIN_EMAIL=$LLL_ADMIN_EMAIL LLL_ADMIN_PASSWORD=$LLL_ADMIN_PASSWORD lll token create shard-NN"
 echo
 
 # Hand the terminal to the server: Ctrl-C then stops the board, which is what
