@@ -114,6 +114,7 @@ pub struct IssueExpand {
   pub assignee: Member,
   pub project: Project,
   pub labels: Slice<Label>,
+  pub blocked_by: Slice<Issue>,
 }
 
 #[json]
@@ -138,6 +139,8 @@ pub struct Issue {
   pub assignee: string,
   pub project: string,
   pub labels: Slice<string>,
+  // LLL-175: the issues that must be done before this one can start.
+  pub blocked_by: Slice<string>,
   pub created: string,
   pub updated: string,
   pub expand: IssueExpand,

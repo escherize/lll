@@ -1116,6 +1116,54 @@ out=$(env LLL_URL=$URL LLL_TEAM=ENG "$LIN" search 2>&1)
 set -e
 assert_contains "$out" "what to search for" "search without a query names the usage"
 
+# --- dependencies: block / unblock, Blocked by / Blocks, --ready / --blocked (LLL-175) ---
+DA=$(env LLL_URL=$URL LLL_TEAM=ENG "$LIN" issue create -t "Dep: the foundation" | sed -n 's/^Created \([A-Z]*-[0-9]*\).*/\1/p')
+DB=$(env LLL_URL=$URL LLL_TEAM=ENG "$LIN" issue create -t "Dep: the wall" | sed -n 's/^Created \([A-Z]*-[0-9]*\).*/\1/p')
+DC=$(env LLL_URL=$URL LLL_TEAM=ENG "$LIN" issue create -t "Dep: the roof" | sed -n 's/^Created \([A-Z]*-[0-9]*\).*/\1/p')
+[ -n "$DA" ] && [ -n "$DB" ] && [ -n "$DC" ] || fail "dependency fodder did not print keys"
+out=$(env LLL_URL=$URL "$LIN" issue block "$DB" "$DA")
+assert_contains "$out" "$DB is blocked by $DA" "block records the dependency"
+out=$(env LLL_URL=$URL "$LIN" issue block "$DC" "$DB")
+assert_contains "$out" "$DC is blocked by $DB" "a chain of two"
+out=$(env LLL_URL=$URL "$LIN" issue block "$DB" "$DA")
+assert_contains "$out" "already blocked by" "blocking twice is a no-op that says so"
+set +e
+out=$(env LLL_URL=$URL "$LIN" issue block "$DA" "$DC" 2>&1)
+rc=$?
+set -e
+[ "$rc" -ne 0 ] || fail "a cycle should be refused"
+assert_contains "$out" "would be a cycle" "a cycle through two hops is refused and named"
+set +e
+out=$(env LLL_URL=$URL "$LIN" issue block "$DA" "$DA" 2>&1)
+set -e
+assert_contains "$out" "cannot block itself" "self-block is refused"
+out=$(env LLL_URL=$URL "$LIN" issue view "$DB")
+assert_contains "$out" "Blocked by: $DA (todo) — 1 open, not ready" "view names the blocker, its state and readiness"
+assert_contains "$out" "Blocks:    $DC" "view names what this issue blocks"
+out=$(env LLL_URL=$URL LLL_TEAM=ENG "$LIN" issue list --ready)
+assert_contains "$out" "$DA" "--ready lists the unblocked issue"
+assert_not_contains "$out" "$DB" "--ready omits an issue with an open blocker"
+assert_not_contains "$out" "$DC" "--ready omits the end of the chain"
+out=$(env LLL_URL=$URL LLL_TEAM=ENG "$LIN" issue list --blocked)
+assert_contains "$out" "$DB" "--blocked lists the blocked issue"
+assert_not_contains "$out" "$DA" "--blocked omits the free one"
+out=$(env LLL_URL=$URL "$LIN" issue close "$DA")
+out=$(env LLL_URL=$URL "$LIN" issue view "$DB")
+assert_contains "$out" "Blocked by: $DA (done) — all done, ready" "a done blocker reads as ready"
+out=$(env LLL_URL=$URL LLL_TEAM=ENG "$LIN" issue list --ready)
+assert_contains "$out" "$DB" "--ready admits the issue once its blocker is done"
+assert_not_contains "$out" "$DC" "but not the one behind it"
+out=$(env LLL_URL=$URL LLL_TEAM=ENG "$LIN" issue list --ready --json)
+printf '%s' "$out" | jq -e --arg k "$DB" '.items[] | select(.number == ($k | split("-")[1] | tonumber))' >/dev/null || fail "--ready --json carries the filtered items"
+out=$(env LLL_URL=$URL "$LIN" issue unblock "$DC" "$DB")
+assert_contains "$out" "$DC is no longer blocked by $DB" "unblock output"
+out=$(env LLL_URL=$URL "$LIN" issue unblock "$DC" "$DB")
+assert_contains "$out" "was not blocked by" "unblocking twice says so"
+set +e
+out=$(env LLL_URL=$URL "$LIN" issue depends "$DC" 2>&1)
+set -e
+assert_contains "$out" "lll issue block KEY-123 BLOCKER" "a guessed dependency verb is pointed at block"
+
 # --- --json emits one jq-parseable object per line ---
 wait_for_line "$WATCH_JSON" "Watched todo issue" "watch --json captured the create"
 while IFS= read -r line; do

@@ -217,6 +217,8 @@ fn issue_list_spec() -> Slice<flags.Flag> {
       help: "raw PocketBase JSON (team, assignee, labels, project\nexpanded), pipe-friendly",
       ..,
     },
+    flags.Flag { name: "--ready", help: "only open issues whose blockers are all done (LLL-175): what an agent can pick up now", .. },
+    flags.Flag { name: "--blocked", help: "only issues with an open blocker", .. },
   ]
 }
 
@@ -374,6 +376,7 @@ fn issue_synonym(verb: string) -> Option<string> {
     "ls" => "'lll issue list'",
     "rm" | "remove" => "'lll issue delete KEY-123'",
     "comments" => "'lll issue comment KEY-123' lists them; add one with a body after the key",
+    "depends" | "dep" | "blocked-by" | "blockedby" => "'lll issue block KEY-123 BLOCKER' records that KEY-123 waits on BLOCKER; 'lll issue list --ready' lists what can start",
     _ => "",
   }
   if hint == "" { return None }
@@ -553,6 +556,22 @@ pub fn issue_commands() -> Slice<flags.Command> {
       positional: "KEY-123 SLUG",
       run: unlink,
     },
+    flags.Command {
+      name: "block",
+      summary: "record that KEY-123 cannot start until BLOCKER is done (LLL-175); view shows it, list --ready honours it",
+      page: "",
+      spec: [],
+      positional: "KEY-123 BLOCKER",
+      run: block,
+    },
+    flags.Command {
+      name: "unblock",
+      summary: "remove BLOCKER from KEY-123's blockers",
+      page: "",
+      spec: [],
+      positional: "KEY-123 BLOCKER",
+      run: unblock,
+    },
   ]
 }
 
@@ -701,6 +720,9 @@ fn list(args: Slice<string>) -> Result<(), string> {
     limit = n
   }
   let json_mode = p.given("--json")
+  let ready_only = p.given("--ready")
+  let blocked_only = p.given("--blocked")
+  if ready_only && blocked_only { return Err("--ready and --blocked exclude each other") }
 
   let cfg = config.load()?
 
@@ -727,7 +749,7 @@ fn list(args: Slice<string>) -> Result<(), string> {
   // --limit applies server-side via PB's perPage (capped by PB at 500).
   let mut per_page = 200
   if limit > 0 { per_page = limit }
-  let mut path = f"/api/collections/issues/records?perPage={per_page}&expand=team,assignee,labels,project&sort={url.QueryEscape(sort)}"
+  let mut path = f"/api/collections/issues/records?perPage={per_page}&expand=team,assignee,labels,blocked_by,project&sort={url.QueryEscape(sort)}"
   let filter = query.filter(
     team_id,
     state,
@@ -739,7 +761,7 @@ fn list(args: Slice<string>) -> Result<(), string> {
   if filter != "" { path = f"{path}&filter={url.QueryEscape(filter)}" }
 
   let body = pb.get(path)?
-  if json_mode {
+  if json_mode && !ready_only && !blocked_only {
     fmt.Println(body)
     return Ok(())
   }
@@ -748,7 +770,26 @@ fn list(args: Slice<string>) -> Result<(), string> {
   if let Err(e) = json.Unmarshal(body.bytes(), &issues) {
     return Err(f"decoding issues: {e}")
   }
-  print_issue_table(issues.items)
+  // LLL-175: --ready is what an agent can pick up now - open, and every
+  // blocker done or cancelled; --blocked is the complement with at least
+  // one open blocker. Decided here, after the fetch, because PocketBase
+  // cannot filter on an expanded relation's state.
+  let mut items = issues.items
+  if ready_only {
+    items = items.filter(|i| (i.state == "todo" || i.state == "backlog") && open_blockers(i).is_empty())
+  }
+  if blocked_only {
+    items = items.filter(|i| !open_blockers(i).is_empty())
+  }
+  if json_mode {
+    let out = match json.Marshal(models.IssueList { items, total_items: items.length() }) {
+      Ok(b) => b as string,
+      Err(e) => return Err(f"encoding issues: {e}"),
+    }
+    fmt.Println(out)
+    return Ok(())
+  }
+  print_issue_table(items)
 }
 
 /// The standard issue table (ID, state, priority, title, assignee, age),
@@ -870,6 +911,18 @@ fn view(args: Slice<string>) -> Result<(), string> {
   if linked_docs.length() > 0 {
     let slugs = linked_docs.map(|d| d.slug)
     fmt.Println(f"Docs:      {strings.Join(slugs, ", ")}")
+  }
+  if full.expand.blocked_by.length() > 0 {
+    let mut parts: Slice<string> = []
+    for b in full.expand.blocked_by { parts = parts.append(f"{full.expand.team.key}-{b.number} ({b.state})") }
+    let open = open_blockers(full).length()
+    let tail = if open == 0 { " — all done, ready" } else { f" — {open} open, not ready" }
+    fmt.Println(f"Blocked by: {strings.Join(parts, ", ")}{tail}")
+  }
+  let blocks = fetch_blocks(full.id)?
+  if blocks.length() > 0 {
+    let keys = blocks.map(|b| f"{b.expand.team.key}-{b.number}")
+    fmt.Println(f"Blocks:    {strings.Join(keys, ", ")}")
   }
   if full.emoji != "" { fmt.Println(f"Emoji:     {full.emoji}") }
   fmt.Println(f"Created:   {display.relative(full.created)}")
@@ -1685,7 +1738,7 @@ fn fetch_issue_record(id: string) -> Result<string, string> {
   }
 
   pb.get(
-    f"/api/collections/issues/records/{item.id}?expand=team,assignee,labels,project",
+    f"/api/collections/issues/records/{item.id}?expand=team,assignee,labels,project,blocked_by",
   )
 }
 
@@ -1823,4 +1876,98 @@ fn unlink(args: Slice<string>) -> Result<(), string> {
   set_doc_issues(d, remaining)?
   fmt.Println(f"Unlinked {key} from {d.slug}")
   Ok(())
+}
+
+/// `lll issue block KEY BLOCKER`: KEY cannot start until BLOCKER is done.
+/// Refuses a self-block and a cycle (BLOCKER already waits on KEY, at any
+/// depth), since a cycle would make both un-ready forever. The dependency
+/// lives on the blocked issue: one relation field, no second collection.
+fn block(args: Slice<string>) -> Result<(), string> {
+  let usage = "lll issue block KEY-123 BLOCKER"
+  let (id, blocker_id) = two_positional(args, usage)?
+  if id == "" || blocker_id == "" { return Err(f"usage: {usage}") }
+  let issue = fetch_issue(resolve_id(id, usage)?)?
+  let blocker = fetch_issue(resolve_id(blocker_id, usage)?)?
+  let key = f"{issue.expand.team.key}-{issue.number}"
+  let bkey = f"{blocker.expand.team.key}-{blocker.number}"
+  if issue.id == blocker.id { return Err(f"{key} cannot block itself") }
+  if issue.blocked_by.find(|x| x == blocker.id).is_some() {
+    fmt.Println(f"{key} is already blocked by {bkey}")
+    return Ok(())
+  }
+  let cyclic = depends_on(blocker, issue.id, 0)?
+  if cyclic {
+    return Err(f"{bkey} already waits on {key} (directly or through others); blocking {key} by {bkey} would be a cycle")
+  }
+  set_blocked_by(issue, issue.blocked_by.append(blocker.id))?
+  let mut note = ""
+  if blocker.state == "done" || blocker.state == "cancelled" { note = f" ({bkey} is already {blocker.state}, so this does not hold {key} back)" }
+  fmt.Println(f"{key} is blocked by {bkey}{note}")
+  Ok(())
+}
+
+fn unblock(args: Slice<string>) -> Result<(), string> {
+  let usage = "lll issue unblock KEY-123 BLOCKER"
+  let (id, blocker_id) = two_positional(args, usage)?
+  if id == "" || blocker_id == "" { return Err(f"usage: {usage}") }
+  let issue = fetch_issue(resolve_id(id, usage)?)?
+  let blocker = fetch_issue(resolve_id(blocker_id, usage)?)?
+  let key = f"{issue.expand.team.key}-{issue.number}"
+  let bkey = f"{blocker.expand.team.key}-{blocker.number}"
+  let mut remaining: Slice<string> = []
+  let mut found = false
+  for x in issue.blocked_by {
+    if x == blocker.id { found = true } else { remaining = remaining.append(x) }
+  }
+  if !found {
+    fmt.Println(f"{key} was not blocked by {bkey}")
+    return Ok(())
+  }
+  set_blocked_by(issue, remaining)?
+  fmt.Println(f"{key} is no longer blocked by {bkey}")
+  Ok(())
+}
+
+fn set_blocked_by(issue: models.Issue, ids: Slice<string>) -> Result<(), string> {
+  let encoded = match json.Marshal(ids) {
+    Ok(b) => b as string,
+    Err(e) => return Err(f"encoding blockers: {e}"),
+  }
+  let _ = pb.patch(f"/api/collections/issues/records/{issue.id}", f"{{\"blocked_by\":{encoded}}}")?
+  Ok(())
+}
+
+/// True when `issue` waits on `target` at any depth. Bounded at eight
+/// levels: deeper chains are not a thing a tracker should have.
+fn depends_on(issue: models.Issue, target: string, depth: int) -> Result<bool, string> {
+  if depth > 8 { return Ok(false) }
+  for b in issue.expand.blocked_by {
+    if b.id == target { return Ok(true) }
+    let full = fetch_issue_by_id(b.id)?
+    let deeper = depends_on(full, target, depth + 1)?
+    if deeper { return Ok(true) }
+  }
+  Ok(false)
+}
+
+fn fetch_issue_by_id(id: string) -> Result<models.Issue, string> {
+  let body = pb.get(f"/api/collections/issues/records/{id}?expand=team,blocked_by")?
+  let mut full = models.Issue { .. }
+  if let Err(e) = json.Unmarshal(body.bytes(), &full) {
+    return Err(f"decoding issue: {e}")
+  }
+  Ok(full)
+}
+
+/// A blocker is open unless it is done or cancelled.
+fn open_blockers(issue: models.Issue) -> Slice<models.Issue> {
+  issue.expand.blocked_by.filter(|b| b.state != "done" && b.state != "cancelled")
+}
+
+/// Issues that name `issue` as a blocker, for the "Blocks:" line.
+fn fetch_blocks(issue_id: string) -> Result<Slice<models.Issue>, string> {
+  let filter = url.QueryEscape(f"blocked_by.id ?= {query.quote(issue_id)}")
+  let mut list = models.IssueList { .. }
+  pb.fetch(f"/api/collections/issues/records?perPage=200&sort=number&expand=team&filter={filter}", "issues", &list)?
+  Ok(list.items)
 }
