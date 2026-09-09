@@ -1825,6 +1825,20 @@ out=$(env $E "$LIN" issue view "$CKEY")
 assert_not_contains "$out" "Claimed:   bryan" "the claim is gone with the assignee"
 out=$(env $E LLL_TOKEN="$BRYAN_TOK" LLL_ME=bryan "$LIN" issue claim "$CKEY")
 assert_contains "$out" "Claimed $CKEY for bryan" "and it can be claimed afresh"
+
+# --assignee on a claimed issue is refused and names the holder (LLL-184);
+# assigning the holder to themselves is a no-op.
+set +e
+out=$(env $E "$LIN" issue update "$CKEY" --assignee carol 2>&1)
+rc=$?
+set -e
+[ "$rc" -ne 0 ] || fail "--assignee over a claim: expected nonzero exit"
+assert_contains "$out" "is claimed by bryan" "the refusal names the holder"
+assert_contains "$out" "lll issue release $CKEY" "and the release"
+out=$(env $E "$LIN" issue update "$CKEY" --assignee bryan)
+assert_contains "$out" "assignee=bryan" "assigning the holder to themselves is allowed"
+got=$(env $E "$LIN" issue view "$CKEY" --json | jq -r '.expand.assignee.name')
+[ "$got" = "bryan" ] || fail "claim survives --assignee to the holder: got '$got'"
 out=$(env $E "$LIN" issue view "$CKEY")
 assert_contains "$out" "Assignee:  bryan" "a refused claim leaves the assignee alone"
 assert_contains "$out" "Claimed:   bryan" "a refused claim leaves the holder alone"

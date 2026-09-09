@@ -984,6 +984,18 @@ fn update(args: Slice<string>) -> Result<(), string> {
     changed = changed.append("assignee=none")
   } else if assignee_name != "" {
     let member = resolve_member(assignee_name)?
+    // A claim is exclusive (TASK-175); --assignee used to overwrite the
+    // holder silently and the board then showed someone the claim did not
+    // (LLL-184). Assigning the holder to themselves is a no-op, anyone else
+    // is refused with the two verbs that do it honestly.
+    if let Some(held) = fetch_claim(issue.id)? {
+      if held.member != member.id {
+        let mut holder = held.expand.member.name
+        if holder == "" { holder = "someone" }
+        let key = f"{issue.expand.team.key}-{issue.number}"
+        return Err(f"{key} is claimed by {holder} ({display.relative(held.created)}) — a claim owns the assignee: 'lll issue release {key}' first, or have {member.name} run 'lll issue claim {key}'")
+      }
+    }
     fields = fields.append("\"assignee\":" + json_quote(member.id)?)
     changed = changed.append(f"assignee={member.name}")
   }
