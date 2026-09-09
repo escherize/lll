@@ -1088,6 +1088,34 @@ assert_contains "$out" "no comment containing 'never-coming'" "--timeout names w
 out=$(LLL_URL=$URL "$LIN" issue comment "$WKEY")
 assert_contains "$out" "lll issue watch $WKEY --until TEXT" "a comment listing points at watch --until"
 
+# --- lll search: full text over issues, comments and docs, ranked, with context (LLL-96) ---
+SKEY=$(env LLL_URL=$URL LLL_TEAM=ENG "$LIN" issue create -t "Rail favorites go stale" -d "First line of context.
+The zebra crossing is only mentioned in this description.
+Last line of context." | sed -n 's/^Created \([A-Z]*-[0-9]*\).*/\1/p')
+[ -n "$SKEY" ] || fail "search fodder create did not print a key"
+out=$(env LLL_URL=$URL LLL_TEAM=ENG LLL_TOKEN="$CAROL_TOK" LLL_ME=carol "$LIN" issue comment "$SKEY" -b "The giraffe lives only in this comment.")
+out=$(env LLL_URL=$URL LLL_TEAM=ENG "$LIN" search zebra)
+assert_contains "$out" "$SKEY" "a word only in a description is found"
+assert_contains "$out" "[description]" "and the hit says it came from the description"
+assert_contains "$out" "> The zebra crossing is only mentioned in this description." "the matching line is marked"
+assert_contains "$out" "  First line of context." "with the line before it"
+assert_contains "$out" "  Last line of context." "and the line after it"
+out=$(env LLL_URL=$URL LLL_TEAM=ENG "$LIN" search giraffe)
+assert_contains "$out" "$SKEY" "a word only in a comment is found under its issue"
+assert_contains "$out" "[comment #1 by carol]" "and the hit names the comment and its author"
+out=$(env LLL_URL=$URL LLL_TEAM=ENG "$LIN" search "Rail favorites")
+[ "$(printf '%s\n' "$out" | head -1 | cut -d' ' -f1)" = "$SKEY" ] || fail "a title phrase should rank its issue first, got: $(printf '%s' "$out" | head -1)"
+out=$(env LLL_URL=$URL LLL_TEAM=ENG "$LIN" search "$SKEY")
+[ "$(printf '%s\n' "$out" | head -1 | cut -d' ' -f1)" = "$SKEY" ] || fail "a key as the query should pin its issue first"
+out=$(env LLL_URL=$URL LLL_TEAM=ENG "$LIN" search zebra --json)
+printf '%s' "$out" | jq -e '.[0].group and .[0].snippets[0].lines[0]' >/dev/null || fail "search --json: not the hit shape: $out"
+out=$(env LLL_URL=$URL LLL_TEAM=ENG "$LIN" search "no-such-word-anywhere-xq")
+assert_contains "$out" "No match for" "no hits says so"
+set +e
+out=$(env LLL_URL=$URL LLL_TEAM=ENG "$LIN" search 2>&1)
+set -e
+assert_contains "$out" "what to search for" "search without a query names the usage"
+
 # --- --json emits one jq-parseable object per line ---
 wait_for_line "$WATCH_JSON" "Watched todo issue" "watch --json captured the create"
 while IFS= read -r line; do
@@ -1477,6 +1505,10 @@ out=$(env LLL_URL=$URL LLL_TEAM=ENG "$LIN" finding list -a pb)
 assert_contains "$out" "fleet-new" "finding new sets kind=finding (it lists as a finding)"
 out=$(env LLL_URL=$URL LLL_TEAM=ENG "$LIN" doc read fleet-new --raw)
 assert_contains "$out" "kind set by the verb" "doc read is view"
+# LLL-96: docs are in the full-text search too, ranked with the issues; the
+# delta sync sees a doc created after the cache's first fill.
+out=$(env LLL_URL=$URL LLL_TEAM=ENG "$LIN" search "Migrations are a merge hazard" --docs)
+assert_contains "$out" "doc migration-hazard" "docs are searched too, and say they are docs"
 out=$(env LLL_URL=$URL LLL_TEAM=ENG "$LIN" finding list --search hazard)
 assert_contains "$out" "migration-hazard" "finding list --search matches slug"
 assert_not_contains "$out" "fleet-new" "finding list --search excludes the rest"

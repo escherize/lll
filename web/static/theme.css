@@ -1260,6 +1260,12 @@ input:focus, textarea:focus, select:focus {
   overflow: hidden;
   text-overflow: ellipsis;
 }
+/* LLL-96: the passages a search hit matched on, under the row, in the
+   source's own words with the matching line marked. */
+.sr-snips { padding: 2px 0 8px 28px; font-size: 12px; color: var(--text-2); }
+.sr-snip { margin-top: 4px; }
+.sr-src { display: block; color: var(--text-3); font-size: 11px; }
+.sr-line { white-space: pre-wrap; font-family: var(--mono, ui-monospace, monospace); }
 .sr-prio { flex: none; width: 14px; display: flex; }
 .sr-age {
   flex: none;

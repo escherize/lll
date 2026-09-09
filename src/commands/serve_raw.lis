@@ -179,8 +179,12 @@ fn search_raw(vm: SearchVM) -> string {
   if vm.q == "" {
     lines = lines.append("Give the URL a ?q= term to search.")
   }
-  for c in vm.results {
-    lines = lines.append(card_line(c))
+  for h in vm.results {
+    lines = lines.append(card_line(h.card))
+    for sn in h.snippets {
+      lines = lines.append(f"    [{sn.label}]")
+      for l in sn.lines { lines = lines.append(f"    {l}") }
+    }
   }
   strings.Join(lines, "\n")
 }

@@ -1,0 +1,454 @@
+import "go:encoding/json"
+import "go:fmt"
+import "go:net/url"
+import "go:strconv"
+import "go:strings"
+import "go:path/filepath"
+import "go:os"
+
+import "config"
+import "flags"
+import "models"
+import "pb"
+import "query"
+import "search"
+
+/// `lll search TEXT`: full-text search over the team's record - issue
+/// titles and descriptions, comments, and docs - ranked, each hit with the
+/// lines around the match (LLL-96). `lll issue list --search` stays the
+/// cheap title filter; this is the one that finds a word buried in a
+/// comment from last month.
+pub fn search_cmd(args: Slice<string>) -> Result<(), string> {
+  let spec = search_spec()
+  let usage = flags.usage("lll search", spec, "TEXT...")
+  let p = flags.parse_n(spec, args, 2, 64, usage)?
+  let mut words: Slice<string> = []
+  let mut i = 0
+  while p.nth(i) != "" {
+    words = words.append(p.nth(i))
+    i += 1
+  }
+  let q = strings.TrimSpace(strings.Join(words, " "))
+  if q == "" { return Err(f"what to search for?\nusage: {usage}") }
+  let mut limit = 10
+  if p.given("--limit") {
+    let Ok(n) = strconv.Atoi(p.one("--limit")) else {
+      return Err(f"--limit takes a number, got '{p.one("--limit")}'")
+    }
+    limit = n
+  }
+  let only_issues = p.given("--issues")
+  let only_docs = p.given("--docs")
+  let team = current_team()?
+  let corpus = cached_corpus(team.id, team.key, p.given("--refresh"), !only_docs, !only_issues)?
+  let hits = search.rank(corpus, q, limit)
+  if p.given("--json") {
+    let body = match json.Marshal(hits) {
+      Ok(b) => b as string,
+      Err(e) => return Err(f"encoding hits: {e}"),
+    }
+    fmt.Println(body)
+    return Ok(())
+  }
+  if hits.is_empty() {
+    fmt.Println(f"No match for '{q}' in {team.key}'s issues, comments or docs.")
+    return Ok(())
+  }
+  print_hits(hits)
+  Ok(())
+}
+
+pub fn search_spec() -> Slice<flags.Flag> {
+  [
+    flags.Flag { name: "--limit", alias: "-n", value: true, hint: "N", help: "at most N results (default 10)", .. },
+    flags.Flag { name: "--issues", help: "issues and their comments only", .. },
+    flags.Flag { name: "--docs", help: "docs only (wiki, findings, decisions)", .. },
+    flags.Flag { name: "--json", help: "the ranked hits as JSON: group, kind, title, state, score, snippets", .. },
+    flags.Flag { name: "--refresh", help: "drop the local corpus cache and fetch everything again", .. },
+  ]
+}
+
+/// Every searchable record of one team as search.Documents: each issue as
+/// one document (title + description), each comment as one carrying its
+/// issue's key and title, each doc as one. Paged at PocketBase's ceiling.
+/// The PocketBase clause that admits a record containing ANY query term in
+/// any of `fields` ('~' is a case-insensitive LIKE). The ranker then sees
+/// candidates rather than the corpus: the hosted board serialised a
+/// megabyte of bodies per query before, erratically taking 5 to 20 seconds.
+/// An empty query admits everything.
+pub fn candidate_clause(q: string, fields: Slice<string>) -> string {
+  let mut parts: Slice<string> = []
+  for t in search.tokenize(q) {
+    for f in fields { parts = parts.append(f"{f} ~ {query.quote(t)}") }
+  }
+  if parts.is_empty() { return "" }
+  "(" + strings.Join(parts, " || ") + ")"
+}
+
+pub fn search_corpus(team_id: string, team_key: string, q: string, issues: bool, docs: bool) -> Result<Slice<search.Document>, string> {
+  // The three fetches are each a few hundred kilobytes of body text from
+  // the hosted board; in sequence they were most of an eleven-second query.
+  // They run at once and the query costs the slowest one.
+  let issues_ch = Channel.new<Result<Slice<models.Issue>, string>>()
+  let comments_ch = Channel.new<Result<Slice<models.Comment>, string>>()
+  let docs_ch = Channel.new<Result<Slice<models.Doc>, string>>()
+  if issues {
+    let iq = candidate_clause(q, ["title", "description"])
+    let cq = candidate_clause(q, ["body"])
+    task { let _ = issues_ch.send(fetch_team_issues_light(team_id, iq)) }
+    task { let _ = comments_ch.send(fetch_team_comments_where(team_id, cq)) }
+  }
+  if docs {
+    let dq = candidate_clause(q, ["title", "body"])
+    task { let _ = docs_ch.send(fetch_team_docs_light(team_id, dq)) }
+  }
+  let mut out: Slice<search.Document> = []
+  if issues {
+    let Some(all) = issues_ch.receive() else { return Err("issue fetch ended without an answer") }
+    let Some(comments) = comments_ch.receive() else { return Err("comment fetch ended without an answer") }
+    out = out.append(issue_documents(team_key, all?, comments?)...)
+  }
+  if docs {
+    let Some(ds) = docs_ch.receive() else { return Err("doc fetch ended without an answer") }
+    for d in ds? {
+      out = out.append(search.Document { group: d.slug, kind: "doc", label: d.kind, title: d.title, body: d.body, state: "" })
+    }
+  }
+  Ok(out)
+}
+
+/// Every doc of a team with only the fields the ranker reads, paged.
+fn fetch_team_docs_light(team_id: string, where: string) -> Result<Slice<models.Doc>, string> {
+  let mut clause = f"team={query.quote(team_id)}"
+  if where != "" { clause = f"{clause} && {where}" }
+  let dfilter = url.QueryEscape(clause)
+  let mut out: Slice<models.Doc> = []
+  let mut page = 1
+  loop {
+    let mut list = models.DocList { .. }
+    pb.fetch(f"/api/collections/docs/records?perPage=500&page={page}&sort=slug&fields=id,slug,kind,title,body,updated&filter={dfilter}", "docs", &list)?
+    out = out.append(list.items...)
+    if list.items.length() < 500 { break }
+    page += 1
+  }
+  Ok(out)
+}
+
+/// Every issue of a team, expanded for the board's card, paged.
+pub fn fetch_team_issues(team_id: string) -> Result<Slice<models.Issue>, string> {
+  fetch_team_issues_where(team_id, "")
+}
+
+pub fn fetch_team_issues_where(team_id: string, where: string) -> Result<Slice<models.Issue>, string> {
+  let mut clause = query.filter(team_id, "", "", "", "", "")
+  if where != "" { clause = f"{clause} && {where}" }
+  let filter = url.QueryEscape(clause)
+  let mut out: Slice<models.Issue> = []
+  let mut page = 1
+  loop {
+    let mut list = models.IssueList { .. }
+    pb.fetch(f"/api/collections/issues/records?perPage=500&page={page}&sort=number&expand=team,assignee,labels&filter={filter}", "issues", &list)?
+    out = out.append(list.items...)
+    if list.items.length() < 500 { break }
+    page += 1
+  }
+  Ok(out)
+}
+
+/// The same issues with only the fields the ranker reads: the CLI has no
+/// card to draw, and the expansions were most of the bytes on the wire.
+fn fetch_team_issues_light(team_id: string, where: string) -> Result<Slice<models.Issue>, string> {
+  let mut clause = query.filter(team_id, "", "", "", "", "")
+  if where != "" { clause = f"{clause} && {where}" }
+  let filter = url.QueryEscape(clause)
+  let mut out: Slice<models.Issue> = []
+  let mut page = 1
+  loop {
+    let mut list = models.IssueList { .. }
+    pb.fetch(f"/api/collections/issues/records?perPage=500&page={page}&sort=number&fields=id,number,title,description,state,updated&filter={filter}", "issues", &list)?
+    out = out.append(list.items...)
+    if list.items.length() < 500 { break }
+    page += 1
+  }
+  Ok(out)
+}
+
+/// Every comment on a team's issues, oldest first, authors expanded, paged.
+pub fn fetch_team_comments(team_id: string) -> Result<Slice<models.Comment>, string> {
+  fetch_team_comments_where(team_id, "")
+}
+
+fn fetch_team_comments_where(team_id: string, where: string) -> Result<Slice<models.Comment>, string> {
+  let mut clause = f"issue.team={query.quote(team_id)}"
+  if where != "" { clause = f"{clause} && {where}" }
+  let cfilter = url.QueryEscape(clause)
+  let mut out: Slice<models.Comment> = []
+  let mut page = 1
+  loop {
+    let mut list = models.CommentList { .. }
+    pb.fetch(f"/api/collections/comments/records?perPage=500&page={page}&sort=created&expand=author&fields=id,issue,body,updated,expand.author.name&filter={cfilter}", "comments", &list)?
+    out = out.append(list.items...)
+    if list.items.length() < 500 { break }
+    page += 1
+  }
+  Ok(out)
+}
+
+/// Issues and their comments as documents: an issue's key is the group for
+/// itself and each of its comments, so a hit on a comment is reported under
+/// the issue with "comment #n by who" as its label.
+pub fn issue_documents(team_key: string, issues: Slice<models.Issue>, comments: Slice<models.Comment>) -> Slice<search.Document> {
+  let mut out: Slice<search.Document> = []
+  let mut titles = Map.new<string, string>()
+  let mut keys = Map.new<string, string>()
+  let mut states = Map.new<string, string>()
+  for i in issues {
+    let key = f"{team_key}-{i.number}"
+    titles[i.id] = i.title
+    keys[i.id] = key
+    states[i.id] = i.state
+    out = out.append(search.Document { group: key, kind: "issue", label: "description", title: i.title, body: indexable(i.description), state: i.state })
+  }
+  let mut per_issue = Map.new<string, int>()
+  for c in comments {
+    let n = per_issue.get(c.issue).unwrap_or(0) + 1
+    per_issue[c.issue] = n
+    let mut who = c.expand.author.name
+    if who == "" { who = "anon" }
+    let Some(key) = keys.get(c.issue) else { continue }
+    out = out.append(search.Document {
+      group: key, kind: "comment", label: f"comment #{n} by {who}",
+      title: titles.get(c.issue).unwrap_or(""), body: c.body, state: states.get(c.issue).unwrap_or(""),
+    })
+  }
+  out
+}
+
+/// A body without the importer's provenance lines: "Origin: sidecar
+/// TASK-96" made LLL-95 the second hit for "LLL-96". Those lines are for
+/// the eye, not the index.
+fn indexable(body: string) -> string {
+  let mut kept: Slice<string> = []
+  for l in strings.Split(body, "\n") {
+    let t = strings.TrimSpace(l)
+    if strings.HasPrefix(t, "Origin: sidecar ") || strings.HasPrefix(t, "Created: 20") { continue }
+    kept = kept.append(l)
+  }
+  strings.Join(kept, "\n")
+}
+
+/// One hit: the record on its own line, then each matched passage under
+/// its source, the matching line marked '>' like grep -B1 -A1.
+fn print_hits(hits: Slice<search.Hit>) {
+  for h in hits {
+    let state = if h.state == "" { "" } else { f"  {h.state}" }
+    let kind = if h.kind == "doc" { "doc " } else { "" }
+    fmt.Println(f"{kind}{h.group}{state}  {h.title}")
+    for s in h.snippets {
+      fmt.Println(f"    [{s.label}]")
+      for l in s.lines { fmt.Println(f"    {l}") }
+    }
+    fmt.Println("")
+  }
+}
+
+// --- the local corpus cache ----------------------------------------------
+//
+// The hosted board serialises a megabyte of bodies per full fetch and takes
+// 5 to 20 seconds to do it; the ranker needs 70 milliseconds. So the corpus
+// lives in ~/.cache/lll/, keyed by server and team, and a query fetches only
+// what changed: three small id listings (to drop deletions) and three
+// filtered fetches of records updated since the last sync (usually none).
+// The first query, or --refresh, pays the full fetch once.
+
+#[json]
+struct Cache {
+  synced: string,
+  issues: Slice<models.Issue>,
+  comments: Slice<models.Comment>,
+  docs: Slice<models.Doc>,
+}
+
+fn cache_path(team_id: string) -> Result<string, string> {
+  let cfg = config.load()?
+  let Ok(home) = os.UserHomeDir() else { return Err("no home directory for the search cache") }
+  let dir = filepath.Join(home, ".cache", "lll")
+  if let Err(e) = os.MkdirAll(dir, 0o755) { return Err(f"creating {dir}: {e}") }
+  let host = strings.NewReplacer("https://", "", "http://", "", "/", "_", ":", "_").Replace(cfg.url)
+  Ok(filepath.Join(dir, f"search-{host}-{team_id}.json"))
+}
+
+fn load_cache(path: string) -> Cache {
+  let Ok(data) = os.ReadFile(path) else { return Cache { .. } }
+  let mut c = Cache { .. }
+  if json.Unmarshal(data, &c).is_err() { return Cache { .. } }
+  c
+}
+
+fn save_cache(path: string, c: Cache) -> Result<(), string> {
+  let body = match json.Marshal(c) {
+    Ok(b) => b,
+    Err(e) => return Err(f"encoding the search cache: {e}"),
+  }
+  if let Err(e) = os.WriteFile(path, body, 0o600) { return Err(f"writing {path}: {e}") }
+  Ok(())
+}
+
+/// Documents for the team from the cache, refreshed first.
+fn cached_corpus(team_id: string, team_key: string, refresh: bool, issues: bool, docs: bool) -> Result<Slice<search.Document>, string> {
+  let path = cache_path(team_id)?
+  let mut c = if refresh { Cache { .. } } else { load_cache(path) }
+  c = sync_cache(c, team_id)?
+  save_cache(path, c)?
+  let mut out: Slice<search.Document> = []
+  if issues { out = out.append(issue_documents(team_key, c.issues, c.comments)...) }
+  if docs {
+    for d in c.docs {
+      out = out.append(search.Document { group: d.slug, kind: "doc", label: d.kind, title: d.title, body: d.body, state: "" })
+    }
+  }
+  Ok(out)
+}
+
+/// Bring a cache up to date. Empty cache: full fetch. Otherwise the three
+/// id listings and the three "updated since" fetches run at once; records
+/// whose id is gone are dropped, changed and new ones replace their old
+/// selves, and `synced` moves to the newest `updated` seen.
+fn sync_cache(c: Cache, team_id: string) -> Result<Cache, string> {
+  if c.synced == "" {
+    let issues_ch = Channel.new<Result<Slice<models.Issue>, string>>()
+    let comments_ch = Channel.new<Result<Slice<models.Comment>, string>>()
+    let docs_ch = Channel.new<Result<Slice<models.Doc>, string>>()
+    task { let _ = issues_ch.send(fetch_team_issues_light(team_id, "")) }
+    task { let _ = comments_ch.send(fetch_team_comments_where(team_id, "")) }
+    task { let _ = docs_ch.send(fetch_team_docs_light(team_id, "")) }
+    let Some(issues) = issues_ch.receive() else { return Err("issue fetch ended without an answer") }
+    let Some(comments) = comments_ch.receive() else { return Err("comment fetch ended without an answer") }
+    let Some(docs) = docs_ch.receive() else { return Err("doc fetch ended without an answer") }
+    let full = Cache { synced: "1970-01-01 00:00:00.000Z", issues: issues?, comments: comments?, docs: docs? }
+    return Ok(Cache { synced: newest(full), issues: full.issues, comments: full.comments, docs: full.docs })
+  }
+  // Probe first: the newest `updated` and the count per collection are one
+  // tiny request each. A collection whose newest is not newer than the mark
+  // and whose count matches has not moved, and costs nothing more. (A
+  // delete and a create between two queries keep the count; --refresh is
+  // the answer to that rare lie.)
+  let pi = Channel.new<Result<Probe, string>>()
+  let pc = Channel.new<Result<Probe, string>>()
+  let pd = Channel.new<Result<Probe, string>>()
+  task { let _ = pi.send(probe("issues", f"team={query.quote(team_id)}")) }
+  task { let _ = pc.send(probe("comments", f"issue.team={query.quote(team_id)}")) }
+  task { let _ = pd.send(probe("docs", f"team={query.quote(team_id)}")) }
+  let Some(ri) = pi.receive() else { return Err("probe ended without an answer") }
+  let Some(rc) = pc.receive() else { return Err("probe ended without an answer") }
+  let Some(rd) = pd.receive() else { return Err("probe ended without an answer") }
+  let prob_i = ri?
+  let prob_c = rc?
+  let prob_d = rd?
+  let moved_i = prob_i.newest > c.synced || prob_i.total != c.issues.length()
+  let moved_c = prob_c.newest > c.synced || prob_c.total != c.comments.length()
+  let moved_d = prob_d.newest > c.synced || prob_d.total != c.docs.length()
+  if !moved_i && !moved_c && !moved_d { return Ok(c) }
+
+  let since = f"updated > {query.quote(c.synced)}"
+  let mut issues = c.issues
+  let mut comments = c.comments
+  let mut docs = c.docs
+  if moved_i {
+    let keep = as_set(fetch_ids("issues", f"team={query.quote(team_id)}")?)
+    let changed = fetch_team_issues_light(team_id, since)?
+    let mut seen = Map.new<string, bool>()
+    let mut next: Slice<models.Issue> = []
+    for i in changed { seen[i.id] = true; next = next.append(i) }
+    for i in c.issues { if keep.get(i.id).is_some() && seen.get(i.id).is_none() { next = next.append(i) } }
+    issues = next
+  }
+  if moved_c {
+    let keep = as_set(fetch_ids("comments", f"issue.team={query.quote(team_id)}")?)
+    let changed = fetch_team_comments_where(team_id, since)?
+    let mut seen = Map.new<string, bool>()
+    let mut next: Slice<models.Comment> = []
+    for x in changed { seen[x.id] = true; next = next.append(x) }
+    for x in c.comments { if keep.get(x.id).is_some() && seen.get(x.id).is_none() { next = next.append(x) } }
+    comments = next
+  }
+  if moved_d {
+    let keep = as_set(fetch_ids("docs", f"team={query.quote(team_id)}")?)
+    let changed = fetch_team_docs_light(team_id, since)?
+    let mut seen = Map.new<string, bool>()
+    let mut next: Slice<models.Doc> = []
+    for x in changed { seen[x.id] = true; next = next.append(x) }
+    for x in c.docs { if keep.get(x.id).is_some() && seen.get(x.id).is_none() { next = next.append(x) } }
+    docs = next
+  }
+  let merged = Cache { synced: c.synced, issues, comments, docs }
+  Ok(Cache { synced: newest(merged), issues: merged.issues, comments: merged.comments, docs: merged.docs })
+}
+
+/// A collection's newest `updated` and its count, from one request.
+struct Probe {
+  newest: string,
+  total: int,
+}
+
+#[json]
+struct ProbeList {
+  items: Slice<ProbeItem>,
+  #[json("totalItems")]
+  total_items: int,
+}
+
+#[json]
+struct ProbeItem {
+  updated: string,
+}
+
+fn probe(collection: string, where: string) -> Result<Probe, string> {
+  let filter = url.QueryEscape(where)
+  let mut list = ProbeList { .. }
+  pb.fetch(f"/api/collections/{collection}/records?perPage=1&sort=-updated&fields=updated&filter={filter}", collection, &list)?
+  let newest = if list.items.is_empty() { "" } else { list.items[0].updated }
+  Ok(Probe { newest, total: list.total_items })
+}
+
+fn as_set(ids: Slice<string>) -> Map<string, bool> {
+  let mut m = Map.new<string, bool>()
+  for id in ids { m[id] = true }
+  m
+}
+
+/// The newest `updated` across the cache, or the old mark when nothing is
+/// newer. PocketBase timestamps sort as strings.
+fn newest(c: Cache) -> string {
+  let mut best = c.synced
+  for i in c.issues { if i.updated > best { best = i.updated } }
+  for x in c.comments { if x.updated > best { best = x.updated } }
+  for x in c.docs { if x.updated > best { best = x.updated } }
+  best
+}
+
+#[json]
+struct IdList {
+  items: Slice<IdOnly>,
+}
+
+#[json]
+struct IdOnly {
+  id: string,
+}
+
+/// Every record id of a collection matching `where`: a few kilobytes even
+/// for a big team, which is what makes the delta sync cheap.
+fn fetch_ids(collection: string, where: string) -> Result<Slice<string>, string> {
+  let filter = url.QueryEscape(where)
+  let mut out: Slice<string> = []
+  let mut page = 1
+  loop {
+    let mut list = IdList { .. }
+    pb.fetch(f"/api/collections/{collection}/records?perPage=500&page={page}&fields=id&filter={filter}", collection, &list)?
+    for x in list.items { out = out.append(x.id) }
+    if list.items.length() < 500 { break }
+    page += 1
+  }
+  Ok(out)
+}

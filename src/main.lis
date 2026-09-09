@@ -26,6 +26,7 @@ fn main() {
     "token" => commands.token(os.Args),
     "attach" => commands.attach(os.Args),
     "watch" => commands.watch(os.Args),
+    "search" => commands.search_cmd(os.Args),
     "up" => commands.up(os.Args),
     "board" => commands.board(os.Args),
     "completions" => commands.completions(os.Args),
@@ -79,6 +80,7 @@ Every verb lives under a noun: 'lll issue list', 'lll issue comment KEY \"body\"
 
 Usage:
   lll issue <command>     work with issues (see 'lll issue --help')
+  lll search <text>       full-text search: issues, comments, docs, ranked, with context
   lll team <command>      work with teams (see 'lll team --help')
   lll member <command>    work with members (see 'lll member --help')
   lll project <command>   work with projects (see 'lll project --help')

@@ -248,34 +248,6 @@ fn is_empty_list(method: string, body: string) -> bool {
   method == "GET" && strings.Contains(body, "\"totalItems\":0")
 }
 
-/// Does `tok` still authenticate?
-///
-/// The probe is a GET of the token's OWN record, by the id the JWT carries,
-/// tried against both auth collections a lll token can belong to. Three wrong
-/// probes came before it, each found by a real run:
-///
-/// - auth-refresh (TASK-247's original) answers 400 to a LIVE impersonation
-///   token, not just a dead one: `lll token create` mints non-refreshable
-///   tokens, the whole agent credential. Fleet run 1 (TASK-309) had a shard
-///   search for a title that matched nothing and be told its token was dead.
-/// - a plain authenticated LIST answers 200 to a dead token too, because the
-///   collection rules filter rather than gate - the very symptom this exists
-///   to distinguish.
-/// - a GET of members/records/<id> alone declared `lll up`'s OWN superuser
-///   token dead on every first boot: it seeds into an empty database, the
-///   empty-list heuristic fires, and a superuser's record is not in members.
-///   The e2e_up suite caught that one before it shipped.
-///
-/// A record fetched by id is gated - a token that authenticates as nobody
-/// gets 404 from every collection - so a dead token is refused twice and a
-/// live one of any kind is found once. Members first because that is nearly
-/// every token; _superusers is the boot's process token and nothing else.
-/// A token whose payload cannot be read is treated as valid, so only a
-/// well-formed token the server disowns is ever accused. Uses request()
-/// rather than a verb, so the empty-list check cannot recurse.
-fn token_still_valid(base: string, tok: string) -> bool {
-  token_verdict(base, tok) == "valid"
-}
 
 /// Why a token is or is not usable: "valid", "corrupted", "expired", "rejected", or
 /// "opaque". The last is a token this cannot read as a JWT at all - not three

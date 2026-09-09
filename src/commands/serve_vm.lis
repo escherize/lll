@@ -1,4 +1,5 @@
 import "go:html/template"
+import "search"
 
 // View models for the web board: the structs the templates read, and nothing
 // that fetches or renders. They are built in serve_render.lis and composed
@@ -197,7 +198,14 @@ pub struct BoardVM {
 /// DATABASE returned for it, never what the board happened to be holding.
 pub struct SearchVM {
   pub q: string,
-  pub results: Slice<CardVM>,
+  pub results: Slice<SearchHitVM>,
+}
+
+/// One search result (LLL-96): the card, and the passages that matched it,
+/// each under the source it came from ("description", "comment #2 by kai").
+pub struct SearchHitVM {
+  pub card: CardVM,
+  pub snippets: Slice<search.Snippet>,
 }
 
 /// One row of the rail's team switcher (TASK-198): a team on the server,

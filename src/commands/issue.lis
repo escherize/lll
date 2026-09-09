@@ -370,7 +370,7 @@ fn issue_synonym(verb: string) -> Option<string> {
     "status" => "'lll issue view KEY-123' shows the state; 'lll issue update KEY-123 --state s' sets it",
     "edit" => "'lll issue update KEY-123 ...' changes fields",
     "get" => "'lll issue view KEY-123'",
-    "find" | "search" => "'lll issue list --search text'",
+    "find" | "search" => "'lll search text' ranks every issue, comment and doc with context; 'lll issue list --search text' filters titles",
     "ls" => "'lll issue list'",
     "rm" | "remove" => "'lll issue delete KEY-123'",
     "comments" => "'lll issue comment KEY-123' lists them; add one with a body after the key",

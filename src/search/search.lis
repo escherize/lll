@@ -1,0 +1,297 @@
+import "go:math"
+import "go:strings"
+
+/// Full-text search over the record (LLL-96): issues, their comments, and
+/// docs, ranked, each hit carrying the lines around the match so the
+/// reader sees WHY it matched without opening anything.
+///
+/// Pure: the corpus comes in as Documents, the answer goes out as Hits. The
+/// verb and the board fetch and render; nothing here touches the network.
+///
+/// Ranking is BM25 over a small corpus with two fields, title and body,
+/// the title weighted three times the body, plus two bonuses the numbers
+/// alone get wrong: the whole query appearing as a phrase, and every query
+/// term being present. A query that IS a key ("LLL-96") pins that record
+/// first. Hits are grouped by what a reader would open - an issue with its
+/// comments, a doc - and the group's score is its best member plus a
+/// little for the rest.
+///
+/// ponytail: everything is in memory and O(corpus) per query. Fine to a few
+/// thousand records; past that, pre-filter server-side with PocketBase's
+/// `~` on the fields before ranking here.
+
+/// One searchable thing. `group` is what a hit is reported under: the
+/// issue key for an issue and each of its comments, the slug for a doc.
+/// `kind` is "issue", "comment" or "doc"; `label` names the source in a
+/// hit ("description", "comment #3 by bryan", "body").
+#[json]
+pub struct Document {
+  pub group: string,
+  pub kind: string,
+  pub label: string,
+  pub title: string,
+  pub body: string,
+  pub state: string,
+}
+
+/// A ranked group: the record to open, why it matched, how well.
+#[json]
+pub struct Hit {
+  pub group: string,
+  pub kind: string,
+  pub title: string,
+  pub state: string,
+  pub score: float64,
+  pub snippets: Slice<Snippet>,
+}
+
+/// One matched passage: which source, and the lines around the match with
+/// the matching line marked, grep -A/-B style.
+#[json]
+pub struct Snippet {
+  pub label: string,
+  pub lines: Slice<string>,
+}
+
+/// Lower-cased alphanumeric runs. "LLL-96" gives "lll", "96" AND "lll-96",
+/// so a key matches as a key and as its parts.
+pub fn tokenize(text: string) -> Slice<string> {
+  let mut out: Slice<string> = []
+  let lower = strings.ToLower(text)
+  for w in strings.FieldsFunc(lower, is_separator) {
+    let word = strings.Trim(w, "-")
+    if word == "" { continue }
+    let parts = strings.Split(word, "-")
+    for p in parts { if p != "" { out = out.append(p) } }
+    if parts.length() > 1 { out = out.append(word) }
+  }
+  out
+}
+
+fn is_separator(r: rune) -> bool {
+  let alnum = ('a' <= r && r <= 'z') || ('0' <= r && r <= '9')
+  !(alnum || r == '-')
+}
+
+struct Scored {
+  idx: int,
+  score: float64,
+}
+
+/// A document tokenized once: the ranker used to tokenize each three times
+/// and the excerpt every line again, and a common word cost twelve seconds.
+struct Indexed {
+  title_toks: Slice<string>,
+  body_toks: Slice<string>,
+  lower_title: string,
+  lower_body: string,
+  len: int,
+}
+
+/// Rank `docs` for `query`, at most `limit` groups. Empty query, no hits.
+pub fn rank(docs: Slice<Document>, query: string, limit: int) -> Slice<Hit> {
+  let terms = dedupe(tokenize(query))
+  if terms.is_empty() { return [] }
+  let q_lower = strings.ToLower(strings.TrimSpace(query))
+  let n = docs.length()
+
+  let mut index: Slice<Indexed> = []
+  let mut df = Map.new<string, int>()
+  let mut total_len = 0
+  for d in docs {
+    let tt = tokenize(d.title)
+    let bt = tokenize(d.body)
+    let len = tt.length() + bt.length()
+    total_len += len
+    // Document frequency counts each term once per document, and only the
+    // query's terms are worth counting.
+    for t in terms {
+      if count(tt, t) + count(bt, t) > 0 { df[t] = df.get(t).unwrap_or(0) + 1 }
+    }
+    index = index.append(Indexed {
+      title_toks: tt, body_toks: bt,
+      lower_title: strings.ToLower(d.title), lower_body: strings.ToLower(d.body),
+      len,
+    })
+  }
+  let avg_len = if n == 0 { 1.0 } else { (total_len as float64) / (n as float64) }
+
+  let mut scored: Slice<Scored> = []
+  for (i, d) in docs.enumerate() {
+    let ix = index[i]
+    let mut score = 0.0
+    let mut present = 0
+    for t in terms {
+      let tf_title = count(ix.title_toks, t)
+      let tf_body = count(ix.body_toks, t)
+      if tf_title + tf_body == 0 { continue }
+      present += 1
+      let dft = df.get(t).unwrap_or(0) as float64
+      let idf = math.Log(1.0 + ((n as float64) - dft + 0.5) / (dft + 0.5))
+      score += idf * bm25_tf(tf_title, ix.len, avg_len) * 3.0
+      score += idf * bm25_tf(tf_body, ix.len, avg_len)
+    }
+    if present == terms.length() && terms.length() > 1 { score *= 1.5 }
+    // The whole query as a phrase is worth more than its words apart.
+    if strings.Contains(ix.lower_title, q_lower) { score += 4.0 }
+    else if strings.Contains(ix.lower_body, q_lower) { score += 1.5 }
+    // A query that is the record's own key pins it, matched words or not.
+    if strings.ToLower(d.group) == q_lower { score += 100.0 }
+    if score == 0.0 { continue }
+    scored = scored.append(Scored { idx: i, score })
+  }
+
+  // Group by what the reader opens; best member leads, the rest add a little.
+  let mut order: Slice<string> = []
+  let mut best = Map.new<string, Scored>()
+  let mut extra = Map.new<string, float64>()
+  let mut members = Map.new<string, Slice<Scored>>()
+  for s in scored {
+    let g = docs[s.idx].group
+    match best.get(g) {
+      None => {
+        best[g] = s
+        order = order.append(g)
+        members[g] = [s]
+      },
+      Some(b) => {
+        if s.score > b.score {
+          extra[g] = extra.get(g).unwrap_or(0.0) + b.score * 0.3
+          best[g] = s
+        } else {
+          extra[g] = extra.get(g).unwrap_or(0.0) + s.score * 0.3
+        }
+        members[g] = members.get(g).unwrap_or([]).append(s)
+      },
+    }
+  }
+  let mut hits: Slice<Hit> = []
+  for g in order {
+    let Some(b) = best.get(g) else { continue }
+    let lead = docs[b.idx]
+    let mut snippets: Slice<Snippet> = []
+    for m in sort_scored(members.get(g).unwrap_or([])) {
+      if snippets.length() >= 3 { break }
+      let d = docs[m.idx]
+      let sn = excerpt(d.body, terms, q_lower)
+      if !sn.is_empty() { snippets = snippets.append(Snippet { label: d.label, lines: sn }) }
+    }
+    hits = hits.append(Hit {
+      group: g,
+      kind: lead.kind,
+      title: lead.title,
+      state: lead.state,
+      score: b.score + extra.get(g).unwrap_or(0.0),
+      snippets,
+    })
+  }
+  hits = sort_hits(hits)
+  if limit > 0 && hits.length() > limit {
+    let mut capped: Slice<Hit> = []
+    capped = capped.append(hits[..limit]...)
+    return capped
+  }
+  hits
+}
+
+/// BM25 term saturation with length normalisation (k1 1.2, b 0.75).
+fn bm25_tf(tf: int, len: int, avg: float64) -> float64 {
+  if tf == 0 { return 0.0 }
+  let f = tf as float64
+  let norm = 1.0 - 0.75 + 0.75 * ((len as float64) / avg)
+  (f * 2.2) / (f + 1.2 * norm)
+}
+
+fn count(toks: Slice<string>, t: string) -> int {
+  let mut c = 0
+  for x in toks { if x == t { c += 1 } }
+  c
+}
+
+fn dedupe(toks: Slice<string>) -> Slice<string> {
+  let mut seen = Map.new<string, bool>()
+  let mut out: Slice<string> = []
+  for t in toks {
+    if seen.get(t).is_none() {
+      seen[t] = true
+      out = out.append(t)
+    }
+  }
+  out
+}
+
+/// Stable insertion sorts, best score first, in the codebase's idiom
+/// (serve_render.sort_issues): rebuilt with spread appends, since a slice
+/// element cannot be assigned in place.
+fn sort_scored(xs: Slice<Scored>) -> Slice<Scored> {
+  let mut out: Slice<Scored> = []
+  for x in xs {
+    let mut pos = out.length()
+    for (j, placed) in out.enumerate() {
+      if x.score > placed.score { pos = j; break }
+    }
+    let mut next: Slice<Scored> = []
+    next = next.append(out[..pos]...)
+    next = next.append(x)
+    out = next.append(out[pos..]...)
+  }
+  out
+}
+
+fn sort_hits(xs: Slice<Hit>) -> Slice<Hit> {
+  let mut out: Slice<Hit> = []
+  for x in xs {
+    let mut pos = out.length()
+    for (j, placed) in out.enumerate() {
+      if x.score > placed.score { pos = j; break }
+    }
+    let mut next: Slice<Hit> = []
+    next = next.append(out[..pos]...)
+    next = next.append(x)
+    out = next.append(out[pos..]...)
+  }
+  out
+}
+
+/// The lines around the first match in `body`: the matching line with the
+/// line before and after, the match line prefixed ">" so it reads like
+/// grep -B1 -A1. The phrase is looked for first, then any term. Empty when
+/// nothing in the body matches (a title-only hit).
+pub fn excerpt(body: string, terms: Slice<string>, phrase: string) -> Slice<string> {
+  let lines = strings.Split(body, "\n")
+  let mut at = -1
+  let mut i = 0
+  for l in lines {
+    if strings.Contains(strings.ToLower(l), phrase) { at = i; break }
+    i += 1
+  }
+  if at < 0 {
+    i = 0
+    for l in lines {
+      let low = strings.ToLower(l)
+      let mut hit = false
+      for t in terms { if strings.Contains(low, t) { hit = true } }
+      if hit { at = i; break }
+      i += 1
+    }
+  }
+  if at < 0 { return [] }
+  let mut out: Slice<string> = []
+  if at > 0 && strings.TrimSpace(lines[at - 1]) != "" { out = out.append("  " + trim_line(lines[at - 1])) }
+  out = out.append("> " + trim_line(lines[at]))
+  if at + 1 < lines.length() && strings.TrimSpace(lines[at + 1]) != "" { out = out.append("  " + trim_line(lines[at + 1])) }
+  out
+}
+
+/// One line, trimmed, capped so a pasted log cannot flood the listing.
+fn trim_line(l: string) -> string {
+  let t = strings.TrimSpace(l)
+  if t.length() <= 160 { return t }
+  let mut out = ""
+  for w in strings.Fields(t) {
+    if out.length() + w.length() + 1 > 157 { break }
+    if out != "" { out += " " }
+    out += w
+  }
+  out + "..."
+}

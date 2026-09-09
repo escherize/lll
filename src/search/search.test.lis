@@ -1,0 +1,87 @@
+// Unit cover for the ranker (LLL-96): what makes a result good is decided
+// here, on a corpus small enough to reason about by hand.
+
+fn corpus() -> Slice<Document> {
+  [
+    Document { group: "LLL-1", kind: "issue", label: "description", title: "Search matches titles only", state: "todo",
+      body: "query.filter's --search clause is 'title ~ q'.\nSo a word that appears only in a description is missed.\nComments too." },
+    Document { group: "LLL-2", kind: "issue", label: "description", title: "Board columns collapse on narrow windows", state: "done",
+      body: "Below 900px the kanban squeezes.\nUnrelated to search." },
+    Document { group: "LLL-2", kind: "comment", label: "comment #1 by kai", title: "Board columns collapse on narrow windows", state: "done",
+      body: "The description never mentions the picker.\nSearch for 'description' should still land here though." },
+    Document { group: "focus-picker", kind: "doc", label: "body", title: "Label picker focus", state: "",
+      body: "Focus is lost after the picker closes.\nRestore it to the trigger." },
+  ]
+}
+
+#[test]
+fn tokenize_keeps_keys_whole_and_in_parts() {
+  let t = tokenize("Fix LLL-96 now")
+  assert t.contains("lll")
+  assert t.contains("96")
+  assert t.contains("lll-96")
+  assert t.contains("fix")
+  assert !t.contains("Fix")
+}
+
+#[test]
+fn a_title_hit_outranks_a_body_hit() {
+  let hits = rank(corpus(), "search", 10)
+  assert hits.length() >= 2
+  assert hits[0].group == "LLL-1"
+}
+
+#[test]
+fn a_word_only_in_a_description_or_comment_is_found_with_context() {
+  let hits = rank(corpus(), "description", 10)
+  let groups = hits.map(|h| h.group)
+  assert groups.contains("LLL-1")
+  assert groups.contains("LLL-2")
+  // the LLL-2 hit came from a comment and says so, with the matching line marked
+  let mut saw_comment = false
+  for h in hits {
+    if h.group == "LLL-2" {
+      for s in h.snippets {
+        if s.label == "comment #1 by kai" {
+          saw_comment = true
+          assert s.lines.length() >= 1
+          assert s.lines[0].starts_with("> ")
+        }
+      }
+    }
+  }
+  assert saw_comment
+}
+
+#[test]
+fn a_key_as_the_query_pins_that_record_first() {
+  let hits = rank(corpus(), "LLL-2", 10)
+  assert hits[0].group == "LLL-2"
+}
+
+#[test]
+fn a_phrase_beats_its_words_apart() {
+  let hits = rank(corpus(), "picker closes", 10)
+  assert hits[0].group == "focus-picker"
+}
+
+#[test]
+fn empty_query_and_no_match_are_empty() {
+  assert rank(corpus(), "", 10).is_empty()
+  assert rank(corpus(), "zzzznothing", 10).is_empty()
+}
+
+#[test]
+fn limit_caps_the_groups() {
+  let hits = rank(corpus(), "search description", 1)
+  assert hits.length() == 1
+}
+
+#[test]
+fn snippet_is_grep_style_around_the_match() {
+  let lines = excerpt("one\ntwo picker three\nfour", ["picker"], "picker")
+  assert lines.length() == 3
+  assert lines[0] == "  one"
+  assert lines[1] == "> two picker three"
+  assert lines[2] == "  four"
+}

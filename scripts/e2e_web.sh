@@ -351,7 +351,7 @@ assert_contains "$board_rail" 'href="/t/ENG/search"' "rail has a Search row"
 assert_contains "$(rail "$search")" 'href="/t/ENG/search" class="active"' \
   "the search page marks its own rail row current"
 empty=$(wcurl -sf "$WEB/search?q=zzzznope")
-assert_contains "$empty" "No issue title matches" "an empty result says so"
+assert_contains "$empty" "matches <b>zzzznope</b>" "an empty result says so"
 assert_not_contains "$empty" "ENG-1" "an empty result lists nothing"
 assert_contains "$(wcurl -sf "$WEB/search")" 'class="search-bar"' \
   "/search with no query still renders the field"

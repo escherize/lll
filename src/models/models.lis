@@ -180,6 +180,7 @@ pub struct Comment {
   pub author: string,
   pub body: string,
   pub created: string,
+  pub updated: string,
   pub expand: CommentExpand,
 }
 
