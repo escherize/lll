@@ -255,6 +255,8 @@ Server-rendered board at `/`, issue pages at `/issue/KEY-123`, search at
 - Live search, filter chips (assignee/label/priority/state), hideable columns.
 - `/search?q=…` searches the database, not the rendered board, so the query is
   a shareable URL and `curl` gets the same answer the browser does.
+- `lll search TEXT` is full text over issues, comments and docs, ranked, with the
+  lines around each match; the board's `/search` runs the same engine.
 - Issue pages: inline field editing, markdown comments.
 
 ## Development
