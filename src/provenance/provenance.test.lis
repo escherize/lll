@@ -1,0 +1,28 @@
+import "models"
+
+#[test]
+fn historical_records_do_not_invent_provenance() {
+  assert fields(models.Issue { .. }).is_empty()
+}
+
+#[test]
+fn provenance_preserves_context_and_external_refs() {
+  let source = fields(models.Issue {
+    creator: "member-id",
+    expand: models.IssueExpand { creator: models.Member { name: "reviewer", .. }, .. },
+    origin: models.IssueOrigin { host: "work", cwd: "/tmp/一 folder", branch: "topic", sha: "abc123", tool: "agent", .. },
+    refs: "gh#42 linear:ENG-118",
+    ..
+  })
+  assert source.length() == 7
+  assert source[0].value == "reviewer"
+  assert source[2].value == "/tmp/一 folder"
+  assert source[6].value == "gh#42 linear:ENG-118"
+}
+
+#[test]
+fn unexpanded_creator_keeps_the_record_identity() {
+  let source = fields(models.Issue { creator: "member-id", .. })
+  assert source.length() == 1
+  assert source[0].value == "member-id"
+}

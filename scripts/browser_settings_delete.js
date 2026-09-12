@@ -19,7 +19,7 @@ async page => {
   });
   const memberRow = page.locator('#' + await memberForm.locator('..').getAttribute('id'));
   await memberRow.getByRole('button', {name: 'Delete', exact: true}).click();
-  await memberRow.getByText('This clears 1 issue assignment(s) and 0 comment author reference(s).', {exact: false}).waitFor();
+  await memberRow.getByText('This clears 1 issue assignment(s), 0 comment author reference(s), and 0 issue creator reference(s).', {exact: false}).waitFor();
   await memberRow.getByRole('button', {name: 'Cancel', exact: true}).click();
   await memberRow.locator('input[name="name"]').waitFor();
   await memberRow.getByRole('button', {name: 'Delete', exact: true}).click();

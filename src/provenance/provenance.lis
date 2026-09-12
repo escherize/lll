@@ -1,0 +1,37 @@
+import "go:os"
+import "go:os/exec"
+import "go:strings"
+import "gitctx"
+import "models"
+
+/// Ambient creation context is optional: filing must also work outside Git.
+pub fn capture() -> models.IssueOrigin {
+  let sha = match exec.Command("git", "rev-parse", "--short", "HEAD").Output() {
+    Ok(value) => strings.TrimSpace(value as string),
+    Err(_) => "",
+  }
+  models.IssueOrigin {
+    host: os.Hostname().unwrap_or(""),
+    cwd: os.Getwd().unwrap_or(""),
+    branch: gitctx.current_branch().unwrap_or(""),
+    sha,
+    tool: os.Getenv("LLL_AGENT"),
+  }
+}
+
+pub struct Field { pub label: string, pub value: string }
+
+/// One presentation inventory for CLI, raw/export and web issue detail.
+pub fn fields(issue: models.Issue) -> Slice<Field> {
+  let mut creator = issue.expand.creator.name
+  if creator == "" && issue.creator != "" { creator = issue.creator }
+  [
+    Field { label: "Creator", value: creator },
+    Field { label: "Origin host", value: issue.origin.host },
+    Field { label: "Origin path", value: issue.origin.cwd },
+    Field { label: "Origin branch", value: issue.origin.branch },
+    Field { label: "Origin commit", value: issue.origin.sha },
+    Field { label: "Origin tool", value: issue.origin.tool },
+    Field { label: "Refs", value: issue.refs },
+  ].filter(|field| field.value != "")
+}

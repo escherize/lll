@@ -1459,6 +1459,7 @@ input:focus, textarea:focus, select:focus {
 /* The project link shares its row with the select: a long name truncates on
    its own line instead of wrapping word-per-line or squeezing the select. */
 .prop .v a { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.prop .provenance-value { display: block; min-width: 0; overflow-wrap: anywhere; }
 
 /* ── scalable label picker (TASK-207) ────────────────────── */
 /* The Labels row wears only the issue's chips plus one "+" affordance; the

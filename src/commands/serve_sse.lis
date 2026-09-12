@@ -323,7 +323,7 @@ fn issue_snapshot(hub: Hub, key: string, client_id: int) {
   let filter = url.QueryEscape(f"team.key={query.quote(team)} && number={number}")
   let mut issues = models.IssueList { .. }
   if pb.fetch(
-    f"/api/collections/issues/records?filter={filter}&perPage=1&expand=team,assignee,labels,project",
+    f"/api/collections/issues/records?filter={filter}&perPage=1&expand=team,assignee,labels,project,creator",
     "issue snapshot", &issues,
   ).is_err() { return }
   // Only a successful empty read means deleted; backend errors never clear

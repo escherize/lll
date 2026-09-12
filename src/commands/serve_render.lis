@@ -9,6 +9,7 @@ import "display"
 import "markdown"
 import "models"
 import "pb"
+import "provenance"
 import "query"
 import "theme"
 
@@ -378,6 +379,7 @@ fn issue_fields_vm(issue: models.Issue, comments: Slice<models.Comment>) -> Resu
   if issue.work_branch != "" { work = f"{issue.work_branch} @ {issue.work_host}:{issue.work_path}" }
   let work_stale = work_site_stale(issue.state, held.is_some())
   Ok(IssueVM {
+    provenance: provenance.fields(issue),
     claim_id, claim_holder, claim_age, claim_actor, claim_actor_id, claim_error,
     claim_read_only: issue.expand.team.archived,
     attachments: attachment_vms(issue),

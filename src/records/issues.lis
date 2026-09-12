@@ -47,7 +47,7 @@ pub fn fetch_issue_record(id: string) -> Result<string, string> {
   }
 
   pb.get(
-    f"/api/collections/issues/records/{item.id}?expand=team,assignee,labels,project,blocked_by",
+    f"/api/collections/issues/records/{item.id}?expand=team,assignee,labels,project,blocked_by,creator",
   )
 }
 

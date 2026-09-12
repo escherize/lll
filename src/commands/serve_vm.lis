@@ -1,5 +1,6 @@
 import "go:html/template"
 import "search"
+import "provenance"
 
 // View models for the web board: the structs the templates read, and nothing
 // that fetches or renders. They are built in serve_render.lis and composed
@@ -312,6 +313,7 @@ pub struct FindingVM {
 
 /// View model for the issue page / issue-detail fragment.
 pub struct IssueVM {
+  pub provenance: Slice<provenance.Field>,
   pub claim_id: string,
   pub claim_holder: string,
   pub claim_age: string,

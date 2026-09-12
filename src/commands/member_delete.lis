@@ -7,6 +7,7 @@ import "query"
 struct MemberReferences {
   assigned: int,
   authored: int,
+  created: int,
 }
 
 /// Both deletion surfaces count assignments and authorship under the identity
@@ -15,6 +16,7 @@ fn member_references(id: string, token: string) -> Result<MemberReferences, stri
   Ok(MemberReferences {
     assigned: member_reference_count("issues", "assignee", id, token)?,
     authored: member_reference_count("comments", "author", id, token)?,
+    created: member_reference_count("issues", "creator", id, token)?,
   })
 }
 
@@ -37,4 +39,3 @@ fn member_reference_count(collection: string, field: string, id: string, token: 
   if total < 0 { return Err(f"counting member {collection}: invalid totalItems") }
   Ok(total)
 }
-

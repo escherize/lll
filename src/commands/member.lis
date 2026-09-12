@@ -222,25 +222,26 @@ pass --admin-email and --admin-password, or set LLL_ADMIN_EMAIL/LLL_ADMIN_PASSWO
   let references = member_references(member.id, su)?
   let assigned = references.assigned
   let authored = references.authored
-  if (assigned > 0 || authored > 0) && !p.given("--force") {
+  let created = references.created
+  if (assigned > 0 || authored > 0 || created > 0) && !p.given("--force") {
     return Err(
-      f"{member.name} has {assigned} issue(s) assigned and {authored} comment(s) authored
+      f"{member.name} has {assigned} issue(s) assigned and {authored} comment(s) authored, and created {created} issue(s)
 reassign first: lll issue update <KEY> --assignee <somebody>
-or use --force to clear assignments and comment authorship; comment bodies are kept",
+or use --force to clear assignments, comment authorship and issue creator references; issue and comment bodies are kept",
     )
   }
 
   let _ = pb.delete_as(f"/api/collections/members/records/{member.id}", su)?
   fmt.Println(f"removed member {member.name}")
-  if assigned > 0 || authored > 0 {
-    fmt.Println(f"cleared {assigned} issue assignment(s) and {authored} comment author reference(s); comment bodies kept")
+  if assigned > 0 || authored > 0 || created > 0 {
+    fmt.Println(f"cleared {assigned} issue assignment(s) and {authored} comment author reference(s), plus {created} issue creator reference(s); issue and comment bodies kept")
   }
   Ok(())
 }
 
 fn member_remove_spec() -> Slice<flags.Flag> {
   with_admin_flags([
-    flags.Flag { name: "--force", help: "clear assignments and comment authorship; keep comment bodies", .. },
+    flags.Flag { name: "--force", help: "clear assignments, comment authorship and creator references; keep issue/comment bodies", .. },
     flags.Flag {
       name: "--url",
       value: true,
@@ -261,9 +262,9 @@ fn member_remove_page() -> string {
 Usage:
   " + usage + "
 
-Refuses a member with assigned issues or authored comments. Reassign issues
+Refuses a member with assigned issues, authored comments or issue creator references. Reassign issues
 first ('lll issue update KEY --assignee SOMEBODY'), or use --force to clear
-assignments and comment authorship. Comment bodies are kept.
+assignments, comment authorship and creator references. Issue and comment bodies are kept.
 Authenticates as the superuser, exactly like 'lll member set-password'." + flags.section(member_remove_spec())
 }
 

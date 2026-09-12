@@ -211,7 +211,8 @@
 <input type="hidden" name="confirmed" value="1">
 <input type="hidden" name="expected_assigned" value="{{.Assigned}}">
 <input type="hidden" name="expected_authored" value="{{.Authored}}">
-<div class="set-delete-impact" role="status">{{if .Changed}}The affected references changed. Review them again. {{end}}Delete account <strong>{{.Name}}</strong>? This clears {{.Assigned}} issue assignment(s) and {{.Authored}} comment author reference(s). Issues and comment bodies are kept. This account will no longer be able to sign in.</div>
+<input type="hidden" name="expected_created" value="{{.Created}}">
+<div class="set-delete-impact" role="status">{{if .Changed}}The affected references changed. Review them again. {{end}}Delete account <strong>{{.Name}}</strong>? This clears {{.Assigned}} issue assignment(s), {{.Authored}} comment author reference(s), and {{.Created}} issue creator reference(s). Issues and comment bodies are kept. This account will no longer be able to sign in.</div>
 <input name="admin_password" type="password" placeholder="Admin password" autocomplete="off" aria-label="Admin password" class="set-second">
 <button type="button" class="btn" data-on:click="@post('/settings/member?cancel=1', {contentType: 'form'})">Cancel</button>
 <button type="submit" class="btn">Delete account</button>

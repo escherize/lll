@@ -61,6 +61,7 @@ func Serve(dataDir, addr, adminEmail, adminPassword string) error {
 		MigrationsDir: migrationsDir,
 	})
 
+	registerIssueProvenance(app)
 	app.OnRecordCreate("issues").BindFunc(func(e *core.RecordEvent) error {
 		// Keep the max-number read and record insertion on PocketBase's
 		// serialized writer connection. Reading before that transaction lets

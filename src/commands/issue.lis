@@ -17,6 +17,7 @@ import "flags"
 import "gitctx"
 import "models"
 import "pb"
+import "provenance"
 import "query"
 
 /// A flag value of `-` means "read it from stdin", the convention `gh gist` and
@@ -614,6 +615,8 @@ fn create(input: flags.CommandInput) -> Result<(), string> {
   }
 
   let new_issue = models.NewIssue {
+    creator: actor()?.map_or("", |member| member.id),
+    origin: provenance.capture(),
     team: team.id,
     title,
     description,
@@ -629,7 +632,7 @@ fn create(input: flags.CommandInput) -> Result<(), string> {
     Err(e) => return Err(f"encoding issue: {e}"),
   }
   let path = if p.given("--json") {
-    "/api/collections/issues/records?expand=team,assignee,labels,project"
+    "/api/collections/issues/records?expand=team,assignee,labels,project,creator"
   } else {
     "/api/collections/issues/records"
   }
@@ -787,6 +790,11 @@ fn view(input: flags.CommandInput) -> Result<(), string> {
   // wants the text rather than a rendered table.
   if raw_mode {
     fmt.Println(f"# {full.expand.team.key}-{full.number}: {full.title}")
+    let source = provenance.fields(full)
+    if !source.is_empty() {
+      fmt.Println("")
+      for field in source { fmt.Println(f"- **{field.label}:** {field.value}") }
+    }
     if full.description != "" {
       fmt.Println("")
       fmt.Println(full.description)
@@ -825,6 +833,7 @@ fn view(input: flags.CommandInput) -> Result<(), string> {
   fmt.Println(f"State:     {display.glyph(full.state)} {full.state}")
   fmt.Println(f"Priority:  {display.priority_name(full.priority)}")
   fmt.Println(f"Assignee:  {assignee}")
+  for field in provenance.fields(full) { fmt.Println(f"{field.label}: {field.value}") }
   // The one place the second collection is read on a plain view: assignee says
   // who it is for, Claimed says who is holding it right now, and only the
   // latter is exclusive.

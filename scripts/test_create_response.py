@@ -60,9 +60,10 @@ try:
     assert record['id'] and record['number'] > 0, record
     assert record['title'] == 'Create response regression', record
     assert record['expand']['team']['key'] == 'ENG', record
+    assert record['expand']['creator']['id'] == record['creator'], record
     assert len(posts) == 1, posts
     assert urllib.parse.parse_qs(urllib.parse.urlsplit(posts[0]).query)['expand'] == [
-        'team,assignee,labels,project'], posts
+        'team,assignee,labels,project,creator'], posts
     assert not detail_reads, detail_reads
     request = urllib.request.Request(api + '/api/collections/issues/records/' + record['id'],
         headers={'Authorization': 'Bearer ' + os.environ['LLL_TOKEN']})

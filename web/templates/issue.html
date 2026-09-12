@@ -205,6 +205,7 @@
   <div class="lab-cands">{{range .LabelOpts}}{{if not .On}}<label class="lab" id="lab-c-{{.Id}}" data-n="{{.Terms}}" data-show="!$lab_lc || el.dataset.n.includes($lab_lc)"><input type="checkbox" name="labels" value="{{.Id}}" data-on:change="@post('/labels', {contentType: 'form'})"><span class="chip"><span class="dot" style="background:{{if .Color}}{{.Color}}{{else}}var(--text-3){{end}}"></span>{{.Name}}</span></label>{{end}}{{end}}</div>
   </div></form>{{else}}none{{end}}</span>
 </div>
+{{range .Provenance}}<div class="prop"><span class="k">{{.Label}}</span><span class="v provenance-value">{{.Value}}</span></div>{{end}}
 <div class="prop"><span class="k">Created</span><span class="v">{{.Created}}</span></div>
 <div class="prop"><span class="k">Updated</span><span class="v">{{.Updated}}</span></div>
 </aside>{{end}}

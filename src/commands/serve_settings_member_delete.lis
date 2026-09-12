@@ -12,6 +12,7 @@ pub struct MemberDeleteVM {
   pub name: string,
   pub assigned: int,
   pub authored: int,
+  pub created: int,
   pub changed: bool,
 }
 
@@ -33,11 +34,12 @@ fn settings_member_delete(r: mut Ref<http.Request>, id: string) -> Result<Option
   }
   if member.id != id { return Err("unknown member — reload settings") }
   let references = member_references(id, token)?
-  if !confirmed || r.PostFormValue("expected_assigned") != strconv.Itoa(references.assigned) || r.PostFormValue("expected_authored") != strconv.Itoa(references.authored) {
+  if !confirmed || r.PostFormValue("expected_assigned") != strconv.Itoa(references.assigned) || r.PostFormValue("expected_authored") != strconv.Itoa(references.authored) || r.PostFormValue("expected_created") != strconv.Itoa(references.created) {
     let vm = MemberDeleteVM {
       id, name: member.name,
       assigned: references.assigned,
       authored: references.authored,
+      created: references.created,
       changed: confirmed,
     }
     return Ok(Some(patch_event(render("set-member-delete-review", vm)?)))

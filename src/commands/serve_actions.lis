@@ -149,6 +149,8 @@ fn create_write(
     (form as Map<string, Slice<string>>)["labels"].filter(|id| id != "")
   })
   let new_issue = models.NewIssue {
+    creator: actor()?.map_or("", |member| member.id),
+    origin: models.IssueOrigin { tool: "web", .. },
     team,
     title,
     state,

@@ -110,6 +110,7 @@ pub struct NewLabel {
 
 #[json]
 pub struct IssueExpand {
+  pub creator: Member,
   pub team: Team,
   pub assignee: Member,
   pub project: Project,
@@ -119,6 +120,9 @@ pub struct IssueExpand {
 
 #[json]
 pub struct Issue {
+  pub creator: string,
+  pub origin: IssueOrigin,
+  pub refs: string,
   pub attachments: Slice<string>,
   pub id: string,
   pub team: string,
@@ -156,6 +160,9 @@ pub struct IssueList {
 
 #[json]
 pub struct NewIssue {
+  #[json(omitempty)]
+  pub creator: string,
+  pub origin: IssueOrigin,
   pub team: string,
   pub title: string,
   pub state: string,
@@ -170,6 +177,15 @@ pub struct NewIssue {
   pub project: string,
   #[json(omitempty)]
   pub labels: Slice<string>,
+}
+
+#[json]
+pub struct IssueOrigin {
+  pub host: string,
+  pub cwd: string,
+  pub branch: string,
+  pub sha: string,
+  pub tool: string,
 }
 
 #[json]

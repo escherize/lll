@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Real board/API deletion reviews: no mutation until current impact is accepted."""
 import html
+import itertools
 import json
 import os
 import sys
@@ -89,13 +90,13 @@ try:
         assert 'not in this team' in refused, refused
         record('GET', collection, ident=entity['id'])
     # LLL-341: references span teams; ordinary API clients cannot bypass admin.
-    for assigned, authored in [(0, 0), (1, 0), (0, 1), (1, 1)]:
-        member = create('members', dict(name=f'Review member {assigned}{authored}',
-            email=f'review-{assigned}{authored}@example.test', password='fixture-member-pass',
+    for assigned, authored, credited in itertools.product((0, 1), repeat=3):
+        member = create('members', dict(name=f'Review member {assigned}{authored}{credited}',
+            email=f'review-{assigned}{authored}{credited}@example.test', password='fixture-member-pass',
             passwordConfirm='fixture-member-pass'))
         ident = member['id']
         issue = create('issues', dict(title='Member removal history', team=foreign['id'],
-            state='todo', assignee=ident if assigned else ''))
+            state='todo', assignee=ident if assigned else '', creator=ident if credited else ''), token=admin_token)
         comments = []
         if authored:
             comments.append(create('comments', dict(issue=issue['id'], author=ident,
@@ -110,8 +111,9 @@ try:
         preview = delete('member', ident)
         assert f'{assigned} issue assignment(s)' in preview, preview
         assert f'{authored} comment author reference(s)' in preview, preview
+        assert f'{credited} issue creator reference(s)' in preview, preview
         assert 'name="admin_password"' in preview
-        expected = dict(confirmed='1', expected_assigned=assigned, expected_authored=authored)
+        expected = dict(confirmed='1', expected_assigned=assigned, expected_authored=authored, expected_created=credited)
         for password in ['', 'wrong-admin-password']:
             refusal = delete('member', ident, admin_password=password, **expected)
             assert 'admin password' in refusal, refusal
@@ -120,6 +122,12 @@ try:
         # Admin authentication alone is not confirmation of the current impact.
         preview = delete('member', ident, admin_password=admin_password)
         assert 'Delete account' in preview
+        later = create('issues', dict(title='Creator added after review', team=foreign['id'],
+            state='todo', creator=ident), token=admin_token)
+        stale_creator = delete('member', ident, admin_password=admin_password, **expected)
+        assert 'references changed' in stale_creator, stale_creator
+        assert f'{credited + 1} issue creator reference(s)' in stale_creator
+        expected['expected_created'] = credited + 1
         comments.append(create('comments', dict(issue=issue['id'], author=ident,
             body='Added after review'), token=admin_token))
         stale = delete('member', ident, admin_password=admin_password, **expected)
@@ -136,6 +144,8 @@ try:
             assert error.code == 404
         saved = record('GET', 'issues', ident=issue['id'])
         assert saved['assignee'] == '' and saved['title'] == issue['title']
+        assert saved['creator'] == ''
+        assert record('GET', 'issues', ident=later['id'])['creator'] == ''
         for comment in comments:
             saved = record('GET', 'comments', ident=comment['id'])
             assert saved['author'] == '' and saved['body'] == comment['body'], saved

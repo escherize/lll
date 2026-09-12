@@ -2210,6 +2210,7 @@ print('SSE logs: no NUL bytes after stream cleanup')
 PY
 
 LLL_TEST_BOARD_TOKEN="$BOARD_TOKEN" python3 scripts/test_settings_delete.py "$LLL_URL" "$WEB"
+LLL_TEST_BOARD_TOKEN="$BOARD_TOKEN" python3 scripts/test_provenance.py "$LIN" "$LLL_URL" "$WEB"
 
 LLL_TEST_BOARD_TOKEN="$BOARD_TOKEN" python3 scripts/test_attachments.py "$LIN" "$LLL_URL" "$WEB"
 
