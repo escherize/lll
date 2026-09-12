@@ -418,6 +418,7 @@ pub struct SetLabelVM {
   // How many issues carry the label (TASK-208). Shown so near-duplicates
   // (bug/bugs/defect) are visible before someone creates another one.
   pub usage: int,
+  pub usage_text: string,
 }
 
 /// One member account row on /settings. Accounts are shared across teams;
@@ -442,6 +443,7 @@ pub struct SetTeamVM {
   pub key: string,
   pub name: string,
   pub issues: int,
+  pub issues_text: string,
   pub archived: bool,
 }
 

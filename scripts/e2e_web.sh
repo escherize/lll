@@ -2109,7 +2109,9 @@ sys.exit(0 if 0 <= hot < cold else 1)
 assert_contains "$settings" "reuse beats near-duplicates" \
   "the web label-create form carries the check-first hint"
 # The raw twin carries the same counts, on the label's own line.
-assert_contains "$(wcurl -sf "$WEB/settings?raw")" "usage-hot # (2 issues)" \
+usage_raw=$(wcurl -sf "$WEB/settings?raw")
+printf '%s' "$usage_raw" > /tmp/lll-344-settings-raw.txt
+assert_contains "$usage_raw" "usage-hot (2 issues)" \
   "settings raw carries the label's usage count"
 
 # --- TASK-241: the API answers on the board's port, ungated ------------------

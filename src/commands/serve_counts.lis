@@ -1,0 +1,5 @@
+/// The settings inventory uses the same count text in HTML and raw output.
+fn issue_count_text(count: int) -> string {
+  if count == 1 { return "1 issue" }
+  f"{count} issues"
+}

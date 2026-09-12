@@ -62,7 +62,7 @@
 <input type="hidden" name="id" value="{{.Id}}">
 <input name="color" type="color" class="set-swatch" value="{{if .Color}}{{.Color}}{{else}}#828994{{end}}" aria-label="Colour">
 <input name="name" value="{{.Name}}" autocomplete="off" aria-label="Label name">
-<span class="set-usage">{{.Usage}} issues</span>
+<span class="set-usage">{{.UsageText}}</span>
 <button type="button" class="btn" data-on:click="@post('/settings/label', {contentType: 'form'})">Save</button>
 {{template "set-del" "label"}}
 </form>
@@ -135,7 +135,7 @@
 <input type="hidden" name="id" value="{{.Id}}">
 <span class="rt-key">{{.Key}}</span>
 <span class="rg-title">{{.Name}}</span>
-<span class="set-usage">{{.Issues}} issues{{if .Archived}} · archived{{end}}</span>
+<span class="set-usage">{{.IssuesText}}{{if .Archived}} · archived{{end}}</span>
 <input name="admin_password" type="password" placeholder="Admin password" autocomplete="off" aria-label="Admin password" class="set-second">
 {{if .Archived}}<input type="hidden" name="archived" value="0"><button type="button" class="btn" data-on:click="@post('/settings/teams/archive', {contentType: 'form'})">Unarchive</button>
 {{else}}<input type="hidden" name="archived" value="1"><button type="button" class="btn" data-on:click="confirm('Archive ' + el.form.dataset.name + '? Lists and the rail hide it; its board stays readable.') && @post('/settings/teams/archive', {contentType: 'form'})">Archive</button>

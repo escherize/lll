@@ -106,6 +106,7 @@ fn team_rows() -> Result<Slice<SetTeamVM>, string> {
         key: t.key,
         name: t.name,
         issues: issues.total_items,
+        issues_text: issue_count_text(issues.total_items),
         archived: t.archived,
       },
     )
@@ -144,6 +145,7 @@ fn label_rows(team_id: string) -> Result<Slice<SetLabelVM>, string> {
       name: l.name,
       color: theme.normalize_hex(l.color),
       usage: used,
+      usage_text: issue_count_text(used),
     }
     let mut sorted: Slice<SetLabelVM> = []
     let mut placed = false

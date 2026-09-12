@@ -203,7 +203,9 @@ fn settings_raw(vm: SettingsVM) -> string {
   lines = lines.append("")
   lines = lines.append("## Labels")
   for l in vm.labels {
-    lines = lines.append(f"- {cell(l.name)} #{l.color} ({l.usage} issues)")
+    let mut color = ""
+    if l.color != "" { color = f" {l.color}" }
+    lines = lines.append(f"- {cell(l.name)}{color} ({l.usage_text})")
   }
   lines = lines.append("")
   lines = lines.append("## Members")
@@ -220,7 +222,7 @@ fn settings_raw(vm: SettingsVM) -> string {
   for t in vm.teams {
     let mut mark = ""
     if t.archived { mark = " — archived" }
-    lines = lines.append(f"- {t.key} {cell(t.name)} ({t.issues} issues){mark}")
+    lines = lines.append(f"- {t.key} {cell(t.name)} ({t.issues_text}){mark}")
   }
   strings.Join(lines, "\n")
 }
