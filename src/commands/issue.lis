@@ -704,20 +704,21 @@ fn create(args: Slice<string>) -> Result<(), string> {
     Ok(p) => p,
     Err(e) => return Err(f"encoding issue: {e}"),
   }
-  let body = pb.post("/api/collections/issues/records", payload as string)?
+  let path = if p.given("--json") {
+    "/api/collections/issues/records?expand=team,assignee,labels,project"
+  } else {
+    "/api/collections/issues/records"
+  }
+  let body = pb.post(path, payload as string)?
 
   let mut created = models.Issue { .. }
   if let Err(e) = json.Unmarshal(body.bytes(), &created) {
     return Err(f"decoding created issue: {e}")
   }
-  // The POST response has no expand, so --json re-fetches the record the
-  // way view does — one GET with the same expand list, same shape out.
+  // PocketBase expands the create response itself. A later read must not
+  // turn a successful write into an apparent failure and invite retries.
   if p.given("--json") {
-    fmt.Println(
-      pb.get(
-        f"/api/collections/issues/records/{created.id}?expand=team,assignee,labels,project",
-      )?,
-    )
+    fmt.Println(body)
     return Ok(())
   }
   fmt.Println(f"Created {team.key}-{created.number}: {created.title}")
