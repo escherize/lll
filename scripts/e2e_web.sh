@@ -112,6 +112,10 @@ except IndexError:
 ' "$2"
 }
 
+# A free-port probe releases its socket before startup. If another listener
+# wins that race, up can relocate the board; a 200 from the planned URL then
+# proves nothing about our process. Verify its post-bind announcement first.
+python3 scripts/board_startup.py "$PB_LOG" "$WEB"
 wait_ok "$LLL_URL/api/health" || fail "PocketBase did not start"
 
 # --- TASK-181: the suite rides a member token --------------------------------

@@ -37,6 +37,7 @@ cleanup() { # exit-status
 e2e_trap_cleanup cleanup
 
 lis build >/dev/null
+python3 scripts/test_board_startup.py target/.lisette/bin/lll
 python3 scripts/test_up_errors.py target/.lisette/bin/lll
 python3 scripts/test_scratch.py
 
