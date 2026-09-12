@@ -442,17 +442,18 @@ fn verify_admin(pass: string) -> Result<string, string> {
     payload,
   ) {
     Ok(b) => b,
-    Err(e) => {
-      // PocketBase answers a bad credential pair with 400.
-      if strings.Contains(e, "400") {
-        return Err(
-          "wrong admin password — the superuser credentials are what 'lll up' prints in its banner",
-        )
-      }
-      return Err(f"verifying the admin password: {e}")
-    },
+    Err(e) => return Err(admin_verification_error(e)),
   }
   decode_auth(body, "the superuser auth response")
+}
+
+/// Authentication failures have a specific recovery; other errors retain
+/// their actual server status and transport details.
+fn admin_verification_error(e: string) -> string {
+  if pb.response_status(e) == 400 {
+    return "wrong admin password — the superuser credentials are what 'lll up' prints in its banner"
+  }
+  f"verifying the admin password: {e}"
 }
 
 /// The named member, from the current list — so the flash can say "reload"

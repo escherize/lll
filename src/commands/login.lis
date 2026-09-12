@@ -461,7 +461,7 @@ fn create_as_superuser(
 /// --create from it. Both branches are named here because the server does not
 /// tell us which one it is.
 fn login_failed(e: string, email: string, target: string) -> string {
-  if !strings.Contains(e, "400") {
+  if pb.response_status(e) != 400 {
     return f"login failed: {e}"
   }
   // The server is named on every failure (TASK-203 AC#4): "wrong password"

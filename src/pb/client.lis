@@ -148,7 +148,7 @@ fn send(method: string, path: string, payload: string) -> Result<string, string>
   let body = match request(cfg.url, method, path, payload, bearer(cfg.token), src.url == "default") {
     Ok(b) => b,
     Err(e) => {
-      if cfg.token != "" && strings.Contains(e, ": 401 ") {
+      if cfg.token != "" && response_status(e) == 401 {
         if let Some(refused) = refused_token(cfg, src, method, path, payload) {
           return refused
         }
