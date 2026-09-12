@@ -1,3 +1,4 @@
+import "records"
 import "go:encoding/json"
 import "go:html/template"
 import "go:net/http"
@@ -111,7 +112,7 @@ fn create_write(
   let mut team = team_id
   let team_key = strings.TrimSpace(r.PostFormValue("team"))
   if team_key != "" {
-    let Some(t) = find_team(team_key)? else {
+    let Some(t) = records.find_team(team_key)? else {
       return Err(unknown_team(team_key))
     }
     // New issues do not land in an archived team (TASK-210), same refusal as
@@ -193,7 +194,7 @@ fn state_write(r: mut Ref<http.Request>) -> Result<string, string> {
   // Record id of the card the drop lands before; "" means end of column.
   let before = r.FormValue("before")
   let _ = query.state(state)?
-  let issue = fetch_issue(key)?
+  let issue = records.fetch_issue(key)?
   require_active_team(issue.expand.team)?
   // The issue's OWN team scopes the reorder (TASK-198): a drop on any
   // team's board must compute the midpoint against that team's column, not
@@ -252,7 +253,7 @@ fn fetch_column_issues(
 fn favorite_write(r: mut Ref<http.Request>) -> Result<string, string> {
   let key = r.FormValue("key")
   let on = r.FormValue("on") == "true"
-  let issue = fetch_issue(key)?
+  let issue = records.fetch_issue(key)?
   let existing = fetch_favorite(issue.id)?
   if on {
     if existing.is_some() { return Ok("") }
@@ -271,7 +272,7 @@ fn priority_write(r: mut Ref<http.Request>) -> Result<string, string> {
   let Some(prio) = display.priority_value(slug) else {
     return Err(f"unknown priority '{slug}'")
   }
-  let issue = fetch_issue(key)?
+  let issue = records.fetch_issue(key)?
   require_active_team(issue.expand.team)?
   patch_issue(issue.id, PriorityPatch { priority: prio })
 }
@@ -288,7 +289,7 @@ fn emoji_write(r: mut Ref<http.Request>) -> Result<string, string> {
   let Ok(emoji) = check_emoji(r.FormValue("emoji")) else {
     return Err("an issue takes one emoji, or none")
   }
-  let issue = fetch_issue(key)?
+  let issue = records.fetch_issue(key)?
   require_active_team(issue.expand.team)?
   patch_issue(issue.id, EmojiPatch { emoji })
 }
@@ -297,7 +298,7 @@ fn title_write(r: mut Ref<http.Request>) -> Result<string, string> {
   let key = r.FormValue("key")
   let title = strings.TrimSpace(r.FormValue("title"))
   if title == "" { return Err("title is required") }
-  let issue = fetch_issue(key)?
+  let issue = records.fetch_issue(key)?
   require_active_team(issue.expand.team)?
   patch_issue(issue.id, TitlePatch { title })
 }
@@ -308,10 +309,10 @@ fn project_write(r: mut Ref<http.Request>) -> Result<string, string> {
   // The issue first: its own team is what the posted id has to belong to,
   // and a project from another team is as unknown here as a deleted one
   // (TASK-173).
-  let issue = fetch_issue(key)?
+  let issue = records.fetch_issue(key)?
   require_active_team(issue.expand.team)?
   if id != "" {
-    let projects = fetch_projects(issue.team)?
+    let projects = records.fetch_projects(issue.team)?
     if projects.find(|p| p.id == id).is_none() {
       return Err(
         f"unknown project '{id}' — reload the page for the current list",
@@ -325,14 +326,14 @@ fn assignee_write(r: mut Ref<http.Request>) -> Result<string, string> {
   let key = r.FormValue("key")
   let id = r.FormValue("assignee")
   if id != "" {
-    let members = fetch_members()?
+    let members = records.fetch_members()?
     if members.find(|m| m.id == id).is_none() {
       return Err(
         f"unknown member '{id}' — reload the page for the current list",
       )
     }
   }
-  let issue = fetch_issue(key)?
+  let issue = records.fetch_issue(key)?
   require_active_team(issue.expand.team)?
   patch_issue(issue.id, IssueAssigneePatch { assignee: id })
 }
@@ -351,9 +352,9 @@ fn labels_write(r: mut Ref<http.Request>) -> Result<string, string> {
   // The issue first, for its team: a label from another team is as unknown
   // here as a deleted one, which is what stops a POST crossing tenancy
   // however the checkbox got its id (TASK-173).
-  let issue = fetch_issue(key)?
+  let issue = records.fetch_issue(key)?
   require_active_team(issue.expand.team)?
-  let known = fetch_labels(issue.team)?
+  let known = records.fetch_labels(issue.team)?
   // FormValue above has already parsed the body, so PostForm is populated;
   // labels is the one field that repeats (one checkbox per label).
   let ids = r.PostForm.map_or([], |form| {
@@ -371,14 +372,14 @@ fn comment_write(r: mut Ref<http.Request>) -> Result<string, string> {
   let key = r.PostFormValue("key")
   let body = strings.TrimSpace(r.PostFormValue("body"))
   if body == "" { return Err("comment body is required") }
-  let issue = fetch_issue(key)?
+  let issue = records.fetch_issue(key)?
   require_active_team(issue.expand.team)?
   // Same honor-system authorship as `lll issue comment`: the member named by
   // 'me' in config, or authorless.
   let mut author = ""
   if let Ok(cfg) = config.load() {
     if cfg.me != "" {
-      if let Ok(Some(m)) = find_member(cfg.me) { author = m.id }
+      if let Ok(Some(m)) = records.find_member(cfg.me) { author = m.id }
     }
   }
   let payload = marshal(models.NewComment { issue: issue.id, author, body })?

@@ -1,3 +1,4 @@
+import "records"
 import "go:encoding/json"
 import "go:fmt"
 import "go:os"
@@ -101,7 +102,7 @@ fn token_create(input: flags.CommandInput) -> Result<(), string> {
   point_at_url(p.one("--url"))?
   apply_admin_flags(p.one("--admin-email"), p.one("--admin-password"))?
   let su = superuser_auth()?
-  let found = find_member_as(su, name)?
+  let found = records.find_member_as(su, name)?
   let Some(member) = found else {
     return Err(f"no member named '{name}' — see 'lll member add'")
   }

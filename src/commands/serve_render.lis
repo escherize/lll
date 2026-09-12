@@ -1,3 +1,4 @@
+import "records"
 import "go:html/template"
 import "go:github.com/escherize/lll/web"
 import "go:net/url"
@@ -311,9 +312,9 @@ fn fetch_claimed_issue_ids() -> Result<Slice<string>, string> {
 /// picker offering another team's label would build a record PocketBase is
 /// happy to store and no view can explain.
 fn compose_vm(team_id: string) -> Result<ComposeVM, string> {
-  let members = fetch_members()?
-  let projects = fetch_projects(team_id)?
-  let labels = fetch_labels(team_id)?
+  let members = records.fetch_members()?
+  let projects = records.fetch_projects(team_id)?
+  let labels = records.fetch_labels(team_id)?
   Ok(ComposeVM {
     prios: prio_opts(),
     members: members.map(|m| PickVM { id: m.id, name: m.name }),
@@ -397,9 +398,9 @@ fn issue_vm(issue: models.Issue, comments: Slice<models.Comment>) -> Result<Issu
     // Scoped to the ISSUE's team, not the server's configured one: this
     // renders for whatever issue arrives, including one from a team the
     // board is not scoped to (TASK-173).
-    member_opts: fetch_members()?.map(|m| PickVM { id: m.id, name: m.name }),
-    project_opts: fetch_projects(issue.team)?.map(|p| PickVM { id: p.id, name: p.name }),
-    label_opts: fetch_labels(issue.team)?.map(|l| LabelPickVM {
+    member_opts: records.fetch_members()?.map(|m| PickVM { id: m.id, name: m.name }),
+    project_opts: records.fetch_projects(issue.team)?.map(|p| PickVM { id: p.id, name: p.name }),
+    label_opts: records.fetch_labels(issue.team)?.map(|l| LabelPickVM {
       id: l.id,
       name: l.name,
       color: theme.normalize_hex(l.color),

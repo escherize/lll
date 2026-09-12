@@ -1,0 +1,22 @@
+import "go:net/url"
+import "models"
+import "pb"
+import "query"
+
+pub fn find_team(key: string) -> Result<Option<models.Team>, string> {
+  let filter = url.QueryEscape(f"key={query.quote(key)}")
+  let mut result = models.TeamList { .. }
+  pb.fetch(f"/api/collections/teams/records?filter={filter}", "teams", &result)?
+  Ok(result.items.find(|t| t.key == key))
+}
+
+/// Every team, key-sorted. Shared by `lll team list` and `lll up`.
+pub fn list_teams() -> Result<models.TeamList, string> {
+  let mut teams = models.TeamList { .. }
+  pb.fetch(
+    "/api/collections/teams/records?perPage=200&sort=key",
+    "teams",
+    &teams,
+  )?
+  Ok(teams)
+}

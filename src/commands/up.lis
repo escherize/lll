@@ -1,3 +1,4 @@
+import "records"
 import "go:bufio"
 import "go:bytes"
 import "go:encoding/json"
@@ -305,12 +306,12 @@ fn ensure_team(
     return Ok(key)
   }
 
-  let teams = list_teams()?
+  let teams = records.list_teams()?
   let mut suggested = default_team_key()
   if let Some(t) = teams.items.get(0) { suggested = t.key }
 
   let key = ask_team(suggested)?
-  let existing = find_team(key)?
+  let existing = records.find_team(key)?
   if existing.is_none() {
     match create_team(key, key) {
       Ok(created) => {
@@ -319,7 +320,7 @@ fn ensure_team(
         )
       },
       Err(e) => {
-        let existing = find_team(key)?
+        let existing = records.find_team(key)?
         if existing.is_none() {
           return Err(f"creating team '{key}': {e}")
         }
@@ -351,14 +352,14 @@ fn should_save_team(source: string, throwaway: bool) -> bool {
 /// re-looks-up whoever won rather than failing the boot (the same bargain
 /// e2e.sh's seed_team runs on).
 fn resolve_team(want: string) -> Result<string, string> {
-  if let Some(t) = find_team(want)? { return Ok(t.key) }
+  if let Some(t) = records.find_team(want)? { return Ok(t.key) }
   match create_team(want, want) {
     Ok(created) => {
       fmt.Println(f"created team {created.key}")
       Ok(created.key)
     },
     Err(e) => {
-      if let Some(t) = find_team(want)? { return Ok(t.key) }
+      if let Some(t) = records.find_team(want)? { return Ok(t.key) }
       Err(f"creating team '{want}': {e}")
     },
   }

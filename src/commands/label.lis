@@ -1,3 +1,4 @@
+import "records"
 import "go:encoding/json"
 import "go:fmt"
 import "go:net/url"
@@ -163,7 +164,7 @@ fn label_edit(input: flags.CommandInput) -> Result<(), string> {
   if !p.given("-n") && !p.given("-c") {
     return Err(f"nothing to update — pass -n or -c\nusage: {usage}")
   }
-  let label = resolve_label(configured_team_id()?, name)?
+  let label = records.resolve_label(configured_team_id()?, name)?
 
   let mut fields: Slice<string> = []
   if p.given("-n") { fields = fields.append("\"name\":" + json_quote(p.one("-n"))?) }
@@ -184,7 +185,7 @@ fn label_delete(input: flags.CommandInput) -> Result<(), string> {
   let Some(name) = nonempty(p.first()) else {
     return Err(f"usage: {usage}")
   }
-  let label = resolve_label(configured_team_id()?, name)?
+  let label = records.resolve_label(configured_team_id()?, name)?
   let used = entity_issue_count("label", label.id)?
   if used > 0 && !p.given("--force") {
     return Err(refuse_delete("label", name, used))
@@ -199,20 +200,4 @@ fn label_delete(input: flags.CommandInput) -> Result<(), string> {
 fn nonempty(value: string) -> Option<string> {
   if strings.TrimSpace(value) == "" { return None }
   Some(value)
-}
-
-/// Resolve one team's label by name; unknown names error with the fix. An
-/// empty `team_id` searches every team, which only the unscoped board wants.
-///
-/// Names are unique within a team, not across them (TASK-173): two projects
-/// may both call something "bug", and attaching one team's to the other
-/// team's issue is the leak team scoping exists to stop.
-fn resolve_label(team_id: string, name: string) -> Result<models.Label, string> {
-  let filter = url.QueryEscape(query.scoped(team_id, "name", name))
-  let mut result = models.LabelList { .. }
-  pb.fetch(f"/api/collections/labels/records?filter={filter}", "labels", &result)?
-  let Some(l) = result.items.find(|l| l.name == name) else {
-    return Err(f"no label named '{name}' — see 'lll label list'")
-  }
-  Ok(l)
 }

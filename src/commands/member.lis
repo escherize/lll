@@ -1,8 +1,8 @@
+import "records"
 import "go:bufio"
 import "go:encoding/json"
 import "go:crypto/rand"
 import "go:fmt"
-import "go:net/url"
 import "go:os"
 import "go:strings"
 
@@ -10,7 +10,6 @@ import "models"
 import "pb"
 import "flags"
 import "config"
-import "query"
 
 /// Dispatch `lll member <verb>` through the noun's Command table (TASK-307).
 /// The table is the one place a verb is declared: dispatch, `lll member
@@ -216,7 +215,7 @@ pass --admin-email and --admin-password, or set LLL_ADMIN_EMAIL/LLL_ADMIN_PASSWO
     )
   }
   let su = superuser_auth()?
-  let Some(member) = find_member_as(su, name)? else {
+  let Some(member) = records.find_member_as(su, name)? else {
     return Err(f"no member named '{name}' — see 'lll member list'")
   }
 
@@ -314,7 +313,7 @@ fn member_set_password(input: flags.CommandInput) -> Result<(), string> {
   point_at_url(p.one("--url"))?
   apply_admin_flags(p.one("--admin-email"), p.one("--admin-password"))?
   let su = superuser_auth()?
-  let found = find_member_as(su, name)?
+  let found = records.find_member_as(su, name)?
   let Some(member) = found else {
     return Err(f"no member named '{name}' — see 'lll member add'")
   }
@@ -408,7 +407,7 @@ fn member_invite(input: flags.CommandInput) -> Result<(), string> {
   // Superuser first: the create rides it, and an existing name is caught here
   // rather than as PocketBase's bare 400 on the unique index.
   let su = superuser_auth()?
-  if let Some(existing) = find_member_as(su, name)? {
+  if let Some(existing) = records.find_member_as(su, name)? {
     return Err(
       f"member '{name}' already exists ({existing.email}) — run 'lll member set-password {name} --email {email} --password PASSWORD' with administrator credentials to enable login; existing credentials are unchanged",
     )
@@ -523,7 +522,7 @@ fn member_add(input: flags.CommandInput) -> Result<(), string> {
   let name = flags.entity_name(p, "-n", usage)?
   let email = p.one("-e")
 
-  if let Some(existing) = find_member(name)? {
+  if let Some(existing) = records.find_member(name)? {
     return Err(f"a member named '{name}' already exists <{existing.email}> — pick another name")
   }
   let password = p.one("--password")
@@ -604,7 +603,7 @@ pub fn synthesize_email(name: string) -> string {
 /// assigned to.
 pub fn ensure_member(name: string) -> Result<bool, string> {
   if name == "" { return Ok(false) }
-  let existing = find_member(name)?
+  let existing = records.find_member(name)?
   if existing.is_some() { return Ok(false) }
   // Two actors seeding the same fresh server race here: both find nothing,
   // both POST. The unique name (and now email) indexes admit one and reject
@@ -613,35 +612,9 @@ pub fn ensure_member(name: string) -> Result<bool, string> {
   match create_member(name, "") {
     Ok(_) => Ok(true),
     Err(_) => {
-      let raced = find_member(name)?
+      let raced = records.find_member(name)?
       if raced.is_some() { return Ok(false) }
       Err(f"could not create member '{name}' and none exists to reuse")
     },
   }
-}
-
-/// Find a member by exact name, riding the configured token.
-fn find_member(name: string) -> Result<Option<models.Member>, string> {
-  let cfg = config.load()?
-  find_member_as(cfg.token, name)
-}
-
-/// Find a member by exact name, riding `tok` instead of the configured
-/// token — token create looks its member up as the superuser it has just
-/// authenticated, not as whoever happens to be configured.
-pub fn find_member_as(tok: string, name: string) -> Result<Option<models.Member>, string> {
-  // `name` arrives unsanitized from the board's `/issues?assignee=` query
-  // parameter, so it goes through `quote` and not into the filter raw: the
-  // QueryEscape below makes it safe in a URL, which is a different layer and
-  // does nothing about a `'` closing the clause early (TASK-134).
-  let filter = url.QueryEscape(f"name={query.quote(name)}")
-  let mut result = models.MemberList { .. }
-  let body = pb.get_as(
-    f"/api/collections/members/records?filter={filter}",
-    tok,
-  )?
-  if let Err(e) = json.Unmarshal(body.bytes(), &result) {
-    return Err(f"decoding members: {e}")
-  }
-  Ok(result.items.find(|m| m.name == name))
 }

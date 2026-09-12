@@ -1,3 +1,4 @@
+import "records"
 import "go:fmt"
 import "go:github.com/escherize/lll/web"
 import "go:net"
@@ -338,7 +339,7 @@ fn redirect_with_query(w: http.ResponseWriter, r: Ref<http.Request>, path: strin
 /// 500 for a lookup the database refused.
 fn routed_team(w: http.ResponseWriter, r: Ref<http.Request>) -> Option<models.Team> {
   let key = r.PathValue("team")
-  match find_team(key) {
+  match records.find_team(key) {
     Ok(Some(t)) => Some(t),
     Ok(None) => {
       http.Error(w, f"no team with key '{key}' on this server — see the rail's team switcher", 404)

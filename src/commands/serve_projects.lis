@@ -1,3 +1,4 @@
+import "records"
 import "go:net/http"
 import "go:net/url"
 
@@ -54,7 +55,7 @@ fn projects_page(
 }
 
 fn projects_vm(team_id: string) -> Result<ProjectsVM, string> {
-  let projects = fetch_projects(team_id)?
+  let projects = records.fetch_projects(team_id)?
   Ok(ProjectsVM {
     projects: projects.map(|p| ProjectVM {
       name: p.name,

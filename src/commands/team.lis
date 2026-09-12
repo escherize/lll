@@ -1,3 +1,4 @@
+import "records"
 import "go:encoding/json"
 import "go:fmt"
 import "go:net/url"
@@ -103,7 +104,7 @@ Three things do NOT follow (TASK-87):
 
 fn team_list(input: flags.CommandInput) -> Result<(), string> {
   let p = input.parsed
-  let mut teams = list_teams()?
+  let mut teams = records.list_teams()?
   // Archived teams are hidden by default — everywhere a team list renders
   // (here, the rail switcher) an archived team is finished work, not a
   // choice. --archived includes them, marked.
@@ -212,14 +213,14 @@ fn team_rename(input: flags.CommandInput) -> Result<(), string> {
   if new_key == "" && new_name == "" {
     return Err(f"nothing to rename — give -k, -n, or both\nusage: {usage}")
   }
-  let Some(t) = find_team(key)? else {
+  let Some(t) = records.find_team(key)? else {
     return Err(unknown_team(key))
   }
   // teams.key carries a unique index, so a collision would otherwise surface
   // as a raw PocketBase validation error. Saying which key is taken is the
   // more useful answer: the fix is a different key, not a retry.
   if new_key != "" && new_key != t.key {
-    let taken = find_team(new_key)?
+    let taken = records.find_team(new_key)?
     if taken.is_some() {
       return Err(f"a team with key '{new_key}' already exists — see 'lll team list'")
     }
@@ -282,7 +283,7 @@ fn team_set_accent(input: flags.CommandInput) -> Result<(), string> {
   // The colour is checked before the lookup: a typo is the likelier mistake
   // of the two, and it should not cost a round trip to hear about.
   let hex = accent_value(raw)?
-  let Some(t) = find_team(key)? else {
+  let Some(t) = records.find_team(key)? else {
     return Err(unknown_team(key))
   }
   let payload = match json.Marshal(TeamAccentPatch { accent: hex }) {
@@ -347,16 +348,6 @@ pub fn create_team(key: string, name: string) -> Result<models.Team, string> {
   Ok(created)
 }
 
-/// Every team, key-sorted. Shared by `lll team list` and `lll up`.
-pub fn list_teams() -> Result<models.TeamList, string> {
-  let mut teams = models.TeamList { .. }
-  pb.fetch(
-    "/api/collections/teams/records?perPage=200&sort=key",
-    "teams",
-    &teams,
-  )?
-  Ok(teams)
-}
 
 /// The team `LLL_TEAM` (or `team` in .lll.toml) names, or None when no key
 /// is set. A key naming a team the server does not have is an error either
@@ -365,7 +356,7 @@ pub fn list_teams() -> Result<models.TeamList, string> {
 fn configured_team() -> Result<Option<models.Team>, string> {
   let (cfg, src) = config.load_traced()?
   if cfg.team == "" { return Ok(None) }
-  let Some(t) = find_team(cfg.team)? else {
+  let Some(t) = records.find_team(cfg.team)? else {
     return Err(unknown_configured_team(cfg.team, src.team))
   }
   Ok(Some(t))
@@ -403,7 +394,7 @@ fn current_team() -> Result<models.Team, string> {
 /// neither `create` may leave it unset.
 fn team_flag_or_current(key: string) -> Result<models.Team, string> {
   if key == "" { return current_team() }
-  let Some(t) = find_team(key)? else {
+  let Some(t) = records.find_team(key)? else {
     return Err(unknown_team(key))
   }
   Ok(t)
@@ -432,7 +423,7 @@ fn team_delete(input: flags.CommandInput) -> Result<(), string> {
   if key == "" {
     return Err("usage: lll team delete KEY")
   }
-  let Some(t) = find_team(key)? else {
+  let Some(t) = records.find_team(key)? else {
     return Err(unknown_team(key))
   }
   let filter = url.QueryEscape(f"team={query.quote(t.id)}")
@@ -513,7 +504,7 @@ fn team_set_archived(p: flags.Parsed, archived: bool) -> Result<(), string> {
   if key == "" {
     return Err(f"usage: lll team {verb} KEY")
   }
-  let Some(t) = find_team(key)? else {
+  let Some(t) = records.find_team(key)? else {
     return Err(unknown_team(key))
   }
   let payload = match json.Marshal(TeamArchivedPatch { archived }) {
@@ -536,7 +527,7 @@ fn team_view(input: flags.CommandInput) -> Result<(), string> {
   if key == "" {
     return Err("usage: lll team view KEY")
   }
-  let Some(t) = find_team(key)? else {
+  let Some(t) = records.find_team(key)? else {
     return Err(unknown_team(key))
   }
 

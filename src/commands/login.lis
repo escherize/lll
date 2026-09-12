@@ -1,3 +1,4 @@
+import "records"
 import "go:bufio"
 import "go:encoding/json"
 import "go:fmt"
@@ -284,7 +285,7 @@ would put a second account on that address. --create makes YOUR login: pass
 /// a server that cannot answer about teams does not un-log-you-in.
 fn settle_team() {
   let Ok(cfg) = config.load() else { return }
-  let teams = match list_teams() {
+  let teams = match records.list_teams() {
     Ok(teams) => teams,
     Err(e) => {
       fmt.Println(f"authenticated, but could not verify team setup: {e}\nnext: lll team list, then lll attach -k KEY")
@@ -445,7 +446,7 @@ fn create_as_superuser(
   password: string,
 ) -> Result<(), string> {
   let su = superuser_auth()?
-  if let Some(existing) = find_member_as(su, name)? {
+  if let Some(existing) = records.find_member_as(su, name)? {
     return Err(
       f"member '{name}' already exists ({existing.email}) — drop --create and log in, or reset it with 'lll member set-password {name}'",
     )

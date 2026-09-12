@@ -1,3 +1,4 @@
+import "records"
 import "go:encoding/json"
 import "go:fmt"
 import "go:net/url"
@@ -5,7 +6,6 @@ import "go:strings"
 
 import "models"
 import "pb"
-import "config"
 import "flags"
 import "query"
 
@@ -183,7 +183,7 @@ fn project_edit(input: flags.CommandInput) -> Result<(), string> {
   // must not leave a half-applied patch behind.
   let mut status = ""
   if p.given("--status") { status = check_status(p.one("--status"))? }
-  let project = resolve_project(configured_team_id()?, name)?
+  let project = records.resolve_project(configured_team_id()?, name)?
 
   let mut fields: Slice<string> = []
   if p.given("-n") { fields = fields.append("\"name\":" + json_quote(p.one("-n"))?) }
@@ -205,7 +205,7 @@ fn project_delete(input: flags.CommandInput) -> Result<(), string> {
   let Some(name) = nonempty(p.first()) else {
     return Err(f"usage: {usage}")
   }
-  let project = resolve_project(configured_team_id()?, name)?
+  let project = records.resolve_project(configured_team_id()?, name)?
   let used = entity_issue_count("project", project.id)?
   if used > 0 && !p.given("--force") {
     return Err(refuse_delete("project", name, used))
@@ -220,7 +220,7 @@ fn project_view(input: flags.CommandInput) -> Result<(), string> {
   if name == "" {
     return Err("usage: lll project view NAME")
   }
-  let p = resolve_project(configured_team_id()?, name)?
+  let p = records.resolve_project(configured_team_id()?, name)?
 
   let mut team = p.expand.team.key
   if team == "" { team = "workspace" }
@@ -247,27 +247,4 @@ fn project_view(input: flags.CommandInput) -> Result<(), string> {
     print_issue_table(issues.items)?
   }
   Ok(())
-}
-
-/// Resolve one team's project by name; unknown names error with the fix. An
-/// empty `team_id` searches every team, which only the unscoped board wants.
-/// Names are unique within a team, not across them (TASK-173).
-fn resolve_project(team_id: string, name: string) -> Result<models.Project, string> {
-  let filter = url.QueryEscape(query.scoped(team_id, "name", name))
-  let mut result = models.ProjectList { .. }
-  pb.fetch(
-    f"/api/collections/projects/records?filter={filter}&expand=team",
-    "projects",
-    &result,
-  )?
-  let Some(p) = result.items.find(|p| p.name == name) else {
-    // Four of thirty fleet agents passed the TEAM key here: the team scopes
-    // the command already, so the flag they wanted was no flag at all.
-    let team_key = config.load()?.team
-    if team_key != "" && strings.EqualFold(name, team_key) {
-      return Err(f"'{name}' is the team, not a project — the team scopes every command already, so drop --project, or pick one from 'lll project list'")
-    }
-    return Err(f"no project named '{name}' — see 'lll project list'")
-  }
-  Ok(p)
 }

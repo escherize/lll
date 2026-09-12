@@ -1,3 +1,4 @@
+import "records"
 import "go:net/http"
 import "go:net/url"
 
@@ -81,7 +82,7 @@ fn fetch_issue_rows(
 
 /// Every member's name, for the assignee chooser.
 fn fetch_member_names() -> Result<Slice<string>, string> {
-  Ok(fetch_members()?.map(|m| m.name))
+  Ok(records.fetch_members()?.map(|m| m.name))
 }
 
 /// This team's label names, for the label chooser. Scoped, because a label
@@ -95,13 +96,13 @@ fn fetch_member_names() -> Result<Slice<string>, string> {
 /// expand is wasted here, but one label query beats two that drift apart —
 /// the same trade fetch_project_names already makes.
 fn fetch_label_names(team_id: string) -> Result<Slice<string>, string> {
-  Ok(fetch_labels(team_id)?.map(|l| l.name))
+  Ok(records.fetch_labels(team_id)?.map(|l| l.name))
 }
 
 /// This team's project names, for the project chooser. Scoped for the same
 /// reason labels are, and paired with the same scoped resolve_project.
 fn fetch_project_names(team_id: string) -> Result<Slice<string>, string> {
-  Ok(fetch_projects(team_id)?.map(|p| p.name))
+  Ok(records.fetch_projects(team_id)?.map(|p| p.name))
 }
 
 /// The issues table: one sortable, filterable, bookmarkable list.
@@ -139,7 +140,7 @@ fn issues_page(w: http.ResponseWriter, r: Ref<http.Request>, team_id: string, me
   let mut assignee = filters.assignee
   let mut assignee_id = ""
   if assignee != "" {
-    match resolve_member(assignee) {
+    match records.resolve_member(assignee) {
       Ok(m) => { assignee_id = m.id },
       Err(e) => {
         err = e
@@ -151,7 +152,7 @@ fn issues_page(w: http.ResponseWriter, r: Ref<http.Request>, team_id: string, me
   let mut label = filters.label
   let mut label_id = ""
   if label != "" {
-    match resolve_label(team_id, label) {
+    match records.resolve_label(team_id, label) {
       Ok(l) => { label_id = l.id },
       Err(e) => {
         err = e
@@ -163,7 +164,7 @@ fn issues_page(w: http.ResponseWriter, r: Ref<http.Request>, team_id: string, me
   let mut project = filters.project
   let mut project_id = ""
   if project != "" {
-    match resolve_project(team_id, project) {
+    match records.resolve_project(team_id, project) {
       Ok(p) => { project_id = p.id },
       Err(e) => {
         err = e

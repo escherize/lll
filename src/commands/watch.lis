@@ -1,3 +1,4 @@
+import "records"
 import "go:encoding/json"
 import "go:fmt"
 import "go:os"
@@ -187,7 +188,7 @@ pub fn issue_watch(input: flags.CommandInput) -> Result<(), string> {
 
 fn run_issue_watch(id: string, json_mode: bool, until: string, usage: string) -> Result<(), string> {
   let resolved = resolve_id(id, usage)?
-  let issue = fetch_issue(resolved)?
+  let issue = records.fetch_issue(resolved)?
   let key = f"{issue.expand.team.key}-{issue.number}"
 
   let issue_topic = realtime.topic_with_options(
@@ -208,7 +209,7 @@ fn run_issue_watch(id: string, json_mode: bool, until: string, usage: string) ->
   // Subscribe before reading the initial snapshot: comments created during
   // setup are either in this snapshot or queued on the accepted stream.
   if until != "" {
-    let existing = fetch_comments(issue.id)?
+    let existing = records.fetch_comments(issue.id)?
     let mut n = 0
     for c in existing {
       n += 1

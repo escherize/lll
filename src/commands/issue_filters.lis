@@ -1,3 +1,4 @@
+import "records"
 import "go:strings"
 
 import "flags"
@@ -37,8 +38,8 @@ fn view_filters(q: ViewQuery) -> query.Filters {
 /// CLI lookups fail before subscribing/fetching. Browser adapters may instead
 /// retain valid fields while reporting a stale name in a bookmarked URL.
 fn resolve_filter_query(team_id: string, filters: query.Filters) -> Result<string, string> {
-  let assignee = if filters.assignee == "" { "" } else { resolve_member(filters.assignee)?.id }
-  let label = if filters.label == "" { "" } else { resolve_label(team_id, filters.label)?.id }
-  let project = if filters.project == "" { "" } else { resolve_project(team_id, filters.project)?.id }
+  let assignee = if filters.assignee == "" { "" } else { records.resolve_member(filters.assignee)?.id }
+  let label = if filters.label == "" { "" } else { records.resolve_label(team_id, filters.label)?.id }
+  let project = if filters.project == "" { "" } else { records.resolve_project(team_id, filters.project)?.id }
   Ok(query.filter(team_id, filters.state, assignee, project, label, filters.search))
 }

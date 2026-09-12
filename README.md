@@ -306,7 +306,7 @@ stays their archive.
 Layout:
 
 - `src/`: Lisette source, `main.lis` dispatch, `commands/` one file per
-  noun, `pb/` REST client, `realtime/` SSE client, `query/` filter builder,
+  noun, `records/` shared record lookups, `pb/` REST client, `realtime/` SSE client, `query/` filter builder,
   `config/`, `display/`, `gitctx/`, `models/`.
 - `pb/`: PocketBase schema as code, `pb_migrations/`, applied on start.
 - `gopb/`: a tiny Go module embedding PocketBase behind one `Serve` function.

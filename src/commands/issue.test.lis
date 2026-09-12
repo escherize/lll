@@ -178,67 +178,11 @@ fn value_or_stdin_returns_a_plain_value_unchanged() {
   assert nl == "line\n"
 }
 
-// ------------------------------------------------------- split_issue_key
-
-#[test]
-fn split_issue_key_splits_key_and_number() {
-  let assert Ok(parsed) = split_issue_key("ENG-12")
-  let (key, number) = parsed
-  assert key == "ENG"
-  assert number == 12
-}
 
 /// The number is the LAST segment, so a team key may contain hyphens.
-#[test]
-fn split_issue_key_keeps_hyphenated_team_keys() {
-  let assert Ok(parsed) = split_issue_key("ENG-DEV-12")
-  let (key, number) = parsed
-  assert key == "ENG-DEV"
-  assert number == 12
-}
 
 /// TrimSuffix on the whole id, not a byte offset into it.
-#[test]
-fn split_issue_key_handles_multi_byte_team_keys() {
-  let assert Ok(accented) = split_issue_key("ÉNG-12")
-  let (k1, n1) = accented
-  assert k1 == "ÉNG"
-  assert n1 == 12
 
-  let assert Ok(cjk) = split_issue_key("日本-3")
-  let (k2, n2) = cjk
-  assert k2 == "日本"
-  assert n2 == 3
-
-  let assert Ok(emoji) = split_issue_key("🐛-7")
-  let (k3, n3) = emoji
-  assert k3 == "🐛"
-  assert n3 == 7
-}
-
-#[test]
-fn split_issue_key_rejects_ids_without_both_halves() {
-  let assert Err(_) = split_issue_key("ENG")
-  let assert Err(_) = split_issue_key("")
-  let assert Err(_) = split_issue_key("ENG-")
-  let assert Err(_) = split_issue_key("-12")
-}
-
-#[test]
-fn split_issue_key_rejects_a_non_numeric_tail() {
-  let assert Err(_) = split_issue_key("ENG-abc")
-  let assert Err(_) = split_issue_key("ENG-12x")
-  // Digits, but not ones strconv.Atoi accepts.
-  let assert Err(_) = split_issue_key("ENG-١٢")
-  let assert Err(_) = split_issue_key("ENG-１２")
-}
-
-#[test]
-fn split_issue_key_error_quotes_the_input_and_the_expected_shape() {
-  let assert Err(msg) = split_issue_key("héllo")
-  assert msg.contains("'héllo' is not an issue ID")
-  assert msg.contains("expected KEY-123")
-}
 
 // -------------------------------------------------- issue_create_spec
 

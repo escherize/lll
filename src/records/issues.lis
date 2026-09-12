@@ -1,0 +1,62 @@
+import "go:encoding/json"
+import "go:net/url"
+import "models"
+import "pb"
+import "query"
+
+/// An issue's comments, oldest first, author expanded.
+pub fn fetch_comments(issue_id: string) -> Result<Slice<models.Comment>, string> {
+  let filter = url.QueryEscape(f"issue={query.quote(issue_id)}")
+  let mut result: Slice<models.Comment> = []
+  let mut page = 1
+  loop {
+    let mut comments = models.CommentList { .. }
+    pb.fetch(
+      f"/api/collections/comments/records?filter={filter}&sort=created,id&expand=author&perPage=200&page={page}",
+      "comments",
+      &comments,
+    )?
+    for comment in comments.items { result = result.append(comment) }
+    if page >= comments.total_pages { break }
+    page += 1
+  }
+  Ok(result)
+}
+
+/// Fetch an issue by KEY-123 and return the raw PB record JSON (team,
+/// assignee, labels, project expanded).
+pub fn fetch_issue_record(id: string) -> Result<string, string> {
+  let (team_key, number) = split_issue_key(id)?
+
+  let not_found = f"issue {id} not found — check 'lll issue list' or LLL_TEAM"
+  let Some(team) = find_team(team_key)? else {
+    return Err(not_found)
+  }
+
+  let filter = url.QueryEscape(
+    f"{query.filter(team.id, "", "", "", "", "")} && number={number}",
+  )
+  let mut issues = models.IssueList { .. }
+  pb.fetch(
+    f"/api/collections/issues/records?filter={filter}&perPage=1",
+    "issues",
+    &issues,
+  )?
+  let Some(item) = issues.items.get(0) else {
+    return Err(not_found)
+  }
+
+  pb.get(
+    f"/api/collections/issues/records/{item.id}?expand=team,assignee,labels,project,blocked_by",
+  )
+}
+
+/// fetch_issue_record, decoded.
+pub fn fetch_issue(id: string) -> Result<models.Issue, string> {
+  let record = fetch_issue_record(id)?
+  let mut full = models.Issue { .. }
+  if let Err(e) = json.Unmarshal(record.bytes(), &full) {
+    return Err(f"decoding issue: {e}")
+  }
+  Ok(full)
+}

@@ -1,3 +1,4 @@
+import "records"
 import "go:encoding/json"
 import "go:html/template"
 import "go:net/http"
@@ -45,7 +46,7 @@ fn board_base(key: string) -> string {
 /// Archived teams stay off the switcher (TASK-210) — even the one the page
 /// is scoped to: its board says "archived" in its own banner instead.
 fn rail_teams(current: string) -> Slice<RailTeamVM> {
-  let Ok(teams) = list_teams() else {
+  let Ok(teams) = records.list_teams() else {
     return []
   }
   teams.items.filter(|t| !t.archived).map(|t| RailTeamVM {
@@ -160,14 +161,14 @@ fn board_page(w: http.ResponseWriter, r: Ref<http.Request>, team: models.Team, m
   }
   let mut assignees: Slice<string> = []
   for a in csv(raw.assignee) {
-    match resolve_member(a) {
+    match records.resolve_member(a) {
       Ok(_) => assignees = assignees.append(a),
       Err(e) => { if err == "" { err = e } },
     }
   }
   let mut labels: Slice<string> = []
   for l in csv(raw.label) {
-    match resolve_label(team_id, l) {
+    match records.resolve_label(team_id, l) {
       Ok(_) => labels = labels.append(l),
       Err(e) => { if err == "" { err = e } },
     }
@@ -327,14 +328,14 @@ fn hide_seed_js(hidden: Slice<string>) -> template.JS {
 /// routes through the issue's own team.
 fn issue_page(w: http.ResponseWriter, r: Ref<http.Request>, team: models.Team, me: string) {
   let key = r.PathValue("key")
-  let issue = match fetch_issue(key) {
+  let issue = match records.fetch_issue(key) {
     Ok(i) => i,
     Err(e) => {
       http.Error(w, e, 404)
       return
     },
   }
-  let comments = match fetch_comments(issue.id) {
+  let comments = match records.fetch_comments(issue.id) {
     Ok(c) => c,
     Err(e) => {
       http.Error(w, e, 500)

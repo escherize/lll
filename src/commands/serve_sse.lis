@@ -1,3 +1,4 @@
+import "records"
 import "go:encoding/json"
 import "go:net/http"
 
@@ -272,7 +273,7 @@ fn comment_broadcast(ev: realtime.Event, hub: Hub) {
     &issue,
   ).is_err() { return }
   let key = f"{issue.expand.team.key}-{issue.number}"
-  let Ok(comments) = fetch_comments(issue.id) else {
+  let Ok(comments) = records.fetch_comments(issue.id) else {
     return
   }
   if let Ok(html) = render(

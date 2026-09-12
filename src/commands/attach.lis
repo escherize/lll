@@ -1,3 +1,4 @@
+import "records"
 import "go:fmt"
 import "go:os"
 import "go:path/filepath"
@@ -77,7 +78,7 @@ pub fn attach(args: Slice<string>) -> Result<(), string> {
   // Attaching to an archived team is refused, not silently revived: archive
   // is a deliberate lifecycle act, and unarchive is one command (TASK-210).
   // A server that is down still attaches — same bargain as the create below.
-  if let Ok(Some(t)) = find_team(key) {
+  if let Ok(Some(t)) = records.find_team(key) {
     if t.archived { return Err(archived_hint(key)) }
   }
 
@@ -105,7 +106,7 @@ pub fn attach(args: Slice<string>) -> Result<(), string> {
 /// none (or a server that cannot be reached) falls back to the directory
 /// name, which is the empty-server bootstrap this command was written for.
 fn derive_key_from_server(dir_name: string) -> Result<string, string> {
-  let Ok(teams) = list_teams() else { return Ok(clean_key(dir_name)) }
+  let Ok(teams) = records.list_teams() else { return Ok(clean_key(dir_name)) }
   let live = teams.items.filter(|t| !t.archived)
   if live.length() == 1 {
     let key = live[0].key
@@ -126,7 +127,7 @@ fn derive_key_from_server(dir_name: string) -> Result<string, string> {
 /// Reconciliation is explicit once access to the configured server returns.
 fn ensure_attached_team(key: string) -> string {
   let retry = f"lll attach -k {flags.shell_argument(key)}"
-  let found = match find_team(key) {
+  let found = match records.find_team(key) {
     Ok(found) => found,
     Err(e) => return f"saved local attachment only; could not verify team {key} on the configured server:\n{e}\nRestore server access, then reconcile this attachment:\n  {retry}",
   }
