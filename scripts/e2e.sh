@@ -1563,6 +1563,9 @@ out=$(LLL_URL=$URL LLL_TEAM=ENG "$LIN" doc view port-notes)
 assert_contains "$out" "Issues:    ENG-1" "doc view shows linked issue"
 out=$(LLL_URL=$URL "$LIN" issue view ENG-1)
 assert_contains "$out" "Docs:      port-notes" "issue view shows linked doc"
+out=$(LLL_URL=$URL "$LIN" issue view ENG-1 --json)
+printf '%s' "$out" | jq -e '.docs | any(.slug == "port-notes" and (.body | length > 0))' >/dev/null \
+  || fail "JSON issue context includes linked wiki bodies"
 rid=$(LLL_URL=$URL LLL_TEAM=ENG "$LIN" doc view port-notes --json | jq -r '.issues[0]')
 [ "$rid" = "$ENG1_ID" ] || fail "doc record issues relation: expected $ENG1_ID, got '$rid'"
 
@@ -1635,6 +1638,14 @@ LLL_URL=$URL LLL_TEAM=ENG "$LIN" label create -n pb >/dev/null
 env LLL_URL=$URL "$LIN" issue update ENG-1 --label pb >/dev/null
 out=$(LLL_URL=$URL "$LIN" issue view ENG-1)
 assert_contains "$out" "migration-hazard (pb) — Migration collisions" "an area-matched finding surfaces by label"
+out=$(LLL_URL=$URL "$LIN" issue view ENG-1 --json)
+printf '%s' "$out" | jq -e '
+  (.docs | any(.slug == "race-found")) and
+  (.docs | all(.slug != "migration-hazard")) and
+  (.findings | any(.slug == "race-found")) and
+  (.findings | any(.slug == "migration-hazard" and .body == "Migrations are a merge hazard.")) and
+  ([.findings[].slug] == ([.findings[].slug] | sort))
+' >/dev/null || fail "JSON context distinguishes explicit docs from related findings and includes bodies"
 
 out=$(env LLL_URL=$URL "$LIN" issue view ENG-1 --raw)
 assert_contains "$out" "## Related findings" "issue view --raw carries related findings"
@@ -1697,6 +1708,8 @@ got=$(LLL_URL=$URL LLL_TEAM=ENG "$LIN" issue view ENG-1 --json | jq -r --arg id 
 [ "$got" = "absent" ] || fail "ENG-1 picked up OPS's pb label ($ops_pb)"
 out=$(env LLL_URL=$URL "$LIN" issue view ENG-2 --raw)
 assert_not_contains "$out" "Related findings" "an issue with no matches renders no findings section"
+out=$(LLL_URL=$URL "$LIN" issue view ENG-2 --json)
+printf '%s' "$out" | jq -e '.findings == []' >/dev/null || fail "empty JSON findings must be an array"
 
 out=$("$LIN" finding --help)
 assert_contains "$out" "lll finding near" "finding --help mentions near"

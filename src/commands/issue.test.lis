@@ -415,22 +415,27 @@ fn named_priorities_round_trip_with_numeric_compatibility() {
 
 #[test]
 fn issue_json_preserves_server_fields_and_exposes_empty_handoff_context() {
-  let assert Ok(out) = issue_view_json("{\"id\":\"record\",\"future\":9007199254740993,\"extra\":{\"flag\":true}}", [], None)
+  let assert Ok(out) = issue_view_json("{\"id\":\"record\",\"future\":9007199254740993,\"extra\":{\"flag\":true}}", [], None, [], [])
   assert out.contains("\"future\":9007199254740993")
   assert out.contains("\"extra\":{\"flag\":true}")
   assert out.contains("\"comments\":[]")
   assert out.contains("\"claim\":null")
+  assert out.contains("\"docs\":[]")
+  assert out.contains("\"findings\":[]")
 }
 
 #[test]
 fn issue_json_exposes_authored_comments_and_current_holder() {
   let comments = [models.Comment { body: "handoff\nnext step", author: "alice-id", .. }]
   let claim = models.Claim { member: "bob-id", .. }
-  let assert Ok(out) = issue_view_json("{\"id\":\"record\"}", comments, Some(claim))
+  let assert Ok(out) = issue_view_json("{\"id\":\"record\"}", comments, Some(claim), [models.Doc { slug: "decision", body: "why\nnext", .. }], [models.Doc { slug: "finding", area: "cli", .. }])
   assert out.contains("\"body\":\"handoff\\nnext step\"")
   assert out.contains("\"author\":\"alice-id\"")
   assert out.contains("\"member\":\"bob-id\"")
-  let assert Err(_) = issue_view_json("broken", [], None)
+  assert out.contains("\"slug\":\"decision\"")
+  assert out.contains("\"body\":\"why\\nnext\"")
+  assert out.contains("\"slug\":\"finding\"")
+  let assert Err(_) = issue_view_json("broken", [], None, [], [])
 }
 
 #[test]

@@ -617,7 +617,9 @@ Set the deployed board address with 'lll config set web_url URL';
 'lll up' saves the actual endpoint when it starts the board.
 
 Full view --json preserves the issue record and adds comments (oldest first,
-author expanded) and claim (member expanded, or null when unclaimed).
+author expanded), claim (member expanded, or null when unclaimed), docs
+(explicit links), and findings (linked or label-area matches). Docs and findings
+include their bodies and use slug order; empty collections are [].
 State changes (including review and close) retain claims. Release explicitly
 ends the hold; an assignment to someone other than the holder is preserved.
 
@@ -881,7 +883,13 @@ fn view(args: Slice<string>) -> Result<(), string> {
     return Err(f"decoding issue: {e}")
   }
   if json_mode {
-    fmt.Println(issue_view_json(record, fetch_comments(full.id)?, fetch_claim(full.id)?)?)
+    fmt.Println(issue_view_json(
+      record,
+      fetch_comments(full.id)?,
+      fetch_claim(full.id)?,
+      fetch_issue_docs(full.id)?,
+      findings_for_issue(full)?,
+    )?)
     return Ok(())
   }
 
@@ -1013,7 +1021,13 @@ fn view(args: Slice<string>) -> Result<(), string> {
 /// Keep every server field intact while exposing the handoff context that
 /// the normal view already shows. RawMessage preserves unknown fields and
 /// exact numbers instead of decoding arbitrary records through float64.
-fn issue_view_json(record: string, comments: Slice<models.Comment>, claim: Option<models.Claim>) -> Result<string, string> {
+fn issue_view_json(
+  record: string,
+  comments: Slice<models.Comment>,
+  claim: Option<models.Claim>,
+  docs: Slice<models.Doc>,
+  findings: Slice<models.Doc>,
+) -> Result<string, string> {
   let mut fields = Map.new<string, json.RawMessage>()
   if let Err(e) = json.Unmarshal(record.bytes(), &fields) { return Err(f"decoding issue JSON: {e}") }
   let comments_json = match json.Marshal(comments) {
@@ -1021,6 +1035,8 @@ fn issue_view_json(record: string, comments: Slice<models.Comment>, claim: Optio
     Err(e) => return Err(f"encoding comments: {e}"),
   }
   fields["comments"] = if comments.is_empty() { "[]".bytes() as json.RawMessage } else { comments_json }
+  fields["docs"] = doc_context_json(docs)?
+  fields["findings"] = doc_context_json(findings)?
   fields["claim"] = match claim {
     Some(held) => match json.Marshal(held) {
       Ok(data) => data as json.RawMessage,
@@ -1031,6 +1047,14 @@ fn issue_view_json(record: string, comments: Slice<models.Comment>, claim: Optio
   match json.Marshal(fields) {
     Ok(data) => Ok(data as string),
     Err(e) => Err(f"encoding issue JSON: {e}"),
+  }
+}
+
+fn doc_context_json(docs: Slice<models.Doc>) -> Result<json.RawMessage, string> {
+  if docs.is_empty() { return Ok("[]".bytes() as json.RawMessage) }
+  match json.Marshal(docs) {
+    Ok(data) => Ok(data as json.RawMessage),
+    Err(e) => Err(f"encoding document context: {e}"),
   }
 }
 
