@@ -16,6 +16,6 @@ fn property_recovery(key: string) -> string {
 
 fn current_properties(key: string) -> Result<string, string> {
   let issue = records.fetch_issue(key)?
-  let vm = issue_vm(issue, [])?
+  let vm = issue_fields_vm(issue, [])?
   render("issue-properties", vm)
 }
