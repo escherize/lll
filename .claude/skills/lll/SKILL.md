@@ -34,16 +34,19 @@ lll issue comment KEY-12 -b "what changed and why"
 lll issue close KEY-12
 ```
 
-`claim` is the one command whose failure you must not ignore. It inserts a row
-into a collection that is UNIQUE on the issue, so when two agents claim the
-same issue at the same moment the database picks one and tells the other whose
-it is. `--assignee` cannot do that: it is a PATCH, so both agents "succeed" and
-neither finds out. Claim as the `me` in your config; `lll issue release KEY-12`
-hands it back.
+`claim` atomically acquires an issue for the member authenticated by your token.
+A successful claim is immediately visible on the server; no Git push is needed.
+If another member holds it, the command exits nonzero without taking over.
+Claiming your own issue again succeeds and says it is already yours.
+`--assignee` cannot replace another member's active claim: release it first.
+`lll whoami` shows the authenticated identity. If `me` is configured, it must
+agree with that identity. `lll issue release KEY-12` gives the claim back and
+clears the assignee when it still matches the holder.
 
 `lll issue start KEY-12` sets in-progress without changing Git. To create a
-branch explicitly, use `git switch -c "$(lll issue branch-name KEY-12)"`.
-`branch-name` only prints the suggested name; it changes nothing. Once you
+branch and record its host/path on the issue, use `lll issue start KEY-12 --branch`.
+For separate Git commands, `lll issue branch-name KEY-12` only prints a suggested
+name; it changes nothing. Once you
 are on an issue branch, commands can infer the issue from it:
 `lll issue view` with no argument is the issue you are on.
 
@@ -84,8 +87,9 @@ value is in the pattern being recognisable:
 | ⚡ | performance |
 | 🔒 | security |
 
-**Filter server-side.** `--state`, `--assignee`, `--label`, `--project`,
-`--search`, `--sort`, `--limit`, and `--json` on every read command.
+**Filter server-side.** `lll issue list` supports `--state`, `--assignee`,
+`--label`, `--project`, `--search`, `--sort`, `--limit`, and `--json`. Other
+read commands expose their supported filters in `--help`.
 
 ## Always document friction and feature requests
 
@@ -95,14 +99,11 @@ Real examples from this project: a shell-working-directory trap was recorded
 after two occurrences and happened twice more; a byte-offset versus rune-index
 bug was in a finding before it panicked in five places.
 
-Where to file it depends on which tracker owns the work:
-
-- **Work on the lll project itself** — file it in the sidecar backlog, NOT with
-  the lll CLI: `cd .private && backlog task create "Title" -d "symptom, cause, what you tried"`.
-  The lll board in this checkout is demo data; an issue filed there disappears
-  into the fixture and nobody reads it.
-- **Using some OTHER project's lll board** (or exercising lll as a product) —
-  file with the CLI: `lll issue create -t "Title" -d -`.
+File work on this project in team `LLL` on the hosted board, using the CLI:
+`lll issue create -t "Title" --emoji 🐛 -d -`. The old `.private/` sidecar is
+read-only history. Do not write new tasks there. When using another project's
+board, file in that project's team. Keep scratch/demo fixtures separate from
+these real work records.
 
 File it **when you hit it**, not at the end. Two kinds both count:
 
@@ -157,7 +158,7 @@ can actually scan.
 
 ## Conventions that keep a parallel backlog honest
 
-- **Push a claim immediately.** A claim nobody can see protects nobody.
+- **Claim before editing.** A successful CLI claim is already visible to other agents.
 - **Read the task in full before mutating it.** Its notes may carry a decision
   already made; implementing your own instead wastes both.
 - **Correct a wrong acceptance criterion, out loud.** Never quietly pass one.
