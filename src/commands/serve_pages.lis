@@ -214,7 +214,7 @@ fn board_page(w: http.ResponseWriter, r: Ref<http.Request>, team: models.Team, m
   }
   let flt = BoardFilter { states, assignees, labels, prios }
 
-  let issues = match fetch_board_issues(team_id) {
+  let issues = match records.fetch_board_issues(team_id) {
     Ok(i) => i,
     Err(e) => {
       http.Error(w, e, 500)

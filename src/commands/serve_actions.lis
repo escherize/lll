@@ -219,7 +219,7 @@ fn reorder_sort(
 ) -> Result<float64, string> {
   // Dropping a card onto itself moves nothing.
   if before == issue.id { return Ok(issue.sort) }
-  let others = fetch_column_issues(team_id, state)?.filter(|i| i.id != issue.id)
+  let others = records.fetch_board_issues(team_id)?.filter(|i| i.state == state && i.id != issue.id)
   if others.is_empty() { return Ok(issue.sort) }
   let Some(target) = others.find(|i| i.id == before) else {
     // End of column — also the fallback when `before` went stale (moved or
@@ -234,19 +234,6 @@ fn reorder_sort(
     prev_sort = i.sort
   }
   Ok((prev_sort + target.sort) / 2.0)
-}
-
-/// One column's issues in board order (no expands — reorder needs ids and
-/// sorts only).
-fn fetch_column_issues(
-  team_id: string,
-  state: string,
-) -> Result<Slice<models.Issue>, string> {
-  let filter = query.filter(team_id, state, "", "", "", "")
-  let path = f"/api/collections/issues/records?perPage=200&sort=sort,created&filter={url.QueryEscape(filter)}"
-  let mut issues = models.IssueList { .. }
-  pb.fetch(path, "issues", &issues)?
-  Ok(issues.items)
 }
 
 /// Star or unstar an issue for the workspace: `on=true` adds, anything else

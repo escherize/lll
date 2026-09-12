@@ -60,3 +60,50 @@ pub fn fetch_issue(id: string) -> Result<models.Issue, string> {
   }
   Ok(full)
 }
+
+#[json]
+struct BoardPage {
+  items: Slice<models.Issue>,
+  #[json("totalItems")]
+  total_items: int,
+  #[json("totalPages")]
+  total_pages: int,
+}
+
+/// Complete board input, in deterministic manual order. Failed or inconsistent
+/// pages never escape as a partial board; callers retain their prior view.
+pub fn fetch_board_issues(team_id: string) -> Result<Slice<models.Issue>, string> {
+  collect_board_issues(team_id, |path| {
+    let mut page = BoardPage { .. }
+    pb.fetch(path, "board issues", &page)?
+    Ok(page)
+  })
+}
+
+fn collect_board_issues(
+  team_id: string,
+  fetch: fn(string) -> Result<BoardPage, string>,
+) -> Result<Slice<models.Issue>, string> {
+  let filter = url.QueryEscape(query.filter(team_id, "", "", "", "", ""))
+  let mut result: Slice<models.Issue> = []
+  let mut seen = Map.new<string, bool>()
+  let mut expected = -1
+  let mut pages = -1
+  let mut page = 1
+  loop {
+    let batch = fetch(f"/api/collections/issues/records?perPage=200&page={page}&expand=team,assignee,labels&sort=sort,created,id&filter={filter}")?
+    if page == 1 { expected = batch.total_items; pages = batch.total_pages }
+    if batch.total_items != expected || batch.total_pages != pages {
+      return Err("the board changed while loading; refresh to retry")
+    }
+    for issue in batch.items {
+      if seen.get(issue.id).is_some() { return Err("the board changed while loading; refresh to retry") }
+      seen[issue.id] = true
+      result = result.append(issue)
+    }
+    if page >= pages { break }
+    page += 1
+  }
+  if result.length() != expected { return Err("the board response was incomplete; refresh to retry") }
+  Ok(result)
+}

@@ -280,7 +280,7 @@ fn broadcast_issue_state(rec: models.Issue, hub: Hub) {
 
 /// Reconnects receive a fresh board snapshot, even if no new event follows.
 fn board_snapshot(hub: Hub, team_id: string, team_key: string, only_order: string, client_id: int) {
-  if let Ok(issues) = fetch_board_issues(team_id) {
+  if let Ok(issues) = records.fetch_board_issues(team_id) {
     let Ok(claimed) = claims.for_team(team_id) else { return };
     for order in board_orders() {
       if only_order != "" && only_order != order { continue }

@@ -326,15 +326,6 @@ fn compose_vm(team_id: string) -> Result<ComposeVM, string> {
   })
 }
 
-fn fetch_board_issues(team_id: string) -> Result<Slice<models.Issue>, string> {
-  let mut path = "/api/collections/issues/records?perPage=200&expand=team,assignee,labels&sort=sort,created"
-  let filter = query.filter(team_id, "", "", "", "", "")
-  if filter != "" { path = f"{path}&filter={url.QueryEscape(filter)}" }
-  let mut issues = models.IssueList { .. }
-  pb.fetch(path, "issues", &issues)?
-  Ok(issues.items)
-}
-
 fn comment_vm(c: models.Comment) -> CommentVM {
   let mut author = c.expand.author.name
   if author == "" { author = "anon" }

@@ -1,0 +1,36 @@
+import "models"
+
+#[test]
+fn complete_board_reads_all_pages_in_stable_order() {
+  let result = collect_board_issues("team", |path| {
+    assert path.contains("sort=sort,created,id")
+    assert path.contains("filter=team")
+    if path.contains("page=1&") {
+      Ok(BoardPage { items: [models.Issue { id: "first", .. }], total_items: 2, total_pages: 2 })
+    } else {
+      assert path.contains("page=2&")
+      Ok(BoardPage { items: [models.Issue { id: "last", .. }], total_items: 2, total_pages: 2 })
+    }
+  })
+  let Ok(issues) = result else { panic("complete pages failed") };
+  assert issues.map(|i| i.id).equals(["first", "last"])
+}
+
+#[test]
+fn complete_board_refuses_failed_or_inconsistent_pages() {
+  for mode in ["failure", "duplicate", "count", "short"] {
+    let result = collect_board_issues("team", |path| {
+      if path.contains("page=1&") {
+        return Ok(BoardPage { items: [models.Issue { id: "first", .. }], total_items: 2, total_pages: 2 })
+      }
+      if mode == "failure" { return Err("page two unavailable") }
+      if mode == "duplicate" { return Ok(BoardPage { items: [models.Issue { id: "first", .. }], total_items: 2, total_pages: 2 }) }
+      if mode == "count" { return Ok(BoardPage { items: [models.Issue { id: "last", .. }], total_items: 3, total_pages: 2 }) }
+      Ok(BoardPage { items: [], total_items: 2, total_pages: 2 })
+    })
+    assert result.is_err()
+  }
+  let empty = collect_board_issues("team", |_path| Ok(BoardPage { .. }))
+  let Ok(issues) = empty else { panic("empty board failed") };
+  assert issues.is_empty()
+}
