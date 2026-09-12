@@ -312,10 +312,10 @@ printf 'url = "%s"\nme = "homer"\n' "$URL" > "$HOME_TOML"
 printf 'team = "ENG"\n' > "$WORK/.lll.toml"
 out=$(cd "$WORK" && env -u LLL_URL -u LLL_TEAM -u LLL_ME -u LLL_SORT -u LLL_WEB_URL \
   HOME="$SET_HOME" "$LLL_ABS" config --list)
-assert_contains "$out" "file:$HOME_TOML	url=$URL" "--list attributes url to the home file"
+assert_contains "$out" "file:$HOME_TOML	url=$URL	API base (reads and writes)" "--list names the API role and home origin"
 assert_contains "$out" "file:.lll.toml	team=ENG" "--list attributes team to the repo file"
 assert_contains "$out" "file:$HOME_TOML	me=homer" "--list attributes me to the home file"
-assert_contains "$out" "unset	web_url=" "--list marks an unset key with a default"
+assert_contains "$out" "unset	web_url=	board base (browser links)" "--list names the board role even when unset"
 assert_contains "$out" "unset	sort=" "--list marks a key nothing set"
 out=$(cd "$WORK" && LLL_TEAM=FROMENV HOME="$SET_HOME" "$LLL_ABS" config --list)
 assert_contains "$out" "env:LLL_TEAM	team=FROMENV" "--list attributes an override to the env var"
