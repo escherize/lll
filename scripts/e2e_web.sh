@@ -1568,7 +1568,7 @@ assert_contains "$(wcurl -sf "$WEB/")" '<style id="accent"></style>' \
 assert_contains "$(wcurl -sf "$WEB/")" 'id="favicon"' "the board carries a generated favicon"
 
 wcurl -sf -X POST "$WEB/settings/team" -d 'name=Engineering' -d 'accent=#3ea0f0' >/dev/null
-for page in "/" "/issue/ENG-1" "/settings"; do
+for page in "/" "/issue/ENG-1" "/settings" "/issues" "/search" "/projects"; do
   html=$(wcurl -sf "$WEB$page")
   assert_contains "$html" '--accent:#3ea0f0' "$page wears the team accent"
   # The whole family is derived from that one hex, so hover, ink, deep and
@@ -1579,6 +1579,27 @@ for page in "/" "/issue/ENG-1" "/settings"; do
   assert_contains "$html" 'fill=%27%233ea0f0%27' "$page draws its favicon in the team accent"
   assert_not_contains "$html" 'fill=%27%23f0883e%27' "$page's favicon is not the default orange"
 done
+
+if command -v playwright-cli >/dev/null 2>&1; then
+  playwright-cli -s="$BROWSER_SESSION" open "$WEB/search?board_token=$BOARD_TOKEN" >/dev/null 2>&1 \
+    || fail "playwright: open search for team accent verification"
+  accent_browser=$(playwright-cli -s="$BROWSER_SESSION" run-code "async page => {
+    for (const path of ['/search', '/issues']) {
+      await page.goto('$WEB' + path);
+      const head = await page.evaluate(() => ({
+        accent: getComputedStyle(document.documentElement).getPropertyValue('--accent').trim(),
+        favicon: document.querySelector('link[rel=icon]')?.getAttribute('href') || ''
+      }));
+      if (head.accent !== '#3ea0f0' || !decodeURIComponent(head.favicon).includes(\"fill='#3ea0f0'\")) {
+        throw new Error(path + ': incorrect team accent/favicon: ' + JSON.stringify(head));
+      }
+      await page.screenshot({path: '/tmp/lll-123' + path.replace('/', '-') + '.png'});
+    }
+    return 'team accent verified';
+  }" 2>/dev/null) || fail "playwright: team accent/favicon verification"
+  assert_contains "$accent_browser" 'team accent verified' "search and issues apply the team accent in the browser"
+  playwright-cli -s="$BROWSER_SESSION" close >/dev/null 2>&1 || true
+fi
 
 # A save answers with the head fragment too, so an open page recolors without
 # a reload.
