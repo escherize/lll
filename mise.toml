@@ -18,8 +18,9 @@ jq = "1.8"
 [env]
 _.path = ["{{config_root}}/target/.lisette/bin"]
 
-# Tasks. `mise tasks` lists them. Each pins dir to the checkout root, because
-# lll up reads pb/ and web/ relative to the working directory.
+# Tasks. `mise tasks` lists them. Each pins dir to the checkout root so builds
+# and repository scripts resolve their inputs consistently. The server embeds
+# its migrations, templates and static assets and can run outside the checkout.
 #
 # Note: not named `up` — `mise run up` collides with mise's own `mise up`.
 
