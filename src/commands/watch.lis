@@ -139,9 +139,9 @@ connection loss and reconnection messages also go to stderr.
 
 /// Dispatch `lll issue watch [KEY-123]` — a live event stream for one issue
 /// and its comments. Runs until interrupted or the issue is deleted.
-pub fn issue_watch(args: Slice<string>) -> Result<(), string> {
+pub fn issue_watch(input: flags.CommandInput) -> Result<(), string> {
   let usage = "lll issue watch [KEY-123] [--until text] [--timeout seconds] [--json]"
-  let p = flags.parse(issue_watch_spec(), args, 3, true, "")?
+  let p = input.parsed
   let id = p.first()
   let json_mode = p.given("--json")
   let until = p.one("--until")

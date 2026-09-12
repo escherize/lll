@@ -103,8 +103,8 @@ A freshly added or imported member has a random password nobody knows;
 text, for onboarding somebody who is not here to type a password."
 }
 
-fn member_list(args: Slice<string>) -> Result<(), string> {
-  let p = flags.parse(member_list_spec(), args, 3, false, "")?
+fn member_list(input: flags.CommandInput) -> Result<(), string> {
+  let p = input.parsed
   let mut members = models.MemberList { .. }
   pb.fetch(
     "/api/collections/members/records?perPage=200&sort=name",
@@ -155,7 +155,6 @@ fn member_invite_spec() -> Slice<flags.Flag> {
       help: "the colleague's real email; it is the identity 'lll login' asks for",
       ..,
     },
-    flags.Flag { name: "--help", alias: "-h", hidden: true, help: "show this help", .. },
   ])
 }
 
@@ -183,22 +182,9 @@ fn set_password_spec() -> Slice<flags.Flag> {
       help: "real email to set alongside the password; required when the member has only a synthesized one",
       ..,
     },
-    flags.Flag { name: "--help", alias: "-h", hidden: true, help: "show this help", .. },
   ])
 }
 
-/// The flag table of one member verb; empty for verbs without flags. Read by
-/// `lll completions` so the scripts complete exactly what the parser accepts.
-pub fn member_verb_spec(verb: string) -> Slice<flags.Flag> {
-  match verb {
-    "add" | "create" => member_add_spec(),
-    "invite" => member_invite_spec(),
-    "list" => member_list_spec(),
-    "set-password" => set_password_spec(),
-    "remove" | "delete" => member_remove_spec(),
-    _ => [],
-  }
-}
 
 /// `lll member remove NAME` — delete a member nothing points at (TASK-245).
 ///
@@ -211,10 +197,10 @@ pub fn member_verb_spec(verb: string) -> Slice<flags.Flag> {
 /// Superuser-gated like set-password, because it is destructive and because
 /// deleting an auth record is not something one member should do to another
 /// on a shared board.
-fn member_remove(args: Slice<string>) -> Result<(), string> {
+fn member_remove(input: flags.CommandInput) -> Result<(), string> {
   let spec = member_remove_spec()
   let usage = flags.usage("lll member remove", spec, "NAME")
-  let p = flags.parse(spec, args, 3, true, usage)?
+  let p = input.parsed
   let name = p.first()
   if name == "" { return Err(f"usage: {usage}") }
 
@@ -265,7 +251,6 @@ fn member_remove_spec() -> Slice<flags.Flag> {
       help: "server base url; without it the configured one",
       ..,
     },
-    flags.Flag { name: "--help", alias: "-h", hidden: true, help: "show this help", .. },
   ])
 }
 
@@ -307,10 +292,10 @@ fn point_at_url(given: string) -> Result<(), string> {
 /// a random password nobody knows, so 'lll login' is a dead door until this
 /// runs. Gated exactly like token create: LLL_ADMIN_* env credentials, or a
 /// configured superuser token.
-fn member_set_password(args: Slice<string>) -> Result<(), string> {
+fn member_set_password(input: flags.CommandInput) -> Result<(), string> {
   let spec = set_password_spec()
   let usage = flags.usage("lll member set-password", spec, "NAME")
-  let p = flags.parse(spec, args, 3, true, usage)?
+  let p = input.parsed
   let name = p.first()
   if name == "" {
     return Err(f"usage: {usage}")
@@ -397,10 +382,10 @@ set LLL_ADMIN_EMAIL/LLL_ADMIN_PASSWORD to the credentials 'lll up' prints",
 /// in days. Nothing here is new machinery; it is create_member and the same
 /// superuser gate set-password runs, plus the part that actually got skipped —
 /// telling the inviter the literal lines to paste to the colleague.
-fn member_invite(args: Slice<string>) -> Result<(), string> {
+fn member_invite(input: flags.CommandInput) -> Result<(), string> {
   let spec = member_invite_spec()
   let usage = flags.usage("lll member invite", spec, "NAME")
-  let p = flags.parse(spec, args, 3, true, usage)?
+  let p = input.parsed
   let name = p.first()
   if name == "" {
     return Err(f"usage: {usage}")
@@ -525,14 +510,15 @@ has a synthesized @members.invalid one: the email is the identity
 'lll login --url <server>'." + flags.section(spec)
 }
 
-fn member_add(args: Slice<string>) -> Result<(), string> {
+fn member_add(input: flags.CommandInput) -> Result<(), string> {
+  let args = input.args
   let spec = member_add_spec()
   // The usage line echoes the verb the user actually typed, so somebody who
   // reached this through the TASK-130 `create` alias is not told to rerun a
   // command they did not run.
   let verb = args.get(2).unwrap_or("add")
   let usage = flags.usage(f"lll member {verb}", spec, "[NAME]")
-  let p = flags.parse(spec, args, 3, true, usage)?
+  let p = input.parsed
   let name = flags.entity_name(p, "-n", usage)?
   let email = p.one("-e")
 

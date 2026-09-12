@@ -314,20 +314,14 @@ fn doc_delete_spec() -> Slice<flags.Flag> {
   flags.with_team([flags.Flag { name: "--force", help: "skip the delete confirmation", .. }])
 }
 
-/// The flag table of one doc verb; empty for the verbs without flags. Read
-/// by `lll completions` so the scripts complete exactly what the parser
-/// accepts (TASK-127).
-pub fn doc_verb_spec(verb: string) -> Slice<flags.Flag> {
-  flags.command_spec(doc_commands(), verb)
-}
 
 /// Every flag across the doc verbs, deduplicated by canonical name, in the
 /// order the verbs declare them. This is the Flags: block `lll doc --help`
 /// renders.
 fn doc_union_spec() -> Slice<flags.Flag> {
   let mut out: Slice<flags.Flag> = []
-  for verb in ["new", "list", "view", "edit", "delete"] {
-    for fl in doc_verb_spec(verb) {
+  for command in doc_commands() {
+    for fl in command.spec {
       if out.find(|f| f.name == fl.name).is_none() { out = out.append(fl) }
     }
   }
@@ -336,13 +330,15 @@ fn doc_union_spec() -> Slice<flags.Flag> {
 
 // ----------------------------------------------------------------- verbs
 
-fn doc_new(args: Slice<string>) -> Result<(), string> {
-  let spec = doc_new_spec()
-  let usage = flags.usage("lll doc new", spec, "")
-  let p = flags.parse(spec, args, 3, false, usage)?
+fn doc_new(input: flags.CommandInput) -> Result<(), string> {
+  create_doc(input.parsed, "wiki")
+}
+
+fn create_doc(p: flags.Parsed, default_kind: string) -> Result<(), string> {
   let slug = check_slug(p.one("-s"))?
   let title = p.one("-t")
-  let kind = check_kind(p.one("-k"))?
+  let requested_kind = if p.given("-k") { p.one("-k") } else { default_kind }
+  let kind = check_kind(requested_kind)?
   let area = strings.TrimSpace(p.one("-a"))
   let paths = parse_paths(p.one("-p"))
   let mut body = ""
@@ -387,9 +383,8 @@ fn doc_list_spec() -> Slice<flags.Flag> {
   flags.with_team([flags.Flag { name: "--json", help: "print the raw record list as JSON", .. }])
 }
 
-fn doc_list(args: Slice<string>) -> Result<(), string> {
-  let spec = doc_list_spec()
-  let p = flags.parse(spec, args, 3, false, "lll doc list")?
+fn doc_list(input: flags.CommandInput) -> Result<(), string> {
+  let p = input.parsed
   let team = current_team()?
   let docs = models.DocList {
     items: fetch_docs(query.filter(team.id, "", "", "", "", ""), "kind,slug", "")?,
@@ -410,9 +405,9 @@ fn doc_list(args: Slice<string>) -> Result<(), string> {
   Ok(())
 }
 
-fn doc_view(args: Slice<string>) -> Result<(), string> {
+fn doc_view(input: flags.CommandInput) -> Result<(), string> {
   let spec = doc_view_spec()
-  let p = flags.parse(spec, args, 3, true, "")?
+  let p = input.parsed
   let slug = p.first()
   let usage = flags.usage("lll doc view", spec, "SLUG")
   if slug == "" { return Err(f"usage: {usage}") }
@@ -455,10 +450,10 @@ fn doc_view(args: Slice<string>) -> Result<(), string> {
   Ok(())
 }
 
-fn doc_edit(args: Slice<string>) -> Result<(), string> {
+fn doc_edit(input: flags.CommandInput) -> Result<(), string> {
   let spec = doc_edit_spec()
   let usage = flags.usage("lll doc edit", spec, "SLUG")
-  let p = flags.parse(spec, args, 3, true, "")?
+  let p = input.parsed
   let slug = p.first()
   if slug == "" { return Err(f"usage: {usage}") }
   let mut body = ""
@@ -501,9 +496,8 @@ fn doc_edit(args: Slice<string>) -> Result<(), string> {
   Ok(())
 }
 
-fn doc_delete(args: Slice<string>) -> Result<(), string> {
-  let spec = doc_delete_spec()
-  let p = flags.parse(spec, args, 3, true, "")?
+fn doc_delete(input: flags.CommandInput) -> Result<(), string> {
+  let p = input.parsed
   let slug = p.first()
   let force = p.given("--force")
   if slug == "" { return Err("usage: lll doc delete SLUG [--force]") }

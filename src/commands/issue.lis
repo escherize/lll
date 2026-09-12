@@ -270,6 +270,10 @@ pub fn issue(args: Slice<string>) -> Result<(), string> {
   if let Some(hint) = issue_synonym(args.get(2).unwrap_or("")) {
     return Err(hint)
   }
+  if args.get(2) == Some("comment") && ["edit", "delete"].contains(args.get(3).unwrap_or("")) {
+    let subargs = args[..2].append(args[3..]...)
+    return flags.dispatch("issue comment", "change a comment", "", comment_commands(), subargs)
+  }
   flags.dispatch("issue", "work with issues", issue_intro(), cmds, args)
 }
 
@@ -409,7 +413,7 @@ pub fn issue_commands() -> Slice<flags.Command> {
       summary: "add a comment (bare body or -b); 'comment KEY' lists them numbered; 'comment edit KEY N -b' and 'comment delete KEY N' change your own",
       page: "",
       spec: issue_comment_spec(),
-      positional: "[edit|delete] [KEY-123] [N] [\"body\"]",
+      positional: "[KEY-123] [\"body\"]",
       run: comment,
     },
     flags.Command {
@@ -545,14 +549,14 @@ The team comes from 'lll attach' ('team' in .lll.toml), or LLL_TEAM.
 Without --state the issue starts in todo; --label may be repeated."
 }
 
-fn create(args: Slice<string>) -> Result<(), string> {
+fn create(input: flags.CommandInput) -> Result<(), string> {
   let spec = issue_create_spec()
   let usage = flags.usage("lll issue create", spec, "[\"title\"]")
   // A bare title is accepted alongside -t: `gh issue create`, `linear` and
   // `jira` all take one, and every usability run reached for it first and got
   // "unknown flag: 'Hello'". -t stays the documented spelling, so no script
   // breaks; the positional is the guess that now lands.
-  let p = flags.parse(spec, args, 3, true, usage)?
+  let p = input.parsed
   let title = if p.one("-t") != "" { p.one("-t") } else { p.first() }
   if title == "" {
     return Err(f"no title — give it as the bare argument or with -t\n{usage}")
@@ -624,15 +628,8 @@ fn create(args: Slice<string>) -> Result<(), string> {
   Ok(())
 }
 
-fn list(args: Slice<string>) -> Result<(), string> {
-  let spec = issue_list_spec()
-  let p = flags.parse(
-    spec,
-    args,
-    3,
-    false,
-    flags.usage("lll issue list", spec, ""),
-  )?
+fn list(input: flags.CommandInput) -> Result<(), string> {
+  let p = input.parsed
   let filters = filters_from(p)?
   let sort_flag = p.one("--sort")
   let mut limit = 0
@@ -727,15 +724,9 @@ fn print_issue_table(issues: Slice<models.Issue>) -> Result<(), string> {
   Ok(())
 }
 
-fn view(args: Slice<string>) -> Result<(), string> {
+fn view(input: flags.CommandInput) -> Result<(), string> {
   let spec = issue_view_spec()
-  let p = flags.parse(
-    spec,
-    args,
-    3,
-    true,
-    flags.usage("lll issue view", spec, "[KEY-123]"),
-  )?
+  let p = input.parsed
   let id = p.first()
   let json_mode = p.given("--json")
   let raw_mode = p.given("--raw")
@@ -949,10 +940,10 @@ fn print_findings_raw(full: models.Issue) -> Result<(), string> {
   Ok(())
 }
 
-fn update(args: Slice<string>) -> Result<(), string> {
+fn update(input: flags.CommandInput) -> Result<(), string> {
   let spec = issue_update_spec()
   let usage = flags.usage("lll issue update", spec, "[KEY-123]")
-  let p = flags.parse(spec, args, 3, true, usage)?
+  let p = input.parsed
   let id = p.first()
   let mut state = ""
   if p.given("--state") { state = query.state(p.one("--state"))? }
@@ -1057,9 +1048,9 @@ fn update(args: Slice<string>) -> Result<(), string> {
   Ok(())
 }
 
-fn close_issue(args: Slice<string>) -> Result<(), string> {
+fn close_issue(input: flags.CommandInput) -> Result<(), string> {
   let usage = "lll issue close [KEY-123]"
-  let id = positional_id(args, usage)?
+  let id = input.parsed.first()
   let resolved = resolve_id(id, usage)?
   let issue = fetch_issue(resolved)?
   let claim = fetch_claim(issue.id)?
@@ -1092,10 +1083,10 @@ fn issue_start_spec() -> Slice<flags.Flag> {
   ])
 }
 
-fn start(args: Slice<string>) -> Result<(), string> {
+fn start(input: flags.CommandInput) -> Result<(), string> {
   let spec = issue_start_spec()
   let usage = flags.usage("lll issue start", spec, "[KEY-123]")
-  let p = flags.parse(spec, args, 3, true, usage)?
+  let p = input.parsed
   let with_branch = p.given("--branch")
   if with_branch && !gitctx.in_repo() {
     return Err("--branch needs a git repository: run it from inside the one the work happens in; issue state unchanged")
@@ -1243,9 +1234,9 @@ fn actor() -> Result<Option<Actor>, string> {
 /// show the holder without joining a second collection. That PATCH is a
 /// consequence of having won, never the thing that decides it: `issue update
 /// --assignee` remains last-write-wins and is not a claim.
-fn claim(args: Slice<string>) -> Result<(), string> {
+fn claim(input: flags.CommandInput) -> Result<(), string> {
   let usage = "lll issue claim [KEY-123]"
-  let id = positional_id(args, usage)?
+  let id = input.parsed.first()
   let resolved = resolve_id(id, usage)?
   let Some(member) = actor()? else {
     return Err(
@@ -1305,9 +1296,9 @@ fn claim(args: Slice<string>) -> Result<(), string> {
 /// check would be honour-system anyway, and refusing would strand every issue
 /// whose holder never came back. Exclusivity is a property of `claim`; this is
 /// how a hold ends.
-fn release(args: Slice<string>) -> Result<(), string> {
+fn release(input: flags.CommandInput) -> Result<(), string> {
   let usage = "lll issue release [KEY-123]"
-  let id = positional_id(args, usage)?
+  let id = input.parsed.first()
   let resolved = resolve_id(id, usage)?
   let issue = fetch_issue(resolved)?
   let key = f"{issue.expand.team.key}-{issue.number}"
@@ -1345,15 +1336,8 @@ fn fetch_claim(issue_id: string) -> Result<Option<models.Claim>, string> {
   Ok(list.items.get(0))
 }
 
-fn delete_issue(args: Slice<string>) -> Result<(), string> {
-  let spec = issue_delete_spec()
-  let p = flags.parse(
-    spec,
-    args,
-    3,
-    true,
-    flags.usage("lll issue delete", spec, "KEY-123"),
-  )?
+fn delete_issue(input: flags.CommandInput) -> Result<(), string> {
+  let p = input.parsed
   let id = p.first()
   let force = p.given("--force")
   // Deleting by inferred branch is too dangerous; the ID must be explicit.
@@ -1377,14 +1361,10 @@ fn delete_issue(args: Slice<string>) -> Result<(), string> {
   Ok(())
 }
 
-fn comment(args: Slice<string>) -> Result<(), string> {
-  // 'comment edit KEY N ...' and 'comment delete KEY N' (TASK-320) are the
-  // two sub-forms; everything else is add-or-list, below.
-  let sub = args.get(3).unwrap_or("")
-  if sub == "edit" || sub == "delete" { return comment_mutate(sub, args) }
+fn comment(input: flags.CommandInput) -> Result<(), string> {
   let spec = issue_comment_spec()
   let usage = flags.usage("lll issue comment", spec, "[KEY-123] [\"body\"]")
-  let p = flags.parse_n(spec, args, 3, 2, usage)?
+  let p = input.parsed
   let id = p.first()
   // A bare second word is the body, as `create` takes a bare title and
   // `member add` a bare name. Ten of thirty first-time agents in one fleet run
@@ -1447,36 +1427,36 @@ fn comment(args: Slice<string>) -> Result<(), string> {
   Ok(())
 }
 
-fn url_cmd(args: Slice<string>) -> Result<(), string> {
+fn url_cmd(input: flags.CommandInput) -> Result<(), string> {
   let usage = "lll issue url [KEY-123]"
-  let id = positional_id(args, usage)?
+  let id = input.parsed.first()
   let resolved = resolve_id(id, usage)?
   let target = issue_url(fetch_issue(resolved)?)?
   fmt.Println(target)
   Ok(())
 }
 
-fn id_cmd(args: Slice<string>) -> Result<(), string> {
+fn id_cmd(input: flags.CommandInput) -> Result<(), string> {
   let usage = "lll issue id [KEY-123]"
-  let id = positional_id(args, usage)?
+  let id = input.parsed.first()
   let resolved = resolve_id(id, usage)?
   let issue = fetch_issue(resolved)?
   fmt.Println(f"{issue.expand.team.key}-{issue.number}")
   Ok(())
 }
 
-fn title_cmd(args: Slice<string>) -> Result<(), string> {
+fn title_cmd(input: flags.CommandInput) -> Result<(), string> {
   let usage = "lll issue title [KEY-123]"
-  let id = positional_id(args, usage)?
+  let id = input.parsed.first()
   let resolved = resolve_id(id, usage)?
   let issue = fetch_issue(resolved)?
   fmt.Println(issue.title)
   Ok(())
 }
 
-fn branch_name_cmd(args: Slice<string>) -> Result<(), string> {
+fn branch_name_cmd(input: flags.CommandInput) -> Result<(), string> {
   let usage = "lll issue branch-name [KEY-123]"
-  let p = flags.parse([], args, 3, true, usage)?
+  let p = input.parsed
   let resolved = resolve_id(p.first(), usage)?
   let issue = fetch_issue(resolved)?
   fmt.Println(gitctx.branch_name(
@@ -1489,9 +1469,9 @@ fn branch_name_cmd(args: Slice<string>) -> Result<(), string> {
 
 /// Thin wrapper over the GitHub CLI: gh owns pushing checks, prompts, and
 /// errors — we only supply the KEY-prefixed title and an issue-linking body.
-fn pr_cmd(args: Slice<string>) -> Result<(), string> {
+fn pr_cmd(input: flags.CommandInput) -> Result<(), string> {
   let usage = "lll issue pr [KEY-123]"
-  let id = positional_id(args, usage)?
+  let id = input.parsed.first()
   let resolved = resolve_id(id, usage)?
 
   let mut gh = ""
@@ -1566,10 +1546,16 @@ fn print_comments(comments: Slice<models.Comment>) {
 /// position 'comment KEY' prints. Your own comments only, unless --force:
 /// the author is the token's member (or 'me' under a superuser token), and
 /// a superuser token with no 'me' may change anything.
-fn comment_mutate(verb: string, args: Slice<string>) -> Result<(), string> {
+fn comment_commands() -> Slice<flags.Command> {
+  [
+    flags.Command { name: "edit", summary: "edit a numbered comment", page: "", spec: comment_mutate_spec("edit"), positional: "KEY N", run: |input| comment_mutate("edit", input.parsed) },
+    flags.Command { name: "delete", summary: "delete a numbered comment", page: "", spec: comment_mutate_spec("delete"), positional: "KEY N", run: |input| comment_mutate("delete", input.parsed) },
+  ]
+}
+
+fn comment_mutate(verb: string, p: flags.Parsed) -> Result<(), string> {
   let spec = comment_mutate_spec(verb)
   let usage = flags.usage(f"lll issue comment {verb}", spec, "KEY-123 N")
-  let p = flags.parse_n(spec, args, 4, 2, usage)?
   if p.first() == "" || p.nth(1) == "" { return Err(f"usage: {usage}") }
   let resolved = resolve_id(p.first(), usage)?
   let issue = fetch_issue(resolved)?
@@ -1638,30 +1624,6 @@ fn resolve_member(name: string) -> Result<models.Member, string> {
   Ok(m)
 }
 
-/// Parse `[KEY-123]` as the only allowed argument (verbs without flags).
-fn positional_id(args: Slice<string>, usage: string) -> Result<string, string> {
-  let mut id = ""
-  let mut i = 3
-  while i < args.length() {
-    let arg = args[i]
-    if arg.starts_with("-") {
-      return Err(f"unknown flag: '{arg}'\nusage: {usage}")
-    }
-    if id != "" { return Err(f"unexpected argument: '{arg}'") }
-    id = arg
-    i += 1
-  }
-  Ok(id)
-}
-
-/// Resolution order: explicit arg > current git branch (eng-12-slug -> ENG-12)
-/// > error with a hint.
-/// Accept a pasted board URL anywhere a KEY-123 is expected — the same courtesy
-/// mb-shares' `share` extends to its slugs. Strips `scheme://host/`, an
-/// `issue/` path prefix, a query string, a fragment and a trailing slash;
-/// anything that is not shaped like a URL is returned untouched, so a bare key
-/// stays a bare key and a bad value still fails downstream with the usual "not
-/// an issue ID" message.
 fn deslug(arg: string) -> string {
   // All splitting, no index arithmetic: byte offsets and rune indices disagree
   // on non-ASCII input and panic. See realtime.split_field.
@@ -1791,27 +1753,6 @@ fn find_team(key: string) -> Result<Option<models.Team>, string> {
 
 // ------------------------------------------------------------- doc links
 
-/// Parse the two positional arguments `KEY SLUG` (link/unlink take no
-/// flags; positional_id handles only one).
-fn two_positional(
-  args: Slice<string>,
-  usage: string,
-) -> Result<(string, string), string> {
-  let mut first = ""
-  let mut second = ""
-  let mut i = 3
-  while i < args.length() {
-    let arg = args[i]
-    if arg.starts_with("-") {
-      return Err(f"unknown flag: '{arg}'\nusage: {usage}")
-    }
-    if second != "" { return Err(f"unexpected argument: '{arg}'") }
-    if first == "" { first = arg } else { second = arg }
-    i += 1
-  }
-  Ok((first, second))
-}
-
 /// Docs linked to an issue. The issue -> doc direction is not stored: it is
 /// one `?=` filter over docs.issues, which is the whole reason links are a
 /// relation and not a write-once reference on the issue.
@@ -1850,9 +1791,10 @@ fn cross_team_link(
   )
 }
 
-fn link(args: Slice<string>) -> Result<(), string> {
+fn link(input: flags.CommandInput) -> Result<(), string> {
   let usage = "lll issue link KEY-123 SLUG"
-  let (id, slug) = two_positional(args, usage)?
+  let id = input.parsed.first()
+  let slug = input.parsed.nth(1)
   if id == "" || slug == "" { return Err(f"usage: {usage}") }
   let resolved = resolve_id(id, usage)?
   let issue = fetch_issue(resolved)?
@@ -1870,9 +1812,10 @@ fn link(args: Slice<string>) -> Result<(), string> {
   Ok(())
 }
 
-fn unlink(args: Slice<string>) -> Result<(), string> {
+fn unlink(input: flags.CommandInput) -> Result<(), string> {
   let usage = "lll issue unlink KEY-123 SLUG"
-  let (id, slug) = two_positional(args, usage)?
+  let id = input.parsed.first()
+  let slug = input.parsed.nth(1)
   if id == "" || slug == "" { return Err(f"usage: {usage}") }
   let resolved = resolve_id(id, usage)?
   let issue = fetch_issue(resolved)?
@@ -1897,9 +1840,10 @@ fn unlink(args: Slice<string>) -> Result<(), string> {
 /// Refuses a self-block and a cycle (BLOCKER already waits on KEY, at any
 /// depth), since a cycle would make both un-ready forever. The dependency
 /// lives on the blocked issue: one relation field, no second collection.
-fn block(args: Slice<string>) -> Result<(), string> {
+fn block(input: flags.CommandInput) -> Result<(), string> {
   let usage = "lll issue block KEY-123 BLOCKER"
-  let (id, blocker_id) = two_positional(args, usage)?
+  let id = input.parsed.first()
+  let blocker_id = input.parsed.nth(1)
   if id == "" || blocker_id == "" { return Err(f"usage: {usage}") }
   let issue = fetch_issue(resolve_id(id, usage)?)?
   let blocker = fetch_issue(resolve_id(blocker_id, usage)?)?
@@ -1921,9 +1865,10 @@ fn block(args: Slice<string>) -> Result<(), string> {
   Ok(())
 }
 
-fn unblock(args: Slice<string>) -> Result<(), string> {
+fn unblock(input: flags.CommandInput) -> Result<(), string> {
   let usage = "lll issue unblock KEY-123 BLOCKER"
-  let (id, blocker_id) = two_positional(args, usage)?
+  let id = input.parsed.first()
+  let blocker_id = input.parsed.nth(1)
   if id == "" || blocker_id == "" { return Err(f"usage: {usage}") }
   let issue = fetch_issue(resolve_id(id, usage)?)?
   let blocker = fetch_issue(resolve_id(blocker_id, usage)?)?

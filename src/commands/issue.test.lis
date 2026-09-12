@@ -159,51 +159,6 @@ fn check_emoji_reports_the_trimmed_value() {
   assert msg.contains("'in progress'")
 }
 
-// --------------------------------------------------------- positional_id
-
-fn view_args(rest: Slice<string>) -> Slice<string> {
-  ["lll", "issue", "view"].append(rest...)
-}
-
-#[test]
-fn positional_id_is_empty_when_nothing_is_passed() {
-  let assert Ok(id) = positional_id(view_args([]), "usage")
-  assert id == ""
-}
-
-#[test]
-fn positional_id_takes_the_single_argument() {
-  let assert Ok(id) = positional_id(view_args(["ENG-12"]), "usage")
-  assert id == "ENG-12"
-}
-
-#[test]
-fn positional_id_passes_multi_byte_arguments_through() {
-  // No key validation here; deslug and split_issue_key own that.
-  let assert Ok(id) = positional_id(view_args(["ÉNG-12"]), "usage")
-  assert id == "ÉNG-12"
-}
-
-#[test]
-fn positional_id_rejects_flags_with_the_usage_line() {
-  let assert Err(msg) = positional_id(view_args(["--json"]), "lll issue view")
-  assert msg.contains("unknown flag: '--json'")
-  assert msg.contains("usage: lll issue view")
-  // A flag after a valid id is still a flag.
-  let assert Err(after) =
-    positional_id(view_args(["ENG-12", "--json"]), "lll issue view")
-  assert after.contains("unknown flag")
-  // A bare dash is not a positional argument either.
-  let assert Err(dash) = positional_id(view_args(["-"]), "lll issue view")
-  assert dash.contains("unknown flag: '-'")
-}
-
-#[test]
-fn positional_id_rejects_a_second_argument() {
-  let assert Err(msg) = positional_id(view_args(["ENG-12", "ENG-13"]), "usage")
-  assert msg.contains("unexpected argument: 'ENG-13'")
-}
-
 // -------------------------------------------------------- value_or_stdin
 
 /// Only a lone `-` reaches for stdin; everything else is returned verbatim,
@@ -359,14 +314,14 @@ fn issue_create_help_flag_is_hidden_from_help_and_completions() {
 /// because this shard's file list does not include that file.
 #[test]
 fn member_create_is_an_alias_for_member_add() {
-  let add = flags.tokens(member_verb_spec("add"))
-  let create = flags.tokens(member_verb_spec("create"))
+  let add = flags.tokens(flags.command_spec(member_commands(), "add"))
+  let create = flags.tokens(flags.command_spec(member_commands(), "create"))
   assert create.equals(add)
   // add is not weakened by the alias: both carry -n. It is optional now, not
   // required - TASK-309's fleet had agents type a bare name the way `issue
   // create` takes a bare title, and the body refuses only when BOTH are
   // absent, so the flag layer must not demand -n on its own.
-  let assert Some(n) = member_verb_spec("add").find(|f| f.name == "-n")
+  let assert Some(n) = flags.command_spec(member_commands(), "add").find(|f| f.name == "-n")
   assert n.alias == "--name"
   assert !n.required
   assert n.value
@@ -486,15 +441,6 @@ fn only_issue_create_has_a_hand_written_page() {
   }
   let assert Some(create) = issue_commands().find(|c| c.name == "create")
   assert create.page.contains("The title is the bare argument or -t")
-}
-
-/// link and unlink are the two-positional verbs issue() routes around
-/// flags.dispatch (its parse admits one positional). The route keys off this
-/// exact positional shape, so nothing else may carry it by accident.
-#[test]
-fn only_link_and_unlink_take_two_positionals() {
-  let two = issue_commands().filter(|c| c.positional == "KEY-123 SLUG")
-  assert two.map(|c| c.name).equals(["link", "unlink"])
 }
 
 fn issue_help_requested(args: Slice<string>, verb: string) -> bool {

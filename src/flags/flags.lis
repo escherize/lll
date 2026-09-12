@@ -207,6 +207,7 @@ fn unknown_flag(arg: string, usage: string, spec: Slice<Flag>) -> string {
 }
 
 impl Parsed {
+  pub fn positional_count(self) -> int { self.pos.length() }
   /// The canonical name for a spelling, or the name itself when unknown.
   fn canon(self, name: string) -> string {
     let Some(fl) = self.spec.find(|f| spells(f, name)) else {
@@ -255,6 +256,13 @@ impl Parsed {
   }
 }
 
+/// One invocation parsed at dispatch. Handlers consume `parsed`; raw `args`
+/// remain available for diagnostic spelling, never as a second parser input.
+pub struct CommandInput {
+  pub args: Slice<string>,
+  pub parsed: Parsed,
+}
+
 /// One verb of a noun, as a value (TASK-307). Dispatch, the noun's help
 /// table and shell completions all read the same slice of these, so a verb is
 /// declared exactly once and the three cannot drift. Before this, nine nouns
@@ -274,7 +282,7 @@ pub struct Command {
   pub page: string,
   pub spec: Slice<Flag>,
   pub positional: string,
-  pub run: fn(Slice<string>) -> Result<(), string>,
+  pub run: fn(CommandInput) -> Result<(), string>,
 }
 
 /// Route `lll <noun> <verb> ...` through a noun's Command table.
@@ -284,6 +292,7 @@ pub struct Command {
 /// never reaches the verb body. Thirty verb arms used to call a zero-arg
 /// function and discard argv; `lll config check -h` RAN the health check. No
 /// table entry can do that now, because the dispatcher does not let it.
+/// Its Parsed result is handed to the handler, so each invocation is parsed once.
 ///
 /// `intro` is prose that belongs to the noun rather than to any verb - the
 /// rename collateral under `lll team --help`, the precedence paragraph under
@@ -313,8 +322,8 @@ pub fn dispatch(
   // Arity is the positional string's word count: "KEY-123 SLUG" admits two.
   let words = strings.Fields(c.positional)
   let arity = words.length()
-  let _ = parse_n(c.spec, args, 3, arity, usage(cmd, c.spec, c.positional))?
-  (c.run)(args)
+  let parsed = parse_n(c.spec, args, 3, arity, usage(cmd, c.spec, c.positional))?
+  (c.run)(CommandInput { args, parsed })
 }
 
 /// `lll <noun> --help`: every verb's usage line and summary, aligned, then the

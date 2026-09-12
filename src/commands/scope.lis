@@ -8,10 +8,10 @@ pub fn scoped_args(args: Slice<string>) -> Result<Slice<string>, string> {
   let verb = args.get(2).unwrap_or("")
   let (start, spec) = match noun {
     "issue" => (3, issue_verb_spec(verb)),
-    "project" => (3, project_verb_spec(verb)),
-    "label" => (3, label_verb_spec(verb)),
-    "doc" => (3, doc_verb_spec(verb)),
-    "finding" => (3, finding_verb_spec(verb)),
+    "project" => (3, flags.command_spec(project_commands(), verb)),
+    "label" => (3, flags.command_spec(label_commands(), verb)),
+    "doc" => (3, flags.command_spec(doc_commands(), verb)),
+    "finding" => (3, flags.command_spec(finding_commands(), verb)),
     "watch" => (2, watch_verb_spec("")),
     _ => return Ok(args),
   }

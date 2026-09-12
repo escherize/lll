@@ -30,8 +30,8 @@ fn check_status_accepts_every_lifecycle_status() {
 /// is a verb the shell cannot complete (TASK-127's whole point).
 #[test]
 fn project_verb_spec_covers_the_new_verbs() {
-  assert strings.Join(flags.tokens(project_verb_spec("edit")), " ") == "-n -d --status --team"
-  assert strings.Join(flags.tokens(project_verb_spec("delete")), " ") == "--force --team"
+  assert strings.Join(flags.tokens(flags.command_spec(project_commands(), "edit")), " ") == "-n -d --status --team"
+  assert strings.Join(flags.tokens(flags.command_spec(project_commands(), "delete")), " ") == "--force --team"
 }
 
 /// --force takes no value: `lll project delete Apollo --force` must not

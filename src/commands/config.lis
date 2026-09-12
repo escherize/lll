@@ -74,11 +74,11 @@ repo file."
 }
 
 /// Set a machine-level identity or endpoint, without changing repo config.
-fn config_set(args: Slice<string>) -> Result<(), string> {
+fn config_set(input: flags.CommandInput) -> Result<(), string> {
   let usage = "usage: lll config set <me|url|web_url> VALUE"
-  if args.length() != 5 { return Err(usage) }
-  let key = args[3]
-  let value = strings.TrimSpace(args[4])
+  if input.parsed.positional_count() != 2 { return Err(usage) }
+  let key = input.parsed.first()
+  let value = strings.TrimSpace(input.parsed.nth(1))
   if value == "" { return Err(usage) }
   if key == "url" || key == "web_url" {
     let endpoint = checked_endpoint(key, value)?
@@ -206,7 +206,7 @@ fn set_key_in(path: string, key: string, value: string) -> Result<(), string> {
 /// repo reading the wrong team lists the wrong issues and reports nothing, so
 /// being able to ask which file won is the whole debugging affordance.
 /// `_args` is unread: dispatch already parsed it (TASK-307).
-fn config_list(_args: Slice<string>) -> Result<(), string> {
+fn config_list(_input: flags.CommandInput) -> Result<(), string> {
   let (cfg, src) = config.load_traced()?
   print_origin(src.url, "url", cfg.url)
   print_origin(src.team, "team", cfg.team)
@@ -231,7 +231,7 @@ fn config_list(_args: Slice<string>) -> Result<(), string> {
 /// /api/health is the endpoint because it needs no auth and no collection, so
 /// a failure here is about reachability alone.
 /// `_args` is unread: dispatch already parsed it (TASK-307).
-fn config_check(_args: Slice<string>) -> Result<(), string> {
+fn config_check(_input: flags.CommandInput) -> Result<(), string> {
   let (cfg, src) = config.load_traced()?
   match pb.get("/api/health") {
     Ok(_) => fmt.Println(f"ok\t{cfg.url} answers as a PocketBase API"),
@@ -275,7 +275,7 @@ fn assigns(line: string, key: string) -> bool {
 }
 
 /// `lll config init`. `_args` is unread: dispatch already parsed it (TASK-307).
-fn config_init(_args: Slice<string>) -> Result<(), string> {
+fn config_init(_input: flags.CommandInput) -> Result<(), string> {
   if os.Stat(".lll.toml").is_ok() {
     return Err(".lll.toml already exists; not overwriting")
   }

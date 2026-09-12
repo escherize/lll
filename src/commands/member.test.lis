@@ -127,12 +127,6 @@ fn member_commands_keep_only_the_hand_written_pages() {
 
 /// The table's spec and the completions lookup are the same flag tables, so
 /// what dispatch parses is exactly what the shell completes.
-#[test]
-fn member_commands_specs_match_the_completion_lookup() {
-  for c in member_commands() {
-    assert flags.tokens(c.spec).equals(flags.tokens(member_verb_spec(c.name)))
-  }
-}
 
 // TASK-309, fleet run 2: two of thirty agents typed `lll member add shard-23`
 // and were refused for a bare word, while `issue create` takes a bare title.

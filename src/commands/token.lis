@@ -74,10 +74,10 @@ fn token_create_spec() -> Slice<flags.Flag> {
   ])
 }
 
-fn token_create(args: Slice<string>) -> Result<(), string> {
+fn token_create(input: flags.CommandInput) -> Result<(), string> {
   let spec = token_create_spec()
   let usage = flags.usage("lll token create", spec, "<member>")
-  let p = flags.parse(spec, args, 3, true, usage)?
+  let p = input.parsed
   let name = p.first()
   if name == "" {
     return Err(f"usage: {usage}")

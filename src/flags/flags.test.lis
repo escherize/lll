@@ -382,8 +382,8 @@ fn dispatch_preserves_help_as_an_alias_value_and_stops_real_help() {
   let commands = [Command {
     name: "create", summary: "create", page: "create help",
     spec: [Flag { name: "-b", alias: "--body -m --message", value: true, .. }],
-    positional: "", run: |args| {
-      if args[4] != "--help" { return Err("wrong body") }
+    positional: "", run: |input| {
+      if input.parsed.one("-b") != "--help" { return Err("wrong body") }
       Ok(())
     },
   }]
@@ -402,4 +402,21 @@ fn team_extraction_preserves_values_of_every_alias() {
     assert args.equals(["lll", "doc", "create", alias, "--team"])
     assert team == Some("LLL")
   }
+}
+
+#[test]
+fn dispatch_hands_over_unicode_and_empty_positionals_without_reinterpreting_them() {
+  let commands = [Command {
+    name: "set", summary: "set", page: "", spec: [], positional: "KEY VALUE",
+    run: |input| {
+      if input.parsed.positional_count() != 2 { return Err("missing positional") }
+      if input.parsed.first() != "ÉNG-12" || input.parsed.nth(1) != "" { return Err("changed positional") }
+      Ok(())
+    },
+  }]
+  assert dispatch("test", "", "", commands, ["lll", "test", "set", "ÉNG-12", ""]).is_ok()
+  let assert Err(extra) = dispatch("test", "", "", commands, ["lll", "test", "set", "ÉNG-12", "", "extra"])
+  assert extra.contains("unexpected argument: 'extra'")
+  let assert Err(flag) = dispatch("test", "", "", commands, ["lll", "test", "set", "--unknown"])
+  assert flag.contains("unknown flag: '--unknown'")
 }

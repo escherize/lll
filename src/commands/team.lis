@@ -101,8 +101,8 @@ Three things do NOT follow (TASK-87):
   - OLD-1 mentions inside descriptions and comment bodies are stored text"
 }
 
-fn team_list(args: Slice<string>) -> Result<(), string> {
-  let p = flags.parse(team_list_spec(), args, 3, false, "")?
+fn team_list(input: flags.CommandInput) -> Result<(), string> {
+  let p = input.parsed
   let mut teams = list_teams()?
   // Archived teams are hidden by default — everywhere a team list renders
   // (here, the rail switcher) an archived team is finished work, not a
@@ -170,10 +170,8 @@ fn team_rename_spec() -> Slice<flags.Flag> {
   ]
 }
 
-fn team_create(args: Slice<string>) -> Result<(), string> {
-  let spec = team_create_spec()
-  let usage = flags.usage("lll team create", spec, "")
-  let p = flags.parse(spec, args, 3, false, usage)?
+fn team_create(input: flags.CommandInput) -> Result<(), string> {
+  let p = input.parsed
   let key = p.one("-k")
   let name = p.one("-n")
 
@@ -201,10 +199,10 @@ struct TeamRenamePatch { key: string, name: string }
 /// board, in `issue list` and in every URL the moment the PATCH lands. What
 /// does not follow is stored text, and the caller has to be told which
 /// (see team_rename_collateral).
-fn team_rename(args: Slice<string>) -> Result<(), string> {
+fn team_rename(input: flags.CommandInput) -> Result<(), string> {
   let spec = team_rename_spec()
   let usage = flags.usage("lll team rename", spec, "KEY")
-  let p = flags.parse(spec, args, 3, true, usage)?
+  let p = input.parsed
   let key = p.first()
   if key == "" {
     return Err(f"usage: {usage}")
@@ -275,20 +273,12 @@ fn team_rename_collateral(old_key: string, new_key: string) -> Slice<string> {
 /// `lll team set-accent KEY #rrggbb` — TASK-100. The accent was the one
 /// shared field only the web could write (TASK-83's colour picker), which
 /// inverts the rule TASK-83 was built on.
-fn team_set_accent(args: Slice<string>) -> Result<(), string> {
-  // This verb does not pass through dispatch's parse (see `team`), so the
-  // -h guard every other verb inherits is spelled out here: help must answer
-  // before find_team, which is a network call, and before the PATCH.
-  let usage = flags.usage("lll team set-accent", [], "KEY #rrggbb")
-  if args[3..].find(|a| a == "--help" || a == "-h").is_some() {
-    return Err(f"{flags.help_marker()}usage: {usage} (empty '' clears it)")
-  }
-  let Some(key) = args.get(3) else {
+fn team_set_accent(input: flags.CommandInput) -> Result<(), string> {
+  if input.parsed.positional_count() != 2 {
     return Err("usage: lll team set-accent KEY #rrggbb (empty '' clears it)")
   }
-  let Some(raw) = args.get(4) else {
-    return Err("usage: lll team set-accent KEY #rrggbb (empty '' clears it)")
-  }
+  let key = input.parsed.first()
+  let raw = input.parsed.nth(1)
   // The colour is checked before the lookup: a typo is the likelier mistake
   // of the two, and it should not cost a round trip to hear about.
   let hex = accent_value(raw)?
@@ -437,8 +427,9 @@ fn configured_team_id() -> Result<string, string> {
 /// Refuses a team holding issues rather than cascading: deleting issues is
 /// not what "delete the team I just made by mistake" means, and PocketBase
 /// would happily orphan them.
-fn team_delete(args: Slice<string>) -> Result<(), string> {
-  let Some(key) = args.get(3) else {
+fn team_delete(input: flags.CommandInput) -> Result<(), string> {
+  let key = input.parsed.first()
+  if key == "" {
     return Err("usage: lll team delete KEY")
   }
   let Some(t) = find_team(key)? else {
@@ -502,23 +493,24 @@ fn archived_hint(key: string) -> string {
 #[json]
 struct TeamArchivedPatch { archived: bool }
 
-/// The two archive verbs as `run` entries: Command.run takes args alone, so
-/// the direction each one means is fixed here rather than at the call site.
-fn team_archive(args: Slice<string>) -> Result<(), string> {
-  team_set_archived(args, true)
+/// The archive verbs share parsed inputs; each fixes its lifecycle direction
+/// before entering the common implementation.
+fn team_archive(input: flags.CommandInput) -> Result<(), string> {
+  team_set_archived(input.parsed, true)
 }
 
-fn team_unarchive(args: Slice<string>) -> Result<(), string> {
-  team_set_archived(args, false)
+fn team_unarchive(input: flags.CommandInput) -> Result<(), string> {
+  team_set_archived(input.parsed, false)
 }
 
 /// `lll team archive KEY` / `lll team unarchive KEY` — the team lifecycle.
 /// Archiving hides, never deletes: issues, comments and the /t/KEY/ board
 /// all stay, so the command can afford to be one word with no confirm.
-fn team_set_archived(args: Slice<string>, archived: bool) -> Result<(), string> {
+fn team_set_archived(p: flags.Parsed, archived: bool) -> Result<(), string> {
   let mut verb = "archive"
   if !archived { verb = "unarchive" }
-  let Some(key) = args.get(3) else {
+  let key = p.first()
+  if key == "" {
     return Err(f"usage: lll team {verb} KEY")
   }
   let Some(t) = find_team(key)? else {
@@ -539,8 +531,9 @@ fn team_set_archived(args: Slice<string>, archived: bool) -> Result<(), string> 
   Ok(())
 }
 
-fn team_view(args: Slice<string>) -> Result<(), string> {
-  let Some(key) = args.get(3) else {
+fn team_view(input: flags.CommandInput) -> Result<(), string> {
+  let key = input.parsed.first()
+  if key == "" {
     return Err("usage: lll team view KEY")
   }
   let Some(t) = find_team(key)? else {

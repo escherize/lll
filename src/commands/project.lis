@@ -76,8 +76,8 @@ fn project_statuses() -> Slice<string> {
   ["planned", "started", "paused", "completed", "cancelled"]
 }
 
-fn project_list(args: Slice<string>) -> Result<(), string> {
-  let p = flags.parse(project_list_spec(), args, 3, false, flags.usage("lll project list", project_list_spec(), ""))?
+fn project_list(input: flags.CommandInput) -> Result<(), string> {
+  let p = input.parsed
   // Scoped when a team is configured, every team's when not: a project
   // belongs to one team (TASK-173), so the unscoped list is an admin's view.
   let filter = url.QueryEscape(
@@ -132,12 +132,6 @@ fn project_delete_spec() -> Slice<flags.Flag> {
   ])
 }
 
-/// The flag table of one project verb; empty for verbs without flags. Read
-/// by `lll completions` so the scripts complete exactly what the parser
-/// accepts.
-pub fn project_verb_spec(verb: string) -> Slice<flags.Flag> {
-  flags.command_spec(project_commands(), verb)
-}
 
 fn check_status(val: string) -> Result<string, string> {
   if project_statuses().find(|s| s == val).is_none() {
@@ -148,10 +142,10 @@ fn check_status(val: string) -> Result<string, string> {
   Ok(val)
 }
 
-fn project_create(args: Slice<string>) -> Result<(), string> {
+fn project_create(input: flags.CommandInput) -> Result<(), string> {
   let spec = project_create_spec()
   let usage = flags.usage("lll project create", spec, "[NAME]")
-  let p = flags.parse(spec, args, 3, true, usage)?
+  let p = input.parsed
   let name = flags.entity_name(p, "-n", usage)?
   let description = p.one("-d")
   let mut status = "planned"
@@ -175,10 +169,10 @@ fn project_create(args: Slice<string>) -> Result<(), string> {
   Ok(())
 }
 
-fn project_edit(args: Slice<string>) -> Result<(), string> {
+fn project_edit(input: flags.CommandInput) -> Result<(), string> {
   let spec = project_edit_spec()
   let usage = flags.usage("lll project edit", spec, "NAME")
-  let p = flags.parse(spec, args, 3, true, usage)?
+  let p = input.parsed
   let Some(name) = nonempty(p.first()) else {
     return Err(f"usage: {usage}")
   }
@@ -207,10 +201,10 @@ fn project_edit(args: Slice<string>) -> Result<(), string> {
 /// delete (serve_settings.lis:282) is a bare `pb.delete`, so an issue's
 /// project quietly disappears from underneath it. Count, say the number,
 /// refuse unless --force.
-fn project_delete(args: Slice<string>) -> Result<(), string> {
+fn project_delete(input: flags.CommandInput) -> Result<(), string> {
   let spec = project_delete_spec()
   let usage = flags.usage("lll project delete", spec, "NAME")
-  let p = flags.parse(spec, args, 3, true, usage)?
+  let p = input.parsed
   let Some(name) = nonempty(p.first()) else {
     return Err(f"usage: {usage}")
   }
@@ -224,8 +218,9 @@ fn project_delete(args: Slice<string>) -> Result<(), string> {
   Ok(())
 }
 
-fn project_view(args: Slice<string>) -> Result<(), string> {
-  let Some(name) = args.get(3) else {
+fn project_view(input: flags.CommandInput) -> Result<(), string> {
+  let name = input.parsed.first()
+  if name == "" {
     return Err("usage: lll project view NAME")
   }
   let p = resolve_project(configured_team_id()?, name)?

@@ -56,8 +56,8 @@ pub fn label_commands() -> Slice<flags.Command> {
   ]
 }
 
-fn label_list(args: Slice<string>) -> Result<(), string> {
-  let p = flags.parse(label_list_spec(), args, 3, false, flags.usage("lll label list", label_list_spec(), ""))?
+fn label_list(input: flags.CommandInput) -> Result<(), string> {
+  let p = input.parsed
   // Scoped when a team is configured, every team's when not: a label belongs
   // to one team (TASK-173), so the unscoped list is an admin's view, not a
   // working one.
@@ -111,11 +111,6 @@ fn label_delete_spec() -> Slice<flags.Flag> {
   ])
 }
 
-/// The flag table of one label verb; empty for verbs without flags. Read by
-/// `lll completions` so the scripts complete exactly what the parser accepts.
-pub fn label_verb_spec(verb: string) -> Slice<flags.Flag> {
-  flags.command_spec(label_commands(), verb)
-}
 
 /// The usage line of `lll label create`. The check-first note rides it
 /// (TASK-208), so every surface that prints it - the missing -n error and the
@@ -132,13 +127,13 @@ fn label_create_page() -> string {
   f"usage: {label_create_usage()}" + flags.section(label_create_spec())
 }
 
-fn label_create(args: Slice<string>) -> Result<(), string> {
+fn label_create(input: flags.CommandInput) -> Result<(), string> {
   let spec = label_create_spec()
   // The check-first note rides the usage string (TASK-208), so every surface
   // that prints it — --help included — says to reuse before creating.
   let usage = flags.usage("lll label create", spec, "[NAME]") +
   "\n       (check 'lll label list' first; reuse over near-duplicates like bug/bugs/defect)"
-  let p = flags.parse(spec, args, 3, true, usage)?
+  let p = input.parsed
   let name = flags.entity_name(p, "-n", usage)?
   let color = p.one("-c")
   let team = team_flag_or_current(p.one("--team"))?
@@ -158,10 +153,10 @@ fn label_create(args: Slice<string>) -> Result<(), string> {
   Ok(())
 }
 
-fn label_edit(args: Slice<string>) -> Result<(), string> {
+fn label_edit(input: flags.CommandInput) -> Result<(), string> {
   let spec = label_edit_spec()
   let usage = flags.usage("lll label edit", spec, "NAME")
-  let p = flags.parse(spec, args, 3, true, usage)?
+  let p = input.parsed
   let Some(name) = nonempty(p.first()) else {
     return Err(f"usage: {usage}")
   }
@@ -186,10 +181,10 @@ fn label_edit(args: Slice<string>) -> Result<(), string> {
 /// silently loses a label nobody asked to remove. Parity is about
 /// capabilities, not about copying that: the CLI counts first, always says
 /// the number, and refuses unless --force says the loss is intended.
-fn label_delete(args: Slice<string>) -> Result<(), string> {
+fn label_delete(input: flags.CommandInput) -> Result<(), string> {
   let spec = label_delete_spec()
   let usage = flags.usage("lll label delete", spec, "NAME")
-  let p = flags.parse(spec, args, 3, true, usage)?
+  let p = input.parsed
   let Some(name) = nonempty(p.first()) else {
     return Err(f"usage: {usage}")
   }
