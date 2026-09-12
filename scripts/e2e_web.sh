@@ -1156,9 +1156,9 @@ if command -v playwright-cli >/dev/null 2>&1; then
   wcurl -sf -X POST "$WEB/favorite?key=$FAV_KEY&on=true" >/dev/null
   fav_js="() => { const a = document.querySelector('#rail-favorites a[href=\"/issue/$FAV_KEY\"]'); return JSON.stringify({title: a?.querySelector('.rg-title')?.textContent || '', state: a?.querySelector('use')?.getAttribute('href') || '', rail: document.getElementById('rail').dataset.probe, navs: performance.getEntriesByType('navigation').length}); }"
   for fav_page in "$WEB/" "$WEB/issue/$FAV_KEY"; do
-    fav_ready=$(playwright-cli -s="$BROWSER_SESSION" run-code "async page => { const ready = page.waitForResponse(r => new URL(r.url()).pathname === '/events'); await page.goto('$fav_page'); await ready; await page.locator('#rail-favorites a[href=\"/issue/$FAV_KEY\"]').waitFor(); await page.locator('#rail').evaluate(el => el.dataset.probe = 'favorite-rail-kept'); return 'favorite stream ready'; }" 2>&1)
+    if [ "$fav_page" = "$WEB/" ]; then fav_kind=board; fav_state=done; else fav_kind=issue; fav_state=in-progress; fi
+    fav_ready=$(playwright-cli -s="$BROWSER_SESSION" run-code "async page => { const ready = page.waitForResponse(r => r.url().startsWith('$WEB/events?page=$fav_kind')); await page.goto('$fav_page'); await ready; await page.locator('#rail-favorites a[href=\"/issue/$FAV_KEY\"]').waitFor(); await page.locator('#rail').evaluate(el => el.dataset.probe = 'favorite-rail-kept'); return 'favorite stream ready'; }" 2>&1)
     assert_contains "$fav_ready" 'favorite stream ready' "browser: favorite stream registered"
-    if [ "$fav_page" = "$WEB/" ]; then fav_state=done; else fav_state=in-progress; fi
     "$LIN" issue update "$FAV_KEY" --title "Favorite live $fav_state" --state "$fav_state" >/dev/null
     fav_live=$(page_until "$fav_js" "#st-$fav_state")
     assert_contains "$fav_live" "Favorite live $fav_state" "browser: favorite title follows issue changes"
