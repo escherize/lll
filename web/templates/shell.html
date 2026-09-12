@@ -36,6 +36,7 @@
      #favicon in the response to its own save, so picking a colour recolors
      the open page. An empty AccentCss means nobody chose one — the <style>
      stays empty and theme.css's canonical orange is left byte-identical. */}}
+{{define "team-title-prefix"}}lll - {{if .TeamKey}}{{.TeamKey}} {{end}}{{end}}
 {{define "accent-head"}}<meta name="viewport" content="width=device-width, initial-scale=1"><script src="/static/navigation.js" defer></script><style id="accent">{{.AccentCss}}</style><link id="favicon" rel="icon" href="{{.Favicon}}">{{end}}
 
 {{/* The team switcher (TASK-198): every team on the server, this page's own

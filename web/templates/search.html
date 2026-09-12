@@ -17,7 +17,7 @@
      response to its own @get. */}}
 <head>
 <meta charset="utf-8">
-<title>{{if .Page.Q}}{{.Page.Q}} · {{end}}Search · lll</title>
+<title>{{template "team-title-prefix" .Rail}}search{{if .Page.Q}} "{{.Page.Q}}"{{end}}</title>
 <link rel="stylesheet" href="/static/theme.css">
 {{template "accent-head" .Rail}}
 <!-- Vendored rather than CDN (TASK-74); see board.html for why. -->

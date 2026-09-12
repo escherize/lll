@@ -225,6 +225,7 @@ pub struct RailTeamVM {
 /// construct a rail it must never render. Page handlers compose the two
 /// halves into a PageVM instead; a fragment cannot carry shell by accident.
 pub struct RailVM {
+  pub team_key: string,
   // Which row reads as current: "board", "mine", "issues", "projects",
   // "search" or "settings".
   pub active: string,

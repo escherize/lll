@@ -54,6 +54,19 @@ func TestRenderFailureDoesNotReturnPartialHTML(t *testing.T) {
 	}
 }
 
+func TestTeamTitlePrefix(t *testing.T) {
+	for _, tc := range []struct{ key, want string }{
+		{"ENG", "lll - ENG "},
+		{"", "lll - "},
+		{"<team>", "lll - &lt;team&gt; "},
+	} {
+		got, err := Render("team-title-prefix", struct{ TeamKey string }{tc.key})
+		if err != nil || got != tc.want {
+			t.Errorf("team %q: got %q, %v; want %q", tc.key, got, err, tc.want)
+		}
+	}
+}
+
 func BenchmarkRender(b *testing.B) {
 	b.Run("cached", func(b *testing.B) {
 		for b.Loop() {

@@ -24,7 +24,7 @@ provenance.
      view model. Fragments below are rendered from `.Page`'s type alone. */}}
 <head>
 <meta charset="utf-8">
-<title>{{if eq .Rail.Active "mine"}}My issues{{else}}Board{{end}} · lll</title>
+<title>{{template "team-title-prefix" .Rail}}{{if eq .Rail.Active "mine"}}my issues{{else}}board{{end}}</title>
 <link rel="stylesheet" href="/static/theme.css">
 {{template "accent-head" .Rail}}
 <!-- Vendored, not CDN (TASK-74): the board is local-first and has to work with

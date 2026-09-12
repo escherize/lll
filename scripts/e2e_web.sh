@@ -879,6 +879,26 @@ if command -v playwright-cli >/dev/null 2>&1; then
   # the 303 sets the cookie — and every later navigation rides it.
   playwright-cli -s="$BROWSER_SESSION" open "$WEB/?board_token=$BOARD_TOKEN" >/dev/null 2>&1 \
     || fail "playwright: opening board"
+  tab_titles=$(playwright-cli -s="$BROWSER_SESSION" run-code "async page => {
+    for (const [path, title] of [
+      ['/', 'lll - ENG board'],
+      ['/?assignee=e2e', 'lll - ENG my issues'],
+      ['/issue/ENG-1', 'lll - ENG-1'],
+      ['/issues', 'lll - ENG all issues'],
+      ['/projects', 'lll - ENG projects'],
+      ['/settings', 'lll - ENG settings'],
+      ['/search', 'lll - ENG search'],
+      ['/search?q=auth', 'lll - ENG search \\\"auth\\\"']
+    ]) {
+      await page.goto('$WEB' + path);
+      const actual = await page.title();
+      if (actual !== title) throw new Error(path + ': title ' + actual + ', expected ' + title);
+    }
+    await page.evaluate(() => localStorage.clear());
+    await page.goto('$WEB/');
+    return 'tab titles verified';
+  }" 2>/dev/null) || fail "playwright: page titles"
+  assert_contains "$tab_titles" 'tab titles verified' "page tabs identify the app and their team"
   # Shared navigation must remain reachable on a phone, including keyboard close.
   mobile_nav=$(playwright-cli -s="$BROWSER_SESSION" run-code 'async page => {
     await page.setViewportSize({width:390,height:844});
@@ -1926,6 +1946,7 @@ eng_board=$(wcurl -sf "$WEB/t/ENG/")
 ops_board=$(wcurl -sf "$WEB/t/OPS/")
 assert_contains "$ops_board" "Ops only card" "the routed team's cards render"
 assert_not_contains "$ops_board" "Web board issue" "another team's cards stay off the routed board"
+assert_contains "$ops_board" '<title>lll - OPS board</title>' "a routed board names its own team in the tab"
 assert_not_contains "$eng_board" "Ops only card" "the boot team's board stays scoped too"
 code=$(wcurl -s -o /dev/null -w '%{http_code}' "$WEB/t/NOPE/")
 [ "$code" = "404" ] || fail "an unknown team key should 404, got $code"

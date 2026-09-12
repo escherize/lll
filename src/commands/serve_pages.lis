@@ -19,6 +19,7 @@ import "theme"
 fn rail_vm(active: string, me: string, team: models.Team) -> RailVM {
   let hex = theme.normalize_hex(team.accent)
   RailVM {
+    team_key: team.key,
     active,
     me,
     version: version(),
