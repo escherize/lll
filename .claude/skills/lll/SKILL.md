@@ -167,6 +167,17 @@ can actually scan.
   grep output, not intent. If it is a UI change, look at it.
 - **One task per change.** If you find a second problem, file it.
 
+## Group work by outcome
+
+Projects name durable destinations, such as Release 1 or multi-project server
+mode. A parallel wave is a scheduling record, not automatically a project.
+Before closing scoped work, check its project association against the outcome;
+leave explicitly deferred or unrelated work outside a release commitment.
+Read live counts with `lll project view NAME`. Closed-item counts do not prove
+release readiness. Policy and the historical backfill are recorded in
+`lll doc view projects-name-outcomes-not-waves` and
+`lll doc view historical-wave-project-audit`.
+
 ## Verification, before you claim anything works
 
 Run what the user runs, not what you built. The gate is:
