@@ -314,6 +314,9 @@ Layout:
 - `gopb/`: a tiny Go module embedding PocketBase behind one `Serve` function.
 - `web/`: `templates/` (html/template) and `static/` (plain CSS), compiled
   into the binary via a `//go:embed` in `web/embed.go`: edits need a rebuild.
+  Mermaid stays embedded for offline, single-file delivery and loads in the
+  browser only when a diagram appears. Packaging rationale and revisit criteria:
+  `lll doc view retain-embedded-lazy-mermaid`.
 
 ## Architecture
 
