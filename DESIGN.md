@@ -300,6 +300,14 @@ morph boundaries; cards are `#issue-{id}`, columns `#col-{state}`, comments
 `#comment-{id}`. New surfaces must keep ids stable and semantic — Datastar
 morphs by id, and agents are first-class consumers of the markup.
 
+**ARIA values are strings.** For Datastar bindings to enumerated ARIA
+attributes (`aria-pressed`, `aria-expanded`, `aria-checked`, `aria-selected`),
+return the string value explicitly, for example
+`data-attr:aria-pressed="$fav ? 'true' : 'false'"`. A bare boolean signal
+produces a presence attribute (`aria-pressed=""`), which does not communicate
+the control's state. Boolean presence bindings remain appropriate for HTML
+attributes such as `disabled` and `hidden`.
+
 ## Elevation & Depth
 
 Depth is tonal, not shadowed. Five closely-spaced dark surfaces do the work:
