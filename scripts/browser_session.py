@@ -2,6 +2,13 @@
 import os
 import subprocess
 import urllib.parse
+import uuid
+
+
+def new_session():
+    # Playwright includes this name in a Unix socket path. macOS's ordinary
+    # temporary-directory prefix leaves little room for descriptive names.
+    return uuid.uuid4().hex[:14]
 
 
 def diagnostic(output, url, secrets):
@@ -32,3 +39,7 @@ def open_session(session, url, timeout=30):
     if result.returncode != 0 or '### Error' in output:
         details = diagnostic(output, url, secrets)
         raise AssertionError(f'browser launch {session} failed (exit {result.returncode})\n{details}')
+
+
+if __name__ == '__main__':
+    print(new_session())

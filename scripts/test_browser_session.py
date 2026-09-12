@@ -3,10 +3,18 @@ import subprocess
 import unittest
 from unittest.mock import patch
 
-from browser_session import diagnostic, open_session
+from browser_session import diagnostic, new_session, open_session
 
 
 class BrowserSessionTests(unittest.TestCase):
+    def test_session_names_fit_the_macos_socket_budget_and_are_distinct(self):
+        names = {new_session() for _ in range(100)}
+        self.assertEqual(len(names), 100)
+        prefix = '/var/folders/dw/_2dd8rzs1_1dvtbbt2tdsxy80000gn/T/pw-2a0249a4/cli/99f6e7029aa6be60-'
+        for name in names:
+            self.assertRegex(name, r'^[0-9a-f]{14}$')
+            self.assertLess(len((prefix + name + '.sock').encode()), 104)
+
     def test_preserves_failure_and_redacts_credentials(self):
         url = 'http://localhost:8100/?board_token=board-secret'
         text = 'EADDRINUSE /tmp/session.sock ' + url + ' board-secret member-secret'

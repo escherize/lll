@@ -60,7 +60,7 @@ wcurl() { "${WCURL[@]}" "$@"; }
 # can outlive its tracked PID as an orphan curl, corrupting reused log files.
 PB_LOG="$DATA_DIR/pb.log"
 E2E_LOGS="$PB_LOG"
-BROWSER_SESSION="e2e-web-$$"
+BROWSER_SESSION=$(python3 scripts/browser_session.py)
 
 # PocketBase is embedded in lll; one `lll up` is both the database and the
 # board this suite exercises. Built here because it has to exist first.

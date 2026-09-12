@@ -6,7 +6,7 @@ from pathlib import Path
 import queue
 import shutil
 import subprocess
-from browser_session import open_session
+from browser_session import new_session, open_session
 import sys
 import threading
 import urllib.request
@@ -95,7 +95,7 @@ cli('issue', 'update', key, '-d', '# Diagram\n\n```mermaid\ngraph LR\n  A --> B\
 print(f'Issue stream: metadata {len(metadata)} bytes; initial description {len(initial)} bytes; edit, clear, independent snapshots and reconnect passed')
 
 if shutil.which('playwright-cli'):
-    session = f'issue-stream-{os.getpid()}'
+    session = new_session()
     try:
         open_session(session, board + '/?board_token=' + os.environ['LLL_TEST_BOARD_TOKEN'])
         result = subprocess.run(['playwright-cli', '-s=' + session, 'run-code', Path('scripts/browser_issue_stream.js').read_text()], text=True, capture_output=True, timeout=90)

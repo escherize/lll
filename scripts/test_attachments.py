@@ -7,7 +7,7 @@ import json
 import os
 from pathlib import Path
 import subprocess
-from browser_session import open_session
+from browser_session import new_session, open_session
 import sys
 import tempfile
 import urllib.error
@@ -139,7 +139,7 @@ print('Attachment browser fixture:', key)
 # Browser checks use the same database and fixture, with an isolated session.
 import shutil
 if shutil.which('playwright-cli'):
-    session = f'attachments-{os.getpid()}'
+    session = new_session()
     Path('/tmp/lll-35-browser-upload.txt').write_text('Browser attachment fixture\n')
     try:
         open_session(session, board + '/?board_token=' + os.environ['LLL_TEST_BOARD_TOKEN'])
