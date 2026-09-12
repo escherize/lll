@@ -11,7 +11,7 @@ import re
 import shutil
 import socket
 import subprocess
-from browser_session import new_session, open_session
+from browser_session import new_session, open_session, require_result
 import sys
 import tempfile
 import threading
@@ -201,7 +201,7 @@ if shutil.which('playwright-cli'):
         result = subprocess.run(['playwright-cli', '-s=' + session, 'run-code', Path('scripts/browser_board_pagination.js').read_text()], capture_output=True, text=True, timeout=90)
         output = result.stdout + result.stderr
         Path('/tmp/lll-360-browser.log').write_text(output)
-        assert result.returncode == 0 and '### Error' not in output and '### Result\n"Complete board browser passed"' in output, 'see /tmp/lll-360-browser.log'
+        require_result(result, 'Complete board browser passed', board)
     finally:
         subprocess.run(['playwright-cli', '-s=' + session, 'close'], capture_output=True, timeout=15)
 print('Board pagination: 205 cards, stable order, later-page drop target, HTTP/SSE failure preservation, recovery and live browser update passed')

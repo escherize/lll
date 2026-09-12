@@ -60,5 +60,5 @@ async page => {
     await page.screenshot({path: `/tmp/lll-35-attachments-${width}.png`});
   }
   await boardPage.close();
-  return 'Attachment browser: upload/remove live, pending file/comment preserved, raster preview, count-only cards, responsive layout passed';
+  return 'Attachment browser passed';
 }

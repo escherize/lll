@@ -6,7 +6,7 @@ from pathlib import Path
 import queue
 import shutil
 import subprocess
-from browser_session import new_session, open_session
+from browser_session import new_session, open_session, require_result
 import sys
 import threading
 import urllib.request
@@ -101,7 +101,7 @@ if shutil.which('playwright-cli'):
         result = subprocess.run(['playwright-cli', '-s=' + session, 'run-code', Path('scripts/browser_issue_stream.js').read_text()], text=True, capture_output=True, timeout=90)
         output = result.stdout + result.stderr
         Path('/tmp/lll-58-browser-gate.log').write_text(output)
-        assert '### Error' not in output and 'Issue stream browser passed' in output, 'stream browser failed; see /tmp/lll-58-browser-gate.log'
+        require_result(result, 'Issue stream browser passed', board)
         print('Issue stream browser: retained Mermaid DOM and drafts; desktop/mobile screenshots passed')
     finally:
         subprocess.run(['playwright-cli', '-s=' + session, 'close'], capture_output=True, timeout=15)

@@ -7,7 +7,7 @@ from pathlib import Path
 import queue
 import shutil
 import subprocess
-from browser_session import new_session, open_session
+from browser_session import new_session, open_session, require_result
 import sys
 import threading
 import urllib.error
@@ -107,7 +107,7 @@ if shutil.which('playwright-cli'):
         p = subprocess.run(['playwright-cli', '-s=' + session, 'run-code', Path('scripts/browser_claims.js').read_text()], capture_output=True, text=True, timeout=100)
         output = p.stdout + p.stderr
         Path('/tmp/lll-185-browser.log').write_text(output)
-        assert '### Error' not in output and 'Board claim controls passed' in output, 'see /tmp/lll-185-browser.log'
+        require_result(p, 'Board claim controls passed', board)
         final = json.loads(cli('issue', 'view', key, '--json'))
         assert final['claim'] is None and final['title'] == 'Live claim controls'
         print('Board claim browser: two views, named actor, keyboard release, stale form rejection, retained drafts and responsive screenshots passed')

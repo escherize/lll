@@ -25,5 +25,5 @@ async page => {
     await page.screenshot({path: `/tmp/lll-58-stream-${width}.png`, fullPage: true});
     if (await page.evaluate(() => document.documentElement.scrollWidth > innerWidth)) throw new Error(`overflow at ${width}`);
   }
-  console.log('Issue stream browser passed');
+  return 'Issue stream browser passed';
 }

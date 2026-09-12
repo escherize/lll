@@ -1,4 +1,5 @@
 """Launch an owned browser session and retain actionable, redacted failures."""
+import json
 import os
 import subprocess
 import urllib.parse
@@ -26,9 +27,30 @@ def diagnostic(output, url, secrets):
     return output
 
 
+def _secrets():
+    return [os.environ.get(name, '') for name in
+            ('LLL_TOKEN', 'LLL_BOARD_TOKEN', 'LLL_TEST_BOARD_TOKEN', 'LLL_ADMIN_PASSWORD')]
+
+
+def require_result(result, expected, url):
+    # Source echoed after this heading is not evidence that the script ran.
+    lines = result.stdout.partition('### Ran Playwright code')[0].splitlines()
+    reported = None
+    for index, line in enumerate(lines[:-1]):
+        if line == '### Result':
+            try:
+                reported = json.loads(lines[index + 1])
+            except ValueError:
+                pass
+            break
+    output = result.stdout + result.stderr
+    if result.returncode != 0 or '### Error' in output or reported != expected:
+        details = diagnostic(output, url, _secrets())
+        raise AssertionError(f'browser action failed (exit {result.returncode}); expected {expected!r}\n{details}')
+
+
 def open_session(session, url, timeout=30):
-    secrets = [os.environ.get(name, '') for name in
-               ('LLL_TOKEN', 'LLL_BOARD_TOKEN', 'LLL_TEST_BOARD_TOKEN', 'LLL_ADMIN_PASSWORD')]
+    secrets = _secrets()
     try:
         result = subprocess.run(['playwright-cli', '-s=' + session, 'open', url],
                                 capture_output=True, text=True, timeout=timeout)

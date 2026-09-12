@@ -7,7 +7,7 @@ import json
 import os
 from pathlib import Path
 import subprocess
-from browser_session import new_session, open_session
+from browser_session import new_session, open_session, require_result
 import sys
 import tempfile
 import urllib.error
@@ -146,7 +146,7 @@ if shutil.which('playwright-cli'):
         result = subprocess.run(['playwright-cli', '-s=' + session, 'run-code', Path('scripts/browser_attachments.js').read_text()], text=True, capture_output=True, timeout=90)
         output = result.stdout + result.stderr
         Path('/tmp/lll-35-browser-gate.log').write_text(output)
-        assert '### Error' not in output and 'Attachment browser: upload/remove live' in output, 'attachment browser failed; see /tmp/lll-35-browser-gate.log'
+        require_result(result, 'Attachment browser passed', board)
         print('Attachment browser: real upload/removal, rejected retry, live counts, drafts and responsive screenshots passed')
     finally:
         subprocess.run(['playwright-cli', '-s=' + session, 'close'], capture_output=True, timeout=15)

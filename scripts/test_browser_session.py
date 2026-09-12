@@ -3,10 +3,30 @@ import subprocess
 import unittest
 from unittest.mock import patch
 
-from browser_session import diagnostic, new_session, open_session
+from browser_session import diagnostic, new_session, open_session, require_result
 
 
 class BrowserSessionTests(unittest.TestCase):
+    def test_success_requires_the_actual_returned_value(self):
+        require_result(subprocess.CompletedProcess([], 0, '### Result\n"verified"\n', ''),
+                       'verified', 'http://localhost/')
+        for output in ('### Ran Playwright code\nreturn "verified";',
+                       '### Ran Playwright code\n### Result\n"verified"',
+                       '### Result\n"not verified"',
+                       '### Result\nundefined'):
+            with self.subTest(output=output), self.assertRaises(AssertionError):
+                require_result(subprocess.CompletedProcess([], 0, output, ''),
+                               'verified', 'http://localhost/')
+
+    def test_action_failure_exposes_the_redacted_tool_error(self):
+        url = 'http://localhost/?board_token=handoff-secret'
+        for code in (0, 1):
+            with self.subTest(code=code), self.assertRaises(AssertionError) as caught:
+                require_result(subprocess.CompletedProcess([], code,
+                    '### Error\nTimeout waiting for card at ' + url, ''), 'verified', url)
+            self.assertIn('Timeout waiting for card', str(caught.exception))
+            self.assertNotIn('handoff-secret', str(caught.exception))
+
     def test_session_names_fit_the_macos_socket_budget_and_are_distinct(self):
         names = {new_session() for _ in range(100)}
         self.assertEqual(len(names), 100)
