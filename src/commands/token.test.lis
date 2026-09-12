@@ -63,3 +63,15 @@ fn any_other_failure_keeps_the_raw_error() {
   assert msg.contains("impersonating bryan")
   assert msg.contains("500")
 }
+
+#[test]
+fn status_classification_ignores_url_and_body_digits() {
+  let forbidden = impersonate_error("bryan", "POST http://127.0.0.1:34015/api/401: 403 Forbidden: {}")
+  assert forbidden.contains("superuser-only")
+  assert !forbidden.contains("expired")
+  let unauthorized = impersonate_error("bryan", "POST http://127.0.0.1:34035/api/403: 401 Unauthorized: {}")
+  assert unauthorized.contains("expired")
+  let failed = impersonate_error("bryan", "POST http://127.0.0.1:34015/api/403: 500 Internal Server Error: previous status: 401 Unauthorized")
+  assert failed.contains("impersonating bryan")
+  assert failed.contains("500 Internal Server Error")
+}

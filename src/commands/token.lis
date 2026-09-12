@@ -158,12 +158,16 @@ fn expiry_line(duration: int, now: time.Time) -> string {
 /// happens to someone who was working yesterday is expiry, which the old
 /// shared wording never named (TASK-214). Anything else keeps the raw error.
 fn impersonate_error(name: string, e: string) -> string {
-  if strings.Contains(e, "401") {
+  // request errors put the HTTP status after the first colon-space; ports
+  // and record IDs can contain the same digits, and bodies can name codes.
+  let parts = strings.SplitN(e, ": ", 2)
+  let status = parts.get(1).unwrap_or("")
+  if strings.HasPrefix(status, "401 ") {
     return "the token this ran with was rejected (401) - most likely it expired
 mint a new one with 'lll token create', or set LLL_ADMIN_EMAIL/LLL_ADMIN_PASSWORD
 to the credentials 'lll up' prints"
   }
-  if strings.Contains(e, "403") {
+  if strings.HasPrefix(status, "403 ") {
     return "token create is superuser-only and the configured token is not one
 set LLL_ADMIN_EMAIL/LLL_ADMIN_PASSWORD to the credentials 'lll up' prints"
   }
