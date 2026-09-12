@@ -328,3 +328,10 @@ over SSE; [Datastar](https://data-star.dev) morphs them into the DOM by
 element id. `lll up` runs PocketBase in-process (see `gopb/`) and the board
 in one process; it reuses an already-running PocketBase at `LLL_URL` instead
 of starting its own.
+
+The board uses the same PocketBase REST client for application reads and writes
+even when the server is embedded. This preserves one local/remote data contract;
+the public API proxy hides the internal listener without removing that HTTP hop.
+The board acts as its process identity, not each browser visitor's identity.
+The decision, costs, and criteria for considering direct record access are in
+`lll doc view retain-pocketbase-rest-data-path` on the LLL board.
