@@ -171,6 +171,18 @@ can actually scan.
   grep output, not intent. If it is a UI change, look at it.
 - **One task per change.** If you find a second problem, file it.
 
+When dividing work among reviewers or implementers, derive each task's file
+list from the current checkout. Search for its target symbols with `rg -n`,
+then read the matches to distinguish definitions, callers and unrelated names.
+Do not assign paths from memory. Include the search command, its matching
+path/line output and the checkout commit in the task brief or rules file so
+the recipient can verify the scope. If there are no matches, investigate and
+record that uncertainty before assigning a file list.
+
+Recipients should verify that evidence against their checkout before editing.
+If a symbol moved, search for it again and record the corrected path on the
+issue; an outdated file list does not prove there is no work to do.
+
 ## Group work by outcome
 
 Projects name durable destinations, such as Release 1 or multi-project server
