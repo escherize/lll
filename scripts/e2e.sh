@@ -772,6 +772,21 @@ assert_contains "$out" "'ENG' is the team, not a project" "the team key passed a
 # adding it again hits the unique index. This case is about the no-email path.
 out=$(LLL_URL=$URL "$LIN" member add -n carol)
 assert_contains "$out" "Added member carol" "member add without email"
+# LLL-220: punctuation in a display name must survive both email paths.
+out=$(LLL_URL=$URL "$LIN" member add -n "Tim O'Brien")
+assert_contains "$out" "Added member Tim O'Brien" "apostrophe name without email"
+out=$(LLL_URL=$URL "$LIN" member add -n "Kim O'Brien" -e kim.obrien@example.com)
+assert_contains "$out" "Added member Kim O'Brien" "apostrophe name with email"
+members=$(LLL_URL=$URL "$LIN" member list --json)
+[ "$(jq -r '.items[] | select(.name == "Tim O\u0027Brien") | .email' <<<"$members")" = "tim-o'brien@members.invalid" ] \
+  || fail "apostrophe name or synthesized email did not round trip"
+[ "$(jq -r '.items[] | select(.name == "Kim O\u0027Brien") | .email' <<<"$members")" = "kim.obrien@example.com" ] \
+  || fail "apostrophe name or explicit email did not round trip"
+if out=$(LLL_URL=$URL "$LIN" member add -n "Invalid Email Probe" -e invalid-address 2>&1); then
+  fail "invalid member email should be refused"
+fi
+assert_contains "$out" '"email"' "rejected member creation identifies the email field"
+assert_contains "$out" 'valid email address' "rejected member creation includes the field reason"
 out=$(LLL_URL=$URL "$LIN" member list)
 assert_contains "$out" "bryan" "member list has bryan"
 assert_contains "$out" "bryan@example.com" "member list shows email"
