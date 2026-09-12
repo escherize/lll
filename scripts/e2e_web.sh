@@ -1164,7 +1164,7 @@ Some **bold** text and `code`.
 
 <script>alert(1)</script>' >/dev/null
 page=$(wcurl -sf "$WEB/issue/ENG-1")
-assert_contains "$page" '<div class="desc md">' "description uses the shared markdown container"
+assert_contains "$page" '<div class="issue-desc md">' "description uses the shared markdown container"
 assert_contains "$page" "<h2>Heading</h2>" "description renders a markdown heading"
 assert_contains "$page" "<strong>bold</strong>" "description renders bold"
 assert_contains "$page" "<code>code</code>" "description renders inline code"

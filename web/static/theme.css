@@ -372,7 +372,7 @@ input:focus, textarea:focus, select:focus {
   letter-spacing: -0.012em;
   line-height: 1.3;
 }
-.desc { color: var(--text-2); max-width: 68ch; margin: 0 0 24px; }
+.issue-desc { color: var(--text-2); max-width: 68ch; margin: 0 0 24px; }
 .deleted { grid-area: main; padding: 28px 40px; color: var(--text-2); }
 
 .thread { grid-area: thread; margin: 0 40px; max-width: 680px; border-top: 1px solid var(--border); padding-top: 18px; }
@@ -1151,9 +1151,8 @@ input:focus, textarea:focus, select:focus {
 .itbl th a.on { color: var(--text); }
 /* The caret previews what a click does: it points down (descending) and only
    turns solid on the column that is actually sorting. */
-/* cr-asc / cr-desc, not asc / desc: class names are global, and `.desc` is
-   already the issue description's block (margin-bottom 24px), which lands on
-   an inline icon as a 24px gap under it. */
+/* Classes are global. Keep direction under cr- and description styling
+   under issue-desc; the former bare .desc once gave this icon a 24px margin. */
 .itbl th .cr { margin-left: 2px; vertical-align: -3px; opacity: 0; }
 .itbl th a:hover .cr { opacity: 0.4; }
 .itbl th .cr-asc, .itbl th .cr-desc { opacity: 1; }
@@ -1300,7 +1299,7 @@ input:focus, textarea:focus, select:focus {
 /* One row per project, the whole row a link into /issues?project=NAME: the
    list says what exists, the table it points at does the drilling. Class
    names are namespaced pj- because CSS class names are global here too
-   (task-106); .desc already means the issue description.
+   (task-106); a generic direction class once inherited description spacing.
 
    No new colour: the status dot borrows an --st-* hue (see project_tone),
    and the count sits in the same tertiary grey as every other tally. */

@@ -434,6 +434,11 @@ never icon fonts, emoji, or third-party icon packages. New icons match the
 ## Do's and Don'ts
 
 ### Do:
+
+- **Scope component classes.** Stylesheets share one global class namespace.
+  Use names such as `.issue-desc` for the issue description and `.cr-desc`
+  for a descending sort caret; a generic `.desc` once applied the description
+  block's 24px margin to an icon. Keep shared utilities explicit and intentional.
 - **Do** route every color through the `:root` custom properties in theme.css;
   the tokens are the design system, and SSE-morphed fragments must inherit them.
 - **Do** keep ids stable and semantic on any element inside a morph boundary
