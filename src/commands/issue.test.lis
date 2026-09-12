@@ -362,9 +362,14 @@ fn member_create_is_an_alias_for_member_add() {
   let add = flags.tokens(member_verb_spec("add"))
   let create = flags.tokens(member_verb_spec("create"))
   assert create.equals(add)
-  // The same name flag supports either positional or explicit input.
+  // add is not weakened by the alias: both carry -n. It is optional now, not
+  // required - TASK-309's fleet had agents type a bare name the way `issue
+  // create` takes a bare title, and the body refuses only when BOTH are
+  // absent, so the flag layer must not demand -n on its own.
   let assert Some(n) = member_verb_spec("add").find(|f| f.name == "-n")
   assert n.alias == "--name"
+  assert !n.required
+  assert n.value
 }
 
 // ------------------------------------------------------------ json_quote
@@ -430,7 +435,7 @@ fn issue_json_exposes_authored_comments_and_current_holder() {
 
 #[test]
 fn issue_help_accepts_each_known_verb_before_or_after_an_identifier() {
-  for verb in issue_verbs() {
+  for verb in issue_commands().map(|c| c.name) {
     assert issue_help_requested(["lll", "issue", verb, "--help"], verb)
     assert issue_help_requested(["lll", "issue", verb, "DX-1", "-h"], verb)
   }
@@ -445,4 +450,49 @@ fn issue_help_preserves_literal_flag_values_and_end_of_options() {
   assert !issue_help_requested(["lll", "issue", "create", "--description=--help"], "create")
   assert !issue_help_requested(["lll", "issue", "create", "--", "--help"], "create")
   assert issue_help_requested(["lll", "issue", "create", "-d", "--help", "--help"], "create")
+}
+
+// -------------------------------------------------------- issue_commands
+
+/// TASK-307: the table is what dispatch, `lll issue --help` and completions
+/// read, so every verb the old match knew is in it, once, with a one-line
+/// summary - a blank or multi-line summary breaks the noun's help table.
+#[test]
+fn issue_commands_lists_every_verb_once_with_a_one_line_summary() {
+  let cmds = issue_commands()
+  assert cmds.map(|c| c.name).equals([
+    "create", "new", "list", "view", "show", "read", "update", "close", "start", "claim",
+    "release", "delete", "comment", "watch", "url", "id", "title", "branch-name", "pr", "link",
+    "unlink", "block", "unblock",
+  ])
+  for c in cmds {
+    assert c.summary != ""
+    assert !c.summary.contains("\n")
+  }
+}
+
+/// create is the one issue verb with a hand-written page (its alias new
+/// carries the same one); every other verb generates usage + flags from
+/// its spec, so a page there would be invented.
+#[test]
+fn only_issue_create_has_a_hand_written_page() {
+  for c in issue_commands() {
+    assert (c.page != "") == (c.name == "create" || c.name == "new")
+  }
+  let assert Some(create) = issue_commands().find(|c| c.name == "create")
+  assert create.page.contains("The title is the bare argument or -t")
+}
+
+/// link and unlink are the two-positional verbs issue() routes around
+/// flags.dispatch (its parse admits one positional). The route keys off this
+/// exact positional shape, so nothing else may carry it by accident.
+#[test]
+fn only_link_and_unlink_take_two_positionals() {
+  let two = issue_commands().filter(|c| c.positional == "KEY-123 SLUG")
+  assert two.map(|c| c.name).equals(["link", "unlink"])
+}
+
+fn issue_help_requested(args: Slice<string>, verb: string) -> bool {
+  if issue_commands().find(|c| c.name == verb).is_none() { return false }
+  flags.help_requested(issue_verb_spec(verb), args, 3)
 }

@@ -49,6 +49,15 @@ BROWSER_SESSION="e2e-web-$$"
 # PocketBase is embedded in lll; one `lll up` is both the database and the
 # board this suite exercises. Built here because it has to exist first.
 lis build >/dev/null
+
+# TASK-227 (the half of TASK-187 this suite never got): pin HOME for the rest
+# of the run, AFTER lis build so the lis/go/mise caches under the real HOME
+# stay warm. Without it every plain CLI call here read the developer's own
+# ~/.config/lll/lll.toml - which on this machine names a member that does not
+# exist in the scratch database. That was silent while an unmatched 'me' was
+# accepted as anon; TASK-309 made it a refusal and this suite died at its
+# first comment, naming the developer's own identity.
+e2e_pin_home
 LIN=target/.lisette/bin/lll
 
 # USER is pinned: a first boot seeds a member named after it (task-31), and
@@ -93,7 +102,19 @@ wait_ok "$LLL_URL/api/health" || fail "PocketBase did not start"
 # because `lll up` defaults ITS process to the superuser token (the TASK-182
 # handoff); the CLI verbs and the direct PB fixtures below use the member
 # token a human login would get.
-WEB_TOKEN=$(pb_member_token "$LLL_URL" web-e2e web-e2e@lll.test web-e2e-pass-123) \
+# TASK-317: the token decides identity and 'me' may only agree. The board
+# booted as e2e (USER above) and renders its rail for that member, so the
+# suite's token is e2e's too; pb_member_token finds the boot's record by
+# name and gives it a password.
+# The boot seeds that member a beat after /api/health answers; minting
+# before it lands makes the helper create a second e2e and lose the race.
+_su=$(pb_superuser_token "$LLL_URL")
+for _ in $(seq 1 100); do
+  curl -sf -G "$LLL_URL/api/collections/members/records" --data-urlencode "filter=(name='e2e')" \
+    -H "Authorization: Bearer $_su" | jq -e '.items | length > 0' >/dev/null && break
+  sleep 0.1
+done
+WEB_TOKEN=$(pb_member_token "$LLL_URL" e2e e2e@members.invalid web-e2e-pass-123) \
   || fail "bootstrapping the web e2e member token"
 [ -n "$WEB_TOKEN" ] && [ "$WEB_TOKEN" != "null" ] || fail "pb_member_token returned no token"
 export LLL_TOKEN="$WEB_TOKEN"
@@ -213,7 +234,7 @@ wcurl -s -o /dev/null -w '%{http_code}' "$WEB/issue/ENG-99" | grep -q 404 \
   || fail "unknown issue is a 404"
 
 # --- TASK-205: the work-site slot on the web surfaces -------------------------
-# `issue start` stamps work_branch/work_host/work_path; the props panel shows
+# `issue start --branch` stamps work_branch/work_host/work_path; the props panel shows
 # the whole site and the board hover shows the branch, both straight off the
 # issue's own fields (so SSE morphs carry them for free). The fields are
 # seeded the fixture way (a direct PATCH) — the start->stamp write path is
@@ -339,7 +360,7 @@ assert_contains "$board_rail" 'href="/t/ENG/search"' "rail has a Search row"
 assert_contains "$(rail "$search")" 'href="/t/ENG/search" class="active"' \
   "the search page marks its own rail row current"
 empty=$(wcurl -sf "$WEB/search?q=zzzznope")
-assert_contains "$empty" "No issue title matches" "an empty result says so"
+assert_contains "$empty" "matches <b>zzzznope</b>" "an empty result says so"
 assert_not_contains "$empty" "ENG-1" "an empty result lists nothing"
 assert_contains "$(wcurl -sf "$WEB/search")" 'class="search-bar"' \
   "/search with no query still renders the field"

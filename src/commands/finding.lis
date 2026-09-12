@@ -12,38 +12,76 @@ import "query"
 /// with kind=finding; `lll doc new -k finding` stays the authoring path, and
 /// these verbs answer "what do we know about THIS file / area". Surfacing is
 /// by area and path — a filter over kind='finding' — never full-text luck.
+///
+/// Dispatched through the noun's Command table (TASK-307): dispatch, `lll
+/// finding --help` and shell completions all read it, so none can drift.
 pub fn finding(args: Slice<string>) -> Result<(), string> {
-  let Some(verb) = args.get(2) else {
-    finding_usage()
-    return Ok(())
-  }
-  match verb {
-    "near" => finding_near(args),
-    "list" => finding_list(args),
-    "--help" => {
-      finding_usage()
-      Ok(())
-    },
-    "-h" => {
-      finding_usage()
-      Ok(())
-    },
-    other => Err(f"unknown finding command: '{other}' (see 'lll finding --help')"),
-  }
+  flags.dispatch("finding", "retrieve findings near a path", finding_intro(), finding_commands(), args)
 }
 
-fn finding_usage() {
-  fmt.Println(
-    "lll finding - retrieve findings (docs with kind=finding) by area or path
+/// Every finding verb, as a value. Neither verb had a hand-written page, so
+/// `page` is "" and help is generated from `spec` - and dispatch parses args
+/// against `spec` before `run`, so a trailing -h never reaches the verb body.
+pub fn finding_commands() -> Slice<flags.Command> {
+  [
+    flags.Command {
+      name: "near",
+      summary: "findings about a file or directory",
+      page: "",
+      spec: flags.with_team([]),
+      positional: "<path>",
+      run: finding_near,
+    },
+    flags.Command {
+      name: "view",
+      summary: "show one finding by slug - a finding is a doc, so this is 'lll doc view'",
+      page: "",
+      spec: doc_view_spec(),
+      positional: "SLUG",
+      run: doc_view,
+    },
+    flags.Command {
+      name: "read",
+      summary: "the same command as 'view'",
+      page: "",
+      spec: doc_view_spec(),
+      positional: "SLUG",
+      run: doc_view,
+    },
+    flags.Command {
+      name: "new",
+      summary: "file a finding: 'lll doc new -k finding' with the kind already set",
+      page: "",
+      spec: doc_new_spec(),
+      positional: "",
+      run: finding_new,
+    },
+    flags.Command {
+      name: "create",
+      summary: "the same command as 'new'",
+      page: "",
+      spec: doc_new_spec(),
+      positional: "",
+      run: finding_new,
+    },
+    flags.Command {
+      name: "list",
+      summary: "every finding, or one area's, one line each (slug, area, title)",
+      page: "",
+      spec: finding_list_spec(),
+      positional: "",
+      run: finding_list,
+    },
+  ]
+}
 
-Usage:
-  lll finding near <path>          findings about a file or directory,
-                                   matched by directory containment in both
-                                   directions (a finding filed on 'src/pb'
-                                   answers both 'near src' and
-                                   'near src/pb/records.lis')
-  lll finding list [--area X]      every finding, or one area's, one line
-                                   each (slug, area, title)
+/// Prose that belongs to the noun rather than to any one verb; dispatch
+/// prints it under the verb table for `lll finding --help`.
+fn finding_intro() -> string {
+  "Retrieve findings (docs with kind=finding) by area or path.
+
+'near' matches by directory containment in both directions: a finding filed
+on 'src/pb' answers both 'near src' and 'near src/pb/records.lis'.
 
 Both verbs accept --team KEY for this invocation, overriding LLL_TEAM or
 .lll.toml without rewriting configuration. They answer for ONE team. Every
@@ -53,8 +91,7 @@ Author findings with 'lll doc new -k finding -a <area> -p \"<paths>\"'.
 `area` is conventionally the NAME of an existing label: an issue whose labels
 contain the area surfaces the finding — on its web page and in
 'lll issue view'. `paths` is comma-separated file or directory paths, the
-coordinates 'lll finding near' matches by.",
-  )
+coordinates 'lll finding near' matches by."
 }
 
 // ------------------------------------------------------------------ specs
@@ -69,20 +106,24 @@ fn finding_list_spec() -> Slice<flags.Flag> {
       help: "only findings whose area equals this",
       ..
     },
+    flags.Flag {
+      name: "--search",
+      alias: "--query",
+      value: true,
+      hint: "text",
+      help: "only findings whose slug or title contains text",
+      ..,
+    },
+    flags.Flag {
+      name: "-p",
+      alias: "--path",
+      value: true,
+      hint: "path",
+      help: "only findings about this file or directory (what 'finding near' answers)",
+      ..,
+    },
     flags.Flag { name: "--json", help: "print the raw record list as JSON", .. },
   ])
-}
-
-/// The flag table of one finding verb; read by `lll completions` so the
-/// scripts complete exactly what the parser accepts (TASK-127).
-pub fn finding_verb_spec(verb: string) -> Slice<flags.Flag> {
-  if !["near", "list"].contains(verb) { return [] }
-  let spec = match verb {
-    "near" => [],
-    "list" => finding_list_spec(),
-    _ => [],
-  }
-  flags.with_team(spec)
 }
 
 // ----------------------------------------------------------------- shared
@@ -146,9 +187,19 @@ fn finding_list(args: Slice<string>) -> Result<(), string> {
   let usage = flags.usage("lll finding list", spec, "")
   let p = flags.parse(spec, args, 3, false, usage)?
   let area = strings.TrimSpace(p.one("-a"))
+  // --search and -p exist because eight of thirty fleet agents asked list
+  // for them and none reached for 'near' from here.
+  let search = strings.ToLower(strings.TrimSpace(p.one("--search")))
+  let path = strings.TrimSpace(p.one("-p"))
   let mut findings = fetch_findings(current_team()?.id)?
   if area != "" {
     findings = findings.filter(|d| strings.TrimSpace(d.area) == area)
+  }
+  if search != "" {
+    findings = findings.filter(|d| strings.Contains(strings.ToLower(d.slug), search) || strings.Contains(strings.ToLower(d.title), search))
+  }
+  if path != "" {
+    findings = findings.filter(|d| doc_paths_touch(d, path))
   }
   if p.given("--json") {
     let body = match json.Marshal(findings) {
@@ -174,4 +225,22 @@ fn print_finding_lines(docs: Slice<models.Doc>) {
     if area == "" { area = "-" }
     fmt.Println(f"{d.slug}\t{area}\t{d.title}")
   }
+}
+
+/// `lll finding new ...` is `lll doc new -k finding ...`: five of thirty
+/// fleet agents typed the former, since the noun they were working in was
+/// finding. The kind is appended unless the caller spelled one.
+fn finding_new(args: Slice<string>) -> Result<(), string> {
+  let mut has_kind = false
+  for a in args {
+    if a == "-k" || a == "--kind" || a.starts_with("-k=") || a.starts_with("--kind=") { has_kind = true }
+  }
+  let mut forwarded = args
+  if !has_kind { forwarded = forwarded.append("-k").append("finding") }
+  doc_new(forwarded)
+}
+
+/// Read the same table used by dispatch and completions.
+pub fn finding_verb_spec(verb: string) -> Slice<flags.Flag> {
+  flags.command_spec(finding_commands(), verb)
 }

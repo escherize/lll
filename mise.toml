@@ -69,6 +69,10 @@ SCRATCH=$(mktemp -d)
 # scratch board leaves no .lll.toml behind (TASK-143).
 echo "scratch board: db :$DB_PORT, web :$WEB_PORT, data $SCRATCH"
 echo "  temporary - delete the data dir when you are done: rm -rf $SCRATCH"
+# The scratch board owns its superuser, like seed.sh and e2e_begin: a shell
+# that exports the production LLL_ADMIN_* pair would otherwise boot a throwaway
+# board with the prod admin upserted into it.
+LLL_ADMIN_EMAIL=admin@local.dev LLL_ADMIN_PASSWORD=admin-local-123 \\
 LLL_URL="http://127.0.0.1:$DB_PORT" LLL_TEAM="${LLL_TEAM:-SCRAT}" \\
   target/.lisette/bin/lll up --port "$WEB_PORT" --pb-dir "$SCRATCH/pb_data" "$@"
 """

@@ -1,9 +1,11 @@
 import "go:bytes"
+import "go:encoding/base64"
 import "go:encoding/json"
 import "go:io"
 import "go:net/http"
 import "go:os"
 import "go:strings"
+import "go:time"
 
 import "config"
 
@@ -140,7 +142,20 @@ fn send(method: string, path: string, payload: string) -> Result<string, string>
   if cfg.token == "" && strings.HasPrefix(path, "/api/collections/") {
     return Err(not_logged_in(cfg.url, src.url == "default"))
   }
-  let body = request(cfg.url, method, path, payload, bearer(cfg.token), src.url == "default")?
+  // TASK-319: the server answers 401 to a record request whose token it
+  // could not load, which is how an expired, corrupted or disowned token now
+  // arrives - one step earlier than the empty list below, same verdicts.
+  let body = match request(cfg.url, method, path, payload, bearer(cfg.token), src.url == "default") {
+    Ok(b) => b,
+    Err(e) => {
+      if cfg.token != "" && strings.Contains(e, ": 401 ") {
+        if let Some(refused) = refused_token(cfg, src, method, path, payload) {
+          return refused
+        }
+      }
+      return Err(e)
+    },
+  }
   // TASK-247: the same filter-not-gate semantics that hid a MISSING token also
   // hide a DEAD one. PocketBase rotates a record's tokenKey on every password
   // change, so a token issued before a reset stops matching — and the list rule
@@ -149,22 +164,45 @@ fn send(method: string, path: string, payload: string) -> Result<string, string>
   //
   // An empty list is the only case worth paying for, and it costs one extra
   // request in the case where the command was about to print nothing anyway.
-  if is_empty_list(method, body) && cfg.token != "" && !token_still_valid(cfg.url, cfg.token) {
+  if is_empty_list(method, body) && cfg.token != "" {
+    if let Some(refused) = refused_token(cfg, src, method, path, payload) {
+      return refused
+    }
+  }
+  Ok(body)
+}
+
+/// The answer for a token the server did not honour, by verdict: corrupted
+/// and expired are named from the token itself; rejected re-mints and
+/// repeats when this process holds the admin credentials (the board,
+/// TASK-255) and is named otherwise. None when the token is valid after
+/// all - an empty list that really is empty.
+fn refused_token(
+  cfg: config.Config,
+  src: config.Sources,
+  method: string,
+  path: string,
+  payload: string,
+) -> Option<Result<string, string>> {
+  let verdict = token_verdict(cfg.url, cfg.token)
+  if verdict == "corrupted" { return Some(Err(corrupted_token(src.token))) }
+  if verdict == "expired" { return Some(Err(expired_token(cfg.token, src.token))) }
+  if verdict == "rejected" {
     // A process holding the server's admin credentials can fix this itself.
     // That is the board (TASK-255): `lll up` mints a superuser token at boot
-    // and re-mints it "if refused", but a stale token is never refused on a
+    // and re-mints it "if refused", but a stale token was never refused on a
     // read, so the board silently saw an empty database and told everyone its
     // own configured team did not exist. Re-mint once and repeat the request;
     // a plain CLI user has no admin credentials and gets the message instead.
     if let Some(fresh) = remint_from_admin_credentials(cfg.url) {
       let _ = os.Setenv("LLL_TOKEN", fresh)
-      return request(
+      return Some(request(
         cfg.url, method, path, payload, bearer(fresh), src.url == "default",
-      )
+      ))
     }
-    return Err(stale_token(cfg.url))
+    return Some(Err(stale_token(cfg.url, src.token)))
   }
-  Ok(body)
+  None
 }
 
 /// A fresh superuser token from LLL_ADMIN_EMAIL/LLL_ADMIN_PASSWORD, or None
@@ -174,6 +212,10 @@ fn send(method: string, path: string, payload: string) -> Result<string, string>
 /// credentials may re-authenticate silently. Everyone else is told their
 /// token is dead, which is the honest answer for a person.
 fn remint_from_admin_credentials(base: string) -> Option<string> {
+  // The board sets LLL_REMINT for itself at boot (up.lis). Anyone else
+  // holding the admin pair - a fleet, the e2e suite, a developer shell -
+  // gets the honest refusal instead of a silent superuser upgrade.
+  if os.Getenv("LLL_REMINT") != "1" { return None }
   let email = os.Getenv("LLL_ADMIN_EMAIL")
   let pass = os.Getenv("LLL_ADMIN_PASSWORD")
   if email == "" || pass == "" { return None }
@@ -206,33 +248,155 @@ fn is_empty_list(method: string, body: string) -> bool {
   method == "GET" && strings.Contains(body, "\"totalItems\":0")
 }
 
-/// Does `tok` still authenticate? auth-refresh is the cheapest call a live
-/// token can make. Both collections are tried, because the token here is not
-/// always a member's: `lll up` seeds and serves on the SUPERUSER token, and
-/// checking only /members/auth-refresh declared that valid token dead — on an
-/// empty database, which is precisely what a first boot is seeding. Uses
-/// request() rather than a verb, so the empty-list check cannot recurse.
-fn token_still_valid(base: string, tok: string) -> bool {
-  for collection in ["members", "_superusers"] {
-    let refreshed = request(
+
+/// Why a token is or is not usable: "valid", "corrupted", "expired", "rejected", or
+/// "opaque". The last is a token this cannot read as a JWT at all - not three
+/// segments - which is left alone, because it may be a credential of a kind
+/// this client does not model. "corrupted" is the case fleet run 3 (TASK-309)
+/// produced ten times over: three segments, so it IS a JWT, but the payload
+/// does not decode - a hand-copied token with a typo in its middle third. The
+/// old rule treated that as valid ("a token this cannot read is not accused"),
+/// which meant every one of those agents got silence on their first command
+/// instead of the one word that would have sent them back to the file.
+fn token_verdict(base: string, tok: string) -> string {
+  let parts = strings.Split(tok, ".")
+  if parts.length() != 3 { return "opaque" }
+  let Some(id) = token_subject(tok) else { return "corrupted" }
+  if token_expired(tok) { return "expired" }
+  for coll in ["members", "_superusers"] {
+    let found = request(
       base,
-      "POST",
-      f"/api/collections/{collection}/auth-refresh",
+      "GET",
+      f"/api/collections/{coll}/records/{id}?fields=id",
       "",
       bearer(tok),
       false,
     )
-    if refreshed.is_ok() { return true }
+    if found.is_ok() { return "valid" }
   }
-  false
+  "rejected"
+}
+
+/// The record id a PocketBase auth JWT names, from its payload. None when the
+/// token is not three base64url segments carrying an `id`, which is not a
+/// judgement about validity - a token this cannot read is left alone.
+pub fn token_subject(tok: string) -> Option<string> {
+  let parts = strings.Split(tok, ".")
+  if parts.length() != 3 { return None }
+  let Ok(raw) = base64.RawURLEncoding.DecodeString(parts[1]) else { return None }
+  let mut claims = TokenClaims { .. }
+  if json.Unmarshal(raw, &claims).is_err() { return None }
+  if claims.id == "" { return None }
+  Some(claims.id)
+}
+
+#[json]
+struct TokenClaims {
+  id: string,
+  exp: int,
+}
+
+/// The unix time a PocketBase auth JWT expires, from its payload; None when
+/// the token cannot be read or carries no exp. PocketBase honours exp on
+/// impersonation tokens (verified: a 4-second token lists inside its
+/// lifetime and is refused after), so a past exp is a verdict on its own.
+pub fn token_expiry(tok: string) -> Option<int> {
+  let parts = strings.Split(tok, ".")
+  if parts.length() != 3 { return None }
+  let Ok(raw) = base64.RawURLEncoding.DecodeString(parts[1]) else { return None }
+  let mut claims = TokenClaims { .. }
+  if json.Unmarshal(raw, &claims).is_err() { return None }
+  if claims.exp == 0 { return None }
+  Some(claims.exp)
+}
+
+/// True when the token carries an exp that has passed.
+pub fn token_expired(tok: string) -> bool {
+  let Some(exp) = token_expiry(tok) else { return false }
+  exp < time.Now().Unix() as int
 }
 
 /// The refusal for a token the server no longer accepts.
-fn stale_token(base: string) -> string {
-  f"your saved token is no longer valid at {base}
-it was rejected, so every read comes back empty rather than failing — most
-likely somebody reset your password, which retires the tokens issued before it
-log in again: lll login --email <your email>"
+/// The refusal when the configured token is a JWT whose payload does not
+/// decode: it was mangled in transit, almost always by being typed. Named
+/// separately from a rejected token because the fix is different and local -
+/// nobody reset anything; go back to where the token came from and copy it
+/// again, by machine this time.
+fn corrupted_token(origin: string) -> string {
+  let from = if strings.HasPrefix(origin, "env:") {
+    "LLL_TOKEN"
+  } else if strings.HasPrefix(origin, "file:") {
+    strings.TrimPrefix(origin, "file:")
+  } else {
+    "the configured token"
+  }
+  f"the token in {from} is corrupted: it is shaped like a token but its payload does not decode
+it was almost certainly altered in copying - re-read it from its source into the variable
+rather than typing it (a token is ~200 characters and one wrong one is enough)"
+}
+
+/// not_logged_in, with the url and its origin looked up, for callers outside
+/// send()'s error path (whoami).
+pub fn not_logged_in_message() -> string {
+  let Ok((cfg, src)) = config.load_traced() else { return not_logged_in("", true) }
+  not_logged_in(cfg.url, src.url == "default")
+}
+
+/// corrupted_token, with the origin looked up, for callers that are not in
+/// send()'s error path (whoami).
+pub fn corrupted_token_message() -> string {
+  let Ok((_, src)) = config.load_traced() else { return corrupted_token("") }
+  corrupted_token(src.token)
+}
+
+/// The refusal when a well-formed token is disowned by the server. `origin`
+/// is where the token came from (config's Sources.token: "env:LLL_TOKEN" or
+/// "file:<path>"), because the fix depends on it.
+///
+/// This used to open "your saved token is no longer valid" and name one
+/// cause, a password reset. Fleet run 3 (TASK-309) had ten of thirty agents
+/// hit it with a token they had COPIED WRONG - an env var, never saved
+/// anywhere - and every one of them went looking for a revoked credential,
+/// because the message told them to. The three causes are listed in the order
+/// an agent should check them: the cheap local one first.
+/// The refusal for a token whose own payload says it has expired: exact,
+/// because the payload is. Fleet shard 24 reported expired tokens keep
+/// working; the probe said otherwise, and this is what it says now.
+fn expired_token(tok: string, origin: string) -> string {
+  let from = if strings.HasPrefix(origin, "env:") {
+    "the token in LLL_TOKEN"
+  } else if strings.HasPrefix(origin, "file:") {
+    f"the token in {strings.TrimPrefix(origin, "file:")}"
+  } else {
+    "your token"
+  }
+  let exp = token_expiry(tok).unwrap_or(0)
+  let when = time.Unix(exp as int64, 0).UTC().Format("2006-01-02 15:04:05 UTC")
+  let ago = time.Now().Unix() as int - exp
+  f"{from} expired at {when} ({ago}s ago) — every read comes back empty and every write is refused until it is replaced: 'lll token create <member>' (an agent's, minted by a superuser) or 'lll login --email <your email>' (a person)"
+}
+
+pub fn expired_token_message() -> string {
+  let (cfg, src) = config.load_traced().unwrap_or((config.Config { .. }, config.Sources { .. }))
+  expired_token(cfg.token, src.token)
+}
+
+fn stale_token(base: string, origin: string) -> string {
+  let from = if strings.HasPrefix(origin, "env:") {
+    "the token in LLL_TOKEN"
+  } else if strings.HasPrefix(origin, "file:") {
+    f"the token in {strings.TrimPrefix(origin, "file:")}"
+  } else {
+    "your token"
+  }
+  f"{from} was rejected by {base}
+it is well-formed, but the server does not recognise it, so every read comes
+back empty rather than failing. In order of likelihood:
+  1. it was copied wrong - compare it byte-for-byte with where it came from
+  2. the password behind it was reset, which retires earlier tokens
+  3. it expired
+a fresh one: 'lll login --email <your email>' (a person) or 'lll token create'
+(an agent's, minted by a superuser)"
 }
 
 /// Refusal for a collection request with no token anywhere in the layering.

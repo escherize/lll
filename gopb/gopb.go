@@ -12,6 +12,7 @@ import (
 	"math"
 	"os"
 	"path/filepath"
+	"regexp"
 
 	"github.com/escherize/lll/pb"
 	"github.com/pocketbase/dbx"
@@ -31,6 +32,11 @@ import (
 // The migrations come from the binary (pb.Migrations), not the working
 // directory, so a copied `lll` boots anywhere -- TASK-80. The caller no longer
 // passes a migrations path.
+// recordsPath is every record CRUD route: list, view, create, update, delete.
+var recordsPath = regexp.MustCompile(`^/api/collections/[^/]+/records(/|$)`)
+
+const anonMessage = "authentication required: send a member token as 'Authorization: Bearer ...' - 'lll login' for a person, 'lll token create' for an agent"
+
 func Serve(dataDir, addr, adminEmail, adminPassword string) error {
 	migrationsDir, err := materializeMigrations(dataDir)
 	if err != nil {
@@ -78,6 +84,24 @@ func Serve(dataDir, addr, adminEmail, adminPassword string) error {
 		if err := upsertSuperuser(e.App, adminEmail, adminPassword); err != nil {
 			return err
 		}
+		// TASK-319: a record request that carries no auth at all is told so.
+		// PocketBase applies a list rule as a FILTER, so an anonymous list
+		// answered 200 and nothing, which every client except lll's own read
+		// as "no issues"; view/update/delete answered 404 and create 400.
+		// This is router middleware rather than the record hooks because the
+		// view/update/delete hooks fire AFTER the rule-filtered lookup, by
+		// which point the answer is already a 404. Rules still decide what an
+		// authenticated caller sees; this only turns silence into a 401 for
+		// callers who sent no token. Existence leaks nothing: the refusal is
+		// the same for every collection and record and precedes the lookup.
+		// Only /api/collections/<name>/records... is matched, so password
+		// login, impersonation and /api/health are untouched.
+		e.Router.BindFunc(func(re *core.RequestEvent) error {
+			if re.Auth == nil && recordsPath.MatchString(re.Request.URL.Path) {
+				return re.UnauthorizedError(anonMessage, nil)
+			}
+			return re.Next()
+		})
 		return e.Next()
 	})
 

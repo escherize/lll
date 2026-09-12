@@ -14,8 +14,8 @@ import "go:strings"
 /// it (and [project] version in lisette.toml) when you tag.
 pub fn version() -> string {
   let Ok(out) = exec.Command("git", "describe", "--tags", "--match", "v*", "--always", "--dirty").Output() else {
-    return "0.1.0"
+    return "0.2.0"
   }
   let desc = strings.TrimPrefix(strings.TrimSpace(out as string), "v")
-  if desc == "" { "0.1.0" } else { desc }
+  if desc == "" { "0.2.0" } else { desc }
 }

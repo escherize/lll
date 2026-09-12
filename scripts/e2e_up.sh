@@ -37,6 +37,15 @@ cleanup() { # exit-status
 e2e_trap_cleanup cleanup
 
 lis build >/dev/null
+
+# TASK-227 (the half of TASK-187 this suite never got): pin HOME for the rest
+# of the run, AFTER lis build so the lis/go/mise caches under the real HOME
+# stay warm. Without it every plain CLI call here read the developer's own
+# ~/.config/lll/lll.toml - which on this machine names a member that does not
+# exist in the scratch database. That was silent while an unmatched 'me' was
+# accepted as anon; TASK-309 made it a refusal and this suite died at its
+# first comment, naming the developer's own identity.
+e2e_pin_home
 LLL=target/.lisette/bin/lll
 LLL_ABS="$PWD/$LLL"
 
@@ -94,7 +103,17 @@ curl -sf -X POST "http://127.0.0.1:$DB2/api/collections/_superusers/auth-with-pa
 # rides a member token from the same server.
 grep -q "auth   rules are authenticated-only" "$UP_LOG" \
   || fail "lll up did not apply the superuser token to its own process"
-E2E_TOKEN=$(pb_member_token "http://127.0.0.1:$DB2" e2e-up e2e-up@lll.test e2e-up-pass-123) \
+# TASK-317: the token decides identity and 'me' may only agree. The boot
+# guessed me = "e2euser" (asserted above and again below), so the suite's
+# token is that member's; wait for the boot to seed it before minting, or
+# the helper creates a second one and loses the race on the name.
+_su=$(pb_superuser_token "http://127.0.0.1:$DB2")
+for _ in $(seq 1 100); do
+  curl -sf -G "http://127.0.0.1:$DB2/api/collections/members/records" --data-urlencode "filter=(name='e2euser')" \
+    -H "Authorization: Bearer $_su" | jq -e '.items | length > 0' >/dev/null && break
+  sleep 0.1
+done
+E2E_TOKEN=$(pb_member_token "http://127.0.0.1:$DB2" e2euser e2euser@members.invalid e2e-up-pass-123) \
   || fail "bootstrapping the e2e_up member token"
 export LLL_TOKEN="$E2E_TOKEN"
 AUTH_HDR="Authorization: Bearer $E2E_TOKEN"

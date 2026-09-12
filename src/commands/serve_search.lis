@@ -1,10 +1,9 @@
 import "go:net/http"
-import "go:net/url"
 import "go:strings"
 
 import "models"
-import "pb"
 import "query"
+import "search"
 
 // GET /search - a search over every issue in the team, served as a page or as
 // the results fragment alone.
@@ -33,10 +32,10 @@ fn search_page(
   me: string,
 ) {
   let q = strings.TrimSpace(query_param(r, "q"))
-  let mut results: Slice<CardVM> = []
+  let mut results: Slice<SearchHitVM> = []
   if q != "" {
-    match fetch_search_issues(team.id, q) {
-      Ok(issues) => results = issues.map(card_vm),
+    match search_hits(team, q) {
+      Ok(hits) => results = hits,
       Err(e) => {
         http.Error(w, e, 500)
         return
@@ -76,16 +75,33 @@ fn search_page(
   let _ = w.Write(html.bytes())
 }
 
-/// Issues matching `q`, most recently touched first. The filter is the same
-/// clause `lll issue list --search` builds, so the page and the CLI agree on
-/// what "matches" means instead of each having its own idea of search.
-fn fetch_search_issues(
-  team_id: string,
-  q: string,
-) -> Result<Slice<models.Issue>, string> {
-  let filter = query.filter(team_id, "", "", "", "", q)
-  let path = f"/api/collections/issues/records?perPage=200&expand=team,assignee,labels&sort=-updated&filter={url.QueryEscape(filter)}"
-  let mut issues = models.IssueList { .. }
-  pb.fetch(path, "issues", &issues)?
-  Ok(issues.items)
+/// The team's issues and comments ranked for `q` by the same engine
+/// `lll search` uses (LLL-96), so the page and the CLI agree on what a
+/// match is and why. Docs are not on this page: it is the issue board's
+/// search, and a doc hit has nowhere here to land yet.
+fn search_hits(team: models.Team, q: string) -> Result<Slice<SearchHitVM>, string> {
+  let issues = fetch_team_issues_where(team.id, candidate_clause(q, ["title", "description"]))?
+  let comments = fetch_team_comments_where(team.id, candidate_clause(q, ["body"]))?
+  // A comment's issue must be in the candidate set for the hit to have a
+  // card; fetch the parents the comment filter found that the issue one did not.
+  let mut have = Map.new<string, bool>()
+  for i in issues { have[i.id] = true }
+  let mut extra_ids: Slice<string> = []
+  for c in comments { if have.get(c.issue).is_none() { have[c.issue] = true; extra_ids = extra_ids.append(c.issue) } }
+  let mut all = issues
+  if !extra_ids.is_empty() {
+    let mut ors: Slice<string> = []
+    for id in extra_ids { ors = ors.append(f"id={query.quote(id)}") }
+    all = all.append(fetch_team_issues_where(team.id, "(" + strings.Join(ors, " || ") + ")")?...)
+  }
+  let issues = all
+  let corpus = issue_documents(team.key, issues, comments)
+  let mut by_key = Map.new<string, models.Issue>()
+  for i in issues { by_key[f"{team.key}-{i.number}"] = i }
+  let mut out: Slice<SearchHitVM> = []
+  for h in search.rank(corpus, q, 50) {
+    let Some(i) = by_key.get(h.group) else { continue }
+    out = out.append(SearchHitVM { card: card_vm(i), snippets: h.snippets })
+  }
+  Ok(out)
 }

@@ -356,18 +356,40 @@ each value came from; 'lll login' replaces the token.",
     return Err(f"unknown whoami argument: '{flag}' (see 'lll whoami --help')")
   }
   let (cfg, src) = config.load_traced()?
-  // pb.post refuses an untokened collection call with the message that names
-  // the fix, so there is no second copy of it here.
-  let body = pb.post("/api/collections/members/auth-refresh", "")?
-  let mut auth = models.AuthResponse { .. }
-  if let Err(e) = json.Unmarshal(body.bytes(), &auth) {
+  // NOT auth-refresh, which this used to POST. A refresh is refused for every
+  // non-refreshable token - and `lll token create` mints exactly those, the
+  // whole agent credential - so `lll whoami` answered "401 Unauthorized" to
+  // every agent that ever ran it, which is the first command an agent reaches
+  // for when it is unsure who it is. Fleet run 3 (TASK-309) hit it. The record
+  // the token names is fetched by the id in the JWT instead, which every kind
+  // of token can do. pb.get refuses an untokened call with the message that
+  // names the fix, so there is no second copy of it here.
+  // No token at all is its own answer, the same one every read gives; the
+  // classification below is for a token that IS set but cannot be read.
+  if cfg.token == "" {
+    return Err(pb.not_logged_in_message())
+  }
+  // Same classification the reads use, so a corrupted token gets the same
+  // words here as everywhere else, instead of a third phrasing.
+  let Some(id) = pb.token_subject(cfg.token) else {
+    if strings.Split(cfg.token, ".").length() == 3 {
+      return Err(pb.corrupted_token_message())
+    }
+    return Err("the configured token is not a PocketBase auth token — 'lll login', or 'lll token create' for an agent")
+  }
+  if pb.token_expired(cfg.token) {
+    return Err(pb.expired_token_message())
+  }
+  let body = pb.get(f"/api/collections/members/records/{id}")?
+  let mut me = models.Member { .. }
+  if let Err(e) = json.Unmarshal(body.bytes(), &me) {
     return Err(f"decoding the identity response: {e}")
   }
-  fmt.Println(f"{auth.record.name} <{auth.record.email}>")
+  fmt.Println(f"{me.name} <{me.email}>")
   fmt.Println(f"server  {cfg.url}")
   let team = if cfg.team == "" { "(none — run 'lll attach')" } else { cfg.team }
   fmt.Println(f"team    {team}")
-  let notice = login_identity_notice(cfg.me, auth.record.name, src.me, config.home_path()?)
+  let notice = login_identity_notice(cfg.me, me.name, src.me, config.home_path()?)
   if notice != "" { fmt.Println(notice) }
   Ok(())
 }
@@ -586,7 +608,7 @@ fn login_identity_notice(me: string, authenticated: string, source: string, home
   } else if strings.HasPrefix(source, "file:") && source != f"file:{home}" {
     recovery = f"remove or change 'me' in {strings.TrimPrefix(source, "file:")}, then run '{recovery}'"
   }
-  f"note: authenticated as {authenticated}, but comments are authored as {me} ({source}). To use {authenticated} for comments: {recovery}"
+  f"note: authenticated as {authenticated}, but configured me is {me} ({source}); writes are refused until they agree. To use {authenticated}: {recovery}"
 }
 
 /// Render a literal argument for the recovery command, including display names.

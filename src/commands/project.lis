@@ -5,64 +5,75 @@ import "go:strings"
 
 import "models"
 import "pb"
+import "config"
 import "flags"
 import "query"
 
-/// Dispatch `lll project <verb>`.
+/// Dispatch `lll project <verb>` through the noun's Command table (TASK-307).
+/// The table is the one place a verb is declared: dispatch, `lll project
+/// --help` and shell completions all read it, so none of the three can drift.
 pub fn project(args: Slice<string>) -> Result<(), string> {
-  let Some(verb) = args.get(2) else {
-    project_usage()
-    return Ok(())
-  }
-  match verb {
-    "list" => project_list(args),
-    "create" => project_create(args),
-    "view" => project_view(args),
-    "edit" => project_edit(args),
-    "delete" => project_delete(args),
-    "--help" => {
-      project_usage()
-      Ok(())
+  flags.dispatch("project", "work with projects", project_intro(), project_commands(), args)
+}
+
+/// Every project verb, as a value. No verb has a hand-written page, so every
+/// `page` is "" and help is generated from `spec`. Dispatch parses args
+/// against `spec` before `run`, so a trailing -h can never reach a verb body
+/// - `lll project view --help` used to look up a project named "--help".
+pub fn project_commands() -> Slice<flags.Command> {
+  [
+    flags.Command {
+      name: "list",
+      summary: "list projects (name, status, team); this team's, or every team's when none is configured",
+      page: "",
+      spec: project_list_spec(),
+      positional: "",
+      run: project_list,
     },
-    "-h" => {
-      project_usage()
-      Ok(())
+    flags.Command {
+      name: "view",
+      summary: "show a project and its issues",
+      page: "",
+      spec: flags.with_team([]),
+      positional: "NAME",
+      run: project_view,
     },
-    other => Err(
-      f"unknown project command: '{other}' (see 'lll project --help')",
-    ),
-  }
+    flags.Command {
+      name: "create",
+      summary: "create a project (status defaults to planned; --team defaults to LLL_TEAM)",
+      page: "",
+      spec: project_create_spec(),
+      positional: "[NAME]",
+      run: project_create,
+    },
+    flags.Command {
+      name: "edit",
+      summary: "rename, re-describe or re-status a project; it keeps its issues",
+      page: "",
+      spec: project_edit_spec(),
+      positional: "NAME",
+      run: project_edit,
+    },
+    flags.Command {
+      name: "delete",
+      summary: "delete a project; refuses while issues still belong to it, and --force drops it off all of them",
+      page: "",
+      spec: project_delete_spec(),
+      positional: "NAME",
+      run: project_delete,
+    },
+  ]
+}
+
+/// Prose that belongs to the noun rather than to any one verb; dispatch
+/// prints it under the verb table for `lll project --help`.
+fn project_intro() -> string {
+  "Statuses: planned, started, paused, completed, cancelled"
 }
 
 /// Project statuses, in lifecycle order.
 fn project_statuses() -> Slice<string> {
   ["planned", "started", "paused", "completed", "cancelled"]
-}
-
-fn project_usage() {
-  fmt.Println(
-    "lll project - work with projects
-
-Usage:
-  lll project list                    list projects (name, status, team); this
-                                      team's, or every team's when none is
-                                      configured
-  lll project view NAME               show a project and its issues
-  lll project create NAME (or -n NAME) [-d desc] [--status s] [--team KEY]
-                                      create a project (status defaults to
-                                      planned; --team defaults to LLL_TEAM)
-  lll project edit NAME [-n \"new name\"] [-d desc] [--status s]
-                                      rename, re-describe or re-status a
-                                      project; it keeps its issues
-  lll project delete NAME [--force]   delete a project; refuses while issues
-                                      still belong to it, and --force drops it
-                                      off all of them
-
-Statuses: planned, started, paused, completed, cancelled
-
-Every command accepts --team KEY to select its team for this invocation,
-overriding LLL_TEAM and the saved attachment without rewriting configuration.",
-  )
 }
 
 fn project_list(args: Slice<string>) -> Result<(), string> {
@@ -125,15 +136,7 @@ fn project_delete_spec() -> Slice<flags.Flag> {
 /// by `lll completions` so the scripts complete exactly what the parser
 /// accepts.
 pub fn project_verb_spec(verb: string) -> Slice<flags.Flag> {
-  if !["create", "list", "view", "edit", "delete"].contains(verb) { return [] }
-  let spec = match verb {
-    "create" => project_create_spec(),
-    "list" => project_list_spec(),
-    "edit" => project_edit_spec(),
-    "delete" => project_delete_spec(),
-    _ => [],
-  }
-  flags.with_team(spec)
+  flags.command_spec(project_commands(), verb)
 }
 
 fn check_status(val: string) -> Result<string, string> {
@@ -266,6 +269,12 @@ fn resolve_project(team_id: string, name: string) -> Result<models.Project, stri
     &result,
   )?
   let Some(p) = result.items.find(|p| p.name == name) else {
+    // Four of thirty fleet agents passed the TEAM key here: the team scopes
+    // the command already, so the flag they wanted was no flag at all.
+    let team_key = config.load()?.team
+    if team_key != "" && strings.EqualFold(name, team_key) {
+      return Err(f"'{name}' is the team, not a project — the team scopes every command already, so drop --project, or pick one from 'lll project list'")
+    }
     return Err(f"no project named '{name}' — see 'lll project list'")
   }
   Ok(p)

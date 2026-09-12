@@ -22,46 +22,40 @@ import "pb"
 // duration is now explicit and long by default, the expiry is printed next
 // to the token, and a 401 here names expiry as the likely cause.
 
-/// Dispatch `lll token <verb>`.
+/// Dispatch `lll token <verb>` through the noun's Command table (TASK-307).
+/// The table is the one place a verb is declared: dispatch, `lll token --help`
+/// and shell completions all read it, so none of the three can drift.
 pub fn token(args: Slice<string>) -> Result<(), string> {
-  let Some(verb) = args.get(2) else {
-    token_usage()
-    return Ok(())
-  }
-  match verb {
-    "create" => token_create(args),
-    "--help" => {
-      token_usage()
-      Ok(())
-    },
-    "-h" => {
-      token_usage()
-      Ok(())
-    },
-    other => Err(f"unknown token command: '{other}' (see 'lll token --help')"),
-  }
+  flags.dispatch("token", "work with agent tokens", token_intro(), token_commands(), args)
 }
 
-fn token_usage() {
-  let spec = token_create_spec()
-  let usage = flags.usage("lll token create", spec, "<member>")
-  fmt.Println(
-    f"lll token - work with agent tokens
+/// Every token verb, as a value. `page` is the hand-written help `token
+/// create` already had; its former pre-parse `--help` check is gone because
+/// dispatch answers it now, and parses args against `spec` before `run` so a
+/// trailing -h can never reach the verb body.
+pub fn token_commands() -> Slice<flags.Command> {
+  [
+    flags.Command {
+      name: "create",
+      summary: "mint a long-lived agent token for <member> (superuser only)",
+      page: token_create_page(),
+      spec: token_create_spec(),
+      positional: "<member>",
+      run: token_create,
+    },
+  ]
+}
 
-Usage:
-  {usage}
-
-Mints a long-lived, non-refreshable PocketBase token that authenticates as
-<member> — the agent credential, superuser-only. It lasts a year unless
+/// Prose that belongs to the noun rather than to any one verb; dispatch
+/// prints it under the verb table for `lll token --help`.
+fn token_intro() -> string {
+  "Mints a long-lived, non-refreshable PocketBase token that authenticates as
+<member> - the agent credential, superuser-only. It lasts a year unless
 --duration says otherwise, and the expiry is printed with it. The token is
 printed once, when it is created; nothing else ever shows it. Use it as
 LLL_TOKEN=<token>, or persist it as token = \"...\" in ~/.config/lll/lll.toml
 (never the repo's .lll.toml, which is committed).
-On the receiving machine, save the API endpoint with 'lll config set url URL',
-or supply LLL_URL for the invocation.",
-  )
-  fmt.Println("Administrator credentials: --admin-email/--admin-password or LLL_ADMIN_EMAIL/LLL_ADMIN_PASSWORD; a configured superuser token also works.")
-  fmt.Println(flags.section(spec))
+On the receiving machine, save the API endpoint with 'lll config set url URL', or supply LLL_URL." + flags.section(token_create_spec())
 }
 
 /// The lifetime a mint gets when --duration is not given: one year in
@@ -80,23 +74,10 @@ fn token_create_spec() -> Slice<flags.Flag> {
   ])
 }
 
-/// The flag table of one token verb; empty for verbs without flags. Read by
-/// `lll completions` so the scripts complete exactly what the parser accepts.
-pub fn token_verb_spec(verb: string) -> Slice<flags.Flag> {
-  match verb {
-    "create" => token_create_spec(),
-    _ => [],
-  }
-}
-
 fn token_create(args: Slice<string>) -> Result<(), string> {
   let spec = token_create_spec()
   let usage = flags.usage("lll token create", spec, "<member>")
   let p = flags.parse(spec, args, 3, true, usage)?
-  if p.given("--help") {
-    print_token_create_usage()
-    return Ok(())
-  }
   let name = p.first()
   if name == "" {
     return Err(f"usage: {usage}")
@@ -305,11 +286,10 @@ fn decode_auth(body: string, what: string) -> Result<string, string> {
   Ok(auth.token)
 }
 
-fn print_token_create_usage() {
+fn token_create_page() -> string {
   let spec = token_create_spec()
   let usage = flags.usage("lll token create", spec, "<member>")
-  fmt.Println(
-    f"lll token create - mint a long-lived agent token (superuser only)
+  f"lll token create - mint a long-lived agent token (superuser only)
 
 Usage:
   {usage}
@@ -326,8 +306,6 @@ later command can tell you when it dies. When it does, the 401 says so and the
 fix is another 'lll token create'.
 
 The token is printed exactly once. Agents persist it with
-token = \"...\" in ~/.config/lll/lll.toml — never .lll.toml, which is committed.",
-  )
-  fmt.Println("On the receiving machine, save the API endpoint with 'lll config set url URL', or supply LLL_URL for the invocation.")
-  fmt.Println(flags.section(spec))
+token = \"...\" in ~/.config/lll/lll.toml — never .lll.toml, which is committed.
+On the receiving machine, save the API endpoint with 'lll config set url URL', or supply LLL_URL." + flags.section(spec)
 }

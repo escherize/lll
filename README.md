@@ -188,7 +188,7 @@ Client settings, read by every `lll` command:
 |---|---|---|
 | `LLL_URL` | `url` | PocketBase **API** base URL (default `http://127.0.0.1:8090`; hosted, `https://your-host`, the board's address, which serves the API too). Persist it without logging in using `lll config set url URL`. |
 | `LLL_TEAM` | `team` | Default team key; scopes `issue list`, required by `issue create` |
-| `LLL_ME` | `me` | Your member name; authors your comments and receives assignments |
+| `LLL_ME` | `me` | Optional member name; must agree with your authenticated token |
 | `LLL_SORT` | `sort` | Default sort: `created`, `updated`, `priority`, `number`; `-` prefix descends |
 | `LLL_WEB_URL` | `web_url` | Web board base URL for `board`, `issue url`, `view -w`. Set it with `lll config set web_url URL` or `lll login --web-url URL`. `lll up` saves its actual local board endpoint; the API URL alone does not identify the board. |
 | `LLL_TOKEN` | `token` | PocketBase auth token sent as `Authorization: Bearer` on every request. A secret: `lll login` writes it to the home config, `lll token create` mints agent tokens; never the repo's .lll.toml |
@@ -220,6 +220,7 @@ lll issue list --state todo --sort -updated
 lll issue branch-name ENG-12  # print eng-12-fix-login; changes nothing
 git switch -c "$(lll issue branch-name ENG-12)"  # optional, explicit Git action
 lll issue start ENG-12        # state -> in-progress; leaves Git untouched
+lll issue start ENG-12 --branch  # opt in to branch creation/switch and work-site recording
 lll issue claim ENG-12        # take it exclusively; non-zero if someone holds it
 lll issue release ENG-12      # give it back
 lll issue view                # ID inferred from the git branch
@@ -252,11 +253,11 @@ lll completions zsh           # bash, zsh, fish
 Issue IDs resolve: explicit arg, else the current git branch
 (`eng-12-fix-login` -> `ENG-12`).
 
-`issue start` works without Git. On an existing matching issue branch, it also
-records the branch, host, and checkout/worktree path on the issue. Starting from
-another matching worktree replaces that current location and leaves the previous
-one in a comment. Starting from `main` or outside Git leaves any recorded location
-unchanged. Branch creation and switching are always explicit Git operations.
+`issue start` changes state without touching Git or the recorded work location.
+`issue start --branch` explicitly creates or switches to the suggested branch
+and records its branch, host, and checkout/worktree path. Running it from another
+worktree replaces the current location and leaves the previous one in a comment.
+Use `issue branch-name` when composing your own Git commands.
 
 ## Web board
 
@@ -269,6 +270,8 @@ Server-rendered board at `/`, issue pages at `/issue/KEY-123`, search at
 - Live search, filter chips (assignee/label/priority/state), hideable columns.
 - `/search?q=…` searches the database, not the rendered board, so the query is
   a shareable URL and `curl` gets the same answer the browser does.
+- `lll search TEXT` is full text over issues, comments and docs, ranked, with the
+  lines around each match; the board's `/search` runs the same engine.
 - Issue pages: inline field editing, markdown comments.
 
 ## Development
@@ -286,7 +289,7 @@ mise run gate      # all three -- what a change must pass before it lands
 itself (no external binary), plus `jq` and `python3`. It never touches your
 data.
 
-`scripts/import_sidecar.py` imports this project's own `.private` sidecar
+`scripts/import_sidecar.py` imported this project's former `.private` sidecar
 tracker (Backlog.md tasks + wiki/decisions/findings) into an lll instance as
 team `LLL`. It is idempotent. Every record carries an `Origin: sidecar ...` body line, and
 a re-run creates nothing that is already there. Re-running it is safe, and is

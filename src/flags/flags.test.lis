@@ -120,7 +120,9 @@ fn parse_collects_a_single_positional_when_allowed() {
 #[test]
 fn parse_rejects_positionals_when_disallowed() {
   let assert Err(msg) = parse(spec(), argv(["stray"]), 3, false, "usage line")
-  assert msg == "unexpected argument: 'stray'\nusage: usage line"
+  // The flag table rides along (fleet task 8): the usage line alone was
+  // the message agents rated least helpful.
+  assert msg.starts_with("unexpected argument: 'stray'\nusage: usage line\nFlags:")
 }
 
 #[test]
@@ -354,4 +356,50 @@ fn team_extraction_rejects_missing_or_empty_keys() {
   assert extract_team(argv(["--team"]), 3, []).is_err()
   assert extract_team(argv(["--team="]), 3, []).is_err()
   assert extract_team(argv(["--team", " "]), 3, []).is_err()
+}
+
+// TASK-309, fleet run 4: ten of thirty agents typed `lll issue comment DEMO-1
+// "the body"` and were refused for a bare word, while create takes a bare
+// title and member add a bare name. parse_n admits N positionals; this pins
+// that two of them survive a flag between them and keep their order.
+
+#[test]
+fn parse_n_keeps_two_positionals_in_order_around_a_flag() {
+  let assert Ok(p) = parse_n(spec(), argv(["DEMO-1", "--json", "the body"]), 3, 2, "")
+  assert p.first() == "DEMO-1"
+  assert p.nth(1) == "the body"
+  assert p.given("--json")
+  // A third bare word is still refused, so a stray token cannot become a body.
+  let assert Err(msg) = parse_n(spec(), argv(["DEMO-1", "the body", "extra"]), 3, 2, "")
+  assert msg == "unexpected argument: 'extra'"
+  // Absent second positional reads as empty, not as an error.
+  let assert Ok(q) = parse_n(spec(), argv(["DEMO-1"]), 3, 2, "")
+  assert q.nth(1) == ""
+}
+
+#[test]
+fn dispatch_preserves_help_as_an_alias_value_and_stops_real_help() {
+  let commands = [Command {
+    name: "create", summary: "create", page: "create help",
+    spec: [Flag { name: "-b", alias: "--body -m --message", value: true, .. }],
+    positional: "", run: |args| {
+      if args[4] != "--help" { return Err("wrong body") }
+      Ok(())
+    },
+  }]
+  for alias in ["-b", "--body", "-m", "--message"] {
+    assert dispatch("doc", "", "", commands, ["lll", "doc", "create", alias, "--help"]).is_ok()
+    let assert Err(help) = dispatch("doc", "", "", commands, ["lll", "doc", "create", alias, "--help", "-h"])
+    assert help == help_marker() + "create help"
+  }
+}
+
+#[test]
+fn team_extraction_preserves_values_of_every_alias() {
+  let spec = [Flag { name: "-b", alias: "--body -m --message", value: true, .. }]
+  for alias in ["-b", "--body", "-m", "--message"] {
+    let assert Ok((args, team)) = extract_team(["lll", "doc", "create", alias, "--team", "--team", "LLL"], 3, spec)
+    assert args.equals(["lll", "doc", "create", alias, "--team"])
+    assert team == Some("LLL")
+  }
 }

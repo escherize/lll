@@ -1,6 +1,7 @@
 import "go:encoding/json"
 import "go:fmt"
 import "go:os"
+import "go:strconv"
 import "go:strings"
 import "go:time"
 
@@ -164,13 +165,42 @@ connection loss and reconnection messages also go to stderr.
 /// Dispatch `lll issue watch [KEY-123]` — a live event stream for one issue
 /// and its comments. Runs until interrupted or the issue is deleted.
 pub fn issue_watch(args: Slice<string>) -> Result<(), string> {
-  let usage = "lll issue watch [KEY-123] [--json]"
+  let usage = "lll issue watch [KEY-123] [--until text] [--timeout seconds] [--json]"
   let p = flags.parse(issue_watch_spec(), args, 3, true, "")?
   let id = p.first()
   let json_mode = p.given("--json")
+  let until = p.one("--until")
+  let mut timeout = 0
+  if p.given("--timeout") {
+    let Ok(t) = strconv.Atoi(p.one("--timeout")) else {
+      return Err(f"--timeout takes seconds, got '{p.one("--timeout")}'")
+    }
+    timeout = t
+  }
+  if timeout > 0 && until == "" {
+    return Err("--timeout only means something with --until")
+  }
   let resolved = resolve_id(id, usage)?
   let issue = fetch_issue(resolved)?
   let key = f"{issue.expand.team.key}-{issue.number}"
+
+  // TASK-322: --until is the blocking primitive agents polled for. The
+  // comment may have landed before the watch started, so the list is
+  // checked first; a race here would block forever on a comment that is
+  // already there.
+  if until != "" {
+    let existing = fetch_comments(issue.id)?
+    let mut n = 0
+    for c in existing {
+      n += 1
+      if strings.Contains(c.body, until) {
+        let mut author = c.expand.author.name
+        if author == "" { author = "anon" }
+        fmt.Println(f"already there: #{n} by {author}: {first_line(c.body)}")
+        return Ok(())
+      }
+    }
+  }
 
   let issue_topic = realtime.topic_with_options(
     f"issues/{issue.id}",
@@ -188,13 +218,42 @@ pub fn issue_watch(args: Slice<string>) -> Result<(), string> {
   // re-mint anything; the reconnect loop retries loudly instead.
   let ch = realtime.subscribe(pb.base_url()?, [issue_topic, comments_topic], None)?
   fmt.Fprintln(os.Stderr, f"watch: ready for {key} (issue and comment subscriptions accepted)")
-  if !json_mode { fmt.Println(f"Watching {key}: {issue.title}") }
+  if !json_mode && until != "" {
+    fmt.Println(f"Watching {key} until a comment contains '{until}'")
+  } else if !json_mode {
+    fmt.Println(f"Watching {key}: {issue.title}")
+  }
+
+  // --timeout: a side task posts once after the deadline; the select below
+  // takes whichever comes first.
+  let deadline = Channel.new<bool>()
+  if timeout > 0 {
+    task {
+      time.Sleep(time.Duration(timeout as int64) * time.Second)
+      let _ = deadline.send(true)
+    }
+  }
 
   // The fetched issue seeds the diff, so the very first update already
   // renders as a transition.
   let mut prev = snapshot(issue)
   loop {
-    let Some(ev) = ch.receive() else {
+    let mut next: Option<realtime.Event> = None
+    let mut timed_out = false
+    select {
+      match ch.receive() {
+        Some(ev) => next = Some(ev),
+        None => next = None,
+      },
+      match deadline.receive() {
+        Some(_) => timed_out = true,
+        None => timed_out = true,
+      },
+    }
+    if timed_out {
+      return Err(f"no comment containing '{until}' on {key} within {timeout}s")
+    }
+    let Some(ev) = next else {
       return Ok(())
     }
     if json_mode {
@@ -222,6 +281,7 @@ pub fn issue_watch(args: Slice<string>) -> Result<(), string> {
       fmt.Println(
         f"{stamp} comment by {author}: {first_line(event.record.body)}",
       )
+      if until != "" && strings.Contains(event.record.body, until) { return Ok(()) }
       continue
     }
     let mut event = IssueEvent { .. }

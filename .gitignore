@@ -1,4 +1,4 @@
-.private/
+.private/   # retired sidecar; an old clone must never be committed
 # TASK-88: .private-remote is NOT ignored. It holds the sidecar's git URL and
 # nothing else - the repo it names is private and access is controlled by SSH
 # keys, so the URL is not a credential. Ignoring it made CLAUDE.md's bootstrap

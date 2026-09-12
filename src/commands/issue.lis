@@ -96,6 +96,7 @@ fn issue_create_spec() -> Slice<flags.Flag> {
   flags.with_team([
     flags.Flag {
       name: "-t",
+      alias: "--title",
       value: true,
       hint: "\"title\"",
       help: "title of the issue (or give it as the bare argument)",
@@ -136,6 +137,7 @@ fn issue_create_spec() -> Slice<flags.Flag> {
     },
     flags.Flag {
       name: "--assignee",
+      alias: "--assign",
       value: true,
       hint: "name",
       help: "member name (see 'lll member list'); filters on list",
@@ -182,6 +184,7 @@ fn issue_list_spec() -> Slice<flags.Flag> {
     },
     flags.Flag {
       name: "--assignee",
+      alias: "--assign",
       value: true,
       hint: "name",
       help: "member name (see 'lll member list'); filters on list",
@@ -204,9 +207,10 @@ fn issue_list_spec() -> Slice<flags.Flag> {
     },
     flags.Flag {
       name: "--search",
+      alias: "--query",
       value: true,
-      hint: "q",
-      help: "list only issues whose title contains q",
+      hint: "text",
+      help: "list only issues whose title contains text",
       ..,
     },
     flags.Flag {
@@ -228,6 +232,8 @@ fn issue_list_spec() -> Slice<flags.Flag> {
       help: "raw PocketBase JSON (team, assignee, labels, project\nexpanded), pipe-friendly",
       ..,
     },
+    flags.Flag { name: "--ready", help: "only open issues whose blockers are all done (LLL-175): what an agent can pick up now", .. },
+    flags.Flag { name: "--blocked", help: "only issues with an open blocker", .. },
   ])
 }
 
@@ -269,9 +275,10 @@ fn issue_update_spec() -> Slice<flags.Flag> {
     },
     flags.Flag {
       name: "--assignee",
+      alias: "--assign",
       value: true,
       hint: "name",
-      help: "member name (see 'lll member list'); filters on list",
+      help: "member name (see 'lll member list'); 'none' clears it (update)",
       ..,
     },
     flags.Flag {
@@ -294,7 +301,7 @@ fn issue_update_spec() -> Slice<flags.Flag> {
       alias: "-t",
       value: true,
       hint: "t",
-      help: "new title (update)",
+      help: "new title (update; -t, as create spells it)",
       ..,
     },
     flags.Flag {
@@ -323,176 +330,286 @@ fn issue_comment_spec() -> Slice<flags.Flag> {
   flags.with_team([
     flags.Flag {
       name: "-b",
+      alias: "--body -m --message",
       value: true,
       hint: "\"body\"",
       help: "comment body ('-b -' reads it from stdin)",
       ..,
     },
+    flags.Flag { name: "--force", help: "with edit/delete: change a comment that is not yours", .. },
   ])
 }
 
 pub fn issue_watch_spec() -> Slice<flags.Flag> {
-  [
+  flags.with_team([
     flags.Flag {
       name: "--json",
       help: "NDJSON: one raw PocketBase event object per line, with a\n\"topic\" field added",
       ..,
     },
-  ]
+    flags.Flag {
+      name: "--until",
+      alias: "--for",
+      value: true,
+      hint: "text",
+      help: "exit 0 once a comment containing text arrives (or is already\nthere) - the blocking primitive for waiting on a partner",
+      ..,
+    },
+    flags.Flag {
+      name: "--timeout",
+      value: true,
+      hint: "seconds",
+      help: "with --until: give up after this many seconds, exit non-zero",
+      ..,
+    },
+  ])
 }
 
-/// The flag table of one issue verb; empty for the verbs without flags.
-/// Read by `lll completions` — the shell scripts complete exactly what the
-/// parser accepts because they read the same table.
-pub fn issue_verb_spec(verb: string) -> Slice<flags.Flag> {
-  if !["create", "list", "view", "update", "delete", "comment", "watch", "close", "start", "claim", "release", "url", "id", "title", "branch-name", "pr", "link", "unlink"].contains(verb) { return [] }
-  let spec = match verb {
-    "create" => issue_create_spec(),
-    "list" => issue_list_spec(),
-    "view" => issue_view_spec(),
-    "update" => issue_update_spec(),
-    "delete" => issue_delete_spec(),
-    "comment" => issue_comment_spec(),
-    "watch" => issue_watch_spec(),
-    _ => [],
+/// Dispatch `lll issue <verb>` through the noun's Command table (TASK-307).
+/// The table is the one place a verb is declared: dispatch, `lll issue --help`
+/// and shell completions all read it, so none of the three can drift.
+pub fn issue(args: Slice<string>) -> Result<(), string> {
+  let cmds = issue_commands()
+  if let Some(hint) = issue_synonym(args.get(2).unwrap_or("")) {
+    return Err(hint)
   }
-  flags.with_team(spec)
+  flags.dispatch("issue", "work with issues", issue_intro(), cmds, args)
+}
+
+/// Verbs agents reach for that are not verbs here, each pointed at the
+/// one that is. Counts are from the fleet replay: 'assign' five times in
+/// thirty-shard runs, the rest once or twice.
+fn issue_synonym(verb: string) -> Option<string> {
+  let hint = match verb {
+    "assign" => "take it for yourself with 'lll issue claim KEY-123'; assign someone else with 'lll issue update KEY-123 --assignee NAME'",
+    "unassign" => "'lll issue release KEY-123' gives a claim back; 'lll issue update KEY-123 --assignee none' clears the assignee",
+    "move" | "transition" => "'lll issue start KEY-123' sets in-progress; any state: 'lll issue update KEY-123 --state s'",
+    "status" => "'lll issue view KEY-123' shows the state; 'lll issue update KEY-123 --state s' sets it",
+    "edit" => "'lll issue update KEY-123 ...' changes fields",
+    "get" => "'lll issue view KEY-123'",
+    "find" | "search" => "'lll search text' ranks every issue, comment and doc with context; 'lll issue list --search text' filters titles",
+    "ls" => "'lll issue list'",
+    "rm" | "remove" => "'lll issue delete KEY-123'",
+    "comments" => "'lll issue comment KEY-123' lists them; add one with a body after the key",
+    "depends" | "dep" | "blocked-by" | "blockedby" => "'lll issue block KEY-123 BLOCKER' records that KEY-123 waits on BLOCKER; 'lll issue list --ready' lists what can start",
+    _ => "",
+  }
+  if hint == "" { return None }
+  Some(f"unknown issue command: '{verb}' — {hint} (see 'lll issue -h')")
+}
+
+/// Every issue verb, as a value. `page` is the hand-written help `issue
+/// create` already had; its former pre-parse `--help` check is gone because
+/// dispatch answers it now, and parses args against `spec` before `run` so a
+/// trailing -h can never reach the verb body. The summaries are the old
+/// print_usage rows, one line each.
+pub fn issue_commands() -> Slice<flags.Command> {
+  [
+    flags.Command {
+      name: "create",
+      summary: "create an issue in the configured team; -d - reads the description from stdin; without --state it starts in todo",
+      page: issue_create_page(),
+      spec: issue_create_spec(),
+      positional: "[\"title\"]",
+      run: create,
+    },
+    flags.Command {
+      name: "new",
+      summary: "the same command as 'create'",
+      page: issue_create_page(),
+      spec: issue_create_spec(),
+      positional: "[\"title\"]",
+      run: create,
+    },
+    flags.Command {
+      name: "list",
+      summary: "list issues; scoped to the configured team",
+      page: "",
+      spec: issue_list_spec(),
+      positional: "",
+      run: list,
+    },
+    flags.Command {
+      name: "view",
+      summary: "show one issue in full, with comments; --raw prints it as plain markdown; -w opens its web page instead",
+      page: "",
+      spec: issue_view_spec(),
+      positional: "[KEY-123]",
+      run: view,
+    },
+    // `read` is `view`. Seven of thirty first-time agents typed it in one
+    // fleet run (TASK-309), and the count went UP as other noise was removed -
+    // it is the word people reach for. One table entry; `view` stays the
+    // documented spelling, and the summary says so.
+    // `show` is `view` too. Two of thirty first-time agents typed it on the
+    // first clean fleet run of task 2 (TASK-309), the same shape as `read`.
+    flags.Command {
+      name: "show",
+      summary: "the same command as 'view'",
+      page: "",
+      spec: issue_view_spec(),
+      positional: "[KEY-123]",
+      run: view,
+    },
+    flags.Command {
+      name: "read",
+      summary: "the same command as 'view'",
+      page: "",
+      spec: issue_view_spec(),
+      positional: "[KEY-123]",
+      run: view,
+    },
+    flags.Command {
+      name: "update",
+      summary: "change fields (at least one flag)",
+      page: "",
+      spec: issue_update_spec(),
+      positional: "[KEY-123]",
+      run: update,
+    },
+    flags.Command {
+      name: "close",
+      summary: "set state done; retain any claim",
+      page: "",
+      spec: flags.with_team([]),
+      positional: "[KEY-123]",
+      run: close_issue,
+    },
+    flags.Command {
+      name: "start",
+      summary: "set state in-progress; --branch also git-switches to key-number-slug and records the work site",
+      page: "",
+      spec: issue_start_spec(),
+      positional: "[KEY-123]",
+      run: start,
+    },
+    flags.Command {
+      name: "claim",
+      summary: "take it exclusively for 'me' and assign it; exits non-zero, changing nothing, when someone already holds it",
+      page: "",
+      spec: flags.with_team([]),
+      positional: "[KEY-123]",
+      run: claim,
+    },
+    flags.Command {
+      name: "release",
+      summary: "remove the claim; clear assignee if it still matches the holder",
+      page: "",
+      spec: flags.with_team([]),
+      positional: "[KEY-123]",
+      run: release,
+    },
+    flags.Command {
+      name: "delete",
+      summary: "delete; asks [y/N] unless --force",
+      page: "",
+      spec: issue_delete_spec(),
+      positional: "KEY-123",
+      run: delete_issue,
+    },
+    flags.Command {
+      name: "comment",
+      summary: "add a comment (bare body or -b); 'comment KEY' lists them numbered; 'comment edit KEY N -b' and 'comment delete KEY N' change your own",
+      page: "",
+      spec: issue_comment_spec(),
+      positional: "[edit|delete] [KEY-123] [N] [\"body\"]",
+      run: comment,
+    },
+    flags.Command {
+      name: "watch",
+      summary: "stream live events for the issue and its comments until interrupted",
+      page: "",
+      spec: issue_watch_spec(),
+      positional: "[KEY-123]",
+      run: issue_watch,
+    },
+    flags.Command {
+      name: "url",
+      summary: "print the issue's web page URL",
+      page: "",
+      spec: flags.with_team([]),
+      positional: "[KEY-123]",
+      run: url_cmd,
+    },
+    flags.Command {
+      name: "id",
+      summary: "print the issue's KEY-123 identifier",
+      page: "",
+      spec: flags.with_team([]),
+      positional: "[KEY-123]",
+      run: id_cmd,
+    },
+    flags.Command {
+      name: "title",
+      summary: "print the issue's title",
+      page: "",
+      spec: flags.with_team([]),
+      positional: "[KEY-123]",
+      run: title_cmd,
+    },
+    flags.Command { name: "branch-name", summary: "print a suggested Git branch name; read-only", page: "", spec: flags.with_team([]), positional: "[KEY-123]", run: branch_name_cmd },
+    flags.Command {
+      name: "pr",
+      summary: "open a GitHub PR for the issue via 'gh pr create' (title \"KEY-123: title\", body links the issue)",
+      page: "",
+      spec: flags.with_team([]),
+      positional: "[KEY-123]",
+      run: pr_cmd,
+    },
+    flags.Command {
+      name: "link",
+      summary: "link the issue to a doc (see 'lll doc --help')",
+      page: "",
+      spec: flags.with_team([]),
+      positional: "KEY-123 SLUG",
+      run: link,
+    },
+    flags.Command {
+      name: "unlink",
+      summary: "remove that link",
+      page: "",
+      spec: flags.with_team([]),
+      positional: "KEY-123 SLUG",
+      run: unlink,
+    },
+    flags.Command {
+      name: "block",
+      summary: "record that KEY-123 cannot start until BLOCKER is done (LLL-175); view shows it, list --ready honours it",
+      page: "",
+      spec: flags.with_team([]),
+      positional: "KEY-123 BLOCKER",
+      run: block,
+    },
+    flags.Command {
+      name: "unblock",
+      summary: "remove BLOCKER from KEY-123's blockers",
+      page: "",
+      spec: flags.with_team([]),
+      positional: "KEY-123 BLOCKER",
+      run: unblock,
+    },
+  ]
 }
 
 /// Every flag across the issue verbs, deduplicated by canonical name
-/// (first wording wins), in the order the verbs declare them. This is the
-/// Flags: block `lll issue --help` renders.
-fn issue_verbs() -> Slice<string> {
-  [
-    "create",
-    "list",
-    "view",
-    "update",
-    "delete",
-    "comment",
-    "watch",
-    "close",
-    "start",
-    "claim",
-    "release",
-    "url",
-    "id",
-    "title",
-    "branch-name",
-    "pr",
-    "link",
-    "unlink",
-  ]
-}
-
+/// (first wording wins), in the order the table declares them. This is the
+/// Flags: block `lll issue --help` renders under the verb rows.
 fn issue_union_spec() -> Slice<flags.Flag> {
   let mut out: Slice<flags.Flag> = []
-  for verb in issue_verbs() {
-    for fl in issue_verb_spec(verb) {
+  for c in issue_commands() {
+    for fl in c.spec {
       if out.find(|f| f.name == fl.name).is_none() { out = out.append(fl) }
     }
   }
   out
 }
 
-/// Help is read-only, even after an issue ID. Values such as `-b --help`
-/// remain literal input, and an end-of-options marker ends flag detection.
-fn issue_help_requested(args: Slice<string>, verb: string) -> bool {
-  if !issue_verbs().contains(verb) { return false }
-  flags.help_requested(issue_verb_spec(verb), args, 3)
-}
-
-/// Dispatch `lll issue <verb>`.
-pub fn issue(args: Slice<string>) -> Result<(), string> {
-  let Some(verb) = args.get(2) else {
-    print_usage()
-    return Ok(())
-  }
-  if issue_help_requested(args, verb) {
-    if verb == "create" { print_create_usage() } else { print_usage() }
-    return Ok(())
-  }
-  match verb {
-    "create" => create(args),
-    "list" => list(args),
-    "view" => view(args),
-    "update" => update(args),
-    "close" => close_issue(args),
-    "start" => start(args),
-    "claim" => claim(args),
-    "release" => release(args),
-    "delete" => delete_issue(args),
-    "comment" => comment(args),
-    "watch" => issue_watch(args),
-    "url" => url_cmd(args),
-    "id" => id_cmd(args),
-    "title" => title_cmd(args),
-    "branch-name" => branch_name_cmd(args),
-    "pr" => pr_cmd(args),
-    "link" => link(args),
-    "unlink" => unlink(args),
-    "--help" => {
-      print_usage()
-      Ok(())
-    },
-    "-h" => {
-      print_usage()
-      Ok(())
-    },
-    "search" => Err("use 'lll issue list --search WORD' to search issue titles"),
-    "assign" => Err("use 'lll issue update KEY --assignee NAME' to assign an issue"),
-    "move" => Err("use 'lll issue update KEY --state in-review' (states: backlog, todo, in-progress, in-review, done, cancelled)"),
-    other => Err(f"unknown issue command: '{other}' (see 'lll issue --help')"),
-  }
-}
-
-fn print_usage() {
-  fmt.Println(
-    "lll issue - work with issues
-
-Examples:
-  lll issue list --search checkout
-  lll issue update ENG-1 --assignee alice --state in-review
-
-Usage:
-  lll issue create -t \"title\" [-d desc] [--emoji X] [--priority name|0-4] [--state s]
-                   [--assignee name] [--label name]... [--project name] [--json]
-                                                  create an issue in the configured team;
-                                                  -d - reads the description from stdin;
-                                                  without --state it starts in todo
-  lll issue list [--state s] [--assignee name] [--label name] [--project name]
-                 [--search q] [--sort f] [--limit N] [--json]
-                                                  list issues; scoped to the configured team
-  lll issue view [KEY-123] [--json] [--raw] [-w]  show one issue in full, with comments;
-                                                  --raw prints it as plain markdown;
-                                                  -w opens its web page instead
-  lll issue update [KEY-123] <flags>              change fields (at least one flag)
-  lll issue close [KEY-123]                       set state done; retain any claim
-  lll issue start [KEY-123]                       set state in-progress; never change Git
-  lll issue claim [KEY-123]                       take it exclusively for 'me' and assign
-                                                  it; exits non-zero, changing nothing,
-                                                  when someone already holds it
-  lll issue release [KEY-123]                     remove the claim; also clear assignee
-                                                  if it still matches the claim holder
-  lll issue delete KEY-123 [--force]              delete; asks [y/N] unless --force
-  lll issue comment [KEY-123] [-b \"body\"]         add a comment (authored by 'me' in
-                                                  .lll.toml); without -b, list comments
-  lll issue watch [KEY-123] [--json]              stream live events for the issue and
-                                                  its comments until interrupted or deleted;
-                                                  stderr says 'watch: ready' after subscribing;
-                                                  --json keeps stdout as NDJSON events only
-  lll issue url [KEY-123]                         print the issue's web page URL
-  lll issue id [KEY-123]                          print the issue's KEY-123 identifier
-  lll issue title [KEY-123]                       print the issue's title
-  lll issue branch-name [KEY-123]                 print a suggested Git branch name;
-                                                  read-only, creates nothing
-  lll issue pr [KEY-123]                          open a GitHub PR for the issue via
-                                                  'gh pr create' (title \"KEY-123: title\",
-                                                  body links the issue)
-  lll issue link KEY-123 SLUG                     link the issue to a doc (see 'lll doc --help')
-  lll issue unlink KEY-123 SLUG                   remove that link
-" +
-    flags.section(issue_union_spec()) +
+/// Prose that belongs to the noun rather than to any one verb; dispatch
+/// prints it under the verb table for `lll issue --help`. The union Flags:
+/// block leads, as it did before the table, so no flag's help line is lost
+/// from the noun page.
+fn issue_intro() -> string {
+  strings.TrimPrefix(flags.section(issue_union_spec()), "\n") +
     "
 
 Web URLs come from LLL_WEB_URL, then 'web_url' in the repo or home config.
@@ -509,28 +626,24 @@ git branch: eng-12-fix-login resolves to ENG-12.
 
 State glyphs: ◌ backlog  ○ todo  ◐ in-progress  ◉ in-review  ● done  ⊗ cancelled
 
-Every issue command accepts --team KEY as an invocation-only default scope,
-overriding LLL_TEAM and saved config. Explicit issue IDs keep their own team.",
-  )
+The team comes from LLL_TEAM or 'team' in .lll.toml (see 'lll config --help')."
 }
 
-fn print_create_usage() {
-  fmt.Println(
-    "lll issue create - create an issue in the configured team
+fn issue_create_page() -> string {
+  "lll issue create - create an issue in the configured team
 
 Usage:
   " +
-    flags.usage("lll issue create", issue_verb_spec("create"), "[\"title\"]") +
+    flags.usage("lll issue create", issue_create_spec(), "[\"title\"]") +
     "
 " +
-    flags.section(issue_verb_spec("create")) +
+    flags.section(issue_create_spec()) +
     "
 
 The title is the bare argument or -t; give either, not both.
 
-Use --team KEY for this invocation, or default to LLL_TEAM / 'lll attach'.
-Without --state the issue starts in todo; --label may be repeated.",
-  )
+The team comes from 'lll attach' ('team' in .lll.toml), or LLL_TEAM.
+Without --state the issue starts in todo; --label may be repeated."
 }
 
 fn create(args: Slice<string>) -> Result<(), string> {
@@ -637,6 +750,9 @@ fn list(args: Slice<string>) -> Result<(), string> {
     limit = n
   }
   let json_mode = p.given("--json")
+  let ready_only = p.given("--ready")
+  let blocked_only = p.given("--blocked")
+  if ready_only && blocked_only { return Err("--ready and --blocked exclude each other") }
 
   let cfg = config.load()?
 
@@ -663,7 +779,7 @@ fn list(args: Slice<string>) -> Result<(), string> {
   // --limit applies server-side via PB's perPage (capped by PB at 500).
   let mut per_page = 200
   if limit > 0 { per_page = limit }
-  let mut path = f"/api/collections/issues/records?perPage={per_page}&expand=team,assignee,labels,project&sort={url.QueryEscape(sort)}"
+  let mut path = f"/api/collections/issues/records?perPage={per_page}&expand=team,assignee,labels,blocked_by,project&sort={url.QueryEscape(sort)}"
   let filter = query.filter(
     team_id,
     state,
@@ -675,7 +791,7 @@ fn list(args: Slice<string>) -> Result<(), string> {
   if filter != "" { path = f"{path}&filter={url.QueryEscape(filter)}" }
 
   let body = pb.get(path)?
-  if json_mode {
+  if json_mode && !ready_only && !blocked_only {
     fmt.Println(body)
     return Ok(())
   }
@@ -684,7 +800,26 @@ fn list(args: Slice<string>) -> Result<(), string> {
   if let Err(e) = json.Unmarshal(body.bytes(), &issues) {
     return Err(f"decoding issues: {e}")
   }
-  print_issue_table(issues.items)
+  // LLL-175: --ready is what an agent can pick up now - open, and every
+  // blocker done or cancelled; --blocked is the complement with at least
+  // one open blocker. Decided here, after the fetch, because PocketBase
+  // cannot filter on an expanded relation's state.
+  let mut items = issues.items
+  if ready_only {
+    items = items.filter(|i| (i.state == "todo" || i.state == "backlog") && open_blockers(i).is_empty())
+  }
+  if blocked_only {
+    items = items.filter(|i| !open_blockers(i).is_empty())
+  }
+  if json_mode {
+    let out = match json.Marshal(models.IssueList { items, total_items: items.length() }) {
+      Ok(b) => b as string,
+      Err(e) => return Err(f"encoding issues: {e}"),
+    }
+    fmt.Println(out)
+    return Ok(())
+  }
+  print_issue_table(items)
 }
 
 /// The standard issue table (ID, state, priority, title, assignee, age),
@@ -812,6 +947,18 @@ fn view(args: Slice<string>) -> Result<(), string> {
     let slugs = linked_docs.map(|d| d.slug)
     fmt.Println(f"Docs:      {strings.Join(slugs, ", ")}")
   }
+  if full.expand.blocked_by.length() > 0 {
+    let mut parts: Slice<string> = []
+    for b in full.expand.blocked_by { parts = parts.append(f"{full.expand.team.key}-{b.number} ({b.state})") }
+    let open = open_blockers(full).length()
+    let tail = if open == 0 { " — all done, ready" } else { f" — {open} open, not ready" }
+    fmt.Println(f"Blocked by: {strings.Join(parts, ", ")}{tail}")
+  }
+  let blocks = fetch_blocks(full.id)?
+  if blocks.length() > 0 {
+    let keys = blocks.map(|b| f"{b.expand.team.key}-{b.number}")
+    fmt.Println(f"Blocks:    {strings.Join(keys, ", ")}")
+  }
   if full.emoji != "" { fmt.Println(f"Emoji:     {full.emoji}") }
   fmt.Println(f"Created:   {display.relative(full.created)}")
   fmt.Println(f"Updated:   {display.relative(full.updated)}")
@@ -822,15 +969,33 @@ fn view(args: Slice<string>) -> Result<(), string> {
 
   // The brief mechanism (TASK-103 AC#3): an agent's task brief carries the
   // findings for the work it is about to do without a human choosing them.
+  // Fifteen of thirty fleet agents lost the two docs they had linked in a
+  // list of ninety area matches. Linked findings come first and always show
+  // (the brief contract, TASK-103 AC#3); the area matches stop at a handful
+  // with a pointer. The --raw brief keeps the whole list on purpose.
+  let linked = linked_docs.map(|d| d.slug)
   let findings = findings_for_issue(full)?
   if findings.length() > 0 {
     fmt.Println("")
     fmt.Println("Related findings:")
     fmt.Println("")
+    let mut area_matches = 0
+    let mut hidden = 0
     for f in findings {
+      let is_linked = linked.contains(f.slug)
+      if !is_linked {
+        area_matches += 1
+        if area_matches > 5 {
+          hidden += 1
+          continue
+        }
+      }
       let mut area = f.area
       if area == "" { area = "-" }
       fmt.Println(f"{f.slug} ({area}) — {f.title}")
+    }
+    if hidden > 0 {
+      fmt.Println(f"... and {hidden} more by area — 'lll finding list -a AREA' lists an area, 'lll issue view --raw' prints them all")
     }
   }
 
@@ -906,6 +1071,11 @@ fn update(args: Slice<string>) -> Result<(), string> {
   let description_set = p.given("--description")
   let emoji = check_emoji(p.one("--emoji"))?
   let emoji_set = p.given("--emoji")
+  // An empty --assignee is the natural guess for "clear it" (two of thirty
+  // fleet agents); the word is 'none', and this is where to say so.
+  if p.given("--assignee") && assignee_name == "" {
+    return Err("--assignee needs a member name, or 'none' to clear it")
+  }
   if state == "" && priority < 0 && assignee_name == "" && label_names.is_empty() && project_name == "" && !title_set && !description_set && !emoji_set {
     return Err(f"nothing to update — pass at least one flag\nusage: {usage}")
   }
@@ -914,11 +1084,32 @@ fn update(args: Slice<string>) -> Result<(), string> {
   let issue = fetch_issue(resolved)?
 
   let mut fields: Slice<string> = []
-  if state != "" { fields = fields.append("\"state\":" + json_quote(state)?) }
-  if priority >= 0 { fields = fields.append(f"\"priority\":{priority}") }
-  if assignee_name != "" {
+  // What this update set, for the success line: two fleet agents read
+  // the issue back after 'Updated KEY' because it said nothing else.
+  let mut changed: Slice<string> = []
+  if state != "" { fields = fields.append("\"state\":" + json_quote(state)?); changed = changed.append(f"state={state}") }
+  if priority >= 0 { fields = fields.append(f"\"priority\":{priority}"); changed = changed.append(f"priority={priority}") }
+  if assignee_name == "none" {
+    // 'none' is what view prints for no assignee; the same word clears it.
+    // Nothing else could: an empty --assignee reads as the flag not given.
+    fields = fields.append("\"assignee\":\"\"")
+    changed = changed.append("assignee=none")
+  } else if assignee_name != "" {
     let member = resolve_member(assignee_name)?
+    // A claim is exclusive (TASK-175); --assignee used to overwrite the
+    // holder silently and the board then showed someone the claim did not
+    // (LLL-184). Assigning the holder to themselves is a no-op, anyone else
+    // is refused with the two verbs that do it honestly.
+    if let Some(held) = fetch_claim(issue.id)? {
+      if held.member != member.id {
+        let mut holder = held.expand.member.name
+        if holder == "" { holder = "someone" }
+        let key = f"{issue.expand.team.key}-{issue.number}"
+        return Err(f"{key} is claimed by {holder} ({display.relative(held.created)}) — a claim owns the assignee: 'lll issue release {key}' first, or have {member.name} run 'lll issue claim {key}'")
+      }
+    }
     fields = fields.append("\"assignee\":" + json_quote(member.id)?)
+    changed = changed.append(f"assignee={member.name}")
   }
   // The ISSUE's team scopes both name lookups, not the configured one:
   // `lll issue update GRDN-4 --label bug` must mean GRDN's bug even when
@@ -926,6 +1117,7 @@ fn update(args: Slice<string>) -> Result<(), string> {
   if project_name != "" {
     let project = resolve_project(issue.team, project_name)?
     fields = fields.append("\"project\":" + json_quote(project.id)?)
+    changed = changed.append(f"project={project.name}")
   }
   if !label_names.is_empty() {
     let mut label_ids: Slice<string> = []
@@ -937,18 +1129,32 @@ fn update(args: Slice<string>) -> Result<(), string> {
       Err(e) => return Err(f"encoding labels: {e}"),
     }
     fields = fields.append(f"\"labels\":{encoded}")
+    changed = changed.append(f"labels={strings.Join(label_names, "+")}")
   }
-  if title_set { fields = fields.append("\"title\":" + json_quote(title)?) }
+  if title_set { fields = fields.append("\"title\":" + json_quote(title)?); changed = changed.append("title") }
   if description_set {
     fields = fields.append("\"description\":" + json_quote(description)?)
+    changed = changed.append("description")
   }
   // `--emoji ""` clears the marker, so this one keys off the flag, not the value.
-  if emoji_set { fields = fields.append("\"emoji\":" + json_quote(emoji)?) }
+  if emoji_set { fields = fields.append("\"emoji\":" + json_quote(emoji)?); changed = changed.append(f"emoji={emoji}") }
   let _ = pb.patch(
     f"/api/collections/issues/records/{issue.id}",
     "{" + strings.Join(fields, ",") + "}",
   )?
-  fmt.Println(f"Updated {issue.expand.team.key}-{issue.number}")
+  // Clearing the assignee under a claim used to leave "Claimed: NAME" with
+  // nobody assigned: held but unowned, a state the fleet replay found three
+  // agents reading as "already mine". The claim goes with the assignee.
+  let mut released = ""
+  if assignee_name == "none" {
+    if let Some(held) = fetch_claim(issue.id)? {
+      let _ = pb.delete(f"/api/collections/claims/records/{held.id}")?
+      let mut name = held.expand.member.name
+      if name == "" { name = "someone" }
+      released = f" (released {name}'s claim)"
+    }
+  }
+  fmt.Println(f"Updated {issue.expand.team.key}-{issue.number}: {strings.Join(changed, ", ")}{released}")
   Ok(())
 }
 
@@ -973,11 +1179,25 @@ fn close_issue(args: Slice<string>) -> Result<(), string> {
   Ok(())
 }
 
+/// `--branch` is opt-in (TASK-310). Fleet task 3b ran `start` from a checkout
+/// that was not the work's and it switched that checkout's branch; agents whose
+/// job is "record that I am on this" never wanted git touched. The state
+/// change is the command; the branch and the work-site stamp are the extra.
+fn issue_start_spec() -> Slice<flags.Flag> {
+  flags.with_team([
+    flags.Flag {
+      name: "--branch",
+      help: "also git switch -c key-number-slug in the current repo and\nrecord the work site (branch, host, path) on the issue",
+      ..,
+    },
+  ])
+}
+
 fn start(args: Slice<string>) -> Result<(), string> {
-  let usage = "lll issue start [KEY-123]"
-  let p = flags.parse([], args, 3, true, usage)?
-  let id = p.first()
-  let resolved = resolve_id(id, usage)?
+  let spec = issue_start_spec()
+  let usage = flags.usage("lll issue start", spec, "[KEY-123]")
+  let p = flags.parse(spec, args, 3, true, usage)?
+  let resolved = resolve_id(p.first(), usage)?
   let issue = fetch_issue(resolved)?
   let _ = pb.patch(
     f"/api/collections/issues/records/{issue.id}",
@@ -985,15 +1205,20 @@ fn start(args: Slice<string>) -> Result<(), string> {
   )?
   let key = issue.expand.team.key
   fmt.Println(f"Started {key}-{issue.number}: {issue.title} (◐ in-progress)")
+  if !p.given("--branch") { return Ok(()) }
 
-  // Observe an existing matching issue branch; never create or switch one.
-  // Starting an explicit issue from main or another issue's branch must not
-  // falsely record that branch as this issue's work site.
-  if let Some(branch) = gitctx.current_branch() {
-    if gitctx.issue_id_for_team(branch, key) == Some(f"{key}-{issue.number}") {
-      record_work_site(issue, branch)?
-    }
+  if !gitctx.in_repo() {
+    return Err("--branch needs a git repository: run it from inside the one the work happens in")
   }
+  let branch = gitctx.branch_name(key, issue.number, issue.title)
+  fmt.Println(f"Branch: {branch}")
+  let created = gitctx.switch_branch(branch)?
+  if created {
+    fmt.Println(f"Created and switched to branch '{branch}'")
+  } else {
+    fmt.Println(f"Switched to existing branch '{branch}'")
+  }
+  record_work_site(issue, branch)?
   Ok(())
 }
 
@@ -1021,8 +1246,7 @@ fn record_work_site(issue: models.Issue, branch: string) -> Result<(), string> {
     // authorless otherwise. Member identity is not duplicated into the slot;
     // this comment (and the claim holder) carry the who.
     let mut author = ""
-    let me = config.load()?.me
-    if me != "" { if let Some(m) = find_member(me)? { author = m.id } }
+    if let Some(a) = actor()? { author = a.id }
     let moved = f"work moved: {issue.work_branch} @ {issue.work_host}:{issue.work_path} -> {branch} @ {host}:{path}"
     let payload = match json.Marshal(
       models.NewComment { issue: issue.id, author, body: moved },
@@ -1052,6 +1276,45 @@ fn work_site_stale(state: string, claimed: bool) -> bool {
   state == "done" || state == "cancelled" || !claimed
 }
 
+/// Who a write goes out as (TASK-317). The token decides: a member token
+/// names its member, and 'me' may only agree. A superuser token names
+/// nobody, so 'me' attributes there as it always did; no token, no 'me':
+/// nobody. The fleet showed why: every shard wrote under one shared token
+/// with me = "shard-NN" doing the attribution, and a stale home config sent
+/// six agents' comments out as one member. Identity is now what the server
+/// will also enforce, not a string in a file.
+struct Actor {
+  id: string,
+  name: string,
+}
+
+fn actor() -> Result<Option<Actor>, string> {
+  let cfg = config.load()?
+  if cfg.token != "" {
+    if let Some(id) = pb.token_subject(cfg.token) {
+      // A members record for the subject means a member token. A 404 means
+      // a superuser (or a stranger's) token: fall through to 'me'.
+      if let Ok(body) = pb.get(f"/api/collections/members/records/{id}") {
+        let mut m = models.Member { .. }
+        let decoded = json.Unmarshal(body.bytes(), &m).is_ok()
+        if decoded && m.id != "" {
+          if cfg.me != "" && cfg.me != m.name {
+            return Err(
+              f"this token is {m.name}'s, but 'me' is set to '{cfg.me}' — writes go out as the token's member; 'lll config set me {m.name}' (or unset LLL_ME) to agree, or use {cfg.me}'s own token ('lll token create {cfg.me}')",
+            )
+          }
+          return Ok(Some(Actor { id: m.id, name: m.name }))
+        }
+      }
+    }
+  }
+  if cfg.me == "" { return Ok(None) }
+  let Some(m) = find_member(cfg.me)? else {
+    return Err(f"'me' is set to '{cfg.me}' but no such member exists — see 'lll member add', or 'lll config set me <name>' to change who you are")
+  }
+  Ok(Some(Actor { id: m.id, name: m.name }))
+}
+
 /// Take an issue exclusively. The arbitration is a single INSERT into
 /// `claims`, which is UNIQUE on `issue`: two agents racing both POST the row
 /// and SQLite admits exactly one, so the loser learns it lost. Nothing here
@@ -1066,13 +1329,11 @@ fn claim(args: Slice<string>) -> Result<(), string> {
   let usage = "lll issue claim [KEY-123]"
   let id = positional_id(args, usage)?
   let resolved = resolve_id(id, usage)?
-  let me = config.load()?.me
-  if me == "" {
+  let Some(member) = actor()? else {
     return Err(
-      "claiming needs a name: set 'me' with 'lll config set me <name>', or pass LLL_ME",
+      "claiming needs a name: a member token names you; with a superuser token set 'me' ('lll config set me <name>' or LLL_ME)",
     )
   }
-  let member = resolve_member(me)?
   let issue = fetch_issue(resolved)?
   let key = f"{issue.expand.team.key}-{issue.number}"
 
@@ -1092,6 +1353,18 @@ fn claim(args: Slice<string>) -> Result<(), string> {
     }
     let Some(holder) = held else {
       return Err(e)
+    }
+    // Held by the caller already: that is success, not a conflict. The
+    // fleet replay hit this when task 7 cleared the assignee under a claim
+    // task 3 had made, and every later claim by the holder was refused.
+    // Re-setting the assignee is the point of claiming again.
+    if holder.member == member.id {
+      let _ = pb.patch(
+        f"/api/collections/issues/records/{issue.id}",
+        "{\"assignee\":" + json_quote(member.id)? + "}",
+      )?
+      fmt.Println(f"Claimed {key} for {member.name} (already yours since {display.relative(holder.created)})")
+      return Ok(())
     }
     let mut name = holder.expand.member.name
     if name == "" { name = "someone else" }
@@ -1187,16 +1460,28 @@ fn delete_issue(args: Slice<string>) -> Result<(), string> {
 }
 
 fn comment(args: Slice<string>) -> Result<(), string> {
+  // 'comment edit KEY N ...' and 'comment delete KEY N' (TASK-320) are the
+  // two sub-forms; everything else is add-or-list, below.
+  let sub = args.get(3).unwrap_or("")
+  if sub == "edit" || sub == "delete" { return comment_mutate(sub, args) }
   let spec = issue_comment_spec()
-  let usage = flags.usage("lll issue comment", spec, "[KEY-123]")
-  let p = flags.parse(spec, args, 3, true, usage + " (write a comment with -b BODY)")?
+  let usage = flags.usage("lll issue comment", spec, "[KEY-123] [\"body\"]")
+  let p = flags.parse_n(spec, args, 3, 2, usage)?
   let id = p.first()
-  if id != "" && split_issue_key(deslug(id)).is_err() {
-    return Err(f"expected an issue ID; supply comment text with -b BODY\nusage: {usage}")
-  }
+  // A bare second word is the body, as `create` takes a bare title and
+  // `member add` a bare name. Ten of thirty first-time agents in one fleet run
+  // (TASK-309) typed `issue comment DEMO-1 "text"` and were refused for it. -b
+  // stays the documented spelling and wins when both are given; `-b -` still
+  // reads stdin, which a positional cannot express.
   let mut body = ""
-  if p.given("-b") { body = value_or_stdin(p.one("-b"), "-b")? }
-  let body_set = p.given("-b")
+  let mut body_set = false
+  if p.given("-b") {
+    body = value_or_stdin(p.one("-b"), "-b")?
+    body_set = true
+  } else if p.nth(1) != "" {
+    body = p.nth(1)
+    body_set = true
+  }
 
   let resolved = resolve_id(id, usage)?
   let issue = fetch_issue(resolved)?
@@ -1208,15 +1493,27 @@ fn comment(args: Slice<string>) -> Result<(), string> {
       return Ok(())
     }
     print_comments(comments)
+    // Fleet tasks 4 and 5: every waiting agent re-read this list five times
+    // ten seconds apart. The verb that blocks instead is named where the
+    // polling happens.
+    let key = f"{issue.expand.team.key}-{issue.number}"
+    fmt.Println(f"(waiting for the next one? 'lll issue watch {key} --until TEXT' blocks until a comment containing TEXT arrives)")
     return Ok(())
   }
   if body == "" { return Err(f"-b cannot be empty\nusage: {usage}") }
 
-  // Author is the member named by 'me' in config; unset or unmatched 'me'
-  // makes the comment authorless (honor system, no auth).
+  // Author is the member named by 'me' in config. Unset 'me' makes the
+  // comment authorless (honor system). A 'me' that names NOBODY is refused:
+  // the first fleet run (TASK-309) had thirty agents each set me = "shard-NN",
+  // and every one of their comments went out as "anon" with no warning, which
+  // defeats the point of a comment as a record of who learned what. The four
+  // sibling verbs already say this; comment was the one that stayed quiet.
   let mut author = ""
-  let me = config.load()?.me
-  if me != "" { if let Some(m) = find_member(me)? { author = m.id } }
+  let mut me = ""
+  if let Some(a) = actor()? {
+    author = a.id
+    me = a.name
+  }
 
   let new_comment = models.NewComment { issue: issue.id, author, body }
   let payload = match json.Marshal(new_comment) {
@@ -1224,7 +1521,11 @@ fn comment(args: Slice<string>) -> Result<(), string> {
     Err(e) => return Err(f"encoding comment: {e}"),
   }
   let _ = pb.post("/api/collections/comments/records", payload as string)?
-  fmt.Println(f"Commented on {issue.expand.team.key}-{issue.number}")
+  // Names who it went out as. A stale home config carried one agent's 'me'
+  // into six others' comments (fleet replay); the write line is where that
+  // has to show, not a later read-back.
+  let as_who = if me == "" { "with no author — set 'me' to sign: 'lll config set me NAME' or LLL_ME=NAME" } else { f"as {me}" }
+  fmt.Println(f"Commented on {issue.expand.team.key}-{issue.number} {as_who}")
   Ok(())
 }
 
@@ -1331,12 +1632,84 @@ fn fetch_comments(issue_id: string) -> Result<Slice<models.Comment>, string> {
 
 /// Print comments as "author (3h ago)" then the indented body.
 fn print_comments(comments: Slice<models.Comment>) {
+  // Numbered so 'comment edit KEY N' and 'comment delete KEY N' have a
+  // handle (TASK-320): position in creation order, not the record id.
+  let mut n = 0
   for c in comments {
+    n += 1
     let mut author = c.expand.author.name
     if author == "" { author = "anon" }
-    fmt.Println(f"{author} ({display.relative(c.created)})")
+    fmt.Println(f"#{n} {author} ({display.relative(c.created)})")
     fmt.Println(f"  {c.body}")
   }
+}
+
+/// `lll issue comment edit KEY N -b "body"` and `... delete KEY N`. N is the
+/// position 'comment KEY' prints. Your own comments only, unless --force:
+/// the author is the token's member (or 'me' under a superuser token), and
+/// a superuser token with no 'me' may change anything.
+fn comment_mutate(verb: string, args: Slice<string>) -> Result<(), string> {
+  let spec = comment_mutate_spec(verb)
+  let usage = flags.usage(f"lll issue comment {verb}", spec, "KEY-123 N")
+  let p = flags.parse_n(spec, args, 4, 2, usage)?
+  if p.first() == "" || p.nth(1) == "" { return Err(f"usage: {usage}") }
+  let resolved = resolve_id(p.first(), usage)?
+  let issue = fetch_issue(resolved)?
+  let key = f"{issue.expand.team.key}-{issue.number}"
+  let Ok(n) = strconv.Atoi(p.nth(1)) else {
+    return Err(f"'{p.nth(1)}' is not a comment number — 'lll issue comment {key}' numbers them")
+  }
+  let comments = fetch_comments(issue.id)?
+  if n < 1 || n > comments.length() {
+    return Err(f"{key} has {comments.length()} comments; there is no #{n} — 'lll issue comment {key}' numbers them")
+  }
+  let c = comments[n - 1]
+  let mut whose = c.expand.author.name
+  if whose == "" { whose = "anon" }
+  if !p.given("--force") {
+    if let Some(a) = actor()? {
+      if c.author != a.id {
+        return Err(f"comment #{n} on {key} is {whose}'s, not yours — --force changes it anyway")
+      }
+    }
+  }
+  if verb == "delete" {
+    let _ = pb.delete(f"/api/collections/comments/records/{c.id}")?
+    fmt.Println(f"Deleted comment #{n} on {key} (was {whose}'s)")
+    return Ok(())
+  }
+  let mut body = ""
+  if p.given("-b") {
+    body = value_or_stdin(p.one("-b"), "-b")?
+  } else if p.nth(2) != "" {
+    body = p.nth(2)
+  }
+  if strings.TrimSpace(body) == "" {
+    return Err(f"comment edit needs the new body: -b \"...\" (or '-b -' from stdin)\nusage: {usage}")
+  }
+  let _ = pb.patch(
+    f"/api/collections/comments/records/{c.id}",
+    "{\"body\":" + json_quote(body)? + "}",
+  )?
+  fmt.Println(f"Edited comment #{n} on {key}")
+  Ok(())
+}
+
+fn comment_mutate_spec(verb: string) -> Slice<flags.Flag> {
+  let mut spec = [
+    flags.Flag { name: "--force", help: "change a comment that is not yours", .. },
+  ]
+  if verb == "edit" {
+    spec = spec.append(flags.Flag {
+      name: "-b",
+      alias: "--body -m --message",
+      value: true,
+      hint: "\"body\"",
+      help: "the new body ('-b -' reads it from stdin)",
+      ..,
+    })
+  }
+  spec
 }
 
 /// Resolve a member by name; unknown names error with the fix.
@@ -1429,7 +1802,9 @@ fn resolve_id(explicit: string, usage: string) -> Result<string, string> {
 /// itself contain hyphens (`ENG-DEV-12` is team `ENG-DEV`, issue 12), so the
 /// number is the last segment and the key is everything before it.
 fn split_issue_key(id: string) -> Result<(string, int), string> {
-  let bad_id = f"'{id}' is not an issue ID (expected KEY-123, e.g. ENG-1)"
+  // Names the shape AND the position: three of thirty fleet agents typed
+  // 'lll issue comment add KEY ...' and read this as the key being wrong.
+  let bad_id = f"'{id}' is not an issue ID (expected KEY-123, e.g. ENG-1); the ID comes right after the verb, no sub-verb — 'lll issue <verb> -h' shows the form"
   // Split, not LastIndex + substring: index arithmetic mixes byte offsets with
   // rune indices and panics on non-ASCII input. See realtime.split_field.
   let parts = strings.Split(id, "-")
@@ -1467,7 +1842,7 @@ fn fetch_issue_record(id: string) -> Result<string, string> {
   }
 
   pb.get(
-    f"/api/collections/issues/records/{item.id}?expand=team,assignee,labels,project",
+    f"/api/collections/issues/records/{item.id}?expand=team,assignee,labels,project,blocked_by",
   )
 }
 
@@ -1605,4 +1980,103 @@ fn unlink(args: Slice<string>) -> Result<(), string> {
   set_doc_issues(d, remaining)?
   fmt.Println(f"Unlinked {key} from {d.slug}")
   Ok(())
+}
+
+/// `lll issue block KEY BLOCKER`: KEY cannot start until BLOCKER is done.
+/// Refuses a self-block and a cycle (BLOCKER already waits on KEY, at any
+/// depth), since a cycle would make both un-ready forever. The dependency
+/// lives on the blocked issue: one relation field, no second collection.
+fn block(args: Slice<string>) -> Result<(), string> {
+  let usage = "lll issue block KEY-123 BLOCKER"
+  let (id, blocker_id) = two_positional(args, usage)?
+  if id == "" || blocker_id == "" { return Err(f"usage: {usage}") }
+  let issue = fetch_issue(resolve_id(id, usage)?)?
+  let blocker = fetch_issue(resolve_id(blocker_id, usage)?)?
+  let key = f"{issue.expand.team.key}-{issue.number}"
+  let bkey = f"{blocker.expand.team.key}-{blocker.number}"
+  if issue.id == blocker.id { return Err(f"{key} cannot block itself") }
+  if issue.blocked_by.find(|x| x == blocker.id).is_some() {
+    fmt.Println(f"{key} is already blocked by {bkey}")
+    return Ok(())
+  }
+  let cyclic = depends_on(blocker, issue.id, 0)?
+  if cyclic {
+    return Err(f"{bkey} already waits on {key} (directly or through others); blocking {key} by {bkey} would be a cycle")
+  }
+  set_blocked_by(issue, issue.blocked_by.append(blocker.id))?
+  let mut note = ""
+  if blocker.state == "done" || blocker.state == "cancelled" { note = f" ({bkey} is already {blocker.state}, so this does not hold {key} back)" }
+  fmt.Println(f"{key} is blocked by {bkey}{note}")
+  Ok(())
+}
+
+fn unblock(args: Slice<string>) -> Result<(), string> {
+  let usage = "lll issue unblock KEY-123 BLOCKER"
+  let (id, blocker_id) = two_positional(args, usage)?
+  if id == "" || blocker_id == "" { return Err(f"usage: {usage}") }
+  let issue = fetch_issue(resolve_id(id, usage)?)?
+  let blocker = fetch_issue(resolve_id(blocker_id, usage)?)?
+  let key = f"{issue.expand.team.key}-{issue.number}"
+  let bkey = f"{blocker.expand.team.key}-{blocker.number}"
+  let mut remaining: Slice<string> = []
+  let mut found = false
+  for x in issue.blocked_by {
+    if x == blocker.id { found = true } else { remaining = remaining.append(x) }
+  }
+  if !found {
+    fmt.Println(f"{key} was not blocked by {bkey}")
+    return Ok(())
+  }
+  set_blocked_by(issue, remaining)?
+  fmt.Println(f"{key} is no longer blocked by {bkey}")
+  Ok(())
+}
+
+fn set_blocked_by(issue: models.Issue, ids: Slice<string>) -> Result<(), string> {
+  let encoded = match json.Marshal(ids) {
+    Ok(b) => b as string,
+    Err(e) => return Err(f"encoding blockers: {e}"),
+  }
+  let _ = pb.patch(f"/api/collections/issues/records/{issue.id}", f"{{\"blocked_by\":{encoded}}}")?
+  Ok(())
+}
+
+/// True when `issue` waits on `target` at any depth. Bounded at eight
+/// levels: deeper chains are not a thing a tracker should have.
+fn depends_on(issue: models.Issue, target: string, depth: int) -> Result<bool, string> {
+  if depth > 8 { return Ok(false) }
+  for b in issue.expand.blocked_by {
+    if b.id == target { return Ok(true) }
+    let full = fetch_issue_by_id(b.id)?
+    let deeper = depends_on(full, target, depth + 1)?
+    if deeper { return Ok(true) }
+  }
+  Ok(false)
+}
+
+fn fetch_issue_by_id(id: string) -> Result<models.Issue, string> {
+  let body = pb.get(f"/api/collections/issues/records/{id}?expand=team,blocked_by")?
+  let mut full = models.Issue { .. }
+  if let Err(e) = json.Unmarshal(body.bytes(), &full) {
+    return Err(f"decoding issue: {e}")
+  }
+  Ok(full)
+}
+
+/// A blocker is open unless it is done or cancelled.
+fn open_blockers(issue: models.Issue) -> Slice<models.Issue> {
+  issue.expand.blocked_by.filter(|b| b.state != "done" && b.state != "cancelled")
+}
+
+/// Issues that name `issue` as a blocker, for the "Blocks:" line.
+fn fetch_blocks(issue_id: string) -> Result<Slice<models.Issue>, string> {
+  let filter = url.QueryEscape(f"blocked_by.id ?= {query.quote(issue_id)}")
+  let mut list = models.IssueList { .. }
+  pb.fetch(f"/api/collections/issues/records?perPage=200&sort=number&expand=team&filter={filter}", "issues", &list)?
+  Ok(list.items)
+}
+
+/// Read the same table used by dispatch and completions.
+pub fn issue_verb_spec(verb: string) -> Slice<flags.Flag> {
+  flags.command_spec(issue_commands(), verb)
 }

@@ -83,6 +83,11 @@ E2E_TOKEN=$(pb_member_token "$URL" e2e-agent e2e-agent@lll.test e2e-agent-pass-1
 [ -n "$E2E_TOKEN" ] && [ "$E2E_TOKEN" != "null" ] || fail "pb_member_token returned no token"
 export LLL_TOKEN="$E2E_TOKEN"
 AUTH_HDR="Authorization: Bearer $E2E_TOKEN"
+# TASK-317: the token decides identity and 'me' may only agree. The boot
+# guessed me = "e2e" from $USER; the suite's token is e2e-agent's, so the
+# home config says so too, or every write below would be refused.
+HOME="$E2E_HOME" LLL_URL="$URL" "$LIN" config set me e2e-agent >/dev/null \
+  || fail "pointing the suite's home config at the token's member"
 
 json_id() { python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])'; }
 
@@ -129,42 +134,42 @@ ENG_ID=$(seed_team ENG Engineering)
 OPS_ID=$(seed_team OPS Operations)
 [ -n "$ENG_ID" ] && [ -n "$OPS_ID" ] || fail "seeding teams"
 
-# --- TASK-181: unauthenticated requests are refused, per verb ---------------
-# PocketBase applies rules as FILTERS, so the refusal codes are deliberate
-# and not all 401 (verified in v0.40.1 apis/record_crud.go): a guest listing
-# gets 200 with zero items — no existence leak; view/update/delete cannot
-# resolve the record, so 404; create fails the rule check, so 400. Whatever
-# shape the refusal takes, the property under test is: no data, no mutation.
+# --- TASK-181 + TASK-319: unauthenticated requests are refused, as 401 -----
+# PocketBase applies rules as FILTERS: a guest list used to get 200 with zero
+# items, view/update/delete 404, create 400 - no data, no mutation, but
+# silence every client except lll's own read as "no issues". gopb's request
+# hooks now answer 401 to any record request with no auth at all, before the
+# lookup, so nothing about existence leaks and nobody mistakes a refusal
+# for an empty board. The property under test stays: no data, no mutation.
 anon=$(curl -s "$URL/api/collections/issues/records")
-[ "$(printf '%s' "$anon" | jq '.items | length')" = 0 ] \
+[ "$(printf '%s' "$anon" | jq '.items // [] | length')" = 0 ] \
   || fail "an unauthenticated issue list leaked records: $anon"
 code=$(curl -s -o /dev/null -w '%{http_code}' "$URL/api/collections/issues/records?perPage=1")
-[ "$code" = 200 ] || fail "unauthenticated list: expected 200-empty, got $code"
+[ "$code" = 401 ] || fail "unauthenticated list: expected 401, got $code"
+assert_contains "$anon" "Authentication required" "the 401 names the fix"
 code=$(curl -s -o /dev/null -w '%{http_code}' "$URL/api/collections/issues/records/$ENG_ID")
-[ "$code" = 404 ] || fail "unauthenticated view: expected 404, got $code"
+[ "$code" = 401 ] || fail "unauthenticated view: expected 401, got $code"
 code=$(curl -s -o /dev/null -w '%{http_code}' -X POST \
   "$URL/api/collections/issues/records" -H 'Content-Type: application/json' \
   -d "{\"team\":\"$ENG_ID\",\"title\":\"anonymous create\",\"state\":\"todo\"}")
-[ "$code" = 400 ] || fail "unauthenticated create: expected 400, got $code"
+[ "$code" = 401 ] || fail "unauthenticated create: expected 401, got $code"
 code=$(curl -s -o /dev/null -w '%{http_code}' -X PATCH \
   "$URL/api/collections/issues/records/$ENG_ID" -H 'Content-Type: application/json' \
   -d '{"title":"anonymous patch"}')
-[ "$code" = 404 ] || fail "unauthenticated update: expected 404, got $code"
+[ "$code" = 401 ] || fail "unauthenticated update: expected 401, got $code"
 code=$(curl -s -o /dev/null -w '%{http_code}' -X DELETE \
   "$URL/api/collections/issues/records/$ENG_ID")
-[ "$code" = 404 ] || fail "unauthenticated delete: expected 404, got $code"
+[ "$code" = 401 ] || fail "unauthenticated delete: expected 401, got $code"
 
-# The same sweep across every collection: a guest list comes back empty and
-# a guest create is refused. The browser-shaped version of this request —
-# what a page or script would fire at PocketBase directly — is the same
-# tokenless call, so it is covered by exactly this assertion.
+# The same sweep across every collection: a guest list and a guest create
+# are both 401. The browser-shaped version of this request - what a page or
+# script would fire at PocketBase directly - is the same tokenless call.
 for coll in teams members projects labels issues comments docs views favorites claims; do
-  anon=$(curl -s "$URL/api/collections/$coll/records")
-  [ "$(printf '%s' "$anon" | jq '.items | length')" = 0 ] \
-    || fail "an unauthenticated list of $coll leaked records: $anon"
+  code=$(curl -s -o /dev/null -w '%{http_code}' "$URL/api/collections/$coll/records")
+  [ "$code" = 401 ] || fail "unauthenticated list of $coll: expected 401, got $code"
   code=$(curl -s -o /dev/null -w '%{http_code}' -X POST \
     "$URL/api/collections/$coll/records" -H 'Content-Type: application/json' -d '{}')
-  [ "$code" = 400 ] || fail "unauthenticated create on $coll: expected 400, got $code"
+  [ "$code" = 401 ] || fail "unauthenticated create on $coll: expected 401, got $code"
 done
 
 # The token flips every one of those answers: a member list is 200 with
@@ -565,6 +570,19 @@ done
 [ "$(start_git_snapshot)" = "$git_before" ] || fail "help or invalid input changed Git"
 [ "$(LLL_URL=$URL "$LIN" issue view ENG-6 --json)" = "$issue_before" ] || fail "help or invalid input changed the issue"
 
+# a plain start touches the board only: no branch, no work site (TASK-310).
+# Fleet task 3b ran start from the wrong checkout and it switched that
+# checkout's branch; the branch is what --branch is for.
+out=$(cd "$REPO" && LLL_URL=$URL "$LLL_ABS" issue start ENG-6)
+assert_contains "$out" "Started ENG-6" "plain start output"
+assert_not_contains "$out" "Branch:" "plain start names no branch"
+branch=$(git -C "$REPO" branch --show-current)
+[ "$branch" = "main" ] || fail "plain start: expected to stay on main, on '$branch'"
+out=$(LLL_URL=$URL "$LIN" issue view ENG-6 --json | jq -r '.work_branch')
+[ "$out" = "" ] || fail "plain start stamped a work site: '$out'"
+out=$(cd "$DATA_DIR" && LLL_URL=$URL "$LLL_ABS" issue start --branch ENG-6 2>&1 || true)
+assert_contains "$out" "--branch needs a git repository" "start --branch outside a repo says so"
+
 out=$(cd "$REPO" && LLL_URL=$URL "$LLL_ABS" issue start ENG-6)
 assert_contains "$out" "Started ENG-6" "start output"
 [ "$(start_git_snapshot)" = "$git_before" ] || fail "start changed Git"
@@ -585,11 +603,13 @@ assert_contains "$out" "Started ENG-6" "start outside Git"
 
 # Branch creation is the caller's explicit Git operation.
 branch=$(cd "$REPO" && LLL_URL=$URL "$LLL_ABS" issue branch-name ENG-6)
-git -C "$REPO" switch -q -c "$branch"
+out=$(cd "$REPO" && LLL_URL=$URL "$LLL_ABS" issue start --branch ENG-6)
+assert_contains "$out" "Created and switched to branch" "explicit branch creation"
 git_before=$(start_git_snapshot)
 out=$(cd "$REPO" && LLL_URL=$URL "$LLL_ABS" issue branch-name)
 [ "$out" = "$branch" ] || fail "branch-name infers the issue"
-out=$(cd "$REPO" && LLL_URL=$URL "$LLL_ABS" issue start)
+out=$(cd "$REPO" && LLL_URL=$URL "$LLL_ABS" issue start --branch)
+assert_contains "$out" "Switched to existing branch" "explicit existing branch"
 assert_contains "$out" "Started ENG-6" "inferred start output"
 [ "$(start_git_snapshot)" = "$git_before" ] || fail "inferred start changed Git"
 
@@ -598,7 +618,7 @@ out=$(cd "$REPO" && LLL_URL=$URL "$LLL_ABS" issue view)
 assert_contains "$out" "ENG-6 Roundtrip issue" "inferred view header"
 assert_contains "$out" "◐ in-progress" "start set in-progress"
 
-out=$(cd "$REPO" && LLL_URL=$URL "$LLL_ABS" issue update --priority 1 --title "Roundtrip issue v2")
+out=$(cd "$REPO" && LLL_URL=$URL "$LLL_ABS" issue update --priority 1 -t "Roundtrip issue v2")
 assert_contains "$out" "Updated ENG-6" "inferred update output"
 out=$(LLL_URL=$URL "$LIN" issue view ENG-6)
 assert_contains "$out" "ENG-6 Roundtrip issue v2" "update changed title"
@@ -674,6 +694,19 @@ assert_not_contains "$out" "ENG-7" "forced delete removed the issue"
 # --- members: add + list ---
 out=$(LLL_URL=$URL "$LIN" member add -n bryan -e bryan@example.com)
 assert_contains "$out" "Added member bryan" "member add output"
+
+# --assignee none clears the assignee: the only way to, and the word view
+# prints for the empty slot (fleet task 7)
+out=$(cd "$REPO" && LLL_URL=$URL "$LLL_ABS" issue update ENG-6 --assignee bryan)
+got=$(LLL_URL=$URL "$LIN" issue view ENG-6 --json | jq -r '.assignee')
+[ -n "$got" ] || fail "update --assignee bryan: assignee still empty"
+out=$(cd "$REPO" && LLL_URL=$URL "$LLL_ABS" issue update ENG-6 --assignee none)
+got=$(LLL_URL=$URL "$LIN" issue view ENG-6 --json | jq -r '.assignee')
+[ "$got" = "" ] || fail "update --assignee none: assignee is '$got'"
+out=$(LLL_URL=$URL "$LIN" issue update ENG-6 --assignee "" 2>&1 || true)
+assert_contains "$out" "or 'none' to clear it" "an empty --assignee names none"
+out=$(LLL_URL=$URL LLL_TEAM=ENG "$LIN" issue list --project ENG 2>&1 || true)
+assert_contains "$out" "'ENG' is the team, not a project" "the team key passed as a project is told so"
 # NOT alice: `config set me alice` above now seeds that member for real, so
 # adding it again hits the unique index. This case is about the no-email path.
 out=$(LLL_URL=$URL "$LIN" member add -n carol)
@@ -718,6 +751,33 @@ code=$(curl -s -o /dev/null -w '%{http_code}' -H "Authorization: Bearer $TOKEN" 
 [ "$code" = 200 ] || fail "authenticated GET with the member token returned $code"
 # The assignee/author paths are asserted unchanged further below, where the
 # issues they point at exist (ENG-7: 'assignee relation' + comment author).
+
+# Per-member tokens (TASK-317): identity is the token's member now, so a test
+# that writes as bryan carries bryan's token rather than LLL_ME=bryan. Minted
+# by the superuser (the suite exports the admin pair); a member token cannot.
+# Minted AFTER bryan's password is set below: PocketBase rotates a record's
+# token key on a password change, which kills every token minted before it.
+mint_tok() { env -u LLL_TOKEN LLL_URL=$URL "$LIN" token create "$1" --duration 3600 | sed -n 's/^LLL_TOKEN=//p'; }
+BRYAN_TOK=$(mint_tok bryan); CAROL_TOK=$(mint_tok carol); ALICE_TOK=$(mint_tok alice)
+[ -n "$BRYAN_TOK" ] && [ -n "$CAROL_TOK" ] && [ -n "$ALICE_TOK" ] || fail "per-member tokens: a mint printed nothing"
+tok_for() { case "$1" in bryan) printf '%s' "$BRYAN_TOK";; carol) printf '%s' "$CAROL_TOK";; alice) printf '%s' "$ALICE_TOK";; *) fail "no token for $1";; esac; }
+SU_TOK=$(pb_superuser_token "$URL") || fail "superuser token for the authorless cases"
+out=$(env -u LLL_ME LLL_URL=$URL LLL_TOKEN="$BRYAN_TOK" LLL_ME=bryan "$LIN" whoami 2>&1)
+assert_contains "$out" "bryan <" "the minted token is bryan's (whoami: $out)"
+
+# TASK-323: a dead member token stays dead in a CLI that holds the admin
+# pair. Only the board re-mints for itself (LLL_REMINT, set by lll up).
+# Kill alice's token by rotating her password, then ask who she is.
+ALICE_ID=$(curl -sf -H "Authorization: Bearer $SU_TOK" "$URL/api/collections/members/records?perPage=200" | jq -r '.items[] | select(.name=="alice") | .id')
+curl -sf -X PATCH -H "Authorization: Bearer $SU_TOK" "$URL/api/collections/members/records/$ALICE_ID" \
+  -H 'Content-Type: application/json' -d '{"password":"alice-rotated-123","passwordConfirm":"alice-rotated-123"}' >/dev/null \
+  || fail "rotating alice's password"
+out=$(env -u LLL_ME LLL_URL=$URL LLL_TOKEN="$ALICE_TOK" "$LIN" whoami 2>&1 || true)
+assert_contains "$out" "was rejected" "whoami on a dead token says rejected, admin pair or not"
+assert_not_contains "$out" "alice <" "and does not name the member as alive"
+ALICE_TOK=$(mint_tok alice)
+[ -n "$ALICE_TOK" ] || fail "re-minting alice"
+
 
 # --- --assignee on create; assignee in list and view ---
 out=$(LLL_URL=$URL LLL_TEAM=ENG "$LIN" issue create -t "Assigned issue" --assignee bryan)
@@ -775,8 +835,8 @@ aname=$(LLL_URL=$URL LLL_TEAM=ENG "$LIN" issue list --assignee bryan --json | \
 
 # --- comment add authored by config 'me'; shown in view with relative date ---
 printf 'url = "%s"\nteam = "ENG"\nme = "bryan"\n' "$URL" > "$WORK/.lll.toml"
-out=$(cd "$WORK" && env -u LLL_URL -u LLL_TEAM HOME="$FAKEHOME" "$LLL_ABS" issue comment ENG-7 -b "Looks good to me")
-assert_contains "$out" "Commented on ENG-7" "comment add output"
+out=$(cd "$WORK" && env -u LLL_URL -u LLL_TEAM LLL_TOKEN="$BRYAN_TOK" LLL_ME=bryan HOME="$FAKEHOME" "$LLL_ABS" issue comment ENG-7 -b "Looks good to me")
+assert_contains "$out" "Commented on ENG-7 as bryan" "comment add output names the token's member, which 'me' agrees with"
 
 out=$(LLL_URL=$URL "$LIN" issue view ENG-7)
 assert_contains "$out" "Comments:" "view has comments section"
@@ -787,19 +847,69 @@ assert_contains "$out" "Looks good to me" "view comment body"
 out=$(LLL_URL=$URL "$LIN" issue comment ENG-7)
 assert_contains "$out" "bryan (just now)" "comment list author"
 assert_contains "$out" "Looks good to me" "comment list body"
+assert_contains "$out" "#1 bryan (just now)" "comments are numbered (TASK-320)"
 
-# --- authorless comments: me unset, and me naming no member ---
-out=$(LLL_URL=$URL "$LIN" issue comment ENG-7 -b "Anonymous note")
-assert_contains "$out" "Commented on ENG-7" "authorless comment (me unset) accepted"
+# --- comment edit / delete: your own, or --force (TASK-320) ---
+out=$(LLL_URL=$URL LLL_TOKEN="$BRYAN_TOK" LLL_ME=bryan "$LIN" issue comment edit ENG-7 1 -b "Looks good to me, edited")
+assert_contains "$out" "Edited comment #1 on ENG-7" "comment edit output"
+out=$(LLL_URL=$URL "$LIN" issue comment ENG-7)
+assert_contains "$out" "Looks good to me, edited" "the edited body landed"
+set +e
+out=$(LLL_URL=$URL LLL_TOKEN="$CAROL_TOK" LLL_ME=carol "$LIN" issue comment delete ENG-7 1 2>&1)
+rc=$?
+set -e
+[ "$rc" -ne 0 ] || fail "deleting someone else's comment: expected nonzero exit"
+assert_contains "$out" "is bryan's, not yours" "another member's comment is refused and named"
+assert_contains "$out" "--force" "the refusal names the override"
+out=$(LLL_URL=$URL LLL_TOKEN="$CAROL_TOK" LLL_ME=carol "$LIN" issue comment delete ENG-7 1 --force)
+assert_contains "$out" "Deleted comment #1 on ENG-7 (was bryan's)" "--force deletes and says whose it was"
+out=$(LLL_URL=$URL "$LIN" issue comment ENG-7)
+assert_not_contains "$out" "Looks good to me, edited" "the deleted comment is gone"
+set +e
+out=$(LLL_URL=$URL "$LIN" issue comment delete ENG-7 9 2>&1)
+set -e
+assert_contains "$out" "there is no #9" "an out-of-range number is told the count"
+# put the comment back for the assertions that follow
+out=$(LLL_URL=$URL LLL_TOKEN="$BRYAN_TOK" LLL_ME=bryan "$LIN" issue comment ENG-7 -b "Looks good to me")
 
+# --- authorless comments: me unset is accepted; me naming NO member is refused ---
+# A genuinely unset 'me' needs a home with no me key: the suite's own
+# E2E_HOME carries me = "e2e" from the boot, which authored this comment for
+# years while the assertion below was satisfied by a DIFFERENT comment's line.
+NOME_HOME="$DATA_DIR/nome_home"; mkdir -p "$NOME_HOME/.config/lll"
+# A member token always names its member (TASK-317), so "no author" needs a
+# token that names nobody: the superuser's, with no 'me' anywhere.
+out=$(env -u LLL_ME LLL_TOKEN="$SU_TOK" HOME="$NOME_HOME" LLL_URL=$URL LLL_TEAM=ENG "$LIN" issue comment ENG-7 -b "Anonymous note")
+assert_contains "$out" "Commented on ENG-7 with no author" "authorless comment (superuser token, me unset) accepted, and says so"
+
+# TASK-309, fleet run 1: thirty agents each set me = "shard-NN", no such
+# members existed, and every one of their comments landed as "anon" with no
+# warning. The one shard that noticed wrote "the me field correctly identifies
+# the author under the hood" - it did not; the silence had told it so. This
+# block used to PIN that silence as accepted behaviour. A me that names nobody
+# is now an error naming the fix, and the comment must not land.
 printf 'url = "%s"\nteam = "ENG"\nme = "ghost"\n' "$URL" > "$WORK/.lll.toml"
-out=$(cd "$WORK" && env -u LLL_URL -u LLL_TEAM HOME="$FAKEHOME" "$LLL_ABS" issue comment ENG-7 -b "Ghost note")
-assert_contains "$out" "Commented on ENG-7" "authorless comment (me unmatched) accepted"
+if out=$(cd "$WORK" && env -u LLL_URL -u LLL_TEAM LLL_TOKEN="$SU_TOK" HOME="$FAKEHOME" "$LLL_ABS" issue comment ENG-7 -b "Ghost note" 2>&1); then
+  fail "a 'me' naming no member should refuse, got: $out"
+fi
+assert_contains "$out" "no such member exists" "unmatched me is refused, not silently anonymous"
+assert_contains "$out" "lll member add" "the refusal names the fix"
+
+# TASK-317: the token decides. A member token whose member is not 'me' is
+# refused with both names, and the comment must not land.
+if out=$(LLL_URL=$URL LLL_TOKEN="$BRYAN_TOK" LLL_ME=carol "$LIN" issue comment ENG-7 -b "Wrong hat" 2>&1); then
+  fail "a token and a disagreeing 'me' should refuse, got: $out
+"
+fi
+assert_contains "$out" "this token is bryan's, but 'me' is set to 'carol'" "a disagreeing me is refused with both names"
+assert_contains "$out" "lll config set me bryan" "the refusal names the fix"
+out=$(LLL_URL=$URL "$LIN" issue comment ENG-7)
+assert_not_contains "$out" "Wrong hat" "the refused comment did not land"
 
 out=$(LLL_URL=$URL "$LIN" issue comment ENG-7)
-assert_contains "$out" "anon (just now)" "authorless comments render as anon"
+assert_contains "$out" "anon (just now)" "an unset-me comment renders as anon"
 assert_contains "$out" "Anonymous note" "authorless body listed"
-assert_contains "$out" "Ghost note" "unmatched-me body listed"
+assert_not_contains "$out" "Ghost note" "the refused comment did not land"
 
 # --- comment ID inference from the git branch ---
 git -C "$REPO" switch -q eng-6-roundtrip-issue
@@ -1018,10 +1128,104 @@ wait_for_line "$WATCH_ISSUE" "state: in-progress -> in-review" "issue watch rend
 wait_for_line "$WATCH_ISSUE" "assignee: none -> bryan" "issue watch renders assignee transition"
 
 printf 'url = "%s"\nteam = "ENG"\nme = "bryan"\n' "$URL" > "$WORK/.lll.toml"
-out=$(cd "$WORK" && env -u LLL_URL -u LLL_TEAM HOME="$FAKEHOME" "$LLL_ABS" issue comment "$WKEY" -b "Watching closely")
+out=$(cd "$WORK" && env -u LLL_URL -u LLL_TEAM LLL_TOKEN="$BRYAN_TOK" LLL_ME=bryan HOME="$FAKEHOME" "$LLL_ABS" issue comment "$WKEY" -b "Watching closely")
 assert_contains "$out" "Commented on $WKEY" "watched comment output"
 wait_for_line "$WATCH_ISSUE" "comment by bryan: Watching closely" "issue watch sees the comment"
 wait_for_line "$WATCH_ISSUE_JSON" 'Watching closely' 'issue JSON stream sees the comment'
+
+# --- issue watch --until: the blocking primitive (TASK-322) ---
+out=$(LLL_URL=$URL "$LIN" issue watch "$WKEY" --until "Watching clos")
+assert_contains "$out" "already there: #" "--until returns at once when the comment already exists"
+WATCH_UNTIL="$DATA_DIR/watch_until.txt"
+(LLL_URL=$URL "$LIN" issue watch "$WKEY" --until "t9-partner:" --timeout 30 > "$WATCH_UNTIL" 2>&1; echo "rc=$?" >> "$WATCH_UNTIL") &
+wait_for_line "$WATCH_UNTIL" "Watching $WKEY until" "--until header"
+out=$(LLL_URL=$URL LLL_TOKEN="$CAROL_TOK" LLL_ME=carol "$LIN" issue comment "$WKEY" -b "t9-partner: done, over to you")
+wait_for_line "$WATCH_UNTIL" "rc=0" "--until exits 0 once the comment arrives" 100
+assert_contains "$(cat "$WATCH_UNTIL")" "comment by carol: t9-partner: done" "--until printed the comment it waited for"
+set +e
+out=$(LLL_URL=$URL "$LIN" issue watch "$WKEY" --until "never-coming" --timeout 1 2>&1)
+rc=$?
+set -e
+[ "$rc" -ne 0 ] || fail "--until with --timeout: expected nonzero exit"
+assert_contains "$out" "no comment containing 'never-coming'" "--timeout names what did not arrive"
+out=$(LLL_URL=$URL "$LIN" issue comment "$WKEY")
+assert_contains "$out" "lll issue watch $WKEY --until TEXT" "a comment listing points at watch --until"
+
+# --- lll search: full text over issues, comments and docs, ranked, with context (LLL-96) ---
+SKEY=$(env LLL_URL=$URL LLL_TEAM=ENG "$LIN" issue create -t "Rail favorites go stale" -d "First line of context.
+The zebra crossing is only mentioned in this description.
+Last line of context." | sed -n 's/^Created \([A-Z]*-[0-9]*\).*/\1/p')
+[ -n "$SKEY" ] || fail "search fodder create did not print a key"
+out=$(env LLL_URL=$URL LLL_TEAM=ENG LLL_TOKEN="$CAROL_TOK" LLL_ME=carol "$LIN" issue comment "$SKEY" -b "The giraffe lives only in this comment.")
+out=$(env LLL_URL=$URL LLL_TEAM=ENG "$LIN" search zebra)
+assert_contains "$out" "$SKEY" "a word only in a description is found"
+assert_contains "$out" "[description]" "and the hit says it came from the description"
+assert_contains "$out" "> The zebra crossing is only mentioned in this description." "the matching line is marked"
+assert_contains "$out" "  First line of context." "with the line before it"
+assert_contains "$out" "  Last line of context." "and the line after it"
+out=$(env LLL_URL=$URL LLL_TEAM=ENG "$LIN" search giraffe)
+assert_contains "$out" "$SKEY" "a word only in a comment is found under its issue"
+assert_contains "$out" "[comment #1 by carol]" "and the hit names the comment and its author"
+out=$(env LLL_URL=$URL LLL_TEAM=ENG "$LIN" search "Rail favorites")
+[ "$(printf '%s\n' "$out" | head -1 | cut -d' ' -f1)" = "$SKEY" ] || fail "a title phrase should rank its issue first, got: $(printf '%s' "$out" | head -1)"
+out=$(env LLL_URL=$URL LLL_TEAM=ENG "$LIN" search "$SKEY")
+[ "$(printf '%s\n' "$out" | head -1 | cut -d' ' -f1)" = "$SKEY" ] || fail "a key as the query should pin its issue first"
+out=$(env LLL_URL=$URL LLL_TEAM=ENG "$LIN" search zebra --json)
+printf '%s' "$out" | jq -e '.[0].group and .[0].snippets[0].lines[0]' >/dev/null || fail "search --json: not the hit shape: $out"
+out=$(env LLL_URL=$URL LLL_TEAM=ENG "$LIN" search "no-such-word-anywhere-xq")
+assert_contains "$out" "No match for" "no hits says so"
+set +e
+out=$(env LLL_URL=$URL LLL_TEAM=ENG "$LIN" search 2>&1)
+set -e
+assert_contains "$out" "what to search for" "search without a query names the usage"
+
+# --- dependencies: block / unblock, Blocked by / Blocks, --ready / --blocked (LLL-175) ---
+DA=$(env LLL_URL=$URL LLL_TEAM=ENG "$LIN" issue create -t "Dep: the foundation" | sed -n 's/^Created \([A-Z]*-[0-9]*\).*/\1/p')
+DB=$(env LLL_URL=$URL LLL_TEAM=ENG "$LIN" issue create -t "Dep: the wall" | sed -n 's/^Created \([A-Z]*-[0-9]*\).*/\1/p')
+DC=$(env LLL_URL=$URL LLL_TEAM=ENG "$LIN" issue create -t "Dep: the roof" | sed -n 's/^Created \([A-Z]*-[0-9]*\).*/\1/p')
+[ -n "$DA" ] && [ -n "$DB" ] && [ -n "$DC" ] || fail "dependency fodder did not print keys"
+out=$(env LLL_URL=$URL "$LIN" issue block "$DB" "$DA")
+assert_contains "$out" "$DB is blocked by $DA" "block records the dependency"
+out=$(env LLL_URL=$URL "$LIN" issue block "$DC" "$DB")
+assert_contains "$out" "$DC is blocked by $DB" "a chain of two"
+out=$(env LLL_URL=$URL "$LIN" issue block "$DB" "$DA")
+assert_contains "$out" "already blocked by" "blocking twice is a no-op that says so"
+set +e
+out=$(env LLL_URL=$URL "$LIN" issue block "$DA" "$DC" 2>&1)
+rc=$?
+set -e
+[ "$rc" -ne 0 ] || fail "a cycle should be refused"
+assert_contains "$out" "would be a cycle" "a cycle through two hops is refused and named"
+set +e
+out=$(env LLL_URL=$URL "$LIN" issue block "$DA" "$DA" 2>&1)
+set -e
+assert_contains "$out" "cannot block itself" "self-block is refused"
+out=$(env LLL_URL=$URL "$LIN" issue view "$DB")
+assert_contains "$out" "Blocked by: $DA (todo) — 1 open, not ready" "view names the blocker, its state and readiness"
+assert_contains "$out" "Blocks:    $DC" "view names what this issue blocks"
+out=$(env LLL_URL=$URL LLL_TEAM=ENG "$LIN" issue list --ready)
+assert_contains "$out" "$DA" "--ready lists the unblocked issue"
+assert_not_contains "$out" "$DB" "--ready omits an issue with an open blocker"
+assert_not_contains "$out" "$DC" "--ready omits the end of the chain"
+out=$(env LLL_URL=$URL LLL_TEAM=ENG "$LIN" issue list --blocked)
+assert_contains "$out" "$DB" "--blocked lists the blocked issue"
+assert_not_contains "$out" "$DA" "--blocked omits the free one"
+out=$(env LLL_URL=$URL "$LIN" issue close "$DA")
+out=$(env LLL_URL=$URL "$LIN" issue view "$DB")
+assert_contains "$out" "Blocked by: $DA (done) — all done, ready" "a done blocker reads as ready"
+out=$(env LLL_URL=$URL LLL_TEAM=ENG "$LIN" issue list --ready)
+assert_contains "$out" "$DB" "--ready admits the issue once its blocker is done"
+assert_not_contains "$out" "$DC" "but not the one behind it"
+out=$(env LLL_URL=$URL LLL_TEAM=ENG "$LIN" issue list --ready --json)
+printf '%s' "$out" | jq -e --arg k "$DB" '.items[] | select(.number == ($k | split("-")[1] | tonumber))' >/dev/null || fail "--ready --json carries the filtered items"
+out=$(env LLL_URL=$URL "$LIN" issue unblock "$DC" "$DB")
+assert_contains "$out" "$DC is no longer blocked by $DB" "unblock output"
+out=$(env LLL_URL=$URL "$LIN" issue unblock "$DC" "$DB")
+assert_contains "$out" "was not blocked by" "unblocking twice says so"
+set +e
+out=$(env LLL_URL=$URL "$LIN" issue depends "$DC" 2>&1)
+set -e
+assert_contains "$out" "lll issue block KEY-123 BLOCKER" "a guessed dependency verb is pointed at block"
 
 # --- --json emits one jq-parseable object per line ---
 wait_for_line "$WATCH_JSON" "Watched todo issue" "watch --json captured the create"
@@ -1077,7 +1281,7 @@ PY
 "$LIN" completions bash > "$DATA_DIR/comp.bash"
 bash -n "$DATA_DIR/comp.bash" || fail "bash completions do not parse"
 out=$(cat "$DATA_DIR/comp.bash")
-assert_contains "$out" "create list view update close start claim release delete comment watch url id title branch-name pr link unlink" "bash completions list issue verbs"
+assert_contains "$out" "create new list view show read update close start claim release delete comment watch url id title branch-name pr link unlink" "bash completions list issue verbs"
 assert_contains "$out" "--limit" "bash completions know --limit"
 assert_contains "$out" "complete -F _lll lll" "bash completions register"
 "$LIN" completions zsh > "$DATA_DIR/comp.zsh"
@@ -1111,7 +1315,7 @@ done
 # a flag in the completions entry but not the parser would make this error
 # impossible — the two are one table now, so assert both surfaces agree on
 # the flag that once drifted.
-assert_contains "$(cat "$DATA_DIR/comp.bash")" "issue,create) words='-t -d --description --emoji" \
+assert_contains "$(cat "$DATA_DIR/comp.bash")" "issue,create) words='-t --title -d --description --emoji" \
   "completions offer the parser's own issue create flags"
 
 # TASK-177: create --json joined the spec, so its completions entry carries
@@ -1125,6 +1329,10 @@ set -e
 [ "$rc" -ne 0 ] || fail "issue create --bogus: expected nonzero exit"
 assert_contains "$out" "unknown flag: '--bogus'" "unknown flag names the flag"
 assert_contains "$out" "usage: lll issue create" "unknown flag error carries the generated usage line"
+assert_contains "$out" "Flags:" "unknown flag error carries the flag table (fleet task 8)"
+# the table labels aliases, so the long form an agent guesses is visible
+out=$(LLL_URL=$URL "$LIN" issue comment ENG-6 --text "x" 2>&1 || true)
+assert_contains "$out" "-b, --body" "unknown flag error shows -b with its --body alias"
 set +e
 out=$("$LIN" completions powershell 2>&1)
 rc=$?
@@ -1415,6 +1623,26 @@ assert_not_contains "$out" "Related findings" "an issue with no matches renders 
 out=$("$LIN" finding --help)
 assert_contains "$out" "lll finding near" "finding --help mentions near"
 assert_contains "$out" "lll finding list" "finding --help mentions list"
+assert_contains "$out" "lll finding view" "finding --help mentions view (fleet task 9: 6/30 guessed it)"
+out=$(env LLL_URL=$URL LLL_TEAM=ENG "$LIN" finding view migration-hazard --raw)
+assert_contains "$out" "Migrations are a merge hazard." "finding view reads a finding by slug"
+out=$(env LLL_URL=$URL LLL_TEAM=ENG "$LIN" finding read migration-hazard --raw)
+assert_contains "$out" "Migrations are a merge hazard." "finding read is view"
+out=$(env LLL_URL=$URL LLL_TEAM=ENG "$LIN" finding new -s fleet-new -t "Filed from finding new" -a pb -b "kind set by the verb")
+assert_contains "$out" "Created doc fleet-new" "finding new files a doc"
+out=$(env LLL_URL=$URL LLL_TEAM=ENG "$LIN" finding list -a pb)
+assert_contains "$out" "fleet-new" "finding new sets kind=finding (it lists as a finding)"
+out=$(env LLL_URL=$URL LLL_TEAM=ENG "$LIN" doc read fleet-new --raw)
+assert_contains "$out" "kind set by the verb" "doc read is view"
+# LLL-96: docs are in the full-text search too, ranked with the issues; the
+# delta sync sees a doc created after the cache's first fill.
+out=$(env LLL_URL=$URL LLL_TEAM=ENG "$LIN" search "Migrations are a merge hazard" --docs)
+assert_contains "$out" "doc migration-hazard" "docs are searched too, and say they are docs"
+out=$(env LLL_URL=$URL LLL_TEAM=ENG "$LIN" finding list --search hazard)
+assert_contains "$out" "migration-hazard" "finding list --search matches slug"
+assert_not_contains "$out" "fleet-new" "finding list --search excludes the rest"
+out=$(env LLL_URL=$URL LLL_TEAM=ENG "$LIN" finding list -p src/pb/records.lis)
+assert_contains "$out" "migration-hazard" "finding list -p matches by containment like near"
 out=$("$LIN" --help)
 assert_contains "$out" "lll finding" "lll --help mentions finding"
 out=$("$LIN" doc --help)
@@ -1441,12 +1669,15 @@ class H(http.server.BaseHTTPRequestHandler):
         with open(rec, "a") as f:
             f.write((self.headers.get("Authorization") or "<none>") + "\n")
         self._json(b'{"items":[],"totalItems":0,"page":1,"perPage":200}')
-    # TASK-247: an empty list makes the client probe auth-refresh, to tell a
-    # genuinely empty board apart from a token the server has stopped
-    # accepting. This stub stands in for PocketBase, so it answers that too —
-    # otherwise the probe fails and the empty list reads as a dead token.
+    # TASK-247/309: an empty list makes the client check whether its token
+    # is still accepted, to tell a genuinely empty board apart from a dead
+    # token. The probe is a GET of the token's own record by the id in its
+    # JWT (auth-refresh was the old probe; it refuses live impersonation
+    # tokens, which is what the fleet found). This stub's do_GET answers 200
+    # to every path, so the probe passes here and the empty list stays an
+    # empty list. do_POST is kept only so a stray POST is not a stack trace.
     def do_POST(self):
-        self._json(b'{"token":"spy-token-123","record":{"id":"spy","name":"spy"}}')
+        self._json(b'{}')
     def log_message(self, *a): pass
 socketserver.TCPServer(("127.0.0.1", port), H).serve_forever()
 SPY_EOF
@@ -1578,6 +1809,48 @@ set -e
 [ "$rc" -ne 0 ] || fail "unknown command: expected nonzero exit"
 assert_contains "$out" "see 'lll --help'" "unknown command names the fix"
 
+# an issue verb typed as a noun is pointed at its noun (fleet task 4: 3/30)
+set +e
+out=$("$LIN" comment ENG-1 "hi" 2>&1)
+rc=$?
+set -e
+[ "$rc" -ne 0 ] || fail "lll comment: expected nonzero exit"
+assert_contains "$out" "lll issue comment" "misplaced issue verb names its noun"
+
+# the plural of a noun is pointed at the noun
+set +e
+out=$("$LIN" issues list 2>&1)
+set -e
+assert_contains "$out" "did you mean 'lll issue list'" "plural noun names the singular and keeps the verb (fleet replay: 7/30)"
+set +e
+out=$("$LIN" issue assign ENG-1 bob 2>&1)
+set -e
+assert_contains "$out" "lll issue claim KEY-123" "a synonym verb is pointed at the verb (fleet replay: assign, 5/30)"
+out=$(env LLL_URL=$URL LLL_TEAM=ENG "$LIN" doc new --slug long-forms --title "Long forms" --kind finding --area pb --path "src/pb" --body "every short flag has a long one")
+assert_contains "$out" "Created doc long-forms" "doc new takes the long form of every flag, --path included"
+out=$("$LIN" --help)
+assert_contains "$out" "There is no 'lll list' or 'lll comment'" "top-level help states the noun-verb shape (fleet replay: 5/30)"
+
+# a sub-verb where the ID goes is told the ID comes first (fleet task 4: 3/30)
+set +e
+out=$(LLL_URL=$URL "$LIN" issue comment add ENG-1 -b "hi" 2>&1)
+rc=$?
+set -e
+[ "$rc" -ne 0 ] || fail "issue comment add: expected nonzero exit"
+assert_contains "$out" "the ID comes right after the verb" "sub-verb error names the position"
+
+# aliases agents guessed at a steady rate across fleet runs (TASK-309)
+out=$(LLL_URL=$URL "$LIN" issue comment ENG-6 --body "alias body")
+assert_contains "$out" "Commented on ENG-6" "comment takes --body for -b"
+out=$(LLL_URL=$URL "$LIN" issue comment ENG-6 -m "alias m")
+assert_contains "$out" "Commented on ENG-6" "comment takes -m for -b (three shards across two replays)"
+out=$(LLL_URL=$URL "$LIN" issue comment ENG-6 --nope 2>&1 || true)
+assert_contains "$out" "-b, --body, -m, --message" "the flag table lists every alias"
+out=$(LLL_URL=$URL LLL_TEAM=ENG "$LIN" issue list --query "Roundtrip")
+assert_contains "$out" "ENG-6" "list takes --query for --search"
+out=$(LLL_URL=$URL LLL_TEAM=ENG "$LIN" issue new --title "Made with issue new" --priority 4)
+assert_contains "$out" "Made with issue new" "issue new is create, and create takes --title"
+
 # PB unreachable: names lll up and LLL_URL (request path and realtime path)
 set +e
 out=$(LLL_URL=http://127.0.0.1:1 "$LIN" issue list 2>&1)
@@ -1643,7 +1916,7 @@ got=$(env $E "$LIN" issue view "$key" --json | jq -r .description)
 [ "$got" = "literal again" ] || fail "literal --description regressed: got '$got'"
 env $E "$LIN" issue update "$key" -d --help >/dev/null
 env $E "$LIN" issue view "$key" --json | python3 -c 'import json,sys; assert json.load(sys.stdin)["description"] == "--help"'
-env $E LLL_ME=bryan "$LIN" issue comment "$key" -b --help >/dev/null
+env $E LLL_TOKEN="$BRYAN_TOK" LLL_ME=bryan "$LIN" issue comment "$key" -b --help >/dev/null
 env $E "$LIN" issue view "$key" --json | python3 -c 'import json,sys; assert json.load(sys.stdin)["comments"][-1]["body"] == "--help"'
 env $E "$LIN" issue update "$key" --description 'literal again' >/dev/null
 
@@ -1693,7 +1966,7 @@ fi
 CKEY=$(env $E "$LIN" issue create -t "Claimable" | sed -n 's/^Created \([A-Z]*-[0-9]*\).*/\1/p')
 [ -n "$CKEY" ] || fail "claim fodder create did not print a key"
 
-out=$(env $E LLL_ME=bryan "$LIN" issue claim "$CKEY")
+out=$(env $E LLL_TOKEN="$BRYAN_TOK" LLL_ME=bryan "$LIN" issue claim "$CKEY")
 assert_contains "$out" "Claimed $CKEY for bryan" "claim output"
 out=$(env $E "$LIN" issue view "$CKEY")
 assert_contains "$out" "Claimed:   bryan" "issue view shows the holder"
@@ -1704,29 +1977,57 @@ assert_contains "$out" "Claim retained by bryan" "close reports the live claim"
 assert_contains "$out" "lll issue release $CKEY" "close supplies explicit release command"
 assert_contains "$out" "if it still matches" "close explains conditional release assignment effect"
 env $E "$LIN" issue view "$CKEY" --json | python3 -c 'import json,sys; d=json.load(sys.stdin); assert d["state"] == "done"; assert d["claim"]["expand"]["member"]["name"] == "bryan"'
-env $E LLL_ME=bryan "$LIN" issue comment "$CKEY" -b 'handoff for carol' >/dev/null
-env $E LLL_ME=carol "$LIN" issue comment "$CKEY" -b 'acknowledged' >/dev/null
+env $E LLL_TOKEN="$BRYAN_TOK" LLL_ME=bryan "$LIN" issue comment "$CKEY" -b 'handoff for carol' >/dev/null
+env $E LLL_TOKEN="$CAROL_TOK" LLL_ME=carol "$LIN" issue comment "$CKEY" -b 'acknowledged' >/dev/null
 env $E "$LIN" issue view "$CKEY" --json | python3 -c 'import json,sys; d=json.load(sys.stdin); assert [(c["body"],c["expand"]["author"]["name"]) for c in d["comments"]] == [("handoff for carol","bryan"),("acknowledged","carol")]'
 
 # AC#1: a held issue refuses the second claim and changes nothing.
 set +e
-out=$(env $E LLL_ME=carol "$LIN" issue claim "$CKEY" 2>&1)
+out=$(env $E LLL_TOKEN="$CAROL_TOK" LLL_ME=carol "$LIN" issue claim "$CKEY" 2>&1)
 rc=$?
 set -e
 [ "$rc" -ne 0 ] || fail "claiming a held issue: expected nonzero exit"
 assert_contains "$out" "already claimed by bryan" "refusal names the holder"
 assert_contains "$out" "lll issue release $CKEY" "refusal names the fix"
+
+# the holder claiming again is success, not a conflict (fleet replay, task 9:
+# a claim survived --assignee none and every re-claim by its holder was refused)
+out=$(env $E LLL_TOKEN="$BRYAN_TOK" LLL_ME=bryan "$LIN" issue claim "$CKEY")
+assert_contains "$out" "Claimed $CKEY for bryan (already yours" "re-claim by the holder succeeds and says so"
+got=$(env $E "$LIN" issue view "$CKEY" --json | jq -r '.expand.assignee.name')
+[ "$got" = "bryan" ] || fail "re-claim: assignee should be bryan, got '$got'"
+# --assignee none under a claim releases the claim too: held-but-unassigned
+# is not a state (fleet replay, task 9)
+out=$(env $E "$LIN" issue update "$CKEY" --assignee none)
+assert_contains "$out" "released bryan's claim" "clearing the assignee under a claim releases it and says so"
+assert_contains "$out" "assignee=none" "update names what it set (TASK-320)"
+out=$(env $E "$LIN" issue view "$CKEY")
+assert_not_contains "$out" "Claimed:   bryan" "the claim is gone with the assignee"
+out=$(env $E LLL_TOKEN="$BRYAN_TOK" LLL_ME=bryan "$LIN" issue claim "$CKEY")
+assert_contains "$out" "Claimed $CKEY for bryan" "and it can be claimed afresh"
+
+# --assignee on a claimed issue is refused and names the holder (LLL-184);
+# assigning the holder to themselves is a no-op.
+set +e
+out=$(env $E "$LIN" issue update "$CKEY" --assignee carol 2>&1)
+rc=$?
+set -e
+[ "$rc" -ne 0 ] || fail "--assignee over a claim: expected nonzero exit"
+assert_contains "$out" "is claimed by bryan" "the refusal names the holder"
+assert_contains "$out" "lll issue release $CKEY" "and the release"
+out=$(env $E "$LIN" issue update "$CKEY" --assignee bryan)
+assert_contains "$out" "assignee=bryan" "assigning the holder to themselves is allowed"
+got=$(env $E "$LIN" issue view "$CKEY" --json | jq -r '.expand.assignee.name')
+[ "$got" = "bryan" ] || fail "claim survives --assignee to the holder: got '$got'"
 out=$(env $E "$LIN" issue view "$CKEY")
 assert_contains "$out" "Assignee:  bryan" "a refused claim leaves the assignee alone"
 assert_contains "$out" "Claimed:   bryan" "a refused claim leaves the holder alone"
 
-# Held is held, including by you: re-claiming is not a silent no-op.
-set +e
-out=$(env $E LLL_ME=bryan "$LIN" issue claim "$CKEY" 2>&1)
-rc=$?
-set -e
-[ "$rc" -ne 0 ] || fail "re-claiming your own hold: expected nonzero exit"
-assert_contains "$out" "already claimed by bryan" "re-claim names the holder"
+# The rule used to be "held is held, including by you: re-claiming is not
+# a silent no-op". The fleet replay found the cost: a claim outlives
+# --assignee none, and 18 of 30 agents were refused their own issue. The
+# re-claim is not silent - it says "already yours" - and it re-sets the
+# assignee, which is what claiming again is for. Pinned above.
 
 # AC#3: release gives it back, and the next claim succeeds.
 out=$(env $E "$LIN" issue release "$CKEY")
@@ -1735,8 +2036,7 @@ assert_contains "$out" "cleared assignee" "release reports assignment removal"
 out=$(env $E "$LIN" issue view "$CKEY")
 assert_not_contains "$out" "Claimed:" "release removes the hold"
 assert_contains "$out" "Assignee:  none" "release clears the assignee the claim set"
-env $E "$LIN" issue view "$CKEY" --json | python3 -c 'import json,sys; d=json.load(sys.stdin); assert d["claim"] is None; assert len(d["comments"]) == 2'
-out=$(env $E LLL_ME=carol "$LIN" issue claim "$CKEY")
+out=$(env $E LLL_TOKEN="$CAROL_TOK" LLL_ME=carol "$LIN" issue claim "$CKEY")
 assert_contains "$out" "Claimed $CKEY for carol" "a released issue can be claimed again"
 
 # Releasing what nobody holds is an error, not a no-op.
@@ -1747,11 +2047,8 @@ rc=$?
 set -e
 [ "$rc" -ne 0 ] || fail "releasing an unclaimed issue: expected nonzero exit"
 assert_contains "$out" "$CKEY is not claimed" "double release names the state"
-env $E LLL_ME=bryan "$LIN" issue claim "$CKEY" >/dev/null
-env $E "$LIN" issue update "$CKEY" --assignee carol >/dev/null
-out=$(env $E "$LIN" issue release "$CKEY")
-assert_contains "$out" "assignment unchanged" "release reports preserved independent assignment"
-env $E "$LIN" issue view "$CKEY" --json | python3 -c 'import json,sys; d=json.load(sys.stdin); assert d["claim"] is None; assert d["expand"]["assignee"]["name"] == "carol"'
+# The newer claim protection refuses reassignment until release (covered above).
+env $E "$LIN" issue view "$CKEY" --json | python3 -c 'import json,sys; d=json.load(sys.stdin); assert d["claim"] is None; assert len(d["comments"]) == 2'
 
 # Full issue JSON must not silently stop at the first 200 comments.
 env $E python3 - "$LLL_ABS" "$CKEY" <<'PY'
@@ -1774,9 +2071,11 @@ assert {c['body'] for c in comments} >= {f'pagination {i}' for i in range(199)}
 PY
 
 # No 'me' to claim as: refuse and name the fix. $WORK has no .lll.toml and
-# $FAKEHOME no user config, so 'me' is genuinely unset here.
+# $FAKEHOME no user config, so 'me' is genuinely unset here - and the token
+# is the superuser's, which names nobody (a member token would name you,
+# TASK-317).
 set +e
-out=$(cd "$WORK" && env LLL_URL=$URL HOME="$FAKEHOME" "$LLL_ABS" issue claim "$CKEY" 2>&1)
+out=$(cd "$WORK" && env LLL_URL=$URL LLL_TOKEN="$SU_TOK" HOME="$FAKEHOME" "$LLL_ABS" issue claim "$CKEY" 2>&1)
 rc=$?
 set -e
 [ "$rc" -ne 0 ] || fail "claim without 'me': expected nonzero exit"
@@ -1828,7 +2127,7 @@ for m in bryan carol alice; do
   # set +e inside: two of these three MUST fail, and errexit is inherited by
   # a subshell — without it the losers die before recording their status.
   (set +e
-   env $E LLL_ME="$m" "$LIN" issue claim "$CRKEY" > "$CRACE/$m.out" 2>&1
+   env $E LLL_TOKEN="$(tok_for "$m")" LLL_ME="$m" "$LIN" issue claim "$CRKEY" > "$CRACE/$m.out" 2>&1
    echo $? > "$CRACE/$m.rc") &
   cli_pids="$cli_pids $!"
 done
@@ -1845,7 +2144,7 @@ assert_contains "$out" "lll issue release" "issue --help mentions release"
 assert_contains "$("$LIN" completions bash)" "claim" "bash completions offer claim"
 
 # --- TASK-205: the work-site slot (branch/host/path stamped by start) --------
-# `issue start` on an existing matching branch records WHERE the work happens.
+# `issue start --branch` records WHERE the work happens: branch, host, worktree root.
 # The slot holds the current site only — a start from a second site replaces
 # it and leaves an auto-comment trail — and nothing ever clears it; a site
 # that is no longer being worked (state done/cancelled or claim gone) renders
@@ -1857,10 +2156,8 @@ WREPO_A="$DATA_DIR/wsite_a"
 git init -q -b main "$WREPO_A"
 git -C "$WREPO_A" -c user.name=e2e -c user.email=e2e@example.com \
   commit -q --allow-empty -m init
-out=$(env $E LLL_ME=bryan "$LIN" issue claim "$WKEY")
-WBRANCH=$(env $E "$LIN" issue branch-name "$WKEY")
-git -C "$WREPO_A" switch -q -c "$WBRANCH"
-out=$(cd "$WREPO_A" && env $E LLL_WORK_HOST=site-a "$LLL_ABS" issue start "$WKEY")
+out=$(env $E LLL_TOKEN="$BRYAN_TOK" LLL_ME=bryan "$LIN" issue claim "$WKEY")
+out=$(cd "$WREPO_A" && env $E LLL_WORK_HOST=site-a "$LLL_ABS" issue start --branch "$WKEY")
 WBRANCH=$(git -C "$WREPO_A" branch --show-current)
 WROOT_A=$(cd "$WREPO_A" && git rev-parse --show-toplevel)
 
@@ -1872,7 +2169,7 @@ got=$(env $E "$LIN" issue view "$WKEY" --json | jq -r '"\(.work_branch)|\(.work_
 [ "$got" = "$WBRANCH|site-a|$WROOT_A" ] || fail "work fields in --json: got '$got'"
 
 # a same-site restart is silent: the slot stands, no auto-comment
-out=$(cd "$WREPO_A" && env $E LLL_WORK_HOST=site-a "$LLL_ABS" issue start "$WKEY")
+out=$(cd "$WREPO_A" && env $E LLL_WORK_HOST=site-a "$LLL_ABS" issue start --branch "$WKEY")
 out=$(env $E "$LIN" issue view "$WKEY")
 assert_not_contains "$out" "work moved" "same-site restart leaves no comment"
 
@@ -1881,8 +2178,7 @@ WREPO_B="$DATA_DIR/wsite_b"
 git init -q -b main "$WREPO_B"
 git -C "$WREPO_B" -c user.name=e2e -c user.email=e2e@example.com \
   commit -q --allow-empty -m init
-git -C "$WREPO_B" switch -q -c "$WBRANCH"
-out=$(cd "$WREPO_B" && env $E LLL_WORK_HOST=site-b "$LLL_ABS" issue start "$WKEY")
+out=$(cd "$WREPO_B" && env $E LLL_WORK_HOST=site-b "$LLL_ABS" issue start --branch "$WKEY")
 WROOT_B=$(cd "$WREPO_B" && git rev-parse --show-toplevel)
 out=$(env $E "$LIN" issue view "$WKEY")
 assert_contains "$out" "Work:      $WBRANCH @ site-b:$WROOT_B" "a second site replaces the slot"
@@ -2079,6 +2375,23 @@ assert_contains "$out" 'e2e-agent' 'static receiver reads the persisted endpoint
 out=$(cd "$STATIC_HOME" && env -u LLL_URL HOME="$STATIC_HOME" LLL_TOKEN="$FLAG_MINT_TOK" "$LLL_ABS" member list)
 assert_contains "$out" 'e2e-agent' 'static receiver authenticates a read without URL override'
 [ ! -f "$STATIC_HOME/.lll.toml" ] || fail 'API endpoint setter wrote repository config'
+
+# An expired token is named exactly, from its own payload (TASK-318): a
+# 2-second token lists inside its lifetime and is refused after it, by exp.
+# PocketBase honours exp on impersonation tokens; this pins that the CLI
+# says so rather than listing likelihoods.
+SHORT_TOK=$(env -u LLL_TOKEN HOME="$E2E_HOME" LLL_URL=$URL \
+  LLL_ADMIN_EMAIL=admin@local.dev LLL_ADMIN_PASSWORD=admin-local-123 \
+  "$LIN" token create e2e-agent --duration 2 | sed -n 's/^LLL_TOKEN=//p')
+[ -n "$SHORT_TOK" ] || fail "short-lived token: nothing minted"
+out=$(LLL_TOKEN="$SHORT_TOK" HOME="$E2E_HOME" LLL_URL=$URL "$LIN" member list)
+assert_contains "$out" "e2e-agent" "a 2s token authenticates inside its lifetime"
+sleep 3
+out=$(LLL_TOKEN="$SHORT_TOK" HOME="$E2E_HOME" LLL_URL=$URL LLL_TEAM=ENG "$LIN" issue list --limit 1 2>&1 || true)
+assert_contains "$out" "expired at" "an expired token is named as expired, with the time"
+assert_contains "$out" "lll token create" "and the re-mint is named"
+out=$(LLL_TOKEN="$SHORT_TOK" HOME="$E2E_HOME" LLL_URL=$URL "$LIN" whoami 2>&1 || true)
+assert_contains "$out" "expired at" "whoami on an expired token says expired, not 404"
 
 # ...and the gate is superuser-only: a member token and no credentials at all
 # are both refused, naming the fix. The member token is minted fresh — the
@@ -2334,7 +2647,10 @@ assert_contains "$out" "team archive ENG" "the refusal names archive"
 # is destructive (and the gate is ENFORCED, not just claimed — TASK-243).
 LLL_URL=$URL "$LIN" member add -n "Disposable Person" >/dev/null \
   || fail "adding the disposable member"
-out=$(LLL_URL=$URL "$LIN" member remove "Disposable Person" 2>&1) \
+# `env -u` the admin pair, as the token-create refusals above do: e2e_begin now
+# exports it for every boot (the suite owns its superuser), so "no credentials"
+# has to be constructed here rather than assumed from the developer's shell.
+out=$(env -u LLL_ADMIN_EMAIL -u LLL_ADMIN_PASSWORD LLL_URL=$URL "$LIN" member remove "Disposable Person" 2>&1) \
   && fail "member remove without admin credentials should refuse"
 assert_contains "$out" "needs the server's admin credentials" "remove is superuser-gated"
 out=$(LLL_URL=$URL "$LIN" member remove "Disposable Person" \
@@ -2377,17 +2693,34 @@ assert_contains "$out" "at least 8 characters" "set-password checks the length"
 # The rotation above retired every token issued before it, including the one
 # this suite exported. A list rule filters rather than gates, so the reads
 # would answer 200-and-empty exactly as they did before anyone logged in.
-out=$(LLL_URL=$URL "$LIN" issue list 2>&1) && fail "a stale token should be refused, not answered emptily"
-assert_contains "$out" "no longer valid" "a stale token is named"
+# `env -u` the admin pair: e2e_begin exports it for every boot, and a process
+# holding it HEALS a stale token (TASK-255, asserted just below) instead of
+# refusing. "A plain user with a dead token" has to be constructed.
+out=$(env -u LLL_ADMIN_EMAIL -u LLL_ADMIN_PASSWORD LLL_URL=$URL "$LIN" issue list 2>&1) && fail "a stale token should be refused, not answered emptily"
+# The wording changed with TASK-309: a rejected token names WHERE it came from
+# and puts "copied wrong" first, because ten of thirty fleet agents had hand-
+# copied theirs and every one of them went looking for a revoked credential.
+assert_contains "$out" "was rejected by" "a stale token is named"
+assert_contains "$out" "copied wrong" "the rejection lists the cheap local cause first"
 assert_contains "$out" "lll login" "the stale-token refusal names the fix"
 # TASK-255: a process holding the server's admin credentials re-mints and
 # retries instead of reporting an empty database. This is the board: `lll up`
 # rides a superuser token and re-mints only "if refused", but a stale token is
 # never refused on a read, so production told everyone its own configured team
 # did not exist while the CLI could see it fine.
-out=$(LLL_URL=$URL LLL_ADMIN_EMAIL=admin@local.dev LLL_ADMIN_PASSWORD=admin-local-123 \
-  "$LIN" team list) || fail "admin-credentialled process did not self-heal: $out"
-assert_contains "$out" "ENG" "a stale token is re-minted when admin credentials are present"
+# TASK-323 narrowed it: the admin pair alone no longer heals - a fleet or a
+# developer shell holding it would otherwise upgrade a dead member token to
+# the superuser silently and whoami would name the dead member as alive.
+# The board declares itself with LLL_REMINT=1 (set by lll up for itself).
+set +e
+out=$(LLL_URL=$URL LLL_ADMIN_EMAIL=admin@local.dev LLL_ADMIN_PASSWORD=admin-local-123 "$LIN" team list 2>&1)
+rc=$?
+set -e
+[ "$rc" -ne 0 ] || fail "the admin pair alone should not self-heal any more (TASK-323): $out"
+assert_contains "$out" "was rejected by" "a CLI with the admin pair still gets the honest refusal"
+out=$(LLL_URL=$URL LLL_REMINT=1 LLL_ADMIN_EMAIL=admin@local.dev LLL_ADMIN_PASSWORD=admin-local-123 \
+  "$LIN" team list) || fail "the board (LLL_REMINT=1) did not self-heal: $out"
+assert_contains "$out" "ENG" "a stale token is re-minted by the board, which holds the admin pair and says so"
 
 E2E_TOKEN=$(pb_member_token "$URL" e2e-agent e2e-agent@lll.test e2e-agent-pass-123) \
   || fail "re-minting the e2e member token after the rotation"
@@ -2477,7 +2810,7 @@ assert_contains "$out" 'ambiguous' 'ambiguous branch requires explicit ID'
 
 # Account switches preserve deliberate identity config but explain the mismatch.
 out=$(cd "$ORACLE_REPO" && env -u LLL_TOKEN -u LLL_ME HOME="$ORACLE_HOME" "$LLL_ABS" login --url "$URL" --email oracle-colleague@lll.test --password oracle-colleague-pass-123)
-assert_contains "$out" 'comments are authored as e2e-agent' 'login explains retained comment author'
+assert_contains "$out" 'writes are refused until they agree' 'login explains retained identity mismatch'
 assert_contains "$out" 'lll config set me oracle-colleague' 'login gives identity recovery'
 "$LIN" board url >"$DATA_DIR/board-stdout" 2>"$DATA_DIR/board-stderr" && fail 'board accepted an unknown subcommand'
 [ ! -s "$DATA_DIR/board-stdout" ] || fail 'command errors contaminate stdout'

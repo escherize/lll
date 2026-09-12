@@ -71,3 +71,27 @@ pub fn issue_id_for_team(branch: string, key: string) -> Option<string> {
   if number == "" || !number.runes().all(is_digit) || strings.TrimLeft(number, "0") == "" { return None }
   Some(f"{key}-{number}")
 }
+
+/// Whether the working directory is inside a git repository.
+pub fn in_repo() -> bool {
+  exec.Command("git", "rev-parse", "--is-inside-work-tree").Output().is_ok()
+}
+
+/// Switch to a branch, creating it if needed. Returns true when the branch
+/// was created, false when it already existed.
+pub fn switch_branch(name: string) -> Result<bool, string> {
+  let exists = exec
+    .Command("git", "rev-parse", "--verify", "--quiet", f"refs/heads/{name}")
+    .Output()
+    .is_ok()
+  if exists {
+    if let Err(e) = exec.Command("git", "switch", name).Output() {
+      return Err(f"git switch {name}: {e}")
+    }
+    return Ok(false)
+  }
+  if let Err(e) = exec.Command("git", "switch", "-c", name).Output() {
+    return Err(f"git switch -c {name}: {e}")
+  }
+  Ok(true)
+}

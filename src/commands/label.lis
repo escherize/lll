@@ -8,53 +8,52 @@ import "pb"
 import "flags"
 import "query"
 
-/// Dispatch `lll label <verb>`.
+/// Dispatch `lll label <verb>` through the noun's Command table (TASK-307).
+/// The table is the one place a verb is declared: dispatch, `lll label --help`
+/// and shell completions all read it, so none of the three can drift.
 pub fn label(args: Slice<string>) -> Result<(), string> {
-  let Some(verb) = args.get(2) else {
-    label_usage()
-    return Ok(())
-  }
-  match verb {
-    "list" => label_list(args),
-    "create" => label_create(args),
-    "edit" => label_edit(args),
-    "delete" => label_delete(args),
-    "--help" => {
-      label_usage()
-      Ok(())
-    },
-    "-h" => {
-      label_usage()
-      Ok(())
-    },
-    other => Err(f"unknown label command: '{other}' (see 'lll label --help')"),
-  }
+  flags.dispatch("label", "work with labels", "", label_commands(), args)
 }
 
-fn label_usage() {
-  fmt.Println(
-    "lll label - work with labels
-
-Usage:
-  lll label list                                 list labels (name, color, team);
-                                                 this team's, or every team's
-                                                 when none is configured
-  lll label create NAME (or -n NAME) [-c \"#5e6ad2\"] [--team KEY]
-                                                 create a label (--team defaults
-                                                 to LLL_TEAM); check 'lll label
-                                                 list' first — reuse over
-                                                 near-duplicates (bug/bugs/defect)
-  lll label edit NAME [-n \"new name\"] [-c \"#5e6ad2\"]
-                                                 rename or recolor a label; the
-                                                 label keeps its issues
-  lll label delete NAME [--force]                delete a label; refuses while
-                                                 issues still carry it, and
-                                                 --force drops it off all of
-                                                 them
-
-Every command accepts --team KEY to select its team for this invocation,
-overriding LLL_TEAM and the saved attachment without rewriting configuration.",
-  )
+/// Every label verb, as a value. Dispatch parses args against `spec` before
+/// `run`, so a trailing -h can never reach a verb body - the assertion that
+/// matters for `delete`, a write. The summaries are the rows the old
+/// print_usage carried, moved rather than reworded.
+pub fn label_commands() -> Slice<flags.Command> {
+  [
+    flags.Command {
+      name: "list",
+      summary: "list labels (name, color, team); this team's, or every team's when none is configured",
+      page: "",
+      spec: label_list_spec(),
+      positional: "",
+      run: label_list,
+    },
+    flags.Command {
+      name: "create",
+      summary: "create a label (--team defaults to LLL_TEAM); check 'lll label list' first — reuse over near-duplicates (bug/bugs/defect)",
+      page: label_create_page(),
+      spec: label_create_spec(),
+      positional: "[NAME]",
+      run: label_create,
+    },
+    flags.Command {
+      name: "edit",
+      summary: "rename or recolor a label; the label keeps its issues",
+      page: "",
+      spec: label_edit_spec(),
+      positional: "NAME",
+      run: label_edit,
+    },
+    flags.Command {
+      name: "delete",
+      summary: "delete a label; refuses while issues still carry it, and --force drops it off all of them",
+      page: "",
+      spec: label_delete_spec(),
+      positional: "NAME",
+      run: label_delete,
+    },
+  ]
 }
 
 fn label_list(args: Slice<string>) -> Result<(), string> {
@@ -115,15 +114,22 @@ fn label_delete_spec() -> Slice<flags.Flag> {
 /// The flag table of one label verb; empty for verbs without flags. Read by
 /// `lll completions` so the scripts complete exactly what the parser accepts.
 pub fn label_verb_spec(verb: string) -> Slice<flags.Flag> {
-  if !["create", "list", "edit", "delete"].contains(verb) { return [] }
-  let spec = match verb {
-    "create" => label_create_spec(),
-    "list" => label_list_spec(),
-    "edit" => label_edit_spec(),
-    "delete" => label_delete_spec(),
-    _ => [],
-  }
-  flags.with_team(spec)
+  flags.command_spec(label_commands(), verb)
+}
+
+/// The usage line of `lll label create`. The check-first note rides it
+/// (TASK-208), so every surface that prints it - the missing -n error and the
+/// help page below - says to reuse before creating.
+fn label_create_usage() -> string {
+  flags.usage("lll label create", label_create_spec(), "[NAME]") +
+  "\n       (check 'lll label list' first; reuse over near-duplicates like bug/bugs/defect)"
+}
+
+/// `lll label create --help`. The generic page dispatch would generate uses
+/// the bare usage line and so drops the TASK-208 note; this is the same usage
+/// + flags block with the note kept, built from the spec so it cannot drift.
+fn label_create_page() -> string {
+  f"usage: {label_create_usage()}" + flags.section(label_create_spec())
 }
 
 fn label_create(args: Slice<string>) -> Result<(), string> {

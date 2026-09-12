@@ -48,6 +48,14 @@ E2E_LOGS="$SEED_LOG"
 # a seed run is precisely the kind of thing that would do it again.
 export LLL_TEAM=DEMO
 export LLL_ME=demo
+# The demo owns its superuser. `lll up` upserts whatever LLL_ADMIN_* name, and
+# a developer shell exporting the PRODUCTION pair made this script boot a
+# throwaway board with the prod admin, then die at pb_member_token, which
+# still logs in as admin@local.dev. Same pin e2e_begin carries; a script that
+# boots `lll up` must own both halves of that pair or it is at the mercy of
+# whatever the shell happens to export.
+export LLL_ADMIN_EMAIL=admin@local.dev
+export LLL_ADMIN_PASSWORD=admin-local-123
 
 # A scratch HOME, for the same reason the e2e suites use one (lib.sh
 # e2e_pin_home), and it is not optional here - it is the difference between
@@ -300,7 +308,13 @@ for want in backlog todo in-progress in-review done cancelled; do
 done
 
 echo
-echo "seeded $count issues, 2 projects, 5 labels, 3 members into a throwaway board"
+# TASK-309: thirty fleet members, so a shard's me = "shard-NN" names someone.
+# Run 2 of the first fleet task had 22 of 30 shards fail on exactly this: the
+# rules said to set that identity and the board had never heard of it.
+for i in $(seq -w 1 30); do
+  lll_idem member add -n "shard-$i" >/dev/null
+done
+echo "seeded $count issues, 2 projects, 5 labels, 33 members into a throwaway board"
 echo
 echo "  board   $BOARD_URL"
 echo "  db      $URL/_/"
@@ -313,6 +327,9 @@ echo
 echo "the server is still running as pid $UP_PID - Ctrl-C it, or:  kill $UP_PID"
 echo "to drive the CLI against it in another shell:"
 echo "  export LLL_URL=$URL LLL_TEAM=DEMO LLL_TOKEN=$LLL_TOKEN"
+echo "that token is the member 'seed'; writes go out as the token's member (TASK-317),"
+echo "so an agent that should write as shard-NN needs its own:"
+echo "  LLL_ADMIN_EMAIL=$LLL_ADMIN_EMAIL LLL_ADMIN_PASSWORD=$LLL_ADMIN_PASSWORD lll token create shard-NN"
 echo
 
 # Hand the terminal to the server: Ctrl-C then stops the board, which is what

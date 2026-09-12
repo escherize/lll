@@ -53,3 +53,27 @@ fn project_edit_requires_no_flag_by_itself() {
     assert !fl.required
   }
 }
+
+/// The Command table is what dispatch, `lll project --help` and completions
+/// read (TASK-307). Every verb must be in it with a one-line summary, and no
+/// verb had a hand-written page, so none may grow one by accident.
+#[test]
+fn project_commands_cover_every_verb_with_a_summary_and_no_page() {
+  let names = project_commands().map(|c| c.name)
+  assert strings.Join(names, " ") == "list view create edit delete"
+  for c in project_commands() {
+    assert c.summary != ""
+    assert !c.summary.contains("\n")
+    assert c.page == ""
+  }
+}
+
+/// The verbs that take a NAME say so in the usage line; the two that do not
+/// must not, or `lll project list NAME` would look accepted.
+#[test]
+fn project_commands_name_their_positional() {
+  for c in project_commands() {
+    let takes_name = c.name == "view" || c.name == "edit" || c.name == "delete"
+    assert (c.positional == "NAME") == takes_name
+  }
+}

@@ -5,7 +5,8 @@ import "go:strings"
 /// flag is declared exactly once and the three surfaces cannot drift.
 ///
 /// `name` is the canonical spelling — the one shown in help and usage lines.
-/// `alias` is an additional accepted spelling (`-d` for `--description`);
+/// `alias` is any further accepted spellings, space-separated (`-d` for
+/// `--description`; `--body -m --message` for `-b`);
 /// parsed values always land under `name`. A flag with no long form (-t,
 /// -w, -k) simply has the short spelling as its name.
 pub struct Flag {
@@ -45,6 +46,24 @@ pub fn parse(
   allow_positional: bool,
   usage: string,
 ) -> Result<Parsed, string> {
+  let limit = if allow_positional { 1 } else { 0 }
+  parse_n(spec, args, start, limit, usage)
+}
+
+/// `parse`, with the positional limit as a COUNT. Three verbs take two bare
+/// words (`issue link KEY SLUG`, `team set-accent KEY #hex`, `config set me
+/// NAME`) and a bool cannot say so; each of them had grown a bypass around the
+/// dispatcher rather than a second positional. `dispatch` reads the count off
+/// the Command's `positional` string (its word count), so a table entry
+/// declares its arity in the same place it declares its usage line and the
+/// two cannot disagree.
+pub fn parse_n(
+  spec: Slice<Flag>,
+  args: Slice<string>,
+  start: int,
+  max_positional: int,
+  usage: string,
+) -> Result<Parsed, string> {
   let mut vals = Map.new<string, Slice<string>>()
   let mut pos: Slice<string> = []
   // `--help` and `-h` on every verb, before anything else can refuse them
@@ -67,7 +86,7 @@ pub fn parse(
   // fills the gap rather than overriding intent: declared means the caller
   // handles it, undeclared means nobody did.
   let declares_help = spec
-    .find(|f| f.name == "--help" || f.alias == "--help" || f.name == "-h" || f.alias == "-h")
+    .find(|f| spells(f, "--help") || spells(f, "-h"))
     .is_some()
   if !declares_help && help_requested(spec, args, start) {
     return Err(f"{help_marker()}{usage_help(usage, spec)}")
@@ -82,9 +101,9 @@ pub fn parse(
     if arg.starts_with("-") && arg.contains("=") {
       let parts = strings.SplitN(arg, "=", 2)
       let spelling = parts[0]
-      let Some(fl) = spec.find(|f| f.name == spelling || (f.alias != "" && f.alias == spelling)) else {
+      let Some(fl) = spec.find(|f| spells(f, spelling)) else {
         if spelling == "--team" { return Err(team_scope_error(arg, parts[1], usage)) }
-        return Err(unknown_flag(arg, usage))
+        return Err(unknown_flag(arg, usage, spec))
       }
       // A boolean given a value is a mistake, not a truthy string: `--json=0`
       // would otherwise read as "json on". Reject it naming the flag.
@@ -95,14 +114,13 @@ pub fn parse(
       i += 1
       continue
     }
-    let Some(fl) = spec.find(|f| f.name == arg || (f.alias != "" && f.alias == arg)) else {
+    let Some(fl) = spec.find(|f| spells(f, arg)) else {
       if arg == "--team" { return Err(team_scope_error(arg, args.get(i + 1).unwrap_or("KEY"), usage)) }
-      if arg.starts_with("-") || !allow_positional {
-        return Err(unknown_flag(arg, usage))
+      if arg.starts_with("-") || max_positional == 0 {
+        return Err(unknown_flag(arg, usage, spec))
       }
-      if !pos.is_empty() {
-        if usage == "" { return Err(f"unexpected argument: '{arg}'") }
-        return Err(f"unexpected argument: '{arg}'\nusage: {usage}")
+      if pos.length() >= max_positional {
+        return Err(f"unexpected argument: '{arg}'")
       }
       pos = pos.append(arg)
       i += 1
@@ -133,7 +151,7 @@ pub fn help_requested(spec: Slice<Flag>, args: Slice<string>, start: int) -> boo
   while let Some(arg) = args.get(index) {
     if arg == "--" { return false }
     if arg == "--help" || arg == "-h" { return true }
-    if spec.find(|f| f.value && (f.name == arg || (f.alias != "" && f.alias == arg))).is_some() {
+    if spec.find(|f| f.value && spells(f, arg)).is_some() {
       index += 2
     } else {
       index += 1
@@ -150,7 +168,7 @@ pub fn shell_argument(value: string) -> string {
 
 fn team_scope_error(arg: string, key: string, usage: string) -> string {
   let value = shell_argument(key)
-  unknown_flag(arg, usage) + f"\nFor a one-command team override, prefix your command with LLL_TEAM={value}.\nThis leaves the saved attachment unchanged (see 'lll config --help')."
+  unknown_flag(arg, usage, []) + f"\nFor a one-command team override, prefix your command with LLL_TEAM={value}.\nThis leaves the saved attachment unchanged (see 'lll config --help')."
 }
 
 /// The prefix that marks a parse "error" as a help request rather than a
@@ -179,16 +197,19 @@ fn usage_help(usage: string, spec: Slice<Flag>) -> string {
   f"{head}{flags_block}"
 }
 
-fn unknown_flag(arg: string, usage: string) -> string {
-  let kind = if strings.HasPrefix(arg, "-") { "unknown flag" } else { "unexpected argument" }
+/// The flag table travels with the error: 26 of 30 fleet agents named the
+/// bare "unknown flag + usage line" the least helpful message lll has, since
+/// it says what was wrong and nothing about what would be right.
+fn unknown_flag(arg: string, usage: string, spec: Slice<Flag>) -> string {
+  let kind = if arg.starts_with("-") { "unknown flag" } else { "unexpected argument" }
   if usage == "" { return f"{kind}: '{arg}'" }
-  f"{kind}: '{arg}'\nusage: {usage}"
+  f"{kind}: '{arg}'\nusage: {usage}{section(spec)}"
 }
 
 impl Parsed {
   /// The canonical name for a spelling, or the name itself when unknown.
   fn canon(self, name: string) -> string {
-    let Some(fl) = self.spec.find(|f| f.name == name || (f.alias != "" && f.alias == name)) else {
+    let Some(fl) = self.spec.find(|f| spells(f, name)) else {
       return name
     }
     fl.name
@@ -221,6 +242,97 @@ impl Parsed {
     }
     f
   }
+
+  /// The i-th positional argument (0-based), "" when there is none. Two
+  /// verbs take two: `issue link KEY SLUG`, and `issue comment KEY [body]`
+  /// since TASK-309's fleet showed a third of first-time agents type the body
+  /// bare, the way `create` takes a bare title.
+  pub fn nth(self, i: int) -> string {
+    let Some(v) = self.pos.get(i) else {
+      return ""
+    }
+    v
+  }
+}
+
+/// One verb of a noun, as a value (TASK-307). Dispatch, the noun's help
+/// table and shell completions all read the same slice of these, so a verb is
+/// declared exactly once and the three cannot drift. Before this, nine nouns
+/// each carried a hand-rolled `match verb`, eleven files their own copy of the
+/// `--help` arm, and completions.verbs() was a fourth list that drifted twice
+/// in one wave.
+///
+/// `summary` is one line and required: it is the row in `lll <noun> --help`.
+/// `page` is the verb's own help when it has a hand-written one; "" means
+/// generate usage + flags from `spec`, which is the floor, not a ceiling.
+/// `positional` is the shape after the verb: "" for none, "[KEY-123]" for
+/// optional, "KEY-123" for required - it feeds the usage line only; the verb
+/// still reads its positional through Parsed.first().
+pub struct Command {
+  pub name: string,
+  pub summary: string,
+  pub page: string,
+  pub spec: Slice<Flag>,
+  pub positional: string,
+  pub run: fn(Slice<string>) -> Result<(), string>,
+}
+
+/// Route `lll <noun> <verb> ...` through a noun's Command table.
+///
+/// The order is the point. Args are parsed against the entry's spec BEFORE
+/// `run` is called, so a trailing `-h` on any verb is answered by parse and
+/// never reaches the verb body. Thirty verb arms used to call a zero-arg
+/// function and discard argv; `lll config check -h` RAN the health check. No
+/// table entry can do that now, because the dispatcher does not let it.
+///
+/// `intro` is prose that belongs to the noun rather than to any verb - the
+/// rename collateral under `lll team --help`, the precedence paragraph under
+/// `lll config --help`. Printed after the verb table; "" prints nothing.
+pub fn dispatch(
+  noun: string,
+  tagline: string,
+  intro: string,
+  cmds: Slice<Command>,
+  args: Slice<string>,
+) -> Result<(), string> {
+  let Some(verb) = args.get(2) else {
+    return Err(f"{help_marker()}{noun_help(noun, tagline, intro, cmds)}")
+  }
+  if verb == "--help" || verb == "-h" {
+    return Err(f"{help_marker()}{noun_help(noun, tagline, intro, cmds)}")
+  }
+  let Some(c) = cmds.find(|c| c.name == verb) else {
+    return Err(f"unknown {noun} command: '{verb}' (see 'lll {noun} --help')")
+  }
+  // A verb with its own page answers --help with it; the generic parse-time
+  // help would otherwise replace a written page with a bare flags block.
+  if c.page != "" && help_requested(c.spec, args, 3) {
+    return Err(f"{help_marker()}{c.page}")
+  }
+  let cmd = f"lll {noun} {c.name}"
+  // Arity is the positional string's word count: "KEY-123 SLUG" admits two.
+  let words = strings.Fields(c.positional)
+  let arity = words.length()
+  let _ = parse_n(c.spec, args, 3, arity, usage(cmd, c.spec, c.positional))?
+  (c.run)(args)
+}
+
+/// `lll <noun> --help`: every verb's usage line and summary, aligned, then the
+/// noun's intro. Generated from the table so a verb cannot be missing from it.
+fn noun_help(noun: string, tagline: string, intro: string, cmds: Slice<Command>) -> string {
+  let mut out = if tagline == "" { f"lll {noun}" } else { f"lll {noun} - {tagline}" }
+  out += "\n\nUsage:"
+  // One row per verb: the usage line, then the summary on the next line,
+  // indented. The hand-written pages aligned summaries into a right-hand
+  // column, but a generated usage line can run to 110 characters (member
+  // set-password), and padding every row to the widest made the whole table
+  // 150 columns. Two lines per verb reads in any terminal.
+  for c in cmds {
+    let l = usage(f"lll {noun} {c.name}", c.spec, c.positional)
+    out += f"\n  {l}\n      {c.summary}"
+  }
+  if intro != "" { out += f"\n\n{intro}" }
+  out
 }
 
 /// A usage line fragment: "lll issue create -t \"title\" [-d desc] ...".
@@ -249,18 +361,21 @@ pub fn usage(cmd: string, spec: Slice<Flag>, positional: string) -> string {
 pub fn section(spec: Slice<Flag>) -> string {
   let visible = spec.filter(|f| !f.hidden)
   if visible.is_empty() { return "" }
+  // The label carries the alias ("-b, --body"): the long form guessed at a
+  // steady rate across fleet runs was never shown anywhere.
   let mut width = 0
   for fl in visible {
-    if fl.name.length() > width { width = fl.name.length() }
+    if flag_label(fl).length() > width { width = flag_label(fl).length() }
   }
   let cont = strings.Repeat(" ", width + 4)
   let mut out = "\nFlags:"
   for fl in visible {
-    let pad = strings.Repeat(" ", width - fl.name.length() + 2)
+    let label = flag_label(fl)
+    let pad = strings.Repeat(" ", width - label.length() + 2)
     let mut first = true
     for l in fl.help.split("\n") {
       if first {
-        out += f"\n  {fl.name}{pad}{l}"
+        out += f"\n  {label}{pad}{l}"
         first = false
       } else {
         out += f"\n{cont}{l}"
@@ -270,6 +385,18 @@ pub fn section(spec: Slice<Flag>) -> string {
   out
 }
 
+/// True when `s` is the flag's name or one of its aliases.
+fn spells(fl: Flag, s: string) -> bool {
+  if fl.name == s { return true }
+  for a in strings.Fields(fl.alias) { if a == s { return true } }
+  false
+}
+
+fn flag_label(fl: Flag) -> string {
+  if fl.alias == "" { return fl.name }
+  f"{fl.name}, {strings.Join(strings.Fields(fl.alias), ", ")}"
+}
+
 /// Completion tokens for a spec: every accepted spelling, hidden flags
 /// excluded. This is what the shell scripts source.
 pub fn tokens(spec: Slice<Flag>) -> Slice<string> {
@@ -277,7 +404,7 @@ pub fn tokens(spec: Slice<Flag>) -> Slice<string> {
   for fl in spec {
     if fl.hidden { continue }
     out = out.append(fl.name)
-    if fl.alias != "" { out = out.append(fl.alias) }
+    for a in strings.Fields(fl.alias) { out = out.append(a) }
   }
   out
 }
@@ -322,7 +449,7 @@ pub fn extract_team(args: Slice<string>, start: int, spec: Slice<Flag>) -> Resul
       team = Some(value)
     } else {
       cleaned = cleaned.append(arg)
-      if spec.find(|f| f.value && (f.name == arg || (f.alias != "" && f.alias == arg))).is_some() {
+      if spec.find(|f| f.value && spells(f, arg)).is_some() {
         if let Some(value) = args.get(i + 1) {
           cleaned = cleaned.append(value)
           i += 1
@@ -332,4 +459,10 @@ pub fn extract_team(args: Slice<string>, start: int, spec: Slice<Flag>) -> Resul
     i += 1
   }
   Ok((cleaned, team))
+}
+
+/// Look up the declaration shared by parsing and completions.
+pub fn command_spec(cmds: Slice<Command>, verb: string) -> Slice<Flag> {
+  let Some(c) = cmds.find(|c| c.name == verb) else { return [] }
+  c.spec
 }

@@ -132,3 +132,28 @@ fn rename_collateral_says_issue_keys_follow() {
 fn rename_collateral_is_empty_when_the_key_did_not_change() {
   assert team_rename_collateral("ENG", "ENG").is_empty()
 }
+
+// ---------------------------------------------------------- team_commands
+
+/// The table is what dispatch, `lll team --help` and completions read
+/// (TASK-307), so the verb list is pinned here: a verb dropped from it
+/// vanishes from all three at once, and a row without a summary is a blank
+/// line in the help table.
+#[test]
+fn team_commands_declares_every_verb_with_a_summary() {
+  let names = strings.Join(team_commands().map(|c| c.name), " ")
+  assert names == "list create view rename set-accent archive unarchive delete"
+  for c in team_commands() {
+    assert c.summary != ""
+  }
+}
+
+/// `delete` is the one team verb with a hand-written page; every other verb
+/// generates its help from the spec. A page invented for a spec-only verb
+/// would shadow the flags block the spec already renders.
+#[test]
+fn team_commands_only_delete_has_a_page() {
+  for c in team_commands() {
+    assert (c.page != "") == (c.name == "delete")
+  }
+}
