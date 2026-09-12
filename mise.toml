@@ -85,6 +85,7 @@ command -v lis >/dev/null || { echo "lis not found. Install it:" >&2; echo "  cu
 bash scripts/lis-typedefs-workaround.sh
 lis test
 go -C web test ./...
+python3 -m unittest discover -s scripts -p 'test_browser_poll.py'
 """
 
 [tasks.e2e]

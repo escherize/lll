@@ -871,13 +871,7 @@ if command -v playwright-cli >/dev/null 2>&1; then
       | sed -n '/### Result/{n;p;}' | tr -d '\\'
   }
   page_until() { # js needle -> the last result seen, after up to 10s of polling
-    local out=""
-    for _ in $(seq 1 40); do
-      out=$(page_state "$1")
-      case "$out" in *"$2"*) break ;; esac
-      sleep 0.25
-    done
-    printf '%s' "$out"
+    python3 scripts/browser_poll.py "$BROWSER_SESSION" "$1" "$2"
   }
   # The gate: the browser logs in through the banner's handoff URL once —
   # the 303 sets the cookie — and every later navigation rides it.
@@ -1059,13 +1053,8 @@ if command -v playwright-cli >/dev/null 2>&1; then
   # Click again until the probe shows the POST went through --- an extra
   # click is harmless, an empty title just refocuses the field.
   ni_submit() { # needle --- click create until the probe matches
-    local out=""
-    for _ in 1 2 3 4; do
-      playwright-cli -s="$BROWSER_SESSION" click "#ni-create" >/dev/null 2>&1 || true
-      out=$(page_until "$more_js" "$1")
-      case "$out" in *"$1"*) break ;; esac
-    done
-    printf '%s' "$out"
+    python3 scripts/browser_poll.py "$BROWSER_SESSION" "$more_js" "$1" \
+      --click '#ni-create' --timeout 40
   }
   playwright-cli -s="$BROWSER_SESSION" click "#ni-expand" >/dev/null 2>&1 \
     || fail "playwright: opening the create dialog"
