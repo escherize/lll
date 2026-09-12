@@ -1645,6 +1645,18 @@ assert_contains "$out" "migration-hazard" "finding near matches a file inside a 
 out=$(LLL_URL=$URL LLL_TEAM=ENG "$LIN" finding near web/templates)
 assert_contains "$out" "No findings for web/templates." "finding near with no match says so"
 
+# LLL-314: exact coordinates beat an earlier slug's broad directory match.
+LLL_URL=$URL LLL_TEAM=ENG "$LIN" finding create -s a-ranking-directory -t "Broad ranking note" \
+  -b "Directory context" --paths "rank-probe" >/dev/null
+LLL_URL=$URL LLL_TEAM=ENG "$LIN" finding create -s z-ranking-exact -t "Exact ranking note" \
+  -b "File context" --paths "rank-probe, rank-probe/file.lis" >/dev/null
+out=$(LLL_URL=$URL LLL_TEAM=ENG "$LIN" finding near ./rank-probe/file.lis)
+[ "$(printf '%s\n' "$out" | cut -f1 | paste -sd, -)" = 'z-ranking-exact,a-ranking-directory' ] \
+  || fail "finding near did not rank exact before directory: $out"
+out=$(LLL_URL=$URL LLL_TEAM=ENG "$LIN" finding list -p rank-probe/file.lis --json)
+[ "$(jq -r 'map(.slug) | join(",")' <<<"$out")" = 'z-ranking-exact,a-ranking-directory' ] \
+  || fail "finding list JSON did not share path ranking: $out"
+
 out=$(LLL_URL=$URL LLL_TEAM=ENG "$LIN" finding list)
 assert_contains "$out" "migration-hazard	pb	Migration collisions" "finding list prints slug, area, title"
 out=$(LLL_URL=$URL LLL_TEAM=ENG "$LIN" finding list --area pb)

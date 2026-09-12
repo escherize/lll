@@ -1,0 +1,25 @@
+import "models"
+
+#[test]
+fn exact_finding_paths_precede_containment_without_duplicates() {
+  let findings = [
+    models.Doc { slug: "a-broad", paths: "web/static", .. },
+    models.Doc { slug: "b-sibling", paths: "web/static/picker-other.js", .. },
+    models.Doc { slug: "c-parent", paths: "web", .. },
+    models.Doc { slug: "z-exact", paths: "web/static, ./web/static/picker.js/", .. },
+  ]
+  let hits = findings_near(findings, " ./web/static/picker.js/ ")
+  assert hits.map(|d| d.slug).equals(["z-exact", "a-broad", "c-parent"])
+  assert findings_near(findings, "web/stat").map(|d| d.slug).equals(["c-parent"])
+  assert findings_near(findings, "./").is_empty()
+}
+
+#[test]
+fn directory_queries_keep_descendants_after_exact_directory_notes() {
+  let findings = [
+    models.Doc { slug: "a-child", paths: "src/pb/read.lis", .. },
+    models.Doc { slug: "b-exact", paths: "src/pb", .. },
+    models.Doc { slug: "c-exact", paths: "other, src/pb", .. },
+  ]
+  assert findings_near(findings, "src/pb").map(|d| d.slug).equals(["b-exact", "c-exact", "a-child"])
+}

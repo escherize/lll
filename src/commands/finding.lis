@@ -24,7 +24,7 @@ pub fn finding_commands() -> Slice<flags.Command> {
   [
     flags.Command {
       name: "near",
-      summary: "findings about a file or directory",
+      summary: "findings about a file or directory, exact path matches first",
       page: "",
       spec: flags.with_team([]),
       positional: "<path>",
@@ -143,6 +143,23 @@ fn doc_paths_touch(d: models.Doc, path: string) -> bool {
   d.paths.split(",").any(|entry| path_touches(entry, path))
 }
 
+/// Stable relevance partition: exact coordinates precede directory matches.
+/// Input is already ordered by slug/id; preserve that order within each tier.
+fn findings_near(findings: Slice<models.Doc>, path: string) -> Slice<models.Doc> {
+  let normalized = norm_path(path)
+  if normalized == "" { return [] }
+  let mut exact: Slice<models.Doc> = []
+  let mut nearby: Slice<models.Doc> = []
+  for finding in findings {
+    if finding.paths.split(",").any(|entry| norm_path(entry) == normalized) {
+      exact = exact.append(finding)
+    } else if doc_paths_touch(finding, normalized) {
+      nearby = nearby.append(finding)
+    }
+  }
+  exact.append(nearby...)
+}
+
 /// The findings related to one issue: every finding explicitly linked to it
 /// (the issues relation always shows), plus every finding whose `area` names
 /// one of the issue's labels. Shared by 'lll issue view' and the issue page.
@@ -164,7 +181,7 @@ fn finding_near(input: flags.CommandInput) -> Result<(), string> {
   let path = p.first()
   if path == "" { return Err("usage: lll finding near <path>") }
   let findings = fetch_findings(current_team()?.id)?
-  let hits = findings.filter(|d| doc_paths_touch(d, path))
+  let hits = findings_near(findings, path)
   if hits.is_empty() {
     fmt.Println(f"No findings for {path}.")
     return Ok(())
@@ -188,7 +205,7 @@ fn finding_list(input: flags.CommandInput) -> Result<(), string> {
     findings = findings.filter(|d| strings.Contains(strings.ToLower(d.slug), search) || strings.Contains(strings.ToLower(d.title), search))
   }
   if path != "" {
-    findings = findings.filter(|d| doc_paths_touch(d, path))
+    findings = findings_near(findings, path)
   }
   if p.given("--json") {
     let body = match json.Marshal(findings) {
