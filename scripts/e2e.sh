@@ -2981,6 +2981,9 @@ print('Concurrent CLI/API allocation: 40 successful creates, 40 unique IDs and n
 PY_RACE
 
 # --- web board (own ephemeral PB; see e2e_web.sh) ---
+python3 scripts/test_doc_pagination.py "$LLL_ABS" "$URL"
+
+# --- web board (own ephemeral PB; see e2e_web.sh) ---
 HOME="$E2E_REAL_HOME" scripts/e2e_web.sh
 
 # --- lll up runner (own ephemeral PB; see e2e_up.sh) ---

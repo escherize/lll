@@ -1942,14 +1942,7 @@ fn two_positional(
 /// one `?=` filter over docs.issues, which is the whole reason links are a
 /// relation and not a write-once reference on the issue.
 fn fetch_issue_docs(issue_id: string) -> Result<Slice<models.Doc>, string> {
-  let filter = url.QueryEscape(f"issues.id ?= {query.quote(issue_id)}")
-  let mut docs = models.DocList { .. }
-  pb.fetch(
-    f"/api/collections/docs/records?filter={filter}&sort=slug&perPage=200",
-    "docs",
-    &docs,
-  )?
-  Ok(docs.items)
+  fetch_docs(f"issues.id ?= {query.quote(issue_id)}", "slug", "")
 }
 
 fn set_doc_issues(

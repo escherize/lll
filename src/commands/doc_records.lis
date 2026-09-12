@@ -1,0 +1,21 @@
+import "go:net/url"
+
+import "models"
+import "pb"
+
+/// Complete document retrieval shared by lists, briefs and search. Callers
+/// supply domain filters before URL encoding; page size is a transport detail.
+/// A failed later page fails the read instead of returning a partial brief.
+fn fetch_docs(filter: string, sort: string, fields: string) -> Result<Slice<models.Doc>, string> {
+  let query = f"filter={url.QueryEscape(filter)}&sort={url.QueryEscape(sort + ",id")}&fields={url.QueryEscape(fields)}"
+  let mut out: Slice<models.Doc> = []
+  let mut page = 1
+  loop {
+    let mut result = models.DocList { .. }
+    pb.fetch(f"/api/collections/docs/records?{query}&perPage=200&page={page}", "docs", &result)?
+    out = out.append(result.items...)
+    if result.items.length() < 200 { break }
+    page += 1
+  }
+  Ok(out)
+}

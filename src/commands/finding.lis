@@ -1,11 +1,9 @@
 import "go:encoding/json"
 import "go:fmt"
-import "go:net/url"
 import "go:strings"
 
 import "flags"
 import "models"
-import "pb"
 import "query"
 
 /// `lll finding` (TASK-103) — the retrieval side of docs. A finding is a doc
@@ -137,14 +135,7 @@ fn finding_list_spec() -> Slice<flags.Flag> {
 /// known about THIS file; confidently answering about a different repo is
 /// worse than answering nothing.
 pub fn fetch_findings(team_id: string) -> Result<Slice<models.Doc>, string> {
-  let filter = url.QueryEscape(f"kind='finding' && team={query.quote(team_id)}")
-  let mut docs = models.DocList { .. }
-  pb.fetch(
-    f"/api/collections/docs/records?filter={filter}&sort=slug&perPage=500",
-    "docs",
-    &docs,
-  )?
-  Ok(docs.items)
+  fetch_docs(f"kind='finding' && team={query.quote(team_id)}", "slug", "")
 }
 
 /// Does the doc's stored paths list touch the path being asked about?

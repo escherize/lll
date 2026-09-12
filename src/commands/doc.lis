@@ -391,13 +391,9 @@ fn doc_list(args: Slice<string>) -> Result<(), string> {
   let spec = doc_list_spec()
   let p = flags.parse(spec, args, 3, false, "lll doc list")?
   let team = current_team()?
-  let filter = url.QueryEscape(query.filter(team.id, "", "", "", "", ""))
-  let mut docs = models.DocList { .. }
-  pb.fetch(
-    f"/api/collections/docs/records?perPage=500&sort=kind,slug&filter={filter}",
-    "docs",
-    &docs,
-  )?
+  let docs = models.DocList {
+    items: fetch_docs(query.filter(team.id, "", "", "", "", ""), "kind,slug", "")?,
+  }
   if p.given("--json") {
     let body = match json.Marshal(docs) {
       Ok(b) => b as string,
