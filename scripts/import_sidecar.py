@@ -26,8 +26,9 @@ It only ever writes to team LLL (creating it if absent).
 
 Re-run: the same command; the report prints created vs skipped-existing per
 collection and a re-run against an already-imported instance creates zero.
-A skipped issue whose sidecar status moved since gets its state synced (and
-only its state): until the cut-over the sidecar owns that field.
+Existing hosted issues are authoritative and are never updated from the
+archived sidecar. Only newly imported issues receive their historical state.
+For imported blocker links, use migrate_sidecar_dependencies.py separately.
 """
 
 import argparse
@@ -308,26 +309,18 @@ def main():
 
     # -- issues ---------------------------------------------------------------
     origin_re = re.compile(r"^Origin: sidecar (TASK-\d+)\s*$", re.M)
-    existing = {}   # TASK-nnn -> (number, state) already on the board
+    existing = set()   # sidecar origins already on the authoritative board
     for rec in pb_list(url, token, "issues", f"team.key='{TEAM_KEY}'"):
         m = origin_re.search(rec.get("description", ""))
         if m:
-            existing[m.group(1)] = (rec["number"], rec.get("state", ""))
-    created = skipped = updated = 0
+            existing.add(m.group(1))
+    created = skipped = 0
     made_keys = {}  # TASK-nnn -> LLL-n created THIS run (for the link pass)
     for num, f, body, path in tasks:
         origin = f["id"]
         if origin in existing:
-            # Present already: the sidecar is still the source of truth for
-            # its STATE until the cut-over, so bring that up to date. Nothing
-            # else is touched - the board may have grown comments and links
-            # of its own that the sidecar never saw.
-            number, state_now = existing[origin]
-            state = STATE_MAP[f["status"]]
-            if state != state_now:
-                lll.run(["issue", "update", f"{TEAM_KEY}-{number}", "--state", state])
-                updated += 1
-                print(f"  {origin} = {TEAM_KEY}-{number}: {state_now} -> {state}")
+            # The sidecar is archived. Never roll hosted work back to its
+            # historical status, including on an otherwise idempotent rerun.
             skipped += 1
             continue
         desc = clean_body(body)
@@ -360,8 +353,6 @@ def main():
         created += 1
         print(f"  {origin} -> {key}")
     note("issues", len(tasks), created, skipped)
-    if updated:
-        print(f"  ({updated} existing issues had their state synced from the sidecar)")
 
     # -- docs -------------------------------------------------------------
     have = {d["slug"] for d in pb_list(url, token, "docs", f"team.key='{TEAM_KEY}'")}
