@@ -2195,4 +2195,6 @@ LLL_TEST_BOARD_TOKEN="$BOARD_TOKEN" python3 scripts/test_attachments.py "$PWD/$L
 
 LLL_TEST_BOARD_TOKEN="$BOARD_TOKEN" python3 scripts/test_issue_stream.py "$PWD/$LIN" "$LLL_URL" "$WEB"
 
+LLL_TEST_BOARD_TOKEN="$BOARD_TOKEN" python3 scripts/test_board_claims.py "$PWD/$LIN" "$LLL_URL" "$WEB"
+
 echo "e2e_web: all assertions passed"

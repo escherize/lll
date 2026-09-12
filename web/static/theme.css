@@ -1554,3 +1554,9 @@ input:focus, textarea:focus, select:focus {
   outline-offset: -3px;
   border-radius: var(--radius);
 }
+
+/* Claim state belongs to the hold, independently of assignment. */
+.card-claim { margin-left: 8px; font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.claim-controls { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; min-width: 0; }
+.claim-controls button { max-width: 100%; white-space: normal; overflow-wrap: anywhere; }
+.claim-age { color: var(--text-2); font-size: 11px; }

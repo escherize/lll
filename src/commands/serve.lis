@@ -132,7 +132,7 @@ pub fn run_server(
   // page shows, so these topics are unfiltered too.
   let events = realtime.subscribe(
     pb.base_url()?,
-    [issues_topic, comments_topic, "favorites", "views"],
+    [issues_topic, comments_topic, "claims", "favorites", "views"],
     refresh,
   )?
 
@@ -304,6 +304,8 @@ fn board_mux(cfg: config.Config, boot: models.Team, hub: Hub) -> Result<mut Ref<
   mux.HandleFunc("POST /title", gated(flashing(title_write)))
   mux.HandleFunc("POST /project", gated(flashing(project_write)))
   mux.HandleFunc("POST /assignee", gated(flashing(assignee_write)))
+  mux.HandleFunc("POST /claim", gated(flashing(claim_write)))
+  mux.HandleFunc("POST /release", gated(flashing(release_write)))
   mux.HandleFunc("POST /labels", gated(flashing(labels_write)))
   mux.HandleFunc("POST /comment", gated(flashing(comment_write)))
   mux.HandleFunc("POST /views/save", gated(flashing(views_save)))

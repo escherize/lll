@@ -122,6 +122,7 @@ fn issue_raw(vm: IssueVM) -> string {
   let mut assignee = vm.assignee
   if assignee == "" { assignee = "none" }
   lines = lines.append(f"- Assignee: {assignee}")
+  if vm.claim_holder != "" { lines = lines.append(f"- Claimed: {vm.claim_holder} ({vm.claim_age})") }
   lines = lines.append(f"- Project: {vm.project}")
   let mut labels = strings.Join(vm.labels.map(|l| l.name), ", ")
   if labels == "" { labels = "none" }

@@ -426,3 +426,22 @@ fn views_save(r: mut Ref<http.Request>) -> Result<string, string> {
   let _ = pb.post("/api/collections/views/records", payload)?
   Ok("")
 }
+
+/// The board uses its process identity; the button names it explicitly.
+fn claim_write(r: mut Ref<http.Request>) -> Result<string, string> {
+  let issue = records.fetch_issue(r.FormValue("key"))?
+  require_active_team(issue.expand.team)?
+  let Some(member) = actor()? else { return Err("No member is configured for this board.") };
+  if r.FormValue("member_id") != member.id { return Err("The board identity changed; refresh before claiming.") }
+  let _ = claims.acquire(issue.id, member.id)?
+  Ok("")
+}
+
+fn release_write(r: mut Ref<http.Request>) -> Result<string, string> {
+  let issue = records.fetch_issue(r.FormValue("key"))?
+  require_active_team(issue.expand.team)?
+  let observed = r.FormValue("claim_id")
+  if observed == "" { return Err("The claim changed; refresh before releasing it.") }
+  let _ = claims.release(issue.id, observed)?
+  Ok("")
+}

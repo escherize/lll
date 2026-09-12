@@ -61,3 +61,18 @@ pub fn fetch(issue_id: string) -> Result<Option<models.Claim>, string> {
   )?
   Ok(list.items.get(0))
 }
+
+/// Expanded holds for one team, shared by initial boards and live refreshes.
+pub fn for_team(team_id: string) -> Result<Slice<models.Claim>, string> {
+  let filter = url.QueryEscape(f"issue.team={query.quote(team_id)}")
+  let mut result: Slice<models.Claim> = []
+  let mut page = 1
+  loop {
+    let mut list = models.ClaimList { .. }
+    pb.fetch(f"/api/collections/claims/records?filter={filter}&expand=member&sort=id&perPage=200&page={page}", "team claims", &list)?
+    result = result.append(list.items...)
+    if page >= list.total_pages { break }
+    page += 1
+  }
+  Ok(result)
+}

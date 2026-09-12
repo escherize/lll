@@ -162,6 +162,12 @@
   {{range .MemberOpts}}<option value="{{.Id}}"{{if eq .Id $.AssigneeId}} selected{{end}}>{{.Name}}</option>
   {{end}}</select></form></span>
 </div>
+<div class="prop" id="issue-claim"><span class="k">Claim</span><span class="v claim-controls">
+{{if .ClaimId}}<span class="claim-holder">{{.ClaimHolder}} <span class="claim-age">{{.ClaimAge}}</span></span>
+{{if not .ClaimReadOnly}}<form id="release-form" data-on:submit="evt.preventDefault(); @post('/release', {contentType: 'form'})">{{template "issue-property-key" .Key}}<input type="hidden" name="claim_id" value="{{.ClaimId}}"><button type="submit" class="btn">Release {{.ClaimHolder}}'s claim</button></form>{{end}}
+{{else}}<span>Unclaimed</span>
+{{if not .ClaimReadOnly}}{{if .ClaimActor}}<form id="claim-form" data-on:submit="evt.preventDefault(); @post('/claim', {contentType: 'form'})">{{template "issue-property-key" .Key}}<input type="hidden" name="member_id" value="{{.ClaimActorId}}"><button type="submit" class="btn">Claim as {{.ClaimActor}}</button></form>{{else}}<span class="claim-age">{{.ClaimError}}</span>{{end}}{{end}}
+{{end}}</span></div>
 {{/* The work-site slot (TASK-205): where the branch is checked out, stamped
      by `lll issue start`. Read-only, from the issue's own fields, so every
      #issue-detail morph carries it. Dimmed once the site is only history. */}}

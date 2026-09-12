@@ -253,6 +253,8 @@ pub struct Claim {
 
 #[json]
 pub struct ClaimList {
+  #[json("totalPages")]
+  pub total_pages: int,
   pub items: Slice<Claim>,
 }
 

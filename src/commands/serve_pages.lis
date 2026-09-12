@@ -1,4 +1,5 @@
 import "records"
+import "claims"
 import "go:encoding/json"
 import "go:html/template"
 import "go:net/http"
@@ -238,9 +239,13 @@ fn board_page(w: http.ResponseWriter, r: Ref<http.Request>, team: models.Team, m
   let mut active = "board"
   if me != "" && assignees.contains(me) { active = "mine" }
 
+  let held = match claims.for_team(team.id) {
+    Ok(found) => found,
+    Err(e) => { http.Error(w, e, 500); return },
+  }
   let vm = BoardVM {
     states: state_opts(),
-    columns: board_columns(issues, flt, fetch_claimed_issue_ids().unwrap_or([]), order),
+    columns: board_columns(issues, flt, held, order),
     filter_groups: filter_groups(
       board_base(team.key),
       issues,

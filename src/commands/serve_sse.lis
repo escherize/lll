@@ -1,4 +1,5 @@
 import "records"
+import "claims"
 import "markdown"
 import "query"
 import "go:crypto/sha256"
@@ -28,7 +29,7 @@ struct Broadcast {
 }
 
 struct ScopeQuery { scope: string, client_id: int, reply: Channel<bool> }
-struct IssueSnapshot { key: string, client_id: int }
+struct PageSnapshot { key: string, team: string, order: string, client_id: int }
 
 /// Fan-out hub. A single owner task holds the client registry and is fed
 /// exclusively through these channels — no shared mutable state.
@@ -38,7 +39,7 @@ struct Hub {
   broadcast: Channel<Broadcast>,
   ids: Channel<int>,
   observers: Channel<ScopeQuery>,
-  snapshots: Channel<IssueSnapshot>,
+  snapshots: Channel<PageSnapshot>,
 }
 
 fn new_hub() -> Hub {
@@ -48,7 +49,7 @@ fn new_hub() -> Hub {
     broadcast: Channel.new<Broadcast>(),
     ids: Channel.new<int>(),
     observers: Channel.new<ScopeQuery>(),
-    snapshots: Channel.new<IssueSnapshot>(),
+    snapshots: Channel.new<PageSnapshot>(),
   }
   // Client-id allocator: unique ids without shared counters.
   task {
@@ -184,7 +185,9 @@ fn events_stream(
   w.WriteHeader(200)
   flusher.Flush()
   if page == "issue" && key != "" {
-    let _ = hub.snapshots.send(IssueSnapshot { key, client_id: id })
+    let _ = hub.snapshots.send(PageSnapshot { key, client_id: id, .. })
+  } else {
+    let _ = hub.snapshots.send(PageSnapshot { team, order, client_id: id, .. })
   }
   let done = r.Context().Done()
   loop {
@@ -219,7 +222,10 @@ fn bridge(events: Channel<realtime.Event>, hub: Hub) {
       },
       match hub.snapshots.receive() {
         Some(snapshot) => {
-          issue_snapshot(hub, snapshot.key, snapshot.client_id)
+          if snapshot.key != "" { issue_snapshot(hub, snapshot.key, snapshot.client_id) }
+          else if let Ok(Some(team)) = records.find_team(snapshot.team) {
+            board_snapshot(hub, team.id, team.key, snapshot.order, snapshot.client_id)
+          }
           None
         },
         None => { return },
@@ -228,6 +234,8 @@ fn bridge(events: Channel<realtime.Event>, hub: Hub) {
     let Some(ev) = next else { continue };
     if ev.topic == "comments" {
       comment_broadcast(ev, hub)
+    } else if ev.topic == "claims" {
+      claim_broadcast(ev, hub)
     } else if ev.topic == "favorites" {
       favorites_broadcast(hub)
     } else if ev.topic == "views" {
@@ -259,10 +267,23 @@ fn issue_broadcast(ev: realtime.Event, hub: Hub) {
   let mut event = IssueEvent { .. }
   if json.Unmarshal(ev.data.bytes(), &event).is_err() { return }
   let rec = event.record
+  broadcast_issue_state(rec, hub)
+}
+
+fn broadcast_issue_state(rec: models.Issue, hub: Hub) {
   let team_key = rec.expand.team.key
-  if let Ok(issues) = fetch_board_issues(rec.team) {
-    let claimed = fetch_claimed_issue_ids().unwrap_or([])
+  board_snapshot(hub, rec.team, team_key, "", 0)
+
+  let key = f"{team_key}-{rec.number}"
+  issue_snapshot(hub, key, 0)
+}
+
+/// Reconnects receive a fresh board snapshot, even if no new event follows.
+fn board_snapshot(hub: Hub, team_id: string, team_key: string, only_order: string, client_id: int) {
+  if let Ok(issues) = fetch_board_issues(team_id) {
+    let Ok(claimed) = claims.for_team(team_id) else { return };
     for order in board_orders() {
+      if only_order != "" && only_order != order { continue }
       // UNFILTERED on purpose: /events sends one #board per (team, order) to
       // every matching client, so the per-URL filter is applied by the page
       // handler and guarded client-side by the cards' data-show, never here.
@@ -273,14 +294,24 @@ fn issue_broadcast(ev: realtime.Event, hub: Hub) {
       }
       if let Ok(html) = render("board", vm) {
         let _ = hub.broadcast.send(
-          Broadcast { scope: f"board:{team_key}:{order}", payload: patch_event(html), .. },
+          Broadcast { scope: f"board:{team_key}:{order}", payload: patch_event(html), client_id, .. },
         )
       }
     }
   }
+}
 
-  let key = f"{team_key}-{rec.number}"
-  issue_snapshot(hub, key, 0)
+#[json]
+struct ClaimEvent { record: models.Claim }
+
+/// Claim-only releases may not update the issue's assignee. Route the hold's
+/// own event using its issue ID, including deleted holds, then read fresh state.
+fn claim_broadcast(ev: realtime.Event, hub: Hub) {
+  let mut event = ClaimEvent { .. }
+  if json.Unmarshal(ev.data.bytes(), &event).is_err() { return }
+  let mut issue = models.Issue { .. }
+  if pb.fetch(f"/api/collections/issues/records/{event.record.issue}?expand=team", "claimed issue", &issue).is_err() { return }
+  broadcast_issue_state(issue, hub)
 }
 
 /// The bridge serializes snapshot reads and event reads. Fetch current state

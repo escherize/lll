@@ -62,6 +62,7 @@ pub struct AvatarVM {
 
 /// View model for one issue: a board card, or one row of the /issues table.
 pub struct CardVM {
+  pub claim_holder: string,
   pub attachment_count: int,
   pub id: string,
   pub key: string,
@@ -311,6 +312,13 @@ pub struct FindingVM {
 
 /// View model for the issue page / issue-detail fragment.
 pub struct IssueVM {
+  pub claim_id: string,
+  pub claim_holder: string,
+  pub claim_age: string,
+  pub claim_actor: string,
+  pub claim_actor_id: string,
+  pub claim_error: string,
+  pub claim_read_only: bool,
   pub attachments: Slice<AttachmentVM>,
   pub deleted: bool,
   pub id: string,

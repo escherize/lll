@@ -13,6 +13,18 @@ authenticated member. Superusers must name the intended member. Any
 authenticated workspace member can release a hold. Naming the observed claim
 prevents a delayed release from deleting a replacement hold.
 
+The board displays holders on cards and issue pages. Its **Claim as NAME**
+button names the member used by the board process; the shared board login
+cookie does not identify an individual member. **Release NAME's claim** submits
+the claim ID rendered on that page, so an old form cannot release a replacement.
+Archived teams show claim state without writable controls.
+
+Claim events refresh the affected issue and team board independently of issue
+events. This includes releases that preserve an unrelated assignee and therefore
+do not update the issue record. New streams receive current snapshots on
+connection; metadata refreshes preserve title/comment drafts and the separate
+description boundary.
+
 Claiming an issue already held by the same member succeeds, retains the claim
 ID and creation time, and restores assignment to that member. Another member's
 claim is refused. Releasing an unclaimed issue is an error. A transaction
