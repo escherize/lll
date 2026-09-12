@@ -306,15 +306,15 @@ fn issue_create_spec_accepts_a_state() {
 /// verbs cannot drift about what a state is.
 #[test]
 fn create_and_update_share_one_state_validator() {
-  let assert Ok(ok) = check_state("in-review")
+  let assert Ok(ok) = query.state("in-review")
   assert ok == "in-review"
-  let assert Err(msg) = check_state("nope")
+  let assert Err(msg) = query.state("nope")
   assert msg.contains("unknown state 'nope'")
   // The message enumerates query.states() rather than a second hand-written
   // list, so adding a state cannot leave create behind.
   for s in query.states() {
     assert msg.contains(s)
-    let assert Ok(accepted) = check_state(s)
+    let assert Ok(accepted) = query.state(s)
     assert accepted == s
   }
 }

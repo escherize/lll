@@ -147,10 +147,9 @@ fn board_page(w: http.ResponseWriter, r: Ref<http.Request>, team: models.Team, m
   // Validate every value against the catalogue before it filters anything.
   let mut states: Slice<string> = []
   for s in csv(raw.state) {
-    if query.states().find(|x| x == s).is_some() {
-      states = states.append(s)
-    } else if err == "" {
-      err = f"unknown state '{s}' (use one of: {strings.Join(query.states(), ", ")})"
+    match query.state(s) {
+      Ok(valid) => { states = states.append(valid) },
+      Err(e) => { if err == "" { err = e } },
     }
   }
   let mut assignees: Slice<string> = []
@@ -177,10 +176,9 @@ fn board_page(w: http.ResponseWriter, r: Ref<http.Request>, team: models.Team, m
   }
   let mut hidden: Slice<string> = []
   for h in csv(raw.hide) {
-    if query.states().find(|x| x == h).is_some() {
-      hidden = hidden.append(h)
-    } else if err == "" {
-      err = f"unknown state '{h}' in hide (use one of: {strings.Join(query.states(), ", ")})"
+    match query.state(h) {
+      Ok(valid) => { hidden = hidden.append(valid) },
+      Err(e) => { if err == "" { err = f"{e} (hide)" } },
     }
   }
   // Card ordering (TASK-209): "manual" is the default and never a URL param,

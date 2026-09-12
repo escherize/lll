@@ -1,6 +1,5 @@
 import "go:net/http"
 import "go:net/url"
-import "go:strings"
 
 import "models"
 import "pb"
@@ -129,13 +128,13 @@ fn issues_page(w: http.ResponseWriter, r: Ref<http.Request>, team_id: string, me
     sort = "-updated"
   }
 
-  let mut state = raw.state
-  if state != "" && query.states().find(|s| s == state).is_none() {
-    err = f"unknown state '{state}' (use one of: {strings.Join(query.states(), ", ")})"
-    state = ""
+  let mut filters = view_filters(raw)
+  if let Err(e) = filters.validate() {
+    err = e
+    filters.state = ""
   }
-
-  let mut assignee = raw.assignee
+  let state = filters.state
+  let mut assignee = filters.assignee
   let mut assignee_id = ""
   if assignee != "" {
     match resolve_member(assignee) {
@@ -147,7 +146,7 @@ fn issues_page(w: http.ResponseWriter, r: Ref<http.Request>, team_id: string, me
     }
   }
 
-  let mut label = raw.label
+  let mut label = filters.label
   let mut label_id = ""
   if label != "" {
     match resolve_label(team_id, label) {
@@ -159,7 +158,7 @@ fn issues_page(w: http.ResponseWriter, r: Ref<http.Request>, team_id: string, me
     }
   }
 
-  let mut project = raw.project
+  let mut project = filters.project
   let mut project_id = ""
   if project != "" {
     match resolve_project(team_id, project) {

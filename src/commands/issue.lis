@@ -55,17 +55,6 @@ fn check_emoji(val: string) -> Result<string, string> {
   Ok(trimmed)
 }
 
-/// Shared validators, applied after flags.parse collects the raw values.
-/// They live beside the specs so the error wording has exactly one home.
-fn check_state(val: string) -> Result<string, string> {
-  if query.states().find(|s| s == val).is_none() {
-    return Err(
-      f"unknown state '{val}' (use one of: {strings.Join(query.states(), ", ")})",
-    )
-  }
-  Ok(val)
-}
-
 fn check_priority(val: string) -> Result<int, string> {
   let named = strings.ToLower(val)
   match named {
@@ -125,39 +114,7 @@ fn issue_create_spec() -> Slice<flags.Flag> {
       help: "0 none, 1 urgent (!!!), 2 high (!!), 3 medium (!), 4 low (·)",
       ..,
     },
-    // TASK-125: without this, every created issue landed in the default state
-    // and needed a follow-up 'issue update KEY --state x', so seeding a
-    // five-column board cost ten commands instead of five.
-    flags.Flag {
-      name: "--state",
-      value: true,
-      hint: "s",
-      help: "one of: backlog, todo, in-progress, in-review, done, cancelled\n(create defaults to todo)",
-      ..,
-    },
-    flags.Flag {
-      name: "--assignee",
-      alias: "--assign",
-      value: true,
-      hint: "name",
-      help: "member name (see 'lll member list'); filters on list",
-      ..,
-    },
-    flags.Flag {
-      name: "--label",
-      value: true,
-      hint: "name",
-      repeat: true,
-      help: "label name (see 'lll label list'); repeatable on create/update\n(update replaces the set); filters on list",
-      ..,
-    },
-    flags.Flag {
-      name: "--project",
-      value: true,
-      hint: "name",
-      help: "project name (see 'lll project list'); filters on list",
-      ..,
-    },
+  ].append(filter_spec(FilterUse.Create)...).append([
     flags.Flag {
       name: "--json",
       help: "raw PocketBase JSON (team, assignee, labels, project\nexpanded), pipe-friendly",
@@ -170,41 +127,11 @@ fn issue_create_spec() -> Slice<flags.Flag> {
       help: "show this help",
       ..,
     },
-  ])
+  ]...))
 }
 
 fn issue_list_spec() -> Slice<flags.Flag> {
-  flags.with_team([
-    flags.Flag {
-      name: "--state",
-      value: true,
-      hint: "s",
-      help: "one of: backlog, todo, in-progress, in-review, done, cancelled",
-      ..,
-    },
-    flags.Flag {
-      name: "--assignee",
-      alias: "--assign",
-      value: true,
-      hint: "name",
-      help: "member name (see 'lll member list'); filters on list",
-      ..,
-    },
-    flags.Flag {
-      name: "--label",
-      value: true,
-      hint: "name",
-      repeat: true,
-      help: "label name (see 'lll label list'); repeatable on create/update\n(update replaces the set); filters on list",
-      ..,
-    },
-    flags.Flag {
-      name: "--project",
-      value: true,
-      hint: "name",
-      help: "project name (see 'lll project list'); filters on list",
-      ..,
-    },
+  flags.with_team(filter_spec(FilterUse.List).append([
     flags.Flag {
       name: "--search",
       alias: "--query",
@@ -234,7 +161,7 @@ fn issue_list_spec() -> Slice<flags.Flag> {
     },
     flags.Flag { name: "--ready", help: "only open issues whose blockers are all done (LLL-175): what an agent can pick up now", .. },
     flags.Flag { name: "--blocked", help: "only issues with an open blocker", .. },
-  ])
+  ]...))
 }
 
 fn issue_view_spec() -> Slice<flags.Flag> {
@@ -258,42 +185,12 @@ fn issue_view_spec() -> Slice<flags.Flag> {
 }
 
 fn issue_update_spec() -> Slice<flags.Flag> {
-  flags.with_team([
-    flags.Flag {
-      name: "--state",
-      value: true,
-      hint: "s",
-      help: "one of: backlog, todo, in-progress, in-review, done, cancelled",
-      ..,
-    },
+  flags.with_team(filter_spec(FilterUse.Update).append([
     flags.Flag {
       name: "--priority",
       value: true,
       hint: "name|0-4",
       help: "0 none, 1 urgent (!!!), 2 high (!!), 3 medium (!), 4 low (·)",
-      ..,
-    },
-    flags.Flag {
-      name: "--assignee",
-      alias: "--assign",
-      value: true,
-      hint: "name",
-      help: "member name (see 'lll member list'); 'none' clears it (update)",
-      ..,
-    },
-    flags.Flag {
-      name: "--label",
-      value: true,
-      hint: "name",
-      repeat: true,
-      help: "label name (see 'lll label list'); repeatable on create/update\n(update replaces the set); filters on list",
-      ..,
-    },
-    flags.Flag {
-      name: "--project",
-      value: true,
-      hint: "name",
-      help: "project name (see 'lll project list'); filters on list",
       ..,
     },
     flags.Flag {
@@ -319,7 +216,7 @@ fn issue_update_spec() -> Slice<flags.Flag> {
       help: "one emoji for the issue, shown on the card, the issue page and\nthe list; pass \"\" to clear it",
       ..,
     },
-  ])
+  ]...))
 }
 
 fn issue_delete_spec() -> Slice<flags.Flag> {
@@ -668,7 +565,7 @@ fn create(args: Slice<string>) -> Result<(), string> {
   // Same validator update calls, so create and update cannot disagree about
   // what a state is; the list itself lives once in query.states().
   let mut state = "todo"
-  if p.given("--state") { state = check_state(p.one("--state"))? }
+  if p.given("--state") { state = query.state(p.one("--state"))? }
   let assignee_name = p.one("--assignee")
   let label_names = p.all("--label")
   let project_name = p.one("--project")
@@ -736,12 +633,7 @@ fn list(args: Slice<string>) -> Result<(), string> {
     false,
     flags.usage("lll issue list", spec, ""),
   )?
-  let mut state = ""
-  if p.given("--state") { state = check_state(p.one("--state"))? }
-  let assignee_name = p.one("--assignee")
-  let label_name = p.one("--label")
-  let project_name = p.one("--project")
-  let search = p.one("--search")
+  let filters = filters_from(p)?
   let sort_flag = p.one("--sort")
   let mut limit = 0
   if p.given("--limit") {
@@ -763,17 +655,6 @@ fn list(args: Slice<string>) -> Result<(), string> {
   // and with it the label and project names the list filters by.
   let team_id = configured_team_id()?
 
-  let mut assignee_id = ""
-  if assignee_name != "" { assignee_id = resolve_member(assignee_name)?.id }
-
-  let mut label_id = ""
-  if label_name != "" { label_id = resolve_label(team_id, label_name)?.id }
-
-  let mut project_id = ""
-  if project_name != "" {
-    project_id = resolve_project(team_id, project_name)?.id
-  }
-
   let mut sort_spec = sort_flag
   if sort_spec == "" { sort_spec = cfg.sort }
   if sort_spec == "" { sort_spec = "created" }
@@ -783,14 +664,7 @@ fn list(args: Slice<string>) -> Result<(), string> {
   let mut per_page = 200
   if limit > 0 { per_page = limit }
   let mut path = f"/api/collections/issues/records?perPage={per_page}&expand=team,assignee,labels,blocked_by,project&sort={url.QueryEscape(sort)}"
-  let filter = query.filter(
-    team_id,
-    state,
-    assignee_id,
-    project_id,
-    label_id,
-    search,
-  )
+  let filter = resolve_filter_query(team_id, filters)?
   if filter != "" { path = f"{path}&filter={url.QueryEscape(filter)}" }
 
   let body = pb.get(path)?
@@ -1081,7 +955,7 @@ fn update(args: Slice<string>) -> Result<(), string> {
   let p = flags.parse(spec, args, 3, true, usage)?
   let id = p.first()
   let mut state = ""
-  if p.given("--state") { state = check_state(p.one("--state"))? }
+  if p.given("--state") { state = query.state(p.one("--state"))? }
   let mut priority = -1
   if p.given("--priority") { priority = check_priority(p.one("--priority"))? }
   let assignee_name = p.one("--assignee")

@@ -105,9 +105,7 @@ fn create_write(
   // `curl -d title=...` is a complete request.
   let mut state = r.PostFormValue("state")
   if state == "" { state = "todo" }
-  if query.states().find(|s| s == state).is_none() {
-    return Err(f"unknown state '{state}'")
-  }
+  let _ = query.state(state)?
   // The board posts the team it is viewing (TASK-198); a request naming
   // none — a bare `curl -d title=...` — keeps landing in the boot team.
   let mut team = team_id
@@ -194,9 +192,7 @@ fn state_write(r: mut Ref<http.Request>) -> Result<string, string> {
   let state = r.FormValue("state")
   // Record id of the card the drop lands before; "" means end of column.
   let before = r.FormValue("before")
-  if query.states().find(|s| s == state).is_none() {
-    return Err(f"unknown state '{state}'")
-  }
+  let _ = query.state(state)?
   let issue = fetch_issue(key)?
   require_active_team(issue.expand.team)?
   // The issue's OWN team scopes the reorder (TASK-198): a drop on any

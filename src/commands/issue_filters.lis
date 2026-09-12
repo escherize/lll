@@ -1,0 +1,44 @@
+import "go:strings"
+
+import "flags"
+import "query"
+
+enum FilterUse { Create, Update, List, Watch }
+
+/// One declaration per shared field. Operation-specific cardinality and
+/// hints belong here so parsing, help and completion cannot drift apart.
+fn filter_spec(use: FilterUse) -> Slice<flags.Flag> {
+  let state_hint = if use == FilterUse.Create { "\n(create defaults to todo)" } else { "" }
+  let assignee_hint = if use == FilterUse.Update { "; 'none' clears it (update)" } else { "" }
+  let repeat_label = use != FilterUse.Watch
+  let assignee_alias = if use == FilterUse.Watch { "" } else { "--assign" }
+  let label_hint = if repeat_label { "; repeatable on create/update\n(update replaces the set); filters on list" } else { "" }
+  [
+    flags.Flag { name: "--state", value: true, hint: "s", help: f"one of: {strings.Join(query.states(), ", ")}{state_hint}", .. },
+    flags.Flag { name: "--assignee", alias: assignee_alias, value: true, hint: "name", help: f"member name (see 'lll member list'){assignee_hint}", .. },
+    flags.Flag { name: "--label", value: true, hint: "name", repeat: repeat_label, help: f"label name (see 'lll label list'){label_hint}", .. },
+    flags.Flag { name: "--project", value: true, hint: "name", help: "project name (see 'lll project list')", .. },
+  ]
+}
+
+fn filters_from(p: flags.Parsed) -> Result<query.Filters, string> {
+  // Explicit --state "" is a mistake; absence is an unrestricted filter.
+  if p.given("--state") && p.one("--state") == "" { let _ = query.state("")? }
+  query.Filters {
+    state: p.one("--state"), assignee: p.one("--assignee"),
+    label: p.one("--label"), project: p.one("--project"), search: p.one("--search"),
+  }.validate()
+}
+
+fn view_filters(q: ViewQuery) -> query.Filters {
+  query.Filters { state: q.state, assignee: q.assignee, label: q.label, project: q.project, .. }
+}
+
+/// CLI lookups fail before subscribing/fetching. Browser adapters may instead
+/// retain valid fields while reporting a stale name in a bookmarked URL.
+fn resolve_filter_query(team_id: string, filters: query.Filters) -> Result<string, string> {
+  let assignee = if filters.assignee == "" { "" } else { resolve_member(filters.assignee)?.id }
+  let label = if filters.label == "" { "" } else { resolve_label(team_id, filters.label)?.id }
+  let project = if filters.project == "" { "" } else { resolve_project(team_id, filters.project)?.id }
+  Ok(query.filter(team_id, filters.state, assignee, project, label, filters.search))
+}

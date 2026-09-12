@@ -30,15 +30,11 @@ pub struct CommentEvent {
 /// create/update/delete, filtered server-side with the same criteria as
 /// `lll issue list`. Runs until interrupted (Ctrl-C).
 fn watch_spec() -> Slice<flags.Flag> {
-  flags.with_team([
-    flags.Flag { name: "--state", value: true, hint: "s", help: "one of: backlog, todo, in-progress, in-review, done, cancelled", .. },
-    flags.Flag { name: "--assignee", value: true, hint: "name", help: "member name (see 'lll member list')", .. },
-    flags.Flag { name: "--label", value: true, hint: "name", help: "label name (see 'lll label list')", .. },
-    flags.Flag { name: "--project", value: true, hint: "name", help: "project name (see 'lll project list')", .. },
+  flags.with_team(filter_spec(FilterUse.Watch).append([
     flags.Flag { name: "--search", value: true, hint: "q", help: "only issues whose title contains q", .. },
     flags.Flag { name: "--json", help: "NDJSON: one raw PocketBase event object per line, with a\n\"topic\" field added", .. },
     flags.Flag { name: "--help", alias: "-h", hidden: true, help: "show this help", .. },
-  ])
+  ]...))
 }
 
 /// The flag table of the watch noun (one verbless stream); empty for other
@@ -55,35 +51,14 @@ pub fn watch(args: Slice<string>) -> Result<(), string> {
     print_watch_usage()
     return Ok(())
   }
-  let mut state = ""
-  if p.given("--state") { state = check_state(p.one("--state"))? }
-  let assignee_name = p.one("--assignee")
-  let label_name = p.one("--label")
-  let project_name = p.one("--project")
-  let search = p.one("--search")
+  let filters = filters_from(p)?
   let json_mode = p.given("--json")
 
   // A configured team (LLL_TEAM or .lll.toml) scopes the stream by default,
   // same as `issue list`, and with it the label and project names.
   let team_id = configured_team_id()?
 
-  let mut assignee_id = ""
-  if assignee_name != "" { assignee_id = resolve_member(assignee_name)?.id }
-
-  let mut label_id = ""
-  if label_name != "" { label_id = resolve_label(team_id, label_name)?.id }
-
-  let mut project_id = ""
-  if project_name != "" { project_id = resolve_project(team_id, project_name)?.id }
-
-  let filter = query.filter(
-    team_id,
-    state,
-    assignee_id,
-    project_id,
-    label_id,
-    search,
-  )
+  let filter = resolve_filter_query(team_id, filters)?
   let topic = realtime.topic_with_options("issues", filter, "team,assignee")?
   let ch = realtime.subscribe(pb.base_url()?, [topic], None)?
   fmt.Fprintln(os.Stderr, "watch: ready (query subscription accepted)")
