@@ -179,6 +179,8 @@ with tempfile.TemporaryDirectory(prefix='lll-board-pages-') as directory:
         before = api_request(victim_path)
         status, body = web_request(proxy_board, '/state', {'key': 'BP360-205', 'state': 'done'})
         assert status == 200 and '503' in body
+        assert 'class="error-summary"' in body and '<details class="error-details">' in body
+        assert '<details class="error-details" open' not in body
         assert api_request(victim_path) == before, 'failed reorder changed the issue'
         Proxy.fail.clear()
         api_request(victim_path, {'title': 'Recovered full board'}, 'PATCH')

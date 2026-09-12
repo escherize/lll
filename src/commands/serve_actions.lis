@@ -82,9 +82,13 @@ fn require_active_team(t: models.Team) -> Result<(), string> {
 /// One escaped alert response for the page strip and dialog-local errors.
 /// Actions use 200/SSE for both outcomes; an empty message clears the alert.
 fn action_flash(w: http.ResponseWriter, target: string, msg: string) {
-  let safe = template.HTMLEscapeString(msg)
+  let presented = pb.display_error(msg)
+  let safe = template.HTMLEscapeString(presented.summary)
+  let details = if presented.details == "" { "" } else {
+    f"<details class=\"error-details\"><summary>Technical details</summary><pre>{template.HTMLEscapeString(presented.details)}</pre></details>"
+  }
   let hidden = if msg == "" { " hidden" } else { "" }
-  respond_flash(w, f"<div id=\"{target}\" class=\"flash\"{hidden} role=\"alert\" aria-atomic=\"true\">{safe}</div>")
+  respond_flash(w, f"<div id=\"{target}\" class=\"flash\"{hidden} role=\"alert\" aria-atomic=\"true\"><span class=\"error-summary\">{safe}</span>{details}</div>")
 }
 
 fn respond_flash(w: http.ResponseWriter, html: string) {

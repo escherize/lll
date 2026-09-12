@@ -10,6 +10,8 @@ async page => {
   if (!other) throw new Error('assignment fixture needs a second member');
   await select.selectOption(other);
   await page.locator('#flash').getByText('is claimed by', {exact: false}).waitFor();
+  const message = await page.locator('#flash').innerText();
+  if (message.includes('http://') || message.includes('\"data\"') || message.includes('Bad Request')) throw new Error('claim refusal exposed HTTP envelope');
   await page.waitForFunction(value => document.querySelector('#assignee-form select').value === value, original);
   if (await comment.inputValue() !== 'Keep my assignment review draft') throw new Error('refusal lost comment draft');
   await page.screenshot({path: '/tmp/lll-358-assignment-refused.png'});

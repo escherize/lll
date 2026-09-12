@@ -1560,3 +1560,8 @@ input:focus, textarea:focus, select:focus {
 .claim-controls { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; min-width: 0; }
 .claim-controls button { max-width: 100%; white-space: normal; overflow-wrap: anywhere; }
 .claim-age { color: var(--text-2); font-size: 11px; }
+
+.error-summary { white-space: pre-line; }
+.error-details { margin-top: 6px; }
+.error-details summary { cursor: pointer; }
+.error-details pre { white-space: pre-wrap; overflow-wrap: anywhere; font-size: 11px; }
