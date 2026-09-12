@@ -122,12 +122,17 @@ fn issue_raw(vm: IssueVM) -> string {
   let mut assignee = vm.assignee
   if assignee == "" { assignee = "none" }
   lines = lines.append(f"- Assignee: {assignee}")
+  if vm.claim_holder != "" { lines = lines.append(f"- Claimed: {vm.claim_holder} ({vm.claim_age})") }
   lines = lines.append(f"- Project: {vm.project}")
   let mut labels = strings.Join(vm.labels.map(|l| l.name), ", ")
   if labels == "" { labels = "none" }
   lines = lines.append(f"- Labels: {labels}")
   lines = lines.append(f"- Created: {vm.created}")
   lines = lines.append(f"- Updated: {vm.updated}")
+  if !vm.attachments.is_empty() {
+    lines = lines.append("\n## Attachments")
+    for attachment in vm.attachments { lines = lines.append(f"- {attachment.name}") }
+  }
   if vm.description_md != "" {
     lines = lines.append("")
     lines = lines.append(vm.description_md)
@@ -159,12 +164,13 @@ fn issue_raw(vm: IssueVM) -> string {
 
 /// GET /projects?raw — one line per project, the same fields the HTML row
 /// shows, in the same order.
-fn projects_raw(vm: ProjectsVM) -> string {
+fn projects_raw(vm: ProjectsVM, team_key: string) -> string {
   let mut lines: Slice<string> = [f"# Projects ({vm.projects.length()})"]
+  if team_key != "" { lines = lines.append(f"Team: {team_key}") }
   for p in vm.projects {
     let mut noun = "issues"
     if p.count == 1 { noun = "issue" }
-    lines = lines.append(f"- {cell(p.name)} — {p.status_label} · {p.scope} · {p.count} {noun} — {p.href}")
+    lines = lines.append(f"- {cell(p.name)} — {p.status_label} · {p.count} {noun} — {p.href}")
     if p.description != "" {
       lines = lines.append(f"  {p.description}")
     }
@@ -202,7 +208,9 @@ fn settings_raw(vm: SettingsVM) -> string {
   lines = lines.append("")
   lines = lines.append("## Labels")
   for l in vm.labels {
-    lines = lines.append(f"- {cell(l.name)} #{l.color} ({l.scope}, {l.usage} issues)")
+    let mut color = ""
+    if l.color != "" { color = f" {l.color}" }
+    lines = lines.append(f"- {cell(l.name)}{color} ({l.usage_text})")
   }
   lines = lines.append("")
   lines = lines.append("## Members")
@@ -212,14 +220,14 @@ fn settings_raw(vm: SettingsVM) -> string {
   lines = lines.append("")
   lines = lines.append("## Projects")
   for p in vm.projects {
-    lines = lines.append(f"- {cell(p.name)} — {p.status} ({p.scope})")
+    lines = lines.append(f"- {cell(p.name)} — {p.status}")
   }
   lines = lines.append("")
   lines = lines.append("## Teams")
   for t in vm.teams {
     let mut mark = ""
     if t.archived { mark = " — archived" }
-    lines = lines.append(f"- {t.key} {cell(t.name)} ({t.issues} issues){mark}")
+    lines = lines.append(f"- {t.key} {cell(t.name)} ({t.issues_text}){mark}")
   }
   strings.Join(lines, "\n")
 }

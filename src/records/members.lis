@@ -1,0 +1,50 @@
+import "go:encoding/json"
+import "go:net/url"
+import "config"
+import "models"
+import "pb"
+import "query"
+
+/// Resolve a member by name; unknown names error with the fix.
+pub fn resolve_member(name: string) -> Result<models.Member, string> {
+  let Some(m) = find_member(name)? else {
+    return Err(f"no member named '{name}' — see 'lll member list'")
+  }
+  Ok(m)
+}
+
+/// Find a member by exact name, riding the configured token.
+pub fn find_member(name: string) -> Result<Option<models.Member>, string> {
+  let cfg = config.load()?
+  find_member_as(cfg.token, name)
+}
+
+/// Find a member by exact name, riding `tok` instead of the configured
+/// token — token create looks its member up as the superuser it has just
+/// authenticated, not as whoever happens to be configured.
+pub fn find_member_as(tok: string, name: string) -> Result<Option<models.Member>, string> {
+  // `name` arrives unsanitized from the board's `/issues?assignee=` query
+  // parameter, so it goes through `quote` and not into the filter raw: the
+  // QueryEscape below makes it safe in a URL, which is a different layer and
+  // does nothing about a `'` closing the clause early (TASK-134).
+  let filter = url.QueryEscape(f"name={query.quote(name)}")
+  let mut result = models.MemberList { .. }
+  let body = pb.get_as(
+    f"/api/collections/members/records?filter={filter}",
+    tok,
+  )?
+  if let Err(e) = json.Unmarshal(body.bytes(), &result) {
+    return Err(f"decoding members: {e}")
+  }
+  Ok(result.items.find(|m| m.name == name))
+}
+
+pub fn fetch_members() -> Result<Slice<models.Member>, string> {
+  let mut list = models.MemberList { .. }
+  pb.fetch(
+    "/api/collections/members/records?perPage=200&sort=name",
+    "members",
+    &list,
+  )?
+  Ok(list.items)
+}

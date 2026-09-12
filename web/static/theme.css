@@ -32,6 +32,7 @@
   --st-cancelled: #828994;
   --radius: 6px;
   --radius-lg: 8px;
+  --shadow-card: 0 1px 2px rgba(0, 0, 0, 0.25);
 }
 
 * { box-sizing: border-box; }
@@ -55,6 +56,7 @@ html, body {
 ::-webkit-scrollbar-track { background: transparent; }
 
 .app { display: flex; height: 100vh; overflow: hidden; }
+.nav-toggle { display: none; }
 
 /* ── Left rail ─────────────────────────────────────────── */
 .rail {
@@ -314,7 +316,7 @@ input:focus, textarea:focus, select:focus {
   margin-top: 5px;
   text-decoration: none;
   color: inherit;
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.25);
+  box-shadow: var(--shadow-card);
 }
 .card:first-of-type { margin-top: 0; }
 .card:hover { border-color: var(--border-strong); background: var(--bg-hover); }
@@ -354,10 +356,13 @@ input:focus, textarea:focus, select:focus {
   grid-template-columns: minmax(0, 1fr) 280px;
   grid-template-areas:
     "main   props"
+    "description props"
+    "attachments props"
+    "upload props"
     "thread props"
     "comp   props"
     ".      props";
-  grid-template-rows: auto auto auto 1fr;
+  grid-template-rows: auto auto auto auto auto auto 1fr;
   min-height: 100%;
 }
 .issue-detail { display: contents; }
@@ -371,7 +376,20 @@ input:focus, textarea:focus, select:focus {
   letter-spacing: -0.012em;
   line-height: 1.3;
 }
-.desc { color: var(--text-2); max-width: 68ch; margin: 0 0 24px; }
+.issue-desc { grid-area: description; color: var(--text-2); max-width: 68ch; margin: 0 40px 24px; }
+.attachment-count { display: inline-flex; align-items: center; gap: 2px; margin-left: 8px; color: var(--text-3); font-size: 11px; }
+.issue-attachments { grid-area: attachments; margin: 16px 40px; max-width: 680px; min-width: 0; }
+.issue-attachments h2 { font-size: 13px; margin-bottom: 12px; }
+.attachment-item { margin-bottom: 12px; }
+.attachment-item img { display: block; max-width: 100%; max-height: 320px; object-fit: contain; border: 1px solid var(--border); border-radius: 6px; margin-bottom: 8px; }
+.attachment-actions { display: flex; align-items: center; gap: 8px; }
+.attachment-actions a { color: var(--text-2); overflow-wrap: anywhere; min-width: 0; }
+.attachment-actions a:hover { color: var(--text); }
+.attachment-actions form { flex-shrink: 0; margin-left: auto; }
+.attachment-upload { grid-area: upload; display: flex; flex-wrap: wrap; gap: 8px; align-items: flex-end; margin: 16px 40px; }
+.attachment-upload label { display: flex; flex-direction: column; gap: 5px; color: var(--text-2); min-width: 0; }
+.attachment-upload input { max-width: 100%; }
+.attachment-upload input::file-selector-button { color: var(--text); background: var(--bg-raised); border: 0; border-right: 1px solid var(--border); padding: 5px 8px; margin-right: 8px; cursor: pointer; }
 .deleted { grid-area: main; padding: 28px 40px; color: var(--text-2); }
 
 .thread { grid-area: thread; margin: 0 40px; max-width: 680px; border-top: 1px solid var(--border); padding-top: 18px; }
@@ -394,8 +412,9 @@ input:focus, textarea:focus, select:focus {
 }
 .md pre { background: var(--bg-raised); border: 1px solid var(--border); border-radius: var(--radius); padding: 8px 10px; overflow-x: auto; }
 .md pre code { border: none; background: none; padding: 0; }
-.md a { color: var(--accent); text-decoration: none; }
-.md a:hover { text-decoration: underline; }
+/* Prose links share one voice in rendered Markdown, help and empty states. */
+.md a, .prose-link, .prop .v a { color: var(--accent); text-decoration: none; }
+.md a:hover, .prose-link:hover, .prop .v a:hover { text-decoration: underline; }
 .md ul, .md ol { margin: 0 0 6px; padding-left: 20px; }
 .md blockquote { margin: 0 0 6px; padding-left: 10px; border-left: 2px solid var(--border-strong); color: var(--text-2); }
 .md h1, .md h2, .md h3 { font-size: 13px; font-weight: 600; margin: 8px 0 4px; }
@@ -454,12 +473,6 @@ input:focus, textarea:focus, select:focus {
 .prop .k { width: 72px; flex: none; color: var(--text-3); font-size: 12px; }
 .prop .v { display: inline-flex; align-items: center; gap: 6px; color: var(--text-2); font-weight: 500; }
 .prop .v.cap { text-transform: capitalize; }
-/* The project is the one property that leads somewhere (/issues filtered
-   to it), so it wears the same accent the description's links wear —
-   otherwise the browser's default blue lands in a panel with no blue in
-   it, which is what shipped before this rule existed. */
-.prop .v a { color: var(--accent); text-decoration: none; }
-.prop .v a:hover { text-decoration: underline; }
 .prop select { padding: 3px 6px; font-size: 12.5px; }
 .prop form { display: inline-flex; }
 
@@ -508,6 +521,7 @@ input:focus, textarea:focus, select:focus {
   border: 1px solid var(--border-strong);
   border-radius: var(--radius);
 }
+.ni-dialog .flash { margin: 0; }
 .ni-head { display: flex; align-items: center; font-weight: 600; letter-spacing: -0.005em; }
 .ni-flex { flex: 1; }
 .ni-x {
@@ -591,7 +605,7 @@ input:focus, textarea:focus, select:focus {
   border: 1px solid var(--border-strong);
   border-radius: var(--radius-lg);
   padding: 8px;
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.25);
+  box-shadow: var(--shadow-card);
 }
 .emo-head { display: flex; align-items: center; gap: 6px; margin-bottom: 8px; }
 .emo-search {
@@ -662,7 +676,24 @@ input:focus, textarea:focus, select:focus {
 
 /* ── Small screens ─────────────────────────────────────── */
 @media (max-width: 720px) {
+  .app { flex-direction: column; height: 100dvh; }
+  .main { min-height: 0; }
+  .nav-toggle {
+    display: block;
+    flex: none;
+    min-height: 40px;
+    padding: 8px 12px;
+    text-align: left;
+    color: var(--text);
+    background: var(--bg-rail);
+    border: 0;
+    border-bottom: 1px solid var(--border);
+    cursor: pointer;
+  }
   .rail { display: none; }
+  .rail.mobile-open { display: flex; width: 100%; max-height: 50dvh; overflow-y: auto; border-right: 0; border-bottom: 1px solid var(--border); }
+  .rail > * { flex-shrink: 0; }
+  .rail-group { margin-top: 12px; overflow-y: visible; }
   .topbar { flex-wrap: wrap; height: auto; padding: 8px 12px; }
   .new-issue { width: 100%; }
   .new-issue input { flex: 1; width: auto; min-width: 0; }
@@ -672,13 +703,15 @@ input:focus, textarea:focus, select:focus {
   .column { flex: 0 0 240px; min-width: 240px; }
   .issue-scroll {
     grid-template-columns: minmax(0, 1fr);
-    grid-template-areas: "main" "props" "thread" "comp";
-    grid-template-rows: auto auto auto auto;
+    grid-template-areas: "main" "description" "attachments" "props" "upload" "thread" "comp";
+    grid-template-rows: auto auto auto auto auto auto auto;
   }
   .issue-main, .deleted { padding: 20px 16px 0; }
   .props { border-left: none; border-top: 1px solid var(--border); border-bottom: 1px solid var(--border); padding: 16px; }
   .thread { margin: 0 16px; }
   .composer { margin: 14px 16px 20px; }
+  .attachment-upload, .issue-attachments { margin: 16px; }
+  .issue-desc { margin: 0 16px 24px; }
   .set-scroll { padding: 16px 12px 24px; }
   .set-row { flex-wrap: wrap; }
   .set-field { flex-wrap: wrap; }
@@ -918,7 +951,7 @@ input:focus, textarea:focus, select:focus {
   background: var(--bg-raised);
   border: 1px solid var(--border-strong);
   border-radius: var(--radius-lg);
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.25);
+  box-shadow: var(--shadow-card);
   padding: 8px 10px;
   opacity: 0;
   visibility: hidden;
@@ -1011,11 +1044,11 @@ input:focus, textarea:focus, select:focus {
 .set-row input[name="name"] { flex: 1; min-width: 0; }
 .set-row .set-second { flex: 0 1 200px; min-width: 0; }
 .set-row select { flex: none; }
+.set-delete-impact { flex: 1; min-width: 0; overflow-wrap: anywhere; }
 /* The create row sits one rung down the ladder: it holds nothing yet. */
 .set-new { margin-top: 8px; background: var(--bg-panel); }
-/* Fixed width and right-aligned so "ENG" and "workspace" leave every row's
-   inputs and buttons on the same two vertical edges. */
-.set-scope {
+/* Right-align usage counts so row inputs and buttons stay aligned. */
+.set-usage {
   flex: none;
   min-width: 66px;
   text-align: right;
@@ -1132,9 +1165,8 @@ input:focus, textarea:focus, select:focus {
 .itbl th a.on { color: var(--text); }
 /* The caret previews what a click does: it points down (descending) and only
    turns solid on the column that is actually sorting. */
-/* cr-asc / cr-desc, not asc / desc: class names are global, and `.desc` is
-   already the issue description's block (margin-bottom 24px), which lands on
-   an inline icon as a 24px gap under it. */
+/* Classes are global. Keep direction under cr- and description styling
+   under issue-desc; the former bare .desc once gave this icon a 24px margin. */
 .itbl th .cr { margin-left: 2px; vertical-align: -3px; opacity: 0; }
 .itbl th a:hover .cr { opacity: 0.4; }
 .itbl th .cr-asc, .itbl th .cr-desc { opacity: 1; }
@@ -1281,7 +1313,7 @@ input:focus, textarea:focus, select:focus {
 /* One row per project, the whole row a link into /issues?project=NAME: the
    list says what exists, the table it points at does the drilling. Class
    names are namespaced pj- because CSS class names are global here too
-   (task-106); .desc already means the issue description.
+   (task-106); a generic direction class once inherited description spacing.
 
    No new colour: the status dot borrows an --st-* hue (see project_tone),
    and the count sits in the same tertiary grey as every other tally. */
@@ -1321,16 +1353,7 @@ input:focus, textarea:focus, select:focus {
   text-overflow: ellipsis;
 }
 .pj-status { flex: none; width: 84px; color: var(--text-2); font-size: 11.5px; }
-.pj-scope {
-  flex: none;
-  width: 84px;
-  color: var(--text-3);
-  font-size: 11px;
-  font-weight: 500;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
+
 /* The issue count, in the same team scope /issues filters by — so a project
    owned by another team honestly reads 0 rather than a number no page shows. */
 .pj-n {
@@ -1531,3 +1554,14 @@ input:focus, textarea:focus, select:focus {
   outline-offset: -3px;
   border-radius: var(--radius);
 }
+
+/* Claim state belongs to the hold, independently of assignment. */
+.card-claim { margin-left: 8px; font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.claim-controls { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; min-width: 0; }
+.claim-controls button { max-width: 100%; white-space: normal; overflow-wrap: anywhere; }
+.claim-age { color: var(--text-2); font-size: 11px; }
+
+.error-summary { white-space: pre-line; }
+.error-details { margin-top: 6px; }
+.error-details summary { cursor: pointer; }
+.error-details pre { white-space: pre-wrap; overflow-wrap: anywhere; font-size: 11px; }

@@ -1,0 +1,78 @@
+import "go:encoding/json"
+import "go:net/url"
+import "models"
+import "pb"
+import "query"
+
+#[json]
+pub struct Transition {
+  pub claim_id: string,
+  pub member_id: string,
+  pub member_name: string,
+  pub created: string,
+  pub already_owned: bool,
+  pub cleared_assignee: bool,
+}
+
+#[json]
+struct AcquireRequest { member: string }
+#[json]
+struct ReleaseRequest { claim_id: string }
+#[json]
+struct AssignmentRequest { claim_id: string, fields: json.RawMessage }
+
+pub fn update_assignment(issue_id: string, claim_id: string, fields: string) -> Result<Transition, string> {
+  transact(issue_id, "assignment", AssignmentRequest { claim_id, fields: fields.bytes() as json.RawMessage })
+}
+
+pub fn observed_id(issue_id: string) -> Result<string, string> {
+  Ok(fetch(issue_id)?.map_or("", |held| held.id))
+}
+
+/// Claims and their assignment are one server-owned transaction. Callers
+/// resolve the actor through normal identity handling; the server verifies it.
+pub fn acquire(issue_id: string, member_id: string) -> Result<Transition, string> {
+  transact(issue_id, "claim", AcquireRequest { member: member_id })
+}
+
+pub fn release(issue_id: string, claim_id: string) -> Result<Transition, string> {
+  transact(issue_id, "release", ReleaseRequest { claim_id })
+}
+
+fn transact(issue_id: string, action: string, request: Unknown) -> Result<Transition, string> {
+  let body = json.Marshal(request).map_err(|e| f"encoding claim request: {e}")?
+  let path = f"/api/lll/issues/{url.PathEscape(issue_id)}/{action}"
+  let response = pb.post(path, body as string).map_err(|e| {
+    if pb.response_status(e) == 404 {
+      "server does not support atomic claim operations — update the server before changing claims or assignments; no legacy claim writes were attempted"
+    } else { e }
+  })?
+  let mut transition = Transition { .. }
+  json.Unmarshal(response.bytes(), &transition).map_err(|e| f"decoding claim response: {e}")?
+  Ok(transition)
+}
+
+pub fn fetch(issue_id: string) -> Result<Option<models.Claim>, string> {
+  let filter = url.QueryEscape(f"issue={query.quote(issue_id)}")
+  let mut list = models.ClaimList { .. }
+  pb.fetch(
+    f"/api/collections/claims/records?perPage=1&filter={filter}&expand=member",
+    "claims", &list,
+  )?
+  Ok(list.items.get(0))
+}
+
+/// Expanded holds for one team, shared by initial boards and live refreshes.
+pub fn for_team(team_id: string) -> Result<Slice<models.Claim>, string> {
+  let filter = url.QueryEscape(f"issue.team={query.quote(team_id)}")
+  let mut result: Slice<models.Claim> = []
+  let mut page = 1
+  loop {
+    let mut list = models.ClaimList { .. }
+    pb.fetch(f"/api/collections/claims/records?filter={filter}&expand=member&sort=id&perPage=200&page={page}", "team claims", &list)?
+    result = result.append(list.items...)
+    if page >= list.total_pages { break }
+    page += 1
+  }
+  Ok(result)
+}

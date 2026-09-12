@@ -1,3 +1,4 @@
+import "records"
 import "go:bufio"
 import "go:encoding/json"
 import "go:fmt"
@@ -32,6 +33,7 @@ fn login_spec() -> Slice<flags.Flag> {
       help: "server base url; authenticated against and persisted to the home config",
       ..,
     },
+    flags.Flag { name: "--web-url", value: true, hint: "URL", help: "board endpoint to persist separately from the API URL", .. },
     flags.Flag {
       name: "--password",
       alias: "-p",
@@ -86,10 +88,15 @@ pub fn login(args: Slice<string>) -> Result<(), string> {
   let spec = login_spec()
   let usage = flags.usage("lll login", spec, "")
   let p = flags.parse(spec, args, 2, false, usage)?
+
   if p.given("--help") {
     print_login_usage()
     return Ok(())
   }
+
+  let before_login = config.load()?
+  let saved_before_login = config.load_home()?
+  let board_endpoint = if p.given("--web-url") { checked_web_url(p.one("--web-url"))? } else { "" }
 
   // --url is the fresh-machine path (TASK-195): authenticate against the url
   // given, then persist it next to the token, so machine setup is exactly one
@@ -218,6 +225,23 @@ would put a second account on that address. --create makes YOUR login: pass
     let url_path = set_home_key("url", target)?
     fmt.Println(f"url = \"{target}\" in {url_path}")
   }
+  let authenticated_url = if target != "" { target } else { before_login.url }
+  let previous_url = if saved_before_login.url != "" { saved_before_login.url } else { before_login.url }
+  if strings.TrimRight(authenticated_url, "/") != strings.TrimRight(previous_url, "/") && board_endpoint == "" {
+    let _ = clear_home_key("web_url")?
+  }
+  if board_endpoint != "" {
+    let _ = set_home_key("web_url", board_endpoint)?
+  } else {
+    let cfg = config.load()?
+    if cfg.web_url == "" {
+      let discovery_base = if target != "" { target } else { cfg.url }
+      if let Some(endpoint) = discover_board_url(discovery_base) {
+        let _ = set_home_key("web_url", endpoint)?
+        fmt.Println(f"board endpoint discovered: {endpoint}")
+      }
+    }
+  }
   let path = set_home_key("token", auth.token)?
   fmt.Println(f"logged in as {auth.record.name}")
   fmt.Println(f"token saved to {path}")
@@ -245,7 +269,14 @@ would put a second account on that address. --create makes YOUR login: pass
   // belongs to 'lll attach'. Config layers rather than shadows (TASK-179), so
   // a home 'team' is a machine-wide default that any attached repo overrides
   // — which is what the layering documents it for.
+  let (identity_cfg, identity_src) = config.load_traced()?
+  let identity_note = login_identity_notice(identity_cfg.me, auth.record.name, identity_src.me, config.home_path()?)
+  if identity_note != "" { fmt.Println(identity_note) }
   settle_team()
+  let saved_cfg = config.load()?
+  if saved_cfg.web_url == "" {
+    fmt.Println("board endpoint: run 'lll config set web_url URL' with the board address supplied by your deployer")
+  }
   Ok(())
 }
 
@@ -254,12 +285,24 @@ would put a second account on that address. --create makes YOUR login: pass
 /// a server that cannot answer about teams does not un-log-you-in.
 fn settle_team() {
   let Ok(cfg) = config.load() else { return }
-  if cfg.team != "" {
-    fmt.Println(f"team {cfg.team} — ready: lll issue create \"a title\"")
-    return
+  let teams = match records.list_teams() {
+    Ok(teams) => teams,
+    Err(e) => {
+      fmt.Println(f"authenticated, but could not verify team setup: {e}\nnext: lll team list, then lll attach -k KEY")
+      return
+    },
   }
-  let Ok(teams) = list_teams() else {
-    fmt.Println("next: lll attach — picks this directory's team and writes it to .lll.toml")
+  if cfg.team != "" {
+    match teams.items.find(|t| t.key == cfg.team) {
+      Some(team) => {
+        if team.archived {
+          fmt.Println(f"authenticated, but team {cfg.team} is archived; run 'lll team unarchive {cfg.team}' to restore it, or attach to another team")
+        } else {
+          fmt.Println(f"team {cfg.team} — ready: lll issue create \"a title\"")
+        }
+      },
+      None => fmt.Println(f"authenticated, but team {cfg.team} is missing on this server. Check 'lll team list --archived' and reattach with 'lll attach -k EXISTING_KEY'. Only if you intend a new team, run 'lll attach -k {cfg.team}'."),
+    }
     return
   }
   let live = teams.items.filter(|t| !t.archived)
@@ -271,7 +314,7 @@ fn settle_team() {
     }
     fmt.Println(f"team = \"{key}\" in {path} (the server's only team)")
     fmt.Println("ready: lll issue create \"a title\"")
-    fmt.Println("in a shared repo, 'lll attach' commits the team so every clone inherits it")
+    fmt.Println("in a shared repo, 'lll attach' writes .lll.toml; commit that file with Git if clones should inherit the team")
     return
   }
   if live.length() > 1 {
@@ -327,7 +370,7 @@ each value came from; 'lll login' replaces the token.",
     }
     return Err(f"unknown whoami argument: '{flag}' (see 'lll whoami --help')")
   }
-  let cfg = config.load()?
+  let (cfg, src) = config.load_traced()?
   // NOT auth-refresh, which this used to POST. A refresh is refused for every
   // non-refreshable token - and `lll token create` mints exactly those, the
   // whole agent credential - so `lll whoami` answered "401 Unauthorized" to
@@ -361,11 +404,8 @@ each value came from; 'lll login' replaces the token.",
   fmt.Println(f"server  {cfg.url}")
   let team = if cfg.team == "" { "(none — run 'lll attach')" } else { cfg.team }
   fmt.Println(f"team    {team}")
-  if cfg.me != "" && cfg.me != me.name {
-    fmt.Println(
-      f"note: 'me' is set to \"{cfg.me}\", which is not the member this token belongs to — writes are refused until they agree: 'lll config set me {me.name}' (or unset LLL_ME)",
-    )
-  }
+  let notice = login_identity_notice(cfg.me, me.name, src.me, config.home_path()?)
+  if notice != "" { fmt.Println(notice) }
   Ok(())
 }
 
@@ -406,7 +446,7 @@ fn create_as_superuser(
   password: string,
 ) -> Result<(), string> {
   let su = superuser_auth()?
-  if let Some(existing) = find_member_as(su, name)? {
+  if let Some(existing) = records.find_member_as(su, name)? {
     return Err(
       f"member '{name}' already exists ({existing.email}) — drop --create and log in, or reset it with 'lll member set-password {name}'",
     )
@@ -422,7 +462,7 @@ fn create_as_superuser(
 /// --create from it. Both branches are named here because the server does not
 /// tell us which one it is.
 fn login_failed(e: string, email: string, target: string) -> string {
-  if !strings.Contains(e, "400") {
+  if pb.response_status(e) != 400 {
     return f"login failed: {e}"
   }
   // The server is named on every failure (TASK-203 AC#4): "wrong password"
@@ -525,7 +565,7 @@ Prompts for the email (unless --email/-e) and the password (unless
 --password/-p), reading it with echo off when stdin is a terminal; piped
 input is read as a plain line. --password is what scripts, CI and agents use. On success
 the PocketBase token is stored in ~/.config/lll/lll.toml — never in the
-repo's .lll.toml, which is committed — and every later lll call rides it.
+repo's shareable .lll.toml — and every later lll call rides it.
 An LLL_TOKEN in the environment still wins (see 'lll config --list').
 
 --url is the fresh-machine setup: it authenticates against that server and
@@ -533,9 +573,14 @@ persists url (and 'me', when unset) next to the token, so
 
   lll login --url https://tracker.example.com --email you@example.com
 
-is the only step a new machine needs. Without --url, login uses the
-configured url. It finishes by naming what is still missing here — a team,
-which 'lll attach' writes to the repo's .lll.toml.
+authenticates this machine. Without --url, login uses the configured API URL.
+When no board endpoint is configured, login discovers and saves it if the
+server advertises one. Discovery is optional: an unavailable advertisement
+does not fail login. Existing explicit settings take precedence. Supply
+--web-url URL to save a specific board endpoint, including one hosted at a
+different address, or use 'lll config set web_url URL'. Login reports any
+remaining setup, such as a missing team or board endpoint. 'lll attach'
+writes the team to the directory's .lll.toml.
 
 No account on the server yet? If you hold the admin credentials
 (LLL_ADMIN_EMAIL/LLL_ADMIN_PASSWORD, the ones 'lll up' prints and a
@@ -569,4 +614,23 @@ Removes token = \"...\" from ~/.config/lll/lll.toml — the file 'lll login'
 wrote — and unsets nothing else. An LLL_TOKEN in the environment is not
 affected: unset it in the shell that has it.",
   )
+}
+
+/// Authentication and the configured comment author may deliberately differ.
+/// Never silently rewrite that choice, but make the difference actionable.
+fn login_identity_notice(me: string, authenticated: string, source: string, home: string) -> string {
+  if me == "" || authenticated == "" || me == authenticated { return "" }
+  let argument = cli_argument(authenticated)
+  let mut recovery = f"lll config set me {argument}"
+  if source == "env:LLL_ME" {
+    recovery = f"unset LLL_ME; {recovery}"
+  } else if strings.HasPrefix(source, "file:") && source != f"file:{home}" {
+    recovery = f"remove or change 'me' in {strings.TrimPrefix(source, "file:")}, then run '{recovery}'"
+  }
+  f"note: authenticated as {authenticated}, but configured me is {me} ({source}); writes are refused until they agree. To use {authenticated}: {recovery}"
+}
+
+/// Render a literal argument for the recovery command, including display names.
+fn cli_argument(value: string) -> string {
+  flags.shell_argument(value)
 }

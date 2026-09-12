@@ -5,9 +5,35 @@ pub fn states() -> Slice<string> {
   ["backlog", "todo", "in-progress", "in-review", "done", "cancelled"]
 }
 
+/// A supplied state must be in the workflow vocabulary. Empty is not a
+/// state; filter adapters decide whether absence means no restriction.
+pub fn state(value: string) -> Result<string, string> {
+  if !states().contains(value) {
+    return Err(f"unknown state '{value}' (use one of: {strings.Join(states(), ", ")})")
+  }
+  Ok(value)
+}
+
+/// User-facing filter values, before member/label/project name resolution.
+/// Shared by CLI and web adapters; transport and database I/O stay outside.
+pub struct Filters {
+  pub state: string,
+  pub assignee: string,
+  pub label: string,
+  pub project: string,
+  pub search: string,
+}
+
+impl Filters {
+  pub fn validate(self) -> Result<Filters, string> {
+    if self.state != "" { let _ = state(self.state)? }
+    Ok(self)
+  }
+}
+
 /// Sortable issue fields (PB record fields).
 pub fn sort_fields() -> Slice<string> {
-  ["created", "updated", "priority", "number"]
+  ["created", "updated", "priority", "number", "title"]
 }
 
 /// Build a PocketBase filter expression from optional criteria.

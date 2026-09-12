@@ -37,6 +37,9 @@ cleanup() { # exit-status
 e2e_trap_cleanup cleanup
 
 lis build >/dev/null
+python3 scripts/test_board_startup.py target/.lisette/bin/lll
+python3 scripts/test_up_errors.py target/.lisette/bin/lll
+python3 scripts/test_scratch.py
 
 # TASK-227 (the half of TASK-187 this suite never got): pin HOME for the rest
 # of the run, AFTER lis build so the lis/go/mise caches under the real HOME
@@ -89,6 +92,9 @@ printf '%s' "$anon_page" | grep -q "board_token" || fail "401 page does not say 
 curl -sf -H "$BOARD_COOKIE" "http://127.0.0.1:$WEB2/" >/dev/null || fail "board not on incremented port $WEB2"
 grep -q "admin@local.dev / admin-local-123" "$UP_LOG" || fail "default creds not logged"
 grep -q "port $WEB_PORT taken" "$UP_LOG" || fail "web port move not printed"
+resolved_board=$(env -u LLL_WEB_URL HOME="$E2E_HOME" "$LLL" board)
+[ "$resolved_board" = "http://127.0.0.1:$WEB2" ] || fail "up did not save the actual board port"
+
 curl -sf -X POST "http://127.0.0.1:$DB2/api/collections/_superusers/auth-with-password" \
   -H 'Content-Type: application/json' \
   -d '{"identity":"admin@local.dev","password":"admin-local-123"}' >/dev/null \
@@ -203,18 +209,17 @@ OUT_PB_PORT=$(free_port 40000 49999)
 OUT_WEB_PORT=$(free_port 50000 59999)
 OUT_URL="http://127.0.0.1:$OUT_PB_PORT"
 OUT_LOG="$DATA_DIR/outside.log"
-# `env -u LLL_TOKEN` like the blocks above: the suite is still carrying a token
-# minted against an EARLIER PocketBase, and this boot is a different server. A
-# stale token does not fail as an auth error - `up` gets refused while seeding
-# and reports "could not create team 'E2E' and none exists to reuse", which
-# names the team and never mentions auth. Filed separately; here, just do not
-# hand it a token from another database.
+# This is a different server, so do not reuse the earlier member token.
+# LLL-298: fresh HOME, no configured team, and a deliberately long mixed-case
+# answer prove the interactive first boot preserves explicit identifiers.
+mkdir -p "$OUTSIDE/home"
+printf '%s\n' 'Platform42' >"$OUTSIDE/team-answer"
 # TASK-250: `exec`, so $! is the SERVER and not the subshell wrapping it.
 # Without it, e2e_reap killed the subshell and left `lll up` running with a
 # --pb-dir that e2e_end then deleted — orphans holding ports indefinitely,
 # four of them found alive on a developer machine after a day of runs.
-( cd "$OUTSIDE" && exec env -u LLL_TOKEN LLL_TEAM=E2E HOME="$E2E_HOME" LLL_URL="$OUT_URL" \
-    "$LLL_ABS" up --no-open --port "$OUT_WEB_PORT" --pb-dir "$OUTSIDE/pb_data" </dev/null ) \
+( cd "$OUTSIDE" && exec env -u LLL_TOKEN -u LLL_TEAM HOME="$OUTSIDE/home" LLL_URL="$OUT_URL" \
+    "$LLL_ABS" up --no-open --port "$OUT_WEB_PORT" --pb-dir "$OUTSIDE/pb_data" <"$OUTSIDE/team-answer" ) \
   >"$OUT_LOG" 2>&1 &
 OUTSIDE_PID=$!
 wait_ok "$OUT_URL/api/health" 150 \
@@ -226,6 +231,18 @@ out=$(curl -sf "$OUT_URL/api/collections/teams/records" \
   || fail "the teams collection should exist outside the checkout, got: $out (log: $(cat "$OUT_LOG"))"
 printf '%s' "$out" | grep -qF "Missing collection context" \
   && fail "booted unmigrated outside the checkout: $out"
+# Health can be ready before the prompt/seed finishes. Wait for the completed
+# board boot before checking the persisted key, not an arbitrary sleep.
+for _ in $(seq 1 100); do
+  grep -qF 'board  login ' "$OUT_LOG" && break
+  sleep 0.1
+done
+grep -qF 'board  login ' "$OUT_LOG" || fail "interactive first boot did not finish: $(cat "$OUT_LOG")"
+out=$(curl -sf "$OUT_URL/api/collections/teams/records" \
+  -H "Authorization: Bearer $(pb_superuser_token "$OUT_URL")")
+[ "$(jq -r '.items | length' <<<"$out")" = 1 ] || fail "interactive boot created unexpected teams: $out"
+[ "$(jq -r '.items[0].key' <<<"$out")" = 'Platform42' ] || fail "interactive boot changed the typed team key: $out"
+assert_contains "$(cat "$OUT_LOG")" 'created team Platform42' "first-boot transcript preserves the typed key"
 e2e_reap "$OUTSIDE_PID"
 
 echo "e2e_up: all assertions passed"

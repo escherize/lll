@@ -119,6 +119,7 @@ pub struct IssueExpand {
 
 #[json]
 pub struct Issue {
+  pub attachments: Slice<string>,
   pub id: string,
   pub team: string,
   pub number: int,
@@ -130,7 +131,7 @@ pub struct Issue {
   // One author-chosen marker. Empty for most issues.
   pub emoji: string,
   // TASK-205 work-site slot: where the branch is checked out RIGHT NOW.
-  // Written by `issue start` after the branch exists; a start from a
+  // Written by `issue start` on an existing matching issue branch; a start from a
   // different site overwrites it (and leaves an auto-comment recording the
   // displaced one). Never cleared — staleness is a presentation rule.
   pub work_branch: string,
@@ -190,6 +191,8 @@ pub struct Comment {
 #[json]
 pub struct CommentList {
   pub items: Slice<Comment>,
+  #[json("totalPages")]
+  pub total_pages: int,
 }
 
 #[json]
@@ -236,9 +239,9 @@ pub struct ClaimExpand {
   pub member: Member,
 }
 
-/// One exclusive hold on an issue (TASK-175). `claims` is UNIQUE on `issue`,
-/// so the row IS the arbitration: two agents racing both POST one and the
-/// index admits exactly one. `created` is the claim's age.
+/// One exclusive hold on an issue. The unique issue index admits one hold;
+/// server operations couple acquisition/release with the assignment update.
+/// `created` records when this hold was acquired, retained by an own-claim retry.
 #[json]
 pub struct Claim {
   pub id: string,
@@ -250,6 +253,8 @@ pub struct Claim {
 
 #[json]
 pub struct ClaimList {
+  #[json("totalPages")]
+  pub total_pages: int,
   pub items: Slice<Claim>,
 }
 

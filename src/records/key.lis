@@ -1,0 +1,22 @@
+import "go:strconv"
+import "go:strings"
+
+/// Split a KEY-123 identifier into its team key and issue number. The key may
+/// itself contain hyphens (`ENG-DEV-12` is team `ENG-DEV`, issue 12), so the
+/// number is the last segment and the key is everything before it.
+pub fn split_issue_key(id: string) -> Result<(string, int), string> {
+  // Names the shape AND the position: three of thirty fleet agents typed
+  // 'lll issue comment add KEY ...' and read this as the key being wrong.
+  let bad_id = f"'{id}' is not an issue ID (expected KEY-123, e.g. ENG-1); the ID comes right after the verb, no sub-verb — 'lll issue <verb> -h' shows the form"
+  // Split, not LastIndex + substring: index arithmetic mixes byte offsets with
+  // rune indices and panics on non-ASCII input. See realtime.split_field.
+  let parts = strings.Split(id, "-")
+  if parts.length() < 2 { return Err(bad_id) }
+  let number_part = parts[parts.length() - 1]
+  let team_key = strings.TrimSuffix(id, f"-{number_part}")
+  if team_key == "" || number_part == "" { return Err(bad_id) }
+  let Ok(number) = strconv.Atoi(number_part) else {
+    return Err(bad_id)
+  }
+  Ok((team_key, number))
+}

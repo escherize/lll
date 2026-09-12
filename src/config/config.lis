@@ -1,5 +1,4 @@
 import "go:github.com/BurntSushi/toml"
-import "go:net/url"
 import "go:os"
 import "go:os/exec"
 import "go:path/filepath"
@@ -46,20 +45,8 @@ pub fn load_traced() -> Result<(Config, Sources), string> {
   let mut src = Sources { .. }
 
   for path in config_files() {
-    let data = match os.ReadFile(path) {
-      Ok(d) => d,
-      Err(e) => return Err(f"reading {path}: {e}"),
-    }
     let was = cfg
-    // Decoding into an already-populated struct overwrites only the keys the
-    // document names. That, plus the order of config_files(), IS the layering
-    // — there is no merge step to keep in sync with the struct.
-    if let Err(e) = toml.Unmarshal(data, &cfg) {
-      return Err(
-        f"parsing {path}: {e}
-fix the TOML syntax in {path}, or remove it and rerun 'lll config init'",
-      )
-    }
+    cfg = read_config(path, cfg)?
     let from = f"file:{path}"
     if cfg.url != was.url { src.url = from }
     if cfg.team != was.team { src.team = from }
@@ -103,27 +90,7 @@ fix the TOML syntax in {path}, or remove it and rerun 'lll config init'",
     cfg.url = "http://127.0.0.1:8090"
     src.url = "default"
   }
-  if cfg.web_url == "" {
-    cfg.web_url = derive_web_url(cfg.url)
-    src.web_url = "default"
-  }
   Ok((cfg, src))
-}
-
-/// The web_url to assume when nothing configures one, derived from the
-/// resolved `url`. A local PocketBase means the local board `lll up` serves
-/// (:8100). A hosted url means the board rides 443 at the same host —
-/// https://<host>, port dropped — which is where fly.toml's http_service
-/// puts it while the API takes :8091. Without this, `lll board` on a machine
-/// set up by 'lll login --url' printed the localhost default.
-pub fn derive_web_url(base: string) -> string {
-  let local = "http://127.0.0.1:8100"
-  let Ok(u) = url.Parse(base) else {
-    return local
-  }
-  let host = u.Hostname()
-  if host == "" || host == "127.0.0.1" || host == "localhost" { return local }
-  f"https://{host}"
 }
 
 /// The files to layer, lowest precedence first: the machine's config, then
@@ -262,4 +229,24 @@ fn within(dir: string, root: string) -> bool {
 
 fn exists(path: string) -> bool {
   os.Stat(path).is_ok()
+}
+
+/// Read the persisted machine settings without environment/repo overrides.
+/// Login uses the saved API/board pair to detect a server switch reliably.
+pub fn load_home() -> Result<Config, string> {
+  let Some(path) = home_file() else { return Ok(Config { .. }) }
+  read_config(path, Config { .. })
+}
+
+fn read_config(path: string, initial: Config) -> Result<Config, string> {
+  let data = match os.ReadFile(path) {
+    Ok(data) => data,
+    Err(e) => return Err(f"reading {path}: {e}"),
+  }
+  // TOML overwrites only present fields; this is also the layering policy.
+  let mut cfg = initial
+  if let Err(e) = toml.Unmarshal(data, &cfg) {
+    return Err(f"parsing {path}: {e}\nfix the TOML syntax in {path}, or remove it and rerun 'lll config init'")
+  }
+  Ok(cfg)
 }

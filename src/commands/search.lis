@@ -121,17 +121,7 @@ pub fn search_corpus(team_id: string, team_key: string, q: string, issues: bool,
 fn fetch_team_docs_light(team_id: string, where: string) -> Result<Slice<models.Doc>, string> {
   let mut clause = f"team={query.quote(team_id)}"
   if where != "" { clause = f"{clause} && {where}" }
-  let dfilter = url.QueryEscape(clause)
-  let mut out: Slice<models.Doc> = []
-  let mut page = 1
-  loop {
-    let mut list = models.DocList { .. }
-    pb.fetch(f"/api/collections/docs/records?perPage=500&page={page}&sort=slug&fields=id,slug,kind,title,body,updated&filter={dfilter}", "docs", &list)?
-    out = out.append(list.items...)
-    if list.items.length() < 500 { break }
-    page += 1
-  }
-  Ok(out)
+  fetch_docs(clause, "slug", "id,slug,kind,title,body,updated")
 }
 
 /// Every issue of a team, expanded for the board's card, paged.

@@ -17,3 +17,5 @@ pb/pb_data/
 .claude/worktrees/
 .lll-demo/
 *.log
+__pycache__/
+*.lll-export.lock

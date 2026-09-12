@@ -1,42 +1,211 @@
-#!/usr/bin/env bash
-# bin/lll-export — a one-way markdown mirror of the database (TASK-89).
-#
-# Wipes and rewrites the target directory from the live server: one file per
-# issue (issues/KEY-N.md via `lll issue view --raw`), one per doc
-# (docs/SLUG.md via `lll doc view --raw`). The mirror is a build artifact:
-# never read back, never reconciled, no tombstones — a deleted issue simply
-# vanishes from the next export. git makes it durable; grep makes it useful
-# with no server running.
-#
-# Usage: bin/lll-export [TARGET_DIR]   (default: mirror/, at the repo root)
-# Config flows through the usual plumbing: LLL_URL, LLL_TEAM, LLL_TOKEN (or
-# the home config's token), HOME.
-#
-# TASK-89. The volume is not a backup; this mirror pushed to git is.
-set -euo pipefail
+#!/usr/bin/env python3
+"""One-way CLI Markdown projection. See docs/export-mirror.md."""
+import argparse
+from contextlib import contextmanager
+import fcntl
+import hashlib
+import json
+import os
+from pathlib import Path
+import shutil
+import subprocess
+import sys
+import tempfile
 
-TARGET="${1:-mirror}"
-LLL="${LLL_BIN:-target/.lisette/bin/lll}"
-[ -x "$LLL" ] || LLL="$(command -v lll)"
+MARKER = '.lll-export.json'
 
-command -v jq >/dev/null || { echo "lll-export needs jq on PATH" >&2; exit 1; }
 
-WORK="$(mktemp -d)"
-trap 'rm -rf "$WORK"' EXIT
+class ExportError(Exception):
+    pass
 
-# --- enumerate ---
-issues=$("$LLL" issue list --json | jq -r '.items[] | "\(.expand.team.key)-\(.number)"')
-docs=$("$LLL" doc list --json | jq -r '.items[] | .slug' 2>/dev/null || true)
 
-# --- wipe and rewrite, one way ---
-rm -rf "$TARGET"
-mkdir -p "$TARGET/issues" "$TARGET/docs"
+def command(binary, *args):
+    result = subprocess.run([binary, *args], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    if result.returncode:
+        # CLI diagnostics name the failure; stdout may contain partial data.
+        raise ExportError(result.stderr.decode('utf-8', errors='replace').strip()
+                          or f'lll {args[0]} {args[1]} failed ({result.returncode})')
+    return result.stdout
 
-for key in $issues; do
-  "$LLL" issue view "$key" --raw > "$TARGET/issues/$key.md"
-done
-for slug in $docs; do
-  "$LLL" doc view "$slug" --raw > "$TARGET/docs/$slug.md"
-done
 
-echo "lll-export: $(ls "$TARGET/issues" | wc -l | tr -d ' ') issues, $(ls "$TARGET/docs" | wc -l | tr -d ' ') docs -> $TARGET"
+def records(binary, *args):
+    try:
+        value = json.loads(command(binary, *args))
+        if not isinstance(value, dict) or not isinstance(value.get('items'), list):
+            raise ValueError('expected a record list')
+        return value
+    except (ValueError, TypeError) as error:
+        raise ExportError(f'invalid CLI JSON: {error}') from error
+
+
+def issue_inventory(binary):
+    result = []
+    identities = set()
+    total = None
+    pages = None
+    page = 1
+    while True:
+        response = records(binary, 'issue', 'list', '--json', '--limit', '200', '--sort', 'created', '--page', str(page))
+        count, last = response.get('totalItems'), response.get('totalPages')
+        if type(count) is not int or count < 0 or type(last) is not int or last != (count + 199) // 200:
+            raise ExportError('invalid issue pagination metadata')
+        if response.get('page') != page or (total is not None and (total, pages) != (count, last)):
+            raise ExportError('issue inventory changed during pagination; rerun the export')
+        total, pages = count, last
+        expected = min(200, max(0, total - (page - 1) * 200))
+        if len(response['items']) != expected:
+            raise ExportError('incomplete issue page; keeping the previous mirror')
+        for item in response['items']:
+            identity = item['id']
+            if identity in identities:
+                raise ExportError('duplicate issue across pages; rerun the export')
+            identities.add(identity)
+            result.append(item)
+        if page >= pages:
+            return result
+        page += 1
+
+
+def filename(value):
+    if not isinstance(value, str) or not value or value in ('.', '..') or any(c in value for c in '/\\') or any(ord(c) < 32 for c in value):
+        raise ExportError('record has an unsafe filename')
+    return value + '.md'
+
+
+def digest(data):
+    return hashlib.sha256(data).hexdigest()
+
+
+def validate_mirror(root):
+    """An exact generated tree: neither user files nor edited output is owned."""
+    if root.is_symlink() or not root.is_dir():
+        raise ExportError(f'not a managed export directory: {root}')
+    marker = root / MARKER
+    if marker.is_symlink() or not marker.is_file():
+        raise ExportError(f'refusing unmanaged directory {root}; choose a new export destination')
+    try:
+        manifest = json.loads(marker.read_text())
+    except (OSError, ValueError) as error:
+        raise ExportError(f'invalid export manifest in {root}') from error
+    if not isinstance(manifest, dict) or manifest.get('version') != 1 or not isinstance(manifest.get('files'), dict):
+        raise ExportError(f'unsupported export manifest in {root}')
+    actual = {}
+    for item in root.iterdir():
+        if item.name == MARKER:
+            continue
+        if item.name not in ('issues', 'docs') or item.is_symlink() or not item.is_dir():
+            raise ExportError(f'unexpected path in mirror: {item}')
+        for entry in item.iterdir():
+            if entry.is_symlink() or not entry.is_file() or entry.suffix != '.md':
+                raise ExportError(f'unexpected path in mirror: {entry}')
+            actual[entry.relative_to(root).as_posix()] = digest(entry.read_bytes())
+    if not all((root / name).is_dir() for name in ('issues', 'docs')) or actual != manifest['files']:
+        raise ExportError(f'mirror was edited or contains unexpected files: {root}; preserve it and export to a new destination')
+
+
+def destination(raw):
+    candidate = Path(raw).expanduser().absolute()
+    if candidate.is_symlink():
+        raise ExportError('the export destination must not be a symlink')
+    target = candidate.resolve()
+    cwd = Path.cwd().resolve()
+    repo = Path(__file__).resolve().parent.parent
+    if target == Path(target.anchor) or target == Path.home().resolve() or target == repo or target == cwd or target in cwd.parents:
+        raise ExportError('refusing root, home, repository or current/ancestor directory as the export destination')
+    return target
+
+
+@contextmanager
+def publication_lock(target):
+    path = target.with_name('.' + target.name + '.lll-export.lock')
+    # Keep the lock inode after release: unlinking admits two independent locks.
+    fd = os.open(path, os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW, 0o600)
+    try:
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError as error:
+            raise ExportError(f'an export is already running for {target}') from error
+        yield
+    finally:
+        os.close(fd)
+
+
+def recover_previous(target, previous):
+    if previous.exists() or previous.is_symlink():
+        validate_mirror(previous)
+        if target.exists() or target.is_symlink():
+            validate_mirror(target)
+            shutil.rmtree(previous)
+        else:
+            previous.rename(target)
+
+
+def publish(stage, target, previous):
+    had_previous = target.exists() or target.is_symlink()
+    if had_previous:
+        validate_mirror(target)
+        target.rename(previous)
+    try:
+        stage.rename(target)
+    except BaseException:
+        if had_previous:
+            previous.rename(target)
+        raise
+    if had_previous:
+        shutil.rmtree(previous)
+
+
+def export(binary, target):
+    target.parent.mkdir(parents=True, exist_ok=True)
+    previous = target.with_name('.' + target.name + '.lll-previous')
+    with publication_lock(target):
+        recover_previous(target, previous)
+        if target.exists() or target.is_symlink():
+            validate_mirror(target)
+        issues = issue_inventory(binary)
+        docs = records(binary, 'doc', 'list', '--json')['items']
+        with tempfile.TemporaryDirectory(prefix='.' + target.name + '.lll-stage-', dir=target.parent) as temporary:
+            stage = Path(temporary) / 'mirror'
+            (stage / 'issues').mkdir(parents=True)
+            (stage / 'docs').mkdir()
+            files = {}
+            for kind, inventory in [('issue', issues), ('doc', docs)]:
+                for record in inventory:
+                    key = f"{record['expand']['team']['key']}-{record['number']}" if kind == 'issue' else record['slug']
+                    relative = kind + 's/' + filename(key)
+                    if relative in files:
+                        raise ExportError(f'duplicate export filename: {relative}')
+                    body = command(binary, kind, 'view', '--raw', '--', key)
+                    # Exclusive creation also catches case/Unicode aliases on
+                    # filesystems where distinct record names name one file.
+                    with (stage / relative).open("xb") as output:
+                        output.write(body)
+                    files[relative] = digest(body)
+            (stage / MARKER).write_text(json.dumps({'version': 1, 'files': files}, indent=2, sort_keys=True) + '\n')
+            validate_mirror(stage)
+            publish(stage, target, previous)
+        return len(issues), len(docs)
+
+
+def main():
+    parser = argparse.ArgumentParser(description='Generate a complete one-way Markdown mirror using lll. Existing destinations must be unedited, managed exports. This is not a database/attachment backup.')
+    parser.add_argument('target', nargs='?', default='mirror', help='generated directory (default: mirror/ in the current directory)')
+    args = parser.parse_args()
+    try:
+        target = destination(args.target)
+        binary = os.environ.get('LLL_BIN')
+        if not binary:
+            local = Path(__file__).resolve().parent.parent / 'target/.lisette/bin/lll'
+            binary = str(local) if os.access(local, os.X_OK) else shutil.which('lll')
+        if not binary:
+            raise ExportError('lll not found; build the project or put lll on PATH')
+        issues, docs = export(binary, target)
+        print(f'lll-export: {issues} issues, {docs} docs -> {target}')
+    except (ExportError, OSError, KeyError, TypeError) as error:
+        print(f'lll-export: {error}', file=sys.stderr)
+        return 1
+    return 0
+
+
+if __name__ == '__main__':
+    sys.exit(main())

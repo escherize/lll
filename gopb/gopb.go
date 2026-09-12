@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io/fs"
 	"math"
+	"net/http"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -61,10 +62,18 @@ func Serve(dataDir, addr, adminEmail, adminPassword string) error {
 	})
 
 	app.OnRecordCreate("issues").BindFunc(func(e *core.RecordEvent) error {
-		if err := issueDefaults(e.App, e.Record); err != nil {
-			return err
-		}
-		return e.Next()
+		// Keep the max-number read and record insertion on PocketBase's
+		// serialized writer connection. Reading before that transaction lets
+		// concurrent requests choose the same otherwise-valid number.
+		originalApp := e.App
+		defer func() { e.App = originalApp }()
+		return originalApp.RunInTransaction(func(txApp core.App) error {
+			e.App = txApp
+			if err := issueDefaults(txApp, e.Record); err != nil {
+				return err
+			}
+			return e.Next()
+		})
 	})
 
 	migratecmd.MustRegister(app, app.RootCmd, migratecmd.Config{
@@ -72,7 +81,19 @@ func Serve(dataDir, addr, adminEmail, adminPassword string) error {
 		TemplateLang: migratecmd.TemplateLangJS,
 	})
 
+	var issueUpdates issueWriteLocks
 	app.OnServe().BindFunc(func(e *core.ServeEvent) error {
+		registerClaimRoutes(e.Router, &issueUpdates)
+		// A direct API listener cannot infer the public board origin. Operators
+		// may advertise it explicitly; the combined board listener advertises
+		// its own origin independently, without trusting forwarded headers.
+		e.Router.GET("/.well-known/lll", func(re *core.RequestEvent) error {
+			boardURL := os.Getenv("LLL_WEB_URL")
+			if boardURL == "" {
+				return re.NotFoundError("board URL is not advertised", nil)
+			}
+			return re.JSON(http.StatusOK, map[string]string{"service": "lll", "web_url": boardURL})
+		})
 		if err := upsertSuperuser(e.App, adminEmail, adminPassword); err != nil {
 			return err
 		}
@@ -91,6 +112,16 @@ func Serve(dataDir, addr, adminEmail, adminPassword string) error {
 		e.Router.BindFunc(func(re *core.RequestEvent) error {
 			if re.Auth == nil && recordsPath.MatchString(re.Request.URL.Path) {
 				return re.UnauthorizedError(anonMessage, nil)
+			}
+			if re.Request.Method == http.MethodPatch || re.Request.Method == http.MethodDelete {
+				id := re.Request.PathValue("id")
+				if id != "" {
+					collection, err := re.App.FindCachedCollectionByNameOrId(re.Request.PathValue("collection"))
+					if err == nil && collection.Name == "issues" {
+						unlock := issueUpdates.acquire(id)
+						defer unlock()
+					}
+				}
 			}
 			return re.Next()
 		})

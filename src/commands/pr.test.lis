@@ -1,0 +1,17 @@
+import "go:strings"
+import "go:unicode/utf8"
+
+#[test]
+fn pr_body_character_boundary_preserves_or_links_full_text() {
+  let link = "https://board.example/issue/ENG-1"
+  let description = strings.Repeat("🧪", 65536 - utf8.RuneCountInString(link) - 2)
+  let Ok((body, linked_only)) = pr_body(link, description) else { panic("body failed") };
+  assert !linked_only
+  assert body == f"{link}\n\n{description}"
+  let Ok((fallback, linked_only)) = pr_body(link, description + "x") else { panic("fallback failed") };
+  assert linked_only
+  assert strings.HasPrefix(fallback, link)
+  assert strings.Contains(fallback, "full description")
+  assert utf8.RuneCountInString(fallback) <= 65536
+  assert pr_body(strings.Repeat("x", 65537), "").is_err()
+}

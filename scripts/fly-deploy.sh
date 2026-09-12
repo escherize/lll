@@ -12,16 +12,5 @@ command -v fly >/dev/null || { echo "fly not found: brew install flyctl" >&2; ex
 CTX="$(mktemp -d)"
 trap 'rm -rf "$CTX"' EXIT
 
-git archive HEAD | tar -x -C "$CTX"
-
-echo "emitting Go into the deploy context..."
-# emit + relative replace paths: the container's module lives at /src/target,
-# the path deps at /src/gopb and /src/web.
-(cd "$CTX" && bash scripts/emit-relative.sh)
-
-# the checkout's .dockerignore excludes target/ (a stale emit must not ride
-# along on a hand-run `fly deploy`); this context's emit is fresh by
-# construction, so drop that exclusion here.
-grep -v '^target/$' .dockerignore > "$CTX/.dockerignore" || true
-
-exec fly deploy --remote-only --config "$CTX/fly.toml" "$CTX"
+bash scripts/prepare-deploy-context.sh "$CTX"
+fly deploy --remote-only --config "$CTX/fly.toml" "$CTX"

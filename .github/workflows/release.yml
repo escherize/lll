@@ -61,7 +61,6 @@ jobs:
 
       - name: Build darwin-arm64 (native lis)
         run: |
-          mise exec -- bash scripts/lis-typedefs-workaround.sh
           mise exec -- lis build
           mkdir -p dist
           cp target/.lisette/bin/lll dist/lll-darwin-arm64

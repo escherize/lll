@@ -1,5 +1,6 @@
 import "flags"
 import "query"
+import "models"
 
 // Unit cover for the pure helpers in issue.lis. Everything here is a function
 // of its arguments alone — no PocketBase, no config, no git.
@@ -158,51 +159,6 @@ fn check_emoji_reports_the_trimmed_value() {
   assert msg.contains("'in progress'")
 }
 
-// --------------------------------------------------------- positional_id
-
-fn view_args(rest: Slice<string>) -> Slice<string> {
-  ["lll", "issue", "view"].append(rest...)
-}
-
-#[test]
-fn positional_id_is_empty_when_nothing_is_passed() {
-  let assert Ok(id) = positional_id(view_args([]), "usage")
-  assert id == ""
-}
-
-#[test]
-fn positional_id_takes_the_single_argument() {
-  let assert Ok(id) = positional_id(view_args(["ENG-12"]), "usage")
-  assert id == "ENG-12"
-}
-
-#[test]
-fn positional_id_passes_multi_byte_arguments_through() {
-  // No key validation here; deslug and split_issue_key own that.
-  let assert Ok(id) = positional_id(view_args(["ÉNG-12"]), "usage")
-  assert id == "ÉNG-12"
-}
-
-#[test]
-fn positional_id_rejects_flags_with_the_usage_line() {
-  let assert Err(msg) = positional_id(view_args(["--json"]), "lll issue view")
-  assert msg.contains("unknown flag: '--json'")
-  assert msg.contains("usage: lll issue view")
-  // A flag after a valid id is still a flag.
-  let assert Err(after) =
-    positional_id(view_args(["ENG-12", "--json"]), "lll issue view")
-  assert after.contains("unknown flag")
-  // A bare dash is not a positional argument either.
-  let assert Err(dash) = positional_id(view_args(["-"]), "lll issue view")
-  assert dash.contains("unknown flag: '-'")
-}
-
-#[test]
-fn positional_id_rejects_a_second_argument() {
-  let assert Err(msg) = positional_id(view_args(["ENG-12", "ENG-13"]), "usage")
-  assert msg.contains("unexpected argument: 'ENG-13'")
-}
-
 // -------------------------------------------------------- value_or_stdin
 
 /// Only a lone `-` reaches for stdin; everything else is returned verbatim,
@@ -217,72 +173,16 @@ fn value_or_stdin_returns_a_plain_value_unchanged() {
   assert dashed == "-not-stdin"
   let assert Ok(utf8) = value_or_stdin("café — 日本 🐛", "-d")
   assert utf8 == "café — 日本 🐛"
-  // No trailing-newline trimming on this path; that belongs to stdin only.
+  // Preserve the author's trailing newline.
   let assert Ok(nl) = value_or_stdin("line\n", "-d")
   assert nl == "line\n"
 }
 
-// ------------------------------------------------------- split_issue_key
-
-#[test]
-fn split_issue_key_splits_key_and_number() {
-  let assert Ok(parsed) = split_issue_key("ENG-12")
-  let (key, number) = parsed
-  assert key == "ENG"
-  assert number == 12
-}
 
 /// The number is the LAST segment, so a team key may contain hyphens.
-#[test]
-fn split_issue_key_keeps_hyphenated_team_keys() {
-  let assert Ok(parsed) = split_issue_key("ENG-DEV-12")
-  let (key, number) = parsed
-  assert key == "ENG-DEV"
-  assert number == 12
-}
 
 /// TrimSuffix on the whole id, not a byte offset into it.
-#[test]
-fn split_issue_key_handles_multi_byte_team_keys() {
-  let assert Ok(accented) = split_issue_key("ÉNG-12")
-  let (k1, n1) = accented
-  assert k1 == "ÉNG"
-  assert n1 == 12
 
-  let assert Ok(cjk) = split_issue_key("日本-3")
-  let (k2, n2) = cjk
-  assert k2 == "日本"
-  assert n2 == 3
-
-  let assert Ok(emoji) = split_issue_key("🐛-7")
-  let (k3, n3) = emoji
-  assert k3 == "🐛"
-  assert n3 == 7
-}
-
-#[test]
-fn split_issue_key_rejects_ids_without_both_halves() {
-  let assert Err(_) = split_issue_key("ENG")
-  let assert Err(_) = split_issue_key("")
-  let assert Err(_) = split_issue_key("ENG-")
-  let assert Err(_) = split_issue_key("-12")
-}
-
-#[test]
-fn split_issue_key_rejects_a_non_numeric_tail() {
-  let assert Err(_) = split_issue_key("ENG-abc")
-  let assert Err(_) = split_issue_key("ENG-12x")
-  // Digits, but not ones strconv.Atoi accepts.
-  let assert Err(_) = split_issue_key("ENG-١٢")
-  let assert Err(_) = split_issue_key("ENG-１２")
-}
-
-#[test]
-fn split_issue_key_error_quotes_the_input_and_the_expected_shape() {
-  let assert Err(msg) = split_issue_key("héllo")
-  assert msg.contains("'héllo' is not an issue ID")
-  assert msg.contains("expected KEY-123")
-}
 
 // -------------------------------------------------- issue_create_spec
 
@@ -305,15 +205,15 @@ fn issue_create_spec_accepts_a_state() {
 /// verbs cannot drift about what a state is.
 #[test]
 fn create_and_update_share_one_state_validator() {
-  let assert Ok(ok) = check_state("in-review")
+  let assert Ok(ok) = query.state("in-review")
   assert ok == "in-review"
-  let assert Err(msg) = check_state("nope")
+  let assert Err(msg) = query.state("nope")
   assert msg.contains("unknown state 'nope'")
   // The message enumerates query.states() rather than a second hand-written
   // list, so adding a state cannot leave create behind.
   for s in query.states() {
     assert msg.contains(s)
-    let assert Ok(accepted) = check_state(s)
+    let assert Ok(accepted) = query.state(s)
     assert accepted == s
   }
 }
@@ -358,14 +258,15 @@ fn issue_create_help_flag_is_hidden_from_help_and_completions() {
 /// because this shard's file list does not include that file.
 #[test]
 fn member_create_is_an_alias_for_member_add() {
-  let add = flags.tokens(member_verb_spec("add"))
-  let create = flags.tokens(member_verb_spec("create"))
+  let add = flags.tokens(flags.command_spec(member_commands(), "add"))
+  let create = flags.tokens(flags.command_spec(member_commands(), "create"))
   assert create.equals(add)
   // add is not weakened by the alias: both carry -n. It is optional now, not
   // required - TASK-309's fleet had agents type a bare name the way `issue
   // create` takes a bare title, and the body refuses only when BOTH are
   // absent, so the flag layer must not demand -n on its own.
-  let assert Some(n) = member_verb_spec("add").find(|f| f.name == "-n")
+  let assert Some(n) = flags.command_spec(member_commands(), "add").find(|f| f.name == "-n")
+  assert n.alias == "--name"
   assert !n.required
   assert n.value
 }
@@ -399,6 +300,62 @@ fn json_quote_keeps_multi_byte_text_literal() {
   assert q == "\"café — 日本 🐛\""
 }
 
+#[test]
+fn named_priorities_round_trip_with_numeric_compatibility() {
+  for name in ["none", "urgent", "high", "medium", "low"] {
+    let assert Ok(value) = check_priority(name)
+    let assert Ok(numeric) = check_priority(f"{value}")
+    assert numeric == value
+  }
+  let assert Ok(high) = check_priority("HIGH")
+  assert high == 2
+  assert check_priority("critical").is_err()
+}
+
+#[test]
+fn issue_json_preserves_server_fields_and_exposes_empty_handoff_context() {
+  let assert Ok(out) = issue_view_json("{\"id\":\"record\",\"future\":9007199254740993,\"extra\":{\"flag\":true}}", [], None, [], [])
+  assert out.contains("\"future\":9007199254740993")
+  assert out.contains("\"extra\":{\"flag\":true}")
+  assert out.contains("\"comments\":[]")
+  assert out.contains("\"claim\":null")
+  assert out.contains("\"docs\":[]")
+  assert out.contains("\"findings\":[]")
+}
+
+#[test]
+fn issue_json_exposes_authored_comments_and_current_holder() {
+  let comments = [models.Comment { body: "handoff\nnext step", author: "alice-id", .. }]
+  let claim = models.Claim { member: "bob-id", .. }
+  let assert Ok(out) = issue_view_json("{\"id\":\"record\"}", comments, Some(claim), [models.Doc { slug: "decision", body: "why\nnext", .. }], [models.Doc { slug: "finding", area: "cli", .. }])
+  assert out.contains("\"body\":\"handoff\\nnext step\"")
+  assert out.contains("\"author\":\"alice-id\"")
+  assert out.contains("\"member\":\"bob-id\"")
+  assert out.contains("\"slug\":\"decision\"")
+  assert out.contains("\"body\":\"why\\nnext\"")
+  assert out.contains("\"slug\":\"finding\"")
+  let assert Err(_) = issue_view_json("broken", [], None, [], [])
+}
+
+#[test]
+fn issue_help_accepts_each_known_verb_before_or_after_an_identifier() {
+  for verb in issue_commands().map(|c| c.name) {
+    assert issue_help_requested(["lll", "issue", verb, "--help"], verb)
+    assert issue_help_requested(["lll", "issue", verb, "DX-1", "-h"], verb)
+  }
+  assert !issue_help_requested(["lll", "issue", "bogus", "--help"], "bogus")
+}
+
+#[test]
+fn issue_help_preserves_literal_flag_values_and_end_of_options() {
+  assert !issue_help_requested(["lll", "issue", "create", "-d", "--help"], "create")
+  assert !issue_help_requested(["lll", "issue", "update", "-d", "--help"], "update")
+  assert !issue_help_requested(["lll", "issue", "comment", "-b", "-h"], "comment")
+  assert !issue_help_requested(["lll", "issue", "create", "--description=--help"], "create")
+  assert !issue_help_requested(["lll", "issue", "create", "--", "--help"], "create")
+  assert issue_help_requested(["lll", "issue", "create", "-d", "--help", "--help"], "create")
+}
+
 // -------------------------------------------------------- issue_commands
 
 /// TASK-307: the table is what dispatch, `lll issue --help` and completions
@@ -408,8 +365,8 @@ fn json_quote_keeps_multi_byte_text_literal() {
 fn issue_commands_lists_every_verb_once_with_a_one_line_summary() {
   let cmds = issue_commands()
   assert cmds.map(|c| c.name).equals([
-    "create", "new", "list", "view", "show", "read", "update", "close", "start", "claim",
-    "release", "delete", "comment", "watch", "url", "id", "title", "pr", "link",
+    "attach", "detach", "download", "create", "new", "list", "view", "show", "read", "update", "close", "start", "claim",
+    "release", "delete", "comment", "watch", "url", "id", "title", "branch-name", "pr", "link",
     "unlink", "block", "unblock",
   ])
   for c in cmds {
@@ -430,11 +387,7 @@ fn only_issue_create_has_a_hand_written_page() {
   assert create.page.contains("The title is the bare argument or -t")
 }
 
-/// link and unlink are the two-positional verbs issue() routes around
-/// flags.dispatch (its parse admits one positional). The route keys off this
-/// exact positional shape, so nothing else may carry it by accident.
-#[test]
-fn only_link_and_unlink_take_two_positionals() {
-  let two = issue_commands().filter(|c| c.positional == "KEY-123 SLUG")
-  assert two.map(|c| c.name).equals(["link", "unlink"])
+fn issue_help_requested(args: Slice<string>, verb: string) -> bool {
+  if issue_commands().find(|c| c.name == verb).is_none() { return false }
+  flags.help_requested(issue_verb_spec(verb), args, 3)
 }

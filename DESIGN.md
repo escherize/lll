@@ -285,7 +285,10 @@ content rather than overlaying it.
 10/12/14/16px between regions, 24-28px only for page-level breathing room on
 the issue page.
 
-**Responsive (single breakpoint, 720px):** the rail disappears; the topbar
+**Responsive (single breakpoint, 720px):** a compact Navigation disclosure
+replaces the permanent rail. It opens the same links in a scrollable region;
+Escape closes it and returns focus to its button. Pages use device-width
+viewport metadata. The topbar
 wraps and the create form goes full-width; board columns become fixed 240px
 and scroll horizontally; the issue grid stacks to one column with the
 properties panel moving between title and comments (hairline top+bottom
@@ -297,6 +300,14 @@ morph boundaries; cards are `#issue-{id}`, columns `#col-{state}`, comments
 `#comment-{id}`. New surfaces must keep ids stable and semantic — Datastar
 morphs by id, and agents are first-class consumers of the markup.
 
+**ARIA values are strings.** For Datastar bindings to enumerated ARIA
+attributes (`aria-pressed`, `aria-expanded`, `aria-checked`, `aria-selected`),
+return the string value explicitly, for example
+`data-attr:aria-pressed="$fav ? 'true' : 'false'"`. A bare boolean signal
+produces a presence attribute (`aria-pressed=""`), which does not communicate
+the control's state. Boolean presence bindings remain appropriate for HTML
+attributes such as `disabled` and `hidden`.
+
 ## Elevation & Depth
 
 Depth is tonal, not shadowed. Five closely-spaced dark surfaces do the work:
@@ -305,8 +316,10 @@ hover (#1d2126), each step subtly lighter, always paired with white-alpha
 hairlines. Hover means "step one surface lighter," not "lift."
 
 ### Shadow Vocabulary
-- **Card whisper** (`box-shadow: 0 1px 2px rgba(0, 0, 0, 0.25)`): the only
-  resting shadow — under board cards, barely perceptible.
+- **Card whisper** (`--shadow-card: 0 1px 2px rgba(0, 0, 0, 0.25)`): the only
+  resting shadow, barely perceptible. Cards and their popovers use
+  `box-shadow: var(--shadow-card)`; keep this approved black-alpha value in
+  the token declaration rather than repeating color literals on components.
 - **Focus glow** (`box-shadow: 0 0 0 3px var(--accent-dim)`): input focus,
   paired with an orange border; a ring, not a shadow.
 
@@ -336,6 +349,35 @@ orange filled square with an exclamation mark for urgent. Strokes run
 **The Drawn Icon Rule.** Icons are drawn inline SVG in the shared sprite —
 never icon fonts, emoji, or third-party icon packages. New icons match the
 14px grid, ~1.5px round-capped strokes, and `currentColor`.
+
+## Code and Diagrams
+
+Code belongs to the prose surface, not a separate editor theme. Inline code
+uses the system monospace stack at 12px, a raised background, a hairline border,
+and 4px rounding. Fenced blocks use the same raised surface with the standard
+6px radius, 8px/10px padding, and horizontal scrolling; their inner code adds
+no second background or border.
+
+Syntax highlighting is monochrome. Chroma emits classes on the server; the
+`.md .chroma` rules in `web/static/theme.css` assign the existing three text
+voices. Ordinary code uses `--text-2`; comments use italic `--text-3`;
+keywords use `--text` at weight 600. Names, strings, and numbers use `--text`;
+operators and punctuation recede to `--text-3`. Do not add a language-specific
+rainbow palette. Unknown fences remain plain code, and language guessing is
+disabled. Code content remains escaped rather than interpreted as HTML.
+
+Mermaid diagrams are another reading surface. Use Mermaid's base theme with
+the existing neutral tokens: raised/hover/panel fills, `--border-strong` edges,
+`--text` labels, and `--text-3` connecting lines. Labels inherit the page font
+at 13px. Keep the token mapping in `web/static/mermaid-init.js`; do not maintain
+an unrelated diagram palette. The rendered diagram replaces its code-block
+frame, and its SVG fits the available width with automatic height.
+
+The vendored Mermaid renderer loads only when a Mermaid fence is present;
+strict security mode stays enabled. Issue/comment updates can introduce new
+fences, so rendering also handles DOM changes without rerendering existing
+diagrams. These are implementation constraints of the documented treatment,
+not a reason to add a persistent stream or a new visual language to prose.
 
 ## Components
 
@@ -400,6 +442,11 @@ never icon fonts, emoji, or third-party icon packages. New icons match the
   no toast animation — it appears, states the failure, and clears.
 
 ### Navigation
+
+Navigation rows have no section counts: totals belong to the current page
+and its filters. Favorites keep live titles and state icons on the board and
+issue pages through their own `#rail-favorites` fragment; the surrounding rail
+stays outside page morphs. Static pages update their snapshot on reload.
 - **Rail:** 220px, rail surface, 14px 10px padding. Workspace row: 18px
   orange-gradient rounded mark (5px radius, #f0883e → #c96a25 at 135deg) with
   an ember-ink 10px/800 letter, 600-weight name. Links: 13px/500 text-2 with
@@ -423,6 +470,14 @@ never icon fonts, emoji, or third-party icon packages. New icons match the
 ## Do's and Don'ts
 
 ### Do:
+
+- Use `prose-link` on inline help and empty-state anchors. It shares Markdown
+  link styling: team accent, no resting underline, underline on hover.
+
+- **Scope component classes.** Stylesheets share one global class namespace.
+  Use names such as `.issue-desc` for the issue description and `.cr-desc`
+  for a descending sort caret; a generic `.desc` once applied the description
+  block's 24px margin to an icon. Keep shared utilities explicit and intentional.
 - **Do** route every color through the `:root` custom properties in theme.css;
   the tokens are the design system, and SSE-morphed fragments must inherit them.
 - **Do** keep ids stable and semantic on any element inside a morph boundary

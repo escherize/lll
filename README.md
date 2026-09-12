@@ -145,6 +145,11 @@ whole.
 
 ## Configuration
 
+Scoped commands (`issue`, `project`, `label`, `doc`, `finding`, and `watch`)
+accept `--team KEY` for a single invocation, for example
+`lll issue list --team OPS`. This overrides `LLL_TEAM` without rewriting any
+configuration. An explicit issue identifier still targets its own team.
+
 Precedence: env vars > the repo's `.lll.toml` > `~/.config/lll/lll.toml`. The
 files **layer**: each supplies the keys it names, so a repo file carrying
 `team` alone still gets `url` and `me` from the machine's. `.lll.toml` is
@@ -164,7 +169,7 @@ file:/Users/you/.config/lll/lll.toml	url=http://127.0.0.1:8090
 file:.lll.toml	team=ENG
 unset	sort=
 file:/Users/you/.config/lll/lll.toml	me=you
-default	web_url=http://127.0.0.1:8100
+unset	web_url=
 ```
 
 A hosted instance serves the board and the API at **one address**: point `url`
@@ -181,11 +186,11 @@ Client settings, read by every `lll` command:
 
 | Env | TOML key | Meaning |
 |---|---|---|
-| `LLL_URL` | `url` | PocketBase **API** base URL (default `http://127.0.0.1:8090`; hosted, `https://your-host`, the board's address, which serves the API too) |
+| `LLL_URL` | `url` | PocketBase **API** base URL (default `http://127.0.0.1:8090`; hosted, `https://your-host`, the board's address, which serves the API too). Persist it without logging in using `lll config set url URL`. |
 | `LLL_TEAM` | `team` | Default team key; scopes `issue list`, required by `issue create` |
-| `LLL_ME` | `me` | Your member name; authors your comments and receives assignments |
-| `LLL_SORT` | `sort` | Default sort: `created`, `updated`, `priority`, `number`; `-` prefix descends |
-| `LLL_WEB_URL` | `web_url` | Web board base URL for `board`, `issue url`, `view -w`. Unset, it derives from `url`: `https://<url-host>` (the port is dropped, because the hosted board rides 443) when the url is non-local, else `http://127.0.0.1:8100` |
+| `LLL_ME` | `me` | Optional member name; must agree with your authenticated token |
+| `LLL_SORT` | `sort` | Default sort: `created`, `updated`, `priority`, `number`, `title`; `-` prefix descends |
+| `LLL_WEB_URL` | `web_url` | Web board base URL for `board`, `issue url`, `view -w`. Set it with `lll config set web_url URL` or `lll login --web-url URL`. Login discovers the board from `/.well-known/lll` when advertised; a separate API listener advertises the operator’s `LLL_WEB_URL`. Explicit settings take precedence. `lll up` saves its actual local board endpoint. |
 | `LLL_TOKEN` | `token` | PocketBase auth token sent as `Authorization: Bearer` on every request. A secret: `lll login` writes it to the home config, `lll token create` mints agent tokens; never the repo's .lll.toml |
 
 Server settings, read only by `lll up` (env only, no TOML key; on a host,
@@ -197,21 +202,41 @@ set them as secrets):
 | `LLL_BIND` | Bind address for both ports (default `127.0.0.1`; `0.0.0.0` when hosting) |
 | `LLL_BOARD_TOKEN` | Pins the web board's access token; unset, each boot mints and prints a fresh one |
 
-`lll config init` writes a commented template. On its first boot `lll up`
-guesses `me` from `$USER`, writes it to `~/.config/lll/lll.toml` and seeds a
-matching member, so assignment works immediately, with no prompt. It writes the
-home config, never the repo's, because the repo's file is committed. That
-guess is wrong on a shared machine: `lll config set me <name>` fixes it, in
-the same file.
+`lll config init` writes a commented template. When `me` is absent, `lll up`
+guesses it from `$USER`, saves it to the home config and ensures a matching
+member exists. This setup does not authenticate you as that member. A member
+token determines authorship and claims, and `me`, when set, must agree with
+it; under a superuser token, `me` supplies attribution. Check `lll whoami`
+and correct a stale value with `lll config set me NAME`. Use `lll login` to
+authenticate as a member.
 
 ## CLI tour
 
-Every command has `--help`; every read takes `--json`.
+Attach artifacts to an issue with `lll issue attach ENG-1 ./shot.png`.
+`lll issue view ENG-1` lists their stored filenames; use
+`lll issue download ENG-1 FILENAME > artifact` to retrieve exact bytes, or
+`lll issue detach ENG-1 FILENAME` to remove one. These commands also accept
+an issue's board URL. Use `lll issue attach ENG-1 -- -filename` for a
+filename that starts with a dash. After `--`, values are positional even
+when they look like flags; place options such as `--team` before it.
+
+The issue page supports upload, image preview, download and removal. Cards
+show a paperclip count without fetching images. Files use PocketBase's
+protected storage; the board access gate is required for browser downloads.
+HTML and other non-raster artifacts download as files. The attachment
+migration permits 20 files per issue, at most 20 MiB each. A server upgrade
+is required before an older deployment can accept attachments.
+
+Use `--help` for command syntax. Issue lists and views support `--json`;
+scalar reads such as `branch-name` print a single value for shell composition.
 
 ```sh
 lll issue create -t "Fix login" --priority 1 --assignee bryan --label bug
 lll issue list --state todo --sort -updated
-lll issue start ENG-12        # state -> in-progress (--branch also creates eng-12-fix-login)
+lll issue branch-name ENG-12  # print eng-12-fix-login; changes nothing
+git switch -c "$(lll issue branch-name ENG-12)"  # optional, explicit Git action
+lll issue start ENG-12        # state -> in-progress; leaves Git untouched
+lll issue start ENG-12 --branch  # opt in to branch creation/switch and work-site recording
 lll issue claim ENG-12        # take it exclusively; non-zero if someone holds it
 lll issue release ENG-12      # give it back
 lll issue view                # ID inferred from the git branch
@@ -244,6 +269,12 @@ lll completions zsh           # bash, zsh, fish
 Issue IDs resolve: explicit arg, else the current git branch
 (`eng-12-fix-login` -> `ENG-12`).
 
+`issue start` changes state without touching Git or the recorded work location.
+`issue start --branch` explicitly creates or switches to the suggested branch
+and records its branch, host, and checkout/worktree path. Running it from another
+worktree replaces the current location and leaves the previous one in a comment.
+Use `issue branch-name` when composing your own Git commands.
+
 ## Web board
 
 Server-rendered board at `/`, issue pages at `/issue/KEY-123`, search at
@@ -273,6 +304,8 @@ mise run gate      # all three -- what a change must pass before it lands
 `scripts/e2e.sh` runs an ephemeral PocketBase on a random port via `lll up`
 itself (no external binary), plus `jq` and `python3`. It never touches your
 data.
+See [browser failure probes](scripts/README.browser-failures.md) to exercise
+rejected creates and state changes through the real browser handlers.
 
 `scripts/import_sidecar.py` imported this project's former `.private` sidecar
 tracker (Backlog.md tasks + wiki/decisions/findings) into an lll instance as
@@ -291,12 +324,15 @@ stays their archive.
 Layout:
 
 - `src/`: Lisette source, `main.lis` dispatch, `commands/` one file per
-  noun, `pb/` REST client, `realtime/` SSE client, `query/` filter builder,
+  noun, `records/` shared record lookups, `pb/` REST client, `realtime/` SSE client, `query/` filter builder,
   `config/`, `display/`, `gitctx/`, `models/`.
 - `pb/`: PocketBase schema as code, `pb_migrations/`, applied on start.
 - `gopb/`: a tiny Go module embedding PocketBase behind one `Serve` function.
 - `web/`: `templates/` (html/template) and `static/` (plain CSS), compiled
   into the binary via a `//go:embed` in `web/embed.go`: edits need a rebuild.
+  Mermaid stays embedded for offline, single-file delivery and loads in the
+  browser only when a diagram appears. Packaging rationale and revisit criteria:
+  `lll doc view retain-embedded-lazy-mermaid`.
 
 ## Architecture
 
@@ -313,3 +349,14 @@ over SSE; [Datastar](https://data-star.dev) morphs them into the DOM by
 element id. `lll up` runs PocketBase in-process (see `gopb/`) and the board
 in one process; it reuses an already-running PocketBase at `LLL_URL` instead
 of starting its own.
+
+The board uses the same PocketBase REST client for application reads and writes
+even when the server is embedded. This preserves one local/remote data contract;
+the public API proxy hides the internal listener without removing that HTTP hop.
+The board acts as its process identity, not each browser visitor's identity.
+The decision, costs, and criteria for considering direct record access are in
+`lll doc view retain-pocketbase-rest-data-path` on the LLL board.
+
+A one-way, greppable Markdown projection is available with `bin/lll-export`.
+See [export mirrors](docs/export-mirror.md) for managed destinations, pagination
+and failure recovery. It does not replace a database backup.

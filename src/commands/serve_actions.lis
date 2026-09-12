@@ -1,3 +1,5 @@
+import "records"
+import "claims"
 import "go:encoding/json"
 import "go:html/template"
 import "go:net/http"
@@ -33,12 +35,21 @@ fn flashing(
     // (it caches into r.Form). Clone is the sanctioned upgrade: the copy is
     // ours to parse, and it shares the one Body stream each action reads once.
     let mut wr = r.Clone(r.Context())
-    match write(wr) {
+    let result = write(wr)
+    // Only known surfaces may choose an inline alert. The create dialog
+    // must not send its errors behind the modal shade to the page strip.
+    let target = if wr.PostFormValue("flash_target") == "ni-flash" { "ni-flash" } else { "flash" }
+    match result {
       Ok(extra) => {
-        flash_clear(w)
+        action_flash(w, target, "")
         if extra != "" { let _ = w.Write(extra.bytes()) }
       },
-      Err(e) => flash_error(w, e),
+      Err(e) => {
+        action_flash(w, target, e)
+        if wr.PostFormValue("property_edit") == "1" {
+          let _ = w.Write(property_recovery(wr.FormValue("key")).bytes())
+        }
+      },
     }
   }
 }
@@ -68,17 +79,16 @@ fn require_active_team(t: models.Team) -> Result<(), string> {
   Ok(())
 }
 
-/// Respond to a Datastar action by patching the #flash strip. Always 200
-/// with an SSE body: Datastar does not reliably process non-2xx bodies, so
-/// errors travel in-band; success clears the strip and the data itself
-/// arrives via the broadcast, same as CLI-driven changes.
-fn flash_error(w: http.ResponseWriter, msg: string) {
-  let safe = template.HTMLEscapeString(msg)
-  respond_flash(w, f"<div id=\"flash\" class=\"flash\">{safe}</div>")
-}
-
-fn flash_clear(w: http.ResponseWriter) {
-  respond_flash(w, "<div id=\"flash\" class=\"flash\" hidden></div>")
+/// One escaped alert response for the page strip and dialog-local errors.
+/// Actions use 200/SSE for both outcomes; an empty message clears the alert.
+fn action_flash(w: http.ResponseWriter, target: string, msg: string) {
+  let presented = pb.display_error(msg)
+  let safe = template.HTMLEscapeString(presented.summary)
+  let details = if presented.details == "" { "" } else {
+    f"<details class=\"error-details\"><summary>Technical details</summary><pre>{template.HTMLEscapeString(presented.details)}</pre></details>"
+  }
+  let hidden = if msg == "" { " hidden" } else { "" }
+  respond_flash(w, f"<div id=\"{target}\" class=\"flash\"{hidden} role=\"alert\" aria-atomic=\"true\"><span class=\"error-summary\">{safe}</span>{details}</div>")
 }
 
 fn respond_flash(w: http.ResponseWriter, html: string) {
@@ -105,15 +115,13 @@ fn create_write(
   // `curl -d title=...` is a complete request.
   let mut state = r.PostFormValue("state")
   if state == "" { state = "todo" }
-  if query.states().find(|s| s == state).is_none() {
-    return Err(f"unknown state '{state}'")
-  }
+  let _ = query.state(state)?
   // The board posts the team it is viewing (TASK-198); a request naming
   // none — a bare `curl -d title=...` — keeps landing in the boot team.
   let mut team = team_id
   let team_key = strings.TrimSpace(r.PostFormValue("team"))
   if team_key != "" {
-    let Some(t) = find_team(team_key)? else {
+    let Some(t) = records.find_team(team_key)? else {
       return Err(unknown_team(team_key))
     }
     // New issues do not land in an archived team (TASK-210), same refusal as
@@ -194,10 +202,8 @@ fn state_write(r: mut Ref<http.Request>) -> Result<string, string> {
   let state = r.FormValue("state")
   // Record id of the card the drop lands before; "" means end of column.
   let before = r.FormValue("before")
-  if query.states().find(|s| s == state).is_none() {
-    return Err(f"unknown state '{state}'")
-  }
-  let issue = fetch_issue(key)?
+  let _ = query.state(state)?
+  let issue = records.fetch_issue(key)?
   require_active_team(issue.expand.team)?
   // The issue's OWN team scopes the reorder (TASK-198): a drop on any
   // team's board must compute the midpoint against that team's column, not
@@ -217,7 +223,7 @@ fn reorder_sort(
 ) -> Result<float64, string> {
   // Dropping a card onto itself moves nothing.
   if before == issue.id { return Ok(issue.sort) }
-  let others = fetch_column_issues(team_id, state)?.filter(|i| i.id != issue.id)
+  let others = records.fetch_board_issues(team_id)?.filter(|i| i.state == state && i.id != issue.id)
   if others.is_empty() { return Ok(issue.sort) }
   let Some(target) = others.find(|i| i.id == before) else {
     // End of column — also the fallback when `before` went stale (moved or
@@ -234,19 +240,6 @@ fn reorder_sort(
   Ok((prev_sort + target.sort) / 2.0)
 }
 
-/// One column's issues in board order (no expands — reorder needs ids and
-/// sorts only).
-fn fetch_column_issues(
-  team_id: string,
-  state: string,
-) -> Result<Slice<models.Issue>, string> {
-  let filter = query.filter(team_id, state, "", "", "", "")
-  let path = f"/api/collections/issues/records?perPage=200&sort=sort,created&filter={url.QueryEscape(filter)}"
-  let mut issues = models.IssueList { .. }
-  pb.fetch(path, "issues", &issues)?
-  Ok(issues.items)
-}
-
 /// Star or unstar an issue for the workspace: `on=true` adds, anything else
 /// removes.
 ///
@@ -256,7 +249,7 @@ fn fetch_column_issues(
 fn favorite_write(r: mut Ref<http.Request>) -> Result<string, string> {
   let key = r.FormValue("key")
   let on = r.FormValue("on") == "true"
-  let issue = fetch_issue(key)?
+  let issue = records.fetch_issue(key)?
   let existing = fetch_favorite(issue.id)?
   if on {
     if existing.is_some() { return Ok("") }
@@ -275,7 +268,7 @@ fn priority_write(r: mut Ref<http.Request>) -> Result<string, string> {
   let Some(prio) = display.priority_value(slug) else {
     return Err(f"unknown priority '{slug}'")
   }
-  let issue = fetch_issue(key)?
+  let issue = records.fetch_issue(key)?
   require_active_team(issue.expand.team)?
   patch_issue(issue.id, PriorityPatch { priority: prio })
 }
@@ -292,7 +285,7 @@ fn emoji_write(r: mut Ref<http.Request>) -> Result<string, string> {
   let Ok(emoji) = check_emoji(r.FormValue("emoji")) else {
     return Err("an issue takes one emoji, or none")
   }
-  let issue = fetch_issue(key)?
+  let issue = records.fetch_issue(key)?
   require_active_team(issue.expand.team)?
   patch_issue(issue.id, EmojiPatch { emoji })
 }
@@ -301,7 +294,7 @@ fn title_write(r: mut Ref<http.Request>) -> Result<string, string> {
   let key = r.FormValue("key")
   let title = strings.TrimSpace(r.FormValue("title"))
   if title == "" { return Err("title is required") }
-  let issue = fetch_issue(key)?
+  let issue = records.fetch_issue(key)?
   require_active_team(issue.expand.team)?
   patch_issue(issue.id, TitlePatch { title })
 }
@@ -312,10 +305,10 @@ fn project_write(r: mut Ref<http.Request>) -> Result<string, string> {
   // The issue first: its own team is what the posted id has to belong to,
   // and a project from another team is as unknown here as a deleted one
   // (TASK-173).
-  let issue = fetch_issue(key)?
+  let issue = records.fetch_issue(key)?
   require_active_team(issue.expand.team)?
   if id != "" {
-    let projects = fetch_projects(issue.team)?
+    let projects = records.fetch_projects(issue.team)?
     if projects.find(|p| p.id == id).is_none() {
       return Err(
         f"unknown project '{id}' — reload the page for the current list",
@@ -329,16 +322,18 @@ fn assignee_write(r: mut Ref<http.Request>) -> Result<string, string> {
   let key = r.FormValue("key")
   let id = r.FormValue("assignee")
   if id != "" {
-    let members = fetch_members()?
+    let members = records.fetch_members()?
     if members.find(|m| m.id == id).is_none() {
       return Err(
         f"unknown member '{id}' — reload the page for the current list",
       )
     }
   }
-  let issue = fetch_issue(key)?
+  let issue = records.fetch_issue(key)?
   require_active_team(issue.expand.team)?
-  patch_issue(issue.id, IssueAssigneePatch { assignee: id })
+  let observed = claims.observed_id(issue.id)?
+  let _ = claims.update_assignment(issue.id, observed, marshal(IssueAssigneePatch { assignee: id })?)?
+  Ok("")
 }
 
 /// Replace the issue's whole label set from the checkbox chips. Labels is a
@@ -355,9 +350,9 @@ fn labels_write(r: mut Ref<http.Request>) -> Result<string, string> {
   // The issue first, for its team: a label from another team is as unknown
   // here as a deleted one, which is what stops a POST crossing tenancy
   // however the checkbox got its id (TASK-173).
-  let issue = fetch_issue(key)?
+  let issue = records.fetch_issue(key)?
   require_active_team(issue.expand.team)?
-  let known = fetch_labels(issue.team)?
+  let known = records.fetch_labels(issue.team)?
   // FormValue above has already parsed the body, so PostForm is populated;
   // labels is the one field that repeats (one checkbox per label).
   let ids = r.PostForm.map_or([], |form| {
@@ -375,14 +370,14 @@ fn comment_write(r: mut Ref<http.Request>) -> Result<string, string> {
   let key = r.PostFormValue("key")
   let body = strings.TrimSpace(r.PostFormValue("body"))
   if body == "" { return Err("comment body is required") }
-  let issue = fetch_issue(key)?
+  let issue = records.fetch_issue(key)?
   require_active_team(issue.expand.team)?
   // Same honor-system authorship as `lll issue comment`: the member named by
   // 'me' in config, or authorless.
   let mut author = ""
   if let Ok(cfg) = config.load() {
     if cfg.me != "" {
-      if let Ok(Some(m)) = find_member(cfg.me) { author = m.id }
+      if let Ok(Some(m)) = records.find_member(cfg.me) { author = m.id }
     }
   }
   let payload = marshal(models.NewComment { issue: issue.id, author, body })?
@@ -420,5 +415,24 @@ fn views_save(r: mut Ref<http.Request>) -> Result<string, string> {
     models.NewView { name, query: strings.TrimPrefix(query_str, "?"), .. },
   )?
   let _ = pb.post("/api/collections/views/records", payload)?
+  Ok("")
+}
+
+/// The board uses its process identity; the button names it explicitly.
+fn claim_write(r: mut Ref<http.Request>) -> Result<string, string> {
+  let issue = records.fetch_issue(r.FormValue("key"))?
+  require_active_team(issue.expand.team)?
+  let Some(member) = actor()? else { return Err("No member is configured for this board.") };
+  if r.FormValue("member_id") != member.id { return Err("The board identity changed; refresh before claiming.") }
+  let _ = claims.acquire(issue.id, member.id)?
+  Ok("")
+}
+
+fn release_write(r: mut Ref<http.Request>) -> Result<string, string> {
+  let issue = records.fetch_issue(r.FormValue("key"))?
+  require_active_team(issue.expand.team)?
+  let observed = r.FormValue("claim_id")
+  if observed == "" { return Err("The claim changed; refresh before releasing it.") }
+  let _ = claims.release(issue.id, observed)?
   Ok("")
 }

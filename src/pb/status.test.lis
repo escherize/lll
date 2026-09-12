@@ -1,0 +1,13 @@
+#[test]
+fn status_is_taken_only_from_the_response_status_field() {
+  assert response_status("POST http://127.0.0.1:40015/401: 503 Service Unavailable: previous: 400 Bad Request") == 503
+  assert response_status("PATCH https://host/500: 400 Bad Request: oldPassword required") == 400
+  assert response_status("GET http://host:40123/403: 401 Unauthorized: {}") == 401
+  assert response_status("POST http://host/400: Post http://host/400: connection refused") == 0
+  assert response_status("decoding auth: 400 malformed data") == 0
+  assert response_status("POST http://host: 4000 invalid") == 0
+  assert response_status("POST http://host: 400") == 0
+  assert response_status("POST http://host: 999 invalid") == 0
+  assert response_body("PATCH http://host/oldPassword: 400 Bad Request: invalid email: more detail") == "invalid email: more detail"
+  assert response_body("POST http://host/oldPassword: connection refused") == ""
+}

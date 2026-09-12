@@ -1,0 +1,34 @@
+import "attachments"
+import "flags"
+import "records"
+import "go:fmt"
+import "go:os"
+
+fn issue_attach(input: flags.CommandInput) -> Result<(), string> {
+  let issue = records.fetch_issue(deslug(input.parsed.first()))?
+  let path = input.parsed.nth(1)
+  let file = match os.Open(path) {
+    Ok(file) => file,
+    Err(e) => return Err(f"opening attachment: {e}"),
+  }
+  defer file.Close()
+  let data = attachments.read_upload(file)?
+  let name = attachments.upload(issue, path, data)?
+  fmt.Println(f"Attached to {issue.expand.team.key}-{issue.number}: {name}")
+  Ok(())
+}
+
+fn issue_detach(input: flags.CommandInput) -> Result<(), string> {
+  let issue = records.fetch_issue(deslug(input.parsed.first()))?
+  let name = input.parsed.nth(1)
+  attachments.remove(issue, name)?
+  fmt.Println(f"Removed attachment from {input.parsed.first()}: {name}")
+  Ok(())
+}
+
+fn issue_download(input: flags.CommandInput) -> Result<(), string> {
+  let issue = records.fetch_issue(deslug(input.parsed.first()))?
+  let data = attachments.read_file(issue, input.parsed.nth(1))?
+  let Partial.Ok(_) = os.Stdout.Write(data.bytes()) else { return Err("writing attachment to stdout failed") }
+  Ok(())
+}

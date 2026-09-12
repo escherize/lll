@@ -30,6 +30,32 @@ fn argv(rest: Slice<string>) -> Slice<string> {
 // ------------------------------------------------------------------ parse
 
 #[test]
+fn end_of_options_preserves_dash_positionals_and_disables_help_and_flags() {
+  for table in [spec(), bare_spec()] {
+    let assert Ok(p) = parse_n(table, argv(["--json", "--", "--help", "--state=done", "--", "-file"]), 3, 4, "usage")
+    assert p.given("--json")
+    assert !p.given("--help") && !p.given("--state")
+    assert p.nth(0) == "--help"
+    assert p.nth(1) == "--state=done"
+    assert p.nth(2) == "--"
+    assert p.nth(3) == "-file"
+  }
+}
+
+#[test]
+fn end_of_options_keeps_arity_required_flags_and_literal_values() {
+  let assert Ok(p) = parse(spec(), argv(["-d", "--", "--json", "--", "--help"]), 3, true, "usage")
+  assert p.one("-d") == "--" && p.given("--json")
+  assert p.first() == "--help"
+  assert parse(spec(), argv(["--"]), 3, false, "usage").is_ok()
+  let assert Err(extra) = parse(spec(), argv(["--", "--json"]), 3, false, "usage")
+  assert extra == "unexpected argument: '--json'"
+  assert parse(spec(), argv(["one", "--", "two"]), 3, true, "usage").is_err()
+  let required = [Flag { name: "--name", value: true, required: true, .. }]
+  assert parse(required, argv(["--", "--name"]), 3, true, "usage").is_err()
+}
+
+#[test]
 fn parse_collects_values_and_booleans() {
   let assert Ok(p) = parse(spec(), argv(["--json", "-t", "hi"]), 3, false, "")
   assert p.given("--json")
@@ -122,7 +148,7 @@ fn parse_rejects_positionals_when_disallowed() {
   let assert Err(msg) = parse(spec(), argv(["stray"]), 3, false, "usage line")
   // The flag table rides along (fleet task 8): the usage line alone was
   // the message agents rated least helpful.
-  assert msg.starts_with("unknown flag: 'stray'\nusage: usage line\nFlags:")
+  assert msg.starts_with("unexpected argument: 'stray'\nusage: usage line\nFlags:")
 }
 
 #[test]
@@ -316,10 +342,46 @@ fn help_for_a_verb_with_no_flags_says_so_instead_of_printing_nothing() {
 #[test]
 fn a_help_spelling_inside_a_value_is_not_a_help_request() {
   // `--state -h` means the state is literally "-h": odd, but it is a VALUE,
-  // and treating it as help would refuse a legitimate parse. The scan is
-  // deliberately over the raw args, so this documents the edge it accepts.
-  let assert Err(msg) = parse(bare_spec(), argv(["--state", "-h"]), 3, false, "u")
-  assert msg.starts_with(help_marker())
+  // and treating it as help would refuse a legitimate parse.
+  let assert Ok(parsed) = parse(bare_spec(), argv(["--state", "-h"]), 3, false, "u")
+  assert parsed.one("--state") == "-h"
+}
+
+#[test]
+fn implicit_help_does_not_consume_a_literal_flag_value() {
+  let assert Ok(parsed) = parse(spec(), argv(["-t", "--help"]), 3, false, "test")
+  assert parsed.one("-t") == "--help"
+  let assert Ok(short) = parse(spec(), argv(["-t", "-h"]), 3, false, "test")
+  assert short.one("-t") == "-h"
+}
+
+#[test]
+fn unsupported_team_flag_supplies_the_requested_environment_override() {
+  let assert Err(separate) = parse([], argv(["--team", "OPS2"]), 3, false, "lll project list")
+  assert separate.contains("LLL_TEAM=OPS2")
+  assert separate.contains("saved attachment unchanged")
+  let assert Err(inline) = parse([], argv(["--team=OPS2"]), 3, false, "lll label list")
+  assert inline.contains("LLL_TEAM=OPS2")
+  let assert Err(quoted) = parse([], argv(["--team", "owner's team"]), 3, false, "test")
+  assert quoted.contains("LLL_TEAM='owner'\\''s team'")
+}
+
+#[test]
+fn team_extraction_preserves_literal_values_and_accepts_both_spellings() {
+  let input = ["lll", "issue", "create", "-t", "--team", "-d", "--team=literal", "--team", "DX", "--team=OPS"]
+  let assert Ok((cleaned, team)) = extract_team(input, 3, with_team(spec()))
+  assert team == Some("OPS")
+  assert cleaned.equals(["lll", "issue", "create", "-t", "--team", "-d", "--team=literal"])
+  let assert Ok((ended, absent)) = extract_team(["lll", "issue", "create", "--", "--team", "DX"], 3, with_team(spec()))
+  assert absent.is_none()
+  assert ended.equals(["lll", "issue", "create", "--", "--team", "DX"])
+}
+
+#[test]
+fn team_extraction_rejects_missing_or_empty_keys() {
+  assert extract_team(argv(["--team"]), 3, []).is_err()
+  assert extract_team(argv(["--team="]), 3, []).is_err()
+  assert extract_team(argv(["--team", " "]), 3, []).is_err()
 }
 
 // TASK-309, fleet run 4: ten of thirty agents typed `lll issue comment DEMO-1
@@ -339,4 +401,48 @@ fn parse_n_keeps_two_positionals_in_order_around_a_flag() {
   // Absent second positional reads as empty, not as an error.
   let assert Ok(q) = parse_n(spec(), argv(["DEMO-1"]), 3, 2, "")
   assert q.nth(1) == ""
+}
+
+#[test]
+fn dispatch_preserves_help_as_an_alias_value_and_stops_real_help() {
+  let commands = [Command {
+    name: "create", summary: "create", page: "create help",
+    spec: [Flag { name: "-b", alias: "--body -m --message", value: true, .. }],
+    positional: "", run: |input| {
+      if input.parsed.one("-b") != "--help" { return Err("wrong body") }
+      Ok(())
+    },
+  }]
+  for alias in ["-b", "--body", "-m", "--message"] {
+    assert dispatch("doc", "", "", commands, ["lll", "doc", "create", alias, "--help"]).is_ok()
+    let assert Err(help) = dispatch("doc", "", "", commands, ["lll", "doc", "create", alias, "--help", "-h"])
+    assert help == help_marker() + "create help"
+  }
+}
+
+#[test]
+fn team_extraction_preserves_values_of_every_alias() {
+  let spec = [Flag { name: "-b", alias: "--body -m --message", value: true, .. }]
+  for alias in ["-b", "--body", "-m", "--message"] {
+    let assert Ok((args, team)) = extract_team(["lll", "doc", "create", alias, "--team", "--team", "LLL"], 3, spec)
+    assert args.equals(["lll", "doc", "create", alias, "--team"])
+    assert team == Some("LLL")
+  }
+}
+
+#[test]
+fn dispatch_hands_over_unicode_and_empty_positionals_without_reinterpreting_them() {
+  let commands = [Command {
+    name: "set", summary: "set", page: "", spec: [], positional: "KEY VALUE",
+    run: |input| {
+      if input.parsed.positional_count() != 2 { return Err("missing positional") }
+      if input.parsed.first() != "ÉNG-12" || input.parsed.nth(1) != "" { return Err("changed positional") }
+      Ok(())
+    },
+  }]
+  assert dispatch("test", "", "", commands, ["lll", "test", "set", "ÉNG-12", ""]).is_ok()
+  let assert Err(extra) = dispatch("test", "", "", commands, ["lll", "test", "set", "ÉNG-12", "", "extra"])
+  assert extra.contains("unexpected argument: 'extra'")
+  let assert Err(flag) = dispatch("test", "", "", commands, ["lll", "test", "set", "--unknown"])
+  assert flag.contains("unknown flag: '--unknown'")
 }

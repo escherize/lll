@@ -20,7 +20,21 @@
 # SSE morphs, positional drops disabled off-manual).
 # Standalone (boots its own PB), also invoked by e2e.sh.
 set -euo pipefail
-. "$(dirname "$0")/lib.sh"   # free_port, wait_ok, fail, assert_*, e2e_begin/end
+# A Linux/release artifact can exercise exactly this suite without Lisette.
+LIN=""
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --prebuilt)
+      [ "$#" -ge 2 ] && [ -x "$2" ] || { echo "--prebuilt requires an executable" >&2; exit 2; }
+      LIN=$(python3 -c 'import os,sys; print(os.path.abspath(sys.argv[1]))' "$2")
+      shift 2 ;;
+    --require-browser)
+      command -v playwright-cli >/dev/null || { echo "browser verification requires playwright-cli" >&2; exit 1; }
+      shift ;;
+    *) echo "usage: bash scripts/e2e_web.sh [--prebuilt BINARY] [--require-browser]" >&2; exit 2 ;;
+  esac
+done
+. "$(dirname "$0")/lib.sh"   # Resolve user paths before this changes directory.
 e2e_begin
 
 PB_PORT=$(free_port 20000 39999)
@@ -40,15 +54,20 @@ BOARD_COOKIE="Cookie: lll_board=$BOARD_TOKEN"
 # -L: the bare board/issue/search paths 303 to their team-routed twins
 # (/t/ENG/..., TASK-198); every authenticated fetch follows the hop. The
 # redirect itself is asserted in the TASK-198 section below.
-wcurl() { curl -L -H "$BOARD_COOKIE" "$@"; }
+WCURL=(curl -L -H "$BOARD_COOKIE")
+wcurl() { "${WCURL[@]}" "$@"; }
+# Background streams launch WCURL directly: a trapped shell-function wrapper
+# can outlive its tracked PID as an orphan curl, corrupting reused log files.
 PB_LOG="$DATA_DIR/pb.log"
-SERVE_LOG="$DATA_DIR/serve.log"
-E2E_LOGS="$SERVE_LOG $PB_LOG"
-BROWSER_SESSION="e2e-web-$$"
+E2E_LOGS="$PB_LOG"
+BROWSER_SESSION=$(python3 scripts/browser_session.py)
 
 # PocketBase is embedded in lll; one `lll up` is both the database and the
 # board this suite exercises. Built here because it has to exist first.
-lis build >/dev/null
+if [ -z "$LIN" ]; then
+  lis build >/dev/null
+  LIN="$PWD/target/.lisette/bin/lll"
+fi
 
 # TASK-227 (the half of TASK-187 this suite never got): pin HOME for the rest
 # of the run, AFTER lis build so the lis/go/mise caches under the real HOME
@@ -58,16 +77,14 @@ lis build >/dev/null
 # accepted as anon; TASK-309 made it a refusal and this suite died at its
 # first comment, naming the developer's own identity.
 e2e_pin_home
-LIN=target/.lisette/bin/lll
 
 # USER is pinned: a first boot seeds a member named after it (task-31), and
 # the board assertions must not depend on who runs this suite. HOME is pinned
 # because that first boot WRITES 'me' to the home config now (TASK-168).
-env -u LLL_TOKEN LLL_BOARD_TOKEN="$BOARD_TOKEN" USER=e2e HOME="$E2E_HOME" "$LIN" up --no-open \
+env -u LLL_TOKEN LLL_WEB_URL="$WEB" LLL_BOARD_TOKEN="$BOARD_TOKEN" USER=e2e HOME="$E2E_HOME" "$LIN" up --no-open \
   --pb-dir "$DATA_DIR/pb_data" --port "$WEB_PORT" \
   </dev/null >"$PB_LOG" 2>&1 &
 PB_PID=$!
-SERVE_PID=""
 CURL_PID=""
 cleanup() { # exit-status
   # Diagnose first: e2e_diagnose reads the logs, and e2e_end deletes the
@@ -77,7 +94,7 @@ cleanup() { # exit-status
   if command -v playwright-cli >/dev/null 2>&1; then
     playwright-cli -s="$BROWSER_SESSION" close >/dev/null 2>&1 || true
   fi
-  e2e_reap $CURL_PID $SERVE_PID $PB_PID
+  e2e_reap "$CURL_PID" "${PANEL_PID:-}" "${OPS_SSE_PID:-}" "${ENG_SSE_PID:-}" "$PB_PID"
   e2e_end
 }
 e2e_trap_cleanup cleanup
@@ -95,6 +112,10 @@ except IndexError:
 ' "$2"
 }
 
+# A free-port probe releases its socket before startup. If another listener
+# wins that race, up can relocate the board; a 200 from the planned URL then
+# proves nothing about our process. Verify its post-bind announcement first.
+python3 scripts/board_startup.py "$PB_LOG" "$WEB"
 wait_ok "$LLL_URL/api/health" || fail "PocketBase did not start"
 
 # --- TASK-181: the suite rides a member token --------------------------------
@@ -119,6 +140,8 @@ WEB_TOKEN=$(pb_member_token "$LLL_URL" e2e e2e@members.invalid web-e2e-pass-123)
 [ -n "$WEB_TOKEN" ] && [ "$WEB_TOKEN" != "null" ] || fail "pb_member_token returned no token"
 export LLL_TOKEN="$WEB_TOKEN"
 AUTH_HDR="Authorization: Bearer $WEB_TOKEN"
+
+python3 scripts/test_login_discovery.py "$LIN" "$LLL_URL" "$WEB"
 
 curl -sf -H "$AUTH_HDR" -X POST "$LLL_URL/api/collections/teams/records" \
   -H 'Content-Type: application/json' \
@@ -165,6 +188,15 @@ login_hdrs=$(curl -si "$WEB/?board_token=$BOARD_TOKEN")
 assert_contains "$login_hdrs" "Set-Cookie: lll_board=$BOARD_TOKEN" \
   "query-param login sets the board cookie"
 assert_not_contains "$login_hdrs" "board_token=$BOARD_TOKEN" "redirect URL drops the token"
+
+# Reopening a handoff with a current cookie must still clean the URL. An
+# obsolete query token also gets removed when the cookie admits the browser.
+for query_token in "$BOARD_TOKEN" OBSOLETE_TOKEN; do
+  repeat_login=$(curl -s -o /dev/null -w '%{http_code} %{redirect_url}' \
+    -H "$BOARD_COOKIE" "$WEB/t/ENG/?board_token=$query_token&order=priority")
+  [ "$repeat_login" = "303 $WEB/t/ENG/?order=priority" ] \
+    || fail "authenticated handoff did not strip token and preserve order"
+done
 
 # TASK-202: a stale cookie must not veto a valid ?board_token= (and the valid
 # link refreshes the cookie); a stale cookie alone stays refused.
@@ -570,7 +602,7 @@ fi
 wcurl -s -o /dev/null -X POST --data-urlencode "key=ENG-3" "$WEB/labels"
 PICKER_EXTRA=$(curl -sf -H "$AUTH_HDR" "$LLL_URL/api/collections/labels/records?perPage=200" \
   | jq -r '.items[] | select(.name=="Picker-Extra") | .id')
-wcurl -sf -X POST "$WEB/settings/label?del=1" -d "id=$PICKER_EXTRA" >/dev/null
+wcurl -sf -X POST "$WEB/settings/label?del=1" -d "id=$PICKER_EXTRA" -d confirmed=1 -d expected=0 >/dev/null
 
 # --- related findings on the issue page (TASK-103): unprompted, server-
 # rendered with the page. A finding whose area names a label the issue
@@ -614,16 +646,16 @@ assert_contains "$out" "unknown label" "unknown label message"
 # been repainted by the response — and the issue-scope SSE frame is what
 # carries the new value to the open page.
 PANEL_EVENTS="$DATA_DIR/events-panel.txt"
-wcurl -sN "$WEB/events?page=issue&key=ENG-3" >"$PANEL_EVENTS" &
+"${WCURL[@]}" -sN "$WEB/events?page=issue&key=ENG-3" >"$PANEL_EVENTS" &
 PANEL_PID=$!
 sleep 0.5
 wcurl -s -o /dev/null -X POST --data-urlencode "key=ENG-3" \
   --data-urlencode "project=$PANEL_PROJECT" "$WEB/project"
 for _ in $(seq 1 50); do
-  grep -q 'id="project-form"' "$PANEL_EVENTS" 2>/dev/null && break
+  grep -q "value=\"$PANEL_PROJECT\" selected" "$PANEL_EVENTS" 2>/dev/null && break
   sleep 0.1
 done
-kill $PANEL_PID 2>/dev/null || true
+e2e_reap "$PANEL_PID"
 PANEL_PID=""
 panel_events=$(cat "$PANEL_EVENTS")
 assert_contains "$panel_events" 'id="issue-detail"' "issue broadcast morphs #issue-detail"
@@ -680,7 +712,7 @@ assert_contains "$out" "LLL_TEAM=ENG" "refusal suggests the existing team"
 
 # --- /events: board scope gets a patch frame after a CLI-driven update ---
 EVENTS_FILE="$DATA_DIR/events.txt"
-wcurl -sN "$WEB/events?page=board" >"$EVENTS_FILE" &
+"${WCURL[@]}" -sN "$WEB/events?page=board" >"$EVENTS_FILE" &
 CURL_PID=$!
 sleep 0.5
 "$LIN" issue update ENG-1 --state done >/dev/null
@@ -688,7 +720,8 @@ for _ in $(seq 1 50); do
   grep -q "datastar-patch-elements" "$EVENTS_FILE" 2>/dev/null && break
   sleep 0.1
 done
-kill $CURL_PID 2>/dev/null || true
+e2e_reap "$CURL_PID"
+CURL_PID=""
 events=$(cat "$EVENTS_FILE")
 assert_contains "$events" "event: datastar-patch-elements" "SSE patch frame emitted"
 assert_contains "$events" 'data: elements <main id="board"' "patch morphs #board"
@@ -698,7 +731,7 @@ assert_contains "$events" 'id="col-done"' "patch contains the target column"
 assert_not_contains "$events" 'id="rail"' "broadcast fragments carry no shell"
 
 # --- /events: issue scope gets comments patch after a CLI comment ---
-wcurl -sN "$WEB/events?page=issue&key=ENG-1" >"$EVENTS_FILE" &
+"${WCURL[@]}" -sN "$WEB/events?page=issue&key=ENG-1" >"$EVENTS_FILE" &
 CURL_PID=$!
 sleep 0.5
 "$LIN" issue comment ENG-1 -b "live comment over sse" >/dev/null
@@ -706,7 +739,7 @@ for _ in $(seq 1 50); do
   grep -q "live comment over sse" "$EVENTS_FILE" 2>/dev/null && break
   sleep 0.1
 done
-kill $CURL_PID 2>/dev/null || true
+e2e_reap "$CURL_PID"
 CURL_PID=""
 events=$(cat "$EVENTS_FILE")
 assert_contains "$events" "event: datastar-patch-elements" "issue-scope patch frame emitted"
@@ -726,6 +759,12 @@ issue_id() { # title
 "$LIN" issue create -t "Order A" >/dev/null # ENG-4
 "$LIN" issue create -t "Order B" >/dev/null # ENG-5
 "$LIN" issue create -t "Order C" >/dev/null # ENG-6
+# Render order alone also passes when every sort ties at zero. Inspect the
+# stored defaults so removing the hook cannot leave this assertion green.
+"$LIN" issue list --json | jq -e '
+  [.items[] | select(.number >= 4 and .number <= 6)] | sort_by(.number) |
+  length == 3 and (.[0].sort < .[1].sort) and (.[1].sort < .[2].sort)
+' >/dev/null || fail "new issues must receive strictly increasing stored sort values"
 board=$(wcurl -sf "$WEB/")
 got=$(col_order "$board" todo)
 [ "$got" = "ENG-4,ENG-5,ENG-6" ] || fail "new issues in creation order: got '$got'"
@@ -821,7 +860,7 @@ got=$(col_order "$bad" todo)
 
 # The SSE morph respects the connected client's order: a client whose /events
 # URL asked for priority receives a #board fragment already in priority order.
-wcurl -sN "$WEB/events?page=board&team=ENG&order=priority" >"$EVENTS_FILE" &
+"${WCURL[@]}" -sN "$WEB/events?page=board&team=ENG&order=priority" >"$EVENTS_FILE" &
 CURL_PID=$!
 sleep 0.5
 "$LIN" issue update ENG-2 --title "Already in progress (renamed)" >/dev/null
@@ -829,11 +868,9 @@ for _ in $(seq 1 50); do
   grep -q "datastar-patch-elements" "$EVENTS_FILE" 2>/dev/null && break
   sleep 0.1
 done
-kill $CURL_PID 2>/dev/null || true
+e2e_reap "$CURL_PID"
 CURL_PID=""
-# tr strips the stray NUL a killed curl can leave mid-frame, which bash's
-# command substitution would otherwise warn about.
-got=$(col_order "$(tr -d '\0' <"$EVENTS_FILE")" todo)
+got=$(col_order "$(cat "$EVENTS_FILE")" todo)
 [ "$got" = "ENG-4,ENG-6,ENG-5,ENG-2" ] \
   || fail "priority-scoped SSE morph not in priority order: got '$got'"
 
@@ -856,18 +893,58 @@ if command -v playwright-cli >/dev/null 2>&1; then
       | sed -n '/### Result/{n;p;}' | tr -d '\\'
   }
   page_until() { # js needle -> the last result seen, after up to 10s of polling
-    local out=""
-    for _ in $(seq 1 40); do
-      out=$(page_state "$1")
-      case "$out" in *"$2"*) break ;; esac
-      sleep 0.25
-    done
-    printf '%s' "$out"
+    python3 scripts/browser_poll.py "$BROWSER_SESSION" "$1" "$2"
   }
   # The gate: the browser logs in through the banner's handoff URL once —
   # the 303 sets the cookie — and every later navigation rides it.
   playwright-cli -s="$BROWSER_SESSION" open "$WEB/?board_token=$BOARD_TOKEN" >/dev/null 2>&1 \
     || fail "playwright: opening board"
+  tab_titles=$(playwright-cli -s="$BROWSER_SESSION" run-code "async page => {
+    for (const [path, title] of [
+      ['/', 'lll - ENG board'],
+      ['/?assignee=e2e', 'lll - ENG my issues'],
+      ['/issue/ENG-1', 'lll - ENG-1'],
+      ['/issues', 'lll - ENG all issues'],
+      ['/projects', 'lll - ENG projects'],
+      ['/settings', 'lll - ENG settings'],
+      ['/search', 'lll - ENG search'],
+      ['/search?q=auth', 'lll - ENG search \\\"auth\\\"']
+    ]) {
+      await page.goto('$WEB' + path);
+      const actual = await page.title();
+      if (actual !== title) throw new Error(path + ': title ' + actual + ', expected ' + title);
+    }
+    await page.evaluate(() => localStorage.clear());
+    await page.goto('$WEB/');
+    return 'tab titles verified';
+  }" 2>/dev/null) || fail "playwright: page titles"
+  assert_contains "$tab_titles" 'tab titles verified' "page tabs identify the app and their team"
+  title_sort=$(playwright-cli -s="$BROWSER_SESSION" run-code "$(cat scripts/browser_issue_sort.js)" 2>&1)
+  assert_contains "$title_sort" 'title header sorting verified' "browser: title sorting in both directions"
+  playwright-cli -s="$BROWSER_SESSION" goto "$WEB/" >/dev/null 2>&1 || fail "playwright: return to board after title sort"
+  # Shared navigation must remain reachable on a phone, including keyboard close.
+  mobile_nav=$(playwright-cli -s="$BROWSER_SESSION" run-code 'async page => {
+    await page.setViewportSize({width:390,height:844});
+    const toggle = page.getByRole("button", {name:"Navigation",exact:true});
+    if (await page.locator("meta[name=viewport]").getAttribute("content") !== "width=device-width, initial-scale=1") throw new Error("missing device viewport");
+    if (await page.locator("#rail").isVisible()) throw new Error("mobile navigation starts open");
+    await toggle.click();
+    await page.locator("#rail").waitFor({state:"visible"});
+    await page.locator("#rail").getByRole("link", {name:"Projects",exact:true}).click();
+    await page.waitForURL("**/projects");
+    await toggle.click();
+    await page.locator("#rail").getByRole("link", {name:"Settings",exact:true}).focus();
+    await page.keyboard.press("Escape");
+    await page.locator("#rail").waitFor({state:"hidden"});
+    if (await toggle.getAttribute("aria-expanded") !== "false" || !await toggle.evaluate(el => el === document.activeElement)) throw new Error("navigation close focus");
+    await toggle.click();
+    await page.locator("#rail").getByRole("link", {name:"Board",exact:true}).click();
+    await page.setViewportSize({width:1440,height:900});
+    await page.locator("#rail").waitFor({state:"visible"});
+    if (await toggle.isVisible()) throw new Error("mobile toggle visible on desktop");
+    return "phone navigation passed";
+  }' 2>&1)
+  assert_contains "$mobile_nav" 'phone navigation passed' "browser: phone navigation"
   # The probe marks the live rail node: a morph that replaced or re-rendered
   # the rail would take the attribute with it (task-81).
   before=$(playwright-cli -s="$BROWSER_SESSION" eval \
@@ -981,6 +1058,8 @@ if command -v playwright-cli >/dev/null 2>&1; then
   assert_contains "$cleared" '"field":""' "browser: the X empties the field"
   assert_contains "$cleared" '"rows":0' "browser: the X clears the results"
   assert_contains "$cleared" "Searches every issue in the team" "browser: the X returns the empty state"
+  search_ordering=$(playwright-cli -s="$BROWSER_SESSION" run-code "$(cat scripts/browser_search.js)" 2>&1)
+  assert_contains "$search_ordering" 'search ordering and titles verified' "browser: search cancellation and live titles"
   # --- task-94: the save-view affordance in a real browser -----------------
   # Reveal the form, name the view, submit: the rail gains the view without
   # a reload (the SSE patch does the pinning), and clicking the view
@@ -1014,20 +1093,15 @@ if command -v playwright-cli >/dev/null 2>&1; then
   # clearing title and description, keeping the scoping fields. The board
   # repaint is the existing broadcast: navs stays 1 throughout.
   seq_goto "$WEB/"
-  more_js="() => JSON.stringify({open: getComputedStyle(document.querySelector('.ni-shade')).display !== 'none', title: document.getElementById('ni-title').value, desc: document.getElementById('ni-desc').value, focused: document.activeElement === document.getElementById('ni-title'), more: document.getElementById('ni-more').checked, assignee: document.querySelector('#ni-form select[name=assignee]').value, one: [...document.querySelectorAll('.card .title')].some(e => e.textContent === 'Create more one'), two: [...document.querySelectorAll('.card .title')].some(e => e.textContent === 'Create more two'), off: [...document.querySelectorAll('.card .title')].some(e => e.textContent === 'Create more off'), navs: performance.getEntriesByType('navigation').length, flash: document.getElementById('flash').textContent})"
+  more_js="() => JSON.stringify({open: getComputedStyle(document.querySelector('.ni-shade')).display !== 'none', title: document.getElementById('ni-title').value, desc: document.getElementById('ni-desc').value, focused: document.activeElement === document.getElementById('ni-title'), more: document.getElementById('ni-more').checked, assignee: document.querySelector('#ni-form select[name=assignee]').value, one: [...document.querySelectorAll('.card .title')].some(e => e.textContent === 'Create more one'), two: [...document.querySelectorAll('.card .title')].some(e => e.textContent === 'Create more two'), off: [...document.querySelectorAll('.card .title')].some(e => e.textContent === 'Create more off'), navs: performance.getEntriesByType('navigation').length, flash: document.getElementById('ni-flash').textContent})"
   # A submit click can be swallowed while the page is still settling after
   # the last-view restore redirect (seen under e2e load: playwright reports
   # the click, the button's handler never runs, the POST is never sent).
   # Click again until the probe shows the POST went through --- an extra
   # click is harmless, an empty title just refocuses the field.
   ni_submit() { # needle --- click create until the probe matches
-    local out=""
-    for _ in 1 2 3 4; do
-      playwright-cli -s="$BROWSER_SESSION" click "#ni-create" >/dev/null 2>&1 || true
-      out=$(page_until "$more_js" "$1")
-      case "$out" in *"$1"*) break ;; esac
-    done
-    printf '%s' "$out"
+    python3 scripts/browser_poll.py "$BROWSER_SESSION" "$more_js" "$1" \
+      --click '#ni-create' --timeout 40
   }
   playwright-cli -s="$BROWSER_SESSION" click "#ni-expand" >/dev/null 2>&1 \
     || fail "playwright: opening the create dialog"
@@ -1039,7 +1113,7 @@ if command -v playwright-cli >/dev/null 2>&1; then
     | sed -n '/### Result/{n;p;}' | tr -d '\\' | tr -d '"')
   playwright-cli -s="$BROWSER_SESSION" fill "#ni-title" "Create more one" >/dev/null 2>&1 \
     || fail "playwright: typing the first Create-more title"
-  first=$(ni_submit '"one":true,"navs":1')
+  first=$(ni_submit '"one":true')
   assert_contains "$first" '"open":true' "task-159: submitting with Create more keeps the dialog open"
   assert_contains "$first" '"title":""' "task-159: the title is cleared for the next issue"
   assert_contains "$first" '"desc":""' "task-159: the description is cleared for the next issue"
@@ -1078,10 +1152,16 @@ if command -v playwright-cli >/dev/null 2>&1; then
     "() => { const h = document.createElement('input'); h.type = 'hidden'; h.name = 'state'; h.value = 'bogus'; document.getElementById('ni-form').prepend(h); return 'ok' }" >/dev/null 2>&1
   playwright-cli -s="$BROWSER_SESSION" fill "#ni-title" "Create more doomed" >/dev/null 2>&1 \
     || fail "playwright: typing the doomed title"
+  playwright-cli -s="$BROWSER_SESSION" fill "#ni-desc" "Repro details stay here — unsaved" >/dev/null 2>&1 \
+    || fail "playwright: typing the rejected create description"
   rejected=$(ni_submit 'unknown state')
   assert_contains "$rejected" '"title":"Create more doomed"' "task-159: a failed create keeps the typed title"
   assert_contains "$rejected" '"open":true' "task-159: a failed create keeps the dialog open"
   assert_contains "$rejected" '"focused":true' "task-159: a failed create returns focus to the title"
+  assert_contains "$rejected" '"desc":"Repro details stay here — unsaved"' "failed create keeps the typed description"
+  playwright-cli -s="$BROWSER_SESSION" run-code "async page => { await page.screenshot({path: '/tmp/lll-131-create.png'}); }" >/dev/null 2>&1
+  create_failure=$(playwright-cli -s="$BROWSER_SESSION" run-code "$(cat scripts/browser_create_failure.js)" 2>&1)
+  assert_contains "$create_failure" 'create error readable inside dialog; keyboard retry and fresh-open clearing passed' "browser: create failure stays accessible inside dialog"
   "$LIN" issue list | grep -q "Create more doomed" \
     && fail "task-159: a failed Create-more submit wrote a record" || true
 
@@ -1106,8 +1186,75 @@ if command -v playwright-cli >/dev/null 2>&1; then
       "task-206: props controls stay inside the panel at ${w}px"
   done
   playwright-cli -s="$BROWSER_SESSION" resize 1280 800 >/dev/null 2>&1
+  # LLL-131: submit a real browser state change that the server rejects.
+  state_before=$("$LIN" issue view "$key206" --json | jq -r '.state')
+  state_failure=$(playwright-cli -s="$BROWSER_SESSION" run-code "$(cat scripts/browser_state_failure.js)" 2>&1)
+  assert_contains "$state_failure" 'state failure shown in browser and stored state unchanged' "browser: failed state action shows server flash and preserves persisted state"
+  printf '%s\n' "$state_failure" > /tmp/lll-131-state-result.log
+  [ "$("$LIN" issue view "$key206" --json | jq -r '.state')" = "$state_before" ] \
+    || fail "browser rejected state action changed persisted state"
   # The probe issue would skew the count-sensitive table sections below.
   "$LIN" issue delete "$key206" --force >/dev/null
+
+  "$LIN" team create -k ASGN -n "Assignment browser" >/dev/null
+  "$LIN" issue create --team ASGN -t "Claimed assignment browser" >/dev/null
+  "$LIN" issue claim ASGN-1 >/dev/null
+  assignment_browser=$(playwright-cli -s="$BROWSER_SESSION" run-code "$(cat scripts/browser_assignment.js)" 2>&1)
+  assert_not_contains "$assignment_browser" "### Error" "assignment browser errors"
+  assert_contains "$assignment_browser" "Assignment browser passed:" "assignment browser result"
+  "$LIN" issue view ASGN-1 --json | python3 -c 'import json,sys; row=json.load(sys.stdin); assert row["claim"] is None and row["assignee"] == ""'
+
+
+  # LLL-101: save/reorder one row while other rows have unsaved drafts.
+  for suffix in A B; do
+    "$LIN" label create -n "Draft label $suffix" >/dev/null
+    "$LIN" member add -n "Draft member $suffix" >/dev/null
+    "$LIN" project create -n "Draft project $suffix" >/dev/null
+  done
+  seq_goto "$WEB/settings"
+  drafts_browser=$(playwright-cli -s="$BROWSER_SESSION" run-code "$(cat scripts/browser_settings_drafts.js)" 2>&1)
+  assert_contains "$drafts_browser" 'settings drafts survive reordered label, member and project saves' "browser: settings row drafts survive saves and reordering"
+  for prefix in "Z saved" "Unsaved"; do
+    suffix=A
+    [ "$prefix" = "Unsaved" ] && suffix=B
+    "$LIN" label delete "$prefix label $suffix" >/dev/null
+    "$LIN" member remove "$prefix member $suffix" >/dev/null
+    "$LIN" project delete "$prefix project $suffix" >/dev/null
+  done
+
+  # LLL-233: exercise the actual row morph, cancellation and confirmation.
+  "$LIN" project create -n "Deletion browser project" >/dev/null
+  "$LIN" member add -n "Deletion browser member" >/dev/null
+  DELETE_PROBE=$("$LIN" issue create -t "Deletion browser issue" --project "Deletion browser project" --assignee "Deletion browser member" --json)
+  DELETE_KEY=$(printf '%s' "$DELETE_PROBE" | jq -r '.expand.team.key + "-" + (.number | tostring)')
+  seq_goto "$WEB/settings"
+  deletion_browser=$(playwright-cli -s="$BROWSER_SESSION" run-code "$(cat scripts/browser_settings_delete.js)" 2>&1)
+  assert_contains "$deletion_browser" 'settings deletion browser passed' "browser: settings deletion review and cancellation"
+  "$LIN" issue view "$DELETE_KEY" --json | jq -e '.project == "" and .assignee == ""' >/dev/null \
+    || fail "browser deletion should preserve issue and clear project and assignee"
+  "$LIN" issue delete "$DELETE_KEY" --force >/dev/null
+
+  # LLL-94: title and state changes refresh favorites on both realtime pages.
+  FAV_PROBE=$("$LIN" issue create -t "Favorite live original" --json)
+  FAV_KEY=$(printf '%s' "$FAV_PROBE" | jq -r '.expand.team.key + "-" + (.number | tostring)')
+  wcurl -sf -X POST "$WEB/favorite?key=$FAV_KEY&on=true" >/dev/null
+  fav_js="() => { const a = document.querySelector('#rail-favorites a[href=\"/issue/$FAV_KEY\"]'); return JSON.stringify({title: a?.querySelector('.rg-title')?.textContent || '', state: a?.querySelector('use')?.getAttribute('href') || '', rail: document.getElementById('rail').dataset.probe, navs: performance.getEntriesByType('navigation').length}); }"
+  for fav_page in "$WEB/" "$WEB/issue/$FAV_KEY"; do
+    if [ "$fav_page" = "$WEB/" ]; then fav_kind=board; fav_state=done; else fav_kind=issue; fav_state=in-progress; fi
+    fav_ready=$(playwright-cli -s="$BROWSER_SESSION" run-code "async page => { const ready = page.waitForResponse(r => r.url().startsWith('$WEB/events?page=$fav_kind')); await page.goto('$fav_page'); await ready; await page.locator('#rail-favorites a[href=\"/issue/$FAV_KEY\"]').waitFor(); await page.locator('#rail').evaluate(el => el.dataset.probe = 'favorite-rail-kept'); return 'favorite stream ready'; }" 2>&1)
+    assert_contains "$fav_ready" 'favorite stream ready' "browser: favorite stream registered"
+    "$LIN" issue update "$FAV_KEY" --title "Favorite live $fav_state" --state "$fav_state" >/dev/null
+    fav_live=$(page_until "$fav_js" "#st-$fav_state")
+    assert_contains "$fav_live" "Favorite live $fav_state" "browser: favorite title follows issue changes"
+    assert_contains "$fav_live" "#st-$fav_state" "browser: favorite state icon follows issue changes"
+    assert_contains "$fav_live" '"rail":"favorite-rail-kept"' "browser: favorite update preserves outer rail"
+    assert_contains "$fav_live" '"navs":1' "browser: favorite update needs no reload"
+  done
+  playwright-cli -s="$BROWSER_SESSION" run-code "async page => { await page.locator('#rail-favorites').scrollIntoViewIfNeeded(); await page.screenshot({path:'/tmp/lll-94-favorites.png'}); }" >/dev/null 2>&1
+  "$LIN" issue delete "$FAV_KEY" --force >/dev/null
+  fav_deleted=$(page_until "$fav_js" '"title":""')
+  assert_contains "$fav_deleted" '"title":""' "browser: deleted favorite leaves the open rail"
+  assert_contains "$fav_deleted" '"rail":"favorite-rail-kept"' "browser: favorite deletion preserves outer rail"
 
   playwright-cli -s="$BROWSER_SESSION" close >/dev/null 2>&1 || true
   echo "e2e_web: browser-level realtime check passed"
@@ -1123,7 +1270,7 @@ Some **bold** text and `code`.
 
 <script>alert(1)</script>' >/dev/null
 page=$(wcurl -sf "$WEB/issue/ENG-1")
-assert_contains "$page" '<div class="desc md">' "description uses the shared markdown container"
+assert_contains "$page" '<div id="issue-description" class="issue-desc md">' "description uses the shared markdown container"
 assert_contains "$page" "<h2>Heading</h2>" "description renders a markdown heading"
 assert_contains "$page" "<strong>bold</strong>" "description renders bold"
 assert_contains "$page" "<code>code</code>" "description renders inline code"
@@ -1176,11 +1323,13 @@ assert_contains "$issues" '<table id="issues" class="itbl">' "the issues page re
 assert_contains "$issues" 'href="/issue/ENG-1"' "the table links rows to their issue pages"
 assert_contains "$issues" 'href="/issues?sort=-created"' "column headers sort server-side through the URL"
 assert_contains "$issues" 'href="/issues?sort=-priority"' "priority is a sortable column"
+assert_contains "$issues" 'href="/issues?sort=-title"' "title is a sortable column"
 assert_contains "$issues" 'aria-sort="descending"' "the sorting column says so to a screen reader"
 
-# ZERO JavaScript: no script tag, no datastar attributes, no SSE connection.
+# Table data needs no JavaScript: only the shared navigation script loads.
 # A page that subscribed would be morphed into the unfiltered #board.
-assert_not_contains "$issues" "<script" "the issues page loads no script"
+assert_not_contains "$issues" "/static/datastar.js" "the issues page loads no Datastar"
+assert_contains "$issues" "/static/navigation.js" "the issues page has phone navigation"
 assert_not_contains "$issues" "data-on:" "the issues page binds no client-side handlers"
 assert_not_contains "$issues" "data-init" "the issues page opens no SSE connection"
 
@@ -1200,6 +1349,7 @@ desc=$(first_row "/issues?sort=-number")
 
 # Filters are query params, so a filtered view is a shareable URL.
 todo=$(wcurl -sf "$WEB/issues?state=todo")
+assert_contains "$todo" 'href="/issues?state=todo&amp;sort=-title"' "title sorting preserves the state filter"
 assert_contains "$todo" '<option value="todo" selected>' "the chooser shows the filter the URL asked for"
 assert_contains "$todo" 'class="itbl-clear"' "a filtered table offers a way back to all issues"
 # A dedicated pair, so the filter assertion does not depend on what earlier
@@ -1265,8 +1415,9 @@ assert_contains "$projects" 'var(--st-in-progress)' \
 
 # Same reasoning as /issues and /settings: the bridge broadcasts one
 # unfiltered #board to every board-scoped client, so this page subscribes to
-# nothing and loads no script to subscribe with.
-assert_not_contains "$projects" "<script" "the projects page loads no script"
+# nothing; the shared navigation script makes no data requests.
+assert_not_contains "$projects" "/static/datastar.js" "the projects page loads no Datastar"
+assert_contains "$projects" "/static/navigation.js" "the projects page has phone navigation"
 assert_not_contains "$projects" "data-init" "the projects page opens no SSE connection"
 
 # The rail row is what makes a project reachable from the board at all.
@@ -1385,7 +1536,7 @@ row_id() { # html kind name
   printf '%s' "$1" | python3 -c '
 import re, sys
 html, kind, name = sys.stdin.read(), sys.argv[1], sys.argv[2]
-m = re.search(r"id=\"set-%s-([a-z0-9]+)\" data-name=\"%s\"" % (kind, re.escape(name)), html)
+m = re.search(r"id=\"set-%s-([a-z0-9]+)\"><form class=\"set-row\" data-name=\"%s\"" % (kind, re.escape(name)), html)
 print(m.group(1) if m else "")
 ' "$2" "$3"
 }
@@ -1408,7 +1559,7 @@ LABEL_ID=$(row_id "$(wcurl -sf "$WEB/settings")" label web-made)
 [ -n "$LABEL_ID" ] || fail "/settings did not render the label it just created"
 wcurl -sf -X POST "$WEB/settings/label" -d "id=$LABEL_ID" -d 'name=web-renamed' -d 'color=#8d7ce6' >/dev/null
 "$LIN" label list | grep -q '^web-renamed	#8d7ce6' || fail "renaming and recoloring a label from /settings did not persist"
-wcurl -sf -X POST "$WEB/settings/label?del=1" -d "id=$LABEL_ID" >/dev/null
+wcurl -sf -X POST "$WEB/settings/label?del=1" -d "id=$LABEL_ID" -d confirmed=1 -d expected=0 >/dev/null
 "$LIN" label list | grep -q 'web-renamed' && fail "deleting a label from /settings did not persist" || true
 
 wcurl -sf -X POST "$WEB/settings/member" -d 'name=Web Member' -d 'email=web@example.com' >/dev/null
@@ -1418,8 +1569,15 @@ MEMBER_ID=$(row_id "$(wcurl -sf "$WEB/settings")" member "Web Member")
 # identity (task-180) and the page says so when a row tries to move it.
 wcurl -sf -X POST "$WEB/settings/member" -d "id=$MEMBER_ID" -d 'name=Web Member Renamed' -d 'email=web@example.com' >/dev/null
 "$LIN" member list | grep -q '^Web Member Renamed	web@example.com' || fail "editing a member from /settings did not persist"
-wcurl -sf -X POST "$WEB/settings/member" -d "id=$MEMBER_ID" -d 'name=Web Member Renamed' -d 'email=moved@example.com' | grep -q 'login identity' \
-  || fail "moving a member's email from /settings should be refused with the reason"
+rejected_member=$(wcurl -sf -X POST "$WEB/settings/member" -d "id=$MEMBER_ID" -d 'name=Rejected member name' -d 'email=moved@example.com')
+assert_contains "$rejected_member" 'login identity' "moving a member email is refused with the reason"
+assert_contains "$rejected_member" 'Access → Member sign-in' "the refusal names the supported email-change surface"
+assert_contains "$rejected_member" 'No changes saved.' "combined name/email rejection reports no write"
+assert_not_contains "$rejected_member" '(name saved)' "rejection must not claim a partial save"
+"$LIN" member list | grep -q '^Web Member Renamed	web@example.com' \
+  || fail "rejected combined edit changed the stored member name or email"
+"$LIN" member list | grep -q '^Rejected member name	' \
+  && fail "rejected combined edit still saved its name" || true
 
 wcurl -sf -X POST "$WEB/settings/project" -d 'name=Web Project' -d 'status=planned' >/dev/null
 "$LIN" project list | grep -q '^Web Project	planned' || fail "creating a project from /settings did not persist"
@@ -1503,7 +1661,7 @@ assert_contains "$(wcurl -sf "$WEB/")" '<style id="accent"></style>' \
 assert_contains "$(wcurl -sf "$WEB/")" 'id="favicon"' "the board carries a generated favicon"
 
 wcurl -sf -X POST "$WEB/settings/team" -d 'name=Engineering' -d 'accent=#3ea0f0' >/dev/null
-for page in "/" "/issue/ENG-1" "/settings"; do
+for page in "/" "/issue/ENG-1" "/settings" "/issues" "/search" "/projects"; do
   html=$(wcurl -sf "$WEB$page")
   assert_contains "$html" '--accent:#3ea0f0' "$page wears the team accent"
   # The whole family is derived from that one hex, so hover, ink, deep and
@@ -1514,6 +1672,27 @@ for page in "/" "/issue/ENG-1" "/settings"; do
   assert_contains "$html" 'fill=%27%233ea0f0%27' "$page draws its favicon in the team accent"
   assert_not_contains "$html" 'fill=%27%23f0883e%27' "$page's favicon is not the default orange"
 done
+
+if command -v playwright-cli >/dev/null 2>&1; then
+  playwright-cli -s="$BROWSER_SESSION" open "$WEB/search?board_token=$BOARD_TOKEN" >/dev/null 2>&1 \
+    || fail "playwright: open search for team accent verification"
+  accent_browser=$(playwright-cli -s="$BROWSER_SESSION" run-code "async page => {
+    for (const path of ['/search', '/issues', '/settings', '/projects']) {
+      await page.goto('$WEB' + path);
+      const head = await page.evaluate(() => ({
+        accent: getComputedStyle(document.documentElement).getPropertyValue('--accent').trim(),
+        favicon: document.querySelector('link[rel=icon]')?.getAttribute('href') || ''
+      }));
+      if (head.accent !== '#3ea0f0' || !decodeURIComponent(head.favicon).includes(\"fill='#3ea0f0'\")) {
+        throw new Error(path + ': incorrect team accent/favicon: ' + JSON.stringify(head));
+      }
+      await page.screenshot({path: '/tmp/lll-123' + path.replace('/', '-') + '.png'});
+    }
+    return 'team accent verified';
+  }" 2>/dev/null) || fail "playwright: team accent/favicon verification"
+  assert_contains "$accent_browser" 'team accent verified' "search and issues apply the team accent in the browser"
+  playwright-cli -s="$BROWSER_SESSION" close >/dev/null 2>&1 || true
+fi
 
 # A save answers with the head fragment too, so an open page recolors without
 # a reload.
@@ -1588,7 +1767,7 @@ assert_contains "$out" "not found" "/favorite unknown issue message"
 # The rail is outside every morph boundary, but the favorites group is its
 # OWN boundary inside it, so a star patches the group alone on every open
 # page — board scope included, which is why the broadcast scope is "*".
-wcurl -sN "$WEB/events?page=board" >"$EVENTS_FILE" &
+"${WCURL[@]}" -sN "$WEB/events?page=board" >"$EVENTS_FILE" &
 CURL_PID=$!
 sleep 0.5
 wcurl -s -o /dev/null -X POST "$WEB/favorite?key=ENG-1&on=true"
@@ -1596,7 +1775,7 @@ for _ in $(seq 1 50); do
   grep -q "rail-favorites" "$EVENTS_FILE" 2>/dev/null && break
   sleep 0.1
 done
-kill $CURL_PID 2>/dev/null || true
+e2e_reap "$CURL_PID"
 CURL_PID=""
 events=$(cat "$EVENTS_FILE")
 assert_contains "$events" 'data: elements <div id="rail-favorites"' \
@@ -1671,7 +1850,7 @@ dup=$(wcurl -s -X POST "$WEB/views/save" -d "name=Todo lane" --data-urlencode "q
 assert_contains "$dup" "already exists" "a duplicate view name is said out loud"
 
 # The SSE bridge patches the views group alone on every open board page.
-wcurl -sN "$WEB/events?page=board" >"$EVENTS_FILE" &
+"${WCURL[@]}" -sN "$WEB/events?page=board" >"$EVENTS_FILE" &
 CURL_PID=$!
 sleep 0.5
 wcurl -s -o /dev/null -X POST "$WEB/views/save" -d "name=Urgent lane" --data-urlencode "query=?prio=urgent"
@@ -1679,7 +1858,7 @@ for _ in $(seq 1 50); do
   grep -q "rail-views" "$EVENTS_FILE" 2>/dev/null && break
   sleep 0.1
 done
-kill $CURL_PID 2>/dev/null || true
+e2e_reap "$CURL_PID"
 CURL_PID=""
 events=$(cat "$EVENTS_FILE")
 assert_contains "$events" 'data: elements <div id="rail-views"' \
@@ -1840,6 +2019,7 @@ eng_board=$(wcurl -sf "$WEB/t/ENG/")
 ops_board=$(wcurl -sf "$WEB/t/OPS/")
 assert_contains "$ops_board" "Ops only card" "the routed team's cards render"
 assert_not_contains "$ops_board" "Web board issue" "another team's cards stay off the routed board"
+assert_contains "$ops_board" '<title>lll - OPS board</title>' "a routed board names its own team in the tab"
 assert_not_contains "$eng_board" "Ops only card" "the boot team's board stays scoped too"
 code=$(wcurl -s -o /dev/null -w '%{http_code}' "$WEB/t/NOPE/")
 [ "$code" = "404" ] || fail "an unknown team key should 404, got $code"
@@ -1870,9 +2050,9 @@ assert_contains "$out" "no team with key &#39;NOPE&#39;" \
 # event per team, each morph reaching only its own team's clients.
 OPS_EVENTS="$DATA_DIR/events-ops.txt"
 ENG_EVENTS="$DATA_DIR/events-eng.txt"
-wcurl -sN "$WEB/events?page=board&team=OPS" >"$OPS_EVENTS" &
+"${WCURL[@]}" -sN "$WEB/events?page=board&team=OPS" >"$OPS_EVENTS" &
 OPS_SSE_PID=$!
-wcurl -sN "$WEB/events?page=board&team=ENG" >"$ENG_EVENTS" &
+"${WCURL[@]}" -sN "$WEB/events?page=board&team=ENG" >"$ENG_EVENTS" &
 ENG_SSE_PID=$!
 sleep 0.5
 env LLL_TEAM=OPS "$LIN" issue create -t "Ops realtime probe" >/dev/null
@@ -1885,7 +2065,9 @@ for _ in $(seq 1 50); do
   grep -q "Eng realtime probe" "$ENG_EVENTS" 2>/dev/null && break
   sleep 0.1
 done
-kill $OPS_SSE_PID $ENG_SSE_PID 2>/dev/null || true
+e2e_reap "$OPS_SSE_PID" "$ENG_SSE_PID"
+OPS_SSE_PID=""
+ENG_SSE_PID=""
 ops_events=$(cat "$OPS_EVENTS")
 eng_events=$(cat "$ENG_EVENTS")
 assert_contains "$ops_events" 'data: elements <main id="board"' "the OPS stream carries #board morphs"
@@ -1974,7 +2156,7 @@ label_row() { # html name
   printf '%s' "$1" | python3 -c '
 import re, sys
 html, name = sys.stdin.read(), sys.argv[1]
-m = re.search(r"<form class=\"set-row\" id=\"set-label-[a-z0-9]+\" data-name=\"%s\">.*?</form>" % re.escape(name), html, re.S)
+m = re.search(r"<div id=\"set-label-[a-z0-9]+\"><form class=\"set-row\" data-name=\"%s\">.*?</form>" % re.escape(name), html, re.S)
 print(m.group(0) if m else "")
 ' "$2"
 }
@@ -1993,7 +2175,9 @@ sys.exit(0 if 0 <= hot < cold else 1)
 assert_contains "$settings" "reuse beats near-duplicates" \
   "the web label-create form carries the check-first hint"
 # The raw twin carries the same counts, on the label's own line.
-assert_contains "$(wcurl -sf "$WEB/settings?raw")" "usage-hot # (ENG, 2 issues)" \
+usage_raw=$(wcurl -sf "$WEB/settings?raw")
+printf '%s' "$usage_raw" > /tmp/lll-344-settings-raw.txt
+assert_contains "$usage_raw" "usage-hot (2 issues)" \
   "settings raw carries the label's usage count"
 
 # --- TASK-241: the API answers on the board's port, ungated ------------------
@@ -2014,5 +2198,25 @@ assert_contains "$(curl -sf "$WEB/api/collections/issues/records?perPage=1" -H "
 # The gate is still on for BOARD routes - the proxy must not have opened those.
 code=$(curl -s -o /dev/null -w '%{http_code}' "$WEB/")
 [ "$code" = 401 ] || fail "the board itself must still be gated, got $code"
+
+# SSE is text. A NUL here indicates a writer survived log truncation/reuse;
+# fail instead of letting command substitution silently discard the evidence.
+python3 - "$EVENTS_FILE" "$PANEL_EVENTS" "$OPS_EVENTS" "$ENG_EVENTS" <<'PY'
+from pathlib import Path
+import sys
+for name in sys.argv[1:]:
+    assert b'\0' not in Path(name).read_bytes(), f'NUL bytes in SSE log: {name}'
+print('SSE logs: no NUL bytes after stream cleanup')
+PY
+
+LLL_TEST_BOARD_TOKEN="$BOARD_TOKEN" python3 scripts/test_settings_delete.py "$LLL_URL" "$WEB"
+
+LLL_TEST_BOARD_TOKEN="$BOARD_TOKEN" python3 scripts/test_attachments.py "$LIN" "$LLL_URL" "$WEB"
+
+LLL_TEST_BOARD_TOKEN="$BOARD_TOKEN" python3 scripts/test_issue_stream.py "$LIN" "$LLL_URL" "$WEB"
+
+LLL_TEST_BOARD_TOKEN="$BOARD_TOKEN" python3 scripts/test_board_claims.py "$LIN" "$LLL_URL" "$WEB"
+
+LLL_TEST_BOARD_TOKEN="$BOARD_TOKEN" python3 scripts/test_board_pagination.py "$LIN" "$LLL_URL" "$WEB"
 
 echo "e2e_web: all assertions passed"

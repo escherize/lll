@@ -1,0 +1,21 @@
+import "records"
+import "go:strings"
+
+/// A failed immediate-save control must not keep its unsaved selection.
+/// Reuse the normal property template, but replace this panel: a morph
+/// preserves selected/checked DOM properties when server attributes have
+/// not changed. Title and comment drafts live outside this boundary.
+fn property_recovery(key: string) -> string {
+  let html = current_properties(key).unwrap_or_else(|_| {
+    render("issue-properties-unavailable", "").unwrap_or("")
+  })
+  if html == "" { return "" }
+  let lines = html.split("\n").map(|line| f"data: elements {line}")
+  f"event: datastar-patch-elements\ndata: mode replace\ndata: selector #issue-properties\n{strings.Join(lines, "\n")}\n\n"
+}
+
+fn current_properties(key: string) -> Result<string, string> {
+  let issue = records.fetch_issue(key)?
+  let vm = issue_fields_vm(issue, [])?
+  render("issue-properties", vm)
+}

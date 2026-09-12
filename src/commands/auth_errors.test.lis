@@ -1,0 +1,45 @@
+import "go:net/http"
+import "go:net/http/httptest"
+
+import "pb"
+
+fn http_auth_failure(status: int) -> (string, string) {
+  let mut server = httptest.NewServer(http.HandlerFunc(|w, _r| {
+    w.WriteHeader(status)
+    let _ = w.Write("previous status: 400 Bad Request; 401 Unauthorized; oldPassword".bytes())
+  }))
+  defer server.Close()
+  let Err(e) = pb.post_anon_to(server.URL, "/400/401/oldPassword", "{}") else { panic("expected failure") };
+  (e, server.URL)
+}
+
+#[test]
+fn auth_errors_follow_live_http_status_despite_url_and_body_digits() {
+  for status in [400, 401, 403, 500, 503] {
+    let (e, base) = http_auth_failure(status)
+    assert pb.response_status(e) == status
+    if status == 400 {
+      assert admin_verification_error(e).starts_with("wrong admin password")
+      assert login_failed(e, "person@example.test", base).contains("or the password is wrong")
+    } else {
+      assert admin_verification_error(e) == f"verifying the admin password: {e}"
+      assert login_failed(e, "person@example.test", base) == f"login failed: {e}"
+      assert superuser_auth_failed(e) == f"authenticating as the superuser: {e}"
+    }
+    if status == 400 || status == 401 || status == 403 {
+      assert member_password_error("person", e).contains("superuser-only")
+    } else {
+      assert member_password_error("person", e) == f"setting person's password: {e}"
+      assert impersonate_error("person", e) == f"impersonating person: {e}"
+    }
+  }
+}
+
+#[test]
+fn non_auth_validation_and_transport_errors_keep_their_details() {
+  let validation = "PATCH http://127.0.0.1:40123/400/oldPassword: 400 Bad Request: invalid email"
+  assert member_password_error("person", validation) == f"setting person's password: {validation}"
+  let transport = "POST http://127.0.0.1:40015/401: connection refused"
+  assert admin_verification_error(transport) == f"verifying the admin password: {transport}"
+  assert login_failed(transport, "person@example.test", "") == f"login failed: {transport}"
+}

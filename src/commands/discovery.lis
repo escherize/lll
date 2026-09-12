@@ -1,0 +1,42 @@
+import "go:encoding/json"
+import "go:io"
+import "go:net/http"
+import "go:time"
+
+#[json]
+struct BoardDiscovery {
+  service: string,
+  web_url: string,
+}
+
+/// Interpret an explicit server advertisement, never infer a port or hostname.
+fn discovered_board_url(base: string, document: string) -> Option<string> {
+  let mut metadata = BoardDiscovery { .. }
+  if json.Unmarshal(document.bytes(), &metadata).is_err() { return None }
+  if metadata.service != "lll" { return None }
+  let candidate = if metadata.web_url == "." { base } else { metadata.web_url }
+  checked_web_url(candidate).ok()
+}
+
+/// Optional setup: bounded, unauthenticated, and never follows redirects.
+fn discover_board_url(base: string) -> Option<string> {
+  let Ok(endpoint) = checked_web_url(base) else { return None }
+  let client = http.Client {
+    Timeout: 2 * time.Second,
+    CheckRedirect: Some(|_, _| Err(http.ErrUseLastResponse)),
+    ..,
+  }
+  let Ok(response) = client.Get(endpoint + "/.well-known/lll") else { return None }
+  let Some(body) = response.Body else { return None }
+  defer body.Close()
+  if response.StatusCode != 200 { return None }
+  let Ok(bytes) = io.ReadAll(io.LimitReader(body, 4097)) else { return None }
+  if bytes.length() > 4096 { return None }
+  discovered_board_url(base, bytes as string)
+}
+
+/// Public metadata carries no credential and is useful before board login.
+fn board_discovery(w: http.ResponseWriter, _r: Ref<http.Request>) {
+  w.Header().Set("Content-Type", "application/json")
+  let _ = w.Write("{\"service\":\"lll\",\"web_url\":\".\"}".bytes())
+}

@@ -1,0 +1,42 @@
+import "go:net/url"
+
+import "models"
+import "pb"
+import "query"
+
+/// Count every issue affected by removing one shared classification record.
+/// CLI deletion, web review and label inventory use the same relation filters.
+fn entity_issue_count(kind: string, id: string) -> Result<int, string> {
+  match kind {
+    "label" => issue_count(query.filter("", "", "", "", id, "")),
+    "project" => issue_count(query.filter("", "", "", id, "", "")),
+    _ => Err(f"cannot count issue references for '{kind}'"),
+  }
+}
+
+/// How many issues match a filter. perPage=1 so PocketBase answers the count
+/// without a page of records, the same trick the settings sections use.
+fn issue_count(filter: string) -> Result<int, string> {
+  let mut list = models.IssueList { .. }
+  pb.fetch(
+    f"/api/collections/issues/records?perPage=1&fields=id&filter={url.QueryEscape(filter)}",
+    "issues",
+    &list,
+  )?
+  Ok(list.total_items)
+}
+
+/// The refusal a guarded delete answers with. Names the count and the exact
+/// command that overrides it, so the user never has to guess the flag.
+fn refuse_delete(kind: string, name: string, used: int) -> string {
+  let argument = cli_argument(name)
+  f"{used} issue(s) still reference the {kind} '{name}' — deleting it drops the {kind} off them.\nTo delete it anyway, run:\n  lll {kind} delete {argument} --force\nOr reassign those issues first."
+}
+
+/// What a completed delete prints. The count rides along even on the forced
+/// path, because "how many issues just changed" is the thing worth knowing.
+fn deleted_line(kind: string, name: string, used: int) -> string {
+  if used == 0 { return f"Deleted {kind} {name}" }
+  f"Deleted {kind} {name} (dropped from {used} issue(s))"
+}
+

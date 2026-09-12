@@ -1,3 +1,5 @@
+import "records"
+import "claims"
 import "go:bufio"
 import "go:encoding/json"
 import "go:fmt"
@@ -7,7 +9,6 @@ import "go:os"
 import "go:os/exec"
 import "go:strconv"
 import "go:strings"
-import "go:text/tabwriter"
 import "go:unicode/utf8"
 
 import "config"
@@ -36,9 +37,9 @@ fn value_or_stdin(val: string, flag: string) -> Result<string, string> {
   let Ok(data) = io.ReadAll(os.Stdin) else {
     return Err(f"{flag} -: reading stdin")
   }
-  // One trailing newline is the shell's, not the author's: `echo hi` means "hi".
-  let text = strings.TrimSuffix(data as string, "\n")
-  if text == "" { return Err(f"{flag} -: nothing on stdin") }
+  // Stdin is the author's input, including any final newline or indentation.
+  let text = data as string
+  if strings.TrimSpace(text) == "" { return Err(f"{flag} -: nothing on stdin") }
   Ok(text)
 }
 
@@ -55,20 +56,18 @@ fn check_emoji(val: string) -> Result<string, string> {
   Ok(trimmed)
 }
 
-/// Shared validators, applied after flags.parse collects the raw values.
-/// They live beside the specs so the error wording has exactly one home.
-fn check_state(val: string) -> Result<string, string> {
-  if query.states().find(|s| s == val).is_none() {
-    return Err(
-      f"unknown state '{val}' (use one of: {strings.Join(query.states(), ", ")})",
-    )
-  }
-  Ok(val)
-}
-
 fn check_priority(val: string) -> Result<int, string> {
+  let named = strings.ToLower(val)
+  match named {
+    "none" => return Ok(0),
+    "urgent" => return Ok(1),
+    "high" => return Ok(2),
+    "medium" => return Ok(3),
+    "low" => return Ok(4),
+    _ => (),
+  }
   let Ok(p) = strconv.Atoi(val) else {
-    return Err(f"--priority must be a number 0-4, got '{val}'")
+    return Err(f"unknown priority '{val}' (use none, urgent, high, medium, low, or 0-4)")
   }
   if p < 0 || p > 4 {
     return Err(
@@ -84,7 +83,7 @@ fn check_priority(val: string) -> Result<int, string> {
 // in usage lines; `alias` is also accepted.
 
 fn issue_create_spec() -> Slice<flags.Flag> {
-  [
+  flags.with_team([
     flags.Flag {
       name: "-t",
       alias: "--title",
@@ -112,84 +111,28 @@ fn issue_create_spec() -> Slice<flags.Flag> {
       name: "--priority",
       alias: "-p",
       value: true,
-      hint: "0-4",
+      hint: "name|0-4",
       help: "0 none, 1 urgent (!!!), 2 high (!!), 3 medium (!), 4 low (·)",
       ..,
     },
-    // TASK-125: without this, every created issue landed in the default state
-    // and needed a follow-up 'issue update KEY --state x', so seeding a
-    // five-column board cost ten commands instead of five.
-    flags.Flag {
-      name: "--state",
-      value: true,
-      hint: "s",
-      help: "one of: backlog, todo, in-progress, in-review, done, cancelled\n(create defaults to todo)",
-      ..,
-    },
-    flags.Flag {
-      name: "--assignee",
-      alias: "--assign",
-      value: true,
-      hint: "name",
-      help: "member name (see 'lll member list'); filters on list",
-      ..,
-    },
-    flags.Flag {
-      name: "--label",
-      value: true,
-      hint: "name",
-      repeat: true,
-      help: "label name (see 'lll label list'); repeatable on create/update\n(update replaces the set); filters on list",
-      ..,
-    },
-    flags.Flag {
-      name: "--project",
-      value: true,
-      hint: "name",
-      help: "project name (see 'lll project list'); filters on list",
-      ..,
-    },
+  ].append(filter_spec(FilterUse.Create)...).append([
     flags.Flag {
       name: "--json",
       help: "raw PocketBase JSON (team, assignee, labels, project\nexpanded), pipe-friendly",
       ..,
     },
-    flags.Flag { name: "--help", alias: "-h", hidden: true, help: "show this help", .. },
-  ]
+    flags.Flag {
+      name: "--help",
+      alias: "-h",
+      hidden: true,
+      help: "show this help",
+      ..,
+    },
+  ]...))
 }
 
 fn issue_list_spec() -> Slice<flags.Flag> {
-  [
-    flags.Flag {
-      name: "--state",
-      value: true,
-      hint: "s",
-      help: "one of: backlog, todo, in-progress, in-review, done, cancelled",
-      ..,
-    },
-    flags.Flag {
-      name: "--assignee",
-      alias: "--assign",
-      value: true,
-      hint: "name",
-      help: "member name (see 'lll member list'); filters on list",
-      ..,
-    },
-    flags.Flag {
-      name: "--label",
-      value: true,
-      hint: "name",
-      repeat: true,
-      help: "label name (see 'lll label list'); repeatable on create/update\n(update replaces the set); filters on list",
-      ..,
-    },
-    flags.Flag {
-      name: "--project",
-      value: true,
-      hint: "name",
-      help: "project name (see 'lll project list'); filters on list",
-      ..,
-    },
+  flags.with_team(filter_spec(FilterUse.List).append([
     flags.Flag {
       name: "--search",
       alias: "--query",
@@ -202,7 +145,7 @@ fn issue_list_spec() -> Slice<flags.Flag> {
       name: "--sort",
       value: true,
       hint: "f",
-      help: "created, updated, priority, or number; prefix - for descending\n(default: LLL_SORT or 'sort' in .lll.toml, else created)",
+      help: f"{strings.Join(query.sort_fields(), ", ")}; prefix - for descending\n(default: LLL_SORT or 'sort' in .lll.toml, else created)",
       ..,
     },
     flags.Flag {
@@ -213,20 +156,27 @@ fn issue_list_spec() -> Slice<flags.Flag> {
       ..,
     },
     flags.Flag {
+      name: "--page",
+      value: true,
+      hint: "N",
+      help: "page of results (positive integer; default 1); --limit sets page size",
+      ..,
+    },
+    flags.Flag {
       name: "--json",
       help: "raw PocketBase JSON (team, assignee, labels, project\nexpanded), pipe-friendly",
       ..,
     },
     flags.Flag { name: "--ready", help: "only open issues whose blockers are all done (LLL-175): what an agent can pick up now", .. },
     flags.Flag { name: "--blocked", help: "only issues with an open blocker", .. },
-  ]
+  ]...))
 }
 
 fn issue_view_spec() -> Slice<flags.Flag> {
-  [
+  flags.with_team([
     flags.Flag {
       name: "--json",
-      help: "raw PocketBase JSON (team, assignee, labels, project\nexpanded), pipe-friendly",
+      help: "issue JSON with expanded relations, comments (oldest first,\nauthor expanded), and claim (member expanded, or null)",
       ..,
     },
     flags.Flag {
@@ -239,46 +189,16 @@ fn issue_view_spec() -> Slice<flags.Flag> {
       help: "open the issue's web page in the browser (view)",
       ..,
     },
-  ]
+  ])
 }
 
 fn issue_update_spec() -> Slice<flags.Flag> {
-  [
-    flags.Flag {
-      name: "--state",
-      value: true,
-      hint: "s",
-      help: "one of: backlog, todo, in-progress, in-review, done, cancelled",
-      ..,
-    },
+  flags.with_team(filter_spec(FilterUse.Update).append([
     flags.Flag {
       name: "--priority",
       value: true,
-      hint: "0-4",
+      hint: "name|0-4",
       help: "0 none, 1 urgent (!!!), 2 high (!!), 3 medium (!), 4 low (·)",
-      ..,
-    },
-    flags.Flag {
-      name: "--assignee",
-      alias: "--assign",
-      value: true,
-      hint: "name",
-      help: "member name (see 'lll member list'); 'none' clears it (update)",
-      ..,
-    },
-    flags.Flag {
-      name: "--label",
-      value: true,
-      hint: "name",
-      repeat: true,
-      help: "label name (see 'lll label list'); repeatable on create/update\n(update replaces the set); filters on list",
-      ..,
-    },
-    flags.Flag {
-      name: "--project",
-      value: true,
-      hint: "name",
-      help: "project name (see 'lll project list'); filters on list",
       ..,
     },
     flags.Flag {
@@ -304,15 +224,15 @@ fn issue_update_spec() -> Slice<flags.Flag> {
       help: "one emoji for the issue, shown on the card, the issue page and\nthe list; pass \"\" to clear it",
       ..,
     },
-  ]
+  ]...))
 }
 
 fn issue_delete_spec() -> Slice<flags.Flag> {
-  [flags.Flag { name: "--force", help: "skip the delete confirmation", .. }]
+  flags.with_team([flags.Flag { name: "--force", help: "skip the delete confirmation", .. }])
 }
 
 fn issue_comment_spec() -> Slice<flags.Flag> {
-  [
+  flags.with_team([
     flags.Flag {
       name: "-b",
       alias: "--body -m --message",
@@ -322,11 +242,11 @@ fn issue_comment_spec() -> Slice<flags.Flag> {
       ..,
     },
     flags.Flag { name: "--force", help: "with edit/delete: change a comment that is not yours", .. },
-  ]
+  ])
 }
 
 pub fn issue_watch_spec() -> Slice<flags.Flag> {
-  [
+  flags.with_team([
     flags.Flag {
       name: "--json",
       help: "NDJSON: one raw PocketBase event object per line, with a\n\"topic\" field added",
@@ -337,7 +257,7 @@ pub fn issue_watch_spec() -> Slice<flags.Flag> {
       alias: "--for",
       value: true,
       hint: "text",
-      help: "exit 0 once a comment containing text arrives (or is already\nthere) - the blocking primitive for waiting on a partner",
+      help: "exit 0 once a comment containing text arrives (or is already\nthere); --json reports an existing match as action=snapshot",
       ..,
     },
     flags.Flag {
@@ -347,7 +267,7 @@ pub fn issue_watch_spec() -> Slice<flags.Flag> {
       help: "with --until: give up after this many seconds, exit non-zero",
       ..,
     },
-  ]
+  ])
 }
 
 /// Dispatch `lll issue <verb>` through the noun's Command table (TASK-307).
@@ -357,6 +277,10 @@ pub fn issue(args: Slice<string>) -> Result<(), string> {
   let cmds = issue_commands()
   if let Some(hint) = issue_synonym(args.get(2).unwrap_or("")) {
     return Err(hint)
+  }
+  if args.get(2) == Some("comment") && ["edit", "delete"].contains(args.get(3).unwrap_or("")) {
+    let subargs = args[..2].append(args[3..]...)
+    return flags.dispatch("issue comment", "change a comment", "", comment_commands(), subargs)
   }
   flags.dispatch("issue", "work with issues", issue_intro(), cmds, args)
 }
@@ -390,6 +314,19 @@ fn issue_synonym(verb: string) -> Option<string> {
 /// print_usage rows, one line each.
 pub fn issue_commands() -> Slice<flags.Command> {
   [
+    flags.Command {
+      name: "attach", summary: "upload a file to an issue; appends without replacing existing attachments",
+      page: "",
+      spec: flags.with_team([]), positional: "KEY-123 FILE", run: issue_attach,
+    },
+    flags.Command {
+      name: "detach", summary: "remove an attachment by its stored filename (see issue view)",
+      page: "", spec: flags.with_team([]), positional: "KEY-123 FILENAME", run: issue_detach,
+    },
+    flags.Command {
+      name: "download", summary: "write attachment bytes to stdout; redirect to a file",
+      page: "", spec: flags.with_team([]), positional: "KEY-123 FILENAME", run: issue_download,
+    },
     flags.Command {
       name: "create",
       summary: "create an issue in the configured team; -d - reads the description from stdin; without --state it starts in todo",
@@ -454,9 +391,9 @@ pub fn issue_commands() -> Slice<flags.Command> {
     },
     flags.Command {
       name: "close",
-      summary: "set state done",
+      summary: "set state done; retain any claim",
       page: "",
-      spec: [],
+      spec: flags.with_team([]),
       positional: "[KEY-123]",
       run: close_issue,
     },
@@ -472,15 +409,15 @@ pub fn issue_commands() -> Slice<flags.Command> {
       name: "claim",
       summary: "take it exclusively for 'me' and assign it; exits non-zero, changing nothing, when someone already holds it",
       page: "",
-      spec: [],
+      spec: flags.with_team([]),
       positional: "[KEY-123]",
       run: claim,
     },
     flags.Command {
       name: "release",
-      summary: "give a claim back",
+      summary: "remove the claim; clear assignee if it still matches the holder",
       page: "",
-      spec: [],
+      spec: flags.with_team([]),
       positional: "[KEY-123]",
       run: release,
     },
@@ -497,7 +434,7 @@ pub fn issue_commands() -> Slice<flags.Command> {
       summary: "add a comment (bare body or -b); 'comment KEY' lists them numbered; 'comment edit KEY N -b' and 'comment delete KEY N' change your own",
       page: "",
       spec: issue_comment_spec(),
-      positional: "[edit|delete] [KEY-123] [N] [\"body\"]",
+      positional: "[KEY-123] [\"body\"]",
       run: comment,
     },
     flags.Command {
@@ -512,7 +449,7 @@ pub fn issue_commands() -> Slice<flags.Command> {
       name: "url",
       summary: "print the issue's web page URL",
       page: "",
-      spec: [],
+      spec: flags.with_team([]),
       positional: "[KEY-123]",
       run: url_cmd,
     },
@@ -520,7 +457,7 @@ pub fn issue_commands() -> Slice<flags.Command> {
       name: "id",
       summary: "print the issue's KEY-123 identifier",
       page: "",
-      spec: [],
+      spec: flags.with_team([]),
       positional: "[KEY-123]",
       run: id_cmd,
     },
@@ -528,15 +465,16 @@ pub fn issue_commands() -> Slice<flags.Command> {
       name: "title",
       summary: "print the issue's title",
       page: "",
-      spec: [],
+      spec: flags.with_team([]),
       positional: "[KEY-123]",
       run: title_cmd,
     },
+    flags.Command { name: "branch-name", summary: "print a suggested Git branch name; read-only", page: "", spec: flags.with_team([]), positional: "[KEY-123]", run: branch_name_cmd },
     flags.Command {
       name: "pr",
-      summary: "open a GitHub PR for the issue via 'gh pr create' (title \"KEY-123: title\", body links the issue)",
+      summary: "open a GitHub PR via 'gh pr create'; body links the issue and includes its description when it fits the PR limit",
       page: "",
-      spec: [],
+      spec: flags.with_team([]),
       positional: "[KEY-123]",
       run: pr_cmd,
     },
@@ -544,7 +482,7 @@ pub fn issue_commands() -> Slice<flags.Command> {
       name: "link",
       summary: "link the issue to a doc (see 'lll doc --help')",
       page: "",
-      spec: [],
+      spec: flags.with_team([]),
       positional: "KEY-123 SLUG",
       run: link,
     },
@@ -552,7 +490,7 @@ pub fn issue_commands() -> Slice<flags.Command> {
       name: "unlink",
       summary: "remove that link",
       page: "",
-      spec: [],
+      spec: flags.with_team([]),
       positional: "KEY-123 SLUG",
       run: unlink,
     },
@@ -560,7 +498,7 @@ pub fn issue_commands() -> Slice<flags.Command> {
       name: "block",
       summary: "record that KEY-123 cannot start until BLOCKER is done (LLL-175); view shows it, list --ready honours it",
       page: "",
-      spec: [],
+      spec: flags.with_team([]),
       positional: "KEY-123 BLOCKER",
       run: block,
     },
@@ -568,7 +506,7 @@ pub fn issue_commands() -> Slice<flags.Command> {
       name: "unblock",
       summary: "remove BLOCKER from KEY-123's blockers",
       page: "",
-      spec: [],
+      spec: flags.with_team([]),
       positional: "KEY-123 BLOCKER",
       run: unblock,
     },
@@ -596,8 +534,16 @@ fn issue_intro() -> string {
   strings.TrimPrefix(flags.section(issue_union_spec()), "\n") +
     "
 
-Web URLs come from LLL_WEB_URL, 'web_url' in .lll.toml, or the default
-http://127.0.0.1:8100 (where 'lll up' serves the board).
+Web URLs come from LLL_WEB_URL, then 'web_url' in the repo or home config.
+Set the deployed board address with 'lll config set web_url URL';
+'lll up' saves the actual endpoint when it starts the board.
+
+Full view --json preserves the issue record and adds comments (oldest first,
+author expanded), claim (member expanded, or null when unclaimed), docs
+(explicit links), and findings (linked or label-area matches). Docs and findings
+include their bodies and use slug order; empty collections are [].
+State changes (including review and close) retain claims. Release explicitly
+ends the hold; an assignment to someone other than the holder is preserved.
 
 When KEY-123 is omitted (except for delete), it is inferred from the current
 git branch: eng-12-fix-login resolves to ENG-12.
@@ -611,7 +557,9 @@ fn issue_create_page() -> string {
   "lll issue create - create an issue in the configured team
 
 Usage:
-  " + flags.usage("lll issue create", issue_create_spec(), "[\"title\"]") + "
+  " +
+    flags.usage("lll issue create", issue_create_spec(), "[\"title\"]") +
+    "
 " +
     flags.section(issue_create_spec()) +
     "
@@ -622,14 +570,14 @@ The team comes from 'lll attach' ('team' in .lll.toml), or LLL_TEAM.
 Without --state the issue starts in todo; --label may be repeated."
 }
 
-fn create(args: Slice<string>) -> Result<(), string> {
+fn create(input: flags.CommandInput) -> Result<(), string> {
   let spec = issue_create_spec()
   let usage = flags.usage("lll issue create", spec, "[\"title\"]")
   // A bare title is accepted alongside -t: `gh issue create`, `linear` and
   // `jira` all take one, and every usability run reached for it first and got
   // "unknown flag: 'Hello'". -t stays the documented spelling, so no script
   // breaks; the positional is the guess that now lands.
-  let p = flags.parse(spec, args, 3, true, usage)?
+  let p = input.parsed
   let title = if p.one("-t") != "" { p.one("-t") } else { p.first() }
   if title == "" {
     return Err(f"no title — give it as the bare argument or with -t\n{usage}")
@@ -642,7 +590,7 @@ fn create(args: Slice<string>) -> Result<(), string> {
   // Same validator update calls, so create and update cannot disagree about
   // what a state is; the list itself lives once in query.states().
   let mut state = "todo"
-  if p.given("--state") { state = check_state(p.one("--state"))? }
+  if p.given("--state") { state = query.state(p.one("--state"))? }
   let assignee_name = p.one("--assignee")
   let label_names = p.all("--label")
   let project_name = p.one("--project")
@@ -655,14 +603,14 @@ fn create(args: Slice<string>) -> Result<(), string> {
   if team.archived { return Err(archived_hint(team.key)) }
 
   let mut assignee = ""
-  if assignee_name != "" { assignee = resolve_member(assignee_name)?.id }
+  if assignee_name != "" { assignee = records.resolve_member(assignee_name)?.id }
 
   let mut project = ""
-  if project_name != "" { project = resolve_project(team.id, project_name)?.id }
+  if project_name != "" { project = records.resolve_project(team.id, project_name)?.id }
 
   let mut labels: Slice<string> = []
   for name in label_names {
-    labels = labels.append(resolve_label(team.id, name)?.id)
+    labels = labels.append(records.resolve_label(team.id, name)?.id)
   }
 
   let new_issue = models.NewIssue {
@@ -680,35 +628,30 @@ fn create(args: Slice<string>) -> Result<(), string> {
     Ok(p) => p,
     Err(e) => return Err(f"encoding issue: {e}"),
   }
-  let body = pb.post("/api/collections/issues/records", payload as string)?
+  let path = if p.given("--json") {
+    "/api/collections/issues/records?expand=team,assignee,labels,project"
+  } else {
+    "/api/collections/issues/records"
+  }
+  let body = pb.post(path, payload as string)?
 
   let mut created = models.Issue { .. }
   if let Err(e) = json.Unmarshal(body.bytes(), &created) {
     return Err(f"decoding created issue: {e}")
   }
-  // The POST response has no expand, so --json re-fetches the record the
-  // way view does — one GET with the same expand list, same shape out.
+  // PocketBase expands the create response itself. A later read must not
+  // turn a successful write into an apparent failure and invite retries.
   if p.given("--json") {
-    fmt.Println(
-      pb.get(
-        f"/api/collections/issues/records/{created.id}?expand=team,assignee,labels,project",
-      )?,
-    )
+    fmt.Println(body)
     return Ok(())
   }
   fmt.Println(f"Created {team.key}-{created.number}: {created.title}")
   Ok(())
 }
 
-fn list(args: Slice<string>) -> Result<(), string> {
-  let spec = issue_list_spec()
-  let p = flags.parse(spec, args, 3, false, flags.usage("lll issue list", spec, ""))?
-  let mut state = ""
-  if p.given("--state") { state = check_state(p.one("--state"))? }
-  let assignee_name = p.one("--assignee")
-  let label_name = p.one("--label")
-  let project_name = p.one("--project")
-  let search = p.one("--search")
+fn list(input: flags.CommandInput) -> Result<(), string> {
+  let p = input.parsed
+  let filters = filters_from(p)?
   let sort_flag = p.one("--sort")
   let mut limit = 0
   if p.given("--limit") {
@@ -718,6 +661,15 @@ fn list(args: Slice<string>) -> Result<(), string> {
     }
     if n < 1 { return Err(f"--limit must be a positive integer, got {n}") }
     limit = n
+  }
+  let mut page = 1
+  if p.given("--page") {
+    let raw = p.one("--page")
+    let Ok(n) = strconv.Atoi(raw) else {
+      return Err(f"--page must be a positive integer, got '{raw}'")
+    }
+    if n < 1 { return Err(f"--page must be a positive integer, got {n}") }
+    page = n
   }
   let json_mode = p.given("--json")
   let ready_only = p.given("--ready")
@@ -730,17 +682,6 @@ fn list(args: Slice<string>) -> Result<(), string> {
   // and with it the label and project names the list filters by.
   let team_id = configured_team_id()?
 
-  let mut assignee_id = ""
-  if assignee_name != "" { assignee_id = resolve_member(assignee_name)?.id }
-
-  let mut label_id = ""
-  if label_name != "" { label_id = resolve_label(team_id, label_name)?.id }
-
-  let mut project_id = ""
-  if project_name != "" {
-    project_id = resolve_project(team_id, project_name)?.id
-  }
-
   let mut sort_spec = sort_flag
   if sort_spec == "" { sort_spec = cfg.sort }
   if sort_spec == "" { sort_spec = "created" }
@@ -749,15 +690,8 @@ fn list(args: Slice<string>) -> Result<(), string> {
   // --limit applies server-side via PB's perPage (capped by PB at 500).
   let mut per_page = 200
   if limit > 0 { per_page = limit }
-  let mut path = f"/api/collections/issues/records?perPage={per_page}&expand=team,assignee,labels,blocked_by,project&sort={url.QueryEscape(sort)}"
-  let filter = query.filter(
-    team_id,
-    state,
-    assignee_id,
-    project_id,
-    label_id,
-    search,
-  )
+  let mut path = f"/api/collections/issues/records?perPage={per_page}&expand=team,assignee,labels,blocked_by,project&sort={url.QueryEscape(sort + ",id")}&page={page}"
+  let filter = resolve_filter_query(team_id, filters)?
   if filter != "" { path = f"{path}&filter={url.QueryEscape(filter)}" }
 
   let body = pb.get(path)?
@@ -804,25 +738,20 @@ fn print_issue_table(issues: Slice<models.Issue>) -> Result<(), string> {
     let _ = fmt.Fprintln(os.Stderr, "no issues")
     return Ok(())
   }
-  let mut w = tabwriter.NewWriter(os.Stdout, 0, 4, 2, ' ', 0)
+  let mut rows: Slice<Slice<string>> = []
   for item in issues {
     let key = item.expand.team.key
-    // The marker goes last. tabwriter measures a cell in runes while a
-    // terminal draws emoji two cells wide — and a ZWJ sequence is seven runes
-    // in two cells — so a marker anywhere earlier drags every column after it
-    // out of true. Nothing follows the final column, so nothing can shift.
-    let mut tail = ""
-    if item.emoji != "" { tail = f"\t{item.emoji}" }
-    let line = f"{key}-{item.number}\t{display.glyph(item.state)} {item.state}\t{display.priority_marker(item.priority)}\t{item.title}\t{item.expand.assignee.name}\t{display.relative(item.updated)}{tail}"
-    if let Err(e) = fmt.Fprintln(w, line) { return Err(f"writing output: {e}") }
+    let mut row = [f"{key}-{item.number}", f"{display.glyph(item.state)} {item.state}", display.priority_marker(item.priority), item.title, item.expand.assignee.name, display.relative(item.updated)]
+    if item.emoji != "" { row = row.append(item.emoji) }
+    rows = rows.append(row)
   }
-  if let Err(e) = w.Flush() { return Err(f"writing output: {e}") }
+  if let Err(e) = fmt.Fprint(os.Stdout, display.table(rows)) { return Err(f"writing output: {e}") }
   Ok(())
 }
 
-fn view(args: Slice<string>) -> Result<(), string> {
+fn view(input: flags.CommandInput) -> Result<(), string> {
   let spec = issue_view_spec()
-  let p = flags.parse(spec, args, 3, true, flags.usage("lll issue view", spec, "[KEY-123]"))?
+  let p = input.parsed
   let id = p.first()
   let json_mode = p.given("--json")
   let raw_mode = p.given("--raw")
@@ -833,20 +762,25 @@ fn view(args: Slice<string>) -> Result<(), string> {
   )?
 
   if open_web {
-    let target = issue_url(fetch_issue(resolved)?)?
+    let target = issue_url(records.fetch_issue(resolved)?)?
     fmt.Println(f"Opening {target}")
     return open_url(target)
   }
 
-  let record = fetch_issue_record(resolved)?
-  if json_mode {
-    fmt.Println(record)
-    return Ok(())
-  }
-
+  let record = records.fetch_issue_record(resolved)?
   let mut full = models.Issue { .. }
   if let Err(e) = json.Unmarshal(record.bytes(), &full) {
     return Err(f"decoding issue: {e}")
+  }
+  if json_mode {
+    fmt.Println(issue_view_json(
+      record,
+      records.fetch_comments(full.id)?,
+      fetch_claim(full.id)?,
+      fetch_issue_docs(full.id)?,
+      findings_for_issue(full)?,
+    )?)
+    return Ok(())
   }
 
   // --raw: the issue as markdown, no chrome. For piping, and for an agent that
@@ -857,7 +791,11 @@ fn view(args: Slice<string>) -> Result<(), string> {
       fmt.Println("")
       fmt.Println(full.description)
     }
-    let comments = fetch_comments(full.id)?
+    let comments = records.fetch_comments(full.id)?
+    if !full.attachments.is_empty() {
+      fmt.Println("\n## Attachments")
+      for name in full.attachments { fmt.Println(f"- {name}") }
+    }
     if comments.length() > 0 {
       fmt.Println("")
       fmt.Println("## Comments")
@@ -907,6 +845,10 @@ fn view(args: Slice<string>) -> Result<(), string> {
   }
   fmt.Println(f"Project:   {project}")
   fmt.Println(f"Labels:    {labels}")
+  if !full.attachments.is_empty() {
+    fmt.Println("Attachments:")
+    for name in full.attachments { fmt.Println(f"  {name}") }
+  }
   let linked_docs = fetch_issue_docs(full.id)?
   if linked_docs.length() > 0 {
     let slugs = linked_docs.map(|d| d.slug)
@@ -964,7 +906,7 @@ fn view(args: Slice<string>) -> Result<(), string> {
     }
   }
 
-  let comments = fetch_comments(full.id)?
+  let comments = records.fetch_comments(full.id)?
   if comments.length() > 0 {
     fmt.Println("")
     fmt.Println("Comments:")
@@ -972,6 +914,46 @@ fn view(args: Slice<string>) -> Result<(), string> {
     print_comments(comments)
   }
   Ok(())
+}
+
+/// Keep every server field intact while exposing the handoff context that
+/// the normal view already shows. RawMessage preserves unknown fields and
+/// exact numbers instead of decoding arbitrary records through float64.
+fn issue_view_json(
+  record: string,
+  comments: Slice<models.Comment>,
+  claim: Option<models.Claim>,
+  docs: Slice<models.Doc>,
+  findings: Slice<models.Doc>,
+) -> Result<string, string> {
+  let mut fields = Map.new<string, json.RawMessage>()
+  if let Err(e) = json.Unmarshal(record.bytes(), &fields) { return Err(f"decoding issue JSON: {e}") }
+  let comments_json = match json.Marshal(comments) {
+    Ok(data) => data as json.RawMessage,
+    Err(e) => return Err(f"encoding comments: {e}"),
+  }
+  fields["comments"] = if comments.is_empty() { "[]".bytes() as json.RawMessage } else { comments_json }
+  fields["docs"] = doc_context_json(docs)?
+  fields["findings"] = doc_context_json(findings)?
+  fields["claim"] = match claim {
+    Some(held) => match json.Marshal(held) {
+      Ok(data) => data as json.RawMessage,
+      Err(e) => return Err(f"encoding claim: {e}"),
+    },
+    None => "null".bytes() as json.RawMessage,
+  }
+  match json.Marshal(fields) {
+    Ok(data) => Ok(data as string),
+    Err(e) => Err(f"encoding issue JSON: {e}"),
+  }
+}
+
+fn doc_context_json(docs: Slice<models.Doc>) -> Result<json.RawMessage, string> {
+  if docs.is_empty() { return Ok("[]".bytes() as json.RawMessage) }
+  match json.Marshal(docs) {
+    Ok(data) => Ok(data as json.RawMessage),
+    Err(e) => Err(f"encoding document context: {e}"),
+  }
 }
 
 /// The '## Related findings' block of `lll issue view --raw` — same list
@@ -991,19 +973,20 @@ fn print_findings_raw(full: models.Issue) -> Result<(), string> {
   Ok(())
 }
 
-fn update(args: Slice<string>) -> Result<(), string> {
+fn update(input: flags.CommandInput) -> Result<(), string> {
   let spec = issue_update_spec()
   let usage = flags.usage("lll issue update", spec, "[KEY-123]")
-  let p = flags.parse(spec, args, 3, true, usage)?
+  let p = input.parsed
   let id = p.first()
   let mut state = ""
-  if p.given("--state") { state = check_state(p.one("--state"))? }
+  if p.given("--state") { state = query.state(p.one("--state"))? }
   let mut priority = -1
   if p.given("--priority") { priority = check_priority(p.one("--priority"))? }
   let assignee_name = p.one("--assignee")
   let label_names = p.all("--label")
   let project_name = p.one("--project")
   let title = p.one("--title")
+  let project_set = p.given("--project")
   let title_set = p.given("--title")
   let mut description = ""
   if p.given("--description") {
@@ -1017,12 +1000,12 @@ fn update(args: Slice<string>) -> Result<(), string> {
   if p.given("--assignee") && assignee_name == "" {
     return Err("--assignee needs a member name, or 'none' to clear it")
   }
-  if state == "" && priority < 0 && assignee_name == "" && label_names.is_empty() && project_name == "" && !title_set && !description_set && !emoji_set {
+  if state == "" && priority < 0 && assignee_name == "" && label_names.is_empty() && !project_set && !title_set && !description_set && !emoji_set {
     return Err(f"nothing to update — pass at least one flag\nusage: {usage}")
   }
 
   let resolved = resolve_id(id, usage)?
-  let issue = fetch_issue(resolved)?
+  let issue = records.fetch_issue(resolved)?
 
   let mut fields: Slice<string> = []
   // What this update set, for the success line: two fleet agents read
@@ -1036,34 +1019,23 @@ fn update(args: Slice<string>) -> Result<(), string> {
     fields = fields.append("\"assignee\":\"\"")
     changed = changed.append("assignee=none")
   } else if assignee_name != "" {
-    let member = resolve_member(assignee_name)?
-    // A claim is exclusive (TASK-175); --assignee used to overwrite the
-    // holder silently and the board then showed someone the claim did not
-    // (LLL-184). Assigning the holder to themselves is a no-op, anyone else
-    // is refused with the two verbs that do it honestly.
-    if let Some(held) = fetch_claim(issue.id)? {
-      if held.member != member.id {
-        let mut holder = held.expand.member.name
-        if holder == "" { holder = "someone" }
-        let key = f"{issue.expand.team.key}-{issue.number}"
-        return Err(f"{key} is claimed by {holder} ({display.relative(held.created)}) — a claim owns the assignee: 'lll issue release {key}' first, or have {member.name} run 'lll issue claim {key}'")
-      }
-    }
+    let member = records.resolve_member(assignee_name)?
     fields = fields.append("\"assignee\":" + json_quote(member.id)?)
     changed = changed.append(f"assignee={member.name}")
   }
   // The ISSUE's team scopes both name lookups, not the configured one:
   // `lll issue update GRDN-4 --label bug` must mean GRDN's bug even when
   // LLL_TEAM says otherwise.
-  if project_name != "" {
-    let project = resolve_project(issue.team, project_name)?
-    fields = fields.append("\"project\":" + json_quote(project.id)?)
-    changed = changed.append(f"project={project.name}")
+  if project_set {
+    let project_id = if project_name == "" { "" } else { records.resolve_project(issue.team, project_name)?.id }
+    fields = fields.append("\"project\":" + json_quote(project_id)?)
+    let project_change = if project_name == "" { "project=none" } else { f"project={project_name}" }
+    changed = changed.append(project_change)
   }
   if !label_names.is_empty() {
     let mut label_ids: Slice<string> = []
     for name in label_names {
-      label_ids = label_ids.append(resolve_label(issue.team, name)?.id)
+      label_ids = label_ids.append(records.resolve_label(issue.team, name)?.id)
     }
     let encoded = match json.Marshal(label_ids) {
       Ok(b) => b as string,
@@ -1079,36 +1051,42 @@ fn update(args: Slice<string>) -> Result<(), string> {
   }
   // `--emoji ""` clears the marker, so this one keys off the flag, not the value.
   if emoji_set { fields = fields.append("\"emoji\":" + json_quote(emoji)?); changed = changed.append(f"emoji={emoji}") }
-  let _ = pb.patch(
-    f"/api/collections/issues/records/{issue.id}",
-    "{" + strings.Join(fields, ",") + "}",
-  )?
-  // Clearing the assignee under a claim used to leave "Claimed: NAME" with
-  // nobody assigned: held but unowned, a state the fleet replay found three
-  // agents reading as "already mine". The claim goes with the assignee.
+  let payload = "{" + strings.Join(fields, ",") + "}"
   let mut released = ""
-  if assignee_name == "none" {
-    if let Some(held) = fetch_claim(issue.id)? {
-      let _ = pb.delete(f"/api/collections/claims/records/{held.id}")?
-      let mut name = held.expand.member.name
-      if name == "" { name = "someone" }
-      released = f" (released {name}'s claim)"
-    }
+  if assignee_name != "" {
+    let observed = claims.observed_id(issue.id)?
+    let result = claims.update_assignment(issue.id, observed, payload).map_err(|e| {
+      let key = f"{issue.expand.team.key}-{issue.number}"
+      if strings.Contains(e, "is claimed by") {
+        f"{key}: {e} — 'lll issue release {key}' gives it back"
+      } else { f"{key}: {e}" }
+    })?
+    if result.claim_id != "" { released = f" (released {result.member_name}'s claim)" }
+  } else {
+    let _ = pb.patch(f"/api/collections/issues/records/{issue.id}", payload)?
   }
   fmt.Println(f"Updated {issue.expand.team.key}-{issue.number}: {strings.Join(changed, ", ")}{released}")
   Ok(())
 }
 
-fn close_issue(args: Slice<string>) -> Result<(), string> {
+fn close_issue(input: flags.CommandInput) -> Result<(), string> {
   let usage = "lll issue close [KEY-123]"
-  let id = positional_id(args, usage)?
+  let id = input.parsed.first()
   let resolved = resolve_id(id, usage)?
-  let issue = fetch_issue(resolved)?
+  let issue = records.fetch_issue(resolved)?
+  let claim = fetch_claim(issue.id)?
   let _ = pb.patch(
     f"/api/collections/issues/records/{issue.id}",
     "{\"state\":\"done\"}",
   )?
   fmt.Println(f"Closed {issue.expand.team.key}-{issue.number} ● done")
+  if let Some(held) = claim {
+    let mut holder = held.expand.member.name
+    if holder == "" { holder = "an unknown member" }
+    fmt.Println(f"Claim retained by {holder}. To release it explicitly:")
+    fmt.Println(f"  lll issue release {issue.expand.team.key}-{issue.number}")
+    fmt.Println("Release also clears the assignee if it still matches the claim holder.")
+  }
   Ok(())
 }
 
@@ -1117,46 +1095,65 @@ fn close_issue(args: Slice<string>) -> Result<(), string> {
 /// job is "record that I am on this" never wanted git touched. The state
 /// change is the command; the branch and the work-site stamp are the extra.
 fn issue_start_spec() -> Slice<flags.Flag> {
-  [
+  flags.with_team([
     flags.Flag {
       name: "--branch",
       help: "also git switch -c key-number-slug in the current repo and\nrecord the work site (branch, host, path) on the issue",
       ..,
     },
-  ]
+  ])
 }
 
-fn start(args: Slice<string>) -> Result<(), string> {
+fn start(input: flags.CommandInput) -> Result<(), string> {
   let spec = issue_start_spec()
   let usage = flags.usage("lll issue start", spec, "[KEY-123]")
-  let p = flags.parse(spec, args, 3, true, usage)?
+  let p = input.parsed
+  let with_branch = p.given("--branch")
+  if with_branch && !gitctx.in_repo() {
+    return Err("--branch needs a git repository: run it from inside the one the work happens in; issue state unchanged")
+  }
   let resolved = resolve_id(p.first(), usage)?
-  let issue = fetch_issue(resolved)?
-  let _ = pb.patch(
+  let issue = records.fetch_issue(resolved)?
+  let key = f"{issue.expand.team.key}-{issue.number}"
+  let branch = gitctx.branch_name(issue.expand.team.key, issue.number, issue.title)
+
+  // Git is a local prerequisite for the explicit combined operation. Do it
+  // before the remote write so a refused switch cannot start the issue.
+  if with_branch {
+    let created = match gitctx.switch_branch(branch) {
+      Ok(created) => created,
+      Err(reason) => return Err(f"{reason}\nIssue {key} state unchanged; branch setup failed."),
+    }
+    fmt.Println(f"Branch: {branch}")
+    if created {
+      fmt.Println(f"Created and switched to branch '{branch}'")
+    } else {
+      fmt.Println(f"Switched to existing branch '{branch}'")
+    }
+  }
+  if let Err(reason) = pb.patch(
     f"/api/collections/issues/records/{issue.id}",
     "{\"state\":\"in-progress\"}",
-  )?
-  let key = issue.expand.team.key
-  fmt.Println(f"Started {key}-{issue.number}: {issue.title} (◐ in-progress)")
-  if !p.given("--branch") { return Ok(()) }
-
-  if !gitctx.in_repo() {
-    return Err("--branch needs a git repository: run it from inside the one the work happens in")
+  ) {
+    if with_branch {
+      // A lost response does not prove the server rejected the write. Never
+      // undo Git automatically: report the known local outcome and how to
+      // inspect the remote state before retrying.
+      return Err(f"Git is on branch '{branch}', but starting {key} could not be confirmed: {reason}\nInspect with 'lll issue view {key}' before retrying.")
+    }
+    return Err(reason)
   }
-  let branch = gitctx.branch_name(key, issue.number, issue.title)
-  fmt.Println(f"Branch: {branch}")
-  let created = gitctx.switch_branch(branch)?
-  if created {
-    fmt.Println(f"Created and switched to branch '{branch}'")
-  } else {
-    fmt.Println(f"Switched to existing branch '{branch}'")
+  fmt.Println(f"Started {key}: {issue.title} (◐ in-progress)")
+  if with_branch {
+    if let Err(reason) = record_work_site(issue, branch) {
+      return Err(f"{key} is in-progress and Git is on '{branch}', but recording the work site could not be confirmed: {reason}\nInspect with 'lll issue view {key}' before retrying.")
+    }
   }
-  record_work_site(issue, branch)?
   Ok(())
 }
 
 /// TASK-205: stamp the work-site slot (work_branch/work_host/work_path) onto
-/// the issue, after the branch exists. The slot holds the CURRENT site only:
+/// the issue when starting on an existing matching branch. The slot holds the CURRENT site only:
 /// a start from a different site overwrites it and leaves an auto-comment
 /// recording the displaced one, a same-site restart is silent, and nothing
 /// ever clears the slot — a done issue keeps which branch shipped it, and
@@ -1242,131 +1239,69 @@ fn actor() -> Result<Option<Actor>, string> {
     }
   }
   if cfg.me == "" { return Ok(None) }
-  let Some(m) = find_member(cfg.me)? else {
+  let Some(m) = records.find_member(cfg.me)? else {
     return Err(f"'me' is set to '{cfg.me}' but no such member exists — see 'lll member add', or 'lll config set me <name>' to change who you are")
   }
   Ok(Some(Actor { id: m.id, name: m.name }))
 }
 
-/// Take an issue exclusively. The arbitration is a single INSERT into
-/// `claims`, which is UNIQUE on `issue`: two agents racing both POST the row
-/// and SQLite admits exactly one, so the loser learns it lost. Nothing here
-/// reads the collection before writing to it — a "is it free?" GET followed by
-/// a POST is not a claim, it is the race with extra steps.
-///
-/// Winning then sets the assignee, so the board, `issue list` and `issue view`
-/// show the holder without joining a second collection. That PATCH is a
-/// consequence of having won, never the thing that decides it: `issue update
-/// --assignee` remains last-write-wins and is not a claim.
-fn claim(args: Slice<string>) -> Result<(), string> {
+/// Resolve the actor and delegate acquisition to the shared claims client.
+/// The server transaction acquires the exclusive hold and assigns its holder
+/// together; the unique issue index also protects against duplicate hold rows.
+/// Assignment edits use their own observed-claim transaction and cannot replace
+/// another holder. See gopb/claims.go and gopb/assignment.go for that policy.
+fn claim(input: flags.CommandInput) -> Result<(), string> {
   let usage = "lll issue claim [KEY-123]"
-  let id = positional_id(args, usage)?
+  let id = input.parsed.first()
   let resolved = resolve_id(id, usage)?
   let Some(member) = actor()? else {
     return Err(
       "claiming needs a name: a member token names you; with a superuser token set 'me' ('lll config set me <name>' or LLL_ME)",
     )
   }
-  let issue = fetch_issue(resolved)?
+  let issue = records.fetch_issue(resolved)?
   let key = f"{issue.expand.team.key}-{issue.number}"
 
-  let payload = match json.Marshal(
-    models.NewClaim { issue: issue.id, member: member.id },
-  ) {
-    Ok(p) => p as string,
-    Err(e) => return Err(f"encoding claim: {e}"),
+  let result = claims.acquire(issue.id, member.id).map_err(|e| {
+    if strings.Contains(e, "already claimed by") {
+      f"{key}: {e} — 'lll issue release {key}' gives it back"
+    } else { e }
+  })?
+  if result.already_owned {
+    fmt.Println(f"Claimed {key} for {result.member_name} (already yours since {display.relative(result.created)})")
+  } else {
+    fmt.Println(f"Claimed {key} for {result.member_name}")
   }
-  if let Err(e) = pb.post("/api/collections/claims/records", payload) {
-    // Ask who holds it rather than parsing PocketBase's error body: the index
-    // rejects a duplicate with one shape and its pre-flight validator with
-    // another, and a holder is the answer in both. No holder means the POST
-    // failed for some other reason, so the raw error is what to report.
-    let Ok(held) = fetch_claim(issue.id) else {
-      return Err(e)
-    }
-    let Some(holder) = held else {
-      return Err(e)
-    }
-    // Held by the caller already: that is success, not a conflict. The
-    // fleet replay hit this when task 7 cleared the assignee under a claim
-    // task 3 had made, and every later claim by the holder was refused.
-    // Re-setting the assignee is the point of claiming again.
-    if holder.member == member.id {
-      let _ = pb.patch(
-        f"/api/collections/issues/records/{issue.id}",
-        "{\"assignee\":" + json_quote(member.id)? + "}",
-      )?
-      fmt.Println(f"Claimed {key} for {member.name} (already yours since {display.relative(holder.created)})")
-      return Ok(())
-    }
-    let mut name = holder.expand.member.name
-    if name == "" { name = "someone else" }
-    return Err(
-      f"{key} is already claimed by {name} ({display.relative(holder.created)}) — 'lll issue release {key}' gives it back",
-    )
-  }
-  let _ = pb.patch(
-    f"/api/collections/issues/records/{issue.id}",
-    "{\"assignee\":" + json_quote(member.id)? + "}",
-  )?
-  fmt.Println(f"Claimed {key} for {member.name}")
   Ok(())
 }
 
-/// Give a claim back: delete the row, and clear the assignee the claim set.
-///
-/// Unowned on purpose — anyone can release anyone's claim, and the message
-/// says whose it was. There is no auth yet (ADR-1, task-32), so an ownership
-/// check would be honour-system anyway, and refusing would strand every issue
-/// whose holder never came back. Exclusivity is a property of `claim`; this is
-/// how a hold ends.
-fn release(args: Slice<string>) -> Result<(), string> {
+/// Any authenticated workspace member can release an observed hold. The
+/// server atomically removes that exact claim and clears only its assignment.
+fn release(input: flags.CommandInput) -> Result<(), string> {
   let usage = "lll issue release [KEY-123]"
-  let id = positional_id(args, usage)?
-  let resolved = resolve_id(id, usage)?
-  let issue = fetch_issue(resolved)?
+  let resolved = resolve_id(input.parsed.first(), usage)?
+  let issue = records.fetch_issue(resolved)?
   let key = f"{issue.expand.team.key}-{issue.number}"
-
-  let Some(held) = fetch_claim(issue.id)? else {
-    return Err(f"{key} is not claimed")
-  }
-  let _ = pb.delete(f"/api/collections/claims/records/{held.id}")?
-  // Only the assignee this claim wrote: an assignment made some other way is
-  // not the claim's to erase.
-  if issue.assignee == held.member {
-    let _ = pb.patch(
-      f"/api/collections/issues/records/{issue.id}",
-      "{\"assignee\":\"\"}",
-    )?
-  }
-  let mut name = held.expand.member.name
-  if name == "" { name = "an unknown member" }
-  fmt.Println(f"Released {key} (was {name}'s)")
+  let Some(held) = claims.fetch(issue.id)? else { return Err(f"{key} is not claimed") };
+  let result = claims.release(issue.id, held.id)?
+  let assignment = if result.cleared_assignee { "cleared assignee" } else { "assignment unchanged" }
+  fmt.Println(f"Released {key} (was {result.member_name}'s); {assignment}")
   Ok(())
 }
 
-/// The claim on one issue, if it has one, with its holder expanded. `claims`
-/// is UNIQUE on `issue`, so there is at most one row to find.
+/// Compatibility name for command/page reads; storage ownership is in claims.
 fn fetch_claim(issue_id: string) -> Result<Option<models.Claim>, string> {
-  let filter = url.QueryEscape(f"issue={query.quote(issue_id)}")
-  let mut list = models.ClaimList { .. }
-  pb.fetch(
-    f"/api/collections/claims/records?perPage=1&filter={filter}&expand=member",
-    "claims",
-    &list,
-  )?
-  Ok(list.items.get(0))
+  claims.fetch(issue_id)
 }
 
-fn delete_issue(args: Slice<string>) -> Result<(), string> {
-  let spec = issue_delete_spec()
-  let p = flags.parse(spec, args, 3, true, flags.usage("lll issue delete", spec, "KEY-123"))?
+fn delete_issue(input: flags.CommandInput) -> Result<(), string> {
+  let p = input.parsed
   let id = p.first()
   let force = p.given("--force")
   // Deleting by inferred branch is too dangerous; the ID must be explicit.
   if id == "" { return Err("usage: lll issue delete KEY-123 [--force]") }
 
-  let issue = fetch_issue(id)?
+  let issue = records.fetch_issue(id)?
   let label = f"{issue.expand.team.key}-{issue.number}"
   if !force {
     fmt.Print(f"delete {label}? [y/N] ")
@@ -1384,14 +1319,10 @@ fn delete_issue(args: Slice<string>) -> Result<(), string> {
   Ok(())
 }
 
-fn comment(args: Slice<string>) -> Result<(), string> {
-  // 'comment edit KEY N ...' and 'comment delete KEY N' (TASK-320) are the
-  // two sub-forms; everything else is add-or-list, below.
-  let sub = args.get(3).unwrap_or("")
-  if sub == "edit" || sub == "delete" { return comment_mutate(sub, args) }
+fn comment(input: flags.CommandInput) -> Result<(), string> {
   let spec = issue_comment_spec()
   let usage = flags.usage("lll issue comment", spec, "[KEY-123] [\"body\"]")
-  let p = flags.parse_n(spec, args, 3, 2, "")?
+  let p = input.parsed
   let id = p.first()
   // A bare second word is the body, as `create` takes a bare title and
   // `member add` a bare name. Ten of thirty first-time agents in one fleet run
@@ -1409,10 +1340,10 @@ fn comment(args: Slice<string>) -> Result<(), string> {
   }
 
   let resolved = resolve_id(id, usage)?
-  let issue = fetch_issue(resolved)?
+  let issue = records.fetch_issue(resolved)?
 
   if !body_set {
-    let comments = fetch_comments(issue.id)?
+    let comments = records.fetch_comments(issue.id)?
     if comments.is_empty() {
       fmt.Println("No comments.")
       return Ok(())
@@ -1454,38 +1385,51 @@ fn comment(args: Slice<string>) -> Result<(), string> {
   Ok(())
 }
 
-fn url_cmd(args: Slice<string>) -> Result<(), string> {
+fn url_cmd(input: flags.CommandInput) -> Result<(), string> {
   let usage = "lll issue url [KEY-123]"
-  let id = positional_id(args, usage)?
+  let id = input.parsed.first()
   let resolved = resolve_id(id, usage)?
-  let target = issue_url(fetch_issue(resolved)?)?
+  let target = issue_url(records.fetch_issue(resolved)?)?
   fmt.Println(target)
   Ok(())
 }
 
-fn id_cmd(args: Slice<string>) -> Result<(), string> {
+fn id_cmd(input: flags.CommandInput) -> Result<(), string> {
   let usage = "lll issue id [KEY-123]"
-  let id = positional_id(args, usage)?
+  let id = input.parsed.first()
   let resolved = resolve_id(id, usage)?
-  let issue = fetch_issue(resolved)?
+  let issue = records.fetch_issue(resolved)?
   fmt.Println(f"{issue.expand.team.key}-{issue.number}")
   Ok(())
 }
 
-fn title_cmd(args: Slice<string>) -> Result<(), string> {
+fn title_cmd(input: flags.CommandInput) -> Result<(), string> {
   let usage = "lll issue title [KEY-123]"
-  let id = positional_id(args, usage)?
+  let id = input.parsed.first()
   let resolved = resolve_id(id, usage)?
-  let issue = fetch_issue(resolved)?
+  let issue = records.fetch_issue(resolved)?
   fmt.Println(issue.title)
+  Ok(())
+}
+
+fn branch_name_cmd(input: flags.CommandInput) -> Result<(), string> {
+  let usage = "lll issue branch-name [KEY-123]"
+  let p = input.parsed
+  let resolved = resolve_id(p.first(), usage)?
+  let issue = records.fetch_issue(resolved)?
+  fmt.Println(gitctx.branch_name(
+    issue.expand.team.key,
+    issue.number,
+    issue.title,
+  ))
   Ok(())
 }
 
 /// Thin wrapper over the GitHub CLI: gh owns pushing checks, prompts, and
 /// errors — we only supply the KEY-prefixed title and an issue-linking body.
-fn pr_cmd(args: Slice<string>) -> Result<(), string> {
+fn pr_cmd(input: flags.CommandInput) -> Result<(), string> {
   let usage = "lll issue pr [KEY-123]"
-  let id = positional_id(args, usage)?
+  let id = input.parsed.first()
   let resolved = resolve_id(id, usage)?
 
   let mut gh = ""
@@ -1496,10 +1440,12 @@ fn pr_cmd(args: Slice<string>) -> Result<(), string> {
     ),
   }
 
-  let issue = fetch_issue(resolved)?
+  let issue = records.fetch_issue(resolved)?
   let key = f"{issue.expand.team.key}-{issue.number}"
-  let mut body = issue_url(issue)?
-  if issue.description != "" { body = f"{body}\n\n{issue.description}" }
+  let (body, linked_only) = pr_body(issue_url(issue)?, issue.description)?
+  if linked_only {
+    let _ = fmt.Fprintln(os.Stderr, "issue description exceeds the PR body limit; linking to the full description instead")
+  }
 
   let mut cmd = exec.Command(
     gh,
@@ -1507,14 +1453,26 @@ fn pr_cmd(args: Slice<string>) -> Result<(), string> {
     "create",
     "--title",
     f"{key}: {issue.title}",
-    "--body",
-    body,
+    "--body-file",
+    "-",
   )
-  cmd.Stdin = Some(os.Stdin)
+  cmd.Stdin = Some(strings.NewReader(body))
   cmd.Stdout = Some(os.Stdout)
   cmd.Stderr = Some(os.Stderr)
   if let Err(e) = cmd.Run() { return Err(f"gh pr create: {e}") }
   Ok(())
+}
+
+/// Keep the issue as the authoritative full text when its description is
+/// larger than GitHub accepts. Never silently publish a truncated excerpt.
+fn pr_body(link: string, description: string) -> Result<(string, bool), string> {
+  let body = if description == "" { link } else { f"{link}\n\n{description}" }
+  if utf8.RuneCountInString(body) <= 65536 { return Ok((body, false)) }
+  let fallback = f"{link}\n\nThe full description is on the linked issue; it exceeds the pull request body limit."
+  if utf8.RuneCountInString(fallback) > 65536 {
+    return Err("the issue URL exceeds the PR body limit; check the configured web_url")
+  }
+  Ok((fallback, true))
 }
 
 /// Web page URL for an issue: <web_url>/issue/KEY-123.
@@ -1523,17 +1481,6 @@ fn issue_url(issue: models.Issue) -> Result<string, string> {
   Ok(f"{base}/issue/{issue.expand.team.key}-{issue.number}")
 }
 
-/// An issue's comments, oldest first, author expanded.
-fn fetch_comments(issue_id: string) -> Result<Slice<models.Comment>, string> {
-  let filter = url.QueryEscape(f"issue={query.quote(issue_id)}")
-  let mut comments = models.CommentList { .. }
-  pb.fetch(
-    f"/api/collections/comments/records?filter={filter}&sort=created&expand=author&perPage=200",
-    "comments",
-    &comments,
-  )?
-  Ok(comments.items)
-}
 
 /// Print comments as "author (3h ago)" then the indented body.
 fn print_comments(comments: Slice<models.Comment>) {
@@ -1553,18 +1500,24 @@ fn print_comments(comments: Slice<models.Comment>) {
 /// position 'comment KEY' prints. Your own comments only, unless --force:
 /// the author is the token's member (or 'me' under a superuser token), and
 /// a superuser token with no 'me' may change anything.
-fn comment_mutate(verb: string, args: Slice<string>) -> Result<(), string> {
+fn comment_commands() -> Slice<flags.Command> {
+  [
+    flags.Command { name: "edit", summary: "edit a numbered comment", page: "", spec: comment_mutate_spec("edit"), positional: "KEY N", run: |input| comment_mutate("edit", input.parsed) },
+    flags.Command { name: "delete", summary: "delete a numbered comment", page: "", spec: comment_mutate_spec("delete"), positional: "KEY N", run: |input| comment_mutate("delete", input.parsed) },
+  ]
+}
+
+fn comment_mutate(verb: string, p: flags.Parsed) -> Result<(), string> {
   let spec = comment_mutate_spec(verb)
   let usage = flags.usage(f"lll issue comment {verb}", spec, "KEY-123 N")
-  let p = flags.parse_n(spec, args, 4, 2, usage)?
   if p.first() == "" || p.nth(1) == "" { return Err(f"usage: {usage}") }
   let resolved = resolve_id(p.first(), usage)?
-  let issue = fetch_issue(resolved)?
+  let issue = records.fetch_issue(resolved)?
   let key = f"{issue.expand.team.key}-{issue.number}"
   let Ok(n) = strconv.Atoi(p.nth(1)) else {
     return Err(f"'{p.nth(1)}' is not a comment number — 'lll issue comment {key}' numbers them")
   }
-  let comments = fetch_comments(issue.id)?
+  let comments = records.fetch_comments(issue.id)?
   if n < 1 || n > comments.length() {
     return Err(f"{key} has {comments.length()} comments; there is no #{n} — 'lll issue comment {key}' numbers them")
   }
@@ -1617,38 +1570,7 @@ fn comment_mutate_spec(verb: string) -> Slice<flags.Flag> {
   spec
 }
 
-/// Resolve a member by name; unknown names error with the fix.
-fn resolve_member(name: string) -> Result<models.Member, string> {
-  let Some(m) = find_member(name)? else {
-    return Err(f"no member named '{name}' — see 'lll member list'")
-  }
-  Ok(m)
-}
 
-/// Parse `[KEY-123]` as the only allowed argument (verbs without flags).
-fn positional_id(args: Slice<string>, usage: string) -> Result<string, string> {
-  let mut id = ""
-  let mut i = 3
-  while i < args.length() {
-    let arg = args[i]
-    if arg.starts_with("-") {
-      return Err(f"unknown flag: '{arg}'\nusage: {usage}")
-    }
-    if id != "" { return Err(f"unexpected argument: '{arg}'") }
-    id = arg
-    i += 1
-  }
-  Ok(id)
-}
-
-/// Resolution order: explicit arg > current git branch (eng-12-slug -> ENG-12)
-/// > error with a hint.
-/// Accept a pasted board URL anywhere a KEY-123 is expected — the same courtesy
-/// mb-shares' `share` extends to its slugs. Strips `scheme://host/`, an
-/// `issue/` path prefix, a query string, a fragment and a trailing slash;
-/// anything that is not shaped like a URL is returned untouched, so a bare key
-/// stays a bare key and a bad value still fails downstream with the usual "not
-/// an issue ID" message.
 fn deslug(arg: string) -> string {
   // All splitting, no index arithmetic: byte offsets and rune indices disagree
   // on non-ASCII input and panic. See realtime.split_field.
@@ -1686,6 +1608,15 @@ fn resolve_id(explicit: string, usage: string) -> Result<string, string> {
       f"no issue ID given and no git branch to infer one from\nusage: {usage}",
     )
   }
+  let teams = records.list_teams()?
+  let mut matches: Slice<string> = []
+  for team in teams.items {
+    if let Some(id) = gitctx.issue_id_for_team(branch, team.key) { matches = matches.append(id) }
+  }
+  if matches.length() > 1 {
+    return Err(f"branch '{branch}' is ambiguous between {strings.Join(matches, ", ")}; pass the issue ID explicitly")
+  }
+  if matches.length() == 1 { return Ok(matches[0]) }
   let Some(id) = gitctx.issue_id_from_branch(branch) else {
     return Err(
       f"no issue ID given and current branch '{branch}' doesn't look like eng-123-...\nusage: {usage}",
@@ -1694,63 +1625,8 @@ fn resolve_id(explicit: string, usage: string) -> Result<string, string> {
   Ok(id)
 }
 
-/// Split a KEY-123 identifier into its team key and issue number. The key may
-/// itself contain hyphens (`ENG-DEV-12` is team `ENG-DEV`, issue 12), so the
-/// number is the last segment and the key is everything before it.
-fn split_issue_key(id: string) -> Result<(string, int), string> {
-  // Names the shape AND the position: three of thirty fleet agents typed
-  // 'lll issue comment add KEY ...' and read this as the key being wrong.
-  let bad_id = f"'{id}' is not an issue ID (expected KEY-123, e.g. ENG-1); the ID comes right after the verb, no sub-verb — 'lll issue <verb> -h' shows the form"
-  // Split, not LastIndex + substring: index arithmetic mixes byte offsets with
-  // rune indices and panics on non-ASCII input. See realtime.split_field.
-  let parts = strings.Split(id, "-")
-  if parts.length() < 2 { return Err(bad_id) }
-  let number_part = parts[parts.length() - 1]
-  let team_key = strings.TrimSuffix(id, f"-{number_part}")
-  if team_key == "" || number_part == "" { return Err(bad_id) }
-  let Ok(number) = strconv.Atoi(number_part) else {
-    return Err(bad_id)
-  }
-  Ok((team_key, number))
-}
 
-/// Fetch an issue by KEY-123 and return the raw PB record JSON (team,
-/// assignee, labels, project expanded).
-fn fetch_issue_record(id: string) -> Result<string, string> {
-  let (team_key, number) = split_issue_key(id)?
 
-  let not_found = f"issue {id} not found — check 'lll issue list' or LLL_TEAM"
-  let Some(team) = find_team(team_key)? else {
-    return Err(not_found)
-  }
-
-  let filter = url.QueryEscape(
-    f"{query.filter(team.id, "", "", "", "", "")} && number={number}",
-  )
-  let mut issues = models.IssueList { .. }
-  pb.fetch(
-    f"/api/collections/issues/records?filter={filter}&perPage=1",
-    "issues",
-    &issues,
-  )?
-  let Some(item) = issues.items.get(0) else {
-    return Err(not_found)
-  }
-
-  pb.get(
-    f"/api/collections/issues/records/{item.id}?expand=team,assignee,labels,project,blocked_by",
-  )
-}
-
-/// fetch_issue_record, decoded.
-fn fetch_issue(id: string) -> Result<models.Issue, string> {
-  let record = fetch_issue_record(id)?
-  let mut full = models.Issue { .. }
-  if let Err(e) = json.Unmarshal(record.bytes(), &full) {
-    return Err(f"decoding issue: {e}")
-  }
-  Ok(full)
-}
 
 /// JSON-encode a string value (quotes + escaping).
 fn json_quote(value: string) -> Result<string, string> {
@@ -1760,48 +1636,14 @@ fn json_quote(value: string) -> Result<string, string> {
   }
 }
 
-fn find_team(key: string) -> Result<Option<models.Team>, string> {
-  let filter = url.QueryEscape(f"key={query.quote(key)}")
-  let mut result = models.TeamList { .. }
-  pb.fetch(f"/api/collections/teams/records?filter={filter}", "teams", &result)?
-  Ok(result.items.find(|t| t.key == key))
-}
 
 // ------------------------------------------------------------- doc links
-
-/// Parse the two positional arguments `KEY SLUG` (link/unlink take no
-/// flags; positional_id handles only one).
-fn two_positional(
-  args: Slice<string>,
-  usage: string,
-) -> Result<(string, string), string> {
-  let mut first = ""
-  let mut second = ""
-  let mut i = 3
-  while i < args.length() {
-    let arg = args[i]
-    if arg.starts_with("-") {
-      return Err(f"unknown flag: '{arg}'\nusage: {usage}")
-    }
-    if second != "" { return Err(f"unexpected argument: '{arg}'") }
-    if first == "" { first = arg } else { second = arg }
-    i += 1
-  }
-  Ok((first, second))
-}
 
 /// Docs linked to an issue. The issue -> doc direction is not stored: it is
 /// one `?=` filter over docs.issues, which is the whole reason links are a
 /// relation and not a write-once reference on the issue.
 fn fetch_issue_docs(issue_id: string) -> Result<Slice<models.Doc>, string> {
-  let filter = url.QueryEscape(f"issues.id ?= {query.quote(issue_id)}")
-  let mut docs = models.DocList { .. }
-  pb.fetch(
-    f"/api/collections/docs/records?filter={filter}&sort=slug&perPage=200",
-    "docs",
-    &docs,
-  )?
-  Ok(docs.items)
+  fetch_docs(f"issues.id ?= {query.quote(issue_id)}", "slug", "")
 }
 
 fn set_doc_issues(
@@ -1835,14 +1677,15 @@ fn cross_team_link(
   )
 }
 
-fn link(args: Slice<string>) -> Result<(), string> {
+fn link(input: flags.CommandInput) -> Result<(), string> {
   let usage = "lll issue link KEY-123 SLUG"
-  let (id, slug) = two_positional(args, usage)?
+  let id = input.parsed.first()
+  let slug = input.parsed.nth(1)
   if id == "" || slug == "" { return Err(f"usage: {usage}") }
   let resolved = resolve_id(id, usage)?
-  let issue = fetch_issue(resolved)?
+  let issue = records.fetch_issue(resolved)?
   let key = f"{issue.expand.team.key}-{issue.number}"
-  let team = current_team()?
+  let team = issue_link_team(issue)?
   let d = fetch_doc(team, slug)?
   cross_team_link(issue, team, d)?
 
@@ -1855,14 +1698,15 @@ fn link(args: Slice<string>) -> Result<(), string> {
   Ok(())
 }
 
-fn unlink(args: Slice<string>) -> Result<(), string> {
+fn unlink(input: flags.CommandInput) -> Result<(), string> {
   let usage = "lll issue unlink KEY-123 SLUG"
-  let (id, slug) = two_positional(args, usage)?
+  let id = input.parsed.first()
+  let slug = input.parsed.nth(1)
   if id == "" || slug == "" { return Err(f"usage: {usage}") }
   let resolved = resolve_id(id, usage)?
-  let issue = fetch_issue(resolved)?
+  let issue = records.fetch_issue(resolved)?
   let key = f"{issue.expand.team.key}-{issue.number}"
-  let team = current_team()?
+  let team = issue_link_team(issue)?
   let d = fetch_doc(team, slug)?
   cross_team_link(issue, team, d)?
 
@@ -1878,16 +1722,23 @@ fn unlink(args: Slice<string>) -> Result<(), string> {
   Ok(())
 }
 
+/// An explicit issue identifies its document namespace outside an attached
+/// directory. Configured scope remains authoritative, including a mismatch.
+fn issue_link_team(issue: models.Issue) -> Result<models.Team, string> {
+  Ok(configured_team()?.unwrap_or(issue.expand.team))
+}
+
 /// `lll issue block KEY BLOCKER`: KEY cannot start until BLOCKER is done.
 /// Refuses a self-block and a cycle (BLOCKER already waits on KEY, at any
 /// depth), since a cycle would make both un-ready forever. The dependency
 /// lives on the blocked issue: one relation field, no second collection.
-fn block(args: Slice<string>) -> Result<(), string> {
+fn block(input: flags.CommandInput) -> Result<(), string> {
   let usage = "lll issue block KEY-123 BLOCKER"
-  let (id, blocker_id) = two_positional(args, usage)?
+  let id = input.parsed.first()
+  let blocker_id = input.parsed.nth(1)
   if id == "" || blocker_id == "" { return Err(f"usage: {usage}") }
-  let issue = fetch_issue(resolve_id(id, usage)?)?
-  let blocker = fetch_issue(resolve_id(blocker_id, usage)?)?
+  let issue = records.fetch_issue(resolve_id(id, usage)?)?
+  let blocker = records.fetch_issue(resolve_id(blocker_id, usage)?)?
   let key = f"{issue.expand.team.key}-{issue.number}"
   let bkey = f"{blocker.expand.team.key}-{blocker.number}"
   if issue.id == blocker.id { return Err(f"{key} cannot block itself") }
@@ -1906,12 +1757,13 @@ fn block(args: Slice<string>) -> Result<(), string> {
   Ok(())
 }
 
-fn unblock(args: Slice<string>) -> Result<(), string> {
+fn unblock(input: flags.CommandInput) -> Result<(), string> {
   let usage = "lll issue unblock KEY-123 BLOCKER"
-  let (id, blocker_id) = two_positional(args, usage)?
+  let id = input.parsed.first()
+  let blocker_id = input.parsed.nth(1)
   if id == "" || blocker_id == "" { return Err(f"usage: {usage}") }
-  let issue = fetch_issue(resolve_id(id, usage)?)?
-  let blocker = fetch_issue(resolve_id(blocker_id, usage)?)?
+  let issue = records.fetch_issue(resolve_id(id, usage)?)?
+  let blocker = records.fetch_issue(resolve_id(blocker_id, usage)?)?
   let key = f"{issue.expand.team.key}-{issue.number}"
   let bkey = f"{blocker.expand.team.key}-{blocker.number}"
   let mut remaining: Slice<string> = []
@@ -1970,4 +1822,9 @@ fn fetch_blocks(issue_id: string) -> Result<Slice<models.Issue>, string> {
   let mut list = models.IssueList { .. }
   pb.fetch(f"/api/collections/issues/records?perPage=200&sort=number&expand=team&filter={filter}", "issues", &list)?
   Ok(list.items)
+}
+
+/// Read the same table used by dispatch and completions.
+pub fn issue_verb_spec(verb: string) -> Slice<flags.Flag> {
+  flags.command_spec(issue_commands(), verb)
 }

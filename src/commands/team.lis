@@ -1,3 +1,4 @@
+import "records"
 import "go:encoding/json"
 import "go:fmt"
 import "go:net/url"
@@ -101,9 +102,9 @@ Three things do NOT follow (TASK-87):
   - OLD-1 mentions inside descriptions and comment bodies are stored text"
 }
 
-fn team_list(args: Slice<string>) -> Result<(), string> {
-  let p = flags.parse(team_list_spec(), args, 3, false, "")?
-  let mut teams = list_teams()?
+fn team_list(input: flags.CommandInput) -> Result<(), string> {
+  let p = input.parsed
+  let mut teams = records.list_teams()?
   // Archived teams are hidden by default — everywhere a team list renders
   // (here, the rail switcher) an archived team is finished work, not a
   // choice. --archived includes them, marked.
@@ -170,10 +171,8 @@ fn team_rename_spec() -> Slice<flags.Flag> {
   ]
 }
 
-fn team_create(args: Slice<string>) -> Result<(), string> {
-  let spec = team_create_spec()
-  let usage = flags.usage("lll team create", spec, "")
-  let p = flags.parse(spec, args, 3, false, usage)?
+fn team_create(input: flags.CommandInput) -> Result<(), string> {
+  let p = input.parsed
   let key = p.one("-k")
   let name = p.one("-n")
 
@@ -201,10 +200,10 @@ struct TeamRenamePatch { key: string, name: string }
 /// board, in `issue list` and in every URL the moment the PATCH lands. What
 /// does not follow is stored text, and the caller has to be told which
 /// (see team_rename_collateral).
-fn team_rename(args: Slice<string>) -> Result<(), string> {
+fn team_rename(input: flags.CommandInput) -> Result<(), string> {
   let spec = team_rename_spec()
   let usage = flags.usage("lll team rename", spec, "KEY")
-  let p = flags.parse(spec, args, 3, true, usage)?
+  let p = input.parsed
   let key = p.first()
   if key == "" {
     return Err(f"usage: {usage}")
@@ -214,14 +213,14 @@ fn team_rename(args: Slice<string>) -> Result<(), string> {
   if new_key == "" && new_name == "" {
     return Err(f"nothing to rename — give -k, -n, or both\nusage: {usage}")
   }
-  let Some(t) = find_team(key)? else {
+  let Some(t) = records.find_team(key)? else {
     return Err(unknown_team(key))
   }
   // teams.key carries a unique index, so a collision would otherwise surface
   // as a raw PocketBase validation error. Saying which key is taken is the
   // more useful answer: the fix is a different key, not a retry.
   if new_key != "" && new_key != t.key {
-    let taken = find_team(new_key)?
+    let taken = records.find_team(new_key)?
     if taken.is_some() {
       return Err(f"a team with key '{new_key}' already exists — see 'lll team list'")
     }
@@ -275,24 +274,16 @@ fn team_rename_collateral(old_key: string, new_key: string) -> Slice<string> {
 /// `lll team set-accent KEY #rrggbb` — TASK-100. The accent was the one
 /// shared field only the web could write (TASK-83's colour picker), which
 /// inverts the rule TASK-83 was built on.
-fn team_set_accent(args: Slice<string>) -> Result<(), string> {
-  // This verb does not pass through dispatch's parse (see `team`), so the
-  // -h guard every other verb inherits is spelled out here: help must answer
-  // before find_team, which is a network call, and before the PATCH.
-  let usage = flags.usage("lll team set-accent", [], "KEY #rrggbb")
-  if args[3..].find(|a| a == "--help" || a == "-h").is_some() {
-    return Err(f"{flags.help_marker()}usage: {usage} (empty '' clears it)")
-  }
-  let Some(key) = args.get(3) else {
+fn team_set_accent(input: flags.CommandInput) -> Result<(), string> {
+  if input.parsed.positional_count() != 2 {
     return Err("usage: lll team set-accent KEY #rrggbb (empty '' clears it)")
   }
-  let Some(raw) = args.get(4) else {
-    return Err("usage: lll team set-accent KEY #rrggbb (empty '' clears it)")
-  }
+  let key = input.parsed.first()
+  let raw = input.parsed.nth(1)
   // The colour is checked before the lookup: a typo is the likelier mistake
   // of the two, and it should not cost a round trip to hear about.
   let hex = accent_value(raw)?
-  let Some(t) = find_team(key)? else {
+  let Some(t) = records.find_team(key)? else {
     return Err(unknown_team(key))
   }
   let payload = match json.Marshal(TeamAccentPatch { accent: hex }) {
@@ -357,16 +348,6 @@ pub fn create_team(key: string, name: string) -> Result<models.Team, string> {
   Ok(created)
 }
 
-/// Every team, key-sorted. Shared by `lll team list` and `lll up`.
-pub fn list_teams() -> Result<models.TeamList, string> {
-  let mut teams = models.TeamList { .. }
-  pb.fetch(
-    "/api/collections/teams/records?perPage=200&sort=key",
-    "teams",
-    &teams,
-  )?
-  Ok(teams)
-}
 
 /// The team `LLL_TEAM` (or `team` in .lll.toml) names, or None when no key
 /// is set. A key naming a team the server does not have is an error either
@@ -375,7 +356,7 @@ pub fn list_teams() -> Result<models.TeamList, string> {
 fn configured_team() -> Result<Option<models.Team>, string> {
   let (cfg, src) = config.load_traced()?
   if cfg.team == "" { return Ok(None) }
-  let Some(t) = find_team(cfg.team)? else {
+  let Some(t) = records.find_team(cfg.team)? else {
     return Err(unknown_configured_team(cfg.team, src.team))
   }
   Ok(Some(t))
@@ -413,7 +394,7 @@ fn current_team() -> Result<models.Team, string> {
 /// neither `create` may leave it unset.
 fn team_flag_or_current(key: string) -> Result<models.Team, string> {
   if key == "" { return current_team() }
-  let Some(t) = find_team(key)? else {
+  let Some(t) = records.find_team(key)? else {
     return Err(unknown_team(key))
   }
   Ok(t)
@@ -437,11 +418,12 @@ fn configured_team_id() -> Result<string, string> {
 /// Refuses a team holding issues rather than cascading: deleting issues is
 /// not what "delete the team I just made by mistake" means, and PocketBase
 /// would happily orphan them.
-fn team_delete(args: Slice<string>) -> Result<(), string> {
-  let Some(key) = args.get(3) else {
+fn team_delete(input: flags.CommandInput) -> Result<(), string> {
+  let key = input.parsed.first()
+  if key == "" {
     return Err("usage: lll team delete KEY")
   }
-  let Some(t) = find_team(key)? else {
+  let Some(t) = records.find_team(key)? else {
     return Err(unknown_team(key))
   }
   let filter = url.QueryEscape(f"team={query.quote(t.id)}")
@@ -487,7 +469,7 @@ fn no_team() -> string {
 /// Unknown-team message naming the fix. Shared by every command that
 /// resolves a team key (same package: src/commands).
 fn unknown_team(key: string) -> string {
-  f"no team with key '{key}' on the server — see 'lll team list', or create it with 'lll team create -k {key} -n \"Name\"'"
+  f"no team with key '{key}' on the server. First inspect 'lll team list --archived'; the team may have been renamed.\nFor an existing team, use 'lll attach -k EXISTING_KEY' to update the attachment, or prefix one command with LLL_TEAM=EXISTING_KEY.\nOnly if you intend a new team, create it with 'lll team create -k {key} -n \"Name\"'."
 }
 
 /// Archived-team refusal naming the fix. Shared by everything that refuses
@@ -502,26 +484,27 @@ fn archived_hint(key: string) -> string {
 #[json]
 struct TeamArchivedPatch { archived: bool }
 
-/// The two archive verbs as `run` entries: Command.run takes args alone, so
-/// the direction each one means is fixed here rather than at the call site.
-fn team_archive(args: Slice<string>) -> Result<(), string> {
-  team_set_archived(args, true)
+/// The archive verbs share parsed inputs; each fixes its lifecycle direction
+/// before entering the common implementation.
+fn team_archive(input: flags.CommandInput) -> Result<(), string> {
+  team_set_archived(input.parsed, true)
 }
 
-fn team_unarchive(args: Slice<string>) -> Result<(), string> {
-  team_set_archived(args, false)
+fn team_unarchive(input: flags.CommandInput) -> Result<(), string> {
+  team_set_archived(input.parsed, false)
 }
 
 /// `lll team archive KEY` / `lll team unarchive KEY` — the team lifecycle.
 /// Archiving hides, never deletes: issues, comments and the /t/KEY/ board
 /// all stay, so the command can afford to be one word with no confirm.
-fn team_set_archived(args: Slice<string>, archived: bool) -> Result<(), string> {
+fn team_set_archived(p: flags.Parsed, archived: bool) -> Result<(), string> {
   let mut verb = "archive"
   if !archived { verb = "unarchive" }
-  let Some(key) = args.get(3) else {
+  let key = p.first()
+  if key == "" {
     return Err(f"usage: lll team {verb} KEY")
   }
-  let Some(t) = find_team(key)? else {
+  let Some(t) = records.find_team(key)? else {
     return Err(unknown_team(key))
   }
   let payload = match json.Marshal(TeamArchivedPatch { archived }) {
@@ -539,11 +522,12 @@ fn team_set_archived(args: Slice<string>, archived: bool) -> Result<(), string> 
   Ok(())
 }
 
-fn team_view(args: Slice<string>) -> Result<(), string> {
-  let Some(key) = args.get(3) else {
+fn team_view(input: flags.CommandInput) -> Result<(), string> {
+  let key = input.parsed.first()
+  if key == "" {
     return Err("usage: lll team view KEY")
   }
-  let Some(t) = find_team(key)? else {
+  let Some(t) = records.find_team(key)? else {
     return Err(unknown_team(key))
   }
 

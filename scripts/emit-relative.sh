@@ -9,7 +9,6 @@
 # archive context; the release workflow calls it at the checkout root).
 set -euo pipefail
 
-bash scripts/lis-typedefs-workaround.sh
 lis emit >/dev/null
 
 # relative replace paths: target/../<mod> holds each path dep wherever target/

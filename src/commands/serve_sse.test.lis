@@ -1,0 +1,45 @@
+#[test]
+fn description_delivery_tracks_each_connection_and_retries_after_backpressure() {
+  let ready = Channel.buffered<string>(4)
+  let slow = Channel.buffered<string>(1)
+  let _ = slow.send("occupied")
+  let clients = [
+    SseClient { id: 1, scope: "issue:T-1", ch: ready, .. },
+    SseClient { id: 2, scope: "issue:T-1", ch: slow, .. },
+  ]
+  let msg = Broadcast { scope: "issue:T-1", payload: "metadata", description: Some("unique description"), .. }
+  let delivered = deliver(clients, msg)
+  assert delivered[0].description_hash != ""
+  assert delivered[1].description_hash == ""
+  assert ready.receive().unwrap_or("").contains("unique description")
+  assert slow.receive().unwrap_or("") == "occupied"
+  let retried = deliver(delivered, msg)
+  assert ready.receive().unwrap_or("") == "metadata"
+  assert slow.receive().unwrap_or("").contains("unique description")
+  assert retried[0].description_hash == retried[1].description_hash
+  let cleared = deliver(retried, Broadcast { description: Some(""), ..msg })
+  assert ready.receive().unwrap_or("").contains("hidden")
+  assert slow.receive().unwrap_or("").contains("hidden")
+  assert cleared[0].description_hash != delivered[0].description_hash
+}
+
+#[test]
+fn fresh_description_snapshots_are_targeted_and_scope_is_respected() {
+  let a = Channel.buffered<string>(4)
+  let b = Channel.buffered<string>(4)
+  let clients = [
+    SseClient { id: 1, scope: "issue:T-1", ch: a, .. },
+    SseClient { id: 2, scope: "issue:T-1", ch: b, .. },
+  ]
+  let msg = Broadcast { scope: "issue:T-1", payload: "metadata", description: Some("fresh"), client_id: 2 }
+  let delivered = deliver(clients, msg)
+  assert delivered[0].description_hash == ""
+  assert delivered[1].description_hash != ""
+  assert b.receive().unwrap_or("").contains("fresh")
+  let mut leaked = false
+  select { a.receive() => { leaked = true }, _ => () }
+  assert !leaked
+  let _ = deliver(delivered, Broadcast { scope: "issue:T-2", ..msg })
+  select { b.receive() => { leaked = true }, _ => () }
+  assert !leaked
+}

@@ -1,0 +1,34 @@
+import "go:net/url"
+import "models"
+import "pb"
+import "query"
+
+/// Resolve one team's label by name; unknown names error with the fix. An
+/// empty `team_id` searches every team, which only the unscoped board wants.
+///
+/// Names are unique within a team, not across them (TASK-173): two projects
+/// may both call something "bug", and attaching one team's to the other
+/// team's issue is the leak team scoping exists to stop.
+pub fn resolve_label(team_id: string, name: string) -> Result<models.Label, string> {
+  let filter = url.QueryEscape(query.scoped(team_id, "name", name))
+  let mut result = models.LabelList { .. }
+  pb.fetch(f"/api/collections/labels/records?filter={filter}", "labels", &result)?
+  let Some(l) = result.items.find(|l| l.name == name) else {
+    return Err(f"no label named '{name}' — see 'lll label list'")
+  }
+  Ok(l)
+}
+
+/// One team's labels. Labels belong to exactly one team (TASK-173), so
+/// every chooser, chip list and validator built on this is scoped by
+/// construction. An empty `team_id` is the unscoped board, which has no team
+/// to scope to.
+pub fn fetch_labels(team_id: string) -> Result<Slice<models.Label>, string> {
+  let mut list = models.LabelList { .. }
+  pb.fetch(
+    f"/api/collections/labels/records?perPage=200&sort=name&expand=team&filter={team_param(team_id)}",
+    "labels",
+    &list,
+  )?
+  Ok(list.items)
+}

@@ -68,6 +68,25 @@ fn real_email_rejects_the_synthesized_placeholder() {
   assert real_email("kim@example.com")
 }
 
+#[test]
+fn login_notice_distinguishes_authentication_from_comment_identity() {
+  let note = login_identity_notice("alice", "bob", "file:/home/config", "/home/config")
+  assert note.contains("authenticated as bob")
+  assert note.contains("configured me is alice")
+  assert note.contains("lll config set me bob")
+  assert login_identity_notice("bob", "bob", "env:LLL_ME", "/home/config") == ""
+  let env_note = login_identity_notice("alice", "bob", "env:LLL_ME", "/home/config")
+  assert env_note.contains("unset LLL_ME; lll config set me bob")
+  let repo_note = login_identity_notice("alice", "bob", "file:.lll.toml", "/home/config")
+  assert repo_note.contains("remove or change 'me' in .lll.toml")
+}
+
+#[test]
+fn identity_recovery_quotes_display_names() {
+  assert cli_argument("Alice Smith") == "'Alice Smith'"
+  assert cli_argument("O'Brien") == "'O'\\''Brien'"
+}
+
 // -------------------------------------------------------- member_commands
 
 /// TASK-307: the Command table is the one declaration of every member verb.
@@ -108,12 +127,6 @@ fn member_commands_keep_only_the_hand_written_pages() {
 
 /// The table's spec and the completions lookup are the same flag tables, so
 /// what dispatch parses is exactly what the shell completes.
-#[test]
-fn member_commands_specs_match_the_completion_lookup() {
-  for c in member_commands() {
-    assert flags.tokens(c.spec).equals(flags.tokens(member_verb_spec(c.name)))
-  }
-}
 
 // TASK-309, fleet run 2: two of thirty agents typed `lll member add shard-23`
 // and were refused for a bare word, while `issue create` takes a bare title.

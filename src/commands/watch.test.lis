@@ -56,3 +56,13 @@ fn first_line_takes_up_to_the_first_newline() {
   assert first_line("only") == "only"
   assert first_line("") == ""
 }
+
+#[test]
+fn until_matches_existing_created_and_edited_comments_but_not_deletions() {
+  for action in ["snapshot", "create", "update"] {
+    assert comment_matches_until("ready", action, "partner: ready\nnext step")
+    assert !comment_matches_until("ready", action, "not yet")
+  }
+  assert !comment_matches_until("ready", "delete", "ready")
+  assert !comment_matches_until("", "create", "anything")
+}

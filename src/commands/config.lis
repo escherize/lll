@@ -1,4 +1,6 @@
 import "go:fmt"
+import "go:encoding/json"
+import "go:net/url"
 import "go:os"
 import "go:path/filepath"
 import "go:strings"
@@ -6,6 +8,7 @@ import "go:strings"
 import "config"
 import "flags"
 import "pb"
+import "query"
 
 /// Dispatch `lll config <verb>` through the noun's Command table (TASK-307).
 /// Dispatch parses args against the verb's spec BEFORE calling it, which is
@@ -47,10 +50,10 @@ pub fn config_commands() -> Slice<flags.Command> {
     },
     flags.Command {
       name: "set",
-      summary: "set who you are, in ~/.config/lll/lll.toml",
+      summary: "save me, url or web_url in ~/.config/lll/lll.toml",
       page: "",
       spec: [],
-      positional: "me NAME",
+      positional: "<me|url|web_url> VALUE",
       run: config_set,
     },
   ]
@@ -59,9 +62,13 @@ pub fn config_commands() -> Slice<flags.Command> {
 /// Prose that belongs to the noun rather than to any one verb; dispatch
 /// prints it under the verb table for `lll config --help`.
 fn config_intro() -> string {
-  "'me' names the member that authors your comments. 'lll up' guesses it from
-$USER on first boot, which is wrong on a shared machine — this is how you fix
-it. A name with no member yet: 'lll member add -n NAME'.
+  "Your token determines the member that authors comments and holds claims.
+If 'me' is set, it must agree with that member; 'lll whoami' shows the identity.
+Use 'lll config set me NAME' to correct it. Save API and board endpoints with
+'lll config set url URL' and 'lll config set web_url URL'.
+url / LLL_URL: API base for reads and writes.
+web_url / LLL_WEB_URL: board base for browser links; login discovers it when
+the server advertises it. Both may use the same address.
 
 Precedence: env vars (LLL_URL, LLL_TEAM, LLL_ME, LLL_SORT, LLL_WEB_URL,
 LLL_TOKEN) > the repo's .lll.toml > ~/.config/lll/lll.toml. The files layer:
@@ -70,19 +77,27 @@ nothing else while 'url' and 'me' stay per-machine. 'lll attach' writes the
 repo file."
 }
 
-
-/// `lll config set me <name>`: write 'me' to the home config and seed the
-/// member.
-fn config_set(args: Slice<string>) -> Result<(), string> {
-  // Two bare words, `me NAME`, admitted by dispatch's arity (TASK-307). Only
-  // 'me' is settable: it is the one key a machine-specific guess gets wrong,
-  // and everything else is easier to read and edit in the commented template
-  // than through a CLI.
-  let usage = "lll config set me NAME"
-  let key = args.get(3).unwrap_or("")
-  let name = strings.TrimSpace(args.get(4).unwrap_or(""))
-  if key != "me" { return Err(f"only 'me' is settable - got '{key}'; 'lll attach' sets the team, and 'lll config --list' names the file to edit for the rest") }
-  if name == "" { return Err(f"usage: {usage}") }
+/// Set a machine-level identity or endpoint, without changing repo config.
+fn config_set(input: flags.CommandInput) -> Result<(), string> {
+  let usage = "usage: lll config set <me|url|web_url> VALUE"
+  if input.parsed.positional_count() != 2 { return Err(usage) }
+  let key = input.parsed.first()
+  let value = strings.TrimSpace(input.parsed.nth(1))
+  if value == "" { return Err(usage) }
+  if key == "url" || key == "web_url" {
+    let endpoint = checked_endpoint(key, value)?
+    let path = set_home_key(key, endpoint)?
+    fmt.Println(f"{key} = {endpoint} in {path}")
+    let (cfg, src) = config.load_traced()?
+    let effective = if key == "url" { cfg.url } else { cfg.web_url }
+    let origin = if key == "url" { src.url } else { src.web_url }
+    if effective != endpoint {
+      fmt.Println(f"note: {origin} overrides this setting; 'lll config --list' shows the effective configuration")
+    }
+    return Ok(())
+  }
+  if key != "me" { return Err(f"cannot set '{key}'; supported keys: me, url, web_url") }
+  let name = value
 
   // The home config, not the repo's: the repo file is committed, and whose
   // machine this is has no business travelling with it.
@@ -159,7 +174,8 @@ pub fn clear_home_key(key: string) -> Result<bool, string> {
 /// make the file unparseable, and the whole point of these keys is that they
 /// get edited more than once.
 fn set_key_in(path: string, key: string, value: string) -> Result<(), string> {
-  let line = f"{key} = \"{value}\""
+  let Ok(encoded) = json.Marshal(value) else { return Err("could not encode config value") }
+  let line = f"{key} = {encoded as string}"
   let mut text = ""
   if os.Stat(path).is_ok() {
     let Ok(data) = os.ReadFile(path) else {
@@ -194,7 +210,7 @@ fn set_key_in(path: string, key: string, value: string) -> Result<(), string> {
 /// repo reading the wrong team lists the wrong issues and reports nothing, so
 /// being able to ask which file won is the whole debugging affordance.
 /// `_args` is unread: dispatch already parsed it (TASK-307).
-fn config_list(_args: Slice<string>) -> Result<(), string> {
+fn config_list(_input: flags.CommandInput) -> Result<(), string> {
   let (cfg, src) = config.load_traced()?
   print_origin(src.url, "url", cfg.url)
   print_origin(src.team, "team", cfg.team)
@@ -219,7 +235,7 @@ fn config_list(_args: Slice<string>) -> Result<(), string> {
 /// /api/health is the endpoint because it needs no auth and no collection, so
 /// a failure here is about reachability alone.
 /// `_args` is unread: dispatch already parsed it (TASK-307).
-fn config_check(_args: Slice<string>) -> Result<(), string> {
+fn config_check(_input: flags.CommandInput) -> Result<(), string> {
   let (cfg, src) = config.load_traced()?
   match pb.get("/api/health") {
     Ok(_) => fmt.Println(f"ok\t{cfg.url} answers as a PocketBase API"),
@@ -251,7 +267,12 @@ fn committed_token_warning(source: string) -> Option<string> {
 
 fn print_origin(source: string, key: string, value: string) {
   let from = if source == "" { "unset" } else { source }
-  fmt.Println(f"{from}\t{key}={value}")
+  let role = match key {
+    "url" => "\tAPI base (reads and writes)",
+    "web_url" => "\tboard base (browser links)",
+    _ => "",
+  }
+  fmt.Println(f"{from}\t{key}={value}{role}")
 }
 
 /// True for an uncommented `key = ...` line. The commented keys the template
@@ -263,11 +284,11 @@ fn assigns(line: string, key: string) -> bool {
 }
 
 /// `lll config init`. `_args` is unread: dispatch already parsed it (TASK-307).
-fn config_init(_args: Slice<string>) -> Result<(), string> {
+fn config_init(_input: flags.CommandInput) -> Result<(), string> {
   if os.Stat(".lll.toml").is_ok() {
     return Err(".lll.toml already exists; not overwriting")
   }
-  let template = "# lll configuration
+  let template = f"# lll configuration
 # Precedence: env vars (LLL_URL, LLL_TEAM, LLL_ME, LLL_SORT, LLL_WEB_URL,
 # LLL_TOKEN) > this file > ~/.config/lll/lll.toml. The files layer: each
 # supplies the keys it names, so a key left commented out here is inherited
@@ -284,12 +305,14 @@ fn config_init(_args: Slice<string>) -> Result<(), string> {
 # Default team key. Scopes 'lll issue list' and is required by 'lll issue create'.
 # team = \"ENG\"
 
-# Default sort for 'lll issue list': created, updated, priority, or number;
+# Default sort for 'lll issue list': {strings.Join(query.sort_fields(), ", ")};
 # prefix - for descending (e.g. \"-updated\").
 # sort = \"created\"
 
-# Who you are. Identity placeholder until auth exists. 'lll up' guesses this
-# from $USER on first boot; fix it with 'lll config set me <name>'.
+# Optional member name. Your auth token determines authorship and claims;
+# 'me', when set, must agree. Check with 'lll whoami' and correct a stale
+# value with 'lll config set me <name>'. Local superuser setup uses this
+# name for attribution; it does not log you in as that member.
 # me = \"bryan\"
 
 # Web board base URL, used by 'lll board' and 'lll issue url' / 'view -w'.
@@ -305,4 +328,18 @@ fn config_init(_args: Slice<string>) -> Result<(), string> {
   }
   fmt.Println("Wrote .lll.toml")
   Ok(())
+}
+
+/// API and board base URLs must be explicit HTTP(S) endpoints, with no credentials.
+fn checked_web_url(value: string) -> Result<string, string> {
+  checked_endpoint("web_url", value)
+}
+
+fn checked_endpoint(key: string, value: string) -> Result<string, string> {
+  let parsed = url.Parse(value)
+  let Ok(u) = parsed else { return Err(f"{key} must be an absolute http:// or https:// URL") }
+  if (u.Scheme != "http" && u.Scheme != "https") || u.Hostname() == "" || u.User.is_some() || u.RawQuery != "" || u.Fragment != "" {
+    return Err(f"{key} must be an absolute http:// or https:// URL without credentials, query or fragment")
+  }
+  Ok(strings.TrimRight(value, "/"))
 }

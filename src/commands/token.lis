@@ -1,8 +1,8 @@
+import "records"
 import "go:encoding/json"
 import "go:fmt"
 import "go:os"
 import "go:strconv"
-import "go:strings"
 import "go:time"
 
 import "config"
@@ -54,7 +54,8 @@ fn token_intro() -> string {
 --duration says otherwise, and the expiry is printed with it. The token is
 printed once, when it is created; nothing else ever shows it. Use it as
 LLL_TOKEN=<token>, or persist it as token = \"...\" in ~/.config/lll/lll.toml
-(never the repo's .lll.toml, which is committed)."
+(never the repo's .lll.toml, which is committed).
+On the receiving machine, save the API endpoint with 'lll config set url URL', or supply LLL_URL." + flags.section(token_create_spec())
 }
 
 /// The lifetime a mint gets when --duration is not given: one year in
@@ -66,16 +67,17 @@ fn default_token_duration() -> int {
 }
 
 fn token_create_spec() -> Slice<flags.Flag> {
-  [
+  with_admin_flags([
     flags.Flag { name: "--duration", value: true, hint: "seconds", help: "token lifetime in seconds (default one year);\n0 uses the members collection's duration", .. },
+    flags.Flag { name: "--url", value: true, hint: "url", help: "server base url for this invocation (otherwise the configured server)", .. },
     flags.Flag { name: "--help", alias: "-h", hidden: true, help: "show this help", .. },
-  ]
+  ])
 }
 
-fn token_create(args: Slice<string>) -> Result<(), string> {
+fn token_create(input: flags.CommandInput) -> Result<(), string> {
   let spec = token_create_spec()
   let usage = flags.usage("lll token create", spec, "<member>")
-  let p = flags.parse(spec, args, 3, true, usage)?
+  let p = input.parsed
   let name = p.first()
   if name == "" {
     return Err(f"usage: {usage}")
@@ -97,8 +99,10 @@ fn token_create(args: Slice<string>) -> Result<(), string> {
     duration = d
   }
 
+  point_at_url(p.one("--url"))?
+  apply_admin_flags(p.one("--admin-email"), p.one("--admin-password"))?
   let su = superuser_auth()?
-  let found = find_member_as(su, name)?
+  let found = records.find_member_as(su, name)?
   let Some(member) = found else {
     return Err(f"no member named '{name}' — see 'lll member add'")
   }
@@ -154,12 +158,13 @@ fn expiry_line(duration: int, now: time.Time) -> string {
 /// happens to someone who was working yesterday is expiry, which the old
 /// shared wording never named (TASK-214). Anything else keeps the raw error.
 fn impersonate_error(name: string, e: string) -> string {
-  if strings.Contains(e, "401") {
+  let status = pb.response_status(e)
+  if status == 401 {
     return "the token this ran with was rejected (401) - most likely it expired
 mint a new one with 'lll token create', or set LLL_ADMIN_EMAIL/LLL_ADMIN_PASSWORD
 to the credentials 'lll up' prints"
   }
-  if strings.Contains(e, "403") {
+  if status == 403 {
     return "token create is superuser-only and the configured token is not one
 set LLL_ADMIN_EMAIL/LLL_ADMIN_PASSWORD to the credentials 'lll up' prints"
   }
@@ -258,7 +263,7 @@ secrets), or put a superuser token in LLL_TOKEN — and name the server with
 /// nobody's choice, say that first.
 fn superuser_auth_failed(e: string) -> string {
   let msg = f"authenticating as the superuser: {e}"
-  if !strings.Contains(e, "400") { return msg }
+  if pb.response_status(e) != 400 { return msg }
   let Ok((_, src)) = config.load_traced() else { return msg }
   if src.url != "default" {
     return msg + "
@@ -283,13 +288,15 @@ fn decode_auth(body: string, what: string) -> Result<string, string> {
 }
 
 fn token_create_page() -> string {
-    "lll token create - mint a long-lived agent token (superuser only)
+  let spec = token_create_spec()
+  let usage = flags.usage("lll token create", spec, "<member>")
+  f"lll token create - mint a long-lived agent token (superuser only)
 
 Usage:
-  lll token create <member> [--duration seconds]
+  {usage}
 
-Authenticates as the PocketBase superuser — from LLL_ADMIN_EMAIL and
-LLL_ADMIN_PASSWORD (the credentials 'lll up' prints), or the configured token
+Authenticates as the PocketBase superuser — from --admin-email/--admin-password,
+LLL_ADMIN_EMAIL/LLL_ADMIN_PASSWORD, or the configured token
 when it already is one — and asks PocketBase to impersonate <member>: a
 non-refreshable token sent as LLL_TOKEN. It does expire. --duration sets the
 lifetime in seconds and defaults to one year; 0 hands the decision to the
@@ -300,5 +307,6 @@ later command can tell you when it dies. When it does, the 401 says so and the
 fix is another 'lll token create'.
 
 The token is printed exactly once. Agents persist it with
-token = \"...\" in ~/.config/lll/lll.toml — never .lll.toml, which is committed."
+token = \"...\" in ~/.config/lll/lll.toml — never .lll.toml, which is committed.
+On the receiving machine, save the API endpoint with 'lll config set url URL', or supply LLL_URL." + flags.section(spec)
 }

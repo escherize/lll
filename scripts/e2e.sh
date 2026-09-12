@@ -3,7 +3,7 @@
 # Covers: create/list with ENG-1 style IDs, per-team numbering,
 # forged duplicate (team, number) rejection, issue view (fields, unknown IDs),
 # --json (jq roundtrips, expand.team), --state/--sort filters, glyph/priority
-# display, write path (start/update/close/delete, git branch creation and
+# display, write path (start/update/close/delete, explicit git branch creation and
 # ID inference from the branch), members (add/list), comments (add via config
 # 'me', authorless, list, in issue view), --assignee (create/update/list
 # filter, unknown member, expand in --json), projects and labels (create/list,
@@ -24,13 +24,22 @@ set -euo pipefail
 . "$(dirname "$0")/lib.sh"   # free_port, wait_ok, fail, assert_*, e2e_begin/end
 e2e_begin
 
+# Install cleanup before compilation or server startup can fail. The repo
+# configuration has already been moved aside by e2e_begin.
+WATCH_PIDS=""
+cleanup() { # exit-status
+  e2e_diagnose "$1"
+  e2e_reap $WATCH_PIDS ${SPY_PIDS:-} ${PB_PID:-}
+  e2e_end
+}
+e2e_trap_cleanup cleanup
+
 PORT=$(free_port 20000 39999)
 URL="http://127.0.0.1:$PORT"
 WEB_PORT=$(free_port 40000 59999)
 PB_LOG="$DATA_DIR/pb.log"
 E2E_LOGS="$PB_LOG"
 
-bash scripts/lis-typedefs-workaround.sh
 lis build >/dev/null
 LIN=target/.lisette/bin/lll
 
@@ -62,17 +71,6 @@ start_pb() {
   wait_ok "$URL/api/health" 150
 }
 start_pb || { echo "FAIL: lll up did not start" >&2; cat "$PB_LOG" >&2; exit 1; }
-WATCH_PIDS=""
-cleanup() { # exit-status
-  # Diagnose first: e2e_diagnose reads the logs, and e2e_end deletes the
-  # directory they live in (TASK-121). e2e_reap kills AND waits, so the
-  # server is gone before its --pb-dir is (TASK-153).
-  e2e_diagnose "$1"
-  e2e_reap $WATCH_PIDS ${SPY_PIDS:-} "$PB_PID"
-  e2e_end
-}
-e2e_trap_cleanup cleanup
-
 # --- TASK-181: the suite rides a member token --------------------------------
 # The rules refuse tokenless requests now, so bootstrap one before anything
 # else talks to PocketBase: the superuser API creates e2e-agent with a known
@@ -305,8 +303,8 @@ assert_contains "$(cat "$HOME_TOML")" 'me = "bob"' "config set me replaced the v
 # A duplicate key would make the file unparseable; prove it still loads.
 out=$(cd "$WORK" && HOME="$SET_HOME" LLL_URL=$URL LLL_TEAM=ENG "$LLL_ABS" issue list)
 assert_contains "$out" "ENG-1" "config still parses after two config set me"
-out=$(cd "$WORK" && "$LLL_ABS" config set url http://x 2>&1) && fail "config set accepted a key other than me"
-assert_contains "$out" "only 'me' is settable" "config set rejects other keys"
+out=$(cd "$WORK" && "$LLL_ABS" config set unsupported http://x 2>&1) && fail "config set accepted an unsupported key"
+assert_contains "$out" "supported keys: me, url, web_url" "config set rejects unsupported keys"
 
 # --- config --list: every value and the file it came from (TASK-168) ---
 # The failure this answers is silent, so it has to name origins, not values.
@@ -314,10 +312,10 @@ printf 'url = "%s"\nme = "homer"\n' "$URL" > "$HOME_TOML"
 printf 'team = "ENG"\n' > "$WORK/.lll.toml"
 out=$(cd "$WORK" && env -u LLL_URL -u LLL_TEAM -u LLL_ME -u LLL_SORT -u LLL_WEB_URL \
   HOME="$SET_HOME" "$LLL_ABS" config --list)
-assert_contains "$out" "file:$HOME_TOML	url=$URL" "--list attributes url to the home file"
+assert_contains "$out" "file:$HOME_TOML	url=$URL	API base (reads and writes)" "--list names the API role and home origin"
 assert_contains "$out" "file:.lll.toml	team=ENG" "--list attributes team to the repo file"
 assert_contains "$out" "file:$HOME_TOML	me=homer" "--list attributes me to the home file"
-assert_contains "$out" "default	web_url=http://127.0.0.1:8100" "--list marks an unset key with a default"
+assert_contains "$out" "unset	web_url=	board base (browser links)" "--list names the board role even when unset"
 assert_contains "$out" "unset	sort=" "--list marks a key nothing set"
 out=$(cd "$WORK" && LLL_TEAM=FROMENV HOME="$SET_HOME" "$LLL_ABS" config --list)
 assert_contains "$out" "env:LLL_TEAM	team=FROMENV" "--list attributes an override to the env var"
@@ -511,11 +509,21 @@ out=$(LLL_URL=$URL LLL_TEAM=ENG LLL_SORT=-priority "$LIN" issue list)
 assert_contains "$(printf '%s\n' "$out" | head -1)" "ENG-5" "LLL_SORT is the default sort"
 
 set +e
-out=$(LLL_URL=$URL "$LIN" issue list --sort title 2>&1)
+out=$(LLL_URL=$URL "$LIN" issue list --sort state 2>&1)
 rc=$?
 set -e
-[ "$rc" -ne 0 ] || fail "list --sort title: expected nonzero exit"
-assert_contains "$out" "unknown sort field 'title'" "invalid sort message"
+[ "$rc" -ne 0 ] || fail "list --sort state: expected nonzero exit"
+assert_contains "$out" "unknown sort field 'state'" "invalid sort message"
+
+for order in title -title; do
+  out=$(LLL_URL=$URL LLL_TEAM=ENG "$LIN" issue list --sort "$order" --json)
+  printf '%s' "$out" | python3 -c '
+import json, sys
+titles = [i["title"] for i in json.load(sys.stdin)["items"]]
+assert len(titles) >= 2
+assert titles == sorted(titles, reverse=sys.argv[1] == "-title"), titles
+' "$order" || fail "CLI title ordering: $order"
+done
 
 # --- list output: glyphs and priority markers, aligned columns ---
 out=$(LLL_URL=$URL LLL_TEAM=ENG "$LIN" issue list)
@@ -531,8 +539,45 @@ assert_contains "$out" "Created ENG-6: Roundtrip issue" "roundtrip create"
 
 REPO="$DATA_DIR/repo"
 git init -q -b main "$REPO"
+printf 'tracked\n' > "$REPO/tracked.txt"
+git -C "$REPO" add tracked.txt
 git -C "$REPO" -c user.name=e2e -c user.email=e2e@example.com \
-  commit -q --allow-empty -m init
+  commit -q -m init
+printf 'unstaged change\n' >> "$REPO/tracked.txt"
+printf 'staged change\n' > "$REPO/staged.txt"
+git -C "$REPO" add staged.txt
+printf 'untracked content\n' > "$REPO/untracked.txt"
+
+# TASK-263: observe refs, HEAD, staged/unstaged edits and untracked content.
+# Dirty work is deliberate: starting an issue must not disturb any of it.
+start_git_snapshot() {
+  git -C "$REPO" symbolic-ref HEAD
+  git -C "$REPO" show-ref
+  git -C "$REPO" status --porcelain=v1
+  git -C "$REPO" diff
+  git -C "$REPO" diff --cached
+  cat "$REPO/untracked.txt"
+}
+git_before=$(start_git_snapshot)
+issue_before=$(LLL_URL=$URL "$LIN" issue view ENG-6 --json)
+out=$(cd "$REPO" && LLL_URL=$URL "$LLL_ABS" issue branch-name ENG-6)
+[ "$out" = "eng-6-roundtrip-issue" ] || fail "branch-name must print only the suggested name"
+[ "$(start_git_snapshot)" = "$git_before" ] || fail "branch-name changed Git"
+[ "$(LLL_URL=$URL "$LIN" issue view ENG-6 --json)" = "$issue_before" ] || fail "branch-name changed the issue"
+
+# Help and malformed input must not start an issue or change Git.
+for verb in start branch-name; do
+  for help in --help -h; do
+    out=$(cd "$REPO" && LLL_URL=http://127.0.0.1:1 "$LLL_ABS" issue "$verb" ENG-6 "$help")
+    assert_contains "$out" "lll issue $verb" "$verb help needs no server"
+  done
+  if out=$(cd "$REPO" && LLL_URL=$URL "$LLL_ABS" issue "$verb" ENG-6 extra 2>&1); then
+    fail "$verb accepted an extra argument"
+  fi
+  assert_contains "$out" "unexpected argument" "$verb rejects extra arguments"
+done
+[ "$(start_git_snapshot)" = "$git_before" ] || fail "help or invalid input changed Git"
+[ "$(LLL_URL=$URL "$LIN" issue view ENG-6 --json)" = "$issue_before" ] || fail "help or invalid input changed the issue"
 
 # a plain start touches the board only: no branch, no work site (TASK-310).
 # Fleet task 3b ran start from the wrong checkout and it switched that
@@ -544,20 +589,99 @@ branch=$(git -C "$REPO" branch --show-current)
 [ "$branch" = "main" ] || fail "plain start: expected to stay on main, on '$branch'"
 out=$(LLL_URL=$URL "$LIN" issue view ENG-6 --json | jq -r '.work_branch')
 [ "$out" = "" ] || fail "plain start stamped a work site: '$out'"
-out=$(cd "$DATA_DIR" && LLL_URL=$URL "$LLL_ABS" issue start --branch ENG-6 2>&1 || true)
+# Failed local setup must not change a todo issue or claim it was started.
+LLL_URL=$URL "$LIN" issue update ENG-6 --state todo >/dev/null
+before_failed_start=$(LLL_URL=$URL "$LIN" issue view ENG-6 --json)
+if out=$(cd "$DATA_DIR" && LLL_URL=$URL "$LLL_ABS" issue start --branch ENG-6 2>&1); then
+  fail "start --branch outside Git succeeded"
+fi
 assert_contains "$out" "--branch needs a git repository" "start --branch outside a repo says so"
+assert_not_contains "$out" "Started ENG-6" "failed setup does not report success"
+[ "$(LLL_URL=$URL "$LIN" issue view ENG-6 --json)" = "$before_failed_start" ] || fail "outside-Git start changed issue"
 
-out=$(cd "$REPO" && LLL_URL=$URL "$LLL_ABS" issue start --branch ENG-6)
+# Git itself can refuse a valid repository: another worktree owns the branch.
+occupied_branch=$(LLL_URL=$URL "$LIN" issue branch-name ENG-6)
+git -C "$REPO" worktree add -q -b "$occupied_branch" "$DATA_DIR/occupied-start" HEAD
+if out=$(cd "$REPO" && LLL_URL=$URL "$LLL_ABS" issue start --branch ENG-6 2>&1); then
+  fail "start stole a branch owned by another worktree"
+fi
+assert_contains "$out" "state unchanged; branch setup failed" "Git failure names the actual outcome"
+[ "$(LLL_URL=$URL "$LIN" issue view ENG-6 --json)" = "$before_failed_start" ] || fail "failed Git switch changed issue"
+git -C "$REPO" worktree remove "$DATA_DIR/occupied-start"
+git -C "$REPO" branch -D "$occupied_branch" >/dev/null
+
+# A remote write failure after a successful switch must describe partial
+# success. A local proxy forwards reads and deterministically rejects PATCH.
+python3 - "$LLL_ABS" "$URL" "$DATA_DIR/start-remote-failure" <<'PY_START'
+import http.server, json, os, pathlib, subprocess, sys, threading, urllib.request
+binary, upstream, directory = sys.argv[1:]
+class RejectWrites(http.server.BaseHTTPRequestHandler):
+    def do_GET(self):
+        request = urllib.request.Request(upstream + self.path, headers={'Authorization': self.headers.get('Authorization', '')})
+        with urllib.request.urlopen(request, timeout=10) as response:
+            body = response.read()
+        self.send_response(200)
+        self.send_header('Content-Type', 'application/json')
+        self.end_headers()
+        self.wfile.write(body)
+    def do_PATCH(self):
+        self.send_response(503)
+        self.end_headers()
+        self.wfile.write(b'{"message":"injected start failure"}')
+    def log_message(self, *args):
+        pass
+server = http.server.ThreadingHTTPServer(('127.0.0.1', 0), RejectWrites)
+thread = threading.Thread(target=server.serve_forever, daemon=True)
+thread.start()
+try:
+    pathlib.Path(directory).mkdir()
+    subprocess.run(['git', 'init', '-q', '-b', 'main', directory], check=True)
+    subprocess.run(['git', '-C', directory, '-c', 'user.name=e2e', '-c', 'user.email=e2e@example.com', 'commit', '-q', '--allow-empty', '-m', 'init'], check=True)
+    env = dict(os.environ, LLL_URL=f'http://127.0.0.1:{server.server_port}')
+    result = subprocess.run([binary, 'issue', 'start', 'ENG-6', '--branch'], cwd=directory, env=env, capture_output=True, text=True, timeout=30)
+    assert result.returncode != 0, result.stdout
+    assert "Git is on branch 'eng-6-roundtrip-issue'" in result.stderr, result.stderr
+    assert 'could not be confirmed' in result.stderr, result.stderr
+    assert 'lll issue view ENG-6' in result.stderr, result.stderr
+    assert 'Started ENG-6' not in result.stdout, result.stdout
+    branch = subprocess.check_output(['git', '-C', directory, 'branch', '--show-current'], text=True).strip()
+    assert branch == 'eng-6-roundtrip-issue', branch
+finally:
+    server.shutdown()
+    server.server_close()
+    thread.join()
+PY_START
+[ "$(LLL_URL=$URL "$LIN" issue view ENG-6 --json)" = "$before_failed_start" ] || fail "rejected remote start changed issue"
+
+out=$(cd "$REPO" && LLL_URL=$URL "$LLL_ABS" issue start ENG-6)
 assert_contains "$out" "Started ENG-6" "start output"
-assert_contains "$out" "Branch: eng-6-roundtrip-issue" "start prints branch name"
-assert_contains "$out" "Created and switched to branch 'eng-6-roundtrip-issue'" "start creates branch"
-branch=$(git -C "$REPO" branch --show-current)
-[ "$branch" = "eng-6-roundtrip-issue" ] || fail "start: expected branch eng-6-roundtrip-issue, on '$branch'"
+[ "$(start_git_snapshot)" = "$git_before" ] || fail "start changed Git"
+out=$(LLL_URL=$URL "$LIN" issue view ENG-6 --json)
+[ "$(printf '%s' "$out" | jq -r .state)" = "in-progress" ] || fail "start did not set in-progress"
+[ "$(printf '%s' "$out" | jq -r '.work_branch // ""')" = "" ] || fail "start recorded unrelated main branch"
 
-# starting again — ID inferred from the branch — switches instead of failing
+# Explicit IDs also work without a Git repository.
+NO_GIT="$DATA_DIR/no-git"
+mkdir -p "$NO_GIT"
+LLL_URL=$URL "$LIN" issue update ENG-6 --state todo >/dev/null
+out=$(cd "$NO_GIT" && LLL_URL=$URL "$LLL_ABS" issue branch-name ENG-6)
+[ "$out" = "eng-6-roundtrip-issue" ] || fail "branch-name outside Git"
+out=$(cd "$NO_GIT" && LLL_URL=$URL "$LLL_ABS" issue start ENG-6)
+assert_contains "$out" "Started ENG-6" "start outside Git"
+[ ! -e "$NO_GIT/.git" ] || fail "start initialized a repository"
+[ "$(LLL_URL=$URL "$LIN" issue view ENG-6 --json | jq -r .state)" = "in-progress" ] || fail "start outside Git did not change state"
+
+# Branch creation is the caller's explicit Git operation.
+branch=$(cd "$REPO" && LLL_URL=$URL "$LLL_ABS" issue branch-name ENG-6)
+out=$(cd "$REPO" && LLL_URL=$URL "$LLL_ABS" issue start --branch ENG-6)
+assert_contains "$out" "Created and switched to branch" "explicit branch creation"
+git_before=$(start_git_snapshot)
+out=$(cd "$REPO" && LLL_URL=$URL "$LLL_ABS" issue branch-name)
+[ "$out" = "$branch" ] || fail "branch-name infers the issue"
 out=$(cd "$REPO" && LLL_URL=$URL "$LLL_ABS" issue start --branch)
+assert_contains "$out" "Switched to existing branch" "explicit existing branch"
 assert_contains "$out" "Started ENG-6" "inferred start output"
-assert_contains "$out" "Switched to existing branch 'eng-6-roundtrip-issue'" "start reuses branch"
+[ "$(start_git_snapshot)" = "$git_before" ] || fail "inferred start changed Git"
 
 # --- ID inference from the branch: view / update / close with no arg ---
 out=$(cd "$REPO" && LLL_URL=$URL "$LLL_ABS" issue view)
@@ -657,6 +781,21 @@ assert_contains "$out" "'ENG' is the team, not a project" "the team key passed a
 # adding it again hits the unique index. This case is about the no-email path.
 out=$(LLL_URL=$URL "$LIN" member add -n carol)
 assert_contains "$out" "Added member carol" "member add without email"
+# LLL-220: punctuation in a display name must survive both email paths.
+out=$(LLL_URL=$URL "$LIN" member add -n "Tim O'Brien")
+assert_contains "$out" "Added member Tim O'Brien" "apostrophe name without email"
+out=$(LLL_URL=$URL "$LIN" member add -n "Kim O'Brien" -e kim.obrien@example.com)
+assert_contains "$out" "Added member Kim O'Brien" "apostrophe name with email"
+members=$(LLL_URL=$URL "$LIN" member list --json)
+[ "$(jq -r '.items[] | select(.name == "Tim O\u0027Brien") | .email' <<<"$members")" = "tim-o'brien@members.invalid" ] \
+  || fail "apostrophe name or synthesized email did not round trip"
+[ "$(jq -r '.items[] | select(.name == "Kim O\u0027Brien") | .email' <<<"$members")" = "kim.obrien@example.com" ] \
+  || fail "apostrophe name or explicit email did not round trip"
+if out=$(LLL_URL=$URL "$LIN" member add -n "Invalid Email Probe" -e invalid-address 2>&1); then
+  fail "invalid member email should be refused"
+fi
+assert_contains "$out" '"email"' "rejected member creation identifies the email field"
+assert_contains "$out" 'valid email address' "rejected member creation includes the field reason"
 out=$(LLL_URL=$URL "$LIN" member list)
 assert_contains "$out" "bryan" "member list has bryan"
 assert_contains "$out" "bryan@example.com" "member list shows email"
@@ -1008,6 +1147,7 @@ WATCH_ALL="$DATA_DIR/watch_all.txt"    # lll watch (team-scoped, no state filter
 WATCH_TODO="$DATA_DIR/watch_todo.txt"  # lll watch --state todo
 WATCH_JSON="$DATA_DIR/watch_json.txt"  # lll watch --json
 WATCH_ISSUE="$DATA_DIR/watch_issue.txt"
+WATCH_ISSUE_JSON="$DATA_DIR/watch_issue_json.txt"
 
 wait_for_line() { # file needle label [tries, at 0.1s each]
   tries="${4:-100}"
@@ -1019,13 +1159,15 @@ wait_for_line() { # file needle label [tries, at 0.1s each]
 $(cat "$1" 2>/dev/null)"
 }
 
-LLL_URL=$URL LLL_TEAM=ENG "$LIN" watch > "$WATCH_ALL" &
+LLL_URL=$URL LLL_TEAM=ENG "$LIN" watch > "$WATCH_ALL" 2> "$WATCH_ALL.err" &
 WATCH_PIDS="$WATCH_PIDS $!"
-LLL_URL=$URL LLL_TEAM=ENG "$LIN" watch --state todo > "$WATCH_TODO" &
+LLL_URL=$URL LLL_TEAM=ENG "$LIN" watch --state todo > "$WATCH_TODO" 2> "$WATCH_TODO.err" &
 WATCH_PIDS="$WATCH_PIDS $!"
-LLL_URL=$URL LLL_TEAM=ENG "$LIN" watch --json > "$WATCH_JSON" &
+LLL_URL=$URL LLL_TEAM=ENG "$LIN" watch --json > "$WATCH_JSON" 2> "$WATCH_JSON.err" &
 WATCH_PIDS="$WATCH_PIDS $!"
-sleep 2 # let the subscriptions establish
+for stream in "$WATCH_ALL" "$WATCH_TODO" "$WATCH_JSON"; do
+  wait_for_line "$stream.err" 'watch: ready' 'query subscription acknowledgment'
+done
 
 # matching create (lll issue create starts issues in todo)
 out=$(LLL_URL=$URL LLL_TEAM=ENG "$LIN" issue create -t "Watched todo issue")
@@ -1059,6 +1201,11 @@ LLL_URL=$URL "$LIN" issue watch "$WKEY" > "$WATCH_ISSUE" &
 WATCH_PIDS="$WATCH_PIDS $!"
 # the header prints once the subscription is active
 wait_for_line "$WATCH_ISSUE" "Watching $WKEY" "issue watch header"
+LLL_URL=$URL "$LIN" issue watch "$WKEY" --json > "$WATCH_ISSUE_JSON" 2> "$WATCH_ISSUE_JSON.err" &
+ISSUE_JSON_PID=$!
+WATCH_PIDS="$WATCH_PIDS $ISSUE_JSON_PID"
+wait_for_line "$WATCH_ISSUE_JSON.err" 'watch: ready' 'issue JSON subscription acknowledgment'
+[ ! -s "$WATCH_ISSUE_JSON" ] || fail 'issue JSON stream printed a startup banner'
 
 out=$(LLL_URL=$URL "$LIN" issue update "$WKEY" --state in-review --assignee bryan)
 assert_contains "$out" "Updated $WKEY" "issue watch update output"
@@ -1069,6 +1216,7 @@ printf 'url = "%s"\nteam = "ENG"\nme = "bryan"\n' "$URL" > "$WORK/.lll.toml"
 out=$(cd "$WORK" && env -u LLL_URL -u LLL_TEAM LLL_TOKEN="$BRYAN_TOK" LLL_ME=bryan HOME="$FAKEHOME" "$LLL_ABS" issue comment "$WKEY" -b "Watching closely")
 assert_contains "$out" "Commented on $WKEY" "watched comment output"
 wait_for_line "$WATCH_ISSUE" "comment by bryan: Watching closely" "issue watch sees the comment"
+wait_for_line "$WATCH_ISSUE_JSON" 'Watching closely' 'issue JSON stream sees the comment'
 
 # --- issue watch --until: the blocking primitive (TASK-322) ---
 out=$(LLL_URL=$URL "$LIN" issue watch "$WKEY" --until "Watching clos")
@@ -1087,6 +1235,8 @@ set -e
 assert_contains "$out" "no comment containing 'never-coming'" "--timeout names what did not arrive"
 out=$(LLL_URL=$URL "$LIN" issue comment "$WKEY")
 assert_contains "$out" "lll issue watch $WKEY --until TEXT" "a comment listing points at watch --until"
+
+python3 scripts/test_watch_until.py "$LLL_ABS" "$URL" "$WKEY"
 
 # --- lll search: full text over issues, comments and docs, ranked, with context (LLL-96) ---
 SKEY=$(env LLL_URL=$URL LLL_TEAM=ENG "$LIN" issue create -t "Rail favorites go stale" -d "First line of context.
@@ -1188,21 +1338,37 @@ for i in $(seq 1 20); do
 done
 wait_for_line "$WATCH_ALL" "Back after restart" "watch survives a PB restart" 10
 wait_for_line "$WATCH_ISSUE" "Back after restart" "issue watch survives a PB restart" 100
+wait_for_line "$WATCH_ISSUE_JSON" "Back after restart" "issue JSON watch survives a PB restart" 100
+wait_for_line "$WATCH_JSON.err" 'reconnected to PocketBase' 'query stream acknowledges reconnection'
 
 # --- delete events; issue watch exits after its issue is deleted ---
 out=$(LLL_URL=$URL "$LIN" issue delete "$WKEY" --force)
 assert_contains "$out" "Deleted $WKEY" "watched delete output"
 wait_for_line "$WATCH_ALL" "$WKEY deleted" "watch sees the delete"
 wait_for_line "$WATCH_ISSUE" "$WKEY deleted" "issue watch sees the delete"
+wait_for_line "$WATCH_ISSUE_JSON" '"action":"delete"' 'issue JSON watch sees the delete'
+for _ in $(seq 1 50); do
+  kill -0 "$ISSUE_JSON_PID" 2>/dev/null || break
+  sleep 0.1
+done
+kill -0 "$ISSUE_JSON_PID" 2>/dev/null && fail 'issue JSON watch remained alive after deletion'
+wait "$ISSUE_JSON_PID" || fail 'issue JSON watch did not exit successfully after deletion'
 
-kill $WATCH_PIDS 2>/dev/null || true
+e2e_reap $WATCH_PIDS
 WATCH_PIDS=""
+python3 - "$WATCH_JSON" "$WATCH_ISSUE_JSON" <<'PY'
+import json, pathlib, sys
+for name in sys.argv[1:]:
+    rows = [json.loads(line) for line in pathlib.Path(name).read_text().splitlines()]
+    assert rows and all(r['topic'] and r['action'] and r['record']['id'] for r in rows)
+    assert rows[-1]['action'] == 'delete', name
+PY
 
 # --- completions: emit + parse smoke for each shell ---
 "$LIN" completions bash > "$DATA_DIR/comp.bash"
 bash -n "$DATA_DIR/comp.bash" || fail "bash completions do not parse"
 out=$(cat "$DATA_DIR/comp.bash")
-assert_contains "$out" "create new list view show read update close start claim release delete comment watch url id title pr link unlink" "bash completions list issue verbs"
+assert_contains "$out" "create new list view show read update close start claim release delete comment watch url id title branch-name pr link unlink" "bash completions list issue verbs"
 assert_contains "$out" "--limit" "bash completions know --limit"
 assert_contains "$out" "complete -F _lll lll" "bash completions register"
 "$LIN" completions zsh > "$DATA_DIR/comp.zsh"
@@ -1215,6 +1381,21 @@ if command -v fish >/dev/null; then
   fish -n "$DATA_DIR/comp.fish" || fail "fish completions do not parse"
 fi
 assert_contains "$(cat "$DATA_DIR/comp.fish")" "complete -c lll" "fish completions complete lll"
+
+# task-127: help, completions and the parser read ONE table, so the gate
+for shell in bash zsh fish; do
+  for help_flag in -h --help; do
+    out=$("$LIN" completions "$shell" "$help_flag")
+    assert_contains "$out" "Usage:" "completions suffix help precedes script generation"
+  done
+  for extra in --definitely-unknown extra-shell; do
+    if "$LIN" completions "$shell" "$extra" >"$DATA_DIR/comp.out" 2>"$DATA_DIR/comp.err"; then
+      fail "completions $shell accepted unexpected argument $extra"
+    fi
+    [ ! -s "$DATA_DIR/comp.out" ] || fail "invalid completions invocation emitted a partial script"
+    assert_contains "$(cat "$DATA_DIR/comp.err")" "$extra" "completions refusal identifies the argument"
+  done
+done
 
 # task-127: help, completions and the parser read ONE table, so the gate
 # enforces what used to be reviewed — a flag one surface knows, they all
@@ -1262,7 +1443,7 @@ set -e
 assert_contains "$out" "unknown shell" "unknown shell message"
 
 # --- issue url / id / title: explicit arg ---
-out=$(HOME="$FAKEHOME" LLL_URL=$URL "$LIN" issue url ENG-6)
+out=$(HOME="$FAKEHOME" LLL_WEB_URL=http://127.0.0.1:8100 LLL_URL=$URL "$LIN" issue url ENG-6)
 [ "$out" = "http://127.0.0.1:8100/issue/ENG-6" ] || fail "issue url: got '$out'"
 out=$(LLL_URL=$URL LLL_WEB_URL=https://lll.example.com "$LIN" issue url ENG-6)
 [ "$out" = "https://lll.example.com/issue/ENG-6" ] || fail "issue url with LLL_WEB_URL: got '$out'"
@@ -1279,7 +1460,7 @@ set -e
 assert_contains "$out" "issue ENG-99 not found" "issue url unknown ID message"
 
 # --- issue url / id / title: inferred from the git branch ---
-out=$(cd "$REPO" && HOME="$FAKEHOME" LLL_URL=$URL "$LLL_ABS" issue url)
+out=$(cd "$REPO" && HOME="$FAKEHOME" LLL_WEB_URL=http://127.0.0.1:8100 LLL_URL=$URL "$LLL_ABS" issue url)
 [ "$out" = "http://127.0.0.1:8100/issue/ENG-6" ] || fail "inferred issue url: got '$out'"
 out=$(cd "$REPO" && LLL_URL=$URL "$LLL_ABS" issue id)
 [ "$out" = "ENG-6" ] || fail "inferred issue id: got '$out'"
@@ -1287,7 +1468,7 @@ out=$(cd "$REPO" && LLL_URL=$URL "$LLL_ABS" issue title)
 [ "$out" = "Roundtrip issue v2" ] || fail "inferred issue title: got '$out'"
 
 # --- board prints the web URL; LLL_WEB_URL env and web_url config override ---
-out=$(HOME="$FAKEHOME" "$LIN" board)
+out=$(HOME="$FAKEHOME" LLL_WEB_URL=http://127.0.0.1:8100 "$LIN" board)
 [ "$out" = "http://127.0.0.1:8100" ] || fail "board URL: got '$out'"
 out=$(LLL_WEB_URL=https://lll.example.com/ "$LIN" board)
 [ "$out" = "https://lll.example.com" ] || fail "board URL trims trailing slash: got '$out'"
@@ -1299,9 +1480,9 @@ out=$(cd "$WORK" && HOME="$FAKEHOME" "$LLL_ABS" board)
 mkdir -p "$DATA_DIR/bin"
 printf '#!/bin/sh\necho "$1" >> "%s/opened.txt"\n' "$DATA_DIR" > "$DATA_DIR/bin/open"
 chmod +x "$DATA_DIR/bin/open"
-out=$(HOME="$FAKEHOME" PATH="$DATA_DIR/bin:$PATH" LLL_URL=$URL "$LIN" issue view ENG-6 -w)
+out=$(HOME="$FAKEHOME" LLL_WEB_URL=http://127.0.0.1:8100 PATH="$DATA_DIR/bin:$PATH" LLL_URL=$URL "$LIN" issue view ENG-6 -w)
 assert_contains "$out" "Opening http://127.0.0.1:8100/issue/ENG-6" "view -w announces the URL"
-out=$(HOME="$FAKEHOME" PATH="$DATA_DIR/bin:$PATH" "$LIN" board -w)
+out=$(HOME="$FAKEHOME" LLL_WEB_URL=http://127.0.0.1:8100 PATH="$DATA_DIR/bin:$PATH" "$LIN" board -w)
 assert_contains "$out" "Opening http://127.0.0.1:8100" "board -w announces the URL"
 # -w is fire-and-forget by design (the CLI must not block on a browser), so poll
 # for the opener's output instead of assuming it lands within a fixed sleep.
@@ -1381,12 +1562,14 @@ out=$(LLL_URL=$URL LLL_TEAM=ENG "$LIN" doc view port-notes --raw)
 [ "$out" = "The port plan.
 
 Step two." ] || fail "doc view --raw should print only the body, got: $out"
+LLL_URL=$URL LLL_TEAM=ENG "$LIN" doc view port-notes --raw | python3 -c 'import sys; assert sys.stdin.read() == "The port plan.\n\nStep two."'
 
 # edit replaces the whole body from stdin
-out=$(printf 'Replaced body' | env LLL_URL=$URL LLL_TEAM=ENG "$LIN" doc edit port-notes -b -)
+out=$(printf 'Replaced body\n' | env LLL_URL=$URL LLL_TEAM=ENG "$LIN" doc edit port-notes -b -)
 assert_contains "$out" "Updated doc port-notes" "doc edit from stdin"
 got=$(LLL_URL=$URL LLL_TEAM=ENG "$LIN" doc view port-notes --raw)
 [ "$got" = "Replaced body" ] || fail "doc edit should replace the whole body, got: '$got'"
+LLL_URL=$URL LLL_TEAM=ENG "$LIN" doc view port-notes --raw | python3 -c 'import sys; assert sys.stdin.read() == "Replaced body\n"'
 
 # issue link: doc view shows the issue, issue view shows the doc
 ENG1_ID=$(LLL_URL=$URL "$LIN" issue view ENG-1 --json | jq -r .id)
@@ -1404,12 +1587,27 @@ out=$(LLL_URL=$URL LLL_TEAM=ENG "$LIN" doc view port-notes)
 assert_contains "$out" "Issues:    ENG-1" "doc view shows linked issue"
 out=$(LLL_URL=$URL "$LIN" issue view ENG-1)
 assert_contains "$out" "Docs:      port-notes" "issue view shows linked doc"
+out=$(LLL_URL=$URL "$LIN" issue view ENG-1 --json)
+printf '%s' "$out" | jq -e '.docs | any(.slug == "port-notes" and (.body | length > 0))' >/dev/null \
+  || fail "JSON issue context includes linked wiki bodies"
 rid=$(LLL_URL=$URL LLL_TEAM=ENG "$LIN" doc view port-notes --json | jq -r '.issues[0]')
 [ "$rid" = "$ENG1_ID" ] || fail "doc record issues relation: expected $ENG1_ID, got '$rid'"
 
 # linking twice is idempotent
 out=$(LLL_URL=$URL LLL_TEAM=ENG "$LIN" issue link ENG-1 port-notes)
 assert_contains "$out" "already linked" "double link is idempotent"
+
+# Explicit keys and board URLs supply scope when no team is configured.
+LINK_HOME="$DATA_DIR/link-home"
+mkdir -p "$LINK_HOME"
+out=$(env -u LLL_TEAM HOME="$LINK_HOME" LLL_URL="$URL" "$LLL_ABS" issue unlink ENG-1 port-notes)
+assert_contains "$out" "Unlinked ENG-1" "unlink infers team from an explicit issue key"
+out=$(env -u LLL_TEAM HOME="$LINK_HOME" LLL_URL="$URL" "$LLL_ABS" issue link "https://board.example/issue/ENG-1" port-notes)
+assert_contains "$out" "Linked ENG-1" "link infers team from a board URL"
+out=$(env -u LLL_TEAM HOME="$LINK_HOME" LLL_URL="$URL" "$LLL_ABS" issue unlink "https://board.example/issue/ENG-1" port-notes)
+assert_contains "$out" "Unlinked ENG-1" "unlink infers team from a board URL"
+out=$(env -u LLL_TEAM HOME="$LINK_HOME" LLL_URL="$URL" "$LLL_ABS" issue link ENG-1 port-notes)
+assert_contains "$out" "Linked ENG-1" "link infers team from an explicit issue key"
 
 # relink corrects a wrong link: unlink the wrong issue, keep the right one
 out=$(LLL_URL=$URL LLL_TEAM=ENG "$LIN" issue link ENG-2 port-notes)
@@ -1457,6 +1655,18 @@ assert_contains "$out" "migration-hazard" "finding near matches a file inside a 
 out=$(LLL_URL=$URL LLL_TEAM=ENG "$LIN" finding near web/templates)
 assert_contains "$out" "No findings for web/templates." "finding near with no match says so"
 
+# LLL-314: exact coordinates beat an earlier slug's broad directory match.
+LLL_URL=$URL LLL_TEAM=ENG "$LIN" finding create -s a-ranking-directory -t "Broad ranking note" \
+  -b "Directory context" --paths "rank-probe" >/dev/null
+LLL_URL=$URL LLL_TEAM=ENG "$LIN" finding create -s z-ranking-exact -t "Exact ranking note" \
+  -b "File context" --paths "rank-probe, rank-probe/file.lis" >/dev/null
+out=$(LLL_URL=$URL LLL_TEAM=ENG "$LIN" finding near ./rank-probe/file.lis)
+[ "$(printf '%s\n' "$out" | cut -f1 | paste -sd, -)" = 'z-ranking-exact,a-ranking-directory' ] \
+  || fail "finding near did not rank exact before directory: $out"
+out=$(LLL_URL=$URL LLL_TEAM=ENG "$LIN" finding list -p rank-probe/file.lis --json)
+[ "$(jq -r 'map(.slug) | join(",")' <<<"$out")" = 'z-ranking-exact,a-ranking-directory' ] \
+  || fail "finding list JSON did not share path ranking: $out"
+
 out=$(LLL_URL=$URL LLL_TEAM=ENG "$LIN" finding list)
 assert_contains "$out" "migration-hazard	pb	Migration collisions" "finding list prints slug, area, title"
 out=$(LLL_URL=$URL LLL_TEAM=ENG "$LIN" finding list --area pb)
@@ -1476,6 +1686,14 @@ LLL_URL=$URL LLL_TEAM=ENG "$LIN" label create -n pb >/dev/null
 env LLL_URL=$URL "$LIN" issue update ENG-1 --label pb >/dev/null
 out=$(LLL_URL=$URL "$LIN" issue view ENG-1)
 assert_contains "$out" "migration-hazard (pb) — Migration collisions" "an area-matched finding surfaces by label"
+out=$(LLL_URL=$URL "$LIN" issue view ENG-1 --json)
+printf '%s' "$out" | jq -e '
+  (.docs | any(.slug == "race-found")) and
+  (.docs | all(.slug != "migration-hazard")) and
+  (.findings | any(.slug == "race-found")) and
+  (.findings | any(.slug == "migration-hazard" and .body == "Migrations are a merge hazard.")) and
+  ([.findings[].slug] == ([.findings[].slug] | sort))
+' >/dev/null || fail "JSON context distinguishes explicit docs from related findings and includes bodies"
 
 out=$(env LLL_URL=$URL "$LIN" issue view ENG-1 --raw)
 assert_contains "$out" "## Related findings" "issue view --raw carries related findings"
@@ -1538,6 +1756,8 @@ got=$(LLL_URL=$URL LLL_TEAM=ENG "$LIN" issue view ENG-1 --json | jq -r --arg id 
 [ "$got" = "absent" ] || fail "ENG-1 picked up OPS's pb label ($ops_pb)"
 out=$(env LLL_URL=$URL "$LIN" issue view ENG-2 --raw)
 assert_not_contains "$out" "Related findings" "an issue with no matches renders no findings section"
+out=$(LLL_URL=$URL "$LIN" issue view ENG-2 --json)
+printf '%s' "$out" | jq -e '.findings == []' >/dev/null || fail "empty JSON findings must be an array"
 
 out=$("$LIN" finding --help)
 assert_contains "$out" "lll finding near" "finding --help mentions near"
@@ -1657,6 +1877,10 @@ assert_contains "$out" "Usage:" "lll issue --help"
 assert_contains "$out" "lll issue update" "issue --help mentions update"
 assert_contains "$out" "lll issue close" "issue --help mentions close"
 assert_contains "$out" "lll issue start" "issue --help mentions start"
+assert_contains "$out" "lll issue branch-name" "issue --help mentions branch-name"
+for shell in bash zsh fish; do
+  assert_contains "$("$LIN" completions "$shell")" "branch-name" "$shell completes branch-name"
+done
 assert_contains "$out" "lll issue delete" "issue --help mentions delete"
 assert_contains "$out" "lll issue comment" "issue --help mentions comment"
 assert_contains "$out" "--assignee" "issue --help mentions --assignee"
@@ -1815,11 +2039,12 @@ key=$(printf '%s' "$out" | sed -n 's/^Created \([A-Z]*-[0-9]*\).*/\1/p')
 got=$(env $E "$LIN" issue view "$key" --json | jq -r .description)
 [ "$got" = "piped description" ] || fail "-d - description: got '$got'"
 
-# one trailing newline is the shell's, not the author's
+# Stdin preserves the author's exact trailing newline.
 out=$(echo "trailing" | env $E "$LIN" issue create -t "Stdin newline" -d -)
 key2=$(printf '%s' "$out" | sed -n 's/^Created \([A-Z]*-[0-9]*\).*/\1/p')
-got=$(env $E "$LIN" issue view "$key2" --json | jq -r .description)
-[ "$got" = "trailing" ] || fail "-d - should strip the trailing newline: got '$got'"
+env $E "$LIN" issue view "$key2" --json | python3 -c 'import json,sys; assert json.load(sys.stdin)["description"] == "trailing\n"'
+printf '  first line\n\nsecond line\n' | env $E "$LIN" issue update "$key2" -d - >/dev/null
+env $E "$LIN" issue view "$key2" --json | python3 -c 'import json,sys; assert json.load(sys.stdin)["description"] == "  first line\n\nsecond line\n"'
 
 printf 'piped comment body' | env $E "$LIN" issue comment "$key" -b - >/dev/null
 assert_contains "$(env $E "$LIN" issue comment "$key")" "piped comment body" "-b - reads the comment from stdin"
@@ -1828,6 +2053,11 @@ assert_contains "$(env $E "$LIN" issue comment "$key")" "piped comment body" "-b
 env $E "$LIN" issue update "$key" --description "literal again" >/dev/null
 got=$(env $E "$LIN" issue view "$key" --json | jq -r .description)
 [ "$got" = "literal again" ] || fail "literal --description regressed: got '$got'"
+env $E "$LIN" issue update "$key" -d --help >/dev/null
+env $E "$LIN" issue view "$key" --json | python3 -c 'import json,sys; assert json.load(sys.stdin)["description"] == "--help"'
+env $E LLL_TOKEN="$BRYAN_TOK" LLL_ME=bryan "$LIN" issue comment "$key" -b --help >/dev/null
+env $E "$LIN" issue view "$key" --json | python3 -c 'import json,sys; assert json.load(sys.stdin)["comments"][-1]["body"] == "--help"'
+env $E "$LIN" issue update "$key" --description 'literal again' >/dev/null
 
 # nothing piped in: refuse rather than hang
 if out=$(env $E "$LIN" issue create -t "no stdin" -d - </dev/null 2>&1); then
@@ -1836,6 +2066,11 @@ fi
 assert_contains "$out" "nothing is piped in" "-d - with no pipe names the fix"
 
 # --- create --json (TASK-177): the raw record, pipe-safe and keyable ---
+python3 scripts/test_create_response.py "$LLL_ABS" "$URL"
+python3 scripts/test_pr_body.py "$LLL_ABS" "$URL"
+python3 scripts/test_issue_table.py "$LLL_ABS" "$URL"
+python3 scripts/test_issue_project.py "$LLL_ABS" "$URL"
+python3 scripts/test_end_of_options.py "$LLL_ABS" "$URL"
 # Scripts used to parse the "Created KEY-N" sentence for the key; --json
 # hands them the record itself instead — same shape as `view --json`.
 out=$(env $E "$LIN" issue create -t "Create json target" --json)
@@ -1880,6 +2115,15 @@ assert_contains "$out" "Claimed $CKEY for bryan" "claim output"
 out=$(env $E "$LIN" issue view "$CKEY")
 assert_contains "$out" "Claimed:   bryan" "issue view shows the holder"
 assert_contains "$out" "Assignee:  bryan" "claiming assigns the issue"
+env $E "$LIN" issue view "$CKEY" --json | python3 -c 'import json,sys; d=json.load(sys.stdin); assert d["claim"]["expand"]["member"]["name"] == "bryan"; assert d["comments"] == []'
+out=$(env $E "$LIN" issue close "$CKEY")
+assert_contains "$out" "Claim retained by bryan" "close reports the live claim"
+assert_contains "$out" "lll issue release $CKEY" "close supplies explicit release command"
+assert_contains "$out" "if it still matches" "close explains conditional release assignment effect"
+env $E "$LIN" issue view "$CKEY" --json | python3 -c 'import json,sys; d=json.load(sys.stdin); assert d["state"] == "done"; assert d["claim"]["expand"]["member"]["name"] == "bryan"'
+env $E LLL_TOKEN="$BRYAN_TOK" LLL_ME=bryan "$LIN" issue comment "$CKEY" -b 'handoff for carol' >/dev/null
+env $E LLL_TOKEN="$CAROL_TOK" LLL_ME=carol "$LIN" issue comment "$CKEY" -b 'acknowledged' >/dev/null
+env $E "$LIN" issue view "$CKEY" --json | python3 -c 'import json,sys; d=json.load(sys.stdin); assert [(c["body"],c["expand"]["author"]["name"]) for c in d["comments"]] == [("handoff for carol","bryan"),("acknowledged","carol")]'
 
 # AC#1: a held issue refuses the second claim and changes nothing.
 set +e
@@ -1932,6 +2176,7 @@ assert_contains "$out" "Claimed:   bryan" "a refused claim leaves the holder alo
 # AC#3: release gives it back, and the next claim succeeds.
 out=$(env $E "$LIN" issue release "$CKEY")
 assert_contains "$out" "Released $CKEY (was bryan's)" "release output"
+assert_contains "$out" "cleared assignee" "release reports assignment removal"
 out=$(env $E "$LIN" issue view "$CKEY")
 assert_not_contains "$out" "Claimed:" "release removes the hold"
 assert_contains "$out" "Assignee:  none" "release clears the assignee the claim set"
@@ -1946,6 +2191,28 @@ rc=$?
 set -e
 [ "$rc" -ne 0 ] || fail "releasing an unclaimed issue: expected nonzero exit"
 assert_contains "$out" "$CKEY is not claimed" "double release names the state"
+# The newer claim protection refuses reassignment until release (covered above).
+env $E "$LIN" issue view "$CKEY" --json | python3 -c 'import json,sys; d=json.load(sys.stdin); assert d["claim"] is None; assert len(d["comments"]) == 2'
+
+# Full issue JSON must not silently stop at the first 200 comments.
+env $E python3 - "$LLL_ABS" "$CKEY" <<'PY'
+import json, os, subprocess, sys, urllib.request
+binary, key = sys.argv[1:]
+def view():
+    return json.loads(subprocess.check_output([binary, 'issue', 'view', key, '--json']))
+issue = view()
+for i in range(199):
+    payload = json.dumps({'issue': issue['id'], 'body': f'pagination {i}'}).encode()
+    request = urllib.request.Request(os.environ['LLL_URL'] + '/api/collections/comments/records', data=payload,
+        headers={'Authorization': 'Bearer ' + os.environ['LLL_TOKEN'], 'Content-Type': 'application/json'})
+    with urllib.request.urlopen(request) as response:
+        assert response.status == 200
+comments = view()['comments']
+assert len(comments) == 201
+assert len({c['id'] for c in comments}) == 201
+assert [(c['created'], c['id']) for c in comments] == sorted((c['created'], c['id']) for c in comments)
+assert {c['body'] for c in comments} >= {f'pagination {i}' for i in range(199)}
+PY
 
 # No 'me' to claim as: refuse and name the fix. $WORK has no .lll.toml and
 # $FAKEHOME no user config, so 'me' is genuinely unset here - and the token
@@ -2219,6 +2486,40 @@ assert_contains "$create_out" "one-time agent token for e2e-agent" "token create
 out=$(LLL_TOKEN="$MINT_TOK" HOME="$E2E_HOME" LLL_URL=$URL "$LIN" member list)
 assert_contains "$out" "e2e-agent" "the minted token authenticates a GET"
 
+# Explicit authority and endpoint flags use the same gate without persisting
+# credentials or replacing the caller's configured server.
+cp "$E2E_HOME/.config/lll/lll.toml" "$DATA_DIR/pre-token-flags.toml"
+create_out=$(env -u LLL_TOKEN -u LLL_ADMIN_EMAIL -u LLL_ADMIN_PASSWORD \
+  HOME="$E2E_HOME" LLL_URL=http://127.0.0.1:1 "$LIN" token create e2e-agent \
+  --url "$URL" --duration 600 --admin-email admin@local.dev --admin-password admin-local-123)
+FLAG_MINT_TOK=$(printf '%s\n' "$create_out" | sed -n 's/^LLL_TOKEN=//p')
+[ -n "$FLAG_MINT_TOK" ] || fail 'explicit token flags produced no credential'
+out=$(LLL_TOKEN="$FLAG_MINT_TOK" HOME="$E2E_HOME" LLL_URL=$URL "$LIN" whoami)
+assert_contains "$out" 'e2e-agent' 'flag-minted token authenticates the intended member'
+cmp -s "$E2E_HOME/.config/lll/lll.toml" "$DATA_DIR/pre-token-flags.toml" \
+  || fail 'token authority flags modified saved configuration'
+
+# A static-token receiver can persist its endpoint without a login or live
+# connection; the next process reads it without an endpoint environment value.
+STATIC_HOME="$DATA_DIR/static-token-home"
+mkdir -p "$STATIC_HOME"
+out=$(cd "$STATIC_HOME" && env -u LLL_TOKEN HOME="$STATIC_HOME" LLL_URL=http://127.0.0.1:1 \
+  "$LLL_ABS" config set url "$URL/")
+assert_contains "$out" 'overrides this setting' 'URL setter explains an environment override'
+cp "$STATIC_HOME/.config/lll/lll.toml" "$DATA_DIR/static-endpoint.toml"
+for invalid_endpoint in ftp://invalid https://invalid/path?query=yes https://invalid/path#fragment; do
+  out=$(cd "$STATIC_HOME" && env -u LLL_URL HOME="$STATIC_HOME" "$LLL_ABS" config set url "$invalid_endpoint" 2>&1) \
+    && fail 'accepted an invalid API endpoint'
+  assert_contains "$out" 'url must be an absolute' 'invalid API endpoint guidance'
+  cmp -s "$STATIC_HOME/.config/lll/lll.toml" "$DATA_DIR/static-endpoint.toml" \
+    || fail 'invalid endpoint changed saved configuration'
+done
+out=$(cd "$STATIC_HOME" && env -u LLL_URL HOME="$STATIC_HOME" LLL_TOKEN="$FLAG_MINT_TOK" "$LLL_ABS" whoami)
+assert_contains "$out" 'e2e-agent' 'static receiver reads the persisted endpoint'
+out=$(cd "$STATIC_HOME" && env -u LLL_URL HOME="$STATIC_HOME" LLL_TOKEN="$FLAG_MINT_TOK" "$LLL_ABS" member list)
+assert_contains "$out" 'e2e-agent' 'static receiver authenticates a read without URL override'
+[ ! -f "$STATIC_HOME/.lll.toml" ] || fail 'API endpoint setter wrote repository config'
+
 # An expired token is named exactly, from its own payload (TASK-318): a
 # 2-second token lists inside its lifetime and is refused after it, by exp.
 # PocketBase honours exp on impersonation tokens; this pins that the CLI
@@ -2395,32 +2696,25 @@ set -e
 assert_contains "$out" "127.0.0.1:$DEAD_PORT" "the unreachable error names the url"
 assert_not_contains "$out" "lll login --url" "a configured url gets no fresh-machine hint"
 
-# TASK-195 AC#2: with NOTHING configured, the refused built-in default names
-# 'lll login --url'. Only assertable when :8090 is actually dead — a developer
-# machine may be running its own lll up there.
+# With nothing configured, the client refuses missing authentication before
+# making a request. This recovery check is independent of port 8090 occupancy.
 EMPTY_HOME="$DATA_DIR/empty_home"
 mkdir -p "$EMPTY_HOME"
-if curl -s --max-time 1 -o /dev/null http://127.0.0.1:8090/api/health; then
-  echo "e2e: skipping the no-url hint assert — something answers on :8090" >&2
-else
-  set +e
-  out=$(cd "$NEUTRAL" && env -u LLL_URL -u LLL_TOKEN -u LLL_TEAM HOME="$EMPTY_HOME" \
-    "$LLL_ABS" issue list 2>&1)
-  rc=$?
-  set -e
-  [ "$rc" -ne 0 ] || fail "issue list with nothing configured and :8090 dead: expected failure"
-  assert_contains "$out" "127.0.0.1:8090" "the default url is named"
-  assert_contains "$out" "lll login --url" "the no-url error names the fresh-machine fix"
-fi
+set +e
+out=$(cd "$NEUTRAL" && env -u LLL_URL -u LLL_TOKEN -u LLL_TEAM HOME="$EMPTY_HOME" \
+  "$LLL_ABS" issue list 2>&1)
+rc=$?
+set -e
+[ "$rc" -ne 0 ] || fail "issue list with nothing configured: expected failure"
+assert_contains "$out" "127.0.0.1:8090" "the default url is named"
+assert_contains "$out" "lll login --url" "the no-url error names the fresh-machine fix"
 
-# TASK-203 AC#3: web_url derives from a hosted url — https, port dropped —
-# while a local url keeps the local board default. `lll board` only prints,
-# so the hosted url never receives a request.
-out=$(cd "$NEUTRAL" && env -u LLL_WEB_URL -u LLL_TOKEN LLL_URL="https://tracker.example.com:8091" \
-  HOME="$EMPTY_HOME" "$LLL_ABS" board)
-[ "$out" = "https://tracker.example.com" ] || fail "board did not derive the hosted web url: $out"
-out=$(cd "$NEUTRAL" && env -u LLL_WEB_URL -u LLL_TOKEN LLL_URL=$URL HOME="$EMPTY_HOME" "$LLL_ABS" board)
-[ "$out" = "http://127.0.0.1:8100" ] || fail "board lost the local default: $out"
+# API addresses alone cannot identify a separately deployed web endpoint.
+for api_endpoint in "$URL" https://tracker.example.com:8091; do
+  out=$(cd "$NEUTRAL" && env -u LLL_WEB_URL -u LLL_TOKEN LLL_URL="$api_endpoint" HOME="$EMPTY_HOME" "$LLL_ABS" board 2>&1) \
+    && fail "board invented a URL from an API endpoint"
+  assert_contains "$out" "lll config set web_url URL" "missing board endpoint names the setter"
+done
 
 # Help and completions carry the new surface.
 out=$("$LIN" login --help)
@@ -2508,14 +2802,46 @@ assert_contains "$out" "removed member Disposable Person" "an unassigned member 
 # earlier — and cannot delete an account the rest of the run depends on.
 LLL_URL=$URL "$LIN" member add -n "Busy Person" >/dev/null \
   || fail "adding the assigned member"
-LLL_URL=$URL LLL_TEAM=ENG "$LIN" issue create "work for Busy Person" \
-  --assignee "Busy Person" >/dev/null || fail "assigning an issue to Busy Person"
+busy_issue=$(LLL_URL=$URL LLL_TEAM=ENG "$LIN" issue create "work for Busy Person" \
+  --assignee "Busy Person" --json) || fail "assigning an issue to Busy Person"
 out=$(LLL_URL=$URL "$LIN" member remove "Busy Person" \
   --admin-email admin@local.dev --admin-password admin-local-123 2>&1) \
   && fail "removing an assigned member should refuse"
 assert_contains "$out" "issue(s) assigned" "the refusal counts the assigned issues"
 LLL_URL=$URL "$LIN" member list | grep -q "Busy Person" \
   || fail "the refused removal deleted the member anyway"
+
+# LLL-234: both relations count, even when the configured member token is
+# unusable. Forced deletion clears attribution, never comment content.
+REMOVE_ADMIN=$(pb_superuser_token "$URL")
+busy_id=$(jq -r '.assignee' <<<"$busy_issue")
+busy_issue_id=$(jq -r '.id' <<<"$busy_issue")
+busy_comment=$(curl -sf -H "Authorization: Bearer $REMOVE_ADMIN" -H 'Content-Type: application/json' \
+  -d "$(jq -nc --arg issue "$busy_issue_id" --arg author "$busy_id" '{issue:$issue,author:$author,body:"Keep this history"}')" \
+  "$URL/api/collections/comments/records") || fail "creating the member-removal comment"
+out=$(LLL_TOKEN=bad.bad.bad LLL_URL=$URL "$LIN" member delete "Busy Person" \
+  --admin-email admin@local.dev --admin-password admin-local-123 2>&1) \
+  && fail "removing a referenced member should refuse"
+assert_contains "$out" '1 issue(s) assigned and 1 comment(s) authored' "admin identity counts both relations"
+out=$(LLL_TOKEN=bad.bad.bad LLL_URL=$URL "$LIN" member remove "Busy Person" --force \
+  --admin-email admin@local.dev --admin-password admin-local-123) || fail "forced member removal: $out"
+assert_contains "$out" 'cleared 1 issue assignment(s) and 1 comment author reference(s)' "force reports both relations"
+remaining_issue=$(curl -sf -H "Authorization: Bearer $REMOVE_ADMIN" "$URL/api/collections/issues/records/$busy_issue_id")
+[ "$(jq -r '.assignee' <<<"$remaining_issue")" = '' ] || fail "forced removal retained assignment"
+remaining_comment=$(curl -sf -H "Authorization: Bearer $REMOVE_ADMIN" "$URL/api/collections/comments/records/$(jq -r '.id' <<<"$busy_comment")")
+[ "$(jq -r '.author' <<<"$remaining_comment")" = '' ] || fail "forced removal retained comment author"
+[ "$(jq -r '.body' <<<"$remaining_comment")" = 'Keep this history' ] || fail "forced removal lost comment body"
+
+LLL_URL=$URL "$LIN" member add -n "Comment Only Person" >/dev/null
+commenter=$(LLL_URL=$URL "$LIN" member list --json | jq -r '.items[] | select(.name=="Comment Only Person") | .id')
+curl -sf -H "Authorization: Bearer $REMOVE_ADMIN" -H 'Content-Type: application/json' \
+  -d "$(jq -nc --arg issue "$busy_issue_id" --arg author "$commenter" '{issue:$issue,author:$author,body:"Comment only history"}')" \
+  "$URL/api/collections/comments/records" >/dev/null || fail "creating comment-only reference"
+out=$(LLL_URL=$URL "$LIN" member delete "Comment Only Person" 2>&1) \
+  && fail "comment-only member deletion should refuse"
+assert_contains "$out" '0 issue(s) assigned and 1 comment(s) authored' "comments alone block deletion"
+curl -sf -H "Authorization: Bearer $REMOVE_ADMIN" "$URL/api/collections/members/records/$commenter" >/dev/null \
+  || fail "comment-only refusal deleted the member"
 
 # --- TASK-246/248/249: the superuser commands are scriptable ---------------
 # set-password took no password flag and the admin credentials could only ride
@@ -2596,6 +2922,147 @@ assert_contains "$out" "no title" "a titleless create says so"
 # -t still works and still wins, so nothing scripted against it breaks.
 out=$(LLL_URL=$URL LLL_TEAM=POS "$LIN" issue create -t "Flag title still works")
 assert_contains "$out" "Flag title still works" "-t remains the documented spelling"
+
+# --- Oracle regressions: predictable setup and explicit inputs ---
+export LLL_URL="$URL"
+ORACLE_HOME="$DATA_DIR/oracle-home"
+ORACLE_REPO="$DATA_DIR/oracle-repo"
+mkdir -p "$ORACLE_HOME" "$ORACLE_REPO"
+git -C "$ORACLE_REPO" init -q
+# Configuration remains offline, persistent, and safely encoded.
+(cd "$ORACLE_REPO" && HOME="$ORACLE_HOME" "$LLL_ABS" config set web_url https://board.example.test/base/ >/dev/null)
+out=$(cd "$ORACLE_REPO" && env -u LLL_WEB_URL HOME="$ORACLE_HOME" "$LLL_ABS" board)
+[ "$out" = https://board.example.test/base ] || fail "board endpoint did not persist"
+out=$(cd "$ORACLE_REPO" && HOME="$ORACLE_HOME" "$LLL_ABS" config set web_url ftp://wrong 2>&1) && fail "accepted invalid web URL"
+assert_contains "$out" 'http://' "invalid web URL explains supported schemes"
+out=$(cd "$ORACLE_REPO" && HOME="$ORACLE_HOME" "$LLL_ABS" config set web_url https://wrong extra 2>&1) && fail "accepted trailing config argument"
+# Offline attach must not turn into false readiness after authentication.
+out=$(cd "$ORACLE_REPO" && env -u LLL_TOKEN -u LLL_TEAM HOME="$ORACLE_HOME" LLL_URL=http://127.0.0.1:1 "$LLL_ABS" attach -k OFFLINE)
+assert_contains "$out" 'saved local attachment only' 'offline attach distinguishes saved config'
+assert_contains "$out" 'lll attach -k OFFLINE' 'offline attach gives explicit reconciliation'
+assert_not_contains "$out" 'lll up' 'offline client recovery does not start a server'
+[ "$(cat "$ORACLE_REPO/.lll.toml")" = 'team = "OFFLINE"' ] || fail 'explicit long key was changed'
+out=$(cd "$ORACLE_REPO" && HOME="$ORACLE_HOME" "$LLL_ABS" attach -k '' 2>&1) && fail 'empty explicit attachment accepted'
+assert_contains "$out" 'nonempty team key' 'empty key rejected before config mutation'
+[ "$(cat "$ORACLE_REPO/.lll.toml")" = 'team = "OFFLINE"' ] || fail 'empty key changed attachment'
+out=$(cd "$ORACLE_REPO" && env -u LLL_TOKEN -u LLL_TEAM -u LLL_URL HOME="$ORACLE_HOME" "$LLL_ABS" login --url "$URL" --email e2e-agent@lll.test --password e2e-agent-pass-123)
+assert_contains "$out" 'team OFFLINE is missing' "login verifies attached team"
+assert_not_contains "$out" 'ready:' "missing team is not ready"
+(cd "$ORACLE_REPO" && env -u LLL_TOKEN -u LLL_TEAM -u LLL_URL HOME="$ORACLE_HOME" "$LLL_ABS" attach -k OFFLINE >/dev/null)
+out=$(cd "$ORACLE_REPO" && env -u LLL_TOKEN -u LLL_TEAM -u LLL_URL HOME="$ORACLE_HOME" "$LLL_ABS" issue create 'Recovered offline attachment')
+assert_contains "$out" 'OFFLINE-1' "explicit recovery makes team usable"
+# Each create takes a positional name or --name; mixed forms fail before mutation.
+LLL_TEAM=POS "$LIN" project create 'Oracle project' >/dev/null
+LLL_TEAM=POS "$LIN" label create 'oracle-label' >/dev/null
+for noun in project label member; do
+  out=$(LLL_TEAM=POS "$LIN" "$noun" create 'Ambiguous oracle' --name 'Other name' 2>&1) && fail "$noun accepted ambiguous name"
+  assert_contains "$out" 'not both' "$noun rejects name ambiguity"
+done
+out=$(LLL_TEAM=POS "$LIN" issue create 'Named priority oracle' --priority high --label oracle-label --project 'Oracle project' --json)
+[ "$(printf '%s' "$out" | jq -r .priority)" = 2 ] || fail 'named priority did not store high'
+# Real colleague credentials work in a separate HOME and an existing invite cannot reset them.
+"$LIN" member create oracle-colleague --email oracle-colleague@lll.test --password oracle-colleague-pass-123 >/dev/null
+out=$(env -u LLL_TOKEN HOME="$DATA_DIR/oracle-colleague-home" "$LIN" login --url "$URL" --email oracle-colleague@lll.test --password oracle-colleague-pass-123)
+assert_contains "$out" 'logged in as oracle-colleague' 'explicit colleague credentials authenticate'
+out=$(LLL_ADMIN_EMAIL=admin@local.dev LLL_ADMIN_PASSWORD=admin-local-123 "$LIN" member invite oracle-colleague --email oracle-colleague@lll.test 2>&1) && fail 'invite silently reset an existing colleague'
+assert_contains "$out" 'member set-password oracle-colleague --email' 'existing invite gives recovery'
+# Alphanumeric and hyphenated keys infer without ambiguity; conflicting prefixes refuse.
+"$LIN" team create -k DX2 -n 'Oracle digits' >/dev/null
+LLL_TEAM=DX2 "$LIN" issue create 'Digits infer' >/dev/null
+git -C "$ORACLE_REPO" switch -c dx2-1-digits -q
+out=$(cd "$ORACLE_REPO" && LLL_URL="$URL" "$LLL_ABS" issue view)
+assert_contains "$out" 'DX2-1' 'alphanumeric branch inference'
+(cd "$ORACLE_REPO" && LLL_URL="$URL" "$LLL_ABS" issue comment -b 'Alphanumeric branch comment' >/dev/null)
+"$LIN" team create -k DX2-1 -n 'Ambiguous prefix' >/dev/null
+LLL_TEAM=DX2-1 "$LIN" issue create 'Nested prefix' >/dev/null
+git -C "$ORACLE_REPO" switch -c dx2-1-1-title -q
+out=$(cd "$ORACLE_REPO" && LLL_URL="$URL" "$LLL_ABS" issue start 2>&1) && fail 'ambiguous branch selected an issue'
+assert_contains "$out" 'ambiguous' 'ambiguous branch requires explicit ID'
+
+# Account switches preserve deliberate identity config but explain the mismatch.
+out=$(cd "$ORACLE_REPO" && env -u LLL_TOKEN -u LLL_ME HOME="$ORACLE_HOME" "$LLL_ABS" login --url "$URL" --email oracle-colleague@lll.test --password oracle-colleague-pass-123)
+assert_contains "$out" 'writes are refused until they agree' 'login explains retained identity mismatch'
+assert_contains "$out" 'lll config set me oracle-colleague' 'login gives identity recovery'
+"$LIN" board url >"$DATA_DIR/board-stdout" 2>"$DATA_DIR/board-stderr" && fail 'board accepted an unknown subcommand'
+[ ! -s "$DATA_DIR/board-stdout" ] || fail 'command errors contaminate stdout'
+assert_contains "$(cat "$DATA_DIR/board-stderr")" 'unexpected argument' 'board classifies a positional argument accurately'
+assert_contains "$(cat "$DATA_DIR/board-stderr")" 'lll board [-w]' 'board names canonical usage'
+# A normal authenticated member can invite a new colleague; reset is separate.
+out=$(env -u LLL_ADMIN_EMAIL -u LLL_ADMIN_PASSWORD "$LIN" member invite oracle-invited --email oracle-invited@lll.test)
+assert_contains "$out" 'invited oracle-invited' 'member token can invite a new colleague'
+
+# Invocation-only --team works consistently without rewriting config.
+env LLL_URL="$URL" LLL_TEAM=ENG python3 - "$LLL_ABS" <<'PY_SCOPE'
+import json, os, pathlib, subprocess, sys
+binary = sys.argv[1]
+def run(*args):
+    return subprocess.check_output([binary, *args], text=True)
+def record(*args):
+    return json.loads(run(*args))
+paths = [pathlib.Path('.lll.toml'), pathlib.Path.home()/'.config/lll/lll.toml']
+before = [(p.exists(), p.read_bytes() if p.exists() else None) for p in paths]
+for key in ('SCA', 'SCB'):
+    run('team', 'create', '-k', key, '-n', key)
+run('project', 'create', 'Shared scope project', '--team', 'SCB')
+run('label', 'create', 'scope-label', '--team=SCB')
+issue = record('issue', 'create', 'Scoped issue', '--project', 'Shared scope project', '--label', 'scope-label', '--team', 'SCB', '--json')
+assert issue['expand']['team']['key'] == 'SCB'
+key = 'SCB-' + str(issue['number'])
+assert record('issue', 'view', key, '--team', 'SCA', '--json')['id'] == issue['id']
+run('issue', 'update', key, '--team', 'SCA', '--description', '--team')
+assert record('issue', 'view', key, '--json')['description'] == '--team'
+assert len(record('issue', 'list', '--team', 'SCB', '--json')['items']) == 1
+assert record('issue', 'list', '--team', 'SCA', '--json')['items'] == []
+assert all(i['team'] != issue['team'] for i in record('issue', 'list', '--json')['items'])
+assert len(record('project', 'list', '--team', 'SCB', '--json')['items']) == 1
+assert len(record('label', 'list', '--team', 'SCB', '--json')['items']) == 1
+run('project', 'edit', 'Shared scope project', '-n', 'Scoped rename', '--team', 'SCB')
+assert 'Scoped rename' in run('project', 'view', 'Scoped rename', '--team', 'SCB')
+run('doc', 'new', '-s', 'scope-finding', '-t', 'Scoped finding', '-k', 'finding', '-a', 'scope-label', '-p', 'src/cache', '-b', 'scope body', '--team', 'SCB')
+assert record('doc', 'view', 'scope-finding', '--team', 'SCB', '--json')['body'] == 'scope body'
+assert 'scope-finding' in run('finding', 'near', 'src/cache/file.lis', '--team', 'SCB')
+assert 'scope-finding' not in run('finding', 'list', '--team', 'SCA')
+run('doc', 'delete', 'scope-finding', '--force', '--team', 'SCB')
+run('label', 'delete', 'scope-label', '--force', '--team', 'SCB')
+run('project', 'delete', 'Scoped rename', '--force', '--team', 'SCB')
+assert before == [(p.exists(), p.read_bytes() if p.exists() else None) for p in paths]
+PY_SCOPE
+
+# Concurrent callers must not read the same maximum number before insertion.
+# Exercise both CLI and raw API callers; explicit duplicate-number rejection
+# is covered earlier, so the unique constraint remains part of the contract.
+python3 - "$LLL_ABS" <<'PY_RACE'
+import concurrent.futures, json, os, subprocess, sys, urllib.request
+binary = sys.argv[1]
+def cli(*args):
+    result = subprocess.run([binary, *args], text=True, capture_output=True, timeout=30)
+    assert result.returncode == 0, (args, result.stderr)
+    return result.stdout
+cli('team', 'create', '-k', 'RACE', '-n', 'Concurrent allocation')
+def create_cli(index):
+    return json.loads(cli('issue', 'create', f'Parallel CLI {index}', '--team', 'RACE', '--json'))
+with concurrent.futures.ThreadPoolExecutor(max_workers=8) as pool:
+    created = list(pool.map(create_cli, range(32)))
+team_id = created[0]['team']
+def create_api(index):
+    request = urllib.request.Request(os.environ['LLL_URL']+'/api/collections/issues/records',
+        data=json.dumps({'team': team_id, 'title': f'Parallel API {index}', 'state': 'todo'}).encode(),
+        headers={'Authorization': 'Bearer '+os.environ['LLL_TOKEN'], 'Content-Type': 'application/json'})
+    with urllib.request.urlopen(request, timeout=30) as response:
+        return json.load(response)
+with concurrent.futures.ThreadPoolExecutor(max_workers=8) as pool:
+    created += list(pool.map(create_api, range(8)))
+assert len({row['id'] for row in created}) == 40
+assert sorted(row['number'] for row in created) == list(range(1, 41))
+final = json.loads(cli('issue', 'list', '--team', 'RACE', '--limit', '100', '--json'))['items']
+assert {row['id'] for row in final} == {row['id'] for row in created}
+print('Concurrent CLI/API allocation: 40 successful creates, 40 unique IDs and numbers')
+PY_RACE
+
+# --- web board (own ephemeral PB; see e2e_web.sh) ---
+python3 scripts/test_doc_pagination.py "$LLL_ABS" "$URL"
+python3 scripts/test_export_live.py "$LLL_ABS" "$URL"
+python3 scripts/test_claims_live.py "$LLL_ABS" "$URL"
 
 # --- web board (own ephemeral PB; see e2e_web.sh) ---
 HOME="$E2E_REAL_HOME" scripts/e2e_web.sh

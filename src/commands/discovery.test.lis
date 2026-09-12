@@ -1,0 +1,27 @@
+import "go:net/http"
+import "go:net/http/httptest"
+import "go:strings"
+
+#[test]
+fn discovery_uses_only_identified_server_advertisements() {
+  assert discovered_board_url("https://tracker.example.test/", "{\"service\":\"lll\",\"web_url\":\".\"}") == Some("https://tracker.example.test")
+  assert discovered_board_url("http://localhost:8090", "{\"service\":\"lll\",\"web_url\":\"http://localhost:45678/\"}") == Some("http://localhost:45678")
+  for document in ["broken", "{}", "null", "{\"service\":\"other\",\"web_url\":\".\"}", "{\"service\":\"lll\",\"web_url\":\"//other.test\"}", "{\"service\":\"lll\",\"web_url\":\"https://user:secret@other.test\"}", "{\"service\":\"lll\",\"web_url\":\"https://other.test/?token=secret\"}"] {
+    assert discovered_board_url("https://tracker.example.test", document).is_none()
+  }
+}
+
+#[test]
+fn discovery_refuses_credential_bearing_or_ambiguous_base_urls() {
+  let mut server = httptest.NewServer(http.HandlerFunc(discovery_test_advertisement))
+  defer server.Close()
+  let host = strings.TrimPrefix(server.URL, "http://")
+  assert discover_board_url(server.URL) == Some("https://board.example.test")
+  for base in [f"http://user:secret@{host}", server.URL + "/?token=secret", f"ftp://{host}", f"//{host}"] {
+    assert discover_board_url(base).is_none()
+  }
+}
+
+fn discovery_test_advertisement(w: http.ResponseWriter, _r: Ref<http.Request>) {
+  let _ = w.Write("{\"service\":\"lll\",\"web_url\":\"https://board.example.test\"}".bytes())
+}

@@ -1,3 +1,5 @@
+import "records"
+import "claims"
 import "go:encoding/json"
 import "go:html/template"
 import "go:net/http"
@@ -19,6 +21,7 @@ import "theme"
 fn rail_vm(active: string, me: string, team: models.Team) -> RailVM {
   let hex = theme.normalize_hex(team.accent)
   RailVM {
+    team_key: team.key,
     active,
     me,
     version: version(),
@@ -44,7 +47,7 @@ fn board_base(key: string) -> string {
 /// Archived teams stay off the switcher (TASK-210) — even the one the page
 /// is scoped to: its board says "archived" in its own banner instead.
 fn rail_teams(current: string) -> Slice<RailTeamVM> {
-  let Ok(teams) = list_teams() else {
+  let Ok(teams) = records.list_teams() else {
     return []
   }
   teams.items.filter(|t| !t.archived).map(|t| RailTeamVM {
@@ -77,6 +80,11 @@ fn fav_vms() -> Slice<FavVM> {
   let Ok(favs) = fetch_favorites() else {
     return []
   }
+  favorite_rows(favs)
+}
+
+/// The rail projection contains only navigation metadata, never issue bodies.
+fn favorite_rows(favs: Slice<models.Favorite>) -> Slice<FavVM> {
   favs.map(|f| {
     let issue = f.expand.issue
     FavVM {
@@ -87,7 +95,7 @@ fn fav_vms() -> Slice<FavVM> {
   })
 }
 
-/// Every favorite, newest first, with its issue and that issue's team.
+/// Every favorite, newest first, with only the metadata the rail displays.
 ///
 /// Unscoped by member on purpose: auth is deferred (task-32), so every row
 /// carries member="" and a star belongs to the workspace. When members
@@ -95,7 +103,7 @@ fn fav_vms() -> Slice<FavVM> {
 fn fetch_favorites() -> Result<Slice<models.Favorite>, string> {
   let mut list = models.FavoriteList { .. }
   pb.fetch(
-    "/api/collections/favorites/records?perPage=200&sort=-created&expand=issue.team",
+    "/api/collections/favorites/records?perPage=200&sort=-created,id&expand=issue.team&fields=id,issue,expand.issue.id,expand.issue.number,expand.issue.title,expand.issue.state,expand.issue.expand.team.key",
     "favorites",
     &list,
   )?
@@ -147,22 +155,21 @@ fn board_page(w: http.ResponseWriter, r: Ref<http.Request>, team: models.Team, m
   // Validate every value against the catalogue before it filters anything.
   let mut states: Slice<string> = []
   for s in csv(raw.state) {
-    if query.states().find(|x| x == s).is_some() {
-      states = states.append(s)
-    } else if err == "" {
-      err = f"unknown state '{s}' (use one of: {strings.Join(query.states(), ", ")})"
+    match query.state(s) {
+      Ok(valid) => { states = states.append(valid) },
+      Err(e) => { if err == "" { err = e } },
     }
   }
   let mut assignees: Slice<string> = []
   for a in csv(raw.assignee) {
-    match resolve_member(a) {
+    match records.resolve_member(a) {
       Ok(_) => assignees = assignees.append(a),
       Err(e) => { if err == "" { err = e } },
     }
   }
   let mut labels: Slice<string> = []
   for l in csv(raw.label) {
-    match resolve_label(team_id, l) {
+    match records.resolve_label(team_id, l) {
       Ok(_) => labels = labels.append(l),
       Err(e) => { if err == "" { err = e } },
     }
@@ -177,10 +184,9 @@ fn board_page(w: http.ResponseWriter, r: Ref<http.Request>, team: models.Team, m
   }
   let mut hidden: Slice<string> = []
   for h in csv(raw.hide) {
-    if query.states().find(|x| x == h).is_some() {
-      hidden = hidden.append(h)
-    } else if err == "" {
-      err = f"unknown state '{h}' in hide (use one of: {strings.Join(query.states(), ", ")})"
+    match query.state(h) {
+      Ok(valid) => { hidden = hidden.append(valid) },
+      Err(e) => { if err == "" { err = f"{e} (hide)" } },
     }
   }
   // Card ordering (TASK-209): "manual" is the default and never a URL param,
@@ -208,7 +214,7 @@ fn board_page(w: http.ResponseWriter, r: Ref<http.Request>, team: models.Team, m
   }
   let flt = BoardFilter { states, assignees, labels, prios }
 
-  let issues = match fetch_board_issues(team_id) {
+  let issues = match records.fetch_board_issues(team_id) {
     Ok(i) => i,
     Err(e) => {
       http.Error(w, e, 500)
@@ -233,9 +239,13 @@ fn board_page(w: http.ResponseWriter, r: Ref<http.Request>, team: models.Team, m
   let mut active = "board"
   if me != "" && assignees.contains(me) { active = "mine" }
 
+  let held = match claims.for_team(team.id) {
+    Ok(found) => found,
+    Err(e) => { http.Error(w, e, 500); return },
+  }
   let vm = BoardVM {
     states: state_opts(),
-    columns: board_columns(issues, flt, fetch_claimed_issue_ids().unwrap_or([]), order),
+    columns: board_columns(issues, flt, held, order),
     filter_groups: filter_groups(
       board_base(team.key),
       issues,
@@ -323,14 +333,14 @@ fn hide_seed_js(hidden: Slice<string>) -> template.JS {
 /// routes through the issue's own team.
 fn issue_page(w: http.ResponseWriter, r: Ref<http.Request>, team: models.Team, me: string) {
   let key = r.PathValue("key")
-  let issue = match fetch_issue(key) {
+  let issue = match records.fetch_issue(key) {
     Ok(i) => i,
     Err(e) => {
       http.Error(w, e, 404)
       return
     },
   }
-  let comments = match fetch_comments(issue.id) {
+  let comments = match records.fetch_comments(issue.id) {
     Ok(c) => c,
     Err(e) => {
       http.Error(w, e, 500)

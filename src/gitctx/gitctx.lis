@@ -9,7 +9,7 @@ pub fn issue_id_from_branch(branch: string) -> Option<string> {
   if parts.length() < 2 { return None }
   let key = parts[0]
   let number = parts[1]
-  if key == "" || !key.runes().all(is_letter) { return None }
+  if key == "" || !key.runes().all(|r| is_letter(r) || is_digit(r)) { return None }
   if number == "" || !number.runes().all(is_digit) { return None }
   Some(f"{strings.ToUpper(key)}-{number}")
 }
@@ -59,6 +59,17 @@ pub fn repo_root() -> Option<string> {
   }
   let root = strings.TrimSpace(out as string)
   if root == "" { None } else { Some(root) }
+}
+
+/// Match a known team key literally, including digits or hyphens. Callers
+/// compare every actual team so an ambiguous branch cannot select a target.
+pub fn issue_id_for_team(branch: string, key: string) -> Option<string> {
+  let prefix = strings.ToLower(key) + "-"
+  let lower = strings.ToLower(branch)
+  if key == "" || !strings.HasPrefix(lower, prefix) { return None }
+  let number = strings.SplitN(strings.TrimPrefix(lower, prefix), "-", 2)[0]
+  if number == "" || !number.runes().all(is_digit) || strings.TrimLeft(number, "0") == "" { return None }
+  Some(f"{key}-{number}")
 }
 
 /// Whether the working directory is inside a git repository.

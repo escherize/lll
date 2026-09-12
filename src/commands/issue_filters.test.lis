@@ -1,0 +1,45 @@
+import "flags"
+import "query"
+
+#[test]
+fn cli_and_web_filters_share_values_and_validation() {
+  let spec = issue_list_spec()
+  let assert Ok(p) = flags.parse(spec, ["lll", "issue", "list", "--state", "in-review", "--assign", "Alice O'Neil", "--label", "needs review", "--project", "Release 2"], 3, false, "")
+  let assert Ok(cli) = filters_from(p)
+  let assert Ok(web) = view_filters(ViewQuery { state: "in-review", assignee: "Alice O'Neil", label: "needs review", project: "Release 2", .. }).validate()
+  assert cli.state == web.state
+  assert cli.assignee == web.assignee
+  assert cli.label == web.label
+  assert cli.project == web.project
+  let assert Ok(bad) = flags.parse(spec, ["lll", "issue", "list", "--state", "bogus"], 3, false, "")
+  let assert Err(cli_error) = filters_from(bad)
+  let assert Err(web_error) = view_filters(ViewQuery { state: "bogus", .. }).validate()
+  assert cli_error == web_error
+}
+
+#[test]
+fn missing_filter_state_is_optional_but_explicit_empty_cli_state_is_invalid() {
+  let spec = issue_list_spec()
+  let assert Ok(p) = flags.parse(spec, ["lll", "issue", "list"], 3, false, "")
+  let assert Ok(empty) = filters_from(p)
+  assert empty.state == ""
+  assert view_filters(ViewQuery { .. }).validate().is_ok()
+  let assert Ok(explicit) = flags.parse(spec, ["lll", "issue", "list", "--state", ""], 3, false, "")
+  assert filters_from(explicit).is_err()
+  assert query.state("").is_err()
+}
+
+#[test]
+fn shared_fields_preserve_mutation_labels_and_last_value_filter_semantics() {
+  let args = ["--label", "first", "--label", "second"]
+  for use in [FilterUse.Create, FilterUse.Update, FilterUse.List] {
+    let assert Ok(parsed) = flags.parse(filter_spec(use), args, 0, false, "")
+    let labels = parsed.all("--label")
+    assert labels.length() == 2
+    assert labels.get(0) == Some("first")
+    assert labels.get(1) == Some("second")
+  }
+  let assert Ok(watch) = flags.parse(filter_spec(FilterUse.Watch), args, 0, false, "")
+  let assert Ok(filters) = filters_from(watch)
+  assert filters.label == "second"
+}

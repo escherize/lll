@@ -24,7 +24,7 @@ provenance.
      view model. Fragments below are rendered from `.Page`'s type alone. */}}
 <head>
 <meta charset="utf-8">
-<title>{{if eq .Rail.Active "mine"}}My issues{{else}}Board{{end}} · lll</title>
+<title>{{template "team-title-prefix" .Rail}}{{if eq .Rail.Active "mine"}}my issues{{else}}board{{end}}</title>
 <link rel="stylesheet" href="/static/theme.css">
 {{template "accent-head" .Rail}}
 <!-- Vendored, not CDN (TASK-74): the board is local-first and has to work with
@@ -52,7 +52,7 @@ provenance.
       <div class="crumbs"><span class="here">{{if eq .Rail.Active "mine"}}My issues{{else}}Board{{end}}</span></div>
       <div class="spacer"></div>
       <div id="board-search" class="board-search">
-        <svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true"><circle cx="6.2" cy="6.2" r="4.2" fill="none" stroke="currentColor" stroke-width="1.4"/><path d="M9.4 9.4 L12.3 12.3" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>
+        <svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true"><use href="#ic-search"/></svg>
         <input id="board-search-input" type="text" placeholder="Search" autocomplete="off" aria-label="Search board" data-bind:search data-on:keydown="evt.key === 'Escape' && ($search = '')">
       </div>
       <form id="new-issue" class="new-issue">
@@ -111,7 +111,7 @@ provenance.
 <span class="row1">{{.Key}}{{if .Emoji}}<span class="emoji">{{.Emoji}}</span>{{end}}<span class="flex"></span>{{template "priority-icon" .Prio}}</span>
 <span class="title">{{.Title}}</span>
 {{if .Labels}}<span class="row3">{{range .Labels}}<span class="chip"><span class="dot" style="background:{{if .Color}}{{.Color}}{{else}}var(--text-3){{end}}"></span>{{.Name}}</span>{{end}}</span>{{end}}
-<span class="row4"><span class="age">{{.Created}}</span>{{if .Assignee}}{{template "avatar" .Avatar}}{{end}}</span>
+<span class="row4"><span class="age">{{.Created}}</span>{{if .ClaimHolder}}<span class="card-claim" title="Claimed by {{.ClaimHolder}}">Claimed: {{.ClaimHolder}}</span>{{end}}{{if .AttachmentCount}}<span class="attachment-count" aria-label="{{.AttachmentCount}} attachments"><svg width="14" height="14" aria-hidden="true"><use href="#ic-paperclip"/></svg>{{.AttachmentCount}}</span>{{end}}{{if .Assignee}}{{template "avatar" .Avatar}}{{end}}</span>
 {{/* Hover preview: pure CSS (:hover + transition-delay), no data-show — the
      card's data-show is taken by search/filters. Docked position:fixed
      escapes the column's overflow clipping; pointer-events:none keeps
@@ -198,8 +198,10 @@ provenance.
      TASK-72's emoji picker slots in beside the title input when it lands. */}}
 {{define "new-issue-dialog"}}<div id="ni-modal" data-signals:ni_open="false" data-signals:ni_more="false" data-signals:ni_reopen="false">
 <div class="ni-shade" style="display:none" data-show="$ni_open" data-on:click="evt.target === el && ($ni_open = false)" data-on:keydown__window="evt.key === 'Escape' ? ($ni_open = false) : (evt.key === 'c' && !evt.metaKey && !evt.ctrlKey && !evt.altKey && evt.target === document.body && (evt.preventDefault(), $ni_open = true))">
-<form id="ni-form" class="ni-dialog" aria-label="New issue" data-effect="$ni_open && setTimeout(() => { const t = document.getElementById('ni-title'); if ($ni_reopen) { $ni_reopen = false; t.value = ''; document.getElementById('ni-desc').value = ''; t.focus() } else { el.reset(); document.getElementById('ni-more').checked = $ni_more; t.value = document.getElementById('new-title').value; t.focus(); t.select() } }, 0)">
+<form id="ni-form" class="ni-dialog" aria-label="New issue" aria-describedby="ni-flash" data-effect="$ni_open && setTimeout(() => { const t = document.getElementById('ni-title'); const error = document.getElementById('ni-flash'); error.hidden = true; error.textContent = ''; if ($ni_reopen) { $ni_reopen = false; t.value = ''; document.getElementById('ni-desc').value = ''; t.focus() } else { el.reset(); document.getElementById('ni-more').checked = $ni_more; t.value = document.getElementById('new-title').value; t.focus(); t.select() } }, 0)">
 <div class="ni-head">New issue<span class="ni-flex"></span><button type="button" class="ni-x" aria-label="Close" data-on:click="$ni_open = false"><svg width="10" height="10" viewBox="0 0 10 10" aria-hidden="true"><path d="M2 2 L8 8 M8 2 L2 8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg></button></div>
+<div id="ni-flash" class="flash" role="alert" aria-atomic="true" hidden></div>
+<input type="hidden" name="flash_target" value="ni-flash">
 <input type="hidden" name="team" value="{{.TeamKey}}">
 <input id="ni-title" name="title" placeholder="Issue title" autocomplete="off" aria-label="Issue title" data-on:keydown="evt.key === 'Enter' && (evt.preventDefault(), el.value.trim() && document.getElementById('ni-create').click())">
 <textarea id="ni-desc" class="ni-desc" name="description" aria-label="Description" placeholder="Description — markdown, code fences and mermaid all render"></textarea>

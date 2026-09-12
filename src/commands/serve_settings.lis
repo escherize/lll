@@ -1,3 +1,4 @@
+import "records"
 import "go:crypto/rand"
 import "go:html/template"
 import "go:net/http"
@@ -56,8 +57,8 @@ fn settings_vm(team: models.Team) -> Result<SettingsVM, string> {
   // Members stay unscoped on purpose: one person or agent works across many
   // projects, which is what makes a member meaningful on every board.
   let labels = label_rows(team.id)?
-  let members = fetch_members()?
-  let projects = fetch_projects(team.id)?
+  let members = records.fetch_members()?
+  let projects = records.fetch_projects(team.id)?
   let teams = team_rows()?
   Ok(
     SettingsVM {
@@ -75,7 +76,6 @@ fn settings_vm(team: models.Team) -> Result<SettingsVM, string> {
         id: p.id,
         name: p.name,
         status: p.status,
-        scope: scope_label(p.expand.team.key),
       }),
       statuses: project_statuses().map(|s| StateOpt {
         value: s,
@@ -93,7 +93,7 @@ fn settings_vm(team: models.Team) -> Result<SettingsVM, string> {
 /// section's other fetches.
 fn team_rows() -> Result<Slice<SetTeamVM>, string> {
   let mut rows: Slice<SetTeamVM> = []
-  for t in list_teams()?.items {
+  for t in records.list_teams()?.items {
     let filter = url.QueryEscape(f"team={query.quote(t.id)}")
     let mut issues = models.IssueList { .. }
     pb.fetch(
@@ -107,6 +107,7 @@ fn team_rows() -> Result<Slice<SetTeamVM>, string> {
         key: t.key,
         name: t.name,
         issues: issues.total_items,
+        issues_text: issue_count_text(issues.total_items),
         archived: t.archived,
       },
     )
@@ -114,25 +115,6 @@ fn team_rows() -> Result<Slice<SetTeamVM>, string> {
   Ok(rows)
 }
 
-/// A record's owning team key, or the word for "owned by no team".
-fn scope_label(key: string) -> string {
-  if key == "" { return "workspace" }
-  key
-}
-
-/// One team's labels. Labels belong to exactly one team (TASK-173), so
-/// every chooser, chip list and validator built on this is scoped by
-/// construction. An empty `team_id` is the unscoped board, which has no team
-/// to scope to.
-fn fetch_labels(team_id: string) -> Result<Slice<models.Label>, string> {
-  let mut list = models.LabelList { .. }
-  pb.fetch(
-    f"/api/collections/labels/records?perPage=200&sort=name&expand=team&filter={team_param(team_id)}",
-    "labels",
-    &list,
-  )?
-  Ok(list.items)
-}
 
 /// The Labels section's rows (TASK-208): each label with how many issues
 /// carry it, busiest first. One perPage=1 count fetch per label — the same
@@ -144,20 +126,14 @@ fn label_rows(team_id: string) -> Result<Slice<SetLabelVM>, string> {
   let mut rows: Slice<SetLabelVM> = []
   // fetch_labels answers name-sorted; the strict > below keeps equal-usage
   // rows in that order, so ties stay alphabetical.
-  for l in fetch_labels(team_id)? {
-    let filter = url.QueryEscape(query.filter("", "", "", "", l.id, ""))
-    let mut issues = models.IssueList { .. }
-    pb.fetch(
-      f"/api/collections/issues/records?filter={filter}&perPage=1",
-      "issues",
-      &issues,
-    )?
+  for l in records.fetch_labels(team_id)? {
+    let used = entity_issue_count("label", l.id)?
     let row = SetLabelVM {
       id: l.id,
       name: l.name,
       color: theme.normalize_hex(l.color),
-      scope: scope_label(l.expand.team.key),
-      usage: issues.total_items,
+      usage: used,
+      usage_text: issue_count_text(used),
     }
     let mut sorted: Slice<SetLabelVM> = []
     let mut placed = false
@@ -174,32 +150,8 @@ fn label_rows(team_id: string) -> Result<Slice<SetLabelVM>, string> {
   Ok(rows)
 }
 
-/// A `team=<id>` filter for a records URL, URL-escaped, or "" for every
-/// team. Built through query.filter so the id is escaped once, in one place.
-fn team_param(team_id: string) -> string {
-  url.QueryEscape(query.filter(team_id, "", "", "", "", ""))
-}
 
-fn fetch_members() -> Result<Slice<models.Member>, string> {
-  let mut list = models.MemberList { .. }
-  pb.fetch(
-    "/api/collections/members/records?perPage=200&sort=name",
-    "members",
-    &list,
-  )?
-  Ok(list.items)
-}
 
-/// One team's projects, scoped for the same reason labels are.
-fn fetch_projects(team_id: string) -> Result<Slice<models.Project>, string> {
-  let mut list = models.ProjectList { .. }
-  pb.fetch(
-    f"/api/collections/projects/records?perPage=200&sort=name&expand=team&filter={team_param(team_id)}",
-    "projects",
-    &list,
-  )?
-  Ok(list.items)
-}
 
 /// Patch bodies. Each carries exactly the fields the page edits and no
 /// others: PocketBase replaces every field it is handed, so a struct wide
@@ -254,7 +206,13 @@ fn settings_write(
   team_id: string,
   me: string,
 ) -> Result<string, string> {
-  settings_apply(r, team_id)?
+  if r.FormValue("cancel") != "" {
+    // Restore the row after a deletion review without writing a record.
+  } else if r.FormValue("del") != "" {
+    if let Some(review) = settings_delete(r, team_id)? { return Ok(review) }
+  } else {
+    settings_apply(r, team_id)?
+  }
   let team = shell_team(team_id)
   let mut extra = ""
   if let Ok(vm) = settings_vm(team) {
@@ -268,7 +226,7 @@ fn settings_write(
   Ok(extra)
 }
 
-/// The record this request names: created, updated, or deleted.
+/// Create or update the record this request names.
 fn settings_apply(
   r: mut Ref<http.Request>,
   team_id: string,
@@ -277,17 +235,7 @@ fn settings_apply(
   let id = strings.TrimSpace(r.PostFormValue("id"))
   let name = strings.TrimSpace(r.PostFormValue("name"))
 
-  // FormValue, not PostFormValue: delete travels as a query param so the row
-  // form can post its own body unchanged.
-  if r.FormValue("del") != "" {
-    let coll = settings_collection(kind)?
-    if id == "" { return Err("nothing to delete") }
-    let _ = pb.delete(f"/api/collections/{coll}/records/{id}")?
-    return Ok(())
-  }
-
-  // Labels and projects are team-owned too, so every section below the
-  // delete needs the same configured team the team section does.
+  // Labels and projects are team-owned, just like the team section.
   if team_id == "" {
     return Err("no team configured: set LLL_TEAM or 'team' in .lll.toml")
   }
@@ -334,7 +282,7 @@ fn settings_apply(
         )?
         return Ok(())
       }
-      let known = fetch_members()?
+      let known = records.fetch_members()?
       let Some(existing) = known.find(|m| m.id == id) else {
         return Err(
           f"unknown member '{id}' — reload the page for the current list",
@@ -342,11 +290,11 @@ fn settings_apply(
       }
       // Email is the member's login identity now (TASK-180): PocketBase
       // refuses an email change on an auth record without its password, so
-      // the settings row edits the name and says so when the email moved.
+      // this row rejects an email change before saving either field.
       let posted_email = strings.TrimSpace(email)
       if posted_email != "" && posted_email != existing.email {
         return Err(
-          f"'{existing.name}'s email is their login identity now — edit it in the auth flow, not here (name saved)",
+          f"'{existing.name}'s email is their login identity — change it under Access → Member sign-in. No changes saved.",
         )
       }
       save_record("members", id, MemberPatch { name })
@@ -452,17 +400,18 @@ fn verify_admin(pass: string) -> Result<string, string> {
     payload,
   ) {
     Ok(b) => b,
-    Err(e) => {
-      // PocketBase answers a bad credential pair with 400.
-      if strings.Contains(e, "400") {
-        return Err(
-          "wrong admin password — the superuser credentials are what 'lll up' prints in its banner",
-        )
-      }
-      return Err(f"verifying the admin password: {e}")
-    },
+    Err(e) => return Err(admin_verification_error(e)),
   }
   decode_auth(body, "the superuser auth response")
+}
+
+/// Authentication failures have a specific recovery; other errors retain
+/// their actual server status and transport details.
+fn admin_verification_error(e: string) -> string {
+  if pb.response_status(e) == 400 {
+    return "wrong admin password — the superuser credentials are what 'lll up' prints in its banner"
+  }
+  f"verifying the admin password: {e}"
 }
 
 /// The named member, from the current list — so the flash can say "reload"
@@ -470,7 +419,7 @@ fn verify_admin(pass: string) -> Result<string, string> {
 fn access_member(r: mut Ref<http.Request>) -> Result<models.Member, string> {
   let id = strings.TrimSpace(r.PostFormValue("member"))
   if id == "" { return Err("pick a member") }
-  let known = fetch_members()?
+  let known = records.fetch_members()?
   let Some(member) = known.find(|m| m.id == id) else {
     return Err(f"unknown member '{id}' — reload the page for the current list")
   }
@@ -585,7 +534,7 @@ fn teams_archive_write(
 ) -> Result<string, string> {
   let id = strings.TrimSpace(r.PostFormValue("id"))
   if id == "" { return Err("pick a team") }
-  let known = list_teams()?
+  let known = records.list_teams()?
   let Some(t) = known.items.find(|x| x.id == id) else {
     return Err("unknown team — reload the page for the current list")
   }

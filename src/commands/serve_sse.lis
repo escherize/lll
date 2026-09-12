@@ -1,3 +1,10 @@
+import "records"
+import "claims"
+import "markdown"
+import "query"
+import "go:crypto/sha256"
+import "go:fmt"
+import "go:net/url"
 import "go:encoding/json"
 import "go:net/http"
 
@@ -11,10 +18,18 @@ import "realtime"
 /// One connected browser: its scope ("board:KEY:ORDER" for a team's board
 /// view in one card ordering, or "issue:KEY-1") and the channel its /events
 /// handler drains.
-struct SseClient { id: int, scope: string, ch: Channel<string> }
+struct SseClient { id: int, scope: string, ch: Channel<string>, description_hash: string }
 
 /// A rendered SSE payload for every client with a matching scope.
-struct Broadcast { scope: string, payload: string }
+struct Broadcast {
+  scope: string,
+  payload: string,
+  description: Option<string>,
+  client_id: int,
+}
+
+struct ScopeQuery { scope: string, client_id: int, reply: Channel<bool> }
+struct PageSnapshot { key: string, team: string, order: string, client_id: int }
 
 /// Fan-out hub. A single owner task holds the client registry and is fed
 /// exclusively through these channels — no shared mutable state.
@@ -23,6 +38,8 @@ struct Hub {
   unregister: Channel<int>,
   broadcast: Channel<Broadcast>,
   ids: Channel<int>,
+  observers: Channel<ScopeQuery>,
+  snapshots: Channel<PageSnapshot>,
 }
 
 fn new_hub() -> Hub {
@@ -31,6 +48,8 @@ fn new_hub() -> Hub {
     unregister: Channel.new<int>(),
     broadcast: Channel.new<Broadcast>(),
     ids: Channel.new<int>(),
+    observers: Channel.new<ScopeQuery>(),
+    snapshots: Channel.new<PageSnapshot>(),
   }
   // Client-id allocator: unique ids without shared counters.
   task {
@@ -54,8 +73,15 @@ fn new_hub() -> Hub {
           Some(id) => clients = clients.filter(|c| c.id != id),
           None => running = false,
         },
+        match hub.observers.receive() {
+          Some(q) => {
+            let found = clients.find(|c| c.scope == q.scope && (q.client_id == 0 || c.id == q.client_id)).is_some()
+            let _ = q.reply.send(found)
+          },
+          None => running = false,
+        },
         match hub.broadcast.receive() {
-          Some(msg) => deliver(clients, msg),
+          Some(msg) => clients = deliver(clients, msg),
           None => running = false,
         },
       }
@@ -69,14 +95,44 @@ fn new_hub() -> Hub {
 ///
 /// Scope "*" matches every client. The rail is on every page, so its
 /// favorites group is the one fragment with no single scope to belong to.
-fn deliver(clients: Slice<SseClient>, msg: Broadcast) {
-  for c in clients {
+fn deliver(clients: Slice<SseClient>, msg: Broadcast) -> Slice<SseClient> {
+  let mut result = clients.clone()
+  let mut hash = ""
+  if let Some(source) = msg.description {
+    hash = fmt.Sprintf("%x", sha256.Sum256(source.bytes()))
+  }
+  let mut description_patch: Option<string> = None
+  for i in 0..result.length() {
+    let c = result[i]
     if msg.scope != "*" && c.scope != msg.scope { continue }
+    if msg.client_id != 0 && c.id != msg.client_id { continue }
+    let changed = msg.description.is_some() && c.description_hash != hash
+    let mut payload = msg.payload
+    if changed {
+      if description_patch.is_none() {
+        let Ok(html) = render("issue-description", markdown.md_html(msg.description.unwrap_or(""))) else {
+          continue
+        }
+        description_patch = Some(patch_event(html))
+      }
+      payload += description_patch.unwrap_or("")
+    }
     select {
-      c.ch.send(msg.payload) => (),
+      c.ch.send(payload) => {
+        // Advance only after enqueueing: a full buffer must not make a
+        // later metadata update forget the description this client missed.
+        if changed { result[i].description_hash = hash }
+      },
       _ => continue,
     }
   }
+  result
+}
+
+fn has_issue_observer(hub: Hub, key: string, client_id: int) -> bool {
+  let reply = Channel.new<bool>()
+  let _ = hub.observers.send(ScopeQuery { scope: f"issue:{key}", client_id, reply })
+  reply.receive().unwrap_or(false)
 }
 
 /// SSE endpoint: register with the hub under the page's scope and forward
@@ -119,14 +175,20 @@ fn events_stream(
   }
   w.Header().Set("Content-Type", "text/event-stream")
   w.Header().Set("Cache-Control", "no-cache")
-  w.WriteHeader(200)
-  flusher.Flush()
-
   let Some(id) = hub.ids.receive() else {
     return
   }
   let ch = Channel.buffered<string>(64)
-  let _ = hub.register.send(SseClient { id, scope, ch })
+  let _ = hub.register.send(SseClient { id, scope, ch, .. })
+  // Response headers acknowledge registration, so a client that has opened
+  // the stream cannot miss an immediately following issue mutation.
+  w.WriteHeader(200)
+  flusher.Flush()
+  if page == "issue" && key != "" {
+    let _ = hub.snapshots.send(PageSnapshot { key, client_id: id, .. })
+  } else {
+    let _ = hub.snapshots.send(PageSnapshot { team, order, client_id: id, .. })
+  }
   let done = r.Context().Done()
   loop {
     let quit = select {
@@ -153,17 +215,36 @@ fn events_stream(
 /// Consume PB realtime events forever; re-render and broadcast fragments.
 fn bridge(events: Channel<realtime.Event>, hub: Hub) {
   loop {
-    let Some(ev) = events.receive() else {
-      return
+    let next = select {
+      match events.receive() {
+        Some(ev) => Some(ev),
+        None => { return },
+      },
+      match hub.snapshots.receive() {
+        Some(snapshot) => {
+          if snapshot.key != "" { issue_snapshot(hub, snapshot.key, snapshot.client_id) }
+          else if let Ok(Some(team)) = records.find_team(snapshot.team) {
+            board_snapshot(hub, team.id, team.key, snapshot.order, snapshot.client_id)
+          }
+          None
+        },
+        None => { return },
+      },
     }
+    let Some(ev) = next else { continue };
     if ev.topic == "comments" {
       comment_broadcast(ev, hub)
+    } else if ev.topic == "claims" {
+      claim_broadcast(ev, hub)
     } else if ev.topic == "favorites" {
       favorites_broadcast(hub)
     } else if ev.topic == "views" {
       views_broadcast(hub)
     } else {
       issue_broadcast(ev, hub)
+      // Titles and state icons in favorites are issue data too. Share one
+      // metadata refresh across clients, independently of board rendering.
+      favorites_broadcast(hub)
     }
   }
 }
@@ -171,7 +252,7 @@ fn bridge(events: Channel<realtime.Event>, hub: Hub) {
 /// On any issues event: re-render the whole board fragment from a fresh
 /// fetch (laziest correct — a state change moves a card between two columns,
 /// and one #board morph covers create/update/delete alike), plus the
-/// issue-detail fragment for that issue's page, from the event record.
+/// issue-detail fragment from a fresh read for observers of that issue.
 ///
 /// The subscription is UNSCOPED (TASK-198): the server hosts every team, so
 /// each event re-renders the board of the team the record belongs to and
@@ -186,10 +267,23 @@ fn issue_broadcast(ev: realtime.Event, hub: Hub) {
   let mut event = IssueEvent { .. }
   if json.Unmarshal(ev.data.bytes(), &event).is_err() { return }
   let rec = event.record
+  broadcast_issue_state(rec, hub)
+}
+
+fn broadcast_issue_state(rec: models.Issue, hub: Hub) {
   let team_key = rec.expand.team.key
-  if let Ok(issues) = fetch_board_issues(rec.team) {
-    let claimed = fetch_claimed_issue_ids().unwrap_or([])
+  board_snapshot(hub, rec.team, team_key, "", 0)
+
+  let key = f"{team_key}-{rec.number}"
+  issue_snapshot(hub, key, 0)
+}
+
+/// Reconnects receive a fresh board snapshot, even if no new event follows.
+fn board_snapshot(hub: Hub, team_id: string, team_key: string, only_order: string, client_id: int) {
+  if let Ok(issues) = records.fetch_board_issues(team_id) {
+    let Ok(claimed) = claims.for_team(team_id) else { return };
     for order in board_orders() {
+      if only_order != "" && only_order != order { continue }
       // UNFILTERED on purpose: /events sends one #board per (team, order) to
       // every matching client, so the per-URL filter is applied by the page
       // handler and guarded client-side by the cards' data-show, never here.
@@ -200,29 +294,57 @@ fn issue_broadcast(ev: realtime.Event, hub: Hub) {
       }
       if let Ok(html) = render("board", vm) {
         let _ = hub.broadcast.send(
-          Broadcast { scope: f"board:{team_key}:{order}", payload: patch_event(html) },
+          Broadcast { scope: f"board:{team_key}:{order}", payload: patch_event(html), client_id, .. },
         )
       }
     }
   }
+}
 
-  let key = f"{team_key}-{rec.number}"
-  let mut vm = match issue_vm(rec, []) {
-    Ok(v) => v,
-    // A catalogue fetch failing is no reason to leave the page stale for
-    // everything else; the board fragment above already went out.
-    Err(_) => { return },
+#[json]
+struct ClaimEvent { record: models.Claim }
+
+/// Claim-only releases may not update the issue's assignee. Route the hold's
+/// own event using its issue ID, including deleted holds, then read fresh state.
+fn claim_broadcast(ev: realtime.Event, hub: Hub) {
+  let mut event = ClaimEvent { .. }
+  if json.Unmarshal(ev.data.bytes(), &event).is_err() { return }
+  let mut issue = models.Issue { .. }
+  if pb.fetch(f"/api/collections/issues/records/{event.record.issue}?expand=team", "claimed issue", &issue).is_err() { return }
+  broadcast_issue_state(issue, hub)
+}
+
+/// The bridge serializes snapshot reads and event reads. Fetch current state
+/// rather than replaying an old queued event over a reconnect's fresh snapshot.
+/// No issue observers means no detail fetch, catalogues or markdown rendering.
+fn issue_snapshot(hub: Hub, key: string, client_id: int) {
+  if !has_issue_observer(hub, key, client_id) { return }
+  let Ok((team, number)) = records.split_issue_key(key) else { return };
+  let filter = url.QueryEscape(f"team.key={query.quote(team)} && number={number}")
+  let mut issues = models.IssueList { .. }
+  if pb.fetch(
+    f"/api/collections/issues/records?filter={filter}&perPage=1&expand=team,assignee,labels,project",
+    "issue snapshot", &issues,
+  ).is_err() { return }
+  // Only a successful empty read means deleted; backend errors never clear
+  // the page. Every new stream starts without a known description revision.
+  let mut description = ""
+  let mut vm = IssueVM { deleted: true, key, .. }
+  if let Some(issue) = issues.items.get(0) {
+    description = issue.description
+    let Ok(fields) = issue_fields_vm(issue, []) else { return };
+    vm = fields
   }
-  if event.action == "delete" { vm = IssueVM { deleted: true, key, .. } }
   if let Ok(html) = render("issue-detail", vm) {
-    let _ = hub.broadcast.send(
-      Broadcast { scope: f"issue:{key}", payload: patch_event(html) },
-    )
+    let _ = hub.broadcast.send(Broadcast {
+      scope: f"issue:{key}", payload: patch_event(html),
+      description: Some(description), client_id,
+    })
   }
 }
 
-/// On any favorites event: re-render the rail's FAVORITES group from a fresh
-/// fetch and patch it into every open page.
+/// On favorite or issue events, refresh the FAVORITES group on connected
+/// realtime pages. Static pages keep their normal reload behavior.
 ///
 /// This is the one fragment that reaches inside #rail. It is legal because
 /// the group is its own morph boundary with its own id: the shell itself is
@@ -233,9 +355,12 @@ fn issue_broadcast(ev: realtime.Event, hub: Hub) {
 /// The event's own record is ignored — the group is the whole list, and one
 /// fetch is cheaper than reconciling a create against a delete.
 fn favorites_broadcast(hub: Hub) {
-  if let Ok(html) = render("rail-favorites", fav_vms()) {
+  // A transient backend failure must not overwrite visible favorites with
+  // the page-load fallback's empty list.
+  let Ok(favs) = fetch_favorites() else { return };
+  if let Ok(html) = render("rail-favorites", favorite_rows(favs)) {
     let _ = hub.broadcast.send(
-      Broadcast { scope: "*", payload: patch_event(html) },
+      Broadcast { scope: "*", payload: patch_event(html), .. },
     )
   }
 }
@@ -246,7 +371,7 @@ fn favorites_broadcast(hub: Hub) {
 fn views_broadcast(hub: Hub) {
   if let Ok(html) = render("rail-views", view_vms()) {
     let _ = hub.broadcast.send(
-      Broadcast { scope: "*", payload: patch_event(html) },
+      Broadcast { scope: "*", payload: patch_event(html), .. },
     )
   }
 }
@@ -265,7 +390,7 @@ fn comment_broadcast(ev: realtime.Event, hub: Hub) {
     &issue,
   ).is_err() { return }
   let key = f"{issue.expand.team.key}-{issue.number}"
-  let Ok(comments) = fetch_comments(issue.id) else {
+  let Ok(comments) = records.fetch_comments(issue.id) else {
     return
   }
   if let Ok(html) = render(
@@ -273,7 +398,7 @@ fn comment_broadcast(ev: realtime.Event, hub: Hub) {
     CommentsVM { comments: comments.map(comment_vm) },
   ) {
     let _ = hub.broadcast.send(
-      Broadcast { scope: f"issue:{key}", payload: patch_event(html) },
+      Broadcast { scope: f"issue:{key}", payload: patch_event(html), .. },
     )
   }
 }

@@ -1,11 +1,9 @@
 import "go:encoding/json"
 import "go:fmt"
-import "go:net/url"
 import "go:strings"
 
 import "flags"
 import "models"
-import "pb"
 import "query"
 
 /// `lll finding` (TASK-103) — the retrieval side of docs. A finding is a doc
@@ -26,9 +24,9 @@ pub fn finding_commands() -> Slice<flags.Command> {
   [
     flags.Command {
       name: "near",
-      summary: "findings about a file or directory",
+      summary: "findings about a file or directory, exact path matches first",
       page: "",
-      spec: [],
+      spec: flags.with_team([]),
       positional: "<path>",
       run: finding_near,
     },
@@ -83,7 +81,8 @@ fn finding_intro() -> string {
 'near' matches by directory containment in both directions: a finding filed
 on 'src/pb' answers both 'near src' and 'near src/pb/records.lis'.
 
-Both verbs answer for ONE team — the one LLL_TEAM or .lll.toml names. Every
+Both verbs accept --team KEY for this invocation, overriding LLL_TEAM or
+.lll.toml without rewriting configuration. They answer for ONE team. Every
 project has a src/, so an unscoped answer would be another codebase's.
 
 Author findings with 'lll doc new -k finding -a <area> -p \"<paths>\"'.
@@ -96,7 +95,7 @@ coordinates 'lll finding near' matches by."
 // ------------------------------------------------------------------ specs
 
 fn finding_list_spec() -> Slice<flags.Flag> {
-  [
+  flags.with_team([
     flags.Flag {
       name: "-a",
       alias: "--area",
@@ -122,7 +121,7 @@ fn finding_list_spec() -> Slice<flags.Flag> {
       ..,
     },
     flags.Flag { name: "--json", help: "print the raw record list as JSON", .. },
-  ]
+  ])
 }
 
 // ----------------------------------------------------------------- shared
@@ -136,19 +135,29 @@ fn finding_list_spec() -> Slice<flags.Flag> {
 /// known about THIS file; confidently answering about a different repo is
 /// worse than answering nothing.
 pub fn fetch_findings(team_id: string) -> Result<Slice<models.Doc>, string> {
-  let filter = url.QueryEscape(f"kind='finding' && team={query.quote(team_id)}")
-  let mut docs = models.DocList { .. }
-  pb.fetch(
-    f"/api/collections/docs/records?filter={filter}&sort=slug&perPage=500",
-    "docs",
-    &docs,
-  )?
-  Ok(docs.items)
+  fetch_docs(f"kind='finding' && team={query.quote(team_id)}", "slug", "")
 }
 
 /// Does the doc's stored paths list touch the path being asked about?
 fn doc_paths_touch(d: models.Doc, path: string) -> bool {
   d.paths.split(",").any(|entry| path_touches(entry, path))
+}
+
+/// Stable relevance partition: exact coordinates precede directory matches.
+/// Input is already ordered by slug/id; preserve that order within each tier.
+fn findings_near(findings: Slice<models.Doc>, path: string) -> Slice<models.Doc> {
+  let normalized = norm_path(path)
+  if normalized == "" { return [] }
+  let mut exact: Slice<models.Doc> = []
+  let mut nearby: Slice<models.Doc> = []
+  for finding in findings {
+    if finding.paths.split(",").any(|entry| norm_path(entry) == normalized) {
+      exact = exact.append(finding)
+    } else if doc_paths_touch(finding, normalized) {
+      nearby = nearby.append(finding)
+    }
+  }
+  exact.append(nearby...)
 }
 
 /// The findings related to one issue: every finding explicitly linked to it
@@ -167,12 +176,12 @@ pub fn findings_for_issue(issue: models.Issue) -> Result<Slice<models.Doc>, stri
 
 // ------------------------------------------------------------------ verbs
 
-fn finding_near(args: Slice<string>) -> Result<(), string> {
-  let p = flags.parse([], args, 3, true, "")?
+fn finding_near(input: flags.CommandInput) -> Result<(), string> {
+  let p = input.parsed
   let path = p.first()
   if path == "" { return Err("usage: lll finding near <path>") }
   let findings = fetch_findings(current_team()?.id)?
-  let hits = findings.filter(|d| doc_paths_touch(d, path))
+  let hits = findings_near(findings, path)
   if hits.is_empty() {
     fmt.Println(f"No findings for {path}.")
     return Ok(())
@@ -181,10 +190,8 @@ fn finding_near(args: Slice<string>) -> Result<(), string> {
   Ok(())
 }
 
-fn finding_list(args: Slice<string>) -> Result<(), string> {
-  let spec = finding_list_spec()
-  let usage = flags.usage("lll finding list", spec, "")
-  let p = flags.parse(spec, args, 3, false, usage)?
+fn finding_list(input: flags.CommandInput) -> Result<(), string> {
+  let p = input.parsed
   let area = strings.TrimSpace(p.one("-a"))
   // --search and -p exist because eight of thirty fleet agents asked list
   // for them and none reached for 'near' from here.
@@ -198,7 +205,7 @@ fn finding_list(args: Slice<string>) -> Result<(), string> {
     findings = findings.filter(|d| strings.Contains(strings.ToLower(d.slug), search) || strings.Contains(strings.ToLower(d.title), search))
   }
   if path != "" {
-    findings = findings.filter(|d| doc_paths_touch(d, path))
+    findings = findings_near(findings, path)
   }
   if p.given("--json") {
     let body = match json.Marshal(findings) {
@@ -226,15 +233,8 @@ fn print_finding_lines(docs: Slice<models.Doc>) {
   }
 }
 
-/// `lll finding new ...` is `lll doc new -k finding ...`: five of thirty
-/// fleet agents typed the former, since the noun they were working in was
-/// finding. The kind is appended unless the caller spelled one.
-fn finding_new(args: Slice<string>) -> Result<(), string> {
-  let mut has_kind = false
-  for a in args {
-    if a == "-k" || a == "--kind" || a.starts_with("-k=") || a.starts_with("--kind=") { has_kind = true }
-  }
-  let mut forwarded = args
-  if !has_kind { forwarded = forwarded.append("-k").append("finding") }
-  doc_new(forwarded)
+/// Finding creation shares the parsed document input and supplies a domain
+/// default; it does not rewrite argv and ask the parser to interpret it again.
+fn finding_new(input: flags.CommandInput) -> Result<(), string> {
+  create_doc(input.parsed, "finding")
 }

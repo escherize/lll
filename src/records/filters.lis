@@ -1,0 +1,8 @@
+import "go:net/url"
+import "query"
+
+/// A `team=<id>` filter for a records URL, URL-escaped, or "" for every
+/// team. Built through query.filter so the id is escaped once, in one place.
+fn team_param(team_id: string) -> string {
+  url.QueryEscape(query.filter(team_id, "", "", "", "", ""))
+}

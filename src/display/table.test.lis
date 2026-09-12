@@ -1,0 +1,12 @@
+#[test]
+fn table_aligns_graphemes_by_display_cells() {
+  let rows = [["ASCII", "who"], ["漢字", "who"], ["🔥", "who"], ["👨‍👩‍👧‍👦", "who"], ["é", "who"], ["🇺🇸", "who"], ["👍🏽", "who"]]
+  assert table(rows) == "ASCII  who\n漢字   who\n🔥     who\n👨‍👩‍👧‍👦     who\né      who\n🇺🇸     who\n👍🏽     who\n"
+}
+
+#[test]
+fn table_preserves_empty_cells_and_optional_last_column() {
+  assert table([["a", "", "age", "🔥"], ["long", "me", "now"]]) == "a         age  🔥\nlong  me  now\n"
+  assert table([]) == ""
+  assert table([["a\tb\nc\rd", "end"]]) == "a b c d  end\n"
+}

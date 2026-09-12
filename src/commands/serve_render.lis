@@ -1,4 +1,5 @@
-import "go:bytes"
+import "records"
+import "claims"
 import "go:html/template"
 import "go:github.com/escherize/lll/web"
 import "go:net/url"
@@ -16,15 +17,7 @@ import "theme"
 
 /// Render a named template from the embedded web/templates/ tree.
 fn render(name: string, data: Unknown) -> Result<string, string> {
-  let tmpl = match template.ParseFS(web.Assets(), "templates/*.html") {
-    Ok(t) => t,
-    Err(e) => return Err(f"parsing web/templates: {e}"),
-  }
-  let mut buf = bytes.Buffer { .. }
-  if let Err(e) = tmpl.ExecuteTemplate(&buf, name, data) {
-    return Err(f"rendering {name}: {e}")
-  }
-  Ok(buf.String())
+  web.Render(name, data).map_err(|e| e.Error())
 }
 
 /// Wrap a rendered fragment as a datastar-patch-elements SSE event. Each
@@ -93,6 +86,8 @@ fn label_vms(labels: Slice<models.Label>) -> Slice<LabelVM> {
 fn card_vm(issue: models.Issue) -> CardVM {
   let prio = display.priority_name(issue.priority)
   CardVM {
+    claim_holder: "",
+    attachment_count: issue.attachments.length(),
     id: issue.id,
     key: f"{issue.expand.team.key}-{issue.number}",
     title: issue.title,
@@ -270,13 +265,13 @@ fn sort_issues(
 /// the same on a filtered page and inside a broadcast morph instead of
 /// flickering between the two.
 ///
-/// `claimed` is the currently-claimed issue ids (TASK-205): a card whose
+/// `claimed` contains the expanded holds for this team: a card whose
 /// issue holds no claim renders its work site as "(last seen)" — card_vm
 /// alone only knows the state half of that rule.
 fn board_columns(
   issues: Slice<models.Issue>,
   flt: BoardFilter,
-  claimed: Slice<string>,
+  claimed: Slice<models.Claim>,
   order: string,
 ) -> Slice<ColumnVM> {
   let ordered = order_issues(issues, order)
@@ -297,19 +292,13 @@ fn board_columns(
 
 /// A board card: card_vm plus the claim half of the work-site staleness
 /// rule, which only the board fetches claims for.
-fn board_card(issue: models.Issue, claimed: Slice<string>) -> CardVM {
+fn board_card(issue: models.Issue, claimed: Slice<models.Claim>) -> CardVM {
   let mut card = card_vm(issue)
-  if !claimed.contains(issue.id) { card.work_stale = true }
+  if let Some(held) = claimed.find(|c| c.issue == issue.id) {
+    card.claim_holder = held.expand.member.name
+    if card.claim_holder == "" { card.claim_holder = "unknown member" }
+  } else { card.work_stale = true }
   card
-}
-
-/// Issue ids that currently hold a claim — one list fetch per board render,
-/// so the hover preview can dim a released site. Board-only on purpose: the
-/// /issues table and /search rows never render the work site.
-fn fetch_claimed_issue_ids() -> Result<Slice<string>, string> {
-  let mut claims = models.ClaimList { .. }
-  pb.fetch("/api/collections/claims/records?perPage=500", "claims", &claims)?
-  Ok(claims.items.map(|c| c.issue))
 }
 
 /// The create dialog's pickers, freshly fetched. Three extra PB reads, paid
@@ -320,9 +309,9 @@ fn fetch_claimed_issue_ids() -> Result<Slice<string>, string> {
 /// picker offering another team's label would build a record PocketBase is
 /// happy to store and no view can explain.
 fn compose_vm(team_id: string) -> Result<ComposeVM, string> {
-  let members = fetch_members()?
-  let projects = fetch_projects(team_id)?
-  let labels = fetch_labels(team_id)?
+  let members = records.fetch_members()?
+  let projects = records.fetch_projects(team_id)?
+  let labels = records.fetch_labels(team_id)?
   Ok(ComposeVM {
     prios: prio_opts(),
     members: members.map(|m| PickVM { id: m.id, name: m.name }),
@@ -335,15 +324,6 @@ fn compose_vm(team_id: string) -> Result<ComposeVM, string> {
       terms: "",
     }),
   })
-}
-
-fn fetch_board_issues(team_id: string) -> Result<Slice<models.Issue>, string> {
-  let mut path = "/api/collections/issues/records?perPage=200&expand=team,assignee,labels&sort=sort,created"
-  let filter = query.filter(team_id, "", "", "", "", "")
-  if filter != "" { path = f"{path}&filter={url.QueryEscape(filter)}" }
-  let mut issues = models.IssueList { .. }
-  pb.fetch(path, "issues", &issues)?
-  Ok(issues.items)
 }
 
 fn comment_vm(c: models.Comment) -> CommentVM {
@@ -362,6 +342,13 @@ fn comment_vm(c: models.Comment) -> CommentVM {
 /// Issue view model from a full record (expand: team, assignee, labels,
 /// project) — shared by the issue page and broadcast re-renders.
 fn issue_vm(issue: models.Issue, comments: Slice<models.Comment>) -> Result<IssueVM, string> {
+  let mut vm = issue_fields_vm(issue, comments)?
+  vm.description = markdown.md_html(issue.description)
+  Ok(vm)
+}
+
+/// Metadata can refresh without parsing or transmitting the description.
+fn issue_fields_vm(issue: models.Issue, comments: Slice<models.Comment>) -> Result<IssueVM, string> {
   let assignee = issue.expand.assignee.name
   let mut project = issue.expand.project.name
   let mut project_href = ""
@@ -369,15 +356,31 @@ fn issue_vm(issue: models.Issue, comments: Slice<models.Comment>) -> Result<Issu
     project_href = f"/issues?project={url.QueryEscape(project)}"
   }
   if project == "" { project = "none" }
-  // The work-site slot (TASK-205). The claim read is paid per render like
-  // the catalogues below, and only when a site exists to dim.
-  let mut work = ""
-  let mut work_stale = false
-  if issue.work_branch != "" {
-    work = f"{issue.work_branch} @ {issue.work_host}:{issue.work_path}"
-    work_stale = work_site_stale(issue.state, fetch_claim(issue.id)?.is_some())
+  let held = claims.fetch(issue.id)?
+  let mut claim_id = ""
+  let mut claim_holder = ""
+  let mut claim_age = ""
+  if let Some(c) = held {
+    claim_id = c.id
+    claim_holder = c.expand.member.name
+    if claim_holder == "" { claim_holder = "unknown member" }
+    claim_age = display.relative(c.created)
   }
+  let mut claim_actor_id = ""
+  let mut claim_actor = ""
+  let mut claim_error = ""
+  match actor() {
+    Ok(Some(a)) => { claim_actor = a.name; claim_actor_id = a.id },
+    Ok(None) => claim_error = "No member is configured for this board.",
+    Err(e) => claim_error = e,
+  }
+  let mut work = ""
+  if issue.work_branch != "" { work = f"{issue.work_branch} @ {issue.work_host}:{issue.work_path}" }
+  let work_stale = work_site_stale(issue.state, held.is_some())
   Ok(IssueVM {
+    claim_id, claim_holder, claim_age, claim_actor, claim_actor_id, claim_error,
+    claim_read_only: issue.expand.team.archived,
+    attachments: attachment_vms(issue),
     deleted: false,
     id: issue.id,
     key: f"{issue.expand.team.key}-{issue.number}",
@@ -392,7 +395,6 @@ fn issue_vm(issue: models.Issue, comments: Slice<models.Comment>) -> Result<Issu
     emoji: issue.emoji,
     work,
     work_stale,
-    description: markdown.md_html(issue.description),
     description_md: issue.description,
     created: display.relative(issue.created),
     updated: display.relative(issue.updated),
@@ -406,9 +408,9 @@ fn issue_vm(issue: models.Issue, comments: Slice<models.Comment>) -> Result<Issu
     // Scoped to the ISSUE's team, not the server's configured one: this
     // renders for whatever issue arrives, including one from a team the
     // board is not scoped to (TASK-173).
-    member_opts: fetch_members()?.map(|m| PickVM { id: m.id, name: m.name }),
-    project_opts: fetch_projects(issue.team)?.map(|p| PickVM { id: p.id, name: p.name }),
-    label_opts: fetch_labels(issue.team)?.map(|l| LabelPickVM {
+    member_opts: records.fetch_members()?.map(|m| PickVM { id: m.id, name: m.name }),
+    project_opts: records.fetch_projects(issue.team)?.map(|p| PickVM { id: p.id, name: p.name }),
+    label_opts: records.fetch_labels(issue.team)?.map(|l| LabelPickVM {
       id: l.id,
       name: l.name,
       color: theme.normalize_hex(l.color),
@@ -427,6 +429,7 @@ fn issue_vm(issue: models.Issue, comments: Slice<models.Comment>) -> Result<Issu
     // Left empty for the same reason: the picker is page-only, so a
     // broadcast of this fragment carries no catalogue.
     emojis: [],
+    ..
   })
 }
 

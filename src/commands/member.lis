@@ -1,8 +1,8 @@
+import "records"
 import "go:bufio"
 import "go:encoding/json"
 import "go:crypto/rand"
 import "go:fmt"
-import "go:net/url"
 import "go:os"
 import "go:strings"
 
@@ -10,7 +10,6 @@ import "models"
 import "pb"
 import "flags"
 import "config"
-import "query"
 
 /// Dispatch `lll member <verb>` through the noun's Command table (TASK-307).
 /// The table is the one place a verb is declared: dispatch, `lll member
@@ -65,7 +64,7 @@ pub fn member_commands() -> Slice<flags.Command> {
     },
     flags.Command {
       name: "remove",
-      summary: "remove a member with no issues ('delete' is the same command)",
+      summary: "remove a member; guard assignments and comments ('delete' is the same command)",
       page: member_remove_page(),
       spec: member_remove_spec(),
       positional: "NAME",
@@ -73,7 +72,7 @@ pub fn member_commands() -> Slice<flags.Command> {
     },
     flags.Command {
       name: "delete",
-      summary: "remove a member with no issues (the same command as 'remove')",
+      summary: "remove a member; guard assignments and comments (the same command as 'remove')",
       page: member_remove_page(),
       spec: member_remove_spec(),
       positional: "NAME",
@@ -94,8 +93,8 @@ pub fn member_commands() -> Slice<flags.Command> {
 /// prints it under the verb table for `lll member --help`.
 fn member_intro() -> string {
   "Members are PocketBase auth records (email + password; TASK-180). Adding one
-without -e synthesizes <name>@members.invalid as its identity. 'me' in the
-home config names the member that authors your comments.
+without -e synthesizes <name>@members.invalid as its identity. Your token identifies the
+member that authors your comments; configured 'me' must agree.
 
 A freshly added or imported member has a random password nobody knows;
 'lll member set-password' is how a superuser gives them one, after which
@@ -103,8 +102,8 @@ A freshly added or imported member has a random password nobody knows;
 text, for onboarding somebody who is not here to type a password."
 }
 
-fn member_list(args: Slice<string>) -> Result<(), string> {
-  let p = flags.parse(member_list_spec(), args, 3, false, "")?
+fn member_list(input: flags.CommandInput) -> Result<(), string> {
+  let p = input.parsed
   let mut members = models.MemberList { .. }
   pb.fetch(
     "/api/collections/members/records?perPage=200&sort=name",
@@ -131,8 +130,9 @@ fn member_list_spec() -> Slice<flags.Flag> {
 
 fn member_add_spec() -> Slice<flags.Flag> {
   [
-    flags.Flag { name: "-n", value: true, hint: "\"name\"", help: "member name", .. },
-    flags.Flag { name: "-e", value: true, hint: "email", help: "member email", .. },
+    flags.Flag { name: "-n", alias: "--name", value: true, hint: "\"name\"", help: "member name", .. },
+    flags.Flag { name: "-e", alias: "--email", value: true, hint: "email", help: "member email", .. },
+    flags.Flag { name: "--password", value: true, hint: "pw", help: "set a usable login password with a real --email; otherwise creates a record only", .. },
   ]
 }
 
@@ -154,7 +154,6 @@ fn member_invite_spec() -> Slice<flags.Flag> {
       help: "the colleague's real email; it is the identity 'lll login' asks for",
       ..,
     },
-    flags.Flag { name: "--help", alias: "-h", hidden: true, help: "show this help", .. },
   ])
 }
 
@@ -182,22 +181,9 @@ fn set_password_spec() -> Slice<flags.Flag> {
       help: "real email to set alongside the password; required when the member has only a synthesized one",
       ..,
     },
-    flags.Flag { name: "--help", alias: "-h", hidden: true, help: "show this help", .. },
   ])
 }
 
-/// The flag table of one member verb; empty for verbs without flags. Read by
-/// `lll completions` so the scripts complete exactly what the parser accepts.
-pub fn member_verb_spec(verb: string) -> Slice<flags.Flag> {
-  match verb {
-    "add" | "create" => member_add_spec(),
-    "invite" => member_invite_spec(),
-    "list" => member_list_spec(),
-    "set-password" => set_password_spec(),
-    "remove" | "delete" => member_remove_spec(),
-    _ => [],
-  }
-}
 
 /// `lll member remove NAME` — delete a member nothing points at (TASK-245).
 ///
@@ -210,21 +196,18 @@ pub fn member_verb_spec(verb: string) -> Slice<flags.Flag> {
 /// Superuser-gated like set-password, because it is destructive and because
 /// deleting an auth record is not something one member should do to another
 /// on a shared board.
-fn member_remove(args: Slice<string>) -> Result<(), string> {
+fn member_remove(input: flags.CommandInput) -> Result<(), string> {
   let spec = member_remove_spec()
   let usage = flags.usage("lll member remove", spec, "NAME")
-  let p = flags.parse(spec, args, 3, true, usage)?
+  let p = input.parsed
   let name = p.first()
   if name == "" { return Err(f"usage: {usage}") }
 
   point_at_url(p.one("--url"))?
   apply_admin_flags(p.one("--admin-email"), p.one("--admin-password"))?
-  // Insisted on, not merely preferred. superuser_auth falls back to the
-  // configured token when no admin credentials are set, and the members
-  // collection lets any authenticated member delete a record — so without
-  // this check the "superuser only" in the help above would be the same
-  // false claim TASK-243 was filed for. Deleting somebody else's account is
-  // not a thing one member should be able to do to another.
+  // Require an explicit admin login before lookup/counting. The backend also
+  // restricts member deletion to superusers (LLL-341), so direct API clients
+  // cannot bypass the same account boundary.
   if os.Getenv("LLL_ADMIN_EMAIL") == "" || os.Getenv("LLL_ADMIN_PASSWORD") == "" {
     return Err(
       "removing a member needs the server's admin credentials
@@ -232,31 +215,32 @@ pass --admin-email and --admin-password, or set LLL_ADMIN_EMAIL/LLL_ADMIN_PASSWO
     )
   }
   let su = superuser_auth()?
-  let Some(member) = find_member_as(su, name)? else {
+  let Some(member) = records.find_member_as(su, name)? else {
     return Err(f"no member named '{name}' — see 'lll member list'")
   }
 
-  let filter = url.QueryEscape(f"assignee={query.quote(member.id)}")
-  let mut assigned = models.IssueList { .. }
-  pb.fetch(
-    f"/api/collections/issues/records?filter={filter}&perPage=1",
-    "issues",
-    &assigned,
-  )?
-  if assigned.total_items > 0 {
+  let references = member_references(member.id, su)?
+  let assigned = references.assigned
+  let authored = references.authored
+  if (assigned > 0 || authored > 0) && !p.given("--force") {
     return Err(
-      f"{member.name} has {assigned.total_items} issue(s) assigned — removing them would blank the assignee
-reassign first: lll issue update <KEY> --assignee <somebody>",
+      f"{member.name} has {assigned} issue(s) assigned and {authored} comment(s) authored
+reassign first: lll issue update <KEY> --assignee <somebody>
+or use --force to clear assignments and comment authorship; comment bodies are kept",
     )
   }
 
   let _ = pb.delete_as(f"/api/collections/members/records/{member.id}", su)?
   fmt.Println(f"removed member {member.name}")
+  if assigned > 0 || authored > 0 {
+    fmt.Println(f"cleared {assigned} issue assignment(s) and {authored} comment author reference(s); comment bodies kept")
+  }
   Ok(())
 }
 
 fn member_remove_spec() -> Slice<flags.Flag> {
   with_admin_flags([
+    flags.Flag { name: "--force", help: "clear assignments and comment authorship; keep comment bodies", .. },
     flags.Flag {
       name: "--url",
       value: true,
@@ -264,7 +248,6 @@ fn member_remove_spec() -> Slice<flags.Flag> {
       help: "server base url; without it the configured one",
       ..,
     },
-    flags.Flag { name: "--help", alias: "-h", hidden: true, help: "show this help", .. },
   ])
 }
 
@@ -273,14 +256,15 @@ fn member_remove_spec() -> Slice<flags.Flag> {
 /// the parser accepts.
 fn member_remove_page() -> string {
   let usage = flags.usage("lll member remove", member_remove_spec(), "NAME")
-  "lll member remove - remove a member who has no issues assigned
+  "lll member remove - remove a member with reference checks
 
 Usage:
   " + usage + "
 
-Refuses a member with assigned issues: reassign them first
-('lll issue update KEY --assignee SOMEBODY'). Authenticates as the superuser,
-exactly like 'lll member set-password'."
+Refuses a member with assigned issues or authored comments. Reassign issues
+first ('lll issue update KEY --assignee SOMEBODY'), or use --force to clear
+assignments and comment authorship. Comment bodies are kept.
+Authenticates as the superuser, exactly like 'lll member set-password'." + flags.section(member_remove_spec())
 }
 
 /// Point this process at `url` for the rest of the command, when one was
@@ -306,10 +290,21 @@ fn point_at_url(given: string) -> Result<(), string> {
 /// a random password nobody knows, so 'lll login' is a dead door until this
 /// runs. Gated exactly like token create: LLL_ADMIN_* env credentials, or a
 /// configured superuser token.
-fn member_set_password(args: Slice<string>) -> Result<(), string> {
+/// Keep unrelated validation and server failures intact; only actual auth
+/// refusals should advise the caller to change administrative credentials.
+fn member_password_error(name: string, e: string) -> string {
+  let status = pb.response_status(e)
+  if status == 403 || status == 401 || (status == 400 && strings.Contains(pb.response_body(e), "oldPassword")) {
+    return "member set-password is superuser-only and the configured token is not one
+set LLL_ADMIN_EMAIL/LLL_ADMIN_PASSWORD to the credentials 'lll up' prints"
+  }
+  f"setting {name}'s password: {e}"
+}
+
+fn member_set_password(input: flags.CommandInput) -> Result<(), string> {
   let spec = set_password_spec()
   let usage = flags.usage("lll member set-password", spec, "NAME")
-  let p = flags.parse(spec, args, 3, true, usage)?
+  let p = input.parsed
   let name = p.first()
   if name == "" {
     return Err(f"usage: {usage}")
@@ -318,7 +313,7 @@ fn member_set_password(args: Slice<string>) -> Result<(), string> {
   point_at_url(p.one("--url"))?
   apply_admin_flags(p.one("--admin-email"), p.one("--admin-password"))?
   let su = superuser_auth()?
-  let found = find_member_as(su, name)?
+  let found = records.find_member_as(su, name)?
   let Some(member) = found else {
     return Err(f"no member named '{name}' — see 'lll member add'")
   }
@@ -369,16 +364,7 @@ rerun with --email <email> to set one alongside the password",
     payload as string,
     su,
   ) {
-    // A member token (or a guest) is refused by PocketBase — 401/403 outright,
-    // or a 400 demanding oldPassword, which only a superuser may omit. All
-    // three mean the same thing here: say what to set.
-    if strings.Contains(e, "403") || strings.Contains(e, "401") || strings.Contains(e, "oldPassword") {
-      return Err(
-        "member set-password is superuser-only and the configured token is not one
-set LLL_ADMIN_EMAIL/LLL_ADMIN_PASSWORD to the credentials 'lll up' prints",
-      )
-    }
-    return Err(f"setting {name}'s password: {e}")
+    return Err(member_password_error(name, e))
   }
 
   let identity = if email == "" { member.email } else { email }
@@ -396,10 +382,10 @@ set LLL_ADMIN_EMAIL/LLL_ADMIN_PASSWORD to the credentials 'lll up' prints",
 /// in days. Nothing here is new machinery; it is create_member and the same
 /// superuser gate set-password runs, plus the part that actually got skipped —
 /// telling the inviter the literal lines to paste to the colleague.
-fn member_invite(args: Slice<string>) -> Result<(), string> {
+fn member_invite(input: flags.CommandInput) -> Result<(), string> {
   let spec = member_invite_spec()
   let usage = flags.usage("lll member invite", spec, "NAME")
-  let p = flags.parse(spec, args, 3, true, usage)?
+  let p = input.parsed
   let name = p.first()
   if name == "" {
     return Err(f"usage: {usage}")
@@ -421,9 +407,9 @@ fn member_invite(args: Slice<string>) -> Result<(), string> {
   // Superuser first: the create rides it, and an existing name is caught here
   // rather than as PocketBase's bare 400 on the unique index.
   let su = superuser_auth()?
-  if let Some(existing) = find_member_as(su, name)? {
+  if let Some(existing) = records.find_member_as(su, name)? {
     return Err(
-      f"member '{name}' already exists ({existing.email}) — 'lll member set-password {name}' gives them a new password without disturbing their issues",
+      f"member '{name}' already exists ({existing.email}) — run 'lll member set-password {name} --email {email} --password PASSWORD' with administrator credentials to enable login; existing credentials are unchanged",
     )
   }
 
@@ -462,7 +448,7 @@ fn invite_lines(
   let attach = if team == "" {
     "  # then, in the repo you both work in: lll attach"
   } else {
-    f"  # then, in a clone of the repo: lll attach -k {team} (or just 'git clone' it — .lll.toml is committed)"
+    f"  # then, in a clone of the repo: lll attach -k {team} (skip attach only if the clone already contains a committed .lll.toml)"
   }
   [
     f"  temporary password: {password}",
@@ -496,57 +482,63 @@ password is stored nowhere else: lose it and reissue with
 'lll login' asks for, so the synthesized @members.invalid placeholder
 'lll member add' falls back to would be a dead door.
 
-Authenticates as the PocketBase superuser, exactly like 'lll token create'
-and 'lll member set-password': from LLL_ADMIN_EMAIL and LLL_ADMIN_PASSWORD
-(the credentials 'lll up' prints), or the configured token when it already is
-one. An existing member is refused rather than overwritten."
+Uses the configured member token to create a new colleague, or administrator
+credentials from --admin-email/--admin-password or LLL_ADMIN_EMAIL and
+LLL_ADMIN_PASSWORD when supplied. An existing member is refused rather than
+overwritten; resetting an existing password with 'lll member set-password'
+requires administrator credentials." + flags.section(member_invite_spec())
 }
 
 /// The hand-written page for `lll member set-password`.
 fn member_set_password_page() -> string {
-  "lll member set-password - set a member's login password (superuser only)
+  let spec = set_password_spec()
+  let usage = flags.usage("lll member set-password", spec, "NAME")
+  f"lll member set-password - set a member's login password (superuser only)
 
 Usage:
-  lll member set-password NAME [--email email]
+  {usage}
 
-Authenticates as the PocketBase superuser — from LLL_ADMIN_EMAIL and
-LLL_ADMIN_PASSWORD (the credentials 'lll up' prints), or the configured token
-when it already is one — and sets NAME's password: prompted twice with echo
-off when stdin is a terminal, read as two lines when piped.
+Authenticates as the PocketBase superuser using --admin-email/--admin-password,
+LLL_ADMIN_EMAIL/LLL_ADMIN_PASSWORD, or a configured superuser token.
+Sets NAME's password to --password (alias -p) when supplied. Otherwise prompts
+twice with echo off when stdin is a terminal, or reads two lines when piped.
+The replacement password must contain at least 8 characters.
 
 --email also sets the member's email, and is required when the member only
 has a synthesized @members.invalid one: the email is the identity
 'lll login' asks for. After this, the member logs in with
-'lll login --url <server>'."
+'lll login --url <server>'." + flags.section(spec)
 }
 
-fn member_add(args: Slice<string>) -> Result<(), string> {
+fn member_add(input: flags.CommandInput) -> Result<(), string> {
+  let args = input.args
   let spec = member_add_spec()
   // The usage line echoes the verb the user actually typed, so somebody who
   // reached this through the TASK-130 `create` alias is not told to rerun a
   // command they did not run.
   let verb = args.get(2).unwrap_or("add")
-  let usage = flags.usage(f"lll member {verb}", spec, "[\"name\"]")
-  let p = flags.parse(spec, args, 3, true, usage)?
-  // A bare name is accepted alongside -n, as `issue create` takes a bare
-  // title: fleet run 2 (TASK-309) had two of thirty agents type
-  // `lll member add shard-23` and get "unknown flag" for a word. -n stays
-  // the documented spelling so no script breaks; the positional is the guess
-  // that now lands. Both given, -n wins, so a caller who wrote both is not
-  // silently split between two names.
-  let name = if p.one("-n") != "" { p.one("-n") } else { p.first() }
-  if name == "" { return Err(f"usage: {usage}") }
+  let usage = flags.usage(f"lll member {verb}", spec, "[NAME]")
+  let p = input.parsed
+  let name = flags.entity_name(p, "-n", usage)?
   let email = p.one("-e")
 
-  // A name that already exists is the most common way this fails, and it used
-  // to surface as PocketBase's bare "400 Bad Request: Failed to create record"
-  // - fleet run 2 (TASK-309) had an agent unable to tell a collision from a
-  // validation rule from a permissions problem. Look first, and say so.
-  if let Some(existing) = find_member(name)? {
-    return Err(f"a member named '{name}' already exists <{existing.email}> — pick another name, or use it as-is ('lll config set me {name}')")
+  if let Some(existing) = records.find_member(name)? {
+    return Err(f"a member named '{name}' already exists <{existing.email}> — pick another name")
   }
-  let created = create_member(name, email)?
+  let password = p.one("--password")
+  if p.given("--password") && (password == "" || !real_email(email)) {
+    return Err("--password requires a nonempty password and a real --email; use 'lll member invite NAME --email EMAIL' for a generated login handoff")
+  }
+  let created = if p.given("--password") {
+    let cfg = config.load()?
+    create_member_as(cfg.token, name, email, password)?
+  } else { create_member(name, email)? }
   fmt.Println(f"Added member {created.name}")
+  if p.given("--password") {
+    fmt.Println(f"login enabled: lll login --email {email} --url {(config.load()?).url} (use the supplied password)")
+  } else {
+    fmt.Println(f"record only: no known login password. An administrator can enable login with 'lll member set-password {name} --email EMAIL --password PASSWORD'. For a new colleague, use 'lll member invite NAME --email EMAIL' instead.")
+  }
   Ok(())
 }
 
@@ -611,7 +603,7 @@ pub fn synthesize_email(name: string) -> string {
 /// assigned to.
 pub fn ensure_member(name: string) -> Result<bool, string> {
   if name == "" { return Ok(false) }
-  let existing = find_member(name)?
+  let existing = records.find_member(name)?
   if existing.is_some() { return Ok(false) }
   // Two actors seeding the same fresh server race here: both find nothing,
   // both POST. The unique name (and now email) indexes admit one and reject
@@ -620,35 +612,9 @@ pub fn ensure_member(name: string) -> Result<bool, string> {
   match create_member(name, "") {
     Ok(_) => Ok(true),
     Err(_) => {
-      let raced = find_member(name)?
+      let raced = records.find_member(name)?
       if raced.is_some() { return Ok(false) }
       Err(f"could not create member '{name}' and none exists to reuse")
     },
   }
-}
-
-/// Find a member by exact name, riding the configured token.
-fn find_member(name: string) -> Result<Option<models.Member>, string> {
-  let cfg = config.load()?
-  find_member_as(cfg.token, name)
-}
-
-/// Find a member by exact name, riding `tok` instead of the configured
-/// token — token create looks its member up as the superuser it has just
-/// authenticated, not as whoever happens to be configured.
-pub fn find_member_as(tok: string, name: string) -> Result<Option<models.Member>, string> {
-  // `name` arrives unsanitized from the board's `/issues?assignee=` query
-  // parameter, so it goes through `quote` and not into the filter raw: the
-  // QueryEscape below makes it safe in a URL, which is a different layer and
-  // does nothing about a `'` closing the clause early (TASK-134).
-  let filter = url.QueryEscape(f"name={query.quote(name)}")
-  let mut result = models.MemberList { .. }
-  let body = pb.get_as(
-    f"/api/collections/members/records?filter={filter}",
-    tok,
-  )?
-  if let Err(e) = json.Unmarshal(body.bytes(), &result) {
-    return Err(f"decoding members: {e}")
-  }
-  Ok(result.items.find(|m| m.name == name))
 }

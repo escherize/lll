@@ -33,6 +33,12 @@ fn refuse_delete_follows_the_noun() {
   assert !strings.Contains(msg, "lll label")
 }
 
+#[test]
+fn refuse_delete_quotes_multiword_and_apostrophe_names() {
+  assert refuse_delete("project", "Current release", 2).contains("\n  lll project delete 'Current release' --force\n")
+  assert refuse_delete("label", "owner's queue", 1).contains("\n  lll label delete 'owner'\\''s queue' --force\n")
+}
+
 /// A forced delete still reports what it cost. Silence here would be the
 /// web's behaviour with an extra flag typed.
 #[test]
@@ -72,8 +78,8 @@ fn nonempty_keeps_a_real_name_verbatim() {
 /// is a verb the shell cannot complete (TASK-127's whole point).
 #[test]
 fn label_verb_spec_covers_the_new_verbs() {
-  assert strings.Join(flags.tokens(label_verb_spec("edit")), " ") == "-n -c"
-  assert strings.Join(flags.tokens(label_verb_spec("delete")), " ") == "--force"
+  assert strings.Join(flags.tokens(flags.command_spec(label_commands(), "edit")), " ") == "-n -c --team"
+  assert strings.Join(flags.tokens(flags.command_spec(label_commands(), "delete")), " ") == "--force --team"
 }
 
 /// --force takes no value: `lll label delete bug --force` must not swallow a
@@ -120,5 +126,6 @@ fn label_create_page_keeps_the_check_first_note() {
     return
   }
   assert strings.Contains(create.page, "check 'lll label list' first")
-  assert strings.Contains(create.page, "--team  team key the label belongs to")
+  assert strings.Contains(create.page, "--team")
+  assert strings.Contains(create.page, "team key the label belongs to")
 }

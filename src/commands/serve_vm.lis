@@ -62,6 +62,8 @@ pub struct AvatarVM {
 
 /// View model for one issue: a board card, or one row of the /issues table.
 pub struct CardVM {
+  pub claim_holder: string,
+  pub attachment_count: int,
   pub id: string,
   pub key: string,
   pub title: string,
@@ -197,6 +199,7 @@ pub struct BoardVM {
 /// field stays filled and the page reloads to itself; `results` is what the
 /// DATABASE returned for it, never what the board happened to be holding.
 pub struct SearchVM {
+  pub team_key: string,
   pub q: string,
   pub results: Slice<SearchHitVM>,
 }
@@ -225,6 +228,7 @@ pub struct RailTeamVM {
 /// construct a rail it must never render. Page handlers compose the two
 /// halves into a PageVM instead; a fragment cannot carry shell by accident.
 pub struct RailVM {
+  pub team_key: string,
   // Which row reads as current: "board", "mine", "issues", "projects",
   // "search" or "settings".
   pub active: string,
@@ -308,6 +312,14 @@ pub struct FindingVM {
 
 /// View model for the issue page / issue-detail fragment.
 pub struct IssueVM {
+  pub claim_id: string,
+  pub claim_holder: string,
+  pub claim_age: string,
+  pub claim_actor: string,
+  pub claim_actor_id: string,
+  pub claim_error: string,
+  pub claim_read_only: bool,
+  pub attachments: Slice<AttachmentVM>,
   pub deleted: bool,
   pub id: string,
   pub key: string,
@@ -364,6 +376,12 @@ pub struct IssueVM {
   pub emojis: Slice<EmojiOpt>,
 }
 
+pub struct AttachmentVM {
+  pub name: string,
+  pub href: string,
+  pub preview: bool,
+}
+
 /// One column heading in the /issues table. `href` empty means the column has
 /// no PB field behind it and does not sort; `dir` is "asc" or "desc" only on
 /// the column currently doing the sorting.
@@ -408,23 +426,19 @@ pub struct IssuesVM {
 }
 
 
-/// One label row on /settings. `scope` is the owning team's key, or
-/// "workspace" — shown, never edited: which team owns a label is a CLI
-/// decision (`lll label create --team`), and a settings page that silently
-/// moved records between teams would be worse than one that says where they
-/// live.
+/// One label row on /settings. The page already identifies the owning team.
 pub struct SetLabelVM {
   pub id: string,
   pub name: string,
   pub color: string,
-  pub scope: string,
   // How many issues carry the label (TASK-208). Shown so near-duplicates
   // (bug/bugs/defect) are visible before someone creates another one.
   pub usage: int,
+  pub usage_text: string,
 }
 
-/// One member row on /settings. Members are honor-system identities (ADR-1:
-/// no auth), so this list is the workspace's — never "your account".
+/// One member account row on /settings. Accounts are shared across teams;
+/// deletion requires administrator verification and a reference review.
 pub struct SetMemberVM {
   pub id: string,
   pub name: string,
@@ -436,7 +450,6 @@ pub struct SetProjectVM {
   pub id: string,
   pub name: string,
   pub status: string,
-  pub scope: string,
 }
 
 /// One team row on /settings (TASK-210): what it is, how much it holds, and
@@ -446,6 +459,7 @@ pub struct SetTeamVM {
   pub key: string,
   pub name: string,
   pub issues: int,
+  pub issues_text: string,
   pub archived: bool,
 }
 
@@ -488,7 +502,6 @@ pub struct ProjectVM {
   pub status_label: string,
   // The --st-* token the status dot borrows. See project_tone.
   pub tone: string,
-  pub scope: string,
   // Issues pointing here, under the same team scope /issues filters by, so
   // the number and the link it labels can never disagree.
   pub count: int,

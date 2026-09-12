@@ -1,6 +1,6 @@
+import "records"
 import "go:net/http"
 import "go:net/url"
-import "go:strings"
 
 import "models"
 import "pb"
@@ -18,7 +18,7 @@ fn issues_href(q: ViewQuery) -> string {
 }
 
 /// One column heading. `field` is the PB field the header sorts on, or "" for
-/// a column with nothing to sort by (title, labels, assignee — none of them
+/// a column with nothing to sort by (state, labels, assignee — none of them
 /// are in query.sort_fields()). First click on a column sorts it descending;
 /// clicking the column that is already sorting flips it.
 fn issue_col(label: string, field: string, cls: string, q: ViewQuery) -> IssueColVM {
@@ -44,7 +44,9 @@ fn issue_col(label: string, field: string, cls: string, q: ViewQuery) -> IssueCo
 fn issue_cols(q: ViewQuery) -> Slice<IssueColVM> {
   [
     issue_col("ID", "number", "c-id", q),
-    issue_col("Title", "", "c-title", q),
+    issue_col("Title", "title", "c-title", q),
+    // State deliberately stays inert: PB's alphabetical text order is not
+    // workflow order, and sorting only this page would misorder pagination.
     issue_col("State", "", "c-state", q),
     issue_col("Priority", "priority", "c-prio", q),
     issue_col("Labels", "", "c-labels", q),
@@ -80,7 +82,7 @@ fn fetch_issue_rows(
 
 /// Every member's name, for the assignee chooser.
 fn fetch_member_names() -> Result<Slice<string>, string> {
-  Ok(fetch_members()?.map(|m| m.name))
+  Ok(records.fetch_members()?.map(|m| m.name))
 }
 
 /// This team's label names, for the label chooser. Scoped, because a label
@@ -94,13 +96,13 @@ fn fetch_member_names() -> Result<Slice<string>, string> {
 /// expand is wasted here, but one label query beats two that drift apart —
 /// the same trade fetch_project_names already makes.
 fn fetch_label_names(team_id: string) -> Result<Slice<string>, string> {
-  Ok(fetch_labels(team_id)?.map(|l| l.name))
+  Ok(records.fetch_labels(team_id)?.map(|l| l.name))
 }
 
 /// This team's project names, for the project chooser. Scoped for the same
 /// reason labels are, and paired with the same scoped resolve_project.
 fn fetch_project_names(team_id: string) -> Result<Slice<string>, string> {
-  Ok(fetch_projects(team_id)?.map(|p| p.name))
+  Ok(records.fetch_projects(team_id)?.map(|p| p.name))
 }
 
 /// The issues table: one sortable, filterable, bookmarkable list.
@@ -129,16 +131,16 @@ fn issues_page(w: http.ResponseWriter, r: Ref<http.Request>, team_id: string, me
     sort = "-updated"
   }
 
-  let mut state = raw.state
-  if state != "" && query.states().find(|s| s == state).is_none() {
-    err = f"unknown state '{state}' (use one of: {strings.Join(query.states(), ", ")})"
-    state = ""
+  let mut filters = view_filters(raw)
+  if let Err(e) = filters.validate() {
+    err = e
+    filters.state = ""
   }
-
-  let mut assignee = raw.assignee
+  let state = filters.state
+  let mut assignee = filters.assignee
   let mut assignee_id = ""
   if assignee != "" {
-    match resolve_member(assignee) {
+    match records.resolve_member(assignee) {
       Ok(m) => { assignee_id = m.id },
       Err(e) => {
         err = e
@@ -147,10 +149,10 @@ fn issues_page(w: http.ResponseWriter, r: Ref<http.Request>, team_id: string, me
     }
   }
 
-  let mut label = raw.label
+  let mut label = filters.label
   let mut label_id = ""
   if label != "" {
-    match resolve_label(team_id, label) {
+    match records.resolve_label(team_id, label) {
       Ok(l) => { label_id = l.id },
       Err(e) => {
         err = e
@@ -159,10 +161,10 @@ fn issues_page(w: http.ResponseWriter, r: Ref<http.Request>, team_id: string, me
     }
   }
 
-  let mut project = raw.project
+  let mut project = filters.project
   let mut project_id = ""
   if project != "" {
-    match resolve_project(team_id, project) {
+    match records.resolve_project(team_id, project) {
       Ok(p) => { project_id = p.id },
       Err(e) => {
         err = e

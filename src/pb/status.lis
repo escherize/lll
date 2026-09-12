@@ -1,0 +1,25 @@
+import "go:strconv"
+import "go:strings"
+
+/// Decode the status field emitted by request/read_body, never digits in the
+/// URL or response body. Transport and decoding failures have no HTTP status.
+pub fn response_status(message: string) -> int {
+  if !["GET ", "POST ", "PATCH ", "DELETE ", "PUT ", "HEAD ", "OPTIONS "].any(|method| message.starts_with(method)) {
+    return 0
+  }
+  let parts = strings.SplitN(message, ": ", 2)
+  let line = parts.get(1).unwrap_or("")
+  let words = strings.SplitN(line, " ", 2)
+  let code = words.get(0).unwrap_or("")
+  if code.length() != 3 || words.length() != 2 { return 0 }
+  let Ok(status) = strconv.Atoi(code) else { return 0 };
+  if status < 100 || status > 599 { return 0 }
+  status
+}
+
+/// Response details used by field-specific diagnostics. A field name in the
+/// URL is not evidence that PocketBase rejected that field.
+pub fn response_body(message: string) -> string {
+  if response_status(message) == 0 { return "" }
+  strings.SplitN(message, ": ", 3).get(2).unwrap_or("")
+}

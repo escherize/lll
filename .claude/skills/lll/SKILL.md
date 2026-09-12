@@ -19,6 +19,10 @@ is the fixture for exercising the tool; it is a different url and team.)
 
 The sidecar notes repo that used to hold the backlog, findings and decisions
 was imported here and archived; its url is in `.private-remote`, read-only.
+If a local `.private` is retained, run `mise run archive-protect` once to remove
+write permissions; the gate verifies protection. This changes permissions,
+not historical contents. See `docs/archive-history.md`. Fresh checkouts need
+not clone an archive.
 Findings are `lll finding list` / `lll finding near PATH`, decisions are
 `lll doc list` (kind decision), the backlog is the issue list.
 
@@ -34,15 +38,20 @@ lll issue comment KEY-12 -b "what changed and why"
 lll issue close KEY-12
 ```
 
-`claim` is the one command whose failure you must not ignore. It inserts a row
-into a collection that is UNIQUE on the issue, so when two agents claim the
-same issue at the same moment the database picks one and tells the other whose
-it is. `--assignee` cannot do that: it is a PATCH, so both agents "succeed" and
-neither finds out. Claim as the `me` in your config; `lll issue release KEY-12`
-hands it back.
+`claim` atomically acquires an issue for the member authenticated by your token.
+A successful claim is immediately visible on the server; no Git push is needed.
+If another member holds it, the command exits nonzero without taking over.
+Claiming your own issue again succeeds and says it is already yours.
+`--assignee` cannot replace another member's active claim: release it first.
+`lll whoami` shows the authenticated identity. If `me` is configured, it must
+agree with that identity. `lll issue release KEY-12` gives the claim back and
+clears the assignee when it still matches the holder.
 
-`lll issue start KEY-12` sets in-progress and creates the branch
-`key-12-slug`, after which every command infers the issue from the branch:
+`lll issue start KEY-12` sets in-progress without changing Git. To create a
+branch and record its host/path on the issue, use `lll issue start KEY-12 --branch`.
+For separate Git commands, `lll issue branch-name KEY-12` only prints a suggested
+name; it changes nothing. Once you
+are on an issue branch, commands can infer the issue from it:
 `lll issue view` with no argument is the issue you are on.
 
 ## What agents specifically need
@@ -82,8 +91,9 @@ value is in the pattern being recognisable:
 | ⚡ | performance |
 | 🔒 | security |
 
-**Filter server-side.** `--state`, `--assignee`, `--label`, `--project`,
-`--search`, `--sort`, `--limit`, and `--json` on every read command.
+**Filter server-side.** `lll issue list` supports `--state`, `--assignee`,
+`--label`, `--project`, `--search`, `--sort`, `--limit`, and `--json`. Other
+read commands expose their supported filters in `--help`.
 
 ## Always document friction and feature requests
 
@@ -93,14 +103,11 @@ Real examples from this project: a shell-working-directory trap was recorded
 after two occurrences and happened twice more; a byte-offset versus rune-index
 bug was in a finding before it panicked in five places.
 
-Where to file it depends on which tracker owns the work:
-
-- **Work on the lll project itself** — file it in the sidecar backlog, NOT with
-  the lll CLI: `cd .private && backlog task create "Title" -d "symptom, cause, what you tried"`.
-  The lll board in this checkout is demo data; an issue filed there disappears
-  into the fixture and nobody reads it.
-- **Using some OTHER project's lll board** (or exercising lll as a product) —
-  file with the CLI: `lll issue create -t "Title" -d -`.
+File work on this project in team `LLL` on the hosted board, using the CLI:
+`lll issue create -t "Title" --emoji 🐛 -d -`. The old `.private/` sidecar is
+read-only history. Do not write new tasks there. When using another project's
+board, file in that project's team. Keep scratch/demo fixtures separate from
+these real work records.
 
 File it **when you hit it**, not at the end. Two kinds both count:
 
@@ -155,7 +162,7 @@ can actually scan.
 
 ## Conventions that keep a parallel backlog honest
 
-- **Push a claim immediately.** A claim nobody can see protects nobody.
+- **Claim before editing.** A successful CLI claim is already visible to other agents.
 - **Read the task in full before mutating it.** Its notes may carry a decision
   already made; implementing your own instead wastes both.
 - **Correct a wrong acceptance criterion, out loud.** Never quietly pass one.
@@ -163,6 +170,29 @@ can actually scan.
 - **Check criteria against evidence you actually ran.** Not code presence, not
   grep output, not intent. If it is a UI change, look at it.
 - **One task per change.** If you find a second problem, file it.
+
+When dividing work among reviewers or implementers, derive each task's file
+list from the current checkout. Search for its target symbols with `rg -n`,
+then read the matches to distinguish definitions, callers and unrelated names.
+Do not assign paths from memory. Include the search command, its matching
+path/line output and the checkout commit in the task brief or rules file so
+the recipient can verify the scope. If there are no matches, investigate and
+record that uncertainty before assigning a file list.
+
+Recipients should verify that evidence against their checkout before editing.
+If a symbol moved, search for it again and record the corrected path on the
+issue; an outdated file list does not prove there is no work to do.
+
+## Group work by outcome
+
+Projects name durable destinations, such as Release 1 or multi-project server
+mode. A parallel wave is a scheduling record, not automatically a project.
+Before closing scoped work, check its project association against the outcome;
+leave explicitly deferred or unrelated work outside a release commitment.
+Read live counts with `lll project view NAME`. Closed-item counts do not prove
+release readiness. Policy and the historical backfill are recorded in
+`lll doc view projects-name-outcomes-not-waves` and
+`lll doc view historical-wave-project-audit`.
 
 ## Verification, before you claim anything works
 
@@ -185,10 +215,13 @@ mise run scratch -- --no-open # extra flags pass straight through to lll up
 ```
 
 It picks both ports by BINDING them (a liveness probe cannot tell a free port
-from a stranger's server), puts the database in a fresh temp directory, and
-prints all three so you can point a CLI at it:
-`LLL_URL=http://127.0.0.1:<db-port> lll issue list`. The data dir is temporary
-and is not cleaned up for you; the banner shows the `rm -rf` to run.
+from a stranger's server), and runs on loopback with a fresh database, home
+and working directory. Inherited `LLL_*` settings are cleared except an
+explicit `LLL_TEAM`; the default team is SCRAT. The banner prints the board
+login URL, local admin credentials and isolated config path. CLI access to
+this database needs its own local authentication; a hosted login token does
+not authenticate against the scratch database. The temporary directory is
+kept after shutdown; the banner shows the `rm -rf` to run when finished.
 
 `mise run dev` is the OTHER thing: it hardcodes port 8100 and `pb/pb_data`, so
 it is the shared local board and two of them collide. Use it when you want the
