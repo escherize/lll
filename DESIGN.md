@@ -350,6 +350,35 @@ orange filled square with an exclamation mark for urgent. Strokes run
 never icon fonts, emoji, or third-party icon packages. New icons match the
 14px grid, ~1.5px round-capped strokes, and `currentColor`.
 
+## Code and Diagrams
+
+Code belongs to the prose surface, not a separate editor theme. Inline code
+uses the system monospace stack at 12px, a raised background, a hairline border,
+and 4px rounding. Fenced blocks use the same raised surface with the standard
+6px radius, 8px/10px padding, and horizontal scrolling; their inner code adds
+no second background or border.
+
+Syntax highlighting is monochrome. Chroma emits classes on the server; the
+`.md .chroma` rules in `web/static/theme.css` assign the existing three text
+voices. Ordinary code uses `--text-2`; comments use italic `--text-3`;
+keywords use `--text` at weight 600. Names, strings, and numbers use `--text`;
+operators and punctuation recede to `--text-3`. Do not add a language-specific
+rainbow palette. Unknown fences remain plain code, and language guessing is
+disabled. Code content remains escaped rather than interpreted as HTML.
+
+Mermaid diagrams are another reading surface. Use Mermaid's base theme with
+the existing neutral tokens: raised/hover/panel fills, `--border-strong` edges,
+`--text` labels, and `--text-3` connecting lines. Labels inherit the page font
+at 13px. Keep the token mapping in `web/static/mermaid-init.js`; do not maintain
+an unrelated diagram palette. The rendered diagram replaces its code-block
+frame, and its SVG fits the available width with automatic height.
+
+The vendored Mermaid renderer loads only when a Mermaid fence is present;
+strict security mode stays enabled. Issue/comment updates can introduce new
+fences, so rendering also handles DOM changes without rerendering existing
+diagrams. These are implementation constraints of the documented treatment,
+not a reason to add a persistent stream or a new visual language to prose.
+
 ## Components
 
 ### Buttons
