@@ -30,7 +30,8 @@ sys.exit(int(os.environ.get('PR_EXIT', '0')))
     # The 40k emoji body exceeds Linux's single-argument byte ceiling while
     # staying below the PR character limit. The marker must remain literal.
     for description in ('', 'Quotes " and $() `literal`\n\nline two', '🧪' * 40000, 'x' * 100000):
-        created = run('issue', 'create', 'PR body fixture', '-d', '-', '--json', body=description)
+        description_flags = ['-d', '-'] if description else []
+        created = run('issue', 'create', 'PR body fixture', *description_flags, '--json', body=description)
         assert created.returncode == 0, created.stderr
         record = json.loads(created.stdout)
         key = f'ENG-{record["number"]}'
