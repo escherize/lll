@@ -1799,7 +1799,7 @@ fn link(input: flags.CommandInput) -> Result<(), string> {
   let resolved = resolve_id(id, usage)?
   let issue = fetch_issue(resolved)?
   let key = f"{issue.expand.team.key}-{issue.number}"
-  let team = current_team()?
+  let team = issue_link_team(issue)?
   let d = fetch_doc(team, slug)?
   cross_team_link(issue, team, d)?
 
@@ -1820,7 +1820,7 @@ fn unlink(input: flags.CommandInput) -> Result<(), string> {
   let resolved = resolve_id(id, usage)?
   let issue = fetch_issue(resolved)?
   let key = f"{issue.expand.team.key}-{issue.number}"
-  let team = current_team()?
+  let team = issue_link_team(issue)?
   let d = fetch_doc(team, slug)?
   cross_team_link(issue, team, d)?
 
@@ -1834,6 +1834,12 @@ fn unlink(input: flags.CommandInput) -> Result<(), string> {
   set_doc_issues(d, remaining)?
   fmt.Println(f"Unlinked {key} from {d.slug}")
   Ok(())
+}
+
+/// An explicit issue identifies its document namespace outside an attached
+/// directory. Configured scope remains authoritative, including a mismatch.
+fn issue_link_team(issue: models.Issue) -> Result<models.Team, string> {
+  Ok(configured_team()?.unwrap_or(issue.expand.team))
 }
 
 /// `lll issue block KEY BLOCKER`: KEY cannot start until BLOCKER is done.

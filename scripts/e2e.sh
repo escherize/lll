@@ -1573,6 +1573,18 @@ rid=$(LLL_URL=$URL LLL_TEAM=ENG "$LIN" doc view port-notes --json | jq -r '.issu
 out=$(LLL_URL=$URL LLL_TEAM=ENG "$LIN" issue link ENG-1 port-notes)
 assert_contains "$out" "already linked" "double link is idempotent"
 
+# Explicit keys and board URLs supply scope when no team is configured.
+LINK_HOME="$DATA_DIR/link-home"
+mkdir -p "$LINK_HOME"
+out=$(env -u LLL_TEAM HOME="$LINK_HOME" LLL_URL="$URL" "$LLL_ABS" issue unlink ENG-1 port-notes)
+assert_contains "$out" "Unlinked ENG-1" "unlink infers team from an explicit issue key"
+out=$(env -u LLL_TEAM HOME="$LINK_HOME" LLL_URL="$URL" "$LLL_ABS" issue link "https://board.example/issue/ENG-1" port-notes)
+assert_contains "$out" "Linked ENG-1" "link infers team from a board URL"
+out=$(env -u LLL_TEAM HOME="$LINK_HOME" LLL_URL="$URL" "$LLL_ABS" issue unlink "https://board.example/issue/ENG-1" port-notes)
+assert_contains "$out" "Unlinked ENG-1" "unlink infers team from a board URL"
+out=$(env -u LLL_TEAM HOME="$LINK_HOME" LLL_URL="$URL" "$LLL_ABS" issue link ENG-1 port-notes)
+assert_contains "$out" "Linked ENG-1" "link infers team from an explicit issue key"
+
 # relink corrects a wrong link: unlink the wrong issue, keep the right one
 out=$(LLL_URL=$URL LLL_TEAM=ENG "$LIN" issue link ENG-2 port-notes)
 assert_contains "$out" "Linked ENG-2 -> port-notes" "second issue links"
