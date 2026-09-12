@@ -1,0 +1,22 @@
+name: Set up browser verification
+description: Install the pinned CLI and its matching Chromium outside fixture HOME directories.
+runs:
+  using: composite
+  steps:
+    - uses: actions/setup-node@v4
+      with:
+        node-version: '22'
+    - name: Configure the browser and cache
+      shell: bash
+      run: |
+        echo "PLAYWRIGHT_BROWSERS_PATH=$RUNNER_TEMP/playwright-browsers" >> "$GITHUB_ENV"
+        echo "PLAYWRIGHT_MCP_CONFIG=$GITHUB_WORKSPACE/scripts/browser-ci.json" >> "$GITHUB_ENV"
+    - name: Install browser tooling
+      shell: bash
+      run: |
+        npm install -g @playwright/cli@0.1.13
+        if [ "$RUNNER_OS" = Linux ]; then
+          playwright-cli install-browser chromium --with-deps
+        else
+          playwright-cli install-browser chromium
+        fi

@@ -1,7 +1,9 @@
 # CI and deployment
 
 Every pull request and main push runs the macOS compiler/unit/full end-to-end
-gate with pinned Playwright CLI and Chrome installed. Missing browser tooling
+gate with pinned Playwright CLI and its matching bundled Chromium installed.
+The browser cache has an explicit job-local path so fixture HOME isolation
+does not hide it. `scripts/browser-ci.json` selects that browser. Missing browser tooling
 fails the job. After that gate, `scripts/prepare-deploy-context.sh` archives
 the exact checked-out HEAD, emits Go and makes module replacements relative.
 The uploaded archive contains everything needed for a Linux build; it does

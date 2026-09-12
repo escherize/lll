@@ -51,14 +51,7 @@ jobs:
           curl -LsSf https://github.com/ivov/lisette/releases/download/lisette-v0.12.0/lisette-installer.sh | sh
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
 
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '22'
-
-      - name: Install browser tooling
-        run: |
-          npm install -g @playwright/cli@0.1.13
-          playwright-cli install-browser chrome
+      - uses: ./.github/actions/setup-browser
 
       - name: gate
         run: |
@@ -90,15 +83,11 @@ jobs:
           path: ${{ runner.temp }}
       - name: Unpack the verified source context
         run: tar -xzf "$RUNNER_TEMP/deploy-context.tar.gz" -C "$GITHUB_WORKSPACE"
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '22'
-      - name: Install browser tooling
+      - name: Install board test dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y jq
-          npm install -g @playwright/cli@0.1.13
-          playwright-cli install-browser chrome --with-deps
+      - uses: ./.github/actions/setup-browser
       - name: Build the production Dockerfile on Linux
         run: |
           docker build -t lll-ci .
