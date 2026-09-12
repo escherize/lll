@@ -4,10 +4,36 @@ import sys
 import tempfile
 import unittest
 
-from check_assets import check_css
+from check_assets import check_css, check_scripts
 
 
 class AssetCheckTest(unittest.TestCase):
+    def test_external_script_sources_include_encoded_and_multiline_attributes(self):
+        for source in ['<script src="https://cdn.example/x.js"></script>',
+                       '<SCRIPT\nSRC="//cdn.example/x.js"></SCRIPT>',
+                       '<script src="&#104;ttps://cdn.example/x.js"></script>']:
+            self.assertTrue(check_scripts(source), source)
+
+    def test_local_inline_and_script_free_templates_pass(self):
+        self.assertFalse(check_scripts('<script src="/static/app.js"></script>'))
+        self.assertFalse(check_scripts('<script>const text = "https://example.com";</script>'))
+        self.assertFalse(check_scripts('<!-- <script src="https://cdn.example/x.js"> -->'))
+        self.assertFalse(check_scripts('<table><tr><td>No script required</td></tr></table>'))
+
+    def test_guard_cli_rejects_an_injected_cdn_tag(self):
+        script = pathlib.Path(__file__).with_name('check_assets.py').resolve()
+        with tempfile.TemporaryDirectory() as temp:
+            root = pathlib.Path(temp)
+            (root / 'static').mkdir()
+            (root / 'static/theme.css').write_text('.valid {}')
+            (root / 'templates').mkdir()
+            path = root / 'templates/issues.html'
+            path.write_text('<script src="https://cdn.example/app.js"></script>')
+            result = subprocess.run([sys.executable, str(script), str(root)], capture_output=True, text=True)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn('issues.html', result.stderr)
+            self.assertIn('external script', result.stderr)
+
     def test_css_literals_comments_escapes_and_nested_rules(self):
         valid = '''/* } */ @media (width > 1px) {
         .a { content: "{\\\"}"; background: url(data:text/plain,{); }
