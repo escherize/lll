@@ -1066,7 +1066,7 @@ if command -v playwright-cli >/dev/null 2>&1; then
     | sed -n '/### Result/{n;p;}' | tr -d '\\' | tr -d '"')
   playwright-cli -s="$BROWSER_SESSION" fill "#ni-title" "Create more one" >/dev/null 2>&1 \
     || fail "playwright: typing the first Create-more title"
-  first=$(ni_submit '"one":true,"navs":1')
+  first=$(ni_submit '"one":true')
   assert_contains "$first" '"open":true' "task-159: submitting with Create more keeps the dialog open"
   assert_contains "$first" '"title":""' "task-159: the title is cleared for the next issue"
   assert_contains "$first" '"desc":""' "task-159: the description is cleared for the next issue"
