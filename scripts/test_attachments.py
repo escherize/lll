@@ -7,6 +7,7 @@ import json
 import os
 from pathlib import Path
 import subprocess
+from browser_session import open_session
 import sys
 import tempfile
 import urllib.error
@@ -141,8 +142,7 @@ if shutil.which('playwright-cli'):
     session = f'attachments-{os.getpid()}'
     Path('/tmp/lll-35-browser-upload.txt').write_text('Browser attachment fixture\n')
     try:
-        opened = subprocess.run(['playwright-cli', '-s=' + session, 'open', board + '/?board_token=' + os.environ['LLL_TEST_BOARD_TOKEN']], text=True, capture_output=True, timeout=30)
-        assert opened.returncode == 0, 'could not open attachment browser'
+        open_session(session, board + '/?board_token=' + os.environ['LLL_TEST_BOARD_TOKEN'])
         result = subprocess.run(['playwright-cli', '-s=' + session, 'run-code', Path('scripts/browser_attachments.js').read_text()], text=True, capture_output=True, timeout=90)
         output = result.stdout + result.stderr
         Path('/tmp/lll-35-browser-gate.log').write_text(output)

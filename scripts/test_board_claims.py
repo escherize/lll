@@ -7,6 +7,7 @@ from pathlib import Path
 import queue
 import shutil
 import subprocess
+from browser_session import open_session
 import sys
 import threading
 import urllib.error
@@ -102,8 +103,7 @@ print('Board claims: claim-only release updates issue/card/work-site, unrelated 
 if shutil.which('playwright-cli'):
     session = 'board-claims-' + str(os.getpid())
     try:
-        p = subprocess.run(['playwright-cli', '-s=' + session, 'open', board + '/?board_token=' + os.environ['LLL_TEST_BOARD_TOKEN']], capture_output=True, text=True, timeout=30)
-        assert p.returncode == 0
+        open_session(session, board + '/?board_token=' + os.environ['LLL_TEST_BOARD_TOKEN'])
         p = subprocess.run(['playwright-cli', '-s=' + session, 'run-code', Path('scripts/browser_claims.js').read_text()], capture_output=True, text=True, timeout=100)
         output = p.stdout + p.stderr
         Path('/tmp/lll-185-browser.log').write_text(output)

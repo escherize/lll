@@ -6,6 +6,7 @@ from pathlib import Path
 import queue
 import shutil
 import subprocess
+from browser_session import open_session
 import sys
 import threading
 import urllib.request
@@ -96,8 +97,7 @@ print(f'Issue stream: metadata {len(metadata)} bytes; initial description {len(i
 if shutil.which('playwright-cli'):
     session = f'issue-stream-{os.getpid()}'
     try:
-        opened = subprocess.run(['playwright-cli', '-s=' + session, 'open', board + '/?board_token=' + os.environ['LLL_TEST_BOARD_TOKEN']], text=True, capture_output=True, timeout=30)
-        assert opened.returncode == 0, 'could not open stream browser'
+        open_session(session, board + '/?board_token=' + os.environ['LLL_TEST_BOARD_TOKEN'])
         result = subprocess.run(['playwright-cli', '-s=' + session, 'run-code', Path('scripts/browser_issue_stream.js').read_text()], text=True, capture_output=True, timeout=90)
         output = result.stdout + result.stderr
         Path('/tmp/lll-58-browser-gate.log').write_text(output)

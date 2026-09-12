@@ -11,6 +11,7 @@ import re
 import shutil
 import socket
 import subprocess
+from browser_session import open_session
 import sys
 import tempfile
 import threading
@@ -196,7 +197,7 @@ with tempfile.TemporaryDirectory(prefix='lll-board-pages-') as directory:
 if shutil.which('playwright-cli'):
     session = 'board-pages-' + str(os.getpid())
     try:
-        subprocess.run(['playwright-cli', '-s=' + session, 'open', board + '/?board_token=' + os.environ['LLL_TEST_BOARD_TOKEN']], capture_output=True, timeout=30, check=True)
+        open_session(session, board + '/?board_token=' + os.environ['LLL_TEST_BOARD_TOKEN'])
         result = subprocess.run(['playwright-cli', '-s=' + session, 'run-code', Path('scripts/browser_board_pagination.js').read_text()], capture_output=True, text=True, timeout=90)
         output = result.stdout + result.stderr
         Path('/tmp/lll-360-browser.log').write_text(output)
