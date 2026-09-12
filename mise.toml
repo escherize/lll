@@ -84,6 +84,7 @@ run = """
 command -v lis >/dev/null || { echo "lis not found. Install it:" >&2; echo "  curl -LsSf https://github.com/ivov/lisette/releases/latest/download/lisette-installer.sh | sh" >&2; exit 1; }
 bash scripts/lis-typedefs-workaround.sh
 lis test
+go -C web test ./...
 """
 
 [tasks.e2e]

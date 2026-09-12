@@ -1,4 +1,3 @@
-import "go:bytes"
 import "go:html/template"
 import "go:github.com/escherize/lll/web"
 import "go:net/url"
@@ -16,15 +15,7 @@ import "theme"
 
 /// Render a named template from the embedded web/templates/ tree.
 fn render(name: string, data: Unknown) -> Result<string, string> {
-  let tmpl = match template.ParseFS(web.Assets(), "templates/*.html") {
-    Ok(t) => t,
-    Err(e) => return Err(f"parsing web/templates: {e}"),
-  }
-  let mut buf = bytes.Buffer { .. }
-  if let Err(e) = tmpl.ExecuteTemplate(&buf, name, data) {
-    return Err(f"rendering {name}: {e}")
-  }
-  Ok(buf.String())
+  web.Render(name, data).map_err(|e| e.Error())
 }
 
 /// Wrap a rendered fragment as a datastar-patch-elements SSE event. Each
