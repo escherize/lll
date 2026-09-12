@@ -71,6 +71,7 @@ fn api_proxy(base: string) -> Result<(), string> {
   // Both of PocketBase's namespaces: /api/ is the REST surface every client
   // speaks, /_/ is the admin UI `lll up` prints a link to. Neither collides
   // with a board route - the board owns /t/, /issue/, /static/ and friends.
+  http.HandleFunc("GET /.well-known/lll", board_discovery)
   http.Handle("/api/", proxy)
   http.Handle("/_/", proxy)
   Ok(())

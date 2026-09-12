@@ -63,7 +63,7 @@ LIN=target/.lisette/bin/lll
 # USER is pinned: a first boot seeds a member named after it (task-31), and
 # the board assertions must not depend on who runs this suite. HOME is pinned
 # because that first boot WRITES 'me' to the home config now (TASK-168).
-env -u LLL_TOKEN LLL_BOARD_TOKEN="$BOARD_TOKEN" USER=e2e HOME="$E2E_HOME" "$LIN" up --no-open \
+env -u LLL_TOKEN LLL_WEB_URL="$WEB" LLL_BOARD_TOKEN="$BOARD_TOKEN" USER=e2e HOME="$E2E_HOME" "$LIN" up --no-open \
   --pb-dir "$DATA_DIR/pb_data" --port "$WEB_PORT" \
   </dev/null >"$PB_LOG" 2>&1 &
 PB_PID=$!
@@ -119,6 +119,8 @@ WEB_TOKEN=$(pb_member_token "$LLL_URL" e2e e2e@members.invalid web-e2e-pass-123)
 [ -n "$WEB_TOKEN" ] && [ "$WEB_TOKEN" != "null" ] || fail "pb_member_token returned no token"
 export LLL_TOKEN="$WEB_TOKEN"
 AUTH_HDR="Authorization: Bearer $WEB_TOKEN"
+
+python3 scripts/test_login_discovery.py "$PWD/$LIN" "$LLL_URL" "$WEB"
 
 curl -sf -H "$AUTH_HDR" -X POST "$LLL_URL/api/collections/teams/records" \
   -H 'Content-Type: application/json' \

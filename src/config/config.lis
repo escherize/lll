@@ -45,20 +45,8 @@ pub fn load_traced() -> Result<(Config, Sources), string> {
   let mut src = Sources { .. }
 
   for path in config_files() {
-    let data = match os.ReadFile(path) {
-      Ok(d) => d,
-      Err(e) => return Err(f"reading {path}: {e}"),
-    }
     let was = cfg
-    // Decoding into an already-populated struct overwrites only the keys the
-    // document names. That, plus the order of config_files(), IS the layering
-    // — there is no merge step to keep in sync with the struct.
-    if let Err(e) = toml.Unmarshal(data, &cfg) {
-      return Err(
-        f"parsing {path}: {e}
-fix the TOML syntax in {path}, or remove it and rerun 'lll config init'",
-      )
-    }
+    cfg = read_config(path, cfg)?
     let from = f"file:{path}"
     if cfg.url != was.url { src.url = from }
     if cfg.team != was.team { src.team = from }
@@ -241,4 +229,24 @@ fn within(dir: string, root: string) -> bool {
 
 fn exists(path: string) -> bool {
   os.Stat(path).is_ok()
+}
+
+/// Read the persisted machine settings without environment/repo overrides.
+/// Login uses the saved API/board pair to detect a server switch reliably.
+pub fn load_home() -> Result<Config, string> {
+  let Some(path) = home_file() else { return Ok(Config { .. }) }
+  read_config(path, Config { .. })
+}
+
+fn read_config(path: string, initial: Config) -> Result<Config, string> {
+  let data = match os.ReadFile(path) {
+    Ok(data) => data,
+    Err(e) => return Err(f"reading {path}: {e}"),
+  }
+  // TOML overwrites only present fields; this is also the layering policy.
+  let mut cfg = initial
+  if let Err(e) = toml.Unmarshal(data, &cfg) {
+    return Err(f"parsing {path}: {e}\nfix the TOML syntax in {path}, or remove it and rerun 'lll config init'")
+  }
+  Ok(cfg)
 }

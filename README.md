@@ -190,7 +190,7 @@ Client settings, read by every `lll` command:
 | `LLL_TEAM` | `team` | Default team key; scopes `issue list`, required by `issue create` |
 | `LLL_ME` | `me` | Optional member name; must agree with your authenticated token |
 | `LLL_SORT` | `sort` | Default sort: `created`, `updated`, `priority`, `number`; `-` prefix descends |
-| `LLL_WEB_URL` | `web_url` | Web board base URL for `board`, `issue url`, `view -w`. Set it with `lll config set web_url URL` or `lll login --web-url URL`. `lll up` saves its actual local board endpoint; the API URL alone does not identify the board. |
+| `LLL_WEB_URL` | `web_url` | Web board base URL for `board`, `issue url`, `view -w`. Set it with `lll config set web_url URL` or `lll login --web-url URL`. Login discovers the board from `/.well-known/lll` when advertised; a separate API listener advertises the operator’s `LLL_WEB_URL`. Explicit settings take precedence. `lll up` saves its actual local board endpoint. |
 | `LLL_TOKEN` | `token` | PocketBase auth token sent as `Authorization: Bearer` on every request. A secret: `lll login` writes it to the home config, `lll token create` mints agent tokens; never the repo's .lll.toml |
 
 Server settings, read only by `lll up` (env only, no TOML key; on a host,

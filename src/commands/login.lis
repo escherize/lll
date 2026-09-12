@@ -94,6 +94,7 @@ pub fn login(args: Slice<string>) -> Result<(), string> {
   }
 
   let before_login = config.load()?
+  let saved_before_login = config.load_home()?
   let board_endpoint = if p.given("--web-url") { checked_web_url(p.one("--web-url"))? } else { "" }
 
   // --url is the fresh-machine path (TASK-195): authenticate against the url
@@ -223,10 +224,23 @@ would put a second account on that address. --create makes YOUR login: pass
     let url_path = set_home_key("url", target)?
     fmt.Println(f"url = \"{target}\" in {url_path}")
   }
-  if p.given("--url") && target != before_login.url && board_endpoint == "" {
+  let authenticated_url = if target != "" { target } else { before_login.url }
+  let previous_url = if saved_before_login.url != "" { saved_before_login.url } else { before_login.url }
+  if strings.TrimRight(authenticated_url, "/") != strings.TrimRight(previous_url, "/") && board_endpoint == "" {
     let _ = clear_home_key("web_url")?
   }
-  if board_endpoint != "" { let _ = set_home_key("web_url", board_endpoint)? }
+  if board_endpoint != "" {
+    let _ = set_home_key("web_url", board_endpoint)?
+  } else {
+    let cfg = config.load()?
+    if cfg.web_url == "" {
+      let discovery_base = if target != "" { target } else { cfg.url }
+      if let Some(endpoint) = discover_board_url(discovery_base) {
+        let _ = set_home_key("web_url", endpoint)?
+        fmt.Println(f"board endpoint discovered: {endpoint}")
+      }
+    }
+  }
   let path = set_home_key("token", auth.token)?
   fmt.Println(f"logged in as {auth.record.name}")
   fmt.Println(f"token saved to {path}")
