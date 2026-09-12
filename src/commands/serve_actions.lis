@@ -34,12 +34,16 @@ fn flashing(
     // (it caches into r.Form). Clone is the sanctioned upgrade: the copy is
     // ours to parse, and it shares the one Body stream each action reads once.
     let mut wr = r.Clone(r.Context())
-    match write(wr) {
+    let result = write(wr)
+    // Only known surfaces may choose an inline alert. The create dialog
+    // must not send its errors behind the modal shade to the page strip.
+    let target = if wr.PostFormValue("flash_target") == "ni-flash" { "ni-flash" } else { "flash" }
+    match result {
       Ok(extra) => {
-        flash_clear(w)
+        action_flash(w, target, "")
         if extra != "" { let _ = w.Write(extra.bytes()) }
       },
-      Err(e) => flash_error(w, e),
+      Err(e) => action_flash(w, target, e),
     }
   }
 }
@@ -69,17 +73,12 @@ fn require_active_team(t: models.Team) -> Result<(), string> {
   Ok(())
 }
 
-/// Respond to a Datastar action by patching the #flash strip. Always 200
-/// with an SSE body: Datastar does not reliably process non-2xx bodies, so
-/// errors travel in-band; success clears the strip and the data itself
-/// arrives via the broadcast, same as CLI-driven changes.
-fn flash_error(w: http.ResponseWriter, msg: string) {
+/// One escaped alert response for the page strip and dialog-local errors.
+/// Actions use 200/SSE for both outcomes; an empty message clears the alert.
+fn action_flash(w: http.ResponseWriter, target: string, msg: string) {
   let safe = template.HTMLEscapeString(msg)
-  respond_flash(w, f"<div id=\"flash\" class=\"flash\">{safe}</div>")
-}
-
-fn flash_clear(w: http.ResponseWriter) {
-  respond_flash(w, "<div id=\"flash\" class=\"flash\" hidden></div>")
+  let hidden = if msg == "" { " hidden" } else { "" }
+  respond_flash(w, f"<div id=\"{target}\" class=\"flash\"{hidden} role=\"alert\" aria-atomic=\"true\">{safe}</div>")
 }
 
 fn respond_flash(w: http.ResponseWriter, html: string) {

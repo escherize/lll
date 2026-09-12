@@ -505,6 +505,7 @@ input:focus, textarea:focus, select:focus {
   border: 1px solid var(--border-strong);
   border-radius: var(--radius);
 }
+.ni-dialog .flash { margin: 0; }
 .ni-head { display: flex; align-items: center; font-weight: 600; letter-spacing: -0.005em; }
 .ni-flex { flex: 1; }
 .ni-x {

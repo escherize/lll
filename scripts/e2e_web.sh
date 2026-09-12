@@ -1073,7 +1073,7 @@ if command -v playwright-cli >/dev/null 2>&1; then
   # clearing title and description, keeping the scoping fields. The board
   # repaint is the existing broadcast: navs stays 1 throughout.
   seq_goto "$WEB/"
-  more_js="() => JSON.stringify({open: getComputedStyle(document.querySelector('.ni-shade')).display !== 'none', title: document.getElementById('ni-title').value, desc: document.getElementById('ni-desc').value, focused: document.activeElement === document.getElementById('ni-title'), more: document.getElementById('ni-more').checked, assignee: document.querySelector('#ni-form select[name=assignee]').value, one: [...document.querySelectorAll('.card .title')].some(e => e.textContent === 'Create more one'), two: [...document.querySelectorAll('.card .title')].some(e => e.textContent === 'Create more two'), off: [...document.querySelectorAll('.card .title')].some(e => e.textContent === 'Create more off'), navs: performance.getEntriesByType('navigation').length, flash: document.getElementById('flash').textContent})"
+  more_js="() => JSON.stringify({open: getComputedStyle(document.querySelector('.ni-shade')).display !== 'none', title: document.getElementById('ni-title').value, desc: document.getElementById('ni-desc').value, focused: document.activeElement === document.getElementById('ni-title'), more: document.getElementById('ni-more').checked, assignee: document.querySelector('#ni-form select[name=assignee]').value, one: [...document.querySelectorAll('.card .title')].some(e => e.textContent === 'Create more one'), two: [...document.querySelectorAll('.card .title')].some(e => e.textContent === 'Create more two'), off: [...document.querySelectorAll('.card .title')].some(e => e.textContent === 'Create more off'), navs: performance.getEntriesByType('navigation').length, flash: document.getElementById('ni-flash').textContent})"
   # A submit click can be swallowed while the page is still settling after
   # the last-view restore redirect (seen under e2e load: playwright reports
   # the click, the button's handler never runs, the POST is never sent).
@@ -1140,6 +1140,8 @@ if command -v playwright-cli >/dev/null 2>&1; then
   assert_contains "$rejected" '"focused":true' "task-159: a failed create returns focus to the title"
   assert_contains "$rejected" '"desc":"Repro details stay here — unsaved"' "failed create keeps the typed description"
   playwright-cli -s="$BROWSER_SESSION" run-code "async page => { await page.screenshot({path: '/tmp/lll-131-create.png'}); }" >/dev/null 2>&1
+  create_failure=$(playwright-cli -s="$BROWSER_SESSION" run-code "$(cat scripts/browser_create_failure.js)" 2>&1)
+  assert_contains "$create_failure" 'create error readable inside dialog; keyboard retry and fresh-open clearing passed' "browser: create failure stays accessible inside dialog"
   "$LIN" issue list | grep -q "Create more doomed" \
     && fail "task-159: a failed Create-more submit wrote a record" || true
 

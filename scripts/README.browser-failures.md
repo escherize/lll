@@ -25,7 +25,8 @@ await page.locator('#state-form').evaluate(form => {
 Click Create, or select a different valid state in the issue form. Go's
 `FormValue` reads the first submitted `state`, so the added field makes the
 normal handler reject the request. The HTTP response is still 200 with
-`text/event-stream`; the visible `#flash` error is the application result.
+`text/event-stream`; the visible alert is the application result: `#ni-flash`
+inside the create dialog, or `#flash` for issue-page actions.
 A 200 status alone does not prove a successful write.
 
 Check the visible flash, the create dialog's open state and retained title
@@ -46,8 +47,10 @@ The gate takes screenshots at `/tmp/lll-131-create.png` and
 `/tmp/lll-131-state.png`. It checks the rendered failure and persisted data;
 there is no application failure flag to leave enabled accidentally.
 
-Observed follow-ups: LLL-348 tracks a rejected state selection remaining
-visible until reload; LLL-349 tracks create errors rendering behind the modal
-shade. The probes make these defects reproducible. A passing retention or
-persistence assertion does not prove that the failure UI is fully usable;
-inspect the screenshots as well.
+LLL-348 tracks a rejected state selection remaining visible until reload.
+LLL-349 moved create errors inside the dialog. `browser_create_failure.js`
+checks the alert semantics, form description relationship, desktop/mobile
+hit testing, keyboard retry with retained drafts, and clearing on fresh open.
+Its screenshots are `/tmp/lll-349-create-1280.png` and
+`/tmp/lll-349-create-390.png`. These checks verify markup and browser behavior;
+they do not substitute for testing speech output with a screen reader.
