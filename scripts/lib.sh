@@ -309,9 +309,11 @@ e2e_trap_cleanup() { # cleanup-function-name
   # remove its parent's data directory or signal $$ (which still names parent).
   local _owner='[ "${BASH_SUBSHELL:-0}" -eq 0 ]'
   trap "_e2e_status=\$?; if $_owner; then $1 \$_e2e_status; fi" EXIT
-  trap "if $_owner; then $1 130; trap - EXIT INT;  kill -INT  \$\$; fi" INT
-  trap "if $_owner; then $1 143; trap - EXIT TERM; kill -TERM \$\$; fi" TERM
-  trap "if $_owner; then $1 129; trap - EXIT HUP;  kill -HUP  \$\$; fi" HUP
+  # Bash 3.2 loses the re-raised signal when EXIT is removed inside a signal
+  # handler. A no-op EXIT preserves termination without running cleanup twice.
+  trap "if $_owner; then $1 130; trap : EXIT; trap - INT;  kill -INT  \$\$; fi" INT
+  trap "if $_owner; then $1 143; trap : EXIT; trap - TERM; kill -TERM \$\$; fi" TERM
+  trap "if $_owner; then $1 129; trap : EXIT; trap - HUP;  kill -HUP  \$\$; fi" HUP
 }
 
 # TASK-187: pin HOME for the REST of the suite, so plain CLI invocations stop

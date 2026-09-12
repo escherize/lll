@@ -3,6 +3,7 @@
 import os
 from pathlib import Path
 import subprocess
+import shutil
 import tempfile
 import unittest
 
@@ -10,9 +11,11 @@ LIB = Path(__file__).resolve().with_name('lib.sh')
 
 
 class ReapTests(unittest.TestCase):
+    shell = 'bash'
+
     def run_shell(self, script, directory):
         return subprocess.run(
-            ['bash', '-c', script, 'reap-test', str(LIB), directory],
+            [self.shell, '-c', script, 'reap-test', str(LIB), directory],
             env=dict(os.environ, LC_ALL='C', E2E_REAP_GRACE='0.15'),
             capture_output=True, text=True, timeout=10)
 
@@ -80,6 +83,13 @@ e2e_trap_cleanup cleanup
 ''' + ending, directory)
                 self.assertEqual(result.returncode, code, result.stderr)
                 self.assertEqual(Path(directory, 'cleanup').read_text().splitlines(), [f'0:{status}'])
+
+
+@unittest.skipIf(not Path('/bin/bash').exists() or
+                 os.path.samefile(shutil.which('bash'), '/bin/bash'),
+                 'default Bash already covers the system shell')
+class SystemBashReapTests(ReapTests):
+    shell = '/bin/bash'
 
 
 if __name__ == '__main__':
