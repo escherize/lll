@@ -1197,28 +1197,47 @@ fn start(args: Slice<string>) -> Result<(), string> {
   let spec = issue_start_spec()
   let usage = flags.usage("lll issue start", spec, "[KEY-123]")
   let p = flags.parse(spec, args, 3, true, usage)?
+  let with_branch = p.given("--branch")
+  if with_branch && !gitctx.in_repo() {
+    return Err("--branch needs a git repository: run it from inside the one the work happens in; issue state unchanged")
+  }
   let resolved = resolve_id(p.first(), usage)?
   let issue = fetch_issue(resolved)?
-  let _ = pb.patch(
+  let key = f"{issue.expand.team.key}-{issue.number}"
+  let branch = gitctx.branch_name(issue.expand.team.key, issue.number, issue.title)
+
+  // Git is a local prerequisite for the explicit combined operation. Do it
+  // before the remote write so a refused switch cannot start the issue.
+  if with_branch {
+    let created = match gitctx.switch_branch(branch) {
+      Ok(created) => created,
+      Err(reason) => return Err(f"{reason}\nIssue {key} state unchanged; branch setup failed."),
+    }
+    fmt.Println(f"Branch: {branch}")
+    if created {
+      fmt.Println(f"Created and switched to branch '{branch}'")
+    } else {
+      fmt.Println(f"Switched to existing branch '{branch}'")
+    }
+  }
+  if let Err(reason) = pb.patch(
     f"/api/collections/issues/records/{issue.id}",
     "{\"state\":\"in-progress\"}",
-  )?
-  let key = issue.expand.team.key
-  fmt.Println(f"Started {key}-{issue.number}: {issue.title} (◐ in-progress)")
-  if !p.given("--branch") { return Ok(()) }
-
-  if !gitctx.in_repo() {
-    return Err("--branch needs a git repository: run it from inside the one the work happens in")
+  ) {
+    if with_branch {
+      // A lost response does not prove the server rejected the write. Never
+      // undo Git automatically: report the known local outcome and how to
+      // inspect the remote state before retrying.
+      return Err(f"Git is on branch '{branch}', but starting {key} could not be confirmed: {reason}\nInspect with 'lll issue view {key}' before retrying.")
+    }
+    return Err(reason)
   }
-  let branch = gitctx.branch_name(key, issue.number, issue.title)
-  fmt.Println(f"Branch: {branch}")
-  let created = gitctx.switch_branch(branch)?
-  if created {
-    fmt.Println(f"Created and switched to branch '{branch}'")
-  } else {
-    fmt.Println(f"Switched to existing branch '{branch}'")
+  fmt.Println(f"Started {key}: {issue.title} (◐ in-progress)")
+  if with_branch {
+    if let Err(reason) = record_work_site(issue, branch) {
+      return Err(f"{key} is in-progress and Git is on '{branch}', but recording the work site could not be confirmed: {reason}\nInspect with 'lll issue view {key}' before retrying.")
+    }
   }
-  record_work_site(issue, branch)?
   Ok(())
 }
 

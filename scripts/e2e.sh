@@ -580,8 +580,69 @@ branch=$(git -C "$REPO" branch --show-current)
 [ "$branch" = "main" ] || fail "plain start: expected to stay on main, on '$branch'"
 out=$(LLL_URL=$URL "$LIN" issue view ENG-6 --json | jq -r '.work_branch')
 [ "$out" = "" ] || fail "plain start stamped a work site: '$out'"
-out=$(cd "$DATA_DIR" && LLL_URL=$URL "$LLL_ABS" issue start --branch ENG-6 2>&1 || true)
+# Failed local setup must not change a todo issue or claim it was started.
+LLL_URL=$URL "$LIN" issue update ENG-6 --state todo >/dev/null
+before_failed_start=$(LLL_URL=$URL "$LIN" issue view ENG-6 --json)
+if out=$(cd "$DATA_DIR" && LLL_URL=$URL "$LLL_ABS" issue start --branch ENG-6 2>&1); then
+  fail "start --branch outside Git succeeded"
+fi
 assert_contains "$out" "--branch needs a git repository" "start --branch outside a repo says so"
+assert_not_contains "$out" "Started ENG-6" "failed setup does not report success"
+[ "$(LLL_URL=$URL "$LIN" issue view ENG-6 --json)" = "$before_failed_start" ] || fail "outside-Git start changed issue"
+
+# Git itself can refuse a valid repository: another worktree owns the branch.
+occupied_branch=$(LLL_URL=$URL "$LIN" issue branch-name ENG-6)
+git -C "$REPO" worktree add -q -b "$occupied_branch" "$DATA_DIR/occupied-start" HEAD
+if out=$(cd "$REPO" && LLL_URL=$URL "$LLL_ABS" issue start --branch ENG-6 2>&1); then
+  fail "start stole a branch owned by another worktree"
+fi
+assert_contains "$out" "state unchanged; branch setup failed" "Git failure names the actual outcome"
+[ "$(LLL_URL=$URL "$LIN" issue view ENG-6 --json)" = "$before_failed_start" ] || fail "failed Git switch changed issue"
+git -C "$REPO" worktree remove "$DATA_DIR/occupied-start"
+git -C "$REPO" branch -D "$occupied_branch" >/dev/null
+
+# A remote write failure after a successful switch must describe partial
+# success. A local proxy forwards reads and deterministically rejects PATCH.
+python3 - "$LLL_ABS" "$URL" "$DATA_DIR/start-remote-failure" <<'PY_START'
+import http.server, json, os, pathlib, subprocess, sys, threading, urllib.request
+binary, upstream, directory = sys.argv[1:]
+class RejectWrites(http.server.BaseHTTPRequestHandler):
+    def do_GET(self):
+        request = urllib.request.Request(upstream + self.path, headers={'Authorization': self.headers.get('Authorization', '')})
+        with urllib.request.urlopen(request, timeout=10) as response:
+            body = response.read()
+        self.send_response(200)
+        self.send_header('Content-Type', 'application/json')
+        self.end_headers()
+        self.wfile.write(body)
+    def do_PATCH(self):
+        self.send_response(503)
+        self.end_headers()
+        self.wfile.write(b'{"message":"injected start failure"}')
+    def log_message(self, *args):
+        pass
+server = http.server.ThreadingHTTPServer(('127.0.0.1', 0), RejectWrites)
+thread = threading.Thread(target=server.serve_forever, daemon=True)
+thread.start()
+try:
+    pathlib.Path(directory).mkdir()
+    subprocess.run(['git', 'init', '-q', '-b', 'main', directory], check=True)
+    subprocess.run(['git', '-C', directory, '-c', 'user.name=e2e', '-c', 'user.email=e2e@example.com', 'commit', '-q', '--allow-empty', '-m', 'init'], check=True)
+    env = dict(os.environ, LLL_URL=f'http://127.0.0.1:{server.server_port}')
+    result = subprocess.run([binary, 'issue', 'start', 'ENG-6', '--branch'], cwd=directory, env=env, capture_output=True, text=True, timeout=30)
+    assert result.returncode != 0, result.stdout
+    assert "Git is on branch 'eng-6-roundtrip-issue'" in result.stderr, result.stderr
+    assert 'could not be confirmed' in result.stderr, result.stderr
+    assert 'lll issue view ENG-6' in result.stderr, result.stderr
+    assert 'Started ENG-6' not in result.stdout, result.stdout
+    branch = subprocess.check_output(['git', '-C', directory, 'branch', '--show-current'], text=True).strip()
+    assert branch == 'eng-6-roundtrip-issue', branch
+finally:
+    server.shutdown()
+    server.server_close()
+    thread.join()
+PY_START
+[ "$(LLL_URL=$URL "$LIN" issue view ENG-6 --json)" = "$before_failed_start" ] || fail "rejected remote start changed issue"
 
 out=$(cd "$REPO" && LLL_URL=$URL "$LLL_ABS" issue start ENG-6)
 assert_contains "$out" "Started ENG-6" "start output"
