@@ -36,7 +36,10 @@
      rename and its knock-on (a label's colour on the board's chips, a
      project's status in a select) land together. Row forms carry the record
      id; the trailing "new" form carries none, which is what makes it a
-     create. Delete travels as ?del=1 so the same form body serves both. */}}
+     create. Delete travels as ?del=1 so the same form body serves both.
+     Stable patch IDs belong to neutral wrappers: input[name=id] shadows
+     form.id and defeats keyed morphing when a rename reorders rows, losing
+     drafts in other rows. Keep the wrapper when showing deletion review. */}}
 {{define "settings"}}<div id="settings" class="settings">
 <p class="set-lede">Labels, projects and colour belong to the selected team. Member accounts are shared across teams. Per-browser choices (hidden columns, filter chips) stay on the board where you set them.</p>
 
@@ -58,14 +61,14 @@
      it duplicates instead of hiding alphabetically. */}}
 <p class="set-note">Every label this team has, busiest first, with how many issues carry it.</p>
 <div class="set-rows">
-{{range .Labels}}<form class="set-row" id="set-label-{{.Id}}" data-name="{{.Name}}">
+{{range .Labels}}<div id="set-label-{{.Id}}"><form class="set-row" data-name="{{.Name}}">
 <input type="hidden" name="id" value="{{.Id}}">
 <input name="color" type="color" class="set-swatch" value="{{if .Color}}{{.Color}}{{else}}#828994{{end}}" aria-label="Colour">
 <input name="name" value="{{.Name}}" autocomplete="off" aria-label="Label name">
 <span class="set-usage">{{.UsageText}}</span>
 <button type="button" class="btn" data-on:click="@post('/settings/label', {contentType: 'form'})">Save</button>
 {{template "set-del" "label"}}
-</form>
+</form></div>
 {{end}}{{if not .Labels}}<p class="set-empty">No labels yet.</p>
 {{end}}</div>
 <form class="set-row set-new">
@@ -80,13 +83,13 @@
 <h2>Members <span class="count">{{len .Members}}</span></h2>
 <p class="set-note">A member is an account: who a comment is attributed to, who an issue is assigned to, and who can sign in. Added here, a member has no password yet &mdash; give them one under Access below, or run <code>lll member invite NAME --email them@example.com</code>, which creates and credentials in one step.</p>
 <div class="set-rows">
-{{range .Members}}<form class="set-row" id="set-member-{{.Id}}" data-name="{{.Name}}">
+{{range .Members}}<div id="set-member-{{.Id}}"><form class="set-row" data-name="{{.Name}}">
 <input type="hidden" name="id" value="{{.Id}}">
 <input name="name" value="{{.Name}}" autocomplete="off" aria-label="Member name">
 <input name="email" value="{{.Email}}" placeholder="Email" autocomplete="off" aria-label="Member email" class="set-second">
 <button type="button" class="btn" data-on:click="@post('/settings/member', {contentType: 'form'})">Save</button>
 {{template "set-del" "member"}}
-</form>
+</form></div>
 {{end}}{{if not .Members}}<p class="set-empty">No members yet.</p>
 {{end}}</div>
 <form class="set-row set-new">
@@ -99,7 +102,7 @@
 <section class="set-sec">
 <h2>Projects <span class="count">{{len .Projects}}</span></h2>
 <div class="set-rows">
-{{range $p := .Projects}}<form class="set-row" id="set-project-{{$p.Id}}" data-name="{{$p.Name}}">
+{{range $p := .Projects}}<div id="set-project-{{$p.Id}}"><form class="set-row" data-name="{{$p.Name}}">
 <input type="hidden" name="id" value="{{$p.Id}}">
 <input name="name" value="{{$p.Name}}" autocomplete="off" aria-label="Project name">
 <select name="status" aria-label="Project status">
@@ -107,7 +110,7 @@
 {{end}}</select>
 <button type="button" class="btn" data-on:click="@post('/settings/project', {contentType: 'form'})">Save</button>
 {{template "set-del" "project"}}
-</form>
+</form></div>
 {{end}}{{if not .Projects}}<p class="set-empty">No projects yet.</p>
 {{end}}</div>
 <form class="set-row set-new">
@@ -131,7 +134,7 @@
 <h2>Teams <span class="count">{{len .Teams}}</span></h2>
 <p class="set-note">Every team on this server. Archiving hides a team from the rail's switcher and default lists; its board stays readable at <code>/t/KEY/</code> and nothing is deleted. It asks for the admin password — the credentials <code>lll up</code> prints in its banner — verified per action and never stored. New teams come from <code>lll team create</code> or <code>lll attach</code>.</p>
 <div class="set-rows">
-{{range .Teams}}<form class="set-row" id="set-team-{{.Id}}" data-name="{{.Key}}">
+{{range .Teams}}<div id="set-team-{{.Id}}"><form class="set-row" data-name="{{.Key}}">
 <input type="hidden" name="id" value="{{.Id}}">
 <span class="rt-key">{{.Key}}</span>
 <span class="rg-title">{{.Name}}</span>
@@ -139,7 +142,7 @@
 <input name="admin_password" type="password" placeholder="Admin password" autocomplete="off" aria-label="Admin password" class="set-second">
 {{if .Archived}}<input type="hidden" name="archived" value="0"><button type="button" class="btn" data-on:click="@post('/settings/teams/archive', {contentType: 'form'})">Unarchive</button>
 {{else}}<input type="hidden" name="archived" value="1"><button type="button" class="btn" data-on:click="confirm('Archive ' + el.form.dataset.name + '? Lists and the rail hide it; its board stays readable.') && @post('/settings/teams/archive', {contentType: 'form'})">Archive</button>
-{{end}}</form>
+{{end}}</form></div>
 {{end}}</div>
 </section>
 

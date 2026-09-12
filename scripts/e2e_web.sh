@@ -1163,6 +1163,23 @@ if command -v playwright-cli >/dev/null 2>&1; then
   # The probe issue would skew the count-sensitive table sections below.
   "$LIN" issue delete "$key206" --force >/dev/null
 
+  # LLL-101: save/reorder one row while other rows have unsaved drafts.
+  for suffix in A B; do
+    "$LIN" label create -n "Draft label $suffix" >/dev/null
+    "$LIN" member add -n "Draft member $suffix" >/dev/null
+    "$LIN" project create -n "Draft project $suffix" >/dev/null
+  done
+  seq_goto "$WEB/settings"
+  drafts_browser=$(playwright-cli -s="$BROWSER_SESSION" run-code "$(cat scripts/browser_settings_drafts.js)" 2>&1)
+  assert_contains "$drafts_browser" 'settings drafts survive reordered label, member and project saves' "browser: settings row drafts survive saves and reordering"
+  for prefix in "Z saved" "Unsaved"; do
+    suffix=A
+    [ "$prefix" = "Unsaved" ] && suffix=B
+    "$LIN" label delete "$prefix label $suffix" >/dev/null
+    "$LIN" member remove "$prefix member $suffix" >/dev/null
+    "$LIN" project delete "$prefix project $suffix" >/dev/null
+  done
+
   # LLL-233: exercise the actual row morph, cancellation and confirmation.
   "$LIN" project create -n "Deletion browser project" >/dev/null
   "$LIN" member add -n "Deletion browser member" >/dev/null
@@ -1477,7 +1494,7 @@ row_id() { # html kind name
   printf '%s' "$1" | python3 -c '
 import re, sys
 html, kind, name = sys.stdin.read(), sys.argv[1], sys.argv[2]
-m = re.search(r"id=\"set-%s-([a-z0-9]+)\" data-name=\"%s\"" % (kind, re.escape(name)), html)
+m = re.search(r"id=\"set-%s-([a-z0-9]+)\"><form class=\"set-row\" data-name=\"%s\"" % (kind, re.escape(name)), html)
 print(m.group(1) if m else "")
 ' "$2" "$3"
 }
@@ -2090,7 +2107,7 @@ label_row() { # html name
   printf '%s' "$1" | python3 -c '
 import re, sys
 html, name = sys.stdin.read(), sys.argv[1]
-m = re.search(r"<form class=\"set-row\" id=\"set-label-[a-z0-9]+\" data-name=\"%s\">.*?</form>" % re.escape(name), html, re.S)
+m = re.search(r"<div id=\"set-label-[a-z0-9]+\"><form class=\"set-row\" data-name=\"%s\">.*?</form>" % re.escape(name), html, re.S)
 print(m.group(0) if m else "")
 ' "$2"
 }

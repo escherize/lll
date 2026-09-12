@@ -2,7 +2,7 @@ async page => {
   const form = page.locator('form.set-row').filter({
     has: page.locator('input[name="name"][value="Deletion browser project"]')
   });
-  const id = await form.getAttribute('id');
+  const id = await form.locator('..').getAttribute('id');
   const row = page.locator('#' + id);
   await row.getByRole('button', {name: 'Delete', exact: true}).click();
   await row.getByText('This removes the project from 1 issue(s).', {exact: false}).waitFor();
@@ -17,7 +17,7 @@ async page => {
   const memberForm = page.locator('form.set-row').filter({
     has: page.locator('input[name="name"][value="Deletion browser member"]')
   });
-  const memberRow = page.locator('#' + await memberForm.getAttribute('id'));
+  const memberRow = page.locator('#' + await memberForm.locator('..').getAttribute('id'));
   await memberRow.getByRole('button', {name: 'Delete', exact: true}).click();
   await memberRow.getByText('This clears 1 issue assignment(s) and 0 comment author reference(s).', {exact: false}).waitFor();
   await memberRow.getByRole('button', {name: 'Cancel', exact: true}).click();
