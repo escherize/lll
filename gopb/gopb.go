@@ -81,6 +81,7 @@ func Serve(dataDir, addr, adminEmail, adminPassword string) error {
 		TemplateLang: migratecmd.TemplateLangJS,
 	})
 
+	var issueUpdates issueWriteLocks
 	app.OnServe().BindFunc(func(e *core.ServeEvent) error {
 		// A direct API listener cannot infer the public board origin. Operators
 		// may advertise it explicitly; the combined board listener advertises
@@ -110,6 +111,16 @@ func Serve(dataDir, addr, adminEmail, adminPassword string) error {
 		e.Router.BindFunc(func(re *core.RequestEvent) error {
 			if re.Auth == nil && recordsPath.MatchString(re.Request.URL.Path) {
 				return re.UnauthorizedError(anonMessage, nil)
+			}
+			if re.Request.Method == http.MethodPatch || re.Request.Method == http.MethodDelete {
+				id := re.Request.PathValue("id")
+				if id != "" {
+					collection, err := re.App.FindCachedCollectionByNameOrId(re.Request.PathValue("collection"))
+					if err == nil && collection.Name == "issues" {
+						unlock := issueUpdates.acquire(id)
+						defer unlock()
+					}
+				}
 			}
 			return re.Next()
 		})

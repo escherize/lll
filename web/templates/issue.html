@@ -33,6 +33,7 @@
     <div class="issue-wrap" data-signals:edit_title="false" data-signals:title_draft="''" data-signals:emo_open="false" data-signals:emo_q="''" data-signals:lab_open="false" data-signals:lab_q="''" data-computed:lab_lc="$lab_q.trim().toLowerCase()">
       <div class="issue-scroll">
         {{template "issue-detail" .Page}}
+        {{template "attachment-upload" .Page.Key}}
         {{template "related-findings" .Page}}
         {{template "comments" .Page}}
         <form id="comment-form" class="composer">
@@ -55,9 +56,23 @@
 <h1 title="Click to edit" data-show="!$edit_title" data-on:click="$title_draft = el.textContent; $edit_title = true">{{.Title}}</h1>
 <form id="title-form" class="title-edit" style="display:none" data-show="$edit_title"><input type="hidden" name="key" value="{{.Key}}"><input name="title" type="text" autocomplete="off" aria-label="Issue title" data-bind:title_draft data-effect="$edit_title && setTimeout(() => el.focus(), 0)" data-on:keydown="evt.key === 'Escape' ? ($edit_title = false) : evt.key === 'Enter' && (evt.preventDefault(), @post('/title', {contentType: 'form'}), evt.target.value.trim() && ($edit_title = false))" data-on:blur="$edit_title && ($edit_title = false, evt.target.value.trim() && @post('/title', {contentType: 'form'}))"></form>
 {{if .Description}}<div class="issue-desc md">{{.Description}}</div>
-{{end}}</div>
+{{end}}{{template "issue-attachments" .}}</div>
 {{template "issue-properties" .}}
 {{end}}</article>{{end}}
+
+{{define "issue-attachments"}}{{if .Attachments}}<section class="issue-attachments" aria-label="Attachments">
+<h2>Attachments <span class="count">{{len .Attachments}}</span></h2>
+{{range .Attachments}}<div class="attachment-item">
+{{if .Preview}}<a href="{{.Href}}" target="_blank" rel="noopener"><img src="{{.Href}}" alt="{{.Name}}" loading="lazy"></a>{{end}}
+<div class="attachment-actions"><a href="{{.Href}}&amp;download=1" download><svg width="14" height="14" aria-hidden="true"><use href="#ic-paperclip"/></svg> {{.Name}}</a>
+<form><input type="hidden" name="key" value="{{$.Key}}"><input type="hidden" name="file" value="{{.Name}}"><button type="button" class="btn" aria-label="Remove {{.Name}}" data-on:click="confirm('Remove this attachment?') && @post('/attachments/remove', {contentType: 'form'})">Remove</button></form></div>
+</div>{{end}}</section>{{end}}{{end}}
+
+{{define "attachment-upload"}}<form id="attachment-upload" class="attachment-upload" enctype="multipart/form-data" data-on:submit="evt.preventDefault(); @post('/attachments/upload', {contentType: 'form'})">
+<input type="hidden" name="key" value="{{.}}">
+<label>Attach a file <input type="file" name="file" required></label>
+<button type="submit" class="btn">Upload</button>
+</form>{{end}}
 
 {{/* The emoji picker.
 

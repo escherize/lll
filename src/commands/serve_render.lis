@@ -85,6 +85,7 @@ fn label_vms(labels: Slice<models.Label>) -> Slice<LabelVM> {
 fn card_vm(issue: models.Issue) -> CardVM {
   let prio = display.priority_name(issue.priority)
   CardVM {
+    attachment_count: issue.attachments.length(),
     id: issue.id,
     key: f"{issue.expand.team.key}-{issue.number}",
     title: issue.title,
@@ -370,6 +371,7 @@ fn issue_vm(issue: models.Issue, comments: Slice<models.Comment>) -> Result<Issu
     work_stale = work_site_stale(issue.state, fetch_claim(issue.id)?.is_some())
   }
   Ok(IssueVM {
+    attachments: attachment_vms(issue),
     deleted: false,
     id: issue.id,
     key: f"{issue.expand.team.key}-{issue.number}",

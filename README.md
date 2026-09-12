@@ -212,6 +212,20 @@ authenticate as a member.
 
 ## CLI tour
 
+Attach artifacts to an issue with `lll issue attach ENG-1 ./shot.png`.
+`lll issue view ENG-1` lists their stored filenames; use
+`lll issue download ENG-1 FILENAME > artifact` to retrieve exact bytes, or
+`lll issue detach ENG-1 FILENAME` to remove one. These commands also accept
+an issue's board URL. Use `./-filename` or an absolute path for a filename
+that starts with a dash.
+
+The issue page supports upload, image preview, download and removal. Cards
+show a paperclip count without fetching images. Files use PocketBase's
+protected storage; the board access gate is required for browser downloads.
+HTML and other non-raster artifacts download as files. The attachment
+migration permits 20 files per issue, at most 20 MiB each. A server upgrade
+is required before an older deployment can accept attachments.
+
 Use `--help` for command syntax. Issue lists and views support `--json`;
 scalar reads such as `branch-name` print a single value for shell composition.
 

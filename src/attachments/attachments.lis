@@ -1,0 +1,81 @@
+import "go:bytes"
+import "go:encoding/json"
+import "go:io"
+import "go:mime/multipart"
+import "go:net/url"
+import "go:path/filepath"
+import "go:strings"
+import "models"
+import "pb"
+
+/// Transport memory bound, deliberately above the schema's per-file limit.
+/// PocketBase's file field is the authority for size and count acceptance.
+pub fn read_upload(reader: io.Reader) -> Result<Slice<byte>, string> {
+  let cap = 32 * 1024 * 1024
+  let result = io.ReadAll(io.LimitReader(reader, (cap + 1) as int64))
+  let data = match result {
+    Partial.Ok(data) => data,
+    Partial.Both(_, e) | Partial.Err(e) => return Err(f"reading attachment: {e}"),
+  }
+  if data.length() > cap { return Err("attachment exceeds the 32 MiB upload transport limit") }
+  Ok(data)
+}
+
+pub fn upload(issue: models.Issue, name: string, data: Slice<byte>) -> Result<string, string> {
+  if issue.expand.team.archived { return Err(f"team {issue.expand.team.key} is archived — run 'lll team unarchive {issue.expand.team.key}' first") }
+  let filename = filepath.Base(strings.ReplaceAll(name, "\\", "/"))
+  if filename == "" || filename == "." || filename == "/" { return Err("attachment needs a filename") }
+  let mut buffer = bytes.Buffer { .. }
+  let mut writer = multipart.NewWriter(&buffer)
+  let part = match writer.CreateFormFile("attachments+", filename) {
+    Ok(part) => part,
+    Err(e) => return Err(f"encoding attachment: {e}"),
+  }
+  let Partial.Ok(_) = part.Write(data) else { return Err("encoding attachment bytes failed") }
+  if let Err(e) = writer.Close() { return Err(f"encoding attachment: {e}") }
+  let response = pb.send_content("PATCH", f"/api/collections/issues/records/{issue.id}", buffer.String(), writer.FormDataContentType())?
+  let mut saved = models.Issue { .. }
+  if let Err(e) = json.Unmarshal(response.bytes(), &saved) { return Err(f"decoding uploaded issue: {e}") }
+  // Native append keeps the uploaded file last. Comparing every filename
+  // against the caller's earlier read would also report concurrent uploads.
+  let Some(stored) = saved.attachments.get(saved.attachments.length() - 1) else {
+    return Err("server did not save the attachment — update the server to a version with issue attachments")
+  }
+  if issue.attachments.contains(stored) { return Err("server did not append an attachment") }
+  Ok(stored)
+}
+
+pub fn require_file(issue: models.Issue, filename: string) -> Result<(), string> {
+  if !issue.attachments.contains(filename) { return Err(f"no attachment named '{filename}' on this issue") }
+  Ok(())
+}
+
+#[json]
+struct RemoveFiles { #[json("attachments-")] files: Slice<string> }
+
+pub fn remove(issue: models.Issue, filename: string) -> Result<(), string> {
+  if issue.expand.team.archived { return Err(f"team {issue.expand.team.key} is archived — run 'lll team unarchive {issue.expand.team.key}' first") }
+  require_file(issue, filename)?
+  let payload = match json.Marshal(RemoveFiles { files: [filename] }) {
+    Ok(b) => b as string,
+    Err(e) => return Err(f"encoding attachment removal: {e}"),
+  }
+  let _ = pb.patch(f"/api/collections/issues/records/{issue.id}", payload)?
+  Ok(())
+}
+
+#[json]
+struct FileToken { token: string }
+
+/// Fetch with a short-lived PocketBase file token. Keep that token on the
+/// server; browser links name only the issue and its attachment.
+pub fn read_file(issue: models.Issue, filename: string) -> Result<string, string> {
+  require_file(issue, filename)?
+  let response = pb.post("/api/files/token", "{}")?
+  let mut token = FileToken { .. }
+  if let Err(e) = json.Unmarshal(response.bytes(), &token) { return Err(f"decoding file access: {e}") }
+  if token.token == "" { return Err("server did not provide file access") }
+  let path = f"/api/files/issues/{issue.id}/{url.PathEscape(filename)}?token={url.QueryEscape(token.token)}"
+  // Do not include a token-bearing upstream URL in any user-facing error.
+  pb.get(path).map_err(|_| "could not read the attachment from storage")
+}

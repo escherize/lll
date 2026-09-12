@@ -295,6 +295,9 @@ fn board_mux(cfg: config.Config, boot: models.Team, hub: Hub) -> Result<mut Ref<
     gated(flashing(|r: mut Ref<http.Request>| create_write(r, team_id))),
   )
   mux.HandleFunc("POST /state", gated(flashing(state_write)))
+  mux.HandleFunc("POST /attachments/upload", gated(flashing(attachment_upload)))
+  mux.HandleFunc("POST /attachments/remove", gated(flashing(attachment_remove)))
+  mux.HandleFunc("GET /attachments/file", gated(attachment_download))
   mux.HandleFunc("POST /favorite", gated(flashing(favorite_write)))
   mux.HandleFunc("POST /priority", gated(flashing(priority_write)))
   mux.HandleFunc("POST /emoji", gated(flashing(emoji_write)))

@@ -138,6 +138,11 @@ pub fn bearer(tok: string) -> string {
 /// token configured anywhere in the layering reaches PocketBase on every
 /// request — GET included, which is why `get` no longer calls http.Get.
 fn send(method: string, path: string, payload: string) -> Result<string, string> {
+  send_content(method, path, payload, "application/json")
+}
+
+/// Authenticated replayable body, shared by JSON and multipart writes.
+pub fn send_content(method: string, path: string, payload: string, content_type: string) -> Result<string, string> {
   let (cfg, src) = config.load_traced()?
   if cfg.token == "" && strings.HasPrefix(path, "/api/collections/") {
     return Err(not_logged_in(cfg.url, src.url == "default"))
@@ -145,11 +150,11 @@ fn send(method: string, path: string, payload: string) -> Result<string, string>
   // TASK-319: the server answers 401 to a record request whose token it
   // could not load, which is how an expired, corrupted or disowned token now
   // arrives - one step earlier than the empty list below, same verdicts.
-  let body = match request(cfg.url, method, path, payload, bearer(cfg.token), src.url == "default") {
+  let body = match request_content(cfg.url, method, path, payload, bearer(cfg.token), src.url == "default", content_type) {
     Ok(b) => b,
     Err(e) => {
       if cfg.token != "" && response_status(e) == 401 {
-        if let Some(refused) = refused_token(cfg, src, method, path, payload) {
+        if let Some(refused) = refused_token(cfg, src, method, path, payload, content_type) {
           return refused
         }
       }
@@ -165,7 +170,7 @@ fn send(method: string, path: string, payload: string) -> Result<string, string>
   // An empty list is the only case worth paying for, and it costs one extra
   // request in the case where the command was about to print nothing anyway.
   if is_empty_list(method, body) && cfg.token != "" {
-    if let Some(refused) = refused_token(cfg, src, method, path, payload) {
+    if let Some(refused) = refused_token(cfg, src, method, path, payload, content_type) {
       return refused
     }
   }
@@ -183,6 +188,7 @@ fn refused_token(
   method: string,
   path: string,
   payload: string,
+  content_type: string,
 ) -> Option<Result<string, string>> {
   let verdict = token_verdict(cfg.url, cfg.token)
   if verdict == "corrupted" { return Some(Err(corrupted_token(src.token))) }
@@ -196,8 +202,8 @@ fn refused_token(
     // a plain CLI user has no admin credentials and gets the message instead.
     if let Some(fresh) = remint_from_admin_credentials(cfg.url) {
       let _ = os.Setenv("LLL_TOKEN", fresh)
-      return Some(request(
-        cfg.url, method, path, payload, bearer(fresh), src.url == "default",
+      return Some(request_content(
+        cfg.url, method, path, payload, bearer(fresh), src.url == "default", content_type,
       ))
     }
     return Some(Err(stale_token(cfg.url, src.token)))
@@ -456,6 +462,13 @@ fn request(
   auth: string,
   defaulted: bool,
 ) -> Result<string, string> {
+  request_content(base, method, path, payload, auth, defaulted, "application/json")
+}
+
+fn request_content(
+  base: string, method: string, path: string, payload: string,
+  auth: string, defaulted: bool, content_type: string,
+) -> Result<string, string> {
   let mut req = match http.NewRequest(
     method,
     base + path,
@@ -468,7 +481,7 @@ fn request(
   // unwrap is the Option<Header> field type's toll, not a real branch.
   if let Some(h) = req.Header {
     let mut h = h
-    if payload != "" { h.Set("Content-Type", "application/json") }
+    if payload != "" { h.Set("Content-Type", content_type) }
     if auth != "" { h.Set("Authorization", auth) }
   }
   let resp = match http.DefaultClient.Do(req) {

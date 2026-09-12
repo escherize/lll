@@ -119,6 +119,7 @@ pub struct IssueExpand {
 
 #[json]
 pub struct Issue {
+  pub attachments: Slice<string>,
   pub id: string,
   pub team: string,
   pub number: int,

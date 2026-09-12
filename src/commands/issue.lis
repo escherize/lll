@@ -307,6 +307,19 @@ fn issue_synonym(verb: string) -> Option<string> {
 pub fn issue_commands() -> Slice<flags.Command> {
   [
     flags.Command {
+      name: "attach", summary: "upload a file to an issue; appends without replacing existing attachments",
+      page: "",
+      spec: flags.with_team([]), positional: "KEY-123 FILE", run: issue_attach,
+    },
+    flags.Command {
+      name: "detach", summary: "remove an attachment by its stored filename (see issue view)",
+      page: "", spec: flags.with_team([]), positional: "KEY-123 FILENAME", run: issue_detach,
+    },
+    flags.Command {
+      name: "download", summary: "write attachment bytes to stdout; redirect to a file",
+      page: "", spec: flags.with_team([]), positional: "KEY-123 FILENAME", run: issue_download,
+    },
+    flags.Command {
       name: "create",
       summary: "create an issue in the configured team; -d - reads the description from stdin; without --state it starts in todo",
       page: issue_create_page(),
@@ -762,6 +775,10 @@ fn view(input: flags.CommandInput) -> Result<(), string> {
       fmt.Println(full.description)
     }
     let comments = records.fetch_comments(full.id)?
+    if !full.attachments.is_empty() {
+      fmt.Println("\n## Attachments")
+      for name in full.attachments { fmt.Println(f"- {name}") }
+    }
     if comments.length() > 0 {
       fmt.Println("")
       fmt.Println("## Comments")
@@ -811,6 +828,10 @@ fn view(input: flags.CommandInput) -> Result<(), string> {
   }
   fmt.Println(f"Project:   {project}")
   fmt.Println(f"Labels:    {labels}")
+  if !full.attachments.is_empty() {
+    fmt.Println("Attachments:")
+    for name in full.attachments { fmt.Println(f"  {name}") }
+  }
   let linked_docs = fetch_issue_docs(full.id)?
   if linked_docs.length() > 0 {
     let slugs = linked_docs.map(|d| d.slug)

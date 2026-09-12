@@ -2182,4 +2182,6 @@ PY
 
 LLL_TEST_BOARD_TOKEN="$BOARD_TOKEN" python3 scripts/test_settings_delete.py "$LLL_URL" "$WEB"
 
+LLL_TEST_BOARD_TOKEN="$BOARD_TOKEN" python3 scripts/test_attachments.py "$PWD/$LIN" "$LLL_URL" "$WEB"
+
 echo "e2e_web: all assertions passed"

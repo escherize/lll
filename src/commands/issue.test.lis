@@ -365,7 +365,7 @@ fn issue_help_preserves_literal_flag_values_and_end_of_options() {
 fn issue_commands_lists_every_verb_once_with_a_one_line_summary() {
   let cmds = issue_commands()
   assert cmds.map(|c| c.name).equals([
-    "create", "new", "list", "view", "show", "read", "update", "close", "start", "claim",
+    "attach", "detach", "download", "create", "new", "list", "view", "show", "read", "update", "close", "start", "claim",
     "release", "delete", "comment", "watch", "url", "id", "title", "branch-name", "pr", "link",
     "unlink", "block", "unblock",
   ])

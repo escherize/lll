@@ -111,7 +111,7 @@ provenance.
 <span class="row1">{{.Key}}{{if .Emoji}}<span class="emoji">{{.Emoji}}</span>{{end}}<span class="flex"></span>{{template "priority-icon" .Prio}}</span>
 <span class="title">{{.Title}}</span>
 {{if .Labels}}<span class="row3">{{range .Labels}}<span class="chip"><span class="dot" style="background:{{if .Color}}{{.Color}}{{else}}var(--text-3){{end}}"></span>{{.Name}}</span>{{end}}</span>{{end}}
-<span class="row4"><span class="age">{{.Created}}</span>{{if .Assignee}}{{template "avatar" .Avatar}}{{end}}</span>
+<span class="row4"><span class="age">{{.Created}}</span>{{if .AttachmentCount}}<span class="attachment-count" aria-label="{{.AttachmentCount}} attachments"><svg width="14" height="14" aria-hidden="true"><use href="#ic-paperclip"/></svg>{{.AttachmentCount}}</span>{{end}}{{if .Assignee}}{{template "avatar" .Avatar}}{{end}}</span>
 {{/* Hover preview: pure CSS (:hover + transition-delay), no data-show — the
      card's data-show is taken by search/filters. Docked position:fixed
      escapes the column's overflow clipping; pointer-events:none keeps

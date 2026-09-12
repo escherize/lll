@@ -62,6 +62,7 @@ pub struct AvatarVM {
 
 /// View model for one issue: a board card, or one row of the /issues table.
 pub struct CardVM {
+  pub attachment_count: int,
   pub id: string,
   pub key: string,
   pub title: string,
@@ -310,6 +311,7 @@ pub struct FindingVM {
 
 /// View model for the issue page / issue-detail fragment.
 pub struct IssueVM {
+  pub attachments: Slice<AttachmentVM>,
   pub deleted: bool,
   pub id: string,
   pub key: string,
@@ -364,6 +366,12 @@ pub struct IssueVM {
   // outside #issue-detail, so keeping the catalogue out of issue_vm keeps
   // 241 candidates out of every issue-detail broadcast.
   pub emojis: Slice<EmojiOpt>,
+}
+
+pub struct AttachmentVM {
+  pub name: string,
+  pub href: string,
+  pub preview: bool,
 }
 
 /// One column heading in the /issues table. `href` empty means the column has

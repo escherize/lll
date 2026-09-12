@@ -1,0 +1,72 @@
+import "attachments"
+import "models"
+import "records"
+import "go:bytes"
+import "go:io"
+import "go:mime"
+import "go:net/http"
+import "go:net/url"
+import "go:path/filepath"
+import "go:strings"
+import "go:time"
+
+fn attachment_vms(issue: models.Issue) -> Slice<AttachmentVM> {
+  let key = f"{issue.expand.team.key}-{issue.number}"
+  issue.attachments.map(|name| AttachmentVM {
+    name,
+    href: f"/attachments/file?key={url.QueryEscape(key)}&file={url.QueryEscape(name)}",
+    preview: [".png", ".jpg", ".jpeg", ".gif", ".webp"].contains(strings.ToLower(filepath.Ext(name))),
+  })
+}
+
+fn attachment_upload(r: mut Ref<http.Request>) -> Result<string, string> {
+  // Bound the multipart stream before parsing; temporary spill files are
+  // removed on every outcome. The schema enforces its smaller file limit.
+  let Some(body) = r.Body else { return Err("choose a file to upload") }
+  r.Body = Some(io.NopCloser(io.LimitReader(body, (33 * 1024 * 1024) as int64)))
+  let parsed = r.ParseMultipartForm((1024 * 1024) as int64)
+  if let Some(form) = r.MultipartForm { defer { let _ = form.RemoveAll() } }
+  if let Err(e) = parsed { return Err(f"reading upload form: {e}") }
+  let issue = records.fetch_issue(r.FormValue("key"))?
+  let (file, header) = match r.FormFile("file") {
+    Ok(pair) => pair,
+    Err(_) => return Err("choose a file to upload"),
+  }
+  defer file.Close()
+  let data = attachments.read_upload(file)?
+  let _ = attachments.upload(issue, header.Filename, data)?
+  let html = render("attachment-upload", f"{issue.expand.team.key}-{issue.number}")?
+  // Replace just the upload form to clear its file input after success.
+  // It lives outside the issue morph boundary, preserving pending choices
+  // and the separate comment draft during unrelated realtime updates.
+  let lines = html.split("\n").map(|line| f"data: elements {line}")
+  Ok(f"event: datastar-patch-elements\ndata: mode replace\ndata: selector #attachment-upload\n{strings.Join(lines, "\n")}\n\n")
+}
+
+fn attachment_remove(r: mut Ref<http.Request>) -> Result<string, string> {
+  let issue = records.fetch_issue(r.FormValue("key"))?
+  attachments.remove(issue, r.FormValue("file"))?
+  Ok("")
+}
+
+fn attachment_download(w: http.ResponseWriter, r: Ref<http.Request>) {
+  let mut request = r.Clone(r.Context())
+  let filename = request.FormValue("file")
+  let result = records.fetch_issue(request.FormValue("key")).and_then(|issue| attachments.read_file(issue, filename))
+  let data = match result {
+    Ok(data) => data,
+    Err(e) => { http.Error(w, e, 404); return },
+  }
+  let content_type = http.DetectContentType(data.bytes())
+  let raster = ["image/png", "image/jpeg", "image/gif", "image/webp"].contains(content_type)
+  let disposition = if raster && request.FormValue("download") == "" { "inline" } else { "attachment" }
+  let mut parameters = Map.new<string, string>()
+  parameters["filename"] = filename
+  w.Header().Set("Content-Disposition", mime.FormatMediaType(disposition, parameters))
+  w.Header().Set("Content-Type", content_type)
+  w.Header().Set("X-Content-Type-Options", "nosniff")
+  w.Header().Set("Cache-Control", "private, no-store")
+  w.Header().Set("Content-Security-Policy", "sandbox")
+  let mut reader = bytes.NewReader(data.bytes())
+  http.ServeContent(w, r, filename, time.Time { .. }, reader)
+}
