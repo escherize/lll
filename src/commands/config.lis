@@ -65,6 +65,9 @@ fn config_intro() -> string {
 If 'me' is set, it must agree with that member; 'lll whoami' shows the identity.
 Use 'lll config set me NAME' to correct it. Save API and board endpoints with
 'lll config set url URL' and 'lll config set web_url URL'.
+url / LLL_URL: API base for reads and writes.
+web_url / LLL_WEB_URL: board base for browser links; login discovers it when
+the server advertises it. Both may use the same address.
 
 Precedence: env vars (LLL_URL, LLL_TEAM, LLL_ME, LLL_SORT, LLL_WEB_URL,
 LLL_TOKEN) > the repo's .lll.toml > ~/.config/lll/lll.toml. The files layer:
@@ -263,7 +266,12 @@ fn committed_token_warning(source: string) -> Option<string> {
 
 fn print_origin(source: string, key: string, value: string) {
   let from = if source == "" { "unset" } else { source }
-  fmt.Println(f"{from}\t{key}={value}")
+  let role = match key {
+    "url" => "\tAPI base (reads and writes)",
+    "web_url" => "\tboard base (browser links)",
+    _ => "",
+  }
+  fmt.Println(f"{from}\t{key}={value}{role}")
 }
 
 /// True for an uncommented `key = ...` line. The commented keys the template
