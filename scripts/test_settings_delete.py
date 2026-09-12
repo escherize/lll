@@ -15,8 +15,9 @@ def record(method, collection, data=None, ident='', token=None):
     req = urllib.request.Request(
         f'{api}/api/collections/{collection}/records' + (f'/{ident}' if ident else ''),
         data=json.dumps(data).encode() if data is not None else None,
-        headers={'Authorization': f'Bearer {os.environ["LLL_TOKEN"] if token is None else token}',
-                 'Content-Type': 'application/json'}, method=method)
+        headers={'Content-Type': 'application/json',
+                 **({'Authorization': f'Bearer {os.environ["LLL_TOKEN"] if token is None else token}'}
+                    if token != '' else {})}, method=method)
     with urllib.request.urlopen(req, timeout=10) as response:
         body = response.read()
         return json.loads(body) if body else None

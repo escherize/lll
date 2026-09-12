@@ -23,15 +23,20 @@ async page => {
   await memberRow.getByRole('button', {name: 'Cancel', exact: true}).click();
   await memberRow.locator('input[name="name"]').waitFor();
   await memberRow.getByRole('button', {name: 'Delete', exact: true}).click();
-  await memberRow.getByLabel('Admin password', {exact: true}).fill('wrong-admin-password');
-  await memberRow.getByRole('button', {name: 'Delete account', exact: true}).click();
+  const settingsURL = page.url();
+  const password = memberRow.getByLabel('Admin password', {exact: true});
+  if (await password.locator('..').getAttribute('method') !== 'post') throw new Error('password form needs POST fallback');
+  await password.fill('wrong-admin-password');
+  await password.press('Enter');
   await page.locator('#flash').getByText('wrong admin password', {exact: false}).waitFor();
-  await memberRow.getByLabel('Admin password', {exact: true}).fill('');
+  if (page.url() !== settingsURL) throw new Error('password submission navigated or exposed query data');
+  await password.fill('');
   await memberRow.scrollIntoViewIfNeeded();
   await page.screenshot({path: '/tmp/lll-341-delete-review.png'});
   // The web harness pins these throwaway credentials in scripts/lib.sh.
   await memberRow.getByLabel('Admin password', {exact: true}).fill('admin-local-123');
-  await memberRow.getByRole('button', {name: 'Delete account', exact: true}).click();
+  await password.press('Enter');
   await memberRow.waitFor({state: 'detached'});
+  if (page.url() !== settingsURL) throw new Error('account deletion navigated or exposed query data');
   return 'settings deletion browser passed; member admin deletion passed';
 }
