@@ -316,8 +316,10 @@ hover (#1d2126), each step subtly lighter, always paired with white-alpha
 hairlines. Hover means "step one surface lighter," not "lift."
 
 ### Shadow Vocabulary
-- **Card whisper** (`box-shadow: 0 1px 2px rgba(0, 0, 0, 0.25)`): the only
-  resting shadow — under board cards, barely perceptible.
+- **Card whisper** (`--shadow-card: 0 1px 2px rgba(0, 0, 0, 0.25)`): the only
+  resting shadow, barely perceptible. Cards and their popovers use
+  `box-shadow: var(--shadow-card)`; keep this approved black-alpha value in
+  the token declaration rather than repeating color literals on components.
 - **Focus glow** (`box-shadow: 0 0 0 3px var(--accent-dim)`): input focus,
   paired with an orange border; a ring, not a shadow.
 
