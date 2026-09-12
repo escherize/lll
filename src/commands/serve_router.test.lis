@@ -1,0 +1,52 @@
+import "go:io"
+import "go:net/http"
+import "go:net/http/httptest"
+import "go:strings"
+
+import "config"
+import "models"
+
+#[test]
+fn board_routers_are_independent_and_leave_default_mux_untouched() {
+  let mut upstream_a = httptest.NewServer(http.HandlerFunc(|w, _r| { let _ = w.Write("upstream-a".bytes()) }))
+  defer upstream_a.Close()
+  let mut upstream_b = httptest.NewServer(http.HandlerFunc(|w, _r| { let _ = w.Write("upstream-b".bytes()) }))
+  defer upstream_b.Close()
+  let Ok(router_a) = board_mux(config.Config { url: upstream_a.URL, .. }, models.Team { key: "AAA", .. }, router_test_hub()) else { panic("first router failed") };
+  let Ok(router_b) = board_mux(config.Config { url: upstream_b.URL, .. }, models.Team { key: "BBB", .. }, router_test_hub()) else { panic("second router failed") };
+  let mut board_a = httptest.NewServer(router_a)
+  defer board_a.Close()
+  let mut board_b = httptest.NewServer(router_b)
+  defer board_b.Close()
+  let mut default_server = httptest.NewServer(http.DefaultServeMux)
+  defer default_server.Close()
+
+  assert router_get(board_a.URL + "/api/health") == (200, "upstream-a")
+  assert router_get(board_b.URL + "/api/health") == (200, "upstream-b")
+  for base in [board_a.URL, board_b.URL] {
+    let (status, body) = router_get(base + "/.well-known/lll")
+    assert status == 200
+    assert strings.Contains(body, "web_url")
+    let (status, _) = router_get(base + "/static/theme.css")
+    assert status == 401
+  }
+  let (status, _) = router_get(default_server.URL + "/.well-known/lll")
+  assert status == 404
+}
+
+fn router_get(url: string) -> (int, string) {
+  let Ok(response) = http.Get(url) else { panic("request failed") };
+  let Some(body) = response.Body else { panic("missing body") };
+  defer body.Close()
+  let Partial.Ok(data) = io.ReadAll(body) else { panic("reading response failed") };
+  (response.StatusCode, data as string)
+}
+
+fn router_test_hub() -> Hub {
+  Hub {
+    register: Channel.new<SseClient>(),
+    unregister: Channel.new<int>(),
+    broadcast: Channel.new<Broadcast>(),
+    ids: Channel.new<int>(),
+  }
+}
