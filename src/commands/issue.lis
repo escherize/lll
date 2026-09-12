@@ -1245,16 +1245,11 @@ fn actor() -> Result<Option<Actor>, string> {
   Ok(Some(Actor { id: m.id, name: m.name }))
 }
 
-/// Take an issue exclusively. The arbitration is a single INSERT into
-/// `claims`, which is UNIQUE on `issue`: two agents racing both POST the row
-/// and SQLite admits exactly one, so the loser learns it lost. Nothing here
-/// reads the collection before writing to it — a "is it free?" GET followed by
-/// a POST is not a claim, it is the race with extra steps.
-///
-/// Winning then sets the assignee, so the board, `issue list` and `issue view`
-/// show the holder without joining a second collection. That PATCH is a
-/// consequence of having won, never the thing that decides it: `issue update
-/// --assignee` remains last-write-wins and is not a claim.
+/// Resolve the actor and delegate acquisition to the shared claims client.
+/// The server transaction acquires the exclusive hold and assigns its holder
+/// together; the unique issue index also protects against duplicate hold rows.
+/// Assignment edits use their own observed-claim transaction and cannot replace
+/// another holder. See gopb/claims.go and gopb/assignment.go for that policy.
 fn claim(input: flags.CommandInput) -> Result<(), string> {
   let usage = "lll issue claim [KEY-123]"
   let id = input.parsed.first()

@@ -239,9 +239,9 @@ pub struct ClaimExpand {
   pub member: Member,
 }
 
-/// One exclusive hold on an issue (TASK-175). `claims` is UNIQUE on `issue`,
-/// so the row IS the arbitration: two agents racing both POST one and the
-/// index admits exactly one. `created` is the claim's age.
+/// One exclusive hold on an issue. The unique issue index admits one hold;
+/// server operations couple acquisition/release with the assignment update.
+/// `created` records when this hold was acquired, retained by an own-claim retry.
 #[json]
 pub struct Claim {
   pub id: string,
