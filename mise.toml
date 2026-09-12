@@ -48,12 +48,18 @@ dir = "{{config_root}}"
 env = { LC_ALL = "C", PYTHONUTF8 = "1" }
 run = "bash scripts/scratch.sh"
 
+[tasks.archive-protect]
+description = "Make retained .private history read-only without changing its contents"
+dir = "{{config_root}}"
+run = "python3 scripts/protect_archive.py"
+
 [tasks.test]
 description = "Unit tests"
 env = { LC_ALL = "C", PYTHONUTF8 = "1" }
 dir = "{{config_root}}"
 run = """
 command -v lis >/dev/null || { echo "lis not found. Install it:" >&2; echo "  curl -LsSf https://github.com/ivov/lisette/releases/latest/download/lisette-installer.sh | sh" >&2; exit 1; }
+python3 scripts/protect_archive.py --check
 lis test
 go -C web test ./...
 python3 -m unittest discover -s scripts -p 'test_browser_poll.py'
@@ -62,6 +68,7 @@ python3 -m unittest discover -s scripts -p 'test_sidecar_dependencies.py'
 python3 -m unittest discover -s scripts -p 'test_import_sidecar.py'
 python3 -m unittest discover -s scripts -p 'test_reap.py'
 python3 -m unittest discover -s scripts -p 'test_export.py'
+python3 -m unittest discover -s scripts -p 'test_protect_archive.py'
 python3 scripts/check_assets.py
 """
 

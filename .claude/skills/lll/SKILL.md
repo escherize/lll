@@ -19,6 +19,10 @@ is the fixture for exercising the tool; it is a different url and team.)
 
 The sidecar notes repo that used to hold the backlog, findings and decisions
 was imported here and archived; its url is in `.private-remote`, read-only.
+If a local `.private` is retained, run `mise run archive-protect` once to remove
+write permissions; the gate verifies protection. This changes permissions,
+not historical contents. See `docs/archive-history.md`. Fresh checkouts need
+not clone an archive.
 Findings are `lll finding list` / `lll finding near PATH`, decisions are
 `lll doc list` (kind decision), the backlog is the issue list.
 
