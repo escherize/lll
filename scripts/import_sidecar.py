@@ -113,7 +113,7 @@ def clean_body(body):
 def pb_list(url, token, collection, flt=""):
     items, page = [], 1
     while True:
-        q = {"page": page, "perPage": 200, "skipTotal": 1}
+        q = {"page": page, "perPage": 200, "skipTotal": 1, "sort": "id"}
         if flt:
             q["filter"] = flt
         req = urllib.request.Request(
