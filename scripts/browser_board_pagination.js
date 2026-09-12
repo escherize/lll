@@ -26,7 +26,9 @@ async page => {
     phase = 'state mutation';
     const response = await page.request.post(`${base}/state`, {form: {key: 'BP360-205', state: 'done'}});
     mutation = {status: response.status(), body: (await response.text()).slice(0, 3000)};
-    if (mutation.status !== 200 || mutation.body.includes('class="error-summary"')) throw new Error('state mutation failed');
+    const failure = await page.evaluate(body =>
+      new DOMParser().parseFromString(body, 'text/html').querySelector('.error-summary')?.textContent?.trim(), mutation.body);
+    if (mutation.status !== 200 || failure) throw new Error('state mutation failed');
     phase = 'live done card';
     await page.locator('#col-done .card[href="/issue/BP360-205"]').waitFor();
     if (await page.locator('.card').count() !== 205) throw new Error('live board truncated');
