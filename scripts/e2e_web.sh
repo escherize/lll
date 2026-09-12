@@ -1150,6 +1150,28 @@ if command -v playwright-cli >/dev/null 2>&1; then
     || fail "browser deletion should preserve issue and clear project and assignee"
   "$LIN" issue delete "$DELETE_KEY" --force >/dev/null
 
+  # LLL-94: title and state changes refresh favorites on both realtime pages.
+  FAV_PROBE=$("$LIN" issue create -t "Favorite live original" --json)
+  FAV_KEY=$(printf '%s' "$FAV_PROBE" | jq -r '.expand.team.key + "-" + (.number | tostring)')
+  wcurl -sf -X POST "$WEB/favorite?key=$FAV_KEY&on=true" >/dev/null
+  fav_js="() => { const a = document.querySelector('#rail-favorites a[href=\"/issue/$FAV_KEY\"]'); return JSON.stringify({title: a?.querySelector('.rg-title')?.textContent || '', state: a?.querySelector('use')?.getAttribute('href') || '', rail: document.getElementById('rail').dataset.probe, navs: performance.getEntriesByType('navigation').length}); }"
+  for fav_page in "$WEB/" "$WEB/issue/$FAV_KEY"; do
+    fav_ready=$(playwright-cli -s="$BROWSER_SESSION" run-code "async page => { const ready = page.waitForResponse(r => new URL(r.url()).pathname === '/events'); await page.goto('$fav_page'); await ready; await page.locator('#rail-favorites a[href=\"/issue/$FAV_KEY\"]').waitFor(); await page.locator('#rail').evaluate(el => el.dataset.probe = 'favorite-rail-kept'); return 'favorite stream ready'; }" 2>&1)
+    assert_contains "$fav_ready" 'favorite stream ready' "browser: favorite stream registered"
+    if [ "$fav_page" = "$WEB/" ]; then fav_state=done; else fav_state=in-progress; fi
+    "$LIN" issue update "$FAV_KEY" --title "Favorite live $fav_state" --state "$fav_state" >/dev/null
+    fav_live=$(page_until "$fav_js" "#st-$fav_state")
+    assert_contains "$fav_live" "Favorite live $fav_state" "browser: favorite title follows issue changes"
+    assert_contains "$fav_live" "#st-$fav_state" "browser: favorite state icon follows issue changes"
+    assert_contains "$fav_live" '"rail":"favorite-rail-kept"' "browser: favorite update preserves outer rail"
+    assert_contains "$fav_live" '"navs":1' "browser: favorite update needs no reload"
+  done
+  playwright-cli -s="$BROWSER_SESSION" run-code "async page => { await page.locator('#rail-favorites').scrollIntoViewIfNeeded(); await page.screenshot({path:'/tmp/lll-94-favorites.png'}); }" >/dev/null 2>&1
+  "$LIN" issue delete "$FAV_KEY" --force >/dev/null
+  fav_deleted=$(page_until "$fav_js" '"title":""')
+  assert_contains "$fav_deleted" '"title":""' "browser: deleted favorite leaves the open rail"
+  assert_contains "$fav_deleted" '"rail":"favorite-rail-kept"' "browser: favorite deletion preserves outer rail"
+
   playwright-cli -s="$BROWSER_SESSION" close >/dev/null 2>&1 || true
   echo "e2e_web: browser-level realtime check passed"
   echo "e2e_web: browser-level /search live-typing check passed"

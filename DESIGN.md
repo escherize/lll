@@ -411,6 +411,11 @@ never icon fonts, emoji, or third-party icon packages. New icons match the
   no toast animation — it appears, states the failure, and clears.
 
 ### Navigation
+
+Navigation rows have no section counts: totals belong to the current page
+and its filters. Favorites keep live titles and state icons on the board and
+issue pages through their own `#rail-favorites` fragment; the surrounding rail
+stays outside page morphs. Static pages update their snapshot on reload.
 - **Rail:** 220px, rail surface, 14px 10px padding. Workspace row: 18px
   orange-gradient rounded mark (5px radius, #f0883e → #c96a25 at 135deg) with
   an ember-ink 10px/800 letter, 600-weight name. Links: 13px/500 text-2 with

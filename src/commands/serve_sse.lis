@@ -119,14 +119,15 @@ fn events_stream(
   }
   w.Header().Set("Content-Type", "text/event-stream")
   w.Header().Set("Cache-Control", "no-cache")
-  w.WriteHeader(200)
-  flusher.Flush()
-
   let Some(id) = hub.ids.receive() else {
     return
   }
   let ch = Channel.buffered<string>(64)
   let _ = hub.register.send(SseClient { id, scope, ch })
+  // Response headers acknowledge registration, so a client that has opened
+  // the stream cannot miss an immediately following issue mutation.
+  w.WriteHeader(200)
+  flusher.Flush()
   let done = r.Context().Done()
   loop {
     let quit = select {
@@ -164,6 +165,9 @@ fn bridge(events: Channel<realtime.Event>, hub: Hub) {
       views_broadcast(hub)
     } else {
       issue_broadcast(ev, hub)
+      // Titles and state icons in favorites are issue data too. Share one
+      // metadata refresh across clients, independently of board rendering.
+      favorites_broadcast(hub)
     }
   }
 }
@@ -221,8 +225,8 @@ fn issue_broadcast(ev: realtime.Event, hub: Hub) {
   }
 }
 
-/// On any favorites event: re-render the rail's FAVORITES group from a fresh
-/// fetch and patch it into every open page.
+/// On favorite or issue events, refresh the FAVORITES group on connected
+/// realtime pages. Static pages keep their normal reload behavior.
 ///
 /// This is the one fragment that reaches inside #rail. It is legal because
 /// the group is its own morph boundary with its own id: the shell itself is
@@ -233,7 +237,10 @@ fn issue_broadcast(ev: realtime.Event, hub: Hub) {
 /// The event's own record is ignored — the group is the whole list, and one
 /// fetch is cheaper than reconciling a create against a delete.
 fn favorites_broadcast(hub: Hub) {
-  if let Ok(html) = render("rail-favorites", fav_vms()) {
+  // A transient backend failure must not overwrite visible favorites with
+  // the page-load fallback's empty list.
+  let Ok(favs) = fetch_favorites() else { return };
+  if let Ok(html) = render("rail-favorites", favorite_rows(favs)) {
     let _ = hub.broadcast.send(
       Broadcast { scope: "*", payload: patch_event(html) },
     )
