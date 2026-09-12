@@ -23,12 +23,12 @@ import "query"
 /// often enough to pay for a second scope.
 fn projects_page(
   w: http.ResponseWriter,
-  // Nothing on this page is scoped by query string: it is every project the
-  // workspace has.
+  // The server scopes this page to its selected team.
   r: Ref<http.Request>,
   team_id: string,
   me: string,
 ) {
+  let team = shell_team(team_id)
   let vm = match projects_vm(team_id) {
     Ok(v) => v,
     Err(e) => {
@@ -37,10 +37,10 @@ fn projects_page(
     },
   }
   if wants_raw(r) {
-    write_raw(w, projects_raw(vm))
+    write_raw(w, projects_raw(vm, team.key))
     return
   }
-  let page = PageVM { rail: rail_vm("projects", me, shell_team(team_id)), page: vm }
+  let page = PageVM { rail: rail_vm("projects", me, team), page: vm }
   let html = match render("projects-page", page) {
     Ok(h) => h,
     Err(e) => {
@@ -62,7 +62,6 @@ fn projects_vm(team_id: string) -> Result<ProjectsVM, string> {
       status: p.status,
       status_label: state_label(p.status),
       tone: project_tone(p.status),
-      scope: scope_label(p.expand.team.key),
       count: project_count(team_id, p.id),
       href: f"/issues?project={url.QueryEscape(p.name)}",
     }),

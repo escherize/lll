@@ -1032,9 +1032,8 @@ input:focus, textarea:focus, select:focus {
 .set-delete-impact { flex: 1; min-width: 0; overflow-wrap: anywhere; }
 /* The create row sits one rung down the ladder: it holds nothing yet. */
 .set-new { margin-top: 8px; background: var(--bg-panel); }
-/* Fixed width and right-aligned so "ENG" and "workspace" leave every row's
-   inputs and buttons on the same two vertical edges. */
-.set-scope {
+/* Right-align usage counts so row inputs and buttons stay aligned. */
+.set-usage {
   flex: none;
   min-width: 66px;
   text-align: right;
@@ -1339,16 +1338,7 @@ input:focus, textarea:focus, select:focus {
   text-overflow: ellipsis;
 }
 .pj-status { flex: none; width: 84px; color: var(--text-2); font-size: 11.5px; }
-.pj-scope {
-  flex: none;
-  width: 84px;
-  color: var(--text-3);
-  font-size: 11px;
-  font-weight: 500;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
+
 /* The issue count, in the same team scope /issues filters by — so a project
    owned by another team honestly reads 0 rather than a number no page shows. */
 .pj-n {

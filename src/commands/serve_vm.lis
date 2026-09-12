@@ -410,16 +410,11 @@ pub struct IssuesVM {
 }
 
 
-/// One label row on /settings. `scope` is the owning team's key, or
-/// "workspace" — shown, never edited: which team owns a label is a CLI
-/// decision (`lll label create --team`), and a settings page that silently
-/// moved records between teams would be worse than one that says where they
-/// live.
+/// One label row on /settings. The page already identifies the owning team.
 pub struct SetLabelVM {
   pub id: string,
   pub name: string,
   pub color: string,
-  pub scope: string,
   // How many issues carry the label (TASK-208). Shown so near-duplicates
   // (bug/bugs/defect) are visible before someone creates another one.
   pub usage: int,
@@ -438,7 +433,6 @@ pub struct SetProjectVM {
   pub id: string,
   pub name: string,
   pub status: string,
-  pub scope: string,
 }
 
 /// One team row on /settings (TASK-210): what it is, how much it holds, and
@@ -490,7 +484,6 @@ pub struct ProjectVM {
   pub status_label: string,
   // The --st-* token the status dot borrows. See project_tone.
   pub tone: string,
-  pub scope: string,
   // Issues pointing here, under the same team scope /issues filters by, so
   // the number and the link it labels can never disagree.
   pub count: int,

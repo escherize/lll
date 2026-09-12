@@ -53,7 +53,6 @@
 <span class="pj-dot" style="background:var(--st-{{.Tone}})"></span>
 <span class="pj-main"><span class="pj-name">{{.Name}}</span>{{if .Description}}<span class="pj-desc">{{.Description}}</span>{{end}}</span>
 <span class="pj-status">{{.StatusLabel}}</span>
-<span class="pj-scope">{{.Scope}}</span>
 <span class="pj-n">{{.Count}} issue{{if ne .Count 1}}s{{end}}</span>
 </a>
 {{else}}<p class="pj-empty">No projects yet. Add one under Projects in <a href="/settings">Settings</a>, or run <code>lll project create -n "name"</code>.</p>

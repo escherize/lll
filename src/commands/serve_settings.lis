@@ -75,7 +75,6 @@ fn settings_vm(team: models.Team) -> Result<SettingsVM, string> {
         id: p.id,
         name: p.name,
         status: p.status,
-        scope: scope_label(p.expand.team.key),
       }),
       statuses: project_statuses().map(|s| StateOpt {
         value: s,
@@ -114,12 +113,6 @@ fn team_rows() -> Result<Slice<SetTeamVM>, string> {
   Ok(rows)
 }
 
-/// A record's owning team key, or the word for "owned by no team".
-fn scope_label(key: string) -> string {
-  if key == "" { return "workspace" }
-  key
-}
-
 /// One team's labels. Labels belong to exactly one team (TASK-173), so
 /// every chooser, chip list and validator built on this is scoped by
 /// construction. An empty `team_id` is the unscoped board, which has no team
@@ -150,7 +143,6 @@ fn label_rows(team_id: string) -> Result<Slice<SetLabelVM>, string> {
       id: l.id,
       name: l.name,
       color: theme.normalize_hex(l.color),
-      scope: scope_label(l.expand.team.key),
       usage: used,
     }
     let mut sorted: Slice<SetLabelVM> = []

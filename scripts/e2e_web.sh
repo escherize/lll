@@ -1611,7 +1611,7 @@ if command -v playwright-cli >/dev/null 2>&1; then
   playwright-cli -s="$BROWSER_SESSION" open "$WEB/search?board_token=$BOARD_TOKEN" >/dev/null 2>&1 \
     || fail "playwright: open search for team accent verification"
   accent_browser=$(playwright-cli -s="$BROWSER_SESSION" run-code "async page => {
-    for (const path of ['/search', '/issues']) {
+    for (const path of ['/search', '/issues', '/settings', '/projects']) {
       await page.goto('$WEB' + path);
       const head = await page.evaluate(() => ({
         accent: getComputedStyle(document.documentElement).getPropertyValue('--accent').trim(),
@@ -2109,7 +2109,7 @@ sys.exit(0 if 0 <= hot < cold else 1)
 assert_contains "$settings" "reuse beats near-duplicates" \
   "the web label-create form carries the check-first hint"
 # The raw twin carries the same counts, on the label's own line.
-assert_contains "$(wcurl -sf "$WEB/settings?raw")" "usage-hot # (ENG, 2 issues)" \
+assert_contains "$(wcurl -sf "$WEB/settings?raw")" "usage-hot # (2 issues)" \
   "settings raw carries the label's usage count"
 
 # --- TASK-241: the API answers on the board's port, ungated ------------------

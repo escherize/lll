@@ -38,7 +38,7 @@
      id; the trailing "new" form carries none, which is what makes it a
      create. Delete travels as ?del=1 so the same form body serves both. */}}
 {{define "settings"}}<div id="settings" class="settings">
-<p class="set-lede">Everything here belongs to the workspace: every member who opens this board sees the same labels, members, projects and colour. Per-browser choices (hidden columns, filter chips) stay on the board where you set them.</p>
+<p class="set-lede">Labels, projects and colour belong to the selected team. Member accounts are shared across teams. Per-browser choices (hidden columns, filter chips) stay on the board where you set them.</p>
 
 <section class="set-sec">
 <h2>Team</h2>
@@ -62,7 +62,7 @@
 <input type="hidden" name="id" value="{{.Id}}">
 <input name="color" type="color" class="set-swatch" value="{{if .Color}}{{.Color}}{{else}}#828994{{end}}" aria-label="Colour">
 <input name="name" value="{{.Name}}" autocomplete="off" aria-label="Label name">
-<span class="set-scope">{{.Usage}} issues · {{.Scope}}</span>
+<span class="set-usage">{{.Usage}} issues</span>
 <button type="button" class="btn" data-on:click="@post('/settings/label', {contentType: 'form'})">Save</button>
 {{template "set-del" "label"}}
 </form>
@@ -105,7 +105,6 @@
 <select name="status" aria-label="Project status">
 {{range $.Statuses}}<option value="{{.Value}}"{{if eq .Value $p.Status}} selected{{end}}>{{.Label}}</option>
 {{end}}</select>
-<span class="set-scope">{{$p.Scope}}</span>
 <button type="button" class="btn" data-on:click="@post('/settings/project', {contentType: 'form'})">Save</button>
 {{template "set-del" "project"}}
 </form>
@@ -136,7 +135,7 @@
 <input type="hidden" name="id" value="{{.Id}}">
 <span class="rt-key">{{.Key}}</span>
 <span class="rg-title">{{.Name}}</span>
-<span class="set-scope">{{.Issues}} issues{{if .Archived}} · archived{{end}}</span>
+<span class="set-usage">{{.Issues}} issues{{if .Archived}} · archived{{end}}</span>
 <input name="admin_password" type="password" placeholder="Admin password" autocomplete="off" aria-label="Admin password" class="set-second">
 {{if .Archived}}<input type="hidden" name="archived" value="0"><button type="button" class="btn" data-on:click="@post('/settings/teams/archive', {contentType: 'form'})">Unarchive</button>
 {{else}}<input type="hidden" name="archived" value="1"><button type="button" class="btn" data-on:click="confirm('Archive ' + el.form.dataset.name + '? Lists and the rail hide it; its board stays readable.') && @post('/settings/teams/archive', {contentType: 'form'})">Archive</button>
