@@ -1132,10 +1132,14 @@ if command -v playwright-cli >/dev/null 2>&1; then
     "() => { const h = document.createElement('input'); h.type = 'hidden'; h.name = 'state'; h.value = 'bogus'; document.getElementById('ni-form').prepend(h); return 'ok' }" >/dev/null 2>&1
   playwright-cli -s="$BROWSER_SESSION" fill "#ni-title" "Create more doomed" >/dev/null 2>&1 \
     || fail "playwright: typing the doomed title"
+  playwright-cli -s="$BROWSER_SESSION" fill "#ni-desc" "Repro details stay here — unsaved" >/dev/null 2>&1 \
+    || fail "playwright: typing the rejected create description"
   rejected=$(ni_submit 'unknown state')
   assert_contains "$rejected" '"title":"Create more doomed"' "task-159: a failed create keeps the typed title"
   assert_contains "$rejected" '"open":true' "task-159: a failed create keeps the dialog open"
   assert_contains "$rejected" '"focused":true' "task-159: a failed create returns focus to the title"
+  assert_contains "$rejected" '"desc":"Repro details stay here — unsaved"' "failed create keeps the typed description"
+  playwright-cli -s="$BROWSER_SESSION" run-code "async page => { await page.screenshot({path: '/tmp/lll-131-create.png'}); }" >/dev/null 2>&1
   "$LIN" issue list | grep -q "Create more doomed" \
     && fail "task-159: a failed Create-more submit wrote a record" || true
 
@@ -1160,6 +1164,13 @@ if command -v playwright-cli >/dev/null 2>&1; then
       "task-206: props controls stay inside the panel at ${w}px"
   done
   playwright-cli -s="$BROWSER_SESSION" resize 1280 800 >/dev/null 2>&1
+  # LLL-131: submit a real browser state change that the server rejects.
+  state_before=$("$LIN" issue view "$key206" --json | jq -r '.state')
+  state_failure=$(playwright-cli -s="$BROWSER_SESSION" run-code "$(cat scripts/browser_state_failure.js)" 2>&1)
+  assert_contains "$state_failure" 'state failure shown in browser and stored state unchanged' "browser: failed state action shows server flash and preserves persisted state"
+  printf '%s\n' "$state_failure" > /tmp/lll-131-state-result.log
+  [ "$("$LIN" issue view "$key206" --json | jq -r '.state')" = "$state_before" ] \
+    || fail "browser rejected state action changed persisted state"
   # The probe issue would skew the count-sensitive table sections below.
   "$LIN" issue delete "$key206" --force >/dev/null
 

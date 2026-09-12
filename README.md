@@ -288,6 +288,8 @@ mise run gate      # all three -- what a change must pass before it lands
 `scripts/e2e.sh` runs an ephemeral PocketBase on a random port via `lll up`
 itself (no external binary), plus `jq` and `python3`. It never touches your
 data.
+See [browser failure probes](scripts/README.browser-failures.md) to exercise
+rejected creates and state changes through the real browser handlers.
 
 `scripts/import_sidecar.py` imported this project's former `.private` sidecar
 tracker (Backlog.md tasks + wiki/decisions/findings) into an lll instance as
