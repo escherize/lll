@@ -242,15 +242,27 @@ e2e_reap() { # pid...
   for _pid in "$@"; do
     [ -n "$_pid" ] || continue
     _pids="$_pids $_pid"
-    kill "$_pid" 2>/dev/null || true
   done
   [ -n "$_pids" ] || return 0
-  # setsid-free detachment: a plain background subshell is enough, because it
-  # is reaped explicitly below and never waited on by the caller's `wait`
-  # loop (which names PIDs).
-  ( sleep "$E2E_REAP_GRACE"
-    for _pid in $_pids; do kill -9 "$_pid" 2>/dev/null || true; done ) &
-  _guard=$!
+  # A shell subshell inherits the suite's EXIT trap: reaping that watchdog
+  # can run cleanup and delete the still-live data directory (LLL-342).
+  # Spawn one external process directly, with no trapped shell or sleep child.
+  # Read the PID as a readiness handshake: cancelling before exec can still
+  # run an inherited Bash trap, even for an external command.
+  read -r _guard < <(exec python3 -c '
+import os, signal, sys, time
+print(os.getpid(), flush=True)
+time.sleep(float(sys.argv[1]))
+for pid in sys.argv[2:]:
+    try:
+        os.kill(int(pid), signal.SIGKILL)
+    except ProcessLookupError:
+        pass
+' "$E2E_REAP_GRACE" $_pids)
+  # Arm the deadline before signalling any child or blocking in wait.
+  for _pid in $_pids; do
+    kill "$_pid" 2>/dev/null || true
+  done
   for _pid in $_pids; do
     wait "$_pid" 2>/dev/null || true
   done
@@ -293,10 +305,13 @@ e2e_diagnose() { # exit-status
 # frequently 0, which would make e2e_diagnose stay silent on exactly the death
 # it is here to report.
 e2e_trap_cleanup() { # cleanup-function-name
-  trap "$1 \$?" EXIT
-  trap "$1 130; trap - EXIT INT;  kill -INT  \$\$" INT
-  trap "$1 143; trap - EXIT TERM; kill -TERM \$\$" TERM
-  trap "$1 129; trap - EXIT HUP;  kill -HUP  \$\$" HUP
+  # Bash can inherit these traps in a fork before exec. A subshell must never
+  # remove its parent's data directory or signal $$ (which still names parent).
+  local _owner='[ "${BASH_SUBSHELL:-0}" -eq 0 ]'
+  trap "_e2e_status=\$?; if $_owner; then $1 \$_e2e_status; fi" EXIT
+  trap "if $_owner; then $1 130; trap - EXIT INT;  kill -INT  \$\$; fi" INT
+  trap "if $_owner; then $1 143; trap - EXIT TERM; kill -TERM \$\$; fi" TERM
+  trap "if $_owner; then $1 129; trap - EXIT HUP;  kill -HUP  \$\$; fi" HUP
 }
 
 # TASK-187: pin HOME for the REST of the suite, so plain CLI invocations stop
