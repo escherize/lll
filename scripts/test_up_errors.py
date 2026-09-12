@@ -18,7 +18,8 @@ class API(http.server.BaseHTTPRequestHandler):
         self.send_response(status)
         self.send_header('Content-Type', 'application/json')
         self.end_headers()
-        self.wfile.write(json.dumps(body, separators=(',', ':')).encode())
+        # Whitespace is deliberate: auth diagnosis must parse list metadata.
+        self.wfile.write(json.dumps(body).encode())
 
     def do_GET(self):
         if self.path == '/api/health':

@@ -1,6 +1,19 @@
 import "go:errors"
 import "go:strings"
 
+#[test]
+fn empty_list_detection_uses_json_metadata() {
+  assert is_empty_list("GET", "{\"totalItems\":0,\"items\":[]}")
+  assert is_empty_list("GET", "{\n  \"totalItems\": 0, \"items\": []\n}")
+  assert !is_empty_list("POST", "{\"totalItems\":0}")
+  assert !is_empty_list("GET", "{\"totalItems\":1}")
+  assert !is_empty_list("GET", "{\"totalItems\":null}")
+  assert !is_empty_list("GET", "{\"items\":[]}")
+  assert !is_empty_list("GET", "{\"totalItems\":\"0\"}")
+  assert !is_empty_list("GET", "{\"description\":\"\\\"totalItems\\\":0\"}")
+  assert !is_empty_list("GET", "{\"totalItems\":0")
+}
+
 // The bearer decision is the pure seam of TASK-179: every verb asks bearer()
 // what to put in Authorization, and "" means today's request, untouched. The
 // rest — the header actually reaching the wire — is covered by the e2e suite's

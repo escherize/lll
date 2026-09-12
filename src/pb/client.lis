@@ -245,7 +245,16 @@ struct TokenOnly { token: string }
 /// True for a list response that matched nothing. `totalItems` is the list
 /// envelope's own field, so a single-record GET never looks like one.
 fn is_empty_list(method: string, body: string) -> bool {
-  method == "GET" && strings.Contains(body, "\"totalItems\":0")
+  if method != "GET" { return false }
+  let mut metadata = ListMetadata { .. }
+  if json.Unmarshal(body.bytes(), &metadata).is_err() { return false }
+  metadata.total_items == Some(0)
+}
+
+#[json]
+struct ListMetadata {
+  #[json("totalItems")]
+  total_items: Option<int>,
 }
 
 
