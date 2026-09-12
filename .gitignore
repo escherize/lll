@@ -18,3 +18,4 @@ pb/pb_data/
 .lll-demo/
 *.log
 __pycache__/
+*.lll-export.lock

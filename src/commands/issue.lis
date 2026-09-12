@@ -155,6 +155,13 @@ fn issue_list_spec() -> Slice<flags.Flag> {
       ..,
     },
     flags.Flag {
+      name: "--page",
+      value: true,
+      hint: "N",
+      help: "page of results (positive integer; default 1); --limit sets page size",
+      ..,
+    },
+    flags.Flag {
       name: "--json",
       help: "raw PocketBase JSON (team, assignee, labels, project\nexpanded), pipe-friendly",
       ..,
@@ -654,6 +661,15 @@ fn list(input: flags.CommandInput) -> Result<(), string> {
     if n < 1 { return Err(f"--limit must be a positive integer, got {n}") }
     limit = n
   }
+  let mut page = 1
+  if p.given("--page") {
+    let raw = p.one("--page")
+    let Ok(n) = strconv.Atoi(raw) else {
+      return Err(f"--page must be a positive integer, got '{raw}'")
+    }
+    if n < 1 { return Err(f"--page must be a positive integer, got {n}") }
+    page = n
+  }
   let json_mode = p.given("--json")
   let ready_only = p.given("--ready")
   let blocked_only = p.given("--blocked")
@@ -673,7 +689,7 @@ fn list(input: flags.CommandInput) -> Result<(), string> {
   // --limit applies server-side via PB's perPage (capped by PB at 500).
   let mut per_page = 200
   if limit > 0 { per_page = limit }
-  let mut path = f"/api/collections/issues/records?perPage={per_page}&expand=team,assignee,labels,blocked_by,project&sort={url.QueryEscape(sort)}"
+  let mut path = f"/api/collections/issues/records?perPage={per_page}&expand=team,assignee,labels,blocked_by,project&sort={url.QueryEscape(sort + ",id")}&page={page}"
   let filter = resolve_filter_query(team_id, filters)?
   if filter != "" { path = f"{path}&filter={url.QueryEscape(filter)}" }
 
