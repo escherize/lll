@@ -202,12 +202,13 @@ set them as secrets):
 | `LLL_BIND` | Bind address for both ports (default `127.0.0.1`; `0.0.0.0` when hosting) |
 | `LLL_BOARD_TOKEN` | Pins the web board's access token; unset, each boot mints and prints a fresh one |
 
-`lll config init` writes a commented template. On its first boot `lll up`
-guesses `me` from `$USER`, writes it to `~/.config/lll/lll.toml` and seeds a
-matching member, so assignment works immediately, with no prompt. It writes the
-home config, never the repo's, because the repo's file is committed. That
-guess is wrong on a shared machine: `lll config set me <name>` fixes it, in
-the same file.
+`lll config init` writes a commented template. When `me` is absent, `lll up`
+guesses it from `$USER`, saves it to the home config and ensures a matching
+member exists. This setup does not authenticate you as that member. A member
+token determines authorship and claims, and `me`, when set, must agree with
+it; under a superuser token, `me` supplies attribution. Check `lll whoami`
+and correct a stale value with `lll config set me NAME`. Use `lll login` to
+authenticate as a member.
 
 ## CLI tour
 

@@ -309,8 +309,10 @@ fn config_init(_input: flags.CommandInput) -> Result<(), string> {
 # prefix - for descending (e.g. \"-updated\").
 # sort = \"created\"
 
-# Who you are. Identity placeholder until auth exists. 'lll up' guesses this
-# from $USER on first boot; fix it with 'lll config set me <name>'.
+# Optional member name. Your auth token determines authorship and claims;
+# 'me', when set, must agree. Check with 'lll whoami' and correct a stale
+# value with 'lll config set me <name>'. Local superuser setup uses this
+# name for attribution; it does not log you in as that member.
 # me = \"bryan\"
 
 # Web board base URL, used by 'lll board' and 'lll issue url' / 'view -w'.

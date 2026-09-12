@@ -265,11 +265,11 @@ printed in the banner as a login URL — open it once and the browser keeps
 access in a cookie. From a terminal, send the same cookie: curl
 -H 'Cookie: lll_board=<token>' http://127.0.0.1:<port>/.
 
-It also needs to know who you are. On first boot 'me' is guessed from $USER,
-written to ~/.config/lll/lll.toml and seeded as a member so assignment and
-comments work straight away — no second prompt. It goes to the home config,
-not the repo's, because the repo's file is committed. That guess is wrong on
-a shared machine: 'lll config set me <name>' fixes it.",
+When 'me' is absent, it is guessed from $USER, saved to the home config and
+seeded as a member. This does not authenticate you as that member. A member
+token determines authorship and claims; 'me', when set, must agree. Under a
+superuser token, 'me' supplies attribution. Check 'lll whoami', correct a stale
+value with 'lll config set me NAME', and use 'lll login' to authenticate.",
   )
 }
 
@@ -365,19 +365,16 @@ fn resolve_team(want: string) -> Result<string, string> {
   }
 }
 
-/// Who the board and the CLI think you are. `lll up` already asks for a team
-/// and a second prompt is worse than a wrong default, so a missing 'me' is
-/// taken from $USER, written to .lll.toml where it is visible, and changed
-/// with 'lll config set me <name>'. Wrong on a shared machine; one command to
-/// fix. The matching member is seeded either way, so assignment and comment
-/// authorship work on the first boot rather than the second.
-/// (ADR-1: this all goes away when members becomes an auth collection.)
+/// Ensure the configured attribution name exists, defaulting to $USER and
+/// saving that default in the home config. This does not authenticate as the
+/// member: identity resolution checks a member token against 'me', while a
+/// superuser token uses 'me' for attribution.
 fn ensure_me(want: string) -> Result<string, string> {
   let mut name = strings.TrimSpace(want)
   if name == "" {
     name = strings.TrimSpace(os.Getenv("USER"))
-    // No $USER to guess from is not worth failing a boot over: comments go
-    // authorless and 'lll config set me' still works.
+    // No $USER is not worth failing setup over; identity resolution still
+    // determines the author from the active credential.
     if name == "" { return Ok("") }
     // The home config, never the repo's: .lll.toml is committed, and booting
     // a server is no reason to put your username in someone else's checkout.
