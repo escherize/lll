@@ -196,12 +196,13 @@
 {{define "set-del"}}<button type="button" class="set-del" title="Delete" aria-label="Delete" data-on:click="{{if eq . "member"}}confirm('Delete ' + el.form.dataset.name + '?') &amp;&amp; {{end}}@post('/settings/{{.}}?del=1', {contentType: 'form'})"><svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true"><path d="M2.5 2.5 L9.5 9.5 M9.5 2.5 L2.5 9.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg></button>{{end}}
 
 {{/* LLL-233: replace only the selected row; the count is fetched again on
-     confirmation. The record name is escaped HTML, never executable JS. */}}
-{{define "set-delete-review"}}<form class="set-row" id="set-{{.Kind}}-{{.Id}}" aria-label="Review deletion">
+     confirmation. A div owns the patch id: input[name=id] shadows form.id.
+     The record name is escaped HTML, never executable JS. */}}
+{{define "set-delete-review"}}<div id="set-{{.Kind}}-{{.Id}}"><form class="set-row" aria-label="Review deletion">
 <input type="hidden" name="id" value="{{.Id}}">
 <input type="hidden" name="confirmed" value="1">
 <input type="hidden" name="expected" value="{{.Used}}">
 <div class="set-delete-impact" role="status">{{if .Changed}}The affected issue count changed. Review it again. {{end}}Delete {{.Kind}} <strong>{{.Name}}</strong>? {{if .Used}}This removes the {{.Kind}} from {{.Used}} issue(s).{{else}}No issues reference it.{{end}} The issues are kept.</div>
 <button type="button" class="btn" data-on:click="@post('/settings/{{.Kind}}?cancel=1', {contentType: 'form'})">Cancel</button>
 <button type="button" class="btn" data-on:click="@post('/settings/{{.Kind}}?del=1', {contentType: 'form'})">Delete {{.Kind}}</button>
-</form>{{end}}
+</form></div>{{end}}

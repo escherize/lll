@@ -36,6 +36,8 @@ created = []
 
 
 def create(collection, data):
+    if collection == 'projects':
+        data = dict(data, status='planned')
     item = record('POST', collection, data)
     created.append((collection, item['id']))
     return item
