@@ -1,5 +1,7 @@
 import "records"
 import "claims"
+import "references"
+import "go:bytes"
 import "go:bufio"
 import "go:encoding/json"
 import "go:fmt"
@@ -473,11 +475,15 @@ pub fn issue_commands() -> Slice<flags.Command> {
     flags.Command { name: "branch-name", summary: "print a suggested Git branch name; read-only", page: "", spec: flags.with_team([]), positional: "[KEY-123]", run: branch_name_cmd },
     flags.Command {
       name: "pr",
-      summary: "open a GitHub PR via 'gh pr create'; body links the issue and includes its description when it fits the PR limit",
+      summary: "open a GitHub PR via 'gh pr create' and record gh#N; body links the issue and includes its description when it fits",
       page: "",
       spec: flags.with_team([]),
       positional: "[KEY-123]",
       run: pr_cmd,
+    },
+    flags.Command {
+      name: "ref", summary: "append an external reference once (gh#42, linear:ENG-118)",
+      page: "", spec: flags.with_team([]), positional: "KEY-123 REF", run: ref_cmd,
     },
     flags.Command {
       name: "link",
@@ -1435,7 +1441,7 @@ fn branch_name_cmd(input: flags.CommandInput) -> Result<(), string> {
 }
 
 /// Thin wrapper over the GitHub CLI: gh owns pushing checks, prompts, and
-/// errors — we only supply the KEY-prefixed title and an issue-linking body.
+/// errors. Record the returned PR only after gh confirms successful creation.
 fn pr_cmd(input: flags.CommandInput) -> Result<(), string> {
   let usage = "lll issue pr [KEY-123]"
   let id = input.parsed.first()
@@ -1452,6 +1458,7 @@ fn pr_cmd(input: flags.CommandInput) -> Result<(), string> {
   let issue = records.fetch_issue(resolved)?
   let key = f"{issue.expand.team.key}-{issue.number}"
   let (body, linked_only) = pr_body(issue_url(issue)?, issue.description)?
+  if issue.expand.team.archived { return Err(archived_hint(issue.expand.team.key)) }
   if linked_only {
     let _ = fmt.Fprintln(os.Stderr, "issue description exceeds the PR body limit; linking to the full description instead")
   }
@@ -1466,9 +1473,32 @@ fn pr_cmd(input: flags.CommandInput) -> Result<(), string> {
     "-",
   )
   cmd.Stdin = Some(strings.NewReader(body))
-  cmd.Stdout = Some(os.Stdout)
+  let mut captured = bytes.Buffer { .. }
+  cmd.Stdout = Some(io.MultiWriter(os.Stdout, &captured))
   cmd.Stderr = Some(os.Stderr)
   if let Err(e) = cmd.Run() { return Err(f"gh pr create: {e}") }
+  let Some((pr_url, reference)) = references.from_pr_output(captured.String()) else {
+    return Err("gh pr create succeeded but did not report one unambiguous PR URL; the issue was not changed. Inspect the gh output before retrying; do not create a duplicate PR.")
+  };
+  if let Err(e) = references.append(issue.id, reference) {
+    return Err(f"PR created: {pr_url}\nCould not confirm {reference} on {key}: {e}\nRetry only the reference save: lll issue ref {key} {reference}")
+  }
+  Ok(())
+}
+
+/// Both positionals are required, unlike the verbs that infer the issue from the
+/// branch: a lone `ref linear:ENG-118` is shaped exactly like a KEY, so guessing
+/// which one it is would silently append a wrong ref, and there is no unref.
+fn ref_cmd(input: flags.CommandInput) -> Result<(), string> {
+  let usage = "lll issue ref KEY-123 REF"
+  let p = input.parsed
+  let reference = p.nth(1)
+  if p.first() == "" || reference == "" { return Err(f"usage: {usage}") }
+  let resolved = resolve_id(p.first(), usage)?
+  let issue = records.fetch_issue(resolved)?
+  let outcome = references.append(issue.id, reference)?
+  let action = if outcome.added { "Added" } else { "Already recorded" }
+  fmt.Println(f"{action} {reference} on {issue.expand.team.key}-{issue.number}")
   Ok(())
 }
 

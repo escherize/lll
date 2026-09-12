@@ -242,7 +242,8 @@ lll issue release ENG-12      # give it back
 lll issue view                # ID inferred from the git branch
 lll issue comment -b "done in abc123"   # markdown; renders on the web board
 lll issue close
-lll issue pr                  # gh pr create titled "ENG-12: Fix login"
+lll issue pr                  # gh pr create titled "ENG-12: Fix login"; records gh#N
+lll issue ref ENG-12 gh#42     # append once; also retries a failed PR-reference save
 
 lll watch --state in-review   # live NDJSON-able event stream for a query
 lll issue watch ENG-12        # one issue + its comments, until Ctrl-C

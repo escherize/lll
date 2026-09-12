@@ -1,0 +1,38 @@
+import "go:encoding/json"
+import "go:net/url"
+import "go:strconv"
+import "go:strings"
+import "pb"
+
+#[json]
+struct AppendRequest { #[json("ref")] reference: string }
+
+#[json]
+pub struct Outcome { pub refs: string, pub added: bool }
+
+pub fn append(issue_id: string, reference: string) -> Result<Outcome, string> {
+  let body = json.Marshal(AppendRequest { reference }).map_err(|e| f"encoding reference: {e}")?
+  let response = pb.post(f"/api/lll/issues/{url.PathEscape(issue_id)}/refs", body as string).map_err(|e| {
+    if pb.response_status(e) == 404 { "server does not support atomic reference appends — update the server before adding refs" } else { e }
+  })?
+  let mut outcome = Outcome { .. }
+  json.Unmarshal(response.bytes(), &outcome).map_err(|e| f"decoding reference response: {e}")?
+  Ok(outcome)
+}
+
+/// Accept one unambiguous PR URL, including GitHub Enterprise hosts.
+pub fn from_pr_output(output: string) -> Option<(string, string)> {
+  let mut found: Option<(string, string)> = None
+  for word in strings.Fields(output) {
+    let Ok(parsed) = url.Parse(word) else { continue };
+    if (parsed.Scheme != "https" && parsed.Scheme != "http") || parsed.Host == "" || parsed.User.is_some() { continue }
+    let parts = strings.Split(strings.Trim(parsed.Path, "/"), "/")
+    if parts.length() != 4 || parts[0] == "" || parts[1] == "" || parts[2] != "pull" { continue }
+    if parts[3] == "" || !parts[3].runes().all(|r| r >= '0' && r <= '9') { continue }
+    let Ok(number) = strconv.Atoi(parts[3]) else { continue };
+    if number < 1 { continue }
+    if let Some((previous, _)) = found { if previous != word { return None } }
+    found = Some((word, f"gh#{number}"))
+  }
+  found
+}

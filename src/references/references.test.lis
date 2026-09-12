@@ -1,0 +1,21 @@
+#[test]
+fn parses_public_and_enterprise_pull_request_urls() {
+  let assert Some((link, reference)) = from_pr_output("https://github.com/org/repo/pull/42\n")
+  assert link == "https://github.com/org/repo/pull/42"
+  assert reference == "gh#42"
+  let assert Some((_, enterprise)) = from_pr_output("Created PR\nhttps://git.example/équipe/repo/pull/17\n")
+  assert enterprise == "gh#17"
+}
+
+#[test]
+fn refuses_ambiguous_or_non_pr_output() {
+  for output in ["", "42", "https://github.com/org/repo/issues/42", "https://github.com/org/repo/pull/0", "https://user:secret@git.example/org/repo/pull/42", "https://github.com/org/repo/pull/42/files", "https://github.com/org/repo/pull/-2", "https://github.com/org/repo/pull/42\nhttps://github.com/org/repo/pull/43"] {
+    assert from_pr_output(output).is_none()
+  }
+}
+
+#[test]
+fn repeated_identical_url_has_one_reference() {
+  let assert Some((_, reference)) = from_pr_output("https://git.example/o/r/pull/7\nhttps://git.example/o/r/pull/7")
+  assert reference == "gh#7"
+}
