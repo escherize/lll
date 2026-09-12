@@ -7,8 +7,10 @@ import "flags"
 // the one command table below (nouns, verbs per noun, flags per verb).
 
 pub fn completions(args: Slice<string>) -> Result<(), string> {
-  let Some(shell) = args.get(2) else {
-    print_completions_usage()
+  let parsed = flags.parse([], args, 2, true, completions_usage())?
+  let shell = parsed.first()
+  if shell == "" {
+    fmt.Println(completions_usage())
     return Ok(())
   }
   match shell {
@@ -24,21 +26,12 @@ pub fn completions(args: Slice<string>) -> Result<(), string> {
       fmt.Print(fish_script())
       Ok(())
     },
-    "--help" => {
-      print_completions_usage()
-      Ok(())
-    },
-    "-h" => {
-      print_completions_usage()
-      Ok(())
-    },
     other => Err(f"unknown shell: '{other}' (expected bash, zsh, or fish)"),
   }
 }
 
-fn print_completions_usage() {
-  fmt.Println(
-    "lll completions - shell completion scripts
+fn completions_usage() -> string {
+  "lll completions - shell completion scripts
 
 Usage:
   lll completions bash    add to ~/.bashrc:   eval \"$(lll completions bash)\"
@@ -47,8 +40,7 @@ Usage:
   lll completions fish    add to ~/.config/fish/config.fish:
                           lll completions fish | source
 
-Completes nouns, verbs per noun, and flags per verb.",
-  )
+Completes nouns, verbs per noun, and flags per verb."
 }
 
 // --- command table ---

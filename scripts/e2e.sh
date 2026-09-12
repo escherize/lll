@@ -1359,6 +1359,21 @@ fi
 assert_contains "$(cat "$DATA_DIR/comp.fish")" "complete -c lll" "fish completions complete lll"
 
 # task-127: help, completions and the parser read ONE table, so the gate
+for shell in bash zsh fish; do
+  for help_flag in -h --help; do
+    out=$("$LIN" completions "$shell" "$help_flag")
+    assert_contains "$out" "Usage:" "completions suffix help precedes script generation"
+  done
+  for extra in --definitely-unknown extra-shell; do
+    if "$LIN" completions "$shell" "$extra" >"$DATA_DIR/comp.out" 2>"$DATA_DIR/comp.err"; then
+      fail "completions $shell accepted unexpected argument $extra"
+    fi
+    [ ! -s "$DATA_DIR/comp.out" ] || fail "invalid completions invocation emitted a partial script"
+    assert_contains "$(cat "$DATA_DIR/comp.err")" "$extra" "completions refusal identifies the argument"
+  done
+done
+
+# task-127: help, completions and the parser read ONE table, so the gate
 # enforces what used to be reviewed — a flag one surface knows, they all
 # know. `lll watch --help` is generated from the watch spec; the completions
 # entry for the verb-less watch noun reads the same table.
