@@ -120,7 +120,7 @@ fn project_create_spec() -> Slice<flags.Flag> {
 
 fn project_edit_spec() -> Slice<flags.Flag> {
   flags.with_team([
-    flags.Flag { name: "-n", value: true, hint: "\"name\"", help: "new project name", .. },
+    flags.Flag { name: "-n", value: true, hint: "\"new name\"", help: "new project name", .. },
     flags.Flag { name: "-d", value: true, hint: "desc", help: "new project description", .. },
     flags.Flag { name: "--status", value: true, hint: "s", help: "planned, started, paused, completed, or cancelled", .. },
   ])

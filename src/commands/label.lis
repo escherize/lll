@@ -100,7 +100,7 @@ fn label_create_spec() -> Slice<flags.Flag> {
 
 fn label_edit_spec() -> Slice<flags.Flag> {
   flags.with_team([
-    flags.Flag { name: "-n", value: true, hint: "\"name\"", help: "new label name", .. },
+    flags.Flag { name: "-n", value: true, hint: "\"new name\"", help: "new label name", .. },
     flags.Flag { name: "-c", value: true, hint: "\"#5e6ad2\"", help: "new hex color for the label", .. },
   ])
 }
