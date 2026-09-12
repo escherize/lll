@@ -11,6 +11,7 @@ enum FilterUse { Create, Update, List, Watch }
 fn filter_spec(use: FilterUse) -> Slice<flags.Flag> {
   let state_hint = if use == FilterUse.Create { "\n(create defaults to todo)" } else { "" }
   let assignee_hint = if use == FilterUse.Update { "; 'none' clears it (update)" } else { "" }
+  let project_hint = if use == FilterUse.Update { "; pass \"\" to clear it" } else { "" }
   let repeat_label = use != FilterUse.Watch
   let assignee_alias = if use == FilterUse.Watch { "" } else { "--assign" }
   let label_hint = if repeat_label { "; repeatable on create/update\n(update replaces the set); filters on list" } else { "" }
@@ -18,7 +19,7 @@ fn filter_spec(use: FilterUse) -> Slice<flags.Flag> {
     flags.Flag { name: "--state", value: true, hint: "s", help: f"one of: {strings.Join(query.states(), ", ")}{state_hint}", .. },
     flags.Flag { name: "--assignee", alias: assignee_alias, value: true, hint: "name", help: f"member name (see 'lll member list'){assignee_hint}", .. },
     flags.Flag { name: "--label", value: true, hint: "name", repeat: repeat_label, help: f"label name (see 'lll label list'){label_hint}", .. },
-    flags.Flag { name: "--project", value: true, hint: "name", help: "project name (see 'lll project list')", .. },
+    flags.Flag { name: "--project", value: true, hint: "name", help: f"project name (see 'lll project list'){project_hint}", .. },
   ]
 }
 

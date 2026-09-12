@@ -948,6 +948,7 @@ fn update(input: flags.CommandInput) -> Result<(), string> {
   let label_names = p.all("--label")
   let project_name = p.one("--project")
   let title = p.one("--title")
+  let project_set = p.given("--project")
   let title_set = p.given("--title")
   let mut description = ""
   if p.given("--description") {
@@ -961,7 +962,7 @@ fn update(input: flags.CommandInput) -> Result<(), string> {
   if p.given("--assignee") && assignee_name == "" {
     return Err("--assignee needs a member name, or 'none' to clear it")
   }
-  if state == "" && priority < 0 && assignee_name == "" && label_names.is_empty() && project_name == "" && !title_set && !description_set && !emoji_set {
+  if state == "" && priority < 0 && assignee_name == "" && label_names.is_empty() && !project_set && !title_set && !description_set && !emoji_set {
     return Err(f"nothing to update — pass at least one flag\nusage: {usage}")
   }
 
@@ -999,10 +1000,11 @@ fn update(input: flags.CommandInput) -> Result<(), string> {
   // The ISSUE's team scopes both name lookups, not the configured one:
   // `lll issue update GRDN-4 --label bug` must mean GRDN's bug even when
   // LLL_TEAM says otherwise.
-  if project_name != "" {
-    let project = records.resolve_project(issue.team, project_name)?
-    fields = fields.append("\"project\":" + json_quote(project.id)?)
-    changed = changed.append(f"project={project.name}")
+  if project_set {
+    let project_id = if project_name == "" { "" } else { records.resolve_project(issue.team, project_name)?.id }
+    fields = fields.append("\"project\":" + json_quote(project_id)?)
+    let project_change = if project_name == "" { "project=none" } else { f"project={project_name}" }
+    changed = changed.append(project_change)
   }
   if !label_names.is_empty() {
     let mut label_ids: Slice<string> = []
