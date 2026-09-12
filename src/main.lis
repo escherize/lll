@@ -4,6 +4,7 @@ import "go:strings"
 
 import "commands"
 import "flags"
+import "query"
 
 fn main() {
   let Some(noun) = os.Args.get(1) else {
@@ -80,7 +81,7 @@ fn dispatch(noun: string, args: Slice<string>) -> Result<(), string> {
 
 fn print_usage() {
   fmt.Println(
-    "lll - a Linear-style issue tracker
+    f"lll - a Linear-style issue tracker
 
 Every verb lives under a noun: 'lll issue list', 'lll issue comment KEY \"body\"',
 'lll doc view SLUG'. There is no 'lll list' or 'lll comment'.
@@ -127,7 +128,7 @@ Configuration (env > the repo's .lll.toml > ~/.config/lll/lll.toml; the files
 layer, each supplying the keys it names — 'lll config --list' shows which won):
   LLL_URL      PocketBase base URL (default http://127.0.0.1:8090)
   LLL_TEAM     default team key (e.g. ENG); scopes 'issue list', used by 'issue create'
-  LLL_SORT     default sort for 'issue list': created, updated, priority, number; prefix - to descend
+  LLL_SORT     default sort for 'issue list': {strings.Join(query.sort_fields(), ", ")}; prefix - to descend
   LLL_WEB_URL  web board base URL for 'board', 'issue url', 'view -w' (set with 'lll config set web_url URL')",
   )
   let hint = commands.setup_hint()

@@ -899,6 +899,9 @@ if command -v playwright-cli >/dev/null 2>&1; then
     return 'tab titles verified';
   }" 2>/dev/null) || fail "playwright: page titles"
   assert_contains "$tab_titles" 'tab titles verified' "page tabs identify the app and their team"
+  title_sort=$(playwright-cli -s="$BROWSER_SESSION" run-code "$(cat scripts/browser_issue_sort.js)" 2>&1)
+  assert_contains "$title_sort" 'title header sorting verified' "browser: title sorting in both directions"
+  playwright-cli -s="$BROWSER_SESSION" goto "$WEB/" >/dev/null 2>&1 || fail "playwright: return to board after title sort"
   # Shared navigation must remain reachable on a phone, including keyboard close.
   mobile_nav=$(playwright-cli -s="$BROWSER_SESSION" run-code 'async page => {
     await page.setViewportSize({width:390,height:844});
@@ -1261,6 +1264,7 @@ assert_contains "$issues" '<table id="issues" class="itbl">' "the issues page re
 assert_contains "$issues" 'href="/issue/ENG-1"' "the table links rows to their issue pages"
 assert_contains "$issues" 'href="/issues?sort=-created"' "column headers sort server-side through the URL"
 assert_contains "$issues" 'href="/issues?sort=-priority"' "priority is a sortable column"
+assert_contains "$issues" 'href="/issues?sort=-title"' "title is a sortable column"
 assert_contains "$issues" 'aria-sort="descending"' "the sorting column says so to a screen reader"
 
 # Table data needs no JavaScript: only the shared navigation script loads.
@@ -1286,6 +1290,7 @@ desc=$(first_row "/issues?sort=-number")
 
 # Filters are query params, so a filtered view is a shareable URL.
 todo=$(wcurl -sf "$WEB/issues?state=todo")
+assert_contains "$todo" 'href="/issues?state=todo&amp;sort=-title"' "title sorting preserves the state filter"
 assert_contains "$todo" '<option value="todo" selected>' "the chooser shows the filter the URL asked for"
 assert_contains "$todo" 'class="itbl-clear"' "a filtered table offers a way back to all issues"
 # A dedicated pair, so the filter assertion does not depend on what earlier

@@ -8,6 +8,7 @@ import "go:strings"
 import "config"
 import "flags"
 import "pb"
+import "query"
 
 /// Dispatch `lll config <verb>` through the noun's Command table (TASK-307).
 /// Dispatch parses args against the verb's spec BEFORE calling it, which is
@@ -287,7 +288,7 @@ fn config_init(_input: flags.CommandInput) -> Result<(), string> {
   if os.Stat(".lll.toml").is_ok() {
     return Err(".lll.toml already exists; not overwriting")
   }
-  let template = "# lll configuration
+  let template = f"# lll configuration
 # Precedence: env vars (LLL_URL, LLL_TEAM, LLL_ME, LLL_SORT, LLL_WEB_URL,
 # LLL_TOKEN) > this file > ~/.config/lll/lll.toml. The files layer: each
 # supplies the keys it names, so a key left commented out here is inherited
@@ -304,7 +305,7 @@ fn config_init(_input: flags.CommandInput) -> Result<(), string> {
 # Default team key. Scopes 'lll issue list' and is required by 'lll issue create'.
 # team = \"ENG\"
 
-# Default sort for 'lll issue list': created, updated, priority, or number;
+# Default sort for 'lll issue list': {strings.Join(query.sort_fields(), ", ")};
 # prefix - for descending (e.g. \"-updated\").
 # sort = \"created\"
 

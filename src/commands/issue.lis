@@ -143,7 +143,7 @@ fn issue_list_spec() -> Slice<flags.Flag> {
       name: "--sort",
       value: true,
       hint: "f",
-      help: "created, updated, priority, or number; prefix - for descending\n(default: LLL_SORT or 'sort' in .lll.toml, else created)",
+      help: f"{strings.Join(query.sort_fields(), ", ")}; prefix - for descending\n(default: LLL_SORT or 'sort' in .lll.toml, else created)",
       ..,
     },
     flags.Flag {

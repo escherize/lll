@@ -17,7 +17,7 @@ fn issues_href(q: ViewQuery) -> string {
 }
 
 /// One column heading. `field` is the PB field the header sorts on, or "" for
-/// a column with nothing to sort by (title, labels, assignee — none of them
+/// a column with nothing to sort by (state, labels, assignee — none of them
 /// are in query.sort_fields()). First click on a column sorts it descending;
 /// clicking the column that is already sorting flips it.
 fn issue_col(label: string, field: string, cls: string, q: ViewQuery) -> IssueColVM {
@@ -43,7 +43,9 @@ fn issue_col(label: string, field: string, cls: string, q: ViewQuery) -> IssueCo
 fn issue_cols(q: ViewQuery) -> Slice<IssueColVM> {
   [
     issue_col("ID", "number", "c-id", q),
-    issue_col("Title", "", "c-title", q),
+    issue_col("Title", "title", "c-title", q),
+    // State deliberately stays inert: PB's alphabetical text order is not
+    // workflow order, and sorting only this page would misorder pagination.
     issue_col("State", "", "c-state", q),
     issue_col("Priority", "priority", "c-prio", q),
     issue_col("Labels", "", "c-labels", q),

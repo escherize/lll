@@ -33,7 +33,7 @@ impl Filters {
 
 /// Sortable issue fields (PB record fields).
 pub fn sort_fields() -> Slice<string> {
-  ["created", "updated", "priority", "number"]
+  ["created", "updated", "priority", "number", "title"]
 }
 
 /// Build a PocketBase filter expression from optional criteria.

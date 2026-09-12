@@ -509,11 +509,21 @@ out=$(LLL_URL=$URL LLL_TEAM=ENG LLL_SORT=-priority "$LIN" issue list)
 assert_contains "$(printf '%s\n' "$out" | head -1)" "ENG-5" "LLL_SORT is the default sort"
 
 set +e
-out=$(LLL_URL=$URL "$LIN" issue list --sort title 2>&1)
+out=$(LLL_URL=$URL "$LIN" issue list --sort state 2>&1)
 rc=$?
 set -e
-[ "$rc" -ne 0 ] || fail "list --sort title: expected nonzero exit"
-assert_contains "$out" "unknown sort field 'title'" "invalid sort message"
+[ "$rc" -ne 0 ] || fail "list --sort state: expected nonzero exit"
+assert_contains "$out" "unknown sort field 'state'" "invalid sort message"
+
+for order in title -title; do
+  out=$(LLL_URL=$URL LLL_TEAM=ENG "$LIN" issue list --sort "$order" --json)
+  printf '%s' "$out" | python3 -c '
+import json, sys
+titles = [i["title"] for i in json.load(sys.stdin)["items"]]
+assert len(titles) >= 2
+assert titles == sorted(titles, reverse=sys.argv[1] == "-title"), titles
+' "$order" || fail "CLI title ordering: $order"
+done
 
 # --- list output: glyphs and priority markers, aligned columns ---
 out=$(LLL_URL=$URL LLL_TEAM=ENG "$LIN" issue list)

@@ -61,12 +61,16 @@ fn sort_accepts_known_fields() {
   assert s == "created"
   let assert Ok(d) = sort("-priority")
   assert d == "-priority"
+  let assert Ok(t) = sort("title")
+  assert t == "title"
+  let assert Ok(td) = sort("-title")
+  assert td == "-title"
 }
 
 #[test]
 fn sort_rejects_unknown_fields() {
-  let assert Err(msg) = sort("title")
-  assert msg.contains("unknown sort field 'title'")
+  let assert Err(msg) = sort("state")
+  assert msg.contains("unknown sort field 'state'")
   let assert Err(_) = sort("-nope")
 }
 
