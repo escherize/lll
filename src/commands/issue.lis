@@ -1020,18 +1020,6 @@ fn update(input: flags.CommandInput) -> Result<(), string> {
     changed = changed.append("assignee=none")
   } else if assignee_name != "" {
     let member = records.resolve_member(assignee_name)?
-    // A claim is exclusive (TASK-175); --assignee used to overwrite the
-    // holder silently and the board then showed someone the claim did not
-    // (LLL-184). Assigning the holder to themselves is a no-op, anyone else
-    // is refused with the two verbs that do it honestly.
-    if let Some(held) = fetch_claim(issue.id)? {
-      if held.member != member.id {
-        let mut holder = held.expand.member.name
-        if holder == "" { holder = "someone" }
-        let key = f"{issue.expand.team.key}-{issue.number}"
-        return Err(f"{key} is claimed by {holder} ({display.relative(held.created)}) — a claim owns the assignee: 'lll issue release {key}' first, or have {member.name} run 'lll issue claim {key}'")
-      }
-    }
     fields = fields.append("\"assignee\":" + json_quote(member.id)?)
     changed = changed.append(f"assignee={member.name}")
   }
@@ -1063,21 +1051,19 @@ fn update(input: flags.CommandInput) -> Result<(), string> {
   }
   // `--emoji ""` clears the marker, so this one keys off the flag, not the value.
   if emoji_set { fields = fields.append("\"emoji\":" + json_quote(emoji)?); changed = changed.append(f"emoji={emoji}") }
-  let _ = pb.patch(
-    f"/api/collections/issues/records/{issue.id}",
-    "{" + strings.Join(fields, ",") + "}",
-  )?
-  // Clearing the assignee under a claim used to leave "Claimed: NAME" with
-  // nobody assigned: held but unowned, a state the fleet replay found three
-  // agents reading as "already mine". The claim goes with the assignee.
+  let payload = "{" + strings.Join(fields, ",") + "}"
   let mut released = ""
-  if assignee_name == "none" {
-    if let Some(held) = fetch_claim(issue.id)? {
-      let _ = pb.delete(f"/api/collections/claims/records/{held.id}")?
-      let mut name = held.expand.member.name
-      if name == "" { name = "someone" }
-      released = f" (released {name}'s claim)"
-    }
+  if assignee_name != "" {
+    let observed = claims.observed_id(issue.id)?
+    let result = claims.update_assignment(issue.id, observed, payload).map_err(|e| {
+      let key = f"{issue.expand.team.key}-{issue.number}"
+      if strings.Contains(e, "is claimed by") {
+        f"{key}: {e} — 'lll issue release {key}' gives it back"
+      } else { f"{key}: {e}" }
+    })?
+    if result.claim_id != "" { released = f" (released {result.member_name}'s claim)" }
+  } else {
+    let _ = pb.patch(f"/api/collections/issues/records/{issue.id}", payload)?
   }
   fmt.Println(f"Updated {issue.expand.team.key}-{issue.number}: {strings.Join(changed, ", ")}{released}")
   Ok(())

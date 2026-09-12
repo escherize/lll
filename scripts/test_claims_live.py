@@ -151,3 +151,99 @@ finally:
     thread.join()
 
 print('Claims: 24 concurrent CLI calls, authenticated actor enforcement, idempotency, stale release, unrelated assignment, and safe refusal on older servers')
+
+# Assignment edits commit all accompanying fields with the claim policy.
+held = state()['claim']
+before = state()
+p = cli('issue', 'update', key, '--assignee', beta['name'], '--title', 'must not commit')
+assert p.returncode != 0 and 'is claimed by' in p.stderr and 'lll issue release ' + key in p.stderr
+assert state() == before
+p = cli('issue', 'update', key, '--assignee', alpha['name'], '--title', 'same holder edit', '--priority', 'high')
+assert p.returncode == 0, p.stderr
+assert state()['claim']['id'] == held['id'] and state()['title'] == 'same holder edit' and state()['priority'] == 2
+
+# Native field validation must roll back the deletion as well as the edit.
+before = state()
+status, error = request(path + '/assignment', {'claim_id': held['id'], 'fields': {'assignee': '', 'title': ''}})
+assert status == 400 and 'title' in error['data'], error
+assert state() == before
+for body in [{}, {'fields': {'assignee': ''}}, {'claim_id': '', 'fields': {'assignee': '', 'id': 'forged'}}]:
+    assert request(path + '/assignment', body)[0] == 400
+assert request(path + '/assignment', {'claim_id': held['id'], 'fields': {'assignee': ''}}, auth='')[0] == 401
+assert state() == before
+p = cli('issue', 'update', key, '--assignee', 'none', '--title', 'released with edit', '--description', 'café transaction')
+assert p.returncode == 0 and "released claim-alpha's claim" in p.stdout, p.stderr
+assert state()['claim'] is None and state()['assignee'] == '' and state()['title'] == 'released with edit'
+assert state()['description'] == 'café transaction'
+for assignee in [alpha['name'], beta['name'], 'none']:
+    p = cli('issue', 'update', key, '--assignee', assignee)
+    assert p.returncode == 0, p.stderr
+    assert state()['claim'] is None
+    assert state()['assignee'] == ('' if assignee == 'none' else next(a['id'] for a in actors if a['name'] == assignee))
+
+
+class DelayedAssignment(UnsupportedServer):
+    paused = threading.Event()
+    resume = threading.Event()
+
+    def do_POST(self):
+        body = self.rfile.read(int(self.headers.get('Content-Length', '0')))
+        if self.path.endswith('/assignment'):
+            self.paused.set()
+            if not self.resume.wait(15):
+                self.send_error(500)
+                return
+        req = urllib.request.Request(api + self.path, data=body,
+            headers={'Authorization': self.headers.get('Authorization', ''), 'Content-Type': 'application/json'})
+        try:
+            response = urllib.request.urlopen(req, timeout=20)
+        except urllib.error.HTTPError as error:
+            response = error
+        with response:
+            self.send_response(response.code)
+            self.send_header('Content-Type', 'application/json')
+            self.end_headers()
+            self.wfile.write(response.read())
+
+
+server = http.server.ThreadingHTTPServer(('127.0.0.1', 0), DelayedAssignment)
+thread = threading.Thread(target=server.serve_forever, daemon=True)
+thread.start()
+try:
+    proxy = 'http://127.0.0.1:' + str(server.server_port)
+    for assignee in ['none', alpha['name']]:
+        DelayedAssignment.paused.clear()
+        DelayedAssignment.resume.clear()
+        with ThreadPoolExecutor(max_workers=1) as pool:
+            pending = pool.submit(cli, 'issue', 'update', key, '--assignee', assignee,
+                '--title', 'stale title must not commit', endpoint=proxy)
+            assert DelayedAssignment.paused.wait(10), 'update did not reach transaction boundary'
+            assert cli('issue', 'claim', key, actor=beta).returncode == 0
+            before = state()
+            DelayedAssignment.resume.set()
+            p = pending.result(timeout=25)
+        assert p.returncode != 0 and 'claim changed' in p.stderr, p.stderr
+        assert state() == before
+        assert cli('issue', 'release', key).returncode == 0
+finally:
+    DelayedAssignment.resume.set()
+    server.shutdown()
+    server.server_close()
+    thread.join()
+
+# Unsupported assignment routes must not trigger either legacy write.
+UnsupportedServer.writes = []
+server = http.server.ThreadingHTTPServer(('127.0.0.1', 0), UnsupportedServer)
+thread = threading.Thread(target=server.serve_forever, daemon=True)
+thread.start()
+try:
+    before = state()
+    p = cli('issue', 'update', key, '--assignee', 'none', endpoint='http://127.0.0.1:' + str(server.server_port))
+    assert p.returncode != 0 and 'update the server' in p.stderr, p.stderr
+    assert UnsupportedServer.writes == [path + '/assignment'] and state() == before
+finally:
+    server.shutdown()
+    server.server_close()
+    thread.join()
+
+print('Assignment: whole-edit rollback, none/same/different holder, invalid fields, delayed CLI clear/reassignment, and older-server refusal')

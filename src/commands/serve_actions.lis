@@ -1,4 +1,5 @@
 import "records"
+import "claims"
 import "go:encoding/json"
 import "go:html/template"
 import "go:net/http"
@@ -339,7 +340,9 @@ fn assignee_write(r: mut Ref<http.Request>) -> Result<string, string> {
   }
   let issue = records.fetch_issue(key)?
   require_active_team(issue.expand.team)?
-  patch_issue(issue.id, IssueAssigneePatch { assignee: id })
+  let observed = claims.observed_id(issue.id)?
+  let _ = claims.update_assignment(issue.id, observed, marshal(IssueAssigneePatch { assignee: id })?)?
+  Ok("")
 }
 
 /// Replace the issue's whole label set from the checkbox chips. Labels is a

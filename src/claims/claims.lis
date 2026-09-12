@@ -18,6 +18,16 @@ pub struct Transition {
 struct AcquireRequest { member: string }
 #[json]
 struct ReleaseRequest { claim_id: string }
+#[json]
+struct AssignmentRequest { claim_id: string, fields: json.RawMessage }
+
+pub fn update_assignment(issue_id: string, claim_id: string, fields: string) -> Result<Transition, string> {
+  transact(issue_id, "assignment", AssignmentRequest { claim_id, fields: fields.bytes() as json.RawMessage })
+}
+
+pub fn observed_id(issue_id: string) -> Result<string, string> {
+  Ok(fetch(issue_id)?.map_or("", |held| held.id))
+}
 
 /// Claims and their assignment are one server-owned transaction. Callers
 /// resolve the actor through normal identity handling; the server verifies it.
@@ -34,7 +44,7 @@ fn transact(issue_id: string, action: string, request: Unknown) -> Result<Transi
   let path = f"/api/lll/issues/{url.PathEscape(issue_id)}/{action}"
   let response = pb.post(path, body as string).map_err(|e| {
     if pb.response_status(e) == 404 {
-      "server does not support atomic claim operations — update the server before claiming or releasing; no legacy claim writes were attempted"
+      "server does not support atomic claim operations — update the server before changing claims or assignments; no legacy claim writes were attempted"
     } else { e }
   })?
   let mut transition = Transition { .. }

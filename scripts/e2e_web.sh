@@ -1176,6 +1176,15 @@ if command -v playwright-cli >/dev/null 2>&1; then
   # The probe issue would skew the count-sensitive table sections below.
   "$LIN" issue delete "$key206" --force >/dev/null
 
+  "$LIN" team create -k ASGN -n "Assignment browser" >/dev/null
+  "$LIN" issue create --team ASGN -t "Claimed assignment browser" >/dev/null
+  "$LIN" issue claim ASGN-1 >/dev/null
+  assignment_browser=$(playwright-cli -s="$BROWSER_SESSION" run-code "$(cat scripts/browser_assignment.js)" 2>&1)
+  assert_not_contains "$assignment_browser" "### Error" "assignment browser errors"
+  assert_contains "$assignment_browser" "Assignment browser passed:" "assignment browser result"
+  "$LIN" issue view ASGN-1 --json | python3 -c 'import json,sys; row=json.load(sys.stdin); assert row["claim"] is None and row["assignee"] == ""'
+
+
   # LLL-101: save/reorder one row while other rows have unsaved drafts.
   for suffix in A B; do
     "$LIN" label create -n "Draft label $suffix" >/dev/null
