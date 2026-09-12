@@ -20,7 +20,6 @@
 # SSE morphs, positional drops disabled off-manual).
 # Standalone (boots its own PB), also invoked by e2e.sh.
 set -euo pipefail
-. "$(dirname "$0")/lib.sh"   # free_port, wait_ok, fail, assert_*, e2e_begin/end
 # A Linux/release artifact can exercise exactly this suite without Lisette.
 LIN=""
 while [ "$#" -gt 0 ]; do
@@ -35,6 +34,7 @@ while [ "$#" -gt 0 ]; do
     *) echo "usage: bash scripts/e2e_web.sh [--prebuilt BINARY] [--require-browser]" >&2; exit 2 ;;
   esac
 done
+. "$(dirname "$0")/lib.sh"   # Resolve user paths before this changes directory.
 e2e_begin
 
 PB_PORT=$(free_port 20000 39999)
