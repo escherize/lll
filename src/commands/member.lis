@@ -65,7 +65,7 @@ pub fn member_commands() -> Slice<flags.Command> {
     },
     flags.Command {
       name: "remove",
-      summary: "remove a member with no issues ('delete' is the same command)",
+      summary: "remove a member; guard assignments and comments ('delete' is the same command)",
       page: member_remove_page(),
       spec: member_remove_spec(),
       positional: "NAME",
@@ -73,7 +73,7 @@ pub fn member_commands() -> Slice<flags.Command> {
     },
     flags.Command {
       name: "delete",
-      summary: "remove a member with no issues (the same command as 'remove')",
+      summary: "remove a member; guard assignments and comments (the same command as 'remove')",
       page: member_remove_page(),
       spec: member_remove_spec(),
       positional: "NAME",
@@ -223,27 +223,47 @@ pass --admin-email and --admin-password, or set LLL_ADMIN_EMAIL/LLL_ADMIN_PASSWO
     return Err(f"no member named '{name}' — see 'lll member list'")
   }
 
-  let filter = url.QueryEscape(f"assignee={query.quote(member.id)}")
-  let mut assigned = models.IssueList { .. }
-  pb.fetch(
-    f"/api/collections/issues/records?filter={filter}&perPage=1",
-    "issues",
-    &assigned,
-  )?
-  if assigned.total_items > 0 {
+  let assigned = member_reference_count("issues", "assignee", member.id, su)?
+  let authored = member_reference_count("comments", "author", member.id, su)?
+  if (assigned > 0 || authored > 0) && !p.given("--force") {
     return Err(
-      f"{member.name} has {assigned.total_items} issue(s) assigned — removing them would blank the assignee
-reassign first: lll issue update <KEY> --assignee <somebody>",
+      f"{member.name} has {assigned} issue(s) assigned and {authored} comment(s) authored
+reassign first: lll issue update <KEY> --assignee <somebody>
+or use --force to clear assignments and comment authorship; comment bodies are kept",
     )
   }
 
   let _ = pb.delete_as(f"/api/collections/members/records/{member.id}", su)?
   fmt.Println(f"removed member {member.name}")
+  if assigned > 0 || authored > 0 {
+    fmt.Println(f"cleared {assigned} issue assignment(s) and {authored} comment author reference(s); comment bodies kept")
+  }
   Ok(())
+}
+
+#[json]
+struct MemberReferenceCount {
+  #[json("totalItems")]
+  total: Option<int>,
+}
+
+/// All reads and the deletion use the same administrative identity, so a
+/// missing or stale configured member token cannot hide references.
+fn member_reference_count(collection: string, field: string, id: string, token: string) -> Result<int, string> {
+  let filter = url.QueryEscape(f"{field}={query.quote(id)}")
+  let body = pb.get_as(f"/api/collections/{collection}/records?filter={filter}&perPage=1&fields=id", token)?
+  let mut count = MemberReferenceCount { .. }
+  if let Err(e) = json.Unmarshal(body.bytes(), &count) {
+    return Err(f"counting member {collection}: {e}")
+  }
+  let Some(total) = count.total else { return Err(f"counting member {collection}: response omitted totalItems") };
+  if total < 0 { return Err(f"counting member {collection}: invalid totalItems") }
+  Ok(total)
 }
 
 fn member_remove_spec() -> Slice<flags.Flag> {
   with_admin_flags([
+    flags.Flag { name: "--force", help: "clear assignments and comment authorship; keep comment bodies", .. },
     flags.Flag {
       name: "--url",
       value: true,
@@ -259,14 +279,15 @@ fn member_remove_spec() -> Slice<flags.Flag> {
 /// the parser accepts.
 fn member_remove_page() -> string {
   let usage = flags.usage("lll member remove", member_remove_spec(), "NAME")
-  "lll member remove - remove a member who has no issues assigned
+  "lll member remove - remove a member with reference checks
 
 Usage:
   " + usage + "
 
-Refuses a member with assigned issues: reassign them first
-('lll issue update KEY --assignee SOMEBODY'). Authenticates as the superuser,
-exactly like 'lll member set-password'."
+Refuses a member with assigned issues or authored comments. Reassign issues
+first ('lll issue update KEY --assignee SOMEBODY'), or use --force to clear
+assignments and comment authorship. Comment bodies are kept.
+Authenticates as the superuser, exactly like 'lll member set-password'." + flags.section(member_remove_spec())
 }
 
 /// Point this process at `url` for the rest of the command, when one was

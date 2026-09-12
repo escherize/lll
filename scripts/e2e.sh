@@ -2782,14 +2782,46 @@ assert_contains "$out" "removed member Disposable Person" "an unassigned member 
 # earlier — and cannot delete an account the rest of the run depends on.
 LLL_URL=$URL "$LIN" member add -n "Busy Person" >/dev/null \
   || fail "adding the assigned member"
-LLL_URL=$URL LLL_TEAM=ENG "$LIN" issue create "work for Busy Person" \
-  --assignee "Busy Person" >/dev/null || fail "assigning an issue to Busy Person"
+busy_issue=$(LLL_URL=$URL LLL_TEAM=ENG "$LIN" issue create "work for Busy Person" \
+  --assignee "Busy Person" --json) || fail "assigning an issue to Busy Person"
 out=$(LLL_URL=$URL "$LIN" member remove "Busy Person" \
   --admin-email admin@local.dev --admin-password admin-local-123 2>&1) \
   && fail "removing an assigned member should refuse"
 assert_contains "$out" "issue(s) assigned" "the refusal counts the assigned issues"
 LLL_URL=$URL "$LIN" member list | grep -q "Busy Person" \
   || fail "the refused removal deleted the member anyway"
+
+# LLL-234: both relations count, even when the configured member token is
+# unusable. Forced deletion clears attribution, never comment content.
+REMOVE_ADMIN=$(pb_superuser_token "$URL")
+busy_id=$(jq -r '.assignee' <<<"$busy_issue")
+busy_issue_id=$(jq -r '.id' <<<"$busy_issue")
+busy_comment=$(curl -sf -H "Authorization: Bearer $REMOVE_ADMIN" -H 'Content-Type: application/json' \
+  -d "$(jq -nc --arg issue "$busy_issue_id" --arg author "$busy_id" '{issue:$issue,author:$author,body:"Keep this history"}')" \
+  "$URL/api/collections/comments/records") || fail "creating the member-removal comment"
+out=$(LLL_TOKEN=bad.bad.bad LLL_URL=$URL "$LIN" member delete "Busy Person" \
+  --admin-email admin@local.dev --admin-password admin-local-123 2>&1) \
+  && fail "removing a referenced member should refuse"
+assert_contains "$out" '1 issue(s) assigned and 1 comment(s) authored' "admin identity counts both relations"
+out=$(LLL_TOKEN=bad.bad.bad LLL_URL=$URL "$LIN" member remove "Busy Person" --force \
+  --admin-email admin@local.dev --admin-password admin-local-123) || fail "forced member removal: $out"
+assert_contains "$out" 'cleared 1 issue assignment(s) and 1 comment author reference(s)' "force reports both relations"
+remaining_issue=$(curl -sf -H "Authorization: Bearer $REMOVE_ADMIN" "$URL/api/collections/issues/records/$busy_issue_id")
+[ "$(jq -r '.assignee' <<<"$remaining_issue")" = '' ] || fail "forced removal retained assignment"
+remaining_comment=$(curl -sf -H "Authorization: Bearer $REMOVE_ADMIN" "$URL/api/collections/comments/records/$(jq -r '.id' <<<"$busy_comment")")
+[ "$(jq -r '.author' <<<"$remaining_comment")" = '' ] || fail "forced removal retained comment author"
+[ "$(jq -r '.body' <<<"$remaining_comment")" = 'Keep this history' ] || fail "forced removal lost comment body"
+
+LLL_URL=$URL "$LIN" member add -n "Comment Only Person" >/dev/null
+commenter=$(LLL_URL=$URL "$LIN" member list --json | jq -r '.items[] | select(.name=="Comment Only Person") | .id')
+curl -sf -H "Authorization: Bearer $REMOVE_ADMIN" -H 'Content-Type: application/json' \
+  -d "$(jq -nc --arg issue "$busy_issue_id" --arg author "$commenter" '{issue:$issue,author:$author,body:"Comment only history"}')" \
+  "$URL/api/collections/comments/records" >/dev/null || fail "creating comment-only reference"
+out=$(LLL_URL=$URL "$LIN" member delete "Comment Only Person" 2>&1) \
+  && fail "comment-only member deletion should refuse"
+assert_contains "$out" '0 issue(s) assigned and 1 comment(s) authored' "comments alone block deletion"
+curl -sf -H "Authorization: Bearer $REMOVE_ADMIN" "$URL/api/collections/members/records/$commenter" >/dev/null \
+  || fail "comment-only refusal deleted the member"
 
 # --- TASK-246/248/249: the superuser commands are scriptable ---------------
 # set-password took no password flag and the admin credentials could only ride
