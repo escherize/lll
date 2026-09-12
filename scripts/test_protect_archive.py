@@ -18,6 +18,10 @@ class ArchiveTests(unittest.TestCase):
         self.root = self.base/'.private'
         self.root.mkdir()
         self.run_git('init', '-q')
+        # The before/after hashes include all Git metadata. A background
+        # maintenance process must not remove its lock during that comparison.
+        self.run_git('config', 'maintenance.auto', 'false')
+        self.run_git('config', 'gc.auto', '0')
         (self.root/'mise.toml').write_text('[tools]\n')
         (self.root/'read-history').write_text('#!/bin/sh\necho history\n')
         (self.root/'read-history').chmod(0o755)
