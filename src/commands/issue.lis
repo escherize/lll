@@ -7,7 +7,6 @@ import "go:os"
 import "go:os/exec"
 import "go:strconv"
 import "go:strings"
-import "go:text/tabwriter"
 import "go:unicode/utf8"
 
 import "config"
@@ -708,19 +707,14 @@ fn print_issue_table(issues: Slice<models.Issue>) -> Result<(), string> {
     let _ = fmt.Fprintln(os.Stderr, "no issues")
     return Ok(())
   }
-  let mut w = tabwriter.NewWriter(os.Stdout, 0, 4, 2, ' ', 0)
+  let mut rows: Slice<Slice<string>> = []
   for item in issues {
     let key = item.expand.team.key
-    // The marker goes last. tabwriter measures a cell in runes while a
-    // terminal draws emoji two cells wide — and a ZWJ sequence is seven runes
-    // in two cells — so a marker anywhere earlier drags every column after it
-    // out of true. Nothing follows the final column, so nothing can shift.
-    let mut tail = ""
-    if item.emoji != "" { tail = f"\t{item.emoji}" }
-    let line = f"{key}-{item.number}\t{display.glyph(item.state)} {item.state}\t{display.priority_marker(item.priority)}\t{item.title}\t{item.expand.assignee.name}\t{display.relative(item.updated)}{tail}"
-    if let Err(e) = fmt.Fprintln(w, line) { return Err(f"writing output: {e}") }
+    let mut row = [f"{key}-{item.number}", f"{display.glyph(item.state)} {item.state}", display.priority_marker(item.priority), item.title, item.expand.assignee.name, display.relative(item.updated)]
+    if item.emoji != "" { row = row.append(item.emoji) }
+    rows = rows.append(row)
   }
-  if let Err(e) = w.Flush() { return Err(f"writing output: {e}") }
+  if let Err(e) = fmt.Fprint(os.Stdout, display.table(rows)) { return Err(f"writing output: {e}") }
   Ok(())
 }
 

@@ -1,0 +1,36 @@
+import "go:github.com/rivo/uniseg"
+import "go:strings"
+import "go:unicode"
+
+/// A human-readable table measured in terminal cells, including grapheme
+/// clusters. Every field stays on one line; callers own record semantics.
+pub fn table(rows: Slice<Slice<string>>) -> string {
+  let mut clean: Slice<Slice<string>> = []
+  let mut widths: mut Slice<int> = []
+  for row in rows {
+    let mut cells: Slice<string> = []
+    for i in 0..row.length() {
+      let cell = table_cell(row[i])
+      cells = cells.append(cell)
+      if i == widths.length() { widths = widths.append(0) }
+      let width = uniseg.StringWidth(cell)
+      if width > widths[i] { widths[i] = width }
+    }
+    clean = clean.append(cells)
+  }
+  let mut output = strings.Builder { .. }
+  for row in clean {
+    for i in 0..row.length() {
+      let _ = output.WriteString(row[i])
+      if i < row.length() - 1 {
+        let _ = output.WriteString(strings.Repeat(" ", widths[i] - uniseg.StringWidth(row[i]) + 2))
+      }
+    }
+    let _ = output.WriteString("\n")
+  }
+  output.String()
+}
+
+fn table_cell(value: string) -> string {
+  strings.Map(|r| if unicode.IsControl(r) { ' ' } else { r }, value)
+}

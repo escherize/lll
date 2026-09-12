@@ -57,3 +57,4 @@ version = "0.2.0"
 "github.com/yuin/goldmark-highlighting/v2" = "v2.0.0-20230729083705-37449abec8cc"
 "github.com/alecthomas/chroma/v2" = { version = "v2.2.0", via = ["github.com/yuin/goldmark-highlighting/v2"] }
 "github.com/dlclark/regexp2" = { version = "v1.11.4", via = ["github.com/alecthomas/chroma/v2"] }
+"github.com/rivo/uniseg" = "v0.4.7"
