@@ -40,7 +40,10 @@ BOARD_COOKIE="Cookie: lll_board=$BOARD_TOKEN"
 # -L: the bare board/issue/search paths 303 to their team-routed twins
 # (/t/ENG/..., TASK-198); every authenticated fetch follows the hop. The
 # redirect itself is asserted in the TASK-198 section below.
-wcurl() { curl -L -H "$BOARD_COOKIE" "$@"; }
+WCURL=(curl -L -H "$BOARD_COOKIE")
+wcurl() { "${WCURL[@]}" "$@"; }
+# Background streams launch WCURL directly: a trapped shell-function wrapper
+# can outlive its tracked PID as an orphan curl, corrupting reused log files.
 PB_LOG="$DATA_DIR/pb.log"
 E2E_LOGS="$PB_LOG"
 BROWSER_SESSION="e2e-web-$$"
@@ -75,7 +78,7 @@ cleanup() { # exit-status
   if command -v playwright-cli >/dev/null 2>&1; then
     playwright-cli -s="$BROWSER_SESSION" close >/dev/null 2>&1 || true
   fi
-  e2e_reap $CURL_PID $PB_PID
+  e2e_reap "$CURL_PID" "${PANEL_PID:-}" "${OPS_SSE_PID:-}" "${ENG_SSE_PID:-}" "$PB_PID"
   e2e_end
 }
 e2e_trap_cleanup cleanup
@@ -623,7 +626,7 @@ assert_contains "$out" "unknown label" "unknown label message"
 # been repainted by the response — and the issue-scope SSE frame is what
 # carries the new value to the open page.
 PANEL_EVENTS="$DATA_DIR/events-panel.txt"
-wcurl -sN "$WEB/events?page=issue&key=ENG-3" >"$PANEL_EVENTS" &
+"${WCURL[@]}" -sN "$WEB/events?page=issue&key=ENG-3" >"$PANEL_EVENTS" &
 PANEL_PID=$!
 sleep 0.5
 wcurl -s -o /dev/null -X POST --data-urlencode "key=ENG-3" \
@@ -632,7 +635,7 @@ for _ in $(seq 1 50); do
   grep -q 'id="project-form"' "$PANEL_EVENTS" 2>/dev/null && break
   sleep 0.1
 done
-kill $PANEL_PID 2>/dev/null || true
+e2e_reap "$PANEL_PID"
 PANEL_PID=""
 panel_events=$(cat "$PANEL_EVENTS")
 assert_contains "$panel_events" 'id="issue-detail"' "issue broadcast morphs #issue-detail"
@@ -689,7 +692,7 @@ assert_contains "$out" "LLL_TEAM=ENG" "refusal suggests the existing team"
 
 # --- /events: board scope gets a patch frame after a CLI-driven update ---
 EVENTS_FILE="$DATA_DIR/events.txt"
-wcurl -sN "$WEB/events?page=board" >"$EVENTS_FILE" &
+"${WCURL[@]}" -sN "$WEB/events?page=board" >"$EVENTS_FILE" &
 CURL_PID=$!
 sleep 0.5
 "$LIN" issue update ENG-1 --state done >/dev/null
@@ -697,7 +700,8 @@ for _ in $(seq 1 50); do
   grep -q "datastar-patch-elements" "$EVENTS_FILE" 2>/dev/null && break
   sleep 0.1
 done
-kill $CURL_PID 2>/dev/null || true
+e2e_reap "$CURL_PID"
+CURL_PID=""
 events=$(cat "$EVENTS_FILE")
 assert_contains "$events" "event: datastar-patch-elements" "SSE patch frame emitted"
 assert_contains "$events" 'data: elements <main id="board"' "patch morphs #board"
@@ -707,7 +711,7 @@ assert_contains "$events" 'id="col-done"' "patch contains the target column"
 assert_not_contains "$events" 'id="rail"' "broadcast fragments carry no shell"
 
 # --- /events: issue scope gets comments patch after a CLI comment ---
-wcurl -sN "$WEB/events?page=issue&key=ENG-1" >"$EVENTS_FILE" &
+"${WCURL[@]}" -sN "$WEB/events?page=issue&key=ENG-1" >"$EVENTS_FILE" &
 CURL_PID=$!
 sleep 0.5
 "$LIN" issue comment ENG-1 -b "live comment over sse" >/dev/null
@@ -715,7 +719,7 @@ for _ in $(seq 1 50); do
   grep -q "live comment over sse" "$EVENTS_FILE" 2>/dev/null && break
   sleep 0.1
 done
-kill $CURL_PID 2>/dev/null || true
+e2e_reap "$CURL_PID"
 CURL_PID=""
 events=$(cat "$EVENTS_FILE")
 assert_contains "$events" "event: datastar-patch-elements" "issue-scope patch frame emitted"
@@ -836,7 +840,7 @@ got=$(col_order "$bad" todo)
 
 # The SSE morph respects the connected client's order: a client whose /events
 # URL asked for priority receives a #board fragment already in priority order.
-wcurl -sN "$WEB/events?page=board&team=ENG&order=priority" >"$EVENTS_FILE" &
+"${WCURL[@]}" -sN "$WEB/events?page=board&team=ENG&order=priority" >"$EVENTS_FILE" &
 CURL_PID=$!
 sleep 0.5
 "$LIN" issue update ENG-2 --title "Already in progress (renamed)" >/dev/null
@@ -844,7 +848,7 @@ for _ in $(seq 1 50); do
   grep -q "datastar-patch-elements" "$EVENTS_FILE" 2>/dev/null && break
   sleep 0.1
 done
-kill $CURL_PID 2>/dev/null || true
+e2e_reap "$CURL_PID"
 CURL_PID=""
 # tr strips the stray NUL a killed curl can leave mid-frame, which bash's
 # command substitution would otherwise warn about.
@@ -1617,7 +1621,7 @@ assert_contains "$out" "not found" "/favorite unknown issue message"
 # The rail is outside every morph boundary, but the favorites group is its
 # OWN boundary inside it, so a star patches the group alone on every open
 # page — board scope included, which is why the broadcast scope is "*".
-wcurl -sN "$WEB/events?page=board" >"$EVENTS_FILE" &
+"${WCURL[@]}" -sN "$WEB/events?page=board" >"$EVENTS_FILE" &
 CURL_PID=$!
 sleep 0.5
 wcurl -s -o /dev/null -X POST "$WEB/favorite?key=ENG-1&on=true"
@@ -1625,7 +1629,7 @@ for _ in $(seq 1 50); do
   grep -q "rail-favorites" "$EVENTS_FILE" 2>/dev/null && break
   sleep 0.1
 done
-kill $CURL_PID 2>/dev/null || true
+e2e_reap "$CURL_PID"
 CURL_PID=""
 events=$(cat "$EVENTS_FILE")
 assert_contains "$events" 'data: elements <div id="rail-favorites"' \
@@ -1700,7 +1704,7 @@ dup=$(wcurl -s -X POST "$WEB/views/save" -d "name=Todo lane" --data-urlencode "q
 assert_contains "$dup" "already exists" "a duplicate view name is said out loud"
 
 # The SSE bridge patches the views group alone on every open board page.
-wcurl -sN "$WEB/events?page=board" >"$EVENTS_FILE" &
+"${WCURL[@]}" -sN "$WEB/events?page=board" >"$EVENTS_FILE" &
 CURL_PID=$!
 sleep 0.5
 wcurl -s -o /dev/null -X POST "$WEB/views/save" -d "name=Urgent lane" --data-urlencode "query=?prio=urgent"
@@ -1708,7 +1712,7 @@ for _ in $(seq 1 50); do
   grep -q "rail-views" "$EVENTS_FILE" 2>/dev/null && break
   sleep 0.1
 done
-kill $CURL_PID 2>/dev/null || true
+e2e_reap "$CURL_PID"
 CURL_PID=""
 events=$(cat "$EVENTS_FILE")
 assert_contains "$events" 'data: elements <div id="rail-views"' \
@@ -1899,9 +1903,9 @@ assert_contains "$out" "no team with key &#39;NOPE&#39;" \
 # event per team, each morph reaching only its own team's clients.
 OPS_EVENTS="$DATA_DIR/events-ops.txt"
 ENG_EVENTS="$DATA_DIR/events-eng.txt"
-wcurl -sN "$WEB/events?page=board&team=OPS" >"$OPS_EVENTS" &
+"${WCURL[@]}" -sN "$WEB/events?page=board&team=OPS" >"$OPS_EVENTS" &
 OPS_SSE_PID=$!
-wcurl -sN "$WEB/events?page=board&team=ENG" >"$ENG_EVENTS" &
+"${WCURL[@]}" -sN "$WEB/events?page=board&team=ENG" >"$ENG_EVENTS" &
 ENG_SSE_PID=$!
 sleep 0.5
 env LLL_TEAM=OPS "$LIN" issue create -t "Ops realtime probe" >/dev/null
@@ -1914,7 +1918,9 @@ for _ in $(seq 1 50); do
   grep -q "Eng realtime probe" "$ENG_EVENTS" 2>/dev/null && break
   sleep 0.1
 done
-kill $OPS_SSE_PID $ENG_SSE_PID 2>/dev/null || true
+e2e_reap "$OPS_SSE_PID" "$ENG_SSE_PID"
+OPS_SSE_PID=""
+ENG_SSE_PID=""
 ops_events=$(cat "$OPS_EVENTS")
 eng_events=$(cat "$ENG_EVENTS")
 assert_contains "$ops_events" 'data: elements <main id="board"' "the OPS stream carries #board morphs"
@@ -2043,5 +2049,15 @@ assert_contains "$(curl -sf "$WEB/api/collections/issues/records?perPage=1" -H "
 # The gate is still on for BOARD routes - the proxy must not have opened those.
 code=$(curl -s -o /dev/null -w '%{http_code}' "$WEB/")
 [ "$code" = 401 ] || fail "the board itself must still be gated, got $code"
+
+# SSE is text. A NUL here indicates a writer survived log truncation/reuse;
+# fail instead of letting command substitution silently discard the evidence.
+python3 - "$EVENTS_FILE" "$PANEL_EVENTS" "$OPS_EVENTS" "$ENG_EVENTS" <<'PY'
+from pathlib import Path
+import sys
+for name in sys.argv[1:]:
+    assert b'\0' not in Path(name).read_bytes(), f'NUL bytes in SSE log: {name}'
+print('SSE logs: no NUL bytes after stream cleanup')
+PY
 
 echo "e2e_web: all assertions passed"

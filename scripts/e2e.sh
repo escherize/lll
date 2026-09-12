@@ -2673,23 +2673,18 @@ set -e
 assert_contains "$out" "127.0.0.1:$DEAD_PORT" "the unreachable error names the url"
 assert_not_contains "$out" "lll login --url" "a configured url gets no fresh-machine hint"
 
-# TASK-195 AC#2: with NOTHING configured, the refused built-in default names
-# 'lll login --url'. Only assertable when :8090 is actually dead — a developer
-# machine may be running its own lll up there.
+# With nothing configured, the client refuses missing authentication before
+# making a request. This recovery check is independent of port 8090 occupancy.
 EMPTY_HOME="$DATA_DIR/empty_home"
 mkdir -p "$EMPTY_HOME"
-if curl -s --max-time 1 -o /dev/null http://127.0.0.1:8090/api/health; then
-  echo "e2e: skipping the no-url hint assert — something answers on :8090" >&2
-else
-  set +e
-  out=$(cd "$NEUTRAL" && env -u LLL_URL -u LLL_TOKEN -u LLL_TEAM HOME="$EMPTY_HOME" \
-    "$LLL_ABS" issue list 2>&1)
-  rc=$?
-  set -e
-  [ "$rc" -ne 0 ] || fail "issue list with nothing configured and :8090 dead: expected failure"
-  assert_contains "$out" "127.0.0.1:8090" "the default url is named"
-  assert_contains "$out" "lll login --url" "the no-url error names the fresh-machine fix"
-fi
+set +e
+out=$(cd "$NEUTRAL" && env -u LLL_URL -u LLL_TOKEN -u LLL_TEAM HOME="$EMPTY_HOME" \
+  "$LLL_ABS" issue list 2>&1)
+rc=$?
+set -e
+[ "$rc" -ne 0 ] || fail "issue list with nothing configured: expected failure"
+assert_contains "$out" "127.0.0.1:8090" "the default url is named"
+assert_contains "$out" "lll login --url" "the no-url error names the fresh-machine fix"
 
 # API addresses alone cannot identify a separately deployed web endpoint.
 for api_endpoint in "$URL" https://tracker.example.com:8091; do
