@@ -197,10 +197,7 @@ fn project_edit(input: flags.CommandInput) -> Result<(), string> {
   Ok(())
 }
 
-/// TASK-131, same guard as `label delete` and for the same reason: the web's
-/// delete (serve_settings.lis:282) is a bare `pb.delete`, so an issue's
-/// project quietly disappears from underneath it. Count, say the number,
-/// refuse unless --force.
+/// Count shared references before deleting; force explicitly accepts their loss.
 fn project_delete(input: flags.CommandInput) -> Result<(), string> {
   let spec = project_delete_spec()
   let usage = flags.usage("lll project delete", spec, "NAME")
@@ -209,7 +206,7 @@ fn project_delete(input: flags.CommandInput) -> Result<(), string> {
     return Err(f"usage: {usage}")
   }
   let project = resolve_project(configured_team_id()?, name)?
-  let used = issue_count(query.filter("", "", "", project.id, "", ""))?
+  let used = entity_issue_count("project", project.id)?
   if used > 0 && !p.given("--force") {
     return Err(refuse_delete("project", name, used))
   }

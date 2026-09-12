@@ -145,19 +145,13 @@ fn label_rows(team_id: string) -> Result<Slice<SetLabelVM>, string> {
   // fetch_labels answers name-sorted; the strict > below keeps equal-usage
   // rows in that order, so ties stay alphabetical.
   for l in fetch_labels(team_id)? {
-    let filter = url.QueryEscape(query.filter("", "", "", "", l.id, ""))
-    let mut issues = models.IssueList { .. }
-    pb.fetch(
-      f"/api/collections/issues/records?filter={filter}&perPage=1",
-      "issues",
-      &issues,
-    )?
+    let used = entity_issue_count("label", l.id)?
     let row = SetLabelVM {
       id: l.id,
       name: l.name,
       color: theme.normalize_hex(l.color),
       scope: scope_label(l.expand.team.key),
-      usage: issues.total_items,
+      usage: used,
     }
     let mut sorted: Slice<SetLabelVM> = []
     let mut placed = false
@@ -254,7 +248,13 @@ fn settings_write(
   team_id: string,
   me: string,
 ) -> Result<string, string> {
-  settings_apply(r, team_id)?
+  if r.FormValue("cancel") != "" {
+    // Restore the row after a deletion review without writing a record.
+  } else if r.FormValue("del") != "" {
+    if let Some(review) = settings_delete(r, team_id)? { return Ok(review) }
+  } else {
+    settings_apply(r, team_id)?
+  }
   let team = shell_team(team_id)
   let mut extra = ""
   if let Ok(vm) = settings_vm(team) {
@@ -268,7 +268,7 @@ fn settings_write(
   Ok(extra)
 }
 
-/// The record this request names: created, updated, or deleted.
+/// Create or update the record this request names.
 fn settings_apply(
   r: mut Ref<http.Request>,
   team_id: string,
@@ -277,17 +277,7 @@ fn settings_apply(
   let id = strings.TrimSpace(r.PostFormValue("id"))
   let name = strings.TrimSpace(r.PostFormValue("name"))
 
-  // FormValue, not PostFormValue: delete travels as a query param so the row
-  // form can post its own body unchanged.
-  if r.FormValue("del") != "" {
-    let coll = settings_collection(kind)?
-    if id == "" { return Err("nothing to delete") }
-    let _ = pb.delete(f"/api/collections/{coll}/records/{id}")?
-    return Ok(())
-  }
-
-  // Labels and projects are team-owned too, so every section below the
-  // delete needs the same configured team the team section does.
+  // Labels and projects are team-owned, just like the team section.
   if team_id == "" {
     return Err("no team configured: set LLL_TEAM or 'team' in .lll.toml")
   }

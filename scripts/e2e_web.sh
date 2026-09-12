@@ -582,7 +582,7 @@ fi
 wcurl -s -o /dev/null -X POST --data-urlencode "key=ENG-3" "$WEB/labels"
 PICKER_EXTRA=$(curl -sf -H "$AUTH_HDR" "$LLL_URL/api/collections/labels/records?perPage=200" \
   | jq -r '.items[] | select(.name=="Picker-Extra") | .id')
-wcurl -sf -X POST "$WEB/settings/label?del=1" -d "id=$PICKER_EXTRA" >/dev/null
+wcurl -sf -X POST "$WEB/settings/label?del=1" -d "id=$PICKER_EXTRA" -d confirmed=1 -d expected=0 >/dev/null
 
 # --- related findings on the issue page (TASK-103): unprompted, server-
 # rendered with the page. A finding whose area names a label the issue
@@ -1138,6 +1138,17 @@ if command -v playwright-cli >/dev/null 2>&1; then
   # The probe issue would skew the count-sensitive table sections below.
   "$LIN" issue delete "$key206" --force >/dev/null
 
+  # LLL-233: exercise the actual row morph, cancellation and confirmation.
+  "$LIN" project create -n "Deletion browser project" >/dev/null
+  DELETE_PROBE=$("$LIN" issue create -t "Deletion browser issue" --project "Deletion browser project" --json)
+  DELETE_KEY=$(printf '%s' "$DELETE_PROBE" | jq -r '.expand.team.key + "-" + (.number | tostring)')
+  seq_goto "$WEB/settings"
+  deletion_browser=$(playwright-cli -s="$BROWSER_SESSION" run-code "$(cat scripts/browser_settings_delete.js)" 2>&1)
+  assert_contains "$deletion_browser" 'settings deletion browser passed' "browser: settings deletion review and cancellation"
+  "$LIN" issue view "$DELETE_KEY" --json | jq -e '.project == ""' >/dev/null \
+    || fail "browser deletion should preserve issue and clear its project"
+  "$LIN" issue delete "$DELETE_KEY" --force >/dev/null
+
   playwright-cli -s="$BROWSER_SESSION" close >/dev/null 2>&1 || true
   echo "e2e_web: browser-level realtime check passed"
   echo "e2e_web: browser-level /search live-typing check passed"
@@ -1439,7 +1450,7 @@ LABEL_ID=$(row_id "$(wcurl -sf "$WEB/settings")" label web-made)
 [ -n "$LABEL_ID" ] || fail "/settings did not render the label it just created"
 wcurl -sf -X POST "$WEB/settings/label" -d "id=$LABEL_ID" -d 'name=web-renamed' -d 'color=#8d7ce6' >/dev/null
 "$LIN" label list | grep -q '^web-renamed	#8d7ce6' || fail "renaming and recoloring a label from /settings did not persist"
-wcurl -sf -X POST "$WEB/settings/label?del=1" -d "id=$LABEL_ID" >/dev/null
+wcurl -sf -X POST "$WEB/settings/label?del=1" -d "id=$LABEL_ID" -d confirmed=1 -d expected=0 >/dev/null
 "$LIN" label list | grep -q 'web-renamed' && fail "deleting a label from /settings did not persist" || true
 
 wcurl -sf -X POST "$WEB/settings/member" -d 'name=Web Member' -d 'email=web@example.com' >/dev/null
@@ -2057,5 +2068,7 @@ for name in sys.argv[1:]:
     assert b'\0' not in Path(name).read_bytes(), f'NUL bytes in SSE log: {name}'
 print('SSE logs: no NUL bytes after stream cleanup')
 PY
+
+LLL_TEST_BOARD_TOKEN="$BOARD_TOKEN" python3 scripts/test_settings_delete.py "$LLL_URL" "$WEB"
 
 echo "e2e_web: all assertions passed"

@@ -176,11 +176,7 @@ fn label_edit(input: flags.CommandInput) -> Result<(), string> {
   Ok(())
 }
 
-/// TASK-131. `/settings` deletes a label with a bare `pb.delete` and no
-/// reference check (serve_settings.lis:282), so every issue still carrying it
-/// silently loses a label nobody asked to remove. Parity is about
-/// capabilities, not about copying that: the CLI counts first, always says
-/// the number, and refuses unless --force says the loss is intended.
+/// Delete only after counting references; the web shares the same count policy.
 fn label_delete(input: flags.CommandInput) -> Result<(), string> {
   let spec = label_delete_spec()
   let usage = flags.usage("lll label delete", spec, "NAME")
@@ -189,7 +185,7 @@ fn label_delete(input: flags.CommandInput) -> Result<(), string> {
     return Err(f"usage: {usage}")
   }
   let label = resolve_label(configured_team_id()?, name)?
-  let used = issue_count(query.filter("", "", "", "", label.id, ""))?
+  let used = entity_issue_count("label", label.id)?
   if used > 0 && !p.given("--force") {
     return Err(refuse_delete("label", name, used))
   }
@@ -203,32 +199,6 @@ fn label_delete(input: flags.CommandInput) -> Result<(), string> {
 fn nonempty(value: string) -> Option<string> {
   if strings.TrimSpace(value) == "" { return None }
   Some(value)
-}
-
-/// How many issues match a filter. perPage=1 so PocketBase answers the count
-/// without a page of records, the same trick the settings sections use.
-fn issue_count(filter: string) -> Result<int, string> {
-  let mut list = models.IssueList { .. }
-  pb.fetch(
-    f"/api/collections/issues/records?perPage=1&fields=id&filter={url.QueryEscape(filter)}",
-    "issues",
-    &list,
-  )?
-  Ok(list.total_items)
-}
-
-/// The refusal a guarded delete answers with. Names the count and the exact
-/// command that overrides it, so the user never has to guess the flag.
-fn refuse_delete(kind: string, name: string, used: int) -> string {
-  let argument = cli_argument(name)
-  f"{used} issue(s) still reference the {kind} '{name}' — deleting it drops the {kind} off them.\nTo delete it anyway, run:\n  lll {kind} delete {argument} --force\nOr reassign those issues first."
-}
-
-/// What a completed delete prints. The count rides along even on the forced
-/// path, because "how many issues just changed" is the thing worth knowing.
-fn deleted_line(kind: string, name: string, used: int) -> string {
-  if used == 0 { return f"Deleted {kind} {name}" }
-  f"Deleted {kind} {name} (dropped from {used} issue(s))"
 }
 
 /// Resolve one team's label by name; unknown names error with the fix. An

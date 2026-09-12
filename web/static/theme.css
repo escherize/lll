@@ -1029,6 +1029,7 @@ input:focus, textarea:focus, select:focus {
 .set-row input[name="name"] { flex: 1; min-width: 0; }
 .set-row .set-second { flex: 0 1 200px; min-width: 0; }
 .set-row select { flex: none; }
+.set-delete-impact { flex: 1; min-width: 0; overflow-wrap: anywhere; }
 /* The create row sits one rung down the ladder: it holds nothing yet. */
 .set-new { margin-top: 8px; background: var(--bg-panel); }
 /* Fixed width and right-aligned so "ENG" and "workspace" leave every row's
