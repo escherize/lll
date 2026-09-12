@@ -200,7 +200,17 @@ superuser credentials, or set LLL_TOKEN to a member token.",
   // persisted. Persisting it would put a .lll.toml into whatever directory the
   // scratch board ran in, which is the TASK-143 stray exactly.
   let throwaway = p.one("--pb-dir") != ""
-  let team = ensure_team(cfg.team, src.team, throwaway)?
+  let team = match ensure_team(cfg.team, src.team, throwaway) {
+    Ok(team) => team,
+    Err(e) => {
+      let credential = if cfg.token == "" {
+        "superuser token generated for this startup"
+      } else {
+        f"token from {src.token}"
+      }
+      return Err(f"{e}\nstartup credential: {credential}")
+    },
+  }
   let _ = os.Setenv("LLL_TEAM", team)
   let me = ensure_me(cfg.me)?
   let chosen = free_port(web_port)
@@ -308,10 +318,10 @@ fn ensure_team(
           f"created team {created.key} — issues will be {created.key}-1, {created.key}-2, ...",
         )
       },
-      Err(_) => {
+      Err(e) => {
         let existing = find_team(key)?
         if existing.is_none() {
-          return Err(f"could not create team '{key}' and none exists to reuse")
+          return Err(f"creating team '{key}': {e}")
         }
       },
     }
@@ -347,9 +357,9 @@ fn resolve_team(want: string) -> Result<string, string> {
       fmt.Println(f"created team {created.key}")
       Ok(created.key)
     },
-    Err(_) => {
+    Err(e) => {
       if let Some(t) = find_team(want)? { return Ok(t.key) }
-      Err(f"could not create team '{want}' and none exists to reuse")
+      Err(f"creating team '{want}': {e}")
     },
   }
 }
