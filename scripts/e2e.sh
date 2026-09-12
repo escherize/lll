@@ -2046,6 +2046,7 @@ assert_contains "$out" "nothing is piped in" "-d - with no pipe names the fix"
 
 # --- create --json (TASK-177): the raw record, pipe-safe and keyable ---
 python3 scripts/test_create_response.py "$LLL_ABS" "$URL"
+python3 scripts/test_pr_body.py "$LLL_ABS" "$URL"
 # Scripts used to parse the "Created KEY-N" sentence for the key; --json
 # hands them the record itself instead — same shape as `view --json`.
 out=$(env $E "$LIN" issue create -t "Create json target" --json)

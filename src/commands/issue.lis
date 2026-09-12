@@ -451,7 +451,7 @@ pub fn issue_commands() -> Slice<flags.Command> {
     flags.Command { name: "branch-name", summary: "print a suggested Git branch name; read-only", page: "", spec: flags.with_team([]), positional: "[KEY-123]", run: branch_name_cmd },
     flags.Command {
       name: "pr",
-      summary: "open a GitHub PR for the issue via 'gh pr create' (title \"KEY-123: title\", body links the issue)",
+      summary: "open a GitHub PR via 'gh pr create'; body links the issue and includes its description when it fits the PR limit",
       page: "",
       spec: flags.with_team([]),
       positional: "[KEY-123]",
@@ -1484,8 +1484,10 @@ fn pr_cmd(input: flags.CommandInput) -> Result<(), string> {
 
   let issue = fetch_issue(resolved)?
   let key = f"{issue.expand.team.key}-{issue.number}"
-  let mut body = issue_url(issue)?
-  if issue.description != "" { body = f"{body}\n\n{issue.description}" }
+  let (body, linked_only) = pr_body(issue_url(issue)?, issue.description)?
+  if linked_only {
+    let _ = fmt.Fprintln(os.Stderr, "issue description exceeds the PR body limit; linking to the full description instead")
+  }
 
   let mut cmd = exec.Command(
     gh,
@@ -1493,14 +1495,26 @@ fn pr_cmd(input: flags.CommandInput) -> Result<(), string> {
     "create",
     "--title",
     f"{key}: {issue.title}",
-    "--body",
-    body,
+    "--body-file",
+    "-",
   )
-  cmd.Stdin = Some(os.Stdin)
+  cmd.Stdin = Some(strings.NewReader(body))
   cmd.Stdout = Some(os.Stdout)
   cmd.Stderr = Some(os.Stderr)
   if let Err(e) = cmd.Run() { return Err(f"gh pr create: {e}") }
   Ok(())
+}
+
+/// Keep the issue as the authoritative full text when its description is
+/// larger than GitHub accepts. Never silently publish a truncated excerpt.
+fn pr_body(link: string, description: string) -> Result<(string, bool), string> {
+  let body = if description == "" { link } else { f"{link}\n\n{description}" }
+  if utf8.RuneCountInString(body) <= 65536 { return Ok((body, false)) }
+  let fallback = f"{link}\n\nThe full description is on the linked issue; it exceeds the pull request body limit."
+  if utf8.RuneCountInString(fallback) > 65536 {
+    return Err("the issue URL exceeds the PR body limit; check the configured web_url")
+  }
+  Ok((fallback, true))
 }
 
 /// Web page URL for an issue: <web_url>/issue/KEY-123.
