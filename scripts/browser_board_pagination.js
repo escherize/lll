@@ -4,11 +4,16 @@ async page => {
   let mutation = null;
   const streamResponses = [];
   const errors = [];
-  page.on('response', response => {
-    const url = new URL(response.url());
-    if (url.pathname === '/events') streamResponses.push({path: url.pathname + url.search, status: response.status()});
-  });
-  page.on('pageerror', error => errors.push(error.message));
+  const onResponse = response => {
+    // run-code has a restricted VM: URL exists in page.evaluate, not here.
+    const url = response.url();
+    if (url.startsWith(base + '/events?') && streamResponses.length < 8) {
+      streamResponses.push({path: url.slice(base.length), status: response.status()});
+    }
+  };
+  const onError = error => { if (errors.length < 8) errors.push(error.message); };
+  page.on('response', onResponse);
+  page.on('pageerror', onError);
   try {
     await page.goto(`${base}/t/BP360/`);
     const card = page.locator('.card[href="/issue/BP360-205"]');
@@ -45,5 +50,8 @@ async page => {
     });
     await page.screenshot({path: '/tmp/lll-368-pagination-failure.png'});
     throw new Error(`${phase}: ${error.message}\n${JSON.stringify({mutation, streamResponses, errors, dom})}`);
+  } finally {
+    page.off('response', onResponse);
+    page.off('pageerror', onError);
   }
 }
