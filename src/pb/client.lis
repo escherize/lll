@@ -144,7 +144,7 @@ fn send(method: string, path: string, payload: string) -> Result<string, string>
 /// Authenticated replayable body, shared by JSON and multipart writes.
 pub fn send_content(method: string, path: string, payload: string, content_type: string) -> Result<string, string> {
   let (cfg, src) = config.load_traced()?
-  if cfg.token == "" && strings.HasPrefix(path, "/api/collections/") {
+  if cfg.token == "" && (strings.HasPrefix(path, "/api/collections/") || strings.HasPrefix(path, "/api/lll/")) {
     return Err(not_logged_in(cfg.url, src.url == "default"))
   }
   // TASK-319: the server answers 401 to a record request whose token it

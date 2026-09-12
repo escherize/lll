@@ -1,4 +1,5 @@
 import "records"
+import "claims"
 import "go:bufio"
 import "go:encoding/json"
 import "go:fmt"
@@ -1280,94 +1281,36 @@ fn claim(input: flags.CommandInput) -> Result<(), string> {
   let issue = records.fetch_issue(resolved)?
   let key = f"{issue.expand.team.key}-{issue.number}"
 
-  let payload = match json.Marshal(
-    models.NewClaim { issue: issue.id, member: member.id },
-  ) {
-    Ok(p) => p as string,
-    Err(e) => return Err(f"encoding claim: {e}"),
+  let result = claims.acquire(issue.id, member.id).map_err(|e| {
+    if strings.Contains(e, "already claimed by") {
+      f"{key}: {e} — 'lll issue release {key}' gives it back"
+    } else { e }
+  })?
+  if result.already_owned {
+    fmt.Println(f"Claimed {key} for {result.member_name} (already yours since {display.relative(result.created)})")
+  } else {
+    fmt.Println(f"Claimed {key} for {result.member_name}")
   }
-  if let Err(e) = pb.post("/api/collections/claims/records", payload) {
-    // Ask who holds it rather than parsing PocketBase's error body: the index
-    // rejects a duplicate with one shape and its pre-flight validator with
-    // another, and a holder is the answer in both. No holder means the POST
-    // failed for some other reason, so the raw error is what to report.
-    let Ok(held) = fetch_claim(issue.id) else {
-      return Err(e)
-    }
-    let Some(holder) = held else {
-      return Err(e)
-    }
-    // Held by the caller already: that is success, not a conflict. The
-    // fleet replay hit this when task 7 cleared the assignee under a claim
-    // task 3 had made, and every later claim by the holder was refused.
-    // Re-setting the assignee is the point of claiming again.
-    if holder.member == member.id {
-      let _ = pb.patch(
-        f"/api/collections/issues/records/{issue.id}",
-        "{\"assignee\":" + json_quote(member.id)? + "}",
-      )?
-      fmt.Println(f"Claimed {key} for {member.name} (already yours since {display.relative(holder.created)})")
-      return Ok(())
-    }
-    let mut name = holder.expand.member.name
-    if name == "" { name = "someone else" }
-    return Err(
-      f"{key} is already claimed by {name} ({display.relative(holder.created)}) — 'lll issue release {key}' gives it back",
-    )
-  }
-  let _ = pb.patch(
-    f"/api/collections/issues/records/{issue.id}",
-    "{\"assignee\":" + json_quote(member.id)? + "}",
-  )?
-  fmt.Println(f"Claimed {key} for {member.name}")
   Ok(())
 }
 
-/// Give a claim back: delete the row, and clear the assignee the claim set.
-///
-/// Unowned on purpose — anyone can release anyone's claim, and the message
-/// says whose it was. There is no auth yet (ADR-1, task-32), so an ownership
-/// check would be honour-system anyway, and refusing would strand every issue
-/// whose holder never came back. Exclusivity is a property of `claim`; this is
-/// how a hold ends.
+/// Any authenticated workspace member can release an observed hold. The
+/// server atomically removes that exact claim and clears only its assignment.
 fn release(input: flags.CommandInput) -> Result<(), string> {
   let usage = "lll issue release [KEY-123]"
-  let id = input.parsed.first()
-  let resolved = resolve_id(id, usage)?
+  let resolved = resolve_id(input.parsed.first(), usage)?
   let issue = records.fetch_issue(resolved)?
   let key = f"{issue.expand.team.key}-{issue.number}"
-
-  let Some(held) = fetch_claim(issue.id)? else {
-    return Err(f"{key} is not claimed")
-  }
-  let _ = pb.delete(f"/api/collections/claims/records/{held.id}")?
-  // Only the assignee this claim wrote: an assignment made some other way is
-  // not the claim's to erase.
-  let cleared_assignee = issue.assignee == held.member
-  if cleared_assignee {
-    let _ = pb.patch(
-      f"/api/collections/issues/records/{issue.id}",
-      "{\"assignee\":\"\"}",
-    )?
-  }
-  let mut name = held.expand.member.name
-  if name == "" { name = "an unknown member" }
-  let assignment = if cleared_assignee { "cleared assignee" } else { "assignment unchanged" }
-  fmt.Println(f"Released {key} (was {name}'s); {assignment}")
+  let Some(held) = claims.fetch(issue.id)? else { return Err(f"{key} is not claimed") };
+  let result = claims.release(issue.id, held.id)?
+  let assignment = if result.cleared_assignee { "cleared assignee" } else { "assignment unchanged" }
+  fmt.Println(f"Released {key} (was {result.member_name}'s); {assignment}")
   Ok(())
 }
 
-/// The claim on one issue, if it has one, with its holder expanded. `claims`
-/// is UNIQUE on `issue`, so there is at most one row to find.
+/// Compatibility name for command/page reads; storage ownership is in claims.
 fn fetch_claim(issue_id: string) -> Result<Option<models.Claim>, string> {
-  let filter = url.QueryEscape(f"issue={query.quote(issue_id)}")
-  let mut list = models.ClaimList { .. }
-  pb.fetch(
-    f"/api/collections/claims/records?perPage=1&filter={filter}&expand=member",
-    "claims",
-    &list,
-  )?
-  Ok(list.items.get(0))
+  claims.fetch(issue_id)
 }
 
 fn delete_issue(input: flags.CommandInput) -> Result<(), string> {

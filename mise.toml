@@ -62,6 +62,7 @@ command -v lis >/dev/null || { echo "lis not found. Install it:" >&2; echo "  cu
 python3 scripts/protect_archive.py --check
 lis test
 go -C web test ./...
+go -C gopb test ./...
 python3 -m unittest discover -s scripts -p 'test_browser_poll.py'
 python3 -m unittest discover -s scripts -p 'test_check_assets.py'
 python3 -m unittest discover -s scripts -p 'test_sidecar_dependencies.py'

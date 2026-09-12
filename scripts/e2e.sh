@@ -3062,6 +3062,7 @@ PY_RACE
 # --- web board (own ephemeral PB; see e2e_web.sh) ---
 python3 scripts/test_doc_pagination.py "$LLL_ABS" "$URL"
 python3 scripts/test_export_live.py "$LLL_ABS" "$URL"
+python3 scripts/test_claims_live.py "$LLL_ABS" "$URL"
 
 # --- web board (own ephemeral PB; see e2e_web.sh) ---
 HOME="$E2E_REAL_HOME" scripts/e2e_web.sh

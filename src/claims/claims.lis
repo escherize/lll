@@ -1,0 +1,53 @@
+import "go:encoding/json"
+import "go:net/url"
+import "models"
+import "pb"
+import "query"
+
+#[json]
+pub struct Transition {
+  pub claim_id: string,
+  pub member_id: string,
+  pub member_name: string,
+  pub created: string,
+  pub already_owned: bool,
+  pub cleared_assignee: bool,
+}
+
+#[json]
+struct AcquireRequest { member: string }
+#[json]
+struct ReleaseRequest { claim_id: string }
+
+/// Claims and their assignment are one server-owned transaction. Callers
+/// resolve the actor through normal identity handling; the server verifies it.
+pub fn acquire(issue_id: string, member_id: string) -> Result<Transition, string> {
+  transact(issue_id, "claim", AcquireRequest { member: member_id })
+}
+
+pub fn release(issue_id: string, claim_id: string) -> Result<Transition, string> {
+  transact(issue_id, "release", ReleaseRequest { claim_id })
+}
+
+fn transact(issue_id: string, action: string, request: Unknown) -> Result<Transition, string> {
+  let body = json.Marshal(request).map_err(|e| f"encoding claim request: {e}")?
+  let path = f"/api/lll/issues/{url.PathEscape(issue_id)}/{action}"
+  let response = pb.post(path, body as string).map_err(|e| {
+    if pb.response_status(e) == 404 {
+      "server does not support atomic claim operations — update the server before claiming or releasing; no legacy claim writes were attempted"
+    } else { e }
+  })?
+  let mut transition = Transition { .. }
+  json.Unmarshal(response.bytes(), &transition).map_err(|e| f"decoding claim response: {e}")?
+  Ok(transition)
+}
+
+pub fn fetch(issue_id: string) -> Result<Option<models.Claim>, string> {
+  let filter = url.QueryEscape(f"issue={query.quote(issue_id)}")
+  let mut list = models.ClaimList { .. }
+  pb.fetch(
+    f"/api/collections/claims/records?perPage=1&filter={filter}&expand=member",
+    "claims", &list,
+  )?
+  Ok(list.items.get(0))
+}

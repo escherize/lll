@@ -83,6 +83,7 @@ func Serve(dataDir, addr, adminEmail, adminPassword string) error {
 
 	var issueUpdates issueWriteLocks
 	app.OnServe().BindFunc(func(e *core.ServeEvent) error {
+		registerClaimRoutes(e.Router, &issueUpdates)
 		// A direct API listener cannot infer the public board origin. Operators
 		// may advertise it explicitly; the combined board listener advertises
 		// its own origin independently, without trusting forwarded headers.
