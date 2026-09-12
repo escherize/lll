@@ -81,7 +81,6 @@ if [ -n "${LLL_DX_BINARY:-}" ] && [ ! -x "$LLL" ]; then
 fi
 if [ ! -x "$LLL" ]; then
   echo "building lll..."
-  bash scripts/lis-typedefs-workaround.sh >/dev/null 2>&1
   lis build >/dev/null || { echo "build failed" >&2; exit 1; }
 fi
 

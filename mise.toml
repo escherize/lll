@@ -31,7 +31,6 @@ env = { LC_ALL = "C", PYTHONUTF8 = "1" }
 dir = "{{config_root}}"
 run = """
 command -v lis >/dev/null || { echo "lis not found. Install it:" >&2; echo "  curl -LsSf https://github.com/ivov/lisette/releases/latest/download/lisette-installer.sh | sh" >&2; exit 1; }
-bash scripts/lis-typedefs-workaround.sh
 lis build
 """
 
@@ -86,7 +85,6 @@ env = { LC_ALL = "C", PYTHONUTF8 = "1" }
 dir = "{{config_root}}"
 run = """
 command -v lis >/dev/null || { echo "lis not found. Install it:" >&2; echo "  curl -LsSf https://github.com/ivov/lisette/releases/latest/download/lisette-installer.sh | sh" >&2; exit 1; }
-bash scripts/lis-typedefs-workaround.sh
 lis test
 go -C web test ./...
 python3 -m unittest discover -s scripts -p 'test_browser_poll.py'
