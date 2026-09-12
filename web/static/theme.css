@@ -395,8 +395,9 @@ input:focus, textarea:focus, select:focus {
 }
 .md pre { background: var(--bg-raised); border: 1px solid var(--border); border-radius: var(--radius); padding: 8px 10px; overflow-x: auto; }
 .md pre code { border: none; background: none; padding: 0; }
-.md a { color: var(--accent); text-decoration: none; }
-.md a:hover { text-decoration: underline; }
+/* Prose links share one voice in rendered Markdown, help and empty states. */
+.md a, .prose-link, .prop .v a { color: var(--accent); text-decoration: none; }
+.md a:hover, .prose-link:hover, .prop .v a:hover { text-decoration: underline; }
 .md ul, .md ol { margin: 0 0 6px; padding-left: 20px; }
 .md blockquote { margin: 0 0 6px; padding-left: 10px; border-left: 2px solid var(--border-strong); color: var(--text-2); }
 .md h1, .md h2, .md h3 { font-size: 13px; font-weight: 600; margin: 8px 0 4px; }
@@ -455,12 +456,6 @@ input:focus, textarea:focus, select:focus {
 .prop .k { width: 72px; flex: none; color: var(--text-3); font-size: 12px; }
 .prop .v { display: inline-flex; align-items: center; gap: 6px; color: var(--text-2); font-weight: 500; }
 .prop .v.cap { text-transform: capitalize; }
-/* The project is the one property that leads somewhere (/issues filtered
-   to it), so it wears the same accent the description's links wear —
-   otherwise the browser's default blue lands in a panel with no blue in
-   it, which is what shipped before this rule existed. */
-.prop .v a { color: var(--accent); text-decoration: none; }
-.prop .v a:hover { text-decoration: underline; }
 .prop select { padding: 3px 6px; font-size: 12.5px; }
 .prop form { display: inline-flex; }
 

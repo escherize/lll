@@ -440,6 +440,9 @@ stays outside page morphs. Static pages update their snapshot on reload.
 
 ### Do:
 
+- Use `prose-link` on inline help and empty-state anchors. It shares Markdown
+  link styling: team accent, no resting underline, underline on hover.
+
 - **Scope component classes.** Stylesheets share one global class namespace.
   Use names such as `.issue-desc` for the issue description and `.cr-desc`
   for a descending sort caret; a generic `.desc` once applied the description
