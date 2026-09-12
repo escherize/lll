@@ -11,6 +11,13 @@ verification and the claim-before-code workflow. Read an issue fully, claim
 it before nontrivial work, record discoveries, and close it after verification.
 <!-- /tracker pointer -->
 
+## Task-specific implementation guidance
+
+- For Go interop, text offsets, partial I/O or reusable initialization, read
+  [.claude/skills/lisette-interop/SKILL.md](.claude/skills/lisette-interop/SKILL.md).
+- For live board updates, fragment ownership, drafts or async search, read
+  [.claude/skills/datastar-fragments/SKILL.md](.claude/skills/datastar-fragments/SKILL.md).
+
 # Lisette
 
 Lisette compiles to Go. Rust-like syntax, Go runtime. No ownership, no borrowing, no lifetimes.
