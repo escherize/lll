@@ -42,8 +42,7 @@ BOARD_COOKIE="Cookie: lll_board=$BOARD_TOKEN"
 # redirect itself is asserted in the TASK-198 section below.
 wcurl() { curl -L -H "$BOARD_COOKIE" "$@"; }
 PB_LOG="$DATA_DIR/pb.log"
-SERVE_LOG="$DATA_DIR/serve.log"
-E2E_LOGS="$SERVE_LOG $PB_LOG"
+E2E_LOGS="$PB_LOG"
 BROWSER_SESSION="e2e-web-$$"
 
 # PocketBase is embedded in lll; one `lll up` is both the database and the
@@ -67,7 +66,6 @@ env -u LLL_TOKEN LLL_WEB_URL="$WEB" LLL_BOARD_TOKEN="$BOARD_TOKEN" USER=e2e HOME
   --pb-dir "$DATA_DIR/pb_data" --port "$WEB_PORT" \
   </dev/null >"$PB_LOG" 2>&1 &
 PB_PID=$!
-SERVE_PID=""
 CURL_PID=""
 cleanup() { # exit-status
   # Diagnose first: e2e_diagnose reads the logs, and e2e_end deletes the
@@ -77,7 +75,7 @@ cleanup() { # exit-status
   if command -v playwright-cli >/dev/null 2>&1; then
     playwright-cli -s="$BROWSER_SESSION" close >/dev/null 2>&1 || true
   fi
-  e2e_reap $CURL_PID $SERVE_PID $PB_PID
+  e2e_reap $CURL_PID $PB_PID
   e2e_end
 }
 e2e_trap_cleanup cleanup
