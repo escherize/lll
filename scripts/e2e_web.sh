@@ -737,6 +737,12 @@ issue_id() { # title
 "$LIN" issue create -t "Order A" >/dev/null # ENG-4
 "$LIN" issue create -t "Order B" >/dev/null # ENG-5
 "$LIN" issue create -t "Order C" >/dev/null # ENG-6
+# Render order alone also passes when every sort ties at zero. Inspect the
+# stored defaults so removing the hook cannot leave this assertion green.
+"$LIN" issue list --json | jq -e '
+  [.items[] | select(.number >= 4 and .number <= 6)] | sort_by(.number) |
+  length == 3 and (.[0].sort < .[1].sort) and (.[1].sort < .[2].sort)
+' >/dev/null || fail "new issues must receive strictly increasing stored sort values"
 board=$(wcurl -sf "$WEB/")
 got=$(col_order "$board" todo)
 [ "$got" = "ENG-4,ENG-5,ENG-6" ] || fail "new issues in creation order: got '$got'"
