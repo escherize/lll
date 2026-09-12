@@ -352,7 +352,7 @@ pub fn issue_watch_spec() -> Slice<flags.Flag> {
       alias: "--for",
       value: true,
       hint: "text",
-      help: "exit 0 once a comment containing text arrives (or is already\nthere) - the blocking primitive for waiting on a partner",
+      help: "exit 0 once a comment containing text arrives (or is already\nthere); --json reports an existing match as action=snapshot",
       ..,
     },
     flags.Flag {

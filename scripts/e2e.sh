@@ -1212,6 +1212,8 @@ assert_contains "$out" "no comment containing 'never-coming'" "--timeout names w
 out=$(LLL_URL=$URL "$LIN" issue comment "$WKEY")
 assert_contains "$out" "lll issue watch $WKEY --until TEXT" "a comment listing points at watch --until"
 
+python3 scripts/test_watch_until.py "$LLL_ABS" "$URL" "$WKEY"
+
 # --- lll search: full text over issues, comments and docs, ranked, with context (LLL-96) ---
 SKEY=$(env LLL_URL=$URL LLL_TEAM=ENG "$LIN" issue create -t "Rail favorites go stale" -d "First line of context.
 The zebra crossing is only mentioned in this description.

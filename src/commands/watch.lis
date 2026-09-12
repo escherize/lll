@@ -175,32 +175,45 @@ pub fn issue_watch(args: Slice<string>) -> Result<(), string> {
     let Ok(t) = strconv.Atoi(p.one("--timeout")) else {
       return Err(f"--timeout takes seconds, got '{p.one("--timeout")}'")
     }
+    if t <= 0 { return Err("--timeout must be a positive number of seconds") }
+    if time.ParseDuration(f"{t}s").is_err() { return Err("--timeout is too large") }
     timeout = t
   }
+  if p.given("--until") && until == "" { return Err("--until requires nonempty text") }
   if timeout > 0 && until == "" {
     return Err("--timeout only means something with --until")
   }
+  if timeout == 0 { return run_issue_watch(id, json_mode, until, usage) }
+
+  // The CLI owns this worker's lifetime. A deadline covers reads and the
+  // subscription handshake too, not just the final receive loop. Returning
+  // ends the one-command process, closing its stream and pending requests.
+  let completed = Channel.new<Result<(), string>>()
+  let deadline = Channel.new<bool>()
+  task { let _ = completed.send(run_issue_watch(id, json_mode, until, usage)) }
+  task {
+    time.Sleep(time.Duration(timeout as int64) * time.Second)
+    let _ = deadline.send(true)
+  }
+  let target = if id == "" { "the inferred issue" } else { id }
+  let mut outcome: Result<(), string> = Err(f"no comment containing '{until}' on {target} within {timeout}s")
+  select {
+    match completed.receive() {
+      Some(result) => outcome = result,
+      None => (),
+    },
+    match deadline.receive() {
+      Some(_) => (),
+      None => (),
+    },
+  }
+  outcome
+}
+
+fn run_issue_watch(id: string, json_mode: bool, until: string, usage: string) -> Result<(), string> {
   let resolved = resolve_id(id, usage)?
   let issue = fetch_issue(resolved)?
   let key = f"{issue.expand.team.key}-{issue.number}"
-
-  // TASK-322: --until is the blocking primitive agents polled for. The
-  // comment may have landed before the watch started, so the list is
-  // checked first; a race here would block forever on a comment that is
-  // already there.
-  if until != "" {
-    let existing = fetch_comments(issue.id)?
-    let mut n = 0
-    for c in existing {
-      n += 1
-      if strings.Contains(c.body, until) {
-        let mut author = c.expand.author.name
-        if author == "" { author = "anon" }
-        fmt.Println(f"already there: #{n} by {author}: {first_line(c.body)}")
-        return Ok(())
-      }
-    }
-  }
 
   let issue_topic = realtime.topic_with_options(
     f"issues/{issue.id}",
@@ -217,6 +230,28 @@ pub fn issue_watch(args: Slice<string>) -> Result<(), string> {
   // No refresh hook: watch rides the operator's LLL_TOKEN and cannot
   // re-mint anything; the reconnect loop retries loudly instead.
   let ch = realtime.subscribe(pb.base_url()?, [issue_topic, comments_topic], None)?
+  // Subscribe before reading the initial snapshot: comments created during
+  // setup are either in this snapshot or queued on the accepted stream.
+  if until != "" {
+    let existing = fetch_comments(issue.id)?
+    let mut n = 0
+    for c in existing {
+      n += 1
+      if comment_matches_until(until, "snapshot", c.body) {
+        if json_mode {
+          let data = match json.Marshal(CommentEvent { action: "snapshot", record: c }) {
+            Ok(data) => data as string,
+            Err(e) => return Err(f"encoding comment snapshot: {e}"),
+          }
+          fmt.Println(ndjson_line(realtime.Event { topic: "comments", data }))
+        } else {
+          let author = if c.expand.author.name == "" { "anon" } else { c.expand.author.name }
+          fmt.Println(f"already there: #{n} by {author}: {first_line(c.body)}")
+        }
+        return Ok(())
+      }
+    }
+  }
   fmt.Fprintln(os.Stderr, f"watch: ready for {key} (issue and comment subscriptions accepted)")
   if !json_mode && until != "" {
     fmt.Println(f"Watching {key} until a comment contains '{until}'")
@@ -224,69 +259,35 @@ pub fn issue_watch(args: Slice<string>) -> Result<(), string> {
     fmt.Println(f"Watching {key}: {issue.title}")
   }
 
-  // --timeout: a side task posts once after the deadline; the select below
-  // takes whichever comes first.
-  let deadline = Channel.new<bool>()
-  if timeout > 0 {
-    task {
-      time.Sleep(time.Duration(timeout as int64) * time.Second)
-      let _ = deadline.send(true)
-    }
-  }
-
   // The fetched issue seeds the diff, so the very first update already
   // renders as a transition.
   let mut prev = snapshot(issue)
   loop {
-    let mut next: Option<realtime.Event> = None
-    let mut timed_out = false
-    select {
-      match ch.receive() {
-        Some(ev) => next = Some(ev),
-        None => next = None,
-      },
-      match deadline.receive() {
-        Some(_) => timed_out = true,
-        None => timed_out = true,
-      },
-    }
-    if timed_out {
-      return Err(f"no comment containing '{until}' on {key} within {timeout}s")
-    }
-    let Some(ev) = next else {
-      return Ok(())
-    }
-    if json_mode {
-      fmt.Println(ndjson_line(ev))
-      if ev.topic != "comments" {
-        let mut event = IssueEvent { .. }
-        if let Err(e) = json.Unmarshal(ev.data.bytes(), &event) {
-          return Err(f"decoding realtime event: {e}")
-        }
-        if event.action == "delete" { return Ok(()) }
-      }
-      continue
-    }
+    let Some(ev) = ch.receive() else { return Ok(()) }
     let stamp = time.Now().Format("15:04:05")
     if ev.topic == "comments" {
       let mut event = CommentEvent { .. }
       if let Err(e) = json.Unmarshal(ev.data.bytes(), &event) {
         return Err(f"decoding realtime event: {e}")
       }
-      // Only comment creates are narrated; edits and deletions of comments
-      // are not part of the issue's activity stream.
-      if event.action != "create" { continue }
-      let mut author = event.record.expand.author.name
-      if author == "" { author = "anon" }
-      fmt.Println(
-        f"{stamp} comment by {author}: {first_line(event.record.body)}",
-      )
-      if until != "" && strings.Contains(event.record.body, until) { return Ok(()) }
+      let matched = comment_matches_until(until, event.action, event.record.body)
+      if json_mode {
+        fmt.Println(ndjson_line(ev))
+      } else if event.action == "create" || matched {
+        let author = if event.record.expand.author.name == "" { "anon" } else { event.record.expand.author.name }
+        fmt.Println(f"{stamp} comment by {author}: {first_line(event.record.body)}")
+      }
+      if matched { return Ok(()) }
       continue
     }
     let mut event = IssueEvent { .. }
     if let Err(e) = json.Unmarshal(ev.data.bytes(), &event) {
       return Err(f"decoding realtime event: {e}")
+    }
+    if json_mode {
+      fmt.Println(ndjson_line(ev))
+      if event.action == "delete" { return Ok(()) }
+      continue
     }
     match event.action {
       "delete" => {
@@ -365,4 +366,9 @@ fn ndjson_line(ev: realtime.Event) -> string {
 
 fn first_line(body: string) -> string {
   body.split("\n")[0]
+}
+
+/// One completion policy for initial snapshots, text streams and JSON streams.
+fn comment_matches_until(text: string, action: string, body: string) -> bool {
+  text != "" && ["snapshot", "create", "update"].contains(action) && strings.Contains(body, text)
 }
