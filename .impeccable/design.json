@@ -1,6 +1,6 @@
 {
   "schemaVersion": 2,
-  "generatedAt": "2026-08-28T00:00:00Z",
+  "generatedAt": "2026-09-12T13:07:58.948550+00:00",
   "title": "Design System: lll",
   "extensions": {
     "colorMeta": {
@@ -130,6 +130,14 @@
       "micro": {
         "displayName": "Micro",
         "purpose": "Metadata steps 8.5-12.5px: avatar initials (8.5), mark letter (10), chips (10.5), card key rows (11.5), comment meta/prop keys (12), selects and flash (12.5). Tabular numerals for keys/counts."
+      },
+      "code": {
+        "displayName": "Code",
+        "purpose": "System monospace at 12px; monochrome code uses three text voices, weight and italic."
+      },
+      "emoji": {
+        "displayName": "Issue marker",
+        "purpose": "Author-chosen issue emoji is the explicit exception to drawn system icons."
       }
     },
     "roundedMeta": {
@@ -148,17 +156,23 @@
     },
     "shadows": [
       {
-        "name": "card-whisper",
+        "name": "shadow-card",
         "value": "0 1px 2px rgba(0, 0, 0, 0.25)",
-        "purpose": "The only resting shadow; under board cards."
+        "purpose": "Approved resting shadow for cards, card previews and emoji picker; consumed as var(--shadow-card)."
       },
       {
         "name": "focus-glow",
-        "value": "0 0 0 3px rgba(240, 136, 62, 0.16)",
-        "purpose": "Input focus ring, paired with an orange border."
+        "value": "0 0 0 3px var(--accent-dim)",
+        "purpose": "Input focus ring paired with the team accent border."
       }
     ],
-    "motion": [],
+    "motion": [
+      {
+        "name": "card-preview-opacity",
+        "value": "120ms ease",
+        "purpose": "Card preview opacity transition; visibility waits 120ms on hide."
+      }
+    ],
     "breakpoints": [
       {
         "name": "compact",
@@ -189,7 +203,7 @@
       "refersTo": "card",
       "description": "Dense issue card: micro key row + priority, two-line title, chips left / avatar right.",
       "html": "<a class=\"ds-card\" href=\"#\"><span class=\"ds-card-row1\">ENG-142<span class=\"ds-card-flex\"></span><svg width=\"14\" height=\"14\" viewBox=\"0 0 14 14\" style=\"color:#828994\"><rect x=\"2\" y=\"8\" width=\"2.6\" height=\"4\" rx=\"1\" fill=\"currentColor\"/><rect x=\"5.7\" y=\"5.5\" width=\"2.6\" height=\"6.5\" rx=\"1\" fill=\"currentColor\"/><rect x=\"9.4\" y=\"3\" width=\"2.6\" height=\"9\" rx=\"1\" fill=\"currentColor\"/></svg></span><span class=\"ds-card-title\">Board columns jump when a card morphs mid-scroll</span><span class=\"ds-card-row3\"><span class=\"ds-chip\"><span class=\"ds-chip-dot\" style=\"background:#4cb782\"></span>bug</span><span class=\"ds-avatar\">LB</span></span></a>",
-      "css": ".ds-card { display: block; background: var(--bg-raised, #191c20); border: 1px solid var(--border, rgba(255,255,255,0.07)); border-radius: 6px; padding: 6px 8px; text-decoration: none; color: var(--text, #e8eaed); font: 400 13px/1.45 'Inter Variable', system-ui, sans-serif; box-shadow: 0 1px 2px rgba(0,0,0,0.25); max-width: 240px; } .ds-card:hover { border-color: var(--border-strong, rgba(255,255,255,0.12)); background: var(--bg-hover, #1d2126); } .ds-card-row1 { display: flex; align-items: center; gap: 6px; color: var(--text-3, #828994); font-size: 11.5px; font-weight: 500; font-variant-numeric: tabular-nums; } .ds-card-flex { flex: 1; } .ds-card-title { display: block; margin-top: 2px; line-height: 1.35; font-weight: 500; } .ds-card-row3 { display: flex; align-items: center; gap: 5px; margin-top: 5px; min-height: 14px; } .ds-card-row3 .ds-avatar { margin-left: auto; } .ds-chip { display: inline-flex; align-items: center; gap: 5px; font-size: 10.5px; color: var(--text-2, #9299a2); border: 1px solid var(--border, rgba(255,255,255,0.07)); border-radius: 999px; padding: 0 7px 0 5px; } .ds-chip-dot { width: 7px; height: 7px; border-radius: 50%; } .ds-avatar { width: 18px; height: 18px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; font-size: 8.5px; font-weight: 700; background: #7cc0e8; color: #0a1620; }"
+      "css": ".ds-card { display: block; background: var(--bg-raised, #191c20); border: 1px solid var(--border, rgba(255,255,255,0.07)); border-radius: 6px; padding: 6px 8px; text-decoration: none; color: var(--text, #e8eaed); font: 400 13px/1.45 'Inter Variable', system-ui, sans-serif; box-shadow: var(--shadow-card, 0 1px 2px rgba(0,0,0,0.25)); max-width: 240px; } .ds-card:hover { border-color: var(--border-strong, rgba(255,255,255,0.12)); background: var(--bg-hover, #1d2126); } .ds-card-row1 { display: flex; align-items: center; gap: 6px; color: var(--text-3, #828994); font-size: 11.5px; font-weight: 500; font-variant-numeric: tabular-nums; } .ds-card-flex { flex: 1; } .ds-card-title { display: block; margin-top: 2px; line-height: 1.35; font-weight: 500; } .ds-card-row3 { display: flex; align-items: center; gap: 5px; margin-top: 5px; min-height: 14px; } .ds-card-row3 .ds-avatar { margin-left: auto; } .ds-chip { display: inline-flex; align-items: center; gap: 5px; font-size: 10.5px; color: var(--text-2, #9299a2); border: 1px solid var(--border, rgba(255,255,255,0.07)); border-radius: 999px; padding: 0 7px 0 5px; } .ds-chip-dot { width: 7px; height: 7px; border-radius: 50%; } .ds-avatar { width: 18px; height: 18px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; font-size: 8.5px; font-weight: 700; background: #7cc0e8; color: #0a1620; }"
     },
     {
       "name": "Text Input",
@@ -211,9 +225,9 @@
       "name": "Rail Navigation",
       "kind": "nav",
       "refersTo": "navigation",
-      "description": "Left rail: orange-gradient workspace mark plus icon links; active steps up the tonal ladder.",
+      "description": "Desktop navigation rail; at 720px and below the app uses the shared navigation toggle and keyboard-close behavior documented in DESIGN.md.",
       "html": "<nav class=\"ds-rail\"><div class=\"ds-workspace\"><span class=\"ds-mark\">L</span> lll</div><a class=\"ds-rail-link ds-active\" href=\"#\"><svg width=\"14\" height=\"14\" viewBox=\"0 0 14 14\"><rect x=\"1.5\" y=\"2.5\" width=\"3.4\" height=\"9\" rx=\"1\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.3\"/><rect x=\"5.8\" y=\"2.5\" width=\"3.4\" height=\"6.5\" rx=\"1\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.3\"/><rect x=\"10.1\" y=\"2.5\" width=\"3.4\" height=\"4.5\" rx=\"1\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.3\"/></svg> Board</a></nav>",
-      "css": ".ds-rail { width: 220px; background: var(--bg-rail, #111316); border-right: 1px solid var(--border, rgba(255,255,255,0.07)); padding: 14px 10px; display: flex; flex-direction: column; gap: 2px; font: 400 13px/1.45 'Inter Variable', system-ui, sans-serif; } .ds-workspace { display: flex; align-items: center; gap: 8px; padding: 4px 8px 14px; font-weight: 600; letter-spacing: -0.01em; color: var(--text, #e8eaed); } .ds-mark { width: 18px; height: 18px; border-radius: 5px; background: linear-gradient(135deg, var(--accent, #f0883e) 0%, #c96a25 100%); display: inline-flex; align-items: center; justify-content: center; color: var(--accent-ink, #1a0f06); font-size: 10px; font-weight: 800; } .ds-rail-link { display: flex; align-items: center; gap: 8px; padding: 5px 8px; border-radius: 6px; color: var(--text-2, #9299a2); text-decoration: none; font-weight: 500; } .ds-rail-link:hover { background: var(--bg-hover, #1d2126); color: var(--text, #e8eaed); } .ds-rail-link.ds-active { background: var(--bg-raised, #191c20); color: var(--text, #e8eaed); }"
+      "css": ".ds-rail { width: 220px; background: var(--bg-rail, #111316); border-right: 1px solid var(--border, rgba(255,255,255,0.07)); padding: 14px 10px; display: flex; flex-direction: column; gap: 2px; font: 400 13px/1.45 'Inter Variable', system-ui, sans-serif; } .ds-workspace { display: flex; align-items: center; gap: 8px; padding: 4px 8px 14px; font-weight: 600; letter-spacing: -0.01em; color: var(--text, #e8eaed); } .ds-mark { width: 18px; height: 18px; border-radius: 5px; background: linear-gradient(135deg, var(--accent, #f0883e) 0%, var(--accent-deep, #c96a25) 100%); display: inline-flex; align-items: center; justify-content: center; color: var(--accent-ink, #1a0f06); font-size: 10px; font-weight: 800; } .ds-rail-link { display: flex; align-items: center; gap: 8px; padding: 5px 8px; border-radius: 6px; color: var(--text-2, #9299a2); text-decoration: none; font-weight: 500; } .ds-rail-link:hover { background: var(--bg-hover, #1d2126); color: var(--text, #e8eaed); } .ds-rail-link.ds-active { background: var(--bg-raised, #191c20); color: var(--text, #e8eaed); }"
     },
     {
       "name": "State Icons",
@@ -227,12 +241,26 @@
       "kind": "custom",
       "description": "Properties panel row: 72px gray key beside a 500-weight value with icon.",
       "html": "<div class=\"ds-props\"><h3 class=\"ds-props-h\">Properties</h3><div class=\"ds-prop\"><span class=\"ds-prop-k\">Priority</span><span class=\"ds-prop-v\"><svg width=\"14\" height=\"14\" viewBox=\"0 0 14 14\" style=\"color:#828994\"><rect x=\"2\" y=\"8\" width=\"2.6\" height=\"4\" rx=\"1\" fill=\"currentColor\"/><rect x=\"5.7\" y=\"5.5\" width=\"2.6\" height=\"6.5\" rx=\"1\" fill=\"currentColor\"/><rect x=\"9.4\" y=\"3\" width=\"2.6\" height=\"9\" rx=\"1\" fill=\"currentColor\" opacity=\"0.25\"/></svg> Medium</span></div></div>",
-      "css": ".ds-props { width: 260px; padding: 16px 18px; border-left: 1px solid var(--border, rgba(255,255,255,0.07)); font: 400 13px/1.45 'Inter Variable', system-ui, sans-serif; color: var(--text, #e8eaed); } .ds-props-h { margin: 0 0 14px; font-size: 11px; font-weight: 600; color: var(--text-3, #828994); letter-spacing: 0.02em; text-transform: uppercase; } .ds-prop { display: flex; align-items: center; gap: 8px; min-height: 24px; } .ds-prop-k { width: 72px; flex: none; color: var(--text-3, #828994); font-size: 12px; } .ds-prop-v { display: inline-flex; align-items: center; gap: 6px; color: var(--text-2, #9299a2); font-weight: 500; }"
+      "css": ".ds-props { width: 280px; padding: 16px 18px; border-left: 1px solid var(--border, rgba(255,255,255,0.07)); font: 400 13px/1.45 'Inter Variable', system-ui, sans-serif; color: var(--text, #e8eaed); } .ds-props-h { margin: 0 0 14px; font-size: 11px; font-weight: 600; color: var(--text-3, #828994); letter-spacing: 0.02em; text-transform: uppercase; } .ds-prop { display: flex; align-items: center; gap: 8px; min-height: 24px; } .ds-prop-k { width: 72px; flex: none; color: var(--text-3, #828994); font-size: 12px; } .ds-prop-v { display: inline-flex; align-items: center; gap: 6px; color: var(--text-2, #9299a2); font-weight: 500; }"
+    },
+    {
+      "name": "Prose Link",
+      "kind": "custom",
+      "description": "Inline help and empty-state links share the Markdown accent and hover underline.",
+      "html": "<p class=\"ds-prose\">Read the <a href=\"#guide\">guide</a>.</p>",
+      "css": ".ds-prose { color: var(--text, #e8eaed); font: 400 13px/1.45 \"Inter Variable\", system-ui, sans-serif; } .ds-prose a { color: var(--accent, #f0883e); text-decoration: none; } .ds-prose a:hover { text-decoration: underline; }"
+    },
+    {
+      "name": "Code Block",
+      "kind": "custom",
+      "description": "Monochrome fenced code: raised surface, scrolling, three text voices and keyword weight.",
+      "html": "<pre class=\"ds-code\"><code><span class=\"ds-comment\">// Shared record lookup</span>\n<span class=\"ds-keyword\">fn</span> read() {\n  <span class=\"ds-name\">fetch_issue</span>(<span class=\"ds-value\">\"ENG-1\"</span>)\n}</code></pre>",
+      "css": ".ds-code { background: var(--bg-raised, #191c20); border: 1px solid var(--border, rgba(255,255,255,0.07)); border-radius: 6px; padding: 8px 10px; overflow-x: auto; tab-size: 2; } .ds-code code { color: var(--text-2, #9299a2); font: 400 12px/1.45 ui-monospace, SFMono-Regular, Menlo, monospace; } .ds-comment { color: var(--text-3, #828994); font-style: italic; } .ds-keyword { color: var(--text, #e8eaed); font-weight: 600; } .ds-name, .ds-value { color: var(--text, #e8eaed); }"
     }
   ],
   "narrative": {
     "northStar": "The Instrument Panel",
-    "overview": "lll is a dark, dense, quiet issue board: every issue's state legible in one glance, refusing the airy marketing-card look of generic kanban tools. The world is Linear's grammar rebuilt in lll's own materials \u2014 a near-black ground, hairline white-alpha borders, one small variable typeface at 13px, muted gray text, and semantic state color carried almost entirely by small drawn icons. Color is rationed: the single ember orange accent appears only where the user can act and on urgent priority, and errors get one voice of their own \u2014 a muted red flash strip patched in over SSE. Depth is tonal, not shadowed: five closely-spaced dark surfaces layer the UI, and the one real shadow is a 1px whisper under cards.",
+    "overview": "lll is a dark, dense, quiet issue board: every issue's state legible in one\nglance, refusing the airy marketing-card look of generic kanban tools. The\nworld is Linear's grammar rebuilt in lll's own materials — a near-black ground,\nhairline white-alpha borders, one small variable typeface at 13px, muted gray\ntext, and semantic state color carried almost entirely by small drawn icons.\nChrome recedes; the data is the interface.\n\nColor is rationed. The single accent, an ember orange (#f0883e), appears only\nwhere the user can act (primary buttons, focus rings, selection, the workspace\nmark) and on exactly one piece of data: urgent priority. Errors get one voice\nof their own — a muted red flash strip patched in over SSE. Everything else\nspeaks in three grays and the six semantic state hues. Depth is tonal, not\nshadowed: five closely-spaced dark surfaces layer the UI, and the one real\nshadow is a 1px whisper under cards.\n\nNote: PRODUCT.md's brand commitment named a teal accent; the shipped build is\norange throughout (tokens, comp, icons). Orange #f0883e is canonical.",
     "keyCharacteristics": [
       "Dark-only; near-black tonal surfaces, no light theme.",
       "Compact density: 13px base type, 5-8px internal padding, 18px avatars.",
@@ -245,7 +273,7 @@
     "rules": [
       {
         "name": "The Ember Budget Rule",
-        "body": "Orange means \"you can act here\" or \"urgent\" \u2014 nothing else. Never use it for decoration, emphasis, headings, or non-urgent data.",
+        "body": "Orange means \"you can act here\" or \"urgent\" — nothing else. Never use it for decoration, emphasis, headings, or non-urgent data.",
         "section": "colors"
       },
       {
@@ -255,12 +283,12 @@
       },
       {
         "name": "The Icon-Carries-Color Rule",
-        "body": "State color reaches the page only through the 14px state icon (color: var(--st-*) + currentColor). Text next to the icon stays gray; no colored text, no colored column headers, no tinted card backgrounds.",
+        "body": "State color reaches the page only through the 14px state icon (`color: var(--st-*)` + `currentColor`). Text next to the icon stays gray; no colored text, no colored column headers, no tinted card backgrounds.",
         "section": "colors"
       },
       {
         "name": "The White-Alpha Border Rule",
-        "body": "Borders are translucent white (0.07 structural, 0.12 interactive), so they read correctly over every tonal surface. No opaque border grays. The one exception is the error flash, whose border is the red at 0.4 alpha \u2014 still translucent, never opaque.",
+        "body": "Borders are translucent white (0.07 structural, 0.12 interactive), so they read correctly over every tonal surface. No opaque border grays. The one exception is the error flash, whose border is the red at 0.4 alpha — still translucent, never opaque.",
         "section": "colors"
       },
       {
@@ -270,40 +298,47 @@
       },
       {
         "name": "The Tabular Numerals Rule",
-        "body": "Issue keys, counts, and any aligned numbers set font-variant-numeric: tabular-nums.",
+        "body": "Issue keys, counts, and any aligned numbers set `font-variant-numeric: tabular-nums`.",
         "section": "typography"
       },
       {
         "name": "The Stable Id Rule",
-        "body": "#board, #issue-detail, and #comments are SSE morph boundaries; cards are #issue-{id}, columns #col-{state}, comments #comment-{id}. New surfaces must keep ids stable and semantic \u2014 Datastar morphs by id, and agents are first-class consumers of the markup.",
+        "body": "`#board`, `#issue-detail`, and `#comments` are SSE morph boundaries; cards are `#issue-{id}`, columns `#col-{state}`, comments `#comment-{id}`. New surfaces must keep ids stable and semantic — Datastar morphs by id, and agents are first-class consumers of the markup.",
         "section": "layout"
       },
       {
         "name": "The Tonal Ladder Rule",
         "body": "New surfaces pick a rung on the existing ladder; never invent a new dark gray, and never use large soft drop shadows.",
-        "section": "elevation"
+        "section": "elevation & depth"
       },
       {
         "name": "The Drawn Icon Rule",
-        "body": "Icons are drawn inline SVG in the shared sprite \u2014 never icon fonts, emoji, or third-party icon packages. New icons match the 14px grid, ~1.5px round-capped strokes, and currentColor.",
+        "body": "Icons are drawn inline SVG in the shared sprite — never icon fonts, emoji, or third-party icon packages. New icons match the 14px grid, ~1.5px round-capped strokes, and `currentColor`.",
         "section": "shapes"
+      },
+      {
+        "name": "Code and Diagrams",
+        "body": "Code belongs to the prose surface, not a separate editor theme. Inline code\nuses the system monospace stack at 12px, a raised background, a hairline border,\nand 4px rounding. Fenced blocks use the same raised surface with the standard\n6px radius, 8px/10px padding, and horizontal scrolling; their inner code adds\nno second background or border.\n\nSyntax highlighting is monochrome. Chroma emits classes on the server; the\n`.md .chroma` rules in `web/static/theme.css` assign the existing three text\nvoices. Ordinary code uses `--text-2`; comments use italic `--text-3`;\nkeywords use `--text` at weight 600. Names, strings, and numbers use `--text`;\noperators and punctuation recede to `--text-3`. Do not add a language-specific\nrainbow palette. Unknown fences remain plain code, and language guessing is\ndisabled. Code content remains escaped rather than interpreted as HTML.\n\nMermaid diagrams are another reading surface. Use Mermaid's base theme with\nthe existing neutral tokens: raised/hover/panel fills, `--border-strong` edges,\n`--text` labels, and `--text-3` connecting lines. Labels inherit the page font\nat 13px. Keep the token mapping in `web/static/mermaid-init.js`; do not maintain\nan unrelated diagram palette. The rendered diagram replaces its code-block\nframe, and its SVG fits the available width with automatic height.\n\nThe vendored Mermaid renderer loads only when a Mermaid fence is present;\nstrict security mode stays enabled. Issue/comment updates can introduce new\nfences, so rendering also handles DOM changes without rerendering existing\ndiagrams. These are implementation constraints of the documented treatment,\nnot a reason to add a persistent stream or a new visual language to prose.",
+        "section": "components"
       }
     ],
     "dos": [
-      "Do route every color through the :root custom properties in theme.css; the tokens are the design system, and SSE-morphed fragments must inherit them.",
-      "Do keep ids stable and semantic on any element inside a morph boundary (#board, #issue-detail, #comments).",
-      "Do express state with the drawn circle icons and priority with the bar icons \u2014 the icon carries the hue, the adjacent text stays gray.",
-      "Do surface failures through the flash strip's single red voice; hide it when there is nothing to report.",
-      "Do use font-variant-numeric: tabular-nums for keys and counts.",
-      "Do step one rung up the tonal ladder for hover, and pair every surface with a white-alpha hairline."
+      "Use `prose-link` on inline help and empty-state anchors. It shares Markdown link styling: team accent, no resting underline, underline on hover.",
+      "**Scope component classes.** Stylesheets share one global class namespace. Use names such as `.issue-desc` for the issue description and `.cr-desc` for a descending sort caret; a generic `.desc` once applied the description block's 24px margin to an icon. Keep shared utilities explicit and intentional.",
+      "**Do** route every color through the `:root` custom properties in theme.css; the tokens are the design system, and SSE-morphed fragments must inherit them.",
+      "**Do** keep ids stable and semantic on any element inside a morph boundary (`#board`, `#issue-detail`, `#comments`).",
+      "**Do** express state with the drawn circle icons and priority with the bar icons — the icon carries the hue, the adjacent text stays gray.",
+      "**Do** surface failures through the flash strip's single red voice; hide it when there is nothing to report.",
+      "**Do** use `font-variant-numeric: tabular-nums` for keys and counts.",
+      "**Do** step one rung up the tonal ladder for hover, and pair every surface with a white-alpha hairline."
     ],
     "donts": [
-      "Don't spend orange on anything except interactive affordances and the urgent priority icon.",
-      "Don't use red outside the flash strip \u2014 no inline error text, no red icons, no second error treatment.",
-      "Don't introduce a second typeface, type above 19px, or uppercase outside the sidebar section-label register.",
-      "Don't add drop shadows beyond the card whisper, or invent new dark grays off the ladder.",
-      "Don't use icon fonts, emoji glyphs, or imported icon packs; draw new icons into the shared sprite.",
-      "Don't add a light theme or theme switching; the world is dark-only."
+      "**Don't** spend orange on anything except interactive affordances and the urgent priority icon.",
+      "**Don't** use red outside the flash strip — no inline error text, no red icons, no second error treatment.",
+      "**Don't** introduce a second typeface, type above 19px, or uppercase outside the sidebar section-label register.",
+      "**Don't** add drop shadows beyond the card whisper, or invent new dark grays off the ladder.",
+      "**Don't** use icon fonts, emoji glyphs, or imported icon packs; draw new icons into the shared sprite. One exception: the per-issue emoji, a marker the author picks for one issue. System iconography — state, priority, navigation — must inherit `currentColor` for the Icon-Carries-Color Rule and stay legible at 14px next to hairline strokes, and emoji are full-colour bitmaps that ignore the palette and redraw themselves per platform. A personal marker is the opposite category: arbitrary colour is the whole point of it, and it spends nothing from the Ember Budget because it is not an affordance. The exception covers that field and nothing else.",
+      "**Don't** add a light theme or theme switching; the world is dark-only."
     ]
   }
 }
