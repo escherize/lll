@@ -16,7 +16,8 @@ on:
 
 concurrency:
   group: gate-${{ github.ref }}
-  cancel-in-progress: true
+  # Never interrupt a production deployment midway through its rollout.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions:
   contents: read
@@ -25,6 +26,7 @@ jobs:
   gate:
     name: gate
     runs-on: macos-14
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
 
@@ -49,7 +51,84 @@ jobs:
           curl -LsSf https://github.com/ivov/lisette/releases/download/lisette-v0.12.0/lisette-installer.sh | sh
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
 
-      # THE failing step: build + unit tests + full e2e (~75s). A red gate
-      # blocks the PR.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Install browser tooling
+        run: |
+          npm install -g @playwright/cli@0.1.13
+          playwright-cli install-browser chrome
+
       - name: gate
-        run: mise run gate
+        run: |
+          command -v playwright-cli
+          mise run gate
+
+      - name: Prepare portable deployment context
+        run: |
+          mkdir "$RUNNER_TEMP/deploy-context"
+          mise exec -- bash scripts/prepare-deploy-context.sh "$RUNNER_TEMP/deploy-context"
+          tar -czf "$RUNNER_TEMP/deploy-context.tar.gz" -C "$RUNNER_TEMP/deploy-context" .
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: deploy-context
+          path: ${{ runner.temp }}/deploy-context.tar.gz
+          retention-days: 7
+          if-no-files-found: error
+
+  linux:
+    name: Linux container and browser gate
+    needs: gate
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: deploy-context
+          path: ${{ runner.temp }}
+      - name: Unpack the verified source context
+        run: tar -xzf "$RUNNER_TEMP/deploy-context.tar.gz" -C "$GITHUB_WORKSPACE"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install browser tooling
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y jq
+          npm install -g @playwright/cli@0.1.13
+          playwright-cli install-browser chrome --with-deps
+      - name: Build the production Dockerfile on Linux
+        run: |
+          docker build -t lll-ci .
+          container=$(docker create lll-ci)
+          trap 'docker rm "$container" >/dev/null' EXIT
+          docker cp "$container:/app/target/.lisette/bin/lll" "$RUNNER_TEMP/lll-linux"
+          "$RUNNER_TEMP/lll-linux" --version
+      - name: Exercise the Linux artifact through the board and realtime browser suite
+        run: bash scripts/e2e_web.sh --prebuilt "$RUNNER_TEMP/lll-linux" --require-browser
+
+  deploy:
+    name: Deploy verified main to Fly
+    needs: [gate, linux]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: deploy-context
+          path: ${{ runner.temp }}
+      - name: Unpack the verified source context
+        run: tar -xzf "$RUNNER_TEMP/deploy-context.tar.gz" -C "$GITHUB_WORKSPACE"
+      - uses: superfly/flyctl-actions/setup-flyctl@master
+      - name: Deploy
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+        run: |
+          if [ -z "$FLY_API_TOKEN" ]; then
+            echo 'Configure the repository FLY_API_TOKEN secret with an app-scoped Fly deploy token; see docs/ci-deployment.md.' >&2
+            exit 1
+          fi
+          flyctl deploy --remote-only --config fly.toml .

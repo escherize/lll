@@ -34,7 +34,7 @@
 FROM golang:1.27-alpine AS build
 COPY . /src
 WORKDIR /src/target
-RUN go build -o .lisette/bin/lll .
+RUN CGO_ENABLED=0 go build -o .lisette/bin/lll .
 
 # --- runtime stage: the checkout paths + the built binary ---
 FROM alpine:3.20

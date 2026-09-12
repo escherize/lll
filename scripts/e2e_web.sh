@@ -21,6 +21,20 @@
 # Standalone (boots its own PB), also invoked by e2e.sh.
 set -euo pipefail
 . "$(dirname "$0")/lib.sh"   # free_port, wait_ok, fail, assert_*, e2e_begin/end
+# A Linux/release artifact can exercise exactly this suite without Lisette.
+LIN=""
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --prebuilt)
+      [ "$#" -ge 2 ] && [ -x "$2" ] || { echo "--prebuilt requires an executable" >&2; exit 2; }
+      LIN=$(python3 -c 'import os,sys; print(os.path.abspath(sys.argv[1]))' "$2")
+      shift 2 ;;
+    --require-browser)
+      command -v playwright-cli >/dev/null || { echo "browser verification requires playwright-cli" >&2; exit 1; }
+      shift ;;
+    *) echo "usage: bash scripts/e2e_web.sh [--prebuilt BINARY] [--require-browser]" >&2; exit 2 ;;
+  esac
+done
 e2e_begin
 
 PB_PORT=$(free_port 20000 39999)
@@ -50,7 +64,10 @@ BROWSER_SESSION="e2e-web-$$"
 
 # PocketBase is embedded in lll; one `lll up` is both the database and the
 # board this suite exercises. Built here because it has to exist first.
-lis build >/dev/null
+if [ -z "$LIN" ]; then
+  lis build >/dev/null
+  LIN="$PWD/target/.lisette/bin/lll"
+fi
 
 # TASK-227 (the half of TASK-187 this suite never got): pin HOME for the rest
 # of the run, AFTER lis build so the lis/go/mise caches under the real HOME
@@ -60,7 +77,6 @@ lis build >/dev/null
 # accepted as anon; TASK-309 made it a refusal and this suite died at its
 # first comment, naming the developer's own identity.
 e2e_pin_home
-LIN=target/.lisette/bin/lll
 
 # USER is pinned: a first boot seeds a member named after it (task-31), and
 # the board assertions must not depend on who runs this suite. HOME is pinned
@@ -121,7 +137,7 @@ WEB_TOKEN=$(pb_member_token "$LLL_URL" e2e e2e@members.invalid web-e2e-pass-123)
 export LLL_TOKEN="$WEB_TOKEN"
 AUTH_HDR="Authorization: Bearer $WEB_TOKEN"
 
-python3 scripts/test_login_discovery.py "$PWD/$LIN" "$LLL_URL" "$WEB"
+python3 scripts/test_login_discovery.py "$LIN" "$LLL_URL" "$WEB"
 
 curl -sf -H "$AUTH_HDR" -X POST "$LLL_URL/api/collections/teams/records" \
   -H 'Content-Type: application/json' \
@@ -2191,12 +2207,12 @@ PY
 
 LLL_TEST_BOARD_TOKEN="$BOARD_TOKEN" python3 scripts/test_settings_delete.py "$LLL_URL" "$WEB"
 
-LLL_TEST_BOARD_TOKEN="$BOARD_TOKEN" python3 scripts/test_attachments.py "$PWD/$LIN" "$LLL_URL" "$WEB"
+LLL_TEST_BOARD_TOKEN="$BOARD_TOKEN" python3 scripts/test_attachments.py "$LIN" "$LLL_URL" "$WEB"
 
-LLL_TEST_BOARD_TOKEN="$BOARD_TOKEN" python3 scripts/test_issue_stream.py "$PWD/$LIN" "$LLL_URL" "$WEB"
+LLL_TEST_BOARD_TOKEN="$BOARD_TOKEN" python3 scripts/test_issue_stream.py "$LIN" "$LLL_URL" "$WEB"
 
-LLL_TEST_BOARD_TOKEN="$BOARD_TOKEN" python3 scripts/test_board_claims.py "$PWD/$LIN" "$LLL_URL" "$WEB"
+LLL_TEST_BOARD_TOKEN="$BOARD_TOKEN" python3 scripts/test_board_claims.py "$LIN" "$LLL_URL" "$WEB"
 
-LLL_TEST_BOARD_TOKEN="$BOARD_TOKEN" python3 scripts/test_board_pagination.py "$PWD/$LIN" "$LLL_URL" "$WEB"
+LLL_TEST_BOARD_TOKEN="$BOARD_TOKEN" python3 scripts/test_board_pagination.py "$LIN" "$LLL_URL" "$WEB"
 
 echo "e2e_web: all assertions passed"
