@@ -1035,6 +1035,8 @@ if command -v playwright-cli >/dev/null 2>&1; then
   assert_contains "$cleared" '"field":""' "browser: the X empties the field"
   assert_contains "$cleared" '"rows":0' "browser: the X clears the results"
   assert_contains "$cleared" "Searches every issue in the team" "browser: the X returns the empty state"
+  search_ordering=$(playwright-cli -s="$BROWSER_SESSION" run-code "$(cat scripts/browser_search.js)" 2>&1)
+  assert_contains "$search_ordering" 'search ordering and titles verified' "browser: search cancellation and live titles"
   # --- task-94: the save-view affordance in a real browser -----------------
   # Reveal the form, name the view, submit: the rail gains the view without
   # a reload (the SSE patch does the pinning), and clicking the view

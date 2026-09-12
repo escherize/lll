@@ -5,7 +5,7 @@
 
      Search is a URL. The query lives in ?q=, so a result is shareable and an
      agent can curl it. Typing keeps that true: each keystroke (debounced)
-     asks the SAME handler for the results fragment alone and rewrites the
+     asks the SAME handler for results and title fragments and rewrites the
      address bar to match, so the list on screen is always the list that URL
      serves. Enter still submits the form, which is what a browser with no
      JavaScript does and what makes the field work at all without Datastar.
@@ -17,7 +17,7 @@
      response to its own @get. */}}
 <head>
 <meta charset="utf-8">
-<title>{{template "team-title-prefix" .Rail}}search{{if .Page.Q}} "{{.Page.Q}}"{{end}}</title>
+{{template "search-title" .Page}}
 <link rel="stylesheet" href="/static/theme.css">
 {{template "accent-head" .Rail}}
 <!-- Vendored rather than CDN (TASK-74); see board.html for why. -->
@@ -35,10 +35,11 @@
          loaded with ?q= starts with the signal already filled and the X
          already showing. The X is a plain link to the empty page rather
          than a signal reset: clearing IS a query change, and the query is
-         the URL. */}}
+         the URL. Cleanup cancellation belongs to this field's @get action,
+         so a newer query cancels the older request even across different URLs. */}}
     <form class="search-bar" action="{{.Rail.BoardBase}}search" method="get" role="search">
       <svg width="14" height="14" aria-hidden="true"><use href="#ic-search"/></svg>
-      <input name="q" type="text" value="{{.Page.Q}}" placeholder="Search issues, descriptions and comments" aria-label="Search issues, descriptions and comments" autocomplete="off" autofocus data-bind:q data-on:input__debounce.250ms="@get('{{.Rail.BoardBase}}search?fragment=1&q=' + encodeURIComponent($q)); history.replaceState(null, '', $q ? '{{.Rail.BoardBase}}search?q=' + encodeURIComponent($q) : '{{.Rail.BoardBase}}search')">
+      <input name="q" type="text" value="{{.Page.Q}}" placeholder="Search issues, descriptions and comments" aria-label="Search issues, descriptions and comments" autocomplete="off" autofocus data-bind:q data-on:input__debounce.250ms="@get('{{.Rail.BoardBase}}search?fragment=1&q=' + encodeURIComponent($q), {requestCancellation: 'cleanup'}); history.replaceState(null, '', $q ? '{{.Rail.BoardBase}}search?q=' + encodeURIComponent($q) : '{{.Rail.BoardBase}}search')">
       <a class="search-clear" href="{{.Rail.BoardBase}}search" title="Clear search" aria-label="Clear search" style="display:none" data-show="$q !== ''"><svg width="10" height="10" viewBox="0 0 10 10" aria-hidden="true"><path d="M2 2 L8 8 M8 2 L2 8" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg></a>
     </form>
     {{template "search-results" .Page}}
@@ -46,6 +47,9 @@
 </div>
 </body>
 </html>{{end}}
+
+{{define "search-title"}}<title id="search-title">{{template "team-title-prefix" .}}search{{if .Q}} "{{.Q}}"{{end}}</title>{{end}}
+{{define "search-update"}}{{template "search-title" .}}{{template "search-results" .}}{{end}}
 
 {{define "search-results"}}<div id="search-results" class="search-body">
 {{if not .Q}}<p class="search-note">Searches every issue in the team - titles, descriptions and comments - including the ones the board is not showing.</p>

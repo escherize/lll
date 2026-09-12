@@ -197,6 +197,7 @@ pub struct BoardVM {
 /// field stays filled and the page reloads to itself; `results` is what the
 /// DATABASE returned for it, never what the board happened to be holding.
 pub struct SearchVM {
+  pub team_key: string,
   pub q: string,
   pub results: Slice<SearchHitVM>,
 }
