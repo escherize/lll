@@ -1527,8 +1527,15 @@ MEMBER_ID=$(row_id "$(wcurl -sf "$WEB/settings")" member "Web Member")
 # identity (task-180) and the page says so when a row tries to move it.
 wcurl -sf -X POST "$WEB/settings/member" -d "id=$MEMBER_ID" -d 'name=Web Member Renamed' -d 'email=web@example.com' >/dev/null
 "$LIN" member list | grep -q '^Web Member Renamed	web@example.com' || fail "editing a member from /settings did not persist"
-wcurl -sf -X POST "$WEB/settings/member" -d "id=$MEMBER_ID" -d 'name=Web Member Renamed' -d 'email=moved@example.com' | grep -q 'login identity' \
-  || fail "moving a member's email from /settings should be refused with the reason"
+rejected_member=$(wcurl -sf -X POST "$WEB/settings/member" -d "id=$MEMBER_ID" -d 'name=Rejected member name' -d 'email=moved@example.com')
+assert_contains "$rejected_member" 'login identity' "moving a member email is refused with the reason"
+assert_contains "$rejected_member" 'Access → Member sign-in' "the refusal names the supported email-change surface"
+assert_contains "$rejected_member" 'No changes saved.' "combined name/email rejection reports no write"
+assert_not_contains "$rejected_member" '(name saved)' "rejection must not claim a partial save"
+"$LIN" member list | grep -q '^Web Member Renamed	web@example.com' \
+  || fail "rejected combined edit changed the stored member name or email"
+"$LIN" member list | grep -q '^Rejected member name	' \
+  && fail "rejected combined edit still saved its name" || true
 
 wcurl -sf -X POST "$WEB/settings/project" -d 'name=Web Project' -d 'status=planned' >/dev/null
 "$LIN" project list | grep -q '^Web Project	planned' || fail "creating a project from /settings did not persist"

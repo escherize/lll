@@ -290,11 +290,11 @@ fn settings_apply(
       }
       // Email is the member's login identity now (TASK-180): PocketBase
       // refuses an email change on an auth record without its password, so
-      // the settings row edits the name and says so when the email moved.
+      // this row rejects an email change before saving either field.
       let posted_email = strings.TrimSpace(email)
       if posted_email != "" && posted_email != existing.email {
         return Err(
-          f"'{existing.name}'s email is their login identity now — edit it in the auth flow, not here (name saved)",
+          f"'{existing.name}'s email is their login identity — change it under Access → Member sign-in. No changes saved.",
         )
       }
       save_record("members", id, MemberPatch { name })
