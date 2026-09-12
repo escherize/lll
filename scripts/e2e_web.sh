@@ -850,9 +850,7 @@ for _ in $(seq 1 50); do
 done
 e2e_reap "$CURL_PID"
 CURL_PID=""
-# tr strips the stray NUL a killed curl can leave mid-frame, which bash's
-# command substitution would otherwise warn about.
-got=$(col_order "$(tr -d '\0' <"$EVENTS_FILE")" todo)
+got=$(col_order "$(cat "$EVENTS_FILE")" todo)
 [ "$got" = "ENG-4,ENG-6,ENG-5,ENG-2" ] \
   || fail "priority-scoped SSE morph not in priority order: got '$got'"
 
