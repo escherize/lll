@@ -25,6 +25,9 @@ _.path = ["{{config_root}}/target/.lisette/bin"]
 
 [tasks.build]
 description = "Compile lll to target/.lisette/bin/lll"
+# C is available on macOS and Linux; Python keeps explicit UTF-8 text I/O.
+# Task-local settings leave the developer's interactive locale unchanged.
+env = { LC_ALL = "C", PYTHONUTF8 = "1" }
 dir = "{{config_root}}"
 run = """
 command -v lis >/dev/null || { echo "lis not found. Install it:" >&2; echo "  curl -LsSf https://github.com/ivov/lisette/releases/latest/download/lisette-installer.sh | sh" >&2; exit 1; }
@@ -79,6 +82,7 @@ LLL_URL="http://127.0.0.1:$DB_PORT" LLL_TEAM="${LLL_TEAM:-SCRAT}" \\
 
 [tasks.test]
 description = "Unit tests"
+env = { LC_ALL = "C", PYTHONUTF8 = "1" }
 dir = "{{config_root}}"
 run = """
 command -v lis >/dev/null || { echo "lis not found. Install it:" >&2; echo "  curl -LsSf https://github.com/ivov/lisette/releases/latest/download/lisette-installer.sh | sh" >&2; exit 1; }
@@ -94,6 +98,7 @@ python3 scripts/check_assets.py
 
 [tasks.e2e]
 description = "Full end-to-end suite (CLI, web board, lll up)"
+env = { LC_ALL = "C", PYTHONUTF8 = "1" }
 depends = ["build"]
 dir = "{{config_root}}"
 run = "bash scripts/e2e.sh"
@@ -113,6 +118,7 @@ run = "bash scripts/seed.sh"
 
 [tasks.gate]
 description = "Everything a change must pass before it lands"
+env = { LC_ALL = "C", PYTHONUTF8 = "1" }
 depends = ["build", "test", "e2e"]
 dir = "{{config_root}}"
 run = "echo 'gate green'"
