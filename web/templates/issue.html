@@ -56,73 +56,7 @@
 <form id="title-form" class="title-edit" style="display:none" data-show="$edit_title"><input type="hidden" name="key" value="{{.Key}}"><input name="title" type="text" autocomplete="off" aria-label="Issue title" data-bind:title_draft data-effect="$edit_title && setTimeout(() => el.focus(), 0)" data-on:keydown="evt.key === 'Escape' ? ($edit_title = false) : evt.key === 'Enter' && (evt.preventDefault(), @post('/title', {contentType: 'form'}), evt.target.value.trim() && ($edit_title = false))" data-on:blur="$edit_title && ($edit_title = false, evt.target.value.trim() && @post('/title', {contentType: 'form'}))"></form>
 {{if .Description}}<div class="issue-desc md">{{.Description}}</div>
 {{end}}</div>
-<aside class="props">
-<h3>Properties</h3>
-<div class="prop"><span class="k">State</span>
-  <span class="v">{{template "state-icon" .State}}
-  <form id="state-form"><input type="hidden" name="key" value="{{.Key}}"><select name="state" data-on:change="@post('/state', {contentType: 'form'})">
-  {{range .States}}<option value="{{.Value}}"{{if eq .Value $.State}} selected{{end}}>{{.Label}}</option>
-  {{end}}</select></form></span>
-</div>
-<div class="prop"><span class="k">Priority</span>
-  <span class="v">{{template "priority-icon" .Prio}}
-  <form id="prio-form"><input type="hidden" name="key" value="{{.Key}}"><select name="priority" aria-label="Priority" data-on:change="@post('/priority', {contentType: 'form'})">
-  {{range .Prios}}<option value="{{.Value}}"{{if eq .Value $.Prio}} selected{{end}}>{{.Label}}</option>
-  {{end}}</select></form></span>
-</div>
-<!-- The picker's trigger, not the picker: the panel itself is rendered once
-     per page load OUTSIDE this fragment, so 241 candidates never ride an
-     issue-detail broadcast. This button only reflects the current marker and
-     toggles $emo_open, positioning the fixed panel under itself. -->
-<div class="prop"><span class="k">Emoji</span>
-  <span class="v"><button type="button" class="emo-trigger" aria-label="Set the issue emoji" title="Set the issue emoji" data-attr:aria-expanded="$emo_open ? 'true' : 'false'" data-on:click="if ($emo_open) { $emo_open = false } else { const r = el.getBoundingClientRect(), p = document.getElementById('emo-pop'); p.style.left = Math.max(8, Math.min(r.left, innerWidth - 252)) + 'px'; p.style.top = Math.max(8, Math.min(r.bottom + 6, innerHeight - 340)) + 'px'; $emo_q = ''; $emo_open = true }">{{if .Emoji}}<span class="emoji">{{.Emoji}}</span>{{else}}<span class="emo-blank">none</span>{{end}}</button></span>
-</div>
-<div class="prop"><span class="k">Assignee</span>
-  <span class="v">{{if .Assignee}}{{template "avatar" .Avatar}}{{end}}
-  <form id="assignee-form"><input type="hidden" name="key" value="{{.Key}}"><select name="assignee" aria-label="Assignee" data-on:change="@post('/assignee', {contentType: 'form'})"><option value=""{{if eq $.AssigneeId ""}} selected{{end}}>Unassigned</option>
-  {{range .MemberOpts}}<option value="{{.Id}}"{{if eq .Id $.AssigneeId}} selected{{end}}>{{.Name}}</option>
-  {{end}}</select></form></span>
-</div>
-{{/* The work-site slot (TASK-205): where the branch is checked out, stamped
-     by `lll issue start`. Read-only, from the issue's own fields, so every
-     #issue-detail morph carries it. Dimmed once the site is only history. */}}
-{{if .Work}}<div class="prop"><span class="k">Work</span>
-  <span class="v"><span class="work-site{{if .WorkStale}} work-stale{{end}}">{{.Work}}{{if .WorkStale}} <span class="work-seen">(last seen)</span>{{end}}</span></span>
-</div>
-{{end}}<div class="prop"><span class="k">Project</span>
-  <!-- The link stays: it is the way into that project's issues, which the
-       select's selected option cannot be. -->
-  <span class="v">{{if .ProjectHref}}<a href="{{.ProjectHref}}">{{.Project}}</a>{{end}}
-  <form id="project-form"><input type="hidden" name="key" value="{{.Key}}"><select name="project" aria-label="Project" data-on:change="@post('/project', {contentType: 'form'})"><option value=""{{if eq $.ProjectId ""}} selected{{end}}>No project</option>
-  {{range .ProjectOpts}}<option value="{{.Id}}"{{if eq .Id $.ProjectId}} selected{{end}}>{{.Name}}</option>
-  {{end}}</select></form></span>
-</div>
-<div class="prop"><span class="k">Labels</span>
-  <!-- The scalable picker (TASK-207). The row shows only the labels the
-       issue carries, as removable chips, plus one "+" affordance. Every
-       candidate still renders on every pass — so each #issue-detail morph
-       re-carries the list with fresh checked state — but the panel stays
-       hidden until $lab_open, and typing narrows it client-side via each
-       candidate's own data-show ($lab_open/$lab_q/$lab_lc live on
-       .issue-wrap, outside the morph boundary, so an SSE morph under an
-       open picker disturbs nothing). Chips and candidates are one checkbox
-       set in one form: any change posts the whole set to /labels, the
-       rel-multi idiom unchanged. Enter adds the first still-visible
-       candidate; Escape closes. -->
-  <span class="v">{{if .LabelOpts}}<form id="labels-form" class="labs"><input type="hidden" name="key" value="{{.Key}}">{{range .LabelOpts}}{{if .On}}<label class="lab" id="lab-o-{{.Id}}" title="Remove {{.Name}}"><input type="checkbox" name="labels" value="{{.Id}}" checked data-on:change="@post('/labels', {contentType: 'form'})"><span class="chip"><span class="dot" style="background:{{if .Color}}{{.Color}}{{else}}var(--text-3){{end}}"></span>{{.Name}}</span></label>{{end}}{{end}}<button type="button" class="lab-add" title="Add a label" aria-label="Add a label" data-attr:aria-expanded="$lab_open ? 'true' : 'false'" data-on:click="$lab_open ? ($lab_open = false) : ($lab_q = '', $lab_open = true)"><svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true"><path d="M6 1.5 V10.5 M1.5 6 H10.5" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg></button>
-  <div class="lab-pick" style="display:none" data-show="$lab_open" data-on:click__outside="!evt.target.closest('.lab-add') && ($lab_open = false)" data-on:keydown="evt.key === 'Escape' && ($lab_open = false)">
-  <span class="lab-search"><svg width="14" height="14"><use href="#ic-search"/></svg><input type="text" placeholder="Filter labels" autocomplete="off" aria-label="Filter labels" data-bind:lab_q data-effect="$lab_open && setTimeout(() => el.focus(), 0)" data-on:keydown="evt.key === 'Enter' && (evt.preventDefault(), [...el.closest('.lab-pick').querySelectorAll('.lab-cands label')].find(l => l.style.display !== 'none')?.querySelector('input').click())"></span>
-  {{/* Every chip and candidate wears a stable id: idiomorph matches by id,
-       so a morph that moves a label between the two sets cannot shift
-       content under its neighbours — a shifted candidate would keep the
-       display its OLD data-show computed (no signal changed, so nothing
-       re-evaluates) and the filter would go visibly stale. */}}
-  <div class="lab-cands">{{range .LabelOpts}}{{if not .On}}<label class="lab" id="lab-c-{{.Id}}" data-n="{{.Terms}}" data-show="!$lab_lc || el.dataset.n.includes($lab_lc)"><input type="checkbox" name="labels" value="{{.Id}}" data-on:change="@post('/labels', {contentType: 'form'})"><span class="chip"><span class="dot" style="background:{{if .Color}}{{.Color}}{{else}}var(--text-3){{end}}"></span>{{.Name}}</span></label>{{end}}{{end}}</div>
-  </div></form>{{else}}none{{end}}</span>
-</div>
-<div class="prop"><span class="k">Created</span><span class="v">{{.Created}}</span></div>
-<div class="prop"><span class="k">Updated</span><span class="v">{{.Updated}}</span></div>
-</aside>
+{{template "issue-properties" .}}
 {{end}}</article>{{end}}
 
 {{/* The emoji picker.
@@ -180,3 +114,75 @@
 <p>{{.Title}}</p></div>
 </div>
 {{end}}</section>{{end}}{{end}}
+
+{{define "issue-property-key"}}<input type="hidden" name="key" value="{{.}}"><input type="hidden" name="property_edit" value="1">{{end}}
+
+{{define "issue-properties"}}<aside id="issue-properties" class="props">
+<h3>Properties</h3>
+<div class="prop"><span class="k">State</span>
+  <span class="v">{{template "state-icon" .State}}
+  <form id="state-form">{{template "issue-property-key" .Key}}<select name="state" data-on:change="@post('/state', {contentType: 'form'})">
+  {{range .States}}<option value="{{.Value}}"{{if eq .Value $.State}} selected{{end}}>{{.Label}}</option>
+  {{end}}</select></form></span>
+</div>
+<div class="prop"><span class="k">Priority</span>
+  <span class="v">{{template "priority-icon" .Prio}}
+  <form id="prio-form">{{template "issue-property-key" .Key}}<select name="priority" aria-label="Priority" data-on:change="@post('/priority', {contentType: 'form'})">
+  {{range .Prios}}<option value="{{.Value}}"{{if eq .Value $.Prio}} selected{{end}}>{{.Label}}</option>
+  {{end}}</select></form></span>
+</div>
+<!-- The picker's trigger, not the picker: the panel itself is rendered once
+     per page load OUTSIDE this fragment, so 241 candidates never ride an
+     issue-detail broadcast. This button only reflects the current marker and
+     toggles $emo_open, positioning the fixed panel under itself. -->
+<div class="prop"><span class="k">Emoji</span>
+  <span class="v"><button type="button" class="emo-trigger" aria-label="Set the issue emoji" title="Set the issue emoji" data-attr:aria-expanded="$emo_open ? 'true' : 'false'" data-on:click="if ($emo_open) { $emo_open = false } else { const r = el.getBoundingClientRect(), p = document.getElementById('emo-pop'); p.style.left = Math.max(8, Math.min(r.left, innerWidth - 252)) + 'px'; p.style.top = Math.max(8, Math.min(r.bottom + 6, innerHeight - 340)) + 'px'; $emo_q = ''; $emo_open = true }">{{if .Emoji}}<span class="emoji">{{.Emoji}}</span>{{else}}<span class="emo-blank">none</span>{{end}}</button></span>
+</div>
+<div class="prop"><span class="k">Assignee</span>
+  <span class="v">{{if .Assignee}}{{template "avatar" .Avatar}}{{end}}
+  <form id="assignee-form">{{template "issue-property-key" .Key}}<select name="assignee" aria-label="Assignee" data-on:change="@post('/assignee', {contentType: 'form'})"><option value=""{{if eq $.AssigneeId ""}} selected{{end}}>Unassigned</option>
+  {{range .MemberOpts}}<option value="{{.Id}}"{{if eq .Id $.AssigneeId}} selected{{end}}>{{.Name}}</option>
+  {{end}}</select></form></span>
+</div>
+{{/* The work-site slot (TASK-205): where the branch is checked out, stamped
+     by `lll issue start`. Read-only, from the issue's own fields, so every
+     #issue-detail morph carries it. Dimmed once the site is only history. */}}
+{{if .Work}}<div class="prop"><span class="k">Work</span>
+  <span class="v"><span class="work-site{{if .WorkStale}} work-stale{{end}}">{{.Work}}{{if .WorkStale}} <span class="work-seen">(last seen)</span>{{end}}</span></span>
+</div>
+{{end}}<div class="prop"><span class="k">Project</span>
+  <!-- The link stays: it is the way into that project's issues, which the
+       select's selected option cannot be. -->
+  <span class="v">{{if .ProjectHref}}<a href="{{.ProjectHref}}">{{.Project}}</a>{{end}}
+  <form id="project-form">{{template "issue-property-key" .Key}}<select name="project" aria-label="Project" data-on:change="@post('/project', {contentType: 'form'})"><option value=""{{if eq $.ProjectId ""}} selected{{end}}>No project</option>
+  {{range .ProjectOpts}}<option value="{{.Id}}"{{if eq .Id $.ProjectId}} selected{{end}}>{{.Name}}</option>
+  {{end}}</select></form></span>
+</div>
+<div class="prop"><span class="k">Labels</span>
+  <!-- The scalable picker (TASK-207). The row shows only the labels the
+       issue carries, as removable chips, plus one "+" affordance. Every
+       candidate still renders on every pass — so each #issue-detail morph
+       re-carries the list with fresh checked state — but the panel stays
+       hidden until $lab_open, and typing narrows it client-side via each
+       candidate's own data-show ($lab_open/$lab_q/$lab_lc live on
+       .issue-wrap, outside the morph boundary, so an SSE morph under an
+       open picker disturbs nothing). Chips and candidates are one checkbox
+       set in one form: any change posts the whole set to /labels, the
+       rel-multi idiom unchanged. Enter adds the first still-visible
+       candidate; Escape closes. -->
+  <span class="v">{{if .LabelOpts}}<form id="labels-form" class="labs">{{template "issue-property-key" .Key}}{{range .LabelOpts}}{{if .On}}<label class="lab" id="lab-o-{{.Id}}" title="Remove {{.Name}}"><input type="checkbox" name="labels" value="{{.Id}}" checked data-on:change="@post('/labels', {contentType: 'form'})"><span class="chip"><span class="dot" style="background:{{if .Color}}{{.Color}}{{else}}var(--text-3){{end}}"></span>{{.Name}}</span></label>{{end}}{{end}}<button type="button" class="lab-add" title="Add a label" aria-label="Add a label" data-attr:aria-expanded="$lab_open ? 'true' : 'false'" data-on:click="$lab_open ? ($lab_open = false) : ($lab_q = '', $lab_open = true)"><svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true"><path d="M6 1.5 V10.5 M1.5 6 H10.5" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg></button>
+  <div class="lab-pick" style="display:none" data-show="$lab_open" data-on:click__outside="!evt.target.closest('.lab-add') && ($lab_open = false)" data-on:keydown="evt.key === 'Escape' && ($lab_open = false)">
+  <span class="lab-search"><svg width="14" height="14"><use href="#ic-search"/></svg><input type="text" placeholder="Filter labels" autocomplete="off" aria-label="Filter labels" data-bind:lab_q data-effect="$lab_open && setTimeout(() => el.focus(), 0)" data-on:keydown="evt.key === 'Enter' && (evt.preventDefault(), [...el.closest('.lab-pick').querySelectorAll('.lab-cands label')].find(l => l.style.display !== 'none')?.querySelector('input').click())"></span>
+  {{/* Every chip and candidate wears a stable id: idiomorph matches by id,
+       so a morph that moves a label between the two sets cannot shift
+       content under its neighbours — a shifted candidate would keep the
+       display its OLD data-show computed (no signal changed, so nothing
+       re-evaluates) and the filter would go visibly stale. */}}
+  <div class="lab-cands">{{range .LabelOpts}}{{if not .On}}<label class="lab" id="lab-c-{{.Id}}" data-n="{{.Terms}}" data-show="!$lab_lc || el.dataset.n.includes($lab_lc)"><input type="checkbox" name="labels" value="{{.Id}}" data-on:change="@post('/labels', {contentType: 'form'})"><span class="chip"><span class="dot" style="background:{{if .Color}}{{.Color}}{{else}}var(--text-3){{end}}"></span>{{.Name}}</span></label>{{end}}{{end}}</div>
+  </div></form>{{else}}none{{end}}</span>
+</div>
+<div class="prop"><span class="k">Created</span><span class="v">{{.Created}}</span></div>
+<div class="prop"><span class="k">Updated</span><span class="v">{{.Updated}}</span></div>
+</aside>{{end}}
+
+{{define "issue-properties-unavailable"}}<aside id="issue-properties" class="props"><h3>Properties</h3><p role="status">Property values could not be refreshed. Reload to retry.</p><button type="button" class="btn" data-on:click="window.location.reload()">Reload</button></aside>{{end}}

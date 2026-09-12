@@ -43,7 +43,12 @@ fn flashing(
         action_flash(w, target, "")
         if extra != "" { let _ = w.Write(extra.bytes()) }
       },
-      Err(e) => action_flash(w, target, e),
+      Err(e) => {
+        action_flash(w, target, e)
+        if wr.PostFormValue("property_edit") == "1" {
+          let _ = w.Write(property_recovery(wr.FormValue("key")).bytes())
+        }
+      },
     }
   }
 }

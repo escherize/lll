@@ -33,7 +33,11 @@ Check the visible flash, the create dialog's open state and retained title
 and description, and unchanged stored data through the CLI or a reload.
 Distinguish a locally selected control value from the stored value: inspect
 both rather than treating the browser selection as proof of persistence.
-The state probe records the selection at failure as well as after reload.
+The property probe checks that state, priority, assignee, project and label
+controls return to current server values without a reload. It also checks
+that an unsaved comment survives recovery. If refreshing the values fails,
+the Properties panel reports that they could not be verified and offers a
+reload; it does not leave the rejected selection looking current.
 
 Remove the field in a `finally` block, or reload the page, before continuing:
 
@@ -47,7 +51,7 @@ The gate takes screenshots at `/tmp/lll-131-create.png` and
 `/tmp/lll-131-state.png`. It checks the rendered failure and persisted data;
 there is no application failure flag to leave enabled accidentally.
 
-LLL-348 tracks a rejected state selection remaining visible until reload.
+LLL-348 added server-backed property recovery after rejected writes.
 LLL-349 moved create errors inside the dialog. `browser_create_failure.js`
 checks the alert semantics, form description relationship, desktop/mobile
 hit testing, keyboard retry with retained drafts, and clearing on fresh open.
