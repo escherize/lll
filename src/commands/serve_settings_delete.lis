@@ -22,11 +22,7 @@ fn settings_delete(r: mut Ref<http.Request>, team_id: string) -> Result<Option<s
   let id = strings.TrimSpace(r.PostFormValue("id"))
   if id == "" { return Err("nothing to delete") }
   let path = f"/api/collections/{coll}/records/{url.PathEscape(id)}"
-  // Account removal has its own authorization follow-up, LLL-341.
-  if kind == "member" {
-    let _ = pb.delete(path)?
-    return Ok(None)
-  }
+  if kind == "member" { return settings_member_delete(r, id) }
   let (name, owner) = if kind == "label" {
     let mut label = models.Label { .. }
     pb.fetch(path, "label", &label)?

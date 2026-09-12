@@ -206,12 +206,9 @@ fn member_remove(input: flags.CommandInput) -> Result<(), string> {
 
   point_at_url(p.one("--url"))?
   apply_admin_flags(p.one("--admin-email"), p.one("--admin-password"))?
-  // Insisted on, not merely preferred. superuser_auth falls back to the
-  // configured token when no admin credentials are set, and the members
-  // collection lets any authenticated member delete a record — so without
-  // this check the "superuser only" in the help above would be the same
-  // false claim TASK-243 was filed for. Deleting somebody else's account is
-  // not a thing one member should be able to do to another.
+  // Require an explicit admin login before lookup/counting. The backend also
+  // restricts member deletion to superusers (LLL-341), so direct API clients
+  // cannot bypass the same account boundary.
   if os.Getenv("LLL_ADMIN_EMAIL") == "" || os.Getenv("LLL_ADMIN_PASSWORD") == "" {
     return Err(
       "removing a member needs the server's admin credentials
@@ -223,8 +220,9 @@ pass --admin-email and --admin-password, or set LLL_ADMIN_EMAIL/LLL_ADMIN_PASSWO
     return Err(f"no member named '{name}' — see 'lll member list'")
   }
 
-  let assigned = member_reference_count("issues", "assignee", member.id, su)?
-  let authored = member_reference_count("comments", "author", member.id, su)?
+  let references = member_references(member.id, su)?
+  let assigned = references.assigned
+  let authored = references.authored
   if (assigned > 0 || authored > 0) && !p.given("--force") {
     return Err(
       f"{member.name} has {assigned} issue(s) assigned and {authored} comment(s) authored
@@ -239,26 +237,6 @@ or use --force to clear assignments and comment authorship; comment bodies are k
     fmt.Println(f"cleared {assigned} issue assignment(s) and {authored} comment author reference(s); comment bodies kept")
   }
   Ok(())
-}
-
-#[json]
-struct MemberReferenceCount {
-  #[json("totalItems")]
-  total: Option<int>,
-}
-
-/// All reads and the deletion use the same administrative identity, so a
-/// missing or stale configured member token cannot hide references.
-fn member_reference_count(collection: string, field: string, id: string, token: string) -> Result<int, string> {
-  let filter = url.QueryEscape(f"{field}={query.quote(id)}")
-  let body = pb.get_as(f"/api/collections/{collection}/records?filter={filter}&perPage=1&fields=id", token)?
-  let mut count = MemberReferenceCount { .. }
-  if let Err(e) = json.Unmarshal(body.bytes(), &count) {
-    return Err(f"counting member {collection}: {e}")
-  }
-  let Some(total) = count.total else { return Err(f"counting member {collection}: response omitted totalItems") };
-  if total < 0 { return Err(f"counting member {collection}: invalid totalItems") }
-  Ok(total)
 }
 
 fn member_remove_spec() -> Slice<flags.Flag> {

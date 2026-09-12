@@ -188,12 +188,9 @@
 <code class="access-token-value">{{.Token}}</code>
 </div>{{end}}
 
-{{/* The row's delete control. The record's name reaches the confirm through
-     data-name rather than the expression: html/template escapes an attribute
-     correctly, and a name with an apostrophe in it would otherwise land as
-     broken JS — the same trap the board's filter seed hit. Dot is the section
-     name, which is also the route segment. */}}
-{{define "set-del"}}<button type="button" class="set-del" title="Delete" aria-label="Delete" data-on:click="{{if eq . "member"}}confirm('Delete ' + el.form.dataset.name + '?') &amp;&amp; {{end}}@post('/settings/{{.}}?del=1', {contentType: 'form'})"><svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true"><path d="M2.5 2.5 L9.5 9.5 M9.5 2.5 L2.5 9.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg></button>{{end}}
+{{/* The row's delete control requests a server-rendered impact review.
+     Dot is the section name, which is also the route segment. */}}
+{{define "set-del"}}<button type="button" class="set-del" title="Delete" aria-label="Delete" data-on:click="@post('/settings/{{.}}?del=1', {contentType: 'form'})"><svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true"><path d="M2.5 2.5 L9.5 9.5 M9.5 2.5 L2.5 9.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg></button>{{end}}
 
 {{/* LLL-233: replace only the selected row; the count is fetched again on
      confirmation. A div owns the patch id: input[name=id] shadows form.id.
@@ -205,4 +202,15 @@
 <div class="set-delete-impact" role="status">{{if .Changed}}The affected issue count changed. Review it again. {{end}}Delete {{.Kind}} <strong>{{.Name}}</strong>? {{if .Used}}This removes the {{.Kind}} from {{.Used}} issue(s).{{else}}No issues reference it.{{end}} The issues are kept.</div>
 <button type="button" class="btn" data-on:click="@post('/settings/{{.Kind}}?cancel=1', {contentType: 'form'})">Cancel</button>
 <button type="button" class="btn" data-on:click="@post('/settings/{{.Kind}}?del=1', {contentType: 'form'})">Delete {{.Kind}}</button>
+</form></div>{{end}}
+
+{{define "set-member-delete-review"}}<div id="set-member-{{.Id}}"><form class="set-row" aria-label="Review account deletion">
+<input type="hidden" name="id" value="{{.Id}}">
+<input type="hidden" name="confirmed" value="1">
+<input type="hidden" name="expected_assigned" value="{{.Assigned}}">
+<input type="hidden" name="expected_authored" value="{{.Authored}}">
+<div class="set-delete-impact" role="status">{{if .Changed}}The affected references changed. Review them again. {{end}}Delete account <strong>{{.Name}}</strong>? This clears {{.Assigned}} issue assignment(s) and {{.Authored}} comment author reference(s). Issues and comment bodies are kept. This account will no longer be able to sign in.</div>
+<input name="admin_password" type="password" placeholder="Admin password" autocomplete="off" aria-label="Admin password" class="set-second">
+<button type="button" class="btn" data-on:click="@post('/settings/member?cancel=1', {contentType: 'form'})">Cancel</button>
+<button type="button" class="btn" data-on:click="@post('/settings/member?del=1', {contentType: 'form'})">Delete account</button>
 </form></div>{{end}}

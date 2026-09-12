@@ -423,8 +423,8 @@ pub struct SetLabelVM {
   pub usage: int,
 }
 
-/// One member row on /settings. Members are honor-system identities (ADR-1:
-/// no auth), so this list is the workspace's — never "your account".
+/// One member account row on /settings. Accounts are shared across teams;
+/// deletion requires administrator verification and a reference review.
 pub struct SetMemberVM {
   pub id: string,
   pub name: string,
