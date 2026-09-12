@@ -30,6 +30,32 @@ fn argv(rest: Slice<string>) -> Slice<string> {
 // ------------------------------------------------------------------ parse
 
 #[test]
+fn end_of_options_preserves_dash_positionals_and_disables_help_and_flags() {
+  for table in [spec(), bare_spec()] {
+    let assert Ok(p) = parse_n(table, argv(["--json", "--", "--help", "--state=done", "--", "-file"]), 3, 4, "usage")
+    assert p.given("--json")
+    assert !p.given("--help") && !p.given("--state")
+    assert p.nth(0) == "--help"
+    assert p.nth(1) == "--state=done"
+    assert p.nth(2) == "--"
+    assert p.nth(3) == "-file"
+  }
+}
+
+#[test]
+fn end_of_options_keeps_arity_required_flags_and_literal_values() {
+  let assert Ok(p) = parse(spec(), argv(["-d", "--", "--json", "--", "--help"]), 3, true, "usage")
+  assert p.one("-d") == "--" && p.given("--json")
+  assert p.first() == "--help"
+  assert parse(spec(), argv(["--"]), 3, false, "usage").is_ok()
+  let assert Err(extra) = parse(spec(), argv(["--", "--json"]), 3, false, "usage")
+  assert extra == "unexpected argument: '--json'"
+  assert parse(spec(), argv(["one", "--", "two"]), 3, true, "usage").is_err()
+  let required = [Flag { name: "--name", value: true, required: true, .. }]
+  assert parse(required, argv(["--", "--name"]), 3, true, "usage").is_err()
+}
+
+#[test]
 fn parse_collects_values_and_booleans() {
   let assert Ok(p) = parse(spec(), argv(["--json", "-t", "hi"]), 3, false, "")
   assert p.given("--json")

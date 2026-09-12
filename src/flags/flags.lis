@@ -92,8 +92,20 @@ pub fn parse_n(
     return Err(f"{help_marker()}{usage_help(usage, spec)}")
   }
   let mut i = start
+  let mut options_ended = false
   while i < args.length() {
     let arg = args[i]
+    if options_ended {
+      if pos.length() >= max_positional { return Err(f"unexpected argument: '{arg}'") }
+      pos = pos.append(arg)
+      i += 1
+      continue
+    }
+    if arg == "--" {
+      options_ended = true
+      i += 1
+      continue
+    }
     // `--flag=value` (TASK-165). Split ONCE, so a value may itself contain
     // an equals sign: `--filter=a=b` is the value `a=b`. SplitN, not Index +
     // substring: strings.Index returns a BYTE offset while substring takes

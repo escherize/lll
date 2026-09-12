@@ -216,8 +216,9 @@ Attach artifacts to an issue with `lll issue attach ENG-1 ./shot.png`.
 `lll issue view ENG-1` lists their stored filenames; use
 `lll issue download ENG-1 FILENAME > artifact` to retrieve exact bytes, or
 `lll issue detach ENG-1 FILENAME` to remove one. These commands also accept
-an issue's board URL. Use `./-filename` or an absolute path for a filename
-that starts with a dash.
+an issue's board URL. Use `lll issue attach ENG-1 -- -filename` for a
+filename that starts with a dash. After `--`, values are positional even
+when they look like flags; place options such as `--team` before it.
 
 The issue page supports upload, image preview, download and removal. Cards
 show a paperclip count without fetching images. Files use PocketBase's

@@ -18,8 +18,8 @@ env = dict(os.environ, LLL_URL=api, LLL_TEAM='ATT35')
 cookie = 'lll_board=' + os.environ['LLL_TEST_BOARD_TOKEN']
 
 
-def cli(*args, success=True):
-    result = subprocess.run([binary, *args], env=env, text=True, capture_output=True, timeout=30)
+def cli(*args, success=True, cwd=None):
+    result = subprocess.run([binary, *args], env=env, text=True, capture_output=True, timeout=30, cwd=cwd)
     assert (result.returncode == 0) == success, result.stderr
     return result.stdout if success else result.stderr
 
@@ -59,7 +59,7 @@ with tempfile.TemporaryDirectory(prefix='lll-35-files-') as directory:
     image = root / 'shot.png'; image.write_bytes(png)
     report = root / '-report with spaces.html'; report.write_text('<script>window.attachmentExecuted=true</script><h1>Report</h1>')
     cli('issue', 'attach', board + '/issue/' + key + '?source=test#files', str(image))
-    cli('issue', 'attach', key, str(report))
+    cli('issue', 'attach', key, '--', report.name, cwd=root)
     saved = view()
     assert len(saved['attachments']) == 2
     assert stable(saved) == stable(before)
