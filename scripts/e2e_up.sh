@@ -38,6 +38,7 @@ e2e_trap_cleanup cleanup
 
 lis build >/dev/null
 python3 scripts/test_up_errors.py target/.lisette/bin/lll
+python3 scripts/test_scratch.py
 
 # TASK-227 (the half of TASK-187 this suite never got): pin HOME for the rest
 # of the run, AFTER lis build so the lis/go/mise caches under the real HOME

@@ -188,10 +188,13 @@ mise run scratch -- --no-open # extra flags pass straight through to lll up
 ```
 
 It picks both ports by BINDING them (a liveness probe cannot tell a free port
-from a stranger's server), puts the database in a fresh temp directory, and
-prints all three so you can point a CLI at it:
-`LLL_URL=http://127.0.0.1:<db-port> lll issue list`. The data dir is temporary
-and is not cleaned up for you; the banner shows the `rm -rf` to run.
+from a stranger's server), and runs on loopback with a fresh database, home
+and working directory. Inherited `LLL_*` settings are cleared except an
+explicit `LLL_TEAM`; the default team is SCRAT. The banner prints the board
+login URL, local admin credentials and isolated config path. CLI access to
+this database needs its own local authentication; a hosted login token does
+not authenticate against the scratch database. The temporary directory is
+kept after shutdown; the banner shows the `rm -rf` to run when finished.
 
 `mise run dev` is the OTHER thing: it hardcodes port 8100 and `pb/pb_data`, so
 it is the shared local board and two of them collide. Use it when you want the
