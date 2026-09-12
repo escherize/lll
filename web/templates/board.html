@@ -52,7 +52,7 @@ provenance.
       <div class="crumbs"><span class="here">{{if eq .Rail.Active "mine"}}My issues{{else}}Board{{end}}</span></div>
       <div class="spacer"></div>
       <div id="board-search" class="board-search">
-        <svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true"><circle cx="6.2" cy="6.2" r="4.2" fill="none" stroke="currentColor" stroke-width="1.4"/><path d="M9.4 9.4 L12.3 12.3" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>
+        <svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true"><use href="#ic-search"/></svg>
         <input id="board-search-input" type="text" placeholder="Search" autocomplete="off" aria-label="Search board" data-bind:search data-on:keydown="evt.key === 'Escape' && ($search = '')">
       </div>
       <form id="new-issue" class="new-issue">
