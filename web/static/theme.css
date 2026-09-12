@@ -356,11 +356,13 @@ input:focus, textarea:focus, select:focus {
   grid-template-columns: minmax(0, 1fr) 280px;
   grid-template-areas:
     "main   props"
+    "description props"
+    "attachments props"
     "upload props"
     "thread props"
     "comp   props"
     ".      props";
-  grid-template-rows: auto auto auto auto 1fr;
+  grid-template-rows: auto auto auto auto auto auto 1fr;
   min-height: 100%;
 }
 .issue-detail { display: contents; }
@@ -374,9 +376,9 @@ input:focus, textarea:focus, select:focus {
   letter-spacing: -0.012em;
   line-height: 1.3;
 }
-.issue-desc { color: var(--text-2); max-width: 68ch; margin: 0 0 24px; }
+.issue-desc { grid-area: description; color: var(--text-2); max-width: 68ch; margin: 0 40px 24px; }
 .attachment-count { display: inline-flex; align-items: center; gap: 2px; margin-left: 8px; color: var(--text-3); font-size: 11px; }
-.issue-attachments { margin: 16px 0; }
+.issue-attachments { grid-area: attachments; margin: 16px 40px; max-width: 680px; min-width: 0; }
 .issue-attachments h2 { font-size: 13px; margin-bottom: 12px; }
 .attachment-item { margin-bottom: 12px; }
 .attachment-item img { display: block; max-width: 100%; max-height: 320px; object-fit: contain; border: 1px solid var(--border); border-radius: 6px; margin-bottom: 8px; }
@@ -701,14 +703,15 @@ input:focus, textarea:focus, select:focus {
   .column { flex: 0 0 240px; min-width: 240px; }
   .issue-scroll {
     grid-template-columns: minmax(0, 1fr);
-    grid-template-areas: "main" "props" "upload" "thread" "comp";
-    grid-template-rows: auto auto auto auto auto;
+    grid-template-areas: "main" "description" "attachments" "props" "upload" "thread" "comp";
+    grid-template-rows: auto auto auto auto auto auto auto;
   }
   .issue-main, .deleted { padding: 20px 16px 0; }
   .props { border-left: none; border-top: 1px solid var(--border); border-bottom: 1px solid var(--border); padding: 16px; }
   .thread { margin: 0 16px; }
   .composer { margin: 14px 16px 20px; }
-  .attachment-upload { margin: 16px; }
+  .attachment-upload, .issue-attachments { margin: 16px; }
+  .issue-desc { margin: 0 16px 24px; }
   .set-scroll { padding: 16px 12px 24px; }
   .set-row { flex-wrap: wrap; }
   .set-field { flex-wrap: wrap; }

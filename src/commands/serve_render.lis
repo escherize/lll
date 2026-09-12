@@ -355,6 +355,13 @@ fn comment_vm(c: models.Comment) -> CommentVM {
 /// Issue view model from a full record (expand: team, assignee, labels,
 /// project) — shared by the issue page and broadcast re-renders.
 fn issue_vm(issue: models.Issue, comments: Slice<models.Comment>) -> Result<IssueVM, string> {
+  let mut vm = issue_fields_vm(issue, comments)?
+  vm.description = markdown.md_html(issue.description)
+  Ok(vm)
+}
+
+/// Metadata can refresh without parsing or transmitting the description.
+fn issue_fields_vm(issue: models.Issue, comments: Slice<models.Comment>) -> Result<IssueVM, string> {
   let assignee = issue.expand.assignee.name
   let mut project = issue.expand.project.name
   let mut project_href = ""
@@ -386,7 +393,6 @@ fn issue_vm(issue: models.Issue, comments: Slice<models.Comment>) -> Result<Issu
     emoji: issue.emoji,
     work,
     work_stale,
-    description: markdown.md_html(issue.description),
     description_md: issue.description,
     created: display.relative(issue.created),
     updated: display.relative(issue.updated),
@@ -421,6 +427,7 @@ fn issue_vm(issue: models.Issue, comments: Slice<models.Comment>) -> Result<Issu
     // Left empty for the same reason: the picker is page-only, so a
     // broadcast of this fragment carries no catalogue.
     emojis: [],
+    ..
   })
 }
 

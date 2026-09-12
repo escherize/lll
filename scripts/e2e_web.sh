@@ -632,7 +632,7 @@ sleep 0.5
 wcurl -s -o /dev/null -X POST --data-urlencode "key=ENG-3" \
   --data-urlencode "project=$PANEL_PROJECT" "$WEB/project"
 for _ in $(seq 1 50); do
-  grep -q 'id="project-form"' "$PANEL_EVENTS" 2>/dev/null && break
+  grep -q "value=\"$PANEL_PROJECT\" selected" "$PANEL_EVENTS" 2>/dev/null && break
   sleep 0.1
 done
 e2e_reap "$PANEL_PID"
@@ -1241,7 +1241,7 @@ Some **bold** text and `code`.
 
 <script>alert(1)</script>' >/dev/null
 page=$(wcurl -sf "$WEB/issue/ENG-1")
-assert_contains "$page" '<div class="issue-desc md">' "description uses the shared markdown container"
+assert_contains "$page" '<div id="issue-description" class="issue-desc md">' "description uses the shared markdown container"
 assert_contains "$page" "<h2>Heading</h2>" "description renders a markdown heading"
 assert_contains "$page" "<strong>bold</strong>" "description renders bold"
 assert_contains "$page" "<code>code</code>" "description renders inline code"
@@ -2183,5 +2183,7 @@ PY
 LLL_TEST_BOARD_TOKEN="$BOARD_TOKEN" python3 scripts/test_settings_delete.py "$LLL_URL" "$WEB"
 
 LLL_TEST_BOARD_TOKEN="$BOARD_TOKEN" python3 scripts/test_attachments.py "$PWD/$LIN" "$LLL_URL" "$WEB"
+
+LLL_TEST_BOARD_TOKEN="$BOARD_TOKEN" python3 scripts/test_issue_stream.py "$PWD/$LIN" "$LLL_URL" "$WEB"
 
 echo "e2e_web: all assertions passed"

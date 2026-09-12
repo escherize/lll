@@ -48,5 +48,7 @@ fn router_test_hub() -> Hub {
     unregister: Channel.new<int>(),
     broadcast: Channel.new<Broadcast>(),
     ids: Channel.new<int>(),
+    observers: Channel.new<ScopeQuery>(),
+    snapshots: Channel.new<IssueSnapshot>(),
   }
 }
