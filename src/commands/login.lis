@@ -573,10 +573,14 @@ persists url (and 'me', when unset) next to the token, so
 
   lll login --url https://tracker.example.com --email you@example.com
 
-authenticates this machine. Add --web-url URL to save the board endpoint
-too, or use 'lll config set web_url URL'. Without --url, login uses the
-configured API URL. It finishes by naming what is still missing here — a team,
-which 'lll attach' writes to the repo's .lll.toml.
+authenticates this machine. Without --url, login uses the configured API URL.
+When no board endpoint is configured, login discovers and saves it if the
+server advertises one. Discovery is optional: an unavailable advertisement
+does not fail login. Existing explicit settings take precedence. Supply
+--web-url URL to save a specific board endpoint, including one hosted at a
+different address, or use 'lll config set web_url URL'. Login reports any
+remaining setup, such as a missing team or board endpoint. 'lll attach'
+writes the team to the directory's .lll.toml.
 
 No account on the server yet? If you hold the admin credentials
 (LLL_ADMIN_EMAIL/LLL_ADMIN_PASSWORD, the ones 'lll up' prints and a

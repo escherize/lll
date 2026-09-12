@@ -160,10 +160,14 @@ If server access or team creation fails, only the local attachment is saved.
 Restore access or resolve the reported error, then rerun lll attach -k KEY
 to reconcile it with the configured server.
 
-In a repo, commit that file. Config layers — the repo's .lll.toml supplies
-'team', your ~/.config/lll/lll.toml supplies 'url' and 'me' — so on the next
-machine an already-attached repo needs a 'git clone' and nothing else, and
-every worktree of it is attached the moment it is created.
+In a repo, commit that file. Clones and worktrees inherit its team attachment.
+Each machine still needs the API endpoint and authentication: run
+'lll login --url URL' with your member account, or configure the API URL and
+a member token for an agent. Login saves machine settings in
+~/.config/lll/lll.toml and discovers the board endpoint when advertised.
+Use --web-url URL with login when an explicit board address is needed.
+Keep credentials in the home config or environment, never the committed
+.lll.toml. An inherited attachment does not need another 'lll attach'.
 
 'lll config --list' shows every effective value and the file it came from.",
   )
