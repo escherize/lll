@@ -86,6 +86,8 @@ bash scripts/lis-typedefs-workaround.sh
 lis test
 go -C web test ./...
 python3 -m unittest discover -s scripts -p 'test_browser_poll.py'
+python3 -m unittest discover -s scripts -p 'test_check_assets.py'
+python3 scripts/check_assets.py
 """
 
 [tasks.e2e]
