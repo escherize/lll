@@ -198,7 +198,7 @@ if shutil.which('playwright-cli'):
     session = new_session()
     try:
         open_session(session, board + '/?board_token=' + os.environ['LLL_TEST_BOARD_TOKEN'])
-        result = subprocess.run(['playwright-cli', '-s=' + session, 'run-code', Path('scripts/browser_board_pagination.js').read_text()], capture_output=True, text=True, timeout=90)
+        result = subprocess.run(['playwright-cli', '-s=' + session, 'run-code', (Path(__file__).resolve().parent / 'browser_board_pagination.js').read_text()], capture_output=True, text=True, timeout=90)
         output = result.stdout + result.stderr
         Path('/tmp/lll-360-browser.log').write_text(output)
         require_result(result, 'Complete board browser passed', board)

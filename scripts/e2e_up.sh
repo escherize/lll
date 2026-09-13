@@ -36,10 +36,10 @@ cleanup() { # exit-status
 }
 e2e_trap_cleanup cleanup
 
-lis build >/dev/null
-python3 scripts/test_board_startup.py target/.lisette/bin/lll
-python3 scripts/test_up_errors.py target/.lisette/bin/lll
-python3 scripts/test_scratch.py
+(cd "$REPO_ROOT" && lis build >/dev/null)
+python3 "$REPO_ROOT"/scripts/test_board_startup.py "$REPO_ROOT"/target/.lisette/bin/lll
+python3 "$REPO_ROOT"/scripts/test_up_errors.py "$REPO_ROOT"/target/.lisette/bin/lll
+python3 "$REPO_ROOT"/scripts/test_scratch.py
 
 # TASK-227 (the half of TASK-187 this suite never got): pin HOME for the rest
 # of the run, AFTER lis build so the lis/go/mise caches under the real HOME
@@ -49,8 +49,8 @@ python3 scripts/test_scratch.py
 # accepted as anon; TASK-309 made it a refusal and this suite died at its
 # first comment, naming the developer's own identity.
 e2e_pin_home
-LLL=target/.lisette/bin/lll
-LLL_ABS="$PWD/$LLL"
+LLL="$REPO_ROOT"/target/.lisette/bin/lll
+LLL_ABS="$LLL"
 
 # Occupy the configured db port and the web port so both must auto-increment.
 python3 -c "

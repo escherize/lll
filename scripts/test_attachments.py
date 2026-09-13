@@ -143,7 +143,7 @@ if shutil.which('playwright-cli'):
     Path('/tmp/lll-35-browser-upload.txt').write_text('Browser attachment fixture\n')
     try:
         open_session(session, board + '/?board_token=' + os.environ['LLL_TEST_BOARD_TOKEN'])
-        result = subprocess.run(['playwright-cli', '-s=' + session, 'run-code', Path('scripts/browser_attachments.js').read_text()], text=True, capture_output=True, timeout=90)
+        result = subprocess.run(['playwright-cli', '-s=' + session, 'run-code', (Path(__file__).resolve().parent / 'browser_attachments.js').read_text()], text=True, capture_output=True, timeout=90)
         output = result.stdout + result.stderr
         Path('/tmp/lll-35-browser-gate.log').write_text(output)
         require_result(result, 'Attachment browser passed', board)

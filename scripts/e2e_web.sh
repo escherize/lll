@@ -60,13 +60,13 @@ wcurl() { "${WCURL[@]}" "$@"; }
 # can outlive its tracked PID as an orphan curl, corrupting reused log files.
 PB_LOG="$DATA_DIR/pb.log"
 E2E_LOGS="$PB_LOG"
-BROWSER_SESSION=$(python3 scripts/browser_session.py)
+BROWSER_SESSION=$(python3 "$REPO_ROOT"/scripts/browser_session.py)
 
 # PocketBase is embedded in lll; one `lll up` is both the database and the
 # board this suite exercises. Built here because it has to exist first.
 if [ -z "$LIN" ]; then
-  lis build >/dev/null
-  LIN="$PWD/target/.lisette/bin/lll"
+  (cd "$REPO_ROOT" && lis build >/dev/null)
+  LIN="$REPO_ROOT/target/.lisette/bin/lll"
 fi
 
 # TASK-227 (the half of TASK-187 this suite never got): pin HOME for the rest
@@ -115,7 +115,7 @@ except IndexError:
 # A free-port probe releases its socket before startup. If another listener
 # wins that race, up can relocate the board; a 200 from the planned URL then
 # proves nothing about our process. Verify its post-bind announcement first.
-python3 scripts/board_startup.py "$PB_LOG" "$WEB"
+python3 "$REPO_ROOT"/scripts/board_startup.py "$PB_LOG" "$WEB"
 wait_ok "$LLL_URL/api/health" || fail "PocketBase did not start"
 
 # --- TASK-181: the suite rides a member token --------------------------------
@@ -141,7 +141,7 @@ WEB_TOKEN=$(pb_member_token "$LLL_URL" e2e e2e@members.invalid web-e2e-pass-123)
 export LLL_TOKEN="$WEB_TOKEN"
 AUTH_HDR="Authorization: Bearer $WEB_TOKEN"
 
-python3 scripts/test_login_discovery.py "$LIN" "$LLL_URL" "$WEB"
+python3 "$REPO_ROOT"/scripts/test_login_discovery.py "$LIN" "$LLL_URL" "$WEB"
 
 curl -sf -H "$AUTH_HDR" -X POST "$LLL_URL/api/collections/teams/records" \
   -H 'Content-Type: application/json' \
@@ -893,7 +893,7 @@ if command -v playwright-cli >/dev/null 2>&1; then
       | sed -n '/### Result/{n;p;}' | tr -d '\\'
   }
   page_until() { # js needle -> the last result seen, after up to 10s of polling
-    python3 scripts/browser_poll.py "$BROWSER_SESSION" "$1" "$2"
+    python3 "$REPO_ROOT"/scripts/browser_poll.py "$BROWSER_SESSION" "$1" "$2"
   }
   # The gate: the browser logs in through the banner's handoff URL once —
   # the 303 sets the cookie — and every later navigation rides it.
@@ -919,7 +919,7 @@ if command -v playwright-cli >/dev/null 2>&1; then
     return 'tab titles verified';
   }" 2>/dev/null) || fail "playwright: page titles"
   assert_contains "$tab_titles" 'tab titles verified' "page tabs identify the app and their team"
-  title_sort=$(playwright-cli -s="$BROWSER_SESSION" run-code "$(cat scripts/browser_issue_sort.js)" 2>&1)
+  title_sort=$(playwright-cli -s="$BROWSER_SESSION" run-code "$(cat "$REPO_ROOT"/scripts/browser_issue_sort.js)" 2>&1)
   assert_contains "$title_sort" 'title header sorting verified' "browser: title sorting in both directions"
   playwright-cli -s="$BROWSER_SESSION" goto "$WEB/" >/dev/null 2>&1 || fail "playwright: return to board after title sort"
   # Shared navigation must remain reachable on a phone, including keyboard close.
@@ -1058,7 +1058,7 @@ if command -v playwright-cli >/dev/null 2>&1; then
   assert_contains "$cleared" '"field":""' "browser: the X empties the field"
   assert_contains "$cleared" '"rows":0' "browser: the X clears the results"
   assert_contains "$cleared" "Searches every issue in the team" "browser: the X returns the empty state"
-  search_ordering=$(playwright-cli -s="$BROWSER_SESSION" run-code "$(cat scripts/browser_search.js)" 2>&1)
+  search_ordering=$(playwright-cli -s="$BROWSER_SESSION" run-code "$(cat "$REPO_ROOT"/scripts/browser_search.js)" 2>&1)
   assert_contains "$search_ordering" 'search ordering and titles verified' "browser: search cancellation and live titles"
   # --- task-94: the save-view affordance in a real browser -----------------
   # Reveal the form, name the view, submit: the rail gains the view without
@@ -1100,7 +1100,7 @@ if command -v playwright-cli >/dev/null 2>&1; then
   # Click again until the probe shows the POST went through --- an extra
   # click is harmless, an empty title just refocuses the field.
   ni_submit() { # needle --- click create until the probe matches
-    python3 scripts/browser_poll.py "$BROWSER_SESSION" "$more_js" "$1" \
+    python3 "$REPO_ROOT"/scripts/browser_poll.py "$BROWSER_SESSION" "$more_js" "$1" \
       --click '#ni-create' --timeout 40
   }
   playwright-cli -s="$BROWSER_SESSION" click "#ni-expand" >/dev/null 2>&1 \
@@ -1160,7 +1160,7 @@ if command -v playwright-cli >/dev/null 2>&1; then
   assert_contains "$rejected" '"focused":true' "task-159: a failed create returns focus to the title"
   assert_contains "$rejected" '"desc":"Repro details stay here — unsaved"' "failed create keeps the typed description"
   playwright-cli -s="$BROWSER_SESSION" run-code "async page => { await page.screenshot({path: '/tmp/lll-131-create.png'}); }" >/dev/null 2>&1
-  create_failure=$(playwright-cli -s="$BROWSER_SESSION" run-code "$(cat scripts/browser_create_failure.js)" 2>&1)
+  create_failure=$(playwright-cli -s="$BROWSER_SESSION" run-code "$(cat "$REPO_ROOT"/scripts/browser_create_failure.js)" 2>&1)
   assert_contains "$create_failure" 'create error readable inside dialog; keyboard retry and fresh-open clearing passed' "browser: create failure stays accessible inside dialog"
   "$LIN" issue list | grep -q "Create more doomed" \
     && fail "task-159: a failed Create-more submit wrote a record" || true
@@ -1188,7 +1188,7 @@ if command -v playwright-cli >/dev/null 2>&1; then
   playwright-cli -s="$BROWSER_SESSION" resize 1280 800 >/dev/null 2>&1
   # LLL-131: submit a real browser state change that the server rejects.
   state_before=$("$LIN" issue view "$key206" --json | jq -r '.state')
-  state_failure=$(playwright-cli -s="$BROWSER_SESSION" run-code "$(cat scripts/browser_state_failure.js)" 2>&1)
+  state_failure=$(playwright-cli -s="$BROWSER_SESSION" run-code "$(cat "$REPO_ROOT"/scripts/browser_state_failure.js)" 2>&1)
   assert_contains "$state_failure" 'state failure shown in browser and stored state unchanged' "browser: failed state action shows server flash and preserves persisted state"
   printf '%s\n' "$state_failure" > /tmp/lll-131-state-result.log
   [ "$("$LIN" issue view "$key206" --json | jq -r '.state')" = "$state_before" ] \
@@ -1199,7 +1199,7 @@ if command -v playwright-cli >/dev/null 2>&1; then
   "$LIN" team create -k ASGN -n "Assignment browser" >/dev/null
   "$LIN" issue create --team ASGN -t "Claimed assignment browser" >/dev/null
   "$LIN" issue claim ASGN-1 >/dev/null
-  assignment_browser=$(playwright-cli -s="$BROWSER_SESSION" run-code "$(cat scripts/browser_assignment.js)" 2>&1)
+  assignment_browser=$(playwright-cli -s="$BROWSER_SESSION" run-code "$(cat "$REPO_ROOT"/scripts/browser_assignment.js)" 2>&1)
   assert_not_contains "$assignment_browser" "### Error" "assignment browser errors"
   assert_contains "$assignment_browser" "Assignment browser passed:" "assignment browser result"
   "$LIN" issue view ASGN-1 --json | python3 -c 'import json,sys; row=json.load(sys.stdin); assert row["claim"] is None and row["assignee"] == ""'
@@ -1212,7 +1212,7 @@ if command -v playwright-cli >/dev/null 2>&1; then
     "$LIN" project create -n "Draft project $suffix" >/dev/null
   done
   seq_goto "$WEB/settings"
-  drafts_browser=$(playwright-cli -s="$BROWSER_SESSION" run-code "$(cat scripts/browser_settings_drafts.js)" 2>&1)
+  drafts_browser=$(playwright-cli -s="$BROWSER_SESSION" run-code "$(cat "$REPO_ROOT"/scripts/browser_settings_drafts.js)" 2>&1)
   assert_contains "$drafts_browser" 'settings drafts survive reordered label, member and project saves' "browser: settings row drafts survive saves and reordering"
   for prefix in "Z saved" "Unsaved"; do
     suffix=A
@@ -1228,7 +1228,7 @@ if command -v playwright-cli >/dev/null 2>&1; then
   DELETE_PROBE=$("$LIN" issue create -t "Deletion browser issue" --project "Deletion browser project" --assignee "Deletion browser member" --json)
   DELETE_KEY=$(printf '%s' "$DELETE_PROBE" | jq -r '.expand.team.key + "-" + (.number | tostring)')
   seq_goto "$WEB/settings"
-  deletion_browser=$(playwright-cli -s="$BROWSER_SESSION" run-code "$(cat scripts/browser_settings_delete.js)" 2>&1)
+  deletion_browser=$(playwright-cli -s="$BROWSER_SESSION" run-code "$(cat "$REPO_ROOT"/scripts/browser_settings_delete.js)" 2>&1)
   assert_contains "$deletion_browser" 'settings deletion browser passed' "browser: settings deletion review and cancellation"
   "$LIN" issue view "$DELETE_KEY" --json | jq -e '.project == "" and .assignee == ""' >/dev/null \
     || fail "browser deletion should preserve issue and clear project and assignee"
@@ -2209,15 +2209,15 @@ for name in sys.argv[1:]:
 print('SSE logs: no NUL bytes after stream cleanup')
 PY
 
-LLL_TEST_BOARD_TOKEN="$BOARD_TOKEN" python3 scripts/test_settings_delete.py "$LLL_URL" "$WEB"
-LLL_TEST_BOARD_TOKEN="$BOARD_TOKEN" python3 scripts/test_provenance.py "$LIN" "$LLL_URL" "$WEB"
+LLL_TEST_BOARD_TOKEN="$BOARD_TOKEN" python3 "$REPO_ROOT"/scripts/test_settings_delete.py "$LLL_URL" "$WEB"
+LLL_TEST_BOARD_TOKEN="$BOARD_TOKEN" python3 "$REPO_ROOT"/scripts/test_provenance.py "$LIN" "$LLL_URL" "$WEB"
 
-LLL_TEST_BOARD_TOKEN="$BOARD_TOKEN" python3 scripts/test_attachments.py "$LIN" "$LLL_URL" "$WEB"
+LLL_TEST_BOARD_TOKEN="$BOARD_TOKEN" python3 "$REPO_ROOT"/scripts/test_attachments.py "$LIN" "$LLL_URL" "$WEB"
 
-LLL_TEST_BOARD_TOKEN="$BOARD_TOKEN" python3 scripts/test_issue_stream.py "$LIN" "$LLL_URL" "$WEB"
+LLL_TEST_BOARD_TOKEN="$BOARD_TOKEN" python3 "$REPO_ROOT"/scripts/test_issue_stream.py "$LIN" "$LLL_URL" "$WEB"
 
-LLL_TEST_BOARD_TOKEN="$BOARD_TOKEN" python3 scripts/test_board_claims.py "$LIN" "$LLL_URL" "$WEB"
+LLL_TEST_BOARD_TOKEN="$BOARD_TOKEN" python3 "$REPO_ROOT"/scripts/test_board_claims.py "$LIN" "$LLL_URL" "$WEB"
 
-LLL_TEST_BOARD_TOKEN="$BOARD_TOKEN" python3 scripts/test_board_pagination.py "$LIN" "$LLL_URL" "$WEB"
+LLL_TEST_BOARD_TOKEN="$BOARD_TOKEN" python3 "$REPO_ROOT"/scripts/test_board_pagination.py "$LIN" "$LLL_URL" "$WEB"
 
 echo "e2e_web: all assertions passed"

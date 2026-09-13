@@ -4,9 +4,12 @@
 #   . "$(dirname "$0")/lib.sh"
 #   e2e_begin
 #
-# Sourcing also cds to the checkout root, so a suite can use repo-relative
-# paths (target/.lisette/bin/lll, scripts/e2e_web.sh) however it was invoked.
+# Sourcing cds to the checkout root and records it as REPO_ROOT, so a script can
+# use repo-relative paths however it was invoked. seed.sh, scratch.sh and
+# dx-review.sh stay there. The e2e suites do NOT: e2e_begin cds them out of the
+# checkout entirely and they address the repo through REPO_ROOT (LLL-369).
 cd "$(dirname "${BASH_SOURCE[0]}")/.."
+REPO_ROOT=$PWD
 
 # A random port that is actually free. Binding proves it, unlike a liveness
 # probe: an occupied port makes a health poll succeed against a STRANGER's
@@ -190,27 +193,26 @@ e2e_begin() {
   # (LLL_ADMIN_*, then LLL_ME) is the class; this closes it.
   unset LLL_ME LLL_TOKEN LLL_SORT LLL_WEB_URL LLL_BOARD_TOKEN LLL_BIND LLL_WORK_HOST
   mkdir -p "$E2E_HOME/.config/lll"
-  # TASK-311: e2e.sh runs e2e_web.sh and e2e_up.sh as children in the SAME
-  # checkout while it holds the moved-aside .lll.toml. A child that ran this
-  # block saw no file, left RESTORE_TOML unset, and its e2e_end then removed
-  # a .lll.toml on the assumption none existed at start - deleting the TRACKED
-  # copy once the parent's restore raced it. The parent exports the marker;
-  # a child that sees it does not touch the file at all.
-  if [ "${E2E_TOML_HELD:-}" = 1 ]; then
-    RESTORE_TOML=skip
-  elif [ -f .lll.toml ]; then
-    export E2E_TOML_HELD=1
-    # TASK-143: the move alone is not the report. A stray file written by an
-    # earlier demo (`lll up` with no configured team writes .lll.toml into the
-    # CURRENT directory) once made the gate die at 'FAIL: seeding teams' with a
-    # JSON decode error, and nothing in that output pointed back here. The move
-    # aside makes the run hermetic; ECHOING THE CONTENTS is what lets the next
-    # reader connect a weird failure to a file they did not know they had.
-    echo "e2e: repo-root .lll.toml moved aside for this run, restored on exit" >&2
-    echo "e2e:   its contents were: $(tr '\n' ' ' < .lll.toml)" >&2
-    mv .lll.toml "$DATA_DIR/.lll.toml.saved"
-    RESTORE_TOML=1
-  fi
+  # LLL-369: the suite runs from a temp directory OUTSIDE the checkout, which is
+  # what makes it hermetic. The config walk goes up from the cwd and stops at a
+  # repository root, so from here it finds neither the repo's .lll.toml nor
+  # anything else of the developer's (HOME is pinned by e2e_pin_home below).
+  #
+  # This replaces moving the repo's .lll.toml aside and restoring it on exit
+  # (TASK-143/115/311). That worked, but it mutated a TRACKED file in the
+  # developer's working tree for the length of the run: every `lll` command in
+  # the checkout failed with "no team configured" while the gate ran, a
+  # concurrent diff reported a tracked file as deleted, and each interruption was
+  # a chance to lose it for good - which TASK-311 records happening when a child
+  # suite's restore raced the parent's. Not moving it needs no marker, no
+  # restore, and no trap to get right.
+  #
+  # A stray .lll.toml written DURING the run (`lll up` with no configured team
+  # writes one into the current directory) now lands in this run directory, where
+  # e2e_end reports it. That diagnostic is the part of TASK-143 worth keeping:
+  # the accident it names once cost a gate failure reading 'FAIL: seeding teams'.
+  mkdir -p "$DATA_DIR/run"
+  cd "$DATA_DIR/run"
 }
 
 # Kill a list of PIDs and WAIT for them to actually be gone (TASK-153).
@@ -340,40 +342,20 @@ e2e_pin_home() {
   export HOME="$E2E_HOME"
 }
 
-# The tail of every suite's EXIT trap: put the repo's own .lll.toml back.
-#
-# It restores rather than deletes because .lll.toml is TRACKED now (TASK-168):
-# `rm -f` on a committed file leaves git status dirty after every run, and on
-# a checkout whose copy is already missing it deletes it for good. The bare
-# `rm` is kept only for the case where there was nothing to move aside, where
-# any file present was written by this run.
+# The tail of every suite's EXIT trap. The checkout needs no repair here: the run
+# never had its cwd inside it and never moved its .lll.toml (LLL-369).
 e2e_end() {
-  # TASK-143: a .lll.toml present at the END that this run did not put back is
-  # a file something WROTE during the run - `lll up` with no configured team
-  # writes one into the current directory. Name it here, at the moment it can
-  # still be attributed, instead of leaving it to poison a later run that will
-  # only manage to say 'FAIL: seeding teams'. Report, never remove: which
-  # process wrote it is the open question (TASK-115), and a silent delete is
-  # how the question stays open.
-  if [ "${RESTORE_TOML:-}" = 1 ] && [ -f .lll.toml ]; then
-    echo "e2e: a .lll.toml APPEARED at the repo root during this run (something wrote it):" >&2
-    echo "e2e:   $(tr '\n' ' ' < .lll.toml)" >&2
-    echo "e2e:   the run's saved copy is restored over it; see TASK-143/TASK-115" >&2
+  # TASK-143/115: a .lll.toml in the run directory was WRITTEN by this run -
+  # `lll up` with no configured team writes one into the current directory. Name
+  # it while it can still be attributed. Before LLL-369 this accident landed at
+  # the repo root, where it survived to poison a later run that could only manage
+  # to say 'FAIL: seeding teams'; now it lands in a directory that is about to be
+  # deleted, so reporting it is all that is left to do.
+  if [ -f "${DATA_DIR:-}/run/.lll.toml" ]; then
+    echo "e2e: a .lll.toml was written into the run directory (something wrote it):" >&2
+    echo "e2e:   $(tr '\n' ' ' < "$DATA_DIR/run/.lll.toml")" >&2
   fi
-  if [ "${RESTORE_TOML:-}" = skip ]; then
-    : # a parent holds the file; nothing here to restore or remove
-  elif [ "${RESTORE_TOML:-}" != 1 ]; then
-    # No file at start. One present now was WRITTEN during the run; report it
-    # and leave it - `git status` will show it, and a silent rm is how a
-    # tracked file went missing (TASK-311).
-    if [ -f .lll.toml ]; then
-      echo "e2e: a .lll.toml appeared at the repo root during this run and was left in place:" >&2
-      echo "e2e:   $(tr '\n' ' ' < .lll.toml)" >&2
-    fi
-  elif [ -f "$DATA_DIR/.lll.toml.saved" ]; then
-    mv -f "$DATA_DIR/.lll.toml.saved" .lll.toml
-  else
-    echo "e2e: the saved .lll.toml is gone; restore it with 'git checkout .lll.toml'" >&2
-  fi
+  # Leave the tree before removing it: the cwd is inside it.
+  cd "$REPO_ROOT" || cd /
   rm -rf "$DATA_DIR"
 }

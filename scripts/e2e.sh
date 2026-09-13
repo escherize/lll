@@ -40,8 +40,8 @@ WEB_PORT=$(free_port 40000 59999)
 PB_LOG="$DATA_DIR/pb.log"
 E2E_LOGS="$PB_LOG"
 
-lis build >/dev/null
-LIN=target/.lisette/bin/lll
+(cd "$REPO_ROOT" && lis build >/dev/null)
+LIN="$REPO_ROOT/target/.lisette/bin/lll"
 
 # TASK-187: from here on the suite runs under a scratch HOME. Config LAYERS
 # (TASK-168), so every plain `"$LIN" ...` below was reading the developer's own
@@ -243,7 +243,7 @@ out=$(LLL_URL=$URL LLL_TEAM=QA "$LIN" issue create -t "never created" 2>&1) \
 assert_contains "$out" "team QA is archived — 'lll team unarchive QA' first" \
   "create against an archived team names the fix"
 ARCHDIR="$DATA_DIR/attach-archived"
-LLL_HERE="$PWD/$LIN"
+LLL_HERE="$LIN"
 mkdir -p "$ARCHDIR"
 git -C "$ARCHDIR" init -q
 out=$(cd "$ARCHDIR" && LLL_URL=$URL HOME="$E2E_HOME" "$LLL_HERE" attach -k QA 2>&1) \
@@ -265,7 +265,7 @@ assert_contains "$out" "ENG-1" "scoped list has ENG-1"
 assert_not_contains "$out" "OPS-1" "scoped list hides OPS-1"
 
 # --- config init ---
-LLL_ABS="$PWD/$LIN"
+LLL_ABS="$LIN"
 WORK="$DATA_DIR/work"
 FAKEHOME="$DATA_DIR/home"
 mkdir -p "$WORK" "$FAKEHOME/.config/lll"
@@ -1236,7 +1236,7 @@ assert_contains "$out" "no comment containing 'never-coming'" "--timeout names w
 out=$(LLL_URL=$URL "$LIN" issue comment "$WKEY")
 assert_contains "$out" "lll issue watch $WKEY --until TEXT" "a comment listing points at watch --until"
 
-python3 scripts/test_watch_until.py "$LLL_ABS" "$URL" "$WKEY"
+python3 "$REPO_ROOT"/scripts/test_watch_until.py "$LLL_ABS" "$URL" "$WKEY"
 
 # --- lll search: full text over issues, comments and docs, ranked, with context (LLL-96) ---
 SKEY=$(env LLL_URL=$URL LLL_TEAM=ENG "$LIN" issue create -t "Rail favorites go stale" -d "First line of context.
@@ -2066,11 +2066,11 @@ fi
 assert_contains "$out" "nothing is piped in" "-d - with no pipe names the fix"
 
 # --- create --json (TASK-177): the raw record, pipe-safe and keyable ---
-python3 scripts/test_create_response.py "$LLL_ABS" "$URL"
-python3 scripts/test_pr_body.py "$LLL_ABS" "$URL"
-python3 scripts/test_issue_table.py "$LLL_ABS" "$URL"
-python3 scripts/test_issue_project.py "$LLL_ABS" "$URL"
-python3 scripts/test_end_of_options.py "$LLL_ABS" "$URL"
+python3 "$REPO_ROOT"/scripts/test_create_response.py "$LLL_ABS" "$URL"
+python3 "$REPO_ROOT"/scripts/test_pr_body.py "$LLL_ABS" "$URL"
+python3 "$REPO_ROOT"/scripts/test_issue_table.py "$LLL_ABS" "$URL"
+python3 "$REPO_ROOT"/scripts/test_issue_project.py "$LLL_ABS" "$URL"
+python3 "$REPO_ROOT"/scripts/test_end_of_options.py "$LLL_ABS" "$URL"
 # Scripts used to parse the "Created KEY-N" sentence for the key; --json
 # hands them the record itself instead — same shape as `view --json`.
 out=$(env $E "$LIN" issue create -t "Create json target" --json)
@@ -2374,8 +2374,8 @@ assert_contains "$login_out" "$E2E_HOME" "the file login names is the home confi
 HOME_TOK=$(sed -n 's/^token = "\(.*\)"$/\1/p' "$E2E_HOME/.config/lll/lll.toml")
 [ -n "$HOME_TOK" ] || fail "login stored no token in the home config"
 assert_not_contains "$login_out" "$HOME_TOK" "login output never echoes the token"
-if [ -f .lll.toml ]; then
-  assert_not_contains "$(cat .lll.toml)" "$HOME_TOK" "the repo's .lll.toml holds no token"
+if [ -f "$REPO_ROOT/.lll.toml" ]; then
+  assert_not_contains "$(cat "$REPO_ROOT/.lll.toml")" "$HOME_TOK" "the repo's .lll.toml holds no token"
 fi
 
 # AC#3: config --list shows where the token came from, never its value — and
@@ -3060,12 +3060,12 @@ print('Concurrent CLI/API allocation: 40 successful creates, 40 unique IDs and n
 PY_RACE
 
 # --- web board (own ephemeral PB; see e2e_web.sh) ---
-python3 scripts/test_doc_pagination.py "$LLL_ABS" "$URL"
-python3 scripts/test_export_live.py "$LLL_ABS" "$URL"
-python3 scripts/test_claims_live.py "$LLL_ABS" "$URL"
+python3 "$REPO_ROOT"/scripts/test_doc_pagination.py "$LLL_ABS" "$URL"
+python3 "$REPO_ROOT"/scripts/test_export_live.py "$LLL_ABS" "$URL"
+python3 "$REPO_ROOT"/scripts/test_claims_live.py "$LLL_ABS" "$URL"
 
 # --- web board (own ephemeral PB; see e2e_web.sh) ---
-HOME="$E2E_REAL_HOME" scripts/e2e_web.sh
+HOME="$E2E_REAL_HOME" "$REPO_ROOT"/scripts/e2e_web.sh
 
 # --- lll up runner (own ephemeral PB; see e2e_up.sh) ---
-HOME="$E2E_REAL_HOME" scripts/e2e_up.sh
+HOME="$E2E_REAL_HOME" "$REPO_ROOT"/scripts/e2e_up.sh

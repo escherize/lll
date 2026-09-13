@@ -15,7 +15,7 @@ import urllib.request
 
 binary, api = sys.argv[1:]
 env = dict(os.environ, LLL_BIN=binary, LLL_URL=api, LLL_TEAM='EXPT')
-exporter = str(Path('bin/lll-export').resolve())
+exporter = str(Path(__file__).resolve().parents[1] / 'bin/lll-export')
 
 
 def cli(*args):

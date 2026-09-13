@@ -104,7 +104,7 @@ if shutil.which('playwright-cli'):
     session = new_session()
     try:
         open_session(session, board + '/?board_token=' + os.environ['LLL_TEST_BOARD_TOKEN'])
-        p = subprocess.run(['playwright-cli', '-s=' + session, 'run-code', Path('scripts/browser_claims.js').read_text()], capture_output=True, text=True, timeout=100)
+        p = subprocess.run(['playwright-cli', '-s=' + session, 'run-code', (Path(__file__).resolve().parent / 'browser_claims.js').read_text()], capture_output=True, text=True, timeout=100)
         output = p.stdout + p.stderr
         Path('/tmp/lll-185-browser.log').write_text(output)
         require_result(p, 'Board claim controls passed', board)
