@@ -144,7 +144,10 @@ done
 # TASK-181: the collection rules are authenticated-only, so the CLI needs a
 # member token. lib.sh's pb_member_token runs the same auth-with-password round
 # trip a human login does, against the server just booted.
-LLL_TOKEN=$(pb_member_token "$URL" seed seed@lll.test seed-pass-123) \
+# LLL-377: the token's member IS the author (identity-is-the-token, TASK-317),
+# so mint demo's rather than seed's - LLL_ME=demo above must AGREE with it, not
+# name someone else. Minting as `seed` while pinning `demo` refused every write.
+LLL_TOKEN=$(pb_member_token "$URL" demo demo@lll.test demo-pass-123) \
   || fail "could not bootstrap a member token against $URL"
 export LLL_TOKEN
 
@@ -276,8 +279,8 @@ issues() {
     --priority 3 --assignee avery --project "Board v2" --label feature >/dev/null
 }
 
-# Comments, so the issue page is not just a description. Authored as 'me',
-# which LLL_ME pins to the seeded demo member.
+# Comments, so the issue page is not just a description. Authored as the demo
+# member, because the TOKEN names demo (TASK-317) and LLL_ME=demo agrees with it.
 #
 # Addressed by the ids issues() captured, not by a literal DEMO-1: issue
 # numbers are per-team and monotonic, so under --keep the second run's issues
