@@ -17,14 +17,12 @@
 #   fly apps create <app>
 #   fly volumes create lll_data --size 3 --region <region>
 #   fly secrets set LLL_TEAM=<key> LLL_ADMIN_EMAIL=<email> LLL_ADMIN_PASSWORD=<pw>
-#   fly ips allocate-v4 -a <app>   # dedicated IPv4 (~$2/mo): the tls+http
-#                                  # :8091 stanza in fly.toml rides only this
 #   scripts/fly-deploy.sh
 # The API and the board share ONE address: https://<app>.fly.dev, which is what
 # 'lll login --url' and LLL_URL take (TASK-241 - the board proxies /api/ and
-# /_/ to the PocketBase it runs in-process). The :8091 stanza and its dedicated
-# IPv4 still answer, for configs written before that landed; retiring them is a
-# separate decision.
+# /_/ to the PocketBase it runs in-process). No dedicated IPv4 is needed: the
+# shared one carries the 80/443 http_service, which is now the only service.
+# LLL-371 retired the separate :8091 stanza that required one.
 # The volume mounts at /data/pb_data (see fly.toml) — without it, every deploy
 # wipes the backlog (the single most common way to lose everything here).
 

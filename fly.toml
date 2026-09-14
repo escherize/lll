@@ -1,6 +1,6 @@
-# TASK-171: Fly configuration. Two ports — the CLI talks to PocketBase (8090),
-# the board links (8100) — and one volume, because the machine filesystem is
-# ephemeral and pb/pb_data is the backlog.
+# TASK-171: Fly configuration. One published port — the board on 8100, which
+# also serves the API under /api/ (LLL-371) — and one volume, because the
+# machine filesystem is ephemeral and pb/pb_data is the backlog.
 #
 # app = the Fly app name; set it once with `fly apps create <name>` and keep
 # this file's `app =` in agreement (or delete the line and pass --app).
@@ -24,18 +24,15 @@ primary_region = "ord"
     soft_limit = 200
     hard_limit = 250
 
-# The PocketBase API, for the CLI: https://<host>:8091, TLS terminated at the
-# Fly edge (TASK-201/TASK-203). The tls+http handlers only ride a DEDICATED
-# IPv4 — the shared IPv4 carries nothing but the 80/443 http_service, which is
-# why the earlier raw-TCP stanza was IPv6-only. Operator steps, once:
-#   fly ips allocate-v4 -a <app>        # ~$2/mo, then
-#   scripts/fly-deploy.sh               # picks up this stanza
-[[services]]
-  internal_port = 8090
-  protocol = "tcp"
-  [[services.ports]]
-    port = 8091
-    handlers = ["tls", "http"]
+# LLL-371: the API had its own service here, published as :8091 over a
+# dedicated IPv4 (~$2/mo, because Fly's shared IPv4 carries only the 80/443
+# http_service). It is gone. The board serves /api/ and /_/ under its own 443
+# origin by proxying the PocketBase it runs in-process, so one address is both
+# the board and the API and there is no port for anyone to guess or configure.
+#
+# A client whose url still carries :8091 fixes it by dropping the port. The
+# non-JSON-404 hint in pb/client.lis still names :8091 deliberately - that is
+# advice about OLDER servers, which have not taken this move.
 
 [mounts]
   source = "lll_data"
