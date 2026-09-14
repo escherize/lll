@@ -71,14 +71,7 @@ fn label_list(input: flags.CommandInput) -> Result<(), string> {
     "labels",
     &labels,
   )?
-  if p.given("--json") {
-    let body = match json.Marshal(labels) {
-      Ok(b) => b as string,
-      Err(e) => return Err(f"encoding label list: {e}"),
-    }
-    fmt.Println(body)
-    return Ok(())
-  }
+  if p.given("--json") { return print_json(labels, "label list") }
   for l in labels.items {
     let mut team = l.expand.team.key
     if team == "" { team = "workspace" }

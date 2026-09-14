@@ -1,0 +1,17 @@
+import "go:encoding/json"
+import "go:fmt"
+
+/// Print a value as JSON, the end of every `--json` list command.
+///
+/// Eight of them ended in the same eight lines - marshal, bail with an
+/// "encoding X" message, print, return - differing only in the noun the
+/// failure named. `what` is that noun and the only thing that ever varied.
+fn print_json(value: Unknown, what: string) -> Result<(), string> {
+  match json.Marshal(value) {
+    Ok(b) => {
+      fmt.Println(b as string)
+      Ok(())
+    },
+    Err(e) => Err(f"encoding {what}: {e}"),
+  }
+}

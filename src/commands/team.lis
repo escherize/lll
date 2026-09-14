@@ -110,14 +110,7 @@ fn team_list(input: flags.CommandInput) -> Result<(), string> {
   if !p.given("--archived") {
     teams.items = teams.items.filter(|t| !t.archived)
   }
-  if p.given("--json") {
-    let body = match json.Marshal(teams) {
-      Ok(b) => b as string,
-      Err(e) => return Err(f"encoding team list: {e}"),
-    }
-    fmt.Println(body)
-    return Ok(())
-  }
+  if p.given("--json") { return print_json(teams, "team list") }
   for t in teams.items {
     let mut mark = ""
     if t.archived { mark = "\t(archived)" }

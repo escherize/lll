@@ -42,14 +42,7 @@ pub fn search_cmd(args: Slice<string>) -> Result<(), string> {
   let team = current_team()?
   let corpus = cached_corpus(team.id, team.key, p.given("--refresh"), !only_docs, !only_issues)?
   let hits = search.rank(corpus, q, limit)
-  if p.given("--json") {
-    let body = match json.Marshal(hits) {
-      Ok(b) => b as string,
-      Err(e) => return Err(f"encoding hits: {e}"),
-    }
-    fmt.Println(body)
-    return Ok(())
-  }
+  if p.given("--json") { return print_json(hits, "hits") }
   if hits.is_empty() {
     fmt.Println(f"No match for '{q}' in {team.key}'s issues, comments or docs.")
     return Ok(())

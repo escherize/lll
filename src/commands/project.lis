@@ -89,14 +89,7 @@ fn project_list(input: flags.CommandInput) -> Result<(), string> {
     "projects",
     &projects,
   )?
-  if p.given("--json") {
-    let body = match json.Marshal(projects) {
-      Ok(b) => b as string,
-      Err(e) => return Err(f"encoding project list: {e}"),
-    }
-    fmt.Println(body)
-    return Ok(())
-  }
+  if p.given("--json") { return print_json(projects, "project list") }
   for p in projects.items {
     let mut team = p.expand.team.key
     if team == "" { team = "workspace" }

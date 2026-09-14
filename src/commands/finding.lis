@@ -1,4 +1,3 @@
-import "go:encoding/json"
 import "go:fmt"
 import "go:strings"
 
@@ -207,14 +206,7 @@ fn finding_list(input: flags.CommandInput) -> Result<(), string> {
   if path != "" {
     findings = findings_near(findings, path)
   }
-  if p.given("--json") {
-    let body = match json.Marshal(findings) {
-      Ok(b) => b as string,
-      Err(e) => return Err(f"encoding findings: {e}"),
-    }
-    fmt.Println(body)
-    return Ok(())
-  }
+  if p.given("--json") { return print_json(findings, "findings") }
   if findings.is_empty() {
     fmt.Println("No findings.")
     return Ok(())

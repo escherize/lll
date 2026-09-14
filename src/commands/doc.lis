@@ -389,14 +389,7 @@ fn doc_list(input: flags.CommandInput) -> Result<(), string> {
   let docs = models.DocList {
     items: fetch_docs(query.filter(team.id, "", "", "", "", ""), "kind,slug", "")?,
   }
-  if p.given("--json") {
-    let body = match json.Marshal(docs) {
-      Ok(b) => b as string,
-      Err(e) => return Err(f"encoding docs: {e}"),
-    }
-    fmt.Println(body)
-    return Ok(())
-  }
+  if p.given("--json") { return print_json(docs, "docs") }
   for d in docs.items {
     let mut kind = d.kind
     if kind == "" { kind = "-" }
