@@ -1,8 +1,6 @@
 package gopb
 
 import (
-	"database/sql"
-	"errors"
 	"net/http"
 	"strings"
 	"unicode"
@@ -75,13 +73,6 @@ func registerReferenceRoutes(routes *router.Router[*core.RequestEvent], writes *
 		if err == nil {
 			return re.JSON(http.StatusOK, result)
 		}
-		var invalid validation.Errors
-		if errors.As(err, &invalid) {
-			return re.BadRequestError("invalid reference", invalid)
-		}
-		if errors.Is(err, sql.ErrNoRows) {
-			return re.BadRequestError("issue or team no longer exists", nil)
-		}
-		return re.InternalServerError("reference transaction failed", err)
+		return writeFailure(re, err, "issue or team no longer exists", "invalid reference", "reference transaction failed")
 	}).Bind(apis.RequireAuth("members", core.CollectionNameSuperusers))
 }

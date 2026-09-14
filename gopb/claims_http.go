@@ -80,16 +80,27 @@ func respondClaim(re *core.RequestEvent, outcome ClaimOutcome, err error) error 
 	if err == nil {
 		return re.JSON(http.StatusOK, outcome)
 	}
+	// A rejected claim is a claim-only concept: someone else holds it. Everything
+	// below it is the shared shape.
 	var rejected *claimRejection
 	if errors.As(err, &rejected) {
 		return re.BadRequestError(rejected.Error(), nil)
 	}
-	if errors.Is(err, sql.ErrNoRows) {
-		return re.BadRequestError("issue or member no longer exists", nil)
-	}
+	return writeFailure(re, err, "issue or member no longer exists", "invalid issue fields", "claim transaction failed")
+}
+
+// writeFailure maps a failed transaction onto a response. The lll routes that
+// write inside a transaction - claims and references - had the same three
+// branches with different nouns, and had drifted into checking them in
+// different orders, so the nouns are the parameters and the order is fixed
+// here: the most specific error first.
+func writeFailure(re *core.RequestEvent, err error, missing, invalidMsg, failed string) error {
 	var invalid validation.Errors
 	if errors.As(err, &invalid) {
-		return re.BadRequestError("invalid issue fields", invalid)
+		return re.BadRequestError(invalidMsg, invalid)
 	}
-	return re.InternalServerError("claim transaction failed", err)
+	if errors.Is(err, sql.ErrNoRows) {
+		return re.BadRequestError(missing, nil)
+	}
+	return re.InternalServerError(failed, err)
 }
