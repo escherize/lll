@@ -316,6 +316,28 @@ fn board_mux(cfg: config.Config, boot: models.Team, hub: Hub) -> Result<mut Ref<
     "GET /static/",
     |w: http.ResponseWriter, r: Ref<http.Request>| {
       if admit(w, r) {
+        // Embedded files carry a ZERO ModTime, so http.ServeContent omits
+        // Last-Modified and sets no ETag. With no validator and no freshness
+        // directive the browser cannot reuse anything: every load refetched
+        // the 352KB variable font, and theme.css's `font-display: swap`
+        // rendered the fallback until it landed. That is the flash on refresh.
+        //
+        // Fonts are the one asset here safe to pin hard: the file is a
+        // vendored Inter release, so the bytes behind
+        // /static/fonts/InterVariable.woff2 do not change without the name
+        // changing too. `immutable` means the browser does not even revalidate.
+        //
+        // theme.css and the scripts deliberately keep no caching. They DO
+        // change from deploy to deploy and the URLs carry no content hash, so
+        // caching them would serve a stale board after an upgrade with no way
+        // to say otherwise. The cost is that they are refetched per load,
+        // which is worth measuring only once the URLs are versioned; that is
+        // the upgrade path if the CSS ever becomes a problem too.
+        if let Some(u) = r.URL {
+          if strings.HasPrefix(u.Path, "/static/fonts/") {
+            w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
+          }
+        }
         // FileServer's ServeHTTP wants a writable request; the mux hands out
         // read-only ones, so serve a clone (see `flashing`).
         let mut rc = r.Clone(r.Context())
