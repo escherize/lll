@@ -6,10 +6,8 @@ import "models"
 
 /// Ambient creation context is optional: filing must also work outside Git.
 pub fn capture() -> models.IssueOrigin {
-  let sha = match exec.Command("git", "rev-parse", "--short", "HEAD").Output() {
-    Ok(value) => strings.TrimSpace(value as string),
-    Err(_) => "",
-  }
+  let sha = exec.Command("git", "rev-parse", "--short", "HEAD").Output()
+    .map_or("", |value| strings.TrimSpace(value as string))
   models.IssueOrigin {
     host: os.Hostname().unwrap_or(""),
     cwd: os.Getwd().unwrap_or(""),

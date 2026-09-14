@@ -68,9 +68,6 @@ pub fn search_spec() -> Slice<flags.Flag> {
   ]
 }
 
-/// Every searchable record of one team as search.Documents: each issue as
-/// one document (title + description), each comment as one carrying its
-/// issue's key and title, each doc as one. Paged at PocketBase's ceiling.
 /// The PocketBase clause that admits a record containing ANY query term in
 /// any of `fields` ('~' is a case-insensitive LIKE). The ranker then sees
 /// candidates rather than the corpus: the hosted board serialised a
@@ -85,48 +82,11 @@ pub fn candidate_clause(q: string, fields: Slice<string>) -> string {
   "(" + strings.Join(parts, " || ") + ")"
 }
 
-pub fn search_corpus(team_id: string, team_key: string, q: string, issues: bool, docs: bool) -> Result<Slice<search.Document>, string> {
-  // The three fetches are each a few hundred kilobytes of body text from
-  // the hosted board; in sequence they were most of an eleven-second query.
-  // They run at once and the query costs the slowest one.
-  let issues_ch = Channel.new<Result<Slice<models.Issue>, string>>()
-  let comments_ch = Channel.new<Result<Slice<models.Comment>, string>>()
-  let docs_ch = Channel.new<Result<Slice<models.Doc>, string>>()
-  if issues {
-    let iq = candidate_clause(q, ["title", "description"])
-    let cq = candidate_clause(q, ["body"])
-    task { let _ = issues_ch.send(fetch_team_issues_light(team_id, iq)) }
-    task { let _ = comments_ch.send(fetch_team_comments_where(team_id, cq)) }
-  }
-  if docs {
-    let dq = candidate_clause(q, ["title", "body"])
-    task { let _ = docs_ch.send(fetch_team_docs_light(team_id, dq)) }
-  }
-  let mut out: Slice<search.Document> = []
-  if issues {
-    let Some(all) = issues_ch.receive() else { return Err("issue fetch ended without an answer") }
-    let Some(comments) = comments_ch.receive() else { return Err("comment fetch ended without an answer") }
-    out = out.append(issue_documents(team_key, all?, comments?)...)
-  }
-  if docs {
-    let Some(ds) = docs_ch.receive() else { return Err("doc fetch ended without an answer") }
-    for d in ds? {
-      out = out.append(search.Document { group: d.slug, kind: "doc", label: d.kind, title: d.title, body: d.body, state: "" })
-    }
-  }
-  Ok(out)
-}
-
 /// Every doc of a team with only the fields the ranker reads, paged.
 fn fetch_team_docs_light(team_id: string, where: string) -> Result<Slice<models.Doc>, string> {
   let mut clause = f"team={query.quote(team_id)}"
   if where != "" { clause = f"{clause} && {where}" }
   fetch_docs(clause, "slug", "id,slug,kind,title,body,updated")
-}
-
-/// Every issue of a team, expanded for the board's card, paged.
-pub fn fetch_team_issues(team_id: string) -> Result<Slice<models.Issue>, string> {
-  fetch_team_issues_where(team_id, "")
 }
 
 pub fn fetch_team_issues_where(team_id: string, where: string) -> Result<Slice<models.Issue>, string> {
@@ -161,11 +121,6 @@ fn fetch_team_issues_light(team_id: string, where: string) -> Result<Slice<model
     page += 1
   }
   Ok(out)
-}
-
-/// Every comment on a team's issues, oldest first, authors expanded, paged.
-pub fn fetch_team_comments(team_id: string) -> Result<Slice<models.Comment>, string> {
-  fetch_team_comments_where(team_id, "")
 }
 
 fn fetch_team_comments_where(team_id: string, where: string) -> Result<Slice<models.Comment>, string> {

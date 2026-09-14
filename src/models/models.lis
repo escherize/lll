@@ -274,12 +274,6 @@ pub struct ClaimList {
   pub items: Slice<Claim>,
 }
 
-#[json]
-pub struct NewClaim {
-  pub issue: string,
-  pub member: string,
-}
-
 /// One saved view (TASK-94): a name plus the board query string it stands
 /// for. `member` is "" for every row written before auth (TASK-32) lands:
 /// a view is workspace-wide, not personal.

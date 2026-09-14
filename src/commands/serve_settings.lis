@@ -2,7 +2,6 @@ import "records"
 import "go:crypto/rand"
 import "go:html/template"
 import "go:net/http"
-import "go:net/url"
 import "go:os"
 import "go:strings"
 import "go:time"
@@ -94,20 +93,14 @@ fn settings_vm(team: models.Team) -> Result<SettingsVM, string> {
 fn team_rows() -> Result<Slice<SetTeamVM>, string> {
   let mut rows: Slice<SetTeamVM> = []
   for t in records.list_teams()?.items {
-    let filter = url.QueryEscape(f"team={query.quote(t.id)}")
-    let mut issues = models.IssueList { .. }
-    pb.fetch(
-      f"/api/collections/issues/records?filter={filter}&perPage=1",
-      "issues",
-      &issues,
-    )?
+    let held = issue_count(f"team={query.quote(t.id)}")?
     rows = rows.append(
       SetTeamVM {
         id: t.id,
         key: t.key,
         name: t.name,
-        issues: issues.total_items,
-        issues_text: issue_count_text(issues.total_items),
+        issues: held,
+        issues_text: issue_count_text(held),
         archived: t.archived,
       },
     )

@@ -3,7 +3,6 @@ import "go:net/http"
 import "go:net/url"
 
 import "models"
-import "pb"
 import "query"
 
 // GET /projects - the project list, with each issue count linking to the
@@ -86,12 +85,8 @@ fn project_tone(status: string) -> string {
 /// scopes by, so the count and the /issues link it labels always agree — a
 /// project owned by another team reads 0 rather than a number no page shows.
 ///
-/// perPage=1: PocketBase reports totalItems for the filter regardless, so the
-/// count costs one tiny request per project and never a page of records.
+/// A project's issue count, or 0 when the count cannot be had: the projects
+/// page would rather render with a zero than not render.
 fn project_count(team_id: string, project_id: string) -> int {
-  let filter = query.filter(team_id, "", "", project_id, "", "")
-  let path = f"/api/collections/issues/records?perPage=1&fields=id&filter={url.QueryEscape(filter)}"
-  let mut list = models.IssueList { .. }
-  if pb.fetch(path, "issues", &list).is_err() { return 0 }
-  list.total_items
+  issue_count(query.filter(team_id, "", "", project_id, "", "")).unwrap_or(0)
 }

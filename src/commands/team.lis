@@ -1,7 +1,6 @@
 import "records"
 import "go:encoding/json"
 import "go:fmt"
-import "go:net/url"
 import "go:strings"
 
 import "config"
@@ -426,16 +425,10 @@ fn team_delete(input: flags.CommandInput) -> Result<(), string> {
   let Some(t) = records.find_team(key)? else {
     return Err(unknown_team(key))
   }
-  let filter = url.QueryEscape(f"team={query.quote(t.id)}")
-  let mut issues = models.IssueList { .. }
-  pb.fetch(
-    f"/api/collections/issues/records?filter={filter}&perPage=1",
-    "issues",
-    &issues,
-  )?
-  if issues.total_items > 0 {
+  let issues_held = issue_count(f"team={query.quote(t.id)}")?
+  if issues_held > 0 {
     return Err(
-      f"team {t.key} holds {issues.total_items} issue(s) — deleting it would orphan them
+      f"team {t.key} holds {issues_held} issue(s) — deleting it would orphan them
 'lll team archive {t.key}' hides it and keeps their ids working",
     )
   }
@@ -531,20 +524,14 @@ fn team_view(input: flags.CommandInput) -> Result<(), string> {
     return Err(unknown_team(key))
   }
 
-  let filter = url.QueryEscape(f"team={query.quote(t.id)}")
-  let mut issues = models.IssueList { .. }
-  pb.fetch(
-    f"/api/collections/issues/records?filter={filter}&perPage=1",
-    "issues",
-    &issues,
-  )?
+  let issues_held = issue_count(f"team={query.quote(t.id)}")?
 
   fmt.Println(f"Key:    {t.key}")
   fmt.Println(f"Name:   {t.name}")
   // The stored value is what /settings wrote, so it goes through the same
   // normalizer the board renders with; "" is the canonical orange (TASK-100).
   fmt.Println(f"Accent: {view_accent(t.accent)}")
-  fmt.Println(f"Issues: {issues.total_items}")
+  fmt.Println(f"Issues: {issues_held}")
   if t.archived {
     fmt.Println("Archived: yes ('lll team unarchive' brings it back)")
   }

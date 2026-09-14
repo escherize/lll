@@ -15,7 +15,12 @@ fn entity_issue_count(kind: string, id: string) -> Result<int, string> {
 }
 
 /// How many issues match a filter. perPage=1 so PocketBase answers the count
-/// without a page of records, the same trick the settings sections use.
+/// without a page of records.
+///
+/// The one copy: team delete, team view, the settings team inventory and the
+/// projects page all counted issues by spelling this request out again, four
+/// times, one of them twice. Takes the filter UNESCAPED and escapes it here,
+/// so no caller has to remember which side of the escape it is on.
 fn issue_count(filter: string) -> Result<int, string> {
   let mut list = models.IssueList { .. }
   pb.fetch(
