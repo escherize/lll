@@ -165,6 +165,25 @@ anon_page=$(curl -s "$WEB/")
 assert_contains "$anon_page" "board_token" "401 page says how to get in"
 assert_contains "$anon_page" "LLL_BOARD_TOKEN" "401 page names the env override"
 
+# LLL-370: the page offers a field rather than only describing the token. The
+# form carries no action, so it submits ?board_token= to whatever path was
+# refused - the same handoff asserted below, reached by pasting instead of by
+# hand-editing a URL. Assert the field NAME: it is what ties the two together,
+# and a rename would silently produce a form that logs nobody in.
+assert_contains "$anon_page" "<form method='get'" "401 page offers a form"
+assert_contains "$anon_page" "name='board_token'" "the field submits the accepted parameter"
+assert_contains "$anon_page" "type='submit'" "the form can be submitted"
+assert_not_contains "$anon_page" "/static/" "the 401 page stays self-contained"
+
+# A wrong paste must say so. Without this the form looks inert: the gate
+# re-renders the same 401 and nothing on it acknowledges the attempt.
+wrong_paste=$(curl -s -w '\n%{http_code}' "$WEB/?board_token=NOT_THE_BOARD_TOKEN")
+assert_contains "$wrong_paste" "401" "a wrong token is still refused"
+assert_contains "$wrong_paste" "not accepted" "a wrong token says it was not accepted"
+assert_contains "$wrong_paste" "name='board_token'" "a wrong token leaves the form to retry in"
+# And the anonymous page, which nobody submitted, must NOT accuse them.
+assert_not_contains "$anon_page" "not accepted" "an untried 401 page reports no failure"
+
 # A POST with no token is refused before any write happens.
 anon_post=$(curl -s -o /dev/null -w '%{http_code}' -X POST \
   -d "key=ENG-1&body=anonymous comment" "$WEB/comment")

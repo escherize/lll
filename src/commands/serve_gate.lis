@@ -76,7 +76,7 @@ fn admit(w: http.ResponseWriter, r: Ref<http.Request>) -> bool {
     }
     return true
   }
-  refused(w)
+  refused(w, r)
   false
 }
 
@@ -125,11 +125,22 @@ fn without_board_token(r: Ref<http.Request>) -> string {
 /// that too), and it says how to get in: the rule-as-filter spirit — an
 /// anonymous viewer is told the fix, not just refused. HTML attributes are
 /// single-quoted so the lis string stays a plain multi-line literal.
-fn refused(w: http.ResponseWriter) {
+///
+/// The form is the whole of LLL-370 and needs no route of its own: a GET with
+/// no action submits ?board_token=… to the very path the viewer was refused
+/// at, which is the handoff admit() already accepts — it sets the cookie and
+/// 303s back without the token. One way in, reachable by paste as well as by
+/// hand-edited URL.
+fn refused(w: http.ResponseWriter, r: Ref<http.Request>) {
   w.Header().Set("Content-Type", "text/html; charset=utf-8")
   w.Header().Set("Cache-Control", "no-store")
   w.WriteHeader(401)
-  let page = "<!doctype html>
+  // Reaching here with a token in the query means that token did not match.
+  // Saying so is what separates a wrong paste from a dead button.
+  let wrong = if query_param(r, "board_token") == "" { "" } else {
+    "<p style='margin: 1.5rem 0 0; padding: .6rem .8rem; border-left: 3px solid #b3261e; background: #fdeded; color: #7f1d1b;'>That token was not accepted. Check for a missing character or a trailing space, then paste it again.</p>"
+  }
+  let page = f"<!doctype html>
 <html lang='en'>
 <head>
 <meta charset='utf-8'>
@@ -139,11 +150,21 @@ fn refused(w: http.ResponseWriter) {
 <body style='font-family: ui-sans-serif, system-ui, sans-serif; max-width: 42rem; margin: 4rem auto; padding: 0 1rem; color: #1c1c1e; line-height: 1.5;'>
 <h1 style='font-size: 1.4rem;'>401 &mdash; this board is gated</h1>
 <p>The lll board only answers requests that carry its board token.</p>
-<p>To get in: open the board URL that <code>lll up</code> printed in its
-banner &mdash; it carries <code>?board_token=&hellip;</code> once, and visiting
-it hands your browser a cookie that keeps it in. The token comes from
-<code>LLL_BOARD_TOKEN</code>, or <code>lll up</code> generates one each boot
-and prints it next to the admin line.</p>
+{wrong}
+<form method='get' style='margin: 1.5rem 0; display: flex; gap: .6rem; flex-wrap: wrap; align-items: flex-end;'>
+<label for='board_token' style='flex: 1 1 20rem; display: flex; flex-direction: column; gap: .3rem;'>
+<span>Paste your board token</span>
+<input id='board_token' name='board_token' type='text' required autofocus
+autocomplete='off' autocapitalize='off' autocorrect='off' spellcheck='false'
+style='padding: .5rem .6rem; font: inherit; color: inherit; border: 1px solid #bbb; border-radius: .35rem;'>
+</label>
+<button type='submit' style='padding: .55rem 1rem; font: inherit; border: 1px solid #1c1c1e; border-radius: .35rem; background: #1c1c1e; color: #fff; cursor: pointer;'>Open the board</button>
+</form>
+<p>Where to find it: the board URL <code>lll up</code> printed in its banner
+carries <code>?board_token=&hellip;</code>, and opening that hands your browser
+a cookie instead. The token comes from <code>LLL_BOARD_TOKEN</code>, or
+<code>lll up</code> generates one each boot and prints it next to the admin
+line.</p>
 <p style='color: #666;'>From a terminal:
 <code>curl -H 'Cookie: lll_board=&lt;token&gt;' &lt;board-url&gt;</code></p>
 </body>
