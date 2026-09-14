@@ -597,11 +597,30 @@ pub fn synthesize_email(name: string) -> string {
   f"{slug}@members.invalid"
 }
 
-/// Find a member by exact name, or None.
+/// True when the server already has a member by that name.
+pub fn member_exists(name: string) -> Result<bool, string> {
+  Ok(records.find_member(name)?.is_some())
+}
+
 /// Create the member if the server does not have one by that name. Returns
-/// true when it created one. Shared by `lll up`'s first-boot seeding and
-/// `lll config set me`, which both need an identity to exist before it can be
-/// assigned to.
+/// true when it created one.
+///
+/// LLL-374: this is now FIRST-BOOT seeding only, and the reason is the
+/// identity-is-the-token decision (TASK-317): the author of every write is the
+/// member the TOKEN names, and `me` may only agree with it. A field whose whole
+/// job is to agree with who you are must not be able to mint who you are.
+///
+/// It used to back `lll config set me` too, so any harness setting
+/// LLL_ME=wt-42 left a permanent auth record behind as a side effect of
+/// booting. That is the same failure TASK-317 was decided after - thirty
+/// agents on one shared token, each with me = "shard-NN" - and the wt-*,
+/// goal-* and shard-* members are its fossils: 64 of them, every one holding
+/// issues, none deletable without the superuser (LLL-341).
+///
+/// A first boot is the exception because it is not an assertion of identity.
+/// There is no member and no token yet, so someone has to exist before anyone
+/// can agree with anything. Every other path creates members the way people
+/// actually join a board: `lll member add`, or the invite composite.
 pub fn ensure_member(name: string) -> Result<bool, string> {
   if name == "" { return Ok(false) }
   let existing = records.find_member(name)?

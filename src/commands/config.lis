@@ -104,15 +104,20 @@ fn config_set(input: flags.CommandInput) -> Result<(), string> {
   let path = set_home_key("me", name)?
   fmt.Println(f"me = \"{name}\" in {path}")
 
-  // Seed the member too, so the new identity can be assigned to and can author
-  // a comment immediately rather than after the next `lll up`. PocketBase being
-  // unreachable is not a reason to fail: the config write is the point, and
-  // `lll up` seeds the member anyway.
-  match ensure_member(name) {
-    Ok(true) => fmt.Println(f"created member {name}"),
-    Ok(false) => (),
+  // LLL-374: report whether that name exists; do not create it. `me` is a
+  // claim that must AGREE with the token's member (identity-is-the-token,
+  // TASK-317), so it is the wrong place to mint one - seeding here made every
+  // harness that named itself per worktree leave a permanent auth record
+  // behind. People join a board through `lll member add` or an invite, not by
+  // asserting a name. An unreachable server is not a reason to fail: the
+  // config write is the point, and this is only a courtesy check.
+  match member_exists(name) {
+    Ok(true) => (),
+    Ok(false) => fmt.Println(
+      f"no member named {name} yet — 'lll member add -n \"{name}\"' to create one",
+    ),
     Err(_) => fmt.Println(
-      f"could not reach PocketBase to create the member — 'lll member add -n \"{name}\"' once it is up",
+      f"could not reach the server to check for member {name} — 'lll member add -n \"{name}\"' if it does not exist",
     ),
   }
   Ok(())

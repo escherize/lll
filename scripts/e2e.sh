@@ -290,10 +290,17 @@ HOME_TOML="$SET_HOME/.config/lll/lll.toml"
 out=$(cd "$WORK" && HOME="$SET_HOME" LLL_URL=$URL "$LLL_ABS" config set me alice)
 assert_contains "$out" 'me = "alice"' "config set me output"
 assert_contains "$out" "$HOME_TOML" "config set me names the file it wrote"
-# With PocketBase reachable, config set me SEEDS the member (task-63) rather
-# than printing the add-it-yourself hint. This assertion used to pass only
-# because LLL_URL was unpinned and the command could not reach a server.
-assert_contains "$out" "created member alice" "config set me seeds the member"
+# LLL-374: config set me REPORTS an unknown name instead of creating it.
+# task-63 had it seed the member, which made `me` a member factory: every
+# harness naming itself per worktree left a permanent auth record behind, and
+# 64 accumulated before anyone counted. Naming yourself does not create you.
+# (LLL_URL stays pinned, so this reaches a real server and the check is real.)
+assert_contains "$out" "no member named alice yet" "config set me reports an unknown name"
+assert_not_contains "$out" "created member alice" "config set me does not create the member"
+# The leak is closed only if the members collection is genuinely untouched;
+# the printed hint alone would not prove that.
+assert_not_contains "$(LLL_URL=$URL "$LIN" member list)" "alice" \
+  "config set me left no member behind"
 assert_contains "$(cat "$HOME_TOML")" 'me = "alice"' "config set me wrote the key"
 [ ! -e "$WORK/.lll.toml" ] || fail "config set me wrote the repo file: $(cat "$WORK/.lll.toml")"
 (cd "$WORK" && HOME="$SET_HOME" LLL_URL=$URL "$LLL_ABS" config set me bob >/dev/null)
@@ -777,8 +784,12 @@ out=$(LLL_URL=$URL "$LIN" issue update ENG-6 --assignee "" 2>&1 || true)
 assert_contains "$out" "or 'none' to clear it" "an empty --assignee names none"
 out=$(LLL_URL=$URL LLL_TEAM=ENG "$LIN" issue list --project ENG 2>&1 || true)
 assert_contains "$out" "'ENG' is the team, not a project" "the team key passed as a project is told so"
-# NOT alice: `config set me alice` above now seeds that member for real, so
-# adding it again hits the unique index. This case is about the no-email path.
+# LLL-374: alice used to arrive for free, because `config set me alice` seeded
+# her. `me` only agrees with the token's member now (identity-is-the-token), so
+# nothing mints her and the suite asks for her the way a person actually joins.
+# She is needed below, where the per-member token mint expects her to exist.
+out=$(LLL_URL=$URL "$LIN" member add -n alice)
+assert_contains "$out" "Added member alice" "member add creates the identity config set me no longer does"
 out=$(LLL_URL=$URL "$LIN" member add -n carol)
 assert_contains "$out" "Added member carol" "member add without email"
 # LLL-220: punctuation in a display name must survive both email paths.
@@ -800,7 +811,7 @@ out=$(LLL_URL=$URL "$LIN" member list)
 assert_contains "$out" "bryan" "member list has bryan"
 assert_contains "$out" "bryan@example.com" "member list shows email"
 assert_contains "$out" "carol" "member list has carol"
-assert_contains "$out" "alice" "member list has the member config set me seeded"
+assert_contains "$out" "alice" "member list has the explicitly added alice"
 
 # --- task-180: members is an auth collection -------------------------------
 # carol was created without an email, so the CLI synthesized the reserved

@@ -371,6 +371,7 @@ fn resolve_team(want: string) -> Result<string, string> {
 /// superuser token uses 'me' for attribution.
 fn ensure_me(want: string) -> Result<string, string> {
   let mut name = strings.TrimSpace(want)
+  let mut guessed = false
   if name == "" {
     name = strings.TrimSpace(os.Getenv("USER"))
     // No $USER is not worth failing setup over; identity resolution still
@@ -382,9 +383,23 @@ fn ensure_me(want: string) -> Result<string, string> {
     fmt.Println(
       f"guessed me = \"{name}\" from $USER, wrote it to {path} — 'lll config set me <name>' to change it",
     )
+    guessed = true
   }
-  let created = ensure_member(name)?
-  if created { fmt.Println(f"created member {name}") }
+  // LLL-374: only the FIRST-BOOT guess above seeds a member, because only that
+  // case has no token and no member to agree with yet. A CONFIGURED `me` is an
+  // assertion about an identity that should already exist
+  // (identity-is-the-token, TASK-317), so it is reported, not created — that
+  // path is how a harness setting LLL_ME=wt-42 minted an auth record a boot.
+  if guessed {
+    let created = ensure_member(name)?
+    if created { fmt.Println(f"created member {name}") }
+    return Ok(name)
+  }
+  if let Ok(false) = member_exists(name) {
+    fmt.Println(
+      f"me = \"{name}\" names no member — 'lll member add -n \"{name}\"' to create one",
+    )
+  }
   Ok(name)
 }
 
