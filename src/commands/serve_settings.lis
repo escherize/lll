@@ -409,7 +409,7 @@ fn verify_admin(pass: string) -> Result<string, string> {
 /// their actual server status and transport details.
 fn admin_verification_error(e: string) -> string {
   if pb.response_status(e) == 400 {
-    return "wrong admin password — the superuser credentials are what 'lll up' prints in its banner"
+    return f"wrong admin password for {admin_email()} — locally these are the credentials 'lll up' prints in its banner; on a hosted server they are LLL_ADMIN_EMAIL and LLL_ADMIN_PASSWORD in the server's own environment, not the local defaults"
   }
   f"verifying the admin password: {e}"
 }
