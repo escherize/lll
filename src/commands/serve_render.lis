@@ -4,6 +4,7 @@ import "go:html/template"
 import "go:github.com/escherize/lll/web"
 import "go:net/url"
 import "go:strings"
+import "go:unicode/utf8"
 
 import "display"
 import "markdown"
@@ -119,7 +120,13 @@ fn card_vm(issue: models.Issue) -> CardVM {
 fn snippet(desc: string) -> string {
   let lines = desc.split("\n").map(strings.TrimSpace).filter(|l| l != "")
   let text = strings.Join(lines[..min(2, lines.length())], " ")
-  if text.length() > 160 { return text.substring(0..159) + "…" }
+  // RuneCountInString, not length(): length() counts BYTES and substring
+  // indexes RUNES, so a description of 100 accented characters (200 bytes,
+  // 100 runes) passed the gate and then asked for runes that do not exist -
+  // panicking the hover preview (LLL-419). The cap is "160 chars" as the
+  // doc comment says, and characters are runes here, as they are for the
+  // emoji and PR-body caps.
+  if utf8.RuneCountInString(text) > 160 { return text.substring(0..159) + "…" }
   text
 }
 
