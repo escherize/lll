@@ -40,6 +40,7 @@ fn dispatch(noun: string, args: Slice<string>) -> Result<(), string> {
     "label" => commands.label(args),
     "doc" => commands.doc(args),
     "finding" => commands.finding(args),
+    "import" => commands.import_cmd(args),
     "config" => commands.config_cmd(args),
     "login" => commands.login(args),
     "logout" => commands.logout(args),
@@ -96,6 +97,10 @@ Usage:
   lll member <command>    work with members (see 'lll member --help')
   lll project <command>   work with projects (see 'lll project --help')
   lll label <command>     work with labels (see 'lll label --help')
+  lll import github OWNER/REPO
+                          bring a GitHub repo's issues in via gh: title, body,
+                          labels, state (open todo, closed done), each issue
+                          ref'd gh#N; re-import skips what it already brought
   lll doc <command>       work with docs: wiki, findings, decisions, PRDs
                           (see 'lll doc --help')
   lll finding <command>   retrieve findings by area or path
@@ -121,7 +126,8 @@ Usage:
   lll --version, -v       print the version
   lll --help              show this help
 
-Scoped commands (issue, project, label, doc, finding, watch) accept --team KEY.
+Scoped commands (issue, project, label, doc, finding, import, watch) accept
+--team KEY.
 It overrides LLL_TEAM for this invocation and never writes configuration.
 Explicit issue IDs still target their own team.
 

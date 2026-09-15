@@ -55,6 +55,7 @@ fn nouns() -> Slice<string> {
     "doc",
     "finding",
     "config",
+    "import",
     "attach",
     "watch",
     "up",
@@ -84,6 +85,7 @@ fn verbs(noun: string) -> Slice<string> {
     "doc" => doc_commands().map(|c| c.name),
     "finding" => finding_commands().map(|c| c.name),
     "config" => config_commands().map(|c| c.name),
+    "import" => import_commands().map(|c| c.name),
     "token" => token_commands().map(|c| c.name),
     "skill" => ["list", "get"],
     "completions" => ["bash", "zsh", "fish"],
@@ -108,6 +110,7 @@ fn verb_flags(noun: string, verb: string) -> Slice<string> {
     "doc" => doc_commands(),
     "finding" => finding_commands(),
     "config" => config_commands(),
+    "import" => import_commands(),
     "token" => token_commands(),
     _ => [],
   }

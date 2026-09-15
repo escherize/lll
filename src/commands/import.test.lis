@@ -1,0 +1,70 @@
+#[test]
+fn repo_shape_requires_owner_and_repo() {
+  assert repo_shape_ok("octocat/Hello-World")
+  assert !repo_shape_ok("Hello-World")
+  assert !repo_shape_ok("octocat/Hello-World/extra")
+  assert !repo_shape_ok("/Hello-World")
+  assert !repo_shape_ok("octocat/")
+  assert !repo_shape_ok("")
+}
+
+#[test]
+fn imports_run_in_ascending_gh_number_order() {
+  let issues = [
+    GithubIssue { number: 30, title: "newest", body: "", state: "OPEN", labels: [] },
+    GithubIssue { number: 10, title: "oldest", body: "", state: "OPEN", labels: [] },
+    GithubIssue { number: 20, title: "middle", body: "", state: "CLOSED", labels: [] },
+  ]
+  let sorted = sort_by_number(issues)
+  assert sorted[0].number == 10
+  assert sorted[1].number == 20
+  assert sorted[2].number == 30
+  assert sort_by_number([]).length() == 0
+  let one = [GithubIssue { number: 5, title: "only", body: "", state: "OPEN", labels: [] }]
+  assert sort_by_number(one)[0].number == 5
+}
+
+#[test]
+fn gh_states_map_toward_work_remaining() {
+  assert imported_state("OPEN") == "todo"
+  assert imported_state("CLOSED") == "done"
+  assert imported_state("") == "todo"
+  assert imported_state("UNEXPECTED") == "todo"
+}
+
+#[test]
+fn gh_label_colors_gain_the_hash_only_when_present() {
+  assert gh_color("d73a4a") == "#d73a4a"
+  assert gh_color("") == ""
+}
+
+#[test]
+fn labels_collect_once_per_name_in_first_seen_order() {
+  let issues = [
+    GithubIssue {
+      number: 1,
+      title: "a",
+      body: "",
+      state: "OPEN",
+      labels: [
+        GithubLabel { name: "bug", color: "d73a4a" },
+        GithubLabel { name: "web", color: "5e6ad2" },
+      ],
+    },
+    GithubIssue {
+      number: 2,
+      title: "b",
+      body: "",
+      state: "OPEN",
+      labels: [
+        GithubLabel { name: "bug", color: "d73a4a" },
+        GithubLabel { name: "", color: "" },
+      ],
+    },
+  ]
+  let (names, colors) = collect_labels(issues)
+  assert names.equals(["bug", "web"])
+  assert colors.get("bug").unwrap_or("") == "d73a4a"
+  assert colors.get("web").unwrap_or("") == "5e6ad2"
+  assert colors.get("").is_none()
+}

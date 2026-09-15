@@ -12,6 +12,7 @@ pub fn scoped_args(args: Slice<string>) -> Result<Slice<string>, string> {
     "label" => (3, flags.command_spec(label_commands(), verb)),
     "doc" => (3, flags.command_spec(doc_commands(), verb)),
     "finding" => (3, flags.command_spec(finding_commands(), verb)),
+    "import" => (3, flags.command_spec(import_commands(), verb)),
     "watch" => (2, watch_verb_spec("")),
     _ => return Ok(args),
   }

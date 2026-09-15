@@ -1,0 +1,275 @@
+import "records"
+import "references"
+import "go:bytes"
+import "go:encoding/json"
+import "go:fmt"
+import "go:os"
+import "go:os/exec"
+import "go:strings"
+
+import "flags"
+import "models"
+import "pb"
+import "provenance"
+
+/// Dispatch `lll import <verb>` through the noun's Command table (TASK-307):
+/// dispatch, `lll import --help` and shell completions all read it, so none
+/// can drift.
+pub fn import_cmd(args: Slice<string>) -> Result<(), string> {
+  flags.dispatch("import", "bring an external backlog in", import_intro(), import_commands(), args)
+}
+
+pub fn import_commands() -> Slice<flags.Command> {
+  [
+    flags.Command {
+      name: "github",
+      summary: "import a GitHub repo's issues into the configured team via gh; title, body and labels come along, open becomes todo and closed done, every import refs gh#N; re-import skips already-imported issues",
+      page: "",
+      spec: github_spec(),
+      positional: "OWNER/REPO",
+      run: import_github,
+    },
+  ]
+}
+
+/// Prose that belongs to the noun rather than to any one verb; dispatch
+/// prints it under the verb table for `lll import --help`.
+fn import_intro() -> string {
+  "Auth and API access come from the GitHub CLI: install gh and run
+'gh auth login' once, the same requirement 'lll issue pr' has. Imports write
+to the configured team like 'issue create' does, and are idempotent - an
+issue whose gh#N ref is already recorded in the team is skipped, so
+re-running an import never duplicates."
+}
+
+fn github_spec() -> Slice<flags.Flag> {
+  flags.with_team([])
+}
+
+fn import_github(input: flags.CommandInput) -> Result<(), string> {
+  let spec = github_spec()
+  let usage = flags.usage("lll import github", spec, "OWNER/REPO")
+  let repo = input.parsed.first()
+  if !repo_shape_ok(repo) {
+    return Err(f"expected OWNER/REPO, got '{repo}'\nusage: {usage}")
+  }
+  // The team first: it scopes the labels below, which are unique per team
+  // (TASK-173), the same order 'issue create' resolves things in.
+  let team = current_team()?
+  if team.archived { return Err(archived_hint(team.key)) }
+
+  let issues = sort_by_number(gh_issue_list(repo)?)
+  // The idempotency set: every ref already recorded on a team issue. A gh#N
+  // anywhere in the team means that source issue is already imported.
+  let known_refs = team_refs(team.id)?
+  let (label_names, label_colors) = collect_labels(issues)
+  let (label_ids, created_labels) = ensure_labels(team, label_names, label_colors)?
+
+  let creator = actor()?.map_or("", |member| member.id)
+  let mut created = 0
+  let mut skipped = 0
+  for g in issues {
+    let reference = f"gh#{g.number}"
+    if known_refs.get(reference).is_some() {
+      skipped += 1
+      continue
+    }
+    let state = imported_state(g.state)
+    let mut labels: Slice<string> = []
+    for label in g.labels {
+      if let Some(id) = label_ids.get(label.name) { labels = labels.append(id) }
+    }
+    let new_issue = models.NewIssue {
+      creator,
+      origin: provenance.capture(),
+      team: team.id,
+      title: g.title,
+      state,
+      priority: 0,
+      description: g.body,
+      emoji: "",
+      assignee: "",
+      project: "",
+      labels,
+    }
+    let payload = match json.Marshal(new_issue) {
+      Ok(p) => p,
+      Err(e) => return Err(f"encoding issue for {reference}: {e}"),
+    }
+    let body = pb.post("/api/collections/issues/records", payload as string)?
+    let mut issue = models.Issue { .. }
+    if let Err(e) = json.Unmarshal(body.bytes(), &issue) {
+      return Err(f"decoding created issue for {reference}: {e}")
+    }
+    let key = f"{team.key}-{issue.number}"
+    // The ref saves only after the create is confirmed, as 'issue pr' does
+    // for its PR. A failed append is retried alone, and the message names
+    // it, because re-import skips on a saved ref and nothing else - an
+    // issue without its ref would import twice.
+    if let Err(e) = references.append(issue.id, reference) {
+      return Err(f"{key} created from {reference}, but the ref was not saved: {e}\nRetry only the reference save: lll issue ref {key} {reference}")
+    }
+    created += 1
+    fmt.Println(f"Created {key}: {g.title} ({reference}, {state})")
+  }
+  let mut labels_note = ""
+  if created_labels.length() > 0 {
+    labels_note = f"; created labels: {strings.Join(created_labels, ", ")}"
+  }
+  fmt.Println(f"Imported {created} of {issues.length()} issues from {repo} into {team.key} (skipped {skipped} already carrying gh#N refs){labels_note}")
+  Ok(())
+}
+
+/// OWNER/REPO with both halves present. gh's --repo would also take
+/// [HOST/]OWNER/REPO, but the usage line promises the github.com shape, and
+/// a mangled name deserves this error rather than gh's repo-not-found for a
+/// name it never meant.
+fn repo_shape_ok(repo: string) -> bool {
+  let parts = strings.Split(repo, "/")
+  if parts.length() != 2 { return false }
+  parts[0] != "" && parts[1] != ""
+}
+
+/// gh lists newest first; the team's issue numbers should follow the
+/// source's, so imports run in ascending gh-number order. Insertion sort:
+/// one int field, at most a few hundred items, no closure indirection.
+fn sort_by_number(issues: Slice<GithubIssue>) -> Slice<GithubIssue> {
+  let mut out = issues.clone()
+  for i in 1..out.length() {
+    let mut j = i
+    while j > 0 && out[j - 1].number > out[j].number {
+      let tmp = out[j - 1]
+      out[j - 1] = out[j]
+      out[j] = tmp
+      j -= 1
+    }
+  }
+  out
+}
+
+/// OPEN -> todo, CLOSED -> done - the only two states gh reports for issues
+/// under --state all. Anything else reads as open: an import errs toward
+/// work remaining, never toward done.
+fn imported_state(state: string) -> string {
+  if state == "CLOSED" { "done" } else { "todo" }
+}
+
+/// gh label colors are bare hex ("d73a4a"); the board's are "#rrggbb".
+fn gh_color(color: string) -> string {
+  if color == "" { "" } else { f"#{color}" }
+}
+
+/// Every ref already recorded on a team issue, as the idempotency set.
+/// Refs are space-separated (gopb/references.go mergeReference); strings.Fields
+/// is how the server itself splits them.
+fn team_refs(team_id: string) -> Result<Map<string, bool>, string> {
+  let issues = records.fetch_board_issues(team_id)?
+  let mut refs = Map.new<string, bool>()
+  for issue in issues {
+    for word in strings.Fields(issue.refs) {
+      refs[word] = true
+    }
+  }
+  Ok(refs)
+}
+
+/// The distinct labels the issues carry, in first-seen order, with each
+/// name's color. Pure, so the dedupe is testable without a server.
+fn collect_labels(issues: Slice<GithubIssue>) -> (Slice<string>, Map<string, string>) {
+  let mut names: Slice<string> = []
+  let mut colors = Map.new<string, string>()
+  for issue in issues {
+    for label in issue.labels {
+      if label.name == "" { continue }
+      if colors.get(label.name).is_some() { continue }
+      colors[label.name] = label.color
+      names = names.append(label.name)
+    }
+  }
+  (names, colors)
+}
+
+/// Resolve each label within the team, creating the missing ones with gh's
+/// color. Reuse over near-duplicates is `label create`'s own rule (TASK-208):
+/// an existing name wins and the gh color is ignored.
+fn ensure_labels(
+  team: models.Team,
+  names: Slice<string>,
+  colors: Map<string, string>,
+) -> Result<(Map<string, string>, Slice<string>), string> {
+  let mut ids = Map.new<string, string>()
+  for label in records.fetch_labels(team.id)? {
+    ids[label.name] = label.id
+  }
+  let mut created: Slice<string> = []
+  for name in names {
+    if ids.get(name).is_some() { continue }
+    let mut color = ""
+    if let Some(c) = colors.get(name) { color = gh_color(c) }
+    let new_label = models.NewLabel { name, color, team: team.id }
+    let payload = match json.Marshal(new_label) {
+      Ok(p) => p,
+      Err(e) => return Err(f"encoding label '{name}': {e}"),
+    }
+    let body = pb.post("/api/collections/labels/records", payload as string)?
+    let mut label = models.Label { .. }
+    if let Err(e) = json.Unmarshal(body.bytes(), &label) {
+      return Err(f"decoding created label '{name}': {e}")
+    }
+    ids[name] = label.id
+    created = created.append(name)
+  }
+  Ok((ids, created))
+}
+
+#[json]
+struct GithubLabel {
+  pub name: string,
+  pub color: string,
+}
+
+#[json]
+struct GithubIssue {
+  pub number: int,
+  pub title: string,
+  pub body: string,
+  pub state: string,
+  pub labels: Slice<GithubLabel>,
+}
+
+/// One gh call fetches everything import maps. `--state all` because a
+/// backlog's closed issues belong on the board too (they become done);
+/// `--limit 1000` because gh's default 30 would silently truncate. gh owns
+/// auth, hosts and error text, exactly as `issue pr` has it: LookPath,
+/// exec.Command, stderr passed through, stdout captured for parsing.
+fn gh_issue_list(repo: string) -> Result<Slice<GithubIssue>, string> {
+  let mut gh = ""
+  match exec.LookPath("gh") {
+    Partial.Ok(path) => gh = path,
+    _ => return Err(
+      "gh not found on PATH — install the GitHub CLI (brew install gh)",
+    ),
+  }
+  let mut cmd = exec.Command(
+    gh,
+    "issue",
+    "list",
+    "--repo",
+    repo,
+    "--state",
+    "all",
+    "--limit",
+    "1000",
+    "--json",
+    "number,title,body,state,labels",
+  )
+  let mut captured = bytes.Buffer { .. }
+  cmd.Stdout = Some(&captured)
+  cmd.Stderr = Some(os.Stderr)
+  if let Err(e) = cmd.Run() { return Err(f"gh issue list: {e}") }
+  let mut issues: Slice<GithubIssue> = []
+  if let Err(e) = json.Unmarshal(captured.Bytes(), &issues) {
+    return Err(f"decoding gh issue list output: {e}")
+  }
+  Ok(issues)
+}
