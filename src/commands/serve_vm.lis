@@ -13,10 +13,12 @@ pub struct LabelVM {
 }
 
 /// One relation option in the create dialog: the record id the form posts,
-/// and the name a human picks by.
+/// and the name a human picks by. `bot` marks bot-kind members, so the
+/// picker reads automation as automation (LLL-407).
 pub struct PickVM {
   pub id: string,
   pub name: string,
+  pub bot: bool,
 }
 
 /// One selectable label in the create dialog. Same shape as LabelVM plus the
@@ -55,10 +57,13 @@ pub struct StateOpt {
   pub label: string,
 }
 
-/// View model for an avatar: initials plus a stable per-name color class.
+/// View model for an avatar: initials, a stable per-name color class, and
+/// whether the member is a bot — the badge the shared avatar template
+/// appends so automation is attributable at a glance (LLL-407).
 pub struct AvatarVM {
   pub initials: string,
   pub class: string,
+  pub bot: bool,
 }
 
 /// View model for one issue: a board card, or one row of the /issues table.

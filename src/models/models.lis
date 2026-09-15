@@ -28,6 +28,12 @@ pub struct Member {
   pub id: string,
   pub name: string,
   pub email: string,
+  // Bot accounts (LLL-407): "person" or "bot"; "" only on servers that have
+  // not applied the kind migration. `owner` is the creating human member's
+  // id, empty for people and for bots minted by the superuser.
+  pub kind: string,
+  #[json(omitempty)]
+  pub owner: string,
 }
 
 #[json]
@@ -50,6 +56,13 @@ pub struct NewMember {
   // before the collection became an auth one.
   #[json("emailVisibility")]
   pub email_visibility: bool,
+  // Bot accounts (LLL-407). Selects have no schema-level default, so every
+  // create states its kind; owner is the creating human member's id, sent
+  // only for bots.
+  #[json(omitempty)]
+  pub kind: string,
+  #[json(omitempty)]
+  pub owner: string,
 }
 
 #[json]
@@ -420,4 +433,14 @@ pub struct NewWebhook {
   pub url: string,
   #[json(omitempty)]
   pub secret: string,
+}
+
+/// POST body for /api/lll/bots/rotate (LLL-407): re-mint the named bot's
+/// static token after invalidating the previous one. 0 uses the collection's
+/// token duration, the same contract impersonate has. The name rides the
+/// body because member names are arbitrary text, not path segments.
+#[json]
+pub struct BotRotate {
+  pub name: string,
+  pub duration: int,
 }

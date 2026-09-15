@@ -63,6 +63,7 @@ func Serve(dataDir, addr, adminEmail, adminPassword string) error {
 
 	registerIssueProvenance(app)
 	registerWebhookDelivery(app)
+	registerMemberGuards(app)
 	app.OnRecordCreate("issues").BindFunc(func(e *core.RecordEvent) error {
 		// Keep the max-number read and record insertion on PocketBase's
 		// serialized writer connection. Reading before that transaction lets
@@ -86,6 +87,7 @@ func Serve(dataDir, addr, adminEmail, adminPassword string) error {
 	var issueUpdates issueWriteLocks
 	app.OnServe().BindFunc(func(e *core.ServeEvent) error {
 		registerClaimRoutes(e.Router, &issueUpdates)
+		registerBotRoutes(e.Router)
 		registerReferenceRoutes(e.Router, &issueUpdates)
 		// A direct API listener cannot infer the public board origin. Operators
 		// may advertise it explicitly; the combined board listener advertises

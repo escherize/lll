@@ -462,7 +462,23 @@ fn create_as_superuser(
 /// --create from it. Both branches are named here because the server does not
 /// tell us which one it is.
 fn login_failed(e: string, email: string, target: string) -> string {
-  if pb.response_status(e) != 400 {
+  let status = pb.response_status(e)
+  // A 403 whose body is a PocketBase envelope is the server refusing this
+  // identity by name — a bot member at a password door (LLL-407) — and its
+  // own wording is the answer. A bare 403 (or any other non-400) keeps the
+  // raw detail: unexpected statuses are diagnostics, not prose.
+  if status == 403 {
+    let presented = pb.display_error(e)
+    if presented.details == "" {
+      let base = if target != "" {
+        target
+      } else {
+        pb.base_url().unwrap_or("the configured server")
+      }
+      return f"login failed at {base}: {presented.summary}"
+    }
+  }
+  if status != 400 {
     return f"login failed: {e}"
   }
   // The server is named on every failure (TASK-203 AC#4): "wrong password"

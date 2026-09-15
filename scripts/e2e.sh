@@ -2530,7 +2530,7 @@ assert_contains "$out" "e2e-agent" "the minted token authenticates a GET"
 bot_out=$(env -u LLL_TOKEN HOME="$E2E_HOME" LLL_URL=$URL \
   LLL_ADMIN_EMAIL=admin@local.dev LLL_ADMIN_PASSWORD=admin-local-123 \
   "$LIN" bot bot-e2e --duration 3600) || fail "lll bot exited nonzero: $bot_out"
-assert_contains "$bot_out" "created member bot-e2e" "bot creates the member when missing"
+assert_contains "$bot_out" "created bot member bot-e2e" "bot creates a bot-kind member when missing"
 BOT_TOK=$(printf '%s\n' "$bot_out" | sed -n 's/^LLL_TOKEN=//p')
 [ -n "$BOT_TOK" ] || fail "lll bot printed no LLL_TOKEN line: $bot_out"
 out=$(LLL_TOKEN="$BOT_TOK" HOME="$E2E_HOME" LLL_URL=$URL "$LIN" whoami)
@@ -2538,7 +2538,69 @@ assert_contains "$out" "bot-e2e <" "the bot's token is the bot's"
 bot_out=$(env -u LLL_TOKEN HOME="$E2E_HOME" LLL_URL=$URL \
   LLL_ADMIN_EMAIL=admin@local.dev LLL_ADMIN_PASSWORD=admin-local-123 \
   "$LIN" bot bot-e2e --duration 3600) || fail "lll bot (second run) exited nonzero"
-assert_contains "$bot_out" "member bot-e2e exists; minting a fresh token" "a second run re-mints without a second member"
+assert_contains "$bot_out" "member bot-e2e exists; rotating its token" "a second run rotates without a second member"
+
+# --- bot membership rules (LLL-407): reserved prefix, dead password door,
+# --- owner attribution, rotation stranding the old token.
+
+# The reserved prefix is enforced server-side in both directions: a bot
+# member cannot drop it, and a person signup cannot take it. The person
+# signup rides bryan's member token (minted below and fresh here) — the
+# refusal must not depend on administrative credentials.
+BRYAN_AUTH=$(set +e; curl -s -X POST "$URL/api/collections/members/auth-with-password" \
+  -H 'Content-Type: application/json' \
+  -d '{"identity":"bryan@example.com","password":"bryan-pass-123"}'; set -e)
+assert_contains "$BRYAN_AUTH" '"token"' "bryan's re-auth for the bot checks"
+BRYAN_TOK=$(printf '%s' "$BRYAN_AUTH" | jq -r '.token')
+out=$(env -u LLL_TOKEN HOME="$E2E_HOME" LLL_URL=$URL \
+  LLL_ADMIN_EMAIL=admin@local.dev LLL_ADMIN_PASSWORD=admin-local-123 \
+  "$LIN" bot claude-main 2>&1) && fail "lll bot accepted a name without the bot- prefix: $out"
+assert_contains "$out" "reserved" "the bot-kind prefix refusal names the reservation"
+out=$(env LLL_TOKEN="$BRYAN_TOK" HOME="$E2E_HOME" LLL_URL=$URL \
+  "$LIN" member add -n bot-impersonator 2>&1) && fail "member add took the reserved bot- prefix: $out"
+assert_contains "$out" "reserved" "person signups cannot take the bot- prefix"
+
+# The bot records its creating member as owner when the command rides a
+# member token — bryan's, minted fresh above because the configured one may
+# outlive its duration. The admin pair rides this suite's environment
+# (e2e_begin exports it), and `lll bot` rightly treats that as the superuser
+# speaking, so it is unset here to name the member path.
+bot_out=$(env -u LLL_ADMIN_EMAIL -u LLL_ADMIN_PASSWORD LLL_TOKEN="$BRYAN_TOK" \
+  HOME="$E2E_HOME" LLL_URL=$URL \
+  "$LIN" bot bot-owned --duration 3600) || fail "member-token lll bot exited nonzero: $bot_out"
+
+# A bot member cannot authenticate interactively, whatever password is typed.
+out=$(env -u LLL_TOKEN HOME="$E2E_HOME" LLL_URL=$URL \
+  "$LIN" login --email bot-e2e@members.invalid --password not-the-password 2>&1) \
+  && fail "a bot member logged in with a password: $out"
+assert_contains "$out" "cannot sign in with a password" "the login refusal names the bot rule"
+
+SU_AUTH=$(set +e; curl -s -X POST "$URL/api/collections/_superusers/auth-with-password" \
+  -H 'Content-Type: application/json' \
+  -d '{"identity":"admin@local.dev","password":"admin-local-123"}'; set -e)
+assert_contains "$SU_AUTH" '"token"' "fresh admin token for the bot record read"
+# A fresh token, not the one from the auth round trip above: the mid-suite
+# restart re-upserts the superuser, which refreshes its tokenKey and strands
+# earlier admin tokens.
+OWNED=$(curl -s -G -H "Authorization: Bearer $(printf '%s' "$SU_AUTH" | jq -r '.token')" \
+  "$URL/api/collections/members/records" \
+  --data-urlencode "filter=name='bot-owned'")
+assert_contains "$OWNED" '"kind":"bot"' "the created record is bot kind"
+assert_contains "$OWNED" "\"owner\":\"$BRYAN_ID\"" "the owner relation points at the creating member"
+
+# Rotation re-mints and strands the old token at its next request.
+bot_out=$(env -u LLL_TOKEN HOME="$E2E_HOME" LLL_URL=$URL \
+  LLL_ADMIN_EMAIL=admin@local.dev LLL_ADMIN_PASSWORD=admin-local-123 \
+  "$LIN" bot rotate bot-e2e --duration 3600) || fail "lll bot rotate exited nonzero: $bot_out"
+ROT_TOK=$(printf '%s\n' "$bot_out" | sed -n 's/^LLL_TOKEN=//p')
+[ -n "$ROT_TOK" ] || fail "lll bot rotate printed no LLL_TOKEN line: $bot_out"
+[ "$ROT_TOK" != "$BOT_TOK" ] || fail "rotation re-minted the identical token"
+code=$(curl -s -o /dev/null -w '%{http_code}' -H "Authorization: Bearer $BOT_TOK" \
+  "$URL/api/collections/members/records?perPage=1")
+[ "$code" = 401 ] || fail "the rotated-out token still authenticates (got $code)"
+code=$(curl -s -o /dev/null -w '%{http_code}' -H "Authorization: Bearer $ROT_TOK" \
+  "$URL/api/collections/members/records?perPage=1")
+[ "$code" = 200 ] || fail "the rotated-in token does not authenticate (got $code)"
 
 # Explicit authority and endpoint flags use the same gate without persisting
 # credentials or replacing the caller's configured server.

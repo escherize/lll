@@ -32,4 +32,4 @@
 
 {{define "priority-icon"}}{{if eq . "urgent"}}<svg class="pri-icon" width="14" height="14"><use href="#pri-urgent"/></svg>{{else if ne . "none"}}<svg class="pri-icon" width="14" height="14" style="color:var(--text-3)"><use href="#pri-{{.}}"/></svg>{{end}}{{end}}
 
-{{define "avatar"}}{{if .Initials}}<span class="avatar {{.Class}}">{{.Initials}}</span>{{end}}{{end}}
+{{define "avatar"}}{{if .Initials}}<span class="avatar {{.Class}}">{{.Initials}}</span>{{if .Bot}}<span class="bot-glyph" title="bot member">🤖</span>{{end}}{{end}}{{end}}

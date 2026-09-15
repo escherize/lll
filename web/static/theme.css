@@ -266,6 +266,12 @@ input:focus, textarea:focus, select:focus {
 .avatar.av-1 { background: #d8b06a; }
 .avatar.av-2 { background: #9d8fe0; }
 .avatar.av-3 { background: #82c99a; }
+.bot-glyph {
+  font-size: 10px;
+  margin-left: 1px;
+  line-height: 1;
+  flex: none;
+}
 
 .chip {
   display: inline-flex; align-items: center; gap: 5px;
