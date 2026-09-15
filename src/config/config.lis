@@ -104,11 +104,35 @@ fn config_files() -> Slice<string> {
 
 /// Path of the machine's config, whether or not it exists. `url` and `me`
 /// belong here: how THIS machine reaches the tracker, and who is at it.
+///
+/// The config ROOT is overridable, because a harness that cannot set HOME can
+/// still set an environment variable (LLL-400). Fleet workers that could write
+/// HOME but not set it wrote `lll config set me` and `lll login` into the
+/// developer's own ~/.config/lll/lll.toml six times in one replay.
+///
+/// Precedence: LLL_CONFIG_HOME, then XDG_CONFIG_HOME, then ~/.config. The
+/// middle one is not a new opinion - `~/.config` IS the XDG default, so this
+/// finishes a convention the path already followed without reading its
+/// variable. Both name the root and get `lll/lll.toml` appended, so
+/// LLL_CONFIG_HOME=/tmp/w1 puts the file at /tmp/w1/lll/lll.toml and two
+/// workers cannot collide.
 pub fn home_path() -> Result<string, string> {
+  Ok(filepath.Join(config_root()?, "lll", "lll.toml"))
+}
+
+/// The directory holding per-machine config, overridable so a process that
+/// cannot change HOME can still be given its own.
+fn config_root() -> Result<string, string> {
+  let explicit = strings.TrimSpace(os.Getenv("LLL_CONFIG_HOME"))
+  if explicit != "" { return Ok(explicit) }
+  let xdg = strings.TrimSpace(os.Getenv("XDG_CONFIG_HOME"))
+  if xdg != "" { return Ok(xdg) }
   let Ok(home) = os.UserHomeDir() else {
-    return Err("no home directory to read config from — $HOME is unset")
+    return Err(
+      "no home directory to read config from — $HOME is unset; set LLL_CONFIG_HOME to a directory this process can write",
+    )
   }
-  Ok(filepath.Join(home, ".config", "lll", "lll.toml"))
+  Ok(filepath.Join(home, ".config"))
 }
 
 fn home_file() -> Option<string> {

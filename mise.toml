@@ -72,7 +72,8 @@ command -v lis >/dev/null || { echo "lis not found. Install it:" >&2; echo "  cu
 python3 scripts/protect_archive.py --check
 python3 scripts/sync_skills.py --check
 env -u LLL_ME -u LLL_TOKEN -u LLL_URL -u LLL_TEAM -u LLL_SORT -u LLL_WEB_URL \
-    -u LLL_BOARD_TOKEN -u LLL_BIND -u LLL_WORK_HOST -u LLL_AGENT lis test
+    -u LLL_BOARD_TOKEN -u LLL_BIND -u LLL_WORK_HOST -u LLL_AGENT \
+    -u LLL_CONFIG_HOME -u XDG_CONFIG_HOME lis test
 go -C web test ./...
 go -C gopb test ./...
 python3 -m unittest discover -s scripts -p 'test_browser_poll.py'
