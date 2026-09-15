@@ -3,6 +3,7 @@ import "go:encoding/json"
 import "go:fmt"
 import "go:os"
 import "go:strconv"
+import "go:net/url"
 import "go:strings"
 import "go:time"
 
@@ -33,6 +34,11 @@ pub struct CommentEvent {
 fn watch_spec() -> Slice<flags.Flag> {
   flags.with_team(filter_spec(FilterUse.Watch).append([
     flags.Flag { name: "--search", value: true, hint: "q", help: "only issues whose title contains q", .. },
+    flags.Flag {
+      name: "--ready",
+      help: "stream only the ready agenda (LLL-395): open issues whose\nblockers are all done, computed client-side against the ready set\nfetched at startup and refreshed from each event; an empty agenda\nkeeps the stream alive until something becomes ready",
+      ..,
+    },
     flags.Flag { name: "--json", help: "NDJSON: one raw PocketBase event object per line, with a\n\"topic\" field added", .. },
     flags.Flag { name: "--help", alias: "-h", hidden: true, help: "show this help", .. },
   ]...))
@@ -54,7 +60,7 @@ pub fn watch(args: Slice<string>) -> Result<(), string> {
   }
   let filters = filters_from(p)?
   let json_mode = p.given("--json")
-
+  if p.given("--ready") { return watch_ready(filters, p.given("--json")) }
   // A configured team (LLL_TEAM or .lll.toml) scopes the stream by default,
   // same as `issue list`, and with it the label and project names.
   let team_id = configured_team_id()?
@@ -134,6 +140,22 @@ delivers events for records matching the filter after the change.
 Startup is acknowledged on stderr as 'watch: ready' only after the server
 accepts the subscription. With --json, stdout contains only NDJSON events;
 connection loss and reconnection messages also go to stderr.
+
+With --ready, the stream shows only the ready agenda (LLL-395): open issues
+(todo or backlog) whose blockers are all done or cancelled. Readiness is
+computed client-side against a snapshot of the team's issues taken at startup
+and refreshed from every event, so an issue becomes ready when its LAST open
+blocker is closed — an event that arrives on the blocker, not on the blocked
+issue — and that transition is announced as:
+
+  10:43:00 ENG-12 ready: Fix login flow
+
+An empty agenda at startup does NOT end the stream: it stays alive and
+announces the first issue that becomes ready, then keeps streaming. Updates
+to issues that are already ready stream as usual; events for issues that are
+not ready are suppressed. With --json, a transition is an NDJSON event object
+with action 'ready' and the full issue record.
+
 " + flags.section(watch_spec())
   )
 }
@@ -347,4 +369,140 @@ fn first_line(body: string) -> string {
 /// One completion policy for initial snapshots, text streams and JSON streams.
 fn comment_matches_until(text: string, action: string, body: string) -> bool {
   text != "" && ["snapshot", "create", "update"].contains(action) && strings.Contains(body, text)
+}
+
+/// `lll watch --ready` (LLL-395): stream the ready agenda. The readiness
+/// decision is client-side (PocketBase cannot filter on an expanded
+/// relation's state), against a snapshot of the team's issues taken at
+/// startup and refreshed from every event that arrives. The event that makes
+/// an issue ready lands on the BLOCKER (its state flips to done) — the
+/// blocked issue emits nothing — so a readiness transition is announced from
+/// the snapshot, not from the event's own record. An empty agenda at startup
+/// does NOT exit: the stream stays alive and announces the first issue that
+/// becomes ready. Events for issues that are ready keep streaming, as the
+/// plain query watch does.
+fn watch_ready(filters: query.Filters, json_mode: bool) -> Result<(), string> {
+  let team_id = configured_team_id()?
+  let filter = resolve_filter_query(team_id, filters)?
+  // blocked_by expand, so each event record carries its blockers' states.
+  let topic = realtime.topic_with_options("issues", filter, "team,assignee,blocked_by")?
+  let ch = realtime.subscribe(pb.base_url()?, [topic], None)?
+  let mut issues = fetch_all_issues(filter)?
+  let mut ready = ready_keys(issues)
+  fmt.Fprintln(os.Stderr, "watch: ready (agenda subscription accepted)")
+  loop {
+    let Some(ev) = ch.receive() else { return Ok(()) }
+    let mut event = IssueEvent { .. }
+    if let Err(e) = json.Unmarshal(ev.data.bytes(), &event) {
+      return Err(f"decoding realtime event: {e}")
+    }
+    let rec = event.record
+    let mut kept: Slice<models.Issue> = []
+    let mut known = false
+    for i in issues {
+      if i.id == rec.id {
+        known = true
+        if event.action != "delete" { kept = kept.append(rec) }
+        continue
+      }
+      kept = kept.append(i)
+    }
+    // A create for a record the snapshot has not seen: it joins the cache
+    // here, or its readiness would never be computed.
+    if !known && event.action != "delete" { kept = kept.append(rec) }
+    issues = kept
+    let fresh = ready_keys(issues)
+    let stamp = time.Now().Format("15:04:05")
+    // Announce every issue the event made ready, oldest first for ties.
+    let mut became: Slice<models.Issue> = []
+    for issue in issues {
+      if fresh.contains(issue.id) && !ready.contains(issue.id) { became = became.append(issue) }
+    }
+    ready = fresh
+    for issue in became {
+      let key = f"{issue.expand.team.key}-{issue.number}"
+      if json_mode {
+        // Marshaled with the topic inline: ndjson_line would splice the
+        // topic in with a rune-indexed substring, which panics on any
+        // multi-byte byte in the record (LLL-417).
+        let data = match json.Marshal(ReadyEvent { topic: "issues", action: "ready", record: issue }) {
+          Ok(data) => data as string,
+          Err(e) => return Err(f"encoding ready event: {e}"),
+        }
+        fmt.Println(data)
+      } else {
+        fmt.Println(f"{stamp} {key} ready: {issue.title}")
+      }
+    }
+    // Ordinary events for issues that are already ready keep flowing.
+    if event.action != "delete" && ready.contains(rec.id) && !became.find(|b| b.id == rec.id).is_some() {
+      if json_mode {
+        fmt.Println(ndjson_line(ev))
+      } else {
+        let key = f"{rec.expand.team.key}-{rec.number}"
+        fmt.Println(f"{stamp} {key} {event.action}: {rec.title}")
+      }
+    }
+  }
+}
+
+/// The ids of every issue in the cache that is open (todo or backlog) and
+/// has no open blocker. Blocker states come from the cache, which every
+/// event refreshes, so a blocker finishing flips its dependents ready on the
+/// blocker's own event.
+fn ready_keys(issues: Slice<models.Issue>) -> Slice<string> {
+  let mut out: Slice<string> = []
+  for issue in issues {
+    if issue.state != "todo" && issue.state != "backlog" { continue }
+    let mut open = false
+    for b in issue.blocked_by {
+      if let Some(rec) = issues.find(|i| i.id == b) {
+        if rec.state != "done" && rec.state != "cancelled" { open = true }
+      } else {
+        open = true // an unknown blocker is not provably done
+      }
+    }
+    if !open { out = out.append(issue.id) }
+  }
+  out
+}
+
+/// Every issue the filter selects, all pages, blockers expanded: the startup
+/// snapshot of the ready computation. `issue next`'s ready_issues walks the
+/// same collection; this one starts from a filter string so `watch --ready`
+/// can carry the other watch flags (--state, --search, --team) through.
+fn fetch_all_issues(filter: string) -> Result<Slice<models.Issue>, string> {
+  let mut out: Slice<models.Issue> = []
+  let mut page = 1
+  loop {
+    let mut path = f"/api/collections/issues/records?perPage=500&page={page}&expand=team,assignee,blocked_by,labels&sort=created,id"
+    if filter != "" { path = f"{path}&filter={url.QueryEscape(filter)}" }
+    let body = pb.get(path)?
+    let mut issues = NextPage { .. }
+    if let Err(e) = json.Unmarshal(body.bytes(), &issues) {
+      return Err(f"decoding issues: {e}")
+    }
+    for i in issues.items { out = out.append(i) }
+    if page >= issues.total_pages || issues.items.is_empty() { break }
+    page += 1
+  }
+  Ok(out)
+}
+
+/// One page of the issues collection with the page count, so the snapshot
+/// can walk past 500 issues. models.IssueList has no totalPages.
+#[json]
+struct NextPage {
+  items: Slice<models.Issue>,
+  #[json("totalPages")]
+  total_pages: int,
+}
+
+/// A ready transition as NDJSON, topic included so the line matches the
+/// shape ndjson_line produces for raw PocketBase events.
+#[json]
+struct ReadyEvent {
+  topic: string,
+  action: string,
+  record: models.Issue,
 }

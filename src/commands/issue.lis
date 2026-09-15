@@ -11,6 +11,7 @@ import "go:os"
 import "go:os/exec"
 import "go:strconv"
 import "go:strings"
+import "go:time"
 import "go:unicode/utf8"
 
 import "config"
@@ -381,6 +382,14 @@ pub fn issue_commands() -> Slice<flags.Command> {
       spec: issue_list_spec(),
       positional: "",
       run: list,
+    },
+    flags.Command {
+      name: "next",
+      summary: "print the key of the one issue to work next - ready and unclaimed, then priority (urgent first), then oldest, then most-unblocking; --claim takes it (LLL-395)",
+      page: "",
+      spec: issue_next_spec(),
+      positional: "",
+      run: issue_next,
     },
     flags.Command {
       name: "view",
@@ -1934,3 +1943,136 @@ fn fetch_blocks(issue_id: string) -> Result<Slice<models.Issue>, string> {
 pub fn issue_verb_spec(verb: string) -> Slice<flags.Flag> {
   flags.command_spec(issue_commands(), verb)
 }
+
+fn issue_next_spec() -> Slice<flags.Flag> {
+  flags.with_team([
+    flags.Flag { name: "--json", help: "print the chosen issue's full record instead of just its key", .. },
+    flags.Flag {
+      name: "--claim",
+      help: "atomically claim the chosen issue before printing it; if another\nmember wins the race, exit non-zero and print no key",
+      ..,
+    },
+  ])
+}
+
+/// Dispatch `lll issue next` (LLL-395) — the agenda verb. Prints ONE key so a
+/// shell loop can compose it (`next=$(lll issue next)`): the best unclaimed
+/// ready issue, ranked by rank_agenda. An empty agenda is an error, the same
+/// bargain `claim` makes: the command either hands out work or says there is
+/// none. With --claim the printed key is always secured first.
+fn issue_next(input: flags.CommandInput) -> Result<(), string> {
+  let p = input.parsed
+  let candidates = ready_issues()?
+  let unblocks = unblocks_map(candidates)?
+  // A claimed ready issue is someone's work in progress, not an invitation -
+  // including my own claims. The agenda is what an agent can pick up NOW.
+  let agenda = rank_agenda(candidates, unblocks).filter(|i| i.assignee == "")
+  if agenda.is_empty() {
+    return Err("no unclaimed ready issues — the agenda is empty; 'lll issue list --ready' shows what is claimed, 'lll issue create' makes new work")
+  }
+  let best = agenda[0]
+  let key = f"{best.expand.team.key}-{best.number}"
+  if p.given("--claim") {
+    let Some(member) = actor()? else {
+      return Err(
+        "claiming needs a name: a member token names you; with a superuser token set 'me' ('lll config set me <name>' or LLL_ME)",
+      )
+    }
+    // Acquire before printing: a key this command did not secure is a lie to
+    // the shell loop that composed it. A lost race exits non-zero, keyless.
+    let result = claims.acquire(best.id, member.id).map_err(|e| {
+      if strings.Contains(e, "already claimed by") {
+        f"{key}: {e} — 'lll issue release {key}' gives it back"
+      } else { e }
+    })?
+    fmt.Fprintln(os.Stderr, f"Claimed {key} for {result.member_name}")
+  }
+  if p.given("--json") {
+    let out = match json.Marshal(best) {
+      Ok(b) => b as string,
+      Err(e) => return Err(f"encoding issue: {e}"),
+    }
+    fmt.Println(out)
+    return Ok(())
+  }
+  fmt.Println(key)
+  Ok(())
+}
+
+/// The `list --ready` candidate set (LLL-175), reused as the `issue next`
+/// agenda input: open, every blocker done or cancelled, scoped to the
+/// configured team. PocketBase cannot filter on an expanded relation's
+/// state, so readiness is decided here, after the fetch.
+fn ready_issues() -> Result<Slice<models.Issue>, string> {
+  let mut items: Slice<models.Issue> = []
+  let mut page = 1
+  loop {
+    let path = f"/api/collections/issues/records?perPage=500&page={page}&expand=team,assignee,labels,blocked_by,project&sort=created,id"
+    let body = pb.get(path)?
+    let mut issues = NextPage { .. }
+    if let Err(e) = json.Unmarshal(body.bytes(), &issues) {
+      return Err(f"decoding issues: {e}")
+    }
+    for i in issues.items { items = items.append(i) }
+    if page >= issues.total_pages || issues.items.is_empty() { break }
+    page += 1
+  }
+  Ok(items.filter(|i| (i.state == "todo" || i.state == "backlog") && open_blockers(i).is_empty()))
+}
+
+/// How many issues each candidate unblocks: the open issues that name it as
+/// a blocker. A tie-break, not a goal — the more work one issue frees, the
+/// sooner it should go.
+fn unblocks_map(candidates: Slice<models.Issue>) -> Result<Map<string, int>, string> {
+  let mut out = Map.new<string, int>()
+  for c in candidates { out[c.id] = 0 }
+  let body = pb.get("/api/collections/issues/records?perPage=500&filter=" + url.QueryEscape("state != 'done' && state != 'cancelled'"))?
+  let mut issues = models.IssueList { .. }
+  if let Err(e) = json.Unmarshal(body.bytes(), &issues) {
+    return Err(f"decoding issues: {e}")
+  }
+  for i in issues.items {
+    for b in i.blocked_by {
+      if let Some(n) = out.get(b) { out[b] = n + 1 }
+    }
+  }
+  Ok(out)
+}
+
+/// Orders the agenda the way `issue next` hands out work: unclaimed first,
+/// then more urgent (prio_rank, so none sorts after low), then older, then
+/// the issue that unblocks more others. Insertion sort over a few hundred
+/// ready issues at most, stable on the four keys' ties (import.lis's
+/// sort_by_number is the house shape).
+fn rank_agenda(items: Slice<models.Issue>, unblocks: Map<string, int>) -> Slice<models.Issue> {
+  let mut out = items.clone()
+  for i in 1..out.length() {
+    let mut j = i
+    while j > 0 && agenda_before(out[j], out[j - 1], unblocks) {
+      let tmp = out[j - 1]
+      out[j - 1] = out[j]
+      out[j] = tmp
+      j -= 1
+    }
+  }
+  out
+}
+
+fn agenda_before(a: models.Issue, b: models.Issue, unblocks: Map<string, int>) -> bool {
+  if (a.assignee == "") != (b.assignee == "") { return a.assignee == "" }
+  let pa = prio_rank(a.priority)
+  let qb = prio_rank(b.priority)
+  if pa != qb { return pa < qb }
+  let ta = parse_created(a.created)
+  let tb = parse_created(b.created)
+  if ta != tb { return ta < tb }
+  unblocks.get(a.id).unwrap_or(0) > unblocks.get(b.id).unwrap_or(0)
+}
+
+/// A PB timestamp as seconds so age can compare. Unparseable strings sort as
+/// 0 (oldest) — a malformed date should surface as "very old", not panic.
+fn parse_created(stamp: string) -> int {
+  let Ok(t) = time.Parse("2006-01-02 15:04:05.999Z", stamp) else { return 0 }
+  t.Unix() as int
+}
+

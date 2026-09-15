@@ -121,7 +121,8 @@ Usage:
                           (see 'lll token --help')
   lll attach [-k KEY]     write this repo's team to a shareable
                           .lll.toml (see 'lll attach --help')
-  lll watch [flags]       live event stream for a query (see 'lll watch --help')
+  lll watch [flags]       live event stream for a query; --ready streams the
+                          ready agenda (see 'lll watch --help')
   lll webhook <command>   outbound webhooks: add/list/remove URLs that the
                           server POSTs issue events to (see 'lll webhook --help')
   lll up [--port 8100]    start PocketBase + web board together (see 'lll up --help')
@@ -141,6 +142,8 @@ Explicit issue IDs still target their own team.
 Examples:
   lll issue list --team ENG --search checkout
   lll issue update ENG-1 --assignee alice --state in-review
+  next=$(lll issue next)  the one issue to work next: ready, unclaimed,
+                          priority, age, unblocks; add --claim to take it
 
 Configuration (env > the repo's .lll.toml > ~/.config/lll/lll.toml; the files
 layer, each supplying the keys it names — 'lll config --list' shows which won):
