@@ -56,6 +56,39 @@ BOARD_COOKIE="Cookie: lll_board=$BOARD_TOKEN"
 # redirect itself is asserted in the TASK-198 section below.
 WCURL=(curl -L -H "$BOARD_COOKIE")
 wcurl() { "${WCURL[@]}" "$@"; }
+
+# A board WRITE, judged (LLL-393). The same bargain lib.sh's seed() makes for
+# fixture writes, and for the same reason its comment gives: a write that is
+# "lost in a pipeline or an `|| true`" leaves the fixture absent, and the
+# assertion it was setting up fails several sections later blaming a feature
+# that is fine.
+#
+# `wcurl -sf -X POST ... >/dev/null` lost both halves. `-f` throws the body
+# away, so a refusal explains nothing; discarding the exit status meant the
+# suite simply carried on. CI then reported "creating a member from /settings
+# did not persist" about a member the board had declined to create, with
+# nothing anywhere saying why it declined.
+#
+# So: no -f, ask for the status explicitly, and put the board's own body in the
+# failure. Reads do NOT go through this - they are asserted on directly, which
+# is the same line seed() draws.
+#
+# Handled refusals come back 200 with a flash fragment, so the cases that
+# deliberately provoke one still pass through here untouched; a non-2xx is the
+# unexpected refusal this exists to name.
+web_post() { # label url curl-args... -> the response body
+  local label=$1 url=$2 out status=0 code
+  shift 2
+  out=$("${WCURL[@]}" -sS -w '\n%{http_code}' -X POST "$url" "$@" 2>&1) || status=$?
+  code=${out##*$'\n'}
+  out=${out%$'\n'*}
+  [ "$status" = 0 ] || fail "$label never reached the board (curl exit $status): $out"
+  case "$code" in
+    2*) ;;
+    *) fail "$label was refused with HTTP $code: $out" ;;
+  esac
+  printf '%s' "$out"
+}
 # Background streams launch WCURL directly: a trapped shell-function wrapper
 # can outlive its tracked PID as an orphan curl, corrupting reused log files.
 PB_LOG="$DATA_DIR/pb.log"
@@ -621,7 +654,7 @@ fi
 wcurl -s -o /dev/null -X POST --data-urlencode "key=ENG-3" "$WEB/labels"
 PICKER_EXTRA=$(curl -sf -H "$AUTH_HDR" "$LLL_URL/api/collections/labels/records?perPage=200" \
   | jq -r '.items[] | select(.name=="Picker-Extra") | .id')
-wcurl -sf -X POST "$WEB/settings/label?del=1" -d "id=$PICKER_EXTRA" -d confirmed=1 -d expected=0 >/dev/null
+web_post "POST settings/label" "$WEB/settings/label?del=1" -d "id=$PICKER_EXTRA" -d confirmed=1 -d expected=0 >/dev/null
 
 # --- related findings on the issue page (TASK-103): unprompted, server-
 # rendered with the page. A finding whose area names a label the issue
@@ -1256,7 +1289,7 @@ if command -v playwright-cli >/dev/null 2>&1; then
   # LLL-94: title and state changes refresh favorites on both realtime pages.
   FAV_PROBE=$("$LIN" issue create -t "Favorite live original" --json)
   FAV_KEY=$(printf '%s' "$FAV_PROBE" | jq -r '.expand.team.key + "-" + (.number | tostring)')
-  wcurl -sf -X POST "$WEB/favorite?key=$FAV_KEY&on=true" >/dev/null
+  web_post "POST favorite" "$WEB/favorite?key=$FAV_KEY&on=true" >/dev/null
   fav_js="() => { const a = document.querySelector('#rail-favorites a[href=\"/issue/$FAV_KEY\"]'); return JSON.stringify({title: a?.querySelector('.rg-title')?.textContent || '', state: a?.querySelector('use')?.getAttribute('href') || '', rail: document.getElementById('rail').dataset.probe, navs: performance.getEntriesByType('navigation').length}); }"
   for fav_page in "$WEB/" "$WEB/issue/$FAV_KEY"; do
     if [ "$fav_page" = "$WEB/" ]; then fav_kind=board; fav_state=done; else fav_kind=issue; fav_state=in-progress; fi
@@ -1572,21 +1605,21 @@ assert_not_contains "$settings" "pb-dir" "settings does not offer config the run
 assert_not_contains "$settings" "$WEB" "settings does not offer the port it is served on"
 
 # Labels, members and projects are creatable and editable from the page.
-wcurl -sf -X POST "$WEB/settings/label" -d 'name=web-made' -d 'color=#4cb782' >/dev/null
+web_post "POST settings/label" "$WEB/settings/label" -d 'name=web-made' -d 'color=#4cb782' >/dev/null
 assert_cli_contains "creating a label from /settings did not reach PocketBase" '^web-made	#4cb782' "$LIN" label list
 LABEL_ID=$(row_id "$(wcurl -sf "$WEB/settings")" label web-made)
 [ -n "$LABEL_ID" ] || fail "/settings did not render the label it just created"
-wcurl -sf -X POST "$WEB/settings/label" -d "id=$LABEL_ID" -d 'name=web-renamed' -d 'color=#8d7ce6' >/dev/null
+web_post "POST settings/label" "$WEB/settings/label" -d "id=$LABEL_ID" -d 'name=web-renamed' -d 'color=#8d7ce6' >/dev/null
 assert_cli_contains "renaming and recoloring a label from /settings did not persist" '^web-renamed	#8d7ce6' "$LIN" label list
-wcurl -sf -X POST "$WEB/settings/label?del=1" -d "id=$LABEL_ID" -d confirmed=1 -d expected=0 >/dev/null
+web_post "POST settings/label" "$WEB/settings/label?del=1" -d "id=$LABEL_ID" -d confirmed=1 -d expected=0 >/dev/null
 assert_cli_lacks "deleting a label from /settings did not persist" 'web-renamed' "$LIN" label list
 
-wcurl -sf -X POST "$WEB/settings/member" -d 'name=Web Member' -d 'email=web@example.com' >/dev/null
+web_post "POST settings/member" "$WEB/settings/member" -d 'name=Web Member' -d 'email=web@example.com' >/dev/null
 assert_cli_contains "creating a member from /settings did not persist" '^Web Member	web@example.com' "$LIN" member list
 MEMBER_ID=$(row_id "$(wcurl -sf "$WEB/settings")" member "Web Member")
 # The name is the settings-editable half; the email is the member's login
 # identity (task-180) and the page says so when a row tries to move it.
-wcurl -sf -X POST "$WEB/settings/member" -d "id=$MEMBER_ID" -d 'name=Web Member Renamed' -d 'email=web@example.com' >/dev/null
+web_post "POST settings/member" "$WEB/settings/member" -d "id=$MEMBER_ID" -d 'name=Web Member Renamed' -d 'email=web@example.com' >/dev/null
 assert_cli_contains "editing a member from /settings did not persist" '^Web Member Renamed	web@example.com' "$LIN" member list
 rejected_member=$(wcurl -sf -X POST "$WEB/settings/member" -d "id=$MEMBER_ID" -d 'name=Rejected member name' -d 'email=moved@example.com')
 assert_contains "$rejected_member" 'login identity' "moving a member email is refused with the reason"
@@ -1598,10 +1631,10 @@ assert_cli_contains "rejected combined edit changed the stored member name or em
 assert_cli_lacks "rejected combined edit still saved its name" \
   '^Rejected member name	' "$LIN" member list
 
-wcurl -sf -X POST "$WEB/settings/project" -d 'name=Web Project' -d 'status=planned' >/dev/null
+web_post "POST settings/project" "$WEB/settings/project" -d 'name=Web Project' -d 'status=planned' >/dev/null
 assert_cli_contains "creating a project from /settings did not persist" '^Web Project	planned' "$LIN" project list
 PROJECT_ID=$(row_id "$(wcurl -sf "$WEB/settings")" project "Web Project")
-wcurl -sf -X POST "$WEB/settings/project" -d "id=$PROJECT_ID" -d 'name=Web Project' -d 'status=started' >/dev/null
+web_post "POST settings/project" "$WEB/settings/project" -d "id=$PROJECT_ID" -d 'name=Web Project' -d 'status=started' >/dev/null
 assert_cli_contains "changing a project status from /settings did not persist" '^Web Project	started' "$LIN" project list
 
 # Validation speaks through the one flash strip, and writes nothing.
@@ -1679,7 +1712,7 @@ assert_contains "$(wcurl -sf "$WEB/")" '<style id="accent"></style>' \
   "an unset accent overrides nothing"
 assert_contains "$(wcurl -sf "$WEB/")" 'id="favicon"' "the board carries a generated favicon"
 
-wcurl -sf -X POST "$WEB/settings/team" -d 'name=Engineering' -d 'accent=#3ea0f0' >/dev/null
+web_post "POST settings/team" "$WEB/settings/team" -d 'name=Engineering' -d 'accent=#3ea0f0' >/dev/null
 for page in "/" "/issue/ENG-1" "/settings" "/issues" "/search" "/projects"; do
   html=$(wcurl -sf "$WEB$page")
   assert_contains "$html" '--accent:#3ea0f0' "$page wears the team accent"
@@ -1730,7 +1763,7 @@ assert_contains "$(wcurl -sf "$WEB/")" '<style id="accent"></style>' \
   "an unparseable stored accent falls back to the canonical orange"
 
 # Choosing the canonical orange back stores nothing, so theme.css decides again.
-wcurl -sf -X POST "$WEB/settings/team" -d 'name=Engineering' -d 'accent=#f0883e' >/dev/null
+web_post "POST settings/team" "$WEB/settings/team" -d 'name=Engineering' -d 'accent=#f0883e' >/dev/null
 assert_contains "$(wcurl -sf "$WEB/")" '<style id="accent"></style>' \
   "picking the default orange clears the stored accent"
 
@@ -1916,16 +1949,16 @@ assert_contains "$(wcurl -s -X POST --data-urlencode "key=ENG-1" \
 
 # Labels and projects are required to name a team, so the settings writes
 # have to supply one — and an update must not blank it.
-wcurl -sf -X POST "$WEB/settings/label" -d 'name=scoped-label' -d 'color=#4cb782' >/dev/null
+web_post "POST settings/label" "$WEB/settings/label" -d 'name=scoped-label' -d 'color=#4cb782' >/dev/null
 SCOPED=$(curl -sf -H "$AUTH_HDR" "$LLL_URL/api/collections/labels/records?perPage=200&expand=team" \
   | jq -r '.items[] | select(.name=="scoped-label") | .expand.team.key')
 [ "$SCOPED" = "ENG" ] || fail "a web-created label landed on team '$SCOPED', want ENG"
 SCOPED_ID=$(curl -sf -H "$AUTH_HDR" "$LLL_URL/api/collections/labels/records?perPage=200" \
   | jq -r '.items[] | select(.name=="scoped-label") | .id')
-wcurl -sf -X POST "$WEB/settings/label" -d "id=$SCOPED_ID" -d 'name=scoped-label' -d 'color=#8d7ce6' >/dev/null
+web_post "POST settings/label" "$WEB/settings/label" -d "id=$SCOPED_ID" -d 'name=scoped-label' -d 'color=#8d7ce6' >/dev/null
 KEPT=$(curl -sf -H "$AUTH_HDR" "$LLL_URL/api/collections/labels/records/$SCOPED_ID?expand=team" | jq -r '.expand.team.key')
 [ "$KEPT" = "ENG" ] || fail "a settings update blanked the label's team (got '$KEPT')"
-wcurl -sf -X POST "$WEB/settings/label?del=1" -d "id=$SCOPED_ID" >/dev/null
+web_post "POST settings/label" "$WEB/settings/label?del=1" -d "id=$SCOPED_ID" >/dev/null
 
 
 # --- task-114: /create takes everything `lll issue create` does ------------

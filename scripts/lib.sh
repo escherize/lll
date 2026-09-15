@@ -226,7 +226,14 @@ e2e_begin() {
   # suite must start from a KNOWN environment, not a pinned-one-var-at-a-time
   # one: unset every LLL_* it does not set itself. Three leaks in one session
   # (LLL_ADMIN_*, then LLL_ME) is the class; this closes it.
-  unset LLL_ME LLL_TOKEN LLL_SORT LLL_WEB_URL LLL_BOARD_TOKEN LLL_BIND LLL_WORK_HOST
+  # LLL-400 added two more ways to choose the config root, so pinning HOME is
+  # no longer enough on its own. This machine exports XDG_CONFIG_HOME, and with
+  # it live the suite read the DEVELOPER'S OWN ~/.config/lll/lll.toml while HOME
+  # pointed at a scratch directory - "startup credential: token from
+  # file:/Users/.../.config/lll/lll.toml" in a run that was supposed to be
+  # hermetic. Unset both here, so e2e_pin_home's HOME decides again.
+  unset LLL_ME LLL_TOKEN LLL_SORT LLL_WEB_URL LLL_BOARD_TOKEN LLL_BIND LLL_WORK_HOST \
+    LLL_CONFIG_HOME XDG_CONFIG_HOME
   mkdir -p "$E2E_HOME/.config/lll"
   # LLL-369: the suite runs from a temp directory OUTSIDE the checkout, which is
   # what makes it hermetic. The config walk goes up from the cwd and stops at a

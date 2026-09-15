@@ -313,6 +313,49 @@ assert_contains "$out" "ENG-1" "config still parses after two config set me"
 out=$(cd "$WORK" && "$LLL_ABS" config set unsupported http://x 2>&1) && fail "config set accepted an unsupported key"
 assert_contains "$out" "supported keys: me, url, web_url" "config set rejects unsupported keys"
 
+# --- LLL-400: the config ROOT is overridable ------------------------------
+# A harness that cannot set HOME can still set an environment variable. Fleet
+# workers that could write HOME but not set it wrote 'config set me' into the
+# developer's own ~/.config/lll/lll.toml six times in one replay, so this is
+# about damage to a real person's machine, not tidiness.
+#
+# HOME is pinned to $SET_HOME throughout, so any write reaching $SET_HOME
+# instead of the override is the bug: it proves the override was ignored
+# WITHOUT having to touch the developer's actual home directory to find out.
+ROOT_A="$DATA_DIR/cfgroot-a"
+ROOT_B="$DATA_DIR/cfgroot-b"
+ROOT_XDG="$DATA_DIR/cfgroot-xdg"
+HOME_TOML_BEFORE=$(cat "$HOME_TOML")
+
+(cd "$WORK" && HOME="$SET_HOME" LLL_CONFIG_HOME="$ROOT_A" LLL_URL=$URL "$LLL_ABS" config set me root-a >/dev/null)
+assert_contains "$(cat "$ROOT_A/lll/lll.toml" 2>&1)" 'me = "root-a"' \
+  "LLL_CONFIG_HOME puts the config under its own root"
+
+# Two workers must not be able to collide, which is the whole point.
+(cd "$WORK" && HOME="$SET_HOME" LLL_CONFIG_HOME="$ROOT_B" LLL_URL=$URL "$LLL_ABS" config set me root-b >/dev/null)
+assert_contains "$(cat "$ROOT_A/lll/lll.toml")" 'me = "root-a"' \
+  "a second worker's config did not reach into the first's"
+
+# ~/.config IS the XDG default, so honouring the variable finishes a convention
+# the path already followed.
+(cd "$WORK" && HOME="$SET_HOME" XDG_CONFIG_HOME="$ROOT_XDG" LLL_URL=$URL "$LLL_ABS" config set me xdg-root >/dev/null)
+assert_contains "$(cat "$ROOT_XDG/lll/lll.toml" 2>&1)" 'me = "xdg-root"' \
+  "XDG_CONFIG_HOME is honoured when LLL_CONFIG_HOME is unset"
+
+# The app-specific override wins over the ecosystem one.
+(cd "$WORK" && HOME="$SET_HOME" LLL_CONFIG_HOME="$ROOT_A" XDG_CONFIG_HOME="$ROOT_XDG" LLL_URL=$URL \
+  "$LLL_ABS" config set me precedence >/dev/null)
+assert_contains "$(cat "$ROOT_A/lll/lll.toml")" 'me = "precedence"' "LLL_CONFIG_HOME beats XDG_CONFIG_HOME"
+assert_contains "$(cat "$ROOT_XDG/lll/lll.toml")" 'me = "xdg-root"' "the XDG root was left alone"
+
+# None of that may have touched the home config the rest of this section uses.
+[ "$(cat "$HOME_TOML")" = "$HOME_TOML_BEFORE" ] \
+  || fail "an overridden config root still wrote the home config: $(cat "$HOME_TOML")"
+
+# --list must attribute the file it actually read, or the override is invisible.
+out=$(cd "$WORK" && HOME="$SET_HOME" LLL_CONFIG_HOME="$ROOT_B" LLL_URL=$URL "$LLL_ABS" config --list)
+assert_contains "$out" "$ROOT_B/lll/lll.toml" "config --list names the overridden root"
+
 # --- config --list: every value and the file it came from (TASK-168) ---
 # The failure this answers is silent, so it has to name origins, not values.
 printf 'url = "%s"\nme = "homer"\n' "$URL" > "$HOME_TOML"
