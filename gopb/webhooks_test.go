@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -159,6 +160,26 @@ func assertNoDelivery(t *testing.T, ch <-chan receivedDelivery) {
 	}
 }
 
+// A log sink shared by the delivery goroutine and the test: log serializes
+// its writes, but the test's reads of the buffer do not go through that
+// mutex, so the buffer serializes itself.
+type syncBuffer struct {
+	mu  sync.Mutex
+	buf bytes.Buffer
+}
+
+func (b *syncBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.Write(p)
+}
+
+func (b *syncBuffer) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.String()
+}
+
 func TestWebhookDeliversCreateUpdateDelete(t *testing.T) {
 	f := webhookFixtureApp(t)
 	server, ch := webhookReceiver(t)
@@ -271,7 +292,7 @@ func TestWebhookFailureIsLoggedNotSilent(t *testing.T) {
 	t.Cleanup(dead.Close)
 	f.register(t, dead.URL+"/dead", "", false)
 
-	var buf bytes.Buffer
+	var buf syncBuffer
 	prev := log.Writer()
 	log.SetOutput(&buf)
 	defer log.SetOutput(prev)
@@ -280,14 +301,21 @@ func TestWebhookFailureIsLoggedNotSilent(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	deadline := time.Now().Add(5 * time.Second)
-	for time.Now().Before(deadline) {
-		if strings.Contains(buf.String(), "webhook: delivery to "+dead.URL+"/dead answered 500") {
-			return
-		}
+	// Failed deliveries retry (1s + 4s of backoff), so the bounded schedule
+	// takes ~5s to exhaust; all three attempts must be loud.
+	want := "webhook: delivery to " + dead.URL + "/dead answered 500"
+	deadline := time.Now().Add(20 * time.Second)
+	for time.Now().Before(deadline) && strings.Count(buf.String(), want) < 3 {
 		time.Sleep(20 * time.Millisecond)
 	}
-	t.Fatalf("no failure line for the dead receiver; log was:\n%s", buf.String())
+	if got := strings.Count(buf.String(), want); got != 3 {
+		t.Fatalf("counted %d failure lines for the dead receiver, want 3; log was:\n%s", got, buf.String())
+	}
+	// And the bound holds: nothing retries past the third attempt.
+	time.Sleep(300 * time.Millisecond)
+	if got := strings.Count(buf.String(), want); got != 3 {
+		t.Fatalf("delivery kept retrying past the bound: %d failure lines; log was:\n%s", got, buf.String())
+	}
 }
 
 func TestWebhookTransportFailureIsLoggedNotSilent(t *testing.T) {
@@ -295,7 +323,7 @@ func TestWebhookTransportFailureIsLoggedNotSilent(t *testing.T) {
 	// An address where nothing listens: the transport itself must fail.
 	f.register(t, "http://127.0.0.1:1/hook", "", false)
 
-	var buf bytes.Buffer
+	var buf syncBuffer
 	prev := log.Writer()
 	log.SetOutput(&buf)
 	defer log.SetOutput(prev)
@@ -304,12 +332,103 @@ func TestWebhookTransportFailureIsLoggedNotSilent(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	deadline := time.Now().Add(5 * time.Second)
-	for time.Now().Before(deadline) {
-		if strings.Contains(buf.String(), "webhook: delivery to http://127.0.0.1:1/hook failed:") {
-			return
-		}
+	// Same bounded schedule as the 500 receiver: three attempts, ~5s.
+	want := "webhook: delivery to http://127.0.0.1:1/hook failed:"
+	deadline := time.Now().Add(20 * time.Second)
+	for time.Now().Before(deadline) && strings.Count(buf.String(), want) < 3 {
 		time.Sleep(20 * time.Millisecond)
 	}
-	t.Fatalf("no transport-failure line for the unreachable receiver; log was:\n%s", buf.String())
+	if got := strings.Count(buf.String(), want); got != 3 {
+		t.Fatalf("counted %d transport-failure lines for the unreachable receiver, want 3; log was:\n%s", got, buf.String())
+	}
+	time.Sleep(300 * time.Millisecond)
+	if got := strings.Count(buf.String(), want); got != 3 {
+		t.Fatalf("delivery kept retrying past the bound: %d failure lines; log was:\n%s", got, buf.String())
+	}
+}
+
+// LLL-416: the retry schedule is part of the delivery contract — three
+// attempts total, 1s then 4s apart — so it is pinned here rather than left
+// to drift. (The ×4 sequence would next wait 16s before a fourth attempt;
+// the attempt cap ends the schedule at three.)
+func TestWebhookRetrySchedule(t *testing.T) {
+	want := [...]time.Duration{time.Second, 4 * time.Second}
+	if webhookRetryDelays != want {
+		t.Fatalf("webhookRetryDelays = %v, want %v", webhookRetryDelays, want)
+	}
+}
+
+// The retry loop, driven directly with a shortened schedule: a receiver
+// that 500s twice then answers 200 gets all three attempts — the event is
+// delivered once — and the log shows two failures followed by one recovery
+// line.
+func TestWebhookRetriesUntilSuccess(t *testing.T) {
+	var mu sync.Mutex
+	attempts := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		io.Copy(io.Discard, r.Body)
+		mu.Lock()
+		n := attempts
+		attempts++
+		mu.Unlock()
+		if n < 2 {
+			http.Error(w, "no", http.StatusInternalServerError)
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	t.Cleanup(server.Close)
+
+	var buf syncBuffer
+	prev := log.Writer()
+	log.SetOutput(&buf)
+	defer log.SetOutput(prev)
+
+	webhookPostWithRetries(server.URL+"/hook", "", []byte(`{"topic":"issues"}`), []time.Duration{5 * time.Millisecond, 10 * time.Millisecond})
+
+	mu.Lock()
+	n := attempts
+	mu.Unlock()
+	if n != 3 {
+		t.Fatalf("receiver saw %d attempts, want 3", n)
+	}
+	if !strings.Contains(buf.String(), "webhook: delivered to "+server.URL+"/hook after 2 failed attempts") {
+		t.Fatalf("no recovery line after the two failures; log was:\n%s", buf.String())
+	}
+}
+
+// The bound is the point of the schedule: a receiver that always answers
+// 500 gets exactly three attempts, and nothing keeps working after the
+// schedule runs out — no retry queue.
+func TestWebhookRetryBoundStops(t *testing.T) {
+	var mu sync.Mutex
+	attempts := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		io.Copy(io.Discard, r.Body)
+		mu.Lock()
+		attempts++
+		mu.Unlock()
+		http.Error(w, "no", http.StatusInternalServerError)
+	}))
+	t.Cleanup(server.Close)
+
+	var buf syncBuffer
+	prev := log.Writer()
+	log.SetOutput(&buf)
+	defer log.SetOutput(prev)
+
+	webhookPostWithRetries(server.URL+"/hook", "", []byte(`{"topic":"issues"}`), []time.Duration{5 * time.Millisecond, 10 * time.Millisecond})
+
+	// Longer than the whole shortened schedule: a loop that kept going
+	// would have fired a fourth attempt inside this window.
+	time.Sleep(200 * time.Millisecond)
+	mu.Lock()
+	n := attempts
+	mu.Unlock()
+	if n != 3 {
+		t.Fatalf("receiver saw %d attempts after the bound, want exactly 3", n)
+	}
+	if got := strings.Count(buf.String(), "answered 500"); got != 3 {
+		t.Fatalf("log shows %d failure lines, want 3; log was:\n%s", got, buf.String())
+	}
 }

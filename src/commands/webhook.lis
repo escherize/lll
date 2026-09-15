@@ -26,9 +26,10 @@ fn webhook_intro() -> string {
 registered URL whose scope matches, shaped like an `lll watch --json` event
 ({\"topic\":\"issues\",\"action\":...,\"record\":{...}}). A registration's
 secret, when set, rides every delivery as the X-LLL-Secret header, so a
-receiver can tell the server from anyone who found the URL. Failed deliveries
-are printed to the server's log with a 'webhook:' prefix, never dropped
-silently."
+receiver can tell the server from anyone who found the URL. A failed delivery
+is retried with backoff — three attempts, 1s then 4s apart — and every failed
+attempt is printed to the server's log with a 'webhook:' prefix, the last one
+final; nothing is dropped silently."
 }
 
 pub fn webhook_commands() -> Slice<flags.Command> {
