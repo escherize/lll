@@ -268,9 +268,18 @@ fn sync_cache(c: Cache, team_id: string) -> Result<Cache, string> {
   }
   // Probe first: the newest `updated` and the count per collection are one
   // tiny request each. A collection whose newest is not newer than the mark
-  // and whose count matches has not moved, and costs nothing more. (A
-  // delete and a create between two queries keep the count; --refresh is
-  // the answer to that rare lie.)
+  // AND whose count matches has not moved, and costs nothing more.
+  //
+  // The two halves cover each other, which is why this is not the lie it
+  // looks like (LLL-401). A delete alone changes the count. A delete paired
+  // with a create keeps the count, but the create stamps `updated` with now,
+  // so `newest > synced` fires and the id sweep below drops the deleted
+  // record. Verified against a live board: after deleting one doc and
+  // creating another in the same window, the deleted doc's text stops
+  // matching and the new doc's starts, with no --refresh.
+  //
+  // It would take a create whose `updated` is NOT newer than the mark to slip
+  // past both, which the server does not produce.
   let pi = Channel.new<Result<Probe, string>>()
   let pc = Channel.new<Result<Probe, string>>()
   let pd = Channel.new<Result<Probe, string>>()
