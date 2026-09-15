@@ -48,6 +48,7 @@ fn dispatch(noun: string, args: Slice<string>) -> Result<(), string> {
     "bot" => commands.bot(args),
     "attach" => commands.attach(args),
     "watch" => commands.watch(args),
+    "webhook" => commands.webhook(args),
     "search" => commands.search_cmd(args),
     "up" => commands.up(args),
     "board" => commands.board(args),
@@ -112,6 +113,8 @@ Usage:
   lll attach [-k KEY]     write this repo's team to a shareable
                           .lll.toml (see 'lll attach --help')
   lll watch [flags]       live event stream for a query (see 'lll watch --help')
+  lll webhook <command>   outbound webhooks: add/list/remove URLs that the
+                          server POSTs issue events to (see 'lll webhook --help')
   lll up [--port 8100]    start PocketBase + web board together (see 'lll up --help')
   lll board [-w]          print the web board URL; -w opens it (see 'lll board --help')
   lll skill list          the agent operating instructions in this binary

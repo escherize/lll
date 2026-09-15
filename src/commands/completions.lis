@@ -62,6 +62,7 @@ fn nouns() -> Slice<string> {
     "login",
     "logout",
     "token",
+    "webhook",
     "skill",
     "completions",
     "whoami",
@@ -85,6 +86,7 @@ fn verbs(noun: string) -> Slice<string> {
     "finding" => finding_commands().map(|c| c.name),
     "config" => config_commands().map(|c| c.name),
     "token" => token_commands().map(|c| c.name),
+    "webhook" => webhook_commands().map(|c| c.name),
     "skill" => ["list", "get"],
     "completions" => ["bash", "zsh", "fish"],
     _ => [],
@@ -109,6 +111,7 @@ fn verb_flags(noun: string, verb: string) -> Slice<string> {
     "finding" => finding_commands(),
     "config" => config_commands(),
     "token" => token_commands(),
+    "webhook" => webhook_commands(),
     _ => [],
   }
   if !table.is_empty() {
