@@ -171,10 +171,17 @@ Stopping is a result. Report it as one.
   Grep for the old behaviour, not just the old string.
 - **Deploy context archives HEAD.** Uncommitted changes do not deploy, and a
   context built before committing silently carries the previous version.
-- **Isolate before editing.** Work in a worktree, branch from the commit you
-  mean, and never stash - that stack is shared with every other session.
-  [parallel-work](../parallel-work/SKILL.md) is the whole of it: claims as the
-  lock, ports, what a worktree does not isolate, and getting the branch out.
+- **Isolate before editing.** Work in a worktree; a second agent in one checkout
+  overwrites your edits rather than conflicting with them. Branch from the
+  commit you mean, not whatever the worktree defaulted to. Never stash: that
+  stack is shared with every other session and worktree.
+- **The claim is the lock**, not the branch. `lll issue claim` is atomic and
+  server-side, and its refusal is how two agents avoid doing the same work
+  twice. Claim before writing code, not before pushing.
+
+  (Working on lll itself? Its repo carries a `parallel-work` skill with the rest:
+  ports, servers, what a worktree does not isolate, and getting the branch out.
+  This skill ships inside the binary, so it does not link to it.)
 - **Do not point test agents at the hosted board.** Give them a pinned wrapper
   against a throwaway board. Ephemeral identities that name themselves leave
   permanent auth records behind; that is an existing issue on this board, not a

@@ -68,15 +68,37 @@ goes stale.
 ## Collection rules: `""` is public, not private
 
 In PocketBase, an empty-string rule means **anyone**, and `null` means
-**superuser only**. Every collection in `init.js` currently has
-`listRule`/`viewRule`/`createRule`/`updateRule`/`deleteRule` set to `""`, so
-anything that can reach the port can read, edit and delete everything. That is
-fine on localhost and unacceptable anywhere else. See task-32 and ADR-1.
+**superuser only**. That inversion is the trap: a collection created with
+default rules is wide open, and it reads like the opposite.
 
-## Auth (decided in ADR-1, not yet implemented)
+`init.js` did ship every collection at `""`. It no longer stands:
+`1788400000_collection_rules.js` moved them to `AUTH`, which is
+`@request.auth.id != ""` - any authenticated member, no per-record ACLs. Three
+carve-outs, each deliberate:
 
-`members` becomes an auth collection; every actor — human or agent — is one member
-record.
+- `claims.updateRule` is `null`. A member who could PATCH a claim could set its
+  `member` to themselves and steal the hold; claims move through gopb's
+  transactional route instead.
+- `members.deleteRule` is `null` (`1789200000_member_delete_admin.js`, LLL-341).
+  Deleting an account is a superuser act, because a browser-only check would
+  leave direct API deletion as a bypass.
+- `users` is `null` across the board. lll does not use that collection, and
+  PocketBase's stock `createRule` is public self-registration nobody asked for.
+
+**A new collection does not inherit any of this.** Add one and you must set its
+rules in the same migration, or it ships public.
+
+## Auth (shipped)
+
+`members` IS an auth collection (`1788300000_members_auth.js`); every actor -
+human or agent - is one member record.
+
+**Identity is the token, and `me` may only agree with it** (TASK-317, decision
+`identity-is-the-token`). The author of a write is the member the token names; a
+configured `me` naming someone else is refused with both names. A superuser
+token names nobody, so under it `me` attributes as before. This is why `me` does
+not create members: a field that may only agree with who you are must not be
+able to mint who you are (LLL-374).
 
 - Humans: email + password, PocketBase's built-in auth.
 - Bots: a static, non-refreshable token from
@@ -85,8 +107,8 @@ record.
   lifetime. (Verified in v0.40.1: `apis/record_auth_impersonate.go`,
   `core/record_tokens.go`.) This is the API-key mechanism — do not build a
   key table.
-- Rules become `@request.auth.id != ""`. Keep it at that: any authenticated
-  member sees everything, no per-record ACLs.
+- Rules ARE `@request.auth.id != ""`. Keep it at that: any authenticated
+  member sees everything, no per-record ACLs, with the three carve-outs above.
 
 `issues.assignee` already relates to `members`, so `@request.auth.id` *is* a
 member id — "my issues" is one filter, and authorship stops being a convention.
