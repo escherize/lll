@@ -3125,6 +3125,9 @@ PY_RACE
 python3 "$REPO_ROOT"/scripts/test_doc_pagination.py "$LLL_ABS" "$URL"
 python3 "$REPO_ROOT"/scripts/test_export_live.py "$LLL_ABS" "$URL"
 python3 "$REPO_ROOT"/scripts/test_claims_live.py "$LLL_ABS" "$URL"
+# LLL-385: seed is outside build/test/e2e, so it broke for five days under a
+# green gate. Here rather than in `test` because it needs the built binary.
+python3 "$REPO_ROOT"/scripts/test_seed.py
 
 # --- web board (own ephemeral PB; see e2e_web.sh) ---
 HOME="$E2E_REAL_HOME" "$REPO_ROOT"/scripts/e2e_web.sh

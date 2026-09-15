@@ -34,7 +34,10 @@ case "${1:-}" in
   *) echo "usage: scripts/seed.sh [--keep]" >&2; exit 2 ;;
 esac
 
-DEMO_DIR=".lll-demo"
+# LLL-385: overridable so the gate's smoke check gets a directory of its own.
+# seed WIPES this on every run, so a check using the default would destroy a
+# developer's running demo board rather than merely coexisting with it.
+DEMO_DIR="${LLL_DEMO_DIR:-.lll-demo}"
 PB_DIR="$DEMO_DIR/pb_data"
 SEED_LOG="$DEMO_DIR/seed.log"
 E2E_LOGS="$SEED_LOG"
