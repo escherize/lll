@@ -16,6 +16,12 @@ mkdir -p "$scratch_dir/home"
 for scratch_var in ${!LLL_@}; do
   unset "$scratch_var"
 done
+# XDG_CONFIG_HOME is not an LLL_ var, so the loop above never saw it, and since
+# LLL-400 it outranks the HOME set below: on a machine that exports it, scratch
+# announced an isolated config and then authenticated with the developer's real
+# token, which a fresh database has never seen. Same trap e2e_begin records and
+# clears (lib.sh); this is the third copy of that bargain.
+unset XDG_CONFIG_HOME
 
 echo "scratch board: db :$scratch_db_port, web :$scratch_web_port, data $scratch_dir"
 echo "  isolated config: $scratch_dir/home/.config/lll/lll.toml"
