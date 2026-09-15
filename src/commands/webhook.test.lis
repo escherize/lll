@@ -1,0 +1,116 @@
+import "go:strings"
+
+import "flags"
+import "models"
+
+// Unit cover for the pure helpers behind `lll webhook add|remove` (LLL-409).
+// The network halves need a live PocketBase and are covered by the scratch-
+// board verification on the issue; what is asserted here is the part that
+// decides whether a registration can exist at all and how it reads back.
+
+// --------------------------------------------------------- validate_target
+
+/// A webhook target must be an absolute http(s) URL: anything else reaches
+/// the server's outbound client as a malformed request, or worse as a
+/// delivery to somewhere the operator never meant.
+#[test]
+fn validate_target_accepts_http_and_https_urls() {
+  for raw in ["http://127.0.0.1:9999/hook", "https://relay.example.com/lll"] {
+    let assert Ok(kept) = validate_target(raw)
+    assert kept == raw
+  }
+}
+
+#[test]
+fn validate_target_rejects_non_http_schemes_and_hostless_urls() {
+  for raw in ["ftp://relay.example.com/lll", "not a url", "localhost:9999/hook", "file:///tmp/hook"] {
+    let msg = match validate_target(raw) {
+      Err(m) => m,
+      Ok(kept) => panic(f"validate_target accepted '{kept}'"),
+    }
+    assert strings.Contains(msg, "http(s) URL")
+  }
+}
+
+/// The absent positional arrives as "" (flags answers "" for absent and
+/// blank); it must name the command instead of querying for an empty URL.
+#[test]
+fn validate_target_rejects_blank_with_the_command_name() {
+  let msg = match validate_target("") {
+    Err(m) => m,
+    Ok(kept) => panic(f"validate_target accepted '{kept}'"),
+  }
+  assert strings.Contains(msg, "lll webhook add URL")
+}
+
+// ------------------------------------------------------------------ scope
+
+/// The list column shows the project when the registration is narrowed to
+/// one, else the team key from the expansion. An unexpanded record (a caller
+/// that skipped expand) still reads as team-scoped rather than printing "".
+#[test]
+fn scope_label_prefers_the_project_then_the_team_key() {
+  let mut expanded = models.Webhook { .. }
+  expanded.expand.team.key = "ENG"
+  expanded.expand.project.name = "Apollo"
+  assert scope_label(expanded) == "project Apollo"
+
+  let mut team_scoped = models.Webhook { .. }
+  team_scoped.expand.team.key = "ENG"
+  assert scope_label(team_scoped) == "team ENG"
+
+  assert scope_label(models.Webhook { .. }) == "team ?"
+}
+
+/// A secret is never printed as its value: list output gets pasted into
+/// boards and screenshots.
+#[test]
+fn secret_state_never_carries_the_value() {
+  assert secret_state("") == "-"
+  let state = secret_state("hunter2")
+  assert state == "secret set"
+  assert !strings.Contains(state, "hunter2")
+}
+
+// -------------------------------------------------------------- dup_filter
+
+/// Both halves of a duplicate check go through query.quote, so an apostrophe
+/// or quote in a URL cannot break out of the filter (TASK-134).
+#[test]
+fn dup_filter_quotes_the_url() {
+  let filter = dup_filter("TEAMID123", "", "https://r.example.com/it's")
+  assert filter == "team='TEAMID123' && url='https://r.example.com/it\\'s'"
+}
+
+#[test]
+fn dup_filter_adds_the_project_only_when_scoped() {
+  assert dup_filter("T1", "", "http://h/hook") == "team='T1' && url='http://h/hook'"
+  assert strings.Contains(dup_filter("T1", "P1", "http://h/hook"), "&& project='P1'")
+}
+
+// ---------------------------------------------------------------- the table
+
+/// The Command table is what dispatch, `lll webhook --help` and completions
+/// read (TASK-307): every verb is in it, in the order help lists them, and
+/// none is missing the one-line summary that is its row in the help table.
+#[test]
+fn webhook_commands_covers_every_verb_with_a_summary() {
+  let cmds = webhook_commands()
+  assert strings.Join(cmds.map(|c| c.name), " ") == "add list remove"
+  for c in cmds {
+    assert c.summary != ""
+  }
+}
+
+/// `--secret` and `--project` take values: `lll webhook add URL --secret s`
+/// must not treat the secret as a boolean and drop it.
+#[test]
+fn add_flags_take_values() {
+  for name in ["--secret", "--project"] {
+    let Some(fl) = webhook_add_spec().find(|f| f.name == name) else {
+      assert false
+      return
+    }
+    assert fl.value
+  }
+}

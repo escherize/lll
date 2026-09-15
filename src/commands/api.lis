@@ -1,0 +1,125 @@
+import "go:bytes"
+import "go:fmt"
+import "go:io"
+import "go:net/http"
+import "go:os"
+import "go:strings"
+
+import "config"
+import "flags"
+import "pb"
+
+// `lll api METHOD PATH` — raw passthrough to the board's PocketBase API, the
+// documented escape hatch (LLL-408). Scripts and agents in other repos get
+// the board's whole REST surface without hand-rolling curl plus token
+// wiring: the request rides the same configured url and member token every
+// other command uses, and the response comes back raw — status line on
+// stderr, body on stdout, nothing prettied, so `| jq .` works and a non-200
+// is visible instead of swallowed. `lll api --schema` prints the generated
+// collection/field reference (api_schema.lis, written by
+// scripts/gen_api_schema.py from the migrations' end state).
+
+fn api_spec() -> Slice<flags.Flag> {
+  [
+    flags.Flag { name: "--body", value: true, hint: "text", help: "request body to send (application/json)", .. },
+    flags.Flag { name: "--schema", help: "print the collection/field reference instead of sending a request", .. },
+    flags.Flag { name: "--help", alias: "-h", hidden: true, help: "show this help", .. },
+  ]
+}
+
+/// The flag table of the api noun; read by `lll completions`.
+pub fn api_verb_spec(_verb: string) -> Slice<flags.Flag> {
+  api_spec()
+}
+
+pub fn api(args: Slice<string>) -> Result<(), string> {
+  let spec = api_spec()
+  // Two bare words: METHOD and PATH, like `veans api` and curl.
+  let p = flags.parse_n(spec, args, 2, 2, "lll api METHOD PATH [--body TEXT]")?
+  if p.given("--help") {
+    print_api_usage()
+    return Ok(())
+  }
+  if p.given("--schema") {
+    if p.positional_count() != 0 {
+      return Err("--schema prints the reference; it takes no METHOD PATH")
+    }
+    fmt.Print(schema_reference())
+    return Ok(())
+  }
+  let method = strings.ToUpper(p.nth(0))
+  let path = p.nth(1)
+  if method == "" || path == "" {
+    print_api_usage()
+    return Ok(())
+  }
+  if !strings.HasPrefix(path, "/") {
+    return Err(f"path must start with '/': got '{path}' — the path is joined to the configured board url ('lll config --list' shows it)")
+  }
+  send(method, path, p.one("--body"))
+}
+
+/// One raw request, deliberately NOT through pb.send: the client classifies
+/// responses (refused tokens, empty lists) and returns bodies alone, which is
+/// right for the verbs and wrong for a passthrough whose whole job is to show
+/// the API as it answered. Transport failures still get the client's
+/// "cannot reach PocketBase" message, because that failure is the same one.
+fn send(method: string, path: string, payload: string) -> Result<(), string> {
+  let (cfg, _src) = config.load_traced()?
+  let base = strings.TrimRight(cfg.url, "/")
+  let mut req = match http.NewRequest(method, base + path, bytes.NewReader(payload.bytes())) {
+    Ok(r) => r,
+    Err(e) => return Err(f"{method} {path}: {e}"),
+  }
+  // http.NewRequest always populates Header, so None cannot happen; the
+  // unwrap is the Option<Header> field type's toll, not a real branch.
+  if let Some(h) = req.Header {
+    let mut h = h
+    if payload != "" { h.Set("Content-Type", "application/json") }
+    if cfg.token != "" { h.Set("Authorization", pb.bearer(cfg.token)) }
+  }
+  let resp = match http.DefaultClient.Do(req) {
+    Ok(r) => r,
+    Err(e) => return Err(pb.unreachable(cfg.url, e)),
+  }
+  let Some(stream) = resp.Body else {
+    return Err(f"{method} {path}: empty response body")
+  }
+  defer stream.Close()
+  let body = match io.ReadAll(stream) {
+    Partial.Ok(b) => b,
+    Partial.Both(b, _) => b,
+    Partial.Err(e) => return Err(f"{method} {path}: reading response: {e}"),
+  }
+  // Status to stderr, body to stdout: a human sees both, a script pipes the
+  // body to jq and reads the status from stderr when it wants it.
+  fmt.Fprintln(os.Stderr, resp.Status)
+  fmt.Println(body as string)
+  Ok(())
+}
+
+fn print_api_usage() {
+  fmt.Println(
+    "lll api - raw passthrough to the board's PocketBase API
+
+Usage:
+  lll api METHOD PATH [--body TEXT]
+  lll api --schema
+
+Sends METHOD PATH to the configured board url (LLL_URL, or 'url' in config)
+with the configured member token as `Authorization: Bearer`. The response
+body goes to stdout and the status line to stderr, so
+`lll api GET /api/collections/issues/records | jq .` works in scripts and a
+non-200 stays visible. A non-200 is not a command error: the passthrough
+shows the API as it answered.
+
+  --body TEXT    send TEXT as the request body (application/json)
+  --schema       print the collection/field reference and exit
+
+Every collection is served at /api/collections/<name>/records with
+list/view/create/update/delete and PocketBase filter expressions, e.g.
+`lll api GET \"/api/collections/issues/records?filter=(state='todo')\"`.
+`lll api --schema` names every collection and field with the rules a member
+token answers to; regenerate it from the migrations with `mise run api-schema`.",
+  )
+}

@@ -565,6 +565,10 @@ fn create_member_as(
     password,
     password_confirm: password,
     email_visibility: true,
+    // PB selects have no schema-level default, so the CLI states the kind:
+    // everything but `lll bot` is a person (LLL-407).
+    kind: "person",
+    owner: "",
   }
   let payload = match json.Marshal(new_member) {
     Ok(p) => p,

@@ -112,3 +112,14 @@ env = { LC_ALL = "C", PYTHONUTF8 = "1" }
 depends = ["build", "test", "e2e"]
 dir = "{{config_root}}"
 run = "echo 'gate green'"
+
+# Regenerates src/commands/api_schema.lis - the reference `lll api --schema`
+# prints - from a throwaway board booted off the embedded migrations. Run it
+# whenever pb/pb_migrations changes what a collection or field looks like;
+# docs/api.md points readers here.
+[tasks.api-schema]
+description = "Regenerate the `lll api --schema` reference from the migrations"
+depends = ["build"]
+dir = "{{config_root}}"
+env = { LC_ALL = "C", PYTHONUTF8 = "1" }
+run = "python3 scripts/gen_api_schema.py"

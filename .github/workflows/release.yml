@@ -10,6 +10,11 @@
 #      and the fallback in src/commands/version.lis (what an installed binary
 #      reports outside a checkout)
 #   2. git tag v<version> && git push origin v<version>
+#
+# On the same tags the workflow also renders packaging/homebrew/lll.rb.template
+# into a Homebrew formula (version + binary sha256s) and pushes it to a tap
+# repo (default escherize/homebrew-lll). That step is skipped cleanly when the
+# TAP_TOKEN secret is absent, so releases stay green before the tap exists.
 
 name: release
 
@@ -92,3 +97,40 @@ jobs:
         run: |
           gh release create "$GITHUB_REF_NAME" dist/lll-* --title "$GITHUB_REF_NAME" --generate-notes ||
             gh release upload "$GITHUB_REF_NAME" dist/lll-* --clobber
+
+      - name: Render the Homebrew formula
+        run: |
+          tag="${GITHUB_REF_NAME#v}"
+          sed -e "s/__VERSION__/$tag/" \
+              -e "s/__SHA256_DARWIN_ARM64__/$(shasum -a 256 dist/lll-darwin-arm64 | cut -d' ' -f1)/" \
+              -e "s/__SHA256_LINUX_AMD64__/$(shasum -a 256 dist/lll-linux-amd64 | cut -d' ' -f1)/" \
+              -e "s/__SHA256_LINUX_ARM64__/$(shasum -a 256 dist/lll-linux-arm64 | cut -d' ' -f1)/" \
+            packaging/homebrew/lll.rb.template > dist/lll.rb
+
+      - name: Push the formula to the Homebrew tap
+        env:
+          # No TAP_TOKEN secret (or no tap repo) yet? Skip cleanly: releases
+          # must stay green before the human creates escherize/homebrew-lll.
+          TAP_TOKEN: ${{ secrets.TAP_TOKEN }}
+          TAP_REPO: ${{ vars.TAP_REPO }}
+          GH_TOKEN: ${{ secrets.TAP_TOKEN }}
+        run: |
+          if [ -z "$TAP_TOKEN" ]; then
+            echo "TAP_TOKEN secret is not set - skipping Homebrew tap update."
+            echo "To enable: create the tap repo (default escherize/homebrew-lll),"
+            echo "add a TAP_TOKEN secret (repo-scoped contents:write), and optionally a"
+            echo "TAP_REPO variable to override the default. Formula rendered at dist/lll.rb."
+            exit 0
+          fi
+          repo="${TAP_REPO:-escherize/homebrew-lll}"
+          rm -rf tap && gh repo clone "$repo" tap
+          mkdir -p tap/Formula
+          cp dist/lll.rb tap/Formula/lll.rb
+          git -C tap add Formula/lll.rb
+          if git -C tap diff --cached --quiet; then
+            echo "tap formula already up to date"
+          else
+            git -C tap -c user.name=lll-release -c user.email=actions@github.com \
+              commit -m "lll ${GITHUB_REF_NAME}"
+            git -C tap push
+          fi

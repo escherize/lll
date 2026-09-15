@@ -37,9 +37,11 @@ fn dispatch(noun: string, args: Slice<string>) -> Result<(), string> {
     "team" => commands.team(args),
     "member" => commands.member(args),
     "project" => commands.project(args),
+    "api" => commands.api(args),
     "label" => commands.label(args),
     "doc" => commands.doc(args),
     "finding" => commands.finding(args),
+    "import" => commands.import_cmd(args),
     "config" => commands.config_cmd(args),
     "login" => commands.login(args),
     "logout" => commands.logout(args),
@@ -48,6 +50,7 @@ fn dispatch(noun: string, args: Slice<string>) -> Result<(), string> {
     "bot" => commands.bot(args),
     "attach" => commands.attach(args),
     "watch" => commands.watch(args),
+    "webhook" => commands.webhook(args),
     "search" => commands.search_cmd(args),
     "up" => commands.up(args),
     "board" => commands.board(args),
@@ -95,7 +98,14 @@ Usage:
   lll team <command>      work with teams (see 'lll team --help')
   lll member <command>    work with members (see 'lll member --help')
   lll project <command>   work with projects (see 'lll project --help')
+  lll api METHOD PATH     raw passthrough to the board's PocketBase API;
+                          --schema prints the collection/field reference
+                          (see 'lll api --help')
   lll label <command>     work with labels (see 'lll label --help')
+  lll import github OWNER/REPO
+                          bring a GitHub repo's issues in via gh: title, body,
+                          labels, state (open todo, closed done), each issue
+                          ref'd gh#N; re-import skips what it already brought
   lll doc <command>       work with docs: wiki, findings, decisions, PRDs
                           (see 'lll doc --help')
   lll finding <command>   retrieve findings by area or path
@@ -112,6 +122,8 @@ Usage:
   lll attach [-k KEY]     write this repo's team to a shareable
                           .lll.toml (see 'lll attach --help')
   lll watch [flags]       live event stream for a query (see 'lll watch --help')
+  lll webhook <command>   outbound webhooks: add/list/remove URLs that the
+                          server POSTs issue events to (see 'lll webhook --help')
   lll up [--port 8100]    start PocketBase + web board together (see 'lll up --help')
   lll board [-w]          print the web board URL; -w opens it (see 'lll board --help')
   lll skill list          the agent operating instructions in this binary
@@ -121,7 +133,8 @@ Usage:
   lll --version, -v       print the version
   lll --help              show this help
 
-Scoped commands (issue, project, label, doc, finding, watch) accept --team KEY.
+Scoped commands (issue, project, label, doc, finding, import, watch) accept
+--team KEY.
 It overrides LLL_TEAM for this invocation and never writes configuration.
 Explicit issue IDs still target their own team.
 

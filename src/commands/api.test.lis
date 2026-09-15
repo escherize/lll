@@ -1,0 +1,56 @@
+import "flags"
+
+// Unit cover for LLL-408's api noun: the parts that do not need a network.
+// The passthrough itself is exercised end-to-end in scripts/e2e.sh against a
+// live board; what a unit can pin is the schema contract — the generated
+// reference must still name every collection the CLI reads or writes — and
+// the spec's shape as completions reads it.
+
+// -------------------------------------------------------- schema_reference
+
+/// The six collections the issue names, plus the rest the CLI touches; if a
+/// migration renames or removes one, this fails and the reference gets
+/// regenerated (`mise run api-schema`) rather than drifting.
+#[test]
+fn schema_names_every_collection_the_cli_reads_or_writes() {
+  let md = schema_reference()
+  for c in ["teams", "members", "projects", "labels", "issues", "comments", "docs", "claims", "favorites", "views"] {
+    assert md.contains(f"## {c} ")
+  }
+  // Spot fields, one per corner of the schema: an issue's state select, the
+  // member identity fields, a comment's issue relation.
+  assert md.contains("| state | select | yes | values: backlog, todo, in-progress, in-review, done, cancelled |")
+  assert md.contains("| name | text | yes |")
+  assert md.contains("| issue | relation | yes | relation to issues |")
+  // PocketBase's own support collections and its unused default `users` stay out.
+  for absent in ["_authOrigins", "_superusers", "## users "] {
+    assert !md.contains(absent)
+  }
+}
+
+#[test]
+fn schema_states_the_auth_and_filter_basics() {
+  let md = schema_reference()
+  assert md.contains("Bearer")
+  assert md.contains("?filter=")
+  assert md.contains("/api/collections/<name>/records")
+}
+
+// ---------------------------------------------------------------- the spec
+
+#[test]
+fn api_spec_offers_body_schema_and_help() {
+  let spec = api_verb_spec("")
+  // Completions read tokens(): --body and --schema are taught, --help is
+  // declared but hidden and never offered.
+  let names = flags.tokens(spec)
+  assert names.contains("--body")
+  assert names.contains("--schema")
+  assert !names.contains("--help")
+  // --body takes a value; --schema does not.
+  assert spec.find(|f| f.name == "--body").unwrap_or(flags.Flag { name: "", .. }).value
+  assert !spec.find(|f| f.name == "--schema").unwrap_or(flags.Flag { name: "", value: true, .. }).value
+  let help = spec.find(|f| f.name == "--help")
+  assert help.is_some()
+  assert help.unwrap_or(flags.Flag { name: "", .. }).hidden
+}

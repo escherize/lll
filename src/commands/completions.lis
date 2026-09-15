@@ -52,9 +52,11 @@ fn nouns() -> Slice<string> {
     "member",
     "project",
     "label",
+    "api",
     "doc",
     "finding",
     "config",
+    "import",
     "attach",
     "watch",
     "up",
@@ -62,6 +64,7 @@ fn nouns() -> Slice<string> {
     "login",
     "logout",
     "token",
+    "webhook",
     "skill",
     "completions",
     "whoami",
@@ -84,7 +87,9 @@ fn verbs(noun: string) -> Slice<string> {
     "doc" => doc_commands().map(|c| c.name),
     "finding" => finding_commands().map(|c| c.name),
     "config" => config_commands().map(|c| c.name),
+    "import" => import_commands().map(|c| c.name),
     "token" => token_commands().map(|c| c.name),
+    "webhook" => webhook_commands().map(|c| c.name),
     "skill" => ["list", "get"],
     "completions" => ["bash", "zsh", "fish"],
     _ => [],
@@ -108,7 +113,9 @@ fn verb_flags(noun: string, verb: string) -> Slice<string> {
     "doc" => doc_commands(),
     "finding" => finding_commands(),
     "config" => config_commands(),
+    "import" => import_commands(),
     "token" => token_commands(),
+    "webhook" => webhook_commands(),
     _ => [],
   }
   if !table.is_empty() {
@@ -121,6 +128,7 @@ fn verb_flags(noun: string, verb: string) -> Slice<string> {
     "attach" => flags.tokens(attach_verb_spec("")),
     "board" => flags.tokens(board_verb_spec(verb)),
     "login" => flags.tokens(login_verb_spec("")),
+    "api" => flags.tokens(api_verb_spec("")),
     _ => [],
   }
 }
