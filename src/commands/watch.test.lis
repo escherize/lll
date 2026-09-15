@@ -51,6 +51,19 @@ fn ndjson_line_splices_the_topic_into_the_payload() {
 }
 
 #[test]
+fn ndjson_line_survives_multi_byte_payloads() {
+  // The case above is pure ASCII, where byte length and rune count agree - which
+  // is why splicing with a byte length into a rune-indexed range looked correct
+  // for as long as it did. One emoji is all it takes to separate them (LLL-417).
+  let ev = realtime.Event {
+    topic: "issues",
+    data: "{\"action\":\"create\",\"record\":{\"emoji\":\"✨\"}}",
+  }
+  assert ndjson_line(ev) ==
+  "{\"topic\":\"issues\",\"action\":\"create\",\"record\":{\"emoji\":\"✨\"}}"
+}
+
+#[test]
 fn first_line_takes_up_to_the_first_newline() {
   assert first_line("one\ntwo") == "one"
   assert first_line("only") == "only"

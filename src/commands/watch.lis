@@ -337,7 +337,11 @@ fn assignee_display(snap: Snapshot) -> string {
 /// record ids — no JSON escaping needed.
 fn ndjson_line(ev: realtime.Event) -> string {
   if !ev.data.starts_with("{") { return ev.data }
-  "{\"topic\":\"" + ev.topic + "\"," + ev.data.substring(1..ev.data.length())
+  // TrimPrefix, not substring(1..length()): length() counts BYTES and substring
+  // indexes RUNES, so the two agree only while the payload is pure ASCII. One
+  // emoji in a record put the end bound past the last rune and panicked the
+  // whole stream (LLL-417). The prefix is the single byte "{", already checked.
+  "{\"topic\":\"" + ev.topic + "\"," + strings.TrimPrefix(ev.data, "{")
 }
 
 fn first_line(body: string) -> string {
