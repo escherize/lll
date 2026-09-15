@@ -19,6 +19,7 @@ with tempfile.TemporaryDirectory() as directory:
     gh.write_text(f'#!{sys.executable}\n' + '''import json,os,pathlib,sys
 pathlib.Path(os.environ['PR_CAPTURE']).write_text(json.dumps({'args':sys.argv[1:],'body':sys.stdin.read()}))
 print(os.environ.get('PR_OUTPUT', 'https://github.example/owner/repo/pull/1'))
+if os.environ.get('PR_STDERR'): print(os.environ['PR_STDERR'], file=sys.stderr)
 sys.exit(int(os.environ.get('PR_EXIT', '0')))
 ''')
     gh.chmod(0o755)
@@ -116,5 +117,25 @@ sys.exit(int(os.environ.get('PR_EXIT', '0')))
     recovered = run('issue', 'ref', key, 'gh#19')
     assert recovered.returncode == 0, recovered.stderr
     assert 'gh#19' in json.loads(run('issue', 'view', key, '--json').stdout)['refs'].split()
+
+    # LLL-415: gh refuses a second PR for a branch that already has one and
+    # prints the URL of the one that does - on stderr. Recording that PR is the
+    # point of this verb, so adopting it is success, the way claiming an issue
+    # already yours is. Note the PR_EXIT=7 case above keeps a URL on stdout and
+    # must STAY a failure: adoption is gated on gh's "already exists" wording,
+    # not on any URL appearing in the output.
+    existing = ('a pull request for branch "topic" into branch "main" already exists:\n'
+                'https://github.example/owner/repo/pull/44')
+    adopted = run('issue', 'pr', key,
+                  extra={'PR_EXIT': '1', 'PR_OUTPUT': '', 'PR_STDERR': existing})
+    assert adopted.returncode == 0, adopted.stderr
+    assert 'already existed' in adopted.stderr, adopted.stderr
+    assert 'gh#44' in json.loads(run('issue', 'view', key, '--json').stdout)['refs'].split()
+    # Twice is once: the reference must not be duplicated.
+    again = run('issue', 'pr', key,
+                extra={'PR_EXIT': '1', 'PR_OUTPUT': '', 'PR_STDERR': existing})
+    assert again.returncode == 0, again.stderr
+    twice = json.loads(run('issue', 'view', key, '--json').stdout)['refs'].split()
+    assert twice.count('gh#44') == 1, twice
 print('PR bodies: exact stdin transport, large Unicode, oversized link fallback and gh failure passed')
 print('PR refs: success, unchanged failure/ambiguity, duplicate/concurrent preservation, lone-argument refusal, failed-save recovery and old-server refusal passed')
