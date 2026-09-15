@@ -13,10 +13,24 @@ it before nontrivial work, record discoveries, and close it after verification.
 
 ## Task-specific implementation guidance
 
+- Before your first edit, if another agent may be working here too, read
+  [.claude/skills/parallel-work/SKILL.md](.claude/skills/parallel-work/SKILL.md).
+  Isolation, what a worktree does NOT isolate, and why the board's claim is the
+  lock rather than Git.
 - For Go interop, text offsets, partial I/O or reusable initialization, read
   [.claude/skills/lisette-interop/SKILL.md](.claude/skills/lisette-interop/SKILL.md).
 - For live board updates, fragment ownership, drafts or async search, read
   [.claude/skills/datastar-fragments/SKILL.md](.claude/skills/datastar-fragments/SKILL.md).
+- Before touching `pb/` or `gopb/`, adding a collection, field or rule, or when
+  a PocketBase call 404s, read
+  [.claude/skills/pocketbase/SKILL.md](.claude/skills/pocketbase/SKILL.md).
+- For working the backlog unattended — which issues an agent may safely take,
+  and when it must hand one back instead — read
+  [.claude/skills/backlog-loop/SKILL.md](.claude/skills/backlog-loop/SKILL.md).
+
+The `lll` and `backlog-loop` skills also ship inside the binary, so an agent
+working from another repo can read them without this checkout:
+`lll skill list`, `lll skill get lll`.
 
 # Lisette
 
