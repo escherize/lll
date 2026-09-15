@@ -208,7 +208,7 @@ provenance.
 <div class="ni-props">
   <select name="state" aria-label="State">{{range .States}}<option value="{{.Value}}"{{if eq .Value "todo"}} selected{{end}}>{{.Label}}</option>{{end}}</select>
   <select name="priority" aria-label="Priority">{{range .Compose.Prios}}<option value="{{.Value}}">{{.Label}}</option>{{end}}</select>
-  <select name="assignee" aria-label="Assignee"><option value="">Unassigned</option>{{range .Compose.Members}}<option value="{{.Id}}">{{.Name}}</option>{{end}}</select>
+  <select name="assignee" aria-label="Assignee"><option value="">Unassigned</option>{{range .Compose.Members}}<option value="{{.Id}}">{{.Name}}{{if .Bot}} 🤖{{end}}</option>{{end}}</select>
   <select name="project" aria-label="Project"><option value="">No project</option>{{range .Compose.Projects}}<option value="{{.Id}}">{{.Name}}</option>{{end}}</select>
 </div>
 {{if .Compose.Labels}}<div class="ni-labels"><span class="ni-key">Labels</span>{{range .Compose.Labels}}<label class="ni-lab"><input type="checkbox" name="labels" value="{{.Id}}"><span class="chip"><span class="dot" style="background:{{if .Color}}{{.Color}}{{else}}var(--text-3){{end}}"></span>{{.Name}}</span></label>{{end}}</div>

@@ -64,9 +64,12 @@ fn prios_by_urgency() -> Slice<string> {
   scale[1..].append(scale[0])
 }
 
-/// Initials plus a stable per-name color class (av-0..av-3), so different
-/// members scan differently on the board.
-fn avatar_vm(name: string) -> AvatarVM {
+/// Initials, a stable per-name color class (av-0..av-3, so different
+/// members scan differently on the board), and the bot badge flag: a
+/// bot-kind member renders the glyph after its initials everywhere the
+/// shared avatar template does (LLL-407).
+fn avatar_vm(member: models.Member) -> AvatarVM {
+  let name = member.name
   let words = strings.Fields(name)
   let first = words.map(|w| strings.ToUpper(w.substring(0..1)))
   let mut sum = 0
@@ -76,6 +79,7 @@ fn avatar_vm(name: string) -> AvatarVM {
   AvatarVM {
     initials: strings.Join(first[..min(2, first.length())], ""),
     class: f"av-{sum % 4}",
+    bot: member.kind == "bot",
   }
 }
 
@@ -96,7 +100,7 @@ fn card_vm(issue: models.Issue) -> CardVM {
     prio,
     prio_label: prio_label(prio),
     assignee: issue.expand.assignee.name,
-    avatar: avatar_vm(issue.expand.assignee.name),
+    avatar: avatar_vm(issue.expand.assignee),
     labels: label_vms(issue.expand.labels),
     emoji: issue.emoji,
     created: display.relative(issue.created),
@@ -314,8 +318,8 @@ fn compose_vm(team_id: string) -> Result<ComposeVM, string> {
   let labels = records.fetch_labels(team_id)?
   Ok(ComposeVM {
     prios: prio_opts(),
-    members: members.map(|m| PickVM { id: m.id, name: m.name }),
-    projects: projects.map(|p| PickVM { id: p.id, name: p.name }),
+    members: members.map(|m| PickVM { id: m.id, name: m.name, bot: m.kind == "bot" }),
+    projects: projects.map(|p| PickVM { id: p.id, name: p.name, bot: false }),
     labels: labels.map(|l| LabelPickVM {
       id: l.id,
       name: l.name,
@@ -332,7 +336,7 @@ fn comment_vm(c: models.Comment) -> CommentVM {
   CommentVM {
     id: c.id,
     author,
-    avatar: avatar_vm(author),
+    avatar: avatar_vm(c.expand.author),
     age: display.relative(c.created),
     body: markdown.md_html(c.body),
     body_md: c.body,
@@ -389,7 +393,7 @@ fn issue_fields_vm(issue: models.Issue, comments: Slice<models.Comment>) -> Resu
     state: issue.state,
     prio: display.priority_name(issue.priority),
     assignee,
-    avatar: avatar_vm(assignee),
+    avatar: avatar_vm(issue.expand.assignee),
     project,
     project_href,
     labels: label_vms(issue.expand.labels),
@@ -409,8 +413,8 @@ fn issue_fields_vm(issue: models.Issue, comments: Slice<models.Comment>) -> Resu
     // Scoped to the ISSUE's team, not the server's configured one: this
     // renders for whatever issue arrives, including one from a team the
     // board is not scoped to (TASK-173).
-    member_opts: records.fetch_members()?.map(|m| PickVM { id: m.id, name: m.name }),
-    project_opts: records.fetch_projects(issue.team)?.map(|p| PickVM { id: p.id, name: p.name }),
+    member_opts: records.fetch_members()?.map(|m| PickVM { id: m.id, name: m.name, bot: m.kind == "bot" }),
+    project_opts: records.fetch_projects(issue.team)?.map(|p| PickVM { id: p.id, name: p.name, bot: false }),
     label_opts: records.fetch_labels(issue.team)?.map(|l| LabelPickVM {
       id: l.id,
       name: l.name,

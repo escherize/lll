@@ -76,6 +76,22 @@ fn token_create_spec() -> Slice<flags.Flag> {
   ])
 }
 
+/// The --duration value as token create, `lll bot` and `lll bot rotate` all
+/// read it: absent means the explicit one-year default, 0 means PocketBase's
+/// collection duration, and a negative is refused here rather than
+/// round-tripped into a 400 (PocketBase validates duration >= 0,
+/// v0.40.1 impersonateForm).
+fn parse_token_duration(raw: string) -> Result<int, string> {
+  if raw == "" { return Ok(default_token_duration()) }
+  let Ok(d) = strconv.Atoi(raw) else {
+    return Err(f"--duration must be a number of seconds, got '{raw}'")
+  }
+  if d < 0 {
+    return Err("--duration must be 0 or more; 0 uses the members collection's duration")
+  }
+  Ok(d)
+}
+
 fn token_create(input: flags.CommandInput) -> Result<(), string> {
   let spec = token_create_spec()
   let usage = flags.usage("lll token create", spec, "<member>")
@@ -87,19 +103,7 @@ fn token_create(input: flags.CommandInput) -> Result<(), string> {
   // Absent --duration means the explicit default, not PocketBase's: leaving
   // it at 0 is what silently handed out 5-day tokens. 0 stays reachable, but
   // only by asking for it.
-  let mut duration = default_token_duration()
-  let raw = p.one("--duration")
-  if raw != "" {
-    let Ok(d) = strconv.Atoi(raw) else {
-      return Err(f"--duration must be a number of seconds, got '{raw}'")
-    }
-    // PocketBase validates duration >= 0 (v0.40.1 impersonateForm), so a
-    // negative value is refused here rather than round-tripped into a 400.
-    if d < 0 {
-      return Err("--duration must be 0 or more; 0 uses the members collection's duration")
-    }
-    duration = d
-  }
+  let duration = parse_token_duration(p.one("--duration"))?
 
   point_at_url(p.one("--url"))?
   apply_admin_flags(p.one("--admin-email"), p.one("--admin-password"))?
@@ -314,29 +318,177 @@ On the receiving machine, save the API endpoint with 'lll config set url URL', o
 }
 
 /// `lll bot NAME [--duration s]`: an agent identity in one command (LLL-392,
-/// after veans init). Creates the member when it is missing, mints its
-/// token as the superuser, prints the LLL_TOKEN line once with where to
-/// keep it. The human's own session is never the agent's credential: the
-/// bot's token is scoped to the bot, and rotating it (`lll bot NAME` again)
-/// touches nothing of yours.
+/// after veans init; LLL-407 made bots a member kind). Creates a bot-kind
+/// member named NAME — the bot- prefix is reserved for bots and enforced
+/// server-side — records the calling member as its owner, and prints its
+/// token once. The human's own session is never the agent's credential: the
+/// bot's token is scoped to the bot, and both this command and `lll bot
+/// rotate NAME` re-mint it while invalidating the previous token, which
+/// stops working at its next request.
+///
+/// Creation rides the calling member's own token when there is one, so the
+/// bot is owned by whoever ran the command. Administrator credentials name
+/// no member, so a bot created with them has no owner.
 pub fn bot(args: Slice<string>) -> Result<(), string> {
+  // `args` is the full argv ("lll", "bot", ...), so the verb rides index 2
+  // — where a bot's NAME would sit. A bot cannot be named "rotate": the
+  // server reserves bot- * names, so the two forms cannot collide.
+  if args.get(2).unwrap_or("") == "rotate" { return bot_rotate(args) }
+  bot_create(args)
+}
+
+fn bot_create(args: Slice<string>) -> Result<(), string> {
   let spec = token_create_spec()
   let usage = flags.usage("lll bot", spec, "NAME")
   let p = flags.parse_n(spec, args, 2, 1, usage)?
   let name = strings.TrimSpace(p.first())
-  if name == "" { return Err(f"usage: {usage}\n  NAME is the agent's member name, e.g. bot-myrepo or claude-main") }
+  if name == "" {
+    return Err(f"usage: {usage}\n  NAME is the agent's member name, e.g. bot-myrepo — bot names are reserved to the bot- prefix")
+  }
   point_at_url(p.one("--url"))?
   apply_admin_flags(p.one("--admin-email"), p.one("--admin-password"))?
-  let su = superuser_auth()?
-  let mut created = false
-  let existing = records.find_member_as(su, name)?
-  if existing.is_none() {
-    let _ = create_member_as(su, name, "", rand.Text())?
-    created = true
+  let (tok, caller) = bot_caller()?
+  let duration = parse_token_duration(p.one("--duration"))?
+  let existing = records.find_member_as(tok, name)?
+  if let Some(member) = existing {
+    if member.kind != "bot" {
+      return Err(
+        f"member '{name}' exists and is not a bot member
+'lll bot' only provisions bot members; use 'lll token create {name}' to mint its token directly",
+      )
+    }
+    fmt.Println(f"member {name} exists; rotating its token (the previous one stops working)")
+  } else {
+    let owner = caller.map_or("", |me| me.id)
+    let created = create_bot_member_as(tok, name, owner)?
+    let owned = caller.map_or("no owner (the superuser created it)", |me| f"owned by {me.name}")
+    fmt.Println(f"created bot member {created.name} (kind=bot, {owned})")
   }
-  if created { fmt.Println(f"created member {name}") } else { fmt.Println(f"member {name} exists; minting a fresh token for it") }
-  // The mint is token create's, with the same --duration semantics.
-  let mut forwarded: Slice<string> = ["lll", "token", "create", name]
-  if p.given("--duration") { forwarded = forwarded.append("--duration").append(p.one("--duration")) }
-  token(forwarded)
+  bot_mint(tok, name, duration)
+}
+
+/// `lll bot rotate NAME [--duration s]`: re-mint the bot's token and strand
+/// the previous one. The server admits the superuser or the bot's owner —
+/// the human who created it is the one who sees a token leak.
+fn bot_rotate(args: Slice<string>) -> Result<(), string> {
+  let spec = token_create_spec()
+  let usage = flags.usage("lll bot rotate", spec, "NAME")
+  let p = flags.parse_n(spec, args, 3, 1, usage)?
+  let name = strings.TrimSpace(p.first())
+  if name == "" {
+    return Err(f"usage: {usage}\n  NAME is the bot member's name, e.g. bot-myrepo")
+  }
+  point_at_url(p.one("--url"))?
+  apply_admin_flags(p.one("--admin-email"), p.one("--admin-password"))?
+  let (tok, _) = bot_caller()?
+  let duration = parse_token_duration(p.one("--duration"))?
+  bot_mint(tok, name, duration)
+}
+
+/// creates. Administrator credentials authenticate as the superuser, which
+/// names no member; a configured member token creates on the caller's own
+/// behalf (the members create rule is authenticated-only, TASK-181); a
+/// configured superuser token falls back to that, ownerless.
+fn bot_caller() -> Result<(string, Option<models.Member>), string> {
+  if os.Getenv("LLL_ADMIN_EMAIL") != "" && os.Getenv("LLL_ADMIN_PASSWORD") != "" {
+    return Ok((superuser_auth()?, None))
+  }
+  let cfg = config.load()?
+  if cfg.token == "" {
+    return Ok((superuser_auth()?, None))
+  }
+  let me = token_member(cfg.token)?
+  Ok((cfg.token, me))
+}
+
+/// The member a token names, or None when it names nobody: a superuser
+/// token's JWT id has no members record, and PocketBase answers 404. The
+/// same probe `lll whoami` makes — the id out of the JWT, then that record.
+fn token_member(tok: string) -> Result<Option<models.Member>, string> {
+  let Some(id) = pb.token_subject(tok) else { return Ok(None) }
+  match pb.get_as(f"/api/collections/members/records/{id}", tok) {
+    Ok(body) => {
+      let mut me = models.Member { .. }
+      if let Err(e) = json.Unmarshal(body.bytes(), &me) {
+        return Err(f"decoding the identity response: {e}")
+      }
+      Ok(Some(me))
+    },
+    Err(e) => {
+      if pb.response_status(e) == 404 { return Ok(None) }
+      Err(e)
+    },
+  }
+}
+
+/// Create the bot-kind member record: a random password nobody knows (the
+/// login door is closed server-side regardless), the synthesized email every
+/// record-only member gets, kind = bot, and `owner` pointing at the calling
+/// member when there is one.
+fn create_bot_member_as(tok: string, name: string, owner: string) -> Result<models.Member, string> {
+  let password = rand.Text()
+  let new_bot = models.NewMember {
+    name,
+    email: synthesize_email(name),
+    password,
+    password_confirm: password,
+    email_visibility: true,
+    kind: "bot",
+    owner,
+  }
+  let payload = match json.Marshal(new_bot) {
+    Ok(p) => p,
+    Err(e) => return Err(f"encoding bot member: {e}"),
+  }
+  let body = pb.post_as("/api/collections/members/records", payload as string, tok)?
+  let mut created = models.Member { .. }
+  if let Err(e) = json.Unmarshal(body.bytes(), &created) {
+    return Err(f"decoding created bot member: {e}")
+  }
+  Ok(created)
+}
+
+/// Mint the bot's token through the rotate route: it re-mints and — by
+/// refreshing the record's tokenKey — strands every earlier token at its
+/// next request. The server checks owner or superuser; the response is the
+/// same {token, record} shape impersonate answers with. The one place a bot
+/// token is ever printed, like token create's.
+fn bot_mint(tok: string, name: string, duration: int) -> Result<(), string> {
+  let payload = match json.Marshal(models.BotRotate { name, duration }) {
+    Ok(b) => b,
+    Err(e) => return Err(f"encoding the rotation request: {e}"),
+  }
+  let body = match pb.post_as("/api/lll/bots/rotate", payload as string, tok) {
+    Ok(b) => b,
+    Err(e) => return Err(bot_mint_error(name, e)),
+  }
+  let mut auth = models.AuthResponse { .. }
+  if let Err(e) = json.Unmarshal(body.bytes(), &auth) {
+    return Err(f"decoding the rotation response: {e}")
+  }
+  if auth.token == "" { return Err("the rotation response carried no token") }
+  fmt.Println(f"LLL_TOKEN={auth.token}")
+  fmt.Println(
+    f"one-time bot token for {name} — shown only here; to persist it, put token = \"...\" in ~/.config/lll/lll.toml (never .lll.toml, which is committed)",
+  )
+  fmt.Println(expiry_line(duration, time.Now()))
+  Ok(())
+}
+
+/// What to say when the rotate route refuses. 403 is the owner check — the
+/// configured credential neither owns the bot nor is a superuser; 401 is a
+/// dead token, the same shape token create's refusal names. Anything else
+/// keeps the raw error.
+fn bot_mint_error(name: string, e: string) -> string {
+  let status = pb.response_status(e)
+  if status == 403 {
+    return f"rotating {name}'s token: only the bot's owner or a superuser can do that
+the configured token does not own this bot — pass --admin-email/--admin-password (or set LLL_ADMIN_EMAIL/LLL_ADMIN_PASSWORD) to rotate as the superuser"
+  }
+  if status == 401 {
+    return "the token this ran with was rejected (401) - most likely it expired
+mint a new one with 'lll token create', or set LLL_ADMIN_EMAIL/LLL_ADMIN_PASSWORD
+to the credentials 'lll up' prints"
+  }
+  f"rotating {name}'s token: {e}"
 }

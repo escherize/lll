@@ -36,6 +36,22 @@ fn auth_errors_follow_live_http_status_despite_url_and_body_digits() {
 }
 
 #[test]
+fn login_403_with_a_server_message_repeats_it_verbatim() {
+  // A bot member at the password door (LLL-407): the server answers a PB
+  // envelope naming the rule, and login_failed repeats it instead of the raw
+  // wrapper. A bare 403 keeps the raw detail — the loop test above pins that.
+  let mut server = httptest.NewServer(http.HandlerFunc(|w, _r| {
+    w.WriteHeader(403)
+    let _ = w.Write("{\"data\":{},\"message\":\"bot members cannot sign in with a password - they are token-only accounts; use the minted LLL_TOKEN (see 'lll bot')\",\"status\":403}".bytes())
+  }))
+  defer server.Close()
+  let Err(e) = pb.post_anon_to(server.URL, "/api/collections/members/auth-with-password", "{}") else { panic("expected failure") };
+  let refused = login_failed(e, "bot-e2e@members.invalid", server.URL)
+  assert refused.starts_with(f"login failed at {server.URL}: ")
+  assert refused.contains("bot members cannot sign in with a password")
+}
+
+#[test]
 fn non_auth_validation_and_transport_errors_keep_their_details() {
   let validation = "PATCH http://127.0.0.1:40123/400/oldPassword: 400 Bad Request: invalid email"
   assert member_password_error("person", validation) == f"setting person's password: {validation}"
