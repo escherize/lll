@@ -52,6 +52,7 @@ fn nouns() -> Slice<string> {
     "member",
     "project",
     "label",
+    "api",
     "doc",
     "finding",
     "config",
@@ -127,6 +128,7 @@ fn verb_flags(noun: string, verb: string) -> Slice<string> {
     "attach" => flags.tokens(attach_verb_spec("")),
     "board" => flags.tokens(board_verb_spec(verb)),
     "login" => flags.tokens(login_verb_spec("")),
+    "api" => flags.tokens(api_verb_spec("")),
     _ => [],
   }
 }

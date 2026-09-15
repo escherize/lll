@@ -37,6 +37,7 @@ fn dispatch(noun: string, args: Slice<string>) -> Result<(), string> {
     "team" => commands.team(args),
     "member" => commands.member(args),
     "project" => commands.project(args),
+    "api" => commands.api(args),
     "label" => commands.label(args),
     "doc" => commands.doc(args),
     "finding" => commands.finding(args),
@@ -97,6 +98,9 @@ Usage:
   lll team <command>      work with teams (see 'lll team --help')
   lll member <command>    work with members (see 'lll member --help')
   lll project <command>   work with projects (see 'lll project --help')
+  lll api METHOD PATH     raw passthrough to the board's PocketBase API;
+                          --schema prints the collection/field reference
+                          (see 'lll api --help')
   lll label <command>     work with labels (see 'lll label --help')
   lll import github OWNER/REPO
                           bring a GitHub repo's issues in via gh: title, body,
