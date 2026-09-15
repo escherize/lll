@@ -2591,6 +2591,14 @@ assert_contains "$out" "lll token create" "and the re-mint is named"
 out=$(LLL_TOKEN="$SHORT_TOK" HOME="$E2E_HOME" LLL_URL=$URL "$LIN" whoami 2>&1 || true)
 assert_contains "$out" "expired at" "whoami on an expired token says expired, not 404"
 
+# LLL-388: the board (LLL_REMINT=1 and the admin pair) heals an EXPIRED token
+# the way it heals a rejected one. It used to report expiry and serve empty
+# pages from the moment its boot token aged out.
+out=$(LLL_TOKEN="$SHORT_TOK" HOME="$E2E_HOME" LLL_URL=$URL LLL_TEAM=ENG LLL_REMINT=1 \
+  LLL_ADMIN_EMAIL=admin@local.dev LLL_ADMIN_PASSWORD=admin-local-123 "$LIN" issue list --limit 1 2>&1) \
+  || fail "the board should re-mint an expired token, got: $out"
+assert_contains "$out" "ENG-" "an expired token is re-minted by the board and the read answers"
+
 # ...and the gate is superuser-only: a member token and no credentials at all
 # are both refused, naming the fix. The member token is minted fresh — the
 # password PATCH above rotated e2e-agent's tokenKey, so the bootstrap token

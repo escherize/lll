@@ -192,8 +192,15 @@ fn refused_token(
 ) -> Option<Result<string, string>> {
   let verdict = token_verdict(cfg.url, cfg.token)
   if verdict == "corrupted" { return Some(Err(corrupted_token(src.token))) }
-  if verdict == "expired" { return Some(Err(expired_token(cfg.token, src.token))) }
-  if verdict == "rejected" {
+  // An expired token is a refusal the board can heal exactly like a
+  // rejected one (LLL-388): the expiry verdict used to return here before
+  // the re-mint below, so the one process allowed to re-mint never did,
+  // and the hosted board served empty pages from the moment its boot token
+  // aged out until someone restarted the machine.
+  if verdict == "expired" && os.Getenv("LLL_REMINT") != "1" {
+    return Some(Err(expired_token(cfg.token, src.token)))
+  }
+  if verdict == "rejected" || verdict == "expired" {
     // A process holding the server's admin credentials can fix this itself.
     // That is the board (TASK-255): `lll up` mints a superuser token at boot
     // and re-mints it "if refused", but a stale token was never refused on a
@@ -206,6 +213,7 @@ fn refused_token(
         cfg.url, method, path, payload, bearer(fresh), src.url == "default", content_type,
       ))
     }
+    if verdict == "expired" { return Some(Err(expired_token(cfg.token, src.token))) }
     return Some(Err(stale_token(cfg.url, src.token)))
   }
   None
