@@ -130,6 +130,9 @@ jobs:
           if git -C tap diff --cached --quiet; then
             echo "tap formula already up to date"
           else
+            # gh repo clone authenticates the clone, not a later push;
+            # point the remote at the token explicitly.
+            git -C tap remote set-url origin "https://x-access-token:${TAP_TOKEN}@github.com/${repo}.git"
             git -C tap -c user.name=lll-release -c user.email=actions@github.com \
               commit -m "lll ${GITHUB_REF_NAME}"
             git -C tap push

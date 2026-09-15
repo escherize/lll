@@ -36,7 +36,16 @@ class Lll < Formula
   end
 
   def install
-    bin.install "lll"
+    # Release assets are bare binaries named per platform; the staged file
+    # keeps that name, so install renames it to lll. (Verified by a real
+    # `brew install escherize/lll/lll` against the v0.2.0 tap.)
+    if OS.mac?
+      bin.install "lll-darwin-arm64" => "lll"
+    elsif OS.linux? && Hardware::CPU.intel?
+      bin.install "lll-linux-amd64" => "lll"
+    else
+      bin.install "lll-linux-arm64" => "lll"
+    end
   end
 
   def caveats
