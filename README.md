@@ -26,6 +26,13 @@ mkdir -p ~/bin && curl -LsSf -o ~/bin/lll \
   && chmod +x ~/bin/lll
 ```
 
+Via Homebrew (requires the `escherize/homebrew-lll` tap to exist; until it
+does, use the curl line above):
+
+```sh
+brew install escherize/lll/lll
+```
+
 Linux: swap in `lll-linux-amd64` or `lll-linux-arm64`. Binaries are attached
 to [GitHub releases](https://github.com/escherize/lll/releases) by the
 release workflow on every `v*` tag; `lll --version` names the release. This
