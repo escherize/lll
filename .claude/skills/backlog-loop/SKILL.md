@@ -171,8 +171,10 @@ Stopping is a result. Report it as one.
   Grep for the old behaviour, not just the old string.
 - **Deploy context archives HEAD.** Uncommitted changes do not deploy, and a
   context built before committing silently carries the previous version.
-- **Isolate before editing.** Work in a worktree. Never `git stash` - the stack
-  is shared with other sessions.
+- **Isolate before editing.** Work in a worktree, branch from the commit you
+  mean, and never stash - that stack is shared with every other session.
+  [parallel-work](../parallel-work/SKILL.md) is the whole of it: claims as the
+  lock, ports, what a worktree does not isolate, and getting the branch out.
 - **Do not point test agents at the hosted board.** Give them a pinned wrapper
   against a throwaway board. Ephemeral identities that name themselves leave
   permanent auth records behind; that is an existing issue on this board, not a
