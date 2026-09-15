@@ -1540,10 +1540,36 @@ fn pr_cmd(input: flags.CommandInput) -> Result<(), string> {
     "-",
   )
   cmd.Stdin = Some(strings.NewReader(body))
+  // Two buffers, not one shared by both streams: exec runs a goroutine per
+  // writer, so a single bytes.Buffer behind Stdout and Stderr would be written
+  // from two goroutines at once.
   let mut captured = bytes.Buffer { .. }
+  let mut captured_err = bytes.Buffer { .. }
   cmd.Stdout = Some(io.MultiWriter(os.Stdout, &captured))
-  cmd.Stderr = Some(os.Stderr)
-  if let Err(e) = cmd.Run() { return Err(f"gh pr create: {e}") }
+  cmd.Stderr = Some(io.MultiWriter(os.Stderr, &captured_err))
+  if let Err(e) = cmd.Run() {
+    // gh refuses to open a second PR for a branch that already has one, and
+    // prints the URL of the one that does - on stderr, which is why that is
+    // captured now. Recording the PR is the whole point of this verb, so adopt
+    // the existing one instead of failing with the URL sitting right there in
+    // the output. `lll issue claim` already answers "it exists and it is
+    // already yours" with success rather than a refusal (LLL-415).
+    //
+    // Gated on gh's own "already exists" wording, deliberately narrow: a create
+    // that failed for any OTHER reason must stay a failure, or a reference gets
+    // recorded for a PR that was never opened. If gh ever changes the wording
+    // this falls back to the old error, which is the safe direction.
+    let combined = captured_err.String() + "\n" + captured.String()
+    if !strings.Contains(combined, "already exists") { return Err(f"gh pr create: {e}") }
+    let Some((existing_url, existing_ref)) = references.from_pr_output(combined) else {
+      return Err(f"gh pr create: {e}")
+    };
+    if let Err(save) = references.append(issue.id, existing_ref) {
+      return Err(f"A pull request already exists: {existing_url}\nCould not confirm {existing_ref} on {key}: {save}\nRetry only the reference save: lll issue ref {key} {existing_ref}")
+    }
+    let _ = fmt.Fprintln(os.Stderr, f"a pull request already existed for this branch; recorded {existing_ref} on {key}")
+    return Ok(())
+  }
   let Some((pr_url, reference)) = references.from_pr_output(captured.String()) else {
     return Err("gh pr create succeeded but did not report one unambiguous PR URL; the issue was not changed. Inspect the gh output before retrying; do not create a duplicate PR.")
   };
