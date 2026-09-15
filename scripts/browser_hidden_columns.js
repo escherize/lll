@@ -54,5 +54,31 @@ async page => {
 
   await page.goto(base + '/t/ENG/');
   await page.waitForLoadState('load');
+  // LLL-375: the saved view is a cookie the SERVER reads, so the bare URL
+  // paints the hidden column on the FIRST render — the URL never changes,
+  // where the old localStorage restore replaced it with ?hide=.
+  await page.goto(base + '/t/ENG/?hide=todo');
+  await page.waitForLoadState('load');
+  await page.goto(base + '/t/ENG/');
+  await page.waitForLoadState('load');
+  await page.waitForTimeout(700);
+  if (page.url().includes('?')) throw new Error(`the bare board redirected: ${page.url()}`);
+  if (!(await hidden('#col-todo'))) {
+    throw new Error('the saved-view cookie did not hide todo on the bare board');
+  }
+  const cookie = await page.evaluate(() => document.cookie);
+  if (!cookie.includes('lll_view_ENG=todo')) {
+    throw new Error(`the saved-view cookie is missing: ${cookie}`);
+  }
+  // Clearing the view — the cookie and the old localStorage key — restores
+  // every column, the same bargain Clear and unhide-the-last-column offer.
+  await page.evaluate(() => {
+    document.cookie = 'lll_view_ENG=; Max-Age=0; Path=/';
+    localStorage.clear();
+  });
+  await page.goto(base + '/t/ENG/');
+  await page.waitForLoadState('load');
+  await page.waitForTimeout(500);
+  if (await hidden('#col-todo')) throw new Error('a cleared saved view still hides todo');
   return 'hidden column round trip verified';
 }

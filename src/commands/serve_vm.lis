@@ -175,6 +175,12 @@ pub struct BoardVM {
   // One `$hide_<sig> = true/false` assignment per state, seeding the signals
   // data-class reads on .main.
   pub hide_seed: template.JS,
+  // The same states, comma-joined, as the $vhide signal seed on .main
+  // (LLL-375): the hide/unhide buttons live inside the #board morph and are
+  // re-rendered by broadcasts that know nothing of this request's view, so
+  // they read the CURRENT hide at click time — the URL's ?hide= when it has
+  // one, this signal when it does not. Filled by board_page ONLY.
+  pub hide_csv: string,
   // A rejected query param, said out loud in the flash strip rather than
   // silently dropped — the same contract /issues runs on.
   pub error: string,
@@ -192,6 +198,16 @@ pub struct BoardVM {
   // banner and its writes refuse server-side. Filled by board_page ONLY,
   // same bargain as team_key.
   pub team_archived: bool,
+  // This team's saved-view cookie name (LLL-375): lll_view_<key>, seeded as
+  // the $vck signal on .main so Clear and unhide-the-last-column can clear
+  // the cookie by name from handlers the broadcast re-renders. Filled by
+  // board_page ONLY, same bargain as team_key.
+  pub view_cookie_name: string,
+  // True when a saved-view cookie was SEEN on this request, even when it hid
+  // nothing: localStorage then has nothing this browser still needs, so
+  // data-init's one-time migration hook stays off. Filled by board_page
+  // ONLY, same bargain as team_key.
+  pub view_restored: bool,
   // The validated card ordering (TASK-209), "manual" by default. Filled by
   // board_page ONLY: the page's /events URL carries it so the SSE scope —
   // and therefore every broadcast morph — respects this client's order.

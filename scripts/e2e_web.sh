@@ -421,6 +421,44 @@ assert_not_contains "$unhidden" 'class="main hc-done"' \
 # what differs is the class attribute and the seeded signal value.
 assert_contains "$unhidden" "'hc-done': \$hide_done" "the lane's hide binding exists"
 assert_contains "$hidden" "\$hide_done = true" "?hide=done seeds the lane's hide signal"
+
+# LLL-375: the browser's saved view rides a cookie the server reads, so the
+# bare board URL — the way anyone opens it — paints the hidden lanes on the
+# FIRST render, where the old localStorage restore painted them second.
+viewed=$(curl -sf -H "Cookie: lll_board=$BOARD_TOKEN; lll_view_ENG=done" "$WEB/t/ENG/")
+assert_contains "$viewed" 'class="main hc-done"' \
+  "a saved-view cookie hides the lane on the first paint"
+assert_not_contains "$viewed" "location.replace" \
+  "a cookie-restored board embeds no localStorage redirect"
+assert_contains "$unhidden" "lllView" \
+  "a browser with no view cookie still carries the one-time migration hook"
+viewed_multi=$(curl -sf -H "Cookie: lll_board=$BOARD_TOKEN; lll_view_ENG=done%2Ctodo" "$WEB/t/ENG/")
+assert_contains "$viewed_multi" 'class="main hc-done hc-todo"' \
+  "the saved view may hide several lanes"
+urlwins=$(curl -sf -H "Cookie: lll_board=$BOARD_TOKEN; lll_view_ENG=todo" "$WEB/t/ENG/?hide=done")
+assert_contains "$urlwins" 'class="main hc-done"' "an explicit ?hide= still wins over the cookie"
+curl -s -D - -o /dev/null -H "Cookie: lll_board=$BOARD_TOKEN; lll_view_ENG=todo" "$WEB/t/ENG/?hide=done" \
+  | grep -qi "^set-cookie: lll_view_ENG=done" \
+  || fail "an explicit ?hide= did not rewrite the saved-view cookie"
+# A slug the catalogue cannot name is dropped silently — there is no URL to
+# fix, so a renamed state must not become a permanent flash.
+stale_slug=$(curl -sf -H "Cookie: lll_board=$BOARD_TOKEN; lll_view_ENG=bogus,done" "$WEB/t/ENG/")
+assert_contains "$stale_slug" 'class="main hc-done"' "a stale slug in the cookie is dropped silently"
+assert_contains "$stale_slug" '<div id="flash" class="flash" hidden>' \
+  "a stale cookie slug raises no flash"
+# Any other param'd URL is a full view statement (TASK-94): it clears the
+# cookie; an explicit empty ?hide= clears it too.
+curl -s -D - -o /dev/null -H "Cookie: lll_board=$BOARD_TOKEN; lll_view_ENG=done" "$WEB/t/ENG/?state=todo" \
+  | grep -qi "^set-cookie: lll_view_ENG=;" || fail "a param'd URL without hide did not clear the saved view"
+curl -s -D - -o /dev/null -H "Cookie: lll_board=$BOARD_TOKEN; lll_view_ENG=done" "$WEB/t/ENG/?hide=" \
+  | grep -qi "^set-cookie: lll_view_ENG=;" || fail "an explicit empty ?hide= did not clear the saved view"
+# Saving a view makes it the browser's view: the POST writes the same cookie
+# a board GET would, so a bare reload honors what was just saved.
+curl -s -D - -o /dev/null -X POST "$WEB/views/save" -H "$BOARD_COOKIE" \
+  --data-urlencode "name=Cookie probe" --data-urlencode "team=ENG" \
+  --data-urlencode "query=?hide=todo" \
+  | grep -qi "^set-cookie: lll_view_ENG=todo" \
+  || fail "saving a view did not write the saved-view cookie"
 # The query lives in the URL, so a result is shareable and curl-able.
 search=$(wcurl -sf "$WEB/search?q=Already")
 assert_contains "$search" "ENG-2" "search finds the matching issue"
@@ -1054,21 +1092,41 @@ if command -v playwright-cli >/dev/null 2>&1; then
   [ "${mine_visible:-0}" -lt "$all" ] \
     || fail "task-109 step 2: My issues did not actually filter ($step2 vs $all)"
 
-  # Coming back to a bare / restores the LAST VIEW from localStorage — a
-  # convenience only, and the chip comes back WITH it, visibly. The URL is
-  # what is restored, so the address bar says what the board is filtered by.
+  # Coming back to a bare / used to restore the LAST VIEW from localStorage —
+  # filters and ordering swept in with the hide. Since LLL-375 the persisted
+  # view is only the hidden lanes, on a cookie the server reads: filters live
+  # in the URL and named views, so a bare arrival stays bare — no chips, no
+  # redirect, every card visible.
   seq_goto "$WEB/"
   step3=$(seq_probe)
-  assert_contains "$step3" '"chips":1' \
-    "task-109 step 3: the restored view brings its chip back, visibly"
+  assert_contains "$step3" '"chips":0' \
+    "task-109 step 3: a bare arrival restores no filter — the saved view is hide-only"
   restored=$(playwright-cli -s="$BROWSER_SESSION" eval "() => location.pathname + location.search" \
     | sed -n '/### Result/{n;p;}' | tr -d '\\')
-  assert_contains "$restored" "/?assignee=e2e" \
-    "task-109 step 3: the restore lands on the view's own URL"
-  assert_contains "$step3" "\"visible\":$mine_visible" \
-    "task-109 step 3: the restored view actually filters"
+  assert_contains "$restored" "/t/ENG/" \
+    "task-109 step 3: the bare arrival stays bare — no localStorage redirect"
+  assert_contains "$step3" "\"visible\":$all" \
+    "task-109 step 3: the bare arrival actually shows the whole board"
+
+  # The hide half of the saved view DOES come back on the bare URL — painted
+  # by the server from the cookie, with the hidden rail as its visible undo,
+  # and without the URL ever changing (no redirect to wait behind).
+  seq_goto "$WEB/?hide=done"
+  seq_goto "$WEB/"
+  step3b=$(seq_probe)
+  assert_contains "$step3b" '"chips":0' "the restored hide carries no chips"
+  hides=$(playwright-cli -s="$BROWSER_SESSION" eval \
+    "() => getComputedStyle(document.getElementById('col-done')).display === 'none' && getComputedStyle(document.getElementById('hidden-rail')).display !== 'none'" \
+    | sed -n '/### Result/{n;p;}' | tr -d '\\')
+  assert_contains "$hides" "true" \
+    "the restored view hides its lane and shows the hidden rail"
+  restored_hide=$(playwright-cli -s="$BROWSER_SESSION" eval "() => location.pathname + location.search" \
+    | sed -n '/### Result/{n;p;}' | tr -d '\\')
+  assert_contains "$restored_hide" "/t/ENG/" \
+    "the hide restore does not rewrite the URL"
 
   # The chip IS the undo: clicking it toggles its value out of the URL.
+  seq_goto "$WEB/?assignee=e2e"
   playwright-cli -s="$BROWSER_SESSION" click ".flt-chip" >/dev/null 2>&1 \
     || fail "playwright: clicking the chip"
   sleep 0.5

@@ -105,6 +105,26 @@ fn set_board_cookie(w: http.ResponseWriter, tok: string) {
   http.SetCookie(w, &cookie)
 }
 
+/// Hand the browser the saved-view cookie for one team (LLL-375): the hidden
+/// columns of the browser's last view, comma-joined and query-escaped, so a
+/// bare board URL paints them on the FIRST render instead of after a
+/// localStorage redirect. NOT HttpOnly: the page's own Clear and
+/// unhide-the-last-column handlers clear it, exactly what the old
+/// localStorage key let them do. The value is query-escaped because cookie
+/// values may not carry the comma the join uses; reads unescape it before
+/// the slugs are re-validated. SameSite zero-fills to the default, which
+/// browsers treat as Lax.
+fn set_view_cookie(w: http.ResponseWriter, name: string, value: string) {
+  let cookie = http.Cookie {
+    Name: name,
+    Value: url.QueryEscape(value),
+    Path: "/",
+    MaxAge: 365 * 24 * 3600,
+    ..,
+  }
+  http.SetCookie(w, &cookie)
+}
+
 /// The request path and query with board_token stripped — the redirect
 /// target after a query-param login, so the token is not re-sent on every
 /// navigation or pasted into a bookmark.
