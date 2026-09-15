@@ -2839,7 +2839,7 @@ LLL_URL=$URL "$LIN" team create -k GONE -n "Disposable" >/dev/null \
   || fail "creating the disposable team"
 out=$(LLL_URL=$URL "$LIN" team delete GONE) || fail "deleting an empty team: $out"
 assert_contains "$out" "deleted team GONE" "an empty team can be deleted"
-LLL_URL=$URL "$LIN" team list | grep -q "GONE" && fail "the deleted team is still listed"
+assert_cli_lacks "the deleted team is still listed" "GONE" env LLL_URL=$URL "$LIN" team list
 # A team with issues is refused, and told about archive instead.
 out=$(LLL_URL=$URL "$LIN" team delete ENG 2>&1) && fail "deleting a team with issues should refuse"
 assert_contains "$out" "team archive ENG" "the refusal names archive"
@@ -2870,8 +2870,8 @@ out=$(LLL_URL=$URL "$LIN" member remove "Busy Person" \
   --admin-email admin@local.dev --admin-password admin-local-123 2>&1) \
   && fail "removing an assigned member should refuse"
 assert_contains "$out" "issue(s) assigned" "the refusal counts the assigned issues"
-LLL_URL=$URL "$LIN" member list | grep -q "Busy Person" \
-  || fail "the refused removal deleted the member anyway"
+assert_cli_contains "the refused removal deleted the member anyway" "Busy Person" \
+  env LLL_URL=$URL "$LIN" member list
 
 # LLL-234: both relations count, even when the configured member token is
 # unusable. Forced deletion clears attribution, never comment content.

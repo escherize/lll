@@ -106,6 +106,41 @@ assert_contains() { # haystack needle label
 $1"
 }
 
+# Assert on what a CLI READ returned, keeping two failures apart (LLL-412).
+#
+# `"$LIN" member list | grep -q X || fail "..."` throws away the read's exit
+# status, so a transient failure prints nothing, grep matches nothing, and the
+# suite reports the absence as if it were the finding: "the refused removal
+# deleted the member anyway" when nothing was deleted and the read simply
+# failed. The negative form is worse - it PASSES, hiding the regression it
+# exists to catch.
+#
+# These also avoid `grep -q` for the reason assert_contains documents below:
+# under pipefail it exits on the first match and the writer takes EPIPE, so a
+# matching haystack can fail when the needle lands early in a large page.
+#
+# Pattern is a basic regex, so the existing '^name\tvalue' anchors still work.
+assert_cli_contains() { # label pattern command...
+  local label=$1 pattern=$2 out status
+  shift 2
+  out=$("$@" 2>&1); status=$?
+  [ "$status" -eq 0 ] || fail "$label: the read itself failed (exit $status): $*
+$out"
+  printf '%s\n' "$out" | grep -- "$pattern" >/dev/null || fail "$label: expected '$pattern' from: $*
+$out"
+}
+
+assert_cli_lacks() { # label pattern command...
+  local label=$1 pattern=$2 out status
+  shift 2
+  out=$("$@" 2>&1); status=$?
+  [ "$status" -eq 0 ] || fail "$label: the read itself failed (exit $status): $*
+$out"
+  printf '%s\n' "$out" | grep -- "$pattern" >/dev/null && fail "$label: did not expect '$pattern' from: $*
+$out"
+  return 0
+}
+
 assert_not_contains() { # haystack needle label
   printf '%s' "$1" | grep -F -- "$2" >/dev/null &&
     fail "$3: did not expect '$2' in output:
