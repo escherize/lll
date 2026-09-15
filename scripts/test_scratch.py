@@ -19,7 +19,18 @@ with tempfile.TemporaryDirectory(prefix='lll-scratch-test-') as directory:
     config.parent.mkdir(parents=True)
     original = b'token = "fixture-hosted-token"\nme = "hosted-person"\n'
     config.write_bytes(original)
+    # XDG_CONFIG_HOME is SET here, not inherited (LLL-421). e2e_begin unsets it
+    # so the suite cannot read the developer's own config, which left this test
+    # - whose whole job is a hostile environment - receiving one already
+    # sanitised of the variable that broke scratch. Since LLL-400 it outranks
+    # HOME, so it belongs with the hostile values below rather than in the
+    # harness's hands: scratch must survive it the way it survives a hostile
+    # LLL_TOKEN.
+    xdg_config = base / 'xdg/lll/lll.toml'
+    xdg_config.parent.mkdir(parents=True)
+    xdg_config.write_bytes(b'token = "fixture-xdg-token"\nme = "xdg-person"\n')
     env = dict(os.environ, HOME=str(base / 'home'), TMPDIR=directory,
+               XDG_CONFIG_HOME=str(base / 'xdg'),
                LLL_TOKEN='fixture-env-token', LLL_ME='hosted-person',
                LLL_URL='http://127.0.0.1:1', LLL_WEB_URL='https://invalid.example',
                LLL_ADMIN_EMAIL='wrong@example.com', LLL_ADMIN_PASSWORD='wrong-password',
@@ -36,10 +47,15 @@ with tempfile.TemporaryDirectory(prefix='lll-scratch-test-') as directory:
                 output = log_path.read_text()
                 if 'board  login ' in output:
                     break
-                assert process.poll() is None, 'scratch exited before board startup'
+                # With the boot log, not without it: this assertion fires when
+                # something in the environment steered the boot, and the reason
+                # is always in the log it just wrote.
+                assert process.poll() is None, (
+                    'scratch exited before board startup:\n' + output)
                 time.sleep(.1)
             else:
-                raise AssertionError('scratch board did not start within 20 seconds')
+                raise AssertionError(
+                    'scratch board did not start within 20 seconds:\n' + output)
             ports = re.search(r'scratch board: db :(\d+), web :(\d+), data (.+)', output)
             assert ports, 'scratch banner missing'
             db, web = map(int, ports.group(1, 2))
