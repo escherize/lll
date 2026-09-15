@@ -134,9 +134,9 @@ fn issues_page(w: http.ResponseWriter, r: Ref<http.Request>, team_id: string, me
   let mut filters = view_filters(raw)
   if let Err(e) = filters.validate() {
     err = e
-    filters.state = ""
+    filters.state = []
   }
-  let state = filters.state
+  let state = filters.one_state()
   let mut assignee = filters.assignee
   let mut assignee_id = ""
   if assignee != "" {
@@ -149,7 +149,7 @@ fn issues_page(w: http.ResponseWriter, r: Ref<http.Request>, team_id: string, me
     }
   }
 
-  let mut label = filters.label
+  let mut label = filters.one_label()
   let mut label_id = ""
   if label != "" {
     match records.resolve_label(team_id, label) {

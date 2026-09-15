@@ -87,11 +87,15 @@ fn parse_accepts_a_hidden_flag_by_either_spelling() {
 }
 
 #[test]
-fn parse_repeats_accumulate_and_single_values_take_the_last() {
+fn parse_repeats_accumulate_and_undeclared_repeats_are_refused() {
   let assert Ok(p) = parse(spec(), argv(["--label", "a", "--label", "b"]), 3, false, "")
   assert p.all("--label").equals(["a", "b"])
-  let assert Ok(twice) = parse(spec(), argv(["-t", "one", "-t", "two"]), 3, false, "")
-  assert twice.one("-t") == "two"
+  // LLL-381: this asserted that a non-repeatable flag given twice kept the
+  // last value. That silence is the defect - the reader got a confident answer
+  // to a question they did not ask. The table says whether a flag may repeat,
+  // and now the parser enforces it.
+  let assert Err(msg) = parse(spec(), argv(["-t", "one", "-t", "two"]), 3, false, "")
+  assert msg.contains("may only be given once")
 }
 
 #[test]

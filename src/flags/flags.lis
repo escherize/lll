@@ -39,6 +39,24 @@ pub struct Parsed {
 /// A dash-prefixed argument may also carry its value inline as
 /// `--flag=value` (TASK-165), split at the FIRST equals so the value may
 /// contain more. A boolean spelt that way (`--json=1`) is an error.
+/// Refuse a second occurrence of a flag that did not declare itself
+/// repeatable (LLL-381).
+///
+/// `repeat` used to be decoration: it added "..." to the usage line and
+/// nothing else, so `--state todo --state in-review` was accepted and then
+/// read with `one()`, which took the last. The result was a plausible,
+/// well-formed, WRONG list at exit 0 - worse than a refusal, because nothing
+/// on screen said half the question had been dropped.
+///
+/// Now the table decides. A repeatable flag accumulates and its consumer ORs
+/// the values; anything else says so the first time it is doubled.
+fn repeat_ok(fl: Flag, existing: Slice<string>) -> Result<(), string> {
+  if fl.repeat || existing.is_empty() { return Ok(()) }
+  Err(
+    f"{fl.name} may only be given once (got {existing.length() + 1}); it takes a single value",
+  )
+}
+
 pub fn parse(
   spec: Slice<Flag>,
   args: Slice<string>,
@@ -122,6 +140,7 @@ pub fn parse_n(
       if !fl.value {
         return Err(f"{spelling} takes no value")
       }
+      repeat_ok(fl, vals.get(fl.name).unwrap_or([]))?
       vals[fl.name] = vals.get(fl.name).unwrap_or([]).append(parts[1])
       i += 1
       continue
@@ -142,6 +161,7 @@ pub fn parse_n(
       let Some(val) = args.get(i + 1) else {
         return Err(f"{arg} requires a value")
       }
+      repeat_ok(fl, vals.get(fl.name).unwrap_or([]))?
       vals[fl.name] = vals.get(fl.name).unwrap_or([]).append(val)
       i += 2
     } else {
