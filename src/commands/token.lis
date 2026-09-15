@@ -2,7 +2,9 @@ import "records"
 import "go:encoding/json"
 import "go:fmt"
 import "go:os"
+import "go:crypto/rand"
 import "go:strconv"
+import "go:strings"
 import "go:time"
 
 import "config"
@@ -309,4 +311,32 @@ fix is another 'lll token create'.
 The token is printed exactly once. Agents persist it with
 token = \"...\" in ~/.config/lll/lll.toml — never .lll.toml, which is committed.
 On the receiving machine, save the API endpoint with 'lll config set url URL', or supply LLL_URL." + flags.section(spec)
+}
+
+/// `lll bot NAME [--duration s]`: an agent identity in one command (LLL-392,
+/// after veans init). Creates the member when it is missing, mints its
+/// token as the superuser, prints the LLL_TOKEN line once with where to
+/// keep it. The human's own session is never the agent's credential: the
+/// bot's token is scoped to the bot, and rotating it (`lll bot NAME` again)
+/// touches nothing of yours.
+pub fn bot(args: Slice<string>) -> Result<(), string> {
+  let spec = token_create_spec()
+  let usage = flags.usage("lll bot", spec, "NAME")
+  let p = flags.parse_n(spec, args, 2, 1, usage)?
+  let name = strings.TrimSpace(p.first())
+  if name == "" { return Err(f"usage: {usage}\n  NAME is the agent's member name, e.g. bot-myrepo or claude-main") }
+  point_at_url(p.one("--url"))?
+  apply_admin_flags(p.one("--admin-email"), p.one("--admin-password"))?
+  let su = superuser_auth()?
+  let mut created = false
+  let existing = records.find_member_as(su, name)?
+  if existing.is_none() {
+    let _ = create_member_as(su, name, "", rand.Text())?
+    created = true
+  }
+  if created { fmt.Println(f"created member {name}") } else { fmt.Println(f"member {name} exists; minting a fresh token for it") }
+  // The mint is token create's, with the same --duration semantics.
+  let mut forwarded: Slice<string> = ["lll", "token", "create", name]
+  if p.given("--duration") { forwarded = forwarded.append("--duration").append(p.one("--duration")) }
+  token(forwarded)
 }

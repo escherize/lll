@@ -221,6 +221,34 @@ fn issue_update_spec() -> Slice<flags.Flag> {
       ..,
     },
     flags.Flag {
+      name: "--description-replace-old",
+      value: true,
+      hint: "text",
+      help: "with --description-replace-new: replace exactly one occurrence of text in the description",
+      ..,
+    },
+    flags.Flag {
+      name: "--description-replace-new",
+      value: true,
+      hint: "text",
+      help: "the replacement for --description-replace-old",
+      ..,
+    },
+    flags.Flag {
+      name: "--description-append",
+      value: true,
+      hint: "text",
+      help: "append text to the description on its own line",
+      ..,
+    },
+    flags.Flag {
+      name: "--if-unchanged-since",
+      value: true,
+      hint: "stamp",
+      help: "refuse unless the issue's 'updated' still equals stamp (from 'issue view --json'), so an edit\ncannot land on a record someone changed under you",
+      ..,
+    },
+    flags.Flag {
       name: "--emoji",
       value: true,
       hint: "e",
@@ -1007,7 +1035,19 @@ fn update(input: flags.CommandInput) -> Result<(), string> {
   if p.given("--description") {
     description = value_or_stdin(p.one("--description"), "--description")?
   }
-  let description_set = p.given("--description")
+  let mut description_set = p.given("--description")
+  let replace_old = p.one("--description-replace-old")
+  let replace_new = p.one("--description-replace-new")
+  let replace_set = p.given("--description-replace-old") || p.given("--description-replace-new")
+  if p.given("--description-replace-old") != p.given("--description-replace-new") {
+    return Err("--description-replace-old and --description-replace-new go together")
+  }
+  let append_text = p.one("--description-append")
+  let append_set = p.given("--description-append")
+  if description_set && (replace_set || append_set) {
+    return Err("--description replaces the whole text; it cannot be combined with --description-replace-* or --description-append")
+  }
+  let since = p.one("--if-unchanged-since")
   let emoji = check_emoji(p.one("--emoji"))?
   let emoji_set = p.given("--emoji")
   // An empty --assignee is the natural guess for "clear it" (two of thirty
@@ -1015,12 +1055,39 @@ fn update(input: flags.CommandInput) -> Result<(), string> {
   if p.given("--assignee") && assignee_name == "" {
     return Err("--assignee needs a member name, or 'none' to clear it")
   }
-  if state == "" && priority < 0 && assignee_name == "" && label_names.is_empty() && !project_set && !title_set && !description_set && !emoji_set {
+  if state == "" && priority < 0 && assignee_name == "" && label_names.is_empty() && !project_set && !title_set && !description_set && !replace_set && !append_set && !emoji_set {
     return Err(f"nothing to update — pass at least one flag\nusage: {usage}")
   }
 
   let resolved = resolve_id(id, usage)?
   let issue = records.fetch_issue(resolved)?
+  let key = f"{issue.expand.team.key}-{issue.number}"
+
+  // LLL-391: optimistic concurrency for the fields nobody owns. The caller
+  // passes the 'updated' it read; a record written since is refused with
+  // the current stamp, and the caller reads again. Claims arbitrate who
+  // owns an issue; this arbitrates edits. The check is read-then-write on
+  // the client (PocketBase has no conditional PATCH), so the window is the
+  // round trip, not the whole session it used to be.
+  if since != "" && issue.updated != since {
+    return Err(f"{key} changed since {since}: its 'updated' is now {issue.updated} — read it again ('lll issue view {key} --json' carries updated) and retry with that stamp")
+  }
+  // Surgical description edits (LLL-391, after veans): a replace must match
+  // exactly once, or the caller is told how many times it matched, so a
+  // common phrase never silently rewrites the wrong place.
+  if replace_set {
+    let n = strings.Count(issue.description, replace_old)
+    if n != 1 {
+      return Err(f"--description-replace-old matched {n} times in {key}'s description; it must match exactly once - widen the text")
+    }
+    description = strings.Replace(issue.description, replace_old, replace_new, 1)
+    description_set = true
+  }
+  if append_set {
+    let base = if replace_set { description } else { issue.description }
+    description = if strings.TrimSpace(base) == "" { append_text } else { strings.TrimRight(base, "\n") + "\n" + append_text }
+    description_set = true
+  }
 
   let mut fields: Slice<string> = []
   // What this update set, for the success line: two fleet agents read
@@ -1062,7 +1129,8 @@ fn update(input: flags.CommandInput) -> Result<(), string> {
   if title_set { fields = fields.append("\"title\":" + json_quote(title)?); changed = changed.append("title") }
   if description_set {
     fields = fields.append("\"description\":" + json_quote(description)?)
-    changed = changed.append("description")
+    let how = if replace_set && append_set { "description (replaced, appended)" } else if replace_set { "description (replaced)" } else if append_set { "description (appended)" } else { "description" }
+    changed = changed.append(how)
   }
   // `--emoji ""` clears the marker, so this one keys off the flag, not the value.
   if emoji_set { fields = fields.append("\"emoji\":" + json_quote(emoji)?); changed = changed.append(f"emoji={emoji}") }
@@ -1071,7 +1139,6 @@ fn update(input: flags.CommandInput) -> Result<(), string> {
   if assignee_name != "" {
     let observed = claims.observed_id(issue.id)?
     let result = claims.update_assignment(issue.id, observed, payload).map_err(|e| {
-      let key = f"{issue.expand.team.key}-{issue.number}"
       if strings.Contains(e, "is claimed by") {
         f"{key}: {e} — 'lll issue release {key}' gives it back"
       } else { f"{key}: {e}" }

@@ -2161,6 +2161,35 @@ assert_not_contains "$out" "Claimed:   bryan" "the claim is gone with the assign
 out=$(env $E LLL_TOKEN="$BRYAN_TOK" LLL_ME=bryan "$LIN" issue claim "$CKEY")
 assert_contains "$out" "Claimed $CKEY for bryan" "and it can be claimed afresh"
 
+# --- --if-unchanged-since, description replace/append (LLL-391) ---
+stamp=$(env $E "$LIN" issue view "$CKEY" --json | jq -r '.updated')
+[ -n "$stamp" ] || fail "issue view --json carries no updated stamp"
+out=$(env $E "$LIN" issue update "$CKEY" --priority 3 --if-unchanged-since "$stamp")
+assert_contains "$out" "priority=3" "an edit with the current stamp lands"
+set +e
+out=$(env $E "$LIN" issue update "$CKEY" --priority 4 --if-unchanged-since "$stamp" 2>&1)
+rc=$?
+set -e
+[ "$rc" -ne 0 ] || fail "an edit with a stale stamp should be refused"
+assert_contains "$out" "changed since $stamp" "the refusal names the stale stamp"
+assert_contains "$out" "issue view $CKEY --json" "and where to read the new one"
+[ "$(env $E "$LIN" issue view "$CKEY" --json | jq -r '.priority')" = 3 ] || fail "the refused edit must not land"
+out=$(env $E "$LIN" issue update "$CKEY" -d "The picker loses focus. Then the picker reopens.")
+out=$(env $E "$LIN" issue update "$CKEY" --description-replace-old "loses focus" --description-replace-new "keeps focus")
+assert_contains "$out" "description (replaced)" "replace says it replaced"
+assert_contains "$(env $E "$LIN" issue view "$CKEY" --raw)" "The picker keeps focus." "the one occurrence was replaced"
+set +e
+out=$(env $E "$LIN" issue update "$CKEY" --description-replace-old "picker" --description-replace-new "chooser" 2>&1)
+set -e
+assert_contains "$out" "matched 2 times" "an ambiguous replace is refused with the count"
+out=$(env $E "$LIN" issue update "$CKEY" --description-append "Appended line.")
+assert_contains "$out" "description (appended)" "append says it appended"
+assert_contains "$(env $E "$LIN" issue view "$CKEY" --raw)" "Appended line." "the line was appended"
+set +e
+out=$(env $E "$LIN" issue update "$CKEY" --description-replace-old x 2>&1)
+set -e
+assert_contains "$out" "go together" "half a replace is refused"
+
 # --assignee on a claimed issue is refused and names the holder (LLL-184);
 # assigning the holder to themselves is a no-op.
 set +e
@@ -2496,6 +2525,20 @@ MINT_TOK=$(printf '%s\n' "$create_out" | sed -n 's/^LLL_TOKEN=//p')
 assert_contains "$create_out" "one-time agent token for e2e-agent" "token create says who it minted for"
 out=$(LLL_TOKEN="$MINT_TOK" HOME="$E2E_HOME" LLL_URL=$URL "$LIN" member list)
 assert_contains "$out" "e2e-agent" "the minted token authenticates a GET"
+
+# --- lll bot NAME: member + token in one command (LLL-392) ---
+bot_out=$(env -u LLL_TOKEN HOME="$E2E_HOME" LLL_URL=$URL \
+  LLL_ADMIN_EMAIL=admin@local.dev LLL_ADMIN_PASSWORD=admin-local-123 \
+  "$LIN" bot bot-e2e --duration 3600) || fail "lll bot exited nonzero: $bot_out"
+assert_contains "$bot_out" "created member bot-e2e" "bot creates the member when missing"
+BOT_TOK=$(printf '%s\n' "$bot_out" | sed -n 's/^LLL_TOKEN=//p')
+[ -n "$BOT_TOK" ] || fail "lll bot printed no LLL_TOKEN line: $bot_out"
+out=$(LLL_TOKEN="$BOT_TOK" HOME="$E2E_HOME" LLL_URL=$URL "$LIN" whoami)
+assert_contains "$out" "bot-e2e <" "the bot's token is the bot's"
+bot_out=$(env -u LLL_TOKEN HOME="$E2E_HOME" LLL_URL=$URL \
+  LLL_ADMIN_EMAIL=admin@local.dev LLL_ADMIN_PASSWORD=admin-local-123 \
+  "$LIN" bot bot-e2e --duration 3600) || fail "lll bot (second run) exited nonzero"
+assert_contains "$bot_out" "member bot-e2e exists; minting a fresh token" "a second run re-mints without a second member"
 
 # Explicit authority and endpoint flags use the same gate without persisting
 # credentials or replacing the caller's configured server.
