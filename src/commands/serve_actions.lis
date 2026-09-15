@@ -34,22 +34,43 @@ fn flashing(
     // (it caches into r.Form). Clone is the sanctioned upgrade: the copy is
     // ours to parse, and it shares the one Body stream each action reads once.
     let mut wr = r.Clone(r.Context())
-    let result = write(wr)
-    // Only known surfaces may choose an inline alert. The create dialog
-    // must not send its errors behind the modal shade to the page strip.
-    let target = if wr.PostFormValue("flash_target") == "ni-flash" { "ni-flash" } else { "flash" }
-    match result {
-      Ok(extra) => {
-        action_flash(w, target, "")
-        if extra != "" { let _ = w.Write(extra.bytes()) }
-      },
-      Err(e) => {
-        action_flash(w, target, e)
-        if wr.PostFormValue("property_edit") == "1" {
-          let _ = w.Write(property_recovery(wr.FormValue("key")).bytes())
-        }
-      },
-    }
+    finish_action(w, wr, write(wr))
+  }
+}
+
+/// The same, for the one write that must also touch the response headers
+/// (LLL-375): /views/save hands the browser the saved view's cookie, and a
+/// Set-Cookie has to be on the writer before the flash body is written.
+fn flashing_with(
+  write: fn(http.ResponseWriter, mut Ref<http.Request>) -> Result<string, string>,
+) -> fn(http.ResponseWriter, Ref<http.Request>) {
+  |w: http.ResponseWriter, r: Ref<http.Request>| {
+    let mut wr = r.Clone(r.Context())
+    finish_action(w, wr, write(w, wr))
+  }
+}
+
+/// The only two answers an action can give — flash the error or clear the
+/// strip — consumed in one place instead of once per fallible step.
+fn finish_action(
+  w: http.ResponseWriter,
+  wr: mut Ref<http.Request>,
+  result: Result<string, string>,
+) {
+  // Only known surfaces may choose an inline alert. The create dialog
+  // must not send its errors behind the modal shade to the page strip.
+  let target = if wr.PostFormValue("flash_target") == "ni-flash" { "ni-flash" } else { "flash" }
+  match result {
+    Ok(extra) => {
+      action_flash(w, target, "")
+      if extra != "" { let _ = w.Write(extra.bytes()) }
+    },
+    Err(e) => {
+      action_flash(w, target, e)
+      if wr.PostFormValue("property_edit") == "1" {
+        let _ = w.Write(property_recovery(wr.FormValue("key")).bytes())
+      }
+    },
   }
 }
 
@@ -404,7 +425,7 @@ fn comment_write(r: mut Ref<http.Request>) -> Result<string, string> {
 /// stored — the form posts the board page's own rendering of the URL, but
 /// the endpoint is curl-able like every other, and a view must always be
 /// exactly the URL it will navigate to.
-fn views_save(r: mut Ref<http.Request>) -> Result<string, string> {
+fn views_save(w: http.ResponseWriter, r: mut Ref<http.Request>) -> Result<string, string> {
   let name = strings.TrimSpace(r.PostFormValue("name"))
   if name == "" { return Err("a view needs a name") }
   if name.length() > 80 { return Err("view names are capped at 80 characters") }
@@ -425,6 +446,16 @@ fn views_save(r: mut Ref<http.Request>) -> Result<string, string> {
     models.NewView { name, query: strings.TrimPrefix(query_str, "?"), .. },
   )?
   let _ = pb.post("/api/collections/views/records", payload)?
+  // LLL-375: saving a view makes it this browser's view — the same cookie a
+  // board GET would write, so a bare reload honors what was just saved even
+  // if the page's own cookie went stale. The team key rides the form (the
+  // endpoint stays curl-able without one); a cookie named for a team that
+  // does not exist is never read, and the slugs are re-validated on every
+  // read, so an unvalidated write here plants nothing a board would act on.
+  let team_key = strings.TrimSpace(r.PostFormValue("team"))
+  if team_key != "" {
+    set_view_cookie(w, f"lll_view_{team_key}", raw_q.hide)
+  }
   Ok("")
 }
 

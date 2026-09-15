@@ -189,6 +189,36 @@ fn board_page(w: http.ResponseWriter, r: Ref<http.Request>, team: models.Team, m
       Err(e) => { if err == "" { err = f"{e} (hide)" } },
     }
   }
+  // The saved view (LLL-375): on a URL that says nothing about hide — the
+  // bare board, the way anyone opens it — this team's view cookie replays
+  // the browser's hidden columns, so the server's FIRST paint is already
+  // correct and the old localStorage redirect never fires. An explicit
+  // ?hide= in the URL still wins (a shared link shows what its sender saw);
+  // a stale slug in the cookie is dropped silently, because a renamed state
+  // must not become a permanent flash there is no URL to fix.
+  let view_cookie_name = f"lll_view_{team.key}"
+  let mut view_restored = false
+  let mut url_says_hide = false
+  if let Some(u) = r.URL {
+    url_says_hide = u.Query().Has("hide")
+  }
+  // "Bare" means the URL says nothing the board can render — the same test
+  // data-init used to apply to the localStorage restore. Any other URL is a
+  // full view statement (TASK-94): it overrides the cookie, and the write
+  // below clears or rewrites it to match. project and sort are /issues
+  // dimensions the board drops, so they leave a URL bare, exactly as they
+  // left the canonical query string empty before.
+  let bare = raw.state == "" && raw.assignee == "" && raw.label == "" && raw.prio == "" && raw.order == ""
+  if !url_says_hide && bare {
+    if let Some(cv) = cookie_named(r, view_cookie_name) {
+      view_restored = true
+      let mut decoded = cv
+      if let Ok(d) = url.QueryUnescape(cv) { decoded = d }
+      for h in csv(decoded) {
+        if let Ok(valid) = query.state(h) { hidden = hidden.append(valid) }
+      }
+    }
+  }
   // Card ordering (TASK-209): "manual" is the default and never a URL param,
   // so ?order=manual normalizes back to the bare URL. An unknown value flashes
   // and falls back to manual, the same contract the filters run on.
@@ -213,6 +243,18 @@ fn board_page(w: http.ResponseWriter, r: Ref<http.Request>, team: models.Team, m
     .. // `project` and `sort` are /issues dimensions; the board drops them.
   }
   let flt = BoardFilter { states, assignees, labels, prios }
+
+  // Cookie maintenance (LLL-375). The URL's hide — including an explicit
+  // empty ?hide= — always wins and rewrites the cookie; any other param'd
+  // URL clears it, exactly as every navigation used to overwrite the
+  // localStorage mirror (the URL is the whole view, TASK-94); a bare arrival
+  // with a cookie rewrites its own value, which keeps the expiry fresh; and
+  // a browser with neither cookie nor params writes nothing, so data-init's
+  // one-time localStorage migration can still seed the cookie itself.
+  let query_str = view_query_string(q)
+  if url_says_hide || query_str != "" || view_restored {
+    set_view_cookie(w, view_cookie_name, join_csv(hidden))
+  }
 
   let issues = match records.fetch_board_issues(team_id) {
     Ok(i) => i,
@@ -254,14 +296,17 @@ fn board_page(w: http.ResponseWriter, r: Ref<http.Request>, team: models.Team, m
       fetch_label_names(team_id).unwrap_or([]),
     ),
     flt_seed: flt_seed_js(pairs),
-    query_str: view_query_string(q),
+    query_str,
     hidden,
     hide_seed: hide_seed_js(hidden),
+    hide_csv: join_csv(hidden),
     error: err,
     no_match: view_query_filtered(q) && !issues.any(|i| issue_matches(i, flt)),
     compose,
     team_key: team.key,
     team_archived: team.archived,
+    view_cookie_name,
+    view_restored,
     order,
     orders: order_opts(board_base(team.key), q, order),
   }
