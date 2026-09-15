@@ -1422,7 +1422,7 @@ PY
 "$LIN" completions bash > "$DATA_DIR/comp.bash"
 bash -n "$DATA_DIR/comp.bash" || fail "bash completions do not parse"
 out=$(cat "$DATA_DIR/comp.bash")
-assert_contains "$out" "create new list view show read update close start claim release delete comment watch url id title branch-name pr ref link unlink" "bash completions list issue verbs"
+assert_contains "$out" "create new list next view show read update close start claim release delete comment watch url id title branch-name pr ref link unlink" "bash completions list issue verbs"
 assert_contains "$out" "--limit" "bash completions know --limit"
 assert_contains "$out" "complete -F _lll lll" "bash completions register"
 "$LIN" completions zsh > "$DATA_DIR/comp.zsh"
@@ -1456,7 +1456,7 @@ done
 # know. `lll watch --help` is generated from the watch spec; the completions
 # entry for the verb-less watch noun reads the same table.
 comp_watch=$("$LIN" completions bash | grep -F "watch,*)" | head -1 | sed "s/.*words='//;s/'.*//")
-assert_contains "$comp_watch" "--state --assignee --label --project --search --json" \
+assert_contains "$comp_watch" "--state --assignee --label --project --search --ready --json" \
   "watch completions carry exactly the watch spec's flags"
 comp_doc=$("$LIN" completions bash | grep -F "doc,new" | head -1 | sed "s/.*words='//;s/'.*//")
 assert_contains "$comp_doc" "-s --slug -t --title -k --kind -b --body" \

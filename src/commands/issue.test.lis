@@ -365,7 +365,7 @@ fn issue_help_preserves_literal_flag_values_and_end_of_options() {
 fn issue_commands_lists_every_verb_once_with_a_one_line_summary() {
   let cmds = issue_commands()
   assert cmds.map(|c| c.name).equals([
-    "attach", "detach", "download", "create", "new", "list", "view", "show", "read", "update", "close", "start", "claim",
+    "attach", "detach", "download", "create", "new", "list", "next", "view", "show", "read", "update", "close", "start", "claim",
     "release", "delete", "comment", "watch", "url", "id", "title", "branch-name", "pr", "ref", "link",
     "unlink", "block", "unblock",
   ])
@@ -390,4 +390,77 @@ fn only_issue_create_has_a_hand_written_page() {
 fn issue_help_requested(args: Slice<string>, verb: string) -> bool {
   if issue_commands().find(|c| c.name == verb).is_none() { return false }
   flags.help_requested(issue_verb_spec(verb), args, 3)
+}
+
+// ---------------------------------------------------------------- next
+
+/// An agenda item with only the fields the ranking reads; `..` zeroes the rest.
+fn agenda_item(id: string, assignee: string, priority: int, created: string) -> models.Issue {
+  models.Issue { id, assignee, priority, created, .. }
+}
+
+fn agenda_unblocks(pairs: Slice<(string, int)>) -> Map<string, int> {
+  let mut m = Map.new<string, int>()
+  for (id, n) in pairs { m[id] = n }
+  m
+}
+
+#[test]
+fn rank_agenda_prefers_more_urgent_priority_with_none_last() {
+  // Linear scale: 0 none, 1 urgent, 2 high, 3 medium, 4 low — none sorts
+  // after low, the rotation prio_rank already uses elsewhere.
+  let items = [
+    agenda_item("none1", "", 0, "2026-01-01 00:00:00.000Z"),
+    agenda_item("low1", "", 4, "2026-01-01 00:00:00.000Z"),
+    agenda_item("urgent1", "", 1, "2026-01-01 00:00:00.000Z"),
+    agenda_item("high1", "", 2, "2026-01-01 00:00:00.000Z"),
+  ]
+  let ranked = rank_agenda(items, agenda_unblocks([]))
+  assert ranked[0].id == "urgent1"
+  assert ranked[1].id == "high1"
+  assert ranked[2].id == "low1"
+  assert ranked[3].id == "none1"
+}
+
+#[test]
+fn rank_agenda_prefers_older_issues() {
+  let items = [
+    agenda_item("newer", "", 0, "2026-09-15 10:00:00.000Z"),
+    agenda_item("older", "", 0, "2026-09-01 08:00:00.000Z"),
+  ]
+  assert rank_agenda(items, agenda_unblocks([]))[0].id == "older"
+}
+
+#[test]
+fn rank_agenda_prefers_unclaimed_over_claimed() {
+  let items = [
+    agenda_item("claimed-urgent", "alice", 1, "2026-09-01 08:00:00.000Z"),
+    agenda_item("unclaimed-low", "", 4, "2026-09-14 08:00:00.000Z"),
+  ]
+  assert rank_agenda(items, agenda_unblocks([]))[0].id == "unclaimed-low"
+}
+
+#[test]
+fn rank_agenda_prefers_the_issue_that_unblocks_more() {
+  let items = [
+    agenda_item("frees-one", "", 0, "2026-09-01 08:00:00.000Z"),
+    agenda_item("frees-three", "", 0, "2026-09-01 08:00:00.000Z"),
+  ]
+  let unblocks = agenda_unblocks([("frees-one", 1), ("frees-three", 3)])
+  assert rank_agenda(items, unblocks)[0].id == "frees-three"
+  // Missing entries count as zero, not a crash.
+  let partial = agenda_unblocks([("frees-one", 1)])
+  assert rank_agenda(items, partial)[0].id == "frees-one"
+}
+
+#[test]
+fn rank_agenda_keeps_input_order_on_full_ties_and_handles_empty() {
+  let items = [
+    agenda_item("first", "", 2, "2026-09-01 08:00:00.000Z"),
+    agenda_item("second", "", 2, "2026-09-01 08:00:00.000Z"),
+  ]
+  let ranked = rank_agenda(items, agenda_unblocks([]))
+  assert ranked[0].id == "first"
+  assert ranked[1].id == "second"
+  assert rank_agenda([], agenda_unblocks([])).length() == 0
 }
