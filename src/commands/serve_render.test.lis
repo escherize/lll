@@ -1,3 +1,5 @@
+import "go:strings"
+
 // The web's two priority orders are derived from display.priorities() rather
 // than written out, so these pin the order and the labels a reader sees.
 
@@ -15,4 +17,26 @@ fn priority_options_are_the_linear_scale_with_web_labels() {
 #[test]
 fn the_filter_chooser_lists_priorities_most_urgent_first() {
   assert prios_by_urgency().equals(["urgent", "high", "medium", "low", "none"])
+}
+
+// LLL-419: snippet() gated on bytes and sliced runes. The two agree only for
+// ASCII, which is all the board's own fixtures ever carried.
+#[test]
+fn snippet_caps_on_runes_not_bytes() {
+  // 100 precomposed e-acute: 100 runes, 200 bytes. A byte gate sees 200 > 160,
+  // enters the branch, and asks for 159 runes that do not exist.
+  let accented = strings.Repeat("é", 100)
+  assert snippet(accented) == accented
+
+  // 60 emoji: 60 runes, 240 bytes. Same trap, further from the boundary.
+  let emoji = strings.Repeat("✨", 60)
+  assert snippet(emoji) == emoji
+}
+
+#[test]
+fn snippet_truncates_at_160_runes_keeping_characters_whole() {
+  // Past the cap it still truncates - and cuts on runes, so no character is
+  // sliced in half on its way to the hover preview.
+  let long = strings.Repeat("é", 200)
+  assert snippet(long) == strings.Repeat("é", 159) + "…"
 }
