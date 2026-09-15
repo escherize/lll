@@ -38,6 +38,12 @@ esac
 # seed WIPES this on every run, so a check using the default would destroy a
 # developer's running demo board rather than merely coexisting with it.
 DEMO_DIR="${LLL_DEMO_DIR:-.lll-demo}"
+# Absolute from here on. An override may be absolute (the gate's check passes a
+# mktemp path) and the default is relative, and further down HOME is built from
+# it - "$PWD/$DEMO_DIR" on an absolute override lands the scratch HOME INSIDE
+# the repo, at <repo>/var/folders/..., which is how six temp lll.toml files
+# reached a commit.
+case "$DEMO_DIR" in /*) ;; *) DEMO_DIR="$PWD/$DEMO_DIR" ;; esac
 PB_DIR="$DEMO_DIR/pb_data"
 SEED_LOG="$DEMO_DIR/seed.log"
 E2E_LOGS="$SEED_LOG"
@@ -84,7 +90,7 @@ export LLL_ADMIN_PASSWORD=admin-local-123
 # already-built binary and says so. The lis and go caches live under the real
 # HOME, so anything that compiles must run before this line - which is why the
 # mise task depends on `build` rather than building here.
-export HOME="$PWD/$DEMO_DIR/home"
+export HOME="$DEMO_DIR/home"
 mkdir -p "$HOME/.config/lll"
 # A fixed board token, so the login URL printed at the end is stable and this
 # script can print it without scraping it back out of the boot banner.
