@@ -3121,6 +3121,31 @@ assert {row['id'] for row in final} == {row['id'] for row in created}
 print('Concurrent CLI/API allocation: 40 successful creates, 40 unique IDs and numbers')
 PY_RACE
 
+# LLL-408: the raw passthrough. A member token rides the configured url and
+# token with no extra wiring: body on stdout, status line on stderr,
+# non-200s printed as the response they were, and --schema naming the
+# collections from the migrations' end state. Identity travels as
+# LLL_ME=bryan wherever bryan's token does (the suite's own pairing), since
+# the writer guard refuses a token and 'me' that disagree.
+API_CALL=(LLL_URL=$URL LLL_TOKEN="$BRYAN_TOK" LLL_ME=bryan)
+API_FIXTURE=$(env "${API_CALL[@]}" "$LIN" issue create 'api passthrough fixture' --team ENG --json)
+API_ISSUE_ID=$(printf '%s' "$API_FIXTURE" | jq -r .id)
+# A compound filter rides URL-encoded: raw & would split the query string,
+# which is exactly the trap a hand-rolled curl falls into and lll api shows as-is.
+out=$(env "${API_CALL[@]}" "$LIN" api GET "/api/collections/issues/records?filter=(state='todo'%26%26title~'passthrough')" 2>"$DATA_DIR/api-status")
+assert_contains "$out" '"items"' "api GET prints the JSON body"
+assert_contains "$out" 'api passthrough fixture' "api GET compound filter matches the fixture"
+assert_contains "$(cat "$DATA_DIR/api-status")" "200" "api GET prints the status line on stderr"
+status=$(env "${API_CALL[@]}" "$LIN" api GET /api/collections/definitely-not-a-collection/records 2>&1 >/dev/null)
+assert_contains "$status" "404" "api prints a 404 as the response it was"
+created=$(env "${API_CALL[@]}" "$LIN" api POST "/api/collections/comments/records" --body "{\"issue\":\"$API_ISSUE_ID\",\"body\":\"posted through lll api\"}")
+assert_contains "$created" 'posted through lll api' "api POST --body creates a record"
+schema_out=$(env "${API_CALL[@]}" "$LIN" api --schema)
+for api_c in issues members comments labels projects teams; do
+  assert_contains "$schema_out" "## $api_c " "api --schema names $api_c"
+done
+assert_contains "$schema_out" "Rules:" "api --schema carries the access rules"
+
 # --- web board (own ephemeral PB; see e2e_web.sh) ---
 python3 "$REPO_ROOT"/scripts/test_doc_pagination.py "$LLL_ABS" "$URL"
 python3 "$REPO_ROOT"/scripts/test_export_live.py "$LLL_ABS" "$URL"
