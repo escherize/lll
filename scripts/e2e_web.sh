@@ -941,6 +941,11 @@ if command -v playwright-cli >/dev/null 2>&1; then
   title_sort=$(playwright-cli -s="$BROWSER_SESSION" run-code "$(cat "$REPO_ROOT"/scripts/browser_issue_sort.js)" 2>&1)
   assert_contains "$title_sort" 'title header sorting verified' "browser: title sorting in both directions"
   playwright-cli -s="$BROWSER_SESSION" goto "$WEB/" >/dev/null 2>&1 || fail "playwright: return to board after title sort"
+  # LLL-383: the unhide round trip. The ?hide= assertions above all passed
+  # while the rail's own "Show X column" button could not show the last hidden
+  # one - the saved view restored the hide before the page settled.
+  hidden_cols=$(playwright-cli -s="$BROWSER_SESSION" run-code "$(cat "$REPO_ROOT"/scripts/browser_hidden_columns.js)" 2>&1)
+  assert_contains "$hidden_cols" 'hidden column round trip verified' "browser: a hidden column can be shown again"
   # Shared navigation must remain reachable on a phone, including keyboard close.
   mobile_nav=$(playwright-cli -s="$BROWSER_SESSION" run-code 'async page => {
     await page.setViewportSize({width:390,height:844});
