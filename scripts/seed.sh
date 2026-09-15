@@ -191,8 +191,11 @@ people() {
   lll_idem member add -n kai -e kai@lll.test
   # But the members must genuinely be there, or every --assignee below fails
   # one at a time with a message about an unknown member instead of this one.
+  # Through assert_cli_contains, not a bare pipe into grep: a pipeline's status
+  # is grep's, so a read that FAILED reported as "member 'x' was not created" -
+  # a claim about data the suite never established (LLL-422, class of LLL-412).
   for who in demo avery kai; do
-    "$LLL" member list | grep -qw "$who" || fail "member '$who' was not created"
+    assert_cli_contains "seed member" "$who" "$LLL" member list
   done
 }
 
@@ -209,10 +212,10 @@ scaffolding() {
   # Same reason as the member check: an --project or --label on an issue below
   # fails per-issue and blames the issue, not the missing project or label.
   for p in "Board v2" Onboarding; do
-    "$LLL" project list | grep -qF "$p" || fail "project '$p' was not created"
+    assert_cli_contains "seed project" "$p" "$LLL" project list
   done
   for l in bug feature chore docs perf; do
-    "$LLL" label list | grep -qw "$l" || fail "label '$l' was not created"
+    assert_cli_contains "seed label" "$l" "$LLL" label list
   done
 }
 
