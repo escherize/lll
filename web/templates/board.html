@@ -84,9 +84,15 @@ provenance.
 
 {{define "board"}}<main id="board" class="board">
 {{range .Columns}}{{template "column" .}}
-{{end}}<aside id="hidden-rail" class="hidden-rail" aria-label="Hidden columns">
+{{end}}{{/* LLL-383: each entry rewrites lllView BEFORE navigating, the way the
+     Clear button already does. Unhiding the last hidden column leaves no query
+     string, which is exactly the case data-init treats as "restore the saved
+     view" - so without this the saved view put the hide straight back and the
+     column could not be shown at all. Setting it to the new (possibly empty)
+     search keeps the store from resurrecting a setting just removed. */}}
+<aside id="hidden-rail" class="hidden-rail" aria-label="Hidden columns">
 <h2>Hidden columns</h2>
-{{range .Columns}}<button type="button" class="hr-entry hr-{{.State}}" title="Show {{.Label}} column" data-on:click="const u = new URL(location.href); const cur = (u.searchParams.get('hide') || '').split(',').filter(s => s && s !== '{{.State}}'); cur.length ? u.searchParams.set('hide', cur.join(',')) : u.searchParams.delete('hide'); location.assign(u)">{{template "state-icon" .State}}<span class="hr-name">{{.Label}}</span><span class="count">{{.Total}}</span></button>
+{{range .Columns}}<button type="button" class="hr-entry hr-{{.State}}" title="Show {{.Label}} column" data-on:click="const u = new URL(location.href); const cur = (u.searchParams.get('hide') || '').split(',').filter(s => s && s !== '{{.State}}'); cur.length ? u.searchParams.set('hide', cur.join(',')) : u.searchParams.delete('hide'); localStorage.setItem('lllView', u.search); location.assign(u)">{{template "state-icon" .State}}<span class="hr-name">{{.Label}}</span><span class="count">{{.Total}}</span></button>
 {{end}}</aside>
 </main>{{end}}
 
