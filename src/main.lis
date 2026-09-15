@@ -51,6 +51,7 @@ fn dispatch(noun: string, args: Slice<string>) -> Result<(), string> {
     "search" => commands.search_cmd(args),
     "up" => commands.up(args),
     "board" => commands.board(args),
+    "skill" => commands.skill(args),
     "completions" => commands.completions(args),
     "--help" => {
       print_usage()
@@ -113,6 +114,8 @@ Usage:
   lll watch [flags]       live event stream for a query (see 'lll watch --help')
   lll up [--port 8100]    start PocketBase + web board together (see 'lll up --help')
   lll board [-w]          print the web board URL; -w opens it (see 'lll board --help')
+  lll skill list          the agent operating instructions in this binary
+  lll skill get NAME      one of them as markdown (see 'lll skill --help')
   lll completions <shell> completion script for bash, zsh, or fish
                           (see 'lll completions --help')
   lll --version, -v       print the version

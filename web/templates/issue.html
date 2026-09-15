@@ -37,11 +37,7 @@
         {{template "attachment-upload" .Page.Key}}
         {{template "related-findings" .Page}}
         {{template "comments" .Page}}
-        <form id="comment-form" class="composer">
-          <input type="hidden" name="key" value="{{.Page.Key}}">
-          <textarea name="body" placeholder="Leave a comment…"></textarea>
-          <button type="button" class="btn primary" data-on:click="@post('/comment', {contentType: 'form'})">Comment</button>
-        </form>
+        {{template "comment-composer" .Page.Key}}
       </div>
       {{template "emoji-picker" .Page}}
     </div>
@@ -70,6 +66,19 @@
 <div class="attachment-actions"><a href="{{.Href}}&amp;download=1" download><svg width="14" height="14" aria-hidden="true"><use href="#ic-paperclip"/></svg> {{.Name}}</a>
 <form><input type="hidden" name="key" value="{{$.Key}}"><input type="hidden" name="file" value="{{.Name}}"><button type="button" class="btn" aria-label="Remove {{.Name}}" data-on:click="confirm('Remove this attachment?') && @post('/attachments/remove', {contentType: 'form'})">Remove</button></form></div>
 </div>{{end}}</section>{{end}}{{end}}
+
+{{/* Its own define so comment_write can re-render it: a SUCCESSFUL send
+     replaces this form to empty the box, while a refused one returns only a
+     flash and the draft survives untouched. Same bargain as attachment-upload
+     below, and the reason both sit outside the issue morph boundary.
+
+     cmd/ctrl+enter sends. Enter alone must stay a newline - comments are
+     markdown and multi-line by default. */}}
+{{define "comment-composer"}}<form id="comment-form" class="composer">
+<input type="hidden" name="key" value="{{.}}">
+<textarea name="body" placeholder="Leave a comment…" data-on:keydown="(evt.metaKey || evt.ctrlKey) &amp;&amp; evt.key === 'Enter' &amp;&amp; (evt.preventDefault(), @post('/comment', {contentType: 'form'}))"></textarea>
+<button type="button" class="btn primary" data-on:click="@post('/comment', {contentType: 'form'})">Comment</button>
+</form>{{end}}
 
 {{define "attachment-upload"}}<form id="attachment-upload" class="attachment-upload" enctype="multipart/form-data" data-on:submit="evt.preventDefault(); @post('/attachments/upload', {contentType: 'form'})">
 <input type="hidden" name="key" value="{{.}}">

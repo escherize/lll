@@ -383,7 +383,16 @@ fn comment_write(r: mut Ref<http.Request>) -> Result<string, string> {
   }
   let payload = marshal(models.NewComment { issue: issue.id, author, body })?
   let _ = pb.post("/api/collections/comments/records", payload)?
-  Ok("")
+  // LLL-386/LLL-384: the comment arrives through the live stream, so the
+  // composer was never told the write landed and kept the text - which reads
+  // as "it did not send" and invites a second identical comment.
+  //
+  // Returned from the Ok branch ONLY, so a refusal (empty body, archived team)
+  // leaves the draft exactly where it was. `mode replace` rather than a morph
+  // because a morph retains the live value, which is the thing being cleared.
+  let html = render("comment-composer", f"{issue.expand.team.key}-{issue.number}")?
+  let lines = html.split("\n").map(|line| f"data: elements {line}")
+  Ok(f"event: datastar-patch-elements\ndata: mode replace\ndata: selector #comment-form\n{strings.Join(lines, "\n")}\n\n")
 }
 
 /// Save the board's current view under a name (TASK-94, half two): one row

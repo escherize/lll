@@ -1181,8 +1181,8 @@ if command -v playwright-cli >/dev/null 2>&1; then
   playwright-cli -s="$BROWSER_SESSION" run-code "async page => { await page.screenshot({path: '/tmp/lll-131-create.png'}); }" >/dev/null 2>&1
   create_failure=$(playwright-cli -s="$BROWSER_SESSION" run-code "$(cat "$REPO_ROOT"/scripts/browser_create_failure.js)" 2>&1)
   assert_contains "$create_failure" 'create error readable inside dialog; keyboard retry and fresh-open clearing passed' "browser: create failure stays accessible inside dialog"
-  "$LIN" issue list | grep -q "Create more doomed" \
-    && fail "task-159: a failed Create-more submit wrote a record" || true
+  assert_cli_lacks "task-159: a failed Create-more submit wrote a record" "Create more doomed" \
+    "$LIN" issue list
 
   # --- task-206: props-panel controls stay inside the panel ---------------
   # A select sizes to its widest option, so one long member or project name
@@ -1573,36 +1573,36 @@ assert_not_contains "$settings" "$WEB" "settings does not offer the port it is s
 
 # Labels, members and projects are creatable and editable from the page.
 wcurl -sf -X POST "$WEB/settings/label" -d 'name=web-made' -d 'color=#4cb782' >/dev/null
-"$LIN" label list | grep -q '^web-made	#4cb782' || fail "creating a label from /settings did not reach PocketBase"
+assert_cli_contains "creating a label from /settings did not reach PocketBase" '^web-made	#4cb782' "$LIN" label list
 LABEL_ID=$(row_id "$(wcurl -sf "$WEB/settings")" label web-made)
 [ -n "$LABEL_ID" ] || fail "/settings did not render the label it just created"
 wcurl -sf -X POST "$WEB/settings/label" -d "id=$LABEL_ID" -d 'name=web-renamed' -d 'color=#8d7ce6' >/dev/null
-"$LIN" label list | grep -q '^web-renamed	#8d7ce6' || fail "renaming and recoloring a label from /settings did not persist"
+assert_cli_contains "renaming and recoloring a label from /settings did not persist" '^web-renamed	#8d7ce6' "$LIN" label list
 wcurl -sf -X POST "$WEB/settings/label?del=1" -d "id=$LABEL_ID" -d confirmed=1 -d expected=0 >/dev/null
-"$LIN" label list | grep -q 'web-renamed' && fail "deleting a label from /settings did not persist" || true
+assert_cli_lacks "deleting a label from /settings did not persist" 'web-renamed' "$LIN" label list
 
 wcurl -sf -X POST "$WEB/settings/member" -d 'name=Web Member' -d 'email=web@example.com' >/dev/null
-"$LIN" member list | grep -q '^Web Member	web@example.com' || fail "creating a member from /settings did not persist"
+assert_cli_contains "creating a member from /settings did not persist" '^Web Member	web@example.com' "$LIN" member list
 MEMBER_ID=$(row_id "$(wcurl -sf "$WEB/settings")" member "Web Member")
 # The name is the settings-editable half; the email is the member's login
 # identity (task-180) and the page says so when a row tries to move it.
 wcurl -sf -X POST "$WEB/settings/member" -d "id=$MEMBER_ID" -d 'name=Web Member Renamed' -d 'email=web@example.com' >/dev/null
-"$LIN" member list | grep -q '^Web Member Renamed	web@example.com' || fail "editing a member from /settings did not persist"
+assert_cli_contains "editing a member from /settings did not persist" '^Web Member Renamed	web@example.com' "$LIN" member list
 rejected_member=$(wcurl -sf -X POST "$WEB/settings/member" -d "id=$MEMBER_ID" -d 'name=Rejected member name' -d 'email=moved@example.com')
 assert_contains "$rejected_member" 'login identity' "moving a member email is refused with the reason"
 assert_contains "$rejected_member" 'Access → Member sign-in' "the refusal names the supported email-change surface"
 assert_contains "$rejected_member" 'No changes saved.' "combined name/email rejection reports no write"
 assert_not_contains "$rejected_member" '(name saved)' "rejection must not claim a partial save"
-"$LIN" member list | grep -q '^Web Member Renamed	web@example.com' \
-  || fail "rejected combined edit changed the stored member name or email"
-"$LIN" member list | grep -q '^Rejected member name	' \
-  && fail "rejected combined edit still saved its name" || true
+assert_cli_contains "rejected combined edit changed the stored member name or email" \
+  '^Web Member Renamed	web@example.com' "$LIN" member list
+assert_cli_lacks "rejected combined edit still saved its name" \
+  '^Rejected member name	' "$LIN" member list
 
 wcurl -sf -X POST "$WEB/settings/project" -d 'name=Web Project' -d 'status=planned' >/dev/null
-"$LIN" project list | grep -q '^Web Project	planned' || fail "creating a project from /settings did not persist"
+assert_cli_contains "creating a project from /settings did not persist" '^Web Project	planned' "$LIN" project list
 PROJECT_ID=$(row_id "$(wcurl -sf "$WEB/settings")" project "Web Project")
 wcurl -sf -X POST "$WEB/settings/project" -d "id=$PROJECT_ID" -d 'name=Web Project' -d 'status=started' >/dev/null
-"$LIN" project list | grep -q '^Web Project	started' || fail "changing a project status from /settings did not persist"
+assert_cli_contains "changing a project status from /settings did not persist" '^Web Project	started' "$LIN" project list
 
 # Validation speaks through the one flash strip, and writes nothing.
 assert_contains "$(wcurl -sf -X POST "$WEB/settings/label" -d 'name=   ')" \
@@ -1611,7 +1611,7 @@ assert_contains "$(wcurl -sf -X POST "$WEB/settings/label" -d 'name=x' -d 'color
   'not a #rrggbb colour' "a malformed colour is refused"
 assert_contains "$(wcurl -sf -X POST "$WEB/settings/project" -d "id=$PROJECT_ID" -d 'name=Web Project' -d 'status=bogus')" \
   "unknown project status" "an unknown project status is refused"
-"$LIN" label list | grep -q '^x	' && fail "a refused label write still created a record" || true
+assert_cli_lacks "a refused label write still created a record" '^x	' "$LIN" label list
 
 # --- Access (task-204): superuser actions behind per-action re-auth ---------
 # /settings is board-token-reachable, but minting an agent token and
@@ -1989,7 +1989,7 @@ assert_contains "$("$LIN" issue view "$FAST_KEY")" "todo" "a title-only create d
 out=$(wcurl -s -X POST -d "title=Never written" -d "priority=bogus" "$WEB/create")
 assert_contains "$out" "unknown priority &#39;bogus&#39;" "a bad priority answers through the flash"
 assert_not_contains "$out" "ni_open" "a failed create does not close the dialog"
-"$LIN" issue list | grep -q "Never written" && fail "a refused create still wrote a record" || true
+assert_cli_lacks "a refused create still wrote a record" "Never written" "$LIN" issue list
 
 # task-159: the handler is stateless — two creates back to back both land,
 # each on its own closing the dialog (the same one write path, unchanged).
@@ -2057,10 +2057,10 @@ assert_not_contains "$eng_board" 'href="/t/OPS/" title="OPS · Operations" class
 # The board posts the team it is viewing: a create from /t/OPS/ lands in
 # OPS, and an unknown team answers through the flash, not a write.
 wcurl -s -o /dev/null -X POST -d "title=Created on the ops board" -d "team=OPS" "$WEB/create"
-env LLL_TEAM=OPS "$LIN" issue list | grep -q "Created on the ops board" \
-  || fail "a create carrying team=OPS did not land in OPS"
-env LLL_TEAM=ENG "$LIN" issue list | grep -q "Created on the ops board" \
-  && fail "a create carrying team=OPS leaked into ENG" || true
+assert_cli_contains "a create carrying team=OPS did not land in OPS" \
+  "Created on the ops board" env LLL_TEAM=OPS "$LIN" issue list
+assert_cli_lacks "a create carrying team=OPS leaked into ENG" \
+  "Created on the ops board" env LLL_TEAM=ENG "$LIN" issue list
 out=$(wcurl -s -X POST -d "title=never written" -d "team=NOPE" "$WEB/create")
 assert_contains "$out" "no team with key &#39;NOPE&#39;" \
   "an unknown create team answers through the flash"
@@ -2120,13 +2120,13 @@ assert_contains "$(wcurl -sf "$WEB/t/OPS/?raw")" "archived" "the raw board says 
 # Writes refuse with the hint, and nothing lands.
 out=$(wcurl -s -X POST -d "title=never written" -d "team=OPS" "$WEB/create")
 assert_contains "$out" "team OPS is archived" "creating into an archived team is refused"
-env LLL_TEAM=OPS "$LIN" issue list | grep -q "never written" \
-  && fail "a refused create still landed in the archived team" || true
+assert_cli_lacks "a refused create still landed in the archived team" \
+  "never written" env LLL_TEAM=OPS "$LIN" issue list
 out=$(wcurl -s -X POST "$WEB/state?key=$ARCH_KEY&state=done")
 assert_contains "$out" "team OPS is archived" \
   "a state write on an archived team's issue is refused"
-env LLL_TEAM=OPS "$LIN" issue list --state done | grep -q "$ARCH_KEY" \
-  && fail "the refused state write still landed" || true
+assert_cli_lacks "the refused state write still landed" \
+  "$ARCH_KEY" env LLL_TEAM=OPS "$LIN" issue list --state done
 out=$(wcurl -s -X POST -d "key=$ARCH_KEY" -d "body=nope" "$WEB/comment")
 assert_contains "$out" "team OPS is archived" \
   "a comment on an archived team's issue is refused"
@@ -2147,19 +2147,19 @@ out=$(wcurl -sf -X POST "$WEB/settings/teams/archive" -d "id=$OPS_TEAM_ID" -d 'a
   -d 'admin_password=not-the-password')
 assert_contains "$out" "wrong admin password" \
   "unarchiving with a wrong admin password is refused"
-"$LIN" team list | grep -q OPS && fail "a refused unarchive still unarchived" || true
+assert_cli_lacks "a refused unarchive still unarchived" "OPS" "$LIN" team list
 out=$(wcurl -sf -X POST "$WEB/settings/teams/archive" -d "id=$OPS_TEAM_ID" -d 'archived=0' \
   -d "admin_password=$ADMIN_PASS")
 assert_contains "$out" 'flash-ok' "an unarchive says its success in the flash strip"
 assert_contains "$out" 'id="settings"' "an unarchive patches the settings body back"
-"$LIN" team list | grep -q OPS || fail "unarchiving from settings did not persist"
+assert_cli_contains "unarchiving from settings did not persist" "OPS" "$LIN" team list
 
 # And archive from settings, the same gate.
 out=$(wcurl -sf -X POST "$WEB/settings/teams/archive" -d "id=$OPS_TEAM_ID" -d 'archived=1' \
   -d "admin_password=$ADMIN_PASS")
 assert_contains "$out" 'flash-ok' "an archive says its success in the flash strip"
-"$LIN" team list | grep -q OPS && fail "archiving from settings did not persist" || true
-"$LIN" team list --archived | grep -q OPS || fail "the settings-archived team is gone entirely"
+assert_cli_lacks "archiving from settings did not persist" "OPS" "$LIN" team list
+assert_cli_contains "the settings-archived team is gone entirely" "OPS" "$LIN" team list --archived
 env LLL_TEAM=OPS "$LIN" team unarchive OPS >/dev/null   # leave the suite as it found OPS
 
 # --- TASK-208: the Labels section is an inventory — usage counts, busiest ---

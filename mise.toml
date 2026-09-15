@@ -57,10 +57,22 @@ run = "python3 scripts/protect_archive.py"
 description = "Unit tests"
 env = { LC_ALL = "C", PYTHONUTF8 = "1" }
 dir = "{{config_root}}"
+# LLL-394: the config tests assert which SOURCE supplied each setting, and env
+# outranks every file, so a developer's exported LLL_ME made
+# load_traced_names_the_file_each_value_came_from and
+# repo_file_supplies_team_without_losing_the_home_url_and_me fail against a tree
+# with nothing wrong with it. That cost a false alarm on 2026-09-15.
+#
+# Cleared here rather than inside the tests: config.load reads the process
+# environment, so a test that unset these would be mutating shared state while
+# its neighbours run. Same bargain e2e_begin already makes - unset every LLL_*
+# the suite does not set itself, so it starts from a KNOWN environment.
 run = """
 command -v lis >/dev/null || { echo "lis not found. Install it:" >&2; echo "  curl -LsSf https://github.com/ivov/lisette/releases/latest/download/lisette-installer.sh | sh" >&2; exit 1; }
 python3 scripts/protect_archive.py --check
-lis test
+python3 scripts/sync_skills.py --check
+env -u LLL_ME -u LLL_TOKEN -u LLL_URL -u LLL_TEAM -u LLL_SORT -u LLL_WEB_URL \
+    -u LLL_BOARD_TOKEN -u LLL_BIND -u LLL_WORK_HOST -u LLL_AGENT lis test
 go -C web test ./...
 go -C gopb test ./...
 python3 -m unittest discover -s scripts -p 'test_browser_poll.py'
