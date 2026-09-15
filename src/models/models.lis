@@ -388,3 +388,36 @@ pub struct PasswordPatch {
 pub struct ImpersonateRequest {
   pub duration: int,
 }
+
+#[json]
+pub struct WebhookExpand {
+  pub team: Team,
+  pub project: Project,
+}
+
+/// An outbound webhook registration (LLL-409): one URL that receives issue
+/// events for its team, narrowed to one project when `project` is set.
+#[json]
+pub struct Webhook {
+  pub id: string,
+  pub url: string,
+  pub secret: string,
+  pub team: string,
+  pub project: string,
+  pub expand: WebhookExpand,
+}
+
+#[json]
+pub struct WebhookList {
+  pub items: Slice<Webhook>,
+}
+
+#[json]
+pub struct NewWebhook {
+  pub team: string,
+  #[json(omitempty)]
+  pub project: string,
+  pub url: string,
+  #[json(omitempty)]
+  pub secret: string,
+}

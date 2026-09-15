@@ -1,0 +1,214 @@
+import "records"
+import "go:encoding/json"
+import "go:fmt"
+import "go:net/url"
+import "go:strings"
+
+import "models"
+import "pb"
+import "flags"
+import "query"
+
+/// Dispatch `lll webhook <verb>` through the noun's Command table (TASK-307):
+/// dispatch, `lll webhook --help` and shell completions all read the table.
+pub fn webhook(args: Slice<string>) -> Result<(), string> {
+  flags.dispatch(
+    "webhook",
+    "outbound webhooks for issue events",
+    webhook_intro(),
+    webhook_commands(),
+    args,
+  )
+}
+
+fn webhook_intro() -> string {
+  "The server POSTs one JSON object per issue create/update/delete to every
+registered URL whose scope matches, shaped like an `lll watch --json` event
+({\"topic\":\"issues\",\"action\":...,\"record\":{...}}). A registration's
+secret, when set, rides every delivery as the X-LLL-Secret header, so a
+receiver can tell the server from anyone who found the URL. Failed deliveries
+are printed to the server's log with a 'webhook:' prefix, never dropped
+silently."
+}
+
+pub fn webhook_commands() -> Slice<flags.Command> {
+  [
+    flags.Command {
+      name: "add",
+      summary: "register a URL that receives this team's issue events, or one project's with --project",
+      page: "",
+      spec: webhook_add_spec(),
+      positional: "URL",
+      run: webhook_add,
+    },
+    flags.Command {
+      name: "list",
+      summary: "list this team's registrations: scope, URL, whether a secret is set",
+      page: "",
+      spec: webhook_list_spec(),
+      positional: "",
+      run: webhook_list,
+    },
+    flags.Command {
+      name: "remove",
+      summary: "delete a registration by its URL; --project picks between the same URL at both scopes",
+      page: "",
+      spec: webhook_remove_spec(),
+      positional: "URL",
+      run: webhook_remove,
+    },
+  ]
+}
+
+fn webhook_add_spec() -> Slice<flags.Flag> {
+  flags.with_team([
+    flags.Flag { name: "--project", value: true, hint: "NAME", help: "scope deliveries to one project instead of the whole team", .. },
+    flags.Flag { name: "--secret", value: true, hint: "SECRET", help: "sent on every delivery as the X-LLL-Secret header", .. },
+  ])
+}
+
+fn webhook_list_spec() -> Slice<flags.Flag> {
+  flags.with_team([flags.Flag { name: "--json", help: "print the raw record list as JSON", .. }])
+}
+
+fn webhook_remove_spec() -> Slice<flags.Flag> {
+  flags.with_team([
+    flags.Flag { name: "--project", value: true, hint: "NAME", help: "remove the project-scoped registration of this URL", .. },
+  ])
+}
+
+fn webhook_add(input: flags.CommandInput) -> Result<(), string> {
+  let p = input.parsed
+  let raw = p.first()
+  let target = validate_target(raw)?
+  let team = team_flag_or_current(p.one("--team"))?
+
+  let mut project_id = ""
+  let mut scope = f"team {team.key}"
+  if p.given("--project") {
+    let proj = records.resolve_project(team.id, p.one("--project"))?
+    project_id = proj.id
+    scope = f"project {proj.name}"
+  }
+  let secret = p.one("--secret")
+
+  // One registration per scope and URL: a duplicate would double every
+  // delivery, which reads downstream as a server bug rather than a mistake.
+  let mut existing = models.WebhookList { .. }
+  pb.fetch(
+    f"/api/collections/webhooks/records?filter={url.QueryEscape(dup_filter(team.id, project_id, target))}",
+    "webhooks",
+    &existing,
+  )?
+  if existing.items.length() > 0 {
+    return Err(f"webhook {target} is already registered for {scope} — remove it first: 'lll webhook remove {target}'")
+  }
+
+  let new_hook = models.NewWebhook { team: team.id, project: project_id, url: target, secret }
+  let payload = match json.Marshal(new_hook) {
+    Ok(p) => p,
+    Err(e) => return Err(f"encoding webhook: {e}"),
+  }
+  let body = pb.post("/api/collections/webhooks/records", payload as string)?
+  let mut created = models.Webhook { .. }
+  if let Err(e) = json.Unmarshal(body.bytes(), &created) {
+    return Err(f"decoding created webhook: {e}")
+  }
+  if secret == "" {
+    fmt.Println(f"Registered webhook {target} ({scope})")
+  } else {
+    fmt.Println(f"Registered webhook {target} ({scope}) — deliveries carry X-LLL-Secret")
+  }
+  Ok(())
+}
+
+fn webhook_list(input: flags.CommandInput) -> Result<(), string> {
+  let p = input.parsed
+  let team = team_flag_or_current(p.one("--team"))?
+  let mut hooks = models.WebhookList { .. }
+  pb.fetch(
+    f"/api/collections/webhooks/records?perPage=200&sort=-created&expand=team,project&filter={url.QueryEscape(f"team={query.quote(team.id)}")}",
+    "webhooks",
+    &hooks,
+  )?
+  if p.given("--json") { return print_json(hooks, "webhook list") }
+  for h in hooks.items {
+    fmt.Println(f"{scope_label(h)}\t{h.url}\t{secret_state(h.secret)}")
+  }
+  Ok(())
+}
+
+fn webhook_remove(input: flags.CommandInput) -> Result<(), string> {
+  let spec = webhook_remove_spec()
+  let usage = flags.usage("lll webhook remove", spec, "URL")
+  let p = input.parsed
+  let raw = p.first()
+  let target = validate_target(raw)?
+  let team = team_flag_or_current(p.one("--team"))?
+
+  let mut project_id = ""
+  let mut scope = f"team {team.key}"
+  if p.given("--project") {
+    let proj = records.resolve_project(team.id, p.one("--project"))?
+    project_id = proj.id
+    scope = f"project {proj.name}"
+  }
+
+  let mut matches = models.WebhookList { .. }
+  pb.fetch(
+    f"/api/collections/webhooks/records?filter={url.QueryEscape(dup_filter(team.id, project_id, target))}",
+    "webhooks",
+    &matches,
+  )?
+  if matches.items.is_empty() {
+    return Err(f"no webhook {target} registered for {scope} — see 'lll webhook list'")
+  }
+  if matches.items.length() > 1 {
+    let mut ids: Slice<string> = []
+    for h in matches.items { ids = ids.append(h.id) }
+    return Err(f"webhook {target} is registered more than once — pass --project, or remove by id: one of {strings.Join(ids, ", ")}\nusage: {usage}")
+  }
+  let victim = matches.items[0]
+  let _ = pb.delete(f"/api/collections/webhooks/records/{victim.id}")?
+  fmt.Println(f"Removed webhook {target} ({scope})")
+  Ok(())
+}
+
+/// The filter naming one registration exactly: team, URL, and project when
+/// the caller scoped it. Both halves go through query.quote (TASK-134).
+fn dup_filter(team_id: string, project_id: string, target: string) -> string {
+  let mut filter = query.scoped(team_id, "url", target)
+  if project_id != "" {
+    filter += f" && project={query.quote(project_id)}"
+  }
+  filter
+}
+
+/// An http(s) URL with a host, or the reason it is not one. Deliberately
+/// stricter than url.Parse, which happily accepts "not a url" as a path.
+fn validate_target(raw: string) -> Result<string, string> {
+  if strings.TrimSpace(raw) == "" {
+    return Err("a webhook needs a target URL: 'lll webhook add URL'")
+  }
+  let Ok(parsed) = url.Parse(raw) else {
+    return Err(f"'{raw}' is not a URL — webhook targets are http(s) URLs")
+  }
+  if (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Host == "" {
+    return Err(f"'{raw}' is not an http(s) URL with a host — webhook targets are http(s) URLs")
+  }
+  Ok(raw)
+}
+
+/// The scope column of `lll webhook list`: the project when narrowed, else
+/// the team key from the expansion.
+fn scope_label(h: models.Webhook) -> string {
+  if h.expand.project.name != "" { return f"project {h.expand.project.name}" }
+  if h.expand.team.key != "" { return f"team {h.expand.team.key}" }
+  "team ?"
+}
+
+/// A registration's secret is shown as set or not, never as its value: list
+/// output is pasted into boards and screenshots.
+fn secret_state(secret: string) -> string {
+  if secret == "" { "-" } else { "secret set" }
+}
