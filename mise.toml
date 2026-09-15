@@ -70,6 +70,7 @@ dir = "{{config_root}}"
 run = """
 command -v lis >/dev/null || { echo "lis not found. Install it:" >&2; echo "  curl -LsSf https://github.com/ivov/lisette/releases/latest/download/lisette-installer.sh | sh" >&2; exit 1; }
 python3 scripts/protect_archive.py --check
+python3 scripts/sync_skills.py --check
 env -u LLL_ME -u LLL_TOKEN -u LLL_URL -u LLL_TEAM -u LLL_SORT -u LLL_WEB_URL \
     -u LLL_BOARD_TOKEN -u LLL_BIND -u LLL_WORK_HOST -u LLL_AGENT lis test
 go -C web test ./...

@@ -1,0 +1,66 @@
+import "go:fmt"
+import "go:github.com/escherize/lll/skills"
+import "go:strings"
+
+import "flags"
+
+// `lll skill list|get` — the operating instructions, from inside the binary
+// (LLL-404).
+//
+// lll's conventions are as much the product as the CLI is: claim before code,
+// record what you learned, close honestly. An agent pointed at a board from
+// some other repo used to get the tracker and none of that, because the skills
+// live in THIS checkout. These ship, so `lll skill get lll` answers with no
+// clone and no board - it reads nothing but the binary, which is why it works
+// before any configuration exists.
+//
+// Only skills about USING lll travel. The ones about this codebase stay in
+// .claude/skills/; scripts/sync_skills.py owns that list and the gate fails
+// when the mirror drifts from it.
+
+pub fn skill(args: Slice<string>) -> Result<(), string> {
+  // parse_n, not parse: `get NAME` is two bare words and parse caps at one.
+  let parsed = flags.parse_n([], args, 2, 2, skill_usage())?
+  let verb = parsed.first()
+  match verb {
+    "" => {
+      fmt.Println(skill_usage())
+      Ok(())
+    },
+    "list" => {
+      for name in skills.Names() {
+        fmt.Println(f"{name}\t{skills.Description(name)}")
+      }
+      Ok(())
+    },
+    "get" => {
+      let name = parsed.nth(1)
+      if name == "" { return Err(f"usage: lll skill get NAME\n\n{known()}") }
+      let body = skills.Body(name)
+      if body == "" { return Err(f"no skill named '{name}'\n\n{known()}") }
+      fmt.Print(body)
+      Ok(())
+    },
+    other => Err(f"unknown command: 'lll skill {other}' (expected list or get)"),
+  }
+}
+
+/// Named in every refusal: the point of `get` is that the caller does not
+/// already know what is there.
+fn known() -> string {
+  f"skills: {strings.Join(skills.Names(), ", ")}"
+}
+
+fn skill_usage() -> string {
+  "lll skill - the agent operating instructions carried by this binary
+
+Usage:
+  lll skill list          every shipped skill, as NAME<TAB>description
+  lll skill get NAME      that skill as markdown, on stdout
+
+These describe how to WORK with an lll board, so they are the same wherever
+lll is installed and need no checkout, no .lll.toml and no server. Skills
+about lll's own source live in its repository instead.
+
+  lll skill get lll > .claude/skills/lll/SKILL.md     # teach an agent elsewhere"
+}
