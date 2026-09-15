@@ -13,10 +13,16 @@ fn filter_spec(use: FilterUse) -> Slice<flags.Flag> {
   let assignee_hint = if use == FilterUse.Update { "; 'none' clears it (update)" } else { "" }
   let project_hint = if use == FilterUse.Update { "; pass \"\" to clear it" } else { "" }
   let repeat_label = use != FilterUse.Watch
+  // Repeatable only where it filters: on create/update a state is the one the
+  // issue moves to, and two would be a contradiction rather than a union.
+  let repeat_state = use == FilterUse.List || use == FilterUse.Watch
+  let state_repeat_hint = if repeat_state { "; repeatable, matching any of them" } else { "" }
   let assignee_alias = if use == FilterUse.Watch { "" } else { "--assign" }
-  let label_hint = if repeat_label { "; repeatable on create/update\n(update replaces the set); filters on list" } else { "" }
+  // LLL-381: say what a repeat MEANS on each side, since it differs - on a
+  // mutation the last set wins, on a filter they union.
+  let label_hint = if repeat_label { "; repeatable\n(update replaces the set; a filter matches any of them)" } else { "" }
   [
-    flags.Flag { name: "--state", value: true, hint: "s", help: f"one of: {strings.Join(query.states(), ", ")}{state_hint}", .. },
+    flags.Flag { name: "--state", value: true, hint: "s", repeat: repeat_state, help: f"one of: {strings.Join(query.states(), ", ")}{state_hint}{state_repeat_hint}", .. },
     flags.Flag { name: "--assignee", alias: assignee_alias, value: true, hint: "name", help: f"member name (see 'lll member list'){assignee_hint}", .. },
     flags.Flag { name: "--label", value: true, hint: "name", repeat: repeat_label, help: f"label name (see 'lll label list'){label_hint}", .. },
     flags.Flag { name: "--project", value: true, hint: "name", help: f"project name (see 'lll project list'){project_hint}", .. },
@@ -26,21 +32,32 @@ fn filter_spec(use: FilterUse) -> Slice<flags.Flag> {
 fn filters_from(p: flags.Parsed) -> Result<query.Filters, string> {
   // Explicit --state "" is a mistake; absence is an unrestricted filter.
   if p.given("--state") && p.one("--state") == "" { let _ = query.state("")? }
+  // `all`, not `one` (LLL-381). The parser had been collecting every value all
+  // along; reading one of them is what turned `--state todo --state in-review`
+  // into a confident answer to a question nobody asked.
   query.Filters {
-    state: p.one("--state"), assignee: p.one("--assignee"),
-    label: p.one("--label"), project: p.one("--project"), search: p.one("--search"),
+    state: p.all("--state"), assignee: p.one("--assignee"),
+    label: p.all("--label"), project: p.one("--project"), search: p.one("--search"),
   }.validate()
 }
 
 fn view_filters(q: ViewQuery) -> query.Filters {
-  query.Filters { state: q.state, assignee: q.assignee, label: q.label, project: q.project, .. }
+  // The board's URL carries one of each; the slices are how the CLI says more.
+  let states = if q.state == "" { [] } else { [q.state] }
+  let labels = if q.label == "" { [] } else { [q.label] }
+  query.Filters { state: states, assignee: q.assignee, label: labels, project: q.project, .. }
 }
 
 /// CLI lookups fail before subscribing/fetching. Browser adapters may instead
 /// retain valid fields while reporting a stale name in a bookmarked URL.
 fn resolve_filter_query(team_id: string, filters: query.Filters) -> Result<string, string> {
   let assignee = if filters.assignee == "" { "" } else { records.resolve_member(filters.assignee)?.id }
-  let label = if filters.label == "" { "" } else { records.resolve_label(team_id, filters.label)?.id }
+  // Every label resolves, so a typo in the second one is still reported rather
+  // than quietly widening the result to whatever the first one matched.
+  let mut label_ids: Slice<string> = []
+  for name in filters.label {
+    if name != "" { label_ids = label_ids.append(records.resolve_label(team_id, name)?.id) }
+  }
   let project = if filters.project == "" { "" } else { records.resolve_project(team_id, filters.project)?.id }
-  Ok(query.filter(team_id, filters.state, assignee, project, label, filters.search))
+  Ok(query.filter_in(team_id, filters.state, assignee, project, label_ids, filters.search))
 }

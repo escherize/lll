@@ -17,17 +17,33 @@ pub fn state(value: string) -> Result<string, string> {
 /// User-facing filter values, before member/label/project name resolution.
 /// Shared by CLI and web adapters; transport and database I/O stay outside.
 pub struct Filters {
-  pub state: string,
+  // Slices, because `--state todo --state in-review` means BOTH (LLL-381).
+  // Keeping one value silently discarded the rest and answered a question
+  // nobody asked, which is worse than refusing: the output was a plausible,
+  // well-formed, wrong list with exit code 0.
+  pub state: Slice<string>,
   pub assignee: string,
-  pub label: string,
+  pub label: Slice<string>,
   pub project: string,
   pub search: string,
 }
 
 impl Filters {
   pub fn validate(self) -> Result<Filters, string> {
-    if self.state != "" { let _ = state(self.state)? }
+    for s in self.state { let _ = state(s)? }
     Ok(self)
+  }
+
+  /// The one state a single-valued surface means. The board's URL carries one
+  /// of each and renders it as a chip, so it asks for that rather than
+  /// learning that the CLI can mean several (LLL-381).
+  pub fn one_state(self) -> string {
+    self.state.get(0).unwrap_or("")
+  }
+
+  /// The one label, for the same reason.
+  pub fn one_label(self) -> string {
+    self.label.get(0).unwrap_or("")
   }
 }
 
@@ -40,6 +56,9 @@ pub fn sort_fields() -> Slice<string> {
 /// Empty criteria are omitted; an empty result means "no filter".
 /// `label_id` matches multi-relation membership (`labels.id ?=`); `search`
 /// is a title substring match (`title ~`).
+///
+/// The single-value door onto `filter_in`, for the callers that can only ever
+/// mean one state or one label. Repeated values arrive through `filter_in`.
 pub fn filter(
   team_id: string,
   state: string,
@@ -48,20 +67,54 @@ pub fn filter(
   label_id: string,
   search: string,
 ) -> string {
+  let states = if state == "" { [] } else { [state] }
+  let labels = if label_id == "" { [] } else { [label_id] }
+  filter_in(team_id, states, assignee_id, project_id, labels, search)
+}
+
+/// `filter`, with states and labels that may repeat (LLL-381).
+///
+/// Several of either is an OR inside the AND: `--state todo --state in-review`
+/// becomes `(state='todo' || state='in-review')`, which is what a repeated flag
+/// means everywhere else and what makes "everything unfinished" one command.
+/// Labels do the same, so an issue carrying ANY of them matches.
+pub fn filter_in(
+  team_id: string,
+  states: Slice<string>,
+  assignee_id: string,
+  project_id: string,
+  label_ids: Slice<string>,
+  search: string,
+) -> string {
   let mut clauses: Slice<string> = []
   if team_id != "" { clauses = clauses.append(f"team={quote(team_id)}") }
-  if state != "" { clauses = clauses.append(f"state={quote(state)}") }
+  if let Some(c) = any_of("state=", states) { clauses = clauses.append(c) }
   if assignee_id != "" {
     clauses = clauses.append(f"assignee={quote(assignee_id)}")
   }
   if project_id != "" {
     clauses = clauses.append(f"project={quote(project_id)}")
   }
-  if label_id != "" {
-    clauses = clauses.append(f"labels.id ?= {quote(label_id)}")
-  }
+  if let Some(c) = any_of("labels.id ?= ", label_ids) { clauses = clauses.append(c) }
   if search != "" { clauses = clauses.append(f"title ~ {quote(search)}") }
   strings.Join(clauses, " && ")
+}
+
+/// `<lhs>value` for one value, `(<lhs>a || <lhs>b)` for several, and nothing
+/// at all for none. Parenthesised, or the ORs would escape the surrounding AND
+/// and widen every other clause with them.
+///
+/// `lhs` carries its own operator AND its spacing, because the two differ:
+/// `state=` has none and `labels.id ?= ` has spaces on both sides, which is
+/// how PocketBase's parser wants the membership operator written.
+fn any_of(lhs: string, values: Slice<string>) -> Option<string> {
+  let mut parts: Slice<string> = []
+  for v in values {
+    if v != "" { parts = parts.append(f"{lhs}{quote(v)}") }
+  }
+  if parts.is_empty() { return None }
+  if parts.length() == 1 { return Some(parts[0]) }
+  Some("(" + strings.Join(parts, " || ") + ")")
 }
 
 /// Validate a sort spec ("field" or "-field" for descending) and return it

@@ -7,9 +7,9 @@ fn cli_and_web_filters_share_values_and_validation() {
   let assert Ok(p) = flags.parse(spec, ["lll", "issue", "list", "--state", "in-review", "--assign", "Alice O'Neil", "--label", "needs review", "--project", "Release 2"], 3, false, "")
   let assert Ok(cli) = filters_from(p)
   let assert Ok(web) = view_filters(ViewQuery { state: "in-review", assignee: "Alice O'Neil", label: "needs review", project: "Release 2", .. }).validate()
-  assert cli.state == web.state
+  assert cli.one_state() == web.one_state()
   assert cli.assignee == web.assignee
-  assert cli.label == web.label
+  assert cli.one_label() == web.one_label()
   assert cli.project == web.project
   let assert Ok(bad) = flags.parse(spec, ["lll", "issue", "list", "--state", "bogus"], 3, false, "")
   let assert Err(cli_error) = filters_from(bad)
@@ -22,15 +22,19 @@ fn missing_filter_state_is_optional_but_explicit_empty_cli_state_is_invalid() {
   let spec = issue_list_spec()
   let assert Ok(p) = flags.parse(spec, ["lll", "issue", "list"], 3, false, "")
   let assert Ok(empty) = filters_from(p)
-  assert empty.state == ""
+  assert empty.state.is_empty()
   assert view_filters(ViewQuery { .. }).validate().is_ok()
   let assert Ok(explicit) = flags.parse(spec, ["lll", "issue", "list", "--state", ""], 3, false, "")
   assert filters_from(explicit).is_err()
   assert query.state("").is_err()
 }
 
+/// LLL-381 renamed this test as much as it changed it: it used to assert
+/// "last value wins", which is the defect. A repeated filter now means the
+/// union, and a flag that did not declare itself repeatable is refused rather
+/// than quietly keeping one of the values.
 #[test]
-fn shared_fields_preserve_mutation_labels_and_last_value_filter_semantics() {
+fn repeated_filters_mean_the_union_and_undeclared_repeats_are_refused() {
   let args = ["--label", "first", "--label", "second"]
   for use in [FilterUse.Create, FilterUse.Update, FilterUse.List] {
     let assert Ok(parsed) = flags.parse(filter_spec(use), args, 0, false, "")
@@ -39,7 +43,48 @@ fn shared_fields_preserve_mutation_labels_and_last_value_filter_semantics() {
     assert labels.get(0) == Some("first")
     assert labels.get(1) == Some("second")
   }
-  let assert Ok(watch) = flags.parse(filter_spec(FilterUse.Watch), args, 0, false, "")
-  let assert Ok(filters) = filters_from(watch)
-  assert filters.label == "second"
+  // List KEEPS both, where it used to keep only the second.
+  let assert Ok(listed) = flags.parse(filter_spec(FilterUse.List), args, 0, false, "")
+  let assert Ok(list_filters) = filters_from(listed)
+  assert list_filters.label.length() == 2
+  assert list_filters.label.get(0) == Some("first")
+
+  // Watch does not declare --label repeatable, so the second one is refused
+  // by name instead of silently discarded.
+  let assert Err(refused) = flags.parse(filter_spec(FilterUse.Watch), args, 0, false, "")
+  assert refused.contains("--label may only be given once")
+
+  // Repeated --state is the case the issue was filed about.
+  let assert Ok(states) = flags.parse(
+    filter_spec(FilterUse.List),
+    ["--state", "todo", "--state", "in-review"],
+    0, false, "",
+  )
+  let assert Ok(state_filters) = filters_from(states)
+  assert state_filters.state.length() == 2
+  assert state_filters.state.get(1) == Some("in-review")
+
+  // A bad value anywhere in the repetition is still caught, not just the first.
+  let assert Ok(bad) = flags.parse(
+    filter_spec(FilterUse.List),
+    ["--state", "todo", "--state", "bogus"],
+    0, false, "",
+  )
+  assert filters_from(bad).is_err()
+}
+
+/// The clause a repeated filter produces: an OR inside the AND, parenthesised
+/// so it cannot widen the team scope around it.
+#[test]
+fn repeated_values_become_a_parenthesised_or() {
+  let one = query.filter_in("t1", ["todo"], "", "", [], "")
+  assert one.contains("state='todo'")
+  assert !one.contains("||")
+  let two = query.filter_in("t1", ["todo", "in-review"], "", "", [], "")
+  assert two.contains("(state='todo' || state='in-review')")
+  assert two.contains("team='t1'")
+  let labels = query.filter_in("t1", [], "", "", ["l1", "l2"], "")
+  assert labels.contains("(labels.id ?= 'l1' || labels.id ?= 'l2')")
+  let none = query.filter_in("t1", [], "", "", [], "")
+  assert none == "team='t1'"
 }
