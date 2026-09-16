@@ -1565,6 +1565,24 @@ assert_contains "$doc_404_body" "lll doc list" "the 404 says how to find the rig
 doc_anon=$(curl -s -o /dev/null -w '%{http_code}' "$WEB/t/ENG/doc/board-render-decision")
 [ "$doc_anon" = "401" ] || fail "anonymous doc fetch: expected 401, got $doc_anon"
 
+# --- docs are searchable from the board (LLL-398) ---
+# The CLI's `lll search` ranked docs from the start; the board searched issues
+# and comments only, because a doc hit had nowhere to land. LLL-405 gave it
+# somewhere. Searching for a word that appears ONLY in the doc's body is what
+# separates "the engine reaches docs" from "the title happened to match".
+doc_search=$(wcurl -sf "$WEB/t/ENG/search?q=JavaScript")
+assert_contains "$doc_search" "board-render-decision" "board search finds a doc by its body"
+assert_contains "$doc_search" 'href="/t/ENG/doc/board-render-decision"' \
+  "the doc result links to the doc page, not to nothing"
+assert_contains "$doc_search" "Render on the server" "the doc result carries its title"
+assert_contains "$doc_search" "decision" "the doc result says which kind it is"
+# Issues must not have been displaced by docs joining the corpus.
+issue_search=$(wcurl -sf "$WEB/t/ENG/search?q=Already")
+assert_contains "$issue_search" "ENG-2" "issues still rank after docs joined the search"
+# The empty-state copy promises what is actually searched.
+assert_contains "$(wcurl -sf "$WEB/t/ENG/search?q=zzzznope")" "issues, comments or docs" \
+  "the empty state names docs among what was searched"
+
 # The bare path lands on the selected team: slugs are unique per team, so it
 # cannot resolve one by itself.
 doc_bare=$(curl -s -o /dev/null -w '%{http_code}' -H "$BOARD_COOKIE" \

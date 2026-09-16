@@ -230,7 +230,21 @@ pub struct SearchVM {
 /// each under the source it came from ("description", "comment #2 by kai").
 pub struct SearchHitVM {
   pub card: CardVM,
+  /// Set on a doc hit, zero-valued on an issue hit. A plain struct rather
+  /// than an Option because the template branches on `.Doc.Slug`, and Go
+  /// templates read a zero string far more readably than a nil pointer.
+  pub doc: DocHitVM,
   pub snippets: Slice<search.Snippet>,
+}
+
+/// A doc among the search results (LLL-398). Docs became linkable when they
+/// got a page (LLL-405); before that a doc hit had nowhere to land, which is
+/// why the board searched issues and comments only.
+pub struct DocHitVM {
+  pub slug: string,
+  pub kind: string,
+  pub title: string,
+  pub url: string,
 }
 
 /// One row of the rail's team switcher (TASK-198): a team on the server,
