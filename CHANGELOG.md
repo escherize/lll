@@ -4,6 +4,17 @@ All notable changes to lll. The format follows Keep a Changelog; versions
 follow SemVer, with 0.x meaning the CLI surface can still move between
 minors. Issue keys are on the project's own board (`lll issue view KEY`).
 
+## [0.3.1] - 2026-09-16
+
+### Fixed
+
+- `lll --version` reports lll's version. It ran `git describe` at startup
+  and answered with whatever repository the caller stood in, so the 0.3.0
+  binary said `lll 0.2.0` outside a checkout, and `lll 9.9.9` inside a
+  project tagged `v9.9.9`. The version is a literal now. The gate asserts
+  it matches `[project] version` in lisette.toml, and that the answer is
+  the same inside the checkout and outside it.
+
 ## [0.3.0] - 2026-09-15
 
 The release shaped by several agents working one board at once: a command

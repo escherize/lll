@@ -2063,17 +2063,22 @@ assert_contains "$out" "Usage:" "lll up --help"
 assert_contains "$out" "--port" "up --help mentions --port"
 
 # --- --version reports the build ---
-# version() derives from `git describe --tags`, so in a working checkout this
-# is a tag-relative description ("0.1.0-3-gabc123", "-dirty" when the tree has
-# edits) and only equals lisette.toml's bare version at a clean tag checkout.
-# Asserting the exact string here would fail on every commit between tags, so
-# the assertion is the shape: prefixed "lll ", non-empty, and the same answer
-# from all three spellings.
+# version() is a literal, so this asserts the VALUE, not just the shape. The
+# shape was all the old assertion could check: version() ran `git describe` at
+# startup and answered with the caller's repository, so the same binary said
+# something different in every directory (LLL-431).
+# Pinning it to lisette.toml is what catches a release that forgets to bump one
+# of the two.
+project_version=$(grep -m1 '^version = ' "$REPO_ROOT/lisette.toml" | cut -d'"' -f2)
+[ -n "$project_version" ] || fail "no [project] version in lisette.toml"
 want=$("$LIN" --version)
-case "$want" in
-  "lll "?*) ;;
-  *) fail "--version: expected 'lll <version>', got '$want'" ;;
-esac
+[ "$want" = "lll $project_version" ] ||
+  fail "--version says '$want', lisette.toml says '$project_version' - bump both"
+
+# The value must not depend on where it runs: that was the whole defect.
+outside=$(cd / && "$LIN" --version)
+[ "$outside" = "$want" ] ||
+  fail "--version answers '$want' in the checkout but '$outside' outside it"
 [ "$("$LIN" version)" = "$want" ] || fail "'lll version' disagrees with --version"
 [ "$("$LIN" -v)" = "$want" ] || fail "'lll -v' disagrees with --version"
 
