@@ -241,15 +241,22 @@ def verify(generated):
     if committed == generated:
         print(f"api schema check passed: {rel} matches what pb/pb_migrations builds")
         return
-    diff = difflib.unified_diff(
+    diff = list(difflib.unified_diff(
         committed.splitlines(), generated.splitlines(),
         fromfile=f"a/{rel} (committed)",
         tofile=f"b/{rel} (generated from pb/pb_migrations)",
         lineterm="",
-    )
+    ))
     added = [l for l in diff if l.startswith("+") and not l.startswith("+++")]
     removed = [l for l in diff if l.startswith("-") and not l.startswith("---")]
     print(f"api schema check FAILED: {rel} does not match what pb/pb_migrations builds", file=sys.stderr)
+    if not added and not removed:
+        # Lines are identical but bytes are not: a trailing-newline or
+        # encoding difference no line diff can name. Say exactly that — the
+        # first run of this check reported a useless 'lacks 0, carries 0'
+        # for exactly this case (a merge resolution's trailing newline).
+        print("  the difference is outside any line diff (trailing newline or encoding) — regenerate with `mise run api-schema`", file=sys.stderr)
+        sys.exit(1)
     print(f"  the committed reference lacks {len(added)} line(s) and carries {len(removed)} the migrations no longer produce:", file=sys.stderr)
     for line in added + removed:
         print(f"  {line}", file=sys.stderr)
