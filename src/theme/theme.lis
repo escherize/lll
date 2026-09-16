@@ -1,3 +1,4 @@
+import "go:html"
 import "go:html/template"
 import "go:net/url"
 import "go:strconv"
@@ -90,6 +91,15 @@ pub fn accent_css(hex: string) -> template.CSS {
   (":root{" + body + "}") as template.CSS
 }
 
+/// The mark for the favicon: a team's emoji when it set one, else the letter
+/// below. Split from mark_letter so the fallback stays exactly what it was for
+/// every team that has no emoji.
+pub fn mark_for(key: string, emoji: string) -> string {
+  let glyph = strings.TrimSpace(emoji)
+  if glyph != "" { return glyph }
+  mark_letter(key)
+}
+
 /// The mark's letter for the favicon: the team key's initial, or lll's own L.
 /// One ASCII alphanumeric and nothing else — it lands inside an SVG document
 /// that carries no escaping of its own.
@@ -104,6 +114,11 @@ pub fn mark_letter(key: string) -> string {
 /// team's accent, so two boards open side by side differ in the tab strip as
 /// well as on the page.
 pub fn favicon_url(hex: string, letter: string) -> template.URL {
+  // XML-escaped, and not optional. mark_letter was safe unescaped because it
+  // could only ever return one ASCII alphanumeric; since LLL-427 the mark can
+  // be a team's stored emoji, which is user input, and percent-encoding the
+  // data: URL does not protect the SVG the browser decodes back out of it.
+  let letter = html.EscapeString(letter)
   let mut fill = hex
   if fill == "" { fill = "#f0883e" }
   let r = hex_channel(fill, 1)

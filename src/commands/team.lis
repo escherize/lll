@@ -64,6 +64,14 @@ pub fn team_commands() -> Slice<flags.Command> {
       run: team_set_accent,
     },
     flags.Command {
+      name: "set-emoji",
+      summary: "set the team's glyph, beside its key ('' clears it)",
+      page: "",
+      spec: [],
+      positional: "KEY EMOJI",
+      run: team_set_emoji,
+    },
+    flags.Command {
       name: "archive",
       summary: "hide the team from lists and the board rail (data kept)",
       page: "",
@@ -313,6 +321,56 @@ fn accent_value(raw: string) -> Result<string, string> {
 #[json]
 struct TeamAccentPatch { accent: string }
 
+/// `lll team set-emoji KEY 🚀` (LLL-427). A team's identity was its accent
+/// plus a letter derived from the key, so two teams whose keys share an
+/// initial differed only in hue. Settable from the CLI for the same reason
+/// the accent is: a shared field only the web can write inverts the rule.
+fn team_set_emoji(input: flags.CommandInput) -> Result<(), string> {
+  if input.parsed.positional_count() != 2 {
+    return Err("usage: lll team set-emoji KEY EMOJI (empty '' clears it)")
+  }
+  let key = input.parsed.first()
+  let glyph = team_emoji_value(input.parsed.nth(1))?
+  let Some(t) = records.find_team(key)? else {
+    return Err(unknown_team(key))
+  }
+  let payload = match json.Marshal(TeamEmojiPatch { emoji: glyph }) {
+    Ok(p) => p as string,
+    Err(e) => return Err(f"encoding team patch: {e}"),
+  }
+  let _ = pb.patch(f"/api/collections/teams/records/{t.id}", payload)?
+  if glyph == "" {
+    fmt.Println(f"Cleared the emoji for {t.key} — back to the letter from its key")
+  } else {
+    fmt.Println(f"{t.key} is now {glyph}")
+  }
+  Ok(())
+}
+
+/// One glyph, or empty to clear. The rule lives in check_emoji, which is what
+/// `issue create --emoji` already enforces; calling it rather than counting
+/// runes again here is what stops the two from drifting apart.
+fn team_emoji_value(raw: string) -> Result<string, string> {
+  match check_emoji(raw) {
+    Ok(glyph) => Ok(glyph),
+    Err(_) => Err(
+      f"'{strings.TrimSpace(raw)}' is not one emoji (pass '' to clear it)",
+    ),
+  }
+}
+
+#[json]
+struct TeamEmojiPatch { emoji: string }
+
+/// The emoji line for `team view`: what the rail and the tab icon will show,
+/// including the derived letter when no emoji is set, so the line answers
+/// "what does this team look like" rather than "is the field empty".
+fn view_emoji(stored: string, key: string) -> string {
+  let glyph = strings.TrimSpace(stored)
+  if glyph == "" { return f"{theme.mark_letter(key)} (the letter from its key)" }
+  glyph
+}
+
 /// The accent line for `team view`. A stored value that theme.normalize_hex
 /// refuses is what the board falls back on too, so the CLI says so rather
 /// than printing a colour no page is actually using.
@@ -526,6 +584,7 @@ fn team_view(input: flags.CommandInput) -> Result<(), string> {
   // The stored value is what /settings wrote, so it goes through the same
   // normalizer the board renders with; "" is the canonical orange (TASK-100).
   fmt.Println(f"Accent: {view_accent(t.accent)}")
+  fmt.Println(f"Emoji:  {view_emoji(t.emoji, t.key)}")
   fmt.Println(f"Issues: {issues_held}")
   if t.archived {
     fmt.Println("Archived: yes ('lll team unarchive' brings it back)")

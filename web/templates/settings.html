@@ -54,6 +54,7 @@
 {{if .TeamKey}}<form class="set-form" id="team-form">
   <div class="set-field"><label for="set-key">Key</label><input id="set-key" value="{{.TeamKey}}" readonly aria-readonly="true" title="Every issue key and every checkout's .lll.toml names this. Rename a team with the CLI."><span class="set-hint">Names every issue: {{.TeamKey}}-1, {{.TeamKey}}-2.</span></div>
   <div class="set-field"><label for="set-name">Name</label><input id="set-name" name="name" value="{{.TeamName}}" autocomplete="off"></div>
+  <div class="set-field"><label for="set-emoji">Emoji</label><input id="set-emoji" name="emoji" value="{{.TeamEmoji}}" autocomplete="off" class="set-swatch" maxlength="32"><span class="set-hint">One glyph beside the key in the rail, and the tab icon's mark. Leave it empty for the letter from the key.</span></div>
   <div class="set-field"><label for="set-accent">Accent</label><input id="set-accent" name="accent" type="color" class="set-swatch" value="{{.Accent}}"><span class="set-hint"><code>{{.Accent}}</code>, {{if .AccentSet}}this team's own colour{{else}}the default ember orange{{end}}. It colours every button, focus ring and tab icon, so two boards open side by side never blur together.</span></div>
   <button type="button" class="btn primary" data-on:click="@post('settings/team', {contentType: 'form'})">Save team</button>
 </form>

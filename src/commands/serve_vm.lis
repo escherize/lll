@@ -252,6 +252,7 @@ pub struct DocHitVM {
 pub struct RailTeamVM {
   pub key: string,
   pub name: string,
+  pub emoji: string,
   pub href: string,
   pub active: bool,
 }
@@ -522,6 +523,7 @@ pub struct SettingsVM {
   // "" when no team is configured; the team card then says so instead.
   pub team_key: string,
   pub team_name: string,
+  pub team_emoji: string,
   // The accent as "#rrggbb", falling back to the canonical orange:
   // <input type="color"> has no empty state, so the swatch always shows one.
   pub accent: string,

@@ -142,7 +142,7 @@ fn rename_collateral_is_empty_when_the_key_did_not_change() {
 #[test]
 fn team_commands_declares_every_verb_with_a_summary() {
   let names = strings.Join(team_commands().map(|c| c.name), " ")
-  assert names == "list create view rename set-accent archive unarchive delete"
+  assert names == "list create view rename set-accent set-emoji archive unarchive delete"
   for c in team_commands() {
     assert c.summary != ""
   }

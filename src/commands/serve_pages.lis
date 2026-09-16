@@ -26,7 +26,7 @@ fn rail_vm(active: string, me: string, team: models.Team) -> RailVM {
     me,
     version: version(),
     accent_css: theme.accent_css(hex),
-    favicon: theme.favicon_url(hex, theme.mark_letter(team.key)),
+    favicon: theme.favicon_url(hex, theme.mark_for(team.key, team.emoji)),
     board_base: board_base(team.key),
     teams: rail_teams(team.key),
     favorites: fav_vms(),
@@ -53,6 +53,7 @@ fn rail_teams(current: string) -> Slice<RailTeamVM> {
   teams.items.filter(|t| !t.archived).map(|t| RailTeamVM {
     key: t.key,
     name: t.name,
+    emoji: t.emoji,
     href: board_base(t.key),
     active: t.key == current,
   })

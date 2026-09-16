@@ -1,3 +1,4 @@
+import "go:net/url"
 import "go:strings"
 
 #[test]
@@ -52,6 +53,27 @@ fn accent_ink_flips_to_light_on_a_dark_accent() {
   // navy is an unreadable button.
   assert strings.Contains(accent_css("#102040") as string, "--accent-ink:#e7e9ec")
   assert strings.Contains(accent_css("#f0883e") as string, "--accent-ink:#180e06")
+}
+
+#[test]
+fn mark_for_prefers_the_teams_emoji_and_falls_back_to_the_letter() {
+  assert mark_for("ENG", "\u{1F680}") == "\u{1F680}"
+  assert mark_for("ENG", "  \u{1F680}  ") == "\u{1F680}"
+  // No emoji is today's rendering exactly, which is LLL-427's third criterion.
+  assert mark_for("ENG", "") == "E"
+  assert mark_for("", "") == "L"
+}
+
+#[test]
+fn favicon_url_escapes_a_mark_that_is_not_a_letter() {
+  // mark_letter could only ever return one ASCII alphanumeric, so the SVG did
+  // not need escaping. A team's emoji is user input, and the emoji rule is a
+  // rune COUNT: "</text>" is seven runes and passes it. Percent-encoding the
+  // data: URL is no defence, because the browser decodes it back.
+  let icon = favicon_url("#3ea0f0", "</text>") as string
+  let decoded = url.PathUnescape(icon.substring(19..icon.length())).unwrap_or("")
+  assert strings.Contains(decoded, "&lt;/text&gt;")
+  assert !strings.Contains(decoded, "</text></text>")
 }
 
 #[test]

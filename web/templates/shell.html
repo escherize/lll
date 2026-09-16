@@ -47,7 +47,7 @@
      outside every morph boundary, so no broadcast ever re-renders it. */}}
 {{define "rail-teams"}}<div id="rail-teams" class="rail-group">
 <h2>Teams</h2>
-{{range .}}<a href="{{.Href}}" title="{{.Key}} · {{.Name}}"{{if .Active}} class="active"{{end}}><span class="rt-key">{{.Key}}</span> <span class="rg-title">{{.Name}}</span></a>
+{{range .}}<a href="{{.Href}}" title="{{.Key}} · {{.Name}}"{{if .Active}} class="active"{{end}}>{{if .Emoji}}<span class="rt-emoji">{{.Emoji}}</span>{{end}}<span class="rt-key">{{.Key}}</span> <span class="rg-title">{{.Name}}</span></a>
 {{else}}<p class="rg-empty">No teams on this server yet.</p>
 {{end}}</div>{{end}}
 
