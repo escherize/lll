@@ -91,6 +91,14 @@ export LLL_ADMIN_PASSWORD=admin-local-123
 # HOME, so anything that compiles must run before this line - which is why the
 # mise task depends on `build` rather than building here.
 export HOME="$DEMO_DIR/home"
+# LLL-423: and HOME is not enough on its own. Since LLL-400 there are two other
+# ways to choose the config root, and both outrank it - on a machine that
+# exports XDG_CONFIG_HOME (a common dotfiles setting) this script announced an
+# isolated HOME and then read the DEVELOPER'S ~/.config/lll/lll.toml, whose
+# hosted token the freshly booted server has never heard of. It died on the
+# token, naming the right file for the wrong reason. Fourth copy of the bargain
+# e2e_begin (lib.sh) and scratch.sh already make.
+unset XDG_CONFIG_HOME LLL_CONFIG_HOME
 mkdir -p "$HOME/.config/lll"
 # A fixed board token, so the login URL printed at the end is stable and this
 # script can print it without scraping it back out of the boot banner.

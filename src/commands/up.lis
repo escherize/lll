@@ -48,6 +48,11 @@ fn up_spec() -> Slice<flags.Flag> {
       ..,
     },
     flags.Flag {
+      name: "--demo",
+      help: "seed a DEMO team with issues and docs to try, on a board with no\nissues yet (LLL-433)",
+      ..,
+    },
+    flags.Flag {
       name: "--help",
       alias: "-h",
       hidden: true,
@@ -201,7 +206,11 @@ superuser credentials, or set LLL_TOKEN to a member token.",
   // persisted. Persisting it would put a .lll.toml into whatever directory the
   // scratch board ran in, which is the TASK-143 stray exactly.
   let throwaway = p.one("--pb-dir") != ""
-  let team = match ensure_team(cfg.team, src.team, throwaway) {
+  // A demo boot must not stop to ask for a team key: "show me the tool" is the
+  // whole request. DEMO unless the caller already chose something.
+  let demo = p.given("--demo")
+  let want_team = if demo && cfg.team == "" { "DEMO" } else { cfg.team }
+  let team = match ensure_team(want_team, src.team, throwaway) {
     Ok(team) => team,
     Err(e) => {
       let credential = if cfg.token == "" {
@@ -214,6 +223,7 @@ superuser credentials, or set LLL_TOKEN to a member token.",
   }
   let _ = os.Setenv("LLL_TEAM", team)
   let me = ensure_me(cfg.me)?
+  if demo { seed_demo(team, me, db_url)? }
   let chosen = free_port(web_port)
   if chosen != web_port {
     fmt.Println(f"port {web_port} taken — board moving to {chosen}")
@@ -239,7 +249,7 @@ fn print_up_usage() {
     "lll up - start PocketBase and the web board together
 
 Usage:
-  lll up [--port 8100] [--pb-dir pb/pb_data] [--no-open]
+  lll up [--port 8100] [--pb-dir pb/pb_data] [--no-open] [--demo]
 
 Reuses a PocketBase already running at the configured URL; otherwise runs one
 in-process (first free port from the configured port up) after upserting the

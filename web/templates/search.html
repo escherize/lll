@@ -52,13 +52,23 @@
 {{define "search-update"}}{{template "search-title" .}}{{template "search-results" .}}{{end}}
 
 {{define "search-results"}}<div id="search-results" class="search-body">
-{{if not .Q}}<p class="search-note">Searches every issue in the team - titles, descriptions and comments - including the ones the board is not showing.</p>
-{{else if not .Results}}<p class="search-note">Nothing in the team's issues or comments matches <b>{{.Q}}</b>.</p>
+{{if not .Q}}<p class="search-note">Searches every issue in the team - titles, descriptions and comments - and its docs, including the ones the board is not showing.</p>
+{{else if not .Results}}<p class="search-note">Nothing in the team's issues, comments or docs matches <b>{{.Q}}</b>.</p>
 {{else}}<p class="search-note"><span class="count">{{len .Results}}</span> matching <b>{{.Q}}</b>, best match first</p>
 <ol class="results">
-{{range .Results}}<li>{{template "search-row" .Card}}{{if .Snippets}}<div class="sr-snips">{{range .Snippets}}<div class="sr-snip"><span class="sr-src">{{.Label}}</span>{{range .Lines}}<div class="sr-line">{{.}}</div>{{end}}</div>{{end}}</div>{{end}}</li>
+{{range .Results}}<li>{{if .Doc.Slug}}{{template "search-doc-row" .Doc}}{{else}}{{template "search-row" .Card}}{{end}}{{if .Snippets}}<div class="sr-snips">{{range .Snippets}}<div class="sr-snip"><span class="sr-src">{{.Label}}</span>{{range .Lines}}<div class="sr-line">{{.}}</div>{{end}}</div>{{end}}</div>{{end}}</li>
 {{end}}</ol>
 {{end}}</div>{{end}}
+
+{{/* A doc hit. Same one-line shape as an issue row so the list stays a list,
+     with the kind where an issue shows its state, because "finding" and
+     "decision" are what tell you whether to open it. */}}
+{{define "search-doc-row"}}<a class="sr sr-doc" id="result-doc-{{.Slug}}" href="{{.Url}}">
+<span class="sr-key">doc</span>
+<span class="sr-kind">{{.Kind}}</span>
+<span class="sr-title">{{.Title}}</span>
+<span class="sr-slug">{{.Slug}}</span>
+</a>{{end}}
 
 {{/* One result row: the card's data on one line, because a hit is scanned in
      a list and not dragged in a column. */}}

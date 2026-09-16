@@ -75,10 +75,11 @@ fn search_page(
   let _ = w.Write(html.bytes())
 }
 
-/// The team's issues and comments ranked for `q` by the same engine
-/// `lll search` uses (LLL-96), so the page and the CLI agree on what a
-/// match is and why. Docs are not on this page: it is the issue board's
-/// search, and a doc hit has nowhere here to land yet.
+/// The team's issues, comments and docs ranked for `q` by the same engine
+/// `lll search` uses (LLL-96), so the page and the CLI agree on what a match
+/// is and why. Docs joined the page when they got one of their own to link to
+/// (LLL-405): until then a doc hit was a result you could not click, which is
+/// why this searched issues and comments only (LLL-398).
 fn search_hits(team: models.Team, q: string) -> Result<Slice<SearchHitVM>, string> {
   let issues = fetch_team_issues_where(team.id, candidate_clause(q, ["title", "description"]))?
   let comments = fetch_team_comments_where(team.id, candidate_clause(q, ["body"]))?
@@ -95,13 +96,39 @@ fn search_hits(team: models.Team, q: string) -> Result<Slice<SearchHitVM>, strin
     all = all.append(fetch_team_issues_where(team.id, "(" + strings.Join(ors, " || ") + ")")?...)
   }
   let issues = all
-  let corpus = issue_documents(team.key, issues, comments)
+  let docs = fetch_team_docs_light(team.id, candidate_clause(q, ["title", "body"]))?
+  let mut corpus = issue_documents(team.key, issues, comments)
+  let mut by_slug = Map.new<string, models.Doc>()
+  for d in docs {
+    by_slug[d.slug] = d
+    // The same Document the CLI builds (search.lis), so one query cannot rank
+    // a doc differently in the two places.
+    corpus = corpus.append(
+      search.Document { group: d.slug, kind: "doc", label: d.kind, title: d.title, body: d.body, state: "" },
+    )
+  }
   let mut by_key = Map.new<string, models.Issue>()
   for i in issues { by_key[f"{team.key}-{i.number}"] = i }
   let mut out: Slice<SearchHitVM> = []
   for h in search.rank(corpus, q, 50) {
-    let Some(i) = by_key.get(h.group) else { continue }
-    out = out.append(SearchHitVM { card: card_vm(i), snippets: h.snippets })
+    if let Some(i) = by_key.get(h.group) {
+      out = out.append(SearchHitVM { card: card_vm(i), snippets: h.snippets, .. })
+      continue
+    }
+    if let Some(d) = by_slug.get(h.group) {
+      out = out.append(
+        SearchHitVM {
+          doc: DocHitVM {
+            slug: d.slug,
+            kind: d.kind,
+            title: d.title,
+            url: f"/t/{team.key}/doc/{d.slug}",
+          },
+          snippets: h.snippets,
+          ..
+        },
+      )
+    }
   }
   Ok(out)
 }

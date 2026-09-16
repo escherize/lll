@@ -55,6 +55,14 @@ pub fn project_commands() -> Slice<flags.Command> {
       run: project_edit,
     },
     flags.Command {
+      name: "move",
+      summary: "move a project to another team; refuses while issues outside it still belong to it",
+      page: "",
+      spec: project_move_spec(),
+      positional: "NAME",
+      run: project_move,
+    },
+    flags.Command {
       name: "delete",
       summary: "delete a project; refuses while issues still belong to it, and --force drops it off all of them",
       page: "",
@@ -116,6 +124,12 @@ fn project_edit_spec() -> Slice<flags.Flag> {
     flags.Flag { name: "-n", value: true, hint: "\"new name\"", help: "new project name", .. },
     flags.Flag { name: "-d", value: true, hint: "desc", help: "new project description", .. },
     flags.Flag { name: "--status", value: true, hint: "s", help: "planned, started, paused, completed, or cancelled", .. },
+  ])
+}
+
+fn project_move_spec() -> Slice<flags.Flag> {
+  flags.with_team([
+    flags.Flag { name: "--to", value: true, hint: "KEY", help: "team key to move the project to", .. },
   ])
 }
 
@@ -191,6 +205,22 @@ fn project_edit(input: flags.CommandInput) -> Result<(), string> {
 }
 
 /// Count shared references before deleting; force explicitly accepts their loss.
+/// `lll project move NAME --to KEY` (LLL-100). See move_scope.lis for why the
+/// refusal is the right answer rather than dragging the references along.
+fn project_move(input: flags.CommandInput) -> Result<(), string> {
+  let spec = project_move_spec()
+  let usage = flags.usage("lll project move", spec, "NAME")
+  let p = input.parsed
+  let Some(name) = nonempty(p.first()) else {
+    return Err(f"usage: {usage}")
+  }
+  let from = team_flag_or_current(p.one("--team"))?
+  let to = move_destination(p.one("--to"))?
+  let project = records.resolve_project(from.id, name)?
+  fmt.Println(move_to_team("project", project.name, project.id, from, to)?)
+  Ok(())
+}
+
 fn project_delete(input: flags.CommandInput) -> Result<(), string> {
   let spec = project_delete_spec()
   let usage = flags.usage("lll project delete", spec, "NAME")

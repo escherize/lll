@@ -216,6 +216,26 @@ assert_contains "$out" "Created team QA: Quality" "team create output"
 out=$(LLL_URL=$URL "$LIN" team list)
 assert_contains "$out" "QA" "team list has created QA"
 
+# LLL-235: a team key is uppercase whoever writes it, and lookups ask for the
+# same normalised form - a key that normalised on write but not on read would
+# leave `LLL_TEAM=eng` naming a team it could not find.
+out=$(LLL_URL=$URL "$LIN" team create -k low -n "Lowercase Asked")
+assert_contains "$out" "Created team LOW: Lowercase Asked" "a lowercase -k is stored uppercase"
+out=$(LLL_URL=$URL "$LIN" team list)
+assert_contains "$out" "LOW" "team list shows the uppercase key"
+assert_not_contains "$out" "	low	" "the typed lowercase key is not a second team"
+# Read back by the spelling that was typed, and by the stored one.
+out=$(LLL_URL=$URL "$LIN" team view low)
+assert_contains "$out" "Key:    LOW" "a lowercase key looks up the uppercase team"
+out=$(LLL_URL=$URL LLL_TEAM=low "$LIN" issue list)
+assert_not_contains "$out" "no team with key" "a lowercase LLL_TEAM resolves"
+# The server enforces it too, so the raw API cannot mint a second spelling.
+api_team=$(curl -s -H "Authorization: Bearer $LLL_TOKEN" -H 'Content-Type: application/json' \
+  -d '{"key":"raw","name":"Raw API"}' "$URL/api/collections/teams/records")
+assert_contains "$api_team" '"key":"RAW"' "a raw API create is normalised by the server"
+LLL_URL=$URL "$LIN" team delete RAW >/dev/null 2>&1 || true
+LLL_URL=$URL "$LIN" team delete LOW >/dev/null 2>&1 || true
+
 out=$(LLL_URL=$URL "$LIN" team view ENG)
 assert_contains "$out" "Key:    ENG" "team view key"
 assert_contains "$out" "Name:   Engineering" "team view name"
@@ -550,10 +570,20 @@ assert_contains "$out" "Created ENG-4" "urgent issue created"
 out=$(LLL_URL=$URL LLL_TEAM=ENG "$LIN" issue create -t "Tidy readme" --priority 4)
 assert_contains "$out" "Created ENG-5" "low issue created"
 
+# LLL-382: priority is a triage order, so urgent leads and the unprioritised
+# (ENG-1..3, stored as 0) are last in EITHER direction - absent is not a
+# priority below low. Asserted on both ends of both directions, because the
+# old bug was invisible from one end: low did sort last, under three
+# unprioritised issues that outranked the urgent one.
 out=$(LLL_URL=$URL LLL_TEAM=ENG "$LIN" issue list --sort -priority)
 assert_contains "$(printf '%s\n' "$out" | head -1)" "ENG-5" "sort -priority puts low (4) first"
+last=$(printf '%s\n' "$out" | tail -1)
+assert_not_contains "$last" "ENG-4" "sort -priority ends on an unprioritised issue, not urgent"
+assert_not_contains "$last" "ENG-5" "sort -priority ends on an unprioritised issue, not low"
 out=$(LLL_URL=$URL LLL_TEAM=ENG "$LIN" issue list --sort priority)
-assert_contains "$(printf '%s\n' "$out" | tail -1)" "ENG-5" "sort priority puts low (4) last"
+assert_contains "$(printf '%s\n' "$out" | head -1)" "ENG-4" "sort priority leads with urgent (1)"
+assert_not_contains "$(printf '%s\n' "$out" | tail -1)" "ENG-5" "sort priority puts unprioritised below low (4)"
+assert_not_contains "$(printf '%s\n' "$out" | head -1)" "ENG-1" "sort priority does not lead with an unprioritised issue"
 
 out=$(LLL_URL=$URL LLL_TEAM=ENG LLL_SORT=-priority "$LIN" issue list)
 assert_contains "$(printf '%s\n' "$out" | head -1)" "ENG-5" "LLL_SORT is the default sort"
@@ -2053,17 +2083,22 @@ assert_contains "$out" "Usage:" "lll up --help"
 assert_contains "$out" "--port" "up --help mentions --port"
 
 # --- --version reports the build ---
-# version() derives from `git describe --tags`, so in a working checkout this
-# is a tag-relative description ("0.1.0-3-gabc123", "-dirty" when the tree has
-# edits) and only equals lisette.toml's bare version at a clean tag checkout.
-# Asserting the exact string here would fail on every commit between tags, so
-# the assertion is the shape: prefixed "lll ", non-empty, and the same answer
-# from all three spellings.
+# version() is a literal, so this asserts the VALUE, not just the shape. The
+# shape was all the old assertion could check: version() ran `git describe` at
+# startup and answered with the caller's repository, so the same binary said
+# something different in every directory (LLL-431).
+# Pinning it to lisette.toml is what catches a release that forgets to bump one
+# of the two.
+project_version=$(grep -m1 '^version = ' "$REPO_ROOT/lisette.toml" | cut -d'"' -f2)
+[ -n "$project_version" ] || fail "no [project] version in lisette.toml"
 want=$("$LIN" --version)
-case "$want" in
-  "lll "?*) ;;
-  *) fail "--version: expected 'lll <version>', got '$want'" ;;
-esac
+[ "$want" = "lll $project_version" ] ||
+  fail "--version says '$want', lisette.toml says '$project_version' - bump both"
+
+# The value must not depend on where it runs: that was the whole defect.
+outside=$(cd / && "$LIN" --version)
+[ "$outside" = "$want" ] ||
+  fail "--version answers '$want' in the checkout but '$outside' outside it"
 [ "$("$LIN" version)" = "$want" ] || fail "'lll version' disagrees with --version"
 [ "$("$LIN" -v)" = "$want" ] || fail "'lll -v' disagrees with --version"
 
@@ -3352,6 +3387,13 @@ python3 "$REPO_ROOT"/scripts/test_claims_live.py "$LLL_ABS" "$URL"
 # LLL-385: seed is outside build/test/e2e, so it broke for five days under a
 # green gate. Here rather than in `test` because it needs the built binary.
 python3 "$REPO_ROOT"/scripts/test_seed.py
+
+# LLL-435: api_schema.lis is generated from the migrations' end state and
+# nothing compared the two — it described a schema the server does not have
+# through two releases (members kind/owner, the whole webhooks collection)
+# under a green gate. Same placement as test_seed.py: it needs the built
+# binary and boots its own throwaway board.
+python3 "$REPO_ROOT"/scripts/gen_api_schema.py --check
 
 # --- web board (own ephemeral PB; see e2e_web.sh) ---
 HOME="$E2E_REAL_HOME" "$REPO_ROOT"/scripts/e2e_web.sh

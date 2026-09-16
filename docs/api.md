@@ -42,4 +42,6 @@ sends it for you.) The header applies to the `issues` collection only.
 and field, its type, whether it is required, and the access rules a member
 token answers to. It is generated from the migrations (their end state — what
 the server actually enforces), not hand-typed; regenerate after schema
-changes with `mise run api-schema`.
+changes with `mise run api-schema`. The gate verifies the two agree —
+`gen_api_schema.py --check` runs in e2e and fails naming what drifted, so the
+reference cannot silently fall behind the schema again (LLL-435).

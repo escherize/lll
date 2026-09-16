@@ -110,7 +110,9 @@ fn label_edit_requires_no_flag_by_itself() {
 #[test]
 fn label_commands_covers_every_verb_with_a_summary() {
   let cmds = label_commands()
-  assert strings.Join(cmds.map(|c| c.name), " ") == "list create edit delete"
+  // LLL-100 added `move`, between edit and delete: it is an edit of the one
+  // field edit cannot touch.
+  assert strings.Join(cmds.map(|c| c.name), " ") == "list create edit move delete"
   for c in cmds {
     assert c.summary != ""
   }

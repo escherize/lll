@@ -29,7 +29,7 @@ fn projects_page(
   me: string,
 ) {
   let team = shell_team(team_id)
-  let vm = match projects_vm(team_id) {
+  let vm = match projects_vm(team_id, team.key) {
     Ok(v) => v,
     Err(e) => {
       http.Error(w, e, 500)
@@ -53,8 +53,10 @@ fn projects_page(
   let _ = w.Write(html.bytes())
 }
 
-fn projects_vm(team_id: string) -> Result<ProjectsVM, string> {
+fn projects_vm(team_id: string, team_key: string) -> Result<ProjectsVM, string> {
   let projects = records.fetch_projects(team_id)?
+  // LLL-426: into THIS team's table, not the configured team's.
+  let base = issues_base(team_key)
   Ok(ProjectsVM {
     projects: projects.map(|p| ProjectVM {
       name: p.name,
@@ -63,7 +65,7 @@ fn projects_vm(team_id: string) -> Result<ProjectsVM, string> {
       status_label: state_label(p.status),
       tone: project_tone(p.status),
       count: project_count(team_id, p.id),
-      href: f"/issues?project={url.QueryEscape(p.name)}",
+      href: f"{base}?project={url.QueryEscape(p.name)}",
     }),
   })
 }

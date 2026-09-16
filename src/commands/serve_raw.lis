@@ -146,7 +146,7 @@ fn issue_raw(vm: IssueVM) -> string {
     for f in vm.findings {
       let mut area = f.area
       if area == "" { area = "-" }
-      lines = lines.append(f"- {f.slug} ({area}): {f.title}")
+      lines = lines.append(f"- {f.slug} ({area}): {f.title}{confidence_suffix(f.confidence, f.confidence_note)}")
     }
   }
   if vm.comments.length() > 0 {

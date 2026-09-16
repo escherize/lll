@@ -149,7 +149,7 @@ fn issue_list_spec() -> Slice<flags.Flag> {
       name: "--sort",
       value: true,
       hint: "f",
-      help: f"{strings.Join(query.sort_fields(), ", ")}; prefix - for descending\n(default: LLL_SORT or 'sort' in .lll.toml, else created)",
+      help: f"{strings.Join(query.sort_fields(), ", ")}; prefix - for descending\npriority leads with urgent (- leads with low); unprioritised last either way\n(default: LLL_SORT or 'sort' in .lll.toml, else created)",
       ..,
     },
     flags.Flag {
@@ -737,25 +737,38 @@ fn list(input: flags.CommandInput) -> Result<(), string> {
   // --limit applies server-side via PB's perPage (capped by PB at 500).
   let mut per_page = 200
   if limit > 0 { per_page = limit }
-  let mut path = f"/api/collections/issues/records?perPage={per_page}&expand=team,assignee,labels,blocked_by,project&sort={url.QueryEscape(sort + ",id")}&page={page}"
   let filter = resolve_filter_query(team_id, filters)?
-  if filter != "" { path = f"{path}&filter={url.QueryEscape(filter)}" }
+  let mut tail = "&expand=team,assignee,labels,blocked_by,project"
+  if filter != "" { tail = f"{tail}&filter={url.QueryEscape(filter)}" }
 
-  let body = pb.get(path)?
-  if json_mode && !ready_only && !blocked_only {
-    fmt.Println(body)
-    return Ok(())
-  }
-
-  let mut issues = models.IssueList { .. }
-  if let Err(e) = json.Unmarshal(body.bytes(), &issues) {
-    return Err(f"decoding issues: {e}")
+  // LLL-382: PocketBase can only sort priority as the number it stores, and
+  // none is 0, so its ascending order leads with the unprioritised - the
+  // opposite of what a triage list is for. No PB sort expression can say
+  // "none last", so that order is decided here, over the WHOLE result set:
+  // one page of the raw numeric order holds the wrong issues, not merely the
+  // right ones in the wrong order, and urgent work past the page falls off.
+  let by_priority = strings.TrimPrefix(sort_spec, "-") == "priority"
+  let mut items: Slice<models.Issue> = []
+  if by_priority {
+    let all = fetch_all_issues(f"&sort=priority,id{tail}")?
+    items = page_of(rank_by_priority(all, strings.HasPrefix(sort_spec, "-")), page, per_page)
+  } else {
+    let path = f"/api/collections/issues/records?perPage={per_page}{tail}&sort={url.QueryEscape(sort + ",id")}&page={page}"
+    let body = pb.get(path)?
+    if json_mode && !ready_only && !blocked_only {
+      fmt.Println(body)
+      return Ok(())
+    }
+    let mut issues = models.IssueList { .. }
+    if let Err(e) = json.Unmarshal(body.bytes(), &issues) {
+      return Err(f"decoding issues: {e}")
+    }
+    items = issues.items
   }
   // LLL-175: --ready is what an agent can pick up now - open, and every
   // blocker done or cancelled; --blocked is the complement with at least
   // one open blocker. Decided here, after the fetch, because PocketBase
   // cannot filter on an expanded relation's state.
-  let mut items = issues.items
   if ready_only {
     items = items.filter(|i| (i.state == "todo" || i.state == "backlog") && open_blockers(i).is_empty())
   }
@@ -952,7 +965,7 @@ fn view(input: flags.CommandInput) -> Result<(), string> {
       }
       let mut area = f.area
       if area == "" { area = "-" }
-      fmt.Println(f"{f.slug} ({area}) — {f.title}")
+      fmt.Println(f"{f.slug} ({area}) — {f.title}{confidence_suffix(f.confidence, f.confidence_note)}")
     }
     if hidden > 0 {
       fmt.Println(f"... and {hidden} more by area — 'lll finding list -a AREA' lists an area, 'lll issue view --raw' prints them all")
@@ -1021,7 +1034,7 @@ fn print_findings_raw(full: models.Issue) -> Result<(), string> {
   for f in findings {
     let mut area = f.area
     if area == "" { area = "-" }
-    fmt.Println(f"- {f.slug} ({area}): {f.title}")
+    fmt.Println(f"- {f.slug} ({area}): {f.title}{confidence_suffix(f.confidence, f.confidence_note)}")
   }
   Ok(())
 }
@@ -2064,11 +2077,19 @@ fn issue_next(input: flags.CommandInput) -> Result<(), string> {
 /// configured team. PocketBase cannot filter on an expanded relation's
 /// state, so readiness is decided here, after the fetch.
 fn ready_issues() -> Result<Slice<models.Issue>, string> {
+  let items = fetch_all_issues("&sort=created,id&expand=team,assignee,labels,blocked_by,project")?
+  Ok(items.filter(|i| (i.state == "todo" || i.state == "backlog") && open_blockers(i).is_empty()))
+}
+
+/// Every page of an issues query, for the callers that must see the whole set
+/// before they can order or filter it: readiness (PB cannot filter on an
+/// expanded relation) and priority order (PB cannot express "none last").
+/// `tail` carries the sort, expand and filter parameters, already escaped.
+fn fetch_all_issues(tail: string) -> Result<Slice<models.Issue>, string> {
   let mut items: Slice<models.Issue> = []
   let mut page = 1
   loop {
-    let path = f"/api/collections/issues/records?perPage=500&page={page}&expand=team,assignee,labels,blocked_by,project&sort=created,id"
-    let body = pb.get(path)?
+    let body = pb.get(f"/api/collections/issues/records?perPage=500&page={page}{tail}")?
     let mut issues = NextPage { .. }
     if let Err(e) = json.Unmarshal(body.bytes(), &issues) {
       return Err(f"decoding issues: {e}")
@@ -2077,7 +2098,49 @@ fn ready_issues() -> Result<Slice<models.Issue>, string> {
     if page >= issues.total_pages || issues.items.is_empty() { break }
     page += 1
   }
-  Ok(items.filter(|i| (i.state == "todo" || i.state == "backlog") && open_blockers(i).is_empty()))
+  Ok(items)
+}
+
+/// Triage order (LLL-382). prio_rank is the house answer to "how urgent is
+/// this" - 1 urgent .. 4 low, none last - shared with the board's priority
+/// ordering and `issue next`. Descending reverses the prioritised ones and
+/// still leaves none last: none is the ABSENCE of a priority, not one below
+/// low, so it belongs at the end of a triage list whichever way it runs.
+/// Stable insertion sort, so the PB order (priority,id) breaks ties.
+fn rank_by_priority(items: Slice<models.Issue>, descending: bool) -> Slice<models.Issue> {
+  let mut out = items.clone()
+  for i in 1..out.length() {
+    let mut j = i
+    while j > 0 && prio_before(out[j], out[j - 1], descending) {
+      let tmp = out[j - 1]
+      out[j - 1] = out[j]
+      out[j] = tmp
+      j -= 1
+    }
+  }
+  out
+}
+
+fn prio_before(a: models.Issue, b: models.Issue, descending: bool) -> bool {
+  let ra = prio_rank(a.priority)
+  let rb = prio_rank(b.priority)
+  if ra == rb { return false }
+  if ra == none_rank() || rb == none_rank() { return rb == none_rank() }
+  if descending { return ra > rb }
+  ra < rb
+}
+
+/// What prio_rank gives an issue with no priority.
+fn none_rank() -> int { prio_rank(0) }
+
+/// One --page window of a locally ordered list, the slice PB's perPage/page
+/// would have returned had it been able to produce this order itself.
+fn page_of(items: Slice<models.Issue>, page: int, per_page: int) -> Slice<models.Issue> {
+  let start = (page - 1) * per_page
+  if start >= items.length() { return [] }
+  let mut end = start + per_page
+  if end > items.length() { end = items.length() }
+  items[start..end]
 }
 
 /// How many issues each candidate unblocks: the open issues that name it as

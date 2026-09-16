@@ -107,3 +107,39 @@ fn collect_board_issues(
   if result.length() != expected { return Err("the board response was incomplete; refresh to retry") }
   Ok(result)
 }
+
+/// One column's issues in board order: the input a reorder needs, not the
+/// team. fetch_board_issues here made every card move re-read every issue
+/// the team ever had, expanded, to find two sorts (LLL-428).
+pub fn fetch_column_issues(team_id: string, state: string) -> Result<Slice<models.Issue>, string> {
+  collect_column_issues(team_id, state, |path| {
+    let mut page = BoardPage { .. }
+    pb.fetch(path, "column issues", &page)?
+    Ok(page)
+  })
+}
+
+/// The column query behind fetch_column_issues, fetcher injected like
+/// collect_board_issues. Deliberately no seen-duplicate or count check: the
+/// caller computes one sort from the result, so a board changing mid-walk can
+/// only land the midpoint a little off, and the next move corrects it — an
+/// error here would fail a drag that is otherwise fine. Only id and sort are
+/// read, so no expansions ride along.
+fn collect_column_issues(
+  team_id: string,
+  state: string,
+  fetch: fn(string) -> Result<BoardPage, string>,
+) -> Result<Slice<models.Issue>, string> {
+  let filter = url.QueryEscape(
+    f"{query.filter(team_id, "", "", "", "", "")} && state={query.quote(state)}",
+  )
+  let mut result: Slice<models.Issue> = []
+  let mut page = 1
+  loop {
+    let batch = fetch(f"/api/collections/issues/records?perPage=200&page={page}&sort=sort,created,id&fields=id,sort&filter={filter}")?
+    for issue in batch.items { result = result.append(issue) }
+    if batch.items.length() < 200 { break }
+    page += 1
+  }
+  Ok(result)
+}

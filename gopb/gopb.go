@@ -14,6 +14,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strings"
 
 	"github.com/escherize/lll/pb"
 	"github.com/pocketbase/dbx"
@@ -65,6 +66,21 @@ func Serve(dataDir, addr, adminEmail, adminPassword string) error {
 	registerWebhookDelivery(app)
 	registerMemberGuards(app)
 	registerIssuePrecondition(app)
+	registerClaimExpiry(app)
+	// LLL-235: a team key is uppercase, whoever writes it. Keys were stored
+	// as typed, so 'eng' and 'ENG' were two teams the unique index was happy
+	// with and prose could not tell apart, and every other surface - the
+	// derived issue key, the rail, the docs - assumes uppercase. Normalising
+	// here rather than in the CLI makes it true for the raw API and any
+	// future writer too, which is what "one rule" has to mean.
+	normalizeTeamKey := func(e *core.RecordEvent) error {
+		if key := e.Record.GetString("key"); key != "" {
+			e.Record.Set("key", strings.ToUpper(key))
+		}
+		return e.Next()
+	}
+	app.OnRecordCreate("teams").BindFunc(normalizeTeamKey)
+	app.OnRecordUpdate("teams").BindFunc(normalizeTeamKey)
 	app.OnRecordCreate("issues").BindFunc(func(e *core.RecordEvent) error {
 		// Keep the max-number read and record insertion on PocketBase's
 		// serialized writer connection. Reading before that transaction lets
