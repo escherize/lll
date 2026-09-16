@@ -48,8 +48,22 @@ def main() -> None:
     # Whatever the caller configured must not steer the fixture, the same
     # bargain e2e_begin makes (LLL-394, LLL-400).
     for leak in ("LLL_ME", "LLL_TOKEN", "LLL_URL", "LLL_TEAM", "LLL_CONFIG_HOME",
-                 "XDG_CONFIG_HOME", "LLL_BOARD_TOKEN"):
+                 "LLL_BOARD_TOKEN"):
         env.pop(leak, None)
+    # LLL-423: XDG_CONFIG_HOME is POISONED rather than removed. Stripping it
+    # asserted nothing and hid a real failure: seed.sh moved HOME and stopped
+    # there, so on any machine exporting XDG_CONFIG_HOME (a common dotfiles
+    # setting) seed read the developer's own lll.toml and died on its hosted
+    # token against a server that had never issued it. The gate stayed green
+    # because the gate had unset the variable. A config root that exists and
+    # must be ignored is the only version of this check worth running.
+    poison = demo.parent / f"{demo.name}-config"
+    (poison / "lll").mkdir(parents=True, exist_ok=True)
+    (poison / "lll" / "lll.toml").write_text(
+        'url = "http://127.0.0.1:1"\ntoken = "poison-not-a-real-token"\n'
+        'team = "POISON"\nme = "poison"\n'
+    )
+    env["XDG_CONFIG_HOME"] = str(poison)
 
     proc = subprocess.Popen(
         ["bash", str(SEED)],
@@ -72,6 +86,7 @@ def main() -> None:
     finally:
         _reap(proc)
         shutil.rmtree(demo, ignore_errors=True)
+        shutil.rmtree(poison, ignore_errors=True)
 
     transcript = "".join(seen[-25:])
     if counts is None:
