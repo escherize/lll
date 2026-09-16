@@ -365,10 +365,11 @@ input:focus, textarea:focus, select:focus {
     "description props"
     "attachments props"
     "upload props"
+    "findings props"
     "thread props"
     "comp   props"
     ".      props";
-  grid-template-rows: auto auto auto auto auto auto 1fr;
+  grid-template-rows: auto auto auto auto auto auto auto 1fr;
   min-height: 100%;
 }
 .issue-detail { display: contents; }
@@ -399,6 +400,12 @@ input:focus, textarea:focus, select:focus {
 .deleted { grid-area: main; padding: 28px 40px; color: var(--text-2); }
 
 .thread { grid-area: thread; margin: 0 40px; max-width: 680px; border-top: 1px solid var(--border); padding-top: 18px; }
+/* LLL-424: related findings and comments are both .thread sections, and a
+   named grid area places every element that claims it in the SAME cell - so
+   an issue with both drew one over the other. The findings section gets its
+   own row above the comments; the shared .thread rule still gives it its
+   rule, margins and spacing. */
+.thread.findings { grid-area: findings; }
 .thread > h2 { font-size: 13px; font-weight: 600; margin: 0 0 14px; }
 .comment { display: flex; gap: 10px; margin-bottom: 16px; }
 .comment .avatar { margin-top: 1px; }
@@ -709,8 +716,8 @@ input:focus, textarea:focus, select:focus {
   .column { flex: 0 0 240px; min-width: 240px; }
   .issue-scroll {
     grid-template-columns: minmax(0, 1fr);
-    grid-template-areas: "main" "description" "attachments" "props" "upload" "thread" "comp";
-    grid-template-rows: auto auto auto auto auto auto auto;
+    grid-template-areas: "main" "description" "attachments" "props" "upload" "findings" "thread" "comp";
+    grid-template-rows: auto auto auto auto auto auto auto auto;
   }
   .issue-main, .deleted { padding: 20px 16px 0; }
   .props { border-left: none; border-top: 1px solid var(--border); border-bottom: 1px solid var(--border); padding: 16px; }
