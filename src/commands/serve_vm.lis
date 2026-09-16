@@ -330,6 +330,9 @@ pub struct FindingVM {
   pub slug: string,
   pub title: string,
   pub area: string,
+  // The doc page for this finding (LLL-405). Team-routed, because a slug is
+  // unique per team only; the issue's own team supplies the key.
+  pub href: string,
 }
 
 /// View model for the issue page / issue-detail fragment.
@@ -535,4 +538,31 @@ pub struct ProjectVM {
 /// View model for /projects.
 pub struct ProjectsVM {
   pub projects: Slice<ProjectVM>,
+}
+
+/// View model for /t/KEY/doc/SLUG (LLL-405). `body` is what a browser gets
+/// and `body_md` what `?raw` gets, both off the same record in doc_vm, so the
+/// two forms cannot disagree — the bargain IssueVM.description_md makes.
+pub struct DocVM {
+  pub slug: string,
+  pub title: string,
+  pub kind: string,
+  pub kind_label: string,
+  // The retrieval coordinates (TASK-103): one workspace area, and the paths
+  // the doc is about. Empty on docs that name neither.
+  pub area: string,
+  pub paths: string,
+  pub created: string,
+  pub updated: string,
+  pub issues: Slice<DocIssueVM>,
+  pub body: template.HTML,
+  pub body_md: string,
+  pub team_key: string,
+}
+
+/// One issue a doc names, as a row on the doc page.
+pub struct DocIssueVM {
+  pub key: string,
+  pub title: string,
+  pub href: string,
 }
