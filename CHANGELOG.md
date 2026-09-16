@@ -4,126 +4,136 @@ All notable changes to lll. The format follows Keep a Changelog; versions
 follow SemVer, with 0.x meaning the CLI surface can still move between
 minors. Issue keys are on the project's own board (`lll issue view KEY`).
 
+## [0.3.1] - 2026-09-16
+
+### Fixed
+
+- `lll --version` reports lll's version. It ran `git describe` at startup
+  and answered with whatever repository the caller stood in, so the 0.3.0
+  binary said `lll 0.2.0` outside a checkout, and `lll 9.9.9` inside a
+  project tagged `v9.9.9`. The version is a literal now. The gate asserts
+  it matches `[project] version` in lisette.toml, and that the answer is
+  the same inside the checkout and outside it.
+
 ## [0.3.0] - 2026-09-15
 
-The release shaped by lll running its own board with several agents working
-it at once. That pressure asked for surfaces an agent needs rather than a
-person — one command that says what to work on next, identities that are
-not people, events that leave the process, and the operating instructions
-carried inside the binary. It also put real text through the board, which
-is how two panics were found.
+The release shaped by several agents working one board at once: a command
+that says what to work on next, identities that are not people, events that
+leave the process, and the operating instructions carried in the binary.
 
 ### Breaking
 
 - **Repeated `--state` and `--label` mean the union.** `--state todo
-  --state in-progress` returns both; it used to silently keep the last one
+  --state in-progress` returns both. It used to keep the last one silently
   and drop the rest. A flag repeated where repetition means nothing is now
-  refused rather than quietly ignored.
+  refused instead of ignored.
 - **`me` no longer mints members.** A `me` naming nobody used to create
-  that member on the spot, which is how a board accumulates identities
+  that member on the spot, which is how a board fills with identities
   nobody chose. It is now an error that names the fix.
 - **Deleting a member requires admin authority.** Migration
-  `1789200000_member_delete_admin.js` sets `members.deleteRule = null`;
-  deletion is refused for ordinary tokens and checked against assignments
+  `1789200000_member_delete_admin.js` sets `members.deleteRule = null`.
+  Deletion is refused for ordinary tokens, and checked against assignments
   and comment authorship first.
 - **Claims, releases and assignment edits are one server transaction.**
-  Authenticated endpoints commit the claim and every accompanying issue
-  field together, against an observed claim id. **Deploy the server before
-  distributing the client**: an older server refuses with an explicit
-  upgrade instruction rather than falling back to unsafe two-request
-  writes.
+  Deploy the server before you distribute the client. An older server
+  refuses these writes and names the upgrade. It does not fall back to an
+  unsafe two-request write. The endpoints commit the claim and every
+  accompanying issue field together, against an observed claim id.
 - **`lll up` serves one address.** The separate `:8091` API service is
-  retired; the board proxies `/api/` and `/_/` on its own port.
+  retired. The board proxies `/api/` and `/_/` on its own port.
 
 ### Added
 
-- `lll issue next`: the one issue to work now — ready and unclaimed, then
-  priority, then oldest, then most-unblocking. `--claim` takes it, so an
-  agent starts work in one command. `lll watch --ready` streams the same
+- `lll issue next` prints the one issue to work now: ready and unclaimed,
+  then priority, then oldest, then most-unblocking. `--claim` takes it, so
+  an agent starts work in one command. `lll watch --ready` streams the same
   agenda as it changes.
 - `lll webhook add|list|remove`: the server POSTs issue events to your
   URLs, with bounded retries and backoff for deliveries that fail.
-- `lll api METHOD PATH`: raw authenticated passthrough to the board's
-  PocketBase API, with `--schema` printing the collection and field
-  reference — an escape hatch that does not require finding the admin UI.
+- `lll api METHOD PATH`: authenticated passthrough to the board's
+  PocketBase API. `--schema` prints the collection and field reference. It
+  reaches what the CLI does not wrap, without the admin UI.
 - `lll bot NAME`: an agent identity in one command, member and token,
-  printed once. Bot members are a distinct kind that cannot log in, are
-  owned by a person, badged on the board, and rotatable.
-- `lll import github OWNER/REPO`: brings a GitHub backlog in through `gh` —
+  printed once. A bot member cannot log in, is owned by a person, is badged
+  on the board, and is rotatable.
+- `lll import github OWNER/REPO` brings a GitHub backlog in through `gh`:
   title, body, labels and state, each issue carrying its `gh#N` ref.
   Re-importing skips what it already brought.
-- `lll skill list` / `lll skill get NAME`: the agent operating instructions
-  ship inside the binary, so an agent working from another repo can read
-  them without this checkout.
+- `lll skill list` and `lll skill get NAME`. The agent operating
+  instructions ship inside the binary. An agent working from another repo
+  reads them without this checkout.
 - Attachments: `issue attach KEY FILE`, `issue unattach`, `issue cat`, and
   upload from the board. Files are protected, appended rather than
   replaced, and refused to anonymous readers.
 - Surgical description edits: `issue update --description-replace-old/-new`
-  and `--description-append`, plus `--if-unchanged-since STAMP` so a
-  concurrent edit is refused instead of overwritten.
-- Homebrew distribution: `brew install escherize/lll/lll`, with the tap
-  formula rendered and pushed by the release workflow.
-- Provenance: an issue records who created it and the host, path, branch
-  and commit it was created from, shown on the board and in exports.
-- `lll issue pr` records `gh#N` back on the issue once `gh` confirms the
-  PR, and adopts the existing PR when the branch already has one.
-- `doc list --search`, `doc link`/`unlink`, `finding list --limit`, a
-  positional finding slug, `-l` for `--label`, `issue list --page N` and
-  sorting by title.
+  and `--description-append`. `--if-unchanged-since STAMP` refuses a write
+  when someone edited the issue first.
+- Homebrew distribution: `brew install escherize/lll/lll`. The release
+  workflow renders the tap formula and pushes it.
+- Provenance: an issue records its creator, and the host, path, branch and
+  commit it was created from. Both show on the board and in exports.
+- `lll issue pr` records `gh#N` on the issue once `gh` confirms the pull
+  request, and adopts the existing one when the branch already has it.
+- Smaller additions:
+  - `doc list --search`
+  - `doc link` and `doc unlink`
+  - `finding list --limit`, and a positional finding slug
+  - `-l` for `--label`
+  - `issue list --page N`, and sorting by title
 - `lll login --url` discovers and persists the board's advertised endpoint
-  through `/.well-known/lll`; an older server falls back to manual
+  through `/.well-known/lll`. An older server falls back to manual
   configuration.
 - `LLL_CONFIG_HOME` chooses the config root, for harnesses that cannot set
   `HOME`.
-- The board shows live claims and can claim and release.
-- Docs have an address: `/t/TEAM/doc/SLUG` renders a decision, finding, PRD
-  or wiki page through the same markdown renderer as issue descriptions,
-  with the properties `doc view` prints beside it. Read-only for now — the
-  point is that a reason can be linked to, from an issue or a review.
+- The board shows live claims, and can claim and release.
+- Docs have an address. `/t/TEAM/doc/SLUG` renders a decision, finding, PRD
+  or wiki page through the renderer that issue descriptions use, with the
+  properties `doc view` prints beside it. A decision can now be linked to
+  from an issue or a review. Read-only for now.
 
 ### Changed
 
 - The board renders every issue in the team. Past roughly 200 it used to
-  truncate silently; pagination, ordering and live updates now hold across
+  truncate silently. Pagination, ordering and live updates now hold across
   a full board.
 - The saved column view rides a cookie the server reads on first paint, so
-  the board no longer flashes the wrong columns before correcting itself.
-  The webfont is cached rather than refetched, for the same reason.
-- The 401 board gate has a field to paste the token into, instead of only
-  explaining where the token lives.
+  the board no longer shows the wrong columns before correcting itself. The
+  webfont is cached rather than refetched, for the same reason.
+- The 401 board gate takes the token in a field, instead of only explaining
+  where the token lives.
 - Issue table columns are measured in grapheme display cells, so emoji and
   wide characters line up.
-- Errors say what to do: rejected edits restore the authoritative values,
+- Errors say what to do. Rejected edits restore the authoritative values,
   board write failures name themselves instead of vanishing, and creation
-  errors appear inside the dialog that caused them.
+  errors appear inside the dialog that raised them.
 - `cmd+enter` sends a comment, and a successful send clears the box.
-- The e2e suites run from outside the checkout, so a gate no longer mutates
-  the tree another agent is reading — including the tracked `.lll.toml`.
+- The e2e suites run from outside the checkout. A gate no longer writes to
+  the tree another agent is reading, including the tracked `.lll.toml`.
 
 ### Fixed
 
-- **An issue description killed the board.** The hover preview capped on
-  byte length and sliced on rune indices, so a description of ~100 accented
-  characters or 60 emoji panicked a goroutine outside any HTTP handler and
-  took the server process down.
-- **`watch --json` panicked on any multi-byte record**, for the same
-  byte-versus-rune reason — one emoji anywhere in the payload ended the
-  stream.
+- **An issue description could kill the board.** The hover preview capped
+  on byte length and sliced on rune indices. A description of about 100
+  accented characters, or 60 emoji, panicked a goroutine outside any HTTP
+  handler, and the server process died.
+- **`watch --json` panicked on any multi-byte record.** One emoji in the
+  payload ended the stream, for the same reason: byte length fed to a rune
+  index.
 - Related findings and comments no longer draw on top of each other on the
-  issue page: both carried the same grid area, so a named cell held two
-  sections at once. The DOM was right all along; only geometry could see it.
-- The last hidden column can be shown again; unhiding it no longer restores
+  issue page. Both claimed one named grid area, so a single cell held two
+  sections. The markup was correct; only the geometry was wrong.
+- The last hidden column can be shown again. Unhiding it no longer restores
   the hide from the saved view.
-- An expired boot token is re-minted the way a rejected one already was.
-- `mise run scratch` and `mise run seed` read their own isolated config
-  rather than the developer's real token on machines that export
-  `XDG_CONFIG_HOME`, which moving `HOME` alone stopped being enough for.
+- An expired boot token is re-minted, as a rejected one already was.
+- `mise run scratch` and `mise run seed` read their own isolated config.
+  Moving `HOME` stopped being enough once `LLL_CONFIG_HOME` and
+  `XDG_CONFIG_HOME` outranked it. On a machine that exports the XDG one,
+  both read the developer's real token.
 - `issue list --sort priority` leads with urgent and leaves the
-  unprioritised last. PocketBase sorts on the stored number and `none` is
-  0, so the ascending fetch led with issues nobody had triaged and buried
-  the urgent ones — and because the ordering decided which page you got,
-  urgent work past `--limit` fell off the list entirely rather than merely
-  sorting late.
+  unprioritised last. PocketBase sorts on the stored number, where `none`
+  is 0, so the ascending fetch led with untriaged issues and buried the
+  urgent ones. The order also decided which page you got: urgent work past
+  `--limit` left the list entirely.
 - `issue update --project ""` clears the project, `--` ends options in
   every verb, and search results supersede stale in-flight queries.
 

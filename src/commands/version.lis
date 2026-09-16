@@ -1,21 +1,15 @@
-import "go:os/exec"
-import "go:strings"
-
 /// The build's version, printed by `lll --version` and shown in the board's
-/// rail footer — the browser is lll's second interface, so it says which
-/// build is serving it.
+/// rail footer, so the browser says which build is serving it.
 ///
-/// Derived from git: `git describe --tags --match 'v*' --always --dirty`
-/// names the tag on a tag checkout and auto-increments the commit count in a
-/// working checkout (`0.1.0-3-gabc123`, or a bare short hash before the first
-/// tag). `lis build` has no version-injection hook (only --go-flags
-/// pass-through, which cannot target generated identifiers reliably), so a
-/// binary outside a checkout falls back to the released version below — bump
-/// it (and [project] version in lisette.toml) when you tag.
+/// A literal, bumped with [project] version in lisette.toml when tagging. The
+/// gate asserts the two agree, so a missed bump fails before a release does.
+///
+/// This used to run `git describe --tags` at startup, which answered with
+/// whatever repository the caller was standing in. lll is run inside other
+/// people's projects, so it usually was one: in a checkout tagged v9.9.9 the
+/// binary reported "lll 9.9.9", and outside any repo it fell back to a
+/// hardcoded literal that a release could forget to bump. v0.3.0 shipped
+/// reporting 0.2.0 that way (LLL-431).
 pub fn version() -> string {
-  let Ok(out) = exec.Command("git", "describe", "--tags", "--match", "v*", "--always", "--dirty").Output() else {
-    return "0.2.0"
-  }
-  let desc = strings.TrimPrefix(strings.TrimSpace(out as string), "v")
-  if desc == "" { "0.2.0" } else { desc }
+  "0.3.1"
 }

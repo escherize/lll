@@ -187,6 +187,7 @@
   pre .cmd { color: var(--text); font-weight: 500; }
   pre .sig { color: var(--text-3); }
   pre .key { color: var(--text); }
+  pre .note { color: var(--text-3); }
 
   /* The Icon-Carries-Color Rule: state colour reaches the page only through
      the drawn icon; the text beside it stays gray. */
@@ -221,6 +222,16 @@
   }
   .step p { margin: 9px 0 0; color: var(--text-2); max-width: 58ch; font-size: 16px; text-wrap: pretty; }
   .step .term { margin: 18px 0 0; }
+
+  .shot {
+    margin: 26px 0 0;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    box-shadow: var(--card-shadow);
+    overflow: hidden;
+    line-height: 0;
+  }
+  .shot img { display: block; width: 100%; height: auto; }
 
   .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(228px, 1fr)); gap: 30px 36px; margin-top: 30px; }
   .feat h4 { font-size: 15px; font-weight: 600; margin: 0 0 6px; color: var(--text); letter-spacing: -0.01em; }
@@ -302,7 +313,7 @@
     <nav class="top-links">
       <a href="https://github.com/escherize/lll">Source</a>
       <a href="https://github.com/escherize/lll#readme">Docs</a>
-      <a href="https://github.com/escherize/lll/releases/tag/v0.2.0">v0.2.0</a>
+      <a href="https://github.com/escherize/lll/releases/tag/v0.3.1">v0.3.1</a>
     </nav>
   </div>
 </header>
@@ -319,18 +330,21 @@
 
     <div class="term">
       <div class="term-head"><span class="label">Install</span></div>
-      <div class="term-body"><pre><span class="sig">$</span> <span class="cmd">mkdir -p ~/bin &amp;&amp; curl -LsSf -o ~/bin/lll \
+      <div class="term-body"><pre><span class="sig">$</span> <span class="cmd">brew install escherize/lll/lll</span>
+
+<span class="note">or, without Homebrew:</span>
+<span class="sig">$</span> <span class="cmd">mkdir -p ~/bin &amp;&amp; curl -LsSf -o ~/bin/lll \
     https://github.com/escherize/lll/releases/latest/download/lll-darwin-arm64 \
     &amp;&amp; chmod +x ~/bin/lll</span>
 
 <span class="sig">$</span> <span class="cmd">lll --version</span>
-lll 0.2.0</pre></div>
+lll 0.3.1</pre></div>
     </div>
 
     <div class="dl">
-      <a class="act mono" href="https://github.com/escherize/lll/releases/download/v0.2.0/lll-darwin-arm64">darwin-arm64</a>
-      <a class="act mono" href="https://github.com/escherize/lll/releases/download/v0.2.0/lll-linux-amd64">linux-amd64</a>
-      <a class="act mono" href="https://github.com/escherize/lll/releases/download/v0.2.0/lll-linux-arm64">linux-arm64</a>
+      <a class="act mono" href="https://github.com/escherize/lll/releases/download/v0.3.1/lll-darwin-arm64">darwin-arm64</a>
+      <a class="act mono" href="https://github.com/escherize/lll/releases/download/v0.3.1/lll-linux-amd64">linux-amd64</a>
+      <a class="act mono" href="https://github.com/escherize/lll/releases/download/v0.3.1/lll-linux-arm64">linux-arm64</a>
     </div>
   </div>
 </div>
@@ -411,6 +425,16 @@ commit .lll.toml — every clone and worktree of this repo is attached from then
   </section>
 
   <section>
+    <h2>The board</h2>
+    <p class="sec-note">Every state, every card, one SSE connection. No reload.</p>
+    <figure class="shot">
+      <img src="board.png" width="2880" height="1240"
+           alt="The lll board: Backlog, Todo, In progress, In review, Done and Cancelled
+                columns with labelled issue cards, a team rail, favourites and saved views.">
+    </figure>
+  </section>
+
+  <section>
     <h2>What you get</h2>
     <p class="body">
       <strong>A tracker that runs where you run.</strong> PocketBase is compiled into the
@@ -446,16 +470,27 @@ commit .lll.toml — every clone and worktree of this repo is attached from then
       member record and a long-lived token, so authorship is a fact the server knows rather than
       a convention everyone remembers.
     </p>
+    <p class="body">
+      <code>lll bot</code> mints that identity in one command. A bot member cannot log in,
+      is owned by a person, and is rotatable. <code>lll issue next</code> answers the question
+      an agent has: which issue now. It picks ready and unclaimed, then priority, then oldest.
+      <code>--claim</code> takes it, so two agents cannot start the same work.
+      <code>lll skill get</code> prints the operating instructions carried in the binary.
+    </p>
     <div class="term">
       <div class="term-head"><span class="label">Streams and tokens</span></div>
-      <div class="term-body"><pre><span class="sig">$</span> <span class="cmd">lll watch --state in-review --json | jq -r '.record.title'</span>
-Fix the login flow
-Board rail spacing
+      <div class="term-body"><pre><span class="sig">$</span> <span class="cmd">lll bot bot-deploy</span>
+created bot member bot-deploy (kind=bot, owned by bryan)
+LLL_TOKEN=eyJhbGciOi…
+one-time bot token for bot-deploy
 
-<span class="sig">$</span> <span class="cmd">lll token create deploy-bot</span>
-token for deploy-bot, shown once:
-  eyJhbGciOi…
-set it as LLL_TOKEN in the agent's environment</pre></div>
+<span class="sig">$</span> <span class="cmd">lll issue next --claim</span>
+Claimed ENG-2 for bot-deploy
+ENG-2
+
+<span class="sig">$</span> <span class="cmd">lll watch --state in-review --json | jq -r '.record.title'</span>
+Fix the login flow
+Board rail spacing</pre></div>
     </div>
   </section>
 
@@ -470,7 +505,7 @@ set it as LLL_TOKEN in the agent's environment</pre></div>
     <div class="term">
       <div class="term-head"><span class="label">lll up</span></div>
       <div class="term-body"><pre><span class="sig">$</span> <span class="cmd">lll up</span>
-lll    0.2.0
+lll    0.3.1
 admin  http://127.0.0.1:8090/_/  admin@local.dev / admin-local-123
 team   ENG
 me     bryan
@@ -483,7 +518,7 @@ board  http://127.0.0.1:8100</pre></div>
 </main>
 
 <footer class="wrap">
-  <div>lll v0.2.0 · a Linear-style tracker over embedded PocketBase</div>
+  <div>lll v0.3.1 · a Linear-style tracker over embedded PocketBase</div>
   <div><a href="https://github.com/escherize/lll">github.com/escherize/lll</a></div>
 </footer>
 </body>
