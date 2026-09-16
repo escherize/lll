@@ -47,6 +47,14 @@ pub fn label_commands() -> Slice<flags.Command> {
       run: label_edit,
     },
     flags.Command {
+      name: "move",
+      summary: "move a label to another team; refuses while issues outside it still carry the label",
+      page: "",
+      spec: label_move_spec(),
+      positional: "NAME",
+      run: label_move,
+    },
+    flags.Command {
       name: "delete",
       summary: "delete a label; refuses while issues still carry it, and --force drops it off all of them",
       page: "",
@@ -96,6 +104,12 @@ fn label_edit_spec() -> Slice<flags.Flag> {
   flags.with_team([
     flags.Flag { name: "-n", value: true, hint: "\"new name\"", help: "new label name", .. },
     flags.Flag { name: "-c", value: true, hint: "\"#5e6ad2\"", help: "new hex color for the label", .. },
+  ])
+}
+
+fn label_move_spec() -> Slice<flags.Flag> {
+  flags.with_team([
+    flags.Flag { name: "--to", value: true, hint: "KEY", help: "team key to move the label to", .. },
   ])
 }
 
@@ -185,6 +199,23 @@ fn label_delete(input: flags.CommandInput) -> Result<(), string> {
   }
   let _ = pb.delete(f"/api/collections/labels/records/{label.id}")?
   fmt.Println(deleted_line("label", name, used))
+  Ok(())
+}
+
+/// `lll label move NAME --to KEY` (LLL-100). A label created in the wrong
+/// team could only be deleted and remade before this, which loses every issue
+/// that carried it.
+fn label_move(input: flags.CommandInput) -> Result<(), string> {
+  let spec = label_move_spec()
+  let usage = flags.usage("lll label move", spec, "NAME")
+  let p = input.parsed
+  let Some(name) = nonempty(p.first()) else {
+    return Err(f"usage: {usage}")
+  }
+  let from = team_flag_or_current(p.one("--team"))?
+  let to = move_destination(p.one("--to"))?
+  let label = records.resolve_label(from.id, name)?
+  fmt.Println(move_to_team("label", label.name, label.id, from, to)?)
   Ok(())
 }
 

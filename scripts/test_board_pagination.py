@@ -178,11 +178,24 @@ with tempfile.TemporaryDirectory(prefix='lll-board-pages-') as directory:
         status, body = web_request(proxy_board, '/t/BP360/')
         assert status == 500 and '503' in body and not cards(body)
         before = api_request(victim_path)
+        # LLL-428 scoped the reorder fetch to the target column. A move into a
+        # column whose cards sit on page one (done is empty) no longer needs
+        # the team's second page, so it succeeds with the card's sort intact
+        # while that page is unavailable.
         status, body = web_request(proxy_board, '/state', {'key': 'BP360-205', 'state': 'done'})
+        assert status == 200 and '503' not in body
+        moved = api_request(victim_path)
+        assert moved['state'] == 'done' and moved['sort'] == before['sort'], 'move into an empty column re-sorted the card'
+        # done renders after todo and the card still holds the largest sort,
+        # so the board order checked below is unchanged.
+        # A drop inside a column that spans page two still needs that page;
+        # that reorder fails upstream without changing the issue.
+        before_moved = api_request('/api/collections/issues/records/' + rows[1]['id'])
+        status, body = web_request(proxy_board, '/state', {'key': 'BP360-' + str(rows[1]['number']), 'state': 'todo', 'before': rows[201]['id']})
         assert status == 200 and '503' in body
         assert 'class="error-summary"' in body and '<details class="error-details">' in body
         assert '<details class="error-details" open' not in body
-        assert api_request(victim_path) == before, 'failed reorder changed the issue'
+        assert api_request('/api/collections/issues/records/' + rows[1]['id']) == before_moved, 'failed reorder changed the issue'
         Proxy.fail.clear()
         api_request(victim_path, {'title': 'Recovered full board'}, 'PATCH')
         observed = stream.until(lambda e: 'Recovered full board' in e and bool(cards(e)))

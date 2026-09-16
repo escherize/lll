@@ -244,7 +244,12 @@ fn settings_apply(
     "label" => {
       if name == "" { return Err("label name is required") }
       let color = form_hex(r, "color")?
-      save_record("labels", id, LabelPatch { name, color, team: team_id })
+      // LLL-100: the row's team select. The move runs FIRST and may refuse,
+      // so a rejected move leaves the name and colour untouched too - one
+      // submit is one outcome. `owner` is where the record ends up, so the
+      // patch below cannot drag it back to the page's team.
+      let owner = move_scope_if_asked(r, "label", name, id, team_id)?
+      save_record("labels", id, LabelPatch { name, color, team: owner })
     },
     "member" => {
       if name == "" { return Err("member name is required") }
@@ -298,7 +303,8 @@ fn settings_apply(
       if project_statuses().find(|s| s == status).is_none() {
         return Err(f"unknown project status '{status}'")
       }
-      save_record("projects", id, ProjectPatch { name, status, team: team_id })
+      let owner = move_scope_if_asked(r, "project", name, id, team_id)?
+      save_record("projects", id, ProjectPatch { name, status, team: owner })
     },
     other => Err(f"unknown settings section '{other}'"),
   }
@@ -330,6 +336,31 @@ fn settings_collection(kind: string) -> Result<string, string> {
 }
 
 /// Create (no id) or update (id) one record.
+/// LLL-100: the settings row's team select, applied before anything else the
+/// row asked for. Returns the team the record should END UP in, so the caller's
+/// patch writes the destination rather than dragging it back.
+///
+/// A create (no id) has nothing to move: the row's team select is the team the
+/// new record is born in, which `team_id` already is.
+///
+/// The refusal rule lives in move_scope.lis and is the CLI's, so the board and
+/// `lll label move` cannot answer differently - one rule, two doors.
+fn move_scope_if_asked(
+  r: mut Ref<http.Request>,
+  kind: string,
+  name: string,
+  id: string,
+  team_id: string,
+) -> Result<string, string> {
+  let wanted = strings.TrimSpace(r.PostFormValue("team"))
+  if id == "" || wanted == "" { return Ok(team_id) }
+  let to = move_destination(wanted)?
+  if to.id == team_id { return Ok(team_id) }
+  let from = shell_team(team_id)
+  let _ = move_to_team(kind, name, id, from, to)?
+  Ok(to.id)
+}
+
 fn save_record(coll: string, id: string, value: Unknown) -> Result<(), string> {
   let payload = marshal(value)?
   if id == "" {

@@ -1,0 +1,65 @@
+{{/* The document page (LLL-405).
+
+     A decision, finding, PRD or wiki page at an address. Until this page the
+     only way to read one was `lll doc view SLUG`, which needs a terminal and
+     a configured CLI — so the records that answer "why is this like this"
+     were the one kind with no URL, and the board could not link to them.
+
+     Read-only: decisions are immutable by policy, and `lll doc edit` is the
+     write path. No page-specific JavaScript and no /events connection, as
+     with /projects and /issues: the bridge broadcasts ONE unfiltered #board
+     fragment to every board-scoped client, so a page that subscribed would be
+     morphed into the board.
+
+     It borrows the issue page's prose classes rather than minting its own —
+     a doc body and an issue description are the same markdown through the
+     same renderer, and DESIGN.md rations new surface hard. */}}
+{{define "doc-page"}}<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>lll - {{.Page.Slug}}</title>
+<link rel="stylesheet" href="/static/theme.css">
+{{template "accent-head" .Rail}}
+<script src="/static/mermaid-init.js" defer></script>
+</head>
+<body>
+{{template "icons"}}
+<div class="app">
+  {{template "rail" .Rail}}
+  <div class="main">
+    <header class="topbar">
+      <div class="crumbs"><a href="{{.Rail.BoardBase}}">Board</a><span class="sep">›</span><span class="here">{{.Page.Slug}}</span></div>
+      <div class="spacer"></div>
+    </header>
+    <div class="issue-wrap">
+      <div class="issue-scroll">
+        {{template "doc-detail" .Page}}
+        {{template "doc-body" .Page.Body}}
+      </div>
+    </div>
+  </div>
+</div>
+</body>
+</html>{{end}}
+
+{{/* The slug is shown, not only used: a doc is CITED by slug (`lll doc view
+     identity-is-the-token`, `[[identity-is-the-token]]` in an issue), so a
+     reader who arrived from a link needs the name to quote back. */}}
+{{define "doc-detail"}}<article id="doc-detail" class="issue-detail">
+<div class="issue-main">
+<span class="key">{{.Slug}}</span>
+<h1>{{.Title}}</h1>
+</div>
+<aside id="doc-properties" class="props">
+<h3>Properties</h3>
+<div class="prop"><span class="k">Kind</span><span class="v">{{.KindLabel}}</span></div>
+{{if .Area}}<div class="prop"><span class="k">Area</span><span class="v">{{.Area}}</span></div>
+{{end}}{{if .Paths}}<div class="prop"><span class="k">Paths</span><span class="v">{{.Paths}}</span></div>
+{{end}}<div class="prop"><span class="k">Created</span><span class="v">{{.Created}}</span></div>
+<div class="prop"><span class="k">Updated</span><span class="v">{{.Updated}}</span></div>
+{{if .Issues}}<div class="prop"><span class="k">Issues</span><span class="v">{{range .Issues}}<a class="prose-link" href="{{.Href}}" title="{{.Title}}">{{.Key}}</a> {{end}}</span></div>
+{{end}}</aside>
+</article>{{end}}
+
+{{define "doc-body"}}<div id="doc-body" class="issue-desc md"{{if not .}} hidden{{end}}>{{.}}</div>{{end}}

@@ -1,0 +1,114 @@
+import "records"
+import "go:encoding/json"
+import "go:net/url"
+import "go:strings"
+
+import "models"
+import "pb"
+import "query"
+
+// LLL-100: moving a label or project from one team to another.
+//
+// A label or project belongs to exactly one team (TASK-173), and the scope was
+// write-once: `--team` at creation, read-only text on /settings. One created in
+// the wrong team could only be deleted and remade, which loses every issue that
+// referenced it — the relation is the thing you were trying to keep.
+
+/// The PATCH body. Only the relation moves; name, colour, description and
+/// status are not this verb's business.
+#[json]
+struct ScopePatch { team: string }
+
+/// Move one team-owned record to another team, refusing while another team's
+/// issues still reference it.
+///
+/// Decided on LLL-100: **refuse**, rather than letting the references follow
+/// (team A's issues would then carry a B-owned label) or clearing them (A's
+/// issues silently lose it). It is the LLL-341 precedent — deleting a member
+/// is refused while they hold issues — and the only option that rewrites
+/// nothing the user did not ask for. The way through is to unassign the
+/// references and run it again.
+fn move_to_team(
+  kind: string,
+  name: string,
+  id: string,
+  from: models.Team,
+  to: models.Team,
+) -> Result<string, string> {
+  if from.id == to.id {
+    return Ok(f"{kind} {name} is already in {to.key}")
+  }
+  let blocking = referencing_issue_keys(kind, id, to.id)?
+  if !blocking.is_empty() {
+    return Err(refuse_move(kind, name, from, to, blocking))
+  }
+  let payload = match json.Marshal(ScopePatch { team: to.id }) {
+    Ok(p) => p as string,
+    Err(e) => return Err(f"encoding {kind}: {e}"),
+  }
+  let _ = pb.patch(f"/api/collections/{kind}s/records/{id}", payload)?
+  Ok(f"Moved {kind} {name}: {from.key} -> {to.key}")
+}
+
+/// The keys of the issues that stand in the way: every issue referencing this
+/// record that does NOT belong to the destination team. An issue already in the
+/// destination is not a problem — after the move it and the record agree.
+///
+/// Keys, not a count: "3 issues reference it" sends you looking, and the fix is
+/// per-issue.
+fn referencing_issue_keys(
+  kind: string,
+  id: string,
+  to_team_id: string,
+) -> Result<Slice<string>, string> {
+  let filter = match kind {
+    "label" => query.filter("", "", "", "", id, ""),
+    "project" => query.filter("", "", "", id, "", ""),
+    _ => return Err(f"cannot move a '{kind}'"),
+  }
+  let mut list = models.IssueList { .. }
+  pb.fetch(
+    f"/api/collections/issues/records?perPage=200&expand=team&sort=created,id&filter={url.QueryEscape(filter)}",
+    "issues",
+    &list,
+  )?
+  Ok(
+    list.items
+      .filter(|i| i.team != to_team_id)
+      .map(|i| f"{i.expand.team.key}-{i.number}"),
+  )
+}
+
+/// The refusal. Names what blocks it and the command that clears each one, so
+/// the reader never has to work out which flag unassigns an issue.
+fn refuse_move(
+  kind: string,
+  name: string,
+  from: models.Team,
+  to: models.Team,
+  blocking: Slice<string>,
+) -> string {
+  let shown = if blocking.length() > 10 { blocking[..10] } else { blocking }
+  let mut tail = ""
+  if blocking.length() > shown.length() {
+    tail = f" (and {blocking.length() - shown.length()} more)"
+  }
+  // Both nouns clear the same way; only the flag differs.
+  let flag = if kind == "label" { "--label" } else { "--project" }
+  let clear = f"lll issue update KEY {flag} \"\""
+  f"{blocking.length()} issue(s) outside {to.key} still reference the {kind} '{name}': {strings.Join(shown, ", ")}{tail}\nMoving it to {to.key} would leave them pointing at another team's {kind}.\nClear it off them first ({clear}), or move those issues to {to.key}.\n'{name}' stays in {from.key}."
+}
+
+/// The destination team a `--to KEY` names.
+fn move_destination(key: string) -> Result<models.Team, string> {
+  if strings.TrimSpace(key) == "" {
+    return Err("--to requires a team key (see 'lll team list')")
+  }
+  let Some(team) = records.find_team(key)? else {
+    return Err(unknown_team(key))
+  }
+  if team.archived {
+    return Err(f"team {team.key} is archived — 'lll team unarchive {team.key}' first")
+  }
+  Ok(team)
+}

@@ -245,7 +245,8 @@ fn reorder_sort(
 ) -> Result<float64, string> {
   // Dropping a card onto itself moves nothing.
   if before == issue.id { return Ok(issue.sort) }
-  let others = records.fetch_board_issues(team_id)?.filter(|i| i.state == state && i.id != issue.id)
+  // Column-scoped fetch (LLL-428): only this column, board order, id+sort.
+  let others = records.fetch_column_issues(team_id, state)?.filter(|i| i.id != issue.id)
   if others.is_empty() { return Ok(issue.sort) }
   let Some(target) = others.find(|i| i.id == before) else {
     // End of column — also the fallback when `before` went stale (moved or

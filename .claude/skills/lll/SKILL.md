@@ -47,6 +47,12 @@ Claiming your own issue again succeeds and says it is already yours.
 agree with that identity. `lll issue release KEY-12` gives the claim back and
 clears the assignee when it still matches the holder.
 
+**A claim older than 24 hours is released for you** (LLL-183): the server
+sweeps hourly and frees holds that outlived the agent that took them, leaving
+the issue exactly as a deliberate release would. Nothing announces it, so if
+you expect to hold an issue for longer than a day, say so on the issue - and
+if a claim you were relying on has vanished, this is why.
+
 `lll issue start KEY-12` sets in-progress without changing Git. To create a
 branch and record its host/path on the issue, use `lll issue start KEY-12 --branch`.
 For separate Git commands, `lll issue branch-name KEY-12` only prints a suggested

@@ -13,15 +13,23 @@ import "query"
 /// the URL is the whole page state, and every link on the page is the shared
 /// encoder (serve_url.lis) with one part changed — the same encoder the
 /// board's chips are made of (TASK-94 AC#3).
-fn issues_href(q: ViewQuery) -> string {
-  view_query_href("/issues", q)
+fn issues_href(base: string, q: ViewQuery) -> string {
+  view_query_href(base, q)
+}
+
+/// This table's own path for a team key (LLL-426). Every link the page builds
+/// has to stay inside the team it is showing, or a sort click would move the
+/// reader to another team's issues without saying so.
+fn issues_base(team_key: string) -> string {
+  if team_key == "" { return "/issues" }
+  f"/t/{team_key}/issues"
 }
 
 /// One column heading. `field` is the PB field the header sorts on, or "" for
 /// a column with nothing to sort by (state, labels, assignee — none of them
 /// are in query.sort_fields()). First click on a column sorts it descending;
 /// clicking the column that is already sorting flips it.
-fn issue_col(label: string, field: string, cls: string, q: ViewQuery) -> IssueColVM {
+fn issue_col(label: string, field: string, cls: string, q: ViewQuery, base: string) -> IssueColVM {
   if field == "" {
     return IssueColVM { label, cls, .. }
   }
@@ -36,23 +44,23 @@ fn issue_col(label: string, field: string, cls: string, q: ViewQuery) -> IssueCo
   }
   let mut nq = q
   nq.sort = next
-  IssueColVM { label, cls, dir, href: issues_href(nq) }
+  IssueColVM { label, cls, dir, href: issues_href(base, nq) }
 }
 
 
 /// The eight columns, in the order issues.html writes the row cells.
-fn issue_cols(q: ViewQuery) -> Slice<IssueColVM> {
+fn issue_cols(q: ViewQuery, base: string) -> Slice<IssueColVM> {
   [
-    issue_col("ID", "number", "c-id", q),
-    issue_col("Title", "title", "c-title", q),
+    issue_col("ID", "number", "c-id", q, base),
+    issue_col("Title", "title", "c-title", q, base),
     // State deliberately stays inert: PB's alphabetical text order is not
     // workflow order, and sorting only this page would misorder pagination.
-    issue_col("State", "", "c-state", q),
-    issue_col("Priority", "priority", "c-prio", q),
-    issue_col("Labels", "", "c-labels", q),
-    issue_col("Assignee", "", "c-assignee", q),
-    issue_col("Created", "created", "c-age", q),
-    issue_col("Updated", "updated", "c-age", q),
+    issue_col("State", "", "c-state", q, base),
+    issue_col("Priority", "priority", "c-prio", q, base),
+    issue_col("Labels", "", "c-labels", q, base),
+    issue_col("Assignee", "", "c-assignee", q, base),
+    issue_col("Created", "created", "c-age", q, base),
+    issue_col("Updated", "updated", "c-age", q, base),
   ]
 }
 
@@ -174,6 +182,8 @@ fn issues_page(w: http.ResponseWriter, r: Ref<http.Request>, team_id: string, me
   }
 
   let q = ViewQuery { state, assignee, label, project, sort, .. }
+  let team = shell_team(team_id)
+  let base = issues_base(team.key)
   let list = match fetch_issue_rows(team_id, state, assignee_id, label_id, project_id, sort) {
     Ok(l) => l,
     Err(e) => {
@@ -190,7 +200,8 @@ fn issues_page(w: http.ResponseWriter, r: Ref<http.Request>, team_id: string, me
 
   let rows = list.items.map(card_vm)
   let vm = IssuesVM {
-    cols: issue_cols(q),
+    base,
+    cols: issue_cols(q, base),
     rows,
     shown: rows.length(),
     total: list.total_items,
@@ -205,7 +216,7 @@ fn issues_page(w: http.ResponseWriter, r: Ref<http.Request>, team_id: string, me
     label,
     project,
     sort,
-    clear_href: issues_href(ViewQuery { sort, .. }),
+    clear_href: issues_href(base, ViewQuery { sort, .. }),
     error: err,
   }
   // ?raw: the same table, as markdown. The choosers and sort links are
@@ -214,7 +225,7 @@ fn issues_page(w: http.ResponseWriter, r: Ref<http.Request>, team_id: string, me
     write_raw(w, issues_raw(vm))
     return
   }
-  let html = match render("issues-page", PageVM { rail: rail_vm("issues", me, shell_team(team_id)), page: vm }) {
+  let html = match render("issues-page", PageVM { rail: rail_vm("issues", me, team), page: vm }) {
     Ok(h) => h,
     Err(e) => {
       http.Error(w, e, 500)

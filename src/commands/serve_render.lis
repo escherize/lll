@@ -364,7 +364,9 @@ fn issue_fields_vm(issue: models.Issue, comments: Slice<models.Comment>) -> Resu
   let mut project = issue.expand.project.name
   let mut project_href = ""
   if project != "" {
-    project_href = f"/issues?project={url.QueryEscape(project)}"
+    // LLL-426: the issue's OWN team - the board serves every team, and this
+    // link used to land on whichever one the server was configured with.
+    project_href = f"{issues_base(issue.expand.team.key)}?project={url.QueryEscape(project)}"
   }
   if project == "" { project = "none" }
   let held = claims.fetch(issue.id)?
@@ -446,6 +448,13 @@ fn issue_fields_vm(issue: models.Issue, comments: Slice<models.Comment>) -> Resu
 }
 
 /// A finding doc -> its issue-page block (TASK-103).
-fn finding_vm(d: models.Doc) -> FindingVM {
-  FindingVM { slug: d.slug, title: d.title, area: d.area, confidence: d.confidence, confidence_note: d.confidence_note }
+fn finding_vm(d: models.Doc, team_key: string) -> FindingVM {
+  FindingVM {
+    slug: d.slug,
+    title: d.title,
+    area: d.area,
+    confidence: d.confidence,
+    confidence_note: d.confidence_note,
+    href: f"/t/{team_key}/doc/{d.slug}",
+  }
 }
