@@ -623,7 +623,8 @@ code=$(wcurl -s -o /dev/null -w '%{http_code}' -X POST \
   --data-urlencode "key=ENG-3" --data-urlencode "project=$PANEL_PROJECT" "$WEB/project")
 [ "$code" = 200 ] || fail "/project returned $code, want 200"
 issue=$(wcurl -sf "$WEB/issue/ENG-3")
-assert_contains "$issue" 'href="/issues?project=Panel&#43;Project"' "issue page links the new project"
+# LLL-426: the link carries the issue's OWN team, not the configured one.
+assert_contains "$issue" 'href="/t/ENG/issues?project=Panel&#43;Project"' "issue page links the new project into its team"
 assert_contains "$issue" "value=\"$PANEL_PROJECT\" selected" "project select reflects the move"
 assert_contains "$("$LIN" issue view ENG-3)" "Project:   Panel Project" "POST /project persisted"
 
@@ -1445,9 +1446,9 @@ wcurl -sfI "$WEB/static/mermaid-init.js" >/dev/null || fail "mermaid-init.js is 
 issues=$(wcurl -sf "$WEB/issues") || fail "/issues did not serve"
 assert_contains "$issues" '<table id="issues" class="itbl">' "the issues page renders a table"
 assert_contains "$issues" 'href="/issue/ENG-1"' "the table links rows to their issue pages"
-assert_contains "$issues" 'href="/issues?sort=-created"' "column headers sort server-side through the URL"
-assert_contains "$issues" 'href="/issues?sort=-priority"' "priority is a sortable column"
-assert_contains "$issues" 'href="/issues?sort=-title"' "title is a sortable column"
+assert_contains "$issues" 'href="/t/ENG/issues?sort=-created"' "column headers sort server-side through the URL"
+assert_contains "$issues" 'href="/t/ENG/issues?sort=-priority"' "priority is a sortable column"
+assert_contains "$issues" 'href="/t/ENG/issues?sort=-title"' "title is a sortable column"
 assert_contains "$issues" 'aria-sort="descending"' "the sorting column says so to a screen reader"
 
 # Table data needs no JavaScript: only the shared navigation script loads.
@@ -1473,7 +1474,7 @@ desc=$(first_row "/issues?sort=-number")
 
 # Filters are query params, so a filtered view is a shareable URL.
 todo=$(wcurl -sf "$WEB/issues?state=todo")
-assert_contains "$todo" 'href="/issues?state=todo&amp;sort=-title"' "title sorting preserves the state filter"
+assert_contains "$todo" 'href="/t/ENG/issues?state=todo&amp;sort=-title"' "title sorting preserves the state filter"
 assert_contains "$todo" '<option value="todo" selected>' "the chooser shows the filter the URL asked for"
 assert_contains "$todo" 'class="itbl-clear"' "a filtered table offers a way back to all issues"
 # A dedicated pair, so the filter assertion does not depend on what earlier
@@ -1511,9 +1512,9 @@ board_rail_now=$(rail "$(wcurl -sf "$WEB/")")
 [ "$(rail_rows "$issues_rail")" = "$(rail_rows "$board_rail_now")" ] \
   || fail "the board and issues rails offer different destinations:
 $(diff <(rail_rows "$board_rail_now") <(rail_rows "$issues_rail") || true)"
-assert_contains "$issues_rail" 'href="/issues"' "the rail has an All issues row"
-assert_contains "$board_rail" 'href="/issues"' "the board's rail has it too"
-assert_contains "$issues_rail" '<a href="/issues" class="active">' "the All issues row is current on its own page"
+assert_contains "$issues_rail" 'href="/t/ENG/issues"' "the rail has an All issues row"
+assert_contains "$board_rail" 'href="/t/ENG/issues"' "the board's rail has it too"
+assert_contains "$issues_rail" '<a href="/t/ENG/issues" class="active">' "the All issues row is current on its own page"
 assert_not_contains "$issues_rail" '<a href="/" class="active">' "and the board row is not"
 # --- /t/ENG/doc/SLUG: the document page (LLL-405) ---
 # Decisions and findings were the one record kind with no URL: reachable only
@@ -1586,7 +1587,7 @@ assert_contains "$projects" "Ship the board" "the project is listed by name"
 assert_contains "$projects" "Started" "the list shows the project status"
 assert_contains "$projects" "The web board and everything it needs." \
   "the list shows the description only the CLI could write"
-assert_contains "$projects" 'href="/issues?project=Ship&#43;the&#43;board"' \
+assert_contains "$projects" 'href="/t/ENG/issues?project=Ship&#43;the&#43;board"' \
   "each row links into the issues table filtered to that project"
 assert_contains "$projects" "1 issue" "the row counts the issues pointing at it"
 assert_contains "$projects" 'var(--st-in-progress)' \
@@ -1601,8 +1602,8 @@ assert_not_contains "$projects" "data-init" "the projects page opens no SSE conn
 
 # The rail row is what makes a project reachable from the board at all.
 projects_rail=$(rail "$projects")
-assert_contains "$board_rail_now" 'href="/projects"' "the board's rail has a Projects row"
-assert_contains "$projects_rail" '<a href="/projects" class="active">' \
+assert_contains "$board_rail_now" 'href="/t/ENG/projects"' "the board's rail has a Projects row"
+assert_contains "$projects_rail" '<a href="/t/ENG/projects" class="active">' \
   "the Projects row is current on its own page"
 board_rail_projects=$(rail "$(wcurl -sf "$WEB/")")
 [ "$(rail_rows "$projects_rail")" = "$(rail_rows "$board_rail_projects")" ] \
@@ -1614,7 +1615,7 @@ pj_filtered=$(wcurl -sf "$WEB/issues?project=Ship+the+board")
 assert_contains "$pj_filtered" "Project member issue" "?project= keeps the issue in that project"
 assert_contains "$pj_filtered" '<option value="Ship the board" selected>' \
   "the project chooser reflects the URL"
-assert_contains "$pj_filtered" 'href="/issues?project=Ship&#43;the&#43;board&amp;sort=-created"' \
+assert_contains "$pj_filtered" 'href="/t/ENG/issues?project=Ship&#43;the&#43;board&amp;sort=-created"' \
   "a sort link keeps the project filter"
 assert_not_contains "$(wcurl -sf "$WEB/issues?project=Ship+the+board&state=done")" \
   "Project member issue" "?project= composes with ?state= instead of replacing it"
@@ -1631,7 +1632,7 @@ assert_contains "$bad_pj" '<table id="issues"' "an unknown project still serves 
 
 # An issue says which project it belongs to, and the name is the way in.
 pj_issue=$(wcurl -sf "$WEB/issue/$pj_key")
-assert_contains "$pj_issue" '<a href="/issues?project=Ship&#43;the&#43;board">Ship the board</a>' \
+assert_contains "$pj_issue" '<a href="/t/ENG/issues?project=Ship&#43;the&#43;board">Ship the board</a>' \
   "the issue page links its project to that project's issues"
 assert_contains "$(wcurl -sf "$WEB/issue/ENG-1")" \
   '<option value="" selected>No project</option>' \
@@ -1722,7 +1723,7 @@ print(m.group(1) if m else "")
 
 settings=$(wcurl -sf "$WEB/settings") || fail "/settings did not respond"
 assert_contains "$settings" 'id="settings"' "settings page has its morph target"
-assert_contains "$(rail "$settings")" 'href="/settings" class="active"' \
+assert_contains "$(rail "$settings")" 'href="/t/ENG/settings" class="active"' \
   "the rail's Settings row is current on /settings"
 assert_contains "$settings" 'id="team-form"' "settings page edits the team"
 assert_contains "$settings" 'name="accent"' "settings page edits the team accent"
@@ -2213,6 +2214,44 @@ assert_contains "$ops_board" 'href="/t/OPS/" title="OPS · Operations" class="ac
   "the switcher marks the routed team current"
 assert_not_contains "$eng_board" 'href="/t/OPS/" title="OPS · Operations" class="active"' \
   "the boot team's board does not mark OPS current"
+
+# LLL-426: the table, the projects list and settings answer for the team in
+# the URL. They used to take the CONFIGURED team, so on this very server -
+# two teams, ENG configured - OPS had no identity surface at all: its name
+# and accent were uneditable on the web, and "All issues" from its board
+# listed ENG's.
+env LLL_TEAM=OPS "$LIN" label create -n ops-only -c '#2ea043' >/dev/null 2>&1 || true
+env LLL_TEAM=OPS "$LIN" project create -n "Ops Project" >/dev/null 2>&1 || true
+
+ops_settings=$(wcurl -sf "$WEB/t/OPS/settings") || fail "/t/OPS/settings did not serve"
+assert_contains "$ops_settings" 'id="set-key" value="OPS"' "settings shows the ROUTED team's key"
+assert_contains "$ops_settings" 'value="ops-only"' "settings lists the routed team's labels"
+assert_not_contains "$ops_settings" 'value="web-renamed"' "another team's labels stay off it"
+assert_contains "$(rail "$ops_settings")" 'href="/t/OPS/" title="OPS · Operations" class="active"' \
+  "the current team does not change when you open its settings"
+
+ops_issues=$(wcurl -sf "$WEB/t/OPS/issues")
+assert_contains "$ops_issues" "Ops only card" "the table lists the routed team's issues"
+assert_not_contains "$ops_issues" "Web board issue" "and not the configured team's"
+assert_contains "$ops_issues" 'href="/t/OPS/issues?sort=' "its sort links stay inside the team"
+ops_projects=$(wcurl -sf "$WEB/t/OPS/projects")
+assert_contains "$ops_projects" "Ops Project" "the projects list is the routed team's"
+assert_not_contains "$ops_projects" "Ship the board" "and not the configured team's"
+
+# A write from that page reaches THAT team. This is the half that was
+# impossible before: OPS's accent could only be set from the CLI.
+web_post "POST t/OPS/settings/team" "$WEB/t/OPS/settings/team" \
+  --data-urlencode "name=Operations" --data-urlencode "accent=#2ea043" >/dev/null
+assert_contains "$(wcurl -sf "$WEB/t/OPS/")" "--accent:#2ea043" \
+  "an accent saved on the routed settings page reaches that team's board"
+assert_not_contains "$(wcurl -sf "$WEB/t/ENG/")" "--accent:#2ea043" \
+  "and not the configured team's board"
+
+# The bare paths keep working, landing on the configured team.
+for bare in issues projects settings; do
+  redir=$(curl -s -o /dev/null -w '%{http_code} %{redirect_url}' -H "$BOARD_COOKIE" "$WEB/$bare")
+  assert_contains "$redir" "303 $WEB/t/ENG/$bare" "bare /$bare redirects to the configured team"
+done
 
 # The board posts the team it is viewing: a create from /t/OPS/ lands in
 # OPS, and an unknown team answers through the flash, not a write.

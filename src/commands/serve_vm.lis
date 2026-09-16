@@ -425,6 +425,9 @@ pub struct IssueColVM {
 /// asked for 200 rows and reports how many matched, so the page can say
 /// "showing 200 of 340" instead of silently ending at 200.
 pub struct IssuesVM {
+  // This team's table path (LLL-426): the filter form submits here, so a
+  // filter keeps the reader in the team they were looking at.
+  pub base: string,
   // Header cells, in the order the row cells below them are written.
   pub cols: Slice<IssueColVM>,
   pub rows: Slice<CardVM>,

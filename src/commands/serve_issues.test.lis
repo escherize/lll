@@ -41,8 +41,9 @@ fn a_header_link_changes_the_sort_and_keeps_the_filters() {
     "created",
     "c-age",
     ViewQuery { state: "todo", sort: "-updated", .. },
+    issues_base("ENG"),
   )
-  assert col.href == "/issues?state=todo&sort=-created"
+  assert col.href == "/t/ENG/issues?state=todo&sort=-created"
   assert col.dir == ""
 }
 
@@ -53,24 +54,36 @@ fn clicking_the_sorting_column_flips_its_direction() {
     "created",
     "c-age",
     ViewQuery { sort: "-created", .. },
+    issues_base("ENG"),
   )
   assert desc.dir == "desc"
-  assert desc.href == "/issues?sort=created"
-  let asc = issue_col("Created", "created", "c-age", ViewQuery { sort: "created", .. })
+  assert desc.href == "/t/ENG/issues?sort=created"
+  let asc = issue_col("Created", "created", "c-age", ViewQuery { sort: "created", .. }, issues_base("ENG"))
   assert asc.dir == "asc"
-  assert asc.href == "/issues?sort=-created"
+  assert asc.href == "/t/ENG/issues?sort=-created"
+}
+
+// LLL-426: every link the table builds stays inside the team it is showing.
+// A sort click used to carry the reader onto the configured team's issues.
+#[test]
+fn the_tables_links_stay_inside_the_team_being_shown() {
+  assert issues_base("OPS") == "/t/OPS/issues"
+  let col = issue_col("Created", "created", "c-age", ViewQuery { .. }, issues_base("OPS"))
+  assert col.href == "/t/OPS/issues?sort=-created"
+  // No team configured at all - the unrouted fallback, which redirects.
+  assert issues_base("") == "/issues"
 }
 
 #[test]
 fn a_column_with_no_pb_field_behind_it_does_not_sort() {
-  let col = issue_col("Title", "", "c-title", ViewQuery { sort: "-updated", .. })
+  let col = issue_col("Title", "", "c-title", ViewQuery { sort: "-updated", .. }, issues_base("ENG"))
   assert col.href == ""
   assert col.dir == ""
 }
 
 #[test]
 fn every_sortable_column_asks_for_a_field_query_sort_accepts() {
-  for col in issue_cols(ViewQuery { sort: "-updated", .. }) {
+  for col in issue_cols(ViewQuery { sort: "-updated", .. }, issues_base("ENG")) {
     if col.href != "" {
       let spec = strings.Split(col.href, "sort=")[1]
       assert query.sort(spec).is_ok()
@@ -93,7 +106,7 @@ fn every_sortable_column_asks_for_a_field_query_sort_accepts() {
 
 /// The column count every copy has to agree with.
 fn expected_col_count() -> int {
-  issue_cols(ViewQuery { sort: "-updated", .. }).length()
+  issue_cols(ViewQuery { sort: "-updated", .. }, issues_base("ENG")).length()
 }
 
 /// The text of the embedded issues.html — the same bytes render() parses, so
