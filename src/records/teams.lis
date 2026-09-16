@@ -1,13 +1,28 @@
 import "go:net/url"
+import "go:strings"
 import "models"
 import "pb"
 import "query"
 
+/// A team key as it is stored: uppercase, trimmed (LLL-235).
+///
+/// One rule, applied at every boundary rather than in each verb. Keys were
+/// stored as typed, so 'eng' and 'ENG' were two teams the unique index was
+/// happy with and prose could not tell apart, while the derived issue key,
+/// the rail and the docs all assumed uppercase. gopb enforces the same
+/// normalisation on write, so a key reaching the database any other way
+/// obeys it too; this is what makes READS agree - `LLL_TEAM=eng` finds ENG
+/// rather than failing to.
+pub fn normalize_team_key(key: string) -> string {
+  strings.ToUpper(strings.TrimSpace(key))
+}
+
 pub fn find_team(key: string) -> Result<Option<models.Team>, string> {
-  let filter = url.QueryEscape(f"key={query.quote(key)}")
+  let wanted = normalize_team_key(key)
+  let filter = url.QueryEscape(f"key={query.quote(wanted)}")
   let mut result = models.TeamList { .. }
   pb.fetch(f"/api/collections/teams/records?filter={filter}", "teams", &result)?
-  Ok(result.items.find(|t| t.key == key))
+  Ok(result.items.find(|t| t.key == wanted))
 }
 
 /// Every team, key-sorted. Shared by `lll team list` and `lll up`.

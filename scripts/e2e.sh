@@ -216,6 +216,26 @@ assert_contains "$out" "Created team QA: Quality" "team create output"
 out=$(LLL_URL=$URL "$LIN" team list)
 assert_contains "$out" "QA" "team list has created QA"
 
+# LLL-235: a team key is uppercase whoever writes it, and lookups ask for the
+# same normalised form - a key that normalised on write but not on read would
+# leave `LLL_TEAM=eng` naming a team it could not find.
+out=$(LLL_URL=$URL "$LIN" team create -k low -n "Lowercase Asked")
+assert_contains "$out" "Created team LOW: Lowercase Asked" "a lowercase -k is stored uppercase"
+out=$(LLL_URL=$URL "$LIN" team list)
+assert_contains "$out" "LOW" "team list shows the uppercase key"
+assert_not_contains "$out" "	low	" "the typed lowercase key is not a second team"
+# Read back by the spelling that was typed, and by the stored one.
+out=$(LLL_URL=$URL "$LIN" team view low)
+assert_contains "$out" "Key:    LOW" "a lowercase key looks up the uppercase team"
+out=$(LLL_URL=$URL LLL_TEAM=low "$LIN" issue list)
+assert_not_contains "$out" "no team with key" "a lowercase LLL_TEAM resolves"
+# The server enforces it too, so the raw API cannot mint a second spelling.
+api_team=$(curl -s -H "Authorization: Bearer $LLL_TOKEN" -H 'Content-Type: application/json' \
+  -d '{"key":"raw","name":"Raw API"}' "$URL/api/collections/teams/records")
+assert_contains "$api_team" '"key":"RAW"' "a raw API create is normalised by the server"
+LLL_URL=$URL "$LIN" team delete RAW >/dev/null 2>&1 || true
+LLL_URL=$URL "$LIN" team delete LOW >/dev/null 2>&1 || true
+
 out=$(LLL_URL=$URL "$LIN" team view ENG)
 assert_contains "$out" "Key:    ENG" "team view key"
 assert_contains "$out" "Name:   Engineering" "team view name"
