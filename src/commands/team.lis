@@ -200,7 +200,7 @@ fn team_rename(input: flags.CommandInput) -> Result<(), string> {
   if key == "" {
     return Err(f"usage: {usage}")
   }
-  let new_key = p.one("-k")
+  let new_key = records.normalize_team_key(p.one("-k"))
   let new_name = p.one("-n")
   if new_key == "" && new_name == "" {
     return Err(f"nothing to rename — give -k, -n, or both\nusage: {usage}")
@@ -326,7 +326,9 @@ fn view_accent(stored: string) -> string {
 /// Create a team. Shared by `lll team create` and `lll up`'s first-boot
 /// bootstrap.
 pub fn create_team(key: string, name: string) -> Result<models.Team, string> {
-  let new_team = models.NewTeam { key, name }
+  // LLL-235: uppercase here as well as in gopb, so the message this prints
+  // and the .lll.toml `lll attach` writes say what was actually stored.
+  let new_team = models.NewTeam { key: records.normalize_team_key(key), name }
   let payload = match json.Marshal(new_team) {
     Ok(p) => p,
     Err(e) => return Err(f"encoding team: {e}"),

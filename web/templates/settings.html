@@ -41,6 +41,12 @@
      form.id and defeats keyed morphing when a rename reorders rows, losing
      drafts in other rows. Keep the wrapper when showing deletion review. */}}
 {{define "settings"}}<div id="settings" class="settings">
+{{/* LLL-426: the team-scoped writes below post RELATIVE to this page, whose
+     URL is /t/KEY/settings, so a form on team B's settings can only ever write
+     team B. The rows are rendered from row view models with no team on them,
+     and the page's own URL already carries it. The server-wide actions - the
+     Access section and team archiving - stay absolute, because they are not
+     any one team's business. */}}
 <p class="set-lede">Labels, projects and colour belong to the selected team. Member accounts are shared across teams. Per-browser choices (hidden columns, filter chips) stay on the board where you set them.</p>
 
 <section class="set-sec">
@@ -49,7 +55,7 @@
   <div class="set-field"><label for="set-key">Key</label><input id="set-key" value="{{.TeamKey}}" readonly aria-readonly="true" title="Every issue key and every checkout's .lll.toml names this. Rename a team with the CLI."><span class="set-hint">Names every issue: {{.TeamKey}}-1, {{.TeamKey}}-2.</span></div>
   <div class="set-field"><label for="set-name">Name</label><input id="set-name" name="name" value="{{.TeamName}}" autocomplete="off"></div>
   <div class="set-field"><label for="set-accent">Accent</label><input id="set-accent" name="accent" type="color" class="set-swatch" value="{{.Accent}}"><span class="set-hint"><code>{{.Accent}}</code>, {{if .AccentSet}}this team's own colour{{else}}the default ember orange{{end}}. It colours every button, focus ring and tab icon, so two boards open side by side never blur together.</span></div>
-  <button type="button" class="btn primary" data-on:click="@post('/settings/team', {contentType: 'form'})">Save team</button>
+  <button type="button" class="btn primary" data-on:click="@post('settings/team', {contentType: 'form'})">Save team</button>
 </form>
 {{else}}<p class="set-empty">No team is configured, so there is nothing to name or colour. Set <code>team</code> in <code>.lll.toml</code> (or <code>LLL_TEAM</code>) and restart <code>lll up</code>.</p>
 {{end}}</section>
@@ -66,7 +72,8 @@
 <input name="color" type="color" class="set-swatch" value="{{if .Color}}{{.Color}}{{else}}#828994{{end}}" aria-label="Colour">
 <input name="name" value="{{.Name}}" autocomplete="off" aria-label="Label name">
 <span class="set-usage">{{.UsageText}}</span>
-<button type="button" class="btn" data-on:click="@post('/settings/label', {contentType: 'form'})">Save</button>
+{{template "set-team-select" $}}
+<button type="button" class="btn" data-on:click="@post('settings/label', {contentType: 'form'})">Save</button>
 {{template "set-del" "label"}}
 </form></div>
 {{end}}{{if not .Labels}}<p class="set-empty">No labels yet.</p>
@@ -74,7 +81,7 @@
 <form class="set-row set-new">
 <input name="color" type="color" class="set-swatch" value="#828994" aria-label="Colour for the new label">
 <input name="name" placeholder="New label" autocomplete="off" aria-label="New label name">
-<button type="button" class="btn" data-on:click="@post('/settings/label', {contentType: 'form'})">Add label</button>
+<button type="button" class="btn" data-on:click="@post('settings/label', {contentType: 'form'})">Add label</button>
 </form>
 <p class="set-note">Check the list first — reuse beats near-duplicates (bug/bugs/defect). The CLI view is <code>lll label list</code>.</p>
 </section>
@@ -87,7 +94,7 @@
 <input type="hidden" name="id" value="{{.Id}}">
 <input name="name" value="{{.Name}}" autocomplete="off" aria-label="Member name">
 <input name="email" value="{{.Email}}" placeholder="Email" autocomplete="off" aria-label="Member email" class="set-second">
-<button type="button" class="btn" data-on:click="@post('/settings/member', {contentType: 'form'})">Save</button>
+<button type="button" class="btn" data-on:click="@post('settings/member', {contentType: 'form'})">Save</button>
 {{template "set-del" "member"}}
 </form></div>
 {{end}}{{if not .Members}}<p class="set-empty">No members yet.</p>
@@ -95,7 +102,7 @@
 <form class="set-row set-new">
 <input name="name" placeholder="New member" autocomplete="off" aria-label="New member name">
 <input name="email" placeholder="Email" autocomplete="off" aria-label="New member email" class="set-second">
-<button type="button" class="btn" data-on:click="@post('/settings/member', {contentType: 'form'})">Add member</button>
+<button type="button" class="btn" data-on:click="@post('settings/member', {contentType: 'form'})">Add member</button>
 </form>
 </section>
 
@@ -108,7 +115,8 @@
 <select name="status" aria-label="Project status">
 {{range $.Statuses}}<option value="{{.Value}}"{{if eq .Value $p.Status}} selected{{end}}>{{.Label}}</option>
 {{end}}</select>
-<button type="button" class="btn" data-on:click="@post('/settings/project', {contentType: 'form'})">Save</button>
+{{template "set-team-select" $}}
+<button type="button" class="btn" data-on:click="@post('settings/project', {contentType: 'form'})">Save</button>
 {{template "set-del" "project"}}
 </form></div>
 {{end}}{{if not .Projects}}<p class="set-empty">No projects yet.</p>
@@ -118,7 +126,7 @@
 <select name="status" aria-label="Status for the new project">
 {{range .Statuses}}<option value="{{.Value}}">{{.Label}}</option>
 {{end}}</select>
-<button type="button" class="btn" data-on:click="@post('/settings/project', {contentType: 'form'})">Add project</button>
+<button type="button" class="btn" data-on:click="@post('settings/project', {contentType: 'form'})">Add project</button>
 </form>
 <p class="set-note">Descriptions are long-form, so they stay with <code>lll project create -d</code>.</p>
 </section>
@@ -192,7 +200,17 @@
 
 {{/* The row's delete control requests a server-rendered impact review.
      Dot is the section name, which is also the route segment. */}}
-{{define "set-del"}}<button type="button" class="set-del" title="Delete" aria-label="Delete" data-on:click="@post('/settings/{{.}}?del=1', {contentType: 'form'})"><svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true"><path d="M2.5 2.5 L9.5 9.5 M9.5 2.5 L2.5 9.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg></button>{{end}}
+{{/* LLL-100: the scope control. A label or project belongs to exactly one
+     team, and that was write-once - one created in the wrong team could only
+     be deleted and remade, which loses every issue that referenced it. The
+     select posts with the rest of the row; the server refuses the move while
+     issues outside the destination still reference the record, and says which
+     ones in the flash strip. Archived teams are not offered: you cannot write
+     to one. Dot is the page's team key. */}}
+{{define "set-team-select"}}<select name="team" aria-label="Team" title="Move this to another team">
+{{range .Teams}}{{if not .Archived}}<option value="{{.Key}}"{{if eq .Key $.TeamKey}} selected{{end}}>{{.Key}}</option>{{end}}{{end}}</select>{{end}}
+
+{{define "set-del"}}<button type="button" class="set-del" title="Delete" aria-label="Delete" data-on:click="@post('settings/{{.}}?del=1', {contentType: 'form'})"><svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true"><path d="M2.5 2.5 L9.5 9.5 M9.5 2.5 L2.5 9.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg></button>{{end}}
 
 {{/* LLL-233: replace only the selected row; the count is fetched again on
      confirmation. A div owns the patch id: input[name=id] shadows form.id.
@@ -202,11 +220,11 @@
 <input type="hidden" name="confirmed" value="1">
 <input type="hidden" name="expected" value="{{.Used}}">
 <div class="set-delete-impact" role="status">{{if .Changed}}The affected issue count changed. Review it again. {{end}}Delete {{.Kind}} <strong>{{.Name}}</strong>? {{if .Used}}This removes the {{.Kind}} from {{.Used}} issue(s).{{else}}No issues reference it.{{end}} The issues are kept.</div>
-<button type="button" class="btn" data-on:click="@post('/settings/{{.Kind}}?cancel=1', {contentType: 'form'})">Cancel</button>
-<button type="button" class="btn" data-on:click="@post('/settings/{{.Kind}}?del=1', {contentType: 'form'})">Delete {{.Kind}}</button>
+<button type="button" class="btn" data-on:click="@post('settings/{{.Kind}}?cancel=1', {contentType: 'form'})">Cancel</button>
+<button type="button" class="btn" data-on:click="@post('settings/{{.Kind}}?del=1', {contentType: 'form'})">Delete {{.Kind}}</button>
 </form></div>{{end}}
 
-{{define "set-member-delete-review"}}<div id="set-member-{{.Id}}"><form class="set-row" aria-label="Review account deletion" method="post" action="/settings/member?del=1" data-on:submit="evt.preventDefault(); @post('/settings/member?del=1', {contentType: 'form'})">
+{{define "set-member-delete-review"}}<div id="set-member-{{.Id}}"><form class="set-row" aria-label="Review account deletion" method="post" action="settings/member?del=1" data-on:submit="evt.preventDefault(); @post('settings/member?del=1', {contentType: 'form'})">
 <input type="hidden" name="id" value="{{.Id}}">
 <input type="hidden" name="confirmed" value="1">
 <input type="hidden" name="expected_assigned" value="{{.Assigned}}">
@@ -214,6 +232,6 @@
 <input type="hidden" name="expected_created" value="{{.Created}}">
 <div class="set-delete-impact" role="status">{{if .Changed}}The affected references changed. Review them again. {{end}}Delete account <strong>{{.Name}}</strong>? This clears {{.Assigned}} issue assignment(s), {{.Authored}} comment author reference(s), and {{.Created}} issue creator reference(s). Issues and comment bodies are kept. This account will no longer be able to sign in.</div>
 <input name="admin_password" type="password" placeholder="Admin password" autocomplete="off" aria-label="Admin password" class="set-second">
-<button type="button" class="btn" data-on:click="@post('/settings/member?cancel=1', {contentType: 'form'})">Cancel</button>
+<button type="button" class="btn" data-on:click="@post('settings/member?cancel=1', {contentType: 'form'})">Cancel</button>
 <button type="submit" class="btn">Delete account</button>
 </form></div>{{end}}

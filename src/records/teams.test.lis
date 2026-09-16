@@ -1,0 +1,17 @@
+// LLL-235: a team key is uppercase, and the same rule decides what is WRITTEN
+// and what a lookup asks for. Two spellings of one team is the bug; a key
+// that normalises on write but not on read is the same bug with an extra
+// step, because `LLL_TEAM=eng` would then fail to find the team it named.
+#[test]
+fn a_team_key_normalises_to_uppercase() {
+  assert normalize_team_key("eng") == "ENG"
+  assert normalize_team_key("Eng") == "ENG"
+  assert normalize_team_key("ENG") == "ENG"
+  // Trimmed too: a key pasted out of a config file or a shell variable
+  // carries whitespace that the unique index would otherwise honour.
+  assert normalize_team_key("  ops  ") == "OPS"
+  // Digits and the empty key pass through unchanged - "no team configured"
+  // must keep meaning that.
+  assert normalize_team_key("t2") == "T2"
+  assert normalize_team_key("") == ""
+}

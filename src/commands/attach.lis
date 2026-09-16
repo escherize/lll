@@ -60,7 +60,8 @@ pub fn attach(args: Slice<string>) -> Result<(), string> {
   let given = p.one("-k")
   let key = if p.given("-k") {
     if given == "" { return Err("-k requires a nonempty team key") }
-    given
+    // LLL-235: what lands in .lll.toml is what the server stores.
+    records.normalize_team_key(given)
   } else {
     // Ask the server before inventing anything. Bare `lll attach` reads as
     // "connect me to the tracker", and every usability run typed it against a

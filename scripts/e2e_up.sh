@@ -211,7 +211,11 @@ OUT_URL="http://127.0.0.1:$OUT_PB_PORT"
 OUT_LOG="$DATA_DIR/outside.log"
 # This is a different server, so do not reuse the earlier member token.
 # LLL-298: fresh HOME, no configured team, and a deliberately long mixed-case
-# answer prove the interactive first boot preserves explicit identifiers.
+# answer prove the interactive first boot preserves explicit identifiers - it
+# does not truncate to five characters or drop what it cannot derive.
+# LLL-235 narrows that: the CASE is normalised, because a team key is
+# uppercase whoever writes it, so 'Platform42' is stored and echoed as
+# PLATFORM42 with its length and characters intact.
 mkdir -p "$OUTSIDE/home"
 printf '%s\n' 'Platform42' >"$OUTSIDE/team-answer"
 # TASK-250: `exec`, so $! is the SERVER and not the subshell wrapping it.
@@ -241,8 +245,8 @@ grep -qF 'board  login ' "$OUT_LOG" || fail "interactive first boot did not fini
 out=$(curl -sf "$OUT_URL/api/collections/teams/records" \
   -H "Authorization: Bearer $(pb_superuser_token "$OUT_URL")")
 [ "$(jq -r '.items | length' <<<"$out")" = 1 ] || fail "interactive boot created unexpected teams: $out"
-[ "$(jq -r '.items[0].key' <<<"$out")" = 'Platform42' ] || fail "interactive boot changed the typed team key: $out"
-assert_contains "$(cat "$OUT_LOG")" 'created team Platform42' "first-boot transcript preserves the typed key"
+[ "$(jq -r '.items[0].key' <<<"$out")" = 'PLATFORM42' ] || fail "interactive boot mangled the typed team key: $out"
+assert_contains "$(cat "$OUT_LOG")" 'created team PLATFORM42' "first-boot transcript echoes the key as stored"
 e2e_reap "$OUTSIDE_PID"
 
 echo "e2e_up: all assertions passed"

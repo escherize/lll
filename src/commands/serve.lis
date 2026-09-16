@@ -233,10 +233,49 @@ fn board_mux(cfg: config.Config, boot: models.Team, hub: Hub) -> Result<mut Ref<
       if let Some(t) = routed_team(w, r) { search_page(w, r, t, cfg.me) }
     }),
   )
+  // LLL-426: the table, the projects list and settings answer for the team in
+  // the URL, like the board and the issue pages. They used to take the
+  // CONFIGURED team, so on a multi-team server they showed the boot team's
+  // data whichever board you came from - and settings, being the only surface
+  // that edits a team's name and accent, made every other team uneditable.
+  mux.HandleFunc(
+    "GET /t/{team}/issues",
+    gated(|w: http.ResponseWriter, r: Ref<http.Request>| {
+      if let Some(t) = routed_team(w, r) { issues_page(w, r, t.id, cfg.me) }
+    }),
+  )
+  mux.HandleFunc(
+    "GET /t/{team}/projects",
+    gated(|w: http.ResponseWriter, r: Ref<http.Request>| {
+      if let Some(t) = routed_team(w, r) { projects_page(w, r, t.id, cfg.me) }
+    }),
+  )
+  mux.HandleFunc(
+    "GET /t/{team}/settings",
+    gated(|w: http.ResponseWriter, r: Ref<http.Request>| {
+      if let Some(t) = routed_team(w, r) { settings_page(w, r, t.id, cfg.me) }
+    }),
+  )
+  // The team-scoped writes ride the same path as the page that made them, so
+  // a form on team B's settings cannot write team A. The server-wide actions
+  // below (access, team archiving) stay bare: they are not a team's business.
+  mux.HandleFunc(
+    "POST /t/{team}/settings/{kind}",
+    gated(flashing(|r: mut Ref<http.Request>| {
+      let key = r.PathValue("team")
+      let Some(t) = records.find_team(key)? else {
+        return Err(f"no team with key '{key}' on this server")
+      }
+      settings_write(r, t.id, cfg.me)
+    })),
+  )
+  // The bare paths stay as redirects onto the configured team, the same
+  // compatibility `/` and `/issue/{key}` make: bookmarks, printed URLs and
+  // anything that learned them keep working.
   mux.HandleFunc(
     "GET /issues",
     gated(|w: http.ResponseWriter, r: Ref<http.Request>| {
-      issues_page(w, r, team_id, cfg.me)
+      redirect_with_query(w, r, f"/t/{boot_key}/issues")
     }),
   )
   mux.HandleFunc(
@@ -264,13 +303,13 @@ fn board_mux(cfg: config.Config, boot: models.Team, hub: Hub) -> Result<mut Ref<
   mux.HandleFunc(
     "GET /projects",
     gated(|w: http.ResponseWriter, r: Ref<http.Request>| {
-      projects_page(w, r, team_id, cfg.me)
+      redirect_with_query(w, r, f"/t/{boot_key}/projects")
     }),
   )
   mux.HandleFunc(
     "GET /settings",
     gated(|w: http.ResponseWriter, r: Ref<http.Request>| {
-      settings_page(w, r, team_id, cfg.me)
+      redirect_with_query(w, r, f"/t/{boot_key}/settings")
     }),
   )
   // Every POST is a write returning Result; `flashing` (serve_actions.lis) is
