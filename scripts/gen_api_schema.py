@@ -11,14 +11,21 @@ changes, and what PocketBase actually enforces is their end state.
 
 Run with `mise run api-schema` (which builds first) or
 `python3 scripts/gen_api_schema.py` against an existing target/.lisette/bin/lll.
+
+`--check` writes nothing: it regenerates in memory and fails with the drifted
+lines when the committed reference no longer matches the migrations. The gate
+runs it beside test_seed.py (LLL-435) — the reference described a schema the
+server does not have through two releases because nothing compared the two.
 """
 
+import difflib
 import json
 import os
 import shutil
 import signal
 import socket
 import subprocess
+import sys
 import tempfile
 import time
 import urllib.error
@@ -206,7 +213,39 @@ def lisette_constant(markdown):
     )
 
 
+def verify(generated):
+    """--check: the committed reference must match what the migrations build.
+    A drifted line is a collection header or a field row, so printing the
+    unified diff's body names the drift — the migration that moved — rather
+    than just 'files differ'."""
+    rel = os.path.relpath(OUT, ROOT)
+    if not os.path.exists(OUT):
+        raise SystemExit(
+            f"api schema check FAILED: {rel} does not exist — generate it with `mise run api-schema`"
+        )
+    with open(OUT) as f:
+        committed = f.read()
+    if committed == generated:
+        print(f"api schema check passed: {rel} matches what pb/pb_migrations builds")
+        return
+    diff = difflib.unified_diff(
+        committed.splitlines(), generated.splitlines(),
+        fromfile=f"a/{rel} (committed)",
+        tofile=f"b/{rel} (generated from pb/pb_migrations)",
+        lineterm="",
+    )
+    added = [l for l in diff if l.startswith("+") and not l.startswith("+++")]
+    removed = [l for l in diff if l.startswith("-") and not l.startswith("---")]
+    print(f"api schema check FAILED: {rel} does not match what pb/pb_migrations builds", file=sys.stderr)
+    print(f"  the committed reference lacks {len(added)} line(s) and carries {len(removed)} the migrations no longer produce:", file=sys.stderr)
+    for line in added + removed:
+        print(f"  {line}", file=sys.stderr)
+    print("  regenerate with: mise run api-schema", file=sys.stderr)
+    sys.exit(1)
+
+
 def main():
+    check = "--check" in sys.argv[1:]
     if not os.access(BINARY, os.X_OK):
         raise SystemExit(f"{BINARY} is missing - run `mise run build` first")
     proc, url, scratch = boot_board()
@@ -220,8 +259,12 @@ def main():
         except subprocess.TimeoutExpired:
             proc.kill()
         shutil.rmtree(scratch, ignore_errors=True)
+    generated = lisette_constant(markdown)
+    if check:
+        verify(generated)
+        return
     with open(OUT, "w") as f:
-        f.write(lisette_constant(markdown))
+        f.write(generated)
     print(f"wrote {os.path.relpath(OUT, ROOT)} ({len(markdown.splitlines())} lines)")
 
 
