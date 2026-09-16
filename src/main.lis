@@ -172,7 +172,11 @@ fn unknown_command(noun: string, verb: string) -> string {
   }
   for c in commands.issue_commands() {
     if c.name == noun {
-      return f"unknown command: '{noun}' — it is an issue verb: 'lll issue {noun} ...' (see 'lll issue {noun} -h')"
+      // 'lll comment create' is the common shape of this mistake; dropping
+      // the typed verb here, as the plural branch once did, hid the half
+      // the user had right. So the verb rides along (LLL-313).
+      let rest = if verb == "" || verb.starts_with("-") { "" } else { f" {verb}" }
+      return f"unknown command: '{noun}{rest}' — it is an issue verb: 'lll issue {noun} ...' (see 'lll issue {noun} -h')"
     }
   }
   f"unknown command: '{noun}' (see 'lll --help')"
