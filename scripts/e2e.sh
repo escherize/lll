@@ -2318,7 +2318,7 @@ pre412=$(curl -s -X PATCH -H "$AUTH_HDR" -H "Content-Type: application/json" \
   -H "If-Unmodified-Since: 2000-01-01 00:00:00.000Z" \
   -d '{"title":"clobbered"}' "$URL/api/collections/issues/records/$iid")
 assert_contains "$pre412" '"status":412' "a server-side precondition answers 412"
-assert_contains "$pre412" "the record changed since 2000-01-01 00:00:00.000Z" "the refusal names the stamp that was passed"
+assert_contains "$pre412" "record changed since 2000-01-01 00:00:00.000Z" "the refusal names the stamp that was passed"
 now=$(env $E "$LIN" issue view "$CKEY" --json | jq -r '.updated')
 assert_contains "$pre412" "$now" "and the current stamp to retry with"
 [ "$(env $E "$LIN" issue view "$CKEY" --json | jq -r '.title')" != "clobbered" ] || fail "a 412 precondition patch must not land"
