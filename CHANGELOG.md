@@ -4,6 +4,69 @@ All notable changes to lll. The format follows Keep a Changelog; versions
 follow SemVer, with 0.x meaning the CLI surface can still move between
 minors. Issue keys are on the project's own board (`lll issue view KEY`).
 
+## [0.3.2] - 2026-09-16
+
+What a team is on a server that has more than one, and what happens to a
+hold when the agent that took it is gone.
+
+### Breaking
+
+- **Team keys are uppercase.** They were stored as typed, so `eng` and `ENG`
+  were two teams the unique index was happy with and prose could not tell
+  apart, while the derived issue key, the rail and the docs all assumed
+  uppercase. Normalised on write in the server, so the raw API obeys it too,
+  and on lookup, so `LLL_TEAM=eng` and `/t/eng/` resolve rather than fail. A
+  migration uppercases existing rows; a key whose uppercase form is already
+  taken is left alone rather than merged, because the two teams own separate
+  issues (LLL-235).
+- **A claim older than 24 hours releases itself.** The server sweeps hourly
+  and frees holds that outlived the agent that took them, clearing the
+  assignee exactly when a deliberate `issue release` would - only when it is
+  still the holder. Nothing announces it; if you mean to hold an issue for
+  longer than a day, say so on the issue (LLL-183).
+
+### Added
+
+- Documents have an address: `/t/KEY/doc/SLUG` renders a decision, finding,
+  PRD or wiki page with its markdown, kind, slug, retrieval coordinates and
+  linked issues, and answers `?raw` with the source. Decisions and findings
+  were the one record kind reachable only from a terminal, which is where
+  "why is this like this" is usually asked. An issue's related findings now
+  link to it (LLL-405).
+- `lll label move NAME --to KEY` and `lll project move NAME --to KEY`, with
+  a team select on each settings row. The scope was write-once, so a label
+  created in the wrong team could only be deleted and remade - losing every
+  issue that referenced it. The move is refused while issues outside the
+  destination still reference the record, and names them (LLL-100).
+- Findings carry a confidence: a suspected or refuted finding says so
+  wherever it renders (LLL-396).
+
+### Changed
+
+- `issue list --sort priority` leads with the most urgent work, and
+  unprioritised issues sort last in either direction - absent is not a
+  priority below low. It also fetched the wrong page before: the first
+  `--limit` rows of PocketBase's numeric order, so on a board with more
+  unprioritised issues than the limit the urgent ones were never read at
+  all (LLL-382).
+- The issues table, the projects list and settings answer for the team in
+  the URL rather than the one the server booted with. On a multi-team server
+  every other team's name, accent, labels and projects were uneditable on the
+  web, and the rail moved the current-team marker under the reader (LLL-426).
+- Moving one card reads one column instead of the whole team (LLL-428).
+
+### Fixed
+
+- Related findings and comments no longer draw on top of each other on the
+  issue page (LLL-424).
+- `mise run seed` and `mise run api-schema` isolate their config root, not
+  just `HOME`: `XDG_CONFIG_HOME` outranks it, so on a machine exporting one
+  they read the developer's own config and died against a throwaway database
+  (LLL-423, LLL-430).
+- `lll api --schema` describes the schema the server actually has: bot
+  member fields and the webhooks collection had been missing since they
+  landed (LLL-430).
+
 ## [0.3.1] - 2026-09-16
 
 ### Fixed
