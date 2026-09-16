@@ -550,10 +550,20 @@ assert_contains "$out" "Created ENG-4" "urgent issue created"
 out=$(LLL_URL=$URL LLL_TEAM=ENG "$LIN" issue create -t "Tidy readme" --priority 4)
 assert_contains "$out" "Created ENG-5" "low issue created"
 
+# LLL-382: priority is a triage order, so urgent leads and the unprioritised
+# (ENG-1..3, stored as 0) are last in EITHER direction - absent is not a
+# priority below low. Asserted on both ends of both directions, because the
+# old bug was invisible from one end: low did sort last, under three
+# unprioritised issues that outranked the urgent one.
 out=$(LLL_URL=$URL LLL_TEAM=ENG "$LIN" issue list --sort -priority)
 assert_contains "$(printf '%s\n' "$out" | head -1)" "ENG-5" "sort -priority puts low (4) first"
+last=$(printf '%s\n' "$out" | tail -1)
+assert_not_contains "$last" "ENG-4" "sort -priority ends on an unprioritised issue, not urgent"
+assert_not_contains "$last" "ENG-5" "sort -priority ends on an unprioritised issue, not low"
 out=$(LLL_URL=$URL LLL_TEAM=ENG "$LIN" issue list --sort priority)
-assert_contains "$(printf '%s\n' "$out" | tail -1)" "ENG-5" "sort priority puts low (4) last"
+assert_contains "$(printf '%s\n' "$out" | head -1)" "ENG-4" "sort priority leads with urgent (1)"
+assert_not_contains "$(printf '%s\n' "$out" | tail -1)" "ENG-5" "sort priority puts unprioritised below low (4)"
+assert_not_contains "$(printf '%s\n' "$out" | head -1)" "ENG-1" "sort priority does not lead with an unprioritised issue"
 
 out=$(LLL_URL=$URL LLL_TEAM=ENG LLL_SORT=-priority "$LIN" issue list)
 assert_contains "$(printf '%s\n' "$out" | head -1)" "ENG-5" "LLL_SORT is the default sort"
