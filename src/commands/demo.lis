@@ -1,0 +1,459 @@
+import "go:encoding/json"
+import "go:fmt"
+
+import "go:strings"
+
+import "config"
+import "models"
+import "pb"
+import "provenance"
+import "records"
+
+/// The seeded first run behind `lll up --demo` (LLL-433).
+///
+/// A fresh `lll up` lands you on an empty board, which is the worst possible
+/// introduction to a tool whose point is what happens when there IS work on it.
+/// This fills one team with something to move around.
+///
+/// The content rule, and the reason this is not "buy groceries": every item
+/// demonstrates something lll does that a generic tracker does not. A demo of
+/// sample todos would teach a reader that this is a todo list, which is the
+/// wrong thing to teach.
+///
+/// Every issue ends in a line beginning "Works if:", so the seeded board is
+/// also a rubric. Walking it top to bottom exercises claims, bot identities,
+/// the agenda verb, realtime in both directions, dependencies, docs, repo
+/// attachment, handoff and archiving. That is an acceptance pass a person can
+/// run without reading the suite.
+struct DemoIssue {
+  title: string,
+  emoji: string,
+  state: string,
+  priority: int,
+  label: string,
+  body: string,
+}
+
+struct DemoDoc {
+  slug: string,
+  title: string,
+  kind: string,
+  body: string,
+}
+
+/// Seed `team_key` when it holds no issues. Never touches a team that has any:
+/// the demo is for a board nobody has used yet, and duplicating ten issues into
+/// real work would be a worse bug than the empty board it fixes.
+pub fn seed_demo(team_key: string, me: string, db_url: string) -> Result<(), string> {
+  let Some(team) = records.find_team(team_key)? else {
+    return Err(f"--demo: no team {team_key} to seed")
+  };
+  let existing = records.fetch_board_issues(team.id)?
+  if !existing.is_empty() {
+    fmt.Println(
+      f"demo   {team_key} already has {existing.length()} issues — not seeding over them",
+    )
+    return Ok(())
+  }
+
+  // Issue numbers are assigned in creation order, and this only runs on an
+  // empty team, so the cross-references below (DEMO-5 from DEMO-6) are stable.
+  let creator = records.find_member(me)?.map_or("", |m| m.id)
+
+  let mut label_ids = Map.new<string, string>()
+  for (name, color) in demo_labels() {
+    let id = make_label(team.id, name, color)?
+    label_ids[name] = id
+  }
+  let project = make_project(team.id)?
+
+  for spec in demo_issues(team_key) {
+    let labels: Slice<string> = label_ids.get(spec.label).map_or([], |id| [id])
+    make_issue(team.id, creator, project, labels, spec)?
+  }
+  for doc in demo_docs(team_key) {
+    make_doc(team.id, doc)?
+  }
+
+  fmt.Println(
+    f"demo   seeded {team_key} with 10 issues and 4 docs — start at 'lll doc view start-here'",
+  )
+  point_cli_at_demo(db_url, team_key, me)?
+  fmt.Println(f"demo   done with it? 'lll team archive {team_key}'")
+  Ok(())
+}
+
+/// Leave the CLI able to run the demo's own instructions.
+///
+/// Nearly every "Works if:" line is a CLI command, and a plain boot leaves the
+/// config pointing at no server with no credentials, so all of them answer
+/// "not logged in" instead. A demo whose instructions do not run is worse than
+/// no demo.
+///
+/// Only ever into an EMPTY slot. A configured token belongs to somebody's real
+/// server, and overwriting it to make a toy board convenient would be the worst
+/// trade in this file.
+fn point_cli_at_demo(db_url: string, team_key: string, me: string) -> Result<(), string> {
+  // From a FILE, not merely set: the boot exports its own superuser token
+  // into the environment for the in-process board, so "is a token configured"
+  // is true during every `lll up` and would skip this every time.
+  let (_, src) = config.load_traced()?
+  if strings.HasPrefix(src.token, "file:") {
+    fmt.Println(
+      f"demo   your CLI keeps its configured token — to drive this board instead:
+demo     LLL_URL={db_url} LLL_TEAM={team_key} lll issue list",
+    )
+    return Ok(())
+  }
+  let su = superuser_auth()?
+  let Some(member) = records.find_member_as(su, me)? else {
+    return Ok(())
+  }
+  // A year: the demo should still work tomorrow, and it is a local board.
+  let payload = match json.Marshal(models.ImpersonateRequest { duration: 31536000 }) {
+    Ok(b) => b,
+    Err(e) => return Err(f"demo: encoding the token request: {e}"),
+  }
+  let body = pb.post_as(
+    f"/api/collections/members/impersonate/{member.id}",
+    payload as string,
+    su,
+  )?
+  let mut auth = models.AuthResponse { .. }
+  if let Err(e) = json.Unmarshal(body.bytes(), &auth) {
+    return Err(f"demo: decoding the token response: {e}")
+  }
+  if auth.token == "" { return Ok(()) }
+  let _ = set_home_key("url", db_url)?
+  let _ = set_home_key("token", auth.token)?
+  let _ = set_home_key("team", team_key)?
+  fmt.Println(f"demo   your CLI is pointed at this board as {me} — try 'lll issue next'")
+  Ok(())
+}
+
+fn demo_labels() -> Slice<(string, string)> {
+  [
+    ("agents", "#3e63dd"),
+    ("board", "#30a46c"),
+    ("cli", "#8e8c99"),
+    ("docs", "#f76b15"),
+    ("setup", "#e5484d"),
+  ]
+}
+
+fn make_label(team_id: string, name: string, color: string) -> Result<string, string> {
+  let payload = match json.Marshal(models.NewLabel { name, color, team: team_id }) {
+    Ok(p) => p,
+    Err(e) => return Err(f"demo: encoding label {name}: {e}"),
+  }
+  let body = pb.post("/api/collections/labels/records", payload as string)?
+  let mut created = models.Label { .. }
+  if let Err(e) = json.Unmarshal(body.bytes(), &created) {
+    return Err(f"demo: decoding label {name}: {e}")
+  }
+  Ok(created.id)
+}
+
+fn make_project(team_id: string) -> Result<string, string> {
+  let new_project = models.NewProject {
+    name: "First hour",
+    description: "The ten things worth trying before you decide anything.",
+    status: "started",
+    team: team_id,
+  }
+  let payload = match json.Marshal(new_project) {
+    Ok(p) => p,
+    Err(e) => return Err(f"demo: encoding project: {e}"),
+  }
+  let body = pb.post("/api/collections/projects/records", payload as string)?
+  let mut created = models.Project { .. }
+  if let Err(e) = json.Unmarshal(body.bytes(), &created) {
+    return Err(f"demo: decoding project: {e}")
+  }
+  Ok(created.id)
+}
+
+fn make_issue(
+  team_id: string,
+  creator: string,
+  project: string,
+  labels: Slice<string>,
+  spec: DemoIssue,
+) -> Result<(), string> {
+  let new_issue = models.NewIssue {
+    creator,
+    origin: provenance.capture(),
+    team: team_id,
+    title: spec.title,
+    state: spec.state,
+    priority: spec.priority,
+    description: spec.body,
+    emoji: spec.emoji,
+    project,
+    labels,
+    ..
+  }
+  let payload = match json.Marshal(new_issue) {
+    Ok(p) => p,
+    Err(e) => return Err(f"demo: encoding '{spec.title}': {e}"),
+  }
+  let _ = pb.post("/api/collections/issues/records", payload as string)?
+  Ok(())
+}
+
+fn make_doc(team_id: string, doc: DemoDoc) -> Result<(), string> {
+  let new_doc = models.NewDoc {
+    team: team_id,
+    slug: doc.slug,
+    title: doc.title,
+    kind: doc.kind,
+    body: doc.body,
+    ..
+  }
+  let payload = match json.Marshal(new_doc) {
+    Ok(p) => p,
+    Err(e) => return Err(f"demo: encoding doc {doc.slug}: {e}"),
+  }
+  let _ = pb.post("/api/collections/docs/records", payload as string)?
+  Ok(())
+}
+
+/// Ten issues, spread across the columns so the board is not one stack, each
+/// ending in the line that makes it checkable.
+fn demo_issues(k: string) -> Slice<DemoIssue> {
+  [
+    DemoIssue {
+      title: "Claim me, then try to claim me again",
+      emoji: "\u{1F512}",
+      state: "todo",
+      priority: 2,
+      label: "agents",
+      body: f"A claim is the lock. Git will let two agents edit the same thing
+happily; the board refuses.
+
+  lll issue claim {k}-1
+  lll issue claim {k}-1     # again, as somebody else
+
+Works if: the second claim exits non-zero and names the holder instead of
+taking it.
+
+Give it back with 'lll issue release {k}-1'.",
+    },
+    DemoIssue {
+      title: "Give an agent its own identity",
+      emoji: "\u{1F916}",
+      state: "todo",
+      priority: 2,
+      label: "agents",
+      body: "An agent should not borrow your account. A bot member cannot log
+in, is owned by the person who made it, and its token rotates without touching
+yours.
+
+  lll bot bot-demo
+
+Works if: the board badges bot-demo as a bot, and the token it prints once
+authenticates that agent alone.",
+    },
+    DemoIssue {
+      title: "Ask the board what to work on",
+      emoji: "\u{1F3AF}",
+      state: "todo",
+      priority: 1,
+      label: "agents",
+      body: f"The question an agent has is not 'list everything', it is 'what
+now'. Ready, unclaimed, highest priority, oldest.
+
+  lll issue next
+  lll issue next --claim
+
+Works if: it prints one key on stdout and the claim on stderr, so the key pipes
+into the next command while you still see what happened.",
+    },
+    DemoIssue {
+      title: "Watch the board from your terminal",
+      emoji: "\u{1F4E1}",
+      state: "backlog",
+      priority: 3,
+      label: "cli",
+      body: "Run this, then drag a card in the browser.
+
+  lll watch --json | jq -r '.record.title'
+
+Works if: the terminal prints a line the moment the card lands. No polling, no
+reload, one SSE connection.",
+    },
+    DemoIssue {
+      title: "Move me on the board, then read me from the CLI",
+      emoji: "\u{2194}",
+      state: "todo",
+      priority: 2,
+      label: "board",
+      body: f"Drag this card into another column, then:
+
+  lll issue view {k}-5
+
+Works if: the CLI reports the state you dropped it in. The board and the CLI
+are one database, not two views kept in step.",
+    },
+    DemoIssue {
+      title: "Block me until the card above is done",
+      emoji: "\u{26D3}",
+      state: "backlog",
+      priority: 3,
+      label: "cli",
+      body: f"  lll issue block {k}-6 {k}-5
+  lll issue list --ready
+
+Works if: {k}-6 is absent from --ready until {k}-5 is done, and 'lll issue next'
+stops offering it. Dependencies decide the agenda, not just the display.",
+    },
+    DemoIssue {
+      title: "Write down why, not just what",
+      emoji: "\u{1F4DD}",
+      state: "backlog",
+      priority: 3,
+      label: "docs",
+      body: "Issues record what changed. Decisions and findings record why, and
+what was rejected, which is the half that is gone in six months.
+
+  lll doc list
+  lll doc view why-not-a-todo-list
+  lll doc create -t 'Why we picked X' --kind decision
+
+Works if: the doc has a page on the board, and 'lll search' finds it by a word
+from its body rather than its title.",
+    },
+    DemoIssue {
+      title: "Attach a repo to this team",
+      emoji: "\u{1F517}",
+      state: "todo",
+      priority: 2,
+      label: "setup",
+      body: "  cd ~/any/git/repo && lll attach
+
+Works if: .lll.toml appears, and 'lll issue list' in that directory needs no
+flags. Commit it and every clone and worktree arrives configured.",
+    },
+    DemoIssue {
+      title: "Hand work to someone else",
+      emoji: "\u{1F91D}",
+      state: "in-review",
+      priority: 2,
+      label: "setup",
+      body: f"  lll member add -n alex
+  lll issue update {k}-9 --assignee alex
+
+Works if: reassigning an issue somebody else holds is refused and names the
+holder. The claim owns the assignee, so nobody is quietly reassigned off work
+they started.",
+    },
+    DemoIssue {
+      title: "Throw this board away when you are done",
+      emoji: "\u{1F9F9}",
+      state: "backlog",
+      priority: 4,
+      label: "setup",
+      body: f"The demo is a real team, so get rid of it the way you would any
+other.
+
+  lll team archive {k}
+
+Works if: /t/{k}/ still renders, read-only and banded as archived, and new
+writes refuse while naming 'lll team unarchive {k}'. Archiving hides; it never
+deletes.",
+    },
+  ]
+}
+
+/// Four docs, written for a person rather than for a parser. They are the half
+/// a newcomer is missing: the issues show what the tool does, these say what it
+/// is for.
+fn demo_docs(k: string) -> Slice<DemoDoc> {
+  [
+    DemoDoc {
+      slug: "start-here",
+      title: "Start here",
+      kind: "wiki",
+      body: f"This board is a demo. Everything on it is fake, and it is a real
+team, so anything you do to it works exactly as it would on your own.
+
+Five commands, in this order:
+
+  lll issue list              what is here
+  lll issue next              what to do first
+  lll issue claim {k}-1       take it
+  lll watch --json            watch the board change while you use it
+  lll doc list                the written record, of which this is a page
+
+Every issue ends in a line beginning 'Works if:'. That is the check for the
+thing it teaches, so working through the board top to bottom is also a way to
+satisfy yourself that lll does what it claims.
+
+When you have had enough: 'lll team archive {k}'.",
+    },
+    DemoDoc {
+      slug: "why-not-a-todo-list",
+      title: "Why this is not a todo list",
+      kind: "decision",
+      body: "A todo list assumes one person who remembers the context. lll
+assumes several workers, most of them agents, none of whom remember anything
+between sessions.
+
+That assumption is the whole design:
+
+- The claim is a lock, not a label. Two agents cannot take one issue, and the
+  refusal is the coordination.
+- Identity comes from the token, so authorship is a fact the server knows
+  rather than a convention everyone honours.
+- Docs are first class. An issue says what changed; a decision says what was
+  rejected and why, which is what the next person actually needs.
+- The CLI is the API. Reads take --json, changes arrive as an event stream.
+
+What was rejected: a hosted service with accounts, and a plugin for an existing
+tracker. Both put the record somewhere an agent needs credentials and a network
+round trip to reach, which is the thing that stops it being used.",
+    },
+    DemoDoc {
+      slug: "how-claims-work",
+      title: "How a claim works",
+      kind: "wiki",
+      body: f"A claim is server-side and atomic. `lll issue claim {k}-1` either
+acquires the issue or exits non-zero naming the holder. There is no window in
+which two agents both believe they hold it.
+
+Three things follow, and they are the reason claims exist rather than an
+assignee field:
+
+- The refusal IS the coordination. An agent that cannot claim picks something
+  else, without asking anyone.
+- The claim owns the assignee. Reassigning an issue somebody holds is refused,
+  so nobody is moved off work they have started.
+- Releasing is explicit: 'lll issue release {k}-1' hands it back and clears the
+  assignee when it still matches.
+
+Claim before you start, not before you push. Two agents that discover the
+collision after both have done the work have wasted the work.",
+    },
+    DemoDoc {
+      slug: "a-finding-looks-like-this",
+      title: "A finding looks like this",
+      kind: "finding",
+      body: "Findings are traps, written down the moment they cost someone
+time, so the next person pays nothing. This one is real.
+
+The trap: `length()` counts BYTES in this codebase and `substring()` indexes
+RUNES. The two agree for ASCII, so code that mixes them looks correct for as
+long as nobody writes an accented character.
+
+What it cost: an issue description of about 100 accented characters panicked a
+goroutine outside any HTTP handler, and the board server died. A second copy of
+the same mistake ended the `watch --json` stream on any emoji.
+
+The tell: `substring(n..x.length())` anywhere. A byte count has no business
+near a rune index.
+
+A finding is worth writing when it took you more than a few minutes and the
+next person would hit it the same way. That is the whole bar.",
+    },
+  ]
+}
