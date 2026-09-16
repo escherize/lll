@@ -330,6 +330,9 @@ pub struct FindingVM {
   pub slug: string,
   pub title: string,
   pub area: string,
+  // LLL-396: suspected and refuted findings say so where they render.
+  pub confidence: string,
+  pub confidence_note: string,
 }
 
 /// View model for the issue page / issue-detail fragment.
