@@ -109,6 +109,9 @@ is how two panics were found.
 - **`watch --json` panicked on any multi-byte record**, for the same
   byte-versus-rune reason — one emoji anywhere in the payload ended the
   stream.
+- Related findings and comments no longer draw on top of each other on the
+  issue page: both carried the same grid area, so a named cell held two
+  sections at once. The DOM was right all along; only geometry could see it.
 - The last hidden column can be shown again; unhiding it no longer restores
   the hide from the saved view.
 - An expired boot token is re-minted the way a rejected one already was.
