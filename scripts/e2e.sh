@@ -2307,6 +2307,26 @@ out=$(env $E "$LIN" issue update "$CKEY" --description-replace-old x 2>&1)
 set -e
 assert_contains "$out" "go together" "half a replace is refused"
 
+# --- If-Unmodified-Since is enforced by the server (LLL-399) ---
+# LLL-391's check was read-then-write on the client, so a write landing
+# inside the round trip still clobbered. The precondition now rides the PATCH
+# and holds at the write: a stamp that never matched is refused with 412 even
+# though this request did no read first, and the refusal carries the current
+# stamp to retry with.
+iid=$(env $E "$LIN" issue view "$CKEY" --json | jq -r '.id')
+pre412=$(curl -s -X PATCH -H "$AUTH_HDR" -H "Content-Type: application/json" \
+  -H "If-Unmodified-Since: 2000-01-01 00:00:00.000Z" \
+  -d '{"title":"clobbered"}' "$URL/api/collections/issues/records/$iid")
+assert_contains "$pre412" '"code":412' "a server-side precondition answers 412"
+assert_contains "$pre412" "the record changed since 2000-01-01 00:00:00.000Z" "the refusal names the stamp that was passed"
+now=$(env $E "$LIN" issue view "$CKEY" --json | jq -r '.updated')
+assert_contains "$pre412" "$now" "and the current stamp to retry with"
+[ "$(env $E "$LIN" issue view "$CKEY" --json | jq -r '.title')" != "clobbered" ] || fail "a 412 precondition patch must not land"
+cur=$(curl -s -X PATCH -H "$AUTH_HDR" -H "Content-Type: application/json" \
+  -H "If-Unmodified-Since: $now" \
+  -d '{"description":"server-side precondition verified"}' "$URL/api/collections/issues/records/$iid")
+assert_contains "$(env $E "$LIN" issue view "$CKEY" --raw)" "server-side precondition verified" "the current stamp writes"
+
 # --assignee on a claimed issue is refused and names the holder (LLL-184);
 # assigning the holder to themselves is a no-op.
 set +e

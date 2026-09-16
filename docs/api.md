@@ -27,6 +27,15 @@ errors:
     lll api GET "/api/collections/issues/records?filter=(state='todo')"
     lll api POST /api/collections/comments/records --body '{"issue":"...","body":"hi"}'
 
+## Optimistic writes
+
+`PATCH /api/collections/issues/records/{id}` honours an `If-Unmodified-Since`
+header: pass the `updated` stamp your read returned, and the server answers
+`412` — without applying the write — when the record has changed since. The
+refusal body names the current stamp to retry with. Without the header the
+PATCH behaves exactly as before. (`lll issue update --if-unchanged-since`
+sends it for you.) The header applies to the `issues` collection only.
+
 ## The schema
 
 `lll api --schema` prints the collection/field reference: every collection
