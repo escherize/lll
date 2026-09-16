@@ -1009,6 +1009,15 @@ if command -v playwright-cli >/dev/null 2>&1; then
     return 'tab titles verified';
   }" 2>/dev/null) || fail "playwright: page titles"
   assert_contains "$tab_titles" 'tab titles verified' "page tabs identify the app and their team"
+  # LLL-424: ENG-1 carries an area-matched finding (above) and a comment, so
+  # its page is the one that renders both .thread sections. The overlap this
+  # guards against was invisible to every markup assertion the suite has.
+  "$LIN" issue comment ENG-1 -b "A comment, so the page renders both threads." >/dev/null
+  thread_layout=$(playwright-cli -s="$BROWSER_SESSION" run-code "$(cat "$REPO_ROOT"/scripts/browser_thread_layout.js)" 2>&1)
+  assert_contains "$thread_layout" 'thread sections stack without overlapping' \
+    "browser: related findings and comments do not overlap"
+  playwright-cli -s="$BROWSER_SESSION" goto "$WEB/" >/dev/null 2>&1 \
+    || fail "playwright: return to board after thread layout check"
   title_sort=$(playwright-cli -s="$BROWSER_SESSION" run-code "$(cat "$REPO_ROOT"/scripts/browser_issue_sort.js)" 2>&1)
   assert_contains "$title_sort" 'title header sorting verified' "browser: title sorting in both directions"
   playwright-cli -s="$BROWSER_SESSION" goto "$WEB/" >/dev/null 2>&1 || fail "playwright: return to board after title sort"
