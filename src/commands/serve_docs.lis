@@ -1,0 +1,102 @@
+import "go:net/http"
+import "go:strings"
+
+import "display"
+import "markdown"
+import "models"
+
+// GET /t/{team}/doc/{slug} - a decision, finding, PRD or wiki page at an
+// address (LLL-405).
+
+/// The document page: the one record kind that had no URL.
+///
+/// A doc was reachable only through `lll doc view SLUG`, which needs a
+/// terminal and a configured CLI - unavailable exactly when a person is
+/// reading the board and wants to know why something is the way it is.
+/// Decisions and findings ARE that answer, so they are the records that most
+/// needed an address.
+///
+/// Read-only, deliberately. Decisions are immutable by the project's own
+/// policy (`lll doc view tracker-records-source-files-and-generated-mirrors`),
+/// and a page nobody can edit is the smaller, obviously-safe start; `lll doc
+/// edit` remains the write path.
+///
+/// No SSE, for the reason /projects and /issues have none: the bridge
+/// broadcasts one unfiltered #board fragment to every board-scoped client, so
+/// a page that subscribed would be morphed into the board.
+fn doc_page(
+  w: http.ResponseWriter,
+  r: Ref<http.Request>,
+  team: models.Team,
+  me: string,
+) {
+  let slug = r.PathValue("slug")
+  // fetch_doc is `lll doc view`'s own read, expands included, so the page and
+  // the command cannot answer differently. Its error already names the team
+  // and points at `lll doc list`, which is the right 404 body.
+  let doc = match fetch_doc(team, slug) {
+    Ok(d) => d,
+    Err(e) => {
+      http.Error(w, e, 404)
+      return
+    },
+  }
+  let vm = doc_vm(doc, team.key)
+  if wants_raw(r) {
+    write_raw(w, doc_raw(vm))
+    return
+  }
+  let page = PageVM { rail: rail_vm("doc", me, team), page: vm }
+  let html = match render("doc-page", page) {
+    Ok(h) => h,
+    Err(e) => {
+      http.Error(w, e, 500)
+      return
+    },
+  }
+  w.Header().Set("Cache-Control", "no-store")
+  w.Header().Set("Content-Type", "text/html; charset=utf-8")
+  let _ = w.Write(html.bytes())
+}
+
+/// Doc record -> view model. The property order is `lll doc view`'s, so a
+/// reader moving between the two surfaces finds the same page.
+fn doc_vm(d: models.Doc, team_key: string) -> DocVM {
+  DocVM {
+    slug: d.slug,
+    title: d.title,
+    kind: d.kind,
+    kind_label: state_label(d.kind),
+    area: d.area,
+    paths: d.paths,
+    created: display.relative(d.created),
+    updated: display.relative(d.updated),
+    issues: d.expand.issues.map(|i| {
+      let key = f"{i.expand.team.key}-{i.number}"
+      DocIssueVM { key, title: i.title, href: f"/issue/{key}" }
+    }),
+    body: markdown.md_html(d.body),
+    body_md: d.body,
+    team_key,
+  }
+}
+
+/// GET /t/KEY/doc/SLUG?raw - the doc as markdown. Its BODY is markdown
+/// already, so the raw form is the source with the property block `lll doc
+/// view` prints in front of it, not a re-rendering of anything.
+fn doc_raw(vm: DocVM) -> string {
+  let mut lines = [f"# {vm.slug} {vm.title}", "", f"Kind: {vm.kind}"]
+  if vm.area != "" { lines = lines.append(f"Area: {vm.area}") }
+  if vm.paths != "" { lines = lines.append(f"Paths: {vm.paths}") }
+  lines = lines.append(f"Created: {vm.created}")
+  lines = lines.append(f"Updated: {vm.updated}")
+  if !vm.issues.is_empty() {
+    let keys = vm.issues.map(|i| f"[{i.key}]({i.href})")
+    lines = lines.append(f"Issues: {strings.Join(keys, ", ")}")
+  }
+  if vm.body_md != "" {
+    lines = lines.append("")
+    lines = lines.append(vm.body_md)
+  }
+  strings.Join(lines, "\n") + "\n"
+}
