@@ -247,7 +247,7 @@ fn issue_update_spec() -> Slice<flags.Flag> {
       name: "--if-unchanged-since",
       value: true,
       hint: "stamp",
-      help: "refuse unless the issue's 'updated' still equals stamp (from 'issue view --json'), so an edit\ncannot land on a record someone changed under you",
+      help: "refuse unless the issue's 'updated' still equals stamp (from 'issue view --json') —\nenforced at the write by the server (LLL-399), so an edit cannot land on a record\nsomeone changed under you, even mid-flight",
       ..,
     },
     flags.Flag {
@@ -1078,6 +1078,13 @@ fn update(input: flags.CommandInput) -> Result<(), string> {
   if p.given("--assignee") && assignee_name == "" {
     return Err("--assignee needs a member name, or 'none' to clear it")
   }
+  // LLL-399: the stamp rides the direct PATCH. Assignment writes go through
+  // the claim route, which carries no precondition header — honouring the
+  // flag there would mean a guard that silently stops guarding. The claims
+  // route arbitrates with its own observed-claim stamp instead.
+  if since != "" && assignee_name != "" {
+    return Err("--if-unchanged-since cannot be combined with --assignee: assignment writes go through the claim route, which arbitrates with its own claim stamp — run them as two updates")
+  }
   if state == "" && priority < 0 && assignee_name == "" && label_names.is_empty() && !project_set && !title_set && !description_set && !replace_set && !append_set && !emoji_set {
     return Err(f"nothing to update — pass at least one flag\nusage: {usage}")
   }
@@ -1089,9 +1096,11 @@ fn update(input: flags.CommandInput) -> Result<(), string> {
   // LLL-391: optimistic concurrency for the fields nobody owns. The caller
   // passes the 'updated' it read; a record written since is refused with
   // the current stamp, and the caller reads again. Claims arbitrate who
-  // owns an issue; this arbitrates edits. The check is read-then-write on
-  // the client (PocketBase has no conditional PATCH), so the window is the
-  // round trip, not the whole session it used to be.
+  // owns an issue; this arbitrates edits. The local check gives the friendly
+  // refusal before a doomed round trip; since LLL-399 the stamp also rides
+  // the PATCH as If-Unmodified-Since, so the window this check cannot close
+  // — a write landing between this read and the PATCH — is held at the
+  // server and answers 412 instead of clobbering.
   if since != "" && issue.updated != since {
     return Err(f"{key} changed since {since}: its 'updated' is now {issue.updated} — read it again ('lll issue view {key} --json' carries updated) and retry with that stamp")
   }
@@ -1168,7 +1177,17 @@ fn update(input: flags.CommandInput) -> Result<(), string> {
     })?
     if result.claim_id != "" { released = f" (released {result.member_name}'s claim)" }
   } else {
-    let _ = pb.patch(f"/api/collections/issues/records/{issue.id}", payload)?
+    // The stamp rides the write (LLL-399): the precondition holds at the
+    // server, so a write landing between this process's read and its PATCH
+    // answers 412 instead of being clobbered.
+    let patched = pb.patch_with_stamp(f"/api/collections/issues/records/{issue.id}", payload, since)
+    if let Err(e) = patched {
+      if pb.response_status(e) == 412 {
+        let presented = pb.display_error(e)
+        return Err(f"{key} changed under you: {presented.summary}\nread it again ('lll issue view {key} --json' carries updated) and retry with that stamp")
+      }
+      return Err(e)
+    }
   }
   fmt.Println(f"Updated {issue.expand.team.key}-{issue.number}: {strings.Join(changed, ", ")}{released}")
   Ok(())
