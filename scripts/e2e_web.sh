@@ -1506,6 +1506,61 @@ assert_contains "$issues_rail" 'href="/issues"' "the rail has an All issues row"
 assert_contains "$board_rail" 'href="/issues"' "the board's rail has it too"
 assert_contains "$issues_rail" '<a href="/issues" class="active">' "the All issues row is current on its own page"
 assert_not_contains "$issues_rail" '<a href="/" class="active">' "and the board row is not"
+# --- /t/ENG/doc/SLUG: the document page (LLL-405) ---
+# Decisions and findings were the one record kind with no URL: reachable only
+# through `lll doc view`, which needs a terminal. Every assertion here is a
+# read path onto the record the CLI already prints.
+"$LIN" doc new -s board-render-decision -t "Render on the server" -k decision \
+  -a web --paths web/templates \
+  -b "The board renders **server-side**.
+
+## Rejected
+
+- A client framework: the board must work with JavaScript off." >/dev/null
+
+doc_page=$(wcurl -sf "$WEB/t/ENG/doc/board-render-decision") \
+  || fail "/t/ENG/doc/SLUG did not serve"
+assert_contains "$doc_page" 'id="doc-detail"' "the doc page carries its stable id"
+assert_contains "$doc_page" "Render on the server" "the page shows the title"
+assert_contains "$doc_page" "board-render-decision" "the page shows the slug a reader cites"
+assert_contains "$doc_page" "Decision" "the page names the kind"
+assert_contains "$doc_page" "<strong>server-side</strong>" "the body is rendered markdown, not source"
+assert_contains "$doc_page" "<h2>Rejected</h2>" "markdown headings render"
+assert_contains "$doc_page" "web/templates" "the retrieval paths are shown"
+
+# Same bargain as /projects and /issues: one unfiltered #board fragment goes to
+# every board-scoped client, so a page that subscribed would be morphed into
+# the board.
+assert_not_contains "$doc_page" "/static/datastar.js" "the doc page loads no Datastar"
+assert_not_contains "$doc_page" "data-init" "the doc page opens no SSE connection"
+assert_contains "$doc_page" "/static/navigation.js" "the doc page has phone navigation"
+
+# ?raw is the address bar's view source, as on every other route. The body is
+# markdown already, so raw is the SOURCE - the one place the two forms could
+# drift is doc_vm, which builds both.
+doc_raw=$(wcurl -sf "$WEB/t/ENG/doc/board-render-decision?raw")
+assert_contains "$doc_raw" "The board renders **server-side**." "raw serves the markdown source"
+assert_contains "$doc_raw" "Kind: decision" "raw names the kind"
+assert_not_contains "$doc_raw" "<strong>" "raw is not the rendered html"
+
+# An unknown slug is a 404 whose body names the team and the way out, which is
+# `lll doc view`'s own message.
+doc_404=$(curl -s -o /dev/null -w '%{http_code}' -H "$BOARD_COOKIE" \
+  "$WEB/t/ENG/doc/no-such-decision")
+[ "$doc_404" = "404" ] || fail "unknown doc slug: expected 404, got $doc_404"
+doc_404_body=$(curl -s -H "$BOARD_COOKIE" "$WEB/t/ENG/doc/no-such-decision")
+assert_contains "$doc_404_body" "lll doc list" "the 404 says how to find the right slug"
+
+# Behind the same gate as every other board route (criterion #2).
+doc_anon=$(curl -s -o /dev/null -w '%{http_code}' "$WEB/t/ENG/doc/board-render-decision")
+[ "$doc_anon" = "401" ] || fail "anonymous doc fetch: expected 401, got $doc_anon"
+
+# The bare path lands on the selected team: slugs are unique per team, so it
+# cannot resolve one by itself.
+doc_bare=$(curl -s -o /dev/null -w '%{http_code}' -H "$BOARD_COOKIE" \
+  "$WEB/doc/board-render-decision")
+[ "$doc_bare" = "303" ] || fail "bare /doc/SLUG: expected 303, got $doc_bare"
+
 # --- /projects: the read path a project never had (task-113) ---
 # Projects have been in the schema since the start and issues have always
 # related to them, but until this page the only place one was ever SHOWN was

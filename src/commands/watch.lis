@@ -391,7 +391,10 @@ fn watch_ready(filters: query.Filters, json_mode: bool) -> Result<(), string> {
   // blocked_by expand, so each event record carries its blockers' states.
   let topic = realtime.topic_with_options("issues", filter, "team,assignee,blocked_by")?
   let ch = realtime.subscribe(pb.base_url()?, [topic], None)?
-  let mut issues = fetch_all_issues(filter)?
+  // blocked_by expanded on every page, so readiness can be decided locally.
+  let mut tail = "&expand=team,assignee,blocked_by,labels&sort=created,id"
+  if filter != "" { tail = f"{tail}&filter={url.QueryEscape(filter)}" }
+  let mut issues = fetch_all_issues(tail)?
   let mut ready = ready_keys(issues)
   fmt.Fprintln(os.Stderr, "watch: ready (agenda subscription accepted)")
   loop {
@@ -469,28 +472,6 @@ fn ready_keys(issues: Slice<models.Issue>) -> Slice<string> {
     if !open { out = out.append(issue.id) }
   }
   out
-}
-
-/// Every issue the filter selects, all pages, blockers expanded: the startup
-/// snapshot of the ready computation. `issue next`'s ready_issues walks the
-/// same collection; this one starts from a filter string so `watch --ready`
-/// can carry the other watch flags (--state, --search, --team) through.
-fn fetch_all_issues(filter: string) -> Result<Slice<models.Issue>, string> {
-  let mut out: Slice<models.Issue> = []
-  let mut page = 1
-  loop {
-    let mut path = f"/api/collections/issues/records?perPage=500&page={page}&expand=team,assignee,blocked_by,labels&sort=created,id"
-    if filter != "" { path = f"{path}&filter={url.QueryEscape(filter)}" }
-    let body = pb.get(path)?
-    let mut issues = NextPage { .. }
-    if let Err(e) = json.Unmarshal(body.bytes(), &issues) {
-      return Err(f"decoding issues: {e}")
-    }
-    for i in issues.items { out = out.append(i) }
-    if page >= issues.total_pages || issues.items.is_empty() { break }
-    page += 1
-  }
-  Ok(out)
 }
 
 /// One page of the issues collection with the page count, so the snapshot

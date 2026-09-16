@@ -434,6 +434,37 @@ fn rank_agenda_prefers_more_urgent_priority_with_none_last() {
   assert ranked[3].id == "none1"
 }
 
+// LLL-382: `--sort priority` is a triage order. PocketBase can only sort the
+// stored number, where none is 0, so it led with the unprioritised.
+#[test]
+fn rank_by_priority_leads_with_urgent_and_keeps_none_last_both_ways() {
+  let items = [
+    agenda_item("none1", "", 0, "2026-01-01 00:00:00.000Z"),
+    agenda_item("low1", "", 4, "2026-01-01 00:00:00.000Z"),
+    agenda_item("urgent1", "", 1, "2026-01-01 00:00:00.000Z"),
+    agenda_item("high1", "", 2, "2026-01-01 00:00:00.000Z"),
+  ]
+  let up = rank_by_priority(items, false)
+  assert up.map(|i| i.id).equals(["urgent1", "high1", "low1", "none1"])
+
+  // Descending reverses the prioritised ones; none is absent, not lowest, so
+  // it stays at the end rather than leading.
+  let down = rank_by_priority(items, true)
+  assert down.map(|i| i.id).equals(["low1", "high1", "urgent1", "none1"])
+}
+
+#[test]
+fn page_of_windows_a_locally_ordered_list() {
+  let items = [
+    agenda_item("a", "", 1, ""),
+    agenda_item("b", "", 1, ""),
+    agenda_item("c", "", 1, ""),
+  ]
+  assert page_of(items, 1, 2).map(|i| i.id).equals(["a", "b"])
+  assert page_of(items, 2, 2).map(|i| i.id).equals(["c"])
+  assert page_of(items, 3, 2).is_empty()
+}
+
 #[test]
 fn rank_agenda_prefers_older_issues() {
   let items = [

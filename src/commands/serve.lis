@@ -116,6 +116,7 @@ pub fn run_server(
     "projects-page",
     PageVM { rail: shell, page: ProjectsVM { .. } },
   )?
+  let _ = render("doc-page", PageVM { rail: shell, page: DocVM { .. } })?
 
   // One PB subscription for everything. Issues are UNSCOPED (TASK-198): the
   // server hosts every team, and the bridge routes each event to the clients
@@ -217,6 +218,15 @@ fn board_mux(cfg: config.Config, boot: models.Team, hub: Hub) -> Result<mut Ref<
       if let Some(t) = routed_team(w, r) { issue_page(w, r, t, cfg.me) }
     }),
   )
+  // LLL-405: a doc's address. Team-routed like the board and issue pages,
+  // because slugs are unique PER TEAM, not per server - GRDN and LLL both
+  // get an `index`, so a bare /doc/SLUG cannot name one record.
+  mux.HandleFunc(
+    "GET /t/{team}/doc/{slug}",
+    gated(|w: http.ResponseWriter, r: Ref<http.Request>| {
+      if let Some(t) = routed_team(w, r) { doc_page(w, r, t, cfg.me) }
+    }),
+  )
   mux.HandleFunc(
     "GET /t/{team}/search",
     gated(|w: http.ResponseWriter, r: Ref<http.Request>| {
@@ -240,6 +250,15 @@ fn board_mux(cfg: config.Config, boot: models.Team, hub: Hub) -> Result<mut Ref<
         if i > 0 { tk = key.substring(0..i) }
       }
       redirect_with_query(w, r, f"/t/{tk}/issue/{key}")
+    }),
+  )
+  // The bare path lands on the SELECTED team, the same compatibility the
+  // other unrouted reads (/issues, /projects) already make. It cannot look
+  // the slug up to do better: two teams may both own it.
+  mux.HandleFunc(
+    "GET /doc/{slug}",
+    gated(|w: http.ResponseWriter, r: Ref<http.Request>| {
+      redirect_with_query(w, r, f"/t/{boot_key}/doc/{r.PathValue("slug")}")
     }),
   )
   mux.HandleFunc(
