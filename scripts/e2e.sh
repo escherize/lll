@@ -3368,6 +3368,13 @@ python3 "$REPO_ROOT"/scripts/test_claims_live.py "$LLL_ABS" "$URL"
 # green gate. Here rather than in `test` because it needs the built binary.
 python3 "$REPO_ROOT"/scripts/test_seed.py
 
+# LLL-435: api_schema.lis is generated from the migrations' end state and
+# nothing compared the two — it described a schema the server does not have
+# through two releases (members kind/owner, the whole webhooks collection)
+# under a green gate. Same placement as test_seed.py: it needs the built
+# binary and boots its own throwaway board.
+python3 "$REPO_ROOT"/scripts/gen_api_schema.py --check
+
 # --- web board (own ephemeral PB; see e2e_web.sh) ---
 HOME="$E2E_REAL_HOME" "$REPO_ROOT"/scripts/e2e_web.sh
 
