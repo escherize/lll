@@ -40,6 +40,7 @@ e2e_trap_cleanup cleanup
 python3 "$REPO_ROOT"/scripts/test_board_startup.py "$REPO_ROOT"/target/.lisette/bin/lll
 python3 "$REPO_ROOT"/scripts/test_up_errors.py "$REPO_ROOT"/target/.lisette/bin/lll
 python3 "$REPO_ROOT"/scripts/test_scratch.py
+python3 "$REPO_ROOT"/scripts/test_demo.py
 
 # TASK-227 (the half of TASK-187 this suite never got): pin HOME for the rest
 # of the run, AFTER lis build so the lis/go/mise caches under the real HOME
