@@ -74,7 +74,20 @@ def boot_board():
     url = f"http://127.0.0.1:{db_port}"
     # Env beats files: unset every inherited LLL_* variable so a hosted url or
     # token cannot steer the throwaway board, then pin the scratch values.
-    env = {k: v for k, v in os.environ.items() if not k.startswith("LLL_")}
+    #
+    # LLL-430: XDG_CONFIG_HOME is not an LLL_ variable, so that filter never
+    # saw it, and since LLL-400 it outranks the HOME set below. On a machine
+    # exporting it - a common dotfiles setting - this scratch board resolved
+    # the DEVELOPER's ~/.config/lll/lll.toml, rejected its hosted token
+    # against a database that had never issued it, and exited before
+    # listening. The task then failed with "board did not become healthy",
+    # which names the symptom and not the cause. Fourth copy of the bargain
+    # scratch.sh, seed.sh and lib.sh's e2e_begin already make.
+    env = {
+        k: v
+        for k, v in os.environ.items()
+        if not k.startswith("LLL_") and k not in ("XDG_CONFIG_HOME",)
+    }
     env.update(
         HOME=home,
         LLL_URL=url,
