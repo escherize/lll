@@ -63,6 +63,7 @@ fn settings_vm(team: models.Team) -> Result<SettingsVM, string> {
     SettingsVM {
       team_key: team.key,
       team_name: team.name,
+      team_emoji: team.emoji,
       accent,
       accent_set: hex != "",
       labels,
@@ -151,7 +152,7 @@ fn label_rows(team_id: string) -> Result<Slice<SetLabelVM>, string> {
 /// enough to include, say, a project description would blank descriptions the
 /// page never showed.
 #[json]
-struct TeamPatch { name: string, accent: string }
+struct TeamPatch { name: string, accent: string, emoji: string }
 
 // Labels and projects carry their team: it is required (TASK-173), and PB
 // replaces every field a patch hands it, so an update that omitted the team
@@ -237,7 +238,11 @@ fn settings_apply(
     "team" => {
       if name == "" { return Err("team name is required") }
       let accent = form_hex(r, "accent")?
-      let payload = marshal(TeamPatch { name, accent })?
+      // Validated with the CLI's rule, not the browser's: a maxlength on the
+      // input is a hint, and this is the same field `lll team set-emoji`
+      // writes.
+      let emoji = team_emoji_value(r.PostFormValue("emoji"))?
+      let payload = marshal(TeamPatch { name, accent, emoji })?
       let _ = pb.patch(f"/api/collections/teams/records/{team_id}", payload)?
       Ok(())
     },

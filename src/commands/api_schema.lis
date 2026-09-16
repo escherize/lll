@@ -153,6 +153,7 @@ Rules: list @request.auth.id != \"\" view @request.auth.id != \"\" create @reque
 | created | autodate |  | set on create |
 | updated | autodate |  | set on create; refreshed on update |
 | accent | text |  |  |
+| emoji | text |  |  |
 
 ## views (base)
 

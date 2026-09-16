@@ -2233,6 +2233,28 @@ assert_contains "$ops_board" 'href="/t/OPS/" title="OPS · Operations" class="ac
 assert_not_contains "$eng_board" 'href="/t/OPS/" title="OPS · Operations" class="active"' \
   "the boot team's board does not mark OPS current"
 
+# LLL-427: a team's glyph, beside its key in that switcher. Set and cleared
+# here rather than in the fixture, because the assertion that matters as much
+# as the glyph is that a team WITHOUT one renders exactly as it did before.
+assert_not_contains "$eng_board" 'rt-emoji' "no team has an emoji before one is set"
+"$LIN" team set-emoji OPS "🛠" >/dev/null || fail "team set-emoji did not set"
+emoji_rail=$(wcurl -sf "$WEB/t/ENG/")
+assert_contains "$emoji_rail" '<span class="rt-emoji">🛠</span><span class="rt-key">OPS</span>' \
+  "the switcher shows the glyph beside the key"
+assert_not_contains "$emoji_rail" '<span class="rt-emoji">🛠</span><span class="rt-key">ENG</span>' \
+  "a team without an emoji is untouched by another team having one"
+assert_cli_contains "team view reports the glyph" "🛠" "$LIN" team view OPS
+# The emoji rule is a rune COUNT, so markup short enough to pass it must still
+# be escaped where it lands: the favicon SVG carries no escaping of its own.
+"$LIN" team set-emoji OPS '</text>' >/dev/null || fail "a 7-rune mark was refused"
+escaped_rail=$(wcurl -sf "$WEB/t/OPS/")
+assert_contains "$escaped_rail" '&lt;/text&gt;' "a markup mark is escaped in the rail"
+assert_not_contains "$escaped_rail" '<span class="rt-emoji"></text>' \
+  "a markup mark does not reach the page as markup"
+"$LIN" team set-emoji OPS "" >/dev/null || fail "team set-emoji did not clear"
+assert_not_contains "$(wcurl -sf "$WEB/t/ENG/")" 'rt-emoji' \
+  "clearing the glyph returns the switcher to what it was"
+
 # LLL-426: the table, the projects list and settings answer for the team in
 # the URL. They used to take the CONFIGURED team, so on this very server -
 # two teams, ENG configured - OPS had no identity surface at all: its name
