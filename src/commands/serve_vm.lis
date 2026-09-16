@@ -330,6 +330,9 @@ pub struct FindingVM {
   pub slug: string,
   pub title: string,
   pub area: string,
+  // LLL-396: suspected and refuted findings say so where they render.
+  pub confidence: string,
+  pub confidence_note: string,
   // The doc page for this finding (LLL-405). Team-routed, because a slug is
   // unique per team only; the issue's own team supplies the key.
   pub href: string,

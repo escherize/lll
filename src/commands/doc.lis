@@ -173,6 +173,19 @@ pub fn check_kind(val: string) -> Result<string, string> {
   Ok(kind)
 }
 
+/// Confidence values a CREATE may carry (LLL-396). 'refuted' is deliberately
+/// absent: a refutation is a later agent's judgement with a reason, and it
+/// only exists once something was asserted first — 'finding refute' is the
+/// only path that sets it.
+pub fn check_confidence(val: string) -> Result<string, string> {
+  let c = strings.TrimSpace(strings.ToLower(val))
+  if c == "" { return Ok("confirmed") }
+  if c != "suspected" && c != "confirmed" {
+    return Err(f"unknown confidence '{c}' (use: suspected, confirmed — 'finding refute SLUG -b why' is how a finding becomes refuted)")
+  }
+  Ok(c)
+}
+
 /// Normalize a comma-separated paths value: trim each entry, drop empties
 /// and duplicates, join back with ", ". Never errors — a path is free text
 /// and retrieval matches by containment, so "./src/pb" and "src/pb" land
@@ -292,6 +305,15 @@ fn finding_new_spec() -> Slice<flags.Flag> {
       spec = spec.append(fl)
     }
   }
+  // LLL-396: a finding may be filed as a guess. doc new keeps today's
+  // semantics — everything it writes is asserted (confirmed).
+  spec = spec.append(flags.Flag {
+    name: "--confidence",
+    value: true,
+    hint: "suspected|confirmed",
+    help: "file as a guess with 'suspected' (default 'confirmed'); 'finding\nrefute' is the only way a finding becomes refuted",
+    ..,
+  })
   spec
 }
 
@@ -382,6 +404,8 @@ fn create_doc(p: flags.Parsed, default_kind: string, slug: string) -> Result<(),
   let kind = check_kind(requested_kind)?
   let area = strings.TrimSpace(p.one("-a"))
   let paths = parse_paths(p.one("-p"))
+  let confidence_raw = if p.given("--confidence") { p.one("--confidence") } else { "" }
+  let confidence = check_confidence(confidence_raw)?
   let mut body = ""
   if p.given("-b") { body = value_or_stdin(p.one("-b"), "-b")? }
 
@@ -402,6 +426,8 @@ fn create_doc(p: flags.Parsed, default_kind: string, slug: string) -> Result<(),
     title,
     kind,
     body,
+    confidence,
+    confidence_note: "",
     area,
     paths,
     issues: [],
@@ -481,9 +507,10 @@ fn doc_view(input: flags.CommandInput) -> Result<(), string> {
     return Ok(())
   }
 
-  fmt.Println(f"{d.slug} {d.title}")
+  fmt.Println(f"{d.slug} {d.title}{confidence_suffix(d.confidence, d.confidence_note)}")
   fmt.Println("")
   fmt.Println(f"Kind:      {d.kind}")
+  if d.confidence_note != "" { fmt.Println(f"Note:      {d.confidence_note}") }
   if d.area != "" { fmt.Println(f"Area:      {d.area}") }
   if d.paths != "" { fmt.Println(f"Paths:     {d.paths}") }
   fmt.Println(f"Created:   {display.relative(d.created)}")

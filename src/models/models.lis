@@ -340,12 +340,25 @@ pub struct Doc {
   pub issues: Slice<string>,
   pub created: string,
   pub updated: string,
+  // LLL-396: a finding is asserted by default; these mark the guesses.
+  // 'confirmed' is the stored default so every pre-field doc keeps today's
+  // semantics, and only 'suspected' and 'refuted' change how it reads.
+  pub confidence: string,
+  pub confidence_note: string,
   pub expand: DocExpand,
 }
 
 #[json]
 pub struct DocList {
   pub items: Slice<Doc>,
+}
+
+/// LLL-396: the confirm/refute PATCH body — a judgement about a finding,
+/// never an edit of its content.
+#[json]
+pub struct ConfidencePatch {
+  pub confidence: string,
+  pub confidence_note: string,
 }
 
 #[json]
@@ -355,6 +368,10 @@ pub struct NewDoc {
   pub title: string,
   pub kind: string,
   pub body: string,
+  // Set explicitly on every create: selects have no schema-level default.
+  pub confidence: string,
+  #[json(omitempty)]
+  pub confidence_note: string,
   #[json(omitempty)]
   pub area: string,
   #[json(omitempty)]

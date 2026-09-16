@@ -137,7 +137,7 @@
 {{define "related-findings"}}{{if .Findings}}<section id="related-findings" class="thread findings">
 <h2>Related findings <span class="count">{{len .Findings}}</span></h2>
 {{range .Findings}}<div class="comment">
-<div><p class="meta"><a class="prose-link" href="{{.Href}}"><b>{{.Slug}}</b></a>{{if .Area}} · {{.Area}}{{end}}</p>
+<div><p class="meta"><a class="prose-link" href="{{.Href}}"><b>{{.Slug}}</b></a>{{if .Area}} · {{.Area}}{{end}}{{if eq .Confidence "suspected"}} <span class="confidence">[suspected]</span>{{else if eq .Confidence "refuted"}} <span class="confidence">[refuted{{if .ConfidenceNote}}: {{.ConfidenceNote}}{{end}}]</span>{{end}}</p>
 <p>{{.Title}}</p></div>
 </div>
 {{end}}</section>{{end}}{{end}}

@@ -1,9 +1,11 @@
+import "go:encoding/json"
 import "go:fmt"
 import "go:strconv"
 import "go:strings"
 
 import "flags"
 import "models"
+import "pb"
 import "query"
 
 /// `lll finding` (TASK-103) — the retrieval side of docs. A finding is a doc
@@ -70,6 +72,22 @@ pub fn finding_commands() -> Slice<flags.Command> {
       positional: "",
       run: finding_list,
     },
+    flags.Command {
+      name: "confirm",
+      summary: "assert a finding is fact; clears any refutation's reason",
+      page: "",
+      spec: flags.with_team([]),
+      positional: "SLUG",
+      run: finding_confirm,
+    },
+    flags.Command {
+      name: "refute",
+      summary: "mark a finding refuted and record why: -b why ('-b -' reads stdin)",
+      page: "",
+      spec: finding_refute_spec(),
+      positional: "SLUG",
+      run: finding_refute,
+    },
   ]
 }
 
@@ -89,7 +107,12 @@ Author findings with 'lll doc new -k finding -a <area> -p \"<paths>\"'.
 `area` is conventionally the NAME of an existing label: an issue whose labels
 contain the area surfaces the finding — on its web page and in
 'lll issue view'. `paths` is comma-separated file or directory paths, the
-coordinates 'lll finding near' matches by."
+coordinates 'lll finding near' matches by.
+
+A finding is asserted (confirmed) unless you say otherwise: file a guess with
+'--confidence suspected', and settle it later with 'lll finding confirm SLUG'
+or 'lll finding refute SLUG -b why'. Suspected and refuted findings say so
+wherever they print — a guess must not read as fact."
 }
 
 // ------------------------------------------------------------------ specs
@@ -239,13 +262,28 @@ fn finding_list(input: flags.CommandInput) -> Result<(), string> {
 }
 
 /// One line per finding, tab-separated like 'lll doc list': slug, area,
-/// title. An empty area prints as "-" so columns stay aligned.
+/// title. An empty area prints as "-" so columns stay aligned. A
+/// non-confirmed confidence rides the line so a guess cannot read as fact.
 fn print_finding_lines(docs: Slice<models.Doc>) {
   for d in docs {
     let mut area = d.area
     if area == "" { area = "-" }
-    fmt.Println(f"{d.slug}\t{area}\t{d.title}")
+    fmt.Println(f"{d.slug}\t{area}\t{d.title}{confidence_suffix(d.confidence, d.confidence_note)}")
   }
+}
+
+/// The marker that keeps a guess from reading as fact (LLL-396): confirmed
+/// findings — which is everything written before the field existed — print
+/// unmarked, so the noise lands only where judgement changed the meaning.
+/// Takes the two fields rather than the record so the board's finding view
+/// model and the CLI's Doc share one rule.
+pub fn confidence_suffix(confidence: string, note: string) -> string {
+  if confidence == "suspected" { return " [suspected]" }
+  if confidence == "refuted" {
+    if note != "" { return f" [refuted: {note}]" }
+    return " [refuted]"
+  }
+  ""
 }
 
 /// Finding creation shares the parsed document input and supplies a domain
@@ -259,4 +297,67 @@ fn finding_new(input: flags.CommandInput) -> Result<(), string> {
   let usage = flags.usage(f"lll finding {verb}", finding_new_spec(), "[\"slug\"]")
   let slug = flags.entity_name(p, "-s", usage)?
   create_doc(p, "finding", slug)
+}
+
+// ------------------------------------------------------------------ LLL-396
+
+fn finding_refute_spec() -> Slice<flags.Flag> {
+  flags.with_team([
+    flags.Flag {
+      name: "-b",
+      alias: "--body",
+      value: true,
+      required: true,
+      hint: "\"why\"",
+      help: "the why it failed — what a later reader was wrong to trust\n('-b -' reads it from stdin)",
+      ..,
+    },
+  ])
+}
+
+/// 'finding confirm SLUG' — a later agent asserts a guess is fact. Clearing
+/// the note is the point: a confirmation carrying a refutation's reason
+/// would contradict itself.
+fn finding_confirm(input: flags.CommandInput) -> Result<(), string> {
+  let p = input.parsed
+  let slug = p.first()
+  if slug == "" { return Err("usage: lll finding confirm SLUG") }
+  let team = current_team()?
+  let Some(d) = find_doc(team, slug)? else {
+    return Err(unknown_doc(team, slug))
+  }
+  patch_confidence(d, "confirmed", "")?
+  fmt.Println(f"Confirmed {d.slug}")
+  Ok(())
+}
+
+/// 'finding refute SLUG -b why' — the counterpart, and the only path that
+/// sets 'refuted': a refutation is a later agent's judgement with a reason,
+/// not a creation option.
+fn finding_refute(input: flags.CommandInput) -> Result<(), string> {
+  let p = input.parsed
+  let slug = p.first()
+  if slug == "" { return Err("usage: lll finding refute SLUG -b why") }
+  let why = strings.TrimSpace(value_or_stdin(p.one("-b"), "-b")?)
+  if why == "" {
+    return Err("a refutation needs the why: 'lll finding refute SLUG -b why' ('-b -' reads it from stdin)")
+  }
+  let team = current_team()?
+  let Some(d) = find_doc(team, slug)? else {
+    return Err(unknown_doc(team, slug))
+  }
+  patch_confidence(d, "refuted", why)?
+  fmt.Println(f"Refuted {d.slug}")
+  Ok(())
+}
+
+/// One PATCH, two fields, on purpose nothing else: confirm/refute is a
+/// judgement about the finding, never an edit of it.
+fn patch_confidence(d: models.Doc, confidence: string, note: string) -> Result<(), string> {
+  let payload = match json.Marshal(models.ConfidencePatch { confidence, confidence_note: note }) {
+    Ok(p) => p,
+    Err(e) => return Err(f"encoding confidence patch: {e}"),
+  }
+  let _ = pb.patch(f"/api/collections/docs/records/{d.id}", payload as string)?
+  Ok(())
 }

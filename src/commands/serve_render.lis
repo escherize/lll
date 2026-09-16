@@ -453,6 +453,8 @@ fn finding_vm(d: models.Doc, team_key: string) -> FindingVM {
     slug: d.slug,
     title: d.title,
     area: d.area,
+    confidence: d.confidence,
+    confidence_note: d.confidence_note,
     href: f"/t/{team_key}/doc/{d.slug}",
   }
 }

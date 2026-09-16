@@ -84,3 +84,37 @@ fn finding_list_spec_carries_a_limit_flag() {
   assert p.one("--limit") == "2"
   assert strings.Join(spec.map(|f| f.name), " ").contains("--limit")
 }
+
+#[test]
+fn confidence_suffix_marks_only_what_judgement_changed() {
+  // Confirmed — and every doc written before the field existed, whose empty
+  // value the migration backfilled — prints unmarked (LLL-396).
+  assert confidence_suffix("confirmed", "") == ""
+  assert confidence_suffix("", "") == ""
+  assert confidence_suffix("suspected", "") == " [suspected]"
+  assert confidence_suffix("refuted", "the render path swallows it") == " [refuted: the render path swallows it]"
+  assert confidence_suffix("refuted", "") == " [refuted]"
+}
+
+#[test]
+fn check_confidence_defaults_to_confirmed_and_refuses_refuted() {
+  let assert Ok(c) = check_confidence("")
+  assert c == "confirmed"
+  let assert Ok(c) = check_confidence("  Suspected ")
+  assert c == "suspected"
+  let assert Err(msg) = check_confidence("refuted")
+  assert msg.contains("finding refute")
+  let assert Err(msg) = check_confidence("maybe")
+  assert msg.contains("unknown confidence")
+}
+
+#[test]
+fn only_finding_new_offers_the_confidence_flag() {
+  // doc new keeps today's semantics: everything it writes is asserted. The
+  // flag is a finding-creation concern, so it lives on the finding spec.
+  let finding_spec = finding_new_spec()
+  let assert Some(confidence) = finding_spec.find(|f| f.name == "--confidence")
+  assert confidence.hint.contains("suspected")
+  let doc_spec = doc_new_spec()
+  assert doc_spec.find(|f| f.name == "--confidence").is_none()
+}

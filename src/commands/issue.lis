@@ -965,7 +965,7 @@ fn view(input: flags.CommandInput) -> Result<(), string> {
       }
       let mut area = f.area
       if area == "" { area = "-" }
-      fmt.Println(f"{f.slug} ({area}) — {f.title}")
+      fmt.Println(f"{f.slug} ({area}) — {f.title}{confidence_suffix(f.confidence, f.confidence_note)}")
     }
     if hidden > 0 {
       fmt.Println(f"... and {hidden} more by area — 'lll finding list -a AREA' lists an area, 'lll issue view --raw' prints them all")
@@ -1034,7 +1034,7 @@ fn print_findings_raw(full: models.Issue) -> Result<(), string> {
   for f in findings {
     let mut area = f.area
     if area == "" { area = "-" }
-    fmt.Println(f"- {f.slug} ({area}): {f.title}")
+    fmt.Println(f"- {f.slug} ({area}): {f.title}{confidence_suffix(f.confidence, f.confidence_note)}")
   }
   Ok(())
 }
