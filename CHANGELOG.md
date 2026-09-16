@@ -76,6 +76,10 @@ is how two panics were found.
 - `LLL_CONFIG_HOME` chooses the config root, for harnesses that cannot set
   `HOME`.
 - The board shows live claims and can claim and release.
+- Docs have an address: `/t/TEAM/doc/SLUG` renders a decision, finding, PRD
+  or wiki page through the same markdown renderer as issue descriptions,
+  with the properties `doc view` prints beside it. Read-only for now — the
+  point is that a reason can be linked to, from an issue or a review.
 
 ### Changed
 
@@ -108,8 +112,15 @@ is how two panics were found.
 - The last hidden column can be shown again; unhiding it no longer restores
   the hide from the saved view.
 - An expired boot token is re-minted the way a rejected one already was.
-- `mise run scratch` reads its own isolated config rather than the
-  developer's real token on machines that export `XDG_CONFIG_HOME`.
+- `mise run scratch` and `mise run seed` read their own isolated config
+  rather than the developer's real token on machines that export
+  `XDG_CONFIG_HOME`, which moving `HOME` alone stopped being enough for.
+- `issue list --sort priority` leads with urgent and leaves the
+  unprioritised last. PocketBase sorts on the stored number and `none` is
+  0, so the ascending fetch led with issues nobody had triaged and buried
+  the urgent ones — and because the ordering decided which page you got,
+  urgent work past `--limit` fell off the list entirely rather than merely
+  sorting late.
 - `issue update --project ""` clears the project, `--` ends options in
   every verb, and search results supersede stale in-flight queries.
 
