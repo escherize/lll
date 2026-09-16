@@ -108,8 +108,13 @@ def main() -> None:
         second = cli('issue', 'claim', 'DEMO-1',
                      extra={'LLL_TOKEN': token.group(1), 'LLL_ME': 'alex'})
         assert second.returncode != 0, 'a claimed issue was claimable by someone else'
-        assert 'bcm' in (second.stdout + second.stderr) or 'held' in (second.stdout + second.stderr), \
-            f'the refusal did not name the holder:\n{second.stdout}{second.stderr}'
+        # The holder is whoever the boot guessed from $USER, so read it from the
+        # banner rather than hardcoding a name: this asserted my own username
+        # once and passed everywhere except CI, which runs as "runner".
+        holder = re.search(r'guessed me = "([^"]+)"', out)
+        holder = holder.group(1) if holder else ''
+        assert holder and holder in (second.stdout + second.stderr), \
+            f'the refusal did not name the holder {holder!r}:\n{second.stdout}{second.stderr}'
 
         # DEMO-3: the key goes to stdout, the claim to stderr, so it pipes.
         nxt = cli('issue', 'next', '--claim')

@@ -260,7 +260,7 @@ authenticates that agent alone.",
       state: "todo",
       priority: 1,
       label: "agents",
-      body: f"The question an agent has is not 'list everything', it is 'what
+      body: "The question an agent has is not 'list everything', it is 'what
 now'. Ready, unclaimed, highest priority, oldest.
 
   lll issue next
