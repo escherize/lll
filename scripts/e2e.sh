@@ -1574,6 +1574,24 @@ set -e
 [ "$rc" -ne 0 ] || fail "list --limit abc: expected nonzero exit"
 assert_contains "$out" "--limit must be a positive integer" "non-numeric limit message"
 
+# LLL-313: -l is the one short the audit called defensible; -P and -p stay
+# rejected on list (no priority filter to alias, -p means priority elsewhere).
+out=$(LLL_URL=$URL LLL_TEAM=ENG "$LIN" issue list -l 1)
+[ "$(printf '%s\n' "$out" | wc -l | tr -d ' ')" = "1" ] || fail "-l 1: expected one line:
+$out"
+set +e
+out=$(LLL_URL=$URL "$LIN" issue list -p 2 2>&1)
+rc=$?
+set -e
+[ "$rc" -ne 0 ] || fail "issue list -p: expected nonzero exit"
+assert_contains "$out" "unknown flag: '-p'" "issue list still refuses -p"
+set +e
+out=$(LLL_URL=$URL "$LIN" issue list -P 2 2>&1)
+rc=$?
+set -e
+[ "$rc" -ne 0 ] || fail "issue list -P: expected nonzero exit"
+assert_contains "$out" "unknown flag: '-P'" "issue list still refuses -P"
+
 # --- docs (TASK-86): new/list/view/edit round trip, issue link + unlink ---
 set +e
 out=$(LLL_URL=$URL LLL_TEAM=ENG "$LIN" doc view nosuch 2>&1)
@@ -1606,6 +1624,16 @@ assert_contains "$out" "Created doc race-found" "doc new with kind finding"
 out=$(LLL_URL=$URL LLL_TEAM=ENG "$LIN" doc list)
 assert_contains "$out" "port-notes	wiki	Port notes" "doc list shows slug, kind, title"
 assert_contains "$out" "race-found	finding	Race found" "doc list shows second doc"
+
+# --- doc list --search (LLL-313): finding list's filter, on the doc noun ---
+out=$(LLL_URL=$URL LLL_TEAM=ENG "$LIN" doc list --search race)
+assert_contains "$out" "race-found" "doc list --search matches slug"
+assert_not_contains "$out" "port-notes" "doc list --search excludes the rest"
+out=$(LLL_URL=$URL LLL_TEAM=ENG "$LIN" doc list --query "Port notes")
+assert_contains "$out" "port-notes" "doc list takes --query for --search"
+out=$(LLL_URL=$URL LLL_TEAM=ENG "$LIN" doc list --search race --json)
+printf '%s' "$out" | jq -e '.items | map(.slug) == ["race-found"]' >/dev/null \
+  || fail "doc list --search --json is the filtered list: $out"
 
 out=$(LLL_URL=$URL LLL_TEAM=ENG "$LIN" doc view port-notes)
 assert_contains "$out" "port-notes Port notes" "doc view header"
@@ -1650,6 +1678,20 @@ rid=$(LLL_URL=$URL LLL_TEAM=ENG "$LIN" doc view port-notes --json | jq -r '.issu
 # linking twice is idempotent
 out=$(LLL_URL=$URL LLL_TEAM=ENG "$LIN" issue link ENG-1 port-notes)
 assert_contains "$out" "already linked" "double link is idempotent"
+
+# --- doc link / doc unlink (LLL-313): the doc noun offers the same verbs,
+# driving the one link write path with the positionals swapped. Either
+# spelling shows the same link on issue view and doc view.
+out=$(LLL_URL=$URL LLL_TEAM=ENG "$LIN" doc link port-notes ENG-2)
+assert_contains "$out" "Linked ENG-2 -> port-notes" "doc link output"
+out=$(LLL_URL=$URL LLL_TEAM=ENG "$LIN" issue view ENG-2)
+assert_contains "$out" "Docs:      port-notes" "doc link lands as an issue link"
+out=$(LLL_URL=$URL LLL_TEAM=ENG "$LIN" doc view port-notes)
+assert_contains "$out" "Issues:    ENG-1, ENG-2" "doc view shows both links"
+out=$(LLL_URL=$URL LLL_TEAM=ENG "$LIN" doc unlink port-notes ENG-2)
+assert_contains "$out" "Unlinked ENG-2 from port-notes" "doc unlink output"
+assert_not_contains "$(LLL_URL=$URL LLL_TEAM=ENG "$LIN" issue view ENG-2)" "port-notes" \
+  "doc unlink removes the link"
 
 # Explicit keys and board URLs supply scope when no team is configured.
 LINK_HOME="$DATA_DIR/link-home"
@@ -1727,6 +1769,23 @@ out=$(LLL_URL=$URL LLL_TEAM=ENG "$LIN" finding list --area pb)
 assert_contains "$out" "migration-hazard" "finding list --area matches"
 out=$(LLL_URL=$URL LLL_TEAM=ENG "$LIN" finding list --area nothing)
 assert_contains "$out" "No findings." "finding list --area without a match"
+
+# --- finding list --limit (LLL-313): post-filter slice, issue list's validation ---
+out=$(LLL_URL=$URL LLL_TEAM=ENG "$LIN" finding list --limit 2)
+[ "$(printf '%s\n' "$out" | wc -l | tr -d ' ')" = "2" ] || fail "finding list --limit 2: expected two lines:
+$out"
+set +e
+out=$(LLL_URL=$URL LLL_TEAM=ENG "$LIN" finding list --limit 0 2>&1)
+rc=$?
+set -e
+[ "$rc" -ne 0 ] || fail "finding list --limit 0: expected nonzero exit"
+assert_contains "$out" "--limit must be a positive integer" "finding limit 0 message"
+set +e
+out=$(LLL_URL=$URL LLL_TEAM=ENG "$LIN" finding list --limit abc 2>&1)
+rc=$?
+set -e
+[ "$rc" -ne 0 ] || fail "finding list --limit abc: expected nonzero exit"
+assert_contains "$out" "--limit must be a positive integer" "finding limit abc message"
 
 # Issue view surfaces related findings (the brief mechanism, AC#3): a
 # finding linked to the issue always shows; a finding whose area names one
@@ -1823,6 +1882,14 @@ out=$(env LLL_URL=$URL LLL_TEAM=ENG "$LIN" finding read migration-hazard --raw)
 assert_contains "$out" "Migrations are a merge hazard." "finding read is view"
 out=$(env LLL_URL=$URL LLL_TEAM=ENG "$LIN" finding new -s fleet-new -t "Filed from finding new" -a pb -b "kind set by the verb")
 assert_contains "$out" "Created doc fleet-new" "finding new files a doc"
+out=$(env LLL_URL=$URL LLL_TEAM=ENG "$LIN" finding create positional-slug -t "Positional slug" -a pb -b "bare slug")
+assert_contains "$out" "Created doc positional-slug" "finding create takes the slug positionally (LLL-313)"
+set +e
+out=$(env LLL_URL=$URL LLL_TEAM=ENG "$LIN" finding new both-slug -s both-slug -t t 2>&1)
+rc=$?
+set -e
+[ "$rc" -ne 0 ] || fail "finding new slug twice: expected nonzero exit"
+assert_contains "$out" "not both" "slug as positional and flag is refused"
 out=$(env LLL_URL=$URL LLL_TEAM=ENG "$LIN" finding list -a pb)
 assert_contains "$out" "fleet-new" "finding new sets kind=finding (it lists as a finding)"
 out=$(env LLL_URL=$URL LLL_TEAM=ENG "$LIN" doc read fleet-new --raw)
@@ -1841,6 +1908,13 @@ assert_contains "$out" "lll finding" "lll --help mentions finding"
 out=$("$LIN" doc --help)
 assert_contains "$out" "-a" "doc --help mentions the area flag"
 assert_contains "$out" "-p" "doc --help mentions the paths flag"
+assert_contains "$out" "lll doc link" "doc --help mentions link (LLL-313)"
+assert_contains "$out" "lll doc unlink" "doc --help mentions unlink (LLL-313)"
+assert_contains "$out" "--search" "doc --help mentions --search (LLL-313)"
+comp_doc_list=$("$LIN" completions bash | grep -F "doc,list" | head -1 | sed "s/.*words='//;s/'.*//")
+assert_contains "$comp_doc_list" "--search --query" "doc list completions carry --search"
+out=$("$LIN" finding --help)
+assert_contains "$out" "--limit" "finding --help mentions --limit (LLL-313)"
 
 # --- task-179: the pb client sends the configured token --------------------
 # A scratch HTTP listener records the Authorization header of whatever the

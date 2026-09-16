@@ -154,6 +154,7 @@ fn issue_list_spec() -> Slice<flags.Flag> {
     },
     flags.Flag {
       name: "--limit",
+      alias: "-l",
       value: true,
       hint: "N",
       help: "list at most N issues (positive integer)",
@@ -1823,6 +1824,14 @@ fn link(input: flags.CommandInput) -> Result<(), string> {
   let id = input.parsed.first()
   let slug = input.parsed.nth(1)
   if id == "" || slug == "" { return Err(f"usage: {usage}") }
+  link_issue(id, slug, usage)
+}
+
+/// The one write path behind 'lll issue link KEY-123 SLUG' and 'lll doc link
+/// SLUG KEY-123', which swaps the two positionals (the doc comes first
+/// there). The relation is stored once on docs.issues, so there is exactly
+/// one way a link happens and both spellings answer identically.
+fn link_issue(id: string, slug: string, usage: string) -> Result<(), string> {
   let resolved = resolve_id(id, usage)?
   let issue = records.fetch_issue(resolved)?
   let key = f"{issue.expand.team.key}-{issue.number}"
@@ -1844,6 +1853,12 @@ fn unlink(input: flags.CommandInput) -> Result<(), string> {
   let id = input.parsed.first()
   let slug = input.parsed.nth(1)
   if id == "" || slug == "" { return Err(f"usage: {usage}") }
+  unlink_issue(id, slug, usage)
+}
+
+/// The one write path behind 'lll issue unlink KEY-123 SLUG' and 'lll doc
+/// unlink SLUG KEY-123', which swaps the two positionals.
+fn unlink_issue(id: string, slug: string, usage: string) -> Result<(), string> {
   let resolved = resolve_id(id, usage)?
   let issue = records.fetch_issue(resolved)?
   let key = f"{issue.expand.team.key}-{issue.number}"

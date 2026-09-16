@@ -1,0 +1,26 @@
+// Unit cover for unknown_command in main.lis: a pure function of (noun,
+// verb), so every branch can be pinned without a board.
+
+#[test]
+fn unknown_command_names_the_typed_verb_for_issue_verbs() {
+  // 'lll comment create' is the most common misplaced command (three of
+  // thirty fleet agents); the pointer must carry the half the user had
+  // right (LLL-313), the way the plural branch does.
+  let msg = unknown_command("comment", "create")
+  assert msg.contains("'comment create'")
+  assert msg.contains("lll issue comment")
+  // A verb that is really a positional rides along too: 'lll comment
+  // ENG-1 "hi"' points at the same place with the key named.
+  let with_key = unknown_command("comment", "ENG-1")
+  assert with_key.contains("'comment ENG-1'")
+  // A flag-like second word is not a verb; the message quotes the noun alone.
+  assert unknown_command("comment", "-b").contains("'comment'")
+  // No verb typed: unchanged shape.
+  assert unknown_command("comment", "").contains("'comment'")
+}
+
+#[test]
+fn unknown_command_keeps_the_plural_and_generic_branches() {
+  assert unknown_command("issues", "list").contains("'lll issue list'")
+  assert unknown_command("wibble", "create").contains("see 'lll --help'")
+}

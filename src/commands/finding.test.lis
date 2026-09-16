@@ -1,3 +1,6 @@
+import "go:strings"
+
+import "flags"
 import "models"
 
 #[test]
@@ -22,4 +25,62 @@ fn directory_queries_keep_descendants_after_exact_directory_notes() {
     models.Doc { slug: "c-exact", paths: "other, src/pb", .. },
   ]
   assert findings_near(findings, "src/pb").map(|d| d.slug).equals(["b-exact", "c-exact", "a-child"])
+}
+
+// ------------------------------------------------------- finding_commands
+
+#[test]
+fn finding_create_takes_the_slug_as_a_positional_or_flag() {
+  // Four create verbs already take a positional name and finding is where
+  // the fleet guess happened (LLL-313): entity_name resolves either form.
+  let spec = finding_new_spec()
+  let assert Ok(p) = flags.parse(spec, ["lll", "finding", "create", "my-slug", "-t", "t"], 3, true, "")
+  let usage = flags.usage("lll finding create", spec, "[\"slug\"]")
+  let assert Ok(slug) = flags.entity_name(p, "-s", usage)
+  assert slug == "my-slug"
+  let assert Ok(via_flag) = flags.parse(spec, ["lll", "finding", "new", "-s", "other", "-t", "t"], 3, true, "")
+  let assert Ok(slug) = flags.entity_name(via_flag, "-s", usage)
+  assert slug == "other"
+}
+
+#[test]
+fn finding_create_refuses_slug_in_both_forms_and_neither() {
+  let spec = finding_new_spec()
+  let usage = flags.usage("lll finding create", spec, "[\"slug\"]")
+  let assert Ok(p) = flags.parse(spec, ["lll", "finding", "create", "my-slug", "-s", "other", "-t", "t"], 3, true, "")
+  let assert Err(msg) = flags.entity_name(p, "-s", usage)
+  assert msg.contains("not both")
+  let assert Ok(bare) = flags.parse(spec, ["lll", "finding", "create", "-t", "t"], 3, true, "")
+  let assert Err(msg) = flags.entity_name(bare, "-s", usage)
+  assert msg.contains("a name is required")
+}
+
+#[test]
+fn finding_new_spec_keeps_doc_new_strict_about_the_slug_flag() {
+  // 'Finding only' (LLL-313): doc new still parse-requires -s and still
+  // refuses bare words; only the finding entries admit the positional.
+  let doc_spec = doc_new_spec()
+  let assert Some(slug_flag) = doc_spec.find(|f| f.name == "-s")
+  assert slug_flag.required
+  let finding_spec = finding_new_spec()
+  let assert Some(slug_flag) = finding_spec.find(|f| f.name == "-s")
+  assert !slug_flag.required
+  assert flags.parse(doc_spec, ["lll", "doc", "new", "bare"], 3, true, "").is_err()
+  let assert Ok(p) = flags.parse(finding_spec, ["lll", "finding", "new", "bare", "-t", "t"], 3, true, "")
+  assert p.first() == "bare"
+  for c in finding_commands() {
+    if c.name == "new" || c.name == "create" {
+      assert c.positional == "[\"slug\"]"
+    } else {
+      assert c.positional != "[\"slug\"]"
+    }
+  }
+}
+
+#[test]
+fn finding_list_spec_carries_a_limit_flag() {
+  let spec = finding_list_spec()
+  let assert Ok(p) = flags.parse(spec, ["lll", "finding", "list", "--limit", "2"], 3, false, "")
+  assert p.one("--limit") == "2"
+  assert strings.Join(spec.map(|f| f.name), " ").contains("--limit")
 }

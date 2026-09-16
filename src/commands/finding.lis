@@ -1,4 +1,5 @@
 import "go:fmt"
+import "go:strconv"
 import "go:strings"
 
 import "flags"
@@ -49,16 +50,16 @@ pub fn finding_commands() -> Slice<flags.Command> {
       name: "new",
       summary: "file a finding: 'lll doc new -k finding' with the kind already set",
       page: "",
-      spec: doc_new_spec(),
-      positional: "",
+      spec: finding_new_spec(),
+      positional: "[\"slug\"]",
       run: finding_new,
     },
     flags.Command {
       name: "create",
       summary: "the same command as 'new'",
       page: "",
-      spec: doc_new_spec(),
-      positional: "",
+      spec: finding_new_spec(),
+      positional: "[\"slug\"]",
       run: finding_new,
     },
     flags.Command {
@@ -117,6 +118,13 @@ fn finding_list_spec() -> Slice<flags.Flag> {
       value: true,
       hint: "path",
       help: "only findings about this file or directory (what 'finding near' answers)",
+      ..,
+    },
+    flags.Flag {
+      name: "--limit",
+      value: true,
+      hint: "N",
+      help: "list at most N findings (positive integer)",
       ..,
     },
     flags.Flag { name: "--json", help: "print the raw record list as JSON", .. },
@@ -196,6 +204,17 @@ fn finding_list(input: flags.CommandInput) -> Result<(), string> {
   // for them and none reached for 'near' from here.
   let search = strings.ToLower(strings.TrimSpace(p.one("--search")))
   let path = strings.TrimSpace(p.one("-p"))
+  // Issue list's --limit validation, verbatim, run before any server call;
+  // the slice itself happens after the filters below (LLL-313).
+  let mut limit = 0
+  if p.given("--limit") {
+    let raw = p.one("--limit")
+    let Ok(n) = strconv.Atoi(raw) else {
+      return Err(f"--limit must be a positive integer, got '{raw}'")
+    }
+    if n < 1 { return Err(f"--limit must be a positive integer, got {n}") }
+    limit = n
+  }
   let mut findings = fetch_findings(current_team()?.id)?
   if area != "" {
     findings = findings.filter(|d| strings.TrimSpace(d.area) == area)
@@ -206,6 +225,10 @@ fn finding_list(input: flags.CommandInput) -> Result<(), string> {
   if path != "" {
     findings = findings_near(findings, path)
   }
+  // The fetch already pulls every finding and the filters run client-side,
+  // so a limit is a post-filter slice — honest here because there is no
+  // server-side page to ask for.
+  if limit > 0 { findings = findings[..limit] }
   if p.given("--json") { return print_json(findings, "findings") }
   if findings.is_empty() {
     fmt.Println("No findings.")
@@ -226,7 +249,14 @@ fn print_finding_lines(docs: Slice<models.Doc>) {
 }
 
 /// Finding creation shares the parsed document input and supplies a domain
-/// default; it does not rewrite argv and ask the parser to interpret it again.
+/// default; it does not rewrite argv and ask the parser to interpret it
+/// again. The slug may arrive as the bare argument (four create verbs take
+/// a positional name and finding is where the guess happened), so it is
+/// resolved here, positional-or-flag, and handed to create_doc.
 fn finding_new(input: flags.CommandInput) -> Result<(), string> {
-  create_doc(input.parsed, "finding")
+  let p = input.parsed
+  let verb = input.args.get(2).unwrap_or("new")
+  let usage = flags.usage(f"lll finding {verb}", finding_new_spec(), "[\"slug\"]")
+  let slug = flags.entity_name(p, "-s", usage)?
+  create_doc(p, "finding", slug)
 }

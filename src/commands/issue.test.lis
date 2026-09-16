@@ -239,6 +239,18 @@ fn issue_create_spec_takes_p_as_short_for_priority() {
   assert two == 2
 }
 
+/// LLL-313: -l on issue list --limit, the one short the audit called
+/// defensible. -P and -p stay rejected on list — list has no priority filter
+/// to alias, and -p already means priority on create/update.
+#[test]
+fn issue_list_takes_l_for_limit_and_refuses_p_shorts() {
+  let spec = issue_list_spec()
+  let assert Ok(p) = flags.parse(spec, ["lll", "issue", "list", "-l", "5"], 3, false, "")
+  assert p.one("--limit") == "5"
+  assert flags.parse(spec, ["lll", "issue", "list", "-p", "2"], 3, false, "").is_err()
+  assert flags.parse(spec, ["lll", "issue", "list", "-P", "2"], 3, false, "").is_err()
+}
+
 /// --help is hidden: it is a parser entry so 'issue create --help' is not an
 /// unknown flag, but it must not appear in help output or completions.
 #[test]
