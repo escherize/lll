@@ -72,6 +72,7 @@
 <input name="color" type="color" class="set-swatch" value="{{if .Color}}{{.Color}}{{else}}#828994{{end}}" aria-label="Colour">
 <input name="name" value="{{.Name}}" autocomplete="off" aria-label="Label name">
 <span class="set-usage">{{.UsageText}}</span>
+{{template "set-team-select" $}}
 <button type="button" class="btn" data-on:click="@post('settings/label', {contentType: 'form'})">Save</button>
 {{template "set-del" "label"}}
 </form></div>
@@ -114,6 +115,7 @@
 <select name="status" aria-label="Project status">
 {{range $.Statuses}}<option value="{{.Value}}"{{if eq .Value $p.Status}} selected{{end}}>{{.Label}}</option>
 {{end}}</select>
+{{template "set-team-select" $}}
 <button type="button" class="btn" data-on:click="@post('settings/project', {contentType: 'form'})">Save</button>
 {{template "set-del" "project"}}
 </form></div>
@@ -198,6 +200,16 @@
 
 {{/* The row's delete control requests a server-rendered impact review.
      Dot is the section name, which is also the route segment. */}}
+{{/* LLL-100: the scope control. A label or project belongs to exactly one
+     team, and that was write-once - one created in the wrong team could only
+     be deleted and remade, which loses every issue that referenced it. The
+     select posts with the rest of the row; the server refuses the move while
+     issues outside the destination still reference the record, and says which
+     ones in the flash strip. Archived teams are not offered: you cannot write
+     to one. Dot is the page's team key. */}}
+{{define "set-team-select"}}<select name="team" aria-label="Team" title="Move this to another team">
+{{range .Teams}}{{if not .Archived}}<option value="{{.Key}}"{{if eq .Key $.TeamKey}} selected{{end}}>{{.Key}}</option>{{end}}{{end}}</select>{{end}}
+
 {{define "set-del"}}<button type="button" class="set-del" title="Delete" aria-label="Delete" data-on:click="@post('settings/{{.}}?del=1', {contentType: 'form'})"><svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true"><path d="M2.5 2.5 L9.5 9.5 M9.5 2.5 L2.5 9.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg></button>{{end}}
 
 {{/* LLL-233: replace only the selected row; the count is fetched again on

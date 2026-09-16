@@ -2253,6 +2253,38 @@ for bare in issues projects settings; do
   assert_contains "$redir" "303 $WEB/t/ENG/$bare" "bare /$bare redirects to the configured team"
 done
 
+# LLL-100: the scope control. A label or project was stuck in the team it was
+# created in - the only way out was delete and remake, which loses every issue
+# that referenced it. The move is refused while issues OUTSIDE the destination
+# still reference the record, the LLL-341 precedent, and the row's select is
+# the same rule as `lll label move` because both call one function.
+web_post "POST settings/label" "$WEB/settings/label" -d 'name=movable' -d 'color=#4cb782' >/dev/null
+MOVE_ID=$(row_id "$(wcurl -sf "$WEB/t/ENG/settings")" label movable)
+[ -n "$MOVE_ID" ] || fail "/settings did not render the label to move"
+assert_contains "$(wcurl -sf "$WEB/t/ENG/settings")" '<select name="team"' "each row carries a team select"
+# Unreferenced: the move goes through and the label is the other team's.
+web_post "POST settings/label" "$WEB/t/ENG/settings/label" \
+  -d "id=$MOVE_ID" -d 'name=movable' -d 'color=#4cb782' -d 'team=OPS' >/dev/null
+assert_cli_contains "a label moved from /settings did not reach the other team" \
+  '^movable' env LLL_TEAM=OPS "$LIN" label list
+assert_cli_lacks "the moved label is still in the team it left" \
+  '^movable' env LLL_TEAM=ENG "$LIN" label list
+# Referenced by an issue outside the destination: refused, and it says which.
+env LLL_TEAM=OPS "$LIN" issue update OPS-1 --label movable >/dev/null
+refused_move=$(wcurl -sf -X POST "$WEB/t/OPS/settings/label" \
+  -d "id=$MOVE_ID" -d 'name=movable' -d 'color=#4cb782' -d 'team=ENG')
+assert_contains "$refused_move" "still reference the label" "a blocked move is refused in the flash"
+assert_contains "$refused_move" "OPS-1" "the refusal names the issue that blocks it"
+assert_cli_contains "a refused move relocated the label anyway" \
+  '^movable' env LLL_TEAM=OPS "$LIN" label list
+# And the CLI refuses identically, because it is the same function.
+set +e
+cli_refusal=$(env LLL_TEAM=OPS "$LIN" label move movable --to ENG 2>&1)
+cli_rc=$?
+set -e
+[ "$cli_rc" -ne 0 ] || fail "lll label move should refuse while OPS-1 carries the label"
+assert_contains "$cli_refusal" "OPS-1" "the CLI refusal names the blocking issue too"
+
 # The board posts the team it is viewing: a create from /t/OPS/ lands in
 # OPS, and an unknown team answers through the flash, not a write.
 wcurl -s -o /dev/null -X POST -d "title=Created on the ops board" -d "team=OPS" "$WEB/create"
