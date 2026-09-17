@@ -27,9 +27,12 @@ it before nontrivial work, record discoveries, and close it after verification.
 - For working the backlog unattended — which issues an agent may safely take,
   and when it must hand one back instead — read
   [.claude/skills/backlog-loop/SKILL.md](.claude/skills/backlog-loop/SKILL.md).
+- For the half after the pull request — merging, confirming the change reached
+  the artifact people install, release ordering, and closing honestly — read
+  [.claude/skills/merge-gate/SKILL.md](.claude/skills/merge-gate/SKILL.md).
 
-The `lll` and `backlog-loop` skills also ship inside the binary, so an agent
-working from another repo can read them without this checkout:
+The `lll`, `backlog-loop` and `merge-gate` skills also ship inside the binary,
+so an agent working from another repo can read them without this checkout:
 `lll skill list`, `lll skill get lll`.
 
 # Lisette
