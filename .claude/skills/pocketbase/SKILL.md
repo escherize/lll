@@ -1,6 +1,6 @@
 ---
 name: pocketbase
-description: How this project uses PocketBase - the embedded gopb wrapper and its commit-pin loop, schema changes via JS migrations, pb_hooks, collection rules and their public-by-default trap, realtime subscriptions, and auth (email+password for humans, static impersonate tokens for bots). Use before changing anything under pb/ or gopb/, before adding a collection or field, before touching collection rules or auth, and whenever a PocketBase API call 404s or returns unexpected data. Triggers on "add a collection", "add a field", "migration", "pb_hooks", "collection rule", "realtime", "subscription", "auth", "api key", "token", "PocketBase", "gopb", "Missing collection context".
+description: How this project uses PocketBase - the local gopb wrapper, embedded JS migrations, Go hooks, collection rules and their public-by-default trap, realtime subscriptions, and token-based auth. Use before changing anything under pb/ or gopb/, before adding a collection or field, before touching collection rules or auth, and whenever a PocketBase API call 404s or returns unexpected data. Triggers on "add a collection", "add a field", "migration", "collection rule", "realtime", "subscription", "auth", "api key", "token", "PocketBase", "gopb", "Missing collection context".
 ---
 
 # PocketBase in lll
@@ -18,33 +18,26 @@ Reach for lll code only when PocketBase genuinely has no answer.
 
 - `pb/pb_migrations/*.js` — schema as code. Applied automatically before the
   server starts listening.
-- `pb/pb_hooks/main.pb.js` — JS hooks running in goja. Currently: per-team issue
-  numbering and default board `sort`.
 - `pb/pb_data/` — the SQLite database (`data.db` + WAL) and `auxiliary.db` for
   PocketBase's own logs. Gitignored. Move it with `lll up --pb-dir`.
-- `gopb/` — a **nested Go module** wrapping PocketBase behind one `Serve` function.
+- `pb/embed.go` — embeds the migrations in the binary. `gopb` materializes
+  them under the selected data directory before applying them.
+- `gopb/` — a **nested Go module** wrapping PocketBase behind one `Serve` function;
+  Go hooks own per-team issue numbering, defaults and write enforcement.
 
 ## gopb: a nested Go module, no longer commit-pinned
 
 `gopb/` is its own Go module (`github.com/escherize/lll/gopb`) wrapping
 PocketBase behind one `Serve` function.
 
-It exists because binding PocketBase directly breaks Lisette's bindgen on two
-transitive typedefs (`golang.org/x/crypto/acme` pulls the GOEXPERIMENT-only
-`encoding/json/jsontext`; `github.com/dop251/goja/parser` has Go-style `\uXXXX`
-escapes the lexer rejects). Do not try to `lis add` PocketBase itself — see
-`.private/findings/claude-task12/`.
+The adapter keeps PocketBase's transitive types out of Lisette's bindgen.
+Keep PocketBase calls behind this Go boundary rather than binding PocketBase
+directly in `.lis` files.
 
-**Historical note that is now obsolete:** under the toolchain in use through
-2026-08-28, lis had no local-path dependencies, so every edit to `gopb/gopb.go`
-required commit + push of the public repo + `lis add
-github.com/escherize/lll/gopb@<new-commit>` to re-pin the pseudo-version.
-**lis ships `lis add --path <dir>`** (verified on 0.11.3 and 0.12.0: `lis add --help` shows
-`--path <dir>  Add a local Go module`), which removes that loop entirely.
-`lisette.toml` still carries the pinned pseudo-version
-`v0.0.0-20260828210548-11804d3d2b7d`; converting it to a path dep is filed
-separately. Until that lands, assume the pin is live and check `lisette.toml`
-before promising a quick gopb change.
+`lisette.toml` declares this module with `{ path = "gopb" }`, alongside the
+local `web`, `pb` and `skills` modules. Edit the local source and run
+`mise run build` or `mise run gate`; no commit, push or dependency re-pin is
+needed to test a gopb change. The old public pseudo-version loop is retired.
 
 ## Schema changes
 
@@ -54,11 +47,14 @@ matching the style of `1756400000_init.js`. It applies on the next `lll up`.
 **Migrations are a merge hazard between concurrent agents.** Filenames are
 timestamp-ordered and two agents both minting one for the same feature area will
 collide or apply in a surprising order. Before writing one, check whether another
-in-progress task also adds a field (`backlog task list --plain` for In Progress),
+in-progress task also adds a field (`lll issue list --state in-progress`),
 and prefer extending an unapplied migration over adding a second.
 
-Existing collections: `teams` (key UNIQUE, name), `members` (name UNIQUE, email),
-`projects`, `labels`, `issues`, `comments`. `issues` is UNIQUE on `(team, number)`.
+Use `lll api --schema` for the generated collection and field reference;
+[`docs/api.md`](../../../docs/api.md) documents the API. Regenerate
+`src/commands/api_schema.lis` with
+`mise run api-schema` in the same change as schema edits; the gate checks it
+against the migrations. `issues` is UNIQUE on `(team, number)`.
 
 **Issue keys like `ENG-1` are derived, never stored** — every display site builds
 them from `team.key + "-" + number`. Renaming a team rewrites every key for free.
@@ -136,8 +132,7 @@ per viewer. That is a good reason not to add them.
   supported and does not prevent migrations from applying.
 - **One process per database file.** Never point two `lll up` instances at the
   same `pb_data`, especially over a network filesystem.
-- `pb_hooks` JS runs in goja, not Node. `/// <reference path="../pb_data/types.d.ts" />`
-  at the top gives editor types; the file is regenerated by PocketBase on boot.
+- JS migrations run in goja, not Node. Runtime issue hooks are Go in `gopb/`.
 - PocketBase installs its own SIGINT/SIGTERM handler, which suppresses Go's
   default die-on-signal for the whole process. `up.lis` runs `Serve` in a task and
   exits when it returns.
