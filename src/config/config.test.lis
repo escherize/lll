@@ -71,18 +71,82 @@ fn write(path: string, text: string) -> Result<(), string> {
   Ok(())
 }
 
-/// Run `load_traced()` from `dir` with `home` as $HOME, restoring both after.
-fn traced_from(dir: string, home: string) -> Result<(Config, Sources), string> {
+/// One saved environment variable, remembering whether it was set at all: an
+/// unset variable must be restored unset, not set to "".
+struct EnvVar {
+  name: string,
+  value: Option<string>,
+}
+
+/// Every variable config resolution consults — the config root (config.lis
+/// `config_root`) and the per-key overrides (`load_traced`).
+fn config_env_names() -> Slice<string> {
+  [
+    "HOME",
+    "LLL_CONFIG_HOME",
+    "XDG_CONFIG_HOME",
+    "LLL_URL",
+    "LLL_TEAM",
+    "LLL_ME",
+    "LLL_SORT",
+    "LLL_WEB_URL",
+    "LLL_TOKEN",
+  ]
+}
+
+/// Save every variable above and clear it. Setting $HOME is not enough: the
+/// reader honours LLL_CONFIG_HOME and XDG_CONFIG_HOME first, and the per-key
+/// LLL_* variables override files outright — so a developer's own config and
+/// exported token reached these tests and failed eight of them (LLL-449).
+fn isolate_config_env() -> Slice<EnvVar> {
+  let saved = config_env_names().map(|name| EnvVar {
+    name,
+    value: os.LookupEnv(name),
+  })
+  for v in saved {
+    let _ = os.Unsetenv(v.name)
+  }
+  saved
+}
+
+fn restore_config_env(saved: Slice<EnvVar>) {
+  for v in saved {
+    match v.value {
+      Some(text) => {
+        let _ = os.Setenv(v.name, text)
+      },
+      None => {
+        let _ = os.Unsetenv(v.name)
+      },
+    }
+  }
+}
+
+/// Run `load_traced()` from `dir` with `home` as $HOME and nothing else the
+/// reader consults left set, restoring the working directory and the whole
+/// environment after. `token`, when given, is exported as LLL_TOKEN.
+fn traced_in(
+  dir: string,
+  home: string,
+  token: Option<string>,
+) -> Result<(Config, Sources), string> {
   let Ok(prev_dir) = os.Getwd() else {
     return Err("reading the working directory")
   }
-  let prev_home = os.Getenv("HOME")
+  let saved = isolate_config_env()
+  defer restore(prev_dir, saved)
   if let Err(e) = os.Chdir(dir) {
     return Err(f"entering {dir}: {e}")
   }
   let _ = os.Setenv("HOME", home)
-  defer restore(prev_dir, prev_home)
+  if let Some(text) = token {
+    let _ = os.Setenv("LLL_TOKEN", text)
+  }
   load_traced()
+}
+
+fn traced_from(dir: string, home: string) -> Result<(Config, Sources), string> {
+  traced_in(dir, home, None)
 }
 
 fn load_from(dir: string, home: string) -> Result<Config, string> {
@@ -90,9 +154,9 @@ fn load_from(dir: string, home: string) -> Result<Config, string> {
   Ok(cfg)
 }
 
-fn restore(dir: string, home: string) {
+fn restore(dir: string, saved: Slice<EnvVar>) {
   let _ = os.Chdir(dir)
-  let _ = os.Setenv("HOME", home)
+  restore_config_env(saved)
 }
 
 // ---------------------------------------------------------------- layering
@@ -288,28 +352,49 @@ fn lll_token_beats_both_files_and_is_traced_to_the_env() {
   assert src.token == "env:LLL_TOKEN"
 }
 
-/// `traced_from` with LLL_TOKEN also set, all three restored after.
 fn traced_with_token(
   dir: string,
   home: string,
   token: string,
 ) -> Result<(Config, Sources), string> {
-  let Ok(prev_dir) = os.Getwd() else {
-    return Err("reading the working directory")
-  }
-  let prev_home = os.Getenv("HOME")
-  let prev_token = os.Getenv("LLL_TOKEN")
-  if let Err(e) = os.Chdir(dir) {
-    return Err(f"entering {dir}: {e}")
-  }
-  let _ = os.Setenv("HOME", home)
-  let _ = os.Setenv("LLL_TOKEN", token)
-  defer restore_token(prev_dir, prev_home, prev_token)
-  load_traced()
+  traced_in(dir, home, Some(token))
 }
 
-fn restore_token(dir: string, home: string, token: string) {
-  let _ = os.Chdir(dir)
-  let _ = os.Setenv("HOME", home)
-  let _ = os.Setenv("LLL_TOKEN", token)
+// ------------------------------------------------------------- isolation
+
+#[test]
+fn a_real_home_config_and_exported_env_cannot_reach_these_tests() {
+  // The guard for LLL-449. Eight tests above read the developer's own
+  // ~/.config/lll/lll.toml and exported LLL_* instead of the fixture, because
+  // setting $HOME does not cover LLL_CONFIG_HOME, XDG_CONFIG_HOME or the
+  // per-key overrides. Poison every one of them; the fixture must still win.
+  let assert Ok((root, home)) = fixture(
+    "team = \"REPO\"\n",
+    "url = \"http://home:9999\"\nme = \"homer\"\n",
+  )
+  let assert Ok(elsewhere) = os.MkdirTemp("", "lll-elsewhere")
+  let assert Ok(_) = write(
+    filepath.Join(elsewhere, "lll", "lll.toml"),
+    "url = \"http://elsewhere:1\"\nme = \"stranger\"\ntoken = \"real-token\"\n",
+  )
+
+  let saved = isolate_config_env()
+  defer restore_config_env(saved)
+  let _ = os.Setenv("LLL_CONFIG_HOME", elsewhere)
+  let _ = os.Setenv("XDG_CONFIG_HOME", elsewhere)
+  let _ = os.Setenv("LLL_URL", "http://exported:2")
+  let _ = os.Setenv("LLL_TEAM", "EXPORTED")
+  let _ = os.Setenv("LLL_ME", "exported")
+  let _ = os.Setenv("LLL_SORT", "-exported")
+  let _ = os.Setenv("LLL_WEB_URL", "http://exported-board:3")
+  let _ = os.Setenv("LLL_TOKEN", "exported-token")
+
+  let assert Ok(cfg) = load_from(root, home)
+  assert cfg.team == "REPO"
+  assert cfg.url == "http://home:9999"
+  assert cfg.me == "homer"
+  assert cfg.sort == ""
+  assert cfg.web_url == ""
+  // The one that printed a real hosted token into a failure message.
+  assert cfg.token == ""
 }
