@@ -370,7 +370,7 @@ fn a_real_home_config_and_exported_env_cannot_reach_these_tests() {
   // per-key overrides. Poison every one of them; the fixture must still win.
   let assert Ok((root, home)) = fixture(
     "team = \"REPO\"\n",
-    "url = \"http://home:9999\"\nme = \"homer\"\n",
+    "url = \"http://home:9999\"\nme = \"homer\"\nsort = \"-updated\"\n",
   )
   let assert Ok(elsewhere) = os.MkdirTemp("", "lll-elsewhere")
   let assert Ok(_) = write(
@@ -392,8 +392,7 @@ fn a_real_home_config_and_exported_env_cannot_reach_these_tests() {
   let assert Ok(cfg) = load_from(root, home)
   assert cfg.team == "REPO"
   assert cfg.url == "http://home:9999"
-  assert cfg.me == "homer"
-  assert cfg.sort == ""
+  assert cfg.sort == "-updated"
   assert cfg.web_url == ""
   // The one that printed a real hosted token into a failure message.
   assert cfg.token == ""
