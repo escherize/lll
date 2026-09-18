@@ -34,7 +34,7 @@ pub fn config_commands() -> Slice<flags.Command> {
     },
     flags.Command {
       name: "check",
-      summary: "ask the configured url whether it is a PocketBase API",
+      summary: "check the configured lll server API",
       page: "",
       spec: [],
       positional: "",
@@ -242,10 +242,10 @@ fn config_list(_input: flags.CommandInput) -> Result<(), string> {
 fn config_check(_input: flags.CommandInput) -> Result<(), string> {
   let (cfg, src) = config.load_traced()?
   match pb.get("/api/health") {
-    Ok(_) => fmt.Println(f"ok\t{cfg.url} answers as a PocketBase API"),
+    Ok(_) => fmt.Println(f"ok\t{cfg.url} answers as an lll server"),
     // The error already names the url, the status, and (for a board-shaped
     // 404) the port hint from pb.read_body. Prefixing it is all that is left.
-    Err(e) => return Err(f"{cfg.url} is not a reachable PocketBase API: {e}"),
+    Err(e) => return Err(f"{cfg.url} is not a reachable lll server API: {e}"),
   }
   if let Some(warning) = committed_token_warning(src.token) {
     fmt.Println(warning)
@@ -303,7 +303,7 @@ fn config_init(_input: flags.CommandInput) -> Result<(), string> {
 # 'lll attach' writes exactly that. 'url' and 'token' are facts about a machine
 # and its login: set them once in ~/.config/lll/lll.toml.
 
-# PocketBase server URL.
+# lll server URL.
 # url = \"http://127.0.0.1:8090\"
 
 # Default team key. Scopes 'lll issue list' and is required by 'lll issue create'.
@@ -316,7 +316,7 @@ fn config_init(_input: flags.CommandInput) -> Result<(), string> {
 # Web board base URL, used by 'lll board' and 'lll issue url' / 'view -w'.
 # web_url = \"http://127.0.0.1:8100\"
 
-# PocketBase auth token, sent as Authorization: Bearer on every request.
+# Server auth token, sent as Authorization: Bearer on every request.
 # A secret: set it in ~/.config/lll/lll.toml or LLL_TOKEN, never here —
 # this file gets committed.
 # token = \"\"

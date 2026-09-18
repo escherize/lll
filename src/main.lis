@@ -99,7 +99,7 @@ Usage:
   lll team <command>      work with teams (see 'lll team --help')
   lll member <command>    work with members (see 'lll member --help')
   lll project <command>   work with projects (see 'lll project --help')
-  lll api METHOD PATH     raw passthrough to the board's PocketBase API;
+  lll api METHOD PATH     raw passthrough to the board's server API;
                           --schema prints the collection/field reference
                           (see 'lll api --help')
   lll label <command>     work with labels (see 'lll label --help')
@@ -129,7 +129,7 @@ Usage:
                           ready agenda (see 'lll watch --help')
   lll webhook <command>   outbound webhooks: add/list/remove URLs that the
                           server POSTs issue events to (see 'lll webhook --help')
-  lll up [--port 8100]    start PocketBase + web board together (see 'lll up --help')
+  lll up [--port 8100]    start the lll server and web board together (see 'lll up --help')
   lll board [-w]          print the web board URL; -w opens it (see 'lll board --help')
   lll skill list          the agent operating instructions in this binary
   lll skill get NAME      one of them as markdown (see 'lll skill --help')
@@ -151,7 +151,7 @@ Examples:
 
 Configuration (env > the repo's .lll.toml > ~/.config/lll/lll.toml; the files
 layer, each supplying the keys it names — 'lll config --list' shows which won):
-  LLL_URL      PocketBase base URL (default http://127.0.0.1:8090)
+  LLL_URL      lll server base URL (default http://127.0.0.1:8090)
   LLL_TEAM     default team key (e.g. ENG); scopes 'issue list', used by 'issue create'
   LLL_SORT     default sort for 'issue list': {strings.Join(query.sort_fields(), ", ")}; prefix - to descend
   LLL_WEB_URL  web board base URL for 'board', 'issue url', 'view -w' (set with 'lll config set web_url URL')",

@@ -56,17 +56,22 @@ assert 'page-0500' in cli('finding', 'near', 'pagination/last')
 assert 'page-0500' in cli('search', 'Pagination evidence 500', '--docs')
 
 # A later page failure must not look like a successfully truncated list.
-pages = []
-filters = []
+requests = []
 
 
 class FailingPage(http.server.BaseHTTPRequestHandler):
+    def handle(self):
+        try:
+            super().handle()
+        except (BrokenPipeError, ConnectionResetError):
+            pass  # Issue view may exit before another independent read ends.
+
     def do_GET(self):
         parsed = urllib.parse.urlsplit(self.path)
         if parsed.path == '/api/collections/docs/records':
             page = int(urllib.parse.parse_qs(parsed.query).get('page', ['1'])[0])
-            pages.append(page)
-            filters.append(urllib.parse.parse_qs(parsed.query).get('filter', [''])[0])
+            filt = urllib.parse.parse_qs(parsed.query).get('filter', [''])[0]
+            requests.append((filt, page))
             if page == 2:
                 self.send_response(503)
                 self.end_headers()
@@ -93,15 +98,25 @@ thread.start()
 try:
     for args in [('doc', 'list', '--json'), ('doc', 'list', '--kind', 'finding', '--json'),
                  ('issue', 'view', key, '--json')]:
-        pages.clear()
-        filters.clear()
+        requests.clear()
         result = subprocess.run([binary, *args],
             env=dict(env, LLL_URL=f'http://127.0.0.1:{server.server_port}'),
             text=True, capture_output=True, timeout=15)
         assert result.returncode != 0 and not result.stdout, result
-        assert pages == [1, 2], pages
+        observed = list(requests)
+        # Issue view starts linked docs and findings independently. Its first
+        # error still comes from linked docs; the findings read may finish or
+        # be interrupted when the command exits. Check each query separately.
+        if args[0] == 'issue':
+            linked = [page for filt, page in observed if 'issues.id' in filt]
+            findings = [page for filt, page in observed if "kind='finding'" in filt]
+            assert linked == [1, 2], observed
+            assert findings in ([], [1], [1, 2]), observed
+            assert len(observed) == len(linked) + len(findings), observed
+        else:
+            assert [page for _, page in observed] == [1, 2], observed
         if '--kind' in args:
-            assert all("kind='finding'" in value and team['id'] in value for value in filters), filters
+            assert all("kind='finding'" in value and team['id'] in value for value, _ in observed), observed
         assert 'second page unavailable' in result.stderr, result.stderr
 finally:
     server.shutdown()

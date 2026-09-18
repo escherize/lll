@@ -179,7 +179,7 @@ def render(collections_json):
     out.append("`mise run api-schema`. Never edit this output by hand.")
     out.append("")
     out.append("Every collection is served under /api/collections/<name>/records with")
-    out.append("list/view/create/update/delete, filtered by PocketBase filter")
+    out.append("list/view/create/update/delete, filtered by server filter")
     out.append("expressions: ?filter=(state='todo' && title~'login'), sorted with")
     out.append("?sort=-created. Rules name who may call each verb: (any) is every")
     out.append("authenticated member, (superuser only) is nobody else, anything else")

@@ -18,7 +18,7 @@ fn unexpected_http_and_transport_errors_keep_diagnostics_separate() {
     "POST http://host: 400 Bad Request: <html>upstream error</html>",
     "POST http://host: 400 Bad Request: {broken json",
     "PATCH http://host: reading response: unexpected EOF",
-    "cannot reach PocketBase at http://127.0.0.1:8090: connection refused",
+    "cannot reach the lll server at http://127.0.0.1:8090: connection refused",
     "decoding issue: unexpected EOF",
   ] {
     let shown = display_error(raw)

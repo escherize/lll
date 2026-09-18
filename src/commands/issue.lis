@@ -130,7 +130,7 @@ fn issue_create_spec() -> Slice<flags.Flag> {
     },
     flags.Flag {
       name: "--json",
-      help: "raw PocketBase JSON (team, assignee, labels, project\nexpanded), pipe-friendly",
+      help: "raw record JSON (team, assignee, labels, project\nexpanded), pipe-friendly",
       ..,
     },
     flags.Flag {
@@ -184,7 +184,7 @@ fn issue_list_spec() -> Slice<flags.Flag> {
     },
     flags.Flag {
       name: "--json",
-      help: "raw PocketBase JSON (team, assignee, labels, project\nexpanded), pipe-friendly",
+      help: "raw record JSON (team, assignee, labels, project\nexpanded), pipe-friendly",
       ..,
     },
     flags.Flag { name: "--ready", help: "only open issues whose blockers are all done (LLL-175): what an agent can pick up now", .. },
@@ -297,7 +297,7 @@ pub fn issue_watch_spec() -> Slice<flags.Flag> {
   flags.with_team([
     flags.Flag {
       name: "--json",
-      help: "NDJSON: one raw PocketBase event object per line, with a\n\"topic\" field added",
+      help: "NDJSON: one raw server event object per line, with a\n\"topic\" field added",
       ..,
     },
     flags.Flag {
@@ -888,6 +888,60 @@ fn print_issue_table(issues: Slice<models.Issue>) -> Result<(), string> {
   Ok(())
 }
 
+struct IssueViewReads {
+  claim: Channel<Result<Option<models.Claim>, string>>,
+  docs: Channel<Result<Slice<models.Doc>, string>>,
+  blocks: Channel<Result<Slice<models.Issue>, string>>,
+  findings: Channel<Result<Slice<models.Doc>, string>>,
+  comments: Channel<Result<Slice<models.Comment>, string>>,
+}
+
+/// Start only the reads this output mode already uses. Each result has room
+/// to finish even when an earlier error makes the caller stop receiving.
+fn begin_issue_view_reads(
+  full: models.Issue,
+  json_mode: bool,
+  raw_mode: bool,
+) -> IssueViewReads {
+  let reads = IssueViewReads {
+    claim: Channel.buffered<Result<Option<models.Claim>, string>>(1),
+    docs: Channel.buffered<Result<Slice<models.Doc>, string>>(1),
+    blocks: Channel.buffered<Result<Slice<models.Issue>, string>>(1),
+    findings: Channel.buffered<Result<Slice<models.Doc>, string>>(1),
+    comments: Channel.buffered<Result<Slice<models.Comment>, string>>(1),
+  }
+  if json_mode || !raw_mode {
+    task {
+      let _ = reads.claim.send(fetch_claim(full.id))
+    }
+    task {
+      let _ = reads.docs.send(fetch_issue_docs(full.id))
+    }
+  }
+  if !json_mode && !raw_mode {
+    task {
+      let _ = reads.blocks.send(fetch_blocks(full.id))
+    }
+  }
+  task {
+    let _ = reads.findings.send(findings_for_issue(full))
+  }
+  task {
+    let _ = reads.comments.send(records.fetch_comments(full.id))
+  }
+  reads
+}
+
+fn await_issue_view<T>(
+  answer: Channel<Result<T, string>>,
+  what: string,
+) -> Result<T, string> {
+  let Some(result) = answer.receive() else {
+    return Err(f"issue {what} fetch ended without an answer")
+  }
+  result
+}
+
 fn view(input: flags.CommandInput) -> Result<(), string> {
   let spec = issue_view_spec()
   let p = input.parsed
@@ -911,13 +965,14 @@ fn view(input: flags.CommandInput) -> Result<(), string> {
   if let Err(e) = json.Unmarshal(record.bytes(), &full) {
     return Err(f"decoding issue: {e}")
   }
+  let reads = begin_issue_view_reads(full, json_mode, raw_mode)
   if json_mode {
     fmt.Println(issue_view_json(
       record,
-      records.fetch_comments(full.id)?,
-      fetch_claim(full.id)?,
-      fetch_issue_docs(full.id)?,
-      findings_for_issue(full)?,
+      await_issue_view(reads.comments, "comments")?,
+      await_issue_view(reads.claim, "claim")?,
+      await_issue_view(reads.docs, "docs")?,
+      await_issue_view(reads.findings, "findings")?,
     )?)
     return Ok(())
   }
@@ -935,7 +990,7 @@ fn view(input: flags.CommandInput) -> Result<(), string> {
       fmt.Println("")
       fmt.Println(full.description)
     }
-    let comments = records.fetch_comments(full.id)?
+    let comments = await_issue_view(reads.comments, "comments")?
     if !full.attachments.is_empty() {
       fmt.Println("\n## Attachments")
       for name in full.attachments { fmt.Println(f"- {name}") }
@@ -954,7 +1009,7 @@ fn view(input: flags.CommandInput) -> Result<(), string> {
         )
       }
     }
-    print_findings_raw(full)?
+    print_findings_raw(await_issue_view(reads.findings, "findings")?)?
     return Ok(())
   }
 
@@ -976,7 +1031,7 @@ fn view(input: flags.CommandInput) -> Result<(), string> {
   // The one place the second collection is read on a plain view: assignee says
   // who it is for, Claimed says who is holding it right now, and only the
   // latter is exclusive.
-  let claim = fetch_claim(full.id)?
+  let claim = await_issue_view(reads.claim, "claim")?
   if let Some(held) = claim {
     let mut holder = held.expand.member.name
     if holder == "" { holder = "an unknown member" }
@@ -997,7 +1052,7 @@ fn view(input: flags.CommandInput) -> Result<(), string> {
     fmt.Println("Attachments:")
     for name in full.attachments { fmt.Println(f"  {name}") }
   }
-  let linked_docs = fetch_issue_docs(full.id)?
+  let linked_docs = await_issue_view(reads.docs, "docs")?
   if linked_docs.length() > 0 {
     let slugs = linked_docs.map(|d| d.slug)
     fmt.Println(f"Docs:      {strings.Join(slugs, ", ")}")
@@ -1009,7 +1064,7 @@ fn view(input: flags.CommandInput) -> Result<(), string> {
     let tail = if open == 0 { " — all done, ready" } else { f" — {open} open, not ready" }
     fmt.Println(f"Blocked by: {strings.Join(parts, ", ")}{tail}")
   }
-  let blocks = fetch_blocks(full.id)?
+  let blocks = await_issue_view(reads.blocks, "blocks")?
   if blocks.length() > 0 {
     let keys = blocks.map(|b| f"{b.expand.team.key}-{b.number}")
     fmt.Println(f"Blocks:    {strings.Join(keys, ", ")}")
@@ -1029,7 +1084,7 @@ fn view(input: flags.CommandInput) -> Result<(), string> {
   // (the brief contract, TASK-103 AC#3); the area matches stop at a handful
   // with a pointer. The --raw brief keeps the whole list on purpose.
   let linked = linked_docs.map(|d| d.slug)
-  let findings = findings_for_issue(full)?
+  let findings = await_issue_view(reads.findings, "findings")?
   if findings.length() > 0 {
     fmt.Println("")
     fmt.Println("Related findings:")
@@ -1054,7 +1109,7 @@ fn view(input: flags.CommandInput) -> Result<(), string> {
     }
   }
 
-  let comments = records.fetch_comments(full.id)?
+  let comments = await_issue_view(reads.comments, "comments")?
   if comments.length() > 0 {
     fmt.Println("")
     fmt.Println("Comments:")
@@ -1107,8 +1162,7 @@ fn doc_context_json(docs: Slice<models.Doc>) -> Result<json.RawMessage, string> 
 /// The '## Related findings' block of `lll issue view --raw` — same list
 /// findings_for_issue serves the rendered view, as plain markdown so an
 /// agent's piped brief carries the findings too.
-fn print_findings_raw(full: models.Issue) -> Result<(), string> {
-  let findings = findings_for_issue(full)?
+fn print_findings_raw(findings: Slice<models.Doc>) -> Result<(), string> {
   if findings.is_empty() { return Ok(()) }
   fmt.Println("")
   fmt.Println("## Related findings")
