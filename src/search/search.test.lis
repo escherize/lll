@@ -25,6 +25,47 @@ fn tokenize_keeps_keys_whole_and_in_parts() {
 }
 
 #[test]
+fn unicode_search_tokens_keep_letters_numbers_and_combining_marks() {
+  let t = tokenize("日本語、中文。Привет العربية हिन्दी café café ١٢٣ 🧪")
+  assert t.contains("日本語")
+  assert t.contains("中文")
+  assert t.contains("привет")
+  assert t.contains("العربية")
+  assert t.contains("हिन्दी")
+  assert t.contains("café")
+  assert t.contains("café")
+  assert t.contains("١٢٣")
+  assert !t.contains("🧪")
+}
+
+#[test]
+fn unicode_search_finds_japanese_title_substrings_and_record_bodies() {
+  let docs = [
+    Document { group: "LLL-1", kind: "issue", label: "description",
+      title: "日本語クイックスタートを公開する", body: "", state: "todo" },
+    Document { group: "LLL-2", kind: "issue", label: "description",
+      title: "Translation", body: "日本語の説明を追加する", state: "todo" },
+    Document { group: "LLL-3", kind: "comment", label: "comment #1 by kai",
+      title: "Review", body: "日本語のレビューが完了した", state: "todo" },
+    Document { group: "translation", kind: "doc", label: "body",
+      title: "Guide", body: "日本語のガイド", state: "" },
+  ]
+  let hits = rank(docs, "日本語", 10)
+  assert hits.length() == 4
+  assert hits[0].group == "LLL-1"
+  for h in hits {
+    if h.group != "LLL-1" {
+      assert h.snippets.length() == 1
+      assert h.snippets[0].lines[0].contains("日本語")
+    }
+  }
+  let full_title = rank(docs, "日本語クイックスタートを公開する", 10)
+  assert full_title.length() == 1
+  assert full_title[0].group == "LLL-1"
+  assert rank(docs, "不存在", 10).is_empty()
+}
+
+#[test]
 fn a_title_hit_outranks_a_body_hit() {
   let hits = rank(corpus(), "search", 10)
   assert hits.length() >= 2
