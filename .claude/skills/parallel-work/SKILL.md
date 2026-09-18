@@ -20,7 +20,13 @@ Take a worktree. Not a branch in the shared checkout, and not a second clone.
 ```sh
 # The harness's EnterWorktree, or by hand:
 git worktree add .claude/worktrees/<name> -b <branch> origin/main
+mise trust .claude/worktrees/<name>/mise.toml
 ```
+
+Trust the new worktree's config before running any mise task. Mise trusts by
+path, so trusting the main checkout does not cover a new worktree. Without
+this step it reports `error parsing config file` and refuses to start the
+gate; that is a trust failure before verification runs (LLL-149).
 
 A worktree is cheaper than a clone - it shares the object store - and that
 sharing is exactly what the rest of this file is about.
