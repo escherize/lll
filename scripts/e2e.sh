@@ -1113,7 +1113,7 @@ set -e
 assert_contains "$out" "unknown status 'bogus'" "invalid project status message"
 
 # --- labels: create + list ---
-out=$(LLL_URL=$URL LLL_TEAM=ENG "$LIN" label create -n bug -c "#ff0000" --team ENG)
+out=$(LLL_URL=$URL LLL_TEAM=ENG "$LIN" label create -n bug --color "#ff0000" --team ENG)
 assert_contains "$out" "Created label bug" "label create output"
 out=$(LLL_URL=$URL LLL_TEAM=ENG "$LIN" label create -n chore)
 assert_contains "$out" "Created label chore" "label create without color takes LLL_TEAM"
