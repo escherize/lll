@@ -180,6 +180,14 @@ pub struct NewIssue {
   pub creator: string,
   pub origin: IssueOrigin,
   pub team: string,
+  // LLL-454: normally left at zero, which is how gopb's issueDefaults knows
+  // to allocate the next number and sort for the team. `lll import dir`
+  // supplies them, so a restored mirror reproduces ENG-7 as ENG-7 rather
+  // than renumbering and silently repointing every cross-reference.
+  #[json(omitempty)]
+  pub number: int,
+  #[json(omitempty)]
+  pub sort: float64,
   pub title: string,
   pub state: string,
   pub priority: int,

@@ -73,15 +73,36 @@ struct BoardPage {
 /// Complete board input, in deterministic manual order. Failed or inconsistent
 /// pages never escape as a partial board; callers retain their prior view.
 pub fn fetch_board_issues(team_id: string) -> Result<Slice<models.Issue>, string> {
-  collect_board_issues(team_id, |path| {
+  collect_board_issues(team_id, BOARD_EXPAND, |path| {
     let mut page = BoardPage { .. }
     pb.fetch(path, "board issues", &page)?
     Ok(page)
   })
 }
 
+/// What the board draws with. Deliberately not everything: each relation is
+/// another join on a query that runs on every board load.
+const BOARD_EXPAND: string = "team,assignee,labels"
+
+/// The board's relations plus `project`, for callers writing the issue down
+/// rather than drawing it. Members are deliberately NOT here: expanding a
+/// relation into an auth collection proved to depend on the caller's
+/// identity, so `lll export` resolves member names from one members request
+/// instead (see mirror.Names).
+const FULL_EXPAND: string = "team,assignee,labels,project"
+
+/// fetch_board_issues with every named relation expanded.
+pub fn fetch_full_issues(team_id: string) -> Result<Slice<models.Issue>, string> {
+  collect_board_issues(team_id, FULL_EXPAND, |path| {
+    let mut page = BoardPage { .. }
+    pb.fetch(path, "issues", &page)?
+    Ok(page)
+  })
+}
+
 fn collect_board_issues(
   team_id: string,
+  expand: string,
   fetch: fn(string) -> Result<BoardPage, string>,
 ) -> Result<Slice<models.Issue>, string> {
   let filter = url.QueryEscape(query.filter(team_id, "", "", "", "", ""))
@@ -91,7 +112,7 @@ fn collect_board_issues(
   let mut pages = -1
   let mut page = 1
   loop {
-    let batch = fetch(f"/api/collections/issues/records?perPage=200&page={page}&expand=team,assignee,labels&sort=sort,created,id&filter={filter}")?
+    let batch = fetch(f"/api/collections/issues/records?perPage=200&page={page}&expand={expand}&sort=sort,created,id&filter={filter}")?
     if page == 1 { expected = batch.total_items; pages = batch.total_pages }
     if batch.total_items != expected || batch.total_pages != pages {
       return Err("the board changed while loading; refresh to retry")

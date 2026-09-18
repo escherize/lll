@@ -42,6 +42,7 @@ fn dispatch(noun: string, args: Slice<string>) -> Result<(), string> {
     "doc" => commands.doc(args),
     "finding" => commands.finding(args),
     "import" => commands.import_cmd(args),
+    "export" => commands.export_cmd(args),
     "config" => commands.config_cmd(args),
     "login" => commands.login(args),
     "logout" => commands.logout(args),
@@ -106,6 +107,9 @@ Usage:
                           bring a GitHub repo's issues in via gh: title, body,
                           labels, state (open todo, closed done), each issue
                           ref'd gh#N; re-import skips what it already brought
+  lll export [DIR]        the team as readable Markdown a repo can hold:
+                          one file per issue and doc, attachment bytes beside
+                          them (default DIR: mirror)
   lll doc <command>       work with docs: wiki, findings, decisions, PRDs
                           (see 'lll doc --help')
   lll finding <command>   retrieve findings by area or path

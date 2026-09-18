@@ -365,6 +365,6 @@ The board acts as its process identity, not each browser visitor's identity.
 The decision, costs, and criteria for considering direct record access are in
 `lll doc view retain-pocketbase-rest-data-path` on the LLL board.
 
-A one-way, greppable Markdown projection is available with `bin/lll-export`.
+A one-way, greppable Markdown projection is available with `lll export`.
 See [export mirrors](docs/export-mirror.md) for managed destinations, pagination
 and failure recovery. It does not replace a database backup.

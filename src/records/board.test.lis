@@ -2,7 +2,7 @@ import "models"
 
 #[test]
 fn complete_board_reads_all_pages_in_stable_order() {
-  let result = collect_board_issues("team", |path| {
+  let result = collect_board_issues("team", BOARD_EXPAND, |path| {
     assert path.contains("sort=sort,created,id")
     assert path.contains("filter=team")
     if path.contains("page=1&") {
@@ -19,7 +19,7 @@ fn complete_board_reads_all_pages_in_stable_order() {
 #[test]
 fn complete_board_refuses_failed_or_inconsistent_pages() {
   for mode in ["failure", "duplicate", "count", "short"] {
-    let result = collect_board_issues("team", |path| {
+    let result = collect_board_issues("team", BOARD_EXPAND, |path| {
       if path.contains("page=1&") {
         return Ok(BoardPage { items: [models.Issue { id: "first", .. }], total_items: 2, total_pages: 2 })
       }
@@ -30,7 +30,20 @@ fn complete_board_refuses_failed_or_inconsistent_pages() {
     })
     assert result.is_err()
   }
-  let empty = collect_board_issues("team", |_path| Ok(BoardPage { .. }))
+  let empty = collect_board_issues("team", BOARD_EXPAND, |_path| Ok(BoardPage { .. }))
   let Ok(issues) = empty else { panic("empty board failed") };
   assert issues.is_empty()
+}
+
+#[test]
+fn the_expand_argument_reaches_the_query() {
+  // LLL-454: the board's three relations are not every relation an issue
+  // names. `lll export` writes the project and creator NAMES down, and an
+  // unexpanded relation renders as an empty string or a raw record id — a
+  // mirror full of blanks, with nothing failing to say so.
+  let result = collect_board_issues("team", FULL_EXPAND, |path| {
+    assert path.contains("expand=team,assignee,labels,project")
+    Ok(BoardPage { .. })
+  })
+  let Ok(_) = result else { panic("full expand walk failed") };
 }

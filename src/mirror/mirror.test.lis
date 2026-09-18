@@ -1,0 +1,385 @@
+import "models"
+
+import "go:math"
+import "go:strings"
+
+/// The round trip is the whole contract: whatever render() writes, parse()
+/// must give back unchanged. Every test here is that property under a
+/// different kind of hostile input, because the mirror's job is to survive
+/// text a person wrote.
+/// The lookups a rendered issue needs; empty where a test does not care.
+fn no_names() -> Names {
+  Names { issues: Map.new<string, string>(), members: Map.new<string, string>() }
+}
+
+fn round_trip(front: Front, body: string) -> Result<(Front, string), string> {
+  parse(render(front, body)?)
+}
+
+/// `sort` is a float64 board position, so it is compared within a tolerance
+/// far tighter than any two adjacent cards (the board halves the gap between
+/// neighbours, and these are exact binary fractions anyway).
+fn same_float(a: float64, b: float64) -> bool {
+  math.Abs(a - b) < 0.0000000001
+}
+
+/// Slices are not comparable with == in Go, so they are compared as text.
+fn joined(values: Slice<string>) -> string {
+  strings.Join(values, "|")
+}
+
+fn sample() -> Front {
+  Front {
+    key: "ENG-7",
+    number: 7,
+    title: "A title",
+    state: "todo",
+    priority: "high",
+    emoji: "",
+    assignee: "bryan.maass",
+    project: "",
+    labels: ["product"],
+    attachments: [],
+    blocked: ["ENG-3", "ENG-9"],
+    sort: 12.5,
+    creator: "bryan.maass",
+    refs: "gh#12",
+    origin: OriginFront {
+      host: "workstation",
+      cwd: "/Users/bcm/dv/lll",
+      branch: "main",
+      sha: "5257fe5",
+      tool: "claude",
+    },
+    created: "2026-08-28 18:20:00.123Z",
+    updated: "2026-09-01 10:00:00.000Z",
+  }
+}
+
+#[test]
+fn every_front_matter_field_survives() {
+  let assert Ok((back, _)) = round_trip(sample(), "body")
+  assert back.key == "ENG-7"
+  assert back.number == 7
+  assert back.title == "A title"
+  assert back.state == "todo"
+  assert back.priority == "high"
+  assert back.assignee == "bryan.maass"
+  assert joined(back.labels) == "product"
+  assert same_float(back.sort, 12.5)
+  assert back.created == "2026-08-28 18:20:00.123Z"
+  assert back.updated == "2026-09-01 10:00:00.000Z"
+}
+
+#[test]
+fn blocked_by_links_survive_as_keys() {
+  // Record ids mean nothing in the database a mirror is restored into, so
+  // the dependency graph travels as KEYS and is re-resolved after every
+  // issue exists. Losing these loses LLL-175's ordering silently.
+  let assert Ok((back, _)) = round_trip(sample(), "b")
+  assert joined(back.blocked) == "ENG-3|ENG-9"
+}
+
+#[test]
+fn an_unblocked_issue_round_trips_an_empty_list() {
+  let mut front = sample()
+  front.blocked = []
+  let assert Ok((back, _)) = round_trip(front, "b")
+  assert back.blocked.is_empty()
+}
+
+#[test]
+fn provenance_survives_because_refs_are_load_bearing() {
+  // `lll import github` skips an issue whose gh#N ref the team already
+  // carries, so a mirror that drops refs turns a restore into a duplicate
+  // import. scripts/test_provenance.py guards the same thing end to end.
+  let assert Ok((back, _)) = round_trip(sample(), "b")
+  assert back.creator == "bryan.maass"
+  assert back.refs == "gh#12"
+  assert back.origin.host == "workstation"
+  assert back.origin.cwd == "/Users/bcm/dv/lll"
+  assert back.origin.branch == "main"
+  assert back.origin.sha == "5257fe5"
+  assert back.origin.tool == "claude"
+}
+
+#[test]
+fn an_issue_filed_outside_git_round_trips_empty_provenance() {
+  let mut front = sample()
+  front.refs = ""
+  front.origin = OriginFront { .. }
+  let assert Ok((back, _)) = round_trip(front, "b")
+  assert back.refs == ""
+  assert back.origin.branch == ""
+  assert back.origin.sha == ""
+}
+
+#[test]
+fn the_number_and_sort_survive_because_the_import_must_reproduce_them() {
+  // gopb's issueDefaults only allocates number/sort when they arrive zero,
+  // so these two fields are what make ENG-7 come back as ENG-7 rather than
+  // as ENG-5 with every cross-reference silently repointed.
+  let mut front = sample()
+  front.number = 4210
+  front.sort = 0.0009765625
+  let assert Ok((back, _)) = round_trip(front, "x")
+  assert back.number == 4210
+  assert same_float(back.sort, 0.0009765625)
+}
+
+#[test]
+fn a_title_with_colons_and_quotes_survives() {
+  // "LLL-453: absolute comment times" is a real title on this board, and a
+  // naive key:value parser splits it in the wrong place.
+  let mut front = sample()
+  front.title = "LLL-453: absolute times, \"quoted\" and: doubled"
+  let assert Ok((back, _)) = round_trip(front, "b")
+  assert back.title == "LLL-453: absolute times, \"quoted\" and: doubled"
+}
+
+#[test]
+fn a_title_that_looks_like_yaml_survives() {
+  let mut front = sample()
+  front.title = "- item\n- item2"
+  let assert Ok((back, _)) = round_trip(front, "b")
+  assert back.title == "- item\n- item2"
+}
+
+#[test]
+fn unicode_and_emoji_survive() {
+  let mut front = sample()
+  front.emoji = "🐛"
+  front.title = "n'est-ce pas — ünïcødé ✨"
+  front.assignee = "Ægir Þórsson"
+  let assert Ok((back, _)) = round_trip(front, "描述 — a body")
+  assert back.emoji == "🐛"
+  assert back.title == "n'est-ce pas — ünïcødé ✨"
+  assert back.assignee == "Ægir Þórsson"
+}
+
+#[test]
+fn a_body_containing_the_fence_is_not_truncated() {
+  // The single most likely way to lose data: a description with a horizontal
+  // rule or its own front-matter-looking block. parse() only ever splits on
+  // the OPENING pair, so everything after it is body no matter what it holds.
+  let body = "intro\n\n---\n\nkey: not-front-matter\nstate: fake\n\n---\n\ntail"
+  let assert Ok((back, got)) = round_trip(sample(), body)
+  assert got == body
+  assert back.key == "ENG-7"
+  assert back.state == "todo"
+}
+
+#[test]
+fn a_body_that_starts_with_the_fence_survives() {
+  let body = "---\nstill body\n"
+  let assert Ok((_, got)) = round_trip(sample(), body)
+  assert got == "---\nstill body"
+}
+
+#[test]
+fn a_body_that_opens_with_a_blank_line_keeps_it() {
+  // The separator between the closing fence and the body is exactly one
+  // newline, so it is removed with CutPrefix. TrimLeft here would silently
+  // eat a description that deliberately starts with a blank line.
+  let assert Ok((_, got)) = round_trip(sample(), "\n\nindented start")
+  assert got == "\n\nindented start"
+}
+
+#[test]
+fn trailing_newlines_are_normalized_and_that_is_the_only_loss() {
+  // Stated as a test rather than left implicit: this is the one thing the
+  // round trip does not preserve, and it is deliberate — render writes
+  // exactly one trailing newline so an unchanged export cannot diff.
+  let assert Ok((_, none)) = round_trip(sample(), "body")
+  let assert Ok((_, many)) = round_trip(sample(), "body\n\n\n")
+  assert none == "body"
+  assert many == "body"
+}
+
+#[test]
+fn a_multiline_body_keeps_its_interior_blank_lines() {
+  let body = "## Description\n\nfirst\n\n\nthird\n\n## Acceptance Criteria\n- [ ] #1 a\n- [ ] #2 b"
+  let assert Ok((_, got)) = round_trip(sample(), body)
+  assert got == body
+}
+
+#[test]
+fn an_empty_body_round_trips() {
+  let assert Ok((_, got)) = round_trip(sample(), "")
+  assert got == ""
+}
+
+#[test]
+fn empty_optional_fields_round_trip_as_empty() {
+  let mut front = sample()
+  front.emoji = ""
+  front.assignee = ""
+  front.project = ""
+  front.labels = []
+  front.attachments = []
+  let assert Ok((back, _)) = round_trip(front, "b")
+  assert back.emoji == ""
+  assert back.assignee == ""
+  assert back.project == ""
+  assert back.labels.is_empty()
+  assert back.attachments.is_empty()
+}
+
+#[test]
+fn several_labels_and_attachments_keep_their_order() {
+  let mut front = sample()
+  front.labels = ["product", "deploy", "tests"]
+  front.attachments = ["b.png", "a.txt", "c.pdf"]
+  let assert Ok((back, _)) = round_trip(front, "b")
+  assert joined(back.labels) == "product|deploy|tests"
+  assert joined(back.attachments) == "b.png|a.txt|c.pdf"
+}
+
+#[test]
+fn render_is_byte_stable_across_calls() {
+  // AC2: exporting unchanged server state twice must produce identical
+  // files, or the scheduled mirror commits noise every run.
+  let assert Ok(first) = render(sample(), "body")
+  let assert Ok(second) = render(sample(), "body")
+  assert first == second
+}
+
+#[test]
+fn render_ends_with_exactly_one_newline_whatever_the_body_did() {
+  let assert Ok(none) = render(sample(), "body")
+  let assert Ok(one) = render(sample(), "body\n")
+  let assert Ok(many) = render(sample(), "body\n\n\n")
+  assert none == one
+  assert one == many
+  assert strings.HasSuffix(one, "body\n")
+}
+
+#[test]
+fn crlf_input_parses_to_the_same_thing_as_lf() {
+  // A mirror checked out on Windows, or edited by a tool that rewrites line
+  // endings, must not fail to import.
+  let assert Ok(text) = render(sample(), "line one\nline two")
+  let assert Ok((_, lf)) = parse(text)
+  let assert Ok((_, crlf)) = parse(strings.ReplaceAll(text, "\n", "\r\n"))
+  assert lf == crlf
+}
+
+#[test]
+fn parse_refuses_a_file_with_no_front_matter() {
+  let assert Err(e) = parse("# Just markdown\n\nno fence here\n")
+  assert strings.Contains(e, "first line")
+}
+
+#[test]
+fn parse_refuses_unterminated_front_matter() {
+  let assert Err(e) = parse("---\nkey: ENG-1\nstate: todo\n")
+  assert strings.Contains(e, "closing")
+}
+
+#[test]
+fn parse_refuses_front_matter_with_no_key() {
+  // Without a key there is nothing to import the file AS, so this must fail
+  // loudly rather than create an issue named after a filename.
+  let assert Err(e) = parse("---\nstate: todo\n---\n\nbody\n")
+  assert strings.Contains(e, "key")
+}
+
+#[test]
+fn parse_refuses_malformed_yaml() {
+  let assert Err(e) = parse("---\nkey: \"unclosed\nlabels: [a, b\n---\n\nbody\n")
+  assert strings.Contains(e, "front matter")
+}
+
+fn doc_sample() -> DocFront {
+  DocFront {
+    slug: "a-decision",
+    title: "A decision",
+    kind: "decision",
+    area: "architecture",
+    paths: "src/pb,gopb",
+    confidence: "confirmed",
+    note: "",
+    issues: ["ENG-7", "ENG-12"],
+    created: "2026-08-28 18:20:00.123Z",
+    updated: "2026-09-01 10:00:00.000Z",
+  }
+}
+
+#[test]
+fn a_doc_round_trips_every_field() {
+  let assert Ok(text) = render_doc(doc_sample(), "## Context\n\nbody")
+  let assert Ok((back, body)) = parse_doc(text)
+  assert back.slug == "a-decision"
+  assert back.title == "A decision"
+  assert back.kind == "decision"
+  assert back.area == "architecture"
+  assert back.paths == "src/pb,gopb"
+  assert back.confidence == "confirmed"
+  assert joined(back.issues) == "ENG-7|ENG-12"
+  assert body == "## Context\n\nbody"
+}
+
+#[test]
+fn a_doc_body_containing_the_fence_is_not_truncated() {
+  let body = "before\n\n---\n\nslug: fake\n\n---\n\nafter"
+  let assert Ok(text) = render_doc(doc_sample(), body)
+  let assert Ok((back, got)) = parse_doc(text)
+  assert got == body
+  assert back.slug == "a-decision"
+}
+
+#[test]
+fn parse_doc_refuses_front_matter_with_no_slug() {
+  let assert Err(e) = parse_doc("---\nkind: decision\n---\n\nbody\n")
+  assert strings.Contains(e, "slug")
+}
+
+#[test]
+fn a_doc_with_no_issue_links_round_trips() {
+  let mut front = doc_sample()
+  front.issues = []
+  front.area = ""
+  front.paths = ""
+  let assert Ok(text) = render_doc(front, "b")
+  let assert Ok((back, _)) = parse_doc(text)
+  assert back.issues.is_empty()
+  assert back.area == ""
+}
+
+#[test]
+fn front_of_resolves_names_from_the_maps_not_the_expansions() {
+  // The regression this guards: `creator` came from issue.expand.creator,
+  // which the e2e harness's identity could not expand, so every issue in
+  // the mirror said it was filed by nobody — and nothing failed.
+  let mut members = Map.new<string, string>()
+  members["m1"] = "bryan.maass"
+  members["m2"] = "rtrip-bot"
+  let mut keys = Map.new<string, string>()
+  keys["i9"] = "ENG-9"
+  let issue = models.Issue {
+    number: 4,
+    title: "t",
+    creator: "m1",
+    assignee: "m2",
+    blocked_by: ["i9"],
+    expand: models.IssueExpand { team: models.Team { key: "ENG", .. }, .. },
+    ..
+  }
+  let front = front_of(issue, Names { issues: keys, members })
+  assert front.creator == "bryan.maass"
+  assert front.assignee == "rtrip-bot"
+  assert joined(front.blocked) == "ENG-9"
+  assert front.key == "ENG-4"
+}
+
+#[test]
+fn front_of_leaves_an_unknown_member_empty_rather_than_a_record_id() {
+  let issue = models.Issue {
+    number: 1,
+    creator: "deleted-member-id",
+    expand: models.IssueExpand { team: models.Team { key: "ENG", .. }, .. },
+    ..
+  }
+  let front = front_of(issue, no_names())
+  assert front.creator == ""
+}
