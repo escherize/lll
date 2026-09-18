@@ -5,6 +5,9 @@ description: Work on lll alongside other agents without colliding - take a workt
 
 # Working alongside other agents
 
+> One stage of the loop in [software-factory](../software-factory/SKILL.md), which maps all six
+> and says what hands to what.
+
 Two agents in one checkout is not a merge problem, it is a corruption problem:
 they overwrite each other's edits, run servers on each other's ports, and kill
 each other's processes. Isolate first, then the only thing left to coordinate is
@@ -124,5 +127,7 @@ Leave the board and the remote in a state someone else can read:
 - close it, or return it to todo saying what remains - see [backlog-loop](../backlog-loop/SKILL.md)
   for the selection and honesty rules this pairs with
 - push the branch; say its name and the commits in your report
+- then [merge-gate](../merge-gate/SKILL.md) takes it from the open PR
+  onwards; do not close the issue here, it closes when the work is on main
 - if you entered a worktree, commit before you finish, because it can be removed
   with the session

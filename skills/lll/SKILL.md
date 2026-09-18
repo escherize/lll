@@ -5,6 +5,9 @@ description: Use lll as the tracker and record for software work - claim a task 
 
 # Working through lll
 
+> One stage of the loop in [software-factory](../software-factory/SKILL.md), which maps all six
+> and says what hands to what.
+
 lll is the tracker AND the record. The point is not project management: it is
 that six months from now, someone (probably an agent) can ask *why is this like
 this* and get an answer instead of a guess.

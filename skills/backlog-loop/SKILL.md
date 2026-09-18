@@ -5,6 +5,9 @@ description: Work the lll backlog unattended - pick issues that are genuinely sa
 
 # Working the backlog unattended
 
+> One stage of the loop in [software-factory](../software-factory/SKILL.md), which maps all six
+> and says what hands to what.
+
 The loop is easy. Picking what to put in it is the whole job.
 
 Most issues on a mature board are NOT safely automatable, and the failure mode
@@ -101,6 +104,11 @@ Then, per issue:
 Work one issue per commit. A commit that fixes three issues cannot be reverted
 when one of them was wrong.
 
+This loop ends at a pushed branch and an open PR.
+[merge-gate](../merge-gate/SKILL.md) is the stage after it: landing the change,
+confirming it reached the artifact people install, and closing the issue
+honestly. Neither half is the whole job.
+
 ## Verification
 
 `mise run gate` is necessary and not sufficient. It says you broke nothing. It
@@ -136,7 +144,10 @@ it.** Flaky assertions on this board have parked finished work as broken.
 Close only what is done. This is the rule the whole loop depends on, because a
 board that lies is worse than no board.
 
-- Criteria met and verified → close, with the evidence in a comment.
+- Criteria met and verified → comment with the evidence. CLOSE IT WHEN THE
+  WORK IS ON MAIN, not when the PR opens: see
+  [merge-gate](../merge-gate/SKILL.md), which owns that stage. A board saying
+  done while main lacks the change is worse than a board saying nothing.
 - Partly done → back to todo, with a comment naming precisely what remains.
   Do not close "most of it".
 - Blocked on a human → back to todo, with the question stated in one sentence.
@@ -175,6 +186,7 @@ Stopping is a result. Report it as one.
   overwrites your edits rather than conflicting with them. Branch from the
   commit you mean, not whatever the worktree defaulted to. Never stash: that
   stack is shared with every other session and worktree.
+  [parallel-work](../parallel-work/SKILL.md) owns this stage.
 - **The claim is the lock**, not the branch. `lll issue claim` is atomic and
   server-side, and its refusal is how two agents avoid doing the same work
   twice. Claim before writing code, not before pushing.
