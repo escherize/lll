@@ -88,15 +88,7 @@ fn project_list(input: flags.CommandInput) -> Result<(), string> {
   let p = input.parsed
   // Scoped when a team is configured, every team's when not: a project
   // belongs to one team (TASK-173), so the unscoped list is an admin's view.
-  let filter = url.QueryEscape(
-    query.filter(configured_team_id()?, "", "", "", "", ""),
-  )
-  let mut projects = models.ProjectList { .. }
-  pb.fetch(
-    f"/api/collections/projects/records?perPage=200&sort=name&expand=team&filter={filter}",
-    "projects",
-    &projects,
-  )?
+  let projects = models.ProjectList { items: records.fetch_projects(configured_team_id()?)? }
   if p.given("--json") { return print_json(projects, "project list") }
   for p in projects.items {
     let mut team = p.expand.team.key
