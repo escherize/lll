@@ -1,3 +1,5 @@
+import "go:io/fs"
+import "go:github.com/escherize/lll/web"
 import "go:time"
 
 // Unit cover for TASK-219: the Access panel's mint used to send
@@ -39,4 +41,35 @@ fn a_minted_token_says_when_it_dies() {
   let flash = mint_expiry_event(at)
   assert flash.contains("expires 2027-01-15")
   assert flash.contains("flash-ok")
+}
+
+// LLL-446: the sections list is the URL segments, the template's dispatch
+// keys and the nav's rows, all one list. Three things drifting apart is
+// exactly how a nav row starts pointing at a 404, so pin them to each other.
+
+/// The text of the embedded settings.html — the same bytes render() parses.
+fn settings_template_text() -> string {
+  let data = fs.ReadFile(web.Assets(), "templates/settings.html").unwrap_or([])
+  data as string
+}
+
+#[test]
+fn every_section_has_a_template_and_a_nav_row() {
+  let tpl = settings_template_text()
+  for s in settings_sections() {
+    assert tpl.contains(f"{{{{define \"set-{s}\"}}}}")
+    assert tpl.contains(f"/settings/{s}\"")
+    assert tpl.contains(f"eq .Section \"{s}\"")
+  }
+}
+
+#[test]
+fn every_written_kind_redraws_its_own_section() {
+  // The write's reply patches #settings, so a kind that mapped to the wrong
+  // section would answer a label save with the members list.
+  for pair in [["team", "identity"], ["label", "labels"], ["project", "projects"], ["member", "members"]] {
+    let section = section_of(pair[0])
+    assert section == pair[1]
+    assert settings_sections().find(|s| s == section).is_some()
+  }
 }

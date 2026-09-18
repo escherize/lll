@@ -49,6 +49,30 @@ fn search_page(
     write_raw(w, search_raw(page))
     return
   }
+  // LLL-447: the ⌘K palette asks the same question from every page and shows
+  // the top few hits. Same engine, same team, same URL contract - only the
+  // frame differs, so the palette can never rank a result differently from
+  // the search page it hands off to.
+  //
+  // Plain HTML, NOT a datastar patch: the palette rides the rail, and the
+  // rail is on /issues, which deliberately loads no Datastar at all (a table
+  // needs no JavaScript, and a page that subscribed would be morphed into
+  // the unfiltered #board). A fragment only Datastar could apply would make
+  // the palette work on five pages out of six, silently. navigation.js puts
+  // this answer in #cmdk-results itself.
+  if query_param(r, "palette") == "1" {
+    let frag = match render("cmdk-results", page) {
+      Ok(h) => h,
+      Err(e) => {
+        http.Error(w, e, 500)
+        return
+      },
+    }
+    w.Header().Set("Cache-Control", "no-store")
+    w.Header().Set("Content-Type", "text/html; charset=utf-8")
+    let _ = w.Write(frag.bytes())
+    return
+  }
   if query_param(r, "fragment") == "1" {
     let frag = match render("search-update", page) {
       Ok(h) => h,
