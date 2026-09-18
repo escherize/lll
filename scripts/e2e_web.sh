@@ -1135,6 +1135,27 @@ if command -v playwright-cli >/dev/null 2>&1; then
   assert_contains "$restored_hide" "/t/ENG/" \
     "the hide restore does not rewrite the URL"
 
+  # LLL-451: the option rows one level into the filter menu are <a>, not the
+  # <button> the root menu uses, and only the button had a rule — so every
+  # option list rendered as raw underlined link-blue. The root menu looked
+  # fine, which is why nobody caught it. Assert the rows are styled, not that
+  # the CSS file contains a selector.
+  seq_goto "$WEB/"
+  playwright-cli -s="$BROWSER_SESSION" click ".flt-plus" >/dev/null 2>&1 \
+    || fail "playwright: opening the filter menu"
+  sleep 0.3
+  playwright-cli -s="$BROWSER_SESSION" eval \
+    "() => { const b = [...document.querySelectorAll('.flt-menu button')].find(x => x.textContent.trim() === 'Label'); if (b) b.click(); return !!b }" >/dev/null 2>&1 \
+    || fail "playwright: opening the Label options"
+  sleep 0.3
+  opt_style=$(playwright-cli -s="$BROWSER_SESSION" eval \
+    "() => { const m = [...document.querySelectorAll('.flt-menu')].find(x => x.offsetParent !== null); const a = m && m.querySelector('.flt-opt'); if (!a) return 'NO_OPTION'; const cs = getComputedStyle(a); return JSON.stringify({deco: cs.textDecorationLine, display: cs.display, color: cs.color}) }" \
+    | sed -n '/### Result/{n;p;}' | tr -d '\\')
+  assert_not_contains "$opt_style" "NO_OPTION" "the Label dimension lists its options"
+  assert_not_contains "$opt_style" "underline" "filter options are not raw underlined links"
+  assert_contains "$opt_style" '"display":"flex"' "filter options lay out as menu rows"
+  assert_not_contains "$opt_style" "rgb(0, 0, 238)" "filter options do not use the UA link colour"
+
   # The chip IS the undo: clicking it toggles its value out of the URL.
   seq_goto "$WEB/?assignee=e2e"
   playwright-cli -s="$BROWSER_SESSION" click ".flt-chip" >/dev/null 2>&1 \
