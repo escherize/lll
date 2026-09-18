@@ -1064,16 +1064,16 @@ fi
 assert_contains "$out" "no such member exists" "unmatched me is refused, not silently anonymous"
 assert_contains "$out" "lll member add" "the refusal names the fix"
 
-# TASK-317: the token decides. A member token whose member is not 'me' is
-# refused with both names, and the comment must not land.
-if out=$(LLL_URL=$URL LLL_TOKEN="$BRYAN_TOK" LLL_ME=carol "$LIN" issue comment ENG-7 -b "Wrong hat" 2>&1); then
-  fail "a token and a disagreeing 'me' should refuse, got: $out
-"
-fi
-assert_contains "$out" "this token is bryan's, but 'me' is set to 'carol'" "a disagreeing me is refused with both names"
-assert_contains "$out" "lll config set me bryan" "the refusal names the fix"
+# TASK-317: the token decides. LLL-445: it decides SILENTLY — a disagreeing
+# 'me' used to refuse the write, which only ever told the user what the write
+# would have done anyway, while locking anyone who switched tokens out until
+# they also edited a config file. The write lands, authored by the token.
+out=$(LLL_URL=$URL LLL_TOKEN="$BRYAN_TOK" LLL_ME=carol "$LIN" issue comment ENG-7 -b "Wrong hat" 2>&1) \
+  || fail "a token with a disagreeing 'me' must still write, got: $out"
 out=$(LLL_URL=$URL "$LIN" issue comment ENG-7)
-assert_not_contains "$out" "Wrong hat" "the refused comment did not land"
+assert_contains "$out" "Wrong hat" "the comment landed despite the disagreeing me"
+assert_contains "$out" "bryan" "it authored as the token's member"
+assert_not_contains "$out" "carol (just now)" "and not as the configured me"
 
 out=$(LLL_URL=$URL "$LIN" issue comment ENG-7)
 assert_contains "$out" "anon (just now)" "an unset-me comment renders as anon"
@@ -3277,7 +3277,7 @@ assert_contains "$out" 'ambiguous' 'ambiguous branch requires explicit ID'
 
 # Account switches preserve deliberate identity config but explain the mismatch.
 out=$(cd "$ORACLE_REPO" && env -u LLL_TOKEN -u LLL_ME HOME="$ORACLE_HOME" "$LLL_ABS" login --url "$URL" --email oracle-colleague@lll.test --password oracle-colleague-pass-123)
-assert_contains "$out" 'writes are refused until they agree' 'login explains retained identity mismatch'
+assert_contains "$out" 'writes author as oracle-colleague' 'login explains retained identity mismatch'
 assert_contains "$out" 'lll config set me oracle-colleague' 'login gives identity recovery'
 "$LIN" board url >"$DATA_DIR/board-stdout" 2>"$DATA_DIR/board-stderr" && fail 'board accepted an unknown subcommand'
 [ ! -s "$DATA_DIR/board-stdout" ] || fail 'command errors contaminate stdout'

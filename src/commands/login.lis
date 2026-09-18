@@ -643,7 +643,11 @@ fn login_identity_notice(me: string, authenticated: string, source: string, home
   } else if strings.HasPrefix(source, "file:") && source != f"file:{home}" {
     recovery = f"remove or change 'me' in {strings.TrimPrefix(source, "file:")}, then run '{recovery}'"
   }
-  f"note: authenticated as {authenticated}, but configured me is {me} ({source}); writes are refused until they agree. To use {authenticated}: {recovery}"
+  // LLL-445: this was "writes are refused until they agree". They are not,
+  // any more — the token names the author and 'me' no longer vetoes it. The
+  // note stays because a stale 'me' is still worth knowing about: it is what
+  // a superuser token falls back to for attribution.
+  f"note: authenticated as {authenticated}, but configured me is {me} ({source}); writes author as {authenticated}, not {me}. To make them agree: {recovery}"
 }
 
 /// Render a literal argument for the recovery command, including display names.
