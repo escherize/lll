@@ -8,6 +8,7 @@ import "go:net/http"
 import "go:os"
 import "go:strings"
 import "go:time"
+import "go:github.com/escherize/lll/gopb"
 
 import "config"
 
@@ -198,7 +199,7 @@ fn send_content_options(
         // A server refusal invalidates the earlier successful identity probe.
         // Member tokens are revoked by password changes; the board must renew
         // as its member even after it previously read an empty list (LLL-445).
-        let _ = os.Unsetenv("LLL_TOKEN_PROBED")
+        forget_probe()
         if let Some(refused) = refused_token(cfg, src, method, path, payload, content_type, stamp, key) {
           return refused
         }
@@ -358,6 +359,10 @@ struct ListMetadata {
 /// which meant every one of those agents got silence on their first command
 /// instead of the one word that would have sent them back to the file.
 fn token_verdict(base: string, tok: string) -> string {
+  // Empty independent reads may arrive together. Coalesce the cold probe,
+  // and check expiry after waiting rather than trusting an ageing answer.
+  gopb.LockTokenProbe()
+  defer gopb.UnlockTokenProbe()
   let parts = strings.Split(tok, ".")
   if parts.length() != 3 { return "opaque" }
   let Some(id) = token_subject(tok) else { return "corrupted" }
@@ -391,9 +396,10 @@ fn token_verdict(base: string, tok: string) -> string {
 /// (LLL-436). The comment above the empty-list check says it "costs one extra
 /// request"; it costs one per empty list.
 ///
-/// The answer cannot change for a given (server, token) pair during a run. A
-/// re-mint changes the token, which changes the key, so the cache invalidates
-/// itself rather than needing to be cleared.
+/// A re-mint changes the key. Expiry is checked locally on every call, and
+/// an explicit server 401 clears a successful probe after token revocation.
+/// token_verdict and forget_probe hold the Go adapter's process lock so a
+/// concurrent empty result cannot duplicate the check or race invalidation.
 ///
 /// Kept in the environment because package-level `let` is rejected by this
 /// compiler and LLL_REMINT / LLL_TOKEN already make the environment this
@@ -407,6 +413,12 @@ fn probe_remembered(base: string, tok: string) -> bool {
 
 fn remember_probe(base: string, tok: string) {
   let _ = os.Setenv("LLL_TOKEN_PROBED", probe_key(base, tok))
+}
+
+fn forget_probe() {
+  gopb.LockTokenProbe()
+  defer gopb.UnlockTokenProbe()
+  let _ = os.Unsetenv("LLL_TOKEN_PROBED")
 }
 
 fn probe_key(base: string, tok: string) -> string {

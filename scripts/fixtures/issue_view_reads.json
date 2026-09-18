@@ -1,0 +1,62 @@
+{
+  "empty/view": {
+    "code": 0,
+    "stdout": "VIEW-1 Read fixture\n\nState:     ○ todo\nPriority:  urgent\nAssignee:  viewer\nProject:   none\nLabels:    runtime\nAttachments:\n  fixture.txt\nEmoji:     🔧\nCreated:   <age>\nUpdated:   <age>\n\nA description.\nSecond line.\n",
+    "stderr": ""
+  },
+  "empty/raw": {
+    "code": 0,
+    "stdout": "# VIEW-1: Read fixture\n\nA description.\nSecond line.\n\n## Attachments\n- fixture.txt\n",
+    "stderr": ""
+  },
+  "empty/json": {
+    "code": 0,
+    "stdout": "{\"assignee\":\"member000000001\",\"attachments\":[\"fixture.txt\"],\"blocked_by\":[],\"claim\":null,\"comments\":[],\"created\":\"2020-01-02 12:30:00.000Z\",\"description\":\"A description.\\nSecond line.\",\"docs\":[],\"emoji\":\"\\ud83d\\udd27\",\"expand\":{\"team\":{\"id\":\"team00000000001\",\"key\":\"VIEW\"},\"assignee\":{\"id\":\"member000000001\",\"name\":\"viewer\",\"email\":\"viewer@fixture.invalid\"},\"labels\":[{\"id\":\"label000000001\",\"name\":\"runtime\"}]},\"findings\":[],\"future_field\":{\"exact_integer\":9007199254740993},\"id\":\"issue0000000001\",\"labels\":[\"label000000001\"],\"number\":1,\"priority\":1,\"state\":\"todo\",\"team\":\"team00000000001\",\"title\":\"Read fixture\",\"updated\":\"2020-01-02 12:30:00.000Z\"}\n",
+    "stderr": ""
+  },
+  "empty/json-raw": {
+    "code": 0,
+    "stdout": "{\"assignee\":\"member000000001\",\"attachments\":[\"fixture.txt\"],\"blocked_by\":[],\"claim\":null,\"comments\":[],\"created\":\"2020-01-02 12:30:00.000Z\",\"description\":\"A description.\\nSecond line.\",\"docs\":[],\"emoji\":\"\\ud83d\\udd27\",\"expand\":{\"team\":{\"id\":\"team00000000001\",\"key\":\"VIEW\"},\"assignee\":{\"id\":\"member000000001\",\"name\":\"viewer\",\"email\":\"viewer@fixture.invalid\"},\"labels\":[{\"id\":\"label000000001\",\"name\":\"runtime\"}]},\"findings\":[],\"future_field\":{\"exact_integer\":9007199254740993},\"id\":\"issue0000000001\",\"labels\":[\"label000000001\"],\"number\":1,\"priority\":1,\"state\":\"todo\",\"team\":\"team00000000001\",\"title\":\"Read fixture\",\"updated\":\"2020-01-02 12:30:00.000Z\"}\n",
+    "stderr": ""
+  },
+  "rich/view": {
+    "code": 0,
+    "stdout": "VIEW-1 Read fixture\n\nState:     ○ todo\nPriority:  urgent\nAssignee:  viewer\nClaimed:   viewer (<age>)\nProject:   none\nLabels:    runtime\nAttachments:\n  fixture.txt\nDocs:      linked\nBlocks:    VIEW-2\nEmoji:     🔧\nCreated:   <age>\nUpdated:   <age>\n\nA description.\nSecond line.\n\nRelated findings:\n\nruntime-note (runtime) — Runtime finding\n\nComments:\n\n#1 viewer (<age>)\n  A comment.\n",
+    "stderr": ""
+  },
+  "rich/raw": {
+    "code": 0,
+    "stdout": "# VIEW-1: Read fixture\n\nA description.\nSecond line.\n\n## Attachments\n- fixture.txt\n\n## Comments\n- **viewer** (2020-01-02 12:30 UTC): A comment.\n\n## Related findings\n\n- runtime-note (runtime): Runtime finding\n",
+    "stderr": ""
+  },
+  "rich/json": {
+    "code": 0,
+    "stdout": "{\"assignee\":\"member000000001\",\"attachments\":[\"fixture.txt\"],\"blocked_by\":[],\"claim\":{\"id\":\"claim000000001\",\"issue\":\"issue0000000001\",\"member\":\"member000000001\",\"created\":\"2020-01-02 12:30:00.000Z\",\"expand\":{\"member\":{\"id\":\"member000000001\",\"name\":\"viewer\",\"email\":\"viewer@fixture.invalid\",\"kind\":\"\"}}},\"comments\":[{\"id\":\"comment0000001\",\"issue\":\"issue0000000001\",\"author\":\"member000000001\",\"body\":\"A comment.\",\"created\":\"2020-01-02 12:30:00.000Z\",\"updated\":\"2020-01-02 12:30:00.000Z\",\"expand\":{\"author\":{\"id\":\"member000000001\",\"name\":\"viewer\",\"email\":\"viewer@fixture.invalid\",\"kind\":\"\"}}}],\"created\":\"2020-01-02 12:30:00.000Z\",\"description\":\"A description.\\nSecond line.\",\"docs\":[{\"id\":\"doc00000000001\",\"team\":\"team00000000001\",\"slug\":\"linked\",\"title\":\"Linked note\",\"kind\":\"wiki\",\"body\":\"Body \\u003cexample\\u003e\",\"area\":\"\",\"paths\":\"\",\"issues\":[\"issue0000000001\"],\"created\":\"2020-01-02 12:30:00.000Z\",\"updated\":\"2020-01-02 12:30:00.000Z\",\"confidence\":\"confirmed\",\"confidence_note\":\"\",\"expand\":{\"issues\":[]}}],\"emoji\":\"\\ud83d\\udd27\",\"expand\":{\"team\":{\"id\":\"team00000000001\",\"key\":\"VIEW\"},\"assignee\":{\"id\":\"member000000001\",\"name\":\"viewer\",\"email\":\"viewer@fixture.invalid\"},\"labels\":[{\"id\":\"label000000001\",\"name\":\"runtime\"}]},\"findings\":[{\"id\":\"find0000000001\",\"team\":\"team00000000001\",\"slug\":\"runtime-note\",\"title\":\"Runtime finding\",\"kind\":\"finding\",\"body\":\"Body \\u003cexample\\u003e\",\"area\":\"runtime\",\"paths\":\"\",\"issues\":[],\"created\":\"2020-01-02 12:30:00.000Z\",\"updated\":\"2020-01-02 12:30:00.000Z\",\"confidence\":\"confirmed\",\"confidence_note\":\"\",\"expand\":{\"issues\":[]}}],\"future_field\":{\"exact_integer\":9007199254740993},\"id\":\"issue0000000001\",\"labels\":[\"label000000001\"],\"number\":1,\"priority\":1,\"state\":\"todo\",\"team\":\"team00000000001\",\"title\":\"Read fixture\",\"updated\":\"2020-01-02 12:30:00.000Z\"}\n",
+    "stderr": ""
+  },
+  "rich/json-raw": {
+    "code": 0,
+    "stdout": "{\"assignee\":\"member000000001\",\"attachments\":[\"fixture.txt\"],\"blocked_by\":[],\"claim\":{\"id\":\"claim000000001\",\"issue\":\"issue0000000001\",\"member\":\"member000000001\",\"created\":\"2020-01-02 12:30:00.000Z\",\"expand\":{\"member\":{\"id\":\"member000000001\",\"name\":\"viewer\",\"email\":\"viewer@fixture.invalid\",\"kind\":\"\"}}},\"comments\":[{\"id\":\"comment0000001\",\"issue\":\"issue0000000001\",\"author\":\"member000000001\",\"body\":\"A comment.\",\"created\":\"2020-01-02 12:30:00.000Z\",\"updated\":\"2020-01-02 12:30:00.000Z\",\"expand\":{\"author\":{\"id\":\"member000000001\",\"name\":\"viewer\",\"email\":\"viewer@fixture.invalid\",\"kind\":\"\"}}}],\"created\":\"2020-01-02 12:30:00.000Z\",\"description\":\"A description.\\nSecond line.\",\"docs\":[{\"id\":\"doc00000000001\",\"team\":\"team00000000001\",\"slug\":\"linked\",\"title\":\"Linked note\",\"kind\":\"wiki\",\"body\":\"Body \\u003cexample\\u003e\",\"area\":\"\",\"paths\":\"\",\"issues\":[\"issue0000000001\"],\"created\":\"2020-01-02 12:30:00.000Z\",\"updated\":\"2020-01-02 12:30:00.000Z\",\"confidence\":\"confirmed\",\"confidence_note\":\"\",\"expand\":{\"issues\":[]}}],\"emoji\":\"\\ud83d\\udd27\",\"expand\":{\"team\":{\"id\":\"team00000000001\",\"key\":\"VIEW\"},\"assignee\":{\"id\":\"member000000001\",\"name\":\"viewer\",\"email\":\"viewer@fixture.invalid\"},\"labels\":[{\"id\":\"label000000001\",\"name\":\"runtime\"}]},\"findings\":[{\"id\":\"find0000000001\",\"team\":\"team00000000001\",\"slug\":\"runtime-note\",\"title\":\"Runtime finding\",\"kind\":\"finding\",\"body\":\"Body \\u003cexample\\u003e\",\"area\":\"runtime\",\"paths\":\"\",\"issues\":[],\"created\":\"2020-01-02 12:30:00.000Z\",\"updated\":\"2020-01-02 12:30:00.000Z\",\"confidence\":\"confirmed\",\"confidence_note\":\"\",\"expand\":{\"issues\":[]}}],\"future_field\":{\"exact_integer\":9007199254740993},\"id\":\"issue0000000001\",\"labels\":[\"label000000001\"],\"number\":1,\"priority\":1,\"state\":\"todo\",\"team\":\"team00000000001\",\"title\":\"Read fixture\",\"updated\":\"2020-01-02 12:30:00.000Z\"}\n",
+    "stderr": ""
+  },
+  "errors/view": {
+    "code": 1,
+    "stdout": "VIEW-1 Read fixture\n\nState:     ○ todo\nPriority:  urgent\nAssignee:  viewer\n",
+    "stderr": "Error: GET <server>/api/collections/claims/records?perPage=1&filter=issue%3D%27issue0000000001%27&expand=member: 503 Service Unavailable: {\"code\": 503, \"message\": \"failed claim\"}\n"
+  },
+  "errors/raw": {
+    "code": 1,
+    "stdout": "# VIEW-1: Read fixture\n\nA description.\nSecond line.\n",
+    "stderr": "Error: GET <server>/api/collections/comments/records?filter=issue%3D%27issue0000000001%27&sort=created,id&expand=author&perPage=200&page=1: 503 Service Unavailable: {\"code\": 503, \"message\": \"failed comments\"}\n"
+  },
+  "errors/json": {
+    "code": 1,
+    "stdout": "",
+    "stderr": "Error: GET <server>/api/collections/comments/records?filter=issue%3D%27issue0000000001%27&sort=created,id&expand=author&perPage=200&page=1: 503 Service Unavailable: {\"code\": 503, \"message\": \"failed comments\"}\n"
+  },
+  "errors/json-raw": {
+    "code": 1,
+    "stdout": "",
+    "stderr": "Error: GET <server>/api/collections/comments/records?filter=issue%3D%27issue0000000001%27&sort=created,id&expand=author&perPage=200&page=1: 503 Service Unavailable: {\"code\": 503, \"message\": \"failed comments\"}\n"
+  }
+}
