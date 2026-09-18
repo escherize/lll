@@ -88,8 +88,7 @@ fn send(method: string, path: string, payload: string) -> Result<(), string> {
   defer stream.Close()
   let body = match io.ReadAll(stream) {
     Partial.Ok(b) => b,
-    Partial.Both(b, _) => b,
-    Partial.Err(e) => return Err(f"{method} {path}: reading response: {e}"),
+    Partial.Both(_, e) | Partial.Err(e) => return Err(f"{method} {path}: reading response: {e}"),
   }
   // Status to stderr, body to stdout: a human sees both, a script pipes the
   // body to jq and reads the status from stderr when it wants it.
