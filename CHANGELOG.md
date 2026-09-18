@@ -4,6 +4,44 @@ All notable changes to lll. The format follows Keep a Changelog; versions
 follow SemVer, with 0.x meaning the CLI surface can still move between
 minors. Issue keys are on the project's own board (`lll issue view KEY`).
 
+## [0.4.0] - 2026-09-17
+
+Optimistic edits that hold at the server, and a first run that has something
+on it.
+
+### Added
+
+- `If-Unmodified-Since` on `PATCH /api/collections/issues/records/{id}`: pass
+  the `updated` stamp your read returned and the server answers 412 — without
+  applying the write — when the record has changed since, naming the stamp to
+  retry with. `lll issue update --if-unchanged-since` sends it, so an edit
+  can no longer land on a record someone changed between the CLI's read and
+  its write; the check used to run on the client, and the round trip was the
+  race. The header applies to the `issues` collection; without it a PATCH
+  behaves exactly as before (LLL-399).
+- `lll up --demo`: a first run with something on it — a seeded board that
+  teaches the tool and doubles as a rubric (LLL-433).
+- The board's /search reaches docs: findings and decisions get result rows
+  linking to their doc page, so the board answers "have we hit this before"
+  the way the CLI does (LLL-398).
+- A team can carry an emoji beside its key: `lll team set-emoji GLYPH` (or
+  the settings field), shown in the rail next to the accent, so a multi-team
+  board says which team you are reading at a glance (LLL-427).
+- The gate verifies `lll api --schema` against the migrations: a reference
+  that no longer matches what the server enforces fails CI naming the drifted
+  lines — it had described a schema nobody has through two releases, with
+  every gate green (LLL-435).
+- `lll skill get merge-gate`: a skill for the half after the pull request —
+  what to verify once CI is green, and how to land without eating anyone's
+  state (#100).
+
+### Changed
+
+- `issue update --if-unchanged-since` cannot be combined with `--assignee`:
+  assignment writes go through the claim route, which arbitrates with its own
+  claim stamp, and a precondition that silently stopped guarding would be
+  worse than none. Run them as two updates (LLL-399).
+
 ## [0.3.2] - 2026-09-16
 
 What a team is on a server that has more than one, and what happens to a
