@@ -1298,6 +1298,7 @@ for bot_help in --help -h; do
   assert_contains "$out" "lll bot rotate NAME" "bot rotation help names its invocation"
 done
 # --- lll search: full text over issues, comments and docs, ranked, with context (LLL-96) ---
+python3 "$REPO_ROOT"/scripts/test_search_team.py "$LLL_ABS"
 SKEY=$(env LLL_URL=$URL LLL_TEAM=ENG "$LIN" issue create -t "Rail favorites go stale" -d "First line of context.
 The zebra crossing is only mentioned in this description.
 Last line of context." | sed -n 's/^Created \([A-Z]*-[0-9]*\).*/\1/p')

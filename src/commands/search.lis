@@ -52,13 +52,13 @@ pub fn search_cmd(args: Slice<string>) -> Result<(), string> {
 }
 
 pub fn search_spec() -> Slice<flags.Flag> {
-  [
+  flags.with_team([
     flags.Flag { name: "--limit", alias: "-n", value: true, hint: "N", help: "at most N results (default 10)", .. },
     flags.Flag { name: "--issues", help: "issues and their comments only", .. },
     flags.Flag { name: "--docs", help: "docs only (wiki, findings, decisions)", .. },
     flags.Flag { name: "--json", help: "the ranked hits as JSON: group, kind, title, state, score, snippets", .. },
     flags.Flag { name: "--refresh", help: "drop the local corpus cache and fetch everything again", .. },
-  ]
+  ])
 }
 
 /// The PocketBase clause that admits a record containing ANY query term in
