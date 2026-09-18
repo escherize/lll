@@ -1,6 +1,6 @@
 [project]
 name = "lll"
-version = "0.3.2"
+version = "0.4.0"
 
 [dependencies.go]
 "github.com/BurntSushi/toml" = "v1.6.0"
