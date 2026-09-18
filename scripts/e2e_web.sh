@@ -1044,9 +1044,11 @@ if command -v playwright-cli >/dev/null 2>&1; then
     if (await toggle.getAttribute("aria-expanded") !== "false" || !await toggle.evaluate(el => el === document.activeElement)) throw new Error("navigation close focus");
     await toggle.click();
     await page.locator("#rail").getByRole("link", {name:"Board",exact:true}).click();
+    await page.waitForURL("**/");
     await page.setViewportSize({width:1440,height:900});
     await page.locator("#rail").waitFor({state:"visible"});
-    if (await toggle.isVisible()) throw new Error("mobile toggle visible on desktop");
+    // Navigation and responsive styles must settle before asserting desktop state.
+    await toggle.waitFor({state:"hidden"});
     return "phone navigation passed";
   }' 2>&1)
   assert_contains "$mobile_nav" 'phone navigation passed' "browser: phone navigation"
