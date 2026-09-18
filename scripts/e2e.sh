@@ -2613,6 +2613,13 @@ out=$(env -u LLL_TOKEN HOME="$E2E_HOME" LLL_URL=$URL "$LIN" whoami) \
   || fail "lll whoami exited nonzero: $out"
 assert_contains "$out" "e2e-agent@lll.test" "whoami names the member's email"
 assert_contains "$out" "$URL" "whoami names the server"
+# LLL-466: the subject of an administrator token belongs to _superusers,
+# so whoami must validate it there rather than report a missing member.
+WHOAMI_ADMIN=$(pb_superuser_token "$URL") || fail "minting whoami administrator token"
+out=$(LLL_TOKEN="$WHOAMI_ADMIN" LLL_URL=$URL "$LIN" whoami) || fail "whoami refused a valid administrator token: $out"
+assert_contains "$out" "superuser <admin@local.dev>" "whoami identifies administrator authentication"
+assert_contains "$out" "lll bot bot-NAME" "administrator whoami names the bot bootstrap command"
+assert_contains "$out" "$URL" "administrator whoami names the server"
 out=$(env -u LLL_TOKEN -u LLL_URL HOME="$DATA_DIR/nowhere" "$LIN" whoami 2>&1) \
   && fail "whoami without a token should fail"
 assert_contains "$out" "not logged in" "whoami with no token says so"
