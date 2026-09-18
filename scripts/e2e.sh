@@ -1322,6 +1322,14 @@ assert_contains "$out" "lll issue watch $WKEY --until TEXT" "a comment listing p
 
 python3 "$REPO_ROOT"/scripts/test_watch_until.py "$LLL_ABS" "$URL" "$WKEY"
 
+# LLL-464: bot help must succeed without a name, credentials or a server,
+# including rotation help. The unreachable endpoint makes any auth attempt fail.
+for bot_help in --help -h; do
+  out=$(env -u LLL_TOKEN -u LLL_ADMIN_EMAIL -u LLL_ADMIN_PASSWORD LLL_URL=http://127.0.0.1:1 "$LIN" bot "$bot_help") || fail "bot $bot_help refused help"
+  assert_contains "$out" "bot- prefix" "bot help explains its reserved member names"
+  out=$(env -u LLL_TOKEN -u LLL_ADMIN_EMAIL -u LLL_ADMIN_PASSWORD LLL_URL=http://127.0.0.1:1 "$LIN" bot rotate "$bot_help") || fail "bot rotate $bot_help refused help"
+  assert_contains "$out" "lll bot rotate NAME" "bot rotation help names its invocation"
+done
 # --- lll search: full text over issues, comments and docs, ranked, with context (LLL-96) ---
 SKEY=$(env LLL_URL=$URL LLL_TEAM=ENG "$LIN" issue create -t "Rail favorites go stale" -d "First line of context.
 The zebra crossing is only mentioned in this description.

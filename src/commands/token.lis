@@ -341,6 +341,10 @@ fn bot_create(args: Slice<string>) -> Result<(), string> {
   let spec = token_create_spec()
   let usage = flags.usage("lll bot", spec, "NAME")
   let p = flags.parse_n(spec, args, 2, 1, usage)?
+  if p.given("--help") {
+    fmt.Println(bot_page(false))
+    return Ok(())
+  }
   let name = strings.TrimSpace(p.first())
   if name == "" {
     return Err(f"usage: {usage}\n  NAME is the agent's member name, e.g. bot-myrepo — bot names are reserved to the bot- prefix")
@@ -374,6 +378,10 @@ fn bot_rotate(args: Slice<string>) -> Result<(), string> {
   let spec = token_create_spec()
   let usage = flags.usage("lll bot rotate", spec, "NAME")
   let p = flags.parse_n(spec, args, 3, 1, usage)?
+  if p.given("--help") {
+    fmt.Println(bot_page(true))
+    return Ok(())
+  }
   let name = strings.TrimSpace(p.first())
   if name == "" {
     return Err(f"usage: {usage}\n  NAME is the bot member's name, e.g. bot-myrepo")
@@ -383,6 +391,20 @@ fn bot_rotate(args: Slice<string>) -> Result<(), string> {
   let (tok, _) = bot_caller()?
   let duration = parse_token_duration(p.one("--duration"))?
   bot_mint(tok, name, duration)
+}
+
+fn bot_page(rotating: bool) -> string {
+  let command = if rotating { "lll bot rotate" } else { "lll bot" }
+  let spec = token_create_spec()
+  let description = if rotating {
+    "Rotate a bot's token; the previous token stops working. Requires the bot's owner or administrator credentials."
+  } else {
+    "Create a bot member and print its token once. An existing bot's token is rotated. Uses your member token or administrator credentials."
+  }
+  let see_rotate = if rotating { "" } else { "\nSee 'lll bot rotate --help' for token rotation." }
+  f"{command} - {description}\n\nUsage:\n  {flags.usage(command, spec, "NAME")}\n\nNAME must use the reserved bot- prefix, e.g. bot-myrepo."
+    + flags.section(spec)
+    + see_rotate
 }
 
 /// creates. Administrator credentials authenticate as the superuser, which
