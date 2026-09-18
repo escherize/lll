@@ -95,6 +95,8 @@ jobs:
           trap 'docker rm "$container" >/dev/null' EXIT
           docker cp "$container:/app/target/.lisette/bin/lll" "$RUNNER_TEMP/lll-linux"
           "$RUNNER_TEMP/lll-linux" --version
+      - name: Verify concurrent issue reads in the Linux artifact
+        run: python3 scripts/test_issue_view_reads.py "$RUNNER_TEMP/lll-linux"
       - name: Exercise the Linux artifact through the board and realtime browser suite
         run: bash scripts/e2e_web.sh --prebuilt "$RUNNER_TEMP/lll-linux" --require-browser
 
