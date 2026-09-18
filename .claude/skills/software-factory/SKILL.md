@@ -16,6 +16,7 @@ instead of the territory, and then it rots while the territory moves.
   1 intake      backlog-loop     which issue may I take?
   2 isolate     parallel-work    where do I work without colliding?
   3 build       (this codebase)  lisette-interop, datastar-fragments, pocketbase
+                                 codebase-skills builds this stage for a new repo
   4 verify      the gate         mise run gate, and the path the issue describes
   5 merge       merge-gate       land it, confirm it reached the artifact
   6 record      lll              the claim, the evidence, the decision
@@ -56,6 +57,11 @@ claim on the board that is the actual lock.
 
 Three skills, loaded only when the work touches their area. Do not read them
 speculatively; they are reference, not process.
+
+**This is the one stage that cannot be shipped**, because it is made of things
+that are only true here. A repo adopting this loop starts with an empty stage 3
+and builds its own: [codebase-skills](../codebase-skills/SKILL.md) is the
+interview that does it.
 
 - [lisette-interop](../lisette-interop/SKILL.md) - Lisette and Go crossing:
   text offsets, partial I/O, package-level state (there is none; the compiler
