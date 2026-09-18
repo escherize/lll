@@ -9,7 +9,7 @@ import "config"
 import "flags"
 import "pb"
 
-// `lll api METHOD PATH` — raw passthrough to the board's PocketBase API, the
+// `lll api METHOD PATH` — raw passthrough to the board's server API, the
 // documented escape hatch (LLL-408). Scripts and agents in other repos get
 // the board's whole REST surface without hand-rolling curl plus token
 // wiring: the request rides the same configured url and member token every
@@ -100,7 +100,7 @@ fn send(method: string, path: string, payload: string) -> Result<(), string> {
 
 fn print_api_usage() {
   fmt.Println(
-    "lll api - raw passthrough to the board's PocketBase API
+    "lll api - raw passthrough to the board's server API
 
 Usage:
   lll api METHOD PATH [--body TEXT]
@@ -117,7 +117,7 @@ shows the API as it answered.
   --schema       print the collection/field reference and exit
 
 Every collection is served at /api/collections/<name>/records with
-list/view/create/update/delete and PocketBase filter expressions, e.g.
+list/view/create/update/delete and server filter expressions, e.g.
 `lll api GET \"/api/collections/issues/records?filter=(state='todo')\"`.
 `lll api --schema` names every collection and field with the rules a member
 token answers to; regenerate it from the migrations with `mise run api-schema`.",

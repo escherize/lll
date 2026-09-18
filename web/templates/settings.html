@@ -181,7 +181,7 @@
 {{define "set-teams"}}<section class="set-sec" id="set-teams">
 <h2>Teams <span class="count">{{len .Teams}}</span></h2>
 <p class="set-scope">Every team on this server, archived ones included.</p>
-<p class="set-note">Archiving hides a team from the rail's switcher and default lists; its board stays readable at <code>/t/KEY/</code> and nothing is deleted. It asks for the admin password — the credentials <code>lll up</code> prints in its banner — verified per action and never stored. New teams come from <code>lll team create</code> or <code>lll attach</code>.</p>
+<p class="set-note">Archiving hides a team from the rail's switcher and default lists; its board stays readable at <code>/t/KEY/</code> and nothing is deleted. It asks for the admin password — the credentials supplied through the server’s <code>LLL_ADMIN_EMAIL</code> and <code>LLL_ADMIN_PASSWORD</code> — verified per action and never stored. New teams come from <code>lll team create</code> or <code>lll attach</code>.</p>
 <div class="set-rows">
 {{range .Teams}}<div id="set-team-{{.Id}}"><form class="set-row" data-name="{{.Key}}">
 <input type="hidden" name="id" value="{{.Id}}">
@@ -211,10 +211,10 @@
 {{define "set-access"}}<section class="set-sec" id="access">
 <h2>Access</h2>
 <p class="set-scope">Server-wide, and superuser-only.</p>
-<p class="set-note">Each action asks for the admin password — the credentials <code>lll up</code> prints in its banner — verified per action and never stored. The board token alone does not grant these.</p>
+<p class="set-note">Each action asks for the admin password — the credentials supplied through the server’s <code>LLL_ADMIN_EMAIL</code> and <code>LLL_ADMIN_PASSWORD</code> — verified per action and never stored. The board token alone does not grant these.</p>
 
 <h3 class="access-h">Agent token</h3>
-<p class="set-note">The web face of <code>lll token create</code>: a static PocketBase token that authenticates as the member. It is shown exactly once, below; tokens are stateless, so nothing can list them afterwards. Setting the member's password cuts old tokens off.</p>
+<p class="set-note">The web face of <code>lll token create</code>: a static member token that authenticates as the member. It is shown exactly once, below; tokens are stateless, so nothing can list them afterwards. Setting the member's password cuts old tokens off.</p>
 <form class="set-row set-new" id="access-token-form">
 <select name="member" aria-label="Member the token authenticates as">
 {{range .Members}}<option value="{{.Id}}">{{.Name}}</option>

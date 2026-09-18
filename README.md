@@ -43,25 +43,32 @@ directory without a checkout or a toolchain.
 
 ```sh
 mkdir my-board && cd my-board
-LLL_TEAM=DEMO lll up           # PocketBase (:8090) + web board (:8100)
+LLL_TEAM=DEMO lll up           # lll server (:8090) + web board (:8100)
 ```
 
 The first boot creates the team and writes `.lll.toml` in this directory.
-The banner prints the actual API endpoint, administrator credentials and board
-login URL. Taken ports auto-increment; Ctrl-C stops everything. Keep this shell
-running while using the CLI from another shell in the same directory.
+The banner prints the actual API endpoint and board login URL. Administrator
+credentials stay private. Taken ports auto-increment; Ctrl-C stops everything.
+Keep this shell running while using the CLI from another shell in the same directory.
 
-Create your member and authenticate using the administrator credentials printed
-at startup. A member password is separate from the administrator password.
-Use the banner's API endpoint for `--url` if PocketBase chose another port:
+Create your member using the administrator credentials supplied through
+`LLL_ADMIN_EMAIL` and `LLL_ADMIN_PASSWORD`. For a local boot with neither set,
+the fallback is `admin@local.dev` / `admin-local-123`. A member password is
+separate from the administrator password.
+Use the banner's API endpoint for `--url` if the server chose another port:
 
 ```sh
 lll login --create --email you@example.com --password '<member password>' \
-  --admin-email '<startup admin email>' --admin-password '<startup admin password>'
+  --admin-email '<admin email>' --admin-password '<admin password>'
 lll issue create "First issue" --priority 2 --emoji 🧪
 lll issue list
 lll board -w
 ```
+
+The administration UI at the board's `/_/` path returns 404 by default.
+Start with `lll up --admin-ui` to enable it and print its address; sign in with
+the server administrator credentials. This controls the board proxy; the
+separate API listener retains its own administration routes.
 
 For development from a checkout, install the Lisette toolchain and let mise
 provision Go and jq, then build and start the board:
@@ -217,7 +224,7 @@ set them as secrets):
 
 | Env | Meaning |
 |---|---|
-| `LLL_ADMIN_EMAIL` / `LLL_ADMIN_PASSWORD` | PocketBase superuser, upserted at boot (a logged default is used when unset) |
+| `LLL_ADMIN_EMAIL` / `LLL_ADMIN_PASSWORD` | Server administrator, upserted at boot (a local fallback is used when unset; credentials are never printed) |
 | `LLL_BIND` | Bind address for both ports (default `127.0.0.1`; `0.0.0.0` when hosting) |
 | `LLL_BOARD_TOKEN` | Pins the web board's access token; unset, each boot mints and prints a fresh one |
 

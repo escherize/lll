@@ -20,8 +20,8 @@ pub fn base_url() -> Result<string, string> {
 /// Connection-failure message that names the fix. Shared by every request
 /// path here and by the realtime client.
 pub fn unreachable(base: string, e: error) -> string {
-  f"cannot reach PocketBase at {base}: {e}
-is PocketBase running? start everything with 'lll up', or point LLL_URL (or 'url' in .lll.toml) at your server"
+  f"cannot reach the lll server at {base}: {e}
+is the lll server running? start everything with 'lll up', or point LLL_URL (or 'url' in .lll.toml) at your server"
 }
 
 /// unreachable(), plus — when the url that refused was nobody's choice but

@@ -51,7 +51,7 @@ pub fn token_commands() -> Slice<flags.Command> {
 /// Prose that belongs to the noun rather than to any one verb; dispatch
 /// prints it under the verb table for `lll token --help`.
 fn token_intro() -> string {
-  "Mints a long-lived, non-refreshable PocketBase token that authenticates as
+  "Mints a long-lived, non-refreshable auth token that authenticates as
 <member> - the agent credential, superuser-only. It lasts a year unless
 --duration says otherwise, and the expiry is printed with it. The token is
 printed once, when it is created; nothing else ever shows it. Use it as
@@ -168,11 +168,11 @@ fn impersonate_error(name: string, e: string) -> string {
   if status == 401 {
     return "the token this ran with was rejected (401) - most likely it expired
 mint a new one with 'lll token create', or set LLL_ADMIN_EMAIL/LLL_ADMIN_PASSWORD
-to the credentials 'lll up' prints"
+to this server's administrator credentials"
   }
   if status == 403 {
     return "token create is superuser-only and the configured token is not one
-set LLL_ADMIN_EMAIL/LLL_ADMIN_PASSWORD to the credentials 'lll up' prints"
+set LLL_ADMIN_EMAIL/LLL_ADMIN_PASSWORD to this server's administrator credentials"
   }
   f"impersonating {name}: {e}"
 }
@@ -253,8 +253,7 @@ fn superuser_auth() -> Result<string, string> {
   Err(
     "this command is superuser-only and nothing here can authenticate as one
 pass --admin-email and --admin-password, or set LLL_ADMIN_EMAIL/LLL_ADMIN_PASSWORD
-(the credentials 'lll up' prints, or whoever deployed the server set as
-secrets), or put a superuser token in LLL_TOKEN — and name the server with
+(the credentials used to start the server), or put a superuser token in LLL_TOKEN — and name the server with
 --url if it is not the configured one",
   )
 }
@@ -301,9 +300,9 @@ fn token_create_page() -> string {
 Usage:
   {usage}
 
-Authenticates as the PocketBase superuser — from --admin-email/--admin-password,
+Authenticates as the server administrator — from --admin-email/--admin-password,
 LLL_ADMIN_EMAIL/LLL_ADMIN_PASSWORD, or the configured token
-when it already is one — and asks PocketBase to impersonate <member>: a
+when it already is one — and asks the server to impersonate <member>: a
 non-refreshable token sent as LLL_TOKEN. It does expire. --duration sets the
 lifetime in seconds and defaults to one year; 0 hands the decision to the
 members collection's own duration (5 days out of the box).
@@ -510,7 +509,7 @@ the configured token does not own this bot — pass --admin-email/--admin-passwo
   if status == 401 {
     return "the token this ran with was rejected (401) - most likely it expired
 mint a new one with 'lll token create', or set LLL_ADMIN_EMAIL/LLL_ADMIN_PASSWORD
-to the credentials 'lll up' prints"
+to this server's administrator credentials"
   }
   f"rotating {name}'s token: {e}"
 }

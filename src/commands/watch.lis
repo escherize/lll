@@ -39,7 +39,7 @@ fn watch_spec() -> Slice<flags.Flag> {
       help: "stream only the ready agenda (LLL-395): open issues whose\nblockers are all done, computed client-side against the ready set\nfetched at startup and refreshed from each event; an empty agenda\nkeeps the stream alive until something becomes ready",
       ..,
     },
-    flags.Flag { name: "--json", help: "NDJSON: one raw PocketBase event object per line, with a\n\"topic\" field added", .. },
+    flags.Flag { name: "--json", help: "NDJSON: one raw server event object per line, with a\n\"topic\" field added", .. },
     flags.Flag { name: "--help", alias: "-h", hidden: true, help: "show this help", .. },
   ]...))
 }
@@ -134,7 +134,7 @@ one timestamped line per event, until interrupted:
 Updates are shown as field transitions (state, priority, title, assignee) by
 diffing against the last event seen for that record; a record's first update
 prints as 'changed'. Note: an update that moves a record out of the filter
-(e.g. state todo -> done under --state todo) emits nothing — PocketBase only
+(e.g. state todo -> done under --state todo) emits nothing — the server only
 delivers events for records matching the filter after the change.
 
 Startup is acknowledged on stderr as 'watch: ready' only after the server

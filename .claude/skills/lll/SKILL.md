@@ -226,7 +226,8 @@ It picks both ports by BINDING them (a liveness probe cannot tell a free port
 from a stranger's server), and runs on loopback with a fresh database, home
 and working directory. Inherited `LLL_*` settings are cleared except an
 explicit `LLL_TEAM`; the default team is SCRAT. The banner prints the board
-login URL, local admin credentials and isolated config path. CLI access to
+login URL and isolated config path. Administrator credentials are not printed;
+scratch uses `admin@local.dev` / `admin-local-123`. CLI access to
 this database needs its own local authentication; a hosted login token does
 not authenticate against the scratch database. The temporary directory is
 kept after shutdown; the banner shows the `rm -rf` to run when finished.
@@ -241,6 +242,8 @@ binary path and kills every sibling agent's server. Kill only PIDs you started.
 ## The board
 
 `lll up` runs PocketBase and the board together; `mise run dev` builds first.
-Board at :8100, PocketBase admin at :8090/_/. Changes made anywhere (CLI, web,
+Board at :8100; the administration UI on the board’s `/_/` path is disabled
+by default and requires `lll up --admin-ui`. The separate API listener at
+:8090 retains its own administration routes. Changes made anywhere (CLI, web,
 another agent) appear in every open browser without a reload, over one SSE
 stream, so the CLI and the board are never out of sync.

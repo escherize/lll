@@ -150,7 +150,7 @@ $1" || true
 # --- TASK-181: every collection rule is authenticated-only now --------------
 # PocketBase answers nothing useful to a tokenless request, so every suite
 # drives the server with a member token. pb_superuser_token is the admin API
-# (the credentials `lll up` prints and upserts); pb_member_token runs the
+# (the local fallback credentials `lll up` upserts); pb_member_token runs the
 # same auth-with-password round trip a human login does: find-or-create a
 # member whose password the suite knows, then exchange identity+password for
 # the member token the CLI itself sends as LLL_TOKEN.
