@@ -122,6 +122,13 @@ fn issue_create_spec() -> Slice<flags.Flag> {
     },
   ].append(filter_spec(FilterUse.Create)...).append([
     flags.Flag {
+      name: "--idempotency-key",
+      value: true,
+      hint: "key",
+      help: "retry the same creation with a stable key: reuse the issue, or refuse a changed payload\nscoped per team; requires a server supporting keyed creation",
+      ..,
+    },
+    flags.Flag {
       name: "--json",
       help: "raw PocketBase JSON (team, assignee, labels, project\nexpanded), pipe-friendly",
       ..,
@@ -631,6 +638,10 @@ fn create(input: flags.CommandInput) -> Result<(), string> {
   // "unknown flag: 'Hello'". -t stays the documented spelling, so no script
   // breaks; the positional is the guess that now lands.
   let p = input.parsed
+  let key = strings.TrimSpace(p.one("--idempotency-key"))
+  if p.given("--idempotency-key") && key == "" {
+    return Err("--idempotency-key must not be empty")
+  }
   let title = if p.one("-t") != "" { p.one("-t") } else { p.first() }
   if title == "" {
     return Err(f"no title — give it as the bare argument or with -t\n{usage}")
@@ -689,7 +700,21 @@ fn create(input: flags.CommandInput) -> Result<(), string> {
   } else {
     "/api/collections/issues/records"
   }
-  let body = pb.post(path, payload as string)?
+  let body = if key == "" {
+    pb.post(path, payload as string)?
+  } else {
+    let supported = pb.get("/api/lll/issues/idempotency").map_err(|e| {
+      if pb.response_status(e) == 404 {
+        "this server does not support --idempotency-key; upgrade the server before retrying this creation"
+      } else { e }
+    })?
+    let mut support = IdempotencySupport { .. }
+    if let Err(e) = json.Unmarshal(supported.bytes(), &support) {
+      return Err(f"decoding creation support: {e}")
+    }
+    if !support.supported { return Err("this server does not support --idempotency-key; upgrade the server before retrying this creation") }
+    pb.post_idempotent(path, payload as string, key)?
+  }
 
   let mut created = models.Issue { .. }
   if let Err(e) = json.Unmarshal(body.bytes(), &created) {
@@ -701,9 +726,20 @@ fn create(input: flags.CommandInput) -> Result<(), string> {
     fmt.Println(body)
     return Ok(())
   }
-  fmt.Println(f"Created {team.key}-{created.number}: {created.title}")
+  let mut reuse = CreationReuse { .. }
+  if let Err(e) = json.Unmarshal(body.bytes(), &reuse) {
+    return Err(f"decoding creation reuse: {e}")
+  }
+  let action = if reuse.reused { "Reused" } else { "Created" }
+  fmt.Println(f"{action} {team.key}-{created.number}: {created.title}")
   Ok(())
 }
+
+#[json]
+struct IdempotencySupport { supported: bool }
+
+#[json]
+struct CreationReuse { reused: bool }
 
 fn list(input: flags.CommandInput) -> Result<(), string> {
   let p = input.parsed
