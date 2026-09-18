@@ -1,0 +1,210 @@
+import "go:go.yaml.in/yaml/v3"
+import "go:strings"
+
+import "display"
+import "models"
+
+/// The delimiter line. Front matter is the text between the FIRST two of
+/// these; everything after the second is the body, verbatim. A description
+/// containing its own '---' is therefore safe: the split only ever looks at
+/// the opening pair.
+const FENCE: string = "---"
+
+/// The structured fields `issue view --raw` drops, carried in YAML so the
+/// mirror is greppable by a person and parsable by `yq` without lll.
+///
+/// `number` and `sort` are here because they round-trip: gopb's issueDefaults
+/// only allocates them when the incoming record leaves them at zero, so an
+/// import that supplies them reproduces the original identifiers exactly,
+/// gaps included. Without them ENG-7 could come back as ENG-5 and every
+/// cross-reference in every description would quietly point somewhere else.
+///
+/// Single-word keys on purpose: yaml.v3 lowercases a Go field name whole, so
+/// `work_branch` would land as `workbranch`. Nothing here needs two words.
+/// An issue's creation context, nested so the yaml keys stay single words
+/// (see the note on Front). These are historical facts about how the issue
+/// came to exist, so an import restores them rather than stamping the
+/// machine doing the restoring.
+#[yaml]
+pub struct OriginFront {
+  pub host: string,
+  pub cwd: string,
+  pub branch: string,
+  pub sha: string,
+  pub tool: string,
+}
+
+#[yaml]
+pub struct Front {
+  pub key: string,
+  pub number: int,
+  pub title: string,
+  pub state: string,
+  pub priority: string,
+  pub emoji: string,
+  pub assignee: string,
+  pub project: string,
+  pub labels: Slice<string>,
+  pub attachments: Slice<string>,
+  // LLL-175's dependency links, as KEYS for the same reason the doc's are:
+  // record ids mean nothing in another database, and numbers round-trip.
+  // Restored in a second pass, because ENG-3 can be blocked by ENG-7.
+  pub blocked: Slice<string>,
+  pub sort: float64,
+  // Provenance. `lll issue view --raw` prints these as a bullet list and the
+  // old bin/lll-export carried them into the mirror through it; dropping
+  // them here lost refs, which is how `lll import github` knows what it has
+  // already brought in. The gate caught it (scripts/test_provenance.py).
+  pub creator: string,
+  pub refs: string,
+  pub origin: OriginFront,
+  pub created: string,
+  pub updated: string,
+}
+
+/// The lookups front_of needs to write NAMES instead of record ids.
+///
+/// `members` is an explicit map rather than the record's own `expand`
+/// because expanding a relation into an auth collection is not reliably
+/// available to every caller: the same export that resolved `project` from
+/// its expansion left `creator` empty under the e2e harness's identity,
+/// where a superuser token had filled it. One members request is cheaper
+/// than a field that is silently blank for some callers and not others.
+pub struct Names {
+  pub issues: Map<string, string>,
+  pub members: Map<string, string>,
+}
+
+impl Names {
+  fn member(self, id: string) -> string {
+    self.members.get(id).unwrap_or("")
+  }
+}
+
+/// The front matter for an issue, as exported. Names, not ids: a mirror that
+/// carried record ids would only ever import back into the database it came
+/// from, and the point is that a person can read it.
+pub fn front_of(issue: models.Issue, names: Names) -> Front {
+  let mut blocked: Slice<string> = []
+  for id in issue.blocked_by {
+    if let Some(key) = names.issues.get(id) { blocked = blocked.append(key) }
+  }
+  Front {
+    key: f"{issue.expand.team.key}-{issue.number}",
+    number: issue.number,
+    title: issue.title,
+    state: issue.state,
+    priority: display.priority_name(issue.priority),
+    emoji: issue.emoji,
+    assignee: names.member(issue.assignee),
+    project: issue.expand.project.name,
+    labels: issue.expand.labels.map(|l| l.name),
+    attachments: issue.attachments,
+    blocked,
+    sort: issue.sort,
+    creator: names.member(issue.creator),
+    refs: issue.refs,
+    origin: OriginFront {
+      host: issue.origin.host,
+      cwd: issue.origin.cwd,
+      branch: issue.origin.branch,
+      sha: issue.origin.sha,
+      tool: issue.origin.tool,
+    },
+    created: issue.created,
+    updated: issue.updated,
+  }
+}
+
+/// A document's front matter. Separate from Front because a doc has no
+/// number, state or assignee, and carrying empty ones would put noise in
+/// every finding in the mirror.
+///
+/// `issues` holds issue KEYS, not record ids — which works only because
+/// numbers round-trip (see Front.number), so a restored doc re-links to the
+/// same issues it was filed against.
+#[yaml]
+pub struct DocFront {
+  pub slug: string,
+  pub title: string,
+  pub kind: string,
+  pub area: string,
+  pub paths: string,
+  pub confidence: string,
+  pub note: string,
+  pub issues: Slice<string>,
+  pub created: string,
+  pub updated: string,
+}
+
+/// Front matter + body, the file `lll export` writes and `lll import dir`
+/// reads. Byte-stable for a given input: nothing here reads the clock.
+pub fn render(front: Front, body: string) -> Result<string, string> {
+  let Ok(encoded) = yaml.Marshal(front) else {
+    return Err(f"encoding front matter for {front.key}")
+  }
+  let text = encoded as string
+  // Exactly one blank line between the fence and the body, and a trailing
+  // newline, so re-exporting unchanged input cannot produce a whitespace
+  // diff (AC2). yaml.Marshal already ends with a newline.
+  Ok(f"{FENCE}\n{text}{FENCE}\n\n{strings.TrimRight(body, "\n")}\n")
+}
+
+/// render, for a document.
+pub fn render_doc(front: DocFront, body: string) -> Result<string, string> {
+  let Ok(encoded) = yaml.Marshal(front) else {
+    return Err(f"encoding front matter for {front.slug}")
+  }
+  Ok(f"{FENCE}\n{encoded as string}{FENCE}\n\n{strings.TrimRight(body, "\n")}\n")
+}
+
+/// parse, for a document.
+pub fn parse_doc(text: string) -> Result<(DocFront, string), string> {
+  let (head, body) = split(text)?
+  let mut front = DocFront { .. }
+  if let Err(e) = yaml.Unmarshal(f"{head}\n".bytes(), &front) {
+    return Err(f"decoding front matter: {e}")
+  }
+  if front.slug == "" { return Err("front matter has no 'slug'") }
+  Ok((front, body))
+}
+
+/// The inverse of render. Returns the front matter and the body.
+///
+/// One thing is deliberately NOT preserved: trailing newlines on the body are
+/// normalized away, because render writes exactly one and byte-stability
+/// (AC2) matters more than a blank line nobody typed on purpose. Everything
+/// else survives, including a body that opens with a blank line — hence
+/// CutPrefix of the single separator rather than TrimLeft, which would eat it.
+pub fn parse(text: string) -> Result<(Front, string), string> {
+  let (head, body) = split(text)?
+  let mut front = Front { .. }
+  if let Err(e) = yaml.Unmarshal(f"{head}\n".bytes(), &front) {
+    return Err(f"decoding front matter: {e}")
+  }
+  if front.key == "" { return Err("front matter has no 'key'") }
+  Ok((front, body))
+}
+
+/// The fence handling both parsers share: front matter text, then the body
+/// with its one separating newline and any trailing ones removed.
+fn split(text: string) -> Result<(string, string), string> {
+  let normalized = strings.ReplaceAll(text, "\r\n", "\n")
+  let Some(rest) = strings.CutPrefix(normalized, f"{FENCE}\n") else {
+    return Err("not a mirror file: expected '---' on the first line")
+  }
+  let Some((head, body)) = cut(rest, f"\n{FENCE}\n") else {
+    return Err("unterminated front matter: expected a closing '---' line")
+  }
+  Ok((head, strings.TrimRight(strings.TrimPrefix(body, "\n"), "\n")))
+}
+
+/// strings.Cut, which Lisette cannot bind directly (two returns plus a bool).
+/// SplitN rather than Index + substring on purpose: index arithmetic mixes
+/// byte offsets with rune indices and panics on non-ASCII input, the trap
+/// records/key.lis already carries a comment about.
+fn cut(s: string, sep: string) -> Option<(string, string)> {
+  let parts = strings.SplitN(s, sep, 2)
+  if parts.length() < 2 { return None }
+  Some((parts[0], parts[1]))
+}

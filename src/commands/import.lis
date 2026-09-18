@@ -29,6 +29,14 @@ pub fn import_commands() -> Slice<flags.Command> {
       positional: "OWNER/REPO",
       run: import_github,
     },
+    flags.Command {
+      name: "dir",
+      summary: "rebuild the configured team from a directory 'lll export' wrote; refuses a team that already has issues unless --replace deletes them first",
+      page: "",
+      spec: dir_spec(),
+      positional: "DIR",
+      run: import_dir,
+    },
   ]
 }
 
@@ -91,6 +99,7 @@ fn import_github(input: flags.CommandInput) -> Result<(), string> {
       assignee: "",
       project: "",
       labels,
+      ..
     }
     let payload = match json.Marshal(new_issue) {
       Ok(p) => p,

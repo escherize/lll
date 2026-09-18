@@ -1,0 +1,202 @@
+import "go:fmt"
+import "go:net/url"
+import "go:os"
+import "go:io/fs"
+import "go:path/filepath"
+import "go:strings"
+
+import "attachments"
+import "display"
+import "flags"
+import "mirror"
+import "models"
+import "pb"
+import "query"
+import "records"
+
+/// `lll export DIR`: the team as a directory of Markdown a person can read
+/// and Git can diff.
+///
+/// This replaces bin/lll-export, which was a Python API client that spawned
+/// the CLI once per record — roughly three HTTP round trips per issue, each
+/// through a process. In here it is a handful of paginated fetches.
+///
+/// Most of that script was also ceremony to make a *directory* safely
+/// replaceable: a sha256 manifest, a two-phase rename with rollback, an
+/// flock. Under Git none of it is needed — `git status` reports an edit,
+/// `git checkout` undoes one, and the commit is the atomic unit. What is
+/// kept is the part Git cannot do: refusing to publish an incomplete read.
+pub fn export_cmd(args: Slice<string>) -> Result<(), string> {
+  let spec = export_spec()
+  let usage = flags.usage("lll export", spec, "[DIR]")
+  let p = flags.parse_n(spec, args, 2, 1, usage)?
+  let mut dir = p.first()
+  if dir == "" { dir = "mirror" }
+  let team = team_flag_or_current(p.one("--team"))?
+
+  let issues = records.fetch_full_issues(team.id)?
+  let docs = fetch_team_docs(team.id)?
+
+  if let Err(e) = os.MkdirAll(filepath.Join(dir, "issues"), 0o755 as fs.FileMode) {
+    return Err(f"creating {dir}/issues: {e}")
+  }
+  if let Err(e) = os.MkdirAll(filepath.Join(dir, "docs"), 0o755 as fs.FileMode) {
+    return Err(f"creating {dir}/docs: {e}")
+  }
+
+  // Issue KEYS, not record ids, for every relation that points at an issue —
+  // resolvable by an import because numbers round-trip.
+  let mut key_of = Map.new<string, string>()
+  for issue in issues { key_of[issue.id] = f"{team.key}-{issue.number}" }
+  let mut member_of = Map.new<string, string>()
+  for member in records.fetch_members()? { member_of[member.id] = member.name }
+  let names = mirror.Names { issues: key_of, members: member_of }
+
+  let mut blobs = 0
+  for issue in issues {
+    let key = f"{team.key}-{issue.number}"
+    let text = mirror.render(mirror.front_of(issue, names), issue.description)?
+    write_file(filepath.Join(dir, "issues", f"{key}.md"), text)?
+
+    // Comments go in their own file rather than under a heading in the
+    // issue's: a description may itself contain '## Comments', and an
+    // importer that had to find the boundary would silently truncate the
+    // first description that did. They are export-only — nothing can forge
+    // another member's authorship on the way back in.
+    let comments = records.fetch_comments(issue.id)?
+    if !comments.is_empty() {
+      write_file(
+        filepath.Join(dir, "issues", f"{key}.comments.md"),
+        render_comments(key, issue.title, comments),
+      )?
+    }
+
+    for name in issue.attachments {
+      let data = attachments.read_file(issue, name)?
+      let holder = filepath.Join(dir, "issues", key)
+      if let Err(e) = os.MkdirAll(holder, 0o755 as fs.FileMode) {
+        return Err(f"creating {holder}: {e}")
+      }
+      write_file(filepath.Join(holder, name), data)?
+      blobs += 1
+    }
+  }
+
+  for doc in docs {
+    let text = mirror.render_doc(doc_front(doc, names.issues), doc.body)?
+    write_file(filepath.Join(dir, "docs", f"{doc.slug}.md"), text)?
+  }
+  write_file(filepath.Join(dir, "README.md"), readme(team.key))?
+
+  fmt.Println(
+    f"{issues.length()} issues, {docs.length()} docs, {blobs} attachments -> {dir}",
+  )
+  Ok(())
+}
+
+pub fn export_spec() -> Slice<flags.Flag> {
+  flags.with_team([])
+}
+
+fn write_file(path: string, body: string) -> Result<(), string> {
+  if let Err(e) = os.WriteFile(path, body.bytes(), 0o644 as fs.FileMode) {
+    return Err(f"writing {path}: {e}")
+  }
+  Ok(())
+}
+
+/// models.DocList carries only `items`; the walk needs the envelope's totals
+/// to tell a last page from a truncated one, the same shape records/issues
+/// declares for the board.
+#[json]
+struct DocPage {
+  items: Slice<models.Doc>,
+  #[json("totalItems")]
+  total_items: int,
+  #[json("totalPages")]
+  total_pages: int,
+}
+
+/// Every doc on the team, walked to completion. Same refusal as the board
+/// walk: a page that disagrees with the first one's totals means the set
+/// moved underneath, and half a mirror is worse than none.
+fn fetch_team_docs(team_id: string) -> Result<Slice<models.Doc>, string> {
+  let filter = url.QueryEscape(f"team={query.quote(team_id)}")
+  let mut result: Slice<models.Doc> = []
+  let mut expected = -1
+  let mut page = 1
+  loop {
+    let mut batch = DocPage { .. }
+    pb.fetch(
+      f"/api/collections/docs/records?filter={filter}&sort=slug,id&perPage=200&page={page}",
+      "docs",
+      &batch,
+    )?
+    if page == 1 { expected = batch.total_items }
+    if batch.total_items != expected {
+      return Err("the document set changed while exporting; run the export again")
+    }
+    for doc in batch.items { result = result.append(doc) }
+    if page >= batch.total_pages { break }
+    page += 1
+  }
+  if result.length() != expected {
+    return Err("the document response was incomplete; run the export again")
+  }
+  Ok(result)
+}
+
+/// Comments as a sidecar file. Absolute timestamps (LLL-453) so re-exporting
+/// an unchanged comment cannot produce a diff.
+fn render_comments(
+  key: string,
+  title: string,
+  comments: Slice<models.Comment>,
+) -> string {
+  let mut lines = [f"# {key}: {title} — comments", ""]
+  for cm in comments {
+    let mut author = cm.expand.author.name
+    if author == "" { author = "ghost" }
+    lines = lines.append(f"## {author} ({display.absolute(cm.created)})")
+    lines = lines.append("")
+    lines = lines.append(strings.TrimRight(cm.body, "\n"))
+    lines = lines.append("")
+  }
+  strings.Join(lines, "\n")
+}
+
+fn doc_front(doc: models.Doc, key_of: Map<string, string>) -> mirror.DocFront {
+  let mut keys: Slice<string> = []
+  for id in doc.issues {
+    if let Some(key) = key_of.get(id) { keys = keys.append(key) }
+  }
+  mirror.DocFront {
+    slug: doc.slug,
+    title: doc.title,
+    kind: doc.kind,
+    area: doc.area,
+    paths: doc.paths,
+    confidence: doc.confidence,
+    note: doc.confidence_note,
+    issues: keys,
+    created: doc.created,
+    updated: doc.updated,
+  }
+}
+
+fn readme(team_key: string) -> string {
+  f"# {team_key} — exported mirror
+
+Generated by `lll export`. One file per issue under `issues/`, one per
+document under `docs/`, attachment bytes beside the issue that owns them.
+
+This is a projection, not the tracker. Editing a file here changes nothing
+until someone runs `lll import dir`, and that command refuses a team that
+already has issues unless it is told to replace them. It is not a database
+backup either: it carries no record ids and no member accounts.
+
+- `issues/KEY-N.md` — front matter plus the description; this is what imports
+- `issues/KEY-N.comments.md` — export only, because authorship cannot be forged
+- `issues/KEY-N/` — attachment bytes, when the issue has any
+"
+}

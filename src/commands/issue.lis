@@ -670,6 +670,7 @@ fn create(input: flags.CommandInput) -> Result<(), string> {
     assignee,
     project,
     labels,
+    ..
   }
   let payload = match json.Marshal(new_issue) {
     Ok(p) => p,
