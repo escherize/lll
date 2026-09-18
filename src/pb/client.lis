@@ -369,6 +369,20 @@ fn probe_key(base: string, tok: string) -> string {
   hex.EncodeToString(sum.to_slice())
 }
 
+/// Whether `tok` authenticates against `base` right now. For a caller that
+/// holds BETTER credentials and only wants to know whether to bother with
+/// this one - `lll up`, which owns the superuser pair (LLL-443). Everything
+/// else wants `refused_token`'s verdict, which names WHY and can re-mint.
+///
+/// An opaque token counts as usable, matching the policy in `token_verdict`:
+/// a credential this client cannot model is left alone rather than accused,
+/// so an unreadable-but-working token is not silently traded for another.
+pub fn token_usable(base: string, tok: string) -> bool {
+  if tok == "" { return false }
+  let verdict = token_verdict(base, tok)
+  verdict == "valid" || verdict == "opaque"
+}
+
 /// The record id a PocketBase auth JWT names, from its payload. None when the
 /// token is not three base64url segments carrying an `id`, which is not a
 /// judgement about validity - a token this cannot read is left alone.

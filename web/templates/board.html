@@ -151,15 +151,26 @@ provenance.
      from the workspace catalogue, not the rendered cards), so a filter that
      matches nothing still renders its chip with a count of 0 and the bar
      says so out loud (TASK-116). */}}
-{{define "filterbar"}}<div class="filterbar" data-signals:flt="{{.FltSeed}}" data-signals:fltmenu="''" data-signals:sv="false" data-effect="localStorage.setItem('lllView', location.search)">
-<div class="flt-add" data-on:click__outside="$fltmenu = ''">
-  <button type="button" class="flt-plus" data-on:click="$fltmenu = $fltmenu ? '' : 'root'"><svg width="10" height="10" viewBox="0 0 10 10" aria-hidden="true"><path d="M5 1.2 V8.8 M1.2 5 H8.8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg> Filter</button>
+{{/* $fltq is the menu's type-to-filter query and $fltq_lc its folded form,
+     computed once here rather than per option. Every assignment to $fltmenu
+     clears $fltq, because a query that outlived its menu comes back next time
+     hiding every option, which reads as an empty menu, not a stale filter. */}}
+{{define "filterbar"}}<div class="filterbar" data-signals:flt="{{.FltSeed}}" data-signals:fltmenu="''" data-signals:fltq="''" data-computed:fltq_lc="$fltq.trim().toLowerCase()" data-signals:sv="false" data-effect="localStorage.setItem('lllView', location.search)">
+<div class="flt-add" data-on:click__outside="$fltmenu = ''; $fltq = ''">
+  <button type="button" class="flt-plus" data-on:click="$fltmenu = $fltmenu ? '' : 'root'; $fltq = ''"><svg width="10" height="10" viewBox="0 0 10 10" aria-hidden="true"><path d="M5 1.2 V8.8 M1.2 5 H8.8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg> Filter</button>
   <div class="flt-menu" style="display:none" data-show="$fltmenu === 'root'">
-  {{range .FilterGroups}}<button type="button" data-on:click="$fltmenu = '{{.Dim}}'">{{.Label}}</button>
+  {{range .FilterGroups}}<button type="button" data-on:click="$fltmenu = '{{.Dim}}'; $fltq = ''">{{.Label}}</button>
   {{end}}</div>
+  {{/* Long dimensions get a search box. State and Priority have four options
+       and would only be wearing one. The options scroll inside .flt-opts so
+       the box stays put. data-n carries the searchable text so filtering never
+       interpolates a label into a JS string literal, which a label containing
+       an apostrophe would break; attribute escaping handles the dataset. */}}
   {{range $g := .FilterGroups}}<div class="flt-menu" style="display:none" data-show="$fltmenu === '{{$g.Dim}}'">
-  {{range $g.Opts}}<a class="flt-opt{{if .Active}} on{{end}}" href="{{.Href}}" data-on:click="$fltmenu = ''"><span class="dim">{{$g.Label}}</span> {{.Label}} <span class="count">{{.Count}}</span></a>
-  {{end}}</div>
+  {{if gt (len $g.Opts) 8}}<span class="flt-search"><svg width="13" height="13" aria-hidden="true"><use href="#ic-search"/></svg><input type="text" placeholder="Filter" autocomplete="off" aria-label="Filter {{$g.Label}} options" data-bind:fltq data-effect="$fltmenu === '{{$g.Dim}}' && setTimeout(() => el.focus(), 0)" data-on:keydown="evt.key === 'Escape' && ($fltmenu = '', $fltq = '')"></span>
+  {{end}}<div class="flt-opts">
+  {{range $g.Opts}}<a class="flt-opt{{if .Active}} on{{end}}" href="{{.Href}}" data-n="{{.Label}}" data-show="!$fltq_lc || el.dataset.n.toLowerCase().includes($fltq_lc)" data-on:click="$fltmenu = ''; $fltq = ''"><span class="dim">{{$g.Label}}</span> {{.Label}} <span class="count">{{.Count}}</span></a>
+  {{end}}</div></div>
   {{end}}</div>
 {{range $g := .FilterGroups}}{{range $g.Opts}}{{if .Active}}<a class="flt-chip" href="{{.Href}}" data-on:click="localStorage.removeItem('lllView')"><span class="dim">{{$g.Label}}</span> {{.Label}} <svg width="8" height="8" viewBox="0 0 8 8" aria-hidden="true"><path d="M1.5 1.5 L6.5 6.5 M6.5 1.5 L1.5 6.5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg></a>
 {{end}}{{end}}{{end}}{{if .NoMatch}}<span class="flt-none">No issues match these filters.</span>{{end}}

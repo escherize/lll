@@ -5,6 +5,9 @@ description: Land work that is already in a pull request - merge it, confirm it 
 
 # The half after the pull request
 
+> One stage of the loop in [software-factory](../software-factory/SKILL.md), which maps all six
+> and says what hands to what.
+
 Every other skill here ends at "open the PR". That is the wrong place to stop.
 
 The stage that decides whether a pile of agents is a software factory or a pull
@@ -30,7 +33,8 @@ gh pr view N --json statusCheckRollup,mergeable,mergeStateStatus
 merge commit. That is not a conflict. Read it again before concluding anything.
 
 **A red check is not automatically your fault, and not automatically a flake.**
-Classify it: see [ci-watch](../ci-watch/SKILL.md) if it is installed, or the
+Classify it: see the `ci-watch` skill if it is installed (it is a global
+skill, not one of this repo's, so there is no link to it here), or the
 short version - find which STEP failed. A failure asserting something your diff
 could not have caused is a strong infrastructure signal. A failure naming your
 own change is not. Never rerun a real failure hoping it passes.

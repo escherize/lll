@@ -20,13 +20,74 @@
 <a href="{{.BoardBase}}issues"{{if eq .Active "issues"}} class="active"{{end}}><svg width="14" height="14"><use href="#ic-issues"/></svg> All issues</a>
 {{if .Me}}<a href="{{.BoardBase}}?assignee={{.Me}}" title="Issues assigned to {{.Me}}"{{if eq .Active "mine"}} class="active"{{end}}><svg width="14" height="14"><use href="#ic-me"/></svg> My issues</a>
 {{end}}<a href="{{.BoardBase}}projects"{{if eq .Active "projects"}} class="active"{{end}}><svg width="14" height="14"><use href="#ic-project"/></svg> Projects</a>
-<a href="{{.BoardBase}}search"{{if eq .Active "search"}} class="active"{{end}}><svg width="14" height="14"><use href="#ic-search"/></svg> Search</a>
+<a href="{{.BoardBase}}search"{{if eq .Active "search"}} class="active"{{end}}><svg width="14" height="14"><use href="#ic-search"/></svg> Search{{/* The palette's only advertisement. A shortcut nobody is told about is a shortcut nobody uses. */}}<kbd class="rail-kbd" title="Open the jump palette: Cmd+K, or Ctrl+K">⌘K</kbd></a>
 {{template "rail-teams" .Teams}}
 {{template "rail-favorites" .Favorites}}
 {{template "rail-views" .Views}}
 <a href="{{.BoardBase}}settings"{{if eq .Active "settings"}} class="active"{{end}}><svg width="14" height="14"><use href="#ic-settings"/></svg> Settings</a>
 <div class="rail-foot">v{{.Version}}</div>
-</nav>{{end}}
+</nav>
+{{template "cmdk" .}}{{end}}
+
+{{/* LLL-447: the ⌘K palette. It lives in the rail's own template because
+     the rail is the one thing every page includes, so the palette arrives
+     on every page without seven templates having to remember it.
+
+     It asks the SAME handler the search page asks (?palette=1), so a result
+     here and a result there are ranked by one engine. It opens no /events
+     connection: the bridge broadcasts one unfiltered #board to every
+     board-scoped client, and a server-filtered list must never be a client
+     it can reach - the only stream this ever holds is the one-shot answer to
+     its own @get.
+
+     The Go to rows are rendered here, complete, and filtered in the browser:
+     they are the destinations this page already knows, so asking the server
+     for them would be a round trip to learn what the rail already says.
+
+     Keyboard handling is navigation.js, which every page already loads. With
+     no JavaScript the dialog never opens and the rail still goes everywhere
+     it goes. */}}
+{{define "cmdk"}}<dialog id="cmdk" class="cmdk" aria-label="Jump to">
+<div class="cmdk-bar">
+<svg width="14" height="14" aria-hidden="true"><use href="#ic-search"/></svg>
+{{/* data-cmdk-search is where navigation.js asks; no Datastar attribute
+     here on purpose, since /issues loads no Datastar and the palette has to
+     work the same on every page. */}}
+<input id="cmdk-q" type="text" autocomplete="off" placeholder="Jump to an issue, doc or team" aria-label="Jump to an issue, doc or team" data-cmdk-search="{{.BoardBase}}search?palette=1">
+<kbd class="cmdk-esc">esc</kbd>
+</div>
+<div class="cmdk-body">
+{{/* The search half. Empty until something is typed, and replaced wholesale
+     by the handler's patch - the id is the contract. */}}
+<div id="cmdk-results" class="cmdk-group"></div>
+<div id="cmdk-goto" class="cmdk-group">
+<h3>Go to</h3>
+<a data-cmdk-item href="{{.BoardBase}}"><span class="cmdk-kind">board</span>{{if .TeamKey}}{{.TeamKey}} board{{else}}Board{{end}}</a>
+<a data-cmdk-item href="{{.BoardBase}}issues"><span class="cmdk-kind">list</span>All issues</a>
+{{if .Me}}<a data-cmdk-item href="{{.BoardBase}}?assignee={{.Me}}"><span class="cmdk-kind">list</span>My issues</a>
+{{end}}<a data-cmdk-item href="{{.BoardBase}}projects"><span class="cmdk-kind">list</span>Projects</a>
+<a data-cmdk-item href="{{.BoardBase}}search"><span class="cmdk-kind">page</span>Search every field</a>
+<a data-cmdk-item href="{{.BoardBase}}settings/identity"><span class="cmdk-kind">settings</span>Identity, emoji and accent</a>
+<a data-cmdk-item href="{{.BoardBase}}settings/labels"><span class="cmdk-kind">settings</span>Labels</a>
+<a data-cmdk-item href="{{.BoardBase}}settings/projects"><span class="cmdk-kind">settings</span>Projects settings</a>
+<a data-cmdk-item href="{{.BoardBase}}settings/teams"><span class="cmdk-kind">settings</span>Teams</a>
+<a data-cmdk-item href="{{.BoardBase}}settings/members"><span class="cmdk-kind">settings</span>Members</a>
+<a data-cmdk-item href="{{.BoardBase}}settings/access"><span class="cmdk-kind">settings</span>Access, tokens and sign-in</a>
+{{range .Teams}}<a data-cmdk-item href="{{.Href}}"><span class="cmdk-kind">team</span>{{if .Emoji}}{{.Emoji}} {{end}}{{.Key}} · {{.Name}}</a>
+{{end}}</div>
+<p id="cmdk-none" class="cmdk-none" hidden>Nothing matches. Enter searches every field.</p>
+</div>
+</dialog>{{end}}
+
+{{/* The palette's search half, patched in by the ?palette=1 answer. A doc
+     and an issue are one list here: both are places to land. */}}
+{{define "cmdk-results"}}<div id="cmdk-results" class="cmdk-group">
+{{if .Q}}{{if .Results}}<h3>Issues and docs</h3>
+{{range $i, $h := .Results}}{{if lt $i 8}}{{if $h.Doc.Slug}}<a data-cmdk-item href="{{$h.Doc.Url}}"><span class="cmdk-kind">doc</span>{{$h.Doc.Title}}</a>
+{{else}}<a data-cmdk-item href="/issue/{{$h.Card.Key}}"><span class="cmdk-kind">{{$h.Card.Key}}</span>{{if $h.Card.Emoji}}{{$h.Card.Emoji}} {{end}}{{$h.Card.Title}}</a>
+{{end}}{{end}}{{end}}
+{{else}}<p class="cmdk-empty">No issue or doc in {{.TeamKey}} matches <b>{{.Q}}</b>.</p>
+{{end}}{{end}}</div>{{end}}
 
 {{/* The shell's other half: what every page wears in its <head>.
 

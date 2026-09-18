@@ -169,10 +169,32 @@ check 'lll config --list', or pin a local url: LLL_URL=http://127.0.0.1:8090 lll
   // The board's BROWSER side is gated separately (serve_gate.lis): a board
   // token admits a browser, but web writes still author as this process's
   // identity until browser sessions exist (TASK-182's ADR).
+  //
+  // LLL-443: "a caller-provided token wins" used to mean a token that merely
+  // EXISTS wins, so a home config holding a token for another server (the
+  // hosted board, say) aborted a local boot that was holding working superuser
+  // credentials the whole time — and the abort said to run `lll login`, which
+  // needs the server this boot was refusing to start. The member token is an
+  // optimisation here (it decides who the board's writes author as), never a
+  // requirement: absent OR unusable, fall through to the superuser.
+  // The fallback must never make a boot WORSE than it was: a configured token
+  // that this cannot verify is still the credential the caller chose, and an
+  // unreachable superuser is not a reason to refuse a boot that used to work.
+  // So an unusable token only LOSES to a superuser pair that actually
+  // authenticates; when neither works, the token stays and whatever it does
+  // next reports honestly. (Caught by the gate: an e2e boot reusing a running
+  // PocketBase has a valid member token and default admin creds that do not
+  // match that server, and refusing it was a regression this change caused.)
   let mut refresh: Option<fn() -> Result<string, string>> = None
-  if cfg.token == "" {
+  let mut using_token = cfg.token != "" && pb.token_usable(db_url, cfg.token)
+  if !using_token {
     match superuser_token(db_url, email, pass) {
       Ok(tok) => {
+        if cfg.token != "" {
+          fmt.Println(
+            f"auth   the token from {src.token} is not valid for {db_url} — booting on the superuser credentials instead; 'lll login' once the board is up replaces it",
+          )
+        }
         let _ = os.Setenv("LLL_TOKEN", tok)
         // Only this process may re-mint a refused token silently (TASK-323):
         // a CLI holding the admin pair used to re-mint too, and whoami then
@@ -184,15 +206,19 @@ check 'lll config --list', or pin a local url: LLL_URL=http://127.0.0.1:8090 lll
         )
       },
       Err(e) => {
-        return Err(
-          f"could not authenticate as the PocketBase superuser at {db_url}: {e}
+        if cfg.token == "" {
+          return Err(
+            f"could not authenticate as the PocketBase superuser at {db_url}: {e}
 collection rules now refuse unauthenticated requests, so the boot cannot even
 create its team. Point LLL_ADMIN_EMAIL/LLL_ADMIN_PASSWORD at this server's
-superuser credentials, or set LLL_TOKEN to a member token.",
-        )
+superuser credentials, or set LLL_TOKEN to a member token valid for this server.",
+          )
+        }
+        using_token = true
       },
     }
   }
+  let member_token_ok = using_token
 
   // The in-process board (and its PB client) must talk to the db we chose.
   let _ = os.Setenv("LLL_URL", db_url)
@@ -213,10 +239,10 @@ superuser credentials, or set LLL_TOKEN to a member token.",
   let team = match ensure_team(want_team, src.team, throwaway) {
     Ok(team) => team,
     Err(e) => {
-      let credential = if cfg.token == "" {
-        "superuser token generated for this startup"
-      } else {
+      let credential = if member_token_ok {
         f"token from {src.token}"
+      } else {
+        "superuser token generated for this startup"
       }
       return Err(f"{e}\nstartup credential: {credential}")
     },
@@ -237,7 +263,15 @@ superuser credentials, or set LLL_TOKEN to a member token.",
   let board_url = f"http://127.0.0.1:{chosen}"
   let _ = set_home_key("web_url", board_url)?
   if open {
-    if let Err(e) = open_url(board_url) {
+    // Open the LOGIN url, not the bare one (LLL-444). Opening the bare url
+    // landed the user on the gate's 401 page and sent them back to the
+    // terminal to copy a token by hand — the whole of "i just want my
+    // localhost, it's me, let me in". The gate sets the cookie and redirects
+    // to the clean url, so the token never lingers in the address bar.
+    // resolve_board_token pins its answer into the environment, so the
+    // run_server below resolves the same token rather than a second one.
+    let login_url = f"{board_url}/?board_token={resolve_board_token()}"
+    if let Err(e) = open_url(login_url) {
       fmt.Println(f"could not open a browser: {e}")
     }
   }

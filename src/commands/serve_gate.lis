@@ -99,9 +99,16 @@ fn set_board_cookie(w: http.ResponseWriter, tok: string) {
     Path: "/",
     HttpOnly: true,
     MaxAge: 7 * 24 * 3600,
+    // Stated, not inherited. Lax is what a zero SameSite already got from
+    // browsers, but it is load-bearing rather than incidental: the board
+    // serves POST writes (state, priority, title, attachments, and the
+    // token-minting route under /settings/access), and Lax is what keeps a
+    // page the user happens to be visiting from POSTing to their board on
+    // 127.0.0.1 with the cookie attached. A security property should not
+    // rest on a default that a browser is free to change.
+    SameSite: http.SameSiteLaxMode,
     ..,
   }
-  // SameSite zero-fills to the default, which browsers treat as Lax.
   http.SetCookie(w, &cookie)
 }
 

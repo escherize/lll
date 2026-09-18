@@ -5,6 +5,10 @@
 Use the hosted team `LLL` configured in `.lll.toml`. The `.private/` sidecar
 is archived, read-only history; new work belongs in lll.
 
+New here, or not sure which skill applies? Read
+[.claude/skills/software-factory/SKILL.md](.claude/skills/software-factory/SKILL.md).
+It maps the six stages work moves through and says which skill owns each one.
+
 Before starting, read [.claude/skills/lll/SKILL.md](.claude/skills/lll/SKILL.md).
 It is the shared source for tracking, token identity, recording findings,
 verification and the claim-before-code workflow. Read an issue fully, claim
@@ -31,9 +35,10 @@ it before nontrivial work, record discoveries, and close it after verification.
   the artifact people install, release ordering, and closing honestly — read
   [.claude/skills/merge-gate/SKILL.md](.claude/skills/merge-gate/SKILL.md).
 
-The `lll`, `backlog-loop` and `merge-gate` skills also ship inside the binary,
-so an agent working from another repo can read them without this checkout:
-`lll skill list`, `lll skill get lll`.
+The `software-factory`, `lll`, `backlog-loop`, `merge-gate` and
+`codebase-skills` skills also ship inside the binary, so an agent working from
+another repo can read them without this checkout: `lll skill list`,
+`lll skill get software-factory`.
 
 # Lisette
 

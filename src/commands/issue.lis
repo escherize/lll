@@ -867,8 +867,11 @@ fn view(input: flags.CommandInput) -> Result<(), string> {
       for cm in comments {
         let mut author = cm.expand.author.name
         if author == "" { author = "ghost" }
+        // Absolute, not relative: --raw is machine output that gets stored
+        // and re-read (an agent's brief, an exported mirror in Git), where
+        // "5d ago" silently becomes a different string tomorrow.
         fmt.Println(
-          f"- **{author}** ({display.relative(cm.created)}): {cm.body}",
+          f"- **{author}** ({display.absolute(cm.created)}): {cm.body}",
         )
       }
     }
@@ -1352,11 +1355,13 @@ fn actor() -> Result<Option<Actor>, string> {
         let mut m = models.Member { .. }
         let decoded = json.Unmarshal(body.bytes(), &m).is_ok()
         if decoded && m.id != "" {
-          if cfg.me != "" && cfg.me != m.name {
-            return Err(
-              f"this token is {m.name}'s, but 'me' is set to '{cfg.me}' — writes go out as the token's member; 'lll config set me {m.name}' (or unset LLL_ME) to agree, or use {cfg.me}'s own token ('lll token create {cfg.me}')",
-            )
-          }
+          // LLL-445: a disagreeing 'me' used to REFUSE the write. It could
+          // only ever be noise — the token already names the author, and the
+          // error told the user the same thing the write would have done.
+          // Its cost was real: switching tokens locked you out until you
+          // also edited a config file, which is the stale-config failure it
+          // was meant to prevent, wearing a different coat. whoami still
+          // names the disagreement; nothing refuses because of it.
           return Ok(Some(Actor { id: m.id, name: m.name }))
         }
       }

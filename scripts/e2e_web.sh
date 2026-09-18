@@ -1135,6 +1135,56 @@ if command -v playwright-cli >/dev/null 2>&1; then
   assert_contains "$restored_hide" "/t/ENG/" \
     "the hide restore does not rewrite the URL"
 
+  # LLL-451: the option rows one level into the filter menu are <a>, not the
+  # <button> the root menu uses, and only the button had a rule — so every
+  # option list rendered as raw underlined link-blue. The root menu looked
+  # fine, which is why nobody caught it. Assert the rows are styled, not that
+  # the CSS file contains a selector.
+  seq_goto "$WEB/"
+  playwright-cli -s="$BROWSER_SESSION" click ".flt-plus" >/dev/null 2>&1 \
+    || fail "playwright: opening the filter menu"
+  sleep 0.3
+  playwright-cli -s="$BROWSER_SESSION" eval \
+    "() => { const b = [...document.querySelectorAll('.flt-menu button')].find(x => x.textContent.trim() === 'Label'); if (b) b.click(); return !!b }" >/dev/null 2>&1 \
+    || fail "playwright: opening the Label options"
+  sleep 0.3
+  opt_style=$(playwright-cli -s="$BROWSER_SESSION" eval \
+    "() => { const m = [...document.querySelectorAll('.flt-menu')].find(x => x.offsetParent !== null); const a = m && m.querySelector('.flt-opt'); if (!a) return 'NO_OPTION'; const cs = getComputedStyle(a); return JSON.stringify({deco: cs.textDecorationLine, display: cs.display, color: cs.color}) }" \
+    | sed -n '/### Result/{n;p;}' | tr -d '\\')
+  assert_not_contains "$opt_style" "NO_OPTION" "the Label dimension lists its options"
+  assert_not_contains "$opt_style" "underline" "filter options are not raw underlined links"
+  assert_contains "$opt_style" '"display":"flex"' "filter options lay out as menu rows"
+  assert_not_contains "$opt_style" "rgb(0, 0, 238)" "filter options do not use the UA link colour"
+
+  # LLL-455: with enough labels the list ran past the bottom of the viewport
+  # with no way to reach the last one. The options scroll inside .flt-opts and
+  # the menu must stay on screen. Assert geometry, not the declaration.
+  menu_fit=$(playwright-cli -s="$BROWSER_SESSION" eval \
+    "() => { const m = [...document.querySelectorAll('.flt-menu')].find(x => x.offsetParent !== null); const o = m.querySelector('.flt-opts'); const cs = getComputedStyle(o); return JSON.stringify({fits: m.getBoundingClientRect().bottom <= window.innerHeight, contained: cs.overscrollBehaviorY, scrolls: cs.overflowY}) }" \
+    | sed -n '/### Result/{n;p;}' | tr -d '\\')
+  assert_contains "$menu_fit" '"fits":true' "the filter menu stays inside the viewport"
+  assert_contains "$menu_fit" '"contained":"contain"' "the option list does not chain its scroll to the board"
+  assert_contains "$menu_fit" '"scrolls":"auto"' "the option list scrolls rather than overflowing"
+
+  # Type-to-filter. The fixture's Label dimension is short, so the search box
+  # may be absent here; when it is present it must narrow the list. Both
+  # outcomes are asserted rather than skipped silently.
+  flt_search=$(playwright-cli -s="$BROWSER_SESSION" eval \
+    "() => { const m = [...document.querySelectorAll('.flt-menu')].find(x => x.offsetParent !== null); const i = m.querySelector('.flt-search input'); const n = m.querySelectorAll('.flt-opt').length; if (!i) return JSON.stringify({box: false, opts: n}); const first = m.querySelector('.flt-opt').dataset.n; i.focus(); i.value = first; i.dispatchEvent(new Event('input', {bubbles: true})); return JSON.stringify({box: true, opts: n, typed: first}) }" \
+    | sed -n '/### Result/{n;p;}' | tr -d '\\')
+  if printf '%s' "$flt_search" | grep -q '"box":true'; then
+    sleep 0.4
+    narrowed=$(playwright-cli -s="$BROWSER_SESSION" eval \
+      "() => [...[...document.querySelectorAll('.flt-menu')].find(x => x.offsetParent !== null).querySelectorAll('.flt-opt')].filter(a => a.offsetParent !== null).length" \
+      | sed -n '/### Result/{n;p;}' | tr -d '\\')
+    [ "$narrowed" -ge 1 ] || fail "typing a label name hid every option: $narrowed"
+    total=$(printf '%s' "$flt_search" | sed -n 's/.*"opts":\([0-9]*\).*/\1/p')
+    [ "$narrowed" -lt "$total" ] || fail "typing a label name narrowed nothing ($narrowed of $total)"
+  else
+    # A short dimension must NOT wear a search box (LLL-455 AC#5).
+    assert_contains "$flt_search" '"box":false' "a short dimension renders no search box"
+  fi
+
   # The chip IS the undo: clicking it toggles its value out of the URL.
   seq_goto "$WEB/?assignee=e2e"
   playwright-cli -s="$BROWSER_SESSION" click ".flt-chip" >/dev/null 2>&1 \
@@ -1336,7 +1386,7 @@ if command -v playwright-cli >/dev/null 2>&1; then
     "$LIN" member add -n "Draft member $suffix" >/dev/null
     "$LIN" project create -n "Draft project $suffix" >/dev/null
   done
-  seq_goto "$WEB/settings"
+  seq_goto "$WEB/settings/labels"
   drafts_browser=$(playwright-cli -s="$BROWSER_SESSION" run-code "$(cat "$REPO_ROOT"/scripts/browser_settings_drafts.js)" 2>&1)
   assert_contains "$drafts_browser" 'settings drafts survive reordered label, member and project saves' "browser: settings row drafts survive saves and reordering"
   for prefix in "Z saved" "Unsaved"; do
@@ -1352,12 +1402,21 @@ if command -v playwright-cli >/dev/null 2>&1; then
   "$LIN" member add -n "Deletion browser member" >/dev/null
   DELETE_PROBE=$("$LIN" issue create -t "Deletion browser issue" --project "Deletion browser project" --assignee "Deletion browser member" --json)
   DELETE_KEY=$(printf '%s' "$DELETE_PROBE" | jq -r '.expand.team.key + "-" + (.number | tostring)')
-  seq_goto "$WEB/settings"
+  seq_goto "$WEB/settings/projects"
   deletion_browser=$(playwright-cli -s="$BROWSER_SESSION" run-code "$(cat "$REPO_ROOT"/scripts/browser_settings_delete.js)" 2>&1)
   assert_contains "$deletion_browser" 'settings deletion browser passed' "browser: settings deletion review and cancellation"
   "$LIN" issue view "$DELETE_KEY" --json | jq -e '.project == "" and .assignee == ""' >/dev/null \
     || fail "browser deletion should preserve issue and clear project and assignee"
   "$LIN" issue delete "$DELETE_KEY" --force >/dev/null
+
+  # LLL-447: the ⌘K palette, on every page, ranked by the search engine.
+  CMDK_PROBE=$("$LIN" issue create -t "Palette landing probe" --json)
+  CMDK_KEY=$(printf '%s' "$CMDK_PROBE" | jq -r '.expand.team.key + "-" + (.number | tostring)')
+  cmdk_js=$(sed -e "s|__WEB__|$WEB|" -e "s|__KEY__|$CMDK_KEY|" -e "s|__QUERY__|Palette landing|" \
+    "$REPO_ROOT"/scripts/browser_cmdk.js)
+  cmdk_browser=$(playwright-cli -s="$BROWSER_SESSION" run-code "$cmdk_js" 2>&1)
+  assert_contains "$cmdk_browser" 'cmdk palette browser passed' "browser: the cmd+K palette opens, filters, searches and lands"
+  "$LIN" issue delete "$CMDK_KEY" --force >/dev/null
 
   # LLL-94: title and state changes refresh favorites on both realtime pages.
   FAV_PROBE=$("$LIN" issue create -t "Favorite live original" --json)
@@ -1721,11 +1780,16 @@ raw_search=$(wcurl -sf "$WEB/search?q=Raw+todo&raw") || fail "search ?raw did no
 assert_contains "$raw_search" "Raw todo subject" "search raw lists the hit"
 assert_not_contains "$(wcurl -sf "$WEB/search?q=zzzznope&raw")" "Raw todo subject" \
   "a no-hit search raw lists nothing"
-raw_settings=$(wcurl -sf "$WEB/settings?raw") || fail "settings ?raw did not serve"
+# LLL-446: ?raw answers for ONE section, like the page. An empty list now
+# means the section is empty rather than "not the section you asked for".
+raw_settings=$(wcurl -sf "$WEB/settings/identity?raw") || fail "settings ?raw did not serve"
 # The display name rides a seed race (`lll up` may create ENG before the
 # rename POST lands), so assert on the stable key, not the name.
-assert_contains "$raw_settings" "(ENG)" "settings raw lists the team"
-assert_contains "$raw_settings" "No Issues Here" "settings raw lists the members"
+assert_contains "$raw_settings" "(ENG)" "settings raw names the team it answered for"
+assert_contains "$raw_settings" "Key: ENG" "settings identity raw carries the team"
+assert_not_contains "$raw_settings" "No Issues Here" "identity raw does not carry another section's records"
+raw_members=$(wcurl -sf "$WEB/settings/members?raw") || fail "settings members ?raw did not serve"
+assert_contains "$raw_members" "No Issues Here" "settings members raw lists the members"
 
 # --- /settings: server-side, shared, CLI-only things (task-83) ---
 # The id of the row a section rendered for a named record, so the assertions
@@ -1739,12 +1803,26 @@ print(m.group(1) if m else "")
 ' "$2" "$3"
 }
 
-settings=$(wcurl -sf "$WEB/settings") || fail "/settings did not respond"
+# LLL-446: six sections, six URLs, grouped by what a write there reaches.
+settings=$(wcurl -sf "$WEB/settings/identity") || fail "/settings/identity did not respond"
 assert_contains "$settings" 'id="settings"' "settings page has its morph target"
 assert_contains "$(rail "$settings")" 'href="/t/ENG/settings" class="active"' \
-  "the rail's Settings row is current on /settings"
-assert_contains "$settings" 'id="team-form"' "settings page edits the team"
-assert_contains "$settings" 'name="accent"' "settings page edits the team accent"
+  "the rail's Settings row is current on a settings section"
+assert_contains "$settings" 'id="team-form"' "settings identity edits the team"
+assert_contains "$settings" 'name="accent"' "settings identity edits the team accent"
+assert_contains "$settings" 'href="/t/ENG/settings/labels"' "the section nav links the team's other sections"
+assert_contains "$settings" 'href="/t/ENG/settings/members"' "the section nav links the server-wide sections"
+assert_contains "$settings" 'class="active" aria-current="page"' "the nav marks the open section"
+# Each section fetches only its own records: that is the point of the split.
+assert_not_contains "$settings" 'aria-label="Member name"' "identity does not carry the members list"
+assert_not_contains "$(wcurl -sf "$WEB/settings/members")" 'aria-label="Label name"' \
+  "members does not carry the labels list"
+# An unknown section is a 404 that names the ones that exist. (The bare path
+# redirects first, like every other bare path, and 404s on the team route.)
+bogus=$(curl -s -o /dev/null -w '%{http_code}' -H "$BOARD_COOKIE" "$WEB/t/ENG/settings/nope")
+assert_contains "$bogus" "404" "an unknown settings section 404s"
+assert_contains "$(curl -s -H "$BOARD_COOKIE" "$WEB/t/ENG/settings/nope")" "identity, labels" \
+  "the 404 names the sections that do exist"
 # Per-browser state and unwritable config must not appear here.
 assert_not_contains "$settings" "Hidden columns" "settings does not duplicate the board's per-browser column state"
 assert_not_contains "$settings" "pb-dir" "settings does not offer config the running process cannot change"
@@ -1753,7 +1831,7 @@ assert_not_contains "$settings" "$WEB" "settings does not offer the port it is s
 # Labels, members and projects are creatable and editable from the page.
 web_post "POST settings/label" "$WEB/settings/label" -d 'name=web-made' -d 'color=#4cb782' >/dev/null
 assert_cli_contains "creating a label from /settings did not reach PocketBase" '^web-made	#4cb782' "$LIN" label list
-LABEL_ID=$(row_id "$(wcurl -sf "$WEB/settings")" label web-made)
+LABEL_ID=$(row_id "$(wcurl -sf "$WEB/settings/labels")" label web-made)
 [ -n "$LABEL_ID" ] || fail "/settings did not render the label it just created"
 web_post "POST settings/label" "$WEB/settings/label" -d "id=$LABEL_ID" -d 'name=web-renamed' -d 'color=#8d7ce6' >/dev/null
 assert_cli_contains "renaming and recoloring a label from /settings did not persist" '^web-renamed	#8d7ce6' "$LIN" label list
@@ -1762,7 +1840,7 @@ assert_cli_lacks "deleting a label from /settings did not persist" 'web-renamed'
 
 web_post "POST settings/member" "$WEB/settings/member" -d 'name=Web Member' -d 'email=web@example.com' >/dev/null
 assert_cli_contains "creating a member from /settings did not persist" '^Web Member	web@example.com' "$LIN" member list
-MEMBER_ID=$(row_id "$(wcurl -sf "$WEB/settings")" member "Web Member")
+MEMBER_ID=$(row_id "$(wcurl -sf "$WEB/settings/members")" member "Web Member")
 # The name is the settings-editable half; the email is the member's login
 # identity (task-180) and the page says so when a row tries to move it.
 web_post "POST settings/member" "$WEB/settings/member" -d "id=$MEMBER_ID" -d 'name=Web Member Renamed' -d 'email=web@example.com' >/dev/null
@@ -1779,7 +1857,7 @@ assert_cli_lacks "rejected combined edit still saved its name" \
 
 web_post "POST settings/project" "$WEB/settings/project" -d 'name=Web Project' -d 'status=planned' >/dev/null
 assert_cli_contains "creating a project from /settings did not persist" '^Web Project	planned' "$LIN" project list
-PROJECT_ID=$(row_id "$(wcurl -sf "$WEB/settings")" project "Web Project")
+PROJECT_ID=$(row_id "$(wcurl -sf "$WEB/settings/projects")" project "Web Project")
 web_post "POST settings/project" "$WEB/settings/project" -d "id=$PROJECT_ID" -d 'name=Web Project' -d 'status=started' >/dev/null
 assert_cli_contains "changing a project status from /settings did not persist" '^Web Project	started' "$LIN" project list
 
@@ -1792,6 +1870,25 @@ assert_contains "$(wcurl -sf -X POST "$WEB/settings/project" -d "id=$PROJECT_ID"
   "unknown project status" "an unknown project status is refused"
 assert_cli_lacks "a refused label write still created a record" '^x	' "$LIN" label list
 
+# --- LLL-447: the palette's markup and its fragment ------------------------
+# The dialog rides the rail template, so every page that has a rail has it.
+for page in "/" "/issues" "/projects" "/search" "/settings/identity" "/issue/ENG-1"; do
+  html=$(wcurl -sf "$WEB$page")
+  assert_contains "$html" 'id="cmdk"' "$page carries the jump palette"
+  assert_contains "$html" 'id="cmdk-goto"' "$page carries the palette's destinations"
+  assert_contains "$html" 'href="/t/ENG/settings/access"' "$page's palette links the settings sections"
+done
+# The palette asks the search route, which answers one fragment for its id.
+palette=$(wcurl -sf "$WEB/search?palette=1&q=Raw+todo")
+assert_contains "$palette" 'id="cmdk-results"' "the palette fragment owns its id"
+# Plain HTML, not an SSE patch: /issues loads no Datastar and the palette is
+# on it like every other page.
+assert_not_contains "$palette" 'datastar-patch-elements' "the palette fragment needs no Datastar"
+assert_contains "$palette" 'Raw todo subject' "the palette fragment carries the hit"
+assert_not_contains "$palette" 'id="search-results"' "the palette fragment is not the search page's"
+assert_contains "$(wcurl -sf "$WEB/search?palette=1&q=zzzznope")" 'matches' \
+  "a no-hit palette query says so"
+
 # --- Access (task-204): superuser actions behind per-action re-auth ---------
 # /settings is board-token-reachable, but minting an agent token and
 # credentialing a member are superuser-power actions: each form carries the
@@ -1800,7 +1897,7 @@ assert_cli_lacks "a refused label write still created a record" '^x	' "$LIN" lab
 # the printed default pair.
 ADMIN_PASS="${LLL_ADMIN_PASSWORD:-admin-local-123}"
 
-settings=$(wcurl -sf "$WEB/settings")
+settings=$(wcurl -sf "$WEB/settings/access")
 assert_contains "$settings" 'id="access-token-form"' "settings page carries the mint form"
 assert_contains "$settings" 'id="access-credential-form"' "settings page carries the credential form"
 assert_contains "$settings" 'id="access-token-result"' "settings page carries the token result placeholder"
@@ -1859,7 +1956,7 @@ assert_contains "$(wcurl -sf "$WEB/")" '<style id="accent"></style>' \
 assert_contains "$(wcurl -sf "$WEB/")" 'id="favicon"' "the board carries a generated favicon"
 
 web_post "POST settings/team" "$WEB/settings/team" -d 'name=Engineering' -d 'accent=#3ea0f0' >/dev/null
-for page in "/" "/issue/ENG-1" "/settings" "/issues" "/search" "/projects"; do
+for page in "/" "/issue/ENG-1" "/settings/identity" "/issues" "/search" "/projects"; do
   html=$(wcurl -sf "$WEB$page")
   assert_contains "$html" '--accent:#3ea0f0' "$page wears the team accent"
   # The whole family is derived from that one hex, so hover, ink, deep and
@@ -2076,7 +2173,7 @@ env LLL_TEAM=OPS "$LIN" project create -n "Foreign Project" >/dev/null
 page=$(wcurl -sf "$WEB/issues")
 assert_not_contains "$page" 'value="foreign-label"' "/issues label chooser is team-scoped"
 assert_not_contains "$page" 'value="Foreign Project"' "/issues project chooser is team-scoped"
-assert_not_contains "$(wcurl -sf "$WEB/settings")" "foreign-label" "/settings is team-scoped"
+assert_not_contains "$(wcurl -sf "$WEB/settings/labels")" "foreign-label" "/settings is team-scoped"
 assert_not_contains "$(wcurl -sf "$WEB/projects")" "Foreign Project" "/projects is team-scoped"
 assert_not_contains "$(wcurl -sf "$WEB/issue/ENG-1")" "foreign-label" "issue page label chips are team-scoped"
 
@@ -2263,12 +2360,18 @@ assert_not_contains "$(wcurl -sf "$WEB/t/ENG/")" 'rt-emoji' \
 env LLL_TEAM=OPS "$LIN" label create -n ops-only -c '#2ea043' >/dev/null 2>&1 || true
 env LLL_TEAM=OPS "$LIN" project create -n "Ops Project" >/dev/null 2>&1 || true
 
-ops_settings=$(wcurl -sf "$WEB/t/OPS/settings") || fail "/t/OPS/settings did not serve"
+ops_settings=$(wcurl -sf "$WEB/t/OPS/settings/identity") || fail "/t/OPS/settings did not serve"
 assert_contains "$ops_settings" 'id="set-key" value="OPS"' "settings shows the ROUTED team's key"
-assert_contains "$ops_settings" 'value="ops-only"' "settings lists the routed team's labels"
-assert_not_contains "$ops_settings" 'value="web-renamed"' "another team's labels stay off it"
 assert_contains "$(rail "$ops_settings")" 'href="/t/OPS/" title="OPS · Operations" class="active"' \
   "the current team does not change when you open its settings"
+# LLL-446: the server-wide sections are routed under the team too, so the
+# rail keeps the board you came from while you edit accounts every team shares.
+ops_members=$(wcurl -sf "$WEB/t/OPS/settings/members") || fail "/t/OPS/settings/members did not serve"
+assert_contains "$(rail "$ops_members")" 'href="/t/OPS/" title="OPS · Operations" class="active"' \
+  "a server-wide section does not switch the team you are standing in"
+ops_labels=$(wcurl -sf "$WEB/t/OPS/settings/labels")
+assert_contains "$ops_labels" 'value="ops-only"' "settings lists the routed team's labels"
+assert_not_contains "$ops_labels" 'value="web-renamed"' "another team's labels stay off it"
 
 ops_issues=$(wcurl -sf "$WEB/t/OPS/issues")
 assert_contains "$ops_issues" "Ops only card" "the table lists the routed team's issues"
@@ -2288,10 +2391,17 @@ assert_not_contains "$(wcurl -sf "$WEB/t/ENG/")" "--accent:#2ea043" \
   "and not the configured team's board"
 
 # The bare paths keep working, landing on the configured team.
-for bare in issues projects settings; do
+for bare in issues projects; do
   redir=$(curl -s -o /dev/null -w '%{http_code} %{redirect_url}' -H "$BOARD_COOKIE" "$WEB/$bare")
   assert_contains "$redir" "303 $WEB/t/ENG/$bare" "bare /$bare redirects to the configured team"
 done
+# Settings lands on its first section; a bookmarked bare section keeps its own.
+redir=$(curl -s -o /dev/null -w '%{http_code} %{redirect_url}' -H "$BOARD_COOKIE" "$WEB/settings")
+assert_contains "$redir" "303 $WEB/t/ENG/settings/identity" "bare /settings redirects to the first section"
+redir=$(curl -s -o /dev/null -w '%{http_code} %{redirect_url}' -H "$BOARD_COOKIE" "$WEB/settings/access")
+assert_contains "$redir" "303 $WEB/t/ENG/settings/access" "a bare section keeps its section"
+redir=$(curl -s -o /dev/null -w '%{http_code} %{redirect_url}' -H "$BOARD_COOKIE" "$WEB/t/OPS/settings")
+assert_contains "$redir" "303 $WEB/t/OPS/settings/identity" "a team's bare settings keeps its team"
 
 # LLL-100: the scope control. A label or project was stuck in the team it was
 # created in - the only way out was delete and remake, which loses every issue
@@ -2299,9 +2409,9 @@ done
 # still reference the record, the LLL-341 precedent, and the row's select is
 # the same rule as `lll label move` because both call one function.
 web_post "POST settings/label" "$WEB/settings/label" -d 'name=movable' -d 'color=#4cb782' >/dev/null
-MOVE_ID=$(row_id "$(wcurl -sf "$WEB/t/ENG/settings")" label movable)
+MOVE_ID=$(row_id "$(wcurl -sf "$WEB/t/ENG/settings/labels")" label movable)
 [ -n "$MOVE_ID" ] || fail "/settings did not render the label to move"
-assert_contains "$(wcurl -sf "$WEB/t/ENG/settings")" '<select name="team"' "each row carries a team select"
+assert_contains "$(wcurl -sf "$WEB/t/ENG/settings/labels")" '<select name="team"' "each row carries a team select"
 # Unreferenced: the move goes through and the label is the other team's.
 web_post "POST settings/label" "$WEB/t/ENG/settings/label" \
   -d "id=$MOVE_ID" -d 'name=movable' -d 'color=#4cb782' -d 'team=OPS' >/dev/null
@@ -2403,7 +2513,7 @@ assert_contains "$out" "team OPS is archived" \
   "a comment on an archived team's issue is refused"
 
 # The Settings Teams section: every team, archived marked, counts shown.
-settings=$(wcurl -sf "$WEB/settings")
+settings=$(wcurl -sf "$WEB/settings/teams")
 assert_contains "$settings" 'id="set-teams"' "settings page carries the Teams section"
 assert_contains "$settings" "· archived" "the archived team's row is marked"
 OPS_TEAM_ID=$(row_id "$settings" team OPS)
@@ -2450,7 +2560,7 @@ m = re.search(r"<div id=\"set-label-[a-z0-9]+\"><form class=\"set-row\" data-nam
 print(m.group(0) if m else "")
 ' "$2"
 }
-settings=$(wcurl -sf "$WEB/settings")
+settings=$(wcurl -sf "$WEB/settings/labels")
 assert_contains "$(label_row "$settings" usage-hot)" "2 issues" \
   "a label row counts the issues carrying it"
 assert_contains "$(label_row "$settings" usage-cold)" "0 issues" \
@@ -2465,7 +2575,7 @@ sys.exit(0 if 0 <= hot < cold else 1)
 assert_contains "$settings" "reuse beats near-duplicates" \
   "the web label-create form carries the check-first hint"
 # The raw twin carries the same counts, on the label's own line.
-usage_raw=$(wcurl -sf "$WEB/settings?raw")
+usage_raw=$(wcurl -sf "$WEB/settings/labels?raw")
 printf '%s' "$usage_raw" > /tmp/lll-344-settings-raw.txt
 assert_contains "$usage_raw" "usage-hot (2 issues)" \
   "settings raw carries the label's usage count"

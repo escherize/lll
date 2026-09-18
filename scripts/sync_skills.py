@@ -26,7 +26,7 @@ import shutil
 import sys
 from pathlib import Path
 
-PORTABLE = ["lll", "backlog-loop", "merge-gate"]
+PORTABLE = ["software-factory", "lll", "backlog-loop", "merge-gate", "codebase-skills"]
 
 ROOT = Path(__file__).resolve().parents[1]
 SOURCE = ROOT / ".claude" / "skills"

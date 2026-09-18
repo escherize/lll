@@ -22,7 +22,12 @@ func claimFixture(t *testing.T) (core.App, string, string, string) {
 		t.Fatal(err)
 	}
 	issues := core.NewBaseCollection("issues")
-	issues.Fields.Add(&core.RelationField{Name: "assignee", CollectionId: members.Id, MaxSelect: 1}, &core.TextField{Name: "title"})
+	issues.Fields.Add(
+		&core.RelationField{Name: "assignee", CollectionId: members.Id, MaxSelect: 1},
+		&core.TextField{Name: "title"},
+		// LLL-452: the expiry announcement is skipped on finished work.
+		&core.TextField{Name: "state"},
+	)
 	if err := app.Save(issues); err != nil {
 		t.Fatal(err)
 	}
@@ -32,6 +37,17 @@ func claimFixture(t *testing.T) (core.App, string, string, string) {
 		&core.AutodateField{Name: "created", OnCreate: true})
 	claims.Indexes = []string{"CREATE UNIQUE INDEX idx_claim_test_issue ON claims (issue)"}
 	if err := app.Save(claims); err != nil {
+		t.Fatal(err)
+	}
+	// LLL-452: the sweep records an expiry as a comment on the issue.
+	comments := core.NewBaseCollection("comments")
+	comments.Fields.Add(
+		&core.RelationField{Name: "issue", CollectionId: issues.Id, MaxSelect: 1, Required: true},
+		&core.RelationField{Name: "author", CollectionId: members.Id, MaxSelect: 1},
+		&core.TextField{Name: "body", Required: true},
+		&core.AutodateField{Name: "created", OnCreate: true},
+	)
+	if err := app.Save(comments); err != nil {
 		t.Fatal(err)
 	}
 	a, b := core.NewRecord(members), core.NewRecord(members)
@@ -44,6 +60,7 @@ func claimFixture(t *testing.T) (core.App, string, string, string) {
 	}
 	issue := core.NewRecord(issues)
 	issue.Set("title", "preserve title")
+	issue.Set("state", "in-progress")
 	if err := app.Save(issue); err != nil {
 		t.Fatal(err)
 	}

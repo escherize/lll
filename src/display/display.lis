@@ -44,6 +44,19 @@ pub fn priority_value(name: string) -> Option<int> {
   None
 }
 
+/// Render a PocketBase timestamp ("2026-08-28 18:20:00.123Z") as an absolute
+/// UTC minute, "2026-08-28 18:20 UTC". Unparseable input is returned as-is.
+///
+/// relative() is for a person reading a screen now; this is for output that
+/// gets stored and re-read — a piped brief, an agent's context, an exported
+/// mirror under Git. Re-rendering "5d ago" tomorrow says "6d ago" and diffs
+/// a line whose record never changed.
+pub fn absolute(timestamp: string) -> string {
+  time
+    .Parse("2006-01-02 15:04:05.999Z", timestamp)
+    .map_or(timestamp, |t| t.UTC().Format("2006-01-02 15:04 UTC"))
+}
+
 /// Render a PocketBase timestamp ("2026-08-28 18:20:00.123Z") as a relative
 /// age like "3h ago". Unparseable input is returned as-is.
 pub fn relative(timestamp: string) -> string {

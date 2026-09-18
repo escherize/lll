@@ -195,39 +195,55 @@ fn search_raw(vm: SearchVM) -> string {
   strings.Join(lines, "\n")
 }
 
-/// GET /settings?raw — the page is forms, and markdown around forms would be
-/// theatre, so the raw form is a plain list of what the records say right
-/// now: the team, then labels, members, projects.
+/// GET /t/KEY/settings/SECTION?raw — the page is forms, and markdown around
+/// forms would be theatre, so the raw form is a plain list of what the
+/// section's records say right now.
+///
+/// LLL-446: one section per request, like the page. It used to print all four
+/// lists whatever you asked for; now an empty heading means the section is
+/// empty rather than "not the section you fetched".
 fn settings_raw(vm: SettingsVM) -> string {
-  let mut lines: Slice<string> = ["# Settings"]
-  if vm.team_key == "" {
-    lines = lines.append("- Team: none configured")
-  } else {
-    lines = lines.append(f"- Team: {vm.team_name} ({vm.team_key}) — accent {vm.accent}")
-  }
-  lines = lines.append("")
-  lines = lines.append("## Labels")
-  for l in vm.labels {
-    let mut color = ""
-    if l.color != "" { color = f" {l.color}" }
-    lines = lines.append(f"- {cell(l.name)}{color} ({l.usage_text})")
-  }
-  lines = lines.append("")
-  lines = lines.append("## Members")
-  for m in vm.members {
-    lines = lines.append(f"- {cell(m.name)} <{m.email}>")
-  }
-  lines = lines.append("")
-  lines = lines.append("## Projects")
-  for p in vm.projects {
-    lines = lines.append(f"- {cell(p.name)} — {p.status}")
-  }
-  lines = lines.append("")
-  lines = lines.append("## Teams")
-  for t in vm.teams {
-    let mut mark = ""
-    if t.archived { mark = " — archived" }
-    lines = lines.append(f"- {t.key} {cell(t.name)} ({t.issues_text}){mark}")
+  let scope = if vm.team_key == "" { "no team" } else { vm.team_key }
+  let mut lines: Slice<string> = [f"# Settings · {vm.section} ({scope})", ""]
+  match vm.section {
+    "identity" => {
+      if vm.team_key == "" {
+        lines = lines.append("- Team: none configured")
+      } else {
+        let mut emoji = "no emoji"
+        if vm.team_emoji != "" { emoji = vm.team_emoji }
+        lines = lines.append(f"- Key: {vm.team_key}")
+        lines = lines.append(f"- Name: {cell(vm.team_name)}")
+        lines = lines.append(f"- Emoji: {emoji}")
+        lines = lines.append(f"- Accent: {vm.accent}")
+      }
+    },
+    "labels" => {
+      for l in vm.labels {
+        let mut color = ""
+        if l.color != "" { color = f" {l.color}" }
+        lines = lines.append(f"- {cell(l.name)}{color} ({l.usage_text})")
+      }
+    },
+    "projects" => {
+      for p in vm.projects {
+        lines = lines.append(f"- {cell(p.name)} — {p.status}")
+      }
+    },
+    "teams" => {
+      for t in vm.teams {
+        let mut mark = ""
+        if t.archived { mark = " — archived" }
+        lines = lines.append(f"- {t.key} {cell(t.name)} ({t.issues_text}){mark}")
+      }
+    },
+    // Access lists the members its two forms pick from; the tokens it mints
+    // are stateless and nothing records them, so there is nothing else to print.
+    _ => {
+      for m in vm.members {
+        lines = lines.append(f"- {cell(m.name)} <{m.email}>")
+      }
+    },
   }
   strings.Join(lines, "\n")
 }
