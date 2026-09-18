@@ -1,0 +1,375 @@
+import "go:encoding/json"
+import "go:fmt"
+import "go:os"
+import "go:path/filepath"
+import "go:sort"
+import "go:strings"
+
+import "display"
+import "attachments"
+import "flags"
+import "mirror"
+import "models"
+import "pb"
+import "records"
+import "references"
+
+/// `lll import dir DIR`: a mirror back into a team.
+///
+/// This is a restore, not a sync. It imports into a team that has no issues,
+/// and refuses one that does unless `--replace` is given — which deletes
+/// every issue in the team first. There is deliberately no merge, no
+/// per-field diff and no conflict resolution: two writable copies of the
+/// same record need a reconciler, and the ADR
+/// (`lll doc view issue-text-and-state-live-in-lll`) rejected that trade.
+/// The mirror stays a projection; this command rebuilds a team FROM one.
+///
+/// Comments and members are not imported. Nothing here can forge another
+/// member's authorship, so `KEY-N.comments.md` is export-only.
+fn import_dir(input: flags.CommandInput) -> Result<(), string> {
+  let spec = dir_spec()
+  let p = input.parsed
+  let usage = flags.usage("lll import dir", spec, "DIR")
+  let dir = p.first()
+  if dir == "" { return Err(f"which directory?\nusage: {usage}") }
+
+  let team = current_team()?
+  if team.archived { return Err(archived_hint(team.key)) }
+
+  // Read and parse the WHOLE set before writing anything. A mirror with one
+  // malformed file must fail with nothing created, not leave a team half
+  // rebuilt for someone to clean up by hand.
+  let parsed = read_mirror(dir)?
+  let parsed_docs = read_mirror_docs(dir)?
+  if parsed.is_empty() {
+    return Err(f"no issue files in {filepath.Join(dir, "issues")} — is this a directory 'lll export' wrote?")
+  }
+
+  let existing = records.fetch_board_issues(team.id)?
+  if !existing.is_empty() && !p.given("--replace") {
+    return Err(
+      f"{team.key} already has {existing.length()} issues, and importing into a team that is not empty would mix two sets of numbering.
+To rebuild {team.key} from {dir}, deleting all {existing.length()} first: lll import dir {dir} --replace
+To import somewhere harmless instead: lll attach -k NEWKEY in another directory, then run this there",
+    )
+  }
+
+  let (label_ids, _) = ensure_labels(team, label_names(parsed), Map.new<string, string>())?
+  let creator = actor()?.map_or("", |member| member.id)
+
+  // From here the team is being rebuilt, and a failure leaves it partly
+  // done. Nothing can make that atomic over HTTP, so every error past this
+  // point says so and names the way out: the directory is read-only input
+  // and re-running --replace starts from a clean team again.
+  let mut deleted = 0
+  for issue in existing {
+    if let Err(e) = pb.delete(f"/api/collections/issues/records/{issue.id}") {
+      return Err(partial(dir, f"deleting {team.key}-{issue.number}: {e}", deleted, 0))
+    }
+    deleted += 1
+  }
+
+  let mut created = 0
+  let mut restored_blobs = 0
+  let mut unassigned: Slice<string> = []
+  for front_and_body in parsed {
+    let (front, body) = front_and_body
+    let mut assignee = ""
+    if front.assignee != "" {
+      match records.find_member(front.assignee)? {
+        Some(member) => assignee = member.id,
+        // A member cannot be conjured from a name, and refusing the whole
+        // import over an account that left would make the mirror
+        // unrestorable. Import the issue, name what was dropped.
+        None => unassigned = unassigned.append(f"{front.key} ({front.assignee})"),
+      }
+    }
+    let mut project = ""
+    if front.project != "" {
+      project = records.resolve_project(team.id, front.project)?.id
+    }
+    let mut labels: Slice<string> = []
+    for name in front.labels {
+      if let Some(id) = label_ids.get(name) { labels = labels.append(id) }
+    }
+    // The stored origin, not this machine's. An issue's creation context is
+    // a historical fact; capture() here would rewrite every issue in the
+    // mirror to say it was filed by whoever ran the restore, on their box.
+    let mut filed_by = creator
+    if front.creator != "" {
+      if let Some(member) = records.find_member(front.creator)? {
+        filed_by = member.id
+      }
+    }
+    let new_issue = models.NewIssue {
+      creator: filed_by,
+      origin: models.IssueOrigin {
+        host: front.origin.host,
+        cwd: front.origin.cwd,
+        branch: front.origin.branch,
+        sha: front.origin.sha,
+        tool: front.origin.tool,
+      },
+      team: team.id,
+      number: front.number,
+      sort: front.sort,
+      title: front.title,
+      state: front.state,
+      priority: priority_value_or_none(front.priority),
+      description: body,
+      emoji: front.emoji,
+      assignee,
+      project,
+      labels,
+    }
+    let payload = match json.Marshal(new_issue) {
+      Ok(payload) => payload,
+      Err(e) => return Err(partial(dir, f"encoding {front.key}: {e}", deleted, created)),
+    }
+    // expand=team because attachments.upload checks the team's archived flag
+    // on the record it is handed.
+    let body_json = match pb.post(
+      "/api/collections/issues/records?expand=team",
+      payload as string,
+    ) {
+      Ok(body) => body,
+      Err(e) => return Err(partial(dir, f"creating {front.key}: {e}", deleted, created)),
+    }
+    created += 1
+
+    if front.refs != "" {
+      let mut issue_for_refs = models.Issue { .. }
+      if let Err(e) = json.Unmarshal(body_json.bytes(), &issue_for_refs) {
+        return Err(partial(dir, f"decoding created {front.key}: {e}", deleted, created))
+      }
+      // One append per recorded ref, through the server's atomic endpoint —
+      // the refs field is a list in one string, and `lll import github`
+      // skips an issue whose gh#N the team already carries, so losing these
+      // turns a later re-import into a duplicate import.
+      for reference in strings.Fields(front.refs) {
+        if let Err(e) = references.append(issue_for_refs.id, reference) {
+          return Err(partial(dir, f"recording ref {reference} on {front.key}: {e}", deleted, created))
+        }
+      }
+    }
+
+    if front.attachments.is_empty() { continue }
+    let mut issue = models.Issue { .. }
+    if let Err(e) = json.Unmarshal(body_json.bytes(), &issue) {
+      return Err(f"decoding created {front.key}: {e}")
+    }
+    for name in front.attachments {
+      let path = filepath.Join(dir, "issues", front.key, name)
+      let data = match os.ReadFile(path) {
+        Ok(data) => data,
+        Err(e) => return Err(f"reading attachment {path}: {e}"),
+      }
+      // PocketBase assigns its own stored filename on upload, so the bytes
+      // come back and the NAME does not: a restored shot_ab12.png becomes
+      // shot_ab12_cd34.png. Nothing downstream keys off the name, and
+      // inventing one would mean fighting the file field's own uniqueness.
+      if let Err(e) = attachments.upload(issue, name, data) {
+        return Err(partial(dir, f"attaching {name} to {front.key}: {e}", deleted, created))
+      }
+      restored_blobs += 1
+    }
+  }
+
+  // Everything that points at an issue is resolved here, in a second pass,
+  // because a forward reference is normal: ENG-3 can be blocked by ENG-7,
+  // and a doc can be filed against an issue created after it.
+  let mut id_of = Map.new<string, string>()
+  for issue in records.fetch_board_issues(team.id)? {
+    id_of[f"{team.key}-{issue.number}"] = issue.id
+  }
+
+  let mut linked_blocks = 0
+  for front_and_body in parsed {
+    let (front, _) = front_and_body
+    if front.blocked.is_empty() { continue }
+    let mut ids: Slice<string> = []
+    for key in front.blocked {
+      if let Some(id) = id_of.get(key) { ids = ids.append(id) }
+    }
+    if ids.is_empty() { continue }
+    let Some(issue_id) = id_of.get(front.key) else { continue }
+    let payload = match json.Marshal(BlockedPatch { blocked_by: ids }) {
+      Ok(payload) => payload,
+      Err(e) => return Err(partial(dir, f"encoding blockers for {front.key}: {e}", deleted, created)),
+    }
+    if let Err(e) = pb.patch(f"/api/collections/issues/records/{issue_id}", payload as string) {
+      return Err(partial(dir, f"linking blockers on {front.key}: {e}", deleted, created))
+    }
+    linked_blocks += 1
+  }
+
+  let mut restored_docs = 0
+  if !parsed_docs.is_empty() {
+    for existing_doc in fetch_team_docs(team.id)? {
+      if let Err(e) = pb.delete(f"/api/collections/docs/records/{existing_doc.id}") {
+        return Err(partial(dir, f"deleting doc {existing_doc.slug}: {e}", deleted, created))
+      }
+    }
+    for front_and_body in parsed_docs {
+      let (front, body) = front_and_body
+      let mut linked: Slice<string> = []
+      for key in front.issues {
+        if let Some(id) = id_of.get(key) { linked = linked.append(id) }
+      }
+      let mut confidence = front.confidence
+      if confidence == "" { confidence = "confirmed" }
+      let new_doc = models.NewDoc {
+        team: team.id,
+        slug: front.slug,
+        title: front.title,
+        kind: front.kind,
+        body,
+        confidence,
+        confidence_note: front.note,
+        area: front.area,
+        paths: front.paths,
+        issues: linked,
+      }
+      let payload = match json.Marshal(new_doc) {
+        Ok(payload) => payload,
+        Err(e) => return Err(partial(dir, f"encoding doc {front.slug}: {e}", deleted, created)),
+      }
+      if let Err(e) = pb.post("/api/collections/docs/records", payload as string) {
+        return Err(partial(dir, f"creating doc {front.slug}: {e}", deleted, created))
+      }
+      restored_docs += 1
+    }
+  }
+
+  let mut note = ""
+  if deleted > 0 { note = f" (replaced {deleted})" }
+  let mut blobs = ""
+  if restored_blobs > 0 { blobs = f", {restored_blobs} attachments" }
+  let mut docs_note = ""
+  if restored_docs > 0 { docs_note = f", {restored_docs} docs" }
+  if linked_blocks > 0 { docs_note = f"{docs_note}, {linked_blocks} dependency links" }
+  fmt.Println(f"Imported {created} issues{blobs}{docs_note} into {team.key}{note}")
+  if !unassigned.is_empty() {
+    fmt.Println(
+      f"Left unassigned, no such member here: {strings.Join(unassigned, ", ")}",
+    )
+  }
+  Ok(())
+}
+
+#[json]
+struct BlockedPatch {
+  #[json("blocked_by")]
+  blocked_by: Slice<string>,
+}
+
+pub fn dir_spec() -> Slice<flags.Flag> {
+  [
+    flags.Flag {
+      name: "--replace",
+      help: "delete every issue in the team first, then import\n(the only way to import into a team that is not empty)",
+      ..
+    },
+  ]
+}
+
+/// Every `issues/*.md` in the mirror, parsed, in ascending file order so the
+/// created records land in a deterministic sequence. `*.comments.md` is
+/// skipped: comments are export-only.
+fn read_mirror(dir: string) -> Result<Slice<(mirror.Front, string)>, string> {
+  let issues_dir = filepath.Join(dir, "issues")
+  // os.ReadDir reports a partial listing alongside its error; a mirror read
+  // that could not see every file must not import the subset it did see.
+  let entries = match os.ReadDir(issues_dir) {
+    Partial.Ok(entries) => entries,
+    Partial.Both(_, e) | Partial.Err(e) => return Err(f"reading {issues_dir}: {e}"),
+  }
+  let mut names: mut Slice<string> = []
+  for entry in entries {
+    let name = entry.Name()
+    if entry.IsDir() { continue }
+    if !strings.HasSuffix(name, ".md") { continue }
+    if strings.HasSuffix(name, ".comments.md") { continue }
+    names = names.append(name)
+  }
+  sort.Strings(names)
+  let mut out: Slice<(mirror.Front, string)> = []
+  for name in names {
+    let path = filepath.Join(issues_dir, name)
+    let data = match os.ReadFile(path) {
+      Ok(data) => data,
+      Err(e) => return Err(f"reading {path}: {e}"),
+    }
+    match mirror.parse(data as string) {
+      Ok(pair) => out = out.append(pair),
+      Err(e) => return Err(f"{path}: {e}"),
+    }
+  }
+  Ok(out)
+}
+
+/// Every `docs/*.md` in the mirror, parsed. Absent or empty is fine — a
+/// mirror of a team with no documents is a normal mirror.
+fn read_mirror_docs(dir: string) -> Result<Slice<(mirror.DocFront, string)>, string> {
+  let docs_dir = filepath.Join(dir, "docs")
+  let entries = match os.ReadDir(docs_dir) {
+    Partial.Ok(entries) => entries,
+    Partial.Both(_, e) | Partial.Err(e) => return Err(f"reading {docs_dir}: {e}"),
+  }
+  let mut names: mut Slice<string> = []
+  for entry in entries {
+    if entry.IsDir() { continue }
+    if !strings.HasSuffix(entry.Name(), ".md") { continue }
+    names = names.append(entry.Name())
+  }
+  sort.Strings(names)
+  let mut out: Slice<(mirror.DocFront, string)> = []
+  for name in names {
+    let path = filepath.Join(docs_dir, name)
+    let data = match os.ReadFile(path) {
+      Ok(data) => data,
+      Err(e) => return Err(f"reading {path}: {e}"),
+    }
+    match mirror.parse_doc(data as string) {
+      Ok(pair) => out = out.append(pair),
+      Err(e) => return Err(f"{path}: {e}"),
+    }
+  }
+  Ok(out)
+}
+
+/// A failure after the team started being rebuilt. Says what was already
+/// done, and that the directory is untouched input rather than something
+/// that needs repairing too.
+fn partial(dir: string, cause: string, deleted: int, created: int) -> string {
+  f"{cause}
+{team_state(deleted, created)} — {dir} is unchanged, so fix the cause and run 'lll import dir {dir} --replace' again to rebuild from scratch"
+}
+
+fn team_state(deleted: int, created: int) -> string {
+  if created == 0 && deleted == 0 { return "nothing was written" }
+  f"the team is part-way rebuilt: {deleted} deleted, {created} created"
+}
+
+/// Every distinct label named across the mirror, so they can be created once
+/// before the issues that reference them.
+fn label_names(parsed: Slice<(mirror.Front, string)>) -> Slice<string> {
+  let mut seen = Map.new<string, bool>()
+  let mut names: mut Slice<string> = []
+  for front_and_body in parsed {
+    let (front, _) = front_and_body
+    for name in front.labels {
+      if seen.get(name).is_some() { continue }
+      seen[name] = true
+      names = names.append(name)
+    }
+  }
+  names
+}
+
+/// A priority name back to its stored value. An unknown name imports as
+/// 'none' rather than failing: the scale can gain a level between an export
+/// and its restore, and losing one field beats losing the issue.
+fn priority_value_or_none(name: string) -> int {
+  display.priority_value(name).unwrap_or(0)
+}

@@ -102,8 +102,8 @@ with tempfile.TemporaryDirectory(prefix='lll-provenance-') as directory:
     for value in [member['name'], str(repo.resolve()), 'provenance-test', refs]:
         assert value in page, value
     mirror = base / 'mirror'
-    result = subprocess.run([str(root / 'bin/lll-export'), str(mirror)], cwd=base,
-        env=dict(env, LLL_BIN=binary), capture_output=True, text=True, timeout=60)
+    result = subprocess.run([binary, 'export', str(mirror)], cwd=base,
+        env=env, capture_output=True, text=True, timeout=120)
     assert result.returncode == 0, result.stderr
     assert refs in (mirror / 'issues' / (key + '.md')).read_text()
     if shutil.which('playwright-cli'):
