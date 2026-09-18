@@ -251,7 +251,15 @@ superuser credentials, or set LLL_TOKEN to a member token valid for this server.
   let board_url = f"http://127.0.0.1:{chosen}"
   let _ = set_home_key("web_url", board_url)?
   if open {
-    if let Err(e) = open_url(board_url) {
+    // Open the LOGIN url, not the bare one (LLL-444). Opening the bare url
+    // landed the user on the gate's 401 page and sent them back to the
+    // terminal to copy a token by hand — the whole of "i just want my
+    // localhost, it's me, let me in". The gate sets the cookie and redirects
+    // to the clean url, so the token never lingers in the address bar.
+    // resolve_board_token pins its answer into the environment, so the
+    // run_server below resolves the same token rather than a second one.
+    let login_url = f"{board_url}/?board_token={resolve_board_token()}"
+    if let Err(e) = open_url(login_url) {
       fmt.Println(f"could not open a browser: {e}")
     }
   }
