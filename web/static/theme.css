@@ -838,16 +838,29 @@ input:focus, textarea:focus, select:focus {
   border-radius: var(--radius);
   padding: 4px;
 }
-.flt-menu button {
-  display: block; width: 100%; text-align: left;
+/* Both row kinds together: the root menu's dimensions are <button>, the
+   per-dimension options are <a class="flt-opt"> because they are navigations.
+   Styling only the button left every option list rendering as raw underlined
+   link-blue, wrapped inline. They are the same row, so they are one rule. */
+.flt-menu button,
+.flt-menu .flt-opt {
+  display: flex; align-items: center; gap: 5px;
+  width: 100%; text-align: left;
   background: none; border: none;
   color: var(--text-2);
   font: inherit; font-size: 12.5px;
   padding: 4px 8px;
   border-radius: 4px;
   cursor: pointer;
+  text-decoration: none;
+  white-space: nowrap;
 }
-.flt-menu button:hover { background: var(--bg-hover); color: var(--text); }
+.flt-menu button:hover,
+.flt-menu .flt-opt:hover { background: var(--bg-hover); color: var(--text); }
+.flt-menu .flt-opt.on { color: var(--text); background: var(--bg-raised); }
+.flt-menu .flt-opt .dim { color: var(--text-3); }
+/* The tally sits at the right edge, so the counts line up down the menu. */
+.flt-menu .flt-opt .count { margin-left: auto; padding-left: 10px; }
 .flt-chip {
   display: inline-flex; align-items: center; gap: 5px;
   background: var(--bg-raised);
