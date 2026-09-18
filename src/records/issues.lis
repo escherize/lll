@@ -23,18 +23,26 @@ pub fn fetch_comments(issue_id: string) -> Result<Slice<models.Comment>, string>
   Ok(result)
 }
 
+/// The stored spelling of a team key. Keys are uppercased on write (LLL-235),
+/// so `lll issue view eng-1` has to match `ENG` to keep working.
+fn records_team_key(key: string) -> string {
+  normalize_team_key(key)
+}
+
 /// Fetch an issue by KEY-123 and return the raw PB record JSON (team,
 /// assignee, labels, project expanded).
 pub fn fetch_issue_record(id: string) -> Result<string, string> {
   let (team_key, number) = split_issue_key(id)?
 
   let not_found = f"issue {id} not found — check 'lll issue list' or LLL_TEAM"
-  let Some(team) = find_team(team_key)? else {
-    return Err(not_found)
-  }
-
+  // One query, filtering through the team relation, rather than resolving the
+  // team to an id first and filtering on that (LLL-436). PocketBase filters on
+  // a relation's own fields, so `team.key` does in one round trip what the
+  // team lookup plus this filter did in two - and both arms of the old version
+  // returned the SAME not_found message, so nothing is lost by no longer
+  // telling them apart.
   let filter = url.QueryEscape(
-    f"{query.filter(team.id, "", "", "", "", "")} && number={number}",
+    f"team.key={query.quote(records_team_key(team_key))} && number={number}",
   )
   let mut issues = models.IssueList { .. }
   pb.fetch(
