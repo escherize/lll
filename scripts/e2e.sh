@@ -1281,6 +1281,7 @@ assert_contains "$out" "no comment containing 'never-coming'" "--timeout names w
 out=$(LLL_URL=$URL "$LIN" issue comment "$WKEY")
 assert_contains "$out" "lll issue watch $WKEY --until TEXT" "a comment listing points at watch --until"
 
+python3 "$REPO_ROOT"/scripts/test_response_reads.py "$LLL_ABS"
 python3 "$REPO_ROOT"/scripts/test_watch_until.py "$LLL_ABS" "$URL" "$WKEY"
 
 # LLL-464: bot help must succeed without a name, credentials or a server,
@@ -2234,7 +2235,7 @@ assert_contains "$out" "nothing is piped in" "-d - with no pipe names the fix"
 # --- create --json (TASK-177): the raw record, pipe-safe and keyable ---
 python3 "$REPO_ROOT"/scripts/test_create_response.py "$LLL_ABS" "$URL"
 python3 "$REPO_ROOT"/scripts/test_config_permissions.py "$LLL_ABS"
-python3 "$REPO_ROOT"/scripts/test_response_reads.py "$LLL_ABS"
+python3 "$REPO_ROOT"/scripts/test_agenda_scope.py "$LLL_ABS"
 python3 "$REPO_ROOT"/scripts/test_pr_body.py "$LLL_ABS" "$URL"
 python3 "$REPO_ROOT"/scripts/test_issue_table.py "$LLL_ABS" "$URL"
 python3 "$REPO_ROOT"/scripts/test_issue_project.py "$LLL_ABS" "$URL"
