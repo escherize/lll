@@ -1,5 +1,7 @@
 import "go:bytes"
 import "go:encoding/base64"
+import "go:crypto/sha256"
+import "go:encoding/hex"
 import "go:encoding/json"
 import "go:io"
 import "go:net/http"
@@ -313,7 +315,11 @@ fn token_verdict(base: string, tok: string) -> string {
   let parts = strings.Split(tok, ".")
   if parts.length() != 3 { return "opaque" }
   let Some(id) = token_subject(tok) else { return "corrupted" }
+  // Read from the token, so it costs nothing and stays live: a long-running
+  // process must keep noticing when its own token ages out mid-run, which is
+  // the whole of LLL-388. Never cached.
   if token_expired(tok) { return "expired" }
+  if probe_remembered(base, tok) { return "valid" }
   for coll in ["members", "_superusers"] {
     let found = request(
       base,
@@ -323,9 +329,44 @@ fn token_verdict(base: string, tok: string) -> string {
       bearer(tok),
       false,
     )
-    if found.is_ok() { return "valid" }
+    if found.is_ok() {
+      remember_probe(base, tok)
+      return "valid"
+    }
   }
   "rejected"
+}
+
+/// Whether this process has already asked the server to identify this token.
+///
+/// The probe is one round trip, and an empty list is what triggers it - so
+/// `lll issue view` on an issue with no linked docs, no blockers and no
+/// comments paid for it THREE times, byte-identically, inside one process
+/// (LLL-436). The comment above the empty-list check says it "costs one extra
+/// request"; it costs one per empty list.
+///
+/// The answer cannot change for a given (server, token) pair during a run. A
+/// re-mint changes the token, which changes the key, so the cache invalidates
+/// itself rather than needing to be cleared.
+///
+/// Kept in the environment because package-level `let` is rejected by this
+/// compiler and LLL_REMINT / LLL_TOKEN already make the environment this
+/// process's state (see the lisette-interop skill). A FINGERPRINT rather than
+/// the token: this variable is inherited by every child process lll starts
+/// (gh, git), and a token that currently lives only in a config file must not
+/// start leaking into them.
+fn probe_remembered(base: string, tok: string) -> bool {
+  os.Getenv("LLL_TOKEN_PROBED") == probe_key(base, tok)
+}
+
+fn remember_probe(base: string, tok: string) {
+  let _ = os.Setenv("LLL_TOKEN_PROBED", probe_key(base, tok))
+}
+
+fn probe_key(base: string, tok: string) -> string {
+  let sum = sha256.Sum256(f"{base}\n{tok}".bytes())
+  // Sum256 gives a fixed Array<byte, 32>; range indexing needs a slice.
+  hex.EncodeToString(sum.to_slice())
 }
 
 /// The record id a PocketBase auth JWT names, from its payload. None when the
