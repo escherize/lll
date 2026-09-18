@@ -9,8 +9,8 @@ absolute worker directory and the `lll` wrapper path when launching you.
 
 Use only the provided lll CLI wrapper to operate on your board. Do not use raw
 HTTP, a database, the web UI, repository source, another worker's files or a
-hosted board. You may read the provided connection file and write your wrapper
-and reports within your own directory. The supplied wrapper already connects to
+hosted board. Write your own reports within your directory; do not edit the
+supplied wrapper. It already connects to
 your instance; prefer its `--help` to guessing.
 
 1. Find the issue about retrying a comment after a socket reset in team FLEET.
@@ -42,6 +42,10 @@ If the wrapper or instance is unavailable, record a harness blocker and stop.
 ## Deliverable
 
 Write `report.json` and `report.md` in your worker directory. Log every CLI call
+in those reports. Never create/edit/delete/reconstruct `calls.jsonl` or any
+instrumentation file: the controller keeps the authoritative audit elsewhere
+and publishes it only after you return. Its absence during work is intentional.
+Log each call
 exactly, its exit code and first output line; redact any unexpected credential
 output. For every failure, record expected behavior, full sanitized error,
 whether help would have shown the correct form and whether you tried help.

@@ -10,7 +10,7 @@ import sys
 import tempfile
 from types import SimpleNamespace
 from unittest.mock import patch
-from agent_dx_fleet import connection, private_dir, private_write, public_snapshot, serve, stop
+from agent_dx_fleet import audit_path, connection, private_dir, private_write, public_snapshot, publish_audit, serve, stop
 
 with tempfile.TemporaryDirectory(prefix='lll-fleet-harness-') as temporary:
     root = Path(temporary)
@@ -48,9 +48,23 @@ with tempfile.TemporaryDirectory(prefix='lll-fleet-harness-') as temporary:
                             env=env, text=True, capture_output=True, timeout=10)
     assert result.returncode == 0, result.stderr
     assert result.stdout.strip() == 'isolated wrapper: [REDACTED]'
-    audit = json.loads((worker / 'calls.jsonl').read_text())
+    primary = audit_path(fake, worker)
+    audit = json.loads(primary.read_text())
     assert audit['command'] == ['lll', '--help'] and audit['exit_code'] == 0
     assert 'throwaway-test-token' not in json.dumps(audit)
+    assert not (worker / 'calls.jsonl').exists()
+    (worker / 'calls.jsonl').write_text('malformed worker reconstruction')
+    again = subprocess.run([sys.executable, str(Path(__file__).with_name('agent_dx_fleet.py')),
+                            'wrapper', str(worker), str(fake), 'throwaway-test-token'],
+                           env=env, text=True, capture_output=True, timeout=10)
+    assert again.returncode == 0, again.stderr
+    assert primary.stat().st_mode & 0o777 == 0o600
+    assert len(primary.read_text().splitlines()) == 2
+    assert 'throwaway-test-token' not in primary.read_text()
+    assert publish_audit(fake, worker)
+    assert (worker / 'worker-supplied-calls.jsonl').read_text() == 'malformed worker reconstruction'
+    assert (worker / 'calls.jsonl').read_bytes() == primary.read_bytes()
+    assert publish_audit(fake, worker)
     snapshot = {'webhooks': [{'id': 'hook', 'secret': 'throwaway-hook-secret'}]}
     assert public_snapshot(snapshot)['webhooks'][0]['secret'] == '[REDACTED]'
     assert snapshot['webhooks'][0]['secret'] == 'throwaway-hook-secret'

@@ -40,6 +40,10 @@ If the wrapper or instance is unavailable, record a harness blocker and stop.
 ## Deliverable
 
 Write `report.json` and `report.md` in your worker directory. Log every CLI call
+in those reports. Never create/edit/delete/reconstruct `calls.jsonl` or any
+instrumentation file: the controller keeps the authoritative audit elsewhere
+and publishes it only after you return. Its absence during work is intentional.
+Log each call
 exactly, its exit code and first output line; redact any unexpected credential
 output. For every failure, record expected behavior, full sanitized error,
 whether help would have shown the correct form and whether you tried help.

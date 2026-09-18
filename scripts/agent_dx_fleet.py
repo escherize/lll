@@ -86,6 +86,25 @@ def public_snapshot(snapshot):
     return result
 
 
+def audit_path(binary, worker):
+    return binary.parent / 'audits' / worker.parent.name / (worker.name + '.jsonl')
+
+
+def publish_audit(binary, worker):
+    source = audit_path(binary, worker)
+    for line in source.read_text().splitlines():
+        entry = json.loads(line)
+        assert set(entry) == {'command', 'exit_code', 'stdout', 'stderr'}
+        assert isinstance(entry['command'], list)
+    destination = worker / 'calls.jsonl'
+    supplied = worker / 'worker-supplied-calls.jsonl'
+    if destination.exists() and destination.read_bytes() != source.read_bytes():
+        assert not supplied.exists(), 'audit evidence changed again after publication'
+        destination.rename(supplied)
+    shutil.copy2(source, destination)
+    return supplied.exists()
+
+
 def wrapper_main():
     worker = Path(sys.argv[2]).resolve()
     binary = Path(sys.argv[3]).resolve()
@@ -98,9 +117,13 @@ def wrapper_main():
                             text=True, capture_output=True)
     stdout = redact(result.stdout, (token,))
     stderr = redact(result.stderr, (token,))
-    entry = {'command': ['lll', *args], 'exit_code': result.returncode,
+    entry = {'command': ['lll', *[redact(arg, (token,)) for arg in args]], 'exit_code': result.returncode,
              'stdout': stdout, 'stderr': stderr}
-    with (worker / 'calls.jsonl').open('a') as output:
+    audit = audit_path(binary, worker)
+    private_dir(audit.parent)
+    fd = os.open(audit, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
+    with os.fdopen(fd, 'a') as output:
+        os.fchmod(output.fileno(), 0o600)
         output.write(json.dumps(entry) + '\n')
     sys.stdout.write(stdout)
     sys.stderr.write(stderr)
@@ -109,6 +132,7 @@ def wrapper_main():
 
 class Instance:
     def __init__(self, binary, controller, worker, number):
+        self.binary = binary
         self.worker, self.number = worker, number
         self.private = controller / number
         private_dir(self.private)
@@ -166,6 +190,9 @@ class Instance:
             self.create('docs', {'team': self.team, 'slug': 'retry-once', 'title': 'Retry once', 'kind': 'decision',
                                  'body': 'Retry once after inspecting the saved result. Rejected: unbounded blind retries create duplicates.'})
             self.before = self.snapshot()
+            audit = audit_path(binary, worker)
+            private_dir(audit.parent)
+            private_write(audit, '')
             private_write(worker / 'conn.txt', f'{self.api}\n{self.bot_token}\nFLEET\n')
             assert connection(worker / 'conn.txt')[0] == self.api
             script = binary.parent / 'harness' / 'agent_dx_fleet.py'
@@ -234,7 +261,9 @@ class Instance:
             for name, value in expected.items():
                 if artifact.get(name) != value:
                     errors.append('artifact mismatch: ' + name)
-        result = {'worker': self.number, 'pass': not errors, 'errors': errors, 'new_records': len(new)}
+        supplied_audit = publish_audit(self.binary, self.worker)
+        result = {'worker': self.number, 'pass': not errors, 'errors': errors, 'new_records': len(new),
+                  'worker_supplied_audit_preserved': supplied_audit}
         (self.worker / 'truth.json').write_text(json.dumps(result, indent=2))
         (self.worker / 'before.json').write_text(redact(json.dumps(public_snapshot(self.before), indent=2)))
         (self.worker / 'after.json').write_text(redact(json.dumps(public_snapshot(after), indent=2)))

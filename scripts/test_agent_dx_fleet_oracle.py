@@ -1,12 +1,16 @@
 #!/usr/bin/env python3
 """Reject adversarial false positives in the independent fleet oracle."""
 import copy
-from agent_dx_fleet import COLLECTIONS, Instance
+from agent_dx_fleet import COLLECTIONS, Instance, audit_path, private_dir, private_write
 
 def exercise_oracle(root):
     i = Instance.__new__(Instance)
     i.worker = root / 'oracle'
     i.worker.mkdir()
+    i.binary = root / 'lll'
+    audit = audit_path(i.binary, i.worker)
+    private_dir(audit.parent)
+    private_write(audit, '')
     i.number, i.bot_id, i.target = '01', 'bot', 'target'
     i.team, i.bug, i.project = 'team', 'bug', 'project'
     i.before = {name: [] for name in COLLECTIONS}

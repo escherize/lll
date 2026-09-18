@@ -17,12 +17,17 @@ Send `{"action":"provision","case":"01","run":1}`. Launch workers only after
 the controller reports all ten ready. Give each worker only its case rules,
 number, directory and `lll` wrapper path. Workers invoke that wrapper from
 their own directory. It supplies the isolated environment and audits exact
-arguments, exit status and redacted output. Never print `conn.txt` or paste a
+arguments, exit status and redacted output under the controller, outside worker
+directories. Workers never create/edit `calls.jsonl`; their deliverables are
+report.json and report.md. Never print `conn.txt` or paste a
 token into a prompt. The wrapper permits the CLI only; task rules prohibit
 source, raw HTTP, the UI, identity changes and server/config operations.
 
 After every worker has written report.json and report.md, send
-`{"action":"judge"}`. The controller snapshots all eleven member-writable
+`{"action":"judge"}`. It validates and publishes the authoritative audits into
+worker evidence directories, preserving any worker-supplied file separately.
+Missing/malformed instrumentation means unavailable counts and a fresh rerun,
+not reconstruction from worker claims. The controller snapshots all eleven member-writable
 collections over REST, compares every seeded record, counts every new record
 and verifies the exact expected author/creator, fields and relations.
 Durable snapshots redact webhook secrets. A fresh reviewer writes review.json,
