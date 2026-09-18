@@ -168,7 +168,7 @@ class Instance:
             self.before = self.snapshot()
             private_write(worker / 'conn.txt', f'{self.api}\n{self.bot_token}\nFLEET\n')
             assert connection(worker / 'conn.txt')[0] == self.api
-            script = Path(__file__).resolve()
+            script = binary.parent / 'harness' / 'agent_dx_fleet.py'
             wrapper = f'#!/usr/bin/env python3\nimport os\nos.execv({sys.executable!r}, [{sys.executable!r}, {str(script)!r}, "wrapper", {str(worker)!r}, {str(binary)!r}, *os.sys.argv[1:]])\n'
             (worker / 'lll').write_text(wrapper)
             (worker / 'lll').chmod(0o700)
@@ -253,7 +253,15 @@ def serve(args):
     digest = hashlib.sha256(binary.read_bytes()).hexdigest()
     if digest != args.sha256:
         raise ValueError('pinned binary hash mismatch')
-    (root / 'fingerprint.json').write_text(json.dumps({'commit': args.commit, 'binary_sha256': digest}, indent=2))
+    harness = root / 'controller' / 'harness'
+    private_dir(harness)
+    for name in ('agent_dx_fleet.py', 'board_startup.py'):
+        shutil.copy2(Path(__file__).resolve().parent / name, harness / name)
+    (root / 'fingerprint.json').write_text(json.dumps({
+        'commit': args.commit, 'binary_sha256': digest,
+        'harness_sha256': hashlib.sha256((harness / 'agent_dx_fleet.py').read_bytes()).hexdigest(),
+        'startup_helper_sha256': hashlib.sha256((harness / 'board_startup.py').read_bytes()).hexdigest(),
+    }, indent=2))
     instances = []
     live_case = None
     try:

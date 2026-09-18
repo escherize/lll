@@ -10,7 +10,8 @@ Run `python3 scripts/test_agent_dx_fleet.py` before provisioning. Start
 `scripts/agent_dx_fleet.py` with `--root` pointing to an absent temporary
 path, `--binary` pointing to the built binary, and its exact `--commit` and
 `--sha256`. Keep this process alive; it owns all children. It copies the
-binary and records its fingerprint before accepting JSON lines on stdin.
+binary and wrapper/startup code and records their fingerprints before accepting
+JSON lines on stdin. Worktree edits cannot change code beneath live workers.
 
 Send `{"action":"provision","case":"01","run":1}`. Launch workers only after
 the controller reports all ten ready. Give each worker only its case rules,
