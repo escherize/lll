@@ -811,6 +811,8 @@ assert_contains "$out" "Deleted ENG-7" "forced delete output"
 out=$(LLL_URL=$URL LLL_TEAM=ENG "$LIN" issue list)
 assert_not_contains "$out" "ENG-7" "forced delete removed the issue"
 
+python3 "$REPO_ROOT"/scripts/test_cli_read_assertions.py
+
 # --- members: add + list ---
 out=$(LLL_URL=$URL "$LIN" member add -n bryan -e bryan@example.com)
 assert_contains "$out" "Added member bryan" "member add output"
