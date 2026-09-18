@@ -30,9 +30,13 @@ async page => {
   // Typing filters those destinations in the browser: they are this page's
   // own links, so narrowing them needs no round trip.
   await page.keyboard.type('Members', {delay: 40});
+  // Measured as PAINTED, not as the hidden property: `display: flex` on a
+  // row once beat the user agent's [hidden] rule, so the code believed rows
+  // were filtered out while they were still on screen.
   await page.waitForFunction(() => {
     const rows = [...document.querySelectorAll('#cmdk-goto [data-cmdk-item]')];
-    return rows.some(r => !r.hidden) && rows.some(r => r.hidden);
+    const painted = rows.filter(r => r.offsetParent !== null);
+    return painted.length > 0 && painted.length < rows.length;
   });
   await page.locator('#cmdk-goto a:visible', {hasText: 'Members'}).first().click();
   await page.waitForURL(/\/settings\/members$/);
@@ -45,7 +49,9 @@ async page => {
   const hit = page.locator(`#cmdk-results a[href="/issue/${key}"]`);
   await hit.waitFor();
   await page.screenshot({path: '/tmp/lll-447-cmdk.png'});
-  // The arriving answer takes the selection, so Enter follows the hit.
+  // The arriving answer takes the selection even though a destination was
+  // selected while it was in flight: Enter follows the best match, not
+  // whatever was highlighted a moment ago.
   await page.waitForFunction(
     k => document.querySelector('#cmdk .cmdk-sel')?.getAttribute('href') === '/issue/' + k,
     key,

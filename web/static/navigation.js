@@ -97,7 +97,11 @@ if (palette && typeof palette.showModal === 'function') {
         // page's node and take its children, so the id survives.
         const parsed = new DOMParser().parseFromString(html, 'text/html');
         results.innerHTML = parsed.getElementById('cmdk-results')?.innerHTML ?? '';
-        if (!palette.querySelector('.cmdk-sel')) select(shown()[0]);
+        // The list changed, so where the old selection sat means nothing:
+        // take the top of the new one. Enter has to follow the best match,
+        // not whichever destination happened to be selected while the
+        // answer was still in flight.
+        select(shown()[0]);
         sayNone();
       })
       .catch(() => {});

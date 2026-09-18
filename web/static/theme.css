@@ -1699,6 +1699,10 @@ input:focus, textarea:focus, select:focus {
   color: var(--text-3);
   font-size: 11px; font-weight: 600; letter-spacing: 0.02em;
 }
+/* `display: flex` on a row beats the user agent's [hidden] { display: none },
+   so the filter's hidden rows kept painting while the code believed they
+   were gone. Restate it here: a rule that sets display owns hiding too. */
+.cmdk-group [hidden], .cmdk-group[hidden] { display: none; }
 .cmdk-group a {
   display: flex; align-items: center; gap: 9px;
   padding: 6px 8px;
