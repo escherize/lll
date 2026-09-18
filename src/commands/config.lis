@@ -104,7 +104,7 @@ fn config_set(input: flags.CommandInput) -> Result<(), string> {
 /// one worth committing.
 pub fn set_repo_key(key: string, value: string) -> Result<string, string> {
   let path = config.repo_path()
-  set_key_in(path, key, value)?
+  set_key_in(path, key, value, false)?
   Ok(path)
 }
 
@@ -117,7 +117,7 @@ pub fn set_home_key(key: string, value: string) -> Result<string, string> {
   if let Err(e) = os.MkdirAll(dir, 0o755) {
     return Err(f"creating {dir}: {e}")
   }
-  set_key_in(path, key, value)?
+  set_key_in(path, key, value, true)?
   Ok(path)
 }
 
@@ -143,9 +143,7 @@ pub fn clear_home_key(key: string) -> Result<bool, string> {
   }
   if !removed { return Ok(false) }
   let out = strings.Join(lines, "\n")
-  if let Err(e) = os.WriteFile(path, out.bytes(), 0o644) {
-    return Err(f"writing {path}: {e}")
-  }
+  write_home_config(path, out)?
   Ok(true)
 }
 
@@ -153,7 +151,7 @@ pub fn clear_home_key(key: string) -> Result<bool, string> {
 /// existing assignment instead of appending a second one — duplicate keys
 /// make the file unparseable, and the whole point of these keys is that they
 /// get edited more than once.
-fn set_key_in(path: string, key: string, value: string) -> Result<(), string> {
+fn set_key_in(path: string, key: string, value: string, private: bool) -> Result<(), string> {
   let Ok(encoded) = json.Marshal(value) else { return Err("could not encode config value") }
   let line = f"{key} = {encoded as string}"
   let mut text = ""
@@ -179,8 +177,35 @@ fn set_key_in(path: string, key: string, value: string) -> Result<(), string> {
     if out != "" && !strings.HasSuffix(out, "\n") { out += "\n" }
     out += line + "\n"
   }
-  if let Err(e) = os.WriteFile(path, out.bytes(), 0o644) {
+  if private {
+    write_home_config(path, out)?
+  } else if let Err(e) = os.WriteFile(path, out.bytes(), 0o644) {
     return Err(f"writing {path}: {e}")
+  }
+  Ok(())
+}
+
+/// Tighten the opened machine config before truncating or writing secrets.
+/// Open without O_TRUNC so an existing public file is private first. Chmod
+/// uses the same descriptor as the write; repository config does not use this.
+fn write_home_config(path: string, out: string) -> Result<(), string> {
+  let file = match os.OpenFile(path, os.O_WRONLY | os.O_CREATE, 0o600) {
+    Ok(file) => file,
+    Err(e) => return Err(f"opening {path}: {e}"),
+  }
+  defer file.Close()
+  if let Err(e) = file.Chmod(0o600) {
+    return Err(f"restricting permissions on {path}: {e}")
+  }
+  if let Err(e) = file.Truncate(0) {
+    return Err(f"truncating {path}: {e}")
+  }
+  match file.WriteString(out) {
+    Partial.Ok(_) => (),
+    Partial.Err(e) | Partial.Both(_, e) => return Err(f"writing {path}: {e}"),
+  }
+  if let Err(e) = file.Close() {
+    return Err(f"closing {path}: {e}")
   }
   Ok(())
 }

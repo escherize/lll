@@ -84,7 +84,7 @@ pub fn attach(args: Slice<string>) -> Result<(), string> {
   }
 
   let path = filepath.Join(root, ".lll.toml")
-  set_key_in(path, "team", key)?
+  set_key_in(path, "team", key, false)?
   fmt.Println(f"team = \"{key}\" in {path}")
   fmt.Println(ensure_attached_team(key))
   // A plain directory has no clone to inherit the file; what it has instead is
