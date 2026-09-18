@@ -64,23 +64,29 @@ pub fn bind_addr() -> string {
 /// The port was never the boundary. Anyone who could reach :8091 could always
 /// reach these routes; all that changes is that they no longer have to guess
 /// a port number to do it.
-fn api_proxy(mux: mut Ref<http.ServeMux>, base: string) -> Result<(), string> {
+fn api_proxy(mux: mut Ref<http.ServeMux>, base: string, admin_ui: bool) -> Result<(), string> {
   let Ok(target) = url.Parse(base) else {
     return Err(f"cannot proxy the API: '{base}' is not a url")
   }
   let proxy = httputil.NewSingleHostReverseProxy(target)
-  // Both of PocketBase's namespaces: /api/ is the REST surface every client
-  // speaks, /_/ is the admin UI `lll up` prints a link to. Neither collides
-  // with a board route - the board owns /t/, /issue/, /static/ and friends.
+  // /api/ is the REST surface every client speaks. The administration UI
+  // shares that upstream only when the operator explicitly enables it.
   mux.HandleFunc("GET /.well-known/lll", board_discovery)
   mux.Handle("/api/", proxy)
-  mux.Handle("/_/", proxy)
+  if admin_ui {
+    mux.Handle("/_/", proxy)
+  } else {
+    for path in ["/_", "/_/"] {
+      mux.HandleFunc(path, http.NotFound)
+    }
+  }
   Ok(())
 }
 
 pub fn run_server(
   port: int,
   refresh: Option<fn() -> Result<string, string>>,
+  admin_ui: bool,
 ) -> Result<(), string> {
   // The gate's env token, resolved (and generated when unset) before any
   // request can arrive — the handlers and the banner below must agree.
@@ -149,7 +155,7 @@ pub fn run_server(
     bridge(events, hub)
   }
 
-  let mux = board_mux(cfg, boot, hub, board_member)?
+  let mux = board_mux(cfg, boot, hub, board_member, admin_ui)?
 
   // Bind BEFORE announcing: "board <url>" is the promise that the board is
   // accepting connections, and e2e_web.sh curls the URL the moment the line
@@ -164,6 +170,9 @@ pub fn run_server(
     Err(e) => return Err(f"server: {e}"),
   }
   fmt.Println(f"board  http://127.0.0.1:{port}")
+  if admin_ui {
+    fmt.Println(f"admin  http://127.0.0.1:{port}/_/ (enabled by --admin-ui)")
+  }
   fmt.Println(
     f"board  login http://127.0.0.1:{port}/?board_token={board_tok} (sets a cookie; LLL_BOARD_TOKEN pins it)",
   )
@@ -175,7 +184,7 @@ pub fn run_server(
 
 /// Construct an independent router. Runtime I/O (configuration, listener and
 /// realtime subscription) belongs to run_server, not route registration.
-fn board_mux(cfg: config.Config, boot: models.Team, hub: Hub, board_member: Actor) -> Result<mut Ref<http.ServeMux>, string> {
+fn board_mux(cfg: config.Config, boot: models.Team, hub: Hub, board_member: Actor, admin_ui: bool) -> Result<mut Ref<http.ServeMux>, string> {
   let mut mux: mut Ref<http.ServeMux> = http.NewServeMux()
   let team_id = boot.id
   let boot_key = boot.key
@@ -188,12 +197,12 @@ fn board_mux(cfg: config.Config, boot: models.Team, hub: Hub, board_member: Acto
   // deferred rather than rejected).
   //
   // Registered FIRST so the board's own routes cannot shadow /api/.
-  api_proxy(mux, cfg.url)?
+  api_proxy(mux, cfg.url, admin_ui)?
   //
   // Every BOARD route sits behind the board gate (serve_gate.lis): pages,
   // writes, the SSE stream and static assets alike answer only board-token
-  // requests. /api/ and /_/ are the exception and are proxied ungated - see
-  // api_proxy for why that is a move rather than a hole.
+  // requests. /api/ stays outside that cookie gate for remote clients.
+  // /_/ is registered only with --admin-ui and keeps upstream admin auth.
   //
   // The board, its issue pages and its search live under /t/KEY/ (TASK-198):
   // one server, every team, each team's board a shareable URL. The bare

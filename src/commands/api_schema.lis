@@ -11,7 +11,7 @@ server enforces) by scripts/gen_api_schema.py; regenerate with
 `mise run api-schema`. Never edit this output by hand.
 
 Every collection is served under /api/collections/<name>/records with
-list/view/create/update/delete, filtered by PocketBase filter
+list/view/create/update/delete, filtered by server filter
 expressions: ?filter=(state='todo' && title~'login'), sorted with
 ?sort=-created. Rules name who may call each verb: (any) is every
 authenticated member, (superuser only) is nobody else, anything else

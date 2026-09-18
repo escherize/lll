@@ -30,7 +30,7 @@ pub fn display_error(message: string) -> ErrorDisplay {
     } else { f"The server rejected this request (HTTP {status})." }
     return ErrorDisplay { summary, details: message }
   }
-  if message.starts_with("cannot reach PocketBase at ") || ["GET http", "POST http", "PATCH http", "DELETE http", "PUT http", "HEAD http", "OPTIONS http"].any(|prefix| message.starts_with(prefix)) {
+  if message.starts_with("cannot reach the lll server at ") || ["GET http", "POST http", "PATCH http", "DELETE http", "PUT http", "HEAD http", "OPTIONS http"].any(|prefix| message.starts_with(prefix)) {
     return ErrorDisplay { summary: "The board could not communicate with its server. Try again.", details: message }
   }
   if message.starts_with("decoding ") {

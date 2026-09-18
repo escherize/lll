@@ -130,7 +130,7 @@ fn issue_create_spec() -> Slice<flags.Flag> {
     },
     flags.Flag {
       name: "--json",
-      help: "raw PocketBase JSON (team, assignee, labels, project\nexpanded), pipe-friendly",
+      help: "raw record JSON (team, assignee, labels, project\nexpanded), pipe-friendly",
       ..,
     },
     flags.Flag {
@@ -184,7 +184,7 @@ fn issue_list_spec() -> Slice<flags.Flag> {
     },
     flags.Flag {
       name: "--json",
-      help: "raw PocketBase JSON (team, assignee, labels, project\nexpanded), pipe-friendly",
+      help: "raw record JSON (team, assignee, labels, project\nexpanded), pipe-friendly",
       ..,
     },
     flags.Flag { name: "--ready", help: "only open issues whose blockers are all done (LLL-175): what an agent can pick up now", .. },
@@ -297,7 +297,7 @@ pub fn issue_watch_spec() -> Slice<flags.Flag> {
   flags.with_team([
     flags.Flag {
       name: "--json",
-      help: "NDJSON: one raw PocketBase event object per line, with a\n\"topic\" field added",
+      help: "NDJSON: one raw server event object per line, with a\n\"topic\" field added",
       ..,
     },
     flags.Flag {

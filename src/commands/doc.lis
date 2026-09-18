@@ -322,7 +322,7 @@ fn doc_view_spec() -> Slice<flags.Flag> {
     flags.Flag { name: "--raw", help: "print only the body, no chrome", .. },
     flags.Flag {
       name: "--json",
-      help: "raw PocketBase JSON (linked issues expanded), pipe-friendly",
+      help: "raw record JSON (linked issues expanded), pipe-friendly",
       ..,
     },
   ])
