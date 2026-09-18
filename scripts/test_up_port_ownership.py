@@ -50,6 +50,7 @@ def api(url, path, payload=None, token=None):
 
 
 binary = str(Path(sys.argv[1]).resolve())
+neighbor_race = '--neighbor-board-race' in sys.argv[2:]
 with tempfile.TemporaryDirectory(prefix='lll-up-owned-') as directory:
     base = Path(directory)
     db, db_reservations = reserve_run(22000, 35000, 3)
@@ -79,15 +80,29 @@ with tempfile.TemporaryDirectory(prefix='lll-up-owned-') as directory:
         # which the old harness would accept merely because health returns 200.
         db_reservations[1].close()
         web_reservations[2].close()
+        competitor = None
+        if neighbor_race:
+            # Model a parallel bind probe while the neighbor chooses its port.
+            # Its announced endpoint is authoritative even when it increments.
+            competitor = socket.socket()
+            listeners.append(competitor)
+            competitor.bind(('127.0.0.1', web + 2))
+            competitor.listen(4)
         neighbor, _, _ = boot('neighbor', db + 1, web + 2, 'OTHER')
         assert neighbor['db_url'] == f'http://127.0.0.1:{db + 1}'
+        if competitor:
+            assert int(neighbor['board_url'].rsplit(':', 1)[1]) >= web + 3
+            competitor.close()
         db_reservations[2].close()
         for listener in (db_reservations[0], web_reservations[0], web_reservations[1]):
             threading.Thread(target=refuse, args=(listener,), daemon=True).start()
         owned, env, home = boot('owned', db, web, 'E2E')
         assert owned['db_url'] != neighbor['db_url']
         assert int(owned['db_url'].rsplit(':', 1)[1]) >= db + 2
-        assert int(owned['board_url'].rsplit(':', 1)[1]) >= web + 3
+        # Only the first two board ports remain reserved. The neighbor may
+        # have moved above +2; the owned boot can legitimately reuse that hole.
+        assert int(owned['board_url'].rsplit(':', 1)[1]) >= web + 2
+        assert owned['board_url'] != neighbor['board_url']
 
         def token(url):
             return api(url, '/api/collections/_superusers/auth-with-password',
@@ -105,7 +120,7 @@ with tempfile.TemporaryDirectory(prefix='lll-up-owned-') as directory:
         assert correct.returncode == 0 and 'Created E2E-1' in correct.stdout, correct.stderr
         rows = api(neighbor['db_url'], '/api/collections/issues/records', token=neighbor_token)
         assert rows['totalItems'] == 0, 'fixture wrote to the neighboring database'
-        print('Startup port ownership: healthy neighbor reproduces missing E2E; owned banner skips multiple occupied ports and targets the correct database')
+        print('Startup port ownership: healthy neighbor, occupied ports and correct database passed; transient neighbor collision=' + str(neighbor_race))
     finally:
         for process in processes:
             if process.poll() is None:
