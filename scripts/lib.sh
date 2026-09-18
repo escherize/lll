@@ -121,9 +121,9 @@ $1"
 #
 # Pattern is a basic regex, so the existing '^name\tvalue' anchors still work.
 assert_cli_contains() { # label pattern command...
-  local label=$1 pattern=$2 out status
+  local label=$1 pattern=$2 out status=0
   shift 2
-  out=$("$@" 2>&1); status=$?
+  out=$("$@" 2>&1) || status=$?
   [ "$status" -eq 0 ] || fail "$label: the read itself failed (exit $status): $*
 $out"
   printf '%s\n' "$out" | grep -- "$pattern" >/dev/null || fail "$label: expected '$pattern' from: $*
@@ -131,9 +131,9 @@ $out"
 }
 
 assert_cli_lacks() { # label pattern command...
-  local label=$1 pattern=$2 out status
+  local label=$1 pattern=$2 out status=0
   shift 2
-  out=$("$@" 2>&1); status=$?
+  out=$("$@" 2>&1) || status=$?
   [ "$status" -eq 0 ] || fail "$label: the read itself failed (exit $status): $*
 $out"
   printf '%s\n' "$out" | grep -- "$pattern" >/dev/null && fail "$label: did not expect '$pattern' from: $*
