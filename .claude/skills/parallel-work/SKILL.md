@@ -20,7 +20,13 @@ Take a worktree. Not a branch in the shared checkout, and not a second clone.
 ```sh
 # The harness's EnterWorktree, or by hand:
 git worktree add .claude/worktrees/<name> -b <branch> origin/main
+mise trust .claude/worktrees/<name>/mise.toml
 ```
+
+Trust the new worktree's config before running any mise task. Mise trusts by
+path, so trusting the main checkout does not cover a new worktree. Without
+this step it reports `error parsing config file` and refuses to start the
+gate; that is a trust failure before verification runs (LLL-149).
 
 A worktree is cheaper than a clone - it shares the object store - and that
 sharing is exactly what the rest of this file is about.
@@ -84,6 +90,26 @@ remove only the temp directory your own run printed.
 Gates are parallel-safe: the e2e suite binds free ports, uses its own temp data
 directory, and since LLL-369 runs from outside the checkout, so a gate no longer
 mutates the tree another agent is reading.
+
+## Keep formatting inside the issue
+
+`lis format` without a path formats the whole project. On lis 0.12.0 this
+rewrote 111 files during a scoped auth change (LLL-461). Pass each intended
+source file explicitly, then inspect the diff before committing:
+
+```sh
+lis format src/commands/issue.lis
+lis format src/commands/issue.lis --check
+git diff --stat
+git diff --check
+```
+
+A directory path formats every source file beneath it. Even a single-file
+format can change unrelated existing lines in that file; review those too.
+For a new helper in a large existing file, format a temporary `.lis` file
+containing the helper and apply its formatted text to the intended source.
+Keep repository-wide formatting in its own change rather than expanding the
+current issue. Never restore another session's edits to shrink a diff.
 
 ## Getting the work out
 

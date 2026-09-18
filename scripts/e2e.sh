@@ -1643,6 +1643,31 @@ out=$(LLL_URL=$URL LLL_TEAM=ENG "$LIN" doc list --search race --json)
 printf '%s' "$out" | jq -e '.items | map(.slug) == ["race-found"]' >/dev/null \
   || fail "doc list --search --json is the filtered list: $out"
 
+# LLL-440: kind filtering uses the existing authoring vocabulary and stays
+# scoped to the selected team, in text and JSON and alongside --search.
+LLL_URL=$URL LLL_TEAM=ENG "$LIN" doc new -s port-choice -t "Port choice" -k decision >/dev/null
+LLL_URL=$URL LLL_TEAM=ENG "$LIN" doc new -s port-spec -t "Port spec" -k prd >/dev/null
+LLL_URL=$URL LLL_TEAM=OPS "$LIN" doc new -s ops-choice -t "OPS choice" -k decision >/dev/null
+for pair in 'wiki port-notes' 'finding race-found' 'decision port-choice' 'prd port-spec'; do
+  read -r kind slug <<< "$pair"
+  out=$(LLL_URL=$URL LLL_TEAM=ENG "$LIN" doc list --kind "$kind" --json)
+  printf '%s' "$out" | jq -e --arg slug "$slug" --arg kind "$kind" \
+    '.items | length == 1 and all(.slug == $slug and .kind == $kind)' >/dev/null \
+    || fail "doc list --kind $kind returns only its scoped kind: $out"
+done
+out=$(LLL_URL=$URL LLL_TEAM=ENG "$LIN" doc list -k ' DECISION ' --search choice)
+assert_contains "$out" $'port-choice\tdecision\tPort choice' "kind alias, normalization and search combine"
+assert_not_contains "$out" "ops-choice" "kind filter excludes other teams"
+out=$(LLL_URL=$URL LLL_TEAM=ENG "$LIN" doc list --kind decision --search race --json)
+printf '%s' "$out" | jq -e '(.items // []) == []' >/dev/null || fail "kind and search intersect: $out"
+set +e
+out=$(LLL_URL=$URL LLL_TEAM=ENG "$LIN" doc list --kind memo 2>&1)
+rc=$?
+set -e
+[ "$rc" -ne 0 ] || fail "unknown doc kind must fail"
+assert_contains "$out" "unknown kind 'memo'" "doc list validates kinds"
+assert_contains "$out" "wiki, finding, decision, prd" "unknown kind names valid kinds"
+
 out=$(LLL_URL=$URL LLL_TEAM=ENG "$LIN" doc view port-notes)
 assert_contains "$out" "port-notes Port notes" "doc view header"
 assert_contains "$out" "Kind:      wiki" "doc view kind"
@@ -3372,6 +3397,7 @@ assert_contains "$schema_out" "Rules:" "api --schema carries the access rules"
 
 # --- web board (own ephemeral PB; see e2e_web.sh) ---
 python3 "$REPO_ROOT"/scripts/test_doc_pagination.py "$LLL_ABS" "$URL"
+python3 "$REPO_ROOT"/scripts/test_issue_since.py "$LLL_ABS" "$URL"
 python3 "$REPO_ROOT"/scripts/test_export_import.py "$LLL_ABS" "$URL"
 python3 "$REPO_ROOT"/scripts/test_import_github.py "$LLL_ABS" "$URL"
 python3 "$REPO_ROOT"/scripts/test_claims_live.py "$LLL_ABS" "$URL"

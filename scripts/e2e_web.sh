@@ -363,9 +363,9 @@ $(diff <(printf '%s' "$board_rail") <(rail "$issue") || true)"
 assert_contains "$board_rail" 'href="/t/ENG/?assignee=e2e"' \
   "rail has a My issues row (the board's own URL encoding, team-routed)"
 assert_contains "$board_rail" 'id="rail-views"' "rail carries the saved views group"
-# The version is derived from `git describe` (see src/commands/version.lis),
-# so assert the shape the footer renders, not a pinned number that only holds
-# at a clean tag checkout.
+# The version is a build literal (src/commands/version.lis); the CLI e2e
+# checks it against lisette.toml. Match the footer to this binary's version
+# so the assertion stays valid across release bumps.
 assert_contains "$board_rail" "v$("$LIN" --version | sed 's/^lll //')" \
   "rail footer carries the version"
 
@@ -1044,9 +1044,11 @@ if command -v playwright-cli >/dev/null 2>&1; then
     if (await toggle.getAttribute("aria-expanded") !== "false" || !await toggle.evaluate(el => el === document.activeElement)) throw new Error("navigation close focus");
     await toggle.click();
     await page.locator("#rail").getByRole("link", {name:"Board",exact:true}).click();
+    await page.waitForURL("**/");
     await page.setViewportSize({width:1440,height:900});
     await page.locator("#rail").waitFor({state:"visible"});
-    if (await toggle.isVisible()) throw new Error("mobile toggle visible on desktop");
+    // Navigation and responsive styles must settle before asserting desktop state.
+    await toggle.waitFor({state:"hidden"});
     return "phone navigation passed";
   }' 2>&1)
   assert_contains "$mobile_nav" 'phone navigation passed' "browser: phone navigation"
