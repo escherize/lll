@@ -369,7 +369,9 @@ fn favorites_broadcast(hub: Hub) {
 /// fetch and patch it into every open page — same shape as
 /// favorites_broadcast, since a view is the workspace's like a star is.
 fn views_broadcast(hub: Hub) {
-  if let Ok(html) = render("rail-views", view_vms()) {
+  // Keep the last successful group when its refresh fails.
+  let Ok(views) = fetch_view_vms() else { return };
+  if let Ok(html) = render("rail-views", views) {
     let _ = hub.broadcast.send(
       Broadcast { scope: "*", payload: patch_event(html), .. },
     )
