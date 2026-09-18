@@ -340,10 +340,18 @@ fn compose_vm(team_id: string) -> Result<ComposeVM, string> {
 fn comment_vm(c: models.Comment) -> CommentVM {
   let mut author = c.expand.author.name
   if author == "" { author = "anon" }
+  // The avatar follows the name SHOWN, not the record (LLL-452). An
+  // authorless comment - an import that carried no member, or the claim sweep,
+  // which is not a member and must not mint one - rendered with no initials,
+  // so the avatar template skipped it and the row sat flush left, out of line
+  // with every other comment. Built from the record where there is one, so a
+  // real member keeps its colour and its bot glyph.
+  let mut avatar = avatar_vm(c.expand.author)
+  if c.expand.author.name == "" { avatar = avatar_vm(models.Member { name: author, .. }) }
   CommentVM {
     id: c.id,
     author,
-    avatar: avatar_vm(c.expand.author),
+    avatar,
     age: display.relative(c.created),
     body: markdown.md_html(c.body),
     body_md: c.body,
