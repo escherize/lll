@@ -91,6 +91,26 @@ Gates are parallel-safe: the e2e suite binds free ports, uses its own temp data
 directory, and since LLL-369 runs from outside the checkout, so a gate no longer
 mutates the tree another agent is reading.
 
+## Keep formatting inside the issue
+
+`lis format` without a path formats the whole project. On lis 0.12.0 this
+rewrote 111 files during a scoped auth change (LLL-461). Pass each intended
+source file explicitly, then inspect the diff before committing:
+
+```sh
+lis format src/commands/issue.lis
+lis format src/commands/issue.lis --check
+git diff --stat
+git diff --check
+```
+
+A directory path formats every source file beneath it. Even a single-file
+format can change unrelated existing lines in that file; review those too.
+For a new helper in a large existing file, format a temporary `.lis` file
+containing the helper and apply its formatted text to the intended source.
+Keep repository-wide formatting in its own change rather than expanding the
+current issue. Never restore another session's edits to shrink a diff.
+
 ## Getting the work out
 
 Push the branch. A worktree can be deleted with the session, and unpushed work
