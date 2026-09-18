@@ -36,6 +36,7 @@ e2e_trap_cleanup cleanup
 
 (cd "$REPO_ROOT" && lis build >/dev/null)
 python3 "$REPO_ROOT"/scripts/test_board_startup.py "$REPO_ROOT"/target/.lisette/bin/lll
+python3 "$REPO_ROOT"/scripts/test_up_port_ownership.py "$REPO_ROOT"/target/.lisette/bin/lll
 python3 "$REPO_ROOT"/scripts/test_up_errors.py "$REPO_ROOT"/target/.lisette/bin/lll
 python3 "$REPO_ROOT"/scripts/test_board_identity.py "$REPO_ROOT"/target/.lisette/bin/lll
 python3 "$REPO_ROOT"/scripts/test_scratch.py
@@ -62,7 +63,7 @@ time.sleep(60)
 BLOCK_PID=$!
 sleep 0.5
 
-# --- own path: boots PB on DB_PORT+1, board on WEB_PORT+1, default creds ---
+# --- own path: skips occupied preferred ports, default creds ---
 set -m
 env -u LLL_ADMIN_EMAIL -u LLL_ADMIN_PASSWORD -u LLL_TOKEN \
   LLL_URL="http://127.0.0.1:$DB_PORT" LLL_TEAM=E2E USER=e2euser HOME="$E2E_HOME" \
@@ -70,19 +71,19 @@ env -u LLL_ADMIN_EMAIL -u LLL_ADMIN_PASSWORD -u LLL_TOKEN \
 UP_PID=$!
 set +m
 
-DB2=$((DB_PORT + 1)); WEB2=$((WEB_PORT + 1))
-wait_ok "http://127.0.0.1:$DB2/api/health" || fail "own PB not on incremented port $DB2"
+endpoints=$(python3 "$REPO_ROOT"/scripts/board_startup.py --endpoints "$UP_LOG") \
+  || fail "own process did not announce its endpoints"
+DB2=$(jq -r '.db_url | split(":")[-1]' <<<"$endpoints")
+WEB2=$(jq -r '.board_url | split(":")[-1]' <<<"$endpoints")
+[ "$DB2" -gt "$DB_PORT" ] || fail "own PB did not skip occupied port $DB_PORT"
+[ "$WEB2" -gt "$WEB_PORT" ] || fail "own board did not skip occupied port $WEB_PORT"
+wait_ok "http://127.0.0.1:$DB2/api/health" || fail "owned announced PB is not healthy"
 
 # --- TASK-182: no LLL_BOARD_TOKEN here — the boot generates one per boot and
 # prints its login URL in the banner. Parse it out; the gate refuses every
 # other request, so the suite's own liveness probes must log in like a
 # browser does.
-BOARD_TOKEN=""
-for _ in $(seq 1 100); do
-  BOARD_TOKEN=$(sed -n 's/.*[?&]board_token=\([^ )]*\).*/\1/p' "$UP_LOG" | head -1)
-  [ -n "$BOARD_TOKEN" ] && break
-  sleep 0.1
-done
+BOARD_TOKEN=$(jq -r '.board_token' <<<"$endpoints")
 [ -n "$BOARD_TOKEN" ] || fail "banner did not print a board login URL"
 BOARD_COOKIE="Cookie: lll_board=$BOARD_TOKEN"
 anon=$(curl -s -o /dev/null -w '%{http_code}' "http://127.0.0.1:$WEB2/")
@@ -151,22 +152,25 @@ EXT_PORT=$((DB_PORT + 5))
 # A genuinely separate server, so the reuse path is tested against a PocketBase
 # this `lll up` did not start: a second lll up, its own process and data dir.
 EXT_WEB=$((WEB_PORT + 7))
+EXT_LOG="$DATA_DIR/external.log"
+E2E_LOGS="$E2E_LOGS $EXT_LOG"
 env -u LLL_TOKEN LLL_URL="http://127.0.0.1:$EXT_PORT" LLL_TEAM=E2E HOME="$E2E_HOME" \
   "$LLL_ABS" up --no-open --port "$EXT_WEB" --pb-dir "$DATA_DIR/ext_pb_data" \
-  </dev/null >/dev/null 2>&1 &
+  </dev/null >"$EXT_LOG" 2>&1 &
 EXT_PB_PID=$!
+endpoints=$(python3 "$REPO_ROOT"/scripts/board_startup.py --endpoints "$EXT_LOG") \
+  || fail "external owned process did not announce its endpoints"
+EXT_PORT=$(jq -r '.db_url | split(":")[-1]' <<<"$endpoints")
 wait_ok "http://127.0.0.1:$EXT_PORT/api/health" || fail "the external PB never came up"
 set -m
 env -u LLL_TOKEN LLL_URL="http://127.0.0.1:$EXT_PORT" LLL_TEAM=E2E HOME="$E2E_HOME" \
   "$LLL" up --no-open --port "$WEB_PORT" --pb-dir "$DATA_DIR/pb_data" >"$UP_LOG" 2>&1 &
 UP_PID=$!
 set +m
-BOARD_TOKEN2=""
-for _ in $(seq 1 100); do
-  BOARD_TOKEN2=$(sed -n 's/.*[?&]board_token=\([^ )]*\).*/\1/p' "$UP_LOG" | head -1)
-  [ -n "$BOARD_TOKEN2" ] && break
-  sleep 0.1
-done
+endpoints=$(python3 "$REPO_ROOT"/scripts/board_startup.py --endpoints "$UP_LOG") \
+  || fail "reuse process did not announce its endpoints"
+WEB2=$(jq -r '.board_url | split(":")[-1]' <<<"$endpoints")
+BOARD_TOKEN2=$(jq -r '.board_token' <<<"$endpoints")
 [ -n "$BOARD_TOKEN2" ] || fail "the reuse boot did not print a board login URL"
 curl -sf -H "Cookie: lll_board=$BOARD_TOKEN2" "http://127.0.0.1:$WEB2/" >/dev/null \
   || fail "reuse-path board not serving (or gate broke)"
@@ -218,6 +222,9 @@ printf '%s\n' 'Platform42' >"$OUTSIDE/team-answer"
     "$LLL_ABS" up --no-open --port "$OUT_WEB_PORT" --pb-dir "$OUTSIDE/pb_data" <"$OUTSIDE/team-answer" ) \
   >"$OUT_LOG" 2>&1 &
 OUTSIDE_PID=$!
+endpoints=$(python3 "$REPO_ROOT"/scripts/board_startup.py --endpoints "$OUT_LOG") \
+  || fail "outside process did not announce its endpoints"
+OUT_URL=$(jq -r '.db_url' <<<"$endpoints")
 wait_ok "$OUT_URL/api/health" 150 \
   || fail "lll up outside the checkout should boot now that migrations are embedded: $(cat "$OUT_LOG")"
 # Migrated, not merely listening: an empty database answers /api/health too, and
