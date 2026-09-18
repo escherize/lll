@@ -1,0 +1,117 @@
+import "go:os"
+
+import "config"
+
+// Characterization cover for `scoped_args` (LLL-486). It had none, and it is
+// the function the threading refactor changes most: today `--team KEY` is
+// applied by MUTATING the process environment (scope.lis:22), so the value
+// reaches config only because 41 downstream call sites re-read the
+// environment. After threading it becomes a passed value.
+//
+// These pin the observable contract that must survive that change: the flag
+// is removed from the arguments, and it wins over the configured team.
+
+/// One saved variable, remembering whether it was set at all.
+struct SavedVar { name: string, value: Option<string> }
+
+fn save_team_env() -> Slice<SavedVar> {
+  let names = [
+    "LLL_TEAM",
+    "LLL_CONFIG_HOME",
+    "XDG_CONFIG_HOME",
+    "HOME",
+    "LLL_URL",
+  ]
+  let saved = names.map(|name| SavedVar { name, value: os.LookupEnv(name) })
+  for v in saved {
+    let _ = os.Unsetenv(v.name)
+  }
+  saved
+}
+
+fn restore_team_env(saved: Slice<SavedVar>) {
+  for v in saved {
+    match v.value {
+      Some(text) => {
+        let _ = os.Setenv(v.name, text)
+      },
+      None => {
+        let _ = os.Unsetenv(v.name)
+      },
+    }
+  }
+}
+
+#[test]
+fn scoped_args_strips_the_team_flag_from_the_arguments() {
+  let saved = save_team_env()
+  defer restore_team_env(saved)
+  let assert Ok(cleaned) = scoped_args([
+    "lll",
+    "issue",
+    "list",
+    "--team",
+    "ENG",
+    "--state",
+    "todo",
+  ])
+  // The flag and its value are consumed; everything else survives in order.
+  assert cleaned.equals(["lll", "issue", "list", "--state", "todo"])
+}
+
+#[test]
+fn scoped_args_accepts_the_equals_form() {
+  let saved = save_team_env()
+  defer restore_team_env(saved)
+  let assert Ok(cleaned) = scoped_args(["lll", "issue", "list", "--team=ENG"])
+  assert cleaned.equals(["lll", "issue", "list"])
+}
+
+#[test]
+fn a_command_team_reaches_config() {
+  // The contract, stated without reference to how it is carried: after
+  // scoped_args has seen --team, the configured team IS that team. Today the
+  // carrier is the environment; threading replaces the carrier and must keep
+  // this true.
+  let saved = save_team_env()
+  defer restore_team_env(saved)
+  let assert Ok(_) = scoped_args(["lll", "issue", "list", "--team", "SCOPED"])
+  let assert Ok(cfg) = config.load()
+  assert cfg.team == "SCOPED"
+}
+
+#[test]
+fn no_team_flag_leaves_the_configured_team_alone() {
+  let saved = save_team_env()
+  defer restore_team_env(saved)
+  let _ = os.Setenv("LLL_TEAM", "AMBIENT")
+  let assert Ok(cleaned) = scoped_args([
+    "lll",
+    "issue",
+    "list",
+    "--state",
+    "todo",
+  ])
+  assert cleaned.equals(["lll", "issue", "list", "--state", "todo"])
+  let assert Ok(cfg) = config.load()
+  assert cfg.team == "AMBIENT"
+}
+
+#[test]
+fn an_unscoped_noun_passes_its_arguments_through_untouched() {
+  // `scoped_args` returns early for nouns that take no --team, so a --team
+  // there is NOT consumed. Pinned because it looks like a bug and is not: the
+  // flag is left for the command's own parser to reject by name.
+  let saved = save_team_env()
+  defer restore_team_env(saved)
+  let args = ["lll", "whoami", "--team", "ENG"]
+  let assert Ok(cleaned) = scoped_args(args)
+  assert cleaned.equals(args)
+}
+
+#[test]
+fn a_team_flag_without_a_value_is_refused() {
+  let saved = save_team_env()
+  defer restore_team_env(saved)
+  assert scoped_args(["lll", "issue", "list", "--team"]).is_err()
+}

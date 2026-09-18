@@ -397,3 +397,167 @@ fn a_real_home_config_and_exported_env_cannot_reach_these_tests() {
   // The one that printed a real hosted token into a failure message.
   assert cfg.token == ""
 }
+
+// ------------------------------------------- characterization: LLL-486
+//
+// Pinned BEFORE threading Config through the call sites (LLL-486), so the
+// refactor has to prove it changed nothing. Every assertion here passes on
+// the ambient-config code these were written against.
+//
+// The file-layering rules above are already covered. What was not covered is
+// the half the refactor actually moves: per-key environment precedence, the
+// rule that an env var can only ADD a value and never clear one, and the
+// `--team` override, which today is process-environment mutation
+// (scope.lis:22) rather than a value anyone passes.
+
+/// `traced_in`, for any set of variables rather than LLL_TOKEN alone. The
+/// fixture's $HOME is applied first, so a caller may override it.
+fn traced_with_env(
+  dir: string,
+  home: string,
+  vars: Slice<(string, string)>,
+) -> Result<(Config, Sources), string> {
+  let Ok(prev_dir) = os.Getwd() else {
+    return Err("reading the working directory")
+  }
+  let saved = isolate_config_env()
+  defer restore(prev_dir, saved)
+  if let Err(e) = os.Chdir(dir) { return Err(f"entering {dir}: {e}") }
+  let _ = os.Setenv("HOME", home)
+  for pair in vars {
+    let (name, value) = pair
+    let _ = os.Setenv(name, value)
+  }
+  load_traced()
+}
+
+#[test]
+fn every_env_var_overrides_its_file_key_and_is_traced_to_the_env() {
+  // One case per key, because the override is written out per field in
+  // load_traced rather than driven by a table: a key can be forgotten there
+  // and nothing else would notice.
+  let assert Ok((root, home)) = fixture(
+    "team = \"REPO\"\n",
+    "url = \"http://home:9999\"\nsort = \"-updated\"\nweb_url = \"http://home:8080\"\n",
+  )
+  let assert Ok((cfg, src)) = traced_with_env(root, home, [
+    ("LLL_URL", "http://env:1111"),
+    ("LLL_TEAM", "ENVTEAM"),
+    ("LLL_SORT", "priority"),
+    ("LLL_WEB_URL", "http://env:2222"),
+  ])
+  assert cfg.url == "http://env:1111"
+  assert cfg.team == "ENVTEAM"
+  assert cfg.sort == "priority"
+  assert cfg.web_url == "http://env:2222"
+  assert src.url == "env:LLL_URL"
+  assert src.team == "env:LLL_TEAM"
+  assert src.sort == "env:LLL_SORT"
+  assert src.web_url == "env:LLL_WEB_URL"
+}
+
+#[test]
+fn an_empty_env_var_cannot_clear_a_file_value() {
+  // load_traced gates each override on `!= ""`, so an exported-but-empty
+  // variable is indistinguishable from an unset one and the file still wins.
+  // This is why `LLL_TOKEN= lll up` cannot shed an inherited hosted token,
+  // and why isolating a throwaway board needs LLL_CONFIG_HOME instead
+  // (LLL-487). Pinned as current behaviour, not endorsed: if threading ever
+  // makes clearing expressible, this test is the one that must change, and
+  // changing it should be a deliberate decision rather than a side effect.
+  let assert Ok((root, home)) = fixture(
+    "team = \"REPO\"\n",
+    "url = \"http://home:9999\"\ntoken = \"home-token\"\n",
+  )
+  let assert Ok((cfg, src)) = traced_with_env(root, home, [
+    ("LLL_TOKEN", ""),
+    ("LLL_URL", ""),
+    ("LLL_TEAM", ""),
+  ])
+  assert cfg.token == "home-token"
+  assert cfg.url == "http://home:9999"
+  assert cfg.team == "REPO"
+  // Traced to the file, not to the empty variable that failed to override it.
+  assert src.token != "env:LLL_TOKEN"
+  assert src.url != "env:LLL_URL"
+  assert src.team != "env:LLL_TEAM"
+}
+
+#[test]
+fn the_default_url_applies_only_when_nothing_supplied_one() {
+  let assert Ok((root, home)) = fixture("team = \"REPO\"\n", "")
+  let assert Ok((cfg, src)) = traced_from(root, home)
+  assert cfg.url == "http://127.0.0.1:8090"
+  assert src.url == "default"
+  // A supplied url keeps its own origin rather than picking up "default".
+  let assert Ok((root2, home2)) = fixture(
+    "team = \"REPO\"\n",
+    "url = \"http://home:9999\"\n",
+  )
+  let assert Ok((cfg2, src2)) = traced_from(root2, home2)
+  assert cfg2.url == "http://home:9999"
+  assert src2.url != "default"
+}
+
+#[test]
+fn load_and_load_traced_agree_on_every_field() {
+  // `--list` explains what the rest of the CLI uses only while these two stay
+  // the same code path. Threading must not let them drift apart.
+  let assert Ok((root, home)) = fixture(
+    "team = \"REPO\"\n",
+    "url = \"http://home:9999\"\nsort = \"-updated\"\ntoken = \"home-token\"\n",
+  )
+  let assert Ok(plain) = load_from(root, home)
+  let assert Ok((traced, _)) = traced_from(root, home)
+  assert plain.url == traced.url
+  assert plain.team == traced.team
+  assert plain.sort == traced.sort
+  assert plain.web_url == traced.web_url
+  assert plain.token == traced.token
+}
+
+#[test]
+fn load_home_reads_the_machine_file_alone() {
+  // The one reader that deliberately ignores the repo file and the
+  // environment: login compares the saved pair to detect a server switch, so
+  // it must not see an override. Threading gives every other reader a passed
+  // value; this one keeps reading a specific file, and that difference is the
+  // point.
+  let assert Ok((root, home)) = fixture(
+    "team = \"REPO\"\nurl = \"http://repo:7777\"\n",
+    "url = \"http://home:9999\"\nteam = \"HOME\"\n",
+  )
+  let assert Ok(prev_dir) = os.Getwd()
+  let saved = isolate_config_env()
+  defer restore(prev_dir, saved)
+  let assert Ok(()) = os.Chdir(root)
+  let _ = os.Setenv("HOME", home)
+  let _ = os.Setenv("LLL_URL", "http://env:1111")
+  let assert Ok(cfg) = load_home()
+  // Neither the repo file nor the environment reaches it.
+  assert cfg.url == "http://home:9999"
+  assert cfg.team == "HOME"
+}
+
+#[test]
+fn repeated_loads_from_one_directory_agree() {
+  // Config is re-derived at 41 call sites today, so a single command resolves
+  // it many times and every one must land on the same answer. After threading
+  // this is true by construction; today it is a property worth pinning,
+  // because it is what makes the refactor behaviour-preserving rather than
+  // behaviour-changing.
+  let assert Ok((root, home)) = fixture(
+    "team = \"REPO\"\n",
+    "url = \"http://home:9999\"\ntoken = \"home-token\"\n",
+  )
+  let assert Ok(first) = load_from(root, home)
+  let assert Ok(second) = load_from(root, home)
+  let assert Ok(third) = load_from(filepath.Join(root, "src"), home)
+  assert first.url == second.url
+  assert first.team == second.team
+  assert first.token == second.token
+  // A subdirectory of the same repo resolves to the same values, which is
+  // what lets a deep call site load config without knowing where it stands.
+  assert third.url == first.url
+  assert third.team == first.team
+}
