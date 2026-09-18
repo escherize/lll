@@ -1156,6 +1156,35 @@ if command -v playwright-cli >/dev/null 2>&1; then
   assert_contains "$opt_style" '"display":"flex"' "filter options lay out as menu rows"
   assert_not_contains "$opt_style" "rgb(0, 0, 238)" "filter options do not use the UA link colour"
 
+  # LLL-455: with enough labels the list ran past the bottom of the viewport
+  # with no way to reach the last one. The options scroll inside .flt-opts and
+  # the menu must stay on screen. Assert geometry, not the declaration.
+  menu_fit=$(playwright-cli -s="$BROWSER_SESSION" eval \
+    "() => { const m = [...document.querySelectorAll('.flt-menu')].find(x => x.offsetParent !== null); const o = m.querySelector('.flt-opts'); const cs = getComputedStyle(o); return JSON.stringify({fits: m.getBoundingClientRect().bottom <= window.innerHeight, contained: cs.overscrollBehaviorY, scrolls: cs.overflowY}) }" \
+    | sed -n '/### Result/{n;p;}' | tr -d '\\')
+  assert_contains "$menu_fit" '"fits":true' "the filter menu stays inside the viewport"
+  assert_contains "$menu_fit" '"contained":"contain"' "the option list does not chain its scroll to the board"
+  assert_contains "$menu_fit" '"scrolls":"auto"' "the option list scrolls rather than overflowing"
+
+  # Type-to-filter. The fixture's Label dimension is short, so the search box
+  # may be absent here; when it is present it must narrow the list. Both
+  # outcomes are asserted rather than skipped silently.
+  flt_search=$(playwright-cli -s="$BROWSER_SESSION" eval \
+    "() => { const m = [...document.querySelectorAll('.flt-menu')].find(x => x.offsetParent !== null); const i = m.querySelector('.flt-search input'); const n = m.querySelectorAll('.flt-opt').length; if (!i) return JSON.stringify({box: false, opts: n}); const first = m.querySelector('.flt-opt').dataset.n; i.focus(); i.value = first; i.dispatchEvent(new Event('input', {bubbles: true})); return JSON.stringify({box: true, opts: n, typed: first}) }" \
+    | sed -n '/### Result/{n;p;}' | tr -d '\\')
+  if printf '%s' "$flt_search" | grep -q '"box":true'; then
+    sleep 0.4
+    narrowed=$(playwright-cli -s="$BROWSER_SESSION" eval \
+      "() => [...[...document.querySelectorAll('.flt-menu')].find(x => x.offsetParent !== null).querySelectorAll('.flt-opt')].filter(a => a.offsetParent !== null).length" \
+      | sed -n '/### Result/{n;p;}' | tr -d '\\')
+    [ "$narrowed" -ge 1 ] || fail "typing a label name hid every option: $narrowed"
+    total=$(printf '%s' "$flt_search" | sed -n 's/.*"opts":\([0-9]*\).*/\1/p')
+    [ "$narrowed" -lt "$total" ] || fail "typing a label name narrowed nothing ($narrowed of $total)"
+  else
+    # A short dimension must NOT wear a search box (LLL-455 AC#5).
+    assert_contains "$flt_search" '"box":false' "a short dimension renders no search box"
+  fi
+
   # The chip IS the undo: clicking it toggles its value out of the URL.
   seq_goto "$WEB/?assignee=e2e"
   playwright-cli -s="$BROWSER_SESSION" click ".flt-chip" >/dev/null 2>&1 \

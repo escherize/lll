@@ -838,6 +838,41 @@ input:focus, textarea:focus, select:focus {
   border-radius: var(--radius);
   padding: 4px;
 }
+/* The options scroll, the search box above them does not. Bounded by the
+   viewport rather than a fixed pixel height, because this menu hangs off a
+   bar near the top of a full-height page: 40 labels ran past the bottom of
+   the screen with no way to reach the last one. overscroll-behavior keeps
+   the wheel from chaining to the board once the list is at its end, the
+   same pairing .emo-grid uses. */
+.flt-opts {
+  max-height: min(60vh, 420px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+.flt-search {
+  display: flex; align-items: center; gap: 6px;
+  margin-bottom: 4px;
+  padding: 0 8px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  background: var(--bg-panel);
+  color: var(--text-3);
+}
+.flt-search:focus-within {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-dim);
+  color: var(--text-2);
+}
+.flt-search svg { flex: none; }
+.flt-search input {
+  width: 100%; min-width: 0;
+  padding: 4px 0;
+  border: none;
+  background: none;
+  border-radius: 0;
+  font-size: 12.5px;
+}
+.flt-search input:focus { outline: none; border: none; box-shadow: none; }
 /* Both row kinds together: the root menu's dimensions are <button>, the
    per-dimension options are <a class="flt-opt"> because they are navigations.
    Styling only the button left every option list rendering as raw underlined
