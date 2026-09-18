@@ -1350,6 +1350,15 @@ out=$(env LLL_URL=$URL LLL_TEAM=ENG "$LIN" search 2>&1)
 set -e
 assert_contains "$out" "what to search for" "search without a query names the usage"
 
+# LLL-467: non-Latin queries must survive tokenization, including a substring
+# of a Japanese title whose words are not separated by spaces.
+UKEY=$(env LLL_URL=$URL LLL_TEAM=ENG "$LIN" issue create -t "日本語クイックスタートを公開する" -d "日本語の説明を追加する" | sed -n 's/^Created \([A-Z]*-[0-9]*\).*/\1/p')
+[ -n "$UKEY" ] || fail "Unicode search fodder create did not print a key"
+out=$(env LLL_URL=$URL LLL_TEAM=ENG "$LIN" search 日本語 --json --refresh)
+printf '%s' "$out" | jq -e --arg key "$UKEY" 'any(.[]; .group == $key)' >/dev/null || fail "Japanese substring query missed its issue: $out"
+out=$(env LLL_URL=$URL LLL_TEAM=ENG "$LIN" search 日本語クイックスタートを公開する --json)
+printf '%s' "$out" | jq -e --arg key "$UKEY" '.[0].group == $key' >/dev/null || fail "Japanese full-title query missed its issue: $out"
+
 # --- dependencies: block / unblock, Blocked by / Blocks, --ready / --blocked (LLL-175) ---
 DA=$(env LLL_URL=$URL LLL_TEAM=ENG "$LIN" issue create -t "Dep: the foundation" | sed -n 's/^Created \([A-Z]*-[0-9]*\).*/\1/p')
 DB=$(env LLL_URL=$URL LLL_TEAM=ENG "$LIN" issue create -t "Dep: the wall" | sed -n 's/^Created \([A-Z]*-[0-9]*\).*/\1/p')
