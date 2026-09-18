@@ -2151,8 +2151,9 @@ fn issue_next_spec() -> Slice<flags.Flag> {
 /// none. With --claim the printed key is always secured first.
 fn issue_next(input: flags.CommandInput) -> Result<(), string> {
   let p = input.parsed
-  let candidates = ready_issues()?
-  let unblocks = unblocks_map(candidates)?
+  let team_id = configured_team_id()?
+  let candidates = ready_issues(team_id)?
+  let unblocks = unblocks_map(team_id, candidates)?
   // A claimed ready issue is someone's work in progress, not an invitation -
   // including my own claims. The agenda is what an agent can pick up NOW.
   let agenda = rank_agenda(candidates, unblocks).filter(|i| i.assignee == "")
@@ -2192,8 +2193,9 @@ fn issue_next(input: flags.CommandInput) -> Result<(), string> {
 /// agenda input: open, every blocker done or cancelled, scoped to the
 /// configured team. PocketBase cannot filter on an expanded relation's
 /// state, so readiness is decided here, after the fetch.
-fn ready_issues() -> Result<Slice<models.Issue>, string> {
-  let items = fetch_all_issues("&sort=created,id&expand=team,assignee,labels,blocked_by,project")?
+fn ready_issues(team_id: string) -> Result<Slice<models.Issue>, string> {
+  let filter = url.QueryEscape(query.filter(team_id, "", "", "", "", ""))
+  let items = fetch_all_issues(f"&sort=created,id&expand=team,assignee,labels,blocked_by,project&filter={filter}")?
   Ok(items.filter(|i| (i.state == "todo" || i.state == "backlog") && open_blockers(i).is_empty()))
 }
 
@@ -2262,15 +2264,15 @@ fn page_of(items: Slice<models.Issue>, page: int, per_page: int) -> Slice<models
 /// How many issues each candidate unblocks: the open issues that name it as
 /// a blocker. A tie-break, not a goal — the more work one issue frees, the
 /// sooner it should go.
-fn unblocks_map(candidates: Slice<models.Issue>) -> Result<Map<string, int>, string> {
+fn unblocks_map(team_id: string, candidates: Slice<models.Issue>) -> Result<Map<string, int>, string> {
   let mut out = Map.new<string, int>()
   for c in candidates { out[c.id] = 0 }
-  let body = pb.get("/api/collections/issues/records?perPage=500&filter=" + url.QueryEscape("state != 'done' && state != 'cancelled'"))?
-  let mut issues = models.IssueList { .. }
-  if let Err(e) = json.Unmarshal(body.bytes(), &issues) {
-    return Err(f"decoding issues: {e}")
-  }
-  for i in issues.items {
+  let scope = query.filter(team_id, "", "", "", "", "")
+  let open = "state != 'done' && state != 'cancelled'"
+  let clause = if scope == "" { open } else { f"{scope} && {open}" }
+  let filter = url.QueryEscape(clause)
+  let issues = fetch_all_issues(f"&sort=created,id&fields=id,blocked_by&filter={filter}")?
+  for i in issues {
     for b in i.blocked_by {
       if let Some(n) = out.get(b) { out[b] = n + 1 }
     }
