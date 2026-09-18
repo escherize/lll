@@ -51,6 +51,38 @@ Two failures from one session, to calibrate:
 The first is infrastructure. The second is yours. They look identical in the
 summary line.
 
+## Updating PR metadata
+
+Older GitHub CLI versions can fail `gh pr edit --body-file` with the
+classic-project GraphQL deprecation at `repository.pullRequest.projectCards`
+(reproduced with 2.65.0; 2.95.0 succeeds). If you hit that error, use the REST
+fallback already exercised here. Do not apply it to an unrelated permission or
+network failure.
+
+Keep the exact Markdown in a file and encode it as JSON; shell interpolation
+can change newlines or execute characters from the body. For an existing PR:
+
+```sh
+pr_repo=OWNER/REPO
+pr_number=123
+pr_body=/tmp/pr-body.md
+pr_payload=$(mktemp /tmp/pr-metadata.XXXXXX)
+python3 - "$pr_body" "$pr_payload" <<'PY'
+import json
+import sys
+from pathlib import Path
+Path(sys.argv[2]).write_text(json.dumps({"body": Path(sys.argv[1]).read_text()}))
+PY
+gh api --method PATCH "repos/$pr_repo/pulls/$pr_number" \
+  --input "$pr_payload" --jq .html_url
+gh pr view "$pr_number" --repo "$pr_repo" --json title,body
+rm "$pr_payload"
+```
+
+Confirm the PATCH succeeded and the returned body matches the file before
+recording the edit as complete. A title change can use the same JSON payload's
+`title` field. This updates metadata; it does not replace the merge checks.
+
 ## Merging
 
 ```sh
