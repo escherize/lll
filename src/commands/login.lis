@@ -334,24 +334,28 @@ No account on it, but you hold the server's admin credentials?
 Someone else deployed it? Ask them for 'lll member invite <name> --email <you>'."
 }
 
-/// `lll whoami` — the identity every other command is acting as, confirmed
-/// against the server rather than read off the config.
-///
-/// 'lll config --list' shows the token as bullets and never says whose it is,
-/// so the one question a person actually has — am I logged in, as whom, to
-/// which server — had no command. auth-refresh is the check because it is the
-/// cheapest call that only a valid member token can make.
+#[json]
+struct WhoamiIdentity {
+  name: string,
+  email: string,
+  #[json("collectionName")]
+  collection: string,
+}
+
+/// `lll whoami` — the member or administrator identity, confirmed by a
+/// record lookup against the server rather than read off the config.
 pub fn whoami(args: Slice<string>) -> Result<(), string> {
   if let Some(flag) = args.get(2) {
     if flag == "--help" || flag == "-h" {
       fmt.Println(
-        "lll whoami - show which member, server and team this machine is acting as
+        "lll whoami - show which member or administrator, server and team this machine is acting as
 
 Usage:
   lll whoami
 
-Confirms the stored token against the server. 'lll config --list' shows where
-each value came from; 'lll login' replaces the token.",
+Confirms the stored token against the server, including administrator tokens.
+'lll config --list' shows where each value came from; 'lll login' replaces the
+token with a member session, and 'lll bot bot-NAME' provisions a bot identity.",
       )
       return Ok(())
     }
@@ -363,8 +367,8 @@ each value came from; 'lll login' replaces the token.",
   // whole agent credential - so `lll whoami` answered "401 Unauthorized" to
   // every agent that ever ran it, which is the first command an agent reaches
   // for when it is unsure who it is. Fleet run 3 (TASK-309) hit it. The record
-  // the token names is fetched by the id in the JWT instead, which every kind
-  // of token can do. pb.get refuses an untokened call with the message that
+  // the token names is fetched by its JWT id and collection instead, which
+  // works for members and administrators. pb.get refuses an untokened call with the message that
   // names the fix, so there is no second copy of it here.
   // No token at all is its own answer, the same one every read gives; the
   // classification below is for a token that IS set but cannot be read.
@@ -382,16 +386,22 @@ each value came from; 'lll login' replaces the token.",
   if pb.token_expired(cfg.token) {
     return Err(pb.expired_token_message())
   }
-  let body = pb.get(f"/api/collections/members/records/{id}")?
-  let mut me = models.Member { .. }
+  let collection = pb.token_collection(cfg.token).unwrap_or("members")
+  let body = pb.get(f"/api/collections/{collection}/records/{id}")?
+  let mut me = WhoamiIdentity { .. }
   if let Err(e) = json.Unmarshal(body.bytes(), &me) {
     return Err(f"decoding the identity response: {e}")
   }
-  fmt.Println(f"{me.name} <{me.email}>")
+  let administrator = me.collection == "_superusers"
+  let name = if administrator { "superuser" } else { me.name }
+  fmt.Println(f"{name} <{me.email}>")
   fmt.Println(f"server  {cfg.url}")
   let team = if cfg.team == "" { "(none — run 'lll attach')" } else { cfg.team }
   fmt.Println(f"team    {team}")
   fmt.Println(f"token   {src.token}")
+  if administrator {
+    fmt.Println("Administrator tokens do not name a member. Use 'lll login' for a member session or 'lll bot bot-NAME' for a bot identity.")
+  }
   Ok(())
 }
 

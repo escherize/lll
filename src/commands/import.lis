@@ -51,7 +51,9 @@ re-running an import never duplicates."
 }
 
 fn github_spec() -> Slice<flags.Flag> {
-  flags.with_team([])
+  flags.with_team([
+    flags.Flag { name: "--emoji", value: true, hint: "EMOJI", help: "default emoji for newly imported issues (omitted leaves it unset)", .. },
+  ])
 }
 
 fn import_github(input: flags.CommandInput) -> Result<(), string> {
@@ -61,6 +63,7 @@ fn import_github(input: flags.CommandInput) -> Result<(), string> {
   if !repo_shape_ok(repo) {
     return Err(f"expected OWNER/REPO, got '{repo}'\nusage: {usage}")
   }
+  let emoji = check_emoji(input.parsed.one("--emoji"))?
   // The team first: it scopes the labels below, which are unique per team
   // (TASK-173), the same order 'issue create' resolves things in.
   let team = current_team()?
@@ -94,6 +97,7 @@ fn import_github(input: flags.CommandInput) -> Result<(), string> {
       title: g.title,
       state,
       description: g.body,
+      emoji,
       labels,
       ..
     }

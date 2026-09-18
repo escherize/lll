@@ -420,19 +420,34 @@ pub fn token_usable(base: string, tok: string) -> bool {
 /// token is not three base64url segments carrying an `id`, which is not a
 /// judgement about validity - a token this cannot read is left alone.
 pub fn token_subject(tok: string) -> Option<string> {
+  let Some(claims) = token_claims(tok) else { return None };
+  if claims.id == "" { return None }
+  Some(claims.id)
+}
+
+/// The collection named by a JWT, for routing an identity lookup. This is
+/// unverified metadata; the record request must still authenticate the token.
+pub fn token_collection(tok: string) -> Option<string> {
+  let Some(claims) = token_claims(tok) else { return None };
+  if claims.collection_id == "" { return None }
+  Some(claims.collection_id)
+}
+
+fn token_claims(tok: string) -> Option<TokenClaims> {
   let parts = strings.Split(tok, ".")
   if parts.length() != 3 { return None }
   let Ok(raw) = base64.RawURLEncoding.DecodeString(parts[1]) else { return None }
   let mut claims = TokenClaims { .. }
   if json.Unmarshal(raw, &claims).is_err() { return None }
-  if claims.id == "" { return None }
-  Some(claims.id)
+  Some(claims)
 }
 
 #[json]
 struct TokenClaims {
   id: string,
   exp: int,
+  #[json("collectionId")]
+  collection_id: string,
 }
 
 /// The unix time a PocketBase auth JWT expires, from its payload; None when
@@ -440,11 +455,7 @@ struct TokenClaims {
 /// impersonation tokens (verified: a 4-second token lists inside its
 /// lifetime and is refused after), so a past exp is a verdict on its own.
 pub fn token_expiry(tok: string) -> Option<int> {
-  let parts = strings.Split(tok, ".")
-  if parts.length() != 3 { return None }
-  let Ok(raw) = base64.RawURLEncoding.DecodeString(parts[1]) else { return None }
-  let mut claims = TokenClaims { .. }
-  if json.Unmarshal(raw, &claims).is_err() { return None }
+  let Some(claims) = token_claims(tok) else { return None };
   if claims.exp == 0 { return None }
   Some(claims.exp)
 }

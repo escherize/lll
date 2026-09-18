@@ -1074,7 +1074,7 @@ set -e
 assert_contains "$out" "unknown status 'bogus'" "invalid project status message"
 
 # --- labels: create + list ---
-out=$(LLL_URL=$URL LLL_TEAM=ENG "$LIN" label create -n bug -c "#ff0000" --team ENG)
+out=$(LLL_URL=$URL LLL_TEAM=ENG "$LIN" label create -n bug --color "#ff0000" --team ENG)
 assert_contains "$out" "Created label bug" "label create output"
 out=$(LLL_URL=$URL LLL_TEAM=ENG "$LIN" label create -n chore)
 assert_contains "$out" "Created label chore" "label create without color takes LLL_TEAM"
@@ -1283,6 +1283,14 @@ assert_contains "$out" "lll issue watch $WKEY --until TEXT" "a comment listing p
 
 python3 "$REPO_ROOT"/scripts/test_watch_until.py "$LLL_ABS" "$URL" "$WKEY"
 
+# LLL-464: bot help must succeed without a name, credentials or a server,
+# including rotation help. The unreachable endpoint makes any auth attempt fail.
+for bot_help in --help -h; do
+  out=$(env -u LLL_TOKEN -u LLL_ADMIN_EMAIL -u LLL_ADMIN_PASSWORD LLL_URL=http://127.0.0.1:1 "$LIN" bot "$bot_help") || fail "bot $bot_help refused help"
+  assert_contains "$out" "bot- prefix" "bot help explains its reserved member names"
+  out=$(env -u LLL_TOKEN -u LLL_ADMIN_EMAIL -u LLL_ADMIN_PASSWORD LLL_URL=http://127.0.0.1:1 "$LIN" bot rotate "$bot_help") || fail "bot rotate $bot_help refused help"
+  assert_contains "$out" "lll bot rotate NAME" "bot rotation help names its invocation"
+done
 # --- lll search: full text over issues, comments and docs, ranked, with context (LLL-96) ---
 SKEY=$(env LLL_URL=$URL LLL_TEAM=ENG "$LIN" issue create -t "Rail favorites go stale" -d "First line of context.
 The zebra crossing is only mentioned in this description.
@@ -1310,6 +1318,15 @@ set +e
 out=$(env LLL_URL=$URL LLL_TEAM=ENG "$LIN" search 2>&1)
 set -e
 assert_contains "$out" "what to search for" "search without a query names the usage"
+
+# LLL-467: non-Latin queries must survive tokenization, including a substring
+# of a Japanese title whose words are not separated by spaces.
+UKEY=$(env LLL_URL=$URL LLL_TEAM=ENG "$LIN" issue create -t "日本語クイックスタートを公開する" -d "日本語の説明を追加する" | sed -n 's/^Created \([A-Z]*-[0-9]*\).*/\1/p')
+[ -n "$UKEY" ] || fail "Unicode search fodder create did not print a key"
+out=$(env LLL_URL=$URL LLL_TEAM=ENG "$LIN" search 日本語 --json --refresh)
+printf '%s' "$out" | jq -e --arg key "$UKEY" 'any(.[]; .group == $key)' >/dev/null || fail "Japanese substring query missed its issue: $out"
+out=$(env LLL_URL=$URL LLL_TEAM=ENG "$LIN" search 日本語クイックスタートを公開する --json)
+printf '%s' "$out" | jq -e --arg key "$UKEY" '.[0].group == $key' >/dev/null || fail "Japanese full-title query missed its issue: $out"
 
 # --- dependencies: block / unblock, Blocked by / Blocks, --ready / --blocked (LLL-175) ---
 DA=$(env LLL_URL=$URL LLL_TEAM=ENG "$LIN" issue create -t "Dep: the foundation" | sed -n 's/^Created \([A-Z]*-[0-9]*\).*/\1/p')
@@ -2576,6 +2593,14 @@ out=$(env -u LLL_TOKEN HOME="$E2E_HOME" LLL_URL=$URL "$LIN" whoami) \
   || fail "lll whoami exited nonzero: $out"
 assert_contains "$out" "e2e-agent@lll.test" "whoami names the member's email"
 assert_contains "$out" "$URL" "whoami names the server"
+# LLL-466: the subject of an administrator token belongs to _superusers,
+# so whoami must validate it there rather than report a missing member.
+WHOAMI_ADMIN=$(pb_superuser_token "$URL") || fail "minting whoami administrator token"
+out=$(LLL_TOKEN="$WHOAMI_ADMIN" LLL_URL=$URL "$LIN" whoami) || fail "whoami refused a valid administrator token: $out"
+assert_contains "$out" "superuser <admin@local.dev>" "whoami identifies administrator authentication"
+assert_contains "$out" "token   env:LLL_TOKEN" "administrator whoami names the token source"
+assert_contains "$out" "lll bot bot-NAME" "administrator whoami names the bot bootstrap command"
+assert_contains "$out" "$URL" "administrator whoami names the server"
 out=$(env -u LLL_TOKEN -u LLL_URL HOME="$DATA_DIR/nowhere" "$LIN" whoami 2>&1) \
   && fail "whoami without a token should fail"
 assert_contains "$out" "not logged in" "whoami with no token says so"
@@ -3348,6 +3373,7 @@ assert_contains "$schema_out" "Rules:" "api --schema carries the access rules"
 # --- web board (own ephemeral PB; see e2e_web.sh) ---
 python3 "$REPO_ROOT"/scripts/test_doc_pagination.py "$LLL_ABS" "$URL"
 python3 "$REPO_ROOT"/scripts/test_export_import.py "$LLL_ABS" "$URL"
+python3 "$REPO_ROOT"/scripts/test_import_github.py "$LLL_ABS" "$URL"
 python3 "$REPO_ROOT"/scripts/test_claims_live.py "$LLL_ABS" "$URL"
 # LLL-385: seed is outside build/test/e2e, so it broke for five days under a
 # green gate. Here rather than in `test` because it needs the built binary.

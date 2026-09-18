@@ -95,7 +95,7 @@ fn label_list_spec() -> Slice<flags.Flag> {
 fn label_create_spec() -> Slice<flags.Flag> {
   flags.with_team([
     flags.Flag { name: "-n", alias: "--name", value: true, hint: "\"name\"", help: "label name", .. },
-    flags.Flag { name: "-c", value: true, hint: "\"#5e6ad2\"", help: "hex color for the label", .. },
+    flags.Flag { name: "-c", alias: "--color", value: true, hint: "\"#5e6ad2\"", help: "hex color for the label", .. },
     flags.Flag { name: "--team", value: true, hint: "KEY", help: "team key the label belongs to (defaults to LLL_TEAM)", .. },
   ])
 }

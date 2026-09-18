@@ -1,5 +1,6 @@
 import "go:math"
 import "go:strings"
+import "go:unicode"
 
 /// Full-text search over the record (LLL-96): issues, their comments, and
 /// docs, ranked, each hit carrying the lines around the match so the
@@ -53,7 +54,8 @@ pub struct Snippet {
   pub lines: Slice<string>,
 }
 
-/// Lower-cased alphanumeric runs. "LLL-96" gives "lll", "96" AND "lll-96",
+/// Lower-cased Unicode alphanumeric runs, including combining marks.
+/// "LLL-96" gives "lll", "96" AND "lll-96",
 /// so a key matches as a key and as its parts.
 pub fn tokenize(text: string) -> Slice<string> {
   let mut out: Slice<string> = []
@@ -69,7 +71,7 @@ pub fn tokenize(text: string) -> Slice<string> {
 }
 
 fn is_separator(r: rune) -> bool {
-  let alnum = ('a' <= r && r <= 'z') || ('0' <= r && r <= '9')
+  let alnum = unicode.IsLetter(r) || unicode.IsNumber(r) || unicode.IsMark(r)
   !(alnum || r == '-')
 }
 

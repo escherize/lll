@@ -137,6 +137,8 @@ fn token_subject_reads_the_id_from_a_pocketbase_auth_jwt() {
   let tok = "eyJhbGciOiJIUzI1NiJ9.eyJjb2xsZWN0aW9uSWQiOiJwYmNfMzU3MjczOTM0OSIsImV4cCI6MSwiaWQiOiJhYmMxMjNkZWY0NTZnaGkiLCJyZWZyZXNoYWJsZSI6ZmFsc2UsInR5cGUiOiJhdXRoIn0.sig"
   let assert Some(id) = token_subject(tok)
   assert id == "abc123def456ghi"
+  let assert Some(collection) = token_collection(tok)
+  assert collection == "pbc_3572739349"
 }
 
 #[test]
@@ -148,6 +150,9 @@ fn token_subject_declines_what_it_cannot_read() {
   // {"exp":1} - valid JSON, no id: still None, so no record can be fetched
   // and the token is treated as valid rather than accused.
   assert token_subject("h.eyJleHAiOjF9.s").is_none()
+  assert token_collection("not-a-jwt").is_none()
+  assert token_collection("h.!!!notbase64!!!.s").is_none()
+  assert token_collection("h.eyJleHAiOjF9.s").is_none()
 }
 
 #[test]

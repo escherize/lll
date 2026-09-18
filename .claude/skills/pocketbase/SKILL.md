@@ -128,9 +128,12 @@ per viewer. That is a good reason not to add them.
 
 ## Gotchas
 
-- **`404 "Missing collection context"`** means migrations never ran. Almost always
-  because `lll up` was run outside the checkout: `pb/pb_migrations` and
-  `pb/pb_hooks` are passed to `gopb.Serve` as cwd-relative paths (task-30).
+- **`404 "Missing collection context"`** means the API cannot resolve the
+  requested collection. Check the configured server and collection name,
+  then the startup migration log. `lll up` embeds its migrations via
+  `pb.Migrations()` and materializes them under the selected data directory;
+  its issue hooks are registered in Go. Running outside the checkout is
+  supported and does not prevent migrations from applying.
 - **One process per database file.** Never point two `lll up` instances at the
   same `pb_data`, especially over a network filesystem.
 - `pb_hooks` JS runs in goja, not Node. `/// <reference path="../pb_data/types.d.ts" />`
