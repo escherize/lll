@@ -14,6 +14,8 @@ async page => {
   await page.screenshot({path: '/tmp/lll-233-delete-review.png'});
   await row.getByRole('button', {name: 'Delete project', exact: true}).click();
   await row.waitFor({state: 'detached'});
+  // LLL-446: members live in their own section now.
+  await page.goto(page.url().replace(/\/settings\/[^/?#]*.*$/, '/settings/members'));
   const memberForm = page.locator('form.set-row').filter({
     has: page.locator('input[name="name"][value="Deletion browser member"]')
   });

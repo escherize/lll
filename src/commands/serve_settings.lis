@@ -14,18 +14,38 @@ import "theme"
 // /settings - the workspace records the web can edit, and the one handler
 // that writes them.
 
-/// The workspace's shared settings: labels, members, projects, and the team's
-/// name and accent colour.
+/// The settings sections, in nav order. The string is the URL's last
+/// segment, the template's dispatch key and the nav's active marker.
+///
+/// LLL-446: the first three are the TEAM's own records, the last three the
+/// server's, shared by every team. One scroll could not say that, and the
+/// page's lede claiming it was not something anyone reads before renaming a
+/// member on every board at once. The nav is the claim now.
+pub fn settings_sections() -> Slice<string> {
+  ["identity", "labels", "projects", "teams", "members", "access"]
+}
+
+/// One section of the settings surface. The team is the ROUTED one, so the
+/// rail keeps the board you came from even while a server-wide section is
+/// open — the server-wide sections are still addressed under /t/KEY/ for
+/// exactly that reason (LLL-426 fixed the reverse of this bug).
 fn settings_page(
   w: http.ResponseWriter,
-  // The page takes no parameters: everything on it is the workspace's, and
-  // there is nothing here to scope by query string.
   r: Ref<http.Request>,
   team_id: string,
   me: string,
+  section: string,
 ) {
+  if settings_sections().find(|s| s == section).is_none() {
+    http.Error(
+      w,
+      f"no settings section '{section}' — try {strings.Join(settings_sections(), ", ")}",
+      404,
+    )
+    return
+  }
   let team = shell_team(team_id)
-  let vm = match settings_vm(team) {
+  let vm = match settings_vm(team, section) {
     Ok(v) => v,
     Err(e) => {
       http.Error(w, e, 500)
@@ -49,40 +69,79 @@ fn settings_page(
   let _ = w.Write(html.bytes())
 }
 
-fn settings_vm(team: models.Team) -> Result<SettingsVM, string> {
+/// One section's data, and only that section's.
+///
+/// LLL-446: this used to fetch everything on every render — a count query per
+/// label AND one per team, plus members and projects, to draw a page that
+/// shows one of them at a time. A section pays for itself now: opening
+/// Identity costs nothing beyond the team already in hand.
+fn settings_vm(team: models.Team, section: string) -> Result<SettingsVM, string> {
   let hex = theme.normalize_hex(team.accent)
   let mut accent = hex
   if accent == "" { accent = "#f0883e" }
-  // Members stay unscoped on purpose: one person or agent works across many
-  // projects, which is what makes a member meaningful on every board.
-  let labels = label_rows(team.id)?
-  let members = records.fetch_members()?
-  let projects = records.fetch_projects(team.id)?
-  let teams = team_rows()?
-  Ok(
-    SettingsVM {
-      team_key: team.key,
-      team_name: team.name,
-      team_emoji: team.emoji,
-      accent,
-      accent_set: hex != "",
-      labels,
-      members: members.map(|m| SetMemberVM {
-        id: m.id,
-        name: m.name,
-        email: m.email,
-      }),
-      projects: projects.map(|p| SetProjectVM {
+  let mut vm = SettingsVM {
+    section,
+    team_key: team.key,
+    team_name: team.name,
+    team_emoji: team.emoji,
+    team_mark: theme.mark_for(team.key, team.emoji),
+    accent,
+    accent_set: hex != "",
+    ..
+  }
+  match section {
+    // Identity is the team record itself, which shell_team already fetched.
+    "identity" => (),
+    "labels" => {
+      vm.labels = label_rows(team.id)?
+      vm.teams = scope_rows()?
+    },
+    "projects" => {
+      vm.projects = records.fetch_projects(team.id)?.map(|p| SetProjectVM {
         id: p.id,
         name: p.name,
         status: p.status,
-      }),
-      statuses: project_statuses().map(|s| StateOpt {
+      })
+      vm.statuses = project_statuses().map(|s| StateOpt {
         value: s,
         label: state_label(s),
-      }),
-      teams,
+      })
+      vm.teams = scope_rows()?
     },
+    "teams" => vm.teams = team_rows()?,
+    // Members stay unscoped on purpose: one person or agent works across many
+    // projects, which is what makes a member meaningful on every board. Access
+    // shows the same list because both its forms pick a member.
+    "members" => vm.members = member_rows()?,
+    "access" => vm.members = member_rows()?,
+    other => return Err(f"unknown settings section '{other}'"),
+  }
+  Ok(vm)
+}
+
+fn member_rows() -> Result<Slice<SetMemberVM>, string> {
+  Ok(
+    records.fetch_members()?.map(|m| SetMemberVM {
+      id: m.id,
+      name: m.name,
+      email: m.email,
+    }),
+  )
+}
+
+/// The teams a label or project row can be MOVED to (LLL-100's select) —
+/// key and archived flag only. Deliberately not `team_rows`: that one counts
+/// issues per team, and a select showing six keys has no use for six count
+/// queries.
+fn scope_rows() -> Result<Slice<SetTeamVM>, string> {
+  Ok(
+    records.list_teams()?.items.map(|t| SetTeamVM {
+      id: t.id,
+      key: t.key,
+      name: t.name,
+      archived: t.archived,
+      ..
+    }),
   )
 }
 
@@ -209,15 +268,37 @@ fn settings_write(
   }
   let team = shell_team(team_id)
   let mut extra = ""
-  if let Ok(vm) = settings_vm(team) {
+  // The reply redraws the section the row belongs to, which is the section
+  // the browser is looking at: #settings is the section wrapper now, so the
+  // patch id is unchanged and a label save still cannot redraw the members
+  // list it is not showing.
+  if let Ok(vm) = settings_vm(team, section_of(r.PathValue("kind"))) {
     if let Ok(html) = render("settings", vm) { extra += patch_event(html) }
   }
-  // The accent lives in <head>, outside #settings: patch it by id too, so a
-  // new colour lands on the open page instead of waiting for a reload.
+  // The accent lives in <head> and the team's mark on the section nav, both
+  // outside #settings: patch them by id too, so a new colour or emoji lands
+  // on the open page instead of waiting for a reload.
   if let Ok(html) = render("accent-head", rail_vm("settings", me, team)) {
     extra += patch_event(html)
   }
+  if let Ok(vm) = settings_vm(team, section_of(r.PathValue("kind"))) {
+    if let Ok(html) = render("settings-nav", vm) { extra += patch_event(html) }
+  }
   Ok(extra)
+}
+
+/// The section a written row lives in — the write's `kind` is singular and
+/// the section plural, and this is the only place that translation happens.
+fn section_of(kind: string) -> string {
+  match kind {
+    "team" => "identity",
+    "label" => "labels",
+    "project" => "projects",
+    "member" => "members",
+    // A write whose kind is not a section has already failed in
+    // settings_apply; redrawing identity costs one render of data in hand.
+    _ => "identity",
+  }
 }
 
 /// Create or update the record this request names.
@@ -527,11 +608,11 @@ fn access_credential_write(
     payload,
     su,
   )?
-  // The page shows the member's email, so patch the section back — and say
-  // the success out loud in the flash strip, after the redraw, so the morph
-  // cannot swallow it.
+  // The Access section shows the member's email, so patch that section back
+  // — and say the success out loud in the flash strip, after the redraw, so
+  // the morph cannot swallow it.
   let mut extra = ""
-  if let Ok(vm) = settings_vm(shell_team(team_id)) {
+  if let Ok(vm) = settings_vm(shell_team(team_id), "access") {
     if let Ok(html) = render("settings", vm) { extra += patch_event(html) }
   }
   extra += flash_ok_event(f"{member.name} can now sign in as {email}")
@@ -571,10 +652,10 @@ fn teams_archive_write(
   let su = verify_admin(r.PostFormValue("admin_password"))?
   let payload = marshal(TeamArchivedPatch { archived })?
   let _ = pb.patch_as(f"/api/collections/teams/records/{id}", payload, su)?
-  // The page shows the row's state, so patch the section back and say the
-  // success out loud — same shape as access_credential_write.
+  // The page shows the row's state, so patch the Teams section back and say
+  // the success out loud — same shape as access_credential_write.
   let mut extra = ""
-  if let Ok(vm) = settings_vm(shell_team(team_id)) {
+  if let Ok(vm) = settings_vm(shell_team(team_id), "teams") {
     if let Ok(html) = render("settings", vm) { extra += patch_event(html) }
   }
   let mut msg = f"team {t.key} archived — its board stays readable at /t/{t.key}/"

@@ -4,7 +4,7 @@
      view model. #settings below is rendered from `.Page`'s type alone, so the
      save actions can patch it back without building a shell.
 
-     There is no data-init here on purpose: /settings holds no SSE connection.
+     There is no data-init here on purpose: settings holds no SSE connection.
      The bridge broadcasts one unfiltered #board to every board-scoped client,
      so a page on that scope would have to defend against fragments meant for
      a different view. Saves answer in their own response instead. */}}
@@ -22,51 +22,90 @@
   {{template "rail" .Rail}}
   <div class="main">
     <header class="topbar">
-      <div class="crumbs"><span class="here">Settings</span></div>
+      <div class="crumbs"><a href="{{.Rail.BoardBase}}">Board</a><span class="sep">›</span><span class="here">Settings</span></div>
       <div class="spacer"></div>
     </header>
     <div id="flash" class="flash" hidden></div>
-    <div class="set-scroll">{{template "settings" .Page}}</div>
+    {{/* The nav is the sibling of #settings, not inside it: a save patches
+         the section it wrote, and the nav must survive that patch. It carries
+         its own id anyway, because the team's mark is on it and renaming the
+         team is one of the things this page does. */}}
+    <div class="set-scroll"><div class="set-layout">{{template "settings-nav" .Page}}{{template "settings" .Page}}</div></div>
   </div>
 </div>
 </body>
 </html>{{end}}
 
-{{/* Every save posts its own row's form and gets this whole block back, so a
-     rename and its knock-on (a label's colour on the board's chips, a
-     project's status in a select) land together. Row forms carry the record
-     id; the trailing "new" form carries none, which is what makes it a
-     create. Delete travels as ?del=1 so the same form body serves both.
-     Stable patch IDs belong to neutral wrappers: input[name=id] shadows
-     form.id and defeats keyed morphing when a rename reorders rows, losing
-     drafts in other rows. Keep the wrapper when showing deletion review. */}}
-{{define "settings"}}<div id="settings" class="settings">
-{{/* LLL-426: the team-scoped writes below post RELATIVE to this page, whose
-     URL is /t/KEY/settings, so a form on team B's settings can only ever write
-     team B. The rows are rendered from row view models with no team on them,
-     and the page's own URL already carries it. The server-wide actions - the
-     Access section and team archiving - stay absolute, because they are not
-     any one team's business. */}}
-<p class="set-lede">Labels, projects and colour belong to the selected team. Member accounts are shared across teams. Per-browser choices (hidden columns, filter chips) stay on the board where you set them.</p>
+{{/* LLL-446: the sections, grouped by what a write there reaches. The first
+     group is this team's own records; the second is the server's, shared by
+     every team, where a rename lands on every board at once. The page used to
+     be one scroll with a sentence at the top claiming as much, which is not
+     something anyone reads before editing a member.
 
-<section class="set-sec">
-<h2>Team</h2>
+     Server-wide sections are still addressed under /t/KEY/ — their scope is
+     the server, but the page still wears a rail, and a rail that silently
+     switched teams is the bug LLL-426 fixed. */}}
+{{define "settings-nav"}}<nav id="set-nav" class="set-nav" aria-label="Settings sections">
+<div class="set-nav-group">
+<h2><span class="set-nav-mark">{{.TeamMark}}</span>{{if .TeamKey}}{{.TeamKey}}{{else}}No team{{end}}</h2>
+{{$k := .TeamKey}}{{$s := .Section}}
+<a href="/t/{{$k}}/settings/identity"{{if eq $s "identity"}} class="active" aria-current="page"{{end}}>Identity<span>Name, emoji and accent</span></a>
+<a href="/t/{{$k}}/settings/labels"{{if eq $s "labels"}} class="active" aria-current="page"{{end}}>Labels<span>This team's labels</span></a>
+<a href="/t/{{$k}}/settings/projects"{{if eq $s "projects"}} class="active" aria-current="page"{{end}}>Projects<span>This team's projects</span></a>
+</div>
+<div class="set-nav-group">
+<h2><span class="set-nav-mark set-nav-server"><svg width="11" height="11" aria-hidden="true"><use href="#ic-settings"/></svg></span>Server</h2>
+<a href="/t/{{$k}}/settings/teams"{{if eq $s "teams"}} class="active" aria-current="page"{{end}}>Teams<span>Every team here</span></a>
+<a href="/t/{{$k}}/settings/members"{{if eq $s "members"}} class="active" aria-current="page"{{end}}>Members<span>Accounts every team shares</span></a>
+<a href="/t/{{$k}}/settings/access"{{if eq $s "access"}} class="active" aria-current="page"{{end}}>Access<span>Tokens and sign-in</span></a>
+</div>
+</nav>{{end}}
+
+{{/* One section, under the id every save patches back.
+
+     Every save posts its own row's form and gets this block back, so a rename
+     and its knock-on (a label's colour on the board's chips, a project's
+     status in a select) land together. Row forms carry the record id; the
+     trailing "new" form carries none, which is what makes it a create. Delete
+     travels as ?del=1 so the same form body serves both. Stable patch IDs
+     belong to neutral wrappers: input[name=id] shadows form.id and defeats
+     keyed morphing when a rename reorders rows, losing drafts in other rows.
+     Keep the wrapper when showing deletion review.
+
+     The team-scoped writes post RELATIVE to this page, whose URL is
+     /t/KEY/settings/SECTION, so `label` resolves to /t/KEY/settings/label and
+     a form on team B's settings can only ever write team B. The rows are
+     rendered from row view models with no team on them, and the page's own
+     URL already carries it. The server-wide actions - Access and team
+     archiving - stay absolute, because they are not any one team's business. */}}
+{{define "settings"}}<div id="settings" class="settings">
+{{if eq .Section "identity"}}{{template "set-identity" .}}
+{{else if eq .Section "labels"}}{{template "set-labels" .}}
+{{else if eq .Section "projects"}}{{template "set-projects" .}}
+{{else if eq .Section "teams"}}{{template "set-teams" .}}
+{{else if eq .Section "members"}}{{template "set-members" .}}
+{{else if eq .Section "access"}}{{template "set-access" .}}
+{{end}}</div>{{end}}
+
+{{define "set-identity"}}<section class="set-sec">
+<h2>Identity</h2>
+<p class="set-note">What this team is called, and how it is told apart from the others at a glance.</p>
 {{if .TeamKey}}<form class="set-form" id="team-form">
   <div class="set-field"><label for="set-key">Key</label><input id="set-key" value="{{.TeamKey}}" readonly aria-readonly="true" title="Every issue key and every checkout's .lll.toml names this. Rename a team with the CLI."><span class="set-hint">Names every issue: {{.TeamKey}}-1, {{.TeamKey}}-2.</span></div>
   <div class="set-field"><label for="set-name">Name</label><input id="set-name" name="name" value="{{.TeamName}}" autocomplete="off"></div>
-  <div class="set-field"><label for="set-emoji">Emoji</label><input id="set-emoji" name="emoji" value="{{.TeamEmoji}}" autocomplete="off" class="set-swatch" maxlength="32"><span class="set-hint">One glyph beside the key in the rail, and the tab icon's mark. Leave it empty for the letter from the key.</span></div>
+  <div class="set-field"><label for="set-emoji">Emoji</label><input id="set-emoji" name="emoji" value="{{.TeamEmoji}}" maxlength="8" autocomplete="off" class="set-emoji" aria-label="Team emoji"><span class="set-hint">One glyph beside the key in the rail, and the tab icon's mark. Leave it empty for the letter from the key.</span></div>
   <div class="set-field"><label for="set-accent">Accent</label><input id="set-accent" name="accent" type="color" class="set-swatch" value="{{.Accent}}"><span class="set-hint"><code>{{.Accent}}</code>, {{if .AccentSet}}this team's own colour{{else}}the default ember orange{{end}}. It colours every button, focus ring and tab icon, so two boards open side by side never blur together.</span></div>
-  <button type="button" class="btn primary" data-on:click="@post('settings/team', {contentType: 'form'})">Save team</button>
+  <button type="button" class="btn primary" data-on:click="@post('team', {contentType: 'form'})">Save team</button>
 </form>
 {{else}}<p class="set-empty">No team is configured, so there is nothing to name or colour. Set <code>team</code> in <code>.lll.toml</code> (or <code>LLL_TEAM</code>) and restart <code>lll up</code>.</p>
-{{end}}</section>
+{{end}}</section>{{end}}
 
-<section class="set-sec">
-<h2>Labels <span class="count">{{len .Labels}}</span></h2>
 {{/* TASK-208: the label inventory. Each row carries how many issues wear the
      label, sorted busiest first, so a near-duplicate sits next to the label
      it duplicates instead of hiding alphabetically. */}}
-<p class="set-note">Every label this team has, busiest first, with how many issues carry it.</p>
+{{define "set-labels"}}<section class="set-sec">
+<h2>Labels <span class="count">{{len .Labels}}</span></h2>
+<p class="set-note">Every label this team has, busiest first, with how many issues carry it. Check the list before adding, because reuse beats near-duplicates (bug/bugs/defect). The CLI view is <code>lll label list</code>.</p>
 <div class="set-rows">
 {{range .Labels}}<div id="set-label-{{.Id}}"><form class="set-row" data-name="{{.Name}}">
 <input type="hidden" name="id" value="{{.Id}}">
@@ -74,41 +113,21 @@
 <input name="name" value="{{.Name}}" autocomplete="off" aria-label="Label name">
 <span class="set-usage">{{.UsageText}}</span>
 {{template "set-team-select" $}}
-<button type="button" class="btn" data-on:click="@post('settings/label', {contentType: 'form'})">Save</button>
+<button type="button" class="btn" data-on:click="@post('label', {contentType: 'form'})">Save</button>
 {{template "set-del" "label"}}
 </form></div>
-{{end}}{{if not .Labels}}<p class="set-empty">No labels yet.</p>
+{{end}}{{if not .Labels}}<p class="set-empty">No labels yet. The first one is worth naming carefully — every later label gets compared to it.</p>
 {{end}}</div>
 <form class="set-row set-new">
 <input name="color" type="color" class="set-swatch" value="#828994" aria-label="Colour for the new label">
 <input name="name" placeholder="New label" autocomplete="off" aria-label="New label name">
-<button type="button" class="btn" data-on:click="@post('settings/label', {contentType: 'form'})">Add label</button>
+<button type="button" class="btn" data-on:click="@post('label', {contentType: 'form'})">Add label</button>
 </form>
-<p class="set-note">Check the list first — reuse beats near-duplicates (bug/bugs/defect). The CLI view is <code>lll label list</code>.</p>
-</section>
+</section>{{end}}
 
-<section class="set-sec">
-<h2>Members <span class="count">{{len .Members}}</span></h2>
-<p class="set-note">A member is an account: who a comment is attributed to, who an issue is assigned to, and who can sign in. Added here, a member has no password yet &mdash; give them one under Access below, or run <code>lll member invite NAME --email them@example.com</code>, which creates and credentials in one step.</p>
-<div class="set-rows">
-{{range .Members}}<div id="set-member-{{.Id}}"><form class="set-row" data-name="{{.Name}}">
-<input type="hidden" name="id" value="{{.Id}}">
-<input name="name" value="{{.Name}}" autocomplete="off" aria-label="Member name">
-<input name="email" value="{{.Email}}" placeholder="Email" autocomplete="off" aria-label="Member email" class="set-second">
-<button type="button" class="btn" data-on:click="@post('settings/member', {contentType: 'form'})">Save</button>
-{{template "set-del" "member"}}
-</form></div>
-{{end}}{{if not .Members}}<p class="set-empty">No members yet.</p>
-{{end}}</div>
-<form class="set-row set-new">
-<input name="name" placeholder="New member" autocomplete="off" aria-label="New member name">
-<input name="email" placeholder="Email" autocomplete="off" aria-label="New member email" class="set-second">
-<button type="button" class="btn" data-on:click="@post('settings/member', {contentType: 'form'})">Add member</button>
-</form>
-</section>
-
-<section class="set-sec">
+{{define "set-projects"}}<section class="set-sec">
 <h2>Projects <span class="count">{{len .Projects}}</span></h2>
+<p class="set-note">A project names a destination — Release 1, multi-project server mode — not a wave of work. Descriptions are long-form, so they stay with <code>lll project create -d</code>.</p>
 <div class="set-rows">
 {{range $p := .Projects}}<div id="set-project-{{$p.Id}}"><form class="set-row" data-name="{{$p.Name}}">
 <input type="hidden" name="id" value="{{$p.Id}}">
@@ -117,7 +136,7 @@
 {{range $.Statuses}}<option value="{{.Value}}"{{if eq .Value $p.Status}} selected{{end}}>{{.Label}}</option>
 {{end}}</select>
 {{template "set-team-select" $}}
-<button type="button" class="btn" data-on:click="@post('settings/project', {contentType: 'form'})">Save</button>
+<button type="button" class="btn" data-on:click="@post('project', {contentType: 'form'})">Save</button>
 {{template "set-del" "project"}}
 </form></div>
 {{end}}{{if not .Projects}}<p class="set-empty">No projects yet.</p>
@@ -127,25 +146,51 @@
 <select name="status" aria-label="Status for the new project">
 {{range .Statuses}}<option value="{{.Value}}">{{.Label}}</option>
 {{end}}</select>
-<button type="button" class="btn" data-on:click="@post('settings/project', {contentType: 'form'})">Add project</button>
+<button type="button" class="btn" data-on:click="@post('project', {contentType: 'form'})">Add project</button>
 </form>
-<p class="set-note">Descriptions are long-form, so they stay with <code>lll project create -d</code>.</p>
-</section>
+</section>{{end}}
+
+{{define "set-members"}}<section class="set-sec">
+<h2>Members <span class="count">{{len .Members}}</span></h2>
+<p class="set-scope">Shared by every team on this server: a rename here changes who <code>{{.TeamKey}}</code> and every other board attributes work to.</p>
+<p class="set-note">A member is an account: who a comment is attributed to, who an issue is assigned to, and who can sign in. Added here, a member has no password yet &mdash; give them one under Access, or run <code>lll member invite NAME --email them@example.com</code>, which creates and credentials in one step.</p>
+<div class="set-rows">
+{{range .Members}}<div id="set-member-{{.Id}}"><form class="set-row" data-name="{{.Name}}">
+<input type="hidden" name="id" value="{{.Id}}">
+<input name="name" value="{{.Name}}" autocomplete="off" aria-label="Member name">
+<input name="email" value="{{.Email}}" placeholder="Email" autocomplete="off" aria-label="Member email" class="set-second">
+<button type="button" class="btn" data-on:click="@post('member', {contentType: 'form'})">Save</button>
+{{template "set-del" "member"}}
+</form></div>
+{{end}}{{if not .Members}}<p class="set-empty">No members yet.</p>
+{{end}}</div>
+<form class="set-row set-new">
+<input name="name" placeholder="New member" autocomplete="off" aria-label="New member name">
+<input name="email" placeholder="Email" autocomplete="off" aria-label="New member email" class="set-second">
+<button type="button" class="btn" data-on:click="@post('member', {contentType: 'form'})">Add member</button>
+</form>
+</section>{{end}}
 
 {{/* Teams (TASK-210): every team on the server — the one web surface where
      an archived team stays visible, which is what makes unarchiving from
-     here possible. Archive/unarchive run the Access sections' per-action
-     admin re-auth: /settings is board-token-reachable, and removing a team
+     here possible. Archive/unarchive run the Access section's per-action
+     admin re-auth: settings is board-token-reachable, and removing a team
      from every list and rail is destructive-adjacent even though it deletes
      nothing. The row posts the state it wants (archived=1/0), so a stale
      page converges instead of toggling blind. */}}
-<section class="set-sec" id="set-teams">
+{{define "set-teams"}}<section class="set-sec" id="set-teams">
 <h2>Teams <span class="count">{{len .Teams}}</span></h2>
-<p class="set-note">Every team on this server. Archiving hides a team from the rail's switcher and default lists; its board stays readable at <code>/t/KEY/</code> and nothing is deleted. It asks for the admin password — the credentials <code>lll up</code> prints in its banner — verified per action and never stored. New teams come from <code>lll team create</code> or <code>lll attach</code>.</p>
+<p class="set-scope">Every team on this server, archived ones included.</p>
+<p class="set-note">Archiving hides a team from the rail's switcher and default lists; its board stays readable at <code>/t/KEY/</code> and nothing is deleted. It asks for the admin password — the credentials <code>lll up</code> prints in its banner — verified per action and never stored. New teams come from <code>lll team create</code> or <code>lll attach</code>.</p>
 <div class="set-rows">
 {{range .Teams}}<div id="set-team-{{.Id}}"><form class="set-row" data-name="{{.Key}}">
 <input type="hidden" name="id" value="{{.Id}}">
-<span class="rt-key">{{.Key}}</span>
+{{/* The key is the way IN to that team's own identity section. Setting
+     another team's colour otherwise means leaving settings, switching board
+     in the rail and coming back, which is what made "you can only set one
+     team's colour" true of the web long after it stopped being true of the
+     product (LLL-387). */}}
+<a class="rt-key set-team-link" href="/t/{{.Key}}/settings/identity" title="Open {{.Key}}'s identity">{{.Key}}</a>
 <span class="rg-title">{{.Name}}</span>
 <span class="set-usage">{{.IssuesText}}{{if .Archived}} · archived{{end}}</span>
 <input name="admin_password" type="password" placeholder="Admin password" autocomplete="off" aria-label="Admin password" class="set-second">
@@ -153,17 +198,20 @@
 {{else}}<input type="hidden" name="archived" value="1"><button type="button" class="btn" data-on:click="confirm('Archive ' + el.form.dataset.name + '? Lists and the rail hide it; its board stays readable.') && @post('/settings/teams/archive', {contentType: 'form'})">Archive</button>
 {{end}}</form></div>
 {{end}}</div>
-</section>
+</section>{{end}}
 
 {{/* Access (TASK-204): superuser-power actions behind per-action re-auth.
      Every form here carries the admin password; the server verifies it
      against the superuser per request and never stores it — the board token
      alone must not grant these. The minted token answers in the response
      patch (#access-token-result) and is shown exactly once: impersonate
-     tokens are stateless, so no list of minted tokens exists to render. */}}
-<section class="set-sec" id="access">
+     tokens are stateless, so no list of minted tokens exists to render.
+
+     The id stays `access` so the anchors that named it still land. */}}
+{{define "set-access"}}<section class="set-sec" id="access">
 <h2>Access</h2>
-<p class="set-note">Superuser actions. Each asks for the admin password — the credentials <code>lll up</code> prints in its banner — verified per action and never stored. The board token alone does not grant these.</p>
+<p class="set-scope">Server-wide, and superuser-only.</p>
+<p class="set-note">Each action asks for the admin password — the credentials <code>lll up</code> prints in its banner — verified per action and never stored. The board token alone does not grant these.</p>
 
 <h3 class="access-h">Agent token</h3>
 <p class="set-note">The web face of <code>lll token create</code>: a static PocketBase token that authenticates as the member. It is shown exactly once, below; tokens are stateless, so nothing can list them afterwards. Setting the member's password cuts old tokens off.</p>
@@ -188,8 +236,7 @@
 <input name="admin_password" type="password" placeholder="Admin password" autocomplete="off" aria-label="Admin password" class="set-second">
 <button type="button" class="btn" data-on:click="@post('/settings/access/member', {contentType: 'form'})">Set credential</button>
 </form>
-</section>
-</div>{{end}}
+</section>{{end}}
 
 {{/* The mint action's response patch: the one time the token is ever shown.
      Any later #settings morph redraws the empty placeholder over it, which
@@ -211,7 +258,7 @@
 {{define "set-team-select"}}<select name="team" aria-label="Team" title="Move this to another team">
 {{range .Teams}}{{if not .Archived}}<option value="{{.Key}}"{{if eq .Key $.TeamKey}} selected{{end}}>{{.Key}}</option>{{end}}{{end}}</select>{{end}}
 
-{{define "set-del"}}<button type="button" class="set-del" title="Delete" aria-label="Delete" data-on:click="@post('settings/{{.}}?del=1', {contentType: 'form'})"><svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true"><path d="M2.5 2.5 L9.5 9.5 M9.5 2.5 L2.5 9.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg></button>{{end}}
+{{define "set-del"}}<button type="button" class="set-del" title="Delete" aria-label="Delete" data-on:click="@post('{{.}}?del=1', {contentType: 'form'})"><svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true"><path d="M2.5 2.5 L9.5 9.5 M9.5 2.5 L2.5 9.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg></button>{{end}}
 
 {{/* LLL-233: replace only the selected row; the count is fetched again on
      confirmation. A div owns the patch id: input[name=id] shadows form.id.
@@ -221,11 +268,11 @@
 <input type="hidden" name="confirmed" value="1">
 <input type="hidden" name="expected" value="{{.Used}}">
 <div class="set-delete-impact" role="status">{{if .Changed}}The affected issue count changed. Review it again. {{end}}Delete {{.Kind}} <strong>{{.Name}}</strong>? {{if .Used}}This removes the {{.Kind}} from {{.Used}} issue(s).{{else}}No issues reference it.{{end}} The issues are kept.</div>
-<button type="button" class="btn" data-on:click="@post('settings/{{.Kind}}?cancel=1', {contentType: 'form'})">Cancel</button>
-<button type="button" class="btn" data-on:click="@post('settings/{{.Kind}}?del=1', {contentType: 'form'})">Delete {{.Kind}}</button>
+<button type="button" class="btn" data-on:click="@post('{{.Kind}}?cancel=1', {contentType: 'form'})">Cancel</button>
+<button type="button" class="btn" data-on:click="@post('{{.Kind}}?del=1', {contentType: 'form'})">Delete {{.Kind}}</button>
 </form></div>{{end}}
 
-{{define "set-member-delete-review"}}<div id="set-member-{{.Id}}"><form class="set-row" aria-label="Review account deletion" method="post" action="settings/member?del=1" data-on:submit="evt.preventDefault(); @post('settings/member?del=1', {contentType: 'form'})">
+{{define "set-member-delete-review"}}<div id="set-member-{{.Id}}"><form class="set-row" aria-label="Review account deletion" method="post" action="member?del=1" data-on:submit="evt.preventDefault(); @post('member?del=1', {contentType: 'form'})">
 <input type="hidden" name="id" value="{{.Id}}">
 <input type="hidden" name="confirmed" value="1">
 <input type="hidden" name="expected_assigned" value="{{.Assigned}}">
@@ -233,6 +280,6 @@
 <input type="hidden" name="expected_created" value="{{.Created}}">
 <div class="set-delete-impact" role="status">{{if .Changed}}The affected references changed. Review them again. {{end}}Delete account <strong>{{.Name}}</strong>? This clears {{.Assigned}} issue assignment(s), {{.Authored}} comment author reference(s), and {{.Created}} issue creator reference(s). Issues and comment bodies are kept. This account will no longer be able to sign in.</div>
 <input name="admin_password" type="password" placeholder="Admin password" autocomplete="off" aria-label="Admin password" class="set-second">
-<button type="button" class="btn" data-on:click="@post('settings/member?cancel=1', {contentType: 'form'})">Cancel</button>
+<button type="button" class="btn" data-on:click="@post('member?cancel=1', {contentType: 'form'})">Cancel</button>
 <button type="submit" class="btn">Delete account</button>
 </form></div>{{end}}

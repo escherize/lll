@@ -93,11 +93,7 @@ fn import_github(input: flags.CommandInput) -> Result<(), string> {
       team: team.id,
       title: g.title,
       state,
-      priority: 0,
       description: g.body,
-      emoji: "",
-      assignee: "",
-      project: "",
       labels,
       ..
     }

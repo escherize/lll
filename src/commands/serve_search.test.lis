@@ -1,0 +1,49 @@
+import "go:io/fs"
+import "go:github.com/escherize/lll/web"
+import "go:strings"
+
+// LLL-447: the ⌘K palette's destinations are written by hand in shell.html,
+// which is the one place they can drift from the routes that exist. A link
+// to a settings section that was renamed is a 404 nobody finds until they
+// press the key.
+
+fn shell_template_text() -> string {
+  let data = fs.ReadFile(web.Assets(), "templates/shell.html").unwrap_or([])
+  data as string
+}
+
+/// The settings sections the palette offers, in the order it lists them.
+fn palette_settings_links() -> Slice<string> {
+  let mut out: Slice<string> = []
+  for line in strings.Split(shell_template_text(), "\n") {
+    if !strings.Contains(line, "data-cmdk-item") { continue }
+    let marker = "{{.BoardBase}}settings/"
+    let Some(at) = strings.Index(line, marker) else { continue }
+    let rest = line.substring(at + marker.length()..)
+    let Some(end) = strings.Index(rest, "\"") else { continue }
+    out = out.append(rest.substring(0..end))
+  }
+  out
+}
+
+#[test]
+fn every_palette_settings_link_is_a_real_section() {
+  let links = palette_settings_links()
+  // Not an empty pass: the palette lists every section it can reach.
+  assert links.length() == settings_sections().length()
+  for l in links {
+    assert settings_sections().find(|s| s == l).is_some()
+  }
+}
+
+#[test]
+fn the_palette_answers_on_its_own_id() {
+  // The handler patches by id, so the template and the fragment branch have
+  // to agree on which element the palette's results are.
+  assert shell_template_text().contains("{{define \"cmdk-results\"}}<div id=\"cmdk-results\"")
+  assert shell_template_text().contains("data-cmdk-search")
+  // The asker and the answerer, agreeing on one query parameter and one id.
+  let script = fs.ReadFile(web.Assets(), "static/navigation.js").unwrap_or([]) as string
+  assert script.contains("cmdkSearch")
+  assert script.contains("getElementById('cmdk-results')")
+}

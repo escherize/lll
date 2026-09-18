@@ -1,4 +1,5 @@
 import "go:errors"
+import "go:os"
 import "go:strings"
 
 #[test]
@@ -94,6 +95,41 @@ fn only_404s_at_an_api_path_are_suspected() {
 // tokens and a filtered list answers 200 to dead ones. token_subject is the
 // pure half; it must read a real payload and must NOT accuse what it cannot
 // read.
+
+// LLL-436: the stale-token probe above is one round trip, and an EMPTY LIST is
+// what triggers it. `lll issue view` on an issue with no linked docs, no
+// blockers and no comments hit three empty lists and paid for the identical
+// probe three times in one process. These pin the memo that stopped that.
+
+#[test]
+fn the_identity_probe_is_remembered_once_per_server_and_token() {
+  let tok = "eyJhbGciOiJIUzI1NiJ9.eyJjb2xsZWN0aW9uSWQiOiJwYmNfMzU3MjczOTM0OSIsImV4cCI6MSwiaWQiOiJhYmMxMjNkZWY0NTZnaGkiLCJyZWZyZXNoYWJsZSI6ZmFsc2UsInR5cGUiOiJhdXRoIn0.sig"
+  let _ = os.Setenv("LLL_TOKEN_PROBED", "")
+  assert !probe_remembered("https://a.example", tok)
+  remember_probe("https://a.example", tok)
+  assert probe_remembered("https://a.example", tok)
+
+  // A different server is a different question, even with the same token.
+  assert !probe_remembered("https://b.example", tok)
+  // And a re-mint changes the token, so the memo invalidates itself rather
+  // than needing to be cleared: this is why the key is (server, token).
+  assert !probe_remembered("https://a.example", tok + "x")
+  let _ = os.Setenv("LLL_TOKEN_PROBED", "")
+}
+
+#[test]
+fn the_probe_key_never_carries_the_token_itself() {
+  // The memo lives in the environment, which every child process lll starts
+  // (gh, git) inherits. A token that lives only in a config file must not
+  // start leaking into them, so the key is a digest and nothing else.
+  let tok = "eyJhbGciOiJIUzI1NiJ9.eyJpZCI6InNlY3JldCJ9.sig"
+  let key = probe_key("https://a.example", tok)
+  assert !strings.Contains(key, tok)
+  assert !strings.Contains(key, "https://a.example")
+  assert key.length() == 64
+  // Same inputs, same key: the memo has to hit on the second call.
+  assert probe_key("https://a.example", tok) == key
+}
 
 #[test]
 fn token_subject_reads_the_id_from_a_pocketbase_auth_jwt() {

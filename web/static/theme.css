@@ -726,6 +726,15 @@ input:focus, textarea:focus, select:focus {
   .attachment-upload, .issue-attachments { margin: 16px; }
   .issue-desc { margin: 0 16px 24px; }
   .set-scroll { padding: 16px 12px 24px; }
+  /* The nav becomes a scrolling strip above the section: 176px of sticky
+     column plus a row of inputs does not fit a phone. */
+  .set-layout { flex-direction: column; gap: 18px; }
+  .set-nav { position: static; width: 100%; display: flex; gap: 14px; overflow-x: auto; }
+  .set-nav-group { flex: none; }
+  .set-nav-group + .set-nav-group { margin-top: 0; }
+  .set-nav-group > h2 { padding: 0 6px; }
+  .set-nav a { display: inline-block; }
+  .set-nav a span { display: none; }
   .set-row { flex-wrap: wrap; }
   .set-field { flex-wrap: wrap; }
   .set-hint { flex-basis: 100%; padding-left: 82px; }
@@ -838,6 +847,41 @@ input:focus, textarea:focus, select:focus {
   border-radius: var(--radius);
   padding: 4px;
 }
+/* The options scroll, the search box above them does not. Bounded by the
+   viewport rather than a fixed pixel height, because this menu hangs off a
+   bar near the top of a full-height page: 40 labels ran past the bottom of
+   the screen with no way to reach the last one. overscroll-behavior keeps
+   the wheel from chaining to the board once the list is at its end, the
+   same pairing .emo-grid uses. */
+.flt-opts {
+  max-height: min(60vh, 420px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+.flt-search {
+  display: flex; align-items: center; gap: 6px;
+  margin-bottom: 4px;
+  padding: 0 8px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  background: var(--bg-panel);
+  color: var(--text-3);
+}
+.flt-search:focus-within {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-dim);
+  color: var(--text-2);
+}
+.flt-search svg { flex: none; }
+.flt-search input {
+  width: 100%; min-width: 0;
+  padding: 4px 0;
+  border: none;
+  background: none;
+  border-radius: 0;
+  font-size: 12.5px;
+}
+.flt-search input:focus { outline: none; border: none; box-shadow: none; }
 /* Both row kinds together: the root menu's dimensions are <button>, the
    per-dimension options are <a class="flt-opt"> because they are navigations.
    Styling only the button left every option list rendering as raw underlined
@@ -1035,8 +1079,56 @@ input:focus, textarea:focus, select:focus {
    scans. Every row is its own form; the only orange on the page is the one
    Save that changes the whole workspace's colour, plus the focus rings. */
 .set-scroll { flex: 1; overflow-y: auto; padding: 28px 40px 40px; }
-.settings { max-width: 760px; }
-.set-lede { margin: 0 0 22px; max-width: 68ch; color: var(--text-2); }
+/* LLL-446: the section nav and the section, side by side. The nav is narrow
+   and quiet; the section keeps the reading measure it always had. */
+.set-layout { display: flex; align-items: flex-start; gap: 36px; }
+.settings { flex: 1; min-width: 0; max-width: 760px; }
+
+/* The nav says what a write in each section REACHES: the team's group wears
+   the team's own mark, the server's group is marked as the server's. That
+   grouping is the page's claim about scope, so it is the one thing here
+   allowed to be louder than a row of labels. */
+.set-nav { flex: none; width: 176px; position: sticky; top: 0; }
+.set-nav-group + .set-nav-group { margin-top: 22px; }
+.set-nav-group > h2 {
+  display: flex; align-items: center; gap: 7px;
+  margin: 0 0 7px; padding: 0 8px;
+  color: var(--text-3);
+  font-size: 11px; font-weight: 600; letter-spacing: 0.02em;
+}
+.set-nav-mark {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 17px; height: 17px;
+  border-radius: 5px;
+  background: var(--accent-dim);
+  color: var(--accent);
+  font-size: 10px; line-height: 1;
+}
+.set-nav-server { background: var(--bg-raised); color: var(--text-3); }
+.set-nav a {
+  display: block;
+  padding: 5px 8px;
+  border-radius: var(--radius);
+  color: var(--text-2);
+  font-size: 13px;
+  text-decoration: none;
+}
+.set-nav a span {
+  display: block;
+  margin-top: 1px;
+  color: var(--text-3);
+  font-size: 11px;
+}
+.set-nav a:hover { background: var(--bg-hover); color: var(--text); }
+.set-nav a.active { background: var(--bg-hover); color: var(--accent); font-weight: 600; }
+.set-nav a.active span { color: var(--text-3); font-weight: 400; }
+
+/* One line per section saying whose records these are, above the prose that
+   says what to do with them. A server-wide section earns it; the team's own
+   sections do not, because the nav's team mark already answered. */
+.set-team-link { text-decoration: none; }
+.set-team-link:hover { color: var(--accent); }
+.set-scope { margin: 0 0 6px; max-width: 68ch; color: var(--text-2); font-size: 12px; }
 .set-sec { border-top: 1px solid var(--border); padding: 20px 0; }
 .set-sec:first-of-type { border-top: none; padding-top: 0; }
 .set-sec > h2 {
@@ -1592,3 +1684,99 @@ input:focus, textarea:focus, select:focus {
 .error-details { margin-top: 6px; }
 .error-details summary { cursor: pointer; }
 .error-details pre { white-space: pre-wrap; overflow-wrap: anywhere; font-size: 11px; }
+
+/* The rail's shortcut hint. Pushed to the row's right edge, dimmer than the
+   label it follows: a hint, not a second destination. */
+.rail-kbd {
+  margin-left: auto;
+  padding: 0 4px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--text-3);
+  font-family: inherit;
+  font-size: 10px;
+}
+.rail a:hover .rail-kbd { color: var(--text-2); }
+
+/* ── ⌘K palette (LLL-447) ──────────────────────
+   A native <dialog>, so the browser owns the backdrop, the focus trap and
+   Escape, and no z-index has to be invented for it. Anchored a third of the
+   way down rather than centred: the list grows downward and a centred box
+   would walk up the screen as results arrive. */
+.cmdk {
+  width: min(560px, calc(100vw - 32px));
+  margin: 14vh auto auto;
+  padding: 0;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-lg);
+  background: var(--bg-panel);
+  color: var(--text);
+  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.55);
+}
+.cmdk::backdrop { background: rgba(6, 7, 8, 0.62); }
+.cmdk-bar {
+  display: flex; align-items: center; gap: 9px;
+  padding: 11px 13px;
+  border-bottom: 1px solid var(--border);
+  color: var(--text-3);
+}
+.cmdk-bar input {
+  flex: 1; min-width: 0;
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--text);
+  font: inherit;
+  font-size: 14px;
+}
+.cmdk-bar input:focus { outline: none; }
+.cmdk-esc {
+  flex: none;
+  padding: 1px 5px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--text-3);
+  font-family: inherit;
+  font-size: 10.5px;
+}
+.cmdk-body { max-height: min(420px, 60vh); overflow-y: auto; padding: 6px; }
+.cmdk-group:empty { display: none; }
+.cmdk-group > h3 {
+  margin: 6px 0 3px;
+  padding: 0 8px;
+  color: var(--text-3);
+  font-size: 11px; font-weight: 600; letter-spacing: 0.02em;
+}
+/* `display: flex` on a row beats the user agent's [hidden] { display: none },
+   so the filter's hidden rows kept painting while the code believed they
+   were gone. Restate it here: a rule that sets display owns hiding too. */
+.cmdk-group [hidden], .cmdk-group[hidden] { display: none; }
+.cmdk-group a {
+  display: flex; align-items: center; gap: 9px;
+  padding: 6px 8px;
+  border-radius: var(--radius);
+  color: var(--text);
+  font-size: 13px;
+  text-decoration: none;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+/* One selection, driven by the keyboard, and hover agrees with it rather
+   than competing: two highlighted rows is two answers to "what does Enter
+   do". */
+.cmdk-group a.cmdk-sel, .cmdk-group a:hover { background: var(--bg-hover); }
+.cmdk-group a.cmdk-sel { color: var(--accent); }
+.cmdk-kind {
+  flex: none;
+  min-width: 58px;
+  color: var(--text-3);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px;
+}
+.cmdk-none, .cmdk-empty { margin: 8px; color: var(--text-3); font-size: 12px; }
+@media (prefers-reduced-motion: no-preference) {
+  .cmdk[open] { animation: cmdk-in 120ms cubic-bezier(0.22, 1, 0.36, 1); }
+  @keyframes cmdk-in {
+    from { opacity: 0; transform: translateY(-6px); }
+    to { opacity: 1; transform: none; }
+  }
+}
