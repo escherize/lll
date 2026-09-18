@@ -520,10 +520,21 @@ pub struct SetTeamVM {
 /// url/port/pb-dir — a page cannot change the address of the process serving
 /// it without restarting that process.
 pub struct SettingsVM {
+  // LLL-446: which section this page is. It is the URL's last segment, the
+  // template's dispatch key and the nav's active marker, all one string —
+  // a page that renders one section must not be able to disagree with the
+  // nav row it highlights. Every field below belongs to exactly one section
+  // and is left zero for the others, which is the point: the render fetches
+  // what it shows, not what the page used to show all at once.
+  pub section: string,
   // "" when no team is configured; the team card then says so instead.
   pub team_key: string,
   pub team_name: string,
   pub team_emoji: string,
+  // The glyph the nav wears beside the team's name: the emoji when the team
+  // set one, its key's initial otherwise — theme.mark_for, the same rule the
+  // favicon follows, so the tab and the nav never show different marks.
+  pub team_mark: string,
   // The accent as "#rrggbb", falling back to the canonical orange:
   // <input type="color"> has no empty state, so the swatch always shows one.
   pub accent: string,

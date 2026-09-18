@@ -107,10 +107,14 @@ pub fn run_server(
   )?
   let _ = render("issue-page", PageVM { rail: shell, page: IssueVM { .. } })?
   let _ = render("issues-page", PageVM { rail: shell, page: IssuesVM { .. } })?
-  let _ = render(
-    "settings-page",
-    PageVM { rail: shell, page: SettingsVM { .. } },
-  )?
+  // Every settings section, because each is its own template block and a
+  // typo in one would otherwise wait for someone to click that nav row.
+  for section in settings_sections() {
+    let _ = render(
+      "settings-page",
+      PageVM { rail: shell, page: SettingsVM { section, .. } },
+    )?
+  }
   let _ = render("search-page", PageVM { rail: shell, page: SearchVM { .. } })?
   let _ = render(
     "projects-page",
@@ -250,10 +254,24 @@ fn board_mux(cfg: config.Config, boot: models.Team, hub: Hub) -> Result<mut Ref<
       if let Some(t) = routed_team(w, r) { projects_page(w, r, t.id, cfg.me) }
     }),
   )
+  // LLL-446: settings is six sections with six addresses, so a render fetches
+  // what it shows and a link can name a section. The bare path is the first
+  // one — someone arriving from the rail wants the team they are standing in.
   mux.HandleFunc(
     "GET /t/{team}/settings",
     gated(|w: http.ResponseWriter, r: Ref<http.Request>| {
-      if let Some(t) = routed_team(w, r) { settings_page(w, r, t.id, cfg.me) }
+      redirect_with_query(w, r, f"/t/{r.PathValue("team")}/settings/identity")
+    }),
+  )
+  // The server-wide sections (teams, members, access) are routed under a team
+  // like the rest: their SCOPE is the server, but the page still has a rail,
+  // and a rail that quietly switched teams is the bug LLL-426 fixed.
+  mux.HandleFunc(
+    "GET /t/{team}/settings/{section}",
+    gated(|w: http.ResponseWriter, r: Ref<http.Request>| {
+      if let Some(t) = routed_team(w, r) {
+        settings_page(w, r, t.id, cfg.me, r.PathValue("section"))
+      }
     }),
   )
   // The team-scoped writes ride the same path as the page that made them, so
@@ -309,7 +327,20 @@ fn board_mux(cfg: config.Config, boot: models.Team, hub: Hub) -> Result<mut Ref<
   mux.HandleFunc(
     "GET /settings",
     gated(|w: http.ResponseWriter, r: Ref<http.Request>| {
-      redirect_with_query(w, r, f"/t/{boot_key}/settings")
+      redirect_with_query(w, r, f"/t/{boot_key}/settings/identity")
+    }),
+  )
+  // A bookmarked section on the bare path lands on the same section of the
+  // boot team, not back at the top: /settings/access is where the release
+  // notes and the CLI's own error messages send people.
+  mux.HandleFunc(
+    "GET /settings/{section}",
+    gated(|w: http.ResponseWriter, r: Ref<http.Request>| {
+      redirect_with_query(
+        w,
+        r,
+        f"/t/{boot_key}/settings/{r.PathValue("section")}",
+      )
     }),
   )
   // Every POST is a write returning Result; `flashing` (serve_actions.lis) is

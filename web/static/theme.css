@@ -726,6 +726,15 @@ input:focus, textarea:focus, select:focus {
   .attachment-upload, .issue-attachments { margin: 16px; }
   .issue-desc { margin: 0 16px 24px; }
   .set-scroll { padding: 16px 12px 24px; }
+  /* The nav becomes a scrolling strip above the section: 176px of sticky
+     column plus a row of inputs does not fit a phone. */
+  .set-layout { flex-direction: column; gap: 18px; }
+  .set-nav { position: static; width: 100%; display: flex; gap: 14px; overflow-x: auto; }
+  .set-nav-group { flex: none; }
+  .set-nav-group + .set-nav-group { margin-top: 0; }
+  .set-nav-group > h2 { padding: 0 6px; }
+  .set-nav a { display: inline-block; }
+  .set-nav a span { display: none; }
   .set-row { flex-wrap: wrap; }
   .set-field { flex-wrap: wrap; }
   .set-hint { flex-basis: 100%; padding-left: 82px; }
@@ -1022,8 +1031,56 @@ input:focus, textarea:focus, select:focus {
    scans. Every row is its own form; the only orange on the page is the one
    Save that changes the whole workspace's colour, plus the focus rings. */
 .set-scroll { flex: 1; overflow-y: auto; padding: 28px 40px 40px; }
-.settings { max-width: 760px; }
-.set-lede { margin: 0 0 22px; max-width: 68ch; color: var(--text-2); }
+/* LLL-446: the section nav and the section, side by side. The nav is narrow
+   and quiet; the section keeps the reading measure it always had. */
+.set-layout { display: flex; align-items: flex-start; gap: 36px; }
+.settings { flex: 1; min-width: 0; max-width: 760px; }
+
+/* The nav says what a write in each section REACHES: the team's group wears
+   the team's own mark, the server's group is marked as the server's. That
+   grouping is the page's claim about scope, so it is the one thing here
+   allowed to be louder than a row of labels. */
+.set-nav { flex: none; width: 176px; position: sticky; top: 0; }
+.set-nav-group + .set-nav-group { margin-top: 22px; }
+.set-nav-group > h2 {
+  display: flex; align-items: center; gap: 7px;
+  margin: 0 0 7px; padding: 0 8px;
+  color: var(--text-3);
+  font-size: 11px; font-weight: 600; letter-spacing: 0.02em;
+}
+.set-nav-mark {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 17px; height: 17px;
+  border-radius: 5px;
+  background: var(--accent-dim);
+  color: var(--accent);
+  font-size: 10px; line-height: 1;
+}
+.set-nav-server { background: var(--bg-raised); color: var(--text-3); }
+.set-nav a {
+  display: block;
+  padding: 5px 8px;
+  border-radius: var(--radius);
+  color: var(--text-2);
+  font-size: 13px;
+  text-decoration: none;
+}
+.set-nav a span {
+  display: block;
+  margin-top: 1px;
+  color: var(--text-3);
+  font-size: 11px;
+}
+.set-nav a:hover { background: var(--bg-hover); color: var(--text); }
+.set-nav a.active { background: var(--bg-hover); color: var(--accent); font-weight: 600; }
+.set-nav a.active span { color: var(--text-3); font-weight: 400; }
+
+/* One line per section saying whose records these are, above the prose that
+   says what to do with them. A server-wide section earns it; the team's own
+   sections do not, because the nav's team mark already answered. */
+.set-team-link { text-decoration: none; }
+.set-team-link:hover { color: var(--accent); }
+.set-scope { margin: 0 0 6px; max-width: 68ch; color: var(--text-2); font-size: 12px; }
 .set-sec { border-top: 1px solid var(--border); padding: 20px 0; }
 .set-sec:first-of-type { border-top: none; padding-top: 0; }
 .set-sec > h2 {
