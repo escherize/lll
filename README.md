@@ -35,31 +35,45 @@ brew install escherize/lll/lll
 
 Linux: swap in `lll-linux-amd64` or `lll-linux-arm64`. Binaries are attached
 to [GitHub releases](https://github.com/escherize/lll/releases) by the
-release workflow on every `v*` tag; `lll --version` names the release. This
-covers every client command; `lll up` (the server) reads `pb/` from disk and
-still wants a checkout.
+release workflow on every `v*` tag; `lll --version` names the release. The
+binary includes PocketBase, migrations and web assets: `lll up` runs from any
+directory without a checkout or a toolchain.
 
 ## Quickstart
 
 ```sh
-curl -LsSf https://github.com/ivov/lisette/releases/latest/download/lisette-installer.sh | sh
-mise install && mise run dev   # build, then PocketBase (:8090) + web board (:8100)
+mkdir my-board && cd my-board
+LLL_TEAM=DEMO lll up           # PocketBase (:8090) + web board (:8100)
 ```
 
-That is everything. PocketBase is embedded in the binary. `lis` (the Lisette
-toolchain) is the one tool mise cannot install; the rest (go, jq) it pins.
-Taken ports auto-increment; Ctrl-C stops everything; markup/CSS edits need a
-rebuild (`mise run dev` does it).
+The first boot creates the team and writes `.lll.toml` in this directory.
+The banner prints the actual API endpoint, administrator credentials and board
+login URL. Taken ports auto-increment; Ctrl-C stops everything. Keep this shell
+running while using the CLI from another shell in the same directory.
 
-Then, in another shell. With mise activated, `lll` anywhere under the
-checkout is the binary you just built:
+Create your member and authenticate using the administrator credentials printed
+at startup. A member password is separate from the administrator password.
+Use the banner's API endpoint for `--url` if PocketBase chose another port:
 
 ```sh
-lll attach                               # writes .lll.toml; commit it
-lll issue create "First issue" --priority 2   # -t "First issue" also works
+lll login --create --email you@example.com --password '<member password>' \
+  --admin-email '<startup admin email>' --admin-password '<startup admin password>'
+lll issue create "First issue" --priority 2 --emoji 🧪
 lll issue list
-open http://127.0.0.1:8100               # or: lll board -w
+lll board -w
 ```
+
+For development from a checkout, install the Lisette toolchain and let mise
+provision Go and jq, then build and start the board:
+
+```sh
+curl -LsSf https://github.com/ivov/lisette/releases/latest/download/lisette-installer.sh | sh
+mise install && mise run dev
+```
+
+With mise activated, `lll` under the checkout is the binary you just built.
+Markup/CSS edits need a rebuild (`mise run dev` does it). For an isolated test
+board alongside other servers, use `mise run scratch -- --no-open`.
 
 ## Setup, exactly
 
@@ -73,9 +87,9 @@ Four actors, each configured once, none written twice:
 | Each agent (agent path) | superuser mints `lll token create <name>` | nothing; `LLL_TOKEN` and `LLL_URL` in its env |
 
 Humans log in with email + password; agents ride minted tokens. A member has
-to exist before `lll login` will work. `lll login` authenticates members and
-never creates them, and the superuser is not a member, so its credentials do
-not log you into the board.
+to exist before plain `lll login` will work; `lll login --create` creates one
+using administrator credentials. The superuser is not a member, so its
+credentials alone do not establish a member session.
 
 **If you hold the server's admin credentials, setting up your own machine is
 one command:**
