@@ -177,16 +177,24 @@ check 'lll config --list', or pin a local url: LLL_URL=http://127.0.0.1:8090 lll
   // needs the server this boot was refusing to start. The member token is an
   // optimisation here (it decides who the board's writes author as), never a
   // requirement: absent OR unusable, fall through to the superuser.
+  // The fallback must never make a boot WORSE than it was: a configured token
+  // that this cannot verify is still the credential the caller chose, and an
+  // unreachable superuser is not a reason to refuse a boot that used to work.
+  // So an unusable token only LOSES to a superuser pair that actually
+  // authenticates; when neither works, the token stays and whatever it does
+  // next reports honestly. (Caught by the gate: an e2e boot reusing a running
+  // PocketBase has a valid member token and default admin creds that do not
+  // match that server, and refusing it was a regression this change caused.)
   let mut refresh: Option<fn() -> Result<string, string>> = None
-  let member_token_ok = pb.token_usable(db_url, cfg.token)
-  if cfg.token != "" && !member_token_ok {
-    fmt.Println(
-      f"auth   the token from {src.token} is not valid for {db_url} — booting on the superuser credentials instead; 'lll login' once the board is up replaces it",
-    )
-  }
-  if !member_token_ok {
+  let mut using_token = cfg.token != "" && pb.token_usable(db_url, cfg.token)
+  if !using_token {
     match superuser_token(db_url, email, pass) {
       Ok(tok) => {
+        if cfg.token != "" {
+          fmt.Println(
+            f"auth   the token from {src.token} is not valid for {db_url} — booting on the superuser credentials instead; 'lll login' once the board is up replaces it",
+          )
+        }
         let _ = os.Setenv("LLL_TOKEN", tok)
         // Only this process may re-mint a refused token silently (TASK-323):
         // a CLI holding the admin pair used to re-mint too, and whoami then
@@ -198,15 +206,19 @@ check 'lll config --list', or pin a local url: LLL_URL=http://127.0.0.1:8090 lll
         )
       },
       Err(e) => {
-        return Err(
-          f"could not authenticate as the PocketBase superuser at {db_url}: {e}
+        if cfg.token == "" {
+          return Err(
+            f"could not authenticate as the PocketBase superuser at {db_url}: {e}
 collection rules now refuse unauthenticated requests, so the boot cannot even
 create its team. Point LLL_ADMIN_EMAIL/LLL_ADMIN_PASSWORD at this server's
 superuser credentials, or set LLL_TOKEN to a member token valid for this server.",
-        )
+          )
+        }
+        using_token = true
       },
     }
   }
+  let member_token_ok = using_token
 
   // The in-process board (and its PB client) must talk to the db we chose.
   let _ = os.Setenv("LLL_URL", db_url)
