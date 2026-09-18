@@ -2234,7 +2234,7 @@ assert_contains "$out" "nothing is piped in" "-d - with no pipe names the fix"
 # --- create --json (TASK-177): the raw record, pipe-safe and keyable ---
 python3 "$REPO_ROOT"/scripts/test_create_response.py "$LLL_ABS" "$URL"
 python3 "$REPO_ROOT"/scripts/test_config_permissions.py "$LLL_ABS"
-python3 "$REPO_ROOT"/scripts/test_move_pagination.py "$LLL_ABS"
+python3 "$REPO_ROOT"/scripts/test_agenda_scope.py "$LLL_ABS"
 python3 "$REPO_ROOT"/scripts/test_pr_body.py "$LLL_ABS" "$URL"
 python3 "$REPO_ROOT"/scripts/test_issue_table.py "$LLL_ABS" "$URL"
 python3 "$REPO_ROOT"/scripts/test_issue_project.py "$LLL_ABS" "$URL"
@@ -3413,6 +3413,7 @@ python3 "$REPO_ROOT"/scripts/test_seed.py
 # through two releases (members kind/owner, the whole webhooks collection)
 # under a green gate. Same placement as test_seed.py: it needs the built
 # binary and boots its own throwaway board.
+python3 "$REPO_ROOT"/scripts/test_move_pagination.py "$LLL_ABS"
 python3 "$REPO_ROOT"/scripts/gen_api_schema.py --check
 
 # --- web board (own ephemeral PB; see e2e_web.sh) ---
