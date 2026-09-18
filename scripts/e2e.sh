@@ -1659,7 +1659,7 @@ out=$(LLL_URL=$URL LLL_TEAM=ENG "$LIN" doc list -k ' DECISION ' --search choice)
 assert_contains "$out" $'port-choice\tdecision\tPort choice' "kind alias, normalization and search combine"
 assert_not_contains "$out" "ops-choice" "kind filter excludes other teams"
 out=$(LLL_URL=$URL LLL_TEAM=ENG "$LIN" doc list --kind decision --search race --json)
-printf '%s' "$out" | jq -e '.items == []' >/dev/null || fail "kind and search intersect: $out"
+printf '%s' "$out" | jq -e '(.items // []) == []' >/dev/null || fail "kind and search intersect: $out"
 set +e
 out=$(LLL_URL=$URL LLL_TEAM=ENG "$LIN" doc list --kind memo 2>&1)
 rc=$?
