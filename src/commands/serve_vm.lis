@@ -276,7 +276,7 @@ pub struct RailVM {
   // The team switcher: every team on the server, this page's marked. Rendered
   // per page load like the rest of the rail — never broadcast.
   pub teams: Slice<RailTeamVM>,
-  // Config's `me`. Empty means there is no member to be, so no "My issues"
+  // The authenticated board member's name. Empty means no "My issues"
   // row — a rail link that leads nowhere is worse than no rail link.
   pub me: string,
   pub version: string,

@@ -5,7 +5,6 @@ import "go:html/template"
 import "go:net/http"
 import "go:strings"
 
-import "config"
 import "display"
 import "models"
 import "pb"
@@ -395,14 +394,10 @@ fn comment_write(r: mut Ref<http.Request>) -> Result<string, string> {
   if body == "" { return Err("comment body is required") }
   let issue = records.fetch_issue(key)?
   require_active_team(issue.expand.team)?
-  // Same honor-system authorship as `lll issue comment`: the member named by
-  // 'me' in config, or authorless.
-  let mut author = ""
-  if let Ok(cfg) = config.load() {
-    if cfg.me != "" {
-      if let Ok(Some(m)) = records.find_member(cfg.me) { author = m.id }
-    }
-  }
+  let Some(member) = actor()? else {
+    return Err("commenting needs a member token — start the board with lll up")
+  };
+  let author = member.id
   let payload = marshal(models.NewComment { issue: issue.id, author, body })?
   let _ = pb.post("/api/collections/comments/records", payload)?
   // LLL-386/LLL-384: the comment arrives through the live stream, so the

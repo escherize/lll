@@ -46,9 +46,8 @@ A successful claim is immediately visible on the server; no Git push is needed.
 If another member holds it, the command exits nonzero without taking over.
 Claiming your own issue again succeeds and says it is already yours.
 `--assignee` cannot replace another member's active claim: release it first.
-`lll whoami` shows the authenticated identity. If `me` is configured, it must
-agree with that identity. `lll issue release KEY-12` gives the claim back and
-clears the assignee when it still matches the holder.
+`lll whoami` shows the authenticated identity. `lll issue release KEY-12`
+gives the claim back and clears the assignee when it still matches the holder.
 
 **A claim older than 24 hours is released for you** (LLL-183): the server
 sweeps hourly and frees holds that outlived the agent that took them, leaving

@@ -10,7 +10,6 @@ pub struct Config {
   pub url: string,
   pub team: string,
   pub sort: string,
-  pub me: string,
   pub web_url: string,
   pub token: string,
 }
@@ -24,7 +23,6 @@ pub struct Sources {
   pub url: string,
   pub team: string,
   pub sort: string,
-  pub me: string,
   pub web_url: string,
   pub token: string,
 }
@@ -32,7 +30,7 @@ pub struct Sources {
 /// Load config: env vars > the repo's .lll.toml > ~/.config/lll/lll.toml.
 /// The files LAYER rather than shadow: each supplies the keys it names, so a
 /// committed repo file can carry `team` alone and still inherit `url` and
-/// `me` from the machine. Env vars override per field.
+/// `token` from the machine. Env vars override per field.
 pub fn load() -> Result<Config, string> {
   let (cfg, _) = load_traced()?
   Ok(cfg)
@@ -51,7 +49,6 @@ pub fn load_traced() -> Result<(Config, Sources), string> {
     if cfg.url != was.url { src.url = from }
     if cfg.team != was.team { src.team = from }
     if cfg.sort != was.sort { src.sort = from }
-    if cfg.me != was.me { src.me = from }
     if cfg.web_url != was.web_url { src.web_url = from }
     if cfg.token != was.token { src.token = from }
   }
@@ -65,11 +62,6 @@ pub fn load_traced() -> Result<(Config, Sources), string> {
   if team != "" {
     cfg.team = team
     src.team = "env:LLL_TEAM"
-  }
-  let me = os.Getenv("LLL_ME")
-  if me != "" {
-    cfg.me = me
-    src.me = "env:LLL_ME"
   }
   let sort = os.Getenv("LLL_SORT")
   if sort != "" {
@@ -102,12 +94,12 @@ fn config_files() -> Slice<string> {
   files
 }
 
-/// Path of the machine's config, whether or not it exists. `url` and `me`
-/// belong here: how THIS machine reaches the tracker, and who is at it.
+/// Path of the machine's config, whether or not it exists. `url` and `token`
+/// belong here: how THIS machine reaches the tracker, and the login credential.
 ///
 /// The config ROOT is overridable, because a harness that cannot set HOME can
 /// still set an environment variable (LLL-400). Fleet workers that could write
-/// HOME but not set it wrote `lll config set me` and `lll login` into the
+/// HOME but not set it wrote `lll login` into the
 /// developer's own ~/.config/lll/lll.toml six times in one replay.
 ///
 /// Precedence: LLL_CONFIG_HOME, then XDG_CONFIG_HOME, then ~/.config. The

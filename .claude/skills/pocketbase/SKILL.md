@@ -93,12 +93,12 @@ rules in the same migration, or it ships public.
 `members` IS an auth collection (`1788300000_members_auth.js`); every actor -
 human or agent - is one member record.
 
-**Identity is the token, and `me` may only agree with it** (TASK-317, decision
-`identity-is-the-token`). The author of a write is the member the token names; a
-configured `me` naming someone else is refused with both names. A superuser
-token names nobody, so under it `me` attributes as before. This is why `me` does
-not create members: a field that may only agree with who you are must not be
-able to mint who you are (LLL-374).
+**Identity is the token** (LLL-445, decision `board-identity-is-a-member-token`).
+A member token determines authorship. `me` and `LLL_ME` are no longer settings;
+legacy file keys are ignored. A superuser token has no member identity, so
+optional CLI authorship is empty and claims require a member token. `lll up`
+uses admin credentials to bootstrap, then impersonates a member from `$USER`
+(`local` when absent). The board and automatic renewals keep that member's identity.
 
 - Humans: email + password, PocketBase's built-in auth.
 - Bots: a static, non-refreshable token from

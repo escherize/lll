@@ -50,10 +50,10 @@ pub fn config_commands() -> Slice<flags.Command> {
     },
     flags.Command {
       name: "set",
-      summary: "save me, url or web_url in ~/.config/lll/lll.toml",
+      summary: "save url or web_url in ~/.config/lll/lll.toml",
       page: "",
       spec: [],
-      positional: "<me|url|web_url> VALUE",
+      positional: "<url|web_url> VALUE",
       run: config_set,
     },
   ]
@@ -63,23 +63,22 @@ pub fn config_commands() -> Slice<flags.Command> {
 /// prints it under the verb table for `lll config --help`.
 fn config_intro() -> string {
   "Your token determines the member that authors comments and holds claims.
-If 'me' is set, it must agree with that member; 'lll whoami' shows the identity.
-Use 'lll config set me NAME' to correct it. Save API and board endpoints with
+Use 'lll whoami' to check it. Save API and board endpoints with
 'lll config set url URL' and 'lll config set web_url URL'.
 url / LLL_URL: API base for reads and writes.
 web_url / LLL_WEB_URL: board base for browser links; login discovers it when
 the server advertises it. Both may use the same address.
 
-Precedence: env vars (LLL_URL, LLL_TEAM, LLL_ME, LLL_SORT, LLL_WEB_URL,
+Precedence: env vars (LLL_URL, LLL_TEAM, LLL_SORT, LLL_WEB_URL,
 LLL_TOKEN) > the repo's .lll.toml > ~/.config/lll/lll.toml. The files layer:
 each supplies the keys it names, so the committed repo file carries 'team' and
-nothing else while 'url' and 'me' stay per-machine. 'lll attach' writes the
+nothing else while 'url' and 'token' stay per-machine. 'lll attach' writes the
 repo file."
 }
 
-/// Set a machine-level identity or endpoint, without changing repo config.
+/// Set a machine-level endpoint, without changing repo config.
 fn config_set(input: flags.CommandInput) -> Result<(), string> {
-  let usage = "usage: lll config set <me|url|web_url> VALUE"
+  let usage = "usage: lll config set <url|web_url> VALUE"
   if input.parsed.positional_count() != 2 { return Err(usage) }
   let key = input.parsed.first()
   let value = strings.TrimSpace(input.parsed.nth(1))
@@ -96,31 +95,7 @@ fn config_set(input: flags.CommandInput) -> Result<(), string> {
     }
     return Ok(())
   }
-  if key != "me" { return Err(f"cannot set '{key}'; supported keys: me, url, web_url") }
-  let name = value
-
-  // The home config, not the repo's: the repo file is committed, and whose
-  // machine this is has no business travelling with it.
-  let path = set_home_key("me", name)?
-  fmt.Println(f"me = \"{name}\" in {path}")
-
-  // LLL-374: report whether that name exists; do not create it. `me` is a
-  // claim that must AGREE with the token's member (identity-is-the-token,
-  // TASK-317), so it is the wrong place to mint one - seeding here made every
-  // harness that named itself per worktree leave a permanent auth record
-  // behind. People join a board through `lll member add` or an invite, not by
-  // asserting a name. An unreachable server is not a reason to fail: the
-  // config write is the point, and this is only a courtesy check.
-  match member_exists(name) {
-    Ok(true) => (),
-    Ok(false) => fmt.Println(
-      f"no member named {name} yet — 'lll member add -n \"{name}\"' to create one",
-    ),
-    Err(_) => fmt.Println(
-      f"could not reach the server to check for member {name} — 'lll member add -n \"{name}\"' if it does not exist",
-    ),
-  }
-  Ok(())
+  Err(f"cannot set '{key}'; supported keys: url, web_url")
 }
 
 /// Set a repo-level key in the repo's .lll.toml — the one already in play,
@@ -134,7 +109,7 @@ pub fn set_repo_key(key: string, value: string) -> Result<string, string> {
 }
 
 /// Set a machine-level key in ~/.config/lll/lll.toml, creating the directory
-/// if needed. Returns the path written. `url` and `me` belong here: the repo
+/// if needed. Returns the path written. `url` and `token` belong here: the repo
 /// file is committed, and neither of those travels.
 pub fn set_home_key(key: string, value: string) -> Result<string, string> {
   let path = config.home_path()?
@@ -220,7 +195,6 @@ fn config_list(_input: flags.CommandInput) -> Result<(), string> {
   print_origin(src.url, "url", cfg.url)
   print_origin(src.team, "team", cfg.team)
   print_origin(src.sort, "sort", cfg.sort)
-  print_origin(src.me, "me", cfg.me)
   print_origin(src.web_url, "web_url", cfg.web_url)
   // The token is a secret, so --list answers where it came from, never what
   // it is. The origin column is the debugging affordance; the value would
@@ -294,15 +268,15 @@ fn config_init(_input: flags.CommandInput) -> Result<(), string> {
     return Err(".lll.toml already exists; not overwriting")
   }
   let template = f"# lll configuration
-# Precedence: env vars (LLL_URL, LLL_TEAM, LLL_ME, LLL_SORT, LLL_WEB_URL,
+# Precedence: env vars (LLL_URL, LLL_TEAM, LLL_SORT, LLL_WEB_URL,
 # LLL_TOKEN) > this file > ~/.config/lll/lll.toml. The files layer: each
 # supplies the keys it names, so a key left commented out here is inherited
 # from the home config. 'lll config --list' shows every effective value and
 # the file it came from.
 #
 # Committed at a repo root this file should carry 'team' and nothing else —
-# 'lll attach' writes exactly that. 'url' and 'me' are facts about a machine
-# and a person: set them once in ~/.config/lll/lll.toml.
+# 'lll attach' writes exactly that. 'url' and 'token' are facts about a machine
+# and its login: set them once in ~/.config/lll/lll.toml.
 
 # PocketBase server URL.
 # url = \"http://127.0.0.1:8090\"
@@ -313,12 +287,6 @@ fn config_init(_input: flags.CommandInput) -> Result<(), string> {
 # Default sort for 'lll issue list': {strings.Join(query.sort_fields(), ", ")};
 # prefix - for descending (e.g. \"-updated\").
 # sort = \"created\"
-
-# Optional member name. Your auth token determines authorship and claims;
-# 'me', when set, must agree. Check with 'lll whoami' and correct a stale
-# value with 'lll config set me <name>'. Local superuser setup uses this
-# name for attribution; it does not log you in as that member.
-# me = \"bryan\"
 
 # Web board base URL, used by 'lll board' and 'lll issue url' / 'view -w'.
 # web_url = \"http://127.0.0.1:8100\"

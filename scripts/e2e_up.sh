@@ -6,15 +6,13 @@
 # shuts down gracefully, taking the board with it), and the reuse path (a
 # healthy external PB at the configured URL is used, not restarted, and
 # survives lll up's exit; that external PB is a second lll up instance), and
-# first-boot identity (me guessed from $USER, written to the HOME config —
-# never the repo's committed .lll.toml — seeded as a member, and not
-# re-guessed once configured), and the TASK-182 board gate: with no
+# first-boot identity (a member seeded from $USER, authenticated by a member
+# token without changing CLI credentials), and the TASK-182 board gate: with no
 # LLL_BOARD_TOKEN the boot generates one, prints its login URL in the banner,
 # and refuses every anonymous request with a 401 that names the fix.
 #
-# Every lll up here runs with HOME="$E2E_HOME": a first boot writes 'me' to
-# the home config now (TASK-168), and a suite must not rewrite the
-# developer's own.
+# Every lll up here runs with HOME="$E2E_HOME" so the suite reads and writes
+# only its isolated CLI configuration.
 set -euo pipefail
 . "$(dirname "$0")/lib.sh"   # free_port, wait_ok, fail, assert_*, e2e_begin/end
 e2e_begin
@@ -39,6 +37,7 @@ e2e_trap_cleanup cleanup
 (cd "$REPO_ROOT" && lis build >/dev/null)
 python3 "$REPO_ROOT"/scripts/test_board_startup.py "$REPO_ROOT"/target/.lisette/bin/lll
 python3 "$REPO_ROOT"/scripts/test_up_errors.py "$REPO_ROOT"/target/.lisette/bin/lll
+python3 "$REPO_ROOT"/scripts/test_board_identity.py "$REPO_ROOT"/target/.lisette/bin/lll
 python3 "$REPO_ROOT"/scripts/test_scratch.py
 python3 "$REPO_ROOT"/scripts/test_demo.py
 
@@ -107,10 +106,8 @@ curl -sf -X POST "http://127.0.0.1:$DB2/api/collections/_superusers/auth-with-pa
 # rides a member token from the same server.
 grep -q "auth   rules are authenticated-only" "$UP_LOG" \
   || fail "lll up did not apply the superuser token to its own process"
-# TASK-317: the token decides identity and 'me' may only agree. The boot
-# guessed me = "e2euser" (asserted above and again below), so the suite's
-# token is that member's; wait for the boot to seed it before minting, or
-# the helper creates a second one and loses the race on the name.
+# The boot seeds e2euser and authenticates as that member. Wait for it before
+# minting the suite's CLI token, or the helper loses the race on the name.
 _su=$(pb_superuser_token "http://127.0.0.1:$DB2")
 for _ in $(seq 1 100); do
   curl -sf -G "http://127.0.0.1:$DB2/api/collections/members/records" --data-urlencode "filter=(name='e2euser')" \
@@ -123,14 +120,10 @@ export LLL_TOKEN="$E2E_TOKEN"
 AUTH_HDR="Authorization: Bearer $E2E_TOKEN"
 
 # --- first boot settles an identity without asking (task-31) ---
-grep -q 'guessed me = "e2euser" from $USER' "$UP_LOG" || fail "first boot did not guess me from \$USER"
-grep -q 'created member e2euser' "$UP_LOG" || fail "first boot did not seed the member"
-grep -q '^me     e2euser' "$UP_LOG" || fail "first boot did not print me"
-# The HOME config, not the repo's: .lll.toml is committed now (TASK-168), and
-# booting a server must not put a username into someone else's checkout.
+grep -q 'created member e2euser' "$UP_LOG" || fail "first boot did not seed member"
+grep -q '^member e2euser' "$UP_LOG" || fail "first boot did not use member identity"
 HOME_TOML="$E2E_HOME/.config/lll/lll.toml"
-grep -q 'me = "e2euser"' "$HOME_TOML" \
-  || fail "me not written to the home config: $(cat "$HOME_TOML" 2>&1)"
+grep -q '^me = ' "$HOME_TOML" && fail "boot wrote removed me setting"
 [ ! -e .lll.toml ] || fail "first boot wrote the repo's .lll.toml: $(cat .lll.toml)"
 curl -sf -H "$AUTH_HDR" "http://127.0.0.1:$DB2/api/collections/members/records?filter=name%3D%27e2euser%27" \
   | grep -q '"name":"e2euser"' || fail "seeded member not in the members collection"
@@ -180,9 +173,7 @@ curl -sf -H "Cookie: lll_board=$BOARD_TOKEN2" "http://127.0.0.1:$WEB2/" >/dev/nu
 grep -q "(already running)" "$UP_LOG" || fail "reuse path not taken"
 grep -q "auth   rules are authenticated-only" "$UP_LOG" \
   || fail "the reuse path did not authenticate against the external server"
-# The home config now names me, so a later boot must use it, not guess again.
-grep -q "guessed me" "$UP_LOG" && fail "me re-guessed with one already configured"
-grep -q "^me     e2euser" "$UP_LOG" || fail "configured me not used on a later boot"
+grep -q "^member " "$UP_LOG" || fail "reuse boot did not authenticate as member"
 # The up may have already exited (it has after the banner, twice on loaded
 # runners — TASK-153's orphan class): a kill of nothing is success, the
 # assertion below judges whether the external PB outlived it.

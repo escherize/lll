@@ -33,5 +33,5 @@ cd "$scratch_dir/home"
 exec env HOME="$scratch_dir/home" \
   LLL_ADMIN_EMAIL=admin@local.dev LLL_ADMIN_PASSWORD=admin-local-123 \
   LLL_URL="http://127.0.0.1:$scratch_db_port" LLL_TEAM="$scratch_team" \
-  LLL_ME=scratch LLL_BIND=127.0.0.1 \
+  USER=scratch LLL_BIND=127.0.0.1 \
   "$scratch_binary" up --port "$scratch_web_port" --pb-dir "$scratch_dir/pb_data" "$@"

@@ -33,7 +33,7 @@ binary, api = sys.argv[1:]
 # the whole script by the module-level reference.
 _config_home = tempfile.TemporaryDirectory(prefix='lll-rtrip-config-')
 env = dict(os.environ, LLL_URL=api, LLL_TEAM='RTRIP',
-           LLL_CONFIG_HOME=_config_home.name, LLL_ME='rtrip-bot')
+           LLL_CONFIG_HOME=_config_home.name)
 
 
 def cli(*args, check=True, team='RTRIP'):

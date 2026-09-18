@@ -98,7 +98,7 @@ fn restore(dir: string, home: string) {
 // ---------------------------------------------------------------- layering
 
 #[test]
-fn repo_file_supplies_team_without_losing_the_home_url_and_me() {
+fn repo_file_supplies_team_without_losing_the_home_url_and_sort() {
   let assert Ok((root, home)) = fixture(
     "team = \"REPO\"\n",
     "url = \"http://home:9999\"\nme = \"homer\"\nsort = \"-updated\"\n",
@@ -108,7 +108,6 @@ fn repo_file_supplies_team_without_losing_the_home_url_and_me() {
   // First-wins threw all three away the moment a repo file existed, which is
   // what made a committed repo file impossible.
   assert cfg.url == "http://home:9999"
-  assert cfg.me == "homer"
   assert cfg.sort == "-updated"
 }
 
@@ -239,7 +238,6 @@ fn load_traced_names_the_file_each_value_came_from() {
   assert src.url.contains(filepath.Join("home", ".config", "lll", "lll.toml"))
   // Nothing named web_url, so `--list` must attribute it to the default.
   assert src.web_url == ""
-  assert src.me == ""
 }
 
 // ------------------------------------------------------------- web_url
@@ -258,7 +256,7 @@ fn an_api_url_does_not_invent_a_board_endpoint() {
 
 #[test]
 fn a_repo_file_without_token_keeps_the_home_one() {
-  // TASK-179: token layers exactly like url and me — a committed repo file
+  // TASK-179: token layers exactly like url — a committed repo file
   // carrying 'team' alone must not throw away the machine's secret.
   let assert Ok((root, home)) = fixture(
     "team = \"REPO\"\n",
