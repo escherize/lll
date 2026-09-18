@@ -38,12 +38,13 @@ cli('team', 'create', '-k', 'SINCE2', '-n', 'Other since fixture')
 cli('member', 'add', '-n', 'since-owner')
 cli('label', 'create', '-n', 'delta')
 old = json.loads(cli('issue', 'create', 'Before window', '--json',
-                     '--assignee', 'since-owner', '--label', 'delta'))
+                     '--assignee', 'since-owner', '--label', 'delta', '--priority', '1'))
 time.sleep(0.02)
 boundary = json.loads(cli('issue', 'create', 'At window', '--json',
-                          '--assignee', 'since-owner', '--label', 'delta'))
+                          '--assignee', 'since-owner', '--label', 'delta', '--priority', '3'))
 time.sleep(0.02)
-new = json.loads(cli('issue', 'create', 'After window', '--json', '--state', 'done'))
+new = json.loads(cli('issue', 'create', 'After window', '--json', '--state', 'done',
+                     '--priority', '4'))
 cli('issue', 'create', 'Different team', '--json', team='SINCE2')
 assert instant(old) < instant(boundary) < instant(new)
 stamp = instant(boundary).isoformat()
