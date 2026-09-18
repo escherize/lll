@@ -44,6 +44,8 @@ with concurrent.futures.ThreadPoolExecutor(max_workers=6) as pool:
     records = list(pool.map(create, range(501)))
 docs = json.loads(cli('doc', 'list', '--json'))['items']
 assert [doc['slug'] for doc in docs] == expected
+filtered_docs = json.loads(cli('doc', 'list', '--kind', 'finding', '--json'))['items']
+assert [doc['slug'] for doc in filtered_docs] == expected
 findings = json.loads(cli('finding', 'list', '--json'))
 assert [doc['slug'] for doc in findings] == expected
 context = json.loads(cli('issue', 'view', key, '--json'))
@@ -55,6 +57,7 @@ assert 'page-0500' in cli('search', 'Pagination evidence 500', '--docs')
 
 # A later page failure must not look like a successfully truncated list.
 pages = []
+filters = []
 
 
 class FailingPage(http.server.BaseHTTPRequestHandler):
@@ -63,6 +66,7 @@ class FailingPage(http.server.BaseHTTPRequestHandler):
         if parsed.path == '/api/collections/docs/records':
             page = int(urllib.parse.parse_qs(parsed.query).get('page', ['1'])[0])
             pages.append(page)
+            filters.append(urllib.parse.parse_qs(parsed.query).get('filter', [''])[0])
             if page == 2:
                 self.send_response(503)
                 self.end_headers()
@@ -87,13 +91,17 @@ server = http.server.ThreadingHTTPServer(('127.0.0.1', 0), FailingPage)
 thread = threading.Thread(target=server.serve_forever, daemon=True)
 thread.start()
 try:
-    for args in [('doc', 'list', '--json'), ('issue', 'view', key, '--json')]:
+    for args in [('doc', 'list', '--json'), ('doc', 'list', '--kind', 'finding', '--json'),
+                 ('issue', 'view', key, '--json')]:
         pages.clear()
+        filters.clear()
         result = subprocess.run([binary, *args],
             env=dict(env, LLL_URL=f'http://127.0.0.1:{server.server_port}'),
             text=True, capture_output=True, timeout=15)
         assert result.returncode != 0 and not result.stdout, result
         assert pages == [1, 2], pages
+        if '--kind' in args:
+            assert all("kind='finding'" in value and team['id'] in value for value in filters), filters
         assert 'second page unavailable' in result.stderr, result.stderr
 finally:
     server.shutdown()
