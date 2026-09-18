@@ -1,13 +1,14 @@
 # LLL-402: lll agent DX fleet plan
 
-Status: proposed; no workers or servers have been launched. Review this plan and
-[rules/01-read-and-restate.md](rules/01-read-and-restate.md) before execution.
+Status: approved initial cases 01 and 05; execution is in progress. The user
+said go after reviewing this plan and the first briefs on 2026-09-18.
+Other cases remain a roadmap requiring separate review.
 
 Source: [agent-dx-fleet](https://github.com/metabase/agent-instructions/blob/main/bryan/skills/agent-dx-fleet/SKILL.md),
 main skill blob `f76bc9c4b7a44d4ec13ff67106e60840f5732ea1`. The design, report
 schema, lessons, rules template and lifecycle scripts were read as well.
 
-## Proposed first run
+## Approved initial scope
 
 Run case 01 (tier 1) and case 05 (tier 2), in that order, with ten fresh workers
 per case. Other cases are a prepared roadmap, not approval to run them. Use the
@@ -42,11 +43,14 @@ target has title `Retry loses the issue comment`, priority 2 and description
 report the saved result.` Decoys have unrelated titles and descriptions. Store
 all seeded IDs and complete before-state in controller receipts.
 
+The implementation is `scripts/agent_dx_fleet.py`, with fake lifecycle/isolation
+checks in `scripts/test_agent_dx_fleet.py` registered in the full gate.
+
 Readiness requires the complete URL/token/team tuple, the owned board banner,
 a live owned child and authenticated access as the expected bot. A nonempty
 connection file alone is insufficient. The upstream provision script currently
-uses file size as readiness and the caller's umask; invoke with umask 077 and
-add the stronger controller handshake before any worker launch. Its teardown
+uses file size as readiness and the caller's umask; the real run uses the
+owning controller directly instead. Its teardown
 comment says process group but actually signals immediate descendants and later
 reuses saved PIDs. Use an owning controller that terminates, waits/reaps and
 only escalates still-live children it owns. Test these harness properties with

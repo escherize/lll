@@ -34,6 +34,9 @@ cleanup() { # exit-status
 }
 e2e_trap_cleanup cleanup
 
+python3 "$REPO_ROOT"/scripts/test_agent_dx_fleet.py
+python3 "$REPO_ROOT"/scripts/test_agent_dx_fleet_oracle.py
+
 PORT=$(free_port 20000 39999)
 URL="http://127.0.0.1:$PORT"
 WEB_PORT=$(free_port 40000 59999)
