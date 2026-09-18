@@ -92,7 +92,7 @@ pub fn member_commands() -> Slice<flags.Command> {
 /// Prose that belongs to the noun rather than to any one verb; dispatch
 /// prints it under the verb table for `lll member --help`.
 fn member_intro() -> string {
-  "Members are PocketBase auth records (email + password; TASK-180). Adding one
+  "Members authenticate with email + password. Adding one
 without -e synthesizes <name>@members.invalid as its identity. Your token identifies the
 member that authors your comments and holds claims.
 
@@ -104,12 +104,7 @@ text, for onboarding somebody who is not here to type a password."
 
 fn member_list(input: flags.CommandInput) -> Result<(), string> {
   let p = input.parsed
-  let mut members = models.MemberList { .. }
-  pb.fetch(
-    "/api/collections/members/records?perPage=200&sort=name",
-    "members",
-    &members,
-  )?
+  let members = models.MemberList { items: records.fetch_members()? }
   if p.given("--json") { return print_json(members, "member list") }
   for m in members.items {
     fmt.Println(f"{m.name}\t{m.email}")
@@ -290,7 +285,7 @@ fn member_password_error(name: string, e: string) -> string {
   let status = pb.response_status(e)
   if status == 403 || status == 401 || (status == 400 && strings.Contains(pb.response_body(e), "oldPassword")) {
     return "member set-password is superuser-only and the configured token is not one
-set LLL_ADMIN_EMAIL/LLL_ADMIN_PASSWORD to the credentials 'lll up' prints"
+set LLL_ADMIN_EMAIL/LLL_ADMIN_PASSWORD to this server's administrator credentials"
   }
   f"setting {name}'s password: {e}"
 }
@@ -341,7 +336,7 @@ rerun with --email <email> to set one alongside the password",
   }
   if password.length() < 8 {
     return Err(
-      f"PocketBase requires at least 8 characters (got {password.length()})",
+      f"passwords require at least 8 characters (got {password.length()})",
     )
   }
 
@@ -492,7 +487,7 @@ fn member_set_password_page() -> string {
 Usage:
   {usage}
 
-Authenticates as the PocketBase superuser using --admin-email/--admin-password,
+Authenticates as the server administrator using --admin-email/--admin-password,
 LLL_ADMIN_EMAIL/LLL_ADMIN_PASSWORD, or a configured superuser token.
 Sets NAME's password to --password (alias -p) when supplied. Otherwise prompts
 twice with echo off when stdin is a terminal, or reads two lines when piped.

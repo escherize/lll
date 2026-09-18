@@ -121,9 +121,9 @@ $1"
 #
 # Pattern is a basic regex, so the existing '^name\tvalue' anchors still work.
 assert_cli_contains() { # label pattern command...
-  local label=$1 pattern=$2 out status
+  local label=$1 pattern=$2 out status=0
   shift 2
-  out=$("$@" 2>&1); status=$?
+  out=$("$@" 2>&1) || status=$?
   [ "$status" -eq 0 ] || fail "$label: the read itself failed (exit $status): $*
 $out"
   printf '%s\n' "$out" | grep -- "$pattern" >/dev/null || fail "$label: expected '$pattern' from: $*
@@ -131,9 +131,9 @@ $out"
 }
 
 assert_cli_lacks() { # label pattern command...
-  local label=$1 pattern=$2 out status
+  local label=$1 pattern=$2 out status=0
   shift 2
-  out=$("$@" 2>&1); status=$?
+  out=$("$@" 2>&1) || status=$?
   [ "$status" -eq 0 ] || fail "$label: the read itself failed (exit $status): $*
 $out"
   printf '%s\n' "$out" | grep -- "$pattern" >/dev/null && fail "$label: did not expect '$pattern' from: $*
@@ -150,7 +150,7 @@ $1" || true
 # --- TASK-181: every collection rule is authenticated-only now --------------
 # PocketBase answers nothing useful to a tokenless request, so every suite
 # drives the server with a member token. pb_superuser_token is the admin API
-# (the credentials `lll up` prints and upserts); pb_member_token runs the
+# (the local fallback credentials `lll up` upserts); pb_member_token runs the
 # same auth-with-password round trip a human login does: find-or-create a
 # member whose password the suite knows, then exchange identity+password for
 # the member token the CLI itself sends as LLL_TOKEN.

@@ -27,11 +27,6 @@ pub fn find_team(key: string) -> Result<Option<models.Team>, string> {
 
 /// Every team, key-sorted. Shared by `lll team list` and `lll up`.
 pub fn list_teams() -> Result<models.TeamList, string> {
-  let mut teams = models.TeamList { .. }
-  pb.fetch(
-    "/api/collections/teams/records?perPage=200&sort=key",
-    "teams",
-    &teams,
-  )?
-  Ok(teams)
+  let items = fetch_all_records<models.Team>("/api/collections/teams/records?sort=key,id", "teams")?
+  Ok(models.TeamList { items })
 }

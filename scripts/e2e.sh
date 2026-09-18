@@ -811,6 +811,8 @@ assert_contains "$out" "Deleted ENG-7" "forced delete output"
 out=$(LLL_URL=$URL LLL_TEAM=ENG "$LIN" issue list)
 assert_not_contains "$out" "ENG-7" "forced delete removed the issue"
 
+python3 "$REPO_ROOT"/scripts/test_cli_read_assertions.py
+
 # --- members: add + list ---
 out=$(LLL_URL=$URL "$LIN" member add -n bryan -e bryan@example.com)
 assert_contains "$out" "Added member bryan" "member add output"
@@ -1281,6 +1283,7 @@ assert_contains "$out" "no comment containing 'never-coming'" "--timeout names w
 out=$(LLL_URL=$URL "$LIN" issue comment "$WKEY")
 assert_contains "$out" "lll issue watch $WKEY --until TEXT" "a comment listing points at watch --until"
 
+python3 "$REPO_ROOT"/scripts/test_response_reads.py "$LLL_ABS"
 python3 "$REPO_ROOT"/scripts/test_watch_until.py "$LLL_ABS" "$URL" "$WKEY"
 
 # LLL-464: bot help must succeed without a name, credentials or a server,
@@ -1401,7 +1404,7 @@ done
 wait_for_line "$WATCH_ALL" "Back after restart" "watch survives a PB restart" 10
 wait_for_line "$WATCH_ISSUE" "Back after restart" "issue watch survives a PB restart" 100
 wait_for_line "$WATCH_ISSUE_JSON" "Back after restart" "issue JSON watch survives a PB restart" 100
-wait_for_line "$WATCH_JSON.err" 'reconnected to PocketBase' 'query stream acknowledges reconnection'
+wait_for_line "$WATCH_JSON.err" 'reconnected to the lll server' 'query stream acknowledges reconnection'
 
 # --- delete events; issue watch exits after its issue is deleted ---
 out=$(LLL_URL=$URL "$LIN" issue delete "$WKEY" --force)
@@ -2016,7 +2019,7 @@ assert_contains "$out" "lll login --url" "the refusal names the command that fix
 # The health endpoint is not a collection, so it still answers without a token
 # — 'lll config check' is the one thing a brand-new machine can run.
 out=$(env -u LLL_TOKEN HOME="$E2E_HOME" LLL_URL=$URL "$LIN" config check)
-assert_contains "$out" "answers as a PocketBase API" "config check works without a token"
+assert_contains "$out" "answers as an lll server" "config check works without a token"
 
 for pid in $SPY_PIDS; do kill "$pid" 2>/dev/null || true; done
 SPY_PIDS=""
@@ -2162,7 +2165,7 @@ out=$(LLL_URL=http://127.0.0.1:1 "$LIN" issue list 2>&1)
 rc=$?
 set -e
 [ "$rc" -ne 0 ] || fail "issue list with PB down: expected nonzero exit"
-assert_contains "$out" "cannot reach PocketBase at http://127.0.0.1:1" "PB-down names the server"
+assert_contains "$out" "cannot reach the lll server at http://127.0.0.1:1" "PB-down names the server"
 assert_contains "$out" "start everything with 'lll up'" "PB-down names lll up"
 assert_contains "$out" "LLL_URL" "PB-down names LLL_URL"
 set +e
@@ -2232,7 +2235,10 @@ fi
 assert_contains "$out" "nothing is piped in" "-d - with no pipe names the fix"
 
 # --- create --json (TASK-177): the raw record, pipe-safe and keyable ---
+python3 "$REPO_ROOT"/scripts/test_views_refresh.py "$LLL_ABS"
 python3 "$REPO_ROOT"/scripts/test_create_response.py "$LLL_ABS" "$URL"
+python3 "$REPO_ROOT"/scripts/test_config_permissions.py "$LLL_ABS"
+python3 "$REPO_ROOT"/scripts/test_agenda_scope.py "$LLL_ABS"
 python3 "$REPO_ROOT"/scripts/test_pr_body.py "$LLL_ABS" "$URL"
 python3 "$REPO_ROOT"/scripts/test_issue_table.py "$LLL_ABS" "$URL"
 python3 "$REPO_ROOT"/scripts/test_issue_project.py "$LLL_ABS" "$URL"
@@ -2631,7 +2637,7 @@ out=$(env -u LLL_TOKEN -u LLL_URL HOME="$DATA_DIR/nowhere" "$LIN" whoami 2>&1) \
 assert_contains "$out" "not logged in" "whoami with no token says so"
 
 # TASK-242 AC: --create provisions the member and logs into it in one command,
-# gated on the superuser credentials 'lll up' prints. This is the fresh-server
+# gated on the superuser credentials used to start the server. This is the fresh-server
 # dead end every usability run hit: 'Failed to authenticate' for an account
 # that had never existed, with nothing naming the command that makes one.
 CREATE_HOME="$DATA_DIR/createhome"
@@ -3396,8 +3402,10 @@ done
 assert_contains "$schema_out" "Rules:" "api --schema carries the access rules"
 
 # --- web board (own ephemeral PB; see e2e_web.sh) ---
+python3 "$REPO_ROOT"/scripts/test_collection_pagination.py "$LLL_ABS"
 python3 "$REPO_ROOT"/scripts/test_doc_pagination.py "$LLL_ABS" "$URL"
 python3 "$REPO_ROOT"/scripts/test_issue_since.py "$LLL_ABS" "$URL"
+python3 "$REPO_ROOT"/scripts/test_issue_view_reads.py "$LLL_ABS"
 python3 "$REPO_ROOT"/scripts/test_export_import.py "$LLL_ABS" "$URL"
 python3 "$REPO_ROOT"/scripts/test_import_github.py "$LLL_ABS" "$URL"
 python3 "$REPO_ROOT"/scripts/test_claims_live.py "$LLL_ABS" "$URL"
@@ -3410,6 +3418,7 @@ python3 "$REPO_ROOT"/scripts/test_seed.py
 # through two releases (members kind/owner, the whole webhooks collection)
 # under a green gate. Same placement as test_seed.py: it needs the built
 # binary and boots its own throwaway board.
+python3 "$REPO_ROOT"/scripts/test_move_pagination.py "$LLL_ABS"
 python3 "$REPO_ROOT"/scripts/gen_api_schema.py --check
 
 # --- web board (own ephemeral PB; see e2e_web.sh) ---

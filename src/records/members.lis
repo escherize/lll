@@ -40,11 +40,5 @@ pub fn find_member_as(tok: string, name: string) -> Result<Option<models.Member>
 }
 
 pub fn fetch_members() -> Result<Slice<models.Member>, string> {
-  let mut list = models.MemberList { .. }
-  pb.fetch(
-    "/api/collections/members/records?perPage=200&sort=name",
-    "members",
-    &list,
-  )?
-  Ok(list.items)
+  fetch_all_records<models.Member>("/api/collections/members/records?sort=name,id", "members")
 }

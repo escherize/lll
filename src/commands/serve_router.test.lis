@@ -12,8 +12,8 @@ fn board_routers_are_independent_and_leave_default_mux_untouched() {
   defer upstream_a.Close()
   let mut upstream_b = httptest.NewServer(http.HandlerFunc(|w, _r| { let _ = w.Write("upstream-b".bytes()) }))
   defer upstream_b.Close()
-  let Ok(router_a) = board_mux(config.Config { url: upstream_a.URL, .. }, models.Team { key: "AAA", .. }, router_test_hub(), Actor { .. }) else { panic("first router failed") };
-  let Ok(router_b) = board_mux(config.Config { url: upstream_b.URL, .. }, models.Team { key: "BBB", .. }, router_test_hub(), Actor { .. }) else { panic("second router failed") };
+  let Ok(router_a) = board_mux(config.Config { url: upstream_a.URL, .. }, models.Team { key: "AAA", .. }, router_test_hub(), Actor { .. }, false) else { panic("first router failed") };
+  let Ok(router_b) = board_mux(config.Config { url: upstream_b.URL, .. }, models.Team { key: "BBB", .. }, router_test_hub(), Actor { .. }, false) else { panic("second router failed") };
   let mut board_a = httptest.NewServer(router_a)
   defer board_a.Close()
   let mut board_b = httptest.NewServer(router_b)
@@ -32,6 +32,36 @@ fn board_routers_are_independent_and_leave_default_mux_untouched() {
   }
   let (status, _) = router_get(default_server.URL + "/.well-known/lll")
   assert status == 404
+}
+
+#[test]
+fn administration_ui_requires_explicit_router_opt_in(t: TestContext) {
+  let mut upstream = httptest.NewServer(http.HandlerFunc(|w, r| {
+    let Some(url) = r.URL else { panic("missing request URL") };
+    let text = if strings.HasPrefix(url.Path, "/_/") { "admin-interface" } else { "public-api" }
+    let _ = w.Write(text.bytes())
+  }))
+  defer upstream.Close()
+  for enabled in [false, true] {
+    check_admin_router(t, upstream.URL, enabled)
+  }
+}
+
+fn check_admin_router(t: TestContext, upstream: string, enabled: bool) {
+  let Ok(router) = board_mux(config.Config { url: upstream, .. }, models.Team { key: "ADM", .. }, router_test_hub(), Actor { .. }, enabled) else { panic("router failed") };
+  let mut board = httptest.NewServer(router)
+  defer board.Close()
+  for path in ["/_", "/_/", "/_/assets/app.js"] {
+    let (status, body) = router_get(board.URL + path)
+    if enabled {
+      assert status == 200
+      assert body == "admin-interface"
+    } else {
+      assert status == 404
+      assert !strings.Contains(body, "admin-interface")
+    }
+  }
+  assert router_get(board.URL + "/api/health") == (200, "public-api")
 }
 
 fn router_get(url: string) -> (int, string) {

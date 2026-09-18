@@ -1,13 +1,11 @@
 import "records"
 import "go:encoding/json"
 import "go:fmt"
-import "go:net/url"
 import "go:strings"
 
 import "models"
 import "pb"
 import "flags"
-import "query"
 
 /// Dispatch `lll label <verb>` through the noun's Command table (TASK-307).
 /// The table is the one place a verb is declared: dispatch, `lll label --help`
@@ -70,15 +68,7 @@ fn label_list(input: flags.CommandInput) -> Result<(), string> {
   // Scoped when a team is configured, every team's when not: a label belongs
   // to one team (TASK-173), so the unscoped list is an admin's view, not a
   // working one.
-  let filter = url.QueryEscape(
-    query.filter(configured_team_id()?, "", "", "", "", ""),
-  )
-  let mut labels = models.LabelList { .. }
-  pb.fetch(
-    f"/api/collections/labels/records?perPage=200&sort=name&expand=team&filter={filter}",
-    "labels",
-    &labels,
-  )?
+  let labels = models.LabelList { items: records.fetch_labels(configured_team_id()?)? }
   if p.given("--json") { return print_json(labels, "label list") }
   for l in labels.items {
     let mut team = l.expand.team.key

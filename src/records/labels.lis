@@ -24,11 +24,8 @@ pub fn resolve_label(team_id: string, name: string) -> Result<models.Label, stri
 /// construction. An empty `team_id` is the unscoped board, which has no team
 /// to scope to.
 pub fn fetch_labels(team_id: string) -> Result<Slice<models.Label>, string> {
-  let mut list = models.LabelList { .. }
-  pb.fetch(
-    f"/api/collections/labels/records?perPage=200&sort=name&expand=team&filter={team_param(team_id)}",
+  fetch_all_records<models.Label>(
+    f"/api/collections/labels/records?sort=name,id&expand=team&filter={team_param(team_id)}",
     "labels",
-    &list,
-  )?
-  Ok(list.items)
+  )
 }

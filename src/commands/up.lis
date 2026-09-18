@@ -39,12 +39,17 @@ fn up_spec() -> Slice<flags.Flag> {
       name: "--pb-dir",
       value: true,
       hint: "pb/pb_data",
-      help: "PocketBase data directory (migrations ship in the binary)",
+      help: "server data directory (migrations ship in the binary)",
       ..,
     },
     flags.Flag {
       name: "--no-open",
       help: "do not open the board in the browser",
+      ..,
+    },
+    flags.Flag {
+      name: "--admin-ui",
+      help: "enable the administration UI at the board's /_/ path",
       ..,
     },
     flags.Flag {
@@ -113,11 +118,11 @@ check 'lll config --list', or pin a local url: LLL_URL=http://127.0.0.1:8090 lll
     )
   }
 
-  let mut admin_line = f"admin  {db_url}/_/  (already running)"
+  let mut api_line = f"api    {db_url} (already running)"
 
   // The superuser identity: upserted on a fresh boot, and used for the
-  // process token further down. The printed default keeps `lll up` from
-  // ever showing PocketBase's install wizard.
+  // process token further down. The local fallback initializes the server
+  // before it can show an install wizard; credentials stay off the banner.
   let mut email = os.Getenv("LLL_ADMIN_EMAIL")
   let mut pass = os.Getenv("LLL_ADMIN_PASSWORD")
   if email == "" || pass == "" {
@@ -132,7 +137,7 @@ check 'lll config --list', or pin a local url: LLL_URL=http://127.0.0.1:8090 lll
     task {
       match gopb.Serve(pb_dir, f"{bind_addr()}:{db_port}", email, pass) {
         Err(e) => {
-          fmt.Println(f"pocketbase failed to start: {e}")
+          fmt.Println(f"lll server failed to start: {e}")
           fmt.Println(
             f"check that the data dir '{pb_dir}' is writable, or pick another with --pb-dir",
           )
@@ -155,10 +160,10 @@ check 'lll config --list', or pin a local url: LLL_URL=http://127.0.0.1:8090 lll
     }
     if !ok {
       return Err(
-        f"pocketbase did not come up on {db_url} — check its output above",
+        f"lll server did not come up on {db_url} — check its output above",
       )
     }
-    admin_line = f"admin  {db_url}/_/  {email} / {pass}"
+    api_line = f"api    {db_url}"
   }
   // TASK-181: PocketBase's collection rules refuse unauthenticated requests
   // now, so the boot's seeding (team, member) and the board's own writes
@@ -204,7 +209,7 @@ check 'lll config --list', or pin a local url: LLL_URL=http://127.0.0.1:8090 lll
       Err(e) => {
         if cfg.token == "" {
           return Err(
-            f"could not authenticate as the PocketBase superuser at {db_url}: {e}
+            f"could not authenticate as the server administrator at {db_url}: {e}
 collection rules now refuse unauthenticated requests, so the boot cannot even
 create its team. Point LLL_ADMIN_EMAIL/LLL_ADMIN_PASSWORD at this server's
 superuser credentials, or set LLL_TOKEN to a member token valid for this server.",
@@ -251,7 +256,7 @@ superuser credentials, or set LLL_TOKEN to a member token valid for this server.
     fmt.Println(f"port {web_port} taken — board moving to {chosen}")
   }
   fmt.Println(f"lll    {version()}")
-  fmt.Println(admin_line)
+  fmt.Println(api_line)
   fmt.Println(f"team   {team}")
   fmt.Println(f"member {member.name}")
   // The board binds in microseconds; a browser takes far longer to launch,
@@ -271,22 +276,27 @@ superuser credentials, or set LLL_TOKEN to a member token valid for this server.
       fmt.Println(f"could not open a browser: {e}")
     }
   }
-  run_server(chosen, refresh)
+  run_server(chosen, refresh, p.given("--admin-ui"))
 }
 
 fn print_up_usage() {
   fmt.Println(
-    "lll up - start PocketBase and the web board together
+    "lll up - start the lll server and web board together
 
 Usage:
-  lll up [--port 8100] [--pb-dir pb/pb_data] [--no-open] [--demo]
+  lll up [--port 8100] [--pb-dir pb/pb_data] [--no-open] [--demo] [--admin-ui]
 
-Reuses a PocketBase already running at the configured URL; otherwise runs one
+Reuses a server API already running at the configured URL; otherwise runs one
 in-process (first free port from the configured port up) after upserting the
-superuser from LLL_ADMIN_EMAIL/LLL_ADMIN_PASSWORD (a printed default is used
+administrator from LLL_ADMIN_EMAIL/LLL_ADMIN_PASSWORD (a local fallback is used
 when unset). The board opens in your browser unless --no-open. Taken ports
 auto-increment. Ctrl-C stops everything lll up started; an externally-started
-PocketBase is left running.
+server API is left running.
+
+The administration UI at the board's /_/ path is disabled by default.
+--admin-ui enables it and prints its address. Sign in with the server's
+administrator credentials; LLL_ADMIN_EMAIL/LLL_ADMIN_PASSWORD set them when
+starting a local API. Administrator credentials are never printed.
 
 The board needs a team. A configured team (LLL_TEAM or 'team' in .lll.toml)
 is created on the server if it is missing. With none configured lll up asks

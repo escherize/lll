@@ -14,13 +14,13 @@ def wait_for_endpoints(log_path, timeout=30):
             output = Path(log_path).read_text(errors='replace')
         except FileNotFoundError:
             output = ''
-        admin = re.search(r'^admin  (http://127\.0\.0\.1:\d+)/_/ ', output, re.M)
+        api = re.search(r'^api    (http://127\.0\.0\.1:\d+)(?: |$)', output, re.M)
         board = re.search(r'^board  (http://127\.0\.0\.1:\d+)$', output, re.M)
         login = re.search(r'^board  login (http://127\.0\.0\.1:\d+)/\?board_token=([^ )\s]+)', output, re.M)
-        if admin and board and login:
+        if api and board and login:
             if board[1] != login[1]:
                 raise AssertionError('owned board endpoint differs from its login URL')
-            return {'db_url': admin[1], 'board_url': board[1], 'board_token': login[2]}
+            return {'db_url': api[1], 'board_url': board[1], 'board_token': login[2]}
         if time.monotonic() >= deadline:
             raise AssertionError(f'owned process did not announce both endpoints within {timeout}s; see {log_path}')
         time.sleep(.1)

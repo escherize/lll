@@ -62,17 +62,20 @@ fn rail_teams(current: string) -> Slice<RailTeamVM> {
 /// The rail's SAVED VIEWS group. Same bargain as fav_vms: a failed fetch
 /// renders an empty group rather than a 500.
 fn view_vms() -> Slice<ViewVM> {
+  fetch_view_vms().unwrap_or([])
+}
+
+/// A refresh must distinguish a failed read from an actually empty group.
+fn fetch_view_vms() -> Result<Slice<ViewVM>, string> {
   let mut list = models.ViewList { .. }
-  if pb.fetch("/api/collections/views/records?perPage=200&sort=-created", "views", &list).is_err() {
-    return []
-  }
+  pb.fetch("/api/collections/views/records?perPage=200&sort=-created", "views", &list)?
   // A view is a name plus a query string, nothing more: the rail row is the
   // board URL that query string reproduces.
-  list.items.map(|v| {
+  Ok(list.items.map(|v| {
     let mut href = "/"
     if v.query != "" { href = f"/?{v.query}" }
     ViewVM { name: v.name, href }
-  })
+  }))
 }
 
 /// The rail's FAVORITES group. A failed fetch renders an empty group rather

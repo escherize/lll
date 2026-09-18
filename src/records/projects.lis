@@ -30,11 +30,8 @@ pub fn resolve_project(team_id: string, name: string) -> Result<models.Project, 
 
 /// One team's projects, scoped for the same reason labels are.
 pub fn fetch_projects(team_id: string) -> Result<Slice<models.Project>, string> {
-  let mut list = models.ProjectList { .. }
-  pb.fetch(
-    f"/api/collections/projects/records?perPage=200&sort=name&expand=team&filter={team_param(team_id)}",
+  fetch_all_records<models.Project>(
+    f"/api/collections/projects/records?sort=name,id&expand=team&filter={team_param(team_id)}",
     "projects",
-    &list,
-  )?
-  Ok(list.items)
+  )
 }
