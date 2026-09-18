@@ -1,0 +1,28 @@
+import "pb"
+
+#[json]
+struct CollectionPage<T> {
+  items: Slice<T>,
+  #[json("totalPages")]
+  total_pages: int,
+}
+
+/// Complete typed collection reads. The URL owns scope, sort and expansions;
+/// every page keeps them. A failed page fails the read before callers print.
+fn fetch_all_records<T>(path: string, thing: string) -> Result<Slice<T>, string> {
+  let mut out: Slice<T> = []
+  let mut page = 1
+  loop {
+    let mut batch: CollectionPage<T> = CollectionPage { .. }
+    pb.fetch(f"{path}&perPage=200&page={page}", thing, &batch)?
+    out = out.append(batch.items...)
+    if batch.total_pages > 0 {
+      if page >= batch.total_pages { break }
+    } else if batch.items.length() < 200 {
+      // Empty native responses and older fixtures omit pagination metadata.
+      break
+    }
+    page += 1
+  }
+  Ok(out)
+}

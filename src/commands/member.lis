@@ -104,12 +104,7 @@ text, for onboarding somebody who is not here to type a password."
 
 fn member_list(input: flags.CommandInput) -> Result<(), string> {
   let p = input.parsed
-  let mut members = models.MemberList { .. }
-  pb.fetch(
-    "/api/collections/members/records?perPage=200&sort=name",
-    "members",
-    &members,
-  )?
+  let members = models.MemberList { items: records.fetch_members()? }
   if p.given("--json") { return print_json(members, "member list") }
   for m in members.items {
     fmt.Println(f"{m.name}\t{m.email}")
