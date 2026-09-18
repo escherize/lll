@@ -61,6 +61,20 @@ fn every_state_has_an_icon_symbol_and_no_symbol_is_orphaned() {
 }
 
 #[test]
+fn absolute_is_stable_utc_minutes() {
+  // The property that matters: same input, same output, forever. relative()
+  // cannot be asserted this way at all, which is the point.
+  assert absolute("2026-08-28 18:20:00.123Z") == "2026-08-28 18:20 UTC"
+  assert absolute("2026-08-28 18:20:59.999Z") == "2026-08-28 18:20 UTC"
+}
+
+#[test]
+fn absolute_returns_unparseable_input_as_is() {
+  assert absolute("") == ""
+  assert absolute("not a timestamp") == "not a timestamp"
+}
+
+#[test]
 fn relative_under_a_minute_is_just_now() {
   assert relative_seconds(0) == "just now"
   assert relative_seconds(59) == "just now"

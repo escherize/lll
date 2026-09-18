@@ -867,8 +867,11 @@ fn view(input: flags.CommandInput) -> Result<(), string> {
       for cm in comments {
         let mut author = cm.expand.author.name
         if author == "" { author = "ghost" }
+        // Absolute, not relative: --raw is machine output that gets stored
+        // and re-read (an agent's brief, an exported mirror in Git), where
+        // "5d ago" silently becomes a different string tomorrow.
         fmt.Println(
-          f"- **{author}** ({display.relative(cm.created)}): {cm.body}",
+          f"- **{author}** ({display.absolute(cm.created)}): {cm.body}",
         )
       }
     }
