@@ -1636,3 +1636,95 @@ input:focus, textarea:focus, select:focus {
 .error-details { margin-top: 6px; }
 .error-details summary { cursor: pointer; }
 .error-details pre { white-space: pre-wrap; overflow-wrap: anywhere; font-size: 11px; }
+
+/* The rail's shortcut hint. Pushed to the row's right edge, dimmer than the
+   label it follows: a hint, not a second destination. */
+.rail-kbd {
+  margin-left: auto;
+  padding: 0 4px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--text-3);
+  font-family: inherit;
+  font-size: 10px;
+}
+.rail a:hover .rail-kbd { color: var(--text-2); }
+
+/* ── ⌘K palette (LLL-447) ──────────────────────
+   A native <dialog>, so the browser owns the backdrop, the focus trap and
+   Escape, and no z-index has to be invented for it. Anchored a third of the
+   way down rather than centred: the list grows downward and a centred box
+   would walk up the screen as results arrive. */
+.cmdk {
+  width: min(560px, calc(100vw - 32px));
+  margin: 14vh auto auto;
+  padding: 0;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-lg);
+  background: var(--bg-panel);
+  color: var(--text);
+  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.55);
+}
+.cmdk::backdrop { background: rgba(6, 7, 8, 0.62); }
+.cmdk-bar {
+  display: flex; align-items: center; gap: 9px;
+  padding: 11px 13px;
+  border-bottom: 1px solid var(--border);
+  color: var(--text-3);
+}
+.cmdk-bar input {
+  flex: 1; min-width: 0;
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--text);
+  font: inherit;
+  font-size: 14px;
+}
+.cmdk-bar input:focus { outline: none; }
+.cmdk-esc {
+  flex: none;
+  padding: 1px 5px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--text-3);
+  font-family: inherit;
+  font-size: 10.5px;
+}
+.cmdk-body { max-height: min(420px, 60vh); overflow-y: auto; padding: 6px; }
+.cmdk-group:empty { display: none; }
+.cmdk-group > h3 {
+  margin: 6px 0 3px;
+  padding: 0 8px;
+  color: var(--text-3);
+  font-size: 11px; font-weight: 600; letter-spacing: 0.02em;
+}
+.cmdk-group a {
+  display: flex; align-items: center; gap: 9px;
+  padding: 6px 8px;
+  border-radius: var(--radius);
+  color: var(--text);
+  font-size: 13px;
+  text-decoration: none;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+/* One selection, driven by the keyboard, and hover agrees with it rather
+   than competing: two highlighted rows is two answers to "what does Enter
+   do". */
+.cmdk-group a.cmdk-sel, .cmdk-group a:hover { background: var(--bg-hover); }
+.cmdk-group a.cmdk-sel { color: var(--accent); }
+.cmdk-kind {
+  flex: none;
+  min-width: 58px;
+  color: var(--text-3);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px;
+}
+.cmdk-none, .cmdk-empty { margin: 8px; color: var(--text-3); font-size: 12px; }
+@media (prefers-reduced-motion: no-preference) {
+  .cmdk[open] { animation: cmdk-in 120ms cubic-bezier(0.22, 1, 0.36, 1); }
+  @keyframes cmdk-in {
+    from { opacity: 0; transform: translateY(-6px); }
+    to { opacity: 1; transform: none; }
+  }
+}

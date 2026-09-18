@@ -1359,6 +1359,15 @@ if command -v playwright-cli >/dev/null 2>&1; then
     || fail "browser deletion should preserve issue and clear project and assignee"
   "$LIN" issue delete "$DELETE_KEY" --force >/dev/null
 
+  # LLL-447: the ⌘K palette, on every page, ranked by the search engine.
+  CMDK_PROBE=$("$LIN" issue create -t "Palette landing probe" --json)
+  CMDK_KEY=$(printf '%s' "$CMDK_PROBE" | jq -r '.expand.team.key + "-" + (.number | tostring)')
+  cmdk_js=$(sed -e "s|__WEB__|$WEB|" -e "s|__KEY__|$CMDK_KEY|" -e "s|__QUERY__|Palette landing|" \
+    "$REPO_ROOT"/scripts/browser_cmdk.js)
+  cmdk_browser=$(playwright-cli -s="$BROWSER_SESSION" run-code "$cmdk_js" 2>&1)
+  assert_contains "$cmdk_browser" 'cmdk palette browser passed' "browser: the cmd+K palette opens, filters, searches and lands"
+  "$LIN" issue delete "$CMDK_KEY" --force >/dev/null
+
   # LLL-94: title and state changes refresh favorites on both realtime pages.
   FAV_PROBE=$("$LIN" issue create -t "Favorite live original" --json)
   FAV_KEY=$(printf '%s' "$FAV_PROBE" | jq -r '.expand.team.key + "-" + (.number | tostring)')
@@ -1758,9 +1767,12 @@ assert_contains "$settings" 'class="active" aria-current="page"' "the nav marks 
 assert_not_contains "$settings" 'aria-label="Member name"' "identity does not carry the members list"
 assert_not_contains "$(wcurl -sf "$WEB/settings/members")" 'aria-label="Label name"' \
   "members does not carry the labels list"
-# An unknown section is a 404 that names the ones that exist.
-bogus=$(curl -s -o /dev/null -w '%{http_code}' -H "$BOARD_COOKIE" "$WEB/settings/nope")
+# An unknown section is a 404 that names the ones that exist. (The bare path
+# redirects first, like every other bare path, and 404s on the team route.)
+bogus=$(curl -s -o /dev/null -w '%{http_code}' -H "$BOARD_COOKIE" "$WEB/t/ENG/settings/nope")
 assert_contains "$bogus" "404" "an unknown settings section 404s"
+assert_contains "$(curl -s -H "$BOARD_COOKIE" "$WEB/t/ENG/settings/nope")" "identity, labels" \
+  "the 404 names the sections that do exist"
 # Per-browser state and unwritable config must not appear here.
 assert_not_contains "$settings" "Hidden columns" "settings does not duplicate the board's per-browser column state"
 assert_not_contains "$settings" "pb-dir" "settings does not offer config the running process cannot change"
@@ -1807,6 +1819,25 @@ assert_contains "$(wcurl -sf -X POST "$WEB/settings/label" -d 'name=x' -d 'color
 assert_contains "$(wcurl -sf -X POST "$WEB/settings/project" -d "id=$PROJECT_ID" -d 'name=Web Project' -d 'status=bogus')" \
   "unknown project status" "an unknown project status is refused"
 assert_cli_lacks "a refused label write still created a record" '^x	' "$LIN" label list
+
+# --- LLL-447: the palette's markup and its fragment ------------------------
+# The dialog rides the rail template, so every page that has a rail has it.
+for page in "/" "/issues" "/projects" "/search" "/settings/identity" "/issue/ENG-1"; do
+  html=$(wcurl -sf "$WEB$page")
+  assert_contains "$html" 'id="cmdk"' "$page carries the jump palette"
+  assert_contains "$html" 'id="cmdk-goto"' "$page carries the palette's destinations"
+  assert_contains "$html" 'href="/t/ENG/settings/access"' "$page's palette links the settings sections"
+done
+# The palette asks the search route, which answers one fragment for its id.
+palette=$(wcurl -sf "$WEB/search?palette=1&q=Raw+todo")
+assert_contains "$palette" 'id="cmdk-results"' "the palette fragment owns its id"
+# Plain HTML, not an SSE patch: /issues loads no Datastar and the palette is
+# on it like every other page.
+assert_not_contains "$palette" 'datastar-patch-elements' "the palette fragment needs no Datastar"
+assert_contains "$palette" 'Raw todo subject' "the palette fragment carries the hit"
+assert_not_contains "$palette" 'id="search-results"' "the palette fragment is not the search page's"
+assert_contains "$(wcurl -sf "$WEB/search?palette=1&q=zzzznope")" 'matches' \
+  "a no-hit palette query says so"
 
 # --- Access (task-204): superuser actions behind per-action re-auth ---------
 # /settings is board-token-reachable, but minting an agent token and
