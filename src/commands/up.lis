@@ -169,8 +169,22 @@ check 'lll config --list', or pin a local url: LLL_URL=http://127.0.0.1:8090 lll
   // The board's BROWSER side is gated separately (serve_gate.lis): a board
   // token admits a browser, but web writes still author as this process's
   // identity until browser sessions exist (TASK-182's ADR).
+  //
+  // LLL-443: "a caller-provided token wins" used to mean a token that merely
+  // EXISTS wins, so a home config holding a token for another server (the
+  // hosted board, say) aborted a local boot that was holding working superuser
+  // credentials the whole time — and the abort said to run `lll login`, which
+  // needs the server this boot was refusing to start. The member token is an
+  // optimisation here (it decides who the board's writes author as), never a
+  // requirement: absent OR unusable, fall through to the superuser.
   let mut refresh: Option<fn() -> Result<string, string>> = None
-  if cfg.token == "" {
+  let member_token_ok = pb.token_usable(db_url, cfg.token)
+  if cfg.token != "" && !member_token_ok {
+    fmt.Println(
+      f"auth   the token from {src.token} is not valid for {db_url} — booting on the superuser credentials instead; 'lll login' once the board is up replaces it",
+    )
+  }
+  if !member_token_ok {
     match superuser_token(db_url, email, pass) {
       Ok(tok) => {
         let _ = os.Setenv("LLL_TOKEN", tok)
@@ -188,7 +202,7 @@ check 'lll config --list', or pin a local url: LLL_URL=http://127.0.0.1:8090 lll
           f"could not authenticate as the PocketBase superuser at {db_url}: {e}
 collection rules now refuse unauthenticated requests, so the boot cannot even
 create its team. Point LLL_ADMIN_EMAIL/LLL_ADMIN_PASSWORD at this server's
-superuser credentials, or set LLL_TOKEN to a member token.",
+superuser credentials, or set LLL_TOKEN to a member token valid for this server.",
         )
       },
     }
@@ -213,10 +227,10 @@ superuser credentials, or set LLL_TOKEN to a member token.",
   let team = match ensure_team(want_team, src.team, throwaway) {
     Ok(team) => team,
     Err(e) => {
-      let credential = if cfg.token == "" {
-        "superuser token generated for this startup"
-      } else {
+      let credential = if member_token_ok {
         f"token from {src.token}"
+      } else {
+        "superuser token generated for this startup"
       }
       return Err(f"{e}\nstartup credential: {credential}")
     },
