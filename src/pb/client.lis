@@ -668,8 +668,8 @@ fn read_body(resp: Ref<http.Response>, what: string) -> Result<string, string> {
   defer stream.Close()
   let body = match io.ReadAll(stream) {
     Partial.Ok(b) => b,
-    Partial.Both(b, _) => b,
-    Partial.Err(e) => return Err(f"{what}: reading response: {e}"),
+    // A complete JSON prefix does not make an incomplete HTTP body valid.
+    Partial.Both(_, e) | Partial.Err(e) => return Err(f"{what}: reading response: {e}"),
   }
   if resp.StatusCode >= 300 {
     return Err(

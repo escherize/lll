@@ -1281,6 +1281,7 @@ assert_contains "$out" "no comment containing 'never-coming'" "--timeout names w
 out=$(LLL_URL=$URL "$LIN" issue comment "$WKEY")
 assert_contains "$out" "lll issue watch $WKEY --until TEXT" "a comment listing points at watch --until"
 
+python3 "$REPO_ROOT"/scripts/test_response_reads.py "$LLL_ABS"
 python3 "$REPO_ROOT"/scripts/test_watch_until.py "$LLL_ABS" "$URL" "$WKEY"
 
 # LLL-464: bot help must succeed without a name, credentials or a server,
