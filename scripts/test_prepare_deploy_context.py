@@ -106,7 +106,7 @@ raise SystemExit(status)
         path.chmod(0o755)
 
     def run_prepare(self, **settings):
-        return subprocess.run(['bash', str(self.repo / 'scripts/prepare-deploy-context.sh'), str(self.context)],
+        return subprocess.run([os.environ.get('CONTEXT_TEST_BASH', 'bash'), str(self.repo / 'scripts/prepare-deploy-context.sh'), str(self.context)],
                               env=dict(self.env, **settings), capture_output=True, text=True, timeout=15)
 
     def test_complete_archive_accepts_late_padding(self):

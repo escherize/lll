@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Prepare a clean HEAD plus freshly emitted Go for both CI and local deploys.
 # The caller owns the empty output directory and its lifetime.
-set -euo pipefail
+set -Eeuo pipefail
 if [ "$#" != 1 ] || [ ! -d "$1" ]; then
   echo "usage: bash scripts/prepare-deploy-context.sh EMPTY_DIRECTORY" >&2
   exit 2
