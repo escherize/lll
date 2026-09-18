@@ -451,6 +451,14 @@ fn doc_list_spec() -> Slice<flags.Flag> {
   // written there: agents ask the list to narrow, not 'lll search' to rank.
   flags.with_team([
     flags.Flag {
+      name: "-k",
+      alias: "--kind",
+      value: true,
+      hint: "kind",
+      help: "only docs of this kind: wiki, finding, decision, or prd",
+      ..,
+    },
+    flags.Flag {
       name: "--search",
       alias: "--query",
       value: true,
@@ -464,9 +472,12 @@ fn doc_list_spec() -> Slice<flags.Flag> {
 
 fn doc_list(input: flags.CommandInput) -> Result<(), string> {
   let p = input.parsed
+  let kind = if p.given("-k") { check_kind(p.one("-k"))? } else { "" }
   let team = current_team()?
   let search = strings.ToLower(strings.TrimSpace(p.one("--search")))
-  let mut items = fetch_docs(query.filter(team.id, "", "", "", "", ""), "kind,slug", "")?
+  let mut filter = query.filter(team.id, "", "", "", "", "")
+  if kind != "" { filter = f"{filter} && kind={query.quote(kind)}" }
+  let mut items = fetch_docs(filter, "kind,slug", "")?
   if search != "" {
     items = items.filter(|d| strings.Contains(strings.ToLower(d.slug), search) || strings.Contains(strings.ToLower(d.title), search))
   }
