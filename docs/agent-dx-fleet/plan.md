@@ -17,7 +17,7 @@ commit and SHA-256. This evaluates the tool people will receive rather than a
 known earlier credential/banner defect.
 
 Use Agent fallback: ten workers in batches of at most three, then a fresh
-reviewer. Proposed worker model: `gpt-5.6-luna`, the available cheap worker model;
+reviewer. Approved worker model: `gpt-5.6-luna`, the available cheap worker model;
 the reviewer inherits the parent model. The external skill's `haiku`/`opus`
 Workflow models and Workflow tool are unavailable here. Each worker receives
 only its rules and slot paths, without this implementation conversation. The
