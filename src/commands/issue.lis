@@ -9,6 +9,7 @@ import "go:io"
 import "go:net/url"
 import "go:os"
 import "go:os/exec"
+import "go:regexp"
 import "go:strconv"
 import "go:strings"
 import "go:time"
@@ -150,6 +151,13 @@ fn issue_list_spec() -> Slice<flags.Flag> {
       value: true,
       hint: "f",
       help: f"{strings.Join(query.sort_fields(), ", ")}; prefix - for descending\npriority leads with urgent (- leads with low); unprioritised last either way\n(default: LLL_SORT or 'sort' in .lll.toml, else created)",
+      ..,
+    },
+    flags.Flag {
+      name: "--since",
+      value: true,
+      hint: "rfc3339",
+      help: "issues updated at or after an RFC3339 timestamp (e.g. 2026-09-18T00:00:00Z)\ncurrent records only: no deletions or intermediate states; not exactly-once replay\noverlap the previous window by a second and deduplicate on resume",
       ..,
     },
     flags.Flag {
@@ -700,6 +708,7 @@ fn create(input: flags.CommandInput) -> Result<(), string> {
 fn list(input: flags.CommandInput) -> Result<(), string> {
   let p = input.parsed
   let filters = filters_from(p)?
+  let since = if p.given("--since") { issue_since_stamp(p.one("--since"))? } else { "" }
   let sort_flag = p.one("--sort")
   let mut limit = 0
   if p.given("--limit") {
@@ -738,7 +747,11 @@ fn list(input: flags.CommandInput) -> Result<(), string> {
   // --limit applies server-side via PB's perPage (capped by PB at 500).
   let mut per_page = 200
   if limit > 0 { per_page = limit }
-  let filter = resolve_filter_query(team_id, filters)?
+  let mut filter = resolve_filter_query(team_id, filters)?
+  if since != "" {
+    let clause = f"updated >= {query.quote(since)}"
+    filter = if filter == "" { clause } else { f"{filter} && {clause}" }
+  }
   let mut tail = "&expand=team,assignee,labels,blocked_by,project"
   if filter != "" { tail = f"{tail}&filter={url.QueryEscape(filter)}" }
 
@@ -785,6 +798,35 @@ fn list(input: flags.CommandInput) -> Result<(), string> {
     return Ok(())
   }
   print_issue_table(items)
+}
+
+/// Normalize an inclusive bound to the server's millisecond UTC stamps.
+/// Round UP when the input falls between stored milliseconds, so an issue
+/// updated just before the requested instant cannot slip into the result.
+fn issue_since_stamp(value: string) -> Result<string, string> {
+  let invalid = f"--since takes an RFC3339 timestamp, e.g. 2026-09-18T00:00:00Z or 2026-09-18T02:00:00+02:00; got '{value}'"
+  // Go's parser also accepts comma fractions and malformed numeric offsets.
+  // Keep the advertised RFC3339 grammar, then let Parse validate the date.
+  let parts = regexp
+    .MustCompile(
+      r"^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\.[0-9]+)?(Z|[+-]([01][0-9]|2[0-3]):[0-5][0-9])$",
+    )
+    .FindStringSubmatch(value)
+  if parts.is_empty() { return Err(invalid) }
+  let Ok(parsed) = time.Parse(time.RFC3339, value) else {
+    return Err(invalid)
+  }
+  let mut stamp = parsed.UTC().Truncate(time.Millisecond)
+  let fraction = parts[1]
+  // The regex guarantees ASCII, so these rune offsets also count digits.
+  // Inspect the original fraction: Parse truncates precision beyond nanos.
+  if fraction.length() > 4 && strings.Trim(fraction.substring(4..), "0") != "" {
+    stamp = stamp.Add(time.Millisecond)
+  }
+  if stamp.Year() < 0 || stamp.Year() > 9999 {
+    return Err("--since must fit a UTC year from 0000 to 9999")
+  }
+  Ok(stamp.Format("2006-01-02 15:04:05.000Z"))
 }
 
 /// The standard issue table (ID, state, priority, title, assignee, age),
@@ -2182,4 +2224,3 @@ fn parse_created(stamp: string) -> int {
   let Ok(t) = time.Parse("2006-01-02 15:04:05.999Z", stamp) else { return 0 }
   t.Unix() as int
 }
-

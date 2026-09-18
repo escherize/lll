@@ -3372,6 +3372,7 @@ assert_contains "$schema_out" "Rules:" "api --schema carries the access rules"
 
 # --- web board (own ephemeral PB; see e2e_web.sh) ---
 python3 "$REPO_ROOT"/scripts/test_doc_pagination.py "$LLL_ABS" "$URL"
+python3 "$REPO_ROOT"/scripts/test_issue_since.py "$LLL_ABS" "$URL"
 python3 "$REPO_ROOT"/scripts/test_export_import.py "$LLL_ABS" "$URL"
 python3 "$REPO_ROOT"/scripts/test_import_github.py "$LLL_ABS" "$URL"
 python3 "$REPO_ROOT"/scripts/test_claims_live.py "$LLL_ABS" "$URL"

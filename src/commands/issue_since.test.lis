@@ -1,0 +1,43 @@
+#[test]
+fn since_normalizes_offsets_and_preserves_inclusive_milliseconds() {
+  assert issue_since_stamp("2026-09-18T07:00:00Z") ==
+  Ok("2026-09-18 07:00:00.000Z")
+  assert issue_since_stamp("2026-09-18T09:00:00+02:00") ==
+  Ok("2026-09-18 07:00:00.000Z")
+  assert issue_since_stamp("2026-09-18T00:00:00-07:00") ==
+  Ok("2026-09-18 07:00:00.000Z")
+  assert issue_since_stamp("2026-09-18T07:00:00.123Z") ==
+  Ok("2026-09-18 07:00:00.123Z")
+  assert issue_since_stamp("2026-09-18T07:00:00.123000000000Z") ==
+  Ok("2026-09-18 07:00:00.123Z")
+}
+
+#[test]
+fn since_rounds_submilliseconds_up_including_across_day_boundaries() {
+  assert issue_since_stamp("2026-09-18T07:00:00.123000001Z") ==
+  Ok("2026-09-18 07:00:00.124Z")
+  assert issue_since_stamp("2026-09-18T07:00:00.123000000001Z") ==
+  Ok("2026-09-18 07:00:00.124Z")
+  assert issue_since_stamp("2026-09-18T23:59:59.999999999Z") ==
+  Ok("2026-09-19 00:00:00.000Z")
+}
+
+#[test]
+fn since_rejects_invalid_or_incomplete_timestamps_with_layout_guidance() {
+  for value in [
+    "",
+    "yesterday",
+    "2026-09-18",
+    "2026-09-18T07:00:00",
+    "2026-02-30T07:00:00Z",
+    "2026-09-18T7:00:00Z",
+    "2026-09-18T07:00:00,123Z",
+    "2026-09-18T07:00:00+24:00",
+    "2026-09-18T07:00:00+00:60",
+    "2026-09-18T07:00:00Z' || true",
+  ] {
+    let assert Err(message) = issue_since_stamp(value)
+    assert message.contains("RFC3339")
+    assert message.contains("2026-09-18T00:00:00Z")
+  }
+}
