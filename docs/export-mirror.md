@@ -16,7 +16,7 @@ Each mirror holds:
 | `issues/KEY-N.md` | YAML front matter plus the description | yes |
 | `issues/KEY-N.comments.md` | the issue's comments | no, export only |
 | `issues/KEY-N/` | attachment bytes, when the issue has any | bytes yes, names no |
-| `docs/SLUG.md` | a document | not imported |
+| `docs/SLUG.md` | a document | yes, including kind, coordinates and issue links |
 
 Front matter carries the fields the prose does not: state, priority, assignee,
 project, labels, and the issue's `number` and `sort`. Those last two matter
