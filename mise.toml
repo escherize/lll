@@ -83,6 +83,7 @@ python3 -m unittest discover -s scripts -p 'test_sidecar_dependencies.py'
 python3 -m unittest discover -s scripts -p 'test_import_sidecar.py'
 python3 -m unittest discover -s scripts -p 'test_reap.py'
 python3 -m unittest discover -s scripts -p 'test_protect_archive.py'
+python3 -m unittest discover -s scripts -p 'test_prepare_deploy_context.py'
 python3 scripts/check_assets.py
 """
 
