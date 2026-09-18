@@ -7,8 +7,8 @@
 #
 # Cutting a release:
 #   1. bump [project] version in lisette.toml (checked against the tag below)
-#      and the fallback in src/commands/version.lis (what an installed binary
-#      reports outside a checkout)
+#      and the literal in src/commands/version.lis (what every binary reports);
+#      the gate asserts that the literal agrees with lisette.toml
 #   2. git tag v<version> && git push origin v<version>
 #
 # On the same tags the workflow also renders packaging/homebrew/lll.rb.template
@@ -32,9 +32,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          # `lll --version` now derives from `git describe --tags`, which
-          # needs the tag history present. A shallow checkout can report a
-          # bare SHA and fail the version check below.
+          # `lll --version` uses the literal in src/commands/version.lis;
+          # the gate asserts it agrees with lisette.toml. Version checks
+          # do not require the full history retained here.
           fetch-depth: 0
 
       # Fail fast, before any toolchain install: the tag must equal the
@@ -70,8 +70,9 @@ jobs:
           mkdir -p dist
           cp target/.lisette/bin/lll dist/lll-darwin-arm64
 
-      # `lll --version` derives from `git describe --tags`, so at this tag
-      # checkout the built binary must answer the tag itself — check it.
+      # `lll --version` uses the literal in src/commands/version.lis, which
+      # the gate checks against lisette.toml. Independently verify that the
+      # built release binary reports the tag we are publishing.
       - name: lll --version matches the tag
         run: |
           tag="${GITHUB_REF_NAME#v}"
