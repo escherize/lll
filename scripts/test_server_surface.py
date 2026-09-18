@@ -10,6 +10,8 @@ import time
 import urllib.error
 import urllib.request
 
+from board_startup import wait_for_endpoints
+
 binary = str(Path(sys.argv[1]).resolve())
 
 
@@ -64,6 +66,10 @@ for admin_ui in (False, True):
                     raise AssertionError('board readiness timed out: ' + log.read_text())
                 # A listener is bound before the banner; it begins serving just after.
                 base = f'http://127.0.0.1:{web_port}'
+                announced = wait_for_endpoints(log, timeout=5)
+                assert announced['db_url'] == env['LLL_URL']
+                assert announced['board_url'] == base
+                assert announced['board_token'] == env['LLL_BOARD_TOKEN']
                 assert get(base + '/')[0] == 401
                 assert get(base + '/api/health')[0] == 200
                 for path in ('/_', '/_/', '/_/assets/fixture-missing.js'):
