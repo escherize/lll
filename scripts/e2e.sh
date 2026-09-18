@@ -82,14 +82,6 @@ E2E_TOKEN=$(pb_member_token "$URL" e2e-agent e2e-agent@lll.test e2e-agent-pass-1
 [ -n "$E2E_TOKEN" ] && [ "$E2E_TOKEN" != "null" ] || fail "pb_member_token returned no token"
 export LLL_TOKEN="$E2E_TOKEN"
 AUTH_HDR="Authorization: Bearer $E2E_TOKEN"
-# TASK-317: the token decides identity and 'me' may only agree. The boot
-# guessed me = "e2e" from $USER; the suite's token is e2e-agent's, so the
-# home config says so too, or every write below would be refused.
-HOME="$E2E_HOME" LLL_URL="$URL" "$LIN" config set me e2e-agent >/dev/null \
-  || fail "pointing the suite's home config at the token's member"
-
-json_id() { python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])'; }
-
 # `lll up` created ENG with name "ENG"; create-or-fetch, then set the name the
 # assertions expect. Idempotent so the mid-suite restart cannot double-create.
 seed_team() { # key name -> prints the record id
@@ -299,39 +291,17 @@ if (cd "$WORK" && "$LLL_ABS" config init >/dev/null 2>&1); then
 fi
 rm "$WORK/.lll.toml"
 
-# --- config set me (task-31): creates, then replaces rather than appends ---
-# LLL_URL pinned: without it this reaches whatever owns the default port 8090,
-# which on a machine running a dev board is somebody else's database.
-# It writes the HOME config, not the repo file (TASK-168): 'me' is a fact
-# about a person, and the repo's .lll.toml is committed.
+# --- endpoint settings replace a key instead of appending duplicates ---
 SET_HOME="$DATA_DIR/sethome"
 mkdir -p "$SET_HOME"
 HOME_TOML="$SET_HOME/.config/lll/lll.toml"
-out=$(cd "$WORK" && HOME="$SET_HOME" LLL_URL=$URL "$LLL_ABS" config set me alice)
-assert_contains "$out" 'me = "alice"' "config set me output"
-assert_contains "$out" "$HOME_TOML" "config set me names the file it wrote"
-# LLL-374: config set me REPORTS an unknown name instead of creating it.
-# task-63 had it seed the member, which made `me` a member factory: every
-# harness naming itself per worktree left a permanent auth record behind, and
-# 64 accumulated before anyone counted. Naming yourself does not create you.
-# (LLL_URL stays pinned, so this reaches a real server and the check is real.)
-assert_contains "$out" "no member named alice yet" "config set me reports an unknown name"
-assert_not_contains "$out" "created member alice" "config set me does not create the member"
-# The leak is closed only if the members collection is genuinely untouched;
-# the printed hint alone would not prove that.
-assert_not_contains "$(LLL_URL=$URL "$LIN" member list)" "alice" \
-  "config set me left no member behind"
-assert_contains "$(cat "$HOME_TOML")" 'me = "alice"' "config set me wrote the key"
-[ ! -e "$WORK/.lll.toml" ] || fail "config set me wrote the repo file: $(cat "$WORK/.lll.toml")"
-(cd "$WORK" && HOME="$SET_HOME" LLL_URL=$URL "$LLL_ABS" config set me bob >/dev/null)
-[ "$(grep -c '^me = ' "$HOME_TOML")" = 1 ] \
-  || fail "config set me appended a duplicate key: $(cat "$HOME_TOML")"
-assert_contains "$(cat "$HOME_TOML")" 'me = "bob"' "config set me replaced the value"
-# A duplicate key would make the file unparseable; prove it still loads.
-out=$(cd "$WORK" && HOME="$SET_HOME" LLL_URL=$URL LLL_TEAM=ENG "$LLL_ABS" issue list)
-assert_contains "$out" "ENG-1" "config still parses after two config set me"
-out=$(cd "$WORK" && "$LLL_ABS" config set unsupported http://x 2>&1) && fail "config set accepted an unsupported key"
-assert_contains "$out" "supported keys: me, url, web_url" "config set rejects unsupported keys"
+out=$(cd "$WORK" && HOME="$SET_HOME" "$LLL_ABS" config set url "$URL")
+assert_contains "$out" "$HOME_TOML" "endpoint setting names its file"
+(cd "$WORK" && HOME="$SET_HOME" "$LLL_ABS" config set url "$URL" >/dev/null)
+[ "$(grep -c '^url = ' "$HOME_TOML")" = 1 ] || fail "duplicate endpoint key"
+[ ! -e "$WORK/.lll.toml" ] || fail "endpoint setting wrote repo config"
+out=$(cd "$WORK" && "$LLL_ABS" config set me alice 2>&1) && fail "removed me setting was accepted"
+assert_contains "$out" "supported keys: url, web_url" "me setting is removed"
 
 # --- LLL-400: the config ROOT is overridable ------------------------------
 # A harness that cannot set HOME can still set an environment variable. Fleet
@@ -347,26 +317,26 @@ ROOT_B="$DATA_DIR/cfgroot-b"
 ROOT_XDG="$DATA_DIR/cfgroot-xdg"
 HOME_TOML_BEFORE=$(cat "$HOME_TOML")
 
-(cd "$WORK" && HOME="$SET_HOME" LLL_CONFIG_HOME="$ROOT_A" LLL_URL=$URL "$LLL_ABS" config set me root-a >/dev/null)
-assert_contains "$(cat "$ROOT_A/lll/lll.toml" 2>&1)" 'me = "root-a"' \
+(cd "$WORK" && HOME="$SET_HOME" LLL_CONFIG_HOME="$ROOT_A" LLL_URL=$URL "$LLL_ABS" config set web_url http://root-a.test >/dev/null)
+assert_contains "$(cat "$ROOT_A/lll/lll.toml" 2>&1)" 'web_url = "http://root-a.test"' \
   "LLL_CONFIG_HOME puts the config under its own root"
 
 # Two workers must not be able to collide, which is the whole point.
-(cd "$WORK" && HOME="$SET_HOME" LLL_CONFIG_HOME="$ROOT_B" LLL_URL=$URL "$LLL_ABS" config set me root-b >/dev/null)
-assert_contains "$(cat "$ROOT_A/lll/lll.toml")" 'me = "root-a"' \
+(cd "$WORK" && HOME="$SET_HOME" LLL_CONFIG_HOME="$ROOT_B" LLL_URL=$URL "$LLL_ABS" config set web_url http://root-b.test >/dev/null)
+assert_contains "$(cat "$ROOT_A/lll/lll.toml")" 'web_url = "http://root-a.test"' \
   "a second worker's config did not reach into the first's"
 
 # ~/.config IS the XDG default, so honouring the variable finishes a convention
 # the path already followed.
-(cd "$WORK" && HOME="$SET_HOME" XDG_CONFIG_HOME="$ROOT_XDG" LLL_URL=$URL "$LLL_ABS" config set me xdg-root >/dev/null)
-assert_contains "$(cat "$ROOT_XDG/lll/lll.toml" 2>&1)" 'me = "xdg-root"' \
+(cd "$WORK" && HOME="$SET_HOME" XDG_CONFIG_HOME="$ROOT_XDG" LLL_URL=$URL "$LLL_ABS" config set web_url http://xdg-root.test >/dev/null)
+assert_contains "$(cat "$ROOT_XDG/lll/lll.toml" 2>&1)" 'web_url = "http://xdg-root.test"' \
   "XDG_CONFIG_HOME is honoured when LLL_CONFIG_HOME is unset"
 
 # The app-specific override wins over the ecosystem one.
 (cd "$WORK" && HOME="$SET_HOME" LLL_CONFIG_HOME="$ROOT_A" XDG_CONFIG_HOME="$ROOT_XDG" LLL_URL=$URL \
-  "$LLL_ABS" config set me precedence >/dev/null)
-assert_contains "$(cat "$ROOT_A/lll/lll.toml")" 'me = "precedence"' "LLL_CONFIG_HOME beats XDG_CONFIG_HOME"
-assert_contains "$(cat "$ROOT_XDG/lll/lll.toml")" 'me = "xdg-root"' "the XDG root was left alone"
+  "$LLL_ABS" config set web_url http://precedence.test >/dev/null)
+assert_contains "$(cat "$ROOT_A/lll/lll.toml")" 'web_url = "http://precedence.test"' "LLL_CONFIG_HOME beats XDG_CONFIG_HOME"
+assert_contains "$(cat "$ROOT_XDG/lll/lll.toml")" 'web_url = "http://xdg-root.test"' "the XDG root was left alone"
 
 # None of that may have touched the home config the rest of this section uses.
 [ "$(cat "$HOME_TOML")" = "$HOME_TOML_BEFORE" ] \
@@ -384,19 +354,19 @@ out=$(cd "$WORK" && env -u LLL_URL -u LLL_TEAM -u LLL_ME -u LLL_SORT -u LLL_WEB_
   HOME="$SET_HOME" "$LLL_ABS" config --list)
 assert_contains "$out" "file:$HOME_TOML	url=$URL	API base (reads and writes)" "--list names the API role and home origin"
 assert_contains "$out" "file:.lll.toml	team=ENG" "--list attributes team to the repo file"
-assert_contains "$out" "file:$HOME_TOML	me=homer" "--list attributes me to the home file"
+assert_not_contains "$out" "me=homer" "legacy me is no longer an effective setting"
 assert_contains "$out" "unset	web_url=	board base (browser links)" "--list names the board role even when unset"
 assert_contains "$out" "unset	sort=" "--list marks a key nothing set"
 out=$(cd "$WORK" && LLL_TEAM=FROMENV HOME="$SET_HOME" "$LLL_ABS" config --list)
 assert_contains "$out" "env:LLL_TEAM	team=FROMENV" "--list attributes an override to the env var"
 
-# --- layering: the repo file supplies team, the home file keeps url and me ---
+# --- layering: repo team and home endpoint combine; legacy me is ignored ---
 # First-wins made a committed repo file impossible; this is what replaced it.
 out=$(cd "$WORK" && env -u LLL_URL -u LLL_TEAM HOME="$SET_HOME" "$LLL_ABS" issue list)
 assert_contains "$out" "ENG-1" "repo team layered over the home url"
 assert_not_contains "$out" "OPS-1" "repo team scopes the list"
 out=$(cd "$WORK" && env -u LLL_URL -u LLL_TEAM HOME="$SET_HOME" "$LLL_ABS" config --list)
-assert_contains "$out" "me=homer" "the home file's me survives a repo file"
+assert_not_contains "$out" "me=homer" "legacy identity is ignored when files layer"
 
 # --- discovery walks up to the repo root, not just the cwd (TASK-168) ---
 # Running from a subdirectory used to fall through to the home config and use
@@ -1002,7 +972,7 @@ aname=$(LLL_URL=$URL LLL_TEAM=ENG "$LIN" issue list --assignee bryan --json | \
   jq -r '.items[0].expand.assignee.name')
 [ "$aname" = "bryan" ] || fail "list --json: expected expand.assignee.name bryan, got '$aname'"
 
-# --- comment add authored by config 'me'; shown in view with relative date ---
+# --- comment add authored by the token; shown with relative date ---
 printf 'url = "%s"\nteam = "ENG"\nme = "bryan"\n' "$URL" > "$WORK/.lll.toml"
 out=$(cd "$WORK" && env -u LLL_URL -u LLL_TEAM LLL_TOKEN="$BRYAN_TOK" LLL_ME=bryan HOME="$FAKEHOME" "$LLL_ABS" issue comment ENG-7 -b "Looks good to me")
 assert_contains "$out" "Commented on ENG-7 as bryan" "comment add output names the token's member, which 'me' agrees with"
@@ -1041,28 +1011,19 @@ assert_contains "$out" "there is no #9" "an out-of-range number is told the coun
 # put the comment back for the assertions that follow
 out=$(LLL_URL=$URL LLL_TOKEN="$BRYAN_TOK" LLL_ME=bryan "$LIN" issue comment ENG-7 -b "Looks good to me")
 
-# --- authorless comments: me unset is accepted; me naming NO member is refused ---
-# A genuinely unset 'me' needs a home with no me key: the suite's own
-# E2E_HOME carries me = "e2e" from the boot, which authored this comment for
-# years while the assertion below was satisfied by a DIFFERENT comment's line.
+# --- authorless comments: a superuser token has no member identity ---
+# Use an empty home to keep the superuser-token fixture isolated from
+# the suite's member credentials.
 NOME_HOME="$DATA_DIR/nome_home"; mkdir -p "$NOME_HOME/.config/lll"
 # A member token always names its member (TASK-317), so "no author" needs a
 # token that names nobody: the superuser's, with no 'me' anywhere.
 out=$(env -u LLL_ME LLL_TOKEN="$SU_TOK" HOME="$NOME_HOME" LLL_URL=$URL LLL_TEAM=ENG "$LIN" issue comment ENG-7 -b "Anonymous note")
 assert_contains "$out" "Commented on ENG-7 with no author" "authorless comment (superuser token, me unset) accepted, and says so"
 
-# TASK-309, fleet run 1: thirty agents each set me = "shard-NN", no such
-# members existed, and every one of their comments landed as "anon" with no
-# warning. The one shard that noticed wrote "the me field correctly identifies
-# the author under the hood" - it did not; the silence had told it so. This
-# block used to PIN that silence as accepted behaviour. A me that names nobody
-# is now an error naming the fix, and the comment must not land.
+# Legacy me cannot choose an author or block an authenticated write.
 printf 'url = "%s"\nteam = "ENG"\nme = "ghost"\n' "$URL" > "$WORK/.lll.toml"
-if out=$(cd "$WORK" && env -u LLL_URL -u LLL_TEAM LLL_TOKEN="$SU_TOK" HOME="$FAKEHOME" "$LLL_ABS" issue comment ENG-7 -b "Ghost note" 2>&1); then
-  fail "a 'me' naming no member should refuse, got: $out"
-fi
-assert_contains "$out" "no such member exists" "unmatched me is refused, not silently anonymous"
-assert_contains "$out" "lll member add" "the refusal names the fix"
+out=$(cd "$WORK" && env -u LLL_URL -u LLL_TEAM LLL_TOKEN="$SU_TOK" HOME="$FAKEHOME" "$LLL_ABS" issue comment ENG-7 -b "Ghost note")
+assert_contains "$out" "with no author" "superuser has no member despite legacy me"
 
 # TASK-317: the token decides. LLL-445: it decides SILENTLY — a disagreeing
 # 'me' used to refuse the write, which only ever told the user what the write
@@ -1078,7 +1039,7 @@ assert_not_contains "$out" "carol (just now)" "and not as the configured me"
 out=$(LLL_URL=$URL "$LIN" issue comment ENG-7)
 assert_contains "$out" "anon (just now)" "an unset-me comment renders as anon"
 assert_contains "$out" "Anonymous note" "authorless body listed"
-assert_not_contains "$out" "Ghost note" "the refused comment did not land"
+assert_contains "$out" "Ghost note" "the legacy me did not refuse the write"
 
 # --- comment ID inference from the git branch ---
 git -C "$REPO" switch -q eng-6-roundtrip-issue
@@ -2443,16 +2404,18 @@ assert [(c['created'], c['id']) for c in comments] == sorted((c['created'], c['i
 assert {c['body'] for c in comments} >= {f'pagination {i}' for i in range(199)}
 PY
 
-# No 'me' to claim as: refuse and name the fix. $WORK has no .lll.toml and
-# $FAKEHOME no user config, so 'me' is genuinely unset here - and the token
+# A superuser has no member to claim as: refuse and name the fix. $WORK has
+# no .lll.toml and $FAKEHOME no user config, and the token
 # is the superuser's, which names nobody (a member token would name you,
 # TASK-317).
+# The earlier mid-suite restart upserted the superuser and retired its token.
+SU_TOK=$(pb_superuser_token "$URL") || fail "fresh superuser token for the claim refusal"
 set +e
 out=$(cd "$WORK" && env LLL_URL=$URL LLL_TOKEN="$SU_TOK" HOME="$FAKEHOME" "$LLL_ABS" issue claim "$CKEY" 2>&1)
 rc=$?
 set -e
 [ "$rc" -ne 0 ] || fail "claim without 'me': expected nonzero exit"
-assert_contains "$out" "lll config set me" "claim without 'me' names the fix"
+assert_contains "$out" "member token" "superuser claim names the required credential"
 
 # AC#2, at the REST layer: fire N creates at one issue at once and count the
 # survivors. This is the atomicity claim itself — the unique index, with no
@@ -2635,6 +2598,7 @@ assert_contains "$out" "$URL" "whoami names the server"
 WHOAMI_ADMIN=$(pb_superuser_token "$URL") || fail "minting whoami administrator token"
 out=$(LLL_TOKEN="$WHOAMI_ADMIN" LLL_URL=$URL "$LIN" whoami) || fail "whoami refused a valid administrator token: $out"
 assert_contains "$out" "superuser <admin@local.dev>" "whoami identifies administrator authentication"
+assert_contains "$out" "token   env:LLL_TOKEN" "administrator whoami names the token source"
 assert_contains "$out" "lll bot bot-NAME" "administrator whoami names the bot bootstrap command"
 assert_contains "$out" "$URL" "administrator whoami names the server"
 out=$(env -u LLL_TOKEN -u LLL_URL HOME="$DATA_DIR/nowhere" "$LIN" whoami 2>&1) \
@@ -2697,14 +2661,14 @@ assert_contains "$out" "no member with email nobody@lll.test" "login names the i
 assert_contains "$out" "--create" "the login failure names --create"
 assert_contains "$out" "set-password" "the login failure names the password reset"
 
-# logout clears exactly the token: the me line the boot wrote stays.
+# Logout clears exactly the token; the board endpoint stays.
 env -u LLL_TOKEN HOME="$E2E_HOME" LLL_URL=$URL "$LIN" logout > "$DATA_DIR/logout.out" \
   || fail "lll logout exited nonzero"
 assert_contains "$(cat "$DATA_DIR/logout.out")" "token cleared from" "logout output"
 grep -q '^token = ' "$E2E_HOME/.config/lll/lll.toml" \
   && fail "logout left the token line in the home config"
-grep -q '^me = ' "$E2E_HOME/.config/lll/lll.toml" \
-  || fail "logout unset something else (the me line is gone)"
+grep -q '^web_url = ' "$E2E_HOME/.config/lll/lll.toml" \
+  || fail "logout removed the board endpoint"
 out=$(env -u LLL_TOKEN HOME="$E2E_HOME" LLL_URL=$URL "$LIN" logout)
 assert_contains "$out" "nothing to clear" "a second logout is a no-op, not an error"
 
@@ -2852,10 +2816,14 @@ assert_contains "$out" "expired at" "whoami on an expired token says expired, no
 # LLL-388: the board (LLL_REMINT=1 and the admin pair) heals an EXPIRED token
 # the way it heals a rejected one. It used to report expiry and serve empty
 # pages from the moment its boot token aged out.
-out=$(LLL_TOKEN="$SHORT_TOK" HOME="$E2E_HOME" LLL_URL=$URL LLL_TEAM=ENG LLL_REMINT=1 \
+out=$(LLL_TOKEN="$SHORT_TOK" HOME="$E2E_HOME" LLL_URL=$URL LLL_TEAM=ENG LLL_REMINT=1 LLL_REMINT_MEMBER="$AGENT_ID" \
   LLL_ADMIN_EMAIL=admin@local.dev LLL_ADMIN_PASSWORD=admin-local-123 "$LIN" issue list --limit 1 2>&1) \
   || fail "the board should re-mint an expired token, got: $out"
 assert_contains "$out" "ENG-" "an expired token is re-minted by the board and the read answers"
+
+out=$(LLL_TOKEN="$SHORT_TOK" HOME="$E2E_HOME" LLL_URL=$URL LLL_TEAM=ENG LLL_REMINT=1 LLL_REMINT_MEMBER="$AGENT_ID" \
+  LLL_ADMIN_EMAIL=admin@local.dev LLL_ADMIN_PASSWORD=admin-local-123 "$LIN" issue comment ENG-7 -b 'Renewal preserves member')
+assert_contains "$out" 'as e2e-agent' 'expired board credential renews as the same member'
 
 # ...and the gate is superuser-only: a member token and no credentials at all
 # are both refused, naming the fix. The member token is minted fresh — the
@@ -2893,7 +2861,7 @@ assert_contains "$comp_token" "create" "token completions offer create"
 # --- TASK-203 / TASK-195: one-command machine setup ---------------------------
 # The onboarding overhaul, from a real second-machine transcript: a superuser
 # credentials a human (member set-password), a fresh machine runs exactly one
-# command (login --url persists url + token + me), and every error names the
+# command (login --url persists url + token), and every error names the
 # server it failed against.
 
 # A member the CLI itself created carries a synthesized identity and a random
@@ -2956,7 +2924,7 @@ set -e
 assert_contains "$out" "LLL_ADMIN_EMAIL" "credential-less set-password names what to set"
 
 # TASK-195 AC#1/#3: the fresh machine. An empty HOME, a directory outside any
-# repo, no LLL_* in the env — one login --url leaves url, token AND me in the
+# repo, no LLL_* in the env — one login --url leaves url and token in the
 # home config, and the next command just works.
 LOGIN_HOME="$DATA_DIR/login_home"
 NEUTRAL="$DATA_DIR/neutral"
@@ -2968,10 +2936,9 @@ out=$(cd "$NEUTRAL" && printf '%s\n' "$ONBOARD_PASS" | \
   || fail "login --url exited nonzero: $out"
 assert_contains "$out" "url = \"$URL\"" "login --url reports the persisted url"
 assert_contains "$out" "logged in as onboard" "login --url says who you are"
-assert_contains "$out" "me = \"onboard\"" "login --url sets an unset me"
+
 grep -q "^url = \"$URL\"\$" "$LOGIN_TOML" || fail "login --url did not persist the url: $(cat "$LOGIN_TOML")"
 grep -q '^token = ' "$LOGIN_TOML" || fail "login --url did not persist the token"
-grep -q '^me = "onboard"$' "$LOGIN_TOML" || fail "login --url did not persist me"
 out=$(cd "$NEUTRAL" && env -u LLL_URL -u LLL_TOKEN LLL_TEAM=ENG HOME="$LOGIN_HOME" "$LLL_ABS" issue list) \
   || fail "issue list on the freshly logged-in machine failed: $out"
 assert_contains "$out" "ENG-" "the one-command machine lists issues"
@@ -3299,10 +3266,10 @@ git -C "$ORACLE_REPO" switch -c dx2-1-1-title -q
 out=$(cd "$ORACLE_REPO" && LLL_URL="$URL" "$LLL_ABS" issue start 2>&1) && fail 'ambiguous branch selected an issue'
 assert_contains "$out" 'ambiguous' 'ambiguous branch requires explicit ID'
 
-# Account switches preserve deliberate identity config but explain the mismatch.
+# Account switches replace the token and ignore legacy identity configuration.
 out=$(cd "$ORACLE_REPO" && env -u LLL_TOKEN -u LLL_ME HOME="$ORACLE_HOME" "$LLL_ABS" login --url "$URL" --email oracle-colleague@lll.test --password oracle-colleague-pass-123)
-assert_contains "$out" 'writes author as oracle-colleague' 'login explains retained identity mismatch'
-assert_contains "$out" 'lll config set me oracle-colleague' 'login gives identity recovery'
+assert_contains "$out" 'logged in as oracle-colleague' 'login switches the authenticated identity'
+assert_not_contains "$out" 'configured me' 'legacy identity config is ignored'
 "$LIN" board url >"$DATA_DIR/board-stdout" 2>"$DATA_DIR/board-stderr" && fail 'board accepted an unknown subcommand'
 [ ! -s "$DATA_DIR/board-stdout" ] || fail 'command errors contaminate stdout'
 assert_contains "$(cat "$DATA_DIR/board-stderr")" 'unexpected argument' 'board classifies a positional argument accurately'
@@ -3382,10 +3349,9 @@ PY_RACE
 # LLL-408: the raw passthrough. A member token rides the configured url and
 # token with no extra wiring: body on stdout, status line on stderr,
 # non-200s printed as the response they were, and --schema naming the
-# collections from the migrations' end state. Identity travels as
-# LLL_ME=bryan wherever bryan's token does (the suite's own pairing), since
-# the writer guard refuses a token and 'me' that disagree.
-API_CALL=(LLL_URL=$URL LLL_TOKEN="$BRYAN_TOK" LLL_ME=bryan)
+# collections from the migrations' end state. API writes authenticate as
+# the same member as the CLI fixtures.
+API_CALL=(LLL_URL=$URL LLL_TOKEN="$BRYAN_TOK")
 API_FIXTURE=$(env "${API_CALL[@]}" "$LIN" issue create 'api passthrough fixture' --team ENG --json)
 API_ISSUE_ID=$(printf '%s' "$API_FIXTURE" | jq -r .id)
 # A compound filter rides URL-encoded: raw & would split the query string,

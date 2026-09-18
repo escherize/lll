@@ -82,7 +82,7 @@ Four actors, each configured once, none written twice:
 | Actor | Once | Writes |
 |---|---|---|
 | Server | `lll up` with `LLL_ADMIN_*`, `LLL_TEAM`, `LLL_BIND`, `LLL_BOARD_TOKEN` in env (Fly: secrets) | nothing on disk but the database |
-| Your machine (human path) | `lll login --url https://your-host --email you@example.com`, which prompts for the password unless you pass `--password` | `url`, `token`, `me` and `team` (each when unset) in the home config |
+| Your machine (human path) | `lll login --url https://your-host --email you@example.com`, which prompts for the password unless you pass `--password` | `url`, `token` and `team` (each when unset) in the home config |
 | Each repo or directory | `lll attach`, commit the file if it is a repo | `team = "KEY"` in `.lll.toml`, at the repo root or in the working directory |
 | Each agent (agent path) | superuser mints `lll token create <name>` | nothing; `LLL_TOKEN` and `LLL_URL` in its env |
 
@@ -140,7 +140,7 @@ places:
 | Half | Where | Keys |
 |---|---|---|
 | Which tracker | the directory's `.lll.toml`, committed when it is a repo | `team` |
-| How to reach it | `~/.config/lll/lll.toml`, once per machine | `url`, `me` |
+| How to reach it | `~/.config/lll/lll.toml`, once per machine | `url`, `token` |
 
 So attaching a new repo on a machine already set up is `lll attach`, and an
 already-attached repo on a new machine is `git clone`, with no lll step at all.
@@ -173,7 +173,7 @@ configuration. An explicit issue identifier still targets its own team.
 
 Precedence: env vars > the repo's `.lll.toml` > `~/.config/lll/lll.toml`. The
 files **layer**: each supplies the keys it names, so a repo file carrying
-`team` alone still gets `url` and `me` from the machine's. `.lll.toml` is
+`team` alone still gets `url` and `token` from the machine's. `.lll.toml` is
 found by walking up from the working directory. Inside a repo the walk stops
 at the repo root and no higher, so a stray file above a checkout cannot
 capture it. Outside any repo it stops at the first of: the file, a directory
@@ -189,7 +189,6 @@ after `git config --list --show-origin`:
 file:/Users/you/.config/lll/lll.toml	url=http://127.0.0.1:8090
 file:.lll.toml	team=ENG
 unset	sort=
-file:/Users/you/.config/lll/lll.toml	me=you
 unset	web_url=
 ```
 
@@ -209,7 +208,6 @@ Client settings, read by every `lll` command:
 |---|---|---|
 | `LLL_URL` | `url` | PocketBase **API** base URL (default `http://127.0.0.1:8090`; hosted, `https://your-host`, the board's address, which serves the API too). Persist it without logging in using `lll config set url URL`. |
 | `LLL_TEAM` | `team` | Default team key; scopes `issue list`, required by `issue create` |
-| `LLL_ME` | `me` | Optional member name; must agree with your authenticated token |
 | `LLL_SORT` | `sort` | Default sort: `created`, `updated`, `priority`, `number`, `title`; `-` prefix descends |
 | `LLL_WEB_URL` | `web_url` | Web board base URL for `board`, `issue url`, `view -w`. Set it with `lll config set web_url URL` or `lll login --web-url URL`. Login discovers the board from `/.well-known/lll` when advertised; a separate API listener advertises the operator’s `LLL_WEB_URL`. Explicit settings take precedence. `lll up` saves its actual local board endpoint. |
 | `LLL_TOKEN` | `token` | PocketBase auth token sent as `Authorization: Bearer` on every request. A secret: `lll login` writes it to the home config, `lll token create` mints agent tokens; never the repo's .lll.toml |
@@ -223,13 +221,10 @@ set them as secrets):
 | `LLL_BIND` | Bind address for both ports (default `127.0.0.1`; `0.0.0.0` when hosting) |
 | `LLL_BOARD_TOKEN` | Pins the web board's access token; unset, each boot mints and prints a fresh one |
 
-`lll config init` writes a commented template. When `me` is absent, `lll up`
-guesses it from `$USER`, saves it to the home config and ensures a matching
-member exists. This setup does not authenticate you as that member. A member
-token determines authorship and claims, and `me`, when set, must agree with
-it; under a superuser token, `me` supplies attribution. Check `lll whoami`
-and correct a stale value with `lll config set me NAME`. Use `lll login` to
-authenticate as a member.
+`lll config init` writes a commented template. `lll up` uses a supplied member
+token or bootstraps a member from `$USER`, then runs the board with a member
+token. Token identity determines authorship and claims. Use `lll whoami` to
+check your CLI login, and `lll login` to change it. Legacy `me` settings are ignored.
 
 ## CLI tour
 

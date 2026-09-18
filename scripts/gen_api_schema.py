@@ -99,7 +99,6 @@ def boot_board():
         HOME=home,
         LLL_URL=url,
         LLL_TEAM="SCHEM",
-        LLL_ME=ADMIN_EMAIL,
         LLL_BIND="127.0.0.1",
         LLL_ADMIN_EMAIL=ADMIN_EMAIL,
         LLL_ADMIN_PASSWORD=ADMIN_PASSWORD,

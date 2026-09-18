@@ -163,9 +163,8 @@ check 'lll config --list', or pin a local url: LLL_URL=http://127.0.0.1:8090 lll
   // TASK-181: PocketBase's collection rules refuse unauthenticated requests
   // now, so the boot's seeding (team, member) and the board's own writes
   // both need a token. A caller-provided LLL_TOKEN — a member token — wins;
-  // otherwise this process defaults to the superuser token, which the
-  // credentials above can always get — and, owning those credentials, the
-  // boot can re-mint the token if the realtime bridge ever sees it refused.
+  // otherwise this process bootstraps with a superuser token, then mints
+  // a member token for the board. Renewals keep that member identity.
   // The board's BROWSER side is gated separately (serve_gate.lis): a board
   // token admits a browser, but web writes still author as this process's
   // identity until browser sessions exist (TASK-182's ADR).
@@ -185,7 +184,9 @@ check 'lll config --list', or pin a local url: LLL_URL=http://127.0.0.1:8090 lll
   // next reports honestly. (Caught by the gate: an e2e boot reusing a running
   // PocketBase has a valid member token and default admin creds that do not
   // match that server, and refusing it was a regression this change caused.)
-  let mut refresh: Option<fn() -> Result<string, string>> = None
+  let _ = os.Unsetenv("LLL_REMINT")
+  let _ = os.Unsetenv("LLL_REMINT_MEMBER")
+  let _ = os.Unsetenv("LLL_REALTIME_SUBSCRIPTION")
   let mut using_token = cfg.token != "" && pb.token_usable(db_url, cfg.token)
   if !using_token {
     match superuser_token(db_url, email, pass) {
@@ -196,13 +197,8 @@ check 'lll config --list', or pin a local url: LLL_URL=http://127.0.0.1:8090 lll
           )
         }
         let _ = os.Setenv("LLL_TOKEN", tok)
-        // Only this process may re-mint a refused token silently (TASK-323):
-        // a CLI holding the admin pair used to re-mint too, and whoami then
-        // named a dead member token's member as alive.
-        let _ = os.Setenv("LLL_REMINT", "1")
-        refresh = Some(|| superuser_token(db_url, email, pass))
         fmt.Println(
-          "auth   rules are authenticated-only; this process's PocketBase calls (seeding, the board) ride the superuser token, re-minted if refused",
+          "auth   rules are authenticated-only; bootstrapping with superuser credentials before signing in the board as a member",
         )
       },
       Err(e) => {
@@ -248,8 +244,8 @@ superuser credentials, or set LLL_TOKEN to a member token valid for this server.
     },
   }
   let _ = os.Setenv("LLL_TEAM", team)
-  let me = ensure_me(cfg.me)?
-  if demo { seed_demo(team, me, db_url)? }
+  let (member, refresh) = board_identity(db_url, email, pass)?
+  if demo { seed_demo(team, member.name, db_url, strings.HasPrefix(src.token, "file:"))? }
   let chosen = free_port(web_port)
   if chosen != web_port {
     fmt.Println(f"port {web_port} taken — board moving to {chosen}")
@@ -257,7 +253,7 @@ superuser credentials, or set LLL_TOKEN to a member token valid for this server.
   fmt.Println(f"lll    {version()}")
   fmt.Println(admin_line)
   fmt.Println(f"team   {team}")
-  if me != "" { fmt.Println(f"me     {me}") }
+  fmt.Println(f"member {member.name}")
   // The board binds in microseconds; a browser takes far longer to launch,
   // so opening before run_server blocks is not a race worth guarding.
   let board_url = f"http://127.0.0.1:{chosen}"
@@ -309,11 +305,11 @@ printed in the banner as a login URL — open it once and the browser keeps
 access in a cookie. From a terminal, send the same cookie: curl
 -H 'Cookie: lll_board=<token>' http://127.0.0.1:<port>/.
 
-When 'me' is absent, it is guessed from $USER, saved to the home config and
-seeded as a member. This does not authenticate you as that member. A member
-token determines authorship and claims; 'me', when set, must agree. Under a
-superuser token, 'me' supplies attribution. Check 'lll whoami', correct a stale
-value with 'lll config set me NAME', and use 'lll login' to authenticate.",
+A valid member token selects the board's identity. Otherwise the superuser
+credentials bootstrap a member from $USER (local when absent), then mint a
+member token for this process. Board writes and token renewal use that member.
+Use LLL_TOKEN to run the board as another authenticated member; 'lll whoami'
+shows the CLI's login. Existing CLI credentials are left alone.",
   )
 }
 
@@ -409,42 +405,35 @@ fn resolve_team(want: string) -> Result<string, string> {
   }
 }
 
-/// Ensure the configured attribution name exists, defaulting to $USER and
-/// saving that default in the home config. This does not authenticate as the
-/// member: identity resolution checks a member token against 'me', while a
-/// superuser token uses 'me' for attribution.
-fn ensure_me(want: string) -> Result<string, string> {
-  let mut name = strings.TrimSpace(want)
-  let mut guessed = false
-  if name == "" {
-    name = strings.TrimSpace(os.Getenv("USER"))
-    // No $USER is not worth failing setup over; identity resolution still
-    // determines the author from the active credential.
-    if name == "" { return Ok("") }
-    // The home config, never the repo's: .lll.toml is committed, and booting
-    // a server is no reason to put your username in someone else's checkout.
-    let path = set_home_key("me", name)?
-    fmt.Println(
-      f"guessed me = \"{name}\" from $USER, wrote it to {path} — 'lll config set me <name>' to change it",
-    )
-    guessed = true
+/// Bootstrap with admin authority, then serve as an actual member. Renewals
+/// keep that same identity rather than upgrading normal board calls to admin.
+fn board_identity(
+  base: string,
+  email: string,
+  pass: string,
+) -> Result<(Actor, Option<fn() -> Result<string, string>>), string> {
+  if let Some(member) = actor()? { return Ok((member, None)) }
+  let cfg = config.load()?
+  let guessed = strings.TrimSpace(os.Getenv("USER"))
+  let name = if guessed == "" { "local" } else { guessed }
+  let created = ensure_member(name)?
+  if created { fmt.Println(f"created member {name}") }
+  let Some(member) = records.find_member(name)? else {
+    return Err(f"could not resolve the board member {name}")
+  };
+  let token = pb.impersonate_member(base, cfg.token, member.id, default_token_duration())?
+  let _ = os.Setenv("LLL_TOKEN", token)
+  let _ = os.Setenv("LLL_ADMIN_EMAIL", email)
+  let _ = os.Setenv("LLL_ADMIN_PASSWORD", pass)
+  let _ = os.Setenv("LLL_REMINT", "1")
+  let _ = os.Setenv("LLL_REMINT_MEMBER", member.id)
+  let id = member.id
+  let refresh: fn() -> Result<string, string> = || {
+    let admin = superuser_token(base, email, pass)?
+    pb.impersonate_member(base, admin, id, default_token_duration())
   }
-  // LLL-374: only the FIRST-BOOT guess above seeds a member, because only that
-  // case has no token and no member to agree with yet. A CONFIGURED `me` is an
-  // assertion about an identity that should already exist
-  // (identity-is-the-token, TASK-317), so it is reported, not created — that
-  // path is how a harness setting LLL_ME=wt-42 minted an auth record a boot.
-  if guessed {
-    let created = ensure_member(name)?
-    if created { fmt.Println(f"created member {name}") }
-    return Ok(name)
-  }
-  if let Ok(false) = member_exists(name) {
-    fmt.Println(
-      f"me = \"{name}\" names no member — 'lll member add -n \"{name}\"' to create one",
-    )
-  }
-  Ok(name)
+  fmt.Println(f"auth   board signed in as {name}; token renewal keeps this member")
+  Ok((Actor { id: member.id, name }, Some(refresh)))
 }
 
 /// Ask for a team key on stdin, defaulting to `suggested`. Errs when stdin

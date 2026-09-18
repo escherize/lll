@@ -48,15 +48,9 @@ PB_DIR="$DEMO_DIR/pb_data"
 SEED_LOG="$DEMO_DIR/seed.log"
 E2E_LOGS="$SEED_LOG"
 
-# The seed's identity and team are pinned in the ENVIRONMENT, never written to
-# a file. `lll up` writes 'me' to the HOME config only when it has to guess it
-# (up.lis:331) and writes 'team' to the repo's .lll.toml only when no team is
-# configured (up.lis:311) - so pinning LLL_ME and LLL_TEAM means this script
-# leaves no config behind in either place. That matters: a stray .lll.toml
-# written by a demo boot once poisoned the e2e suite for hours (TASK-143), and
-# a seed run is precisely the kind of thing that would do it again.
+# USER selects the bootstrap member only for this isolated demo process.
 export LLL_TEAM=DEMO
-export LLL_ME=demo
+export USER=demo
 # The demo owns its superuser. `lll up` upserts whatever LLL_ADMIN_* name, and
 # a developer shell exporting the PRODUCTION pair made this script boot a
 # throwaway board with the prod admin, then die at pb_member_token, which
@@ -158,14 +152,12 @@ for _ in $(seq 1 100); do
 done
 [ -n "$BOARD_URL" ] || fail "the boot banner never printed a board login URL"
 
-# TASK-181: the collection rules are authenticated-only, so the CLI needs a
-# member token. lib.sh's pb_member_token runs the same auth-with-password round
-# trip a human login does, against the server just booted.
-# LLL-377: the token's member IS the author (identity-is-the-token, TASK-317),
-# so mint demo's rather than seed's - LLL_ME=demo above must AGREE with it, not
-# name someone else. Minting as `seed` while pinning `demo` refused every write.
-LLL_TOKEN=$(pb_member_token "$URL" demo demo@lll.test demo-pass-123) \
-  || fail "could not bootstrap a member token against $URL"
+# The boot already created demo as a member. Use the product's own token mint
+# instead of resetting its password and assuming a fixture email; its existing
+# email may be synthesized or come from an older --keep database (LLL-445).
+LLL_TOKEN=$("$LLL" token create demo --url "$URL" --duration 31536000 | sed -n 's/^LLL_TOKEN=//p') \
+  || fail "could not mint demo's member token against $URL"
+[ -n "$LLL_TOKEN" ] || fail "demo token mint returned no credential"
 export LLL_TOKEN
 
 # --- the fixtures ------------------------------------------------------------
@@ -186,14 +178,14 @@ lll() {
 # The already-there variant. Members, teams, projects and labels are unique
 # server-side and the CLI has no --if-missing, so a create that loses to
 # something that got there first is a 400 and not an error worth stopping for.
-# Two things get there first: `lll up` seeds the LLL_ME member on every boot
+# Two things get there first: `lll up` seeds the USER member on every boot
 # (up.lis:336), and `--keep` reuses a data dir that already holds the whole
 # fixture set. Issues deliberately do NOT go through this - they have no
 # uniqueness constraint, so a failure there is real.
 lll_idem() { "$LLL" "$@" >/dev/null 2>&1 || true; }
 
 people() {
-  # demo already exists: `lll up` seeded it from LLL_ME during the boot above.
+  # demo already exists: `lll up` seeded it from USER during the boot above.
   lll_idem member add -n demo -e demo@lll.test
   lll_idem member add -n avery -e avery@lll.test
   lll_idem member add -n kai -e kai@lll.test
@@ -300,7 +292,7 @@ issues() {
 }
 
 # Comments, so the issue page is not just a description. Authored as the demo
-# member, because the TOKEN names demo (TASK-317) and LLL_ME=demo agrees with it.
+# member, because the TOKEN names demo (TASK-317) and the board bootstrapped that member.
 #
 # Addressed by the ids issues() captured, not by a literal DEMO-1: issue
 # numbers are per-team and monotonic, so under --keep the second run's issues
@@ -350,7 +342,7 @@ echo
 echo "the server is still running as pid $UP_PID - Ctrl-C it, or:  kill $UP_PID"
 echo "to drive the CLI against it in another shell:"
 echo "  export LLL_URL=$URL LLL_TEAM=DEMO LLL_TOKEN=$LLL_TOKEN"
-echo "that token is the member 'seed'; writes go out as the token's member (TASK-317),"
+echo "that token is the member 'demo'; writes go out as the token's member (TASK-317),"
 echo "so an agent that should write as shard-NN needs its own:"
 echo "  LLL_ADMIN_EMAIL=$LLL_ADMIN_EMAIL LLL_ADMIN_PASSWORD=$LLL_ADMIN_PASSWORD lll token create shard-NN"
 echo

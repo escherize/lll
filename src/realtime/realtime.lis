@@ -300,6 +300,12 @@ fn connect(
   if sub_resp.StatusCode >= 300 {
     return Err(f"POST /api/realtime: {sub_resp.Status}")
   }
+  // The board owns one subscription. Keep its accepted request so a member
+  // token renewal can reauthenticate that same client using PocketBase's own
+  // subscription endpoint; token-key rotation clears auth without closing SSE.
+  if os.Getenv("LLL_REMINT") == "1" {
+    let _ = os.Setenv("LLL_REALTIME_SUBSCRIPTION", payload as string)
+  }
   Ok(reader)
 }
 

@@ -150,7 +150,7 @@ with tempfile.TemporaryDirectory(prefix='lll-board-pages-') as directory:
         port = reservation.getsockname()[1]
     env = {k: v for k, v in os.environ.items() if not k.startswith('LLL_')}
     env.update(HOME=directory, LLL_URL='http://127.0.0.1:' + str(server.server_port), LLL_TOKEN=token,
-        LLL_TEAM='BP360', LLL_ME=actor['name'], LLL_BIND='127.0.0.1', LLL_BOARD_TOKEN=os.environ['LLL_TEST_BOARD_TOKEN'])
+        LLL_TEAM='BP360', LLL_BIND='127.0.0.1', LLL_BOARD_TOKEN=os.environ['LLL_TEST_BOARD_TOKEN'])
     log = Path(directory) / 'board.log'
     with log.open('w') as output:
         process = subprocess.Popen([binary, 'up', '--no-open', '--port', str(port)], cwd=directory,

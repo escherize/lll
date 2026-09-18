@@ -245,16 +245,6 @@ would put a second account on that address. --create makes YOUR login: pass
   let path = set_home_key("token", auth.token)?
   fmt.Println(f"logged in as {auth.record.name}")
   fmt.Println(f"token saved to {path}")
-  // On the fresh-machine path, an unset 'me' gets the member just logged in —
-  // one command leaves the machine fully set up. A 'me' already configured
-  // anywhere (env, repo file, home file) is somebody's choice; keep it.
-  if target != "" && auth.record.name != "" {
-    let cfg = config.load()?
-    if cfg.me == "" {
-      let me_path = set_home_key("me", auth.record.name)?
-      fmt.Println(f"me = \"{auth.record.name}\" in {me_path}")
-    }
-  }
   if os.Getenv("LLL_TOKEN") != "" {
     fmt.Println(
       "note: LLL_TOKEN is set in this shell and overrides the saved token until it is unset",
@@ -269,9 +259,6 @@ would put a second account on that address. --create makes YOUR login: pass
   // belongs to 'lll attach'. Config layers rather than shadows (TASK-179), so
   // a home 'team' is a machine-wide default that any attached repo overrides
   // — which is what the layering documents it for.
-  let (identity_cfg, identity_src) = config.load_traced()?
-  let identity_note = login_identity_notice(identity_cfg.me, auth.record.name, identity_src.me, config.home_path()?)
-  if identity_note != "" { fmt.Println(identity_note) }
   settle_team()
   let saved_cfg = config.load()?
   if saved_cfg.web_url == "" {
@@ -411,12 +398,10 @@ token with a member session, and 'lll bot bot-NAME' provisions a bot identity.",
   fmt.Println(f"server  {cfg.url}")
   let team = if cfg.team == "" { "(none — run 'lll attach')" } else { cfg.team }
   fmt.Println(f"team    {team}")
+  fmt.Println(f"token   {src.token}")
   if administrator {
     fmt.Println("Administrator tokens do not name a member. Use 'lll login' for a member session or 'lll bot bot-NAME' for a bot identity.")
-    return Ok(())
   }
-  let notice = login_identity_notice(cfg.me, me.name, src.me, config.home_path()?)
-  if notice != "" { fmt.Println(notice) }
   Ok(())
 }
 
@@ -596,7 +581,7 @@ repo's shareable .lll.toml — and every later lll call rides it.
 An LLL_TOKEN in the environment still wins (see 'lll config --list').
 
 --url is the fresh-machine setup: it authenticates against that server and
-persists url (and 'me', when unset) next to the token, so
+persists url next to the token, so
 
   lll login --url https://tracker.example.com --email you@example.com
 
@@ -641,24 +626,6 @@ Removes token = \"...\" from ~/.config/lll/lll.toml — the file 'lll login'
 wrote — and unsets nothing else. An LLL_TOKEN in the environment is not
 affected: unset it in the shell that has it.",
   )
-}
-
-/// Authentication and the configured comment author may deliberately differ.
-/// Never silently rewrite that choice, but make the difference actionable.
-fn login_identity_notice(me: string, authenticated: string, source: string, home: string) -> string {
-  if me == "" || authenticated == "" || me == authenticated { return "" }
-  let argument = cli_argument(authenticated)
-  let mut recovery = f"lll config set me {argument}"
-  if source == "env:LLL_ME" {
-    recovery = f"unset LLL_ME; {recovery}"
-  } else if strings.HasPrefix(source, "file:") && source != f"file:{home}" {
-    recovery = f"remove or change 'me' in {strings.TrimPrefix(source, "file:")}, then run '{recovery}'"
-  }
-  // LLL-445: this was "writes are refused until they agree". They are not,
-  // any more — the token names the author and 'me' no longer vetoes it. The
-  // note stays because a stale 'me' is still worth knowing about: it is what
-  // a superuser token falls back to for attribution.
-  f"note: authenticated as {authenticated}, but configured me is {me} ({source}); writes author as {authenticated}, not {me}. To make them agree: {recovery}"
 }
 
 /// Render a literal argument for the recovery command, including display names.

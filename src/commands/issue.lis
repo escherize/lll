@@ -448,7 +448,7 @@ pub fn issue_commands() -> Slice<flags.Command> {
     },
     flags.Command {
       name: "claim",
-      summary: "take it exclusively for 'me' and assign it; exits non-zero, changing nothing, when someone already holds it",
+      summary: "take it exclusively for the authenticated member and assign it; exits non-zero, changing nothing, when someone already holds it",
       page: "",
       spec: flags.with_team([]),
       positional: "[KEY-123]",
@@ -1300,9 +1300,9 @@ fn record_work_site(issue: models.Issue, branch: string) -> Result<(), string> {
     return Ok(())
   }
   if issue.work_branch != "" {
-    // Author resolution mirrors `issue comment`: 'me' if it names a member,
-    // authorless otherwise. Member identity is not duplicated into the slot;
-    // this comment (and the claim holder) carry the who.
+    // Author resolution mirrors `issue comment`: the token's member,
+    // authorless for a superuser credential. Member identity is not duplicated
+    // into the slot; this comment (and the claim holder) carry the who.
     let mut author = ""
     if let Some(a) = actor()? { author = a.id }
     let moved = f"work moved: {issue.work_branch} @ {issue.work_host}:{issue.work_path} -> {branch} @ {host}:{path}"
@@ -1334,13 +1334,8 @@ fn work_site_stale(state: string, claimed: bool) -> bool {
   state == "done" || state == "cancelled" || !claimed
 }
 
-/// Who a write goes out as (TASK-317). The token decides: a member token
-/// names its member, and 'me' may only agree. A superuser token names
-/// nobody, so 'me' attributes there as it always did; no token, no 'me':
-/// nobody. The fleet showed why: every shard wrote under one shared token
-/// with me = "shard-NN" doing the attribution, and a stale home config sent
-/// six agents' comments out as one member. Identity is now what the server
-/// will also enforce, not a string in a file.
+/// The member named by the current token. A superuser credential has no
+/// member identity and leaves optional authorship empty.
 struct Actor {
   id: string,
   name: string,
@@ -1348,31 +1343,22 @@ struct Actor {
 
 fn actor() -> Result<Option<Actor>, string> {
   let cfg = config.load()?
-  if cfg.token != "" {
-    if let Some(id) = pb.token_subject(cfg.token) {
-      // A members record for the subject means a member token. A 404 means
-      // a superuser (or a stranger's) token: fall through to 'me'.
-      if let Ok(body) = pb.get(f"/api/collections/members/records/{id}") {
-        let mut m = models.Member { .. }
-        let decoded = json.Unmarshal(body.bytes(), &m).is_ok()
-        if decoded && m.id != "" {
-          // LLL-445: a disagreeing 'me' used to REFUSE the write. It could
-          // only ever be noise — the token already names the author, and the
-          // error told the user the same thing the write would have done.
-          // Its cost was real: switching tokens locked you out until you
-          // also edited a config file, which is the stale-config failure it
-          // was meant to prevent, wearing a different coat. whoami still
-          // names the disagreement; nothing refuses because of it.
-          return Ok(Some(Actor { id: m.id, name: m.name }))
-        }
+  if cfg.token == "" { return Ok(None) }
+  let Some(id) = pb.token_subject(cfg.token) else { return Ok(None) }
+  // Use the configured request path so the board can renew an expired token
+  // before resolving its member. Explicit-token calls deliberately cannot heal.
+  match pb.get(f"/api/collections/members/records/{id}") {
+    Ok(body) => {
+      let mut member = models.Member { .. }
+      if let Err(e) = json.Unmarshal(body.bytes(), &member) {
+        return Err(f"decoding the actor: {e}")
       }
-    }
+      Ok(Some(Actor { id: member.id, name: member.name }))
+    },
+    Err(e) => {
+      if pb.response_status(e) == 404 { Ok(None) } else { Err(e) }
+    },
   }
-  if cfg.me == "" { return Ok(None) }
-  let Some(m) = records.find_member(cfg.me)? else {
-    return Err(f"'me' is set to '{cfg.me}' but no such member exists — see 'lll member add', or 'lll config set me <name>' to change who you are")
-  }
-  Ok(Some(Actor { id: m.id, name: m.name }))
 }
 
 /// Resolve the actor and delegate acquisition to the shared claims client.
@@ -1386,7 +1372,7 @@ fn claim(input: flags.CommandInput) -> Result<(), string> {
   let resolved = resolve_id(id, usage)?
   let Some(member) = actor()? else {
     return Err(
-      "claiming needs a name: a member token names you; with a superuser token set 'me' ('lll config set me <name>' or LLL_ME)",
+      "claiming needs a member token — 'lll login' as a person, or 'lll token create <member>' with admin credentials",
     )
   }
   let issue = records.fetch_issue(resolved)?
@@ -1488,17 +1474,12 @@ fn comment(input: flags.CommandInput) -> Result<(), string> {
   }
   if body == "" { return Err(f"-b cannot be empty\nusage: {usage}") }
 
-  // Author is the member named by 'me' in config. Unset 'me' makes the
-  // comment authorless (honor system). A 'me' that names NOBODY is refused:
-  // the first fleet run (TASK-309) had thirty agents each set me = "shard-NN",
-  // and every one of their comments went out as "anon" with no warning, which
-  // defeats the point of a comment as a record of who learned what. The four
-  // sibling verbs already say this; comment was the one that stayed quiet.
+  // Authorship follows the authenticated member. Superuser comments are authorless.
   let mut author = ""
-  let mut me = ""
+  let mut author_name = ""
   if let Some(a) = actor()? {
     author = a.id
-    me = a.name
+    author_name = a.name
   }
 
   let new_comment = models.NewComment { issue: issue.id, author, body }
@@ -1507,10 +1488,8 @@ fn comment(input: flags.CommandInput) -> Result<(), string> {
     Err(e) => return Err(f"encoding comment: {e}"),
   }
   let _ = pb.post("/api/collections/comments/records", payload as string)?
-  // Names who it went out as. A stale home config carried one agent's 'me'
-  // into six others' comments (fleet replay); the write line is where that
-  // has to show, not a later read-back.
-  let as_who = if me == "" { "with no author — set 'me' to sign: 'lll config set me NAME' or LLL_ME=NAME" } else { f"as {me}" }
+  // Show the authenticated author at the write, so token switches are visible.
+  let as_who = if author_name == "" { "with no author — use a member token from 'lll login' or 'lll token create'" } else { f"as {author_name}" }
   fmt.Println(f"Commented on {issue.expand.team.key}-{issue.number} {as_who}")
   Ok(())
 }
@@ -1678,8 +1657,7 @@ fn print_comments(comments: Slice<models.Comment>) {
 
 /// `lll issue comment edit KEY N -b "body"` and `... delete KEY N`. N is the
 /// position 'comment KEY' prints. Your own comments only, unless --force:
-/// the author is the token's member (or 'me' under a superuser token), and
-/// a superuser token with no 'me' may change anything.
+/// the author is the token's member. A superuser token may change anything.
 fn comment_commands() -> Slice<flags.Command> {
   [
     flags.Command { name: "edit", summary: "edit a numbered comment", page: "", spec: comment_mutate_spec("edit"), positional: "KEY N", run: |input| comment_mutate("edit", input.parsed) },
@@ -2054,7 +2032,7 @@ fn issue_next(input: flags.CommandInput) -> Result<(), string> {
   if p.given("--claim") {
     let Some(member) = actor()? else {
       return Err(
-        "claiming needs a name: a member token names you; with a superuser token set 'me' ('lll config set me <name>' or LLL_ME)",
+        "claiming needs a member token — 'lll login' as a person, or 'lll token create <member>' with admin credentials",
       )
     }
     // Acquire before printing: a key this command did not secure is a lie to

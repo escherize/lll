@@ -106,12 +106,12 @@ def main() -> None:
         token = re.search(r'^LLL_TOKEN=(\S+)$', mint.stdout, re.M)
         assert token, f'could not mint a second identity:\n{mint.stdout}{mint.stderr}'
         second = cli('issue', 'claim', 'DEMO-1',
-                     extra={'LLL_TOKEN': token.group(1), 'LLL_ME': 'alex'})
+                     extra={'LLL_TOKEN': token.group(1)})
         assert second.returncode != 0, 'a claimed issue was claimable by someone else'
         # The holder is whoever the boot guessed from $USER, so read it from the
         # banner rather than hardcoding a name: this asserted my own username
         # once and passed everywhere except CI, which runs as "runner".
-        holder = re.search(r'guessed me = "([^"]+)"', out)
+        holder = re.search(r'^member (.+)$', out, re.M)
         holder = holder.group(1) if holder else ''
         assert holder and holder in (second.stdout + second.stderr), \
             f'the refusal did not name the holder {holder!r}:\n{second.stdout}{second.stderr}'

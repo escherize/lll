@@ -86,6 +86,9 @@ pub fn run_server(
   // request can arrive — the handlers and the banner below must agree.
   let board_tok = resolve_board_token()
   let cfg = config.load()?
+  let Some(board_member) = actor()? else {
+    return Err("the board needs a member token — start it with lll up")
+  };
   // The BOOT team (TASK-198): the server hosts every team — the board views
   // one per URL under /t/KEY/ — and the configured team is only where the
   // bare / redirect and the compatibility routes land. `lll up` (the one
@@ -97,7 +100,7 @@ pub fn run_server(
 
   // Fail fast on broken templates before accepting connections — both
   // pages, because they share the rail and a typo in it breaks every page.
-  let shell = rail_vm("board", cfg.me, models.Team { .. })
+  let shell = rail_vm("board", board_member.name, models.Team { .. })
   let _ = render(
     "board-page",
     PageVM {
@@ -146,7 +149,7 @@ pub fn run_server(
     bridge(events, hub)
   }
 
-  let mux = board_mux(cfg, boot, hub)?
+  let mux = board_mux(cfg, boot, hub, board_member)?
 
   // Bind BEFORE announcing: "board <url>" is the promise that the board is
   // accepting connections, and e2e_web.sh curls the URL the moment the line
@@ -172,7 +175,7 @@ pub fn run_server(
 
 /// Construct an independent router. Runtime I/O (configuration, listener and
 /// realtime subscription) belongs to run_server, not route registration.
-fn board_mux(cfg: config.Config, boot: models.Team, hub: Hub) -> Result<mut Ref<http.ServeMux>, string> {
+fn board_mux(cfg: config.Config, boot: models.Team, hub: Hub, board_member: Actor) -> Result<mut Ref<http.ServeMux>, string> {
   let mut mux: mut Ref<http.ServeMux> = http.NewServeMux()
   let team_id = boot.id
   let boot_key = boot.key
@@ -213,13 +216,13 @@ fn board_mux(cfg: config.Config, boot: models.Team, hub: Hub) -> Result<mut Ref<
   mux.HandleFunc(
     "GET /t/{team}/{$}",
     gated(|w: http.ResponseWriter, r: Ref<http.Request>| {
-      if let Some(t) = routed_team(w, r) { board_page(w, r, t, cfg.me) }
+      if let Some(t) = routed_team(w, r) { board_page(w, r, t, board_member.name) }
     }),
   )
   mux.HandleFunc(
     "GET /t/{team}/issue/{key}",
     gated(|w: http.ResponseWriter, r: Ref<http.Request>| {
-      if let Some(t) = routed_team(w, r) { issue_page(w, r, t, cfg.me) }
+      if let Some(t) = routed_team(w, r) { issue_page(w, r, t, board_member.name) }
     }),
   )
   // LLL-405: a doc's address. Team-routed like the board and issue pages,
@@ -228,13 +231,13 @@ fn board_mux(cfg: config.Config, boot: models.Team, hub: Hub) -> Result<mut Ref<
   mux.HandleFunc(
     "GET /t/{team}/doc/{slug}",
     gated(|w: http.ResponseWriter, r: Ref<http.Request>| {
-      if let Some(t) = routed_team(w, r) { doc_page(w, r, t, cfg.me) }
+      if let Some(t) = routed_team(w, r) { doc_page(w, r, t, board_member.name) }
     }),
   )
   mux.HandleFunc(
     "GET /t/{team}/search",
     gated(|w: http.ResponseWriter, r: Ref<http.Request>| {
-      if let Some(t) = routed_team(w, r) { search_page(w, r, t, cfg.me) }
+      if let Some(t) = routed_team(w, r) { search_page(w, r, t, board_member.name) }
     }),
   )
   // LLL-426: the table, the projects list and settings answer for the team in
@@ -245,13 +248,13 @@ fn board_mux(cfg: config.Config, boot: models.Team, hub: Hub) -> Result<mut Ref<
   mux.HandleFunc(
     "GET /t/{team}/issues",
     gated(|w: http.ResponseWriter, r: Ref<http.Request>| {
-      if let Some(t) = routed_team(w, r) { issues_page(w, r, t.id, cfg.me) }
+      if let Some(t) = routed_team(w, r) { issues_page(w, r, t.id, board_member.name) }
     }),
   )
   mux.HandleFunc(
     "GET /t/{team}/projects",
     gated(|w: http.ResponseWriter, r: Ref<http.Request>| {
-      if let Some(t) = routed_team(w, r) { projects_page(w, r, t.id, cfg.me) }
+      if let Some(t) = routed_team(w, r) { projects_page(w, r, t.id, board_member.name) }
     }),
   )
   // LLL-446: settings is six sections with six addresses, so a render fetches
@@ -270,7 +273,7 @@ fn board_mux(cfg: config.Config, boot: models.Team, hub: Hub) -> Result<mut Ref<
     "GET /t/{team}/settings/{section}",
     gated(|w: http.ResponseWriter, r: Ref<http.Request>| {
       if let Some(t) = routed_team(w, r) {
-        settings_page(w, r, t.id, cfg.me, r.PathValue("section"))
+        settings_page(w, r, t.id, board_member.name, r.PathValue("section"))
       }
     }),
   )
@@ -284,7 +287,7 @@ fn board_mux(cfg: config.Config, boot: models.Team, hub: Hub) -> Result<mut Ref<
       let Some(t) = records.find_team(key)? else {
         return Err(f"no team with key '{key}' on this server")
       }
-      settings_write(r, t.id, cfg.me)
+      settings_write(r, t.id, board_member.name)
     })),
   )
   // The bare paths stay as redirects onto the configured team, the same
@@ -347,7 +350,7 @@ fn board_mux(cfg: config.Config, boot: models.Team, hub: Hub) -> Result<mut Ref<
   // the one place an Err becomes the flash strip.
   mux.HandleFunc(
     "POST /settings/{kind}",
-    gated(flashing(|r: mut Ref<http.Request>| settings_write(r, team_id, cfg.me))),
+    gated(flashing(|r: mut Ref<http.Request>| settings_write(r, team_id, board_member.name))),
   )
   // The Access section's superuser-power actions (TASK-204). Their own
   // routes, not a {kind}: each verifies the form's admin password against

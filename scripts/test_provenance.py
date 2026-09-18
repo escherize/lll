@@ -38,7 +38,7 @@ with tempfile.TemporaryDirectory(prefix='lll-provenance-') as directory:
     base = Path(directory)
     repo = base / '一 checkout'
     repo.mkdir()
-    env = dict(os.environ, LLL_TEAM='PROV168', LLL_AGENT='provenance-test', LLL_ME=member['name'])
+    env = dict(os.environ, LLL_TEAM='PROV168', LLL_AGENT='provenance-test')
 
     def cli(*args, cwd=repo):
         result = subprocess.run([binary, *args], cwd=cwd, env=env,

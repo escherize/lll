@@ -36,7 +36,7 @@ def post(collection, body):
 def cli(*args, actor=None, endpoint=api):
     settings = dict(env, LLL_URL=endpoint)
     if actor:
-        settings.update(LLL_TOKEN=actor['token'], LLL_ME=actor['name'])
+        settings.update(LLL_TOKEN=actor['token'])
     return subprocess.run([binary, *args], env=settings, capture_output=True, text=True, timeout=30)
 
 

@@ -183,6 +183,10 @@ pub fn send_content_extra(
     Ok(b) => b,
     Err(e) => {
       if cfg.token != "" && response_status(e) == 401 {
+        // A server refusal invalidates the earlier successful identity probe.
+        // Member tokens are revoked by password changes; the board must renew
+        // as its member even after it previously read an empty list (LLL-445).
+        let _ = os.Unsetenv("LLL_TOKEN_PROBED")
         if let Some(refused) = refused_token(cfg, src, method, path, payload, content_type, stamp) {
           return refused
         }
@@ -232,13 +236,20 @@ fn refused_token(
   }
   if verdict == "rejected" || verdict == "expired" {
     // A process holding the server's admin credentials can fix this itself.
-    // That is the board (TASK-255): `lll up` mints a superuser token at boot
+    // That is the board (TASK-255): `lll up` bootstraps its member token
     // and re-mints it "if refused", but a stale token was never refused on a
     // read, so the board silently saw an empty database and told everyone its
     // own configured team did not exist. Re-mint once and repeat the request;
     // a plain CLI user has no admin credentials and gets the message instead.
     if let Some(fresh) = remint_from_admin_credentials(cfg.url) {
       let _ = os.Setenv("LLL_TOKEN", fresh)
+      let subscription = os.Getenv("LLL_REALTIME_SUBSCRIPTION")
+      if subscription != "" {
+        // PocketBase revocation clears a realtime client's auth but keeps its
+        // stream alive. Restore that client's existing subscriptions as the
+        // renewed member so reads and live updates recover together (LLL-445).
+        let _ = request(cfg.url, "POST", "/api/realtime", subscription, bearer(fresh), false)
+      }
       return Some(request_content(
         cfg.url, method, path, payload, bearer(fresh), src.url == "default", content_type, stamp,
       ))
@@ -249,7 +260,8 @@ fn refused_token(
   None
 }
 
-/// A fresh superuser token from LLL_ADMIN_EMAIL/LLL_ADMIN_PASSWORD, or None
+/// Renew from LLL_ADMIN_EMAIL/LLL_ADMIN_PASSWORD, keeping LLL_REMINT_MEMBER
+/// when the board has selected its member. None
 /// when this process holds no admin credentials.
 ///
 /// Deliberately narrow: only a process that was given the server's own
@@ -277,7 +289,28 @@ fn remint_from_admin_credentials(base: string) -> Option<string> {
   let mut auth = TokenOnly { .. }
   if let Err(_e) = json.Unmarshal(body.bytes(), &auth) { return None }
   if auth.token == "" { return None }
+  let member = os.Getenv("LLL_REMINT_MEMBER")
+  if member != "" {
+    return impersonate_member(base, auth.token, member, 31536000).ok()
+  }
   Some(auth.token)
+}
+
+/// PocketBase's impersonation endpoint, shared by boot and token renewal.
+/// Explicit server and admin token prevent refresh from consulting stale config.
+pub fn impersonate_member(
+  base: string,
+  admin: string,
+  member: string,
+  duration: int,
+) -> Result<string, string> {
+  let body = request(base, "POST", f"/api/collections/members/impersonate/{member}", f"{{\"duration\":{duration}}}", bearer(admin), false)?
+  let mut auth = TokenOnly { .. }
+  if let Err(e) = json.Unmarshal(body.bytes(), &auth) {
+    return Err(f"decoding the member token: {e}")
+  }
+  if auth.token == "" { return Err("the member token response carried no token") }
+  Ok(auth.token)
 }
 
 #[json]

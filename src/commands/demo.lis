@@ -1,8 +1,6 @@
 import "go:encoding/json"
 import "go:fmt"
 
-import "go:strings"
-
 import "config"
 import "models"
 import "pb"
@@ -44,7 +42,7 @@ struct DemoDoc {
 /// Seed `team_key` when it holds no issues. Never touches a team that has any:
 /// the demo is for a board nobody has used yet, and duplicating ten issues into
 /// real work would be a worse bug than the empty board it fixes.
-pub fn seed_demo(team_key: string, me: string, db_url: string) -> Result<(), string> {
+pub fn seed_demo(team_key: string, me: string, db_url: string, keep_cli_token: bool) -> Result<(), string> {
   let Some(team) = records.find_team(team_key)? else {
     return Err(f"--demo: no team {team_key} to seed")
   };
@@ -78,7 +76,7 @@ pub fn seed_demo(team_key: string, me: string, db_url: string) -> Result<(), str
   fmt.Println(
     f"demo   seeded {team_key} with 10 issues and 4 docs — start at 'lll doc view start-here'",
   )
-  point_cli_at_demo(db_url, team_key, me)?
+  point_cli_at_demo(db_url, team_key, me, keep_cli_token)?
   fmt.Println(f"demo   done with it? 'lll team archive {team_key}'")
   Ok(())
 }
@@ -93,39 +91,20 @@ pub fn seed_demo(team_key: string, me: string, db_url: string) -> Result<(), str
 /// Only ever into an EMPTY slot. A configured token belongs to somebody's real
 /// server, and overwriting it to make a toy board convenient would be the worst
 /// trade in this file.
-fn point_cli_at_demo(db_url: string, team_key: string, me: string) -> Result<(), string> {
-  // From a FILE, not merely set: the boot exports its own superuser token
-  // into the environment for the in-process board, so "is a token configured"
-  // is true during every `lll up` and would skip this every time.
-  let (_, src) = config.load_traced()?
-  if strings.HasPrefix(src.token, "file:") {
+fn point_cli_at_demo(db_url: string, team_key: string, me: string, keep_cli_token: bool) -> Result<(), string> {
+  // Capture the original token source before up installs its process token.
+  // Reading winning config here would always see env:LLL_TOKEN and overlook
+  // an existing CLI credential from a file.
+  if keep_cli_token {
     fmt.Println(
       f"demo   your CLI keeps its configured token — to drive this board instead:
 demo     LLL_URL={db_url} LLL_TEAM={team_key} lll issue list",
     )
     return Ok(())
   }
-  let su = superuser_auth()?
-  let Some(member) = records.find_member_as(su, me)? else {
-    return Ok(())
-  }
-  // A year: the demo should still work tomorrow, and it is a local board.
-  let payload = match json.Marshal(models.ImpersonateRequest { duration: 31536000 }) {
-    Ok(b) => b,
-    Err(e) => return Err(f"demo: encoding the token request: {e}"),
-  }
-  let body = pb.post_as(
-    f"/api/collections/members/impersonate/{member.id}",
-    payload as string,
-    su,
-  )?
-  let mut auth = models.AuthResponse { .. }
-  if let Err(e) = json.Unmarshal(body.bytes(), &auth) {
-    return Err(f"demo: decoding the token response: {e}")
-  }
-  if auth.token == "" { return Ok(()) }
+  let cfg = config.load()?
   let _ = set_home_key("url", db_url)?
-  let _ = set_home_key("token", auth.token)?
+  let _ = set_home_key("token", cfg.token)?
   let _ = set_home_key("team", team_key)?
   fmt.Println(f"demo   your CLI is pointed at this board as {me} — try 'lll issue next'")
   Ok(())

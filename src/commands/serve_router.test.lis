@@ -12,8 +12,8 @@ fn board_routers_are_independent_and_leave_default_mux_untouched() {
   defer upstream_a.Close()
   let mut upstream_b = httptest.NewServer(http.HandlerFunc(|w, _r| { let _ = w.Write("upstream-b".bytes()) }))
   defer upstream_b.Close()
-  let Ok(router_a) = board_mux(config.Config { url: upstream_a.URL, .. }, models.Team { key: "AAA", .. }, router_test_hub()) else { panic("first router failed") };
-  let Ok(router_b) = board_mux(config.Config { url: upstream_b.URL, .. }, models.Team { key: "BBB", .. }, router_test_hub()) else { panic("second router failed") };
+  let Ok(router_a) = board_mux(config.Config { url: upstream_a.URL, .. }, models.Team { key: "AAA", .. }, router_test_hub(), Actor { .. }) else { panic("first router failed") };
+  let Ok(router_b) = board_mux(config.Config { url: upstream_b.URL, .. }, models.Team { key: "BBB", .. }, router_test_hub(), Actor { .. }) else { panic("second router failed") };
   let mut board_a = httptest.NewServer(router_a)
   defer board_a.Close()
   let mut board_b = httptest.NewServer(router_b)

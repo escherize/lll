@@ -94,7 +94,7 @@ pub fn member_commands() -> Slice<flags.Command> {
 fn member_intro() -> string {
   "Members are PocketBase auth records (email + password; TASK-180). Adding one
 without -e synthesizes <name>@members.invalid as its identity. Your token identifies the
-member that authors your comments; configured 'me' must agree.
+member that authors your comments and holds claims.
 
 A freshly added or imported member has a random password nobody knows;
 'lll member set-password' is how a superuser gives them one, after which
@@ -602,22 +602,8 @@ pub fn member_exists(name: string) -> Result<bool, string> {
 /// Create the member if the server does not have one by that name. Returns
 /// true when it created one.
 ///
-/// LLL-374: this is now FIRST-BOOT seeding only, and the reason is the
-/// identity-is-the-token decision (TASK-317): the author of every write is the
-/// member the TOKEN names, and `me` may only agree with it. A field whose whole
-/// job is to agree with who you are must not be able to mint who you are.
-///
-/// It used to back `lll config set me` too, so any harness setting
-/// LLL_ME=wt-42 left a permanent auth record behind as a side effect of
-/// booting. That is the same failure TASK-317 was decided after - thirty
-/// agents on one shared token, each with me = "shard-NN" - and the wt-*,
-/// goal-* and shard-* members are its fossils: 64 of them, every one holding
-/// issues, none deletable without the superuser (LLL-341).
-///
-/// A first boot is the exception because it is not an assertion of identity.
-/// There is no member and no token yet, so someone has to exist before anyone
-/// can agree with anything. Every other path creates members the way people
-/// actually join a board: `lll member add`, or the invite composite.
+/// Used by up while it still holds superuser authority. Normal configuration
+/// never creates a member. The board receives a member token after this step.
 pub fn ensure_member(name: string) -> Result<bool, string> {
   if name == "" { return Ok(false) }
   let existing = records.find_member(name)?

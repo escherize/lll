@@ -10,7 +10,7 @@ import "flags"
 //
 // One instance, one team per repo. The repo says WHICH tracker (team, in a
 // committed .lll.toml at its root); the machine says HOW to reach it (url,
-// me, in ~/.config/lll/lll.toml). Because config layers rather than shadows,
+// token, in ~/.config/lll/lll.toml). Because config layers rather than shadows,
 // those two halves compose, and that is what makes the next clone — and every
 // worktree — attached already, with nothing to run.
 

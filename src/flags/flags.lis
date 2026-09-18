@@ -69,7 +69,7 @@ pub fn parse(
 }
 
 /// `parse`, with the positional limit as a COUNT. Three verbs take two bare
-/// words (`issue link KEY SLUG`, `team set-accent KEY #hex`, `config set me
+/// words (`issue link KEY SLUG`, `team set-accent KEY #hex`, `config set url
 /// NAME`) and a bool cannot say so; each of them had grown a bypass around the
 /// dispatcher rather than a second positional. `dispatch` reads the count off
 /// the Command's `positional` string (its word count), so a table entry
