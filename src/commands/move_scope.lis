@@ -66,14 +66,11 @@ fn referencing_issue_keys(
     "project" => query.filter("", "", "", id, "", ""),
     _ => return Err(f"cannot move a '{kind}'"),
   }
-  let mut list = models.IssueList { .. }
-  pb.fetch(
-    f"/api/collections/issues/records?perPage=200&expand=team&sort=created,id&filter={url.QueryEscape(filter)}",
-    "issues",
-    &list,
+  let issues = fetch_all_issues(
+    f"&expand=team&sort=created,id&filter={url.QueryEscape(filter)}",
   )?
   Ok(
-    list.items
+    issues
       .filter(|i| i.team != to_team_id)
       .map(|i| f"{i.expand.team.key}-{i.number}"),
   )
