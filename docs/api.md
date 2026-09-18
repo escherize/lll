@@ -36,6 +36,24 @@ refusal body names the current stamp to retry with. Without the header the
 PATCH behaves exactly as before. (`lll issue update --if-unchanged-since`
 sends it for you.) The header applies to the `issues` collection only.
 
+## Retried issue creation
+
+`POST /api/collections/issues/records` accepts `Idempotency-Key: <stable-key>`
+for JSON requests. Keys are scoped per team. The first request creates an
+issue; matching retries return the current issue with `reused: true` and do
+not apply the creation again. A changed payload returns `409` with a conflict
+message. Fingerprints use canonical JSON, including origin and the enforced
+member creator; object key order is irrelevant. Key/fingerprint fields are
+server-owned and retain their creation values through subsequent edits.
+Deleting the issue removes its key reservation. Requests without a key keep
+ordinary creation behavior. Non-JSON keyed requests are explicitly refused.
+
+Authenticate and check `GET /api/lll/issues/idempotency` for
+`{"supported":true}` before relying on the header: older servers can ignore
+unknown headers. `lll issue create --idempotency-key KEY` checks this before
+writing and reports `Reused` for matching retries. The lll skill gives a recipe
+for deriving a stable key.
+
 ## The schema
 
 `lll api --schema` prints the collection/field reference: every collection

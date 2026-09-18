@@ -103,6 +103,17 @@ value is in the pattern being recognisable:
 `--label`, `--project`, `--search`, `--sort`, `--limit`, and `--json`. Other
 read commands expose their supported filters in `--help`.
 
+**Make retried creates idempotent.** Use `lll issue create --idempotency-key KEY`
+when a run might lose the creation response. Derive the key once from the
+intent, for example `finding:member-revocation-keeps-realtime-open`, and keep
+it for every retry of that create. Do not generate a new random key on retry.
+Keys are scoped per team: matching creation payloads return the existing issue
+and report `Reused` (`reused: true` with `--json`); changed payloads return a
+409 conflict. The fingerprint includes creator and origin, so retain the same
+creation fields and context when retrying. A replay returns the current issue
+without reverting subsequent edits. The server must support keyed creation;
+the CLI checks support before writing. Unkeyed creates remain independent.
+
 ## Always document friction and feature requests
 
 **This is not optional and it is not a nicety.** Every agent hits the same walls,

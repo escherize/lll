@@ -98,6 +98,8 @@ Rules: list @request.auth.id != \"\" view @request.auth.id != \"\" create @reque
 | creator | relation |  | relation to members |
 | origin | json |  |  |
 | refs | text |  |  |
+| idempotency_key | text |  |  |
+| idempotency_fingerprint | text |  |  |
 
 ## labels (base)
 
