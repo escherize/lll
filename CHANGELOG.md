@@ -4,6 +4,35 @@ All notable changes to lll. The format follows Keep a Changelog; versions
 follow SemVer, with 0.x meaning the CLI surface can still move between
 minors. Issue keys are on the project's own board (`lll issue view KEY`).
 
+## [0.5.0] - 2026-09-17
+
+A Markdown mirror of the board, and quicker ways to reach what is on it.
+
+### Added
+
+- `lll export [DIR]` exports a team's issues, documents and attachment bytes
+  as Markdown. `lll import dir DIR` imports that mirror into an empty team;
+  `--replace` explicitly deletes the team's existing issues first. Comments
+  export but do not import, preserving their original authorship (LLL-454).
+- Cmd+K opens a command palette from any board page to jump to an issue,
+  document, section or team (LLL-447).
+- `software-factory` and `codebase-skills` ship as built-in skills: the map
+  of the development workflow and the interview for adapting it to a repo.
+
+### Changed
+
+- Settings are grouped into six sections by the scope of the change (LLL-446).
+- Claim expiry leaves a comment on the issue explaining the automatic release
+  (LLL-452). Raw issue output uses absolute comment timestamps (LLL-453).
+- Filter menus scroll, and dimensions with many options offer search
+  (LLL-451, LLL-455).
+- Issue view fetches eight requests instead of eleven (LLL-436).
+- `lll up` can use its local superuser credentials when the configured member
+  token belongs to another server. It opens the board's login URL, including
+  on loopback (LLL-443, LLL-444).
+- A configured `me` is advisory when a member token supplies the authenticated
+  identity (LLL-445).
+
 ## [0.4.0] - 2026-09-17
 
 Optimistic edits that hold at the server, and a first run that has something
@@ -328,5 +357,6 @@ First release: issues, teams, members, projects, labels, docs, findings,
 claims, the web board over embedded PocketBase, `lll up`, realtime
 `watch`, Fly deployment.
 
+[0.5.0]: https://github.com/escherize/lll/compare/v0.4.0...v0.5.0
 [0.2.0]: https://github.com/escherize/lll/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/escherize/lll/releases/tag/v0.1.0
