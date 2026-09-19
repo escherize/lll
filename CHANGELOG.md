@@ -4,6 +4,49 @@ All notable changes to lll. The format follows Keep a Changelog; versions
 follow SemVer, with 0.x meaning the CLI surface can still move between
 minors. Issue keys are on the project's own board (`lll issue view KEY`).
 
+## [0.6.0] - 2026-09-19
+
+The CLI now uses one authenticated member identity, and retries of issue
+creation can be made safe with a caller-supplied key.
+
+### Removed
+
+- The separate `me` / `LLL_ME` identity setting, its setter, and mismatch
+  warnings. Old config keys are ignored; `whoami` reports the member in the
+  token and its source (LLL-445). Scripts that set `me` should drop it.
+
+### Added
+
+- `lll issue create --idempotency-key KEY` reuses an issue when the same team,
+  key and creation body are retried, and refuses a changed body with 409. A
+  keyed create checks server support before writing; unkeyed creates keep their
+  existing behavior (LLL-438).
+- `lll issue list --since` catches up on recently changed issues, document
+  lists can filter with `--kind`, and search accepts a one-command `--team`
+  override (LLL-439, LLL-440, LLL-483).
+- Label creation accepts `--color`; GitHub issue import can set a default
+  emoji for imported issues (LLL-470, LLL-469).
+- `lll up --admin-ui` explicitly exposes the local administration UI. The
+  default board no longer serves that UI or prints administrator credentials
+  in its startup banner (LLL-372).
+
+### Changed
+
+- A locally started board authenticates as a member and renews that member's
+  identity after token revocation, including its realtime subscription.
+  Supplied member tokens remain authoritative (LLL-445).
+- Saved member-token config files are private to their owner, including
+  existing files rewritten by the CLI (LLL-475).
+- `issue view` fetches independent records concurrently while preserving
+  output and errors. Member, team, project and label lists read every page
+  instead of silently stopping after 200 records (LLL-436, LLL-476).
+- `issue next` stays within its selected team; project and label moves check
+  all referencing issues before proceeding (LLL-477, LLL-479).
+- HTTP reads reject incomplete response bodies. A failed saved-view refresh
+  retains the previous rail content instead of clearing it (LLL-478, LLL-480).
+- The landing page downloads the latest published release, and its demo board
+  screenshot shows the current interface (LLL-459, LLL-425).
+
 ## [0.5.0] - 2026-09-17
 
 A Markdown mirror of the board, and quicker ways to reach what is on it.
@@ -357,6 +400,7 @@ First release: issues, teams, members, projects, labels, docs, findings,
 claims, the web board over embedded PocketBase, `lll up`, realtime
 `watch`, Fly deployment.
 
+[0.6.0]: https://github.com/escherize/lll/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/escherize/lll/compare/v0.4.0...v0.5.0
 [0.2.0]: https://github.com/escherize/lll/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/escherize/lll/releases/tag/v0.1.0
