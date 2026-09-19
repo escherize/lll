@@ -4,6 +4,26 @@ All notable changes to lll. The format follows Keep a Changelog; versions
 follow SemVer, with 0.x meaning the CLI surface can still move between
 minors. Issue keys are on the project's own board (`lll issue view KEY`).
 
+## [0.6.1] - 2026-09-19
+
+Local boards can now be disposable or shared with a small team without
+inheriting a hosted connection or assembling credentials by hand.
+
+### Added
+
+- `lll up --scratch` (`--local`) creates an isolated throwaway board with fresh
+  ports, data, and config. It ignores inherited `LLL_*` values, home config,
+  and the caller's `.lll.toml`, and prints the temporary CLI connection
+  (LLL-487).
+- `lll up --bind LAN_OR_TAILSCALE_IP` starts a shareable board on that address,
+  advertises a reachable board/login URL, and keeps random administrator and
+  browser-gate secrets private across restarts. An inherited hosted URL or
+  token cannot redirect this explicit local boot (LLL-497).
+- `lll member passes --count 10` creates distinct human members and one-year
+  API tokens, then writes a private `0600` handoff file with each person's
+  credential and the shared board login link. Browser edits still use the
+  board process identity (LLL-497).
+
 ## [0.6.0] - 2026-09-19
 
 The CLI now uses one authenticated member identity, and retries of issue
