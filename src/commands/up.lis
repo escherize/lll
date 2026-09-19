@@ -1,5 +1,5 @@
-import "records"
 import "go:bufio"
+import "go:crypto/rand"
 import "go:encoding/json"
 import "go:fmt"
 import "go:github.com/escherize/lll/gopb"
@@ -13,9 +13,10 @@ import "go:time"
 import "go:unicode"
 
 import "config"
+import "flags"
 import "models"
 import "pb"
-import "flags"
+import "records"
 
 // `lll up` — one command for local use: PocketBase + the web board, one process.
 //
@@ -58,6 +59,12 @@ fn up_spec() -> Slice<flags.Flag> {
       ..,
     },
     flags.Flag {
+      name: "--scratch",
+      alias: "--local",
+      help: "start a throwaway local board, ignoring inherited config and LLL_* values",
+      ..,
+    },
+    flags.Flag {
       name: "--help",
       alias: "-h",
       hidden: true,
@@ -79,7 +86,12 @@ pub fn up(args: Slice<string>) -> Result<(), string> {
     print_up_usage()
     return Ok(())
   }
-  let mut web_port = 8100
+  let scratch = p.given("--scratch")
+  if scratch && p.one("--pb-dir") != "" {
+    return Err("--scratch owns its temporary data directory; omit --pb-dir")
+  }
+  let scratch_dir = if scratch { setup_scratch()? } else { "" }
+  let mut web_port = if scratch { available_port()? } else { 8100 }
   let raw_port = p.one("--port")
   if raw_port != "" {
     let Ok(pn) = strconv.Atoi(raw_port) else {
@@ -88,7 +100,9 @@ pub fn up(args: Slice<string>) -> Result<(), string> {
     web_port = pn
   }
   let pb_dir = p.one("--pb-dir")
-  let pb_dir = if pb_dir == "" { "pb/pb_data" } else { pb_dir }
+  let pb_dir = if scratch {
+    filepath.Join(scratch_dir, "pb_data")
+  } else if pb_dir == "" { "pb/pb_data" } else { pb_dir }
   let open = !p.given("--no-open")
 
   // Traced, not plain `load()`: TASK-115 needs to know not just WHICH team was
@@ -232,7 +246,7 @@ superuser credentials, or set LLL_TOKEN to a member token valid for this server.
   // a fact about that database, not about this checkout - so it is not
   // persisted. Persisting it would put a .lll.toml into whatever directory the
   // scratch board ran in, which is the TASK-143 stray exactly.
-  let throwaway = p.one("--pb-dir") != ""
+  let throwaway = p.one("--pb-dir") != "" || scratch
   // A demo boot must not stop to ask for a team key: "show me the tool" is the
   // whole request. DEMO unless the caller already chose something.
   let demo = p.given("--demo")
@@ -250,7 +264,20 @@ superuser credentials, or set LLL_TOKEN to a member token valid for this server.
   }
   let _ = os.Setenv("LLL_TEAM", team)
   let (member, refresh) = board_identity(db_url, email, pass)?
-  if demo { seed_demo(team, member.name, db_url, strings.HasPrefix(src.token, "file:"))? }
+  if scratch {
+    let _ = set_home_key("url", db_url)?
+    let _ = set_home_key("team", team)?
+    let _ = set_home_key("token", os.Getenv("LLL_TOKEN"))?
+    fmt.Println(f"scratch data   {scratch_dir}")
+    fmt.Println(f"scratch config {filepath.Join(scratch_dir, "config")}")
+    fmt.Println(f"scratch admin  {email} / {pass} (shown once)")
+    fmt.Println(
+      f"scratch CLI    cd {scratch_dir} && env -u LLL_URL -u LLL_TOKEN -u LLL_TEAM LLL_CONFIG_HOME={filepath.Join(scratch_dir, "config")} lll issue list",
+    )
+  }
+  if demo {
+    seed_demo(team, member.name, db_url, strings.HasPrefix(src.token, "file:"))?
+  }
   let chosen = free_port(web_port)
   if chosen != web_port {
     fmt.Println(f"port {web_port} taken — board moving to {chosen}")
@@ -279,12 +306,62 @@ superuser credentials, or set LLL_TOKEN to a member token valid for this server.
   run_server(chosen, refresh, p.given("--admin-ui"))
 }
 
+/// Scratch is a PROCESS boundary: clear the inherited LLL_* values and move
+/// away from any repo before the first config load. Only this lll process is
+/// changed; the invoking shell and its real tracker stay untouched.
+fn setup_scratch() -> Result<string, string> {
+  let root = match os.MkdirTemp("", "lll-scratch-") {
+    Ok(path) => path,
+    Err(e) => return Err(f"creating scratch directory: {e}"),
+  }
+  for entry in os.Environ() {
+    let key = strings.SplitN(entry, "=", 2)[0]
+    if key.starts_with("LLL_") { let _ = os.Unsetenv(key) }
+  }
+  let _ = os.Unsetenv("XDG_CONFIG_HOME")
+  if let Err(e) = os.Chdir(root) {
+    return Err(f"entering scratch directory {root}: {e}")
+  }
+  let home = filepath.Join(root, "home")
+  if let Err(e) = os.MkdirAll(home, 0o700) {
+    return Err(f"creating scratch home {home}: {e}")
+  }
+  let db_port = available_port()?
+  let _ = os.Setenv("HOME", home)
+  let _ = os.Setenv("USER", "scratch")
+  let _ = os.Setenv("LLL_CONFIG_HOME", filepath.Join(root, "config"))
+  let _ = os.Setenv("LLL_URL", f"http://127.0.0.1:{db_port}")
+  let _ = os.Setenv("LLL_TEAM", "SCRAT")
+  let _ = os.Setenv("LLL_BIND", "127.0.0.1")
+  let _ = os.Setenv("LLL_ADMIN_EMAIL", "admin@local.invalid")
+  let _ = os.Setenv("LLL_ADMIN_PASSWORD", rand.Text() + rand.Text())
+  Ok(root)
+}
+
+/// The kernel chooses a free port while the listener is bound. The normal up
+/// path still checks it again before serving, including a collision fallback.
+fn available_port() -> Result<int, string> {
+  let listener = match net.Listen("tcp", "127.0.0.1:0") {
+    Ok(l) => l,
+    Err(e) => return Err(f"selecting a scratch port: {e}"),
+  }
+  let Some(addr) = listener.Addr() else {
+    let _ = listener.Close()
+    return Err("the scratch listener did not report an address")
+  }
+  let port = port_of(addr.String(), 0)
+  let _ = listener.Close()
+  if port == 0 { return Err("the scratch listener did not report its port") }
+  Ok(port)
+}
+
 fn print_up_usage() {
   fmt.Println(
     "lll up - start the lll server and web board together
 
 Usage:
   lll up [--port 8100] [--pb-dir pb/pb_data] [--no-open] [--demo] [--admin-ui]
+  lll up --scratch [--no-open]   (--local is an alias)
 
 Reuses a server API already running at the configured URL; otherwise runs one
 in-process (first free port from the configured port up) after upserting the
@@ -304,6 +381,11 @@ for one and writes the answer to the repo's .lll.toml, so the board and the
 CLI always agree; with nothing on stdin to answer with (scripts, agents, CI)
 it refuses to start rather than run on a team only this process knows about.
 'lll attach' settles the same question up front, without a boot.
+
+--scratch starts a fresh local board in a temporary directory, ignoring all
+inherited LLL_* values, home/repo config, and XDG_CONFIG_HOME. Its banner gives
+the directory and a CLI command to reach that board; delete the directory when
+finished. It never writes to the original directory's config.
 
 Whichever way the team was settled, it is written to .lll.toml unless a
 config file already supplies it, so the NEXT boot in this directory needs no
@@ -371,9 +453,7 @@ fn ensure_team(
       },
       Err(e) => {
         let existing = records.find_team(key)?
-        if existing.is_none() {
-          return Err(f"creating team '{key}': {e}")
-        }
+        if existing.is_none() { return Err(f"creating team '{key}': {e}") }
       },
     }
   }
@@ -430,8 +510,13 @@ fn board_identity(
   if created { fmt.Println(f"created member {name}") }
   let Some(member) = records.find_member(name)? else {
     return Err(f"could not resolve the board member {name}")
-  };
-  let token = pb.impersonate_member(base, cfg.token, member.id, default_token_duration())?
+  }
+  let token = pb.impersonate_member(
+    base,
+    cfg.token,
+    member.id,
+    default_token_duration(),
+  )?
   let _ = os.Setenv("LLL_TOKEN", token)
   let _ = os.Setenv("LLL_ADMIN_EMAIL", email)
   let _ = os.Setenv("LLL_ADMIN_PASSWORD", pass)
@@ -442,7 +527,9 @@ fn board_identity(
     let admin = superuser_token(base, email, pass)?
     pb.impersonate_member(base, admin, id, default_token_duration())
   }
-  fmt.Println(f"auth   board signed in as {name}; token renewal keeps this member")
+  fmt.Println(
+    f"auth   board signed in as {name}; token renewal keeps this member",
+  )
   Ok((Actor { id: member.id, name }, Some(refresh)))
 }
 
