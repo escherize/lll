@@ -1,4 +1,3 @@
-import "records"
 import "go:fmt"
 import "go:github.com/escherize/lll/web"
 import "go:net"
@@ -6,12 +5,14 @@ import "go:net/http"
 import "go:net/http/httputil"
 import "go:net/url"
 import "go:os"
+import "go:strconv"
 import "go:strings"
 
 import "config"
 import "models"
 import "pb"
 import "realtime"
+import "records"
 
 // The web board — a server-rendered board with realtime updates, started by
 // `lll up`.
@@ -43,6 +44,14 @@ pub fn bind_addr() -> string {
   if b == "" { "127.0.0.1" } else { b }
 }
 
+/// A concrete bind address is also the address a teammate can open. Wildcard
+/// binds (used by hosted reverse proxies) have no client URL of their own.
+pub fn advertised_board_url(port: int) -> string {
+  let bind = bind_addr()
+  let host = if bind == "0.0.0.0" || bind == "::" { "127.0.0.1" } else { bind }
+  f"http://{net.JoinHostPort(host, strconv.Itoa(port))}"
+}
+
 /// Serve PocketBase's own routes from the board's port, so the API and the
 /// board share one address (TASK-241).
 ///
@@ -64,7 +73,11 @@ pub fn bind_addr() -> string {
 /// The port was never the boundary. Anyone who could reach :8091 could always
 /// reach these routes; all that changes is that they no longer have to guess
 /// a port number to do it.
-fn api_proxy(mux: mut Ref<http.ServeMux>, base: string, admin_ui: bool) -> Result<(), string> {
+fn api_proxy(
+  mux: mut Ref<http.ServeMux>,
+  base: string,
+  admin_ui: bool,
+) -> Result<(), string> {
   let Ok(target) = url.Parse(base) else {
     return Err(f"cannot proxy the API: '{base}' is not a url")
   }
@@ -94,7 +107,7 @@ pub fn run_server(
   let cfg = config.load()?
   let Some(board_member) = actor()? else {
     return Err("the board needs a member token — start it with lll up")
-  };
+  }
   // The BOOT team (TASK-198): the server hosts every team — the board views
   // one per URL under /t/KEY/ — and the configured team is only where the
   // bare / redirect and the compatibility routes land. `lll up` (the one
@@ -169,12 +182,11 @@ pub fn run_server(
     Ok(l) => l,
     Err(e) => return Err(f"server: {e}"),
   }
-  fmt.Println(f"board  http://127.0.0.1:{port}")
-  if admin_ui {
-    fmt.Println(f"admin  http://127.0.0.1:{port}/_/ (enabled by --admin-ui)")
-  }
+  let board_url = advertised_board_url(port)
+  fmt.Println(f"board  {board_url}")
+  if admin_ui { fmt.Println(f"admin  {board_url}/_/ (enabled by --admin-ui)") }
   fmt.Println(
-    f"board  login http://127.0.0.1:{port}/?board_token={board_tok} (sets a cookie; LLL_BOARD_TOKEN pins it)",
+    f"board  login {board_url}/?board_token={board_tok} (sets a cookie; LLL_BOARD_TOKEN pins it)",
   )
   match http.Serve(listener, mux) {
     Ok(_) => Ok(()),
@@ -184,7 +196,13 @@ pub fn run_server(
 
 /// Construct an independent router. Runtime I/O (configuration, listener and
 /// realtime subscription) belongs to run_server, not route registration.
-fn board_mux(cfg: config.Config, boot: models.Team, hub: Hub, board_member: Actor, admin_ui: bool) -> Result<mut Ref<http.ServeMux>, string> {
+fn board_mux(
+  cfg: config.Config,
+  boot: models.Team,
+  hub: Hub,
+  board_member: Actor,
+  admin_ui: bool,
+) -> Result<mut Ref<http.ServeMux>, string> {
   let mut mux: mut Ref<http.ServeMux> = http.NewServeMux()
   let team_id = boot.id
   let boot_key = boot.key
@@ -225,13 +243,17 @@ fn board_mux(cfg: config.Config, boot: models.Team, hub: Hub, board_member: Acto
   mux.HandleFunc(
     "GET /t/{team}/{$}",
     gated(|w: http.ResponseWriter, r: Ref<http.Request>| {
-      if let Some(t) = routed_team(w, r) { board_page(w, r, t, board_member.name) }
+      if let Some(t) = routed_team(w, r) {
+        board_page(w, r, t, board_member.name)
+      }
     }),
   )
   mux.HandleFunc(
     "GET /t/{team}/issue/{key}",
     gated(|w: http.ResponseWriter, r: Ref<http.Request>| {
-      if let Some(t) = routed_team(w, r) { issue_page(w, r, t, board_member.name) }
+      if let Some(t) = routed_team(w, r) {
+        issue_page(w, r, t, board_member.name)
+      }
     }),
   )
   // LLL-405: a doc's address. Team-routed like the board and issue pages,
@@ -240,13 +262,17 @@ fn board_mux(cfg: config.Config, boot: models.Team, hub: Hub, board_member: Acto
   mux.HandleFunc(
     "GET /t/{team}/doc/{slug}",
     gated(|w: http.ResponseWriter, r: Ref<http.Request>| {
-      if let Some(t) = routed_team(w, r) { doc_page(w, r, t, board_member.name) }
+      if let Some(t) = routed_team(w, r) {
+        doc_page(w, r, t, board_member.name)
+      }
     }),
   )
   mux.HandleFunc(
     "GET /t/{team}/search",
     gated(|w: http.ResponseWriter, r: Ref<http.Request>| {
-      if let Some(t) = routed_team(w, r) { search_page(w, r, t, board_member.name) }
+      if let Some(t) = routed_team(w, r) {
+        search_page(w, r, t, board_member.name)
+      }
     }),
   )
   // LLL-426: the table, the projects list and settings answer for the team in
@@ -257,13 +283,17 @@ fn board_mux(cfg: config.Config, boot: models.Team, hub: Hub, board_member: Acto
   mux.HandleFunc(
     "GET /t/{team}/issues",
     gated(|w: http.ResponseWriter, r: Ref<http.Request>| {
-      if let Some(t) = routed_team(w, r) { issues_page(w, r, t.id, board_member.name) }
+      if let Some(t) = routed_team(w, r) {
+        issues_page(w, r, t.id, board_member.name)
+      }
     }),
   )
   mux.HandleFunc(
     "GET /t/{team}/projects",
     gated(|w: http.ResponseWriter, r: Ref<http.Request>| {
-      if let Some(t) = routed_team(w, r) { projects_page(w, r, t.id, board_member.name) }
+      if let Some(t) = routed_team(w, r) {
+        projects_page(w, r, t.id, board_member.name)
+      }
     }),
   )
   // LLL-446: settings is six sections with six addresses, so a render fetches
@@ -359,7 +389,11 @@ fn board_mux(cfg: config.Config, boot: models.Team, hub: Hub, board_member: Acto
   // the one place an Err becomes the flash strip.
   mux.HandleFunc(
     "POST /settings/{kind}",
-    gated(flashing(|r: mut Ref<http.Request>| settings_write(r, team_id, board_member.name))),
+    gated(flashing(|r: mut Ref<http.Request>| settings_write(
+      r,
+      team_id,
+      board_member.name,
+    ))),
   )
   // The Access section's superuser-power actions (TASK-204). Their own
   // routes, not a {kind}: each verifies the form's admin password against
@@ -370,7 +404,10 @@ fn board_mux(cfg: config.Config, boot: models.Team, hub: Hub, board_member: Acto
   )
   mux.HandleFunc(
     "POST /settings/access/member",
-    gated(flashing(|r: mut Ref<http.Request>| access_credential_write(r, team_id))),
+    gated(flashing(|r: mut Ref<http.Request>| access_credential_write(
+      r,
+      team_id,
+    ))),
   )
   // The Teams section's archive lifecycle (TASK-210): its own route, not a
   // {kind}, because it runs the Access sections' per-action admin re-auth —
@@ -436,7 +473,9 @@ fn board_mux(cfg: config.Config, boot: models.Team, hub: Hub, board_member: Acto
         // the upgrade path if the CSS ever becomes a problem too.
         if let Some(u) = r.URL {
           if strings.HasPrefix(u.Path, "/static/fonts/") {
-            w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
+            w
+              .Header()
+              .Set("Cache-Control", "public, max-age=31536000, immutable")
           }
         }
         // FileServer's ServeHTTP wants a writable request; the mux hands out
@@ -453,7 +492,11 @@ fn board_mux(cfg: config.Config, boot: models.Team, hub: Hub, board_member: Acto
 /// 303 to `path`, carrying the request's query string over — the bare board
 /// and search paths redirect to their team-routed twins (TASK-198), and a
 /// filtered URL must stay filtered across the hop.
-fn redirect_with_query(w: http.ResponseWriter, r: Ref<http.Request>, path: string) {
+fn redirect_with_query(
+  w: http.ResponseWriter,
+  r: Ref<http.Request>,
+  path: string,
+) {
   let mut target = path
   if let Some(u) = r.URL {
     if u.RawQuery != "" { target = f"{path}?{u.RawQuery}" }
@@ -465,12 +508,19 @@ fn redirect_with_query(w: http.ResponseWriter, r: Ref<http.Request>, path: strin
 /// carries can change under /settings at any moment — shell_team's bargain).
 /// None means the response is already written: a 404 naming the key, or a
 /// 500 for a lookup the database refused.
-fn routed_team(w: http.ResponseWriter, r: Ref<http.Request>) -> Option<models.Team> {
+fn routed_team(
+  w: http.ResponseWriter,
+  r: Ref<http.Request>,
+) -> Option<models.Team> {
   let key = r.PathValue("team")
   match records.find_team(key) {
     Ok(Some(t)) => Some(t),
     Ok(None) => {
-      http.Error(w, f"no team with key '{key}' on this server — see the rail's team switcher", 404)
+      http.Error(
+        w,
+        f"no team with key '{key}' on this server — see the rail's team switcher",
+        404,
+      )
       None
     },
     Err(e) => {
