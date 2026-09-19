@@ -1,21 +1,30 @@
-import "records"
 import "go:bufio"
-import "go:encoding/json"
 import "go:crypto/rand"
+import "go:encoding/json"
 import "go:fmt"
 import "go:os"
+import "go:path/filepath"
+import "go:strconv"
 import "go:strings"
+import "go:time"
 
+import "config"
+import "flags"
 import "models"
 import "pb"
-import "flags"
-import "config"
+import "records"
 
 /// Dispatch `lll member <verb>` through the noun's Command table (TASK-307).
 /// The table is the one place a verb is declared: dispatch, `lll member
 /// --help` and shell completions all read it, so none of the three can drift.
 pub fn member(args: Slice<string>) -> Result<(), string> {
-  flags.dispatch("member", "work with members", member_intro(), member_commands(), args)
+  flags.dispatch(
+    "member",
+    "work with members",
+    member_intro(),
+    member_commands(),
+    args,
+  )
 }
 
 /// Every member verb, as a value. `page` is the hand-written help invite,
@@ -61,6 +70,14 @@ pub fn member_commands() -> Slice<flags.Command> {
       spec: member_invite_spec(),
       positional: "NAME",
       run: member_invite,
+    },
+    flags.Command {
+      name: "passes",
+      summary: "make private, copyable human teammate tokens for a local board",
+      page: member_passes_page(),
+      spec: member_passes_spec(),
+      positional: "",
+      run: member_passes,
     },
     flags.Command {
       name: "remove",
@@ -118,9 +135,29 @@ fn member_list_spec() -> Slice<flags.Flag> {
 
 fn member_add_spec() -> Slice<flags.Flag> {
   [
-    flags.Flag { name: "-n", alias: "--name", value: true, hint: "\"name\"", help: "member name", .. },
-    flags.Flag { name: "-e", alias: "--email", value: true, hint: "email", help: "member email", .. },
-    flags.Flag { name: "--password", value: true, hint: "pw", help: "set a usable login password with a real --email; otherwise creates a record only", .. },
+    flags.Flag {
+      name: "-n",
+      alias: "--name",
+      value: true,
+      hint: "\"name\"",
+      help: "member name",
+      ..,
+    },
+    flags.Flag {
+      name: "-e",
+      alias: "--email",
+      value: true,
+      hint: "email",
+      help: "member email",
+      ..,
+    },
+    flags.Flag {
+      name: "--password",
+      value: true,
+      hint: "pw",
+      help: "set a usable login password with a real --email; otherwise creates a record only",
+      ..,
+    },
   ]
 }
 
@@ -143,6 +180,63 @@ fn member_invite_spec() -> Slice<flags.Flag> {
       ..,
     },
   ])
+}
+
+fn member_passes_spec() -> Slice<flags.Flag> {
+  with_admin_flags([
+    flags.Flag {
+      name: "--count",
+      value: true,
+      hint: "10",
+      help: "number of distinct people (1..50; default 10)",
+      ..,
+    },
+    flags.Flag {
+      name: "--prefix",
+      value: true,
+      hint: "hack",
+      help: "name prefix for the new people (default guest)",
+      ..,
+    },
+    flags.Flag {
+      name: "--out",
+      value: true,
+      hint: "path",
+      help: "private handoff file (default machine config directory)",
+      ..,
+    },
+    flags.Flag {
+      name: "--duration",
+      value: true,
+      hint: "seconds",
+      help: "token lifetime (default one year)",
+      ..,
+    },
+    flags.Flag {
+      name: "--url",
+      value: true,
+      hint: "url",
+      help: "API URL; defaults to the local board's saved URL",
+      ..,
+    },
+  ])
+}
+
+fn member_passes_page() -> string {
+  "lll member passes - make copyable credentials for a local team board
+
+Usage:
+  lll member passes [--count 10] [--prefix hack] [--out PATH]
+
+Run after 'lll up --bind LAN_OR_TAILSCALE_IP'. Creates distinct person members
+with long-lived API tokens, then writes a mode-0600 handoff file containing
+each person's name, token, team, API URL, and the board login link. Share only
+one person's block with that person. The browser link admits them to the board;
+their personal token authenticates CLI/API calls. Browser edits currently use
+the board process identity, not the person's API token. The output file is
+the only copy of the minted tokens; keep it private. If the batch stops early,
+the error names the partial file and the exact number completed." +
+  flags.section(member_passes_spec())
 }
 
 fn set_password_spec() -> Slice<flags.Flag> {
@@ -171,7 +265,6 @@ fn set_password_spec() -> Slice<flags.Flag> {
     },
   ])
 }
-
 
 /// `lll member remove NAME` — delete a member nothing points at (TASK-245).
 ///
@@ -222,14 +315,20 @@ or use --force to clear assignments, comment authorship and issue creator refere
   let _ = pb.delete_as(f"/api/collections/members/records/{member.id}", su)?
   fmt.Println(f"removed member {member.name}")
   if assigned > 0 || authored > 0 || created > 0 {
-    fmt.Println(f"cleared {assigned} issue assignment(s) and {authored} comment author reference(s), plus {created} issue creator reference(s); issue and comment bodies kept")
+    fmt.Println(
+      f"cleared {assigned} issue assignment(s) and {authored} comment author reference(s), plus {created} issue creator reference(s); issue and comment bodies kept",
+    )
   }
   Ok(())
 }
 
 fn member_remove_spec() -> Slice<flags.Flag> {
   with_admin_flags([
-    flags.Flag { name: "--force", help: "clear assignments, comment authorship and creator references; keep issue/comment bodies", .. },
+    flags.Flag {
+      name: "--force",
+      help: "clear assignments, comment authorship and creator references; keep issue/comment bodies",
+      ..,
+    },
     flags.Flag {
       name: "--url",
       value: true,
@@ -248,12 +347,15 @@ fn member_remove_page() -> string {
   "lll member remove - remove a member with reference checks
 
 Usage:
-  " + usage + "
+  " +
+  usage +
+  "
 
 Refuses a member with assigned issues, authored comments or issue creator references. Reassign issues
 first ('lll issue update KEY --assignee SOMEBODY'), or use --force to clear
 assignments, comment authorship and creator references. Issue and comment bodies are kept.
-Authenticates as the superuser, exactly like 'lll member set-password'." + flags.section(member_remove_spec())
+Authenticates as the superuser, exactly like 'lll member set-password'." +
+  flags.section(member_remove_spec())
 }
 
 /// Point this process at `url` for the rest of the command, when one was
@@ -283,7 +385,8 @@ fn point_at_url(given: string) -> Result<(), string> {
 /// refusals should advise the caller to change administrative credentials.
 fn member_password_error(name: string, e: string) -> string {
   let status = pb.response_status(e)
-  if status == 403 || status == 401 || (status == 400 && strings.Contains(pb.response_body(e), "oldPassword")) {
+  if status == 403 || status == 401 || (status == 400 &&
+  strings.Contains(pb.response_body(e), "oldPassword")) {
     return "member set-password is superuser-only and the configured token is not one
 set LLL_ADMIN_EMAIL/LLL_ADMIN_PASSWORD to this server's administrator credentials"
   }
@@ -295,9 +398,7 @@ fn member_set_password(input: flags.CommandInput) -> Result<(), string> {
   let usage = flags.usage("lll member set-password", spec, "NAME")
   let p = input.parsed
   let name = p.first()
-  if name == "" {
-    return Err(f"usage: {usage}")
-  }
+  if name == "" { return Err(f"usage: {usage}") }
 
   point_at_url(p.one("--url"))?
   apply_admin_flags(p.one("--admin-email"), p.one("--admin-password"))?
@@ -340,11 +441,9 @@ rerun with --email <email> to set one alongside the password",
     )
   }
 
-  let payload = match json.Marshal(models.PasswordPatch {
-    password,
-    password_confirm: password,
-    email,
-  }) {
+  let payload = match json.Marshal(
+    models.PasswordPatch { password, password_confirm: password, email },
+  ) {
     Ok(b) => b,
     Err(e) => return Err(f"encoding the patch: {e}"),
   }
@@ -361,7 +460,9 @@ rerun with --email <email> to set one alongside the password",
     fmt.Println(f"email set to {email}")
   }
   fmt.Println(f"password set for {member.name}")
-  fmt.Println(f"they log in with: lll login --email {identity} (plus --url <server> on a fresh machine)")
+  fmt.Println(
+    f"they log in with: lll login --email {identity} (plus --url <server> on a fresh machine)",
+  )
   Ok(())
 }
 
@@ -376,9 +477,7 @@ fn member_invite(input: flags.CommandInput) -> Result<(), string> {
   let usage = flags.usage("lll member invite", spec, "NAME")
   let p = input.parsed
   let name = p.first()
-  if name == "" {
-    return Err(f"usage: {usage}")
-  }
+  if name == "" { return Err(f"usage: {usage}") }
   let email = strings.TrimSpace(p.one("--email"))
   if !real_email(email) {
     return Err(
@@ -419,6 +518,166 @@ fn member_invite(input: flags.CommandInput) -> Result<(), string> {
   for line in invite_lines(email, password, cfg.url, cfg.team) {
     fmt.Println(line)
   }
+  Ok(())
+}
+
+/// A single private handoff for a group. The file is reserved before the
+/// first member is created, then each minted credential is appended. A failed
+/// later step leaves the exact completed subset in that file for recovery.
+fn member_passes(input: flags.CommandInput) -> Result<(), string> {
+  let p = input.parsed
+  let count = if p.one("--count") == "" {
+    10
+  } else {
+    let Ok(value) = strconv.Atoi(p.one("--count")) else {
+      return Err(
+        f"--count must be a number from 1 to 50, got '{p.one("--count")}'",
+      )
+    }
+    value
+  }
+  if count < 1 || count > 50 { return Err("--count must be from 1 to 50") }
+  let prefix = if p.one("--prefix") == "" {
+    "guest"
+  } else {
+    strings.TrimSpace(p.one("--prefix"))
+  }
+  if prefix == "" { return Err("--prefix cannot be blank") }
+  let duration = parse_token_duration(p.one("--duration"))?
+  let admin_file = filepath.Join(
+    filepath.Dir(config.home_path()?),
+    "local-admin.json",
+  )
+  let bytes = match os.ReadFile(admin_file) {
+    Ok(b) => b,
+    Err(e) => return Err(
+      f"no local board admin connection at {admin_file}: {e}\nrun 'lll up --bind LAN_OR_TAILSCALE_IP' first",
+    ),
+  }
+  let mut local = LocalShareAdmin { .. }
+  if let Err(e) = json.Unmarshal(bytes, &local) {
+    return Err(f"decoding local board admin connection: {e}")
+  }
+  if local.url == "" || local.email == "" || local.password == "" {
+    return Err("saved local board admin connection is incomplete")
+  }
+  // The saved local share is authoritative for this verb: an inherited hosted
+  // LLL_URL or LLL_WEB_URL must not redirect credential creation elsewhere.
+  let requested_url = p.one("--url")
+  if requested_url != "" && strings.TrimSuffix(requested_url, "/") != local.url {
+    return Err("--url disagrees with the saved local board URL")
+  }
+  point_at_url(local.url)?
+  if let Err(e) = os.Setenv("LLL_WEB_URL", local.url) {
+    return Err(f"pointing at the local board: {e}")
+  }
+  apply_admin_flags(p.one("--admin-email"), p.one("--admin-password"))?
+  let cfg = config.load()?
+  if cfg.team == "" {
+    return Err(
+      "no team is configured; run 'lll up --bind LAN_OR_TAILSCALE_IP' from the team directory",
+    )
+  }
+  if cfg.web_url == "" {
+    return Err(
+      "no board URL is configured; run 'lll up --bind LAN_OR_TAILSCALE_IP' first",
+    )
+  }
+  let login_file = filepath.Join(
+    filepath.Dir(config.home_path()?),
+    "board-login-url",
+  )
+  let login_bytes = match os.ReadFile(login_file) {
+    Ok(b) => b,
+    Err(e) => return Err(
+      f"no saved board login link at {login_file}: {e}\nrun 'lll up --bind LAN_OR_TAILSCALE_IP' first",
+    ),
+  }
+  let login_url = strings.TrimSpace(login_bytes as string)
+  if !strings.HasPrefix(
+    login_url,
+    strings.TrimRight(cfg.web_url, "/") + "/?board_token=",
+  ) {
+    return Err(
+      "the saved board login link disagrees with web_url; restart with 'lll up --bind LAN_OR_TAILSCALE_IP'",
+    )
+  }
+  if local.url != cfg.url {
+    return Err("saved local board admin connection disagrees with this API URL")
+  }
+  if (os.Getenv("LLL_ADMIN_EMAIL") == "") != (os.Getenv("LLL_ADMIN_PASSWORD") == "") {
+    return Err("provide both administrator credentials, or neither")
+  }
+  if os.Getenv("LLL_ADMIN_EMAIL") == "" {
+    apply_admin_flags(local.email, local.password)?
+  }
+  let su = superuser_auth()?
+  let run_id = strings.ToLower(rand.Text())
+  let out = if p.one("--out") != "" {
+    p.one("--out")
+  } else {
+    filepath.Join(filepath.Dir(config.home_path()?), f"handoffs-{run_id}.txt")
+  }
+  if let Err(e) = os.MkdirAll(filepath.Dir(out), 0o700) {
+    return Err(f"creating handoff directory: {e}")
+  }
+  let file = match os.OpenFile(
+    out,
+    os.O_WRONLY | os.O_CREATE | os.O_EXCL,
+    0o600,
+  ) {
+    Ok(f) => f,
+    Err(e) => return Err(
+      f"creating private handoff file {out}: {e}; choose a new --out path",
+    ),
+  }
+  defer file.Close()
+  let header = f"Team: {cfg.team}\nAPI: {cfg.url}\nBoard login: {login_url}\n\nSend only one person's block to that person. Browser access uses the board link; CLI/API access uses that person's LLL_TOKEN.\n{expiry_line(duration, time.Now())}\n\n"
+  match file.WriteString(header) {
+    Partial.Ok(n) => if n != header.bytes().length() {
+      return Err(f"short write to handoff file {out}")
+    },
+    Partial.Err(e) | Partial.Both(_, e) => return Err(
+      f"writing handoff file {out}: {e}",
+    ),
+  }
+  let mut completed = 0
+  for i in 0..count {
+    let name = f"{prefix}-{run_id}-{i + 1}"
+    let member = match create_member_as(su, name, "", rand.Text()) {
+      Ok(m) => m,
+      Err(e) => return Err(
+        f"created {completed} of {count} credentials in {out}; creating {name} failed: {e}",
+      ),
+    }
+    let token = match pb.impersonate_member(cfg.url, su, member.id, duration) {
+      Ok(tok) => tok,
+      Err(e) => return Err(
+        f"created person {name} but could not mint its token; {completed} complete credentials are in {out}: {e}",
+      ),
+    }
+    let block = f"Person {i + 1}: {name}\nLLL_URL={cfg.url}\nLLL_TEAM={cfg.team}\nLLL_TOKEN={token}\nBoard login: {login_url}\n\n"
+    match file.WriteString(block) {
+      Partial.Ok(n) => if n != block.bytes().length() {
+        return Err(
+          f"created person {name} but its token was only partly written to {out}; {completed} earlier credentials are complete",
+        )
+      },
+      Partial.Err(e) | Partial.Both(_, e) => return Err(
+        f"created person {name} but could not write its token; {completed} complete credentials are in {out}: {e}",
+      ),
+    }
+    completed += 1
+  }
+  if let Err(e) = file.Close() {
+    return Err(f"closing private handoff file {out}: {e}")
+  }
+  fmt.Println(
+    f"created {completed} distinct human credentials in {out} (mode 0600)",
+  )
+  fmt.Println(
+    "send each person only their block; the board login link works on the selected LAN or Tailscale IP",
+  )
   Ok(())
 }
 
@@ -475,7 +734,8 @@ Uses the configured member token to create a new colleague, or administrator
 credentials from --admin-email/--admin-password or LLL_ADMIN_EMAIL and
 LLL_ADMIN_PASSWORD when supplied. An existing member is refused rather than
 overwritten; resetting an existing password with 'lll member set-password'
-requires administrator credentials." + flags.section(member_invite_spec())
+requires administrator credentials." +
+  flags.section(member_invite_spec())
 }
 
 /// The hand-written page for `lll member set-password`.
@@ -496,7 +756,8 @@ The replacement password must contain at least 8 characters.
 --email also sets the member's email, and is required when the member only
 has a synthesized @members.invalid one: the email is the identity
 'lll login' asks for. After this, the member logs in with
-'lll login --url <server>'." + flags.section(spec)
+'lll login --url <server>'." +
+  flags.section(spec)
 }
 
 fn member_add(input: flags.CommandInput) -> Result<(), string> {
@@ -512,21 +773,31 @@ fn member_add(input: flags.CommandInput) -> Result<(), string> {
   let email = p.one("-e")
 
   if let Some(existing) = records.find_member(name)? {
-    return Err(f"a member named '{name}' already exists <{existing.email}> — pick another name")
+    return Err(
+      f"a member named '{name}' already exists <{existing.email}> — pick another name",
+    )
   }
   let password = p.one("--password")
   if p.given("--password") && (password == "" || !real_email(email)) {
-    return Err("--password requires a nonempty password and a real --email; use 'lll member invite NAME --email EMAIL' for a generated login handoff")
+    return Err(
+      "--password requires a nonempty password and a real --email; use 'lll member invite NAME --email EMAIL' for a generated login handoff",
+    )
   }
   let created = if p.given("--password") {
     let cfg = config.load()?
     create_member_as(cfg.token, name, email, password)?
-  } else { create_member(name, email)? }
+  } else {
+    create_member(name, email)?
+  }
   fmt.Println(f"Added member {created.name}")
   if p.given("--password") {
-    fmt.Println(f"login enabled: lll login --email {email} --url {(config.load()?).url} (use the supplied password)")
+    fmt.Println(
+      f"login enabled: lll login --email {email} --url {(config.load()?).url} (use the supplied password)",
+    )
   } else {
-    fmt.Println(f"record only: no known login password. An administrator can enable login with 'lll member set-password {name} --email EMAIL --password PASSWORD'. For a new colleague, use 'lll member invite NAME --email EMAIL' instead.")
+    fmt.Println(
+      f"record only: no known login password. An administrator can enable login with 'lll member set-password {name} --email EMAIL --password PASSWORD'. For a new colleague, use 'lll member invite NAME --email EMAIL' instead.",
+    )
   }
   Ok(())
 }
@@ -536,7 +807,10 @@ fn member_add(input: flags.CommandInput) -> Result<(), string> {
 /// collection: without -e, one is synthesized from the name — the same
 /// @members.invalid rule the TASK-180 migration used to backfill. The random
 /// password satisfies PB's create validation; it is never shown or reused.
-pub fn create_member(name: string, email: string) -> Result<models.Member, string> {
+pub fn create_member(
+  name: string,
+  email: string,
+) -> Result<models.Member, string> {
   let cfg = config.load()?
   create_member_as(cfg.token, name, email, rand.Text())
 }

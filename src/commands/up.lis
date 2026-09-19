@@ -18,6 +18,9 @@ import "models"
 import "pb"
 import "records"
 
+#[json]
+struct LocalShareAdmin { url: string, email: string, password: string }
+
 // `lll up` — one command for local use: PocketBase + the web board, one process.
 //
 // A PocketBase already healthy at the configured URL is reused (and never
@@ -65,6 +68,13 @@ fn up_spec() -> Slice<flags.Flag> {
       ..,
     },
     flags.Flag {
+      name: "--bind",
+      value: true,
+      hint: "LAN_OR_TAILSCALE_IP",
+      help: "start a shareable local board on this reachable address",
+      ..,
+    },
+    flags.Flag {
       name: "--help",
       alias: "-h",
       hidden: true,
@@ -87,10 +97,20 @@ pub fn up(args: Slice<string>) -> Result<(), string> {
     return Ok(())
   }
   let scratch = p.given("--scratch")
+  let share_bind = p.one("--bind")
+  if scratch && share_bind != "" {
+    return Err("--scratch is loopback-only; omit --bind for a throwaway board")
+  }
+  if share_bind == "0.0.0.0" || share_bind == "::" {
+    return Err(
+      "--bind needs the actual LAN or Tailscale IP teammates can reach, not a wildcard address",
+    )
+  }
   if scratch && p.one("--pb-dir") != "" {
     return Err("--scratch owns its temporary data directory; omit --pb-dir")
   }
   let scratch_dir = if scratch { setup_scratch()? } else { "" }
+  if share_bind != "" { let _ = os.Setenv("LLL_BIND", share_bind) }
   let mut web_port = if scratch { available_port()? } else { 8100 }
   let raw_port = p.one("--port")
   if raw_port != "" {
@@ -110,7 +130,14 @@ pub fn up(args: Slice<string>) -> Result<(), string> {
   // needs no persisting; one that came from LLL_TEAM (or from the prompt) does,
   // or the next boot in this directory asks the same question again.
   let (cfg, src) = config.load_traced()?
-  let mut db_url = cfg.url
+  // A shareable local boot is explicit intent to use THIS machine even when
+  // the home config still points at a hosted board. Give its embedded API a
+  // fresh local port; the public board port proxies /api/ for teammates.
+  let mut db_url = if share_bind != "" {
+    f"http://127.0.0.1:{available_port()?}"
+  } else {
+    cfg.url
+  }
 
   // A configured REMOTE url plus local-data flags is a contradiction, and the
   // silent reading of it wrote to production: `healthy()` answers "is something
@@ -130,6 +157,11 @@ run against it deliberately with 'lll up' and no --pb-dir, or pin a local one: L
 'lll up' serves and seeds a database — pointed at a remote one it writes there
 check 'lll config --list', or pin a local url: LLL_URL=http://127.0.0.1:8090 lll up",
     )
+  }
+
+  if share_bind != "" {
+    pin_local_board_token(pb_dir)?
+    pin_local_admin(pb_dir)?
   }
 
   let mut api_line = f"api    {db_url} (already running)"
@@ -206,11 +238,19 @@ check 'lll config --list', or pin a local url: LLL_URL=http://127.0.0.1:8090 lll
   let _ = os.Unsetenv("LLL_REMINT")
   let _ = os.Unsetenv("LLL_REMINT_MEMBER")
   let _ = os.Unsetenv("LLL_REALTIME_SUBSCRIPTION")
-  let mut using_token = cfg.token != "" && pb.token_usable(db_url, cfg.token)
+  // An explicit local share boot owns a new database, so an opaque token from
+  // the user's hosted config cannot be allowed to win by the normal
+  // conservative "maybe usable" rule.
+  let mut using_token = share_bind == "" && cfg.token != "" &&
+  pb.token_usable(db_url, cfg.token)
   if !using_token {
     match superuser_token(db_url, email, pass) {
       Ok(tok) => {
-        if cfg.token != "" {
+        if cfg.token != "" && share_bind != "" {
+          fmt.Println(
+            "auth   ignoring the inherited token for this new local board",
+          )
+        } else if cfg.token != "" {
           fmt.Println(
             f"auth   the token from {src.token} is not valid for {db_url} — booting on the superuser credentials instead; 'lll login' once the board is up replaces it",
           )
@@ -221,7 +261,7 @@ check 'lll config --list', or pin a local url: LLL_URL=http://127.0.0.1:8090 lll
         )
       },
       Err(e) => {
-        if cfg.token == "" {
+        if cfg.token == "" || share_bind != "" {
           return Err(
             f"could not authenticate as the server administrator at {db_url}: {e}
 collection rules now refuse unauthenticated requests, so the boot cannot even
@@ -288,8 +328,36 @@ superuser credentials, or set LLL_TOKEN to a member token valid for this server.
   fmt.Println(f"member {member.name}")
   // The board binds in microseconds; a browser takes far longer to launch,
   // so opening before run_server blocks is not a race worth guarding.
-  let board_url = f"http://127.0.0.1:{chosen}"
+  let board_url = advertised_board_url(chosen)
   let _ = set_home_key("web_url", board_url)?
+  if share_bind != "" {
+    let _ = set_home_key("url", board_url)?
+    let _ = set_home_key("team", team)?
+    let _ = set_home_key("token", os.Getenv("LLL_TOKEN"))?
+    let login_file = filepath.Join(
+      filepath.Dir(config.home_path()?),
+      "board-login-url",
+    )
+    write_home_config(
+      login_file,
+      f"{board_url}/?board_token={resolve_board_token()}\n",
+    )?
+    let admin_file = filepath.Join(
+      filepath.Dir(config.home_path()?),
+      "local-admin.json",
+    )
+    let admin_json = match json.Marshal(
+      LocalShareAdmin { url: board_url, email, password: pass },
+    ) {
+      Ok(b) => b,
+      Err(e) => return Err(f"encoding local admin connection: {e}"),
+    }
+    write_home_config(admin_file, admin_json as string)?
+    fmt.Println(f"share  board login and member passes use {board_url}")
+    fmt.Println(
+      "share  lll member passes --count 10 writes ten private teammate handoffs",
+    )
+  }
   if open {
     // Open the LOGIN url, not the bare one (LLL-444). Opening the bare url
     // landed the user on the gate's 401 page and sent them back to the
@@ -338,6 +406,87 @@ fn setup_scratch() -> Result<string, string> {
   Ok(root)
 }
 
+/// The local data directory owns the browser gate secret. A restart with the
+/// same --bind and --pb-dir preserves every link already sent to teammates.
+fn pin_local_board_token(pb_dir: string) -> Result<(), string> {
+  if let Err(e) = os.MkdirAll(pb_dir, 0o700) {
+    return Err(f"creating local board data directory {pb_dir}: {e}")
+  }
+  let path = filepath.Join(pb_dir, ".lll-board-token")
+  let provided = os.Getenv("LLL_BOARD_TOKEN")
+  let saved = match os.ReadFile(path) {
+    Ok(b) => strings.TrimSpace(b as string),
+    Err(e) => {
+      if !os.IsNotExist(e) {
+        return Err(f"reading local board token {path}: {e}")
+      }
+      ""
+    },
+  }
+  let token = if provided != "" {
+    provided
+  } else if saved != "" { saved } else { rand.Text() }
+  if saved != token { write_home_config(path, token + "\n")? }
+  if let Err(e) = os.Setenv("LLL_BOARD_TOKEN", token) {
+    return Err(f"using local board token: {e}")
+  }
+  Ok(())
+}
+
+/// A LAN board must never expose the loopback-only fallback administrator
+/// password. Keep one random pair with its data directory, and copy it to the
+/// machine's private config after startup for later member-pass minting.
+fn pin_local_admin(pb_dir: string) -> Result<(), string> {
+  let path = filepath.Join(pb_dir, ".lll-admin.json")
+  let supplied_email = os.Getenv("LLL_ADMIN_EMAIL")
+  let supplied_pass = os.Getenv("LLL_ADMIN_PASSWORD")
+  if (supplied_email == "") != (supplied_pass == "") {
+    return Err(
+      "a shareable board needs both LLL_ADMIN_EMAIL and LLL_ADMIN_PASSWORD, or neither",
+    )
+  }
+  let mut saved = LocalShareAdmin { .. }
+  match os.ReadFile(path) {
+    Ok(b) => {
+      if let Err(e) = json.Unmarshal(b, &saved) {
+        return Err(f"decoding local admin credentials in {path}: {e}")
+      }
+      if saved.email == "" || saved.password == "" {
+        return Err(f"local admin credentials in {path} are incomplete")
+      }
+    },
+    Err(e) => if !os.IsNotExist(e) {
+      return Err(f"reading local admin credentials in {path}: {e}")
+    },
+  }
+  let email = if supplied_email != "" {
+    supplied_email
+  } else if saved.email != "" { saved.email } else { "admin@local.invalid" }
+  let pass = if supplied_pass != "" {
+    supplied_pass
+  } else if saved.password != "" {
+    saved.password
+  } else {
+    rand.Text() + rand.Text()
+  }
+  if saved.email != email || saved.password != pass {
+    let encoded = match json.Marshal(
+      LocalShareAdmin { url: "", email, password: pass },
+    ) {
+      Ok(b) => b,
+      Err(e) => return Err(f"encoding local admin credentials: {e}"),
+    }
+    write_home_config(path, encoded as string)?
+  }
+  if let Err(e) = os.Setenv("LLL_ADMIN_EMAIL", email) {
+    return Err(f"using local admin email: {e}")
+  }
+  if let Err(e) = os.Setenv("LLL_ADMIN_PASSWORD", pass) {
+    return Err(f"using local admin password: {e}")
+  }
+  Ok(())
+}
+
 /// The kernel chooses a free port while the listener is bound. The normal up
 /// path still checks it again before serving, including a collision fallback.
 fn available_port() -> Result<int, string> {
@@ -362,6 +511,7 @@ fn print_up_usage() {
 Usage:
   lll up [--port 8100] [--pb-dir pb/pb_data] [--no-open] [--demo] [--admin-ui]
   lll up --scratch [--no-open]   (--local is an alias)
+  lll up --bind LAN_OR_TAILSCALE_IP [--no-open]
 
 Reuses a server API already running at the configured URL; otherwise runs one
 in-process (first free port from the configured port up) after upserting the
@@ -386,6 +536,12 @@ it refuses to start rather than run on a team only this process knows about.
 inherited LLL_* values, home/repo config, and XDG_CONFIG_HOME. Its banner gives
 the directory and a CLI command to reach that board; delete the directory when
 finished. It never writes to the original directory's config.
+
+--bind starts a local board for teammates on the named LAN or Tailscale IP.
+It chooses a local API port, serves the API through the board URL, saves this
+machine's CLI connection, and keeps its board login token in the data directory
+so a restart with the same directory preserves shared links. Run 'lll member
+passes --count 10' in another terminal to create distinct human credentials.
 
 Whichever way the team was settled, it is written to .lll.toml unless a
 config file already supplies it, so the NEXT boot in this directory needs no

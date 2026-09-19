@@ -51,6 +51,30 @@ The banner prints the actual API endpoint and board login URL. Administrator
 credentials stay private. Taken ports auto-increment; Ctrl-C stops everything.
 Keep this shell running while using the CLI from another shell in the same directory.
 
+For a throwaway board that ignores your existing hosted config and all inherited
+`LLL_*` values, run `lll up --scratch` (`--local` is an alias). Its banner gives
+the temporary data directory and the exact command for using its CLI. Delete
+that directory when finished.
+
+To share a local board with hackathon teammates over a LAN or Tailscale, use
+the address they can reach:
+
+```sh
+mkdir hack-board && cd hack-board
+LLL_TEAM=HACK lll up --bind <your-LAN-or-Tailscale-IP>
+# in a second terminal, in hack-board:
+lll member passes --count 10 --prefix hack
+```
+
+The second command prints the path to a private `0600` handoff file. It holds
+ten distinct human member tokens, the team's API address, and a working board
+login link. Send each teammate only their own block and the board link. Their
+token authenticates CLI/API calls from another machine; the browser link admits
+them to the board. Browser edits currently use the board process identity. The
+board login token and random administrator credentials are stored privately
+with the local board and survive a restart with the same data directory and
+`--bind` address. Do not publish the handoff file or local data directory.
+
 Create your member using the administrator credentials supplied through
 `LLL_ADMIN_EMAIL` and `LLL_ADMIN_PASSWORD`. For a local boot with neither set,
 the fallback is `admin@local.dev` / `admin-local-123`. A member password is
@@ -283,6 +307,7 @@ lll login --url https://host --email you@x.com --create --password <pw>
 lll login                     # as a member, against the configured url
 lll whoami                    # which member, server and team you are acting as
 lll member invite NAME --email e@x.com  # add a colleague + temp password, in one
+lll member passes --count 10 --prefix hack  # private LAN/Tailscale teammate handoffs
 lll member set-password NAME --password <pw>  # superuser gives a member credentials
 lll token create bryan        # a one-year agent token (superuser only), printed once
 lll logout                    # clear the stored token
