@@ -98,14 +98,15 @@ fn member_commands_all_carry_a_summary() {
   }
 }
 
-/// The three verbs that had hand-written pages keep them; the rest generate
-/// usage + flags from spec. A page invented for `list` or `add` would replace
-/// the flags block that already documents them.
+/// The verbs with hand-written pages keep them. `add` and `create` joined
+/// them in LLL-500: the member-token prerequisite is prose the generated
+/// usage+flags block never said, and their page still ends with
+/// flags.section, so the flags block this test used to protect is preserved.
 #[test]
 fn member_commands_keep_only_the_hand_written_pages() {
   for c in member_commands() {
     let want_page = match c.name {
-      "invite" | "passes" | "remove" | "delete" | "set-password" => true,
+      "add" | "create" | "invite" | "passes" | "remove" | "delete" | "set-password" => true,
       _ => false,
     }
     assert (c.page != "") == want_page
@@ -148,4 +149,32 @@ fn set_password_page_warns_that_the_reset_revokes_earlier_tokens() {
   let page = member_set_password_page()
   assert strings.Contains(page, "rotates the member's token key")
   assert strings.Contains(page, "'lll token create NAME'")
+}
+
+// LLL-500 (fleet case B03/B06): the page has to say what the generated help
+// never did, and the error has to name the working paths when the call 401s
+// on an administrator-only machine.
+#[test]
+fn member_add_page_names_the_member_token_prerequisite() {
+  let page = member_add_page()
+  assert page.contains("authenticates as a MEMBER")
+  assert page.contains("'lll member invite NAME --email EMAIL'")
+  assert page.contains("'lll login --create'")
+  // The page keeps the flags block the generated help used to be.
+  assert page.contains("Flags:")
+  assert page.contains("-e, --email")
+}
+
+#[test]
+fn member_create_error_names_the_requirement_and_the_paths() {
+  let e = "GET http://x/api/collections/members/records: 401 Unauthorized: nope"
+  let msg = member_create_error(e)
+  assert msg.contains("creating a member needs a member token")
+  assert msg.contains("do not authenticate member creation")
+  assert msg.contains("'lll login --create'")
+  assert msg.contains("'lll member invite NAME --email EMAIL'")
+  assert msg.contains("'lll token create NAME'")
+  // A non-401 failure keeps its original message: only auth is reclassified.
+  let other = "POST http://x: 400 Bad Request: validation"
+  assert member_create_error(other) == other
 }

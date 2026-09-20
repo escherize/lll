@@ -50,7 +50,7 @@ pub fn member_commands() -> Slice<flags.Command> {
     flags.Command {
       name: "add",
       summary: "add a member ('create' is the same command)",
-      page: "",
+      page: member_add_page(),
       spec: member_add_spec(),
       positional: "[\"name\"]",
       run: member_add,
@@ -58,7 +58,7 @@ pub fn member_commands() -> Slice<flags.Command> {
     flags.Command {
       name: "create",
       summary: "add a member (the same command as 'add')",
-      page: "",
+      page: member_add_page(),
       spec: member_add_spec(),
       positional: "[\"name\"]",
       run: member_add,
@@ -772,6 +772,44 @@ new token to whoever held the old one." +
   flags.section(spec)
 }
 
+/// The hand-written page for `lll member add` and `create` (LLL-500). The
+/// member-token prerequisite is the part a first-time operator cannot guess:
+/// the admin bootstrap pair authenticates the admin UI and the superuser
+/// verbs, not this one. Ends with flags.section so the flags block that used
+/// to be the whole help is still there.
+fn member_add_page() -> string {
+  let spec = member_add_spec()
+  let usage = flags.usage("lll member add", spec, "[NAME]")
+  f"lll member add - add a member record ('create' is the same command)
+
+Usage:
+  {usage}
+
+Creates a member with a real --email, or a synthesized @members.invalid one.
+This call authenticates as a MEMBER: the token in LLL_TOKEN or the home
+config. The server's administrator credentials (LLL_ADMIN_EMAIL/
+LLL_ADMIN_PASSWORD) do not authenticate it. From an administrator-only
+machine, use 'lll member invite NAME --email EMAIL' (it accepts
+--admin-email/--admin-password), or make a first member login with
+'lll login --create'. With --password the member can log in at once;
+otherwise an administrator enables login later with 'lll member set-password'." +
+  flags.section(spec)
+}
+
+/// The refusal when member add/create cannot authenticate (LLL-500). The
+/// members collection's createRule needs a member token, and the machines
+/// that hit this hold only the admin bootstrap pair: name the requirement,
+/// then the two paths that actually work from there. The boundary is
+/// PocketBase's; this only says what it is.
+fn member_create_error(e: string) -> string {
+  if pb.response_status(e) == 401 {
+    return "creating a member needs a member token: the one configured here is missing or was refused
+administrator credentials (LLL_ADMIN_EMAIL/LLL_ADMIN_PASSWORD) do not authenticate member creation
+paths forward: 'lll login --create' makes a first member login with the admin credentials; 'lll member invite NAME --email EMAIL' creates the member from the admin side; 'lll token create NAME' mints an agent token for an existing member"
+  }
+  e
+}
+
 fn member_add(input: flags.CommandInput) -> Result<(), string> {
   let args = input.args
   let spec = member_add_spec()
@@ -784,7 +822,16 @@ fn member_add(input: flags.CommandInput) -> Result<(), string> {
   let name = flags.entity_name(p, "-n", usage)?
   let email = p.one("-e")
 
-  if let Some(existing) = records.find_member(name)? {
+  // LLL-500 (fleet case B03/B06): a first-time LAN operator's only
+  // credentials are the admin bootstrap pair, and this call's 401 arrived as
+  // a raw PocketBase dump that never said member creation authenticates as a
+  // MEMBER. Classify here, where the verb is known; the boundary itself is
+  // unchanged, only the message.
+  let found = match records.find_member(name) {
+    Ok(found) => found,
+    Err(e) => return Err(member_create_error(e)),
+  }
+  if let Some(existing) = found {
     return Err(
       f"a member named '{name}' already exists <{existing.email}> — pick another name",
     )
@@ -797,9 +844,15 @@ fn member_add(input: flags.CommandInput) -> Result<(), string> {
   }
   let created = if p.given("--password") {
     let cfg = config.load()?
-    create_member_as(cfg.token, name, email, password)?
+    match create_member_as(cfg.token, name, email, password) {
+      Ok(created) => created,
+      Err(e) => return Err(member_create_error(e)),
+    }
   } else {
-    create_member(name, email)?
+    match create_member(name, email) {
+      Ok(created) => created,
+      Err(e) => return Err(member_create_error(e)),
+    }
   }
   fmt.Println(f"Added member {created.name}")
   if p.given("--password") {
