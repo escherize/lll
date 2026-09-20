@@ -149,13 +149,22 @@ pub fn up(args: Slice<string>) -> Result<(), string> {
       return Err(
         f"--pb-dir asks for a local instance but the configured url is {db_url}, which is remote
 'lll up' would have served that remote database and written to it, not to '{pb_dir}'
-run against it deliberately with 'lll up' and no --pb-dir, or pin a local one: LLL_URL=http://127.0.0.1:8090 lll up --pb-dir {pb_dir}",
+for a throwaway board: lll up --scratch
+to keep this data directory: LLL_CONFIG_HOME=$(mktemp -d) LLL_URL=http://127.0.0.1:8090 lll up --pb-dir {pb_dir}
+or run against the remote deliberately, with no --pb-dir",
       )
     }
+    // LLL-488: naming LLL_URL alone is a dead end. It is the first of three
+    // values that must all change — the home config still supplies a token
+    // minted by the remote, and the local boot then has no team — so the
+    // advice stalled two steps later having written a stray pb/ directory.
+    // --scratch (LLL-487) is the whole answer in one command.
     return Err(
       f"the configured url is {db_url}, which is not this machine
 'lll up' serves and seeds a database — pointed at a remote one it writes there
-check 'lll config --list', or pin a local url: LLL_URL=http://127.0.0.1:8090 lll up",
+for a throwaway board: lll up --scratch
+to serve this directory instead: LLL_CONFIG_HOME=$(mktemp -d) LLL_URL=http://127.0.0.1:8090 lll up
+check what is configured with 'lll config --list'",
     )
   }
 
@@ -557,7 +566,19 @@ A valid member token selects the board's identity. Otherwise the superuser
 credentials bootstrap a member from $USER (local when absent), then mint a
 member token for this process. Board writes and token renewal use that member.
 Use LLL_TOKEN to run the board as another authenticated member; 'lll whoami'
-shows the CLI's login. Existing CLI credentials are left alone.",
+shows the CLI's login. Existing CLI credentials are left alone.
+
+Environment:
+  LLL_URL           server API to serve or reuse; a remote one is refused
+  LLL_CONFIG_HOME   directory the config is read from and written to
+  LLL_TEAM          team to boot on, created on the server if missing
+  LLL_TOKEN         member token selecting the board's identity
+  LLL_BIND          address the board and API listen on (default 127.0.0.1)
+  LLL_BOARD_TOKEN   pins the board's access token instead of generating one
+  LLL_ADMIN_EMAIL   superuser used to start a local API
+  LLL_ADMIN_PASSWORD
+
+--scratch ignores every one of these.",
   )
 }
 
