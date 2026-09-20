@@ -342,6 +342,27 @@ struct WhoamiIdentity {
   collection: string,
 }
 
+/// The refusal for an argument `lll whoami` does not take. A `--team` here is
+/// a guess about how context works (LLL-493, fleet case 05): the answer names
+/// the bare invocation that DOES report context, and the house one-command
+/// override for inspecting another team. Other arguments keep the short form.
+fn whoami_arg_error(flag: string, args: Slice<string>) -> string {
+  let refusal = f"unknown whoami argument: '{flag}' (see 'lll whoami --help')"
+  if flag != "--team" && !flag.starts_with("--team=") {
+    return refusal
+  }
+  let raw = if flag.starts_with("--team=") {
+    strings.TrimPrefix(flag, "--team=")
+  } else {
+    args.get(3).unwrap_or("KEY")
+  }
+  let key = if strings.TrimSpace(raw) == "" { "KEY" } else { raw }
+  f"{refusal}
+'whoami' takes no flags: run it bare to see the identity, server and team this machine is acting as.
+For a one-command team override, prefix your command with LLL_TEAM={flags.shell_argument(key)}.
+This leaves the saved attachment unchanged (see 'lll config --help')."
+}
+
 /// `lll whoami` — the member or administrator identity, confirmed by a
 /// record lookup against the server rather than read off the config.
 pub fn whoami(args: Slice<string>) -> Result<(), string> {
@@ -359,7 +380,7 @@ token with a member session, and 'lll bot bot-NAME' provisions a bot identity.",
       )
       return Ok(())
     }
-    return Err(f"unknown whoami argument: '{flag}' (see 'lll whoami --help')")
+    return Err(whoami_arg_error(flag, args))
   }
   let (cfg, src) = config.load_traced()?
   // NOT auth-refresh, which this used to POST. A refresh is refused for every
