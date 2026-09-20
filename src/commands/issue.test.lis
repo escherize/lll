@@ -1,6 +1,7 @@
 import "flags"
 import "query"
 import "models"
+import "go:strings"
 
 // Unit cover for the pure helpers in issue.lis. Everything here is a function
 // of its arguments alone — no PocketBase, no config, no git.
@@ -506,4 +507,18 @@ fn rank_agenda_keeps_input_order_on_full_ties_and_handles_empty() {
   assert ranked[0].id == "first"
   assert ranked[1].id == "second"
   assert rank_agenda([], agenda_unblocks([])).length() == 0
+}
+
+// LLL-484 (fleet case 01): seven of ten fresh workers took the bare "no
+// issues" from a title-only search as "the term is nowhere on the board",
+// when the term sat in a description. The hint names the narrower contract
+// and the full-text escape hatch instead of leaving the empty result bare.
+#[test]
+fn empty_search_hint_names_the_title_contract_and_lll_search() {
+  let msg = empty_search_hint("socket reset")
+  assert strings.Contains(msg, "'socket reset'")
+  assert strings.Contains(msg, "titles only")
+  assert strings.Contains(msg, "'lll search socket reset'")
+  // Multi-word searches pass through as the words the operator can retype.
+  assert strings.Contains(empty_search_hint("LAN"), "'lll search LAN'")
 }

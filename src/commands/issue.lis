@@ -738,6 +738,14 @@ fn create(input: flags.CommandInput) -> Result<(), string> {
 #[json]
 struct IdempotencySupport { supported: bool }
 
+/// The hint a title-only search prints when nothing matched (LLL-484). The
+/// contract ("titles only") is the part a fresh reader cannot see from an
+/// empty result, and 'lll search' is the escape hatch into descriptions,
+/// comments and docs.
+fn empty_search_hint(search: string) -> string {
+  f"no issues with '{search}' in the title; --search matches titles only: 'lll search {search}' also looks in descriptions, comments and docs"
+}
+
 #[json]
 struct CreationReuse { reused: bool }
 
@@ -831,6 +839,16 @@ fn list(input: flags.CommandInput) -> Result<(), string> {
       Err(e) => return Err(f"encoding issues: {e}"),
     }
     fmt.Println(out)
+    return Ok(())
+  }
+  // LLL-484 (fleet case 01): --search matches TITLES, and seven of ten fresh
+  // workers read the bare "no issues" as "the term is nowhere on the board"
+  // when it sat in a description. When a title search came up empty, name
+  // the narrower contract and the full-text escape hatch. STDERR, like the
+  // plain empty message, so stdout stays empty for pipes and --json is
+  // untouched.
+  if items.is_empty() && filters.search != "" {
+    let _ = fmt.Fprintln(os.Stderr, empty_search_hint(filters.search))
     return Ok(())
   }
   print_issue_table(items)
