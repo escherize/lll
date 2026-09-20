@@ -54,3 +54,17 @@ fn api_spec_offers_body_schema_and_help() {
   assert help.is_some()
   assert help.unwrap_or(flags.Flag { name: "", .. }).hidden
 }
+
+// ---------------------------------------------------------------- the page
+
+// LLL-501, fleet case B05: a fresh-machine operator guessed --url, was
+// refused, and had no named path to the working endpoint. The page is the
+// other half of that teaching: it must say how the endpoint is chosen and
+// how to change it, not only that a url is used.
+#[test]
+fn api_page_names_how_the_endpoint_is_chosen_and_set() {
+  let page = api_usage_page()
+  assert page.contains("configured board url")
+  assert page.contains("LLL_URL for one command")
+  assert page.contains("'lll config set url URL'")
+}
