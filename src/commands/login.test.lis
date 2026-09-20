@@ -1,0 +1,36 @@
+import "go:strings"
+
+// Unit cover for the whoami argument refusal (LLL-493, fleet case 05). The
+// server half of whoami needs a live PocketBase and is covered by e2e; what
+// is asserted here is the text a fresh agent reads when it guesses a flag
+// that does not exist: the refusal must teach the bare invocation that DOES
+// report context, plus the house one-command override for another team.
+
+#[test]
+fn team_argument_refusal_teaches_the_bare_invocation_and_the_override() {
+  let msg = whoami_arg_error("--team", ["lll", "whoami", "--team", "FLEET"])
+  assert strings.Contains(msg, "unknown whoami argument: '--team'")
+  assert strings.Contains(msg, "takes no flags")
+  assert strings.Contains(msg, "LLL_TEAM=FLEET")
+  assert strings.Contains(msg, "saved attachment unchanged")
+}
+
+#[test]
+fn inline_team_value_and_missing_value_both_name_a_key() {
+  assert whoami_arg_error("--team=OPS", ["lll", "whoami", "--team=OPS"]).contains(
+    "LLL_TEAM=OPS",
+  )
+  assert whoami_arg_error("--team", ["lll", "whoami", "--team"]).contains(
+    "LLL_TEAM=KEY",
+  )
+  assert whoami_arg_error("--team=", ["lll", "whoami", "--team="]).contains(
+    "LLL_TEAM=KEY",
+  )
+}
+
+#[test]
+fn other_unknown_arguments_keep_the_short_refusal() {
+  let msg = whoami_arg_error("--json", ["lll", "whoami", "--json"])
+  assert strings.Contains(msg, "unknown whoami argument: '--json'")
+  assert !strings.Contains(msg, "LLL_TEAM=")
+}

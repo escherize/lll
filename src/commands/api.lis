@@ -98,15 +98,22 @@ fn send(method: string, path: string, payload: string) -> Result<(), string> {
 }
 
 fn print_api_usage() {
-  fmt.Println(
-    "lll api - raw passthrough to the board's server API
+  fmt.Println(api_usage_page())
+}
+
+/// The hand-written page for `lll api`, pure so its text can be asserted:
+/// the endpoint-selection paragraph is the part a fresh-machine operator
+/// reads when a command refuses their guessed --url (LLL-501).
+fn api_usage_page() -> string {
+  "lll api - raw passthrough to the board's server API
 
 Usage:
   lll api METHOD PATH [--body TEXT]
   lll api --schema
 
-Sends METHOD PATH to the configured board url (LLL_URL, or 'url' in config)
-with the configured member token as `Authorization: Bearer`. The response
+Sends METHOD PATH to the configured board url (LLL_URL for one command, or
+'url' in config; save a default with 'lll config set url URL') with the
+configured member token as `Authorization: Bearer`. The response
 body goes to stdout and the status line to stderr, so
 `lll api GET /api/collections/issues/records | jq .` works in scripts and a
 non-200 stays visible. A non-200 is not a command error: the passthrough
@@ -119,6 +126,5 @@ Every collection is served at /api/collections/<name>/records with
 list/view/create/update/delete and server filter expressions, e.g.
 `lll api GET \"/api/collections/issues/records?filter=(state='todo')\"`.
 `lll api --schema` names every collection and field with the rules a member
-token answers to; regenerate it from the migrations with `mise run api-schema`.",
-  )
+token answers to; regenerate it from the migrations with `mise run api-schema`."
 }

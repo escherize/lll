@@ -133,6 +133,7 @@ pub fn parse_n(
       let spelling = parts[0]
       let Some(fl) = spec.find(|f| spells(f, spelling)) else {
         if spelling == "--team" { return Err(team_scope_error(arg, parts[1], usage)) }
+        if spelling == "--url" { return Err(url_scope_error(arg, parts[1], usage)) }
         return Err(unknown_flag(arg, usage, spec))
       }
       // A boolean given a value is a mistake, not a truthy string: `--json=0`
@@ -147,6 +148,7 @@ pub fn parse_n(
     }
     let Some(fl) = spec.find(|f| spells(f, arg)) else {
       if arg == "--team" { return Err(team_scope_error(arg, args.get(i + 1).unwrap_or("KEY"), usage)) }
+      if arg == "--url" { return Err(url_scope_error(arg, args.get(i + 1).unwrap_or("URL"), usage)) }
       if arg.starts_with("-") || max_positional == 0 {
         return Err(unknown_flag(arg, usage, spec))
       }
@@ -201,6 +203,15 @@ pub fn shell_argument(value: string) -> string {
 fn team_scope_error(arg: string, key: string, usage: string) -> string {
   let value = shell_argument(key)
   unknown_flag(arg, usage, []) + f"\nFor a one-command team override, prefix your command with LLL_TEAM={value}.\nThis leaves the saved attachment unchanged (see 'lll config --help')."
+}
+
+/// The same teaching for a guessed --url: a command that takes one declares
+/// it, so a refusal here means the endpoint is the configured one (LLL-501,
+/// fleet case B05). Name the one-command override and the way to change the
+/// default, in that order of commitment.
+fn url_scope_error(arg: string, url: string, usage: string) -> string {
+  let value = shell_argument(url)
+  unknown_flag(arg, usage, []) + f"\nThis command takes no --url: the endpoint is the configured one. For one command, prefix your command with LLL_URL={value}; to change the default, run 'lll config set url URL'."
 }
 
 /// The prefix that marks a parse "error" as a help request rather than a

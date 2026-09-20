@@ -370,6 +370,37 @@ fn unsupported_team_flag_supplies_the_requested_environment_override() {
   assert quoted.contains("LLL_TEAM='owner'\\''s team'")
 }
 
+// LLL-501, fleet case B05: `lll api GET /api/health --url <lan>` was refused
+// as a bare unknown flag, and an operator on a fresh machine had no way to
+// learn how the endpoint IS chosen. A command that takes --url declares it,
+// so a refusal here is a guess about endpoint selection: teach the
+// one-command override and the way to change the default.
+#[test]
+fn a_guessed_url_flag_names_the_configured_endpoint_paths() {
+  // The typed url rides the same shell_argument quoting team_scope_error
+  // uses, so the hint is paste-safe.
+  let assert Err(inline) = parse([], argv(["--url=http://127.0.0.1:8090"]), 3, false, "lll api GET /api/health")
+  assert inline.contains("unknown flag: '--url=http://127.0.0.1:8090'")
+  assert inline.contains("This command takes no --url")
+  assert inline.contains("LLL_URL='http://127.0.0.1:8090'")
+  assert inline.contains("lll config set url URL")
+  let assert Err(bare) = parse([], argv(["--url", "http://127.0.0.1:8090"]), 3, false, "lll api GET /api/health")
+  assert bare.contains("unknown flag: '--url'")
+  assert bare.contains("LLL_URL='http://127.0.0.1:8090'")
+  // No value typed: the hint still names both paths, unquoted.
+  let assert Err(valueless) = parse([], argv(["--url"]), 3, false, "lll api GET /api/health")
+  assert valueless.contains("LLL_URL=URL")
+}
+
+#[test]
+fn a_command_that_declares_url_still_parses_it() {
+  let table = [Flag { name: "--url", value: true, hint: "url", help: "endpoint", .. }]
+  let assert Ok(p) = parse(table, argv(["--url", "http://127.0.0.1:8090"]), 3, false, "")
+  assert p.one("--url") == "http://127.0.0.1:8090"
+  let assert Ok(inline) = parse(table, argv(["--url=http://127.0.0.1:8090"]), 3, false, "")
+  assert inline.one("--url") == "http://127.0.0.1:8090"
+}
+
 #[test]
 fn team_extraction_preserves_literal_values_and_accepts_both_spellings() {
   let input = ["lll", "issue", "create", "-t", "--team", "-d", "--team=literal", "--team", "DX", "--team=OPS"]

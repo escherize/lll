@@ -138,6 +138,19 @@ fn member_add_takes_a_bare_name_and_n_still_wins() {
   assert r.first() == "" && r.one("-n") == ""
 }
 
+// ------------------------------------------------------ set-password page
+
+// LLL-499 (fleet case B08): a password reset retires every token minted
+// before it, and the reset output said nothing about it, so an operator
+// silently revoked a working person token. Help has to name the revocation
+// and the re-mint; the page is pure, so its text is asserted here.
+#[test]
+fn set_password_page_warns_that_the_reset_revokes_earlier_tokens() {
+  let page = member_set_password_page()
+  assert strings.Contains(page, "rotates the member's token key")
+  assert strings.Contains(page, "'lll token create NAME'")
+}
+
 // LLL-500 (fleet case B03/B06): the page has to say what the generated help
 // never did, and the error has to name the working paths when the call 401s
 // on an administrator-only machine.
