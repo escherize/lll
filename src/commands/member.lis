@@ -460,6 +460,13 @@ rerun with --email <email> to set one alongside the password",
     fmt.Println(f"email set to {email}")
   }
   fmt.Println(f"password set for {member.name}")
+  // LLL-499 (fleet case B08): PocketBase rotates the member's tokenKey here,
+  // so a token minted before the reset starts answering 401 with nothing in
+  // the reset output explaining why. Name the revocation and the re-mint
+  // while the operator is still holding the terminal.
+  fmt.Println(
+    f"tokens minted before this reset are revoked (401): re-mint with 'lll token create {member.name}' and send the new one to whoever held the old",
+  )
   fmt.Println(
     f"they log in with: lll login --email {identity} (plus --url <server> on a fresh machine)",
   )
@@ -756,7 +763,12 @@ The replacement password must contain at least 8 characters.
 --email also sets the member's email, and is required when the member only
 has a synthesized @members.invalid one: the email is the identity
 'lll login' asks for. After this, the member logs in with
-'lll login --url <server>'." +
+'lll login --url <server>'.
+
+The password change rotates the member's token key, so every token minted
+before it (an agent's LLL_TOKEN, a person token in a handed-off config)
+answers 401 afterwards. Re-mint with 'lll token create NAME' and send the
+new token to whoever held the old one." +
   flags.section(spec)
 }
 
