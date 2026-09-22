@@ -1719,19 +1719,24 @@ rid=$(LLL_URL=$URL LLL_TEAM=ENG "$LIN" doc view port-notes --json | jq -r '.issu
 out=$(LLL_URL=$URL LLL_TEAM=ENG "$LIN" issue link ENG-1 port-notes)
 assert_contains "$out" "already linked" "double link is idempotent"
 
-# --- doc link / doc unlink (LLL-313): the doc noun offers the same verbs,
-# driving the one link write path with the positionals swapped. Either
-# spelling shows the same link on issue view and doc view.
-out=$(LLL_URL=$URL LLL_TEAM=ENG "$LIN" doc link port-notes ENG-2)
-assert_contains "$out" "Linked ENG-2 -> port-notes" "doc link output"
-out=$(LLL_URL=$URL LLL_TEAM=ENG "$LIN" issue view ENG-2)
-assert_contains "$out" "Docs:      port-notes" "doc link lands as an issue link"
-out=$(LLL_URL=$URL LLL_TEAM=ENG "$LIN" doc view port-notes)
-assert_contains "$out" "Issues:    ENG-1, ENG-2" "doc view shows both links"
-out=$(LLL_URL=$URL LLL_TEAM=ENG "$LIN" doc unlink port-notes ENG-2)
-assert_contains "$out" "Unlinked ENG-2 from port-notes" "doc unlink output"
-assert_not_contains "$(LLL_URL=$URL LLL_TEAM=ENG "$LIN" issue view ENG-2)" "port-notes" \
-  "doc unlink removes the link"
+# Removed doc-first verbs refuse without changing the relation.
+before_links=$(LLL_URL=$URL LLL_TEAM=ENG "$LIN" doc view port-notes --json | jq -c .issues)
+set +e
+out=$(LLL_URL=$URL LLL_TEAM=ENG "$LIN" doc link port-notes ENG-2 2>&1)
+rc=$?
+set -e
+[ "$rc" -eq 1 ] || fail "doc link must refuse"
+assert_contains "$out" "lll issue link ENG-2 port-notes" "doc link names the issue-first command"
+after_links=$(LLL_URL=$URL LLL_TEAM=ENG "$LIN" doc view port-notes --json | jq -c .issues)
+[ "$before_links" = "$after_links" ] || fail "refused doc link changed relations"
+set +e
+out=$(LLL_URL=$URL LLL_TEAM=ENG "$LIN" doc unlink port-notes ENG-1 2>&1)
+rc=$?
+set -e
+[ "$rc" -eq 1 ] || fail "doc unlink must refuse"
+assert_contains "$out" "lll issue unlink ENG-1 port-notes" "doc unlink names the issue-first command"
+after_links=$(LLL_URL=$URL LLL_TEAM=ENG "$LIN" doc view port-notes --json | jq -c .issues)
+[ "$before_links" = "$after_links" ] || fail "refused doc unlink changed relations"
 
 # Explicit keys and board URLs supply scope when no team is configured.
 LINK_HOME="$DATA_DIR/link-home"
@@ -1915,11 +1920,25 @@ printf '%s' "$out" | jq -e '.findings == []' >/dev/null || fail "empty JSON find
 out=$("$LIN" finding --help)
 assert_contains "$out" "lll finding near" "finding --help mentions near"
 assert_contains "$out" "lll finding list" "finding --help mentions list"
-assert_contains "$out" "lll finding view" "finding --help mentions view (fleet task 9: 6/30 guessed it)"
-out=$(env LLL_URL=$URL LLL_TEAM=ENG "$LIN" finding view migration-hazard --raw)
-assert_contains "$out" "Migrations are a merge hazard." "finding view reads a finding by slug"
-out=$(env LLL_URL=$URL LLL_TEAM=ENG "$LIN" finding read migration-hazard --raw)
-assert_contains "$out" "Migrations are a merge hazard." "finding read is view"
+assert_not_contains "$out" "lll finding view" "finding help excludes removed view"
+assert_not_contains "$out" "lll finding read" "finding help excludes removed read"
+set +e
+out=$(env LLL_URL=$URL LLL_TEAM=ENG "$LIN" finding view migration-hazard --raw 2>&1)
+rc=$?
+set -e
+[ "$rc" -eq 1 ] || fail "finding view must refuse"
+assert_contains "$out" "lll doc view migration-hazard --raw --team ENG" "finding view preserves output and team"
+set +e
+out=$(env LLL_URL=$URL LLL_TEAM=ENG "$LIN" finding read migration-hazard --json 2>&1)
+rc=$?
+set -e
+[ "$rc" -eq 1 ] || fail "finding read must refuse"
+assert_contains "$out" "lll doc view migration-hazard --json --team ENG" "finding read preserves output and team"
+out=$(env LLL_URL=$URL LLL_TEAM=ENG "$LIN" doc view migration-hazard --raw)
+[ "$out" = "Migrations are a merge hazard." ] || fail "doc view reads finding body"
+env LLL_URL=$URL LLL_TEAM=ENG "$LIN" doc view migration-hazard --json | \
+  jq -e '.slug == "migration-hazard" and .kind == "finding" and .body == "Migrations are a merge hazard."' >/dev/null \
+  || fail "doc view JSON reads finding fields"
 out=$(env LLL_URL=$URL LLL_TEAM=ENG "$LIN" finding new -s fleet-new -t "Filed from finding new" -a pb -b "kind set by the verb")
 assert_contains "$out" "Created doc fleet-new" "finding new files a doc"
 out=$(env LLL_URL=$URL LLL_TEAM=ENG "$LIN" finding create positional-slug -t "Positional slug" -a pb -b "bare slug")
@@ -1948,8 +1967,10 @@ assert_contains "$out" "lll finding" "lll --help mentions finding"
 out=$("$LIN" doc --help)
 assert_contains "$out" "-a" "doc --help mentions the area flag"
 assert_contains "$out" "-p" "doc --help mentions the paths flag"
-assert_contains "$out" "lll doc link" "doc --help mentions link (LLL-313)"
-assert_contains "$out" "lll doc unlink" "doc --help mentions unlink (LLL-313)"
+assert_not_contains "$out" "lll doc link" "doc help excludes removed link"
+assert_not_contains "$out" "lll doc unlink" "doc help excludes removed unlink"
+assert_contains "$out" "lll issue link KEY-123 SLUG" "doc help names canonical linking"
+assert_contains "$out" "lll issue unlink KEY-123 SLUG" "doc help names canonical unlinking"
 assert_contains "$out" "--search" "doc --help mentions --search (LLL-313)"
 comp_doc_list=$("$LIN" completions bash | grep -F "doc,list" | head -1 | sed "s/.*words='//;s/'.*//")
 assert_contains "$comp_doc_list" "--search --query" "doc list completions carry --search"
