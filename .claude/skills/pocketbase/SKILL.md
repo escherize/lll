@@ -132,6 +132,11 @@ per viewer. That is a good reason not to add them.
   supported and does not prevent migrations from applying.
 - **One process per database file.** Never point two `lll up` instances at the
   same `pb_data`, especially over a network filesystem.
+- **`field+` / `field-` modifiers are not atomic.** PocketBase reads the record,
+  applies the modifier in memory and saves the whole value. Sixteen concurrent
+  `issues+` PATCHes kept as few as one edge. `serializeRecordUpdates`
+  (`gopb/issue_writes.go`) locks each `issues` and `docs` record for the whole
+  request (LLL-513). If another collection needs modifiers, add it there.
 - JS migrations run in goja, not Node. Runtime issue hooks are Go in `gopb/`.
 - PocketBase installs its own SIGINT/SIGTERM handler, which suppresses Go's
   default die-on-signal for the whole process. `up.lis` runs `Serve` in a task and

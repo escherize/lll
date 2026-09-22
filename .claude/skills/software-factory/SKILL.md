@@ -153,18 +153,19 @@ a measurement. Every issue closes carrying exactly one outcome label:
 immediately before it. Create the three once per team with `lll label create`;
 run `lll label list` first and reuse rather than minting near-duplicates.
 
-**`--label` REPLACES the set, it does not add to it.** `lll issue update
-LLL-123 --label outcome:clean` writes that one label and drops every other
-label the issue was carrying. Pass the existing ones alongside it:
+**Use `--add-label`, not `--label`.** `--label` REPLACES the set: `lll issue
+update LLL-123 --label outcome:clean` writes that one label and drops every
+other label the issue was carrying. `--add-label` adds one label and keeps the
+rest:
 
 ```sh
-lll issue update LLL-123 --label bug --label web --label outcome:clean
+lll issue update LLL-123 --add-label outcome:clean
 lll issue close LLL-123
 ```
 
-Read the issue's current labels first and repeat them, or accept that a
-one-label update is a deliberate reset. This has no `--add-label`; the repeated
-flag is the whole vocabulary.
+`--add-label` and `--remove-label` repeat. Each changes only the labels it
+names, so a label another agent adds at the same time is kept (LLL-513).
+They cannot be combined with `--label`.
 
 Then the ratio is a query rather than an archaeology project:
 

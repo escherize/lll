@@ -20,6 +20,11 @@ type assignmentFields struct {
 	Emoji       *string   `json:"emoji"`
 	Project     *string   `json:"project"`
 	Labels      *[]string `json:"labels"`
+	// LLL-513: 'lll issue update --add-label/--remove-label' combined with
+	// --assignee arrives here. Set resolves the modifier against the issue
+	// read inside the transaction.
+	LabelsAdd    *[]string `json:"labels+"`
+	LabelsRemove *[]string `json:"labels-"`
 }
 
 func parseAssignmentFields(raw json.RawMessage) (assignmentFields, error) {
@@ -57,6 +62,12 @@ func (fields assignmentFields) apply(issue *core.Record) {
 	}
 	if fields.Labels != nil {
 		issue.Set("labels", *fields.Labels)
+	}
+	if fields.LabelsAdd != nil {
+		issue.Set("labels+", *fields.LabelsAdd)
+	}
+	if fields.LabelsRemove != nil {
+		issue.Set("labels-", *fields.LabelsRemove)
 	}
 }
 
