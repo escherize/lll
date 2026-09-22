@@ -55,6 +55,10 @@ pub fn member_commands() -> Slice<flags.Command> {
       positional: "[\"name\"]",
       run: member_add,
     },
+    // Alias by the same rule issue.lis records: a spelling guessed by more
+    // than one agent in thirty, on a clean run, is a design signal rather
+    // than a typo (finding doc 2026-09-07-fleet-graph-first-four-tasks, ten
+    // runs of thirty). Kept deliberately; do not remove as a duplicate.
     flags.Command {
       name: "create",
       summary: "add a member (the same command as 'add')",
@@ -87,6 +91,10 @@ pub fn member_commands() -> Slice<flags.Command> {
       positional: "NAME",
       run: member_remove,
     },
+    // Alias by the same rule issue.lis records: a spelling guessed by more
+    // than one agent in thirty, on a clean run, is a design signal rather
+    // than a typo (finding doc 2026-09-07-fleet-graph-first-four-tasks, ten
+    // runs of thirty). Kept deliberately; do not remove as a duplicate.
     flags.Command {
       name: "delete",
       summary: "remove a member; guard assignments and comments (the same command as 'remove')",

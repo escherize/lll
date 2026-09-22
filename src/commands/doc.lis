@@ -33,6 +33,10 @@ pub fn doc_commands() -> Slice<flags.Command> {
       positional: "",
       run: doc_new,
     },
+    // Alias by the same rule issue.lis records: a spelling guessed by more
+    // than one agent in thirty, on a clean run, is a design signal rather
+    // than a typo (finding doc 2026-09-07-fleet-graph-first-four-tasks, ten
+    // runs of thirty). Kept deliberately; do not remove as a duplicate.
     flags.Command {
       name: "create",
       summary: "the same command as 'new'",
@@ -57,6 +61,10 @@ pub fn doc_commands() -> Slice<flags.Command> {
       positional: "SLUG",
       run: doc_view,
     },
+    // Alias by the same rule issue.lis records: a spelling guessed by more
+    // than one agent in thirty, on a clean run, is a design signal rather
+    // than a typo (finding doc 2026-09-07-fleet-graph-first-four-tasks, ten
+    // runs of thirty). Kept deliberately; do not remove as a duplicate.
     flags.Command {
       name: "show",
       summary: "the same command as 'view'",
@@ -65,6 +73,10 @@ pub fn doc_commands() -> Slice<flags.Command> {
       positional: "SLUG",
       run: doc_view,
     },
+    // Alias by the same rule issue.lis records: a spelling guessed by more
+    // than one agent in thirty, on a clean run, is a design signal rather
+    // than a typo (finding doc 2026-09-07-fleet-graph-first-four-tasks, ten
+    // runs of thirty). Kept deliberately; do not remove as a duplicate.
     flags.Command {
       name: "read",
       summary: "the same command as 'view'",
