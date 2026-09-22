@@ -17,7 +17,7 @@ instead of the territory, and then it rots while the territory moves.
   2 isolate     parallel-work    where do I work without colliding?
   3 build       (this codebase)  lisette-interop, datastar-fragments, pocketbase
                                  codebase-skills builds this stage for a new repo
-  4 verify      the gate         mise run gate, and the path the issue describes
+  4 verify      verify-gate      mise run gate, and the path the issue describes
   5 merge       merge-gate       land it, confirm it reached the artifact
   6 record      lll              the claim, the evidence, the decision
 ```
@@ -34,6 +34,12 @@ and closing the issue.
 
 That skill is a filter of five questions. Spend your judgement there, then be
 mechanical about the rest.
+
+**Before handing a question back, ask whether it is empirical.** If the answer
+is something you could observe by running the code - what it does, how long it
+takes, what it prints - it is not the human's to answer, and asking stalls the
+run for a fact. Reserve the handback for a genuine product or preference call
+no experiment can settle.
 
 You are in this stage when you have no issue yet, or when the one you picked
 turns out to contain a decision that is not yours.
@@ -73,9 +79,16 @@ interview that does it.
 
 One issue per change. Found a second problem? File it and carry on.
 
+**Sequence the work so it proves itself.** Break a change into units that each
+end in a check, and do not start the next one until the current is green.
+Order the delivery the same way - the failing test first, the fix on top - so
+the stack reads as an argument instead of asking a reviewer to trust you.
+
 ## 4. Verify - is it actually true?
 
-No skill of its own, because the rule is one sentence:
+[verify-gate](../verify-gate/SKILL.md)
+
+The gate is one command:
 
 ```sh
 mise run gate     # build + unit tests + full e2e
@@ -84,7 +97,8 @@ mise run gate     # build + unit tests + full e2e
 **`mise run gate` is necessary and not sufficient.** It says you broke nothing.
 It does not say you fixed anything. Reproduce the failure the issue describes,
 fix it, then reproduce the fix under the issue's conditions rather than the
-gate's.
+gate's. That skill is how: an isolated board, a health check before you trust
+it, the driver that already covers your feature, and where the evidence lives.
 
 Two rules that have each cost this repo real time:
 
@@ -125,9 +139,48 @@ the ones that go unrecorded get hit again at full cost by the next one.
 ## The one number worth keeping
 
 Of the issues you took, what share landed without a human having to intervene?
-That ratio is the field's one durable measure of a setup like this, and it
-cannot be answered here today without rereading a transcript. If you work a
-stack, count it and say so on the last issue.
+That ratio is the field's one durable measure of a setup like this.
+
+**Make it countable by labelling the outcome before you close.** A number you
+can only get by rereading a transcript is prose; a number the board answers is
+a measurement. Every issue closes carrying exactly one outcome label:
+
+- `outcome:clean` - landed, nothing else needed
+- `outcome:changed` - landed, but a human had to touch it
+- `outcome:blocked` - handed back, and the issue says why
+
+`lll issue close` takes no `--label`, so the label goes on in the update
+immediately before it. Create the three once per team with `lll label create`;
+run `lll label list` first and reuse rather than minting near-duplicates.
+
+**`--label` REPLACES the set, it does not add to it.** `lll issue update
+LLL-123 --label outcome:clean` writes that one label and drops every other
+label the issue was carrying. Pass the existing ones alongside it:
+
+```sh
+lll issue update LLL-123 --label bug --label web --label outcome:clean
+lll issue close LLL-123
+```
+
+Read the issue's current labels first and repeat them, or accept that a
+one-label update is a deliberate reset. This has no `--add-label`; the repeated
+flag is the whole vocabulary.
+
+Then the ratio is a query rather than an archaeology project:
+
+```sh
+lll issue list --label outcome:clean   --state done --json | jq .totalItems
+lll issue list --label outcome:changed --state done --json | jq .totalItems
+lll issue list --label outcome:blocked --json              | jq .totalItems
+```
+
+`--json` returns a paginated envelope, so `.totalItems` is the server's own
+count of the whole result set. `jq length` would count one page and quietly
+under-report once the board outgrows it.
+
+`blocked` is not a failure. An issue correctly handed back is the filter in
+stage 1 working. The number that matters is `clean` against `clean + changed`,
+because `changed` is where a human's time actually went.
 
 ## When the map is wrong
 
