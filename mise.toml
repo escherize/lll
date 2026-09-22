@@ -48,6 +48,19 @@ dir = "{{config_root}}"
 env = { LC_ALL = "C", PYTHONUTF8 = "1" }
 run = "bash scripts/scratch.sh"
 
+# Read-only. Answers "is this instance worth driving?" before a verification
+# run commits to it, because evidence captured from a stale or wedged board is
+# worse than no evidence. Takes the scratch banner's urls and token:
+#   mise run doctor -- --url http://127.0.0.1:PORT --web http://127.0.0.1:PORT --board-token TOKEN
+# With no target it exits 1 rather than reporting green, since a check that
+# reached nothing is not a green light. No depends on build: doctor REPORTS a
+# missing or stale binary, and building one underneath it would destroy the
+# finding it exists to make.
+[tasks.doctor]
+description = "Health-check a running board before driving it for verification evidence"
+dir = "{{config_root}}"
+run = "bash scripts/doctor.sh"
+
 [tasks.archive-protect]
 description = "Make retained .private history read-only without changing its contents"
 dir = "{{config_root}}"
