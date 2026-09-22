@@ -14,6 +14,25 @@ That finding doc - "What 300 first-time agents taught about the CLI" - is the
 evidence base for most of what follows, and it already answers the question
 this inventory was expected to defer to a new fleet run.
 
+## The answer, up front
+
+**Nothing in the alias surface should be cut.** Every command alias and every
+flag alias this audit examined is either measured by the TASK-309 fleet runs or
+covered by the stated long-form rule in `CHANGELOG.md:385`. The audit found no
+cruft in the place it most expected to.
+
+What it DID find is that the evidence was not written down where a future
+auditor would look, so the same question was going to be re-opened
+indefinitely. That is what this change fixes.
+
+Two things genuinely are being removed, and neither needed this audit to find:
+`finding view` and `doc link`/`unlink`, already in review as LLL-505.
+
+If step 2 wants real cruft, this inventory says to look somewhere other than
+aliases - the singleton flags (Bucket D) and the 28 subcommands on `issue` are
+where an unexamined surface would more plausibly hide, and neither has been
+checked against "is there still a caller?".
+
 ## The size of it
 
 | Surface | Count |
@@ -113,7 +132,7 @@ sample this question needs.
 
 | Alias | Canonical | Source |
 |---|---|---|
-| `--path` | `--paths` | `finding.lis:140` |
+| `--path` | `-p` / `--paths` | `doc.lis:290`, `finding.lis:148` |
 | `--local` | `--scratch` | `lll up` |
 | `--assign` | `--assignee` | `issue_filters.lis:20` |
 
@@ -124,9 +143,22 @@ is at least honest.
 for `--assignee` by 2 of 30 agents on the task where it was the main flag -
 over the design-signal threshold. Keep it, and comment it.
 
-That leaves `--path` as the only alias in Buckets B or C with no evidence
-either way. It is one line in `finding.lis`; the cost of keeping it is lower
-than the cost of a removal that breaks a caller nobody inventoried.
+**`--path` is not cruft either, and an earlier draft of this document was wrong
+to list it as the one open question.** It is the long form of `-p`, not a stray
+duplicate of `--paths`, and it belongs to a stated design rule. CHANGELOG.md:385
+says it outright:
+
+> A flag takes any number of aliases. Added across the fleet runs: `read` and
+> `show` for `view`, `--assign`, `-t`/`--title` and `-d` both ways,
+> `--body`/`-m`/`--message`, `--query`, `--path`.
+
+It is in the same sentence as the aliases TASK-309 measured, for the same
+reason. `scripts/e2e.sh:2141` pins it with an assertion that says so:
+"doc new takes the long form of every flag, --path included".
+
+Every short flag in `doc.lis` has a long form on the same pattern: `-s`/`--slug`,
+`-t`/`--title`, `-k`/`--kind`, `-b`/`--body`, `-a`/`--area`, `-p`/`--paths --path`.
+Removing one would break the consistency that makes the rest guessable.
 
 ## Bucket D: singleton flags - probably fine, listed for completeness
 
@@ -138,6 +170,13 @@ Fifteen flags appear exactly once in the whole CLI:
 A flag used once is not automatically cruft - `--version` and `--pb-dir` are
 obviously load-bearing. This list is here so step 2 can check each against "is
 there still a caller?" rather than rediscovering the set.
+
+Spot-checked each against `scripts/`: every one has an e2e or script caller
+except `--secret`. That one is NOT cruft either - `webhook.lis:67` declares it,
+line 94 consumes it to set the `X-LLL-Secret` delivery header, and
+`webhook.test.lis:109` covers it. Zero e2e references means webhooks are not
+exercised end to end, which is a test-coverage observation rather than a
+surface one, and worth its own issue rather than a removal.
 
 ## Bucket E: shared vocabulary - the part that is working
 
@@ -171,9 +210,9 @@ re-propose removals that are already done.
 
 ## What this does NOT answer
 
-- Whether `--path` goes. It is the one alias with no evidence in either
-  direction. Everything else in Buckets B and C is covered by the
-  design-signal rule in the TASK-309 finding doc.
+- Nothing in Buckets A, B or C. Every alias is either measured by TASK-309 or
+  covered by the stated long-form rule in CHANGELOG.md:385, and both are now
+  cited at the source.
 - Whether `lll doctor` should exist (step 4). Note the overlap with LLL-510: if
   gate roles become resolvable and runnable, part of what a doctor would check
   may belong there instead.
