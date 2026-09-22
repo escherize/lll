@@ -81,7 +81,7 @@ for actor, p in results:
         assert p.returncode == 0, p.stderr
     else:
         assert p.returncode != 0 and 'already claimed by' in p.stderr, p.stderr
-        assert 'lll issue release ' + key in p.stderr
+        assert 'lll issue release ' + key + ' --force' in p.stderr, p.stderr
 actor = next(a for a in actors if a['id'] == holder)
 assert cli('issue', 'claim', key, actor=actor).returncode == 0
 assert state()['claim']['id'] == held['claim']['id']
@@ -289,4 +289,18 @@ p = cli('issue', 'release', key, '--force', actor=alpha)
 assert p.returncode == 0 and 'forced' not in p.stdout, p.stdout
 assert state()['claim'] is None and len(state()['comments']) == comments + 1
 
-print('Release: collection DELETE refused for holder and non-holder, non-holder refused without force, forced release comments with the reason, holder release silent')
+# A superuser token names no member, so it is never the holder: it needs
+# force like anyone else, and its comment has no author.
+su = os.environ['LLL_TEST_SUPERUSER_TOKEN']
+assert cli('issue', 'claim', key, actor=alpha).returncode == 0
+held = state()['claim']
+status, refused = request(path + '/release', {'claim_id': held['id']}, auth=su)
+assert status == 400 and 'needs force' in refused['message'], refused
+assert state()['claim']['id'] == held['id']
+status, outcome = request(path + '/release', {'claim_id': held['id'], 'force': True}, auth=su)
+assert status == 200 and outcome['forced'], outcome
+note = state()['comments'][-1]
+assert note['author'] == '' and note['body'].startswith("An administrator force-released claim-alpha's claim."), note
+assert state()['claim'] is None and len(state()['comments']) == comments + 2
+
+print('Release: superuser needs force and comments without an author; collection DELETE refused for holder and non-holder, non-holder refused without force, forced release comments with the reason, holder release silent')

@@ -2309,6 +2309,7 @@ set -e
 [ "$rc" -ne 0 ] || fail "claiming a held issue: expected nonzero exit"
 assert_contains "$out" "already claimed by bryan" "refusal names the holder"
 assert_contains "$out" "lll issue release $CKEY" "refusal names the fix"
+assert_contains "$out" "lll issue release $CKEY --force" "a non-holder's fix is --force (LLL-512)"
 
 # the holder claiming again is success, not a conflict (fleet replay, task 9:
 # a claim survived --assignee none and every re-claim by its holder was refused)
@@ -3428,7 +3429,9 @@ python3 "$REPO_ROOT"/scripts/test_issue_since.py "$LLL_ABS" "$URL"
 python3 "$REPO_ROOT"/scripts/test_issue_view_reads.py "$LLL_ABS"
 python3 "$REPO_ROOT"/scripts/test_export_import.py "$LLL_ABS" "$URL"
 python3 "$REPO_ROOT"/scripts/test_import_github.py "$LLL_ABS" "$URL"
-python3 "$REPO_ROOT"/scripts/test_claims_live.py "$LLL_ABS" "$URL"
+# A fresh superuser token: the mid-suite restart retired the earlier one.
+LLL_TEST_SUPERUSER_TOKEN=$(pb_superuser_token "$URL") \
+  python3 "$REPO_ROOT"/scripts/test_claims_live.py "$LLL_ABS" "$URL"
 # LLL-385: seed is outside build/test/e2e, so it broke for five days under a
 # green gate. Here rather than in `test` because it needs the built binary.
 python3 "$REPO_ROOT"/scripts/test_seed.py

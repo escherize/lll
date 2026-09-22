@@ -1340,7 +1340,7 @@ fn update(input: flags.CommandInput) -> Result<(), string> {
     let observed = claims.observed_id(issue.id)?
     let result = claims.update_assignment(issue.id, observed, payload).map_err(|e| {
       if strings.Contains(e, "is claimed by") {
-        f"{key}: {e} — 'lll issue release {key}' gives it back"
+        f"{key}: {e} — {held_elsewhere_hint(key)}"
       } else { f"{key}: {e}" }
     })?
     if result.claim_id != "" { released = f" (released {result.member_name}'s claim)" }
@@ -1525,6 +1525,14 @@ fn actor() -> Result<Option<Actor>, string> {
   }
 }
 
+/// The fix for a claim someone else holds. Plain release works only for the
+/// holder (LLL-512), so the hint asks them first and names --force for a hold
+/// whose agent is gone. On `update --assignee` the caller may be the holder,
+/// which is why the plain release is still named.
+fn held_elsewhere_hint(key: string) -> string {
+  f"the holder releases it with 'lll issue release {key}'; ask them, or if the hold is dead, 'lll issue release {key} --force -b \"why\"' takes it and comments on the issue"
+}
+
 /// Resolve the actor and delegate acquisition to the shared claims client.
 /// The server transaction acquires the exclusive hold and assigns its holder
 /// together; the unique issue index also protects against duplicate hold rows.
@@ -1544,7 +1552,7 @@ fn claim(input: flags.CommandInput) -> Result<(), string> {
 
   let result = claims.acquire(issue.id, member.id).map_err(|e| {
     if strings.Contains(e, "already claimed by") {
-      f"{key}: {e} — 'lll issue release {key}' gives it back"
+      f"{key}: {e} — {held_elsewhere_hint(key)}"
     } else { e }
   })?
   if result.already_owned {
@@ -2217,7 +2225,7 @@ fn issue_next(input: flags.CommandInput) -> Result<(), string> {
     // the shell loop that composed it. A lost race exits non-zero, keyless.
     let result = claims.acquire(best.id, member.id).map_err(|e| {
       if strings.Contains(e, "already claimed by") {
-        f"{key}: {e} — 'lll issue release {key}' gives it back"
+        f"{key}: {e} — {held_elsewhere_hint(key)}"
       } else { e }
     })?
     fmt.Fprintln(os.Stderr, f"Claimed {key} for {result.member_name}")

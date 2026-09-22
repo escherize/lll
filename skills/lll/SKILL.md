@@ -45,7 +45,8 @@ lll issue close KEY-12
 A successful claim is immediately visible on the server; no Git push is needed.
 If another member holds it, the command exits nonzero without taking over.
 Claiming your own issue again succeeds and says it is already yours.
-`--assignee` cannot replace another member's active claim: release it first.
+`--assignee` cannot move a claimed issue to anyone but the holder: the holder
+releases it first, or you force-release a dead hold (below).
 `lll whoami` shows the authenticated identity. `lll issue release KEY-12`
 gives your claim back and clears the assignee when it still matches the holder.
 Releasing another member's claim is refused unless you add `--force`
