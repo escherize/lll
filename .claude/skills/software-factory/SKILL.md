@@ -164,8 +164,10 @@ lll issue close LLL-123
 ```
 
 `--add-label` and `--remove-label` repeat. Each changes only the labels it
-names, so a label another agent adds at the same time is kept (LLL-513).
-They cannot be combined with `--label`.
+names, so a label another agent adds at the same time with `--add-label` is
+kept (LLL-513). `--label` and the board's label picker still write the whole
+set from an earlier read, so either can drop a concurrent add. The two flags
+cannot be combined with `--label`.
 
 Then the ratio is a query rather than an archaeology project:
 
