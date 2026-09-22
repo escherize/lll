@@ -465,11 +465,15 @@ fn claim_write(r: mut Ref<http.Request>) -> Result<string, string> {
   Ok("")
 }
 
+/// Always forced (LLL-512): the button names whose claim it releases, so a
+/// person clicking it has said so. The server skips the comment when the
+/// board's own member is the holder, and otherwise records the release under
+/// that member - the board login does not identify the person clicking.
 fn release_write(r: mut Ref<http.Request>) -> Result<string, string> {
   let issue = records.fetch_issue(r.FormValue("key"))?
   require_active_team(issue.expand.team)?
   let observed = r.FormValue("claim_id")
   if observed == "" { return Err("The claim changed; refresh before releasing it.") }
-  let _ = claims.release(issue.id, observed)?
+  let _ = claims.release(issue.id, observed, true, "")?
   Ok("")
 }

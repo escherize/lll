@@ -21,7 +21,7 @@ is the rule itself. Auth is the member token the CLI stores
 
 ## claims (base)
 
-Rules: list @request.auth.id != \"\" view @request.auth.id != \"\" create @request.auth.id != \"\" update (superuser only) delete @request.auth.id != \"\"
+Rules: list @request.auth.id != \"\" view @request.auth.id != \"\" create @request.auth.id != \"\" update (superuser only) delete (superuser only)
 
 | field | type | required | notes |
 |-------|------|----------|-------|

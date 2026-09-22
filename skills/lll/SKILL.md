@@ -47,7 +47,11 @@ If another member holds it, the command exits nonzero without taking over.
 Claiming your own issue again succeeds and says it is already yours.
 `--assignee` cannot replace another member's active claim: release it first.
 `lll whoami` shows the authenticated identity. `lll issue release KEY-12`
-gives the claim back and clears the assignee when it still matches the holder.
+gives your claim back and clears the assignee when it still matches the holder.
+Releasing another member's claim is refused unless you add `--force`
+(LLL-512); a forced release leaves a comment on the issue naming both members,
+with the reason from `-b "why"` if you give one. Force only a hold you know is
+dead: its holder may still be editing.
 
 **A claim older than 24 hours is released for you** (LLL-183): the server
 sweeps hourly and frees holds that outlived the agent that took them, leaving
