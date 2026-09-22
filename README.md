@@ -409,3 +409,7 @@ The decision, costs, and criteria for considering direct record access are in
 A one-way, greppable Markdown projection is available with `lll export`.
 See [export mirrors](docs/export-mirror.md) for managed destinations, pagination
 and failure recovery. It does not replace a database backup.
+
+## License
+
+MIT. See [LICENSE](LICENSE).

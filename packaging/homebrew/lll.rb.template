@@ -15,7 +15,7 @@ class Lll < Formula
   homepage "https://github.com/escherize/lll"
   version "__VERSION__"
 
-  # No license field: the repo does not declare one. Add it here when it does.
+  license "MIT"
 
   on_macos do
     if Hardware::CPU.arm?
