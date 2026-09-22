@@ -4,6 +4,28 @@ import "flags"
 import "models"
 
 #[test]
+fn removed_finding_reads_preserve_quoted_and_dash_prefixed_slugs() {
+  let assert Err(msg) = finding([
+    "lll",
+    "finding",
+    "view",
+    "team's notes",
+    "--raw",
+  ])
+  assert msg.contains("lll doc view 'team'\\''s notes' --raw")
+  let assert Err(dash) = finding([
+    "lll",
+    "finding",
+    "read",
+    "--json",
+    "--",
+    "-notes",
+  ])
+  assert dash.contains("lll doc view --json ")
+  assert dash.contains("-- -notes'")
+}
+
+#[test]
 fn exact_finding_paths_precede_containment_without_duplicates() {
   let findings = [
     models.Doc { slug: "a-broad", paths: "web/static", .. },

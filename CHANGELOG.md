@@ -4,6 +4,13 @@ All notable changes to lll. The format follows Keep a Changelog; versions
 follow SemVer, with 0.x meaning the CLI surface can still move between
 minors. Issue keys are on the project's own board (`lll issue view KEY`).
 
+## [Unreleased]
+
+### Removed
+
+- `finding view/read` and `doc link/unlink` refuse with replacement commands.
+  Use `doc view SLUG` and `issue link/unlink KEY-123 SLUG` (LLL-505).
+
 ## [0.6.1] - 2026-09-19
 
 Local boards can now be disposable or shared with a small team without

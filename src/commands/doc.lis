@@ -16,7 +16,43 @@ import "query"
 /// The table is the one place a verb is declared: dispatch, `lll doc --help`
 /// and shell completions all read it, so none of the three can drift.
 pub fn doc(args: Slice<string>) -> Result<(), string> {
-  flags.dispatch("doc", "work with docs (wiki pages, findings, decisions, PRDs)", doc_intro(), doc_commands(), args)
+  if ["link", "unlink"].contains(args.get(2).unwrap_or("")) {
+    return doc_removed_command(args)
+  }
+  flags.dispatch(
+    "doc",
+    "work with docs (wiki pages, findings, decisions, PRDs)",
+    doc_intro(),
+    doc_commands(),
+    args,
+  )
+}
+
+fn doc_removed_command(args: Slice<string>) -> Result<(), string> {
+  let verb = args[2]
+  let spec = flags
+    .with_team([])
+    .append(flags.Flag { name: "--help", alias: "-h", hidden: true, .. })
+  let p = flags.parse_n(spec, args, 3, 2, f"lll issue {verb} KEY-123 SLUG")?
+  let slug = if p.first() == "" { "SLUG" } else { p.first() }
+  let key = if p.nth(1) == "" { "KEY-123" } else { p.nth(1) }
+  let mut options: Slice<string> = []
+  if p.given("--help") { options = options.append("--help") }
+  let team = os.Getenv("LLL_TEAM")
+  if team != "" {
+    options = options.append("--team", flags.shell_argument(team))
+  }
+  let mut command = ["lll", "issue", verb]
+  if key.starts_with("-") || slug.starts_with("-") {
+    command = command
+      .append(options...)
+      .append("--", flags.shell_argument(key), flags.shell_argument(slug))
+  } else {
+    command = command
+      .append(flags.shell_argument(key), flags.shell_argument(slug))
+      .append(options...)
+  }
+  Err(f"use '{strings.Join(command, " ")}'")
 }
 
 /// Every doc verb, as a value. No verb has a hand-written page, so `page` is
@@ -89,22 +125,6 @@ pub fn doc_commands() -> Slice<flags.Command> {
       positional: "SLUG",
       run: doc_delete,
     },
-    flags.Command {
-      name: "link",
-      summary: "link the doc to an issue — 'lll issue link KEY-123 SLUG' does the same",
-      page: "",
-      spec: flags.with_team([]),
-      positional: "SLUG KEY-123",
-      run: doc_link,
-    },
-    flags.Command {
-      name: "unlink",
-      summary: "remove that link — 'lll issue unlink KEY-123 SLUG' does the same",
-      page: "",
-      spec: flags.with_team([]),
-      positional: "SLUG KEY-123",
-      run: doc_unlink,
-    },
   ]
 }
 
@@ -121,10 +141,9 @@ Every verb accepts --team KEY for this invocation, overriding LLL_TEAM or
 slug is unique per team, so two projects sharing a server both get an
 'index'; read the other one with LLL_TEAM=THEIRS lll doc view index.
 
-Docs link to issues with 'lll doc link SLUG KEY-123' and unlink with
-'lll doc unlink SLUG KEY-123' (the issue-first spellings live under
-'lll issue --help'). A link stays inside one team: the doc and the issue
-must belong to the same one.
+Docs link to issues with 'lll issue link KEY-123 SLUG' and unlink with
+'lll issue unlink KEY-123 SLUG'. A link stays inside one team: the doc and
+the issue must belong to the same one.
 
 Findings surface by area and path, not by search: 'lll finding near <path>'
 lists what is filed about a file or directory, 'lll finding list [--area X]'
@@ -604,27 +623,6 @@ fn doc_delete(input: flags.CommandInput) -> Result<(), string> {
   let _ = pb.delete(f"/api/collections/docs/records/{d.id}")?
   fmt.Println(f"Deleted doc {d.slug}")
   Ok(())
-}
-
-/// 'lll doc link SLUG KEY-123': the doc-first spelling of the issue link.
-/// It swaps the two positionals and delegates to the same write path
-/// (link_issue in issue.lis), so both nouns answer identically — the
-/// relation is stored once on docs.issues, and one way to write it.
-fn doc_link(input: flags.CommandInput) -> Result<(), string> {
-  let usage = "lll doc link SLUG KEY-123"
-  let slug = input.parsed.first()
-  let id = input.parsed.nth(1)
-  if slug == "" || id == "" { return Err(f"usage: {usage}") }
-  link_issue(id, slug, usage)
-}
-
-/// 'lll doc unlink SLUG KEY-123', the doc-first spelling of the unlink.
-fn doc_unlink(input: flags.CommandInput) -> Result<(), string> {
-  let usage = "lll doc unlink SLUG KEY-123"
-  let slug = input.parsed.first()
-  let id = input.parsed.nth(1)
-  if slug == "" || id == "" { return Err(f"usage: {usage}") }
-  unlink_issue(id, slug, usage)
 }
 
 // --------------------------------------------------------------- lookups

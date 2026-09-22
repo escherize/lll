@@ -1993,10 +1993,7 @@ fn link(input: flags.CommandInput) -> Result<(), string> {
   link_issue(id, slug, usage)
 }
 
-/// The one write path behind 'lll issue link KEY-123 SLUG' and 'lll doc link
-/// SLUG KEY-123', which swaps the two positionals (the doc comes first
-/// there). The relation is stored once on docs.issues, so there is exactly
-/// one way a link happens and both spellings answer identically.
+/// Store an issue link on the doc's issues relation.
 fn link_issue(id: string, slug: string, usage: string) -> Result<(), string> {
   let resolved = resolve_id(id, usage)?
   let issue = records.fetch_issue(resolved)?
@@ -2022,8 +2019,7 @@ fn unlink(input: flags.CommandInput) -> Result<(), string> {
   unlink_issue(id, slug, usage)
 }
 
-/// The one write path behind 'lll issue unlink KEY-123 SLUG' and 'lll doc
-/// unlink SLUG KEY-123', which swaps the two positionals.
+/// Remove an issue link from the doc's issues relation.
 fn unlink_issue(id: string, slug: string, usage: string) -> Result<(), string> {
   let resolved = resolve_id(id, usage)?
   let issue = records.fetch_issue(resolved)?

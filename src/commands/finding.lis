@@ -1,5 +1,6 @@
 import "go:encoding/json"
 import "go:fmt"
+import "go:os"
 import "go:strconv"
 import "go:strings"
 
@@ -16,7 +17,47 @@ import "query"
 /// Dispatched through the noun's Command table (TASK-307): dispatch, `lll
 /// finding --help` and shell completions all read it, so none can drift.
 pub fn finding(args: Slice<string>) -> Result<(), string> {
-  flags.dispatch("finding", "retrieve findings near a path", finding_intro(), finding_commands(), args)
+  if ["view", "read"].contains(args.get(2).unwrap_or("")) {
+    return finding_removed_command(args)
+  }
+  flags.dispatch(
+    "finding",
+    "retrieve findings near a path",
+    finding_intro(),
+    finding_commands(),
+    args,
+  )
+}
+
+fn finding_removed_command(args: Slice<string>) -> Result<(), string> {
+  let spec = doc_view_spec().append(
+    flags.Flag { name: "--help", alias: "-h", hidden: true, .. },
+  )
+  let p = flags.parse_n(
+    spec,
+    args,
+    3,
+    1,
+    flags.usage("lll doc view", doc_view_spec(), "SLUG"),
+  )?
+  let slug = if p.first() == "" { "SLUG" } else { p.first() }
+  let mut options: Slice<string> = []
+  for flag in ["--raw", "--json", "--help"] {
+    if p.given(flag) { options = options.append(flag) }
+  }
+  let team = os.Getenv("LLL_TEAM")
+  if team != "" {
+    options = options.append("--team", flags.shell_argument(team))
+  }
+  let mut command = ["lll", "doc", "view"]
+  if slug.starts_with("-") {
+    command = command
+      .append(options...)
+      .append("--", flags.shell_argument(slug))
+  } else {
+    command = command.append(flags.shell_argument(slug)).append(options...)
+  }
+  Err(f"findings are docs: use '{strings.Join(command, " ")}'")
 }
 
 /// Every finding verb, as a value. Neither verb had a hand-written page, so
@@ -31,22 +72,6 @@ pub fn finding_commands() -> Slice<flags.Command> {
       spec: flags.with_team([]),
       positional: "<path>",
       run: finding_near,
-    },
-    flags.Command {
-      name: "view",
-      summary: "show one finding by slug - a finding is a doc, so this is 'lll doc view'",
-      page: "",
-      spec: doc_view_spec(),
-      positional: "SLUG",
-      run: doc_view,
-    },
-    flags.Command {
-      name: "read",
-      summary: "the same command as 'view'",
-      page: "",
-      spec: doc_view_spec(),
-      positional: "SLUG",
-      run: doc_view,
     },
     flags.Command {
       name: "new",
@@ -99,9 +124,11 @@ fn finding_intro() -> string {
 'near' matches by directory containment in both directions: a finding filed
 on 'src/pb' answers both 'near src' and 'near src/pb/records.lis'.
 
-Both verbs accept --team KEY for this invocation, overriding LLL_TEAM or
+Every verb accepts --team KEY for this invocation, overriding LLL_TEAM or
 .lll.toml without rewriting configuration. They answer for ONE team. Every
 project has a src/, so an unscoped answer would be another codebase's.
+
+Read a finding with 'lll doc view SLUG'; --raw and --json are available.
 
 Author findings with 'lll doc new -k finding -a <area> -p \"<paths>\"'.
 `area` is conventionally the NAME of an existing label: an issue whose labels
