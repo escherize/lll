@@ -27,7 +27,7 @@ func TestAssignmentFailureRollsBackCompleteEdit(t *testing.T) {
 	for _, failure := range []string{"delete", "save"} {
 		t.Run(failure, func(t *testing.T) {
 			app, issueID, alpha, _ := claimFixture(t)
-			held, err := acquireClaim(app, issueID, alpha)
+			held, err := acquireClaim(app, issueID, alpha, "")
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -53,7 +53,7 @@ func TestAssignmentClaimPolicy(t *testing.T) {
 		t.Fatal(err)
 	}
 	assertClaimState(t, app, issueID, "", alpha)
-	held, err := acquireClaim(app, issueID, alpha)
+	held, err := acquireClaim(app, issueID, alpha, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -73,7 +73,7 @@ func TestAssignmentClaimPolicy(t *testing.T) {
 
 func TestStaleAssignmentCannotChangeNewOrReplacementClaim(t *testing.T) {
 	app, issueID, alpha, beta := claimFixture(t)
-	held, err := acquireClaim(app, issueID, alpha)
+	held, err := acquireClaim(app, issueID, alpha, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -87,7 +87,7 @@ func TestStaleAssignmentCannotChangeNewOrReplacementClaim(t *testing.T) {
 	if _, err := releaseClaim(app, issueID, held.ClaimID); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := acquireClaim(app, issueID, alpha); err != nil {
+	if _, err := acquireClaim(app, issueID, alpha, ""); err != nil {
 		t.Fatal(err)
 	}
 	none := ""

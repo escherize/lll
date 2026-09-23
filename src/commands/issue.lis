@@ -290,6 +290,13 @@ fn issue_comment_spec() -> Slice<flags.Flag> {
       ..,
     },
     flags.Flag { name: "--force", help: "with edit/delete: change a comment that is not yours", .. },
+    flags.Flag {
+      name: "--agent",
+      value: true,
+      hint: "NAME",
+      help: "self-asserted session label, for agents sharing one member token\n(default: LLL_AGENT)",
+      ..,
+    },
   ])
 }
 
@@ -465,7 +472,15 @@ pub fn issue_commands() -> Slice<flags.Command> {
       name: "claim",
       summary: "take it exclusively for the authenticated member and assign it; exits non-zero, changing nothing, when someone already holds it",
       page: "",
-      spec: flags.with_team([]),
+      spec: flags.with_team([
+      flags.Flag {
+        name: "--agent",
+        value: true,
+        hint: "NAME",
+        help: "self-asserted session label, for agents sharing one member token\n(default: LLL_AGENT)",
+        ..,
+      },
+      ]),
       positional: "[KEY-123]",
       run: claim,
     },
@@ -1019,6 +1034,7 @@ fn view(input: flags.CommandInput) -> Result<(), string> {
       for cm in comments {
         let mut author = cm.expand.author.name
         if author == "" { author = "ghost" }
+        author = display.byline(author, cm.agent)
         // Absolute, not relative: --raw is machine output that gets stored
         // and re-read (an agent's brief, an exported mirror in Git), where
         // "5d ago" silently becomes a different string tomorrow.
@@ -1053,7 +1069,7 @@ fn view(input: flags.CommandInput) -> Result<(), string> {
   if let Some(held) = claim {
     let mut holder = held.expand.member.name
     if holder == "" { holder = "an unknown member" }
-    fmt.Println(f"Claimed:   {holder} ({display.relative(held.created)})")
+    fmt.Println(f"Claimed:   {display.byline(holder, held.agent)} ({display.relative(held.created)})")
   }
   // The work-site slot (TASK-205), under the claim holder: the claim says
   // who, this says where. "(last seen)" once the work is over.
@@ -1457,7 +1473,7 @@ fn record_work_site(issue: models.Issue, branch: string) -> Result<(), string> {
     if let Some(a) = actor()? { author = a.id }
     let moved = f"work moved: {issue.work_branch} @ {issue.work_host}:{issue.work_path} -> {branch} @ {host}:{path}"
     let payload = match json.Marshal(
-      models.NewComment { issue: issue.id, author, body: moved },
+      models.NewComment { issue: issue.id, author, agent: "", body: moved },
     ) {
       Ok(p) => p as string,
       Err(e) => return Err(f"encoding work-moved comment: {e}"),
@@ -1511,6 +1527,13 @@ fn actor() -> Result<Option<Actor>, string> {
   }
 }
 
+/// The session label for claims and comments (LLL-521): --agent, else
+/// LLL_AGENT. Self-asserted; it separates agents sharing one member token and
+/// proves nothing about who they are.
+fn agent_label(p: flags.Parsed) -> string {
+  if p.given("--agent") { p.one("--agent") } else { os.Getenv("LLL_AGENT") }
+}
+
 /// Resolve the actor and delegate acquisition to the shared claims client.
 /// The server transaction acquires the exclusive hold and assigns its holder
 /// together; the unique issue index also protects against duplicate hold rows.
@@ -1528,15 +1551,15 @@ fn claim(input: flags.CommandInput) -> Result<(), string> {
   let issue = records.fetch_issue(resolved)?
   let key = f"{issue.expand.team.key}-{issue.number}"
 
-  let result = claims.acquire(issue.id, member.id).map_err(|e| {
+  let result = claims.acquire(issue.id, member.id, agent_label(input.parsed)).map_err(|e| {
     if strings.Contains(e, "already claimed by") {
       f"{key}: {e} — 'lll issue release {key}' gives it back"
     } else { e }
   })?
   if result.already_owned {
-    fmt.Println(f"Claimed {key} for {result.member_name} (already yours since {display.relative(result.created)})")
+    fmt.Println(f"Claimed {key} for {display.byline(result.member_name, result.agent)} (already yours since {display.relative(result.created)})")
   } else {
-    fmt.Println(f"Claimed {key} for {result.member_name}")
+    fmt.Println(f"Claimed {key} for {display.byline(result.member_name, result.agent)}")
   }
   Ok(())
 }
@@ -1632,14 +1655,15 @@ fn comment(input: flags.CommandInput) -> Result<(), string> {
     author_name = a.name
   }
 
-  let new_comment = models.NewComment { issue: issue.id, author, body }
+  let agent = agent_label(p)
+  let new_comment = models.NewComment { issue: issue.id, author, agent, body }
   let payload = match json.Marshal(new_comment) {
     Ok(p) => p,
     Err(e) => return Err(f"encoding comment: {e}"),
   }
   let _ = pb.post("/api/collections/comments/records", payload as string)?
   // Show the authenticated author at the write, so token switches are visible.
-  let as_who = if author_name == "" { "with no author — use a member token from 'lll login' or 'lll token create'" } else { f"as {author_name}" }
+  let as_who = if author_name == "" { "with no author — use a member token from 'lll login' or 'lll token create'" } else { f"as {display.byline(author_name, agent)}" }
   fmt.Println(f"Commented on {issue.expand.team.key}-{issue.number} {as_who}")
   Ok(())
 }
@@ -1800,6 +1824,7 @@ fn print_comments(comments: Slice<models.Comment>) {
     n += 1
     let mut author = c.expand.author.name
     if author == "" { author = "anon" }
+    author = display.byline(author, c.agent)
     fmt.Println(f"#{n} {author} ({display.relative(c.created)})")
     fmt.Println(f"  {c.body}")
   }
@@ -2159,6 +2184,13 @@ fn issue_next_spec() -> Slice<flags.Flag> {
       help: "atomically claim the chosen issue before printing it; if another\nmember wins the race, exit non-zero and print no key",
       ..,
     },
+    flags.Flag {
+      name: "--agent",
+      value: true,
+      hint: "NAME",
+      help: "self-asserted session label, for agents sharing one member token\n(default: LLL_AGENT)",
+      ..,
+    },
   ])
 }
 
@@ -2188,7 +2220,7 @@ fn issue_next(input: flags.CommandInput) -> Result<(), string> {
     }
     // Acquire before printing: a key this command did not secure is a lie to
     // the shell loop that composed it. A lost race exits non-zero, keyless.
-    let result = claims.acquire(best.id, member.id).map_err(|e| {
+    let result = claims.acquire(best.id, member.id, agent_label(p)).map_err(|e| {
       if strings.Contains(e, "already claimed by") {
         f"{key}: {e} — 'lll issue release {key}' gives it back"
       } else { e }

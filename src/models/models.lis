@@ -222,6 +222,8 @@ pub struct Comment {
   pub id: string,
   pub issue: string,
   pub author: string,
+  #[json(omitempty)]
+  pub agent: string,
   pub body: string,
   pub created: string,
   pub updated: string,
@@ -240,6 +242,8 @@ pub struct NewComment {
   pub issue: string,
   #[json(omitempty)]
   pub author: string,
+  #[json(omitempty)]
+  pub agent: string,
   pub body: string,
 }
 
@@ -287,6 +291,8 @@ pub struct Claim {
   pub id: string,
   pub issue: string,
   pub member: string,
+  #[json(omitempty)]
+  pub agent: string,
   pub created: string,
   pub expand: ClaimExpand,
 }

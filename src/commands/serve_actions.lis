@@ -398,7 +398,7 @@ fn comment_write(r: mut Ref<http.Request>) -> Result<string, string> {
     return Err("commenting needs a member token — start the board with lll up")
   };
   let author = member.id
-  let payload = marshal(models.NewComment { issue: issue.id, author, body })?
+  let payload = marshal(models.NewComment { issue: issue.id, author, agent: "", body })?
   let _ = pb.post("/api/collections/comments/records", payload)?
   // LLL-386/LLL-384: the comment arrives through the live stream, so the
   // composer was never told the write landed and kept the text - which reads
@@ -461,7 +461,7 @@ fn claim_write(r: mut Ref<http.Request>) -> Result<string, string> {
   require_active_team(issue.expand.team)?
   let Some(member) = actor()? else { return Err("No member is configured for this board.") };
   if r.FormValue("member_id") != member.id { return Err("The board identity changed; refresh before claiming.") }
-  let _ = claims.acquire(issue.id, member.id)?
+  let _ = claims.acquire(issue.id, member.id, "")?
   Ok("")
 }
 

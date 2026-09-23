@@ -35,6 +35,7 @@ func registerClaimRoutes(routes *router.Router[*core.RequestEvent], writes *issu
 	routes.POST("/api/lll/issues/{issue}/claim", func(re *core.RequestEvent) error {
 		var body struct {
 			Member string `json:"member"`
+			Agent  string `json:"agent"`
 		}
 		re.Request.Body = http.MaxBytesReader(re.Response, re.Request.Body, 2048)
 		if err := re.BindBody(&body); err != nil {
@@ -52,7 +53,7 @@ func registerClaimRoutes(routes *router.Router[*core.RequestEvent], writes *issu
 		}
 		unlock := writes.acquire(re.Request.PathValue("issue"))
 		defer unlock()
-		outcome, err := acquireClaim(re.App, re.Request.PathValue("issue"), body.Member)
+		outcome, err := acquireClaim(re.App, re.Request.PathValue("issue"), body.Member, body.Agent)
 		return respondClaim(re, outcome, err)
 	}).Bind(apis.RequireAuth("members", core.CollectionNameSuperusers))
 

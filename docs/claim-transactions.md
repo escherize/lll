@@ -30,6 +30,13 @@ ID and creation time, and restores assignment to that member. Another member's
 claim is refused. Releasing an unclaimed issue is an error. A transaction
 failure rolls back both the claim and assignment writes.
 
+A claim may carry an agent label (LLL-521: `--agent NAME` or `LLL_AGENT`),
+stored on the hold. The same member claiming with a different non-empty label
+is refused, naming the holder's label. An empty label on either side keeps the
+same-member retry above. The label is self-asserted: it separates agents
+sharing one member token, not members, and proves nothing about identity.
+Comments carry the same label, and every view shows it after the author.
+
 Assignment edits must include the observed claim ID; an empty string means
 the caller observed no claim. A changed observation rejects the entire edit.
 While a claim exists, assigning a different member is refused. Assigning the

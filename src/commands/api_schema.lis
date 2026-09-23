@@ -28,6 +28,7 @@ Rules: list @request.auth.id != \"\" view @request.auth.id != \"\" create @reque
 | issue | relation | yes | relation to issues |
 | member | relation | yes | relation to members |
 | created | autodate |  | set on create |
+| agent | text |  |  |
 
 ## comments (base)
 
@@ -40,6 +41,7 @@ Rules: list @request.auth.id != \"\" view @request.auth.id != \"\" create @reque
 | body | text | yes |  |
 | created | autodate |  | set on create |
 | updated | autodate |  | set on create; refreshed on update |
+| agent | text |  |  |
 
 ## docs (base)
 

@@ -15,6 +15,7 @@ type ClaimOutcome struct {
 	ClaimID         string `json:"claim_id"`
 	MemberID        string `json:"member_id"`
 	MemberName      string `json:"member_name"`
+	Agent           string `json:"agent"`
 	Created         string `json:"created"`
 	AlreadyOwned    bool   `json:"already_owned"`
 	ClearedAssignee bool   `json:"cleared_assignee"`
@@ -35,7 +36,12 @@ func currentClaim(app core.App, issueID string) (*core.Record, error) {
 // acquireClaim keeps both the exclusive hold and its assignment on the
 // serialized writer transaction. A duplicate by its holder repairs assignment
 // without replacing the original claim or its creation time.
-func acquireClaim(app core.App, issueID, memberID string) (ClaimOutcome, error) {
+//
+// agent is a self-asserted session label (LLL-521) so agents sharing one
+// member token can tell their holds apart. It is coordination, not auth: the
+// only refusal it adds is two different non-empty labels on one member. An
+// empty label on either side keeps the member-level idempotency.
+func acquireClaim(app core.App, issueID, memberID, agent string) (ClaimOutcome, error) {
 	var outcome ClaimOutcome
 	err := app.RunInTransaction(func(tx core.App) error {
 		issue, err := tx.FindRecordById("issues", issueID)
@@ -58,6 +64,10 @@ func acquireClaim(app core.App, issueID, memberID string) (ClaimOutcome, error) 
 			}
 			return &claimRejection{fmt.Sprintf("issue is already claimed by %s", name)}
 		}
+		if held != nil && held.GetString("agent") != "" && agent != "" && held.GetString("agent") != agent {
+			return &claimRejection{fmt.Sprintf("issue is already claimed by %s (agent %s)",
+				member.GetString("name"), held.GetString("agent"))}
+		}
 		if held == nil {
 			collection, err := tx.FindCollectionByNameOrId("claims")
 			if err != nil {
@@ -66,6 +76,7 @@ func acquireClaim(app core.App, issueID, memberID string) (ClaimOutcome, error) 
 			held = core.NewRecord(collection)
 			held.Set("issue", issueID)
 			held.Set("member", memberID)
+			held.Set("agent", agent)
 			if err := tx.Save(held); err != nil {
 				return err
 			}
@@ -77,7 +88,7 @@ func acquireClaim(app core.App, issueID, memberID string) (ClaimOutcome, error) 
 			}
 		}
 		outcome = ClaimOutcome{ClaimID: held.Id, MemberID: memberID, MemberName: member.GetString("name"),
-			Created: held.GetString("created"), AlreadyOwned: alreadyOwned}
+			Agent: held.GetString("agent"), Created: held.GetString("created"), AlreadyOwned: alreadyOwned}
 		return nil
 	})
 	if err != nil {

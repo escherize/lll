@@ -13,7 +13,7 @@ import (
 // the state a deliberate `lll issue release` would have left it in.
 func TestExpireClaimsReleasesOnlyTheStaleOnes(t *testing.T) {
 	app, issueID, alpha, _ := claimFixture(t)
-	if _, err := acquireClaim(app, issueID, alpha); err != nil {
+	if _, err := acquireClaim(app, issueID, alpha, ""); err != nil {
 		t.Fatal(err)
 	}
 	assertClaimState(t, app, issueID, alpha, alpha)
@@ -46,7 +46,7 @@ func TestExpireClaimsReleasesOnlyTheStaleOnes(t *testing.T) {
 // undo, and an expiry that cleared it would quietly unassign real work.
 func TestExpireClaimsLeavesAnotherMembersAssignment(t *testing.T) {
 	app, issueID, alpha, beta := claimFixture(t)
-	if _, err := acquireClaim(app, issueID, alpha); err != nil {
+	if _, err := acquireClaim(app, issueID, alpha, ""); err != nil {
 		t.Fatal(err)
 	}
 	issue, err := app.FindRecordById("issues", issueID)
@@ -92,7 +92,7 @@ func TestClaimExpiryIsScheduled(t *testing.T) {
 // hosted board freed 123 claims and nothing anywhere said so.
 func TestExpiredClaimIsAnnouncedOnAnOpenIssue(t *testing.T) {
 	app, issueID, alpha, _ := claimFixture(t)
-	if _, err := acquireClaim(app, issueID, alpha); err != nil {
+	if _, err := acquireClaim(app, issueID, alpha, ""); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := expireClaims(app, time.Now().Add(claimMaxAge+time.Minute), claimMaxAge); err != nil {
@@ -135,7 +135,7 @@ func TestExpiredClaimOnFinishedWorkIsNotAnnounced(t *testing.T) {
 		if err := app.Save(issue); err != nil {
 			t.Fatal(err)
 		}
-		if _, err := acquireClaim(app, issueID, alpha); err != nil {
+		if _, err := acquireClaim(app, issueID, alpha, ""); err != nil {
 			t.Fatal(err)
 		}
 		expired, err := expireClaims(app, time.Now().Add(claimMaxAge+time.Minute), claimMaxAge)
@@ -158,7 +158,7 @@ func TestExpiredClaimOnFinishedWorkIsNotAnnounced(t *testing.T) {
 // The release is the half that must not be undone by the half that records it.
 func TestAnnouncementFailureDoesNotUndoTheRelease(t *testing.T) {
 	app, issueID, alpha, _ := claimFixture(t)
-	if _, err := acquireClaim(app, issueID, alpha); err != nil {
+	if _, err := acquireClaim(app, issueID, alpha, ""); err != nil {
 		t.Fatal(err)
 	}
 	// A comment collection that refuses every write, which is the shape of any
