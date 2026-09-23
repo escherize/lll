@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"strings"
 
 	validation "github.com/pocketbase/ozzo-validation/v4"
 	"github.com/pocketbase/pocketbase/apis"
@@ -59,19 +60,34 @@ func registerClaimRoutes(routes *router.Router[*core.RequestEvent], writes *issu
 	routes.POST("/api/lll/issues/{issue}/release", func(re *core.RequestEvent) error {
 		var body struct {
 			ClaimID string `json:"claim_id"`
+			Force   bool   `json:"force"`
+			Reason  string `json:"reason"`
 		}
-		re.Request.Body = http.MaxBytesReader(re.Response, re.Request.Body, 2048)
+		// 8 KiB, not the claim route's 2: the optional reason is prose.
+		re.Request.Body = http.MaxBytesReader(re.Response, re.Request.Body, 8<<10)
 		if err := re.BindBody(&body); err != nil {
 			return re.BadRequestError("invalid release request", nil)
 		}
 		if body.ClaimID == "" {
 			return re.BadRequestError("release requires the observed claim_id", nil)
 		}
-		// Any authenticated workspace member may release a hold, matching the
-		// existing CLI contract; naming the observed hold prevents stale release.
+		// The holder releases freely; anyone else needs force, and a forced
+		// release leaves a comment (LLL-512). Naming the observed hold still
+		// prevents a stale release.
+		//
+		// A superuser gets no exemption. Its token names no member, so it is
+		// never the holder, and the fleet operator holding admin credentials
+		// is exactly who should say so out loud: force costs one flag, and
+		// the comment is the only record the release happened. (A superuser
+		// can still DELETE the record directly - claims.deleteRule is null,
+		// not "nobody" - but that is the admin API, not the release path.)
+		by := releaser{force: body.Force, reason: strings.TrimSpace(body.Reason)}
+		if !re.HasSuperuserAuth() {
+			by.memberID = re.Auth.Id
+		}
 		unlock := writes.acquire(re.Request.PathValue("issue"))
 		defer unlock()
-		outcome, err := releaseClaim(re.App, re.Request.PathValue("issue"), body.ClaimID)
+		outcome, err := releaseClaim(re.App, re.Request.PathValue("issue"), body.ClaimID, by)
 		return respondClaim(re, outcome, err)
 	}).Bind(apis.RequireAuth("members", core.CollectionNameSuperusers))
 }

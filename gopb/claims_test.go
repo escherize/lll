@@ -2,9 +2,12 @@ package gopb
 
 import (
 	"errors"
+	"sort"
+	"strings"
 	"sync"
 	"testing"
 
+	"github.com/pocketbase/dbx"
 	"github.com/pocketbase/pocketbase/core"
 	"github.com/pocketbase/pocketbase/tests"
 )
@@ -109,7 +112,7 @@ func TestClaimTransitionsRollbackBothWrites(t *testing.T) {
 		t.Fatal(err)
 	}
 	fail = true
-	if _, err := releaseClaim(app, issueID, held.ClaimID); err == nil {
+	if _, err := releaseClaim(app, issueID, held.ClaimID, releaser{memberID: alpha}); err == nil {
 		t.Fatal("expected release failure")
 	}
 	assertClaimState(t, app, issueID, alpha, alpha)
@@ -130,7 +133,7 @@ func TestClaimIdempotencyAndUnrelatedAssignment(t *testing.T) {
 	if err := app.Save(issue); err != nil {
 		t.Fatal(err)
 	}
-	outcome, err := releaseClaim(app, issueID, first.ClaimID)
+	outcome, err := releaseClaim(app, issueID, first.ClaimID, releaser{memberID: alpha})
 	if err != nil || outcome.ClearedAssignee {
 		t.Fatalf("unrelated assignment: %#v %v", outcome, err)
 	}
@@ -154,7 +157,7 @@ func TestConcurrentClaimantsAndStaleRelease(t *testing.T) {
 		t.Fatalf("missing winning claim: %v", err)
 	}
 	assertClaimState(t, app, issueID, held.GetString("member"), held.GetString("member"))
-	if _, err := releaseClaim(app, issueID, held.Id); err != nil {
+	if _, err := releaseClaim(app, issueID, held.Id, releaser{memberID: held.GetString("member")}); err != nil {
 		t.Fatal(err)
 	}
 	replacement, err := acquireClaim(app, issueID, beta)
@@ -164,8 +167,91 @@ func TestConcurrentClaimantsAndStaleRelease(t *testing.T) {
 	if replacement.ClaimID == held.Id {
 		t.Fatal("claim identity reused")
 	}
-	if _, err := releaseClaim(app, issueID, held.Id); err == nil {
+	if _, err := releaseClaim(app, issueID, held.Id, releaser{memberID: held.GetString("member")}); err == nil {
 		t.Fatal("stale release accepted")
 	}
 	assertClaimState(t, app, issueID, beta, beta)
+}
+
+// LLL-512: the holder releases freely; anyone else is refused unless they
+// force, and a forced release leaves a comment naming both members.
+func TestReleaseRequiresHolderOrForce(t *testing.T) {
+	app, issueID, alpha, beta := claimFixture(t)
+	held, err := acquireClaim(app, issueID, alpha)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, by := range []releaser{{memberID: beta}, {}} {
+		if _, err := releaseClaim(app, issueID, held.ClaimID, by); err == nil ||
+			err.Error() != "the claim is held by Alpha; releasing another member's claim needs force" {
+			t.Fatalf("non-holder %#v: %v", by, err)
+		}
+		assertClaimState(t, app, issueID, alpha, alpha)
+	}
+	assertComments(t, app, issueID)
+
+	outcome, err := releaseClaim(app, issueID, held.ClaimID, releaser{memberID: alpha, force: true})
+	if err != nil || outcome.Forced || !outcome.ClearedAssignee {
+		t.Fatalf("holder release: %#v %v", outcome, err)
+	}
+	assertClaimState(t, app, issueID, "", "")
+	assertComments(t, app, issueID)
+
+	held, err = acquireClaim(app, issueID, alpha)
+	if err != nil {
+		t.Fatal(err)
+	}
+	outcome, err = releaseClaim(app, issueID, held.ClaimID, releaser{memberID: beta, force: true, reason: "Alpha's agent crashed"})
+	if err != nil || !outcome.Forced || outcome.MemberName != "Alpha" {
+		t.Fatalf("forced release: %#v %v", outcome, err)
+	}
+	assertClaimState(t, app, issueID, "", "")
+	assertComments(t, app, issueID, beta+": Beta force-released Alpha's claim.\n\nReason: Alpha's agent crashed")
+
+	held, err = acquireClaim(app, issueID, alpha)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := releaseClaim(app, issueID, held.ClaimID, releaser{force: true}); err != nil {
+		t.Fatal(err)
+	}
+	assertComments(t, app, issueID,
+		beta+": Beta force-released Alpha's claim.\n\nReason: Alpha's agent crashed",
+		": An administrator force-released Alpha's claim.")
+}
+
+// The comment is part of the forced release: if it cannot be written, the
+// claim stays where it was.
+func TestForcedReleaseRollsBackWithoutItsComment(t *testing.T) {
+	app, issueID, alpha, beta := claimFixture(t)
+	held, err := acquireClaim(app, issueID, alpha)
+	if err != nil {
+		t.Fatal(err)
+	}
+	app.OnRecordCreate("comments").BindFunc(func(e *core.RecordEvent) error {
+		return errors.New("injected comment failure")
+	})
+	if _, err := releaseClaim(app, issueID, held.ClaimID, releaser{memberID: beta, force: true}); err == nil {
+		t.Fatal("forced release committed without its comment")
+	}
+	assertClaimState(t, app, issueID, alpha, alpha)
+}
+
+// assertComments pins the issue's comments as "author: body". Sorted, not by
+// creation time: two comments inside one millisecond would tie.
+func assertComments(t *testing.T, app core.App, issueID string, want ...string) {
+	t.Helper()
+	records, err := app.FindRecordsByFilter("comments", "issue={:issue}", "", 0, 0, dbx.Params{"issue": issueID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got []string
+	for _, r := range records {
+		got = append(got, r.GetString("author")+": "+r.GetString("body"))
+	}
+	sort.Strings(got)
+	sort.Strings(want)
+	if strings.Join(got, "|") != strings.Join(want, "|") {
+		t.Fatalf("comments:\n got %q\nwant %q", got, want)
+	}
 }

@@ -81,14 +81,20 @@ for actor, p in results:
         assert p.returncode == 0, p.stderr
     else:
         assert p.returncode != 0 and 'already claimed by' in p.stderr, p.stderr
-        assert 'lll issue release ' + key in p.stderr
+        assert 'lll issue release ' + key + ' --force' in p.stderr, p.stderr
 actor = next(a for a in actors if a['id'] == holder)
 assert cli('issue', 'claim', key, actor=actor).returncode == 0
 assert state()['claim']['id'] == held['claim']['id']
 assert state()['claim']['created'] == held['claim']['created']
 
+# LLL-512: the suite's own token does not hold the claim, so it is refused
+# and told about --force; the holder releases freely.
+p = cli('issue', 'release', key)
+assert p.returncode != 0 and 'held by ' + actor['name'] in p.stderr and '--force' in p.stderr, p.stderr
+assert state()['claim']['id'] == held['claim']['id']
+
 # A delayed release cannot remove a replacement hold.
-assert cli('issue', 'release', key).returncode == 0
+assert cli('issue', 'release', key, actor=actor).returncode == 0
 assert cli('issue', 'claim', key, actor=beta).returncode == 0
 status, rejected = request(path + '/release', {'claim_id': held['claim']['id']})
 assert status == 400 and 'claim changed' in rejected['message']
@@ -96,7 +102,7 @@ assert state()['claim']['member'] == beta['id'] and state()['assignee'] == beta[
 
 # Assignment made by a low-level API client belongs to that edit, not the hold.
 assert request('/api/collections/issues/records/' + issue['id'], {'assignee': alpha['id']}, 'PATCH')[0] == 200
-p = cli('issue', 'release', key)
+p = cli('issue', 'release', key, actor=beta)
 assert p.returncode == 0 and 'assignment unchanged' in p.stdout, p.stderr
 assert state()['claim'] is None and state()['assignee'] == alpha['id']
 
@@ -224,7 +230,7 @@ try:
             p = pending.result(timeout=25)
         assert p.returncode != 0 and 'claim changed' in p.stderr, p.stderr
         assert state() == before
-        assert cli('issue', 'release', key).returncode == 0
+        assert cli('issue', 'release', key, actor=beta).returncode == 0
 finally:
     DelayedAssignment.resume.set()
     server.shutdown()
@@ -247,3 +253,54 @@ finally:
     thread.join()
 
 print('Assignment: whole-edit rollback, none/same/different holder, invalid fields, delayed CLI clear/reassignment, and older-server refusal')
+
+# LLL-512: a claim leaves only through /release. The collection's DELETE is
+# superuser-only, for the holder as much as anyone, so the holder check on the
+# route cannot be walked around.
+assert cli('issue', 'claim', key, actor=alpha).returncode == 0
+held = state()['claim']
+comments = len(state()['comments'])
+for who in [alpha, beta]:
+    status, refused = request('/api/collections/claims/records/' + held['id'], method='DELETE', auth=who['token'])
+    assert status == 403, (status, refused)
+assert state()['claim']['id'] == held['id']
+
+# A non-holder is refused through the route too, and changes nothing.
+status, refused = request(path + '/release', {'claim_id': held['id']}, auth=beta['token'])
+assert status == 400 and 'needs force' in refused['message'], refused
+p = cli('issue', 'release', key, actor=beta)
+assert p.returncode != 0 and 'lll issue release ' + key + ' --force' in p.stderr, p.stderr
+p = cli('issue', 'release', key, '-b', 'no force', actor=beta)
+assert p.returncode != 0 and 'add --force' in p.stderr, p.stderr
+assert state()['claim']['id'] == held['id'] and len(state()['comments']) == comments
+
+# Forced, it goes through and the issue says who took whose claim and why.
+p = cli('issue', 'release', key, '--force', '-b', 'alpha went quiet', actor=beta)
+assert p.returncode == 0 and 'forced, and commented' in p.stdout, p.stderr
+after = state()
+assert after['claim'] is None and len(after['comments']) == comments + 1
+note = after['comments'][-1]
+assert note['body'] == "claim-beta force-released claim-alpha's claim.\n\nReason: alpha went quiet", note
+assert note['author'] == beta['id'], note
+
+# The holder's own release, forced or not, leaves no comment.
+assert cli('issue', 'claim', key, actor=alpha).returncode == 0
+p = cli('issue', 'release', key, '--force', actor=alpha)
+assert p.returncode == 0 and 'forced' not in p.stdout, p.stdout
+assert state()['claim'] is None and len(state()['comments']) == comments + 1
+
+# A superuser token names no member, so it is never the holder: it needs
+# force like anyone else, and its comment has no author.
+su = os.environ['LLL_TEST_SUPERUSER_TOKEN']
+assert cli('issue', 'claim', key, actor=alpha).returncode == 0
+held = state()['claim']
+status, refused = request(path + '/release', {'claim_id': held['id']}, auth=su)
+assert status == 400 and 'needs force' in refused['message'], refused
+assert state()['claim']['id'] == held['id']
+status, outcome = request(path + '/release', {'claim_id': held['id'], 'force': True}, auth=su)
+assert status == 200 and outcome['forced'], outcome
+note = state()['comments'][-1]
+assert note['author'] == '' and note['body'].startswith("An administrator force-released claim-alpha's claim."), note
+assert state()['claim'] is None and len(state()['comments']) == comments + 2
+
+print('Release: superuser needs force and comments without an author; collection DELETE refused for holder and non-holder, non-holder refused without force, forced release comments with the reason, holder release silent')

@@ -55,9 +55,14 @@ give each long-lived worker its own member (`lll member add <name>`, then
 `lll issue view KEY-12` (claim holder, comments, recorded work site) before it
 starts, and skips any issue another session is already on.
 
-`--assignee` cannot replace another member's active claim: release it first.
+`--assignee` cannot move a claimed issue to anyone but the holder: the holder
+releases it first, or you force-release a dead hold (below).
 `lll whoami` shows the authenticated identity. `lll issue release KEY-12`
-gives the claim back and clears the assignee when it still matches the holder.
+gives your claim back and clears the assignee when it still matches the holder.
+Releasing another member's claim is refused unless you add `--force`
+(LLL-512); a forced release leaves a comment on the issue naming both members,
+with the reason from `-b "why"` if you give one. Force only a hold you know is
+dead: its holder may still be editing.
 
 **A claim older than 24 hours is released for you** (LLL-183): the server
 sweeps hourly and frees holds that outlived the agent that took them, leaving

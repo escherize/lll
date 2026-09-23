@@ -2354,6 +2354,7 @@ set -e
 [ "$rc" -ne 0 ] || fail "claiming a held issue: expected nonzero exit"
 assert_contains "$out" "already claimed by bryan" "refusal names the holder"
 assert_contains "$out" "lll issue release $CKEY" "refusal names the fix"
+assert_contains "$out" "lll issue release $CKEY --force" "a non-holder's fix is --force (LLL-512)"
 
 # the holder claiming again is success, not a conflict (fleet replay, task 9:
 # a claim survived --assignee none and every re-claim by its holder was refused)
@@ -2443,8 +2444,17 @@ assert_contains "$out" "Claimed:   bryan" "a refused claim leaves the holder alo
 # re-claim is not silent - it says "already yours" - and it re-sets the
 # assignee, which is what claiming again is for. Pinned above.
 
+# LLL-512: only the holder releases without --force, and the refusal says so.
+set +e
+out=$(env $E "$LIN" issue release "$CKEY" 2>&1)
+rc=$?
+set -e
+[ "$rc" -ne 0 ] || fail "a non-holder release without --force: expected nonzero exit"
+assert_contains "$out" "held by bryan" "the refusal names the holder"
+assert_contains "$out" "lll issue release $CKEY --force" "the refusal names --force"
+
 # AC#3: release gives it back, and the next claim succeeds.
-out=$(env $E "$LIN" issue release "$CKEY")
+out=$(env $E LLL_TOKEN="$BRYAN_TOK" LLL_ME=bryan "$LIN" issue release "$CKEY")
 assert_contains "$out" "Released $CKEY (was bryan's)" "release output"
 assert_contains "$out" "cleared assignee" "release reports assignment removal"
 out=$(env $E "$LIN" issue view "$CKEY")
@@ -2453,8 +2463,15 @@ assert_contains "$out" "Assignee:  none" "release clears the assignee the claim 
 out=$(env $E LLL_TOKEN="$CAROL_TOK" LLL_ME=carol "$LIN" issue claim "$CKEY")
 assert_contains "$out" "Claimed $CKEY for carol" "a released issue can be claimed again"
 
+# A forced release of carol's claim goes through and comments with the reason.
+out=$(env $E "$LIN" issue release "$CKEY" --force -b "carol is on leave")
+assert_contains "$out" "Released $CKEY (was carol's)" "forced release output"
+assert_contains "$out" "forced, and commented on the issue" "forced release says it commented"
+out=$(env $E "$LIN" issue view "$CKEY")
+assert_contains "$out" "e2e-agent force-released carol's claim." "the comment names both members"
+assert_contains "$out" "Reason: carol is on leave" "the comment carries the reason"
+
 # Releasing what nobody holds is an error, not a no-op.
-env $E "$LIN" issue release "$CKEY" >/dev/null
 set +e
 out=$(env $E "$LIN" issue release "$CKEY" 2>&1)
 rc=$?
@@ -2462,7 +2479,7 @@ set -e
 [ "$rc" -ne 0 ] || fail "releasing an unclaimed issue: expected nonzero exit"
 assert_contains "$out" "$CKEY is not claimed" "double release names the state"
 # The newer claim protection refuses reassignment until release (covered above).
-env $E "$LIN" issue view "$CKEY" --json | python3 -c 'import json,sys; d=json.load(sys.stdin); assert d["claim"] is None; assert len(d["comments"]) == 2'
+env $E "$LIN" issue view "$CKEY" --json | python3 -c 'import json,sys; d=json.load(sys.stdin); assert d["claim"] is None; assert len(d["comments"]) == 3'
 
 # Full issue JSON must not silently stop at the first 200 comments.
 env $E python3 - "$LLL_ABS" "$CKEY" <<'PY'
@@ -2478,8 +2495,8 @@ for i in range(199):
     with urllib.request.urlopen(request) as response:
         assert response.status == 200
 comments = view()['comments']
-assert len(comments) == 201
-assert len({c['id'] for c in comments}) == 201
+assert len(comments) == 202
+assert len({c['id'] for c in comments}) == 202
 assert [(c['created'], c['id']) for c in comments] == sorted((c['created'], c['id']) for c in comments)
 assert {c['body'] for c in comments} >= {f'pagination {i}' for i in range(199)}
 PY
@@ -2615,7 +2632,7 @@ assert_contains "$out" "Work:      $WBRANCH @ site-b:$WROOT_B (last seen)" \
 out=$(env $E "$LIN" issue update "$WKEY" --state in-progress)
 out=$(env $E "$LIN" issue view "$WKEY")
 assert_not_contains "$out" "last seen" "reopened and still claimed: fresh again"
-out=$(env $E "$LIN" issue release "$WKEY")
+out=$(env $E LLL_TOKEN="$BRYAN_TOK" LLL_ME=bryan "$LIN" issue release "$WKEY")
 out=$(env $E "$LIN" issue view "$WKEY")
 assert_contains "$out" "Work:      $WBRANCH @ site-b:$WROOT_B (last seen)" \
   "a released claim renders the site as last seen"
@@ -3457,7 +3474,9 @@ python3 "$REPO_ROOT"/scripts/test_issue_since.py "$LLL_ABS" "$URL"
 python3 "$REPO_ROOT"/scripts/test_issue_view_reads.py "$LLL_ABS"
 python3 "$REPO_ROOT"/scripts/test_export_import.py "$LLL_ABS" "$URL"
 python3 "$REPO_ROOT"/scripts/test_import_github.py "$LLL_ABS" "$URL"
-python3 "$REPO_ROOT"/scripts/test_claims_live.py "$LLL_ABS" "$URL"
+# A fresh superuser token: the mid-suite restart retired the earlier one.
+LLL_TEST_SUPERUSER_TOKEN=$(pb_superuser_token "$URL") \
+  python3 "$REPO_ROOT"/scripts/test_claims_live.py "$LLL_ABS" "$URL"
 # LLL-385: seed is outside build/test/e2e, so it broke for five days under a
 # green gate. Here rather than in `test` because it needs the built binary.
 python3 "$REPO_ROOT"/scripts/test_seed.py

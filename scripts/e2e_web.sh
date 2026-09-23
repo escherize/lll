@@ -328,7 +328,10 @@ assert_contains "$board" 'class="cp-work work-stale"' "hover preview carries the
 assert_contains "$board" "eng-2-already-in-progress" "hover preview shows the branch"
 
 # a claim makes the site current: no dimming on either surface
-W205_MID=$(curl -sf -H "$AUTH_HDR" "$LLL_URL/api/collections/members/records?perPage=1" | jq -r '.items[0].id')
+# The suite's own member holds it, so the release below is the holder's
+# (LLL-512: anyone else would need force, and force leaves a comment).
+W205_MID=$(curl -sf -G -H "$AUTH_HDR" "$LLL_URL/api/collections/members/records" \
+  --data-urlencode "filter=(name='e2e')" | jq -r '.items[0].id')
 W205_CLAIM=$(seed "work-site claim" -H "$AUTH_HDR" \
   -X POST "$LLL_URL/api/collections/claims/records" \
   -H 'Content-Type: application/json' \
@@ -339,9 +342,12 @@ assert_contains "$issue" "eng-2-already-in-progress @ webhost:/tmp/wt-eng-2" "pr
 assert_not_contains "$issue" "(last seen)" "a claimed site is not dimmed"
 board=$(wcurl -sf "$WEB/")
 assert_contains "$board" 'class="cp-work"' "hover branch is undimmed while claimed"
-# put the claim back so later sections see the board they always saw
+# put the claim back so later sections see the board they always saw; a
+# claim leaves through /release, since direct DELETE is superuser-only (LLL-512)
 seed "releasing the work-site claim" -H "$AUTH_HDR" \
-  -X DELETE "$LLL_URL/api/collections/claims/records/$W205_CLAIM" >/dev/null
+  -X POST "$LLL_URL/api/lll/issues/$ENG2_ID/release" \
+  -H 'Content-Type: application/json' \
+  -d "{\"claim_id\":\"$W205_CLAIM\"}" >/dev/null
 
 # --- app shell: one rail template, the same on every page (task-81) ---
 # The <nav id="rail"> block, for diffing one page's shell against another's.

@@ -295,6 +295,20 @@ fn issue_delete_spec() -> Slice<flags.Flag> {
   flags.with_team([flags.Flag { name: "--force", help: "skip the delete confirmation", .. }])
 }
 
+fn issue_release_spec() -> Slice<flags.Flag> {
+  flags.with_team([
+    flags.Flag { name: "--force", help: "release a claim another member holds; leaves a comment on the issue", .. },
+    flags.Flag {
+      name: "-b",
+      alias: "--body -m --message",
+      value: true,
+      hint: "\"why\"",
+      help: "with --force: the reason, recorded in the comment ('-b -' reads stdin)",
+      ..,
+    },
+  ])
+}
+
 fn issue_comment_spec() -> Slice<flags.Flag> {
   flags.with_team([
     flags.Flag {
@@ -487,9 +501,9 @@ pub fn issue_commands() -> Slice<flags.Command> {
     },
     flags.Command {
       name: "release",
-      summary: "remove the claim; clear assignee if it still matches the holder",
+      summary: "remove your claim; clear assignee if it still matches the holder; --force takes another member's and comments why",
       page: "",
-      spec: flags.with_team([]),
+      spec: issue_release_spec(),
       positional: "[KEY-123]",
       run: release,
     },
@@ -1372,7 +1386,7 @@ fn update(input: flags.CommandInput) -> Result<(), string> {
     let observed = claims.observed_id(issue.id)?
     let result = claims.update_assignment(issue.id, observed, payload).map_err(|e| {
       if strings.Contains(e, "is claimed by") {
-        f"{key}: {e} — 'lll issue release {key}' gives it back"
+        f"{key}: {e} — {held_elsewhere_hint(key)}"
       } else { f"{key}: {e}" }
     })?
     if result.claim_id != "" { released = f" (released {result.member_name}'s claim)" }
@@ -1557,6 +1571,14 @@ fn actor() -> Result<Option<Actor>, string> {
   }
 }
 
+/// The fix for a claim someone else holds. Plain release works only for the
+/// holder (LLL-512), so the hint asks them first and names --force for a hold
+/// whose agent is gone. On `update --assignee` the caller may be the holder,
+/// which is why the plain release is still named.
+fn held_elsewhere_hint(key: string) -> string {
+  f"the holder releases it with 'lll issue release {key}'; ask them, or if the hold is dead, 'lll issue release {key} --force -b \"why\"' takes it and comments on the issue"
+}
+
 /// Resolve the actor and delegate acquisition to the shared claims client.
 /// The server transaction acquires the exclusive hold and assigns its holder
 /// together; the unique issue index also protects against duplicate hold rows.
@@ -1576,7 +1598,7 @@ fn claim(input: flags.CommandInput) -> Result<(), string> {
 
   let result = claims.acquire(issue.id, member.id).map_err(|e| {
     if strings.Contains(e, "already claimed by") {
-      f"{key}: {e} — 'lll issue release {key}' gives it back"
+      f"{key}: {e} — {held_elsewhere_hint(key)}"
     } else { e }
   })?
   if result.already_owned {
@@ -1587,17 +1609,30 @@ fn claim(input: flags.CommandInput) -> Result<(), string> {
   Ok(())
 }
 
-/// Any authenticated workspace member can release an observed hold. The
+/// The holder releases an observed hold; anyone else needs --force, and the
+/// server records a forced release as a comment on the issue (LLL-512). The
 /// server atomically removes that exact claim and clears only its assignment.
 fn release(input: flags.CommandInput) -> Result<(), string> {
-  let usage = "lll issue release [KEY-123]"
-  let resolved = resolve_id(input.parsed.first(), usage)?
+  let usage = "lll issue release [KEY-123] [--force [-b \"why\"]]"
+  let p = input.parsed
+  let resolved = resolve_id(p.first(), usage)?
+  let force = p.given("--force")
+  let mut reason = ""
+  if p.given("-b") {
+    if !force { return Err("-b is the reason for a forced release; add --force") }
+    reason = value_or_stdin(p.one("-b"), "-b")?
+  }
   let issue = records.fetch_issue(resolved)?
   let key = f"{issue.expand.team.key}-{issue.number}"
   let Some(held) = claims.fetch(issue.id)? else { return Err(f"{key} is not claimed") };
-  let result = claims.release(issue.id, held.id)?
+  let result = claims.release(issue.id, held.id, force, reason).map_err(|e| {
+    if strings.Contains(e, "needs force") {
+      f"{key}: {e} — 'lll issue release {key} --force -b \"why\"' takes it anyway and comments on the issue"
+    } else { e }
+  })?
   let assignment = if result.cleared_assignee { "cleared assignee" } else { "assignment unchanged" }
-  fmt.Println(f"Released {key} (was {result.member_name}'s); {assignment}")
+  let forced = if result.forced { "; forced, and commented on the issue" } else { "" }
+  fmt.Println(f"Released {key} (was {result.member_name}'s); {assignment}{forced}")
   Ok(())
 }
 
@@ -2237,7 +2272,7 @@ fn issue_next(input: flags.CommandInput) -> Result<(), string> {
     // the shell loop that composed it. A lost race exits non-zero, keyless.
     let result = claims.acquire(best.id, member.id).map_err(|e| {
       if strings.Contains(e, "already claimed by") {
-        f"{key}: {e} — 'lll issue release {key}' gives it back"
+        f"{key}: {e} — {held_elsewhere_hint(key)}"
       } else { e }
     })?
     fmt.Fprintln(os.Stderr, f"Claimed {key} for {result.member_name}")
