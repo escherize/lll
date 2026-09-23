@@ -1,4 +1,5 @@
 import "go:strings"
+import "models"
 
 // The web's two priority orders are derived from display.priorities() rather
 // than written out, so these pin the order and the labels a reader sees.
@@ -39,4 +40,45 @@ fn snippet_truncates_at_160_runes_keeping_characters_whole() {
   // sliced in half on its way to the hover preview.
   let long = strings.Repeat("é", 200)
   assert snippet(long) == strings.Repeat("é", 159) + "…"
+}
+
+// LLL-523: the board filters projects by record id, because its fetch does
+// not expand the relation; the chooser still speaks names and counts by id.
+#[test]
+fn the_board_project_filter_matches_by_id_and_counts_by_name() {
+  let alpha = models.Issue { id: "i1", project: "p-alpha", .. }
+  let loose = models.Issue { id: "i2", project: "", .. }
+  let flt = BoardFilter { projects: ["p-alpha"], .. }
+  assert issue_matches(alpha, flt)
+  assert !issue_matches(loose, flt)
+  assert issue_matches(loose, BoardFilter { .. })
+
+  let groups = filter_groups(
+    "/t/TST/",
+    [alpha, loose],
+    ViewQuery { project: "Alpha", .. },
+    [],
+    [],
+    [models.Project { id: "p-alpha", name: "Alpha", .. }, models.Project { id: "p-beta", name: "Beta", .. }],
+  )
+  let Some(g) = groups.find(|g| g.dim == "project") else {
+    assert false
+    return
+  }
+  assert g.opts.map(|o| f"{o.value}={o.count}").equals(["Alpha=1", "Beta=0"])
+  assert g.opts.map(|o| o.active).equals([true, false])
+  assert g.opts.map(|o| o.href).equals(["/t/TST/", "/t/TST/?project=Alpha%2CBeta"])
+}
+
+// LLL-523 review: a ?project= value the catalogue fetch did not return (it
+// fails soft to []) still gets its chip, counted 0, rather than filtering
+// the board with no affordance to undo it (TASK-116).
+#[test]
+fn a_project_filter_keeps_its_chip_when_the_catalogue_is_missing() {
+  let groups = filter_groups("/t/TST/", [], ViewQuery { project: "Alpha", .. }, [], [], [])
+  let Some(g) = groups.find(|g| g.dim == "project") else {
+    assert false
+    return
+  }
+  assert g.opts.map(|o| f"{o.value}={o.count}={o.active}").equals(["Alpha=0=true"])
 }

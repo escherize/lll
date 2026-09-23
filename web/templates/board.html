@@ -117,7 +117,7 @@ provenance.
 {{range .Cards}}{{template "card" .}}
 {{end}}</section>{{end}}
 
-{{define "card"}}<a class="card" id="issue-{{.Id}}" href="/issue/{{.Key}}" draggable="true" data-search="{{.Key}} {{.Title}}{{range .Labels}} {{.Name}}{{end}}{{if .Assignee}} {{.Assignee}}{{end}}" data-fkeys="|state:{{.State}}|prio:{{.Prio}}{{if .Assignee}}|assignee:{{.Assignee}}{{end}}{{range .Labels}}|label:{{.Name}}{{end}}|" data-show="(!$search || el.dataset.search.toLowerCase().includes($search.toLowerCase())) && $flt.every(f => el.dataset.fkeys.includes('|' + f + '|'))" data-on:dragstart="evt.dataTransfer.setData('text/plain', '{{.Key}}'); evt.dataTransfer.effectAllowed = 'move'" data-on:dragend="document.querySelectorAll('.card.drop-before').forEach(c => c.classList.remove('drop-before')); document.querySelectorAll('.column.drop-end').forEach(c => c.classList.remove('drop-end')); document.querySelectorAll('.column.drop-append').forEach(c => c.classList.remove('drop-append'))">
+{{define "card"}}<a class="card" id="issue-{{.Id}}" href="/issue/{{.Key}}" draggable="true" data-search="{{.Key}} {{.Title}}{{range .Labels}} {{.Name}}{{end}}{{if .Assignee}} {{.Assignee}}{{end}}" data-fkeys="|state:{{.State}}|prio:{{.Prio}}{{if .Assignee}}|assignee:{{.Assignee}}{{end}}{{range .Labels}}|label:{{.Name}}{{end}}{{if .ProjectId}}|project:{{.ProjectId}}{{end}}|" data-show="(!$search || el.dataset.search.toLowerCase().includes($search.toLowerCase())) && $flt.every(f => el.dataset.fkeys.includes('|' + f + '|'))" data-on:dragstart="evt.dataTransfer.setData('text/plain', '{{.Key}}'); evt.dataTransfer.effectAllowed = 'move'" data-on:dragend="document.querySelectorAll('.card.drop-before').forEach(c => c.classList.remove('drop-before')); document.querySelectorAll('.column.drop-end').forEach(c => c.classList.remove('drop-end')); document.querySelectorAll('.column.drop-append').forEach(c => c.classList.remove('drop-append'))">
 <span class="row1">{{.Key}}{{if .Emoji}}<span class="emoji">{{.Emoji}}</span>{{end}}<span class="flex"></span>{{template "priority-icon" .Prio}}</span>
 <span class="title">{{.Title}}</span>
 {{if .Labels}}<span class="row3">{{range .Labels}}<span class="chip"><span class="dot" style="background:{{if .Color}}{{.Color}}{{else}}var(--text-3){{end}}"></span>{{.Name}}</span>{{end}}</span>{{end}}
@@ -143,6 +143,8 @@ provenance.
      $flt still exists, seeded from the URL, but it guards rather than
      drives: /events delivers ONE unfiltered #board, and each card's
      data-show hides the cards the URL excludes until the next navigation.
+     A project key is the record id, not the name (LLL-523): the board
+     fetch does not expand the relation, so the card only knows the id.
      The localStorage write-back records the last view's query string, which
      data-init reads ONLY to migrate a pre-cookie browser into the
      saved-view cookie (LLL-375).
