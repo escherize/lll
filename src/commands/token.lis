@@ -456,6 +456,7 @@ fn create_bot_member_as(tok: string, name: string, owner: string) -> Result<mode
     email_visibility: true,
     kind: "bot",
     owner,
+    teams: [],
   }
   let payload = match json.Marshal(new_bot) {
     Ok(p) => p,

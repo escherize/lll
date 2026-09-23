@@ -468,7 +468,7 @@ fn create_as_superuser(
       f"member '{name}' already exists ({existing.email}) — drop --create and log in, or reset it with 'lll member set-password {name}'",
     )
   }
-  let _ = create_member_as(su, name, email, password)?
+  let _ = create_member_as(su, name, email, password, [])?
   Ok(())
 }
 

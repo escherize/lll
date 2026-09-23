@@ -40,7 +40,7 @@ fn projects_page(
     write_raw(w, projects_raw(vm, team.key))
     return
   }
-  let page = PageVM { rail: rail_vm("projects", me, team), page: vm }
+  let page = PageVM { rail: rail_for(r, "projects", me, team), page: vm }
   let html = match render("projects-page", page) {
     Ok(h) => h,
     Err(e) => {

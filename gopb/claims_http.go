@@ -26,6 +26,9 @@ func registerClaimRoutes(routes *router.Router[*core.RequestEvent], writes *issu
 		if err != nil {
 			return re.BadRequestError("invalid assignment update fields", err)
 		}
+		if err := issueInScope(re, re.Request.PathValue("issue")); err != nil {
+			return err
+		}
 		unlock := writes.acquire(re.Request.PathValue("issue"))
 		defer unlock()
 		outcome, err := updateAssignment(re.App, re.Request.PathValue("issue"), *body.ClaimID, fields)
@@ -50,6 +53,9 @@ func registerClaimRoutes(routes *router.Router[*core.RequestEvent], writes *issu
 			}
 			body.Member = re.Auth.Id
 		}
+		if err := issueInScope(re, re.Request.PathValue("issue")); err != nil {
+			return err
+		}
 		unlock := writes.acquire(re.Request.PathValue("issue"))
 		defer unlock()
 		outcome, err := acquireClaim(re.App, re.Request.PathValue("issue"), body.Member)
@@ -69,6 +75,9 @@ func registerClaimRoutes(routes *router.Router[*core.RequestEvent], writes *issu
 		}
 		// Any authenticated workspace member may release a hold, matching the
 		// existing CLI contract; naming the observed hold prevents stale release.
+		if err := issueInScope(re, re.Request.PathValue("issue")); err != nil {
+			return err
+		}
 		unlock := writes.acquire(re.Request.PathValue("issue"))
 		defer unlock()
 		outcome, err := releaseClaim(re.App, re.Request.PathValue("issue"), body.ClaimID)
