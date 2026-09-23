@@ -145,6 +145,11 @@ Without it they mint members on the real board. That is not hypothetical:
 68 of 71 members there are synthetic identities left behind by ephemeral runs
 (LLL-374), and members cannot be deleted without the superuser.
 
+The warning is about throwaway runs. A durable member for each long-lived
+worker in a fleet is fine, and it is the only way the claim locks between
+workers: agents sharing one member token share every claim (see the claim
+section of [lll](../lll/SKILL.md)).
+
 ## Finishing
 
 Leave the board and the remote in a state someone else can read:
