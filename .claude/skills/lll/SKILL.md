@@ -66,9 +66,11 @@ dead: its holder may still be editing.
 
 **A claim older than 24 hours is released for you** (LLL-183): the server
 sweeps hourly and frees holds that outlived the agent that took them, leaving
-the issue exactly as a deliberate release would. Nothing announces it, so if
-you expect to hold an issue for longer than a day, say so on the issue - and
-if a claim you were relying on has vanished, this is why.
+the issue exactly as a deliberate release would. On an issue that is not done
+or cancelled, the sweep leaves a comment naming the holder and how long they
+held it (LLL-452); read the comments if a claim you were relying on has
+vanished. The 24 hours is fixed on the server, not configurable, so if you
+expect to hold an issue for longer than a day, say so on the issue.
 
 `lll issue start KEY-12` sets in-progress without changing Git. To create a
 branch and record its host/path on the issue, use `lll issue start KEY-12 --branch`.

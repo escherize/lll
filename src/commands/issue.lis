@@ -272,6 +272,22 @@ fn issue_update_spec() -> Slice<flags.Flag> {
       help: "one emoji for the issue, shown on the card, the issue page and\nthe list; pass \"\" to clear it",
       ..,
     },
+    flags.Flag {
+      name: "--add-label",
+      value: true,
+      hint: "name",
+      repeat: true,
+      help: "add a label and keep the others; repeatable (not with --label)",
+      ..,
+    },
+    flags.Flag {
+      name: "--remove-label",
+      value: true,
+      hint: "name",
+      repeat: true,
+      help: "remove a label and keep the others; repeatable (not with --label)",
+      ..,
+    },
   ]...))
 }
 
@@ -1218,6 +1234,8 @@ fn update(input: flags.CommandInput) -> Result<(), string> {
   if p.given("--priority") { priority = check_priority(p.one("--priority"))? }
   let assignee_name = p.one("--assignee")
   let label_names = p.all("--label")
+  let add_label_names = p.all("--add-label")
+  let remove_label_names = p.all("--remove-label")
   let project_name = p.one("--project")
   let title = p.one("--title")
   let project_set = p.given("--project")
@@ -1253,7 +1271,12 @@ fn update(input: flags.CommandInput) -> Result<(), string> {
   if since != "" && assignee_name != "" {
     return Err("--if-unchanged-since cannot be combined with --assignee: assignment writes go through the claim route, which arbitrates with its own claim stamp — run them as two updates")
   }
-  if state == "" && priority < 0 && assignee_name == "" && label_names.is_empty() && !project_set && !title_set && !description_set && !replace_set && !append_set && !emoji_set {
+  // LLL-513: --label writes the whole set, the other two edit it. Together
+  // there is no single answer to what the set should be.
+  if !label_names.is_empty() && (!add_label_names.is_empty() || !remove_label_names.is_empty()) {
+    return Err("--label replaces the whole label set, so it cannot be combined with --add-label/--remove-label — use --add-label/--remove-label to change some labels and keep the rest, or --label alone to set the exact list")
+  }
+  if state == "" && priority < 0 && assignee_name == "" && label_names.is_empty() && add_label_names.is_empty() && remove_label_names.is_empty() && !project_set && !title_set && !description_set && !replace_set && !append_set && !emoji_set {
     return Err(f"nothing to update — pass at least one flag\nusage: {usage}")
   }
 
@@ -1325,6 +1348,29 @@ fn update(input: flags.CommandInput) -> Result<(), string> {
     }
     fields = fields.append(f"\"labels\":{encoded}")
     changed = changed.append(f"labels={strings.Join(label_names, "+")}")
+  }
+  // LLL-513: relation modifiers change only the named labels, so a label
+  // another writer adds at the same time is kept. The server holds the
+  // issue's lock across the request.
+  let mut add_ids: Slice<string> = []
+  for name in add_label_names {
+    add_ids = add_ids.append(records.resolve_label(issue.team, name)?.id)
+  }
+  let mut remove_ids: Slice<string> = []
+  for name in remove_label_names {
+    let id = records.resolve_label(issue.team, name)?.id
+    if add_ids.contains(id) {
+      return Err(f"--add-label and --remove-label both name '{name}' — pass it to only one of them")
+    }
+    remove_ids = remove_ids.append(id)
+  }
+  if !add_ids.is_empty() {
+    fields = fields.append("\"labels+\":" + json_ids(add_ids)?)
+    changed = changed.append(f"labels+={strings.Join(add_label_names, "+")}")
+  }
+  if !remove_ids.is_empty() {
+    fields = fields.append("\"labels-\":" + json_ids(remove_ids)?)
+    changed = changed.append(f"labels-={strings.Join(remove_label_names, "+")}")
   }
   if title_set { fields = fields.append("\"title\":" + json_quote(title)?); changed = changed.append("title") }
   if description_set {
@@ -1979,6 +2025,14 @@ fn json_quote(value: string) -> Result<string, string> {
   }
 }
 
+/// JSON-encode a list of record ids.
+fn json_ids(ids: Slice<string>) -> Result<string, string> {
+  match json.Marshal(ids) {
+    Ok(b) => Ok(b as string),
+    Err(e) => Err(f"encoding ids: {e}"),
+  }
+}
+
 
 // ------------------------------------------------------------- doc links
 
@@ -1989,17 +2043,14 @@ fn fetch_issue_docs(issue_id: string) -> Result<Slice<models.Doc>, string> {
   fetch_docs(f"issues.id ?= {query.quote(issue_id)}", "slug", "")
 }
 
-fn set_doc_issues(
-  doc: models.Doc,
-  issue_ids: Slice<string>,
-) -> Result<(), string> {
-  let encoded = match json.Marshal(issue_ids) {
-    Ok(b) => b as string,
-    Err(e) => return Err(f"encoding issues: {e}"),
-  }
+/// Send one edge as a relation modifier ("issues+" or "issues-"), never the
+/// whole array (LLL-513). Writing back a locally edited copy of the array let
+/// two concurrent links to one doc drop an edge. The server applies the
+/// modifier under a per-record lock (gopb serializeRecordUpdates).
+fn modify_doc_issues(doc: models.Doc, modifier: string, issue_id: string) -> Result<(), string> {
   let _ = pb.patch(
     f"/api/collections/docs/records/{doc.id}",
-    "{\"issues\":" + encoded + "}",
+    "{" + json_quote(modifier)? + ":[" + json_quote(issue_id)? + "]}",
   )?
   Ok(())
 }
@@ -2044,7 +2095,7 @@ fn link_issue(id: string, slug: string, usage: string) -> Result<(), string> {
     fmt.Println(f"{key} is already linked to {d.slug}")
     return Ok(())
   }
-  set_doc_issues(d, d.issues.append(issue.id))?
+  modify_doc_issues(d, "issues+", issue.id)?
   fmt.Println(f"Linked {key} -> {d.slug}")
   Ok(())
 }
@@ -2067,14 +2118,10 @@ fn unlink_issue(id: string, slug: string, usage: string) -> Result<(), string> {
   let d = fetch_doc(team, slug)?
   cross_team_link(issue, team, d)?
 
-  let mut remaining: Slice<string> = []
-  for x in d.issues {
-    if x != issue.id { remaining = remaining.append(x) }
-  }
-  if remaining.length() == d.issues.length() {
+  if d.issues.find(|x| x == issue.id).is_none() {
     return Err(f"{key} is not linked to {d.slug} — see 'lll doc view {d.slug}'")
   }
-  set_doc_issues(d, remaining)?
+  modify_doc_issues(d, "issues-", issue.id)?
   fmt.Println(f"Unlinked {key} from {d.slug}")
   Ok(())
 }

@@ -1131,6 +1131,26 @@ out=$(LLL_URL=$URL LLL_TEAM=ENG "$LIN" issue list --label chore)
 assert_contains "$out" "ENG-6" "label filter finds updated issue"
 assert_contains "$out" "ENG-8" "label filter matches multi-relation membership"
 
+# --- --add-label / --remove-label edit the set without replacing it (LLL-513) ---
+out=$(LLL_URL=$URL "$LIN" issue update ENG-6 --add-label bug)
+assert_contains "$out" "labels+=bug" "update --add-label output"
+assert_contains "$(LLL_URL=$URL "$LIN" issue view ENG-6)" "Labels:    chore, bug" "--add-label keeps the other labels"
+out=$(LLL_URL=$URL "$LIN" issue update ENG-6 --remove-label chore)
+assert_contains "$out" "labels-=chore" "update --remove-label output"
+assert_contains "$(LLL_URL=$URL "$LIN" issue view ENG-6)" "Labels:    bug" "--remove-label keeps the other labels"
+set +e
+out=$(LLL_URL=$URL "$LIN" issue update ENG-6 --label chore --add-label bug 2>&1)
+rc=$?
+set -e
+[ "$rc" -ne 0 ] || fail "--label with --add-label: expected nonzero exit"
+assert_contains "$out" "cannot be combined with --add-label/--remove-label" "--label with --add-label is refused"
+assert_contains "$out" "or --label alone" "the refusal names what to do instead"
+# With --assignee the edit goes through the claim route; the modifiers ride it.
+assignee=$(LLL_URL=$URL "$LIN" issue view ENG-6 --json | jq -r '.expand.assignee.name // "none"')
+out=$(LLL_URL=$URL "$LIN" issue update ENG-6 --assignee "$assignee" --add-label chore --remove-label bug)
+assert_contains "$out" "labels+=chore, labels-=bug" "modifiers ride the assignment route"
+assert_contains "$(LLL_URL=$URL "$LIN" issue view ENG-6)" "Labels:    chore" "assignment route applied both modifiers"
+
 # --- project view lists its issues ---
 out=$(LLL_URL=$URL LLL_TEAM=ENG "$LIN" project view "Auth Revamp")
 assert_contains "$out" "Name:    Auth Revamp" "project view name"
@@ -1768,6 +1788,31 @@ env LLL_URL=$URL "$LIN" issue delete "$key" --force >/dev/null
 n=$(LLL_URL=$URL LLL_TEAM=ENG "$LIN" doc view race-found --json | jq -r '.issues | length')
 [ "$n" = "0" ] || fail "deleting a linked issue should unset the relation, got: $n"
 assert_contains "$(LLL_URL=$URL LLL_TEAM=ENG "$LIN" doc view race-found)" "race-found Race found" "doc survives a linked issue's deletion"
+
+# Concurrent links to one doc all survive (LLL-513). Link used to write back
+# the whole locally edited array, so the last writer dropped the others.
+race_keys=""
+for i in 1 2 3 4 5 6; do
+  k=$(LLL_URL=$URL LLL_TEAM=ENG "$LIN" issue create -t "Concurrent link $i" | sed -n 's/^Created \([A-Z]*-[0-9]*\).*/\1/p')
+  [ -n "$k" ] || fail "concurrent-link fodder create did not print a key"
+  race_keys="$race_keys $k"
+done
+race_pids=""
+for k in $race_keys; do
+  env LLL_URL=$URL LLL_TEAM=ENG "$LIN" issue link "$k" race-found >/dev/null &
+  race_pids="$race_pids $!"
+done
+for pid in $race_pids; do wait "$pid" || fail "a concurrent link failed"; done
+n=$(LLL_URL=$URL LLL_TEAM=ENG "$LIN" doc view race-found --json | jq -r '.issues | length')
+[ "$n" = "6" ] || fail "six concurrent links should all survive, got: $n"
+race_pids=""
+for k in $race_keys; do
+  env LLL_URL=$URL LLL_TEAM=ENG "$LIN" issue unlink "$k" race-found >/dev/null &
+  race_pids="$race_pids $!"
+done
+for pid in $race_pids; do wait "$pid" || fail "a concurrent unlink failed"; done
+n=$(LLL_URL=$URL LLL_TEAM=ENG "$LIN" doc view race-found --json | jq -r '.issues | length')
+[ "$n" = "0" ] || fail "six concurrent unlinks should leave none, got: $n"
 
 # --- findings (TASK-103): authorship with area/paths, near by path, list,
 # issue view surfacing. A finding is a doc with kind=finding; retrieval is
