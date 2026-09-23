@@ -141,6 +141,13 @@ Startup is acknowledged on stderr as 'watch: ready' only after the server
 accepts the subscription. With --json, stdout contains only NDJSON events;
 connection loss and reconnection messages also go to stderr.
 
+The stream is live-only: it delivers events from the moment the server
+accepts the subscription, and a reconnect resubscribes without replaying
+what changed while disconnected. A gap looks exactly like a quiet board.
+If you need every change, note the time of the last event you handled and,
+on start and after each reconnect, catch up with
+'lll issue list --since <that time>' (see its help for overlap and limits).
+
 With --ready, the stream shows only the ready agenda (LLL-395): open issues
 (todo or backlog) whose blockers are all done or cancelled. Readiness is
 computed client-side against a snapshot of the team's issues taken at startup

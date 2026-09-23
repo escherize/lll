@@ -120,6 +120,13 @@ value is in the pattern being recognisable:
 `--label`, `--project`, `--search`, `--sort`, `--limit`, and `--json`. Other
 read commands expose their supported filters in `--help`.
 
+**`lll watch` is live-only; reconcile on start.** It streams from the moment
+the subscription is accepted, and a reconnect does not replay what it missed,
+so a gap looks exactly like a quiet board. A long-running agent keeps the time
+of the last event it handled and, on every start and reconnect, runs
+`lll issue list --since <that time>` before trusting the stream. A fleet
+coordinator missed three cards reaching done by relying on watch alone.
+
 **Make retried creates idempotent.** Use `lll issue create --idempotency-key KEY`
 when a run might lose the creation response. Derive the key once from the
 intent, for example `finding:member-revocation-keeps-realtime-open`, and keep
