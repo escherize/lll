@@ -57,7 +57,8 @@ The part people miss is what a worktree does NOT isolate: the stash stack, the
 refs, and the remote are shared. Never `git stash` here.
 
 Hands to stage 3: a worktree, a branch cut from the commit you meant, and a
-claim on the board that is the actual lock.
+claim on the board that is the actual lock - between members. Agents sharing
+one token are one member; parallel-work says what to do instead.
 
 ## 3. Build - the codebase itself
 
