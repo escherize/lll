@@ -208,10 +208,16 @@ fn filter_groups(
   for l in csv(q.label) {
     if !label_names.contains(l) { label_names = label_names.append(l) }
   }
-  // Only the team's own projects: the page handler already dropped any
-  // ?project= value the catalogue cannot name, so there is no stray to add
-  // back. No "No project" option (LLL-523): /issues offers none either.
-  let project_names = projects.map(|p| p.name)
+  // The team's projects, plus any URL value the catalogue fetch did not
+  // return (it fails soft to []), so an applied filter always keeps its chip
+  // (TASK-116). A stray has no id, so it counts 0. No "No project" option
+  // (LLL-523): /issues offers none either. Names map to ids once here, so
+  // the count below is one lookup per (value, issue), not a catalogue scan.
+  let mut project_names = projects.map(|p| p.name)
+  for p in csv(q.project) {
+    if !project_names.contains(p) { project_names = project_names.append(p) }
+  }
+  let project_ids = Map.from(projects.map(|p| (p.name, p.id)))
   let mut prios = prios_by_urgency()
   for p in csv(q.prio) {
     if !prios.contains(p) { prios = prios.append(p) }
@@ -222,7 +228,10 @@ fn filter_groups(
     opt_group(base, "label", "Label", label_names, issues, q,
       |i, v| i.expand.labels.any(|l| l.name == v), |v| v),
     opt_group(base, "project", "Project", project_names, issues, q,
-      |i, v| projects.any(|p| p.name == v && p.id == i.project), |v| v),
+      |i, v| match project_ids.get(v) {
+        Some(id) => id == i.project,
+        None => false,
+      }, |v| v),
     opt_group(base, "prio", "Priority", prios, issues, q,
       |i, v| display.priority_name(i.priority) == v, prio_label),
     opt_group(base, "state", "State", query.states(), issues, q,

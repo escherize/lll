@@ -992,7 +992,13 @@ assert_contains "$(column "$pj_board" todo)" "$PJ_ALPHA_KEY" \
   "a ?project= board keeps that project's cards"
 assert_not_contains "$(column "$pj_board" todo)" "$PJ_BETA_KEY" \
   "a ?project= board drops another project's cards"
-assert_not_contains "$(column "$pj_board" todo)" 'href="/issue/ENG-1"' \
+# ENG-2 is a todo card with no project (the col_order check above pins it in
+# todo); the precondition keeps this assert from passing on an absent card.
+assert_contains "$(column "$(wcurl -sf "$WEB/")" todo)" 'href="/issue/ENG-2"' \
+  "precondition: ENG-2 is a todo card on the unfiltered board"
+[ "$("$LIN" issue view ENG-2 --json | jq -r .project)" = "" ] \
+  || fail "precondition: ENG-2 must have no project"
+assert_not_contains "$(column "$pj_board" todo)" 'href="/issue/ENG-2"' \
   "a ?project= board drops cards with no project"
 assert_contains "$pj_board" "|project:$PJ_ALPHA_ID|" \
   "a card in a project carries the key its data-show matches"

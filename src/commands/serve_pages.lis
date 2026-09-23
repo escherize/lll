@@ -180,6 +180,9 @@ fn board_page(w: http.ResponseWriter, r: Ref<http.Request>, team: models.Team, m
   }
   // Projects filter by id (LLL-523): the URL speaks names, as /issues does,
   // and the resolved id is what a board issue carries without an expand.
+  // Split on commas like every board dimension, which is a known limit: a
+  // project named "Q3, infra" cannot be filtered here, though /issues takes
+  // ?project= as one value. Labels share the limit.
   let mut projects: Slice<string> = []
   let mut project_ids: Slice<string> = []
   for p in csv(raw.project) {

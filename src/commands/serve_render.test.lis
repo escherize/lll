@@ -69,3 +69,16 @@ fn the_board_project_filter_matches_by_id_and_counts_by_name() {
   assert g.opts.map(|o| o.active).equals([true, false])
   assert g.opts.map(|o| o.href).equals(["/t/TST/", "/t/TST/?project=Alpha%2CBeta"])
 }
+
+// LLL-523 review: a ?project= value the catalogue fetch did not return (it
+// fails soft to []) still gets its chip, counted 0, rather than filtering
+// the board with no affordance to undo it (TASK-116).
+#[test]
+fn a_project_filter_keeps_its_chip_when_the_catalogue_is_missing() {
+  let groups = filter_groups("/t/TST/", [], ViewQuery { project: "Alpha", .. }, [], [], [])
+  let Some(g) = groups.find(|g| g.dim == "project") else {
+    assert false
+    return
+  }
+  assert g.opts.map(|o| f"{o.value}={o.count}={o.active}").equals(["Alpha=0=true"])
+}
