@@ -108,6 +108,7 @@ fn card_vm(issue: models.Issue) -> CardVM {
     updated: display.relative(issue.updated),
     snippet: snippet(issue.description),
     work_branch: issue.work_branch,
+    project_id: issue.project,
     // The state half of the staleness rule; board_card ORs in the claim
     // half. Rows built straight from card_vm never show the site anyway.
     work_stale: work_site_stale(issue.state, true),
@@ -137,6 +138,10 @@ struct BoardFilter {
   assignees: Slice<string>,
   labels: Slice<string>,
   prios: Slice<string>,
+  // Project IDS, not names (LLL-523): the board fetch does not expand
+  // `project` (each relation is another join on every load and broadcast),
+  // and an issue carries its project's id either way.
+  projects: Slice<string>,
 }
 
 /// Does one issue pass the board's current filter? Every dimension ANDs;
@@ -146,6 +151,7 @@ fn issue_matches(i: models.Issue, f: BoardFilter) -> bool {
     && (f.assignees.is_empty() || f.assignees.contains(i.expand.assignee.name))
     && (f.labels.is_empty() || issue_has_any_label(i, f.labels))
     && (f.prios.is_empty() || f.prios.contains(display.priority_name(i.priority)))
+    && (f.projects.is_empty() || f.projects.contains(i.project))
 }
 
 fn issue_has_any_label(i: models.Issue, names: Slice<string>) -> bool {
@@ -190,6 +196,7 @@ fn filter_groups(
   q: ViewQuery,
   members: Slice<string>,
   labels: Slice<string>,
+  projects: Slice<models.Project>,
 ) -> Slice<FilterGroupVM> {
   let mut assignees: Slice<string> = []
   assignees = assignees.append(members...)
@@ -201,6 +208,10 @@ fn filter_groups(
   for l in csv(q.label) {
     if !label_names.contains(l) { label_names = label_names.append(l) }
   }
+  // Only the team's own projects: the page handler already dropped any
+  // ?project= value the catalogue cannot name, so there is no stray to add
+  // back. No "No project" option (LLL-523): /issues offers none either.
+  let project_names = projects.map(|p| p.name)
   let mut prios = prios_by_urgency()
   for p in csv(q.prio) {
     if !prios.contains(p) { prios = prios.append(p) }
@@ -210,6 +221,8 @@ fn filter_groups(
       |i, v| i.expand.assignee.name == v, |v| v),
     opt_group(base, "label", "Label", label_names, issues, q,
       |i, v| i.expand.labels.any(|l| l.name == v), |v| v),
+    opt_group(base, "project", "Project", project_names, issues, q,
+      |i, v| projects.any(|p| p.name == v && p.id == i.project), |v| v),
     opt_group(base, "prio", "Priority", prios, issues, q,
       |i, v| display.priority_name(i.priority) == v, prio_label),
     opt_group(base, "state", "State", query.states(), issues, q,

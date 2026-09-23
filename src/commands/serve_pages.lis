@@ -178,6 +178,19 @@ fn board_page(w: http.ResponseWriter, r: Ref<http.Request>, team: models.Team, m
       Err(e) => { if err == "" { err = e } },
     }
   }
+  // Projects filter by id (LLL-523): the URL speaks names, as /issues does,
+  // and the resolved id is what a board issue carries without an expand.
+  let mut projects: Slice<string> = []
+  let mut project_ids: Slice<string> = []
+  for p in csv(raw.project) {
+    match records.resolve_project(team_id, p) {
+      Ok(found) => {
+        projects = projects.append(p)
+        project_ids = project_ids.append(found.id)
+      },
+      Err(e) => { if err == "" { err = e } },
+    }
+  }
   let mut prios: Slice<string> = []
   for p in csv(raw.prio) {
     if display.priority_value(p).is_some() {
@@ -209,10 +222,12 @@ fn board_page(w: http.ResponseWriter, r: Ref<http.Request>, team: models.Team, m
   // "Bare" means the URL says nothing the board can render — the same test
   // data-init used to apply to the localStorage restore. Any other URL is a
   // full view statement (TASK-94): it overrides the cookie, and the write
-  // below clears or rewrites it to match. project and sort are /issues
-  // dimensions the board drops, so they leave a URL bare, exactly as they
-  // left the canonical query string empty before.
-  let bare = raw.state == "" && raw.assignee == "" && raw.label == "" && raw.prio == "" && raw.order == ""
+  // below clears or rewrites it to match. sort is an /issues dimension the
+  // board drops, so it leaves a URL bare, exactly as it leaves the canonical
+  // query string empty. project used to be dropped too; since LLL-523 the
+  // board filters on it, so a ?project= URL is a view statement like ?label=.
+  let bare = raw.state == "" && raw.assignee == "" && raw.label == "" && raw.prio == ""
+    && raw.project == "" && raw.order == ""
   if !url_says_hide && bare {
     if let Some(cv) = cookie_named(r, view_cookie_name) {
       view_restored = true
@@ -242,11 +257,12 @@ fn board_page(w: http.ResponseWriter, r: Ref<http.Request>, team: models.Team, m
     assignee: join_csv(assignees),
     label: join_csv(labels),
     prio: join_csv(prios),
+    project: join_csv(projects),
     order: order_param,
     hide: join_csv(hidden),
-    .. // `project` and `sort` are /issues dimensions; the board drops them.
+    .. // `sort` is an /issues dimension; the board drops it.
   }
-  let flt = BoardFilter { states, assignees, labels, prios }
+  let flt = BoardFilter { states, assignees, labels, prios, projects: project_ids }
 
   // Cookie maintenance (LLL-375). The URL's hide — including an explicit
   // empty ?hide= — always wins and rewrites the cookie; any other param'd
@@ -281,6 +297,7 @@ fn board_page(w: http.ResponseWriter, r: Ref<http.Request>, team: models.Team, m
   for a in assignees { pairs = pairs.append(f"assignee:{a}") }
   for l in labels { pairs = pairs.append(f"label:{l}") }
   for p in prios { pairs = pairs.append(f"prio:{p}") }
+  for p in project_ids { pairs = pairs.append(f"project:{p}") }
 
   let mut active = "board"
   if me != "" && assignees.contains(me) { active = "mine" }
@@ -298,6 +315,7 @@ fn board_page(w: http.ResponseWriter, r: Ref<http.Request>, team: models.Team, m
       q,
       fetch_member_names().unwrap_or([]),
       fetch_label_names(team_id).unwrap_or([]),
+      records.fetch_projects(team_id).unwrap_or([]),
     ),
     flt_seed: flt_seed_js(pairs),
     query_str,

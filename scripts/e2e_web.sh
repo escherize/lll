@@ -971,6 +971,40 @@ got=$(col_order "$(cat "$EVENTS_FILE")" todo)
 [ "$got" = "ENG-4,ENG-6,ENG-5,ENG-2" ] \
   || fail "priority-scoped SSE morph not in priority order: got '$got'"
 
+# LLL-523: Project is a board dimension like the others. The URL speaks the
+# project's NAME (the /issues vocabulary); the card and the $flt seed key on
+# the record id, because the board fetch does not expand the relation.
+"$LIN" project create -n "Board Alpha" >/dev/null
+"$LIN" project create -n "Board Beta" >/dev/null
+PJ_ALPHA_KEY=$("$LIN" issue create -t "Alpha board card" --project "Board Alpha" --json \
+  | jq -r '.expand.team.key + "-" + (.number | tostring)')
+PJ_BETA_KEY=$("$LIN" issue create -t "Beta board card" --project "Board Beta" --json \
+  | jq -r '.expand.team.key + "-" + (.number | tostring)')
+PJ_ALPHA_ID=$(curl -sf -G -H "$AUTH_HDR" "$LLL_URL/api/collections/projects/records" \
+  --data-urlencode "filter=(name='Board Alpha')" | jq -r '.items[0].id')
+[ -n "$PJ_ALPHA_ID" ] && [ "$PJ_ALPHA_ID" != null ] || fail "resolving the Board Alpha project id"
+pj_board=$(wcurl -sf "$WEB/?project=Board+Alpha")
+assert_contains "$pj_board" '<span class="dim">Project</span> Board Alpha <svg' \
+  "a ?project= board renders its chip"
+assert_contains "$pj_board" "data-signals:flt=\"[&#34;project:$PJ_ALPHA_ID&#34;]\"" \
+  "a ?project= board seeds the filter signal with the project id"
+assert_contains "$(column "$pj_board" todo)" "$PJ_ALPHA_KEY" \
+  "a ?project= board keeps that project's cards"
+assert_not_contains "$(column "$pj_board" todo)" "$PJ_BETA_KEY" \
+  "a ?project= board drops another project's cards"
+assert_not_contains "$(column "$pj_board" todo)" 'href="/issue/ENG-1"' \
+  "a ?project= board drops cards with no project"
+assert_contains "$pj_board" "|project:$PJ_ALPHA_ID|" \
+  "a card in a project carries the key its data-show matches"
+assert_contains "$(wcurl -sf "$WEB/")" 'href="/t/ENG/?project=Board&#43;Beta"' \
+  "the chooser offers the team's projects as navigations"
+nopj=$(wcurl -sf "$WEB/?project=No+Such+Project")
+assert_contains "$nopj" "no project named" "an unknown project is said out loud in the flash"
+# A ?project= URL is a view statement, so it clears the hide-only saved view
+# just as ?state= does rather than leaving the URL "bare" (LLL-375).
+curl -s -D - -o /dev/null -H "Cookie: lll_board=$BOARD_TOKEN; lll_view_ENG=done" "$WEB/t/ENG/?project=Board+Alpha" \
+  | grep -qi "^set-cookie: lll_view_ENG=;" || fail "a ?project= URL did not clear the saved view"
+
 # --- browser-level: CLI create appears on an open board without reload ---
 if command -v playwright-cli >/dev/null 2>&1; then
   # Read the page, and read it again until it says what we are waiting for.
@@ -1209,6 +1243,37 @@ if command -v playwright-cli >/dev/null 2>&1; then
   assert_contains "$(seq_probe)" '"chips":0' "Clear resets the board"
   seq_goto "$WEB/"
   assert_contains "$(seq_probe)" '"chips":0' "Clear also cleared the last-view record"
+
+  # --- LLL-523: a project filter survives a live broadcast ---
+  # /events sends ONE unfiltered #board, so cards from another project (and
+  # cards with none) do arrive in the DOM; only the card's data-show, keyed
+  # on the project id the URL seeded into $flt, keeps them hidden. Beta and
+  # the loose card are created BEFORE the Alpha one: broadcasts land in
+  # order, so once the Alpha card shows, the other two have been morphed in.
+  seq_goto "$WEB/?project=Board+Alpha"
+  pj_before=$(seq_probe)
+  assert_contains "$pj_before" '"chips":1' "LLL-523: ?project= renders its chip in the browser"
+  assert_contains "$pj_before" '"visible":1' "LLL-523: ?project= shows only that project's card"
+  "$LIN" issue create -t "Beta born while filtered" --project "Board Beta" >/dev/null
+  "$LIN" issue create -t "Loose born while filtered" >/dev/null
+  "$LIN" issue create -t "Alpha born while filtered" --project "Board Alpha" >/dev/null
+  pj_live=$(page_until \
+    "() => { const shown = t => { const c = [...document.querySelectorAll('.card')].find(c => c.querySelector('.title')?.textContent === t); return c ? (c.offsetParent !== null ? 'shown' : 'hidden') : 'absent' }; return JSON.stringify({alpha: shown('Alpha born while filtered'), beta: shown('Beta born while filtered'), loose: shown('Loose born while filtered'), navs: performance.getEntriesByType('navigation').length}) }" \
+    '"alpha":"shown"')
+  assert_contains "$pj_live" '"alpha":"shown"' "LLL-523: a broadcast card in the project shows"
+  assert_contains "$pj_live" '"beta":"hidden"' "LLL-523: a broadcast card in another project stays hidden"
+  assert_contains "$pj_live" '"loose":"hidden"' "LLL-523: a broadcast card with no project stays hidden"
+  assert_contains "$pj_live" '"navs":1' "LLL-523: the broadcast arrived without a reload"
+  # Clear drops the project with everything else; back walks to the filter.
+  playwright-cli -s="$BROWSER_SESSION" click ".flt-clear" >/dev/null 2>&1 \
+    || fail "playwright: clicking Clear on the project filter"
+  sleep 0.5
+  assert_contains "$(seq_probe)" '"chips":0' "LLL-523: Clear drops the project filter"
+  playwright-cli -s="$BROWSER_SESSION" go-back >/dev/null 2>&1 || fail "playwright: go-back"
+  sleep 0.5
+  pj_back=$(seq_probe)
+  assert_contains "$pj_back" '"chips":1' "LLL-523: back restores the project chip"
+  assert_contains "$pj_back" '"visible":2' "LLL-523: back restores the project-filtered cards"
 
   # --- /search filters as you type, and the X clears it (task-110) ---
   # A SEQUENCE, not an end state: the probe on <body> survives a fragment
