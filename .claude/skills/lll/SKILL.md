@@ -45,6 +45,16 @@ lll issue close KEY-12
 A successful claim is immediately visible on the server; no Git push is needed.
 If another member holds it, the command exits nonzero without taking over.
 Claiming your own issue again succeeds and says it is already yours.
+
+**The claim is exclusive per member, not per agent.** Agents that share one
+member token share every claim: each one's `claim` succeeds with "already
+yours" and exits 0, so the claim does not stop two of them working the same
+issue (finding `shared-member-claims-do-not-isolate-sessions`). For a fleet,
+give each long-lived worker its own member (`lll member add <name>`, then
+`lll token create <name>` with admin credentials). If workers must share a token, each one reads
+`lll issue view KEY-12` (claim holder, comments, recorded work site) before it
+starts, and skips any issue another session is already on.
+
 `--assignee` cannot move a claimed issue to anyone but the holder: the holder
 releases it first, or you force-release a dead hold (below).
 `lll whoami` shows the authenticated identity. `lll issue release KEY-12`
