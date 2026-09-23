@@ -3,6 +3,17 @@ import "query"
 import "models"
 import "go:strings"
 
+#[test]
+fn description_replacement_splits_once_after_unicode_without_trimming() {
+  let assert Ok((old, new)) = parse_description_replacement(" café =日本=x ")
+  assert old == " café "
+  assert new == "日本=x "
+  let assert Ok((old, new)) = parse_description_replacement("=")
+  assert old == ""
+  assert new == ""
+  assert parse_description_replacement("missing separator").is_err()
+}
+
 // Unit cover for the pure helpers in issue.lis. Everything here is a function
 // of its arguments alone — no PocketBase, no config, no git.
 //

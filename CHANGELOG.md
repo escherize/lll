@@ -4,6 +4,14 @@ All notable changes to lll. The format follows Keep a Changelog; versions
 follow SemVer, with 0.x meaning the CLI surface can still move between
 minors. Issue keys are on the project's own board (`lll issue view KEY`).
 
+## [Unreleased]
+
+### Changed
+
+- `issue update --description-replace "old=new"` replaces exactly one match
+  and composes with `--description-append`. The legacy old/new pair remains
+  accepted for one release, hidden from help, with a deprecation hint (LLL-506).
+
 ## [0.6.1] - 2026-09-19
 
 Local boards can now be disposable or shared with a small team without

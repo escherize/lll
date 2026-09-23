@@ -2339,21 +2339,91 @@ set -e
 assert_contains "$out" "changed since $stamp" "the refusal names the stale stamp"
 assert_contains "$out" "issue view $CKEY --json" "and where to read the new one"
 [ "$(env $E "$LIN" issue view "$CKEY" --json | jq -r '.priority')" = 3 ] || fail "the refused edit must not land"
-out=$(env $E "$LIN" issue update "$CKEY" -d "The picker loses focus. Then the picker reopens.")
-out=$(env $E "$LIN" issue update "$CKEY" --description-replace-old "loses focus" --description-replace-new "keeps focus")
-assert_contains "$out" "description (replaced)" "replace says it replaced"
-assert_contains "$(env $E "$LIN" issue view "$CKEY" --raw)" "The picker keeps focus." "the one occurrence was replaced"
-set +e
-out=$(env $E "$LIN" issue update "$CKEY" --description-replace-old "picker" --description-replace-new "chooser" 2>&1)
-set -e
-assert_contains "$out" "matched 2 times" "an ambiguous replace is refused with the count"
-out=$(env $E "$LIN" issue update "$CKEY" --description-append "Appended line.")
-assert_contains "$out" "description (appended)" "append says it appended"
-assert_contains "$(env $E "$LIN" issue view "$CKEY" --raw)" "Appended line." "the line was appended"
-set +e
-out=$(env $E "$LIN" issue update "$CKEY" --description-replace-old x 2>&1)
-set -e
-assert_contains "$out" "go together" "half a replace is refused"
+env $E python3 - "$LIN" "$CKEY" <<'PY'
+import json
+import subprocess
+import sys
+
+binary, key = sys.argv[1:]
+hint = "--description-replace-old/--description-replace-new are deprecated; use --description-replace old=new"
+
+def run(*args, code=0):
+    result = subprocess.run([binary, *args], text=True, capture_output=True)
+    assert result.returncode == code, (args, result.returncode, result.stdout, result.stderr)
+    return result
+
+def record():
+    return json.loads(run("issue", "view", key, "--json").stdout)
+
+def update(*args, code=0):
+    return run("issue", "update", key, *args, code=code)
+
+def reset(text):
+    update("-d", text)
+
+def refuse(args, message):
+    before = record()
+    result = update(*args, "--title", "must not land", code=1)
+    assert message in result.stderr, result.stderr
+    assert record() == before, (args, before, record())
+    return result
+
+reset("café start")
+result = update("--description-replace", "café=日本=x", "--description-append", "tail")
+assert "description (replaced, appended)" in result.stdout, result.stdout
+assert result.stderr == "", result.stderr
+assert record()["description"] == "日本=x start\ntail"
+
+reset("a")
+update("--description-replace=a=b=c")
+assert record()["description"] == "b=c"
+reset("remove me")
+update("--description-replace", "remove =")
+assert record()["description"] == "me"
+
+reset("a a")
+refuse(["--description-replace", "a=b"], "--description-replace matched 2 times")
+refuse(["--description-replace", "missing=b"], "--description-replace matched 0 times")
+for args, message in [
+    (["--description-replace", "missing-equals"], "requires old=new"),
+    (["--description-replace", "a=b", "--description-replace", "b=c"], "may only be given once"),
+    (["--description-replace", "a=b", "--description-replace-old", "a"], "cannot be combined"),
+    (["--description-replace", "a=b", "--description-replace-new", "b"], "cannot be combined"),
+    (["--description-replace", "a=b", "--description-replace-old", "a", "--description-replace-new", "b"], "cannot be combined"),
+    (["--description-replace-old", "a"], "go together"),
+    (["-d", "whole", "--description-replace", "a=b"], "--description replaces the whole text"),
+    (["-d", "whole", "--description-append", "tail"], "--description replaces the whole text"),
+]:
+    result = refuse(args, message)
+    assert hint not in result.stderr, result.stderr
+
+reset("before")
+result = update("--description-replace-old", "before", "--description-replace-new", "after")
+assert result.stderr == hint + "\n", result.stderr
+assert hint not in result.stdout
+assert "description (replaced)" in result.stdout, result.stdout
+assert record()["description"] == "after"
+result = update("--description-append", "tail")
+assert "description (appended)" in result.stdout, result.stdout
+assert record()["description"] == "after\ntail"
+
+for args, flag in [
+    (["--description-replace", "=inserted"], "--description-replace"),
+    (["--description-replace-old", "", "--description-replace-new", "inserted"], "--description-replace-old"),
+]:
+    reset("")
+    update(*args)
+    assert record()["description"] == "inserted"
+    reset("x")
+    refuse(args, flag + " matched 2 times")
+
+for args in [("issue", "update", "--help"), ("issue", "--help"), ("completions", "bash")]:
+    text = run(*args).stdout
+    assert "--description-replace" in text, args
+    assert "--description-replace-old" not in text, args
+    assert "--description-replace-new" not in text, args
+print("Description replacement: Unicode, first equals, append, empty values, unchanged refusals and hidden legacy compatibility passed")
+PY
 
 # --- If-Unmodified-Since is enforced by the server (LLL-399) ---
 # LLL-391's check was read-then-write on the client, so a write landing

@@ -238,9 +238,17 @@ fn issue_update_spec() -> Slice<flags.Flag> {
       ..,
     },
     flags.Flag {
+      name: "--description-replace",
+      value: true,
+      hint: "old=new",
+      help: "replace exactly one occurrence of old with new in the description",
+      ..,
+    },
+    flags.Flag {
       name: "--description-replace-old",
       value: true,
       hint: "text",
+      hidden: true,
       help: "with --description-replace-new: replace exactly one occurrence of text in the description",
       ..,
     },
@@ -248,6 +256,7 @@ fn issue_update_spec() -> Slice<flags.Flag> {
       name: "--description-replace-new",
       value: true,
       hint: "text",
+      hidden: true,
       help: "the replacement for --description-replace-old",
       ..,
     },
@@ -1193,6 +1202,16 @@ fn print_findings_raw(findings: Slice<models.Doc>) -> Result<(), string> {
   Ok(())
 }
 
+fn parse_description_replacement(
+  value: string,
+) -> Result<(string, string), string> {
+  let parts = strings.SplitN(value, "=", 2)
+  if parts.length() != 2 {
+    return Err("--description-replace requires old=new")
+  }
+  Ok((parts[0], parts[1]))
+}
+
 fn update(input: flags.CommandInput) -> Result<(), string> {
   let spec = issue_update_spec()
   let usage = flags.usage("lll issue update", spec, "[KEY-123]")
@@ -1213,16 +1232,24 @@ fn update(input: flags.CommandInput) -> Result<(), string> {
     description = value_or_stdin(p.one("--description"), "--description")?
   }
   let mut description_set = p.given("--description")
-  let replace_old = p.one("--description-replace-old")
-  let replace_new = p.one("--description-replace-new")
-  let replace_set = p.given("--description-replace-old") || p.given("--description-replace-new")
+  let canonical_replace = p.given("--description-replace")
+  let legacy_replace = p.given("--description-replace-old") || p.given("--description-replace-new")
+  if canonical_replace && legacy_replace {
+    return Err("--description-replace cannot be combined with --description-replace-old or --description-replace-new")
+  }
   if p.given("--description-replace-old") != p.given("--description-replace-new") {
     return Err("--description-replace-old and --description-replace-new go together")
   }
+  let (replace_old, replace_new) = if canonical_replace {
+    parse_description_replacement(p.one("--description-replace"))?
+  } else {
+    (p.one("--description-replace-old"), p.one("--description-replace-new"))
+  }
+  let replace_set = canonical_replace || legacy_replace
   let append_text = p.one("--description-append")
   let append_set = p.given("--description-append")
   if description_set && (replace_set || append_set) {
-    return Err("--description replaces the whole text; it cannot be combined with --description-replace-* or --description-append")
+    return Err("--description replaces the whole text; it cannot be combined with --description-replace or --description-append")
   }
   let since = p.one("--if-unchanged-since")
   let emoji = check_emoji(p.one("--emoji"))?
@@ -1241,6 +1268,9 @@ fn update(input: flags.CommandInput) -> Result<(), string> {
   }
   if state == "" && priority < 0 && assignee_name == "" && label_names.is_empty() && !project_set && !title_set && !description_set && !replace_set && !append_set && !emoji_set {
     return Err(f"nothing to update — pass at least one flag\nusage: {usage}")
+  }
+  if legacy_replace {
+    let _ = fmt.Fprintln(os.Stderr, "--description-replace-old/--description-replace-new are deprecated; use --description-replace old=new")
   }
 
   let resolved = resolve_id(id, usage)?
@@ -1264,7 +1294,8 @@ fn update(input: flags.CommandInput) -> Result<(), string> {
   if replace_set {
     let n = strings.Count(issue.description, replace_old)
     if n != 1 {
-      return Err(f"--description-replace-old matched {n} times in {key}'s description; it must match exactly once - widen the text")
+      let flag = if canonical_replace { "--description-replace" } else { "--description-replace-old" }
+      return Err(f"{flag} matched {n} times in {key}'s description; it must match exactly once - widen the text")
     }
     description = strings.Replace(issue.description, replace_old, replace_new, 1)
     description_set = true
