@@ -2,6 +2,7 @@ import "go:bufio"
 import "go:crypto/rand"
 import "go:encoding/json"
 import "go:fmt"
+import "go:net/url"
 import "go:os"
 import "go:path/filepath"
 import "go:strconv"
@@ -12,6 +13,7 @@ import "config"
 import "flags"
 import "models"
 import "pb"
+import "query"
 import "records"
 
 /// Dispatch `lll member <verb>` through the noun's Command table (TASK-307).
@@ -185,6 +187,14 @@ fn member_invite_spec() -> Slice<flags.Flag> {
       hint: "email",
       required: true,
       help: "the colleague's real email; it is the identity 'lll login' asks for",
+      ..,
+    },
+    flags.Flag {
+      name: "--team",
+      alias: "-t",
+      value: true,
+      hint: "KEY",
+      help: "limit the colleague to this team: they see only its issues, and their board link opens only its board",
       ..,
     },
   ])
@@ -523,17 +533,74 @@ fn member_invite(input: flags.CommandInput) -> Result<(), string> {
   // than as a follow-up patch, so a failure leaves no member behind holding a
   // password nobody knows — the exact dead record set-password exists to fix.
   let password = rand.Text()
-  let created = create_member_as(su, name, email, password)?
-
   let cfg = config.load()?
-  fmt.Println(f"invited {created.name} <{email}>")
+  let scope = records.normalize_team_key(p.one("--team"))
+  if scope == "" {
+    let created = create_member_as(su, name, email, password, [])?
+    fmt.Println(f"invited {created.name} <{email}>")
+    fmt.Println("")
+    fmt.Println("send them this — the password is shown once and stored nowhere:")
+    fmt.Println("")
+    for line in invite_lines(email, password, cfg.url, cfg.team) {
+      fmt.Println(line)
+    }
+    return Ok(())
+  }
+
+  // A scoped invite (--team): the member record carries the scope, so the
+  // collection rules keep this colleague's own token inside the team, and the
+  // board link is one that opens only that team's board.
+  let Some(team) = find_team_as(su, scope)? else {
+    return Err(f"no team with key '{scope}' on this server — see 'lll team list'")
+  }
+  let created = create_member_as(su, name, email, password, [team.id])?
+  fmt.Println(f"invited {created.name} <{email}>, limited to team {scope}")
   fmt.Println("")
   fmt.Println("send them this — the password is shown once and stored nowhere:")
   fmt.Println("")
-  for line in invite_lines(email, password, cfg.url, cfg.team) {
+  for line in invite_lines(email, password, cfg.url, scope) {
     fmt.Println(line)
   }
+  match scoped_board_link(cfg.web_url, scope) {
+    Some(link) => {
+      fmt.Println("")
+      fmt.Println(f"  read-only board for {scope}: {link}")
+    },
+    None => {
+      fmt.Println("")
+      fmt.Println(f"no board link printed: run this invite on the machine running 'lll up' to add a read-only {scope} board link")
+    },
+  }
   Ok(())
+}
+
+/// The team by key, read with `tok` rather than the configured token: an
+/// invite may run on administrator credentials alone.
+fn find_team_as(tok: string, key: string) -> Result<Option<models.Team>, string> {
+  let filter = url.QueryEscape(f"key={query.quote(key)}")
+  let body = pb.get_as(f"/api/collections/teams/records?filter={filter}", tok)?
+  let mut result = models.TeamList { .. }
+  if let Err(e) = json.Unmarshal(body.bytes(), &result) {
+    return Err(f"decoding teams: {e}")
+  }
+  Ok(result.items.find(|t| t.key == key))
+}
+
+/// A board link that opens only team `key`, or None when this machine does
+/// not know the board token: LLL_BOARD_TOKEN, else the login link `lll up`
+/// saved beside the home config.
+fn scoped_board_link(web_url: string, key: string) -> Option<string> {
+  let base = strings.TrimRight(web_url, "/")
+  if base == "" { return None }
+  let mut board_token = os.Getenv("LLL_BOARD_TOKEN")
+  if board_token == "" {
+    let Ok(home) = config.home_path() else { return None }
+    let Ok(saved) = os.ReadFile(filepath.Join(filepath.Dir(home), "board-login-url")) else { return None }
+    let Some(tok) = strings.CutPrefix(strings.TrimSpace(saved as string), base + "/?board_token=") else { return None }
+    board_token = tok
+  }
+  if board_token == "" { return None }
+  Some(f"{base}/t/{key}/?board_token={scoped_board_token(board_token, key)}")
 }
 
 /// A single private handoff for a group. The file is reserved before the
@@ -659,7 +726,7 @@ fn member_passes(input: flags.CommandInput) -> Result<(), string> {
   let mut completed = 0
   for i in 0..count {
     let name = f"{prefix}-{run_id}-{i + 1}"
-    let member = match create_member_as(su, name, "", rand.Text()) {
+    let member = match create_member_as(su, name, "", rand.Text(), []) {
       Ok(m) => m,
       Err(e) => return Err(
         f"created {completed} of {count} credentials in {out}; creating {name} failed: {e}",
@@ -749,7 +816,13 @@ Uses the configured member token to create a new colleague, or administrator
 credentials from --admin-email/--admin-password or LLL_ADMIN_EMAIL and
 LLL_ADMIN_PASSWORD when supplied. An existing member is refused rather than
 overwritten; resetting an existing password with 'lll member set-password'
-requires administrator credentials." +
+requires administrator credentials.
+
+--team KEY limits the colleague to one team. Their own token sees and writes
+only that team's issues, comments, docs and claims, and cannot widen its scope
+or create members. When this machine knows the board token (LLL_BOARD_TOKEN,
+or the link 'lll up --bind' saved), the invite also prints a read-only board
+link that opens only that team; it stops working when the board token rotates." +
   flags.section(member_invite_spec())
 }
 
@@ -852,7 +925,7 @@ fn member_add(input: flags.CommandInput) -> Result<(), string> {
   }
   let created = if p.given("--password") {
     let cfg = config.load()?
-    match create_member_as(cfg.token, name, email, password) {
+    match create_member_as(cfg.token, name, email, password, []) {
       Ok(created) => created,
       Err(e) => return Err(member_create_error(e)),
     }
@@ -885,7 +958,7 @@ pub fn create_member(
   email: string,
 ) -> Result<models.Member, string> {
   let cfg = config.load()?
-  create_member_as(cfg.token, name, email, rand.Text())
+  create_member_as(cfg.token, name, email, rand.Text(), [])
 }
 
 /// create_member, riding `tok` and a caller-chosen password. Invite needs
@@ -899,6 +972,7 @@ fn create_member_as(
   name: string,
   email: string,
   password: string,
+  teams: Slice<string>,
 ) -> Result<models.Member, string> {
   let member_email = if email == "" { synthesize_email(name) } else { email }
   let new_member = models.NewMember {
@@ -911,6 +985,7 @@ fn create_member_as(
     // everything but `lll bot` is a person (LLL-407).
     kind: "person",
     owner: "",
+    teams,
   }
   let payload = match json.Marshal(new_member) {
     Ok(p) => p,

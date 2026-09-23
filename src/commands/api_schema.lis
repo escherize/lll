@@ -21,7 +21,7 @@ is the rule itself. Auth is the member token the CLI stores
 
 ## claims (base)
 
-Rules: list @request.auth.id != \"\" view @request.auth.id != \"\" create @request.auth.id != \"\" update (superuser only) delete @request.auth.id != \"\"
+Rules: list @request.auth.id != \"\" && (@request.auth.teams:length = 0 || @request.auth.teams.id ?= issue.team) view @request.auth.id != \"\" && (@request.auth.teams:length = 0 || @request.auth.teams.id ?= issue.team) create @request.auth.id != \"\" && (@request.auth.teams:length = 0 || @request.auth.teams.id ?= issue.team) update (superuser only) delete @request.auth.id != \"\" && (@request.auth.teams:length = 0 || @request.auth.teams.id ?= issue.team)
 
 | field | type | required | notes |
 |-------|------|----------|-------|
@@ -31,7 +31,7 @@ Rules: list @request.auth.id != \"\" view @request.auth.id != \"\" create @reque
 
 ## comments (base)
 
-Rules: list @request.auth.id != \"\" view @request.auth.id != \"\" create @request.auth.id != \"\" update @request.auth.id != \"\" delete @request.auth.id != \"\"
+Rules: list @request.auth.id != \"\" && (@request.auth.teams:length = 0 || @request.auth.teams.id ?= issue.team) view @request.auth.id != \"\" && (@request.auth.teams:length = 0 || @request.auth.teams.id ?= issue.team) create @request.auth.id != \"\" && (@request.auth.teams:length = 0 || @request.auth.teams.id ?= issue.team) update @request.auth.id != \"\" && (@request.auth.teams:length = 0 || @request.auth.teams.id ?= issue.team) && (@request.auth.teams:length = 0 || @request.body.issue:isset = false) delete @request.auth.id != \"\" && (@request.auth.teams:length = 0 || @request.auth.teams.id ?= issue.team)
 
 | field | type | required | notes |
 |-------|------|----------|-------|
@@ -43,7 +43,7 @@ Rules: list @request.auth.id != \"\" view @request.auth.id != \"\" create @reque
 
 ## docs (base)
 
-Rules: list @request.auth.id != \"\" view @request.auth.id != \"\" create @request.auth.id != \"\" update @request.auth.id != \"\" delete @request.auth.id != \"\"
+Rules: list @request.auth.id != \"\" && (@request.auth.teams:length = 0 || @request.auth.teams.id ?= team) view @request.auth.id != \"\" && (@request.auth.teams:length = 0 || @request.auth.teams.id ?= team) create @request.auth.id != \"\" && (@request.auth.teams:length = 0 || @request.auth.teams.id ?= team) update @request.auth.id != \"\" && (@request.auth.teams:length = 0 || @request.auth.teams.id ?= team) && (@request.auth.teams:length = 0 || @request.body.team:isset = false || @request.auth.teams.id ?= @request.body.team) delete @request.auth.id != \"\" && (@request.auth.teams:length = 0 || @request.auth.teams.id ?= team)
 
 | field | type | required | notes |
 |-------|------|----------|-------|
@@ -62,7 +62,7 @@ Rules: list @request.auth.id != \"\" view @request.auth.id != \"\" create @reque
 
 ## favorites (base)
 
-Rules: list @request.auth.id != \"\" view @request.auth.id != \"\" create @request.auth.id != \"\" update @request.auth.id != \"\" delete @request.auth.id != \"\"
+Rules: list @request.auth.id != \"\" && (@request.auth.teams:length = 0 || @request.auth.teams.id ?= issue.team) view @request.auth.id != \"\" && (@request.auth.teams:length = 0 || @request.auth.teams.id ?= issue.team) create @request.auth.id != \"\" && (@request.auth.teams:length = 0 || @request.auth.teams.id ?= issue.team) update @request.auth.id != \"\" && (@request.auth.teams:length = 0 || @request.auth.teams.id ?= issue.team) && (@request.auth.teams:length = 0 || @request.body.issue:isset = false) delete @request.auth.id != \"\" && (@request.auth.teams:length = 0 || @request.auth.teams.id ?= issue.team)
 
 | field | type | required | notes |
 |-------|------|----------|-------|
@@ -73,7 +73,7 @@ Rules: list @request.auth.id != \"\" view @request.auth.id != \"\" create @reque
 
 ## issues (base)
 
-Rules: list @request.auth.id != \"\" view @request.auth.id != \"\" create @request.auth.id != \"\" update @request.auth.id != \"\" delete @request.auth.id != \"\"
+Rules: list @request.auth.id != \"\" && (@request.auth.teams:length = 0 || @request.auth.teams.id ?= team) view @request.auth.id != \"\" && (@request.auth.teams:length = 0 || @request.auth.teams.id ?= team) create @request.auth.id != \"\" && (@request.auth.teams:length = 0 || @request.auth.teams.id ?= team) update @request.auth.id != \"\" && (@request.auth.teams:length = 0 || @request.auth.teams.id ?= team) && (@request.auth.teams:length = 0 || @request.body.team:isset = false || @request.auth.teams.id ?= @request.body.team) delete @request.auth.id != \"\" && (@request.auth.teams:length = 0 || @request.auth.teams.id ?= team)
 
 | field | type | required | notes |
 |-------|------|----------|-------|
@@ -103,7 +103,7 @@ Rules: list @request.auth.id != \"\" view @request.auth.id != \"\" create @reque
 
 ## labels (base)
 
-Rules: list @request.auth.id != \"\" view @request.auth.id != \"\" create @request.auth.id != \"\" update @request.auth.id != \"\" delete @request.auth.id != \"\"
+Rules: list @request.auth.id != \"\" && (@request.auth.teams:length = 0 || @request.auth.teams.id ?= team) view @request.auth.id != \"\" && (@request.auth.teams:length = 0 || @request.auth.teams.id ?= team) create @request.auth.id != \"\" && (@request.auth.teams:length = 0 || @request.auth.teams.id ?= team) update @request.auth.id != \"\" && (@request.auth.teams:length = 0 || @request.auth.teams.id ?= team) && (@request.auth.teams:length = 0 || @request.body.team:isset = false || @request.auth.teams.id ?= @request.body.team) delete @request.auth.id != \"\" && (@request.auth.teams:length = 0 || @request.auth.teams.id ?= team)
 
 | field | type | required | notes |
 |-------|------|----------|-------|
@@ -115,7 +115,7 @@ Rules: list @request.auth.id != \"\" view @request.auth.id != \"\" create @reque
 
 ## members (auth)
 
-Rules: list @request.auth.id != \"\" view @request.auth.id != \"\" create @request.auth.id != \"\" update @request.auth.id != \"\" delete (superuser only)
+Rules: list @request.auth.id != \"\" view @request.auth.id != \"\" create @request.auth.id != \"\" && @request.auth.teams:length = 0 update @request.auth.id != \"\" && (@request.auth.teams:length = 0 || (id = @request.auth.id && @request.body.teams:isset = false)) delete (superuser only)
 
 | field | type | required | notes |
 |-------|------|----------|-------|
@@ -129,10 +129,11 @@ Rules: list @request.auth.id != \"\" view @request.auth.id != \"\" create @reque
 | verified | bool |  |  |
 | kind | select |  | values: person, bot |
 | owner | relation |  | relation to members |
+| teams | relation |  | maxSelect: 999; relation to teams |
 
 ## projects (base)
 
-Rules: list @request.auth.id != \"\" view @request.auth.id != \"\" create @request.auth.id != \"\" update @request.auth.id != \"\" delete @request.auth.id != \"\"
+Rules: list @request.auth.id != \"\" && (@request.auth.teams:length = 0 || @request.auth.teams.id ?= team) view @request.auth.id != \"\" && (@request.auth.teams:length = 0 || @request.auth.teams.id ?= team) create @request.auth.id != \"\" && (@request.auth.teams:length = 0 || @request.auth.teams.id ?= team) update @request.auth.id != \"\" && (@request.auth.teams:length = 0 || @request.auth.teams.id ?= team) && (@request.auth.teams:length = 0 || @request.body.team:isset = false || @request.auth.teams.id ?= @request.body.team) delete @request.auth.id != \"\" && (@request.auth.teams:length = 0 || @request.auth.teams.id ?= team)
 
 | field | type | required | notes |
 |-------|------|----------|-------|
@@ -145,7 +146,7 @@ Rules: list @request.auth.id != \"\" view @request.auth.id != \"\" create @reque
 
 ## teams (base)
 
-Rules: list @request.auth.id != \"\" view @request.auth.id != \"\" create @request.auth.id != \"\" update @request.auth.id != \"\" delete @request.auth.id != \"\"
+Rules: list @request.auth.id != \"\" && (@request.auth.teams:length = 0 || @request.auth.teams.id ?= id) view @request.auth.id != \"\" && (@request.auth.teams:length = 0 || @request.auth.teams.id ?= id) create @request.auth.id != \"\" && @request.auth.teams:length = 0 update @request.auth.id != \"\" && @request.auth.teams:length = 0 delete @request.auth.id != \"\" && @request.auth.teams:length = 0
 
 | field | type | required | notes |
 |-------|------|----------|-------|
@@ -171,7 +172,7 @@ Rules: list @request.auth.id != \"\" view @request.auth.id != \"\" create @reque
 
 ## webhooks (base)
 
-Rules: list @request.auth.id != \"\" view @request.auth.id != \"\" create @request.auth.id != \"\" update @request.auth.id != \"\" delete @request.auth.id != \"\"
+Rules: list @request.auth.id != \"\" && (@request.auth.teams:length = 0 || @request.auth.teams.id ?= team) view @request.auth.id != \"\" && (@request.auth.teams:length = 0 || @request.auth.teams.id ?= team) create @request.auth.id != \"\" && (@request.auth.teams:length = 0 || @request.auth.teams.id ?= team) update @request.auth.id != \"\" && (@request.auth.teams:length = 0 || @request.auth.teams.id ?= team) && (@request.auth.teams:length = 0 || @request.body.team:isset = false || @request.auth.teams.id ?= @request.body.team) delete @request.auth.id != \"\" && (@request.auth.teams:length = 0 || @request.auth.teams.id ?= team)
 
 | field | type | required | notes |
 |-------|------|----------|-------|

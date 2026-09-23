@@ -34,6 +34,15 @@ fn rail_vm(active: string, me: string, team: models.Team) -> RailVM {
   }
 }
 
+/// The rail for this request's viewer. A viewer on a team-scoped board link
+/// sees its own team in the switcher and no favorites or saved views: those
+/// belong to the whole workspace and name other teams' issues.
+fn rail_for(r: Ref<http.Request>, active: string, me: string, team: models.Team) -> RailVM {
+  let rail = rail_vm(active, me, team)
+  let Some(key) = viewer_scope(r) else { return rail }
+  RailVM { teams: rail.teams.filter(|t| t.key == key), favorites: [], views: [], ..rail }
+}
+
 /// The board path for a team key: "/t/KEY/", or "/" when no key scopes the
 /// page (defensive — run_server insists on a boot team). TASK-198.
 fn board_base(key: string) -> string {
@@ -318,7 +327,7 @@ fn board_page(w: http.ResponseWriter, r: Ref<http.Request>, team: models.Team, m
     write_raw(w, board_raw(vm))
     return
   }
-  let rail = rail_vm(active, me, team)
+  let rail = rail_for(r, active, me, team)
   let html = match render("board-page", PageVM { rail, page: vm }) {
     Ok(h) => h,
     Err(e) => {
@@ -420,7 +429,7 @@ fn issue_page(w: http.ResponseWriter, r: Ref<http.Request>, team: models.Team, m
   }
   if let Ok(Some(_)) = fetch_favorite(issue.id) { page.favorited = true }
   page.emojis = emoji_catalog()
-  let vm = PageVM { rail: rail_vm("board", me, team), page }
+  let vm = PageVM { rail: rail_for(r, "board", me, team), page }
   let html = match render("issue-page", vm) {
     Ok(h) => h,
     Err(e) => {

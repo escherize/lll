@@ -225,7 +225,7 @@ fn issues_page(w: http.ResponseWriter, r: Ref<http.Request>, team_id: string, me
     write_raw(w, issues_raw(vm))
     return
   }
-  let html = match render("issues-page", PageVM { rail: rail_vm("issues", me, team), page: vm }) {
+  let html = match render("issues-page", PageVM { rail: rail_for(r, "issues", me, team), page: vm }) {
     Ok(h) => h,
     Err(e) => {
       http.Error(w, e, 500)

@@ -66,6 +66,10 @@ pub struct NewMember {
   pub kind: string,
   #[json(omitempty)]
   pub owner: string,
+  // Team scope: the ids of the only teams this member may see. Empty means
+  // every team; `lll member invite --team` sets one.
+  #[json(omitempty)]
+  pub teams: Slice<string>,
 }
 
 #[json]

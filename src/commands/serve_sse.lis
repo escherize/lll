@@ -17,8 +17,9 @@ import "realtime"
 
 /// One connected browser: its scope ("board:KEY:ORDER" for a team's board
 /// view in one card ordering, or "issue:KEY-1") and the channel its /events
-/// handler drains.
-struct SseClient { id: int, scope: string, ch: Channel<string>, description_hash: string }
+/// handler drains. `team_only` marks a viewer on a team-scoped board link,
+/// which never receives the workspace-wide "*" fragments (favorites, views).
+struct SseClient { id: int, scope: string, ch: Channel<string>, description_hash: string, team_only: bool }
 
 /// A rendered SSE payload for every client with a matching scope.
 struct Broadcast {
@@ -105,6 +106,7 @@ fn deliver(clients: Slice<SseClient>, msg: Broadcast) -> Slice<SseClient> {
   for i in 0..result.length() {
     let c = result[i]
     if msg.scope != "*" && c.scope != msg.scope { continue }
+    if msg.scope == "*" && c.team_only { continue }
     if msg.client_id != 0 && c.id != msg.client_id { continue }
     let changed = msg.description.is_some() && c.description_hash != hash
     let mut payload = msg.payload
@@ -179,7 +181,7 @@ fn events_stream(
     return
   }
   let ch = Channel.buffered<string>(64)
-  let _ = hub.register.send(SseClient { id, scope, ch, .. })
+  let _ = hub.register.send(SseClient { id, scope, ch, team_only: viewer_scope(r).is_some(), .. })
   // Response headers acknowledge registration, so a client that has opened
   // the stream cannot miss an immediately following issue mutation.
   w.WriteHeader(200)
