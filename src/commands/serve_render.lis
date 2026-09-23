@@ -350,7 +350,7 @@ fn comment_vm(c: models.Comment) -> CommentVM {
   if c.expand.author.name == "" { avatar = avatar_vm(models.Member { name: author, .. }) }
   CommentVM {
     id: c.id,
-    author,
+    author: display.byline(author, c.agent),
     avatar,
     age: display.relative(c.created),
     body: markdown.md_html(c.body),
@@ -385,6 +385,7 @@ fn issue_fields_vm(issue: models.Issue, comments: Slice<models.Comment>) -> Resu
     claim_id = c.id
     claim_holder = c.expand.member.name
     if claim_holder == "" { claim_holder = "unknown member" }
+    claim_holder = display.byline(claim_holder, c.agent)
     claim_age = display.relative(c.created)
   }
   let mut claim_actor_id = ""

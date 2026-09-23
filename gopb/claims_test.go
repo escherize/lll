@@ -34,6 +34,7 @@ func claimFixture(t *testing.T) (core.App, string, string, string) {
 	claims := core.NewBaseCollection("claims")
 	claims.Fields.Add(&core.RelationField{Name: "issue", CollectionId: issues.Id, MaxSelect: 1, Required: true},
 		&core.RelationField{Name: "member", CollectionId: members.Id, MaxSelect: 1, Required: true},
+		&core.TextField{Name: "agent"},
 		&core.AutodateField{Name: "created", OnCreate: true})
 	claims.Indexes = []string{"CREATE UNIQUE INDEX idx_claim_test_issue ON claims (issue)"}
 	if err := app.Save(claims); err != nil {
@@ -99,12 +100,12 @@ func TestClaimTransitionsRollbackBothWrites(t *testing.T) {
 		return e.Next()
 	})
 	fail = true
-	if _, err := acquireClaim(app, issueID, alpha); err == nil {
+	if _, err := acquireClaim(app, issueID, alpha, ""); err == nil {
 		t.Fatal("expected failure")
 	}
 	assertClaimState(t, app, issueID, "", "")
 	fail = false
-	held, err := acquireClaim(app, issueID, alpha)
+	held, err := acquireClaim(app, issueID, alpha, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -117,11 +118,11 @@ func TestClaimTransitionsRollbackBothWrites(t *testing.T) {
 
 func TestClaimIdempotencyAndUnrelatedAssignment(t *testing.T) {
 	app, issueID, alpha, beta := claimFixture(t)
-	first, err := acquireClaim(app, issueID, alpha)
+	first, err := acquireClaim(app, issueID, alpha, "")
 	if err != nil {
 		t.Fatal(err)
 	}
-	again, err := acquireClaim(app, issueID, alpha)
+	again, err := acquireClaim(app, issueID, alpha, "")
 	if err != nil || !again.AlreadyOwned || again.ClaimID != first.ClaimID || again.Created != first.Created {
 		t.Fatalf("idempotent claim: %#v %v", again, err)
 	}
@@ -146,7 +147,7 @@ func TestConcurrentClaimantsAndStaleRelease(t *testing.T) {
 			member = beta
 		}
 		wg.Add(1)
-		go func() { defer wg.Done(); _, _ = acquireClaim(app, issueID, member) }()
+		go func() { defer wg.Done(); _, _ = acquireClaim(app, issueID, member, "") }()
 	}
 	wg.Wait()
 	held, err := currentClaim(app, issueID)
@@ -157,7 +158,7 @@ func TestConcurrentClaimantsAndStaleRelease(t *testing.T) {
 	if _, err := releaseClaim(app, issueID, held.Id); err != nil {
 		t.Fatal(err)
 	}
-	replacement, err := acquireClaim(app, issueID, beta)
+	replacement, err := acquireClaim(app, issueID, beta, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -168,4 +169,41 @@ func TestConcurrentClaimantsAndStaleRelease(t *testing.T) {
 		t.Fatal("stale release accepted")
 	}
 	assertClaimState(t, app, issueID, beta, beta)
+}
+
+// LLL-521: agents sharing one member token label themselves. Two differing
+// labels on one member conflict; an absent label on either side keeps the
+// member-level idempotency every existing caller relies on.
+func TestClaimAgentLabels(t *testing.T) {
+	app, issueID, alpha, beta := claimFixture(t)
+	first, err := acquireClaim(app, issueID, alpha, "wt-a")
+	if err != nil || first.Agent != "wt-a" {
+		t.Fatalf("labelled claim: %#v %v", first, err)
+	}
+	_, err = acquireClaim(app, issueID, alpha, "wt-b")
+	var rejected *claimRejection
+	if !errors.As(err, &rejected) || rejected.Error() != "issue is already claimed by Alpha (agent wt-a)" {
+		t.Fatalf("differing label accepted or misreported: %v", err)
+	}
+	for _, agent := range []string{"wt-a", ""} {
+		again, err := acquireClaim(app, issueID, alpha, agent)
+		if err != nil || !again.AlreadyOwned || again.ClaimID != first.ClaimID || again.Agent != "wt-a" {
+			t.Fatalf("idempotent claim with %q: %#v %v", agent, again, err)
+		}
+	}
+	if _, err := acquireClaim(app, issueID, beta, "wt-a"); !errors.As(err, &rejected) {
+		t.Fatalf("another member took the hold: %v", err)
+	}
+	assertClaimState(t, app, issueID, alpha, alpha)
+	if _, err := releaseClaim(app, issueID, first.ClaimID); err != nil {
+		t.Fatal(err)
+	}
+	unlabelled, err := acquireClaim(app, issueID, alpha, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	labelled, err := acquireClaim(app, issueID, alpha, "wt-b")
+	if err != nil || !labelled.AlreadyOwned || labelled.ClaimID != unlabelled.ClaimID {
+		t.Fatalf("unlabelled hold refused a labelled session: %#v %v", labelled, err)
+	}
 }

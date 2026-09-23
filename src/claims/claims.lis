@@ -9,13 +9,18 @@ pub struct Transition {
   pub claim_id: string,
   pub member_id: string,
   pub member_name: string,
+  pub agent: string,
   pub created: string,
   pub already_owned: bool,
   pub cleared_assignee: bool,
 }
 
 #[json]
-struct AcquireRequest { member: string }
+struct AcquireRequest {
+  member: string,
+  #[json(omitempty)]
+  agent: string,
+}
 #[json]
 struct ReleaseRequest { claim_id: string }
 #[json]
@@ -31,8 +36,9 @@ pub fn observed_id(issue_id: string) -> Result<string, string> {
 
 /// Claims and their assignment are one server-owned transaction. Callers
 /// resolve the actor through normal identity handling; the server verifies it.
-pub fn acquire(issue_id: string, member_id: string) -> Result<Transition, string> {
-  transact(issue_id, "claim", AcquireRequest { member: member_id })
+/// `agent` is the optional self-asserted session label (LLL-521); "" for none.
+pub fn acquire(issue_id: string, member_id: string, agent: string) -> Result<Transition, string> {
+  transact(issue_id, "claim", AcquireRequest { member: member_id, agent })
 }
 
 pub fn release(issue_id: string, claim_id: string) -> Result<Transition, string> {
