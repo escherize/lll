@@ -1497,6 +1497,11 @@ if command -v playwright-cli >/dev/null 2>&1; then
   assert_contains "$cmdk_browser" 'cmdk palette browser passed' "browser: the cmd+K palette opens, filters, searches and lands"
   "$LIN" issue delete "$CMDK_KEY" --force >/dev/null
 
+  # LLL-531/532: '?' sheet, '/' search and g-chords, including the keys that must not act.
+  shortcuts_js=$(sed -e "s|__WEB__|$WEB|" "$REPO_ROOT"/scripts/browser_shortcuts.js)
+  shortcuts_browser=$(playwright-cli -s="$BROWSER_SESSION" run-code "$shortcuts_js" 2>&1)
+  assert_contains "$shortcuts_browser" 'keyboard shortcuts browser passed' "browser: ? sheet, / search and g-chords, never while typing"
+
   # LLL-94: title and state changes refresh favorites on both realtime pages.
   FAV_PROBE=$("$LIN" issue create -t "Favorite live original" --json)
   FAV_KEY=$(printf '%s' "$FAV_PROBE" | jq -r '.expand.team.key + "-" + (.number | tostring)')
