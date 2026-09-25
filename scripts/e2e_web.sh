@@ -388,7 +388,7 @@ assert_contains "$board_rail" "Star an issue to pin it here for the whole worksp
 # ?mine=1 any more). The page marks the row current and seeds the chip the
 # URL implies.
 mine=$(wcurl -sf "$WEB/?assignee=e2e")
-assert_contains "$mine" '<a href="/t/ENG/?assignee=e2e" title="Issues assigned to e2e" class="active">' \
+assert_contains "$mine" '<a data-g="m" href="/t/ENG/?assignee=e2e" title="Issues assigned to e2e" class="active">' \
   "the My issues URL marks the My issues row current"
 assert_contains "$mine" 'data-signals:flt="[&#34;assignee:e2e&#34;]"' \
   "the My issues URL seeds the assignee filter chip"
@@ -1497,6 +1497,11 @@ if command -v playwright-cli >/dev/null 2>&1; then
   assert_contains "$cmdk_browser" 'cmdk palette browser passed' "browser: the cmd+K palette opens, filters, searches and lands"
   "$LIN" issue delete "$CMDK_KEY" --force >/dev/null
 
+  # LLL-531/532: '?' sheet, '/' search and g-chords, including the keys that must not act.
+  shortcuts_js=$(sed -e "s|__WEB__|$WEB|" "$REPO_ROOT"/scripts/browser_shortcuts.js)
+  shortcuts_browser=$(playwright-cli -s="$BROWSER_SESSION" run-code "$shortcuts_js" 2>&1)
+  assert_contains "$shortcuts_browser" 'keyboard shortcuts browser passed' "browser: ? sheet, / search and g-chords, never while typing"
+
   # LLL-94: title and state changes refresh favorites on both realtime pages.
   FAV_PROBE=$("$LIN" issue create -t "Favorite live original" --json)
   FAV_KEY=$(printf '%s' "$FAV_PROBE" | jq -r '.expand.team.key + "-" + (.number | tostring)')
@@ -1652,7 +1657,7 @@ board_rail_now=$(rail "$(wcurl -sf "$WEB/")")
 $(diff <(rail_rows "$board_rail_now") <(rail_rows "$issues_rail") || true)"
 assert_contains "$issues_rail" 'href="/t/ENG/issues"' "the rail has an All issues row"
 assert_contains "$board_rail" 'href="/t/ENG/issues"' "the board's rail has it too"
-assert_contains "$issues_rail" '<a href="/t/ENG/issues" class="active">' "the All issues row is current on its own page"
+assert_contains "$issues_rail" '<a data-g="i" href="/t/ENG/issues" class="active">' "the All issues row is current on its own page"
 assert_not_contains "$issues_rail" '<a href="/" class="active">' "and the board row is not"
 # --- /t/ENG/doc/SLUG: the document page (LLL-405) ---
 # Decisions and findings were the one record kind with no URL: reachable only
@@ -1759,7 +1764,7 @@ assert_not_contains "$projects" "data-init" "the projects page opens no SSE conn
 # The rail row is what makes a project reachable from the board at all.
 projects_rail=$(rail "$projects")
 assert_contains "$board_rail_now" 'href="/t/ENG/projects"' "the board's rail has a Projects row"
-assert_contains "$projects_rail" '<a href="/t/ENG/projects" class="active">' \
+assert_contains "$projects_rail" '<a data-g="p" href="/t/ENG/projects" class="active">' \
   "the Projects row is current on its own page"
 board_rail_projects=$(rail "$(wcurl -sf "$WEB/")")
 [ "$(rail_rows "$projects_rail")" = "$(rail_rows "$board_rail_projects")" ] \
