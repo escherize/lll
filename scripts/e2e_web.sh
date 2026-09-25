@@ -388,7 +388,7 @@ assert_contains "$board_rail" "Star an issue to pin it here for the whole worksp
 # ?mine=1 any more). The page marks the row current and seeds the chip the
 # URL implies.
 mine=$(wcurl -sf "$WEB/?assignee=e2e")
-assert_contains "$mine" '<a href="/t/ENG/?assignee=e2e" title="Issues assigned to e2e" class="active">' \
+assert_contains "$mine" '<a data-g="m" href="/t/ENG/?assignee=e2e" title="Issues assigned to e2e" class="active">' \
   "the My issues URL marks the My issues row current"
 assert_contains "$mine" 'data-signals:flt="[&#34;assignee:e2e&#34;]"' \
   "the My issues URL seeds the assignee filter chip"
@@ -1657,7 +1657,7 @@ board_rail_now=$(rail "$(wcurl -sf "$WEB/")")
 $(diff <(rail_rows "$board_rail_now") <(rail_rows "$issues_rail") || true)"
 assert_contains "$issues_rail" 'href="/t/ENG/issues"' "the rail has an All issues row"
 assert_contains "$board_rail" 'href="/t/ENG/issues"' "the board's rail has it too"
-assert_contains "$issues_rail" '<a href="/t/ENG/issues" class="active">' "the All issues row is current on its own page"
+assert_contains "$issues_rail" '<a data-g="i" href="/t/ENG/issues" class="active">' "the All issues row is current on its own page"
 assert_not_contains "$issues_rail" '<a href="/" class="active">' "and the board row is not"
 # --- /t/ENG/doc/SLUG: the document page (LLL-405) ---
 # Decisions and findings were the one record kind with no URL: reachable only
@@ -1764,7 +1764,7 @@ assert_not_contains "$projects" "data-init" "the projects page opens no SSE conn
 # The rail row is what makes a project reachable from the board at all.
 projects_rail=$(rail "$projects")
 assert_contains "$board_rail_now" 'href="/t/ENG/projects"' "the board's rail has a Projects row"
-assert_contains "$projects_rail" '<a href="/t/ENG/projects" class="active">' \
+assert_contains "$projects_rail" '<a data-g="p" href="/t/ENG/projects" class="active">' \
   "the Projects row is current on its own page"
 board_rail_projects=$(rail "$(wcurl -sf "$WEB/")")
 [ "$(rail_rows "$projects_rail")" = "$(rail_rows "$board_rail_projects")" ] \

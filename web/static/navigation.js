@@ -134,7 +134,10 @@ if (palette && typeof palette.showModal === 'function') {
 
 // LLL-531/532: single-key shortcuts. They never fire while typing, with a
 // modifier held (⌘K and browser keys keep theirs), or over an open dialog,
-// so a letter meant for a field is never eaten. 'g' starts a chord whose
+// so a letter meant for a field is never eaten. "Open dialog" includes the
+// Datastar-shown overlays (new issue, emoji and label pickers): they are
+// divs with role="dialog", and a chord over them would navigate away from
+// an unsaved draft. 'g' starts a chord whose
 // second key picks a rail row by its data-g, so the destination is always
 // the href the rail itself rendered.
 const shortcutSheet = document.getElementById('kbd-help');
@@ -142,7 +145,8 @@ let chordAt = 0;
 document.addEventListener('keydown', (event) => {
   if (event.metaKey || event.ctrlKey || event.altKey) return;
   if (event.target.closest?.('input, textarea, select, [contenteditable]')) return;
-  if (document.querySelector('dialog[open]')) return;
+  const overlays = document.querySelectorAll('dialog[open], [role="dialog"]');
+  if ([...overlays].some((el) => el.checkVisibility())) return;
   if (Date.now() - chordAt < 1000) {
     chordAt = 0;
     const row = document.querySelector(`#rail [data-g="${CSS.escape(event.key)}"]`);
