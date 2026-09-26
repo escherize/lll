@@ -191,3 +191,45 @@ func recordForcedRelease(tx core.App, issueID, holder string, by releaser) error
 	comment.Set("body", body)
 	return tx.Save(comment)
 }
+
+// renewClaim restarts a hold's expiry clock (LLL-535). The sweep ages a claim
+// by `updated`, and nothing but this writes a claim, so saving it unchanged is
+// the renewal: the autodate moves and the claim keeps its id and `created`.
+// Keeping the id matters - release and assignment name the observed claim_id,
+// so a delete-and-recreate would turn every open page's next release into
+// "the claim changed".
+//
+// Only the holder renews, and only the hold it observed: renewing is a promise
+// that the work is still alive, which no one else can make.
+func renewClaim(app core.App, issueID, expectedClaimID, memberID string) (ClaimOutcome, error) {
+	var outcome ClaimOutcome
+	err := app.RunInTransaction(func(tx core.App) error {
+		held, err := currentClaim(tx, issueID)
+		if err != nil {
+			return err
+		}
+		if held == nil {
+			return &claimRejection{"is not claimed"}
+		}
+		if expectedClaimID == "" || held.Id != expectedClaimID {
+			return &claimRejection{"the claim changed; refresh before renewing it"}
+		}
+		holderID := held.GetString("member")
+		name := "an unknown member"
+		if member, err := tx.FindRecordById("members", holderID); err == nil {
+			name = member.GetString("name")
+		}
+		if holderID != memberID {
+			return &claimRejection{fmt.Sprintf("the claim is held by %s; only the holder renews it", name)}
+		}
+		if err := tx.Save(held); err != nil {
+			return err
+		}
+		outcome = ClaimOutcome{ClaimID: held.Id, MemberID: holderID, MemberName: name, Created: held.GetString("created")}
+		return nil
+	})
+	if err != nil {
+		return ClaimOutcome{}, err
+	}
+	return outcome, nil
+}

@@ -295,6 +295,12 @@ fn issue_delete_spec() -> Slice<flags.Flag> {
   flags.with_team([flags.Flag { name: "--force", help: "skip the delete confirmation", .. }])
 }
 
+fn issue_claim_spec() -> Slice<flags.Flag> {
+  flags.with_team([
+    flags.Flag { name: "--renew", help: "restart the expiry clock on a claim you hold (a hold unrenewed for 24h is released)", .. },
+  ])
+}
+
 fn issue_release_spec() -> Slice<flags.Flag> {
   flags.with_team([
     flags.Flag { name: "--force", help: "release a claim another member holds; leaves a comment on the issue", .. },
@@ -493,9 +499,9 @@ pub fn issue_commands() -> Slice<flags.Command> {
     },
     flags.Command {
       name: "claim",
-      summary: "take it exclusively for the authenticated member and assign it; exits non-zero, changing nothing, when someone already holds it",
+      summary: "take it exclusively for the authenticated member and assign it; exits non-zero, changing nothing, when someone already holds it; --renew restarts your hold's 24h expiry",
       page: "",
-      spec: flags.with_team([]),
+      spec: issue_claim_spec(),
       positional: "[KEY-123]",
       run: claim,
     },
@@ -1585,7 +1591,7 @@ fn held_elsewhere_hint(key: string) -> string {
 /// Assignment edits use their own observed-claim transaction and cannot replace
 /// another holder. See gopb/claims.go and gopb/assignment.go for that policy.
 fn claim(input: flags.CommandInput) -> Result<(), string> {
-  let usage = "lll issue claim [KEY-123]"
+  let usage = "lll issue claim [KEY-123] [--renew]"
   let id = input.parsed.first()
   let resolved = resolve_id(id, usage)?
   let Some(member) = actor()? else {
@@ -1595,6 +1601,15 @@ fn claim(input: flags.CommandInput) -> Result<(), string> {
   }
   let issue = records.fetch_issue(resolved)?
   let key = f"{issue.expand.team.key}-{issue.number}"
+
+  if input.parsed.given("--renew") {
+    let Some(held) = claims.fetch(issue.id)? else {
+      return Err(f"{key} is not claimed; 'lll issue claim {key}' takes it")
+    };
+    let renewed = claims.renew(issue.id, held.id).map_err(|e| f"{key}: {e}")?
+    fmt.Println(f"Renewed {key} for {renewed.member_name}; the expiry clock restarts now (held since {display.relative(renewed.created)})")
+    return Ok(())
+  }
 
   let result = claims.acquire(issue.id, member.id).map_err(|e| {
     if strings.Contains(e, "already claimed by") {
