@@ -1315,7 +1315,7 @@ for bot_help in --help -h; do
   out=$(env -u LLL_TOKEN -u LLL_ADMIN_EMAIL -u LLL_ADMIN_PASSWORD LLL_URL=http://127.0.0.1:1 "$LIN" bot "$bot_help") || fail "bot $bot_help refused help"
   assert_contains "$out" "bot- prefix" "bot help explains its reserved member names"
   out=$(env -u LLL_TOKEN -u LLL_ADMIN_EMAIL -u LLL_ADMIN_PASSWORD LLL_URL=http://127.0.0.1:1 "$LIN" bot rotate "$bot_help") || fail "bot rotate $bot_help refused help"
-  assert_contains "$out" "lll bot rotate NAME" "bot rotation help names its invocation"
+  assert_contains "$out" "lll bot rotate bot-NAME" "bot rotation help names its invocation"
 done
 # --- lll search: full text over issues, comments and docs, ranked, with context (LLL-96) ---
 python3 "$REPO_ROOT"/scripts/test_search_team.py "$LLL_ABS"
@@ -2813,6 +2813,14 @@ out=$(env -u LLL_TOKEN HOME="$E2E_HOME" LLL_URL=$URL \
   LLL_ADMIN_EMAIL=admin@local.dev LLL_ADMIN_PASSWORD=admin-local-123 \
   "$LIN" bot claude-main 2>&1) && fail "lll bot accepted a name without the bot- prefix: $out"
 assert_contains "$out" "reserved" "the bot-kind prefix refusal names the reservation"
+assert_contains "$out" "try 'lll bot bot-claude-main'" "the prefix refusal names the working spelling (LLL-539)"
+# The CLI refuses that name before any server call (LLL-539), so the server's
+# own guard is exercised directly: a bot-kind member without the prefix.
+SU_TOK=$(pb_superuser_token "$URL") || fail "superuser token for the server prefix guard"
+out=$(curl -s -X POST "$URL/api/collections/members/records" \
+  -H "Authorization: Bearer $SU_TOK" -H 'Content-Type: application/json' \
+  -d '{"name":"claude-main","email":"claude-main@bots.invalid","password":"bot-pass-12345","passwordConfirm":"bot-pass-12345","kind":"bot"}')
+assert_contains "$out" "reserved to the 'bot-' prefix" "the server refuses a bot-kind member without the prefix"
 out=$(env LLL_TOKEN="$BRYAN_TOK" HOME="$E2E_HOME" LLL_URL=$URL \
   "$LIN" member add -n bot-impersonator 2>&1) && fail "member add took the reserved bot- prefix: $out"
 assert_contains "$out" "reserved" "person signups cannot take the bot- prefix"
