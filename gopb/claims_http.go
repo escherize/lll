@@ -90,6 +90,26 @@ func registerClaimRoutes(routes *router.Router[*core.RequestEvent], writes *issu
 		outcome, err := releaseClaim(re.App, re.Request.PathValue("issue"), body.ClaimID, by)
 		return respondClaim(re, outcome, err)
 	}).Bind(apis.RequireAuth("members", core.CollectionNameSuperusers))
+
+	routes.POST("/api/lll/issues/{issue}/renew", func(re *core.RequestEvent) error {
+		var body struct {
+			ClaimID string `json:"claim_id"`
+		}
+		re.Request.Body = http.MaxBytesReader(re.Response, re.Request.Body, 2048)
+		if err := re.BindBody(&body); err != nil || body.ClaimID == "" {
+			return re.BadRequestError("renew requires the observed claim_id", nil)
+		}
+		// A superuser token names no member, so it is never the holder and
+		// renewClaim refuses it with the holder's name.
+		memberID := ""
+		if !re.HasSuperuserAuth() {
+			memberID = re.Auth.Id
+		}
+		unlock := writes.acquire(re.Request.PathValue("issue"))
+		defer unlock()
+		outcome, err := renewClaim(re.App, re.Request.PathValue("issue"), body.ClaimID, memberID)
+		return respondClaim(re, outcome, err)
+	}).Bind(apis.RequireAuth("members", core.CollectionNameSuperusers))
 }
 
 func respondClaim(re *core.RequestEvent, outcome ClaimOutcome, err error) error {

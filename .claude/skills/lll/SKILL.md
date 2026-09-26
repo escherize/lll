@@ -64,13 +64,15 @@ Releasing another member's claim is refused unless you add `--force`
 with the reason from `-b "why"` if you give one. Force only a hold you know is
 dead: its holder may still be editing.
 
-**A claim older than 24 hours is released for you** (LLL-183): the server
-sweeps hourly and frees holds that outlived the agent that took them, leaving
-the issue exactly as a deliberate release would. On an issue that is not done
-or cancelled, the sweep leaves a comment naming the holder and how long they
-held it (LLL-452); read the comments if a claim you were relying on has
-vanished. The 24 hours is fixed on the server, not configurable, so if you
-expect to hold an issue for longer than a day, say so on the issue.
+**A claim not renewed for 24 hours is released for you** (LLL-183): the
+server sweeps hourly and frees holds that outlived the agent that took them,
+leaving the issue exactly as a deliberate release would. On an issue that is
+not done or cancelled, the sweep leaves a comment naming the holder and how
+long they held it (LLL-452); read the comments if a claim you were relying on
+has vanished. The 24 hours is fixed on the server, not configurable. To hold
+an issue longer, renew before it lapses: `lll issue claim KEY-12 --renew`
+restarts the clock on a claim you hold (LLL-535). Plain `claim` on your own
+issue does not renew it.
 
 `lll issue start KEY-12` sets in-progress without changing Git. To create a
 branch and record its host/path on the issue, use `lll issue start KEY-12 --branch`.
