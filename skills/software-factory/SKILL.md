@@ -48,7 +48,8 @@ Hands to stage 2: one issue, claimed.
 
 ## 2. Isolate - where do I work?
 
-[parallel-work](../parallel-work/SKILL.md)
+`parallel-work`, in the lll repo only. It does not ship with the binary; in
+another repo, this section is the guidance.
 
 Two agents in one checkout is not a merge problem, it is a corruption problem.
 Take a worktree before the first edit.
@@ -61,20 +62,22 @@ claim on the board that is the actual lock.
 
 ## 3. Build - the codebase itself
 
-Three skills, loaded only when the work touches their area. Do not read them
+Skills loaded only when the work touches their area. Do not read them
 speculatively; they are reference, not process.
 
-**This is the one stage that cannot be shipped**, because it is made of things
-that are only true here. A repo adopting this loop starts with an empty stage 3
+**This stage can never be shipped**, because it is made of things that are
+only true in one repo. A repo adopting this loop starts with an empty stage 3
 and builds its own: [codebase-skills](../codebase-skills/SKILL.md) is the
 interview that does it.
 
-- [lisette-interop](../lisette-interop/SKILL.md) - Lisette and Go crossing:
+In the lll repo (none of these ship with the binary):
+
+- `lisette-interop` - Lisette and Go crossing:
   text offsets, partial I/O, package-level state (there is none; the compiler
   rejects it), embedded resources.
-- [datastar-fragments](../datastar-fragments/SKILL.md) - the live board: SSE
+- `datastar-fragments` - the live board: SSE
   routing, fragment ownership, drafts a broadcast must not clear.
-- [pocketbase](../pocketbase/SKILL.md) - anything under `pb/` or `gopb/`:
+- `pocketbase` - anything under `pb/` or `gopb/`:
   migrations, collection rules (empty string means PUBLIC), realtime, auth.
 
 One issue per change. Found a second problem? File it and carry on.
@@ -86,7 +89,8 @@ the stack reads as an argument instead of asking a reviewer to trust you.
 
 ## 4. Verify - is it actually true?
 
-[verify-gate](../verify-gate/SKILL.md)
+`verify-gate`, in the lll repo only. It does not ship with the binary; in
+another repo, this section is the guidance.
 
 The gate is one command:
 

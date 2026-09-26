@@ -8,12 +8,10 @@ description: Interview a maintainer and write the codebase-specific skills for a
 > One stage of the loop in [software-factory](../software-factory/SKILL.md), which maps all six
 > and says what hands to what.
 
-Five of the six stages ship. Stage 3 cannot, because it is the one made of
-things that are only true here. In this repo it is
-[lisette-interop](../lisette-interop/SKILL.md),
-[datastar-fragments](../datastar-fragments/SKILL.md) and
-[pocketbase](../pocketbase/SKILL.md). In yours it is three different things,
-and nobody but you knows what they are yet.
+Stage 3 can never ship, because it is made of things that are only true in
+one repo. In the lll repo it is `lisette-interop`, `datastar-fragments` and
+`pocketbase`. In yours it is different things, and nobody but you knows what
+they are yet.
 
 This skill is how to find out: read first, then interview, then write, then
 check that it would have caught something.

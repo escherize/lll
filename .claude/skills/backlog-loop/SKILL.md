@@ -186,7 +186,7 @@ Stopping is a result. Report it as one.
   overwrites your edits rather than conflicting with them. Branch from the
   commit you mean, not whatever the worktree defaulted to. Never stash: that
   stack is shared with every other session and worktree.
-  [parallel-work](../parallel-work/SKILL.md) owns this stage.
+  In the lll repo, `parallel-work` owns this stage.
 - **The claim is the lock**, not the branch. `lll issue claim` is atomic and
   server-side, and its refusal is how two agents avoid doing the same work
   twice. Claim before writing code, not before pushing.
