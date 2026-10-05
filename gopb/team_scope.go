@@ -1,7 +1,9 @@
 package gopb
 
 import (
+	"net/http"
 	"slices"
+	"strings"
 
 	"github.com/pocketbase/pocketbase/core"
 	"github.com/pocketbase/pocketbase/tools/router"
@@ -38,7 +40,7 @@ func issueWritable(re *core.RequestEvent, issueID string) error {
 		return re.NotFoundError("", nil)
 	}
 	if !re.Auth.IsSuperuser() && re.Auth.GetString("mode") != "rw" {
-		return re.ForbiddenError("this member is read-only", nil)
+		return re.ForbiddenError(readOnlyRefusal(re.Auth), nil)
 	}
 	return nil
 }
@@ -153,4 +155,43 @@ func registerScopedRefGuard(app core.App) {
 			return e.Next()
 		})
 	}
+}
+
+// readOnlyRefusal is the one wording for a read-only member's write, shared
+// by the collection hooks below and the custom /api/lll routes.
+func readOnlyRefusal(auth *core.Record) string {
+	return "read-only access: " + auth.GetString("name") +
+		" can read but not change records here. 'lll whoami' shows your access; ask the person who invited you for read-write"
+}
+
+// Collections a read-only member may still write: its own favorites and
+// saved views, and its own member record (name, password).
+var readOnlyWritable = map[string]bool{"favorites": true, "views": true}
+
+// refuseReadOnlyWrites answers a read-only member's write through the
+// records API with a 403 that says why, instead of the rule's bare "Failed
+// to create record." (400) or 404 (fleet case 02: 10 of 10 agents could not
+// tell why they were refused). The rules still enforce it; this names the
+// reason. Router middleware, because PocketBase checks a create rule before
+// any request hook runs. It answers before any record lookup, so the reply is
+// the same whether or not the id exists and reveals nothing.
+func refuseReadOnlyWrites(re *core.RequestEvent) error {
+	method := re.Request.Method
+	if method != http.MethodPost && method != http.MethodPatch && method != http.MethodDelete {
+		return re.Next()
+	}
+	name := re.Request.PathValue("collection")
+	if name == "" || re.Auth == nil || re.Auth.IsSuperuser() || re.Auth.GetString("mode") != "ro" {
+		return re.Next()
+	}
+	if c, err := re.App.FindCachedCollectionByNameOrId(name); err == nil {
+		name = c.Name
+	}
+	if readOnlyWritable[name] || (name == "members" && method == http.MethodPatch && re.Request.PathValue("id") == re.Auth.Id) {
+		return re.Next()
+	}
+	if !strings.HasPrefix(re.Request.URL.Path, "/api/collections/") {
+		return re.Next()
+	}
+	return re.ForbiddenError(readOnlyRefusal(re.Auth), nil)
 }

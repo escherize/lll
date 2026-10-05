@@ -340,6 +340,28 @@ struct WhoamiIdentity {
   email: string,
   #[json("collectionName")]
   collection: string,
+  // Access (LLL-542): "all" | "teams" and "rw" | "ro". Empty on a server
+  // that predates scoped members, and for administrators.
+  scope: string,
+  mode: string,
+  expand: WhoamiExpand,
+}
+
+#[json]
+struct WhoamiExpand {
+  teams: Slice<models.Team>,
+}
+
+/// The access line: what this identity may see and whether it may write.
+/// None when the server does not report access (older server, superuser).
+fn access_line(me: WhoamiIdentity) -> Option<string> {
+  if me.scope == "" { return None }
+  let mode = if me.mode == "ro" { "read-only" } else { "read-write" }
+  if me.scope == "all" { return Some(f"{mode}, all teams") }
+  let keys = me.expand.teams.map(|t| t.key)
+  if keys.is_empty() { return Some(f"{mode}, no teams") }
+  let noun = if keys.length() == 1 { "team" } else { "teams" }
+  Some(f"{mode}, {noun} {strings.Join(keys, ", ")}")
 }
 
 /// The refusal for an argument `lll whoami` does not take. A `--team` here is
@@ -408,7 +430,7 @@ token with a member session, and 'lll bot bot-NAME' provisions a bot identity.",
     return Err(pb.expired_token_message())
   }
   let collection = pb.token_collection(cfg.token).unwrap_or("members")
-  let body = pb.get(f"/api/collections/{collection}/records/{id}")?
+  let body = pb.get(f"/api/collections/{collection}/records/{id}?expand=teams")?
   let mut me = WhoamiIdentity { .. }
   if let Err(e) = json.Unmarshal(body.bytes(), &me) {
     return Err(f"decoding the identity response: {e}")
@@ -420,6 +442,9 @@ token with a member session, and 'lll bot bot-NAME' provisions a bot identity.",
   let team = if cfg.team == "" { "(none — run 'lll attach')" } else { cfg.team }
   fmt.Println(f"team    {team}")
   fmt.Println(f"token   {src.token}")
+  if let Some(access) = access_line(me) {
+    fmt.Println(f"access  {access}")
+  }
   if administrator {
     fmt.Println("Administrator tokens do not name a member. Use 'lll login' for a member session or 'lll bot bot-NAME' for a bot identity.")
   }

@@ -156,9 +156,23 @@ with tempfile.TemporaryDirectory(prefix='lll-team-scope-') as directory:
         ro_rec, ro = member('reader', scope='teams', teams=[alpha['id']], mode='ro')
         assert {i['title'] for i in call(api, '/api/collections/issues/records', token=ro)[1]['items']} == \
             {'alpha edited', 'ok'}, 'ro member cannot read its team'
-        assert call(api, '/api/collections/issues/records', {'team': alpha['id'], 'title': 'n', 'state': 'todo'}, ro)[0] == 400
-        assert call(api, f"/api/collections/issues/records/{ia['id']}", {'title': 'n'}, ro, 'PATCH')[0] == 404
-        assert call(api, '/api/collections/comments/records', {'issue': ia['id'], 'body': 'n'}, ro)[0] == 400
+        # Refusals name the reason (fleet case 02). The answer is the same for
+        # a BETA row and for an id that does not exist, so it reveals nothing.
+        for code_body in [call(api, '/api/collections/issues/records', {'team': alpha['id'], 'title': 'n', 'state': 'todo'}, ro),
+                          call(api, f"/api/collections/issues/records/{ia['id']}", {'title': 'n'}, ro, 'PATCH'),
+                          call(api, f"/api/collections/issues/records/{ia['id']}", token=ro, method='DELETE'),
+                          call(api, '/api/collections/comments/records', {'issue': ia['id'], 'body': 'n'}, ro)]:
+            assert code_body[0] == 403 and 'read-only access: reader' in code_body[1]['message'].lower(), code_body[:2]
+        for target in [ib['id'], 'nosuchrecord123']:
+            assert call(api, f"/api/collections/issues/records/{target}", {'title': 'n'}, ro, 'PATCH')[0] == 403
+            assert call(api, f"/api/collections/issues/records/{target}", token=ro, method='DELETE')[0] == 403
+        assert call(api, f"/api/collections/members/records/{ro_rec['id']}", {'name': 'reader2'}, ro, 'PATCH')[0] == 200, \
+            'ro may still edit its own profile'
+        cli_ro = dict(cli, LLL_URL=api, LLL_TOKEN=ro, LLL_TEAM='ALPHA')
+        who = subprocess.run([binary, 'whoami'], cwd=root, env=cli_ro, text=True, capture_output=True, timeout=30)
+        assert 'access  read-only, team ALPHA' in who.stdout, who.stdout + who.stderr
+        who = subprocess.run([binary, 'whoami'], cwd=root, env=dict(cli_ro, LLL_TOKEN=tok), text=True, capture_output=True, timeout=30)
+        assert 'access  read-write, team ALPHA' in who.stdout, who.stdout + who.stderr
         assert call(api, f"/api/lll/issues/{ia['id']}/refs", {'ref': 'https://example.test/pr/2'}, ro)[0] == 403
         assert call(api, '/api/collections/favorites/records', {'issue': ia['id'], 'member': ro_rec['id']}, ro)[0] == 200, \
             'ro keeps favorites'

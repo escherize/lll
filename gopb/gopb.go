@@ -142,6 +142,7 @@ func Serve(dataDir, addr, adminEmail, adminPassword string) error {
 			return re.Next()
 		})
 		e.Router.BindFunc(serializeRecordUpdates(&issueUpdates))
+		e.Router.BindFunc(refuseReadOnlyWrites)
 		return e.Next()
 	})
 
