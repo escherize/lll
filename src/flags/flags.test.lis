@@ -481,3 +481,18 @@ fn dispatch_hands_over_unicode_and_empty_positionals_without_reinterpreting_them
   let assert Err(flag) = dispatch("test", "", "", commands, ["lll", "test", "set", "--unknown"])
   assert flag.contains("unknown flag: '--unknown'")
 }
+
+/// Fleet (scoped-access, case 10): 3 of 10 agents typed '--teams' for
+/// '--team'. A near miss names the flag; an unrelated one does not guess.
+#[test]
+fn unknown_flag_names_a_near_miss_and_only_a_near_miss() {
+  let spec = [
+    Flag { name: "--label", value: true, hint: "name", repeat: true, help: "label", .. },
+    Flag { name: "--team", value: true, hint: "KEY", help: "team", .. },
+  ]
+  assert unknown_flag("--labels", "lll x", spec).starts_with("unknown flag: '--labels' — did you mean '--label'?")
+  assert unknown_flag("--teams=ALPHA", "lll x", spec).contains("did you mean '--team'?")
+  assert !unknown_flag("--zzzzzz", "lll x", spec).contains("did you mean")
+  assert edit_distance("--teams", "--team") == 1
+  assert edit_distance("", "abc") == 3
+}

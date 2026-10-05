@@ -245,8 +245,57 @@ fn usage_help(usage: string, spec: Slice<Flag>) -> string {
 /// it says what was wrong and nothing about what would be right.
 fn unknown_flag(arg: string, usage: string, spec: Slice<Flag>) -> string {
   let kind = if arg.starts_with("-") { "unknown flag" } else { "unexpected argument" }
-  if usage == "" { return f"{kind}: '{arg}'" }
-  f"{kind}: '{arg}'\nusage: {usage}{section(spec)}"
+  let mut head = f"{kind}: '{arg}'"
+  if let Some(near) = nearest_flag(arg, spec) { head = f"{head} — did you mean '{near}'?" }
+  if usage == "" { return head }
+  f"{head}\nusage: {usage}{section(spec)}"
+}
+
+/// The declared spelling closest to an unknown flag, when it is close:
+/// '--teams' for '--team' (fleet: 3 of 10 agents typed the plural). Edit
+/// distance at most 2, so an unrelated flag is never suggested.
+fn nearest_flag(arg: string, spec: Slice<Flag>) -> Option<string> {
+  // Long flags only: a bare '-' or a one-letter '-x' is one edit from
+  // every short alias, so any suggestion there would be noise.
+  if !arg.starts_with("--") { return None }
+  let typed = arg.split("=")[0]
+  let mut best = ""
+  let mut best_d = 3
+  for f in spec {
+    if f.hidden { continue }
+    for name in [f.name, f.alias] {
+      if !name.starts_with("--") { continue }
+      let d = edit_distance(typed, name)
+      if d < best_d {
+        best = name
+        best_d = d
+      }
+    }
+  }
+  if best == "" { None } else { Some(best) }
+}
+
+/// Levenshtein distance over bytes; flag names are ASCII.
+fn edit_distance(a: string, b: string) -> int {
+  let x = a.bytes()
+  let y = b.bytes()
+  let mut prev: Slice<int> = []
+  for j in 0..y.length() + 1 { prev = prev.append(j) }
+  for i in 1..x.length() + 1 {
+    let mut cur: Slice<int> = [i]
+    for j in 1..y.length() + 1 {
+      let cost = if x[i - 1] == y[j - 1] { 0 } else { 1 }
+      let del = prev[j] + 1
+      let ins = cur[j - 1] + 1
+      let sub = prev[j - 1] + cost
+      let mut m = del
+      if ins < m { m = ins }
+      if sub < m { m = sub }
+      cur = cur.append(m)
+    }
+    prev = cur
+  }
+  prev[y.length()]
 }
 
 impl Parsed {

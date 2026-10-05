@@ -1158,11 +1158,15 @@ fn view(input: flags.CommandInput) -> Result<(), string> {
   }
 
   let comments = await_issue_view(reads.comments, "comments")?
+  fmt.Println("")
   if comments.length() > 0 {
-    fmt.Println("")
     fmt.Println("Comments:")
     fmt.Println("")
     print_comments(comments)
+  } else {
+    // Said, not omitted: an agent checking whether its comment landed
+    // could not tell "none" from "not shown" (fleet: 2 of 10).
+    fmt.Println("Comments: none")
   }
   Ok(())
 }
