@@ -67,7 +67,7 @@ func registerReferenceRoutes(routes *router.Router[*core.RequestEvent], writes *
 		if err := re.BindBody(&body); err != nil {
 			return re.BadRequestError("invalid reference request", nil)
 		}
-		if err := issueInScope(re, re.Request.PathValue("issue")); err != nil {
+		if err := issueWritable(re, re.Request.PathValue("issue")); err != nil {
 			return err
 		}
 		unlock := writes.acquire(re.Request.PathValue("issue"))

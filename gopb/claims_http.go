@@ -27,7 +27,7 @@ func registerClaimRoutes(routes *router.Router[*core.RequestEvent], writes *issu
 		if err != nil {
 			return re.BadRequestError("invalid assignment update fields", err)
 		}
-		if err := issueInScope(re, re.Request.PathValue("issue")); err != nil {
+		if err := issueWritable(re, re.Request.PathValue("issue")); err != nil {
 			return err
 		}
 		unlock := writes.acquire(re.Request.PathValue("issue"))
@@ -54,7 +54,7 @@ func registerClaimRoutes(routes *router.Router[*core.RequestEvent], writes *issu
 			}
 			body.Member = re.Auth.Id
 		}
-		if err := issueInScope(re, re.Request.PathValue("issue")); err != nil {
+		if err := issueWritable(re, re.Request.PathValue("issue")); err != nil {
 			return err
 		}
 		unlock := writes.acquire(re.Request.PathValue("issue"))
@@ -77,7 +77,7 @@ func registerClaimRoutes(routes *router.Router[*core.RequestEvent], writes *issu
 		if body.ClaimID == "" {
 			return re.BadRequestError("release requires the observed claim_id", nil)
 		}
-		if err := issueInScope(re, re.Request.PathValue("issue")); err != nil {
+		if err := issueWritable(re, re.Request.PathValue("issue")); err != nil {
 			return err
 		}
 		// The holder releases freely; anyone else needs force, and a forced

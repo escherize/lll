@@ -1,35 +1,34 @@
 package gopb
 
 import (
-	"fmt"
 	"slices"
 
-	"github.com/pocketbase/dbx"
 	"github.com/pocketbase/pocketbase/core"
 )
 
-// Team-scoped members (members.teams, 1789800000_member_teams.js): the
-// collection rules keep a scoped member inside its teams, but the custom
+// Team-scoped members (members.scope/teams/mode, 1789900000_member_teams.js):
+// the collection rules keep a scoped member inside its teams, but the custom
 // /api/lll routes read records through the app and skip those rules. Each
-// one that takes an issue calls issueInScope first.
+// one that takes an issue calls issueWritable first; all of them write.
 
 // memberSeesTeam reports whether auth may see rows of teamID. Superusers and
-// members with no teams see every team.
+// scope "all" see every team; scope "teams" sees only the listed ones, so an
+// empty list sees nothing.
 func memberSeesTeam(auth *core.Record, teamID string) bool {
 	if auth == nil {
 		return false
 	}
-	if auth.IsSuperuser() {
+	if auth.IsSuperuser() || auth.GetString("scope") == "all" {
 		return true
 	}
-	teams := auth.GetStringSlice("teams")
-	return len(teams) == 0 || slices.Contains(teams, teamID)
+	return slices.Contains(auth.GetStringSlice("teams"), teamID)
 }
 
-// issueInScope answers 404 for an issue outside the caller's teams, the same
-// answer a rule gives, so the route does not reveal that the issue exists.
-// An issue that does not exist is left to the route's own handling.
-func issueInScope(re *core.RequestEvent, issueID string) error {
+// issueWritable answers 404 for an issue outside the caller's teams, the same
+// answer a rule gives, so the route does not reveal that the issue exists,
+// and 403 for a read-only member. An issue that does not exist is left to the
+// route's own handling.
+func issueWritable(re *core.RequestEvent, issueID string) error {
 	issue, err := re.App.FindRecordById("issues", issueID)
 	if err != nil {
 		return nil
@@ -37,23 +36,24 @@ func issueInScope(re *core.RequestEvent, issueID string) error {
 	if !memberSeesTeam(re.Auth, issue.GetString("team")) {
 		return re.NotFoundError("", nil)
 	}
+	if !re.Auth.IsSuperuser() && re.Auth.GetString("mode") != "rw" {
+		return re.ForbiddenError("this member is read-only", nil)
+	}
 	return nil
 }
 
-// registerTeamScopeGuard refuses to delete a team that is some member's only
-// team. Deleting it would empty that member's teams, and empty means every
-// team, so the member would gain access instead of losing it.
-func registerTeamScopeGuard(app core.App) {
-	app.OnRecordDelete("teams").BindFunc(func(e *core.RecordEvent) error {
-		members, err := e.App.FindRecordsByFilter("members", "teams ?= {:id}", "", 0, 0, dbx.Params{"id": e.Record.Id})
-		if err != nil {
-			return err
+// registerMemberScopeDefault gives a member created without a scope or mode
+// its creator's: only a superuser or an "all" + "rw" member passes
+// members.createRule, so the default is "all" + "rw". OnRecordCreate rather
+// than the Request variant, so seeding and direct saves get it too. Only a
+// missing value is filled; "teams" with no teams stays exactly that.
+func registerMemberScopeDefault(app core.App) {
+	app.OnRecordCreate("members").BindFunc(func(e *core.RecordEvent) error {
+		if e.Record.GetString("scope") == "" {
+			e.Record.Set("scope", "all")
 		}
-		for _, m := range members {
-			if len(m.GetStringSlice("teams")) == 1 {
-				return fmt.Errorf("team %s is the only team member %s may see; give that member another team or remove them first, because an empty scope means every team",
-					e.Record.GetString("key"), m.GetString("name"))
-			}
+		if e.Record.GetString("mode") == "" {
+			e.Record.Set("mode", "rw")
 		}
 		return e.Next()
 	})

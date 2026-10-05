@@ -92,6 +92,7 @@ with tempfile.TemporaryDirectory(prefix='lll-team-scope-') as directory:
                           {'identity': 'guest@example.test', 'password': password})
         tok, me = auth['token'], auth['record']['id']
         assert auth['record']['teams'] == [alpha['id']], auth['record']
+        assert (auth['record']['scope'], auth['record']['mode']) == ('teams', 'rw'), auth['record']
 
         def status(path, body=None, method=None, headers=None):
             return call(api, path, body, tok, method, headers)[0]
@@ -116,6 +117,8 @@ with tempfile.TemporaryDirectory(prefix='lll-team-scope-') as directory:
         assert replay[0] == 400 and 'beta secret' not in json.dumps(replay[1]), replay
         # No widening its own scope, no minting members or teams.
         assert status(f'/api/collections/members/records/{me}', {'teams': []}, 'PATCH') == 404
+        assert status(f'/api/collections/members/records/{me}', {'scope': 'all'}, 'PATCH') == 404
+        assert status(f'/api/collections/members/records/{me}', {'mode': 'rw'}, 'PATCH') == 404
         assert status(f'/api/collections/members/records/{me}', {'name': 'guest2'}, 'PATCH') == 200
         assert status('/api/collections/members/records', {'name': 'evil', 'email': 'e@example.test', 'password': 'pw12345678',
                                                            'passwordConfirm': 'pw12345678', 'kind': 'person'}) == 400
@@ -124,6 +127,39 @@ with tempfile.TemporaryDirectory(prefix='lll-team-scope-') as directory:
         assert status(f"/api/lll/issues/{ib['id']}/claim", {}) == 404
         assert status(f"/api/lll/issues/{ib['id']}/refs", {'ref': 'https://example.test/pr/1'}) == 404
         assert status(f"/api/lll/issues/{ia['id']}/claim", {}) == 200
+        # Claims leave only through /release (LLL-512): this migration runs
+        # after claim_delete_admin and must not reopen direct DELETE.
+        _, held, _ = call(api, '/api/collections/claims/records', token=tok)
+        assert held['items'], held
+        claim_path = f"/api/collections/claims/records/{held['items'][0]['id']}"
+        assert status(claim_path, method='DELETE') == 403
+        assert status(claim_path) == 200, 'the refused DELETE removed the claim'
+
+        def member(name, **access):
+            body = {'name': name, 'email': f'{name}@example.test', 'password': 'pw12345678',
+                    'passwordConfirm': 'pw12345678', 'kind': 'person', **access}
+            code, rec, _ = call(api, '/api/collections/members/records', body, su)
+            assert code == 200, rec
+            _, a, _ = call(api, '/api/collections/members/auth-with-password',
+                           {'identity': body['email'], 'password': body['password']})
+            return rec, a['token']
+
+        # Created with no scope or mode: the creator's, never blank.
+        plain, _ = member('plain')
+        assert (plain['scope'], plain['mode']) == ('all', 'rw'), plain
+        # Read-only: sees ALPHA, writes nothing, custom routes included.
+        _, ro = member('reader', scope='teams', teams=[alpha['id']], mode='ro')
+        assert {i['title'] for i in call(api, '/api/collections/issues/records', token=ro)[1]['items']} == \
+            {'alpha edited', 'ok'}, 'ro member cannot read its team'
+        assert call(api, '/api/collections/issues/records', {'team': alpha['id'], 'title': 'n', 'state': 'todo'}, ro)[0] == 400
+        assert call(api, f"/api/collections/issues/records/{ia['id']}", {'title': 'n'}, ro, 'PATCH')[0] == 404
+        assert call(api, '/api/collections/comments/records', {'issue': ia['id'], 'body': 'n'}, ro)[0] == 400
+        assert call(api, f"/api/lll/issues/{ia['id']}/refs", {'ref': 'https://example.test/pr/2'}, ro)[0] == 403
+        assert call(api, '/api/collections/favorites/records', {'issue': ia['id']}, ro)[0] == 200, 'ro keeps favorites'
+        # Scope "teams" with no teams sees nothing: empty never means every team.
+        _, none = member('nobody', scope='teams', teams=[])
+        assert call(api, '/api/collections/issues/records', token=none)[1]['items'] == []
+        assert call(api, '/api/collections/teams/records', token=none)[1]['items'] == []
 
         # The board: the link logs in, then only ALPHA's read-only pages answer.
         code, _, headers = call(board, link[len(board):])
@@ -154,10 +190,14 @@ with tempfile.TemporaryDirectory(prefix='lll-team-scope-') as directory:
         code, body, _ = page('/t/ALPHA/doc/cross?raw')
         assert code == 200 and 'ALPHA-1' in body and 'BETA-1' not in body, body
         assert 'BETA-1' in call(board, '/t/ALPHA/doc/cross?raw', headers=full)[1]
-        # Deleting ALPHA would empty guest's teams, and empty means every team.
-        assert call(api, f"/api/collections/teams/records/{alpha['id']}", token=su, method='DELETE')[0] == 400
+        # Deleting a scoped member's only team leaves it seeing nothing, not
+        # everything: scope is explicit, so no delete guard is needed.
         _, gamma, _ = call(api, '/api/collections/teams/records', {'key': 'GAMMA', 'name': 'g'}, su)
+        _, solo = member('solo', scope='teams', teams=[gamma['id']])
+        assert [t['key'] for t in call(api, '/api/collections/teams/records', token=solo)[1]['items']] == ['GAMMA']
         assert call(api, f"/api/collections/teams/records/{gamma['id']}", token=su, method='DELETE')[0] == 204
+        assert call(api, '/api/collections/teams/records', token=solo)[1]['items'] == []
+        assert call(api, '/api/collections/issues/records', token=solo)[1]['items'] == []
         assert [t['key'] for t in items('/api/collections/teams/records')] == ['ALPHA']
         # Controls: the negatives above would pass vacuously if these did not hold.
         assert 'BETA' in call(board, '/t/ALPHA/', headers=full)[1], 'rail check proves nothing'

@@ -66,8 +66,11 @@ pub struct NewMember {
   pub kind: string,
   #[json(omitempty)]
   pub owner: string,
-  // Team scope: the ids of the only teams this member may see. Empty means
-  // every team; `lll member invite --team` sets one.
+  // Access scope: "all" or "teams". Empty lets the server fill in the
+  // creator's ("all"). With "teams", the member sees only `teams`, the ids
+  // `lll member invite --team` sets; an empty list then sees nothing.
+  #[json(omitempty)]
+  pub scope: string,
   #[json(omitempty)]
   pub teams: Slice<string>,
 }
