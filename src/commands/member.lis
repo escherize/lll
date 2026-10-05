@@ -865,11 +865,15 @@ LLL_ADMIN_PASSWORD when supplied. An existing member is refused rather than
 overwritten; resetting an existing password with 'lll member set-password'
 requires administrator credentials.
 
---team KEY limits the colleague to one team. Their own token sees and writes
-only that team's issues, comments, docs and claims, and cannot widen its scope
-or create members. When this machine knows the board token (LLL_BOARD_TOKEN,
-or the link 'lll up --bind' saved), the invite also prints a read-only board
-link that opens only that team; it stops working when the board token rotates." +
+--team KEY limits the colleague to that team (repeat for more); --read-only
+lets them look but not change anything. Their own token sees only those teams'
+issues, comments, docs and claims, and cannot widen its scope or create
+members. When this machine knows the board token (LLL_BOARD_TOKEN, or the link
+'lll up --bind' saved), the invite also prints a view-only web board link per
+team; it stops working when the server's LLL_BOARD_TOKEN changes.
+
+Only need someone to watch a team's board, with no login of their own?
+'lll board --team KEY' prints that view-only link and creates no member." +
   flags.section(member_invite_spec())
 }
 
