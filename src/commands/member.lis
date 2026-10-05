@@ -599,7 +599,7 @@ fn member_invite(input: flags.CommandInput) -> Result<(), string> {
   let mut team_ids: Slice<string> = []
   for key in keys {
     let Some(team) = find_team_as(su, key)? else {
-      return Err(f"no team with key '{key}' on this server — see 'lll team list'")
+      return Err(f"no team with key '{key}' on this server; teams: {team_keys_as(su)} (see 'lll team list')")
     }
     team_ids = team_ids.append(team.id)
   }
@@ -619,6 +619,16 @@ fn member_invite(input: flags.CommandInput) -> Result<(), string> {
     }
   }
   Ok(())
+}
+
+/// Every team key, comma-joined, for an unknown-team refusal (fleet case
+/// 10: 8 of 10 agents ranked "no team with key 'NOPE'" the least helpful
+/// error because it named no valid team). Best effort: "?" on failure.
+fn team_keys_as(tok: string) -> string {
+  let Ok(body) = pb.get_as("/api/collections/teams/records?perPage=200&sort=key", tok) else { return "?" }
+  let mut result = models.TeamList { .. }
+  if json.Unmarshal(body.bytes(), &result).is_err() { return "?" }
+  strings.Join(result.items.map(|t| t.key), ", ")
 }
 
 /// The team by key, read with `tok` rather than the configured token: an

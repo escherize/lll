@@ -200,6 +200,8 @@ with tempfile.TemporaryDirectory(prefix='lll-team-scope-') as directory:
         assert out.returncode == 0 and 'invited viewer <viewer@example.test>: read-only, team ALPHA' in out.stdout, \
             out.stdout + out.stderr
         assert 'view-only web board for ALPHA (separate from their CLI access' in out.stdout, out.stdout
+        out = lll('member', 'invite', 'nope', '--email', 'nope@example.test', '--team', 'NOPE', env=cli)
+        assert out.returncode != 0 and "no team with key 'NOPE' on this server; teams: ALPHA, BETA" in out.stderr, out.stderr
         steps = [
             ([], 'viewer: read-only, team ALPHA'),
             (['--add-team', 'BETA'], 'viewer: read-only, teams ALPHA, BETA (was read-only, team ALPHA)'),
