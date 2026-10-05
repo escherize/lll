@@ -952,8 +952,9 @@ otherwise an administrator enables login later with 'lll member set-password'." 
 fn member_create_error(e: string) -> string {
   // Scoped and read-only members fail the members create rule, which
   // PocketBase answers with a bare 400 (scoped-access fleet case 09: 4 of
-  // 10 got nothing more). A validation failure carries field data instead.
-  if pb.response_status(e) == 400 && e.contains("\"data\":{}") {
+  // 10 got nothing more). A validation failure carries field data, and a
+  // gopb refusal (the bot- prefix) its own message; both pass through.
+  if pb.response_status(e) == 400 && e.contains("\"data\":{}") && e.contains("Failed to create record.") {
     return "your token cannot add members: only a member with read-write access to every team, or administrator credentials ('lll member invite NAME --email E' with LLL_ADMIN_EMAIL/LLL_ADMIN_PASSWORD), can
 for your own agent, ask whoever invited you for a bot ('lll bot bot-NAME')"
   }
