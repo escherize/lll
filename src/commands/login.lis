@@ -296,10 +296,12 @@ fn settle_team() {
   if live.length() == 1 {
     let key = live[0].key
     let Ok(path) = set_home_key("team", key) else {
-      fmt.Println(f"next: lll attach -k {key} — the server's only team")
+      fmt.Println(f"next: lll attach -k {key} — the only team you can see")
       return
     }
-    fmt.Println(f"team = \"{key}\" in {path} (the server's only team)")
+    // "you can see": a team-scoped member is shown only its teams, so "the
+    // server's only team" was false for it (verification fleet, LLL-552).
+    fmt.Println(f"team = \"{key}\" in {path} (the only team you can see)")
     fmt.Println("ready: lll issue create \"a title\"")
     fmt.Println("in a shared repo, 'lll attach' writes .lll.toml; commit that file with Git if clones should inherit the team")
     return
