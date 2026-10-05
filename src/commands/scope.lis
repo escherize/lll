@@ -21,6 +21,9 @@ pub fn scoped_args(args: Slice<string>) -> Result<Slice<string>, string> {
   let (cleaned, team) = flags.extract_team(args, start, spec)?
   if let Some(key) = team {
     if let Err(e) = os.Setenv("LLL_TEAM", key) { return Err(f"setting command team: {e}") }
+    // So an unknown key is blamed on the flag the user typed, not on
+    // LLL_TEAM, which they never set (fleet: 3 of 10).
+    if let Err(e) = os.Setenv("LLL_TEAM_FROM_FLAG", "1") { return Err(f"setting command team: {e}") }
   }
   Ok(cleaned)
 }
