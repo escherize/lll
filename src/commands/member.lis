@@ -266,6 +266,7 @@ fn set_password_spec() -> Slice<flags.Flag> {
     },
     flags.Flag {
       name: "--email",
+      alias: "-e",
       value: true,
       hint: "email",
       help: "real email to set alongside the password; required when the member has only a synthesized one",
