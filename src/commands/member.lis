@@ -167,7 +167,7 @@ fn member_access(m: models.Member, keys: Map<string, string>) -> string {
   for id in m.teams {
     match keys.get(id) {
       Some(k) => named = named.append(k),
-      None => hidden = hidden + 1,
+      None => hidden += 1,
     }
   }
   let mut shown = if named.is_empty() { "no teams" } else { strings.Join(named, ", ") }
@@ -576,7 +576,7 @@ fn member_invite(input: flags.CommandInput) -> Result<(), string> {
   // password nobody knows — the exact dead record set-password exists to fix.
   let password = rand.Text()
   let cfg = config.load()?
-  let keys = p.all("--team").map(|k| records.normalize_team_key(k)).filter(|k| k != "")
+  let keys = p.all("--team").map(records.normalize_team_key).filter(|k| k != "")
   let mode = if p.given("--read-only") { "ro" } else { "rw" }
   if keys.is_empty() && mode == "ro" {
     return Err("--read-only needs --team KEY: say which teams they may read")
@@ -1103,7 +1103,7 @@ fn describe_access(scope: string, mode: string, keys: Slice<string>) -> string {
 }
 
 fn member_access_spec() -> Slice<flags.Flag> {
-  [
+  with_admin_flags([
     flags.Flag { name: "--team", value: true, hint: "KEY", repeat: true, help: "limit them to exactly these teams (repeat for more); replaces their teams", .. },
     flags.Flag { name: "--add-team", value: true, hint: "KEY", repeat: true, help: "also give them this team, keeping the others", .. },
     flags.Flag { name: "--remove-team", value: true, hint: "KEY", repeat: true, help: "take this team away, keeping the others; removing the last leaves them seeing nothing", .. },
@@ -1111,7 +1111,7 @@ fn member_access_spec() -> Slice<flags.Flag> {
     flags.Flag { name: "--no-teams", help: "revoke: they see nothing, and their comments and issues stay", .. },
     flags.Flag { name: "--read-only", help: "they can read but not change anything", .. },
     flags.Flag { name: "--read-write", help: "they can change things in the teams they see", .. },
-  ]
+  ])
 }
 
 fn member_access_page() -> string {
@@ -1126,9 +1126,11 @@ Usage:
   lll member access NAME --no-teams            revoke (nothing is deleted)
   lll member access NAME --all-teams --read-write
 
-Changing access needs a member with read-write access to every team, or
-administrator credentials. Revoking keeps the member and everything they wrote;
-'lll member remove' deletes the member instead.
+Showing access works with any token. Changing it needs administrator
+credentials (--admin-email/--admin-password, or LLL_ADMIN_EMAIL and
+LLL_ADMIN_PASSWORD), the same gate as 'lll member invite': no member or bot
+token can change anyone's access, its own included. Revoking keeps the member
+and everything they wrote; 'lll member remove' deletes the member instead.
 " + flags.section(member_access_spec())
 }
 
@@ -1204,7 +1206,20 @@ fn member_access_cmd(input: flags.CommandInput) -> Result<(), string> {
     Ok(b) => b as string,
     Err(e) => return Err(f"encoding access: {e}"),
   }
-  let _ = pb.patch(f"/api/collections/members/records/{m.id}", payload)?
+  // Administrator credentials only: the members rules refuse every member
+  // and bot token, so an agent on someone's token cannot widen a guest or
+  // narrow its owner.
+  apply_admin_flags(p.one("--admin-email"), p.one("--admin-password"))?
+  let su = superuser_auth()?
+  if let Err(e) = pb.patch_as(f"/api/collections/members/records/{m.id}", payload, su) {
+    let status = pb.response_status(e)
+    if status == 400 || status == 403 || status == 404 {
+      return Err(
+        "changing access needs administrator credentials: pass --admin-email and --admin-password, or set LLL_ADMIN_EMAIL/LLL_ADMIN_PASSWORD. A member or bot token cannot change anyone's access, its own included.",
+      )
+    }
+    return Err(e)
+  }
   let after = describe_access(scope, mode, ids.map(key_of))
   if after == before {
     fmt.Println(f"{m.name}: {after} (unchanged)")

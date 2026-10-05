@@ -168,7 +168,8 @@ with tempfile.TemporaryDirectory(prefix='lll-team-scope-') as directory:
             assert call(api, f"/api/collections/issues/records/{target}", token=ro, method='DELETE')[0] == 403
         assert call(api, f"/api/collections/members/records/{ro_rec['id']}", {'name': 'reader2'}, ro, 'PATCH')[0] == 200, \
             'ro may still edit its own profile'
-        cli_ro = dict(cli, LLL_URL=api, LLL_TOKEN=ro, LLL_TEAM='ALPHA')
+        cli_ro = {k: v for k, v in cli.items() if not k.startswith('LLL_ADMIN_')}
+        cli_ro.update(LLL_URL=api, LLL_TOKEN=ro, LLL_TEAM='ALPHA')
         who = subprocess.run([binary, 'whoami'], cwd=root, env=cli_ro, text=True, capture_output=True, timeout=30)
         assert 'access  read-only, team ALPHA' in who.stdout, who.stdout + who.stderr
         who = subprocess.run([binary, 'whoami'], cwd=root, env=dict(cli_ro, LLL_TOKEN=tok), text=True, capture_output=True, timeout=30)
@@ -187,8 +188,9 @@ with tempfile.TemporaryDirectory(prefix='lll-team-scope-') as directory:
 
         # Fleet cases 04, 06-08: invite read-only, then narrow, widen, revoke
         # with 'lll member access', as a full member (not the superuser).
-        _, plain_tok = member_login('plain')
+        plain_rec, plain_tok = member_login('plain')
         full_env = dict(cli_ro, LLL_TOKEN=plain_tok)
+        admin_env = dict(full_env, LLL_ADMIN_EMAIL=env['LLL_ADMIN_EMAIL'], LLL_ADMIN_PASSWORD=env['LLL_ADMIN_PASSWORD'])
 
         def lll(*argv, env=full_env):
             return subprocess.run([binary, *argv], cwd=root, env=env, text=True, capture_output=True, timeout=30)
@@ -208,15 +210,26 @@ with tempfile.TemporaryDirectory(prefix='lll-team-scope-') as directory:
             (['--read-only'], 'viewer: read-only, all teams (unchanged)'),
         ]
         for flags_, want in steps:
-            out = lll('member', 'access', 'viewer', *flags_)
+            out = lll('member', 'access', 'viewer', *flags_, env=admin_env)
             assert out.returncode == 0 and want in out.stdout, (flags_, out.stdout, out.stderr)
         for bad in [['--team', 'ALPHA', '--all-teams'], ['--read-only', '--read-write'], ['--add-team', 'ALPHA']]:
-            out = lll('member', 'access', 'viewer', *bad)
+            out = lll('member', 'access', 'viewer', *bad, env=admin_env)
             assert out.returncode != 0, (bad, out.stdout)
         out = lll('member', 'access', 'viewer', '--read-write', env=guest_env)
         assert out.returncode != 0, 'a scoped member changed someone else\'s access'
         out = lll('member', 'access', 'guest2', '--all-teams', env=guest_env)
         assert out.returncode != 0, 'a scoped member widened itself'
+        # Only administrator credentials change access: a full member's (or
+        # bot's) token alone cannot, through the CLI or the API.
+        out = lll('member', 'access', 'viewer', '--team', 'ALPHA')
+        assert out.returncode != 0 and 'admin' in (out.stdout + out.stderr).lower(), out.stdout + out.stderr
+        viewer_id = next(m for m in call(api, '/api/collections/members/records?perPage=200', token=su)[1]['items']
+                         if m['name'] == 'viewer')['id']
+        for body in [{'mode': 'rw'}, {'scope': 'teams', 'teams': [alpha['id']]}, {'teams+': [beta['id']]}]:
+            assert call(api, f'/api/collections/members/records/{viewer_id}', body, plain_tok, 'PATCH')[0] == 404, body
+            assert call(api, f"/api/collections/members/records/{plain_rec['id']}", body, plain_tok, 'PATCH')[0] == 404, body
+        assert call(api, f'/api/collections/members/records/{viewer_id}', {'name': 'viewer'}, plain_tok, 'PATCH')[0] == 200, \
+            'control: a full member still edits other fields'
         assert call(api, f"/api/lll/issues/{ia['id']}/refs", {'ref': 'https://example.test/pr/2'}, ro)[0] == 403
         assert call(api, '/api/collections/favorites/records', {'issue': ia['id'], 'member': ro_rec['id']}, ro)[0] == 200, \
             'ro keeps favorites'

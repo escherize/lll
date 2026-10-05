@@ -66,8 +66,13 @@ migrate((app) => {
   members.fields.add(new SelectField({ name: "scope", values: ["all", "teams"], maxSelect: 1, required: true }));
   members.fields.add(new SelectField({ name: "mode", values: ["rw", "ro"], maxSelect: 1, required: true }));
   members.createRule = ONLY_ALL;
-  // A member may edit itself (name, password) but never its own access.
-  members.updateRule = `${AUTH} && ((${ALL} && ${RW}) || (id = @request.auth.id && @request.body.teams:isset = false && @request.body.scope:isset = false && @request.body.mode:isset = false))`;
+  // Access (scope, teams, mode) changes only with superuser credentials,
+  // which bypass rules: no member or bot token may change anyone's access,
+  // its own included, so an agent running on a full member's token cannot
+  // widen a guest or narrow its owner. Other fields keep their old rule: a
+  // full member edits anyone, everyone else edits only itself.
+  const NO_ACCESS_FIELDS = "@request.body.teams:isset = false && @request.body.scope:isset = false && @request.body.mode:isset = false";
+  members.updateRule = `${AUTH} && ${NO_ACCESS_FIELDS} && ((${ALL} && ${RW}) || id = @request.auth.id)`;
   app.save(members);
   app.db().newQuery("UPDATE members SET scope = 'all', mode = 'rw'").execute();
   for (const [name, rules] of Object.entries(RULES)) {
