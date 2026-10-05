@@ -62,7 +62,7 @@ Rules: list @request.auth.id != \"\" && (@request.auth.scope = \"all\" || @reque
 
 ## favorites (base)
 
-Rules: list @request.auth.id != \"\" && (@request.auth.scope = \"all\" || @request.auth.teams.id ?= issue.team) view @request.auth.id != \"\" && (@request.auth.scope = \"all\" || @request.auth.teams.id ?= issue.team) create @request.auth.id != \"\" && (@request.auth.scope = \"all\" || @request.auth.teams.id ?= issue.team) update @request.auth.id != \"\" && (@request.auth.scope = \"all\" || @request.auth.teams.id ?= issue.team) && (@request.auth.scope = \"all\" || @request.body.issue:isset = false) delete @request.auth.id != \"\" && (@request.auth.scope = \"all\" || @request.auth.teams.id ?= issue.team)
+Rules: list @request.auth.id != \"\" && (@request.auth.scope = \"all\" || @request.auth.teams.id ?= issue.team) && (@request.auth.scope = \"all\" && @request.auth.mode = \"rw\" || member = @request.auth.id) view @request.auth.id != \"\" && (@request.auth.scope = \"all\" || @request.auth.teams.id ?= issue.team) && (@request.auth.scope = \"all\" && @request.auth.mode = \"rw\" || member = @request.auth.id) create @request.auth.id != \"\" && (@request.auth.scope = \"all\" || @request.auth.teams.id ?= issue.team) && (@request.auth.scope = \"all\" && @request.auth.mode = \"rw\" || @request.body.member = @request.auth.id) update @request.auth.id != \"\" && (@request.auth.scope = \"all\" || @request.auth.teams.id ?= issue.team) && (@request.auth.scope = \"all\" || @request.body.issue:isset = false) && (@request.auth.scope = \"all\" && @request.auth.mode = \"rw\" || member = @request.auth.id) && (@request.auth.scope = \"all\" && @request.auth.mode = \"rw\" || @request.body.member:isset = false) delete @request.auth.id != \"\" && (@request.auth.scope = \"all\" || @request.auth.teams.id ?= issue.team) && (@request.auth.scope = \"all\" && @request.auth.mode = \"rw\" || member = @request.auth.id)
 
 | field | type | required | notes |
 |-------|------|----------|-------|
@@ -162,7 +162,7 @@ Rules: list @request.auth.id != \"\" && (@request.auth.scope = \"all\" || @reque
 
 ## views (base)
 
-Rules: list @request.auth.id != \"\" view @request.auth.id != \"\" create @request.auth.id != \"\" update @request.auth.id != \"\" delete @request.auth.id != \"\"
+Rules: list @request.auth.id != \"\" && (@request.auth.scope = \"all\" && @request.auth.mode = \"rw\" || member = @request.auth.id) view @request.auth.id != \"\" && (@request.auth.scope = \"all\" && @request.auth.mode = \"rw\" || member = @request.auth.id) create @request.auth.id != \"\" && (@request.auth.scope = \"all\" && @request.auth.mode = \"rw\" || @request.body.member = @request.auth.id) update @request.auth.id != \"\" && (@request.auth.scope = \"all\" && @request.auth.mode = \"rw\" || member = @request.auth.id) && (@request.auth.scope = \"all\" && @request.auth.mode = \"rw\" || @request.body.member:isset = false) delete @request.auth.id != \"\" && (@request.auth.scope = \"all\" && @request.auth.mode = \"rw\" || member = @request.auth.id)
 
 | field | type | required | notes |
 |-------|------|----------|-------|

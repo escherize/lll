@@ -35,7 +35,13 @@ const keepsTeam = (field) =>
 // Rows that follow their issue: a scoped member may not re-point them.
 const keepsIssue = (rule) => `${rule} && (${ALL} || @request.body.issue:isset = false)`;
 const ONLY_ALL = `${AUTH} && ${ALL} && ${RW}`;
-// Favorites are the viewer's own bookmarks, so a read-only member keeps them.
+// Favorites and saved views are a member's own. A full member ("all" +
+// "rw") keeps today's access to everyone's; anyone narrower reads and writes
+// only its own, and a read-only member keeps them.
+const FULL = `${ALL} && ${RW}`;
+const own = (rule) => `${rule} && (${FULL} || member = @request.auth.id)`;
+const ownCreate = (rule) => `${rule} && (${FULL} || @request.body.member = @request.auth.id)`;
+const keepsOwner = (rule) => `${own(rule)} && (${FULL} || @request.body.member:isset = false)`;
 const fav = read("issue.team");
 
 // name -> [listRule, viewRule, createRule, updateRule, deleteRule]
@@ -47,7 +53,8 @@ const RULES = {
   docs: [read("team"), read("team"), write("team"), keepsTeam("team"), write("team")],
   webhooks: [read("team"), read("team"), write("team"), keepsTeam("team"), write("team")],
   comments: [read("issue.team"), read("issue.team"), write("issue.team"), keepsIssue(write("issue.team")), write("issue.team")],
-  favorites: [fav, fav, fav, keepsIssue(fav), fav],
+  favorites: [own(fav), own(fav), ownCreate(fav), keepsOwner(keepsIssue(fav)), own(fav)],
+  views: [own(AUTH), own(AUTH), ownCreate(AUTH), keepsOwner(AUTH), own(AUTH)],
   claims: [read("issue.team"), read("issue.team"), write("issue.team"), null, null],
 };
 const NAMES = ["listRule", "viewRule", "createRule", "updateRule", "deleteRule"];

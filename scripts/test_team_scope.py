@@ -153,14 +153,15 @@ with tempfile.TemporaryDirectory(prefix='lll-team-scope-') as directory:
         plain, _ = member('plain')
         assert (plain['scope'], plain['mode']) == ('all', 'rw'), plain
         # Read-only: sees ALPHA, writes nothing, custom routes included.
-        _, ro = member('reader', scope='teams', teams=[alpha['id']], mode='ro')
+        ro_rec, ro = member('reader', scope='teams', teams=[alpha['id']], mode='ro')
         assert {i['title'] for i in call(api, '/api/collections/issues/records', token=ro)[1]['items']} == \
             {'alpha edited', 'ok'}, 'ro member cannot read its team'
         assert call(api, '/api/collections/issues/records', {'team': alpha['id'], 'title': 'n', 'state': 'todo'}, ro)[0] == 400
         assert call(api, f"/api/collections/issues/records/{ia['id']}", {'title': 'n'}, ro, 'PATCH')[0] == 404
         assert call(api, '/api/collections/comments/records', {'issue': ia['id'], 'body': 'n'}, ro)[0] == 400
         assert call(api, f"/api/lll/issues/{ia['id']}/refs", {'ref': 'https://example.test/pr/2'}, ro)[0] == 403
-        assert call(api, '/api/collections/favorites/records', {'issue': ia['id']}, ro)[0] == 200, 'ro keeps favorites'
+        assert call(api, '/api/collections/favorites/records', {'issue': ia['id'], 'member': ro_rec['id']}, ro)[0] == 200, \
+            'ro keeps favorites'
         # A bot minted while its owner was "all" stays "all"; narrowing the
         # owner must stop the owner minting fresh tokens for it.
         owner, owner_tok = member('owner')
@@ -173,6 +174,43 @@ with tempfile.TemporaryDirectory(prefix='lll-team-scope-') as directory:
         _, owner_tok = member_login('owner')
         assert call(api, '/api/lll/bots/rotate', {'name': 'bot-owned'}, owner_tok)[0] == 403
         assert call(api, '/api/lll/bots/rotate', {'name': 'bot-owned'}, su)[0] == 200
+        # Saved views and favorites are a narrower member's own (review of #172).
+        _, other_view, _ = call(api, '/api/collections/views/records',
+                                {'name': 'secret', 'query': 'team=BETA&q=beta+secret', 'member': plain['id']}, su)
+        _, mine, _ = call(api, '/api/collections/views/records', {'name': 'mine', 'query': 'team=ALPHA', 'member': me}, tok)
+        assert mine.get('id'), mine
+        assert [v['name'] for v in items('/api/collections/views/records')] == ['mine']
+        assert call(api, f"/api/collections/views/records/{other_view['id']}", {'query': 'x'}, ro, 'PATCH')[0] == 404
+        assert call(api, f"/api/collections/views/records/{other_view['id']}", token=ro, method='DELETE')[0] == 404
+        assert status('/api/collections/views/records', {'name': 'n', 'query': 'q', 'member': plain['id']}) == 400
+        assert status(f"/api/collections/views/records/{mine['id']}", {'member': plain['id']}, 'PATCH') == 404
+        _, their_fav, _ = call(api, '/api/collections/favorites/records', {'issue': ia['id'], 'member': plain['id']}, su)
+        assert status(f"/api/collections/favorites/records/{their_fav['id']}", method='DELETE') == 404
+        assert status('/api/collections/favorites/records', {'issue': ia['id'], 'member': plain['id']}) == 400
+        assert their_fav['id'] not in [f['id'] for f in items('/api/collections/favorites/records')]
+        assert len(call(api, '/api/collections/views/records', token=su)[1]['items']) == 2, 'control: both views exist'
+
+        # No pointing an ALPHA row at BETA's project, labels or issues, even
+        # with the ids in hand: the board would render BETA's names.
+        _, bproj, _ = call(api, '/api/collections/projects/records', {'team': beta['id'], 'name': 'beta-proj', 'status': 'planned'}, su)
+        _, blabel, _ = call(api, '/api/collections/labels/records', {'team': beta['id'], 'name': 'beta-label'}, su)
+        _, aproj, _ = call(api, '/api/collections/projects/records', {'team': alpha['id'], 'name': 'alpha-proj', 'status': 'planned'}, su)
+        assert status('/api/collections/issues/records',
+                      {'team': alpha['id'], 'title': 'x', 'state': 'todo', 'project': bproj['id']}) == 400
+        assert status(f"/api/collections/issues/records/{ia['id']}", {'labels+': [blabel['id']]}, 'PATCH') == 400
+        assert status(f"/api/collections/issues/records/{ia['id']}", {'blocked_by+': [ib['id']]}, 'PATCH') == 400
+        assert status('/api/collections/docs/records', {'team': alpha['id'], 'slug': 's1', 'title': 't',
+                                                        'kind': 'note', 'body': 'b', 'issues': [ib['id']]}) == 400
+        assert status('/api/collections/webhooks/records', {'team': alpha['id'], 'project': bproj['id'],
+                                                            'url': 'https://example.test/h'}) == 400
+        assert status(f"/api/lll/issues/{ia['id']}/assignment",
+                      {'claim_id': '', 'fields': {'assignee': '', 'labels': [blabel['id']]}}) == 400
+        assert status(f"/api/collections/issues/records/{ia['id']}", {'project': aproj['id']}, 'PATCH') == 200, \
+            'control: same-team project accepted'
+        # A link an all-scope member made does not block the scoped member's edit.
+        call(api, f"/api/collections/issues/records/{ia['id']}", {'blocked_by+': [ib['id']]}, su, 'PATCH')
+        assert status(f"/api/collections/issues/records/{ia['id']}", {'title': 'alpha edited'}, 'PATCH') == 200
+
         # Scope "teams" with no teams sees nothing: empty never means every team.
         _, none = member('nobody', scope='teams', teams=[])
         assert call(api, '/api/collections/issues/records', token=none)[1]['items'] == []

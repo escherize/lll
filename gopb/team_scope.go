@@ -4,6 +4,7 @@ import (
 	"slices"
 
 	"github.com/pocketbase/pocketbase/core"
+	"github.com/pocketbase/pocketbase/tools/router"
 )
 
 // Team-scoped members (members.scope/teams/mode, 1789900000_member_teams.js):
@@ -77,4 +78,79 @@ func accessCovers(a, b *core.Record) bool {
 		}
 	}
 	return true
+}
+
+// Relations a scoped member could point across teams, by collection: field ->
+// the collection it relates to. Every target carries its own team.
+var scopedRefs = map[string]map[string]string{
+	"issues":   {"project": "projects", "labels": "labels", "blocked_by": "issues"},
+	"docs":     {"issues": "issues"},
+	"webhooks": {"project": "projects"},
+}
+
+// refsInScope refuses ids in collection that belong to a team auth cannot
+// see. Unknown ids pass, so the relation validator reports them exactly as it
+// reports a hidden one. Without this a scoped member who learned a BETA id
+// could hang BETA's project, label or issue on an ALPHA row, and every page
+// that renders the row as the board's all-scope member would show BETA's name.
+func refsInScope(app core.App, auth *core.Record, collection string, ids []string) error {
+	for _, id := range ids {
+		target, err := app.FindRecordById(collection, id)
+		if err != nil {
+			continue
+		}
+		if !memberSeesTeam(auth, target.GetString("team")) {
+			return router.NewBadRequestError("Failed to find all relation records with the provided ids.", nil)
+		}
+	}
+	return nil
+}
+
+// added returns the ids in now that were not in before.
+func added(now, before []string) []string {
+	var out []string
+	for _, id := range now {
+		if !slices.Contains(before, id) {
+			out = append(out, id)
+		}
+	}
+	return out
+}
+
+// checkNewRefs runs refsInScope over the relation ids a write adds. Only
+// added ids are checked: a link an all-scope member made earlier must not
+// block a scoped member's unrelated edit.
+func checkNewRefs(app core.App, auth *core.Record, record *core.Record) error {
+	if auth == nil || auth.IsSuperuser() || auth.GetString("scope") == "all" {
+		return nil
+	}
+	original := record.Original()
+	for field, target := range scopedRefs[record.Collection().Name] {
+		ids := added(record.GetStringSlice(field), original.GetStringSlice(field))
+		if err := refsInScope(app, auth, target, ids); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// registerScopedRefGuard binds checkNewRefs to API creates and updates of the
+// collections in scopedRefs. The Request variants carry the caller; the
+// custom assignment route, which saves through the app, checks its own
+// fields (claims_http.go).
+func registerScopedRefGuard(app core.App) {
+	for collection := range scopedRefs {
+		app.OnRecordCreateRequest(collection).BindFunc(func(e *core.RecordRequestEvent) error {
+			if err := checkNewRefs(e.App, e.Auth, e.Record); err != nil {
+				return err
+			}
+			return e.Next()
+		})
+		app.OnRecordUpdateRequest(collection).BindFunc(func(e *core.RecordRequestEvent) error {
+			if err := checkNewRefs(e.App, e.Auth, e.Record); err != nil {
+				return err
+			}
+			return e.Next()
+		})
+	}
 }

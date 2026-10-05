@@ -30,6 +30,9 @@ func registerClaimRoutes(routes *router.Router[*core.RequestEvent], writes *issu
 		if err := issueWritable(re, re.Request.PathValue("issue")); err != nil {
 			return err
 		}
+		if err := fields.refsInScope(re); err != nil {
+			return err
+		}
 		unlock := writes.acquire(re.Request.PathValue("issue"))
 		defer unlock()
 		outcome, err := updateAssignment(re.App, re.Request.PathValue("issue"), *body.ClaimID, fields)
