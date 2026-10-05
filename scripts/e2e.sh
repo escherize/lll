@@ -3374,7 +3374,7 @@ assert_not_contains "$out" 'configured me' 'legacy identity config is ignored'
 assert_contains "$(cat "$DATA_DIR/board-stderr")" 'unexpected argument' 'board classifies a positional argument accurately'
 assert_contains "$(cat "$DATA_DIR/board-stderr")" 'lll board [-w]' 'board names canonical usage'
 # A normal authenticated member can invite a new colleague; reset is separate.
-out=$(env -u LLL_ADMIN_EMAIL -u LLL_ADMIN_PASSWORD "$LIN" member invite oracle-invited --email oracle-invited@lll.test)
+out=$(env -u LLL_ADMIN_EMAIL -u LLL_ADMIN_PASSWORD "$LIN" member invite oracle-invited --email oracle-invited@lll.test 2>&1)
 assert_contains "$out" 'invited oracle-invited' 'member token can invite a new colleague'
 
 # Invocation-only --team works consistently without rewriting config.

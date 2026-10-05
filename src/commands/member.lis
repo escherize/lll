@@ -583,10 +583,8 @@ fn member_invite(input: flags.CommandInput) -> Result<(), string> {
   }
   if keys.is_empty() {
     let created = create_member_as(su, name, email, password, [], "")?
-    fmt.Println(f"invited {created.name} <{email}>: read-write, all teams")
-    fmt.Println("")
-    fmt.Println("send them this — the password is shown once and stored nowhere:")
-    fmt.Println("")
+    status(f"invited {created.name} <{email}>: read-write, all teams")
+    status("send them this (below, on stdout) — the password is shown once and stored nowhere")
     for line in invite_lines(email, password, cfg.url, cfg.team) {
       fmt.Println(line)
     }
@@ -604,10 +602,8 @@ fn member_invite(input: flags.CommandInput) -> Result<(), string> {
     team_ids = team_ids.append(team.id)
   }
   let created = create_member_as(su, name, email, password, team_ids, mode)?
-  fmt.Println(f"invited {created.name} <{email}>: {describe_access("teams", mode, keys)}")
-  fmt.Println("")
-  fmt.Println("send them this — the password is shown once and stored nowhere:")
-  fmt.Println("")
+  status(f"invited {created.name} <{email}>: {describe_access("teams", mode, keys)}")
+  status("send them this (below, on stdout) — the password is shown once and stored nowhere")
   for line in invite_lines(email, password, cfg.url, keys[0]) {
     fmt.Println(line)
   }
@@ -615,7 +611,7 @@ fn member_invite(input: flags.CommandInput) -> Result<(), string> {
   for key in keys {
     match scoped_board_link(cfg.web_url, key) {
       Some(link) => fmt.Println(f"  view-only web board for {key} (separate from their CLI access; stops working when the server's LLL_BOARD_TOKEN changes): {link}"),
-      None => fmt.Println(f"no web board link for {key}: run this invite on the machine running 'lll up' to print one"),
+      None => status(f"no web board link for {key}: run this invite on the machine running 'lll up' to print one"),
     }
   }
   Ok(())
@@ -1241,4 +1237,12 @@ fn member_access_cmd(input: flags.CommandInput) -> Result<(), string> {
     fmt.Println(f"{m.name}: {after} (was {before})")
   }
   Ok(())
+}
+
+/// A line for the inviter, not the colleague: stderr, so that
+/// 'lll member invite ... > handoff.txt' captures exactly what to send
+/// (fleet case 11: 8 of 10 agents retyped the handoff, password included,
+/// because the status lines were mixed into it).
+fn status(line: string) {
+  let _ = fmt.Fprintln(os.Stderr, line)
 }

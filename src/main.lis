@@ -183,5 +183,11 @@ fn unknown_command(noun: string, verb: string) -> string {
       return f"unknown command: '{noun}{rest}' — it is an issue verb: 'lll issue {noun} ...' (see 'lll issue {noun} -h')"
     }
   }
+  // 'lll invite' is a member verb (fleet case 11), the same mistake shape.
+  for c in commands.member_commands() {
+    if c.name == noun {
+      return f"unknown command: '{noun}' — it is a member verb: 'lll member {noun} ...' (see 'lll member {noun} -h')"
+    }
+  }
   f"unknown command: '{noun}' (see 'lll --help')"
 }

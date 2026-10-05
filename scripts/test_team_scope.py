@@ -82,7 +82,10 @@ with tempfile.TemporaryDirectory(prefix='lll-team-scope-') as directory:
         out = subprocess.run([binary, 'member', 'invite', 'guest', '--email', 'guest@example.test', '--team', 'alpha'],
                              cwd=root, env=cli, text=True, capture_output=True, timeout=30)
         assert out.returncode == 0, out.stdout + out.stderr
-        assert ': read-write, team ALPHA' in out.stdout, out.stdout
+        # Status on stderr, the handoff alone on stdout (fleet case 11), so
+        # '> handoff.txt' captures exactly what to send.
+        assert ': read-write, team ALPHA' in out.stderr, out.stderr
+        assert 'invited' not in out.stdout and 'temporary password' in out.stdout, out.stdout
         password = re.search(r'temporary password: (\S+)', out.stdout).group(1)
         link = re.search(r'view-only web board for ALPHA \(.*?\): (\S+)', out.stdout).group(1)
         assert link.startswith(board + '/t/ALPHA/?board_token=ALPHA.'), link
@@ -197,9 +200,11 @@ with tempfile.TemporaryDirectory(prefix='lll-team-scope-') as directory:
 
         out = lll('member', 'invite', 'viewer', '--email', 'viewer@example.test', '--team', 'ALPHA', '--read-only',
                   env=cli)
-        assert out.returncode == 0 and 'invited viewer <viewer@example.test>: read-only, team ALPHA' in out.stdout, \
+        assert out.returncode == 0 and 'invited viewer <viewer@example.test>: read-only, team ALPHA' in out.stderr, \
             out.stdout + out.stderr
         assert 'view-only web board for ALPHA (separate from their CLI access' in out.stdout, out.stdout
+        out = lll('invite')
+        assert "it is a member verb: 'lll member invite ...'" in out.stderr, out.stderr
         out = lll('member', 'invite', 'nope', '--email', 'nope@example.test', '--team', 'NOPE', env=cli)
         assert out.returncode != 0 and "no team with key 'NOPE' on this server; teams: ALPHA, BETA" in out.stderr, out.stderr
         steps = [
