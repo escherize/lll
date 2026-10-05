@@ -87,7 +87,7 @@ pub fn member_commands() -> Slice<flags.Command> {
     },
     flags.Command {
       name: "remove",
-      summary: "remove a member; guard assignments and comments ('delete' is the same command)",
+      summary: "delete a member record ('delete' is the same command); to revoke access and keep it: member access NAME --no-teams",
       page: member_remove_page(),
       spec: member_remove_spec(),
       positional: "NAME",
@@ -99,7 +99,7 @@ pub fn member_commands() -> Slice<flags.Command> {
     // runs of thirty). Kept deliberately; do not remove as a duplicate.
     flags.Command {
       name: "delete",
-      summary: "remove a member; guard assignments and comments (the same command as 'remove')",
+      summary: "delete a member record (the same command as 'remove'); to revoke access and keep it: member access NAME --no-teams",
       page: member_remove_page(),
       spec: member_remove_spec(),
       positional: "NAME",
@@ -107,7 +107,7 @@ pub fn member_commands() -> Slice<flags.Command> {
     },
     flags.Command {
       name: "access",
-      summary: "show or change what a member can see and whether they can write",
+      summary: "show or change what a member can see and whether they can write; --no-teams revokes, deleting nothing",
       page: member_access_page(),
       spec: member_access_spec(),
       positional: "NAME",
