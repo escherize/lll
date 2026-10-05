@@ -81,6 +81,9 @@ pub struct NewMember {
   pub scope: string,
   #[json(omitempty)]
   pub teams: Slice<string>,
+  // "rw" | "ro"; empty lets the server fill in the creator's ("rw").
+  #[json(omitempty)]
+  pub mode: string,
 }
 
 #[json]

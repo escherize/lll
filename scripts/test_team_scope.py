@@ -82,9 +82,9 @@ with tempfile.TemporaryDirectory(prefix='lll-team-scope-') as directory:
         out = subprocess.run([binary, 'member', 'invite', 'guest', '--email', 'guest@example.test', '--team', 'alpha'],
                              cwd=root, env=cli, text=True, capture_output=True, timeout=30)
         assert out.returncode == 0, out.stdout + out.stderr
-        assert 'limited to team ALPHA' in out.stdout, out.stdout
+        assert ': read-write, team ALPHA' in out.stdout, out.stdout
         password = re.search(r'temporary password: (\S+)', out.stdout).group(1)
-        link = re.search(r'read-only board for ALPHA: (\S+)', out.stdout).group(1)
+        link = re.search(r'view-only web board for ALPHA \(.*?\): (\S+)', out.stdout).group(1)
         assert link.startswith(board + '/t/ALPHA/?board_token=ALPHA.'), link
         assert env['LLL_BOARD_TOKEN'] not in link, 'scoped link leaked the full board token'
 
@@ -184,6 +184,39 @@ with tempfile.TemporaryDirectory(prefix='lll-team-scope-') as directory:
                                capture_output=True, timeout=30)
         assert other.returncode != 0 and "no team 'BETA' among the teams you can see (ALPHA)" in other.stderr, other.stderr
         assert 'team create' not in other.stderr, other.stderr
+
+        # Fleet cases 04, 06-08: invite read-only, then narrow, widen, revoke
+        # with 'lll member access', as a full member (not the superuser).
+        _, plain_tok = member_login('plain')
+        full_env = dict(cli_ro, LLL_TOKEN=plain_tok)
+
+        def lll(*argv, env=full_env):
+            return subprocess.run([binary, *argv], cwd=root, env=env, text=True, capture_output=True, timeout=30)
+
+        out = lll('member', 'invite', 'viewer', '--email', 'viewer@example.test', '--team', 'ALPHA', '--read-only',
+                  env=cli)
+        assert out.returncode == 0 and 'invited viewer <viewer@example.test>: read-only, team ALPHA' in out.stdout, \
+            out.stdout + out.stderr
+        assert 'view-only web board for ALPHA (separate from their CLI access' in out.stdout, out.stdout
+        steps = [
+            ([], 'viewer: read-only, team ALPHA'),
+            (['--add-team', 'BETA'], 'viewer: read-only, teams ALPHA, BETA (was read-only, team ALPHA)'),
+            (['--remove-team', 'beta', '--read-write'], 'viewer: read-write, team ALPHA (was read-only, teams ALPHA, BETA)'),
+            (['--no-teams'], 'viewer: read-write, no teams (was read-write, team ALPHA)'),
+            (['--team', 'ALPHA', '--team', 'BETA'], 'viewer: read-write, teams ALPHA, BETA (was read-write, no teams)'),
+            (['--all-teams', '--read-only'], 'viewer: read-only, all teams (was read-write, teams ALPHA, BETA)'),
+            (['--read-only'], 'viewer: read-only, all teams (unchanged)'),
+        ]
+        for flags_, want in steps:
+            out = lll('member', 'access', 'viewer', *flags_)
+            assert out.returncode == 0 and want in out.stdout, (flags_, out.stdout, out.stderr)
+        for bad in [['--team', 'ALPHA', '--all-teams'], ['--read-only', '--read-write'], ['--add-team', 'ALPHA']]:
+            out = lll('member', 'access', 'viewer', *bad)
+            assert out.returncode != 0, (bad, out.stdout)
+        out = lll('member', 'access', 'viewer', '--read-write', env=guest_env)
+        assert out.returncode != 0, 'a scoped member changed someone else\'s access'
+        out = lll('member', 'access', 'guest2', '--all-teams', env=guest_env)
+        assert out.returncode != 0, 'a scoped member widened itself'
         assert call(api, f"/api/lll/issues/{ia['id']}/refs", {'ref': 'https://example.test/pr/2'}, ro)[0] == 403
         assert call(api, '/api/collections/favorites/records', {'issue': ia['id'], 'member': ro_rec['id']}, ro)[0] == 200, \
             'ro keeps favorites'

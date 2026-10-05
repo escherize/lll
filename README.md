@@ -150,11 +150,16 @@ before you close the terminal. A member who has lost their password gets a new
 one from `lll member set-password NAME --password <pw>` (superuser only:
 pass `--admin-email` and `--admin-password`, or set them in the environment).
 
-To give someone one team and nothing else, add `--team KEY`. Their token then
-sees only that team's issues, comments, docs and claims, and they cannot widen
-their own scope or create members. Run on the machine serving the board, the
-invite also prints a read-only board link that opens only that team. They make
-changes through the CLI, as themselves.
+To give someone one team and nothing else, add `--team KEY` (repeat it for more
+teams). Their token then sees only those teams' issues, comments, docs and
+claims, and they cannot widen their own scope or create members. Add
+`--read-only` for someone who should look but not change anything. Run on the
+machine serving the board, the invite also prints a view-only web board link
+per team. They make changes through the CLI, as themselves.
+
+`lll member access NAME` shows what a member can see; the same command changes
+it: `--team KEY`, `--add-team KEY`, `--remove-team KEY`, `--all-teams`,
+`--no-teams` (revoke, keeping what they wrote), `--read-only`, `--read-write`.
 
 On a local `lll up`, plain `lll login` (the url default is
 `http://127.0.0.1:8090`) is enough.

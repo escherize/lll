@@ -106,6 +106,14 @@ pub fn member_commands() -> Slice<flags.Command> {
       run: member_remove,
     },
     flags.Command {
+      name: "access",
+      summary: "show or change what a member can see and whether they can write",
+      page: member_access_page(),
+      spec: member_access_spec(),
+      positional: "NAME",
+      run: member_access_cmd,
+    },
+    flags.Command {
       name: "set-password",
       summary: "set a member's login password (superuser only)",
       page: member_set_password_page(),
@@ -222,7 +230,13 @@ fn member_invite_spec() -> Slice<flags.Flag> {
       alias: "-t",
       value: true,
       hint: "KEY",
-      help: "limit the colleague to this team: they see only its issues, and their board link opens only its board",
+      repeat: true,
+      help: "limit the colleague to this team (repeat for more): they see only its issues, and their board link opens only its board",
+      ..,
+    },
+    flags.Flag {
+      name: "--read-only",
+      help: "they can read but not change anything (default: read-write)",
       ..,
     },
   ])
@@ -562,10 +576,14 @@ fn member_invite(input: flags.CommandInput) -> Result<(), string> {
   // password nobody knows — the exact dead record set-password exists to fix.
   let password = rand.Text()
   let cfg = config.load()?
-  let scope = records.normalize_team_key(p.one("--team"))
-  if scope == "" {
-    let created = create_member_as(su, name, email, password, [])?
-    fmt.Println(f"invited {created.name} <{email}>")
+  let keys = p.all("--team").map(|k| records.normalize_team_key(k)).filter(|k| k != "")
+  let mode = if p.given("--read-only") { "ro" } else { "rw" }
+  if keys.is_empty() && mode == "ro" {
+    return Err("--read-only needs --team KEY: say which teams they may read")
+  }
+  if keys.is_empty() {
+    let created = create_member_as(su, name, email, password, [], "")?
+    fmt.Println(f"invited {created.name} <{email}>: read-write, all teams")
     fmt.Println("")
     fmt.Println("send them this — the password is shown once and stored nowhere:")
     fmt.Println("")
@@ -576,28 +594,29 @@ fn member_invite(input: flags.CommandInput) -> Result<(), string> {
   }
 
   // A scoped invite (--team): the member record carries the scope, so the
-  // collection rules keep this colleague's own token inside the team, and the
-  // board link is one that opens only that team's board.
-  let Some(team) = find_team_as(su, scope)? else {
-    return Err(f"no team with key '{scope}' on this server — see 'lll team list'")
+  // collection rules keep this colleague's own token inside its teams, and
+  // each board link opens only one team's board.
+  let mut team_ids: Slice<string> = []
+  for key in keys {
+    let Some(team) = find_team_as(su, key)? else {
+      return Err(f"no team with key '{key}' on this server — see 'lll team list'")
+    }
+    team_ids = team_ids.append(team.id)
   }
-  let created = create_member_as(su, name, email, password, [team.id])?
-  fmt.Println(f"invited {created.name} <{email}>, limited to team {scope}")
+  let created = create_member_as(su, name, email, password, team_ids, mode)?
+  fmt.Println(f"invited {created.name} <{email}>: {describe_access("teams", mode, keys)}")
   fmt.Println("")
   fmt.Println("send them this — the password is shown once and stored nowhere:")
   fmt.Println("")
-  for line in invite_lines(email, password, cfg.url, scope) {
+  for line in invite_lines(email, password, cfg.url, keys[0]) {
     fmt.Println(line)
   }
-  match scoped_board_link(cfg.web_url, scope) {
-    Some(link) => {
-      fmt.Println("")
-      fmt.Println(f"  read-only board for {scope}: {link}")
-    },
-    None => {
-      fmt.Println("")
-      fmt.Println(f"no board link printed: run this invite on the machine running 'lll up' to add a read-only {scope} board link")
-    },
+  fmt.Println("")
+  for key in keys {
+    match scoped_board_link(cfg.web_url, key) {
+      Some(link) => fmt.Println(f"  view-only web board for {key} (separate from their CLI access; stops working if the board token rotates): {link}"),
+      None => fmt.Println(f"no web board link for {key}: run this invite on the machine running 'lll up' to print one"),
+    }
   }
   Ok(())
 }
@@ -754,7 +773,7 @@ fn member_passes(input: flags.CommandInput) -> Result<(), string> {
   let mut completed = 0
   for i in 0..count {
     let name = f"{prefix}-{run_id}-{i + 1}"
-    let member = match create_member_as(su, name, "", rand.Text(), []) {
+    let member = match create_member_as(su, name, "", rand.Text(), [], "") {
       Ok(m) => m,
       Err(e) => return Err(
         f"created {completed} of {count} credentials in {out}; creating {name} failed: {e}",
@@ -953,7 +972,7 @@ fn member_add(input: flags.CommandInput) -> Result<(), string> {
   }
   let created = if p.given("--password") {
     let cfg = config.load()?
-    match create_member_as(cfg.token, name, email, password, []) {
+    match create_member_as(cfg.token, name, email, password, [], "") {
       Ok(created) => created,
       Err(e) => return Err(member_create_error(e)),
     }
@@ -986,7 +1005,7 @@ pub fn create_member(
   email: string,
 ) -> Result<models.Member, string> {
   let cfg = config.load()?
-  create_member_as(cfg.token, name, email, rand.Text(), [])
+  create_member_as(cfg.token, name, email, rand.Text(), [], "")
 }
 
 /// create_member, riding `tok` and a caller-chosen password. Invite needs
@@ -1001,6 +1020,7 @@ fn create_member_as(
   email: string,
   password: string,
   teams: Slice<string>,
+  mode: string,
 ) -> Result<models.Member, string> {
   let member_email = if email == "" { synthesize_email(name) } else { email }
   // Unscoped creates send no scope and get the creator's ("all").
@@ -1017,6 +1037,7 @@ fn create_member_as(
     owner: "",
     scope,
     teams,
+    mode,
   }
   let payload = match json.Marshal(new_member) {
     Ok(p) => p,
@@ -1068,4 +1089,127 @@ pub fn ensure_member(name: string) -> Result<bool, string> {
       Err(f"could not create member '{name}' and none exists to reuse")
     },
   }
+}
+
+/// "read-only, team ALPHA", "read-write, teams ALPHA, GAMMA",
+/// "read-write, all teams", "read-only, no teams". One wording for whoami,
+/// invite and access.
+fn describe_access(scope: string, mode: string, keys: Slice<string>) -> string {
+  let m = if mode == "ro" { "read-only" } else { "read-write" }
+  if scope == "all" { return f"{m}, all teams" }
+  if keys.is_empty() { return f"{m}, no teams" }
+  let noun = if keys.length() == 1 { "team" } else { "teams" }
+  f"{m}, {noun} {strings.Join(keys, ", ")}"
+}
+
+fn member_access_spec() -> Slice<flags.Flag> {
+  [
+    flags.Flag { name: "--team", value: true, hint: "KEY", repeat: true, help: "limit them to exactly these teams (repeat for more); replaces their teams", .. },
+    flags.Flag { name: "--add-team", value: true, hint: "KEY", repeat: true, help: "also give them this team, keeping the others", .. },
+    flags.Flag { name: "--remove-team", value: true, hint: "KEY", repeat: true, help: "take this team away, keeping the others; removing the last leaves them seeing nothing", .. },
+    flags.Flag { name: "--all-teams", help: "let them see every team", .. },
+    flags.Flag { name: "--no-teams", help: "revoke: they see nothing, and their comments and issues stay", .. },
+    flags.Flag { name: "--read-only", help: "they can read but not change anything", .. },
+    flags.Flag { name: "--read-write", help: "they can change things in the teams they see", .. },
+  ]
+}
+
+fn member_access_page() -> string {
+  "lll member access - show or change what a member can see and whether they can write
+
+Usage:
+  lll member access NAME                       show it
+  lll member access NAME --team ALPHA          limit them to ALPHA
+  lll member access NAME --add-team GAMMA      also GAMMA
+  lll member access NAME --remove-team GAMMA   no longer GAMMA
+  lll member access NAME --read-only           reads only
+  lll member access NAME --no-teams            revoke (nothing is deleted)
+  lll member access NAME --all-teams --read-write
+
+Changing access needs a member with read-write access to every team, or
+administrator credentials. Revoking keeps the member and everything they wrote;
+'lll member remove' deletes the member instead.
+" + flags.section(member_access_spec())
+}
+
+#[json]
+struct AccessPatch {
+  scope: string,
+  teams: Slice<string>,
+  mode: string,
+}
+
+/// `lll member access NAME [changes]`. Fleet case 04: 10 of 10 agents could
+/// not make a member read-only with any lll command, and 7 patched the
+/// record through 'lll api' instead. Cases 06-08 (narrow, widen, revoke)
+/// need the same verb.
+fn member_access_cmd(input: flags.CommandInput) -> Result<(), string> {
+  let p = input.parsed
+  let name = p.first()
+  if name == "" { return Err("usage: lll member access NAME [--team KEY]... [--add-team KEY] [--remove-team KEY] [--all-teams|--no-teams] [--read-only|--read-write]") }
+  let Some(m) = records.find_member(name)? else {
+    return Err(f"no member named '{name}' — see 'lll member list'")
+  }
+  let teams = records.list_teams()?.items
+  let key_of = |id: string| teams.find(|t| t.id == id).map_or(id, |t| t.key)
+  let before = describe_access(m.scope, m.mode, m.teams.map(key_of))
+  let set_teams = p.given("--team") || p.given("--all-teams") || p.given("--no-teams")
+  let edit_teams = p.given("--add-team") || p.given("--remove-team")
+  let set_mode = p.given("--read-only") || p.given("--read-write")
+  if !set_teams && !edit_teams && !set_mode {
+    fmt.Println(f"{m.name}: {before}")
+    return Ok(())
+  }
+  let given = [p.given("--team"), p.given("--all-teams"), p.given("--no-teams"), edit_teams].filter(|g| g)
+  if given.length() > 1 {
+    return Err("give one of --team, --all-teams, --no-teams, or --add-team/--remove-team")
+  }
+  if p.given("--read-only") && p.given("--read-write") {
+    return Err("give --read-only or --read-write, not both")
+  }
+  let id_of = |key: string| -> Result<string, string> {
+    let k = records.normalize_team_key(key)
+    let Some(t) = teams.find(|t| t.key == k) else { return Err(unknown_team(k)) }
+    Ok(t.id)
+  }
+  let mut scope = m.scope
+  let mut ids = m.teams
+  if p.given("--all-teams") {
+    scope = "all"
+    ids = []
+  } else if p.given("--no-teams") {
+    scope = "teams"
+    ids = []
+  } else if p.given("--team") {
+    scope = "teams"
+    ids = []
+    for k in p.all("--team") { ids = ids.append(id_of(k)?) }
+  } else if edit_teams {
+    if m.scope == "all" {
+      return Err(f"{m.name} sees every team; limit them first with --team KEY, then add or remove")
+    }
+    for k in p.all("--add-team") {
+      let id = id_of(k)?
+      if !ids.contains(id) { ids = ids.append(id) }
+    }
+    for k in p.all("--remove-team") {
+      let id = id_of(k)?
+      ids = ids.filter(|x| x != id)
+    }
+  }
+  let mut mode = m.mode
+  if p.given("--read-only") { mode = "ro" }
+  if p.given("--read-write") { mode = "rw" }
+  let payload = match json.Marshal(AccessPatch { scope, teams: ids, mode }) {
+    Ok(b) => b as string,
+    Err(e) => return Err(f"encoding access: {e}"),
+  }
+  let _ = pb.patch(f"/api/collections/members/records/{m.id}", payload)?
+  let after = describe_access(scope, mode, ids.map(key_of))
+  if after == before {
+    fmt.Println(f"{m.name}: {after} (unchanged)")
+  } else {
+    fmt.Println(f"{m.name}: {after} (was {before})")
+  }
+  Ok(())
 }
