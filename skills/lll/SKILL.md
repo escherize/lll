@@ -45,15 +45,32 @@ lll issue close KEY-12
 A successful claim is immediately visible on the server; no Git push is needed.
 If another member holds it, the command exits nonzero without taking over.
 Claiming your own issue again succeeds and says it is already yours.
-`--assignee` cannot replace another member's active claim: release it first.
+
+**The claim is exclusive per member, not per agent.** Agents that share one
+member token share every claim: each one's `claim` succeeds with "already
+yours" and exits 0, so the claim does not stop two of them working the same
+issue (finding `shared-member-claims-do-not-isolate-sessions`). For a fleet,
+give each long-lived worker its own member (`lll member add <name>`, then
+`lll token create <name>` with admin credentials). If workers must share a token, each one reads
+`lll issue view KEY-12` (claim holder, comments, recorded work site) before it
+starts, and skips any issue another session is already on.
+
+`--assignee` cannot move a claimed issue to anyone but the holder: the holder
+releases it first, or you force-release a dead hold (below).
 `lll whoami` shows the authenticated identity. `lll issue release KEY-12`
-gives the claim back and clears the assignee when it still matches the holder.
+gives your claim back and clears the assignee when it still matches the holder.
+Releasing another member's claim is refused unless you add `--force`
+(LLL-512); a forced release leaves a comment on the issue naming both members,
+with the reason from `-b "why"` if you give one. Force only a hold you know is
+dead: its holder may still be editing.
 
 **A claim older than 24 hours is released for you** (LLL-183): the server
 sweeps hourly and frees holds that outlived the agent that took them, leaving
-the issue exactly as a deliberate release would. Nothing announces it, so if
-you expect to hold an issue for longer than a day, say so on the issue - and
-if a claim you were relying on has vanished, this is why.
+the issue exactly as a deliberate release would. On an issue that is not done
+or cancelled, the sweep leaves a comment naming the holder and how long they
+held it (LLL-452); read the comments if a claim you were relying on has
+vanished. The 24 hours is fixed on the server, not configurable, so if you
+expect to hold an issue for longer than a day, say so on the issue.
 
 `lll issue start KEY-12` sets in-progress without changing Git. To create a
 branch and record its host/path on the issue, use `lll issue start KEY-12 --branch`.

@@ -12,12 +12,13 @@ pub struct Transition {
   pub created: string,
   pub already_owned: bool,
   pub cleared_assignee: bool,
+  pub forced: bool,
 }
 
 #[json]
 struct AcquireRequest { member: string }
 #[json]
-struct ReleaseRequest { claim_id: string }
+struct ReleaseRequest { claim_id: string, force: bool, reason: string }
 #[json]
 struct AssignmentRequest { claim_id: string, fields: json.RawMessage }
 
@@ -35,8 +36,11 @@ pub fn acquire(issue_id: string, member_id: string) -> Result<Transition, string
   transact(issue_id, "claim", AcquireRequest { member: member_id })
 }
 
-pub fn release(issue_id: string, claim_id: string) -> Result<Transition, string> {
-  transact(issue_id, "release", ReleaseRequest { claim_id })
+/// Only the holder releases without force. With force, the server releases
+/// another member's claim and comments on the issue, naming both members and
+/// the reason when one is given (LLL-512).
+pub fn release(issue_id: string, claim_id: string, force: bool, reason: string) -> Result<Transition, string> {
+  transact(issue_id, "release", ReleaseRequest { claim_id, force, reason })
 }
 
 fn transact(issue_id: string, action: string, request: Unknown) -> Result<Transition, string> {

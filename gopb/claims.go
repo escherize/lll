@@ -18,6 +18,9 @@ type ClaimOutcome struct {
 	Created         string `json:"created"`
 	AlreadyOwned    bool   `json:"already_owned"`
 	ClearedAssignee bool   `json:"cleared_assignee"`
+	// Forced is true when the release took another member's claim and left a
+	// comment saying so (LLL-512).
+	Forced bool `json:"forced"`
 }
 
 type claimRejection struct{ message string }
@@ -86,10 +89,24 @@ func acquireClaim(app core.App, issueID, memberID string) (ClaimOutcome, error) 
 	return outcome, nil
 }
 
+// releaser is who asked for a release, as the HTTP adapter authenticated it.
+// memberID is empty for a superuser: that token names no member, so it can
+// never be the holder and always needs force.
+type releaser struct {
+	memberID string
+	force    bool
+	reason   string
+}
+
 // releaseClaim names the observed hold, so a stale command or page cannot
 // release a replacement claim. Assignment is checked from the fresh record
 // inside this same transaction; unrelated assignment is preserved.
-func releaseClaim(app core.App, issueID, expectedClaimID string) (ClaimOutcome, error) {
+//
+// Only the holder releases without force (LLL-512): in a fleet, a confused
+// sibling releasing someone else's hold unlocks an issue another agent is
+// still editing. The holder is read from the fresh record inside the
+// transaction, so the check and the delete see the same claim.
+func releaseClaim(app core.App, issueID, expectedClaimID string, by releaser) (ClaimOutcome, error) {
 	var outcome ClaimOutcome
 	err := app.RunInTransaction(func(tx core.App) error {
 		issue, err := tx.FindRecordById("issues", issueID)
@@ -111,6 +128,10 @@ func releaseClaim(app core.App, issueID, expectedClaimID string) (ClaimOutcome, 
 		if member, err := tx.FindRecordById("members", memberID); err == nil {
 			name = member.GetString("name")
 		}
+		forced := memberID != by.memberID
+		if forced && !by.force {
+			return &claimRejection{fmt.Sprintf("the claim is held by %s; releasing another member's claim needs force", name)}
+		}
 		cleared := issue.GetString("assignee") == memberID
 		if err := tx.Delete(held); err != nil {
 			return err
@@ -121,11 +142,52 @@ func releaseClaim(app core.App, issueID, expectedClaimID string) (ClaimOutcome, 
 				return err
 			}
 		}
-		outcome = ClaimOutcome{ClaimID: held.Id, MemberID: memberID, MemberName: name, ClearedAssignee: cleared}
+		if forced {
+			if err := recordForcedRelease(tx, issueID, name, by); err != nil {
+				return err
+			}
+		}
+		outcome = ClaimOutcome{ClaimID: held.Id, MemberID: memberID, MemberName: name, ClearedAssignee: cleared, Forced: forced}
 		return nil
 	})
 	if err != nil {
 		return ClaimOutcome{}, err
 	}
 	return outcome, nil
+}
+
+// recordForcedRelease writes the comment a forced release owes the holder
+// (LLL-512). It runs INSIDE the release transaction, the opposite of the
+// expiry announcement (LLL-452), and for the reason LLL-452 gave: that comment
+// goes after the commit because rolling back an unattended sweep over a comment
+// would hand the same claim to the next sweep forever. Here a person or agent
+// is waiting on the answer and can retry, and the comment is the price of
+// force, not a courtesy - a forced release with no record is the silent
+// release this issue exists to stop.
+//
+// The releaser is the author, so the comment is attributed like any other. A
+// superuser has no member record and the comment goes authorless, which the
+// web renders as "anon"; the body names the actor either way.
+func recordForcedRelease(tx core.App, issueID, holder string, by releaser) error {
+	actor := "An administrator"
+	if by.memberID != "" {
+		member, err := tx.FindRecordById("members", by.memberID)
+		if err != nil {
+			return err
+		}
+		actor = member.GetString("name")
+	}
+	body := fmt.Sprintf("%s force-released %s's claim.", actor, holder)
+	if by.reason != "" {
+		body += "\n\nReason: " + by.reason
+	}
+	comments, err := tx.FindCollectionByNameOrId("comments")
+	if err != nil {
+		return err
+	}
+	comment := core.NewRecord(comments)
+	comment.Set("issue", issueID)
+	comment.Set("author", by.memberID)
+	comment.Set("body", body)
+	return tx.Save(comment)
 }

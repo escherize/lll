@@ -20,7 +20,7 @@ fn filter_spec(use: FilterUse) -> Slice<flags.Flag> {
   let assignee_alias = if use == FilterUse.Watch { "" } else { "--assign" }
   // LLL-381: say what a repeat MEANS on each side, since it differs - on a
   // mutation the last set wins, on a filter they union.
-  let label_hint = if repeat_label { "; repeatable\n(update replaces the set; a filter matches any of them)" } else { "" }
+  let label_hint = if repeat_label { "; repeatable\n(update replaces the set - --add-label/--remove-label edit it;\na filter matches any of them)" } else { "" }
   [
     flags.Flag { name: "--state", value: true, hint: "s", repeat: repeat_state, help: f"one of: {strings.Join(query.states(), ", ")}{state_hint}{state_repeat_hint}", .. },
     flags.Flag { name: "--assignee", alias: assignee_alias, value: true, hint: "name", help: f"member name (see 'lll member list'){assignee_hint}", .. },

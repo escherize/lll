@@ -84,7 +84,7 @@ func TestStaleAssignmentCannotChangeNewOrReplacementClaim(t *testing.T) {
 		}
 		assertClaimState(t, app, issueID, alpha, alpha)
 	}
-	if _, err := releaseClaim(app, issueID, held.ClaimID); err != nil {
+	if _, err := releaseClaim(app, issueID, held.ClaimID, releaser{memberID: alpha}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := acquireClaim(app, issueID, alpha); err != nil {
