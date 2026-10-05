@@ -305,6 +305,19 @@ with tempfile.TemporaryDirectory(prefix='lll-team-scope-') as directory:
             assert page(path)[0] == 403, path
         assert page('/t/ALPHA/issue/ALPHA-1')[0] == 200
         assert page('/state', 'POST')[0] == 403
+        # Fleet case 05: 'lll board --team KEY' gives the same view-only link
+        # without creating a member.
+        out = subprocess.run([binary, 'board', '--team', 'alpha'], cwd=root, env=dict(cli, LLL_TOKEN=su), text=True, capture_output=True, timeout=30)
+        assert out.returncode == 0 and out.stdout.strip() == link, (out.stdout, out.stderr, link)
+        out = subprocess.run([binary, 'board', '--team', 'NOPE'], cwd=root, env=dict(cli, LLL_TOKEN=su), text=True, capture_output=True, timeout=30)
+        assert out.returncode != 0 and 'NOPE' in out.stderr, out.stderr
+        no_tok = {k: v for k, v in cli.items() if k != 'LLL_BOARD_TOKEN'}
+        no_tok['LLL_TOKEN'] = su
+        no_tok['LLL_CONFIG_HOME'] = str(root / 'empty-config')
+        no_tok['HOME'] = str(root / 'empty-home')
+        out = subprocess.run([binary, 'board', '--team', 'ALPHA'], cwd=root, env=no_tok, text=True, capture_output=True, timeout=30)
+        assert out.returncode != 0 and 'board token' in out.stderr, out.stdout + out.stderr
+
         # The full board token still opens everything.
         full = {'Cookie': 'lll_board=' + env['LLL_BOARD_TOKEN']}
         assert call(board, '/t/BETA/', headers=full)[0] == 200

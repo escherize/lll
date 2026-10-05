@@ -614,7 +614,7 @@ fn member_invite(input: flags.CommandInput) -> Result<(), string> {
   fmt.Println("")
   for key in keys {
     match scoped_board_link(cfg.web_url, key) {
-      Some(link) => fmt.Println(f"  view-only web board for {key} (separate from their CLI access; stops working if the board token rotates): {link}"),
+      Some(link) => fmt.Println(f"  view-only web board for {key} (separate from their CLI access; stops working when the server's LLL_BOARD_TOKEN changes): {link}"),
       None => fmt.Println(f"no web board link for {key}: run this invite on the machine running 'lll up' to print one"),
     }
   }
