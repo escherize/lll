@@ -58,3 +58,23 @@ func registerMemberScopeDefault(app core.App) {
 		return e.Next()
 	})
 }
+
+// accessCovers reports whether member a holds at least b's access: every team
+// b sees, and write if b writes.
+func accessCovers(a, b *core.Record) bool {
+	if b.GetString("mode") == "rw" && a.GetString("mode") != "rw" {
+		return false
+	}
+	if a.GetString("scope") == "all" {
+		return true
+	}
+	if b.GetString("scope") == "all" {
+		return false
+	}
+	for _, team := range b.GetStringSlice("teams") {
+		if !slices.Contains(a.GetStringSlice("teams"), team) {
+			return false
+		}
+	}
+	return true
+}

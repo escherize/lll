@@ -135,6 +135,11 @@ with tempfile.TemporaryDirectory(prefix='lll-team-scope-') as directory:
         assert status(claim_path, method='DELETE') == 403
         assert status(claim_path) == 200, 'the refused DELETE removed the claim'
 
+        def member_login(name):
+            _, a, _ = call(api, '/api/collections/members/auth-with-password',
+                           {'identity': f'{name}@example.test', 'password': 'pw12345678'})
+            return a['record'], a['token']
+
         def member(name, **access):
             body = {'name': name, 'email': f'{name}@example.test', 'password': 'pw12345678',
                     'passwordConfirm': 'pw12345678', 'kind': 'person', **access}
@@ -156,6 +161,18 @@ with tempfile.TemporaryDirectory(prefix='lll-team-scope-') as directory:
         assert call(api, '/api/collections/comments/records', {'issue': ia['id'], 'body': 'n'}, ro)[0] == 400
         assert call(api, f"/api/lll/issues/{ia['id']}/refs", {'ref': 'https://example.test/pr/2'}, ro)[0] == 403
         assert call(api, '/api/collections/favorites/records', {'issue': ia['id']}, ro)[0] == 200, 'ro keeps favorites'
+        # A bot minted while its owner was "all" stays "all"; narrowing the
+        # owner must stop the owner minting fresh tokens for it.
+        owner, owner_tok = member('owner')
+        code, rot, _ = call(api, '/api/collections/members/records',
+                            {'name': 'bot-owned', 'email': 'bot-owned@example.test', 'password': 'pw12345678',
+                             'passwordConfirm': 'pw12345678', 'kind': 'bot', 'owner': owner['id']}, su)
+        assert code == 200, rot
+        assert call(api, '/api/lll/bots/rotate', {'name': 'bot-owned'}, owner_tok)[0] == 200
+        call(api, f"/api/collections/members/records/{owner['id']}", {'scope': 'teams', 'teams': [alpha['id']]}, su, 'PATCH')
+        _, owner_tok = member_login('owner')
+        assert call(api, '/api/lll/bots/rotate', {'name': 'bot-owned'}, owner_tok)[0] == 403
+        assert call(api, '/api/lll/bots/rotate', {'name': 'bot-owned'}, su)[0] == 200
         # Scope "teams" with no teams sees nothing: empty never means every team.
         _, none = member('nobody', scope='teams', teams=[])
         assert call(api, '/api/collections/issues/records', token=none)[1]['items'] == []
