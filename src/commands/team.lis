@@ -1,6 +1,7 @@
 import "records"
 import "go:encoding/json"
 import "go:fmt"
+import "go:os"
 import "go:strings"
 
 import "config"
@@ -421,7 +422,9 @@ fn configured_team() -> Result<Option<models.Team>, string> {
 /// typed LLL and did not know which file had. `config --list` knows; so does
 /// this message now.
 fn unknown_configured_team(key: string, origin: string) -> string {
-  let from = if strings.HasPrefix(origin, "env:") {
+  let from = if origin == "env:LLL_TEAM" && os.Getenv("LLL_TEAM_FROM_FLAG") == "1" {
+    " (from --team)"
+  } else if strings.HasPrefix(origin, "env:") {
     f" (from {strings.TrimPrefix(origin, "env:")})"
   } else if strings.HasPrefix(origin, "file:") {
     f" (from {strings.TrimPrefix(origin, "file:")})"
