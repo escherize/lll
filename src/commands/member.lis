@@ -950,6 +950,13 @@ otherwise an administrator enables login later with 'lll member set-password'." 
 /// then the two paths that actually work from there. The boundary is
 /// PocketBase's; this only says what it is.
 fn member_create_error(e: string) -> string {
+  // Scoped and read-only members fail the members create rule, which
+  // PocketBase answers with a bare 400 (scoped-access fleet case 09: 4 of
+  // 10 got nothing more). A validation failure carries field data instead.
+  if pb.response_status(e) == 400 && e.contains("\"data\":{}") {
+    return "your token cannot add members: only a member with read-write access to every team, or administrator credentials ('lll member invite NAME --email E' with LLL_ADMIN_EMAIL/LLL_ADMIN_PASSWORD), can
+for your own agent, ask whoever invited you for a bot ('lll bot bot-NAME')"
+  }
   if pb.response_status(e) == 401 {
     return "creating a member needs a member token: the one configured here is missing or was refused
 administrator credentials (LLL_ADMIN_EMAIL/LLL_ADMIN_PASSWORD) do not authenticate member creation

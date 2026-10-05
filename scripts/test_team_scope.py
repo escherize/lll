@@ -192,6 +192,8 @@ with tempfile.TemporaryDirectory(prefix='lll-team-scope-') as directory:
         att = subprocess.run([binary, 'attach'], cwd=root / 'attach-dir', env=guest_env, text=True,
                              capture_output=True, timeout=30)
         assert 'you can see one team, ALPHA' in att.stdout + att.stderr, att.stdout + att.stderr
+        added = subprocess.run([binary, 'member', 'add', 'sneaky'], cwd=root, env=guest_env, text=True, capture_output=True, timeout=30)
+        assert added.returncode != 0 and 'your token cannot add members' in added.stderr, added.stderr
         team_help = subprocess.run([binary, 'team', '--help'], cwd=root, env=guest_env, text=True, capture_output=True, timeout=30)
         assert 'answers\nexactly like a team that does not exist' in team_help.stdout, team_help.stdout
         other = subprocess.run([binary, 'issue', 'list', '--team', 'BETA'], cwd=root, env=guest_env, text=True,
