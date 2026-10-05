@@ -173,6 +173,17 @@ with tempfile.TemporaryDirectory(prefix='lll-team-scope-') as directory:
         assert 'access  read-only, team ALPHA' in who.stdout, who.stdout + who.stderr
         who = subprocess.run([binary, 'whoami'], cwd=root, env=dict(cli_ro, LLL_TOKEN=tok), text=True, capture_output=True, timeout=30)
         assert 'access  read-write, team ALPHA' in who.stdout, who.stdout + who.stderr
+        # Fleet case 03: member list shows access by team key; a scoped
+        # caller asking for another team is told it is not one of its own.
+        guest_env = dict(cli_ro, LLL_TOKEN=tok)
+        listed = subprocess.run([binary, 'member', 'list'], cwd=root, env=guest_env, text=True, capture_output=True, timeout=30)
+        assert 'guest2\tguest@example.test\trw ALPHA' in listed.stdout, listed.stdout + listed.stderr
+        assert 'ro ALPHA' in listed.stdout and 'rw all teams' in listed.stdout, listed.stdout
+        assert 'BETA' not in listed.stdout, 'member list named a team the caller cannot see'
+        other = subprocess.run([binary, 'issue', 'list', '--team', 'BETA'], cwd=root, env=guest_env, text=True,
+                               capture_output=True, timeout=30)
+        assert other.returncode != 0 and "no team 'BETA' among the teams you can see (ALPHA)" in other.stderr, other.stderr
+        assert 'team create' not in other.stderr, other.stderr
         assert call(api, f"/api/lll/issues/{ia['id']}/refs", {'ref': 'https://example.test/pr/2'}, ro)[0] == 403
         assert call(api, '/api/collections/favorites/records', {'issue': ia['id'], 'member': ro_rec['id']}, ro)[0] == 200, \
             'ro keeps favorites'

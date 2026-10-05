@@ -43,7 +43,7 @@ pub fn member_commands() -> Slice<flags.Command> {
   [
     flags.Command {
       name: "list",
-      summary: "list members (name, email)",
+      summary: "list members (name, email, access)",
       page: "",
       spec: member_list_spec(),
       positional: "",
@@ -133,10 +133,38 @@ fn member_list(input: flags.CommandInput) -> Result<(), string> {
   let p = input.parsed
   let members = models.MemberList { items: records.fetch_members()? }
   if p.given("--json") { return print_json(members, "member list") }
+  // Team ids become keys. Ids of teams the caller cannot see stay hidden
+  // and are only counted.
+  let keys: mut Map<string, string> = Map.new()
+  for team in records.list_teams()?.items { keys[team.id] = team.key }
   for m in members.items {
-    fmt.Println(f"{m.name}\t{m.email}")
+    let access = member_access(m, keys)
+    if access == "" {
+      fmt.Println(f"{m.name}\t{m.email}")
+    } else {
+      fmt.Println(f"{m.name}\t{m.email}\t{access}")
+    }
   }
   Ok(())
+}
+
+/// "rw all teams", "ro ALPHA", "rw ALPHA, GAMMA +1 hidden", or "" when the
+/// server does not report access (fleet case 03: 7 of 10 agents went to
+/// 'lll api' to see a member's teams).
+fn member_access(m: models.Member, keys: Map<string, string>) -> string {
+  if m.scope == "" { return "" }
+  if m.scope == "all" { return f"{m.mode} all teams" }
+  let mut named: Slice<string> = []
+  let mut hidden = 0
+  for id in m.teams {
+    match keys.get(id) {
+      Some(k) => named = named.append(k),
+      None => hidden = hidden + 1,
+    }
+  }
+  let mut shown = if named.is_empty() { "no teams" } else { strings.Join(named, ", ") }
+  if hidden > 0 { shown = f"{shown} +{hidden} hidden" }
+  f"{m.mode} {shown}"
 }
 
 fn member_list_spec() -> Slice<flags.Flag> {

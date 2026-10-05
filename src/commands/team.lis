@@ -421,6 +421,7 @@ fn configured_team() -> Result<Option<models.Team>, string> {
 /// typed LLL and did not know which file had. `config --list` knows; so does
 /// this message now.
 fn unknown_configured_team(key: string, origin: string) -> string {
+  if let Some(scoped) = unknown_team_scoped(key) { return scoped }
   let from = if strings.HasPrefix(origin, "env:") {
     f" (from {strings.TrimPrefix(origin, "env:")})"
   } else if strings.HasPrefix(origin, "file:") {
@@ -515,7 +516,19 @@ fn no_team() -> string {
 /// Unknown-team message naming the fix. Shared by every command that
 /// resolves a team key (same package: src/commands).
 fn unknown_team(key: string) -> string {
+  if let Some(scoped) = unknown_team_scoped(key) { return scoped }
   f"no team with key '{key}' on the server. First inspect 'lll team list --archived'; the team may have been renamed.\nFor an existing team, use 'lll attach -k EXISTING_KEY' to update the attachment, or prefix one command with LLL_TEAM=EXISTING_KEY.\nOnly if you intend a new team, create it with 'lll team create -k {key} -n \"Name\"'."
+}
+
+/// For a team-scoped caller, a missing key usually means "not yours", and
+/// 'lll team create' is a dead end it cannot run (fleet case 03). The wording
+/// does not say whether the team exists.
+fn unknown_team_scoped(key: string) -> Option<string> {
+  let Some(keys) = records.scoped_team_keys() else { return None }
+  let mine = if keys.is_empty() { "none" } else { strings.Join(keys, ", ") }
+  Some(
+    f"no team '{key}' among the teams you can see ({mine}). 'lll whoami' shows your access; ask the person who invited you if you need another team.",
+  )
 }
 
 /// Archived-team refusal naming the fix. Shared by everything that refuses

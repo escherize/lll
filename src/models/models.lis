@@ -37,6 +37,14 @@ pub struct Member {
   pub kind: string,
   #[json(omitempty)]
   pub owner: string,
+  // Access (LLL-542): "all" | "teams", the team ids, "rw" | "ro". Empty on a
+  // server that predates scoped members.
+  #[json(omitempty)]
+  pub scope: string,
+  #[json(omitempty)]
+  pub teams: Slice<string>,
+  #[json(omitempty)]
+  pub mode: string,
 }
 
 #[json]
