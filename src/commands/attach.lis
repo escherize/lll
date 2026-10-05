@@ -111,13 +111,15 @@ fn derive_key_from_server(dir_name: string) -> Result<string, string> {
   let live = teams.items.filter(|t| !t.archived)
   if live.length() == 1 {
     let key = live[0].key
-    fmt.Println(f"the server has one team, {key} — attaching to it")
+    // "you can see": a team-scoped member is shown only its own teams, so
+    // "the server has" was false for it (fleet case 12, LLL-552).
+    fmt.Println(f"you can see one team, {key} — attaching to it")
     return Ok(key)
   }
   if live.length() > 1 {
     let keys = live.map(|t| t.key).join(", ")
     return Err(
-      f"the server has {live.length()} teams ({keys}) — say which: lll attach -k KEY",
+      f"you can see {live.length()} teams ({keys}) — say which: lll attach -k KEY",
     )
   }
   Ok(clean_key(dir_name))

@@ -106,7 +106,11 @@ fn team_intro() -> string {
 Three things do NOT follow (TASK-87):
   - the 'team =' line in .lll.toml, and LLL_TEAM — rerun 'lll attach -k NEW'
   - git branches already named eng-12-slug keep the old key
-  - OLD-1 mentions inside descriptions and comment bodies are stored text"
+  - OLD-1 mentions inside descriptions and comment bodies are stored text
+
+A member limited to some teams sees only those. A team they cannot see answers
+exactly like a team that does not exist, on purpose: the answer must not tell
+anyone which other teams are on the server. 'lll whoami' shows your access."
 }
 
 fn team_list(input: flags.CommandInput) -> Result<(), string> {

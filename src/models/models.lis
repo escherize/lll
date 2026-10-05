@@ -45,6 +45,9 @@ pub struct Member {
   pub teams: Slice<string>,
   #[json(omitempty)]
   pub mode: string,
+  // Keys of `teams` the caller can see; filled by 'member list --json' only.
+  #[json(omitempty)]
+  pub team_keys: Slice<string>,
 }
 
 #[json]

@@ -182,8 +182,18 @@ with tempfile.TemporaryDirectory(prefix='lll-team-scope-') as directory:
         guest_env = dict(cli_ro, LLL_TOKEN=tok)
         listed = subprocess.run([binary, 'member', 'list'], cwd=root, env=guest_env, text=True, capture_output=True, timeout=30)
         assert 'guest2\tguest@example.test\trw ALPHA' in listed.stdout, listed.stdout + listed.stderr
-        assert 'ro ALPHA' in listed.stdout and 'rw all teams' in listed.stdout, listed.stdout
+        assert 'ro ALPHA' in listed.stdout and 'rw every team (server-wide)' in listed.stdout, listed.stdout
         assert 'BETA' not in listed.stdout, 'member list named a team the caller cannot see'
+        js = json.loads(subprocess.run([binary, 'member', 'list', '--json'], cwd=root, env=guest_env, text=True,
+                                       capture_output=True, timeout=30).stdout)
+        g = next(m for m in js['items'] if m['name'] == 'guest2')
+        assert g['team_keys'] == ['ALPHA'], g
+        (root / 'attach-dir').mkdir(exist_ok=True)
+        att = subprocess.run([binary, 'attach'], cwd=root / 'attach-dir', env=guest_env, text=True,
+                             capture_output=True, timeout=30)
+        assert 'you can see one team, ALPHA' in att.stdout + att.stderr, att.stdout + att.stderr
+        team_help = subprocess.run([binary, 'team', '--help'], cwd=root, env=guest_env, text=True, capture_output=True, timeout=30)
+        assert 'answers\nexactly like a team that does not exist' in team_help.stdout, team_help.stdout
         other = subprocess.run([binary, 'issue', 'list', '--team', 'BETA'], cwd=root, env=guest_env, text=True,
                                capture_output=True, timeout=30)
         assert other.returncode != 0 and "no team 'BETA' among the teams you can see (ALPHA)" in other.stderr, other.stderr
@@ -213,8 +223,8 @@ with tempfile.TemporaryDirectory(prefix='lll-team-scope-') as directory:
             (['--remove-team', 'beta', '--read-write'], 'viewer: read-write, team ALPHA (was read-only, teams ALPHA, BETA)'),
             (['--no-teams'], 'viewer: read-write, no teams (was read-write, team ALPHA)'),
             (['--team', 'ALPHA', '--team', 'BETA'], 'viewer: read-write, teams ALPHA, BETA (was read-write, no teams)'),
-            (['--all-teams', '--read-only'], 'viewer: read-only, all teams (was read-write, teams ALPHA, BETA)'),
-            (['--read-only'], 'viewer: read-only, all teams (unchanged)'),
+            (['--all-teams', '--read-only'], 'viewer: read-only, every team (server-wide) (was read-write, teams ALPHA, BETA)'),
+            (['--read-only'], 'viewer: read-only, every team (server-wide) (unchanged)'),
         ]
         for flags_, want in steps:
             out = lll('member', 'access', 'viewer', *flags_, env=admin_env)
