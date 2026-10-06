@@ -73,7 +73,7 @@ for kind, collection, extra in [('label', 'labels', {'color': '#123456'}),
         assert 'id="settings"' not in reply, 'a rejected write must not redraw the form and discard drafts'
     status, after = record(collection, ident=entity['id'])
     assert status == 200 and after['name'] == valid
-    assert all(after[field] == value for field, value in extra.items())
+    assert all(after[field] == entity[field] for field in extra), (entity, after)
     status, rows = record(collection)
     assert status == 200
     owned = [r for r in rows['items'] if r['team'] == team['id']]

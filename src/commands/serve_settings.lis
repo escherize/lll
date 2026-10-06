@@ -329,6 +329,7 @@ fn settings_apply(
     },
     "label" => {
       if name == "" { return Err("label name is required") }
+      check_filter_name("label", name)?
       let color = form_hex(r, "color")?
       // LLL-100: the row's team select. The move runs FIRST and may refuse,
       // so a rejected move leaves the name and colour untouched too - one
@@ -385,6 +386,7 @@ fn settings_apply(
     },
     "project" => {
       if name == "" { return Err("project name is required") }
+      check_filter_name("project", name)?
       let status = r.PostFormValue("status")
       if project_statuses().find(|s| s == status).is_none() {
         return Err(f"unknown project status '{status}'")
