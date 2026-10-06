@@ -1437,6 +1437,21 @@ input:focus, textarea:focus, select:focus {
 }
 .sr-who { flex: none; width: 18px; display: flex; }
 
+/* A search hit's title gets its own line on narrow screens. Metadata
+   remains available below it rather than reserving the desktop columns. */
+@media (max-width: 720px) {
+  .sr { flex-wrap: wrap; }
+  .sr-title {
+    flex-basis: 100%;
+    order: -1;
+    white-space: normal;
+    overflow-wrap: anywhere;
+  }
+  .sr-key { width: auto; }
+  .sr-age { margin-left: auto; }
+  .sr-slug { min-width: 0; overflow-wrap: anywhere; }
+}
+
 /* ── Projects page (/projects) ──────────────────────────── */
 /* One row per project, the whole row a link into /issues?project=NAME: the
    list says what exists, the table it points at does the drilling. Class
