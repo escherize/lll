@@ -460,7 +460,7 @@ fn doc_list(input: flags.CommandInput) -> Result<(), string> {
   for d in docs.items {
     let mut kind = d.kind
     if kind == "" { kind = "-" }
-    fmt.Println(f"{d.slug}\t{kind}\t{d.title}")
+    fmt.Println(f"{d.slug}\t{kind}\t{display.table_cell(d.title)}")
   }
   Ok(())
 }
@@ -492,12 +492,12 @@ fn doc_view(input: flags.CommandInput) -> Result<(), string> {
     return Ok(())
   }
 
-  fmt.Println(f"{d.slug} {d.title}{confidence_suffix(d.confidence, d.confidence_note)}")
+  fmt.Println(f"{d.slug} {display.table_cell(d.title)}{display.table_cell(confidence_suffix(d.confidence, d.confidence_note))}")
   fmt.Println("")
   fmt.Println(f"Kind:      {d.kind}")
-  if d.confidence_note != "" { fmt.Println(f"Note:      {d.confidence_note}") }
-  if d.area != "" { fmt.Println(f"Area:      {d.area}") }
-  if d.paths != "" { fmt.Println(f"Paths:     {d.paths}") }
+  if d.confidence_note != "" { fmt.Println(f"Note:      {display.table_cell(d.confidence_note)}") }
+  if d.area != "" { fmt.Println(f"Area:      {display.table_cell(d.area)}") }
+  if d.paths != "" { fmt.Println(f"Paths:     {display.table_cell(d.paths)}") }
   fmt.Println(f"Created:   {display.relative(d.created)}")
   fmt.Println(f"Updated:   {display.relative(d.updated)}")
   if d.expand.issues.length() > 0 {
