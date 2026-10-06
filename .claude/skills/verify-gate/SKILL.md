@@ -31,8 +31,8 @@ mise run scratch -- --no-open # flags pass through to lll up
 
 It binds both ports rather than probing them, so it is safe while siblings are
 running. Fresh database, fresh home, isolated config. Default team SCRAT.
-Administrator credentials are `admin@local.dev` / `admin-local-123` and are not
-printed. The banner prints the board login URL and the isolated config path,
+The banner prints administrator credentials once: `admin@local.invalid` / a
+generated password. It also prints the board login URL and the isolated config path,
 and the `rm -rf` for the temp directory when you are finished.
 
 `mise run dev` is the OTHER thing. It hardcodes port 8100 and `pb/pb_data`, so
