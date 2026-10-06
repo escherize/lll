@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/pocketbase/dbx"
 	"github.com/pocketbase/pocketbase/core"
 )
 
@@ -176,4 +177,97 @@ func TestAnnouncementFailureDoesNotUndoTheRelease(t *testing.T) {
 	// Gone for good: a release that rolled back here would hand the same claim
 	// to the next sweep, every hour, forever.
 	assertClaimState(t, app, issueID, "", "")
+}
+
+// backdateClaim ages a hold by writing its timestamps directly, because the
+// autodates cannot be set through a record save.
+func backdateClaim(t *testing.T, app core.App, claimID string, age time.Duration) {
+	t.Helper()
+	stamp := time.Now().Add(-age).UTC().Format("2006-01-02 15:04:05.000Z")
+	if _, err := app.DB().NewQuery("UPDATE claims SET created = {:s}, updated = {:s} WHERE id = {:id}").
+		Bind(dbx.Params{"s": stamp, "id": claimID}).Execute(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// LLL-535: a renewed hold survives the sweep that would have expired it, and
+// keeps its id and `created` - release names the observed id, so a renewal
+// that replaced the claim would break every open page's next release.
+func TestRenewedClaimSurvivesTheSweep(t *testing.T) {
+	app, issueID, alpha, _ := claimFixture(t)
+	held, err := acquireClaim(app, issueID, alpha)
+	if err != nil {
+		t.Fatal(err)
+	}
+	backdateClaim(t, app, held.ClaimID, claimMaxAge-time.Hour)
+	before, _ := currentClaim(app, issueID)
+
+	renewed, err := renewClaim(app, issueID, held.ClaimID, alpha)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if renewed.ClaimID != held.ClaimID || renewed.Created != before.GetString("created") {
+		t.Fatalf("renewal replaced the claim: %#v", renewed)
+	}
+
+	// Two hours on, the claim is 25 hours old but was vouched for 2 hours ago.
+	expired, err := expireClaims(app, time.Now().Add(2*time.Hour), claimMaxAge)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if expired != 0 {
+		t.Fatalf("a renewed claim was expired: %d", expired)
+	}
+	assertClaimState(t, app, issueID, alpha, alpha)
+
+	// Renewal restarts the clock; it does not stop it.
+	expired, err = expireClaims(app, time.Now().Add(claimMaxAge+time.Minute), claimMaxAge)
+	if err != nil || expired != 1 {
+		t.Fatalf("expected the renewed claim to expire a day later: %d %v", expired, err)
+	}
+}
+
+// The control for the test above: the same backdated hold, not renewed, goes.
+func TestUnrenewedClaimExpiresOnSchedule(t *testing.T) {
+	app, issueID, alpha, _ := claimFixture(t)
+	held, err := acquireClaim(app, issueID, alpha)
+	if err != nil {
+		t.Fatal(err)
+	}
+	backdateClaim(t, app, held.ClaimID, claimMaxAge-time.Hour)
+	expired, err := expireClaims(app, time.Now().Add(2*time.Hour), claimMaxAge)
+	if err != nil || expired != 1 {
+		t.Fatalf("expected the unrenewed claim to expire: %d %v", expired, err)
+	}
+}
+
+// Only the holder renews, only the hold it observed, and only a hold that
+// exists. Each refusal changes nothing.
+func TestRenewRefusesAllButTheHolder(t *testing.T) {
+	app, issueID, alpha, beta := claimFixture(t)
+	if _, err := renewClaim(app, issueID, "anything", alpha); err == nil || !strings.Contains(err.Error(), "is not claimed") {
+		t.Fatalf("renewing an unclaimed issue: %v", err)
+	}
+	held, err := acquireClaim(app, issueID, alpha)
+	if err != nil {
+		t.Fatal(err)
+	}
+	backdateClaim(t, app, held.ClaimID, time.Hour)
+	before, _ := currentClaim(app, issueID)
+
+	var rejected *claimRejection
+	if _, err := renewClaim(app, issueID, held.ClaimID, beta); !errors.As(err, &rejected) || !strings.Contains(err.Error(), "held by Alpha") {
+		t.Fatalf("a non-holder renewed: %v", err)
+	}
+	if _, err := renewClaim(app, issueID, held.ClaimID, ""); !errors.As(err, &rejected) {
+		t.Fatalf("a superuser (no member) renewed: %v", err)
+	}
+	if _, err := renewClaim(app, issueID, "stale-id", alpha); err == nil || !strings.Contains(err.Error(), "claim changed") {
+		t.Fatalf("a stale claim id renewed: %v", err)
+	}
+	after, _ := currentClaim(app, issueID)
+	if after.GetString("updated") != before.GetString("updated") {
+		t.Fatal("a refused renewal moved the clock")
+	}
+	assertClaimState(t, app, issueID, alpha, alpha)
 }

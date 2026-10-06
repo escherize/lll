@@ -37,7 +37,9 @@ func claimFixture(t *testing.T) (core.App, string, string, string) {
 	claims := core.NewBaseCollection("claims")
 	claims.Fields.Add(&core.RelationField{Name: "issue", CollectionId: issues.Id, MaxSelect: 1, Required: true},
 		&core.RelationField{Name: "member", CollectionId: members.Id, MaxSelect: 1, Required: true},
-		&core.AutodateField{Name: "created", OnCreate: true})
+		&core.AutodateField{Name: "created", OnCreate: true},
+		// LLL-535: the sweep ages a claim by this, and renewal moves it.
+		&core.AutodateField{Name: "updated", OnCreate: true, OnUpdate: true})
 	claims.Indexes = []string{"CREATE UNIQUE INDEX idx_claim_test_issue ON claims (issue)"}
 	if err := app.Save(claims); err != nil {
 		t.Fatal(err)

@@ -6,6 +6,7 @@ Claim acquisition and release use authenticated server operations:
 | --- | --- | --- |
 | `POST /api/lll/issues/{issue-id}/claim` | `{"member":"member-id"}` | Acquire the exclusive claim and assign its holder in one transaction. |
 | `POST /api/lll/issues/{issue-id}/release` | `{"claim_id":"observed-claim-id","force":false,"reason":""}` | Remove that exact claim and clear assignment only if it still names the holder, in one transaction. `force` and `reason` are optional. |
+| `POST /api/lll/issues/{issue-id}/renew` | `{"claim_id":"observed-claim-id"}` | Restart that exact claim's expiry clock. Only the holder may renew. The claim keeps its id and `created`. |
 | `POST /api/lll/issues/{issue-id}/assignment` | `{"claim_id":"observed-claim-id","fields":{"assignee":"member-id"}}` | Update assignment and accompanying issue fields, releasing the observed claim if assignment is cleared. |
 
 Members can claim only for themselves; an omitted member ID uses the
@@ -21,6 +22,13 @@ superuser token names no member, so it is never the holder: it needs force like
 anyone else, and its comment has no author and names "An administrator". The
 response's `forced` field is true when a comment was written. The CLI spelling
 is `lll issue release KEY --force [-b "why"]`.
+
+A claim expires when it has not been renewed for 24 hours. The hourly sweep
+ages a claim by its `updated` time, and only a renewal moves `updated`
+(LLL-535). Renewing is holder-only, like a plain release: a non-holder or
+superuser is refused with a message that names the holder, and the clock does
+not move. Claiming your own issue again does not renew it. The CLI spelling is
+`lll issue claim KEY --renew`.
 
 The comment commits with the release, unlike the expiry announcement, which is
 written after its commit. A failed expiry comment must not roll back the sweep,
