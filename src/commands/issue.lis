@@ -632,8 +632,7 @@ Without --state the issue starts in todo; --label may be repeated."
 }
 
 fn create(input: flags.CommandInput) -> Result<(), string> {
-  let spec = issue_create_spec()
-  let usage = flags.usage("lll issue create", spec, "[\"title\"]")
+  let usage = input.usage
   // A bare title is accepted alongside -t: `gh issue create`, `linear` and
   // `jira` all take one, and every usability run reached for it first and got
   // "unknown flag: 'Hello'". -t stays the documented spelling, so no script
@@ -1199,8 +1198,7 @@ fn print_findings_raw(findings: Slice<models.Doc>) -> Result<(), string> {
 }
 
 fn update(input: flags.CommandInput) -> Result<(), string> {
-  let spec = issue_update_spec()
-  let usage = flags.usage("lll issue update", spec, "[KEY-123]")
+  let usage = input.usage
   let p = input.parsed
   let id = p.first()
   let mut state = ""
@@ -1418,8 +1416,7 @@ fn issue_start_spec() -> Slice<flags.Flag> {
 }
 
 fn start(input: flags.CommandInput) -> Result<(), string> {
-  let spec = issue_start_spec()
-  let usage = flags.usage("lll issue start", spec, "[KEY-123]")
+  let usage = input.usage
   let p = input.parsed
   let with_branch = p.given("--branch")
   if with_branch && !gitctx.in_repo() {
@@ -1642,8 +1639,7 @@ fn delete_issue(input: flags.CommandInput) -> Result<(), string> {
 }
 
 fn comment(input: flags.CommandInput) -> Result<(), string> {
-  let spec = issue_comment_spec()
-  let usage = flags.usage("lll issue comment", spec, "[KEY-123] [\"body\"]")
+  let usage = input.usage
   let p = input.parsed
   let id = p.first()
   // A bare second word is the body, as `create` takes a bare title and
