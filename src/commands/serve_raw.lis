@@ -192,7 +192,12 @@ fn search_raw(vm: SearchVM) -> string {
     lines = lines.append("Give the URL a ?q= term to search.")
   }
   for h in vm.results {
-    lines = lines.append(card_line(h.card))
+    if h.doc.slug != "" {
+      let d = h.doc
+      lines = lines.append(f"- [{cell(d.slug)}]({d.url}) | {cell(d.title)} | {d.kind}")
+    } else {
+      lines = lines.append(card_line(h.card))
+    }
     for sn in h.snippets {
       lines = lines.append(f"    [{sn.label}]")
       for l in sn.lines { lines = lines.append(f"    {l}") }
