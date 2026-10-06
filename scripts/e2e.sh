@@ -2355,6 +2355,7 @@ python3 "$REPO_ROOT"/scripts/test_agenda_scope.py "$LLL_ABS"
 python3 "$REPO_ROOT"/scripts/test_pr_body.py "$LLL_ABS" "$URL"
 python3 "$REPO_ROOT"/scripts/test_issue_table.py "$LLL_ABS" "$URL"
 python3 "$REPO_ROOT"/scripts/test_issue_project.py "$LLL_ABS" "$URL"
+python3 "$REPO_ROOT"/scripts/test_issue_next_filters.py "$LLL_ABS" "$URL"
 python3 "$REPO_ROOT"/scripts/test_end_of_options.py "$LLL_ABS" "$URL"
 # Scripts used to parse the "Created KEY-N" sentence for the key; --json
 # hands them the record itself instead — same shape as `view --json`.
