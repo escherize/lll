@@ -717,6 +717,7 @@ input:focus, textarea:focus, select:focus {
   .ni-foot button { justify-self: end; white-space: nowrap; }
   .board { padding: 10px 12px; }
   .column { flex: 0 0 240px; min-width: 240px; }
+  .doc-scroll { align-content: start; }
   .issue-scroll {
     grid-template-columns: minmax(0, 1fr);
     grid-template-areas: "main" "description" "attachments" "props" "upload" "findings" "thread" "comp";
