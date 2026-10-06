@@ -351,9 +351,21 @@ struct WhoamiExpand {
 
 /// The access line: what this identity may see and whether it may write.
 /// None when the server does not report access (older server, superuser).
-fn access_line(me: WhoamiIdentity) -> Option<string> {
-  if me.scope == "" { return None }
-  Some(describe_access(me.scope, me.mode, me.expand.teams.map(|t| t.key)))
+/// A bot with an owner shows its access within the owner's (LLL-543), and
+/// names the owner when that is narrower than the bot's own.
+fn access_line(me: WhoamiIdentity, body: string) -> Result<Option<string>, string> {
+  if me.scope == "" { return Ok(None) }
+  let own_keys = me.expand.teams.map(|t| t.key)
+  let mut record = models.Member { .. }
+  let decoded = json.Unmarshal(body.bytes(), &record)
+  if decoded.is_err() || record.owner == "" {
+    return Ok(Some(describe_access(me.scope, me.mode, own_keys)))
+  }
+  let (eff, cap) = records.effective_access(record)?
+  let Some(owner) = cap else { return Ok(Some(describe_access(me.scope, me.mode, own_keys))) }
+  // A scoped caller lists exactly the teams it can see.
+  let keys = if eff.scope == "all" { [] } else { records.list_teams()?.items.map(|t| t.key) }
+  Ok(Some(f"{describe_access(eff.scope, eff.mode, keys)} (capped by its owner, {owner.name})"))
 }
 
 /// The refusal for an argument `lll whoami` does not take. A `--team` here is
@@ -434,7 +446,7 @@ token with a member session, and 'lll bot bot-NAME' provisions a bot identity.",
   let team = if cfg.team == "" { "(none — run 'lll attach')" } else { cfg.team }
   fmt.Println(f"team    {team}")
   fmt.Println(f"token   {src.token}")
-  if let Some(access) = access_line(me) {
+  if let Some(access) = access_line(me, body)? {
     fmt.Println(f"access  {access}")
   }
   if administrator {

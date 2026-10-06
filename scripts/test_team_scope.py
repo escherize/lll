@@ -381,6 +381,86 @@ with tempfile.TemporaryDirectory(prefix='lll-team-scope-') as directory:
                          su, headers={'Idempotency-Key': 'beta-once'})
         assert su_replay[1].get('reused') is True, su_replay
         assert len(call(api, '/api/collections/teams/records', token=su)[1]['items']) == 2
+        # LLL-543: a bot holds its own access within its owner's current
+        # access, everywhere access is enforced.
+        _, a2, _ = call(api, '/api/collections/issues/records', {'team': alpha['id'], 'title': 'alpha bot work', 'state': 'todo'}, su)
+        _, b2, _ = call(api, '/api/collections/issues/records', {'team': beta['id'], 'title': 'beta bot work', 'state': 'todo'}, su)
+        boss, boss_tok = member('boss', scope='teams', teams=[alpha['id'], beta['id']], mode='rw')
+        boss_env = dict(cli_ro, LLL_TOKEN=boss_tok)
+        # A scoped human sets up its own bot (fleet case 09), which starts
+        # with the creator's access rather than every team read-write.
+        out = lll('bot', 'bot-boss', env=boss_env)
+        assert out.returncode == 0 and 'owned by boss' in out.stdout, out.stdout + out.stderr
+        bot_tok = next(l for l in out.stdout.splitlines() if l.startswith('LLL_TOKEN='))[len('LLL_TOKEN='):]
+
+        def bot_record():
+            return next(m for m in call(api, '/api/collections/members/records?perPage=200', token=su)[1]['items']
+                        if m['name'] == 'bot-boss')
+
+        made = bot_record()
+        assert (made['scope'], sorted(made['teams']), made['mode'], made['owner']) == \
+            ('teams', sorted([alpha['id'], beta['id']]), 'rw', boss['id']), made
+
+        def bot_titles():
+            return {i['title'] for i in call(api, '/api/collections/issues/records?perPage=200', token=bot_tok)[1]['items']}
+
+        assert {'alpha bot work', 'beta bot work'} <= bot_titles(), 'control: the bot sees both of its owner\'s teams'
+        # A bot never exceeds its owner, and a scoped human mints bots only for itself.
+        bot_body = {'email': 'b@example.test', 'password': 'pw12345678', 'passwordConfirm': 'pw12345678', 'kind': 'bot'}
+        wide = call(api, '/api/collections/members/records', dict(bot_body, name='bot-wide', owner=boss['id'], scope='all'), boss_tok)
+        assert wide[0] == 400 and 'bot never exceeds its owner' in wide[1]['message'], wide[:2]
+        assert call(api, '/api/collections/members/records', dict(bot_body, name='bot-theirs', owner=plain['id']), boss_tok)[0] == 400
+        sub = call(api, '/api/collections/members/records', dict(bot_body, name='bot-sub', owner=made['id']), su)
+        assert sub[0] == 400 and 'bot cannot own a bot' in sub[1]['message'], sub[:2]
+        out = lll('member', 'access', 'bot-boss', '--all-teams', env=admin_env)
+        assert out.returncode != 0 and "lll member access boss" in out.stderr, out.stdout + out.stderr
+        # Narrowing the owner narrows the bot at once; the bot record is untouched.
+        call(api, f"/api/collections/members/records/{boss['id']}", {'teams': [alpha['id']]}, su, 'PATCH')
+        assert bot_record() == made, 'narrowing the owner rewrote the bot'
+        assert 'alpha bot work' in bot_titles() and not {'beta bot work', 'beta secret'} & bot_titles(), bot_titles()
+        assert [t['key'] for t in call(api, '/api/collections/teams/records', token=bot_tok)[1]['items']] == ['ALPHA']
+        assert call(api, f"/api/collections/issues/records/{b2['id']}", token=bot_tok)[0] == 404
+        assert call(api, '/api/collections/issues/records', {'team': beta['id'], 'title': 'x', 'state': 'todo'}, bot_tok)[0] == 400
+        assert call(api, f"/api/collections/issues/records/{b2['id']}", {'title': 'x'}, bot_tok, 'PATCH')[0] == 404
+        assert call(api, f"/api/collections/issues/records/{a2['id']}", {'project': bproj['id']}, bot_tok, 'PATCH')[0] == 400, \
+            'the bot hung its own team BETA\'s project on ALPHA past its owner'
+        assert call(api, f"/api/collections/issues/records/{a2['id']}", {'title': 'alpha bot edited'}, bot_tok, 'PATCH')[0] == 200
+        for route, body in [('claim', {}), ('release', {'claim_id': 'x'}), ('renew', {'claim_id': 'x'}),
+                            ('refs', {'ref': 'https://example.test/pr/9'}),
+                            ('assignment', {'claim_id': '', 'fields': {'assignee': ''}})]:
+            assert call(api, f"/api/lll/issues/{b2['id']}/{route}", body, bot_tok)[0] == 404, route
+        assert call(api, f"/api/lll/issues/{a2['id']}/assignment",
+                    {'claim_id': '', 'fields': {'assignee': '', 'labels': [blabel['id']]}}, bot_tok)[0] == 400
+        assert call(api, f"/api/lll/issues/{a2['id']}/claim", {}, bot_tok)[0] == 200
+        bot_env = dict(cli_ro, LLL_TOKEN=bot_tok)
+        who = lll('whoami', env=bot_env)
+        assert 'access  read-write, team ALPHA (capped by its owner, boss)' in who.stdout, who.stdout + who.stderr
+        listed = lll('member', 'list', env=admin_env)
+        assert 'rw ALPHA, BETA (capped by its owner, boss)' not in listed.stdout and \
+            re.search(r'bot-boss\t\S+\trw ALPHA \(capped by its owner, boss\)', listed.stdout), listed.stdout
+        shown = lll('member', 'access', 'bot-boss', env=admin_env)
+        assert 'bot-boss: read-write, teams ALPHA, BETA' in shown.stdout and \
+            'effective: read-write, team ALPHA (capped by its owner, boss)' in shown.stdout, shown.stdout + shown.stderr
+        # A read-only owner makes its bots read-only, custom routes included.
+        call(api, f"/api/collections/members/records/{boss['id']}", {'mode': 'ro'}, su, 'PATCH')
+        assert bot_record() == made
+        refused = call(api, '/api/collections/issues/records', {'team': alpha['id'], 'title': 'n', 'state': 'todo'}, bot_tok)
+        assert refused[0] == 403 and 'read-only access: bot-boss' in refused[1]['message'].lower(), refused[:2]
+        assert call(api, f"/api/lll/issues/{a2['id']}/refs", {'ref': 'https://example.test/pr/10'}, bot_tok)[0] == 403
+        assert call(api, f"/api/lll/issues/{a2['id']}/release", {'claim_id': 'x'}, bot_tok)[0] == 403
+        assert 'alpha bot edited' in bot_titles(), 'a read-only bot still reads'
+        who = lll('whoami', env=bot_env)
+        assert 'access  read-only, team ALPHA (capped by its owner, boss)' in who.stdout, who.stdout + who.stderr
+        # An unowned bot (minted by a superuser) keeps exactly its own access.
+        code, free, _ = call(api, '/api/collections/members/records', dict(bot_body, name='bot-free', email='free@example.test'), su)
+        assert code == 200 and (free['scope'], free['mode'], free['owner']) == ('all', 'rw', ''), free
+        _, freed, _ = call(api, '/api/lll/bots/rotate', {'name': 'bot-free'}, su)
+        assert 'beta bot work' in {i['title'] for i in call(api, '/api/collections/issues/records?perPage=200',
+                                                            token=freed['token'])[1]['items']}
+        assert call(api, '/api/collections/issues/records', {'team': beta['id'], 'title': 'free', 'state': 'todo'},
+                    freed['token'])[0] == 200
+        who = lll('whoami', env=dict(cli_ro, LLL_TOKEN=freed['token']))
+        assert 'access  read-write, every team (server-wide)\n' in who.stdout, who.stdout + who.stderr
         print('team scope: ok')
     finally:
         child.terminate()

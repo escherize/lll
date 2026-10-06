@@ -133,8 +133,12 @@ fn member_list(input: flags.CommandInput) -> Result<(), string> {
     }
     return print_json(models.MemberList { items }, "member list")
   }
-  for m in members.items {
+  for listed in members.items {
+    // A bot shows what it can do now: within its owner's access (LLL-543).
+    let (m, cap) = records.effective_access_in(listed, members.items)
+    let capped = cap.map_or("", |o| f" (capped by its owner, {o.name})")
     let access = member_access(m, keys)
+    let access = if access == "" { access } else { access + capped }
     if access == "" {
       fmt.Println(f"{display.table_cell(m.name)}\t{display.table_cell(m.email)}")
     } else {
@@ -1164,6 +1168,7 @@ fn member_access_cmd(input: flags.CommandInput) -> Result<(), string> {
   let set_mode = p.given("--read-only") || p.given("--read-write")
   if !set_teams && !edit_teams && !set_mode {
     fmt.Println(f"{m.name}: {before}")
+    print_owner_cap(m, key_of)?
     return Ok(())
   }
   let given = [p.given("--team"), p.given("--all-teams"), p.given("--no-teams"), edit_teams].filter(|g| g)
@@ -1216,6 +1221,8 @@ fn member_access_cmd(input: flags.CommandInput) -> Result<(), string> {
   apply_admin_flags(p.one("--admin-email"), p.one("--admin-password"))?
   let su = superuser_auth()?
   if let Err(e) = pb.patch_as(f"/api/collections/members/records/{m.id}", payload, su) {
+    // gopb checkBotOwner's refusal names its own fix (LLL-543).
+    if strings.Contains(e, "bot never exceeds its owner") { return Err(e) }
     let status = pb.response_status(e)
     if status == 400 || status == 403 || status == 404 {
       return Err(
@@ -1229,6 +1236,20 @@ fn member_access_cmd(input: flags.CommandInput) -> Result<(), string> {
     fmt.Println(f"{m.name}: {after} (unchanged)")
   } else {
     fmt.Println(f"{m.name}: {after} (was {before})")
+  }
+  let mut now = m
+  now.scope = scope
+  now.teams = ids
+  now.mode = mode
+  print_owner_cap(now, key_of)
+}
+
+/// For a bot whose owner's access is narrower than its own, the access it
+/// actually has and why (LLL-543). Prints nothing otherwise.
+fn print_owner_cap(m: models.Member, key_of: fn(string) -> string) -> Result<(), string> {
+  let (eff, cap) = records.effective_access(m)?
+  if let Some(owner) = cap {
+    fmt.Println(f"  effective: {describe_access(eff.scope, eff.mode, eff.teams.map(key_of))} (capped by its owner, {owner.name})")
   }
   Ok(())
 }
