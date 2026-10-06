@@ -78,10 +78,10 @@ fn identity_recovery_quotes_display_names() {
 
 /// TASK-307: the Command table is the one declaration of every member verb.
 /// Both alias spellings (TASK-130's `create`, TASK-245's `delete`) must be
-/// rows of their own, or dispatch answers them "unknown member command".
+/// accepted aliases, without duplicate rows in help.
 #[test]
 fn member_commands_declare_every_verb_and_alias() {
-  let names = member_commands().map(|c| c.name)
+  let names = flags.command_names(member_commands())
   for want in ["list", "add", "create", "invite", "passes", "remove", "delete", "set-password"] {
     assert names.find(|n| n == want).is_some()
   }
@@ -106,7 +106,7 @@ fn member_commands_all_carry_a_summary() {
 fn member_commands_keep_only_the_hand_written_pages() {
   for c in member_commands() {
     let want_page = match c.name {
-      "add" | "create" | "invite" | "passes" | "remove" | "delete" | "set-password" => true,
+      "create" | "invite" | "passes" | "delete" | "set-password" => true,
       _ => false,
     }
     assert (c.page != "") == want_page

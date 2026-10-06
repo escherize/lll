@@ -68,6 +68,16 @@ assert request(path + '/claim', {'member': beta['id']}, auth=alpha['token'])[0] 
 assert request(path + '/release', {}, auth=alpha['token'])[0] == 400
 assert state()['claim'] is None
 
+# LLL-515: the raw collection endpoint cannot bypass the identity check or
+# create a hold without the claim route's transactional assignment write.
+for member in (alpha, beta):
+    status, rejected = request('/api/collections/claims/records',
+        {'issue': issue['id'], 'member': member['id']}, auth=alpha['token'])
+    assert status == 403, (status, rejected)
+    unchanged = state()
+    assert unchanged['claim'] is None and unchanged['assignee'] == ''
+print('Claims: direct member-token creation refused for self and another holder, with no claim or assignment side effects')
+
 # Independent CLI processes compete for the same issue. Every successful
 # caller must be the actual holder, and failures must identify that holder.
 with ThreadPoolExecutor(max_workers=12) as pool:

@@ -332,7 +332,9 @@ assert_contains "$board" "eng-2-already-in-progress" "hover preview shows the br
 # (LLL-512: anyone else would need force, and force leaves a comment).
 W205_MID=$(curl -sf -G -H "$AUTH_HDR" "$LLL_URL/api/collections/members/records" \
   --data-urlencode "filter=(name='e2e')" | jq -r '.items[0].id')
-W205_CLAIM=$(seed "work-site claim" -H "$AUTH_HDR" \
+# Raw fixtures preserve this issue's unrelated assignment; only superusers
+# can create these directly (LLL-515). Member actions use /claim.
+W205_CLAIM=$(seed "work-site claim" -H "Authorization: Bearer $_su" \
   -X POST "$LLL_URL/api/collections/claims/records" \
   -H 'Content-Type: application/json' \
   -d "{\"issue\":\"$ENG2_ID\",\"member\":\"$W205_MID\"}" | jq -r '.id')
@@ -1013,6 +1015,8 @@ curl -s -D - -o /dev/null -H "Cookie: lll_board=$BOARD_TOKEN; lll_view_ENG=done"
 
 # --- browser-level: CLI create appears on an open board without reload ---
 if command -v playwright-cli >/dev/null 2>&1; then
+  "$LIN" member create -n "A very long member name that should fit inside the full create dialog on a mobile screen" >/dev/null
+  "$LIN" project create -n "A very long project name that should fit inside the full create dialog on a mobile screen" >/dev/null
   # Read the page, and read it again until it says what we are waiting for.
   #
   # Polled, not slept: a browser-side change (an SSE morph, a fragment patch,
@@ -1232,6 +1236,25 @@ if command -v playwright-cli >/dev/null 2>&1; then
     # A short dimension must NOT wear a search box (LLL-455 AC#5).
     assert_contains "$flt_search" '"box":false' "a short dimension renders no search box"
   fi
+
+  # Escape belongs to every chooser, including short dimensions without a search box.
+  filter_escape=$(playwright-cli -s="$BROWSER_SESSION" run-code "async page => {
+    await page.keyboard.press('Escape');
+    const trigger = page.getByRole('button', {name: 'Filter', exact: true});
+    await trigger.click();
+    await page.locator('.flt-menu:visible').getByRole('button', {name: 'State', exact: true}).click();
+    const option = page.locator('.flt-opt:visible').first();
+    await option.focus();
+    await option.press('Escape');
+    await page.waitForFunction(() => !document.querySelector('.flt-menu') || [...document.querySelectorAll('.flt-menu')].every(el => el.offsetParent === null));
+    await page.waitForFunction(() => document.activeElement?.classList.contains('flt-plus'));
+    await trigger.press('Enter');
+    await page.locator('.flt-menu:visible').getByRole('button', {name: 'State', exact: true}).waitFor();
+    await page.keyboard.press('Escape');
+    await page.waitForFunction(() => document.activeElement?.classList.contains('flt-plus'));
+    return 'filter Escape and keyboard reopening passed';
+  }") || fail "playwright: filter Escape dismissal"
+  assert_contains "$filter_escape" 'filter Escape and keyboard reopening passed' "all filter menus dismiss from keyboard"
 
   # The chip IS the undo: clicking it toggles its value out of the URL.
   seq_goto "$WEB/?assignee=e2e"
@@ -1466,6 +1489,7 @@ if command -v playwright-cli >/dev/null 2>&1; then
     "$LIN" project create -n "Draft project $suffix" >/dev/null
   done
   seq_goto "$WEB/settings/labels"
+  "$LIN" member create -n "A long agent member name that needs to stay inside a narrow settings form" >/dev/null
   drafts_browser=$(playwright-cli -s="$BROWSER_SESSION" run-code "$(cat "$REPO_ROOT"/scripts/browser_settings_drafts.js)" 2>&1)
   assert_contains "$drafts_browser" 'settings drafts survive reordered label, member and project saves' "browser: settings row drafts survive saves and reordering"
   for prefix in "Z saved" "Unsaved"; do
@@ -2028,6 +2052,8 @@ out=$(wcurl -sf -X POST "$WEB/settings/access/member" -d "member=$MEMBER_ID" \
   -d "admin_password=$ADMIN_PASS")
 assert_contains "$out" 'id="settings"' "a credential patches the settings body back"
 assert_contains "$out" 'flash-ok' "a credential says its success in the flash strip"
+assert_contains "$out" 'role="status"' "success confirmation exposes status semantics"
+assert_contains "$out" 'aria-atomic="true"' "success confirmation is atomic"
 curl -sf "$LLL_URL/api/collections/members/auth-with-password" -H 'Content-Type: application/json' \
   -d '{"identity":"cred@example.com","password":"cred-pass-12345"}' | grep -q '"token"' \
   || fail "the credentialed member cannot log in"
@@ -2616,6 +2642,8 @@ assert_cli_lacks "a refused unarchive still unarchived" "OPS" "$LIN" team list
 out=$(wcurl -sf -X POST "$WEB/settings/teams/archive" -d "id=$OPS_TEAM_ID" -d 'archived=0' \
   -d "admin_password=$ADMIN_PASS")
 assert_contains "$out" 'flash-ok' "an unarchive says its success in the flash strip"
+assert_contains "$out" 'role="status"' "success confirmation exposes status semantics"
+assert_contains "$out" 'aria-atomic="true"' "success confirmation is atomic"
 assert_contains "$out" 'id="settings"' "an unarchive patches the settings body back"
 assert_cli_contains "unarchiving from settings did not persist" "OPS" "$LIN" team list
 
@@ -2623,6 +2651,8 @@ assert_cli_contains "unarchiving from settings did not persist" "OPS" "$LIN" tea
 out=$(wcurl -sf -X POST "$WEB/settings/teams/archive" -d "id=$OPS_TEAM_ID" -d 'archived=1' \
   -d "admin_password=$ADMIN_PASS")
 assert_contains "$out" 'flash-ok' "an archive says its success in the flash strip"
+assert_contains "$out" 'role="status"' "success confirmation exposes status semantics"
+assert_contains "$out" 'aria-atomic="true"' "success confirmation is atomic"
 assert_cli_lacks "archiving from settings did not persist" "OPS" "$LIN" team list
 assert_cli_contains "the settings-archived team is gone entirely" "OPS" "$LIN" team list --archived
 env LLL_TEAM=OPS "$LIN" team unarchive OPS >/dev/null   # leave the suite as it found OPS
@@ -2694,13 +2724,15 @@ print('SSE logs: no NUL bytes after stream cleanup')
 PY
 
 LLL_TEST_BOARD_TOKEN="$BOARD_TOKEN" python3 "$REPO_ROOT"/scripts/test_settings_delete.py "$LLL_URL" "$WEB"
+LLL_TEST_BOARD_TOKEN="$BOARD_TOKEN" python3 "$REPO_ROOT"/scripts/test_filter_names.py "$LIN" "$LLL_URL" "$WEB"
 LLL_TEST_BOARD_TOKEN="$BOARD_TOKEN" python3 "$REPO_ROOT"/scripts/test_provenance.py "$LIN" "$LLL_URL" "$WEB"
 
 LLL_TEST_BOARD_TOKEN="$BOARD_TOKEN" python3 "$REPO_ROOT"/scripts/test_attachments.py "$LIN" "$LLL_URL" "$WEB"
 
 LLL_TEST_BOARD_TOKEN="$BOARD_TOKEN" python3 "$REPO_ROOT"/scripts/test_issue_stream.py "$LIN" "$LLL_URL" "$WEB"
 
-LLL_TEST_BOARD_TOKEN="$BOARD_TOKEN" python3 "$REPO_ROOT"/scripts/test_board_claims.py "$LIN" "$LLL_URL" "$WEB"
+LLL_TEST_BOARD_TOKEN="$BOARD_TOKEN" LLL_TEST_SUPERUSER_TOKEN=$(pb_superuser_token "$LLL_URL") \
+  python3 "$REPO_ROOT"/scripts/test_board_claims.py "$LIN" "$LLL_URL" "$WEB"
 
 LLL_TEST_BOARD_TOKEN="$BOARD_TOKEN" python3 "$REPO_ROOT"/scripts/test_board_pagination.py "$LIN" "$LLL_URL" "$WEB"
 

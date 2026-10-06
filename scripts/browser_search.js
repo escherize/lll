@@ -66,5 +66,22 @@ async page => {
   await page.screenshot({path: '/tmp/lll-121-search.png'});
   await page.goto(origin + base + '?q=' + encodeURIComponent(query));
   if (await page.title() !== expected) throw new Error('page-load and live titles differ');
+  await field.fill('Web board');
+  await page.locator('.sr-title').filter({hasText: 'Web board issue'}).waitFor();
+  for (const width of [320, 390]) {
+    await page.setViewportSize({width, height: 720});
+    const geometry = await page.locator('.sr').first().evaluate(row => {
+      const title = row.querySelector('.sr-title');
+      return {row: row.getBoundingClientRect().width,
+        title: title.getBoundingClientRect().width,
+        whiteSpace: getComputedStyle(title).whiteSpace,
+        viewport: innerWidth, document: document.documentElement.scrollWidth};
+    });
+    if (geometry.title < geometry.row - 18 || geometry.whiteSpace !== 'normal') {
+      throw new Error('mobile search title remains squeezed: ' + JSON.stringify(geometry));
+    }
+    if (geometry.document > geometry.viewport) throw new Error('mobile search overflows');
+  }
+  await page.setViewportSize({width: 1280, height: 720});
   return 'search ordering and titles verified';
 }

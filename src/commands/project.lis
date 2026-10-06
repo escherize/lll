@@ -1,3 +1,4 @@
+import "display"
 import "records"
 import "go:encoding/json"
 import "go:fmt"
@@ -25,50 +26,49 @@ pub fn project_commands() -> Slice<flags.Command> {
     flags.Command {
       name: "list",
       summary: "list projects (name, status, team); this team's, or every team's when none is configured",
-      page: "",
       spec: project_list_spec(),
-      positional: "",
       run: project_list,
+      ..
     },
     flags.Command {
       name: "view",
       summary: "show a project and its issues",
-      page: "",
       spec: flags.with_team([]),
       positional: "NAME",
       run: project_view,
+      ..
     },
     flags.Command {
       name: "create",
       summary: "create a project (status defaults to planned; --team defaults to LLL_TEAM)",
-      page: "",
       spec: project_create_spec(),
       positional: "[NAME]",
       run: project_create,
+      ..
     },
     flags.Command {
       name: "edit",
       summary: "rename, re-describe or re-status a project; it keeps its issues",
-      page: "",
       spec: project_edit_spec(),
       positional: "NAME",
       run: project_edit,
+      ..
     },
     flags.Command {
       name: "move",
       summary: "move a project to another team; refuses while issues outside it still belong to it",
-      page: "",
       spec: project_move_spec(),
       positional: "NAME",
       run: project_move,
+      ..
     },
     flags.Command {
       name: "delete",
       summary: "delete a project; refuses while issues still belong to it, and --force drops it off all of them",
-      page: "",
       spec: project_delete_spec(),
       positional: "NAME",
       run: project_delete,
+      ..
     },
   ]
 }
@@ -93,7 +93,7 @@ fn project_list(input: flags.CommandInput) -> Result<(), string> {
   for p in projects.items {
     let mut team = p.expand.team.key
     if team == "" { team = "workspace" }
-    fmt.Println(f"{p.name}\t{p.status}\t{team}")
+    fmt.Println(f"{display.table_cell(p.name)}\t{display.table_cell(p.status)}\t{display.table_cell(team)}")
   }
   Ok(())
 }
@@ -142,10 +142,10 @@ fn check_status(val: string) -> Result<string, string> {
 }
 
 fn project_create(input: flags.CommandInput) -> Result<(), string> {
-  let spec = project_create_spec()
-  let usage = flags.usage("lll project create", spec, "[NAME]")
+  let usage = input.usage
   let p = input.parsed
   let name = flags.entity_name(p, "-n", usage)?
+  check_filter_name("project", name)?
   let description = p.one("-d")
   let mut status = "planned"
   if p.given("--status") {
@@ -169,8 +169,7 @@ fn project_create(input: flags.CommandInput) -> Result<(), string> {
 }
 
 fn project_edit(input: flags.CommandInput) -> Result<(), string> {
-  let spec = project_edit_spec()
-  let usage = flags.usage("lll project edit", spec, "NAME")
+  let usage = input.usage
   let p = input.parsed
   let Some(name) = nonempty(p.first()) else {
     return Err(f"usage: {usage}")
@@ -181,6 +180,7 @@ fn project_edit(input: flags.CommandInput) -> Result<(), string> {
   // Validate before the lookup: a typo'd status should cost no round trip and
   // must not leave a half-applied patch behind.
   let mut status = ""
+  if p.given("-n") { check_filter_name("project", p.one("-n"))? }
   if p.given("--status") { status = check_status(p.one("--status"))? }
   let project = records.resolve_project(configured_team_id()?, name)?
 
@@ -200,8 +200,7 @@ fn project_edit(input: flags.CommandInput) -> Result<(), string> {
 /// `lll project move NAME --to KEY` (LLL-100). See move_scope.lis for why the
 /// refusal is the right answer rather than dragging the references along.
 fn project_move(input: flags.CommandInput) -> Result<(), string> {
-  let spec = project_move_spec()
-  let usage = flags.usage("lll project move", spec, "NAME")
+  let usage = input.usage
   let p = input.parsed
   let Some(name) = nonempty(p.first()) else {
     return Err(f"usage: {usage}")
@@ -214,8 +213,7 @@ fn project_move(input: flags.CommandInput) -> Result<(), string> {
 }
 
 fn project_delete(input: flags.CommandInput) -> Result<(), string> {
-  let spec = project_delete_spec()
-  let usage = flags.usage("lll project delete", spec, "NAME")
+  let usage = input.usage
   let p = input.parsed
   let Some(name) = nonempty(p.first()) else {
     return Err(f"usage: {usage}")

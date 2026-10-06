@@ -50,8 +50,8 @@
 {{if .Deleted}}<p class="deleted">{{.Key}} was deleted.</p>
 {{else}}<div class="issue-main">
 <span class="key">{{.Key}}</span>{{if .Emoji}}<span class="emoji">{{.Emoji}}</span>{{end}}
-<h1 title="Click to edit" data-show="!$edit_title" data-on:click="$title_draft = el.textContent; $edit_title = true">{{.Title}}</h1>
-<form id="title-form" class="title-edit" style="display:none" data-show="$edit_title"><input type="hidden" name="key" value="{{.Key}}"><input name="title" type="text" autocomplete="off" aria-label="Issue title" data-bind:title_draft data-effect="$edit_title && setTimeout(() => el.focus(), 0)" data-on:keydown="evt.key === 'Escape' ? ($edit_title = false) : evt.key === 'Enter' && (evt.preventDefault(), @post('/title', {contentType: 'form'}), evt.target.value.trim() && ($edit_title = false))" data-on:blur="$edit_title && ($edit_title = false, evt.target.value.trim() && @post('/title', {contentType: 'form'}))"></form>
+<h1 title="Click to edit" data-show="!$edit_title" data-on:click="$title_draft = el.textContent; $edit_title = true"><button type="button" class="title-edit-trigger" aria-label="Edit issue title">{{.Title}}</button></h1>
+<form id="title-form" class="title-edit" style="display:none" data-show="$edit_title"><input type="hidden" name="key" value="{{.Key}}"><input name="title" type="text" autocomplete="off" aria-label="Issue title" data-bind:title_draft data-effect="$edit_title && setTimeout(() => el.focus(), 0)" data-on:keydown="evt.key === 'Escape' ? ($edit_title = false, setTimeout(() => document.querySelector('.title-edit-trigger')?.focus(), 0)) : evt.key === 'Enter' && (evt.preventDefault(), @post('/title', {contentType: 'form'}), evt.target.value.trim() && ($edit_title = false))" data-on:blur="$edit_title && ($edit_title = false, evt.target.value.trim() && @post('/title', {contentType: 'form'}))"></form>
 </div>
 {{template "issue-attachments" .}}
 {{template "issue-properties" .}}
@@ -108,10 +108,10 @@
 
      "Remove emoji" is the way back to none. Posting an empty `emoji` is the
      same clear as `lll issue update --emoji ""`. */}}
-{{define "emoji-picker"}}<div id="emo-pop" class="emo-pop" role="dialog" aria-label="Choose an emoji" style="display:none" data-computed:emo_lc="$emo_q.trim().toLowerCase()" data-show="$emo_open" data-on:click__outside="!evt.target.closest('.emo-trigger') && ($emo_open = false)" data-on:keydown="evt.key === 'Escape' && ($emo_open = false)">
+{{define "emoji-picker"}}<div id="emo-pop" class="emo-pop" role="dialog" aria-label="Choose an emoji" style="display:none" data-computed:emo_lc="$emo_q.trim().toLowerCase()" data-show="$emo_open" data-on:click__outside="!evt.target.closest('.emo-trigger') && ($emo_open = false)" data-on:keydown="evt.key === 'Escape' && ($emo_open = false, setTimeout(() => document.querySelector('.emo-trigger')?.focus(), 0))">
 <div class="emo-head">
   <span class="emo-search"><svg width="14" height="14"><use href="#ic-search"/></svg><input type="text" placeholder="Search by name" autocomplete="off" aria-label="Search emoji by name" data-bind:emo_q data-effect="$emo_open && setTimeout(() => el.focus(), 0)"></span>
-  <button type="button" class="emo-x" aria-label="Close the emoji picker" title="Close" data-on:click="$emo_open = false"><svg width="14" height="14"><use href="#ic-close"/></svg></button>
+  <button type="button" class="emo-x" aria-label="Close the emoji picker" title="Close" data-on:click="$emo_open = false; setTimeout(() => document.querySelector('.emo-trigger')?.focus(), 0)"><svg width="14" height="14"><use href="#ic-close"/></svg></button>
 </div>
 <div class="emo-grid" data-on:click="evt.target.dataset.n && ($emo_open = false, @post('/emoji?key={{.Key}}&emoji=' + encodeURIComponent(evt.target.textContent)))">
 {{range .Emojis}}<button type="button" class="emo-cell" data-n="{{.Terms}}" data-show="!$emo_lc || el.dataset.n.includes($emo_lc)">{{.Glyph}}</button>
@@ -148,7 +148,7 @@
 <h3>Properties</h3>
 <div class="prop"><span class="k">State</span>
   <span class="v">{{template "state-icon" .State}}
-  <form id="state-form">{{template "issue-property-key" .Key}}<select name="state" data-on:change="@post('/state', {contentType: 'form'})">
+  <form id="state-form">{{template "issue-property-key" .Key}}<select name="state" aria-label="State" data-on:change="@post('/state', {contentType: 'form'})">
   {{range .States}}<option value="{{.Value}}"{{if eq .Value $.State}} selected{{end}}>{{.Label}}</option>
   {{end}}</select></form></span>
 </div>
@@ -204,7 +204,7 @@
        rel-multi idiom unchanged. Enter adds the first still-visible
        candidate; Escape closes. -->
   <span class="v">{{if .LabelOpts}}<form id="labels-form" class="labs">{{template "issue-property-key" .Key}}{{range .LabelOpts}}{{if .On}}<label class="lab" id="lab-o-{{.Id}}" title="Remove {{.Name}}"><input type="checkbox" name="labels" value="{{.Id}}" checked data-on:change="@post('/labels', {contentType: 'form'})"><span class="chip"><span class="dot" style="background:{{if .Color}}{{.Color}}{{else}}var(--text-3){{end}}"></span>{{.Name}}</span></label>{{end}}{{end}}<button type="button" class="lab-add" title="Add a label" aria-label="Add a label" data-attr:aria-expanded="$lab_open ? 'true' : 'false'" data-on:click="$lab_open ? ($lab_open = false) : ($lab_q = '', $lab_open = true)"><svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true"><path d="M6 1.5 V10.5 M1.5 6 H10.5" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg></button>
-  <div class="lab-pick" role="dialog" aria-label="Labels" style="display:none" data-show="$lab_open" data-on:click__outside="!evt.target.closest('.lab-add') && ($lab_open = false)" data-on:keydown="evt.key === 'Escape' && ($lab_open = false)">
+  <div class="lab-pick" role="dialog" aria-label="Labels" style="display:none" data-show="$lab_open" data-on:click__outside="!evt.target.closest('.lab-add') && ($lab_open = false)" data-on:keydown="evt.key === 'Escape' && ($lab_open = false, setTimeout(() => document.querySelector('.lab-add')?.focus(), 0))">
   <span class="lab-search"><svg width="14" height="14"><use href="#ic-search"/></svg><input type="text" placeholder="Filter labels" autocomplete="off" aria-label="Filter labels" data-bind:lab_q data-effect="$lab_open && setTimeout(() => el.focus(), 0)" data-on:keydown="evt.key === 'Enter' && (evt.preventDefault(), [...el.closest('.lab-pick').querySelectorAll('.lab-cands label')].find(l => l.style.display !== 'none')?.querySelector('input').click())"></span>
   {{/* Every chip and candidate wears a stable id: idiomorph matches by id,
        so a morph that moves a label between the two sets cannot shift

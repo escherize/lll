@@ -52,6 +52,8 @@ pub fn export_cmd(args: Slice<string>) -> Result<(), string> {
   for member in records.fetch_members()? { member_of[member.id] = member.name }
   let names = mirror.Names { issues: key_of, members: member_of }
 
+  let comments_of = fetch_team_comments(team.id)?
+
   let mut blobs = 0
   for issue in issues {
     let key = f"{team.key}-{issue.number}"
@@ -63,7 +65,7 @@ pub fn export_cmd(args: Slice<string>) -> Result<(), string> {
     // importer that had to find the boundary would silently truncate the
     // first description that did. They are export-only — nothing can forge
     // another member's authorship on the way back in.
-    let comments = records.fetch_comments(issue.id)?
+    let comments = comments_of.get(issue.id).unwrap_or([])
     if !comments.is_empty() {
       write_file(
         filepath.Join(dir, "issues", f"{key}.comments.md"),
@@ -144,6 +146,55 @@ fn fetch_team_docs(team_id: string) -> Result<Slice<models.Doc>, string> {
     return Err("the document response was incomplete; run the export again")
   }
   Ok(result)
+}
+
+/// models.CommentList carries no totals, and this walk needs them for the
+/// same completeness refusal as the doc walk.
+#[json]
+struct CommentPage {
+  items: Slice<models.Comment>,
+  #[json("totalItems")]
+  total_items: int,
+  #[json("totalPages")]
+  total_pages: int,
+}
+
+/// Every comment on the team in one walk, grouped by issue id.
+///
+/// records.fetch_comments asks for one issue, which is right for the six
+/// callers that show one issue and wrong here: a 927-issue team made 927
+/// serial round trips, about four minutes of latency against a remote board
+/// with nothing printed until the end, so the export read as a hang
+/// (LLL-540). The relation filter fetches the same comments in five
+/// requests. Order within an issue is the sort, so grouping preserves it.
+fn fetch_team_comments(team_id: string) -> Result<Map<string, Slice<models.Comment>>, string> {
+  let filter = url.QueryEscape(f"issue.team={query.quote(team_id)}")
+  let mut by_issue = Map.new<string, Slice<models.Comment>>()
+  let mut seen = 0
+  let mut expected = -1
+  let mut page = 1
+  loop {
+    let mut batch = CommentPage { .. }
+    pb.fetch(
+      f"/api/collections/comments/records?filter={filter}&sort=created,id&expand=author&perPage=200&page={page}",
+      "comments",
+      &batch,
+    )?
+    if page == 1 { expected = batch.total_items }
+    if batch.total_items != expected {
+      return Err("the comment set changed while exporting; run the export again")
+    }
+    for comment in batch.items {
+      by_issue[comment.issue] = by_issue.get(comment.issue).unwrap_or([]).append(comment)
+      seen += 1
+    }
+    if page >= batch.total_pages { break }
+    page += 1
+  }
+  if seen != expected {
+    return Err("the comment response was incomplete; run the export again")
+  }
+  Ok(by_issue)
 }
 
 /// Comments as a sidecar file. Absolute timestamps (LLL-453) so re-exporting

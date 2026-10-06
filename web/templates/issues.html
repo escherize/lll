@@ -33,7 +33,7 @@
            truncated page says so instead of ending quietly at the limit. */}}
       <span class="itbl-count">{{if .Page.Truncated}}Showing {{.Page.Shown}} of {{.Page.Total}} · {{.Page.Limit}}-row limit{{else}}{{.Page.Total}} issue{{if ne .Page.Total 1}}s{{end}}{{end}}</span>
     </header>
-    {{if .Page.Error}}<div id="flash" class="flash">{{.Page.Error}}</div>{{end}}
+    {{if .Page.Error}}<div id="flash" class="flash" role="alert" aria-atomic="true">{{.Page.Error}}</div>{{end}}
     <form class="itbl-bar" method="get" action="{{.Page.Base}}">
       {{/* The sort rides along as a hidden field, so filtering keeps the
            column you were sorting by. */}}
