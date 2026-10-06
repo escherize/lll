@@ -1237,6 +1237,25 @@ if command -v playwright-cli >/dev/null 2>&1; then
     assert_contains "$flt_search" '"box":false' "a short dimension renders no search box"
   fi
 
+  # Escape belongs to every chooser, including short dimensions without a search box.
+  filter_escape=$(playwright-cli -s="$BROWSER_SESSION" run-code "async page => {
+    await page.keyboard.press('Escape');
+    const trigger = page.getByRole('button', {name: 'Filter', exact: true});
+    await trigger.click();
+    await page.locator('.flt-menu:visible').getByRole('button', {name: 'State', exact: true}).click();
+    const option = page.locator('.flt-opt:visible').first();
+    await option.focus();
+    await option.press('Escape');
+    await page.waitForFunction(() => !document.querySelector('.flt-menu') || [...document.querySelectorAll('.flt-menu')].every(el => el.offsetParent === null));
+    await page.waitForFunction(() => document.activeElement?.classList.contains('flt-plus'));
+    await trigger.press('Enter');
+    await page.locator('.flt-menu:visible').getByRole('button', {name: 'State', exact: true}).waitFor();
+    await page.keyboard.press('Escape');
+    await page.waitForFunction(() => document.activeElement?.classList.contains('flt-plus'));
+    return 'filter Escape and keyboard reopening passed';
+  }") || fail "playwright: filter Escape dismissal"
+  assert_contains "$filter_escape" 'filter Escape and keyboard reopening passed' "all filter menus dismiss from keyboard"
+
   # The chip IS the undo: clicking it toggles its value out of the URL.
   seq_goto "$WEB/?assignee=e2e"
   playwright-cli -s="$BROWSER_SESSION" click ".flt-chip" >/dev/null 2>&1 \
