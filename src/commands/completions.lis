@@ -75,22 +75,30 @@ fn nouns() -> Slice<string> {
   ]
 }
 
+fn command_table(noun: string) -> Slice<flags.Command> {
+  match noun {
+    "issue" => issue_commands(),
+    "team" => team_commands(),
+    "member" => member_commands(),
+    "project" => project_commands(),
+    "label" => label_commands(),
+    "doc" => doc_commands(),
+    "finding" => finding_commands(),
+    "config" => config_commands(),
+    "import" => import_commands(),
+    "token" => token_commands(),
+    "webhook" => webhook_commands(),
+    _ => [],
+  }
+}
+
 fn verbs(noun: string) -> Slice<string> {
+  let table = command_table(noun)
+  if !table.is_empty() { return flags.command_names(table) }
   // TASK-307: every noun with a Command table is read FROM it, so a verb
   // added to a table is completed with no edit here. This was a fourth
   // hand-kept list of the same verbs, and it drifted twice in one wave.
   match noun {
-    "issue" => flags.command_names(issue_commands()),
-    "team" => flags.command_names(team_commands()),
-    "member" => flags.command_names(member_commands()),
-    "project" => flags.command_names(project_commands()),
-    "label" => flags.command_names(label_commands()),
-    "doc" => flags.command_names(doc_commands()),
-    "finding" => flags.command_names(finding_commands()),
-    "config" => flags.command_names(config_commands()),
-    "import" => flags.command_names(import_commands()),
-    "token" => flags.command_names(token_commands()),
-    "webhook" => flags.command_names(webhook_commands()),
     "skill" => ["list", "get"],
     "completions" => ["bash", "zsh", "fish"],
     _ => [],
@@ -105,20 +113,7 @@ fn verb_flags(noun: string, verb: string) -> Slice<string> {
   // A table noun's flags come off the same Command entry its verb name did,
   // so the *_verb_spec accessors (one more hand-kept match per noun) retire.
   // The verb-less nouns keep their single spec fn: they have no table.
-  let table: Slice<flags.Command> = match noun {
-    "issue" => issue_commands(),
-    "team" => team_commands(),
-    "member" => member_commands(),
-    "project" => project_commands(),
-    "label" => label_commands(),
-    "doc" => doc_commands(),
-    "finding" => finding_commands(),
-    "config" => config_commands(),
-    "import" => import_commands(),
-    "token" => token_commands(),
-    "webhook" => webhook_commands(),
-    _ => [],
-  }
+  let table = command_table(noun)
   if !table.is_empty() {
     let Some(c) = flags.resolve_command(table, verb) else { return [] }
     return flags.tokens(c.spec)
