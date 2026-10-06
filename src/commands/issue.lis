@@ -616,7 +616,8 @@ Set the deployed board address with 'lll config set web_url URL';
 'lll up' saves the actual endpoint when it starts the board.
 
 Full view --json preserves the issue record and adds comments (oldest first,
-author expanded), claim (member expanded, or null when unclaimed), docs
+author expanded; a bot author's owner under author.expand.owner when you can
+read it), claim (member expanded, or null when unclaimed), docs
 (explicit links), and findings (linked or label-area matches). Docs and findings
 include their bodies and use slug order; empty collections are [].
 State changes (including review and close) retain claims. Release explicitly
@@ -1038,8 +1039,9 @@ fn view(input: flags.CommandInput) -> Result<(), string> {
         // Absolute, not relative: --raw is machine output that gets stored
         // and re-read (an agent's brief, an exported mirror in Git), where
         // "5d ago" silently becomes a different string tomorrow.
+        let tag = display.author_tag(cm.expand.author.kind == "bot", cm.expand.author.owner_name())
         fmt.Println(
-          f"- **{author}** ({display.absolute(cm.created)}): {cm.body}",
+          f"- **{author}**{tag} ({display.absolute(cm.created)}): {cm.body}",
         )
       }
     }
@@ -1890,7 +1892,8 @@ fn issue_url(issue: models.Issue) -> Result<string, string> {
 }
 
 
-/// Print comments as "author (3h ago)" then the indented body.
+/// Print comments as "author (3h ago)", or "author [bot via OWNER] (3h ago)",
+/// then the indented body.
 fn print_comments(comments: Slice<models.Comment>) {
   // Numbered so 'comment edit KEY N' and 'comment delete KEY N' have a
   // handle (TASK-320): position in creation order, not the record id.
@@ -1899,7 +1902,8 @@ fn print_comments(comments: Slice<models.Comment>) {
     n += 1
     let mut author = c.expand.author.name
     if author == "" { author = "anon" }
-    fmt.Println(f"#{n} {author} ({display.relative(c.created)})")
+    let tag = display.author_tag(c.expand.author.kind == "bot", c.expand.author.owner_name())
+    fmt.Println(f"#{n} {author}{tag} ({display.relative(c.created)})")
     fmt.Println(f"  {c.body}")
   }
 }

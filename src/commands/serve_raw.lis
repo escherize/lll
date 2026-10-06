@@ -1,6 +1,8 @@
 import "go:net/http"
 import "go:strings"
 
+import "display"
+
 // The URL is the API; ?raw is the address bar's view source.
 //
 // One mechanism, no content negotiation: any HTML route answers the SAME URL
@@ -162,7 +164,8 @@ fn issue_raw(vm: IssueVM) -> string {
     for c in vm.comments {
       let age = c.age
       let body = c.body_md
-      lines = lines.append(f"- **{line_text(c.author)}** ({age}): {body}")
+      let tag = line_text(display.author_tag(c.avatar.bot, c.via))
+      lines = lines.append(f"- **{line_text(c.author)}**{tag} ({age}): {body}")
     }
   }
   strings.Join(lines, "\n")
