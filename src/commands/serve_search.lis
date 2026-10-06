@@ -61,16 +61,7 @@ fn search_page(
   // the palette work on five pages out of six, silently. navigation.js puts
   // this answer in #cmdk-results itself.
   if query_param(r, "palette") == "1" {
-    let frag = match render("cmdk-results", page) {
-      Ok(h) => h,
-      Err(e) => {
-        http.Error(w, e, 500)
-        return
-      },
-    }
-    w.Header().Set("Cache-Control", "no-store")
-    w.Header().Set("Content-Type", "text/html; charset=utf-8")
-    let _ = w.Write(frag.bytes())
+    render_html(w, "cmdk-results", page)
     return
   }
   if query_param(r, "fragment") == "1" {
@@ -86,17 +77,8 @@ fn search_page(
     let _ = w.Write(patch_event(frag).bytes())
     return
   }
-  let vm = PageVM { rail: rail_vm("search", me, team), page }
-  let html = match render("search-page", vm) {
-    Ok(h) => h,
-    Err(e) => {
-      http.Error(w, e, 500)
-      return
-    },
-  }
-  w.Header().Set("Cache-Control", "no-store")
-  w.Header().Set("Content-Type", "text/html; charset=utf-8")
-  let _ = w.Write(html.bytes())
+  let vm = PageVM { rail: rail_for(r, "search", me, team), page }
+  render_html(w, "search-page", vm)
 }
 
 /// The team's issues, comments and docs ranked for `q` by the same engine

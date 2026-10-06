@@ -17,7 +17,7 @@ instead of the territory, and then it rots while the territory moves.
   2 isolate     parallel-work    where do I work without colliding?
   3 build       (this codebase)  lisette-interop, datastar-fragments, pocketbase
                                  codebase-skills builds this stage for a new repo
-  4 verify      the gate         mise run gate, and the path the issue describes
+  4 verify      verify-gate      mise run gate, and the path the issue describes
   5 merge       merge-gate       land it, confirm it reached the artifact
   6 record      lll              the claim, the evidence, the decision
 ```
@@ -35,6 +35,12 @@ and closing the issue.
 That skill is a filter of five questions. Spend your judgement there, then be
 mechanical about the rest.
 
+**Before handing a question back, ask whether it is empirical.** If the answer
+is something you could observe by running the code - what it does, how long it
+takes, what it prints - it is not the human's to answer, and asking stalls the
+run for a fact. Reserve the handback for a genuine product or preference call
+no experiment can settle.
+
 You are in this stage when you have no issue yet, or when the one you picked
 turns out to contain a decision that is not yours.
 
@@ -42,7 +48,8 @@ Hands to stage 2: one issue, claimed.
 
 ## 2. Isolate - where do I work?
 
-[parallel-work](../parallel-work/SKILL.md)
+`parallel-work`, in the lll repo only. It does not ship with the binary; in
+another repo, this section is the guidance.
 
 Two agents in one checkout is not a merge problem, it is a corruption problem.
 Take a worktree before the first edit.
@@ -51,31 +58,42 @@ The part people miss is what a worktree does NOT isolate: the stash stack, the
 refs, and the remote are shared. Never `git stash` here.
 
 Hands to stage 3: a worktree, a branch cut from the commit you meant, and a
-claim on the board that is the actual lock.
+claim on the board that is the actual lock - between members. Agents sharing
+one token are one member; parallel-work says what to do instead.
 
 ## 3. Build - the codebase itself
 
-Three skills, loaded only when the work touches their area. Do not read them
+Skills loaded only when the work touches their area. Do not read them
 speculatively; they are reference, not process.
 
-**This is the one stage that cannot be shipped**, because it is made of things
-that are only true here. A repo adopting this loop starts with an empty stage 3
+**This stage can never be shipped**, because it is made of things that are
+only true in one repo. A repo adopting this loop starts with an empty stage 3
 and builds its own: [codebase-skills](../codebase-skills/SKILL.md) is the
 interview that does it.
 
-- [lisette-interop](../lisette-interop/SKILL.md) - Lisette and Go crossing:
+In the lll repo (none of these ship with the binary):
+
+- `lisette-interop` - Lisette and Go crossing:
   text offsets, partial I/O, package-level state (there is none; the compiler
   rejects it), embedded resources.
-- [datastar-fragments](../datastar-fragments/SKILL.md) - the live board: SSE
+- `datastar-fragments` - the live board: SSE
   routing, fragment ownership, drafts a broadcast must not clear.
-- [pocketbase](../pocketbase/SKILL.md) - anything under `pb/` or `gopb/`:
+- `pocketbase` - anything under `pb/` or `gopb/`:
   migrations, collection rules (empty string means PUBLIC), realtime, auth.
 
 One issue per change. Found a second problem? File it and carry on.
 
+**Sequence the work so it proves itself.** Break a change into units that each
+end in a check, and do not start the next one until the current is green.
+Order the delivery the same way - the failing test first, the fix on top - so
+the stack reads as an argument instead of asking a reviewer to trust you.
+
 ## 4. Verify - is it actually true?
 
-No skill of its own, because the rule is one sentence:
+`verify-gate`, in the lll repo only. It does not ship with the binary; in
+another repo, this section is the guidance.
+
+The gate is one command:
 
 ```sh
 mise run gate     # build + unit tests + full e2e
@@ -84,7 +102,8 @@ mise run gate     # build + unit tests + full e2e
 **`mise run gate` is necessary and not sufficient.** It says you broke nothing.
 It does not say you fixed anything. Reproduce the failure the issue describes,
 fix it, then reproduce the fix under the issue's conditions rather than the
-gate's.
+gate's. That skill is how: an isolated board, a health check before you trust
+it, the driver that already covers your feature, and where the evidence lives.
 
 Two rules that have each cost this repo real time:
 
@@ -125,9 +144,51 @@ the ones that go unrecorded get hit again at full cost by the next one.
 ## The one number worth keeping
 
 Of the issues you took, what share landed without a human having to intervene?
-That ratio is the field's one durable measure of a setup like this, and it
-cannot be answered here today without rereading a transcript. If you work a
-stack, count it and say so on the last issue.
+That ratio is the field's one durable measure of a setup like this.
+
+**Make it countable by labelling the outcome before you close.** A number you
+can only get by rereading a transcript is prose; a number the board answers is
+a measurement. Every issue closes carrying exactly one outcome label:
+
+- `outcome:clean` - landed, nothing else needed
+- `outcome:changed` - landed, but a human had to touch it
+- `outcome:blocked` - handed back, and the issue says why
+
+`lll issue close` takes no `--label`, so the label goes on in the update
+immediately before it. Create the three once per team with `lll label create`;
+run `lll label list` first and reuse rather than minting near-duplicates.
+
+**Use `--add-label`, not `--label`.** `--label` REPLACES the set: `lll issue
+update LLL-123 --label outcome:clean` writes that one label and drops every
+other label the issue was carrying. `--add-label` adds one label and keeps the
+rest:
+
+```sh
+lll issue update LLL-123 --add-label outcome:clean
+lll issue close LLL-123
+```
+
+`--add-label` and `--remove-label` repeat. Each changes only the labels it
+names, so a label another agent adds at the same time with `--add-label` is
+kept (LLL-513). `--label` and the board's label picker still write the whole
+set from an earlier read, so either can drop a concurrent add. The two flags
+cannot be combined with `--label`.
+
+Then the ratio is a query rather than an archaeology project:
+
+```sh
+lll issue list --label outcome:clean   --state done --json | jq .totalItems
+lll issue list --label outcome:changed --state done --json | jq .totalItems
+lll issue list --label outcome:blocked --json              | jq .totalItems
+```
+
+`--json` returns a paginated envelope, so `.totalItems` is the server's own
+count of the whole result set. `jq length` would count one page and quietly
+under-report once the board outgrows it.
+
+`blocked` is not a failure. An issue correctly handed back is the filter in
+stage 1 working. The number that matters is `clean` against `clean + changed`,
+because `changed` is where a human's time actually went.
 
 ## When the map is wrong
 

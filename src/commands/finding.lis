@@ -1,6 +1,6 @@
+import "display"
 import "go:encoding/json"
 import "go:fmt"
-import "go:os"
 import "go:strconv"
 import "go:strings"
 
@@ -17,47 +17,7 @@ import "query"
 /// Dispatched through the noun's Command table (TASK-307): dispatch, `lll
 /// finding --help` and shell completions all read it, so none can drift.
 pub fn finding(args: Slice<string>) -> Result<(), string> {
-  if ["view", "read"].contains(args.get(2).unwrap_or("")) {
-    return finding_removed_command(args)
-  }
-  flags.dispatch(
-    "finding",
-    "retrieve findings near a path",
-    finding_intro(),
-    finding_commands(),
-    args,
-  )
-}
-
-fn finding_removed_command(args: Slice<string>) -> Result<(), string> {
-  let spec = doc_view_spec().append(
-    flags.Flag { name: "--help", alias: "-h", hidden: true, .. },
-  )
-  let p = flags.parse_n(
-    spec,
-    args,
-    3,
-    1,
-    flags.usage("lll doc view", doc_view_spec(), "SLUG"),
-  )?
-  let slug = if p.first() == "" { "SLUG" } else { p.first() }
-  let mut options: Slice<string> = []
-  for flag in ["--raw", "--json", "--help"] {
-    if p.given(flag) { options = options.append(flag) }
-  }
-  let team = os.Getenv("LLL_TEAM")
-  if team != "" {
-    options = options.append("--team", flags.shell_argument(team))
-  }
-  let mut command = ["lll", "doc", "view"]
-  if slug.starts_with("-") {
-    command = command
-      .append(options...)
-      .append("--", flags.shell_argument(slug))
-  } else {
-    command = command.append(flags.shell_argument(slug)).append(options...)
-  }
-  Err(f"findings are docs: use '{strings.Join(command, " ")}'")
+  flags.dispatch("finding", "retrieve findings near a path", finding_intro(), finding_commands(), args)
 }
 
 /// Every finding verb, as a value. Neither verb had a hand-written page, so
@@ -68,50 +28,52 @@ pub fn finding_commands() -> Slice<flags.Command> {
     flags.Command {
       name: "near",
       summary: "findings about a file or directory, exact path matches first",
-      page: "",
       spec: flags.with_team([]),
       positional: "<path>",
       run: finding_near,
+      ..
     },
     flags.Command {
-      name: "new",
+      name: "create", alias: "new",
       summary: "file a finding: 'lll doc new -k finding' with the kind already set",
-      page: "",
       spec: finding_new_spec(),
       positional: "[\"slug\"]",
       run: finding_new,
-    },
-    flags.Command {
-      name: "create",
-      summary: "the same command as 'new'",
-      page: "",
-      spec: finding_new_spec(),
-      positional: "[\"slug\"]",
-      run: finding_new,
+      ..
     },
     flags.Command {
       name: "list",
       summary: "every finding, or one area's, one line each (slug, area, title)",
-      page: "",
       spec: finding_list_spec(),
-      positional: "",
       run: finding_list,
+      ..
     },
     flags.Command {
       name: "confirm",
       summary: "assert a finding is fact; clears any refutation's reason",
-      page: "",
       spec: flags.with_team([]),
       positional: "SLUG",
       run: finding_confirm,
+      ..
     },
     flags.Command {
       name: "refute",
       summary: "mark a finding refuted and record why: -b why ('-b -' reads stdin)",
-      page: "",
       spec: finding_refute_spec(),
       positional: "SLUG",
       run: finding_refute,
+      ..
+    },
+    // Hidden (LLL-505): a finding is a doc, so 'lll doc view' is the
+    // documented read. Fleet task 9 had 6/30 agents guess 'finding view', so
+    // it and 'read' keep working without a help row or completion.
+    flags.Command {
+      name: "view", alias: "read", hidden: true,
+      summary: "show one finding by slug; the documented spelling is 'lll doc view'",
+      spec: doc_view_spec(),
+      positional: "SLUG",
+      run: doc_view,
+      ..
     },
   ]
 }
@@ -156,7 +118,7 @@ fn finding_list_spec() -> Slice<flags.Flag> {
     },
     flags.Flag {
       name: "--search",
-      alias: "--query",
+      alias: "",
       value: true,
       hint: "text",
       help: "only findings whose slug or title contains text",
@@ -172,6 +134,7 @@ fn finding_list_spec() -> Slice<flags.Flag> {
     },
     flags.Flag {
       name: "--limit",
+      alias: "-l",
       value: true,
       hint: "N",
       help: "list at most N findings (positive integer)",
@@ -295,7 +258,7 @@ fn print_finding_lines(docs: Slice<models.Doc>) {
   for d in docs {
     let mut area = d.area
     if area == "" { area = "-" }
-    fmt.Println(f"{d.slug}\t{area}\t{d.title}{confidence_suffix(d.confidence, d.confidence_note)}")
+    fmt.Println(f"{d.slug}\t{display.table_cell(area)}\t{display.table_cell(d.title)}{display.table_cell(confidence_suffix(d.confidence, d.confidence_note))}")
   }
 }
 

@@ -3,6 +3,7 @@ import "claims"
 import "go:html/template"
 import "go:github.com/escherize/lll/web"
 import "go:net/url"
+import "go:net/http"
 import "go:strings"
 import "go:unicode/utf8"
 
@@ -19,6 +20,21 @@ import "theme"
 /// Render a named template from the embedded web/templates/ tree.
 fn render(name: string, data: Unknown) -> Result<string, string> {
   web.Render(name, data).map_err(|e| e.Error())
+}
+
+/// Render an HTML response completely before writing headers or body.
+/// Raw text and SSE callers keep their own response contracts.
+fn render_html(w: http.ResponseWriter, name: string, data: Unknown) {
+  let html = match render(name, data) {
+    Ok(h) => h,
+    Err(e) => {
+      http.Error(w, e, 500)
+      return
+    },
+  }
+  w.Header().Set("Cache-Control", "no-store")
+  w.Header().Set("Content-Type", "text/html; charset=utf-8")
+  let _ = w.Write(html.bytes())
 }
 
 /// Wrap a rendered fragment as a datastar-patch-elements SSE event. Each
@@ -108,6 +124,7 @@ fn card_vm(issue: models.Issue) -> CardVM {
     updated: display.relative(issue.updated),
     snippet: snippet(issue.description),
     work_branch: issue.work_branch,
+    project_id: issue.project,
     // The state half of the staleness rule; board_card ORs in the claim
     // half. Rows built straight from card_vm never show the site anyway.
     work_stale: work_site_stale(issue.state, true),
@@ -137,6 +154,10 @@ struct BoardFilter {
   assignees: Slice<string>,
   labels: Slice<string>,
   prios: Slice<string>,
+  // Project IDS, not names (LLL-523): the board fetch does not expand
+  // `project` (each relation is another join on every load and broadcast),
+  // and an issue carries its project's id either way.
+  projects: Slice<string>,
 }
 
 /// Does one issue pass the board's current filter? Every dimension ANDs;
@@ -146,6 +167,7 @@ fn issue_matches(i: models.Issue, f: BoardFilter) -> bool {
     && (f.assignees.is_empty() || f.assignees.contains(i.expand.assignee.name))
     && (f.labels.is_empty() || issue_has_any_label(i, f.labels))
     && (f.prios.is_empty() || f.prios.contains(display.priority_name(i.priority)))
+    && (f.projects.is_empty() || f.projects.contains(i.project))
 }
 
 fn issue_has_any_label(i: models.Issue, names: Slice<string>) -> bool {
@@ -190,6 +212,7 @@ fn filter_groups(
   q: ViewQuery,
   members: Slice<string>,
   labels: Slice<string>,
+  projects: Slice<models.Project>,
 ) -> Slice<FilterGroupVM> {
   let mut assignees: Slice<string> = []
   assignees = assignees.append(members...)
@@ -201,6 +224,16 @@ fn filter_groups(
   for l in csv(q.label) {
     if !label_names.contains(l) { label_names = label_names.append(l) }
   }
+  // The team's projects, plus any URL value the catalogue fetch did not
+  // return (it fails soft to []), so an applied filter always keeps its chip
+  // (TASK-116). A stray has no id, so it counts 0. No "No project" option
+  // (LLL-523): /issues offers none either. Names map to ids once here, so
+  // the count below is one lookup per (value, issue), not a catalogue scan.
+  let mut project_names = projects.map(|p| p.name)
+  for p in csv(q.project) {
+    if !project_names.contains(p) { project_names = project_names.append(p) }
+  }
+  let project_ids = Map.from(projects.map(|p| (p.name, p.id)))
   let mut prios = prios_by_urgency()
   for p in csv(q.prio) {
     if !prios.contains(p) { prios = prios.append(p) }
@@ -210,6 +243,8 @@ fn filter_groups(
       |i, v| i.expand.assignee.name == v, |v| v),
     opt_group(base, "label", "Label", label_names, issues, q,
       |i, v| i.expand.labels.any(|l| l.name == v), |v| v),
+    opt_group(base, "project", "Project", project_names, issues, q,
+      |i, v| project_ids.get(v).map_or(false, |id| id == i.project), |v| v),
     opt_group(base, "prio", "Priority", prios, issues, q,
       |i, v| display.priority_name(i.priority) == v, prio_label),
     opt_group(base, "state", "State", query.states(), issues, q,

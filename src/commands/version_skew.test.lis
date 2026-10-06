@@ -1,0 +1,43 @@
+import "go:strings"
+
+#[test]
+fn only_a_strictly_later_server_version_is_newer() {
+  assert newer_version("0.6.1", "0.7.0")
+  assert newer_version("0.6.1", "v0.6.2")
+  assert newer_version("0.9.9", "1.0.0")
+  assert newer_version("0.6.10", "0.6.9") == false
+  for theirs in ["0.6.1", "0.6.0", "0.5.9", "", "0.7", "0.7.0-rc1", "latest"] {
+    assert newer_version("0.6.1", theirs) == false
+  }
+}
+
+#[test]
+fn discovery_version_is_read_only_from_an_lll_document() {
+  assert advertised_version(
+    "{\"service\":\"lll\",\"web_url\":\".\",\"version\":\"0.7.0\"}",
+  ) ==
+  Some("0.7.0")
+  for document in [
+    "{\"service\":\"lll\",\"web_url\":\".\"}",
+    "{\"service\":\"other\",\"version\":\"0.7.0\"}",
+    "broken",
+    "null",
+  ] {
+    assert advertised_version(document).is_none()
+  }
+}
+
+#[test]
+fn skew_warning_names_both_versions_the_server_and_the_upgrade() {
+  let line = skew_warning("0.6.1", "https://board.example.test", "0.7.0", true)
+  assert strings.Contains(
+    line,
+    "this lll is 0.6.1; https://board.example.test runs 0.7.0",
+  )
+  assert strings.HasSuffix(line, "Upgrade: brew upgrade lll")
+  assert !strings.Contains(line, "\n")
+  assert strings.Contains(
+    skew_warning("0.6.1", "https://b.test", "0.7.0", false),
+    "github.com/escherize/lll/releases",
+  )
+}

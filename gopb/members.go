@@ -110,6 +110,11 @@ func registerBotRoutes(routes *router.Router[*core.RequestEvent]) {
 			if re.Auth == nil || re.Auth.Id != bot.GetString("owner") {
 				return re.ForbiddenError("only the bot's owner or a superuser can rotate its token", nil)
 			}
+			// A fresh token for a bot wider than its owner would hand the
+			// owner access it no longer has (narrowed after minting the bot).
+			if !accessCovers(re.Auth, bot) {
+				return re.ForbiddenError("this bot has wider access than you; ask an admin to narrow it, or rotate it with superuser credentials", nil)
+			}
 		}
 		// RefreshTokenKey sets an autogenerate modifier: the new key is
 		// written on save, which is what strands the old tokens. The fresh

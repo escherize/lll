@@ -40,17 +40,8 @@ fn projects_page(
     write_raw(w, projects_raw(vm, team.key))
     return
   }
-  let page = PageVM { rail: rail_vm("projects", me, team), page: vm }
-  let html = match render("projects-page", page) {
-    Ok(h) => h,
-    Err(e) => {
-      http.Error(w, e, 500)
-      return
-    },
-  }
-  w.Header().Set("Cache-Control", "no-store")
-  w.Header().Set("Content-Type", "text/html; charset=utf-8")
-  let _ = w.Write(html.bytes())
+  let page = PageVM { rail: rail_for(r, "projects", me, team), page: vm }
+  render_html(w, "projects-page", page)
 }
 
 fn projects_vm(team_id: string, team_key: string) -> Result<ProjectsVM, string> {

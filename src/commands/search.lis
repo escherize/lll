@@ -1,3 +1,4 @@
+import "display"
 import "go:encoding/json"
 import "go:fmt"
 import "go:net/url"
@@ -23,10 +24,8 @@ pub fn search_cmd(args: Slice<string>) -> Result<(), string> {
   let usage = flags.usage("lll search", spec, "TEXT...")
   let p = flags.parse_n(spec, args, 2, 64, usage)?
   let mut words: Slice<string> = []
-  let mut i = 0
-  while p.nth(i) != "" {
+  for i in 0..p.positional_count() {
     words = words.append(p.nth(i))
-    i += 1
   }
   let q = strings.TrimSpace(strings.Join(words, " "))
   if q == "" { return Err(f"what to search for?\nusage: {usage}") }
@@ -53,7 +52,7 @@ pub fn search_cmd(args: Slice<string>) -> Result<(), string> {
 
 pub fn search_spec() -> Slice<flags.Flag> {
   flags.with_team([
-    flags.Flag { name: "--limit", alias: "-n", value: true, hint: "N", help: "at most N results (default 10)", .. },
+    flags.Flag { name: "--limit", alias: "-l", value: true, hint: "N", help: "at most N results (default 10)", .. },
     flags.Flag { name: "--issues", help: "issues and their comments only", .. },
     flags.Flag { name: "--docs", help: "docs only (wiki, findings, decisions)", .. },
     flags.Flag { name: "--json", help: "the ranked hits as JSON: group, kind, title, state, score, snippets", .. },
@@ -181,7 +180,7 @@ fn print_hits(hits: Slice<search.Hit>) {
   for h in hits {
     let state = if h.state == "" { "" } else { f"  {h.state}" }
     let kind = if h.kind == "doc" { "doc " } else { "" }
-    fmt.Println(f"{kind}{h.group}{state}  {h.title}")
+    fmt.Println(f"{kind}{h.group}{state}  {display.table_cell(h.title)}")
     for s in h.snippets {
       fmt.Println(f"    [{s.label}]")
       for l in s.lines { fmt.Println(f"    {l}") }

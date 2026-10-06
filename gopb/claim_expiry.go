@@ -34,7 +34,8 @@ func registerClaimExpiry(app core.App) {
 	})
 }
 
-// expireClaims deletes every claim older than maxAge and returns how many went.
+// expireClaims deletes every claim not renewed within maxAge and returns how
+// many went.
 //
 // It clears the issue's assignee exactly when `lll issue release` would - only
 // when the assignee is still the holder - so an expired claim leaves the issue
@@ -45,7 +46,9 @@ func registerClaimExpiry(app core.App) {
 func expireClaims(app core.App, now time.Time, maxAge time.Duration) (int, error) {
 	cutoff := now.Add(-maxAge).UTC().Format("2006-01-02 15:04:05.000Z")
 	stale, err := app.FindRecordsByFilter(
-		"claims", "created < {:cutoff}", "created", 0, 0,
+		// `updated`, not `created`: renewal (LLL-535) moves it, and nothing
+		// else writes a claim, so it is when the holder last vouched for it.
+		"claims", "updated < {:cutoff}", "updated", 0, 0,
 		dbx.Params{"cutoff": cutoff},
 	)
 	if err != nil {

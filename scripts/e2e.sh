@@ -60,6 +60,17 @@ LIN="$REPO_ROOT/target/.lisette/bin/lll"
 # so they stay - they document the requirement at the calls that most need it.
 e2e_pin_home
 
+# Embedded skills are available before configuration or a server exists.
+skill_list=$(cd "$DATA_DIR" && "$LIN" skill list)
+assert_contains "$skill_list" "software-factory" "skill list works outside the checkout"
+skill_body=$(cd "$DATA_DIR" && "$LIN" skill get software-factory)
+assert_contains "$skill_body" "# How work moves through this repo" "skill get reads the embedded body"
+if skill_extra=$(cd "$DATA_DIR" && "$LIN" skill list software-factory 2>&1); then
+  fail "skill list silently ignored an extra argument"
+fi
+assert_contains "$skill_extra" "usage: lll skill list" "skill list extra-argument error names usage"
+assert_contains "$skill_extra" "lll skill get NAME" "skill list error names the one-skill command"
+
 # PocketBase is embedded in lll (gopb), so there is no external binary to
 # install. `lll up` needs a team and refuses to start without one; ENG is the
 # one this suite uses anyway, and seed_team below fixes up its display name.
@@ -1131,6 +1142,26 @@ out=$(LLL_URL=$URL LLL_TEAM=ENG "$LIN" issue list --label chore)
 assert_contains "$out" "ENG-6" "label filter finds updated issue"
 assert_contains "$out" "ENG-8" "label filter matches multi-relation membership"
 
+# --- --add-label / --remove-label edit the set without replacing it (LLL-513) ---
+out=$(LLL_URL=$URL "$LIN" issue update ENG-6 --add-label bug)
+assert_contains "$out" "labels+=bug" "update --add-label output"
+assert_contains "$(LLL_URL=$URL "$LIN" issue view ENG-6)" "Labels:    chore, bug" "--add-label keeps the other labels"
+out=$(LLL_URL=$URL "$LIN" issue update ENG-6 --remove-label chore)
+assert_contains "$out" "labels-=chore" "update --remove-label output"
+assert_contains "$(LLL_URL=$URL "$LIN" issue view ENG-6)" "Labels:    bug" "--remove-label keeps the other labels"
+set +e
+out=$(LLL_URL=$URL "$LIN" issue update ENG-6 --label chore --add-label bug 2>&1)
+rc=$?
+set -e
+[ "$rc" -ne 0 ] || fail "--label with --add-label: expected nonzero exit"
+assert_contains "$out" "cannot be combined with --add-label/--remove-label" "--label with --add-label is refused"
+assert_contains "$out" "or --label alone" "the refusal names what to do instead"
+# With --assignee the edit goes through the claim route; the modifiers ride it.
+assignee=$(LLL_URL=$URL "$LIN" issue view ENG-6 --json | jq -r '.expand.assignee.name // "none"')
+out=$(LLL_URL=$URL "$LIN" issue update ENG-6 --assignee "$assignee" --add-label chore --remove-label bug)
+assert_contains "$out" "labels+=chore, labels-=bug" "modifiers ride the assignment route"
+assert_contains "$(LLL_URL=$URL "$LIN" issue view ENG-6)" "Labels:    chore" "assignment route applied both modifiers"
+
 # --- project view lists its issues ---
 out=$(LLL_URL=$URL LLL_TEAM=ENG "$LIN" project view "Auth Revamp")
 assert_contains "$out" "Name:    Auth Revamp" "project view name"
@@ -1295,10 +1326,14 @@ for bot_help in --help -h; do
   out=$(env -u LLL_TOKEN -u LLL_ADMIN_EMAIL -u LLL_ADMIN_PASSWORD LLL_URL=http://127.0.0.1:1 "$LIN" bot "$bot_help") || fail "bot $bot_help refused help"
   assert_contains "$out" "bot- prefix" "bot help explains its reserved member names"
   out=$(env -u LLL_TOKEN -u LLL_ADMIN_EMAIL -u LLL_ADMIN_PASSWORD LLL_URL=http://127.0.0.1:1 "$LIN" bot rotate "$bot_help") || fail "bot rotate $bot_help refused help"
-  assert_contains "$out" "lll bot rotate NAME" "bot rotation help names its invocation"
+  assert_contains "$out" "lll bot rotate bot-NAME" "bot rotation help names its invocation"
 done
 # --- lll search: full text over issues, comments and docs, ranked, with context (LLL-96) ---
 python3 "$REPO_ROOT"/scripts/test_search_team.py "$LLL_ABS"
+# --- member invite --team: one team over the API and the board ---
+python3 "$REPO_ROOT"/scripts/test_team_scope.py "$LLL_ABS"
+# --- an older CLI than its server says so once a day, on stderr only (LLL-607) ---
+python3 "$REPO_ROOT"/scripts/test_version_skew.py "$LLL_ABS"
 SKEY=$(env LLL_URL=$URL LLL_TEAM=ENG "$LIN" issue create -t "Rail favorites go stale" -d "First line of context.
 The zebra crossing is only mentioned in this description.
 Last line of context." | sed -n 's/^Created \([A-Z]*-[0-9]*\).*/\1/p')
@@ -1317,6 +1352,17 @@ out=$(env LLL_URL=$URL LLL_TEAM=ENG "$LIN" search "Rail favorites")
 [ "$(printf '%s\n' "$out" | head -1 | cut -d' ' -f1)" = "$SKEY" ] || fail "a title phrase should rank its issue first, got: $(printf '%s' "$out" | head -1)"
 out=$(env LLL_URL=$URL LLL_TEAM=ENG "$LIN" search "$SKEY")
 [ "$(printf '%s\n' "$out" | head -1 | cut -d' ' -f1)" = "$SKEY" ] || fail "a key as the query should pin its issue first"
+# Empty shell arguments are whitespace, not the end of a multiword query.
+for placement in leading middle trailing; do
+  case "$placement" in
+    leading) out=$(env LLL_URL=$URL LLL_TEAM=ENG "$LIN" search "" zebra) ;;
+    middle) out=$(env LLL_URL=$URL LLL_TEAM=ENG "$LIN" search zebra "" giraffe) ;;
+    trailing) out=$(env LLL_URL=$URL LLL_TEAM=ENG "$LIN" search zebra "") ;;
+  esac
+  assert_contains "$out" "$SKEY" "search retains words around $placement empty argument"
+done
+out=$(env LLL_URL=$URL LLL_TEAM=ENG "$LIN" search "" "" 2>&1) && fail "blank-only search should refuse"
+assert_contains "$out" "what to search for" "blank-only search still names the usage"
 out=$(env LLL_URL=$URL LLL_TEAM=ENG "$LIN" search zebra --json)
 printf '%s' "$out" | jq -e '.[0].group and .[0].snippets[0].lines[0]' >/dev/null || fail "search --json: not the hit shape: $out"
 out=$(env LLL_URL=$URL LLL_TEAM=ENG "$LIN" search "no-such-word-anywhere-xq")
@@ -1437,7 +1483,7 @@ PY
 "$LIN" completions bash > "$DATA_DIR/comp.bash"
 bash -n "$DATA_DIR/comp.bash" || fail "bash completions do not parse"
 out=$(cat "$DATA_DIR/comp.bash")
-assert_contains "$out" "create new list next view show read update close start claim release delete comment watch url id title branch-name pr ref link unlink" "bash completions list issue verbs"
+assert_contains "$out" "create new list next view show update close start claim release delete comment watch url id title branch-name pr ref link unlink" "bash completions list issue verbs"
 assert_contains "$out" "--limit" "bash completions know --limit"
 assert_contains "$out" "complete -F _lll lll" "bash completions register"
 "$LIN" completions zsh > "$DATA_DIR/comp.zsh"
@@ -1450,6 +1496,7 @@ if command -v fish >/dev/null; then
   fish -n "$DATA_DIR/comp.fish" || fail "fish completions do not parse"
 fi
 assert_contains "$(cat "$DATA_DIR/comp.fish")" "complete -c lll" "fish completions complete lll"
+python3 "$REPO_ROOT"/scripts/test_completion_commands.py "$LIN"
 
 # task-127: help, completions and the parser read ONE table, so the gate
 for shell in bash zsh fish; do
@@ -1478,6 +1525,14 @@ assert_contains "$comp_doc" "-s --slug -t --title -k --kind -b --body" \
   "doc new completions carry exactly the doc new spec's flags"
 comp_issue=$("$LIN" completions bash | grep -F "issue)" | head -1 | sed "s/.*words='//;s/'.*//")
 assert_contains "$comp_issue" "link unlink" "issue completions include link and unlink"
+# LLL-505: hidden aliases are not completed.
+comp_doc_verbs=$("$LIN" completions bash | grep -F "doc)" | head -1 | sed "s/.*words='//;s/'.*//")
+assert_contains "$comp_doc_verbs" "view" "doc completions offer view"
+assert_not_contains "$comp_doc_verbs" "link" "doc completions omit hidden link/unlink"
+comp_finding_verbs=$("$LIN" completions bash | grep -F "finding)" | head -1 | sed "s/.*words='//;s/'.*//")
+assert_contains "$comp_finding_verbs" "near" "finding completions offer near"
+assert_not_contains "$comp_finding_verbs" "view" "finding completions omit hidden view"
+assert_not_contains "$comp_finding_verbs" "read" "finding completions omit hidden read"
 help_watch=$("$LIN" watch --help)
 for fl in '--state' '--assignee' '--label' '--project' '--search' '--json'; do
   assert_contains "$help_watch" "$fl" "watch help lists $fl, as its completions entry does"
@@ -1644,8 +1699,8 @@ assert_contains "$out" "race-found	finding	Race found" "doc list shows second do
 out=$(LLL_URL=$URL LLL_TEAM=ENG "$LIN" doc list --search race)
 assert_contains "$out" "race-found" "doc list --search matches slug"
 assert_not_contains "$out" "port-notes" "doc list --search excludes the rest"
-out=$(LLL_URL=$URL LLL_TEAM=ENG "$LIN" doc list --query "Port notes")
-assert_contains "$out" "port-notes" "doc list takes --query for --search"
+out=$(LLL_URL=$URL LLL_TEAM=ENG "$LIN" doc list --search "Port notes")
+assert_contains "$out" "port-notes" "doc list takes --search"
 out=$(LLL_URL=$URL LLL_TEAM=ENG "$LIN" doc list --search race --json)
 printf '%s' "$out" | jq -e '.items | map(.slug) == ["race-found"]' >/dev/null \
   || fail "doc list --search --json is the filtered list: $out"
@@ -1719,24 +1774,20 @@ rid=$(LLL_URL=$URL LLL_TEAM=ENG "$LIN" doc view port-notes --json | jq -r '.issu
 out=$(LLL_URL=$URL LLL_TEAM=ENG "$LIN" issue link ENG-1 port-notes)
 assert_contains "$out" "already linked" "double link is idempotent"
 
-# Removed doc-first verbs refuse without changing the relation.
-before_links=$(LLL_URL=$URL LLL_TEAM=ENG "$LIN" doc view port-notes --json | jq -c .issues)
-set +e
-out=$(LLL_URL=$URL LLL_TEAM=ENG "$LIN" doc link port-notes ENG-2 2>&1)
-rc=$?
-set -e
-[ "$rc" -eq 1 ] || fail "doc link must refuse"
-assert_contains "$out" "lll issue link ENG-2 port-notes" "doc link names the issue-first command"
-after_links=$(LLL_URL=$URL LLL_TEAM=ENG "$LIN" doc view port-notes --json | jq -c .issues)
-[ "$before_links" = "$after_links" ] || fail "refused doc link changed relations"
-set +e
-out=$(LLL_URL=$URL LLL_TEAM=ENG "$LIN" doc unlink port-notes ENG-1 2>&1)
-rc=$?
-set -e
-[ "$rc" -eq 1 ] || fail "doc unlink must refuse"
-assert_contains "$out" "lll issue unlink ENG-1 port-notes" "doc unlink names the issue-first command"
-after_links=$(LLL_URL=$URL LLL_TEAM=ENG "$LIN" doc view port-notes --json | jq -c .issues)
-[ "$before_links" = "$after_links" ] || fail "refused doc unlink changed relations"
+# --- doc link / doc unlink (LLL-313): hidden aliases since LLL-505. They
+# drive the one link write path with the positionals swapped, so either
+# spelling shows the same link on issue view and doc view; help documents
+# only 'issue link/unlink'.
+out=$(LLL_URL=$URL LLL_TEAM=ENG "$LIN" doc link port-notes ENG-2)
+assert_contains "$out" "Linked ENG-2 -> port-notes" "doc link output"
+out=$(LLL_URL=$URL LLL_TEAM=ENG "$LIN" issue view ENG-2)
+assert_contains "$out" "Docs:      port-notes" "doc link lands as an issue link"
+out=$(LLL_URL=$URL LLL_TEAM=ENG "$LIN" doc view port-notes)
+assert_contains "$out" "Issues:    ENG-1, ENG-2" "doc view shows both links"
+out=$(LLL_URL=$URL LLL_TEAM=ENG "$LIN" doc unlink port-notes ENG-2)
+assert_contains "$out" "Unlinked ENG-2 from port-notes" "doc unlink output"
+assert_not_contains "$(LLL_URL=$URL LLL_TEAM=ENG "$LIN" issue view ENG-2)" "port-notes" \
+  "doc unlink removes the link"
 
 # Explicit keys and board URLs supply scope when no team is configured.
 LINK_HOME="$DATA_DIR/link-home"
@@ -1773,6 +1824,31 @@ env LLL_URL=$URL "$LIN" issue delete "$key" --force >/dev/null
 n=$(LLL_URL=$URL LLL_TEAM=ENG "$LIN" doc view race-found --json | jq -r '.issues | length')
 [ "$n" = "0" ] || fail "deleting a linked issue should unset the relation, got: $n"
 assert_contains "$(LLL_URL=$URL LLL_TEAM=ENG "$LIN" doc view race-found)" "race-found Race found" "doc survives a linked issue's deletion"
+
+# Concurrent links to one doc all survive (LLL-513). Link used to write back
+# the whole locally edited array, so the last writer dropped the others.
+race_keys=""
+for i in 1 2 3 4 5 6; do
+  k=$(LLL_URL=$URL LLL_TEAM=ENG "$LIN" issue create -t "Concurrent link $i" | sed -n 's/^Created \([A-Z]*-[0-9]*\).*/\1/p')
+  [ -n "$k" ] || fail "concurrent-link fodder create did not print a key"
+  race_keys="$race_keys $k"
+done
+race_pids=""
+for k in $race_keys; do
+  env LLL_URL=$URL LLL_TEAM=ENG "$LIN" issue link "$k" race-found >/dev/null &
+  race_pids="$race_pids $!"
+done
+for pid in $race_pids; do wait "$pid" || fail "a concurrent link failed"; done
+n=$(LLL_URL=$URL LLL_TEAM=ENG "$LIN" doc view race-found --json | jq -r '.issues | length')
+[ "$n" = "6" ] || fail "six concurrent links should all survive, got: $n"
+race_pids=""
+for k in $race_keys; do
+  env LLL_URL=$URL LLL_TEAM=ENG "$LIN" issue unlink "$k" race-found >/dev/null &
+  race_pids="$race_pids $!"
+done
+for pid in $race_pids; do wait "$pid" || fail "a concurrent unlink failed"; done
+n=$(LLL_URL=$URL LLL_TEAM=ENG "$LIN" doc view race-found --json | jq -r '.issues | length')
+[ "$n" = "0" ] || fail "six concurrent unlinks should leave none, got: $n"
 
 # --- findings (TASK-103): authorship with area/paths, near by path, list,
 # issue view surfacing. A finding is a doc with kind=finding; retrieval is
@@ -1897,6 +1973,25 @@ set -e
 [ "$rc" -ne 0 ] || fail "cross-team issue link: expected nonzero exit"
 assert_contains "$out" "a link stays inside one team" "cross-team link is refused"
 
+# LLL-503: aliases keep canonical help, while retired third spellings refuse.
+# 'finding read' is excluded: LLL-505 keeps it as a hidden alias of
+# 'finding view' (asserted with the finding checks below).
+for pair in 'issue show view' 'issue new create' 'doc new create' 'doc show view' 'finding new create' 'member add create' 'member remove delete'; do
+  read -r noun alias canonical <<< "$pair"
+  canonical_help=$("$LIN" "$noun" "$canonical" --help)
+  alias_help=$("$LIN" "$noun" "$alias" --help)
+  [ "$alias_help" = "$canonical_help" ] || fail "$noun $alias must show canonical help"
+done
+for noun in issue doc; do
+  if "$LIN" "$noun" read --help >"$DATA_DIR/retired.out" 2>&1; then
+    fail "$noun read must refuse the retired spelling"
+  fi
+  assert_contains "$(cat "$DATA_DIR/retired.out")" "unknown $noun command" "retired verb nudge"
+done
+for noun in issue doc finding member; do
+  assert_not_contains "$("$LIN" "$noun" --help)" "the same command as" "canonical help has no duplicate alias rows"
+done
+
 # Labels are team-owned, so the same name on two boards is two labels and an
 # issue takes its own team's.
 LLL_URL=$URL LLL_TEAM=OPS "$LIN" label create -n pb >/dev/null
@@ -1920,25 +2015,16 @@ printf '%s' "$out" | jq -e '.findings == []' >/dev/null || fail "empty JSON find
 out=$("$LIN" finding --help)
 assert_contains "$out" "lll finding near" "finding --help mentions near"
 assert_contains "$out" "lll finding list" "finding --help mentions list"
-assert_not_contains "$out" "lll finding view" "finding help excludes removed view"
-assert_not_contains "$out" "lll finding read" "finding help excludes removed read"
-set +e
-out=$(env LLL_URL=$URL LLL_TEAM=ENG "$LIN" finding view migration-hazard --raw 2>&1)
-rc=$?
-set -e
-[ "$rc" -eq 1 ] || fail "finding view must refuse"
-assert_contains "$out" "lll doc view migration-hazard --raw --team ENG" "finding view preserves output and team"
-set +e
-out=$(env LLL_URL=$URL LLL_TEAM=ENG "$LIN" finding read migration-hazard --json 2>&1)
-rc=$?
-set -e
-[ "$rc" -eq 1 ] || fail "finding read must refuse"
-assert_contains "$out" "lll doc view migration-hazard --json --team ENG" "finding read preserves output and team"
-out=$(env LLL_URL=$URL LLL_TEAM=ENG "$LIN" doc view migration-hazard --raw)
-[ "$out" = "Migrations are a merge hazard." ] || fail "doc view reads finding body"
-env LLL_URL=$URL LLL_TEAM=ENG "$LIN" doc view migration-hazard --json | \
-  jq -e '.slug == "migration-hazard" and .kind == "finding" and .body == "Migrations are a merge hazard."' >/dev/null \
-  || fail "doc view JSON reads finding fields"
+# LLL-505: 'finding view' and 'read' are hidden aliases of 'doc view'. Fleet
+# task 9 had 6/30 agents guess 'finding view', so both keep working; help
+# documents only 'doc view'.
+assert_not_contains "$out" "lll finding view" "finding --help omits hidden view"
+assert_not_contains "$out" "lll finding read" "finding --help omits hidden read"
+assert_contains "$out" "lll doc view SLUG" "finding --help names doc view"
+out=$(env LLL_URL=$URL LLL_TEAM=ENG "$LIN" finding view migration-hazard --raw)
+assert_contains "$out" "Migrations are a merge hazard." "finding view reads a finding by slug"
+out=$(env LLL_URL=$URL LLL_TEAM=ENG "$LIN" finding read migration-hazard --raw)
+assert_contains "$out" "Migrations are a merge hazard." "finding read reads a finding by slug"
 out=$(env LLL_URL=$URL LLL_TEAM=ENG "$LIN" finding new -s fleet-new -t "Filed from finding new" -a pb -b "kind set by the verb")
 assert_contains "$out" "Created doc fleet-new" "finding new files a doc"
 out=$(env LLL_URL=$URL LLL_TEAM=ENG "$LIN" finding create positional-slug -t "Positional slug" -a pb -b "bare slug")
@@ -1951,8 +2037,8 @@ set -e
 assert_contains "$out" "not both" "slug as positional and flag is refused"
 out=$(env LLL_URL=$URL LLL_TEAM=ENG "$LIN" finding list -a pb)
 assert_contains "$out" "fleet-new" "finding new sets kind=finding (it lists as a finding)"
-out=$(env LLL_URL=$URL LLL_TEAM=ENG "$LIN" doc read fleet-new --raw)
-assert_contains "$out" "kind set by the verb" "doc read is view"
+out=$(env LLL_URL=$URL LLL_TEAM=ENG "$LIN" doc show fleet-new --raw)
+assert_contains "$out" "kind set by the verb" "doc show is view"
 # LLL-96: docs are in the full-text search too, ranked with the issues; the
 # delta sync sees a doc created after the cache's first fill.
 out=$(env LLL_URL=$URL LLL_TEAM=ENG "$LIN" search "Migrations are a merge hazard" --docs)
@@ -1967,13 +2053,13 @@ assert_contains "$out" "lll finding" "lll --help mentions finding"
 out=$("$LIN" doc --help)
 assert_contains "$out" "-a" "doc --help mentions the area flag"
 assert_contains "$out" "-p" "doc --help mentions the paths flag"
-assert_not_contains "$out" "lll doc link" "doc help excludes removed link"
-assert_not_contains "$out" "lll doc unlink" "doc help excludes removed unlink"
-assert_contains "$out" "lll issue link KEY-123 SLUG" "doc help names canonical linking"
-assert_contains "$out" "lll issue unlink KEY-123 SLUG" "doc help names canonical unlinking"
+assert_not_contains "$out" "lll doc link" "doc --help omits hidden link (LLL-505)"
+assert_not_contains "$out" "lll doc unlink" "doc --help omits hidden unlink (LLL-505)"
+assert_contains "$out" "lll issue link KEY-123 SLUG" "doc --help names issue link"
+assert_contains "$out" "lll issue unlink KEY-123 SLUG" "doc --help names issue unlink"
 assert_contains "$out" "--search" "doc --help mentions --search (LLL-313)"
 comp_doc_list=$("$LIN" completions bash | grep -F "doc,list" | head -1 | sed "s/.*words='//;s/'.*//")
-assert_contains "$comp_doc_list" "--search --query" "doc list completions carry --search"
+assert_contains "$comp_doc_list" "--search" "doc list completions carry --search"
 out=$("$LIN" finding --help)
 assert_contains "$out" "--limit" "finding --help mentions --limit (LLL-313)"
 
@@ -2092,7 +2178,7 @@ assert_contains "$out" "--state" "watch --help mentions --state"
 assert_contains "$out" "--json" "watch --help mentions --json"
 out=$("$LIN" member --help)
 assert_contains "$out" "Usage:" "lll member --help"
-assert_contains "$out" "lll member add" "member --help mentions add"
+assert_contains "$out" "lll member create" "member --help mentions create"
 out=$("$LIN" team --help)
 assert_contains "$out" "Usage:" "lll team --help"
 out=$("$LIN" project --help)
@@ -2103,7 +2189,7 @@ assert_contains "$out" "Usage:" "lll label --help"
 assert_contains "$out" "lll label create" "label --help mentions create"
 out=$("$LIN" doc --help)
 assert_contains "$out" "Usage:" "lll doc --help"
-assert_contains "$out" "lll doc new" "doc --help mentions new"
+assert_contains "$out" "lll doc create" "doc --help mentions create"
 assert_contains "$out" "lll doc edit" "doc --help mentions edit"
 assert_contains "$out" "--raw" "doc --help mentions --raw"
 assert_contains "$out" "-b" "doc --help mentions -b"
@@ -2159,8 +2245,8 @@ set +e
 out=$("$LIN" issue assign ENG-1 bob 2>&1)
 set -e
 assert_contains "$out" "lll issue claim KEY-123" "a synonym verb is pointed at the verb (fleet replay: assign, 5/30)"
-out=$(env LLL_URL=$URL LLL_TEAM=ENG "$LIN" doc new --slug long-forms --title "Long forms" --kind finding --area pb --path "src/pb" --body "every short flag has a long one")
-assert_contains "$out" "Created doc long-forms" "doc new takes the long form of every flag, --path included"
+out=$(env LLL_URL=$URL LLL_TEAM=ENG "$LIN" doc new --slug long-forms --title "Long forms" --kind finding --area pb --paths "src/pb" --body "every short flag has a long one")
+assert_contains "$out" "Created doc long-forms" "doc new takes the long form of every flag, --paths included"
 out=$("$LIN" --help)
 assert_contains "$out" "There is no 'lll list' or 'lll comment'" "top-level help states the noun-verb shape (fleet replay: 5/30)"
 
@@ -2175,12 +2261,12 @@ assert_contains "$out" "the ID comes right after the verb" "sub-verb error names
 # aliases agents guessed at a steady rate across fleet runs (TASK-309)
 out=$(LLL_URL=$URL "$LIN" issue comment ENG-6 --body "alias body")
 assert_contains "$out" "Commented on ENG-6" "comment takes --body for -b"
-out=$(LLL_URL=$URL "$LIN" issue comment ENG-6 -m "alias m")
-assert_contains "$out" "Commented on ENG-6" "comment takes -m for -b (three shards across two replays)"
+out=$(LLL_URL=$URL "$LIN" issue comment ENG-6 -b "canonical body")
+assert_contains "$out" "Commented on ENG-6" "comment keeps canonical -b"
 out=$(LLL_URL=$URL "$LIN" issue comment ENG-6 --nope 2>&1 || true)
-assert_contains "$out" "-b, --body, -m, --message" "the flag table lists every alias"
-out=$(LLL_URL=$URL LLL_TEAM=ENG "$LIN" issue list --query "Roundtrip")
-assert_contains "$out" "ENG-6" "list takes --query for --search"
+assert_contains "$out" "-b, --body" "the flag table lists every alias"
+out=$(LLL_URL=$URL LLL_TEAM=ENG "$LIN" issue list --search "Roundtrip")
+assert_contains "$out" "ENG-6" "list takes --search"
 out=$(LLL_URL=$URL LLL_TEAM=ENG "$LIN" issue new --title "Made with issue new" --priority 4)
 assert_contains "$out" "Made with issue new" "issue new is create, and create takes --title"
 
@@ -2330,6 +2416,7 @@ set -e
 [ "$rc" -ne 0 ] || fail "claiming a held issue: expected nonzero exit"
 assert_contains "$out" "already claimed by bryan" "refusal names the holder"
 assert_contains "$out" "lll issue release $CKEY" "refusal names the fix"
+assert_contains "$out" "lll issue release $CKEY --force" "a non-holder's fix is --force (LLL-512)"
 
 # the holder claiming again is success, not a conflict (fleet replay, task 9:
 # a claim survived --assignee none and every re-claim by its holder was refused)
@@ -2360,21 +2447,91 @@ set -e
 assert_contains "$out" "changed since $stamp" "the refusal names the stale stamp"
 assert_contains "$out" "issue view $CKEY --json" "and where to read the new one"
 [ "$(env $E "$LIN" issue view "$CKEY" --json | jq -r '.priority')" = 3 ] || fail "the refused edit must not land"
-out=$(env $E "$LIN" issue update "$CKEY" -d "The picker loses focus. Then the picker reopens.")
-out=$(env $E "$LIN" issue update "$CKEY" --description-replace-old "loses focus" --description-replace-new "keeps focus")
-assert_contains "$out" "description (replaced)" "replace says it replaced"
-assert_contains "$(env $E "$LIN" issue view "$CKEY" --raw)" "The picker keeps focus." "the one occurrence was replaced"
-set +e
-out=$(env $E "$LIN" issue update "$CKEY" --description-replace-old "picker" --description-replace-new "chooser" 2>&1)
-set -e
-assert_contains "$out" "matched 2 times" "an ambiguous replace is refused with the count"
-out=$(env $E "$LIN" issue update "$CKEY" --description-append "Appended line.")
-assert_contains "$out" "description (appended)" "append says it appended"
-assert_contains "$(env $E "$LIN" issue view "$CKEY" --raw)" "Appended line." "the line was appended"
-set +e
-out=$(env $E "$LIN" issue update "$CKEY" --description-replace-old x 2>&1)
-set -e
-assert_contains "$out" "go together" "half a replace is refused"
+env $E python3 - "$LIN" "$CKEY" <<'PY'
+import json
+import subprocess
+import sys
+
+binary, key = sys.argv[1:]
+hint = "--description-replace-old/--description-replace-new are deprecated; use --description-replace old=new"
+
+def run(*args, code=0):
+    result = subprocess.run([binary, *args], text=True, capture_output=True)
+    assert result.returncode == code, (args, result.returncode, result.stdout, result.stderr)
+    return result
+
+def record():
+    return json.loads(run("issue", "view", key, "--json").stdout)
+
+def update(*args, code=0):
+    return run("issue", "update", key, *args, code=code)
+
+def reset(text):
+    update("-d", text)
+
+def refuse(args, message):
+    before = record()
+    result = update(*args, "--title", "must not land", code=1)
+    assert message in result.stderr, result.stderr
+    assert record() == before, (args, before, record())
+    return result
+
+reset("café start")
+result = update("--description-replace", "café=日本=x", "--description-append", "tail")
+assert "description (replaced, appended)" in result.stdout, result.stdout
+assert result.stderr == "", result.stderr
+assert record()["description"] == "日本=x start\ntail"
+
+reset("a")
+update("--description-replace=a=b=c")
+assert record()["description"] == "b=c"
+reset("remove me")
+update("--description-replace", "remove =")
+assert record()["description"] == "me"
+
+reset("a a")
+refuse(["--description-replace", "a=b"], "--description-replace matched 2 times")
+refuse(["--description-replace", "missing=b"], "--description-replace matched 0 times")
+for args, message in [
+    (["--description-replace", "missing-equals"], "requires old=new"),
+    (["--description-replace", "a=b", "--description-replace", "b=c"], "may only be given once"),
+    (["--description-replace", "a=b", "--description-replace-old", "a"], "cannot be combined"),
+    (["--description-replace", "a=b", "--description-replace-new", "b"], "cannot be combined"),
+    (["--description-replace", "a=b", "--description-replace-old", "a", "--description-replace-new", "b"], "cannot be combined"),
+    (["--description-replace-old", "a"], "go together"),
+    (["-d", "whole", "--description-replace", "a=b"], "--description replaces the whole text"),
+    (["-d", "whole", "--description-append", "tail"], "--description replaces the whole text"),
+]:
+    result = refuse(args, message)
+    assert hint not in result.stderr, result.stderr
+
+reset("before")
+result = update("--description-replace-old", "before", "--description-replace-new", "after")
+assert result.stderr == hint + "\n", result.stderr
+assert hint not in result.stdout
+assert "description (replaced)" in result.stdout, result.stdout
+assert record()["description"] == "after"
+result = update("--description-append", "tail")
+assert "description (appended)" in result.stdout, result.stdout
+assert record()["description"] == "after\ntail"
+
+for args, flag in [
+    (["--description-replace", "=inserted"], "--description-replace"),
+    (["--description-replace-old", "", "--description-replace-new", "inserted"], "--description-replace-old"),
+]:
+    reset("")
+    update(*args)
+    assert record()["description"] == "inserted"
+    reset("x")
+    refuse(args, flag + " matched 2 times")
+
+for args in [("issue", "update", "--help"), ("issue", "--help"), ("completions", "bash")]:
+    text = run(*args).stdout
+    assert "--description-replace" in text, args
+    assert "--description-replace-old" not in text, args
+    assert "--description-replace-new" not in text, args
+print("Description replacement: Unicode, first equals, append, empty values, unchanged refusals and hidden legacy compatibility passed")
+PY
 
 # --- If-Unmodified-Since is enforced by the server (LLL-399) ---
 # LLL-391's check was read-then-write on the client, so a write landing
@@ -2419,8 +2576,17 @@ assert_contains "$out" "Claimed:   bryan" "a refused claim leaves the holder alo
 # re-claim is not silent - it says "already yours" - and it re-sets the
 # assignee, which is what claiming again is for. Pinned above.
 
+# LLL-512: only the holder releases without --force, and the refusal says so.
+set +e
+out=$(env $E "$LIN" issue release "$CKEY" 2>&1)
+rc=$?
+set -e
+[ "$rc" -ne 0 ] || fail "a non-holder release without --force: expected nonzero exit"
+assert_contains "$out" "held by bryan" "the refusal names the holder"
+assert_contains "$out" "lll issue release $CKEY --force" "the refusal names --force"
+
 # AC#3: release gives it back, and the next claim succeeds.
-out=$(env $E "$LIN" issue release "$CKEY")
+out=$(env $E LLL_TOKEN="$BRYAN_TOK" LLL_ME=bryan "$LIN" issue release "$CKEY")
 assert_contains "$out" "Released $CKEY (was bryan's)" "release output"
 assert_contains "$out" "cleared assignee" "release reports assignment removal"
 out=$(env $E "$LIN" issue view "$CKEY")
@@ -2429,8 +2595,15 @@ assert_contains "$out" "Assignee:  none" "release clears the assignee the claim 
 out=$(env $E LLL_TOKEN="$CAROL_TOK" LLL_ME=carol "$LIN" issue claim "$CKEY")
 assert_contains "$out" "Claimed $CKEY for carol" "a released issue can be claimed again"
 
+# A forced release of carol's claim goes through and comments with the reason.
+out=$(env $E "$LIN" issue release "$CKEY" --force -b "carol is on leave")
+assert_contains "$out" "Released $CKEY (was carol's)" "forced release output"
+assert_contains "$out" "forced, and commented on the issue" "forced release says it commented"
+out=$(env $E "$LIN" issue view "$CKEY")
+assert_contains "$out" "e2e-agent force-released carol's claim." "the comment names both members"
+assert_contains "$out" "Reason: carol is on leave" "the comment carries the reason"
+
 # Releasing what nobody holds is an error, not a no-op.
-env $E "$LIN" issue release "$CKEY" >/dev/null
 set +e
 out=$(env $E "$LIN" issue release "$CKEY" 2>&1)
 rc=$?
@@ -2438,7 +2611,7 @@ set -e
 [ "$rc" -ne 0 ] || fail "releasing an unclaimed issue: expected nonzero exit"
 assert_contains "$out" "$CKEY is not claimed" "double release names the state"
 # The newer claim protection refuses reassignment until release (covered above).
-env $E "$LIN" issue view "$CKEY" --json | python3 -c 'import json,sys; d=json.load(sys.stdin); assert d["claim"] is None; assert len(d["comments"]) == 2'
+env $E "$LIN" issue view "$CKEY" --json | python3 -c 'import json,sys; d=json.load(sys.stdin); assert d["claim"] is None; assert len(d["comments"]) == 3'
 
 # Full issue JSON must not silently stop at the first 200 comments.
 env $E python3 - "$LLL_ABS" "$CKEY" <<'PY'
@@ -2454,8 +2627,8 @@ for i in range(199):
     with urllib.request.urlopen(request) as response:
         assert response.status == 200
 comments = view()['comments']
-assert len(comments) == 201
-assert len({c['id'] for c in comments}) == 201
+assert len(comments) == 202
+assert len({c['id'] for c in comments}) == 202
 assert [(c['created'], c['id']) for c in comments] == sorted((c['created'], c['id']) for c in comments)
 assert {c['body'] for c in comments} >= {f'pagination {i}' for i in range(199)}
 PY
@@ -2475,7 +2648,8 @@ assert_contains "$out" "member token" "superuser claim names the required creden
 
 # AC#2, at the REST layer: fire N creates at one issue at once and count the
 # survivors. This is the atomicity claim itself — the unique index, with no
-# lll process in the way to serialise anything.
+# lll process in the way to serialise anything. Direct collection inserts are
+# superuser fixtures (LLL-515); member concurrency goes through /claim below.
 RKEY=$(env $E "$LIN" issue create -t "Race target" | sed -n 's/^Created \([A-Z]*-[0-9]*\).*/\1/p')
 RID=$(env $E "$LIN" issue view "$RKEY" --json | jq -r .id)
 MID=$(curl -sf -H "$AUTH_HDR" "$URL/api/collections/members/records?perPage=1" | jq -r '.items[0].id')
@@ -2486,7 +2660,7 @@ mkdir -p "$RACE"
 race_pids=""
 for i in $(seq 1 16); do
   (curl -s -o /dev/null -w '%{http_code}\n' -X POST "$URL/api/collections/claims/records" \
-     -H "$AUTH_HDR" \
+     -H "Authorization: Bearer $SU_TOK" \
      -H 'Content-Type: application/json' \
      -d "{\"issue\":\"$RID\",\"member\":\"$MID\"}" > "$RACE/$i.code") &
   race_pids="$race_pids $!"
@@ -2591,7 +2765,7 @@ assert_contains "$out" "Work:      $WBRANCH @ site-b:$WROOT_B (last seen)" \
 out=$(env $E "$LIN" issue update "$WKEY" --state in-progress)
 out=$(env $E "$LIN" issue view "$WKEY")
 assert_not_contains "$out" "last seen" "reopened and still claimed: fresh again"
-out=$(env $E "$LIN" issue release "$WKEY")
+out=$(env $E LLL_TOKEN="$BRYAN_TOK" LLL_ME=bryan "$LIN" issue release "$WKEY")
 out=$(env $E "$LIN" issue view "$WKEY")
 assert_contains "$out" "Work:      $WBRANCH @ site-b:$WROOT_B (last seen)" \
   "a released claim renders the site as last seen"
@@ -2772,6 +2946,14 @@ out=$(env -u LLL_TOKEN HOME="$E2E_HOME" LLL_URL=$URL \
   LLL_ADMIN_EMAIL=admin@local.dev LLL_ADMIN_PASSWORD=admin-local-123 \
   "$LIN" bot claude-main 2>&1) && fail "lll bot accepted a name without the bot- prefix: $out"
 assert_contains "$out" "reserved" "the bot-kind prefix refusal names the reservation"
+assert_contains "$out" "try 'lll bot bot-claude-main'" "the prefix refusal names the working spelling (LLL-539)"
+# The CLI refuses that name before any server call (LLL-539), so the server's
+# own guard is exercised directly: a bot-kind member without the prefix.
+SU_TOK=$(pb_superuser_token "$URL") || fail "superuser token for the server prefix guard"
+out=$(curl -s -X POST "$URL/api/collections/members/records" \
+  -H "Authorization: Bearer $SU_TOK" -H 'Content-Type: application/json' \
+  -d '{"name":"claude-main","email":"claude-main@bots.invalid","password":"bot-pass-12345","passwordConfirm":"bot-pass-12345","kind":"bot"}')
+assert_contains "$out" "reserved to the 'bot-' prefix" "the server refuses a bot-kind member without the prefix"
 out=$(env LLL_TOKEN="$BRYAN_TOK" HOME="$E2E_HOME" LLL_URL=$URL \
   "$LIN" member add -n bot-impersonator 2>&1) && fail "member add took the reserved bot- prefix: $out"
 assert_contains "$out" "reserved" "person signups cannot take the bot- prefix"
@@ -3331,7 +3513,7 @@ assert_not_contains "$out" 'configured me' 'legacy identity config is ignored'
 assert_contains "$(cat "$DATA_DIR/board-stderr")" 'unexpected argument' 'board classifies a positional argument accurately'
 assert_contains "$(cat "$DATA_DIR/board-stderr")" 'lll board [-w]' 'board names canonical usage'
 # A normal authenticated member can invite a new colleague; reset is separate.
-out=$(env -u LLL_ADMIN_EMAIL -u LLL_ADMIN_PASSWORD "$LIN" member invite oracle-invited --email oracle-invited@lll.test)
+out=$(env -u LLL_ADMIN_EMAIL -u LLL_ADMIN_PASSWORD "$LIN" member invite oracle-invited --email oracle-invited@lll.test 2>&1)
 assert_contains "$out" 'invited oracle-invited' 'member token can invite a new colleague'
 
 # Invocation-only --team works consistently without rewriting config.
@@ -3433,7 +3615,9 @@ python3 "$REPO_ROOT"/scripts/test_issue_since.py "$LLL_ABS" "$URL"
 python3 "$REPO_ROOT"/scripts/test_issue_view_reads.py "$LLL_ABS"
 python3 "$REPO_ROOT"/scripts/test_export_import.py "$LLL_ABS" "$URL"
 python3 "$REPO_ROOT"/scripts/test_import_github.py "$LLL_ABS" "$URL"
-python3 "$REPO_ROOT"/scripts/test_claims_live.py "$LLL_ABS" "$URL"
+# A fresh superuser token: the mid-suite restart retired the earlier one.
+LLL_TEST_SUPERUSER_TOKEN=$(pb_superuser_token "$URL") \
+  python3 "$REPO_ROOT"/scripts/test_claims_live.py "$LLL_ABS" "$URL"
 # LLL-385: seed is outside build/test/e2e, so it broke for five days under a
 # green gate. Here rather than in `test` because it needs the built binary.
 python3 "$REPO_ROOT"/scripts/test_seed.py

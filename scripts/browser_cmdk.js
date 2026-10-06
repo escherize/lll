@@ -78,5 +78,26 @@ async page => {
     throw new Error('two empty messages at once');
   }
   await page.keyboard.press('Escape');
+
+  // A response already in flight cannot repaint an obsolete query.
+  await open();
+  await page.evaluate(() => {
+    window.paletteRequests = [];
+    window.fetch = (url, options) => new Promise(resolve => {
+      window.paletteRequests.push({url, options, resolve});
+    });
+  });
+  await page.locator('#cmdk-q').fill('old query');
+  await page.waitForFunction(() => window.paletteRequests.length === 1);
+  const stale = await page.evaluate(async () => {
+    const field = document.getElementById('cmdk-q');
+    field.value = 'new query';
+    field.dispatchEvent(new Event('input', {bubbles:true}));
+    window.paletteRequests[0].resolve({ok:true, text:async () => '<div id="cmdk-results"><a data-cmdk-item href="/issue/STALE-1">stale old query</a></div>'});
+    await new Promise(resolve => setTimeout(resolve, 20));
+    return document.getElementById('cmdk-results').textContent;
+  });
+  if (stale.includes('stale old query')) throw new Error('old search response replaced the new query during debounce');
+  await page.keyboard.press('Escape');
   return 'cmdk palette browser passed';
 }

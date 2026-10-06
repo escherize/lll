@@ -2,23 +2,6 @@ import "go:strings"
 
 import "flags"
 
-#[test]
-fn removed_doc_links_preserve_quoted_positionals_in_issue_order() {
-  let assert Err(msg) = doc(["lll", "doc", "link", "team's notes", "ENG-2"])
-  assert msg.contains("lll issue link ENG-2 'team'\\''s notes'")
-  let assert Err(dash) = doc([
-    "lll",
-    "doc",
-    "unlink",
-    "--help",
-    "--",
-    "-notes",
-    "ENG-2",
-  ])
-  assert dash.contains("lll issue unlink --help ")
-  assert dash.contains("-- ENG-2 -notes'")
-}
-
 // Unit cover for the pure helpers in doc.lis: check_slug, check_kind and
 // path_touches. Everything here is a function of its arguments alone — no
 // PocketBase.
@@ -199,6 +182,50 @@ fn path_touches_is_false_when_either_side_is_empty() {
   assert !path_touches("  ", "/")
 }
 
+// ----------------------------------------------------------- doc_commands
+//
+// The Command table is what dispatch, `lll doc --help` and completions read
+// (TASK-307), so canonical verbs and their summaries are pinned here: a verb
+// dropped from the table vanishes from all three at once.
+
+#[test]
+fn doc_commands_declares_every_verb_once_with_a_summary() {
+  let names = doc_commands().map(|c| c.name)
+  assert strings.Join(names, " ") == "create list view edit delete link unlink"
+  // LLL-505: link and unlink are hidden aliases of 'lll issue link/unlink'.
+  // They dispatch, but neither help nor completions advertise them.
+  assert strings.Join(flags.command_names(doc_commands()), " ") == "create new list view show edit delete"
+  let assert Err(help) = doc(["lll", "doc", "--help"])
+  assert !help.contains("lll doc link")
+  assert !help.contains("lll doc unlink")
+  assert help.contains("lll issue link KEY-123 SLUG")
+  assert flags.resolve_command(doc_commands(), "link").is_some()
+  assert flags.resolve_command(doc_commands(), "unlink").is_some()
+  for c in doc_commands() {
+    assert c.summary != ""
+    // No doc verb has a hand-written page; help is generated from spec.
+    assert c.page == ""
+  }
+}
+
+#[test]
+fn doc_commands_slug_verbs_take_a_positional() {
+  for c in doc_commands() {
+    let takes_slug = c.name == "view" || c.name == "edit" || c.name == "delete"
+    assert (c.positional == "SLUG") == takes_slug
+  }
+}
+
+#[test]
+fn doc_commands_link_verbs_take_slug_then_key() {
+  // The doc-first spelling: the doc's slug comes first, the issue key
+  // second — the reverse of 'lll issue link KEY-123 SLUG' (LLL-313).
+  for c in doc_commands() {
+    let links = c.name == "link" || c.name == "unlink"
+    assert (c.positional == "SLUG KEY-123") == links
+  }
+}
+
 #[test]
 fn doc_list_spec_searches_slug_and_title() {
   // finding list --search exists for fleet reasons its source records; doc
@@ -206,6 +233,17 @@ fn doc_list_spec_searches_slug_and_title() {
   let spec = doc_list_spec()
   let assert Ok(p) = flags.parse(spec, ["lll", "doc", "list", "--search", "port"], 3, false, "")
   assert p.one("--search") == "port"
-  let assert Ok(q) = flags.parse(spec, ["lll", "doc", "list", "--query", "port"], 3, false, "")
-  assert q.one("--search") == "port"
+  assert flags.parse(spec, ["lll", "doc", "list", "--query", "port"], 3, false, "").is_err()
+}
+
+#[test]
+fn parse_paths_deduplicates_equivalent_dot_slash_spellings() {
+  assert parse_paths("./src/pb, src/pb, ././src/pb/") == "src/pb"
+  assert parse_paths("./web, ./src/pb, web/, /src/pb/") == "web, src/pb"
+}
+
+#[test]
+fn parse_paths_preserves_distinct_unicode_paths_and_ignores_empty_entries() {
+  assert parse_paths(" , ./, /, ./文档/设计, 文档/设计/, ./src/pb, src/pb2, ") == "文档/设计, src/pb, src/pb2"
+  assert parse_paths("") == ""
 }

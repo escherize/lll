@@ -147,7 +147,7 @@ fn issue_list_spec() -> Slice<flags.Flag> {
   flags.with_team(filter_spec(FilterUse.List).append([
     flags.Flag {
       name: "--search",
-      alias: "--query",
+      alias: "",
       value: true,
       hint: "text",
       help: "list only issues whose title contains text",
@@ -238,9 +238,17 @@ fn issue_update_spec() -> Slice<flags.Flag> {
       ..,
     },
     flags.Flag {
+      name: "--description-replace",
+      value: true,
+      hint: "old=new",
+      help: "replace exactly one occurrence of old with new in the description",
+      ..,
+    },
+    flags.Flag {
       name: "--description-replace-old",
       value: true,
       hint: "text",
+      hidden: true,
       help: "with --description-replace-new: replace exactly one occurrence of text in the description",
       ..,
     },
@@ -248,6 +256,7 @@ fn issue_update_spec() -> Slice<flags.Flag> {
       name: "--description-replace-new",
       value: true,
       hint: "text",
+      hidden: true,
       help: "the replacement for --description-replace-old",
       ..,
     },
@@ -272,6 +281,22 @@ fn issue_update_spec() -> Slice<flags.Flag> {
       help: "one emoji for the issue, shown on the card, the issue page and\nthe list; pass \"\" to clear it",
       ..,
     },
+    flags.Flag {
+      name: "--add-label",
+      value: true,
+      hint: "name",
+      repeat: true,
+      help: "add a label and keep the others; repeatable (not with --label)",
+      ..,
+    },
+    flags.Flag {
+      name: "--remove-label",
+      value: true,
+      hint: "name",
+      repeat: true,
+      help: "remove a label and keep the others; repeatable (not with --label)",
+      ..,
+    },
   ]...))
 }
 
@@ -279,11 +304,31 @@ fn issue_delete_spec() -> Slice<flags.Flag> {
   flags.with_team([flags.Flag { name: "--force", help: "skip the delete confirmation", .. }])
 }
 
+fn issue_claim_spec() -> Slice<flags.Flag> {
+  flags.with_team([
+    flags.Flag { name: "--renew", help: "restart the expiry clock on a claim you hold (a hold unrenewed for 24h is released)", .. },
+  ])
+}
+
+fn issue_release_spec() -> Slice<flags.Flag> {
+  flags.with_team([
+    flags.Flag { name: "--force", help: "release a claim another member holds; leaves a comment on the issue", .. },
+    flags.Flag {
+      name: "-b",
+      alias: "--body",
+      value: true,
+      hint: "\"why\"",
+      help: "with --force: the reason, recorded in the comment ('-b -' reads stdin)",
+      ..,
+    },
+  ])
+}
+
 fn issue_comment_spec() -> Slice<flags.Flag> {
   flags.with_team([
     flags.Flag {
       name: "-b",
-      alias: "--body -m --message",
+      alias: "--body",
       value: true,
       hint: "\"body\"",
       help: "comment body ('-b -' reads it from stdin)",
@@ -302,7 +347,7 @@ pub fn issue_watch_spec() -> Slice<flags.Flag> {
     },
     flags.Flag {
       name: "--until",
-      alias: "--for",
+      alias: "",
       value: true,
       hint: "text",
       help: "exit 0 once a comment containing text arrives (or is already\nthere); --json reports an existing match as action=snapshot",
@@ -364,211 +409,183 @@ pub fn issue_commands() -> Slice<flags.Command> {
   [
     flags.Command {
       name: "attach", summary: "upload a file to an issue; appends without replacing existing attachments",
-      page: "",
       spec: flags.with_team([]), positional: "KEY-123 FILE", run: issue_attach,
+      ..
     },
     flags.Command {
       name: "detach", summary: "remove an attachment by its stored filename (see issue view)",
-      page: "", spec: flags.with_team([]), positional: "KEY-123 FILENAME", run: issue_detach,
+      spec: flags.with_team([]), positional: "KEY-123 FILENAME", run: issue_detach,
+      ..
     },
     flags.Command {
       name: "download", summary: "write attachment bytes to stdout; redirect to a file",
-      page: "", spec: flags.with_team([]), positional: "KEY-123 FILENAME", run: issue_download,
+      spec: flags.with_team([]), positional: "KEY-123 FILENAME", run: issue_download,
+      ..
     },
     flags.Command {
-      name: "create",
+      name: "create", alias: "new",
       summary: "create an issue in the configured team; -d - reads the description from stdin; without --state it starts in todo",
       page: issue_create_page(),
       spec: issue_create_spec(),
       positional: "[\"title\"]",
       run: create,
-    },
-    flags.Command {
-      name: "new",
-      summary: "the same command as 'create'",
-      page: issue_create_page(),
-      spec: issue_create_spec(),
-      positional: "[\"title\"]",
-      run: create,
+      ..
     },
     flags.Command {
       name: "list",
       summary: "list issues; scoped to the configured team",
-      page: "",
       spec: issue_list_spec(),
-      positional: "",
       run: list,
+      ..
     },
     flags.Command {
       name: "next",
       summary: "print the key of the one issue to work next - ready and unclaimed, then priority (urgent first), then oldest, then most-unblocking; --claim takes it (LLL-395)",
-      page: "",
       spec: issue_next_spec(),
-      positional: "",
       run: issue_next,
+      ..
     },
     flags.Command {
-      name: "view",
+      name: "view", alias: "show",
       summary: "show one issue in full, with comments; --raw prints it as plain markdown; -w opens its web page instead",
-      page: "",
       spec: issue_view_spec(),
       positional: "[KEY-123]",
       run: view,
-    },
-    // `read` is `view`. Seven of thirty first-time agents typed it in one
-    // fleet run (TASK-309), and the count went UP as other noise was removed -
-    // it is the word people reach for. One table entry; `view` stays the
-    // documented spelling, and the summary says so.
-    // `show` is `view` too. Two of thirty first-time agents typed it on the
-    // first clean fleet run of task 2 (TASK-309), the same shape as `read`.
-    flags.Command {
-      name: "show",
-      summary: "the same command as 'view'",
-      page: "",
-      spec: issue_view_spec(),
-      positional: "[KEY-123]",
-      run: view,
-    },
-    flags.Command {
-      name: "read",
-      summary: "the same command as 'view'",
-      page: "",
-      spec: issue_view_spec(),
-      positional: "[KEY-123]",
-      run: view,
+      ..
     },
     flags.Command {
       name: "update",
       summary: "change fields (at least one flag)",
-      page: "",
       spec: issue_update_spec(),
       positional: "[KEY-123]",
       run: update,
+      ..
     },
     flags.Command {
       name: "close",
       summary: "set state done; retain any claim",
-      page: "",
       spec: flags.with_team([]),
       positional: "[KEY-123]",
       run: close_issue,
+      ..
     },
     flags.Command {
       name: "start",
       summary: "set state in-progress; --branch also git-switches to key-number-slug and records the work site",
-      page: "",
       spec: issue_start_spec(),
       positional: "[KEY-123]",
       run: start,
+      ..
     },
     flags.Command {
       name: "claim",
-      summary: "take it exclusively for the authenticated member and assign it; exits non-zero, changing nothing, when someone already holds it",
-      page: "",
-      spec: flags.with_team([]),
+      summary: "take it exclusively for the authenticated member and assign it; exits non-zero, changing nothing, when someone already holds it; --renew restarts your hold's 24h expiry",
+      spec: issue_claim_spec(),
       positional: "[KEY-123]",
       run: claim,
+      ..
     },
     flags.Command {
       name: "release",
-      summary: "remove the claim; clear assignee if it still matches the holder",
-      page: "",
-      spec: flags.with_team([]),
+      summary: "remove your claim; clear assignee if it still matches the holder; --force takes another member's and comments why",
+      spec: issue_release_spec(),
       positional: "[KEY-123]",
       run: release,
+      ..
     },
     flags.Command {
       name: "delete",
       summary: "delete; asks [y/N] unless --force",
-      page: "",
       spec: issue_delete_spec(),
       positional: "KEY-123",
       run: delete_issue,
+      ..
     },
     flags.Command {
       name: "comment",
       summary: "add a comment (bare body or -b); 'comment KEY' lists them numbered; 'comment edit KEY N -b' and 'comment delete KEY N' change your own",
-      page: "",
       spec: issue_comment_spec(),
       positional: "[KEY-123] [\"body\"]",
       run: comment,
+      ..
     },
     flags.Command {
       name: "watch",
       summary: "stream live events for the issue and its comments until interrupted",
-      page: "",
       spec: issue_watch_spec(),
       positional: "[KEY-123]",
       run: issue_watch,
+      ..
     },
     flags.Command {
       name: "url",
       summary: "print the issue's web page URL",
-      page: "",
       spec: flags.with_team([]),
       positional: "[KEY-123]",
       run: url_cmd,
+      ..
     },
     flags.Command {
       name: "id",
       summary: "print the issue's KEY-123 identifier",
-      page: "",
       spec: flags.with_team([]),
       positional: "[KEY-123]",
       run: id_cmd,
+      ..
     },
     flags.Command {
       name: "title",
       summary: "print the issue's title",
-      page: "",
       spec: flags.with_team([]),
       positional: "[KEY-123]",
       run: title_cmd,
+      ..
     },
-    flags.Command { name: "branch-name", summary: "print a suggested Git branch name; read-only", page: "", spec: flags.with_team([]), positional: "[KEY-123]", run: branch_name_cmd },
+    flags.Command { name: "branch-name", summary: "print a suggested Git branch name; read-only", spec: flags.with_team([]), positional: "[KEY-123]", run: branch_name_cmd, .. },
     flags.Command {
       name: "pr",
       summary: "open a GitHub PR via 'gh pr create' and record gh#N; body links the issue and includes its description when it fits",
-      page: "",
       spec: flags.with_team([]),
       positional: "[KEY-123]",
       run: pr_cmd,
+      ..
     },
     flags.Command {
       name: "ref", summary: "append an external reference once (gh#42, linear:ENG-118)",
-      page: "", spec: flags.with_team([]), positional: "KEY-123 REF", run: ref_cmd,
+      spec: flags.with_team([]), positional: "KEY-123 REF", run: ref_cmd,
+      ..
     },
     flags.Command {
       name: "link",
       summary: "link the issue to a doc (see 'lll doc --help')",
-      page: "",
       spec: flags.with_team([]),
       positional: "KEY-123 SLUG",
       run: link,
+      ..
     },
     flags.Command {
       name: "unlink",
       summary: "remove that link",
-      page: "",
       spec: flags.with_team([]),
       positional: "KEY-123 SLUG",
       run: unlink,
+      ..
     },
     flags.Command {
       name: "block",
       summary: "record that KEY-123 cannot start until BLOCKER is done (LLL-175); view shows it, list --ready honours it",
-      page: "",
       spec: flags.with_team([]),
       positional: "KEY-123 BLOCKER",
       run: block,
+      ..
     },
     flags.Command {
       name: "unblock",
       summary: "remove BLOCKER from KEY-123's blockers",
-      page: "",
       spec: flags.with_team([]),
       positional: "KEY-123 BLOCKER",
       run: unblock,
+      ..
     },
   ]
 }
@@ -631,8 +648,7 @@ Without --state the issue starts in todo; --label may be repeated."
 }
 
 fn create(input: flags.CommandInput) -> Result<(), string> {
-  let spec = issue_create_spec()
-  let usage = flags.usage("lll issue create", spec, "[\"title\"]")
+  let usage = input.usage
   // A bare title is accepted alongside -t: `gh issue create`, `linear` and
   // `jira` all take one, and every usability run reached for it first and got
   // "unknown flag: 'Hello'". -t stays the documented spelling, so no script
@@ -1128,11 +1144,15 @@ fn view(input: flags.CommandInput) -> Result<(), string> {
   }
 
   let comments = await_issue_view(reads.comments, "comments")?
+  fmt.Println("")
   if comments.length() > 0 {
-    fmt.Println("")
     fmt.Println("Comments:")
     fmt.Println("")
     print_comments(comments)
+  } else {
+    // Said, not omitted: an agent checking whether its comment landed
+    // could not tell "none" from "not shown" (fleet: 2 of 10).
+    fmt.Println("Comments: none")
   }
   Ok(())
 }
@@ -1193,9 +1213,18 @@ fn print_findings_raw(findings: Slice<models.Doc>) -> Result<(), string> {
   Ok(())
 }
 
+fn parse_description_replacement(
+  value: string,
+) -> Result<(string, string), string> {
+  let parts = strings.SplitN(value, "=", 2)
+  if parts.length() != 2 {
+    return Err("--description-replace requires old=new")
+  }
+  Ok((parts[0], parts[1]))
+}
+
 fn update(input: flags.CommandInput) -> Result<(), string> {
-  let spec = issue_update_spec()
-  let usage = flags.usage("lll issue update", spec, "[KEY-123]")
+  let usage = input.usage
   let p = input.parsed
   let id = p.first()
   let mut state = ""
@@ -1204,6 +1233,8 @@ fn update(input: flags.CommandInput) -> Result<(), string> {
   if p.given("--priority") { priority = check_priority(p.one("--priority"))? }
   let assignee_name = p.one("--assignee")
   let label_names = p.all("--label")
+  let add_label_names = p.all("--add-label")
+  let remove_label_names = p.all("--remove-label")
   let project_name = p.one("--project")
   let title = p.one("--title")
   let project_set = p.given("--project")
@@ -1213,16 +1244,24 @@ fn update(input: flags.CommandInput) -> Result<(), string> {
     description = value_or_stdin(p.one("--description"), "--description")?
   }
   let mut description_set = p.given("--description")
-  let replace_old = p.one("--description-replace-old")
-  let replace_new = p.one("--description-replace-new")
-  let replace_set = p.given("--description-replace-old") || p.given("--description-replace-new")
+  let canonical_replace = p.given("--description-replace")
+  let legacy_replace = p.given("--description-replace-old") || p.given("--description-replace-new")
+  if canonical_replace && legacy_replace {
+    return Err("--description-replace cannot be combined with --description-replace-old or --description-replace-new")
+  }
   if p.given("--description-replace-old") != p.given("--description-replace-new") {
     return Err("--description-replace-old and --description-replace-new go together")
   }
+  let (replace_old, replace_new) = if canonical_replace {
+    parse_description_replacement(p.one("--description-replace"))?
+  } else {
+    (p.one("--description-replace-old"), p.one("--description-replace-new"))
+  }
+  let replace_set = canonical_replace || legacy_replace
   let append_text = p.one("--description-append")
   let append_set = p.given("--description-append")
   if description_set && (replace_set || append_set) {
-    return Err("--description replaces the whole text; it cannot be combined with --description-replace-* or --description-append")
+    return Err("--description replaces the whole text; it cannot be combined with --description-replace or --description-append")
   }
   let since = p.one("--if-unchanged-since")
   let emoji = check_emoji(p.one("--emoji"))?
@@ -1239,8 +1278,16 @@ fn update(input: flags.CommandInput) -> Result<(), string> {
   if since != "" && assignee_name != "" {
     return Err("--if-unchanged-since cannot be combined with --assignee: assignment writes go through the claim route, which arbitrates with its own claim stamp — run them as two updates")
   }
-  if state == "" && priority < 0 && assignee_name == "" && label_names.is_empty() && !project_set && !title_set && !description_set && !replace_set && !append_set && !emoji_set {
+  // LLL-513: --label writes the whole set, the other two edit it. Together
+  // there is no single answer to what the set should be.
+  if !label_names.is_empty() && (!add_label_names.is_empty() || !remove_label_names.is_empty()) {
+    return Err("--label replaces the whole label set, so it cannot be combined with --add-label/--remove-label — use --add-label/--remove-label to change some labels and keep the rest, or --label alone to set the exact list")
+  }
+  if state == "" && priority < 0 && assignee_name == "" && label_names.is_empty() && add_label_names.is_empty() && remove_label_names.is_empty() && !project_set && !title_set && !description_set && !replace_set && !append_set && !emoji_set {
     return Err(f"nothing to update — pass at least one flag\nusage: {usage}")
+  }
+  if legacy_replace {
+    let _ = fmt.Fprintln(os.Stderr, "--description-replace-old/--description-replace-new are deprecated; use --description-replace old=new")
   }
 
   let resolved = resolve_id(id, usage)?
@@ -1264,7 +1311,8 @@ fn update(input: flags.CommandInput) -> Result<(), string> {
   if replace_set {
     let n = strings.Count(issue.description, replace_old)
     if n != 1 {
-      return Err(f"--description-replace-old matched {n} times in {key}'s description; it must match exactly once - widen the text")
+      let flag = if canonical_replace { "--description-replace" } else { "--description-replace-old" }
+      return Err(f"{flag} matched {n} times in {key}'s description; it must match exactly once - widen the text")
     }
     description = strings.Replace(issue.description, replace_old, replace_new, 1)
     description_set = true
@@ -1312,6 +1360,29 @@ fn update(input: flags.CommandInput) -> Result<(), string> {
     fields = fields.append(f"\"labels\":{encoded}")
     changed = changed.append(f"labels={strings.Join(label_names, "+")}")
   }
+  // LLL-513: relation modifiers change only the named labels, so a label
+  // another writer adds at the same time is kept. The server holds the
+  // issue's lock across the request.
+  let mut add_ids: Slice<string> = []
+  for name in add_label_names {
+    add_ids = add_ids.append(records.resolve_label(issue.team, name)?.id)
+  }
+  let mut remove_ids: Slice<string> = []
+  for name in remove_label_names {
+    let id = records.resolve_label(issue.team, name)?.id
+    if add_ids.contains(id) {
+      return Err(f"--add-label and --remove-label both name '{name}' — pass it to only one of them")
+    }
+    remove_ids = remove_ids.append(id)
+  }
+  if !add_ids.is_empty() {
+    fields = fields.append("\"labels+\":" + json_ids(add_ids)?)
+    changed = changed.append(f"labels+={strings.Join(add_label_names, "+")}")
+  }
+  if !remove_ids.is_empty() {
+    fields = fields.append("\"labels-\":" + json_ids(remove_ids)?)
+    changed = changed.append(f"labels-={strings.Join(remove_label_names, "+")}")
+  }
   if title_set { fields = fields.append("\"title\":" + json_quote(title)?); changed = changed.append("title") }
   if description_set {
     fields = fields.append("\"description\":" + json_quote(description)?)
@@ -1326,7 +1397,7 @@ fn update(input: flags.CommandInput) -> Result<(), string> {
     let observed = claims.observed_id(issue.id)?
     let result = claims.update_assignment(issue.id, observed, payload).map_err(|e| {
       if strings.Contains(e, "is claimed by") {
-        f"{key}: {e} — 'lll issue release {key}' gives it back"
+        f"{key}: {e} — {held_elsewhere_hint(key)}"
       } else { f"{key}: {e}" }
     })?
     if result.claim_id != "" { released = f" (released {result.member_name}'s claim)" }
@@ -1383,8 +1454,7 @@ fn issue_start_spec() -> Slice<flags.Flag> {
 }
 
 fn start(input: flags.CommandInput) -> Result<(), string> {
-  let spec = issue_start_spec()
-  let usage = flags.usage("lll issue start", spec, "[KEY-123]")
+  let usage = input.usage
   let p = input.parsed
   let with_branch = p.given("--branch")
   if with_branch && !gitctx.in_repo() {
@@ -1511,13 +1581,21 @@ fn actor() -> Result<Option<Actor>, string> {
   }
 }
 
+/// The fix for a claim someone else holds. Plain release works only for the
+/// holder (LLL-512), so the hint asks them first and names --force for a hold
+/// whose agent is gone. On `update --assignee` the caller may be the holder,
+/// which is why the plain release is still named.
+fn held_elsewhere_hint(key: string) -> string {
+  f"the holder releases it with 'lll issue release {key}'; ask them, or if the hold is dead, 'lll issue release {key} --force -b \"why\"' takes it and comments on the issue"
+}
+
 /// Resolve the actor and delegate acquisition to the shared claims client.
 /// The server transaction acquires the exclusive hold and assigns its holder
 /// together; the unique issue index also protects against duplicate hold rows.
 /// Assignment edits use their own observed-claim transaction and cannot replace
 /// another holder. See gopb/claims.go and gopb/assignment.go for that policy.
 fn claim(input: flags.CommandInput) -> Result<(), string> {
-  let usage = "lll issue claim [KEY-123]"
+  let usage = "lll issue claim [KEY-123] [--renew]"
   let id = input.parsed.first()
   let resolved = resolve_id(id, usage)?
   let Some(member) = actor()? else {
@@ -1528,9 +1606,18 @@ fn claim(input: flags.CommandInput) -> Result<(), string> {
   let issue = records.fetch_issue(resolved)?
   let key = f"{issue.expand.team.key}-{issue.number}"
 
+  if input.parsed.given("--renew") {
+    let Some(held) = claims.fetch(issue.id)? else {
+      return Err(f"{key} is not claimed; 'lll issue claim {key}' takes it")
+    };
+    let renewed = claims.renew(issue.id, held.id).map_err(|e| f"{key}: {e}")?
+    fmt.Println(f"Renewed {key} for {renewed.member_name}; the expiry clock restarts now (held since {display.relative(renewed.created)})")
+    return Ok(())
+  }
+
   let result = claims.acquire(issue.id, member.id).map_err(|e| {
     if strings.Contains(e, "already claimed by") {
-      f"{key}: {e} — 'lll issue release {key}' gives it back"
+      f"{key}: {e} — {held_elsewhere_hint(key)}"
     } else { e }
   })?
   if result.already_owned {
@@ -1541,17 +1628,30 @@ fn claim(input: flags.CommandInput) -> Result<(), string> {
   Ok(())
 }
 
-/// Any authenticated workspace member can release an observed hold. The
+/// The holder releases an observed hold; anyone else needs --force, and the
+/// server records a forced release as a comment on the issue (LLL-512). The
 /// server atomically removes that exact claim and clears only its assignment.
 fn release(input: flags.CommandInput) -> Result<(), string> {
-  let usage = "lll issue release [KEY-123]"
-  let resolved = resolve_id(input.parsed.first(), usage)?
+  let usage = "lll issue release [KEY-123] [--force [-b \"why\"]]"
+  let p = input.parsed
+  let resolved = resolve_id(p.first(), usage)?
+  let force = p.given("--force")
+  let mut reason = ""
+  if p.given("-b") {
+    if !force { return Err("-b is the reason for a forced release; add --force") }
+    reason = value_or_stdin(p.one("-b"), "-b")?
+  }
   let issue = records.fetch_issue(resolved)?
   let key = f"{issue.expand.team.key}-{issue.number}"
   let Some(held) = claims.fetch(issue.id)? else { return Err(f"{key} is not claimed") };
-  let result = claims.release(issue.id, held.id)?
+  let result = claims.release(issue.id, held.id, force, reason).map_err(|e| {
+    if strings.Contains(e, "needs force") {
+      f"{key}: {e} — 'lll issue release {key} --force -b \"why\"' takes it anyway and comments on the issue"
+    } else { e }
+  })?
   let assignment = if result.cleared_assignee { "cleared assignee" } else { "assignment unchanged" }
-  fmt.Println(f"Released {key} (was {result.member_name}'s); {assignment}")
+  let forced = if result.forced { "; forced, and commented on the issue" } else { "" }
+  fmt.Println(f"Released {key} (was {result.member_name}'s); {assignment}{forced}")
   Ok(())
 }
 
@@ -1586,8 +1686,7 @@ fn delete_issue(input: flags.CommandInput) -> Result<(), string> {
 }
 
 fn comment(input: flags.CommandInput) -> Result<(), string> {
-  let spec = issue_comment_spec()
-  let usage = flags.usage("lll issue comment", spec, "[KEY-123] [\"body\"]")
+  let usage = input.usage
   let p = input.parsed
   let id = p.first()
   // A bare second word is the body, as `create` takes a bare title and
@@ -1810,8 +1909,8 @@ fn print_comments(comments: Slice<models.Comment>) {
 /// the author is the token's member. A superuser token may change anything.
 fn comment_commands() -> Slice<flags.Command> {
   [
-    flags.Command { name: "edit", summary: "edit a numbered comment", page: "", spec: comment_mutate_spec("edit"), positional: "KEY N", run: |input| comment_mutate("edit", input.parsed) },
-    flags.Command { name: "delete", summary: "delete a numbered comment", page: "", spec: comment_mutate_spec("delete"), positional: "KEY N", run: |input| comment_mutate("delete", input.parsed) },
+    flags.Command { name: "edit", summary: "edit a numbered comment", spec: comment_mutate_spec("edit"), positional: "KEY N", run: |input| comment_mutate("edit", input.parsed), .. },
+    flags.Command { name: "delete", summary: "delete a numbered comment", spec: comment_mutate_spec("delete"), positional: "KEY N", run: |input| comment_mutate("delete", input.parsed), .. },
   ]
 }
 
@@ -1868,7 +1967,7 @@ fn comment_mutate_spec(verb: string) -> Slice<flags.Flag> {
   if verb == "edit" {
     spec = spec.append(flags.Flag {
       name: "-b",
-      alias: "--body -m --message",
+      alias: "--body",
       value: true,
       hint: "\"body\"",
       help: "the new body ('-b -' reads it from stdin)",
@@ -1944,6 +2043,14 @@ fn json_quote(value: string) -> Result<string, string> {
   }
 }
 
+/// JSON-encode a list of record ids.
+fn json_ids(ids: Slice<string>) -> Result<string, string> {
+  match json.Marshal(ids) {
+    Ok(b) => Ok(b as string),
+    Err(e) => Err(f"encoding ids: {e}"),
+  }
+}
+
 
 // ------------------------------------------------------------- doc links
 
@@ -1954,17 +2061,14 @@ fn fetch_issue_docs(issue_id: string) -> Result<Slice<models.Doc>, string> {
   fetch_docs(f"issues.id ?= {query.quote(issue_id)}", "slug", "")
 }
 
-fn set_doc_issues(
-  doc: models.Doc,
-  issue_ids: Slice<string>,
-) -> Result<(), string> {
-  let encoded = match json.Marshal(issue_ids) {
-    Ok(b) => b as string,
-    Err(e) => return Err(f"encoding issues: {e}"),
-  }
+/// Send one edge as a relation modifier ("issues+" or "issues-"), never the
+/// whole array (LLL-513). Writing back a locally edited copy of the array let
+/// two concurrent links to one doc drop an edge. The server applies the
+/// modifier under a per-record lock (gopb serializeRecordUpdates).
+fn modify_doc_issues(doc: models.Doc, modifier: string, issue_id: string) -> Result<(), string> {
   let _ = pb.patch(
     f"/api/collections/docs/records/{doc.id}",
-    "{\"issues\":" + encoded + "}",
+    "{" + json_quote(modifier)? + ":[" + json_quote(issue_id)? + "]}",
   )?
   Ok(())
 }
@@ -1993,7 +2097,10 @@ fn link(input: flags.CommandInput) -> Result<(), string> {
   link_issue(id, slug, usage)
 }
 
-/// Store an issue link on the doc's issues relation.
+/// The one write path behind 'lll issue link KEY-123 SLUG' and 'lll doc link
+/// SLUG KEY-123', which swaps the two positionals (the doc comes first
+/// there). The relation is stored once on docs.issues, so there is exactly
+/// one way a link happens and both spellings answer identically.
 fn link_issue(id: string, slug: string, usage: string) -> Result<(), string> {
   let resolved = resolve_id(id, usage)?
   let issue = records.fetch_issue(resolved)?
@@ -2006,7 +2113,7 @@ fn link_issue(id: string, slug: string, usage: string) -> Result<(), string> {
     fmt.Println(f"{key} is already linked to {d.slug}")
     return Ok(())
   }
-  set_doc_issues(d, d.issues.append(issue.id))?
+  modify_doc_issues(d, "issues+", issue.id)?
   fmt.Println(f"Linked {key} -> {d.slug}")
   Ok(())
 }
@@ -2019,7 +2126,8 @@ fn unlink(input: flags.CommandInput) -> Result<(), string> {
   unlink_issue(id, slug, usage)
 }
 
-/// Remove an issue link from the doc's issues relation.
+/// The one write path behind 'lll issue unlink KEY-123 SLUG' and 'lll doc
+/// unlink SLUG KEY-123', which swaps the two positionals.
 fn unlink_issue(id: string, slug: string, usage: string) -> Result<(), string> {
   let resolved = resolve_id(id, usage)?
   let issue = records.fetch_issue(resolved)?
@@ -2028,14 +2136,10 @@ fn unlink_issue(id: string, slug: string, usage: string) -> Result<(), string> {
   let d = fetch_doc(team, slug)?
   cross_team_link(issue, team, d)?
 
-  let mut remaining: Slice<string> = []
-  for x in d.issues {
-    if x != issue.id { remaining = remaining.append(x) }
-  }
-  if remaining.length() == d.issues.length() {
+  if d.issues.find(|x| x == issue.id).is_none() {
     return Err(f"{key} is not linked to {d.slug} — see 'lll doc view {d.slug}'")
   }
-  set_doc_issues(d, remaining)?
+  modify_doc_issues(d, "issues-", issue.id)?
   fmt.Println(f"Unlinked {key} from {d.slug}")
   Ok(())
 }
@@ -2142,11 +2246,6 @@ fn fetch_blocks(issue_id: string) -> Result<Slice<models.Issue>, string> {
   Ok(list.items)
 }
 
-/// Read the same table used by dispatch and completions.
-pub fn issue_verb_spec(verb: string) -> Slice<flags.Flag> {
-  flags.command_spec(issue_commands(), verb)
-}
-
 fn issue_next_spec() -> Slice<flags.Flag> {
   flags.with_team([
     flags.Flag { name: "--json", help: "print the chosen issue's full record instead of just its key", .. },
@@ -2186,7 +2285,7 @@ fn issue_next(input: flags.CommandInput) -> Result<(), string> {
     // the shell loop that composed it. A lost race exits non-zero, keyless.
     let result = claims.acquire(best.id, member.id).map_err(|e| {
       if strings.Contains(e, "already claimed by") {
-        f"{key}: {e} — 'lll issue release {key}' gives it back"
+        f"{key}: {e} — {held_elsewhere_hint(key)}"
       } else { e }
     })?
     fmt.Fprintln(os.Stderr, f"Claimed {key} for {result.member_name}")

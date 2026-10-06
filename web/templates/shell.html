@@ -16,18 +16,19 @@
 {{define "rail"}}<button id="nav-toggle" class="nav-toggle" type="button" aria-controls="rail" aria-expanded="false">Navigation</button>
 <nav id="rail" class="rail" aria-label="Workspace">
 <div class="workspace"><span class="mark">L</span> lll</div>
-<a href="{{.BoardBase}}"{{if eq .Active "board"}} class="active"{{end}}><svg width="14" height="14"><use href="#ic-board"/></svg> Board</a>
-<a href="{{.BoardBase}}issues"{{if eq .Active "issues"}} class="active"{{end}}><svg width="14" height="14"><use href="#ic-issues"/></svg> All issues</a>
-{{if .Me}}<a href="{{.BoardBase}}?assignee={{.Me}}" title="Issues assigned to {{.Me}}"{{if eq .Active "mine"}} class="active"{{end}}><svg width="14" height="14"><use href="#ic-me"/></svg> My issues</a>
-{{end}}<a href="{{.BoardBase}}projects"{{if eq .Active "projects"}} class="active"{{end}}><svg width="14" height="14"><use href="#ic-project"/></svg> Projects</a>
-<a href="{{.BoardBase}}search"{{if eq .Active "search"}} class="active"{{end}}><svg width="14" height="14"><use href="#ic-search"/></svg> Search{{/* The palette's only advertisement. A shortcut nobody is told about is a shortcut nobody uses. */}}<kbd class="rail-kbd" title="Open the jump palette: Cmd+K, or Ctrl+K">⌘K</kbd></a>
+<a data-g="b" href="{{.BoardBase}}"{{if eq .Active "board"}} class="active"{{end}}><svg width="14" height="14"><use href="#ic-board"/></svg> Board</a>
+<a data-g="i" href="{{.BoardBase}}issues"{{if eq .Active "issues"}} class="active"{{end}}><svg width="14" height="14"><use href="#ic-issues"/></svg> All issues</a>
+{{if .Me}}<a data-g="m" href="{{.BoardBase}}?assignee={{.Me}}" title="Issues assigned to {{.Me}}"{{if eq .Active "mine"}} class="active"{{end}}><svg width="14" height="14"><use href="#ic-me"/></svg> My issues</a>
+{{end}}<a data-g="p" href="{{.BoardBase}}projects"{{if eq .Active "projects"}} class="active"{{end}}><svg width="14" height="14"><use href="#ic-project"/></svg> Projects</a>
+<a data-g="s" href="{{.BoardBase}}search"{{if eq .Active "search"}} class="active"{{end}}><svg width="14" height="14"><use href="#ic-search"/></svg> Search{{/* The palette's only advertisement. A shortcut nobody is told about is a shortcut nobody uses. */}}<kbd class="rail-kbd" title="Open the jump palette: Cmd+K, or Ctrl+K">⌘K</kbd></a>
 {{template "rail-teams" .Teams}}
 {{template "rail-favorites" .Favorites}}
 {{template "rail-views" .Views}}
 <a href="{{.BoardBase}}settings"{{if eq .Active "settings"}} class="active"{{end}}><svg width="14" height="14"><use href="#ic-settings"/></svg> Settings</a>
 <div class="rail-foot">v{{.Version}}</div>
 </nav>
-{{template "cmdk" .}}{{end}}
+{{template "cmdk" .}}
+{{template "kbd-help" .}}{{end}}
 
 {{/* LLL-447: the ⌘K palette. It lives in the rail's own template because
      the rail is the one thing every page includes, so the palette arrives
@@ -76,6 +77,31 @@
 {{range .Teams}}<a data-cmdk-item href="{{.Href}}"><span class="cmdk-kind">team</span>{{if .Emoji}}{{.Emoji}} {{end}}{{.Key}} · {{.Name}}</a>
 {{end}}</div>
 <p id="cmdk-none" class="cmdk-none" hidden>Nothing matches. Enter searches every field.</p>
+</div>
+</dialog>{{end}}
+
+{{/* LLL-531: the '?' sheet. Static on purpose: it lists what navigation.js
+     and board.html bind, so a new shortcut adds a row here too. The g-rows
+     are the rail's data-g anchors; "My issues" follows the rail and only
+     exists with a configured me. */}}
+{{define "kbd-help"}}<dialog id="kbd-help" class="cmdk" aria-label="Keyboard shortcuts">
+<div class="cmdk-bar"><b class="kbd-help-title">Keyboard shortcuts</b><kbd class="cmdk-esc">esc</kbd></div>
+<div class="cmdk-body">
+<div class="cmdk-group kbd-help">
+<h3>Anywhere</h3>
+<p><span>Jump to an issue, doc or team</span><kbd class="cmdk-esc">⌘K</kbd></p>
+<p><span>This sheet</span><kbd class="cmdk-esc">?</kbd></p>
+<p><span>Go to board</span><kbd class="cmdk-esc">g b</kbd></p>
+<p><span>Go to all issues</span><kbd class="cmdk-esc">g i</kbd></p>
+{{if .Me}}<p><span>Go to my issues</span><kbd class="cmdk-esc">g m</kbd></p>
+{{end}}<p><span>Go to projects</span><kbd class="cmdk-esc">g p</kbd></p>
+<p><span>Go to search</span><kbd class="cmdk-esc">g s</kbd></p>
+<h3>Board</h3>
+<p><span>New issue</span><kbd class="cmdk-esc">c</kbd></p>
+<p><span>Search the board</span><kbd class="cmdk-esc">/</kbd></p>
+<h3>Issue</h3>
+<p><span>Post comment</span><kbd class="cmdk-esc">⌘ Enter</kbd></p>
+</div>
 </div>
 </dialog>{{end}}
 

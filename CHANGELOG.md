@@ -6,10 +6,16 @@ minors. Issue keys are on the project's own board (`lll issue view KEY`).
 
 ## [Unreleased]
 
-### Removed
+### Changed
 
-- `finding view/read` and `doc link/unlink` refuse with replacement commands.
-  Use `doc view SLUG` and `issue link/unlink KEY-123 SLUG` (LLL-505).
+- `issue update --description-replace "old=new"` replaces exactly one match
+  and composes with `--description-append`. The legacy old/new pair remains
+  accepted for one release, hidden from help, with a deprecation hint (LLL-506).
+- `finding view`/`finding read` and `doc link`/`doc unlink` are hidden
+  aliases: they still run, but no longer appear in help, completions or docs.
+  The documented spellings are `doc view SLUG` and
+  `issue link/unlink KEY-123 SLUG`. `finding read` runs again after LLL-503
+  retired it (LLL-505).
 
 ## [0.6.1] - 2026-09-19
 

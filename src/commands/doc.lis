@@ -16,43 +16,7 @@ import "query"
 /// The table is the one place a verb is declared: dispatch, `lll doc --help`
 /// and shell completions all read it, so none of the three can drift.
 pub fn doc(args: Slice<string>) -> Result<(), string> {
-  if ["link", "unlink"].contains(args.get(2).unwrap_or("")) {
-    return doc_removed_command(args)
-  }
-  flags.dispatch(
-    "doc",
-    "work with docs (wiki pages, findings, decisions, PRDs)",
-    doc_intro(),
-    doc_commands(),
-    args,
-  )
-}
-
-fn doc_removed_command(args: Slice<string>) -> Result<(), string> {
-  let verb = args[2]
-  let spec = flags
-    .with_team([])
-    .append(flags.Flag { name: "--help", alias: "-h", hidden: true, .. })
-  let p = flags.parse_n(spec, args, 3, 2, f"lll issue {verb} KEY-123 SLUG")?
-  let slug = if p.first() == "" { "SLUG" } else { p.first() }
-  let key = if p.nth(1) == "" { "KEY-123" } else { p.nth(1) }
-  let mut options: Slice<string> = []
-  if p.given("--help") { options = options.append("--help") }
-  let team = os.Getenv("LLL_TEAM")
-  if team != "" {
-    options = options.append("--team", flags.shell_argument(team))
-  }
-  let mut command = ["lll", "issue", verb]
-  if key.starts_with("-") || slug.starts_with("-") {
-    command = command
-      .append(options...)
-      .append("--", flags.shell_argument(key), flags.shell_argument(slug))
-  } else {
-    command = command
-      .append(flags.shell_argument(key), flags.shell_argument(slug))
-      .append(options...)
-  }
-  Err(f"use '{strings.Join(command, " ")}'")
+  flags.dispatch("doc", "work with docs (wiki pages, findings, decisions, PRDs)", doc_intro(), doc_commands(), args)
 }
 
 /// Every doc verb, as a value. No verb has a hand-written page, so `page` is
@@ -62,68 +26,60 @@ fn doc_removed_command(args: Slice<string>) -> Result<(), string> {
 pub fn doc_commands() -> Slice<flags.Command> {
   [
     flags.Command {
-      name: "new",
+      name: "create", alias: "new",
       summary: "create a doc; -b - reads the body from stdin",
-      page: "",
       spec: doc_new_spec(),
-      positional: "",
       run: doc_new,
-    },
-    flags.Command {
-      name: "create",
-      summary: "the same command as 'new'",
-      page: "",
-      spec: doc_new_spec(),
-      positional: "",
-      run: doc_new,
+      ..
     },
     flags.Command {
       name: "list",
       summary: "list docs (slug, kind, title), one line each",
-      page: "",
       spec: doc_list_spec(),
-      positional: "",
       run: doc_list,
+      ..
     },
     flags.Command {
-      name: "view",
+      name: "view", alias: "show",
       summary: "show one doc with its linked issues; --raw prints only the body; --json prints the raw record",
-      page: "",
       spec: doc_view_spec(),
       positional: "SLUG",
       run: doc_view,
-    },
-    flags.Command {
-      name: "show",
-      summary: "the same command as 'view'",
-      page: "",
-      spec: doc_view_spec(),
-      positional: "SLUG",
-      run: doc_view,
-    },
-    flags.Command {
-      name: "read",
-      summary: "the same command as 'view'",
-      page: "",
-      spec: doc_view_spec(),
-      positional: "SLUG",
-      run: doc_view,
+      ..
     },
     flags.Command {
       name: "edit",
       summary: "replace fields (at least one flag); -b - reads the whole body from stdin",
-      page: "",
       spec: doc_edit_spec(),
       positional: "SLUG",
       run: doc_edit,
+      ..
     },
     flags.Command {
       name: "delete",
       summary: "delete; asks [y/N] unless --force",
-      page: "",
       spec: doc_delete_spec(),
       positional: "SLUG",
       run: doc_delete,
+      ..
+    },
+    // Hidden (LLL-505): 'lll issue link/unlink KEY-123 SLUG' is the
+    // documented spelling. The doc-first one keeps working for muscle memory.
+    flags.Command {
+      name: "link", hidden: true,
+      summary: "link the doc to an issue — 'lll issue link KEY-123 SLUG' does the same",
+      spec: flags.with_team([]),
+      positional: "SLUG KEY-123",
+      run: doc_link,
+      ..
+    },
+    flags.Command {
+      name: "unlink", hidden: true,
+      summary: "remove that link — 'lll issue unlink KEY-123 SLUG' does the same",
+      spec: flags.with_team([]),
+      positional: "SLUG KEY-123",
+      run: doc_unlink,
+      ..
     },
   ]
 }
@@ -212,7 +168,7 @@ pub fn check_confidence(val: string) -> Result<string, string> {
 pub fn parse_paths(val: string) -> string {
   let mut out: Slice<string> = []
   for raw in strings.Split(val, ",") {
-    let p = strings.Trim(strings.TrimSpace(raw), "/")
+    let p = norm_path(raw)
     if p == "" { continue }
     if out.find(|x| x == p).is_some() { continue }
     out = out.append(p)
@@ -239,7 +195,7 @@ pub fn path_touches(entry: string, path: string) -> bool {
 /// The query side of `lll finding near <path>` is raw argv, and shell path
 /// completion hands over `./src/pb` routinely; `./x` and `x` name the same
 /// place, so a stored entry on `src/pb` has to answer for both. `parse_paths`
-/// already promises this in its doc comment - this is what makes it true.
+/// uses this same normalization before deduplicating stored metadata.
 fn norm_path(val: string) -> string {
   let mut s = strings.TrimSpace(val)
   while strings.HasPrefix(s, "./") { s = strings.TrimPrefix(s, "./") }
@@ -294,7 +250,7 @@ fn doc_new_spec() -> Slice<flags.Flag> {
     },
     flags.Flag {
       name: "-p",
-      alias: "--paths --path",
+      alias: "--paths",
       value: true,
       hint: "paths",
       help: "comma-separated file/directory paths the doc is about, e.g.\nsrc/pb, pb/pb_migrations ('lll finding near' matches by them)",
@@ -383,7 +339,7 @@ fn doc_edit_spec() -> Slice<flags.Flag> {
     },
     flags.Flag {
       name: "-p",
-      alias: "--paths --path",
+      alias: "--paths",
       value: true,
       hint: "paths",
       help: "replacement comma-separated paths — the WHOLE set\n(pass \"\" to clear it)",
@@ -479,7 +435,7 @@ fn doc_list_spec() -> Slice<flags.Flag> {
     },
     flags.Flag {
       name: "--search",
-      alias: "--query",
+      alias: "",
       value: true,
       hint: "text",
       help: "only docs whose slug or title contains text",
@@ -505,16 +461,15 @@ fn doc_list(input: flags.CommandInput) -> Result<(), string> {
   for d in docs.items {
     let mut kind = d.kind
     if kind == "" { kind = "-" }
-    fmt.Println(f"{d.slug}\t{kind}\t{d.title}")
+    fmt.Println(f"{d.slug}\t{kind}\t{display.table_cell(d.title)}")
   }
   Ok(())
 }
 
 fn doc_view(input: flags.CommandInput) -> Result<(), string> {
-  let spec = doc_view_spec()
   let p = input.parsed
   let slug = p.first()
-  let usage = flags.usage("lll doc view", spec, "SLUG")
+  let usage = input.usage
   if slug == "" { return Err(f"usage: {usage}") }
   let json_mode = p.given("--json")
   let raw_mode = p.given("--raw")
@@ -537,12 +492,12 @@ fn doc_view(input: flags.CommandInput) -> Result<(), string> {
     return Ok(())
   }
 
-  fmt.Println(f"{d.slug} {d.title}{confidence_suffix(d.confidence, d.confidence_note)}")
+  fmt.Println(f"{d.slug} {display.table_cell(d.title)}{display.table_cell(confidence_suffix(d.confidence, d.confidence_note))}")
   fmt.Println("")
   fmt.Println(f"Kind:      {d.kind}")
-  if d.confidence_note != "" { fmt.Println(f"Note:      {d.confidence_note}") }
-  if d.area != "" { fmt.Println(f"Area:      {d.area}") }
-  if d.paths != "" { fmt.Println(f"Paths:     {d.paths}") }
+  if d.confidence_note != "" { fmt.Println(f"Note:      {display.table_cell(d.confidence_note)}") }
+  if d.area != "" { fmt.Println(f"Area:      {display.table_cell(d.area)}") }
+  if d.paths != "" { fmt.Println(f"Paths:     {display.table_cell(d.paths)}") }
   fmt.Println(f"Created:   {display.relative(d.created)}")
   fmt.Println(f"Updated:   {display.relative(d.updated)}")
   if d.expand.issues.length() > 0 {
@@ -557,8 +512,7 @@ fn doc_view(input: flags.CommandInput) -> Result<(), string> {
 }
 
 fn doc_edit(input: flags.CommandInput) -> Result<(), string> {
-  let spec = doc_edit_spec()
-  let usage = flags.usage("lll doc edit", spec, "SLUG")
+  let usage = input.usage
   let p = input.parsed
   let slug = p.first()
   if slug == "" { return Err(f"usage: {usage}") }
@@ -623,6 +577,27 @@ fn doc_delete(input: flags.CommandInput) -> Result<(), string> {
   let _ = pb.delete(f"/api/collections/docs/records/{d.id}")?
   fmt.Println(f"Deleted doc {d.slug}")
   Ok(())
+}
+
+/// 'lll doc link SLUG KEY-123': the doc-first spelling of the issue link.
+/// It swaps the two positionals and delegates to the same write path
+/// (link_issue in issue.lis), so both nouns answer identically — the
+/// relation is stored once on docs.issues, and one way to write it.
+fn doc_link(input: flags.CommandInput) -> Result<(), string> {
+  let usage = "lll doc link SLUG KEY-123"
+  let slug = input.parsed.first()
+  let id = input.parsed.nth(1)
+  if slug == "" || id == "" { return Err(f"usage: {usage}") }
+  link_issue(id, slug, usage)
+}
+
+/// 'lll doc unlink SLUG KEY-123', the doc-first spelling of the unlink.
+fn doc_unlink(input: flags.CommandInput) -> Result<(), string> {
+  let usage = "lll doc unlink SLUG KEY-123"
+  let slug = input.parsed.first()
+  let id = input.parsed.nth(1)
+  if slug == "" || id == "" { return Err(f"usage: {usage}") }
+  unlink_issue(id, slug, usage)
 }
 
 // --------------------------------------------------------------- lookups

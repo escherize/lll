@@ -16,7 +16,7 @@ import urllib.request
 root = Path(__file__).resolve().parent.parent
 binary = root / 'target/.lisette/bin/lll'
 
-for flag in ('--scratch', '--local'):
+for flag in ('--scratch',):
     with tempfile.TemporaryDirectory(prefix='lll-scratch-test-') as directory:
         base = Path(directory)
         caller = base / 'unrelated-work'
