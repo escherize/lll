@@ -3,6 +3,14 @@ async page => {
   const key = 'SSE58-1';
   await page.goto(`${base}/issue/${key}`);
   await page.locator('#issue-description svg').waitFor();
+  const stateControl = page.getByRole('combobox', {name: 'State', exact: true});
+  const stateResponse = page.waitForResponse(response => response.url().endsWith('/state') && response.request().method() === 'POST');
+  await stateControl.selectOption('in-progress');
+  await (await stateResponse).finished();
+  await page.waitForFunction(() => document.querySelector('#state-form select').value === 'in-progress');
+  await page.reload();
+  await page.locator('#issue-description svg').waitFor();
+  if (await stateControl.inputValue() !== 'in-progress') throw new Error('named State selection did not persist');
   // Establish a metadata barrier after the initial stream snapshot.
   await page.request.post(`${base}/title`, {form: {key, title: 'Stream browser ready'}});
   await page.locator('.issue-main h1').getByText('Stream browser ready', {exact: true}).waitFor();
