@@ -1166,6 +1166,12 @@ input:focus, textarea:focus, select:focus {
 .set-row input[name="name"] { flex: 1; min-width: 0; }
 .set-row .set-second { flex: 0 1 200px; min-width: 0; }
 .set-row select { flex: none; }
+@media (max-width: 720px) {
+  /* Keep the name on the first editing line; controls wrap below it.
+     Labels leave room beside the name for their 26px colour swatch. */
+  .set-row input[name="name"] { flex: 1 1 calc(100% - 34px); }
+}
+
 .set-delete-impact { flex: 1; min-width: 0; overflow-wrap: anywhere; }
 /* The create row sits one rung down the ladder: it holds nothing yet. */
 .set-new { margin-top: 8px; background: var(--bg-panel); }
