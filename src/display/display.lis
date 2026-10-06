@@ -72,3 +72,11 @@ pub fn relative_seconds(seconds: int64) -> string {
   if seconds < 86400 { return f"{seconds / 3600}h ago" }
   f"{seconds / 86400}d ago"
 }
+
+/// The marker after an author's name (LLL-610): "" for a person, " [bot]",
+/// or " [bot via OWNER]" when the caller may read the owner.
+pub fn author_tag(bot: bool, owner: string) -> string {
+  if !bot { return "" }
+  if owner == "" { return " [bot]" }
+  f" [bot via {owner}]"
+}

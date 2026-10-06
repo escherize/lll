@@ -48,6 +48,31 @@ pub struct Member {
   // Keys of `teams` the caller can see; filled by 'member list --json' only.
   #[json(omitempty)]
   pub team_keys: Slice<string>,
+  // A bot's owner (LLL-610), present only when the read asked PocketBase to
+  // expand `owner` and the caller may read that member. Absent is not "no
+  // owner": it may be an owner this caller cannot see.
+  #[json(omitempty)]
+  pub expand: Option<MemberExpand>,
+}
+
+#[json]
+pub struct MemberExpand {
+  #[json(omitempty)]
+  pub owner: Option<MemberOwner>,
+}
+
+/// The owner as a comment needs it: who, not their email or access.
+#[json]
+pub struct MemberOwner {
+  pub id: string,
+  pub name: string,
+}
+
+impl Member {
+  /// The expanded owner's name, or "" when there is none to show.
+  pub fn owner_name(self) -> string {
+    self.expand.and_then(|e| e.owner).map_or("", |o| o.name)
+  }
 }
 
 #[json]

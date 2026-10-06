@@ -47,16 +47,16 @@
   "errors/raw": {
     "code": 1,
     "stdout": "# VIEW-1: Read fixture\n\nA description.\nSecond line.\n",
-    "stderr": "Error: GET <server>/api/collections/comments/records?filter=issue%3D%27issue0000000001%27&sort=created,id&expand=author&perPage=200&page=1: 503 Service Unavailable: {\"code\": 503, \"message\": \"failed comments\"}\n"
+    "stderr": "Error: GET <server>/api/collections/comments/records?filter=issue%3D%27issue0000000001%27&sort=created,id&expand=author.owner&perPage=200&page=1: 503 Service Unavailable: {\"code\": 503, \"message\": \"failed comments\"}\n"
   },
   "errors/json": {
     "code": 1,
     "stdout": "",
-    "stderr": "Error: GET <server>/api/collections/comments/records?filter=issue%3D%27issue0000000001%27&sort=created,id&expand=author&perPage=200&page=1: 503 Service Unavailable: {\"code\": 503, \"message\": \"failed comments\"}\n"
+    "stderr": "Error: GET <server>/api/collections/comments/records?filter=issue%3D%27issue0000000001%27&sort=created,id&expand=author.owner&perPage=200&page=1: 503 Service Unavailable: {\"code\": 503, \"message\": \"failed comments\"}\n"
   },
   "errors/json-raw": {
     "code": 1,
     "stdout": "",
-    "stderr": "Error: GET <server>/api/collections/comments/records?filter=issue%3D%27issue0000000001%27&sort=created,id&expand=author&perPage=200&page=1: 503 Service Unavailable: {\"code\": 503, \"message\": \"failed comments\"}\n"
+    "stderr": "Error: GET <server>/api/collections/comments/records?filter=issue%3D%27issue0000000001%27&sort=created,id&expand=author.owner&perPage=200&page=1: 503 Service Unavailable: {\"code\": 503, \"message\": \"failed comments\"}\n"
   }
 }

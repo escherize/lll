@@ -4,7 +4,9 @@ import "models"
 import "pb"
 import "query"
 
-/// An issue's comments, oldest first, author expanded.
+/// An issue's comments, oldest first, author and a bot author's owner
+/// expanded (LLL-610). PocketBase leaves the owner out when the caller may
+/// not read it, so nobody learns an owner they cannot see.
 pub fn fetch_comments(issue_id: string) -> Result<Slice<models.Comment>, string> {
   let filter = url.QueryEscape(f"issue={query.quote(issue_id)}")
   let mut result: Slice<models.Comment> = []
@@ -12,11 +14,17 @@ pub fn fetch_comments(issue_id: string) -> Result<Slice<models.Comment>, string>
   loop {
     let mut comments = models.CommentList { .. }
     pb.fetch(
-      f"/api/collections/comments/records?filter={filter}&sort=created,id&expand=author&perPage=200&page={page}",
+      f"/api/collections/comments/records?filter={filter}&sort=created,id&expand=author.owner&perPage=200&page={page}",
       "comments",
       &comments,
     )?
-    for comment in comments.items { result = result.append(comment) }
+    for comment in comments.items {
+      // PocketBase answers `"expand":{}` for an author with no owner to show;
+      // dropping it keeps such an author's --json exactly as before LLL-610.
+      let mut c = comment
+      if c.expand.author.owner_name() == "" { c.expand.author.expand = None }
+      result = result.append(c)
+    }
     if page >= comments.total_pages { break }
     page += 1
   }

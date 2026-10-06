@@ -387,6 +387,7 @@ fn comment_vm(c: models.Comment) -> CommentVM {
     id: c.id,
     author,
     avatar,
+    via: c.expand.author.owner_name(),
     age: display.relative(c.created),
     body: markdown.md_html(c.body),
     body_md: c.body,
