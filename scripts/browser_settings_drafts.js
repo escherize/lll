@@ -113,6 +113,26 @@ async page => {
     await page.screenshot({path: `/tmp/lll-558-settings-${width}.png`});
   }
   await page.setViewportSize(viewport);
+  const previous = page.url();
+  await page.getByRole('navigation', {name: 'Settings sections'}).getByRole('link', {name: /^Access/}).click();
+  const longMember = 'A long agent member name that needs to stay inside a narrow settings form';
+  for (const selector of ['#access-token-form', '#access-credential-form']) {
+    await page.locator(selector + ' select').selectOption({label: longMember});
+  }
+  for (const width of [320, 390]) {
+    await page.setViewportSize({width, height: 844});
+    const fits = await page.locator('#access').evaluate(section => {
+      const bounds = section.getBoundingClientRect();
+      return bounds.right <= innerWidth && [...section.querySelectorAll('input, select, button')].every(el => {
+        const r = el.getBoundingClientRect();
+        return r.left >= bounds.left && r.right <= bounds.right + 1;
+      });
+    });
+    if (!fits) throw new Error(`Access settings controls clipped at ${width}px`);
+    await page.screenshot({path: `/tmp/lll-568-access-${width}.png`});
+  }
+  await page.setViewportSize(viewport);
+  await page.goto(previous);
   await page.screenshot({path: '/tmp/lll-101-settings.png'});
   return 'settings drafts survive reordered label, member and project saves';
 }

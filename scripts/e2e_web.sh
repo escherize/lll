@@ -1468,6 +1468,7 @@ if command -v playwright-cli >/dev/null 2>&1; then
     "$LIN" project create -n "Draft project $suffix" >/dev/null
   done
   seq_goto "$WEB/settings/labels"
+  "$LIN" member create -n "A long agent member name that needs to stay inside a narrow settings form" >/dev/null
   drafts_browser=$(playwright-cli -s="$BROWSER_SESSION" run-code "$(cat "$REPO_ROOT"/scripts/browser_settings_drafts.js)" 2>&1)
   assert_contains "$drafts_browser" 'settings drafts survive reordered label, member and project saves' "browser: settings row drafts survive saves and reordering"
   for prefix in "Z saved" "Unsaved"; do
