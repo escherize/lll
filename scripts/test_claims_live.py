@@ -76,6 +76,7 @@ for member in (alpha, beta):
     assert status == 403, (status, rejected)
     unchanged = state()
     assert unchanged['claim'] is None and unchanged['assignee'] == ''
+print('Claims: direct member-token creation refused for self and another holder, with no claim or assignment side effects')
 
 # Independent CLI processes compete for the same issue. Every successful
 # caller must be the actual holder, and failures must identify that holder.

@@ -25,8 +25,8 @@ def cli(*args):
     return p.stdout
 
 
-def request(path, body=None, method=None, web=False):
-    headers = {'Cookie': cookie} if web else {'Authorization': 'Bearer ' + env['LLL_TOKEN']}
+def request(path, body=None, method=None, web=False, auth=None):
+    headers = {'Cookie': cookie} if web else {'Authorization': 'Bearer ' + (env['LLL_TOKEN'] if auth is None else auth)}
     if body is not None:
         headers['Content-Type'] = 'application/json'
     req = urllib.request.Request((board if web else api) + path,
@@ -160,7 +160,7 @@ def seed(n):
     issue = first if n == 0 else json.loads(request('/api/collections/issues/records',
         {'team': team['id'], 'title': 'Pagination fixture ' + str(n), 'state': 'todo'}))
     return request('/api/collections/claims/records', {'id': 'zzzzzzzzzzzzzzz' if n == 0 else 'c' + str(n).zfill(14),
-        'issue': issue['id'], 'member': other['id']})
+        'issue': issue['id'], 'member': other['id']}, auth=os.environ['LLL_TEST_SUPERUSER_TOKEN'])
 with ThreadPoolExecutor(max_workers=8) as pool:
     list(pool.map(seed, range(201)))
 html = request('/t/CPAGE/', web=True).decode()
