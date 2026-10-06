@@ -2516,7 +2516,8 @@ assert_contains "$out" "member token" "superuser claim names the required creden
 
 # AC#2, at the REST layer: fire N creates at one issue at once and count the
 # survivors. This is the atomicity claim itself — the unique index, with no
-# lll process in the way to serialise anything.
+# lll process in the way to serialise anything. Direct collection inserts are
+# superuser fixtures (LLL-515); member concurrency goes through /claim below.
 RKEY=$(env $E "$LIN" issue create -t "Race target" | sed -n 's/^Created \([A-Z]*-[0-9]*\).*/\1/p')
 RID=$(env $E "$LIN" issue view "$RKEY" --json | jq -r .id)
 MID=$(curl -sf -H "$AUTH_HDR" "$URL/api/collections/members/records?perPage=1" | jq -r '.items[0].id')
@@ -2527,7 +2528,7 @@ mkdir -p "$RACE"
 race_pids=""
 for i in $(seq 1 16); do
   (curl -s -o /dev/null -w '%{http_code}\n' -X POST "$URL/api/collections/claims/records" \
-     -H "$AUTH_HDR" \
+     -H "Authorization: Bearer $SU_TOK" \
      -H 'Content-Type: application/json' \
      -d "{\"issue\":\"$RID\",\"member\":\"$MID\"}" > "$RACE/$i.code") &
   race_pids="$race_pids $!"
