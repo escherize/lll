@@ -41,7 +41,7 @@ pub fn finding_commands() -> Slice<flags.Command> {
       ..
     },
     flags.Command {
-      name: "create", aliases: "new",
+      name: "create", alias: "new",
       summary: "file a finding: 'lll doc new -k finding' with the kind already set",
       spec: finding_new_spec(),
       positional: "[\"slug\"]",
