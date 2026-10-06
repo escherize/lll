@@ -44,6 +44,35 @@ async page => {
     await page.reload();
     await row(`Unsaved ${kind} B`).waitFor();
     await row(`Z saved ${kind} A`).waitFor();
+    if (kind === 'label' || kind === 'project') {
+      const invalid = row(`Z saved ${kind} A`);
+      const peer = row(`Unsaved ${kind} B`).locator('input[name="name"]');
+      await invalid.locator('input[name="name"]').fill(`Invalid, ${kind}`);
+      await peer.fill(`Unsubmitted ${kind} draft`);
+      await page.getByLabel(newName, {exact: true}).fill(`Unsubmitted new ${kind}`);
+      const rejected = async button => {
+        const response = page.waitForResponse(r => r.request().method() === 'POST' && r.url().endsWith('/settings/' + kind));
+        await button.click();
+        const body = await (await response).text();
+        if (!body.includes('names cannot contain commas')) throw new Error('missing comma refusal');
+        await page.locator('#flash').getByText('names cannot contain commas', {exact: false}).waitFor();
+      };
+      await rejected(invalid.getByRole('button', {name: 'Save', exact: true}));
+      await expectValue(invalid.locator('input[name="name"]'), `Invalid, ${kind}`);
+      await expectValue(peer, `Unsubmitted ${kind} draft`);
+      await expectValue(page.getByLabel(newName, {exact: true}), `Unsubmitted new ${kind}`);
+      const viewport = page.viewportSize();
+      await page.screenshot({path: `/tmp/lll-524-${kind}-desktop.png`});
+      await page.setViewportSize({width: 390, height: 844});
+      await page.screenshot({path: `/tmp/lll-524-${kind}-mobile.png`});
+      await page.setViewportSize(viewport);
+      await page.getByLabel(newName, {exact: true}).fill(`Invalid, new ${kind}`);
+      await rejected(page.getByRole('button', {name: 'Add ' + kind, exact: true}));
+      await expectValue(page.getByLabel(newName, {exact: true}), `Invalid, new ${kind}`);
+      await page.reload();
+      await row(`Z saved ${kind} A`).waitFor();
+      await row(`Unsaved ${kind} B`).waitFor();
+    }
     const viewport = page.viewportSize();
     for (const width of [390, 320]) {
       await page.setViewportSize({width, height: 844});
