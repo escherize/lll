@@ -60,6 +60,17 @@ LIN="$REPO_ROOT/target/.lisette/bin/lll"
 # so they stay - they document the requirement at the calls that most need it.
 e2e_pin_home
 
+# Embedded skills are available before configuration or a server exists.
+skill_list=$(cd "$DATA_DIR" && "$LIN" skill list)
+assert_contains "$skill_list" "software-factory" "skill list works outside the checkout"
+skill_body=$(cd "$DATA_DIR" && "$LIN" skill get software-factory)
+assert_contains "$skill_body" "# How work moves through this repo" "skill get reads the embedded body"
+if skill_extra=$(cd "$DATA_DIR" && "$LIN" skill list software-factory 2>&1); then
+  fail "skill list silently ignored an extra argument"
+fi
+assert_contains "$skill_extra" "usage: lll skill list" "skill list extra-argument error names usage"
+assert_contains "$skill_extra" "lll skill get NAME" "skill list error names the one-skill command"
+
 # PocketBase is embedded in lll (gopb), so there is no external binary to
 # install. `lll up` needs a team and refuses to start without one; ENG is the
 # one this suite uses anyway, and seed_team below fixes up its display name.

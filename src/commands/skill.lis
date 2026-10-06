@@ -28,6 +28,9 @@ pub fn skill(args: Slice<string>) -> Result<(), string> {
       Ok(())
     },
     "list" => {
+      if parsed.positional_count() != 1 {
+        return Err("usage: lll skill list (no arguments); use 'lll skill get NAME' to read one skill")
+      }
       for name in skills.Names() {
         fmt.Println(f"{name}\t{skills.Description(name)}")
       }
