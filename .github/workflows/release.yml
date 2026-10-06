@@ -5,7 +5,8 @@
 # on every deploy. Pure-Go deps (modernc sqlite), so CGO_ENABLED=0 cross
 # builds are static and portable.
 #
-# Cutting a release:
+# Cutting a release (the whole gate is docs/release-checklist.md; run
+# `mise run release-check CUT=<sha>` first):
 #   1. bump [project] version in lisette.toml (checked against the tag below)
 #      and the literal in src/commands/version.lis (what every binary reports);
 #      the gate asserts that the literal agrees with lisette.toml

@@ -98,6 +98,7 @@ python3 -m unittest discover -s scripts -p 'test_import_sidecar.py'
 python3 -m unittest discover -s scripts -p 'test_reap.py'
 python3 -m unittest discover -s scripts -p 'test_protect_archive.py'
 python3 -m unittest discover -s scripts -p 'test_prepare_deploy_context.py'
+python3 -m unittest discover -s scripts -p 'test_release_check.py'
 python3 scripts/check_assets.py
 """
 
@@ -127,6 +128,17 @@ env = { LC_ALL = "C", PYTHONUTF8 = "1" }
 depends = ["build", "test", "e2e"]
 dir = "{{config_root}}"
 run = "echo 'gate green'"
+
+# LLL-620: the automated half of a release (docs/release-checklist.md steps
+# 2-4), then the checklist itself. `mise run release-check CUT=<sha>`. Reads
+# production (GitHub, the hosted board, its /.well-known/lll) and writes only
+# to throwaway scratch servers, so it is NOT part of the gate; its table logic
+# is, through scripts/test_release_check.py in `test`.
+[tasks.release-check]
+description = "Release gate for CUT=<sha>: pass/fail table, then the manual checklist"
+dir = "{{config_root}}"
+env = { LC_ALL = "C", PYTHONUTF8 = "1" }
+run = "python3 scripts/release_check.py"
 
 # Regenerates src/commands/api_schema.lis - the reference `lll api --schema`
 # prints - from a throwaway board booted off the embedded migrations. Run it
