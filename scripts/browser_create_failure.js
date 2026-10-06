@@ -85,5 +85,18 @@ async page => {
   await quickState.selectOption('in-progress');
   if (await quickState.inputValue() !== 'in-progress') throw new Error('named quick-create state selector did not retain selection');
   await quickState.selectOption(originalState);
+  const opener = page.getByRole('button', {name: 'Open the full create form', exact: true});
+  for (const dismissal of ['Escape', 'Close', 'Cancel']) {
+    await opener.click();
+    await page.waitForFunction(() => document.activeElement?.id === 'ni-title');
+    if (dismissal === 'Escape') await page.locator('#ni-title').press('Escape');
+    else await page.locator('#ni-form').getByRole('button', {name: dismissal, exact: true}).click();
+    await page.waitForFunction(() => document.activeElement?.id === 'ni-expand');
+  }
+  await page.evaluate(() => document.activeElement.blur());
+  await page.keyboard.press('c');
+  await page.waitForFunction(() => document.activeElement?.id === 'ni-title');
+  await page.locator('#ni-title').press('Escape');
+  await page.locator('#ni-title').waitFor({state: 'hidden'});
   return 'create error readable inside dialog; keyboard retry and fresh-open clearing passed';
 }
