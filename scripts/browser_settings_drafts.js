@@ -44,6 +44,23 @@ async page => {
     await page.reload();
     await row(`Unsaved ${kind} B`).waitFor();
     await row(`Z saved ${kind} A`).waitFor();
+    const viewport = page.viewportSize();
+    for (const width of [390, 320]) {
+      await page.setViewportSize({width, height: 844});
+      const geometry = await row(`Z saved ${kind} A`).evaluate(el => {
+        const row = el.getBoundingClientRect();
+        const name = el.querySelector('input[name="name"]').getBoundingClientRect();
+        const controls = [...el.querySelectorAll('input:not([type="hidden"]), select, button')];
+        return {nameWidth: name.width, rowWidth: row.width,
+          fits: controls.every(control => { const r = control.getBoundingClientRect();
+            return r.left >= row.left && r.right <= row.right; })};
+      });
+      if (geometry.nameWidth < geometry.rowWidth - 54 || !geometry.fits)
+        throw new Error(`${kind} settings fields cramped at ${width}px: ${JSON.stringify(geometry)}`);
+      await page.screenshot({path: `/tmp/lll-559-${kind}-${width}.png`});
+    }
+    await page.setViewportSize(viewport);
+
     // The nav is the section's sibling, not part of the morph: a save must
     // not take it with it.
     await page.locator(`#set-nav a.active`).waitFor();
