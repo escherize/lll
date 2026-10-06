@@ -161,7 +161,7 @@ with tempfile.TemporaryDirectory() as work:
     # interesting part, because it survives only if issue numbers do.
     cli('finding', 'new', '-s', 'round-trip-finding', '-t', 'Round trip finding',
         '-a', 'evidence', '-p', 'src/mirror', '-b', 'finding body')
-    cli('doc', 'link', 'round-trip-finding', 'RTRIP-5')
+    cli('issue', 'link', 'RTRIP-5', 'round-trip-finding')
 
     # Refs are how `lll import github` knows what it already brought in, so
     # losing them turns a later re-import into a duplicate import.

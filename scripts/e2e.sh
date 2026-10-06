@@ -1525,6 +1525,14 @@ assert_contains "$comp_doc" "-s --slug -t --title -k --kind -b --body" \
   "doc new completions carry exactly the doc new spec's flags"
 comp_issue=$("$LIN" completions bash | grep -F "issue)" | head -1 | sed "s/.*words='//;s/'.*//")
 assert_contains "$comp_issue" "link unlink" "issue completions include link and unlink"
+# LLL-505: hidden aliases are not completed.
+comp_doc_verbs=$("$LIN" completions bash | grep -F "doc)" | head -1 | sed "s/.*words='//;s/'.*//")
+assert_contains "$comp_doc_verbs" "view" "doc completions offer view"
+assert_not_contains "$comp_doc_verbs" "link" "doc completions omit hidden link/unlink"
+comp_finding_verbs=$("$LIN" completions bash | grep -F "finding)" | head -1 | sed "s/.*words='//;s/'.*//")
+assert_contains "$comp_finding_verbs" "near" "finding completions offer near"
+assert_not_contains "$comp_finding_verbs" "view" "finding completions omit hidden view"
+assert_not_contains "$comp_finding_verbs" "read" "finding completions omit hidden read"
 help_watch=$("$LIN" watch --help)
 for fl in '--state' '--assignee' '--label' '--project' '--search' '--json'; do
   assert_contains "$help_watch" "$fl" "watch help lists $fl, as its completions entry does"
@@ -1766,9 +1774,10 @@ rid=$(LLL_URL=$URL LLL_TEAM=ENG "$LIN" doc view port-notes --json | jq -r '.issu
 out=$(LLL_URL=$URL LLL_TEAM=ENG "$LIN" issue link ENG-1 port-notes)
 assert_contains "$out" "already linked" "double link is idempotent"
 
-# --- doc link / doc unlink (LLL-313): the doc noun offers the same verbs,
-# driving the one link write path with the positionals swapped. Either
-# spelling shows the same link on issue view and doc view.
+# --- doc link / doc unlink (LLL-313): hidden aliases since LLL-505. They
+# drive the one link write path with the positionals swapped, so either
+# spelling shows the same link on issue view and doc view; help documents
+# only 'issue link/unlink'.
 out=$(LLL_URL=$URL LLL_TEAM=ENG "$LIN" doc link port-notes ENG-2)
 assert_contains "$out" "Linked ENG-2 -> port-notes" "doc link output"
 out=$(LLL_URL=$URL LLL_TEAM=ENG "$LIN" issue view ENG-2)
@@ -1965,13 +1974,15 @@ set -e
 assert_contains "$out" "a link stays inside one team" "cross-team link is refused"
 
 # LLL-503: aliases keep canonical help, while retired third spellings refuse.
+# 'finding read' is excluded: LLL-505 keeps it as a hidden alias of
+# 'finding view' (asserted with the finding checks below).
 for pair in 'issue show view' 'issue new create' 'doc new create' 'doc show view' 'finding new create' 'member add create' 'member remove delete'; do
   read -r noun alias canonical <<< "$pair"
   canonical_help=$("$LIN" "$noun" "$canonical" --help)
   alias_help=$("$LIN" "$noun" "$alias" --help)
   [ "$alias_help" = "$canonical_help" ] || fail "$noun $alias must show canonical help"
 done
-for noun in issue doc finding; do
+for noun in issue doc; do
   if "$LIN" "$noun" read --help >"$DATA_DIR/retired.out" 2>&1; then
     fail "$noun read must refuse the retired spelling"
   fi
@@ -2004,9 +2015,16 @@ printf '%s' "$out" | jq -e '.findings == []' >/dev/null || fail "empty JSON find
 out=$("$LIN" finding --help)
 assert_contains "$out" "lll finding near" "finding --help mentions near"
 assert_contains "$out" "lll finding list" "finding --help mentions list"
-assert_contains "$out" "lll finding view" "finding --help mentions view (fleet task 9: 6/30 guessed it)"
+# LLL-505: 'finding view' and 'read' are hidden aliases of 'doc view'. Fleet
+# task 9 had 6/30 agents guess 'finding view', so both keep working; help
+# documents only 'doc view'.
+assert_not_contains "$out" "lll finding view" "finding --help omits hidden view"
+assert_not_contains "$out" "lll finding read" "finding --help omits hidden read"
+assert_contains "$out" "lll doc view SLUG" "finding --help names doc view"
 out=$(env LLL_URL=$URL LLL_TEAM=ENG "$LIN" finding view migration-hazard --raw)
 assert_contains "$out" "Migrations are a merge hazard." "finding view reads a finding by slug"
+out=$(env LLL_URL=$URL LLL_TEAM=ENG "$LIN" finding read migration-hazard --raw)
+assert_contains "$out" "Migrations are a merge hazard." "finding read reads a finding by slug"
 out=$(env LLL_URL=$URL LLL_TEAM=ENG "$LIN" finding new -s fleet-new -t "Filed from finding new" -a pb -b "kind set by the verb")
 assert_contains "$out" "Created doc fleet-new" "finding new files a doc"
 out=$(env LLL_URL=$URL LLL_TEAM=ENG "$LIN" finding create positional-slug -t "Positional slug" -a pb -b "bare slug")
@@ -2035,8 +2053,10 @@ assert_contains "$out" "lll finding" "lll --help mentions finding"
 out=$("$LIN" doc --help)
 assert_contains "$out" "-a" "doc --help mentions the area flag"
 assert_contains "$out" "-p" "doc --help mentions the paths flag"
-assert_contains "$out" "lll doc link" "doc --help mentions link (LLL-313)"
-assert_contains "$out" "lll doc unlink" "doc --help mentions unlink (LLL-313)"
+assert_not_contains "$out" "lll doc link" "doc --help omits hidden link (LLL-505)"
+assert_not_contains "$out" "lll doc unlink" "doc --help omits hidden unlink (LLL-505)"
+assert_contains "$out" "lll issue link KEY-123 SLUG" "doc --help names issue link"
+assert_contains "$out" "lll issue unlink KEY-123 SLUG" "doc --help names issue unlink"
 assert_contains "$out" "--search" "doc --help mentions --search (LLL-313)"
 comp_doc_list=$("$LIN" completions bash | grep -F "doc,list" | head -1 | sed "s/.*words='//;s/'.*//")
 assert_contains "$comp_doc_list" "--search" "doc list completions carry --search"

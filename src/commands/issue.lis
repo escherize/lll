@@ -429,6 +429,7 @@ pub fn issue_commands() -> Slice<flags.Command> {
       spec: issue_create_spec(),
       positional: "[\"title\"]",
       run: create,
+      ..
     },
     flags.Command {
       name: "list",

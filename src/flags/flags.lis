@@ -374,6 +374,10 @@ pub struct Command {
   pub name: string,
   /// One accepted alternate spelling; empty means none. Kept out of help.
   pub alias: string,
+  /// A hidden verb dispatches but has no help row and no completion, and
+  /// neither does its alias (LLL-505). It keeps a spelling agents guess
+  /// working when the documented operation lives under another noun.
+  pub hidden: bool,
   pub summary: string,
   pub page: string,
   pub spec: Slice<Flag>,
@@ -433,7 +437,7 @@ fn noun_help(noun: string, tagline: string, intro: string, cmds: Slice<Command>)
   // column, but a generated usage line can run to 110 characters (member
   // set-password), and padding every row to the widest made the whole table
   // 150 columns. Two lines per verb reads in any terminal.
-  for c in cmds {
+  for c in cmds.filter(|c| !c.hidden) {
     let l = usage(f"lll {noun} {c.name}", c.spec, c.positional)
     out += f"\n  {l}\n      {c.summary}"
   }
@@ -578,10 +582,11 @@ pub fn resolve_command(cmds: Slice<Command>, verb: string) -> Option<Command> {
   cmds.find(|c| c.name == verb || (!c.alias.is_empty() && c.alias == verb))
 }
 
-/// Shell completion offers every accepted spelling without duplicating help.
+/// Shell completion offers every accepted spelling without duplicating help,
+/// except a hidden verb's.
 pub fn command_names(cmds: Slice<Command>) -> Slice<string> {
   let mut names: Slice<string> = []
-  for c in cmds {
+  for c in cmds.filter(|c| !c.hidden) {
     names = names.append(c.name)
     if !c.alias.is_empty() { names = names.append(c.alias) }
   }

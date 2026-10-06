@@ -25,8 +25,9 @@ What it DID find is that the evidence was not written down where a future
 auditor would look, so the same question was going to be re-opened
 indefinitely. That is what this change fixes.
 
-Two things genuinely are being removed, and neither needed this audit to find:
-`finding view` and `doc link`/`unlink`, already in review as LLL-505.
+Two things genuinely are leaving the documented surface, and neither needed
+this audit to find: `finding view` and `doc link`/`unlink`. LLL-505 makes them
+hidden aliases: they still run, with no help row or completion.
 
 If step 2 wants real cruft, this inventory says to look somewhere other than
 aliases - the singleton flags (Bucket D) and the 28 subcommands on `issue` are
@@ -203,10 +204,11 @@ Checked each against the current binary:
 
 ## Already in flight - do not double-count
 
-**LLL-505** (`in-review`, branch `lll-505-remove-duplicate-verbs`) already
-removes cross-noun duplicate verbs: `finding view`, and `doc link`/`unlink`.
-Step 2 should start from that branch's result, not from `main`, or it will
-re-propose removals that are already done.
+**LLL-505** (`in-review`, branch `lll-505-remove-duplicate-verbs`) hides
+cross-noun duplicate verbs: `finding view`/`read`, and `doc link`/`unlink`
+keep working but leave help and completions. Step 2 should start from that
+branch's result, not from `main`, or it will re-propose changes that are
+already done.
 
 ## What this does NOT answer
 

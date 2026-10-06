@@ -53,6 +53,7 @@ pub fn member_commands() -> Slice<flags.Command> {
       spec: member_add_spec(),
       positional: "[\"name\"]",
       run: member_add,
+      ..
     },
     flags.Command {
       name: "invite",
@@ -78,6 +79,7 @@ pub fn member_commands() -> Slice<flags.Command> {
       spec: member_remove_spec(),
       positional: "NAME",
       run: member_remove,
+      ..
     },
     flags.Command {
       name: "access",
