@@ -187,7 +187,7 @@ fn projects_raw(vm: ProjectsVM, team_key: string) -> string {
 /// GET /search?raw — the result list as the same card lines every other raw
 /// route uses. An empty query lists nothing, like the empty page.
 fn search_raw(vm: SearchVM) -> string {
-  let mut lines: Slice<string> = [f"# Search: {vm.q} ({vm.results.length()})"]
+  let mut lines: Slice<string> = [f"# Search: {line_text(vm.q)} ({vm.results.length()})"]
   if vm.q == "" {
     lines = lines.append("Give the URL a ?q= term to search.")
   }

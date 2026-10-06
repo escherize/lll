@@ -51,3 +51,11 @@ fn raw_detail_metadata_is_flat_but_authored_markdown_keeps_its_lines() {
   assert doc.contains("Paths: src/first second\n")
   assert doc.ends_with(body + "\n")
 }
+
+#[test]
+fn raw_search_heading_flattens_line_endings_without_changing_query_semantics() {
+  for query in ["First\r\nSecond", "First\nSecond", "First\rSecond"] {
+    let raw = search_raw(SearchVM { q: query, .. })
+    assert raw == "# Search: First Second (0)"
+  }
+}
