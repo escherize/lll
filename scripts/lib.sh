@@ -235,6 +235,14 @@ e2e_begin() {
   unset LLL_ME LLL_TOKEN LLL_SORT LLL_WEB_URL LLL_BOARD_TOKEN LLL_BIND LLL_WORK_HOST \
     LLL_CONFIG_HOME XDG_CONFIG_HOME
   mkdir -p "$E2E_HOME/.config/lll"
+  # LLL-619: and until e2e_pin_home, HOME is still the REAL one - deliberately,
+  # so `lis build` keeps its warm caches, and e2e.sh starts e2e_web.sh and
+  # e2e_up.sh with HOME=$E2E_REAL_HOME for the same reason. An `lll up` in that
+  # window wrote web_url to the developer's ~/.config/lll/lll.toml. So the
+  # config root is the scratch one from here on: LLL_CONFIG_HOME names it until
+  # the pin, then HOME does (e2e_pin_home unsets this again, because the config
+  # assertions choose their own HOME and test XDG_CONFIG_HOME's precedence).
+  export LLL_CONFIG_HOME="$E2E_HOME/.config"
   # LLL-369: the suite runs from a temp directory OUTSIDE the checkout, which is
   # what makes it hermetic. The config walk goes up from the cwd and stops at a
   # repository root, so from here it finds neither the repo's .lll.toml nor
@@ -382,6 +390,8 @@ e2e_trap_cleanup() { # cleanup-function-name
 e2e_pin_home() {
   E2E_REAL_HOME="$HOME"
   export HOME="$E2E_HOME"
+  # Same root e2e_begin named, now reached through HOME (LLL-619).
+  unset LLL_CONFIG_HOME
 }
 
 # The tail of every suite's EXIT trap. The checkout needs no repair here: the run
