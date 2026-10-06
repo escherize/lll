@@ -46,7 +46,7 @@ pub fn member_commands() -> Slice<flags.Command> {
       ..
     },
     flags.Command {
-      name: "add", aliases: "create",
+      name: "create", aliases: "add",
       summary: "add a member",
       page: member_add_page(),
       spec: member_add_spec(),
@@ -72,7 +72,7 @@ pub fn member_commands() -> Slice<flags.Command> {
       ..
     },
     flags.Command {
-      name: "remove", aliases: "delete",
+      name: "delete", aliases: "remove",
       summary: "remove a member; guard assignments and comments",
       page: member_remove_page(),
       spec: member_remove_spec(),
@@ -252,7 +252,7 @@ fn set_password_spec() -> Slice<flags.Flag> {
   ])
 }
 
-/// `lll member remove NAME` — delete a member nothing points at (TASK-245).
+/// `lll member delete NAME` — delete a member nothing points at (TASK-245).
 ///
 /// There was no removal verb at all, so every mistyped name, every test
 /// account and every departed colleague stayed on the list forever. Refuses a
@@ -265,7 +265,7 @@ fn set_password_spec() -> Slice<flags.Flag> {
 /// on a shared board.
 fn member_remove(input: flags.CommandInput) -> Result<(), string> {
   let spec = member_remove_spec()
-  let usage = flags.usage("lll member remove", spec, "NAME")
+  let usage = flags.usage("lll member delete", spec, "NAME")
   let p = input.parsed
   let name = p.first()
   if name == "" { return Err(f"usage: {usage}") }
@@ -325,12 +325,12 @@ fn member_remove_spec() -> Slice<flags.Flag> {
   ])
 }
 
-/// The hand-written page for `lll member remove` (and its `delete` alias).
+/// The hand-written page for `lll member delete` (and its `delete` alias).
 /// The usage line is generated from the spec so it cannot drift from what
 /// the parser accepts.
 fn member_remove_page() -> string {
-  let usage = flags.usage("lll member remove", member_remove_spec(), "NAME")
-  "lll member remove - remove a member with reference checks
+  let usage = flags.usage("lll member delete", member_remove_spec(), "NAME")
+  "lll member delete - remove a member with reference checks
 
 Usage:
   " +
@@ -391,7 +391,7 @@ fn member_set_password(input: flags.CommandInput) -> Result<(), string> {
   let su = superuser_auth()?
   let found = records.find_member_as(su, name)?
   let Some(member) = found else {
-    return Err(f"no member named '{name}' — see 'lll member add'")
+    return Err(f"no member named '{name}' — see 'lll member create'")
   }
 
   // The email IS the login identity. A member carrying only the synthesized
@@ -721,7 +721,7 @@ password is stored nowhere else: lose it and reissue with
 
 --email is required and must be a real address — it is the identity
 'lll login' asks for, so the synthesized @members.invalid placeholder
-'lll member add' falls back to would be a dead door.
+'lll member create' falls back to would be a dead door.
 
 Uses the configured member token to create a new colleague, or administrator
 credentials from --admin-email/--admin-password or LLL_ADMIN_EMAIL and
@@ -758,15 +758,15 @@ new token to whoever held the old one." +
   flags.section(spec)
 }
 
-/// The hand-written page for `lll member add` and `create` (LLL-500). The
+/// The hand-written page for `lll member create` and `create` (LLL-500). The
 /// member-token prerequisite is the part a first-time operator cannot guess:
 /// the admin bootstrap pair authenticates the admin UI and the superuser
 /// verbs, not this one. Ends with flags.section so the flags block that used
 /// to be the whole help is still there.
 fn member_add_page() -> string {
   let spec = member_add_spec()
-  let usage = flags.usage("lll member add", spec, "[NAME]")
-  f"lll member add - add a member record
+  let usage = flags.usage("lll member create", spec, "[NAME]")
+  f"lll member create - add a member record
 
 Usage:
   {usage}
@@ -802,7 +802,7 @@ fn member_add(input: flags.CommandInput) -> Result<(), string> {
   // The usage line echoes the verb the user actually typed, so somebody who
   // reached this through the TASK-130 `create` alias is not told to rerun a
   // command they did not run.
-  let verb = args.get(2).unwrap_or("add")
+  let verb = args.get(2).unwrap_or("create")
   let usage = flags.usage(f"lll member {verb}", spec, "[NAME]")
   let p = input.parsed
   let name = flags.entity_name(p, "-n", usage)?

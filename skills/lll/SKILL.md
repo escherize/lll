@@ -50,7 +50,7 @@ Claiming your own issue again succeeds and says it is already yours.
 member token share every claim: each one's `claim` succeeds with "already
 yours" and exits 0, so the claim does not stop two of them working the same
 issue (finding `shared-member-claims-do-not-isolate-sessions`). For a fleet,
-give each long-lived worker its own member (`lll member add <name>`, then
+give each long-lived worker its own member (`lll member create <name>`, then
 `lll token create <name>` with admin credentials). If workers must share a token, each one reads
 `lll issue view KEY-12` (claim holder, comments, recorded work site) before it
 starts, and skips any issue another session is already on.

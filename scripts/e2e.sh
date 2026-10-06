@@ -1938,7 +1938,7 @@ set -e
 assert_contains "$out" "a link stays inside one team" "cross-team link is refused"
 
 # LLL-503: aliases keep canonical help, while retired third spellings refuse.
-for pair in 'issue show view' 'issue new create' 'doc create new' 'doc show view' 'finding create new' 'member create add' 'member delete remove'; do
+for pair in 'issue show view' 'issue new create' 'doc new create' 'doc show view' 'finding new create' 'member add create' 'member remove delete'; do
   read -r noun alias canonical <<< "$pair"
   canonical_help=$("$LIN" "$noun" "$canonical" --help)
   alias_help=$("$LIN" "$noun" "$alias" --help)
@@ -2131,7 +2131,7 @@ assert_contains "$out" "--state" "watch --help mentions --state"
 assert_contains "$out" "--json" "watch --help mentions --json"
 out=$("$LIN" member --help)
 assert_contains "$out" "Usage:" "lll member --help"
-assert_contains "$out" "lll member add" "member --help mentions add"
+assert_contains "$out" "lll member create" "member --help mentions create"
 out=$("$LIN" team --help)
 assert_contains "$out" "Usage:" "lll team --help"
 out=$("$LIN" project --help)
@@ -2142,7 +2142,7 @@ assert_contains "$out" "Usage:" "lll label --help"
 assert_contains "$out" "lll label create" "label --help mentions create"
 out=$("$LIN" doc --help)
 assert_contains "$out" "Usage:" "lll doc --help"
-assert_contains "$out" "lll doc new" "doc --help mentions new"
+assert_contains "$out" "lll doc create" "doc --help mentions create"
 assert_contains "$out" "lll doc edit" "doc --help mentions edit"
 assert_contains "$out" "--raw" "doc --help mentions --raw"
 assert_contains "$out" "-b" "doc --help mentions -b"

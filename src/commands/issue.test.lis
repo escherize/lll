@@ -546,3 +546,17 @@ fn command_tables_keep_one_alias_per_verb_and_flag() {
     }
   }
 }
+
+/// LLL-504: one operation has one advertised word across nouns.
+#[test]
+fn command_tables_advertise_consistent_creation_and_deletion() {
+  for table in [issue_commands(), team_commands(), member_commands(), project_commands(),
+    label_commands(), doc_commands(), finding_commands()] {
+    assert table.find(|c| c.name == "create").is_some()
+    assert table.find(|c| c.name == "new" || c.name == "add").is_none()
+  }
+  for table in [issue_commands(), member_commands(), project_commands(), label_commands(), doc_commands()] {
+    assert table.find(|c| c.name == "delete").is_some()
+    assert table.find(|c| c.name == "remove").is_none()
+  }
+}
