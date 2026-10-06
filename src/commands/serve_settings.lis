@@ -617,7 +617,7 @@ fn access_credential_write(
 /// ends up showing the message.
 fn flash_ok_event(msg: string) -> string {
   let safe = template.HTMLEscapeString(msg)
-  patch_event(f"<div id=\"flash\" class=\"flash flash-ok\">{safe}</div>")
+  patch_event(f"<div id=\"flash\" class=\"flash flash-ok\" role=\"status\" aria-atomic=\"true\">{safe}</div>")
 }
 
 // ── Teams (TASK-210) ─────────────────────────────────────────────────────
