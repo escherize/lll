@@ -40,7 +40,7 @@ fn schema_states_the_auth_and_filter_basics() {
 
 #[test]
 fn api_spec_offers_body_schema_and_help() {
-  let spec = api_verb_spec("")
+  let spec = api_spec()
   // Completions read tokens(): --body and --schema are taught, --help is
   // declared but hidden and never offered.
   let names = flags.tokens(spec)

@@ -31,9 +31,13 @@ fn write_raw(w: http.ResponseWriter, md: string) {
 
 /// One field in a raw row/list line: keep it on one line and escape pipes.
 fn cell(s: string) -> string {
+  strings.ReplaceAll(line_text(s), "|", "\\|")
+}
+
+/// Metadata occupies one line; authored Markdown bodies keep their source.
+fn line_text(s: string) -> string {
   let unix = strings.ReplaceAll(s, "\r\n", " ")
-  let line = strings.ReplaceAll(strings.ReplaceAll(unix, "\n", " "), "\r", " ")
-  strings.ReplaceAll(line, "|", "\\|")
+  strings.ReplaceAll(strings.ReplaceAll(unix, "\n", " "), "\r", " ")
 }
 
 /// One card as a markdown list line — the one shape every route's raw cards
@@ -117,23 +121,23 @@ fn issues_raw(vm: IssuesVM) -> string {
 /// `lll issue view --raw`: properties as a list, the description as-is (the
 /// markdown source the VM carries beside its rendered HTML), then comments.
 fn issue_raw(vm: IssueVM) -> string {
-  let mut lines: Slice<string> = [f"# {vm.key}: {vm.title}"]
+  let mut lines: Slice<string> = [f"# {vm.key}: {line_text(vm.title)}"]
   lines = lines.append("")
   lines = lines.append(f"- State: {vm.state}")
   lines = lines.append(f"- Priority: {vm.prio}")
   let mut assignee = vm.assignee
   if assignee == "" { assignee = "none" }
-  lines = lines.append(f"- Assignee: {assignee}")
-  if vm.claim_holder != "" { lines = lines.append(f"- Claimed: {vm.claim_holder} ({vm.claim_age})") }
-  lines = lines.append(f"- Project: {vm.project}")
+  lines = lines.append(f"- Assignee: {line_text(assignee)}")
+  if vm.claim_holder != "" { lines = lines.append(f"- Claimed: {line_text(vm.claim_holder)} ({vm.claim_age})") }
+  lines = lines.append(f"- Project: {line_text(vm.project)}")
   let mut labels = strings.Join(vm.labels.map(|l| l.name), ", ")
   if labels == "" { labels = "none" }
-  lines = lines.append(f"- Labels: {labels}")
+  lines = lines.append(f"- Labels: {line_text(labels)}")
   lines = lines.append(f"- Created: {vm.created}")
   lines = lines.append(f"- Updated: {vm.updated}")
   if !vm.attachments.is_empty() {
     lines = lines.append("\n## Attachments")
-    for attachment in vm.attachments { lines = lines.append(f"- {attachment.name}") }
+    for attachment in vm.attachments { lines = lines.append(f"- {line_text(attachment.name)}") }
   }
   if vm.description_md != "" {
     lines = lines.append("")
@@ -148,7 +152,7 @@ fn issue_raw(vm: IssueVM) -> string {
     for f in vm.findings {
       let mut area = f.area
       if area == "" { area = "-" }
-      lines = lines.append(f"- {f.slug} ({area}): {f.title}{confidence_suffix(f.confidence, f.confidence_note)}")
+      lines = lines.append(f"- {line_text(f.slug)} ({line_text(area)}): {line_text(f.title)}{line_text(confidence_suffix(f.confidence, f.confidence_note))}")
     }
   }
   if vm.comments.length() > 0 {
@@ -158,7 +162,7 @@ fn issue_raw(vm: IssueVM) -> string {
     for c in vm.comments {
       let age = c.age
       let body = c.body_md
-      lines = lines.append(f"- **{c.author}** ({age}): {body}")
+      lines = lines.append(f"- **{line_text(c.author)}** ({age}): {body}")
     }
   }
   strings.Join(lines, "\n")

@@ -1,3 +1,4 @@
+import "display"
 import "go:bufio"
 import "go:crypto/rand"
 import "go:encoding/json"
@@ -106,7 +107,7 @@ fn member_list(input: flags.CommandInput) -> Result<(), string> {
   let members = models.MemberList { items: records.fetch_members()? }
   if p.given("--json") { return print_json(members, "member list") }
   for m in members.items {
-    fmt.Println(f"{m.name}\t{m.email}")
+    fmt.Println(f"{display.table_cell(m.name)}\t{display.table_cell(m.email)}")
   }
   Ok(())
 }
@@ -261,8 +262,7 @@ fn set_password_spec() -> Slice<flags.Flag> {
 /// deleting an auth record is not something one member should do to another
 /// on a shared board.
 fn member_remove(input: flags.CommandInput) -> Result<(), string> {
-  let spec = member_remove_spec()
-  let usage = flags.usage("lll member delete", spec, "NAME")
+  let usage = input.usage
   let p = input.parsed
   let name = p.first()
   if name == "" { return Err(f"usage: {usage}") }
@@ -377,8 +377,7 @@ set LLL_ADMIN_EMAIL/LLL_ADMIN_PASSWORD to this server's administrator credential
 }
 
 fn member_set_password(input: flags.CommandInput) -> Result<(), string> {
-  let spec = set_password_spec()
-  let usage = flags.usage("lll member set-password", spec, "NAME")
+  let usage = input.usage
   let p = input.parsed
   let name = p.first()
   if name == "" { return Err(f"usage: {usage}") }
@@ -463,8 +462,7 @@ rerun with --email <email> to set one alongside the password",
 /// superuser gate set-password runs, plus the part that actually got skipped —
 /// telling the inviter the literal lines to paste to the colleague.
 fn member_invite(input: flags.CommandInput) -> Result<(), string> {
-  let spec = member_invite_spec()
-  let usage = flags.usage("lll member invite", spec, "NAME")
+  let usage = input.usage
   let p = input.parsed
   let name = p.first()
   if name == "" { return Err(f"usage: {usage}") }

@@ -538,8 +538,8 @@ fn command_tables_keep_one_alias_per_verb_and_flag() {
       }
     }
   }
-  for spec in [watch_verb_spec(""), up_verb_spec(""), attach_verb_spec(""),
-    board_verb_spec(""), login_verb_spec(""), api_verb_spec(""), search_spec()] {
+  for spec in [watch_spec(), up_spec(), attach_spec(),
+    board_spec(), login_spec(), api_spec(), search_spec()] {
     for fl in spec {
       assert strings.Fields(fl.alias).length() <= 1
       if fl.name == "--limit" { assert fl.alias == "-l" }

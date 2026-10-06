@@ -19,17 +19,12 @@ import "pb"
 // collection/field reference (api_schema.lis, written by
 // scripts/gen_api_schema.py from the migrations' end state).
 
-fn api_spec() -> Slice<flags.Flag> {
+pub fn api_spec() -> Slice<flags.Flag> {
   [
     flags.Flag { name: "--body", value: true, hint: "text", help: "request body to send (application/json)", .. },
     flags.Flag { name: "--schema", help: "print the collection/field reference instead of sending a request", .. },
     flags.Flag { name: "--help", alias: "-h", hidden: true, help: "show this help", .. },
   ]
-}
-
-/// The flag table of the api noun; read by `lll completions`.
-pub fn api_verb_spec(_verb: string) -> Slice<flags.Flag> {
-  api_spec()
 }
 
 pub fn api(args: Slice<string>) -> Result<(), string> {

@@ -712,8 +712,12 @@ input:focus, textarea:focus, select:focus {
   .new-issue input { flex: 1; width: auto; min-width: 0; }
   .ni-shade { padding: 4vh 10px 10px; }
   .ni-dialog { max-height: 92vh; }
+  .ni-foot { display: grid; grid-template-columns: 1fr auto; }
+  .ni-hint, .ni-more { grid-column: 1 / -1; }
+  .ni-foot button { justify-self: end; white-space: nowrap; }
   .board { padding: 10px 12px; }
   .column { flex: 0 0 240px; min-width: 240px; }
+  .doc-scroll { align-content: start; }
   .issue-scroll {
     grid-template-columns: minmax(0, 1fr);
     grid-template-areas: "main" "description" "attachments" "props" "upload" "findings" "thread" "comp";
@@ -986,7 +990,7 @@ input:focus, textarea:focus, select:focus {
   text-align: left;
   cursor: text;
 }
-.issue-main h1:hover { color: var(--text-2); }
+#issue-detail .issue-main h1:hover { color: var(--text-2); }
 .title-edit { margin: 4px 0 14px; }
 .title-edit input {
   width: 100%;
@@ -1608,14 +1612,14 @@ input:focus, textarea:focus, select:focus {
    carry the 720px stacked layout — same flex chain, wider panel. */
 .prop .v { min-width: 0; max-width: 100%; }
 .prop form { min-width: 0; }
-.prop select { min-width: 0; max-width: 100%; text-overflow: ellipsis; }
+.prop select, .ni-props select { min-width: 0; max-width: 100%; text-overflow: ellipsis; }
 /* The state/priority icons and the avatar share the shrinking row; they are
    decoration-sized and must not be squeezed by a long neighbour. */
 .prop .v > svg { flex: none; }
 /* The project link shares its row with the select: a long name truncates on
    its own line instead of wrapping word-per-line or squeezing the select. */
 .prop .v a { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.prop .provenance-value { display: block; min-width: 0; overflow-wrap: anywhere; }
+.prop .provenance-value, #doc-properties .prop .v { display: block; min-width: 0; overflow-wrap: anywhere; }
 
 /* ── scalable label picker (TASK-207) ────────────────────── */
 /* The Labels row wears only the issue's chips plus one "+" affordance; the

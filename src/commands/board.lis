@@ -5,16 +5,11 @@ import "config"
 import "flags"
 
 /// `lll board` — print the web board URL; `-w` opens it in the browser.
-fn board_spec() -> Slice<flags.Flag> {
+pub fn board_spec() -> Slice<flags.Flag> {
   [
     flags.Flag { name: "-w", help: "open the board in the browser", .. },
     flags.Flag { name: "--help", alias: "-h", hidden: true, help: "show this help", .. },
   ]
-}
-
-/// The flag table of the board verb; read by `lll completions`.
-pub fn board_verb_spec(_verb: string) -> Slice<flags.Flag> {
-  board_spec()
 }
 
 pub fn board(args: Slice<string>) -> Result<(), string> {
