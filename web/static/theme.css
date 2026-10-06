@@ -975,7 +975,7 @@ input:focus, textarea:focus, select:focus {
 
 /* ── issue detail editing (priority select, title edit) ─────── */
 .issue-main h1 { cursor: text; }
-.issue-main h1:hover { color: var(--text-2); }
+#issue-detail .issue-main h1:hover { color: var(--text-2); }
 .title-edit { margin: 4px 0 14px; }
 .title-edit input {
   width: 100%;
