@@ -1,0 +1,152 @@
+import "go:crypto/sha256"
+import "go:encoding/hex"
+import "go:encoding/json"
+import "go:io"
+import "go:net/http"
+import "go:os"
+import "go:path/filepath"
+import "go:strconv"
+import "go:strings"
+import "go:time"
+
+import "config"
+
+#[json]
+struct AdvertisedVersion { service: string, version: string }
+
+/// LLL-607: tell the user when the server they talk to runs a newer lll than
+/// this binary, because a newer server can need commands this build lacks and
+/// nothing else says so. Detection only; nothing is replaced or downloaded.
+///
+/// The probe starts in a task before the command runs and its line is read
+/// after, so it overlaps the command's own requests. It runs at most once a
+/// day per server, only for nouns that already talk to the server, and every
+/// failure (no config, no network, an old server without `version`) is
+/// silent. The line goes to stderr only, so stdout and JSON stay byte-identical.
+pub fn version_skew_check(noun: string) -> Channel<Option<string>> {
+  let line = Channel.buffered<Option<string>>(1)
+  task {
+    let _ = line.send(skew_line(noun))
+  }
+  line
+}
+
+fn skew_line(noun: string) -> Option<string> {
+  let talks_to_server = [
+    "issue",
+    "team",
+    "member",
+    "project",
+    "api",
+    "label",
+    "doc",
+    "finding",
+    "search",
+    "whoami",
+    "token",
+    "bot",
+    "webhook",
+    "import",
+    "export",
+  ]
+  if !talks_to_server.contains(noun) { return None }
+  let Ok(cfg) = config.load() else {
+    return None
+  }
+  // Without a token the command is refused before it reaches the server.
+  if cfg.token == "" { return None }
+  let Ok(base) = checked_web_url(cfg.url) else {
+    return None
+  }
+  let Ok(home) = config.home_path() else {
+    return None
+  }
+  let sum = sha256.Sum256(base.bytes())
+  let stamp = filepath.Join(
+    filepath.Dir(home),
+    "version-checks",
+    hex.EncodeToString(sum.to_slice()[..8]),
+  )
+  let today = time.Now().Format("2006-01-02")
+  if let Ok(seen) = os.ReadFile(stamp) {
+    if seen as string == today { return None }
+  }
+  // Stamped before probing: an unreachable server costs one timeout a day,
+  // not one per command.
+  if os.MkdirAll(filepath.Dir(stamp), 0o700).is_err() { return None }
+  if os.WriteFile(stamp, today.bytes(), 0o600).is_err() { return None }
+  let theirs = probe_server_version(base)?
+  if !newer_version(version(), theirs) { return None }
+  let Ok(exe) = os.Executable() else {
+    return None
+  }
+  Some(skew_warning(version(), base, theirs, strings.Contains(exe, "/Cellar/")))
+}
+
+fn probe_server_version(base: string) -> Option<string> {
+  let client = http.Client {
+    Timeout: time.Second,
+    CheckRedirect: Some(|_, _| Err(http.ErrUseLastResponse)),
+    ..,
+  }
+  let Ok(response) = client.Get(base + "/.well-known/lll") else {
+    return None
+  }
+  let Some(body) = response.Body else {
+    return None
+  }
+  defer body.Close()
+  if response.StatusCode != 200 { return None }
+  let Ok(bytes) = io.ReadAll(io.LimitReader(body, 4097)) else {
+    return None
+  }
+  if bytes.length() > 4096 { return None }
+  advertised_version(bytes as string)
+}
+
+/// The version an lll discovery document names, if it names one.
+fn advertised_version(document: string) -> Option<string> {
+  let mut metadata = AdvertisedVersion { .. }
+  if json.Unmarshal(document.bytes(), &metadata).is_err() { return None }
+  if metadata.service != "lll" || metadata.version == "" { return None }
+  Some(metadata.version)
+}
+
+/// Whether `theirs` is a strictly later dotted-number version than `mine`.
+/// Anything that does not parse is not newer, so a surprise stays silent.
+fn newer_version(mine: string, theirs: string) -> bool {
+  let (Some(a), Some(b)) = (version_parts(mine), version_parts(theirs)) else {
+    return false
+  }
+  for i in 0..3 {
+    if b[i] != a[i] { return b[i] > a[i] }
+  }
+  false
+}
+
+fn version_parts(v: string) -> Option<Slice<int>> {
+  let fields = strings.Split(strings.TrimPrefix(v, "v"), ".")
+  if fields.length() != 3 { return None }
+  let mut parts: Slice<int> = []
+  for field in fields {
+    let Ok(n) = strconv.Atoi(field) else {
+      return None
+    }
+    parts = parts.append(n)
+  }
+  Some(parts)
+}
+
+fn skew_warning(
+  mine: string,
+  base: string,
+  theirs: string,
+  homebrew: bool,
+) -> string {
+  let upgrade = if homebrew {
+    "brew upgrade lll"
+  } else {
+    "download the latest from https://github.com/escherize/lll/releases"
+  }
+  f"lll: this lll is {mine}; {base} runs {theirs}, which may have commands this build lacks. Upgrade: {upgrade}"
+}

@@ -79,6 +79,11 @@ class Handler(http.server.BaseHTTPRequestHandler):
 
     def do_GET(self):
         parsed = urllib.parse.urlsplit(self.path)
+        if parsed.path == '/.well-known/lll':
+            # The once-a-day version probe (LLL-607) is not one of the reads
+            # this test counts; an unversioned server answers it like this.
+            self.send_error(404)
+            return
         query = urllib.parse.parse_qs(parsed.query)
         filt = query.get('filter', [''])[0]
         route = parsed.path
