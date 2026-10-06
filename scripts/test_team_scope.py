@@ -130,6 +130,7 @@ with tempfile.TemporaryDirectory(prefix='lll-team-scope-') as directory:
         assert status(f"/api/lll/issues/{ib['id']}/claim", {}) == 404
         assert status(f"/api/lll/issues/{ib['id']}/refs", {'ref': 'https://example.test/pr/1'}) == 404
         assert status(f"/api/lll/issues/{ia['id']}/claim", {}) == 200
+        assert status(f"/api/lll/issues/{ib['id']}/renew", {'claim_id': 'x'}) == 404, 'renew skips the scope check'
         # Claims leave only through /release (LLL-512): this migration runs
         # after claim_delete_admin and must not reopen direct DELETE.
         _, held, _ = call(api, '/api/collections/claims/records', token=tok)

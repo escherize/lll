@@ -111,6 +111,11 @@ func registerClaimRoutes(routes *router.Router[*core.RequestEvent], writes *issu
 		if err := re.BindBody(&body); err != nil || body.ClaimID == "" {
 			return re.BadRequestError("renew requires the observed claim_id", nil)
 		}
+		// Same rule as claim/release/assignment (team_scope.go): a member
+		// narrowed or made read-only after claiming cannot keep renewing.
+		if err := issueWritable(re, re.Request.PathValue("issue")); err != nil {
+			return err
+		}
 		// A superuser token names no member, so it is never the holder and
 		// renewClaim refuses it with the holder's name.
 		memberID := ""
