@@ -27,34 +27,27 @@ pub fn config_commands() -> Slice<flags.Command> {
     flags.Command {
       name: "--list",
       summary: "every effective value and the file it came from",
-      page: "",
       spec: [],
-      positional: "",
       run: config_list,
       ..
     },
     flags.Command {
       name: "check",
       summary: "check the configured lll server API",
-      page: "",
       spec: [],
-      positional: "",
       run: config_check,
       ..
     },
     flags.Command {
       name: "init",
       summary: "write a commented .lll.toml template to the current directory",
-      page: "",
       spec: [],
-      positional: "",
       run: config_init,
       ..
     },
     flags.Command {
       name: "set",
       summary: "save url or web_url in ~/.config/lll/lll.toml",
-      page: "",
       spec: [],
       positional: "<url|web_url> VALUE",
       run: config_set,

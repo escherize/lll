@@ -25,16 +25,13 @@ pub fn project_commands() -> Slice<flags.Command> {
     flags.Command {
       name: "list",
       summary: "list projects (name, status, team); this team's, or every team's when none is configured",
-      page: "",
       spec: project_list_spec(),
-      positional: "",
       run: project_list,
       ..
     },
     flags.Command {
       name: "view",
       summary: "show a project and its issues",
-      page: "",
       spec: flags.with_team([]),
       positional: "NAME",
       run: project_view,
@@ -43,7 +40,6 @@ pub fn project_commands() -> Slice<flags.Command> {
     flags.Command {
       name: "create",
       summary: "create a project (status defaults to planned; --team defaults to LLL_TEAM)",
-      page: "",
       spec: project_create_spec(),
       positional: "[NAME]",
       run: project_create,
@@ -52,7 +48,6 @@ pub fn project_commands() -> Slice<flags.Command> {
     flags.Command {
       name: "edit",
       summary: "rename, re-describe or re-status a project; it keeps its issues",
-      page: "",
       spec: project_edit_spec(),
       positional: "NAME",
       run: project_edit,
@@ -61,7 +56,6 @@ pub fn project_commands() -> Slice<flags.Command> {
     flags.Command {
       name: "move",
       summary: "move a project to another team; refuses while issues outside it still belong to it",
-      page: "",
       spec: project_move_spec(),
       positional: "NAME",
       run: project_move,
@@ -70,7 +64,6 @@ pub fn project_commands() -> Slice<flags.Command> {
     flags.Command {
       name: "delete",
       summary: "delete a project; refuses while issues still belong to it, and --force drops it off all of them",
-      page: "",
       spec: project_delete_spec(),
       positional: "NAME",
       run: project_delete,

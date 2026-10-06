@@ -37,7 +37,6 @@ pub fn webhook_commands() -> Slice<flags.Command> {
     flags.Command {
       name: "add",
       summary: "register a URL that receives this team's issue events, or one project's with --project",
-      page: "",
       spec: webhook_add_spec(),
       positional: "URL",
       run: webhook_add,
@@ -46,16 +45,13 @@ pub fn webhook_commands() -> Slice<flags.Command> {
     flags.Command {
       name: "list",
       summary: "list this team's registrations: scope, URL, whether a secret is set",
-      page: "",
       spec: webhook_list_spec(),
-      positional: "",
       run: webhook_list,
       ..
     },
     flags.Command {
       name: "remove",
       summary: "delete a registration by its URL; --project picks between the same URL at both scopes",
-      page: "",
       spec: webhook_remove_spec(),
       positional: "URL",
       run: webhook_remove,

@@ -394,18 +394,17 @@ pub fn issue_commands() -> Slice<flags.Command> {
   [
     flags.Command {
       name: "attach", summary: "upload a file to an issue; appends without replacing existing attachments",
-      page: "",
       spec: flags.with_team([]), positional: "KEY-123 FILE", run: issue_attach,
       ..
     },
     flags.Command {
       name: "detach", summary: "remove an attachment by its stored filename (see issue view)",
-      page: "", spec: flags.with_team([]), positional: "KEY-123 FILENAME", run: issue_detach,
+      spec: flags.with_team([]), positional: "KEY-123 FILENAME", run: issue_detach,
       ..
     },
     flags.Command {
       name: "download", summary: "write attachment bytes to stdout; redirect to a file",
-      page: "", spec: flags.with_team([]), positional: "KEY-123 FILENAME", run: issue_download,
+      spec: flags.with_team([]), positional: "KEY-123 FILENAME", run: issue_download,
       ..
     },
     flags.Command {
@@ -419,33 +418,28 @@ pub fn issue_commands() -> Slice<flags.Command> {
     flags.Command {
       name: "list",
       summary: "list issues; scoped to the configured team",
-      page: "",
       spec: issue_list_spec(),
-      positional: "",
       run: list,
       ..
     },
     flags.Command {
       name: "next",
       summary: "print the key of the one issue to work next - ready and unclaimed, then priority (urgent first), then oldest, then most-unblocking; --claim takes it (LLL-395)",
-      page: "",
       spec: issue_next_spec(),
-      positional: "",
       run: issue_next,
       ..
     },
     flags.Command {
       name: "view", aliases: "show",
       summary: "show one issue in full, with comments; --raw prints it as plain markdown; -w opens its web page instead",
-      page: "",
       spec: issue_view_spec(),
       positional: "[KEY-123]",
       run: view,
+      ..
     },
     flags.Command {
       name: "update",
       summary: "change fields (at least one flag)",
-      page: "",
       spec: issue_update_spec(),
       positional: "[KEY-123]",
       run: update,
@@ -454,7 +448,6 @@ pub fn issue_commands() -> Slice<flags.Command> {
     flags.Command {
       name: "close",
       summary: "set state done; retain any claim",
-      page: "",
       spec: flags.with_team([]),
       positional: "[KEY-123]",
       run: close_issue,
@@ -463,7 +456,6 @@ pub fn issue_commands() -> Slice<flags.Command> {
     flags.Command {
       name: "start",
       summary: "set state in-progress; --branch also git-switches to key-number-slug and records the work site",
-      page: "",
       spec: issue_start_spec(),
       positional: "[KEY-123]",
       run: start,
@@ -472,7 +464,6 @@ pub fn issue_commands() -> Slice<flags.Command> {
     flags.Command {
       name: "claim",
       summary: "take it exclusively for the authenticated member and assign it; exits non-zero, changing nothing, when someone already holds it",
-      page: "",
       spec: flags.with_team([]),
       positional: "[KEY-123]",
       run: claim,
@@ -481,7 +472,6 @@ pub fn issue_commands() -> Slice<flags.Command> {
     flags.Command {
       name: "release",
       summary: "remove your claim; clear assignee if it still matches the holder; --force takes another member's and comments why",
-      page: "",
       spec: issue_release_spec(),
       positional: "[KEY-123]",
       run: release,
@@ -490,7 +480,6 @@ pub fn issue_commands() -> Slice<flags.Command> {
     flags.Command {
       name: "delete",
       summary: "delete; asks [y/N] unless --force",
-      page: "",
       spec: issue_delete_spec(),
       positional: "KEY-123",
       run: delete_issue,
@@ -499,7 +488,6 @@ pub fn issue_commands() -> Slice<flags.Command> {
     flags.Command {
       name: "comment",
       summary: "add a comment (bare body or -b); 'comment KEY' lists them numbered; 'comment edit KEY N -b' and 'comment delete KEY N' change your own",
-      page: "",
       spec: issue_comment_spec(),
       positional: "[KEY-123] [\"body\"]",
       run: comment,
@@ -508,7 +496,6 @@ pub fn issue_commands() -> Slice<flags.Command> {
     flags.Command {
       name: "watch",
       summary: "stream live events for the issue and its comments until interrupted",
-      page: "",
       spec: issue_watch_spec(),
       positional: "[KEY-123]",
       run: issue_watch,
@@ -517,7 +504,6 @@ pub fn issue_commands() -> Slice<flags.Command> {
     flags.Command {
       name: "url",
       summary: "print the issue's web page URL",
-      page: "",
       spec: flags.with_team([]),
       positional: "[KEY-123]",
       run: url_cmd,
@@ -526,7 +512,6 @@ pub fn issue_commands() -> Slice<flags.Command> {
     flags.Command {
       name: "id",
       summary: "print the issue's KEY-123 identifier",
-      page: "",
       spec: flags.with_team([]),
       positional: "[KEY-123]",
       run: id_cmd,
@@ -535,17 +520,15 @@ pub fn issue_commands() -> Slice<flags.Command> {
     flags.Command {
       name: "title",
       summary: "print the issue's title",
-      page: "",
       spec: flags.with_team([]),
       positional: "[KEY-123]",
       run: title_cmd,
       ..
     },
-    flags.Command { name: "branch-name", summary: "print a suggested Git branch name; read-only", page: "", spec: flags.with_team([]), positional: "[KEY-123]", run: branch_name_cmd, .. },
+    flags.Command { name: "branch-name", summary: "print a suggested Git branch name; read-only", spec: flags.with_team([]), positional: "[KEY-123]", run: branch_name_cmd, .. },
     flags.Command {
       name: "pr",
       summary: "open a GitHub PR via 'gh pr create' and record gh#N; body links the issue and includes its description when it fits",
-      page: "",
       spec: flags.with_team([]),
       positional: "[KEY-123]",
       run: pr_cmd,
@@ -553,13 +536,12 @@ pub fn issue_commands() -> Slice<flags.Command> {
     },
     flags.Command {
       name: "ref", summary: "append an external reference once (gh#42, linear:ENG-118)",
-      page: "", spec: flags.with_team([]), positional: "KEY-123 REF", run: ref_cmd,
+      spec: flags.with_team([]), positional: "KEY-123 REF", run: ref_cmd,
       ..
     },
     flags.Command {
       name: "link",
       summary: "link the issue to a doc (see 'lll doc --help')",
-      page: "",
       spec: flags.with_team([]),
       positional: "KEY-123 SLUG",
       run: link,
@@ -568,7 +550,6 @@ pub fn issue_commands() -> Slice<flags.Command> {
     flags.Command {
       name: "unlink",
       summary: "remove that link",
-      page: "",
       spec: flags.with_team([]),
       positional: "KEY-123 SLUG",
       run: unlink,
@@ -577,7 +558,6 @@ pub fn issue_commands() -> Slice<flags.Command> {
     flags.Command {
       name: "block",
       summary: "record that KEY-123 cannot start until BLOCKER is done (LLL-175); view shows it, list --ready honours it",
-      page: "",
       spec: flags.with_team([]),
       positional: "KEY-123 BLOCKER",
       run: block,
@@ -586,7 +566,6 @@ pub fn issue_commands() -> Slice<flags.Command> {
     flags.Command {
       name: "unblock",
       summary: "remove BLOCKER from KEY-123's blockers",
-      page: "",
       spec: flags.with_team([]),
       positional: "KEY-123 BLOCKER",
       run: unblock,
@@ -1887,8 +1866,8 @@ fn print_comments(comments: Slice<models.Comment>) {
 /// the author is the token's member. A superuser token may change anything.
 fn comment_commands() -> Slice<flags.Command> {
   [
-    flags.Command { name: "edit", summary: "edit a numbered comment", page: "", spec: comment_mutate_spec("edit"), positional: "KEY N", run: |input| comment_mutate("edit", input.parsed), .. },
-    flags.Command { name: "delete", summary: "delete a numbered comment", page: "", spec: comment_mutate_spec("delete"), positional: "KEY N", run: |input| comment_mutate("delete", input.parsed), .. },
+    flags.Command { name: "edit", summary: "edit a numbered comment", spec: comment_mutate_spec("edit"), positional: "KEY N", run: |input| comment_mutate("edit", input.parsed), .. },
+    flags.Command { name: "delete", summary: "delete a numbered comment", spec: comment_mutate_spec("delete"), positional: "KEY N", run: |input| comment_mutate("delete", input.parsed), .. },
   ]
 }
 

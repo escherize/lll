@@ -24,7 +24,6 @@ pub fn import_commands() -> Slice<flags.Command> {
     flags.Command {
       name: "github",
       summary: "import a GitHub repo's issues into the configured team via gh; title, body and labels come along, open becomes todo and closed done, every import refs gh#N; re-import skips already-imported issues",
-      page: "",
       spec: github_spec(),
       positional: "OWNER/REPO",
       run: import_github,
@@ -33,7 +32,6 @@ pub fn import_commands() -> Slice<flags.Command> {
     flags.Command {
       name: "dir",
       summary: "rebuild the configured team from a directory 'lll export' wrote; refuses a team that already has issues unless --replace deletes them first",
-      page: "",
       spec: dir_spec(),
       positional: "DIR",
       run: import_dir,
