@@ -316,7 +316,7 @@ token = \"...\" in ~/.config/lll/lll.toml — never .lll.toml, which is committe
 On the receiving machine, save the API endpoint with 'lll config set url URL', or supply LLL_URL." + flags.section(spec)
 }
 
-/// `lll bot NAME [--duration s]`: an agent identity in one command (LLL-392,
+/// `lll bot bot-NAME [--duration s]`: an agent identity in one command (LLL-392,
 /// after veans init; LLL-407 made bots a member kind). Creates a bot-kind
 /// member named NAME — the bot- prefix is reserved for bots and enforced
 /// server-side — records the calling member as its owner, and prints its
@@ -338,7 +338,7 @@ pub fn bot(args: Slice<string>) -> Result<(), string> {
 
 fn bot_create(args: Slice<string>) -> Result<(), string> {
   let spec = token_create_spec()
-  let usage = flags.usage("lll bot", spec, "NAME")
+  let usage = flags.usage("lll bot", spec, "bot-NAME")
   let p = flags.parse_n(spec, args, 2, 1, usage)?
   if p.given("--help") {
     fmt.Println(bot_page(false))
@@ -346,8 +346,9 @@ fn bot_create(args: Slice<string>) -> Result<(), string> {
   }
   let name = strings.TrimSpace(p.first())
   if name == "" {
-    return Err(f"usage: {usage}\n  NAME is the agent's member name, e.g. bot-myrepo — bot names are reserved to the bot- prefix")
+    return Err(f"usage: {usage}\n  bot-NAME is the agent's member name, e.g. bot-myrepo — bot names are reserved to the bot- prefix")
   }
+  require_bot_prefix("lll bot", name)?
   point_at_url(p.one("--url"))?
   apply_admin_flags(p.one("--admin-email"), p.one("--admin-password"))?
   let (tok, caller) = bot_caller()?
@@ -370,12 +371,12 @@ fn bot_create(args: Slice<string>) -> Result<(), string> {
   bot_mint(tok, name, duration)
 }
 
-/// `lll bot rotate NAME [--duration s]`: re-mint the bot's token and strand
+/// `lll bot rotate bot-NAME [--duration s]`: re-mint the bot's token and strand
 /// the previous one. The server admits the superuser or the bot's owner —
 /// the human who created it is the one who sees a token leak.
 fn bot_rotate(args: Slice<string>) -> Result<(), string> {
   let spec = token_create_spec()
-  let usage = flags.usage("lll bot rotate", spec, "NAME")
+  let usage = flags.usage("lll bot rotate", spec, "bot-NAME")
   let p = flags.parse_n(spec, args, 3, 1, usage)?
   if p.given("--help") {
     fmt.Println(bot_page(true))
@@ -383,8 +384,9 @@ fn bot_rotate(args: Slice<string>) -> Result<(), string> {
   }
   let name = strings.TrimSpace(p.first())
   if name == "" {
-    return Err(f"usage: {usage}\n  NAME is the bot member's name, e.g. bot-myrepo")
+    return Err(f"usage: {usage}\n  bot-NAME is the bot member's name, e.g. bot-myrepo")
   }
+  require_bot_prefix("lll bot rotate", name)?
   point_at_url(p.one("--url"))?
   apply_admin_flags(p.one("--admin-email"), p.one("--admin-password"))?
   let (tok, _) = bot_caller()?
@@ -401,9 +403,17 @@ fn bot_page(rotating: bool) -> string {
     "Create a bot member and print its token once. An existing bot's token is rotated. Uses your member token or administrator credentials."
   }
   let see_rotate = if rotating { "" } else { "\nSee 'lll bot rotate --help' for token rotation." }
-  f"{command} - {description}\n\nUsage:\n  {flags.usage(command, spec, "NAME")}\n\nNAME must use the reserved bot- prefix, e.g. bot-myrepo."
+  f"{command} - {description}\n\nUsage:\n  {flags.usage(command, spec, "bot-NAME")}\n\nThe name must start with the reserved bot- prefix, e.g. '{command} bot-myrepo'."
     + flags.section(spec)
     + see_rotate
+}
+
+/// The server reserves bot- names to bots (gopb checkMemberKind), so a name
+/// without the prefix can never be a bot. Refuse it here, before any
+/// credential or server call, with the spelling that would work.
+fn require_bot_prefix(command: string, name: string) -> Result<(), string> {
+  if strings.HasPrefix(name, "bot-") { return Ok(()) }
+  Err(f"bot names are reserved to the bot- prefix - got '{name}'; try '{command} bot-{name}'")
 }
 
 /// creates. Administrator credentials authenticate as the superuser, which
