@@ -47,16 +47,7 @@ fn doc_page(
     return
   }
   let page = PageVM { rail: rail_vm("doc", me, team), page: vm }
-  let html = match render("doc-page", page) {
-    Ok(h) => h,
-    Err(e) => {
-      http.Error(w, e, 500)
-      return
-    },
-  }
-  w.Header().Set("Cache-Control", "no-store")
-  w.Header().Set("Content-Type", "text/html; charset=utf-8")
-  let _ = w.Write(html.bytes())
+  render_html(w, "doc-page", page)
 }
 
 /// Doc record -> view model. The property order is `lll doc view`'s, so a

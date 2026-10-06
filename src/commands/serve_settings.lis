@@ -57,16 +57,7 @@ fn settings_page(
     return
   }
   let page = PageVM { rail: rail_vm("settings", me, team), page: vm }
-  let html = match render("settings-page", page) {
-    Ok(h) => h,
-    Err(e) => {
-      http.Error(w, e, 500)
-      return
-    },
-  }
-  w.Header().Set("Cache-Control", "no-store")
-  w.Header().Set("Content-Type", "text/html; charset=utf-8")
-  let _ = w.Write(html.bytes())
+  render_html(w, "settings-page", page)
 }
 
 /// One section's data, and only that section's.

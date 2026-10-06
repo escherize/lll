@@ -3,6 +3,7 @@ import "claims"
 import "go:html/template"
 import "go:github.com/escherize/lll/web"
 import "go:net/url"
+import "go:net/http"
 import "go:strings"
 import "go:unicode/utf8"
 
@@ -19,6 +20,21 @@ import "theme"
 /// Render a named template from the embedded web/templates/ tree.
 fn render(name: string, data: Unknown) -> Result<string, string> {
   web.Render(name, data).map_err(|e| e.Error())
+}
+
+/// Render an HTML response completely before writing headers or body.
+/// Raw text and SSE callers keep their own response contracts.
+fn render_html(w: http.ResponseWriter, name: string, data: Unknown) {
+  let html = match render(name, data) {
+    Ok(h) => h,
+    Err(e) => {
+      http.Error(w, e, 500)
+      return
+    },
+  }
+  w.Header().Set("Cache-Control", "no-store")
+  w.Header().Set("Content-Type", "text/html; charset=utf-8")
+  let _ = w.Write(html.bytes())
 }
 
 /// Wrap a rendered fragment as a datastar-patch-elements SSE event. Each
