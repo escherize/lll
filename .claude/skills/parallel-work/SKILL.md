@@ -66,6 +66,14 @@ else. Claim BEFORE writing code, not before pushing, or two agents discover the
 collision after both have done the work. Release what you abandon
 (`lll issue release KEY-123`) so it returns to the pool rather than looking busy.
 
+**The claim excludes members, not agents.** A second claim by the member that
+already holds the issue succeeds ("already yours"), from any directory or
+session. Agents that share one token are one member, so claim gives them no
+exclusion at all: a fleet run that followed this section on a shared token
+found it with a probe card. Until LLL-525 lands, give each agent its own
+member, or take an external lock before claiming (that fleet used a local
+`mkdir` lock with stale takeover gated on the server state and the lock's age).
+
 One issue per branch, one issue per commit. A commit spanning three issues
 cannot be reverted when one of them was wrong.
 

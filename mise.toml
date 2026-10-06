@@ -89,6 +89,7 @@ env -u LLL_ME -u LLL_TOKEN -u LLL_URL -u LLL_TEAM -u LLL_SORT -u LLL_WEB_URL \
     -u LLL_CONFIG_HOME -u XDG_CONFIG_HOME lis test
 go -C web test ./...
 go -C gopb test ./...
+python3 -m unittest discover -s scripts -p 'test_board_startup_diagnostics.py'
 python3 -m unittest discover -s scripts -p 'test_browser_poll.py'
 python3 -m unittest discover -s scripts -p 'test_browser_session.py'
 python3 -m unittest discover -s scripts -p 'test_check_assets.py'

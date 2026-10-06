@@ -50,7 +50,7 @@ Claiming your own issue again succeeds and says it is already yours.
 member token share every claim: each one's `claim` succeeds with "already
 yours" and exits 0, so the claim does not stop two of them working the same
 issue (finding `shared-member-claims-do-not-isolate-sessions`). For a fleet,
-give each long-lived worker its own member (`lll member add <name>`, then
+give each long-lived worker its own member (`lll member create <name>`, then
 `lll token create <name>` with admin credentials). If workers must share a token, each one reads
 `lll issue view KEY-12` (claim holder, comments, recorded work site) before it
 starts, and skips any issue another session is already on.
@@ -121,6 +121,13 @@ value is in the pattern being recognisable:
 **Filter server-side.** `lll issue list` supports `--state`, `--assignee`,
 `--label`, `--project`, `--search`, `--sort`, `--limit`, and `--json`. Other
 read commands expose their supported filters in `--help`.
+
+**`lll watch` is live-only; reconcile on start.** It streams from the moment
+the subscription is accepted, and a reconnect does not replay what it missed,
+so a gap looks exactly like a quiet board. A long-running agent keeps the time
+of the last event it handled and, on every start and reconnect, runs
+`lll issue list --since <that time>` before trusting the stream. A fleet
+coordinator missed three cards reaching done by relying on watch alone.
 
 **Make retried creates idempotent.** Use `lll issue create --idempotency-key KEY`
 when a run might lose the creation response. Derive the key once from the
@@ -256,8 +263,8 @@ It picks both ports by BINDING them (a liveness probe cannot tell a free port
 from a stranger's server), and runs on loopback with a fresh database, home
 and working directory. Inherited `LLL_*` settings are cleared except an
 explicit `LLL_TEAM`; the default team is SCRAT. The banner prints the board
-login URL and isolated config path. Administrator credentials are not printed;
-scratch uses `admin@local.dev` / `admin-local-123`. CLI access to
+login URL and isolated config path. The banner prints administrator credentials
+once: `admin@local.invalid` / a generated password. CLI access to
 this database needs its own local authentication; a hosted login token does
 not authenticate against the scratch database. The temporary directory is
 kept after shutdown; the banner shows the `rm -rf` to run when finished.

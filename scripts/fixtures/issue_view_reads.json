@@ -1,7 +1,7 @@
 {
   "empty/view": {
     "code": 0,
-    "stdout": "VIEW-1 Read fixture\n\nState:     ○ todo\nPriority:  urgent\nAssignee:  viewer\nProject:   none\nLabels:    runtime\nAttachments:\n  fixture.txt\nEmoji:     🔧\nCreated:   <age>\nUpdated:   <age>\n\nA description.\nSecond line.\n",
+    "stdout": "VIEW-1 Read fixture\n\nState:     ○ todo\nPriority:  urgent\nAssignee:  viewer\nProject:   none\nLabels:    runtime\nAttachments:\n  fixture.txt\nEmoji:     🔧\nCreated:   <age>\nUpdated:   <age>\n\nA description.\nSecond line.\n\nComments: none\n",
     "stderr": ""
   },
   "empty/raw": {

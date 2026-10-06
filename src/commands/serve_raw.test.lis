@@ -1,0 +1,78 @@
+import "go:strings"
+
+#[test]
+fn raw_cell_flattens_line_breaks_and_preserves_pipe_escaping() {
+  assert cell("First\r\nSecond\nThird\r中文 | pipe") == "First Second Third 中文 \\| pipe"
+  assert cell("plain  spacing\tstays") == "plain  spacing\tstays"
+}
+
+#[test]
+fn raw_issue_rows_and_card_lines_stay_on_one_physical_line() {
+  let card = CardVM {
+    key: "TST-1",
+    title: "First\nSecond | pipe",
+    assignee: "Agent\r\nname",
+    labels: [LabelVM { name: "文档\rlabel", .. }],
+    ..
+  }
+  let row = strings.Join(issue_row_cells(card), " | ")
+  let line = card_line(card)
+  for text in [row, line] {
+    assert !text.contains("\n")
+    assert !text.contains("\r")
+    assert text.contains("First Second \\| pipe")
+    assert text.contains("Agent name")
+    assert text.contains("文档 label")
+  }
+}
+
+#[test]
+fn raw_detail_metadata_is_flat_but_authored_markdown_keeps_its_lines() {
+  let body = "First paragraph\n\nSecond | paragraph"
+  let issue = issue_raw(IssueVM {
+    key: "TST-1", title: "First\r\nSecond | 中文", project: "Project\nname",
+    assignee: "Agent\rname", description_md: body,
+    labels: [LabelVM { name: "Label\nname", .. }],
+    comments: [CommentVM { author: "Author\nname", body_md: body, .. }],
+    ..
+  })
+  assert issue.starts_with("# TST-1: First Second | 中文\n\n")
+  assert issue.contains("- Assignee: Agent name\n")
+  assert issue.contains("- Project: Project name\n")
+  assert issue.contains("- Labels: Label name\n")
+  assert issue.contains("**Author name**")
+  assert issue.contains(body)
+  let doc = doc_raw(DocVM {
+    slug: "detail", title: "First\nSecond | 中文", area: "Area\r\nname",
+    paths: "src/first\nsecond", body_md: body, ..
+  })
+  assert doc.starts_with("# detail First Second | 中文\n\n")
+  assert doc.contains("Area: Area name\n")
+  assert doc.contains("Paths: src/first second\n")
+  assert doc.ends_with(body + "\n")
+}
+
+#[test]
+fn raw_search_heading_flattens_line_endings_without_changing_query_semantics() {
+  for query in ["First\r\nSecond", "First\nSecond", "First\rSecond"] {
+    let raw = search_raw(SearchVM { q: query, .. })
+    assert raw == "# Search: First Second (0)"
+  }
+}
+
+#[test]
+fn raw_search_distinguishes_document_and_issue_hits() {
+  let issue = CardVM { key: "TST-1", title: "Matching issue", .. }
+  let raw = search_raw(SearchVM {
+    q: "Matching", results: [
+      SearchHitVM { card: issue, .. },
+      SearchHitVM { doc: DocHitVM {
+        slug: "matching-doc", title: "Matching\n文档 | notes", kind: "finding",
+        url: "/t/TST/doc/matching-doc", ..
+      }, .. },
+    ], ..
+  })
+  assert raw.contains(card_line(issue))
+  assert raw.contains("- [matching-doc](/t/TST/doc/matching-doc) | Matching 文档 \\| notes | finding")
+  assert !raw.contains("- [](/issue/)")
+}

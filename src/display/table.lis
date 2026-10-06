@@ -31,6 +31,7 @@ pub fn table(rows: Slice<Slice<string>>) -> string {
   output.String()
 }
 
-fn table_cell(value: string) -> string {
+/// Keep a terminal field on one line without interpreting control characters.
+pub fn table_cell(value: string) -> string {
   strings.Map(|r| if unicode.IsControl(r) { ' ' } else { r }, value)
 }

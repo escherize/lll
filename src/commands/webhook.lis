@@ -37,26 +37,25 @@ pub fn webhook_commands() -> Slice<flags.Command> {
     flags.Command {
       name: "add",
       summary: "register a URL that receives this team's issue events, or one project's with --project",
-      page: "",
       spec: webhook_add_spec(),
       positional: "URL",
       run: webhook_add,
+      ..
     },
     flags.Command {
       name: "list",
       summary: "list this team's registrations: scope, URL, whether a secret is set",
-      page: "",
       spec: webhook_list_spec(),
-      positional: "",
       run: webhook_list,
+      ..
     },
     flags.Command {
       name: "remove",
       summary: "delete a registration by its URL; --project picks between the same URL at both scopes",
-      page: "",
       spec: webhook_remove_spec(),
       positional: "URL",
       run: webhook_remove,
+      ..
     },
   ]
 }
@@ -140,8 +139,7 @@ fn webhook_list(input: flags.CommandInput) -> Result<(), string> {
 }
 
 fn webhook_remove(input: flags.CommandInput) -> Result<(), string> {
-  let spec = webhook_remove_spec()
-  let usage = flags.usage("lll webhook remove", spec, "URL")
+  let usage = input.usage
   let p = input.parsed
   let raw = p.first()
   let target = validate_target(raw)?

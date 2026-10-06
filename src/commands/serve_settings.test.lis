@@ -73,3 +73,12 @@ fn every_written_kind_redraws_its_own_section() {
     assert settings_sections().find(|s| s == section).is_some()
   }
 }
+
+#[test]
+fn success_confirmation_is_an_atomic_status_with_escaped_copy() {
+  let event = flash_ok_event("Saved <label> & member")
+  assert event.contains("role=\"status\"")
+  assert event.contains("aria-atomic=\"true\"")
+  assert !event.contains("role=\"alert\"")
+  assert event.contains("Saved &lt;label&gt; &amp; member")
+}

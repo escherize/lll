@@ -1,0 +1,10 @@
+/// Names selected by the board's comma-separated filters must be one value.
+/// Validate at each write boundary, before lookups or a settings team move.
+fn check_filter_name(kind: string, name: string) -> Result<(), string> {
+  if name.contains(",") {
+    return Err(
+      f"{kind} names cannot contain commas; board filters use commas to separate names. Remove the commas.",
+    )
+  }
+  Ok(())
+}

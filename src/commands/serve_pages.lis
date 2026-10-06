@@ -340,16 +340,7 @@ fn board_page(w: http.ResponseWriter, r: Ref<http.Request>, team: models.Team, m
     return
   }
   let rail = rail_vm(active, me, team)
-  let html = match render("board-page", PageVM { rail, page: vm }) {
-    Ok(h) => h,
-    Err(e) => {
-      http.Error(w, e, 500)
-      return
-    },
-  }
-  w.Header().Set("Cache-Control", "no-store")
-  w.Header().Set("Content-Type", "text/html; charset=utf-8")
-  let _ = w.Write(html.bytes())
+  render_html(w, "board-page", PageVM { rail, page: vm })
 }
 
 /// The ordering picker's options (TASK-209): each is the current URL with
@@ -442,16 +433,7 @@ fn issue_page(w: http.ResponseWriter, r: Ref<http.Request>, team: models.Team, m
   if let Ok(Some(_)) = fetch_favorite(issue.id) { page.favorited = true }
   page.emojis = emoji_catalog()
   let vm = PageVM { rail: rail_vm("board", me, team), page }
-  let html = match render("issue-page", vm) {
-    Ok(h) => h,
-    Err(e) => {
-      http.Error(w, e, 500)
-      return
-    },
-  }
-  w.Header().Set("Cache-Control", "no-store")
-  w.Header().Set("Content-Type", "text/html; charset=utf-8")
-  let _ = w.Write(html.bytes())
+  render_html(w, "issue-page", vm)
 }
 
 /// The configured team record, re-read per page load. /settings can change

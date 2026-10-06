@@ -447,6 +447,7 @@ fn dispatch_preserves_help_as_an_alias_value_and_stops_real_help() {
       if input.parsed.one("-b") != "--help" { return Err("wrong body") }
       Ok(())
     },
+    ..
   }]
   for alias in ["-b", "--body", "-m", "--message"] {
     assert dispatch("doc", "", "", commands, ["lll", "doc", "create", alias, "--help"]).is_ok()
@@ -474,10 +475,50 @@ fn dispatch_hands_over_unicode_and_empty_positionals_without_reinterpreting_them
       if input.parsed.first() != "ÉNG-12" || input.parsed.nth(1) != "" { return Err("changed positional") }
       Ok(())
     },
+    ..
   }]
   assert dispatch("test", "", "", commands, ["lll", "test", "set", "ÉNG-12", ""]).is_ok()
   let assert Err(extra) = dispatch("test", "", "", commands, ["lll", "test", "set", "ÉNG-12", "", "extra"])
   assert extra.contains("unexpected argument: 'extra'")
   let assert Err(flag) = dispatch("test", "", "", commands, ["lll", "test", "set", "--unknown"])
   assert flag.contains("unknown flag: '--unknown'")
+}
+
+/// Fleet (scoped-access, case 10): 3 of 10 agents typed '--teams' for
+/// '--team'. A near miss names the flag; an unrelated one does not guess.
+#[test]
+fn unknown_flag_names_a_near_miss_and_only_a_near_miss() {
+  let spec = [
+    Flag { name: "--label", value: true, hint: "name", repeat: true, help: "label", .. },
+    Flag { name: "--team", value: true, hint: "KEY", help: "team", .. },
+  ]
+  assert unknown_flag("--labels", "lll x", spec).starts_with("unknown flag: '--labels' — did you mean '--label'?")
+  assert unknown_flag("--teams=ALPHA", "lll x", spec).contains("did you mean '--team'?")
+  assert !unknown_flag("--zzzzzz", "lll x", spec).contains("did you mean")
+  assert edit_distance("--teams", "--team") == 1
+  assert edit_distance("", "abc") == 3
+}
+
+#[test]
+fn command_alias_dispatch_uses_canonical_help_and_parser() {
+  let commands = [Command {
+    name: "view", alias: "show", summary: "view", page: "", spec: [],
+    positional: "KEY", run: |input| {
+      if input.parsed.first() != "DEMO-1" { return Err("wrong key") }
+      Ok(())
+    },
+  }]
+  assert dispatch("issue", "", "", commands, ["lll", "issue", "show", "DEMO-1"]).is_ok()
+  let assert Err(help) = dispatch("issue", "", "", commands, ["lll", "issue", "show", "--help"])
+  assert help.contains("lll issue view KEY")
+  assert !help.contains("lll issue show")
+  assert command_names(commands).equals(["view", "show"])
+  assert resolve_command(commands, "read").is_none()
+}
+
+#[test]
+fn empty_command_alias_does_not_resolve_an_empty_verb() {
+  let commands = [Command { name: "list", run: |_| Ok(()), .. }]
+  assert resolve_command(commands, "").is_none()
+  assert command_names(commands).equals(["list"])
 }
