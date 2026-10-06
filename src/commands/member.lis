@@ -44,7 +44,7 @@ pub fn member_commands() -> Slice<flags.Command> {
       ..
     },
     flags.Command {
-      name: "create", aliases: "add",
+      name: "create", alias: "add",
       summary: "add a member",
       page: member_add_page(),
       spec: member_add_spec(),
@@ -69,7 +69,7 @@ pub fn member_commands() -> Slice<flags.Command> {
       ..
     },
     flags.Command {
-      name: "delete", aliases: "remove",
+      name: "delete", alias: "remove",
       summary: "remove a member; guard assignments and comments",
       page: member_remove_page(),
       spec: member_remove_spec(),

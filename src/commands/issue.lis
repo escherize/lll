@@ -408,7 +408,7 @@ pub fn issue_commands() -> Slice<flags.Command> {
       ..
     },
     flags.Command {
-      name: "create", aliases: "new",
+      name: "create", alias: "new",
       summary: "create an issue in the configured team; -d - reads the description from stdin; without --state it starts in todo",
       page: issue_create_page(),
       spec: issue_create_spec(),
@@ -430,7 +430,7 @@ pub fn issue_commands() -> Slice<flags.Command> {
       ..
     },
     flags.Command {
-      name: "view", aliases: "show",
+      name: "view", alias: "show",
       summary: "show one issue in full, with comments; --raw prints it as plain markdown; -w opens its web page instead",
       spec: issue_view_spec(),
       positional: "[KEY-123]",
