@@ -712,6 +712,9 @@ input:focus, textarea:focus, select:focus {
   .new-issue input { flex: 1; width: auto; min-width: 0; }
   .ni-shade { padding: 4vh 10px 10px; }
   .ni-dialog { max-height: 92vh; }
+  .ni-foot { display: grid; grid-template-columns: 1fr auto; }
+  .ni-hint, .ni-more { grid-column: 1 / -1; }
+  .ni-foot button { justify-self: end; white-space: nowrap; }
   .board { padding: 10px 12px; }
   .column { flex: 0 0 240px; min-width: 240px; }
   .issue-scroll {
