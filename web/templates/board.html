@@ -65,8 +65,8 @@ provenance.
         <!-- The one-line composer is the fast path and stays exactly as it
              was: type, Enter, done. This button is the escape hatch to the
              full form, carrying whatever is already typed with it. -->
-        <button type="button" id="ni-expand" class="ni-expand" title="Full form (c)" aria-label="Open the full create form" data-on:click="$ni_open = true"><svg width="14" height="14"><use href="#ic-expand"/></svg></button>
-        <select name="state">
+        <button type="button" id="ni-expand" class="ni-expand" title="Full form (c)" aria-label="Open the full create form" data-on:click="$ni_from_button = true; $ni_open = true"><svg width="14" height="14"><use href="#ic-expand"/></svg></button>
+        <select name="state" aria-label="Issue state">
         {{range .Page.States}}<option value="{{.Value}}"{{if eq .Value "todo"}} selected{{end}}>{{.Label}}</option>
         {{end}}</select>
         <button type="button" class="btn primary" data-on:click="document.getElementById('new-title').value.trim() ? @post('/create', {contentType: 'form'}) : document.getElementById('new-title').focus()"><svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true"><path d="M6 1.5 V10.5 M1.5 6 H10.5" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg> New issue</button>
@@ -117,7 +117,7 @@ provenance.
 {{range .Cards}}{{template "card" .}}
 {{end}}</section>{{end}}
 
-{{define "card"}}<a class="card" id="issue-{{.Id}}" href="/issue/{{.Key}}" draggable="true" data-search="{{.Key}} {{.Title}}{{range .Labels}} {{.Name}}{{end}}{{if .Assignee}} {{.Assignee}}{{end}}" data-fkeys="|state:{{.State}}|prio:{{.Prio}}{{if .Assignee}}|assignee:{{.Assignee}}{{end}}{{range .Labels}}|label:{{.Name}}{{end}}|" data-show="(!$search || el.dataset.search.toLowerCase().includes($search.toLowerCase())) && $flt.every(f => el.dataset.fkeys.includes('|' + f + '|'))" data-on:dragstart="evt.dataTransfer.setData('text/plain', '{{.Key}}'); evt.dataTransfer.effectAllowed = 'move'" data-on:dragend="document.querySelectorAll('.card.drop-before').forEach(c => c.classList.remove('drop-before')); document.querySelectorAll('.column.drop-end').forEach(c => c.classList.remove('drop-end')); document.querySelectorAll('.column.drop-append').forEach(c => c.classList.remove('drop-append'))">
+{{define "card"}}<a class="card" id="issue-{{.Id}}" href="/issue/{{.Key}}" draggable="true" data-search="{{.Key}} {{.Title}}{{range .Labels}} {{.Name}}{{end}}{{if .Assignee}} {{.Assignee}}{{end}}" data-fkeys="|state:{{.State}}|prio:{{.Prio}}{{if .Assignee}}|assignee:{{.Assignee}}{{end}}{{range .Labels}}|label:{{.Name}}{{end}}{{if .ProjectId}}|project:{{.ProjectId}}{{end}}|" data-show="(!$search || el.dataset.search.toLowerCase().includes($search.toLowerCase())) && $flt.every(f => el.dataset.fkeys.includes('|' + f + '|'))" data-on:dragstart="evt.dataTransfer.setData('text/plain', '{{.Key}}'); evt.dataTransfer.effectAllowed = 'move'" data-on:dragend="document.querySelectorAll('.card.drop-before').forEach(c => c.classList.remove('drop-before')); document.querySelectorAll('.column.drop-end').forEach(c => c.classList.remove('drop-end')); document.querySelectorAll('.column.drop-append').forEach(c => c.classList.remove('drop-append'))">
 <span class="row1">{{.Key}}{{if .Emoji}}<span class="emoji">{{.Emoji}}</span>{{end}}<span class="flex"></span>{{template "priority-icon" .Prio}}</span>
 <span class="title">{{.Title}}</span>
 {{if .Labels}}<span class="row3">{{range .Labels}}<span class="chip"><span class="dot" style="background:{{if .Color}}{{.Color}}{{else}}var(--text-3){{end}}"></span>{{.Name}}</span>{{end}}</span>{{end}}
@@ -143,6 +143,8 @@ provenance.
      $flt still exists, seeded from the URL, but it guards rather than
      drives: /events delivers ONE unfiltered #board, and each card's
      data-show hides the cards the URL excludes until the next navigation.
+     A project key is the record id, not the name (LLL-523): the board
+     fetch does not expand the relation, so the card only knows the id.
      The localStorage write-back records the last view's query string, which
      data-init reads ONLY to migrate a pre-cookie browser into the
      saved-view cookie (LLL-375).
@@ -156,7 +158,7 @@ provenance.
      clears $fltq, because a query that outlived its menu comes back next time
      hiding every option, which reads as an empty menu, not a stale filter. */}}
 {{define "filterbar"}}<div class="filterbar" data-signals:flt="{{.FltSeed}}" data-signals:fltmenu="''" data-signals:fltq="''" data-computed:fltq_lc="$fltq.trim().toLowerCase()" data-signals:sv="false" data-effect="localStorage.setItem('lllView', location.search)">
-<div class="flt-add" data-on:click__outside="$fltmenu = ''; $fltq = ''">
+<div class="flt-add" data-on:click__outside="$fltmenu = ''; $fltq = ''" data-on:keydown="evt.key === 'Escape' && ($fltmenu = '', $fltq = '', setTimeout(() => el.querySelector('.flt-plus').focus(), 0))">
   <button type="button" class="flt-plus" data-on:click="$fltmenu = $fltmenu ? '' : 'root'; $fltq = ''"><svg width="10" height="10" viewBox="0 0 10 10" aria-hidden="true"><path d="M5 1.2 V8.8 M1.2 5 H8.8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg> Filter</button>
   <div class="flt-menu" style="display:none" data-show="$fltmenu === 'root'">
   {{range .FilterGroups}}<button type="button" data-on:click="$fltmenu = '{{.Dim}}'; $fltq = ''">{{.Label}}</button>
@@ -167,7 +169,7 @@ provenance.
        interpolates a label into a JS string literal, which a label containing
        an apostrophe would break; attribute escaping handles the dataset. */}}
   {{range $g := .FilterGroups}}<div class="flt-menu" style="display:none" data-show="$fltmenu === '{{$g.Dim}}'">
-  {{if gt (len $g.Opts) 8}}<span class="flt-search"><svg width="13" height="13" aria-hidden="true"><use href="#ic-search"/></svg><input type="text" placeholder="Filter" autocomplete="off" aria-label="Filter {{$g.Label}} options" data-bind:fltq data-effect="$fltmenu === '{{$g.Dim}}' && setTimeout(() => el.focus(), 0)" data-on:keydown="evt.key === 'Escape' && ($fltmenu = '', $fltq = '')"></span>
+  {{if gt (len $g.Opts) 8}}<span class="flt-search"><svg width="13" height="13" aria-hidden="true"><use href="#ic-search"/></svg><input type="text" placeholder="Filter" autocomplete="off" aria-label="Filter {{$g.Label}} options" data-bind:fltq data-effect="$fltmenu === '{{$g.Dim}}' && setTimeout(() => el.focus(), 0)"></span>
   {{end}}<div class="flt-opts">
   {{range $g.Opts}}<a class="flt-opt{{if .Active}} on{{end}}" href="{{.Href}}" data-n="{{.Label}}" data-show="!$fltq_lc || el.dataset.n.toLowerCase().includes($fltq_lc)" data-on:click="$fltmenu = ''; $fltq = ''"><span class="dim">{{$g.Label}}</span> {{.Label}} <span class="count">{{.Count}}</span></a>
   {{end}}</div></div>
@@ -219,10 +221,10 @@ provenance.
      names are global here (TASK-106), so a new surface namespaces both.
 
      TASK-72's emoji picker slots in beside the title input when it lands. */}}
-{{define "new-issue-dialog"}}<div id="ni-modal" data-signals:ni_open="false" data-signals:ni_more="false" data-signals:ni_reopen="false">
-<div class="ni-shade" style="display:none" data-show="$ni_open" data-on:click="evt.target === el && ($ni_open = false)" data-on:keydown__window="evt.key === 'Escape' ? ($ni_open = false) : (evt.key === 'c' && !evt.metaKey && !evt.ctrlKey && !evt.altKey && evt.target === document.body && (evt.preventDefault(), $ni_open = true))">
-<form id="ni-form" class="ni-dialog" aria-label="New issue" aria-describedby="ni-flash" data-effect="$ni_open && setTimeout(() => { const t = document.getElementById('ni-title'); const error = document.getElementById('ni-flash'); error.hidden = true; error.textContent = ''; if ($ni_reopen) { $ni_reopen = false; t.value = ''; document.getElementById('ni-desc').value = ''; t.focus() } else { el.reset(); document.getElementById('ni-more').checked = $ni_more; t.value = document.getElementById('new-title').value; t.focus(); t.select() } }, 0)">
-<div class="ni-head">New issue<span class="ni-flex"></span><button type="button" class="ni-x" aria-label="Close" data-on:click="$ni_open = false"><svg width="10" height="10" viewBox="0 0 10 10" aria-hidden="true"><path d="M2 2 L8 8 M8 2 L2 8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg></button></div>
+{{define "new-issue-dialog"}}<div id="ni-modal" data-signals:ni_from_button="false" data-signals:ni_dismiss="false" data-effect="$ni_dismiss &amp;&amp; !$ni_open &amp;&amp; ($ni_dismiss = false, $ni_from_button &amp;&amp; setTimeout(() => document.getElementById('ni-expand').focus(), 0))" data-signals:ni_open="false" data-signals:ni_more="false" data-signals:ni_reopen="false">
+<div class="ni-shade" style="display:none" data-show="$ni_open" data-on:click="evt.target === el && ($ni_open = false)" data-on:keydown__window="evt.key === 'Escape' ? ($ni_open &amp;&amp; ($ni_dismiss = true, $ni_open = false)) : (evt.key === 'c' && !evt.metaKey && !evt.ctrlKey && !evt.altKey && evt.target === document.body && (evt.preventDefault(), $ni_from_button = false, $ni_open = true))">
+<form id="ni-form" role="dialog" class="ni-dialog" aria-label="New issue" aria-describedby="ni-flash" data-effect="$ni_open && setTimeout(() => { const t = document.getElementById('ni-title'); const error = document.getElementById('ni-flash'); error.hidden = true; error.textContent = ''; if ($ni_reopen) { $ni_reopen = false; t.value = ''; document.getElementById('ni-desc').value = ''; t.focus() } else { el.reset(); document.getElementById('ni-more').checked = $ni_more; t.value = document.getElementById('new-title').value; t.focus(); t.select() } }, 0)">
+<div class="ni-head">New issue<span class="ni-flex"></span><button type="button" class="ni-x" aria-label="Close" data-on:click="$ni_dismiss = true; $ni_open = false"><svg width="10" height="10" viewBox="0 0 10 10" aria-hidden="true"><path d="M2 2 L8 8 M8 2 L2 8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg></button></div>
 <div id="ni-flash" class="flash" role="alert" aria-atomic="true" hidden></div>
 <input type="hidden" name="flash_target" value="ni-flash">
 <input type="hidden" name="team" value="{{.TeamKey}}">
@@ -235,7 +237,7 @@ provenance.
   <select name="project" aria-label="Project"><option value="">No project</option>{{range .Compose.Projects}}<option value="{{.Id}}">{{.Name}}</option>{{end}}</select>
 </div>
 {{if .Compose.Labels}}<div class="ni-labels"><span class="ni-key">Labels</span>{{range .Compose.Labels}}<label class="ni-lab"><input type="checkbox" name="labels" value="{{.Id}}"><span class="chip"><span class="dot" style="background:{{if .Color}}{{.Color}}{{else}}var(--text-3){{end}}"></span>{{.Name}}</span></label>{{end}}</div>
-{{end}}<div class="ni-foot"><span class="ni-hint">Enter to create · Esc to close</span><label class="ni-more" title="Keep this dialog open to file the next issue"><input id="ni-more" type="checkbox" data-bind:ni_more><span>Create more</span></label><button type="button" class="btn" data-on:click="$ni_open = false">Cancel</button><button type="button" id="ni-create" class="btn primary" data-on:click="if (!document.getElementById('ni-title').value.trim()) { document.getElementById('ni-title').focus() } else if (!$ni_more) { @post('/create', {contentType: 'form'}) } else { (async () => { await @post('/create', {contentType: 'form'}); if (!$ni_open) { $ni_reopen = true; $ni_open = true } else { document.getElementById('ni-title').focus() } })() }">Create issue</button></div>
+{{end}}<div class="ni-foot"><span class="ni-hint">Enter to create · Esc to close</span><label class="ni-more" title="Keep this dialog open to file the next issue"><input id="ni-more" type="checkbox" data-bind:ni_more><span>Create more</span></label><button type="button" class="btn" data-on:click="$ni_dismiss = true; $ni_open = false">Cancel</button><button type="button" id="ni-create" class="btn primary" data-on:click="if (!document.getElementById('ni-title').value.trim()) { document.getElementById('ni-title').focus() } else if (!$ni_more) { @post('/create', {contentType: 'form'}) } else { (async () => { await @post('/create', {contentType: 'form'}); if (!$ni_open) { $ni_reopen = true; $ni_open = true } else { document.getElementById('ni-title').focus() } })() }">Create issue</button></div>
 </form>
 </div>
 </div>{{end}}

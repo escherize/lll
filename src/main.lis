@@ -12,9 +12,13 @@ fn main() {
     return
   }
 
+  let skew = commands.version_skew_check(noun)
   let result = match commands.scoped_args(os.Args) {
     Ok(args) => dispatch(noun, args),
     Err(msg) => Err(msg),
+  }
+  if let Some(Some(line)) = skew.receive() {
+    fmt.Fprintln(os.Stderr, line)
   }
 
   if let Err(msg) = result {
@@ -95,7 +99,8 @@ Every verb lives under a noun: 'lll issue list', 'lll issue comment KEY \"body\"
 Usage:
   lll issue <command>     work with issues (see 'lll issue --help')
   lll search <text>       full-text search: issues, comments, docs, ranked, with context
-  lll bot <name>          an agent identity in one command: member + token, printed once
+  lll bot bot-<name>      an agent identity in one command: member + token, printed
+                          once; the name must start with bot- (lll bot bot-myrepo)
   lll team <command>      work with teams (see 'lll team --help')
   lll member <command>    work with members (see 'lll member --help')
   lll project <command>   work with projects (see 'lll project --help')
@@ -131,6 +136,7 @@ Usage:
                           server POSTs issue events to (see 'lll webhook --help')
   lll up [--port 8100]    start the lll server and web board together (see 'lll up --help')
   lll board [-w]          print the web board URL; -w opens it (see 'lll board --help')
+  lll board --team KEY    a view-only link to one team's board, no account needed
   lll skill list          the agent operating instructions in this binary
   lll skill get NAME      one of them as markdown (see 'lll skill --help')
   lll completions <shell> completion script for bash, zsh, or fish
@@ -181,6 +187,12 @@ fn unknown_command(noun: string, verb: string) -> string {
       // the user had right. So the verb rides along (LLL-313).
       let rest = if verb == "" || verb.starts_with("-") { "" } else { f" {verb}" }
       return f"unknown command: '{noun}{rest}' — it is an issue verb: 'lll issue {noun} ...' (see 'lll issue {noun} -h')"
+    }
+  }
+  // 'lll invite' is a member verb (fleet case 11), the same mistake shape.
+  for c in commands.member_commands() {
+    if c.name == noun {
+      return f"unknown command: '{noun}' — it is a member verb: 'lll member {noun} ...' (see 'lll member {noun} -h')"
     }
   }
   f"unknown command: '{noun}' (see 'lll --help')"

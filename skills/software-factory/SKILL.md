@@ -48,7 +48,8 @@ Hands to stage 2: one issue, claimed.
 
 ## 2. Isolate - where do I work?
 
-[parallel-work](../parallel-work/SKILL.md)
+`parallel-work`, in the lll repo only. It does not ship with the binary; in
+another repo, this section is the guidance.
 
 Two agents in one checkout is not a merge problem, it is a corruption problem.
 Take a worktree before the first edit.
@@ -57,24 +58,27 @@ The part people miss is what a worktree does NOT isolate: the stash stack, the
 refs, and the remote are shared. Never `git stash` here.
 
 Hands to stage 3: a worktree, a branch cut from the commit you meant, and a
-claim on the board that is the actual lock.
+claim on the board that is the actual lock - between members. Agents sharing
+one token are one member; parallel-work says what to do instead.
 
 ## 3. Build - the codebase itself
 
-Three skills, loaded only when the work touches their area. Do not read them
+Skills loaded only when the work touches their area. Do not read them
 speculatively; they are reference, not process.
 
-**This is the one stage that cannot be shipped**, because it is made of things
-that are only true here. A repo adopting this loop starts with an empty stage 3
+**This stage can never be shipped**, because it is made of things that are
+only true in one repo. A repo adopting this loop starts with an empty stage 3
 and builds its own: [codebase-skills](../codebase-skills/SKILL.md) is the
 interview that does it.
 
-- [lisette-interop](../lisette-interop/SKILL.md) - Lisette and Go crossing:
+In the lll repo (none of these ship with the binary):
+
+- `lisette-interop` - Lisette and Go crossing:
   text offsets, partial I/O, package-level state (there is none; the compiler
   rejects it), embedded resources.
-- [datastar-fragments](../datastar-fragments/SKILL.md) - the live board: SSE
+- `datastar-fragments` - the live board: SSE
   routing, fragment ownership, drafts a broadcast must not clear.
-- [pocketbase](../pocketbase/SKILL.md) - anything under `pb/` or `gopb/`:
+- `pocketbase` - anything under `pb/` or `gopb/`:
   migrations, collection rules (empty string means PUBLIC), realtime, auth.
 
 One issue per change. Found a second problem? File it and carry on.
@@ -86,7 +90,8 @@ the stack reads as an argument instead of asking a reviewer to trust you.
 
 ## 4. Verify - is it actually true?
 
-[verify-gate](../verify-gate/SKILL.md)
+`verify-gate`, in the lll repo only. It does not ship with the binary; in
+another repo, this section is the guidance.
 
 The gate is one command:
 
@@ -153,18 +158,21 @@ a measurement. Every issue closes carrying exactly one outcome label:
 immediately before it. Create the three once per team with `lll label create`;
 run `lll label list` first and reuse rather than minting near-duplicates.
 
-**`--label` REPLACES the set, it does not add to it.** `lll issue update
-LLL-123 --label outcome:clean` writes that one label and drops every other
-label the issue was carrying. Pass the existing ones alongside it:
+**Use `--add-label`, not `--label`.** `--label` REPLACES the set: `lll issue
+update LLL-123 --label outcome:clean` writes that one label and drops every
+other label the issue was carrying. `--add-label` adds one label and keeps the
+rest:
 
 ```sh
-lll issue update LLL-123 --label bug --label web --label outcome:clean
+lll issue update LLL-123 --add-label outcome:clean
 lll issue close LLL-123
 ```
 
-Read the issue's current labels first and repeat them, or accept that a
-one-label update is a deliberate reset. This has no `--add-label`; the repeated
-flag is the whole vocabulary.
+`--add-label` and `--remove-label` repeat. Each changes only the labels it
+names, so a label another agent adds at the same time with `--add-label` is
+kept (LLL-513). `--label` and the board's label picker still write the whole
+set from an earlier read, so either can drop a concurrent add. The two flags
+cannot be combined with `--label`.
 
 Then the ratio is a query rather than an archaeology project:
 

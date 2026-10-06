@@ -27,9 +27,8 @@ import "references"
 /// Comments and members are not imported. Nothing here can forge another
 /// member's authorship, so `KEY-N.comments.md` is export-only.
 fn import_dir(input: flags.CommandInput) -> Result<(), string> {
-  let spec = dir_spec()
   let p = input.parsed
-  let usage = flags.usage("lll import dir", spec, "DIR")
+  let usage = input.usage
   let dir = p.first()
   if dir == "" { return Err(f"which directory?\nusage: {usage}") }
 

@@ -26,96 +26,58 @@ pub fn doc(args: Slice<string>) -> Result<(), string> {
 pub fn doc_commands() -> Slice<flags.Command> {
   [
     flags.Command {
-      name: "new",
+      name: "create", alias: "new",
       summary: "create a doc; -b - reads the body from stdin",
-      page: "",
       spec: doc_new_spec(),
-      positional: "",
       run: doc_new,
-    },
-    // Alias by the same rule issue.lis records: a spelling guessed by more
-    // than one agent in thirty, on a clean run, is a design signal rather
-    // than a typo (finding doc 2026-09-07-fleet-graph-first-four-tasks, ten
-    // runs of thirty). Kept deliberately; do not remove as a duplicate.
-    flags.Command {
-      name: "create",
-      summary: "the same command as 'new'",
-      page: "",
-      spec: doc_new_spec(),
-      positional: "",
-      run: doc_new,
+      ..
     },
     flags.Command {
       name: "list",
       summary: "list docs (slug, kind, title), one line each",
-      page: "",
       spec: doc_list_spec(),
-      positional: "",
       run: doc_list,
+      ..
     },
     flags.Command {
-      name: "view",
+      name: "view", alias: "show",
       summary: "show one doc with its linked issues; --raw prints only the body; --json prints the raw record",
-      page: "",
       spec: doc_view_spec(),
       positional: "SLUG",
       run: doc_view,
-    },
-    // Alias by the same rule issue.lis records: a spelling guessed by more
-    // than one agent in thirty, on a clean run, is a design signal rather
-    // than a typo (finding doc 2026-09-07-fleet-graph-first-four-tasks, ten
-    // runs of thirty). Kept deliberately; do not remove as a duplicate.
-    flags.Command {
-      name: "show",
-      summary: "the same command as 'view'",
-      page: "",
-      spec: doc_view_spec(),
-      positional: "SLUG",
-      run: doc_view,
-    },
-    // Alias by the same rule issue.lis records: a spelling guessed by more
-    // than one agent in thirty, on a clean run, is a design signal rather
-    // than a typo (finding doc 2026-09-07-fleet-graph-first-four-tasks, ten
-    // runs of thirty). Kept deliberately; do not remove as a duplicate.
-    flags.Command {
-      name: "read",
-      summary: "the same command as 'view'",
-      page: "",
-      spec: doc_view_spec(),
-      positional: "SLUG",
-      run: doc_view,
+      ..
     },
     flags.Command {
       name: "edit",
       summary: "replace fields (at least one flag); -b - reads the whole body from stdin",
-      page: "",
       spec: doc_edit_spec(),
       positional: "SLUG",
       run: doc_edit,
+      ..
     },
     flags.Command {
       name: "delete",
       summary: "delete; asks [y/N] unless --force",
-      page: "",
       spec: doc_delete_spec(),
       positional: "SLUG",
       run: doc_delete,
+      ..
     },
     flags.Command {
       name: "link",
       summary: "link the doc to an issue — 'lll issue link KEY-123 SLUG' does the same",
-      page: "",
       spec: flags.with_team([]),
       positional: "SLUG KEY-123",
       run: doc_link,
+      ..
     },
     flags.Command {
       name: "unlink",
       summary: "remove that link — 'lll issue unlink KEY-123 SLUG' does the same",
-      page: "",
       spec: flags.with_team([]),
       positional: "SLUG KEY-123",
       run: doc_unlink,
+      ..
     },
   ]
 }
@@ -205,7 +167,7 @@ pub fn check_confidence(val: string) -> Result<string, string> {
 pub fn parse_paths(val: string) -> string {
   let mut out: Slice<string> = []
   for raw in strings.Split(val, ",") {
-    let p = strings.Trim(strings.TrimSpace(raw), "/")
+    let p = norm_path(raw)
     if p == "" { continue }
     if out.find(|x| x == p).is_some() { continue }
     out = out.append(p)
@@ -232,7 +194,7 @@ pub fn path_touches(entry: string, path: string) -> bool {
 /// The query side of `lll finding near <path>` is raw argv, and shell path
 /// completion hands over `./src/pb` routinely; `./x` and `x` name the same
 /// place, so a stored entry on `src/pb` has to answer for both. `parse_paths`
-/// already promises this in its doc comment - this is what makes it true.
+/// uses this same normalization before deduplicating stored metadata.
 fn norm_path(val: string) -> string {
   let mut s = strings.TrimSpace(val)
   while strings.HasPrefix(s, "./") { s = strings.TrimPrefix(s, "./") }
@@ -287,7 +249,7 @@ fn doc_new_spec() -> Slice<flags.Flag> {
     },
     flags.Flag {
       name: "-p",
-      alias: "--paths --path",
+      alias: "--paths",
       value: true,
       hint: "paths",
       help: "comma-separated file/directory paths the doc is about, e.g.\nsrc/pb, pb/pb_migrations ('lll finding near' matches by them)",
@@ -376,7 +338,7 @@ fn doc_edit_spec() -> Slice<flags.Flag> {
     },
     flags.Flag {
       name: "-p",
-      alias: "--paths --path",
+      alias: "--paths",
       value: true,
       hint: "paths",
       help: "replacement comma-separated paths — the WHOLE set\n(pass \"\" to clear it)",
@@ -472,7 +434,7 @@ fn doc_list_spec() -> Slice<flags.Flag> {
     },
     flags.Flag {
       name: "--search",
-      alias: "--query",
+      alias: "",
       value: true,
       hint: "text",
       help: "only docs whose slug or title contains text",
@@ -498,16 +460,15 @@ fn doc_list(input: flags.CommandInput) -> Result<(), string> {
   for d in docs.items {
     let mut kind = d.kind
     if kind == "" { kind = "-" }
-    fmt.Println(f"{d.slug}\t{kind}\t{d.title}")
+    fmt.Println(f"{d.slug}\t{kind}\t{display.table_cell(d.title)}")
   }
   Ok(())
 }
 
 fn doc_view(input: flags.CommandInput) -> Result<(), string> {
-  let spec = doc_view_spec()
   let p = input.parsed
   let slug = p.first()
-  let usage = flags.usage("lll doc view", spec, "SLUG")
+  let usage = input.usage
   if slug == "" { return Err(f"usage: {usage}") }
   let json_mode = p.given("--json")
   let raw_mode = p.given("--raw")
@@ -530,12 +491,12 @@ fn doc_view(input: flags.CommandInput) -> Result<(), string> {
     return Ok(())
   }
 
-  fmt.Println(f"{d.slug} {d.title}{confidence_suffix(d.confidence, d.confidence_note)}")
+  fmt.Println(f"{d.slug} {display.table_cell(d.title)}{display.table_cell(confidence_suffix(d.confidence, d.confidence_note))}")
   fmt.Println("")
   fmt.Println(f"Kind:      {d.kind}")
-  if d.confidence_note != "" { fmt.Println(f"Note:      {d.confidence_note}") }
-  if d.area != "" { fmt.Println(f"Area:      {d.area}") }
-  if d.paths != "" { fmt.Println(f"Paths:     {d.paths}") }
+  if d.confidence_note != "" { fmt.Println(f"Note:      {display.table_cell(d.confidence_note)}") }
+  if d.area != "" { fmt.Println(f"Area:      {display.table_cell(d.area)}") }
+  if d.paths != "" { fmt.Println(f"Paths:     {display.table_cell(d.paths)}") }
   fmt.Println(f"Created:   {display.relative(d.created)}")
   fmt.Println(f"Updated:   {display.relative(d.updated)}")
   if d.expand.issues.length() > 0 {
@@ -550,8 +511,7 @@ fn doc_view(input: flags.CommandInput) -> Result<(), string> {
 }
 
 fn doc_edit(input: flags.CommandInput) -> Result<(), string> {
-  let spec = doc_edit_spec()
-  let usage = flags.usage("lll doc edit", spec, "SLUG")
+  let usage = input.usage
   let p = input.parsed
   let slug = p.first()
   if slug == "" { return Err(f"usage: {usage}") }

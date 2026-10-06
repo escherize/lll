@@ -565,11 +565,12 @@ fn stale_token(base: string, origin: string) -> string {
     "your token"
   }
   f"{from} was rejected by {base}
-it is well-formed, but the server does not recognise it, so every read comes
-back empty rather than failing. In order of likelihood:
+it is well-formed, but the server does not recognise it. In order of
+likelihood:
   1. it was copied wrong - compare it byte-for-byte with where it came from
   2. the password behind it was reset, which retires earlier tokens
-  3. it expired
+  3. the member was removed, or its token revoked - ask whoever invited you
+  4. it expired
 a fresh one: 'lll login --email <your email>' (a person) or 'lll token create'
 (an agent's, minted by a superuser)"
 }

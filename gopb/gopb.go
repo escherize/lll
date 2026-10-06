@@ -66,6 +66,9 @@ func Serve(dataDir, addr, adminEmail, adminPassword string) error {
 	registerIssueIdempotency(app)
 	registerWebhookDelivery(app)
 	registerMemberGuards(app)
+	registerMemberScopeDefault(app)
+	registerScopedRefGuard(app)
+	registerFilterNameGuards(app)
 	registerIssuePrecondition(app)
 	registerClaimExpiry(app)
 	// LLL-235: a team key is uppercase, whoever writes it. Keys were stored
@@ -137,18 +140,10 @@ func Serve(dataDir, addr, adminEmail, adminPassword string) error {
 			if re.Auth == nil && recordsPath.MatchString(re.Request.URL.Path) {
 				return re.UnauthorizedError(anonMessage, nil)
 			}
-			if re.Request.Method == http.MethodPatch || re.Request.Method == http.MethodDelete {
-				id := re.Request.PathValue("id")
-				if id != "" {
-					collection, err := re.App.FindCachedCollectionByNameOrId(re.Request.PathValue("collection"))
-					if err == nil && collection.Name == "issues" {
-						unlock := issueUpdates.acquire(id)
-						defer unlock()
-					}
-				}
-			}
 			return re.Next()
 		})
+		e.Router.BindFunc(serializeRecordUpdates(&issueUpdates))
+		e.Router.BindFunc(refuseReadOnlyWrites)
 		return e.Next()
 	})
 

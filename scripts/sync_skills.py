@@ -22,6 +22,7 @@ Only skills about USING lll belong here. Skills about THIS codebase -
 lisette-interop, datastar-fragments, pocketbase - are noise or worse inside a
 binary someone runs against a different repo.
 """
+import re
 import shutil
 import sys
 from pathlib import Path
@@ -56,6 +57,19 @@ def present() -> dict[str, str]:
 def main() -> None:
     check = "--check" in sys.argv[1:]
     want, have = wanted(), present()
+
+    # A shipped skill that links to a skill the binary lacks is a dead link in
+    # every other repo (LLL-538). Name such a skill in plain text instead.
+    dead = [
+        f"{name} links to {target}, which does not ship"
+        for name, text in want.items()
+        for target in re.findall(r"\]\(\.\./([^/)]+)/SKILL\.md\)", text)
+        if target not in PORTABLE
+    ]
+    if dead:
+        for line in dead:
+            print(f"  {line}", file=sys.stderr)
+        sys.exit("shipped skills link to unshipped ones — name them in plain text")
 
     if check:
         if want == have:

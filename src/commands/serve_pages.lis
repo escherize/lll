@@ -34,6 +34,15 @@ fn rail_vm(active: string, me: string, team: models.Team) -> RailVM {
   }
 }
 
+/// The rail for this request's viewer. A viewer on a team-scoped board link
+/// sees its own team in the switcher and no favorites or saved views: those
+/// belong to the whole workspace and name other teams' issues.
+fn rail_for(r: Ref<http.Request>, active: string, me: string, team: models.Team) -> RailVM {
+  let rail = rail_vm(active, me, team)
+  let Some(key) = viewer_scope(r) else { return rail }
+  RailVM { teams: rail.teams.filter(|t| t.key == key), favorites: [], views: [], ..rail }
+}
+
 /// The board path for a team key: "/t/KEY/", or "/" when no key scopes the
 /// page (defensive — run_server insists on a boot team). TASK-198.
 fn board_base(key: string) -> string {
@@ -178,6 +187,22 @@ fn board_page(w: http.ResponseWriter, r: Ref<http.Request>, team: models.Team, m
       Err(e) => { if err == "" { err = e } },
     }
   }
+  // Projects filter by id (LLL-523): the URL speaks names, as /issues does,
+  // and the resolved id is what a board issue carries without an expand.
+  // Split on commas like every board dimension, which is a known limit: a
+  // project named "Q3, infra" cannot be filtered here, though /issues takes
+  // ?project= as one value. Labels share the limit.
+  let mut projects: Slice<string> = []
+  let mut project_ids: Slice<string> = []
+  for p in csv(raw.project) {
+    match records.resolve_project(team_id, p) {
+      Ok(found) => {
+        projects = projects.append(p)
+        project_ids = project_ids.append(found.id)
+      },
+      Err(e) => { if err == "" { err = e } },
+    }
+  }
   let mut prios: Slice<string> = []
   for p in csv(raw.prio) {
     if display.priority_value(p).is_some() {
@@ -209,10 +234,12 @@ fn board_page(w: http.ResponseWriter, r: Ref<http.Request>, team: models.Team, m
   // "Bare" means the URL says nothing the board can render — the same test
   // data-init used to apply to the localStorage restore. Any other URL is a
   // full view statement (TASK-94): it overrides the cookie, and the write
-  // below clears or rewrites it to match. project and sort are /issues
-  // dimensions the board drops, so they leave a URL bare, exactly as they
-  // left the canonical query string empty before.
-  let bare = raw.state == "" && raw.assignee == "" && raw.label == "" && raw.prio == "" && raw.order == ""
+  // below clears or rewrites it to match. sort is an /issues dimension the
+  // board drops, so it leaves a URL bare, exactly as it leaves the canonical
+  // query string empty. project used to be dropped too; since LLL-523 the
+  // board filters on it, so a ?project= URL is a view statement like ?label=.
+  let bare = raw.state == "" && raw.assignee == "" && raw.label == "" && raw.prio == ""
+    && raw.project == "" && raw.order == ""
   if !url_says_hide && bare {
     if let Some(cv) = cookie_named(r, view_cookie_name) {
       view_restored = true
@@ -242,11 +269,12 @@ fn board_page(w: http.ResponseWriter, r: Ref<http.Request>, team: models.Team, m
     assignee: join_csv(assignees),
     label: join_csv(labels),
     prio: join_csv(prios),
+    project: join_csv(projects),
     order: order_param,
     hide: join_csv(hidden),
-    .. // `project` and `sort` are /issues dimensions; the board drops them.
+    .. // `sort` is an /issues dimension; the board drops it.
   }
-  let flt = BoardFilter { states, assignees, labels, prios }
+  let flt = BoardFilter { states, assignees, labels, prios, projects: project_ids }
 
   // Cookie maintenance (LLL-375). The URL's hide — including an explicit
   // empty ?hide= — always wins and rewrites the cookie; any other param'd
@@ -281,6 +309,7 @@ fn board_page(w: http.ResponseWriter, r: Ref<http.Request>, team: models.Team, m
   for a in assignees { pairs = pairs.append(f"assignee:{a}") }
   for l in labels { pairs = pairs.append(f"label:{l}") }
   for p in prios { pairs = pairs.append(f"prio:{p}") }
+  for p in project_ids { pairs = pairs.append(f"project:{p}") }
 
   let mut active = "board"
   if me != "" && assignees.contains(me) { active = "mine" }
@@ -298,6 +327,7 @@ fn board_page(w: http.ResponseWriter, r: Ref<http.Request>, team: models.Team, m
       q,
       fetch_member_names().unwrap_or([]),
       fetch_label_names(team_id).unwrap_or([]),
+      records.fetch_projects(team_id).unwrap_or([]),
     ),
     flt_seed: flt_seed_js(pairs),
     query_str,
@@ -318,17 +348,8 @@ fn board_page(w: http.ResponseWriter, r: Ref<http.Request>, team: models.Team, m
     write_raw(w, board_raw(vm))
     return
   }
-  let rail = rail_vm(active, me, team)
-  let html = match render("board-page", PageVM { rail, page: vm }) {
-    Ok(h) => h,
-    Err(e) => {
-      http.Error(w, e, 500)
-      return
-    },
-  }
-  w.Header().Set("Cache-Control", "no-store")
-  w.Header().Set("Content-Type", "text/html; charset=utf-8")
-  let _ = w.Write(html.bytes())
+  let rail = rail_for(r, active, me, team)
+  render_html(w, "board-page", PageVM { rail, page: vm })
 }
 
 /// The ordering picker's options (TASK-209): each is the current URL with
@@ -420,17 +441,8 @@ fn issue_page(w: http.ResponseWriter, r: Ref<http.Request>, team: models.Team, m
   }
   if let Ok(Some(_)) = fetch_favorite(issue.id) { page.favorited = true }
   page.emojis = emoji_catalog()
-  let vm = PageVM { rail: rail_vm("board", me, team), page }
-  let html = match render("issue-page", vm) {
-    Ok(h) => h,
-    Err(e) => {
-      http.Error(w, e, 500)
-      return
-    },
-  }
-  w.Header().Set("Cache-Control", "no-store")
-  w.Header().Set("Content-Type", "text/html; charset=utf-8")
-  let _ = w.Write(html.bytes())
+  let vm = PageVM { rail: rail_for(r, "board", me, team), page }
+  render_html(w, "issue-page", vm)
 }
 
 /// The configured team record, re-read per page load. /settings can change

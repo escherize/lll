@@ -4,7 +4,7 @@ import "query"
 #[test]
 fn cli_and_web_filters_share_values_and_validation() {
   let spec = issue_list_spec()
-  let assert Ok(p) = flags.parse(spec, ["lll", "issue", "list", "--state", "in-review", "--assign", "Alice O'Neil", "--label", "needs review", "--project", "Release 2"], 3, false, "")
+  let assert Ok(p) = flags.parse(spec, ["lll", "issue", "list", "--state", "in-review", "--assignee", "Alice O'Neil", "--label", "needs review", "--project", "Release 2"], 3, false, "")
   let assert Ok(cli) = filters_from(p)
   let assert Ok(web) = view_filters(ViewQuery { state: "in-review", assignee: "Alice O'Neil", label: "needs review", project: "Release 2", .. }).validate()
   assert cli.one_state() == web.one_state()

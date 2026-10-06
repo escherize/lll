@@ -328,8 +328,13 @@ assert_contains "$board" 'class="cp-work work-stale"' "hover preview carries the
 assert_contains "$board" "eng-2-already-in-progress" "hover preview shows the branch"
 
 # a claim makes the site current: no dimming on either surface
-W205_MID=$(curl -sf -H "$AUTH_HDR" "$LLL_URL/api/collections/members/records?perPage=1" | jq -r '.items[0].id')
-W205_CLAIM=$(seed "work-site claim" -H "$AUTH_HDR" \
+# The suite's own member holds it, so the release below is the holder's
+# (LLL-512: anyone else would need force, and force leaves a comment).
+W205_MID=$(curl -sf -G -H "$AUTH_HDR" "$LLL_URL/api/collections/members/records" \
+  --data-urlencode "filter=(name='e2e')" | jq -r '.items[0].id')
+# Raw fixtures preserve this issue's unrelated assignment; only superusers
+# can create these directly (LLL-515). Member actions use /claim.
+W205_CLAIM=$(seed "work-site claim" -H "Authorization: Bearer $_su" \
   -X POST "$LLL_URL/api/collections/claims/records" \
   -H 'Content-Type: application/json' \
   -d "{\"issue\":\"$ENG2_ID\",\"member\":\"$W205_MID\"}" | jq -r '.id')
@@ -339,9 +344,12 @@ assert_contains "$issue" "eng-2-already-in-progress @ webhost:/tmp/wt-eng-2" "pr
 assert_not_contains "$issue" "(last seen)" "a claimed site is not dimmed"
 board=$(wcurl -sf "$WEB/")
 assert_contains "$board" 'class="cp-work"' "hover branch is undimmed while claimed"
-# put the claim back so later sections see the board they always saw
+# put the claim back so later sections see the board they always saw; a
+# claim leaves through /release, since direct DELETE is superuser-only (LLL-512)
 seed "releasing the work-site claim" -H "$AUTH_HDR" \
-  -X DELETE "$LLL_URL/api/collections/claims/records/$W205_CLAIM" >/dev/null
+  -X POST "$LLL_URL/api/lll/issues/$ENG2_ID/release" \
+  -H 'Content-Type: application/json' \
+  -d "{\"claim_id\":\"$W205_CLAIM\"}" >/dev/null
 
 # --- app shell: one rail template, the same on every page (task-81) ---
 # The <nav id="rail"> block, for diffing one page's shell against another's.
@@ -382,7 +390,7 @@ assert_contains "$board_rail" "Star an issue to pin it here for the whole worksp
 # ?mine=1 any more). The page marks the row current and seeds the chip the
 # URL implies.
 mine=$(wcurl -sf "$WEB/?assignee=e2e")
-assert_contains "$mine" '<a href="/t/ENG/?assignee=e2e" title="Issues assigned to e2e" class="active">' \
+assert_contains "$mine" '<a data-g="m" href="/t/ENG/?assignee=e2e" title="Issues assigned to e2e" class="active">' \
   "the My issues URL marks the My issues row current"
 assert_contains "$mine" 'data-signals:flt="[&#34;assignee:e2e&#34;]"' \
   "the My issues URL seeds the assignee filter chip"
@@ -965,8 +973,50 @@ got=$(col_order "$(cat "$EVENTS_FILE")" todo)
 [ "$got" = "ENG-4,ENG-6,ENG-5,ENG-2" ] \
   || fail "priority-scoped SSE morph not in priority order: got '$got'"
 
+# LLL-523: Project is a board dimension like the others. The URL speaks the
+# project's NAME (the /issues vocabulary); the card and the $flt seed key on
+# the record id, because the board fetch does not expand the relation.
+"$LIN" project create -n "Board Alpha" >/dev/null
+"$LIN" project create -n "Board Beta" >/dev/null
+PJ_ALPHA_KEY=$("$LIN" issue create -t "Alpha board card" --project "Board Alpha" --json \
+  | jq -r '.expand.team.key + "-" + (.number | tostring)')
+PJ_BETA_KEY=$("$LIN" issue create -t "Beta board card" --project "Board Beta" --json \
+  | jq -r '.expand.team.key + "-" + (.number | tostring)')
+PJ_ALPHA_ID=$(curl -sf -G -H "$AUTH_HDR" "$LLL_URL/api/collections/projects/records" \
+  --data-urlencode "filter=(name='Board Alpha')" | jq -r '.items[0].id')
+[ -n "$PJ_ALPHA_ID" ] && [ "$PJ_ALPHA_ID" != null ] || fail "resolving the Board Alpha project id"
+pj_board=$(wcurl -sf "$WEB/?project=Board+Alpha")
+assert_contains "$pj_board" '<span class="dim">Project</span> Board Alpha <svg' \
+  "a ?project= board renders its chip"
+assert_contains "$pj_board" "data-signals:flt=\"[&#34;project:$PJ_ALPHA_ID&#34;]\"" \
+  "a ?project= board seeds the filter signal with the project id"
+assert_contains "$(column "$pj_board" todo)" "$PJ_ALPHA_KEY" \
+  "a ?project= board keeps that project's cards"
+assert_not_contains "$(column "$pj_board" todo)" "$PJ_BETA_KEY" \
+  "a ?project= board drops another project's cards"
+# ENG-2 is a todo card with no project (the col_order check above pins it in
+# todo); the precondition keeps this assert from passing on an absent card.
+assert_contains "$(column "$(wcurl -sf "$WEB/")" todo)" 'href="/issue/ENG-2"' \
+  "precondition: ENG-2 is a todo card on the unfiltered board"
+[ "$("$LIN" issue view ENG-2 --json | jq -r .project)" = "" ] \
+  || fail "precondition: ENG-2 must have no project"
+assert_not_contains "$(column "$pj_board" todo)" 'href="/issue/ENG-2"' \
+  "a ?project= board drops cards with no project"
+assert_contains "$pj_board" "|project:$PJ_ALPHA_ID|" \
+  "a card in a project carries the key its data-show matches"
+assert_contains "$(wcurl -sf "$WEB/")" 'href="/t/ENG/?project=Board&#43;Beta"' \
+  "the chooser offers the team's projects as navigations"
+nopj=$(wcurl -sf "$WEB/?project=No+Such+Project")
+assert_contains "$nopj" "no project named" "an unknown project is said out loud in the flash"
+# A ?project= URL is a view statement, so it clears the hide-only saved view
+# just as ?state= does rather than leaving the URL "bare" (LLL-375).
+curl -s -D - -o /dev/null -H "Cookie: lll_board=$BOARD_TOKEN; lll_view_ENG=done" "$WEB/t/ENG/?project=Board+Alpha" \
+  | grep -qi "^set-cookie: lll_view_ENG=;" || fail "a ?project= URL did not clear the saved view"
+
 # --- browser-level: CLI create appears on an open board without reload ---
 if command -v playwright-cli >/dev/null 2>&1; then
+  "$LIN" member create -n "A very long member name that should fit inside the full create dialog on a mobile screen" >/dev/null
+  "$LIN" project create -n "A very long project name that should fit inside the full create dialog on a mobile screen" >/dev/null
   # Read the page, and read it again until it says what we are waiting for.
   #
   # Polled, not slept: a browser-side change (an SSE morph, a fragment patch,
@@ -1187,6 +1237,25 @@ if command -v playwright-cli >/dev/null 2>&1; then
     assert_contains "$flt_search" '"box":false' "a short dimension renders no search box"
   fi
 
+  # Escape belongs to every chooser, including short dimensions without a search box.
+  filter_escape=$(playwright-cli -s="$BROWSER_SESSION" run-code "async page => {
+    await page.keyboard.press('Escape');
+    const trigger = page.getByRole('button', {name: 'Filter', exact: true});
+    await trigger.click();
+    await page.locator('.flt-menu:visible').getByRole('button', {name: 'State', exact: true}).click();
+    const option = page.locator('.flt-opt:visible').first();
+    await option.focus();
+    await option.press('Escape');
+    await page.waitForFunction(() => !document.querySelector('.flt-menu') || [...document.querySelectorAll('.flt-menu')].every(el => el.offsetParent === null));
+    await page.waitForFunction(() => document.activeElement?.classList.contains('flt-plus'));
+    await trigger.press('Enter');
+    await page.locator('.flt-menu:visible').getByRole('button', {name: 'State', exact: true}).waitFor();
+    await page.keyboard.press('Escape');
+    await page.waitForFunction(() => document.activeElement?.classList.contains('flt-plus'));
+    return 'filter Escape and keyboard reopening passed';
+  }") || fail "playwright: filter Escape dismissal"
+  assert_contains "$filter_escape" 'filter Escape and keyboard reopening passed' "all filter menus dismiss from keyboard"
+
   # The chip IS the undo: clicking it toggles its value out of the URL.
   seq_goto "$WEB/?assignee=e2e"
   playwright-cli -s="$BROWSER_SESSION" click ".flt-chip" >/dev/null 2>&1 \
@@ -1203,6 +1272,37 @@ if command -v playwright-cli >/dev/null 2>&1; then
   assert_contains "$(seq_probe)" '"chips":0' "Clear resets the board"
   seq_goto "$WEB/"
   assert_contains "$(seq_probe)" '"chips":0' "Clear also cleared the last-view record"
+
+  # --- LLL-523: a project filter survives a live broadcast ---
+  # /events sends ONE unfiltered #board, so cards from another project (and
+  # cards with none) do arrive in the DOM; only the card's data-show, keyed
+  # on the project id the URL seeded into $flt, keeps them hidden. Beta and
+  # the loose card are created BEFORE the Alpha one: broadcasts land in
+  # order, so once the Alpha card shows, the other two have been morphed in.
+  seq_goto "$WEB/?project=Board+Alpha"
+  pj_before=$(seq_probe)
+  assert_contains "$pj_before" '"chips":1' "LLL-523: ?project= renders its chip in the browser"
+  assert_contains "$pj_before" '"visible":1' "LLL-523: ?project= shows only that project's card"
+  "$LIN" issue create -t "Beta born while filtered" --project "Board Beta" >/dev/null
+  "$LIN" issue create -t "Loose born while filtered" >/dev/null
+  "$LIN" issue create -t "Alpha born while filtered" --project "Board Alpha" >/dev/null
+  pj_live=$(page_until \
+    "() => { const shown = t => { const c = [...document.querySelectorAll('.card')].find(c => c.querySelector('.title')?.textContent === t); return c ? (c.offsetParent !== null ? 'shown' : 'hidden') : 'absent' }; return JSON.stringify({alpha: shown('Alpha born while filtered'), beta: shown('Beta born while filtered'), loose: shown('Loose born while filtered'), navs: performance.getEntriesByType('navigation').length}) }" \
+    '"alpha":"shown"')
+  assert_contains "$pj_live" '"alpha":"shown"' "LLL-523: a broadcast card in the project shows"
+  assert_contains "$pj_live" '"beta":"hidden"' "LLL-523: a broadcast card in another project stays hidden"
+  assert_contains "$pj_live" '"loose":"hidden"' "LLL-523: a broadcast card with no project stays hidden"
+  assert_contains "$pj_live" '"navs":1' "LLL-523: the broadcast arrived without a reload"
+  # Clear drops the project with everything else; back walks to the filter.
+  playwright-cli -s="$BROWSER_SESSION" click ".flt-clear" >/dev/null 2>&1 \
+    || fail "playwright: clicking Clear on the project filter"
+  sleep 0.5
+  assert_contains "$(seq_probe)" '"chips":0' "LLL-523: Clear drops the project filter"
+  playwright-cli -s="$BROWSER_SESSION" go-back >/dev/null 2>&1 || fail "playwright: go-back"
+  sleep 0.5
+  pj_back=$(seq_probe)
+  assert_contains "$pj_back" '"chips":1' "LLL-523: back restores the project chip"
+  assert_contains "$pj_back" '"visible":2' "LLL-523: back restores the project-filtered cards"
 
   # --- /search filters as you type, and the X clears it (task-110) ---
   # A SEQUENCE, not an end state: the probe on <body> survives a fragment
@@ -1389,6 +1489,7 @@ if command -v playwright-cli >/dev/null 2>&1; then
     "$LIN" project create -n "Draft project $suffix" >/dev/null
   done
   seq_goto "$WEB/settings/labels"
+  "$LIN" member create -n "A long agent member name that needs to stay inside a narrow settings form" >/dev/null
   drafts_browser=$(playwright-cli -s="$BROWSER_SESSION" run-code "$(cat "$REPO_ROOT"/scripts/browser_settings_drafts.js)" 2>&1)
   assert_contains "$drafts_browser" 'settings drafts survive reordered label, member and project saves' "browser: settings row drafts survive saves and reordering"
   for prefix in "Z saved" "Unsaved"; do
@@ -1419,6 +1520,11 @@ if command -v playwright-cli >/dev/null 2>&1; then
   cmdk_browser=$(playwright-cli -s="$BROWSER_SESSION" run-code "$cmdk_js" 2>&1)
   assert_contains "$cmdk_browser" 'cmdk palette browser passed' "browser: the cmd+K palette opens, filters, searches and lands"
   "$LIN" issue delete "$CMDK_KEY" --force >/dev/null
+
+  # LLL-531/532: '?' sheet, '/' search and g-chords, including the keys that must not act.
+  shortcuts_js=$(sed -e "s|__WEB__|$WEB|" "$REPO_ROOT"/scripts/browser_shortcuts.js)
+  shortcuts_browser=$(playwright-cli -s="$BROWSER_SESSION" run-code "$shortcuts_js" 2>&1)
+  assert_contains "$shortcuts_browser" 'keyboard shortcuts browser passed' "browser: ? sheet, / search and g-chords, never while typing"
 
   # LLL-94: title and state changes refresh favorites on both realtime pages.
   FAV_PROBE=$("$LIN" issue create -t "Favorite live original" --json)
@@ -1575,7 +1681,7 @@ board_rail_now=$(rail "$(wcurl -sf "$WEB/")")
 $(diff <(rail_rows "$board_rail_now") <(rail_rows "$issues_rail") || true)"
 assert_contains "$issues_rail" 'href="/t/ENG/issues"' "the rail has an All issues row"
 assert_contains "$board_rail" 'href="/t/ENG/issues"' "the board's rail has it too"
-assert_contains "$issues_rail" '<a href="/t/ENG/issues" class="active">' "the All issues row is current on its own page"
+assert_contains "$issues_rail" '<a data-g="i" href="/t/ENG/issues" class="active">' "the All issues row is current on its own page"
 assert_not_contains "$issues_rail" '<a href="/" class="active">' "and the board row is not"
 # --- /t/ENG/doc/SLUG: the document page (LLL-405) ---
 # Decisions and findings were the one record kind with no URL: reachable only
@@ -1682,7 +1788,7 @@ assert_not_contains "$projects" "data-init" "the projects page opens no SSE conn
 # The rail row is what makes a project reachable from the board at all.
 projects_rail=$(rail "$projects")
 assert_contains "$board_rail_now" 'href="/t/ENG/projects"' "the board's rail has a Projects row"
-assert_contains "$projects_rail" '<a href="/t/ENG/projects" class="active">' \
+assert_contains "$projects_rail" '<a data-g="p" href="/t/ENG/projects" class="active">' \
   "the Projects row is current on its own page"
 board_rail_projects=$(rail "$(wcurl -sf "$WEB/")")
 [ "$(rail_rows "$projects_rail")" = "$(rail_rows "$board_rail_projects")" ] \
@@ -1946,6 +2052,8 @@ out=$(wcurl -sf -X POST "$WEB/settings/access/member" -d "member=$MEMBER_ID" \
   -d "admin_password=$ADMIN_PASS")
 assert_contains "$out" 'id="settings"' "a credential patches the settings body back"
 assert_contains "$out" 'flash-ok' "a credential says its success in the flash strip"
+assert_contains "$out" 'role="status"' "success confirmation exposes status semantics"
+assert_contains "$out" 'aria-atomic="true"' "success confirmation is atomic"
 curl -sf "$LLL_URL/api/collections/members/auth-with-password" -H 'Content-Type: application/json' \
   -d '{"identity":"cred@example.com","password":"cred-pass-12345"}' | grep -q '"token"' \
   || fail "the credentialed member cannot log in"
@@ -2534,6 +2642,8 @@ assert_cli_lacks "a refused unarchive still unarchived" "OPS" "$LIN" team list
 out=$(wcurl -sf -X POST "$WEB/settings/teams/archive" -d "id=$OPS_TEAM_ID" -d 'archived=0' \
   -d "admin_password=$ADMIN_PASS")
 assert_contains "$out" 'flash-ok' "an unarchive says its success in the flash strip"
+assert_contains "$out" 'role="status"' "success confirmation exposes status semantics"
+assert_contains "$out" 'aria-atomic="true"' "success confirmation is atomic"
 assert_contains "$out" 'id="settings"' "an unarchive patches the settings body back"
 assert_cli_contains "unarchiving from settings did not persist" "OPS" "$LIN" team list
 
@@ -2541,6 +2651,8 @@ assert_cli_contains "unarchiving from settings did not persist" "OPS" "$LIN" tea
 out=$(wcurl -sf -X POST "$WEB/settings/teams/archive" -d "id=$OPS_TEAM_ID" -d 'archived=1' \
   -d "admin_password=$ADMIN_PASS")
 assert_contains "$out" 'flash-ok' "an archive says its success in the flash strip"
+assert_contains "$out" 'role="status"' "success confirmation exposes status semantics"
+assert_contains "$out" 'aria-atomic="true"' "success confirmation is atomic"
 assert_cli_lacks "archiving from settings did not persist" "OPS" "$LIN" team list
 assert_cli_contains "the settings-archived team is gone entirely" "OPS" "$LIN" team list --archived
 env LLL_TEAM=OPS "$LIN" team unarchive OPS >/dev/null   # leave the suite as it found OPS
@@ -2612,13 +2724,15 @@ print('SSE logs: no NUL bytes after stream cleanup')
 PY
 
 LLL_TEST_BOARD_TOKEN="$BOARD_TOKEN" python3 "$REPO_ROOT"/scripts/test_settings_delete.py "$LLL_URL" "$WEB"
+LLL_TEST_BOARD_TOKEN="$BOARD_TOKEN" python3 "$REPO_ROOT"/scripts/test_filter_names.py "$LIN" "$LLL_URL" "$WEB"
 LLL_TEST_BOARD_TOKEN="$BOARD_TOKEN" python3 "$REPO_ROOT"/scripts/test_provenance.py "$LIN" "$LLL_URL" "$WEB"
 
 LLL_TEST_BOARD_TOKEN="$BOARD_TOKEN" python3 "$REPO_ROOT"/scripts/test_attachments.py "$LIN" "$LLL_URL" "$WEB"
 
 LLL_TEST_BOARD_TOKEN="$BOARD_TOKEN" python3 "$REPO_ROOT"/scripts/test_issue_stream.py "$LIN" "$LLL_URL" "$WEB"
 
-LLL_TEST_BOARD_TOKEN="$BOARD_TOKEN" python3 "$REPO_ROOT"/scripts/test_board_claims.py "$LIN" "$LLL_URL" "$WEB"
+LLL_TEST_BOARD_TOKEN="$BOARD_TOKEN" LLL_TEST_SUPERUSER_TOKEN=$(pb_superuser_token "$LLL_URL") \
+  python3 "$REPO_ROOT"/scripts/test_board_claims.py "$LIN" "$LLL_URL" "$WEB"
 
 LLL_TEST_BOARD_TOKEN="$BOARD_TOKEN" python3 "$REPO_ROOT"/scripts/test_board_pagination.py "$LIN" "$LLL_URL" "$WEB"
 

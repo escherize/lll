@@ -94,6 +94,10 @@ pub struct CardVM {
   // The work-site slot's branch (TASK-205), for the hover preview. Empty
   // until an `issue start` stamps it.
   pub work_branch: string,
+  // The project's record id, "" for none: the card's data-fkeys key for the
+  // board's project filter (LLL-523). An id because the board fetch does not
+  // expand the relation, so no name is at hand.
+  pub project_id: string,
   // Whether the site is only "(last seen)": state done/cancelled, or — on
   // the board, where board_columns knows the claims — the claim is gone.
   pub work_stale: bool,

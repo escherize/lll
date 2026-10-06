@@ -41,32 +41,29 @@ fn doc_page(
       return
     },
   }
-  let vm = doc_vm(doc, team.key)
+  let mut vm = doc_vm(doc, team.key)
+  // The board reads as its own member, so a doc linking another team's issue
+  // would show that issue to a viewer scoped to this team.
+  if let Some(key) = viewer_scope(r) {
+    vm.issues = vm.issues.filter(|i| issue_of_team(i.key, key))
+  }
   if wants_raw(r) {
     write_raw(w, doc_raw(vm))
     return
   }
-  let page = PageVM { rail: rail_vm("doc", me, team), page: vm }
-  let html = match render("doc-page", page) {
-    Ok(h) => h,
-    Err(e) => {
-      http.Error(w, e, 500)
-      return
-    },
-  }
-  w.Header().Set("Cache-Control", "no-store")
-  w.Header().Set("Content-Type", "text/html; charset=utf-8")
-  let _ = w.Write(html.bytes())
+  let page = PageVM { rail: rail_for(r, "doc", me, team), page: vm }
+  render_html(w, "doc-page", page)
 }
 
 /// Doc record -> view model. The property order is `lll doc view`'s, so a
 /// reader moving between the two surfaces finds the same page.
 fn doc_vm(d: models.Doc, team_key: string) -> DocVM {
+  let kind_label = if d.kind == "prd" { "PRD" } else { state_label(d.kind) }
   DocVM {
     slug: d.slug,
     title: d.title,
     kind: d.kind,
-    kind_label: state_label(d.kind),
+    kind_label,
     area: d.area,
     paths: d.paths,
     created: display.relative(d.created),
@@ -85,9 +82,9 @@ fn doc_vm(d: models.Doc, team_key: string) -> DocVM {
 /// already, so the raw form is the source with the property block `lll doc
 /// view` prints in front of it, not a re-rendering of anything.
 fn doc_raw(vm: DocVM) -> string {
-  let mut lines = [f"# {vm.slug} {vm.title}", "", f"Kind: {vm.kind}"]
-  if vm.area != "" { lines = lines.append(f"Area: {vm.area}") }
-  if vm.paths != "" { lines = lines.append(f"Paths: {vm.paths}") }
+  let mut lines = [f"# {vm.slug} {line_text(vm.title)}", "", f"Kind: {vm.kind}"]
+  if vm.area != "" { lines = lines.append(f"Area: {line_text(vm.area)}") }
+  if vm.paths != "" { lines = lines.append(f"Paths: {line_text(vm.paths)}") }
   lines = lines.append(f"Created: {vm.created}")
   lines = lines.append(f"Updated: {vm.updated}")
   if !vm.issues.is_empty() {

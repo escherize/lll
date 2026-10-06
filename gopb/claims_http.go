@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"strings"
 
 	validation "github.com/pocketbase/ozzo-validation/v4"
 	"github.com/pocketbase/pocketbase/apis"
@@ -25,6 +26,12 @@ func registerClaimRoutes(routes *router.Router[*core.RequestEvent], writes *issu
 		fields, err := parseAssignmentFields(body.Fields)
 		if err != nil {
 			return re.BadRequestError("invalid assignment update fields", err)
+		}
+		if err := issueWritable(re, re.Request.PathValue("issue")); err != nil {
+			return err
+		}
+		if err := fields.refsInScope(re); err != nil {
+			return err
 		}
 		unlock := writes.acquire(re.Request.PathValue("issue"))
 		defer unlock()
@@ -51,6 +58,9 @@ func registerClaimRoutes(routes *router.Router[*core.RequestEvent], writes *issu
 			}
 			body.Member = re.Auth.Id
 		}
+		if err := issueWritable(re, re.Request.PathValue("issue")); err != nil {
+			return err
+		}
 		unlock := writes.acquire(re.Request.PathValue("issue"))
 		defer unlock()
 		outcome, err := acquireClaim(re.App, re.Request.PathValue("issue"), body.Member, body.Agent)
@@ -60,19 +70,63 @@ func registerClaimRoutes(routes *router.Router[*core.RequestEvent], writes *issu
 	routes.POST("/api/lll/issues/{issue}/release", func(re *core.RequestEvent) error {
 		var body struct {
 			ClaimID string `json:"claim_id"`
+			Force   bool   `json:"force"`
+			Reason  string `json:"reason"`
 		}
-		re.Request.Body = http.MaxBytesReader(re.Response, re.Request.Body, 2048)
+		// 8 KiB, not the claim route's 2: the optional reason is prose.
+		re.Request.Body = http.MaxBytesReader(re.Response, re.Request.Body, 8<<10)
 		if err := re.BindBody(&body); err != nil {
 			return re.BadRequestError("invalid release request", nil)
 		}
 		if body.ClaimID == "" {
 			return re.BadRequestError("release requires the observed claim_id", nil)
 		}
-		// Any authenticated workspace member may release a hold, matching the
-		// existing CLI contract; naming the observed hold prevents stale release.
+		if err := issueWritable(re, re.Request.PathValue("issue")); err != nil {
+			return err
+		}
+		// The holder releases freely; anyone else needs force, and a forced
+		// release leaves a comment (LLL-512). Naming the observed hold still
+		// prevents a stale release.
+		//
+		// A superuser gets no exemption. Its token names no member, so it is
+		// never the holder, and the fleet operator holding admin credentials
+		// is exactly who should say so out loud: force costs one flag, and
+		// the comment is the only record the release happened. (A superuser
+		// can still DELETE the record directly - claims.deleteRule is null,
+		// not "nobody" - but that is the admin API, not the release path.)
+		by := releaser{force: body.Force, reason: strings.TrimSpace(body.Reason)}
+		if !re.HasSuperuserAuth() {
+			by.memberID = re.Auth.Id
+		}
 		unlock := writes.acquire(re.Request.PathValue("issue"))
 		defer unlock()
-		outcome, err := releaseClaim(re.App, re.Request.PathValue("issue"), body.ClaimID)
+		outcome, err := releaseClaim(re.App, re.Request.PathValue("issue"), body.ClaimID, by)
+		return respondClaim(re, outcome, err)
+	}).Bind(apis.RequireAuth("members", core.CollectionNameSuperusers))
+
+	routes.POST("/api/lll/issues/{issue}/renew", func(re *core.RequestEvent) error {
+		var body struct {
+			ClaimID string `json:"claim_id"`
+			Agent   string `json:"agent"`
+		}
+		re.Request.Body = http.MaxBytesReader(re.Response, re.Request.Body, 2048)
+		if err := re.BindBody(&body); err != nil || body.ClaimID == "" {
+			return re.BadRequestError("renew requires the observed claim_id", nil)
+		}
+		// Same rule as claim/release/assignment (team_scope.go): a member
+		// narrowed or made read-only after claiming cannot keep renewing.
+		if err := issueWritable(re, re.Request.PathValue("issue")); err != nil {
+			return err
+		}
+		// A superuser token names no member, so it is never the holder and
+		// renewClaim refuses it with the holder's name.
+		memberID := ""
+		if !re.HasSuperuserAuth() {
+			memberID = re.Auth.Id
+		}
+		unlock := writes.acquire(re.Request.PathValue("issue"))
+		defer unlock()
+		outcome, err := renewClaim(re.App, re.Request.PathValue("issue"), body.ClaimID, memberID, body.Agent)
 		return respondClaim(re, outcome, err)
 	}).Bind(apis.RequireAuth("members", core.CollectionNameSuperusers))
 }

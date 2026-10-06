@@ -31,7 +31,7 @@ pub struct CommentEvent {
 /// Dispatch `lll watch` — a live event stream for a query, one line per
 /// create/update/delete, filtered server-side with the same criteria as
 /// `lll issue list`. Runs until interrupted (Ctrl-C).
-fn watch_spec() -> Slice<flags.Flag> {
+pub fn watch_spec() -> Slice<flags.Flag> {
   flags.with_team(filter_spec(FilterUse.Watch).append([
     flags.Flag { name: "--search", value: true, hint: "q", help: "only issues whose title contains q", .. },
     flags.Flag {
@@ -42,13 +42,6 @@ fn watch_spec() -> Slice<flags.Flag> {
     flags.Flag { name: "--json", help: "NDJSON: one raw server event object per line, with a\n\"topic\" field added", .. },
     flags.Flag { name: "--help", alias: "-h", hidden: true, help: "show this help", .. },
   ]...))
-}
-
-/// The flag table of the watch noun (one verbless stream); empty for other
-/// names. Read by `lll completions` so the scripts complete exactly what the
-/// parser accepts.
-pub fn watch_verb_spec(_verb: string) -> Slice<flags.Flag> {
-  flags.with_team(watch_spec())
 }
 
 pub fn watch(args: Slice<string>) -> Result<(), string> {
@@ -140,6 +133,13 @@ delivers events for records matching the filter after the change.
 Startup is acknowledged on stderr as 'watch: ready' only after the server
 accepts the subscription. With --json, stdout contains only NDJSON events;
 connection loss and reconnection messages also go to stderr.
+
+The stream is live-only: it delivers events from the moment the server
+accepts the subscription, and a reconnect resubscribes without replaying
+what changed while disconnected. A gap looks exactly like a quiet board.
+If you need every change, note the time of the last event you handled and,
+on start and after each reconnect, catch up with
+'lll issue list --since <that time>' (see its help for overlap and limits).
 
 With --ready, the stream shows only the ready agenda (LLL-395): open issues
 (todo or backlog) whose blockers are all done or cancelled. Readiness is

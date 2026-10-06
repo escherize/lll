@@ -37,6 +37,17 @@ pub struct Member {
   pub kind: string,
   #[json(omitempty)]
   pub owner: string,
+  // Access (LLL-542): "all" | "teams", the team ids, "rw" | "ro". Empty on a
+  // server that predates scoped members.
+  #[json(omitempty)]
+  pub scope: string,
+  #[json(omitempty)]
+  pub teams: Slice<string>,
+  #[json(omitempty)]
+  pub mode: string,
+  // Keys of `teams` the caller can see; filled by 'member list --json' only.
+  #[json(omitempty)]
+  pub team_keys: Slice<string>,
 }
 
 #[json]
@@ -66,6 +77,16 @@ pub struct NewMember {
   pub kind: string,
   #[json(omitempty)]
   pub owner: string,
+  // Access scope: "all" or "teams". Empty lets the server fill in the
+  // creator's ("all"). With "teams", the member sees only `teams`, the ids
+  // `lll member invite --team` sets; an empty list then sees nothing.
+  #[json(omitempty)]
+  pub scope: string,
+  #[json(omitempty)]
+  pub teams: Slice<string>,
+  // "rw" | "ro"; empty lets the server fill in the creator's ("rw").
+  #[json(omitempty)]
+  pub mode: string,
 }
 
 #[json]

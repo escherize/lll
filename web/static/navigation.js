@@ -83,16 +83,17 @@ if (palette && typeof palette.showModal === 'function') {
   let timer;
   const ask = () => {
     const q = field.value.trim();
-    if (pending) pending.abort();
     if (!q) {
       results.innerHTML = '';
       sayNone();
       return;
     }
-    pending = new AbortController();
-    fetch(endpoint + '&q=' + encodeURIComponent(q), {signal: pending.signal})
+    const request = new AbortController();
+    pending = request;
+    fetch(endpoint + '&q=' + encodeURIComponent(q), {signal: request.signal})
       .then((res) => (res.ok ? res.text() : ''))
       .then((html) => {
+        if (request.signal.aborted) return;
         // The server answers with the whole #cmdk-results element; keep this
         // page's node and take its children, so the id survives.
         const parsed = new DOMParser().parseFromString(html, 'text/html');
@@ -107,6 +108,9 @@ if (palette && typeof palette.showModal === 'function') {
       .catch(() => {});
   };
   field.addEventListener('input', () => {
+    // Invalidate immediately, including a response already reading its body.
+    if (pending) pending.abort();
+    results.innerHTML = '';
     filter();
     clearTimeout(timer);
     timer = setTimeout(ask, 200);
@@ -129,5 +133,49 @@ if (palette && typeof palette.showModal === 'function') {
   // A click on the backdrop is outside the dialog's own box.
   palette.addEventListener('click', (event) => {
     if (event.target === palette) palette.close();
+  });
+}
+
+// LLL-531/532: single-key shortcuts. They never fire while typing, with a
+// modifier held (⌘K and browser keys keep theirs), or over an open dialog,
+// so a letter meant for a field is never eaten. "Open dialog" includes the
+// Datastar-shown overlays (new issue, emoji and label pickers): they are
+// divs with role="dialog", and a chord over them would navigate away from
+// an unsaved draft. 'g' starts a chord whose
+// second key picks a rail row by its data-g, so the destination is always
+// the href the rail itself rendered.
+const shortcutSheet = document.getElementById('kbd-help');
+let chordAt = 0;
+document.addEventListener('keydown', (event) => {
+  if (event.metaKey || event.ctrlKey || event.altKey) return;
+  if (event.target.closest?.('input, textarea, select, [contenteditable]')) return;
+  const overlays = document.querySelectorAll('dialog[open], [role="dialog"]');
+  if ([...overlays].some((el) => el.checkVisibility())) return;
+  if (Date.now() - chordAt < 1000) {
+    chordAt = 0;
+    const row = document.querySelector(`#rail [data-g="${CSS.escape(event.key)}"]`);
+    if (row) {
+      event.preventDefault();
+      row.click();
+    }
+    return;
+  }
+  chordAt = 0;
+  if (event.key === 'g') {
+    chordAt = Date.now();
+  } else if (event.key === '?' && shortcutSheet) {
+    event.preventDefault();
+    shortcutSheet.showModal();
+  } else if (event.key === '/') {
+    const search = document.getElementById('board-search-input');
+    if (search) {
+      event.preventDefault();
+      search.focus();
+    }
+  }
+});
+if (shortcutSheet) {
+  shortcutSheet.addEventListener('click', (event) => {
+    if (event.target === shortcutSheet) shortcutSheet.close();
   });
 }

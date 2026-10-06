@@ -20,6 +20,11 @@ type assignmentFields struct {
 	Emoji       *string   `json:"emoji"`
 	Project     *string   `json:"project"`
 	Labels      *[]string `json:"labels"`
+	// LLL-513: 'lll issue update --add-label/--remove-label' combined with
+	// --assignee arrives here. Set resolves the modifier against the issue
+	// read inside the transaction.
+	LabelsAdd    *[]string `json:"labels+"`
+	LabelsRemove *[]string `json:"labels-"`
 }
 
 func parseAssignmentFields(raw json.RawMessage) (assignmentFields, error) {
@@ -33,6 +38,28 @@ func parseAssignmentFields(raw json.RawMessage) (assignmentFields, error) {
 		return fields, fmt.Errorf("assignment update requires an assignee")
 	}
 	return fields, nil
+}
+
+// refsInScope applies the scoped-reference rule (team_scope.go) to the
+// project and labels this update would set or add.
+func (fields assignmentFields) refsInScope(re *core.RequestEvent) error {
+	if re.Auth == nil || re.Auth.IsSuperuser() || re.Auth.GetString("scope") == "all" {
+		return nil
+	}
+	var labels []string
+	if fields.Labels != nil {
+		labels = append(labels, *fields.Labels...)
+	}
+	if fields.LabelsAdd != nil {
+		labels = append(labels, *fields.LabelsAdd...)
+	}
+	if err := refsInScope(re.App, re.Auth, "labels", labels); err != nil {
+		return err
+	}
+	if fields.Project != nil && *fields.Project != "" {
+		return refsInScope(re.App, re.Auth, "projects", []string{*fields.Project})
+	}
+	return nil
 }
 
 func (fields assignmentFields) apply(issue *core.Record) {
@@ -57,6 +84,12 @@ func (fields assignmentFields) apply(issue *core.Record) {
 	}
 	if fields.Labels != nil {
 		issue.Set("labels", *fields.Labels)
+	}
+	if fields.LabelsAdd != nil {
+		issue.Set("labels+", *fields.LabelsAdd)
+	}
+	if fields.LabelsRemove != nil {
+		issue.Set("labels-", *fields.LabelsRemove)
 	}
 }
 

@@ -10,6 +10,11 @@
 //   comments.agent  — who among the member's sessions wrote the comment.
 //
 // Coordination, not auth: any member may write any label.
+//
+// Named after 1791265600_claim_create_admin.js, the newest migration on main
+// when this landed, so fresh and upgraded databases apply it in the same order.
+// It writes fields only, never rules: claims rules stay as
+// 1789900000_member_teams.js and 1791265600_claim_create_admin.js set them.
 migrate(
   (app) => {
     for (const name of ["claims", "comments"]) {
