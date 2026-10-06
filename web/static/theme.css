@@ -712,6 +712,9 @@ input:focus, textarea:focus, select:focus {
   .new-issue input { flex: 1; width: auto; min-width: 0; }
   .ni-shade { padding: 4vh 10px 10px; }
   .ni-dialog { max-height: 92vh; }
+  .ni-foot { display: grid; grid-template-columns: 1fr auto; }
+  .ni-hint, .ni-more { grid-column: 1 / -1; }
+  .ni-foot button { justify-self: end; white-space: nowrap; }
   .board { padding: 10px 12px; }
   .column { flex: 0 0 240px; min-width: 240px; }
   .issue-scroll {
@@ -974,7 +977,18 @@ input:focus, textarea:focus, select:focus {
 }
 
 /* ── issue detail editing (priority select, title edit) ─────── */
-.issue-main h1 { cursor: text; }
+.title-edit-trigger {
+  display: block;
+  width: 100%;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  letter-spacing: inherit;
+  text-align: left;
+  cursor: text;
+}
 #issue-detail .issue-main h1:hover { color: var(--text-2); }
 .title-edit { margin: 4px 0 14px; }
 .title-edit input {
