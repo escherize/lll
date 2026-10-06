@@ -70,6 +70,7 @@ fn nouns() -> Slice<string> {
     "webhook",
     "skill",
     "completions",
+    "upgrade",
     "whoami",
     "help",
     "--version",
@@ -130,6 +131,7 @@ fn verb_flags(noun: string, verb: string) -> Slice<string> {
     "board" => flags.tokens(board_spec()),
     "login" => flags.tokens(login_spec()),
     "api" => flags.tokens(api_spec()),
+    "upgrade" => flags.tokens(upgrade_spec()),
     _ => [],
   }
 }

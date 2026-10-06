@@ -118,7 +118,7 @@ Rules: list @request.auth.id != \"\" && (@request.auth.scope = \"all\" || @reque
 
 ## members (auth)
 
-Rules: list @request.auth.id != \"\" view @request.auth.id != \"\" create @request.auth.id != \"\" && @request.auth.scope = \"all\" && @request.auth.mode = \"rw\" update @request.auth.id != \"\" && @request.body.teams:isset = false && @request.body.scope:isset = false && @request.body.mode:isset = false && ((@request.auth.scope = \"all\" && @request.auth.mode = \"rw\") || id = @request.auth.id) delete (superuser only)
+Rules: list @request.auth.id != \"\" view @request.auth.id != \"\" create @request.auth.id != \"\" && @request.auth.scope = \"all\" && @request.auth.mode = \"rw\" update @request.auth.id != \"\" && @request.body.teams:isset = false && @request.body.scope:isset = false && @request.body.mode:isset = false && @request.body.owner:isset = false && @request.body.kind:isset = false && ((@request.auth.scope = \"all\" && @request.auth.mode = \"rw\") || id = @request.auth.id) delete (superuser only)
 
 | field | type | required | notes |
 |-------|------|----------|-------|

@@ -268,7 +268,20 @@ with tempfile.TemporaryDirectory(prefix='lll-team-scope-') as directory:
         call(api, f"/api/collections/members/records/{owner['id']}", {'scope': 'teams', 'teams': [alpha['id']]}, su, 'PATCH')
         _, owner_tok = member_login('owner')
         assert call(api, '/api/lll/bots/rotate', {'name': 'bot-owned'}, owner_tok)[0] == 403
-        assert call(api, '/api/lll/bots/rotate', {'name': 'bot-owned'}, su)[0] == 200
+        _, rotated, _ = call(api, '/api/lll/bots/rotate', {'name': 'bot-owned'}, su)
+        bot_tok, bot_id = rotated['token'], rotated['record']['id']
+        # LLL-616: owner and kind change only with superuser credentials. A
+        # full member could otherwise re-own any bot and rotate its token;
+        # a bot could re-own itself.
+        thief, thief_tok = member('thief')
+        assert call(api, f'/api/collections/members/records/{bot_id}', {'owner': thief['id']}, thief_tok, 'PATCH')[0] == 404
+        assert call(api, '/api/lll/bots/rotate', {'name': 'bot-owned'}, thief_tok)[0] == 403
+        assert call(api, f'/api/collections/members/records/{bot_id}', {'owner': bot_id}, bot_tok, 'PATCH')[0] == 404
+        assert call(api, f"/api/collections/members/records/{thief['id']}", {'kind': 'bot'}, thief_tok, 'PATCH')[0] == 404
+        assert call(api, f"/api/collections/members/records/{thief['id']}", {'name': 'thief2'}, thief_tok, 'PATCH')[0] == 200, \
+            'control: a member still edits its own name'
+        assert call(api, f'/api/collections/members/records/{bot_id}', {'owner': thief['id']}, su, 'PATCH')[0] == 200, \
+            'control: a superuser can still re-own a bot'
         # Saved views and favorites are a narrower member's own (review of #172).
         _, other_view, _ = call(api, '/api/collections/views/records',
                                 {'name': 'secret', 'query': 'team=BETA&q=beta+secret', 'member': plain['id']}, su)

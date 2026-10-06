@@ -507,6 +507,7 @@ fn command_alias_dispatch_uses_canonical_help_and_parser() {
       if input.parsed.first() != "DEMO-1" { return Err("wrong key") }
       Ok(())
     },
+    ..
   }]
   assert dispatch("issue", "", "", commands, ["lll", "issue", "show", "DEMO-1"]).is_ok()
   let assert Err(help) = dispatch("issue", "", "", commands, ["lll", "issue", "show", "--help"])
@@ -514,6 +515,30 @@ fn command_alias_dispatch_uses_canonical_help_and_parser() {
   assert !help.contains("lll issue show")
   assert command_names(commands).equals(["view", "show"])
   assert resolve_command(commands, "read").is_none()
+}
+
+/// LLL-505: a hidden verb and its alias dispatch, with no help row and no
+/// completion.
+#[test]
+fn hidden_command_dispatches_without_help_row_or_completion() {
+  let commands = [
+    Command { name: "near", summary: "near", run: |_| Ok(()), .. },
+    Command {
+      name: "view", alias: "read", hidden: true, summary: "view", positional: "SLUG",
+      run: |input| {
+        if input.parsed.first() != "a-slug" { return Err("wrong slug") }
+        Ok(())
+      },
+      ..
+    },
+  ]
+  assert dispatch("finding", "", "", commands, ["lll", "finding", "view", "a-slug"]).is_ok()
+  assert dispatch("finding", "", "", commands, ["lll", "finding", "read", "a-slug"]).is_ok()
+  let assert Err(help) = dispatch("finding", "", "", commands, ["lll", "finding", "--help"])
+  assert help.contains("lll finding near")
+  assert !help.contains("view")
+  assert !help.contains("read")
+  assert command_names(commands).equals(["near"])
 }
 
 #[test]

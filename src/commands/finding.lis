@@ -34,14 +34,6 @@ pub fn finding_commands() -> Slice<flags.Command> {
       ..
     },
     flags.Command {
-      name: "view",
-      summary: "show one finding by slug - a finding is a doc, so this is 'lll doc view'",
-      spec: doc_view_spec(),
-      positional: "SLUG",
-      run: doc_view,
-      ..
-    },
-    flags.Command {
       name: "create", alias: "new",
       summary: "file a finding: 'lll doc new -k finding' with the kind already set",
       spec: finding_new_spec(),
@@ -72,6 +64,17 @@ pub fn finding_commands() -> Slice<flags.Command> {
       run: finding_refute,
       ..
     },
+    // Hidden (LLL-505): a finding is a doc, so 'lll doc view' is the
+    // documented read. Fleet task 9 had 6/30 agents guess 'finding view', so
+    // it and 'read' keep working without a help row or completion.
+    flags.Command {
+      name: "view", alias: "read", hidden: true,
+      summary: "show one finding by slug; the documented spelling is 'lll doc view'",
+      spec: doc_view_spec(),
+      positional: "SLUG",
+      run: doc_view,
+      ..
+    },
   ]
 }
 
@@ -83,9 +86,11 @@ fn finding_intro() -> string {
 'near' matches by directory containment in both directions: a finding filed
 on 'src/pb' answers both 'near src' and 'near src/pb/records.lis'.
 
-Both verbs accept --team KEY for this invocation, overriding LLL_TEAM or
+Every verb accepts --team KEY for this invocation, overriding LLL_TEAM or
 .lll.toml without rewriting configuration. They answer for ONE team. Every
 project has a src/, so an unscoped answer would be another codebase's.
+
+Read a finding with 'lll doc view SLUG'; --raw and --json are available.
 
 Author findings with 'lll doc new -k finding -a <area> -p \"<paths>\"'.
 `area` is conventionally the NAME of an existing label: an issue whose labels

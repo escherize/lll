@@ -157,3 +157,11 @@ fn priority_value_rejects_names_off_the_scale() {
   assert priority_value("Urgent").is_none()
   assert priority_value("").is_none()
 }
+
+#[test]
+fn author_tag_marks_bots_and_names_only_a_readable_owner() {
+  assert author_tag(false, "") == ""
+  assert author_tag(false, "alice") == ""
+  assert author_tag(true, "") == " [bot]"
+  assert author_tag(true, "alice") == " [bot via alice]"
+}

@@ -130,9 +130,32 @@ prints as 'changed'. Note: an update that moves a record out of the filter
 (e.g. state todo -> done under --state todo) emits nothing — the server only
 delivers events for records matching the filter after the change.
 
-Startup is acknowledged on stderr as 'watch: ready' only after the server
-accepts the subscription. With --json, stdout contains only NDJSON events;
-connection loss and reconnection messages also go to stderr.
+An update that changes none of those four fields prints only the key:
+
+  10:42:11 ENG-12 changed
+
+That covers labels, project, description and emoji. Use --json for the record.
+
+The stream carries issue records only: no comment or claim events. A claim
+shows up only when it writes the issue. Claiming an issue assigned to someone
+else or to nobody assigns you, which is an update; a release that clears the
+assignee is another. Claiming an issue already assigned to you, claiming one
+you already hold, and 'lll issue claim --renew' print nothing.
+
+Status lines go to stderr, never stdout, in text and --json mode alike:
+
+  watch: ready (query subscription accepted)
+  realtime: lll server stream lost — reconnecting
+  realtime: reconnect failed: <error>
+  realtime: reconnected to the lll server (subscriptions accepted)
+
+'watch: ready' prints once, after the server accepts the subscription.
+With --ready it reads 'watch: ready (agenda subscription accepted)'. After a
+lost stream, watch retries every second and prints each distinct failure once.
+The server closes a stream that has carried no event for 5 minutes, and any
+stream after 30 minutes, so a quiet watch prints a lost/reconnected pair every
+few minutes. The pair is routine. A watch whose token stops working (a rotated
+bot token) still prints only that pair, but receives no events (LLL-617).
 
 The stream is live-only: it delivers events from the moment the server
 accepts the subscription, and a reconnect resubscribes without replaying

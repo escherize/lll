@@ -1,3 +1,4 @@
+import "go:encoding/json"
 import "go:strings"
 import "models"
 
@@ -81,4 +82,38 @@ fn a_project_filter_keeps_its_chip_when_the_catalogue_is_missing() {
     return
   }
   assert g.opts.map(|o| f"{o.value}={o.count}={o.active}").equals(["Alpha=0=true"])
+}
+
+/// A comment as PocketBase answers `expand=author.owner` (LLL-610).
+fn decoded_comment(record: string) -> models.Comment {
+  let mut c = models.Comment { .. }
+  let _ = json.Unmarshal(record.bytes(), &c)
+  c
+}
+
+#[test]
+fn bot_comment_shows_via_owner_only_when_the_owner_was_expanded() {
+  let owned = comment_vm(decoded_comment(
+    "{\"id\":\"c1\",\"author\":\"b1\",\"body\":\"hi\",\"expand\":{\"author\":{\"id\":\"b1\",\"name\":\"bot-ci\",\"kind\":\"bot\",\"owner\":\"m1\",\"expand\":{\"owner\":{\"id\":\"m1\",\"name\":\"alice\",\"email\":\"a@x.invalid\"}}}}}",
+  ))
+  // The owner the caller may not read: PocketBase drops it from expand.
+  let hidden = comment_vm(decoded_comment(
+    "{\"id\":\"c2\",\"author\":\"b1\",\"body\":\"hi\",\"expand\":{\"author\":{\"id\":\"b1\",\"name\":\"bot-ci\",\"kind\":\"bot\",\"owner\":\"m1\"}}}",
+  ))
+  let person = comment_vm(decoded_comment(
+    "{\"id\":\"c3\",\"author\":\"m1\",\"body\":\"hi\",\"expand\":{\"author\":{\"id\":\"m1\",\"name\":\"alice\",\"kind\":\"person\"}}}",
+  ))
+  assert owned.via == "alice" && owned.avatar.bot
+  assert hidden.via == "" && hidden.avatar.bot
+  assert person.via == "" && !person.avatar.bot
+
+  let assert Ok(html) = render("comments", CommentsVM { comments: [owned, hidden, person] })
+  assert html.contains("<b>bot-ci</b> · via alice · ")
+  assert strings.Count(html, "via ") == 1
+  assert strings.Count(html, "title=\"bot member\"") == 2
+
+  let raw = issue_raw(IssueVM { key: "T-1", comments: [owned, hidden, person], .. })
+  assert raw.contains("- **bot-ci** [bot via alice] (")
+  assert raw.contains("- **bot-ci** [bot] (")
+  assert raw.contains("- **alice** (")
 }

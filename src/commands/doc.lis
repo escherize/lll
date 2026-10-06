@@ -63,8 +63,10 @@ pub fn doc_commands() -> Slice<flags.Command> {
       run: doc_delete,
       ..
     },
+    // Hidden (LLL-505): 'lll issue link/unlink KEY-123 SLUG' is the
+    // documented spelling. The doc-first one keeps working for muscle memory.
     flags.Command {
-      name: "link",
+      name: "link", hidden: true,
       summary: "link the doc to an issue — 'lll issue link KEY-123 SLUG' does the same",
       spec: flags.with_team([]),
       positional: "SLUG KEY-123",
@@ -72,7 +74,7 @@ pub fn doc_commands() -> Slice<flags.Command> {
       ..
     },
     flags.Command {
-      name: "unlink",
+      name: "unlink", hidden: true,
       summary: "remove that link — 'lll issue unlink KEY-123 SLUG' does the same",
       spec: flags.with_team([]),
       positional: "SLUG KEY-123",
@@ -95,10 +97,9 @@ Every verb accepts --team KEY for this invocation, overriding LLL_TEAM or
 slug is unique per team, so two projects sharing a server both get an
 'index'; read the other one with LLL_TEAM=THEIRS lll doc view index.
 
-Docs link to issues with 'lll doc link SLUG KEY-123' and unlink with
-'lll doc unlink SLUG KEY-123' (the issue-first spellings live under
-'lll issue --help'). A link stays inside one team: the doc and the issue
-must belong to the same one.
+Docs link to issues with 'lll issue link KEY-123 SLUG' and unlink with
+'lll issue unlink KEY-123 SLUG'. A link stays inside one team: the doc and
+the issue must belong to the same one.
 
 Findings surface by area and path, not by search: 'lll finding near <path>'
 lists what is filed about a file or directory, 'lll finding list [--area X]'

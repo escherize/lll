@@ -123,7 +123,7 @@
 <h2>Comments <span class="count">{{len .Comments}}</span></h2>
 {{range .Comments}}<div class="comment" id="comment-{{.Id}}">
 {{template "avatar" .Avatar}}
-<div><p class="meta"><b>{{.Author}}</b> · {{.Age}}</p>
+<div><p class="meta"><b>{{.Author}}</b>{{if .Via}} · via {{.Via}}{{end}} · {{.Age}}</p>
 <div class="md">{{.Body}}</div></div>
 </div>
 {{end}}</section>{{end}}

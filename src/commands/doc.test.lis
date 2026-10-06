@@ -192,6 +192,15 @@ fn path_touches_is_false_when_either_side_is_empty() {
 fn doc_commands_declares_every_verb_once_with_a_summary() {
   let names = doc_commands().map(|c| c.name)
   assert strings.Join(names, " ") == "create list view edit delete link unlink"
+  // LLL-505: link and unlink are hidden aliases of 'lll issue link/unlink'.
+  // They dispatch, but neither help nor completions advertise them.
+  assert strings.Join(flags.command_names(doc_commands()), " ") == "create new list view show edit delete"
+  let assert Err(help) = doc(["lll", "doc", "--help"])
+  assert !help.contains("lll doc link")
+  assert !help.contains("lll doc unlink")
+  assert help.contains("lll issue link KEY-123 SLUG")
+  assert flags.resolve_command(doc_commands(), "link").is_some()
+  assert flags.resolve_command(doc_commands(), "unlink").is_some()
   for c in doc_commands() {
     assert c.summary != ""
     // No doc verb has a hand-written page; help is generated from spec.

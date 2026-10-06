@@ -330,6 +330,9 @@ pub struct CommentVM {
   pub id: string,
   pub author: string,
   pub avatar: AvatarVM,
+  // A bot author's owner (LLL-610), "" for a person or an owner the viewer
+  // cannot read. The avatar's bot glyph already says "bot".
+  pub via: string,
   pub age: string,
   pub body: template.HTML,
   // The comment's markdown source for ?raw — same bargain as IssueVM's
