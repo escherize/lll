@@ -1348,6 +1348,17 @@ out=$(env LLL_URL=$URL LLL_TEAM=ENG "$LIN" search "Rail favorites")
 [ "$(printf '%s\n' "$out" | head -1 | cut -d' ' -f1)" = "$SKEY" ] || fail "a title phrase should rank its issue first, got: $(printf '%s' "$out" | head -1)"
 out=$(env LLL_URL=$URL LLL_TEAM=ENG "$LIN" search "$SKEY")
 [ "$(printf '%s\n' "$out" | head -1 | cut -d' ' -f1)" = "$SKEY" ] || fail "a key as the query should pin its issue first"
+# Empty shell arguments are whitespace, not the end of a multiword query.
+for placement in leading middle trailing; do
+  case "$placement" in
+    leading) out=$(env LLL_URL=$URL LLL_TEAM=ENG "$LIN" search "" zebra) ;;
+    middle) out=$(env LLL_URL=$URL LLL_TEAM=ENG "$LIN" search zebra "" giraffe) ;;
+    trailing) out=$(env LLL_URL=$URL LLL_TEAM=ENG "$LIN" search zebra "") ;;
+  esac
+  assert_contains "$out" "$SKEY" "search retains words around $placement empty argument"
+done
+out=$(env LLL_URL=$URL LLL_TEAM=ENG "$LIN" search "" "" 2>&1) && fail "blank-only search should refuse"
+assert_contains "$out" "what to search for" "blank-only search still names the usage"
 out=$(env LLL_URL=$URL LLL_TEAM=ENG "$LIN" search zebra --json)
 printf '%s' "$out" | jq -e '.[0].group and .[0].snippets[0].lines[0]' >/dev/null || fail "search --json: not the hit shape: $out"
 out=$(env LLL_URL=$URL LLL_TEAM=ENG "$LIN" search "no-such-word-anywhere-xq")

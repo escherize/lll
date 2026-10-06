@@ -24,10 +24,8 @@ pub fn search_cmd(args: Slice<string>) -> Result<(), string> {
   let usage = flags.usage("lll search", spec, "TEXT...")
   let p = flags.parse_n(spec, args, 2, 64, usage)?
   let mut words: Slice<string> = []
-  let mut i = 0
-  while p.nth(i) != "" {
+  for i in 0..p.positional_count() {
     words = words.append(p.nth(i))
-    i += 1
   }
   let q = strings.TrimSpace(strings.Join(words, " "))
   if q == "" { return Err(f"what to search for?\nusage: {usage}") }
