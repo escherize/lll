@@ -1,3 +1,4 @@
+import "display"
 import "go:encoding/json"
 import "go:fmt"
 import "go:strconv"
@@ -252,7 +253,7 @@ fn print_finding_lines(docs: Slice<models.Doc>) {
   for d in docs {
     let mut area = d.area
     if area == "" { area = "-" }
-    fmt.Println(f"{d.slug}\t{area}\t{d.title}{confidence_suffix(d.confidence, d.confidence_note)}")
+    fmt.Println(f"{d.slug}\t{display.table_cell(area)}\t{display.table_cell(d.title)}{display.table_cell(confidence_suffix(d.confidence, d.confidence_note))}")
   }
 }
 

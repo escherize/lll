@@ -1,3 +1,4 @@
+import "display"
 import "go:encoding/json"
 import "go:fmt"
 import "go:net/url"
@@ -181,7 +182,7 @@ fn print_hits(hits: Slice<search.Hit>) {
   for h in hits {
     let state = if h.state == "" { "" } else { f"  {h.state}" }
     let kind = if h.kind == "doc" { "doc " } else { "" }
-    fmt.Println(f"{kind}{h.group}{state}  {h.title}")
+    fmt.Println(f"{kind}{h.group}{state}  {display.table_cell(h.title)}")
     for s in h.snippets {
       fmt.Println(f"    [{s.label}]")
       for l in s.lines { fmt.Println(f"    {l}") }
