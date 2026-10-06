@@ -1170,6 +1170,8 @@ input:focus, textarea:focus, select:focus {
   /* Keep the name on the first editing line; controls wrap below it.
      Labels leave room beside the name for their 26px colour swatch. */
   .set-row input[name="name"] { flex: 1 1 calc(100% - 34px); }
+  .settings { width: 100%; }
+  .set-row select { max-width: 100%; }
 }
 
 .set-delete-impact { flex: 1; min-width: 0; overflow-wrap: anywhere; }
