@@ -28,32 +28,28 @@ pub fn doc_commands() -> Slice<flags.Command> {
     flags.Command {
       name: "create", aliases: "new",
       summary: "create a doc; -b - reads the body from stdin",
-      page: "",
       spec: doc_new_spec(),
-      positional: "",
       run: doc_new,
+      ..
     },
     flags.Command {
       name: "list",
       summary: "list docs (slug, kind, title), one line each",
-      page: "",
       spec: doc_list_spec(),
-      positional: "",
       run: doc_list,
       ..
     },
     flags.Command {
       name: "view", aliases: "show",
       summary: "show one doc with its linked issues; --raw prints only the body; --json prints the raw record",
-      page: "",
       spec: doc_view_spec(),
       positional: "SLUG",
       run: doc_view,
+      ..
     },
     flags.Command {
       name: "edit",
       summary: "replace fields (at least one flag); -b - reads the whole body from stdin",
-      page: "",
       spec: doc_edit_spec(),
       positional: "SLUG",
       run: doc_edit,
@@ -62,7 +58,6 @@ pub fn doc_commands() -> Slice<flags.Command> {
     flags.Command {
       name: "delete",
       summary: "delete; asks [y/N] unless --force",
-      page: "",
       spec: doc_delete_spec(),
       positional: "SLUG",
       run: doc_delete,
@@ -71,7 +66,6 @@ pub fn doc_commands() -> Slice<flags.Command> {
     flags.Command {
       name: "link",
       summary: "link the doc to an issue — 'lll issue link KEY-123 SLUG' does the same",
-      page: "",
       spec: flags.with_team([]),
       positional: "SLUG KEY-123",
       run: doc_link,
@@ -80,7 +74,6 @@ pub fn doc_commands() -> Slice<flags.Command> {
     flags.Command {
       name: "unlink",
       summary: "remove that link — 'lll issue unlink KEY-123 SLUG' does the same",
-      page: "",
       spec: flags.with_team([]),
       positional: "SLUG KEY-123",
       run: doc_unlink,

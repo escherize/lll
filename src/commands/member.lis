@@ -39,9 +39,7 @@ pub fn member_commands() -> Slice<flags.Command> {
     flags.Command {
       name: "list",
       summary: "list members (name, email)",
-      page: "",
       spec: member_list_spec(),
-      positional: "",
       run: member_list,
       ..
     },
@@ -67,7 +65,6 @@ pub fn member_commands() -> Slice<flags.Command> {
       summary: "make private, copyable human teammate tokens for a local board",
       page: member_passes_page(),
       spec: member_passes_spec(),
-      positional: "",
       run: member_passes,
       ..
     },

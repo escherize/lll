@@ -23,9 +23,7 @@ pub fn label_commands() -> Slice<flags.Command> {
     flags.Command {
       name: "list",
       summary: "list labels (name, color, team); this team's, or every team's when none is configured",
-      page: "",
       spec: label_list_spec(),
-      positional: "",
       run: label_list,
       ..
     },
@@ -41,7 +39,6 @@ pub fn label_commands() -> Slice<flags.Command> {
     flags.Command {
       name: "edit",
       summary: "rename or recolor a label; the label keeps its issues",
-      page: "",
       spec: label_edit_spec(),
       positional: "NAME",
       run: label_edit,
@@ -50,7 +47,6 @@ pub fn label_commands() -> Slice<flags.Command> {
     flags.Command {
       name: "move",
       summary: "move a label to another team; refuses while issues outside it still carry the label",
-      page: "",
       spec: label_move_spec(),
       positional: "NAME",
       run: label_move,
@@ -59,7 +55,6 @@ pub fn label_commands() -> Slice<flags.Command> {
     flags.Command {
       name: "delete",
       summary: "delete a label; refuses while issues still carry it, and --force drops it off all of them",
-      page: "",
       spec: label_delete_spec(),
       positional: "NAME",
       run: label_delete,

@@ -27,7 +27,6 @@ pub fn finding_commands() -> Slice<flags.Command> {
     flags.Command {
       name: "near",
       summary: "findings about a file or directory, exact path matches first",
-      page: "",
       spec: flags.with_team([]),
       positional: "<path>",
       run: finding_near,
@@ -36,7 +35,6 @@ pub fn finding_commands() -> Slice<flags.Command> {
     flags.Command {
       name: "view",
       summary: "show one finding by slug - a finding is a doc, so this is 'lll doc view'",
-      page: "",
       spec: doc_view_spec(),
       positional: "SLUG",
       run: doc_view,
@@ -45,24 +43,21 @@ pub fn finding_commands() -> Slice<flags.Command> {
     flags.Command {
       name: "create", aliases: "new",
       summary: "file a finding: 'lll doc new -k finding' with the kind already set",
-      page: "",
       spec: finding_new_spec(),
       positional: "[\"slug\"]",
       run: finding_new,
+      ..
     },
     flags.Command {
       name: "list",
       summary: "every finding, or one area's, one line each (slug, area, title)",
-      page: "",
       spec: finding_list_spec(),
-      positional: "",
       run: finding_list,
       ..
     },
     flags.Command {
       name: "confirm",
       summary: "assert a finding is fact; clears any refutation's reason",
-      page: "",
       spec: flags.with_team([]),
       positional: "SLUG",
       run: finding_confirm,
@@ -71,7 +66,6 @@ pub fn finding_commands() -> Slice<flags.Command> {
     flags.Command {
       name: "refute",
       summary: "mark a finding refuted and record why: -b why ('-b -' reads stdin)",
-      page: "",
       spec: finding_refute_spec(),
       positional: "SLUG",
       run: finding_refute,
