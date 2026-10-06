@@ -531,7 +531,7 @@ fn command_tables_keep_one_alias_per_verb_and_flag() {
     config_commands(), import_commands(), token_commands(), webhook_commands()]
   for table in tables {
     for c in table {
-      assert strings.Fields(c.aliases).length() <= 1
+      assert strings.Fields(c.alias).length() <= 1
       for fl in c.spec {
         assert strings.Fields(fl.alias).length() <= 1
         if fl.name == "--limit" { assert fl.alias == "-l" }

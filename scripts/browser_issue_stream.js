@@ -12,7 +12,13 @@ async page => {
     window.keptDiagram = document.querySelector('#issue-description svg');
   });
   await page.locator('#comment-form textarea').fill('Unfinished comment');
-  await page.locator('.issue-main h1').click();
+  const editTitle = page.getByRole('button', {name: 'Edit issue title', exact: true});
+  await editTitle.focus();
+  await editTitle.press('Enter');
+  await page.locator('#title-form input[name=title]').waitFor({state: 'visible'});
+  await page.locator('#title-form input[name=title]').press('Escape');
+  await page.waitForFunction(() => document.activeElement?.classList.contains('title-edit-trigger'));
+  await editTitle.press('Space');
   await page.locator('#title-form input[name=title]').fill('Unfinished title');
   await page.request.post(`${base}/priority`, {form: {key, priority: 'urgent'}});
   await page.waitForFunction(() => document.querySelector('#prio-form select').value === 'urgent');

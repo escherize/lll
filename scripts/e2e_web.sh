@@ -2026,6 +2026,8 @@ out=$(wcurl -sf -X POST "$WEB/settings/access/member" -d "member=$MEMBER_ID" \
   -d "admin_password=$ADMIN_PASS")
 assert_contains "$out" 'id="settings"' "a credential patches the settings body back"
 assert_contains "$out" 'flash-ok' "a credential says its success in the flash strip"
+assert_contains "$out" 'role="status"' "success confirmation exposes status semantics"
+assert_contains "$out" 'aria-atomic="true"' "success confirmation is atomic"
 curl -sf "$LLL_URL/api/collections/members/auth-with-password" -H 'Content-Type: application/json' \
   -d '{"identity":"cred@example.com","password":"cred-pass-12345"}' | grep -q '"token"' \
   || fail "the credentialed member cannot log in"
@@ -2614,6 +2616,8 @@ assert_cli_lacks "a refused unarchive still unarchived" "OPS" "$LIN" team list
 out=$(wcurl -sf -X POST "$WEB/settings/teams/archive" -d "id=$OPS_TEAM_ID" -d 'archived=0' \
   -d "admin_password=$ADMIN_PASS")
 assert_contains "$out" 'flash-ok' "an unarchive says its success in the flash strip"
+assert_contains "$out" 'role="status"' "success confirmation exposes status semantics"
+assert_contains "$out" 'aria-atomic="true"' "success confirmation is atomic"
 assert_contains "$out" 'id="settings"' "an unarchive patches the settings body back"
 assert_cli_contains "unarchiving from settings did not persist" "OPS" "$LIN" team list
 
@@ -2621,6 +2625,8 @@ assert_cli_contains "unarchiving from settings did not persist" "OPS" "$LIN" tea
 out=$(wcurl -sf -X POST "$WEB/settings/teams/archive" -d "id=$OPS_TEAM_ID" -d 'archived=1' \
   -d "admin_password=$ADMIN_PASS")
 assert_contains "$out" 'flash-ok' "an archive says its success in the flash strip"
+assert_contains "$out" 'role="status"' "success confirmation exposes status semantics"
+assert_contains "$out" 'aria-atomic="true"' "success confirmation is atomic"
 assert_cli_lacks "archiving from settings did not persist" "OPS" "$LIN" team list
 assert_cli_contains "the settings-archived team is gone entirely" "OPS" "$LIN" team list --archived
 env LLL_TEAM=OPS "$LIN" team unarchive OPS >/dev/null   # leave the suite as it found OPS

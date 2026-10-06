@@ -48,6 +48,8 @@ Completes nouns, verbs per noun, and flags per verb."
 fn nouns() -> Slice<string> {
   [
     "issue",
+    "search",
+    "bot",
     "team",
     "member",
     "project",
@@ -99,6 +101,7 @@ fn verbs(noun: string) -> Slice<string> {
   // added to a table is completed with no edit here. This was a fourth
   // hand-kept list of the same verbs, and it drifted twice in one wave.
   match noun {
+    "bot" => ["rotate"],
     "skill" => ["list", "get"],
     "completions" => ["bash", "zsh", "fish"],
     _ => [],
@@ -119,6 +122,8 @@ fn verb_flags(noun: string, verb: string) -> Slice<string> {
     return flags.tokens(c.spec)
   }
   match noun {
+    "search" => flags.tokens(search_spec()),
+    "bot" => flags.tokens(token_create_spec()),
     "watch" => flags.tokens(watch_spec()),
     "up" => flags.tokens(up_spec()),
     "attach" => flags.tokens(attach_spec()),
@@ -141,12 +146,14 @@ fn bash_script() -> string {
   let mut flag_cases = ""
   for n in nouns() {
     let vs = verbs(n)
-    if !vs.is_empty() {
-      let ws = strings.Join(vs, " ")
+    let own = noun_flags(n)
+    let candidates = vs.append(own...)
+    if !candidates.is_empty() {
+      let ws = strings.Join(candidates, " ")
       verb_cases += f"      {n}) words='{ws}' ;;\n"
-    } else if !noun_flags(n).is_empty() {
-      let ws = strings.Join(noun_flags(n), " ")
-      verb_cases += f"      {n}) words='{ws}' ;;\n"
+    }
+    if !own.is_empty() {
+      let ws = strings.Join(own, " ")
       flag_cases += f"      {n},*) words='{ws}' ;;\n"
     }
     for v in vs {
@@ -191,12 +198,14 @@ fn zsh_script() -> string {
   let mut flag_cases = ""
   for n in nouns() {
     let vs = verbs(n)
-    if !vs.is_empty() {
-      let ws = strings.Join(vs, " ")
+    let own = noun_flags(n)
+    let candidates = vs.append(own...)
+    if !candidates.is_empty() {
+      let ws = strings.Join(candidates, " ")
       verb_cases += f"      {n}) comps=({ws}) ;;\n"
-    } else if !noun_flags(n).is_empty() {
-      let ws = strings.Join(noun_flags(n), " ")
-      verb_cases += f"      {n}) comps=({ws}) ;;\n"
+    }
+    if !own.is_empty() {
+      let ws = strings.Join(own, " ")
       flag_cases += f"      {n},*) comps=({ws}) ;;\n"
     }
     for v in vs {
@@ -244,16 +253,18 @@ complete -c lll -f
   out += f"complete -c lll -n '__fish_use_subcommand' -a '{all_nouns}'\n"
   for n in nouns() {
     let vs = verbs(n)
+    let own = noun_flags(n)
     if !vs.is_empty() {
       let ws = strings.Join(vs, " ")
       out += f"complete -c lll -n '__fish_seen_subcommand_from {n}; and not __fish_seen_subcommand_from {ws}' -a '{ws}'\n"
     }
-    for fl in noun_flags(n) {
+    for fl in own {
       let spec = fish_flag(fl)
       out += f"complete -c lll -n '__fish_seen_subcommand_from {n}' {spec}\n"
     }
     for v in vs {
       for fl in verb_flags(n, v) {
+        if own.contains(fl) { continue }
         let spec = fish_flag(fl)
         out += f"complete -c lll -n '__fish_seen_subcommand_from {n}; and __fish_seen_subcommand_from {v}' {spec}\n"
       }
