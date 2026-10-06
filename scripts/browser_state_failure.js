@@ -15,13 +15,18 @@ async page => {
     const checkbox = field === 'labels';
     const control = checkbox ? form.locator('input[type=checkbox]').first() : form.locator('select');
     const original = checkbox ? await control.isChecked() : await control.inputValue();
-    await form.evaluate((el, name) => {
-      const input = document.createElement('input');
-      input.type = 'hidden'; input.name = name; input.value = 'bogus';
-      input.dataset.failureProbe = 'true'; el.prepend(input);
-    }, field);
+    if (checkbox) {
+      // A chip posts only its own id (LLL-519), so the probe is the id.
+      await control.evaluate(el => { el.value = 'bogus'; el.dataset.failureProbe = 'true'; });
+    } else {
+      await form.evaluate((el, name) => {
+        const input = document.createElement('input');
+        input.type = 'hidden'; input.name = name; input.value = 'bogus';
+        input.dataset.failureProbe = 'true'; el.prepend(input);
+      }, field);
+    }
     try {
-      const response = page.waitForResponse(r => r.url().endsWith('/' + field) && r.request().method() === 'POST').catch(error => { throw new Error(field + ': ' + error.message); });
+      const response = page.waitForResponse(r => r.url().split('?')[0].endsWith('/' + field) && r.request().method() === 'POST').catch(error => { throw new Error(field + ': ' + error.message); });
       if (checkbox) {
         await form.locator('.lab-add').click();
         await control.locator("..").click();
