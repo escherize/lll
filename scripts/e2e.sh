@@ -1457,7 +1457,7 @@ PY
 "$LIN" completions bash > "$DATA_DIR/comp.bash"
 bash -n "$DATA_DIR/comp.bash" || fail "bash completions do not parse"
 out=$(cat "$DATA_DIR/comp.bash")
-assert_contains "$out" "create new list next view show read update close start claim release delete comment watch url id title branch-name pr ref link unlink" "bash completions list issue verbs"
+assert_contains "$out" "create new list next view show update close start claim release delete comment watch url id title branch-name pr ref link unlink" "bash completions list issue verbs"
 assert_contains "$out" "--limit" "bash completions know --limit"
 assert_contains "$out" "complete -F _lll lll" "bash completions register"
 "$LIN" completions zsh > "$DATA_DIR/comp.zsh"
@@ -1664,8 +1664,8 @@ assert_contains "$out" "race-found	finding	Race found" "doc list shows second do
 out=$(LLL_URL=$URL LLL_TEAM=ENG "$LIN" doc list --search race)
 assert_contains "$out" "race-found" "doc list --search matches slug"
 assert_not_contains "$out" "port-notes" "doc list --search excludes the rest"
-out=$(LLL_URL=$URL LLL_TEAM=ENG "$LIN" doc list --query "Port notes")
-assert_contains "$out" "port-notes" "doc list takes --query for --search"
+out=$(LLL_URL=$URL LLL_TEAM=ENG "$LIN" doc list --search "Port notes")
+assert_contains "$out" "port-notes" "doc list takes --search"
 out=$(LLL_URL=$URL LLL_TEAM=ENG "$LIN" doc list --search race --json)
 printf '%s' "$out" | jq -e '.items | map(.slug) == ["race-found"]' >/dev/null \
   || fail "doc list --search --json is the filtered list: $out"
@@ -1937,6 +1937,23 @@ set -e
 [ "$rc" -ne 0 ] || fail "cross-team issue link: expected nonzero exit"
 assert_contains "$out" "a link stays inside one team" "cross-team link is refused"
 
+# LLL-503: aliases keep canonical help, while retired third spellings refuse.
+for pair in 'issue show view' 'issue new create' 'doc create new' 'doc show view' 'finding create new' 'member create add' 'member delete remove'; do
+  read -r noun alias canonical <<< "$pair"
+  canonical_help=$("$LIN" "$noun" "$canonical" --help)
+  alias_help=$("$LIN" "$noun" "$alias" --help)
+  [ "$alias_help" = "$canonical_help" ] || fail "$noun $alias must show canonical help"
+done
+for noun in issue doc finding; do
+  if "$LIN" "$noun" read --help >"$DATA_DIR/retired.out" 2>&1; then
+    fail "$noun read must refuse the retired spelling"
+  fi
+  assert_contains "$(cat "$DATA_DIR/retired.out")" "unknown $noun command" "retired verb nudge"
+done
+for noun in issue doc finding member; do
+  assert_not_contains "$("$LIN" "$noun" --help)" "the same command as" "canonical help has no duplicate alias rows"
+done
+
 # Labels are team-owned, so the same name on two boards is two labels and an
 # issue takes its own team's.
 LLL_URL=$URL LLL_TEAM=OPS "$LIN" label create -n pb >/dev/null
@@ -1963,8 +1980,6 @@ assert_contains "$out" "lll finding list" "finding --help mentions list"
 assert_contains "$out" "lll finding view" "finding --help mentions view (fleet task 9: 6/30 guessed it)"
 out=$(env LLL_URL=$URL LLL_TEAM=ENG "$LIN" finding view migration-hazard --raw)
 assert_contains "$out" "Migrations are a merge hazard." "finding view reads a finding by slug"
-out=$(env LLL_URL=$URL LLL_TEAM=ENG "$LIN" finding read migration-hazard --raw)
-assert_contains "$out" "Migrations are a merge hazard." "finding read is view"
 out=$(env LLL_URL=$URL LLL_TEAM=ENG "$LIN" finding new -s fleet-new -t "Filed from finding new" -a pb -b "kind set by the verb")
 assert_contains "$out" "Created doc fleet-new" "finding new files a doc"
 out=$(env LLL_URL=$URL LLL_TEAM=ENG "$LIN" finding create positional-slug -t "Positional slug" -a pb -b "bare slug")
@@ -1977,8 +1992,8 @@ set -e
 assert_contains "$out" "not both" "slug as positional and flag is refused"
 out=$(env LLL_URL=$URL LLL_TEAM=ENG "$LIN" finding list -a pb)
 assert_contains "$out" "fleet-new" "finding new sets kind=finding (it lists as a finding)"
-out=$(env LLL_URL=$URL LLL_TEAM=ENG "$LIN" doc read fleet-new --raw)
-assert_contains "$out" "kind set by the verb" "doc read is view"
+out=$(env LLL_URL=$URL LLL_TEAM=ENG "$LIN" doc show fleet-new --raw)
+assert_contains "$out" "kind set by the verb" "doc show is view"
 # LLL-96: docs are in the full-text search too, ranked with the issues; the
 # delta sync sees a doc created after the cache's first fill.
 out=$(env LLL_URL=$URL LLL_TEAM=ENG "$LIN" search "Migrations are a merge hazard" --docs)
@@ -1997,7 +2012,7 @@ assert_contains "$out" "lll doc link" "doc --help mentions link (LLL-313)"
 assert_contains "$out" "lll doc unlink" "doc --help mentions unlink (LLL-313)"
 assert_contains "$out" "--search" "doc --help mentions --search (LLL-313)"
 comp_doc_list=$("$LIN" completions bash | grep -F "doc,list" | head -1 | sed "s/.*words='//;s/'.*//")
-assert_contains "$comp_doc_list" "--search --query" "doc list completions carry --search"
+assert_contains "$comp_doc_list" "--search" "doc list completions carry --search"
 out=$("$LIN" finding --help)
 assert_contains "$out" "--limit" "finding --help mentions --limit (LLL-313)"
 
@@ -2183,8 +2198,8 @@ set +e
 out=$("$LIN" issue assign ENG-1 bob 2>&1)
 set -e
 assert_contains "$out" "lll issue claim KEY-123" "a synonym verb is pointed at the verb (fleet replay: assign, 5/30)"
-out=$(env LLL_URL=$URL LLL_TEAM=ENG "$LIN" doc new --slug long-forms --title "Long forms" --kind finding --area pb --path "src/pb" --body "every short flag has a long one")
-assert_contains "$out" "Created doc long-forms" "doc new takes the long form of every flag, --path included"
+out=$(env LLL_URL=$URL LLL_TEAM=ENG "$LIN" doc new --slug long-forms --title "Long forms" --kind finding --area pb --paths "src/pb" --body "every short flag has a long one")
+assert_contains "$out" "Created doc long-forms" "doc new takes the long form of every flag, --paths included"
 out=$("$LIN" --help)
 assert_contains "$out" "There is no 'lll list' or 'lll comment'" "top-level help states the noun-verb shape (fleet replay: 5/30)"
 
@@ -2199,12 +2214,12 @@ assert_contains "$out" "the ID comes right after the verb" "sub-verb error names
 # aliases agents guessed at a steady rate across fleet runs (TASK-309)
 out=$(LLL_URL=$URL "$LIN" issue comment ENG-6 --body "alias body")
 assert_contains "$out" "Commented on ENG-6" "comment takes --body for -b"
-out=$(LLL_URL=$URL "$LIN" issue comment ENG-6 -m "alias m")
-assert_contains "$out" "Commented on ENG-6" "comment takes -m for -b (three shards across two replays)"
+out=$(LLL_URL=$URL "$LIN" issue comment ENG-6 -b "canonical body")
+assert_contains "$out" "Commented on ENG-6" "comment keeps canonical -b"
 out=$(LLL_URL=$URL "$LIN" issue comment ENG-6 --nope 2>&1 || true)
-assert_contains "$out" "-b, --body, -m, --message" "the flag table lists every alias"
-out=$(LLL_URL=$URL LLL_TEAM=ENG "$LIN" issue list --query "Roundtrip")
-assert_contains "$out" "ENG-6" "list takes --query for --search"
+assert_contains "$out" "-b, --body" "the flag table lists every alias"
+out=$(LLL_URL=$URL LLL_TEAM=ENG "$LIN" issue list --search "Roundtrip")
+assert_contains "$out" "ENG-6" "list takes --search"
 out=$(LLL_URL=$URL LLL_TEAM=ENG "$LIN" issue new --title "Made with issue new" --priority 4)
 assert_contains "$out" "Made with issue new" "issue new is create, and create takes --title"
 

@@ -27,6 +27,7 @@ pub fn label_commands() -> Slice<flags.Command> {
       spec: label_list_spec(),
       positional: "",
       run: label_list,
+      ..
     },
     flags.Command {
       name: "create",
@@ -35,6 +36,7 @@ pub fn label_commands() -> Slice<flags.Command> {
       spec: label_create_spec(),
       positional: "[NAME]",
       run: label_create,
+      ..
     },
     flags.Command {
       name: "edit",
@@ -43,6 +45,7 @@ pub fn label_commands() -> Slice<flags.Command> {
       spec: label_edit_spec(),
       positional: "NAME",
       run: label_edit,
+      ..
     },
     flags.Command {
       name: "move",
@@ -51,6 +54,7 @@ pub fn label_commands() -> Slice<flags.Command> {
       spec: label_move_spec(),
       positional: "NAME",
       run: label_move,
+      ..
     },
     flags.Command {
       name: "delete",
@@ -59,6 +63,7 @@ pub fn label_commands() -> Slice<flags.Command> {
       spec: label_delete_spec(),
       positional: "NAME",
       run: label_delete,
+      ..
     },
   ]
 }

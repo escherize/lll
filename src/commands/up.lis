@@ -63,7 +63,7 @@ fn up_spec() -> Slice<flags.Flag> {
     },
     flags.Flag {
       name: "--scratch",
-      alias: "--local",
+      alias: "",
       help: "start a throwaway local board, ignoring inherited config and LLL_* values",
       ..,
     },

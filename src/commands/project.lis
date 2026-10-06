@@ -29,6 +29,7 @@ pub fn project_commands() -> Slice<flags.Command> {
       spec: project_list_spec(),
       positional: "",
       run: project_list,
+      ..
     },
     flags.Command {
       name: "view",
@@ -37,6 +38,7 @@ pub fn project_commands() -> Slice<flags.Command> {
       spec: flags.with_team([]),
       positional: "NAME",
       run: project_view,
+      ..
     },
     flags.Command {
       name: "create",
@@ -45,6 +47,7 @@ pub fn project_commands() -> Slice<flags.Command> {
       spec: project_create_spec(),
       positional: "[NAME]",
       run: project_create,
+      ..
     },
     flags.Command {
       name: "edit",
@@ -53,6 +56,7 @@ pub fn project_commands() -> Slice<flags.Command> {
       spec: project_edit_spec(),
       positional: "NAME",
       run: project_edit,
+      ..
     },
     flags.Command {
       name: "move",
@@ -61,6 +65,7 @@ pub fn project_commands() -> Slice<flags.Command> {
       spec: project_move_spec(),
       positional: "NAME",
       run: project_move,
+      ..
     },
     flags.Command {
       name: "delete",
@@ -69,6 +74,7 @@ pub fn project_commands() -> Slice<flags.Command> {
       spec: project_delete_spec(),
       positional: "NAME",
       run: project_delete,
+      ..
     },
   ]
 }

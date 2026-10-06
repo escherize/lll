@@ -31,6 +31,7 @@ pub fn team_commands() -> Slice<flags.Command> {
       spec: team_list_spec(),
       positional: "",
       run: team_list,
+      ..
     },
     flags.Command {
       name: "create",
@@ -39,6 +40,7 @@ pub fn team_commands() -> Slice<flags.Command> {
       spec: team_create_spec(),
       positional: "",
       run: team_create,
+      ..
     },
     flags.Command {
       name: "view",
@@ -47,6 +49,7 @@ pub fn team_commands() -> Slice<flags.Command> {
       spec: [],
       positional: "KEY",
       run: team_view,
+      ..
     },
     flags.Command {
       name: "rename",
@@ -55,6 +58,7 @@ pub fn team_commands() -> Slice<flags.Command> {
       spec: team_rename_spec(),
       positional: "KEY",
       run: team_rename,
+      ..
     },
     flags.Command {
       name: "set-accent",
@@ -63,6 +67,7 @@ pub fn team_commands() -> Slice<flags.Command> {
       spec: [],
       positional: "KEY #rrggbb",
       run: team_set_accent,
+      ..
     },
     flags.Command {
       name: "set-emoji",
@@ -71,6 +76,7 @@ pub fn team_commands() -> Slice<flags.Command> {
       spec: [],
       positional: "KEY EMOJI",
       run: team_set_emoji,
+      ..
     },
     flags.Command {
       name: "archive",
@@ -79,6 +85,7 @@ pub fn team_commands() -> Slice<flags.Command> {
       spec: [],
       positional: "KEY",
       run: team_archive,
+      ..
     },
     flags.Command {
       name: "unarchive",
@@ -87,6 +94,7 @@ pub fn team_commands() -> Slice<flags.Command> {
       spec: [],
       positional: "KEY",
       run: team_unarchive,
+      ..
     },
     flags.Command {
       name: "delete",
@@ -95,6 +103,7 @@ pub fn team_commands() -> Slice<flags.Command> {
       spec: [],
       positional: "KEY",
       run: team_delete,
+      ..
     },
   ]
 }

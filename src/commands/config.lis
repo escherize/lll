@@ -31,6 +31,7 @@ pub fn config_commands() -> Slice<flags.Command> {
       spec: [],
       positional: "",
       run: config_list,
+      ..
     },
     flags.Command {
       name: "check",
@@ -39,6 +40,7 @@ pub fn config_commands() -> Slice<flags.Command> {
       spec: [],
       positional: "",
       run: config_check,
+      ..
     },
     flags.Command {
       name: "init",
@@ -47,6 +49,7 @@ pub fn config_commands() -> Slice<flags.Command> {
       spec: [],
       positional: "",
       run: config_init,
+      ..
     },
     flags.Command {
       name: "set",
@@ -55,6 +58,7 @@ pub fn config_commands() -> Slice<flags.Command> {
       spec: [],
       positional: "<url|web_url> VALUE",
       run: config_set,
+      ..
     },
   ]
 }

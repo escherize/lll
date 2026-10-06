@@ -41,6 +41,7 @@ pub fn webhook_commands() -> Slice<flags.Command> {
       spec: webhook_add_spec(),
       positional: "URL",
       run: webhook_add,
+      ..
     },
     flags.Command {
       name: "list",
@@ -49,6 +50,7 @@ pub fn webhook_commands() -> Slice<flags.Command> {
       spec: webhook_list_spec(),
       positional: "",
       run: webhook_list,
+      ..
     },
     flags.Command {
       name: "remove",
@@ -57,6 +59,7 @@ pub fn webhook_commands() -> Slice<flags.Command> {
       spec: webhook_remove_spec(),
       positional: "URL",
       run: webhook_remove,
+      ..
     },
   ]
 }
