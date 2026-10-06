@@ -402,7 +402,7 @@ fn only_issue_create_has_a_hand_written_page() {
 
 fn issue_help_requested(args: Slice<string>, verb: string) -> bool {
   if issue_commands().find(|c| c.name == verb).is_none() { return false }
-  flags.help_requested(issue_verb_spec(verb), args, 3)
+  flags.help_requested(flags.command_spec(issue_commands(), verb), args, 3)
 }
 
 // ---------------------------------------------------------------- next
