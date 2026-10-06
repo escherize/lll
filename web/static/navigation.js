@@ -83,16 +83,17 @@ if (palette && typeof palette.showModal === 'function') {
   let timer;
   const ask = () => {
     const q = field.value.trim();
-    if (pending) pending.abort();
     if (!q) {
       results.innerHTML = '';
       sayNone();
       return;
     }
-    pending = new AbortController();
-    fetch(endpoint + '&q=' + encodeURIComponent(q), {signal: pending.signal})
+    const request = new AbortController();
+    pending = request;
+    fetch(endpoint + '&q=' + encodeURIComponent(q), {signal: request.signal})
       .then((res) => (res.ok ? res.text() : ''))
       .then((html) => {
+        if (request.signal.aborted) return;
         // The server answers with the whole #cmdk-results element; keep this
         // page's node and take its children, so the id survives.
         const parsed = new DOMParser().parseFromString(html, 'text/html');
@@ -107,6 +108,9 @@ if (palette && typeof palette.showModal === 'function') {
       .catch(() => {});
   };
   field.addEventListener('input', () => {
+    // Invalidate immediately, including a response already reading its body.
+    if (pending) pending.abort();
+    results.innerHTML = '';
     filter();
     clearTimeout(timer);
     timer = setTimeout(ask, 200);
