@@ -77,6 +77,25 @@ async page => {
     // not take it with it.
     await page.locator(`#set-nav a.active`).waitFor();
   }
+  const viewport = page.viewportSize();
+  for (const width of [390, 320]) {
+    await page.setViewportSize({width, height: 844});
+    const nav = page.getByRole('navigation', {name: 'Settings sections'});
+    const layout = await nav.evaluate(el => ({width: el.clientWidth, parent: el.parentElement.clientWidth}));
+    if (Math.abs(layout.width - layout.parent) > 1) throw new Error(`settings nav clipped at ${width}px`);
+    for (const name of ['Identity', 'Labels', 'Projects', 'Teams', 'Members', 'Access']) {
+      const link = nav.getByRole('link', {name, exact: true});
+      await link.scrollIntoViewIfNeeded();
+      const fits = await link.evaluate(el => {
+        const r = el.getBoundingClientRect(), n = el.closest('nav').getBoundingClientRect();
+        return r.left >= n.left - 1 && r.right <= n.right + 1 && r.width + 1 >= el.scrollWidth;
+      });
+      if (!fits) throw new Error(`settings link ${name} clipped at ${width}px`);
+    }
+    await nav.locator('a.active').scrollIntoViewIfNeeded();
+    await page.screenshot({path: `/tmp/lll-558-settings-${width}.png`});
+  }
+  await page.setViewportSize(viewport);
   await page.screenshot({path: '/tmp/lll-101-settings.png'});
   return 'settings drafts survive reordered label, member and project saves';
 }
