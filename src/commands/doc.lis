@@ -26,7 +26,7 @@ pub fn doc(args: Slice<string>) -> Result<(), string> {
 pub fn doc_commands() -> Slice<flags.Command> {
   [
     flags.Command {
-      name: "create", aliases: "new",
+      name: "create", alias: "new",
       summary: "create a doc; -b - reads the body from stdin",
       spec: doc_new_spec(),
       run: doc_new,
@@ -40,7 +40,7 @@ pub fn doc_commands() -> Slice<flags.Command> {
       ..
     },
     flags.Command {
-      name: "view", aliases: "show",
+      name: "view", alias: "show",
       summary: "show one doc with its linked issues; --raw prints only the body; --json prints the raw record",
       spec: doc_view_spec(),
       positional: "SLUG",

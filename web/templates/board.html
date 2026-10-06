@@ -66,7 +66,7 @@ provenance.
              was: type, Enter, done. This button is the escape hatch to the
              full form, carrying whatever is already typed with it. -->
         <button type="button" id="ni-expand" class="ni-expand" title="Full form (c)" aria-label="Open the full create form" data-on:click="$ni_open = true"><svg width="14" height="14"><use href="#ic-expand"/></svg></button>
-        <select name="state">
+        <select name="state" aria-label="Issue state">
         {{range .Page.States}}<option value="{{.Value}}"{{if eq .Value "todo"}} selected{{end}}>{{.Label}}</option>
         {{end}}</select>
         <button type="button" class="btn primary" data-on:click="document.getElementById('new-title').value.trim() ? @post('/create', {contentType: 'form'}) : document.getElementById('new-title').focus()"><svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true"><path d="M6 1.5 V10.5 M1.5 6 H10.5" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg> New issue</button>

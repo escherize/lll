@@ -502,7 +502,7 @@ fn unknown_flag_names_a_near_miss_and_only_a_near_miss() {
 #[test]
 fn command_alias_dispatch_uses_canonical_help_and_parser() {
   let commands = [Command {
-    name: "view", aliases: "show", summary: "view", page: "", spec: [],
+    name: "view", alias: "show", summary: "view", page: "", spec: [],
     positional: "KEY", run: |input| {
       if input.parsed.first() != "DEMO-1" { return Err("wrong key") }
       Ok(())
@@ -514,4 +514,11 @@ fn command_alias_dispatch_uses_canonical_help_and_parser() {
   assert !help.contains("lll issue show")
   assert command_names(commands).equals(["view", "show"])
   assert resolve_command(commands, "read").is_none()
+}
+
+#[test]
+fn empty_command_alias_does_not_resolve_an_empty_verb() {
+  let commands = [Command { name: "list", run: |_| Ok(()), .. }]
+  assert resolve_command(commands, "").is_none()
+  assert command_names(commands).equals(["list"])
 }

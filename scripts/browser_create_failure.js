@@ -69,5 +69,10 @@ async page => {
   await assignee.selectOption('');
   await project.selectOption('');
   await page.locator('#ni-title').press('Escape');
+  const quickState = page.getByRole('combobox', {name: 'Issue state', exact: true});
+  const originalState = await quickState.inputValue();
+  await quickState.selectOption('in-progress');
+  if (await quickState.inputValue() !== 'in-progress') throw new Error('named quick-create state selector did not retain selection');
+  await quickState.selectOption(originalState);
   return 'create error readable inside dialog; keyboard retry and fresh-open clearing passed';
 }

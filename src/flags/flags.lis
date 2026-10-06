@@ -370,8 +370,8 @@ pub struct CommandInput {
 /// still reads its positional through Parsed.first().
 pub struct Command {
   pub name: string,
-  /// Accepted verb spellings, kept out of the canonical help table.
-  pub aliases: string,
+  /// One accepted alternate spelling; empty means none. Kept out of help.
+  pub alias: string,
   pub summary: string,
   pub page: string,
   pub spec: Slice<Flag>,
@@ -572,7 +572,7 @@ pub fn command_spec(cmds: Slice<Command>, verb: string) -> Slice<Flag> {
 
 /// Resolve both advertised verbs and accepted aliases to the same command.
 pub fn resolve_command(cmds: Slice<Command>, verb: string) -> Option<Command> {
-  cmds.find(|c| c.name == verb || strings.Fields(c.aliases).contains(verb))
+  cmds.find(|c| c.name == verb || (!c.alias.is_empty() && c.alias == verb))
 }
 
 /// Shell completion offers every accepted spelling without duplicating help.
@@ -580,7 +580,7 @@ pub fn command_names(cmds: Slice<Command>) -> Slice<string> {
   let mut names: Slice<string> = []
   for c in cmds {
     names = names.append(c.name)
-    for alias in strings.Fields(c.aliases) { names = names.append(alias) }
+    if !c.alias.is_empty() { names = names.append(c.alias) }
   }
   names
 }

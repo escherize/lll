@@ -974,7 +974,18 @@ input:focus, textarea:focus, select:focus {
 }
 
 /* ── issue detail editing (priority select, title edit) ─────── */
-.issue-main h1 { cursor: text; }
+.title-edit-trigger {
+  display: block;
+  width: 100%;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  letter-spacing: inherit;
+  text-align: left;
+  cursor: text;
+}
 .issue-main h1:hover { color: var(--text-2); }
 .title-edit { margin: 4px 0 14px; }
 .title-edit input {
