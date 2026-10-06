@@ -55,6 +55,12 @@ do not update the issue record. New streams receive current snapshots on
 connection; metadata refreshes preserve title/comment drafts and the separate
 description boundary.
 
+`lll watch` streams issue records only, so it sees a claim operation only
+when the operation writes the issue. A claim that assigns its holder and a
+release that clears the assignee each produce one issue update event. Claiming
+an issue already assigned to you, claiming one you already hold, and renewing
+produce none. `scripts/test_watch_contracts.py` pins this.
+
 Claiming an issue already held by the same member succeeds, retains the claim
 ID and creation time, and restores assignment to that member. Another member's
 claim is refused. Releasing an unclaimed issue is an error. A transaction

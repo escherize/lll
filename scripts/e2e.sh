@@ -3621,6 +3621,10 @@ python3 "$REPO_ROOT"/scripts/test_import_github.py "$LLL_ABS" "$URL"
 # A fresh superuser token: the mid-suite restart retired the earlier one.
 LLL_TEST_SUPERUSER_TOKEN=$(pb_superuser_token "$URL") \
   python3 "$REPO_ROOT"/scripts/test_claims_live.py "$LLL_ABS" "$URL"
+# LLL-615: the watch, claim and bot answers 'lll watch --help' and
+# 'lll bot rotate --help' give scripts.
+LLL_TEST_SUPERUSER_TOKEN=$(pb_superuser_token "$URL") \
+  python3 "$REPO_ROOT"/scripts/test_watch_contracts.py "$LLL_ABS" "$URL"
 # LLL-385: seed is outside build/test/e2e, so it broke for five days under a
 # green gate. Here rather than in `test` because it needs the built binary.
 python3 "$REPO_ROOT"/scripts/test_seed.py
