@@ -132,6 +132,7 @@ Usage:
                           server POSTs issue events to (see 'lll webhook --help')
   lll up [--port 8100]    start the lll server and web board together (see 'lll up --help')
   lll board [-w]          print the web board URL; -w opens it (see 'lll board --help')
+  lll board --team KEY    a view-only link to one team's board, no account needed
   lll skill list          the agent operating instructions in this binary
   lll skill get NAME      one of them as markdown (see 'lll skill --help')
   lll completions <shell> completion script for bash, zsh, or fish
@@ -182,6 +183,12 @@ fn unknown_command(noun: string, verb: string) -> string {
       // the user had right. So the verb rides along (LLL-313).
       let rest = if verb == "" || verb.starts_with("-") { "" } else { f" {verb}" }
       return f"unknown command: '{noun}{rest}' — it is an issue verb: 'lll issue {noun} ...' (see 'lll issue {noun} -h')"
+    }
+  }
+  // 'lll invite' is a member verb (fleet case 11), the same mistake shape.
+  for c in commands.member_commands() {
+    if c.name == noun {
+      return f"unknown command: '{noun}' — it is a member verb: 'lll member {noun} ...' (see 'lll member {noun} -h')"
     }
   }
   f"unknown command: '{noun}' (see 'lll --help')"

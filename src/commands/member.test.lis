@@ -82,10 +82,10 @@ fn identity_recovery_quotes_display_names() {
 #[test]
 fn member_commands_declare_every_verb_and_alias() {
   let names = flags.command_names(member_commands())
-  for want in ["list", "add", "create", "invite", "passes", "remove", "delete", "set-password"] {
+  for want in ["list", "add", "create", "invite", "passes", "remove", "delete", "access", "set-password"] {
     assert names.find(|n| n == want).is_some()
   }
-  assert names.length() == 8
+  assert names.length() == 9
 }
 
 /// A summary is the verb's row in `lll member --help`; an empty one is a
@@ -106,7 +106,7 @@ fn member_commands_all_carry_a_summary() {
 fn member_commands_keep_only_the_hand_written_pages() {
   for c in member_commands() {
     let want_page = match c.name {
-      "create" | "invite" | "passes" | "delete" | "set-password" => true,
+      "create" | "invite" | "passes" | "delete" | "access" | "set-password" => true,
       _ => false,
     }
     assert (c.page != "") == want_page

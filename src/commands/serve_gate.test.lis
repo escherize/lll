@@ -1,0 +1,39 @@
+import "go:strings"
+
+#[test]
+fn scoped_board_token_opens_only_its_team() {
+  let tok = scoped_board_token("board-secret", "AAA")
+  assert team_scope(tok, "board-secret") == Some("AAA")
+  // Another board's secret, a renamed key and the full token are not scopes.
+  assert team_scope(tok, "other-secret") == None
+  assert team_scope("BBB" + strings.TrimPrefix(tok, "AAA"), "board-secret") == None
+  assert team_scope("board-secret", "board-secret") == None
+  assert team_scope(tok, "") == None
+}
+
+#[test]
+fn scoped_viewer_allowlist() {
+  let ok = |path: string| scoped_allows("GET", path, "", "", "", "AAA")
+  for path in ["/t/AAA", "/t/AAA/", "/t/AAA/issues", "/t/AAA/projects", "/t/AAA/search",
+               "/t/AAA/issue/AAA-3", "/t/AAA/issue/aaa-3", "/t/AAA/doc/index", "/static/app.js"] {
+    assert ok(path)
+  }
+  for path in ["/", "/t/BBB/", "/t/AAAB/", "/t/AAA/settings", "/t/AAA/settings/access",
+               "/t/AAA/issue/BBB-3", "/t/AAA/issue/AAAB-3", "/t/AAA/doc/", "/t/AAA/doc/a/b",
+               "/issue/AAA-3", "/search", "/attachments/file", "/settings/access"] {
+    assert !ok(path)
+  }
+  // Read-only: no write is admitted, even on its own team.
+  assert !scoped_allows("POST", "/t/AAA/settings/label", "", "", "", "AAA")
+  assert !scoped_allows("POST", "/state", "", "", "", "AAA")
+  // /events: only its own board or one of its own issues.
+  assert scoped_allows("GET", "/events", "", "", "AAA", "AAA")
+  assert scoped_allows("GET", "/events", "issue", "AAA-1", "", "AAA")
+  assert !scoped_allows("GET", "/events", "", "", "", "AAA")
+  assert !scoped_allows("GET", "/events", "", "", "BBB", "AAA")
+  assert !scoped_allows("GET", "/events", "issue", "BBB-1", "AAA", "AAA")
+  // Hyphenated team keys: AAA-X-1 is team AAA-X's issue, not AAA's.
+  assert !ok("/t/AAA/issue/AAA-X-1")
+  assert !scoped_allows("GET", "/events", "issue", "AAA-X-1", "", "AAA")
+  assert !ok("/t/AAA/issue/AAA-")
+}

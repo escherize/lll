@@ -291,10 +291,12 @@ fn settle_team() {
   if live.length() == 1 {
     let key = live[0].key
     let Ok(path) = set_home_key("team", key) else {
-      fmt.Println(f"next: lll attach -k {key} — the server's only team")
+      fmt.Println(f"next: lll attach -k {key} — the only team you can see")
       return
     }
-    fmt.Println(f"team = \"{key}\" in {path} (the server's only team)")
+    // "you can see": a team-scoped member is shown only its teams, so "the
+    // server's only team" was false for it (verification fleet, LLL-552).
+    fmt.Println(f"team = \"{key}\" in {path} (the only team you can see)")
     fmt.Println("ready: lll issue create \"a title\"")
     fmt.Println("in a shared repo, 'lll attach' writes .lll.toml; commit that file with Git if clones should inherit the team")
     return
@@ -335,6 +337,23 @@ struct WhoamiIdentity {
   email: string,
   #[json("collectionName")]
   collection: string,
+  // Access (LLL-542): "all" | "teams" and "rw" | "ro". Empty on a server
+  // that predates scoped members, and for administrators.
+  scope: string,
+  mode: string,
+  expand: WhoamiExpand,
+}
+
+#[json]
+struct WhoamiExpand {
+  teams: Slice<models.Team>,
+}
+
+/// The access line: what this identity may see and whether it may write.
+/// None when the server does not report access (older server, superuser).
+fn access_line(me: WhoamiIdentity) -> Option<string> {
+  if me.scope == "" { return None }
+  Some(describe_access(me.scope, me.mode, me.expand.teams.map(|t| t.key)))
 }
 
 /// The refusal for an argument `lll whoami` does not take. A `--team` here is
@@ -403,7 +422,7 @@ token with a member session, and 'lll bot bot-NAME' provisions a bot identity.",
     return Err(pb.expired_token_message())
   }
   let collection = pb.token_collection(cfg.token).unwrap_or("members")
-  let body = pb.get(f"/api/collections/{collection}/records/{id}")?
+  let body = pb.get(f"/api/collections/{collection}/records/{id}?expand=teams")?
   let mut me = WhoamiIdentity { .. }
   if let Err(e) = json.Unmarshal(body.bytes(), &me) {
     return Err(f"decoding the identity response: {e}")
@@ -415,6 +434,9 @@ token with a member session, and 'lll bot bot-NAME' provisions a bot identity.",
   let team = if cfg.team == "" { "(none — run 'lll attach')" } else { cfg.team }
   fmt.Println(f"team    {team}")
   fmt.Println(f"token   {src.token}")
+  if let Some(access) = access_line(me) {
+    fmt.Println(f"access  {access}")
+  }
   if administrator {
     fmt.Println("Administrator tokens do not name a member. Use 'lll login' for a member session or 'lll bot bot-NAME' for a bot identity.")
   }
@@ -463,7 +485,7 @@ fn create_as_superuser(
       f"member '{name}' already exists ({existing.email}) — drop --create and log in, or reset it with 'lll member set-password {name}'",
     )
   }
-  let _ = create_member_as(su, name, email, password)?
+  let _ = create_member_as(su, name, email, password, [], "")?
   Ok(())
 }
 

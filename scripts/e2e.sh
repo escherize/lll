@@ -1330,6 +1330,8 @@ for bot_help in --help -h; do
 done
 # --- lll search: full text over issues, comments and docs, ranked, with context (LLL-96) ---
 python3 "$REPO_ROOT"/scripts/test_search_team.py "$LLL_ABS"
+# --- member invite --team: one team over the API and the board ---
+python3 "$REPO_ROOT"/scripts/test_team_scope.py "$LLL_ABS"
 SKEY=$(env LLL_URL=$URL LLL_TEAM=ENG "$LIN" issue create -t "Rail favorites go stale" -d "First line of context.
 The zebra crossing is only mentioned in this description.
 Last line of context." | sed -n 's/^Created \([A-Z]*-[0-9]*\).*/\1/p')
@@ -3489,7 +3491,7 @@ assert_not_contains "$out" 'configured me' 'legacy identity config is ignored'
 assert_contains "$(cat "$DATA_DIR/board-stderr")" 'unexpected argument' 'board classifies a positional argument accurately'
 assert_contains "$(cat "$DATA_DIR/board-stderr")" 'lll board [-w]' 'board names canonical usage'
 # A normal authenticated member can invite a new colleague; reset is separate.
-out=$(env -u LLL_ADMIN_EMAIL -u LLL_ADMIN_PASSWORD "$LIN" member invite oracle-invited --email oracle-invited@lll.test)
+out=$(env -u LLL_ADMIN_EMAIL -u LLL_ADMIN_PASSWORD "$LIN" member invite oracle-invited --email oracle-invited@lll.test 2>&1)
 assert_contains "$out" 'invited oracle-invited' 'member token can invite a new colleague'
 
 # Invocation-only --team works consistently without rewriting config.

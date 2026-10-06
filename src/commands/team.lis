@@ -107,7 +107,11 @@ fn team_intro() -> string {
 Three things do NOT follow (TASK-87):
   - the 'team =' line in .lll.toml, and LLL_TEAM — rerun 'lll attach -k NEW'
   - git branches already named eng-12-slug keep the old key
-  - OLD-1 mentions inside descriptions and comment bodies are stored text"
+  - OLD-1 mentions inside descriptions and comment bodies are stored text
+
+A member limited to some teams sees only those. A team they cannot see answers
+exactly like a team that does not exist, on purpose: the answer must not tell
+anyone which other teams are on the server. 'lll whoami' shows your access."
 }
 
 fn team_list(input: flags.CommandInput) -> Result<(), string> {
@@ -421,6 +425,7 @@ fn configured_team() -> Result<Option<models.Team>, string> {
 /// typed LLL and did not know which file had. `config --list` knows; so does
 /// this message now.
 fn unknown_configured_team(key: string, origin: string) -> string {
+  if let Some(scoped) = unknown_team_scoped(key) { return scoped }
   let from = if origin == "env:LLL_TEAM" && os.Getenv("LLL_TEAM_FROM_FLAG") == "1" {
     " (from --team)"
   } else if strings.HasPrefix(origin, "env:") {
@@ -517,7 +522,19 @@ fn no_team() -> string {
 /// Unknown-team message naming the fix. Shared by every command that
 /// resolves a team key (same package: src/commands).
 fn unknown_team(key: string) -> string {
+  if let Some(scoped) = unknown_team_scoped(key) { return scoped }
   f"no team with key '{key}' on the server. First inspect 'lll team list --archived'; the team may have been renamed.\nFor an existing team, use 'lll attach -k EXISTING_KEY' to update the attachment, or prefix one command with LLL_TEAM=EXISTING_KEY.\nOnly if you intend a new team, create it with 'lll team create -k {key} -n \"Name\"'."
+}
+
+/// For a team-scoped caller, a missing key usually means "not yours", and
+/// 'lll team create' is a dead end it cannot run (fleet case 03). The wording
+/// does not say whether the team exists.
+fn unknown_team_scoped(key: string) -> Option<string> {
+  let Some(keys) = records.scoped_team_keys() else { return None }
+  let mine = if keys.is_empty() { "none" } else { strings.Join(keys, ", ") }
+  Some(
+    f"no team '{key}' among the teams you can see ({mine}). 'lll whoami' shows your access; ask the person who invited you if you need another team.",
+  )
 }
 
 /// Archived-team refusal naming the fix. Shared by everything that refuses

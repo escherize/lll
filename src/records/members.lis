@@ -42,3 +42,29 @@ pub fn find_member_as(tok: string, name: string) -> Result<Option<models.Member>
 pub fn fetch_members() -> Result<Slice<models.Member>, string> {
   fetch_all_records<models.Member>("/api/collections/members/records?sort=name,id", "members")
 }
+
+#[json]
+struct OwnAccess {
+  scope: string,
+  expand: OwnAccessExpand,
+}
+
+#[json]
+struct OwnAccessExpand {
+  teams: Slice<models.Team>,
+}
+
+/// The calling member's team keys when it is team-scoped (LLL-542); None
+/// when it sees every team, is an administrator, or the server predates
+/// scoped members. An administrator's id is not a member record, so its
+/// lookup fails and answers None too. Best effort: any failure answers None,
+/// because callers only use it to word an error better.
+pub fn scoped_team_keys() -> Option<Slice<string>> {
+  let Ok(cfg) = config.load() else { return None }
+  let Some(id) = pb.token_subject(cfg.token) else { return None }
+  let Ok(body) = pb.get(f"/api/collections/members/records/{id}?expand=teams") else { return None }
+  let mut own = OwnAccess { .. }
+  if json.Unmarshal(body.bytes(), &own).is_err() { return None }
+  if own.scope != "teams" { return None }
+  Some(own.expand.teams.map(|t| t.key))
+}
