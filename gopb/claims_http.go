@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"regexp"
 	"strings"
 
 	validation "github.com/pocketbase/ozzo-validation/v4"
@@ -12,6 +13,15 @@ import (
 	"github.com/pocketbase/pocketbase/core"
 	"github.com/pocketbase/pocketbase/tools/router"
 )
+
+// agentLabelShape is the only shape an agent label takes (LLL-521). Labels
+// are self-asserted and rendered into comments and views, which are markdown,
+// so anything outside this charset could forge text or links in an attributed
+// comment. Empty means no label. Migration 1791300000_agent_labels.js gives the
+// stored fields the same pattern.
+var agentLabelShape = regexp.MustCompile(`^[A-Za-z0-9._-]{0,64}$`)
+
+const agentLabelRule = "agent label must be at most 64 characters from A-Z, a-z, 0-9, '.', '_' and '-'"
 
 func registerClaimRoutes(routes *router.Router[*core.RequestEvent], writes *issueWriteLocks) {
 	routes.POST("/api/lll/issues/{issue}/assignment", func(re *core.RequestEvent) error {
@@ -42,10 +52,14 @@ func registerClaimRoutes(routes *router.Router[*core.RequestEvent], writes *issu
 	routes.POST("/api/lll/issues/{issue}/claim", func(re *core.RequestEvent) error {
 		var body struct {
 			Member string `json:"member"`
+			Agent  string `json:"agent"`
 		}
 		re.Request.Body = http.MaxBytesReader(re.Response, re.Request.Body, 2048)
 		if err := re.BindBody(&body); err != nil {
 			return re.BadRequestError("invalid claim request", nil)
+		}
+		if !agentLabelShape.MatchString(body.Agent) {
+			return re.BadRequestError(agentLabelRule, nil)
 		}
 		if re.HasSuperuserAuth() {
 			if body.Member == "" {
@@ -62,13 +76,14 @@ func registerClaimRoutes(routes *router.Router[*core.RequestEvent], writes *issu
 		}
 		unlock := writes.acquire(re.Request.PathValue("issue"))
 		defer unlock()
-		outcome, err := acquireClaim(re.App, re.Request.PathValue("issue"), body.Member)
+		outcome, err := acquireClaim(re.App, re.Request.PathValue("issue"), body.Member, body.Agent)
 		return respondClaim(re, outcome, err)
 	}).Bind(apis.RequireAuth("members", core.CollectionNameSuperusers))
 
 	routes.POST("/api/lll/issues/{issue}/release", func(re *core.RequestEvent) error {
 		var body struct {
 			ClaimID string `json:"claim_id"`
+			Agent   string `json:"agent"`
 			Force   bool   `json:"force"`
 			Reason  string `json:"reason"`
 		}
@@ -79,6 +94,9 @@ func registerClaimRoutes(routes *router.Router[*core.RequestEvent], writes *issu
 		}
 		if body.ClaimID == "" {
 			return re.BadRequestError("release requires the observed claim_id", nil)
+		}
+		if !agentLabelShape.MatchString(body.Agent) {
+			return re.BadRequestError(agentLabelRule, nil)
 		}
 		if err := issueWritable(re, re.Request.PathValue("issue")); err != nil {
 			return err
@@ -93,7 +111,7 @@ func registerClaimRoutes(routes *router.Router[*core.RequestEvent], writes *issu
 		// the comment is the only record the release happened. (A superuser
 		// can still DELETE the record directly - claims.deleteRule is null,
 		// not "nobody" - but that is the admin API, not the release path.)
-		by := releaser{force: body.Force, reason: strings.TrimSpace(body.Reason)}
+		by := releaser{agent: body.Agent, force: body.Force, reason: strings.TrimSpace(body.Reason)}
 		if !re.HasSuperuserAuth() {
 			by.memberID = re.Auth.Id
 		}
@@ -106,10 +124,14 @@ func registerClaimRoutes(routes *router.Router[*core.RequestEvent], writes *issu
 	routes.POST("/api/lll/issues/{issue}/renew", func(re *core.RequestEvent) error {
 		var body struct {
 			ClaimID string `json:"claim_id"`
+			Agent   string `json:"agent"`
 		}
 		re.Request.Body = http.MaxBytesReader(re.Response, re.Request.Body, 2048)
 		if err := re.BindBody(&body); err != nil || body.ClaimID == "" {
 			return re.BadRequestError("renew requires the observed claim_id", nil)
+		}
+		if !agentLabelShape.MatchString(body.Agent) {
+			return re.BadRequestError(agentLabelRule, nil)
 		}
 		// Same rule as claim/release/assignment (team_scope.go): a member
 		// narrowed or made read-only after claiming cannot keep renewing.
@@ -124,7 +146,7 @@ func registerClaimRoutes(routes *router.Router[*core.RequestEvent], writes *issu
 		}
 		unlock := writes.acquire(re.Request.PathValue("issue"))
 		defer unlock()
-		outcome, err := renewClaim(re.App, re.Request.PathValue("issue"), body.ClaimID, memberID)
+		outcome, err := renewClaim(re.App, re.Request.PathValue("issue"), body.ClaimID, memberID, body.Agent)
 		return respondClaim(re, outcome, err)
 	}).Bind(apis.RequireAuth("members", core.CollectionNameSuperusers))
 }

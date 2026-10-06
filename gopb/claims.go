@@ -15,6 +15,7 @@ type ClaimOutcome struct {
 	ClaimID         string `json:"claim_id"`
 	MemberID        string `json:"member_id"`
 	MemberName      string `json:"member_name"`
+	Agent           string `json:"agent"`
 	Created         string `json:"created"`
 	AlreadyOwned    bool   `json:"already_owned"`
 	ClearedAssignee bool   `json:"cleared_assignee"`
@@ -38,7 +39,18 @@ func currentClaim(app core.App, issueID string) (*core.Record, error) {
 // acquireClaim keeps both the exclusive hold and its assignment on the
 // serialized writer transaction. A duplicate by its holder repairs assignment
 // without replacing the original claim or its creation time.
-func acquireClaim(app core.App, issueID, memberID string) (ClaimOutcome, error) {
+//
+// agent is a self-asserted session label (LLL-521) so agents sharing one
+// member token can tell their holds apart. It is coordination, not auth: the
+// only refusal it adds is two different non-empty labels on one member. An
+// empty label on either side keeps the member-level idempotency.
+// agentsDiffer is the one refusal an agent label adds (LLL-521): two
+// different non-empty labels on the same member's hold.
+func agentsDiffer(held *core.Record, agent string) bool {
+	return held.GetString("agent") != "" && agent != "" && held.GetString("agent") != agent
+}
+
+func acquireClaim(app core.App, issueID, memberID, agent string) (ClaimOutcome, error) {
 	var outcome ClaimOutcome
 	err := app.RunInTransaction(func(tx core.App) error {
 		issue, err := tx.FindRecordById("issues", issueID)
@@ -61,6 +73,10 @@ func acquireClaim(app core.App, issueID, memberID string) (ClaimOutcome, error) 
 			}
 			return &claimRejection{fmt.Sprintf("issue is already claimed by %s", name)}
 		}
+		if held != nil && agentsDiffer(held, agent) {
+			return &claimRejection{fmt.Sprintf("issue is already claimed by %s (agent %s)",
+				member.GetString("name"), held.GetString("agent"))}
+		}
 		if held == nil {
 			collection, err := tx.FindCollectionByNameOrId("claims")
 			if err != nil {
@@ -69,6 +85,7 @@ func acquireClaim(app core.App, issueID, memberID string) (ClaimOutcome, error) 
 			held = core.NewRecord(collection)
 			held.Set("issue", issueID)
 			held.Set("member", memberID)
+			held.Set("agent", agent)
 			if err := tx.Save(held); err != nil {
 				return err
 			}
@@ -80,7 +97,7 @@ func acquireClaim(app core.App, issueID, memberID string) (ClaimOutcome, error) 
 			}
 		}
 		outcome = ClaimOutcome{ClaimID: held.Id, MemberID: memberID, MemberName: member.GetString("name"),
-			Created: held.GetString("created"), AlreadyOwned: alreadyOwned}
+			Agent: held.GetString("agent"), Created: held.GetString("created"), AlreadyOwned: alreadyOwned}
 		return nil
 	})
 	if err != nil {
@@ -92,10 +109,23 @@ func acquireClaim(app core.App, issueID, memberID string) (ClaimOutcome, error) 
 // releaser is who asked for a release, as the HTTP adapter authenticated it.
 // memberID is empty for a superuser: that token names no member, so it can
 // never be the holder and always needs force.
+//
+// agent is the releasing session's label (LLL-521). The same member under a
+// different non-empty label than the holder's is another session, and like
+// another member it needs force.
 type releaser struct {
 	memberID string
+	agent    string
 	force    bool
 	reason   string
+}
+
+// byline names a member and, when it has one, its session label.
+func byline(name, agent string) string {
+	if agent == "" {
+		return name
+	}
+	return fmt.Sprintf("%s (agent %s)", name, agent)
 }
 
 // releaseClaim names the observed hold, so a stale command or page cannot
@@ -128,9 +158,14 @@ func releaseClaim(app core.App, issueID, expectedClaimID string, by releaser) (C
 		if member, err := tx.FindRecordById("members", memberID); err == nil {
 			name = member.GetString("name")
 		}
-		forced := memberID != by.memberID
+		holder := byline(name, held.GetString("agent"))
+		otherSession := memberID == by.memberID && agentsDiffer(held, by.agent)
+		forced := memberID != by.memberID || otherSession
 		if forced && !by.force {
-			return &claimRejection{fmt.Sprintf("the claim is held by %s; releasing another member's claim needs force", name)}
+			if otherSession {
+				return &claimRejection{fmt.Sprintf("the claim is held by %s; releasing another session's claim needs force", holder)}
+			}
+			return &claimRejection{fmt.Sprintf("the claim is held by %s; releasing another member's claim needs force", holder)}
 		}
 		cleared := issue.GetString("assignee") == memberID
 		if err := tx.Delete(held); err != nil {
@@ -143,7 +178,7 @@ func releaseClaim(app core.App, issueID, expectedClaimID string, by releaser) (C
 			}
 		}
 		if forced {
-			if err := recordForcedRelease(tx, issueID, name, by); err != nil {
+			if err := recordForcedRelease(tx, issueID, holder, by); err != nil {
 				return err
 			}
 		}
@@ -175,7 +210,7 @@ func recordForcedRelease(tx core.App, issueID, holder string, by releaser) error
 		if err != nil {
 			return err
 		}
-		actor = member.GetString("name")
+		actor = byline(member.GetString("name"), by.agent)
 	}
 	body := fmt.Sprintf("%s force-released %s's claim.", actor, holder)
 	if by.reason != "" {
@@ -200,8 +235,10 @@ func recordForcedRelease(tx core.App, issueID, holder string, by releaser) error
 // "the claim changed".
 //
 // Only the holder renews, and only the hold it observed: renewing is a promise
-// that the work is still alive, which no one else can make.
-func renewClaim(app core.App, issueID, expectedClaimID, memberID string) (ClaimOutcome, error) {
+// that the work is still alive, which no one else can make. A sibling agent
+// on the holder's token is "someone else" when both carry different labels
+// (LLL-521), the same test acquireClaim applies.
+func renewClaim(app core.App, issueID, expectedClaimID, memberID, agent string) (ClaimOutcome, error) {
 	var outcome ClaimOutcome
 	err := app.RunInTransaction(func(tx core.App) error {
 		held, err := currentClaim(tx, issueID)
@@ -222,10 +259,14 @@ func renewClaim(app core.App, issueID, expectedClaimID, memberID string) (ClaimO
 		if holderID != memberID {
 			return &claimRejection{fmt.Sprintf("the claim is held by %s; only the holder renews it", name)}
 		}
+		if agentsDiffer(held, agent) {
+			return &claimRejection{fmt.Sprintf("the claim is held by %s (agent %s); only the holder renews it",
+				name, held.GetString("agent"))}
+		}
 		if err := tx.Save(held); err != nil {
 			return err
 		}
-		outcome = ClaimOutcome{ClaimID: held.Id, MemberID: holderID, MemberName: name, Created: held.GetString("created")}
+		outcome = ClaimOutcome{ClaimID: held.Id, MemberID: holderID, MemberName: name, Agent: held.GetString("agent"), Created: held.GetString("created")}
 		return nil
 	})
 	if err != nil {

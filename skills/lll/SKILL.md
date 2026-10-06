@@ -46,21 +46,31 @@ A successful claim is immediately visible on the server; no Git push is needed.
 If another member holds it, the command exits nonzero without taking over.
 Claiming your own issue again succeeds and says it is already yours.
 
-**The claim is exclusive per member, not per agent.** Agents that share one
-member token share every claim: each one's `claim` succeeds with "already
-yours" and exits 0, so the claim does not stop two of them working the same
-issue (finding `shared-member-claims-do-not-isolate-sessions`). For a fleet,
-give each long-lived worker its own member (`lll member create <name>`, then
-`lll token create <name>` with admin credentials). If workers must share a token, each one reads
-`lll issue view KEY-12` (claim holder, comments, recorded work site) before it
-starts, and skips any issue another session is already on.
+**The claim is exclusive per member, not per agent, unless agents label
+themselves.** Agents that share one member token share every claim: each
+one's `claim` succeeds with "already yours" and exits 0, so the claim does not
+stop two of them working the same issue (finding
+`shared-member-claims-do-not-isolate-sessions`). Give each session a label with
+`--agent NAME` or `LLL_AGENT` (on `issue claim`, `issue next --claim`, `issue
+comment`): a claim by the same member under a different label exits nonzero
+and names the holder's label, and so do `--renew` and `issue release`
+without `--force`. An unlabelled claim or
+hold still matches any label, so every sharing session must set one. The label
+is self-asserted coordination, not auth, and is at most 64 characters from
+A-Z, a-z, 0-9, `.`, `_` and `-`. For a fleet, you can instead give each
+long-lived worker its own member (`lll member create <name>`, then
+`lll token create <name>` with admin credentials). If workers share a token
+without labels, each one reads `lll issue view KEY-12` (claim holder, comments,
+recorded work site) before it starts, and skips any issue another session is
+already on.
 
 `--assignee` cannot move a claimed issue to anyone but the holder: the holder
 releases it first, or you force-release a dead hold (below).
 `lll whoami` shows the authenticated identity. `lll issue release KEY-12`
 gives your claim back and clears the assignee when it still matches the holder.
-Releasing another member's claim is refused unless you add `--force`
-(LLL-512); a forced release leaves a comment on the issue naming both members,
+Releasing another member's claim, or a hold under a different agent label on
+your own token, is refused unless you add `--force` (LLL-512, LLL-521); a
+forced release leaves a comment on the issue naming both members and labels,
 with the reason from `-b "why"` if you give one. Force only a hold you know is
 dead: its holder may still be editing.
 

@@ -9,6 +9,7 @@ pub struct Transition {
   pub claim_id: string,
   pub member_id: string,
   pub member_name: string,
+  pub agent: string,
   pub created: string,
   pub already_owned: bool,
   pub cleared_assignee: bool,
@@ -16,11 +17,25 @@ pub struct Transition {
 }
 
 #[json]
-struct AcquireRequest { member: string }
+struct AcquireRequest {
+  member: string,
+  #[json(omitempty)]
+  agent: string,
+}
 #[json]
-struct ReleaseRequest { claim_id: string, force: bool, reason: string }
+struct ReleaseRequest {
+  claim_id: string,
+  #[json(omitempty)]
+  agent: string,
+  force: bool,
+  reason: string,
+}
 #[json]
-struct RenewRequest { claim_id: string }
+struct RenewRequest {
+  claim_id: string,
+  #[json(omitempty)]
+  agent: string,
+}
 #[json]
 struct AssignmentRequest { claim_id: string, fields: json.RawMessage }
 
@@ -34,21 +49,25 @@ pub fn observed_id(issue_id: string) -> Result<string, string> {
 
 /// Claims and their assignment are one server-owned transaction. Callers
 /// resolve the actor through normal identity handling; the server verifies it.
-pub fn acquire(issue_id: string, member_id: string) -> Result<Transition, string> {
-  transact(issue_id, "claim", AcquireRequest { member: member_id })
+/// `agent` is the optional self-asserted session label (LLL-521); "" for none.
+pub fn acquire(issue_id: string, member_id: string, agent: string) -> Result<Transition, string> {
+  transact(issue_id, "claim", AcquireRequest { member: member_id, agent })
 }
 
 /// Only the holder releases without force. With force, the server releases
 /// another member's claim and comments on the issue, naming both members and
-/// the reason when one is given (LLL-512).
-pub fn release(issue_id: string, claim_id: string, force: bool, reason: string) -> Result<Transition, string> {
-  transact(issue_id, "release", ReleaseRequest { claim_id, force, reason })
+/// the reason when one is given (LLL-512). The same member under a different
+/// non-empty `agent` than the holder's is another session and needs force too
+/// (LLL-521).
+pub fn release(issue_id: string, claim_id: string, agent: string, force: bool, reason: string) -> Result<Transition, string> {
+  transact(issue_id, "release", ReleaseRequest { claim_id, agent, force, reason })
 }
 
 /// Only the holder renews its observed hold. The server restarts the expiry
-/// clock and keeps the claim's id and creation time (LLL-535).
-pub fn renew(issue_id: string, claim_id: string) -> Result<Transition, string> {
-  transact(issue_id, "renew", RenewRequest { claim_id })
+/// clock and keeps the claim's id and creation time (LLL-535). A different
+/// non-empty `agent` than the holder's is refused, as on acquire (LLL-521).
+pub fn renew(issue_id: string, claim_id: string, agent: string) -> Result<Transition, string> {
+  transact(issue_id, "renew", RenewRequest { claim_id, agent })
 }
 
 fn transact(issue_id: string, action: string, request: Unknown) -> Result<Transition, string> {

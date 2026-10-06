@@ -14,7 +14,7 @@ import (
 // the state a deliberate `lll issue release` would have left it in.
 func TestExpireClaimsReleasesOnlyTheStaleOnes(t *testing.T) {
 	app, issueID, alpha, _ := claimFixture(t)
-	if _, err := acquireClaim(app, issueID, alpha); err != nil {
+	if _, err := acquireClaim(app, issueID, alpha, ""); err != nil {
 		t.Fatal(err)
 	}
 	assertClaimState(t, app, issueID, alpha, alpha)
@@ -47,7 +47,7 @@ func TestExpireClaimsReleasesOnlyTheStaleOnes(t *testing.T) {
 // undo, and an expiry that cleared it would quietly unassign real work.
 func TestExpireClaimsLeavesAnotherMembersAssignment(t *testing.T) {
 	app, issueID, alpha, beta := claimFixture(t)
-	if _, err := acquireClaim(app, issueID, alpha); err != nil {
+	if _, err := acquireClaim(app, issueID, alpha, ""); err != nil {
 		t.Fatal(err)
 	}
 	issue, err := app.FindRecordById("issues", issueID)
@@ -93,7 +93,7 @@ func TestClaimExpiryIsScheduled(t *testing.T) {
 // hosted board freed 123 claims and nothing anywhere said so.
 func TestExpiredClaimIsAnnouncedOnAnOpenIssue(t *testing.T) {
 	app, issueID, alpha, _ := claimFixture(t)
-	if _, err := acquireClaim(app, issueID, alpha); err != nil {
+	if _, err := acquireClaim(app, issueID, alpha, ""); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := expireClaims(app, time.Now().Add(claimMaxAge+time.Minute), claimMaxAge); err != nil {
@@ -136,7 +136,7 @@ func TestExpiredClaimOnFinishedWorkIsNotAnnounced(t *testing.T) {
 		if err := app.Save(issue); err != nil {
 			t.Fatal(err)
 		}
-		if _, err := acquireClaim(app, issueID, alpha); err != nil {
+		if _, err := acquireClaim(app, issueID, alpha, ""); err != nil {
 			t.Fatal(err)
 		}
 		expired, err := expireClaims(app, time.Now().Add(claimMaxAge+time.Minute), claimMaxAge)
@@ -159,7 +159,7 @@ func TestExpiredClaimOnFinishedWorkIsNotAnnounced(t *testing.T) {
 // The release is the half that must not be undone by the half that records it.
 func TestAnnouncementFailureDoesNotUndoTheRelease(t *testing.T) {
 	app, issueID, alpha, _ := claimFixture(t)
-	if _, err := acquireClaim(app, issueID, alpha); err != nil {
+	if _, err := acquireClaim(app, issueID, alpha, ""); err != nil {
 		t.Fatal(err)
 	}
 	// A comment collection that refuses every write, which is the shape of any
@@ -195,14 +195,14 @@ func backdateClaim(t *testing.T, app core.App, claimID string, age time.Duration
 // that replaced the claim would break every open page's next release.
 func TestRenewedClaimSurvivesTheSweep(t *testing.T) {
 	app, issueID, alpha, _ := claimFixture(t)
-	held, err := acquireClaim(app, issueID, alpha)
+	held, err := acquireClaim(app, issueID, alpha, "")
 	if err != nil {
 		t.Fatal(err)
 	}
 	backdateClaim(t, app, held.ClaimID, claimMaxAge-time.Hour)
 	before, _ := currentClaim(app, issueID)
 
-	renewed, err := renewClaim(app, issueID, held.ClaimID, alpha)
+	renewed, err := renewClaim(app, issueID, held.ClaimID, alpha, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -230,7 +230,7 @@ func TestRenewedClaimSurvivesTheSweep(t *testing.T) {
 // The control for the test above: the same backdated hold, not renewed, goes.
 func TestUnrenewedClaimExpiresOnSchedule(t *testing.T) {
 	app, issueID, alpha, _ := claimFixture(t)
-	held, err := acquireClaim(app, issueID, alpha)
+	held, err := acquireClaim(app, issueID, alpha, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -245,10 +245,10 @@ func TestUnrenewedClaimExpiresOnSchedule(t *testing.T) {
 // exists. Each refusal changes nothing.
 func TestRenewRefusesAllButTheHolder(t *testing.T) {
 	app, issueID, alpha, beta := claimFixture(t)
-	if _, err := renewClaim(app, issueID, "anything", alpha); err == nil || !strings.Contains(err.Error(), "is not claimed") {
+	if _, err := renewClaim(app, issueID, "anything", alpha, ""); err == nil || !strings.Contains(err.Error(), "is not claimed") {
 		t.Fatalf("renewing an unclaimed issue: %v", err)
 	}
-	held, err := acquireClaim(app, issueID, alpha)
+	held, err := acquireClaim(app, issueID, alpha, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -256,13 +256,13 @@ func TestRenewRefusesAllButTheHolder(t *testing.T) {
 	before, _ := currentClaim(app, issueID)
 
 	var rejected *claimRejection
-	if _, err := renewClaim(app, issueID, held.ClaimID, beta); !errors.As(err, &rejected) || !strings.Contains(err.Error(), "held by Alpha") {
+	if _, err := renewClaim(app, issueID, held.ClaimID, beta, ""); !errors.As(err, &rejected) || !strings.Contains(err.Error(), "held by Alpha") {
 		t.Fatalf("a non-holder renewed: %v", err)
 	}
-	if _, err := renewClaim(app, issueID, held.ClaimID, ""); !errors.As(err, &rejected) {
+	if _, err := renewClaim(app, issueID, held.ClaimID, "", ""); !errors.As(err, &rejected) {
 		t.Fatalf("a superuser (no member) renewed: %v", err)
 	}
-	if _, err := renewClaim(app, issueID, "stale-id", alpha); err == nil || !strings.Contains(err.Error(), "claim changed") {
+	if _, err := renewClaim(app, issueID, "stale-id", alpha, ""); err == nil || !strings.Contains(err.Error(), "claim changed") {
 		t.Fatalf("a stale claim id renewed: %v", err)
 	}
 	after, _ := currentClaim(app, issueID)
@@ -270,4 +270,33 @@ func TestRenewRefusesAllButTheHolder(t *testing.T) {
 		t.Fatal("a refused renewal moved the clock")
 	}
 	assertClaimState(t, app, issueID, alpha, alpha)
+}
+
+// LLL-521: renewing vouches for the hold, so a sibling agent on the holder's
+// token cannot renew another label's claim. The same label or no label on
+// either side renews, matching acquireClaim's idempotency.
+func TestRenewRefusesADifferentAgentLabel(t *testing.T) {
+	app, issueID, alpha, _ := claimFixture(t)
+	held, err := acquireClaim(app, issueID, alpha, "wt-a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	backdateClaim(t, app, held.ClaimID, time.Hour)
+	before, _ := currentClaim(app, issueID)
+
+	var rejected *claimRejection
+	if _, err := renewClaim(app, issueID, held.ClaimID, alpha, "wt-b"); !errors.As(err, &rejected) ||
+		err.Error() != "the claim is held by Alpha (agent wt-a); only the holder renews it" {
+		t.Fatalf("a different agent label renewed: %v", err)
+	}
+	after, _ := currentClaim(app, issueID)
+	if after.GetString("updated") != before.GetString("updated") {
+		t.Fatal("a refused renewal moved the clock")
+	}
+	for _, agent := range []string{"wt-a", ""} {
+		renewed, err := renewClaim(app, issueID, held.ClaimID, alpha, agent)
+		if err != nil || renewed.Agent != "wt-a" {
+			t.Fatalf("renew with %q: %#v %v", agent, renewed, err)
+		}
+	}
 }

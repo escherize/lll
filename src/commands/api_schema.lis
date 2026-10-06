@@ -29,6 +29,7 @@ Rules: list @request.auth.id != \"\" && (@request.auth.scope = \"all\" || @reque
 | member | relation | yes | relation to members |
 | created | autodate |  | set on create |
 | updated | autodate |  | set on create; refreshed on update |
+| agent | text |  |  |
 
 ## comments (base)
 
@@ -41,6 +42,7 @@ Rules: list @request.auth.id != \"\" && (@request.auth.scope = \"all\" || @reque
 | body | text | yes |  |
 | created | autodate |  | set on create |
 | updated | autodate |  | set on create; refreshed on update |
+| agent | text |  |  |
 
 ## docs (base)
 

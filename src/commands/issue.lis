@@ -307,18 +307,32 @@ fn issue_delete_spec() -> Slice<flags.Flag> {
 fn issue_claim_spec() -> Slice<flags.Flag> {
   flags.with_team([
     flags.Flag { name: "--renew", help: "restart the expiry clock on a claim you hold (a hold unrenewed for 24h is released)", .. },
+    flags.Flag {
+      name: "--agent",
+      value: true,
+      hint: "NAME",
+      help: "self-asserted session label, for agents sharing one member token\n(default: LLL_AGENT)",
+      ..,
+    },
   ])
 }
 
 fn issue_release_spec() -> Slice<flags.Flag> {
   flags.with_team([
-    flags.Flag { name: "--force", help: "release a claim another member holds; leaves a comment on the issue", .. },
+    flags.Flag { name: "--force", help: "release a claim another member, or another agent label on your token, holds; leaves a comment on the issue", .. },
     flags.Flag {
       name: "-b",
       alias: "--body",
       value: true,
       hint: "\"why\"",
       help: "with --force: the reason, recorded in the comment ('-b -' reads stdin)",
+      ..,
+    },
+    flags.Flag {
+      name: "--agent",
+      value: true,
+      hint: "NAME",
+      help: "self-asserted session label, for agents sharing one member token\n(default: LLL_AGENT)",
       ..,
     },
   ])
@@ -335,6 +349,13 @@ fn issue_comment_spec() -> Slice<flags.Flag> {
       ..,
     },
     flags.Flag { name: "--force", help: "with edit/delete: change a comment that is not yours", .. },
+    flags.Flag {
+      name: "--agent",
+      value: true,
+      hint: "NAME",
+      help: "self-asserted session label, for agents sharing one member token\n(default: LLL_AGENT)",
+      ..,
+    },
   ])
 }
 
@@ -487,7 +508,7 @@ pub fn issue_commands() -> Slice<flags.Command> {
     },
     flags.Command {
       name: "release",
-      summary: "remove your claim; clear assignee if it still matches the holder; --force takes another member's and comments why",
+      summary: "remove your claim; clear assignee if it still matches the holder; --force takes another member's or another agent label's and comments why",
       spec: issue_release_spec(),
       positional: "[KEY-123]",
       run: release,
@@ -1036,6 +1057,7 @@ fn view(input: flags.CommandInput) -> Result<(), string> {
       for cm in comments {
         let mut author = cm.expand.author.name
         if author == "" { author = "ghost" }
+        author = display.byline(author, cm.agent)
         // Absolute, not relative: --raw is machine output that gets stored
         // and re-read (an agent's brief, an exported mirror in Git), where
         // "5d ago" silently becomes a different string tomorrow.
@@ -1071,7 +1093,7 @@ fn view(input: flags.CommandInput) -> Result<(), string> {
   if let Some(held) = claim {
     let mut holder = held.expand.member.name
     if holder == "" { holder = "an unknown member" }
-    fmt.Println(f"Claimed:   {holder} ({display.relative(held.created)})")
+    fmt.Println(f"Claimed:   {display.byline(holder, held.agent)} ({display.relative(held.created)})")
   }
   // The work-site slot (TASK-205), under the claim holder: the claim says
   // who, this says where. "(last seen)" once the work is over.
@@ -1529,7 +1551,7 @@ fn record_work_site(issue: models.Issue, branch: string) -> Result<(), string> {
     if let Some(a) = actor()? { author = a.id }
     let moved = f"work moved: {issue.work_branch} @ {issue.work_host}:{issue.work_path} -> {branch} @ {host}:{path}"
     let payload = match json.Marshal(
-      models.NewComment { issue: issue.id, author, body: moved },
+      models.NewComment { issue: issue.id, author, agent: "", body: moved },
     ) {
       Ok(p) => p as string,
       Err(e) => return Err(f"encoding work-moved comment: {e}"),
@@ -1583,6 +1605,19 @@ fn actor() -> Result<Option<Actor>, string> {
   }
 }
 
+/// The session label for claims and comments (LLL-521): --agent, else
+/// LLL_AGENT. Self-asserted; it separates agents sharing one member token and
+/// proves nothing about who they are. The server renders it into comments, so
+/// it is refused here, before any request, unless it has the server's shape:
+/// at most 64 of A-Z, a-z, 0-9, '.', '_' and '-'; empty means no label.
+fn agent_label(p: flags.Parsed) -> Result<string, string> {
+  let label = if p.given("--agent") { p.one("--agent") } else { os.Getenv("LLL_AGENT") }
+  if !regexp.MustCompile(r"^[A-Za-z0-9._-]{0,64}$").MatchString(label) {
+    return Err(f"invalid agent label {strconv.Quote(label)} (from --agent or LLL_AGENT): use at most 64 characters from A-Z, a-z, 0-9, '.', '_' and '-'")
+  }
+  Ok(label)
+}
+
 /// The fix for a claim someone else holds. Plain release works only for the
 /// holder (LLL-512), so the hint asks them first and names --force for a hold
 /// whose agent is gone. On `update --assignee` the caller may be the holder,
@@ -1598,6 +1633,7 @@ fn held_elsewhere_hint(key: string) -> string {
 /// another holder. See gopb/claims.go and gopb/assignment.go for that policy.
 fn claim(input: flags.CommandInput) -> Result<(), string> {
   let usage = "lll issue claim [KEY-123] [--renew]"
+  let agent = agent_label(input.parsed)?
   let id = input.parsed.first()
   let resolved = resolve_id(id, usage)?
   let Some(member) = actor()? else {
@@ -1612,20 +1648,20 @@ fn claim(input: flags.CommandInput) -> Result<(), string> {
     let Some(held) = claims.fetch(issue.id)? else {
       return Err(f"{key} is not claimed; 'lll issue claim {key}' takes it")
     };
-    let renewed = claims.renew(issue.id, held.id).map_err(|e| f"{key}: {e}")?
-    fmt.Println(f"Renewed {key} for {renewed.member_name}; the expiry clock restarts now (held since {display.relative(renewed.created)})")
+    let renewed = claims.renew(issue.id, held.id, agent).map_err(|e| f"{key}: {e}")?
+    fmt.Println(f"Renewed {key} for {display.byline(renewed.member_name, renewed.agent)}; the expiry clock restarts now (held since {display.relative(renewed.created)})")
     return Ok(())
   }
 
-  let result = claims.acquire(issue.id, member.id).map_err(|e| {
+  let result = claims.acquire(issue.id, member.id, agent).map_err(|e| {
     if strings.Contains(e, "already claimed by") {
       f"{key}: {e} — {held_elsewhere_hint(key)}"
     } else { e }
   })?
   if result.already_owned {
-    fmt.Println(f"Claimed {key} for {result.member_name} (already yours since {display.relative(result.created)})")
+    fmt.Println(f"Claimed {key} for {display.byline(result.member_name, result.agent)} (already yours since {display.relative(result.created)})")
   } else {
-    fmt.Println(f"Claimed {key} for {result.member_name}")
+    fmt.Println(f"Claimed {key} for {display.byline(result.member_name, result.agent)}")
   }
   Ok(())
 }
@@ -1636,6 +1672,7 @@ fn claim(input: flags.CommandInput) -> Result<(), string> {
 fn release(input: flags.CommandInput) -> Result<(), string> {
   let usage = "lll issue release [KEY-123] [--force [-b \"why\"]]"
   let p = input.parsed
+  let agent = agent_label(p)?
   let resolved = resolve_id(p.first(), usage)?
   let force = p.given("--force")
   let mut reason = ""
@@ -1646,7 +1683,7 @@ fn release(input: flags.CommandInput) -> Result<(), string> {
   let issue = records.fetch_issue(resolved)?
   let key = f"{issue.expand.team.key}-{issue.number}"
   let Some(held) = claims.fetch(issue.id)? else { return Err(f"{key} is not claimed") };
-  let result = claims.release(issue.id, held.id, force, reason).map_err(|e| {
+  let result = claims.release(issue.id, held.id, agent, force, reason).map_err(|e| {
     if strings.Contains(e, "needs force") {
       f"{key}: {e} — 'lll issue release {key} --force -b \"why\"' takes it anyway and comments on the issue"
     } else { e }
@@ -1705,6 +1742,7 @@ fn comment(input: flags.CommandInput) -> Result<(), string> {
     body = p.nth(1)
     body_set = true
   }
+  let agent = if body_set { agent_label(p)? } else { "" }
 
   let resolved = resolve_id(id, usage)?
   let issue = records.fetch_issue(resolved)?
@@ -1733,14 +1771,14 @@ fn comment(input: flags.CommandInput) -> Result<(), string> {
     author_name = a.name
   }
 
-  let new_comment = models.NewComment { issue: issue.id, author, body }
+  let new_comment = models.NewComment { issue: issue.id, author, agent, body }
   let payload = match json.Marshal(new_comment) {
     Ok(p) => p,
     Err(e) => return Err(f"encoding comment: {e}"),
   }
   let _ = pb.post("/api/collections/comments/records", payload as string)?
   // Show the authenticated author at the write, so token switches are visible.
-  let as_who = if author_name == "" { "with no author — use a member token from 'lll login' or 'lll token create'" } else { f"as {author_name}" }
+  let as_who = if author_name == "" { "with no author — use a member token from 'lll login' or 'lll token create'" } else { f"as {display.byline(author_name, agent)}" }
   fmt.Println(f"Commented on {issue.expand.team.key}-{issue.number} {as_who}")
   Ok(())
 }
@@ -1902,6 +1940,7 @@ fn print_comments(comments: Slice<models.Comment>) {
     n += 1
     let mut author = c.expand.author.name
     if author == "" { author = "anon" }
+    author = display.byline(author, c.agent)
     let tag = display.author_tag(c.expand.author.kind == "bot", c.expand.author.owner_name())
     fmt.Println(f"#{n} {author}{tag} ({display.relative(c.created)})")
     fmt.Println(f"  {c.body}")
@@ -2273,6 +2312,13 @@ fn issue_next_spec() -> Slice<flags.Flag> {
       help: "atomically claim the chosen issue before printing it; if another\nmember wins the race, exit non-zero and print no key",
       ..,
     },
+    flags.Flag {
+      name: "--agent",
+      value: true,
+      hint: "NAME",
+      help: "self-asserted session label, for agents sharing one member token\n(default: LLL_AGENT)",
+      ..,
+    },
   ]...))
 }
 
@@ -2283,6 +2329,7 @@ fn issue_next_spec() -> Slice<flags.Flag> {
 /// none. With --claim the printed key is always secured first.
 fn issue_next(input: flags.CommandInput) -> Result<(), string> {
   let p = input.parsed
+  let agent = if p.given("--claim") { agent_label(p)? } else { "" }
   let filters = filters_from(p)?
   let team_id = configured_team_id()?
   // Names resolve before any fetch, so a typo fails naming the fix instead of
@@ -2310,7 +2357,7 @@ fn issue_next(input: flags.CommandInput) -> Result<(), string> {
     }
     // Acquire before printing: a key this command did not secure is a lie to
     // the shell loop that composed it. A lost race exits non-zero, keyless.
-    let result = claims.acquire(best.id, member.id).map_err(|e| {
+    let result = claims.acquire(best.id, member.id, agent).map_err(|e| {
       if strings.Contains(e, "already claimed by") {
         f"{key}: {e} — {held_elsewhere_hint(key)}"
       } else { e }
