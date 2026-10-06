@@ -1,3 +1,4 @@
+import "display"
 import "records"
 import "go:encoding/json"
 import "go:fmt"
@@ -122,7 +123,7 @@ fn team_list(input: flags.CommandInput) -> Result<(), string> {
   for t in teams.items {
     let mut mark = ""
     if t.archived { mark = "\t(archived)" }
-    fmt.Println(f"{t.key}\t{t.name}{mark}")
+    fmt.Println(f"{display.table_cell(t.key)}\t{display.table_cell(t.name)}{mark}")
   }
   Ok(())
 }

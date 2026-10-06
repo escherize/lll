@@ -1,3 +1,4 @@
+import "display"
 import "records"
 import "go:encoding/json"
 import "go:fmt"
@@ -73,7 +74,7 @@ fn label_list(input: flags.CommandInput) -> Result<(), string> {
   for l in labels.items {
     let mut team = l.expand.team.key
     if team == "" { team = "workspace" }
-    fmt.Println(f"{l.name}\t{l.color}\t{team}")
+    fmt.Println(f"{display.table_cell(l.name)}\t{display.table_cell(l.color)}\t{display.table_cell(team)}")
   }
   Ok(())
 }
