@@ -1,3 +1,4 @@
+import "display"
 import "records"
 import "go:encoding/json"
 import "go:fmt"
@@ -73,7 +74,7 @@ fn label_list(input: flags.CommandInput) -> Result<(), string> {
   for l in labels.items {
     let mut team = l.expand.team.key
     if team == "" { team = "workspace" }
-    fmt.Println(f"{l.name}\t{l.color}\t{team}")
+    fmt.Println(f"{display.table_cell(l.name)}\t{display.table_cell(l.color)}\t{display.table_cell(team)}")
   }
   Ok(())
 }
@@ -153,8 +154,7 @@ fn label_create(input: flags.CommandInput) -> Result<(), string> {
 }
 
 fn label_edit(input: flags.CommandInput) -> Result<(), string> {
-  let spec = label_edit_spec()
-  let usage = flags.usage("lll label edit", spec, "NAME")
+  let usage = input.usage
   let p = input.parsed
   let Some(name) = nonempty(p.first()) else {
     return Err(f"usage: {usage}")
@@ -178,8 +178,7 @@ fn label_edit(input: flags.CommandInput) -> Result<(), string> {
 
 /// Delete only after counting references; the web shares the same count policy.
 fn label_delete(input: flags.CommandInput) -> Result<(), string> {
-  let spec = label_delete_spec()
-  let usage = flags.usage("lll label delete", spec, "NAME")
+  let usage = input.usage
   let p = input.parsed
   let Some(name) = nonempty(p.first()) else {
     return Err(f"usage: {usage}")
@@ -198,8 +197,7 @@ fn label_delete(input: flags.CommandInput) -> Result<(), string> {
 /// team could only be deleted and remade before this, which loses every issue
 /// that carried it.
 fn label_move(input: flags.CommandInput) -> Result<(), string> {
-  let spec = label_move_spec()
-  let usage = flags.usage("lll label move", spec, "NAME")
+  let usage = input.usage
   let p = input.parsed
   let Some(name) = nonempty(p.first()) else {
     return Err(f"usage: {usage}")

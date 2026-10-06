@@ -11,6 +11,16 @@ async page => {
     window.keptDescription = document.querySelector('#issue-description');
     window.keptDiagram = document.querySelector('#issue-description svg');
   });
+  const labelTrigger = page.getByRole('button', {name: 'Add a label', exact: true});
+  await labelTrigger.click();
+  const labelSearch = page.getByRole('textbox', {name: 'Filter labels', exact: true});
+  await labelSearch.waitFor({state: 'visible'});
+  await labelSearch.press('Escape');
+  await page.waitForFunction(() => document.activeElement?.classList.contains('lab-add'));
+  await labelTrigger.press('Enter');
+  await labelSearch.waitFor({state: 'visible'});
+  await labelSearch.press('Escape');
+  await page.waitForFunction(() => document.activeElement?.classList.contains('lab-add'));
   await page.locator('#comment-form textarea').fill('Unfinished comment');
   const editTitle = page.getByRole('button', {name: 'Edit issue title', exact: true});
   await editTitle.focus();

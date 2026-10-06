@@ -57,8 +57,7 @@ fn github_spec() -> Slice<flags.Flag> {
 }
 
 fn import_github(input: flags.CommandInput) -> Result<(), string> {
-  let spec = github_spec()
-  let usage = flags.usage("lll import github", spec, "OWNER/REPO")
+  let usage = input.usage
   let repo = input.parsed.first()
   if !repo_shape_ok(repo) {
     return Err(f"expected OWNER/REPO, got '{repo}'\nusage: {usage}")

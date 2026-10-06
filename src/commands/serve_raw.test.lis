@@ -59,3 +59,20 @@ fn raw_search_heading_flattens_line_endings_without_changing_query_semantics() {
     assert raw == "# Search: First Second (0)"
   }
 }
+
+#[test]
+fn raw_search_distinguishes_document_and_issue_hits() {
+  let issue = CardVM { key: "TST-1", title: "Matching issue", .. }
+  let raw = search_raw(SearchVM {
+    q: "Matching", results: [
+      SearchHitVM { card: issue, .. },
+      SearchHitVM { doc: DocHitVM {
+        slug: "matching-doc", title: "Matching\n文档 | notes", kind: "finding",
+        url: "/t/TST/doc/matching-doc", ..
+      }, .. },
+    ], ..
+  })
+  assert raw.contains(card_line(issue))
+  assert raw.contains("- [matching-doc](/t/TST/doc/matching-doc) | Matching 文档 \\| notes | finding")
+  assert !raw.contains("- [](/issue/)")
+}

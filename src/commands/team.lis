@@ -1,3 +1,4 @@
+import "display"
 import "records"
 import "go:encoding/json"
 import "go:fmt"
@@ -122,7 +123,7 @@ fn team_list(input: flags.CommandInput) -> Result<(), string> {
   for t in teams.items {
     let mut mark = ""
     if t.archived { mark = "\t(archived)" }
-    fmt.Println(f"{t.key}\t{t.name}{mark}")
+    fmt.Println(f"{display.table_cell(t.key)}\t{display.table_cell(t.name)}{mark}")
   }
   Ok(())
 }
@@ -201,8 +202,7 @@ struct TeamRenamePatch { key: string, name: string }
 /// does not follow is stored text, and the caller has to be told which
 /// (see team_rename_collateral).
 fn team_rename(input: flags.CommandInput) -> Result<(), string> {
-  let spec = team_rename_spec()
-  let usage = flags.usage("lll team rename", spec, "KEY")
+  let usage = input.usage
   let p = input.parsed
   let key = p.first()
   if key == "" {
