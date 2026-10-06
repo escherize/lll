@@ -174,9 +174,7 @@ fn projects_raw(vm: ProjectsVM, team_key: string) -> string {
   let mut lines: Slice<string> = [f"# Projects ({vm.projects.length()})"]
   if team_key != "" { lines = lines.append(f"Team: {team_key}") }
   for p in vm.projects {
-    let mut noun = "issues"
-    if p.count == 1 { noun = "issue" }
-    lines = lines.append(f"- {cell(p.name)} — {p.status_label} · {p.count} {noun} — {p.href}")
+    lines = lines.append(f"- {cell(p.name)} — {p.status_label} · {issue_count_text(p.count)} — {p.href}")
     if p.description != "" {
       lines = lines.append(f"  {p.description}")
     }
