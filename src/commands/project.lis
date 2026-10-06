@@ -1,3 +1,4 @@
+import "display"
 import "records"
 import "go:encoding/json"
 import "go:fmt"
@@ -92,7 +93,7 @@ fn project_list(input: flags.CommandInput) -> Result<(), string> {
   for p in projects.items {
     let mut team = p.expand.team.key
     if team == "" { team = "workspace" }
-    fmt.Println(f"{p.name}\t{p.status}\t{team}")
+    fmt.Println(f"{display.table_cell(p.name)}\t{display.table_cell(p.status)}\t{display.table_cell(team)}")
   }
   Ok(())
 }
