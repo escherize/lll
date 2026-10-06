@@ -260,6 +260,51 @@ func TestReleaseRequiresHolderOrForce(t *testing.T) {
 		": An administrator force-released Alpha's claim.")
 }
 
+// LLL-521: a sibling session on the holder's token is another session, so
+// releasing a hold under a different label needs force, as another member's
+// does, and the forced-release comment names both sessions. The same label or
+// no label on either side releases as the holder.
+func TestReleaseRefusesADifferentAgentLabel(t *testing.T) {
+	app, issueID, alpha, _ := claimFixture(t)
+	held, err := acquireClaim(app, issueID, alpha, "wt-a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = releaseClaim(app, issueID, held.ClaimID, releaser{memberID: alpha, agent: "wt-b"})
+	if err == nil || err.Error() != "the claim is held by Alpha (agent wt-a); releasing another session's claim needs force" {
+		t.Fatalf("a different agent label released: %v", err)
+	}
+	assertClaimState(t, app, issueID, alpha, alpha)
+	assertComments(t, app, issueID)
+
+	outcome, err := releaseClaim(app, issueID, held.ClaimID, releaser{memberID: alpha, agent: "wt-b", force: true, reason: "wt-a crashed"})
+	if err != nil || !outcome.Forced {
+		t.Fatalf("forced cross-label release: %#v %v", outcome, err)
+	}
+	assertClaimState(t, app, issueID, "", "")
+	forcedComment := alpha + ": Alpha (agent wt-b) force-released Alpha (agent wt-a)'s claim.\n\nReason: wt-a crashed"
+	assertComments(t, app, issueID, forcedComment)
+
+	for _, agent := range []string{"wt-a", ""} {
+		held, err := acquireClaim(app, issueID, alpha, "wt-a")
+		if err != nil {
+			t.Fatal(err)
+		}
+		outcome, err := releaseClaim(app, issueID, held.ClaimID, releaser{memberID: alpha, agent: agent})
+		if err != nil || outcome.Forced {
+			t.Fatalf("release with %q: %#v %v", agent, outcome, err)
+		}
+	}
+	held, err = acquireClaim(app, issueID, alpha, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if outcome, err := releaseClaim(app, issueID, held.ClaimID, releaser{memberID: alpha, agent: "wt-b"}); err != nil || outcome.Forced {
+		t.Fatalf("labelled release of an unlabelled hold: %#v %v", outcome, err)
+	}
+	assertComments(t, app, issueID, forcedComment)
+}
+
 // The comment is part of the forced release: if it cannot be written, the
 // claim stays where it was.
 func TestForcedReleaseRollsBackWithoutItsComment(t *testing.T) {

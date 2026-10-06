@@ -319,13 +319,20 @@ fn issue_claim_spec() -> Slice<flags.Flag> {
 
 fn issue_release_spec() -> Slice<flags.Flag> {
   flags.with_team([
-    flags.Flag { name: "--force", help: "release a claim another member holds; leaves a comment on the issue", .. },
+    flags.Flag { name: "--force", help: "release a claim another member, or another agent label on your token, holds; leaves a comment on the issue", .. },
     flags.Flag {
       name: "-b",
       alias: "--body",
       value: true,
       hint: "\"why\"",
       help: "with --force: the reason, recorded in the comment ('-b -' reads stdin)",
+      ..,
+    },
+    flags.Flag {
+      name: "--agent",
+      value: true,
+      hint: "NAME",
+      help: "self-asserted session label, for agents sharing one member token\n(default: LLL_AGENT)",
       ..,
     },
   ])
@@ -500,7 +507,7 @@ pub fn issue_commands() -> Slice<flags.Command> {
     },
     flags.Command {
       name: "release",
-      summary: "remove your claim; clear assignee if it still matches the holder; --force takes another member's and comments why",
+      summary: "remove your claim; clear assignee if it still matches the holder; --force takes another member's or another agent label's and comments why",
       spec: issue_release_spec(),
       positional: "[KEY-123]",
       run: release,
@@ -1665,7 +1672,7 @@ fn release(input: flags.CommandInput) -> Result<(), string> {
   let issue = records.fetch_issue(resolved)?
   let key = f"{issue.expand.team.key}-{issue.number}"
   let Some(held) = claims.fetch(issue.id)? else { return Err(f"{key} is not claimed") };
-  let result = claims.release(issue.id, held.id, force, reason).map_err(|e| {
+  let result = claims.release(issue.id, held.id, agent_label(p), force, reason).map_err(|e| {
     if strings.Contains(e, "needs force") {
       f"{key}: {e} — 'lll issue release {key} --force -b \"why\"' takes it anyway and comments on the issue"
     } else { e }

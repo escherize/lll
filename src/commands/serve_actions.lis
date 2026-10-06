@@ -474,6 +474,6 @@ fn release_write(r: mut Ref<http.Request>) -> Result<string, string> {
   require_active_team(issue.expand.team)?
   let observed = r.FormValue("claim_id")
   if observed == "" { return Err("The claim changed; refresh before releasing it.") }
-  let _ = claims.release(issue.id, observed, true, "")?
+  let _ = claims.release(issue.id, observed, "", true, "")?
   Ok("")
 }

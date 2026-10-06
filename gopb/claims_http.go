@@ -70,6 +70,7 @@ func registerClaimRoutes(routes *router.Router[*core.RequestEvent], writes *issu
 	routes.POST("/api/lll/issues/{issue}/release", func(re *core.RequestEvent) error {
 		var body struct {
 			ClaimID string `json:"claim_id"`
+			Agent   string `json:"agent"`
 			Force   bool   `json:"force"`
 			Reason  string `json:"reason"`
 		}
@@ -94,7 +95,7 @@ func registerClaimRoutes(routes *router.Router[*core.RequestEvent], writes *issu
 		// the comment is the only record the release happened. (A superuser
 		// can still DELETE the record directly - claims.deleteRule is null,
 		// not "nobody" - but that is the admin API, not the release path.)
-		by := releaser{force: body.Force, reason: strings.TrimSpace(body.Reason)}
+		by := releaser{agent: body.Agent, force: body.Force, reason: strings.TrimSpace(body.Reason)}
 		if !re.HasSuperuserAuth() {
 			by.memberID = re.Auth.Id
 		}

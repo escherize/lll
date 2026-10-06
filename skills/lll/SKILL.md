@@ -53,7 +53,8 @@ stop two of them working the same issue (finding
 `shared-member-claims-do-not-isolate-sessions`). Give each session a label with
 `--agent NAME` or `LLL_AGENT` (on `issue claim`, `issue next --claim`, `issue
 comment`): a claim by the same member under a different label exits nonzero
-and names the holder's label, and so does `--renew`. An unlabelled claim or
+and names the holder's label, and so do `--renew` and `issue release`
+without `--force`. An unlabelled claim or
 hold still matches any label, so every sharing session must set one. The label
 is self-asserted coordination, not auth. For a fleet, you can instead give each
 long-lived worker its own member (`lll member create <name>`, then
@@ -66,8 +67,9 @@ already on.
 releases it first, or you force-release a dead hold (below).
 `lll whoami` shows the authenticated identity. `lll issue release KEY-12`
 gives your claim back and clears the assignee when it still matches the holder.
-Releasing another member's claim is refused unless you add `--force`
-(LLL-512); a forced release leaves a comment on the issue naming both members,
+Releasing another member's claim, or a hold under a different agent label on
+your own token, is refused unless you add `--force` (LLL-512, LLL-521); a
+forced release leaves a comment on the issue naming both members and labels,
 with the reason from `-b "why"` if you give one. Force only a hold you know is
 dead: its holder may still be editing.
 

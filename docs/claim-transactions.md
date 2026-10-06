@@ -5,7 +5,7 @@ Claim acquisition and release use authenticated server operations:
 | Request | JSON body | Effect |
 | --- | --- | --- |
 | `POST /api/lll/issues/{issue-id}/claim` | `{"member":"member-id","agent":"optional-label"}` | Acquire the exclusive claim and assign its holder in one transaction. |
-| `POST /api/lll/issues/{issue-id}/release` | `{"claim_id":"observed-claim-id","force":false,"reason":""}` | Remove that exact claim and clear assignment only if it still names the holder, in one transaction. `force` and `reason` are optional. |
+| `POST /api/lll/issues/{issue-id}/release` | `{"claim_id":"observed-claim-id","agent":"","force":false,"reason":""}` | Remove that exact claim and clear assignment only if it still names the holder, in one transaction. `agent`, `force` and `reason` are optional. |
 | `POST /api/lll/issues/{issue-id}/renew` | `{"claim_id":"observed-claim-id","agent":"optional-label"}` | Restart that exact claim's expiry clock. Only the holder may renew, and a differing agent label is refused. The claim keeps its id and `created`. |
 | `POST /api/lll/issues/{issue-id}/assignment` | `{"claim_id":"observed-claim-id","fields":{"assignee":"member-id"}}` | Update assignment and accompanying issue fields, releasing the observed claim if assignment is cleared. |
 
@@ -64,7 +64,10 @@ A claim may carry an agent label (LLL-521: `--agent NAME` or `LLL_AGENT`),
 stored on the hold. The same member claiming with a different non-empty label
 is refused, naming the holder's label. An empty label on either side keeps the
 same-member retry above. Renewal applies the same test: a session whose label
-differs from the holder's cannot renew the hold. The label is self-asserted: it separates agents
+differs from the holder's cannot renew the hold. Release treats such a session
+like another member: without force it is refused, naming the holder's label;
+with force it goes through, and the comment names both sessions, for example
+"Alpha (agent wt-b) force-released Alpha (agent wt-a)'s claim." The label is self-asserted: it separates agents
 sharing one member token, not members, and proves nothing about identity.
 Comments carry the same label, and every view shows it after the author.
 

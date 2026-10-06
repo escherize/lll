@@ -109,10 +109,23 @@ func acquireClaim(app core.App, issueID, memberID, agent string) (ClaimOutcome, 
 // releaser is who asked for a release, as the HTTP adapter authenticated it.
 // memberID is empty for a superuser: that token names no member, so it can
 // never be the holder and always needs force.
+//
+// agent is the releasing session's label (LLL-521). The same member under a
+// different non-empty label than the holder's is another session, and like
+// another member it needs force.
 type releaser struct {
 	memberID string
+	agent    string
 	force    bool
 	reason   string
+}
+
+// byline names a member and, when it has one, its session label.
+func byline(name, agent string) string {
+	if agent == "" {
+		return name
+	}
+	return fmt.Sprintf("%s (agent %s)", name, agent)
 }
 
 // releaseClaim names the observed hold, so a stale command or page cannot
@@ -145,9 +158,14 @@ func releaseClaim(app core.App, issueID, expectedClaimID string, by releaser) (C
 		if member, err := tx.FindRecordById("members", memberID); err == nil {
 			name = member.GetString("name")
 		}
-		forced := memberID != by.memberID
+		holder := byline(name, held.GetString("agent"))
+		otherSession := memberID == by.memberID && agentsDiffer(held, by.agent)
+		forced := memberID != by.memberID || otherSession
 		if forced && !by.force {
-			return &claimRejection{fmt.Sprintf("the claim is held by %s; releasing another member's claim needs force", name)}
+			if otherSession {
+				return &claimRejection{fmt.Sprintf("the claim is held by %s; releasing another session's claim needs force", holder)}
+			}
+			return &claimRejection{fmt.Sprintf("the claim is held by %s; releasing another member's claim needs force", holder)}
 		}
 		cleared := issue.GetString("assignee") == memberID
 		if err := tx.Delete(held); err != nil {
@@ -160,7 +178,7 @@ func releaseClaim(app core.App, issueID, expectedClaimID string, by releaser) (C
 			}
 		}
 		if forced {
-			if err := recordForcedRelease(tx, issueID, name, by); err != nil {
+			if err := recordForcedRelease(tx, issueID, holder, by); err != nil {
 				return err
 			}
 		}
@@ -192,7 +210,7 @@ func recordForcedRelease(tx core.App, issueID, holder string, by releaser) error
 		if err != nil {
 			return err
 		}
-		actor = member.GetString("name")
+		actor = byline(member.GetString("name"), by.agent)
 	}
 	body := fmt.Sprintf("%s force-released %s's claim.", actor, holder)
 	if by.reason != "" {
