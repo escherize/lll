@@ -1504,7 +1504,7 @@ input:focus, textarea:focus, select:focus {
 /* Name over description, so a long description wraps under the name instead
    of pushing the status and count off the right edge. */
 .pj-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
-.pj-name { font-weight: 500; color: var(--text); }
+.pj-name { font-weight: 500; color: var(--text); overflow-wrap: anywhere; }
 .pj-desc {
   color: var(--text-3);
   font-size: 11.5px;
