@@ -332,7 +332,9 @@ assert_contains "$board" "eng-2-already-in-progress" "hover preview shows the br
 # (LLL-512: anyone else would need force, and force leaves a comment).
 W205_MID=$(curl -sf -G -H "$AUTH_HDR" "$LLL_URL/api/collections/members/records" \
   --data-urlencode "filter=(name='e2e')" | jq -r '.items[0].id')
-W205_CLAIM=$(seed "work-site claim" -H "$AUTH_HDR" \
+# Raw fixtures preserve this issue's unrelated assignment; only superusers
+# can create these directly (LLL-515). Member actions use /claim.
+W205_CLAIM=$(seed "work-site claim" -H "Authorization: Bearer $_su" \
   -X POST "$LLL_URL/api/collections/claims/records" \
   -H 'Content-Type: application/json' \
   -d "{\"issue\":\"$ENG2_ID\",\"member\":\"$W205_MID\"}" | jq -r '.id')
@@ -2696,7 +2698,8 @@ LLL_TEST_BOARD_TOKEN="$BOARD_TOKEN" python3 "$REPO_ROOT"/scripts/test_attachment
 
 LLL_TEST_BOARD_TOKEN="$BOARD_TOKEN" python3 "$REPO_ROOT"/scripts/test_issue_stream.py "$LIN" "$LLL_URL" "$WEB"
 
-LLL_TEST_BOARD_TOKEN="$BOARD_TOKEN" python3 "$REPO_ROOT"/scripts/test_board_claims.py "$LIN" "$LLL_URL" "$WEB"
+LLL_TEST_BOARD_TOKEN="$BOARD_TOKEN" LLL_TEST_SUPERUSER_TOKEN=$(pb_superuser_token "$LLL_URL") \
+  python3 "$REPO_ROOT"/scripts/test_board_claims.py "$LIN" "$LLL_URL" "$WEB"
 
 LLL_TEST_BOARD_TOKEN="$BOARD_TOKEN" python3 "$REPO_ROOT"/scripts/test_board_pagination.py "$LIN" "$LLL_URL" "$WEB"
 
