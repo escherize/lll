@@ -65,7 +65,10 @@ recorded work site) before it starts, and skips any issue another session is
 already on.
 
 `--assignee` cannot move a claimed issue to anyone but the holder: the holder
-releases it first, or you force-release a dead hold (below).
+releases it first, or you force-release a dead hold (below). `--assignee none`
+releases the claim, so it follows the release rule: only the holder clears it
+without `--force`, and `lll issue update KEY-12 --assignee none --force -b "why"`
+leaves the same comment a forced release does (LLL-516).
 `lll whoami` shows the authenticated identity. `lll issue release KEY-12`
 gives your claim back and clears the assignee when it still matches the holder.
 Releasing another member's claim, or a hold under a different agent label on

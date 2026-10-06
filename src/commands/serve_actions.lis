@@ -354,7 +354,10 @@ fn assignee_write(r: mut Ref<http.Request>) -> Result<string, string> {
   let issue = records.fetch_issue(key)?
   require_active_team(issue.expand.team)?
   let observed = claims.observed_id(issue.id)?
-  let _ = claims.update_assignment(issue.id, observed, marshal(IssueAssigneePatch { assignee: id })?)?
+  // Force, as the Release button sends it (LLL-516): a person who picks a new
+  // assignee on a page that names the holder has decided to take the hold.
+  // A forced clear comments on the issue, naming the board's member.
+  let _ = claims.update_assignment(issue.id, observed, marshal(IssueAssigneePatch { assignee: id })?, "", true, "")?
   Ok("")
 }
 

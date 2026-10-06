@@ -28,6 +28,9 @@ func registerClaimRoutes(routes *router.Router[*core.RequestEvent], writes *issu
 		var body struct {
 			ClaimID *string         `json:"claim_id"`
 			Fields  json.RawMessage `json:"fields"`
+			Agent   string          `json:"agent"`
+			Force   bool            `json:"force"`
+			Reason  string          `json:"reason"`
 		}
 		re.Request.Body = http.MaxBytesReader(re.Response, re.Request.Body, 8<<20)
 		if err := re.BindBody(&body); err != nil || body.ClaimID == nil {
@@ -37,15 +40,24 @@ func registerClaimRoutes(routes *router.Router[*core.RequestEvent], writes *issu
 		if err != nil {
 			return re.BadRequestError("invalid assignment update fields", err)
 		}
+		if !agentLabelShape.MatchString(body.Agent) {
+			return re.BadRequestError(agentLabelRule, nil)
+		}
 		if err := issueWritable(re, re.Request.PathValue("issue")); err != nil {
 			return err
 		}
 		if err := fields.refsInScope(re); err != nil {
 			return err
 		}
+		// Clearing the assignee releases the claim, so the caller is a
+		// releaser like /release's, superuser included (LLL-516).
+		by := releaser{agent: body.Agent, force: body.Force, reason: strings.TrimSpace(body.Reason)}
+		if !re.HasSuperuserAuth() {
+			by.memberID = re.Auth.Id
+		}
 		unlock := writes.acquire(re.Request.PathValue("issue"))
 		defer unlock()
-		outcome, err := updateAssignment(re.App, re.Request.PathValue("issue"), *body.ClaimID, fields)
+		outcome, err := updateAssignment(re.App, re.Request.PathValue("issue"), *body.ClaimID, fields, by)
 		return respondClaim(re, outcome, err)
 	}).Bind(apis.RequireAuth("members", core.CollectionNameSuperusers))
 

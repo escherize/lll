@@ -95,7 +95,13 @@ func (fields assignmentFields) apply(issue *core.Record) {
 
 // updateAssignment commits the complete edit and any matching claim release.
 // An empty expectedClaimID means the caller observed no claim, not "any claim".
-func updateAssignment(app core.App, issueID, expectedClaimID string, fields assignmentFields) (ClaimOutcome, error) {
+//
+// Clearing the assignee releases the hold, so it follows the release rule
+// (LLL-516): only the holder clears it without force, and a forced clear
+// leaves the same comment /release does, in the same transaction. Before
+// this, 'lll issue update KEY --assignee none' or the board's assignee editor
+// released anyone's hold silently, the hole LLL-512 closed on /release.
+func updateAssignment(app core.App, issueID, expectedClaimID string, fields assignmentFields, by releaser) (ClaimOutcome, error) {
 	var outcome ClaimOutcome
 	if fields.Assignee == nil {
 		return outcome, &claimRejection{"assignment update requires an assignee"}
@@ -126,10 +132,19 @@ func updateAssignment(app core.App, issueID, expectedClaimID string, fields assi
 				return &claimRejection{fmt.Sprintf("issue is claimed by %s; release the claim before assigning another member", name)}
 			}
 			if *fields.Assignee == "" {
+				name, holder, forced, err := releaseAuthority(tx, held, by)
+				if err != nil {
+					return err
+				}
 				if err := tx.Delete(held); err != nil {
 					return err
 				}
-				outcome = ClaimOutcome{ClaimID: held.Id, MemberID: memberID, MemberName: name, ClearedAssignee: true}
+				if forced {
+					if err := recordForcedRelease(tx, issueID, holder, by); err != nil {
+						return err
+					}
+				}
+				outcome = ClaimOutcome{ClaimID: held.Id, MemberID: memberID, MemberName: name, ClearedAssignee: true, Forced: forced}
 			}
 		}
 		fields.apply(issue)
@@ -139,4 +154,43 @@ func updateAssignment(app core.App, issueID, expectedClaimID string, fields assi
 		return ClaimOutcome{}, err
 	}
 	return outcome, nil
+}
+
+// registerClaimedAssigneeGuard closes the native PATCH side of LLL-516. A
+// PATCH that changes a claimed issue's assignee does not release the hold,
+// but it takes the issue from its holder all the same, and PATCH carries no
+// force and writes no comment. So a PATCH that moves a claimed issue's
+// assignee away from the holder is refused unless the holder's own member
+// sends it. Anyone else, a superuser included, goes through /assignment or
+// /release with force. Assigning the holder is always allowed, as on
+// /assignment.
+//
+// The hook fires after the update rule and scope checks, with the payload
+// loaded onto e.Record, so Original() is the stored assignee.
+// serializeRecordUpdates holds the issue's lock across the request, the same
+// lock the claim routes take, so the claim read here cannot change before
+// the save.
+func registerClaimedAssigneeGuard(app core.App) {
+	app.OnRecordUpdateRequest("issues").BindFunc(func(e *core.RecordRequestEvent) error {
+		assignee := e.Record.GetString("assignee")
+		if assignee == e.Record.Original().GetString("assignee") {
+			return e.Next()
+		}
+		held, err := currentClaim(e.App, e.Record.Id)
+		if err != nil {
+			return err
+		}
+		if held == nil || assignee == held.GetString("member") {
+			return e.Next()
+		}
+		if e.Auth != nil && !e.Auth.IsSuperuser() && e.Auth.Id == held.GetString("member") {
+			return e.Next()
+		}
+		name := "an unknown member"
+		if member, err := e.App.FindRecordById("members", held.GetString("member")); err == nil {
+			name = member.GetString("name")
+		}
+		return e.BadRequestError(fmt.Sprintf("the claim is held by %s; changing the assignee of another member's claimed issue needs force: clear it through /api/lll/issues/{id}/assignment with force, which releases the claim and comments on the issue",
+			byline(name, held.GetString("agent"))), nil)
+	})
 }

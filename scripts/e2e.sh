@@ -2427,10 +2427,24 @@ out=$(env $E LLL_TOKEN="$BRYAN_TOK" LLL_ME=bryan "$LIN" issue claim "$CKEY")
 assert_contains "$out" "Claimed $CKEY for bryan (already yours" "re-claim by the holder succeeds and says so"
 got=$(env $E "$LIN" issue view "$CKEY" --json | jq -r '.expand.assignee.name')
 [ "$got" = "bryan" ] || fail "re-claim: assignee should be bryan, got '$got'"
+# LLL-516: clearing the assignee releases the claim, so a non-holder is
+# refused without --force, exactly as 'issue release' refuses it (LLL-512).
+# Before, this exact command released bryan's hold silently.
+set +e
+out=$(env $E "$LIN" issue update "$CKEY" --assignee none 2>&1)
+rc=$?
+set -e
+[ "$rc" -ne 0 ] || fail "a non-holder clearing the assignee of a claim: expected nonzero exit"
+assert_contains "$out" "held by bryan" "the clear refusal names the holder"
+assert_contains "$out" "lll issue update $CKEY --assignee none --force" "the clear refusal names --force"
+out=$(env $E "$LIN" issue view "$CKEY")
+assert_contains "$out" "Claimed:   bryan" "a refused clear leaves the holder alone"
+assert_contains "$out" "Assignee:  bryan" "a refused clear leaves the assignee alone"
 # --assignee none under a claim releases the claim too: held-but-unassigned
-# is not a state (fleet replay, task 9)
-out=$(env $E "$LIN" issue update "$CKEY" --assignee none)
+# is not a state (fleet replay, task 9). The holder clears freely.
+out=$(env $E LLL_TOKEN="$BRYAN_TOK" LLL_ME=bryan "$LIN" issue update "$CKEY" --assignee none)
 assert_contains "$out" "released bryan's claim" "clearing the assignee under a claim releases it and says so"
+assert_not_contains "$out" "forced" "the holder's own clear is not forced"
 assert_contains "$out" "assignee=none" "update names what it set (TASK-320)"
 out=$(env $E "$LIN" issue view "$CKEY")
 assert_not_contains "$out" "Claimed:   bryan" "the claim is gone with the assignee"
