@@ -147,7 +147,7 @@ fn issue_list_spec() -> Slice<flags.Flag> {
   flags.with_team(filter_spec(FilterUse.List).append([
     flags.Flag {
       name: "--search",
-      alias: "--query",
+      alias: "",
       value: true,
       hint: "text",
       help: "list only issues whose title contains text",
@@ -300,7 +300,7 @@ fn issue_release_spec() -> Slice<flags.Flag> {
     flags.Flag { name: "--force", help: "release a claim another member holds; leaves a comment on the issue", .. },
     flags.Flag {
       name: "-b",
-      alias: "--body -m --message",
+      alias: "--body",
       value: true,
       hint: "\"why\"",
       help: "with --force: the reason, recorded in the comment ('-b -' reads stdin)",
@@ -313,7 +313,7 @@ fn issue_comment_spec() -> Slice<flags.Flag> {
   flags.with_team([
     flags.Flag {
       name: "-b",
-      alias: "--body -m --message",
+      alias: "--body",
       value: true,
       hint: "\"body\"",
       help: "comment body ('-b -' reads it from stdin)",
@@ -332,7 +332,7 @@ pub fn issue_watch_spec() -> Slice<flags.Flag> {
     },
     flags.Flag {
       name: "--until",
-      alias: "--for",
+      alias: "",
       value: true,
       hint: "text",
       help: "exit 0 once a comment containing text arrives (or is already\nthere); --json reports an existing match as action=snapshot",
@@ -396,26 +396,21 @@ pub fn issue_commands() -> Slice<flags.Command> {
       name: "attach", summary: "upload a file to an issue; appends without replacing existing attachments",
       page: "",
       spec: flags.with_team([]), positional: "KEY-123 FILE", run: issue_attach,
+      ..
     },
     flags.Command {
       name: "detach", summary: "remove an attachment by its stored filename (see issue view)",
       page: "", spec: flags.with_team([]), positional: "KEY-123 FILENAME", run: issue_detach,
+      ..
     },
     flags.Command {
       name: "download", summary: "write attachment bytes to stdout; redirect to a file",
       page: "", spec: flags.with_team([]), positional: "KEY-123 FILENAME", run: issue_download,
+      ..
     },
     flags.Command {
-      name: "create",
+      name: "create", aliases: "new",
       summary: "create an issue in the configured team; -d - reads the description from stdin; without --state it starts in todo",
-      page: issue_create_page(),
-      spec: issue_create_spec(),
-      positional: "[\"title\"]",
-      run: create,
-    },
-    flags.Command {
-      name: "new",
-      summary: "the same command as 'create'",
       page: issue_create_page(),
       spec: issue_create_spec(),
       positional: "[\"title\"]",
@@ -428,6 +423,7 @@ pub fn issue_commands() -> Slice<flags.Command> {
       spec: issue_list_spec(),
       positional: "",
       run: list,
+      ..
     },
     flags.Command {
       name: "next",
@@ -436,32 +432,11 @@ pub fn issue_commands() -> Slice<flags.Command> {
       spec: issue_next_spec(),
       positional: "",
       run: issue_next,
+      ..
     },
     flags.Command {
-      name: "view",
+      name: "view", aliases: "show",
       summary: "show one issue in full, with comments; --raw prints it as plain markdown; -w opens its web page instead",
-      page: "",
-      spec: issue_view_spec(),
-      positional: "[KEY-123]",
-      run: view,
-    },
-    // `read` is `view`. Seven of thirty first-time agents typed it in one
-    // fleet run (TASK-309), and the count went UP as other noise was removed -
-    // it is the word people reach for. One table entry; `view` stays the
-    // documented spelling, and the summary says so.
-    // `show` is `view` too. Two of thirty first-time agents typed it on the
-    // first clean fleet run of task 2 (TASK-309), the same shape as `read`.
-    flags.Command {
-      name: "show",
-      summary: "the same command as 'view'",
-      page: "",
-      spec: issue_view_spec(),
-      positional: "[KEY-123]",
-      run: view,
-    },
-    flags.Command {
-      name: "read",
-      summary: "the same command as 'view'",
       page: "",
       spec: issue_view_spec(),
       positional: "[KEY-123]",
@@ -474,6 +449,7 @@ pub fn issue_commands() -> Slice<flags.Command> {
       spec: issue_update_spec(),
       positional: "[KEY-123]",
       run: update,
+      ..
     },
     flags.Command {
       name: "close",
@@ -482,6 +458,7 @@ pub fn issue_commands() -> Slice<flags.Command> {
       spec: flags.with_team([]),
       positional: "[KEY-123]",
       run: close_issue,
+      ..
     },
     flags.Command {
       name: "start",
@@ -490,6 +467,7 @@ pub fn issue_commands() -> Slice<flags.Command> {
       spec: issue_start_spec(),
       positional: "[KEY-123]",
       run: start,
+      ..
     },
     flags.Command {
       name: "claim",
@@ -498,6 +476,7 @@ pub fn issue_commands() -> Slice<flags.Command> {
       spec: flags.with_team([]),
       positional: "[KEY-123]",
       run: claim,
+      ..
     },
     flags.Command {
       name: "release",
@@ -506,6 +485,7 @@ pub fn issue_commands() -> Slice<flags.Command> {
       spec: issue_release_spec(),
       positional: "[KEY-123]",
       run: release,
+      ..
     },
     flags.Command {
       name: "delete",
@@ -514,6 +494,7 @@ pub fn issue_commands() -> Slice<flags.Command> {
       spec: issue_delete_spec(),
       positional: "KEY-123",
       run: delete_issue,
+      ..
     },
     flags.Command {
       name: "comment",
@@ -522,6 +503,7 @@ pub fn issue_commands() -> Slice<flags.Command> {
       spec: issue_comment_spec(),
       positional: "[KEY-123] [\"body\"]",
       run: comment,
+      ..
     },
     flags.Command {
       name: "watch",
@@ -530,6 +512,7 @@ pub fn issue_commands() -> Slice<flags.Command> {
       spec: issue_watch_spec(),
       positional: "[KEY-123]",
       run: issue_watch,
+      ..
     },
     flags.Command {
       name: "url",
@@ -538,6 +521,7 @@ pub fn issue_commands() -> Slice<flags.Command> {
       spec: flags.with_team([]),
       positional: "[KEY-123]",
       run: url_cmd,
+      ..
     },
     flags.Command {
       name: "id",
@@ -546,6 +530,7 @@ pub fn issue_commands() -> Slice<flags.Command> {
       spec: flags.with_team([]),
       positional: "[KEY-123]",
       run: id_cmd,
+      ..
     },
     flags.Command {
       name: "title",
@@ -554,8 +539,9 @@ pub fn issue_commands() -> Slice<flags.Command> {
       spec: flags.with_team([]),
       positional: "[KEY-123]",
       run: title_cmd,
+      ..
     },
-    flags.Command { name: "branch-name", summary: "print a suggested Git branch name; read-only", page: "", spec: flags.with_team([]), positional: "[KEY-123]", run: branch_name_cmd },
+    flags.Command { name: "branch-name", summary: "print a suggested Git branch name; read-only", page: "", spec: flags.with_team([]), positional: "[KEY-123]", run: branch_name_cmd, .. },
     flags.Command {
       name: "pr",
       summary: "open a GitHub PR via 'gh pr create' and record gh#N; body links the issue and includes its description when it fits",
@@ -563,10 +549,12 @@ pub fn issue_commands() -> Slice<flags.Command> {
       spec: flags.with_team([]),
       positional: "[KEY-123]",
       run: pr_cmd,
+      ..
     },
     flags.Command {
       name: "ref", summary: "append an external reference once (gh#42, linear:ENG-118)",
       page: "", spec: flags.with_team([]), positional: "KEY-123 REF", run: ref_cmd,
+      ..
     },
     flags.Command {
       name: "link",
@@ -575,6 +563,7 @@ pub fn issue_commands() -> Slice<flags.Command> {
       spec: flags.with_team([]),
       positional: "KEY-123 SLUG",
       run: link,
+      ..
     },
     flags.Command {
       name: "unlink",
@@ -583,6 +572,7 @@ pub fn issue_commands() -> Slice<flags.Command> {
       spec: flags.with_team([]),
       positional: "KEY-123 SLUG",
       run: unlink,
+      ..
     },
     flags.Command {
       name: "block",
@@ -591,6 +581,7 @@ pub fn issue_commands() -> Slice<flags.Command> {
       spec: flags.with_team([]),
       positional: "KEY-123 BLOCKER",
       run: block,
+      ..
     },
     flags.Command {
       name: "unblock",
@@ -599,6 +590,7 @@ pub fn issue_commands() -> Slice<flags.Command> {
       spec: flags.with_team([]),
       positional: "KEY-123 BLOCKER",
       run: unblock,
+      ..
     },
   ]
 }
@@ -1895,8 +1887,8 @@ fn print_comments(comments: Slice<models.Comment>) {
 /// the author is the token's member. A superuser token may change anything.
 fn comment_commands() -> Slice<flags.Command> {
   [
-    flags.Command { name: "edit", summary: "edit a numbered comment", page: "", spec: comment_mutate_spec("edit"), positional: "KEY N", run: |input| comment_mutate("edit", input.parsed) },
-    flags.Command { name: "delete", summary: "delete a numbered comment", page: "", spec: comment_mutate_spec("delete"), positional: "KEY N", run: |input| comment_mutate("delete", input.parsed) },
+    flags.Command { name: "edit", summary: "edit a numbered comment", page: "", spec: comment_mutate_spec("edit"), positional: "KEY N", run: |input| comment_mutate("edit", input.parsed), .. },
+    flags.Command { name: "delete", summary: "delete a numbered comment", page: "", spec: comment_mutate_spec("delete"), positional: "KEY N", run: |input| comment_mutate("delete", input.parsed), .. },
   ]
 }
 
@@ -1953,7 +1945,7 @@ fn comment_mutate_spec(verb: string) -> Slice<flags.Flag> {
   if verb == "edit" {
     spec = spec.append(flags.Flag {
       name: "-b",
-      alias: "--body -m --message",
+      alias: "--body",
       value: true,
       hint: "\"body\"",
       help: "the new body ('-b -' reads it from stdin)",

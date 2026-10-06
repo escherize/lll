@@ -26,20 +26,8 @@ pub fn doc(args: Slice<string>) -> Result<(), string> {
 pub fn doc_commands() -> Slice<flags.Command> {
   [
     flags.Command {
-      name: "new",
+      name: "new", aliases: "create",
       summary: "create a doc; -b - reads the body from stdin",
-      page: "",
-      spec: doc_new_spec(),
-      positional: "",
-      run: doc_new,
-    },
-    // Alias by the same rule issue.lis records: a spelling guessed by more
-    // than one agent in thirty, on a clean run, is a design signal rather
-    // than a typo (finding doc 2026-09-07-fleet-graph-first-four-tasks, ten
-    // runs of thirty). Kept deliberately; do not remove as a duplicate.
-    flags.Command {
-      name: "create",
-      summary: "the same command as 'new'",
       page: "",
       spec: doc_new_spec(),
       positional: "",
@@ -52,34 +40,11 @@ pub fn doc_commands() -> Slice<flags.Command> {
       spec: doc_list_spec(),
       positional: "",
       run: doc_list,
+      ..
     },
     flags.Command {
-      name: "view",
+      name: "view", aliases: "show",
       summary: "show one doc with its linked issues; --raw prints only the body; --json prints the raw record",
-      page: "",
-      spec: doc_view_spec(),
-      positional: "SLUG",
-      run: doc_view,
-    },
-    // Alias by the same rule issue.lis records: a spelling guessed by more
-    // than one agent in thirty, on a clean run, is a design signal rather
-    // than a typo (finding doc 2026-09-07-fleet-graph-first-four-tasks, ten
-    // runs of thirty). Kept deliberately; do not remove as a duplicate.
-    flags.Command {
-      name: "show",
-      summary: "the same command as 'view'",
-      page: "",
-      spec: doc_view_spec(),
-      positional: "SLUG",
-      run: doc_view,
-    },
-    // Alias by the same rule issue.lis records: a spelling guessed by more
-    // than one agent in thirty, on a clean run, is a design signal rather
-    // than a typo (finding doc 2026-09-07-fleet-graph-first-four-tasks, ten
-    // runs of thirty). Kept deliberately; do not remove as a duplicate.
-    flags.Command {
-      name: "read",
-      summary: "the same command as 'view'",
       page: "",
       spec: doc_view_spec(),
       positional: "SLUG",
@@ -92,6 +57,7 @@ pub fn doc_commands() -> Slice<flags.Command> {
       spec: doc_edit_spec(),
       positional: "SLUG",
       run: doc_edit,
+      ..
     },
     flags.Command {
       name: "delete",
@@ -100,6 +66,7 @@ pub fn doc_commands() -> Slice<flags.Command> {
       spec: doc_delete_spec(),
       positional: "SLUG",
       run: doc_delete,
+      ..
     },
     flags.Command {
       name: "link",
@@ -108,6 +75,7 @@ pub fn doc_commands() -> Slice<flags.Command> {
       spec: flags.with_team([]),
       positional: "SLUG KEY-123",
       run: doc_link,
+      ..
     },
     flags.Command {
       name: "unlink",
@@ -116,6 +84,7 @@ pub fn doc_commands() -> Slice<flags.Command> {
       spec: flags.with_team([]),
       positional: "SLUG KEY-123",
       run: doc_unlink,
+      ..
     },
   ]
 }
@@ -287,7 +256,7 @@ fn doc_new_spec() -> Slice<flags.Flag> {
     },
     flags.Flag {
       name: "-p",
-      alias: "--paths --path",
+      alias: "--paths",
       value: true,
       hint: "paths",
       help: "comma-separated file/directory paths the doc is about, e.g.\nsrc/pb, pb/pb_migrations ('lll finding near' matches by them)",
@@ -376,7 +345,7 @@ fn doc_edit_spec() -> Slice<flags.Flag> {
     },
     flags.Flag {
       name: "-p",
-      alias: "--paths --path",
+      alias: "--paths",
       value: true,
       hint: "paths",
       help: "replacement comma-separated paths — the WHOLE set\n(pass \"\" to clear it)",
@@ -472,7 +441,7 @@ fn doc_list_spec() -> Slice<flags.Flag> {
     },
     flags.Flag {
       name: "--search",
-      alias: "--query",
+      alias: "",
       value: true,
       hint: "text",
       help: "only docs whose slug or title contains text",

@@ -370,6 +370,8 @@ pub struct CommandInput {
 /// still reads its positional through Parsed.first().
 pub struct Command {
   pub name: string,
+  /// Accepted verb spellings, kept out of the canonical help table.
+  pub aliases: string,
   pub summary: string,
   pub page: string,
   pub spec: Slice<Flag>,
@@ -402,7 +404,7 @@ pub fn dispatch(
   if verb == "--help" || verb == "-h" {
     return Err(f"{help_marker()}{noun_help(noun, tagline, intro, cmds)}")
   }
-  let Some(c) = cmds.find(|c| c.name == verb) else {
+  let Some(c) = resolve_command(cmds, verb) else {
     return Err(f"unknown {noun} command: '{verb}' (see 'lll {noun} --help')")
   }
   // A verb with its own page answers --help with it; the generic parse-time
@@ -564,6 +566,21 @@ pub fn extract_team(args: Slice<string>, start: int, spec: Slice<Flag>) -> Resul
 
 /// Look up the declaration shared by parsing and completions.
 pub fn command_spec(cmds: Slice<Command>, verb: string) -> Slice<Flag> {
-  let Some(c) = cmds.find(|c| c.name == verb) else { return [] }
+  let Some(c) = resolve_command(cmds, verb) else { return [] }
   c.spec
+}
+
+/// Resolve both advertised verbs and accepted aliases to the same command.
+pub fn resolve_command(cmds: Slice<Command>, verb: string) -> Option<Command> {
+  cmds.find(|c| c.name == verb || strings.Fields(c.aliases).contains(verb))
+}
+
+/// Shell completion offers every accepted spelling without duplicating help.
+pub fn command_names(cmds: Slice<Command>) -> Slice<string> {
+  let mut names: Slice<string> = []
+  for c in cmds {
+    names = names.append(c.name)
+    for alias in strings.Fields(c.aliases) { names = names.append(alias) }
+  }
+  names
 }

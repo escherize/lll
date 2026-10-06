@@ -31,6 +31,7 @@ pub fn finding_commands() -> Slice<flags.Command> {
       spec: flags.with_team([]),
       positional: "<path>",
       run: finding_near,
+      ..
     },
     flags.Command {
       name: "view",
@@ -39,34 +40,11 @@ pub fn finding_commands() -> Slice<flags.Command> {
       spec: doc_view_spec(),
       positional: "SLUG",
       run: doc_view,
-    },
-    // Alias by the same rule issue.lis records: a spelling guessed by more
-    // than one agent in thirty, on a clean run, is a design signal rather
-    // than a typo (finding doc 2026-09-07-fleet-graph-first-four-tasks, ten
-    // runs of thirty). Kept deliberately; do not remove as a duplicate.
-    flags.Command {
-      name: "read",
-      summary: "the same command as 'view'",
-      page: "",
-      spec: doc_view_spec(),
-      positional: "SLUG",
-      run: doc_view,
+      ..
     },
     flags.Command {
-      name: "new",
+      name: "new", aliases: "create",
       summary: "file a finding: 'lll doc new -k finding' with the kind already set",
-      page: "",
-      spec: finding_new_spec(),
-      positional: "[\"slug\"]",
-      run: finding_new,
-    },
-    // Alias by the same rule issue.lis records: a spelling guessed by more
-    // than one agent in thirty, on a clean run, is a design signal rather
-    // than a typo (finding doc 2026-09-07-fleet-graph-first-four-tasks, ten
-    // runs of thirty). Kept deliberately; do not remove as a duplicate.
-    flags.Command {
-      name: "create",
-      summary: "the same command as 'new'",
       page: "",
       spec: finding_new_spec(),
       positional: "[\"slug\"]",
@@ -79,6 +57,7 @@ pub fn finding_commands() -> Slice<flags.Command> {
       spec: finding_list_spec(),
       positional: "",
       run: finding_list,
+      ..
     },
     flags.Command {
       name: "confirm",
@@ -87,6 +66,7 @@ pub fn finding_commands() -> Slice<flags.Command> {
       spec: flags.with_team([]),
       positional: "SLUG",
       run: finding_confirm,
+      ..
     },
     flags.Command {
       name: "refute",
@@ -95,6 +75,7 @@ pub fn finding_commands() -> Slice<flags.Command> {
       spec: finding_refute_spec(),
       positional: "SLUG",
       run: finding_refute,
+      ..
     },
   ]
 }
@@ -137,7 +118,7 @@ fn finding_list_spec() -> Slice<flags.Flag> {
     },
     flags.Flag {
       name: "--search",
-      alias: "--query",
+      alias: "",
       value: true,
       hint: "text",
       help: "only findings whose slug or title contains text",
@@ -153,6 +134,7 @@ fn finding_list_spec() -> Slice<flags.Flag> {
     },
     flags.Flag {
       name: "--limit",
+      alias: "-l",
       value: true,
       hint: "N",
       help: "list at most N findings (positive integer)",

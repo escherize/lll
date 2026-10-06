@@ -80,17 +80,17 @@ fn verbs(noun: string) -> Slice<string> {
   // added to a table is completed with no edit here. This was a fourth
   // hand-kept list of the same verbs, and it drifted twice in one wave.
   match noun {
-    "issue" => issue_commands().map(|c| c.name),
-    "team" => team_commands().map(|c| c.name),
-    "member" => member_commands().map(|c| c.name),
-    "project" => project_commands().map(|c| c.name),
-    "label" => label_commands().map(|c| c.name),
-    "doc" => doc_commands().map(|c| c.name),
-    "finding" => finding_commands().map(|c| c.name),
-    "config" => config_commands().map(|c| c.name),
-    "import" => import_commands().map(|c| c.name),
-    "token" => token_commands().map(|c| c.name),
-    "webhook" => webhook_commands().map(|c| c.name),
+    "issue" => flags.command_names(issue_commands()),
+    "team" => flags.command_names(team_commands()),
+    "member" => flags.command_names(member_commands()),
+    "project" => flags.command_names(project_commands()),
+    "label" => flags.command_names(label_commands()),
+    "doc" => flags.command_names(doc_commands()),
+    "finding" => flags.command_names(finding_commands()),
+    "config" => flags.command_names(config_commands()),
+    "import" => flags.command_names(import_commands()),
+    "token" => flags.command_names(token_commands()),
+    "webhook" => flags.command_names(webhook_commands()),
     "skill" => ["list", "get"],
     "completions" => ["bash", "zsh", "fish"],
     _ => [],
@@ -120,7 +120,7 @@ fn verb_flags(noun: string, verb: string) -> Slice<string> {
     _ => [],
   }
   if !table.is_empty() {
-    let Some(c) = table.find(|c| c.name == verb) else { return [] }
+    let Some(c) = flags.resolve_command(table, verb) else { return [] }
     return flags.tokens(c.spec)
   }
   match noun {

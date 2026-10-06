@@ -28,6 +28,7 @@ pub fn import_commands() -> Slice<flags.Command> {
       spec: github_spec(),
       positional: "OWNER/REPO",
       run: import_github,
+      ..
     },
     flags.Command {
       name: "dir",
@@ -36,6 +37,7 @@ pub fn import_commands() -> Slice<flags.Command> {
       spec: dir_spec(),
       positional: "DIR",
       run: import_dir,
+      ..
     },
   ]
 }
