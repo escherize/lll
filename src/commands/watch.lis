@@ -60,7 +60,7 @@ pub fn watch(args: Slice<string>) -> Result<(), string> {
 
   let filter = resolve_filter_query(team_id, filters)?
   let topic = realtime.topic_with_options("issues", filter, "team,assignee")?
-  let ch = realtime.subscribe(pb.base_url()?, [topic], None)?
+  let ch = realtime.subscribe(pb.base_url()?, [topic], realtime.DeadToken.Exit)?
   fmt.Fprintln(os.Stderr, "watch: ready (query subscription accepted)")
 
   // Last-seen records, keyed by record id, for rendering updates as field
@@ -154,8 +154,17 @@ With --ready it reads 'watch: ready (agenda subscription accepted)'. After a
 lost stream, watch retries every second and prints each distinct failure once.
 The server closes a stream that has carried no event for 5 minutes, and any
 stream after 30 minutes, so a quiet watch prints a lost/reconnected pair every
-few minutes. The pair is routine. A watch whose token stops working (a rotated
-bot token) still prints only that pair, but receives no events (LLL-617).
+few minutes. The pair is routine.
+
+Every connect and reconnect checks the token with one read. When the server
+rejects it (rotated, revoked or expired), the stream could carry no events, so
+watch prints one line naming the fix and exits 1:
+
+  realtime: the server rejected this token (401 Unauthorized): ...
+
+At startup the same refusal is the command's error. A token rotated while the
+stream is up is caught at the next reconnect; on a stream with no events that
+is within 5 minutes.
 
 The stream is live-only: it delivers events from the moment the server
 accepts the subscription, and a reconnect resubscribes without replaying
@@ -248,9 +257,9 @@ fn run_issue_watch(id: string, json_mode: bool, until: string, usage: string) ->
     f"issue='{issue.id}'",
     "author",
   )?
-  // No refresh hook: watch rides the operator's LLL_TOKEN and cannot
-  // re-mint anything; the reconnect loop retries loudly instead.
-  let ch = realtime.subscribe(pb.base_url()?, [issue_topic, comments_topic], None)?
+  // Watch rides the operator's LLL_TOKEN and cannot re-mint anything, so a
+  // rejected token ends it with the fix instead of a silent stream (LLL-617).
+  let ch = realtime.subscribe(pb.base_url()?, [issue_topic, comments_topic], realtime.DeadToken.Exit)?
   // Subscribe before reading the initial snapshot: comments created during
   // setup are either in this snapshot or queued on the accepted stream.
   if until != "" {
@@ -413,7 +422,7 @@ fn watch_ready(filters: query.Filters, json_mode: bool) -> Result<(), string> {
   let filter = resolve_filter_query(team_id, filters)?
   // blocked_by expand, so each event record carries its blockers' states.
   let topic = realtime.topic_with_options("issues", filter, "team,assignee,blocked_by")?
-  let ch = realtime.subscribe(pb.base_url()?, [topic], None)?
+  let ch = realtime.subscribe(pb.base_url()?, [topic], realtime.DeadToken.Exit)?
   // blocked_by expanded on every page, so readiness can be decided locally.
   let mut tail = "&expand=team,assignee,blocked_by,labels&sort=created,id"
   if filter != "" { tail = f"{tail}&filter={url.QueryEscape(filter)}" }

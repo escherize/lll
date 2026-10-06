@@ -125,24 +125,39 @@ struct SubscribeMsg {
   subscriptions: Slice<string>,
 }
 
+/// What the reconnect loop does when the server refuses the token
+/// (`auth_failure`). Each caller picks one; there is no default.
+pub enum DeadToken {
+  /// Re-mint with this function, put the result in LLL_TOKEN and retry:
+  /// `lll up` passes its superuser credentials' minter when it minted the
+  /// process token itself, so an expired token heals instead of wedging
+  /// the board.
+  Remint(fn() -> Result<string, string>),
+  /// Keep retrying, printing the failure once. For a caller-provided token
+  /// the process cannot renew; a token fixed in a config file is picked up
+  /// on the next attempt.
+  Retry,
+  /// Print one line naming the cause and the fix, then exit 1 (`lll watch`,
+  /// LLL-617): a watch cannot mint a token, and retrying a dead one forever
+  /// looks the same as a quiet board.
+  Exit,
+}
+
 /// Subscribe to PB realtime topics and stream their record events.
 ///
 /// The first connection is established synchronously so configuration errors
-/// (bad URL, PB down) surface immediately; after that a background task pumps
-/// events into the returned channel and, on any stream error (PB restart,
-/// idle disconnect), reconnects from scratch — new SSE connection, new client
-/// id, re-subscribe — retrying every second, forever. The loop is honest
-/// about state instead of silently stopping: a lost stream and every distinct
-/// reconnect error are printed, and a recovery is too.
+/// (bad URL, PB down, a rejected token) surface immediately; after that a
+/// background task pumps events into the returned channel and, on any stream
+/// error (PB restart, idle disconnect), reconnects from scratch — new SSE
+/// connection, new client id, re-subscribe — retrying every second, forever.
+/// The loop is honest about state instead of silently stopping: a lost stream
+/// and every distinct reconnect error are printed, and a recovery is too.
 ///
-/// `refresh` re-mints the PocketBase token after an auth-shaped reconnect
-/// failure (401/403): `lll up` passes its superuser credentials' minter when
-/// it minted the process token itself, so an expired token heals instead of
-/// wedging the board; None (a caller-provided member token the process cannot
-/// renew) leaves the loop retrying with whatever the config says, loudly.
-/// Every attempt re-reads the config, so a token rotated in a config file is
-/// picked up without a restart — an env token is frozen for the process's
-/// life, which only the refresh hook can unlock.
+/// `on_dead_token` decides what an auth-shaped failure (401/403, including
+/// connect's token check) does; see DeadToken. Every attempt re-reads the
+/// config, so a token rotated in a config file is picked up without a
+/// restart — an env token is frozen for the process's life, which only a
+/// re-mint can unlock.
 ///
 /// The protocol (verified live against PB 0.40.1): GET /api/realtime opens an
 /// SSE stream whose first event is PB_CONNECT carrying {"clientId":...};
@@ -152,13 +167,21 @@ struct SubscribeMsg {
 pub fn subscribe(
   base_url: string,
   topics: Slice<string>,
-  refresh: Option<fn() -> Result<string, string>>,
+  on_dead_token: DeadToken,
 ) -> Result<Channel<Event>, string> {
   let ch = Channel.new<Event>()
-  let mut reader = connect(base_url, topics)?
+  let mut reader = match connect(base_url, topics) {
+    Ok(r) => r,
+    Err(e) => {
+      if auth_failure(e) {
+        if let DeadToken.Exit = on_dead_token { return Err(dead_token_fix(e)) }
+      }
+      return Err(e)
+    },
+  }
   task {
     pump(reader, ch)
-    reconnect(base_url, topics, refresh, ch)
+    reconnect(base_url, topics, on_dead_token, ch)
   }
   Ok(ch)
 }
@@ -170,7 +193,7 @@ pub fn subscribe(
 fn reconnect(
   base_url: string,
   topics: Slice<string>,
-  refresh: Option<fn() -> Result<string, string>>,
+  on_dead_token: DeadToken,
   ch: Channel<Event>,
 ) {
   fmt.Fprintln(os.Stderr, "realtime: lll server stream lost — reconnecting")
@@ -185,12 +208,19 @@ fn reconnect(
         fmt.Fprintln(os.Stderr, "realtime: lll server stream lost — reconnecting")
       },
       Err(e) => {
+        let dead = auth_failure(e)
+        if dead {
+          if let DeadToken.Exit = on_dead_token {
+            fmt.Fprintln(os.Stderr, f"realtime: {dead_token_fix(e)}")
+            os.Exit(1)
+          }
+        }
         if e != last_err {
           fmt.Fprintln(os.Stderr, f"realtime: reconnect failed: {e}")
           last_err = e
         }
-        if auth_failure(e) {
-          if let Some(mint) = refresh {
+        if dead {
+          if let DeadToken.Remint(mint) = on_dead_token {
             if let Ok(tok) = mint() {
               let _ = os.Setenv("LLL_TOKEN", tok)
               fmt.Fprintln(os.Stderr,
@@ -206,10 +236,20 @@ fn reconnect(
 
 /// Does a connect error name an authorization refusal? connect's status
 /// errors are "GET|POST /api/realtime: <status>", so matching the path plus
-/// code cannot confuse a port number for a status.
+/// code cannot confuse a port number for a status; the token check's
+/// refusal starts with TOKEN_REJECTED.
 fn auth_failure(e: string) -> bool {
   strings.Contains(e, "/api/realtime: 401") ||
-  strings.Contains(e, "/api/realtime: 403")
+  strings.Contains(e, "/api/realtime: 403") ||
+  e.starts_with(TOKEN_REJECTED)
+}
+
+const TOKEN_REJECTED: string = "the server rejected this token"
+
+/// The auth failure with the fix a person or agent can act on, for a
+/// caller that cannot renew its own token.
+fn dead_token_fix(e: string) -> string {
+  f"{e}; run 'lll login', or set a fresh LLL_TOKEN ('lll bot rotate bot-NAME' or 'lll token create NAME'), then start the watch again"
 }
 
 /// Open the SSE stream, wait for PB_CONNECT, and POST the subscriptions.
@@ -300,6 +340,10 @@ fn connect(
   if sub_resp.StatusCode >= 300 {
     return Err(f"POST /api/realtime: {sub_resp.Status}")
   }
+  if let Err(e) = check_token(base_url, auth) {
+    let _ = stream.Close()
+    return Err(e)
+  }
   // The board owns one subscription. Keep its accepted request so a member
   // token renewal can reauthenticate that same client using PocketBase's own
   // subscription endpoint; token-key rotation clears auth without closing SSE.
@@ -307,6 +351,45 @@ fn connect(
     let _ = os.Setenv("LLL_REALTIME_SUBSCRIPTION", payload as string)
   }
   Ok(reader)
+}
+
+/// LLL-617: one authenticated 1-row read per (re)connect. PocketBase treats
+/// a request whose token it cannot load (rotated, revoked, expired) as a
+/// guest: GET /api/realtime still answers 200 and the subscription POST 204,
+/// but every topic is authenticated-only, so the stream never carries an
+/// event. A record request is the cheap place that refuses a guest with 401
+/// (gopb's TASK-319 middleware), and teams is readable by every member.
+/// Not auth-refresh: bot and `lll token create` tokens are non-refreshable
+/// (TASK-309). A token rotated after this check goes unnoticed until the
+/// next reconnect, which an idle stream reaches within five minutes.
+fn check_token(base_url: string, auth: string) -> Result<(), string> {
+  let mut req = match http.NewRequest(
+    "GET",
+    base_url + "/api/collections/teams/records?perPage=1&fields=id&skipTotal=1",
+    bytes.NewReader("".bytes()),
+  ) {
+    Ok(r) => r,
+    Err(e) => return Err(f"token check: {e}"),
+  }
+  if auth != "" {
+    // NewRequest always populates Header; the unwrap is the Option field's toll.
+    if let Some(h) = req.Header {
+      let mut h = h
+      h.Set("Authorization", auth)
+    }
+  }
+  let resp = match http.DefaultClient.Do(req) {
+    Ok(r) => r,
+    Err(e) => return Err(pb.unreachable(base_url, e)),
+  }
+  if let Some(body) = resp.Body { let _ = body.Close() }
+  if resp.StatusCode == 401 {
+    return Err(f"{TOKEN_REJECTED} ({resp.Status}): it was rotated, revoked or has expired, so the stream would carry no events")
+  }
+  if resp.StatusCode >= 300 {
+    return Err(f"token check: {resp.Status}")
+  }
+  Ok(())
 }
 
 /// Forward record events from an established stream into the channel.
