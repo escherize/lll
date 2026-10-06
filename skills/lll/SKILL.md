@@ -254,8 +254,8 @@ It picks both ports by BINDING them (a liveness probe cannot tell a free port
 from a stranger's server), and runs on loopback with a fresh database, home
 and working directory. Inherited `LLL_*` settings are cleared except an
 explicit `LLL_TEAM`; the default team is SCRAT. The banner prints the board
-login URL and isolated config path. Administrator credentials are not printed;
-scratch uses `admin@local.dev` / `admin-local-123`. CLI access to
+login URL and isolated config path. The banner prints administrator credentials
+once: `admin@local.invalid` / a generated password. CLI access to
 this database needs its own local authentication; a hosted login token does
 not authenticate against the scratch database. The temporary directory is
 kept after shutdown; the banner shows the `rm -rf` to run when finished.
