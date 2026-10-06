@@ -92,8 +92,8 @@ Then, per issue:
 
 1. **Reproduce.** Prove the problem exists, with output you can paste.
 2. **Claim it.** `lll issue claim KEY` then `lll issue update KEY --state in-progress`.
-   Claim is atomic and fails if another agent got there first - that refusal is
-   the point, let it stop you.
+   Claim is atomic and fails if another member got there first - that refusal is
+   the point, let it stop you. (Same token = same member: see the claim trap below.)
 3. **Implement.** Smallest change that satisfies the criteria. Nothing else.
    Found a second problem? File it, do not fix it.
 4. **Verify.** See below. Not "tests pass".
@@ -189,7 +189,9 @@ Stopping is a result. Report it as one.
   [parallel-work](../parallel-work/SKILL.md) owns this stage.
 - **The claim is the lock**, not the branch. `lll issue claim` is atomic and
   server-side, and its refusal is how two agents avoid doing the same work
-  twice. Claim before writing code, not before pushing.
+  twice. Claim before writing code, not before pushing. It refuses other
+  MEMBERS only: a re-claim by the holder succeeds, so agents sharing one token
+  get no exclusion from it. Give each agent its own member, or lock outside lll.
 
   (Working on lll itself? Its repo carries a `parallel-work` skill with the rest:
   ports, servers, what a worktree does not isolate, and getting the branch out.
