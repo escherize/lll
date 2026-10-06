@@ -402,7 +402,21 @@ fn bot_page(rotating: bool) -> string {
   } else {
     "Create a bot member and print its token once. An existing bot's token is rotated. Uses your member token or administrator credentials."
   }
-  let see_rotate = if rotating { "" } else { "\nSee 'lll bot rotate --help' for token rotation." }
+  let see_rotate = if rotating {
+    "
+
+Who may rotate: a superuser, or the bot's owner while the owner's access
+covers the bot's. The owner is the member whose token ran 'lll bot' to create
+it; a bot created with administrator credentials has none. Other members and
+the bot itself are refused, unless they first make themselves the owner, which
+the server does not yet prevent (LLL-616).
+
+What rotation strands: every earlier token for the bot, including ones from
+'lll token create', at its next request. 'lll bot bot-NAME' on an existing bot
+rotates too. 'lll token create bot-NAME' adds a token and strands none."
+  } else {
+    "\nSee 'lll bot rotate --help' for token rotation."
+  }
   f"{command} - {description}\n\nUsage:\n  {flags.usage(command, spec, "bot-NAME")}\n\nThe name must start with the reserved bot- prefix, e.g. '{command} bot-myrepo'."
     + flags.section(spec)
     + see_rotate

@@ -321,10 +321,17 @@ lll member invite NAME --email e@x.com  # add a colleague + temp password, in on
 lll member passes --count 10 --prefix hack  # private LAN/Tailscale teammate handoffs
 lll member set-password NAME --password <pw>  # superuser gives a member credentials
 lll token create bryan        # a one-year agent token (superuser only), printed once
+lll bot bot-myrepo            # a bot member you own, and its token; rerunning rotates it
 lll logout                    # clear the stored token
 lll board -w                  # open the web board
 lll completions zsh           # bash, zsh, fish
 ```
+
+Scripts that read `lll watch` should start from `lll watch --help`. It lists
+the exact status lines (all on stderr), what a label-only update prints, and
+which claim operations produce an event. `lll bot rotate --help` says who may
+rotate a bot's token and which tokens a rotation strands.
+`scripts/test_watch_contracts.py` pins all four answers.
 
 Issue IDs resolve: explicit arg, else the current git branch
 (`eng-12-fix-login` -> `ENG-12`).
