@@ -69,6 +69,9 @@ like another member: without force it is refused, naming the holder's label;
 with force it goes through, and the comment names both sessions, for example
 "Alpha (agent wt-b) force-released Alpha (agent wt-a)'s claim." The label is self-asserted: it separates agents
 sharing one member token, not members, and proves nothing about identity.
+A label is at most 64 characters from A-Z, a-z, 0-9, `.`, `_` and `-`; empty
+means no label. The claim, renew and release routes, the `agent` fields and the
+CLI all refuse anything else, because the label is rendered into comments.
 Comments carry the same label, and every view shows it after the author.
 
 Assignment edits must include the observed claim ID; an empty string means

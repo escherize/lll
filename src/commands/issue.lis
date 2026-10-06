@@ -1604,9 +1604,15 @@ fn actor() -> Result<Option<Actor>, string> {
 
 /// The session label for claims and comments (LLL-521): --agent, else
 /// LLL_AGENT. Self-asserted; it separates agents sharing one member token and
-/// proves nothing about who they are.
-fn agent_label(p: flags.Parsed) -> string {
-  if p.given("--agent") { p.one("--agent") } else { os.Getenv("LLL_AGENT") }
+/// proves nothing about who they are. The server renders it into comments, so
+/// it is refused here, before any request, unless it has the server's shape:
+/// at most 64 of A-Z, a-z, 0-9, '.', '_' and '-'; empty means no label.
+fn agent_label(p: flags.Parsed) -> Result<string, string> {
+  let label = if p.given("--agent") { p.one("--agent") } else { os.Getenv("LLL_AGENT") }
+  if !regexp.MustCompile(r"^[A-Za-z0-9._-]{0,64}$").MatchString(label) {
+    return Err(f"invalid agent label {strconv.Quote(label)} (from --agent or LLL_AGENT): use at most 64 characters from A-Z, a-z, 0-9, '.', '_' and '-'")
+  }
+  Ok(label)
 }
 
 /// The fix for a claim someone else holds. Plain release works only for the
@@ -1624,6 +1630,7 @@ fn held_elsewhere_hint(key: string) -> string {
 /// another holder. See gopb/claims.go and gopb/assignment.go for that policy.
 fn claim(input: flags.CommandInput) -> Result<(), string> {
   let usage = "lll issue claim [KEY-123] [--renew]"
+  let agent = agent_label(input.parsed)?
   let id = input.parsed.first()
   let resolved = resolve_id(id, usage)?
   let Some(member) = actor()? else {
@@ -1638,12 +1645,12 @@ fn claim(input: flags.CommandInput) -> Result<(), string> {
     let Some(held) = claims.fetch(issue.id)? else {
       return Err(f"{key} is not claimed; 'lll issue claim {key}' takes it")
     };
-    let renewed = claims.renew(issue.id, held.id, agent_label(input.parsed)).map_err(|e| f"{key}: {e}")?
+    let renewed = claims.renew(issue.id, held.id, agent).map_err(|e| f"{key}: {e}")?
     fmt.Println(f"Renewed {key} for {display.byline(renewed.member_name, renewed.agent)}; the expiry clock restarts now (held since {display.relative(renewed.created)})")
     return Ok(())
   }
 
-  let result = claims.acquire(issue.id, member.id, agent_label(input.parsed)).map_err(|e| {
+  let result = claims.acquire(issue.id, member.id, agent).map_err(|e| {
     if strings.Contains(e, "already claimed by") {
       f"{key}: {e} — {held_elsewhere_hint(key)}"
     } else { e }
@@ -1662,6 +1669,7 @@ fn claim(input: flags.CommandInput) -> Result<(), string> {
 fn release(input: flags.CommandInput) -> Result<(), string> {
   let usage = "lll issue release [KEY-123] [--force [-b \"why\"]]"
   let p = input.parsed
+  let agent = agent_label(p)?
   let resolved = resolve_id(p.first(), usage)?
   let force = p.given("--force")
   let mut reason = ""
@@ -1672,7 +1680,7 @@ fn release(input: flags.CommandInput) -> Result<(), string> {
   let issue = records.fetch_issue(resolved)?
   let key = f"{issue.expand.team.key}-{issue.number}"
   let Some(held) = claims.fetch(issue.id)? else { return Err(f"{key} is not claimed") };
-  let result = claims.release(issue.id, held.id, agent_label(p), force, reason).map_err(|e| {
+  let result = claims.release(issue.id, held.id, agent, force, reason).map_err(|e| {
     if strings.Contains(e, "needs force") {
       f"{key}: {e} — 'lll issue release {key} --force -b \"why\"' takes it anyway and comments on the issue"
     } else { e }
@@ -1731,6 +1739,7 @@ fn comment(input: flags.CommandInput) -> Result<(), string> {
     body = p.nth(1)
     body_set = true
   }
+  let agent = if body_set { agent_label(p)? } else { "" }
 
   let resolved = resolve_id(id, usage)?
   let issue = records.fetch_issue(resolved)?
@@ -1759,7 +1768,6 @@ fn comment(input: flags.CommandInput) -> Result<(), string> {
     author_name = a.name
   }
 
-  let agent = agent_label(p)
   let new_comment = models.NewComment { issue: issue.id, author, agent, body }
   let payload = match json.Marshal(new_comment) {
     Ok(p) => p,
@@ -2301,6 +2309,7 @@ fn issue_next_spec() -> Slice<flags.Flag> {
 /// none. With --claim the printed key is always secured first.
 fn issue_next(input: flags.CommandInput) -> Result<(), string> {
   let p = input.parsed
+  let agent = if p.given("--claim") { agent_label(p)? } else { "" }
   let team_id = configured_team_id()?
   let candidates = ready_issues(team_id)?
   let unblocks = unblocks_map(team_id, candidates)?
@@ -2320,7 +2329,7 @@ fn issue_next(input: flags.CommandInput) -> Result<(), string> {
     }
     // Acquire before printing: a key this command did not secure is a lie to
     // the shell loop that composed it. A lost race exits non-zero, keyless.
-    let result = claims.acquire(best.id, member.id, agent_label(p)).map_err(|e| {
+    let result = claims.acquire(best.id, member.id, agent).map_err(|e| {
       if strings.Contains(e, "already claimed by") {
         f"{key}: {e} — {held_elsewhere_hint(key)}"
       } else { e }

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"regexp"
 	"strings"
 
 	validation "github.com/pocketbase/ozzo-validation/v4"
@@ -12,6 +13,15 @@ import (
 	"github.com/pocketbase/pocketbase/core"
 	"github.com/pocketbase/pocketbase/tools/router"
 )
+
+// agentLabelShape is the only shape an agent label takes (LLL-521). Labels
+// are self-asserted and rendered into comments and views, which are markdown,
+// so anything outside this charset could forge text or links in an attributed
+// comment. Empty means no label. Migration 1791300000_agent_labels.js gives the
+// stored fields the same pattern.
+var agentLabelShape = regexp.MustCompile(`^[A-Za-z0-9._-]{0,64}$`)
+
+const agentLabelRule = "agent label must be at most 64 characters from A-Z, a-z, 0-9, '.', '_' and '-'"
 
 func registerClaimRoutes(routes *router.Router[*core.RequestEvent], writes *issueWriteLocks) {
 	routes.POST("/api/lll/issues/{issue}/assignment", func(re *core.RequestEvent) error {
@@ -48,6 +58,9 @@ func registerClaimRoutes(routes *router.Router[*core.RequestEvent], writes *issu
 		if err := re.BindBody(&body); err != nil {
 			return re.BadRequestError("invalid claim request", nil)
 		}
+		if !agentLabelShape.MatchString(body.Agent) {
+			return re.BadRequestError(agentLabelRule, nil)
+		}
 		if re.HasSuperuserAuth() {
 			if body.Member == "" {
 				return re.BadRequestError("superuser claim requires a member", nil)
@@ -82,6 +95,9 @@ func registerClaimRoutes(routes *router.Router[*core.RequestEvent], writes *issu
 		if body.ClaimID == "" {
 			return re.BadRequestError("release requires the observed claim_id", nil)
 		}
+		if !agentLabelShape.MatchString(body.Agent) {
+			return re.BadRequestError(agentLabelRule, nil)
+		}
 		if err := issueWritable(re, re.Request.PathValue("issue")); err != nil {
 			return err
 		}
@@ -113,6 +129,9 @@ func registerClaimRoutes(routes *router.Router[*core.RequestEvent], writes *issu
 		re.Request.Body = http.MaxBytesReader(re.Response, re.Request.Body, 2048)
 		if err := re.BindBody(&body); err != nil || body.ClaimID == "" {
 			return re.BadRequestError("renew requires the observed claim_id", nil)
+		}
+		if !agentLabelShape.MatchString(body.Agent) {
+			return re.BadRequestError(agentLabelRule, nil)
 		}
 		// Same rule as claim/release/assignment (team_scope.go): a member
 		// narrowed or made read-only after claiming cannot keep renewing.

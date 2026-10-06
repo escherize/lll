@@ -314,3 +314,41 @@ assert note['author'] == '' and note['body'].startswith("An administrator force-
 assert state()['claim'] is None and len(state()['comments']) == comments + 2
 
 print('Release: superuser needs force and comments without an author; collection DELETE refused for holder and non-holder, non-holder refused without force, forced release comments with the reason, holder release silent')
+
+# LLL-521: an agent label is rendered into comments (markdown), so the server
+# refuses any label outside [A-Za-z0-9._-]{0,64} at every route that takes one,
+# and the stored fields carry the same pattern. A refusal changes nothing.
+rule = "agent label must be at most 64 characters from A-Z, a-z, 0-9, '.', '_' and '-'"
+bad_labels = ["wt-a)'s claim. [x](https://evil)", 'a' * 65, 'wt a', 'wt\nb']
+assert cli('issue', 'claim', key, actor=alpha).returncode == 0
+held = state()['claim']
+claim_record = '/api/collections/claims/records/' + held['id']
+held_updated = request(claim_record, auth=alpha['token'])[1]['updated']
+comments = len(state()['comments'])
+for bad in bad_labels:
+    for route, body in [('/claim', {}), ('/renew', {'claim_id': held['id']}), ('/release', {'claim_id': held['id']})]:
+        status, refused = request(path + route, dict(body, agent=bad), auth=alpha['token'])
+        assert status == 400 and refused['message'].rstrip('.').lower() == rule.lower(), (route, bad, status, refused)
+    status, refused = request('/api/collections/comments/records',
+                              {'issue': issue['id'], 'author': alpha['id'], 'body': 'x', 'agent': bad}, auth=alpha['token'])
+    assert status == 400 and 'agent' in refused.get('data', {}), (bad, status, refused)
+after = state()
+assert after['claim']['id'] == held['id'], after['claim']
+assert request(claim_record, auth=alpha['token'])[1]['updated'] == held_updated, 'a refused renew moved the clock'
+assert len(after['comments']) == comments
+for good in ['wt-a', 'A.b_c-9', 'a' * 64]:
+    status, _ = request(path + '/renew', {'claim_id': held['id'], 'agent': good}, auth=alpha['token'])
+    assert status == 200, good
+# The CLI refuses before any request: an unreachable endpoint still yields the
+# label error, not a connection error.
+dead = 'http://127.0.0.1:1'
+for argv in [['issue', 'claim', key], ['issue', 'claim', key, '--renew'], ['issue', 'release', key],
+             ['issue', 'next', '--claim'], ['issue', 'comment', key, '-b', 'x']]:
+    p = cli(*argv, '--agent', bad_labels[0], actor=alpha, endpoint=dead)
+    assert p.returncode != 0 and 'invalid agent label' in p.stderr and '127.0.0.1:1' not in p.stderr, (argv, p.stderr)
+p = subprocess.run([binary, 'issue', 'claim', key], env=dict(env, LLL_AGENT='bad label', LLL_URL=dead, LLL_TOKEN=alpha['token']),
+                   capture_output=True, text=True, timeout=30)
+assert p.returncode != 0 and 'from --agent or LLL_AGENT' in p.stderr, p.stderr
+assert cli('issue', 'release', key, actor=alpha).returncode == 0
+
+print('Agent labels: claim, renew, release and comment create refuse a malformed label with no side effect; the CLI refuses before sending')

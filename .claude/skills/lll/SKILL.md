@@ -56,7 +56,8 @@ comment`): a claim by the same member under a different label exits nonzero
 and names the holder's label, and so do `--renew` and `issue release`
 without `--force`. An unlabelled claim or
 hold still matches any label, so every sharing session must set one. The label
-is self-asserted coordination, not auth. For a fleet, you can instead give each
+is self-asserted coordination, not auth, and is at most 64 characters from
+A-Z, a-z, 0-9, `.`, `_` and `-`. For a fleet, you can instead give each
 long-lived worker its own member (`lll member create <name>`, then
 `lll token create <name>` with admin credentials). If workers share a token
 without labels, each one reads `lll issue view KEY-12` (claim holder, comments,
