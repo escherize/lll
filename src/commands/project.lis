@@ -141,8 +141,7 @@ fn check_status(val: string) -> Result<string, string> {
 }
 
 fn project_create(input: flags.CommandInput) -> Result<(), string> {
-  let spec = project_create_spec()
-  let usage = flags.usage("lll project create", spec, "[NAME]")
+  let usage = input.usage
   let p = input.parsed
   let name = flags.entity_name(p, "-n", usage)?
   check_filter_name("project", name)?
@@ -169,8 +168,7 @@ fn project_create(input: flags.CommandInput) -> Result<(), string> {
 }
 
 fn project_edit(input: flags.CommandInput) -> Result<(), string> {
-  let spec = project_edit_spec()
-  let usage = flags.usage("lll project edit", spec, "NAME")
+  let usage = input.usage
   let p = input.parsed
   let Some(name) = nonempty(p.first()) else {
     return Err(f"usage: {usage}")
@@ -201,8 +199,7 @@ fn project_edit(input: flags.CommandInput) -> Result<(), string> {
 /// `lll project move NAME --to KEY` (LLL-100). See move_scope.lis for why the
 /// refusal is the right answer rather than dragging the references along.
 fn project_move(input: flags.CommandInput) -> Result<(), string> {
-  let spec = project_move_spec()
-  let usage = flags.usage("lll project move", spec, "NAME")
+  let usage = input.usage
   let p = input.parsed
   let Some(name) = nonempty(p.first()) else {
     return Err(f"usage: {usage}")
@@ -215,8 +212,7 @@ fn project_move(input: flags.CommandInput) -> Result<(), string> {
 }
 
 fn project_delete(input: flags.CommandInput) -> Result<(), string> {
-  let spec = project_delete_spec()
-  let usage = flags.usage("lll project delete", spec, "NAME")
+  let usage = input.usage
   let p = input.parsed
   let Some(name) = nonempty(p.first()) else {
     return Err(f"usage: {usage}")

@@ -201,8 +201,7 @@ struct TeamRenamePatch { key: string, name: string }
 /// does not follow is stored text, and the caller has to be told which
 /// (see team_rename_collateral).
 fn team_rename(input: flags.CommandInput) -> Result<(), string> {
-  let spec = team_rename_spec()
-  let usage = flags.usage("lll team rename", spec, "KEY")
+  let usage = input.usage
   let p = input.parsed
   let key = p.first()
   if key == "" {

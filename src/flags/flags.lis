@@ -353,6 +353,8 @@ impl Parsed {
 pub struct CommandInput {
   pub args: Slice<string>,
   pub parsed: Parsed,
+  /// Canonical usage generated from the resolved command declaration.
+  pub usage: string,
 }
 
 /// One verb of a noun, as a value (TASK-307). Dispatch, the noun's help
@@ -416,8 +418,9 @@ pub fn dispatch(
   // Arity is the positional string's word count: "KEY-123 SLUG" admits two.
   let words = strings.Fields(c.positional)
   let arity = words.length()
-  let parsed = parse_n(c.spec, args, 3, arity, usage(cmd, c.spec, c.positional))?
-  (c.run)(CommandInput { args, parsed })
+  let usage = usage(cmd, c.spec, c.positional)
+  let parsed = parse_n(c.spec, args, 3, arity, usage)?
+  (c.run)(CommandInput { args, parsed, usage })
 }
 
 /// `lll <noun> --help`: every verb's usage line and summary, aligned, then the

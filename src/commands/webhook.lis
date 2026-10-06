@@ -139,8 +139,7 @@ fn webhook_list(input: flags.CommandInput) -> Result<(), string> {
 }
 
 fn webhook_remove(input: flags.CommandInput) -> Result<(), string> {
-  let spec = webhook_remove_spec()
-  let usage = flags.usage("lll webhook remove", spec, "URL")
+  let usage = input.usage
   let p = input.parsed
   let raw = p.first()
   let target = validate_target(raw)?
