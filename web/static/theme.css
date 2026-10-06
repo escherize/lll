@@ -725,7 +725,6 @@ input:focus, textarea:focus, select:focus {
   .composer { margin: 14px 16px 20px; }
   .attachment-upload, .issue-attachments { margin: 16px; }
   .issue-desc { margin: 0 16px 24px; }
-  .set-scroll { padding: 16px 12px 24px; }
   .set-row { flex-wrap: wrap; }
   .set-field { flex-wrap: wrap; }
   .set-hint { flex-basis: 100%; padding-left: 82px; }
@@ -1117,6 +1116,7 @@ input:focus, textarea:focus, select:focus {
 @media (max-width: 720px) {
   /* The nav becomes a scrolling strip above the section: 176px of sticky
      column plus a row of inputs does not fit a phone. */
+  .set-scroll { padding: 16px 12px 24px; }
   .set-layout { flex-direction: column; gap: 18px; }
   .set-nav { position: static; width: 100%; display: flex; gap: 14px; overflow-x: auto; }
   .set-nav-group { flex: none; }

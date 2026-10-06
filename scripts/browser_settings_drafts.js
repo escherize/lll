@@ -97,6 +97,12 @@ async page => {
   const viewport = page.viewportSize();
   for (const width of [390, 320]) {
     await page.setViewportSize({width, height: 844});
+    const padding = await page.locator('.set-scroll').evaluate(el => {
+      const s = getComputedStyle(el);
+      return [s.paddingTop, s.paddingRight, s.paddingBottom, s.paddingLeft];
+    });
+    if (JSON.stringify(padding) !== JSON.stringify(['16px', '12px', '24px', '12px']))
+      throw new Error(`mobile Settings padding overridden at ${width}px: ${JSON.stringify(padding)}`);
     const nav = page.getByRole('navigation', {name: 'Settings sections'});
     const layout = await nav.evaluate(el => ({width: el.clientWidth, parent: el.parentElement.clientWidth}));
     if (Math.abs(layout.width - layout.parent) > 1) throw new Error(`settings nav clipped at ${width}px`);
