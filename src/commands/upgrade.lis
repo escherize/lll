@@ -1,0 +1,109 @@
+import "go:fmt"
+import "go:os"
+import "go:os/exec"
+import "go:path/filepath"
+import "go:runtime"
+import "go:strings"
+
+import "flags"
+
+/// How this binary got onto the machine, read from where it lives. The one
+/// place that answers it: the version-skew warning points here (LLL-608).
+enum Install {
+  Homebrew,
+  /// Built in a checkout; the payload is the checkout root.
+  Checkout(string),
+  /// Anything else is a release download; the payload is the binary's path.
+  Release(string),
+}
+
+/// `exe` is the resolved path: Homebrew links bin/lll to its Cellar, so the
+/// path as invoked does not say Homebrew.
+fn install_of(exe: string) -> Install {
+  let build_dir = "/target/.lisette/bin"
+  let dir = filepath.Dir(exe)
+  if strings.Contains(exe, "/Cellar/") {
+    Install.Homebrew
+  } else if strings.HasSuffix(dir, build_dir) {
+    Install.Checkout(strings.TrimSuffix(dir, build_dir))
+  } else {
+    Install.Release(exe)
+  }
+}
+
+/// The argv `lll upgrade` runs, if any. Only Homebrew gets one: lll never
+/// replaces or rebuilds its own binary, it names the command instead.
+fn upgrade_argv(install: Install) -> Option<Slice<string>> {
+  match install {
+    Install.Homebrew => Some(["brew", "upgrade", "lll"]),
+    Install.Checkout(_) => None,
+    Install.Release(_) => None,
+  }
+}
+
+/// What `lll upgrade` prints before it runs anything (or instead of it).
+fn upgrade_plan(
+  install: Install,
+  dry_run: bool,
+  goos: string,
+  goarch: string,
+) -> string {
+  match install {
+    Install.Homebrew => {
+      let verb = if dry_run { "would run" } else { "running" }
+      f"lll was installed with Homebrew; {verb}: brew upgrade lll"
+    },
+    Install.Checkout(root) => f"lll was built from the checkout at {root}; lll does not rebuild itself. Run:
+  cd {root} && git pull && mise run build",
+    Install.Release(exe) => f"lll was installed from a release download; lll does not replace its own binary. Run:
+  curl -LsSf -o {exe} https://github.com/escherize/lll/releases/latest/download/lll-{goos}-{goarch} && chmod +x {exe}",
+  }
+}
+
+pub fn upgrade_spec() -> Slice<flags.Flag> {
+  [
+    flags.Flag {
+      name: "--dry-run",
+      help: "print what would run; run nothing",
+      ..,
+    },
+    flags.Flag {
+      name: "--help",
+      alias: "-h",
+      hidden: true,
+      help: "show this help",
+      ..,
+    },
+  ]
+}
+
+pub fn upgrade(args: Slice<string>) -> Result<(), string> {
+  let p = flags.parse(upgrade_spec(), args, 2, false, "lll upgrade [--dry-run]")?
+  if p.given("--help") {
+    fmt.Println(
+      "lll upgrade - upgrade lll the way it was installed
+
+Usage:
+  lll upgrade            print the upgrade command, then run it
+  lll upgrade --dry-run  print it only
+
+Homebrew installs run 'brew upgrade lll'. A release download or a checkout
+build prints the command to run yourself: lll never replaces its own binary.",
+    )
+    return Ok(())
+  }
+  let exe = os.Executable().map_err(|e| f"cannot locate this lll binary: {e}")?
+  let resolved = filepath.EvalSymlinks(exe).unwrap_or(exe)
+  let install = install_of(resolved)
+  let dry_run = p.given("--dry-run")
+  fmt.Println(upgrade_plan(install, dry_run, runtime.GOOS, runtime.GOARCH))
+  let Some(argv) = upgrade_argv(install) else {
+    return Ok(())
+  }
+  if dry_run { return Ok(()) }
+  let mut cmd = exec.Command(argv[0], argv[1..]...)
+  cmd.Stdin = Some(os.Stdin)
+  cmd.Stdout = Some(os.Stdout)
+  cmd.Stderr = Some(os.Stderr)
+  cmd.Run().map_err(|e| f"{strings.Join(argv, " ")} failed: {e}")
+}

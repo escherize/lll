@@ -1,0 +1,28 @@
+import "go:strings"
+
+#[test]
+fn install_is_read_from_where_the_binary_lives() {
+  let brew = install_of("/opt/homebrew/Cellar/lll/0.6.1/bin/lll")
+  assert upgrade_argv(brew).map(|a| strings.Join(a, " ")) ==
+  Some("brew upgrade lll")
+  assert upgrade_plan(brew, true, "darwin", "arm64") ==
+  "lll was installed with Homebrew; would run: brew upgrade lll"
+  assert strings.Contains(
+    upgrade_plan(brew, false, "darwin", "arm64"),
+    "running: brew upgrade lll",
+  )
+
+  let checkout = install_of("/src/lll/target/.lisette/bin/lll")
+  assert upgrade_argv(checkout).is_none()
+  assert strings.HasSuffix(
+    upgrade_plan(checkout, false, "darwin", "arm64"),
+    "\n  cd /src/lll && git pull && mise run build",
+  )
+
+  let release = install_of("/Users/me/bin/lll")
+  assert upgrade_argv(release).is_none()
+  assert strings.HasSuffix(
+    upgrade_plan(release, false, "linux", "amd64"),
+    "\n  curl -LsSf -o /Users/me/bin/lll https://github.com/escherize/lll/releases/latest/download/lll-linux-amd64 && chmod +x /Users/me/bin/lll",
+  )
+}
