@@ -29,9 +29,11 @@ fn write_raw(w: http.ResponseWriter, md: string) {
   let _ = w.Write(md.bytes())
 }
 
-/// One markdown-table cell: escape the pipe the table grammar would eat.
+/// One field in a raw row/list line: keep it on one line and escape pipes.
 fn cell(s: string) -> string {
-  strings.ReplaceAll(s, "|", "\\|")
+  let unix = strings.ReplaceAll(s, "\r\n", " ")
+  let line = strings.ReplaceAll(strings.ReplaceAll(unix, "\n", " "), "\r", " ")
+  strings.ReplaceAll(line, "|", "\\|")
 }
 
 /// One card as a markdown list line — the one shape every route's raw cards
