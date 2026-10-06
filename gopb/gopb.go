@@ -66,6 +66,7 @@ func Serve(dataDir, addr, adminEmail, adminPassword string) error {
 	registerIssueIdempotency(app)
 	registerWebhookDelivery(app)
 	registerMemberGuards(app)
+	registerFilterNameGuards(app)
 	registerIssuePrecondition(app)
 	registerClaimExpiry(app)
 	// LLL-235: a team key is uppercase, whoever writes it. Keys were stored

@@ -133,6 +133,7 @@ fn label_create(input: flags.CommandInput) -> Result<(), string> {
   "\n       (check 'lll label list' first; reuse over near-duplicates like bug/bugs/defect)"
   let p = input.parsed
   let name = flags.entity_name(p, "-n", usage)?
+  check_filter_name("label", name)?
   let color = p.one("-c")
   let team = team_flag_or_current(p.one("--team"))?
 
@@ -161,6 +162,7 @@ fn label_edit(input: flags.CommandInput) -> Result<(), string> {
   if !p.given("-n") && !p.given("-c") {
     return Err(f"nothing to update — pass -n or -c\nusage: {usage}")
   }
+  if p.given("-n") { check_filter_name("label", p.one("-n"))? }
   let label = records.resolve_label(configured_team_id()?, name)?
 
   let mut fields: Slice<string> = []
