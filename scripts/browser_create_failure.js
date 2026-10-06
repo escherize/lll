@@ -8,7 +8,7 @@ async page => {
   if (await form.getAttribute('aria-describedby') !== 'ni-flash') throw new Error('form does not reference its error');
   const title = await page.locator('#ni-title').inputValue();
   const description = await page.locator('#ni-desc').inputValue();
-  for (const width of [1280, 390]) {
+  for (const width of [1280, 390, 320]) {
     await page.setViewportSize({width, height: 900});
     await alert.scrollIntoViewIfNeeded();
     const unobscured = await alert.evaluate(el => {
@@ -17,6 +17,17 @@ async page => {
       return box.width > 0 && box.height > 0 && box.left >= 0 && box.right <= innerWidth && (hit === el || el.contains(hit));
     });
     if (!unobscured) throw new Error(`create alert obscured at ${width}px`);
+    if (width <= 390) {
+      const readableFooter = await form.locator('.ni-foot').evaluate(el => {
+        const oneLine = selector => {
+          const item = el.querySelector(selector);
+          return item.getBoundingClientRect().height <= parseFloat(getComputedStyle(item).lineHeight) + 1;
+        };
+        const create = el.querySelector('#ni-create');
+        return oneLine('.ni-hint') && oneLine('.ni-more') && create.getBoundingClientRect().height < 40;
+      });
+      if (!readableFooter) throw new Error(`create footer text is squeezed at ${width}px`);
+    }
     await page.screenshot({path: `/tmp/lll-349-create-${width}.png`});
   }
   await page.setViewportSize({width: 1280, height: 800});
