@@ -5,7 +5,6 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/pocketbase/dbx"
 	"github.com/pocketbase/pocketbase/core"
 	"github.com/pocketbase/pocketbase/tools/router"
 )
@@ -132,9 +131,13 @@ func registerMemberScopeDefault(app core.App) {
 	})
 	app.OnRecordUpdate("members").BindFunc(func(e *core.RecordEvent) error {
 		before := e.Record.Original()
-		// Clearing a bot's owner must not widen it back to its own fields:
-		// it keeps what it could do at that moment, its access within the
-		// old owner's, persisted (fail closed, LLL-543 security review).
+		// Losing the owner must not widen a bot back to its own fields
+		// (fail closed, LLL-543 security review). A superuser clearing it
+		// leaves the bot what it could do at that moment: its access within
+		// the old owner's, persisted. Deleting the owner lands here too:
+		// PocketBase clears the relation with a save after the owner row is
+		// gone, so the lookup fails and the bot keeps nothing (no teams,
+		// read-only) until an administrator grants it access again.
 		if e.Record.GetString("kind") == botKind && before.GetString("owner") != "" && e.Record.GetString("owner") == "" {
 			kept := access{}
 			if old, err := e.App.FindRecordById("members", before.GetString("owner")); err == nil {
@@ -151,31 +154,6 @@ func registerMemberScopeDefault(app core.App) {
 			}
 		}
 		return e.Next()
-	})
-
-	// Deleting a member would clear its bots' owner, and with it the cap:
-	// each bot it owns is disabled (no teams, read-only) in the same
-	// transaction, before the relation is cleared, until an administrator
-	// grants it access again with 'lll member access'.
-	// The delete runs inside this transaction (PocketBase nests it), so a
-	// failed delete also rolls the bots back.
-	app.OnRecordDelete("members").BindFunc(func(e *core.RecordEvent) error {
-		outer := e.App
-		defer func() { e.App = outer }()
-		return outer.RunInTransaction(func(tx core.App) error {
-			bots, err := tx.FindRecordsByFilter("members", "owner = {:id}", "", 0, 0, dbx.Params{"id": e.Record.Id})
-			if err != nil {
-				return err
-			}
-			for _, bot := range bots {
-				setAccess(bot, access{})
-				if err := tx.Save(bot); err != nil {
-					return err
-				}
-			}
-			e.App = tx
-			return e.Next()
-		})
 	})
 }
 
