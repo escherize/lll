@@ -108,10 +108,10 @@
 
      "Remove emoji" is the way back to none. Posting an empty `emoji` is the
      same clear as `lll issue update --emoji ""`. */}}
-{{define "emoji-picker"}}<div id="emo-pop" class="emo-pop" role="dialog" aria-label="Choose an emoji" style="display:none" data-computed:emo_lc="$emo_q.trim().toLowerCase()" data-show="$emo_open" data-on:click__outside="!evt.target.closest('.emo-trigger') && ($emo_open = false)" data-on:keydown="evt.key === 'Escape' && ($emo_open = false)">
+{{define "emoji-picker"}}<div id="emo-pop" class="emo-pop" role="dialog" aria-label="Choose an emoji" style="display:none" data-computed:emo_lc="$emo_q.trim().toLowerCase()" data-show="$emo_open" data-on:click__outside="!evt.target.closest('.emo-trigger') && ($emo_open = false)" data-on:keydown="evt.key === 'Escape' && ($emo_open = false, setTimeout(() => document.querySelector('.emo-trigger')?.focus(), 0))">
 <div class="emo-head">
   <span class="emo-search"><svg width="14" height="14"><use href="#ic-search"/></svg><input type="text" placeholder="Search by name" autocomplete="off" aria-label="Search emoji by name" data-bind:emo_q data-effect="$emo_open && setTimeout(() => el.focus(), 0)"></span>
-  <button type="button" class="emo-x" aria-label="Close the emoji picker" title="Close" data-on:click="$emo_open = false"><svg width="14" height="14"><use href="#ic-close"/></svg></button>
+  <button type="button" class="emo-x" aria-label="Close the emoji picker" title="Close" data-on:click="$emo_open = false; setTimeout(() => document.querySelector('.emo-trigger')?.focus(), 0)"><svg width="14" height="14"><use href="#ic-close"/></svg></button>
 </div>
 <div class="emo-grid" data-on:click="evt.target.dataset.n && ($emo_open = false, @post('/emoji?key={{.Key}}&emoji=' + encodeURIComponent(evt.target.textContent)))">
 {{range .Emojis}}<button type="button" class="emo-cell" data-n="{{.Terms}}" data-show="!$emo_lc || el.dataset.n.includes($emo_lc)">{{.Glyph}}</button>

@@ -11,6 +11,16 @@ async page => {
     window.keptDescription = document.querySelector('#issue-description');
     window.keptDiagram = document.querySelector('#issue-description svg');
   });
+  const emojiTrigger = page.locator('.emo-trigger');
+  await emojiTrigger.click();
+  const emojiSearch = page.getByRole('textbox', {name: 'Search emoji by name'});
+  await emojiSearch.waitFor({state: 'visible'});
+  await emojiSearch.press('Escape');
+  await page.waitForFunction(() => document.activeElement?.classList.contains('emo-trigger'));
+  await emojiTrigger.press('Enter');
+  await emojiSearch.waitFor({state: 'visible'});
+  await page.getByRole('button', {name: 'Close the emoji picker'}).click();
+  await page.waitForFunction(() => document.activeElement?.classList.contains('emo-trigger'));
   await page.locator('#comment-form textarea').fill('Unfinished comment');
   const editTitle = page.getByRole('button', {name: 'Edit issue title', exact: true});
   await editTitle.focus();
