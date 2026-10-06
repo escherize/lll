@@ -13,7 +13,7 @@ pub fn scoped_args(args: Slice<string>) -> Result<Slice<string>, string> {
     "doc" => (3, flags.command_spec(doc_commands(), verb)),
     "finding" => (3, flags.command_spec(finding_commands(), verb)),
     "import" => (3, flags.command_spec(import_commands(), verb)),
-    "watch" => (2, watch_verb_spec("")),
+    "watch" => (2, watch_spec()),
     "search" => (2, search_spec()),
     _ => return Ok(args),
   }
