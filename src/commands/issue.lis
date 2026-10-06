@@ -2199,11 +2199,6 @@ fn fetch_blocks(issue_id: string) -> Result<Slice<models.Issue>, string> {
   Ok(list.items)
 }
 
-/// Read the same table used by dispatch and completions.
-pub fn issue_verb_spec(verb: string) -> Slice<flags.Flag> {
-  flags.command_spec(issue_commands(), verb)
-}
-
 fn issue_next_spec() -> Slice<flags.Flag> {
   flags.with_team([
     flags.Flag { name: "--json", help: "print the chosen issue's full record instead of just its key", .. },
