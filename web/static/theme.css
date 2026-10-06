@@ -726,15 +726,6 @@ input:focus, textarea:focus, select:focus {
   .attachment-upload, .issue-attachments { margin: 16px; }
   .issue-desc { margin: 0 16px 24px; }
   .set-scroll { padding: 16px 12px 24px; }
-  /* The nav becomes a scrolling strip above the section: 176px of sticky
-     column plus a row of inputs does not fit a phone. */
-  .set-layout { flex-direction: column; gap: 18px; }
-  .set-nav { position: static; width: 100%; display: flex; gap: 14px; overflow-x: auto; }
-  .set-nav-group { flex: none; }
-  .set-nav-group + .set-nav-group { margin-top: 0; }
-  .set-nav-group > h2 { padding: 0 6px; }
-  .set-nav a { display: inline-block; }
-  .set-nav a span { display: none; }
   .set-row { flex-wrap: wrap; }
   .set-field { flex-wrap: wrap; }
   .set-hint { flex-basis: 100%; padding-left: 82px; }
@@ -1122,6 +1113,19 @@ input:focus, textarea:focus, select:focus {
 .set-nav a:hover { background: var(--bg-hover); color: var(--text); }
 .set-nav a.active { background: var(--bg-hover); color: var(--accent); font-weight: 600; }
 .set-nav a.active span { color: var(--text-3); font-weight: 400; }
+
+@media (max-width: 720px) {
+  /* The nav becomes a scrolling strip above the section: 176px of sticky
+     column plus a row of inputs does not fit a phone. */
+  .set-layout { flex-direction: column; gap: 18px; }
+  .set-nav { position: static; width: 100%; display: flex; gap: 14px; overflow-x: auto; }
+  .set-nav-group { flex: none; }
+  .set-nav-group + .set-nav-group { margin-top: 0; }
+  .set-nav-group > h2 { padding: 0 6px; }
+  .set-nav a { display: inline-block; }
+  .set-nav a span { display: none; }
+}
+
 
 /* One line per section saying whose records these are, above the prose that
    says what to do with them. A server-wide section earns it; the team's own
