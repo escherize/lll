@@ -25,3 +25,29 @@ fn raw_issue_rows_and_card_lines_stay_on_one_physical_line() {
     assert text.contains("文档 label")
   }
 }
+
+#[test]
+fn raw_detail_metadata_is_flat_but_authored_markdown_keeps_its_lines() {
+  let body = "First paragraph\n\nSecond | paragraph"
+  let issue = issue_raw(IssueVM {
+    key: "TST-1", title: "First\r\nSecond | 中文", project: "Project\nname",
+    assignee: "Agent\rname", description_md: body,
+    labels: [LabelVM { name: "Label\nname", .. }],
+    comments: [CommentVM { author: "Author\nname", body_md: body, .. }],
+    ..
+  })
+  assert issue.starts_with("# TST-1: First Second | 中文\n\n")
+  assert issue.contains("- Assignee: Agent name\n")
+  assert issue.contains("- Project: Project name\n")
+  assert issue.contains("- Labels: Label name\n")
+  assert issue.contains("**Author name**")
+  assert issue.contains(body)
+  let doc = doc_raw(DocVM {
+    slug: "detail", title: "First\nSecond | 中文", area: "Area\r\nname",
+    paths: "src/first\nsecond", body_md: body, ..
+  })
+  assert doc.starts_with("# detail First Second | 中文\n\n")
+  assert doc.contains("Area: Area name\n")
+  assert doc.contains("Paths: src/first second\n")
+  assert doc.ends_with(body + "\n")
+}

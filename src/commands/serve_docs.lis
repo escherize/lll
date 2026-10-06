@@ -76,9 +76,9 @@ fn doc_vm(d: models.Doc, team_key: string) -> DocVM {
 /// already, so the raw form is the source with the property block `lll doc
 /// view` prints in front of it, not a re-rendering of anything.
 fn doc_raw(vm: DocVM) -> string {
-  let mut lines = [f"# {vm.slug} {vm.title}", "", f"Kind: {vm.kind}"]
-  if vm.area != "" { lines = lines.append(f"Area: {vm.area}") }
-  if vm.paths != "" { lines = lines.append(f"Paths: {vm.paths}") }
+  let mut lines = [f"# {vm.slug} {line_text(vm.title)}", "", f"Kind: {vm.kind}"]
+  if vm.area != "" { lines = lines.append(f"Area: {line_text(vm.area)}") }
+  if vm.paths != "" { lines = lines.append(f"Paths: {line_text(vm.paths)}") }
   lines = lines.append(f"Created: {vm.created}")
   lines = lines.append(f"Updated: {vm.updated}")
   if !vm.issues.is_empty() {
