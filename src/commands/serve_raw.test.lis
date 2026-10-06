@@ -1,0 +1,27 @@
+import "go:strings"
+
+#[test]
+fn raw_cell_flattens_line_breaks_and_preserves_pipe_escaping() {
+  assert cell("First\r\nSecond\nThird\r中文 | pipe") == "First Second Third 中文 \\| pipe"
+  assert cell("plain  spacing\tstays") == "plain  spacing\tstays"
+}
+
+#[test]
+fn raw_issue_rows_and_card_lines_stay_on_one_physical_line() {
+  let card = CardVM {
+    key: "TST-1",
+    title: "First\nSecond | pipe",
+    assignee: "Agent\r\nname",
+    labels: [LabelVM { name: "文档\rlabel", .. }],
+    ..
+  }
+  let row = strings.Join(issue_row_cells(card), " | ")
+  let line = card_line(card)
+  for text in [row, line] {
+    assert !text.contains("\n")
+    assert !text.contains("\r")
+    assert text.contains("First Second \\| pipe")
+    assert text.contains("Agent name")
+    assert text.contains("文档 label")
+  }
+}
