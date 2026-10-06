@@ -61,6 +61,7 @@ fn dispatch(noun: string, args: Slice<string>) -> Result<(), string> {
     "board" => commands.board(args),
     "skill" => commands.skill(args),
     "completions" => commands.completions(args),
+    "upgrade" => commands.upgrade(args),
     "--help" => {
       print_usage()
       Ok(())
@@ -141,6 +142,9 @@ Usage:
   lll skill get NAME      one of them as markdown (see 'lll skill --help')
   lll completions <shell> completion script for bash, zsh, or fish
                           (see 'lll completions --help')
+  lll upgrade [--dry-run] upgrade lll the way it was installed: runs
+                          'brew upgrade lll', or prints the command to run
+                          (see 'lll upgrade --help')
   lll --version, -v       print the version
   lll --help              show this help
 

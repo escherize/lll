@@ -28,16 +28,12 @@ fn discovery_version_is_read_only_from_an_lll_document() {
 }
 
 #[test]
-fn skew_warning_names_both_versions_the_server_and_the_upgrade() {
-  let line = skew_warning("0.6.1", "https://board.example.test", "0.7.0", true)
+fn skew_warning_names_both_versions_the_server_and_lll_upgrade() {
+  let line = skew_warning("0.6.1", "https://board.example.test", "0.7.0")
   assert strings.Contains(
     line,
     "this lll is 0.6.1; https://board.example.test runs 0.7.0",
   )
-  assert strings.HasSuffix(line, "Upgrade: brew upgrade lll")
+  assert strings.HasSuffix(line, "Upgrade: lll upgrade")
   assert !strings.Contains(line, "\n")
-  assert strings.Contains(
-    skew_warning("0.6.1", "https://b.test", "0.7.0", false),
-    "github.com/escherize/lll/releases",
-  )
 }

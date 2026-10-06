@@ -82,7 +82,7 @@ with tempfile.TemporaryDirectory(prefix='lll-version-skew-') as directory:
     warned = [line for line in first.stderr.decode().splitlines() if MARK in line]
     assert len(warned) == 1, first.stderr
     assert f'this lll is {mine}; {url} runs 99.0.0' in warned[0], warned
-    assert 'Upgrade: ' in warned[0], warned
+    assert warned[0].endswith('Upgrade: lll upgrade'), warned
     assert MARK not in second.stderr.decode(), 'warned twice in one day: ' + second.stderr.decode()
     # stdout is byte-identical with and without the line, and still the raw JSON.
     assert first.stdout == second.stdout, (first.stdout, second.stdout)

@@ -6,6 +6,13 @@ minors. Issue keys are on the project's own board (`lll issue view KEY`).
 
 ## [Unreleased]
 
+### Added
+
+- `lll upgrade` upgrades lll the way it was installed: a Homebrew install runs
+  `brew upgrade lll`; a release download or a checkout build prints the
+  command to run. lll never replaces its own binary. `--dry-run` prints only.
+  The version-skew warning now points at it (LLL-608).
+
 ### Changed
 
 - `issue update --description-replace "old=new"` replaces exactly one match

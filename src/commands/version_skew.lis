@@ -77,10 +77,7 @@ fn skew_line(noun: string) -> Option<string> {
   if os.WriteFile(stamp, today.bytes(), 0o600).is_err() { return None }
   let theirs = probe_server_version(base)?
   if !newer_version(version(), theirs) { return None }
-  let Ok(exe) = os.Executable() else {
-    return None
-  }
-  Some(skew_warning(version(), base, theirs, strings.Contains(exe, "/Cellar/")))
+  Some(skew_warning(version(), base, theirs))
 }
 
 fn probe_server_version(base: string) -> Option<string> {
@@ -137,16 +134,6 @@ fn version_parts(v: string) -> Option<Slice<int>> {
   Some(parts)
 }
 
-fn skew_warning(
-  mine: string,
-  base: string,
-  theirs: string,
-  homebrew: bool,
-) -> string {
-  let upgrade = if homebrew {
-    "brew upgrade lll"
-  } else {
-    "download the latest from https://github.com/escherize/lll/releases"
-  }
-  f"lll: this lll is {mine}; {base} runs {theirs}, which may have commands this build lacks. Upgrade: {upgrade}"
+fn skew_warning(mine: string, base: string, theirs: string) -> string {
+  f"lll: this lll is {mine}; {base} runs {theirs}, which may have commands this build lacks. Upgrade: lll upgrade"
 }
