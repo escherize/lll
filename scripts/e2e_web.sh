@@ -1015,6 +1015,8 @@ curl -s -D - -o /dev/null -H "Cookie: lll_board=$BOARD_TOKEN; lll_view_ENG=done"
 
 # --- browser-level: CLI create appears on an open board without reload ---
 if command -v playwright-cli >/dev/null 2>&1; then
+  "$LIN" member create -n "A very long member name that should fit inside the full create dialog on a mobile screen" >/dev/null
+  "$LIN" project create -n "A very long project name that should fit inside the full create dialog on a mobile screen" >/dev/null
   # Read the page, and read it again until it says what we are waiting for.
   #
   # Polled, not slept: a browser-side change (an SSE morph, a fragment patch,
