@@ -1481,6 +1481,7 @@ if command -v fish >/dev/null; then
   fish -n "$DATA_DIR/comp.fish" || fail "fish completions do not parse"
 fi
 assert_contains "$(cat "$DATA_DIR/comp.fish")" "complete -c lll" "fish completions complete lll"
+python3 "$REPO_ROOT"/scripts/test_completion_commands.py "$LIN"
 
 # task-127: help, completions and the parser read ONE table, so the gate
 for shell in bash zsh fish; do
