@@ -5,6 +5,7 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/pocketbase/dbx"
 	"github.com/pocketbase/pocketbase/core"
 	"github.com/pocketbase/pocketbase/tools/router"
 )
@@ -53,7 +54,7 @@ func (a access) within(b access) access {
 // and a bot with an owner holds its own access within its owner's current
 // access, so narrowing the owner narrows the bot without touching the bot's
 // record. An owner that cannot be read leaves nothing, the answer the rules
-// give. One hop: checkBotOwner refuses a bot as an owner.
+// give. One hop: checkOwner refuses ownership chains.
 func effectiveAccess(app core.App, auth *core.Record) access {
 	if auth == nil {
 		return access{}
@@ -93,7 +94,7 @@ func issueWritable(re *core.RequestEvent, issueID string) error {
 }
 
 // registerMemberScopeDefault gives a member created without a scope or mode
-// a default, then holds a bot within its owner (checkBotOwner). A bot with
+// a default, then holds a bot within its owner (checkOwner). A bot with
 // an owner defaults to the owner's access: the owner is the member whose
 // token ran 'lll bot', so the bot starts with its creator's teams and mode
 // (fleet case 09: 4 of 10 agents had to narrow an all + rw bot). Anything
@@ -124,7 +125,7 @@ func registerMemberScopeDefault(app core.App) {
 				e.Record.Set("mode", "ro")
 			}
 		}
-		if err := checkBotOwner(e.App, e.Record); err != nil {
+		if err := checkOwner(e.App, e.Record); err != nil {
 			return err
 		}
 		return e.Next()
@@ -138,7 +139,9 @@ func registerMemberScopeDefault(app core.App) {
 		// PocketBase clears the relation with a save after the owner row is
 		// gone, so the lookup fails and the bot keeps nothing (no teams,
 		// read-only) until an administrator grants it access again.
-		if e.Record.GetString("kind") == botKind && before.GetString("owner") != "" && e.Record.GetString("owner") == "" {
+		// Keyed on the old owner alone: a PATCH that also changes kind must
+		// not skip it.
+		if before.GetString("owner") != "" && e.Record.GetString("owner") == "" {
 			kept := access{}
 			if old, err := e.App.FindRecordById("members", before.GetString("owner")); err == nil {
 				kept = ownAccess(e.Record).within(ownAccess(old))
@@ -147,7 +150,7 @@ func registerMemberScopeDefault(app core.App) {
 		}
 		for _, field := range []string{"kind", "owner", "scope", "teams", "mode"} {
 			if !slices.Equal(e.Record.GetStringSlice(field), before.GetStringSlice(field)) {
-				if err := checkBotOwner(e.App, e.Record); err != nil {
+				if err := checkOwner(e.App, e.Record); err != nil {
 					return err
 				}
 				break
@@ -173,30 +176,56 @@ func setAccess(m *core.Record, a access) {
 	}
 }
 
-// checkBotOwner keeps a bot within its owner ("a bot never exceeds its
-// owner", doc scoped-access-invites): the owner is not itself a bot, and its
-// access covers the bot's own. Checked when a bot is created and when its
-// kind, owner or access changes, for every caller, superusers included.
-// Narrowing the owner is not checked: its bots narrow with it through
-// effectiveAccess and the rules. An owner id that does not exist is left to
-// the relation validator.
-func checkBotOwner(app core.App, bot *core.Record) error {
-	if bot.GetString("kind") != botKind || bot.GetString("owner") == "" {
+// checkOwner keeps ownership one hop deep and keeps an owned member within
+// its owner ("a bot never exceeds its owner", doc scoped-access-invites).
+// effectiveAccess and the rules read only the direct owner, so a chain would
+// let a narrowed owner's grandchild keep its access. Refused, for every
+// caller, superusers included:
+//
+//   - an owner that is a bot or has an owner itself;
+//   - an owner on a member that owns members;
+//   - a bot that owns members;
+//   - an owned member wider than its owner.
+//
+// Checked when a member is created and when its kind, owner or access
+// changes. Narrowing an owner is not checked: what it owns narrows with it.
+// An owner id that does not exist is left to the relation validator.
+func checkOwner(app core.App, m *core.Record) error {
+	name := m.GetString("name")
+	// A member being created owns nothing yet (and its id may be empty,
+	// which would match every unowned member).
+	var owns *core.Record
+	if !m.IsNew() {
+		owns, _ = app.FindFirstRecordByFilter("members", "owner = {:id}", dbx.Params{"id": m.Id})
+	}
+	if owns != nil && m.GetString("kind") == botKind {
+		return router.NewBadRequestError("a bot cannot own members: "+name+" owns "+owns.GetString("name")+
+			". Give "+owns.GetString("name")+" a human owner first", nil)
+	}
+	if m.GetString("owner") == "" {
 		return nil
 	}
-	owner, err := app.FindRecordById("members", bot.GetString("owner"))
+	if owns != nil {
+		return router.NewBadRequestError("an owner is one hop: "+name+" owns "+owns.GetString("name")+
+			", so it cannot have an owner itself. Re-own or remove what it owns first", nil)
+	}
+	owner, err := app.FindRecordById("members", m.GetString("owner"))
 	if err != nil {
 		return nil
 	}
 	if owner.GetString("kind") == botKind {
 		return router.NewBadRequestError(
-			"a bot cannot own a bot: "+owner.GetString("name")+" is a bot. Create "+bot.GetString("name")+
+			"a bot cannot own a bot: "+owner.GetString("name")+" is a bot. Create "+name+
 				" with its human owner's token, or with administrator credentials for a bot with no owner", nil)
 	}
-	if !accessCovers(owner, bot) {
+	if owner.GetString("owner") != "" {
+		return router.NewBadRequestError("an owner is one hop: "+owner.GetString("name")+
+			" has an owner itself, so it cannot own "+name+". Give "+name+" that member's owner instead", nil)
+	}
+	if !accessCovers(owner, m) {
 		return router.NewBadRequestError(
-			"a bot never exceeds its owner: "+bot.GetString("name")+" would have wider access than "+
-				owner.GetString("name")+". Give the bot only teams and a mode its owner has, or widen the owner first with 'lll member access "+
+			"a bot never exceeds its owner: "+name+" would have wider access than "+
+				owner.GetString("name")+". Give it only teams and a mode its owner has, or widen the owner first with 'lll member access "+
 				owner.GetString("name")+"'", nil)
 	}
 	return nil

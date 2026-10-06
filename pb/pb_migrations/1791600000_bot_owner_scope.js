@@ -10,9 +10,8 @@
 // makes its bots read-only. A member with no owner (every person, and bots a
 // superuser minted) keeps exactly its own access, as before.
 //
-// Only one hop is resolved: gopb refuses a bot as the owner of a bot
-// (team_scope.go checkBotOwner), so the owner is always a member with no
-// owner of its own. gopb applies the same intersection to the custom
+// Only one hop is resolved: gopb refuses ownership chains (team_scope.go
+// checkOwner), so the owner is always a member with no owner of its own. gopb applies the same intersection to the custom
 // /api/lll routes (effectiveAccess).
 //
 // The rule shapes are those of 1789900000_member_teams.js (claims create

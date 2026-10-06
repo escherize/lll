@@ -1221,7 +1221,7 @@ fn member_access_cmd(input: flags.CommandInput) -> Result<(), string> {
   apply_admin_flags(p.one("--admin-email"), p.one("--admin-password"))?
   let su = superuser_auth()?
   if let Err(e) = pb.patch_as(f"/api/collections/members/records/{m.id}", payload, su) {
-    // gopb checkBotOwner's refusal names its own fix (LLL-543).
+    // gopb checkOwner's refusal names its own fix (LLL-543).
     if strings.Contains(e, "bot never exceeds its owner") { return Err(e) }
     let status = pb.response_status(e)
     if status == 400 || status == 403 || status == 404 {

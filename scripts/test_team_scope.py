@@ -488,6 +488,30 @@ with tempfile.TemporaryDirectory(prefix='lll-team-scope-') as directory:
         assert (kept['owner'], kept['scope'], kept['teams'], kept['mode']) == ('', 'teams', [alpha['id']], 'rw'), kept
         titles = {i['title'] for i in call(api, '/api/collections/issues/records?perPage=200', token=cleared_tok)[1]['items']}
         assert 'alpha bot edited' in titles and 'beta bot work' not in titles, 'clearing the owner widened its bot'
+        # The same, when one PATCH also turns the bot into a person: the cap
+        # follows the lost owner, not the new kind.
+        flipped, flipped_bot, flipped_tok = capped_bot('flipped')
+        assert call(api, f"/api/collections/members/records/{flipped_bot['id']}", {'kind': 'person', 'owner': ''}, su, 'PATCH')[0] == 200
+        kept = call(api, f"/api/collections/members/records/{flipped_bot['id']}", token=su)[1]
+        assert (kept['kind'], kept['scope'], kept['teams']) == ('person', 'teams', [alpha['id']]), kept
+        assert 'beta bot work' not in {i['title'] for i in call(api, '/api/collections/issues/records?perPage=200',
+                                                                token=flipped_tok)[1]['items']}, 'kind+owner PATCH widened'
+        # Ownership stays one hop: the rules read only the direct owner.
+        hub, _ = member('hub')
+        lead, _ = member('lead')
+        code, hub_bot, _ = call(api, '/api/collections/members/records',
+                                dict(bot_body, name='bot-hub', email='bot-hub@example.test', owner=hub['id']), su)
+        assert code == 200, hub_bot
+        hop = call(api, f"/api/collections/members/records/{hub['id']}", {'owner': lead['id']}, su, 'PATCH')
+        assert hop[0] == 400 and 'owner is one hop' in hop[1]['message'], hop[:2]
+        assert call(api, f"/api/collections/members/records/{hub['id']}", {'kind': 'bot'}, su, 'PATCH')[0] == 400
+        code, ward, _ = call(api, '/api/collections/members/records',
+                             {'name': 'ward', 'email': 'ward@example.test', 'password': 'pw12345678',
+                              'passwordConfirm': 'pw12345678', 'kind': 'person', 'owner': lead['id']}, su)
+        assert code == 200, ward
+        hop = call(api, '/api/collections/members/records',
+                   dict(bot_body, name='bot-ward', email='bot-ward@example.test', owner=ward['id']), su)
+        assert hop[0] == 400 and 'owner is one hop' in hop[1]['message'], hop[:2]
         print('team scope: ok')
     finally:
         child.terminate()
