@@ -167,6 +167,7 @@ check what is configured with 'lll config --list'",
     pin_local_board_token(pb_dir)?
     pin_local_admin(pb_dir)?
   }
+  require_board_token_off_loopback()?
 
   let mut api_line = f"api    {db_url} (already running)"
 
@@ -437,6 +438,21 @@ fn pin_local_board_token(pb_dir: string) -> Result<(), string> {
   Ok(())
 }
 
+/// LLL-450: a board other machines can reach must not sit behind a token
+/// nobody chose, that rotates every boot and lives only in the logs. Runs
+/// before anything listens. `--bind` has already pinned a token by now.
+fn require_board_token_off_loopback() -> Result<(), string> {
+  let bind = bind_addr()
+  let loopback = bind == "localhost" || net.ParseIP(bind).IsLoopback()
+  if loopback || os.Getenv("LLL_BOARD_TOKEN") != "" { return Ok(()) }
+  Err(
+    f"LLL_BIND={bind} serves the board beyond this machine, but no LLL_BOARD_TOKEN is set
+a generated token would change on every restart and appear only in this process's logs
+to share the board: set LLL_BOARD_TOKEN to a secret you choose (or use lll up --bind LAN_IP, which keeps one with --pb-dir)
+to keep it private: LLL_BIND=127.0.0.1",
+  )
+}
+
 /// A LAN board must never expose the loopback-only fallback administrator
 /// password. Keep one random pair with its data directory, and copy it to the
 /// machine's private config after startup for later member-pass minting.
@@ -552,8 +568,9 @@ config file already supplies it, so the NEXT boot in this directory needs no
 LLL_TEAM and no prompt.
 
 The board is gated: it answers only requests carrying its board token.
-LLL_BOARD_TOKEN sets that token; otherwise one is generated per boot and
-printed in the banner as a login URL — open it once and the browser keeps
+LLL_BOARD_TOKEN sets that token; otherwise a loopback boot generates one
+per boot (a non-loopback LLL_BIND refuses to start without it) and prints it
+in the banner as a login URL — open it once and the browser keeps
 access in a cookie. From a terminal, send the same cookie: curl
 -H 'Cookie: lll_board=<token>' http://127.0.0.1:<port>/.
 
