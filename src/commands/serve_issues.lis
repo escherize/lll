@@ -225,14 +225,5 @@ fn issues_page(w: http.ResponseWriter, r: Ref<http.Request>, team_id: string, me
     write_raw(w, issues_raw(vm))
     return
   }
-  let html = match render("issues-page", PageVM { rail: rail_vm("issues", me, team), page: vm }) {
-    Ok(h) => h,
-    Err(e) => {
-      http.Error(w, e, 500)
-      return
-    },
-  }
-  w.Header().Set("Cache-Control", "no-store")
-  w.Header().Set("Content-Type", "text/html; charset=utf-8")
-  let _ = w.Write(html.bytes())
+  render_html(w, "issues-page", PageVM { rail: rail_vm("issues", me, team), page: vm })
 }

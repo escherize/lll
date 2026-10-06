@@ -1,0 +1,26 @@
+import "go:net/http/httptest"
+import "go:strings"
+
+#[test]
+fn html_response_preserves_template_bytes_and_headers() {
+  let vm = SearchVM { .. }
+  let assert Ok(expected) = render("search-results", vm)
+  let mut w = httptest.NewRecorder()
+  render_html(w, "search-results", vm)
+  assert w.Code == 200
+  assert w.Header().Get("Cache-Control") == "no-store"
+  assert w.Header().Get("Content-Type") == "text/html; charset=utf-8"
+  let assert Some(body) = w.Body
+  assert body.String() == expected
+}
+
+#[test]
+fn html_render_failure_is_an_error_response_without_success_headers() {
+  let mut w = httptest.NewRecorder()
+  render_html(w, "missing-template-for-response-test", SearchVM { .. })
+  assert w.Code == 500
+  assert w.Header().Get("Content-Type") == "text/plain; charset=utf-8"
+  assert w.Header().Get("Cache-Control") == ""
+  let assert Some(body) = w.Body
+  assert strings.Contains(body.String(), "missing-template-for-response-test")
+}
