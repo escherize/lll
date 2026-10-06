@@ -124,12 +124,12 @@ fn verb_flags(noun: string, verb: string) -> Slice<string> {
   match noun {
     "search" => flags.tokens(search_spec()),
     "bot" => flags.tokens(token_create_spec()),
-    "watch" => flags.tokens(watch_verb_spec(verb)),
-    "up" => flags.tokens(up_verb_spec("")),
-    "attach" => flags.tokens(attach_verb_spec("")),
-    "board" => flags.tokens(board_verb_spec(verb)),
-    "login" => flags.tokens(login_verb_spec("")),
-    "api" => flags.tokens(api_verb_spec("")),
+    "watch" => flags.tokens(watch_spec()),
+    "up" => flags.tokens(up_spec()),
+    "attach" => flags.tokens(attach_spec()),
+    "board" => flags.tokens(board_spec()),
+    "login" => flags.tokens(login_spec()),
+    "api" => flags.tokens(api_spec()),
     _ => [],
   }
 }

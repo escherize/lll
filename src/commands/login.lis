@@ -16,7 +16,7 @@ import "pb"
 // auth-with-password endpoint and keeps the token in the home config, where
 // TASK-179's layered plumbing picks it up on every later request.
 
-fn login_spec() -> Slice<flags.Flag> {
+pub fn login_spec() -> Slice<flags.Flag> {
   [
     flags.Flag {
       name: "--email",
@@ -76,11 +76,6 @@ fn login_spec() -> Slice<flags.Flag> {
       ..,
     },
   ]
-}
-
-/// The flag table of the verb-less login noun; read by `lll completions`.
-pub fn login_verb_spec(_verb: string) -> Slice<flags.Flag> {
-  login_spec()
 }
 
 /// Dispatch `lll login`.
