@@ -30,7 +30,7 @@ struct LocalShareAdmin { url: string, email: string, password: string }
 // PocketBase installs its own SIGINT/SIGTERM handler and shuts down
 // gracefully; when its Serve returns we exit the process, which takes the
 // board down too — Ctrl-C or a plain `kill <pid>` stops everything.
-fn up_spec() -> Slice<flags.Flag> {
+pub fn up_spec() -> Slice<flags.Flag> {
   [
     flags.Flag {
       name: "--port",
@@ -63,7 +63,7 @@ fn up_spec() -> Slice<flags.Flag> {
     },
     flags.Flag {
       name: "--scratch",
-      alias: "--local",
+      alias: "",
       help: "start a throwaway local board, ignoring inherited config and LLL_* values",
       ..,
     },
@@ -82,11 +82,6 @@ fn up_spec() -> Slice<flags.Flag> {
       ..,
     },
   ]
-}
-
-/// The flag table of the up verb; read by `lll completions`.
-pub fn up_verb_spec(_verb: string) -> Slice<flags.Flag> {
-  up_spec()
 }
 
 pub fn up(args: Slice<string>) -> Result<(), string> {

@@ -353,6 +353,8 @@ impl Parsed {
 pub struct CommandInput {
   pub args: Slice<string>,
   pub parsed: Parsed,
+  /// Canonical usage generated from the resolved command declaration.
+  pub usage: string,
 }
 
 /// One verb of a noun, as a value (TASK-307). Dispatch, the noun's help
@@ -370,6 +372,8 @@ pub struct CommandInput {
 /// still reads its positional through Parsed.first().
 pub struct Command {
   pub name: string,
+  /// One accepted alternate spelling; empty means none. Kept out of help.
+  pub alias: string,
   pub summary: string,
   pub page: string,
   pub spec: Slice<Flag>,
@@ -402,7 +406,7 @@ pub fn dispatch(
   if verb == "--help" || verb == "-h" {
     return Err(f"{help_marker()}{noun_help(noun, tagline, intro, cmds)}")
   }
-  let Some(c) = cmds.find(|c| c.name == verb) else {
+  let Some(c) = resolve_command(cmds, verb) else {
     return Err(f"unknown {noun} command: '{verb}' (see 'lll {noun} --help')")
   }
   // A verb with its own page answers --help with it; the generic parse-time
@@ -414,8 +418,9 @@ pub fn dispatch(
   // Arity is the positional string's word count: "KEY-123 SLUG" admits two.
   let words = strings.Fields(c.positional)
   let arity = words.length()
-  let parsed = parse_n(c.spec, args, 3, arity, usage(cmd, c.spec, c.positional))?
-  (c.run)(CommandInput { args, parsed })
+  let usage = usage(cmd, c.spec, c.positional)
+  let parsed = parse_n(c.spec, args, 3, arity, usage)?
+  (c.run)(CommandInput { args, parsed, usage })
 }
 
 /// `lll <noun> --help`: every verb's usage line and summary, aligned, then the
@@ -564,6 +569,21 @@ pub fn extract_team(args: Slice<string>, start: int, spec: Slice<Flag>) -> Resul
 
 /// Look up the declaration shared by parsing and completions.
 pub fn command_spec(cmds: Slice<Command>, verb: string) -> Slice<Flag> {
-  let Some(c) = cmds.find(|c| c.name == verb) else { return [] }
+  let Some(c) = resolve_command(cmds, verb) else { return [] }
   c.spec
+}
+
+/// Resolve both advertised verbs and accepted aliases to the same command.
+pub fn resolve_command(cmds: Slice<Command>, verb: string) -> Option<Command> {
+  cmds.find(|c| c.name == verb || (!c.alias.is_empty() && c.alias == verb))
+}
+
+/// Shell completion offers every accepted spelling without duplicating help.
+pub fn command_names(cmds: Slice<Command>) -> Slice<string> {
+  let mut names: Slice<string> = []
+  for c in cmds {
+    names = names.append(c.name)
+    if !c.alias.is_empty() { names = names.append(c.alias) }
+  }
+  names
 }

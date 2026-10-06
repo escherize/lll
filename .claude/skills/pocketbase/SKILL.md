@@ -69,12 +69,15 @@ default rules is wide open, and it reads like the opposite.
 
 `init.js` did ship every collection at `""`. It no longer stands:
 `1788400000_collection_rules.js` moved them to `AUTH`, which is
-`@request.auth.id != ""` - any authenticated member, no per-record ACLs. Four
+`@request.auth.id != ""` - any authenticated member, no per-record ACLs. Five
 carve-outs, each deliberate:
 
 - `claims.updateRule` is `null`. A member who could PATCH a claim could set its
   `member` to themselves and steal the hold; claims move through gopb's
   transactional route instead.
+- `claims.createRule` is `null` (`1791265600_claim_create_admin.js`, LLL-515).
+  `/claim` authenticates the holder and writes assignment atomically; a direct
+  POST would skip both. Superuser fixtures can still create raw claim records.
 - `claims.deleteRule` is `null` (`1789800000_claim_delete_admin.js`, LLL-512).
   `/release` lets only the holder release without force, and a direct DELETE
   would skip that check. The expiry sweep deletes through the Go app, which
@@ -108,7 +111,7 @@ uses admin credentials to bootstrap, then impersonates a member from `$USER`
   `core/record_tokens.go`.) This is the API-key mechanism — do not build a
   key table.
 - Rules ARE `@request.auth.id != ""`. Keep it at that: any authenticated
-  member sees everything, no per-record ACLs, with the four carve-outs above.
+  member sees everything, no per-record ACLs, with the five carve-outs above.
 
 `issues.assignee` already relates to `members`, so `@request.auth.id` *is* a
 member id — "my issues" is one filter, and authorship stops being a convention.

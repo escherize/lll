@@ -1,3 +1,4 @@
+import "display"
 import "records"
 import "go:encoding/json"
 import "go:fmt"
@@ -27,66 +28,64 @@ pub fn team_commands() -> Slice<flags.Command> {
     flags.Command {
       name: "list",
       summary: "list teams (KEY, name); --archived includes archived ones",
-      page: "",
       spec: team_list_spec(),
-      positional: "",
       run: team_list,
+      ..
     },
     flags.Command {
       name: "create",
       summary: "create a team",
-      page: "",
       spec: team_create_spec(),
-      positional: "",
       run: team_create,
+      ..
     },
     flags.Command {
       name: "view",
       summary: "show a team, its accent and its issue count",
-      page: "",
       spec: [],
       positional: "KEY",
       run: team_view,
+      ..
     },
     flags.Command {
       name: "rename",
       summary: "change a team's key, its name, or both",
-      page: "",
       spec: team_rename_spec(),
       positional: "KEY",
       run: team_rename,
+      ..
     },
     flags.Command {
       name: "set-accent",
       summary: "set the board accent colour ('' clears it)",
-      page: "",
       spec: [],
       positional: "KEY #rrggbb",
       run: team_set_accent,
+      ..
     },
     flags.Command {
       name: "set-emoji",
       summary: "set the team's glyph, beside its key ('' clears it)",
-      page: "",
       spec: [],
       positional: "KEY EMOJI",
       run: team_set_emoji,
+      ..
     },
     flags.Command {
       name: "archive",
       summary: "hide the team from lists and the board rail (data kept)",
-      page: "",
       spec: [],
       positional: "KEY",
       run: team_archive,
+      ..
     },
     flags.Command {
       name: "unarchive",
       summary: "bring an archived team back",
-      page: "",
       spec: [],
       positional: "KEY",
       run: team_unarchive,
+      ..
     },
     flags.Command {
       name: "delete",
@@ -95,6 +94,7 @@ pub fn team_commands() -> Slice<flags.Command> {
       spec: [],
       positional: "KEY",
       run: team_delete,
+      ..
     },
   ]
 }
@@ -127,7 +127,7 @@ fn team_list(input: flags.CommandInput) -> Result<(), string> {
   for t in teams.items {
     let mut mark = ""
     if t.archived { mark = "\t(archived)" }
-    fmt.Println(f"{t.key}\t{t.name}{mark}")
+    fmt.Println(f"{display.table_cell(t.key)}\t{display.table_cell(t.name)}{mark}")
   }
   Ok(())
 }
@@ -206,8 +206,7 @@ struct TeamRenamePatch { key: string, name: string }
 /// does not follow is stored text, and the caller has to be told which
 /// (see team_rename_collateral).
 fn team_rename(input: flags.CommandInput) -> Result<(), string> {
-  let spec = team_rename_spec()
-  let usage = flags.usage("lll team rename", spec, "KEY")
+  let usage = input.usage
   let p = input.parsed
   let key = p.first()
   if key == "" {

@@ -6,6 +6,16 @@ import sys
 import time
 
 
+def _timeout_error(message, output):
+    # Fixture teardown may remove the source log before anyone can read it.
+    # Retain the useful output in the gate log, without login credentials.
+    sensitive = re.compile(r'board\s+login|scratch\s+admin|\b(?:board_token|LLL_TOKEN|LLL_ADMIN_PASSWORD|authorization|password|secret)\s*[:=]', re.I)
+    lines = ['[credential line redacted]' if sensitive.search(line) else line
+             for line in output.splitlines()]
+    captured = '\n'.join(lines)[-4000:] or '(no startup output captured)'
+    return AssertionError(f'{message}\nCaptured startup output (credential lines redacted):\n{captured}')
+
+
 def wait_for_endpoints(log_path, timeout=30):
     """Read both endpoints from the owned process before fixture requests."""
     deadline = time.monotonic() + timeout
@@ -22,7 +32,7 @@ def wait_for_endpoints(log_path, timeout=30):
                 raise AssertionError('owned board endpoint differs from its login URL')
             return {'db_url': api[1], 'board_url': board[1], 'board_token': login[2]}
         if time.monotonic() >= deadline:
-            raise AssertionError(f'owned process did not announce both endpoints within {timeout}s; see {log_path}')
+            raise _timeout_error(f'owned process did not announce both endpoints within {timeout}s ({log_path})', output)
         time.sleep(.1)
 
 
@@ -39,7 +49,7 @@ def wait_for_board(log_path, expected, timeout=20):
                     'the selected port was occupied; refusing fixture requests to another listener')
             return
         if time.monotonic() >= deadline:
-            raise AssertionError(f'owned board did not announce {expected} within {timeout}s; see {log_path}')
+            raise _timeout_error(f'owned board did not announce {expected} within {timeout}s ({log_path})', output)
         time.sleep(.1)
 
 

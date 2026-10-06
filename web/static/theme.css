@@ -712,8 +712,12 @@ input:focus, textarea:focus, select:focus {
   .new-issue input { flex: 1; width: auto; min-width: 0; }
   .ni-shade { padding: 4vh 10px 10px; }
   .ni-dialog { max-height: 92vh; }
+  .ni-foot { display: grid; grid-template-columns: 1fr auto; }
+  .ni-hint, .ni-more { grid-column: 1 / -1; }
+  .ni-foot button { justify-self: end; white-space: nowrap; }
   .board { padding: 10px 12px; }
   .column { flex: 0 0 240px; min-width: 240px; }
+  .doc-scroll { align-content: start; }
   .issue-scroll {
     grid-template-columns: minmax(0, 1fr);
     grid-template-areas: "main" "description" "attachments" "props" "upload" "findings" "thread" "comp";
@@ -725,16 +729,6 @@ input:focus, textarea:focus, select:focus {
   .composer { margin: 14px 16px 20px; }
   .attachment-upload, .issue-attachments { margin: 16px; }
   .issue-desc { margin: 0 16px 24px; }
-  .set-scroll { padding: 16px 12px 24px; }
-  /* The nav becomes a scrolling strip above the section: 176px of sticky
-     column plus a row of inputs does not fit a phone. */
-  .set-layout { flex-direction: column; gap: 18px; }
-  .set-nav { position: static; width: 100%; display: flex; gap: 14px; overflow-x: auto; }
-  .set-nav-group { flex: none; }
-  .set-nav-group + .set-nav-group { margin-top: 0; }
-  .set-nav-group > h2 { padding: 0 6px; }
-  .set-nav a { display: inline-block; }
-  .set-nav a span { display: none; }
   .set-row { flex-wrap: wrap; }
   .set-field { flex-wrap: wrap; }
   .set-hint { flex-basis: 100%; padding-left: 82px; }
@@ -984,8 +978,19 @@ input:focus, textarea:focus, select:focus {
 }
 
 /* ── issue detail editing (priority select, title edit) ─────── */
-.issue-main h1 { cursor: text; }
-.issue-main h1:hover { color: var(--text-2); }
+.title-edit-trigger {
+  display: block;
+  width: 100%;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  letter-spacing: inherit;
+  text-align: left;
+  cursor: text;
+}
+#issue-detail .issue-main h1:hover { color: var(--text-2); }
 .title-edit { margin: 4px 0 14px; }
 .title-edit input {
   width: 100%;
@@ -1123,6 +1128,20 @@ input:focus, textarea:focus, select:focus {
 .set-nav a.active { background: var(--bg-hover); color: var(--accent); font-weight: 600; }
 .set-nav a.active span { color: var(--text-3); font-weight: 400; }
 
+@media (max-width: 720px) {
+  /* The nav becomes a scrolling strip above the section: 176px of sticky
+     column plus a row of inputs does not fit a phone. */
+  .set-scroll { padding: 16px 12px 24px; }
+  .set-layout { flex-direction: column; gap: 18px; }
+  .set-nav { position: static; width: 100%; display: flex; gap: 14px; overflow-x: auto; }
+  .set-nav-group { flex: none; }
+  .set-nav-group + .set-nav-group { margin-top: 0; }
+  .set-nav-group > h2 { padding: 0 6px; }
+  .set-nav a { display: inline-block; }
+  .set-nav a span { display: none; }
+}
+
+
 /* One line per section saying whose records these are, above the prose that
    says what to do with them. A server-wide section earns it; the team's own
    sections do not, because the nav's team mark already answered. */
@@ -1162,6 +1181,14 @@ input:focus, textarea:focus, select:focus {
 .set-row input[name="name"] { flex: 1; min-width: 0; }
 .set-row .set-second { flex: 0 1 200px; min-width: 0; }
 .set-row select { flex: none; }
+@media (max-width: 720px) {
+  /* Keep the name on the first editing line; controls wrap below it.
+     Labels leave room beside the name for their 26px colour swatch. */
+  .set-row input[name="name"] { flex: 1 1 calc(100% - 34px); }
+  .settings { width: 100%; }
+  .set-row select { max-width: 100%; }
+}
+
 .set-delete-impact { flex: 1; min-width: 0; overflow-wrap: anywhere; }
 /* The create row sits one rung down the ladder: it holds nothing yet. */
 .set-new { margin-top: 8px; background: var(--bg-panel); }
@@ -1249,7 +1276,7 @@ input:focus, textarea:focus, select:focus {
   margin-left: 6px;
 }
 .itbl-bar label:first-of-type { margin-left: 0; }
-.itbl-bar select { font-size: 12.5px; padding: 3px 6px; }
+.itbl-bar select { min-width: 0; max-width: 100%; text-overflow: ellipsis; font-size: 12.5px; padding: 3px 6px; }
 .itbl-bar .btn { font-size: 12.5px; padding: 3px 10px; margin-left: 4px; }
 .itbl-clear {
   color: var(--text-3);
@@ -1415,7 +1442,7 @@ input:focus, textarea:focus, select:focus {
 .sr-snips { padding: 2px 0 8px 28px; font-size: 12px; color: var(--text-2); }
 .sr-snip { margin-top: 4px; }
 .sr-src { display: block; color: var(--text-3); font-size: 11px; }
-.sr-line { white-space: pre-wrap; font-family: var(--mono, ui-monospace, monospace); }
+.sr-line { overflow-wrap: anywhere; white-space: pre-wrap; font-family: var(--mono, ui-monospace, monospace); }
 .sr-prio { flex: none; width: 14px; display: flex; }
 .sr-age {
   flex: none;
@@ -1426,6 +1453,21 @@ input:focus, textarea:focus, select:focus {
   font-variant-numeric: tabular-nums;
 }
 .sr-who { flex: none; width: 18px; display: flex; }
+
+/* A search hit's title gets its own line on narrow screens. Metadata
+   remains available below it rather than reserving the desktop columns. */
+@media (max-width: 720px) {
+  .sr { flex-wrap: wrap; }
+  .sr-title {
+    flex-basis: 100%;
+    order: -1;
+    white-space: normal;
+    overflow-wrap: anywhere;
+  }
+  .sr-key { width: auto; }
+  .sr-age { margin-left: auto; }
+  .sr-slug { min-width: 0; overflow-wrap: anywhere; }
+}
 
 /* ── Projects page (/projects) ──────────────────────────── */
 /* One row per project, the whole row a link into /issues?project=NAME: the
@@ -1462,7 +1504,7 @@ input:focus, textarea:focus, select:focus {
 /* Name over description, so a long description wraps under the name instead
    of pushing the status and count off the right edge. */
 .pj-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
-.pj-name { font-weight: 500; color: var(--text); }
+.pj-name { font-weight: 500; color: var(--text); overflow-wrap: anywhere; }
 .pj-desc {
   color: var(--text-3);
   font-size: 11.5px;
@@ -1570,14 +1612,14 @@ input:focus, textarea:focus, select:focus {
    carry the 720px stacked layout — same flex chain, wider panel. */
 .prop .v { min-width: 0; max-width: 100%; }
 .prop form { min-width: 0; }
-.prop select { min-width: 0; max-width: 100%; text-overflow: ellipsis; }
+.prop select, .ni-props select { min-width: 0; max-width: 100%; text-overflow: ellipsis; }
 /* The state/priority icons and the avatar share the shrinking row; they are
    decoration-sized and must not be squeezed by a long neighbour. */
 .prop .v > svg { flex: none; }
 /* The project link shares its row with the select: a long name truncates on
    its own line instead of wrapping word-per-line or squeezing the select. */
 .prop .v a { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.prop .provenance-value { display: block; min-width: 0; overflow-wrap: anywhere; }
+.prop .provenance-value, #doc-properties .prop .v { display: block; min-width: 0; overflow-wrap: anywhere; }
 
 /* ── scalable label picker (TASK-207) ────────────────────── */
 /* The Labels row wears only the issue's chips plus one "+" affordance; the

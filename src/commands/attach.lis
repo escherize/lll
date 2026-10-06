@@ -14,7 +14,7 @@ import "flags"
 // those two halves compose, and that is what makes the next clone — and every
 // worktree — attached already, with nothing to run.
 
-fn attach_spec() -> Slice<flags.Flag> {
+pub fn attach_spec() -> Slice<flags.Flag> {
   [
     flags.Flag {
       name: "-k",
@@ -25,11 +25,6 @@ fn attach_spec() -> Slice<flags.Flag> {
     },
     flags.Flag { name: "--help", alias: "-h", hidden: true, help: "show this help", .. },
   ]
-}
-
-/// The flag table of the attach verb; read by `lll completions`.
-pub fn attach_verb_spec(_verb: string) -> Slice<flags.Flag> {
-  attach_spec()
 }
 
 pub fn attach(args: Slice<string>) -> Result<(), string> {

@@ -44,6 +44,7 @@ pub fn token_commands() -> Slice<flags.Command> {
       spec: token_create_spec(),
       positional: "<member>",
       run: token_create,
+      ..
     },
   ]
 }
@@ -93,8 +94,7 @@ fn parse_token_duration(raw: string) -> Result<int, string> {
 }
 
 fn token_create(input: flags.CommandInput) -> Result<(), string> {
-  let spec = token_create_spec()
-  let usage = flags.usage("lll token create", spec, "<member>")
+  let usage = input.usage
   let p = input.parsed
   let name = p.first()
   if name == "" {

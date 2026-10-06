@@ -147,7 +147,7 @@ fn issue_list_spec() -> Slice<flags.Flag> {
   flags.with_team(filter_spec(FilterUse.List).append([
     flags.Flag {
       name: "--search",
-      alias: "--query",
+      alias: "",
       value: true,
       hint: "text",
       help: "list only issues whose title contains text",
@@ -300,7 +300,7 @@ fn issue_release_spec() -> Slice<flags.Flag> {
     flags.Flag { name: "--force", help: "release a claim another member holds; leaves a comment on the issue", .. },
     flags.Flag {
       name: "-b",
-      alias: "--body -m --message",
+      alias: "--body",
       value: true,
       hint: "\"why\"",
       help: "with --force: the reason, recorded in the comment ('-b -' reads stdin)",
@@ -313,7 +313,7 @@ fn issue_comment_spec() -> Slice<flags.Flag> {
   flags.with_team([
     flags.Flag {
       name: "-b",
-      alias: "--body -m --message",
+      alias: "--body",
       value: true,
       hint: "\"body\"",
       help: "comment body ('-b -' reads it from stdin)",
@@ -332,7 +332,7 @@ pub fn issue_watch_spec() -> Slice<flags.Flag> {
     },
     flags.Flag {
       name: "--until",
-      alias: "--for",
+      alias: "",
       value: true,
       hint: "text",
       help: "exit 0 once a comment containing text arrives (or is already\nthere); --json reports an existing match as action=snapshot",
@@ -394,28 +394,22 @@ pub fn issue_commands() -> Slice<flags.Command> {
   [
     flags.Command {
       name: "attach", summary: "upload a file to an issue; appends without replacing existing attachments",
-      page: "",
       spec: flags.with_team([]), positional: "KEY-123 FILE", run: issue_attach,
+      ..
     },
     flags.Command {
       name: "detach", summary: "remove an attachment by its stored filename (see issue view)",
-      page: "", spec: flags.with_team([]), positional: "KEY-123 FILENAME", run: issue_detach,
+      spec: flags.with_team([]), positional: "KEY-123 FILENAME", run: issue_detach,
+      ..
     },
     flags.Command {
       name: "download", summary: "write attachment bytes to stdout; redirect to a file",
-      page: "", spec: flags.with_team([]), positional: "KEY-123 FILENAME", run: issue_download,
+      spec: flags.with_team([]), positional: "KEY-123 FILENAME", run: issue_download,
+      ..
     },
     flags.Command {
-      name: "create",
+      name: "create", alias: "new",
       summary: "create an issue in the configured team; -d - reads the description from stdin; without --state it starts in todo",
-      page: issue_create_page(),
-      spec: issue_create_spec(),
-      positional: "[\"title\"]",
-      run: create,
-    },
-    flags.Command {
-      name: "new",
-      summary: "the same command as 'create'",
       page: issue_create_page(),
       spec: issue_create_spec(),
       positional: "[\"title\"]",
@@ -424,181 +418,158 @@ pub fn issue_commands() -> Slice<flags.Command> {
     flags.Command {
       name: "list",
       summary: "list issues; scoped to the configured team",
-      page: "",
       spec: issue_list_spec(),
-      positional: "",
       run: list,
+      ..
     },
     flags.Command {
       name: "next",
       summary: "print the key of the one issue to work next - ready and unclaimed, then priority (urgent first), then oldest, then most-unblocking; --claim takes it (LLL-395)",
-      page: "",
       spec: issue_next_spec(),
-      positional: "",
       run: issue_next,
+      ..
     },
     flags.Command {
-      name: "view",
+      name: "view", alias: "show",
       summary: "show one issue in full, with comments; --raw prints it as plain markdown; -w opens its web page instead",
-      page: "",
       spec: issue_view_spec(),
       positional: "[KEY-123]",
       run: view,
-    },
-    // `read` is `view`. Seven of thirty first-time agents typed it in one
-    // fleet run (TASK-309), and the count went UP as other noise was removed -
-    // it is the word people reach for. One table entry; `view` stays the
-    // documented spelling, and the summary says so.
-    // `show` is `view` too. Two of thirty first-time agents typed it on the
-    // first clean fleet run of task 2 (TASK-309), the same shape as `read`.
-    flags.Command {
-      name: "show",
-      summary: "the same command as 'view'",
-      page: "",
-      spec: issue_view_spec(),
-      positional: "[KEY-123]",
-      run: view,
-    },
-    flags.Command {
-      name: "read",
-      summary: "the same command as 'view'",
-      page: "",
-      spec: issue_view_spec(),
-      positional: "[KEY-123]",
-      run: view,
+      ..
     },
     flags.Command {
       name: "update",
       summary: "change fields (at least one flag)",
-      page: "",
       spec: issue_update_spec(),
       positional: "[KEY-123]",
       run: update,
+      ..
     },
     flags.Command {
       name: "close",
       summary: "set state done; retain any claim",
-      page: "",
       spec: flags.with_team([]),
       positional: "[KEY-123]",
       run: close_issue,
+      ..
     },
     flags.Command {
       name: "start",
       summary: "set state in-progress; --branch also git-switches to key-number-slug and records the work site",
-      page: "",
       spec: issue_start_spec(),
       positional: "[KEY-123]",
       run: start,
+      ..
     },
     flags.Command {
       name: "claim",
       summary: "take it exclusively for the authenticated member and assign it; exits non-zero, changing nothing, when someone already holds it",
-      page: "",
       spec: flags.with_team([]),
       positional: "[KEY-123]",
       run: claim,
+      ..
     },
     flags.Command {
       name: "release",
       summary: "remove your claim; clear assignee if it still matches the holder; --force takes another member's and comments why",
-      page: "",
       spec: issue_release_spec(),
       positional: "[KEY-123]",
       run: release,
+      ..
     },
     flags.Command {
       name: "delete",
       summary: "delete; asks [y/N] unless --force",
-      page: "",
       spec: issue_delete_spec(),
       positional: "KEY-123",
       run: delete_issue,
+      ..
     },
     flags.Command {
       name: "comment",
       summary: "add a comment (bare body or -b); 'comment KEY' lists them numbered; 'comment edit KEY N -b' and 'comment delete KEY N' change your own",
-      page: "",
       spec: issue_comment_spec(),
       positional: "[KEY-123] [\"body\"]",
       run: comment,
+      ..
     },
     flags.Command {
       name: "watch",
       summary: "stream live events for the issue and its comments until interrupted",
-      page: "",
       spec: issue_watch_spec(),
       positional: "[KEY-123]",
       run: issue_watch,
+      ..
     },
     flags.Command {
       name: "url",
       summary: "print the issue's web page URL",
-      page: "",
       spec: flags.with_team([]),
       positional: "[KEY-123]",
       run: url_cmd,
+      ..
     },
     flags.Command {
       name: "id",
       summary: "print the issue's KEY-123 identifier",
-      page: "",
       spec: flags.with_team([]),
       positional: "[KEY-123]",
       run: id_cmd,
+      ..
     },
     flags.Command {
       name: "title",
       summary: "print the issue's title",
-      page: "",
       spec: flags.with_team([]),
       positional: "[KEY-123]",
       run: title_cmd,
+      ..
     },
-    flags.Command { name: "branch-name", summary: "print a suggested Git branch name; read-only", page: "", spec: flags.with_team([]), positional: "[KEY-123]", run: branch_name_cmd },
+    flags.Command { name: "branch-name", summary: "print a suggested Git branch name; read-only", spec: flags.with_team([]), positional: "[KEY-123]", run: branch_name_cmd, .. },
     flags.Command {
       name: "pr",
       summary: "open a GitHub PR via 'gh pr create' and record gh#N; body links the issue and includes its description when it fits",
-      page: "",
       spec: flags.with_team([]),
       positional: "[KEY-123]",
       run: pr_cmd,
+      ..
     },
     flags.Command {
       name: "ref", summary: "append an external reference once (gh#42, linear:ENG-118)",
-      page: "", spec: flags.with_team([]), positional: "KEY-123 REF", run: ref_cmd,
+      spec: flags.with_team([]), positional: "KEY-123 REF", run: ref_cmd,
+      ..
     },
     flags.Command {
       name: "link",
       summary: "link the issue to a doc (see 'lll doc --help')",
-      page: "",
       spec: flags.with_team([]),
       positional: "KEY-123 SLUG",
       run: link,
+      ..
     },
     flags.Command {
       name: "unlink",
       summary: "remove that link",
-      page: "",
       spec: flags.with_team([]),
       positional: "KEY-123 SLUG",
       run: unlink,
+      ..
     },
     flags.Command {
       name: "block",
       summary: "record that KEY-123 cannot start until BLOCKER is done (LLL-175); view shows it, list --ready honours it",
-      page: "",
       spec: flags.with_team([]),
       positional: "KEY-123 BLOCKER",
       run: block,
+      ..
     },
     flags.Command {
       name: "unblock",
       summary: "remove BLOCKER from KEY-123's blockers",
-      page: "",
       spec: flags.with_team([]),
       positional: "KEY-123 BLOCKER",
       run: unblock,
+      ..
     },
   ]
 }
@@ -661,8 +632,7 @@ Without --state the issue starts in todo; --label may be repeated."
 }
 
 fn create(input: flags.CommandInput) -> Result<(), string> {
-  let spec = issue_create_spec()
-  let usage = flags.usage("lll issue create", spec, "[\"title\"]")
+  let usage = input.usage
   // A bare title is accepted alongside -t: `gh issue create`, `linear` and
   // `jira` all take one, and every usability run reached for it first and got
   // "unknown flag: 'Hello'". -t stays the documented spelling, so no script
@@ -1228,8 +1198,7 @@ fn print_findings_raw(findings: Slice<models.Doc>) -> Result<(), string> {
 }
 
 fn update(input: flags.CommandInput) -> Result<(), string> {
-  let spec = issue_update_spec()
-  let usage = flags.usage("lll issue update", spec, "[KEY-123]")
+  let usage = input.usage
   let p = input.parsed
   let id = p.first()
   let mut state = ""
@@ -1447,8 +1416,7 @@ fn issue_start_spec() -> Slice<flags.Flag> {
 }
 
 fn start(input: flags.CommandInput) -> Result<(), string> {
-  let spec = issue_start_spec()
-  let usage = flags.usage("lll issue start", spec, "[KEY-123]")
+  let usage = input.usage
   let p = input.parsed
   let with_branch = p.given("--branch")
   if with_branch && !gitctx.in_repo() {
@@ -1671,8 +1639,7 @@ fn delete_issue(input: flags.CommandInput) -> Result<(), string> {
 }
 
 fn comment(input: flags.CommandInput) -> Result<(), string> {
-  let spec = issue_comment_spec()
-  let usage = flags.usage("lll issue comment", spec, "[KEY-123] [\"body\"]")
+  let usage = input.usage
   let p = input.parsed
   let id = p.first()
   // A bare second word is the body, as `create` takes a bare title and
@@ -1895,8 +1862,8 @@ fn print_comments(comments: Slice<models.Comment>) {
 /// the author is the token's member. A superuser token may change anything.
 fn comment_commands() -> Slice<flags.Command> {
   [
-    flags.Command { name: "edit", summary: "edit a numbered comment", page: "", spec: comment_mutate_spec("edit"), positional: "KEY N", run: |input| comment_mutate("edit", input.parsed) },
-    flags.Command { name: "delete", summary: "delete a numbered comment", page: "", spec: comment_mutate_spec("delete"), positional: "KEY N", run: |input| comment_mutate("delete", input.parsed) },
+    flags.Command { name: "edit", summary: "edit a numbered comment", spec: comment_mutate_spec("edit"), positional: "KEY N", run: |input| comment_mutate("edit", input.parsed), .. },
+    flags.Command { name: "delete", summary: "delete a numbered comment", spec: comment_mutate_spec("delete"), positional: "KEY N", run: |input| comment_mutate("delete", input.parsed), .. },
   ]
 }
 
@@ -1953,7 +1920,7 @@ fn comment_mutate_spec(verb: string) -> Slice<flags.Flag> {
   if verb == "edit" {
     spec = spec.append(flags.Flag {
       name: "-b",
-      alias: "--body -m --message",
+      alias: "--body",
       value: true,
       hint: "\"body\"",
       help: "the new body ('-b -' reads it from stdin)",
@@ -2230,11 +2197,6 @@ fn fetch_blocks(issue_id: string) -> Result<Slice<models.Issue>, string> {
   let mut list = models.IssueList { .. }
   pb.fetch(f"/api/collections/issues/records?perPage=200&sort=number&expand=team&filter={filter}", "issues", &list)?
   Ok(list.items)
-}
-
-/// Read the same table used by dispatch and completions.
-pub fn issue_verb_spec(verb: string) -> Slice<flags.Flag> {
-  flags.command_spec(issue_commands(), verb)
 }
 
 fn issue_next_spec() -> Slice<flags.Flag> {

@@ -57,16 +57,7 @@ fn settings_page(
     return
   }
   let page = PageVM { rail: rail_vm("settings", me, team), page: vm }
-  let html = match render("settings-page", page) {
-    Ok(h) => h,
-    Err(e) => {
-      http.Error(w, e, 500)
-      return
-    },
-  }
-  w.Header().Set("Cache-Control", "no-store")
-  w.Header().Set("Content-Type", "text/html; charset=utf-8")
-  let _ = w.Write(html.bytes())
+  render_html(w, "settings-page", page)
 }
 
 /// One section's data, and only that section's.
@@ -268,12 +259,14 @@ fn settings_write(
   }
   let team = shell_team(team_id)
   let mut extra = ""
+  let mut nav = ""
   // The reply redraws the section the row belongs to, which is the section
   // the browser is looking at: #settings is the section wrapper now, so the
   // patch id is unchanged and a label save still cannot redraw the members
   // list it is not showing.
   if let Ok(vm) = settings_vm(team, section_of(r.PathValue("kind"))) {
     if let Ok(html) = render("settings", vm) { extra += patch_event(html) }
+    if let Ok(html) = render("settings-nav", vm) { nav = patch_event(html) }
   }
   // The accent lives in <head> and the team's mark on the section nav, both
   // outside #settings: patch them by id too, so a new colour or emoji lands
@@ -281,9 +274,7 @@ fn settings_write(
   if let Ok(html) = render("accent-head", rail_vm("settings", me, team)) {
     extra += patch_event(html)
   }
-  if let Ok(vm) = settings_vm(team, section_of(r.PathValue("kind"))) {
-    if let Ok(html) = render("settings-nav", vm) { extra += patch_event(html) }
-  }
+  extra += nav
   Ok(extra)
 }
 
@@ -329,6 +320,7 @@ fn settings_apply(
     },
     "label" => {
       if name == "" { return Err("label name is required") }
+      check_filter_name("label", name)?
       let color = form_hex(r, "color")?
       // LLL-100: the row's team select. The move runs FIRST and may refuse,
       // so a rejected move leaves the name and colour untouched too - one
@@ -385,6 +377,7 @@ fn settings_apply(
     },
     "project" => {
       if name == "" { return Err("project name is required") }
+      check_filter_name("project", name)?
       let status = r.PostFormValue("status")
       if project_statuses().find(|s| s == status).is_none() {
         return Err(f"unknown project status '{status}'")
@@ -624,7 +617,7 @@ fn access_credential_write(
 /// ends up showing the message.
 fn flash_ok_event(msg: string) -> string {
   let safe = template.HTMLEscapeString(msg)
-  patch_event(f"<div id=\"flash\" class=\"flash flash-ok\">{safe}</div>")
+  patch_event(f"<div id=\"flash\" class=\"flash flash-ok\" role=\"status\" aria-atomic=\"true\">{safe}</div>")
 }
 
 // ── Teams (TASK-210) ─────────────────────────────────────────────────────

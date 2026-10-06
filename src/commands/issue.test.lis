@@ -372,13 +372,13 @@ fn issue_help_preserves_literal_flag_values_and_end_of_options() {
 // -------------------------------------------------------- issue_commands
 
 /// TASK-307: the table is what dispatch, `lll issue --help` and completions
-/// read, so every verb the old match knew is in it, once, with a one-line
+/// read, so every canonical verb is in it once, with a one-line
 /// summary - a blank or multi-line summary breaks the noun's help table.
 #[test]
 fn issue_commands_lists_every_verb_once_with_a_one_line_summary() {
   let cmds = issue_commands()
   assert cmds.map(|c| c.name).equals([
-    "attach", "detach", "download", "create", "new", "list", "next", "view", "show", "read", "update", "close", "start", "claim",
+    "attach", "detach", "download", "create", "list", "next", "view", "update", "close", "start", "claim",
     "release", "delete", "comment", "watch", "url", "id", "title", "branch-name", "pr", "ref", "link",
     "unlink", "block", "unblock",
   ])
@@ -388,13 +388,13 @@ fn issue_commands_lists_every_verb_once_with_a_one_line_summary() {
   }
 }
 
-/// create is the one issue verb with a hand-written page (its alias new
-/// carries the same one); every other verb generates usage + flags from
+/// create is the one issue verb with a hand-written page (new resolves to
+/// that same row); every other verb generates usage + flags from
 /// its spec, so a page there would be invented.
 #[test]
 fn only_issue_create_has_a_hand_written_page() {
   for c in issue_commands() {
-    assert (c.page != "") == (c.name == "create" || c.name == "new")
+    assert (c.page != "") == (c.name == "create")
   }
   let assert Some(create) = issue_commands().find(|c| c.name == "create")
   assert create.page.contains("The title is the bare argument or -t")
@@ -402,7 +402,7 @@ fn only_issue_create_has_a_hand_written_page() {
 
 fn issue_help_requested(args: Slice<string>, verb: string) -> bool {
   if issue_commands().find(|c| c.name == verb).is_none() { return false }
-  flags.help_requested(issue_verb_spec(verb), args, 3)
+  flags.help_requested(flags.command_spec(issue_commands(), verb), args, 3)
 }
 
 // ---------------------------------------------------------------- next
@@ -521,4 +521,42 @@ fn empty_search_hint_names_the_title_contract_and_lll_search() {
   assert strings.Contains(msg, "'lll search socket reset'")
   // Multi-word searches pass through as the words the operator can retype.
   assert strings.Contains(empty_search_hint("LAN"), "'lll search LAN'")
+}
+
+/// LLL-503: the product has at most one alternate spelling per verb/flag.
+#[test]
+fn command_tables_keep_one_alias_per_verb_and_flag() {
+  let tables = [issue_commands(), comment_commands(), team_commands(), member_commands(),
+    project_commands(), label_commands(), doc_commands(), finding_commands(),
+    config_commands(), import_commands(), token_commands(), webhook_commands()]
+  for table in tables {
+    for c in table {
+      assert strings.Fields(c.alias).length() <= 1
+      for fl in c.spec {
+        assert strings.Fields(fl.alias).length() <= 1
+        if fl.name == "--limit" { assert fl.alias == "-l" }
+      }
+    }
+  }
+  for spec in [watch_spec(), up_spec(), attach_spec(),
+    board_spec(), login_spec(), api_spec(), search_spec()] {
+    for fl in spec {
+      assert strings.Fields(fl.alias).length() <= 1
+      if fl.name == "--limit" { assert fl.alias == "-l" }
+    }
+  }
+}
+
+/// LLL-504: one operation has one advertised word across nouns.
+#[test]
+fn command_tables_advertise_consistent_creation_and_deletion() {
+  for table in [issue_commands(), team_commands(), member_commands(), project_commands(),
+    label_commands(), doc_commands(), finding_commands()] {
+    assert table.find(|c| c.name == "create").is_some()
+    assert table.find(|c| c.name == "new" || c.name == "add").is_none()
+  }
+  for table in [issue_commands(), member_commands(), project_commands(), label_commands(), doc_commands()] {
+    assert table.find(|c| c.name == "delete").is_some()
+    assert table.find(|c| c.name == "remove").is_none()
+  }
 }

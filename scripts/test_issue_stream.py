@@ -59,6 +59,7 @@ class Stream:
 
 
 cli('team', 'create', '-k', 'SSE58', '-n', 'Issue stream verification')
+cli('label', 'create', '-n', 'Stream keyboard label')
 source = ('large description & < >\n' * 5000)[:100000]
 record = json.loads(cli('issue', 'create', 'Stream lifecycle', '-d', source, '--json'))
 key = 'SSE58-' + str(record['number'])

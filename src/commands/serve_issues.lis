@@ -8,15 +8,6 @@ import "query"
 
 // GET /issues - the sortable, filterable table whose whole state is its URL.
 
-/// Rebuild the /issues URL from its view state. Filters and sort travel
-/// together, so a header link keeps the filters and "Clear" keeps the sort:
-/// the URL is the whole page state, and every link on the page is the shared
-/// encoder (serve_url.lis) with one part changed — the same encoder the
-/// board's chips are made of (TASK-94 AC#3).
-fn issues_href(base: string, q: ViewQuery) -> string {
-  view_query_href(base, q)
-}
-
 /// This table's own path for a team key (LLL-426). Every link the page builds
 /// has to stay inside the team it is showing, or a sort click would move the
 /// reader to another team's issues without saying so.
@@ -44,7 +35,7 @@ fn issue_col(label: string, field: string, cls: string, q: ViewQuery, base: stri
   }
   let mut nq = q
   nq.sort = next
-  IssueColVM { label, cls, dir, href: issues_href(base, nq) }
+  IssueColVM { label, cls, dir, href: view_query_href(base, nq) }
 }
 
 
@@ -216,7 +207,7 @@ fn issues_page(w: http.ResponseWriter, r: Ref<http.Request>, team_id: string, me
     label,
     project,
     sort,
-    clear_href: issues_href(base, ViewQuery { sort, .. }),
+    clear_href: view_query_href(base, ViewQuery { sort, .. }),
     error: err,
   }
   // ?raw: the same table, as markdown. The choosers and sort links are
@@ -225,14 +216,5 @@ fn issues_page(w: http.ResponseWriter, r: Ref<http.Request>, team_id: string, me
     write_raw(w, issues_raw(vm))
     return
   }
-  let html = match render("issues-page", PageVM { rail: rail_for(r, "issues", me, team), page: vm }) {
-    Ok(h) => h,
-    Err(e) => {
-      http.Error(w, e, 500)
-      return
-    },
-  }
-  w.Header().Set("Cache-Control", "no-store")
-  w.Header().Set("Content-Type", "text/html; charset=utf-8")
-  let _ = w.Write(html.bytes())
+  render_html(w, "issues-page", PageVM { rail: rail_for(r, "issues", me, team), page: vm })
 }

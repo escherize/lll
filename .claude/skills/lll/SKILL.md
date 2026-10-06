@@ -50,7 +50,7 @@ Claiming your own issue again succeeds and says it is already yours.
 member token share every claim: each one's `claim` succeeds with "already
 yours" and exits 0, so the claim does not stop two of them working the same
 issue (finding `shared-member-claims-do-not-isolate-sessions`). For a fleet,
-give each long-lived worker its own member (`lll member add <name>`, then
+give each long-lived worker its own member (`lll member create <name>`, then
 `lll token create <name>` with admin credentials). If workers must share a token, each one reads
 `lll issue view KEY-12` (claim holder, comments, recorded work site) before it
 starts, and skips any issue another session is already on.
@@ -254,8 +254,8 @@ It picks both ports by BINDING them (a liveness probe cannot tell a free port
 from a stranger's server), and runs on loopback with a fresh database, home
 and working directory. Inherited `LLL_*` settings are cleared except an
 explicit `LLL_TEAM`; the default team is SCRAT. The banner prints the board
-login URL and isolated config path. Administrator credentials are not printed;
-scratch uses `admin@local.dev` / `admin-local-123`. CLI access to
+login URL and isolated config path. The banner prints administrator credentials
+once: `admin@local.invalid` / a generated password. CLI access to
 this database needs its own local authentication; a hosted login token does
 not authenticate against the scratch database. The temporary directory is
 kept after shutdown; the banner shows the `rm -rf` to run when finished.
