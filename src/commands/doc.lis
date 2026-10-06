@@ -174,7 +174,7 @@ pub fn check_confidence(val: string) -> Result<string, string> {
 pub fn parse_paths(val: string) -> string {
   let mut out: Slice<string> = []
   for raw in strings.Split(val, ",") {
-    let p = strings.Trim(strings.TrimSpace(raw), "/")
+    let p = norm_path(raw)
     if p == "" { continue }
     if out.find(|x| x == p).is_some() { continue }
     out = out.append(p)
@@ -201,7 +201,7 @@ pub fn path_touches(entry: string, path: string) -> bool {
 /// The query side of `lll finding near <path>` is raw argv, and shell path
 /// completion hands over `./src/pb` routinely; `./x` and `x` name the same
 /// place, so a stored entry on `src/pb` has to answer for both. `parse_paths`
-/// already promises this in its doc comment - this is what makes it true.
+/// uses this same normalization before deduplicating stored metadata.
 fn norm_path(val: string) -> string {
   let mut s = strings.TrimSpace(val)
   while strings.HasPrefix(s, "./") { s = strings.TrimPrefix(s, "./") }

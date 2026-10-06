@@ -226,3 +226,15 @@ fn doc_list_spec_searches_slug_and_title() {
   assert p.one("--search") == "port"
   assert flags.parse(spec, ["lll", "doc", "list", "--query", "port"], 3, false, "").is_err()
 }
+
+#[test]
+fn parse_paths_deduplicates_equivalent_dot_slash_spellings() {
+  assert parse_paths("./src/pb, src/pb, ././src/pb/") == "src/pb"
+  assert parse_paths("./web, ./src/pb, web/, /src/pb/") == "web, src/pb"
+}
+
+#[test]
+fn parse_paths_preserves_distinct_unicode_paths_and_ignores_empty_entries() {
+  assert parse_paths(" , ./, /, ./文档/设计, 文档/设计/, ./src/pb, src/pb2, ") == "文档/设计, src/pb, src/pb2"
+  assert parse_paths("") == ""
+}
