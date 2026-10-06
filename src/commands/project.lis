@@ -146,6 +146,7 @@ fn project_create(input: flags.CommandInput) -> Result<(), string> {
   let usage = flags.usage("lll project create", spec, "[NAME]")
   let p = input.parsed
   let name = flags.entity_name(p, "-n", usage)?
+  check_filter_name("project", name)?
   let description = p.one("-d")
   let mut status = "planned"
   if p.given("--status") {
@@ -181,6 +182,7 @@ fn project_edit(input: flags.CommandInput) -> Result<(), string> {
   // Validate before the lookup: a typo'd status should cost no round trip and
   // must not leave a half-applied patch behind.
   let mut status = ""
+  if p.given("-n") { check_filter_name("project", p.one("-n"))? }
   if p.given("--status") { status = check_status(p.one("--status"))? }
   let project = records.resolve_project(configured_team_id()?, name)?
 
