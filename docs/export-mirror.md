@@ -53,7 +53,7 @@ coordinates, and attachment bytes. Issue links inside documents and dependency
 links between issues are stored as KEYS and re-resolved after every issue
 exists, which works only because numbers round-trip.
 
-Four things do not come back:
+Five things do not come back:
 
 - **comments**, because nothing can forge another member's authorship
 - **`created` / `updated`**, because a restored record is a new record and
@@ -66,6 +66,10 @@ Four things do not come back:
   filed by that member. The mirror still carries the original name for a
   person reading it; the `origin` block (host, path, branch, commit, tool) is
   restored either way.
+- **a document's author** (LLL-618). The mirror does not carry it. The
+  server sets it from the token, so an import by a member records that
+  member as every document's author, and a superuser import leaves them
+  authorless.
 
 ## What this is not
 
