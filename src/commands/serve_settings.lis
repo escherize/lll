@@ -268,12 +268,14 @@ fn settings_write(
   }
   let team = shell_team(team_id)
   let mut extra = ""
+  let mut nav = ""
   // The reply redraws the section the row belongs to, which is the section
   // the browser is looking at: #settings is the section wrapper now, so the
   // patch id is unchanged and a label save still cannot redraw the members
   // list it is not showing.
   if let Ok(vm) = settings_vm(team, section_of(r.PathValue("kind"))) {
     if let Ok(html) = render("settings", vm) { extra += patch_event(html) }
+    if let Ok(html) = render("settings-nav", vm) { nav = patch_event(html) }
   }
   // The accent lives in <head> and the team's mark on the section nav, both
   // outside #settings: patch them by id too, so a new colour or emoji lands
@@ -281,9 +283,7 @@ fn settings_write(
   if let Ok(html) = render("accent-head", rail_vm("settings", me, team)) {
     extra += patch_event(html)
   }
-  if let Ok(vm) = settings_vm(team, section_of(r.PathValue("kind"))) {
-    if let Ok(html) = render("settings-nav", vm) { extra += patch_event(html) }
-  }
+  extra += nav
   Ok(extra)
 }
 
