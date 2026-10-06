@@ -106,7 +106,7 @@ fn member_commands_all_carry_a_summary() {
 fn member_commands_keep_only_the_hand_written_pages() {
   for c in member_commands() {
     let want_page = match c.name {
-      "add" | "create" | "invite" | "passes" | "remove" | "delete" | "set-password" => true,
+      "create" | "invite" | "passes" | "delete" | "set-password" => true,
       _ => false,
     }
     assert (c.page != "") == want_page

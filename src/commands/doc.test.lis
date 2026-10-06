@@ -191,7 +191,7 @@ fn path_touches_is_false_when_either_side_is_empty() {
 #[test]
 fn doc_commands_declares_every_verb_once_with_a_summary() {
   let names = doc_commands().map(|c| c.name)
-  assert strings.Join(names, " ") == "new list view edit delete link unlink"
+  assert strings.Join(names, " ") == "create list view edit delete link unlink"
   for c in doc_commands() {
     assert c.summary != ""
     // No doc verb has a hand-written page; help is generated from spec.
