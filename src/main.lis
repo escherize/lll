@@ -12,9 +12,13 @@ fn main() {
     return
   }
 
+  let skew = commands.version_skew_check(noun)
   let result = match commands.scoped_args(os.Args) {
     Ok(args) => dispatch(noun, args),
     Err(msg) => Err(msg),
+  }
+  if let Some(Some(line)) = skew.receive() {
+    fmt.Fprintln(os.Stderr, line)
   }
 
   if let Err(msg) = result {
