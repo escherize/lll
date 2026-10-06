@@ -1612,7 +1612,7 @@ input:focus, textarea:focus, select:focus {
    carry the 720px stacked layout — same flex chain, wider panel. */
 .prop .v { min-width: 0; max-width: 100%; }
 .prop form { min-width: 0; }
-.prop select { min-width: 0; max-width: 100%; text-overflow: ellipsis; }
+.prop select, .ni-props select { min-width: 0; max-width: 100%; text-overflow: ellipsis; }
 /* The state/priority icons and the avatar share the shrinking row; they are
    decoration-sized and must not be squeezed by a long neighbour. */
 .prop .v > svg { flex: none; }

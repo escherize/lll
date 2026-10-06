@@ -61,6 +61,25 @@ async page => {
     return error.hidden && error.textContent === '';
   });
   await page.locator('#ni-title').press('Escape');
+  await page.locator('#ni-expand').click();
+  const assignee = form.getByRole('combobox', {name: 'Assignee', exact: true});
+  const project = form.getByRole('combobox', {name: 'Project', exact: true});
+  await assignee.selectOption({label: 'A very long member name that should fit inside the full create dialog on a mobile screen'});
+  await project.selectOption({label: 'A very long project name that should fit inside the full create dialog on a mobile screen'});
+  for (const width of [320, 390, 1280]) {
+    await page.setViewportSize({width, height: 900});
+    const contained = await page.locator('.ni-dialog').evaluate(el => {
+      const box = el.getBoundingClientRect();
+      return [...el.querySelectorAll('select')].every(control => {
+        const rect = control.getBoundingClientRect();
+        return rect.left >= box.left && rect.right <= box.right;
+      });
+    });
+    if (!contained) throw new Error(`create dialog select overflow at ${width}px`);
+  }
+  await assignee.selectOption('');
+  await project.selectOption('');
+  await page.locator('#ni-title').press('Escape');
   const quickState = page.getByRole('combobox', {name: 'Issue state', exact: true});
   const originalState = await quickState.inputValue();
   await quickState.selectOption('in-progress');
