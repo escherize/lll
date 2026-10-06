@@ -1,8 +1,12 @@
+import "go:crypto/hmac"
 import "go:crypto/rand"
+import "go:crypto/sha256"
 import "go:crypto/subtle"
+import "go:encoding/hex"
 import "go:net/http"
 import "go:net/url"
 import "go:os"
+import "go:strings"
 
 // The board gate (TASK-182): every route the board serves — pages, POSTs,
 // /events, /static — answers only requests that carry the board token.
@@ -76,8 +80,112 @@ fn admit(w: http.ResponseWriter, r: Ref<http.Request>) -> bool {
     }
     return true
   }
+  // A team-scoped link logs in the same way, then answers only for its team.
+  if let Some(_) = team_scope(query, want) {
+    if r.Method == "GET" {
+      set_board_cookie(w, query)
+      http.Redirect(w, r, without_board_token(r), 303)
+    } else {
+      refused(w, r)
+    }
+    return false
+  }
+  if let Some(key) = team_scope(cookie, want) {
+    if r.Method == "GET" && query != "" {
+      http.Redirect(w, r, without_board_token(r), 303)
+      return false
+    }
+    return admit_scoped(w, r, key)
+  }
   refused(w, r)
   false
+}
+
+// Team-scoped board links (the invite flow's `--team`): a member limited to
+// one team gets a board token that opens that team's pages and nothing else.
+// The token is "KEY.MAC", where MAC is an HMAC of the key under the board
+// token, so the server stores nothing and rotating the board token revokes
+// every scoped link with it.
+//
+// Scoped viewers are read-only. Every board write runs as the board's own
+// PocketBase member, not as the viewer, so a scoped member writes through
+// the CLI or API with its own token, where the collection rules hold.
+
+/// The board token for one team: what `lll member invite --team` hands out.
+pub fn scoped_board_token(board_token: string, key: string) -> string {
+  let mac = hmac.New(sha256.New, board_token.bytes())
+  let _ = mac.Write(key.bytes())
+  f"{key}.{hex.EncodeToString(mac.Sum([]))}"
+}
+
+/// The team a scoped board token opens, or None when the token is not a
+/// valid scoped token for this board.
+fn team_scope(token: string, board_token: string) -> Option<string> {
+  if board_token == "" { return None }
+  let (key, _, found) = strings.Cut(token, ".")
+  if !found || key == "" { return None }
+  let want = scoped_board_token(board_token, key)
+  if subtle.ConstantTimeCompare(token.bytes(), want.bytes()) != 1 { return None }
+  Some(key)
+}
+
+/// The team this request's viewer is limited to, or None for a viewer with
+/// the full board token. Pages call it to keep other teams out of the rail.
+pub fn viewer_scope(r: Ref<http.Request>) -> Option<string> {
+  let Some(cookie) = cookie_named(r, "lll_board") else { return None }
+  team_scope(cookie, os.Getenv("LLL_BOARD_TOKEN"))
+}
+
+/// Admit a scoped viewer to its own team's pages. The bare root sends it to
+/// its board; anything else outside the allowlist is a 403.
+fn admit_scoped(w: http.ResponseWriter, r: Ref<http.Request>, key: string) -> bool {
+  let Some(u) = r.URL else {
+    http.Error(w, "bad request", 400)
+    return false
+  }
+  if r.Method == "GET" && u.Path == "/" {
+    http.Redirect(w, r, f"/t/{key}/", 303)
+    return false
+  }
+  let q = u.Query()
+  if scoped_allows(r.Method, u.Path, q.Get("page"), q.Get("key"), q.Get("team"), key) {
+    return true
+  }
+  http.Error(w, f"this board link opens team {key} only, read-only", 403)
+  false
+}
+
+/// Whether a viewer scoped to `key` may make this request. An allowlist, so
+/// a route added later stays closed to scoped viewers until someone opens it
+/// here. `page`, `issue` and `team` are the /events query parameters, which
+/// pick the realtime stream the same way events_stream does.
+pub fn scoped_allows(
+  method: string,
+  path: string,
+  page: string,
+  issue: string,
+  team: string,
+  key: string,
+) -> bool {
+  if method != "GET" { return false }
+  if strings.HasPrefix(path, "/static/") { return true }
+  if path == "/events" {
+    if page == "issue" && issue != "" { return issue_of_team(issue, key) }
+    return team == key
+  }
+  if path == f"/t/{key}" { return true }
+  let Some(rest) = strings.CutPrefix(path, f"/t/{key}/") else { return false }
+  if rest == "" || rest == "issues" || rest == "projects" || rest == "search" { return true }
+  if let Some(issue_key) = strings.CutPrefix(rest, "issue/") { return issue_of_team(issue_key, key) }
+  strings.CutPrefix(rest, "doc/").map_or(false, |slug| slug != "" && !strings.Contains(slug, "/"))
+}
+
+/// True when an issue key such as "ABC-12" belongs to team "ABC". The rest
+/// must be the number alone: team keys may contain hyphens, so "ABC-X-1"
+/// belongs to team "ABC-X", not "ABC".
+pub fn issue_of_team(issue: string, key: string) -> bool {
+  let Some(number) = strings.CutPrefix(strings.ToUpper(issue), key + "-") else { return false }
+  number != "" && strings.Trim(number, "0123456789") == ""
 }
 
 /// The named cookie's value, or None when absent.

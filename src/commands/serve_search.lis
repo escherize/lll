@@ -77,7 +77,7 @@ fn search_page(
     let _ = w.Write(patch_event(frag).bytes())
     return
   }
-  let vm = PageVM { rail: rail_vm("search", me, team), page }
+  let vm = PageVM { rail: rail_for(r, "search", me, team), page }
   render_html(w, "search-page", vm)
 }
 

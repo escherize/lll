@@ -27,6 +27,12 @@ func registerClaimRoutes(routes *router.Router[*core.RequestEvent], writes *issu
 		if err != nil {
 			return re.BadRequestError("invalid assignment update fields", err)
 		}
+		if err := issueWritable(re, re.Request.PathValue("issue")); err != nil {
+			return err
+		}
+		if err := fields.refsInScope(re); err != nil {
+			return err
+		}
 		unlock := writes.acquire(re.Request.PathValue("issue"))
 		defer unlock()
 		outcome, err := updateAssignment(re.App, re.Request.PathValue("issue"), *body.ClaimID, fields)
@@ -51,6 +57,9 @@ func registerClaimRoutes(routes *router.Router[*core.RequestEvent], writes *issu
 			}
 			body.Member = re.Auth.Id
 		}
+		if err := issueWritable(re, re.Request.PathValue("issue")); err != nil {
+			return err
+		}
 		unlock := writes.acquire(re.Request.PathValue("issue"))
 		defer unlock()
 		outcome, err := acquireClaim(re.App, re.Request.PathValue("issue"), body.Member)
@@ -70,6 +79,9 @@ func registerClaimRoutes(routes *router.Router[*core.RequestEvent], writes *issu
 		}
 		if body.ClaimID == "" {
 			return re.BadRequestError("release requires the observed claim_id", nil)
+		}
+		if err := issueWritable(re, re.Request.PathValue("issue")); err != nil {
+			return err
 		}
 		// The holder releases freely; anyone else needs force, and a forced
 		// release leaves a comment (LLL-512). Naming the observed hold still
