@@ -461,6 +461,33 @@ with tempfile.TemporaryDirectory(prefix='lll-team-scope-') as directory:
                     freed['token'])[0] == 200
         who = lll('whoami', env=dict(cli_ro, LLL_TOKEN=freed['token']))
         assert 'access  read-write, every team (server-wide)\n' in who.stdout, who.stdout + who.stderr
+
+        # Losing the owner fails closed: a bot capped by a narrower owner does
+        # not widen back to its own (all + rw) fields.
+        def capped_bot(name):
+            human, _ = member(name)
+            code, bot, _ = call(api, '/api/collections/members/records',
+                                dict(bot_body, name=f'bot-{name}', email=f'bot-{name}@example.test', owner=human['id']), su)
+            assert code == 200 and (bot['scope'], bot['mode']) == ('all', 'rw'), bot
+            call(api, f"/api/collections/members/records/{human['id']}", {'scope': 'teams', 'teams': [alpha['id']]}, su, 'PATCH')
+            _, minted, _ = call(api, '/api/lll/bots/rotate', {'name': f'bot-{name}'}, su)
+            titles = {i['title'] for i in call(api, '/api/collections/issues/records?perPage=200', token=minted['token'])[1]['items']}
+            assert 'alpha bot edited' in titles and 'beta bot work' not in titles, titles
+            return human, bot, minted['token']
+
+        gone, gone_bot, gone_tok = capped_bot('gone')
+        assert call(api, f"/api/collections/members/records/{gone['id']}", token=su, method='DELETE')[0] == 204
+        orphan = call(api, f"/api/collections/members/records/{gone_bot['id']}", token=su)[1]
+        assert (orphan['owner'], orphan['scope'], orphan['teams'], orphan['mode']) == ('', 'teams', [], 'ro'), orphan
+        assert call(api, '/api/collections/issues/records?perPage=200', token=gone_tok)[1]['items'] == [], \
+            'deleting the owner widened its bot'
+        assert call(api, '/api/collections/issues/records', {'team': beta['id'], 'title': 'n', 'state': 'todo'}, gone_tok)[0] == 403
+        cleared, cleared_bot, cleared_tok = capped_bot('cleared')
+        assert call(api, f"/api/collections/members/records/{cleared_bot['id']}", {'owner': ''}, su, 'PATCH')[0] == 200
+        kept = call(api, f"/api/collections/members/records/{cleared_bot['id']}", token=su)[1]
+        assert (kept['owner'], kept['scope'], kept['teams'], kept['mode']) == ('', 'teams', [alpha['id']], 'rw'), kept
+        titles = {i['title'] for i in call(api, '/api/collections/issues/records?perPage=200', token=cleared_tok)[1]['items']}
+        assert 'alpha bot edited' in titles and 'beta bot work' not in titles, 'clearing the owner widened its bot'
         print('team scope: ok')
     finally:
         child.terminate()

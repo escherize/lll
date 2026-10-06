@@ -153,7 +153,10 @@ pass `--admin-email` and `--admin-password`, or set them in the environment).
 To give someone one team and nothing else, add `--team KEY` (repeat it for more
 teams). Their token then sees only those teams' issues, comments, docs and
 claims, and they cannot widen their own scope or create members. Add
-`--read-only` for someone who should look but not change anything. Run on the
+`--read-only` for someone who should look but not change anything. A
+read-write member can still run `lll bot bot-NAME` for its own agents: the bot
+starts with the member's teams and mode and never gets more than its owner
+has, so narrowing the member narrows its bots too. Run on the
 machine serving the board, the invite also prints a view-only web board link
 per team. They make changes through the CLI, as themselves.
 

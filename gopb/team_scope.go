@@ -5,6 +5,7 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/pocketbase/dbx"
 	"github.com/pocketbase/pocketbase/core"
 	"github.com/pocketbase/pocketbase/tools/router"
 )
@@ -131,6 +132,16 @@ func registerMemberScopeDefault(app core.App) {
 	})
 	app.OnRecordUpdate("members").BindFunc(func(e *core.RecordEvent) error {
 		before := e.Record.Original()
+		// Clearing a bot's owner must not widen it back to its own fields:
+		// it keeps what it could do at that moment, its access within the
+		// old owner's, persisted (fail closed, LLL-543 security review).
+		if e.Record.GetString("kind") == botKind && before.GetString("owner") != "" && e.Record.GetString("owner") == "" {
+			kept := access{}
+			if old, err := e.App.FindRecordById("members", before.GetString("owner")); err == nil {
+				kept = ownAccess(e.Record).within(ownAccess(old))
+			}
+			setAccess(e.Record, kept)
+		}
 		for _, field := range []string{"kind", "owner", "scope", "teams", "mode"} {
 			if !slices.Equal(e.Record.GetStringSlice(field), before.GetStringSlice(field)) {
 				if err := checkBotOwner(e.App, e.Record); err != nil {
@@ -141,6 +152,47 @@ func registerMemberScopeDefault(app core.App) {
 		}
 		return e.Next()
 	})
+
+	// Deleting a member would clear its bots' owner, and with it the cap:
+	// each bot it owns is disabled (no teams, read-only) in the same
+	// transaction, before the relation is cleared, until an administrator
+	// grants it access again with 'lll member access'.
+	// The delete runs inside this transaction (PocketBase nests it), so a
+	// failed delete also rolls the bots back.
+	app.OnRecordDelete("members").BindFunc(func(e *core.RecordEvent) error {
+		outer := e.App
+		defer func() { e.App = outer }()
+		return outer.RunInTransaction(func(tx core.App) error {
+			bots, err := tx.FindRecordsByFilter("members", "owner = {:id}", "", 0, 0, dbx.Params{"id": e.Record.Id})
+			if err != nil {
+				return err
+			}
+			for _, bot := range bots {
+				setAccess(bot, access{})
+				if err := tx.Save(bot); err != nil {
+					return err
+				}
+			}
+			e.App = tx
+			return e.Next()
+		})
+	})
+}
+
+// setAccess writes a to m's scope, teams and mode.
+func setAccess(m *core.Record, a access) {
+	m.Set("teams", []string{})
+	if a.all {
+		m.Set("scope", "all")
+	} else {
+		m.Set("scope", "teams")
+		m.Set("teams", a.teams)
+	}
+	if a.rw {
+		m.Set("mode", "rw")
+	} else {
+		m.Set("mode", "ro")
+	}
 }
 
 // checkBotOwner keeps a bot within its owner ("a bot never exceeds its
