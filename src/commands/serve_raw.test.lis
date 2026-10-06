@@ -53,6 +53,14 @@ fn raw_detail_metadata_is_flat_but_authored_markdown_keeps_its_lines() {
 }
 
 #[test]
+fn raw_search_heading_flattens_line_endings_without_changing_query_semantics() {
+  for query in ["First\r\nSecond", "First\nSecond", "First\rSecond"] {
+    let raw = search_raw(SearchVM { q: query, .. })
+    assert raw == "# Search: First Second (0)"
+  }
+}
+
+#[test]
 fn raw_search_distinguishes_document_and_issue_hits() {
   let issue = CardVM { key: "TST-1", title: "Matching issue", .. }
   let raw = search_raw(SearchVM {
