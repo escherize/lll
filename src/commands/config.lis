@@ -188,7 +188,12 @@ fn set_key_in(path: string, key: string, value: string, private: bool) -> Result
 /// commands, so parallel agents can write here at the same moment; an
 /// in-place truncate let one read an empty file and save only its token,
 /// dropping url, web_url and team. Repository config does not use this.
-fn write_home_config(path: string, out: string) -> Result<(), string> {
+///
+/// A symlinked config (stow, chezmoi) is written through: the rename targets
+/// the link's resolved file, so the link survives and its target gets the
+/// new contents. A path that does not exist yet resolves to itself.
+fn write_home_config(link: string, out: string) -> Result<(), string> {
+  let path = filepath.EvalSymlinks(link).unwrap_or(link)
   let file = match os.CreateTemp(filepath.Dir(path), ".lll.toml.*") {
     Ok(file) => file,
     Err(e) => return Err(f"creating a temp file beside {path}: {e}"),

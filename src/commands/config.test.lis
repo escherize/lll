@@ -1,0 +1,32 @@
+import "go:os"
+import "go:path/filepath"
+
+// LLL-441 review: the home config is replaced by rename, and a rename onto a
+// symlink replaces the link. A dotfile-managed (stow, chezmoi) config must
+// keep its link, and the link's target must receive the new contents.
+#[test]
+fn writing_a_symlinked_home_config_writes_through_the_link() {
+  let assert Ok(dir) = os.MkdirTemp("", "lll-config-link")
+  defer { let _ = os.RemoveAll(dir) }
+  let target = filepath.Join(dir, "dotfiles-lll.toml")
+  let link = filepath.Join(dir, "lll.toml")
+  let assert Ok(_) = os.WriteFile(target, "token = \"old\"\n".bytes(), 0o600)
+  let assert Ok(_) = os.Symlink(target, link)
+
+  let assert Ok(_) = write_home_config(link, "token = \"new\"\n")
+
+  let assert Ok(info) = os.Lstat(link)
+  assert info.Mode() & os.ModeSymlink != 0
+  let assert Ok(data) = os.ReadFile(target)
+  assert data as string == "token = \"new\"\n"
+}
+
+#[test]
+fn writing_a_missing_home_config_creates_it() {
+  let assert Ok(dir) = os.MkdirTemp("", "lll-config-new")
+  defer { let _ = os.RemoveAll(dir) }
+  let path = filepath.Join(dir, "lll.toml")
+  let assert Ok(_) = write_home_config(path, "url = \"u\"\n")
+  let assert Ok(data) = os.ReadFile(path)
+  assert data as string == "url = \"u\"\n"
+}
