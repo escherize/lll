@@ -114,7 +114,7 @@ fn admit(w: http.ResponseWriter, r: Ref<http.Request>) -> bool {
       // is what browsers send to a plain-HTTP LAN or Tailscale board, gets
       // a confirm page whose same-origin POST to /login sets the cookie.
       if !direct_navigation(r) {
-        confirm_login(w, r, query)
+        confirm_login(w, r, query, login_identity(query, want))
         return false
       }
       let age = if is_link { 7 * 24 * 3600 } else { 365 * 24 * 3600 }
@@ -142,10 +142,21 @@ fn direct_navigation(r: Ref<http.Request>) -> bool {
   site == "none" || site == "same-origin"
 }
 
+/// Who a sign-in link would make this browser, in words for the confirm
+/// page, so someone who opened another person's link can notice.
+fn login_identity(tok: string, want: string) -> string {
+  if let Some(key) = team_scope(tok, want) { return f"a read-only viewer of team {key}" }
+  let Some(v) = member_viewer(tok) else { return "an unknown login" }
+  let Some(m) = v.member else { return "an unknown login" }
+  let mode = if m.rw { "read-write" } else { "read-only" }
+  let teams = if v.teams.is_empty() { "no teams" } else { strings.Join(v.teams, ", ") }
+  f"{m.name} ({mode}, {teams})"
+}
+
 /// The sign-in confirm page for a link that arrived without positive
 /// evidence. It sets nothing: its button POSTs the token to /login, which
 /// checks Origin, so a page on another site cannot complete it.
-fn confirm_login(w: http.ResponseWriter, r: Ref<http.Request>, tok: string) {
+fn confirm_login(w: http.ResponseWriter, r: Ref<http.Request>, tok: string, who: string) {
   w.Header().Set("Content-Type", "text/html; charset=utf-8")
   w.Header().Set("Cache-Control", "no-store")
   w.Header().Set("Referrer-Policy", "no-referrer")
@@ -158,7 +169,7 @@ fn confirm_login(w: http.ResponseWriter, r: Ref<http.Request>, tok: string) {
 <head><meta charset='utf-8'><meta name='viewport' content='width=device-width, initial-scale=1'><title>lll board — sign in</title></head>
 <body style='font-family: ui-sans-serif, system-ui, sans-serif; max-width: 42rem; margin: 4rem auto; padding: 0 1rem; color: #1c1c1e; line-height: 1.5;'>
 <h1 style='font-size: 1.4rem;'>Sign in to this board?</h1>
-<p>This link signs this browser in to the lll board. Continue only if you opened it yourself.</p>
+<p>This link signs this browser in to the lll board as <strong>{html.EscapeString(who)}</strong>. Continue only if you opened it yourself and that is you.</p>
 <form method='post' action='/login'>
 <input type='hidden' name='board_token' value='{token}'>
 <input type='hidden' name='next' value='{next}'>
@@ -218,6 +229,9 @@ fn local_path(next: string) -> string {
   if !strings.HasPrefix(next, "/") || strings.HasPrefix(next, "//") || strings.Contains(next, "\\") {
     return "/"
   }
+  // Control bytes and DEL: browsers strip tab and newline from URLs, so
+  // "/\t/evil.example" would become "//evil.example".
+  if strings.IndexFunc(next, |c: rune| c < 0x20 || c == 0x7f).is_some() { return "/" }
   next
 }
 
@@ -292,6 +306,14 @@ pub fn board_viewer(r: Ref<http.Request>) -> Viewer {
   }
   let none = ScopedViewer { teams: [], member: None }
   Viewer.Scoped(cookie_viewer(cookie, want).unwrap_or(none))
+}
+
+/// True unless this request holds the board token.
+pub fn is_scoped(r: Ref<http.Request>) -> bool {
+  match board_viewer(r) {
+    Viewer.Full => false,
+    Viewer.Scoped(_) => true,
+  }
 }
 
 /// A cookie that is a team-scoped link or a member token, as its viewer.

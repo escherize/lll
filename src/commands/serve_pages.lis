@@ -307,7 +307,7 @@ fn board_page(w: http.ResponseWriter, r: Ref<http.Request>, team: models.Team, m
   }
 
   let issues = match records.fetch_board_issues(team_id) {
-    Ok(i) => i,
+    Ok(i) => issues_for(r, i),
     Err(e) => {
       http.Error(w, e, 500)
       return
@@ -422,7 +422,7 @@ fn hide_seed_js(hidden: Slice<string>) -> template.JS {
 fn issue_page(w: http.ResponseWriter, r: Ref<http.Request>, team: models.Team, me: string) {
   let key = r.PathValue("key")
   let issue = match records.fetch_issue(key) {
-    Ok(i) => i,
+    Ok(i) => issues_for(r, [i])[0],
     Err(e) => {
       http.Error(w, e, 404)
       return

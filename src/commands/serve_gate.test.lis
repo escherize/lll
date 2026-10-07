@@ -67,7 +67,8 @@ fn scoped_viewer_allowlist() {
 fn login_redirect_stays_on_the_board() {
   assert local_path("/t/AAA/") == "/t/AAA/"
   assert local_path("/t/AAA/issue/AAA-1?order=priority") == "/t/AAA/issue/AAA-1?order=priority"
-  for bad in ["", "//evil.example/", "https://evil.example/", "/\\evil.example", "t/AAA"] {
+  for bad in ["", "//evil.example/", "https://evil.example/", "/\\evil.example", "t/AAA",
+              "/\t/evil.example", "/\n/evil.example", "/\r/x", "/\u{7f}/x", "/\u{0}/x"] {
     assert local_path(bad) == "/"
   }
 }

@@ -346,6 +346,65 @@ with tempfile.TemporaryDirectory(prefix='lll-545-') as directory:
             time.sleep(.2)
         assert idle_proc.poll() is not None, 'an idle revoked stream stayed open past the re-check interval'
 
+        # --- an all-scope member hangs a hidden team's label and project on
+        # an ALPHA issue: no scoped surface may name them ---
+        _, zeta, _ = call(api, '/api/collections/teams/records', {'key': 'ZETA', 'name': 'Zeta Hidden'}, su)
+        _, zlabel, _ = call(api, '/api/collections/labels/records', {'team': zeta['id'], 'name': 'zlabelhidden'}, su)
+        _, zproj, _ = call(api, '/api/collections/projects/records',
+                           {'team': zeta['id'], 'name': 'zprojhidden', 'status': 'planned'}, su)
+        _, alabel, _ = call(api, '/api/collections/labels/records', {'team': alpha['id'], 'name': 'alabelown'}, su)
+        wide_rec, wide_tok = member('wide', scope='all', mode='rw')
+        zref = ['zlabelhidden', 'zprojhidden', 'Zeta Hidden', 'ZETA']
+        rw2_rec, rw2_tok = member('zviewer', scope='teams', teams=[alpha['id']], mode='rw')
+        viewers = {'member': rw2_tok, 'link': link}
+        zstreams = {name: (stream('/events?team=ALPHA', tok, f'z-board-{name}'),
+                           stream('/events?page=issue&key=ALPHA-1', tok, f'z-issue-{name}'))
+                    for name, tok in viewers.items()}
+        zfull = stream('/events?page=issue&key=ALPHA-1', env['LLL_BOARD_TOKEN'], 'z-issue-full')
+        zfull_board = stream('/events?team=ALPHA', env['LLL_BOARD_TOKEN'], 'z-board-full')
+        for outs in list(zstreams.values()) + [(zfull, zfull_board)]:
+            for out in outs:
+                wait_for(out, 'AFTERREVOKE title')
+        code, body, _ = call(api, f"/api/collections/issues/records/{ia['id']}",
+                             {'labels': [zlabel['id'], alabel['id']], 'project': zproj['id'], 'title': 'ZREF title'},
+                             wide_tok, 'PATCH')
+        assert code == 200, body
+        wait_for(zfull_board, 'zlabelhidden')  # control: board cards name labels
+        wait_for(zfull, 'zprojhidden')  # control: the issue detail names the project
+        for name, outs in zstreams.items():
+            for out in outs:
+                wait_for(out, 'ZREF title')
+                wait_for(out, 'alabelown')
+        time.sleep(.5)
+        for name, outs in zstreams.items():
+            for out in outs:
+                text = out.read_text()
+                for marker in zref:
+                    assert marker not in text, f'{out.name} leaked {marker}'
+        for name, tok in viewers.items():
+            paths = ['/t/ALPHA/', '/t/ALPHA/?raw', '/t/ALPHA/issues', '/t/ALPHA/issues?raw',
+                     '/t/ALPHA/issue/ALPHA-1', '/t/ALPHA/issue/ALPHA-1?raw',
+                     '/t/ALPHA/search?q=ZREF', '/t/ALPHA/search?q=ZREF&raw', '/t/ALPHA/search?q=ZREF&fragment=1',
+                     '/t/ALPHA/search?q=ZREF&palette=1']
+            for path in paths:
+                code, body, _ = page(path, tok)
+                assert code == 200 and 'ZREF title' in body, (name, path, code)
+                for marker in zref:
+                    assert marker not in body, f'{name} {path} leaked {marker}'
+            # Searching the hidden label's name must not find the issue.
+            assert 'ZREF title' not in page('/t/ALPHA/search?q=zlabelhidden&raw', tok)[1], name
+        # A rejected property edit re-renders the property panel as the board's member.
+        code, text = flash('/project', rw2_tok, {'key': 'ALPHA-1', 'project': 'bogus', 'property_edit': '1'})
+        assert 'issue-properties' in text and 'alabelown' in text, text[:400]
+        for marker in zref:
+            assert marker not in text, f'property recovery leaked {marker}'
+        code, text = flash('/title', rw2_tok, {'key': 'BETA-1', 'title': 'x', 'property_edit': '1'})
+        assert 'issue BETA-1 not found' in text and 'zebra' not in text and 'Bravo' not in text, text[:400]
+        # Controls: the board token still sees both names.
+        full_issue = page('/t/ALPHA/issue/ALPHA-1', env['LLL_BOARD_TOKEN'])[1]
+        assert 'zprojhidden' in full_issue, 'control: board token lost the project'
+        assert 'zlabelhidden' in page('/t/ALPHA/', env['LLL_BOARD_TOKEN'])[1], 'control: board token lost the label'
+
         # --- the board token is unchanged ---
         full = env['LLL_BOARD_TOKEN']
         code, body, _ = page('/t/BETA/', full)
