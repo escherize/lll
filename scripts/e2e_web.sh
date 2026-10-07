@@ -2737,6 +2737,9 @@ LLL_TEST_BOARD_TOKEN="$BOARD_TOKEN" LLL_TEST_SUPERUSER_TOKEN=$(pb_superuser_toke
 LLL_TEST_BOARD_TOKEN="$BOARD_TOKEN" LLL_TEST_SUPERUSER_TOKEN=$(pb_superuser_token "$LLL_URL") \
   python3 "$REPO_ROOT"/scripts/test_author_kind.py "$LIN" "$LLL_URL" "$WEB"
 
+LLL_TEST_BOARD_TOKEN="$BOARD_TOKEN" LLL_TEST_SUPERUSER_TOKEN=$(pb_superuser_token "$LLL_URL") \
+  python3 "$REPO_ROOT"/scripts/test_doc_author.py "$LIN" "$LLL_URL" "$WEB"
+
 LLL_TEST_BOARD_TOKEN="$BOARD_TOKEN" python3 "$REPO_ROOT"/scripts/test_board_pagination.py "$LIN" "$LLL_URL" "$WEB"
 
 python3 "$REPO_ROOT"/scripts/test_issue_idempotency.py "$LIN" "$LLL_URL"

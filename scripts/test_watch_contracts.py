@@ -6,6 +6,8 @@ and docs/claim-transactions.md give to questions scripts used to guess.
 2. What text mode prints for a label-only update ('KEY changed').
 3. Who may rotate a bot's token, and which tokens a rotation strands.
 4. The exact status lines 'lll watch' prints, and that they go to stderr.
+5. LLL-617: a watch whose token is rotated out exits 1 at the next reconnect,
+   naming the fix, instead of reconnecting into a stream that carries nothing.
 
 Run by e2e.sh with the built binary, the server URL, the suite's member token
 in LLL_TOKEN and a fresh superuser token in LLL_TEST_SUPERUSER_TOKEN.
@@ -14,12 +16,14 @@ import http.server
 import json
 import os
 import selectors
+import socket
 import subprocess
 import sys
 import tempfile
 import threading
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 
 binary, api = sys.argv[1:]
@@ -195,6 +199,116 @@ if os.environ.get('LLL_ADMIN_EMAIL'):
     assert result.returncode == 0, result.stderr
     assert authenticates(minted(result.stdout)) and authenticates(fourth)
 
+# --- 5: LLL-617. A proxy in front of the real server lets the test drop the
+# watch's stream, forcing a reconnect, without restarting anything.
+class Proxy:
+    def __init__(self, upstream):
+        self.upstream = upstream
+        self.listener = socket.create_server(('127.0.0.1', 0))
+        self.port = self.listener.getsockname()[1]
+        self.sockets = []
+        self.lock = threading.Lock()
+        threading.Thread(target=self.accept, daemon=True).start()
+
+    def accept(self):
+        while True:
+            try:
+                client, _ = self.listener.accept()
+            except OSError:
+                return
+            server = socket.create_connection(self.upstream)
+            with self.lock:
+                self.sockets += [client, server]
+            for a, b in [(client, server), (server, client)]:
+                threading.Thread(target=self.pipe, args=(a, b), daemon=True).start()
+
+    @staticmethod
+    def pipe(src, dst):
+        try:
+            while data := src.recv(65536):
+                dst.sendall(data)
+        except OSError:
+            pass
+        for s in (src, dst):
+            try:
+                s.shutdown(socket.SHUT_RDWR)
+            except OSError:
+                pass
+
+    def drop(self):
+        with self.lock:
+            dropped, self.sockets = self.sockets, []
+        for s in dropped:
+            try:
+                s.shutdown(socket.SHUT_RDWR)
+            except OSError:
+                pass
+            s.close()
+
+    def close(self):
+        self.listener.close()
+        self.drop()
+
+
+def stderr_lines(process, sink):
+    for line in process.stderr:
+        sink.append(line.rstrip('\n'))
+
+
+def wait_line(lines, text, timeout=15):
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        if text in lines:
+            return
+        time.sleep(0.1)
+    raise AssertionError(f'{text!r} never appeared on stderr: {lines}')
+
+
+host, port = urllib.parse.urlsplit(api).hostname, urllib.parse.urlsplit(api).port
+proxy = Proxy((host, port))
+dead_dir = tempfile.mkdtemp(prefix='watch-dead-token-')
+dead_env = dict(env, LLL_URL=f'http://127.0.0.1:{proxy.port}', LLL_TOKEN=fourth,
+                LLL_CONFIG_HOME=os.path.join(dead_dir, 'config'))
+process = subprocess.Popen([binary, 'watch', '--json'], env=dead_env, cwd=dead_dir,
+                           stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+lines = []
+threading.Thread(target=stderr_lines, args=(process, lines), daemon=True).start()
+reconnected = 'realtime: reconnected to the lll server (subscriptions accepted)'
+try:
+    wait_line(lines, 'watch: ready (query subscription accepted)')
+    # A healthy reconnect still reconnects, and the stream still carries events.
+    proxy.drop()
+    wait_line(lines, reconnected)
+    ok('issue', 'update', tagged, '--title', 'Seen after a reconnect')
+    with selectors.DefaultSelector() as selector:
+        selector.register(process.stdout, selectors.EVENT_READ)
+        assert selector.select(10), ('no event after a healthy reconnect', lines)
+    event = json.loads(process.stdout.readline())
+    assert event['record']['title'] == 'Seen after a reconnect', event
+    # Rotate the bot out from under the watch, then force the reconnect.
+    fifth = minted(ok('bot', 'rotate', 'bot-watch-contract', '--duration', '3600', as_token=superuser))
+    assert not authenticates(fourth) and authenticates(fifth)
+    proxy.drop()
+    try:
+        code = process.wait(timeout=15)
+    except subprocess.TimeoutExpired:
+        raise AssertionError(f'watch outlived its rotated token: {lines}')
+finally:
+    process.kill()
+    process.wait()
+    proxy.close()
+time.sleep(0.2)  # the reader thread drains the last line
+assert code == 1, (code, lines)
+dead_line = ("realtime: the server rejected this token (401 Unauthorized): it was rotated, "
+             "revoked or has expired, so the stream would carry no events; run 'lll login', "
+             "or set a fresh LLL_TOKEN ('lll bot rotate bot-NAME' or 'lll token create NAME'), "
+             "then start the watch again")
+assert lines == ['watch: ready (query subscription accepted)',
+                 'realtime: lll server stream lost — reconnecting', reconnected,
+                 'realtime: lll server stream lost — reconnecting', dead_line], lines
+assert process.stdout.read() == '', 'the dead stream printed an event'
+process.stdout.close()
+
 # --- 4: status lines. A fake server drops the stream after one event, fails
 # twice with the same error, then accepts again. Only stderr may say so.
 stop = threading.Event()
@@ -203,6 +317,12 @@ gets = []
 
 class Flaky(http.server.BaseHTTPRequestHandler):
     def do_GET(self):
+        if self.path.startswith('/api/collections/teams/records?'):
+            self.send_response(200)  # connect's token check (LLL-617)
+            self.send_header('Content-Length', '2')
+            self.end_headers()
+            self.wfile.write(b'{}')
+            return
         assert self.path == '/api/realtime', self.path
         gets.append(1)
         if len(gets) in (2, 3):
@@ -284,6 +404,10 @@ for text in observed + [
     'That covers labels, project, description and emoji.',
     'The stream carries issue records only: no comment or claim events.',
     "and 'lll issue claim --renew' print nothing.",
+    'Every connect and reconnect checks the token with one read.',
+    'watch prints one line naming the fix and exits 1:',
+    dead_line.split(': it was')[0] + ': ...',
+    'A token rotated while the\nstream is up is caught at the next reconnect',
 ]:
     assert text in watch_help, f'lll watch --help lost {text!r}'
 rotate_help = ok('bot', 'rotate', '--help')
@@ -292,4 +416,4 @@ for text in ['Who may rotate: a superuser, or the bot\'s owner',
              "'lll bot bot-NAME' on an existing bot\nrotates too.",
              "'lll token create bot-NAME' adds a token and strands none."]:
     assert text in rotate_help, f'lll bot rotate --help lost {text!r}'
-print('watch contracts: claim events, label-only lines, bot rotation rules and status lines pinned')
+print('watch contracts: claim events, label-only lines, bot rotation rules, status lines and the dead-token exit pinned')

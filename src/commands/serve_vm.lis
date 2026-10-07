@@ -592,6 +592,11 @@ pub struct DocVM {
   // the doc is about. Empty on docs that name neither.
   pub area: string,
   pub paths: string,
+  // The author (LLL-618): "" for a doc with none, or one the viewer cannot
+  // read. `author_via` is a bot author's owner, as CommentVM.via.
+  pub author: string,
+  pub author_avatar: AvatarVM,
+  pub author_via: string,
   pub created: string,
   pub updated: string,
   pub issues: Slice<DocIssueVM>,

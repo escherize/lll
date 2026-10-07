@@ -400,6 +400,10 @@ pub struct NewView {
 #[json]
 pub struct DocExpand {
   pub issues: Slice<Issue>,
+  // The author, and a bot author's owner, when the read asked for
+  // expand=author.owner and the caller may read them (LLL-618).
+  #[json(omitempty)]
+  pub author: Option<Member>,
 }
 
 #[json]
@@ -427,6 +431,11 @@ pub struct Doc {
   // semantics, and only 'suspected' and 'refuted' change how it reads.
   pub confidence: string,
   pub confidence_note: string,
+  // LLL-618: the member whose token created the doc, set by the server.
+  // Empty on docs written before the field and on superuser writes.
+  // omitempty keeps re-encoded authorless docs (issue view --json) as before.
+  #[json(omitempty)]
+  pub author: string,
   pub expand: DocExpand,
 }
 

@@ -22,6 +22,12 @@ _.path = ["{{config_root}}/target/.lisette/bin"]
 # and repository scripts resolve their inputs consistently. The server embeds
 # its migrations, templates and static assets and can run outside the checkout.
 #
+# LLL-619: every task that boots lll starts by unsetting XDG_CONFIG_HOME and
+# LLL_CONFIG_HOME. config.lis reads them before HOME, so a developer shell that
+# exports XDG_CONFIG_HOME sent a test's config writes (`lll up` saves web_url)
+# to the real ~/.config/lll/lll.toml however carefully the test isolated HOME.
+# mise's task env can set a variable but not remove one, hence the shell line.
+#
 # Note: not named `up` — `mise run up` collides with mise's own `mise up`.
 
 [tasks.build]
@@ -46,7 +52,7 @@ description = "A throwaway board on free ports and a temp data dir - safe to run
 depends = ["build"]
 dir = "{{config_root}}"
 env = { LC_ALL = "C", PYTHONUTF8 = "1" }
-run = "bash scripts/scratch.sh"
+run = "unset XDG_CONFIG_HOME LLL_CONFIG_HOME; bash scripts/scratch.sh"
 
 # Read-only. Answers "is this instance worth driving?" before a verification
 # run commits to it, because evidence captured from a stale or wedged board is
@@ -81,12 +87,12 @@ dir = "{{config_root}}"
 # its neighbours run. Same bargain e2e_begin already makes - unset every LLL_*
 # the suite does not set itself, so it starts from a KNOWN environment.
 run = """
+unset XDG_CONFIG_HOME LLL_CONFIG_HOME
 command -v lis >/dev/null || { echo "lis not found. Install it:" >&2; echo "  curl -LsSf https://github.com/ivov/lisette/releases/latest/download/lisette-installer.sh | sh" >&2; exit 1; }
 python3 scripts/protect_archive.py --check
 python3 scripts/sync_skills.py --check
 env -u LLL_ME -u LLL_TOKEN -u LLL_URL -u LLL_TEAM -u LLL_SORT -u LLL_WEB_URL \
-    -u LLL_BOARD_TOKEN -u LLL_BIND -u LLL_WORK_HOST -u LLL_AGENT \
-    -u LLL_CONFIG_HOME -u XDG_CONFIG_HOME lis test
+    -u LLL_BOARD_TOKEN -u LLL_BIND -u LLL_WORK_HOST -u LLL_AGENT lis test
 go -C web test ./...
 go -C gopb test ./...
 python3 -m unittest discover -s scripts -p 'test_board_startup_diagnostics.py'
@@ -106,7 +112,7 @@ description = "Full end-to-end suite (CLI, web board, lll up)"
 env = { LC_ALL = "C", PYTHONUTF8 = "1" }
 depends = ["build"]
 dir = "{{config_root}}"
-run = "bash scripts/e2e.sh"
+run = "unset XDG_CONFIG_HOME LLL_CONFIG_HOME; bash scripts/e2e.sh"
 
 # TASK-79: a board with data on it, for looking at. Boots its own throwaway
 # server on free ports under .lll-demo/ and leaves it running, so `mise run dev`
@@ -119,7 +125,7 @@ run = "bash scripts/e2e.sh"
 description = "Boot a throwaway board seeded with demo issues, projects and labels"
 depends = ["build"]
 dir = "{{config_root}}"
-run = "bash scripts/seed.sh"
+run = "unset XDG_CONFIG_HOME LLL_CONFIG_HOME; bash scripts/seed.sh"
 
 [tasks.gate]
 description = "Everything a change must pass before it lands"
@@ -137,4 +143,4 @@ description = "Regenerate the `lll api --schema` reference from the migrations"
 depends = ["build"]
 dir = "{{config_root}}"
 env = { LC_ALL = "C", PYTHONUTF8 = "1" }
-run = "python3 scripts/gen_api_schema.py"
+run = "unset XDG_CONFIG_HOME LLL_CONFIG_HOME; python3 scripts/gen_api_schema.py"

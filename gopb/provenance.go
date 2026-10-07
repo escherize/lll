@@ -24,3 +24,16 @@ func registerIssueProvenance(app core.App) {
 		return e.Next()
 	})
 }
+
+// A doc's author is the member whose token created it (LLL-618). The docs
+// rules refuse `author` in a member's body, so this is the only way a member
+// write sets it; a superuser has no member identity and stays authorless
+// unless it names one.
+func registerDocAuthor(app core.App) {
+	app.OnRecordCreateRequest("docs").BindFunc(func(e *core.RecordRequestEvent) error {
+		if e.Auth != nil && e.Auth.Collection().Name == "members" {
+			e.Record.Set("author", e.Auth.Id)
+		}
+		return e.Next()
+	})
+}

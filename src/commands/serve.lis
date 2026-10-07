@@ -157,10 +157,14 @@ pub fn run_server(
   let comments_topic = realtime.topic_with_options("comments", "", "author")?
   // Favorites and saved views drive their own rail groups, which every
   // page shows, so these topics are unfiltered too.
+  let on_dead_token = refresh.map_or(
+    realtime.DeadToken.Retry,
+    |mint| realtime.DeadToken.Remint(mint),
+  )
   let events = realtime.subscribe(
     pb.base_url()?,
     [issues_topic, comments_topic, "claims", "favorites", "views"],
-    refresh,
+    on_dead_token,
   )?
 
   let hub = new_hub()
