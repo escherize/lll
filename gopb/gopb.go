@@ -128,6 +128,9 @@ func Serve(dataDir, addr, adminEmail, adminPassword string) error {
 		if err := upsertSuperuser(e.App, adminEmail, adminPassword); err != nil {
 			return err
 		}
+		if err := ensureNameIndex(e.App, os.Stderr); err != nil {
+			return err
+		}
 		// TASK-319: a record request that carries no auth at all is told so.
 		// PocketBase applies a list rule as a FILTER, so an anonymous list
 		// answered 200 and nothing, which every client except lll's own read

@@ -34,6 +34,26 @@
 // case-sensitive index the board and the CLI have always had); the new one
 // only adds the case-folded constraint. NOCASE folds ASCII, which is every
 // name gopb lets a non-superuser choose.
+//
+// A board may already hold two names that differ only by case ("Alice" and
+// "alice"): the old index allowed it. Creating the index there would fail
+// the migration and stop the board from booting, and renaming someone's
+// identity is not this migration's call. So it adds the index only when no
+// such pair exists, and otherwise warns, naming the members. gopb retries
+// at every boot (ensureNameIndex in gopb/invites.go), so the index appears
+// on the first boot after an administrator renames one of each pair; until
+// then gopb's own check still refuses case-variant names, short of a race.
+const NAME_INDEX = "idx_members_name_nocase";
+
+function caseClashes(app) {
+  const rows = arrayOf(new DynamicModel({ names: "" }));
+  app
+    .db()
+    .newQuery("SELECT GROUP_CONCAT(name, ' / ') AS names FROM members GROUP BY name COLLATE NOCASE HAVING COUNT(*) > 1")
+    .all(rows);
+  return rows.map((r) => r.names);
+}
+
 migrate(
   (app) => {
     const teams = app.findCollectionByNameOrId("teams");
@@ -60,13 +80,22 @@ migrate(
       indexes: ["CREATE UNIQUE INDEX `idx_invites_code_hash` ON `invites` (`code_hash`)"],
     });
     app.save(invites);
-    members.addIndex("idx_members_name_nocase", true, "`name` COLLATE NOCASE", "");
+    const clashes = caseClashes(app);
+    if (clashes.length > 0) {
+      console.warn(
+        "lll: member names differ only by case (" + clashes.join("; ") + "), so names are not yet " +
+          "unique regardless of case in the database. Rename one of each pair with administrator " +
+          "credentials (PATCH /api/collections/members/records/ID {\"name\": ...}); the next boot adds the index.",
+      );
+      return;
+    }
+    members.addIndex(NAME_INDEX, true, "`name` COLLATE NOCASE", "");
     app.save(members);
   },
   (app) => {
     app.delete(app.findCollectionByNameOrId("invites"));
     const members = app.findCollectionByNameOrId("members");
-    members.removeIndex("idx_members_name_nocase");
+    members.removeIndex(NAME_INDEX);
     app.save(members);
   },
 );
