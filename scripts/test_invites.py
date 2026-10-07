@@ -193,7 +193,8 @@ with tempfile.TemporaryDirectory(prefix='lll-invites-') as directory:
         # A bot does not invite people, even one owned by a full member.
         out = lll('bot', 'bot-inviter')
         assert out.returncode == 0, out.stdout + out.stderr
-        bot = next(l for l in out.stdout.splitlines() if l.startswith('LLL_TOKEN='))[len('LLL_TOKEN='):]
+        # 'lll bot' prints an agent prompt whose token line is an export (LLL-546).
+        bot = next(l for l in out.stdout.splitlines() if l.startswith('export LLL_TOKEN='))[len('export LLL_TOKEN='):]
         code, body, _ = call(api, '/api/lll/invites', {'teams': [alpha['id']], 'mode': 'ro'}, bot)
         assert code == 403 and 'bots and owned members cannot invite' in body['message'].lower(), body
         rw = invite('--team', 'ALPHA', token=guest)
@@ -264,8 +265,10 @@ with tempfile.TemporaryDirectory(prefix='lll-invites-') as directory:
             assert call(api, '/api/collections/invites/records', token=tok)[0] == 403
             assert call(api, f"/api/collections/invites/records/{listed['id']}", token=tok)[0] == 403
             assert call(api, "/api/collections/members/records?filter=@collection.invites.mode='ro'", token=tok)[0] == 403
+            # 400 from PocketBase (hidden field); a team-scoped caller is
+            # refused earlier, 403, for walking out of members (LLL-551).
             assert call(api, "/api/collections/members/records?filter=invites_via_redeemed_by.mode='ro'",
-                        token=tok)[0] == 400
+                        token=tok)[0] in (400, 403)
             assert call(api, '/api/collections/invites/records', {'code_hash': 'a' * 64, 'mode': 'rw'}, tok)[0] == 403
         # Control: a superuser does see them, so the 403s above are the rules.
         assert call(api, '/api/collections/invites/records', token=su)[1]['totalItems'] == 4

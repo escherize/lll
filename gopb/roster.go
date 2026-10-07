@@ -30,11 +30,15 @@ import (
 //     enrich hook shows them again to a full-access caller;
 //   - a visible member's other teams: the enrich hook drops team ids the
 //     caller cannot see, so a roster entry never names a hidden team;
-//   - relation filters: PocketBase checks no rule on the far side of a
-//     relation in filter= or sort=, so "assignee.name ~ 'x%'" would read a
-//     hidden member's name through an issue the caller can see. A narrower
-//     caller may not filter or sort through a relation into or out of
-//     members;
+//   - relation filters: PocketBase checks the far side's list rule on a
+//     joined row, but not inside a multi-match subquery (a plain operator
+//     on a multi-valued relation or a back-relation: "every related row
+//     matches"), and those rows include hidden ones. So "teams.key ~ 'B%'"
+//     on a visible member, or "issues_via_assignee.title ~ 'x%'", would
+//     read hidden records one character at a time (finding
+//     pb-relation-filters-skip-target-rules). A narrower caller may not
+//     filter or sort through any relation into or out of members: one rule,
+//     rather than a list of the operators that happen to be safe;
 //   - names in custom-route messages (rosterName).
 
 // rosterSees reports whether viewer may see member m under the rule above.
