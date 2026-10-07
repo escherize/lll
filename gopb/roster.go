@@ -57,6 +57,15 @@ func rosterSees(app core.App, viewer, m *core.Record) bool {
 	return slices.ContainsFunc(m.GetStringSlice("teams"), acc.sees)
 }
 
+// onTeamRoster reports whether every member who sees team teamID may see m:
+// m is on that team, or m is a person with access to every team. Output with
+// no single viewer (webhook payloads) names only these; the board applies
+// the same rule (serve_roster.lis team_roster).
+func onTeamRoster(m *core.Record, teamID string) bool {
+	return slices.Contains(m.GetStringSlice("teams"), teamID) ||
+		(m.GetString("scope") == "all" && m.GetString("kind") != botKind)
+}
+
 // hiddenMember is how a message names a member the caller may not see. The
 // CLI and the board use the same words (display.hidden_member).
 const hiddenMember = "a hidden member"

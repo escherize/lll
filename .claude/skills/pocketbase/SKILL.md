@@ -91,6 +91,22 @@ carve-outs, each deliberate:
 **A new collection does not inherit any of this.** Add one and you must set its
 rules in the same migration, or it ships public.
 
+**The members roster is scoped too** (`1791900000_member_roster_scope.js`,
+LLL-551). A member narrower than every team lists itself, members sharing a
+team and full-access people, and reads no email but its own: every member is
+stored with `emailVisibility` false, and `gopb/roster.go` shows emails again to
+full-access callers and strips hidden team ids. Two traps came out of it:
+
+- **A rule does not cover the far side of a multi-match filter.** PocketBase
+  applies a related collection's list rule to a joined row, but not inside the
+  subquery a plain operator on a multi-valued relation or `x_via_y`
+  back-relation compiles to. `labels.name ~ "ae%"` reads hidden labels' names
+  (finding `pb-relation-filters-skip-target-rules`, LLL-634). `roster.go`
+  refuses any filter or sort that walks into or out of `members` for a narrow
+  caller, on the list endpoint and on realtime subscriptions.
+- **The board reads as an all-scope member.** Rules do nothing for its pages;
+  `src/commands/serve_roster.lis` applies the roster before rendering.
+
 ## Auth (shipped)
 
 `members` IS an auth collection (`1788300000_members_auth.js`); every actor -

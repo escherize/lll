@@ -7,6 +7,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"slices"
 	"time"
 
 	"github.com/pocketbase/dbx"
@@ -113,8 +114,15 @@ func webhookPayload(app core.App, action string, issue *core.Record) ([]byte, er
 			expand["team"] = team
 		}
 	}
+	// Any read-write member of the team may register a webhook, a scoped
+	// guest included, and the payload carries no viewer. So the assignee is
+	// expanded only when every member of the team may see it (LLL-551,
+	// onTeamRoster), and never with another team's id.
 	if id := clone.GetString("assignee"); id != "" {
-		if assignee, err := app.FindRecordById("members", id); err == nil {
+		if assignee, err := app.FindRecordById("members", id); err == nil && onTeamRoster(assignee, clone.GetString("team")) {
+			assignee = assignee.Clone()
+			teams := slices.DeleteFunc(slices.Clone(assignee.GetStringSlice("teams")), func(t string) bool { return t != clone.GetString("team") })
+			assignee.Set("teams", teams)
 			expand["assignee"] = assignee
 		}
 	}

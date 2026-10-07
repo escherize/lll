@@ -1,10 +1,83 @@
 package gopb
 
 import (
+	"encoding/json"
 	"testing"
 
 	"github.com/pocketbase/pocketbase/core"
+	"github.com/pocketbase/pocketbase/tests"
 )
+
+// A webhook payload has no viewer, so it expands only an assignee every
+// member of the issue's team may see, and never with another team's id.
+func TestWebhookPayloadExpandsOnlyATeamVisibleAssignee(t *testing.T) {
+	app, err := tests.NewTestApp()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(app.Cleanup)
+	teams := core.NewBaseCollection("teams")
+	teams.Fields.Add(&core.TextField{Name: "key"})
+	if err := app.Save(teams); err != nil {
+		t.Fatal(err)
+	}
+	members := core.NewBaseCollection("members")
+	members.Fields.Add(&core.TextField{Name: "name"}, &core.TextField{Name: "scope"}, &core.TextField{Name: "kind"},
+		&core.RelationField{Name: "teams", CollectionId: teams.Id, MaxSelect: 99})
+	if err := app.Save(members); err != nil {
+		t.Fatal(err)
+	}
+	issues := core.NewBaseCollection("issues")
+	issues.Fields.Add(&core.RelationField{Name: "team", CollectionId: teams.Id, MaxSelect: 1},
+		&core.RelationField{Name: "assignee", CollectionId: members.Id, MaxSelect: 1})
+	if err := app.Save(issues); err != nil {
+		t.Fatal(err)
+	}
+	eng, ops := core.NewRecord(teams), core.NewRecord(teams)
+	eng.Set("key", "ENG")
+	ops.Set("key", "OPS")
+	for _, r := range []*core.Record{eng, ops} {
+		if err := app.Save(r); err != nil {
+			t.Fatal(err)
+		}
+	}
+	bot, both := core.NewRecord(members), core.NewRecord(members)
+	bot.Load(map[string]any{"name": "bot-garden", "scope": "all", "kind": botKind})
+	both.Load(map[string]any{"name": "both", "scope": "teams", "kind": "person", "teams": []string{eng.Id, ops.Id}})
+	for _, r := range []*core.Record{bot, both} {
+		if err := app.Save(r); err != nil {
+			t.Fatal(err)
+		}
+	}
+	payload := func(assignee string) map[string]any {
+		issue := core.NewRecord(issues)
+		issue.Set("team", eng.Id)
+		issue.Set("assignee", assignee)
+		body, err := webhookPayload(app, "create", issue)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var out struct {
+			Record struct {
+				Expand map[string]any `json:"expand"`
+			} `json:"record"`
+		}
+		if err := json.Unmarshal(body, &out); err != nil {
+			t.Fatal(err)
+		}
+		return out.Record.Expand
+	}
+	if got := payload(bot.Id); got["assignee"] != nil {
+		t.Fatalf("a full-access bot was expanded: %v", got["assignee"])
+	}
+	got, _ := payload(both.Id)["assignee"].(map[string]any)
+	if got == nil || got["name"] != "both" {
+		t.Fatalf("a team member was not expanded: %v", got)
+	}
+	if ids, _ := got["teams"].([]any); len(ids) != 1 || ids[0] != eng.Id {
+		t.Fatalf("another team's id rode the payload: %v", got["teams"])
+	}
+}
 
 // LLL-551: a claim refusal names the holder only to a caller whose roster
 // includes it. A full-access bot is hidden from a member limited to teams.
