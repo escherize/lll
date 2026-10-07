@@ -42,16 +42,21 @@
 // such pair exists, and otherwise warns, naming the members. gopb retries
 // at every boot (ensureNameIndex in gopb/invites.go), so the index appears
 // on the first boot after an administrator renames one of each pair; until
-// then gopb's own check still refuses case-variant names, short of a race.
+// then gopb's own check refuses case-variant names. The names in the
+// warning are JSON-quoted: they are member input bound for the operator's
+// terminal, and an escape sequence or newline must not reach it raw.
 const NAME_INDEX = "idx_members_name_nocase";
 
 function caseClashes(app) {
-  const rows = arrayOf(new DynamicModel({ names: "" }));
+  const rows = arrayOf(new DynamicModel({ name: "" }));
   app
     .db()
-    .newQuery("SELECT GROUP_CONCAT(name, ' / ') AS names FROM members GROUP BY name COLLATE NOCASE HAVING COUNT(*) > 1")
+    .newQuery(
+      "SELECT name FROM members WHERE name COLLATE NOCASE IN " +
+        "(SELECT name FROM members GROUP BY name COLLATE NOCASE HAVING COUNT(*) > 1) ORDER BY name COLLATE NOCASE, name",
+    )
     .all(rows);
-  return rows.map((r) => r.names);
+  return rows.map((r) => JSON.stringify(r.name));
 }
 
 migrate(
@@ -83,7 +88,7 @@ migrate(
     const clashes = caseClashes(app);
     if (clashes.length > 0) {
       console.warn(
-        "lll: member names differ only by case (" + clashes.join("; ") + "), so names are not yet " +
+        "lll: member names differ only by case (" + clashes.join(", ") + "), so names are not yet " +
           "unique regardless of case in the database. Rename one of each pair with administrator " +
           "credentials (PATCH /api/collections/members/records/ID {\"name\": ...}); the next boot adds the index.",
       );

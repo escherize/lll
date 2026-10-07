@@ -11,6 +11,7 @@ import sqlite3
 import subprocess
 import sys
 import tempfile
+import threading
 import urllib.error
 import urllib.request
 from board_startup import wait_for_endpoints
@@ -18,6 +19,7 @@ from board_startup import wait_for_endpoints
 binary = str(Path(sys.argv[1]).resolve())
 MIGRATION = '1791810544_invites.js'
 INDEX = 'idx_members_name_nocase'
+EVIL = 'evil\x1b[2K\x07\nlll: all good, index added'
 
 
 def port():
@@ -90,15 +92,22 @@ with tempfile.TemporaryDirectory(prefix='lll-name-index-') as directory:
         conn.execute('DROP TABLE invites')
         conn.execute('DELETE FROM _migrations WHERE file=?', (MIGRATION,))
         cols = [r[1] for r in conn.execute('PRAGMA table_info(members)')]
-        row = dict(zip(cols, conn.execute("SELECT * FROM members WHERE name='alice'").fetchone()))
-        row.update(id='upperalice00001', name='Alice', email='upper-alice@example.test', tokenKey='upper-alice-token-key-0123456789abcdef')
-        conn.execute(f"INSERT INTO members ({','.join(cols)}) VALUES ({','.join('?' * len(cols))})",
-                     [row[c] for c in cols])
+        base = dict(zip(cols, conn.execute("SELECT * FROM members WHERE name='alice'").fetchone()))
+        # A second pair whose names carry an escape sequence, a bell and a
+        # newline that would forge an "all good" line if printed raw.
+        for rid, name in [('upperalice00001', 'Alice'), ('evillower000001', EVIL), ('evilupper000001', EVIL.upper())]:
+            row = dict(base, id=rid, name=name, email=f'{rid}@example.test', tokenKey=f'{rid}-token-key-0123456789abcdef')
+            conn.execute(f"INSERT INTO members ({','.join(cols)}) VALUES ({','.join('?' * len(cols))})",
+                         [row[c] for c in cols])
 
     child, log, api = boot(2)
     try:
         output = log.read_text()
-        assert 'differ only by case' in output and ('alice / Alice' in output or 'Alice / alice' in output), output
+        assert '"Alice", "alice"' in output, output
+        # Member names reach the operator's terminal quoted: no raw escape,
+        # bell or newline, so no forged line.
+        assert '\x1b' not in output and '\x07' not in output, repr(output)
+        assert not any(line.startswith('lll: all good') for line in output.splitlines()), output
         # Both halves warn: the migration itself, and the boot-time retry.
         assert 'lll: member names differ only by case' in output, output
         assert 'warning: member names differ only by case' in output, output
@@ -111,8 +120,34 @@ with tempfile.TemporaryDirectory(prefix='lll-name-index-') as directory:
         # Nobody was renamed.
         names = sorted(m['name'] for m in call(api, '/api/collections/members/records?perPage=200', token=su)[1]['items'])
         assert 'Alice' in names and 'alice' in names, names
-        # 3. An administrator resolves the pair; the next boot adds the index.
+        # Without the index, two members renaming themselves to a case pair
+        # at the same moment must not both win (nameWrites serializes the
+        # check and the save), or the pair would keep the index away forever.
+        def person(name):
+            body = {'name': name, 'email': f'{name}@example.test', 'password': 'pw12345678',
+                    'passwordConfirm': 'pw12345678', 'kind': 'person', 'scope': 'all', 'mode': 'ro'}
+            code, rec = call(api, '/api/collections/members/records', body, su)
+            assert code == 200, rec
+            tok = call(api, '/api/collections/members/auth-with-password',
+                       {'identity': body['email'], 'password': body['password']})[1]['token']
+            return rec['id'], tok
+        writers = [person('racer-a'), person('racer-b')]
+        for i in range(20):
+            barrier, results = threading.Barrier(2), [None, None]
+
+            def rename(w, name):
+                member_id, tok = writers[w]
+                barrier.wait()
+                results[w] = call(api, f'/api/collections/members/records/{member_id}', {'name': name}, tok, 'PATCH')[0]
+            threads = [threading.Thread(target=rename, args=(w, n)) for w, n in enumerate([f'Twin{i}', f'twin{i}'])]
+            for th in threads:
+                th.start()
+            for th in threads:
+                th.join()
+            assert sorted(results) == [200, 400], (i, results)
+        # 3. An administrator resolves the pairs; the next boot adds the index.
         assert call(api, '/api/collections/members/records/upperalice00001', {'name': 'alice-two'}, su, 'PATCH')[0] == 200
+        assert call(api, '/api/collections/members/records/evilupper000001', {'name': 'evil-two'}, su, 'PATCH')[0] == 200
     finally:
         stop(child)
     child, log, api = boot(3)

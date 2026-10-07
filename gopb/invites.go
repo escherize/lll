@@ -11,6 +11,7 @@ import (
 	"regexp"
 	"slices"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/pocketbase/dbx"
@@ -166,6 +167,8 @@ func redeemInvite(app core.App, code, name string, now time.Time) (*core.Record,
 		return nil, errInviteUnknown
 	}
 	var member *core.Record
+	nameWrites.Lock()
+	defer nameWrites.Unlock()
 	err := app.RunInTransaction(func(tx core.App) error {
 		invite, err := tx.FindFirstRecordByData("invites", "code_hash", inviteCodeHash(code))
 		if errors.Is(err, sql.ErrNoRows) {
@@ -409,20 +412,33 @@ func registerMemberNameGuard(app core.App) {
 		if e.HasSuperuserAuth() || e.Record.GetString("name") == e.Record.Original().GetString("name") {
 			return e.Next()
 		}
-		if err := checkChosenName(e.App, e.Record); err != nil {
-			return err
-		}
-		return e.Next()
+		return checkedNameWrite(e)
 	})
 	app.OnRecordCreateRequest("members").BindFunc(func(e *core.RecordRequestEvent) error {
 		if e.HasSuperuserAuth() || e.Record.GetString("kind") != botKind {
 			return e.Next()
 		}
-		if err := checkChosenName(e.App, e.Record); err != nil {
-			return err
-		}
-		return e.Next()
+		return checkedNameWrite(e)
 	})
+}
+
+// nameWrites serializes every checked member-name write in this process -
+// renames, bot creates and redemptions - across its check and its save.
+// Without it two writes can both pass the check before either saves. The
+// case-folded unique index (idx_members_name_nocase) also refuses that,
+// but a board holding older case pairs has no index yet, and there the
+// lock is the only thing that keeps a new pair from forming (which would
+// keep ensureNameIndex from ever adding it).
+var nameWrites sync.Mutex
+
+// checkedNameWrite checks e's name and saves it under nameWrites.
+func checkedNameWrite(e *core.RecordRequestEvent) error {
+	nameWrites.Lock()
+	defer nameWrites.Unlock()
+	if err := checkChosenName(e.App, e.Record); err != nil {
+		return err
+	}
+	return e.Next()
 }
 
 // checkChosenName applies the join name rule to m's name.
