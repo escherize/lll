@@ -141,7 +141,7 @@ with tempfile.TemporaryDirectory(prefix='lll-546-') as directory:
         bot_tok = found.group(1)
         assert text.count(bot_tok) == 1, 'the response printed the token more than once'
         assert f'export LLL_URL={board}\n' in text and '\nlll attach -k ALPHA\n' in text, text
-        assert ": 'You are joining lll team ALPHA at " + board + ".'" in text, text
+        assert "true 'You are joining lll team ALPHA at " + board + ".'" in text, text
         assert '#' not in text[text.index("<pre"):text.index('</pre>')], 'the prompt relies on #'
         bot = members()['bot-agent1']
         assert (bot['kind'], bot['owner'], bot['scope'], bot['teams'], bot['mode']) == \
@@ -196,6 +196,33 @@ with tempfile.TemporaryDirectory(prefix='lll-546-') as directory:
         assert call(api, '/api/collections/issues/records?perPage=1', token=bot_tok)[0] == 200, \
             'a refused re-mint rotated the existing bot token'
 
+        # A team key or url outside the prompt allowlist is refused on both
+        # paths before any bot exists (LLL-546 review; the server does not
+        # validate keys yet, LLL-628).
+        evil_keys = ["Q\r\x1b[KTOUCH PWNCR;: '", "Q\\';TOUCH PWNE2E;ECHO '"]
+        evil_ids = []
+        for key in evil_keys:
+            code, team = call(api, '/api/collections/teams/records', {'key': key, 'name': 'evil'}, su)
+            assert code == 200, team
+            evil_ids.append(team['id'])
+        call(api, f"/api/collections/members/records/{writer['id']}", {'teams': [alpha['id']] + evil_ids}, su, 'PATCH')
+        cli_env = {k: v for k, v in env.items() if not k.startswith('LLL_')}
+        cli_env.update(HOME=str(root / 'home'), LLL_URL=api, LLL_TOKEN=rw_tok)
+        for i, key in enumerate(evil_keys):
+            stored = call(api, f"/api/collections/teams/records/{evil_ids[i]}", token=su)[1]['key']
+            code, body = post(rw_tok, {'name': f'evil{i}', 'team': stored})
+            text = html.unescape(str(body))
+            assert code == 200 and 'team key' in text and 'rename the team' in text, (key, text)
+            assert not TOKEN.search(text)
+            out = subprocess.run([binary, 'bot', f'bot-evilcli{i}', '--team', stored], cwd=root, env=cli_env,
+                                 text=True, capture_output=True, timeout=30)
+            assert out.returncode != 0 and 'team key' in out.stderr and 'LLL_TOKEN' not in out.stdout, \
+                out.stdout + out.stderr
+        url_env = dict(cli_env, LLL_URL=api.replace('http://', 'http://u@'))
+        out = subprocess.run([binary, 'bot', 'bot-evilurl', '--team', 'ALPHA', '--env'], cwd=root, env=url_env,
+                             text=True, capture_output=True, timeout=30)
+        assert out.returncode != 0 and 'server url' in out.stderr and out.stdout == '', out.stdout + out.stderr
+        assert set(members()) == before, set(members()) ^ before
         # 'bot-' typed into the name is accepted, not doubled.
         code, body = post(rw_tok, {'name': 'bot-agent2', 'team': 'ALPHA'})
         assert code == 200 and TOKEN.search(html.unescape(body)), body

@@ -86,33 +86,42 @@ fn status_classification_ignores_url_and_body_digits() {
 fn agent_prompt_is_the_design_doc_prompt() {
   let got = agent_prompt("https://lll.example.com", "ALPHA", "aaa.bbb-c_d.eee")
   // The doc's text, reshaped into a script every shell runs harmlessly
-  // (LLL-546 F1): prose is the no-op `:` with one quoted word, never `#`.
-  let want = ": 'You are joining lll team ALPHA at https://lll.example.com.'
+  // (LLL-546 F1): prose is the no-op `true` with one quoted word, never `#`.
+  let want = "true 'You are joining lll team ALPHA at https://lll.example.com.'
 export LLL_URL=https://lll.example.com
 export LLL_TOKEN=aaa.bbb-c_d.eee
 lll attach -k ALPHA
-: 'Read the workflow:'
+true 'Read the workflow:'
 lll skill get software-factory
-: 'Claim an issue before you edit code; record findings on the board.'
+true 'Claim an issue before you edit code; record findings on the board.'
 "
   assert got == want
   assert !got.contains("#")
 }
 
-/// The shells a pasted prompt meets. Interactive zsh without
-/// interactive_comments (the macOS default) runs `#` lines as commands, so
-/// it is the case that matters most; zsh rows are skipped, saying so, only
-/// where zsh is not installed.
+/// The shells a pasted prompt meets, each skipped (saying so) only where it
+/// is not installed. Interactive zsh without interactive_comments (the macOS
+/// default) runs `#` lines as commands; fish reads `\'` inside single quotes
+/// as an escape.
 fn prompt_shells() -> Slice<Slice<string>> {
   let mut shells = [
     ["/bin/sh", "prompt.txt"],
     ["/bin/sh", "-c", "exec bash --norc --noprofile -i < prompt.txt"],
   ]
-  if exec.LookPath("zsh").is_ok() {
-    shells = shells.append(["/bin/sh", "-c", "exec zsh -f prompt.txt"])
-    shells = shells.append(["/bin/sh", "-c", "exec zsh -f -i < prompt.txt"])
-  } else {
-    fmt.Println("token.test: zsh not installed here; skipping the zsh prompt shells")
+  let optional = [
+    ["zsh", "exec zsh -f prompt.txt"],
+    ["zsh", "exec zsh -f -i < prompt.txt"],
+    ["dash", "exec dash -i < prompt.txt"],
+    ["ksh", "exec ksh -i < prompt.txt"],
+    ["fish", "exec fish --no-config prompt.txt"],
+    ["fish", "exec fish --no-config -i < prompt.txt"],
+  ]
+  for o in optional {
+    if exec.LookPath(o[0]).is_ok() {
+      shells = shells.append(["/bin/sh", "-c", o[1]])
+    } else {
+      fmt.Println(f"token.test: {o[0]} not installed here; skipping: {o[1]}")
+    }
   }
   shells
 }
@@ -126,12 +135,21 @@ fn run_prompt_in(t: TestContext, shell: Slice<string>, url: string, team: string
   let assert Ok(_) = os.Mkdir(bin, 0o755)
   let stub = "#!/bin/sh\nfor a in \"$@\"; do printf '%s\\n' \"$a\" >> \"$PROMPT_LOG\"; done\n"
   let assert Ok(_) = os.WriteFile(filepath.Join(bin, "lll"), stub.bytes(), 0o755)
-  let prompt = agent_prompt(url, team, "aaa.bbb.ccc")
+  let prompt = agent_prompt(url, team, "aaa.bbb-c_d.eee")
   let assert Ok(_) = os.WriteFile(filepath.Join(dir, "prompt.txt"), prompt.bytes(), 0o644)
   let mut cmd = exec.Command(shell[0], shell[1..]...)
   cmd.Dir = dir
-  cmd.Env = [f"PATH={bin}:/usr/bin:/bin:/usr/local/bin:/opt/homebrew/bin", f"PROMPT_LOG={dir}/args.log", f"HOME={dir}", "HISTFILE=/dev/null"]
+  cmd.Env = [
+    f"PATH={bin}:/usr/bin:/bin:/usr/local/bin:/opt/homebrew/bin",
+    f"PROMPT_LOG={dir}/args.log",
+    f"HOME={dir}",
+    "HISTFILE=/dev/null",
+    f"XDG_DATA_HOME={dir}/.xdg",
+    f"XDG_CONFIG_HOME={dir}/.xdg",
+    f"XDG_CACHE_HOME={dir}/.xdg",
+  ]
   let _ = cmd.Run()
+  let _ = os.RemoveAll(filepath.Join(dir, ".xdg"))
   let assert Ok(entries) = os.ReadDir(dir)
   let names = entries.map(|e| e.Name())
   let log = os.ReadFile(filepath.Join(dir, "args.log")).map_or("", |b| b as string)
@@ -139,22 +157,70 @@ fn run_prompt_in(t: TestContext, shell: Slice<string>, url: string, team: string
   (names, log)
 }
 
-#[test]
-fn the_whole_prompt_is_a_harmless_shell_script_for_hostile_values(t: TestContext) {
-  // Review repros: a ' in the url or key closing a quote, and interactive
-  // zsh expanding `$(..)`, `$=IFS` and backticks on a `#` line.
-  let urls = [
+/// Values the reviews used to run code through the prompt in some shell.
+fn hostile_urls() -> Slice<string> {
+  [
     "http://x'$(touch$IFS.pwned)@127.0.0.1:1",
     "http://$(touch$=IFS'PWNED-e2e')@127.0.0.1:1",
+    "http://u@127.0.0.1:1",
     "http://x/`touch .pwned`",
     "http://x/\ntouch .pwned\n",
-    "http://x/'\ntouch .pwned #",
     "http://x/!!;touch .pwned",
+    "http://x/~/a",
+    "http://x/a=b",
+    "http://x/?q=1",
+    "http://x/#frag",
+    "http://x/a\\b",
+    "ftp://x/",
+    "http://x/\r\u{1b}[Ktouch .pwned",
   ]
-  let teams = ["Q'$(touch$IFS.PWNTEAM)", "Q$(touch$=IFS'PWNTEAM')", "Q`touch .PWNTEAM`", "Q\ntouch .PWNTEAM", "ALPHA"]
-  for shell in prompt_shells() {
-    for url in urls {
-      for team in teams {
+}
+
+fn hostile_teams() -> Slice<string> {
+  [
+    "Q'$(touch$IFS.PWNTEAM)",
+    "Q$(touch$=IFS'PWNTEAM')",
+    "Q`touch .PWNTEAM`",
+    "Q\ntouch .PWNTEAM",
+    "Q\\';TOUCH PWNE2E;ECHO '",
+    "Q\r\u{1b}[KTOUCH PWNCR;: '",
+    "=TOUCH",
+    "Q~",
+    "-Q",
+    "q",
+  ]
+}
+
+#[test]
+fn prompt_values_outside_the_allowlist_are_refused_naming_the_field() {
+  for url in hostile_urls() {
+    let assert Err(e) = check_prompt_values(url, "ALPHA", "bot-x")
+    assert e.contains("server url") && e.contains("cannot paste safely")
+    // Quoted in the message, so a CR or ESC cannot repaint the terminal.
+    assert !e.contains("\r") && !e.contains("\u{1b}")
+  }
+  for team in hostile_teams() {
+    let assert Err(e) = check_prompt_values("http://127.0.0.1:8090", team, "bot-x")
+    assert e.contains("team key") && e.contains("rename the team") && e.contains("LLL-628")
+    assert !e.contains("\r") && !e.contains("\u{1b}")
+  }
+  for name in ["bot-", "bot-a b", "bot-a'b", "bot-$(id)", "bot-\u{1b}x", "x"] {
+    let assert Err(e) = check_prompt_values("http://127.0.0.1:8090", "ALPHA", name)
+    assert e.contains("bot name")
+  }
+  // --env prints no team, so it checks none.
+  assert check_prompt_values("http://127.0.0.1:8090", "", "bot-x").is_ok()
+}
+
+#[test]
+fn every_allowed_prompt_is_a_harmless_script_in_every_shell(t: TestContext) {
+  let urls = ["https://lll.example.com", "http://127.0.0.1:8090", "http://[::1]:8090/sub/p_a.th", "https://h-1.example/"]
+  let teams = ["ALPHA", "A-1", "Q9"]
+  let shells = prompt_shells()
+  for url in urls {
+    for team in teams {
+      let assert Ok(_) = check_prompt_values(url, team, "bot-x.y_z")
+      for shell in shells {
         let (names, log) = run_prompt_in(t, shell, url, team)
         assert names.equals(["args.log", "bin", "prompt.txt"])
         // The stub saw exactly the two intended commands, each value whole.

@@ -400,8 +400,8 @@ with tempfile.TemporaryDirectory(prefix='lll-team-scope-') as directory:
         # with the creator's access rather than every team read-write.
         out = lll('bot', 'bot-boss', env=boss_env)
         assert out.returncode == 0 and 'owned by boss' in out.stdout, out.stdout + out.stderr
-        assert ": 'You are joining lll team ALPHA at " + api + ".'\n" in out.stdout, out.stdout
-        assert "\nlll attach -k ALPHA\n: 'Read the workflow:'\nlll skill get software-factory\n" in out.stdout, out.stdout
+        assert "true 'You are joining lll team ALPHA at " + api + ".'\n" in out.stdout, out.stdout
+        assert "\nlll attach -k ALPHA\ntrue 'Read the workflow:'\nlll skill get software-factory\n" in out.stdout, out.stdout
         bot_tok = next(l for l in out.stdout.splitlines() if l.startswith('export LLL_TOKEN='))[len('export LLL_TOKEN='):]
 
         def bot_record():

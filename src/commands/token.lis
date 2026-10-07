@@ -360,6 +360,8 @@ fn bot_create(args: Slice<string>) -> Result<(), string> {
   // Resolved before anything is created or minted, so a refusal leaves the
   // bot and its current token as they were.
   let team = prompt_team(tok, env_only, p.one("--team"))?
+  let url = config.load()?.url
+  check_prompt_values(url, team, name)?
   let existing = records.find_member_as(tok, name)?
   if let Some(member) = existing {
     if member.kind != "bot" {
@@ -375,7 +377,7 @@ fn bot_create(args: Slice<string>) -> Result<(), string> {
       env_only,
       f"member {name} exists; rotated its token (the previous one stops working)",
     )
-    return print_bot_credential(name, minted, team, duration, env_only)
+    return print_bot_credential(name, minted, url, team, duration, env_only)
   } else {
     let owner = caller.map_or("", |me| me.id)
     let created = create_bot_member_as(tok, name, owner)?
@@ -389,7 +391,7 @@ fn bot_create(args: Slice<string>) -> Result<(), string> {
     )
   }
   let minted = bot_mint(tok, name, duration)?
-  print_bot_credential(name, minted, team, duration, env_only)
+  print_bot_credential(name, minted, url, team, duration, env_only)
 }
 
 /// `lll bot rotate bot-NAME [--duration s]`: re-mint the bot's token and strand
@@ -416,8 +418,10 @@ fn bot_rotate(args: Slice<string>) -> Result<(), string> {
   let duration = parse_token_duration(p.one("--duration"))?
   let env_only = p.given("--env")
   let team = prompt_team(tok, env_only, p.one("--team"))?
+  let url = config.load()?.url
+  check_prompt_values(url, team, name)?
   let minted = bot_mint(tok, name, duration)?
-  print_bot_credential(name, minted, team, duration, env_only)
+  print_bot_credential(name, minted, url, team, duration, env_only)
 }
 
 /// token create's flags plus the two that shape the bot's handoff.
@@ -481,11 +485,15 @@ fn bot_status(env_only: bool, line: string) {
 fn print_bot_credential(
   name: string,
   tok: string,
+  url: string,
   team: string,
   duration: int,
   env_only: bool,
 ) -> Result<(), string> {
-  let url = config.load()?.url
+  // The server minted it, but it is printed into a shell all the same.
+  if !regexp.MustCompile("^[A-Za-z0-9._-]+$").MatchString(tok) {
+    return Err("the minted token contains characters lll cannot paste safely into a shell; nothing was printed")
+  }
   let expiry = expiry_line(duration, time.Now())
   if env_only {
     fmt.Print(agent_env(url, tok))
@@ -505,18 +513,45 @@ fn agent_env(url: string, tok: string) -> string {
   f"export LLL_URL={shell_word(url)}\nexport LLL_TOKEN={shell_word(tok)}\n"
 }
 
+/// The values a prompt may carry, checked before any bot is created or
+/// token minted (LLL-546 review). Quoting arbitrary input for every shell a
+/// prompt gets pasted into cannot be done (fish reads backslashes inside
+/// single quotes, zsh expands a leading `=`, a terminal renders CR and ESC),
+/// so the safety is an allowlist: a value outside it is refused, naming the
+/// field, and no prompt is printed. `team` is "" for --env, which prints
+/// none. The root fix for hostile team keys is server-side (LLL-628).
+pub fn check_prompt_values(url: string, team: string, name: string) -> Result<(), string> {
+  let url_ok = regexp.MustCompile(
+    r"^https?://(\[[0-9A-Fa-f:.]+\]|[A-Za-z0-9.-]+)(:[0-9]{1,5})?(/[A-Za-z0-9._/-]*)?$",
+  )
+  if !url_ok.MatchString(url) {
+    return Err(
+      f"the server url {strconv.Quote(url)} contains characters lll cannot paste safely into a shell; use a plain http(s)://host[:port][/path] url (no user, query or fragment)",
+    )
+  }
+  if team != "" && !regexp.MustCompile("^[A-Z0-9][A-Z0-9-]*$").MatchString(team) {
+    return Err(
+      f"team key {strconv.Quote(team)} contains characters lll cannot paste safely into a shell; rename the team (server-side key validation is LLL-628)",
+    )
+  }
+  if !regexp.MustCompile("^bot-[A-Za-z0-9][A-Za-z0-9._-]*$").MatchString(name) {
+    return Err(
+      f"bot name {strconv.Quote(name)} contains characters lll cannot paste safely into a shell; use letters, digits, '.', '_' and '-' after bot-",
+    )
+  }
+  Ok(())
+}
+
 /// The copyable agent prompt, newline-terminated. It is the design doc's
 /// prompt (scoped-access-invites, Decision step 3) reshaped so the whole
-/// text is also a harmless shell script: people paste it into shells, and
-/// the url (config, LLL_URL, a committed .lll.toml) and team key are not
-/// trusted. No line relies on `#`: interactive zsh without
-/// interactive_comments (the macOS default) runs a `#` line as a command
-/// and expands its arguments. Prose lines are the no-op builtin `:` with the
-/// whole sentence as one single-quoted word, and every value on a command
-/// line is one quoted shell word. The doc's "You're" is "You are" (LLL-546
-/// security review, F1 twice).
+/// text is also a harmless shell script. Its values have passed
+/// check_prompt_values; that allowlist is the safety, and the quoting below
+/// is belt and braces. No line relies on `#`: interactive zsh without
+/// interactive_comments (the macOS default) runs a `#` line as a command.
+/// Prose lines are the no-op `true` with the sentence as one
+/// single-quoted word. The doc's "You're" is "You are".
 fn agent_prompt(url: string, team: string, tok: string) -> string {
-  prose(f"You are joining lll team {one_line(team)} at {one_line(url)}.") +
+  prose(f"You are joining lll team {team} at {url}.") +
   agent_env(url, tok) +
   f"lll attach -k {shell_word(team)}\n" +
   prose("Read the workflow:") +
@@ -524,15 +559,11 @@ fn agent_prompt(url: string, team: string, tok: string) -> string {
   prose("Claim an issue before you edit code; record findings on the board.")
 }
 
-/// A prose line that every shell runs as a no-op: `: '<text>'`.
+/// A prose line that every shell runs as a no-op: `true '<text>'`. `true`
+/// rather than `:`, which fish lacks. `text` is a constant sentence or
+/// allowlisted values, so it holds no quote or backslash to escape.
 fn prose(text: string) -> string {
-  ": '" + strings.ReplaceAll(text, "'", "'\\''") + "'\n"
-}
-
-/// `s` with control characters replaced, so a value keeps its prose line
-/// to one line for the reader. Safety comes from the quoting in `prose`.
-fn one_line(s: string) -> string {
-  regexp.MustCompile(r"[\x00-\x1f\x7f]").ReplaceAllString(s, "?")
+  "true '" + text + "'\n"
 }
 
 /// `s` as one shell word. The prompt is pasted into a shell, and the url
