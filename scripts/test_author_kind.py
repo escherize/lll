@@ -3,6 +3,7 @@
 'issue view', --raw, --json and the board's issue page and ?raw."""
 import json
 import os
+import re
 import subprocess
 import sys
 import urllib.request
@@ -47,21 +48,27 @@ orphan = member('bot-ak-orphan', kind='bot')
 for author, body in ((owner, 'person words'), (owned, 'owned bot words'), (orphan, 'orphan bot words')):
     admin('/api/collections/comments/records', dict(issue=issue['id'], author=author['id'], body=body))
 
+# LLL-621: comments list by (created, id). PocketBase stamps 'created' to the
+# millisecond, so two of these fixtures can tie and then sort by their random
+# ids. Every assertion below finds a comment by its author, never by position.
 view = cli('issue', 'view', key)
-assert '#1 ak-owner (' in view, view
-assert '#2 bot-ak-owned [bot via ak-owner] (' in view, view
-assert '#3 bot-ak-orphan [bot] (' in view, view
+assert re.search(r'^#[1-3] ak-owner \(', view, re.M), view
+assert re.search(r'^#[1-3] bot-ak-owned \[bot via ak-owner\] \(', view, re.M), view
+assert re.search(r'^#[1-3] bot-ak-orphan \[bot\] \(', view, re.M), view
 
 raw = cli('issue', 'view', key, '--raw')
 assert '- **ak-owner** (' in raw, raw
 assert '- **bot-ak-owned** [bot via ak-owner] (' in raw, raw
 assert '- **bot-ak-orphan** [bot] (' in raw, raw
 
-authors = [c['expand']['author'] for c in json.loads(cli('issue', 'view', key, '--json'))['comments']]
-assert authors[0]['kind'] == 'person' and 'expand' not in authors[0], authors[0]
-assert authors[1]['kind'] == 'bot' and authors[1]['owner'] == owner['id'], authors[1]
-assert authors[1]['expand']['owner'] == dict(id=owner['id'], name='ak-owner'), authors[1]
-assert authors[2]['kind'] == 'bot' and 'expand' not in authors[2], authors[2]
+authors = {c['expand']['author']['name']: c['expand']['author']
+           for c in json.loads(cli('issue', 'view', key, '--json'))['comments']}
+assert sorted(authors) == ['ak-owner', 'bot-ak-orphan', 'bot-ak-owned'], authors
+person, bot_owned, bot_orphan = authors['ak-owner'], authors['bot-ak-owned'], authors['bot-ak-orphan']
+assert person['kind'] == 'person' and 'expand' not in person, person
+assert bot_owned['kind'] == 'bot' and bot_owned['owner'] == owner['id'], bot_owned
+assert bot_owned['expand']['owner'] == dict(id=owner['id'], name='ak-owner'), bot_owned
+assert bot_orphan['kind'] == 'bot' and 'expand' not in bot_orphan, bot_orphan
 
 page = web('/issue/' + key)
 assert '<b>ak-owner</b> · ' in page and '<b>ak-owner</b> · via' not in page, page
