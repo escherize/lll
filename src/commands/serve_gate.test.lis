@@ -64,6 +64,15 @@ fn scoped_viewer_allowlist() {
 }
 
 #[test]
+fn login_redirect_stays_on_the_board() {
+  assert local_path("/t/AAA/") == "/t/AAA/"
+  assert local_path("/t/AAA/issue/AAA-1?order=priority") == "/t/AAA/issue/AAA-1?order=priority"
+  for bad in ["", "//evil.example/", "https://evil.example/", "/\\evil.example", "t/AAA"] {
+    assert local_path(bad) == "/"
+  }
+}
+
+#[test]
 fn member_viewer_writes_only_when_read_write() {
   let m = ViewerMember { id: "m1", name: "ann", token: "t", rw: true }
   let v = ScopedViewer { teams: ["AAA", "CCC"], member: Some(m) }
