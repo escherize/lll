@@ -6,7 +6,7 @@ minors. Issue keys are on the project's own board (`lll issue view KEY`).
 
 ## [Unreleased]
 
-## [0.7.0] - 2026-10-06
+## [0.7.0] - 2026-10-07
 
 Members can be scoped to teams, one member can run a fleet of labelled agents,
 and a `lll login` token now renews itself instead of dying after five days.
@@ -65,6 +65,9 @@ Several retired flag spellings are gone; see Removed before upgrading scripts.
   without `--force` (LLL-516).
 - The board label picker adds and removes single labels, so it no longer
   drops a label added concurrently from the CLI (LLL-519).
+- The home config (`~/.config/lll/lll.toml`) is written to a temp file and
+  renamed into place, so a concurrent reader never sees it empty; a symlinked
+  config is written through its link (LLL-441).
 
 ### Removed
 
