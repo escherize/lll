@@ -123,7 +123,7 @@ fn fetch_team_comments_where(team_id: string, where: string) -> Result<Slice<mod
   let mut page = 1
   loop {
     let mut list = models.CommentList { .. }
-    pb.fetch(f"/api/collections/comments/records?perPage=500&page={page}&sort=created&expand=author&fields=id,issue,body,updated,expand.author.name&filter={cfilter}", "comments", &list)?
+    pb.fetch(f"/api/collections/comments/records?perPage=500&page={page}&sort=created,id&expand=author&fields=id,issue,body,updated,expand.author.name&filter={cfilter}", "comments", &list)?
     out = out.append(list.items...)
     if list.items.length() < 500 { break }
     page += 1
