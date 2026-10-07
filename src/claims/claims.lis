@@ -37,10 +37,20 @@ struct RenewRequest {
   agent: string,
 }
 #[json]
-struct AssignmentRequest { claim_id: string, fields: json.RawMessage }
+struct AssignmentRequest {
+  claim_id: string,
+  fields: json.RawMessage,
+  #[json(omitempty)]
+  agent: string,
+  force: bool,
+  reason: string,
+}
 
-pub fn update_assignment(issue_id: string, claim_id: string, fields: string) -> Result<Transition, string> {
-  transact(issue_id, "assignment", AssignmentRequest { claim_id, fields: fields.bytes() as json.RawMessage })
+/// Clearing the assignee releases the observed claim, so it follows the
+/// release rule (LLL-516): only the holder clears it without force, and a
+/// forced clear leaves a comment on the issue, with `reason` if given.
+pub fn update_assignment(issue_id: string, claim_id: string, fields: string, agent: string, force: bool, reason: string) -> Result<Transition, string> {
+  transact(issue_id, "assignment", AssignmentRequest { claim_id, fields: fields.bytes() as json.RawMessage, agent, force, reason })
 }
 
 pub fn observed_id(issue_id: string) -> Result<string, string> {

@@ -297,6 +297,22 @@ fn issue_update_spec() -> Slice<flags.Flag> {
       help: "remove a label and keep the others; repeatable (not with --label)",
       ..,
     },
+    flags.Flag { name: "--force", help: "with --assignee none: clear a claim another member, or another agent label on your token, holds; leaves a comment on the issue", .. },
+    flags.Flag {
+      name: "-b",
+      alias: "--body",
+      value: true,
+      hint: "\"why\"",
+      help: "with --force: the reason, recorded in the comment ('-b -' reads stdin)",
+      ..,
+    },
+    flags.Flag {
+      name: "--agent",
+      value: true,
+      hint: "NAME",
+      help: "self-asserted session label, for agents sharing one member token\n(default: LLL_AGENT)",
+      ..,
+    },
   ]...))
 }
 
@@ -1295,6 +1311,18 @@ fn update(input: flags.CommandInput) -> Result<(), string> {
   if p.given("--assignee") && assignee_name == "" {
     return Err("--assignee needs a member name, or 'none' to clear it")
   }
+  // LLL-516: clearing the assignee releases the claim, so it takes release's
+  // --force, reason and agent label, and nothing else does.
+  let force = p.given("--force")
+  if force && assignee_name != "none" {
+    return Err("--force clears another holder's claim; it goes with --assignee none")
+  }
+  let mut reason = ""
+  if p.given("-b") {
+    if !force { return Err("-b is the reason for a forced clear; add --force") }
+    reason = value_or_stdin(p.one("-b"), "-b")?
+  }
+  let agent = if assignee_name != "" { agent_label(p)? } else { "" }
   // LLL-399: the stamp rides the direct PATCH. Assignment writes go through
   // the claim route, which carries no precondition header — honouring the
   // flag there would mean a guard that silently stops guarding. The claims
@@ -1419,12 +1447,17 @@ fn update(input: flags.CommandInput) -> Result<(), string> {
   let mut released = ""
   if assignee_name != "" {
     let observed = claims.observed_id(issue.id)?
-    let result = claims.update_assignment(issue.id, observed, payload).map_err(|e| {
+    let result = claims.update_assignment(issue.id, observed, payload, agent, force, reason).map_err(|e| {
       if strings.Contains(e, "is claimed by") {
         f"{key}: {e} — {held_elsewhere_hint(key)}"
+      } else if strings.Contains(e, "needs force") {
+        f"{key}: {pb.display_error(e).summary} — 'lll issue update {key} --assignee none --force -b \"why\"' clears it anyway and comments on the issue"
       } else { f"{key}: {e}" }
     })?
-    if result.claim_id != "" { released = f" (released {result.member_name}'s claim)" }
+    if result.claim_id != "" {
+      let forced = if result.forced { "; forced, and commented on the issue" } else { "" }
+      released = f" (released {result.member_name}'s claim{forced})"
+    }
   } else {
     // The stamp rides the write (LLL-399): the precondition holds at the
     // server, so a write landing between this process's read and its PATCH

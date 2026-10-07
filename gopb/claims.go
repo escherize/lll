@@ -154,18 +154,9 @@ func releaseClaim(app core.App, issueID, expectedClaimID string, by releaser) (C
 			return &claimRejection{"the claim changed; refresh before releasing it"}
 		}
 		memberID := held.GetString("member")
-		name := "an unknown member"
-		if member, err := tx.FindRecordById("members", memberID); err == nil {
-			name = member.GetString("name")
-		}
-		holder := byline(name, held.GetString("agent"))
-		otherSession := memberID == by.memberID && agentsDiffer(held, by.agent)
-		forced := memberID != by.memberID || otherSession
-		if forced && !by.force {
-			if otherSession {
-				return &claimRejection{fmt.Sprintf("the claim is held by %s; releasing another session's claim needs force", holder)}
-			}
-			return &claimRejection{fmt.Sprintf("the claim is held by %s; releasing another member's claim needs force", holder)}
+		name, holder, forced, err := releaseAuthority(tx, held, by)
+		if err != nil {
+			return err
 		}
 		cleared := issue.GetString("assignee") == memberID
 		if err := tx.Delete(held); err != nil {
@@ -189,6 +180,30 @@ func releaseClaim(app core.App, issueID, expectedClaimID string, by releaser) (C
 		return ClaimOutcome{}, err
 	}
 	return outcome, nil
+}
+
+// releaseAuthority is the one release rule (LLL-512, LLL-521), shared by
+// /release and an assignment edit that clears the assignee (LLL-516): the
+// holder releases freely; another member, a superuser, or the holder's member
+// under a different agent label needs force. It returns the holder's name and
+// byline, and whether the release is forced and so owes a comment. Without
+// force, a forced release is refused naming the holder.
+func releaseAuthority(tx core.App, held *core.Record, by releaser) (name, holder string, forced bool, err error) {
+	memberID := held.GetString("member")
+	name = "an unknown member"
+	if member, err := tx.FindRecordById("members", memberID); err == nil {
+		name = member.GetString("name")
+	}
+	holder = byline(name, held.GetString("agent"))
+	otherSession := memberID == by.memberID && agentsDiffer(held, by.agent)
+	forced = memberID != by.memberID || otherSession
+	if forced && !by.force {
+		if otherSession {
+			return name, holder, forced, &claimRejection{fmt.Sprintf("the claim is held by %s; releasing another session's claim needs force", holder)}
+		}
+		return name, holder, forced, &claimRejection{fmt.Sprintf("the claim is held by %s; releasing another member's claim needs force", holder)}
+	}
+	return name, holder, forced, nil
 }
 
 // recordForcedRelease writes the comment a forced release owes the holder

@@ -7,7 +7,7 @@ Claim acquisition and release use authenticated server operations:
 | `POST /api/lll/issues/{issue-id}/claim` | `{"member":"member-id","agent":"optional-label"}` | Acquire the exclusive claim and assign its holder in one transaction. |
 | `POST /api/lll/issues/{issue-id}/release` | `{"claim_id":"observed-claim-id","agent":"","force":false,"reason":""}` | Remove that exact claim and clear assignment only if it still names the holder, in one transaction. `agent`, `force` and `reason` are optional. |
 | `POST /api/lll/issues/{issue-id}/renew` | `{"claim_id":"observed-claim-id","agent":"optional-label"}` | Restart that exact claim's expiry clock. Only the holder may renew, and a differing agent label is refused. The claim keeps its id and `created`. |
-| `POST /api/lll/issues/{issue-id}/assignment` | `{"claim_id":"observed-claim-id","fields":{"assignee":"member-id"}}` | Update assignment and accompanying issue fields, releasing the observed claim if assignment is cleared. |
+| `POST /api/lll/issues/{issue-id}/assignment` | `{"claim_id":"observed-claim-id","fields":{"assignee":"member-id"},"agent":"","force":false,"reason":""}` | Update assignment and accompanying issue fields, releasing the observed claim if assignment is cleared. `agent`, `force` and `reason` are optional and apply only to that release. |
 
 Members can claim only for themselves; an omitted member ID uses the
 authenticated member. Superusers must name the intended member. Naming the
@@ -83,8 +83,14 @@ Comments carry the same label, and every view shows it after the author.
 Assignment edits must include the observed claim ID; an empty string means
 the caller observed no claim. A changed observation rejects the entire edit.
 While a claim exists, assigning a different member is refused. Assigning the
-holder preserves the claim; assigning `""` releases it. This path does not yet
-apply the holder rule that `/release` applies (LLL-516). The optional accompanying
+holder preserves the claim; assigning `""` releases it, under the same rule
+as `/release` (LLL-516): the holder clears it freely; another member, a
+superuser, or another agent label on the holder's token is refused naming the
+holder unless the request sends `"force": true`, and a forced clear writes the
+same comment a forced release writes, in the same transaction. The CLI
+spelling is `lll issue update KEY --assignee none --force [-b "why"]`. The
+board's assignee editor always sends force, as its Release button does, so
+its comment names the board's member. The optional accompanying
 fields are `title`, `description`, `state`, `priority`, `emoji`, `project`, and
 `labels`. Omitted fields stay unchanged; explicit empty values and zero priority
 are applied. Field validation and claim release belong to the same transaction,
@@ -107,7 +113,11 @@ Native PocketBase record CRUD is a lower-level interface and does not compose
 claim and assignment changes automatically. CLI `issue update --assignee ...`
 and the board's assignee editor use the assignment operation. Edits without
 assignment continue to use native PATCH. This transaction contract does not
-imply that arbitrary direct record edits preserve the assignment policy.
+imply that arbitrary direct record edits preserve the assignment policy, with
+one exception (LLL-516): a native PATCH that moves a claimed issue's assignee
+to anyone but the holder is refused unless the holder's own member sends it.
+PATCH carries no force and writes no comment, so everyone else, a superuser
+included, clears through the assignment operation with force.
 
 Verification lives in `gopb/claims_test.go` (real database rollback and
 concurrency) and `scripts/test_claims_live.py` (authenticated HTTP, competing

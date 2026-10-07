@@ -110,8 +110,21 @@ status, rejected = request(path + '/release', {'claim_id': held['claim']['id']})
 assert status == 400 and 'claim changed' in rejected['message']
 assert state()['claim']['member'] == beta['id'] and state()['assignee'] == beta['id']
 
-# Assignment made by a low-level API client belongs to that edit, not the hold.
-assert request('/api/collections/issues/records/' + issue['id'], {'assignee': alpha['id']}, 'PATCH')[0] == 200
+# LLL-516: a native PATCH cannot move a claimed issue's assignee away from the
+# holder unless the holder sends it. PATCH has no force and writes no comment,
+# so another member and a superuser are refused, and nothing changes.
+su = os.environ['LLL_TEST_SUPERUSER_TOKEN']
+for auth in [token, alpha['token'], su]:
+    for assignee in ['', alpha['id']]:
+        status, refused = request('/api/collections/issues/records/' + issue['id'], {'assignee': assignee}, 'PATCH', auth=auth)
+        assert status == 400 and 'held by claim-beta' in refused['message'] and 'force' in refused['message'], (status, refused)
+assert state()['claim']['member'] == beta['id'] and state()['assignee'] == beta['id']
+# Assigning the holder, or editing another field, is not a move.
+assert request('/api/collections/issues/records/' + issue['id'], {'assignee': beta['id'], 'priority': 3}, 'PATCH')[0] == 200
+
+# Assignment the holder makes with a low-level API client belongs to that
+# edit, not the hold.
+assert request('/api/collections/issues/records/' + issue['id'], {'assignee': alpha['id']}, 'PATCH', auth=beta['token'])[0] == 200
 p = cli('issue', 'release', key, actor=beta)
 assert p.returncode == 0 and 'assignment unchanged' in p.stdout, p.stderr
 assert state()['claim'] is None and state()['assignee'] == alpha['id']
@@ -178,17 +191,33 @@ p = cli('issue', 'update', key, '--assignee', alpha['name'], '--title', 'same ho
 assert p.returncode == 0, p.stderr
 assert state()['claim']['id'] == held['id'] and state()['title'] == 'same holder edit' and state()['priority'] == 2
 
-# Native field validation must roll back the deletion as well as the edit.
+# Native field validation must roll back the deletion as well as the edit. The
+# holder sends it, so the release rule (LLL-516) lets it reach validation.
 before = state()
-status, error = request(path + '/assignment', {'claim_id': held['id'], 'fields': {'assignee': '', 'title': ''}})
+status, error = request(path + '/assignment', {'claim_id': held['id'], 'fields': {'assignee': '', 'title': ''}}, auth=alpha['token'])
 assert status == 400 and 'title' in error['data'], error
 assert state() == before
 for body in [{}, {'fields': {'assignee': ''}}, {'claim_id': '', 'fields': {'assignee': '', 'id': 'forged'}}]:
     assert request(path + '/assignment', body)[0] == 400
 assert request(path + '/assignment', {'claim_id': held['id'], 'fields': {'assignee': ''}}, auth='')[0] == 401
 assert state() == before
-p = cli('issue', 'update', key, '--assignee', 'none', '--title', 'released with edit', '--description', 'café transaction')
-assert p.returncode == 0 and "released claim-alpha's claim" in p.stdout, p.stderr
+# LLL-516: clearing the assignee releases the claim, so a non-holder (the
+# suite's own token, or a superuser) is refused without force, naming the
+# holder and the CLI's --force, and the whole edit stays uncommitted.
+p = cli('issue', 'update', key, '--assignee', 'none', '--title', 'must not commit')
+assert p.returncode != 0 and 'held by claim-alpha' in p.stderr and 'needs force' in p.stderr, p.stderr
+assert 'lll issue update ' + key + ' --assignee none --force' in p.stderr, p.stderr
+status, refused = request(path + '/assignment', {'claim_id': held['id'], 'fields': {'assignee': ''}}, auth=su)
+assert status == 400 and 'needs force' in refused['message'], refused
+p = cli('issue', 'update', key, '--assignee', 'none', '-b', 'no force', actor=beta)
+assert p.returncode != 0 and 'add --force' in p.stderr, p.stderr
+p = cli('issue', 'update', key, '--title', 'x', '--force')
+assert p.returncode != 0 and 'goes with --assignee none' in p.stderr, p.stderr
+assert state() == before
+# The holder clears freely, and it is not a forced release.
+p = cli('issue', 'update', key, '--assignee', 'none', '--title', 'released with edit', '--description', 'café transaction', actor=alpha)
+assert p.returncode == 0 and "released claim-alpha's claim)" in p.stdout and 'forced' not in p.stdout, (p.stdout, p.stderr)
+assert len(state()['comments']) == len(before['comments'])
 assert state()['claim'] is None and state()['assignee'] == '' and state()['title'] == 'released with edit'
 assert state()['description'] == 'café transaction'
 for assignee in [alpha['name'], beta['name'], 'none']:
@@ -262,7 +291,25 @@ finally:
     server.server_close()
     thread.join()
 
-print('Assignment: whole-edit rollback, none/same/different holder, invalid fields, delayed CLI clear/reassignment, and older-server refusal')
+# LLL-516: forced, a non-holder's clear goes through and leaves the comment a
+# forced release leaves, with the reason; a superuser's has no author.
+assert cli('issue', 'claim', key, actor=alpha).returncode == 0
+comments = len(state()['comments'])
+p = cli('issue', 'update', key, '--assignee', 'none', '--force', '-b', 'alpha went quiet', actor=beta)
+assert p.returncode == 0 and "released claim-alpha's claim; forced, and commented" in p.stdout, (p.stdout, p.stderr)
+after = state()
+assert after['claim'] is None and after['assignee'] == '' and len(after['comments']) == comments + 1
+note = after['comments'][-1]
+assert note['body'] == "claim-beta force-released claim-alpha's claim.\n\nReason: alpha went quiet" and note['author'] == beta['id'], note
+assert cli('issue', 'claim', key, actor=alpha).returncode == 0
+held = state()['claim']
+status, outcome = request(path + '/assignment', {'claim_id': held['id'], 'fields': {'assignee': ''}, 'force': True}, auth=su)
+assert status == 200 and outcome['forced'] and outcome['cleared_assignee'], outcome
+note = state()['comments'][-1]
+assert note['author'] == '' and note['body'] == "An administrator force-released claim-alpha's claim.", note
+assert state()['claim'] is None and len(state()['comments']) == comments + 2
+
+print('Assignment: whole-edit rollback, none/same/different holder, invalid fields, delayed CLI clear/reassignment, older-server refusal, and a non-holder clear refused without force and commented with it (LLL-516)')
 
 # LLL-512: a claim leaves only through /release. The collection's DELETE is
 # superuser-only, for the holder as much as anyone, so the holder check on the
