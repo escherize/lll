@@ -46,6 +46,7 @@ fn dispatch(noun: string, args: Slice<string>) -> Result<(), string> {
     "issue" => commands.issue(args),
     "team" => commands.team(args),
     "member" => commands.member(args),
+    "invite" => commands.invite(args),
     "project" => commands.project(args),
     "api" => commands.api(args),
     "label" => commands.label(args),
@@ -110,6 +111,9 @@ Usage:
                           once; the name must start with bot- (lll bot bot-myrepo)
   lll team <command>      work with teams (see 'lll team --help')
   lll member <command>    work with members (see 'lll member --help')
+  lll invite create --team KEY [--ro]
+                          a single-use link that lets one person join with
+                          those teams (see 'lll invite --help')
   lll project <command>   work with projects (see 'lll project --help')
   lll api METHOD PATH     raw passthrough to the board's server API;
                           --schema prints the collection/field reference

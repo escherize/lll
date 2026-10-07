@@ -112,6 +112,7 @@ func Serve(dataDir, addr, adminEmail, adminPassword string) error {
 		registerIssueIdempotencyRoutes(e.Router)
 		registerClaimRoutes(e.Router, &issueUpdates)
 		registerBotRoutes(e.Router)
+		registerInviteRoutes(e.Router)
 		registerReferenceRoutes(e.Router, &issueUpdates)
 		// A direct API listener cannot infer the public board origin. Operators
 		// may advertise it explicitly; the combined board listener advertises

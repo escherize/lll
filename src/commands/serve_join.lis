@@ -1,0 +1,180 @@
+import "go:encoding/json"
+import "go:html/template"
+import "go:net/http"
+import "go:net/url"
+import "go:strings"
+
+import "pb"
+
+// /join/<code> (LLL-544; doc scoped-access-invites): where an invite link
+// lands. Outside the board gate, because the visitor has no credential yet;
+// the code is the credential, and gopb (invites.go) decides everything:
+// whether the code is alive, and what the new member may do. The visitor
+// chooses only a name.
+//
+// GET shows the name form. POST redeems: gopb kills the code and creates the
+// member in one transaction and returns the member's token, which becomes
+// the `lll_board` cookie (the board cookie contract shared with LLL-545:
+// HttpOnly, Path=/, SameSite=Lax, one year). The redirect that follows names
+// a team page, never the code. Admitting that cookie at the gate is LLL-545's
+// part; until it lands the gate refuses it, which fails closed.
+
+/// The name form. It never looks the code up: a GET must not be a way to
+/// test codes, and the POST gives the real answer anyway.
+pub fn join_page(w: http.ResponseWriter, _r: Ref<http.Request>) {
+  join_respond(w, 200, join_html("", true))
+}
+
+#[json]
+struct JoinRequest { code: string, name: string }
+
+#[json]
+struct JoinResponse { token: string, teams: Slice<string> }
+
+/// Redeem the code in the path for the name in the form.
+pub fn join_redeem(w: http.ResponseWriter, r: Ref<http.Request>) {
+  // Another site must not be able to submit this form: it would replace the
+  // visitor's board cookie with a member of the attacker's choosing. Go's
+  // check reads Sec-Fetch-Site, then Origin against Host; a request with
+  // neither (curl) is not from a browser and passes.
+  if http.NewCrossOriginProtection().Check(r).is_err() {
+    join_respond(
+      w,
+      403,
+      join_html(
+        "This form can only be submitted from the invite page itself. Open your invite link again.",
+        false,
+      ),
+    )
+    return
+  }
+  // The mux hands out read-only requests; parsing the form writes to it.
+  let mut wr = r.Clone(r.Context())
+  let name = wr.PostFormValue("name")
+  let payload = match json.Marshal(
+    JoinRequest { code: r.PathValue("code"), name },
+  ) {
+    Ok(b) => b,
+    Err(_) => {
+      join_respond(
+        w,
+        500,
+        join_html("The board could not read your request. Try again.", true),
+      )
+      return
+    },
+  }
+  let body = match pb.post_anon("/api/lll/invites/redeem", payload as string) {
+    Ok(b) => b,
+    Err(e) => {
+      let status = pb.response_status(e)
+      // A bad name keeps the form: the code is still alive. Every other
+      // refusal (unknown, used, expired, void) is final for this link.
+      let again = status == 400
+      let code = if status >= 400 && status < 500 { status } else { 502 }
+      join_respond(w, code, join_html(pb.display_error(e).summary, again))
+      return
+    },
+  }
+  let mut joined = JoinResponse { .. }
+  let unreadable = json.Unmarshal(body.bytes(), &joined).is_err()
+  if unreadable || joined.token == "" {
+    join_respond(
+      w,
+      502,
+      join_html(
+        "You joined, but the board could not read the answer. Ask whoever invited you to check 'lll member list'.",
+        false,
+      ),
+    )
+    return
+  }
+  let cookie = http.Cookie {
+    Name: "lll_board",
+    Value: joined.token,
+    Path: "/",
+    HttpOnly: true,
+    MaxAge: 365 * 24 * 3600,
+    SameSite: http.SameSiteLaxMode,
+    ..,
+  }
+  http.SetCookie(w, &cookie)
+  http.Redirect(w, r, join_target(joined.teams), 303)
+}
+
+/// Where a new member lands: its first team's board. Built from the team key
+/// alone, so the code cannot ride along.
+pub fn join_target(keys: Slice<string>) -> string {
+  let Some(key) = keys.get(0) else {
+    return "/"
+  }
+  if key == "" { return "/" }
+  f"/t/{url.PathEscape(key)}/"
+}
+
+/// Headers every /join answer carries. The code is in this page's URL, so
+/// no Referer may leave it, no cache may keep it, and no other site may
+/// frame the form to trick a click.
+fn join_respond(w: http.ResponseWriter, status: int, page: string) {
+  let mut h = w.Header()
+  h.Set("Content-Type", "text/html; charset=utf-8")
+  h.Set("Cache-Control", "no-store")
+  h.Set("Referrer-Policy", "no-referrer")
+  h.Set("X-Frame-Options", "DENY")
+  h.Set(
+    "Content-Security-Policy",
+    "default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'",
+  )
+  w.WriteHeader(status)
+  let _ = w.Write(page.bytes())
+}
+
+/// The page: a message (escaped here) and, when `form`, the name form. The
+/// form has no action, so it posts back to this same /join/<code> URL.
+pub fn join_html(message: string, form: bool) -> string {
+  let note = if message == "" {
+    ""
+  } else {
+    f"<p role='alert' style='margin: 1.5rem 0 0; padding: .6rem .8rem; border-left: 3px solid #b3261e; background: #fdeded; color: #7f1d1b;'>{template.HTMLEscapeString(message)}</p>"
+  }
+  let fields = if !form {
+    ""
+  } else {
+    "<form method='post' style='margin: 1.5rem 0; display: flex; gap: .6rem; flex-wrap: wrap; align-items: flex-end;'>
+<label for='name' style='flex: 1 1 20rem; display: flex; flex-direction: column; gap: .3rem;'>
+<span>Your name, as others on the board will see it</span>
+<input id='name' name='name' type='text' required autofocus maxlength='40'
+autocomplete='name' spellcheck='false'
+style='padding: .5rem .6rem; font: inherit; color: inherit; border: 1px solid #bbb; border-radius: .35rem;'>
+</label>
+<button type='submit' style='padding: .55rem 1rem; font: inherit; border: 1px solid #1c1c1e; border-radius: .35rem; background: #1c1c1e; color: #fff; cursor: pointer;'>Join</button>
+</form>
+<p style='color: #666;'>The link works once. This browser stays signed in for a year; if you lose it, ask whoever invited you for a new link.</p>"
+  }
+  let lead = if form {
+    "<p>You were invited to this lll board. Pick a name to join.</p>"
+  } else {
+    ""
+  }
+  strings.Join(
+    [
+      "<!doctype html>
+<html lang='en'>
+<head>
+<meta charset='utf-8'>
+<meta name='viewport' content='width=device-width, initial-scale=1'>
+<meta name='referrer' content='no-referrer'>
+<title>Join this lll board</title>
+</head>
+<body style='font-family: ui-sans-serif, system-ui, sans-serif; max-width: 42rem; margin: 4rem auto; padding: 0 1rem; color: #1c1c1e; line-height: 1.5;'>
+<h1 style='font-size: 1.4rem;'>Join this lll board</h1>",
+      lead,
+      note,
+      fields,
+      "</body>
+</html>
+",
+    ],
+    "\n",
+  )
+}

@@ -1332,6 +1332,8 @@ done
 python3 "$REPO_ROOT"/scripts/test_search_team.py "$LLL_ABS"
 # --- member invite --team: one team over the API and the board ---
 python3 "$REPO_ROOT"/scripts/test_team_scope.py "$LLL_ABS"
+# --- invite create + /join/<code>: single-use, bounded by the creator (LLL-544) ---
+python3 "$REPO_ROOT"/scripts/test_invites.py "$LLL_ABS"
 # --- an older CLI than its server says so once a day, on stderr only (LLL-607) ---
 python3 "$REPO_ROOT"/scripts/test_version_skew.py "$LLL_ABS"
 # --- lll upgrade picks its command from how lll was installed (LLL-608) ---

@@ -39,6 +39,7 @@ pub fn talks_to_server(noun: string) -> bool {
     "issue",
     "team",
     "member",
+    "invite",
     "project",
     "api",
     "label",

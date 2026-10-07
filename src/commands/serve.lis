@@ -220,6 +220,10 @@ fn board_mux(
   //
   // Registered FIRST so the board's own routes cannot shadow /api/.
   api_proxy(mux, cfg.url, admin_ui)?
+  // Invite links (LLL-544) sit outside the gate: the visitor has no board
+  // credential until the redemption hands it one (serve_join.lis).
+  mux.HandleFunc("GET /join/{code}", join_page)
+  mux.HandleFunc("POST /join/{code}", join_redeem)
   //
   // Every BOARD route sits behind the board gate (serve_gate.lis): pages,
   // writes, the SSE stream and static assets alike answer only board-token

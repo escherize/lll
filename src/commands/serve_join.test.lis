@@ -1,0 +1,19 @@
+import "go:strings"
+
+#[test]
+fn a_new_member_lands_on_its_first_team_and_never_on_the_code() {
+  assert join_target(["ALPHA", "BETA"]) == "/t/ALPHA/"
+  assert join_target([]) == "/"
+  assert join_target([""]) == "/"
+  // A key is path-escaped, so it cannot turn the redirect into another URL.
+  assert join_target(["A/../x?y"]) == "/t/A%2F..%2Fx%3Fy/"
+}
+
+#[test]
+fn the_join_page_escapes_its_message() {
+  let page = join_html("<script>x</script>", false)
+  assert !strings.Contains(page, "<script>")
+  assert strings.Contains(page, "&lt;script&gt;")
+  assert !strings.Contains(page, "<form")
+  assert strings.Contains(join_html("", true), "<form method='post'")
+}
