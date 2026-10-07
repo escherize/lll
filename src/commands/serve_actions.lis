@@ -67,7 +67,7 @@ fn finish_action(
     Err(e) => {
       action_flash(w, target, e)
       if wr.PostFormValue("property_edit") == "1" {
-        let _ = w.Write(property_recovery(wr.FormValue("key")).bytes())
+        let _ = w.Write(property_recovery(wr.FormValue("key"), board_viewer(wr)).bytes())
       }
     },
   }
