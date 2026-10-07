@@ -300,6 +300,9 @@ pub struct RailVM {
   // The workspace's saved views (TASK-94, half two): a name plus the board
   // query string it stands for, rendered as a rail group beside favorites.
   pub views: Slice<ViewVM>,
+  // The member an "Add a bot" would own (LLL-546): a read-write member
+  // viewer's name, else "" and no button. Never a token.
+  pub bot_owner: string,
 }
 
 /// One starred issue in the rail's FAVORITES group.

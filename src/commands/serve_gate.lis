@@ -280,12 +280,14 @@ pub enum ScopedVerdict {
   Closed(string),
 }
 
-/// The issue-board writes a read-write member viewer may post. Each action
-/// checks the issue's team itself and writes with the viewer's token.
+/// The writes a read-write member viewer may post. Each action checks the
+/// issue's team itself and writes with the viewer's token; /bot (LLL-546)
+/// mints a bot owned by the viewer, with the viewer's token.
 fn scoped_writes() -> Slice<string> {
   [
     "/create", "/state", "/priority", "/emoji", "/title", "/project", "/assignee",
     "/labels", "/comment", "/claim", "/release", "/attachments/upload", "/attachments/remove",
+    "/bot",
   ]
 }
 

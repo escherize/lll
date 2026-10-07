@@ -450,6 +450,7 @@ fn board_mux(
   mux.HandleFunc("POST /release", gated(flashing(release_write)))
   mux.HandleFunc("POST /labels", gated(flashing(labels_write)))
   mux.HandleFunc("POST /comment", gated(flashing(comment_write)))
+  mux.HandleFunc("POST /bot", gated(flashing(bot_write)))
   mux.HandleFunc("POST /views/save", gated(flashing_with(views_save)))
   // The embedded tree keeps its repo paths, so "/static/theme.css" resolves to
   // "static/theme.css" with no prefix surgery.
