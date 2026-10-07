@@ -2942,7 +2942,7 @@ bot_out=$(env -u LLL_TOKEN HOME="$E2E_HOME" LLL_URL=$URL \
   "$LIN" bot bot-e2e --team ENG --duration 3600) || fail "lll bot exited nonzero: $bot_out"
 assert_contains "$bot_out" "created bot member bot-e2e" "bot creates a bot-kind member when missing"
 # LLL-546: the token arrives inside the design's agent prompt, once.
-assert_contains "$bot_out" "# You are joining lll team ENG at $URL." "the bot prompt names the team and server"
+assert_contains "$bot_out" ": 'You are joining lll team ENG at $URL.'" "the bot prompt names the team and server"
 assert_contains "$bot_out" "export LLL_URL=$URL" "the bot prompt exports the server"
 assert_contains "$bot_out" "lll attach -k ENG" "the bot prompt attaches the team"
 assert_contains "$bot_out" "lll skill get software-factory" "the bot prompt points at the workflow"

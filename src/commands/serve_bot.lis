@@ -43,6 +43,8 @@ fn bot_write(
       f"a member named '{name}' already exists - pick another name (to re-mint a bot you own, run 'lll bot rotate {name}')",
     )
   }
+  // Before anything is created: a refusal here must not leave a bot behind.
+  let url = request_origin(r)?
   let _ = create_bot_member_as(m.token, name, m.id)?
   let duration = default_token_duration()
   let tok = match bot_mint(m.token, name, duration) {
@@ -51,7 +53,6 @@ fn bot_write(
       f"{e}\nthe bot {name} exists; mint its token with 'lll bot rotate {name}'",
     ),
   }
-  let url = request_origin(r)?
   let html = render(
     "bot-result",
     BotResultVM { name, team, prompt: agent_prompt(url, team, tok) },

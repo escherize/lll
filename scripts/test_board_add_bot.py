@@ -141,7 +141,8 @@ with tempfile.TemporaryDirectory(prefix='lll-546-') as directory:
         bot_tok = found.group(1)
         assert text.count(bot_tok) == 1, 'the response printed the token more than once'
         assert f'export LLL_URL={board}\n' in text and '\nlll attach -k ALPHA\n' in text, text
-        assert '# You are joining lll team ALPHA at ' + board in text, text
+        assert ": 'You are joining lll team ALPHA at " + board + ".'" in text, text
+        assert '#' not in text[text.index("<pre"):text.index('</pre>')], 'the prompt relies on #'
         bot = members()['bot-agent1']
         assert (bot['kind'], bot['owner'], bot['scope'], bot['teams'], bot['mode']) == \
             ('bot', writer['id'], 'teams', [alpha['id']], 'rw'), bot
@@ -182,6 +183,11 @@ with tempfile.TemporaryDirectory(prefix='lll-546-') as directory:
         refused(rw_tok, {'name': 'agent1', 'team': 'ALPHA'}, 200, "a member named 'bot-agent1' already exists")
         for name in ['', '../x', 'Agent', 'a b', "x'y", 'a' * 41]:
             refused(rw_tok, {'name': name, 'team': 'ALPHA'}, 200, 'lowercase letters, digits and dashes')
+        # A Host the prompt refuses to echo is refused before anything is
+        # created: no orphan bot without a prompt.
+        code, body = call(board, '/bot', {'name': 'orphan1', 'team': 'ALPHA'}, form=True,
+                          headers={'Cookie': 'lll_board=' + rw_tok, 'Host': 'a_b.example:1'})
+        assert code == 200 and "cannot tell this board's address" in html.unescape(str(body)), (code, body)
         # The minted bot cannot mint bots from its own cookie.
         assert 'Add a bot' not in page('/t/ALPHA/', bot_tok)[1]
         code, body = post(bot_tok, {'name': 'grandchild', 'team': 'ALPHA'})

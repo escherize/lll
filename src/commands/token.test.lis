@@ -1,3 +1,4 @@
+import "go:fmt"
 import "go:os"
 import "go:os/exec"
 import "go:path/filepath"
@@ -84,21 +85,42 @@ fn status_classification_ignores_url_and_body_digits() {
 #[test]
 fn agent_prompt_is_the_design_doc_prompt() {
   let got = agent_prompt("https://lll.example.com", "ALPHA", "aaa.bbb-c_d.eee")
-  // The doc's text, reshaped into a harmless shell script (LLL-546 F1).
-  let want = "# You are joining lll team ALPHA at https://lll.example.com.
+  // The doc's text, reshaped into a script every shell runs harmlessly
+  // (LLL-546 F1): prose is the no-op `:` with one quoted word, never `#`.
+  let want = ": 'You are joining lll team ALPHA at https://lll.example.com.'
 export LLL_URL=https://lll.example.com
 export LLL_TOKEN=aaa.bbb-c_d.eee
 lll attach -k ALPHA
-lll skill get software-factory  # read the workflow
-# Claim an issue before you edit code; record findings on the board.
+: 'Read the workflow:'
+lll skill get software-factory
+: 'Claim an issue before you edit code; record findings on the board.'
 "
   assert got == want
+  assert !got.contains("#")
 }
 
-/// Run the WHOLE prompt through sh in a fresh directory whose only `lll` is
-/// a stub logging its arguments, one per line. Returns the directory's
-/// entries and the stub's log.
-fn run_prompt_in_sh(t: TestContext, url: string, team: string) -> (Slice<string>, string) {
+/// The shells a pasted prompt meets. Interactive zsh without
+/// interactive_comments (the macOS default) runs `#` lines as commands, so
+/// it is the case that matters most; zsh rows are skipped, saying so, only
+/// where zsh is not installed.
+fn prompt_shells() -> Slice<Slice<string>> {
+  let mut shells = [
+    ["/bin/sh", "prompt.txt"],
+    ["/bin/sh", "-c", "exec bash --norc --noprofile -i < prompt.txt"],
+  ]
+  if exec.LookPath("zsh").is_ok() {
+    shells = shells.append(["/bin/sh", "-c", "exec zsh -f prompt.txt"])
+    shells = shells.append(["/bin/sh", "-c", "exec zsh -f -i < prompt.txt"])
+  } else {
+    fmt.Println("token.test: zsh not installed here; skipping the zsh prompt shells")
+  }
+  shells
+}
+
+/// Run the WHOLE prompt through `shell` in a fresh directory whose only
+/// `lll` is a stub logging its arguments, one per line. Returns the
+/// directory's entries and the stub's log.
+fn run_prompt_in(t: TestContext, shell: Slice<string>, url: string, team: string) -> (Slice<string>, string) {
   let assert Ok(dir) = os.MkdirTemp("", "lll-prompt-sh")
   let bin = filepath.Join(dir, "bin")
   let assert Ok(_) = os.Mkdir(bin, 0o755)
@@ -106,9 +128,9 @@ fn run_prompt_in_sh(t: TestContext, url: string, team: string) -> (Slice<string>
   let assert Ok(_) = os.WriteFile(filepath.Join(bin, "lll"), stub.bytes(), 0o755)
   let prompt = agent_prompt(url, team, "aaa.bbb.ccc")
   let assert Ok(_) = os.WriteFile(filepath.Join(dir, "prompt.txt"), prompt.bytes(), 0o644)
-  let mut cmd = exec.Command("/bin/sh", "prompt.txt")
+  let mut cmd = exec.Command(shell[0], shell[1..]...)
   cmd.Dir = dir
-  cmd.Env = [f"PATH={bin}:/usr/bin:/bin", f"PROMPT_LOG={dir}/args.log", f"HOME={dir}"]
+  cmd.Env = [f"PATH={bin}:/usr/bin:/bin:/usr/local/bin:/opt/homebrew/bin", f"PROMPT_LOG={dir}/args.log", f"HOME={dir}", "HISTFILE=/dev/null"]
   let _ = cmd.Run()
   let assert Ok(entries) = os.ReadDir(dir)
   let names = entries.map(|e| e.Name())
@@ -119,21 +141,25 @@ fn run_prompt_in_sh(t: TestContext, url: string, team: string) -> (Slice<string>
 
 #[test]
 fn the_whole_prompt_is_a_harmless_shell_script_for_hostile_values(t: TestContext) {
-  // Review repros: a ' in the url or team key closed the quote that
-  // "You're" opened, and the rest ran. A newline must not end a comment.
+  // Review repros: a ' in the url or key closing a quote, and interactive
+  // zsh expanding `$(..)`, `$=IFS` and backticks on a `#` line.
   let urls = [
     "http://x'$(touch$IFS.pwned)@127.0.0.1:1",
+    "http://$(touch$=IFS'PWNED-e2e')@127.0.0.1:1",
     "http://x/`touch .pwned`",
     "http://x/\ntouch .pwned\n",
     "http://x/'\ntouch .pwned #",
+    "http://x/!!;touch .pwned",
   ]
-  let teams = ["Q'$(touch$IFS.PWNTEAM)", "Q\ntouch .PWNTEAM", "ALPHA"]
-  for url in urls {
-    for team in teams {
-      let (names, log) = run_prompt_in_sh(t, url, team)
-      assert names.equals(["args.log", "bin", "prompt.txt"])
-      // The stub saw exactly the two intended commands, each value whole.
-      assert log == f"attach\n-k\n{team}\nskill\nget\nsoftware-factory\n"
+  let teams = ["Q'$(touch$IFS.PWNTEAM)", "Q$(touch$=IFS'PWNTEAM')", "Q`touch .PWNTEAM`", "Q\ntouch .PWNTEAM", "ALPHA"]
+  for shell in prompt_shells() {
+    for url in urls {
+      for team in teams {
+        let (names, log) = run_prompt_in(t, shell, url, team)
+        assert names.equals(["args.log", "bin", "prompt.txt"])
+        // The stub saw exactly the two intended commands, each value whole.
+        assert log == f"attach\n-k\n{team}\nskill\nget\nsoftware-factory\n"
+      }
     }
   }
 }

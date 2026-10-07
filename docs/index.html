@@ -483,12 +483,13 @@ created bot member bot-deploy (kind=bot, owned by bryan)
 one-time bot token for bot-deploy — shown only here; expires …
 paste this into the agent:
 
-# You are joining lll team ENG at https://lll.example.com.
+: 'You are joining lll team ENG at https://lll.example.com.'
 export LLL_URL=https://lll.example.com
 export LLL_TOKEN=eyJhbGciOi…
 lll attach -k ENG
-lll skill get software-factory  # read the workflow
-# Claim an issue before you edit code; record findings on the board.
+: 'Read the workflow:'
+lll skill get software-factory
+: 'Claim an issue before you edit code; record findings on the board.'
 
 <span class="sig">$</span> <span class="cmd">lll issue next --claim</span>
 Claimed ENG-2 for bot-deploy
