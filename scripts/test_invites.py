@@ -197,10 +197,30 @@ with tempfile.TemporaryDirectory(prefix='lll-invites-') as directory:
         code, body, _ = call(api, '/api/lll/invites', {'teams': [alpha['id']], 'mode': 'ro'}, bot)
         assert code == 403 and 'bots and owned members cannot invite' in body['message'].lower(), body
         rw = invite('--team', 'ALPHA', token=guest)
-        assert redeem(rw, 'Rae Writer')[0] == 303
+        code, _, headers = redeem(rw, 'Rae Writer')
+        assert code == 303, code
+        rae = headers['Set-Cookie'].split('lll_board=', 1)[1].split(';', 1)[0]
         rec = next(m for m in call(api, '/api/collections/members/records?perPage=200', token=su)[1]['items']
                    if m['name'] == 'Rae Writer')
         assert (rec['scope'], rec['teams'], rec['mode']) == ('teams', [alpha['id']], 'rw'), rec
+
+        # A joined rw member may create a bot it owns, under the same name rule,
+        # so it cannot impersonate an existing bot ('bot-inviter') in attribution.
+        def own_bot(name, token=rae, owner=rec['id']):
+            return call(api, '/api/collections/members/records', {
+                'name': name, 'kind': 'bot', 'owner': owner, 'email': f'b{len(name)}{abs(hash(name))}@example.test',
+                'password': 'pw12345678', 'passwordConfirm': 'pw12345678'}, token)
+        for bad in ['bot-Inviter', 'bot-ｉnviter', 'bot-inviter​', 'bot-<img src=x onerror=alert(1)>',
+                    'bot-' + 'a' * 300, 'bot-x\x1b[2J\nsecond line']:
+            code, body, _ = own_bot(bad)
+            assert code == 400, (bad, code, body)
+        code, body, _ = own_bot('bot-rae-helper')
+        assert code == 200 and body['owner'] == rec['id'], body
+        out = lll('bot', 'bot-rae-cli', token=rae)
+        assert out.returncode == 0, out.stdout + out.stderr
+        # A superuser is not held to it.
+        code, body, _ = own_bot('bot-Rae.', su)
+        assert code == 200, body
 
         # The invites collection answers no member token: list, view, filter, create.
         for tok in [owner, guest, token]:

@@ -372,35 +372,56 @@ func registerInviteRoutes(routes *router.Router[*core.RequestEvent]) {
 	})
 }
 
-// registerMemberNameGuard holds every non-superuser RENAME to the rule a
-// redeemer gets (joinName, at most 40 characters, unique regardless of
-// case), so the anti-impersonation rule cannot be undone after joining: a
-// member may PATCH its own name (1791700000_bot_owner_scope.js). A person
-// may not take the bot- prefix; a bot keeps it (checkMemberKind). Only a
-// name that changes is checked, so a member whose name predates the rule
-// can still edit its other fields. Superusers are not held to it.
+// registerMemberNameGuard holds a non-superuser's name choices to the rule
+// a redeemer gets (joinName, at most 40 characters, unique regardless of
+// case), so an invited member cannot impersonate anyone in attribution:
 //
-// Creates are not checked: only a full member or a superuser creates a
-// person, and 'lll member add -n "Tim O'Brien"' is supported (e2e.sh).
+//   - a rename, because a member may PATCH its own name
+//     (1791700000_bot_owner_scope.js). Only a name that changes is checked,
+//     so a member whose name predates the rule can still edit other fields.
+//   - the create of a bot, because a scoped read-write member (an invited
+//     one included) may create a bot it owns. 'bot-NAME' passes the rule.
+//
+// A person may not take the bot- prefix; a bot keeps it (checkMemberKind).
+// Superusers are not held to it, and person creates are not checked: only a
+// full member or a superuser creates a person, and
+// 'lll member add -n "Tim O'Brien"' is supported (e2e.sh).
 func registerMemberNameGuard(app core.App) {
 	app.OnRecordUpdateRequest("members").BindFunc(func(e *core.RecordRequestEvent) error {
 		if e.HasSuperuserAuth() || e.Record.GetString("name") == e.Record.Original().GetString("name") {
 			return e.Next()
 		}
-		name := e.Record.GetString("name")
-		if e.Record.GetString("kind") != botKind && strings.HasPrefix(strings.ToLower(name), botPrefix) {
-			return e.BadRequestError(errNameBot.Error(), nil)
-		}
-		if len(name) > 40 || !joinName.MatchString(name) {
-			return e.BadRequestError(errNameInvalid.Error(), nil)
-		}
-		taken, err := nameTaken(e.App, name, e.Record.Id)
-		if err != nil {
+		if err := checkChosenName(e.App, e.Record); err != nil {
 			return err
-		}
-		if taken {
-			return e.BadRequestError("the name '"+name+"' is taken on this board: pick another", nil)
 		}
 		return e.Next()
 	})
+	app.OnRecordCreateRequest("members").BindFunc(func(e *core.RecordRequestEvent) error {
+		if e.HasSuperuserAuth() || e.Record.GetString("kind") != botKind {
+			return e.Next()
+		}
+		if err := checkChosenName(e.App, e.Record); err != nil {
+			return err
+		}
+		return e.Next()
+	})
+}
+
+// checkChosenName applies the join name rule to m's name.
+func checkChosenName(app core.App, m *core.Record) error {
+	name := m.GetString("name")
+	if m.GetString("kind") != botKind && strings.HasPrefix(strings.ToLower(name), botPrefix) {
+		return router.NewBadRequestError(errNameBot.Error(), nil)
+	}
+	if len(name) > 40 || !joinName.MatchString(name) {
+		return router.NewBadRequestError(errNameInvalid.Error(), nil)
+	}
+	taken, err := nameTaken(app, name, m.Id)
+	if err != nil {
+		return err
+	}
+	if taken {
+		return router.NewBadRequestError("the name '"+name+"' is taken on this board: pick another", nil)
+	}
+	return nil
 }
