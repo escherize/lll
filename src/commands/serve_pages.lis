@@ -31,6 +31,7 @@ fn rail_vm(active: string, me: string, team: models.Team) -> RailVM {
     teams: rail_teams(team.key),
     favorites: fav_vms(),
     views: view_vms(),
+    scoped: false,
   }
 }
 
@@ -42,7 +43,7 @@ fn rail_for(r: Ref<http.Request>, active: string, me: string, team: models.Team)
   let rail = rail_vm(active, me, team)
   let Viewer.Scoped(v) = board_viewer(r) else { return rail }
   let mine = v.member.map_or(rail.me, |m| m.name)
-  RailVM { teams: rail.teams.filter(|t| v.sees(t.key)), favorites: [], views: [], me: mine, ..rail }
+  RailVM { teams: rail.teams.filter(|t| v.sees(t.key)), favorites: [], views: [], me: mine, scoped: true, ..rail }
 }
 
 /// The board path for a team key: "/t/KEY/", or "/" when no key scopes the

@@ -128,6 +128,9 @@ with tempfile.TemporaryDirectory(prefix='lll-545-') as directory:
             code, body, _ = page('/t/ALPHA/', tok)
             assert code == 200 and 'alpha work' in body, (code, body[:300])
             assert_clean(body, 'scoped board page')
+            # The rail offers nothing a scoped viewer cannot open.
+            for absent in ['id="rail-favorites"', 'id="rail-views"', '/t/ALPHA/settings']:
+                assert absent not in body, f'scoped rail shows {absent}'
             for path in ['/t/ALPHA/issues', '/t/ALPHA/projects', '/t/ALPHA/issue/ALPHA-1', '/t/ALPHA/doc/cross',
                          '/t/ALPHA/?raw', '/t/ALPHA/issues?raw', '/t/ALPHA/issue/ALPHA-1?raw', '/t/ALPHA/doc/cross?raw']:
                 code, body, _ = page(path, tok)
@@ -349,6 +352,9 @@ with tempfile.TemporaryDirectory(prefix='lll-545-') as directory:
         assert code == 200 and 'zebra hidden plan two' in body
         assert 'BETA' in page('/t/ALPHA/', full)[1] and 'BETA-1' in page('/t/ALPHA/doc/cross?raw', full)[1]
         assert page('/t/ALPHA/settings/identity', full)[0] == 200
+        full_rail = page('/t/ALPHA/', full)[1]
+        for present in ['id="rail-favorites"', 'id="rail-views"', '/t/ALPHA/settings']:
+            assert present in full_rail, f'control: board-token rail lost {present}'
     finally:
         for proc in streams:
             proc.terminate()

@@ -300,6 +300,10 @@ pub struct RailVM {
   // The workspace's saved views (TASK-94, half two): a name plus the board
   // query string it stands for, rendered as a rail group beside favorites.
   pub views: Slice<ViewVM>,
+  // A team-scoped viewer (LLL-545): no Settings row or palette entries
+  // (they answer 403) and no Favorites or Saved views groups (workspace-wide,
+  // so always empty for it).
+  pub scoped: bool,
 }
 
 /// One starred issue in the rail's FAVORITES group.

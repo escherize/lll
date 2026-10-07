@@ -22,9 +22,9 @@
 {{end}}<a data-g="p" href="{{.BoardBase}}projects"{{if eq .Active "projects"}} class="active"{{end}}><svg width="14" height="14"><use href="#ic-project"/></svg> Projects</a>
 <a data-g="s" href="{{.BoardBase}}search"{{if eq .Active "search"}} class="active"{{end}}><svg width="14" height="14"><use href="#ic-search"/></svg> Search{{/* The palette's only advertisement. A shortcut nobody is told about is a shortcut nobody uses. */}}<kbd class="rail-kbd" title="Open the jump palette: Cmd+K, or Ctrl+K">⌘K</kbd></a>
 {{template "rail-teams" .Teams}}
-{{template "rail-favorites" .Favorites}}
+{{if not .Scoped}}{{template "rail-favorites" .Favorites}}
 {{template "rail-views" .Views}}
-<a href="{{.BoardBase}}settings"{{if eq .Active "settings"}} class="active"{{end}}><svg width="14" height="14"><use href="#ic-settings"/></svg> Settings</a>
+<a href="{{.BoardBase}}settings"{{if eq .Active "settings"}} class="active"{{end}}><svg width="14" height="14"><use href="#ic-settings"/></svg> Settings</a>{{end}}
 <div class="rail-foot">v{{.Version}}</div>
 </nav>
 {{template "cmdk" .}}
@@ -68,13 +68,13 @@
 {{if .Me}}<a data-cmdk-item href="{{.BoardBase}}?assignee={{.Me}}"><span class="cmdk-kind">list</span>My issues</a>
 {{end}}<a data-cmdk-item href="{{.BoardBase}}projects"><span class="cmdk-kind">list</span>Projects</a>
 <a data-cmdk-item href="{{.BoardBase}}search"><span class="cmdk-kind">page</span>Search every field</a>
-<a data-cmdk-item href="{{.BoardBase}}settings/identity"><span class="cmdk-kind">settings</span>Identity, emoji and accent</a>
+{{if not .Scoped}}<a data-cmdk-item href="{{.BoardBase}}settings/identity"><span class="cmdk-kind">settings</span>Identity, emoji and accent</a>
 <a data-cmdk-item href="{{.BoardBase}}settings/labels"><span class="cmdk-kind">settings</span>Labels</a>
 <a data-cmdk-item href="{{.BoardBase}}settings/projects"><span class="cmdk-kind">settings</span>Projects settings</a>
 <a data-cmdk-item href="{{.BoardBase}}settings/teams"><span class="cmdk-kind">settings</span>Teams</a>
 <a data-cmdk-item href="{{.BoardBase}}settings/members"><span class="cmdk-kind">settings</span>Members</a>
 <a data-cmdk-item href="{{.BoardBase}}settings/access"><span class="cmdk-kind">settings</span>Access, tokens and sign-in</a>
-{{range .Teams}}<a data-cmdk-item href="{{.Href}}"><span class="cmdk-kind">team</span>{{if .Emoji}}{{.Emoji}} {{end}}{{.Key}} · {{.Name}}</a>
+{{end}}{{range .Teams}}<a data-cmdk-item href="{{.Href}}"><span class="cmdk-kind">team</span>{{if .Emoji}}{{.Emoji}} {{end}}{{.Key}} · {{.Name}}</a>
 {{end}}</div>
 <p id="cmdk-none" class="cmdk-none" hidden>Nothing matches. Enter searches every field.</p>
 </div>
