@@ -1,5 +1,6 @@
 import "attachments"
 import "flags"
+import "pb"
 import "records"
 import "go:fmt"
 import "go:os"
@@ -13,7 +14,7 @@ fn issue_attach(input: flags.CommandInput) -> Result<(), string> {
   }
   defer file.Close()
   let data = attachments.read_upload(file)?
-  let name = attachments.upload(issue, path, data)?
+  let name = attachments.upload(pb.Caller.Process, issue, path, data)?
   fmt.Println(f"Attached to {issue.expand.team.key}-{issue.number}: {name}")
   Ok(())
 }
@@ -21,7 +22,7 @@ fn issue_attach(input: flags.CommandInput) -> Result<(), string> {
 fn issue_detach(input: flags.CommandInput) -> Result<(), string> {
   let issue = records.fetch_issue(deslug(input.parsed.first()))?
   let name = input.parsed.nth(1)
-  attachments.remove(issue, name)?
+  attachments.remove(pb.Caller.Process, issue, name)?
   fmt.Println(f"Removed attachment from {input.parsed.first()}: {name}")
   Ok(())
 }

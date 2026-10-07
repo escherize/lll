@@ -1,0 +1,273 @@
+#!/usr/bin/env python3
+"""LLL-545: a member token in the board cookie scopes the board to the
+member's teams. Pages, search, raw markdown and the live stream carry no key,
+name or issue of a hidden team; writes run as the viewer; a read-only viewer
+cannot write; a bot's cookie is capped by its owner; the board token is
+unchanged."""
+import json
+import os
+from pathlib import Path
+import socket
+import subprocess
+import sys
+import tempfile
+import time
+import urllib.error
+import urllib.parse
+import urllib.request
+from board_startup import wait_for_endpoints
+
+binary = str(Path(sys.argv[1]).resolve())
+
+# Markers that only the hidden team carries: its key, its name, its issue
+# title, a word in its doc and a comment on its issue.
+HIDDEN = ['BETA', 'Bravo Hidden Team', 'zebra hidden plan', 'zebradoc', 'zebra comment']
+
+
+def port():
+    with socket.socket() as sock:
+        sock.bind(('127.0.0.1', 0))
+        return sock.getsockname()[1]
+
+
+class NoRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, *args, **kwargs):
+        return None
+
+
+raw = urllib.request.build_opener(NoRedirect)
+
+
+def call(base, path, body=None, token='', method=None, headers=None, form=False):
+    """(status, parsed-or-text body, headers). Never raises on HTTP errors."""
+    hdrs = dict(headers or {})
+    data = None
+    if body is not None:
+        hdrs['Content-Type'] = 'application/x-www-form-urlencoded' if form else 'application/json'
+        data = (urllib.parse.urlencode(body) if form else json.dumps(body)).encode()
+    if token:
+        hdrs['Authorization'] = 'Bearer ' + token
+    req = urllib.request.Request(base + path, method=method, headers=hdrs, data=data)
+    try:
+        resp = raw.open(req, timeout=15)
+    except urllib.error.HTTPError as e:
+        resp = e
+    text = resp.read().decode()
+    try:
+        text = json.loads(text)
+    except ValueError:
+        pass
+    return resp.status, text, resp.headers
+
+
+def assert_clean(text, where):
+    for marker in HIDDEN:
+        assert marker not in text, f'{where} leaked {marker!r}'
+
+
+with tempfile.TemporaryDirectory(prefix='lll-545-') as directory:
+    root = Path(directory)
+    (root / 'home').mkdir()
+    env = {k: v for k, v in os.environ.items() if not k.startswith(('LLL_', 'XDG_')) and k != 'HOME'}
+    env.update(HOME=str(root / 'home'), LLL_URL=f'http://127.0.0.1:{port()}', LLL_TEAM='ALPHA',
+               LLL_BIND='127.0.0.1', USER='board-owner', LLL_ADMIN_EMAIL='scope@example.invalid',
+               LLL_ADMIN_PASSWORD='local-viewer-scope-password', LLL_BOARD_TOKEN='local-viewer-scope-board')
+    log = root / 'up.log'
+    streams = []
+    with log.open('w') as output:
+        child = subprocess.Popen([binary, 'up', '--no-open', '--port', str(port()), '--pb-dir', str(root / 'data')],
+                                 cwd=root, env=env, stdout=output, stderr=subprocess.STDOUT)
+    try:
+        endpoint = wait_for_endpoints(log)
+        api, board = endpoint['db_url'], endpoint['board_url']
+        _, su, _ = call(api, '/api/collections/_superusers/auth-with-password',
+                        {'identity': env['LLL_ADMIN_EMAIL'], 'password': env['LLL_ADMIN_PASSWORD']})
+        su = su['token']
+        alpha = next(t for t in call(api, '/api/collections/teams/records', token=su)[1]['items'] if t['key'] == 'ALPHA')
+        _, beta, _ = call(api, '/api/collections/teams/records', {'key': 'BETA', 'name': 'Bravo Hidden Team'}, su)
+
+        def issue(team, title):
+            code, rec, _ = call(api, '/api/collections/issues/records', {'team': team['id'], 'title': title, 'state': 'todo'}, su)
+            assert code == 200, rec
+            return rec
+
+        ia = issue(alpha, 'alpha work')
+        ib = issue(beta, 'zebra hidden plan')
+        call(api, '/api/collections/comments/records', {'issue': ib['id'], 'body': 'zebra comment'}, su)
+        call(api, '/api/collections/docs/records', {'team': beta['id'], 'slug': 'bdoc', 'title': 'zebradoc',
+                                                    'kind': 'note', 'body': 'zebradoc body'}, su)
+        # An all-scope writer may link across teams; the scoped page must not show it.
+        code, _, _ = call(api, '/api/collections/docs/records', {'team': alpha['id'], 'slug': 'cross', 'title': 'cross',
+                                                                 'kind': 'note', 'body': 'b', 'issues': [ia['id'], ib['id']]}, su)
+        assert code == 200
+
+        def member(name, **access):
+            body = {'name': name, 'email': f'{name}@example.test', 'password': 'pw12345678',
+                    'passwordConfirm': 'pw12345678', 'kind': 'person', **access}
+            code, rec, _ = call(api, '/api/collections/members/records', body, su)
+            assert code == 200, rec
+            code, tok, _ = call(api, f"/api/collections/members/impersonate/{rec['id']}", {'duration': 3600}, su)
+            assert code == 200, tok
+            return rec, tok['token']
+
+        rw_rec, rw_tok = member('writer', scope='teams', teams=[alpha['id']], mode='rw')
+        ro_rec, ro_tok = member('reader', scope='teams', teams=[alpha['id']], mode='ro')
+        both_rec, both_tok = member('boss', scope='teams', teams=[alpha['id'], beta['id']], mode='rw')
+
+        def as_cookie(tok):
+            return {'Cookie': 'lll_board=' + tok}
+
+        def page(path, tok, body=None, method=None):
+            return call(board, path, body, method=method, headers=as_cookie(tok), form=body is not None)
+
+        # --- reads: ALPHA renders, BETA answers like a missing team ---
+        for tok in [rw_tok, ro_tok]:
+            code, body, _ = page('/t/ALPHA/', tok)
+            assert code == 200 and 'alpha work' in body, (code, body[:300])
+            assert_clean(body, 'scoped board page')
+            for path in ['/t/ALPHA/issues', '/t/ALPHA/projects', '/t/ALPHA/issue/ALPHA-1', '/t/ALPHA/doc/cross',
+                         '/t/ALPHA/?raw', '/t/ALPHA/issues?raw', '/t/ALPHA/issue/ALPHA-1?raw', '/t/ALPHA/doc/cross?raw']:
+                code, body, _ = page(path, tok)
+                assert code == 200, (path, code, body)
+                assert_clean(body, path)
+        missing = page('/t/NOPE/', rw_tok)
+        for path in ['/t/BETA/', '/t/BETA', '/t/beta/issues', '/t/BETA/issue/BETA-1', '/t/ALPHA/issue/BETA-1',
+                     '/t/BETA/doc/bdoc', '/t/BETA/search?q=zebra', '/events?team=BETA', '/events?page=issue&key=BETA-1',
+                     '/attachments/file?key=BETA-1&file=x.png']:
+            code, body, _ = page(path, rw_tok)
+            assert code == 404, (path, code)
+            assert 'Bravo' not in str(body) and 'zebra' not in str(body), (path, body)
+        hidden_body = page('/t/BETA/', rw_tok)[1].replace('BETA', 'NOPE')
+        assert hidden_body == missing[1] and missing[0] == 404, 'a hidden team answers differently from a missing one'
+        for path in ['/t/ALPHA/settings/identity', '/t/ALPHA/settings/access', '/issue/BETA-1', '/search?q=zebra']:
+            assert page(path, rw_tok)[0] == 403, path
+        assert page('/', rw_tok)[0] == 303 and page('/', rw_tok)[2]['Location'] == '/t/ALPHA/'
+
+        # --- search: the hidden team's words find nothing ---
+        for path in ['/t/ALPHA/search?q=zebra', '/t/ALPHA/search?q=zebra&raw', '/t/ALPHA/search?q=zebra&palette=1',
+                     '/t/ALPHA/search?q=zebra&fragment=1']:
+            code, body, _ = page(path, rw_tok)
+            assert code == 200, (path, code)
+            assert_clean(body, path)
+        assert 'alpha work' in page('/t/ALPHA/search?q=alpha&raw', rw_tok)[1], 'control: search works for the scoped viewer'
+
+        # --- the live stream: an ALPHA event arrives, a BETA event never does ---
+        def stream(path, tok, name):
+            out = root / f'{name}.log'
+            handle = out.open('w')
+            proc = subprocess.Popen(['curl', '-sN', '-H', f'Cookie: lll_board={tok}', board + path],
+                                    stdout=handle, stderr=subprocess.DEVNULL, start_new_session=True)
+            streams.append(proc)
+            return out
+
+        def wait_for(out, needle):
+            deadline = time.monotonic() + 15
+            while needle not in out.read_text() and time.monotonic() < deadline:
+                time.sleep(.1)
+            assert needle in out.read_text(), f'{out.name}: never saw {needle!r}'
+
+        scoped_board = stream('/events?team=ALPHA', rw_tok, 'scoped-board')
+        scoped_issue = stream('/events?page=issue&key=ALPHA-1', rw_tok, 'scoped-issue')
+        full_beta = stream('/events?team=BETA', env['LLL_BOARD_TOKEN'], 'full-beta')
+        wait_for(scoped_board, 'alpha work')
+        wait_for(scoped_issue, 'alpha work')
+        wait_for(full_beta, 'zebra hidden plan')
+        # BETA changes first; the bridge is serial, so once ALPHA's change has
+        # arrived any BETA fragment bound for this client would have too.
+        call(api, f"/api/collections/issues/records/{ib['id']}", {'title': 'zebra hidden plan two'}, su, 'PATCH')
+        call(api, '/api/collections/comments/records', {'issue': ib['id'], 'body': 'zebra comment two'}, su)
+        call(api, f"/api/collections/issues/records/{ia['id']}", {'title': 'alpha moved'}, su, 'PATCH')
+        wait_for(full_beta, 'zebra hidden plan two')
+        wait_for(scoped_board, 'alpha moved')
+        wait_for(scoped_issue, 'alpha moved')
+        time.sleep(.5)
+        assert_clean(scoped_board.read_text(), 'scoped board stream')
+        assert_clean(scoped_issue.read_text(), 'scoped issue stream')
+
+        # --- writes: attributed to the viewer, kept inside its teams ---
+        def flash(path, tok, body):
+            code, text, _ = page(path, tok, body)
+            return code, text
+
+        code, text = flash('/title', rw_tok, {'key': 'ALPHA-1', 'title': 'alpha by writer'})
+        assert code == 200 and ' hidden role="alert"' in text, text
+        assert call(api, f"/api/collections/issues/records/{ia['id']}", token=su)[1]['title'] == 'alpha by writer'
+        flash('/comment', rw_tok, {'key': 'ALPHA-1', 'body': 'written by the viewer'})
+        comments = call(api, '/api/collections/comments/records?perPage=200', token=su)[1]['items']
+        assert next(c for c in comments if c['body'] == 'written by the viewer')['author'] == rw_rec['id']
+        flash('/create', rw_tok, {'team': 'ALPHA', 'title': 'created by the viewer'})
+        made = call(api, '/api/collections/issues/records?perPage=200', token=su)[1]['items']
+        assert next(i for i in made if i['title'] == 'created by the viewer')['creator'] == rw_rec['id']
+        flash('/claim', rw_tok, {'key': 'ALPHA-1', 'member_id': 'whatever-the-button-said'})
+        claims = call(api, '/api/collections/claims/records', token=su)[1]['items']
+        assert [c['member'] for c in claims if c['issue'] == ia['id']] == [rw_rec['id']], claims
+        # Another team's issue answers like a missing one, and nothing changes.
+        code, text = flash('/title', rw_tok, {'key': 'BETA-1', 'title': 'hijacked'})
+        assert 'issue BETA-1 not found' in text, text
+        code, text = flash('/comment', rw_tok, {'key': 'BETA-1', 'body': 'hijacked'})
+        assert 'issue BETA-1 not found' in text, text
+        code, text = flash('/create', rw_tok, {'team': 'BETA', 'title': 'hijacked'})
+        assert "BETA" in text and 'hijacked' not in json.dumps(call(api, '/api/collections/issues/records?perPage=200', token=su)[1])
+        code, text = flash('/create', rw_tok, {'title': 'no team named'})
+        assert 'no team named' not in json.dumps(call(api, '/api/collections/issues/records?perPage=200', token=su)[1]), \
+            'a scoped create without a team landed in the boot team'
+        assert call(api, f"/api/collections/issues/records/{ib['id']}", token=su)[1]['title'] == 'zebra hidden plan two'
+        # Workspace-wide and settings writes stay closed even to a writer.
+        for path in ['/favorite', '/views/save', '/settings/label', '/t/ALPHA/settings/label', '/settings/access/token']:
+            assert flash(path, rw_tok, {'key': 'ALPHA-1', 'on': 'true', 'name': 'x', 'query': ''})[0] == 403, path
+
+        # --- a read-only viewer cannot write ---
+        for path in ['/title', '/comment', '/create', '/state', '/claim']:
+            code, _ = flash(path, ro_tok, {'key': 'ALPHA-1', 'title': 'ro', 'body': 'ro', 'team': 'ALPHA', 'state': 'done'})
+            assert code == 403, (path, code)
+        assert call(api, f"/api/collections/issues/records/{ia['id']}", token=su)[1]['title'] == 'alpha by writer'
+        assert 'Claim as writer' in page('/t/ALPHA/issue/ALPHA-2', rw_tok)[1], 'rw viewer is not offered its own claim'
+        assert 'Claim as' not in page('/t/ALPHA/issue/ALPHA-2', ro_tok)[1], 'ro viewer offered a claim button'
+
+        # --- two teams: both open; narrowing applies on the next request ---
+        assert page('/t/BETA/', both_tok)[0] == 200 and 'zebra hidden plan two' in page('/t/BETA/', both_tok)[1]
+        assert 'BETA' in page('/t/ALPHA/', both_tok)[1], 'control: the rail lists a granted second team'
+        call(api, f"/api/collections/members/records/{both_rec['id']}", {'teams': [alpha['id']]}, su, 'PATCH')
+        assert page('/t/BETA/', both_tok)[0] == 404, 'narrowing was not read on the next request'
+
+        # --- a bot's cookie is capped by its owner ---
+        owner_rec, _ = member('owner', scope='teams', teams=[alpha['id'], beta['id']], mode='rw')
+        code, bot, _ = call(api, '/api/collections/members/records',
+                            {'name': 'bot-owned', 'email': 'bot@example.test', 'password': 'pw12345678',
+                             'passwordConfirm': 'pw12345678', 'kind': 'bot', 'owner': owner_rec['id'],
+                             'scope': 'teams', 'teams': [alpha['id'], beta['id']], 'mode': 'rw'}, su)
+        assert code == 200, bot
+        bot_tok = call(api, f"/api/collections/members/impersonate/{bot['id']}", {'duration': 3600}, su)[1]['token']
+        assert page('/t/BETA/', bot_tok)[0] == 200, 'control: the bot sees both teams'
+        call(api, f"/api/collections/members/records/{owner_rec['id']}", {'teams': [alpha['id']], 'mode': 'ro'}, su, 'PATCH')
+        assert page('/t/BETA/', bot_tok)[0] == 404, 'a bot cookie outlived its owner\'s narrowing'
+        assert page('/t/ALPHA/', bot_tok)[0] == 200
+        assert flash('/title', bot_tok, {'key': 'ALPHA-1', 'title': 'bot'})[0] == 403, 'bot wrote past its read-only owner'
+
+        # --- credentials that are not a member's are refused ---
+        for bad in [su, 'not-a-token', rw_tok[:-3] + 'abc']:
+            assert page('/t/ALPHA/', bad)[0] == 401, bad[:12]
+        call(api, f"/api/collections/members/records/{ro_rec['id']}", token=su, method='DELETE')
+        assert page('/t/ALPHA/', ro_tok)[0] == 401, 'a deleted member\'s cookie still opens the board'
+
+        # --- login by query: the member token becomes a year-long cookie ---
+        code, _, headers = call(board, f'/t/ALPHA/?board_token={rw_tok}')
+        assert code == 303 and headers['Location'] == '/t/ALPHA/', (code, headers)
+        cookie = headers['Set-Cookie']
+        assert cookie.startswith(f'lll_board={rw_tok};') and 'Max-Age=31536000' in cookie and 'HttpOnly' in cookie, cookie
+
+        # --- the board token is unchanged ---
+        full = env['LLL_BOARD_TOKEN']
+        code, body, _ = page('/t/BETA/', full)
+        assert code == 200 and 'zebra hidden plan two' in body
+        assert 'BETA' in page('/t/ALPHA/', full)[1] and 'BETA-1' in page('/t/ALPHA/doc/cross?raw', full)[1]
+        assert page('/t/ALPHA/settings/identity', full)[0] == 200
+    finally:
+        for proc in streams:
+            proc.terminate()
+        child.terminate()
+        try:
+            child.wait(timeout=20)
+        except subprocess.TimeoutExpired:
+            child.kill()
+print('board viewer scope: ok')

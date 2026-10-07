@@ -44,8 +44,8 @@ fn doc_page(
   let mut vm = doc_vm(doc, team.key)
   // The board reads as its own member, so a doc linking another team's issue
   // would show that issue to a viewer scoped to this team.
-  if let Some(key) = viewer_scope(r) {
-    vm.issues = vm.issues.filter(|i| issue_of_team(i.key, key))
+  if let Viewer.Scoped(v) = board_viewer(r) {
+    vm.issues = vm.issues.filter(|i| v.sees_issue(i.key))
   }
   if wants_raw(r) {
     write_raw(w, doc_raw(vm))

@@ -17,13 +17,16 @@ import "realtime"
 
 /// One connected browser: its scope ("board:KEY:ORDER" for a team's board
 /// view in one card ordering, or "issue:KEY-1") and the channel its /events
-/// handler drains. `team_only` marks a viewer on a team-scoped board link,
-/// which never receives the workspace-wide "*" fragments (favorites, views).
-struct SseClient { id: int, scope: string, ch: Channel<string>, description_hash: string, team_only: bool }
+/// handler drains. `teams` is a scoped viewer's team keys (LLL-545), None for
+/// the board token: deliver drops every broadcast whose team is not among
+/// them, including the workspace-wide "*" fragments (favorites, views).
+struct SseClient { id: int, scope: string, ch: Channel<string>, description_hash: string, teams: Option<Slice<string>> }
 
-/// A rendered SSE payload for every client with a matching scope.
+/// A rendered SSE payload for every client with a matching scope. `team` is
+/// the key of the team whose data it carries, "" for workspace-wide rows.
 struct Broadcast {
   scope: string,
+  team: string,
   payload: string,
   description: Option<string>,
   client_id: int,
@@ -106,7 +109,12 @@ fn deliver(clients: Slice<SseClient>, msg: Broadcast) -> Slice<SseClient> {
   for i in 0..result.length() {
     let c = result[i]
     if msg.scope != "*" && c.scope != msg.scope { continue }
-    if msg.scope == "*" && c.team_only { continue }
+    // The second fence: the gate already kept a scoped client's stream on
+    // its own teams, and this drops anything carrying another team's data
+    // even if a scope string ever matched across teams.
+    if let Some(teams) = c.teams {
+      if !teams.contains(msg.team) { continue }
+    }
     if msg.client_id != 0 && c.id != msg.client_id { continue }
     let changed = msg.description.is_some() && c.description_hash != hash
     let mut payload = msg.payload
@@ -181,7 +189,11 @@ fn events_stream(
     return
   }
   let ch = Channel.buffered<string>(64)
-  let _ = hub.register.send(SseClient { id, scope, ch, team_only: viewer_scope(r).is_some(), .. })
+  let teams = match board_viewer(r) {
+    Viewer.Full => None,
+    Viewer.Scoped(v) => Some(v.teams),
+  }
+  let _ = hub.register.send(SseClient { id, scope, ch, teams, .. })
   // Response headers acknowledge registration, so a client that has opened
   // the stream cannot miss an immediately following issue mutation.
   w.WriteHeader(200)
@@ -296,7 +308,7 @@ fn board_snapshot(hub: Hub, team_id: string, team_key: string, only_order: strin
       }
       if let Ok(html) = render("board", vm) {
         let _ = hub.broadcast.send(
-          Broadcast { scope: f"board:{team_key}:{order}", payload: patch_event(html), client_id, .. },
+          Broadcast { scope: f"board:{team_key}:{order}", team: team_key, payload: patch_event(html), client_id, .. },
         )
       }
     }
@@ -339,7 +351,7 @@ fn issue_snapshot(hub: Hub, key: string, client_id: int) {
   }
   if let Ok(html) = render("issue-detail", vm) {
     let _ = hub.broadcast.send(Broadcast {
-      scope: f"issue:{key}", payload: patch_event(html),
+      scope: f"issue:{key}", team: records.normalize_team_key(team), payload: patch_event(html),
       description: Some(description), client_id,
     })
   }
@@ -402,7 +414,7 @@ fn comment_broadcast(ev: realtime.Event, hub: Hub) {
     CommentsVM { comments: comments.map(comment_vm) },
   ) {
     let _ = hub.broadcast.send(
-      Broadcast { scope: f"issue:{key}", payload: patch_event(html), .. },
+      Broadcast { scope: f"issue:{key}", team: issue.expand.team.key, payload: patch_event(html), .. },
     )
   }
 }

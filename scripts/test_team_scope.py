@@ -337,8 +337,11 @@ with tempfile.TemporaryDirectory(prefix='lll-team-scope-') as directory:
         assert code == 200 and 'alpha edited' in body and 'beta secret' not in body
         assert 'BETA' not in body, 'rail still lists the other team'
         assert page('/')[0] == 303
-        for path in ['/t/BETA/', '/t/ALPHA/settings/identity', '/t/ALPHA/issue/BETA-1', '/issue/BETA-1',
-                     '/search?q=beta', '/events?team=BETA']:
+        # LLL-545: another team, or its issue, answers 404 like a missing one;
+        # routes scoped viewers do not get at all stay 403.
+        for path in ['/t/BETA/', '/t/ALPHA/issue/BETA-1', '/events?team=BETA']:
+            assert page(path)[0] == 404, path
+        for path in ['/t/ALPHA/settings/identity', '/issue/BETA-1', '/search?q=beta']:
             assert page(path)[0] == 403, path
         assert page('/t/ALPHA/issue/ALPHA-1')[0] == 200
         assert page('/state', 'POST')[0] == 403
