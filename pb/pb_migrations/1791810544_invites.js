@@ -26,6 +26,14 @@
 //               relation below: deleting the member clears redeemed_by,
 //               and a cleared relation must not revive the code.
 //   redeemed_by the member the redemption created
+//
+// Member names also become unique regardless of case, in the database:
+// gopb checks it before a redemption, rename or bot create to give a
+// friendly refusal, but a check-then-save lets two concurrent writes both
+// pass ("Race0" and "race0"). idx_members_name stays as it is (the
+// case-sensitive index the board and the CLI have always had); the new one
+// only adds the case-folded constraint. NOCASE folds ASCII, which is every
+// name gopb lets a non-superuser choose.
 migrate(
   (app) => {
     const teams = app.findCollectionByNameOrId("teams");
@@ -52,8 +60,13 @@ migrate(
       indexes: ["CREATE UNIQUE INDEX `idx_invites_code_hash` ON `invites` (`code_hash`)"],
     });
     app.save(invites);
+    members.addIndex("idx_members_name_nocase", true, "`name` COLLATE NOCASE", "");
+    app.save(members);
   },
   (app) => {
     app.delete(app.findCollectionByNameOrId("invites"));
+    const members = app.findCollectionByNameOrId("members");
+    members.removeIndex("idx_members_name_nocase");
+    app.save(members);
   },
 );

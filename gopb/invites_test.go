@@ -2,14 +2,17 @@ package gopb
 
 import (
 	"errors"
+	"fmt"
 	"slices"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
+	"github.com/pocketbase/dbx"
 	"github.com/pocketbase/pocketbase/core"
 	"github.com/pocketbase/pocketbase/tests"
+	"github.com/pocketbase/pocketbase/tools/router"
 )
 
 type inviteFixture struct {
@@ -41,6 +44,7 @@ func newInviteFixture(t *testing.T) inviteFixture {
 		&core.SelectField{Name: "mode", Values: []string{"rw", "ro"}, MaxSelect: 1, Required: true},
 	)
 	members.AddIndex("idx_members_name_test", true, "name", "")
+	members.AddIndex("idx_members_name_nocase", true, "`name` COLLATE NOCASE", "")
 	if err := app.Save(members); err != nil {
 		t.Fatal(err)
 	}
@@ -354,5 +358,79 @@ func TestAnOwnedPersonCannotInvitePeople(t *testing.T) {
 	code := f.mint(t, owned, inviteGrant{teams: []string{f.alpha}, rw: true}, now)
 	if _, err := redeemInvite(f.app, code, "via-owned", now); !errors.Is(err, errInviteVoid) {
 		t.Fatalf("got %v, want the void refusal", err)
+	}
+}
+
+// The database, not only the hook's check-then-save, refuses two names that
+// differ only by case (idx_members_name_nocase), and nameClash recognizes
+// the refusal the redemption maps to its friendly "taken" answer.
+func TestNamesDifferingOnlyByCaseRaceToExactlyOneWinner(t *testing.T) {
+	f := newInviteFixture(t)
+	members, err := f.app.FindCollectionByNameOrId("members")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for round := range 10 {
+		names := []string{fmt.Sprintf("Race%d", round), fmt.Sprintf("race%d", round)}
+		errs := make([]error, 2)
+		var wg sync.WaitGroup
+		start := make(chan struct{})
+		for i, name := range names {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				m := core.NewRecord(members)
+				m.Set("name", name)
+				m.Set("kind", "person")
+				m.SetEmail(fmt.Sprintf("r%d-%d@members.invalid", round, i))
+				m.SetRandomPassword()
+				setAccess(m, access{teams: []string{f.alpha}})
+				<-start
+				errs[i] = f.app.Save(m)
+			}()
+		}
+		close(start)
+		wg.Wait()
+		if (errs[0] == nil) == (errs[1] == nil) {
+			t.Fatalf("round %d: want exactly one winner, got %v / %v", round, errs[0], errs[1])
+		}
+		for _, err := range errs {
+			if err != nil && !nameClash(err) {
+				t.Fatalf("round %d: the loser's error is not a name clash: %v", round, err)
+			}
+		}
+	}
+	// The redemption's own save is newJoinedMember: a case variant of an
+	// existing name that slipped past the check is refused as a clash.
+	if _, err := newJoinedMember(f.app, "OWNER", inviteGrant{teams: []string{f.alpha}}); !nameClash(err) {
+		t.Fatalf("a case-variant joined member was saved or failed oddly: %v", err)
+	}
+}
+
+// A rename landing between the redemption's name check and its save: the
+// index refuses the save, the redeemer gets the friendly "taken" answer
+// (not a 500), and the rollback leaves the code alive.
+func TestARedemptionLosingTheNameRaceKeepsTheCode(t *testing.T) {
+	f := newInviteFixture(t)
+	now := time.Now()
+	code := f.mint(t, f.full, inviteGrant{teams: []string{f.alpha}}, now)
+	// Simulate the concurrent writer: just before the joined member is
+	// saved, a case variant of its name appears.
+	f.app.OnRecordCreate("members").BindFunc(func(e *core.RecordEvent) error {
+		if e.Record.GetString("name") == "slipper" {
+			if _, err := e.App.DB().NewQuery("UPDATE members SET name = 'SLIPPER' WHERE id = {:id}").
+				Bind(dbx.Params{"id": f.scoped.Id}).Execute(); err != nil {
+				return err
+			}
+		}
+		return e.Next()
+	})
+	_, err := redeemInvite(f.app, code, "slipper", now)
+	var apiErr *router.ApiError
+	if !errors.As(err, &apiErr) || apiErr.Status != 400 || !strings.Contains(apiErr.Message, "is taken") {
+		t.Fatalf("got %v, want the friendly 'taken' refusal", err)
+	}
+	if _, err := redeemInvite(f.app, code, "after-race", now); err != nil {
+		t.Fatalf("the code died with a lost name race: %v", err)
 	}
 }

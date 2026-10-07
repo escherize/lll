@@ -222,6 +222,26 @@ with tempfile.TemporaryDirectory(prefix='lll-invites-') as directory:
         code, body, _ = own_bot('bot-Rae.', su)
         assert code == 200, body
 
+        # Two members renaming to names that differ only by case at the same
+        # moment: the database index, not only the hook's check, lets one win.
+        import threading
+        writers = [(token, me), (rae, rec['id'])]
+        for round_ in range(10):
+            barrier, results = threading.Barrier(2), [None, None]
+
+            def rename(i, name):
+                tok, member_id = writers[i]
+                barrier.wait()
+                results[i] = call(api, f'/api/collections/members/records/{member_id}', {'name': name}, tok,
+                                  method='PATCH')[0]
+            threads = [threading.Thread(target=rename, args=(i, n))
+                       for i, n in enumerate([f'Race{round_}', f'race{round_}'])]
+            for th in threads:
+                th.start()
+            for th in threads:
+                th.join()
+            assert sorted(results) == [200, 400], (round_, results)
+
         # The invites collection answers no member token: list, view, filter, create.
         for tok in [owner, guest, token]:
             assert call(api, '/api/collections/invites/records', token=tok)[0] == 403

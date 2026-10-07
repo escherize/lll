@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/pocketbase/dbx"
+	validation "github.com/pocketbase/ozzo-validation/v4"
 	"github.com/pocketbase/pocketbase/apis"
 	"github.com/pocketbase/pocketbase/core"
 	"github.com/pocketbase/pocketbase/tools/router"
@@ -209,6 +210,12 @@ func redeemInvite(app core.App, code, name string, now time.Time) (*core.Record,
 			return nameTakenError(name)
 		}
 		member, err = newJoinedMember(tx, name, grant)
+		if nameClash(err) {
+			// A rename or create committed between the check above and
+			// this save; idx_members_name_nocase refused it. Returning an
+			// error rolls back the kill, so the code stays alive.
+			return nameTakenError(name)
+		}
 		if err != nil {
 			return err
 		}
@@ -232,6 +239,17 @@ func nameTaken(app core.App, name, exceptID string) (bool, error) {
 	err := app.DB().NewQuery("SELECT id FROM members WHERE LOWER(name) = LOWER({:name}) AND id != {:id} LIMIT 1").
 		Bind(dbx.Params{"name": name, "id": exceptID}).All(&found)
 	return len(found) > 0, err
+}
+
+// nameClash reports whether err is a members name uniqueness violation, as
+// PocketBase normalizes it (validators.NormalizeUniqueIndexError).
+func nameClash(err error) bool {
+	var fields validation.Errors
+	if !errors.As(err, &fields) {
+		return false
+	}
+	_, ok := fields["name"]
+	return ok
 }
 
 func nameTakenError(name string) error {
