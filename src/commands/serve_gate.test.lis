@@ -24,16 +24,18 @@ fn scoped_viewer_allowlist() {
   let link = ScopedViewer { teams: ["AAA"], member: None }
   let get = |path: string| route_kind(scoped_route("GET", path, "", "", "", link, false))
   for path in ["/t/AAA", "/t/AAA/", "/t/AAA/issues", "/t/AAA/projects", "/t/AAA/search",
-               "/t/AAA/issue/AAA-3", "/t/AAA/issue/aaa-3", "/t/AAA/doc/index", "/t/aaa/", "/static/app.js"] {
+               "/t/AAA/issue/AAA-3", "/t/AAA/issue/aaa-3", "/t/AAA/doc/index", "/t/aaa/", "/static/app.js",
+               "/issue/AAA-3", "/issue/aaa-3"] {
     assert get(path) == "open"
   }
   // Another team, or another team's issue, answers like a missing one.
   for path in ["/t/BBB/", "/t/BBB", "/t/AAAB/", "/t/BBB/issue/BBB-1", "/t/BBB/settings/identity",
-               "/t/AAA/issue/BBB-3", "/t/AAA/issue/AAAB-3", "/attachments/file"] {
+               "/t/AAA/issue/BBB-3", "/t/AAA/issue/AAAB-3", "/attachments/file",
+               "/issue/BBB-1", "/issue/AAA-X-1"] {
     assert get(path) == "hidden"
   }
   for path in ["/", "/t/AAA/settings", "/t/AAA/settings/access", "/t/AAA/doc/", "/t/AAA/doc/a/b",
-               "/issue/AAA-3", "/search", "/settings/access", "/issues"] {
+               "/issue/AAA-3/x", "/search", "/settings/access", "/issues"] {
     assert get(path) == "closed"
   }
   // The hidden answer is the missing team's own words, naming no other team.

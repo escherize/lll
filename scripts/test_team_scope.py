@@ -339,9 +339,9 @@ with tempfile.TemporaryDirectory(prefix='lll-team-scope-') as directory:
         assert page('/')[0] == 303
         # LLL-545: another team, or its issue, answers 404 like a missing one;
         # routes scoped viewers do not get at all stay 403.
-        for path in ['/t/BETA/', '/t/ALPHA/issue/BETA-1', '/events?team=BETA']:
+        for path in ['/t/BETA/', '/t/ALPHA/issue/BETA-1', '/issue/BETA-1', '/events?team=BETA']:
             assert page(path)[0] == 404, path
-        for path in ['/t/ALPHA/settings/identity', '/issue/BETA-1', '/search?q=beta']:
+        for path in ['/t/ALPHA/settings/identity', '/search?q=beta']:
             assert page(path)[0] == 403, path
         assert page('/t/ALPHA/issue/ALPHA-1')[0] == 200
         assert page('/state', 'POST')[0] == 403
