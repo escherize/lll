@@ -151,6 +151,33 @@ pub fn bearer(tok: string) -> string {
   f"Bearer {tok}"
 }
 
+/// Whom a request runs as (LLL-545). `Process` is the configured token, with
+/// the renewal and refusal handling every command gets. `Member` is a board
+/// viewer's own member token: PocketBase checks that member's teams and mode
+/// and records it as the author. A viewer's token is never re-minted here;
+/// a refusal is the viewer's answer.
+pub enum Caller {
+  Process,
+  Member(string),
+}
+
+/// One request as `caller`, with an explicit content type.
+pub fn send_as(
+  caller: Caller,
+  method: string,
+  path: string,
+  payload: string,
+  content_type: string,
+) -> Result<string, string> {
+  match caller {
+    Caller.Process => send_content(method, path, payload, content_type),
+    Caller.Member(tok) => {
+      let (cfg, src) = config.load_traced()?
+      request_content(cfg.url, method, path, payload, bearer(tok), src.url == "default", content_type, "")
+    },
+  }
+}
+
 /// Every verb's single path to the wire. One place decides the headers, so a
 /// token configured anywhere in the layering reaches PocketBase on every
 /// request — GET included, which is why `get` no longer calls http.Get.

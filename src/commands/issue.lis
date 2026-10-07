@@ -1447,7 +1447,7 @@ fn update(input: flags.CommandInput) -> Result<(), string> {
   let mut released = ""
   if assignee_name != "" {
     let observed = claims.observed_id(issue.id)?
-    let result = claims.update_assignment(issue.id, observed, payload, agent, force, reason).map_err(|e| {
+    let result = claims.update_assignment(pb.Caller.Process, issue.id, observed, payload, agent, force, reason).map_err(|e| {
       if strings.Contains(e, "is claimed by") {
         f"{key}: {e} — {held_elsewhere_hint(key)}"
       } else if strings.Contains(e, "needs force") {
@@ -1686,7 +1686,7 @@ fn claim(input: flags.CommandInput) -> Result<(), string> {
     return Ok(())
   }
 
-  let result = claims.acquire(issue.id, member.id, agent).map_err(|e| {
+  let result = claims.acquire(pb.Caller.Process, issue.id, member.id, agent).map_err(|e| {
     if strings.Contains(e, "already claimed by") {
       f"{key}: {e} — {held_elsewhere_hint(key)}"
     } else { e }
@@ -1716,7 +1716,7 @@ fn release(input: flags.CommandInput) -> Result<(), string> {
   let issue = records.fetch_issue(resolved)?
   let key = f"{issue.expand.team.key}-{issue.number}"
   let Some(held) = claims.fetch(issue.id)? else { return Err(f"{key} is not claimed") };
-  let result = claims.release(issue.id, held.id, agent, force, reason).map_err(|e| {
+  let result = claims.release(pb.Caller.Process, issue.id, held.id, agent, force, reason).map_err(|e| {
     if strings.Contains(e, "needs force") {
       f"{key}: {e} — 'lll issue release {key} --force -b \"why\"' takes it anyway and comments on the issue"
     } else { e }
@@ -2390,7 +2390,7 @@ fn issue_next(input: flags.CommandInput) -> Result<(), string> {
     }
     // Acquire before printing: a key this command did not secure is a lie to
     // the shell loop that composed it. A lost race exits non-zero, keyless.
-    let result = claims.acquire(best.id, member.id, agent).map_err(|e| {
+    let result = claims.acquire(pb.Caller.Process, best.id, member.id, agent).map_err(|e| {
       if strings.Contains(e, "already claimed by") {
         f"{key}: {e} — {held_elsewhere_hint(key)}"
       } else { e }
