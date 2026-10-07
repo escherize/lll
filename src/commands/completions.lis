@@ -126,7 +126,7 @@ fn verb_flags(noun: string, verb: string) -> Slice<string> {
   }
   match noun {
     "search" => flags.tokens(search_spec()),
-    "bot" => flags.tokens(token_create_spec()),
+    "bot" => flags.tokens(bot_spec()),
     "watch" => flags.tokens(watch_spec()),
     "up" => flags.tokens(up_spec()),
     "attach" => flags.tokens(attach_spec()),

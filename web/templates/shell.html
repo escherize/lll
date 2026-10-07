@@ -25,10 +25,35 @@
 {{if not .Scoped}}{{template "rail-favorites" .Favorites}}
 {{template "rail-views" .Views}}
 <a href="{{.BoardBase}}settings"{{if eq .Active "settings"}} class="active"{{end}}><svg width="14" height="14"><use href="#ic-settings"/></svg> Settings</a>{{end}}
+{{if .BotOwner}}{{template "rail-bot" .}}{{end}}
 <div class="rail-foot">v{{.Version}}</div>
 </nav>
 {{template "cmdk" .}}
 {{template "kbd-help" .}}{{end}}
+
+{{/* LLL-546: "Add a bot", for a read-write member viewer only (.BotOwner).
+     The POST mints a bot the viewer owns, with the viewer's own token, and
+     its response alone patches the agent prompt into #bot-result. Every
+     page renders #bot-result empty, so the token is shown once: never on a
+     reload, never in a broadcast (the rail is never broadcast). */}}
+{{define "rail-bot"}}<details class="rail-bot">
+<summary>Add a bot</summary>
+<form class="rail-bot-form">
+<input type="hidden" name="team" value="{{.TeamKey}}">
+<label class="rail-bot-name">bot-<input name="name" placeholder="myrepo" autocomplete="off" aria-label="Bot name, after bot-" required></label>
+<button type="button" class="btn" data-on:click="@post('/bot', {contentType: 'form'})">Mint for {{.TeamKey}}</button>
+</form>
+<p class="rg-note">Owned by {{.BotOwner}}; it never gets more access than you.</p>
+</details>
+<div id="bot-result" class="bot-result"></div>{{end}}
+
+{{/* The /bot response patch: the one time the bot's token is ever shown. */}}
+{{define "bot-result"}}<div id="bot-result" class="bot-result" role="dialog" aria-label="Agent prompt for {{.Name}}">
+<p class="set-note">Paste this into the agent for <strong>{{.Name}}</strong> (team {{.Team}}). The token is shown only now; reloading the page clears it.</p>
+<pre id="bot-prompt" class="access-token-value">{{.Prompt}}</pre>
+<button type="button" class="btn" data-on:click="navigator.clipboard.writeText(document.getElementById('bot-prompt').textContent)">Copy</button>
+<button type="button" class="btn" data-on:click="document.getElementById('bot-result').replaceChildren()">Done</button>
+</div>{{end}}
 
 {{/* LLL-447: the ⌘K palette. It lives in the rail's own template because
      the rail is the one thing every page includes, so the palette arrives

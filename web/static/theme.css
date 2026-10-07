@@ -1574,6 +1574,25 @@ input:focus, textarea:focus, select:focus {
   word-break: break-all;
   user-select: all;
 }
+/* LLL-546: the rail's "Add a bot" and its one-time prompt. The prompt is
+   too wide for the rail, so it floats over the page until Done empties it. */
+.rail-bot { padding: 4px 8px; color: var(--text-2); }
+.rail-bot > summary { cursor: pointer; font-weight: 500; }
+.rail-bot-form { display: flex; flex-direction: column; gap: 6px; margin-top: 6px; }
+.rail-bot-name { display: flex; align-items: center; gap: 2px; font-size: 12px; }
+.rail-bot-name input { min-width: 0; flex: 1; }
+.bot-result:empty { display: none; }
+.bot-result {
+  position: fixed; z-index: 50;
+  left: 50%; top: 15%; transform: translateX(-50%);
+  width: min(720px, calc(100vw - 32px));
+  padding: 12px 14px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  background: var(--bg-raised);
+  box-shadow: var(--shadow-card);
+}
+.bot-result pre { white-space: pre-wrap; margin: 8px 0; }
 /* A success flash: the same strip errors use, in the done green. */
 .flash.flash-ok {
   border-color: rgba(76, 183, 130, 0.4);

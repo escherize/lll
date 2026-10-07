@@ -169,7 +169,7 @@ class Instance:
             mint = subprocess.run([str(binary), 'bot', f'bot-fleet-worker-{number}', '--duration', '3600'],
                                   cwd=self.private, env=mint_env, text=True, capture_output=True, timeout=20)
             assert mint.returncode == 0, redact(mint.stderr)
-            self.bot_token = next(line.removeprefix('LLL_TOKEN=') for line in mint.stdout.splitlines() if line.startswith('LLL_TOKEN='))
+            self.bot_token = next(line.removeprefix('export LLL_TOKEN=') for line in mint.stdout.splitlines() if line.startswith('export LLL_TOKEN='))
             bot = next(m for m in self.records('members') if m['name'] == f'bot-fleet-worker-{number}')
             assert bot['kind'] == 'bot' and bot['owner'] == person['id']
             self.bot_id = bot['id']

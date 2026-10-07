@@ -108,7 +108,8 @@ Usage:
   lll issue <command>     work with issues (see 'lll issue --help')
   lll search <text>       full-text search: issues, comments, docs, ranked, with context
   lll bot bot-<name>      an agent identity in one command: member + token, printed
-                          once; the name must start with bot- (lll bot bot-myrepo)
+                          once in a prompt to paste into the agent (--env: only the
+                          exports); the name must start with bot- (lll bot bot-myrepo)
   lll team <command>      work with teams (see 'lll team --help')
   lll member <command>    work with members (see 'lll member --help')
   lll invite create --team KEY [--ro]

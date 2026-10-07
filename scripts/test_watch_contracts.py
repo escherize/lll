@@ -166,8 +166,10 @@ _, other_token = member_token('watch-bot-other')
 
 
 def minted(out):
-    lines = [l for l in out.splitlines() if l.startswith('LLL_TOKEN=')]
-    assert len(lines) == 1, out
+    # 'lll token create' prints LLL_TOKEN=; 'lll bot' prints the agent
+    # prompt's export line (LLL-546). Either way, exactly once.
+    lines = [l.removeprefix('export ') for l in out.splitlines() if 'LLL_TOKEN=' in l]
+    assert len(lines) == 1 and lines[0].startswith('LLL_TOKEN='), out
     return lines[0][len('LLL_TOKEN='):]
 
 
@@ -183,11 +185,16 @@ for who in [other_token, first]:  # another full member; the bot itself
     result = cli('bot', 'rotate', 'bot-watch-contract', as_token=who)
     assert result.returncode == 1 and refused in result.stderr, result
     assert authenticates(first), 'a refused rotation stranded the token'
+# LLL-546 review: 'lll bot NAME' by a non-owner claims no rotation it did not do.
+result = cli('bot', 'bot-watch-contract', as_token=other_token)
+assert result.returncode == 1 and refused in result.stderr, result
+assert 'rotat' not in result.stdout and 'exists;' not in result.stderr, result
+assert authenticates(first), 'a refused rotation stranded the token'
 second = minted(ok('bot', 'rotate', 'bot-watch-contract', '--duration', '3600', as_token=owner_token))
 assert not authenticates(first) and authenticates(second)
 # 'lll bot NAME' on an existing bot is a rotation too.
 out = ok('bot', 'bot-watch-contract', '--duration', '3600', as_token=owner_token)
-assert 'member bot-watch-contract exists; rotating its token' in out, out
+assert 'member bot-watch-contract exists; rotated its token' in out, out
 third = minted(out)
 assert not authenticates(second) and authenticates(third)
 # A superuser rotates any bot; 'lll token create' adds a token and strands none.

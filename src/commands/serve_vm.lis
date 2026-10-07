@@ -304,6 +304,9 @@ pub struct RailVM {
   // (they answer 403) and no Favorites or Saved views groups (workspace-wide,
   // so always empty for it).
   pub scoped: bool,
+  // The member an "Add a bot" would own (LLL-546): a read-write member
+  // viewer's name, else "" and no button. Never a token.
+  pub bot_owner: string,
 }
 
 /// One starred issue in the rail's FAVORITES group.

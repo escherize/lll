@@ -32,6 +32,7 @@ fn rail_vm(active: string, me: string, team: models.Team) -> RailVM {
     favorites: fav_vms(),
     views: view_vms(),
     scoped: false,
+    bot_owner: "",
   }
 }
 
@@ -43,7 +44,21 @@ fn rail_for(r: Ref<http.Request>, active: string, me: string, team: models.Team)
   let rail = rail_vm(active, me, team)
   let Viewer.Scoped(v) = board_viewer(r) else { return rail }
   let mine = v.member.map_or(rail.me, |m| m.name)
-  RailVM { teams: rail.teams.filter(|t| v.sees(t.key)), favorites: [], views: [], me: mine, scoped: true, ..rail }
+  // "Add a bot" (LLL-546): a read-write person viewer owns what it mints. A
+  // bot viewer cannot own bots (gopb), so it gets no button.
+  let bot_owner = match v.member {
+    Some(m) if m.rw && !strings.HasPrefix(m.name, "bot-") => m.name,
+    _ => "",
+  }
+  RailVM {
+    teams: rail.teams.filter(|t| v.sees(t.key)),
+    favorites: [],
+    views: [],
+    me: mine,
+    scoped: true,
+    bot_owner,
+    ..rail
+  }
 }
 
 /// The board path for a team key: "/t/KEY/", or "/" when no key scopes the
