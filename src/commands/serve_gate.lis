@@ -92,18 +92,31 @@ fn admit(w: http.ResponseWriter, r: Ref<http.Request>) -> bool {
   // only for its teams. A member's cookie lasts a year (the join contract);
   // revoking it is deleting or narrowing the member, read on every request.
   if query != "" {
-    let max_age = if team_scope(query, want).is_some() {
-      Some(7 * 24 * 3600)
-    } else if member_viewer(query).is_some() {
-      Some(365 * 24 * 3600)
-    } else { None }
-    if let Some(age) = max_age {
-      if r.Method == "GET" {
-        set_board_cookie(w, query, age)
-        http.Redirect(w, r, without_board_token(r), 303)
-      } else {
+    let is_link = team_scope(query, want).is_some()
+    let is_member = !is_link && member_viewer(query).is_some()
+    if is_link || is_member {
+      if r.Method != "GET" {
         refused(w, r)
+        return false
       }
+      // Login CSRF (LLL-545 review): Lax cookies ride cross-site GETs, so a
+      // link from any page could swap a signed-in browser onto another
+      // member and collect its writes. A query login never replaces a
+      // cookie that still resolves to a viewer: the browser stays who it is.
+      if cookie != query && cookie_viewer(cookie, want).is_some() {
+        http.Redirect(w, r, without_board_token(r), 303)
+        return false
+      }
+      // A member token signs in only from a navigation the browser calls
+      // same-origin or direct (typed, pasted, bookmarked). Joining by
+      // invite goes through /join instead.
+      if is_member && cross_site(r) {
+        http.Error(w, "a member sign-in link works only when opened directly: paste it into the address bar", 403)
+        return false
+      }
+      let age = if is_link { 7 * 24 * 3600 } else { 365 * 24 * 3600 }
+      set_board_cookie(w, query, age)
+      http.Redirect(w, r, without_board_token(r), 303)
       return false
     }
   }
@@ -116,6 +129,13 @@ fn admit(w: http.ResponseWriter, r: Ref<http.Request>) -> bool {
     return false
   }
   admit_scoped(w, r, viewer)
+}
+
+/// True when the browser says this request came from another site. Browsers
+/// send Sec-Fetch-Site on every navigation; "none" is a typed or pasted URL.
+fn cross_site(r: Ref<http.Request>) -> bool {
+  let site = r.Header.map_or("", |h| h.Get("Sec-Fetch-Site"))
+  site == "cross-site" || site == "same-site"
 }
 
 fn is_board_token(tok: string, want: string) -> bool {
@@ -318,6 +338,11 @@ pub fn scoped_route(
     return ScopedVerdict.Hidden(hidden_team(team))
   }
   if path == "/attachments/file" { return issue_route(v, issue) }
+  // Cards, search rows and doc links use the bare /issue/KEY address, which
+  // redirects to the issue's own team path, where the gate checks again.
+  if let Some(bare) = strings.CutPrefix(path, "/issue/") {
+    if !strings.Contains(bare, "/") { return issue_route(v, bare) }
+  }
   let Some(routed) = strings.CutPrefix(path, "/t/") else { return closed }
   let (raw_key, rest, slash) = strings.Cut(routed, "/")
   let key = records.normalize_team_key(raw_key)

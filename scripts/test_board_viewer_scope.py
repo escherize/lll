@@ -5,6 +5,7 @@ name or issue of a hidden team; writes run as the viewer; a read-only viewer
 cannot write; a bot's cookie is capped by its owner; the board token is
 unchanged."""
 import json
+import re
 import os
 from pathlib import Path
 import socket
@@ -133,15 +134,25 @@ with tempfile.TemporaryDirectory(prefix='lll-545-') as directory:
         missing = page('/t/NOPE/', rw_tok)
         for path in ['/t/BETA/', '/t/BETA', '/t/beta/issues', '/t/BETA/issue/BETA-1', '/t/ALPHA/issue/BETA-1',
                      '/t/BETA/doc/bdoc', '/t/BETA/search?q=zebra', '/events?team=BETA', '/events?page=issue&key=BETA-1',
-                     '/attachments/file?key=BETA-1&file=x.png']:
+                     '/attachments/file?key=BETA-1&file=x.png', '/issue/BETA-1']:
             code, body, _ = page(path, rw_tok)
             assert code == 404, (path, code)
             assert 'Bravo' not in str(body) and 'zebra' not in str(body), (path, body)
         hidden_body = page('/t/BETA/', rw_tok)[1].replace('BETA', 'NOPE')
         assert hidden_body == missing[1] and missing[0] == 404, 'a hidden team answers differently from a missing one'
-        for path in ['/t/ALPHA/settings/identity', '/t/ALPHA/settings/access', '/issue/BETA-1', '/search?q=zebra']:
+        for path in ['/t/ALPHA/settings/identity', '/t/ALPHA/settings/access', '/search?q=zebra']:
             assert page(path, rw_tok)[0] == 403, path
         assert page('/', rw_tok)[0] == 303 and page('/', rw_tok)[2]['Location'] == '/t/ALPHA/'
+
+        # --- the hrefs the board renders open for a scoped viewer ---
+        board_html = page('/t/ALPHA/', rw_tok)[1]
+        card = re.search(r'class="card" id="issue-[^"]+" href="(/issue/ALPHA-\d+)"', board_html)
+        assert card, 'no card href on the scoped board'
+        code, _, headers = page(card.group(1), rw_tok)
+        assert code == 303 and headers['Location'].startswith('/t/ALPHA/issue/ALPHA-'), (code, dict(headers))
+        assert page(headers['Location'], rw_tok)[0] == 200
+        doc_link = re.search(r'href="(/issue/ALPHA-\d+)"', page('/t/ALPHA/doc/cross', rw_tok)[1]).group(1)
+        assert page(doc_link, rw_tok)[0] == 303
 
         # --- search: the hidden team's words find nothing ---
         for path in ['/t/ALPHA/search?q=zebra', '/t/ALPHA/search?q=zebra&raw', '/t/ALPHA/search?q=zebra&palette=1',
@@ -255,6 +266,50 @@ with tempfile.TemporaryDirectory(prefix='lll-545-') as directory:
         assert code == 303 and headers['Location'] == '/t/ALPHA/', (code, headers)
         cookie = headers['Set-Cookie']
         assert cookie.startswith(f'lll_board={rw_tok};') and 'Max-Age=31536000' in cookie and 'HttpOnly' in cookie, cookie
+        # Login CSRF: a link carrying another member's token must not swap a
+        # signed-in browser's identity, and a cross-site navigation never
+        # signs a browser in as a member.
+        code, _, headers = call(board, f'/t/ALPHA/?board_token={both_tok}', headers=as_cookie(rw_tok))
+        assert code == 303 and 'Set-Cookie' not in headers, (code, dict(headers))
+        code, _, headers = call(board, f'/t/ALPHA/?board_token={both_tok}', headers={'Sec-Fetch-Site': 'cross-site'})
+        assert code == 403 and 'Set-Cookie' not in headers, (code, dict(headers))
+        code, _, headers = call(board, f'/t/ALPHA/?board_token={both_tok}', headers={'Sec-Fetch-Site': 'none'})
+        assert code == 303 and headers['Set-Cookie'].startswith(f'lll_board={both_tok};'), 'control: a pasted link signs in'
+        # The board-token login is unchanged, cookie or not.
+        code, _, headers = call(board, f"/t/ALPHA/?board_token={env['LLL_BOARD_TOKEN']}", headers=as_cookie(rw_tok))
+        assert code == 303 and headers['Set-Cookie'].startswith(f"lll_board={env['LLL_BOARD_TOKEN']};"), dict(headers)
+
+        # --- revocation reaches open streams (LLL-626) ---
+        narrowed_rec, narrowed_tok = member('narrowed', scope='teams', teams=[alpha['id']], mode='rw')
+        doomed_rec, doomed_tok = member('doomed', scope='teams', teams=[alpha['id']], mode='ro')
+        narrowed_stream = stream('/events?team=ALPHA', narrowed_tok, 'narrowed')
+        doomed_stream = stream('/events?page=issue&key=ALPHA-1', doomed_tok, 'doomed')
+        full_alpha = stream('/events?team=ALPHA', env['LLL_BOARD_TOKEN'], 'full-alpha')
+        for out in [narrowed_stream, doomed_stream, full_alpha]:
+            wait_for(out, 'alpha by writer')
+        revoked_procs = streams[-3:-1]
+        call(api, f"/api/collections/members/records/{narrowed_rec['id']}", {'teams': [beta['id']]}, su, 'PATCH')
+        call(api, f"/api/collections/members/records/{doomed_rec['id']}", token=su, method='DELETE')
+        issue(alpha, 'AFTERREVOKE alpha')
+        call(api, f"/api/collections/issues/records/{ia['id']}", {'title': 'AFTERREVOKE title'}, su, 'PATCH')
+        wait_for(full_alpha, 'AFTERREVOKE alpha')
+        wait_for(full_alpha, 'AFTERREVOKE title')
+        deadline = time.monotonic() + 20
+        while any(p.poll() is None for p in revoked_procs) and time.monotonic() < deadline:
+            time.sleep(.2)
+        assert all(p.poll() is not None for p in revoked_procs), 'a revoked stream stayed open'
+        for out in [narrowed_stream, doomed_stream]:
+            assert 'AFTERREVOKE' not in out.read_text(), f'{out.name} received an event after revocation'
+        # An idle stream closes on the timer, with no event to trigger it.
+        idle_rec, idle_tok = member('idle', scope='teams', teams=[alpha['id']], mode='ro')
+        idle_stream = stream('/events?team=ALPHA', idle_tok, 'idle')
+        wait_for(idle_stream, 'AFTERREVOKE alpha')
+        idle_proc = streams[-1]
+        call(api, f"/api/collections/members/records/{idle_rec['id']}", token=su, method='DELETE')
+        deadline = time.monotonic() + 20
+        while idle_proc.poll() is None and time.monotonic() < deadline:
+            time.sleep(.2)
+        assert idle_proc.poll() is not None, 'an idle revoked stream stayed open past the re-check interval'
 
         # --- the board token is unchanged ---
         full = env['LLL_BOARD_TOKEN']

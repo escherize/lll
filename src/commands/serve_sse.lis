@@ -7,6 +7,7 @@ import "go:fmt"
 import "go:net/url"
 import "go:encoding/json"
 import "go:net/http"
+import "go:time"
 
 import "models"
 import "pb"
@@ -203,16 +204,36 @@ fn events_stream(
   } else {
     let _ = hub.snapshots.send(PageSnapshot { team, order, client_id: id, .. })
   }
+  // Revocation (LLL-626): narrowing or deleting a member revokes it, open
+  // streams included. A scoped viewer's access is read again before every
+  // payload and on a timer while idle; the stream closes as soon as its
+  // credential stops resolving or no longer covers what it streams. The
+  // board token is fixed for the process, so a full viewer is not re-read.
+  let scoped = teams.is_some()
+  let still_allowed = || match board_viewer(r) {
+    Viewer.Full => true,
+    Viewer.Scoped(v) => if page == "issue" && key != "" { v.sees_issue(key) } else { v.teams.contains(team) },
+  }
+  let ticker = time.NewTicker(revalidate_every())
+  defer ticker.Stop()
   let done = r.Context().Done()
   loop {
     let quit = select {
       match ch.receive() {
         Some(payload) => {
-          let _ = w.Write(payload.bytes())
-          flusher.Flush()
-          false
+          if scoped && !still_allowed() {
+            true
+          } else {
+            let _ = w.Write(payload.bytes())
+            flusher.Flush()
+            false
+          }
         },
         None => true,
+      },
+      match ticker.C.receive() {
+        Some(_) => scoped && !still_allowed(),
+        None => false,
       },
       match done.receive() {
         Some(_) => true,
@@ -224,6 +245,11 @@ fn events_stream(
       return
     }
   }
+}
+
+/// How often an idle scoped stream re-reads its viewer's access (LLL-626).
+fn revalidate_every() -> time.Duration {
+  10 * time.Second
 }
 
 /// Consume PB realtime events forever; re-render and broadcast fragments.
