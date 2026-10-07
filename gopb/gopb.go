@@ -63,6 +63,7 @@ func Serve(dataDir, addr, adminEmail, adminPassword string) error {
 	})
 
 	registerIssueProvenance(app)
+	registerDocAuthor(app)
 	registerIssueIdempotency(app)
 	registerWebhookDelivery(app)
 	registerMemberGuards(app)

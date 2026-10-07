@@ -59,6 +59,7 @@ fn doc_page(
 /// reader moving between the two surfaces finds the same page.
 fn doc_vm(d: models.Doc, team_key: string) -> DocVM {
   let kind_label = if d.kind == "prd" { "PRD" } else { state_label(d.kind) }
+  let author = d.expand.author.unwrap_or(models.Member { .. })
   DocVM {
     slug: d.slug,
     title: d.title,
@@ -66,6 +67,9 @@ fn doc_vm(d: models.Doc, team_key: string) -> DocVM {
     kind_label,
     area: d.area,
     paths: d.paths,
+    author: author.name,
+    author_avatar: avatar_vm(author),
+    author_via: author.owner_name(),
     created: display.relative(d.created),
     updated: display.relative(d.updated),
     issues: d.expand.issues.map(|i| {
@@ -85,6 +89,10 @@ fn doc_raw(vm: DocVM) -> string {
   let mut lines = [f"# {vm.slug} {line_text(vm.title)}", "", f"Kind: {vm.kind}"]
   if vm.area != "" { lines = lines.append(f"Area: {line_text(vm.area)}") }
   if vm.paths != "" { lines = lines.append(f"Paths: {line_text(vm.paths)}") }
+  if vm.author != "" {
+    let tag = display.author_tag(vm.author_avatar.bot, vm.author_via)
+    lines = lines.append(f"Author: {line_text(vm.author + tag)}")
+  }
   lines = lines.append(f"Created: {vm.created}")
   lines = lines.append(f"Updated: {vm.updated}")
   if !vm.issues.is_empty() {
