@@ -43,9 +43,19 @@
 // at every boot (ensureNameIndex in gopb/invites.go), so the index appears
 // on the first boot after an administrator renames one of each pair; until
 // then gopb's own check refuses case-variant names. The names in the
-// warning are JSON-quoted: they are member input bound for the operator's
-// terminal, and an escape sequence or newline must not reach it raw.
+// warning are quoted (quoteName): they are member input bound for the
+// operator's terminal, and no control character may reach it raw.
 const NAME_INDEX = "idx_members_name_nocase";
+
+// quoteName is JSON.stringify, which escapes C0 controls, plus \u escapes
+// for what it leaves raw: DEL, the C1 controls (U+0080-U+009F, which
+// include the 8-bit CSI) and the bidi controls (U+202A-U+202E,
+// U+2066-U+2069), which can reorder what the operator reads.
+function quoteName(name) {
+  return JSON.stringify(name).replace(/[\u007f-\u009f‪-‮⁦-⁩]/g, (c) =>
+    "\\u" + ("000" + c.charCodeAt(0).toString(16)).slice(-4),
+  );
+}
 
 function caseClashes(app) {
   const rows = arrayOf(new DynamicModel({ name: "" }));
@@ -56,7 +66,7 @@ function caseClashes(app) {
         "(SELECT name FROM members GROUP BY name COLLATE NOCASE HAVING COUNT(*) > 1) ORDER BY name COLLATE NOCASE, name",
     )
     .all(rows);
-  return rows.map((r) => JSON.stringify(r.name));
+  return rows.map((r) => quoteName(r.name));
 }
 
 migrate(

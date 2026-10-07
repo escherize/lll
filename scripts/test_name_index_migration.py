@@ -19,7 +19,9 @@ from board_startup import wait_for_endpoints
 binary = str(Path(sys.argv[1]).resolve())
 MIGRATION = '1791810544_invites.js'
 INDEX = 'idx_members_name_nocase'
-EVIL = 'evil\x1b[2K\x07\nlll: all good, index added'
+# ESC, BEL, newline, DEL, the 8-bit CSI (C1) and bidi controls (RLO, LRI).
+EVIL = 'evil\x1b[2K\x07\x7f\x9b2K\u202e\u2066\nlll: all good, index added'
+RAW = ['\x1b', '\x07', '\x7f', '\x9b', '\u202e', '\u2066']
 
 
 def port():
@@ -106,7 +108,7 @@ with tempfile.TemporaryDirectory(prefix='lll-name-index-') as directory:
         assert '"Alice", "alice"' in output, output
         # Member names reach the operator's terminal quoted: no raw escape,
         # bell or newline, so no forged line.
-        assert '\x1b' not in output and '\x07' not in output, repr(output)
+        assert not any(c in output for c in RAW), repr(output)
         assert not any(line.startswith('lll: all good') for line in output.splitlines()), output
         # Both halves warn: the migration itself, and the boot-time retry.
         assert 'lll: member names differ only by case' in output, output

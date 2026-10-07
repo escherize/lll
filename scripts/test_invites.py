@@ -242,6 +242,23 @@ with tempfile.TemporaryDirectory(prefix='lll-invites-') as directory:
                 th.join()
             assert sorted(results) == [200, 400], (round_, results)
 
+        # A batch of checked name writes is refused (sub-request i+1 runs inside
+        # sub-request i's save, so a lock held across it would deadlock), and
+        # the next rename and redemption still complete promptly.
+        import time
+        settings = {'batch': {'enabled': True, 'maxRequests': 10, 'timeout': 3, 'maxBodySize': 0}}
+        assert call(api, '/api/settings', settings, su, method='PATCH')[0] == 200
+        renames = [{'method': 'PATCH', 'url': f'/api/collections/members/records/{me}', 'body': {'name': f'Batch Name {n}'}}
+                   for n in range(2)]
+        code, body, _ = call(api, '/api/batch', {'requests': renames}, token)
+        assert code == 400, (code, body)
+        assert 'batch' in json.dumps(body).lower(), body
+        started = time.monotonic()
+        assert call(api, f'/api/collections/members/records/{me}', {'name': 'After Batch'}, token, method='PATCH')[0] == 200
+        assert redeem(invite('--team', 'ALPHA', '--ro'), 'After Batch Joiner')[0] == 303
+        assert time.monotonic() - started < 3, 'a name write waited on a lock a batch left held'
+        assert call(api, '/api/settings', {'batch': {'enabled': False}}, su, method='PATCH')[0] == 200
+
         # The invites collection answers no member token: list, view, filter, create.
         for tok in [owner, guest, token]:
             assert call(api, '/api/collections/invites/records', token=tok)[0] == 403
@@ -251,7 +268,7 @@ with tempfile.TemporaryDirectory(prefix='lll-invites-') as directory:
                         token=tok)[0] == 400
             assert call(api, '/api/collections/invites/records', {'code_hash': 'a' * 64, 'mode': 'rw'}, tok)[0] == 403
         # Control: a superuser does see them, so the 403s above are the rules.
-        assert call(api, '/api/collections/invites/records', token=su)[1]['totalItems'] == 3
+        assert call(api, '/api/collections/invites/records', token=su)[1]['totalItems'] == 4
         print('invites: ok')
     finally:
         child.terminate()

@@ -11,7 +11,6 @@ import (
 	"regexp"
 	"slices"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/pocketbase/dbx"
@@ -167,9 +166,12 @@ func redeemInvite(app core.App, code, name string, now time.Time) (*core.Record,
 		return nil, errInviteUnknown
 	}
 	var member *core.Record
-	nameWrites.Lock()
-	defer nameWrites.Unlock()
-	err := app.RunInTransaction(func(tx core.App) error {
+	unlock, err := lockNameWrites()
+	if err != nil {
+		return nil, err
+	}
+	defer unlock()
+	err = app.RunInTransaction(func(tx core.App) error {
 		invite, err := tx.FindFirstRecordByData("invites", "code_hash", inviteCodeHash(code))
 		if errors.Is(err, sql.ErrNoRows) {
 			return errInviteUnknown
@@ -367,6 +369,8 @@ func registerInviteRoutes(routes *router.Router[*core.RequestEvent]) {
 			return re.NotFoundError(err.Error(), nil)
 		case errors.Is(err, errInviteUsed), errors.Is(err, errInviteExpired), errors.Is(err, errInviteVoid):
 			return re.Error(http.StatusGone, err.Error(), nil)
+		case errors.Is(err, errNameWriteBusy):
+			return re.Error(http.StatusServiceUnavailable, err.Error(), nil)
 		case errors.Is(err, errNameInvalid), errors.Is(err, errNameBot):
 			return re.BadRequestError(err.Error(), nil)
 		case errors.As(err, &apiErr):
@@ -429,12 +433,44 @@ func registerMemberNameGuard(app core.App) {
 // but a board holding older case pairs has no index yet, and there the
 // lock is the only thing that keeps a new pair from forming (which would
 // keep ensureNameIndex from ever adding it).
-var nameWrites sync.Mutex
+//
+// It is a one-slot channel, not a sync.Mutex, so every wait is bounded
+// (lockNameWrites). And no holder can nest a second checked write: the
+// holder's e.Next() is one record save, and the only way PocketBase nests
+// request handling - /api/batch, where sub-request i+1 runs inside sub-
+// request i's e.Next() - is refused before the lock is taken
+// (checkedNameWrite). Redemption takes the lock outside any request chain.
+var nameWrites = make(chan struct{}, 1)
 
-// checkedNameWrite checks e's name and saves it under nameWrites.
+const nameWriteWait = 5 * time.Second
+
+var errNameWriteBusy = errors.New("the board is busy saving another member's name: try again in a moment")
+
+// lockNameWrites takes nameWrites, waiting at most nameWriteWait. The
+// returned func releases it.
+func lockNameWrites() (func(), error) {
+	select {
+	case nameWrites <- struct{}{}:
+		return func() { <-nameWrites }, nil
+	case <-time.After(nameWriteWait):
+		return nil, errNameWriteBusy
+	}
+}
+
+// checkedNameWrite checks e's name and saves it under nameWrites. A batch
+// sub-request is refused: it runs inside the previous sub-request's save,
+// so a second checked write in one batch would wait on the lock its own
+// batch holds (the Batch API is off by default and lll never enables it;
+// the pocketbase skill says to keep it off).
 func checkedNameWrite(e *core.RecordRequestEvent) error {
-	nameWrites.Lock()
-	defer nameWrites.Unlock()
+	if info, err := e.RequestInfo(); err != nil || info.Context == core.RequestInfoContextBatch {
+		return e.BadRequestError("member names cannot be set in a batch request: send each create or rename on its own", nil)
+	}
+	unlock, err := lockNameWrites()
+	if err != nil {
+		return e.Error(http.StatusServiceUnavailable, err.Error(), nil)
+	}
+	defer unlock()
 	if err := checkChosenName(e.App, e.Record); err != nil {
 		return err
 	}
