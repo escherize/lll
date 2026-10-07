@@ -165,6 +165,12 @@ with tempfile.TemporaryDirectory(prefix='lll-invites-') as directory:
         assert code == 400, body
         code, body, _ = call(api, '/api/lll/invites', {'teams': [], 'mode': 'rw'}, owner)
         assert code == 400, body
+        # A bot does not invite people, even one owned by a full member.
+        out = lll('bot', 'bot-inviter')
+        assert out.returncode == 0, out.stdout + out.stderr
+        bot = next(l for l in out.stdout.splitlines() if l.startswith('LLL_TOKEN='))[len('LLL_TOKEN='):]
+        code, body, _ = call(api, '/api/lll/invites', {'teams': [alpha['id']], 'mode': 'ro'}, bot)
+        assert code == 403 and 'bots cannot invite' in body['message'].lower(), body
         rw = invite('--team', 'ALPHA', token=guest)
         assert redeem(rw, 'Rae Writer')[0] == 303
         rec = next(m for m in call(api, '/api/collections/members/records?perPage=200', token=su)[1]['items']

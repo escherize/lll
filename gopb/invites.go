@@ -3,6 +3,7 @@ package gopb
 import (
 	"crypto/rand"
 	"crypto/sha256"
+	"database/sql"
 	"encoding/base64"
 	"encoding/hex"
 	"errors"
@@ -50,13 +51,15 @@ var (
 	errInviteUsed    = errors.New("this invite link has already been used: each link lets one person join. Ask whoever invited you for a new link")
 	errInviteExpired = errors.New("this invite link has expired: links last 7 days. Ask whoever invited you for a new link")
 	errInviteVoid    = errors.New("this invite link no longer grants anything: its teams are gone, or whoever made it no longer has the access it grants. Ask them for a new link")
-	errNameInvalid   = errors.New("pick a name of 1 to 40 letters, digits, spaces, dots, dashes or underscores, starting with a letter or digit")
+	errNameInvalid   = errors.New("pick a name of up to 40 letters and digits, with single spaces, dots, dashes or underscores between them")
 	errNameBot       = errors.New("names starting with 'bot-' are reserved for bot members: pick another name")
 )
 
-// joinName is the only thing a redeemer chooses. ASCII only, so a name
-// cannot imitate another member's with look-alike characters.
-var joinName = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9 ._-]{0,39}$`)
+// joinName is the only thing a redeemer chooses. ASCII only, and one
+// separator at a time between letters or digits, so a name cannot imitate
+// another member's with look-alike characters, doubled spaces (which HTML
+// collapses) or trailing punctuation.
+var joinName = regexp.MustCompile(`^[A-Za-z0-9]+([ ._-][A-Za-z0-9]+)*$`)
 
 // newInviteCode is a fresh code and the hash stored for it.
 func newInviteCode() (code, hash string, err error) {
@@ -147,7 +150,7 @@ func redeemInvite(app core.App, code, name string, now time.Time) (*core.Record,
 	if strings.HasPrefix(strings.ToLower(name), botPrefix) {
 		return nil, errNameBot
 	}
-	if !joinName.MatchString(name) {
+	if len(name) > 40 || !joinName.MatchString(name) {
 		return nil, errNameInvalid
 	}
 	if !wellFormedCode(code) {
@@ -156,8 +159,11 @@ func redeemInvite(app core.App, code, name string, now time.Time) (*core.Record,
 	var member *core.Record
 	err := app.RunInTransaction(func(tx core.App) error {
 		invite, err := tx.FindFirstRecordByData("invites", "code_hash", inviteCodeHash(code))
-		if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
 			return errInviteUnknown
+		}
+		if err != nil {
+			return err
 		}
 		if !invite.GetDateTime("redeemed").IsZero() {
 			return errInviteUsed
@@ -170,7 +176,7 @@ func redeemInvite(app core.App, code, name string, now time.Time) (*core.Record,
 			// The creator's access is read again now: narrowing or deleting
 			// the creator voids what it handed out and nobody redeemed yet.
 			creator, err := tx.FindRecordById("members", invite.GetString("creator"))
-			if err != nil || !grantAllowed(effectiveAccess(tx, creator), grant) {
+			if err != nil || creator.GetString("kind") == botKind || !grantAllowed(effectiveAccess(tx, creator), grant) {
 				return errInviteVoid
 			}
 		} else if len(grant.teams) == 0 {
@@ -285,6 +291,13 @@ func registerInviteRoutes(routes *router.Router[*core.RequestEvent]) {
 		acc := access{all: true, rw: true}
 		if !re.HasSuperuserAuth() {
 			creator = re.Auth
+			// A person joined through an invite has no owner, so nothing
+			// would bound it by the bot that minted it: a leaked bot token
+			// could mint people who outlive the bot's rotation and its
+			// owner's narrowing. Bots do not invite.
+			if creator.GetString("kind") == botKind {
+				return re.ForbiddenError("bots cannot invite people: run 'lll invite create' with your own token", nil)
+			}
 			acc = effectiveAccess(re.App, creator)
 			if !acc.rw {
 				return re.ForbiddenError("read-only access: "+creator.GetString("name")+" cannot invite anyone. 'lll whoami' shows your access; ask the person who invited you for read-write", nil)

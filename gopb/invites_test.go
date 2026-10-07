@@ -228,7 +228,7 @@ func TestARefusedNameLeavesTheCodeAlive(t *testing.T) {
 	f := newInviteFixture(t)
 	now := time.Now()
 	code := f.mint(t, f.full, inviteGrant{teams: []string{f.alpha}}, now)
-	for _, name := range []string{"owner", "OWNER", "bot-x", "Bot-x", "", "   ", "<script>", "a\nb", "é", strings.Repeat("a", 41)} {
+	for _, name := range []string{"owner", "OWNER", "bot-x", "Bot-x", "", "   ", "<script>", "a\nb", "é", strings.Repeat("a", 41), "Bryan  Maass", "owner.", "_owner", "a--b"} {
 		if _, err := redeemInvite(f.app, code, name, now); err == nil {
 			t.Fatalf("name %q was accepted", name)
 		}
@@ -301,5 +301,29 @@ func TestDeletingTheJoinedMemberDoesNotReviveTheCode(t *testing.T) {
 	}
 	if _, err := redeemInvite(f.app, code, "again", now); !errors.Is(err, errInviteUsed) {
 		t.Fatalf("got %v, want the used refusal", err)
+	}
+}
+
+func TestABotCannotInvitePeople(t *testing.T) {
+	f := newInviteFixture(t)
+	now := time.Now()
+	members, err := f.app.FindCollectionByNameOrId("members")
+	if err != nil {
+		t.Fatal(err)
+	}
+	bot := core.NewRecord(members)
+	bot.Set("name", "bot-helper")
+	bot.Set("kind", "bot")
+	bot.Set("owner", f.full.Id)
+	bot.SetEmail("bot-helper@members.invalid")
+	bot.SetRandomPassword()
+	if err := f.app.Save(bot); err != nil {
+		t.Fatal(err)
+	}
+	// Minted directly (the route refuses a bot before this point): the
+	// redemption check must refuse it on its own.
+	code := f.mint(t, bot, inviteGrant{teams: []string{f.alpha}}, now)
+	if _, err := redeemInvite(f.app, code, "via-bot", now); !errors.Is(err, errInviteVoid) {
+		t.Fatalf("got %v, want the void refusal", err)
 	}
 }

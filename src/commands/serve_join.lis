@@ -50,6 +50,8 @@ pub fn join_redeem(w: http.ResponseWriter, r: Ref<http.Request>) {
   }
   // The mux hands out read-only requests; parsing the form writes to it.
   let mut wr = r.Clone(r.Context())
+  // A name and nothing else: cap the body far below Go's 10 MB form default.
+  wr.Body = Some(http.MaxBytesReader(w, wr.Body, 4096))
   let name = wr.PostFormValue("name")
   let payload = match json.Marshal(
     JoinRequest { code: r.PathValue("code"), name },
@@ -68,11 +70,25 @@ pub fn join_redeem(w: http.ResponseWriter, r: Ref<http.Request>) {
     Ok(b) => b,
     Err(e) => {
       let status = pb.response_status(e)
-      // A bad name keeps the form: the code is still alive. Every other
+      // A bad name keeps the form: the code is still alive. So does a
+      // server failure, which rolled the redemption back. Every other
       // refusal (unknown, used, expired, void) is final for this link.
-      let again = status == 400
-      let code = if status >= 400 && status < 500 { status } else { 502 }
-      join_respond(w, code, join_html(pb.display_error(e).summary, again))
+      if status >= 400 && status < 500 {
+        join_respond(
+          w,
+          status,
+          join_html(pb.display_error(e).summary, status == 400),
+        )
+      } else {
+        join_respond(
+          w,
+          502,
+          join_html(
+            "The board could not complete this. Your invite link may still work: try again in a moment.",
+            true,
+          ),
+        )
+      }
       return
     },
   }
@@ -96,6 +112,13 @@ pub fn join_redeem(w: http.ResponseWriter, r: Ref<http.Request>) {
     HttpOnly: true,
     MaxAge: 365 * 24 * 3600,
     SameSite: http.SameSiteLaxMode,
+    // The value is a year-long API token: never send it over plain http
+    // when the board was reached over https (directly or behind a proxy).
+    Secure: r.TLS.is_some() ||
+    r.Header.map_or(
+      false,
+      |h: http.Header| h.Get("X-Forwarded-Proto") == "https",
+    ),
     ..,
   }
   http.SetCookie(w, &cookie)
