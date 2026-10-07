@@ -75,3 +75,37 @@ fn status_classification_ignores_url_and_body_digits() {
   assert failed.contains("impersonating bryan")
   assert failed.contains("500 Internal Server Error")
 }
+
+// ------------------------------------------------------------ agent prompt (LLL-546)
+
+#[test]
+fn agent_prompt_is_the_design_doc_prompt() {
+  let got = agent_prompt("https://lll.example.com", "ALPHA", "aaa.bbb-c_d.eee")
+  let want = "You're joining lll team ALPHA at https://lll.example.com.
+export LLL_URL=https://lll.example.com
+export LLL_TOKEN=aaa.bbb-c_d.eee
+lll attach -k ALPHA
+Read the workflow: lll skill get software-factory
+Claim an issue before you edit code; record findings on the board.
+"
+  assert got == want
+}
+
+#[test]
+fn agent_env_is_only_the_two_export_lines() {
+  let got = agent_env("http://127.0.0.1:8090", "aaa.bbb.ccc")
+  assert got == "export LLL_URL=http://127.0.0.1:8090\nexport LLL_TOKEN=aaa.bbb.ccc\n"
+}
+
+#[test]
+fn shell_word_quotes_anything_a_shell_would_interpret() {
+  assert shell_word("https://h.example:8090/x") == "https://h.example:8090/x"
+  // A url from LLL_URL is pasted into the agent's shell: no command
+  // substitution, word splitting or quote breakout survives it.
+  assert shell_word("http://h/$(touch pwned)") == "'http://h/$(touch pwned)'"
+  assert shell_word("http://h/a b") == "'http://h/a b'"
+  assert shell_word("http://h/x';id;'") == "'http://h/x'\\'';id;'\\'''"
+  assert shell_word("") == "''"
+  let prompt = agent_prompt("http://h/`id`", "ALPHA", "t")
+  assert prompt.contains("export LLL_URL='http://h/`id`'\n")
+}

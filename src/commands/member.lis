@@ -936,7 +936,7 @@ fn member_create_error(e: string) -> string {
   // gopb refusal (the bot- prefix) its own message; both pass through.
   if pb.response_status(e) == 400 && e.contains("\"data\":{}") && e.contains("Failed to create record.") {
     return "your token cannot add members: only a member with read-write access to every team, or administrator credentials ('lll member invite NAME --email E' with LLL_ADMIN_EMAIL/LLL_ADMIN_PASSWORD), can
-for your own agent, ask whoever invited you for a bot ('lll bot bot-NAME')"
+for your own agent, run 'lll bot bot-NAME': a read-write member may create bots it owns"
   }
   if pb.response_status(e) == 401 {
     return "creating a member needs a member token: the one configured here is missing or was refused
@@ -957,6 +957,15 @@ fn member_add(input: flags.CommandInput) -> Result<(), string> {
   let p = input.parsed
   let name = flags.entity_name(p, "-n", usage)?
   let email = p.one("-e")
+  // The server reserves bot- names to bots (gopb checkMemberKind); a
+  // scoped member trying this got a bare 400 (fleet case 09). Name the
+  // command that makes one before any server call.
+  if strings.HasPrefix(name, "bot-") {
+    return Err(
+      f"'{name}' is a bot name: the bot- prefix is reserved to bot members
+create it with 'lll bot {name}' - it is owned by you and gets no more access than you have",
+    )
+  }
 
   // LLL-500 (fleet case B03/B06): a first-time LAN operator's only
   // credentials are the admin bootstrap pair, and this call's 401 arrived as

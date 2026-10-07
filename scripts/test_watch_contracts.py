@@ -166,8 +166,10 @@ _, other_token = member_token('watch-bot-other')
 
 
 def minted(out):
-    lines = [l for l in out.splitlines() if l.startswith('LLL_TOKEN=')]
-    assert len(lines) == 1, out
+    # 'lll token create' prints LLL_TOKEN=; 'lll bot' prints the agent
+    # prompt's export line (LLL-546). Either way, exactly once.
+    lines = [l.removeprefix('export ') for l in out.splitlines() if 'LLL_TOKEN=' in l]
+    assert len(lines) == 1 and lines[0].startswith('LLL_TOKEN='), out
     return lines[0][len('LLL_TOKEN='):]
 
 
