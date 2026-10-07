@@ -1,9 +1,11 @@
 import "go:net/http"
+import "go:net/url"
 import "go:strings"
 
 import "display"
 import "markdown"
 import "models"
+import "records"
 
 // GET /t/{team}/doc/{slug} - a decision, finding, PRD or wiki page at an
 // address (LLL-405).
@@ -66,7 +68,7 @@ fn doc_page(
 /// Doc record -> view model. The property order is `lll doc view`'s, so a
 /// reader moving between the two surfaces finds the same page.
 fn doc_vm(d: models.Doc, team_key: string) -> DocVM {
-  let kind_label = if d.kind == "prd" { "PRD" } else { state_label(d.kind) }
+  let kind_label = doc_kind_label(d.kind)
   let author = d.expand.author.unwrap_or(models.Member { .. })
   DocVM {
     slug: d.slug,
@@ -110,6 +112,130 @@ fn doc_raw(vm: DocVM) -> string {
   if vm.body_md != "" {
     lines = lines.append("")
     lines = lines.append(vm.body_md)
+  }
+  strings.Join(lines, "\n") + "\n"
+}
+
+// GET /t/{team}/docs - the team's docs, newest first (LLL-643).
+
+/// The docs index: the list a doc page never had.
+///
+/// A doc page has had an address since LLL-405, but nothing listed them, so
+/// a reader reached one only through an issue's links, search, or a typed
+/// URL. This is the projects page's bargain for docs: one row per record,
+/// each a link to its page, filtered by kind and text in the query string so
+/// a filtered list is a URL someone can paste.
+///
+/// No SSE, for the reason /projects and /issues have none.
+fn docs_page(
+  w: http.ResponseWriter,
+  r: Ref<http.Request>,
+  team: models.Team,
+  me: string,
+) {
+  let q = strings.TrimSpace(query_param(r, "q"))
+  // An unknown kind flashes and lists every kind, as an unknown /issues
+  // filter does: a stale link must still show a page.
+  let (kind, error) = docs_kind(query_param(r, "kind"))
+  let shown = match roster_for(r, team.id) {
+    Ok(found) => found,
+    Err(e) => {
+      http.Error(w, e, 500)
+      return
+    },
+  }
+  let docs = match records.fetch_team_docs(team.id, kind) {
+    Ok(found) => found,
+    Err(e) => {
+      http.Error(w, e, 500)
+      return
+    },
+  }
+  let vm = DocsVM {
+    docs: docs
+      .filter(|d| doc_matches(d, q))
+      .map(|d| doc_row_vm(shown.doc(d), team.key)),
+    kinds: doc_kinds().map(|k| StateOpt { value: k, label: doc_kind_label(k) }),
+    kind,
+    q,
+    error,
+    base: f"/t/{team.key}/docs",
+    team_key: team.key,
+  }
+  if wants_raw(r) {
+    write_raw(w, docs_raw(vm))
+    return
+  }
+  let page = PageVM { rail: rail_for(r, "docs", me, team), page: vm }
+  render_html(w, "docs-page", page)
+}
+
+/// The ?kind= value as a filter: "" lists every kind. Returns the kind to
+/// filter by and the flash for a value outside the catalogue.
+fn docs_kind(raw: string) -> (string, string) {
+  let kind = strings.TrimSpace(strings.ToLower(raw))
+  if kind == "" { return ("", "") }
+  if doc_kinds().contains(kind) { return (kind, "") }
+  ("", f"unknown kind '{kind}' (use one of: {strings.Join(doc_kinds(), ", ")})")
+}
+
+/// Whether a doc matches the text filter: its slug or title contains it,
+/// ignoring case. `lll doc list --search` matches the same two fields.
+fn doc_matches(d: models.Doc, q: string) -> bool {
+  if q == "" { return true }
+  let needle = strings.ToLower(q)
+  strings.Contains(strings.ToLower(d.slug), needle) ||
+  strings.Contains(strings.ToLower(d.title), needle)
+}
+
+/// A kind's label. A doc stored without a kind (LLL-635) gets "", which the
+/// row shows as a dash, rather than reaching state_label, which slices the
+/// first character and panics on an empty string.
+fn doc_kind_label(kind: string) -> string {
+  if kind == "" { return "" }
+  if kind == "prd" { return "PRD" }
+  state_label(kind)
+}
+
+/// Doc record -> index row. The author is whatever the roster left on the
+/// record, so a hidden author arrives here already named "hidden member".
+fn doc_row_vm(d: models.Doc, team_key: string) -> DocRowVM {
+  let author = d.expand.author.unwrap_or(models.Member { .. })
+  DocRowVM {
+    slug: d.slug,
+    title: d.title,
+    kind: d.kind,
+    kind_label: doc_kind_label(d.kind),
+    area: d.area,
+    author: author.name,
+    author_avatar: avatar_vm(author),
+    author_kind: author.kind,
+    author_via: author.owner_name(),
+    updated: display.relative(d.updated),
+    updated_at: d.updated,
+    href: f"/t/{team_key}/doc/{url.PathEscape(d.slug)}",
+  }
+}
+
+/// GET /t/KEY/docs?raw - one line per doc, the fields the HTML row shows.
+fn docs_raw(vm: DocsVM) -> string {
+  let mut lines: Slice<string> = [
+    f"# Docs ({vm.docs.length()})",
+    f"Team: {vm.team_key}",
+  ]
+  if vm.kind != "" { lines = lines.append(f"Kind: {vm.kind}") }
+  if vm.q != "" { lines = lines.append(f"Search: {line_text(vm.q)}") }
+  if vm.error != "" { lines = lines.append(f"Error: {line_text(vm.error)}") }
+  for d in vm.docs {
+    let kind = if d.kind == "" { "-" } else { d.kind }
+    let area = if d.area == "" { "-" } else { d.area }
+    let mut author = "-"
+    if d.author != "" {
+      author = d.author + display.author_tag(d.author_avatar.bot, d.author_via)
+    }
+    lines = lines.append(
+      f"- [{cell(d.slug)}]({d.href}) | {cell(d.title)} | {cell(kind)} | {cell(area)} | {cell(author)} | {d.updated}",
+    )
   }
   strings.Join(lines, "\n") + "\n"
 }

@@ -463,7 +463,7 @@ pub fn scoped_route(
   let (raw_key, rest, slash) = strings.Cut(routed, "/")
   let key = records.normalize_team_key(raw_key)
   if !v.teams.contains(key) { return ScopedVerdict.Hidden(hidden_team(raw_key)) }
-  if !slash || rest == "" || rest == "issues" || rest == "projects" || rest == "search" {
+  if !slash || rest == "" || rest == "issues" || rest == "projects" || rest == "docs" || rest == "search" {
     return ScopedVerdict.Open
   }
   if let Some(issue_key) = strings.CutPrefix(rest, "issue/") {

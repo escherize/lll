@@ -1809,6 +1809,30 @@ doc_bare=$(curl -s -o /dev/null -w '%{http_code}' -H "$BOARD_COOKIE" \
   "$WEB/doc/board-render-decision")
 [ "$doc_bare" = "303" ] || fail "bare /doc/SLUG: expected 303, got $doc_bare"
 
+# --- /t/ENG/docs: the docs index (LLL-643) ---
+# A doc had an address but nothing listed it. ENG now holds the decision above
+# and the web-migrations finding from the related-findings section.
+docs=$(wcurl -sf "$WEB/t/ENG/docs") || fail "/t/ENG/docs did not serve"
+assert_contains "$docs" 'id="docs"' "the docs page carries its stable id"
+assert_contains "$docs" 'href="/t/ENG/doc/board-render-decision"' "each row links to its doc page"
+assert_contains "$docs" "Render on the server" "the row shows the title"
+assert_contains "$docs" "web-migrations" "every kind is listed by default"
+assert_contains "$(rail "$docs")" '<a data-g="d" href="/t/ENG/docs" class="active">' \
+  "the Docs row is current on its own page"
+assert_contains "$board_rail_now" 'href="/t/ENG/docs"' "the board's rail has a Docs row"
+assert_not_contains "$docs" "data-init" "the docs page opens no SSE connection"
+docs_kind=$(wcurl -sf "$WEB/t/ENG/docs?kind=decision&raw")
+assert_contains "$docs_kind" "board-render-decision" "?kind= keeps docs of that kind"
+assert_not_contains "$docs_kind" "web-migrations" "?kind= drops the other kinds"
+docs_q=$(wcurl -sf "$WEB/t/ENG/docs?q=MIGRATIONS&raw")
+assert_contains "$docs_q" "web-migrations" "?q= matches slug text, ignoring case"
+assert_not_contains "$docs_q" "board-render-decision" "?q= drops docs that do not match"
+docs_bad=$(wcurl -sf "$WEB/t/ENG/docs?kind=memo") || fail "an unknown kind returned an error status"
+assert_contains "$docs_bad" "unknown kind &#39;memo&#39;" "an unknown kind is reported in the flash strip"
+assert_contains "$docs_bad" "board-render-decision" "an unknown kind still lists every doc"
+docs_bare=$(curl -s -o /dev/null -w '%{http_code} %{redirect_url}' -H "$BOARD_COOKIE" "$WEB/docs?kind=wiki")
+assert_contains "$docs_bare" "303 $WEB/t/ENG/docs?kind=wiki" "bare /docs lands on the selected team, query kept"
+
 # --- /projects: the read path a project never had (task-113) ---
 # Projects have been in the schema since the start and issues have always
 # related to them, but until this page the only place one was ever SHOWN was
@@ -2149,6 +2173,9 @@ if command -v playwright-cli >/dev/null 2>&1; then
     return 'team accent verified';
   }" 2>/dev/null) || fail "playwright: team accent/favicon verification"
   assert_contains "$accent_browser" 'team accent verified' "search and issues apply the team accent in the browser"
+  # LLL-643: the docs index, reached from the rail, filtered, at both widths.
+  docs_browser=$(playwright-cli -s="$BROWSER_SESSION" run-code "$(cat "$REPO_ROOT"/scripts/browser_docs_index.js)" 2>&1)
+  assert_contains "$docs_browser" 'docs index verified' "browser: the docs index filters and fits a phone"
   playwright-cli -s="$BROWSER_SESSION" close >/dev/null 2>&1 || true
 fi
 

@@ -1,0 +1,23 @@
+import "go:net/url"
+
+import "models"
+import "query"
+
+/// One team's docs for the board's docs index (LLL-643), newest first, with
+/// the author and a bot author's owner expanded. `kind` narrows to one kind
+/// when non-empty. Bodies are left out: the index shows none, and a team's
+/// docs together can be large. The team clause is written out rather than
+/// taken from query.filter, which drops it for an empty id: an empty id here
+/// must match no doc, not every team's.
+pub fn fetch_team_docs(
+  team_id: string,
+  kind: string,
+) -> Result<Slice<models.Doc>, string> {
+  let mut filter = f"team={query.quote(team_id)}"
+  if kind != "" { filter = f"{filter} && kind={query.quote(kind)}" }
+  let fields = "id,team,slug,title,kind,area,author,created,updated,expand"
+  fetch_all_records<models.Doc>(
+    f"/api/collections/docs/records?sort=-updated,id&expand=author.owner&fields={fields}&filter={url.QueryEscape(filter)}",
+    "docs",
+  )
+}
