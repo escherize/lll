@@ -14,10 +14,13 @@
 // checkOwner), so the owner is always a member with no owner of its own. gopb applies the same intersection to the custom
 // /api/lll routes (effectiveAccess).
 //
-// The rule shapes are those of 1789900000_member_teams.js (claims create
-// stays null per 1791265600_claim_create_admin.js; owner and kind stay
-// superuser-only per 1791500000_member_owner_kind_admin.js), built from an
-// access model. Two changes besides the owner clause: a scoped read-write
+// The rule shapes are those of 1789900000_member_teams.js, built from an
+// access model, carrying every clause later migrations added: claims create
+// stays null (1791265600_claim_create_admin.js), owner and kind stay
+// superuser-only (1791500000_member_owner_kind_admin.js), and nobody but a
+// superuser sends a doc's author (1791600000_doc_author.js, LLL-618). This
+// migration sorts after all of them and rewrites whole rules, so a clause
+// missing here would be dropped. Two changes besides the owner clause: a scoped read-write
 // person may create a bot it owns (fleet case 09: a guest could not set up
 // its own bot), and gopb defaults that bot to its owner's access.
 
@@ -61,6 +64,11 @@ function rulesFor(acc, botsBySelf) {
   const keepsOwner = (rule) => `${own(rule)} && ((${FULL}) || @request.body.member:isset = false)`;
   const fav = read("issue.team");
   const team = (f) => [read(f), read(f), write(f), keepsTeam(f), write(f)];
+  // gopb sets a doc's author; a member never sends one (LLL-618).
+  const NO_AUTHOR = "@request.body.author:isset = false";
+  const docs = team("team");
+  docs[2] = `${docs[2]} && ${NO_AUTHOR}`;
+  docs[3] = `${docs[3]} && ${NO_AUTHOR}`;
   // A read-write member creates a bot it owns; gopb checks the bot's access
   // stays within the owner's.
   const ownBot = `(@request.body.kind = "bot" && @request.body.owner = @request.auth.id && ${acc.rw})`;
@@ -69,7 +77,7 @@ function rulesFor(acc, botsBySelf) {
     projects: team("team"),
     labels: team("team"),
     issues: team("team"),
-    docs: team("team"),
+    docs,
     webhooks: team("team"),
     comments: [read("issue.team"), read("issue.team"), write("issue.team"), keepsIssue(write("issue.team")), write("issue.team")],
     favorites: [own(fav), own(fav), ownCreate(fav), keepsOwner(keepsIssue(fav)), own(fav)],

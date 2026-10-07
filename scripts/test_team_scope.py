@@ -425,6 +425,18 @@ with tempfile.TemporaryDirectory(prefix='lll-team-scope-') as directory:
         assert call(api, f"/api/collections/issues/records/{a2['id']}", {'project': bproj['id']}, bot_tok, 'PATCH')[0] == 400, \
             'the bot hung its own team BETA\'s project on ALPHA past its owner'
         assert call(api, f"/api/collections/issues/records/{a2['id']}", {'title': 'alpha bot edited'}, bot_tok, 'PATCH')[0] == 200
+        # Docs carry both the owner cap and LLL-618's author clause: this
+        # migration rewrites the docs rules after 1791600000_doc_author.js.
+        doc = {'slug': 'bot-doc', 'title': 't', 'kind': 'note', 'body': 'b'}
+        assert call(api, '/api/collections/docs/records', dict(doc, team=beta['id']), bot_tok)[0] == 400, \
+            'a narrowed bot wrote a doc into its owner\'s hidden team'
+        for forger in [bot_tok, plain_tok]:
+            assert call(api, '/api/collections/docs/records', dict(doc, team=alpha['id'], author=plain['id']), forger)[0] == 400, \
+                'doc author forgery accepted'
+        _, bot_doc, _ = call(api, '/api/collections/docs/records', dict(doc, team=alpha['id']), bot_tok)
+        assert bot_doc.get('id'), bot_doc
+        assert call(api, f"/api/collections/docs/records/{bot_doc['id']}", {'author': plain['id']}, plain_tok, 'PATCH')[0] == 404, \
+            'doc author re-attribution accepted'
         for route, body in [('claim', {}), ('release', {'claim_id': 'x'}), ('renew', {'claim_id': 'x'}),
                             ('refs', {'ref': 'https://example.test/pr/9'}),
                             ('assignment', {'claim_id': '', 'fields': {'assignee': ''}})]:

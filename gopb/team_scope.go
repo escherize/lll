@@ -50,7 +50,7 @@ func (a access) within(b access) access {
 }
 
 // effectiveAccess is auth's access as the collection rules compute it
-// (1791600000_bot_owner_scope.js, LLL-543): a superuser may do everything,
+// (1791700000_bot_owner_scope.js, LLL-543): a superuser may do everything,
 // and a bot with an owner holds its own access within its owner's current
 // access, so narrowing the owner narrows the bot without touching the bot's
 // record. An owner that cannot be read leaves nothing, the answer the rules
