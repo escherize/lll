@@ -325,7 +325,13 @@ with tempfile.TemporaryDirectory(prefix='lll-team-scope-') as directory:
         assert call(api, '/api/collections/teams/records', token=none)[1]['items'] == []
 
         # The board: the link logs in, then only ALPHA's read-only pages answer.
-        code, _, headers = call(board, link[len(board):])
+        # LLL-545: a link sets a cookie only when the browser says it was
+        # opened directly; otherwise it shows a confirm page and sets nothing.
+        code, body, headers = call(board, link[len(board):])
+        assert code == 200 and 'Set-Cookie' not in headers and "action='/login'" in body, (code, dict(headers))
+        code, _, headers = call(board, link[len(board):], headers={'Sec-Fetch-Site': 'cross-site'})
+        assert code == 200 and 'Set-Cookie' not in headers, 'a cross-site team link set a cookie'
+        code, _, headers = call(board, link[len(board):], headers={'Sec-Fetch-Site': 'none'})
         assert code == 303, code
         cookie = headers['Set-Cookie'].split(';')[0]
         assert cookie.startswith('lll_board=ALPHA.'), cookie

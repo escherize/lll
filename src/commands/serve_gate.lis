@@ -4,6 +4,7 @@ import "go:crypto/sha256"
 import "go:crypto/subtle"
 import "go:encoding/hex"
 import "go:encoding/json"
+import "go:html"
 import "go:net/http"
 import "go:net/url"
 import "go:os"
@@ -107,11 +108,13 @@ fn admit(w: http.ResponseWriter, r: Ref<http.Request>) -> bool {
         http.Redirect(w, r, without_board_token(r), 303)
         return false
       }
-      // A member token signs in only from a navigation the browser calls
-      // same-origin or direct (typed, pasted, bookmarked). Joining by
-      // invite goes through /join instead.
-      if is_member && cross_site(r) {
-        http.Error(w, "a member sign-in link works only when opened directly: paste it into the address bar", 403)
+      // A link sets a cookie only on positive evidence that this browser's
+      // user opened it: Sec-Fetch-Site "none" (typed, pasted, bookmarked)
+      // or "same-origin". Anything else, including no header at all, which
+      // is what browsers send to a plain-HTTP LAN or Tailscale board, gets
+      // a confirm page whose same-origin POST to /login sets the cookie.
+      if !direct_navigation(r) {
+        confirm_login(w, r, query)
         return false
       }
       let age = if is_link { 7 * 24 * 3600 } else { 365 * 24 * 3600 }
@@ -131,11 +134,91 @@ fn admit(w: http.ResponseWriter, r: Ref<http.Request>) -> bool {
   admit_scoped(w, r, viewer)
 }
 
-/// True when the browser says this request came from another site. Browsers
-/// send Sec-Fetch-Site on every navigation; "none" is a typed or pasted URL.
-fn cross_site(r: Ref<http.Request>) -> bool {
+/// True when the browser says the user opened this URL directly or from the
+/// board itself. Browsers send Sec-Fetch-Site only to trustworthy origins,
+/// so a missing header is not evidence of anything.
+fn direct_navigation(r: Ref<http.Request>) -> bool {
   let site = r.Header.map_or("", |h| h.Get("Sec-Fetch-Site"))
-  site == "cross-site" || site == "same-site"
+  site == "none" || site == "same-origin"
+}
+
+/// The sign-in confirm page for a link that arrived without positive
+/// evidence. It sets nothing: its button POSTs the token to /login, which
+/// checks Origin, so a page on another site cannot complete it.
+fn confirm_login(w: http.ResponseWriter, r: Ref<http.Request>, tok: string) {
+  w.Header().Set("Content-Type", "text/html; charset=utf-8")
+  w.Header().Set("Cache-Control", "no-store")
+  w.Header().Set("Referrer-Policy", "no-referrer")
+  w.Header().Set("Content-Security-Policy", "frame-ancestors 'none'")
+  w.Header().Set("X-Frame-Options", "DENY")
+  let token = html.EscapeString(tok)
+  let next = html.EscapeString(without_board_token(r))
+  let page = f"<!doctype html>
+<html lang='en'>
+<head><meta charset='utf-8'><meta name='viewport' content='width=device-width, initial-scale=1'><title>lll board — sign in</title></head>
+<body style='font-family: ui-sans-serif, system-ui, sans-serif; max-width: 42rem; margin: 4rem auto; padding: 0 1rem; color: #1c1c1e; line-height: 1.5;'>
+<h1 style='font-size: 1.4rem;'>Sign in to this board?</h1>
+<p>This link signs this browser in to the lll board. Continue only if you opened it yourself.</p>
+<form method='post' action='/login'>
+<input type='hidden' name='board_token' value='{token}'>
+<input type='hidden' name='next' value='{next}'>
+<button type='submit' style='padding: .55rem 1rem; font: inherit; border: 1px solid #1c1c1e; border-radius: .35rem; background: #1c1c1e; color: #fff; cursor: pointer;'>Sign in</button>
+</form>
+</body>
+</html>
+"
+  let _ = w.Write(page.bytes())
+}
+
+/// POST /login: the confirm page's sign-in. Ungated; it is its own gate.
+/// Origin must name this board's own host (browsers send Origin on POSTs,
+/// plain HTTP included), so only the board's own page can set a cookie
+/// here. The cookie-replace rule holds: a scoped login never replaces a
+/// cookie that still resolves to a viewer.
+pub fn board_login(w: http.ResponseWriter, r: Ref<http.Request>) {
+  let mut rc = r.Clone(r.Context())
+  if !same_origin_post(rc) {
+    http.Error(w, "sign-in must come from this board's own page; open the link again", 403)
+    return
+  }
+  let tok = rc.PostFormValue("board_token")
+  let next = local_path(rc.PostFormValue("next"))
+  let want = os.Getenv("LLL_BOARD_TOKEN")
+  let cookie = cookie_named(rc, "lll_board").unwrap_or("")
+  if is_board_token(tok, want) {
+    set_board_cookie(w, tok, 7 * 24 * 3600)
+    http.Redirect(w, rc, next, 303)
+    return
+  }
+  let age = if team_scope(tok, want).is_some() {
+    7 * 24 * 3600
+  } else if member_viewer(tok).is_some() {
+    365 * 24 * 3600
+  } else {
+    refused(w, rc)
+    return
+  }
+  let signed_in = is_board_token(cookie, want) || cookie_viewer(cookie, want).is_some()
+  if cookie == tok || !signed_in { set_board_cookie(w, tok, age) }
+  http.Redirect(w, rc, next, 303)
+}
+
+/// True when the POST's Origin is this request's own scheme-less host and
+/// the browser does not call it cross-origin.
+fn same_origin_post(r: Ref<http.Request>) -> bool {
+  let origin = r.Header.map_or("", |h| h.Get("Origin"))
+  let site = r.Header.map_or("", |h| h.Get("Sec-Fetch-Site"))
+  if site != "" && site != "same-origin" { return false }
+  let Ok(u) = url.Parse(origin) else { return false }
+  origin != "" && u.Host != "" && u.Host == r.Host && (u.Scheme == "http" || u.Scheme == "https")
+}
+
+/// A redirect target that stays on this board: a path, never another host.
+fn local_path(next: string) -> string {
+  if !strings.HasPrefix(next, "/") || strings.HasPrefix(next, "//") || strings.Contains(next, "\\") {
+    return "/"
+  }
+  next
 }
 
 fn is_board_token(tok: string, want: string) -> bool {

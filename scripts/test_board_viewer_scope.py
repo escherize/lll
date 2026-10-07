@@ -4,6 +4,8 @@ member's teams. Pages, search, raw markdown and the live stream carry no key,
 name or issue of a hidden team; writes run as the viewer; a read-only viewer
 cannot write; a bot's cookie is capped by its owner; the board token is
 unchanged."""
+import hashlib
+import hmac
 import json
 import re
 import os
@@ -126,6 +128,9 @@ with tempfile.TemporaryDirectory(prefix='lll-545-') as directory:
             code, body, _ = page('/t/ALPHA/', tok)
             assert code == 200 and 'alpha work' in body, (code, body[:300])
             assert_clean(body, 'scoped board page')
+            # The rail offers nothing a scoped viewer cannot open.
+            for absent in ['id="rail-favorites"', 'id="rail-views"', '/t/ALPHA/settings']:
+                assert absent not in body, f'scoped rail shows {absent}'
             for path in ['/t/ALPHA/issues', '/t/ALPHA/projects', '/t/ALPHA/issue/ALPHA-1', '/t/ALPHA/doc/cross',
                          '/t/ALPHA/?raw', '/t/ALPHA/issues?raw', '/t/ALPHA/issue/ALPHA-1?raw', '/t/ALPHA/doc/cross?raw']:
                 code, body, _ = page(path, tok)
@@ -262,19 +267,49 @@ with tempfile.TemporaryDirectory(prefix='lll-545-') as directory:
         assert page('/t/ALPHA/', ro_tok)[0] == 401, 'a deleted member\'s cookie still opens the board'
 
         # --- login by query: the member token becomes a year-long cookie ---
-        code, _, headers = call(board, f'/t/ALPHA/?board_token={rw_tok}')
+        direct = {'Sec-Fetch-Site': 'none'}
+        code, _, headers = call(board, f'/t/ALPHA/?board_token={rw_tok}', headers=direct)
         assert code == 303 and headers['Location'] == '/t/ALPHA/', (code, headers)
         cookie = headers['Set-Cookie']
         assert cookie.startswith(f'lll_board={rw_tok};') and 'Max-Age=31536000' in cookie and 'HttpOnly' in cookie, cookie
+        code, _, headers = call(board, f'/t/ALPHA/?board_token={both_tok}', headers={'Sec-Fetch-Site': 'same-origin'})
+        assert code == 303 and 'Set-Cookie' in headers, 'control: a same-origin navigation signs in'
         # Login CSRF: a link carrying another member's token must not swap a
-        # signed-in browser's identity, and a cross-site navigation never
-        # signs a browser in as a member.
-        code, _, headers = call(board, f'/t/ALPHA/?board_token={both_tok}', headers=as_cookie(rw_tok))
+        # signed-in browser's identity.
+        code, _, headers = call(board, f'/t/ALPHA/?board_token={both_tok}', headers=dict(as_cookie(rw_tok), **direct))
         assert code == 303 and 'Set-Cookie' not in headers, (code, dict(headers))
-        code, _, headers = call(board, f'/t/ALPHA/?board_token={both_tok}', headers={'Sec-Fetch-Site': 'cross-site'})
-        assert code == 403 and 'Set-Cookie' not in headers, (code, dict(headers))
-        code, _, headers = call(board, f'/t/ALPHA/?board_token={both_tok}', headers={'Sec-Fetch-Site': 'none'})
-        assert code == 303 and headers['Set-Cookie'].startswith(f'lll_board={both_tok};'), 'control: a pasted link signs in'
+        # Without positive evidence (cross-site, or no header at all, which is
+        # what browsers send to a plain-HTTP LAN board) a link sets nothing
+        # and shows a confirm page that POSTs to /login.
+        link = 'ALPHA.' + hmac.new(env['LLL_BOARD_TOKEN'].encode(), b'ALPHA', hashlib.sha256).hexdigest()
+        for tok, hdrs, what in [(both_tok, {}, 'no header, no cookie'),
+                                (both_tok, {'Sec-Fetch-Site': 'cross-site'}, 'cross-site member token'),
+                                (both_tok, dict(as_cookie('expired.garbage.cookie')), 'no header, dead cookie'),
+                                (link, {'Sec-Fetch-Site': 'cross-site'}, 'cross-site KEY.MAC link'),
+                                (link, {}, 'KEY.MAC link, no header')]:
+            code, body, headers = call(board, f'/t/ALPHA/?board_token={tok}', headers=hdrs)
+            assert code == 200 and 'Set-Cookie' not in headers, (what, code, dict(headers))
+            assert "action='/login'" in body and headers['Cache-Control'] == 'no-store', what
+            assert "frame-ancestors 'none'" in headers['Content-Security-Policy'], what
+            assert headers['Referrer-Policy'] == 'no-referrer', what
+        # /login sets the cookie only for a POST from the board's own origin.
+        login = {'board_token': both_tok, 'next': '/t/ALPHA/'}
+        for hdrs, what in [({}, 'no Origin'), ({'Origin': 'http://evil.example'}, 'Origin mismatch'),
+                           ({'Origin': board.replace('127.0.0.1', 'localhost')}, 'other host, same machine'),
+                           ({'Origin': board, 'Sec-Fetch-Site': 'cross-site'}, 'browser says cross-site')]:
+            code, _, headers = call(board, '/login', login, headers=hdrs, form=True)
+            assert code == 403 and 'Set-Cookie' not in headers, (what, code, dict(headers))
+        code, _, headers = call(board, '/login', login, headers={'Origin': board}, form=True)
+        assert code == 303 and headers['Location'] == '/t/ALPHA/', (code, dict(headers))
+        assert headers['Set-Cookie'].startswith(f'lll_board={both_tok};') and 'Max-Age=31536000' in headers['Set-Cookie']
+        code, _, headers = call(board, '/login', {'board_token': link, 'next': '//evil.example/'},
+                                headers={'Origin': board, 'Sec-Fetch-Site': 'same-origin'}, form=True)
+        assert code == 303 and headers['Location'] == '/' and headers['Set-Cookie'].startswith(f'lll_board={link};'), dict(headers)
+        # The confirm step keeps the cookie-replace rule.
+        code, _, headers = call(board, '/login', login, headers=dict(as_cookie(rw_tok), Origin=board), form=True)
+        assert code == 303 and 'Set-Cookie' not in headers, 'a /login POST replaced a signed-in cookie'
+        code, _, headers = call(board, '/login', {'board_token': 'nope', 'next': '/'}, headers={'Origin': board}, form=True)
+        assert code == 401 and 'Set-Cookie' not in headers
         # The board-token login is unchanged, cookie or not.
         code, _, headers = call(board, f"/t/ALPHA/?board_token={env['LLL_BOARD_TOKEN']}", headers=as_cookie(rw_tok))
         assert code == 303 and headers['Set-Cookie'].startswith(f"lll_board={env['LLL_BOARD_TOKEN']};"), dict(headers)
@@ -317,6 +352,9 @@ with tempfile.TemporaryDirectory(prefix='lll-545-') as directory:
         assert code == 200 and 'zebra hidden plan two' in body
         assert 'BETA' in page('/t/ALPHA/', full)[1] and 'BETA-1' in page('/t/ALPHA/doc/cross?raw', full)[1]
         assert page('/t/ALPHA/settings/identity', full)[0] == 200
+        full_rail = page('/t/ALPHA/', full)[1]
+        for present in ['id="rail-favorites"', 'id="rail-views"', '/t/ALPHA/settings']:
+            assert present in full_rail, f'control: board-token rail lost {present}'
     finally:
         for proc in streams:
             proc.terminate()
