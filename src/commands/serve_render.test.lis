@@ -20,6 +20,11 @@ fn scoped_rendering_drops_other_teams_labels_and_project() {
   let mut own = models.Issue { team: "t-a", project: "p-a", .. }
   own.expand.project = models.Project { id: "p-a", team: "t-a", name: "mine", .. }
   assert !has_foreign_refs(own) && without_foreign_refs(own).expand.project.name == "mine"
+  // Fail closed: an id with no expanded record cannot be shown to be own.
+  let bare = models.Issue { team: "t-a", labels: ["l-?"], project: "p-?", .. }
+  assert has_foreign_refs(bare)
+  let cleared = without_foreign_refs(bare)
+  assert cleared.project == "" && cleared.labels.is_empty()
 }
 
 #[test]

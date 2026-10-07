@@ -110,25 +110,33 @@ fn label_vms(labels: Slice<models.Label>) -> Slice<LabelVM> {
 /// who cannot see that team. Labels and a project from any team other than
 /// the issue's own are dropped. That also hides a label from a second team
 /// the viewer can see, which is the price of one shared rendering per
-/// stream. Only expanded relations are judged; an unexpanded project is an
-/// opaque id with no name.
+/// stream. Fail closed: a label or project id whose expanded record is
+/// missing cannot be shown to be the issue's own, so it is dropped too (the
+/// board expands both, so its filters keep working).
 fn without_foreign_refs(issue: models.Issue) -> models.Issue {
   let own = issue.team
-  let foreign = issue.expand.labels.filter(|l| l.team != own).map(|l| l.id)
+  let own_labels = issue.expand.labels.filter(|l| l.team == own)
+  let own_ids = own_labels.map(|l| l.id)
   let mut out = issue
-  out.expand.labels = issue.expand.labels.filter(|l| l.team == own)
-  out.labels = issue.labels.filter(|id| !foreign.contains(id))
-  if issue.expand.project.id != "" && issue.expand.project.team != own {
+  out.expand.labels = own_labels
+  out.labels = issue.labels.filter(|id| own_ids.contains(id))
+  if !project_is_own(issue) {
     out.project = ""
     out.expand.project = models.Project { .. }
   }
   out
 }
 
+/// True when the issue has no project or its expanded project is its team's.
+fn project_is_own(issue: models.Issue) -> bool {
+  issue.project == "" || (issue.expand.project.id == issue.project && issue.expand.project.team == issue.team)
+}
+
 /// True when `without_foreign_refs` would change anything.
 fn has_foreign_refs(issue: models.Issue) -> bool {
-  issue.expand.labels.any(|l| l.team != issue.team) ||
-    (issue.expand.project.id != "" && issue.expand.project.team != issue.team)
+  let own_ids = issue.expand.labels.filter(|l| l.team == issue.team).map(|l| l.id)
+  issue.labels.any(|id| !own_ids.contains(id)) || issue.expand.labels.any(|l| l.team != issue.team) ||
+    !project_is_own(issue)
 }
 
 /// The issues as this request's viewer may see them: unchanged for the
