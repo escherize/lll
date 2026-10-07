@@ -3,6 +3,7 @@ import "go:encoding/json"
 import "go:fmt"
 import "go:os"
 import "go:crypto/rand"
+import "go:regexp"
 import "go:strconv"
 import "go:strings"
 import "go:time"
@@ -337,7 +338,7 @@ pub fn bot(args: Slice<string>) -> Result<(), string> {
 }
 
 fn bot_create(args: Slice<string>) -> Result<(), string> {
-  let spec = token_create_spec()
+  let spec = bot_spec()
   let usage = flags.usage("lll bot", spec, "bot-NAME")
   let p = flags.parse_n(spec, args, 2, 1, usage)?
   if p.given("--help") {
@@ -346,13 +347,21 @@ fn bot_create(args: Slice<string>) -> Result<(), string> {
   }
   let name = strings.TrimSpace(p.first())
   if name == "" {
-    return Err(f"usage: {usage}\n  bot-NAME is the agent's member name, e.g. bot-myrepo — bot names are reserved to the bot- prefix")
+    return Err(
+      f"usage: {usage}\n  bot-NAME is the agent's member name, e.g. bot-myrepo — bot names are reserved to the bot- prefix",
+    )
   }
   require_bot_prefix("lll bot", name)?
   point_at_url(p.one("--url"))?
   apply_admin_flags(p.one("--admin-email"), p.one("--admin-password"))?
   let (tok, caller) = bot_caller()?
   let duration = parse_token_duration(p.one("--duration"))?
+  let env_only = p.given("--env")
+  // Resolved before anything is created or minted, so a refusal leaves the
+  // bot and its current token as they were.
+  let team = prompt_team(tok, env_only, p.one("--team"))?
+  let url = config.load()?.url
+  check_prompt_values(url, team, name)?
   let existing = records.find_member_as(tok, name)?
   if let Some(member) = existing {
     if member.kind != "bot" {
@@ -361,21 +370,35 @@ fn bot_create(args: Slice<string>) -> Result<(), string> {
 'lll bot' only provisions bot members; use 'lll token create {name}' to mint its token directly",
       )
     }
-    fmt.Println(f"member {name} exists; rotating its token (the previous one stops working)")
+    // Said only after the server accepts the rotation: a refused one (not
+    // the owner) leaves the previous token working.
+    let minted = bot_mint(tok, name, duration)?
+    bot_status(
+      env_only,
+      f"member {name} exists; rotated its token (the previous one stops working)",
+    )
+    return print_bot_credential(name, minted, url, team, duration, env_only)
   } else {
     let owner = caller.map_or("", |me| me.id)
     let created = create_bot_member_as(tok, name, owner)?
-    let owned = caller.map_or("no owner (the superuser created it)", |me| f"owned by {me.name}")
-    fmt.Println(f"created bot member {created.name} (kind=bot, {owned})")
+    let owned = caller.map_or(
+      "no owner (the superuser created it)",
+      |me| f"owned by {me.name}",
+    )
+    bot_status(
+      env_only,
+      f"created bot member {created.name} (kind=bot, {owned})",
+    )
   }
-  bot_mint(tok, name, duration)
+  let minted = bot_mint(tok, name, duration)?
+  print_bot_credential(name, minted, url, team, duration, env_only)
 }
 
 /// `lll bot rotate bot-NAME [--duration s]`: re-mint the bot's token and strand
 /// the previous one. The server admits the superuser or the bot's owner —
 /// the human who created it is the one who sees a token leak.
 fn bot_rotate(args: Slice<string>) -> Result<(), string> {
-  let spec = token_create_spec()
+  let spec = bot_spec()
   let usage = flags.usage("lll bot rotate", spec, "bot-NAME")
   let p = flags.parse_n(spec, args, 3, 1, usage)?
   if p.given("--help") {
@@ -384,19 +407,178 @@ fn bot_rotate(args: Slice<string>) -> Result<(), string> {
   }
   let name = strings.TrimSpace(p.first())
   if name == "" {
-    return Err(f"usage: {usage}\n  bot-NAME is the bot member's name, e.g. bot-myrepo")
+    return Err(
+      f"usage: {usage}\n  bot-NAME is the bot member's name, e.g. bot-myrepo",
+    )
   }
   require_bot_prefix("lll bot rotate", name)?
   point_at_url(p.one("--url"))?
   apply_admin_flags(p.one("--admin-email"), p.one("--admin-password"))?
   let (tok, _) = bot_caller()?
   let duration = parse_token_duration(p.one("--duration"))?
-  bot_mint(tok, name, duration)
+  let env_only = p.given("--env")
+  let team = prompt_team(tok, env_only, p.one("--team"))?
+  let url = config.load()?.url
+  check_prompt_values(url, team, name)?
+  let minted = bot_mint(tok, name, duration)?
+  print_bot_credential(name, minted, url, team, duration, env_only)
+}
+
+/// token create's flags plus the two that shape the bot's handoff.
+fn bot_spec() -> Slice<flags.Flag> {
+  let mut spec = token_create_spec()
+  spec = spec.append(
+    flags.Flag {
+      name: "--team",
+      value: true,
+      hint: "KEY",
+      help: "team the agent prompt attaches to (default: the configured team)",
+      ..,
+    },
+  )
+  spec = spec.append(
+    flags.Flag {
+      name: "--env",
+      help: "print only the two export lines (LLL_URL, LLL_TOKEN), e.g. > agent.env",
+      ..,
+    },
+  )
+  spec
+}
+
+/// The team the agent prompt names, checked against the credential that
+/// creates (and so owns) the bot. A bot never sees more than its owner
+/// (slice 2), so a team its owner cannot see would hand the agent a prompt
+/// whose 'lll attach' fails. --env prints no team, so it needs none.
+fn prompt_team(
+  tok: string,
+  env_only: bool,
+  flag: string,
+) -> Result<string, string> {
+  if env_only { return Ok("") }
+  let key = if flag != "" { flag } else { config.load()?.team }
+  let wanted = records.normalize_team_key(key)
+  if wanted == "" {
+    return Err(
+      "name the team the agent joins: --team KEY (no team is configured here)
+or pass --env to print only the LLL_URL and LLL_TOKEN export lines",
+    )
+  }
+  let Some(team) = records.find_team_as(tok, wanted)? else {
+    return Err(
+      f"no team '{wanted}' among the teams this credential can see - a bot gets no more access than its owner, so the agent could not open it
+'lll team list' shows the teams you can see",
+    )
+  }
+  Ok(team.key)
+}
+
+/// A progress line. With --env, stdout carries only the export lines, so
+/// `lll bot bot-x --env > agent.env` writes a file that sources cleanly.
+fn bot_status(env_only: bool, line: string) {
+  if env_only { fmt.Fprintln(os.Stderr, line) } else { fmt.Println(line) }
+}
+
+/// Print a freshly minted bot token: the one place it is ever shown. The
+/// default is the agent prompt from the design (doc scoped-access-invites,
+/// Decision step 3); --env is its two export lines alone.
+fn print_bot_credential(
+  name: string,
+  tok: string,
+  url: string,
+  team: string,
+  duration: int,
+  env_only: bool,
+) -> Result<(), string> {
+  // The server minted it, but it is printed into a shell all the same.
+  if !regexp.MustCompile("^[A-Za-z0-9._-]+$").MatchString(tok) {
+    return Err("the minted token contains characters lll cannot paste safely into a shell; nothing was printed")
+  }
+  let expiry = expiry_line(duration, time.Now())
+  if env_only {
+    fmt.Print(agent_env(url, tok))
+    fmt.Fprintln(os.Stderr, f"one-time bot token for {name} — shown only here")
+    fmt.Fprintln(os.Stderr, expiry)
+    return Ok(())
+  }
+  fmt.Println(f"one-time bot token for {name} — shown only here; {expiry}")
+  fmt.Println("paste this into the agent:")
+  fmt.Println("")
+  fmt.Print(agent_prompt(url, team, tok))
+  Ok(())
+}
+
+/// The export lines an agent's shell needs, newline-terminated.
+fn agent_env(url: string, tok: string) -> string {
+  f"export LLL_URL={shell_word(url)}\nexport LLL_TOKEN={shell_word(tok)}\n"
+}
+
+/// The values a prompt may carry, checked before any bot is created or
+/// token minted (LLL-546 review). Quoting arbitrary input for every shell a
+/// prompt gets pasted into cannot be done (fish reads backslashes inside
+/// single quotes, zsh expands a leading `=`, a terminal renders CR and ESC),
+/// so the safety is an allowlist: a value outside it is refused, naming the
+/// field, and no prompt is printed. `team` is "" for --env, which prints
+/// none. The root fix for hostile team keys is server-side (LLL-628).
+pub fn check_prompt_values(url: string, team: string, name: string) -> Result<(), string> {
+  let url_ok = regexp.MustCompile(
+    r"^https?://(\[[0-9A-Fa-f:.]+\]|[A-Za-z0-9.-]+)(:[0-9]{1,5})?(/[A-Za-z0-9._/-]*)?$",
+  )
+  if !url_ok.MatchString(url) {
+    return Err(
+      f"the server url {strconv.Quote(url)} contains characters lll cannot paste safely into a shell; use a plain http(s)://host[:port][/path] url (no user, query or fragment)",
+    )
+  }
+  if team != "" && !regexp.MustCompile("^[A-Z0-9][A-Z0-9-]*$").MatchString(team) {
+    return Err(
+      f"team key {strconv.Quote(team)} contains characters lll cannot paste safely into a shell; rename the team (server-side key validation is LLL-628)",
+    )
+  }
+  if !regexp.MustCompile("^bot-[A-Za-z0-9][A-Za-z0-9._-]*$").MatchString(name) {
+    return Err(
+      f"bot name {strconv.Quote(name)} contains characters lll cannot paste safely into a shell; use letters, digits, '.', '_' and '-' after bot-",
+    )
+  }
+  Ok(())
+}
+
+/// The copyable agent prompt, newline-terminated. It is the design doc's
+/// prompt (scoped-access-invites, Decision step 3) reshaped so the whole
+/// text is also a harmless shell script. Its values have passed
+/// check_prompt_values; that allowlist is the safety, and the quoting below
+/// is belt and braces. No line relies on `#`: interactive zsh without
+/// interactive_comments (the macOS default) runs a `#` line as a command.
+/// Prose lines are the no-op `true` with the sentence as one
+/// single-quoted word. The doc's "You're" is "You are".
+fn agent_prompt(url: string, team: string, tok: string) -> string {
+  prose(f"You are joining lll team {team} at {url}.") +
+  agent_env(url, tok) +
+  f"lll attach -k {shell_word(team)}\n" +
+  prose("Read the workflow:") +
+  "lll skill get software-factory\n" +
+  prose("Claim an issue before you edit code; record findings on the board.")
+}
+
+/// A prose line that every shell runs as a no-op: `true '<text>'`. `true`
+/// rather than `:`, which fish lacks. `text` is a constant sentence or
+/// allowlisted values, so it holds no quote or backslash to escape.
+fn prose(text: string) -> string {
+  "true '" + text + "'\n"
+}
+
+/// `s` as one shell word. The prompt is pasted into a shell, and the url
+/// comes from configuration or the environment, so anything outside a plain
+/// url/token alphabet is single-quoted rather than trusted.
+fn shell_word(s: string) -> string {
+  if s != "" && regexp.MustCompile("^[A-Za-z0-9_./:@%+=,~-]+$").MatchString(s) {
+    return s
+  }
+  "'" + strings.ReplaceAll(s, "'", "'\\''") + "'"
 }
 
 fn bot_page(rotating: bool) -> string {
   let command = if rotating { "lll bot rotate" } else { "lll bot" }
-  let spec = token_create_spec()
+  let spec = bot_spec()
   let description = if rotating {
     "Rotate a bot's token; the previous token stops working. Requires the bot's owner or administrator credentials."
   } else {
@@ -426,6 +608,15 @@ owner and keeps its own access.
 See 'lll bot rotate --help' for token rotation."
   }
   f"{command} - {description}\n\nUsage:\n  {flags.usage(command, spec, "bot-NAME")}\n\nThe name must start with the reserved bot- prefix, e.g. '{command} bot-myrepo'."
+    + "
+
+The token is printed once, inside a prompt to paste into the agent: its
+LLL_URL and LLL_TOKEN exports, 'lll attach -k KEY' for --team (default: the
+configured team, which you must be able to see), and where to read the
+workflow. --env prints only the two export lines on stdout:
+  "
+    + command
+    + " bot-myrepo --env > agent.env"
     + flags.section(spec)
     + see_rotate
 }
@@ -507,9 +698,9 @@ fn create_bot_member_as(tok: string, name: string, owner: string) -> Result<mode
 /// Mint the bot's token through the rotate route: it re-mints and — by
 /// refreshing the record's tokenKey — strands every earlier token at its
 /// next request. The server checks owner or superuser; the response is the
-/// same {token, record} shape impersonate answers with. The one place a bot
-/// token is ever printed, like token create's.
-fn bot_mint(tok: string, name: string, duration: int) -> Result<(), string> {
+/// same {token, record} shape impersonate answers with. The caller prints
+/// it, once (print_bot_credential).
+fn bot_mint(tok: string, name: string, duration: int) -> Result<string, string> {
   let payload = match json.Marshal(models.BotRotate { name, duration }) {
     Ok(b) => b,
     Err(e) => return Err(f"encoding the rotation request: {e}"),
@@ -523,12 +714,7 @@ fn bot_mint(tok: string, name: string, duration: int) -> Result<(), string> {
     return Err(f"decoding the rotation response: {e}")
   }
   if auth.token == "" { return Err("the rotation response carried no token") }
-  fmt.Println(f"LLL_TOKEN={auth.token}")
-  fmt.Println(
-    f"one-time bot token for {name} — shown only here; to persist it, put token = \"...\" in ~/.config/lll/lll.toml (never .lll.toml, which is committed)",
-  )
-  fmt.Println(expiry_line(duration, time.Now()))
-  Ok(())
+  Ok(auth.token)
 }
 
 /// What to say when the rotate route refuses. 403 is the owner check — the

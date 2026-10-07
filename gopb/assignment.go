@@ -124,10 +124,7 @@ func updateAssignment(app core.App, issueID, expectedClaimID string, fields assi
 		}
 		if held != nil {
 			memberID := held.GetString("member")
-			name := "someone else"
-			if member, err := tx.FindRecordById("members", memberID); err == nil {
-				name = member.GetString("name")
-			}
+			name := rosterName(tx, by.memberID, memberID, "someone else")
 			if *fields.Assignee != "" && *fields.Assignee != memberID {
 				return &claimRejection{fmt.Sprintf("issue is claimed by %s; release the claim before assigning another member", name)}
 			}
@@ -186,10 +183,11 @@ func registerClaimedAssigneeGuard(app core.App) {
 		if e.Auth != nil && !e.Auth.IsSuperuser() && e.Auth.Id == held.GetString("member") {
 			return e.Next()
 		}
-		name := "an unknown member"
-		if member, err := e.App.FindRecordById("members", held.GetString("member")); err == nil {
-			name = member.GetString("name")
+		viewerID := ""
+		if e.Auth != nil && !e.Auth.IsSuperuser() {
+			viewerID = e.Auth.Id
 		}
+		name := rosterName(e.App, viewerID, held.GetString("member"), "an unknown member")
 		return e.BadRequestError(fmt.Sprintf("the claim is held by %s; changing the assignee of another member's claimed issue needs force: clear it through /api/lll/issues/{id}/assignment with force, which releases the claim and comments on the issue",
 			byline(name, held.GetString("agent"))), nil)
 	})

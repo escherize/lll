@@ -1,3 +1,7 @@
+import "go:fmt"
+import "go:os"
+import "go:os/exec"
+import "go:path/filepath"
 import "go:time"
 
 // Unit cover for TASK-214's pure halves in token.lis: the expiry line printed
@@ -74,4 +78,173 @@ fn status_classification_ignores_url_and_body_digits() {
   let failed = impersonate_error("bryan", "POST http://127.0.0.1:34015/api/403: 500 Internal Server Error: previous status: 401 Unauthorized")
   assert failed.contains("impersonating bryan")
   assert failed.contains("500 Internal Server Error")
+}
+
+// ------------------------------------------------------------ agent prompt (LLL-546)
+
+#[test]
+fn agent_prompt_is_the_design_doc_prompt() {
+  let got = agent_prompt("https://lll.example.com", "ALPHA", "aaa.bbb-c_d.eee")
+  // The doc's text, reshaped into a script every shell runs harmlessly
+  // (LLL-546 F1): prose is the no-op `true` with one quoted word, never `#`.
+  let want = "true 'You are joining lll team ALPHA at https://lll.example.com.'
+export LLL_URL=https://lll.example.com
+export LLL_TOKEN=aaa.bbb-c_d.eee
+lll attach -k ALPHA
+true 'Read the workflow:'
+lll skill get software-factory
+true 'Claim an issue before you edit code; record findings on the board.'
+"
+  assert got == want
+  assert !got.contains("#")
+}
+
+/// The shells a pasted prompt meets, each skipped (saying so) only where it
+/// is not installed. Interactive zsh without interactive_comments (the macOS
+/// default) runs `#` lines as commands; fish reads `\'` inside single quotes
+/// as an escape.
+fn prompt_shells() -> Slice<Slice<string>> {
+  let mut shells = [
+    ["/bin/sh", "prompt.txt"],
+    ["/bin/sh", "-c", "exec bash --norc --noprofile -i < prompt.txt"],
+  ]
+  let optional = [
+    ["zsh", "exec zsh -f prompt.txt"],
+    ["zsh", "exec zsh -f -i < prompt.txt"],
+    ["dash", "exec dash -i < prompt.txt"],
+    ["ksh", "exec ksh -i < prompt.txt"],
+    ["fish", "exec fish --no-config prompt.txt"],
+    ["fish", "exec fish --no-config -i < prompt.txt"],
+  ]
+  for o in optional {
+    if exec.LookPath(o[0]).is_ok() {
+      shells = shells.append(["/bin/sh", "-c", o[1]])
+    } else {
+      fmt.Println(f"token.test: {o[0]} not installed here; skipping: {o[1]}")
+    }
+  }
+  shells
+}
+
+/// Run the WHOLE prompt through `shell` in a fresh directory whose only
+/// `lll` is a stub logging its arguments, one per line. Returns the
+/// directory's entries and the stub's log.
+fn run_prompt_in(t: TestContext, shell: Slice<string>, url: string, team: string) -> (Slice<string>, string) {
+  let assert Ok(dir) = os.MkdirTemp("", "lll-prompt-sh")
+  let bin = filepath.Join(dir, "bin")
+  let assert Ok(_) = os.Mkdir(bin, 0o755)
+  let stub = "#!/bin/sh\nfor a in \"$@\"; do printf '%s\\n' \"$a\" >> \"$PROMPT_LOG\"; done\n"
+  let assert Ok(_) = os.WriteFile(filepath.Join(bin, "lll"), stub.bytes(), 0o755)
+  let prompt = agent_prompt(url, team, "aaa.bbb-c_d.eee")
+  let assert Ok(_) = os.WriteFile(filepath.Join(dir, "prompt.txt"), prompt.bytes(), 0o644)
+  let mut cmd = exec.Command(shell[0], shell[1..]...)
+  cmd.Dir = dir
+  cmd.Env = [
+    f"PATH={bin}:/usr/bin:/bin:/usr/local/bin:/opt/homebrew/bin",
+    f"PROMPT_LOG={dir}/args.log",
+    f"HOME={dir}",
+    "HISTFILE=/dev/null",
+    f"XDG_DATA_HOME={dir}/.xdg",
+    f"XDG_CONFIG_HOME={dir}/.xdg",
+    f"XDG_CACHE_HOME={dir}/.xdg",
+  ]
+  let _ = cmd.Run()
+  let _ = os.RemoveAll(filepath.Join(dir, ".xdg"))
+  let assert Ok(entries) = os.ReadDir(dir)
+  let names = entries.map(|e| e.Name())
+  let log = os.ReadFile(filepath.Join(dir, "args.log")).map_or("", |b| b as string)
+  let _ = os.RemoveAll(dir)
+  (names, log)
+}
+
+/// Values the reviews used to run code through the prompt in some shell.
+fn hostile_urls() -> Slice<string> {
+  [
+    "http://x'$(touch$IFS.pwned)@127.0.0.1:1",
+    "http://$(touch$=IFS'PWNED-e2e')@127.0.0.1:1",
+    "http://u@127.0.0.1:1",
+    "http://x/`touch .pwned`",
+    "http://x/\ntouch .pwned\n",
+    "http://x/!!;touch .pwned",
+    "http://x/~/a",
+    "http://x/a=b",
+    "http://x/?q=1",
+    "http://x/#frag",
+    "http://x/a\\b",
+    "ftp://x/",
+    "http://x/\r\u{1b}[Ktouch .pwned",
+  ]
+}
+
+fn hostile_teams() -> Slice<string> {
+  [
+    "Q'$(touch$IFS.PWNTEAM)",
+    "Q$(touch$=IFS'PWNTEAM')",
+    "Q`touch .PWNTEAM`",
+    "Q\ntouch .PWNTEAM",
+    "Q\\';TOUCH PWNE2E;ECHO '",
+    "Q\r\u{1b}[KTOUCH PWNCR;: '",
+    "=TOUCH",
+    "Q~",
+    "-Q",
+    "q",
+  ]
+}
+
+#[test]
+fn prompt_values_outside_the_allowlist_are_refused_naming_the_field() {
+  for url in hostile_urls() {
+    let assert Err(e) = check_prompt_values(url, "ALPHA", "bot-x")
+    assert e.contains("server url") && e.contains("cannot paste safely")
+    // Quoted in the message, so a CR or ESC cannot repaint the terminal.
+    assert !e.contains("\r") && !e.contains("\u{1b}")
+  }
+  for team in hostile_teams() {
+    let assert Err(e) = check_prompt_values("http://127.0.0.1:8090", team, "bot-x")
+    assert e.contains("team key") && e.contains("rename the team") && e.contains("LLL-628")
+    assert !e.contains("\r") && !e.contains("\u{1b}")
+  }
+  for name in ["bot-", "bot-a b", "bot-a'b", "bot-$(id)", "bot-\u{1b}x", "x"] {
+    let assert Err(e) = check_prompt_values("http://127.0.0.1:8090", "ALPHA", name)
+    assert e.contains("bot name")
+  }
+  // --env prints no team, so it checks none.
+  assert check_prompt_values("http://127.0.0.1:8090", "", "bot-x").is_ok()
+}
+
+#[test]
+fn every_allowed_prompt_is_a_harmless_script_in_every_shell(t: TestContext) {
+  let urls = ["https://lll.example.com", "http://127.0.0.1:8090", "http://[::1]:8090/sub/p_a.th", "https://h-1.example/"]
+  let teams = ["ALPHA", "A-1", "Q9"]
+  let shells = prompt_shells()
+  for url in urls {
+    for team in teams {
+      let assert Ok(_) = check_prompt_values(url, team, "bot-x.y_z")
+      for shell in shells {
+        let (names, log) = run_prompt_in(t, shell, url, team)
+        assert names.equals(["args.log", "bin", "prompt.txt"])
+        // The stub saw exactly the two intended commands, each value whole.
+        assert log == f"attach\n-k\n{team}\nskill\nget\nsoftware-factory\n"
+      }
+    }
+  }
+}
+
+#[test]
+fn agent_env_is_only_the_two_export_lines() {
+  let got = agent_env("http://127.0.0.1:8090", "aaa.bbb.ccc")
+  assert got == "export LLL_URL=http://127.0.0.1:8090\nexport LLL_TOKEN=aaa.bbb.ccc\n"
+}
+
+#[test]
+fn shell_word_quotes_anything_a_shell_would_interpret() {
+  assert shell_word("https://h.example:8090/x") == "https://h.example:8090/x"
+  // A url from LLL_URL is pasted into the agent's shell: no command
+  // substitution, word splitting or quote breakout survives it.
+  assert shell_word("http://h/$(touch pwned)") == "'http://h/$(touch pwned)'"
+  assert shell_word("http://h/a b") == "'http://h/a b'"
+  assert shell_word("http://h/x';id;'") == "'http://h/x'\\'';id;'\\'''"
+  assert shell_word("") == "''"
+  let prompt = agent_prompt("http://h/`id`", "ALPHA", "t")
+  assert prompt.contains("export LLL_URL='http://h/`id`'\n")
 }

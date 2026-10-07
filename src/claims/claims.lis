@@ -49,8 +49,8 @@ struct AssignmentRequest {
 /// Clearing the assignee releases the observed claim, so it follows the
 /// release rule (LLL-516): only the holder clears it without force, and a
 /// forced clear leaves a comment on the issue, with `reason` if given.
-pub fn update_assignment(issue_id: string, claim_id: string, fields: string, agent: string, force: bool, reason: string) -> Result<Transition, string> {
-  transact(issue_id, "assignment", AssignmentRequest { claim_id, fields: fields.bytes() as json.RawMessage, agent, force, reason })
+pub fn update_assignment(caller: pb.Caller, issue_id: string, claim_id: string, fields: string, agent: string, force: bool, reason: string) -> Result<Transition, string> {
+  transact(caller, issue_id, "assignment", AssignmentRequest { claim_id, fields: fields.bytes() as json.RawMessage, agent, force, reason })
 }
 
 pub fn observed_id(issue_id: string) -> Result<string, string> {
@@ -60,8 +60,8 @@ pub fn observed_id(issue_id: string) -> Result<string, string> {
 /// Claims and their assignment are one server-owned transaction. Callers
 /// resolve the actor through normal identity handling; the server verifies it.
 /// `agent` is the optional self-asserted session label (LLL-521); "" for none.
-pub fn acquire(issue_id: string, member_id: string, agent: string) -> Result<Transition, string> {
-  transact(issue_id, "claim", AcquireRequest { member: member_id, agent })
+pub fn acquire(caller: pb.Caller, issue_id: string, member_id: string, agent: string) -> Result<Transition, string> {
+  transact(caller, issue_id, "claim", AcquireRequest { member: member_id, agent })
 }
 
 /// Only the holder releases without force. With force, the server releases
@@ -69,21 +69,23 @@ pub fn acquire(issue_id: string, member_id: string, agent: string) -> Result<Tra
 /// the reason when one is given (LLL-512). The same member under a different
 /// non-empty `agent` than the holder's is another session and needs force too
 /// (LLL-521).
-pub fn release(issue_id: string, claim_id: string, agent: string, force: bool, reason: string) -> Result<Transition, string> {
-  transact(issue_id, "release", ReleaseRequest { claim_id, agent, force, reason })
+pub fn release(caller: pb.Caller, issue_id: string, claim_id: string, agent: string, force: bool, reason: string) -> Result<Transition, string> {
+  transact(caller, issue_id, "release", ReleaseRequest { claim_id, agent, force, reason })
 }
 
 /// Only the holder renews its observed hold. The server restarts the expiry
 /// clock and keeps the claim's id and creation time (LLL-535). A different
 /// non-empty `agent` than the holder's is refused, as on acquire (LLL-521).
 pub fn renew(issue_id: string, claim_id: string, agent: string) -> Result<Transition, string> {
-  transact(issue_id, "renew", RenewRequest { claim_id, agent })
+  transact(pb.Caller.Process, issue_id, "renew", RenewRequest { claim_id, agent })
 }
 
-fn transact(issue_id: string, action: string, request: Unknown) -> Result<Transition, string> {
+/// `caller` is whom the server authenticates as the actor (LLL-545): the
+/// board passes a member viewer's own token.
+fn transact(caller: pb.Caller, issue_id: string, action: string, request: Unknown) -> Result<Transition, string> {
   let body = json.Marshal(request).map_err(|e| f"encoding claim request: {e}")?
   let path = f"/api/lll/issues/{url.PathEscape(issue_id)}/{action}"
-  let response = pb.post(path, body as string).map_err(|e| {
+  let response = pb.send_as(caller, "POST", path, body as string, "application/json").map_err(|e| {
     if pb.response_status(e) == 404 {
       "server does not support atomic claim operations — update the server before changing claims or assignments; no legacy claim writes were attempted"
     } else { e }

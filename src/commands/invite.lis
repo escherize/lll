@@ -1,0 +1,114 @@
+import "go:encoding/json"
+import "go:fmt"
+import "go:strings"
+
+import "flags"
+import "pb"
+import "records"
+
+// `lll invite create` (LLL-544; doc scoped-access-invites): a single-use,
+// expiring link that lets one person join with the named teams and mode.
+// The server mints it (gopb/invites.go) and refuses any grant wider than the
+// caller's own access; this command only resolves team keys and prints the
+// link.
+
+pub fn invite(args: Slice<string>) -> Result<(), string> {
+  flags.dispatch(
+    "invite",
+    "single-use join links",
+    invite_intro(),
+    invite_commands(),
+    args,
+  )
+}
+
+pub fn invite_commands() -> Slice<flags.Command> {
+  [
+    flags.Command {
+      name: "create",
+      summary: "print a single-use link that lets one person join with these teams",
+      spec: invite_create_spec(),
+      run: invite_create,
+      ..,
+    },
+  ]
+}
+
+fn invite_intro() -> string {
+  "An invite link lets one person join this board. Opening it shows a name
+form; submitting it creates a member with exactly the invite's teams and mode
+and signs that browser in. The link works once and expires after 7 days.
+
+You can invite people only to teams you can see, and only if you have
+read-write access; the server refuses any invite wider than your own access.
+
+To give a colleague an email and password login for the CLI instead, use
+'lll member invite NAME --email EMAIL'."
+}
+
+fn invite_create_spec() -> Slice<flags.Flag> {
+  [
+    flags.Flag {
+      name: "--team",
+      alias: "-t",
+      value: true,
+      hint: "KEY",
+      repeat: true,
+      required: true,
+      help: "a team the person joins (repeat for more)",
+      ..,
+    },
+    flags.Flag {
+      name: "--ro",
+      help: "they can read but not change anything (default: read-write)",
+      ..,
+    },
+    flags.Flag {
+      name: "--help",
+      alias: "-h",
+      hidden: true,
+      help: "show this help",
+      ..,
+    },
+  ]
+}
+
+#[json]
+struct InviteRequest { teams: Slice<string>, mode: string }
+
+#[json]
+struct InviteResponse { code: string, expires: string }
+
+fn invite_create(input: flags.CommandInput) -> Result<(), string> {
+  let p = input.parsed
+  let keys = p.all("--team").map(records.normalize_team_key).filter(|k| k != "")
+  if keys.is_empty() { return Err(f"usage: {input.usage}") }
+  let base = web_base()?
+  let mut ids: Slice<string> = []
+  for key in keys {
+    let Some(team) = records.find_team(key)? else {
+      return Err(unknown_team(key))
+    }
+    ids = ids.append(team.id)
+  }
+  let mode = if p.given("--ro") { "ro" } else { "rw" }
+  let payload = match json.Marshal(InviteRequest { teams: ids, mode }) {
+    Ok(b) => b,
+    Err(e) => return Err(f"encoding the invite: {e}"),
+  }
+  let body = match pb.post("/api/lll/invites", payload as string) {
+    Ok(b) => b,
+    Err(e) => return Err(pb.display_error(e).summary),
+  }
+  let mut made = InviteResponse { .. }
+  if let Err(e) = json.Unmarshal(body.bytes(), &made) {
+    return Err(f"decoding the invite: {e}")
+  }
+  if made.code == "" { return Err("the server returned no invite code") }
+  fmt.Println(f"{base}/join/{made.code}")
+  let access = if mode == "ro" { "read-only" } else { "read-write" }
+  status(
+    f"single-use invite: {access}, {strings.Join(keys, ", ")}; expires {made.expires}. Send the link to one person; it is shown only here",
+  )
+  Ok(())
+}

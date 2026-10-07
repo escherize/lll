@@ -123,7 +123,7 @@ fn fetch_team_comments_where(team_id: string, where: string) -> Result<Slice<mod
   let mut page = 1
   loop {
     let mut list = models.CommentList { .. }
-    pb.fetch(f"/api/collections/comments/records?perPage=500&page={page}&sort=created,id&expand=author&fields=id,issue,body,updated,expand.author.name&filter={cfilter}", "comments", &list)?
+    pb.fetch(f"/api/collections/comments/records?perPage=500&page={page}&sort=created,id&expand=author&fields=id,issue,author,body,updated,expand.author.name&filter={cfilter}", "comments", &list)?
     out = out.append(list.items...)
     if list.items.length() < 500 { break }
     page += 1
@@ -150,8 +150,7 @@ pub fn issue_documents(team_key: string, issues: Slice<models.Issue>, comments: 
   for c in comments {
     let n = per_issue.get(c.issue).unwrap_or(0) + 1
     per_issue[c.issue] = n
-    let mut who = c.expand.author.name
-    if who == "" { who = "anon" }
+    let who = display.member_name(c.author, c.expand.author.name, "anon")
     let Some(key) = keys.get(c.issue) else { continue }
     out = out.append(search.Document {
       group: key, kind: "comment", label: f"comment #{n} by {who}",

@@ -108,6 +108,11 @@ func registerBotRoutes(routes *router.Router[*core.RequestEvent]) {
 		}
 		if !re.HasSuperuserAuth() {
 			if re.Auth == nil || re.Auth.Id != bot.GetString("owner") {
+				// A bot outside the caller's roster answers like a missing
+				// one, so the refusal does not confirm a hidden name (LLL-551).
+				if re.Auth == nil || !rosterSees(re.App, re.Auth, bot) {
+					return re.BadRequestError("no bot member by that name", nil)
+				}
 				return re.ForbiddenError("only the bot's owner or a superuser can rotate its token", nil)
 			}
 			// A fresh token for a bot wider than its owner would hand the

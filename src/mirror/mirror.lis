@@ -76,8 +76,11 @@ pub struct Names {
 }
 
 impl Names {
+  /// A member id the caller's roster does not include (LLL-551) exports as
+  /// "hidden member": the issue is assigned, and an import names it among the
+  /// members it could not resolve rather than treating it as unassigned.
   fn member(self, id: string) -> string {
-    self.members.get(id).unwrap_or("")
+    display.member_name(id, self.members.get(id).unwrap_or(""), "")
   }
 }
 

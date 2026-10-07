@@ -1,3 +1,4 @@
+import "go:encoding/json"
 import "go:net/url"
 import "go:strings"
 import "models"
@@ -22,6 +23,22 @@ pub fn find_team(key: string) -> Result<Option<models.Team>, string> {
   let filter = url.QueryEscape(f"key={query.quote(wanted)}")
   let mut result = models.TeamList { .. }
   pb.fetch(f"/api/collections/teams/records?filter={filter}", "teams", &result)?
+  Ok(result.items.find(|t| t.key == wanted))
+}
+
+/// find_team, riding `tok` instead of the configured token: `lll bot` asks
+/// whether the credential that will own the bot can see the team it names.
+pub fn find_team_as(
+  tok: string,
+  key: string,
+) -> Result<Option<models.Team>, string> {
+  let wanted = normalize_team_key(key)
+  let filter = url.QueryEscape(f"key={query.quote(wanted)}")
+  let body = pb.get_as(f"/api/collections/teams/records?filter={filter}", tok)?
+  let mut result = models.TeamList { .. }
+  if let Err(e) = json.Unmarshal(body.bytes(), &result) {
+    return Err(f"decoding teams: {e}")
+  }
   Ok(result.items.find(|t| t.key == wanted))
 }
 

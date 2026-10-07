@@ -220,8 +220,10 @@ with tempfile.TemporaryDirectory(prefix='lll-team-scope-') as directory:
         assert out.returncode == 0 and 'invited viewer <viewer@example.test>: read-only, team ALPHA' in out.stderr, \
             out.stdout + out.stderr
         assert 'view-only web board for ALPHA (separate from their CLI access' in out.stdout, out.stdout
+        # 'lll invite' is its own noun now (LLL-544); its help still points
+        # at the login handoff fleet case 11 was looking for.
         out = lll('invite')
-        assert "it is a member verb: 'lll member invite ...'" in out.stderr, out.stderr
+        assert "'lll member invite NAME --email EMAIL'" in out.stdout, out.stdout + out.stderr
         out = lll('member', 'invite', 'nope', '--email', 'nope@example.test', '--team', 'NOPE', env=cli)
         assert out.returncode != 0 and "no team with key 'NOPE' on this server; teams: ALPHA, BETA" in out.stderr, out.stderr
         steps = [
@@ -325,7 +327,13 @@ with tempfile.TemporaryDirectory(prefix='lll-team-scope-') as directory:
         assert call(api, '/api/collections/teams/records', token=none)[1]['items'] == []
 
         # The board: the link logs in, then only ALPHA's read-only pages answer.
-        code, _, headers = call(board, link[len(board):])
+        # LLL-545: a link sets a cookie only when the browser says it was
+        # opened directly; otherwise it shows a confirm page and sets nothing.
+        code, body, headers = call(board, link[len(board):])
+        assert code == 200 and 'Set-Cookie' not in headers and "action='/login'" in body, (code, dict(headers))
+        code, _, headers = call(board, link[len(board):], headers={'Sec-Fetch-Site': 'cross-site'})
+        assert code == 200 and 'Set-Cookie' not in headers, 'a cross-site team link set a cookie'
+        code, _, headers = call(board, link[len(board):], headers={'Sec-Fetch-Site': 'none'})
         assert code == 303, code
         cookie = headers['Set-Cookie'].split(';')[0]
         assert cookie.startswith('lll_board=ALPHA.'), cookie
@@ -337,8 +345,11 @@ with tempfile.TemporaryDirectory(prefix='lll-team-scope-') as directory:
         assert code == 200 and 'alpha edited' in body and 'beta secret' not in body
         assert 'BETA' not in body, 'rail still lists the other team'
         assert page('/')[0] == 303
-        for path in ['/t/BETA/', '/t/ALPHA/settings/identity', '/t/ALPHA/issue/BETA-1', '/issue/BETA-1',
-                     '/search?q=beta', '/events?team=BETA']:
+        # LLL-545: another team, or its issue, answers 404 like a missing one;
+        # routes scoped viewers do not get at all stay 403.
+        for path in ['/t/BETA/', '/t/ALPHA/issue/BETA-1', '/issue/BETA-1', '/events?team=BETA']:
+            assert page(path)[0] == 404, path
+        for path in ['/t/ALPHA/settings/identity', '/search?q=beta']:
             assert page(path)[0] == 403, path
         assert page('/t/ALPHA/issue/ALPHA-1')[0] == 200
         assert page('/state', 'POST')[0] == 403
@@ -391,7 +402,9 @@ with tempfile.TemporaryDirectory(prefix='lll-team-scope-') as directory:
         # with the creator's access rather than every team read-write.
         out = lll('bot', 'bot-boss', env=boss_env)
         assert out.returncode == 0 and 'owned by boss' in out.stdout, out.stdout + out.stderr
-        bot_tok = next(l for l in out.stdout.splitlines() if l.startswith('LLL_TOKEN='))[len('LLL_TOKEN='):]
+        assert "true 'You are joining lll team ALPHA at " + api + ".'\n" in out.stdout, out.stdout
+        assert "\nlll attach -k ALPHA\ntrue 'Read the workflow:'\nlll skill get software-factory\n" in out.stdout, out.stdout
+        bot_tok = next(l for l in out.stdout.splitlines() if l.startswith('export LLL_TOKEN='))[len('export LLL_TOKEN='):]
 
         def bot_record():
             return next(m for m in call(api, '/api/collections/members/records?perPage=200', token=su)[1]['items']
@@ -425,6 +438,33 @@ with tempfile.TemporaryDirectory(prefix='lll-team-scope-') as directory:
         assert call(api, f"/api/collections/issues/records/{a2['id']}", {'project': bproj['id']}, bot_tok, 'PATCH')[0] == 400, \
             'the bot hung its own team BETA\'s project on ALPHA past its owner'
         assert call(api, f"/api/collections/issues/records/{a2['id']}", {'title': 'alpha bot edited'}, bot_tok, 'PATCH')[0] == 200
+        # LLL-546: the CLI handoff for the now ALPHA-only owner. A prompt for a
+        # team the owner cannot see is refused before any bot exists.
+        def member_names():
+            return {m['name'] for m in call(api, '/api/collections/members/records?perPage=200', token=su)[1]['items']}
+
+        out = lll('bot', 'bot-boss-beta', '--team', 'BETA', env=boss_env)
+        assert out.returncode != 0 and "no team 'BETA' among the teams this credential can see" in out.stderr, \
+            out.stdout + out.stderr
+        assert 'bot-boss-beta' not in member_names() and 'LLL_TOKEN' not in out.stdout + out.stderr
+        # --env: stdout is the two export lines and nothing else; sourced into
+        # a fresh shell with an empty HOME, the bot lists ALPHA's issues only.
+        out = lll('bot', 'bot-boss-env', '--env', env=boss_env)
+        assert out.returncode == 0, out.stdout + out.stderr
+        lines = out.stdout.splitlines()
+        assert len(lines) == 2 and lines[0] == 'export LLL_URL=' + api and lines[1].startswith('export LLL_TOKEN='), out.stdout
+        assert 'created bot member bot-boss-env (kind=bot, owned by boss)' in out.stderr, out.stderr
+        fresh = Path(root) / 'fresh-agent-home'
+        fresh.mkdir()
+        (fresh / 'agent.env').write_text(out.stdout)
+        listed = subprocess.run(['/bin/sh', '-c', '. ./agent.env && "$0" issue list --team ALPHA && "$0" issue list --team BETA',
+                                 binary], cwd=fresh, env={'HOME': str(fresh), 'PATH': os.environ['PATH']},
+                                text=True, capture_output=True, timeout=30)
+        assert 'alpha bot edited' in listed.stdout and 'beta' not in listed.stdout, listed.stdout + listed.stderr
+        assert "no team 'BETA'" in listed.stderr, listed.stderr
+        # A bot- name through 'member add' names the command that makes one.
+        out = lll('member', 'add', 'bot-boss-add', env=boss_env)
+        assert out.returncode != 0 and "creates it with 'lll bot bot-boss-add'" in out.stderr, out.stdout + out.stderr
         # Docs carry both the owner cap and LLL-618's author clause: this
         # migration rewrites the docs rules after 1791600000_doc_author.js.
         doc = {'slug': 'bot-doc', 'title': 't', 'kind': 'note', 'body': 'b'}

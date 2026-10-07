@@ -324,7 +324,8 @@ lll member invite NAME --email e@x.com  # add a colleague + temp password, in on
 lll member passes --count 10 --prefix hack  # private LAN/Tailscale teammate handoffs
 lll member set-password NAME --password <pw>  # superuser gives a member credentials
 lll token create bryan        # a one-year agent token (superuser only), printed once
-lll bot bot-myrepo            # a bot member you own, and its token; rerunning rotates it
+lll bot bot-myrepo            # a bot member you own, and an agent prompt with its token; rerunning rotates it
+lll bot bot-myrepo --env > agent.env  # the same, printing only the LLL_URL/LLL_TOKEN exports
 lll logout                    # clear the stored token
 lll board -w                  # open the web board
 lll completions zsh           # bash, zsh, fish

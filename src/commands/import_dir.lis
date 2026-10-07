@@ -167,7 +167,7 @@ To import somewhere harmless instead: lll attach -k NEWKEY in another directory,
       // come back and the NAME does not: a restored shot_ab12.png becomes
       // shot_ab12_cd34.png. Nothing downstream keys off the name, and
       // inventing one would mean fighting the file field's own uniqueness.
-      if let Err(e) = attachments.upload(issue, name, data) {
+      if let Err(e) = attachments.upload(pb.Caller.Process, issue, name, data) {
         return Err(partial(dir, f"attaching {name} to {front.key}: {e}", deleted, created))
       }
       restored_blobs += 1

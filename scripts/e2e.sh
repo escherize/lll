@@ -1332,6 +1332,15 @@ done
 python3 "$REPO_ROOT"/scripts/test_search_team.py "$LLL_ABS"
 # --- member invite --team: one team over the API and the board ---
 python3 "$REPO_ROOT"/scripts/test_team_scope.py "$LLL_ABS"
+# --- a member token in the board cookie scopes pages, search and the stream (LLL-545) ---
+python3 "$REPO_ROOT"/scripts/test_board_viewer_scope.py "$LLL_ABS"
+# --- invite create + /join/<code>: single-use, bounded by the creator (LLL-544) ---
+python3 "$REPO_ROOT"/scripts/test_invites.py "$LLL_ABS"
+# --- the real invites migration on a board with names differing only by case ---
+python3 "$REPO_ROOT"/scripts/test_name_index_migration.py "$LLL_ABS"
+python3 "$REPO_ROOT"/scripts/test_board_add_bot.py "$LLL_ABS"
+# --- the members roster a team-scoped member sees: API, CLI, board (LLL-551) ---
+python3 "$REPO_ROOT"/scripts/test_roster_scope.py "$LLL_ABS"
 # --- an older CLI than its server says so once a day, on stderr only (LLL-607) ---
 python3 "$REPO_ROOT"/scripts/test_version_skew.py "$LLL_ABS"
 # --- lll upgrade picks its command from how lll was installed (LLL-608) ---
@@ -2936,16 +2945,38 @@ assert_contains "$out" "e2e-agent" "the minted token authenticates a GET"
 # --- lll bot NAME: member + token in one command (LLL-392) ---
 bot_out=$(env -u LLL_TOKEN HOME="$E2E_HOME" LLL_URL=$URL \
   LLL_ADMIN_EMAIL=admin@local.dev LLL_ADMIN_PASSWORD=admin-local-123 \
-  "$LIN" bot bot-e2e --duration 3600) || fail "lll bot exited nonzero: $bot_out"
+  "$LIN" bot bot-e2e --team ENG --duration 3600) || fail "lll bot exited nonzero: $bot_out"
 assert_contains "$bot_out" "created bot member bot-e2e" "bot creates a bot-kind member when missing"
-BOT_TOK=$(printf '%s\n' "$bot_out" | sed -n 's/^LLL_TOKEN=//p')
-[ -n "$BOT_TOK" ] || fail "lll bot printed no LLL_TOKEN line: $bot_out"
+# LLL-546: the token arrives inside the design's agent prompt, once.
+assert_contains "$bot_out" "true 'You are joining lll team ENG at $URL.'" "the bot prompt names the team and server"
+assert_contains "$bot_out" "export LLL_URL=$URL" "the bot prompt exports the server"
+assert_contains "$bot_out" "lll attach -k ENG" "the bot prompt attaches the team"
+assert_contains "$bot_out" "lll skill get software-factory" "the bot prompt points at the workflow"
+BOT_TOK=$(printf '%s\n' "$bot_out" | sed -n 's/^export LLL_TOKEN=//p')
+[ -n "$BOT_TOK" ] || fail "lll bot printed no export LLL_TOKEN line: $bot_out"
+[ "$(printf '%s\n' "$bot_out" | grep -oF "$BOT_TOK" | wc -l | tr -d ' ')" = 1 ] \
+  || fail "lll bot printed the token more than once"
 out=$(LLL_TOKEN="$BOT_TOK" HOME="$E2E_HOME" LLL_URL=$URL "$LIN" whoami)
 assert_contains "$out" "bot-e2e <" "the bot's token is the bot's"
-bot_out=$(env -u LLL_TOKEN HOME="$E2E_HOME" LLL_URL=$URL \
+# --env: stdout is exactly the two export lines, so it sources cleanly;
+# the progress lines go to stderr.
+bot_err="$DATA_DIR/bot-env.err"
+bot_out=$(env -u LLL_TOKEN -u LLL_TEAM HOME="$E2E_HOME" LLL_URL=$URL \
   LLL_ADMIN_EMAIL=admin@local.dev LLL_ADMIN_PASSWORD=admin-local-123 \
-  "$LIN" bot bot-e2e --duration 3600) || fail "lll bot (second run) exited nonzero"
-assert_contains "$bot_out" "member bot-e2e exists; rotating its token" "a second run rotates without a second member"
+  "$LIN" bot bot-e2e --env --duration 3600 2>"$bot_err") || fail "lll bot --env (second run) exited nonzero"
+assert_contains "$(cat "$bot_err")" "member bot-e2e exists; rotated its token" "a second run rotates without a second member"
+[ "$(printf '%s\n' "$bot_out" | wc -l | tr -d ' ')" = 2 ] || fail "lll bot --env printed more than the export lines: $bot_out"
+BOT_TOK=$( (eval "$bot_out"; printf '%s' "$LLL_TOKEN") )
+out=$(LLL_TOKEN="$BOT_TOK" HOME="$E2E_HOME" LLL_URL=$URL "$LIN" whoami)
+assert_contains "$out" "bot-e2e <" "the --env exports carry the rotated bot token"
+# The prompt's team must exist and be visible; the refusal comes before
+# any mint, so the current token keeps working.
+out=$(env -u LLL_TOKEN HOME="$E2E_HOME" LLL_URL=$URL \
+  LLL_ADMIN_EMAIL=admin@local.dev LLL_ADMIN_PASSWORD=admin-local-123 \
+  "$LIN" bot bot-e2e --team NOPE 2>&1) && fail "lll bot accepted an unknown prompt team: $out"
+assert_contains "$out" "no team 'NOPE'" "an unknown prompt team is refused"
+out=$(LLL_TOKEN="$BOT_TOK" HOME="$E2E_HOME" LLL_URL=$URL "$LIN" whoami)
+assert_contains "$out" "bot-e2e <" "a refused prompt team does not rotate the token"
 
 # --- bot membership rules (LLL-407): reserved prefix, dead password door,
 # --- owner attribution, rotation stranding the old token.
@@ -2974,6 +3005,13 @@ assert_contains "$out" "reserved to the 'bot-' prefix" "the server refuses a bot
 out=$(env LLL_TOKEN="$BRYAN_TOK" HOME="$E2E_HOME" LLL_URL=$URL \
   "$LIN" member add -n bot-impersonator 2>&1) && fail "member add took the reserved bot- prefix: $out"
 assert_contains "$out" "reserved" "person signups cannot take the bot- prefix"
+assert_contains "$out" "creates it with 'lll bot bot-impersonator'" "member add names the bot command (LLL-546)"
+# The CLI refuses that before any server call (LLL-546), so the server's
+# person-side guard is exercised directly with the same member token.
+out=$(curl -s -X POST "$URL/api/collections/members/records" \
+  -H "Authorization: Bearer $BRYAN_TOK" -H 'Content-Type: application/json' \
+  -d '{"name":"bot-impersonator","email":"bot-impersonator@members.invalid","password":"bot-pass-12345","passwordConfirm":"bot-pass-12345"}')
+assert_contains "$out" "reserved" "the server refuses a person member with the bot- prefix"
 
 # The bot records its creating member as owner when the command rides a
 # member token — bryan's, minted fresh above because the configured one may
@@ -2982,7 +3020,7 @@ assert_contains "$out" "reserved" "person signups cannot take the bot- prefix"
 # speaking, so it is unset here to name the member path.
 bot_out=$(env -u LLL_ADMIN_EMAIL -u LLL_ADMIN_PASSWORD LLL_TOKEN="$BRYAN_TOK" \
   HOME="$E2E_HOME" LLL_URL=$URL \
-  "$LIN" bot bot-owned --duration 3600) || fail "member-token lll bot exited nonzero: $bot_out"
+  "$LIN" bot bot-owned --env --duration 3600) || fail "member-token lll bot exited nonzero: $bot_out"
 
 # A bot member cannot authenticate interactively, whatever password is typed.
 out=$(env -u LLL_TOKEN HOME="$E2E_HOME" LLL_URL=$URL \
@@ -3006,9 +3044,9 @@ assert_contains "$OWNED" "\"owner\":\"$BRYAN_ID\"" "the owner relation points at
 # Rotation re-mints and strands the old token at its next request.
 bot_out=$(env -u LLL_TOKEN HOME="$E2E_HOME" LLL_URL=$URL \
   LLL_ADMIN_EMAIL=admin@local.dev LLL_ADMIN_PASSWORD=admin-local-123 \
-  "$LIN" bot rotate bot-e2e --duration 3600) || fail "lll bot rotate exited nonzero: $bot_out"
-ROT_TOK=$(printf '%s\n' "$bot_out" | sed -n 's/^LLL_TOKEN=//p')
-[ -n "$ROT_TOK" ] || fail "lll bot rotate printed no LLL_TOKEN line: $bot_out"
+  "$LIN" bot rotate bot-e2e --env --duration 3600) || fail "lll bot rotate exited nonzero: $bot_out"
+ROT_TOK=$(printf '%s\n' "$bot_out" | sed -n 's/^export LLL_TOKEN=//p')
+[ -n "$ROT_TOK" ] || fail "lll bot rotate printed no export LLL_TOKEN line: $bot_out"
 [ "$ROT_TOK" != "$BOT_TOK" ] || fail "rotation re-minted the identical token"
 code=$(curl -s -o /dev/null -w '%{http_code}' -H "Authorization: Bearer $BOT_TOK" \
   "$URL/api/collections/members/records?perPage=1")

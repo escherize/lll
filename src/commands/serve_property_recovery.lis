@@ -5,8 +5,8 @@ import "go:strings"
 /// Reuse the normal property template, but replace this panel: a morph
 /// preserves selected/checked DOM properties when server attributes have
 /// not changed. Title and comment drafts live outside this boundary.
-fn property_recovery(key: string) -> string {
-  let html = current_properties(key).unwrap_or_else(|_| {
+fn property_recovery(key: string, viewer: Viewer) -> string {
+  let html = current_properties(key, viewer).unwrap_or_else(|_| {
     render("issue-properties-unavailable", "").unwrap_or("")
   })
   if html == "" { return "" }
@@ -14,8 +14,17 @@ fn property_recovery(key: string) -> string {
   f"event: datastar-patch-elements\ndata: mode replace\ndata: selector #issue-properties\n{strings.Join(lines, "\n")}\n\n"
 }
 
-fn current_properties(key: string) -> Result<string, string> {
-  let issue = records.fetch_issue(key)?
-  let vm = issue_fields_vm(issue, [])?
+/// The board reads as its own member, so a scoped viewer gets the panel only
+/// for an issue it may see, without other teams' labels or project (LLL-545).
+fn current_properties(key: string, viewer: Viewer) -> Result<string, string> {
+  let fetched = records.fetch_issue(key)?
+  let issue = match viewer {
+    Viewer.Full => fetched,
+    Viewer.Scoped(v) => {
+      if !v.sees(fetched.expand.team.key) { return Err(records.issue_not_found(key)) }
+      without_foreign_refs(fetched)
+    },
+  }
+  let vm = issue_fields_vm(issue, [], roster(viewer_is_scoped(viewer), issue.team)?)?
   render("issue-properties", vm)
 }

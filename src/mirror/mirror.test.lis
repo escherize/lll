@@ -373,13 +373,13 @@ fn front_of_resolves_names_from_the_maps_not_the_expansions() {
 }
 
 #[test]
-fn front_of_leaves_an_unknown_member_empty_rather_than_a_record_id() {
+fn front_of_names_a_member_outside_the_roster_hidden_rather_than_a_record_id() {
   let issue = models.Issue {
     number: 1,
-    creator: "deleted-member-id",
+    creator: "hidden-member-id",
     expand: models.IssueExpand { team: models.Team { key: "ENG", .. }, .. },
     ..
   }
   let front = front_of(issue, no_names())
-  assert front.creator == ""
+  assert front.creator == "hidden member"
 }

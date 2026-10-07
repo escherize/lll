@@ -7,6 +7,7 @@ import "go:fmt"
 import "go:net/url"
 import "go:encoding/json"
 import "go:net/http"
+import "go:time"
 
 import "models"
 import "pb"
@@ -17,14 +18,24 @@ import "realtime"
 
 /// One connected browser: its scope ("board:KEY:ORDER" for a team's board
 /// view in one card ordering, or "issue:KEY-1") and the channel its /events
-/// handler drains. `team_only` marks a viewer on a team-scoped board link,
-/// which never receives the workspace-wide "*" fragments (favorites, views).
-struct SseClient { id: int, scope: string, ch: Channel<string>, description_hash: string, team_only: bool }
+/// handler drains. `teams` is a scoped viewer's team keys (LLL-545), None for
+/// the board token: deliver drops every broadcast whose team is not among
+/// them, including the workspace-wide "*" fragments (favorites, views).
+/// `full` marks a member viewer whose effective access is every team: it is
+/// fenced by `teams` like any member, but gets the full payload, roster
+/// included (LLL-551).
+struct SseClient { id: int, scope: string, ch: Channel<string>, description_hash: string, teams: Option<Slice<string>>, full: bool }
 
-/// A rendered SSE payload for every client with a matching scope.
+/// A rendered SSE payload for every client with a matching scope. `team` is
+/// the key of the team whose data it carries, "" for workspace-wide rows.
 struct Broadcast {
   scope: string,
+  team: string,
   payload: string,
+  /// What a scoped client gets instead of `payload` when the fragment names
+  /// another team's labels or project (LLL-545) or a member outside the
+  /// team's roster (LLL-551); None when they are equal.
+  scoped_payload: Option<string>,
   description: Option<string>,
   client_id: int,
 }
@@ -106,10 +117,15 @@ fn deliver(clients: Slice<SseClient>, msg: Broadcast) -> Slice<SseClient> {
   for i in 0..result.length() {
     let c = result[i]
     if msg.scope != "*" && c.scope != msg.scope { continue }
-    if msg.scope == "*" && c.team_only { continue }
+    // The second fence: the gate already kept a scoped client's stream on
+    // its own teams, and this drops anything carrying another team's data
+    // even if a scope string ever matched across teams.
+    if let Some(teams) = c.teams {
+      if !teams.contains(msg.team) { continue }
+    }
     if msg.client_id != 0 && c.id != msg.client_id { continue }
     let changed = msg.description.is_some() && c.description_hash != hash
-    let mut payload = msg.payload
+    let mut payload = if c.teams.is_some() && !c.full { msg.scoped_payload.unwrap_or(msg.payload) } else { msg.payload }
     if changed {
       if description_patch.is_none() {
         let Ok(html) = render("issue-description", markdown.md_html(msg.description.unwrap_or(""))) else {
@@ -181,7 +197,13 @@ fn events_stream(
     return
   }
   let ch = Channel.buffered<string>(64)
-  let _ = hub.register.send(SseClient { id, scope, ch, team_only: viewer_scope(r).is_some(), .. })
+  let viewer = board_viewer(r)
+  let full = !viewer_is_scoped(viewer)
+  let teams = match viewer {
+    Viewer.Full => None,
+    Viewer.Scoped(v) => Some(v.teams),
+  }
+  let _ = hub.register.send(SseClient { id, scope, ch, teams, full, .. })
   // Response headers acknowledge registration, so a client that has opened
   // the stream cannot miss an immediately following issue mutation.
   w.WriteHeader(200)
@@ -191,16 +213,36 @@ fn events_stream(
   } else {
     let _ = hub.snapshots.send(PageSnapshot { team, order, client_id: id, .. })
   }
+  // Revocation (LLL-626): narrowing or deleting a member revokes it, open
+  // streams included. A scoped viewer's access is read again before every
+  // payload and on a timer while idle; the stream closes as soon as its
+  // credential stops resolving or no longer covers what it streams. The
+  // board token is fixed for the process, so a full viewer is not re-read.
+  let scoped = teams.is_some()
+  let still_allowed = || match board_viewer(r) {
+    Viewer.Full => true,
+    Viewer.Scoped(v) => if page == "issue" && key != "" { v.sees_issue(key) } else { v.teams.contains(team) },
+  }
+  let ticker = time.NewTicker(revalidate_every())
+  defer ticker.Stop()
   let done = r.Context().Done()
   loop {
     let quit = select {
       match ch.receive() {
         Some(payload) => {
-          let _ = w.Write(payload.bytes())
-          flusher.Flush()
-          false
+          if scoped && !still_allowed() {
+            true
+          } else {
+            let _ = w.Write(payload.bytes())
+            flusher.Flush()
+            false
+          }
         },
         None => true,
+      },
+      match ticker.C.receive() {
+        Some(_) => scoped && !still_allowed(),
+        None => false,
       },
       match done.receive() {
         Some(_) => true,
@@ -212,6 +254,11 @@ fn events_stream(
       return
     }
   }
+}
+
+/// How often an idle scoped stream re-reads its viewer's access (LLL-626).
+fn revalidate_every() -> time.Duration {
+  10 * time.Second
 }
 
 /// Consume PB realtime events forever; re-render and broadcast fragments.
@@ -284,6 +331,15 @@ fn broadcast_issue_state(rec: models.Issue, hub: Hub) {
 fn board_snapshot(hub: Hub, team_id: string, team_key: string, only_order: string, client_id: int) {
   if let Ok(issues) = records.fetch_board_issues(team_id) {
     let Ok(claimed) = claims.for_team(team_id) else { return };
+    // Scoped clients get a second rendering only when a card carries another
+    // team's labels or project (LLL-545), or an assignee or claim holder
+    // outside the team's roster (LLL-551).
+    let Ok(shown) = roster(true, team_id) else { return };
+    let scoped_claimed = claimed.map(|c| shown.claim(c))
+    let hides = issues.any(|i| !shown.sees(i.assignee)) || claimed.any(|c| !shown.sees(c.member))
+    let scoped_issues = if hides || issues.any(has_foreign_refs) {
+      Some(issues.map(|i| shown.issue(without_foreign_refs(i))))
+    } else { None }
     for order in board_orders() {
       if only_order != "" && only_order != order { continue }
       // UNFILTERED on purpose: /events sends one #board per (team, order) to
@@ -294,9 +350,15 @@ fn board_snapshot(hub: Hub, team_id: string, team_key: string, only_order: strin
         columns: board_columns(issues, BoardFilter { .. }, claimed, order),
         ..
       }
+      let mut scoped_payload: Option<string> = None
+      if let Some(scoped) = scoped_issues {
+        let scoped_vm = BoardVM { columns: board_columns(scoped, BoardFilter { .. }, scoped_claimed, order), ..vm }
+        let Ok(html) = render("board", scoped_vm) else { continue };
+        scoped_payload = Some(patch_event(html))
+      }
       if let Ok(html) = render("board", vm) {
         let _ = hub.broadcast.send(
-          Broadcast { scope: f"board:{team_key}:{order}", payload: patch_event(html), client_id, .. },
+          Broadcast { scope: f"board:{team_key}:{order}", team: team_key, payload: patch_event(html), scoped_payload, client_id, .. },
         )
       }
     }
@@ -332,15 +394,24 @@ fn issue_snapshot(hub: Hub, key: string, client_id: int) {
   // the page. Every new stream starts without a known description revision.
   let mut description = ""
   let mut vm = IssueVM { deleted: true, key, .. }
+  let mut scoped_payload: Option<string> = None
   if let Some(issue) = issues.items.get(0) {
     description = issue.description
-    let Ok(fields) = issue_fields_vm(issue, []) else { return };
+    let Ok(everyone) = roster(false, issue.team) else { return };
+    let Ok(fields) = issue_fields_vm(issue, [], everyone) else { return };
     vm = fields
+    // Scoped observers never see another team's labels or project (LLL-545),
+    // and their assignee picker and names follow the team's roster
+    // (LLL-551), so they always get their own rendering.
+    let Ok(shown) = roster(true, issue.team) else { return };
+    let Ok(scoped) = issue_fields_vm(without_foreign_refs(issue), [], shown) else { return };
+    let Ok(html) = render("issue-detail", scoped) else { return };
+    scoped_payload = Some(patch_event(html))
   }
   if let Ok(html) = render("issue-detail", vm) {
     let _ = hub.broadcast.send(Broadcast {
-      scope: f"issue:{key}", payload: patch_event(html),
-      description: Some(description), client_id,
+      scope: f"issue:{key}", team: records.normalize_team_key(team), payload: patch_event(html),
+      scoped_payload, description: Some(description), client_id,
     })
   }
 }
@@ -397,12 +468,20 @@ fn comment_broadcast(ev: realtime.Event, hub: Hub) {
   let Ok(comments) = records.fetch_comments(issue.id) else {
     return
   }
+  // Scoped observers see authors through the team's roster (LLL-551).
+  let Ok(shown) = roster(true, issue.team) else { return };
+  let Ok(scoped) = render("comments", CommentsVM { comments: comments.map(|c| comment_vm(shown.comment(c))) }) else {
+    return
+  }
   if let Ok(html) = render(
     "comments",
     CommentsVM { comments: comments.map(comment_vm) },
   ) {
     let _ = hub.broadcast.send(
-      Broadcast { scope: f"issue:{key}", payload: patch_event(html), .. },
+      Broadcast {
+        scope: f"issue:{key}", team: issue.expand.team.key, payload: patch_event(html),
+        scoped_payload: Some(patch_event(scoped)), ..
+      },
     )
   }
 }

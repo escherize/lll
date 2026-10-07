@@ -31,16 +31,34 @@ fn rail_vm(active: string, me: string, team: models.Team) -> RailVM {
     teams: rail_teams(team.key),
     favorites: fav_vms(),
     views: view_vms(),
+    scoped: false,
+    bot_owner: "",
   }
 }
 
-/// The rail for this request's viewer. A viewer on a team-scoped board link
-/// sees its own team in the switcher and no favorites or saved views: those
-/// belong to the whole workspace and name other teams' issues.
+/// The rail for this request's viewer. A scoped viewer sees only its own
+/// teams in the switcher and no favorites or saved views: those belong to the
+/// whole workspace and name other teams' issues. A member viewer's "My
+/// issues" is its own (LLL-545).
 fn rail_for(r: Ref<http.Request>, active: string, me: string, team: models.Team) -> RailVM {
   let rail = rail_vm(active, me, team)
-  let Some(key) = viewer_scope(r) else { return rail }
-  RailVM { teams: rail.teams.filter(|t| t.key == key), favorites: [], views: [], ..rail }
+  let Viewer.Scoped(v) = board_viewer(r) else { return rail }
+  let mine = v.member.map_or(rail.me, |m| m.name)
+  // "Add a bot" (LLL-546): a read-write person viewer owns what it mints. A
+  // bot viewer cannot own bots (gopb), so it gets no button.
+  let bot_owner = match v.member {
+    Some(m) if m.rw && !strings.HasPrefix(m.name, "bot-") => m.name,
+    _ => "",
+  }
+  RailVM {
+    teams: rail.teams.filter(|t| v.sees(t.key)),
+    favorites: [],
+    views: [],
+    me: mine,
+    scoped: true,
+    bot_owner,
+    ..rail
+  }
 }
 
 /// The board path for a team key: "/t/KEY/", or "/" when no key scopes the
@@ -173,9 +191,18 @@ fn board_page(w: http.ResponseWriter, r: Ref<http.Request>, team: models.Team, m
       Err(e) => { if err == "" { err = e } },
     }
   }
+  // Who this viewer may name on this team (LLL-551). An assignee filter
+  // outside it answers exactly like a name nobody has.
+  let roster = match roster_for(r, team_id) {
+    Ok(found) => found,
+    Err(e) => {
+      http.Error(w, e, 500)
+      return
+    },
+  }
   let mut assignees: Slice<string> = []
   for a in csv(raw.assignee) {
-    match records.resolve_member(a) {
+    match roster_member(roster, a) {
       Ok(_) => assignees = assignees.append(a),
       Err(e) => { if err == "" { err = e } },
     }
@@ -289,14 +316,14 @@ fn board_page(w: http.ResponseWriter, r: Ref<http.Request>, team: models.Team, m
   }
 
   let issues = match records.fetch_board_issues(team_id) {
-    Ok(i) => i,
+    Ok(i) => issues_for(r, i).map(|x| roster.issue(x)),
     Err(e) => {
       http.Error(w, e, 500)
       return
     },
   }
   let raw_mode = wants_raw(r)
-  let compose = match compose_vm(team_id) {
+  let compose = match compose_vm(team_id, roster) {
     Ok(c) => c,
     Err(e) => {
       http.Error(w, e, 500)
@@ -315,7 +342,7 @@ fn board_page(w: http.ResponseWriter, r: Ref<http.Request>, team: models.Team, m
   if me != "" && assignees.contains(me) { active = "mine" }
 
   let held = match claims.for_team(team.id) {
-    Ok(found) => found,
+    Ok(found) => found.map(|c| roster.claim(c)),
     Err(e) => { http.Error(w, e, 500); return },
   }
   let vm = BoardVM {
@@ -325,7 +352,7 @@ fn board_page(w: http.ResponseWriter, r: Ref<http.Request>, team: models.Team, m
       board_base(team.key),
       issues,
       q,
-      fetch_member_names().unwrap_or([]),
+      roster.members.map(|m| m.name),
       fetch_label_names(team_id).unwrap_or([]),
       records.fetch_projects(team_id).unwrap_or([]),
     ),
@@ -404,7 +431,7 @@ fn hide_seed_js(hidden: Slice<string>) -> template.JS {
 fn issue_page(w: http.ResponseWriter, r: Ref<http.Request>, team: models.Team, me: string) {
   let key = r.PathValue("key")
   let issue = match records.fetch_issue(key) {
-    Ok(i) => i,
+    Ok(i) => issues_for(r, [i])[0],
     Err(e) => {
       http.Error(w, e, 404)
       return
@@ -419,7 +446,14 @@ fn issue_page(w: http.ResponseWriter, r: Ref<http.Request>, team: models.Team, m
   }
   // An issue is a detail view under the board, so the board row stays
   // current — which also makes the rail byte-identical to the board's.
-  let mut page = match issue_vm(issue, comments) {
+  let roster = match roster_for(r, issue.team) {
+    Ok(found) => found,
+    Err(e) => {
+      http.Error(w, e, 500)
+      return
+    },
+  }
+  let mut page = match issue_vm(issue, comments, roster) {
     Ok(p) => p,
     Err(e) => {
       http.Error(w, e, 500)
@@ -431,6 +465,18 @@ fn issue_page(w: http.ResponseWriter, r: Ref<http.Request>, team: models.Team, m
   // is curl-able" includes the unprompted part. A failed fetch renders no
   // section rather than a 500 (same bargain as the rail's groups).
   page.findings = findings_for_issue(issue).map_or([], |f| f.map(|d| finding_vm(d, team.key)))
+  // A scoped viewer claims as itself, or not at all (LLL-545). Live
+  // re-renders of #issue-detail are shared and still name the board's member
+  // (LLL-627); the claim action uses the viewer whatever the button said.
+  if let Viewer.Scoped(v) = board_viewer(r) {
+    match v.member {
+      Some(m) if m.rw => {
+        page.claim_actor = m.name
+        page.claim_actor_id = m.id
+      },
+      _ => page.claim_read_only = true,
+    }
+  }
   // ?raw answers before the remaining page-only extras (star state, emoji
   // catalogue) are fetched: none of them are markdown's business. An
   // unknown key never gets here — fetch_issue already 404'd above, raw or

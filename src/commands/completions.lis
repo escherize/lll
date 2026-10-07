@@ -52,6 +52,7 @@ fn nouns() -> Slice<string> {
     "bot",
     "team",
     "member",
+    "invite",
     "project",
     "label",
     "api",
@@ -83,6 +84,7 @@ fn command_table(noun: string) -> Slice<flags.Command> {
     "issue" => issue_commands(),
     "team" => team_commands(),
     "member" => member_commands(),
+    "invite" => invite_commands(),
     "project" => project_commands(),
     "label" => label_commands(),
     "doc" => doc_commands(),
@@ -124,7 +126,7 @@ fn verb_flags(noun: string, verb: string) -> Slice<string> {
   }
   match noun {
     "search" => flags.tokens(search_spec()),
-    "bot" => flags.tokens(token_create_spec()),
+    "bot" => flags.tokens(bot_spec()),
     "watch" => flags.tokens(watch_spec()),
     "up" => flags.tokens(up_spec()),
     "attach" => flags.tokens(attach_spec()),

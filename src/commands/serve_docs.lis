@@ -41,11 +41,19 @@ fn doc_page(
       return
     },
   }
-  let mut vm = doc_vm(doc, team.key)
+  // The author, and a bot author's owner, follow the viewer's roster (LLL-551).
+  let shown = match roster_for(r, team.id) {
+    Ok(found) => found,
+    Err(e) => {
+      http.Error(w, e, 500)
+      return
+    },
+  }
+  let mut vm = doc_vm(shown.doc(doc), team.key)
   // The board reads as its own member, so a doc linking another team's issue
   // would show that issue to a viewer scoped to this team.
-  if let Some(key) = viewer_scope(r) {
-    vm.issues = vm.issues.filter(|i| issue_of_team(i.key, key))
+  if let Viewer.Scoped(v) = board_viewer(r) {
+    vm.issues = vm.issues.filter(|i| v.sees_issue(i.key))
   }
   if wants_raw(r) {
     write_raw(w, doc_raw(vm))

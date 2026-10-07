@@ -220,6 +220,10 @@ fn board_mux(
   //
   // Registered FIRST so the board's own routes cannot shadow /api/.
   api_proxy(mux, cfg.url, admin_ui)?
+  // Invite links (LLL-544) sit outside the gate: the visitor has no board
+  // credential until the redemption hands it one (serve_join.lis).
+  mux.HandleFunc("GET /join/{code}", join_page)
+  mux.HandleFunc("POST /join/{code}", join_redeem)
   //
   // Every BOARD route sits behind the board gate (serve_gate.lis): pages,
   // writes, the SSE stream and static assets alike answer only board-token
@@ -231,6 +235,9 @@ fn board_mux(
   // legacy paths stay as redirects — bookmarks, the CLI's printed URLs and
   // the rail's favorites all speak them — landing on the boot team (or, for
   // an issue, on the team its key names).
+  // The sign-in confirm page's POST (LLL-545). Ungated: it carries the
+  // credential itself and checks Origin before setting any cookie.
+  mux.HandleFunc("POST /login", board_login)
   mux.HandleFunc(
     "GET /{$}",
     gated(|w: http.ResponseWriter, r: Ref<http.Request>| {
@@ -450,6 +457,7 @@ fn board_mux(
   mux.HandleFunc("POST /release", gated(flashing(release_write)))
   mux.HandleFunc("POST /labels", gated(flashing(labels_write)))
   mux.HandleFunc("POST /comment", gated(flashing(comment_write)))
+  mux.HandleFunc("POST /bot", gated(flashing_with(bot_write)))
   mux.HandleFunc("POST /views/save", gated(flashing_with(views_save)))
   // The embedded tree keeps its repo paths, so "/static/theme.css" resolves to
   // "static/theme.css" with no prefix surgery.

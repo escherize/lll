@@ -952,7 +952,7 @@ fn print_issue_table(issues: Slice<models.Issue>) -> Result<(), string> {
   let mut rows: Slice<Slice<string>> = []
   for item in issues {
     let key = item.expand.team.key
-    let mut row = [f"{key}-{item.number}", f"{display.glyph(item.state)} {item.state}", display.priority_marker(item.priority), item.title, item.expand.assignee.name, display.relative(item.updated)]
+    let mut row = [f"{key}-{item.number}", f"{display.glyph(item.state)} {item.state}", display.priority_marker(item.priority), item.title, display.member_name(item.assignee, item.expand.assignee.name, ""), display.relative(item.updated)]
     if item.emoji != "" { row = row.append(item.emoji) }
     rows = rows.append(row)
   }
@@ -1071,8 +1071,7 @@ fn view(input: flags.CommandInput) -> Result<(), string> {
       fmt.Println("")
       fmt.Println("## Comments")
       for cm in comments {
-        let mut author = cm.expand.author.name
-        if author == "" { author = "ghost" }
+        let mut author = display.member_name(cm.author, cm.expand.author.name, "ghost")
         author = display.byline(author, cm.agent)
         // Absolute, not relative: --raw is machine output that gets stored
         // and re-read (an agent's brief, an exported mirror in Git), where
@@ -1087,8 +1086,7 @@ fn view(input: flags.CommandInput) -> Result<(), string> {
     return Ok(())
   }
 
-  let mut assignee = full.expand.assignee.name
-  if assignee == "" { assignee = "none" }
+  let assignee = display.member_name(full.assignee, full.expand.assignee.name, "none")
 
   let mut project = full.expand.project.name
   if project == "" { project = "none" }
@@ -1107,8 +1105,7 @@ fn view(input: flags.CommandInput) -> Result<(), string> {
   // latter is exclusive.
   let claim = await_issue_view(reads.claim, "claim")?
   if let Some(held) = claim {
-    let mut holder = held.expand.member.name
-    if holder == "" { holder = "an unknown member" }
+    let holder = display.member_name(held.member, held.expand.member.name, "an unknown member")
     fmt.Println(f"Claimed:   {display.byline(holder, held.agent)} ({display.relative(held.created)})")
   }
   // The work-site slot (TASK-205), under the claim holder: the claim says
@@ -1447,7 +1444,7 @@ fn update(input: flags.CommandInput) -> Result<(), string> {
   let mut released = ""
   if assignee_name != "" {
     let observed = claims.observed_id(issue.id)?
-    let result = claims.update_assignment(issue.id, observed, payload, agent, force, reason).map_err(|e| {
+    let result = claims.update_assignment(pb.Caller.Process, issue.id, observed, payload, agent, force, reason).map_err(|e| {
       if strings.Contains(e, "is claimed by") {
         f"{key}: {e} — {held_elsewhere_hint(key)}"
       } else if strings.Contains(e, "needs force") {
@@ -1487,8 +1484,7 @@ fn close_issue(input: flags.CommandInput) -> Result<(), string> {
   )?
   fmt.Println(f"Closed {issue.expand.team.key}-{issue.number} ● done")
   if let Some(held) = claim {
-    let mut holder = held.expand.member.name
-    if holder == "" { holder = "an unknown member" }
+    let holder = display.member_name(held.member, held.expand.member.name, "an unknown member")
     fmt.Println(f"Claim retained by {holder}. To release it explicitly:")
     fmt.Println(f"  lll issue release {issue.expand.team.key}-{issue.number}")
     fmt.Println("Release also clears the assignee if it still matches the claim holder.")
@@ -1686,7 +1682,7 @@ fn claim(input: flags.CommandInput) -> Result<(), string> {
     return Ok(())
   }
 
-  let result = claims.acquire(issue.id, member.id, agent).map_err(|e| {
+  let result = claims.acquire(pb.Caller.Process, issue.id, member.id, agent).map_err(|e| {
     if strings.Contains(e, "already claimed by") {
       f"{key}: {e} — {held_elsewhere_hint(key)}"
     } else { e }
@@ -1716,7 +1712,7 @@ fn release(input: flags.CommandInput) -> Result<(), string> {
   let issue = records.fetch_issue(resolved)?
   let key = f"{issue.expand.team.key}-{issue.number}"
   let Some(held) = claims.fetch(issue.id)? else { return Err(f"{key} is not claimed") };
-  let result = claims.release(issue.id, held.id, agent, force, reason).map_err(|e| {
+  let result = claims.release(pb.Caller.Process, issue.id, held.id, agent, force, reason).map_err(|e| {
     if strings.Contains(e, "needs force") {
       f"{key}: {e} — 'lll issue release {key} --force -b \"why\"' takes it anyway and comments on the issue"
     } else { e }
@@ -1971,9 +1967,7 @@ fn print_comments(comments: Slice<models.Comment>) {
   let mut n = 0
   for c in comments {
     n += 1
-    let mut author = c.expand.author.name
-    if author == "" { author = "anon" }
-    author = display.byline(author, c.agent)
+    let author = display.byline(display.member_name(c.author, c.expand.author.name, "anon"), c.agent)
     let tag = display.author_tag(c.expand.author.kind == "bot", c.expand.author.owner_name())
     fmt.Println(f"#{n} {author}{tag} ({display.relative(c.created)})")
     fmt.Println(f"  {c.body}")
@@ -2005,8 +1999,7 @@ fn comment_mutate(verb: string, p: flags.Parsed) -> Result<(), string> {
     return Err(f"{key} has {comments.length()} comments; there is no #{n} — 'lll issue comment {key}' numbers them")
   }
   let c = comments[n - 1]
-  let mut whose = c.expand.author.name
-  if whose == "" { whose = "anon" }
+  let whose = display.member_name(c.author, c.expand.author.name, "anon")
   if !p.given("--force") {
     if let Some(a) = actor()? {
       if c.author != a.id {
@@ -2390,7 +2383,7 @@ fn issue_next(input: flags.CommandInput) -> Result<(), string> {
     }
     // Acquire before printing: a key this command did not secure is a lie to
     // the shell loop that composed it. A lost race exits non-zero, keyless.
-    let result = claims.acquire(best.id, member.id, agent).map_err(|e| {
+    let result = claims.acquire(pb.Caller.Process, best.id, member.id, agent).map_err(|e| {
       if strings.Contains(e, "already claimed by") {
         f"{key}: {e} — {held_elsewhere_hint(key)}"
       } else { e }

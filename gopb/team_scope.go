@@ -365,3 +365,40 @@ func refuseReadOnlyWrites(re *core.RequestEvent) error {
 	}
 	return re.ForbiddenError(readOnlyRefusal(re.Auth), nil)
 }
+
+// registerAccessRoute answers GET /api/lll/access with the calling member's
+// effective access (LLL-545): the board resolves a member-token cookie
+// through it on every request. PocketBase's auth middleware has already
+// checked the token (signature, expiry, tokenKey, record still exists), and
+// the grants come from effectiveAccess, so a bot's token gets its owner's
+// intersection, read fresh rather than cached in the cookie. Members only:
+// a superuser token names no member and is not a board credential.
+func registerAccessRoute(routes *router.Router[*core.RequestEvent]) {
+	routes.GET("/api/lll/access", func(re *core.RequestEvent) error {
+		if re.Auth == nil || re.Auth.Collection().Name != "members" {
+			return re.UnauthorizedError("a member token is required", nil)
+		}
+		acc := effectiveAccess(re.App, re.Auth)
+		all, err := re.App.FindAllRecords("teams")
+		if err != nil {
+			return re.InternalServerError("failed to read teams", err)
+		}
+		type team struct {
+			ID  string `json:"id"`
+			Key string `json:"key"`
+		}
+		teams := []team{}
+		for _, t := range all {
+			if acc.sees(t.Id) {
+				teams = append(teams, team{ID: t.Id, Key: t.GetString("key")})
+			}
+		}
+		return re.JSON(http.StatusOK, map[string]any{
+			"id":    re.Auth.Id,
+			"name":  re.Auth.GetString("name"),
+			"rw":    acc.rw,
+			"all":   acc.all,
+			"teams": teams,
+		})
+	})
+}

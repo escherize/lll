@@ -34,7 +34,7 @@ fn search_page(
   let q = strings.TrimSpace(query_param(r, "q"))
   let mut results: Slice<SearchHitVM> = []
   if q != "" {
-    match search_hits(team, q) {
+    match search_hits(team, q, is_scoped(r)) {
       Ok(hits) => results = hits,
       Err(e) => {
         http.Error(w, e, 500)
@@ -86,7 +86,7 @@ fn search_page(
 /// is and why. Docs joined the page when they got one of their own to link to
 /// (LLL-405): until then a doc hit was a result you could not click, which is
 /// why this searched issues and comments only (LLL-398).
-fn search_hits(team: models.Team, q: string) -> Result<Slice<SearchHitVM>, string> {
+fn search_hits(team: models.Team, q: string, scoped: bool) -> Result<Slice<SearchHitVM>, string> {
   let issues = fetch_team_issues_where(team.id, candidate_clause(q, ["title", "description"]))?
   let comments = fetch_team_comments_where(team.id, candidate_clause(q, ["body"]))?
   // A comment's issue must be in the candidate set for the hit to have a
@@ -101,7 +101,12 @@ fn search_hits(team: models.Team, q: string) -> Result<Slice<SearchHitVM>, strin
     for id in extra_ids { ors = ors.append(f"id={query.quote(id)}") }
     all = all.append(fetch_team_issues_where(team.id, "(" + strings.Join(ors, " || ") + ")")?...)
   }
-  let issues = all
+  // A scoped viewer never matches or sees another team's labels or project
+  // (LLL-545), or a member outside its roster (LLL-551): a hidden comment
+  // author's name would ride the hit's "comment #N by NAME" label.
+  let shown = roster(scoped, team.id)?
+  let issues = (if scoped { all.map(without_foreign_refs) } else { all }).map(|i| shown.issue(i))
+  let comments = comments.map(|c| shown.comment(c))
   let docs = fetch_team_docs_light(team.id, candidate_clause(q, ["title", "body"]))?
   let mut corpus = issue_documents(team.key, issues, comments)
   let mut by_slug = Map.new<string, models.Doc>()

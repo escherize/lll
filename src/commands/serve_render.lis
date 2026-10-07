@@ -104,6 +104,47 @@ fn label_vms(labels: Slice<models.Label>) -> Slice<LabelVM> {
   labels.map(|l| LabelVM { name: l.name, color: l.color })
 }
 
+/// An issue as a team-scoped viewer sees it (LLL-545). An all-scope member
+/// may hang another team's labels or project on an issue, and the board
+/// renders as its own all-scope member, so those names would reach a viewer
+/// who cannot see that team. Labels and a project from any team other than
+/// the issue's own are dropped. That also hides a label from a second team
+/// the viewer can see, which is the price of one shared rendering per
+/// stream. Fail closed: a label or project id whose expanded record is
+/// missing cannot be shown to be the issue's own, so it is dropped too (the
+/// board expands both, so its filters keep working).
+fn without_foreign_refs(issue: models.Issue) -> models.Issue {
+  let own = issue.team
+  let own_labels = issue.expand.labels.filter(|l| l.team == own)
+  let own_ids = own_labels.map(|l| l.id)
+  let mut out = issue
+  out.expand.labels = own_labels
+  out.labels = issue.labels.filter(|id| own_ids.contains(id))
+  if !project_is_own(issue) {
+    out.project = ""
+    out.expand.project = models.Project { .. }
+  }
+  out
+}
+
+/// True when the issue has no project or its expanded project is its team's.
+fn project_is_own(issue: models.Issue) -> bool {
+  issue.project == "" || (issue.expand.project.id == issue.project && issue.expand.project.team == issue.team)
+}
+
+/// True when `without_foreign_refs` would change anything.
+fn has_foreign_refs(issue: models.Issue) -> bool {
+  let own_ids = issue.expand.labels.filter(|l| l.team == issue.team).map(|l| l.id)
+  issue.labels.any(|id| !own_ids.contains(id)) || issue.expand.labels.any(|l| l.team != issue.team) ||
+    !project_is_own(issue)
+}
+
+/// The issues as this request's viewer may see them: unchanged for the
+/// board token, foreign labels and projects dropped for a scoped viewer.
+fn issues_for(r: Ref<http.Request>, issues: Slice<models.Issue>) -> Slice<models.Issue> {
+  if is_scoped(r) { issues.map(without_foreign_refs) } else { issues }
+}
+
 fn card_vm(issue: models.Issue) -> CardVM {
   let prio = display.priority_name(issue.priority)
   CardVM {
@@ -350,17 +391,17 @@ fn board_card(issue: models.Issue, claimed: Slice<models.Claim>) -> CardVM {
 /// The create dialog's pickers, freshly fetched. Three extra PB reads, paid
 /// once per board page load and never on a broadcast.
 ///
-/// Labels and projects are the board's team's; members are everyone's
-/// (TASK-173). The issue the dialog creates lands in that same team, so a
-/// picker offering another team's label would build a record PocketBase is
-/// happy to store and no view can explain.
-fn compose_vm(team_id: string) -> Result<ComposeVM, string> {
-  let members = records.fetch_members()?
+/// Labels and projects are the board's team's; members are the viewer's
+/// roster for the team, everyone's for a full viewer (TASK-173, LLL-551).
+/// The issue the dialog creates lands in that same team, so a picker
+/// offering another team's label would build a record PocketBase is happy to
+/// store and no view can explain.
+fn compose_vm(team_id: string, roster: Roster) -> Result<ComposeVM, string> {
   let projects = records.fetch_projects(team_id)?
   let labels = records.fetch_labels(team_id)?
   Ok(ComposeVM {
     prios: prio_opts(),
-    members: members.map(|m| PickVM { id: m.id, name: m.name, bot: m.kind == "bot" }),
+    members: roster.picks(),
     projects: projects.map(|p| PickVM { id: p.id, name: p.name, bot: false }),
     labels: labels.map(|l| LabelPickVM {
       id: l.id,
@@ -395,15 +436,18 @@ fn comment_vm(c: models.Comment) -> CommentVM {
 }
 
 /// Issue view model from a full record (expand: team, assignee, labels,
-/// project) — shared by the issue page and broadcast re-renders.
-fn issue_vm(issue: models.Issue, comments: Slice<models.Comment>) -> Result<IssueVM, string> {
-  let mut vm = issue_fields_vm(issue, comments)?
+/// project) — shared by the issue page and broadcast re-renders. `roster`
+/// is who the rendering may name (LLL-551): hidden members render as
+/// "hidden member" and drop out of the assignee picker.
+fn issue_vm(issue: models.Issue, comments: Slice<models.Comment>, roster: Roster) -> Result<IssueVM, string> {
+  let mut vm = issue_fields_vm(issue, comments, roster)?
   vm.description = markdown.md_html(issue.description)
   Ok(vm)
 }
 
 /// Metadata can refresh without parsing or transmitting the description.
-fn issue_fields_vm(issue: models.Issue, comments: Slice<models.Comment>) -> Result<IssueVM, string> {
+fn issue_fields_vm(raw: models.Issue, comments: Slice<models.Comment>, roster: Roster) -> Result<IssueVM, string> {
+  let issue = roster.issue(raw)
   let assignee = issue.expand.assignee.name
   let mut project = issue.expand.project.name
   let mut project_href = ""
@@ -413,7 +457,7 @@ fn issue_fields_vm(issue: models.Issue, comments: Slice<models.Comment>) -> Resu
     project_href = f"{issues_base(issue.expand.team.key)}?project={url.QueryEscape(project)}"
   }
   if project == "" { project = "none" }
-  let held = claims.fetch(issue.id)?
+  let held = claims.fetch(issue.id)?.map(|c| roster.claim(c))
   let mut claim_id = ""
   let mut claim_holder = ""
   let mut claim_age = ""
@@ -467,7 +511,7 @@ fn issue_fields_vm(issue: models.Issue, comments: Slice<models.Comment>) -> Resu
     // Scoped to the ISSUE's team, not the server's configured one: this
     // renders for whatever issue arrives, including one from a team the
     // board is not scoped to (TASK-173).
-    member_opts: records.fetch_members()?.map(|m| PickVM { id: m.id, name: m.name, bot: m.kind == "bot" }),
+    member_opts: roster.picks(),
     project_opts: records.fetch_projects(issue.team)?.map(|p| PickVM { id: p.id, name: p.name, bot: false }),
     label_opts: records.fetch_labels(issue.team)?.map(|l| LabelPickVM {
       id: l.id,
@@ -476,7 +520,7 @@ fn issue_fields_vm(issue: models.Issue, comments: Slice<models.Comment>) -> Resu
       on: issue.labels.contains(l.id),
       terms: strings.ToLower(l.name),
     }),
-    comments: comments.map(comment_vm),
+    comments: comments.map(|c| comment_vm(roster.comment(c))),
     // Left empty on purpose: the RELATED FINDINGS block is page-only (set by
     // issue_page), like the star and the emoji catalogue below — the section
     // sits outside the #issue-detail morph boundary, so broadcasts never

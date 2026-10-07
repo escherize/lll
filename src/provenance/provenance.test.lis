@@ -21,8 +21,8 @@ fn provenance_preserves_context_and_external_refs() {
 }
 
 #[test]
-fn unexpanded_creator_keeps_the_record_identity() {
+fn unexpanded_creator_reads_as_hidden_not_as_a_record_id() {
   let source = fields(models.Issue { creator: "member-id", .. })
   assert source.length() == 1
-  assert source[0].value == "member-id"
+  assert source[0].value == "hidden member"
 }

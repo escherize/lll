@@ -1,0 +1,69 @@
+import "go:net/http/httptest"
+
+// LLL-546: the board's "Add a bot" route, name and address rules.
+
+fn bot_route(v: ScopedViewer, method: string, writes: bool) -> string {
+  match scoped_route(method, "/bot", "", "", "", v, writes) {
+    ScopedVerdict.Open => "open",
+    ScopedVerdict.Hidden(_) => "hidden",
+    ScopedVerdict.Closed(_) => "closed",
+  }
+}
+
+#[test]
+fn only_a_read_write_member_viewer_may_post_bot() {
+  let m = ViewerMember { id: "m1", name: "ann", token: "t", rw: true, all: false }
+  let member = ScopedViewer { teams: ["AAA"], member: Some(m) }
+  assert bot_route(member, "POST", true) == "open"
+  // A read-only member and a team link (no member, never writes).
+  assert bot_route(member, "POST", false) == "closed"
+  let link = ScopedViewer { teams: ["AAA"], member: None }
+  assert bot_route(link, "POST", false) == "closed"
+  // Not a page: GET stays closed even for a writer.
+  assert bot_route(member, "GET", true) == "closed"
+}
+
+#[test]
+fn board_bot_name_takes_a_plain_name_or_bot_prefix() {
+  let assert Ok(a) = board_bot_name(" myrepo ")
+  assert a == "bot-myrepo"
+  let assert Ok(b) = board_bot_name("bot-my-repo-2")
+  assert b == "bot-my-repo-2"
+  for bad in [
+    "",
+    "bot-",
+    "-x",
+    "My",
+    "a b",
+    "x'y",
+    "../x",
+    "x\ny",
+    "a$(id)",
+    "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  ] {
+    assert board_bot_name(bad).is_err()
+  }
+}
+
+#[test]
+fn request_origin_is_the_address_the_viewer_used() {
+  let plain = httptest.NewRequest("POST", "http://board.example:8100/bot", None)
+  let assert Ok(a) = request_origin(plain)
+  assert a == "http://board.example:8100"
+  let mut proxied = httptest.NewRequest(
+    "POST",
+    "http://lll.example.com/bot",
+    None,
+  )
+  let assert Some(header) = proxied.Header
+  let mut h = header
+  h.Set("X-Forwarded-Proto", "https")
+  let assert Ok(b) = request_origin(proxied)
+  assert b == "https://lll.example.com"
+  // A Host that is not host[:port] is refused, never echoed into a prompt.
+  for host in ["evil.example/x", "a b", "x'y", "h:1:2", ""] {
+    let mut hostile = httptest.NewRequest("POST", "http://ok.example/bot", None)
+    hostile.Host = host
+    assert request_origin(hostile).is_err()
+  }
+}

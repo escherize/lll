@@ -1,0 +1,124 @@
+import "records"
+import "go:net/http"
+
+import "display"
+import "models"
+
+// Who a board page may name (LLL-551).
+//
+// The board reads as its own all-scope member, so every member it fetches,
+// and every assignee, creator, comment author, claim holder and bot owner it
+// expands, comes back named. PocketBase's members rule cannot help here: it
+// sees the board's identity, not the viewer's. So lll code applies the
+// roster before rendering for a scoped viewer.
+//
+// One rule per team, because one rendering of a team's board or issue goes
+// to every scoped viewer of that team over the shared stream: on team T's
+// pages a scoped viewer sees the members whose own teams include T and every
+// person (not a bot) with access to every team. Everyone else on a record
+// renders as "hidden member" (display.hidden_member), and pickers and filters
+// leave them out. Every member this shows, the API shows the same viewer
+// (the collection rule's sets 2 and 3); the API can show a few more (itself,
+// and members sharing one of its OTHER teams), which the board renders as
+// hidden rather than per viewer.
+//
+// A viewer whose effective access is every team (the board token, or a
+// member cookie with scope all) sees everyone, exactly as before.
+
+/// The members a scoped viewer sees on team `team_id`'s pages.
+fn team_roster(members: Slice<models.Member>, team_id: string) -> Slice<models.Member> {
+  members.filter(|m| m.teams.contains(team_id) || (m.scope == "all" && m.kind != "bot"))
+}
+
+/// The members one rendering may name. `scoped` false names everyone.
+struct Roster {
+  scoped: bool,
+  members: Slice<models.Member>,
+}
+
+/// The roster for one team's rendering. A failed members read leaves a
+/// scoped roster empty, so a page names nobody rather than everybody.
+fn roster(scoped: bool, team_id: string) -> Result<Roster, string> {
+  if !scoped { return Ok(Roster { scoped, members: records.fetch_members()? }) }
+  Ok(Roster { scoped, members: team_roster(records.fetch_members().unwrap_or([]), team_id) })
+}
+
+/// This request's viewer's roster for team `team_id`.
+fn roster_for(r: Ref<http.Request>, team_id: string) -> Result<Roster, string> {
+  roster(is_scoped(r), team_id)
+}
+
+/// The roster member with this exact name. A hidden member answers exactly
+/// like a name nobody has (records.resolve_member's words), so a filter
+/// cannot probe who exists.
+fn roster_member(roster: Roster, name: string) -> Result<models.Member, string> {
+  let Some(m) = roster.members.find(|m| m.name == name) else {
+    return Err(f"no member named '{name}' — see 'lll member list'")
+  }
+  Ok(m)
+}
+
+impl Roster {
+  /// Whether this rendering may name the member with this id. An empty id
+  /// is no member, which names nobody.
+  fn sees(self, id: string) -> bool {
+    !self.scoped || id == "" || self.members.any(|m| m.id == id)
+  }
+
+  /// The member, or a placeholder that keeps only its id when it is hidden.
+  fn member(self, m: models.Member) -> models.Member {
+    if self.sees(m.id) { return m }
+    models.Member { id: m.id, name: display.hidden_member(), .. }
+  }
+
+  /// An issue with a hidden assignee or creator replaced by the placeholder.
+  fn issue(self, i: models.Issue) -> models.Issue {
+    if !self.scoped { return i }
+    let mut out = i
+    out.expand.assignee = self.member(models.Member { id: i.assignee, ..i.expand.assignee })
+    out.expand.creator = self.member(models.Member { id: i.creator, ..i.expand.creator })
+    out
+  }
+
+  /// A comment whose hidden author, or a visible bot author's hidden owner,
+  /// is withheld.
+  fn comment(self, c: models.Comment) -> models.Comment {
+    if !self.scoped { return c }
+    let mut out = c
+    out.expand.author = self.author(models.Member { id: c.author, ..c.expand.author })
+    out
+  }
+
+  /// A doc whose hidden author (or the author's hidden owner) is withheld.
+  fn doc(self, d: models.Doc) -> models.Doc {
+    if !self.scoped || d.author == "" { return d }
+    let mut out = d
+    out.expand.author = Some(self.author(d.expand.author.unwrap_or(models.Member { id: d.author, .. })))
+    out
+  }
+
+  /// A claim whose hidden holder is withheld.
+  fn claim(self, c: models.Claim) -> models.Claim {
+    if !self.scoped { return c }
+    let mut out = c
+    out.expand.member = self.member(models.Member { id: c.member, ..c.expand.member })
+    out
+  }
+
+  /// An author: the placeholder when hidden, else itself without an owner
+  /// this rendering may not name.
+  fn author(self, m: models.Member) -> models.Member {
+    let mut out = self.member(m)
+    if let Some(e) = out.expand {
+      if let Some(owner) = e.owner {
+        if !self.sees(owner.id) { out.expand = None }
+      }
+    }
+    out
+  }
+
+  /// The members a picker or a filter offers.
+  fn picks(self) -> Slice<PickVM> {
+    self.members.map(|m| PickVM { id: m.id, name: m.name, bot: m.kind == "bot" })
+  }
+}
