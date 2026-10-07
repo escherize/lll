@@ -1,3 +1,6 @@
+import "go:os"
+import "go:os/exec"
+import "go:path/filepath"
 import "go:time"
 
 // Unit cover for TASK-214's pure halves in token.lis: the expiry line printed
@@ -81,14 +84,58 @@ fn status_classification_ignores_url_and_body_digits() {
 #[test]
 fn agent_prompt_is_the_design_doc_prompt() {
   let got = agent_prompt("https://lll.example.com", "ALPHA", "aaa.bbb-c_d.eee")
-  let want = "You're joining lll team ALPHA at https://lll.example.com.
+  // The doc's text, reshaped into a harmless shell script (LLL-546 F1).
+  let want = "# You are joining lll team ALPHA at https://lll.example.com.
 export LLL_URL=https://lll.example.com
 export LLL_TOKEN=aaa.bbb-c_d.eee
 lll attach -k ALPHA
-Read the workflow: lll skill get software-factory
-Claim an issue before you edit code; record findings on the board.
+lll skill get software-factory  # read the workflow
+# Claim an issue before you edit code; record findings on the board.
 "
   assert got == want
+}
+
+/// Run the WHOLE prompt through sh in a fresh directory whose only `lll` is
+/// a stub logging its arguments, one per line. Returns the directory's
+/// entries and the stub's log.
+fn run_prompt_in_sh(t: TestContext, url: string, team: string) -> (Slice<string>, string) {
+  let assert Ok(dir) = os.MkdirTemp("", "lll-prompt-sh")
+  let bin = filepath.Join(dir, "bin")
+  let assert Ok(_) = os.Mkdir(bin, 0o755)
+  let stub = "#!/bin/sh\nfor a in \"$@\"; do printf '%s\\n' \"$a\" >> \"$PROMPT_LOG\"; done\n"
+  let assert Ok(_) = os.WriteFile(filepath.Join(bin, "lll"), stub.bytes(), 0o755)
+  let prompt = agent_prompt(url, team, "aaa.bbb.ccc")
+  let assert Ok(_) = os.WriteFile(filepath.Join(dir, "prompt.txt"), prompt.bytes(), 0o644)
+  let mut cmd = exec.Command("/bin/sh", "prompt.txt")
+  cmd.Dir = dir
+  cmd.Env = [f"PATH={bin}:/usr/bin:/bin", f"PROMPT_LOG={dir}/args.log", f"HOME={dir}"]
+  let _ = cmd.Run()
+  let assert Ok(entries) = os.ReadDir(dir)
+  let names = entries.map(|e| e.Name())
+  let log = os.ReadFile(filepath.Join(dir, "args.log")).map_or("", |b| b as string)
+  let _ = os.RemoveAll(dir)
+  (names, log)
+}
+
+#[test]
+fn the_whole_prompt_is_a_harmless_shell_script_for_hostile_values(t: TestContext) {
+  // Review repros: a ' in the url or team key closed the quote that
+  // "You're" opened, and the rest ran. A newline must not end a comment.
+  let urls = [
+    "http://x'$(touch$IFS.pwned)@127.0.0.1:1",
+    "http://x/`touch .pwned`",
+    "http://x/\ntouch .pwned\n",
+    "http://x/'\ntouch .pwned #",
+  ]
+  let teams = ["Q'$(touch$IFS.PWNTEAM)", "Q\ntouch .PWNTEAM", "ALPHA"]
+  for url in urls {
+    for team in teams {
+      let (names, log) = run_prompt_in_sh(t, url, team)
+      assert names.equals(["args.log", "bin", "prompt.txt"])
+      // The stub saw exactly the two intended commands, each value whole.
+      assert log == f"attach\n-k\n{team}\nskill\nget\nsoftware-factory\n"
+    }
+  }
 }
 
 #[test]

@@ -391,8 +391,8 @@ with tempfile.TemporaryDirectory(prefix='lll-team-scope-') as directory:
         # with the creator's access rather than every team read-write.
         out = lll('bot', 'bot-boss', env=boss_env)
         assert out.returncode == 0 and 'owned by boss' in out.stdout, out.stdout + out.stderr
-        assert "You're joining lll team ALPHA at " + api + ".\n" in out.stdout, out.stdout
-        assert '\nlll attach -k ALPHA\nRead the workflow: lll skill get software-factory\n' in out.stdout, out.stdout
+        assert '# You are joining lll team ALPHA at ' + api + ".\n" in out.stdout, out.stdout
+        assert '\nlll attach -k ALPHA\nlll skill get software-factory  # read the workflow\n' in out.stdout, out.stdout
         bot_tok = next(l for l in out.stdout.splitlines() if l.startswith('export LLL_TOKEN='))[len('export LLL_TOKEN='):]
 
         def bot_record():
@@ -453,7 +453,7 @@ with tempfile.TemporaryDirectory(prefix='lll-team-scope-') as directory:
         assert "no team 'BETA'" in listed.stderr, listed.stderr
         # A bot- name through 'member add' names the command that makes one.
         out = lll('member', 'add', 'bot-boss-add', env=boss_env)
-        assert out.returncode != 0 and "create it with 'lll bot bot-boss-add'" in out.stderr, out.stdout + out.stderr
+        assert out.returncode != 0 and "creates it with 'lll bot bot-boss-add'" in out.stderr, out.stdout + out.stderr
         # Docs carry both the owner cap and LLL-618's author clause: this
         # migration rewrites the docs rules after 1791600000_doc_author.js.
         doc = {'slug': 'bot-doc', 'title': 't', 'kind': 'note', 'body': 'b'}

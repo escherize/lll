@@ -368,10 +368,14 @@ fn bot_create(args: Slice<string>) -> Result<(), string> {
 'lll bot' only provisions bot members; use 'lll token create {name}' to mint its token directly",
       )
     }
+    // Said only after the server accepts the rotation: a refused one (not
+    // the owner) leaves the previous token working.
+    let minted = bot_mint(tok, name, duration)?
     bot_status(
       env_only,
-      f"member {name} exists; rotating its token (the previous one stops working)",
+      f"member {name} exists; rotated its token (the previous one stops working)",
     )
+    return print_bot_credential(name, minted, team, duration, env_only)
   } else {
     let owner = caller.map_or("", |me| me.id)
     let created = create_bot_member_as(tok, name, owner)?
@@ -501,12 +505,26 @@ fn agent_env(url: string, tok: string) -> string {
   f"export LLL_URL={shell_word(url)}\nexport LLL_TOKEN={shell_word(tok)}\n"
 }
 
-/// The copyable agent prompt, newline-terminated.
+/// The copyable agent prompt, newline-terminated. It is the design doc's
+/// prompt (scoped-access-invites, Decision step 3) reshaped so the whole
+/// text is also a harmless shell script: people paste it into shells, and
+/// the url (config, LLL_URL) and team key are not trusted. Prose lines are
+/// comments with control characters replaced, so no value can end the
+/// comment; every value on a command line is one quoted shell word. The
+/// doc's "You're" is "You are": its apostrophe opened a shell quote that a
+/// ' in the url or key closed (LLL-546 security review, F1).
 fn agent_prompt(url: string, team: string, tok: string) -> string {
-  f"You're joining lll team {team} at {url}.\n" + agent_env(url, tok) +
+  f"# You are joining lll team {comment_text(team)} at {comment_text(url)}.\n" +
+  agent_env(url, tok) +
   f"lll attach -k {shell_word(team)}\n" +
-  "Read the workflow: lll skill get software-factory\n" +
-  "Claim an issue before you edit code; record findings on the board.\n"
+  "lll skill get software-factory  # read the workflow\n" +
+  "# Claim an issue before you edit code; record findings on the board.\n"
+}
+
+/// `s` with control characters replaced, so a newline cannot end the
+/// shell comment it is printed in.
+fn comment_text(s: string) -> string {
+  regexp.MustCompile(r"[\x00-\x1f\x7f]").ReplaceAllString(s, "?")
 }
 
 /// `s` as one shell word. The prompt is pasted into a shell, and the url

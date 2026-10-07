@@ -936,7 +936,7 @@ fn member_create_error(e: string) -> string {
   // gopb refusal (the bot- prefix) its own message; both pass through.
   if pb.response_status(e) == 400 && e.contains("\"data\":{}") && e.contains("Failed to create record.") {
     return "your token cannot add members: only a member with read-write access to every team, or administrator credentials ('lll member invite NAME --email E' with LLL_ADMIN_EMAIL/LLL_ADMIN_PASSWORD), can
-for your own agent, run 'lll bot bot-NAME': a read-write member may create bots it owns"
+for your own agent, a read-write member runs 'lll bot bot-NAME' (a bot it owns); a read-only member cannot, so ask whoever invited you"
   }
   if pb.response_status(e) == 401 {
     return "creating a member needs a member token: the one configured here is missing or was refused
@@ -963,7 +963,7 @@ fn member_add(input: flags.CommandInput) -> Result<(), string> {
   if strings.HasPrefix(name, "bot-") {
     return Err(
       f"'{name}' is a bot name: the bot- prefix is reserved to bot members
-create it with 'lll bot {name}' - it is owned by you and gets no more access than you have",
+a read-write member creates it with 'lll bot {name}' (owned by you, never more access than you have); a read-only member cannot create bots, so ask whoever invited you",
     )
   }
 

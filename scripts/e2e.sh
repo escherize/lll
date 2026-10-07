@@ -2939,7 +2939,7 @@ bot_out=$(env -u LLL_TOKEN HOME="$E2E_HOME" LLL_URL=$URL \
   "$LIN" bot bot-e2e --team ENG --duration 3600) || fail "lll bot exited nonzero: $bot_out"
 assert_contains "$bot_out" "created bot member bot-e2e" "bot creates a bot-kind member when missing"
 # LLL-546: the token arrives inside the design's agent prompt, once.
-assert_contains "$bot_out" "You're joining lll team ENG at $URL." "the bot prompt names the team and server"
+assert_contains "$bot_out" "# You are joining lll team ENG at $URL." "the bot prompt names the team and server"
 assert_contains "$bot_out" "export LLL_URL=$URL" "the bot prompt exports the server"
 assert_contains "$bot_out" "lll attach -k ENG" "the bot prompt attaches the team"
 assert_contains "$bot_out" "lll skill get software-factory" "the bot prompt points at the workflow"
@@ -2955,7 +2955,7 @@ bot_err="$DATA_DIR/bot-env.err"
 bot_out=$(env -u LLL_TOKEN -u LLL_TEAM HOME="$E2E_HOME" LLL_URL=$URL \
   LLL_ADMIN_EMAIL=admin@local.dev LLL_ADMIN_PASSWORD=admin-local-123 \
   "$LIN" bot bot-e2e --env --duration 3600 2>"$bot_err") || fail "lll bot --env (second run) exited nonzero"
-assert_contains "$(cat "$bot_err")" "member bot-e2e exists; rotating its token" "a second run rotates without a second member"
+assert_contains "$(cat "$bot_err")" "member bot-e2e exists; rotated its token" "a second run rotates without a second member"
 [ "$(printf '%s\n' "$bot_out" | wc -l | tr -d ' ')" = 2 ] || fail "lll bot --env printed more than the export lines: $bot_out"
 BOT_TOK=$( (eval "$bot_out"; printf '%s' "$LLL_TOKEN") )
 out=$(LLL_TOKEN="$BOT_TOK" HOME="$E2E_HOME" LLL_URL=$URL "$LIN" whoami)
@@ -2996,7 +2996,7 @@ assert_contains "$out" "reserved to the 'bot-' prefix" "the server refuses a bot
 out=$(env LLL_TOKEN="$BRYAN_TOK" HOME="$E2E_HOME" LLL_URL=$URL \
   "$LIN" member add -n bot-impersonator 2>&1) && fail "member add took the reserved bot- prefix: $out"
 assert_contains "$out" "reserved" "person signups cannot take the bot- prefix"
-assert_contains "$out" "create it with 'lll bot bot-impersonator'" "member add names the bot command (LLL-546)"
+assert_contains "$out" "creates it with 'lll bot bot-impersonator'" "member add names the bot command (LLL-546)"
 # The CLI refuses that before any server call (LLL-546), so the server's
 # person-side guard is exercised directly with the same member token.
 out=$(curl -s -X POST "$URL/api/collections/members/records" \
