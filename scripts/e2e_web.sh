@@ -654,23 +654,25 @@ assert_contains "$issue" 'id="assignee-form"' "issue page has an assignee select
 assert_contains "$issue" 'id="project-form"' "issue page has a project select"
 assert_contains "$issue" 'id="labels-form"' "issue page has the label chips"
 
-# AC#3: add a label, then remove it — the form posts the whole set, so
-# removal is a POST with no labels at all.
+# AC#3: add a label, then remove it. Each chip posts only itself (LLL-519):
+# `label` is its id, `on=true` adds and anything else removes.
 code=$(wcurl -s -o /dev/null -w '%{http_code}' -X POST \
-  --data-urlencode "key=ENG-3" --data-urlencode "labels=$PANEL_LABEL" "$WEB/labels")
+  --data-urlencode "key=ENG-3" --data-urlencode "label=$PANEL_LABEL" --data-urlencode "on=true" "$WEB/labels")
 [ "$code" = 200 ] || fail "/labels add returned $code, want 200"
 issue=$(wcurl -sf "$WEB/issue/ENG-3")
 assert_contains "$issue" ">props-label</span>" "the added label renders as a chip"
 assert_contains "$issue" "value=\"$PANEL_LABEL\" checked" "the added label comes back checked"
 assert_contains "$("$LIN" issue view ENG-3)" "Labels:    props-label" "POST /labels persisted"
 code=$(wcurl -s -o /dev/null -w '%{http_code}' -X POST \
-  --data-urlencode "key=ENG-3" "$WEB/labels")
-[ "$code" = 200 ] || fail "/labels clear returned $code, want 200"
-assert_contains "$("$LIN" issue view ENG-3)" "Labels:    none" "empty /labels removed the label"
+  --data-urlencode "key=ENG-3" --data-urlencode "label=$PANEL_LABEL" --data-urlencode "on=false" "$WEB/labels")
+[ "$code" = 200 ] || fail "/labels remove returned $code, want 200"
+assert_contains "$("$LIN" issue view ENG-3)" "Labels:    none" "/labels on=false removed the label"
 issue=$(wcurl -sf "$WEB/issue/ENG-3")
 if printf '%s' "$issue" | grep -q "value=\"$PANEL_LABEL\" checked"; then
-  fail "empty /labels left the chip checked"
+  fail "/labels on=false left the chip checked"
 fi
+assert_contains "$(wcurl -s -X POST --data-urlencode "key=ENG-3" "$WEB/labels")" \
+  "got no label" "/labels without a label is refused, not read as clear-all"
 
 # --- scalable label picker (TASK-207): the labels row defaults to the
 # issue's own chips plus one "+" affordance; the full candidate list rides
@@ -679,7 +681,7 @@ fi
 # split between checked chips and unchecked candidates, and the terms.
 "$LIN" label create -n "Picker-Extra" -c '#8d7ce6' >/dev/null
 code=$(wcurl -s -o /dev/null -w '%{http_code}' -X POST \
-  --data-urlencode "key=ENG-3" --data-urlencode "labels=$PANEL_LABEL" "$WEB/labels")
+  --data-urlencode "key=ENG-3" --data-urlencode "label=$PANEL_LABEL" --data-urlencode "on=true" "$WEB/labels")
 [ "$code" = 200 ] || fail "/labels picker re-add returned $code, want 200"
 issue=$(wcurl -sf "$WEB/issue/ENG-3")
 assert_contains "$issue" 'class="lab-add"' "labels row has the add affordance"
@@ -697,10 +699,20 @@ assert_contains "$chips" "value=\"$PANEL_LABEL\" checked" "the issue's own label
 if printf '%s' "$chips" | grep -q 'data-n='; then
   fail "a candidate leaked onto the chips row"
 fi
-# Restore the fixtures: ENG-3 back to no labels, the extra label gone.
-wcurl -s -o /dev/null -X POST --data-urlencode "key=ENG-3" "$WEB/labels"
 PICKER_EXTRA=$(curl -sf -H "$AUTH_HDR" "$LLL_URL/api/collections/labels/records?perPage=200" \
   | jq -r '.items[] | select(.name=="Picker-Extra") | .id')
+# LLL-519: a chip toggle writes only its own label. Picker-Extra is added
+# through the CLI after the page above rendered; toggling props-label off
+# and on again from that page must not drop it.
+"$LIN" issue update ENG-3 --add-label Picker-Extra >/dev/null
+wcurl -s -o /dev/null -X POST --data-urlencode "key=ENG-3" --data-urlencode "label=$PANEL_LABEL" "$WEB/labels"
+wcurl -s -o /dev/null -X POST --data-urlencode "key=ENG-3" --data-urlencode "label=$PANEL_LABEL" --data-urlencode "on=true" "$WEB/labels"
+labels519=$("$LIN" issue view ENG-3 --json | jq -r '[.expand.labels[]?.name] | sort | join(",")')
+[ "$labels519" = "Picker-Extra,props-label" ] \
+  || fail "LLL-519: a chip toggle dropped a label the CLI added: got '$labels519'"
+# Restore the fixtures: ENG-3 back to no labels, the extra label gone.
+wcurl -s -o /dev/null -X POST --data-urlencode "key=ENG-3" --data-urlencode "label=$PANEL_LABEL" "$WEB/labels"
+"$LIN" issue update ENG-3 --remove-label Picker-Extra >/dev/null
 web_post "POST settings/label" "$WEB/settings/label?del=1" -d "id=$PICKER_EXTRA" -d confirmed=1 -d expected=0 >/dev/null
 
 # --- related findings on the issue page (TASK-103): unprompted, server-
@@ -737,7 +749,7 @@ out=$(wcurl -s -X POST --data-urlencode "key=ENG-3" --data-urlencode "project=bo
 assert_contains "$out" "unknown project" "unknown project message"
 out=$(wcurl -s -X POST --data-urlencode "key=ENG-3" --data-urlencode "assignee=nosuchid" "$WEB/assignee")
 assert_contains "$out" "unknown member" "unknown member message"
-out=$(wcurl -s -X POST --data-urlencode "key=ENG-3" --data-urlencode "labels=nosuchid" "$WEB/labels")
+out=$(wcurl -s -X POST --data-urlencode "key=ENG-3" --data-urlencode "label=nosuchid" --data-urlencode "on=true" "$WEB/labels")
 assert_contains "$out" "unknown label" "unknown label message"
 
 # AC#4: the repaint is the existing broadcast. The write path (the POST)
@@ -1472,6 +1484,47 @@ if command -v playwright-cli >/dev/null 2>&1; then
     || fail "browser rejected state action changed persisted state"
   # The probe issue would skew the count-sensitive table sections below.
   "$LIN" issue delete "$key206" --force >/dev/null
+
+  # LLL-519: a chip toggle on a page rendered before another writer added a
+  # label must keep that label. /events is aborted so the live morph cannot
+  # refresh the page first: the click lands on exactly the stale read the
+  # race needs, every run. Before the fix the picker posted the page's whole
+  # checked set and race-b was dropped.
+  "$LIN" label create -n race-a >/dev/null
+  "$LIN" label create -n race-b >/dev/null
+  out=$("$LIN" issue create -t "LLL-519 label race")
+  key519=$(printf '%s' "$out" | sed -n 's/^Created \([A-Z][A-Z0-9]*-[0-9]*\):.*/\1/p')
+  [ -n "$key519" ] || fail "LLL-519: could not create the race issue: $out"
+  seq_goto "$WEB/issue/$key519"
+  frozen=$(playwright-cli -s="$BROWSER_SESSION" run-code "async page => {
+    await page.route(u => u.pathname === '/events', r => r.abort());
+    await page.goto(page.url(), {waitUntil: 'domcontentloaded'});
+    await page.locator('#labels-form .lab-add').waitFor();
+    return 'race page frozen';
+  }" 2>&1)
+  assert_contains "$frozen" 'race page frozen' "LLL-519: issue page loaded without live updates"
+  "$LIN" issue update "$key519" --add-label race-b >/dev/null
+  race=$(playwright-cli -s="$BROWSER_SESSION" run-code "async page => {
+    try {
+      const form = page.locator('#labels-form');
+      if (await form.locator('input:checked').count() !== 0) throw new Error('page was not stale: race-b already rendered');
+      await form.locator('.lab-add').click();
+      const posted = page.waitForResponse(r => r.url().split('?')[0].endsWith('/labels') && r.request().method() === 'POST');
+      await form.locator('.lab-cands label', {hasText: 'race-a'}).click();
+      const r = await posted;
+      if (r.status() !== 200) throw new Error('labels POST answered ' + r.status());
+      return 'race toggle posted';
+    } finally {
+      await page.unrouteAll();
+    }
+  }" 2>&1)
+  assert_contains "$race" 'race toggle posted' "LLL-519: the board toggled race-a on the stale page"
+  labels519=$("$LIN" issue view "$key519" --json | jq -r '[.expand.labels[]?.name] | sort | join(",")')
+  [ "$labels519" = "race-a,race-b" ] \
+    || fail "LLL-519: board toggle dropped the label the CLI added after the page rendered: got '$labels519'"
+  "$LIN" issue delete "$key519" --force >/dev/null
+  "$LIN" label delete race-a >/dev/null
+  "$LIN" label delete race-b >/dev/null
 
   "$LIN" team create -k ASGN -n "Assignment browser" >/dev/null
   "$LIN" issue create --team ASGN -t "Claimed assignment browser" >/dev/null
@@ -2294,7 +2347,7 @@ FOREIGN_LABEL=$(curl -sf -H "$AUTH_HDR" "$LLL_URL/api/collections/labels/records
 FOREIGN_PROJECT=$(curl -sf -H "$AUTH_HDR" "$LLL_URL/api/collections/projects/records?perPage=200" \
   | jq -r '.items[] | select(.name=="Foreign Project") | .id')
 assert_contains "$(wcurl -s -X POST --data-urlencode "key=ENG-1" \
-  --data-urlencode "labels=$FOREIGN_LABEL" "$WEB/labels")" \
+  --data-urlencode "label=$FOREIGN_LABEL" --data-urlencode "on=true" "$WEB/labels")" \
   "unknown label" "POST /labels refuses another team's label"
 assert_contains "$(wcurl -s -X POST --data-urlencode "key=ENG-1" \
   --data-urlencode "project=$FOREIGN_PROJECT" "$WEB/project")" \
