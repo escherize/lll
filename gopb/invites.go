@@ -94,6 +94,14 @@ type inviteGrant struct {
 	rw    bool
 }
 
+// mayInvite is false for a bot or any member with an owner. A person
+// joined through an invite has no owner, so nothing would keep it within
+// the owner's access: narrowing or deleting the owner, or rotating a leaked
+// bot token, would leave the people it invited untouched.
+func mayInvite(creator *core.Record) bool {
+	return creator.GetString("kind") != botKind && creator.GetString("owner") == ""
+}
+
 // grantAllowed reports whether a creator with access acc may grant g.
 // A read-only creator may grant nothing: creating a member is a write.
 func grantAllowed(acc access, g inviteGrant) bool {
@@ -176,7 +184,7 @@ func redeemInvite(app core.App, code, name string, now time.Time) (*core.Record,
 			// The creator's access is read again now: narrowing or deleting
 			// the creator voids what it handed out and nobody redeemed yet.
 			creator, err := tx.FindRecordById("members", invite.GetString("creator"))
-			if err != nil || creator.GetString("kind") == botKind || !grantAllowed(effectiveAccess(tx, creator), grant) {
+			if err != nil || !mayInvite(creator) || !grantAllowed(effectiveAccess(tx, creator), grant) {
 				return errInviteVoid
 			}
 		} else if len(grant.teams) == 0 {
@@ -193,7 +201,7 @@ func redeemInvite(app core.App, code, name string, now time.Time) (*core.Record,
 		if n, _ := res.RowsAffected(); n != 1 {
 			return errInviteUsed
 		}
-		taken, err := nameTaken(tx, name)
+		taken, err := nameTaken(tx, name, "")
 		if err != nil {
 			return err
 		}
@@ -215,12 +223,14 @@ func redeemInvite(app core.App, code, name string, now time.Time) (*core.Record,
 }
 
 // nameTaken compares without case: "Bryan" must not join beside "bryan".
-func nameTaken(app core.App, name string) (bool, error) {
+// exceptID is the member being renamed ("" for a new one), so changing
+// only the case of one's own name is not a collision.
+func nameTaken(app core.App, name, exceptID string) (bool, error) {
 	var found []struct {
 		Id string `db:"id"`
 	}
-	err := app.DB().NewQuery("SELECT id FROM members WHERE LOWER(name) = LOWER({:name}) LIMIT 1").
-		Bind(dbx.Params{"name": name}).All(&found)
+	err := app.DB().NewQuery("SELECT id FROM members WHERE LOWER(name) = LOWER({:name}) AND id != {:id} LIMIT 1").
+		Bind(dbx.Params{"name": name, "id": exceptID}).All(&found)
 	return len(found) > 0, err
 }
 
@@ -291,12 +301,8 @@ func registerInviteRoutes(routes *router.Router[*core.RequestEvent]) {
 		acc := access{all: true, rw: true}
 		if !re.HasSuperuserAuth() {
 			creator = re.Auth
-			// A person joined through an invite has no owner, so nothing
-			// would bound it by the bot that minted it: a leaked bot token
-			// could mint people who outlive the bot's rotation and its
-			// owner's narrowing. Bots do not invite.
-			if creator.GetString("kind") == botKind {
-				return re.ForbiddenError("bots cannot invite people: run 'lll invite create' with your own token", nil)
+			if !mayInvite(creator) {
+				return re.ForbiddenError("bots and owned members cannot invite people: run 'lll invite create' with your own token", nil)
 			}
 			acc = effectiveAccess(re.App, creator)
 			if !acc.rw {
@@ -364,4 +370,36 @@ func registerInviteRoutes(routes *router.Router[*core.RequestEvent]) {
 			"mode":  member.GetString("mode"),
 		})
 	})
+}
+
+// registerMemberNameGuard holds every non-superuser name choice to the
+// rule a redeemer gets (joinName, at most 40 characters, unique regardless
+// of case), so the anti-impersonation rule cannot be undone by renaming
+// afterwards: a member may PATCH its own name (1791700000_bot_owner_scope.js).
+// A person may not take the bot- prefix; a bot keeps it (checkMemberKind).
+// Only a name that changes is checked, so a member whose name predates the
+// rule can still edit its other fields. Superusers are not held to it.
+func registerMemberNameGuard(app core.App) {
+	check := func(e *core.RecordRequestEvent) error {
+		if e.HasSuperuserAuth() || (!e.Record.IsNew() && e.Record.GetString("name") == e.Record.Original().GetString("name")) {
+			return e.Next()
+		}
+		name := e.Record.GetString("name")
+		if e.Record.GetString("kind") != botKind && strings.HasPrefix(strings.ToLower(name), botPrefix) {
+			return e.BadRequestError(errNameBot.Error(), nil)
+		}
+		if len(name) > 40 || !joinName.MatchString(name) {
+			return e.BadRequestError(errNameInvalid.Error(), nil)
+		}
+		taken, err := nameTaken(e.App, name, e.Record.Id)
+		if err != nil {
+			return err
+		}
+		if taken {
+			return e.BadRequestError("the name '"+name+"' is taken on this board: pick another", nil)
+		}
+		return e.Next()
+	}
+	app.OnRecordCreateRequest("members").BindFunc(check)
+	app.OnRecordUpdateRequest("members").BindFunc(check)
 }

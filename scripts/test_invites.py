@@ -165,12 +165,37 @@ with tempfile.TemporaryDirectory(prefix='lll-invites-') as directory:
         assert code == 400, body
         code, body, _ = call(api, '/api/lll/invites', {'teams': [], 'mode': 'rw'}, owner)
         assert code == 400, body
+        # The name rule holds after joining too: a member renaming itself
+        # through the API gets the redeemer's rule. Its other fields stay editable.
+        me = rec_id = next(m for m in call(api, '/api/collections/members/records?perPage=200', token=su)[1]['items']
+                           if m['name'] == 'Ada Reader')['id']
+        for bad in ['bot-evil', 'Ｓcratch', 'OWNER', 'Owner', '<img src=x onerror=alert(1)>', 'Ada  Reader', 'Ada.']:
+            code, body, _ = call(api, f'/api/collections/members/records/{me}', {'name': bad}, token, method='PATCH')
+            assert code == 400, (bad, code, body)
+        assert call(api, f'/api/collections/members/records/{me}', {'name': 'Ada Reader'}, token, method='PATCH')[0] == 200
+        assert call(api, f'/api/collections/members/records/{me}', {'name': 'ada reader'}, token, method='PATCH')[0] == 200
+        assert call(api, f'/api/collections/members/records/{me}', {'name': 'Ada R'}, token, method='PATCH')[0] == 200
+        # A superuser is not held to it (existing names predate the rule).
+        assert call(api, f'/api/collections/members/records/{rec_id}', {'name': 'Ada R.'}, su, method='PATCH')[0] == 200
+        assert call(api, f'/api/collections/members/records/{me}', {'emailVisibility': False}, token,
+                    method='PATCH')[0] == 200
+        # A member with an owner does not invite people, bot or person.
+        code, ownedp, _ = call(api, '/api/collections/members/records', {
+            'name': 'ownedp', 'email': 'ownedp@example.test', 'password': 'pw12345678', 'passwordConfirm': 'pw12345678',
+            'kind': 'person', 'owner': next(m for m in call(api, '/api/collections/members/records?perPage=200',
+                                                            token=su)[1]['items'] if m['name'] == 'owner')['id'],
+            'scope': 'teams', 'teams': [alpha['id']], 'mode': 'rw'}, su)
+        assert code == 200, ownedp
+        ownedp_tok = call(api, '/api/collections/members/auth-with-password',
+                          {'identity': 'ownedp@example.test', 'password': 'pw12345678'})[1]['token']
+        code, body, _ = call(api, '/api/lll/invites', {'teams': [alpha['id']], 'mode': 'rw'}, ownedp_tok)
+        assert code == 403 and 'owned members cannot invite' in body['message'].lower(), body
         # A bot does not invite people, even one owned by a full member.
         out = lll('bot', 'bot-inviter')
         assert out.returncode == 0, out.stdout + out.stderr
         bot = next(l for l in out.stdout.splitlines() if l.startswith('LLL_TOKEN='))[len('LLL_TOKEN='):]
         code, body, _ = call(api, '/api/lll/invites', {'teams': [alpha['id']], 'mode': 'ro'}, bot)
-        assert code == 403 and 'bots cannot invite' in body['message'].lower(), body
+        assert code == 403 and 'bots and owned members cannot invite' in body['message'].lower(), body
         rw = invite('--team', 'ALPHA', token=guest)
         assert redeem(rw, 'Rae Writer')[0] == 303
         rec = next(m for m in call(api, '/api/collections/members/records?perPage=200', token=su)[1]['items']

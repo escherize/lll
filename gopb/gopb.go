@@ -67,6 +67,7 @@ func Serve(dataDir, addr, adminEmail, adminPassword string) error {
 	registerIssueIdempotency(app)
 	registerWebhookDelivery(app)
 	registerMemberGuards(app)
+	registerMemberNameGuard(app)
 	registerMemberScopeDefault(app)
 	registerScopedRefGuard(app)
 	registerFilterNameGuards(app)

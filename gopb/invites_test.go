@@ -327,3 +327,32 @@ func TestABotCannotInvitePeople(t *testing.T) {
 		t.Fatalf("got %v, want the void refusal", err)
 	}
 }
+
+// An owned person (owner set by a superuser) is refused like a bot: the
+// people it invited would have no owner, so narrowing its owner would not
+// reach them.
+func TestAnOwnedPersonCannotInvitePeople(t *testing.T) {
+	f := newInviteFixture(t)
+	now := time.Now()
+	members, err := f.app.FindCollectionByNameOrId("members")
+	if err != nil {
+		t.Fatal(err)
+	}
+	owned := core.NewRecord(members)
+	owned.Set("name", "ownedp")
+	owned.Set("kind", "person")
+	owned.Set("owner", f.full.Id)
+	owned.SetEmail("ownedp@members.invalid")
+	owned.SetRandomPassword()
+	setAccess(owned, access{teams: []string{f.alpha}, rw: true})
+	if err := f.app.Save(owned); err != nil {
+		t.Fatal(err)
+	}
+	if mayInvite(owned) || !mayInvite(f.scoped) {
+		t.Fatal("mayInvite must refuse exactly members with an owner or of kind bot")
+	}
+	code := f.mint(t, owned, inviteGrant{teams: []string{f.alpha}, rw: true}, now)
+	if _, err := redeemInvite(f.app, code, "via-owned", now); !errors.Is(err, errInviteVoid) {
+		t.Fatalf("got %v, want the void refusal", err)
+	}
+}
