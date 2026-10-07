@@ -176,7 +176,7 @@ fn issues_page(w: http.ResponseWriter, r: Ref<http.Request>, team_id: string, me
   let team = shell_team(team_id)
   let base = issues_base(team.key)
   let list = match fetch_issue_rows(team_id, state, assignee_id, label_id, project_id, sort) {
-    Ok(l) => l,
+    Ok(l) => models.IssueList { items: issues_for(r, l.items), ..l },
     Err(e) => {
       http.Error(w, e, 500)
       return

@@ -231,6 +231,9 @@ fn board_mux(
   // legacy paths stay as redirects — bookmarks, the CLI's printed URLs and
   // the rail's favorites all speak them — landing on the boot team (or, for
   // an issue, on the team its key names).
+  // The sign-in confirm page's POST (LLL-545). Ungated: it carries the
+  // credential itself and checks Origin before setting any cookie.
+  mux.HandleFunc("POST /login", board_login)
   mux.HandleFunc(
     "GET /{$}",
     gated(|w: http.ResponseWriter, r: Ref<http.Request>| {

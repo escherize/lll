@@ -325,7 +325,13 @@ with tempfile.TemporaryDirectory(prefix='lll-team-scope-') as directory:
         assert call(api, '/api/collections/teams/records', token=none)[1]['items'] == []
 
         # The board: the link logs in, then only ALPHA's read-only pages answer.
-        code, _, headers = call(board, link[len(board):])
+        # LLL-545: a link sets a cookie only when the browser says it was
+        # opened directly; otherwise it shows a confirm page and sets nothing.
+        code, body, headers = call(board, link[len(board):])
+        assert code == 200 and 'Set-Cookie' not in headers and "action='/login'" in body, (code, dict(headers))
+        code, _, headers = call(board, link[len(board):], headers={'Sec-Fetch-Site': 'cross-site'})
+        assert code == 200 and 'Set-Cookie' not in headers, 'a cross-site team link set a cookie'
+        code, _, headers = call(board, link[len(board):], headers={'Sec-Fetch-Site': 'none'})
         assert code == 303, code
         cookie = headers['Set-Cookie'].split(';')[0]
         assert cookie.startswith('lll_board=ALPHA.'), cookie
@@ -337,8 +343,11 @@ with tempfile.TemporaryDirectory(prefix='lll-team-scope-') as directory:
         assert code == 200 and 'alpha edited' in body and 'beta secret' not in body
         assert 'BETA' not in body, 'rail still lists the other team'
         assert page('/')[0] == 303
-        for path in ['/t/BETA/', '/t/ALPHA/settings/identity', '/t/ALPHA/issue/BETA-1', '/issue/BETA-1',
-                     '/search?q=beta', '/events?team=BETA']:
+        # LLL-545: another team, or its issue, answers 404 like a missing one;
+        # routes scoped viewers do not get at all stay 403.
+        for path in ['/t/BETA/', '/t/ALPHA/issue/BETA-1', '/issue/BETA-1', '/events?team=BETA']:
+            assert page(path)[0] == 404, path
+        for path in ['/t/ALPHA/settings/identity', '/search?q=beta']:
             assert page(path)[0] == 403, path
         assert page('/t/ALPHA/issue/ALPHA-1')[0] == 200
         assert page('/state', 'POST')[0] == 403

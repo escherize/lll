@@ -1332,6 +1332,8 @@ done
 python3 "$REPO_ROOT"/scripts/test_search_team.py "$LLL_ABS"
 # --- member invite --team: one team over the API and the board ---
 python3 "$REPO_ROOT"/scripts/test_team_scope.py "$LLL_ABS"
+# --- a member token in the board cookie scopes pages, search and the stream (LLL-545) ---
+python3 "$REPO_ROOT"/scripts/test_board_viewer_scope.py "$LLL_ABS"
 # --- an older CLI than its server says so once a day, on stderr only (LLL-607) ---
 python3 "$REPO_ROOT"/scripts/test_version_skew.py "$LLL_ABS"
 # --- lll upgrade picks its command from how lll was installed (LLL-608) ---

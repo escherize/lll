@@ -37,12 +37,18 @@ fn records_team_key(key: string) -> string {
   normalize_team_key(key)
 }
 
+/// The answer for an issue key that names no issue. The board gives a
+/// scoped viewer the same words for an issue it may not see (LLL-545).
+pub fn issue_not_found(id: string) -> string {
+  f"issue {id} not found — check 'lll issue list' or LLL_TEAM"
+}
+
 /// Fetch an issue by KEY-123 and return the raw PB record JSON (team,
 /// assignee, labels, project expanded).
 pub fn fetch_issue_record(id: string) -> Result<string, string> {
   let (team_key, number) = split_issue_key(id)?
 
-  let not_found = f"issue {id} not found — check 'lll issue list' or LLL_TEAM"
+  let not_found = issue_not_found(id)
   // One query, filtering through the team relation, rather than resolving the
   // team to an id first and filtering on that (LLL-436). PocketBase filters on
   // a relation's own fields, so `team.key` does in one round trip what the
@@ -97,8 +103,11 @@ pub fn fetch_board_issues(team_id: string) -> Result<Slice<models.Issue>, string
 }
 
 /// What the board draws with. Deliberately not everything: each relation is
-/// another join on a query that runs on every board load.
-const BOARD_EXPAND: string = "team,assignee,labels"
+/// another join on a query that runs on every board load. `project` is here
+/// because cards carry its id for the project filter, and a team-scoped
+/// viewer must not get another team's project id (LLL-545): the board can
+/// only tell whose project it is from the expanded record.
+const BOARD_EXPAND: string = "team,assignee,labels,project"
 
 /// The board's relations plus `project`, for callers writing the issue down
 /// rather than drawing it. Members are deliberately NOT here: expanding a

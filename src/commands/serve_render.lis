@@ -104,6 +104,47 @@ fn label_vms(labels: Slice<models.Label>) -> Slice<LabelVM> {
   labels.map(|l| LabelVM { name: l.name, color: l.color })
 }
 
+/// An issue as a team-scoped viewer sees it (LLL-545). An all-scope member
+/// may hang another team's labels or project on an issue, and the board
+/// renders as its own all-scope member, so those names would reach a viewer
+/// who cannot see that team. Labels and a project from any team other than
+/// the issue's own are dropped. That also hides a label from a second team
+/// the viewer can see, which is the price of one shared rendering per
+/// stream. Fail closed: a label or project id whose expanded record is
+/// missing cannot be shown to be the issue's own, so it is dropped too (the
+/// board expands both, so its filters keep working).
+fn without_foreign_refs(issue: models.Issue) -> models.Issue {
+  let own = issue.team
+  let own_labels = issue.expand.labels.filter(|l| l.team == own)
+  let own_ids = own_labels.map(|l| l.id)
+  let mut out = issue
+  out.expand.labels = own_labels
+  out.labels = issue.labels.filter(|id| own_ids.contains(id))
+  if !project_is_own(issue) {
+    out.project = ""
+    out.expand.project = models.Project { .. }
+  }
+  out
+}
+
+/// True when the issue has no project or its expanded project is its team's.
+fn project_is_own(issue: models.Issue) -> bool {
+  issue.project == "" || (issue.expand.project.id == issue.project && issue.expand.project.team == issue.team)
+}
+
+/// True when `without_foreign_refs` would change anything.
+fn has_foreign_refs(issue: models.Issue) -> bool {
+  let own_ids = issue.expand.labels.filter(|l| l.team == issue.team).map(|l| l.id)
+  issue.labels.any(|id| !own_ids.contains(id)) || issue.expand.labels.any(|l| l.team != issue.team) ||
+    !project_is_own(issue)
+}
+
+/// The issues as this request's viewer may see them: unchanged for the
+/// board token, foreign labels and projects dropped for a scoped viewer.
+fn issues_for(r: Ref<http.Request>, issues: Slice<models.Issue>) -> Slice<models.Issue> {
+  if is_scoped(r) { issues.map(without_foreign_refs) } else { issues }
+}
+
 fn card_vm(issue: models.Issue) -> CardVM {
   let prio = display.priority_name(issue.priority)
   CardVM {

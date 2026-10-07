@@ -31,7 +31,7 @@ fn fresh_description_snapshots_are_targeted_and_scope_is_respected() {
     SseClient { id: 1, scope: "issue:T-1", ch: a, .. },
     SseClient { id: 2, scope: "issue:T-1", ch: b, .. },
   ]
-  let msg = Broadcast { scope: "issue:T-1", payload: "metadata", description: Some("fresh"), client_id: 2 }
+  let msg = Broadcast { scope: "issue:T-1", payload: "metadata", description: Some("fresh"), client_id: 2, .. }
   let delivered = deliver(clients, msg)
   assert delivered[0].description_hash == ""
   assert delivered[1].description_hash != ""
@@ -42,4 +42,29 @@ fn fresh_description_snapshots_are_targeted_and_scope_is_respected() {
   let _ = deliver(delivered, Broadcast { scope: "issue:T-2", ..msg })
   select { b.receive() => { leaked = true }, _ => () }
   assert !leaked
+}
+
+#[test]
+fn scoped_clients_receive_only_their_teams_data() {
+  let full = Channel.buffered<string>(4)
+  let scoped = Channel.buffered<string>(4)
+  let clients = [
+    SseClient { id: 1, scope: "board:BBB:manual", ch: full, .. },
+    SseClient { id: 2, scope: "board:BBB:manual", ch: scoped, teams: Some(["AAA"]), .. },
+  ]
+  // Even with a matching scope string, another team's data is dropped.
+  let delivered = deliver(clients, Broadcast { scope: "board:BBB:manual", team: "BBB", payload: "bbb", .. })
+  assert full.receive().unwrap_or("") == "bbb"
+  let mut leaked = false
+  select { scoped.receive() => { leaked = true }, _ => () }
+  assert !leaked
+  // Workspace-wide rows carry no team, so no scoped client gets them.
+  let _ = deliver(delivered, Broadcast { scope: "*", payload: "favorites", .. })
+  assert full.receive().unwrap_or("") == "favorites"
+  select { scoped.receive() => { leaked = true }, _ => () }
+  assert !leaked
+  // Its own team's data arrives.
+  let own = [SseClient { id: 3, scope: "board:AAA:manual", ch: scoped, teams: Some(["AAA"]), .. }]
+  let _ = deliver(own, Broadcast { scope: "board:AAA:manual", team: "AAA", payload: "aaa", .. })
+  assert scoped.receive().unwrap_or("") == "aaa"
 }
