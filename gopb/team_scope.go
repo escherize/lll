@@ -397,6 +397,7 @@ func registerAccessRoute(routes *router.Router[*core.RequestEvent]) {
 			"id":    re.Auth.Id,
 			"name":  re.Auth.GetString("name"),
 			"rw":    acc.rw,
+			"all":   acc.all,
 			"teams": teams,
 		})
 	})

@@ -275,7 +275,7 @@ fn run_issue_watch(id: string, json_mode: bool, until: string, usage: string) ->
           }
           fmt.Println(ndjson_line(realtime.Event { topic: "comments", data }))
         } else {
-          let author = if c.expand.author.name == "" { "anon" } else { c.expand.author.name }
+          let author = display.member_name(c.author, c.expand.author.name, "anon")
           fmt.Println(f"already there: #{n} by {author}: {first_line(c.body)}")
         }
         return Ok(())
@@ -304,7 +304,7 @@ fn run_issue_watch(id: string, json_mode: bool, until: string, usage: string) ->
       if json_mode {
         fmt.Println(ndjson_line(ev))
       } else if event.action == "create" || matched {
-        let author = if event.record.expand.author.name == "" { "anon" } else { event.record.expand.author.name }
+        let author = display.member_name(event.record.author, event.record.expand.author.name, "anon")
         fmt.Println(f"{stamp} comment by {author}: {first_line(event.record.body)}")
       }
       if matched { return Ok(()) }
@@ -355,7 +355,7 @@ fn snapshot(issue: models.Issue) -> Snapshot {
     priority: issue.priority,
     title: issue.title,
     assignee: issue.assignee,
-    assignee_name: issue.expand.assignee.name,
+    assignee_name: display.member_name(issue.assignee, issue.expand.assignee.name, ""),
   }
 }
 

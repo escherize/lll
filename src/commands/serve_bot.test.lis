@@ -12,7 +12,7 @@ fn bot_route(v: ScopedViewer, method: string, writes: bool) -> string {
 
 #[test]
 fn only_a_read_write_member_viewer_may_post_bot() {
-  let m = ViewerMember { id: "m1", name: "ann", token: "t", rw: true }
+  let m = ViewerMember { id: "m1", name: "ann", token: "t", rw: true, all: false }
   let member = ScopedViewer { teams: ["AAA"], member: Some(m) }
   assert bot_route(member, "POST", true) == "open"
   // A read-only member and a team link (no member, never writes).

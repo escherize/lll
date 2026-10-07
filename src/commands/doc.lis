@@ -498,6 +498,8 @@ fn doc_view(input: flags.CommandInput) -> Result<(), string> {
   if let Some(author) = d.expand.author {
     let tag = display.author_tag(author.kind == "bot", author.owner_name())
     fmt.Println(f"Author:    {display.table_cell(author.name)}{tag}")
+  } else if d.author != "" {
+    fmt.Println(f"Author:    {display.hidden_member()}")
   }
   if d.confidence_note != "" { fmt.Println(f"Note:      {display.table_cell(d.confidence_note)}") }
   if d.area != "" { fmt.Println(f"Area:      {display.table_cell(d.area)}") }

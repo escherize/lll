@@ -219,6 +219,15 @@ fn create_write(
   let labels = r.PostForm.map_or([], |form| {
     (form as Map<string, Slice<string>>)["labels"].filter(|id| id != "")
   })
+  // A scoped viewer assigns only members of its roster for the team
+  // (LLL-551), the ones its picker offered.
+  let assignee = r.PostFormValue("assignee")
+  if assignee != "" && who.scope.is_some() {
+    let shown = roster_for(r, team)?
+    if !shown.sees(assignee) {
+      return Err(f"unknown member '{assignee}' — reload the page for the current list")
+    }
+  }
   let new_issue = models.NewIssue {
     creator: who.member_id()?.unwrap_or(""),
     origin: models.IssueOrigin { tool: "web", .. },
@@ -227,7 +236,7 @@ fn create_write(
     state,
     priority,
     description: r.PostFormValue("description"),
-    assignee: r.PostFormValue("assignee"),
+    assignee,
     project: r.PostFormValue("project"),
     labels,
     ..,
@@ -412,16 +421,18 @@ fn project_write(r: mut Ref<http.Request>) -> Result<string, string> {
 fn assignee_write(r: mut Ref<http.Request>) -> Result<string, string> {
   let key = r.FormValue("key")
   let id = r.FormValue("assignee")
+  let who = acting_as(r)?
+  let issue = who.issue(key)?
+  // The picker offers the viewer's roster for the issue's team (LLL-551); a
+  // posted id outside it is as unknown as a deleted one.
   if id != "" {
-    let members = records.fetch_members()?
+    let members = roster_for(r, issue.team)?.members
     if members.find(|m| m.id == id).is_none() {
       return Err(
         f"unknown member '{id}' — reload the page for the current list",
       )
     }
   }
-  let who = acting_as(r)?
-  let issue = who.issue(key)?
   require_active_team(issue.expand.team)?
   let observed = claims.observed_id(issue.id)?
   // Force, as the Release button sends it (LLL-516): a person who picks a new

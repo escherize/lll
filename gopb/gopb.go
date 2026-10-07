@@ -69,6 +69,7 @@ func Serve(dataDir, addr, adminEmail, adminPassword string) error {
 	registerMemberGuards(app)
 	registerMemberNameGuard(app)
 	registerMemberScopeDefault(app)
+	registerRosterScope(app)
 	registerScopedRefGuard(app)
 	registerFilterNameGuards(app)
 	registerIssuePrecondition(app)
@@ -152,6 +153,7 @@ func Serve(dataDir, addr, adminEmail, adminPassword string) error {
 		})
 		e.Router.BindFunc(serializeRecordUpdates(&issueUpdates))
 		e.Router.BindFunc(refuseReadOnlyWrites)
+		e.Router.BindFunc(refuseRosterProbes)
 		return e.Next()
 	})
 

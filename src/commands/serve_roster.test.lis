@@ -1,0 +1,56 @@
+import "models"
+
+// LLL-551: on team T's pages a scoped viewer sees the members of T and the
+// full-access people; everyone else on a record renders as "hidden member".
+
+fn people() -> Slice<models.Member> {
+  [
+    models.Member { id: "alice", name: "alice", kind: "person", scope: "teams", teams: ["t-a"], .. },
+    models.Member { id: "bob", name: "bob", kind: "person", scope: "teams", teams: ["t-b"], .. },
+    models.Member { id: "carol", name: "carol", kind: "person", scope: "all", .. },
+    models.Member { id: "garden", name: "bot-garden", kind: "bot", scope: "all", .. },
+    models.Member { id: "abot", name: "bot-alpha", kind: "bot", scope: "teams", teams: ["t-a"], .. },
+  ]
+}
+
+#[test]
+fn a_teams_roster_is_its_members_and_full_access_people_not_full_access_bots() {
+  let names = team_roster(people(), "t-a").map(|m| m.name)
+  assert names.equals(["alice", "carol", "bot-alpha"])
+}
+
+#[test]
+fn a_scoped_rendering_hides_assignee_creator_author_owner_and_holder_by_id() {
+  let shown = Roster { scoped: true, members: team_roster(people(), "t-a") }
+  let mut issue = models.Issue { team: "t-a", assignee: "garden", creator: "bob", .. }
+  issue.expand.assignee = models.Member { id: "garden", name: "bot-garden", kind: "bot", .. }
+  issue.expand.creator = models.Member { id: "bob", name: "bob", .. }
+  let seen = shown.issue(issue)
+  assert seen.expand.assignee.name == "hidden member" && seen.expand.assignee.kind == ""
+  assert seen.expand.creator.name == "hidden member"
+  assert seen.assignee == "garden"
+
+  // A visible bot author keeps its name but not an owner outside the roster.
+  let owner = models.MemberOwner { id: "bob", name: "bob" }
+  let mut c = models.Comment { author: "abot", .. }
+  c.expand.author = models.Member { id: "abot", name: "bot-alpha", kind: "bot", expand: Some(models.MemberExpand { owner: Some(owner) }), .. }
+  let cs = shown.comment(c)
+  assert cs.expand.author.name == "bot-alpha" && cs.expand.author.owner_name() == ""
+
+  let mut held = models.Claim { member: "garden", .. }
+  held.expand.member = models.Member { id: "garden", name: "bot-garden", .. }
+  assert shown.claim(held).expand.member.name == "hidden member"
+
+  // Pickers offer only the roster.
+  assert shown.picks().map(|p| p.name).equals(["alice", "carol", "bot-alpha"])
+  assert roster_member(shown, "bot-garden").is_err() && roster_member(shown, "carol").is_ok()
+}
+
+#[test]
+fn a_full_rendering_names_everyone() {
+  let shown = Roster { scoped: false, members: people() }
+  let mut issue = models.Issue { assignee: "garden", .. }
+  issue.expand.assignee = models.Member { id: "garden", name: "bot-garden", .. }
+  assert shown.issue(issue).expand.assignee.name == "bot-garden"
+  assert shown.sees("anyone")
+}

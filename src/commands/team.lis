@@ -111,7 +111,10 @@ Three things do NOT follow (TASK-87):
 
 A member limited to some teams sees only those. A team they cannot see answers
 exactly like a team that does not exist, on purpose: the answer must not tell
-anyone which other teams are on the server. 'lll whoami' shows your access."
+anyone which other teams are on the server. Members follow the same rule:
+they see members of their own teams and people with access to every team,
+and no other team's members, keys or ids ('lll member --help'). 'lll whoami'
+shows your access."
 }
 
 fn team_list(input: flags.CommandInput) -> Result<(), string> {

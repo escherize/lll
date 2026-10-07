@@ -21,7 +21,10 @@ import "realtime"
 /// handler drains. `teams` is a scoped viewer's team keys (LLL-545), None for
 /// the board token: deliver drops every broadcast whose team is not among
 /// them, including the workspace-wide "*" fragments (favorites, views).
-struct SseClient { id: int, scope: string, ch: Channel<string>, description_hash: string, teams: Option<Slice<string>> }
+/// `full` marks a member viewer whose effective access is every team: it is
+/// fenced by `teams` like any member, but gets the full payload, roster
+/// included (LLL-551).
+struct SseClient { id: int, scope: string, ch: Channel<string>, description_hash: string, teams: Option<Slice<string>>, full: bool }
 
 /// A rendered SSE payload for every client with a matching scope. `team` is
 /// the key of the team whose data it carries, "" for workspace-wide rows.
@@ -30,7 +33,8 @@ struct Broadcast {
   team: string,
   payload: string,
   /// What a scoped client gets instead of `payload` when the fragment names
-  /// another team's labels or project (LLL-545); None when they are equal.
+  /// another team's labels or project (LLL-545) or a member outside the
+  /// team's roster (LLL-551); None when they are equal.
   scoped_payload: Option<string>,
   description: Option<string>,
   client_id: int,
@@ -121,7 +125,7 @@ fn deliver(clients: Slice<SseClient>, msg: Broadcast) -> Slice<SseClient> {
     }
     if msg.client_id != 0 && c.id != msg.client_id { continue }
     let changed = msg.description.is_some() && c.description_hash != hash
-    let mut payload = if c.teams.is_some() { msg.scoped_payload.unwrap_or(msg.payload) } else { msg.payload }
+    let mut payload = if c.teams.is_some() && !c.full { msg.scoped_payload.unwrap_or(msg.payload) } else { msg.payload }
     if changed {
       if description_patch.is_none() {
         let Ok(html) = render("issue-description", markdown.md_html(msg.description.unwrap_or(""))) else {
@@ -193,11 +197,13 @@ fn events_stream(
     return
   }
   let ch = Channel.buffered<string>(64)
-  let teams = match board_viewer(r) {
+  let viewer = board_viewer(r)
+  let full = !viewer_is_scoped(viewer)
+  let teams = match viewer {
     Viewer.Full => None,
     Viewer.Scoped(v) => Some(v.teams),
   }
-  let _ = hub.register.send(SseClient { id, scope, ch, teams, .. })
+  let _ = hub.register.send(SseClient { id, scope, ch, teams, full, .. })
   // Response headers acknowledge registration, so a client that has opened
   // the stream cannot miss an immediately following issue mutation.
   w.WriteHeader(200)
@@ -326,8 +332,14 @@ fn board_snapshot(hub: Hub, team_id: string, team_key: string, only_order: strin
   if let Ok(issues) = records.fetch_board_issues(team_id) {
     let Ok(claimed) = claims.for_team(team_id) else { return };
     // Scoped clients get a second rendering only when a card carries another
-    // team's labels or project (LLL-545).
-    let scoped_issues = if issues.any(has_foreign_refs) { Some(issues.map(without_foreign_refs)) } else { None }
+    // team's labels or project (LLL-545), or an assignee or claim holder
+    // outside the team's roster (LLL-551).
+    let Ok(shown) = roster(true, team_id) else { return };
+    let scoped_claimed = claimed.map(|c| shown.claim(c))
+    let hides = issues.any(|i| !shown.sees(i.assignee)) || claimed.any(|c| !shown.sees(c.member))
+    let scoped_issues = if hides || issues.any(has_foreign_refs) {
+      Some(issues.map(|i| shown.issue(without_foreign_refs(i))))
+    } else { None }
     for order in board_orders() {
       if only_order != "" && only_order != order { continue }
       // UNFILTERED on purpose: /events sends one #board per (team, order) to
@@ -340,7 +352,7 @@ fn board_snapshot(hub: Hub, team_id: string, team_key: string, only_order: strin
       }
       let mut scoped_payload: Option<string> = None
       if let Some(scoped) = scoped_issues {
-        let scoped_vm = BoardVM { columns: board_columns(scoped, BoardFilter { .. }, claimed, order), ..vm }
+        let scoped_vm = BoardVM { columns: board_columns(scoped, BoardFilter { .. }, scoped_claimed, order), ..vm }
         let Ok(html) = render("board", scoped_vm) else { continue };
         scoped_payload = Some(patch_event(html))
       }
@@ -385,14 +397,16 @@ fn issue_snapshot(hub: Hub, key: string, client_id: int) {
   let mut scoped_payload: Option<string> = None
   if let Some(issue) = issues.items.get(0) {
     description = issue.description
-    let Ok(fields) = issue_fields_vm(issue, []) else { return };
+    let Ok(everyone) = roster(false, issue.team) else { return };
+    let Ok(fields) = issue_fields_vm(issue, [], everyone) else { return };
     vm = fields
-    // Scoped observers never see another team's labels or project (LLL-545).
-    if has_foreign_refs(issue) {
-      let Ok(scoped) = issue_fields_vm(without_foreign_refs(issue), []) else { return };
-      let Ok(html) = render("issue-detail", scoped) else { return };
-      scoped_payload = Some(patch_event(html))
-    }
+    // Scoped observers never see another team's labels or project (LLL-545),
+    // and their assignee picker and names follow the team's roster
+    // (LLL-551), so they always get their own rendering.
+    let Ok(shown) = roster(true, issue.team) else { return };
+    let Ok(scoped) = issue_fields_vm(without_foreign_refs(issue), [], shown) else { return };
+    let Ok(html) = render("issue-detail", scoped) else { return };
+    scoped_payload = Some(patch_event(html))
   }
   if let Ok(html) = render("issue-detail", vm) {
     let _ = hub.broadcast.send(Broadcast {
@@ -454,12 +468,20 @@ fn comment_broadcast(ev: realtime.Event, hub: Hub) {
   let Ok(comments) = records.fetch_comments(issue.id) else {
     return
   }
+  // Scoped observers see authors through the team's roster (LLL-551).
+  let Ok(shown) = roster(true, issue.team) else { return };
+  let Ok(scoped) = render("comments", CommentsVM { comments: comments.map(|c| comment_vm(shown.comment(c))) }) else {
+    return
+  }
   if let Ok(html) = render(
     "comments",
     CommentsVM { comments: comments.map(comment_vm) },
   ) {
     let _ = hub.broadcast.send(
-      Broadcast { scope: f"issue:{key}", team: issue.expand.team.key, payload: patch_event(html), .. },
+      Broadcast {
+        scope: f"issue:{key}", team: issue.expand.team.key, payload: patch_event(html),
+        scoped_payload: Some(patch_event(scoped)), ..
+      },
     )
   }
 }

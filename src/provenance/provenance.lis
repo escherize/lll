@@ -1,6 +1,7 @@
 import "go:os"
 import "go:os/exec"
 import "go:strings"
+import "display"
 import "gitctx"
 import "models"
 
@@ -21,8 +22,7 @@ pub struct Field { pub label: string, pub value: string }
 
 /// One presentation inventory for CLI, raw/export and web issue detail.
 pub fn fields(issue: models.Issue) -> Slice<Field> {
-  let mut creator = issue.expand.creator.name
-  if creator == "" && issue.creator != "" { creator = issue.creator }
+  let creator = display.member_name(issue.creator, issue.expand.creator.name, "")
   [
     Field { label: "Creator", value: creator },
     Field { label: "Origin host", value: issue.origin.host },

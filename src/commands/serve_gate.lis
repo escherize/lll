@@ -280,6 +280,9 @@ pub struct ViewerMember {
   pub token: string,
   /// Effective read-write (a bot's within its owner's).
   pub rw: bool,
+  /// Effective access to every team: such a member sees the whole roster
+  /// and every page as the board token does (LLL-551).
+  pub all: bool,
 }
 
 impl ScopedViewer {
@@ -308,11 +311,19 @@ pub fn board_viewer(r: Ref<http.Request>) -> Viewer {
   Viewer.Scoped(cookie_viewer(cookie, want).unwrap_or(none))
 }
 
-/// True unless this request holds the board token.
+/// True unless this request's viewer sees every team: the board token, or
+/// a member cookie whose effective access is every team (LLL-551). Pages use
+/// it to decide whether to withhold other teams' labels and projects and
+/// members outside the roster.
 pub fn is_scoped(r: Ref<http.Request>) -> bool {
-  match board_viewer(r) {
+  viewer_is_scoped(board_viewer(r))
+}
+
+/// is_scoped for a viewer already resolved.
+pub fn viewer_is_scoped(v: Viewer) -> bool {
+  match v {
     Viewer.Full => false,
-    Viewer.Scoped(_) => true,
+    Viewer.Scoped(s) => !s.member.map_or(false, |m| m.all),
   }
 }
 
@@ -328,7 +339,7 @@ fn cookie_viewer(cookie: string, want: string) -> Option<ScopedViewer> {
 struct AccessTeam { id: string, key: string }
 
 #[json]
-struct AccessReply { id: string, name: string, rw: bool, teams: Slice<AccessTeam> }
+struct AccessReply { id: string, name: string, rw: bool, all: bool, teams: Slice<AccessTeam> }
 
 /// A member token's viewer, or None when the server does not accept it.
 /// PocketBase checks the token (signature, expiry, a deleted member's token
@@ -343,7 +354,7 @@ fn member_viewer(tok: string) -> Option<ScopedViewer> {
   if reply.id == "" { return None }
   Some(ScopedViewer {
     teams: reply.teams.map(|t| t.key),
-    member: Some(ViewerMember { id: reply.id, name: reply.name, token: tok, rw: reply.rw }),
+    member: Some(ViewerMember { id: reply.id, name: reply.name, token: tok, rw: reply.rw, all: reply.all }),
   })
 }
 

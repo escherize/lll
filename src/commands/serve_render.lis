@@ -391,17 +391,17 @@ fn board_card(issue: models.Issue, claimed: Slice<models.Claim>) -> CardVM {
 /// The create dialog's pickers, freshly fetched. Three extra PB reads, paid
 /// once per board page load and never on a broadcast.
 ///
-/// Labels and projects are the board's team's; members are everyone's
-/// (TASK-173). The issue the dialog creates lands in that same team, so a
-/// picker offering another team's label would build a record PocketBase is
-/// happy to store and no view can explain.
-fn compose_vm(team_id: string) -> Result<ComposeVM, string> {
-  let members = records.fetch_members()?
+/// Labels and projects are the board's team's; members are the viewer's
+/// roster for the team, everyone's for a full viewer (TASK-173, LLL-551).
+/// The issue the dialog creates lands in that same team, so a picker
+/// offering another team's label would build a record PocketBase is happy to
+/// store and no view can explain.
+fn compose_vm(team_id: string, roster: Roster) -> Result<ComposeVM, string> {
   let projects = records.fetch_projects(team_id)?
   let labels = records.fetch_labels(team_id)?
   Ok(ComposeVM {
     prios: prio_opts(),
-    members: members.map(|m| PickVM { id: m.id, name: m.name, bot: m.kind == "bot" }),
+    members: roster.picks(),
     projects: projects.map(|p| PickVM { id: p.id, name: p.name, bot: false }),
     labels: labels.map(|l| LabelPickVM {
       id: l.id,
@@ -436,15 +436,18 @@ fn comment_vm(c: models.Comment) -> CommentVM {
 }
 
 /// Issue view model from a full record (expand: team, assignee, labels,
-/// project) — shared by the issue page and broadcast re-renders.
-fn issue_vm(issue: models.Issue, comments: Slice<models.Comment>) -> Result<IssueVM, string> {
-  let mut vm = issue_fields_vm(issue, comments)?
+/// project) — shared by the issue page and broadcast re-renders. `roster`
+/// is who the rendering may name (LLL-551): hidden members render as
+/// "hidden member" and drop out of the assignee picker.
+fn issue_vm(issue: models.Issue, comments: Slice<models.Comment>, roster: Roster) -> Result<IssueVM, string> {
+  let mut vm = issue_fields_vm(issue, comments, roster)?
   vm.description = markdown.md_html(issue.description)
   Ok(vm)
 }
 
 /// Metadata can refresh without parsing or transmitting the description.
-fn issue_fields_vm(issue: models.Issue, comments: Slice<models.Comment>) -> Result<IssueVM, string> {
+fn issue_fields_vm(raw: models.Issue, comments: Slice<models.Comment>, roster: Roster) -> Result<IssueVM, string> {
+  let issue = roster.issue(raw)
   let assignee = issue.expand.assignee.name
   let mut project = issue.expand.project.name
   let mut project_href = ""
@@ -454,7 +457,7 @@ fn issue_fields_vm(issue: models.Issue, comments: Slice<models.Comment>) -> Resu
     project_href = f"{issues_base(issue.expand.team.key)}?project={url.QueryEscape(project)}"
   }
   if project == "" { project = "none" }
-  let held = claims.fetch(issue.id)?
+  let held = claims.fetch(issue.id)?.map(|c| roster.claim(c))
   let mut claim_id = ""
   let mut claim_holder = ""
   let mut claim_age = ""
@@ -508,7 +511,7 @@ fn issue_fields_vm(issue: models.Issue, comments: Slice<models.Comment>) -> Resu
     // Scoped to the ISSUE's team, not the server's configured one: this
     // renders for whatever issue arrives, including one from a team the
     // board is not scoped to (TASK-173).
-    member_opts: records.fetch_members()?.map(|m| PickVM { id: m.id, name: m.name, bot: m.kind == "bot" }),
+    member_opts: roster.picks(),
     project_opts: records.fetch_projects(issue.team)?.map(|p| PickVM { id: p.id, name: p.name, bot: false }),
     label_opts: records.fetch_labels(issue.team)?.map(|l| LabelPickVM {
       id: l.id,
@@ -517,7 +520,7 @@ fn issue_fields_vm(issue: models.Issue, comments: Slice<models.Comment>) -> Resu
       on: issue.labels.contains(l.id),
       terms: strings.ToLower(l.name),
     }),
-    comments: comments.map(comment_vm),
+    comments: comments.map(|c| comment_vm(roster.comment(c))),
     // Left empty on purpose: the RELATED FINDINGS block is page-only (set by
     // issue_page), like the star and the emoji catalogue below — the section
     // sits outside the #issue-detail morph boundary, so broadcasts never

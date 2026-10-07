@@ -75,7 +75,7 @@ fn login_redirect_stays_on_the_board() {
 
 #[test]
 fn member_viewer_writes_only_when_read_write() {
-  let m = ViewerMember { id: "m1", name: "ann", token: "t", rw: true }
+  let m = ViewerMember { id: "m1", name: "ann", token: "t", rw: true, all: false }
   let v = ScopedViewer { teams: ["AAA", "CCC"], member: Some(m) }
   for path in ["/create", "/state", "/title", "/comment", "/claim", "/release", "/attachments/upload"] {
     assert route_kind(scoped_route("POST", path, "", "", "", v, true)) == "open"

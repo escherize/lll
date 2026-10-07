@@ -67,10 +67,7 @@ func acquireClaim(app core.App, issueID, memberID, agent string) (ClaimOutcome, 
 		}
 		alreadyOwned := held != nil
 		if held != nil && held.GetString("member") != memberID {
-			name := "someone else"
-			if holder, err := tx.FindRecordById("members", held.GetString("member")); err == nil {
-				name = holder.GetString("name")
-			}
+			name := rosterName(tx, memberID, held.GetString("member"), "someone else")
 			return &claimRejection{fmt.Sprintf("issue is already claimed by %s", name)}
 		}
 		if held != nil && agentsDiffer(held, agent) {
@@ -188,20 +185,26 @@ func releaseClaim(app core.App, issueID, expectedClaimID string, by releaser) (C
 // under a different agent label needs force. It returns the holder's name and
 // byline, and whether the release is forced and so owes a comment. Without
 // force, a forced release is refused naming the holder.
+//
+// `name` is for the caller and follows the roster (LLL-551): a holder the
+// caller may not see is "a hidden member". `holder` is the real byline for
+// the forced-release comment, which every reader of the issue sees.
 func releaseAuthority(tx core.App, held *core.Record, by releaser) (name, holder string, forced bool, err error) {
 	memberID := held.GetString("member")
-	name = "an unknown member"
+	real := "an unknown member"
 	if member, err := tx.FindRecordById("members", memberID); err == nil {
-		name = member.GetString("name")
+		real = member.GetString("name")
 	}
-	holder = byline(name, held.GetString("agent"))
+	holder = byline(real, held.GetString("agent"))
+	name = rosterName(tx, by.memberID, memberID, "an unknown member")
+	shown := byline(name, held.GetString("agent"))
 	otherSession := memberID == by.memberID && agentsDiffer(held, by.agent)
 	forced = memberID != by.memberID || otherSession
 	if forced && !by.force {
 		if otherSession {
-			return name, holder, forced, &claimRejection{fmt.Sprintf("the claim is held by %s; releasing another session's claim needs force", holder)}
+			return name, holder, forced, &claimRejection{fmt.Sprintf("the claim is held by %s; releasing another session's claim needs force", shown)}
 		}
-		return name, holder, forced, &claimRejection{fmt.Sprintf("the claim is held by %s; releasing another member's claim needs force", holder)}
+		return name, holder, forced, &claimRejection{fmt.Sprintf("the claim is held by %s; releasing another member's claim needs force", shown)}
 	}
 	return name, holder, forced, nil
 }
@@ -267,10 +270,7 @@ func renewClaim(app core.App, issueID, expectedClaimID, memberID, agent string) 
 			return &claimRejection{"the claim changed; refresh before renewing it"}
 		}
 		holderID := held.GetString("member")
-		name := "an unknown member"
-		if member, err := tx.FindRecordById("members", holderID); err == nil {
-			name = member.GetString("name")
-		}
+		name := rosterName(tx, memberID, holderID, "an unknown member")
 		if holderID != memberID {
 			return &claimRejection{fmt.Sprintf("the claim is held by %s; only the holder renews it", name)}
 		}

@@ -71,6 +71,24 @@ pub fn byline(name: string, agent: string) -> string {
   if agent == "" { name } else { f"{name} (agent {agent})" }
 }
 
+/// What every surface prints for a member the reader may not see (LLL-551):
+/// a team-scoped member sees only part of the roster, so a record can point
+/// at someone whose name the server withholds. Saying "hidden" rather than
+/// "none" keeps the record honest: the issue IS assigned, the comment HAS an
+/// author.
+pub fn hidden_member() -> string {
+  "hidden member"
+}
+
+/// A related member's name as the reader may see it: the expanded `name`,
+/// else "hidden member" when the relation holds an id the server would not
+/// expand, else `empty` when the relation is empty.
+pub fn member_name(id: string, name: string, empty: string) -> string {
+  if name != "" { return name }
+  if id != "" { return hidden_member() }
+  empty
+}
+
 /// Pure core of relative(): seconds-ago -> "3h ago".
 pub fn relative_seconds(seconds: int64) -> string {
   if seconds < 60 { return "just now" }

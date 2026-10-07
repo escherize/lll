@@ -25,6 +25,6 @@ fn current_properties(key: string, viewer: Viewer) -> Result<string, string> {
       without_foreign_refs(fetched)
     },
   }
-  let vm = issue_fields_vm(issue, [])?
+  let vm = issue_fields_vm(issue, [], roster(viewer_is_scoped(viewer), issue.team)?)?
   render("issue-properties", vm)
 }

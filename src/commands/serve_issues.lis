@@ -79,11 +79,6 @@ fn fetch_issue_rows(
   Ok(issues)
 }
 
-/// Every member's name, for the assignee chooser.
-fn fetch_member_names() -> Result<Slice<string>, string> {
-  Ok(records.fetch_members()?.map(|m| m.name))
-}
-
 /// This team's label names, for the label chooser. Scoped, because a label
 /// belongs to exactly one team (TASK-173): on a server holding four projects
 /// an unscoped chooser is every project's labels in one dropdown, and every
@@ -136,10 +131,19 @@ fn issues_page(w: http.ResponseWriter, r: Ref<http.Request>, team_id: string, me
     filters.state = []
   }
   let state = filters.one_state()
+  // Who this viewer may name on this team (LLL-551): the chooser offers
+  // only them, and a hidden name answers like one nobody has.
+  let roster = match roster_for(r, team_id) {
+    Ok(found) => found,
+    Err(e) => {
+      http.Error(w, e, 500)
+      return
+    },
+  }
   let mut assignee = filters.assignee
   let mut assignee_id = ""
   if assignee != "" {
-    match records.resolve_member(assignee) {
+    match roster_member(roster, assignee) {
       Ok(m) => { assignee_id = m.id },
       Err(e) => {
         err = e
@@ -176,7 +180,7 @@ fn issues_page(w: http.ResponseWriter, r: Ref<http.Request>, team_id: string, me
   let team = shell_team(team_id)
   let base = issues_base(team.key)
   let list = match fetch_issue_rows(team_id, state, assignee_id, label_id, project_id, sort) {
-    Ok(l) => models.IssueList { items: issues_for(r, l.items), ..l },
+    Ok(l) => models.IssueList { items: issues_for(r, l.items).map(|x| roster.issue(x)), ..l },
     Err(e) => {
       http.Error(w, e, 500)
       return
@@ -185,7 +189,7 @@ fn issues_page(w: http.ResponseWriter, r: Ref<http.Request>, team_id: string, me
   // The choosers offer the whole team, not just what this filter matched: a
   // filter you cannot widen out of is a dead end. The whole TEAM, though —
   // another project's labels would only ever filter this board to nothing.
-  let members = fetch_member_names().unwrap_or([])
+  let members = roster.members.map(|m| m.name)
   let label_names = fetch_label_names(team_id).unwrap_or([])
   let project_names = fetch_project_names(team_id).unwrap_or([])
 

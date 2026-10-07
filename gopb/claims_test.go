@@ -20,7 +20,9 @@ func claimFixture(t *testing.T) (core.App, string, string, string) {
 	}
 	t.Cleanup(app.Cleanup)
 	members := core.NewBaseCollection("members")
-	members.Fields.Add(&core.TextField{Name: "name", Required: true})
+	// scope and kind decide what a holder's name looks like to another
+	// member (LLL-551, rosterName). Both fixture members see every team.
+	members.Fields.Add(&core.TextField{Name: "name", Required: true}, &core.TextField{Name: "scope"}, &core.TextField{Name: "kind"})
 	if err := app.Save(members); err != nil {
 		t.Fatal(err)
 	}
@@ -59,6 +61,8 @@ func claimFixture(t *testing.T) (core.App, string, string, string) {
 	a, b := core.NewRecord(members), core.NewRecord(members)
 	a.Set("name", "Alpha")
 	b.Set("name", "Beta")
+	a.Set("scope", "all")
+	b.Set("scope", "all")
 	for _, member := range []*core.Record{a, b} {
 		if err := app.Save(member); err != nil {
 			t.Fatal(err)
