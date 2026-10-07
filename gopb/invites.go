@@ -372,16 +372,19 @@ func registerInviteRoutes(routes *router.Router[*core.RequestEvent]) {
 	})
 }
 
-// registerMemberNameGuard holds every non-superuser name choice to the
-// rule a redeemer gets (joinName, at most 40 characters, unique regardless
-// of case), so the anti-impersonation rule cannot be undone by renaming
-// afterwards: a member may PATCH its own name (1791700000_bot_owner_scope.js).
-// A person may not take the bot- prefix; a bot keeps it (checkMemberKind).
-// Only a name that changes is checked, so a member whose name predates the
-// rule can still edit its other fields. Superusers are not held to it.
+// registerMemberNameGuard holds every non-superuser RENAME to the rule a
+// redeemer gets (joinName, at most 40 characters, unique regardless of
+// case), so the anti-impersonation rule cannot be undone after joining: a
+// member may PATCH its own name (1791700000_bot_owner_scope.js). A person
+// may not take the bot- prefix; a bot keeps it (checkMemberKind). Only a
+// name that changes is checked, so a member whose name predates the rule
+// can still edit its other fields. Superusers are not held to it.
+//
+// Creates are not checked: only a full member or a superuser creates a
+// person, and 'lll member add -n "Tim O'Brien"' is supported (e2e.sh).
 func registerMemberNameGuard(app core.App) {
-	check := func(e *core.RecordRequestEvent) error {
-		if e.HasSuperuserAuth() || (!e.Record.IsNew() && e.Record.GetString("name") == e.Record.Original().GetString("name")) {
+	app.OnRecordUpdateRequest("members").BindFunc(func(e *core.RecordRequestEvent) error {
+		if e.HasSuperuserAuth() || e.Record.GetString("name") == e.Record.Original().GetString("name") {
 			return e.Next()
 		}
 		name := e.Record.GetString("name")
@@ -399,7 +402,5 @@ func registerMemberNameGuard(app core.App) {
 			return e.BadRequestError("the name '"+name+"' is taken on this board: pick another", nil)
 		}
 		return e.Next()
-	}
-	app.OnRecordCreateRequest("members").BindFunc(check)
-	app.OnRecordUpdateRequest("members").BindFunc(check)
+	})
 }
