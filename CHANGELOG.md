@@ -6,6 +6,52 @@ minors. Issue keys are on the project's own board (`lll issue view KEY`).
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-10-07
+
+Scoped access is complete for teams: a single-use link invites a person to
+chosen teams, the web board signs them in as themselves and shows only those
+teams, they can add their own agents from the board, and they see only the
+members they share a team with.
+
+### Added
+
+- `lll invite create --team KEY [--ro]` prints a single-use `/join/<code>`
+  link that expires after 7 days. Opening it creates a person member with
+  exactly the invite's teams and mode and signs the browser in. Only a
+  read-write member can mint one, and never for more than it can see itself
+  (LLL-544).
+- The web board accepts a member's own token as its cookie. A scoped member
+  sees only its teams in the rail, pages, search and live updates; another
+  team answers like a missing one. A read-only member cannot write. Removing
+  or narrowing a member closes its open live stream within seconds (LLL-545).
+- "Add a bot" on the board creates `bot-NAME` owned by the signed-in member,
+  with the member's teams and mode, and shows a copyable agent prompt once
+  (LLL-546).
+- `lll member --help` has a "Who sees whom" section.
+
+### Changed
+
+- A team-scoped member now sees only itself, members who share a team with
+  it, and people with access to every team. Bots appear only when they share
+  a team, and the only email it sees is its own. Anyone else prints as
+  `hidden member` in the CLI and on the board. Full-access members see what
+  they saw before (LLL-551).
+- `lll bot` prints the token inside a paste-ready agent prompt. Use
+  `lll bot bot-NAME --env` for only the two `export` lines, for example
+  `lll bot bot-x --env > agent.env`. Scripts that parsed the old
+  `LLL_TOKEN=` line must switch to `--env` (LLL-546).
+- `lll member add bot-x` refuses before any server call and names
+  `lll bot bot-x` (LLL-546).
+- Board sign-in from a link is a confirm page and a POST with an origin check,
+  so another site cannot sign your browser in to someone else's board
+  (LLL-545).
+
+### Known issues
+
+- Comments the server writes on a forced release or claim expiry contain the
+  holder's name, so a scoped member can read a hidden holder's name there
+  (LLL-633).
+
 ## [0.7.0] - 2026-10-07
 
 Members can be scoped to teams, one member can run a fleet of labelled agents,
