@@ -1,5 +1,6 @@
 import "go:encoding/json"
 import "go:net/url"
+import "go:strings"
 import "config"
 import "models"
 import "pb"
@@ -43,28 +44,55 @@ pub fn fetch_members() -> Result<Slice<models.Member>, string> {
   fetch_all_records<models.Member>("/api/collections/members/records?sort=name,id", "members")
 }
 
-#[json]
-struct OwnAccess {
-  scope: string,
-  expand: OwnAccessExpand,
+/// The member `id` names, by record id.
+pub fn member_by_id(id: string) -> Result<models.Member, string> {
+  let body = pb.get(f"/api/collections/members/records/{id}")?
+  let mut m = models.Member { .. }
+  if let Err(e) = json.Unmarshal(body.bytes(), &m) {
+    return Err(f"decoding member {id}: {e}")
+  }
+  Ok(m)
 }
 
-#[json]
-struct OwnAccessExpand {
-  teams: Slice<models.Team>,
+/// `m`'s access as the server applies it (LLL-543): a bot with an owner
+/// holds its own access within its owner's current access. The second value
+/// is the owner when that cap is narrower than the bot's own access, so the
+/// caller can say why.
+pub fn effective_access(m: models.Member) -> Result<(models.Member, Option<models.Member>), string> {
+  if m.owner == "" || m.scope == "" { return Ok((m, None)) }
+  let owner = member_by_id(m.owner)?
+  let eff = m.within(owner)
+  if access_equal(eff, m) { return Ok((m, None)) }
+  Ok((eff, Some(owner)))
 }
 
-/// The calling member's team keys when it is team-scoped (LLL-542); None
-/// when it sees every team, is an administrator, or the server predates
-/// scoped members. An administrator's id is not a member record, so its
-/// lookup fails and answers None too. Best effort: any failure answers None,
-/// because callers only use it to word an error better.
+/// `m`'s effective access from `members` (all of them, as 'member list'
+/// reads them), without another request.
+pub fn effective_access_in(m: models.Member, members: Slice<models.Member>) -> (models.Member, Option<models.Member>) {
+  if m.owner == "" || m.scope == "" { return (m, None) }
+  let Some(owner) = members.find(|o| o.id == m.owner) else { return (m, None) }
+  let eff = m.within(owner)
+  if access_equal(eff, m) { return (m, None) }
+  (eff, Some(owner))
+}
+
+fn access_equal(a: models.Member, b: models.Member) -> bool {
+  a.scope == b.scope && a.mode == b.mode && (a.scope == "all" || strings.Join(a.teams, ",") == strings.Join(b.teams, ","))
+}
+
+/// The calling member's team keys when it is team-scoped (LLL-542), after
+/// its owner's cap for a bot (LLL-543); None when it sees every team, is an
+/// administrator, or the server predates scoped members. An administrator's
+/// id is not a member record, so its lookup fails and answers None too. Best
+/// effort: any failure answers None, because callers only use it to word an
+/// error better. A scoped caller can read exactly its own teams, so the
+/// teams it can list are its keys.
 pub fn scoped_team_keys() -> Option<Slice<string>> {
   let Ok(cfg) = config.load() else { return None }
   let Some(id) = pb.token_subject(cfg.token) else { return None }
-  let Ok(body) = pb.get(f"/api/collections/members/records/{id}?expand=teams") else { return None }
-  let mut own = OwnAccess { .. }
-  if json.Unmarshal(body.bytes(), &own).is_err() { return None }
-  if own.scope != "teams" { return None }
-  Some(own.expand.teams.map(|t| t.key))
+  let Ok(me) = member_by_id(id) else { return None }
+  let Ok((eff, _)) = effective_access(me) else { return None }
+  if eff.scope != "teams" { return None }
+  let Ok(teams) = list_teams() else { return None }
+  Some(teams.items.map(|t| t.key))
 }

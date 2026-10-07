@@ -73,6 +73,25 @@ impl Member {
   pub fn owner_name(self) -> string {
     self.expand.and_then(|e| e.owner).map_or("", |o| o.name)
   }
+
+  /// This member's access within `owner`'s (LLL-543): a bot with an owner
+  /// sees only teams both see, and writes only if both write. The server
+  /// enforces the same (gopb effectiveAccess), reading the owner live, so
+  /// this is what the bot can do right now.
+  pub fn within(self, owner: Member) -> Member {
+    let mut out = self
+    out.mode = if self.mode == "rw" && owner.mode == "rw" { "rw" } else { "ro" }
+    if self.scope == "all" && owner.scope == "all" { return out }
+    out.scope = "teams"
+    out.teams = if self.scope == "all" {
+      owner.teams
+    } else if owner.scope == "all" {
+      self.teams
+    } else {
+      self.teams.filter(|t| owner.teams.contains(t))
+    }
+    out
+  }
 }
 
 #[json]

@@ -5,6 +5,7 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/pocketbase/dbx"
 	"github.com/pocketbase/pocketbase/core"
 	"github.com/pocketbase/pocketbase/tools/router"
 )
@@ -14,17 +15,63 @@ import (
 // /api/lll routes read records through the app and skip those rules. Each
 // one that takes an issue calls issueWritable first; all of them write.
 
-// memberSeesTeam reports whether auth may see rows of teamID. Superusers and
-// scope "all" see every team; scope "teams" sees only the listed ones, so an
-// empty list sees nothing.
-func memberSeesTeam(auth *core.Record, teamID string) bool {
+// access is what a member may do: see every team or only the listed ones,
+// and write or only read.
+type access struct {
+	all   bool
+	teams []string
+	rw    bool
+}
+
+func ownAccess(m *core.Record) access {
+	return access{all: m.GetString("scope") == "all", teams: m.GetStringSlice("teams"), rw: m.GetString("mode") == "rw"}
+}
+
+func (a access) sees(teamID string) bool {
+	return a.all || slices.Contains(a.teams, teamID)
+}
+
+// within is the intersection of a and b: what a may do that b may also do.
+func (a access) within(b access) access {
+	out := access{all: a.all && b.all, rw: a.rw && b.rw}
+	switch {
+	case a.all:
+		out.teams = b.teams
+	case b.all:
+		out.teams = a.teams
+	default:
+		for _, team := range a.teams {
+			if slices.Contains(b.teams, team) {
+				out.teams = append(out.teams, team)
+			}
+		}
+	}
+	return out
+}
+
+// effectiveAccess is auth's access as the collection rules compute it
+// (1791700000_bot_owner_scope.js, LLL-543): a superuser may do everything,
+// and a bot with an owner holds its own access within its owner's current
+// access, so narrowing the owner narrows the bot without touching the bot's
+// record. An owner that cannot be read leaves nothing, the answer the rules
+// give. One hop: checkOwner refuses ownership chains.
+func effectiveAccess(app core.App, auth *core.Record) access {
 	if auth == nil {
-		return false
+		return access{}
 	}
-	if auth.IsSuperuser() || auth.GetString("scope") == "all" {
-		return true
+	if auth.IsSuperuser() {
+		return access{all: true, rw: true}
 	}
-	return slices.Contains(auth.GetStringSlice("teams"), teamID)
+	own := ownAccess(auth)
+	ownerID := auth.GetString("owner")
+	if ownerID == "" {
+		return own
+	}
+	owner, err := app.FindRecordById("members", ownerID)
+	if err != nil {
+		return access{}
+	}
+	return own.within(ownAccess(owner))
 }
 
 // issueWritable answers 404 for an issue outside the caller's teams, the same
@@ -36,30 +83,152 @@ func issueWritable(re *core.RequestEvent, issueID string) error {
 	if err != nil {
 		return nil
 	}
-	if !memberSeesTeam(re.Auth, issue.GetString("team")) {
+	acc := effectiveAccess(re.App, re.Auth)
+	if !acc.sees(issue.GetString("team")) {
 		return re.NotFoundError("", nil)
 	}
-	if !re.Auth.IsSuperuser() && re.Auth.GetString("mode") != "rw" {
+	if !acc.rw {
 		return re.ForbiddenError(readOnlyRefusal(re.Auth), nil)
 	}
 	return nil
 }
 
 // registerMemberScopeDefault gives a member created without a scope or mode
-// its creator's: only a superuser or an "all" + "rw" member passes
-// members.createRule, so the default is "all" + "rw". OnRecordCreate rather
-// than the Request variant, so seeding and direct saves get it too. Only a
-// missing value is filled; "teams" with no teams stays exactly that.
+// a default, then holds a bot within its owner (checkOwner). A bot with
+// an owner defaults to the owner's access: the owner is the member whose
+// token ran 'lll bot', so the bot starts with its creator's teams and mode
+// (fleet case 09: 4 of 10 agents had to narrow an all + rw bot). Anything
+// else defaults to "all" + "rw", the creator's: only a superuser or a full
+// member creates other members. OnRecordCreate rather than the Request
+// variant, so seeding and direct saves get it too. Only a missing value is
+// filled; "teams" with no teams stays exactly that.
 func registerMemberScopeDefault(app core.App) {
 	app.OnRecordCreate("members").BindFunc(func(e *core.RecordEvent) error {
+		def := access{all: true, rw: true}
+		if e.Record.GetString("kind") == botKind && e.Record.GetString("owner") != "" {
+			if owner, err := e.App.FindRecordById("members", e.Record.GetString("owner")); err == nil {
+				def = ownAccess(owner)
+			}
+		}
 		if e.Record.GetString("scope") == "" {
-			e.Record.Set("scope", "all")
+			if def.all {
+				e.Record.Set("scope", "all")
+			} else {
+				e.Record.Set("scope", "teams")
+				e.Record.Set("teams", def.teams)
+			}
 		}
 		if e.Record.GetString("mode") == "" {
-			e.Record.Set("mode", "rw")
+			if def.rw {
+				e.Record.Set("mode", "rw")
+			} else {
+				e.Record.Set("mode", "ro")
+			}
+		}
+		if err := checkOwner(e.App, e.Record); err != nil {
+			return err
 		}
 		return e.Next()
 	})
+	app.OnRecordUpdate("members").BindFunc(func(e *core.RecordEvent) error {
+		before := e.Record.Original()
+		// Losing the owner must not widen a bot back to its own fields
+		// (fail closed, LLL-543 security review). A superuser clearing it
+		// leaves the bot what it could do at that moment: its access within
+		// the old owner's, persisted. Deleting the owner lands here too:
+		// PocketBase clears the relation with a save after the owner row is
+		// gone, so the lookup fails and the bot keeps nothing (no teams,
+		// read-only) until an administrator grants it access again.
+		// Keyed on the old owner alone: a PATCH that also changes kind must
+		// not skip it.
+		if before.GetString("owner") != "" && e.Record.GetString("owner") == "" {
+			kept := access{}
+			if old, err := e.App.FindRecordById("members", before.GetString("owner")); err == nil {
+				kept = ownAccess(e.Record).within(ownAccess(old))
+			}
+			setAccess(e.Record, kept)
+		}
+		for _, field := range []string{"kind", "owner", "scope", "teams", "mode"} {
+			if !slices.Equal(e.Record.GetStringSlice(field), before.GetStringSlice(field)) {
+				if err := checkOwner(e.App, e.Record); err != nil {
+					return err
+				}
+				break
+			}
+		}
+		return e.Next()
+	})
+}
+
+// setAccess writes a to m's scope, teams and mode.
+func setAccess(m *core.Record, a access) {
+	m.Set("teams", []string{})
+	if a.all {
+		m.Set("scope", "all")
+	} else {
+		m.Set("scope", "teams")
+		m.Set("teams", a.teams)
+	}
+	if a.rw {
+		m.Set("mode", "rw")
+	} else {
+		m.Set("mode", "ro")
+	}
+}
+
+// checkOwner keeps ownership one hop deep and keeps an owned member within
+// its owner ("a bot never exceeds its owner", doc scoped-access-invites).
+// effectiveAccess and the rules read only the direct owner, so a chain would
+// let a narrowed owner's grandchild keep its access. Refused, for every
+// caller, superusers included:
+//
+//   - an owner that is a bot or has an owner itself;
+//   - an owner on a member that owns members;
+//   - a bot that owns members;
+//   - an owned member wider than its owner.
+//
+// Checked when a member is created and when its kind, owner or access
+// changes. Narrowing an owner is not checked: what it owns narrows with it.
+// An owner id that does not exist is left to the relation validator.
+func checkOwner(app core.App, m *core.Record) error {
+	name := m.GetString("name")
+	// A member being created owns nothing yet (and its id may be empty,
+	// which would match every unowned member).
+	var owns *core.Record
+	if !m.IsNew() {
+		owns, _ = app.FindFirstRecordByFilter("members", "owner = {:id}", dbx.Params{"id": m.Id})
+	}
+	if owns != nil && m.GetString("kind") == botKind {
+		return router.NewBadRequestError("a bot cannot own members: "+name+" owns "+owns.GetString("name")+
+			". Give "+owns.GetString("name")+" a human owner first", nil)
+	}
+	if m.GetString("owner") == "" {
+		return nil
+	}
+	if owns != nil {
+		return router.NewBadRequestError("an owner is one hop: "+name+" owns "+owns.GetString("name")+
+			", so it cannot have an owner itself. Re-own or remove what it owns first", nil)
+	}
+	owner, err := app.FindRecordById("members", m.GetString("owner"))
+	if err != nil {
+		return nil
+	}
+	if owner.GetString("kind") == botKind {
+		return router.NewBadRequestError(
+			"a bot cannot own a bot: "+owner.GetString("name")+" is a bot. Create "+name+
+				" with its human owner's token, or with administrator credentials for a bot with no owner", nil)
+	}
+	if owner.GetString("owner") != "" {
+		return router.NewBadRequestError("an owner is one hop: "+owner.GetString("name")+
+			" has an owner itself, so it cannot own "+name+". Give "+name+" that member's owner instead", nil)
+	}
+	if !accessCovers(owner, m) {
+		return router.NewBadRequestError(
+			"a bot never exceeds its owner: "+name+" would have wider access than "+
+				owner.GetString("name")+". Give it only teams and a mode its owner has, or widen the owner first with 'lll member access "+
+				owner.GetString("name")+"'", nil)
+	}
+	return nil
 }
 
 // accessCovers reports whether member a holds at least b's access: every team
@@ -96,12 +265,13 @@ var scopedRefs = map[string]map[string]string{
 // could hang BETA's project, label or issue on an ALPHA row, and every page
 // that renders the row as the board's all-scope member would show BETA's name.
 func refsInScope(app core.App, auth *core.Record, collection string, ids []string) error {
+	acc := effectiveAccess(app, auth)
 	for _, id := range ids {
 		target, err := app.FindRecordById(collection, id)
 		if err != nil {
 			continue
 		}
-		if !memberSeesTeam(auth, target.GetString("team")) {
+		if !acc.sees(target.GetString("team")) {
 			return router.NewBadRequestError("Failed to find all relation records with the provided ids.", nil)
 		}
 	}
@@ -123,7 +293,7 @@ func added(now, before []string) []string {
 // added ids are checked: a link an all-scope member made earlier must not
 // block a scoped member's unrelated edit.
 func checkNewRefs(app core.App, auth *core.Record, record *core.Record) error {
-	if auth == nil || auth.IsSuperuser() || auth.GetString("scope") == "all" {
+	if auth == nil || effectiveAccess(app, auth).all {
 		return nil
 	}
 	original := record.Original()
@@ -181,7 +351,7 @@ func refuseReadOnlyWrites(re *core.RequestEvent) error {
 		return re.Next()
 	}
 	name := re.Request.PathValue("collection")
-	if name == "" || re.Auth == nil || re.Auth.IsSuperuser() || re.Auth.GetString("mode") != "ro" {
+	if name == "" || re.Auth == nil || effectiveAccess(re.App, re.Auth).rw {
 		return re.Next()
 	}
 	if c, err := re.App.FindCachedCollectionByNameOrId(name); err == nil {
