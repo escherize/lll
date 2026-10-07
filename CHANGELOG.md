@@ -6,12 +6,42 @@ minors. Issue keys are on the project's own board (`lll issue view KEY`).
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-10-06
+
+Members can be scoped to teams, one member can run a fleet of labelled agents,
+and a `lll login` token now renews itself instead of dying after five days.
+Several retired flag spellings are gone; see Removed before upgrading scripts.
+
 ### Added
 
 - `lll upgrade` upgrades lll the way it was installed: a Homebrew install runs
   `brew upgrade lll`; a release download or a checkout build prints the
   command to run. lll never replaces its own binary. `--dry-run` prints only.
   The version-skew warning now points at it (LLL-608).
+- The CLI warns when the server is newer than it, so a missing command reads
+  as version skew rather than a typo (LLL-607).
+- A `lll login` token is renewed and saved when a command runs in its last
+  24 hours, so an agent session no longer stops mid-work five days after
+  login. Tokens from `LLL_TOKEN` or `lll token create` are left alone
+  (LLL-441).
+- Members can be scoped to teams: `lll member invite NAME --email E --team KEY`
+  gives a person one team, read-write or read-only, and a scoped board link.
+  Existing members keep access to every team. Bots inherit their owner's
+  scope (LLL-522, LLL-542, LLL-543).
+- `--agent NAME` labels claims and comments, so one member can run a fleet of
+  agents and still tell them apart (LLL-521).
+- Comments and docs record an author kind (person or bot) and the bot's owner,
+  shown in the CLI and on the board (LLL-610, LLL-618).
+- `lll issue claim --renew` extends a claim you hold. Only the holder releases
+  a claim; `--force` takes someone else's and comments on the issue
+  (LLL-512, LLL-535).
+- `lll issue next` takes `--project`, `--label` and exclusion filters, and
+  `--json` returns the claimed card in one packet (LLL-611).
+- The board: a Project filter, keyboard shortcuts (`?` for the sheet, `/` for
+  search, `g` chords), and settings, search and create dialogs that fit a
+  phone (LLL-523, LLL-531, LLL-532).
+- Unknown flags name the nearest real flag, and `issue view` prints
+  `Comments: none` (LLL-553).
 
 ### Changed
 
@@ -23,6 +53,32 @@ minors. Issue keys are on the project's own board (`lll issue view KEY`).
   The documented spellings are `doc view SLUG` and
   `issue link/unlink KEY-123 SLUG`. `finding read` runs again after LLL-503
   retired it (LLL-505).
+- Creation and deletion read `create` and `delete` on every noun. `new`, `add`
+  and `remove` still run as aliases (LLL-504).
+- `lll up` refuses a non-loopback bind when no `LLL_BOARD_TOKEN` is set.
+  `lll up --bind` is unaffected because it sets one (LLL-450).
+- `lll export` reads the team's comments once instead of once per issue
+  (LLL-540).
+- `lll watch` on a revoked token now fails loudly instead of reporting itself
+  reconnected (LLL-617).
+- `issue update --assignee none` no longer releases another member's claim
+  without `--force` (LLL-516).
+- The board label picker adds and removes single labels, so it no longer
+  drops a label added concurrently from the CLI (LLL-519).
+
+### Removed
+
+- Retired alternate spellings (LLL-503). Use the canonical form:
+  `--assign` -> `--assignee`; `-m`/`--message` -> `-b`; `--query` ->
+  `--search`; `--for` -> `--until`; `read` -> `view`; `lll up --local` ->
+  `lll up --scratch`.
+
+### Security
+
+- Only a superuser can create claim records directly; members claim through
+  `lll issue claim` (LLL-515).
+- A bot's `owner` cannot be changed after creation. Before, any read-write
+  member could make itself a bot's owner and rotate the bot's token (LLL-616).
 
 ## [0.6.1] - 2026-09-19
 
