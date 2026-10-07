@@ -509,18 +509,48 @@ pub fn token_needs_refresh(tok: string, now: int) -> bool {
   claims.refreshable && claims.exp > now && claims.exp - now < refresh_window()
 }
 
+/// True when `fresh` is a refreshable token for the same record and
+/// collection as `old`, expiring later. A refresh answer that is anything
+/// else - another server's token, an impersonation token, garbage - must not
+/// replace the saved login.
+pub fn same_login(old: string, fresh: string) -> bool {
+  let Some(a) = token_claims(old) else { return false };
+  let Some(b) = token_claims(fresh) else { return false };
+  a.id != "" && b.id == a.id && b.collection_id == a.collection_id && b.refreshable && b.exp > a.exp
+}
+
 /// PocketBase's auth-refresh for the collection `tok` names: a fresh token
 /// for the same record, its exp a full collection duration from now.
+///
+/// Its own 2-second client, not request(): this runs before ordinary commands,
+/// and http.DefaultClient has no timeout, so a server that accepts and never
+/// answers would hang the command indefinitely (version_skew uses 1s, discovery 2s).
 pub fn refresh_token(base: string, tok: string) -> Result<string, string> {
   let Some(collection) = token_collection(tok) else {
     return Err("the token names no collection")
   }
-  let body = request(base, "POST", f"/api/collections/{collection}/auth-refresh", "", bearer(tok), false)?
+  let what = f"POST {base}/api/collections/{collection}/auth-refresh"
+  let mut req = match http.NewRequest("POST", f"{base}/api/collections/{collection}/auth-refresh", bytes.NewReader([])) {
+    Ok(r) => r,
+    Err(e) => return Err(f"{what}: {e}"),
+  }
+  if let Some(h) = req.Header {
+    let mut h = h
+    h.Set("Authorization", bearer(tok))
+  }
+  let client = http.Client { Timeout: 2 * time.Second, .. }
+  let resp = match client.Do(req) {
+    Ok(r) => r,
+    Err(e) => return Err(f"{what}: {e}"),
+  }
+  let body = read_body(resp, what)?
   let mut auth = TokenOnly { .. }
   if let Err(e) = json.Unmarshal(body.bytes(), &auth) {
     return Err(f"decoding the refreshed token: {e}")
   }
-  if auth.token == "" { return Err("the refresh response carried no token") }
+  if !same_login(tok, auth.token) {
+    return Err("the refresh response is not a later token for the same member")
+  }
   Ok(auth.token)
 }
 

@@ -1,4 +1,5 @@
 import "go:strings"
+import "config"
 
 // Unit cover for the whoami argument refusal (LLL-493, fleet case 05). The
 // server half of whoami needs a live PocketBase and is covered by e2e; what
@@ -33,4 +34,29 @@ fn other_unknown_arguments_keep_the_short_refusal() {
   let msg = whoami_arg_error("--json", ["lll", "whoami", "--json"])
   assert strings.Contains(msg, "unknown whoami argument: '--json'")
   assert !strings.Contains(msg, "LLL_TEAM=")
+}
+
+// LLL-441 review: the refresh carries the saved login token, so it may only
+// go to the server the home config names. An LLL_URL or a repo url pointing
+// elsewhere would hand the token over and save the stranger's answer.
+#[test]
+fn login_renewal_needs_the_token_and_url_both_from_the_home_config() {
+  let home = "/h/lll/lll.toml"
+  let file = "file:/h/lll/lll.toml"
+  assert renews_home_login(config.Sources { token: file, url: file, .. }, home, "https://lll.example")
+  // url is the default and the home config names none
+  assert renews_home_login(config.Sources { token: file, url: "default", .. }, home, "")
+  assert !renews_home_login(config.Sources { token: file, url: "env:LLL_URL", .. }, home, "https://lll.example")
+  assert !renews_home_login(config.Sources { token: file, url: "file:/repo/.lll.toml", .. }, home, "https://lll.example")
+  assert !renews_home_login(config.Sources { token: "env:LLL_TOKEN", url: file, .. }, home, "https://lll.example")
+  assert !renews_home_login(config.Sources { token: "file:/repo/.lll.toml", url: file, .. }, home, "https://lll.example")
+}
+
+#[test]
+fn renewal_and_the_skew_probe_stay_off_the_network_for_local_nouns() {
+  assert talks_to_server("issue")
+  assert talks_to_server("whoami")
+  for noun in ["--help", "version", "completions", "skill", "upgrade", "login", "logout"] {
+    assert !talks_to_server(noun)
+  }
 }

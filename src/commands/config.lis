@@ -182,27 +182,34 @@ fn set_key_in(path: string, key: string, value: string, private: bool) -> Result
   Ok(())
 }
 
-/// Tighten the opened machine config before truncating or writing secrets.
-/// Open without O_TRUNC so an existing public file is private first. Chmod
-/// uses the same descriptor as the write; repository config does not use this.
+/// Replace the machine config with a private (0600) temp file renamed into
+/// place, so a concurrent reader sees the old file or the new one, never an
+/// empty or half-written one. Login renewal (LLL-441) runs before ordinary
+/// commands, so parallel agents can write here at the same moment; an
+/// in-place truncate let one read an empty file and save only its token,
+/// dropping url, web_url and team. Repository config does not use this.
 fn write_home_config(path: string, out: string) -> Result<(), string> {
-  let file = match os.OpenFile(path, os.O_WRONLY | os.O_CREATE, 0o600) {
+  let file = match os.CreateTemp(filepath.Dir(path), ".lll.toml.*") {
     Ok(file) => file,
-    Err(e) => return Err(f"opening {path}: {e}"),
+    Err(e) => return Err(f"creating a temp file beside {path}: {e}"),
   }
+  let tmp = file.Name()
+  // After a successful rename there is nothing at tmp, so this only cleans
+  // up a failed write.
+  defer { let _ = os.Remove(tmp) }
   defer file.Close()
   if let Err(e) = file.Chmod(0o600) {
-    return Err(f"restricting permissions on {path}: {e}")
-  }
-  if let Err(e) = file.Truncate(0) {
-    return Err(f"truncating {path}: {e}")
+    return Err(f"restricting permissions on {tmp}: {e}")
   }
   match file.WriteString(out) {
     Partial.Ok(_) => (),
-    Partial.Err(e) | Partial.Both(_, e) => return Err(f"writing {path}: {e}"),
+    Partial.Err(e) | Partial.Both(_, e) => return Err(f"writing {tmp}: {e}"),
   }
   if let Err(e) = file.Close() {
-    return Err(f"closing {path}: {e}")
+    return Err(f"closing {tmp}: {e}")
+  }
+  if let Err(e) = os.Rename(tmp, path) {
+    return Err(f"replacing {path}: {e}")
   }
   Ok(())
 }

@@ -13,8 +13,9 @@ fn main() {
   }
 
   // LLL-441: before anything reads the token, renew a login token near
-  // expiry. login and logout replace or remove it, so renewing is wasted.
-  if noun != "login" && noun != "logout" {
+  // expiry - only for nouns that talk to the server anyway, so --help,
+  // version and completions never wait on the network.
+  if commands.talks_to_server(noun) {
     commands.renew_login_token()
   }
   let skew = commands.version_skew_check(noun)

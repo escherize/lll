@@ -160,6 +160,26 @@ fn only_a_live_refreshable_token_near_expiry_needs_refresh() {
   assert !token_needs_refresh("not-a-jwt", exp - 3600)
 }
 
+// LLL-441 review: only a later refreshable token for the same record and
+// collection may replace the saved login. A foreign server's answer must not.
+#[test]
+fn a_refresh_answer_must_be_a_later_token_for_the_same_login() {
+  // exp 1000000, id abc, pbc_1, refreshable
+  let old = "h.eyJjb2xsZWN0aW9uSWQiOiJwYmNfMSIsImV4cCI6MTAwMDAwMCwiaWQiOiJhYmMiLCJyZWZyZXNoYWJsZSI6dHJ1ZX0.s"
+  // exp 2000000 and: same login / other id / other collection / not refreshable
+  let fresh = "h.eyJjb2xsZWN0aW9uSWQiOiJwYmNfMSIsImV4cCI6MjAwMDAwMCwiaWQiOiJhYmMiLCJyZWZyZXNoYWJsZSI6dHJ1ZX0.s"
+  let other_id = "h.eyJjb2xsZWN0aW9uSWQiOiJwYmNfMSIsImV4cCI6MjAwMDAwMCwiaWQiOiJ4eXoiLCJyZWZyZXNoYWJsZSI6dHJ1ZX0.s"
+  let other_collection = "h.eyJjb2xsZWN0aW9uSWQiOiJwYmNfMiIsImV4cCI6MjAwMDAwMCwiaWQiOiJhYmMiLCJyZWZyZXNoYWJsZSI6dHJ1ZX0.s"
+  let not_refreshable = "h.eyJjb2xsZWN0aW9uSWQiOiJwYmNfMSIsImV4cCI6MjAwMDAwMCwiaWQiOiJhYmMiLCJyZWZyZXNoYWJsZSI6ZmFsc2V9.s"
+  assert same_login(old, fresh)
+  assert !same_login(old, other_id)
+  assert !same_login(old, other_collection)
+  assert !same_login(old, not_refreshable)
+  assert !same_login(old, old)
+  assert !same_login(fresh, old)
+  assert !same_login(old, "FOREIGN-SERVER-TOKEN")
+}
+
 #[test]
 fn token_subject_declines_what_it_cannot_read() {
   // Not three segments; a payload that is not JSON; a payload with no id.
