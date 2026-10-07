@@ -153,6 +153,11 @@ func TestRosterProbePaths(t *testing.T) {
 		{members, `issues_via_assignee.title ~ "x"`, "", true},
 		{members, `comments_via_author.body ~ "x"`, "", true},
 		{members, `name = "x" || kind = "bot"`, "name", false},
+		{members, "", "email", true},
+		{members, `email ~ "a"`, "", true},
+		{members, "teams:length = 2", "", true},
+		{members, `teams ~ "x"`, "-teams", true},
+		{issues, `team = "x"`, "", false},
 		{issues, `(title = "a" || (state = "todo" && assignee.kind = "bot"))`, "", true},
 	} {
 		if got := crossesRoster(app, c.base, c.filter, c.sort); got != c.crosses {

@@ -11,6 +11,7 @@ import (
 	"github.com/pocketbase/dbx"
 	"github.com/pocketbase/pocketbase/core"
 	"github.com/pocketbase/pocketbase/tools/search"
+	"github.com/spf13/cast"
 )
 
 // The members roster (LLL-551, decision option b). A member whose effective
@@ -120,23 +121,32 @@ func registerRosterScope(app core.App) {
 			return e.Next()
 		}
 		for _, topic := range e.Subscriptions {
-			base, rawOptions, _ := strings.Cut(topic, "?options=")
-			name, _, _ := strings.Cut(base, "/")
-			collection, err := e.App.FindCachedCollectionByNameOrId(name)
-			if err != nil || rawOptions == "" {
+			// Read the options exactly as PocketBase will
+			// (tools/subscriptions/client.go Subscribe): url.Parse, then the
+			// "options" query value however it is spelled or placed. A
+			// string cut on "?options=" missed "?x=1&options=" and
+			// "?opt%69ons=" (LLL-551 review F1).
+			u, err := url.Parse(topic)
+			if err != nil {
+				continue // PocketBase ignores the options too
+			}
+			raw := u.Query().Get("options")
+			if raw == "" {
 				continue
 			}
-			decoded, err := url.QueryUnescape(rawOptions)
-			if err != nil {
-				return e.BadRequestError("invalid subscription options", nil)
-			}
 			var options struct {
-				Query map[string]string `json:"query"`
+				Query map[string]any `json:"query"`
 			}
-			if err := json.Unmarshal([]byte(decoded), &options); err != nil {
-				return e.BadRequestError("invalid subscription options", nil)
+			if err := json.Unmarshal([]byte(raw), &options); err != nil {
+				continue // PocketBase ignores options that do not decode
 			}
-			if crossesRoster(e.App, collection, options.Query[search.FilterQueryParam], options.Query[search.SortQueryParam]) {
+			filter, sort := cast.ToString(options.Query[search.FilterQueryParam]), cast.ToString(options.Query[search.SortQueryParam])
+			if filter == "" && sort == "" {
+				continue
+			}
+			name, _, _ := strings.Cut(u.Path, "/")
+			collection, err := e.App.FindCachedCollectionByNameOrId(name)
+			if err != nil || crossesRoster(e.App, collection, filter, sort) {
 				return e.ForbiddenError(rosterProbeRefusal, nil)
 			}
 		}
@@ -151,7 +161,7 @@ func narrowCaller(app core.App, auth *core.Record) bool {
 }
 
 const rosterProbeRefusal = "a member limited to some teams cannot filter or sort through a relation to or from members " +
-	"(assignee.name, author.kind, issues_via_assignee, ...); filter on the id instead, e.g. assignee = 'ID'"
+	"(assignee.name, author.kind, issues_via_assignee, ...), or on a member's email or teams; filter on the id instead, e.g. assignee = 'ID'"
 
 // recordsCollection extracts {collection} from /api/collections/{collection}/records.
 var recordsCollection = regexp.MustCompile(`^/api/collections/([^/]+)/records/?$`)
@@ -214,12 +224,23 @@ var viaProp = regexp.MustCompile(`^(\w+)_via_(\w+)$`)
 // pathCrossesRoster walks one dotted path ("assignee.name",
 // "issues_via_assignee.title") from base. Every hop but the last prop is a
 // relation or a back-relation; a hop whose either end is members crosses.
+//
+// On members itself, `email` and `teams` cross too (LLL-551 review F2, F3):
+// PocketBase guards an email FILTER with emailVisibility but not an email
+// SORT, and a bot the caller mints with a chosen email makes the order an
+// oracle; and `teams` holds the stored ids the enrich hook strips, so
+// "teams ~ 'x'" or "teams:length = 2" would read hidden team ids.
 func pathCrossesRoster(app core.App, base *core.Collection, path string) bool {
 	if strings.HasPrefix(path, "@") {
 		return false // @request/@collection: superuser-only in a query already
 	}
 	props := strings.Split(path, ".")
 	current := base
+	if base.Name == "members" {
+		if first, _, _ := strings.Cut(props[0], ":"); first == core.FieldNameEmail || first == "teams" {
+			return true
+		}
+	}
 	for _, prop := range props[:len(props)-1] {
 		prop, _, _ = strings.Cut(prop, ":")
 		var next *core.Collection

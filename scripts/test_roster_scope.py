@@ -170,14 +170,18 @@ with tempfile.TemporaryDirectory(prefix='lll-551-') as directory:
                   '/api/collections/claims/records?filter=' + urllib.parse.quote('member.name ~ "g"'),
                   '/api/collections/members/records?filter=' + urllib.parse.quote('issues_via_assignee.title ~ "zebra"'),
                   '/api/collections/members/records?filter=' + urllib.parse.quote('teams.key = "BETA"'),
-                  '/api/collections/teams/records?filter=' + urllib.parse.quote('members_via_teams.name ~ "bot"')]
+                  '/api/collections/teams/records?filter=' + urllib.parse.quote('members_via_teams.name ~ "bot"'),
+                  # Review F2, F3: an email sort and the stored team ids are oracles.
+                  '/api/collections/members/records?sort=email',
+                  '/api/collections/members/records?filter=' + urllib.parse.quote('teams:length = 2'),
+                  '/api/collections/members/records?filter=' + urllib.parse.quote('teams ~ "x"')]
         for path in probes:
             code, body = call(api, path, token=toks['alpha-guest'])
             assert code == 403, (path, code, body)
             assert call(api, path, token=toks['full-person'])[0] == 200, path
-        # Email filters match nothing for anyone but a superuser.
+        # Email filters are refused for a scoped caller.
         code, body = call(api, '/api/collections/members/records?filter=' + urllib.parse.quote('email ~ "full"'), token=toks['alpha-guest'])
-        assert code == 200 and body['totalItems'] == 0, body
+        assert code == 403, body
         code, body = call(api, '/api/collections/issues/records?filter=' + urllib.parse.quote(f'assignee = "{ids["bot-garden"]}"'), token=toks['alpha-guest'])
         assert code == 200 and body['totalItems'] == 1, 'control: filtering on a relation id still works'
 
@@ -196,6 +200,11 @@ with tempfile.TemporaryDirectory(prefix='lll-551-') as directory:
 
         probe = 'issues/*?options=' + urllib.parse.quote(json.dumps({'query': {'filter': 'assignee.name ~ "bot-g%"'}}))
         assert realtime_subscribe(toks['alpha-guest'], probe)[0] == 403
+        # PocketBase reads "options" from anywhere in the topic's query, so
+        # the guard must too (review F1).
+        options = urllib.parse.quote(json.dumps({'query': {'filter': "teams.key !~ 'B%'"}}))
+        for topic in [f'members/*?x=1&options={options}', f'members/*?opt%69ons={options}']:
+            assert realtime_subscribe(toks['alpha-guest'], topic)[0] == 403, topic
         assert realtime_subscribe(toks['full-person'], probe)[0] == 204
         assert realtime_subscribe(toks['alpha-guest'], 'issues/*')[0] == 204
 
