@@ -68,7 +68,7 @@ fn doc_page(
 /// Doc record -> view model. The property order is `lll doc view`'s, so a
 /// reader moving between the two surfaces finds the same page.
 fn doc_vm(d: models.Doc, team_key: string) -> DocVM {
-  let kind_label = if d.kind == "prd" { "PRD" } else { state_label(d.kind) }
+  let kind_label = doc_kind_label(d.kind)
   let author = d.expand.author.unwrap_or(models.Member { .. })
   DocVM {
     slug: d.slug,

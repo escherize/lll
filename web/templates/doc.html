@@ -53,7 +53,7 @@
 </div>
 <aside id="doc-properties" class="props">
 <h3>Properties</h3>
-<div class="prop"><span class="k">Kind</span><span class="v">{{.KindLabel}}</span></div>
+<div class="prop"><span class="k">Kind</span><span class="v">{{if .KindLabel}}{{.KindLabel}}{{else}}—{{end}}</span></div>
 {{if .Area}}<div class="prop"><span class="k">Area</span><span class="v">{{.Area}}</span></div>
 {{end}}{{if .Paths}}<div class="prop"><span class="k">Paths</span><span class="v">{{.Paths}}</span></div>
 {{end}}{{if .Author}}<div class="prop"><span class="k">Author</span><span class="v">{{template "avatar" .AuthorAvatar}} {{.Author}}{{if .AuthorVia}} · via {{.AuthorVia}}{{end}}</span></div>

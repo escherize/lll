@@ -382,6 +382,12 @@ fn board_mux(
     }),
   )
   mux.HandleFunc(
+    "GET /docs",
+    gated(|w: http.ResponseWriter, r: Ref<http.Request>| {
+      redirect_with_query(w, r, f"/t/{boot_key}/docs")
+    }),
+  )
+  mux.HandleFunc(
     "GET /projects",
     gated(|w: http.ResponseWriter, r: Ref<http.Request>| {
       redirect_with_query(w, r, f"/t/{boot_key}/projects")

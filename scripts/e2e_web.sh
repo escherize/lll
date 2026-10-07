@@ -1830,6 +1830,8 @@ assert_not_contains "$docs_q" "board-render-decision" "?q= drops docs that do no
 docs_bad=$(wcurl -sf "$WEB/t/ENG/docs?kind=memo") || fail "an unknown kind returned an error status"
 assert_contains "$docs_bad" "unknown kind &#39;memo&#39;" "an unknown kind is reported in the flash strip"
 assert_contains "$docs_bad" "board-render-decision" "an unknown kind still lists every doc"
+docs_bare=$(curl -s -o /dev/null -w '%{http_code} %{redirect_url}' -H "$BOARD_COOKIE" "$WEB/docs?kind=wiki")
+assert_contains "$docs_bare" "303 $WEB/t/ENG/docs?kind=wiki" "bare /docs lands on the selected team, query kept"
 
 # --- /projects: the read path a project never had (task-113) ---
 # Projects have been in the schema since the start and issues have always

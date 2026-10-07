@@ -30,6 +30,8 @@ fn a_doc_with_no_kind_is_a_row_with_a_dash() {
   assert row.kind_label == "" && row.author == "" &&
   row.href == "/t/TST/doc/untyped"
   assert doc_kind_label("prd") == "PRD" && doc_kind_label("wiki") == "Wiki"
+  // The doc's own page shares the label, so it renders instead of panicking.
+  assert doc_vm(models.Doc { slug: "untyped", .. }, "TST").kind_label == ""
   let raw = docs_raw(DocsVM { docs: [row], team_key: "TST", .. })
   assert raw.contains("- [untyped](/t/TST/doc/untyped) | Untyped | - | - | - |")
 }
