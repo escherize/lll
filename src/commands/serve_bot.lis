@@ -23,7 +23,12 @@ pub struct BotResultVM {
 }
 
 /// POST /bot: name, team. Refusals flash; success patches #bot-result.
-fn bot_write(r: mut Ref<http.Request>) -> Result<string, string> {
+fn bot_write(
+  w: http.ResponseWriter,
+  r: mut Ref<http.Request>,
+) -> Result<string, string> {
+  // The response may carry the bot's token: no cache keeps a copy.
+  w.Header().Set("Cache-Control", "no-store")
   let who = acting_as(r)?
   // The board token names no person, so a bot minted from it would be owned
   // by the board's process member: refused until that is decided (LLL-546).

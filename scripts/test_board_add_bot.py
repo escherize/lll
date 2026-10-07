@@ -37,6 +37,9 @@ class NoRedirect(urllib.request.HTTPRedirectHandler):
 raw = urllib.request.build_opener(NoRedirect)
 
 
+LAST_HEADERS = [None]
+
+
 def call(base, path, body=None, token='', method=None, headers=None, form=False):
     """(status, parsed-or-text body). Never raises on HTTP errors."""
     hdrs = dict(headers or {})
@@ -52,6 +55,7 @@ def call(base, path, body=None, token='', method=None, headers=None, form=False)
     except urllib.error.HTTPError as e:
         resp = e
     text = resp.read().decode()
+    LAST_HEADERS[:] = [resp.headers]
     try:
         text = json.loads(text)
     except ValueError:
@@ -188,7 +192,10 @@ with tempfile.TemporaryDirectory(prefix='lll-546-') as directory:
 
         # 'bot-' typed into the name is accepted, not doubled.
         code, body = post(rw_tok, {'name': 'bot-agent2', 'team': 'ALPHA'})
-        assert code == 200 and TOKEN.search(html.unescape(body)) and 'bot-agent2' in members(), body
+        assert code == 200 and TOKEN.search(html.unescape(body)), body
+        # The response carries a token: no cache may keep it.
+        assert LAST_HEADERS[0]['Cache-Control'] == 'no-store', dict(LAST_HEADERS[0])
+        assert 'bot-agent2' in members()
     finally:
         for proc in streams:
             proc.terminate()
