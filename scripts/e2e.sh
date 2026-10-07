@@ -1339,6 +1339,8 @@ python3 "$REPO_ROOT"/scripts/test_invites.py "$LLL_ABS"
 # --- the real invites migration on a board with names differing only by case ---
 python3 "$REPO_ROOT"/scripts/test_name_index_migration.py "$LLL_ABS"
 python3 "$REPO_ROOT"/scripts/test_board_add_bot.py "$LLL_ABS"
+# --- the members roster a team-scoped member sees: API, CLI, board (LLL-551) ---
+python3 "$REPO_ROOT"/scripts/test_roster_scope.py "$LLL_ABS"
 # --- an older CLI than its server says so once a day, on stderr only (LLL-607) ---
 python3 "$REPO_ROOT"/scripts/test_version_skew.py "$LLL_ABS"
 # --- lll upgrade picks its command from how lll was installed (LLL-608) ---
