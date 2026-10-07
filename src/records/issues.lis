@@ -103,8 +103,11 @@ pub fn fetch_board_issues(team_id: string) -> Result<Slice<models.Issue>, string
 }
 
 /// What the board draws with. Deliberately not everything: each relation is
-/// another join on a query that runs on every board load.
-const BOARD_EXPAND: string = "team,assignee,labels"
+/// another join on a query that runs on every board load. `project` is here
+/// because cards carry its id for the project filter, and a team-scoped
+/// viewer must not get another team's project id (LLL-545): the board can
+/// only tell whose project it is from the expanded record.
+const BOARD_EXPAND: string = "team,assignee,labels,project"
 
 /// The board's relations plus `project`, for callers writing the issue down
 /// rather than drawing it. Members are deliberately NOT here: expanding a

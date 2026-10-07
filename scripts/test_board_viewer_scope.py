@@ -96,9 +96,11 @@ with tempfile.TemporaryDirectory(prefix='lll-545-') as directory:
 
         ia = issue(alpha, 'alpha work')
         ib = issue(beta, 'zebra hidden plan')
-        call(api, '/api/collections/comments/records', {'issue': ib['id'], 'body': 'zebra comment'}, su)
-        call(api, '/api/collections/docs/records', {'team': beta['id'], 'slug': 'bdoc', 'title': 'zebradoc',
-                                                    'kind': 'note', 'body': 'zebradoc body'}, su)
+        _, bcomment, _ = call(api, '/api/collections/comments/records', {'issue': ib['id'], 'body': 'zebra comment'}, su)
+        _, bdoc, _ = call(api, '/api/collections/docs/records', {'team': beta['id'], 'slug': 'bdoc', 'title': 'zebradoc',
+                                                                 'kind': 'note', 'body': 'zebradoc body'}, su)
+        # Record ids are identifiers too: none of BETA's may reach a scoped viewer.
+        HIDDEN.extend([beta['id'], ib['id'], bcomment['id'], bdoc['id']])
         # An all-scope writer may link across teams; the scoped page must not show it.
         code, _, _ = call(api, '/api/collections/docs/records', {'team': alpha['id'], 'slug': 'cross', 'title': 'cross',
                                                                  'kind': 'note', 'body': 'b', 'issues': [ia['id'], ib['id']]}, su)
@@ -354,7 +356,8 @@ with tempfile.TemporaryDirectory(prefix='lll-545-') as directory:
                            {'team': zeta['id'], 'name': 'zprojhidden', 'status': 'planned'}, su)
         _, alabel, _ = call(api, '/api/collections/labels/records', {'team': alpha['id'], 'name': 'alabelown'}, su)
         wide_rec, wide_tok = member('wide', scope='all', mode='rw')
-        zref = ['zlabelhidden', 'zprojhidden', 'Zeta Hidden', 'ZETA']
+        # Names and record ids: an id in data-fkeys is a leak too.
+        zref = ['zlabelhidden', 'zprojhidden', 'Zeta Hidden', 'ZETA', zeta['id'], zlabel['id'], zproj['id']]
         rw2_rec, rw2_tok = member('zviewer', scope='teams', teams=[alpha['id']], mode='rw')
         viewers = {'member': rw2_tok, 'link': link}
         zstreams = {name: (stream('/events?team=ALPHA', tok, f'z-board-{name}'),
@@ -370,6 +373,7 @@ with tempfile.TemporaryDirectory(prefix='lll-545-') as directory:
                              wide_tok, 'PATCH')
         assert code == 200, body
         wait_for(zfull_board, 'zlabelhidden')  # control: board cards name labels
+        wait_for(zfull_board, zproj['id'])  # control: and carry the project id
         wait_for(zfull, 'zprojhidden')  # control: the issue detail names the project
         for name, outs in zstreams.items():
             for out in outs:
