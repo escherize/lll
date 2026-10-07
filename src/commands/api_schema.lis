@@ -75,6 +75,22 @@ Rules: list @request.auth.id != \"\" && (@request.auth.scope = \"all\" || @reque
 | created | autodate |  | set on create |
 | updated | autodate |  | set on create; refreshed on update |
 
+## invites (base)
+
+Rules: list (superuser only) view (superuser only) create (superuser only) update (superuser only) delete (superuser only)
+
+| field | type | required | notes |
+|-------|------|----------|-------|
+| code_hash | text | yes |  |
+| teams | relation |  | maxSelect: 999; relation to teams |
+| mode | select | yes | values: ro, rw |
+| expires | date | yes |  |
+| creator | relation |  | relation to members |
+| superuser | bool |  |  |
+| redeemed | date |  |  |
+| redeemed_by | relation |  | relation to members |
+| created | autodate |  | set on create |
+
 ## issues (base)
 
 Rules: list @request.auth.id != \"\" && (@request.auth.scope = \"all\" || @request.auth.teams.id ?= team) && (@request.auth.owner = \"\" || @request.auth.owner.scope = \"all\" || @request.auth.owner.teams.id ?= team) view @request.auth.id != \"\" && (@request.auth.scope = \"all\" || @request.auth.teams.id ?= team) && (@request.auth.owner = \"\" || @request.auth.owner.scope = \"all\" || @request.auth.owner.teams.id ?= team) create @request.auth.id != \"\" && (@request.auth.scope = \"all\" || @request.auth.teams.id ?= team) && (@request.auth.owner = \"\" || @request.auth.owner.scope = \"all\" || @request.auth.owner.teams.id ?= team) && (@request.auth.mode = \"rw\" && (@request.auth.owner = \"\" || @request.auth.owner.mode = \"rw\")) update @request.auth.id != \"\" && (@request.auth.scope = \"all\" || @request.auth.teams.id ?= team) && (@request.auth.owner = \"\" || @request.auth.owner.scope = \"all\" || @request.auth.owner.teams.id ?= team) && (@request.auth.mode = \"rw\" && (@request.auth.owner = \"\" || @request.auth.owner.mode = \"rw\")) && (@request.body.team:isset = false || ((@request.auth.scope = \"all\" || @request.auth.teams.id ?= @request.body.team) && (@request.auth.owner = \"\" || @request.auth.owner.scope = \"all\" || @request.auth.owner.teams.id ?= @request.body.team))) delete @request.auth.id != \"\" && (@request.auth.scope = \"all\" || @request.auth.teams.id ?= team) && (@request.auth.owner = \"\" || @request.auth.owner.scope = \"all\" || @request.auth.owner.teams.id ?= team) && (@request.auth.mode = \"rw\" && (@request.auth.owner = \"\" || @request.auth.owner.mode = \"rw\"))

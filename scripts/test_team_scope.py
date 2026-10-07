@@ -220,8 +220,10 @@ with tempfile.TemporaryDirectory(prefix='lll-team-scope-') as directory:
         assert out.returncode == 0 and 'invited viewer <viewer@example.test>: read-only, team ALPHA' in out.stderr, \
             out.stdout + out.stderr
         assert 'view-only web board for ALPHA (separate from their CLI access' in out.stdout, out.stdout
+        # 'lll invite' is its own noun now (LLL-544); its help still points
+        # at the login handoff fleet case 11 was looking for.
         out = lll('invite')
-        assert "it is a member verb: 'lll member invite ...'" in out.stderr, out.stderr
+        assert "'lll member invite NAME --email EMAIL'" in out.stdout, out.stdout + out.stderr
         out = lll('member', 'invite', 'nope', '--email', 'nope@example.test', '--team', 'NOPE', env=cli)
         assert out.returncode != 0 and "no team with key 'NOPE' on this server; teams: ALPHA, BETA" in out.stderr, out.stderr
         steps = [

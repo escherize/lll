@@ -67,6 +67,7 @@ func Serve(dataDir, addr, adminEmail, adminPassword string) error {
 	registerIssueIdempotency(app)
 	registerWebhookDelivery(app)
 	registerMemberGuards(app)
+	registerMemberNameGuard(app)
 	registerMemberScopeDefault(app)
 	registerScopedRefGuard(app)
 	registerFilterNameGuards(app)
@@ -113,6 +114,7 @@ func Serve(dataDir, addr, adminEmail, adminPassword string) error {
 		registerClaimRoutes(e.Router, &issueUpdates)
 		registerBotRoutes(e.Router)
 		registerAccessRoute(e.Router)
+		registerInviteRoutes(e.Router)
 		registerReferenceRoutes(e.Router, &issueUpdates)
 		// A direct API listener cannot infer the public board origin. Operators
 		// may advertise it explicitly; the combined board listener advertises
@@ -125,6 +127,9 @@ func Serve(dataDir, addr, adminEmail, adminPassword string) error {
 			return re.JSON(http.StatusOK, map[string]string{"service": "lll", "web_url": boardURL})
 		})
 		if err := upsertSuperuser(e.App, adminEmail, adminPassword); err != nil {
+			return err
+		}
+		if err := ensureNameIndex(e.App, os.Stderr); err != nil {
 			return err
 		}
 		// TASK-319: a record request that carries no auth at all is told so.
