@@ -12,6 +12,12 @@ fn main() {
     return
   }
 
+  // LLL-441: before anything reads the token, renew a login token near
+  // expiry - only for nouns that talk to the server anyway, so --help,
+  // version and completions never wait on the network.
+  if commands.talks_to_server(noun) {
+    commands.renew_login_token()
+  }
   let skew = commands.version_skew_check(noun)
   let result = match commands.scoped_args(os.Args) {
     Ok(args) => dispatch(noun, args),

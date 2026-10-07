@@ -5,6 +5,7 @@ import "go:fmt"
 import "go:golang.org/x/term"
 import "go:os"
 import "go:strings"
+import "go:time"
 
 import "config"
 import "flags"
@@ -555,6 +556,41 @@ if the account exists, check the password — a superuser can reset it:
 if it does not exist yet, and you hold the server's admin credentials
 (LLL_ADMIN_EMAIL/LLL_ADMIN_PASSWORD), create it as you log in:
   lll login{url_flag} --email {email} --create"
+}
+
+/// Renew a `lll login` token in the home config before it lapses (LLL-441).
+/// The token says refreshable: true, but nothing used to call auth-refresh,
+/// so five days after login every agent session holding one stopped mid-work.
+///
+/// Only the home config's token is rewritten: an LLL_TOKEN is not ours to
+/// persist, and a repo file must never hold a token. No request is made
+/// unless the token's own payload says it is inside the refresh window. A
+/// failed refresh leaves the command to run on the old token and says why.
+pub fn renew_login_token() {
+  let Ok((cfg, src)) = config.load_traced() else { return }
+  let Ok(home) = config.home_path() else { return }
+  let Ok(saved) = config.load_home() else { return }
+  if !renews_home_login(src, home, saved.url) { return }
+  if !pb.token_needs_refresh(cfg.token, time.Now().Unix() as int) { return }
+  match pb.refresh_token(cfg.url, cfg.token) {
+    Ok(fresh) => {
+      if let Err(e) = set_home_key("token", fresh) {
+        fmt.Fprintln(os.Stderr, f"note: could not save the renewed login token: {e}")
+      }
+    },
+    Err(e) => fmt.Fprintln(os.Stderr, f"note: could not renew the login token in {home}: {e}"),
+  }
+}
+
+/// Whether the effective token AND url both come from the home config at
+/// `home` (or the url is the default and the home config names none). The
+/// refresh request carries the token, so it must go to the server that issued
+/// it: an LLL_URL or a repo url would send the saved login elsewhere, and the
+/// answer would be written back as the login.
+fn renews_home_login(src: config.Sources, home: string, home_url: string) -> bool {
+  let from_home = f"file:{home}"
+  if src.token != from_home { return false }
+  src.url == from_home || (src.url == "default" && home_url == "")
 }
 
 /// Dispatch `lll logout`: forget the token the home config holds. Env vars

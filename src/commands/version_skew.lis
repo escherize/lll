@@ -31,8 +31,11 @@ pub fn version_skew_check(noun: string) -> Channel<Option<string>> {
   line
 }
 
-fn skew_line(noun: string) -> Option<string> {
-  let talks_to_server = [
+/// The nouns that already talk to the server, so a background request on
+/// their behalf (the skew probe, login renewal) costs nothing new. --help,
+/// version, completions, skill and upgrade stay off the network.
+pub fn talks_to_server(noun: string) -> bool {
+  [
     "issue",
     "team",
     "member",
@@ -49,7 +52,11 @@ fn skew_line(noun: string) -> Option<string> {
     "import",
     "export",
   ]
-  if !talks_to_server.contains(noun) { return None }
+    .contains(noun)
+}
+
+fn skew_line(noun: string) -> Option<string> {
+  if !talks_to_server(noun) { return None }
   let Ok(cfg) = config.load() else {
     return None
   }
