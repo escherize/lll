@@ -143,6 +143,7 @@ pub fn run_server(
     PageVM { rail: shell, page: ProjectsVM { .. } },
   )?
   let _ = render("doc-page", PageVM { rail: shell, page: DocVM { .. } })?
+  let _ = render("docs-page", PageVM { rail: shell, page: DocsVM { .. } })?
 
   // One PB subscription for everything. Issues are UNSCOPED (TASK-198): the
   // server hosts every team, and the bridge routes each event to the clients
@@ -275,6 +276,15 @@ fn board_mux(
     gated(|w: http.ResponseWriter, r: Ref<http.Request>| {
       if let Some(t) = routed_team(w, r) {
         doc_page(w, r, t, board_member.name)
+      }
+    }),
+  )
+  // LLL-643: the team's docs, each row linking to the address above.
+  mux.HandleFunc(
+    "GET /t/{team}/docs",
+    gated(|w: http.ResponseWriter, r: Ref<http.Request>| {
+      if let Some(t) = routed_team(w, r) {
+        docs_page(w, r, t, board_member.name)
       }
     }),
   )

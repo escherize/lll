@@ -271,7 +271,7 @@ pub struct RailTeamVM {
 pub struct RailVM {
   pub team_key: string,
   // Which row reads as current: "board", "mine", "issues", "projects",
-  // "search" or "settings".
+  // "docs", "search" or "settings".
   pub active: string,
   // The board path this page's team-scoped links hang off: "/t/KEY/" for the
   // page's team, "/" when no team scopes the page (TASK-198). The Board and
@@ -617,4 +617,37 @@ pub struct DocIssueVM {
   pub key: string,
   pub title: string,
   pub href: string,
+}
+
+/// One doc on /t/KEY/docs (LLL-643).
+pub struct DocRowVM {
+  pub slug: string,
+  pub title: string,
+  pub kind: string,
+  // "" for a doc stored without a kind (LLL-635); the row shows a dash.
+  pub kind_label: string,
+  pub area: string,
+  // "" for a doc with no author; "hidden member" when the viewer's roster
+  // withholds it (LLL-551), with no kind or owner beside it.
+  pub author: string,
+  pub author_avatar: AvatarVM,
+  // "person" or "bot"; "" when hidden or unknown.
+  pub author_kind: string,
+  // A bot author's owner, when the viewer may name it.
+  pub author_via: string,
+  pub updated: string,
+  pub updated_at: string,
+  pub href: string,
+}
+
+/// View model for /t/KEY/docs. `kind` and `q` are the filter as applied, so
+/// the form and the raw header show what produced the rows.
+pub struct DocsVM {
+  pub docs: Slice<DocRowVM>,
+  pub kinds: Slice<StateOpt>,
+  pub kind: string,
+  pub q: string,
+  pub error: string,
+  pub base: string,
+  pub team_key: string,
 }

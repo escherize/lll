@@ -1,0 +1,84 @@
+import "models"
+
+// LLL-643: the docs index.
+
+#[test]
+fn docs_kind_takes_the_catalogue_and_flashes_the_rest() {
+  assert docs_kind("") == ("", "")
+  assert docs_kind(" Decision ") == ("decision", "")
+  let (kind, err) = docs_kind("note")
+  assert kind == "" &&
+  err == "unknown kind 'note' (use one of: wiki, finding, decision, prd)"
+}
+
+#[test]
+fn doc_matches_slug_or_title_ignoring_case() {
+  let d = models.Doc { slug: "board-render", title: "Render On The Server", .. }
+  assert doc_matches(d, "")
+  assert doc_matches(d, "BOARD")
+  assert doc_matches(d, "on the server")
+  assert !doc_matches(d, "body only")
+}
+
+// LLL-635: a doc stored without a kind must not take the list down with it.
+#[test]
+fn a_doc_with_no_kind_is_a_row_with_a_dash() {
+  let row = doc_row_vm(
+    models.Doc { slug: "untyped", title: "Untyped", .. },
+    "TST",
+  )
+  assert row.kind_label == "" && row.author == "" &&
+  row.href == "/t/TST/doc/untyped"
+  assert doc_kind_label("prd") == "PRD" && doc_kind_label("wiki") == "Wiki"
+  let raw = docs_raw(DocsVM { docs: [row], team_key: "TST", .. })
+  assert raw.contains("- [untyped](/t/TST/doc/untyped) | Untyped | - | - | - |")
+}
+
+// LLL-551: a scoped viewer's row names a hidden author as "hidden member",
+// with no kind or owner; a full viewer's row names the bot and its owner.
+#[test]
+fn a_doc_row_follows_the_viewers_roster() {
+  let owner = models.MemberOwner { id: "bob", name: "bob" }
+  let bot = models.Member {
+    id: "garden",
+    name: "bot-garden",
+    kind: "bot",
+    scope: "all",
+    expand: Some(models.MemberExpand { owner: Some(owner) }),
+    ..,
+  }
+  let mut d = models.Doc {
+    slug: "s",
+    title: "t",
+    kind: "decision",
+    author: "garden",
+    ..,
+  }
+  d.expand.author = Some(bot)
+  let alice = models.Member {
+    id: "alice",
+    name: "alice",
+    kind: "person",
+    scope: "teams",
+    teams: ["t-a"],
+    ..,
+  }
+
+  let scoped = Roster {
+    scoped: true,
+    members: team_roster([alice, bot], "t-a"),
+  }
+  let hidden = doc_row_vm(scoped.doc(d), "TST")
+  assert hidden.author == "hidden member" && hidden.author_kind == "" &&
+  hidden.author_via == ""
+
+  let full = doc_row_vm(
+    Roster { scoped: false, members: [alice, bot] }.doc(d),
+    "TST",
+  )
+  assert full.author == "bot-garden" && full.author_kind == "bot" &&
+  full.author_via == "bob"
+  assert docs_raw(DocsVM { docs: [full], team_key: "TST", .. }).contains(
+    "| bot-garden [bot via bob] |",
+  )
+}

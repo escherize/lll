@@ -20,6 +20,7 @@
 <a data-g="i" href="{{.BoardBase}}issues"{{if eq .Active "issues"}} class="active"{{end}}><svg width="14" height="14"><use href="#ic-issues"/></svg> All issues</a>
 {{if .Me}}<a data-g="m" href="{{.BoardBase}}?assignee={{.Me}}" title="Issues assigned to {{.Me}}"{{if eq .Active "mine"}} class="active"{{end}}><svg width="14" height="14"><use href="#ic-me"/></svg> My issues</a>
 {{end}}<a data-g="p" href="{{.BoardBase}}projects"{{if eq .Active "projects"}} class="active"{{end}}><svg width="14" height="14"><use href="#ic-project"/></svg> Projects</a>
+<a data-g="d" href="{{.BoardBase}}docs"{{if eq .Active "docs"}} class="active"{{end}}><svg width="14" height="14"><use href="#ic-doc"/></svg> Docs</a>
 <a data-g="s" href="{{.BoardBase}}search"{{if eq .Active "search"}} class="active"{{end}}><svg width="14" height="14"><use href="#ic-search"/></svg> Search{{/* The palette's only advertisement. A shortcut nobody is told about is a shortcut nobody uses. */}}<kbd class="rail-kbd" title="Open the jump palette: Cmd+K, or Ctrl+K">⌘K</kbd></a>
 {{template "rail-teams" .Teams}}
 {{if not .Scoped}}{{template "rail-favorites" .Favorites}}
@@ -92,6 +93,7 @@
 <a data-cmdk-item href="{{.BoardBase}}issues"><span class="cmdk-kind">list</span>All issues</a>
 {{if .Me}}<a data-cmdk-item href="{{.BoardBase}}?assignee={{.Me}}"><span class="cmdk-kind">list</span>My issues</a>
 {{end}}<a data-cmdk-item href="{{.BoardBase}}projects"><span class="cmdk-kind">list</span>Projects</a>
+<a data-cmdk-item href="{{.BoardBase}}docs"><span class="cmdk-kind">list</span>Docs</a>
 <a data-cmdk-item href="{{.BoardBase}}search"><span class="cmdk-kind">page</span>Search every field</a>
 {{if not .Scoped}}<a data-cmdk-item href="{{.BoardBase}}settings/identity"><span class="cmdk-kind">settings</span>Identity, emoji and accent</a>
 <a data-cmdk-item href="{{.BoardBase}}settings/labels"><span class="cmdk-kind">settings</span>Labels</a>
@@ -120,6 +122,7 @@
 <p><span>Go to all issues</span><kbd class="cmdk-esc">g i</kbd></p>
 {{if .Me}}<p><span>Go to my issues</span><kbd class="cmdk-esc">g m</kbd></p>
 {{end}}<p><span>Go to projects</span><kbd class="cmdk-esc">g p</kbd></p>
+<p><span>Go to docs</span><kbd class="cmdk-esc">g d</kbd></p>
 <p><span>Go to search</span><kbd class="cmdk-esc">g s</kbd></p>
 <h3>Board</h3>
 <p><span>New issue</span><kbd class="cmdk-esc">c</kbd></p>

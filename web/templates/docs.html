@@ -1,0 +1,57 @@
+{{/* The docs index (LLL-643) — the list a doc page never had.
+
+     Every doc has had an address since LLL-405, but nothing listed them, so
+     a reader found one only through an issue's links, search or a typed URL.
+     One row per doc, newest first, the whole row a link to its page.
+
+     The filter is a plain GET form, as on /issues, so the URL is the whole
+     state of the page: ?kind= and ?q= make a filtered list someone can paste.
+     No page-specific JavaScript and no /events connection, for the reason
+     /projects and /issues have none: the bridge broadcasts ONE unfiltered
+     #board fragment to every board-scoped client.
+
+     Class names are namespaced `dl-` because template names and CSS class
+     names are both global here (task-106). */}}
+{{define "docs-page"}}<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>{{template "team-title-prefix" .Rail}}docs</title>
+<link rel="stylesheet" href="/static/theme.css">
+{{template "accent-head" .Rail}}
+</head>
+<body>
+{{template "icons"}}
+<div class="app">
+  {{template "rail" .Rail}}
+  <div class="main">
+    <header class="topbar">
+      <div class="crumbs"><span class="here">Docs</span></div>
+      <div class="spacer"></div>
+      <span class="pj-count">{{len .Page.Docs}} doc{{if ne (len .Page.Docs) 1}}s{{end}}</span>
+    </header>
+    {{if .Page.Error}}<div id="flash" class="flash" role="alert" aria-atomic="true">{{.Page.Error}}</div>{{end}}
+    <form class="itbl-bar" method="get" action="{{.Page.Base}}" role="search">
+      <label for="f-kind">Kind</label>
+      <select id="f-kind" name="kind"><option value="">Any</option>{{range .Page.Kinds}}<option value="{{.Value}}"{{if eq .Value $.Page.Kind}} selected{{end}}>{{.Label}}</option>{{end}}</select>
+      <label for="f-q">Text</label>
+      <input id="f-q" class="dl-q" type="search" name="q" value="{{.Page.Q}}" placeholder="Slug or title">
+      <button type="submit" class="btn">Filter</button>
+      {{if or .Page.Kind .Page.Q}}<a class="itbl-clear" href="{{.Page.Base}}">Clear</a>{{end}}
+    </form>
+    {{template "docs-list" .Page}}
+  </div>
+</div>
+</body>
+</html>{{end}}
+
+{{/* #docs is this page's stable id, matching #board, #issues and #projects. */}}
+{{define "docs-list"}}<div id="docs" class="pj-body">
+{{range .Docs}}<a class="pj-row dl-row" href="{{.Href}}">
+<span class="dl-kind">{{if .KindLabel}}{{.KindLabel}}{{else}}<span class="none">—</span>{{end}}</span>
+<span class="pj-main"><span class="pj-name">{{.Title}}</span><span class="pj-desc">{{.Slug}}{{if .Area}} · {{.Area}}{{end}}</span></span>
+<span class="dl-author">{{if .Author}}{{template "avatar" .AuthorAvatar}}<span class="dl-name">{{.Author}}</span>{{if .AuthorKind}}<span class="dl-akind">{{.AuthorKind}}{{if .AuthorVia}} via {{.AuthorVia}}{{end}}</span>{{end}}{{else}}<span class="none">—</span>{{end}}</span>
+<span class="dl-age" title="{{.UpdatedAt}}">{{.Updated}}</span>
+</a>
+{{else}}<p class="pj-empty">{{if or .Kind .Q}}No docs match. <a class="prose-link" href="{{.Base}}">Show every doc</a>.{{else}}No docs yet. Run <code>lll doc create</code> to write one.{{end}}</p>
+{{end}}</div>{{end}}

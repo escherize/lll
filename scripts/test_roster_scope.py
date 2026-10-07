@@ -249,7 +249,13 @@ with tempfile.TemporaryDirectory(prefix='lll-551-') as directory:
         def page(path, who):
             return call(board, path, headers={'Cookie': 'lll_board=' + toks[who]})
 
-        for path in ['/t/ALPHA/', '/t/ALPHA/?raw', '/t/ALPHA/issue/ALPHA-1', '/t/ALPHA/issue/ALPHA-1?raw',
+        # LLL-643: the docs index names a hidden author as "hidden member".
+        assert call(api, '/api/collections/docs/records', {'team': alpha['id'], 'slug': 'garden-doc', 'title': 'garden doc',
+                                                           'kind': 'wiki', 'body': 'b', 'author': ids['bot-garden']}, su)[0] == 200
+        assert '| hidden member |' in page('/t/ALPHA/docs?raw', 'alpha-guest')[1]
+        assert '| bot-garden [bot] |' in page('/t/ALPHA/docs?raw', 'full-person')[1], 'control: full access names the author'
+        for path in ['/t/ALPHA/', '/t/ALPHA/?raw', '/t/ALPHA/docs', '/t/ALPHA/docs?raw',
+                     '/t/ALPHA/issue/ALPHA-1', '/t/ALPHA/issue/ALPHA-1?raw',
                      '/t/ALPHA/issues', '/t/ALPHA/issues?raw', '/t/ALPHA/search?q=garden', '/t/ALPHA/search?q=note&raw',
                      '/t/ALPHA/search?q=note&fragment=1', '/t/ALPHA/search?q=note&palette=1']:
             code, body = page(path, 'alpha-guest')

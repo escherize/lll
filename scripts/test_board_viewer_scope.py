@@ -133,14 +133,15 @@ with tempfile.TemporaryDirectory(prefix='lll-545-') as directory:
             # The rail offers nothing a scoped viewer cannot open.
             for absent in ['id="rail-favorites"', 'id="rail-views"', '/t/ALPHA/settings']:
                 assert absent not in body, f'scoped rail shows {absent}'
-            for path in ['/t/ALPHA/issues', '/t/ALPHA/projects', '/t/ALPHA/issue/ALPHA-1', '/t/ALPHA/doc/cross',
+            for path in ['/t/ALPHA/issues', '/t/ALPHA/projects', '/t/ALPHA/docs', '/t/ALPHA/docs?raw',
+                         '/t/ALPHA/issue/ALPHA-1', '/t/ALPHA/doc/cross',
                          '/t/ALPHA/?raw', '/t/ALPHA/issues?raw', '/t/ALPHA/issue/ALPHA-1?raw', '/t/ALPHA/doc/cross?raw']:
                 code, body, _ = page(path, tok)
                 assert code == 200, (path, code, body)
                 assert_clean(body, path)
         missing = page('/t/NOPE/', rw_tok)
         for path in ['/t/BETA/', '/t/BETA', '/t/beta/issues', '/t/BETA/issue/BETA-1', '/t/ALPHA/issue/BETA-1',
-                     '/t/BETA/doc/bdoc', '/t/BETA/search?q=zebra', '/events?team=BETA', '/events?page=issue&key=BETA-1',
+                     '/t/BETA/doc/bdoc', '/t/BETA/docs', '/t/BETA/docs?raw', '/t/BETA/search?q=zebra', '/events?team=BETA', '/events?page=issue&key=BETA-1',
                      '/attachments/file?key=BETA-1&file=x.png', '/issue/BETA-1']:
             code, body, _ = page(path, rw_tok)
             assert code == 404, (path, code)
