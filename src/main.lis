@@ -12,6 +12,11 @@ fn main() {
     return
   }
 
+  // LLL-441: before anything reads the token, renew a login token near
+  // expiry. login and logout replace or remove it, so renewing is wasted.
+  if noun != "login" && noun != "logout" {
+    commands.renew_login_token()
+  }
   let skew = commands.version_skew_check(noun)
   let result = match commands.scoped_args(os.Args) {
     Ok(args) => dispatch(noun, args),

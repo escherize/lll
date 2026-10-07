@@ -141,6 +141,25 @@ fn token_subject_reads_the_id_from_a_pocketbase_auth_jwt() {
   assert collection == "pbc_3572739349"
 }
 
+// LLL-441: a login token (refreshable: true) is renewed inside the last day
+// of its life; an impersonation token (refreshable: false) never is, and an
+// expired one cannot be, because auth-refresh refuses it.
+#[test]
+fn only_a_live_refreshable_token_near_expiry_needs_refresh() {
+  // payload = {"collectionId":"pbc_1","exp":1000000,"id":"abc","refreshable":true}
+  let login = "h.eyJjb2xsZWN0aW9uSWQiOiJwYmNfMSIsImV4cCI6MTAwMDAwMCwiaWQiOiJhYmMiLCJyZWZyZXNoYWJsZSI6dHJ1ZX0.s"
+  // the same payload with refreshable: false
+  let impersonate = "h.eyJjb2xsZWN0aW9uSWQiOiJwYmNfMSIsImV4cCI6MTAwMDAwMCwiaWQiOiJhYmMiLCJyZWZyZXNoYWJsZSI6ZmFsc2V9.s"
+  let exp = 1000000
+  assert token_needs_refresh(login, exp - 3600)
+  assert !token_needs_refresh(login, exp - refresh_window())
+  assert !token_needs_refresh(login, exp - 4 * 86400)
+  assert !token_needs_refresh(login, exp)
+  assert !token_needs_refresh(login, exp + 1)
+  assert !token_needs_refresh(impersonate, exp - 3600)
+  assert !token_needs_refresh("not-a-jwt", exp - 3600)
+}
+
 #[test]
 fn token_subject_declines_what_it_cannot_read() {
   // Not three segments; a payload that is not JSON; a payload with no id.

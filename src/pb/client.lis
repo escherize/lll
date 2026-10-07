@@ -471,6 +471,7 @@ fn token_claims(tok: string) -> Option<TokenClaims> {
 struct TokenClaims {
   id: string,
   exp: int,
+  refreshable: bool,
   #[json("collectionId")]
   collection_id: string,
 }
@@ -489,6 +490,38 @@ pub fn token_expiry(tok: string) -> Option<int> {
 pub fn token_expired(tok: string) -> bool {
   let Some(exp) = token_expiry(tok) else { return false }
   exp < time.Now().Unix() as int
+}
+
+/// How close to expiry a refreshable token is renewed, in seconds (LLL-441).
+/// A `lll login` token lives 5 days (the members collection's default
+/// AuthToken duration) and auth-refresh refuses it once expired, so renewal
+/// must happen while it still works. One refresh moves exp a full duration
+/// out, so the next one is days away rather than on every command.
+pub fn refresh_window() -> int {
+  86400
+}
+
+/// True when `tok` says it is refreshable and expires inside the refresh
+/// window but has not expired yet. Impersonation tokens (`lll token create`,
+/// bots) carry refreshable: false and never qualify.
+pub fn token_needs_refresh(tok: string, now: int) -> bool {
+  let Some(claims) = token_claims(tok) else { return false };
+  claims.refreshable && claims.exp > now && claims.exp - now < refresh_window()
+}
+
+/// PocketBase's auth-refresh for the collection `tok` names: a fresh token
+/// for the same record, its exp a full collection duration from now.
+pub fn refresh_token(base: string, tok: string) -> Result<string, string> {
+  let Some(collection) = token_collection(tok) else {
+    return Err("the token names no collection")
+  }
+  let body = request(base, "POST", f"/api/collections/{collection}/auth-refresh", "", bearer(tok), false)?
+  let mut auth = TokenOnly { .. }
+  if let Err(e) = json.Unmarshal(body.bytes(), &auth) {
+    return Err(f"decoding the refreshed token: {e}")
+  }
+  if auth.token == "" { return Err("the refresh response carried no token") }
+  Ok(auth.token)
 }
 
 /// The refusal for a token the server no longer accepts.
