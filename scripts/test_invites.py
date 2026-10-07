@@ -252,7 +252,7 @@ with tempfile.TemporaryDirectory(prefix='lll-invites-') as directory:
                    for n in range(2)]
         code, body, _ = call(api, '/api/batch', {'requests': renames}, token)
         assert code == 400, (code, body)
-        assert 'batch' in json.dumps(body).lower(), body
+        assert 'send each create or rename on its own' in json.dumps(body), body
         started = time.monotonic()
         assert call(api, f'/api/collections/members/records/{me}', {'name': 'After Batch'}, token, method='PATCH')[0] == 200
         assert redeem(invite('--team', 'ALPHA', '--ro'), 'After Batch Joiner')[0] == 303
