@@ -95,10 +95,10 @@ scripts. A removed spelling fails and names its replacement (LLL-644).
   config's url. It still needs the token from the home config and never
   renews against any other url, however close the spelling (LLL-653).
 - With no team configured, `label edit`, `label delete`, `project edit`,
-  `project delete` and `project view` refuse and ask for a team. Before
-  this, they acted on the first team's record with that name, so
+  `project delete` and `project view` refuse with "no team configured".
+  Before this, they acted on the first team's record with that name, so
   `lll label delete bug` could delete another team's label. Pass `--team KEY`
-  or configure a team. The list verbs still span every team, and their name
+  or configure a team with `lll attach`. The list verbs still span every team, and their name
   filters now match the name in every team: `issue list --label bug`,
   `--project`, `watch --label` and `issue next --exclude-label bug` used
   only the first team's `bug` (LLL-671).
@@ -107,7 +107,9 @@ scripts. A removed spelling fails and names its replacement (LLL-644).
   hidden from a team-scoped member) counts as open, so `issue next` no longer
   hands out an issue blocked by one. `issue view` shows it as "a hidden
   issue" without naming it. Such links come only from before LLL-631, which
-  refuses new cross-team references (LLL-672).
+  refuses new cross-team references (LLL-672). `watch --ready` still learns
+  of a visible cross-team blocker's change only on the dependent issue's
+  next event, because its subscription is filtered to the team.
 - `issue view` prints each blocker under its own team's key. A blocker in
   another team was printed with the viewed issue's team key, which named a
   different issue (LLL-674).

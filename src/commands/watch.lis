@@ -491,10 +491,18 @@ fn watch_ready(filters: query.Filters, json_mode: bool) -> Result<(), string> {
 /// flips its dependents ready on the blocker's own event; then from the
 /// issue's own expand, for a blocker the cache does not hold (another team's
 /// issue the reader can see). A blocker in neither is hidden, and not ready.
+///
+/// Known limit: the subscription is filtered to the configured team, so a
+/// cross-team blocker changing state sends no event, and its expanded state
+/// is as old as the dependent's last event. The dependent's next event
+/// catches up; `issue list --ready` sees the change at once.
 fn ready_keys(issues: Slice<models.Issue>) -> Slice<string> {
+  // Built once per call: the cache first, so its fresher record wins.
+  let mut seen = issues
+  for issue in issues { seen = seen.append(issue.expand.blocked_by...) }
   let mut out: Slice<string> = []
   for issue in issues {
-    if is_ready(issue, issues.append(issue.expand.blocked_by...)) { out = out.append(issue.id) }
+    if is_ready(issue, seen) { out = out.append(issue.id) }
   }
   out
 }

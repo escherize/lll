@@ -1149,6 +1149,11 @@ out=$(cd "$DATA_DIR" && env -u LLL_TEAM LLL_URL=$URL "$LIN" label delete triage 
 assert_contains "$out" "Deleted label triage" "label delete --team names the team"
 out=$(LLL_URL=$URL LLL_TEAM=ENG "$LIN" label list)
 assert_contains "$out" "triage" "deleting OPS's triage kept ENG's"
+set +e
+out=$(cd "$DATA_DIR" && env -u LLL_TEAM LLL_URL=$URL "$LIN" project view "Auth Revamp" 2>&1); rc=$?
+set -e
+[ "$rc" -ne 0 ] || fail "project view with no team: expected nonzero exit"
+assert_contains "$out" "no team configured" "project view with no team refuses rather than guess"
 
 # --- TASK-208: every label-create surface says check-first, reuse ---
 out=$(LLL_URL=$URL LLL_TEAM=ENG "$LIN" label --help)
