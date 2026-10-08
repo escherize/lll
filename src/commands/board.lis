@@ -25,7 +25,7 @@ pub fn board(args: Slice<string>) -> Result<(), string> {
   let mut base = web_base()?
   if p.given("--team") {
     base = team_link(base, p.one("--team"))?
-  } else if is_loopback(base) {
+  } else if (base.starts_with("http://") || base.starts_with("https://")) && is_loopback(base) {
     // The board is gated: a bare url answers 401 (LLL-648). On the machine
     // serving a loopback board, the printed link signs the browser in. Only
     // loopback: an LLL_BOARD_TOKEN must never ride to whatever other host
