@@ -13,7 +13,7 @@ async page => {
   await input.setInputFiles('/tmp/lll-35-browser-upload.txt');
   // A real issue update must preserve both pending upload and comment draft.
   const title = `Attachment browser verification ${Date.now()}`;
-  await page.request.post(`${base}/title`, {form: {key, title}});
+  await page.request.post(`${base}/title`, {headers: {Origin: base}, form: {key, title}});
   await page.locator('.issue-main h1').getByText(title, {exact: true}).waitFor();
   if (await input.evaluate(el => el.files.length) !== 1) throw new Error('realtime update lost selected file');
   // A rejected upload retains the selection and the comment so retry is possible.

@@ -16,7 +16,7 @@ pub struct Config {
 
 /// Where each field's winning value came from: "file:<path>", "env:LLL_X",
 /// "default", or "" when nothing set it. Filled in lockstep with the Config
-/// it explains and printed by `lll config --list`. The failure it exists for
+/// it explains and printed by `lll config list`. The failure it exists for
 /// is silent — a repo pointed at the wrong team lists the wrong issues and
 /// reports no error — so "which file won?" has to be a question you can ask.
 pub struct Sources {

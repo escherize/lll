@@ -246,9 +246,61 @@ fn usage_help(usage: string, spec: Slice<Flag>) -> string {
 fn unknown_flag(arg: string, usage: string, spec: Slice<Flag>) -> string {
   let kind = if arg.starts_with("-") { "unknown flag" } else { "unexpected argument" }
   let mut head = f"{kind}: '{arg}'"
-  if let Some(near) = nearest_flag(arg, spec) { head = f"{head} — did you mean '{near}'?" }
+  let near = match retired_flag(arg, spec) {
+    Some(new) => Some(new),
+    None => nearest_flag(arg, spec),
+  }
+  if let Some(near) = near { head = f"{head} — did you mean '{near}'?" }
   if usage == "" { return head }
   f"{head}\nusage: {usage}{section(spec)}"
+}
+
+/// Spellings lll no longer accepts, each with what replaced it (LLL-503,
+/// LLL-644; decisions D5 and D6 in doc v1-0-plan). One old spelling may have
+/// several replacements because it meant different things on different verbs:
+/// `-p` was a password, a path list and a priority. The refusal names the
+/// replacement the verb actually declares, so a script written for an older
+/// lll learns the new spelling from its first failure.
+fn retired_flags() -> Slice<(string, string)> {
+  [
+    ("--query", "--search"),
+    ("-m", "-b"),
+    ("--message", "-b"),
+    ("--assign", "--assignee"),
+    ("--for", "--until"),
+    ("--local", "--scratch"),
+    ("--description-replace-old", "--description-replace old=new"),
+    ("--description-replace-new", "--description-replace old=new"),
+    // D6: -t is title, -k kind, -p priority; the other meanings lost them.
+    ("-t", "--team"),
+    ("-k", "--key"),
+    ("-p", "--password"),
+    ("-p", "--paths"),
+    ("-p", "--path"),
+    // D6: --yes skips a confirmation; --force only overrides ownership or
+    // references, so a delete that had --force for the prompt now has --yes.
+    ("--force", "--yes"),
+    // -b is the body everywhere; -d stays only where the field is a description.
+    ("-d", "-b"),
+  ]
+}
+
+/// The replacement for a retired spelling, when this verb declares it.
+fn retired_flag(arg: string, spec: Slice<Flag>) -> Option<string> {
+  let typed = arg.split("=")[0]
+  for (old, new) in retired_flags() {
+    if old != typed { continue }
+    let flag = strings.Fields(new)[0]
+    if spec.find(|f| !f.hidden && spells(f, flag)).is_some() {
+      return Some(new)
+    }
+  }
+  None
+}
+
+/// Verbs lll no longer accepts, each with the verb that replaced it.
+fn retired_verbs() -> Slice<(string, string)> {
+  [("read", "view")]
 }
 
 /// The declared spelling closest to an unknown flag, when it is close:
@@ -411,6 +463,13 @@ pub fn dispatch(
     return Err(f"{help_marker()}{noun_help(noun, tagline, intro, cmds)}")
   }
   let Some(c) = resolve_command(cmds, verb) else {
+    for (old, new) in retired_verbs() {
+      if old == verb && resolve_command(cmds, new).is_some() {
+        return Err(
+          f"unknown {noun} command: '{verb}' - did you mean 'lll {noun} {new}'? (see 'lll {noun} --help')",
+        )
+      }
+    }
     return Err(f"unknown {noun} command: '{verb}' (see 'lll {noun} --help')")
   }
   // A verb with its own page answers --help with it; the generic parse-time

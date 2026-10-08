@@ -19,8 +19,20 @@ import "flags"
 // when the mirror drifts from it.
 
 pub fn skill(args: Slice<string>) -> Result<(), string> {
+  // The page already carries its own Usage: block, so --help prints it alone
+  // rather than under the generic "usage:" prefix.
+  if flags.help_requested([], args, 2) {
+    fmt.Println(skill_usage())
+    return Ok(())
+  }
   // parse_n, not parse: `get NAME` is two bare words and parse caps at one.
-  let parsed = flags.parse_n([], args, 2, 2, skill_usage())?
+  let parsed = flags.parse_n(
+    [],
+    args,
+    2,
+    2,
+    "lll skill list | lll skill get NAME",
+  )?
   let verb = parsed.first()
   match verb {
     "" => {

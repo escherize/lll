@@ -62,14 +62,12 @@ fn scope_label_prefers_the_project_then_the_team_key() {
   assert scope_label(models.Webhook { .. }) == "team ?"
 }
 
-/// A secret is never printed as its value: list output gets pasted into
-/// boards and screenshots.
+/// The list shows whether a secret is set, the only thing the server
+/// returns about it (LLL-661).
 #[test]
-fn secret_state_never_carries_the_value() {
-  assert secret_state("") == "-"
-  let state = secret_state("hunter2")
-  assert state == "secret set"
-  assert !strings.Contains(state, "hunter2")
+fn secret_state_says_set_or_not_set() {
+  assert secret_state(false) == "secret not set"
+  assert secret_state(true) == "secret set"
 }
 
 // -------------------------------------------------------------- dup_filter

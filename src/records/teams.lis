@@ -1,5 +1,6 @@
 import "go:encoding/json"
 import "go:net/url"
+import "go:regexp"
 import "go:strings"
 import "models"
 import "pb"
@@ -16,6 +17,19 @@ import "query"
 /// rather than failing to.
 pub fn normalize_team_key(key: string) -> string {
   strings.ToUpper(strings.TrimSpace(key))
+}
+
+/// Why `key` (already normalised) cannot be a team key, or None when it can
+/// (LLL-628). The server enforces the same pattern on create and on a key
+/// change; checking first means `lll attach` refuses before it writes
+/// .lll.toml, and the message names the rule rather than a raw 400.
+pub fn team_key_problem(key: string) -> Option<string> {
+  if regexp.MustCompile("^[A-Z][A-Z0-9_-]{0,15}$").MatchString(key) {
+    return None
+  }
+  Some(
+    "a team key is a letter followed by up to 15 letters, digits, '_' or '-' (^[A-Z][A-Z0-9_-]{0,15}$ after uppercasing), e.g. ENG or WEB-2",
+  )
 }
 
 pub fn find_team(key: string) -> Result<Option<models.Team>, string> {

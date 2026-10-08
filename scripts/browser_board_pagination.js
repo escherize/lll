@@ -36,7 +36,7 @@ async page => {
       await page.waitForTimeout(100);
     }
     phase = 'state mutation';
-    const response = await page.request.post(`${base}/state`, {form: {key: 'BP360-205', state: 'done'}});
+    const response = await page.request.post(`${base}/state`, {headers: {Origin: base}, form: {key: 'BP360-205', state: 'done'}});
     mutation = {status: response.status(), body: (await response.text()).slice(0, 3000)};
     const failure = await page.evaluate(body =>
       new DOMParser().parseFromString(body, 'text/html').querySelector('.error-summary')?.textContent?.trim(), mutation.body);

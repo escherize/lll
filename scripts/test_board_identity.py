@@ -42,7 +42,8 @@ with tempfile.TemporaryDirectory(prefix='lll-445-') as directory:
         endpoint = f'http://127.0.0.1:{board}' if form else url
         data = None if payload is None else (
             urllib.parse.urlencode(payload).encode() if form else json.dumps(payload).encode())
-        headers = {'Cookie': 'lll_board=identity-fixture'} if form else {}
+        # A board write carries the board's own Origin (LLL-630).
+        headers = {'Cookie': 'lll_board=identity-fixture', 'Origin': endpoint} if form else {}
         if token:
             headers['Authorization'] = f'Bearer {token}'
         if data is not None:

@@ -77,16 +77,17 @@ fn finding_new_spec_keeps_doc_new_strict_about_the_slug_flag() {
   }
 }
 
-/// LLL-505: 'finding view' and 'read' are hidden aliases of 'lll doc view'.
-/// Fleet task 9 had 6/30 agents guess 'finding view', so both still
-/// dispatch, but neither help nor completions advertise them.
+/// LLL-505: 'finding view' is a hidden alias of 'lll doc view'. Fleet task 9
+/// had 6/30 agents guess it, so it still dispatches, but neither help nor
+/// completions advertise it. 'finding read' was removed at 1.0 (LLL-644).
 #[test]
 fn finding_view_and_read_dispatch_but_stay_out_of_help_and_completions() {
-  for verb in ["view", "read"] {
-    let assert Some(c) = flags.resolve_command(finding_commands(), verb)
-    assert c.hidden
-    assert c.positional == "SLUG"
-  }
+  let assert Some(c) = flags.resolve_command(finding_commands(), "view")
+  assert c.hidden
+  assert c.positional == "SLUG"
+  assert flags.resolve_command(finding_commands(), "read").is_none()
+  let assert Err(refused) = finding(["lll", "finding", "read", "a-slug"])
+  assert refused.contains("did you mean 'lll doc view SLUG'?")
   let names = flags.command_names(finding_commands())
   assert !names.contains("view")
   assert !names.contains("read")

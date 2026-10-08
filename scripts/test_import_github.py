@@ -40,7 +40,7 @@ with tempfile.TemporaryDirectory(prefix='lll-gh-import-') as directory:
         return json.loads(cli('issue', 'list', '--json', team=team).stdout)['items']
 
     for team in ('GHEMOJI', 'GHPLAIN'):
-        cli('team', 'create', '-k', team, '-n', team)
+        cli('team', 'create', '--key', team, '-n', team)
     cli('import', 'github', 'fixture/tasks', '--emoji', '🧪')
     first = issues()
     assert len(first) == 2

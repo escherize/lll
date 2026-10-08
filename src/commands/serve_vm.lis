@@ -569,7 +569,7 @@ pub struct SettingsVM {
 pub struct ProjectVM {
   pub name: string,
   // The first ~2 lines of the description. Projects are the one record whose
-  // long text the web could never show; the CLI writes it with -d.
+  // long text the web could never show; the CLI writes it with -b.
   pub description: string,
   pub status: string,
   pub status_label: string,

@@ -39,6 +39,7 @@ pub fn label_commands() -> Slice<flags.Command> {
     },
     flags.Command {
       name: "edit",
+      alias: "update",
       summary: "rename or recolor a label; the label keeps its issues",
       spec: label_edit_spec(),
       positional: "NAME",
@@ -93,8 +94,8 @@ fn label_create_spec() -> Slice<flags.Flag> {
 
 fn label_edit_spec() -> Slice<flags.Flag> {
   flags.with_team([
-    flags.Flag { name: "-n", value: true, hint: "\"new name\"", help: "new label name", .. },
-    flags.Flag { name: "-c", value: true, hint: "\"#5e6ad2\"", help: "new hex color for the label", .. },
+    flags.Flag { name: "-n", alias: "--name", value: true, hint: "\"new name\"", help: "new label name", .. },
+    flags.Flag { name: "-c", alias: "--color", value: true, hint: "\"#5e6ad2\"", help: "new hex color for the label", .. },
   ])
 }
 
@@ -107,6 +108,7 @@ fn label_move_spec() -> Slice<flags.Flag> {
 fn label_delete_spec() -> Slice<flags.Flag> {
   flags.with_team([
     flags.Flag { name: "--force", help: "delete even while issues carry the label", .. },
+    flags.Flag { name: "--yes", help: "skip the delete confirmation (asked only on a terminal)", .. },
   ])
 }
 
@@ -187,6 +189,10 @@ fn label_delete(input: flags.CommandInput) -> Result<(), string> {
   let used = entity_issue_count("label", label.id)?
   if used > 0 && !p.given("--force") {
     return Err(refuse_delete("label", name, used))
+  }
+  if !confirmed_on_terminal(p.given("--yes"), f"delete label {name}?") {
+    fmt.Println("Aborted.")
+    return Ok(())
   }
   let _ = pb.delete(f"/api/collections/labels/records/{label.id}")?
   fmt.Println(deleted_line("label", name, used))

@@ -58,7 +58,7 @@ class Stream:
             assert b'id="issue-description"' not in event, 'unchanged description resent'
 
 
-cli('team', 'create', '-k', 'SSE58', '-n', 'Issue stream verification')
+cli('team', 'create', '--key', 'SSE58', '-n', 'Issue stream verification')
 cli('label', 'create', '-n', 'Stream keyboard label')
 source = ('large description & < >\n' * 5000)[:100000]
 record = json.loads(cli('issue', 'create', 'Stream lifecycle', '-d', source, '--json'))
@@ -112,7 +112,7 @@ victim = json.loads(cli('issue', 'create', 'Delete stream', '-d', 'Remove this b
 victim_key = 'SSE58-' + str(victim['number'])
 deleted = Stream(victim_key)
 assert b'Remove this body' in deleted.until(b'id="issue-description"')
-cli('issue', 'delete', victim_key, '--force')
+cli('issue', 'delete', victim_key, '--yes')
 assert b'id="issue-detail"' in deleted.until(b'was deleted')
 assert b'hidden' in deleted.until(b'id="issue-description"')
 print('Issue stream deletion: metadata tombstone and description clear passed')

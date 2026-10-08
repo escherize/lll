@@ -239,7 +239,6 @@ fn member_invite_spec() -> Slice<flags.Flag> {
     },
     flags.Flag {
       name: "--team",
-      alias: "-t",
       value: true,
       hint: "KEY",
       repeat: true,
@@ -248,6 +247,7 @@ fn member_invite_spec() -> Slice<flags.Flag> {
     },
     flags.Flag {
       name: "--read-only",
+      alias: "--ro",
       help: "they can read but not change anything (default: read-write)",
       ..,
     },
@@ -315,7 +315,6 @@ fn set_password_spec() -> Slice<flags.Flag> {
   with_admin_flags([
     flags.Flag {
       name: "--password",
-      alias: "-p",
       value: true,
       hint: "pw",
       help: "the new password; omit to be prompted twice",
@@ -384,6 +383,10 @@ or use --force to clear assignments, comment authorship and issue creator refere
     )
   }
 
+  if !confirmed_on_terminal(p.given("--yes"), f"delete member {member.name}?") {
+    fmt.Println("Aborted.")
+    return Ok(())
+  }
   let _ = pb.delete_as(f"/api/collections/members/records/{member.id}", su)?
   fmt.Println(f"removed member {member.name}")
   if assigned > 0 || authored > 0 || created > 0 {
@@ -399,6 +402,11 @@ fn member_remove_spec() -> Slice<flags.Flag> {
     flags.Flag {
       name: "--force",
       help: "clear assignments, comment authorship and creator references; keep issue/comment bodies",
+      ..,
+    },
+    flags.Flag {
+      name: "--yes",
+      help: "skip the delete confirmation (asked only on a terminal)",
       ..,
     },
     flags.Flag {
@@ -841,7 +849,7 @@ fn invite_lines(
   let attach = if team == "" {
     "  # then, in the repo you both work in: lll attach"
   } else {
-    f"  # then, in a clone of the repo: lll attach -k {team} (skip attach only if the clone already contains a committed .lll.toml)"
+    f"  # then, in a clone of the repo: lll attach --key {team} (skip attach only if the clone already contains a committed .lll.toml)"
   }
   [
     f"  temporary password: {password}",
@@ -904,7 +912,7 @@ Usage:
 
 Authenticates as the server administrator using --admin-email/--admin-password,
 LLL_ADMIN_EMAIL/LLL_ADMIN_PASSWORD, or a configured superuser token.
-Sets NAME's password to --password (alias -p) when supplied. Otherwise prompts
+Sets NAME's password to --password when supplied. Otherwise prompts
 twice with echo off when stdin is a terminal, or reads two lines when piped.
 The replacement password must contain at least 8 characters.
 
@@ -1146,7 +1154,7 @@ fn member_access_spec() -> Slice<flags.Flag> {
     flags.Flag { name: "--remove-team", value: true, hint: "KEY", repeat: true, help: "take this team away, keeping the others; removing the last leaves them seeing nothing", .. },
     flags.Flag { name: "--all-teams", help: "let them see every team", .. },
     flags.Flag { name: "--no-teams", help: "revoke: they see nothing, and their comments and issues stay", .. },
-    flags.Flag { name: "--read-only", help: "they can read but not change anything", .. },
+    flags.Flag { name: "--read-only", alias: "--ro", help: "they can read but not change anything", .. },
     flags.Flag { name: "--read-write", help: "they can change things in the teams they see", .. },
   ])
 }
@@ -1167,7 +1175,7 @@ Showing access works with any token. Changing it needs administrator
 credentials (--admin-email/--admin-password, or LLL_ADMIN_EMAIL and
 LLL_ADMIN_PASSWORD), the same gate as 'lll member invite': no member or bot
 token can change anyone's access, its own included. Revoking keeps the member
-and everything they wrote; 'lll member remove' deletes the member instead.
+and everything they wrote; 'lll member delete' deletes the member instead.
 " + flags.section(member_access_spec())
 }
 

@@ -795,5 +795,5 @@ fn wrong_port_hint(what: string, status: int, body: string) -> string {
   if status != 404 { return "" }
   if !strings.Contains(what, "/api/") { return "" }
   if strings.HasPrefix(strings.TrimSpace(body), "{") { return "" }
-  "\nthis host answers but is not serving the API. A current lll serves it at the same address as the board, so this is usually an older deployment - try https://host:8091, and check 'lll config --list'"
+  "\nthis host answers but is not serving the API. A current lll serves it at the same address as the board, so this is usually an older deployment - try https://host:8091, and check 'lll config list'"
 }

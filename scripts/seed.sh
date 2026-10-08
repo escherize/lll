@@ -202,8 +202,8 @@ people() {
 # Two projects and a spread of labels: enough for the project filter, the
 # label picker and the label inventory to have something to show.
 scaffolding() {
-  lll_idem project create -n "Board v2" -d "Make the board pleasant to live in." --status started
-  lll_idem project create -n "Onboarding" -d "Everything a second person hits in their first ten minutes." --status planned
+  lll_idem project create -n "Board v2" -b "Make the board pleasant to live in." --status started
+  lll_idem project create -n "Onboarding" -b "Everything a second person hits in their first ten minutes." --status planned
   lll_idem label create -n bug -c "#e5484d"
   lll_idem label create -n feature -c "#3e63dd"
   lll_idem label create -n chore -c "#8e8c99"

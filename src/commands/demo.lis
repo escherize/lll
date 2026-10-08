@@ -297,7 +297,7 @@ what was rejected, which is the half that is gone in six months.
 
   lll doc list
   lll doc view why-not-a-todo-list
-  lll doc create -t 'Why we picked X' --kind decision
+  lll doc create -t 'Why we picked X' -k decision
 
 Works if: the doc has a page on the board, and 'lll search' finds it by a word
 from its body rather than its title.",
@@ -319,7 +319,7 @@ flags. Commit it and every clone and worktree arrives configured.",
       state: "in-review",
       priority: 2,
       label: "setup",
-      body: f"  lll member add -n alex
+      body: f"  lll member create -n alex
   lll issue update {k}-9 --assignee alex
 
 Works if: reassigning an issue somebody else holds is refused and names the

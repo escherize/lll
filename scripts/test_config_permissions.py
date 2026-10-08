@@ -108,7 +108,7 @@ with tempfile.TemporaryDirectory(prefix='lll-config-permissions-') as directory:
         assert stat.S_IMODE(repo.stat().st_mode) == 0o644
         assert 'fake-config-permission-token' not in repo.read_text()
         repo.unlink()
-        run('attach', '-k', 'TEST')
+        run('attach', '--key', 'TEST')
         assert stat.S_IMODE(repo.stat().st_mode) == 0o644
         assert 'team = \"TEST\"' in repo.read_text()
         private()

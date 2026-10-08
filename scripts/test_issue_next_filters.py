@@ -41,7 +41,7 @@ def refused(args, needle):
     assert needle in result.stderr, (args, result.stderr)
 
 
-run('team', 'create', '-k', 'NXT', '-n', 'Next filters')
+run('team', 'create', '--key', 'NXT', '-n', 'Next filters')
 run('project', 'create', '-n', 'Alpha')
 for label in ('agent', 'ops', 'hold'):
     run('label', 'create', '-n', label)

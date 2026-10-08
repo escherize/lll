@@ -1,7 +1,6 @@
 import "display"
 import "go:encoding/json"
 import "go:fmt"
-import "go:strconv"
 import "go:strings"
 
 import "flags"
@@ -10,13 +9,17 @@ import "pb"
 import "query"
 
 /// `lll finding` (TASK-103) — the retrieval side of docs. A finding is a doc
-/// with kind=finding; `lll doc new -k finding` stays the authoring path, and
+/// with kind=finding; `lll finding create` files one, and
 /// these verbs answer "what do we know about THIS file / area". Surfacing is
 /// by area and path — a filter over kind='finding' — never full-text luck.
 ///
 /// Dispatched through the noun's Command table (TASK-307): dispatch, `lll
 /// finding --help` and shell completions all read it, so none can drift.
 pub fn finding(args: Slice<string>) -> Result<(), string> {
+  // Removed at 1.0 (D5); a finding is a doc, and 'doc view' is the read.
+  if args.get(2) == Some("read") {
+    return Err("unknown finding command: 'read' - did you mean 'lll doc view SLUG'? (see 'lll doc view --help')")
+  }
   flags.dispatch("finding", "retrieve findings near a path", finding_intro(), finding_commands(), args)
 }
 
@@ -35,7 +38,7 @@ pub fn finding_commands() -> Slice<flags.Command> {
     },
     flags.Command {
       name: "create", alias: "new",
-      summary: "file a finding: 'lll doc new -k finding' with the kind already set",
+      summary: "file a finding: 'lll doc create -k finding' with the kind already set",
       spec: finding_new_spec(),
       positional: "[\"slug\"]",
       run: finding_new,
@@ -66,9 +69,10 @@ pub fn finding_commands() -> Slice<flags.Command> {
     },
     // Hidden (LLL-505): a finding is a doc, so 'lll doc view' is the
     // documented read. Fleet task 9 had 6/30 agents guess 'finding view', so
-    // it and 'read' keep working without a help row or completion.
+    // it keeps working without a help row or completion. 'read' was removed
+    // at 1.0 (D5) and answers with a hint naming 'view'.
     flags.Command {
-      name: "view", alias: "read", hidden: true,
+      name: "view", hidden: true,
       summary: "show one finding by slug; the documented spelling is 'lll doc view'",
       spec: doc_view_spec(),
       positional: "SLUG",
@@ -92,7 +96,7 @@ project has a src/, so an unscoped answer would be another codebase's.
 
 Read a finding with 'lll doc view SLUG'; --raw and --json are available.
 
-Author findings with 'lll doc new -k finding -a <area> -p \"<paths>\"'.
+Author findings with 'lll finding create SLUG -t \"title\" -a <area> --paths \"<paths>\"'.
 `area` is conventionally the NAME of an existing label: an issue whose labels
 contain the area surfaces the finding — on its web page and in
 'lll issue view'. `paths` is comma-separated file or directory paths, the
@@ -125,8 +129,7 @@ fn finding_list_spec() -> Slice<flags.Flag> {
       ..,
     },
     flags.Flag {
-      name: "-p",
-      alias: "--path",
+      name: "--path",
       value: true,
       hint: "path",
       help: "only findings about this file or directory (what 'finding near' answers)",
@@ -213,21 +216,13 @@ fn finding_near(input: flags.CommandInput) -> Result<(), string> {
 fn finding_list(input: flags.CommandInput) -> Result<(), string> {
   let p = input.parsed
   let area = strings.TrimSpace(p.one("-a"))
-  // --search and -p exist because eight of thirty fleet agents asked list
-  // for them and none reached for 'near' from here.
+  // --search and --path exist because eight of thirty fleet agents asked
+  // list for them and none reached for 'near' from here.
   let search = strings.ToLower(strings.TrimSpace(p.one("--search")))
-  let path = strings.TrimSpace(p.one("-p"))
-  // Issue list's --limit validation, verbatim, run before any server call;
-  // the slice itself happens after the filters below (LLL-313).
-  let mut limit = 0
-  if p.given("--limit") {
-    let raw = p.one("--limit")
-    let Ok(n) = strconv.Atoi(raw) else {
-      return Err(f"--limit must be a positive integer, got '{raw}'")
-    }
-    if n < 1 { return Err(f"--limit must be a positive integer, got {n}") }
-    limit = n
-  }
+  let path = strings.TrimSpace(p.one("--path"))
+  // Issue list's --limit validation, run before any server call; the slice
+  // itself happens after the filters below (LLL-313).
+  let limit = limit_flag(p)?
   let mut findings = fetch_findings(current_team()?.id)?
   if area != "" {
     findings = findings.filter(|d| strings.TrimSpace(d.area) == area)

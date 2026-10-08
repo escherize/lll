@@ -33,8 +33,8 @@ def instant(record):
     return datetime.datetime.fromisoformat(record['updated'].replace('Z', '+00:00'))
 
 
-cli('team', 'create', '-k', 'SINCE', '-n', 'Since fixture')
-cli('team', 'create', '-k', 'SINCE2', '-n', 'Other since fixture')
+cli('team', 'create', '--key', 'SINCE', '-n', 'Since fixture')
+cli('team', 'create', '--key', 'SINCE2', '-n', 'Other since fixture')
 cli('member', 'add', '-n', 'since-owner')
 cli('label', 'create', '-n', 'delta')
 old = json.loads(cli('issue', 'create', 'Before window', '--json',

@@ -110,9 +110,12 @@ Usage:
   lll bot bot-<name>      an agent identity in one command: member + token, printed
                           once in a prompt to paste into the agent (--env: only the
                           exports); the name must start with bot- (lll bot bot-myrepo)
+  lll bot rotate bot-<name>
+                          a new token for a bot; the previous one stops working
+                          (see 'lll bot rotate --help')
   lll team <command>      work with teams (see 'lll team --help')
   lll member <command>    work with members (see 'lll member --help')
-  lll invite create --team KEY [--ro]
+  lll invite create --team KEY [--read-only]
                           a single-use link that lets one person join with
                           those teams (see 'lll invite --help')
   lll project <command>   work with projects (see 'lll project --help')
@@ -140,7 +143,7 @@ Usage:
   lll whoami              which member, server and team you are acting as
   lll token create        mint a static agent token (superuser only)
                           (see 'lll token --help')
-  lll attach [-k KEY]     write this repo's team to a shareable
+  lll attach [--key KEY]  write this repo's team to a shareable
                           .lll.toml (see 'lll attach --help')
   lll watch [flags]       live event stream for a query; --ready streams the
                           ready agenda (see 'lll watch --help')
@@ -159,8 +162,8 @@ Usage:
   lll --version, -v       print the version
   lll --help              show this help
 
-Scoped commands (issue, project, label, doc, finding, import, watch) accept
---team KEY.
+Scoped commands (issue, project, label, doc, finding, import, export, watch,
+search, webhook) accept --team KEY.
 It overrides LLL_TEAM for this invocation and never writes configuration.
 Explicit issue IDs still target their own team.
 
@@ -171,7 +174,7 @@ Examples:
                           priority, age, unblocks; add --claim to take it
 
 Configuration (env > the repo's .lll.toml > ~/.config/lll/lll.toml; the files
-layer, each supplying the keys it names — 'lll config --list' shows which won):
+layer, each supplying the keys it names — 'lll config list' shows which won):
   LLL_URL      lll server base URL (default http://127.0.0.1:8090)
   LLL_TEAM     default team key (e.g. ENG); scopes 'issue list', used by 'issue create'
   LLL_SORT     default sort for 'issue list': {strings.Join(query.sort_fields(), ", ")}; prefix - to descend

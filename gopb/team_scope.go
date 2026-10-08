@@ -289,11 +289,14 @@ func added(now, before []string) []string {
 	return out
 }
 
-// checkNewRefs runs refsInScope over the relation ids a write adds. Only
-// added ids are checked: a link an all-scope member made earlier must not
-// block a scoped member's unrelated edit.
+// checkNewRefs runs refsInScope over the relation ids a write adds, so a
+// narrow caller is told about a hidden id exactly as about a missing one.
+// For every caller (an all-scope member sees every team, so it passes here)
+// the team rule itself is registerTeamRefGuard's, which runs on the save.
+// Only added ids are checked: a link made before LLL-631 must not block an
+// unrelated edit.
 func checkNewRefs(app core.App, auth *core.Record, record *core.Record) error {
-	if auth == nil || effectiveAccess(app, auth).all {
+	if auth == nil {
 		return nil
 	}
 	original := record.Original()

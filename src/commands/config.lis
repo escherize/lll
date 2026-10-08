@@ -18,18 +18,27 @@ pub fn config_cmd(args: Slice<string>) -> Result<(), string> {
   flags.dispatch("config", "manage configuration", config_intro(), config_commands(), args)
 }
 
-/// Every config verb, as a value. `--list` is spelled like a flag but IS the
-/// verb - `git config --list` is the model - so it dispatches by that name.
-/// No verb here has a hand-written page; each `page` is "" and help is the
-/// usage line plus flags, generated from `spec`.
+/// Every config verb, as a value. `list` keeps `--list` as an alias: it was
+/// the verb before 1.0, after `git config --list`. No verb here has a
+/// hand-written page; each `page` is "" and help is the usage line plus
+/// flags, generated from `spec`.
 pub fn config_commands() -> Slice<flags.Command> {
   [
     flags.Command {
-      name: "--list",
+      name: "list",
+      alias: "--list",
       summary: "every effective value and the file it came from",
       spec: [],
       run: config_list,
       ..
+    },
+    flags.Command {
+      name: "get",
+      summary: "print one effective value: url, web_url, team or sort",
+      spec: [],
+      positional: "KEY",
+      run: config_get,
+      ..,
     },
     flags.Command {
       name: "check",
@@ -88,7 +97,7 @@ fn config_set(input: flags.CommandInput) -> Result<(), string> {
     let effective = if key == "url" { cfg.url } else { cfg.web_url }
     let origin = if key == "url" { src.url } else { src.web_url }
     if effective != endpoint {
-      fmt.Println(f"note: {origin} overrides this setting; 'lll config --list' shows the effective configuration")
+      fmt.Println(f"note: {origin} overrides this setting; 'lll config list' shows the effective configuration")
     }
     return Ok(())
   }
@@ -219,7 +228,7 @@ fn write_home_config(link: string, out: string) -> Result<(), string> {
   Ok(())
 }
 
-/// `lll config --list` — every effective value and where it came from, after
+/// `lll config list` — every effective value and where it came from, after
 /// `git config --list --show-origin`. The failure this answers is silent: a
 /// repo reading the wrong team lists the wrong issues and reports nothing, so
 /// being able to ask which file won is the whole debugging affordance.
@@ -238,6 +247,29 @@ fn config_list(_input: flags.CommandInput) -> Result<(), string> {
   if let Some(warning) = committed_token_warning(src.token) {
     fmt.Println(warning)
   }
+  Ok(())
+}
+
+/// `lll config get KEY` — the effective value alone, for a script to read.
+/// The token is a secret, so it is refused here as in `config list`.
+fn config_get(input: flags.CommandInput) -> Result<(), string> {
+  let key = input.parsed.first()
+  if key == "" { return Err(f"usage: {input.usage}") }
+  let (cfg, src) = config.load_traced()?
+  let (value, origin) = match key {
+    "url" => (cfg.url, src.url),
+    "web_url" => (cfg.web_url, src.web_url),
+    "team" => (cfg.team, src.team),
+    "sort" => (cfg.sort, src.sort),
+    "token" => return Err(
+      "the token is a secret and is not printed; 'lll config list' shows where it comes from",
+    ),
+    other => return Err(
+      f"unknown config key '{other}'; keys: url, web_url, team, sort",
+    ),
+  }
+  if origin == "" { return Err(f"{key} is not set (see 'lll config list')") }
+  fmt.Println(value)
   Ok(())
 }
 
@@ -305,7 +337,7 @@ fn config_init(_input: flags.CommandInput) -> Result<(), string> {
 # Precedence: env vars (LLL_URL, LLL_TEAM, LLL_SORT, LLL_WEB_URL,
 # LLL_TOKEN) > this file > ~/.config/lll/lll.toml. The files layer: each
 # supplies the keys it names, so a key left commented out here is inherited
-# from the home config. 'lll config --list' shows every effective value and
+# from the home config. 'lll config list' shows every effective value and
 # the file it came from.
 #
 # Committed at a repo root this file should carry 'team' and nothing else —

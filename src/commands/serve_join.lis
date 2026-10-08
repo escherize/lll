@@ -136,13 +136,16 @@ pub fn join_target(keys: Slice<string>) -> string {
 }
 
 /// Headers every /join answer carries. The code is in this page's URL, so
-/// no Referer may leave it, no cache may keep it, and no other site may
-/// frame the form to trick a click.
+/// no Referer may leave it for another origin, no cache may keep it, and no
+/// other site may frame the form to trick a click. The policy is
+/// same-origin, not no-referrer: under no-referrer a browser sends
+/// `Origin: null` on the form's own POST, which the board's origin check
+/// (LLL-630) refuses.
 fn join_respond(w: http.ResponseWriter, status: int, page: string) {
   let mut h = w.Header()
   h.Set("Content-Type", "text/html; charset=utf-8")
   h.Set("Cache-Control", "no-store")
-  h.Set("Referrer-Policy", "no-referrer")
+  h.Set("Referrer-Policy", "same-origin")
   h.Set("X-Frame-Options", "DENY")
   h.Set(
     "Content-Security-Policy",
@@ -186,7 +189,7 @@ style='padding: .5rem .6rem; font: inherit; color: inherit; border: 1px solid #b
 <head>
 <meta charset='utf-8'>
 <meta name='viewport' content='width=device-width, initial-scale=1'>
-<meta name='referrer' content='no-referrer'>
+<meta name='referrer' content='same-origin'>
 <title>Join this lll board</title>
 </head>
 <body style='font-family: ui-sans-serif, system-ui, sans-serif; max-width: 42rem; margin: 4rem auto; padding: 0 1rem; color: #1c1c1e; line-height: 1.5;'>

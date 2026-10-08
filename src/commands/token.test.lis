@@ -91,7 +91,7 @@ fn agent_prompt_is_the_design_doc_prompt() {
   let want = "true 'You are joining lll team ALPHA at https://lll.example.com.'
 export LLL_URL=https://lll.example.com
 export LLL_TOKEN=aaa.bbb-c_d.eee
-lll attach -k ALPHA
+lll attach --key ALPHA
 true 'Read the workflow:'
 lll skill get software-factory
 true 'Claim an issue before you edit code; record findings on the board.'
@@ -235,7 +235,7 @@ fn every_allowed_prompt_is_a_harmless_script_in_every_shell(t: TestContext) {
         let (names, log) = run_prompt_in(t, shell, url, team)
         assert names.equals(["args.log", "bin", "prompt.txt"])
         // The stub saw exactly the two intended commands, each value whole.
-        assert log == f"attach\n-k\n{team}\nskill\nget\nsoftware-factory\n"
+        assert log == f"attach\n--key\n{team}\nskill\nget\nsoftware-factory\n"
       }
     }
   }

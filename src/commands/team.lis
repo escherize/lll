@@ -34,8 +34,9 @@ pub fn team_commands() -> Slice<flags.Command> {
     },
     flags.Command {
       name: "create",
-      summary: "create a team",
+      summary: "create a team; the key is the bare argument or --key",
       spec: team_create_spec(),
+      positional: "[KEY]",
       run: team_create,
       ..
     },
@@ -91,7 +92,7 @@ pub fn team_commands() -> Slice<flags.Command> {
       name: "delete",
       summary: "delete a team that holds no issues",
       page: team_delete_page(),
-      spec: [],
+      spec: team_delete_spec(),
       positional: "KEY",
       run: team_delete,
       ..
@@ -105,7 +106,7 @@ fn team_intro() -> string {
   "Renaming the key rewrites nothing else, because issue keys are derived from it
 (team key + number), so every key on the board and in the CLI follows at once.
 Three things do NOT follow (TASK-87):
-  - the 'team =' line in .lll.toml, and LLL_TEAM — rerun 'lll attach -k NEW'
+  - the 'team =' line in .lll.toml, and LLL_TEAM — rerun 'lll attach --key NEW'
   - git branches already named eng-12-slug keep the old key
   - OLD-1 mentions inside descriptions and comment bodies are stored text
 
@@ -145,15 +146,15 @@ fn team_list_spec() -> Slice<flags.Flag> {
 fn team_create_spec() -> Slice<flags.Flag> {
   [
     flags.Flag {
-      name: "-k",
+      name: "--key",
       value: true,
       hint: "KEY",
-      required: true,
-      help: "team key (e.g. ENG)",
+      help: "team key (e.g. ENG); or give it as the bare argument",
       ..
     },
     flags.Flag {
       name: "-n",
+      alias: "--name",
       value: true,
       hint: "\"Name\"",
       required: true,
@@ -163,25 +164,33 @@ fn team_create_spec() -> Slice<flags.Flag> {
   ]
 }
 
+fn team_delete_spec() -> Slice<flags.Flag> {
+  [flags.Flag { name: "--yes", help: "skip the delete confirmation (asked only on a terminal)", .. }]
+}
+
 /// `rename` takes the same two fields `create` does, both optional: they are
 /// different things (KEY is the derived-issue-key prefix, name is prose), and
 /// a rename that insisted on both would force a no-op edit of the other.
 fn team_rename_spec() -> Slice<flags.Flag> {
   [
     flags.Flag {
-      name: "-k",
+      name: "--key",
       value: true,
       hint: "KEY",
       help: "new team key (e.g. ENG); issue keys follow immediately",
       ..
     },
-    flags.Flag { name: "-n", value: true, hint: "\"Name\"", help: "new team name", .. },
+    flags.Flag { name: "-n", alias: "--name", value: true, hint: "\"Name\"", help: "new team name", .. },
   ]
 }
 
 fn team_create(input: flags.CommandInput) -> Result<(), string> {
   let p = input.parsed
-  let key = p.one("-k")
+  if p.first() != "" && p.given("--key") {
+    return Err(f"give the team key as the bare argument or --key, not both\nusage: {input.usage}")
+  }
+  let key = if p.given("--key") { p.one("--key") } else { p.first() }
+  if strings.TrimSpace(key) == "" { return Err(f"a team key is required (e.g. ENG)\nusage: {input.usage}") }
   let name = p.one("-n")
 
   let created = create_team(key, name)?
@@ -201,7 +210,7 @@ struct TeamNamePatch { name: string }
 #[json]
 struct TeamRenamePatch { key: string, name: string }
 
-/// `lll team rename KEY [-k NEW] [-n "Name"]` — TASK-87.
+/// `lll team rename KEY [--key NEW] [-n "Name"]` — TASK-87.
 ///
 /// The rename itself is one PATCH to one record: issue keys are DERIVED
 /// (team key + number) and never stored, so ENG-1 becomes PLAT-1 on the
@@ -215,10 +224,10 @@ fn team_rename(input: flags.CommandInput) -> Result<(), string> {
   if key == "" {
     return Err(f"usage: {usage}")
   }
-  let new_key = records.normalize_team_key(p.one("-k"))
+  let new_key = records.normalize_team_key(p.one("--key"))
   let new_name = p.one("-n")
   if new_key == "" && new_name == "" {
-    return Err(f"nothing to rename — give -k, -n, or both\nusage: {usage}")
+    return Err(f"nothing to rename — give --key, -n, or both\nusage: {usage}")
   }
   let Some(t) = records.find_team(key)? else {
     return Err(unknown_team(key))
@@ -227,6 +236,7 @@ fn team_rename(input: flags.CommandInput) -> Result<(), string> {
   // as a raw PocketBase validation error. Saying which key is taken is the
   // more useful answer: the fix is a different key, not a retry.
   if new_key != "" && new_key != t.key {
+    if let Some(problem) = records.team_key_problem(new_key) { return Err(problem) }
     let taken = records.find_team(new_key)?
     if taken.is_some() {
       return Err(f"a team with key '{new_key}' already exists — see 'lll team list'")
@@ -272,7 +282,7 @@ fn team_rename_collateral(old_key: string, new_key: string) -> Slice<string> {
   if old_key == new_key { return [] }
   [
     f"Issue keys follow immediately ({old_key}-1 is now {new_key}-1). These do not:",
-    f"  - .lll.toml / LLL_TEAM still say {old_key} — 'lll attach -k {new_key}'",
+    f"  - .lll.toml / LLL_TEAM still say {old_key} — 'lll attach --key {new_key}'",
     f"  - git branches already named {strings.ToLower(old_key)}-12-slug keep the old key",
     f"  - {old_key}-1 mentions inside descriptions and comment bodies are stored text",
   ]
@@ -394,6 +404,7 @@ pub fn create_team(key: string, name: string) -> Result<models.Team, string> {
   // LLL-235: uppercase here as well as in gopb, so the message this prints
   // and the .lll.toml `lll attach` writes say what was actually stored.
   let new_team = models.NewTeam { key: records.normalize_team_key(key), name }
+  if let Some(problem) = records.team_key_problem(new_team.key) { return Err(problem) }
   let payload = match json.Marshal(new_team) {
     Ok(p) => p,
     Err(e) => return Err(f"encoding team: {e}"),
@@ -425,7 +436,7 @@ fn configured_team() -> Result<Option<models.Team>, string> {
 /// fleet agent (TASK-309, task 4) ran `lll` from inside a checkout whose
 /// committed .lll.toml said team = LLL, against a server with no such team,
 /// and got "no team with key 'LLL'" - true, and useless, because it had never
-/// typed LLL and did not know which file had. `config --list` knows; so does
+/// typed LLL and did not know which file had. `config list` knows; so does
 /// this message now.
 fn unknown_configured_team(key: string, origin: string) -> string {
   if let Some(scoped) = unknown_team_scoped(key) { return scoped }
@@ -438,7 +449,7 @@ fn unknown_configured_team(key: string, origin: string) -> string {
   } else {
     ""
   }
-  f"no team with key '{key}'{from} on the server — 'lll team list' shows the keys; 'lll attach -k KEY' points this directory at one, 'lll config --list' shows every value and the file it came from, or create it with 'lll team create -k {key} -n \"Name\"'"
+  f"no team with key '{key}'{from} on the server — 'lll team list' shows the keys; 'lll attach --key KEY' points this directory at one, 'lll config list' shows every value and the file it came from, or create it with 'lll team create {key} -n \"Name\"'"
 }
 
 /// The configured team, insisted upon. Docs, findings, labels and projects
@@ -495,6 +506,10 @@ fn team_delete(input: flags.CommandInput) -> Result<(), string> {
 'lll team archive {t.key}' hides it and keeps their ids working",
     )
   }
+  if !confirmed_on_terminal(input.parsed.given("--yes"), f"delete team {t.key}?") {
+    fmt.Println("Aborted.")
+    return Ok(())
+  }
   let _ = pb.delete(f"/api/collections/teams/records/{t.id}")?
   fmt.Println(f"deleted team {t.key}")
   Ok(())
@@ -504,11 +519,11 @@ fn team_delete_page() -> string {
   "lll team delete - delete a team that holds no issues
 
 Usage:
-  lll team delete KEY
+  lll team delete KEY [--yes]
 
 Refuses a team with issues in it; 'lll team archive KEY' is the answer there,
 and it keeps the issue ids resolvable. Deleting is for a team created by
-mistake."
+mistake. On a terminal it asks first; --yes skips the question."
 }
 
 /// Missing-team message naming the fix. Shared by every command that needs a
@@ -519,14 +534,14 @@ fn no_team() -> string {
   // the command whose whole job is writing this key — from it. It follows
   // unknown_team's shape for the same reason: say the fix, not the setting.
   "no team configured — 'lll attach' picks the server's team and writes it to .lll.toml
-'lll team list' shows the keys; 'lll attach -k KEY' takes one directly"
+'lll team list' shows the keys; 'lll attach --key KEY' takes one directly"
 }
 
 /// Unknown-team message naming the fix. Shared by every command that
 /// resolves a team key (same package: src/commands).
 fn unknown_team(key: string) -> string {
   if let Some(scoped) = unknown_team_scoped(key) { return scoped }
-  f"no team with key '{key}' on the server. First inspect 'lll team list --archived'; the team may have been renamed.\nFor an existing team, use 'lll attach -k EXISTING_KEY' to update the attachment, or prefix one command with LLL_TEAM=EXISTING_KEY.\nOnly if you intend a new team, create it with 'lll team create -k {key} -n \"Name\"'."
+  f"no team with key '{key}' on the server. First inspect 'lll team list --archived'; the team may have been renamed.\nFor an existing team, use 'lll attach --key EXISTING_KEY' to update the attachment, or prefix one command with LLL_TEAM=EXISTING_KEY.\nOnly if you intend a new team, create it with 'lll team create {key} -n \"Name\"'."
 }
 
 /// For a team-scoped caller, a missing key usually means "not yours", and

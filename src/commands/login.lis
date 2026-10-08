@@ -37,7 +37,6 @@ pub fn login_spec() -> Slice<flags.Flag> {
     flags.Flag { name: "--web-url", value: true, hint: "URL", help: "board endpoint to persist separately from the API URL", .. },
     flags.Flag {
       name: "--password",
-      alias: "-p",
       value: true,
       hint: "pw",
       help: "password; omit to be prompted (a terminal reads it with echo off)",
@@ -271,7 +270,7 @@ fn settle_team() {
   let teams = match records.list_teams() {
     Ok(teams) => teams,
     Err(e) => {
-      fmt.Println(f"authenticated, but could not verify team setup: {e}\nnext: lll team list, then lll attach -k KEY")
+      fmt.Println(f"authenticated, but could not verify team setup: {e}\nnext: lll team list, then lll attach --key KEY")
       return
     },
   }
@@ -284,7 +283,7 @@ fn settle_team() {
           fmt.Println(f"team {cfg.team} — ready: lll issue create \"a title\"")
         }
       },
-      None => fmt.Println(f"authenticated, but team {cfg.team} is missing on this server. Check 'lll team list --archived' and reattach with 'lll attach -k EXISTING_KEY'. Only if you intend a new team, run 'lll attach -k {cfg.team}'."),
+      None => fmt.Println(f"authenticated, but team {cfg.team} is missing on this server. Check 'lll team list --archived' and reattach with 'lll attach --key EXISTING_KEY'. Only if you intend a new team, run 'lll attach --key {cfg.team}'."),
     }
     return
   }
@@ -292,7 +291,7 @@ fn settle_team() {
   if live.length() == 1 {
     let key = live[0].key
     let Ok(path) = set_home_key("team", key) else {
-      fmt.Println(f"next: lll attach -k {key} — the only team you can see")
+      fmt.Println(f"next: lll attach --key {key} — the only team you can see")
       return
     }
     // "you can see": a team-scoped member is shown only its teams, so "the
@@ -304,10 +303,10 @@ fn settle_team() {
   }
   if live.length() > 1 {
     let keys = live.map(|t| t.key).join(", ")
-    fmt.Println(f"next: lll attach -k KEY — the server has {live.length()} teams ({keys})")
+    fmt.Println(f"next: lll attach --key KEY — the server has {live.length()} teams ({keys})")
     return
   }
-  fmt.Println("next: lll attach -k KEY — the server has no teams yet; this creates one")
+  fmt.Println("next: lll attach --key KEY — the server has no teams yet; this creates one")
 }
 
 /// The "you are not set up yet" block for `lll --help`, or "" once a token is
@@ -402,7 +401,7 @@ Usage:
   lll whoami
 
 Confirms the stored token against the server, including administrator tokens.
-'lll config --list' shows where each value came from; 'lll login' replaces the
+'lll config list' shows where each value came from; 'lll login' replaces the
 token with a member session, and 'lll bot bot-NAME' provisions a bot identity.",
       )
       return Ok(())
@@ -668,14 +667,16 @@ fn print_login_usage() {
     "lll login - authenticate as a member
 
 Usage:
-  lll login [--email email] [--url url]
+  " +
+    flags.usage("lll login", login_spec(), "") +
+    "
 
-Prompts for the email (unless --email/-e) and the password (unless
---password/-p), reading it with echo off when stdin is a terminal; piped
+Prompts for the email (unless --email) and the password (unless
+--password), reading it with echo off when stdin is a terminal; piped
 input is read as a plain line. --password is what scripts, CI and agents use. On success
 the auth token is stored in ~/.config/lll/lll.toml — never in the
 repo's shareable .lll.toml — and every later lll call rides it.
-An LLL_TOKEN in the environment still wins (see 'lll config --list').
+An LLL_TOKEN in the environment still wins (see 'lll config list').
 
 --url is the fresh-machine setup: it authenticates against that server and
 persists url next to the token, so

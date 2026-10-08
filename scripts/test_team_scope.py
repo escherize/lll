@@ -6,10 +6,12 @@ import os
 from pathlib import Path
 import re
 import socket
+import sqlite3
 import subprocess
 import sys
 import tempfile
 import urllib.error
+import urllib.parse
 import urllib.request
 from board_startup import wait_for_endpoints
 
@@ -176,6 +178,26 @@ with tempfile.TemporaryDirectory(prefix='lll-team-scope-') as directory:
             assert call(api, f"/api/collections/issues/records/{target}", token=ro, method='DELETE')[0] == 403
         assert call(api, f"/api/collections/members/records/{ro_rec['id']}", {'name': 'reader2'}, ro, 'PATCH')[0] == 200, \
             'ro may still edit its own profile'
+        # LLL-661: a webhook secret is write-only. The rw guest sets one; no
+        # read, expansion, filter or sort returns or tests it, and the guest
+        # cannot repoint the URL to have the secret delivered to itself.
+        code, hook, _ = call(api, '/api/collections/webhooks/records',
+                             {'team': alpha['id'], 'url': 'https://example.test/w', 'secret': 'wh-secret-661',
+                              'creator': ro_rec['id']}, tok)
+        assert code == 200 and hook['creator'] == me and hook['secret_set'] is True and 'secret' not in hook, hook
+        for path in ['/api/collections/webhooks/records', f"/api/collections/webhooks/records/{hook['id']}",
+                     '/api/collections/teams/records?expand=webhooks_via_team']:
+            for viewer in (ro, su):
+                code, body, _ = call(api, path, token=viewer)
+                assert code == 200 and 'wh-secret-661' not in json.dumps(body) and '"secret"' not in json.dumps(body), body
+        for path in ['/api/collections/webhooks/records?filter=' + urllib.parse.quote('secret ~ "wh%"'),
+                     '/api/collections/webhooks/records?sort=secret',
+                     '/api/collections/teams/records?filter=' + urllib.parse.quote('webhooks_via_team.secret ~ "wh%"')]:
+            # 400: PocketBase refuses a hidden field. 403: the LLL-634 probe
+            # guard refuses a back-relation first. Either way, no rows.
+            assert call(api, path, token=ro)[0] in (400, 403), path
+        assert call(api, f"/api/collections/webhooks/records/{hook['id']}", {'url': 'https://evil.test/'}, tok, 'PATCH')[0] == 403
+        assert call(api, f"/api/collections/webhooks/records/{hook['id']}", token=tok, method='DELETE')[0] == 204
         cli_ro = {k: v for k, v in cli.items() if not k.startswith('LLL_ADMIN_')}
         cli_ro.update(LLL_URL=api, LLL_TOKEN=ro, LLL_TEAM='ALPHA')
         who = subprocess.run([binary, 'whoami'], cwd=root, env=cli_ro, text=True, capture_output=True, timeout=30)
@@ -317,8 +339,9 @@ with tempfile.TemporaryDirectory(prefix='lll-team-scope-') as directory:
                       {'claim_id': '', 'fields': {'assignee': '', 'labels': [blabel['id']]}}) == 400
         assert status(f"/api/collections/issues/records/{ia['id']}", {'project': aproj['id']}, 'PATCH') == 200, \
             'control: same-team project accepted'
-        # A link an all-scope member made does not block the scoped member's edit.
-        call(api, f"/api/collections/issues/records/{ia['id']}", {'blocked_by+': [ib['id']]}, su, 'PATCH')
+        # LLL-631: a superuser is refused too; references stay inside one team.
+        code, body, _ = call(api, f"/api/collections/issues/records/{ia['id']}", {'blocked_by+': [ib['id']]}, su, 'PATCH')
+        assert code == 400 and 'reference stays inside one team' in json.dumps(body), (code, body)
         assert status(f"/api/collections/issues/records/{ia['id']}", {'title': 'alpha edited'}, 'PATCH') == 200
 
         # Scope "teams" with no teams sees nothing: empty never means every team.
@@ -371,9 +394,13 @@ with tempfile.TemporaryDirectory(prefix='lll-team-scope-') as directory:
         assert call(board, '/t/BETA/', headers=full)[0] == 200
         # A doc on ALPHA linking BETA's issue: the board renders links as its own
         # member, so a scoped viewer must not get BETA's key or title from it.
+        # LLL-631 refuses the link from every writer, so the legacy link is
+        # written straight to the database.
         _, doc, _ = call(api, '/api/collections/docs/records', {'team': alpha['id'], 'slug': 'cross', 'title': 'cross',
-                                                                'kind': 'note', 'body': 'b', 'issues': [ia['id'], ib['id']]}, su)
+                                                                'kind': 'note', 'body': 'b', 'issues': [ia['id']]}, su)
         assert doc.get('id'), doc
+        with sqlite3.connect(root / 'data' / 'data.db', timeout=30) as conn:
+            conn.execute('UPDATE docs SET issues = ? WHERE id = ?', (json.dumps([ia['id'], ib['id']]), doc['id']))
         code, body, _ = page('/t/ALPHA/doc/cross?raw')
         assert code == 200 and 'ALPHA-1' in body and 'BETA-1' not in body, body
         assert 'BETA-1' in call(board, '/t/ALPHA/doc/cross?raw', headers=full)[1]
@@ -403,7 +430,7 @@ with tempfile.TemporaryDirectory(prefix='lll-team-scope-') as directory:
         out = lll('bot', 'bot-boss', env=boss_env)
         assert out.returncode == 0 and 'owned by boss' in out.stdout, out.stdout + out.stderr
         assert "true 'You are joining lll team ALPHA at " + api + ".'\n" in out.stdout, out.stdout
-        assert "\nlll attach -k ALPHA\ntrue 'Read the workflow:'\nlll skill get software-factory\n" in out.stdout, out.stdout
+        assert "\nlll attach --key ALPHA\ntrue 'Read the workflow:'\nlll skill get software-factory\n" in out.stdout, out.stdout
         bot_tok = next(l for l in out.stdout.splitlines() if l.startswith('export LLL_TOKEN='))[len('export LLL_TOKEN='):]
 
         def bot_record():

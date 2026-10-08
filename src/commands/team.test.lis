@@ -105,7 +105,7 @@ fn rename_collateral_names_the_three_things_that_do_not_follow() {
   let out = strings.Join(lines, "\n")
   assert strings.Contains(out, ".lll.toml")
   assert strings.Contains(out, "LLL_TEAM")
-  assert strings.Contains(out, "lll attach -k PLAT")
+  assert strings.Contains(out, "lll attach --key PLAT")
   assert strings.Contains(out, "git branches")
   assert strings.Contains(out, "comment bodies")
 }

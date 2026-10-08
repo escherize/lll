@@ -6,6 +6,84 @@ minors. Issue keys are on the project's own board (`lll issue view KEY`).
 
 ## [Unreleased]
 
+Every short flag now has one meaning, and help, messages and docs use one
+canonical spelling. Several spellings are gone; read Removed before upgrading
+scripts. A removed spelling fails and names its replacement (LLL-644).
+
+### Added
+
+- `lll config list` and `lll config get KEY` (url, web_url, team or sort).
+  `lll config --list` still works as an alias of `list`.
+- `lll team create KEY -n "Name"` takes the key as the bare argument, like
+  `project create` and `label create`.
+- Long forms: `--key` and `--name` on `team create` and `team rename`,
+  `--name` on `project edit` and `label edit`, `--color` on `label edit`,
+  `--web` for `-w` on `issue view` and `lll board`, `-b` for `--body` on
+  `lll api`.
+- `lll doc list --limit N`.
+- `edit` and `update` are aliases of each other on `issue`, `doc`, `project`
+  and `label`.
+- `--yes` skips a delete confirmation. `team`, `label`, `project`, `member`
+  and comment deletes now ask on a terminal; scripts are not asked.
+- `lll watch --label` may be repeated, matching any of the labels.
+
+### Changed
+
+- `-b`/`--body` is the long-text flag everywhere. On `issue create`,
+  `project create` and `project edit` it sets the description, and
+  `-d`/`--description` stay as aliases there.
+- `--read-only` is the canonical spelling on `lll invite create`; `--ro` stays
+  as an alias, and `member invite` and `member access` accept it too.
+- `--force` only overrides ownership or references (a claim, another member's
+  comment, issues still using a label, project or member).
+- `lll issue comment list KEY` and similar guesses name the real forms
+  instead of reporting that 'list' is not an issue ID.
+- Help fixes: `lll --help` lists `lll bot rotate` and every noun that takes
+  `--team`; `lll bot --help` shows the rotate usage; `lll login --help` shows
+  every flag; `lll import dir` shows `--team`; `lll skill --help` prints its
+  page once; `lll up --help` no longer mentions `--local`; `lll finding --help`
+  teaches `lll finding create`.
+
+### Removed
+
+- `-t` for a team on `invite create` and `member invite`: use `--team`.
+  `-t` is the title.
+- `-k` for a team key on `team create`, `team rename` and `lll attach`: use
+  `--key` (or the bare argument on `team create`). `-k` is the doc kind.
+- `-p` for a password on `lll login` and `member set-password`: use
+  `--password`. `-p` for paths on `doc create`, `doc edit` and
+  `finding create`: use `--paths`; on `finding list`: use `--path`. `-p` is
+  the priority.
+- `--force` on `issue delete` and `doc delete`: use `--yes`.
+- `--description-replace-old` and `--description-replace-new`: use
+  `--description-replace old=new`.
+- `lll doc link` and `lll doc unlink`: use `lll issue link KEY-123 SLUG` and
+  `lll issue unlink KEY-123 SLUG`.
+- `lll finding read`: use `lll doc view SLUG`.
+
+### Security
+
+- The web board refuses every request other than GET or HEAD unless its
+  `Origin` is the board's own address. Before this, a page served on another
+  port of the same host (for example `127.0.0.1:9999` beside the default
+  `lll up` bind) counted as the same site, so it could change issues,
+  settings and bots with the viewer's board cookie. A request with no
+  `Origin`, `Origin: null`, or `Sec-Fetch-Site` other than `same-origin` is
+  refused too. The API under `/api/`, which the CLI uses, is unchanged.
+  Scripts that POST to board pages with `curl` must now send
+  `-H "Origin: <board url>"`. The invite name form and the sign-in confirm
+  page now send `Referrer-Policy: same-origin` instead of `no-referrer`.
+  Under `no-referrer`, browsers sent `Origin: null` on their own form POST.
+  This also fixes the confirm page's "Sign in" button, which this check
+  had always refused (LLL-630).
+- Only a person with read-write access to every team, or a superuser, can
+  create an invite. A team-scoped or read-only member, a bot or a member with
+  an owner is refused with a message that names who can. A joined member
+  does not depend on its inviter, so a scoped guest could otherwise keep
+  access after removal through members it invited itself. Invites that such
+  a member made earlier and nobody has used no longer redeem, and narrowing a
+  full member voids its unused invites (LLL-629).
+
 ### Fixed
 
 - The API port's `/.well-known/lll` always answers `service` and `version`,
@@ -16,6 +94,63 @@ minors. Issue keys are on the project's own board (`lll issue view KEY`).
 - Login token renewal now runs when `LLL_URL` names exactly the home
   config's url. It still needs the token from the home config and never
   renews against any other url, however close the spelling (LLL-653).
+
+### Changed
+
+- A team key must be a letter followed by up to 15 letters, digits, `_` or
+  `-` (`^[A-Z][A-Z0-9_-]{0,15}$` after uppercasing). The server refuses
+  any other key on create and on rename, and the CLI names the rule. Existing
+  keys are not rewritten: the server logs each non-conforming key once at
+  upgrade, and it still takes unrelated edits (LLL-628).
+- A key derived from a directory name (`lll up`, `lll attach`) now keeps
+  only ASCII letters and digits and starts with a letter.
+
+### Security
+
+- A reference stays inside one team for every writer. An issue's labels,
+  project and blockers, a doc's issues and a webhook's project must belong
+  to the record's own team. Full-access members and superusers were not
+  checked before. Moving a record to another team is refused while it, or a
+  record pointing at it, would reference across teams, and the refusal names
+  what to detach. References made before this change remain and do not block
+  unrelated edits; `scripts/audit_cross_team_refs.py` lists them (read-only)
+  (LLL-631).
+- A team-scoped member can no longer read another team's label names or
+  issue titles through a relation filter. Through a multi-valued relation,
+  a back-relation or `@collection`, a filter needs an any-match operator
+  (`labels.name ?~ 'x'`, `blocked_by.id ?= 'ID'`). A stored relation id may
+  only be matched exactly. Neither can be sorted on. A filter through
+  favorites or saved views is refused with any operator, for team-scoped and
+  read-only members alike, since it would show which issues other members
+  favorited. This applies to record lists (all
+  methods, including HEAD) and realtime subscription options. Narrowing a
+  member drops the realtime subscriptions it could no longer make
+  (LLL-634).
+- Team keys can no longer carry quotes, `$( )`, spaces or control characters
+  into URLs, filenames and shell-pasted bot prompts (LLL-628).
+
+### Security
+
+- A webhook's secret is write-only. The API, realtime and the CLI no longer
+  return it to anyone, read-only guests included, and a filter or sort on it
+  is refused. `lll webhook add` prints a generated secret once, or takes
+  yours with `--secret`. `lll webhook list` shows only "secret set" or
+  "secret not set" (LLL-661). Upgrading hides existing secrets but does not
+  rotate them: a secret a guest could read before is still valid, so remove
+  and add those webhooks again.
+- A webhook records the member who created it and delivers only while that
+  member can read the webhook's team. Removing someone from a team stops
+  their webhooks; each skipped delivery is logged. Webhooks created before
+  this change have no creator and deliver while their team exists. Webhooks
+  can no longer be edited through the API; remove and add them again.
+  Deliveries are not queued, so one in flight when the server stops is lost;
+  `lll webhook --help` and `docs/api.md` now say so (LLL-661).
+
+### Fixed
+
+- The hourly claim-expiry sweep re-checks each claim inside its transaction,
+  so a renewal that lands between the sweep's list and its delete keeps the
+  claim (LLL-663).
 
 ## [0.8.0] - 2026-10-07
 

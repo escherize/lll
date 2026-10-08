@@ -499,6 +499,74 @@ fn unknown_flag_names_a_near_miss_and_only_a_near_miss() {
   assert edit_distance("", "abc") == 3
 }
 
+/// LLL-644: a removed spelling names its replacement, but only the one this
+/// verb declares; `-p` meant three things and must not suggest the wrong one.
+#[test]
+fn retired_spellings_name_the_replacement_the_verb_declares() {
+  let login = [
+    Flag { name: "--password", value: true, hint: "pw", help: "pw", .. },
+  ]
+  let doc = [
+    Flag { name: "--paths", value: true, hint: "paths", help: "paths", .. },
+  ]
+  let delete = [Flag { name: "--yes", help: "skip", .. }]
+  let update = [
+    Flag {
+      name: "--description-replace",
+      value: true,
+      hint: "old=new",
+      help: "r",
+      ..,
+    },
+  ]
+  assert unknown_flag("-p", "lll login", login).starts_with(
+    "unknown flag: '-p' — did you mean '--password'?",
+  )
+  assert unknown_flag("-p", "lll doc create", doc).contains(
+    "did you mean '--paths'?",
+  )
+  assert unknown_flag("--force", "lll issue delete", delete).contains(
+    "did you mean '--yes'?",
+  )
+  assert unknown_flag("--description-replace-old=a", "lll issue update", update).contains(
+    "did you mean '--description-replace old=new'?",
+  )
+  // No replacement declared here, so no guess.
+  assert !unknown_flag("-p", "lll issue list", delete).contains("did you mean")
+  assert !unknown_flag("--force", "lll issue close", login).contains(
+    "did you mean",
+  )
+}
+
+#[test]
+fn retired_verb_names_its_replacement_only_where_it_exists() {
+  let commands = [
+    Command {
+      name: "view",
+      summary: "view",
+      positional: "KEY",
+      run: |_| Ok(()),
+      ..,
+    },
+  ]
+  let assert Err(hinted) = dispatch("issue", "", "", commands, [
+    "lll",
+    "issue",
+    "read",
+    "DEMO-1",
+  ])
+  assert hinted.contains(
+    "unknown issue command: 'read' - did you mean 'lll issue view'?",
+  )
+  let without = [Command { name: "list", summary: "list", run: |_| Ok(()), .. }]
+  let assert Err(plain) = dispatch("team", "", "", without, [
+    "lll",
+    "team",
+    "read",
+  ])
+  assert !plain.contains("did you mean")
+}
+
 #[test]
 fn command_alias_dispatch_uses_canonical_help_and_parser() {
   let commands = [Command {

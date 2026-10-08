@@ -535,6 +535,13 @@ fn empty_search_hint_names_the_title_contract_and_lll_search() {
 }
 
 /// LLL-503: the product has at most one alternate spelling per verb/flag.
+/// One exception, from D6 (LLL-644): where the long text is a description,
+/// -b/--body is canonical and -d/--description stays accepted.
+fn alias_count_ok(fl: flags.Flag) -> bool {
+  fl.alias == "--body -d --description" ||
+  strings.Fields(fl.alias).length() <= 1
+}
+
 #[test]
 fn command_tables_keep_one_alias_per_verb_and_flag() {
   let tables = [issue_commands(), comment_commands(), team_commands(), member_commands(),
@@ -544,7 +551,7 @@ fn command_tables_keep_one_alias_per_verb_and_flag() {
     for c in table {
       assert strings.Fields(c.alias).length() <= 1
       for fl in c.spec {
-        assert strings.Fields(fl.alias).length() <= 1
+        assert alias_count_ok(fl)
         if fl.name == "--limit" { assert fl.alias == "-l" }
       }
     }
@@ -552,7 +559,7 @@ fn command_tables_keep_one_alias_per_verb_and_flag() {
   for spec in [watch_spec(), up_spec(), attach_spec(),
     board_spec(), login_spec(), api_spec(), search_spec()] {
     for fl in spec {
-      assert strings.Fields(fl.alias).length() <= 1
+      assert alias_count_ok(fl)
       if fl.name == "--limit" { assert fl.alias == "-l" }
     }
   }

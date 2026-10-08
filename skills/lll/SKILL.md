@@ -126,11 +126,11 @@ board URL. `lll issue view KEY-12 --raw` prints the issue as plain markdown,
 which is what you want in a prompt or a pipe. `--json` gives the raw record with
 relations expanded.
 
-**Pipe bodies in.** `-d -` and `-b -` read from stdin, so generated text never
+**Pipe bodies in.** `-b -` reads from stdin, so generated text never
 needs a temp file:
 
 ```sh
-printf '%s' "$analysis" | lll issue create -t "Title" -d -
+printf '%s' "$analysis" | lll issue create -t "Title" -b -
 git log --oneline -20 | lll issue comment KEY-12 -b -
 ```
 
@@ -187,7 +187,7 @@ recorded after two occurrences and happened twice more; a byte-offset versus
 rune-index bug was in a finding before it panicked in five places.
 
 File work in your project's team, using the CLI:
-`lll issue create -t "Title" --emoji 🐛 -d -`. When a tool you use is tracked
+`lll issue create -t "Title" --emoji 🐛 -b -`. When a tool you use is tracked
 on another board, file its problems in that board's team. Keep scratch and
 demo boards separate from your real work records.
 
@@ -226,12 +226,12 @@ because Y needs a reconciler and two writable copies" is worth the file.
 ## Side projects: attach, work, archive
 
 A team is cheap — give every side project its own instead of piling issues
-into a shared one. It does not have to be a repo: `lll attach -k KEY` in a plain
+into a shared one. It does not have to be a repo: `lll attach --key KEY` in a plain
 directory writes `.lll.toml` there and every subdirectory inherits it, so a
 folder of notes gets tracked without a `git init`.
 
 ```sh
-lll attach -k KEY          # once, repo or plain dir: creates team KEY if missing, writes .lll.toml
+lll attach --key KEY        # once, repo or plain dir: creates team KEY if missing, writes .lll.toml
 lll issue create -t "..."  # work, tracked as KEY-1, KEY-2, ...
 lll team archive KEY       # done: leaves team lists and the board rail
 ```

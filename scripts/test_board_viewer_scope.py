@@ -11,6 +11,7 @@ import re
 import os
 from pathlib import Path
 import socket
+import sqlite3
 import subprocess
 import sys
 import tempfile
@@ -101,10 +102,23 @@ with tempfile.TemporaryDirectory(prefix='lll-545-') as directory:
                                                                  'kind': 'note', 'body': 'zebradoc body'}, su)
         # Record ids are identifiers too: none of BETA's may reach a scoped viewer.
         HIDDEN.extend([beta['id'], ib['id'], bcomment['id'], bdoc['id']])
-        # An all-scope writer may link across teams; the scoped page must not show it.
-        code, _, _ = call(api, '/api/collections/docs/records', {'team': alpha['id'], 'slug': 'cross', 'title': 'cross',
-                                                                 'kind': 'note', 'body': 'b', 'issues': [ia['id'], ib['id']]}, su)
-        assert code == 200
+        def plant(table, rid, field, value):
+            # LLL-631: the server refuses a cross-team reference from every
+            # writer now. A board from before the rule can still hold one, so
+            # write that legacy shape straight to the database: the scoped
+            # pages are the second fence and must still hide it.
+            with sqlite3.connect(root / 'data' / 'data.db', timeout=30) as conn:
+                conn.execute(f'UPDATE {table} SET {field} = ? WHERE id = ?',
+                             (value if isinstance(value, str) else json.dumps(value), rid))
+
+        # A legacy cross-team link; the scoped page must not show it.
+        code, cross, _ = call(api, '/api/collections/docs/records', {'team': alpha['id'], 'slug': 'cross', 'title': 'cross',
+                                                                     'kind': 'note', 'body': 'b', 'issues': [ia['id'], ib['id']]}, su)
+        assert code == 400, 'LLL-631: a superuser cross-team doc link is refused'
+        code, cross, _ = call(api, '/api/collections/docs/records', {'team': alpha['id'], 'slug': 'cross', 'title': 'cross',
+                                                                     'kind': 'note', 'body': 'b', 'issues': [ia['id']]}, su)
+        assert code == 200, cross
+        plant('docs', cross['id'], 'issues', [ia['id'], ib['id']])
 
         def member(name, **access):
             body = {'name': name, 'email': f'{name}@example.test', 'password': 'pw12345678',
@@ -123,7 +137,9 @@ with tempfile.TemporaryDirectory(prefix='lll-545-') as directory:
             return {'Cookie': 'lll_board=' + tok}
 
         def page(path, tok, body=None, method=None):
-            return call(board, path, body, method=method, headers=as_cookie(tok), form=body is not None)
+            # A board write carries the board's own Origin (LLL-630).
+            hdrs = as_cookie(tok) if body is None else dict(as_cookie(tok), Origin=board)
+            return call(board, path, body, method=method, headers=hdrs, form=body is not None)
 
         # --- reads: ALPHA renders, BETA answers like a missing team ---
         for tok in [rw_tok, ro_tok]:
@@ -294,7 +310,7 @@ with tempfile.TemporaryDirectory(prefix='lll-545-') as directory:
             assert code == 200 and 'Set-Cookie' not in headers, (what, code, dict(headers))
             assert "action='/login'" in body and headers['Cache-Control'] == 'no-store', what
             assert "frame-ancestors 'none'" in headers['Content-Security-Policy'], what
-            assert headers['Referrer-Policy'] == 'no-referrer', what
+            assert headers['Referrer-Policy'] == 'same-origin', what
         # /login sets the cookie only for a POST from the board's own origin.
         login = {'board_token': both_tok, 'next': '/t/ALPHA/'}
         for hdrs, what in [({}, 'no Origin'), ({'Origin': 'http://evil.example'}, 'Origin mismatch'),
@@ -349,8 +365,8 @@ with tempfile.TemporaryDirectory(prefix='lll-545-') as directory:
             time.sleep(.2)
         assert idle_proc.poll() is not None, 'an idle revoked stream stayed open past the re-check interval'
 
-        # --- an all-scope member hangs a hidden team's label and project on
-        # an ALPHA issue: no scoped surface may name them ---
+        # --- an ALPHA issue carries a hidden team's label and project (legacy
+        # data, LLL-631): no scoped surface may name them ---
         _, zeta, _ = call(api, '/api/collections/teams/records', {'key': 'ZETA', 'name': 'Zeta Hidden'}, su)
         _, zlabel, _ = call(api, '/api/collections/labels/records', {'team': zeta['id'], 'name': 'zlabelhidden'}, su)
         _, zproj, _ = call(api, '/api/collections/projects/records',
@@ -372,6 +388,10 @@ with tempfile.TemporaryDirectory(prefix='lll-545-') as directory:
         code, body, _ = call(api, f"/api/collections/issues/records/{ia['id']}",
                              {'labels': [zlabel['id'], alabel['id']], 'project': zproj['id'], 'title': 'ZREF title'},
                              wide_tok, 'PATCH')
+        assert code == 400, ("LLL-631: an all-scope member cannot hang another team's label on an issue", body)
+        plant('issues', ia['id'], 'labels', [zlabel['id'], alabel['id']])
+        plant('issues', ia['id'], 'project', zproj['id'])
+        code, body, _ = call(api, f"/api/collections/issues/records/{ia['id']}", {'title': 'ZREF title'}, wide_tok, 'PATCH')
         assert code == 200, body
         wait_for(zfull_board, 'zlabelhidden')  # control: board cards name labels
         wait_for(zfull_board, zproj['id'])  # control: and carry the project id

@@ -111,7 +111,7 @@ fn token_create(input: flags.CommandInput) -> Result<(), string> {
   let su = superuser_auth()?
   let found = records.find_member_as(su, name)?
   let Some(member) = found else {
-    return Err(f"no member named '{name}' — see 'lll member add'")
+    return Err(f"no member named '{name}' — see 'lll member create'")
   }
   let payload = match json.Marshal(models.ImpersonateRequest { duration }) {
     Ok(b) => b,
@@ -129,7 +129,7 @@ fn token_create(input: flags.CommandInput) -> Result<(), string> {
 
   // The one place a token is ever printed: it is the agent's credential,
   // delivered exactly once, in the env form it is used in. Every other
-  // surface — login, config --list, the board — redacts it.
+  // surface — login, config list, the board — redacts it.
   fmt.Println(f"LLL_TOKEN={tok}")
   fmt.Println(
     f"one-time agent token for {member.name} — shown only here; to persist it, put token = \"...\" in ~/.config/lll/lll.toml (never .lll.toml, which is committed)",
@@ -553,7 +553,7 @@ pub fn check_prompt_values(url: string, team: string, name: string) -> Result<()
 fn agent_prompt(url: string, team: string, tok: string) -> string {
   prose(f"You are joining lll team {team} at {url}.") +
   agent_env(url, tok) +
-  f"lll attach -k {shell_word(team)}\n" +
+  f"lll attach --key {shell_word(team)}\n" +
   prose("Read the workflow:") +
   "lll skill get software-factory\n" +
   prose("Claim an issue before you edit code; record findings on the board.")
@@ -607,11 +607,12 @@ owner and keeps its own access.
 
 See 'lll bot rotate --help' for token rotation."
   }
-  f"{command} - {description}\n\nUsage:\n  {flags.usage(command, spec, "bot-NAME")}\n\nThe name must start with the reserved bot- prefix, e.g. '{command} bot-myrepo'."
+  let rotate_usage = if rotating { "" } else { "\n  " + flags.usage("lll bot rotate", spec, "bot-NAME") }
+  f"{command} - {description}\n\nUsage:\n  {flags.usage(command, spec, "bot-NAME")}{rotate_usage}\n\nThe name must start with the reserved bot- prefix, e.g. '{command} bot-myrepo'."
     + "
 
 The token is printed once, inside a prompt to paste into the agent: its
-LLL_URL and LLL_TOKEN exports, 'lll attach -k KEY' for --team (default: the
+LLL_URL and LLL_TOKEN exports, 'lll attach --key KEY' for --team (default: the
 configured team, which you must be able to see), and where to read the
 workflow. --env prints only the two export lines on stdout:
   "

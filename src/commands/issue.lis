@@ -98,11 +98,11 @@ fn issue_create_spec() -> Slice<flags.Flag> {
       ..,
     },
     flags.Flag {
-      name: "-d",
-      alias: "--description",
+      name: "-b",
+      alias: "--body -d --description",
       value: true,
       hint: "desc",
-      help: "description ('-d -' reads it from stdin)",
+      help: "description ('-b -' reads it from stdin)",
       ..,
     },
     flags.Flag {
@@ -206,6 +206,7 @@ fn issue_view_spec() -> Slice<flags.Flag> {
     },
     flags.Flag {
       name: "-w",
+      alias: "--web",
       help: "open the issue's web page in the browser (view)",
       ..,
     },
@@ -216,6 +217,7 @@ fn issue_update_spec() -> Slice<flags.Flag> {
   flags.with_team(filter_spec(FilterUse.Update).append([
     flags.Flag {
       name: "--priority",
+      alias: "-p",
       value: true,
       hint: "name|0-4",
       help: "0 none, 1 urgent (!!!), 2 high (!!), 3 medium (!), 4 low (·)",
@@ -234,7 +236,7 @@ fn issue_update_spec() -> Slice<flags.Flag> {
       alias: "-d",
       value: true,
       hint: "d",
-      help: "new description (update; '-d -' reads it from stdin)",
+      help: "new description (update; '--description -' reads it from stdin)",
       ..,
     },
     flags.Flag {
@@ -242,22 +244,6 @@ fn issue_update_spec() -> Slice<flags.Flag> {
       value: true,
       hint: "old=new",
       help: "replace exactly one occurrence of old with new in the description",
-      ..,
-    },
-    flags.Flag {
-      name: "--description-replace-old",
-      value: true,
-      hint: "text",
-      hidden: true,
-      help: "with --description-replace-new: replace exactly one occurrence of text in the description",
-      ..,
-    },
-    flags.Flag {
-      name: "--description-replace-new",
-      value: true,
-      hint: "text",
-      hidden: true,
-      help: "the replacement for --description-replace-old",
       ..,
     },
     flags.Flag {
@@ -317,7 +303,7 @@ fn issue_update_spec() -> Slice<flags.Flag> {
 }
 
 fn issue_delete_spec() -> Slice<flags.Flag> {
-  flags.with_team([flags.Flag { name: "--force", help: "skip the delete confirmation", .. }])
+  flags.with_team([flags.Flag { name: "--yes", help: "skip the delete confirmation", .. }])
 }
 
 fn issue_claim_spec() -> Slice<flags.Flag> {
@@ -412,7 +398,28 @@ pub fn issue(args: Slice<string>) -> Result<(), string> {
     let subargs = args[..2].append(args[3..]...)
     return flags.dispatch("issue comment", "change a comment", "", comment_commands(), subargs)
   }
+  if args.get(2) == Some("comment") {
+    if let Some(hint) = comment_verb_hint(args.get(3).unwrap_or("")) {
+      return Err(hint)
+    }
+  }
   flags.dispatch("issue", "work with issues", issue_intro(), cmds, args)
+}
+
+/// `lll issue comment list KEY` and its kin: the only sub-verbs are edit and
+/// delete, so name what each guessed word is spelled as instead of letting
+/// the word fail as an issue ID.
+fn comment_verb_hint(word: string) -> Option<string> {
+  let hint = match word {
+    "list" | "ls" | "view" | "show" => "'lll issue comment KEY-123' lists the comments, numbered",
+    "add" | "create" | "new" => "'lll issue comment KEY-123 \"body\"' adds one (or -b \"body\")",
+    "update" | "rm" | "remove" => "'lll issue comment edit KEY-123 N -b \"body\"' and 'lll issue comment delete KEY-123 N' change one",
+    _ => "",
+  }
+  if hint == "" { return None }
+  Some(
+    f"unknown issue comment command: '{word}' - {hint}; the sub-verbs are edit and delete (see 'lll issue comment -h')",
+  )
 }
 
 /// Verbs agents reach for that are not verbs here, each pointed at the
@@ -424,7 +431,6 @@ fn issue_synonym(verb: string) -> Option<string> {
     "unassign" => "'lll issue release KEY-123' gives a claim back; 'lll issue update KEY-123 --assignee none' clears the assignee",
     "move" | "transition" => "'lll issue start KEY-123' sets in-progress; any state: 'lll issue update KEY-123 --state s'",
     "status" => "'lll issue view KEY-123' shows the state; 'lll issue update KEY-123 --state s' sets it",
-    "edit" => "'lll issue update KEY-123 ...' changes fields",
     "get" => "'lll issue view KEY-123'",
     "find" | "search" => "'lll search text' ranks every issue, comment and doc with context; 'lll issue list --search text' filters titles",
     "ls" => "'lll issue list'",
@@ -461,7 +467,7 @@ pub fn issue_commands() -> Slice<flags.Command> {
     },
     flags.Command {
       name: "create", alias: "new",
-      summary: "create an issue in the configured team; -d - reads the description from stdin; without --state it starts in todo",
+      summary: "create an issue in the configured team; -b - reads the description from stdin; without --state it starts in todo",
       page: issue_create_page(),
       spec: issue_create_spec(),
       positional: "[\"title\"]",
@@ -492,6 +498,7 @@ pub fn issue_commands() -> Slice<flags.Command> {
     },
     flags.Command {
       name: "update",
+      alias: "edit",
       summary: "change fields (at least one flag)",
       spec: issue_update_spec(),
       positional: "[KEY-123]",
@@ -532,7 +539,7 @@ pub fn issue_commands() -> Slice<flags.Command> {
     },
     flags.Command {
       name: "delete",
-      summary: "delete; asks [y/N] unless --force",
+      summary: "delete; asks [y/N] unless --yes",
       spec: issue_delete_spec(),
       positional: "KEY-123",
       run: delete_issue,
@@ -634,7 +641,9 @@ fn issue_union_spec() -> Slice<flags.Flag> {
   let mut out: Slice<flags.Flag> = []
   for c in issue_commands() {
     for fl in c.spec {
-      if out.find(|f| f.name == fl.name).is_none() { out = out.append(fl) }
+      // Keyed by name AND aliases: -b is the description on create and the
+      // forced-clear reason on update/release, and both rows belong here.
+      if out.find(|f| f.name == fl.name && f.alias == fl.alias).is_none() { out = out.append(fl) }
     }
   }
   out
@@ -701,7 +710,7 @@ fn create(input: flags.CommandInput) -> Result<(), string> {
     return Err(f"no title — give it as the bare argument or with -t\n{usage}")
   }
   let mut description = ""
-  if p.given("-d") { description = value_or_stdin(p.one("-d"), "-d")? }
+  if p.given("-b") { description = value_or_stdin(p.one("-b"), "-b")? }
   let emoji = check_emoji(p.one("--emoji"))?
   let mut priority = 0
   if p.given("--priority") { priority = check_priority(p.one("--priority"))? }
@@ -1281,20 +1290,12 @@ fn update(input: flags.CommandInput) -> Result<(), string> {
     description = value_or_stdin(p.one("--description"), "--description")?
   }
   let mut description_set = p.given("--description")
-  let canonical_replace = p.given("--description-replace")
-  let legacy_replace = p.given("--description-replace-old") || p.given("--description-replace-new")
-  if canonical_replace && legacy_replace {
-    return Err("--description-replace cannot be combined with --description-replace-old or --description-replace-new")
-  }
-  if p.given("--description-replace-old") != p.given("--description-replace-new") {
-    return Err("--description-replace-old and --description-replace-new go together")
-  }
-  let (replace_old, replace_new) = if canonical_replace {
+  let replace_set = p.given("--description-replace")
+  let (replace_old, replace_new) = if replace_set {
     parse_description_replacement(p.one("--description-replace"))?
   } else {
-    (p.one("--description-replace-old"), p.one("--description-replace-new"))
+    ("", "")
   }
-  let replace_set = canonical_replace || legacy_replace
   let append_text = p.one("--description-append")
   let append_set = p.given("--description-append")
   if description_set && (replace_set || append_set) {
@@ -1316,7 +1317,7 @@ fn update(input: flags.CommandInput) -> Result<(), string> {
   }
   let mut reason = ""
   if p.given("-b") {
-    if !force { return Err("-b is the reason for a forced clear; add --force") }
+    if !force { return Err("-b is the reason for a forced clear; add --force (the new description is --description)") }
     reason = value_or_stdin(p.one("-b"), "-b")?
   }
   let agent = if assignee_name != "" { agent_label(p)? } else { "" }
@@ -1334,9 +1335,6 @@ fn update(input: flags.CommandInput) -> Result<(), string> {
   }
   if state == "" && priority < 0 && assignee_name == "" && label_names.is_empty() && add_label_names.is_empty() && remove_label_names.is_empty() && !project_set && !title_set && !description_set && !replace_set && !append_set && !emoji_set {
     return Err(f"nothing to update — pass at least one flag\nusage: {usage}")
-  }
-  if legacy_replace {
-    let _ = fmt.Fprintln(os.Stderr, "--description-replace-old/--description-replace-new are deprecated; use --description-replace old=new")
   }
 
   let resolved = resolve_id(id, usage)?
@@ -1360,8 +1358,7 @@ fn update(input: flags.CommandInput) -> Result<(), string> {
   if replace_set {
     let n = strings.Count(issue.description, replace_old)
     if n != 1 {
-      let flag = if canonical_replace { "--description-replace" } else { "--description-replace-old" }
-      return Err(f"{flag} matched {n} times in {key}'s description; it must match exactly once - widen the text")
+      return Err(f"--description-replace matched {n} times in {key}'s description; it must match exactly once - widen the text")
     }
     description = strings.Replace(issue.description, replace_old, replace_new, 1)
     description_set = true
@@ -1731,22 +1728,14 @@ fn fetch_claim(issue_id: string) -> Result<Option<models.Claim>, string> {
 fn delete_issue(input: flags.CommandInput) -> Result<(), string> {
   let p = input.parsed
   let id = p.first()
-  let force = p.given("--force")
   // Deleting by inferred branch is too dangerous; the ID must be explicit.
-  if id == "" { return Err("usage: lll issue delete KEY-123 [--force]") }
+  if id == "" { return Err("usage: lll issue delete KEY-123 [--yes]") }
 
   let issue = records.fetch_issue(id)?
   let label = f"{issue.expand.team.key}-{issue.number}"
-  if !force {
-    fmt.Print(f"delete {label}? [y/N] ")
-    let mut scanner = bufio.NewScanner(os.Stdin)
-    let mut answer = ""
-    if scanner.Scan() { answer = strings.TrimSpace(scanner.Text()) }
-    let a = strings.ToLower(answer)
-    if a != "y" && a != "yes" {
-      fmt.Println("Aborted.")
-      return Ok(())
-    }
+  if !p.given("--yes") && !confirmed(f"delete {label}?") {
+    fmt.Println("Aborted.")
+    return Ok(())
   }
   let _ = pb.delete(f"/api/collections/issues/records/{issue.id}")?
   fmt.Println(f"Deleted {label}")
@@ -2008,6 +1997,13 @@ fn comment_mutate(verb: string, p: flags.Parsed) -> Result<(), string> {
     }
   }
   if verb == "delete" {
+    if !confirmed_on_terminal(
+      p.given("--yes"),
+      f"delete comment #{n} on {key}?",
+    ) {
+      fmt.Println("Aborted.")
+      return Ok(())
+    }
     let _ = pb.delete(f"/api/collections/comments/records/{c.id}")?
     fmt.Println(f"Deleted comment #{n} on {key} (was {whose}'s)")
     return Ok(())
@@ -2033,6 +2029,11 @@ fn comment_mutate_spec(verb: string) -> Slice<flags.Flag> {
   let mut spec = [
     flags.Flag { name: "--force", help: "change a comment that is not yours", .. },
   ]
+  if verb == "delete" {
+    spec = spec.append(
+      flags.Flag { name: "--yes", help: "skip the delete confirmation", .. },
+    )
+  }
   if verb == "edit" {
     spec = spec.append(flags.Flag {
       name: "-b",
@@ -2166,10 +2167,8 @@ fn link(input: flags.CommandInput) -> Result<(), string> {
   link_issue(id, slug, usage)
 }
 
-/// The one write path behind 'lll issue link KEY-123 SLUG' and 'lll doc link
-/// SLUG KEY-123', which swaps the two positionals (the doc comes first
-/// there). The relation is stored once on docs.issues, so there is exactly
-/// one way a link happens and both spellings answer identically.
+/// The write path behind 'lll issue link KEY-123 SLUG'. The relation is
+/// stored once on docs.issues. 'lll doc link' was removed at 1.0 (D5).
 fn link_issue(id: string, slug: string, usage: string) -> Result<(), string> {
   let resolved = resolve_id(id, usage)?
   let issue = records.fetch_issue(resolved)?
@@ -2195,8 +2194,7 @@ fn unlink(input: flags.CommandInput) -> Result<(), string> {
   unlink_issue(id, slug, usage)
 }
 
-/// The one write path behind 'lll issue unlink KEY-123 SLUG' and 'lll doc
-/// unlink SLUG KEY-123', which swaps the two positionals.
+/// The write path behind 'lll issue unlink KEY-123 SLUG'.
 fn unlink_issue(id: string, slug: string, usage: string) -> Result<(), string> {
   let resolved = resolve_id(id, usage)?
   let issue = records.fetch_issue(resolved)?

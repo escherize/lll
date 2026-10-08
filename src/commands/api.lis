@@ -21,7 +21,7 @@ import "pb"
 
 pub fn api_spec() -> Slice<flags.Flag> {
   [
-    flags.Flag { name: "--body", value: true, hint: "text", help: "request body to send (application/json)", .. },
+    flags.Flag { name: "--body", alias: "-b", value: true, hint: "text", help: "request body to send (application/json)", .. },
     flags.Flag { name: "--schema", help: "print the collection/field reference instead of sending a request", .. },
     flags.Flag { name: "--help", alias: "-h", hidden: true, help: "show this help", .. },
   ]
@@ -49,7 +49,7 @@ pub fn api(args: Slice<string>) -> Result<(), string> {
     return Ok(())
   }
   if !strings.HasPrefix(path, "/") {
-    return Err(f"path must start with '/': got '{path}' — the path is joined to the configured board url ('lll config --list' shows it)")
+    return Err(f"path must start with '/': got '{path}' — the path is joined to the configured board url ('lll config list' shows it)")
   }
   send(method, path, p.one("--body"))
 }
