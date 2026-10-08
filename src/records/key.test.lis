@@ -55,3 +55,23 @@ fn split_issue_key_error_quotes_the_input_and_the_expected_shape() {
   assert msg.contains("'héllo' is not an issue ID")
   assert msg.contains("expected KEY-123")
 }
+
+#[test]
+fn split_issue_key_refuses_a_signed_number() {
+  let assert Err(_) = split_issue_key("ENG-+3")
+  let assert Err(_) = split_issue_key("ENG-+")
+}
+
+#[test]
+fn issue_of_team_asks_the_parser() {
+  assert issue_of_team("ABC-12", "ABC")
+  assert issue_of_team("abc-12", "ABC")
+  assert issue_of_team("ABC-X-1", "ABC-X")
+  assert !issue_of_team("ABC-X-1", "ABC")
+  assert !issue_of_team("ABC-12", "AB")
+  assert !issue_of_team("ABC-", "ABC")
+  assert !issue_of_team("ABC-+1", "ABC")
+  assert !issue_of_team("ABC-1x", "ABC")
+  assert !issue_of_team(" ABC-1", "ABC")
+  assert !issue_of_team("ABC -1", "ABC")
+}

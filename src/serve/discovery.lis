@@ -1,0 +1,14 @@
+import "go:net/http"
+
+import "buildinfo"
+
+/// Public metadata carries no credential and is useful before board login.
+/// `version` lets an older CLI notice it is behind (LLL-607).
+fn board_discovery(w: http.ResponseWriter, _r: Ref<http.Request>) {
+  w.Header().Set("Content-Type", "application/json")
+  let _ = w.Write(
+    ("{\"service\":\"lll\",\"web_url\":\".\",\"version\":\"" +
+    buildinfo.version() +
+    "\"}").bytes(),
+  )
+}

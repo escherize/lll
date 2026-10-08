@@ -7,6 +7,7 @@ import "config"
 import "flags"
 import "pb"
 import "query"
+import "buildinfo"
 
 fn main() {
   // LLL-486: the environment is read here, once, and everything below gets
@@ -101,15 +102,15 @@ fn dispatch(ctx: pb.Client, noun: string, args: Slice<string>) -> Result<(), str
       Ok(())
     },
     "--version" => {
-      fmt.Println(f"lll {commands.version()}")
+      fmt.Println(f"lll {buildinfo.version()}")
       Ok(())
     },
     "-v" => {
-      fmt.Println(f"lll {commands.version()}")
+      fmt.Println(f"lll {buildinfo.version()}")
       Ok(())
     },
     "version" => {
-      fmt.Println(f"lll {commands.version()}")
+      fmt.Println(f"lll {buildinfo.version()}")
       Ok(())
     },
     other => Err(pb.fail(pb.ErrorKind.Usage, unknown_command(other, os.Args.get(2).unwrap_or("")))),

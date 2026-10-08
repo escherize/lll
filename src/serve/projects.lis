@@ -84,5 +84,5 @@ fn project_tone(status: string) -> string {
 /// A project's issue count, or 0 when the count cannot be had: the projects
 /// page would rather render with a zero than not render.
 fn project_count(ctx: pb.Client, team_id: string, project_id: string) -> int {
-  issue_count(ctx, query.filter(team_id, "", "", project_id, "", "")).unwrap_or(0)
+  records.issue_count(ctx, query.filter(team_id, "", "", project_id, "", "")).unwrap_or(0)
 }

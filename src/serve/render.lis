@@ -164,7 +164,7 @@ fn card_vm(issue: models.Issue) -> CardVM {
     project_id: issue.project,
     // The state half of the staleness rule; board_card ORs in the claim
     // half. Rows built straight from card_vm never show the site anyway.
-    work_stale: work_site_stale(issue.state, true),
+    work_stale: records.work_site_stale(issue.state, true),
   }
 }
 
@@ -306,16 +306,9 @@ fn order_issues(issues: Slice<models.Issue>, order: string) -> Slice<models.Issu
   match order {
     "created" => sort_issues(issues, |a, b| strings.Compare(a.created, b.created) > 0),
     "updated" => sort_issues(issues, |a, b| strings.Compare(a.updated, b.updated) > 0),
-    "priority" => sort_issues(issues, |a, b| prio_rank(a.priority) < prio_rank(b.priority)),
+    "priority" => sort_issues(issues, |a, b| display.prio_rank(a.priority) < display.prio_rank(b.priority)),
     _ => issues,
   }
-}
-
-/// Priority value -> urgency rank: 1 urgent .. 4 low, with none (0) last —
-/// the same rotation prios_by_urgency makes for the filter chooser.
-fn prio_rank(priority: int) -> int {
-  if priority == 0 { return 5 }
-  priority
 }
 
 /// Stable insertion sort. `before` must be a STRICT ordering, so equal keys
@@ -471,14 +464,14 @@ fn issue_fields_vm(ctx: pb.Client, raw: models.Issue, comments: Slice<models.Com
   let mut claim_actor_id = ""
   let mut claim_actor = ""
   let mut claim_error = ""
-  match actor(ctx) {
+  match records.find_actor(ctx) {
     Ok(Some(a)) => { claim_actor = a.name; claim_actor_id = a.id },
     Ok(None) => claim_error = "No member is configured for this board.",
     Err(e) => claim_error = pb.plain(e),
   }
   let mut work = ""
   if issue.work_branch != "" { work = f"{issue.work_branch} @ {issue.work_host}:{issue.work_path}" }
-  let work_stale = work_site_stale(issue.state, held.is_some())
+  let work_stale = records.work_site_stale(issue.state, held.is_some())
   Ok(IssueVM {
     provenance: provenance.fields(issue),
     claim_id, claim_holder, claim_age, claim_actor, claim_actor_id, claim_error,

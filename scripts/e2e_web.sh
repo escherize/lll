@@ -373,7 +373,7 @@ $(diff <(printf '%s' "$board_rail") <(rail "$issue") || true)"
 assert_contains "$board_rail" 'href="/t/ENG/?assignee=e2e"' \
   "rail has a My issues row (the board's own URL encoding, team-routed)"
 assert_contains "$board_rail" 'id="rail-views"' "rail carries the saved views group"
-# The version is a build literal (src/commands/version.lis); the CLI e2e
+# The version is a build literal (src/buildinfo/version.lis); the CLI e2e
 # checks it against lisette.toml. Match the footer to this binary's version
 # so the assertion stays valid across release bumps.
 assert_contains "$board_rail" "v$("$LIN" --version | sed 's/^lll //')" \

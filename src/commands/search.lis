@@ -13,6 +13,7 @@ import "models"
 import "pb"
 import "query"
 import "search"
+import "records"
 
 /// `lll search TEXT`: full-text search over the team's record - issue
 /// titles and descriptions, comments, and docs - ranked, each hit with the
@@ -57,43 +58,6 @@ pub fn search_spec() -> Slice<flags.Flag> {
   ])
 }
 
-/// The PocketBase clause that admits a record containing ANY query term in
-/// any of `fields` ('~' is a case-insensitive LIKE). The ranker then sees
-/// candidates rather than the corpus: the hosted board serialised a
-/// megabyte of bodies per query before, erratically taking 5 to 20 seconds.
-/// An empty query admits everything.
-pub fn candidate_clause(q: string, fields: Slice<string>) -> string {
-  let mut parts: Slice<string> = []
-  for t in search.tokenize(q) {
-    for f in fields { parts = parts.append(f"{f} ~ {query.quote(t)}") }
-  }
-  if parts.is_empty() { return "" }
-  "(" + strings.Join(parts, " || ") + ")"
-}
-
-/// Every doc of a team with only the fields the ranker reads, paged.
-fn fetch_team_docs_light(ctx: pb.Client, team_id: string, where: string) -> Result<Slice<models.Doc>, string> {
-  let mut clause = f"team={query.quote(team_id)}"
-  if where != "" { clause = f"{clause} && {where}" }
-  fetch_docs(ctx, clause, "slug", "id,slug,kind,title,body,updated")
-}
-
-pub fn fetch_team_issues_where(ctx: pb.Client, team_id: string, where: string) -> Result<Slice<models.Issue>, string> {
-  let mut clause = query.filter(team_id, "", "", "", "", "")
-  if where != "" { clause = f"{clause} && {where}" }
-  let filter = url.QueryEscape(clause)
-  let mut out: Slice<models.Issue> = []
-  let mut page = 1
-  loop {
-    let mut list = models.IssueList { .. }
-    pb.fetch(ctx, f"/api/collections/issues/records?perPage=500&page={page}&sort=number&expand=team,assignee,labels&filter={filter}", "issues", &list)?
-    out = out.append(list.items...)
-    if list.items.length() < 500 { break }
-    page += 1
-  }
-  Ok(out)
-}
-
 /// The same issues with only the fields the ranker reads: the CLI has no
 /// card to draw, and the expansions were most of the bytes on the wire.
 fn fetch_team_issues_light(ctx: pb.Client, team_id: string, where: string) -> Result<Slice<models.Issue>, string> {
@@ -110,64 +74,6 @@ fn fetch_team_issues_light(ctx: pb.Client, team_id: string, where: string) -> Re
     page += 1
   }
   Ok(out)
-}
-
-fn fetch_team_comments_where(ctx: pb.Client, team_id: string, where: string) -> Result<Slice<models.Comment>, string> {
-  let mut clause = f"issue.team={query.quote(team_id)}"
-  if where != "" { clause = f"{clause} && {where}" }
-  let cfilter = url.QueryEscape(clause)
-  let mut out: Slice<models.Comment> = []
-  let mut page = 1
-  loop {
-    let mut list = models.CommentList { .. }
-    pb.fetch(ctx, f"/api/collections/comments/records?perPage=500&page={page}&sort=created,id&expand=author&fields=id,issue,author,body,updated,expand.author.name&filter={cfilter}", "comments", &list)?
-    out = out.append(list.items...)
-    if list.items.length() < 500 { break }
-    page += 1
-  }
-  Ok(out)
-}
-
-/// Issues and their comments as documents: an issue's key is the group for
-/// itself and each of its comments, so a hit on a comment is reported under
-/// the issue with "comment #n by who" as its label.
-pub fn issue_documents(team_key: string, issues: Slice<models.Issue>, comments: Slice<models.Comment>) -> Slice<search.Document> {
-  let mut out: Slice<search.Document> = []
-  let mut titles = Map.new<string, string>()
-  let mut keys = Map.new<string, string>()
-  let mut states = Map.new<string, string>()
-  for i in issues {
-    let key = f"{team_key}-{i.number}"
-    titles[i.id] = i.title
-    keys[i.id] = key
-    states[i.id] = i.state
-    out = out.append(search.Document { group: key, kind: "issue", label: "description", title: i.title, body: indexable(i.description), state: i.state })
-  }
-  let mut per_issue = Map.new<string, int>()
-  for c in comments {
-    let n = per_issue.get(c.issue).unwrap_or(0) + 1
-    per_issue[c.issue] = n
-    let who = display.member_name(c.author, c.expand.author.name, "anon")
-    let Some(key) = keys.get(c.issue) else { continue }
-    out = out.append(search.Document {
-      group: key, kind: "comment", label: f"comment #{n} by {who}",
-      title: titles.get(c.issue).unwrap_or(""), body: c.body, state: states.get(c.issue).unwrap_or(""),
-    })
-  }
-  out
-}
-
-/// A body without the importer's provenance lines: "Origin: sidecar
-/// TASK-96" made LLL-95 the second hit for "LLL-96". Those lines are for
-/// the eye, not the index.
-fn indexable(body: string) -> string {
-  let mut kept: Slice<string> = []
-  for l in strings.Split(body, "\n") {
-    let t = strings.TrimSpace(l)
-    if strings.HasPrefix(t, "Origin: sidecar ") || strings.HasPrefix(t, "Created: 20") { continue }
-    kept = kept.append(l)
-  }
-  strings.Join(kept, "\n")
 }
 
 /// One hit: the record on its own line, then each matched passage under
@@ -235,7 +141,7 @@ fn cached_corpus(ctx: pb.Client, team_id: string, team_key: string, refresh: boo
   c = sync_cache(ctx, c, team_id)?
   save_cache(path, c)?
   let mut out: Slice<search.Document> = []
-  if issues { out = out.append(issue_documents(team_key, c.issues, c.comments)...) }
+  if issues { out = out.append(search.issue_documents(team_key, c.issues, c.comments)...) }
   if docs {
     for d in c.docs {
       out = out.append(search.Document { group: d.slug, kind: "doc", label: d.kind, title: d.title, body: d.body, state: "" })
@@ -254,8 +160,8 @@ fn sync_cache(ctx: pb.Client, c: Cache, team_id: string) -> Result<Cache, string
     let comments_ch = Channel.new<Result<Slice<models.Comment>, string>>()
     let docs_ch = Channel.new<Result<Slice<models.Doc>, string>>()
     task { let _ = issues_ch.send(fetch_team_issues_light(ctx, team_id, "")) }
-    task { let _ = comments_ch.send(fetch_team_comments_where(ctx, team_id, "")) }
-    task { let _ = docs_ch.send(fetch_team_docs_light(ctx, team_id, "")) }
+    task { let _ = comments_ch.send(records.fetch_team_comments_where(ctx, team_id, "")) }
+    task { let _ = docs_ch.send(records.fetch_team_docs_light(ctx, team_id, "")) }
     let Some(issues) = issues_ch.receive() else { return Err("issue fetch ended without an answer") }
     let Some(comments) = comments_ch.receive() else { return Err("comment fetch ended without an answer") }
     let Some(docs) = docs_ch.receive() else { return Err("doc fetch ended without an answer") }
@@ -308,7 +214,7 @@ fn sync_cache(ctx: pb.Client, c: Cache, team_id: string) -> Result<Cache, string
   }
   if moved_c {
     let keep = as_set(fetch_ids(ctx, "comments", f"issue.team={query.quote(team_id)}")?)
-    let changed = fetch_team_comments_where(ctx, team_id, since)?
+    let changed = records.fetch_team_comments_where(ctx, team_id, since)?
     let mut seen = Map.new<string, bool>()
     let mut next: Slice<models.Comment> = []
     for x in changed { seen[x.id] = true; next = next.append(x) }
@@ -317,7 +223,7 @@ fn sync_cache(ctx: pb.Client, c: Cache, team_id: string) -> Result<Cache, string
   }
   if moved_d {
     let keep = as_set(fetch_ids(ctx, "docs", f"team={query.quote(team_id)}")?)
-    let changed = fetch_team_docs_light(ctx, team_id, since)?
+    let changed = records.fetch_team_docs_light(ctx, team_id, since)?
     let mut seen = Map.new<string, bool>()
     let mut next: Slice<models.Doc> = []
     for x in changed { seen[x.id] = true; next = next.append(x) }

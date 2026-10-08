@@ -191,3 +191,40 @@ fn collect_column_issues(
   }
   Ok(result)
 }
+
+/// One page of the issues collection with the page count, so the snapshot
+/// can walk past 500 issues. models.IssueList has no totalPages.
+#[json]
+struct NextPage {
+  items: Slice<models.Issue>,
+  #[json("totalPages")]
+  total_pages: int,
+}
+
+/// TASK-205's presentation rule: a work site is only "current" while the
+/// issue is being worked — once the state is done/cancelled or the claim is
+/// gone, the site renders as "(last seen)". A read, never a write: the slot
+/// itself is not cleared.
+pub fn work_site_stale(state: string, claimed: bool) -> bool {
+  state == "done" || state == "cancelled" || !claimed
+}
+
+/// Every page of an issues query, for the callers that must see the whole set
+/// before they can order or filter it: readiness (PB cannot filter on an
+/// expanded relation) and priority order (PB cannot express "none last").
+/// `tail` carries the sort, expand and filter parameters, already escaped.
+pub fn fetch_all_issues(ctx: pb.Client, tail: string) -> Result<Slice<models.Issue>, string> {
+  let mut items: Slice<models.Issue> = []
+  let mut page = 1
+  loop {
+    let body = ctx.get(f"/api/collections/issues/records?perPage=500&page={page}{tail}")?
+    let mut issues = NextPage { .. }
+    if let Err(e) = json.Unmarshal(body.bytes(), &issues) {
+      return Err(f"decoding issues: {e}")
+    }
+    for i in issues.items { items = items.append(i) }
+    if page >= issues.total_pages || issues.items.is_empty() { break }
+    page += 1
+  }
+  Ok(items)
+}

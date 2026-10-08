@@ -5,6 +5,7 @@ import "go:time"
 
 import "records"
 import "pb"
+import "tokens"
 
 // The board's "Add a bot" (LLL-546, doc scoped-access-invites Decision step
 // 3): the web face of `lll bot`. A read-write member viewer mints a bot it
@@ -50,10 +51,10 @@ fn bot_write(
   }
   // Before anything is created: a refusal here must not leave a bot behind.
   let url = request_origin(r)?
-  check_prompt_values(url, team, name)?
-  let _ = create_bot_member_as(ctx, m.token, name, m.id)?
-  let duration = default_token_duration()
-  let tok = match bot_mint(ctx, m.token, name, duration) {
+  tokens.check_prompt_values(url, team, name)?
+  let _ = tokens.create_bot_member_as(ctx, m.token, name, m.id)?
+  let duration = tokens.default_token_duration()
+  let tok = match tokens.bot_mint(ctx, m.token, name, duration) {
     Ok(t) => t,
     Err(e) => return Err(
       f"{e}\nthe bot {name} exists; mint its token with 'lll bot rotate {name}'",
@@ -61,7 +62,7 @@ fn bot_write(
   }
   let html = render(
     "bot-result",
-    BotResultVM { name, team, prompt: agent_prompt(url, team, tok) },
+    BotResultVM { name, team, prompt: tokens.agent_prompt(url, team, tok) },
   )?
   let day = time
     .Now()

@@ -8,7 +8,7 @@
 # Cutting a release (the whole gate is docs/release-checklist.md; run
 # `mise run release-check CUT=<sha>` first):
 #   1. bump [project] version in lisette.toml (checked against the tag below)
-#      and the literal in src/commands/version.lis (what every binary reports);
+#      and the literal in src/buildinfo/version.lis (what every binary reports);
 #      the gate asserts that the literal agrees with lisette.toml
 #   2. git tag v<version> && git push origin v<version>
 #
@@ -33,7 +33,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          # `lll --version` uses the literal in src/commands/version.lis;
+          # `lll --version` uses the literal in src/buildinfo/version.lis;
           # the gate asserts it agrees with lisette.toml. Version checks
           # do not require the full history retained here.
           fetch-depth: 0
@@ -45,7 +45,7 @@ jobs:
           tag="${GITHUB_REF_NAME#v}"
           ver="$(sed -n 's/^version = "\(.*\)"$/\1/p' lisette.toml | head -1)"
           if [ "$tag" != "$ver" ]; then
-            echo "tag v$tag disagrees with lisette.toml version $ver — bump lisette.toml (and src/commands/version.lis) or retag" >&2
+            echo "tag v$tag disagrees with lisette.toml version $ver — bump lisette.toml (and src/buildinfo/version.lis) or retag" >&2
             exit 1
           fi
 
@@ -71,7 +71,7 @@ jobs:
           mkdir -p dist
           cp target/.lisette/bin/lll dist/lll-darwin-arm64
 
-      # `lll --version` uses the literal in src/commands/version.lis, which
+      # `lll --version` uses the literal in src/buildinfo/version.lis, which
       # the gate checks against lisette.toml. Independently verify that the
       # built release binary reports the tag we are publishing.
       - name: lll --version matches the tag
@@ -79,7 +79,7 @@ jobs:
           tag="${GITHUB_REF_NAME#v}"
           out="$(dist/lll-darwin-arm64 --version)"
           if [ "$out" != "lll $tag" ]; then
-            echo "built binary says '$out', tag wants 'lll $tag' — bump src/commands/version.lis" >&2
+            echo "built binary says '$out', tag wants 'lll $tag' — bump src/buildinfo/version.lis" >&2
             exit 1
           fi
 

@@ -1,0 +1,385 @@
+import "records"
+import "go:encoding/json"
+import "go:fmt"
+import "go:strings"
+
+import "display"
+import "flags"
+import "gitctx"
+import "models"
+import "pb"
+import "provenance"
+
+// `lll issue view` and the one-value readers (`url`, `id`, `title`,
+// `branch-name`).
+
+struct IssueViewReads {
+  claim: Channel<Result<Option<models.Claim>, string>>,
+  docs: Channel<Result<Slice<models.Doc>, string>>,
+  blocks: Channel<Result<Slice<models.Issue>, string>>,
+  findings: Channel<Result<Slice<models.Doc>, string>>,
+  comments: Channel<Result<Slice<models.Comment>, string>>,
+}
+
+/// Start only the reads this output mode already uses. Each result has room
+/// to finish even when an earlier error makes the caller stop receiving.
+fn begin_issue_view_reads(
+  ctx: pb.Client,
+  full: models.Issue,
+  json_mode: bool,
+  raw_mode: bool,
+) -> IssueViewReads {
+  let reads = IssueViewReads {
+    claim: Channel.buffered<Result<Option<models.Claim>, string>>(1),
+    docs: Channel.buffered<Result<Slice<models.Doc>, string>>(1),
+    blocks: Channel.buffered<Result<Slice<models.Issue>, string>>(1),
+    findings: Channel.buffered<Result<Slice<models.Doc>, string>>(1),
+    comments: Channel.buffered<Result<Slice<models.Comment>, string>>(1),
+  }
+  // Every mode shows the claim; --raw too since LLL-638.
+  task {
+    let _ = reads.claim.send(fetch_claim(ctx, full.id))
+  }
+  if json_mode || !raw_mode {
+    task {
+      let _ = reads.docs.send(fetch_issue_docs(ctx, full.id))
+    }
+  }
+  if !json_mode && !raw_mode {
+    task {
+      let _ = reads.blocks.send(fetch_blocks(ctx, full.id))
+    }
+  }
+  task {
+    let _ = reads.findings.send(records.findings_for_issue(ctx, full))
+  }
+  task {
+    let _ = reads.comments.send(records.fetch_comments(ctx, full.id))
+  }
+  reads
+}
+
+fn await_issue_view<T>(
+  answer: Channel<Result<T, string>>,
+  what: string,
+) -> Result<T, string> {
+  let Some(result) = answer.receive() else {
+    return Err(f"issue {what} fetch ended without an answer")
+  }
+  result
+}
+
+fn view(input: flags.CommandInput) -> Result<(), string> {
+  let ctx = input.ctx
+  let spec = issue_view_spec()
+  let p = input.parsed
+  let id = p.first()
+  let json_mode = p.given("--json")
+  let raw_mode = p.given("--raw")
+  let open_web = p.given("-w")
+  let resolved = resolve_id(ctx,
+    id,
+    flags.usage("lll issue view", spec, "[KEY-123]"),
+  )?
+
+  if open_web {
+    let target = issue_url(ctx, records.fetch_issue(ctx, resolved)?)?
+    fmt.Println(f"Opening {target}")
+    return open_url(target)
+  }
+
+  let record = records.fetch_issue_record(ctx, resolved)?
+  let mut full = models.Issue { .. }
+  if let Err(e) = json.Unmarshal(record.bytes(), &full) {
+    return Err(f"decoding issue: {e}")
+  }
+  let reads = begin_issue_view_reads(ctx, full, json_mode, raw_mode)
+  if json_mode {
+    fmt.Println(issue_view_json(
+      record,
+      await_issue_view(reads.comments, "comments")?,
+      await_issue_view(reads.claim, "claim")?,
+      await_issue_view(reads.docs, "docs")?,
+      await_issue_view(reads.findings, "findings")?,
+    )?)
+    return Ok(())
+  }
+
+  // --raw: the issue as markdown, no chrome. For piping, and for an agent that
+  // wants the text rather than a rendered table.
+  if raw_mode {
+    fmt.Println(f"# {full.expand.team.key}-{full.number}: {full.title}")
+    let source = provenance.fields(full)
+    // LLL-638: an agent reading --raw must see who holds the issue. Absolute
+    // times, like the comments below: --raw output is stored and re-read.
+    let claim_line = match await_issue_view(reads.claim, "claim")? {
+      Some(held) => {
+        let holder = display.byline(display.member_name(held.member, held.expand.member.name, "an unknown member"), held.agent)
+        let renewed = if held.updated == "" || held.updated == held.created { "" } else { f", renewed {display.absolute(held.updated)}" }
+        Some(f"- **Claimed:** {holder} (since {display.absolute(held.created)}{renewed})")
+      },
+      None => None,
+    }
+    if !source.is_empty() || claim_line.is_some() {
+      fmt.Println("")
+      for field in source { fmt.Println(f"- **{field.label}:** {field.value}") }
+      if let Some(line) = claim_line { fmt.Println(line) }
+    }
+    if full.description != "" {
+      fmt.Println("")
+      fmt.Println(full.description)
+    }
+    let comments = await_issue_view(reads.comments, "comments")?
+    if !full.attachments.is_empty() {
+      fmt.Println("\n## Attachments")
+      for name in full.attachments { fmt.Println(f"- {name}") }
+    }
+    if comments.length() > 0 {
+      fmt.Println("")
+      fmt.Println("## Comments")
+      for cm in comments {
+        let author = display.comment_byline(cm.author_kind, cm.author, cm.expand.author.name, cm.agent, "ghost")
+        // Absolute, not relative: --raw is machine output that gets stored
+        // and re-read (an agent's brief, an exported mirror in Git), where
+        // "5d ago" silently becomes a different string tomorrow.
+        let tag = if cm.author_kind == "system" { "" } else { display.author_tag(cm.expand.author.kind == "bot", cm.expand.author.owner_name()) }
+        fmt.Println(
+          f"- **{author}**{tag} ({display.absolute(cm.created)}): {cm.body}",
+        )
+      }
+    }
+    print_findings_raw(await_issue_view(reads.findings, "findings")?)?
+    return Ok(())
+  }
+
+  let assignee = display.member_name(full.assignee, full.expand.assignee.name, "none")
+
+  let mut project = full.expand.project.name
+  if project == "" { project = "none" }
+
+  let mut labels = strings.Join(full.expand.labels.map(|l| l.name), ", ")
+  if labels == "" { labels = "none" }
+
+  fmt.Println(f"{full.expand.team.key}-{full.number} {full.title}")
+  fmt.Println("")
+  fmt.Println(f"State:     {display.glyph(full.state)} {full.state}")
+  fmt.Println(f"Priority:  {display.priority_name(full.priority)}")
+  fmt.Println(f"Assignee:  {assignee}")
+  for field in provenance.fields(full) { fmt.Println(f"{field.label}: {field.value}") }
+  // The one place the second collection is read on a plain view: assignee says
+  // who it is for, Claimed says who is holding it right now, and only the
+  // latter is exclusive.
+  let claim = await_issue_view(reads.claim, "claim")?
+  if let Some(held) = claim {
+    let holder = display.member_name(held.member, held.expand.member.name, "an unknown member")
+    fmt.Println(f"Claimed:   {display.byline(holder, held.agent)} ({display.relative(held.created)})")
+  }
+  // The work-site slot (TASK-205), under the claim holder: the claim says
+  // who, this says where. "(last seen)" once the work is over.
+  if full.work_branch != "" {
+    let mut work = f"{full.work_branch} @ {full.work_host}:{full.work_path}"
+    if records.work_site_stale(full.state, claim.is_some()) {
+      work = f"{work} (last seen)"
+    }
+    fmt.Println(f"Work:      {work}")
+  }
+  fmt.Println(f"Project:   {project}")
+  fmt.Println(f"Labels:    {labels}")
+  if !full.attachments.is_empty() {
+    fmt.Println("Attachments:")
+    for name in full.attachments { fmt.Println(f"  {name}") }
+  }
+  let linked_docs = await_issue_view(reads.docs, "docs")?
+  if linked_docs.length() > 0 {
+    let slugs = linked_docs.map(|d| d.slug)
+    fmt.Println(f"Docs:      {strings.Join(slugs, ", ")}")
+  }
+  if full.blocked_by.length() > 0 {
+    // Each blocker under its OWN team's key (LLL-674): a cross-team blocker
+    // printed with this issue's key named a different, real issue. One the
+    // reader cannot see is only counted, never named (LLL-672).
+    let mut parts: Slice<string> = []
+    for id in full.blocked_by {
+      match full.expand.blocked_by.find(|b| b.id == id) {
+        Some(b) => { parts = parts.append(f"{b.expand.team.key}-{b.number} ({b.state})") },
+        None => { parts = parts.append("a hidden issue") },
+      }
+    }
+    let blockers = records.blockers_of(full, full.expand.blocked_by)
+    let open = blockers.open.length()
+    // is_ready's archived rule (LLL-679): an archived team's issue is not ready.
+    let done = if full.expand.team.archived { "; all done, but the team is archived" } else { "; all done, ready" }
+    let mut tail = if open == 0 { done } else { f"; {open} open, not ready" }
+    if blockers.hidden > 0 {
+      let counted = if open == 0 { "" } else { f"{open} open, " }
+      tail = f"; {counted}{blockers.hidden} you cannot see, not ready"
+    }
+    fmt.Println(f"Blocked by: {strings.Join(parts, ", ")}{tail}")
+  }
+  let blocks = await_issue_view(reads.blocks, "blocks")?
+  if blocks.length() > 0 {
+    let keys = blocks.map(|b| f"{b.expand.team.key}-{b.number}")
+    fmt.Println(f"Blocks:    {strings.Join(keys, ", ")}")
+  }
+  if full.emoji != "" { fmt.Println(f"Emoji:     {full.emoji}") }
+  fmt.Println(f"Created:   {display.relative(full.created)}")
+  fmt.Println(f"Updated:   {display.relative(full.updated)}")
+  if full.description != "" {
+    fmt.Println("")
+    fmt.Println(full.description)
+  }
+
+  // The brief mechanism (TASK-103 AC#3): an agent's task brief carries the
+  // findings for the work it is about to do without a human choosing them.
+  // Fifteen of thirty fleet agents lost the two docs they had linked in a
+  // list of ninety area matches. Linked findings come first and always show
+  // (the brief contract, TASK-103 AC#3); the area matches stop at a handful
+  // with a pointer. The --raw brief keeps the whole list on purpose.
+  let linked = linked_docs.map(|d| d.slug)
+  let findings = await_issue_view(reads.findings, "findings")?
+  if findings.length() > 0 {
+    fmt.Println("")
+    fmt.Println("Related findings:")
+    fmt.Println("")
+    let mut area_matches = 0
+    let mut hidden = 0
+    for f in findings {
+      let is_linked = linked.contains(f.slug)
+      if !is_linked {
+        area_matches += 1
+        if area_matches > 5 {
+          hidden += 1
+          continue
+        }
+      }
+      let mut area = f.area
+      if area == "" { area = "-" }
+      fmt.Println(f"{f.slug} ({area}): {f.title}{display.confidence_suffix(f.confidence, f.confidence_note)}")
+    }
+    if hidden > 0 {
+      fmt.Println(f"... and {hidden} more by area; 'lll finding list -a AREA' lists an area, 'lll issue view --raw' prints them all")
+    }
+  }
+
+  let comments = await_issue_view(reads.comments, "comments")?
+  fmt.Println("")
+  if comments.length() > 0 {
+    fmt.Println("Comments:")
+    fmt.Println("")
+    print_comments(comments)
+  } else {
+    // Said, not omitted: an agent checking whether its comment landed
+    // could not tell "none" from "not shown" (fleet: 2 of 10).
+    fmt.Println("Comments: none")
+  }
+  Ok(())
+}
+
+/// Keep every server field intact while exposing the handoff context that
+/// the normal view already shows. RawMessage preserves unknown fields and
+/// exact numbers instead of decoding arbitrary records through float64.
+fn issue_view_json(
+  record: string,
+  comments: Slice<models.Comment>,
+  claim: Option<models.Claim>,
+  docs: Slice<models.Doc>,
+  findings: Slice<models.Doc>,
+) -> Result<string, string> {
+  // The list's issue object (key, claim, RFC3339 timestamps) plus what only
+  // the view carries, so one parser reads every issue --json (LLL-645).
+  let mut fields = issue_json(record.bytes() as json.RawMessage, claim)?.clone()
+  let comments_json = match json.Marshal(comments) {
+    Ok(data) => contract_json(data as json.RawMessage, 0),
+    Err(e) => return Err(f"encoding comments: {e}"),
+  }
+  fields["comments"] = if comments.is_empty() { "[]".bytes() as json.RawMessage } else { comments_json }
+  fields["docs"] = contract_json(doc_context_json(docs)?, 0)
+  fields["findings"] = contract_json(doc_context_json(findings)?, 0)
+  match json.Marshal(fields) {
+    Ok(data) => Ok(data as string),
+    Err(e) => Err(f"encoding issue JSON: {e}"),
+  }
+}
+
+/// `--json` on the verbs that change an issue (update, close, start, claim):
+/// the issue as it is after the write, in the list's per-item shape.
+fn print_issue_after(ctx: pb.Client, key: string) -> Result<(), string> {
+  let record = records.fetch_issue_record(ctx, key)?
+  let mut full = models.Issue { .. }
+  if let Err(e) = json.Unmarshal(record.bytes(), &full) { return Err(f"decoding issue: {e}") }
+  print_issue_json(record, fetch_claim(ctx, full.id)?)
+}
+
+fn doc_context_json(docs: Slice<models.Doc>) -> Result<json.RawMessage, string> {
+  if docs.is_empty() { return Ok("[]".bytes() as json.RawMessage) }
+  match json.Marshal(docs) {
+    Ok(data) => Ok(data as json.RawMessage),
+    Err(e) => Err(f"encoding document context: {e}"),
+  }
+}
+
+/// The '## Related findings' block of `lll issue view --raw` — same list
+/// findings_for_issue serves the rendered view, as plain markdown so an
+/// agent's piped brief carries the findings too.
+fn print_findings_raw(findings: Slice<models.Doc>) -> Result<(), string> {
+  if findings.is_empty() { return Ok(()) }
+  fmt.Println("")
+  fmt.Println("## Related findings")
+  fmt.Println("")
+  for f in findings {
+    let mut area = f.area
+    if area == "" { area = "-" }
+    fmt.Println(f"- {f.slug} ({area}): {f.title}{display.confidence_suffix(f.confidence, f.confidence_note)}")
+  }
+  Ok(())
+}
+
+fn url_cmd(input: flags.CommandInput) -> Result<(), string> {
+  let ctx = input.ctx
+  let usage = "lll issue url [KEY-123]"
+  let id = input.parsed.first()
+  let resolved = resolve_id(ctx, id, usage)?
+  let target = issue_url(ctx, records.fetch_issue(ctx, resolved)?)?
+  fmt.Println(target)
+  Ok(())
+}
+
+fn id_cmd(input: flags.CommandInput) -> Result<(), string> {
+  let ctx = input.ctx
+  let usage = "lll issue id [KEY-123]"
+  let id = input.parsed.first()
+  let resolved = resolve_id(ctx, id, usage)?
+  let issue = records.fetch_issue(ctx, resolved)?
+  fmt.Println(f"{issue.expand.team.key}-{issue.number}")
+  Ok(())
+}
+
+fn title_cmd(input: flags.CommandInput) -> Result<(), string> {
+  let ctx = input.ctx
+  let usage = "lll issue title [KEY-123]"
+  let id = input.parsed.first()
+  let resolved = resolve_id(ctx, id, usage)?
+  let issue = records.fetch_issue(ctx, resolved)?
+  fmt.Println(issue.title)
+  Ok(())
+}
+
+fn branch_name_cmd(input: flags.CommandInput) -> Result<(), string> {
+  let ctx = input.ctx
+  let usage = "lll issue branch-name [KEY-123]"
+  let p = input.parsed
+  let resolved = resolve_id(ctx, p.first(), usage)?
+  let issue = records.fetch_issue(ctx, resolved)?
+  fmt.Println(gitctx.branch_name(
+    issue.expand.team.key,
+    issue.number,
+    issue.title,
+  ))
+  Ok(())
+}
+
+/// Web page URL for an issue: <web_url>/issue/KEY-123.
+fn issue_url(ctx: pb.Client, issue: models.Issue) -> Result<string, string> {
+  let base = web_base(ctx)?
+  Ok(f"{base}/issue/{issue.expand.team.key}-{issue.number}")
+}

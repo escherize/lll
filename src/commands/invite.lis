@@ -94,7 +94,7 @@ fn invite_create(input: flags.CommandInput) -> Result<(), string> {
   let mut ids: Slice<string> = []
   for key in keys {
     let Some(team) = records.find_team(ctx, key)? else {
-      return Err(unknown_team(ctx, key))
+      return Err(records.unknown_team(ctx, key))
     }
     ids = ids.append(team.id)
   }

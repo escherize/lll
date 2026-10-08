@@ -38,7 +38,7 @@ and a fix, then a fresh run.
 Each constraint below was found by breaking it.
 
 1. Bump the version in `lisette.toml` and the literal in
-   `src/commands/version.lis`, and merge the bump. The release workflow
+   `src/buildinfo/version.lis`, and merge the bump. The release workflow
    refuses a tag that disagrees with `lisette.toml`.
 2. Write the changelog last: move `[Unreleased]` in `CHANGELOG.md` to the new
    version. PRs keep landing while you write it, so re-read `git log` against

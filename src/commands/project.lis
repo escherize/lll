@@ -81,11 +81,6 @@ fn project_intro() -> string {
   "Statuses: planned, started, paused, completed, cancelled"
 }
 
-/// Project statuses, in lifecycle order.
-fn project_statuses() -> Slice<string> {
-  ["planned", "started", "paused", "completed", "cancelled"]
-}
-
 fn project_list(input: flags.CommandInput) -> Result<(), string> {
   let ctx = input.ctx
   let p = input.parsed
@@ -136,11 +131,10 @@ fn project_delete_spec() -> Slice<flags.Flag> {
   ])
 }
 
-
 fn check_status(val: string) -> Result<string, string> {
-  if project_statuses().find(|s| s == val).is_none() {
+  if records.project_statuses().find(|s| s == val).is_none() {
     return Err(
-      f"unknown status '{val}' (use one of: {strings.Join(project_statuses(), ", ")})",
+      f"unknown status '{val}' (use one of: {strings.Join(records.project_statuses(), ", ")})",
     )
   }
   Ok(val)
@@ -151,7 +145,7 @@ fn project_create(input: flags.CommandInput) -> Result<(), string> {
   let usage = input.usage
   let p = input.parsed
   let name = flags.entity_name(p, "-n", usage)?
-  check_filter_name("project", name)?
+  records.check_filter_name("project", name)?
   let description = p.one("-b")
   let mut status = "planned"
   if p.given("--status") {
@@ -182,7 +176,7 @@ fn project_edit(input: flags.CommandInput) -> Result<(), string> {
   // Validate before the lookup: a typo'd status should cost no round trip and
   // must not leave a half-applied patch behind.
   let mut status = ""
-  if p.given("-n") { check_filter_name("project", p.one("-n"))? }
+  if p.given("-n") { records.check_filter_name("project", p.one("-n"))? }
   if p.given("--status") { status = check_status(p.one("--status"))? }
   let project = records.resolve_project(ctx, current_team(ctx)?.id, name)?
 
@@ -196,7 +190,7 @@ fn project_edit(input: flags.CommandInput) -> Result<(), string> {
 }
 
 /// Count shared references before deleting; force explicitly accepts their loss.
-/// `lll project move NAME --to KEY` (LLL-100). See move_scope.lis for why the
+/// `lll project move NAME --to KEY` (LLL-100). See writes/moves.lis for why the
 /// refusal is the right answer rather than dragging the references along.
 fn project_move(input: flags.CommandInput) -> Result<(), string> {
   let ctx = input.ctx
@@ -206,9 +200,9 @@ fn project_move(input: flags.CommandInput) -> Result<(), string> {
     return Err(flags.usage_error(f"usage: {usage}"))
   }
   let from = team_flag_or_current(ctx, p.one("--team"))?
-  let to = move_destination(ctx, p.one("--to"))?
+  let to = writes.move_destination(ctx, p.one("--to"))?
   let project = records.resolve_project(ctx, from.id, name)?
-  fmt.Println(move_to_team(ctx, "project", project.name, project.id, from, to)?)
+  fmt.Println(writes.move_to_team(ctx, "project", project.name, project.id, from, to)?)
   Ok(())
 }
 
@@ -220,7 +214,7 @@ fn project_delete(input: flags.CommandInput) -> Result<(), string> {
     return Err(flags.usage_error(f"usage: {usage}"))
   }
   let project = records.resolve_project(ctx, current_team(ctx)?.id, name)?
-  let used = entity_issue_count(ctx, "project", project.id)?
+  let used = records.entity_issue_count(ctx, "project", project.id)?
   if used > 0 && !p.given("--force") {
     return Err(refuse_delete("project", name, used))
   }

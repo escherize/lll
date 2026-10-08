@@ -103,7 +103,7 @@ fn team_link(ctx: pb.Client, base: string, key: string) -> Result<string, string
   let wanted = records.normalize_team_key(key)
   let found = records.find_team(ctx, wanted)?
   if found.is_none() {
-    return Err(unknown_team(ctx, wanted))
+    return Err(records.unknown_team(ctx, wanted))
   }
   let Some(link) = scoped_board_link(ctx, base, wanted) else {
     return Err(

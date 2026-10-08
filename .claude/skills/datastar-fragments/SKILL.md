@@ -13,11 +13,11 @@ fragment boundary.
 ## Route events after subscription
 
 The board's PocketBase subscription in
-[run_server](../../../src/commands/serve.lis) receives unfiltered issue events.
+[run_server](../../../src/serve/serve.lis) receives unfiltered issue events.
 Do not state-filter it to the visible columns: an update leaving a PB filter
 may emit no event to that subscription, leaving the old column stale. This
 server hosts multiple teams; scope delivery in the
-[bridge and hub](../../../src/commands/serve_sse.lis), not by turning the shared
+[bridge and hub](../../../src/serve/sse.lis), not by turning the shared
 source subscription into the boot team's or one column's view.
 
 A board connection is scoped by team and ordering; an issue connection is
@@ -45,13 +45,13 @@ include flash messages, clearing a successful attachment form, settings views,
 and restoring authoritative property values after a rejected edit. Search
 responses own their results and title. Preserve those distinctions:
 
-- [flashing/actions](../../../src/commands/serve_actions.lis) own alerts and
+- [flashing/actions](../../../src/serve/actions.lis) own alerts and
   explicitly returned action fragments/signals.
-- [property recovery](../../../src/commands/serve_property_recovery.lis) replaces
+- [property recovery](../../../src/serve/property_recovery.lis) replaces
   the property controls after failure; it leaves title/comment drafts alone.
-- [attachment actions](../../../src/commands/serve_attachments.lis) clear only a
+- [attachment actions](../../../src/serve/attachments.lis) clear only a
   successful upload form. Rejected uploads preserve the selected file.
-- [search](../../../src/commands/serve_search.lis) owns search-result fragments;
+- [search](../../../src/serve/search.lis) owns search-result fragments;
   the [search input](../../../web/templates/search.html) specifies request
   cancellation for changing queries. Keep the response-order browser test when
   altering this flow.

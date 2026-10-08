@@ -2,6 +2,7 @@ import "go:strings"
 
 import "flags"
 import "models"
+import "display"
 
 #[test]
 fn exact_finding_paths_precede_containment_without_duplicates() {
@@ -109,11 +110,11 @@ fn finding_list_spec_carries_a_limit_flag() {
 fn confidence_suffix_marks_only_what_judgement_changed() {
   // Confirmed — and every doc written before the field existed, whose empty
   // value the migration backfilled — prints unmarked (LLL-396).
-  assert confidence_suffix("confirmed", "") == ""
-  assert confidence_suffix("", "") == ""
-  assert confidence_suffix("suspected", "") == " [suspected]"
-  assert confidence_suffix("refuted", "the render path swallows it") == " [refuted: the render path swallows it]"
-  assert confidence_suffix("refuted", "") == " [refuted]"
+  assert display.confidence_suffix("confirmed", "") == ""
+  assert display.confidence_suffix("", "") == ""
+  assert display.confidence_suffix("suspected", "") == " [suspected]"
+  assert display.confidence_suffix("refuted", "the render path swallows it") == " [refuted: the render path swallows it]"
+  assert display.confidence_suffix("refuted", "") == " [refuted]"
 }
 
 #[test]

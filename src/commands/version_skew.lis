@@ -11,6 +11,7 @@ import "go:time"
 
 import "config"
 import "pb"
+import "buildinfo"
 
 #[json]
 struct AdvertisedVersion { service: string, version: string }
@@ -85,8 +86,8 @@ fn skew_line(ctx: pb.Client, noun: string) -> Option<string> {
   if os.MkdirAll(filepath.Dir(stamp), 0o700).is_err() { return None }
   if os.WriteFile(stamp, today.bytes(), 0o600).is_err() { return None }
   let theirs = probe_server_version(base)?
-  if !newer_version(version(), theirs) { return None }
-  Some(skew_warning(version(), base, theirs))
+  if !newer_version(buildinfo.version(), theirs) { return None }
+  Some(skew_warning(buildinfo.version(), base, theirs))
 }
 
 fn probe_server_version(base: string) -> Option<string> {

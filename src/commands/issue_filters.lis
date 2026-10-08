@@ -40,13 +40,6 @@ fn filters_from(p: flags.Parsed) -> Result<query.Filters, string> {
   }.validate()
 }
 
-fn view_filters(q: ViewQuery) -> query.Filters {
-  // The board's URL carries one of each; the slices are how the CLI says more.
-  let states = if q.state == "" { [] } else { [q.state] }
-  let labels = if q.label == "" { [] } else { [q.label] }
-  query.Filters { state: states, assignee: q.assignee, label: labels, project: q.project, .. }
-}
-
 /// CLI lookups fail before subscribing/fetching. Browser adapters may instead
 /// retain valid fields while reporting a stale name in a bookmarked URL.
 ///

@@ -93,3 +93,37 @@ pub fn scoped_team_keys(ctx: pb.Client) -> Option<Slice<string>> {
   let Ok(teams) = list_teams(ctx) else { return None }
   Some(teams.items.map(|t| t.key))
 }
+
+/// The member named by the current token. A superuser credential has no
+/// member identity and leaves optional authorship empty.
+pub struct Actor {
+  pub id: string,
+  pub name: string,
+}
+
+pub fn find_actor(ctx: pb.Client) -> Result<Option<Actor>, string> {
+  let token = ctx.token()
+  if token == "" { return Ok(None) }
+  let Some(id) = pb.token_subject(token) else { return Ok(None) }
+  // Use the configured request path so the board can renew an expired token
+  // before resolving its member. Explicit-token calls deliberately cannot heal.
+  match ctx.get(f"/api/collections/members/records/{id}") {
+    Ok(body) => {
+      let mut member = models.Member { .. }
+      if let Err(e) = json.Unmarshal(body.bytes(), &member) {
+        return Err(f"decoding the actor: {e}")
+      }
+      Ok(Some(Actor { id: member.id, name: member.name }))
+    },
+    Err(e) => {
+      if pb.classify(e).status == 404 { Ok(None) } else { Err(e) }
+    },
+  }
+}
+
+/// The deterministic identity a member without an email gets. Same rule as
+/// the TASK-180 migration's backfill, so both paths agree on one shape.
+pub fn synthesize_email(name: string) -> string {
+  let slug = strings.ReplaceAll(strings.ToLower(name), " ", "-")
+  f"{slug}@members.invalid"
+}

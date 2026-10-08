@@ -1,0 +1,708 @@
+import "records"
+import "claims"
+import "references"
+import "go:bytes"
+import "go:encoding/json"
+import "go:fmt"
+import "go:io"
+import "go:os"
+import "go:os/exec"
+import "go:strconv"
+import "go:strings"
+import "go:time"
+import "go:unicode/utf8"
+
+import "display"
+import "flags"
+import "models"
+import "pb"
+import "provenance"
+import "query"
+import "writes"
+
+// The verbs that change an issue: create, update, close, delete, comment
+// (and comment edit/delete), pr and ref.
+
+fn create(input: flags.CommandInput) -> Result<(), string> {
+  let ctx = input.ctx
+  let usage = input.usage
+  // A bare title is accepted alongside -t: `gh issue create`, `linear` and
+  // `jira` all take one, and every usability run reached for it first and got
+  // "unknown flag: 'Hello'". -t stays the documented spelling, so no script
+  // breaks; the positional is the guess that now lands.
+  let p = input.parsed
+  let key = strings.TrimSpace(p.one("--idempotency-key"))
+  if p.given("--idempotency-key") && key == "" {
+    return Err(flags.usage_error("--idempotency-key must not be empty"))
+  }
+  let title = if p.one("-t") != "" { p.one("-t") } else { p.first() }
+  if title == "" {
+    return Err(f"no title: give it as the bare argument or with -t\n{usage}")
+  }
+  let mut description = ""
+  if p.given("-b") { description = value_or_stdin(p.one("-b"), "-b")? }
+  let emoji = records.check_emoji(p.one("--emoji"))?
+  let mut priority = 0
+  if p.given("--priority") { priority = check_priority(p.one("--priority"))? }
+  // Same validator update calls, so create and update cannot disagree about
+  // what a state is; the list itself lives once in query.states().
+  let mut state = "todo"
+  if p.given("--state") { state = query.state(p.one("--state"))? }
+  let assignee_name = p.one("--assignee")
+  let label_names = p.all("--label")
+  let project_name = p.one("--project")
+
+  // The team first: it scopes the label and project names below, which are
+  // unique per team and not across them (TASK-173).
+  let team = current_team(ctx)?
+  // New issues do not land in an archived team (TASK-210): archived is the
+  // lifecycle's end, and reviving it is a deliberate one-command act.
+  if team.archived { return Err(records.archived_hint(team.key)) }
+
+  let mut assignee = ""
+  if assignee_name != "" { assignee = records.resolve_member(ctx, assignee_name)?.id }
+
+  let mut project = ""
+  if project_name != "" { project = records.resolve_project(ctx, team.id, project_name)?.id }
+
+  let mut labels: Slice<string> = []
+  for name in label_names {
+    labels = labels.append(records.resolve_label(ctx, team.id, name)?.id)
+  }
+
+  // --agent names the session as the other claim verbs do; without it the
+  // origin tool stays LLL_AGENT, as capture() reads it.
+  let mut origin = provenance.capture(ctx.settings.env.agent)
+  if p.given("--agent") { origin.tool = agent_label(ctx, p)? }
+  let new_issue = models.NewIssue {
+    creator: records.find_actor(ctx)?.map_or("", |member| member.id),
+    origin,
+    team: team.id,
+    title,
+    description,
+    emoji,
+    state,
+    priority,
+    assignee,
+    project,
+    labels,
+    ..
+  }
+  let expand = if p.given("--json") { "?expand=team,assignee,labels,project,creator" } else { "" }
+  let body = if key == "" {
+    writes.create_issue(ctx, pb.Caller.Process, new_issue, expand)?
+  } else {
+    writes.create_issue_once(ctx, new_issue, expand, key)?
+  }
+
+  let mut created = models.Issue { .. }
+  if let Err(e) = json.Unmarshal(body.bytes(), &created) {
+    return Err(f"decoding created issue: {e}")
+  }
+  // PocketBase expands the create response itself. A later read must not
+  // turn a successful write into an apparent failure and invite retries.
+  if p.given("--json") {
+    return print_issue_json(body, None)
+  }
+  let mut reuse = CreationReuse { .. }
+  if let Err(e) = json.Unmarshal(body.bytes(), &reuse) {
+    return Err(f"decoding creation reuse: {e}")
+  }
+  let action = if reuse.reused { "Reused" } else { "Created" }
+  fmt.Println(f"{action} {team.key}-{created.number}: {created.title}")
+  Ok(())
+}
+
+#[json]
+struct CreationReuse { reused: bool }
+
+/// --if-unchanged-since as the server's stamp. The instant is what matters:
+/// RFC3339 in any offset and the space form name the same 'updated' when
+/// they name the same millisecond, the precision the server stores.
+fn unchanged_since_stamp(given: string) -> Result<string, string> {
+  let Ok(parsed) = time.Parse(time.RFC3339Nano, rfc3339_of(given)) else {
+    return Err(flags.usage_error(f"--if-unchanged-since takes the issue's 'updated' from 'lll issue view KEY --json' (RFC3339, or the space form older output printed); got '{given}'"))
+  }
+  Ok(parsed.UTC().Truncate(time.Millisecond).Format("2006-01-02 15:04:05.000Z"))
+}
+
+fn parse_description_replacement(
+  value: string,
+) -> Result<(string, string), string> {
+  let parts = strings.SplitN(value, "=", 2)
+  if parts.length() != 2 {
+    return Err(flags.usage_error("--description-replace requires old=new"))
+  }
+  Ok((parts[0], parts[1]))
+}
+
+fn update(input: flags.CommandInput) -> Result<(), string> {
+  let ctx = input.ctx
+  let usage = input.usage
+  let p = input.parsed
+  let id = p.first()
+  let mut state: Option<string> = None
+  if p.given("--state") { state = Some(query.state(p.one("--state"))?) }
+  let mut priority: Option<int> = None
+  if p.given("--priority") { priority = Some(check_priority(p.one("--priority"))?) }
+  let assignee_name = p.one("--assignee")
+  let label_names = p.all("--label")
+  let add_label_names = p.all("--add-label")
+  let remove_label_names = p.all("--remove-label")
+  let project_name = p.one("--project")
+  let title = p.one("--title")
+  let project_set = p.given("--project")
+  let title_set = p.given("--title")
+  // LLL-646: -b is the description, as on create. It used to be the reason
+  // for a forced clear, so '--assignee none --force -b why' would now quietly
+  // overwrite the description with the reason; that combination is refused
+  // naming --reason instead.
+  let force = p.given("--force")
+  if force && p.given("-b") && !p.given("--reason") {
+    return Err(flags.usage_error("-b is the new description, as on create; the reason for a forced clear is --reason \"why\""))
+  }
+  let mut whole: Option<string> = None
+  if p.given("-b") { whole = Some(value_or_stdin(p.one("-b"), "-b")?) }
+  let replace_set = p.given("--description-replace")
+  let replace = if replace_set {
+    let (old, new) = parse_description_replacement(p.one("--description-replace"))?
+    Some(writes.Replacement { old, new })
+  } else {
+    None
+  }
+  let append_set = p.given("--description-append")
+  let append = if append_set { Some(p.one("--description-append")) } else { None }
+  // One description edit: the whole text, or one derived from the text the
+  // server holds. Both at once has no meaning, and no constructor.
+  let description = match whole {
+    Some(text) => {
+      if replace_set || append_set {
+        return Err(flags.usage_error("-b replaces the whole description; it cannot be combined with --description-replace or --description-append"))
+      }
+      writes.DescriptionEdit.Whole(text)
+    },
+    None => if replace_set || append_set {
+      writes.DescriptionEdit.Derived(writes.Derivation { replace, append })
+    } else {
+      writes.DescriptionEdit.Keep
+    },
+  }
+  let since = if p.given("--if-unchanged-since") { Some(unchanged_since_stamp(p.one("--if-unchanged-since"))?) } else { None }
+  let emoji = records.check_emoji(p.one("--emoji"))?
+  let emoji_set = p.given("--emoji")
+  // An empty --assignee is the natural guess for "clear it" (two of thirty
+  // fleet agents); the word is 'none', and this is where to say so.
+  if p.given("--assignee") && assignee_name == "" {
+    return Err(flags.usage_error("--assignee needs a member name, or 'none' to clear it"))
+  }
+  // LLL-516: clearing the assignee releases the claim, so it takes release's
+  // --force, --reason and agent label, and nothing else does.
+  if force && assignee_name != "none" {
+    return Err(flags.usage_error("--force clears another holder's claim; it goes with --assignee none"))
+  }
+  let reason = forced_reason(p, force, "a forced clear")?
+  let agent = if assignee_name != "" { agent_label(ctx, p)? } else { "" }
+  // LLL-399: the stamp rides the direct PATCH. Assignment writes go through
+  // the claim route, which carries no caller's precondition — honouring the
+  // flag there would mean a guard that silently stops guarding. The claims
+  // route arbitrates with its own observed-claim stamp instead.
+  if since.is_some() && assignee_name != "" {
+    return Err(flags.usage_error("--if-unchanged-since cannot be combined with --assignee: assignment writes go through the claim route, which arbitrates with its own claim stamp. Run them as two updates"))
+  }
+  // LLL-513: --label writes the whole set, the other two edit it. Together
+  // there is no single answer to what the set should be.
+  if !label_names.is_empty() && (!add_label_names.is_empty() || !remove_label_names.is_empty()) {
+    return Err(flags.usage_error("--label replaces the whole label set, so it cannot be combined with --add-label/--remove-label. Use --add-label/--remove-label to change some labels and keep the rest, or --label alone to set the exact list"))
+  }
+  let labelling = !label_names.is_empty() || !add_label_names.is_empty() || !remove_label_names.is_empty()
+  let describing = match description { writes.DescriptionEdit.Keep => false, _ => true }
+  if state.is_none() && priority.is_none() && assignee_name == "" && !labelling && !project_set && !title_set && !describing && !emoji_set {
+    return Err(flags.usage_error(f"nothing to update: pass at least one flag\nusage: {usage}"))
+  }
+
+  let resolved = resolve_id(ctx, id, usage)?
+  let issue = records.fetch_issue(ctx, resolved)?
+  let key = f"{issue.expand.team.key}-{issue.number}"
+
+  // LLL-391: optimistic concurrency for the fields nobody owns. The caller
+  // passes the 'updated' it read; a record written since is refused with
+  // the current stamp, and the caller reads again. Claims arbitrate who
+  // owns an issue; this arbitrates edits. The local check gives the friendly
+  // refusal before a doomed round trip; since LLL-399 the stamp also rides
+  // the PATCH as If-Unmodified-Since, so the window this check cannot close
+  // — a write landing between this read and the PATCH — is held at the
+  // server and answers 412 instead of clobbering.
+  if let Some(stamp) = since {
+    if issue.updated != stamp {
+      return Err(pb.fail(pb.ErrorKind.Refused, f"{key} changed since {display.rfc3339(stamp)}: its 'updated' is now {display.rfc3339(issue.updated)}; read it again ('lll issue view {key} --json' carries updated) and retry with that stamp"))
+    }
+  }
+  // Surgical description edits (LLL-391, after veans): a replace must match
+  // exactly once, or the caller is told how many times it matched, so a
+  // common phrase never silently rewrites the wrong place. Checked against
+  // this read before any name is resolved; the write layer derives it again
+  // against the text it writes over (LLL-665).
+  if let writes.DescriptionEdit.Derived(d) = description {
+    if let Err(failure) = writes.derive_description(issue.description, d) {
+      return Err(update_failure(key, failure, since.is_some()))
+    }
+  }
+
+  // What this update set, for the success line: two fleet agents read
+  // the issue back after 'Updated KEY' because it said nothing else.
+  let mut changed: Slice<string> = []
+  if let Some(s) = state { changed = changed.append(f"state={s}") }
+  if let Some(n) = priority { changed = changed.append(f"priority={n}") }
+  let mut assignee = writes.Relation.Keep
+  if assignee_name == "none" {
+    // 'none' is what view prints for no assignee; the same word clears it.
+    // Nothing else could: an empty --assignee reads as the flag not given.
+    assignee = writes.Relation.Clear
+    changed = changed.append("assignee=none")
+  } else if assignee_name != "" {
+    let member = records.resolve_member(ctx, assignee_name)?
+    assignee = writes.Relation.Set(member.id)
+    changed = changed.append(f"assignee={member.name}")
+  }
+  // The ISSUE's team scopes both name lookups, not the configured one:
+  // `lll issue update GRDN-4 --label bug` must mean GRDN's bug even when
+  // LLL_TEAM says otherwise.
+  let mut project = writes.Relation.Keep
+  if project_set {
+    if project_name == "" {
+      project = writes.Relation.Clear
+      changed = changed.append("project=none")
+    } else {
+      project = writes.Relation.Set(records.resolve_project(ctx, issue.team, project_name)?.id)
+      changed = changed.append(f"project={project_name}")
+    }
+  }
+  let mut labels = writes.LabelEdit.Keep
+  if !label_names.is_empty() {
+    let mut label_ids: Slice<string> = []
+    for name in label_names {
+      label_ids = label_ids.append(records.resolve_label(ctx, issue.team, name)?.id)
+    }
+    labels = writes.LabelEdit.Replace(label_ids)
+    changed = changed.append(f"labels={strings.Join(label_names, "+")}")
+  }
+  // LLL-513: relation modifiers change only the named labels, so a label
+  // another writer adds at the same time is kept. The server holds the
+  // issue's lock across the request.
+  let mut add_ids: Slice<string> = []
+  for name in add_label_names {
+    add_ids = add_ids.append(records.resolve_label(ctx, issue.team, name)?.id)
+  }
+  let mut remove_ids: Slice<string> = []
+  for name in remove_label_names {
+    let id = records.resolve_label(ctx, issue.team, name)?.id
+    if add_ids.contains(id) {
+      return Err(flags.usage_error(f"--add-label and --remove-label both name '{name}'; pass it to only one of them"))
+    }
+    remove_ids = remove_ids.append(id)
+  }
+  if !add_ids.is_empty() || !remove_ids.is_empty() {
+    labels = writes.LabelEdit.Delta { add: add_ids, remove: remove_ids }
+  }
+  if !add_ids.is_empty() { changed = changed.append(f"labels+={strings.Join(add_label_names, "+")}") }
+  if !remove_ids.is_empty() { changed = changed.append(f"labels-={strings.Join(remove_label_names, "+")}") }
+  if title_set { changed = changed.append("title") }
+  if replace_set && append_set {
+    changed = changed.append("description (replaced, appended)")
+  } else if replace_set {
+    changed = changed.append("description (replaced)")
+  } else if append_set {
+    changed = changed.append("description (appended)")
+  } else if whole.is_some() {
+    changed = changed.append("description")
+  }
+  // `--emoji ""` clears the marker, so this one keys off the flag, not the value.
+  if emoji_set { changed = changed.append(f"emoji={emoji}") }
+
+  let mut patch = writes.IssuePatch { state, priority, assignee, project, labels, description, .. }
+  if title_set { patch.title = Some(title) }
+  if emoji_set { patch.emoji = Some(emoji) }
+  let opts = writes.UpdateOptions {
+    stamp: since,
+    claim: writes.ClaimAs { caller: pb.Caller.Process, agent, force, reason },
+  }
+  let assigning = assignee_name != ""
+  let result = match writes.update_issue(ctx, issue, patch, opts) {
+    Ok(t) => t,
+    Err(writes.UpdateFailure.Failed(e)) => {
+      if !assigning { return Err(e) }
+      if pb.classify(e).code == "claim_held" {
+        return Err(f"{key}: {e}; {held_elsewhere_hint(key)}")
+      }
+      if pb.classify(e).code == "needs_force" {
+        return Err(f"{key}: {pb.display_error(e).summary}; 'lll issue update {key} --assignee none --force --reason \"why\"' clears it anyway and comments on the issue")
+      }
+      return Err(f"{key}: {e}")
+    },
+    Err(failure) => return Err(update_failure(key, failure, since.is_some())),
+  }
+  let mut released = ""
+  if let Some(t) = result {
+    if t.claim_id != "" {
+      let forced = if t.forced { "; forced, and commented on the issue" } else { "" }
+      released = f" (released {t.member_name}'s claim{forced})"
+    }
+  }
+  if p.given("--json") { return print_issue_after(ctx, key) }
+  fmt.Println(f"Updated {issue.expand.team.key}-{issue.number}: {strings.Join(changed, ", ")}{released}")
+  Ok(())
+}
+
+/// The refusal for an update the write layer could not land on `key`.
+/// `stamped` is whether the caller gave --if-unchanged-since: its stale
+/// stamp is the caller's to refresh, while a derived edit that kept losing
+/// the race (LLL-665) wrote nothing and can simply run again.
+fn update_failure(key: string, failure: writes.UpdateFailure, stamped: bool) -> string {
+  match failure {
+    writes.UpdateFailure.Failed(e) => e,
+    writes.UpdateFailure.ReplaceMatched(n) => f"--description-replace matched {n} times in {key}'s description; it must match exactly once - widen the text",
+    writes.UpdateFailure.Changed(e) => {
+      let presented = pb.display_error(e)
+      if stamped {
+        pb.fail(pb.ErrorKind.Refused, f"{key} changed under you: {presented.summary}\nread it again ('lll issue view {key} --json' carries updated) and retry with that stamp")
+      } else {
+        pb.fail(pb.ErrorKind.Refused, f"{key} kept changing while its description was edited, so nothing was written; run the update again")
+      }
+    },
+  }
+}
+
+/// D3 (LLL-640): close releases the closer's claim in the same server
+/// transaction that sets the state, and keeps the assignee. --keep-claim
+/// keeps the holder's hold. Closing an issue someone else holds follows the
+/// release rule: refused without --force, and a forced close comments with
+/// --reason.
+fn close_issue(input: flags.CommandInput) -> Result<(), string> {
+  let ctx = input.ctx
+  let usage = "lll issue close [KEY-123] [--keep-claim] [--force [--reason \"why\"]]"
+  let p = input.parsed
+  let agent = agent_label(ctx, p)?
+  let force = p.given("--force")
+  let reason = forced_reason(p, force, "closing another holder's claimed issue")?
+  let keep = p.given("--keep-claim")
+  let resolved = resolve_id(ctx, p.first(), usage)?
+  let issue = records.fetch_issue(ctx, resolved)?
+  let key = f"{issue.expand.team.key}-{issue.number}"
+  let observed = claims.observed_id(ctx, issue.id)?
+  let by = writes.ClaimAs { caller: pb.Caller.Process, agent, force, reason }
+  let result = writes.close_issue(ctx, issue.id, observed, by, keep).map_err(|e| {
+    if pb.classify(e).code == "needs_force" {
+      f"{key}: {e} - 'lll issue close {key} --force --reason \"why\"' closes it anyway, releasing that claim and commenting on the issue"
+    } else { f"{key}: {e}" }
+  })?
+  if p.given("--json") { return print_issue_after(ctx, key) }
+  fmt.Println(f"Closed {key} ● done")
+  if result.claim_id != "" {
+    let holder = display.byline(result.member_name, result.agent)
+    if keep {
+      fmt.Println(f"Claim kept by {holder}; 'lll issue release {key}' gives it back.")
+    } else if result.forced {
+      fmt.Println(f"Released {holder}'s claim; forced, and commented on the issue.")
+    } else {
+      fmt.Println(f"Released {holder}'s claim; assignee unchanged.")
+    }
+  }
+  Ok(())
+}
+
+fn delete_issue(input: flags.CommandInput) -> Result<(), string> {
+  let ctx = input.ctx
+  let p = input.parsed
+  let id = p.first()
+  // Deleting by inferred branch is too dangerous; the ID must be explicit.
+  if id == "" { return Err(flags.usage_error("usage: lll issue delete KEY-123 [--yes] [--force]")) }
+
+  let issue = records.fetch_issue(ctx, id)?
+  let label = f"{issue.expand.team.key}-{issue.number}"
+  // LLL-662: the server refuses to delete a claimed issue, because the
+  // claim would go with it and nobody would be told. --force releases it
+  // first, under the release rule, then deletes.
+  // --force means "even if claimed", so on an unclaimed issue it is
+  // unneeded, not wrong: whether a claim exists is server state the caller
+  // may not know (a hold can lapse between two commands), and a usage error
+  // that depends on it is not a usage error (LLL-679).
+  let held = claims.fetch(ctx, issue.id)?
+  if let Some(h) = held {
+    if !p.given("--force") {
+      let holder = display.byline(display.member_name(h.member, h.expand.member.name, "an unknown member"), h.agent)
+      return Err(pb.fail(pb.ErrorKind.Refused, f"{label} is claimed by {holder}; 'lll issue delete {label} --force' releases the claim and deletes it"))
+    }
+  }
+  if !p.given("--yes") && !confirmed(f"delete {label}?") {
+    // D6: --force never skips the confirmation. A script that used it to
+    // (before 1.0) is told which flag does.
+    if p.given("--force") {
+      return Err(pb.fail(pb.ErrorKind.Refused, "aborted: nothing was deleted; --force does not skip the confirmation, which is skipped by --yes"))
+    }
+    return Err(aborted())
+  }
+  if let Some(h) = held {
+    let agent = agent_label(ctx, p)?
+    let by = writes.ClaimAs { caller: pb.Caller.Process, agent, force: true, reason: "deleting the issue" }
+    let _ = writes.release_claim(ctx, issue.id, h.id, by).map_err(|e| f"{label}: {e}")?
+  }
+  writes.delete_issue(ctx, issue.id).map_err(|e| {
+    if held.is_some() { f"{e}\nthe claim on {label} was released, but the issue was not deleted" } else { e }
+  })?
+  fmt.Println(f"Deleted {label}")
+  Ok(())
+}
+
+fn comment(input: flags.CommandInput) -> Result<(), string> {
+  let ctx = input.ctx
+  let usage = input.usage
+  let p = input.parsed
+  let id = p.first()
+  // A bare second word is the body, as `create` takes a bare title and
+  // `member add` a bare name. Ten of thirty first-time agents in one fleet run
+  // (TASK-309) typed `issue comment DEMO-1 "text"` and were refused for it. -b
+  // stays the documented spelling and wins when both are given; `-b -` still
+  // reads stdin, which a positional cannot express.
+  let mut body = ""
+  let mut body_set = false
+  if p.given("-b") {
+    body = value_or_stdin(p.one("-b"), "-b")?
+    body_set = true
+  } else if p.nth(1) != "" {
+    body = p.nth(1)
+    body_set = true
+  }
+  let agent = if body_set { agent_label(ctx, p)? } else { "" }
+
+  let resolved = resolve_id(ctx, id, usage)?
+  let issue = records.fetch_issue(ctx, resolved)?
+
+  if !body_set {
+    let comments = records.fetch_comments(ctx, issue.id)?
+    if p.given("--json") { return print_list_json(comments, whole_list(comments.length()), "comments") }
+    if comments.is_empty() { return say_empty("comments") }
+    print_comments(comments)
+    // Fleet tasks 4 and 5: every waiting agent re-read this list five times
+    // ten seconds apart. The verb that blocks instead is named where the
+    // polling happens.
+    let key = f"{issue.expand.team.key}-{issue.number}"
+    fmt.Println(f"(waiting for the next one? 'lll issue watch {key} --until TEXT' blocks until a comment containing TEXT arrives)")
+    return Ok(())
+  }
+  if body == "" { return Err(flags.usage_error(f"-b cannot be empty\nusage: {usage}")) }
+
+  // Authorship follows the authenticated member. Superuser comments are authorless.
+  let mut author = ""
+  let mut author_name = ""
+  if let Some(a) = records.find_actor(ctx)? {
+    author = a.id
+    author_name = a.name
+  }
+
+  let created = writes.create_comment(ctx, pb.Caller.Process, models.NewComment { issue: issue.id, author, agent, body })?
+  if p.given("--json") {
+    fmt.Println(contract_json(created.bytes() as json.RawMessage, 0) as string)
+    return Ok(())
+  }
+  // Show the authenticated author at the write, so token switches are visible.
+  let as_who = if author_name == "" { "with no author; use a member token from 'lll login' or 'lll token create'" } else { f"as {display.byline(author_name, agent)}" }
+  fmt.Println(f"Commented on {issue.expand.team.key}-{issue.number} {as_who}")
+  Ok(())
+}
+
+/// Thin wrapper over the GitHub CLI: gh owns pushing checks, prompts, and
+/// errors. Record the returned PR only after gh confirms successful creation.
+fn pr_cmd(input: flags.CommandInput) -> Result<(), string> {
+  let ctx = input.ctx
+  let usage = "lll issue pr [KEY-123]"
+  let id = input.parsed.first()
+  let resolved = resolve_id(ctx, id, usage)?
+
+  let mut gh = ""
+  match exec.LookPath("gh") {
+    Partial.Ok(path) => gh = path,
+    _ => return Err(
+      "gh not found on PATH; install the GitHub CLI (brew install gh)",
+    ),
+  }
+
+  let issue = records.fetch_issue(ctx, resolved)?
+  let key = f"{issue.expand.team.key}-{issue.number}"
+  let (body, linked_only) = pr_body(issue_url(ctx, issue)?, issue.description)?
+  if issue.expand.team.archived { return Err(records.archived_hint(issue.expand.team.key)) }
+  if linked_only {
+    let _ = fmt.Fprintln(os.Stderr, "issue description exceeds the PR body limit; linking to the full description instead")
+  }
+
+  let mut cmd = exec.Command(
+    gh,
+    "pr",
+    "create",
+    "--title",
+    f"{key}: {issue.title}",
+    "--body-file",
+    "-",
+  )
+  cmd.Stdin = Some(strings.NewReader(body))
+  // Two buffers, not one shared by both streams: exec runs a goroutine per
+  // writer, so a single bytes.Buffer behind Stdout and Stderr would be written
+  // from two goroutines at once.
+  let mut captured = bytes.Buffer { .. }
+  let mut captured_err = bytes.Buffer { .. }
+  cmd.Stdout = Some(io.MultiWriter(os.Stdout, &captured))
+  cmd.Stderr = Some(io.MultiWriter(os.Stderr, &captured_err))
+  if let Err(e) = cmd.Run() {
+    // gh refuses to open a second PR for a branch that already has one, and
+    // prints the URL of the one that does - on stderr, which is why that is
+    // captured now. Recording the PR is the whole point of this verb, so adopt
+    // the existing one instead of failing with the URL sitting right there in
+    // the output. `lll issue claim` already answers "it exists and it is
+    // already yours" with success rather than a refusal (LLL-415).
+    //
+    // Gated on gh's own "already exists" wording, deliberately narrow: a create
+    // that failed for any OTHER reason must stay a failure, or a reference gets
+    // recorded for a PR that was never opened. If gh ever changes the wording
+    // this falls back to the old error, which is the safe direction.
+    let combined = captured_err.String() + "\n" + captured.String()
+    if !strings.Contains(combined, "already exists") { return Err(f"gh pr create: {e}") }
+    let Some((existing_url, existing_ref)) = references.from_pr_output(combined) else {
+      return Err(f"gh pr create: {e}")
+    };
+    if let Err(save) = writes.append_ref(ctx, issue.id, existing_ref) {
+      return Err(f"A pull request already exists: {existing_url}\nCould not confirm {existing_ref} on {key}: {save}\nRetry only the reference save: lll issue ref {key} {existing_ref}")
+    }
+    let _ = fmt.Fprintln(os.Stderr, f"a pull request already existed for this branch; recorded {existing_ref} on {key}")
+    return Ok(())
+  }
+  let Some((pr_url, reference)) = references.from_pr_output(captured.String()) else {
+    return Err("gh pr create succeeded but did not report one unambiguous PR URL; the issue was not changed. Inspect the gh output before retrying; do not create a duplicate PR.")
+  };
+  if let Err(e) = writes.append_ref(ctx, issue.id, reference) {
+    return Err(f"PR created: {pr_url}\nCould not confirm {reference} on {key}: {e}\nRetry only the reference save: lll issue ref {key} {reference}")
+  }
+  Ok(())
+}
+
+/// Both positionals are required, unlike the verbs that infer the issue from the
+/// branch: a lone `ref linear:ENG-118` is shaped exactly like a KEY, so guessing
+/// which one it is would silently append a wrong ref, and there is no unref.
+fn ref_cmd(input: flags.CommandInput) -> Result<(), string> {
+  let ctx = input.ctx
+  let usage = "lll issue ref KEY-123 REF"
+  let p = input.parsed
+  let reference = p.nth(1)
+  if p.first() == "" || reference == "" { return Err(flags.usage_error(f"usage: {usage}")) }
+  let resolved = resolve_id(ctx, p.first(), usage)?
+  let issue = records.fetch_issue(ctx, resolved)?
+  let outcome = writes.append_ref(ctx, issue.id, reference)?
+  let action = if outcome.added { "Added" } else { "Already recorded" }
+  fmt.Println(f"{action} {reference} on {issue.expand.team.key}-{issue.number}")
+  Ok(())
+}
+
+/// Keep the issue as the authoritative full text when its description is
+/// larger than GitHub accepts. Never silently publish a truncated excerpt.
+fn pr_body(link: string, description: string) -> Result<(string, bool), string> {
+  let body = if description == "" { link } else { f"{link}\n\n{description}" }
+  if utf8.RuneCountInString(body) <= 65536 { return Ok((body, false)) }
+  let fallback = f"{link}\n\nThe full description is on the linked issue; it exceeds the pull request body limit."
+  if utf8.RuneCountInString(fallback) > 65536 {
+    return Err("the issue URL exceeds the PR body limit; check the configured web_url")
+  }
+  Ok((fallback, true))
+}
+
+/// Print comments as "author (3h ago)", or "author [bot via OWNER] (3h ago)",
+/// then the indented body.
+fn print_comments(comments: Slice<models.Comment>) {
+  // Numbered so 'comment edit KEY N' and 'comment delete KEY N' have a
+  // handle (TASK-320): position in creation order, not the record id.
+  let mut n = 0
+  for c in comments {
+    n += 1
+    let author = display.comment_byline(c.author_kind, c.author, c.expand.author.name, c.agent, "anon")
+    let tag = if c.author_kind == "system" { "" } else { display.author_tag(c.expand.author.kind == "bot", c.expand.author.owner_name()) }
+    fmt.Println(f"#{n} {author}{tag} ({display.relative(c.created)})")
+    fmt.Println(f"  {c.body}")
+  }
+}
+
+/// `lll issue comment edit KEY N -b "body"` and `... delete KEY N`. N is the
+/// position 'comment KEY' prints. Your own comments only, unless --force:
+/// the author is the token's member. A superuser token may change anything.
+fn comment_commands() -> Slice<flags.Command> {
+  [
+    flags.Command { name: "edit", summary: "edit a numbered comment", spec: comment_mutate_spec("edit"), positional: "KEY N", run: |input| comment_mutate(input.ctx, "edit", input.parsed), .. },
+    flags.Command { name: "delete", summary: "delete a numbered comment", spec: comment_mutate_spec("delete"), positional: "KEY N", run: |input| comment_mutate(input.ctx, "delete", input.parsed), .. },
+  ]
+}
+
+fn comment_mutate(ctx: pb.Client, verb: string, p: flags.Parsed) -> Result<(), string> {
+  let spec = comment_mutate_spec(verb)
+  let usage = flags.usage(f"lll issue comment {verb}", spec, "KEY-123 N")
+  if p.first() == "" || p.nth(1) == "" { return Err(flags.usage_error(f"usage: {usage}")) }
+  let resolved = resolve_id(ctx, p.first(), usage)?
+  let issue = records.fetch_issue(ctx, resolved)?
+  let key = f"{issue.expand.team.key}-{issue.number}"
+  let Ok(n) = strconv.Atoi(p.nth(1)) else {
+    return Err(f"'{p.nth(1)}' is not a comment number; 'lll issue comment {key}' numbers them")
+  }
+  let comments = records.fetch_comments(ctx, issue.id)?
+  if n < 1 || n > comments.length() {
+    return Err(f"{key} has {comments.length()} comments; there is no #{n}; 'lll issue comment {key}' numbers them")
+  }
+  let c = comments[n - 1]
+  let whose = display.member_name(c.author, c.expand.author.name, "anon")
+  if !p.given("--force") {
+    if let Some(a) = records.find_actor(ctx)? {
+      if c.author != a.id {
+        return Err(pb.fail(pb.ErrorKind.Refused, f"comment #{n} on {key} is {whose}'s, not yours; only its author changes it (a superuser token can, with --force)"))
+      }
+    }
+  }
+  if verb == "delete" {
+    if !confirmed_on_terminal(
+      p.given("--yes"),
+      f"delete comment #{n} on {key}?",
+    ) {
+      return Err(aborted())
+    }
+    writes.delete_comment(ctx, c.id)?
+    fmt.Println(f"Deleted comment #{n} on {key} (was {whose}'s)")
+    return Ok(())
+  }
+  let mut body = ""
+  if p.given("-b") {
+    body = value_or_stdin(p.one("-b"), "-b")?
+  } else if p.nth(2) != "" {
+    body = p.nth(2)
+  }
+  if strings.TrimSpace(body) == "" {
+    return Err(flags.usage_error(f"comment edit needs the new body: -b \"...\" (or '-b -' from stdin)\nusage: {usage}"))
+  }
+  writes.edit_comment(ctx, c.id, body)?
+  fmt.Println(f"Edited comment #{n} on {key}")
+  Ok(())
+}
+
+fn comment_mutate_spec(verb: string) -> Slice<flags.Flag> {
+  let mut spec = [
+    flags.Flag { name: "--force", help: "with a superuser token: change a comment that is not yours (the server refuses members)", .. },
+  ]
+  if verb == "delete" {
+    spec = spec.append(
+      flags.Flag { name: "--yes", help: "skip the delete confirmation", .. },
+    )
+  }
+  if verb == "edit" {
+    spec = spec.append(flags.Flag {
+      name: "-b",
+      alias: "--body",
+      value: true,
+      hint: "\"body\"",
+      help: "the new body ('-b -' reads it from stdin)",
+      ..,
+    })
+  }
+  spec
+}

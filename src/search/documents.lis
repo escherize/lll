@@ -1,0 +1,72 @@
+import "go:strings"
+
+import "display"
+import "models"
+
+/// Issues and their comments as documents: an issue's key is the group for
+/// itself and each of its comments, so a hit on a comment is reported under
+/// the issue with "comment #n by who" as its label.
+pub fn issue_documents(
+  team_key: string,
+  issues: Slice<models.Issue>,
+  comments: Slice<models.Comment>,
+) -> Slice<Document> {
+  let mut out: Slice<Document> = []
+  let mut titles = Map.new<string, string>()
+  let mut keys = Map.new<string, string>()
+  let mut states = Map.new<string, string>()
+  for i in issues {
+    let key = f"{team_key}-{i.number}"
+    titles[i.id] = i.title
+    keys[i.id] = key
+    states[i.id] = i.state
+    out = out.append(
+      Document {
+        group: key,
+        kind: "issue",
+        label: "description",
+        title: i.title,
+        body: indexable(i.description),
+        state: i.state,
+      },
+    )
+  }
+  let mut per_issue = Map.new<string, int>()
+  for c in comments {
+    let n = per_issue.get(c.issue).unwrap_or(0) + 1
+    per_issue[c.issue] = n
+    let who = display.member_name(c.author, c.expand.author.name, "anon")
+    let Some(key) = keys.get(c.issue) else {
+      continue
+    }
+    out = out.append(
+      Document {
+        group: key,
+        kind: "comment",
+        label: f"comment #{n} by {who}",
+        title: titles.get(c.issue).unwrap_or(""),
+        body: c.body,
+        state: states.get(c.issue).unwrap_or(""),
+      },
+    )
+  }
+  out
+}
+
+/// A body without the importer's provenance lines: "Origin: sidecar
+/// TASK-96" made LLL-95 the second hit for "LLL-96". Those lines are for
+/// the eye, not the index.
+fn indexable(body: string) -> string {
+  let mut kept: Slice<string> = []
+  for l in strings.Split(body, "\n") {
+    let t = strings.TrimSpace(l)
+    if strings.HasPrefix(t, "Origin: sidecar ") || strings.HasPrefix(
+      t,
+      "Created: 20",
+    ) {
+      continue
+    }
+    kept = kept.append(l)
+  }
+  strings.Join(kept, "\n")
+}

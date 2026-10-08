@@ -6,7 +6,6 @@ import "flags"
 import "models"
 import "pb"
 import "query"
-import "writes"
 
 // LLL-100: moving a label or project from one team to another.
 //
@@ -24,7 +23,7 @@ import "writes"
 /// is refused while they hold issues — and the only option that rewrites
 /// nothing the user did not ask for. The way through is to unassign the
 /// references and run it again.
-fn move_to_team(
+pub fn move_to_team(
   ctx: pb.Client,
   kind: string,
   name: string,
@@ -42,8 +41,8 @@ fn move_to_team(
   // Only the relation moves; name, colour, description and status are not
   // this verb's business.
   match kind {
-    "label" => writes.update_label(ctx, id, writes.LabelPatch { team: Some(to.id), .. })?,
-    "project" => writes.update_project(ctx, id, writes.ProjectPatch { team: Some(to.id), .. })?,
+    "label" => update_label(ctx, id, LabelPatch { team: Some(to.id), .. })?,
+    "project" => update_project(ctx, id, ProjectPatch { team: Some(to.id), .. })?,
     _ => return Err(f"cannot move a '{kind}'"),
   }
   Ok(f"Moved {kind} {name}: {from.key} -> {to.key}")
@@ -66,7 +65,7 @@ fn referencing_issue_keys(
     "project" => query.filter("", "", "", id, "", ""),
     _ => return Err(f"cannot move a '{kind}'"),
   }
-  let issues = fetch_all_issues(ctx,
+  let issues = records.fetch_all_issues(ctx,
     f"&expand=team&sort=created,id&filter={url.QueryEscape(filter)}",
   )?
   Ok(
@@ -97,12 +96,12 @@ fn refuse_move(
 }
 
 /// The destination team a `--to KEY` names.
-fn move_destination(ctx: pb.Client, key: string) -> Result<models.Team, string> {
+pub fn move_destination(ctx: pb.Client, key: string) -> Result<models.Team, string> {
   if strings.TrimSpace(key) == "" {
     return Err(flags.usage_error("--to requires a team key (see 'lll team list')"))
   }
   let Some(team) = records.find_team(ctx, key)? else {
-    return Err(unknown_team(ctx, key))
+    return Err(records.unknown_team(ctx, key))
   }
   if team.archived {
     return Err(f"team {team.key} is archived; run 'lll team unarchive {team.key}' first")

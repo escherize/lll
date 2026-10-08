@@ -1,0 +1,43 @@
+import "go:strings"
+import "go:unicode/utf8"
+
+import "flags"
+
+// Field rules shared by the CLI and the board: one check per field, so the
+// two writers cannot drift apart.
+
+/// One marker per issue, so anything sentence-shaped is a mistake. Graphemes
+/// need x/text; rune count is the lazy stand-in that still passes the longest
+/// single emoji anyone types (the 7-rune ZWJ family) and stops "in progress".
+pub fn check_emoji(val: string) -> Result<string, string> {
+  let trimmed = strings.TrimSpace(val)
+  if utf8.RuneCountInString(trimmed) > 8 {
+    return Err(flags.usage_error(
+      f"--emoji takes one emoji, got '{trimmed}' (pass \"\" to clear it)",
+    ))
+  }
+  Ok(trimmed)
+}
+
+/// One glyph, or empty to clear. The rule lives in check_emoji, which is what
+/// `issue create --emoji` already enforces; calling it rather than counting
+/// runes again here is what stops the two from drifting apart.
+pub fn team_emoji_value(raw: string) -> Result<string, string> {
+  match check_emoji(raw) {
+    Ok(glyph) => Ok(glyph),
+    Err(_) => Err(
+      f"'{strings.TrimSpace(raw)}' is not one emoji (pass '' to clear it)",
+    ),
+  }
+}
+
+/// Names selected by the board's comma-separated filters must be one value.
+/// Validate at each write boundary, before lookups or a settings team move.
+pub fn check_filter_name(kind: string, name: string) -> Result<(), string> {
+  if name.contains(",") {
+    return Err(
+      f"{kind} names cannot contain commas; board filters use commas to separate names. Remove the commas.",
+    )
+  }
+  Ok(())
+}

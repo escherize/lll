@@ -1,0 +1,36 @@
+import "query"
+
+/// The board half of the shared-filter contract: a URL's view state becomes
+/// the same query.Filters, and fails the same validation, as the CLI's
+/// flags (that half is in src/commands/issue_filters.test.lis).
+#[test]
+fn web_filters_share_values_and_validation_with_the_cli() {
+  let assert Ok(web) = view_filters(
+    ViewQuery {
+      state: "in-review",
+      assignee: "Alice O'Neil",
+      label: "needs review",
+      project: "Release 2",
+      ..,
+    },
+  ).validate()
+  let assert Ok(cli) = query.Filters {
+    state: ["in-review"],
+    assignee: "Alice O'Neil",
+    label: ["needs review"],
+    project: "Release 2",
+    ..,
+  }.validate()
+  assert web.one_state() == cli.one_state()
+  assert web.assignee == cli.assignee
+  assert web.one_label() == cli.one_label()
+  assert web.project == cli.project
+  let assert Err(web_error) = view_filters(ViewQuery { state: "bogus", .. }).validate()
+  let assert Err(cli_error) = query.Filters { state: ["bogus"], .. }.validate()
+  assert web_error == cli_error
+}
+
+#[test]
+fn a_view_without_a_state_filters_nothing() {
+  assert view_filters(ViewQuery { .. }).validate().is_ok()
+}

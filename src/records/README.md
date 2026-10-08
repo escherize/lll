@@ -15,7 +15,6 @@ administrator flows. `resolve_project` retains the configured-team hint on a
 miss. This extraction does not provide independently configured clients or
 change authorization behavior.
 
-The board handlers still live in `commands`. Moving them to a separate module
-also requires addressing shared metadata, emoji, event payloads, and command
-policies; moving record access alone is not that migration. The data-path
-decision is `lll doc view retain-pocketbase-rest-data-path` on team LLL.
+The board handlers live in `src/serve`, which imports this module and never
+`commands` (scripts/test_module_deps.py holds that). The data-path decision is
+`lll doc view retain-pocketbase-rest-data-path` on team LLL.

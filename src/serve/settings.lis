@@ -11,6 +11,7 @@ import "pb"
 import "query"
 import "theme"
 import "writes"
+import "tokens"
 
 // /settings - the workspace records the web can edit, and the one handler
 // that writes them.
@@ -95,7 +96,7 @@ fn settings_vm(ctx: pb.Client, team: models.Team, section: string) -> Result<Set
         name: p.name,
         status: p.status,
       })
-      vm.statuses = project_statuses().map(|s| StateOpt {
+      vm.statuses = records.project_statuses().map(|s| StateOpt {
         value: s,
         label: state_label(s),
       })
@@ -146,7 +147,7 @@ fn scope_rows(ctx: pb.Client) -> Result<Slice<SetTeamVM>, string> {
 fn team_rows(ctx: pb.Client) -> Result<Slice<SetTeamVM>, string> {
   let mut rows: Slice<SetTeamVM> = []
   for t in records.list_teams(ctx)?.items {
-    let held = issue_count(ctx, f"team={query.quote(t.id)}")?
+    let held = records.issue_count(ctx, f"team={query.quote(t.id)}")?
     rows = rows.append(
       SetTeamVM {
         id: t.id,
@@ -173,7 +174,7 @@ fn label_rows(ctx: pb.Client, team_id: string) -> Result<Slice<SetLabelVM>, stri
   // fetch_labels answers name-sorted; the strict > below keeps equal-usage
   // rows in that order, so ties stay alphabetical.
   for l in records.fetch_labels(ctx, team_id)? {
-    let used = entity_issue_count(ctx, "label", l.id)?
+    let used = records.entity_issue_count(ctx, "label", l.id)?
     let row = SetLabelVM {
       id: l.id,
       name: l.name,
@@ -280,7 +281,7 @@ fn settings_apply(
       // Validated with the CLI's rule, not the browser's: a maxlength on the
       // input is a hint, and this is the same field `lll team set-emoji`
       // writes.
-      let emoji = team_emoji_value(r.PostFormValue("emoji"))?
+      let emoji = records.team_emoji_value(r.PostFormValue("emoji"))?
       writes.update_team(ctx, pb.Caller.Process, team_id, writes.TeamPatch {
         name: Some(name),
         accent: Some(accent),
@@ -290,7 +291,7 @@ fn settings_apply(
     },
     "label" => {
       if name == "" { return Err("label name is required") }
-      check_filter_name("label", name)?
+      records.check_filter_name("label", name)?
       let color = form_hex(r, "color")?
       // LLL-100: the row's team select. The move runs FIRST and may refuse,
       // so a rejected move leaves the name and colour untouched too - one
@@ -312,7 +313,7 @@ fn settings_apply(
         // never-shown password are the same bargain the CLI's member add
         // runs; nobody can log in as one until a password is set.
         let member_email = if email == "" {
-          synthesize_email(name)
+          records.synthesize_email(name)
         } else {
           email
         }
@@ -348,9 +349,9 @@ fn settings_apply(
     },
     "project" => {
       if name == "" { return Err("project name is required") }
-      check_filter_name("project", name)?
+      records.check_filter_name("project", name)?
       let status = r.PostFormValue("status")
-      if project_statuses().find(|s| s == status).is_none() {
+      if records.project_statuses().find(|s| s == status).is_none() {
         return Err(f"unknown project status '{status}'")
       }
       let owner = move_scope_if_asked(ctx, r, "project", name, id, team_id)?
@@ -398,7 +399,7 @@ fn settings_collection(kind: string) -> Result<string, string> {
 /// A create (no id) has nothing to move: the row's team select is the team the
 /// new record is born in, which `team_id` already is.
 ///
-/// The refusal rule lives in move_scope.lis and is the CLI's, so the board and
+/// The refusal rule lives in writes/moves.lis and is the CLI's, so the board and
 /// `lll label move` cannot answer differently - one rule, two doors.
 fn move_scope_if_asked(
   ctx: pb.Client,
@@ -410,10 +411,10 @@ fn move_scope_if_asked(
 ) -> Result<string, string> {
   let wanted = strings.TrimSpace(r.PostFormValue("team"))
   if id == "" || wanted == "" { return Ok(team_id) }
-  let to = move_destination(ctx, wanted)?
+  let to = writes.move_destination(ctx, wanted)?
   if to.id == team_id { return Ok(team_id) }
   let from = shell_team(ctx, team_id)
-  let _ = move_to_team(ctx, kind, name, id, from, to)?
+  let _ = writes.move_to_team(ctx, kind, name, id, from, to)?
   Ok(to.id)
 }
 
@@ -471,12 +472,12 @@ fn verify_admin(ctx: pb.Client, pass: string) -> Result<string, string> {
     Ok(b) => b,
     Err(e) => return Err(admin_verification_error(ctx, e)),
   }
-  decode_auth(body, "the superuser auth response")
+  tokens.decode_auth(body, "the superuser auth response")
 }
 
 /// Authentication failures have a specific recovery; other errors retain
 /// their actual server status and transport details.
-fn admin_verification_error(ctx: pb.Client, e: string) -> string {
+pub fn admin_verification_error(ctx: pb.Client, e: string) -> string {
   if pb.classify(e).status == 400 {
     return f"wrong admin password for {admin_email(ctx)}; use the administrator credentials supplied through LLL_ADMIN_EMAIL and LLL_ADMIN_PASSWORD in the server's own environment"
   }
@@ -514,7 +515,7 @@ fn access_token_write(ctx: pb.Client, _v: Viewing, r: mut Ref<http.Request>) -> 
     mint_payload()?,
     su,
   )?
-  let tok = decode_auth(body, "the impersonate response")?
+  let tok = tokens.decode_auth(body, "the impersonate response")?
   let html = render(
     "access-token-result",
     AccessTokenVM { name: member.name, token: tok },
@@ -527,7 +528,7 @@ fn access_token_write(ctx: pb.Client, _v: Viewing, r: mut Ref<http.Request>) -> 
 /// read the number that actually reaches PocketBase — the whole bug was a
 /// duration nobody could see without watching the wire.
 fn mint_payload() -> Result<string, string> {
-  marshal(models.ImpersonateRequest { duration: default_token_duration() })
+  marshal(models.ImpersonateRequest { duration: tokens.default_token_duration() })
 }
 
 /// The expiry the mint says out loud, as the flash that rides after the token
@@ -536,7 +537,7 @@ fn mint_payload() -> Result<string, string> {
 /// sees it, since impersonate tokens are stateless and nothing records a mint.
 /// `now` is a parameter so the wording is a function of its arguments alone.
 fn mint_expiry_event(now: time.Time) -> string {
-  flash_ok_event(expiry_line(default_token_duration(), now, "lll token create"))
+  flash_ok_event(tokens.expiry_line(tokens.default_token_duration(), now, "lll token create"))
 }
 
 /// Give a member a login credential (email + password) — the admin

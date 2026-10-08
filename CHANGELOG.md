@@ -16,9 +16,18 @@ minors. Issue keys are on the project's own board (`lll issue view KEY`).
   it at a server other than the one the home config's url names. It used to
   save that server's token, and the board endpoint it discovered, beside the
   other server's url. Pass `--url` to switch the home config. (LLL-680)
+- The web board moved out of the CLI's `commands` module into its own
+  module, `src/serve`; the helpers both sides use moved to the modules that
+  own them (records, writes, tokens, display, realtime, buildinfo).
+  `scripts/test_module_deps.py` fails if the board imports `commands`. No
+  command, flag, page or output changed. (LLL-659)
 
 ### Fixed
 
+- An issue key with a signed number (`lll issue view ENG-+3`, the board's
+  `/issue/ENG-+3`) is refused as not an issue ID (exit 2; 404 on the board).
+  The CLI used to read it as ENG-3 while the board's gate said it belonged
+  to no team: the two now share one parser. (LLL-659)
 - `lll up` saves its board address as `web_url` only into a home config
   whose url names that board's server, or names no server (`localhost`,
   `127.0.0.1` and `[::1]` count as one host). A boot run beside a hosted

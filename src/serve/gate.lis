@@ -14,6 +14,7 @@ import "go:strings"
 import "pb"
 import "records"
 import "config"
+import "models"
 
 // The board gate (TASK-182): every route the board serves — pages, POSTs,
 // /events, /static — answers only requests that carry the board token.
@@ -368,7 +369,7 @@ impl ScopedViewer {
 
   /// Whether this viewer may see the issue with this key ("ABC-12").
   pub fn sees_issue(self, issue: string) -> bool {
-    self.teams.any(|key| issue_of_team(issue, key))
+    self.teams.any(|key| records.issue_of_team(issue, key))
   }
 }
 
@@ -460,12 +461,6 @@ fn cookie_viewer(ctx: pb.Client, cookie: string, want: string) -> Option<ScopedV
   member_viewer(ctx, cookie)
 }
 
-#[json]
-struct AccessTeam { id: string, key: string }
-
-#[json]
-struct AccessReply { id: string, name: string, rw: bool, all: bool, teams: Slice<AccessTeam> }
-
 /// A member token's viewer, or None when the server does not accept it.
 /// PocketBase checks the token (signature, expiry, a deleted member's token
 /// fails), and /api/lll/access answers the member's effective access, so a
@@ -474,7 +469,7 @@ struct AccessReply { id: string, name: string, rw: bool, all: bool, teams: Slice
 fn member_viewer(ctx: pb.Client, tok: string) -> Option<ScopedViewer> {
   if pb.token_subject(tok).is_none() || pb.token_expired(tok) { return None }
   let Ok(body) = ctx.get_as("/api/lll/access", tok) else { return None }
-  let mut reply = AccessReply { .. }
+  let mut reply = models.AccessReply { .. }
   if json.Unmarshal(body.bytes(), &reply).is_err() { return None }
   if reply.id == "" { return None }
   Some(ScopedViewer {
@@ -586,13 +581,6 @@ fn hidden_team(key: string) -> string {
   f"no team with key '{key}' on this server; see the rail's team switcher"
 }
 
-/// True when an issue key such as "ABC-12" belongs to team "ABC". The rest
-/// must be the number alone: team keys may contain hyphens, so "ABC-X-1"
-/// belongs to team "ABC-X", not "ABC".
-pub fn issue_of_team(issue: string, key: string) -> bool {
-  let Some(number) = strings.CutPrefix(strings.ToUpper(issue), key + "-") else { return false }
-  number != "" && strings.Trim(number, "0123456789") == ""
-}
 /// The named cookie's value, or None when absent.
 fn cookie_named(r: Ref<http.Request>, name: string) -> Option<string> {
   for c in r.Cookies() {
@@ -601,7 +589,7 @@ fn cookie_named(r: Ref<http.Request>, name: string) -> Option<string> {
   None
 }
 
-/// One query parameter: the helper lives in serve_pages.lis; the gate shares
+/// One query parameter: the helper lives in serve/pages.lis; the gate shares
 /// it rather than growing a second dialect.
 /// Hand the browser its board cookie, `max_age` seconds long: a week for the
 /// board token and team links, a year for a member's token. HttpOnly: the

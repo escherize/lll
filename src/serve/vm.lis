@@ -3,7 +3,7 @@ import "search"
 import "provenance"
 
 // View models for the web board: the structs the templates read, and nothing
-// that fetches or renders. They are built in serve_render.lis and composed
+// that fetches or renders. They are built in serve/render.lis and composed
 // into PageVM by the page handlers.
 
 /// View model for one label chip.
@@ -401,7 +401,7 @@ pub struct IssueVM {
   pub work: string,
   pub work_stale: bool,
   pub description: template.HTML,
-  // The description's markdown source, for the ?raw branch (serve_raw.lis):
+  // The description's markdown source, for the ?raw branch (serve/raw.lis):
   // the field above is what a browser gets, this is what curl gets. Both
   // come off the same record in issue_vm, so the two forms cannot disagree.
   pub description_md: string,
@@ -479,7 +479,7 @@ pub struct IssuesVM {
   pub project: string,
   pub sort: string,
   // URL with every filter dropped and the sort kept, for "Clear". Built by
-  // the shared encoder (serve_url.lis), the one the board uses too.
+  // the shared encoder (serve/url.lis), the one the board uses too.
   pub clear_href: string,
   // A rejected query param, said out loud in the flash strip rather than
   // served as a 500 or silently ignored.

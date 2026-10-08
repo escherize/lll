@@ -121,3 +121,24 @@ pub fn author_tag(bot: bool, owner: string) -> string {
   if owner == "" { return " [bot]" }
   f" [bot via {owner}]"
 }
+
+/// Priority value -> urgency rank: 1 urgent .. 4 low, with none (0) last —
+/// the same rotation prios_by_urgency makes for the filter chooser.
+pub fn prio_rank(priority: int) -> int {
+  if priority == 0 { return 5 }
+  priority
+}
+
+/// The marker that keeps a guess from reading as fact (LLL-396): confirmed
+/// findings — which is everything written before the field existed — print
+/// unmarked, so the noise lands only where judgement changed the meaning.
+/// Takes the two fields rather than the record so the board's finding view
+/// model and the CLI's Doc share one rule.
+pub fn confidence_suffix(confidence: string, note: string) -> string {
+  if confidence == "suspected" { return " [suspected]" }
+  if confidence == "refuted" {
+    if note != "" { return f" [refuted: {note}]" }
+    return " [refuted]"
+  }
+  ""
+}
