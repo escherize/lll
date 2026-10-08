@@ -89,7 +89,7 @@ fn project_list(input: flags.CommandInput) -> Result<(), string> {
   let p = input.parsed
   // Scoped when a team is configured, every team's when not: a project
   // belongs to one team (TASK-173), so the unscoped list is an admin's view.
-  let projects = models.ProjectList { items: records.fetch_projects(configured_team_id()?)? }
+  let projects = models.ProjectList { items: records.fetch_projects(configured_scope()?.filter_team())? }
   if p.given("--json") { return print_json(projects, "project list") }
   for p in projects.items {
     let mut team = p.expand.team.key
@@ -184,7 +184,7 @@ fn project_edit(input: flags.CommandInput) -> Result<(), string> {
   let mut status = ""
   if p.given("-n") { check_filter_name("project", p.one("-n"))? }
   if p.given("--status") { status = check_status(p.one("--status"))? }
-  let project = records.resolve_project(configured_team_id()?, name)?
+  let project = records.resolve_project(current_team()?.id, name)?
 
   let mut fields: Slice<string> = []
   if p.given("-n") { fields = fields.append("\"name\":" + json_quote(p.one("-n"))?) }
@@ -220,7 +220,7 @@ fn project_delete(input: flags.CommandInput) -> Result<(), string> {
   let Some(name) = nonempty(p.first()) else {
     return Err(f"usage: {usage}")
   }
-  let project = records.resolve_project(configured_team_id()?, name)?
+  let project = records.resolve_project(current_team()?.id, name)?
   let used = entity_issue_count("project", project.id)?
   if used > 0 && !p.given("--force") {
     return Err(refuse_delete("project", name, used))
@@ -239,7 +239,7 @@ fn project_view(input: flags.CommandInput) -> Result<(), string> {
   if name == "" {
     return Err("usage: lll project view NAME")
   }
-  let p = records.resolve_project(configured_team_id()?, name)?
+  let p = records.resolve_project(current_team()?.id, name)?
 
   let mut team = p.expand.team.key
   if team == "" { team = "workspace" }

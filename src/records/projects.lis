@@ -5,10 +5,12 @@ import "models"
 import "pb"
 import "query"
 
-/// Resolve one team's project by name; unknown names error with the fix. An
-/// empty `team_id` searches every team, which only the unscoped board wants.
-/// Names are unique within a team, not across them (TASK-173).
+/// Resolve one team's project by name; unknown names error with the fix.
+/// Names are unique within a team, not across them (TASK-173), so `team_id`
+/// must name a team, as resolve_label's must (LLL-671). A read that spans
+/// every team goes through project_ids.
 pub fn resolve_project(team_id: string, name: string) -> Result<models.Project, string> {
+  if team_id == "" { return Err(f"internal: resolve_project('{name}') without a team") }
   let filter = url.QueryEscape(query.scoped(team_id, "name", name))
   let mut result = models.ProjectList { .. }
   pb.fetch(
@@ -26,6 +28,21 @@ pub fn resolve_project(team_id: string, name: string) -> Result<models.Project, 
     return Err(f"no project named '{name}' — see 'lll project list'")
   }
   Ok(p)
+}
+
+/// The ids of every project named `name` within `scope`, for a list filter,
+/// as label_ids does for labels (LLL-671).
+pub fn project_ids(scope: TeamScope, name: string) -> Result<Slice<string>, string> {
+  match scope {
+    TeamScope.Only(team_id) => Ok([resolve_project(team_id, name)?.id]),
+    TeamScope.Every => {
+      let filter = url.QueryEscape(f"name={query.quote(name)}")
+      let found = fetch_all_records<models.Project>(f"/api/collections/projects/records?sort=id&filter={filter}", "projects")?
+      let ids = found.filter(|p| p.name == name).map(|p| p.id)
+      if ids.is_empty() { return Err(f"no project named '{name}' — see 'lll project list'") }
+      Ok(ids)
+    },
+  }
 }
 
 /// One team's projects, scoped for the same reason labels are.

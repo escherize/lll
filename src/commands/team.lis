@@ -473,11 +473,15 @@ fn team_flag_or_current(key: string) -> Result<models.Team, string> {
   Ok(t)
 }
 
-/// The configured team's id, or "" for "every team". Only the listing verbs
-/// and the unscoped web board tolerate that second answer; anything that
-/// writes a team-owned record uses current_team.
-fn configured_team_id() -> Result<string, string> {
-  Ok(configured_team()?.map_or("", |t| t.id))
+/// The teams a list verb reads: the configured one, or every team when none
+/// is configured. Only the list verbs and their filters take this; anything
+/// that writes, views or resolves a team-owned record by name uses
+/// current_team, because a name is unique only within a team (LLL-671).
+fn configured_scope() -> Result<records.TeamScope, string> {
+  match configured_team()? {
+    Some(t) => Ok(records.TeamScope.Only(t.id)),
+    None => Ok(records.TeamScope.Every),
+  }
 }
 
 /// `lll team delete KEY` — remove a team that has nothing in it (TASK-245).

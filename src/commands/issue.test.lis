@@ -578,3 +578,51 @@ fn command_tables_advertise_consistent_creation_and_deletion() {
     assert table.find(|c| c.name == "remove").is_none()
   }
 }
+
+fn blocked(id: string, state: string, blocked_by: Slice<string>) -> models.Issue {
+  models.Issue { id, state, blocked_by, .. }
+}
+
+/// LLL-672: PocketBase drops a blocker the reader may not see from the
+/// expand. The id is still on the record, and it counts as open: nothing
+/// proves it finished, and its state is not this reader's to learn.
+#[test]
+fn a_hidden_blocker_is_not_ready() {
+  let issue = blocked("a", "todo", ["hidden"])
+  let b = blockers_of(issue, [])
+  assert b.hidden == 1
+  assert b.open.is_empty()
+  assert b.any()
+  assert !is_ready(issue, [])
+}
+
+#[test]
+fn readiness_counts_visible_open_blockers_and_ignores_finished_ones() {
+  let done = blocked("d", "done", [])
+  let cancelled = blocked("c", "cancelled", [])
+  let open = blocked("o", "in-progress", [])
+  assert is_ready(blocked("a", "todo", ["d", "c"]), [done, cancelled])
+  assert is_ready(blocked("a", "backlog", []), [])
+  let stuck = blocked("a", "todo", ["d", "o"])
+  assert !is_ready(stuck, [done, open])
+  assert blockers_of(stuck, [done, open]).open.length() == 1
+  assert blockers_of(stuck, [done, open]).hidden == 0
+  // Not open itself: blockers or no, it is not work to pick up.
+  assert !is_ready(blocked("a", "in-review", []), [])
+}
+
+/// watch --ready reads the same rule: the cache first, then the issue's
+/// expand for a blocker outside it, and an id in neither is hidden.
+#[test]
+fn watch_ready_keys_share_the_readiness_rule() {
+  let mut outside = blocked("x", "done", [])
+  let mut a = blocked("a", "todo", ["x"])
+  a.expand.blocked_by = [outside]
+  let hid = blocked("h", "todo", ["gone"])
+  let keys = ready_keys([a, hid])
+  assert keys.contains("a")
+  assert !keys.contains("h")
+  // The cache is fresher than the expand: a blocker it holds as open wins.
+  outside.state = "todo"
+  assert !ready_keys([a, outside]).contains("a")
+}

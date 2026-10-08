@@ -844,7 +844,7 @@ fn list(input: flags.CommandInput) -> Result<(), string> {
 
   // A configured team (LLL_TEAM or .lll.toml) scopes the list by default,
   // and with it the label and project names the list filters by.
-  let team_id = configured_team_id()?
+  let scope = configured_scope()?
 
   let mut sort_spec = sort_flag
   if sort_spec == "" { sort_spec = cfg.sort }
@@ -854,7 +854,7 @@ fn list(input: flags.CommandInput) -> Result<(), string> {
   // --limit applies server-side via PB's perPage (capped by PB at 500).
   let mut per_page = 200
   if limit > 0 { per_page = limit }
-  let mut filter = resolve_filter_query(team_id, filters)?
+  let mut filter = resolve_filter_query(scope, filters)?
   if since != "" {
     let clause = f"updated >= {query.quote(since)}"
     filter = if filter == "" { clause } else { f"{filter} && {clause}" }
@@ -891,10 +891,10 @@ fn list(input: flags.CommandInput) -> Result<(), string> {
   // one open blocker. Decided here, after the fetch, because PocketBase
   // cannot filter on an expanded relation's state.
   if ready_only {
-    items = items.filter(|i| (i.state == "todo" || i.state == "backlog") && open_blockers(i).is_empty())
+    items = items.filter(|i| is_ready(i, i.expand.blocked_by))
   }
   if blocked_only {
-    items = items.filter(|i| !open_blockers(i).is_empty())
+    items = items.filter(|i| blockers_of(i, i.expand.blocked_by).any())
   }
   if json_mode {
     let out = match json.Marshal(models.IssueList { items, total_items: items.length() }) {
@@ -1137,11 +1137,24 @@ fn view(input: flags.CommandInput) -> Result<(), string> {
     let slugs = linked_docs.map(|d| d.slug)
     fmt.Println(f"Docs:      {strings.Join(slugs, ", ")}")
   }
-  if full.expand.blocked_by.length() > 0 {
+  if full.blocked_by.length() > 0 {
+    // Each blocker under its OWN team's key (LLL-674): a cross-team blocker
+    // printed with this issue's key named a different, real issue. One the
+    // reader cannot see is only counted, never named (LLL-672).
     let mut parts: Slice<string> = []
-    for b in full.expand.blocked_by { parts = parts.append(f"{full.expand.team.key}-{b.number} ({b.state})") }
-    let open = open_blockers(full).length()
-    let tail = if open == 0 { " — all done, ready" } else { f" — {open} open, not ready" }
+    for id in full.blocked_by {
+      match full.expand.blocked_by.find(|b| b.id == id) {
+        Some(b) => { parts = parts.append(f"{b.expand.team.key}-{b.number} ({b.state})") },
+        None => { parts = parts.append("a hidden issue") },
+      }
+    }
+    let blockers = blockers_of(full, full.expand.blocked_by)
+    let open = blockers.open.length()
+    let mut tail = if open == 0 { " — all done, ready" } else { f" — {open} open, not ready" }
+    if blockers.hidden > 0 {
+      let counted = if open == 0 { "" } else { f"{open} open, " }
+      tail = f" — {counted}{blockers.hidden} you cannot see, not ready"
+    }
     fmt.Println(f"Blocked by: {strings.Join(parts, ", ")}{tail}")
   }
   let blocks = await_issue_view(reads.blocks, "blocks")?
@@ -2300,9 +2313,43 @@ fn fetch_issue_by_id(id: string) -> Result<models.Issue, string> {
   Ok(full)
 }
 
-/// A blocker is open unless it is done or cancelled.
-fn open_blockers(issue: models.Issue) -> Slice<models.Issue> {
-  issue.expand.blocked_by.filter(|b| b.state != "done" && b.state != "cancelled")
+/// What stands between an issue and "ready" for this reader (LLL-672).
+struct Blockers {
+  /// Blockers the reader can see that are not done or cancelled.
+  open: Slice<models.Issue>,
+  /// Blocker ids with no record the reader can see: another team's issue,
+  /// hidden from a team-scoped member. Counted as open, because nothing
+  /// proves them finished, and their state is not this reader's to learn.
+  hidden: int,
+}
+
+impl Blockers {
+  fn any(self) -> bool {
+    !self.open.is_empty() || self.hidden > 0
+  }
+}
+
+/// The one blocker rule, for list --ready and --blocked, issue next, issue
+/// view and watch --ready (LLL-672). Decided from the `blocked_by` ids, not
+/// from the expanded records: PocketBase drops a blocker the reader may not
+/// see from the expand, and deciding from the expand called that issue ready
+/// while watch, deciding from the ids, did not. `seen` is every blocker record
+/// the caller has, freshest first: the expand, or watch's snapshot.
+fn blockers_of(issue: models.Issue, seen: Slice<models.Issue>) -> Blockers {
+  let mut open: Slice<models.Issue> = []
+  let mut hidden = 0
+  for id in issue.blocked_by {
+    match seen.find(|s| s.id == id) {
+      Some(b) => { if b.state != "done" && b.state != "cancelled" { open = open.append(b) } },
+      None => { hidden += 1 },
+    }
+  }
+  Blockers { open, hidden }
+}
+
+/// Ready: open (todo or backlog) and no blocker that is open or hidden.
+fn is_ready(issue: models.Issue, seen: Slice<models.Issue>) -> bool {
+  (issue.state == "todo" || issue.state == "backlog") && !blockers_of(issue, seen).any()
 }
 
 /// Issues that name `issue` as a blocker, for the "Blocks:" line.
@@ -2355,16 +2402,16 @@ fn issue_next(input: flags.CommandInput) -> Result<(), string> {
   let p = input.parsed
   let agent = if p.given("--claim") { agent_label(p)? } else { "" }
   let filters = filters_from(p)?
-  let team_id = configured_team_id()?
+  let scope = configured_scope()?
   // Names resolve before any fetch, so a typo fails naming the fix instead of
   // reporting an empty agenda.
   let mut excluded: Slice<string> = []
   for name in p.all("--exclude-label") {
-    excluded = excluded.append(records.resolve_label(team_id, name)?.id)
+    excluded = excluded.append(records.label_ids(scope, name)?...)
   }
-  let candidates = ready_issues(resolve_filter_query(team_id, filters)?)?
+  let candidates = ready_issues(resolve_filter_query(scope, filters)?)?
     .filter(|i| !i.labels.any(|l| excluded.contains(l)))
-  let unblocks = unblocks_map(team_id, candidates)?
+  let unblocks = unblocks_map(scope.filter_team(), candidates)?
   // A claimed ready issue is someone's work in progress, not an invitation -
   // including my own claims. The agenda is what an agent can pick up NOW.
   let agenda = rank_agenda(candidates, unblocks).filter(|i| i.assignee == "")
@@ -2426,7 +2473,7 @@ fn issue_next(input: flags.CommandInput) -> Result<(), string> {
 fn ready_issues(scope: string) -> Result<Slice<models.Issue>, string> {
   let filter = url.QueryEscape(scope)
   let items = fetch_all_issues(f"&sort=created,id&expand=team,assignee,labels,blocked_by,project&filter={filter}")?
-  Ok(items.filter(|i| (i.state == "todo" || i.state == "backlog") && open_blockers(i).is_empty()))
+  Ok(items.filter(|i| is_ready(i, i.expand.blocked_by)))
 }
 
 /// Every page of an issues query, for the callers that must see the whole set

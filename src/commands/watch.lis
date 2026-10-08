@@ -56,9 +56,9 @@ pub fn watch(args: Slice<string>) -> Result<(), string> {
   if p.given("--ready") { return watch_ready(filters, p.given("--json")) }
   // A configured team (LLL_TEAM or .lll.toml) scopes the stream by default,
   // same as `issue list`, and with it the label and project names.
-  let team_id = configured_team_id()?
+  let scope = configured_scope()?
 
-  let filter = resolve_filter_query(team_id, filters)?
+  let filter = resolve_filter_query(scope, filters)?
   let topic = realtime.topic_with_options("issues", filter, "team,assignee")?
   let ch = realtime.subscribe(pb.base_url()?, [topic], realtime.DeadToken.Exit)?
   fmt.Fprintln(os.Stderr, "watch: ready (query subscription accepted)")
@@ -418,8 +418,8 @@ fn comment_matches_until(text: string, action: string, body: string) -> bool {
 /// becomes ready. Events for issues that are ready keep streaming, as the
 /// plain query watch does.
 fn watch_ready(filters: query.Filters, json_mode: bool) -> Result<(), string> {
-  let team_id = configured_team_id()?
-  let filter = resolve_filter_query(team_id, filters)?
+  let scope = configured_scope()?
+  let filter = resolve_filter_query(scope, filters)?
   // blocked_by expand, so each event record carries its blockers' states.
   let topic = realtime.topic_with_options("issues", filter, "team,assignee,blocked_by")?
   let ch = realtime.subscribe(pb.base_url()?, [topic], realtime.DeadToken.Exit)?
@@ -485,23 +485,16 @@ fn watch_ready(filters: query.Filters, json_mode: bool) -> Result<(), string> {
   }
 }
 
-/// The ids of every issue in the cache that is open (todo or backlog) and
-/// has no open blocker. Blocker states come from the cache, which every
-/// event refreshes, so a blocker finishing flips its dependents ready on the
-/// blocker's own event.
+/// The ids of every issue in the cache that is ready, by is_ready: the rule
+/// `issue list --ready` and `issue next` use (LLL-672). Blocker states come
+/// from the cache first, which every event refreshes, so a blocker finishing
+/// flips its dependents ready on the blocker's own event; then from the
+/// issue's own expand, for a blocker the cache does not hold (another team's
+/// issue the reader can see). A blocker in neither is hidden, and not ready.
 fn ready_keys(issues: Slice<models.Issue>) -> Slice<string> {
   let mut out: Slice<string> = []
   for issue in issues {
-    if issue.state != "todo" && issue.state != "backlog" { continue }
-    let mut open = false
-    for b in issue.blocked_by {
-      if let Some(rec) = issues.find(|i| i.id == b) {
-        if rec.state != "done" && rec.state != "cancelled" { open = true }
-      } else {
-        open = true // an unknown blocker is not provably done
-      }
-    }
-    if !open { out = out.append(issue.id) }
+    if is_ready(issue, issues.append(issue.expand.blocked_by...)) { out = out.append(issue.id) }
   }
   out
 }

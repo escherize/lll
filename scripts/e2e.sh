@@ -1129,6 +1129,27 @@ assert_contains "$out" "chore" "label list has chore"
 out=$(LLL_URL=$URL LLL_TEAM=OPS "$LIN" label list)
 assert_not_contains "$out" "chore" "label list is scoped to the configured team"
 
+# --- LLL-671: with no team, a name is ambiguous, so writers refuse ---
+# Both teams hold a 'triage'. A writer used to act on the first match.
+LLL_URL=$URL LLL_TEAM=ENG "$LIN" label create -n triage --color "#111111" >/dev/null
+LLL_URL=$URL LLL_TEAM=OPS "$LIN" label create -n triage --color "#222222" >/dev/null
+set +e
+out=$(cd "$DATA_DIR" && env -u LLL_TEAM LLL_URL=$URL "$LIN" label delete triage --yes 2>&1); rc=$?
+set -e
+[ "$rc" -ne 0 ] || fail "label delete with no team: expected nonzero exit"
+assert_contains "$out" "no team configured" "label delete with no team refuses rather than guess"
+set +e
+out=$(cd "$DATA_DIR" && env -u LLL_TEAM LLL_URL=$URL "$LIN" label edit triage --color "#333333" 2>&1); rc=$?
+set -e
+[ "$rc" -ne 0 ] || fail "label edit with no team: expected nonzero exit"
+out=$(cd "$DATA_DIR" && env -u LLL_TEAM LLL_URL=$URL "$LIN" label list)
+assert_contains "$out" "#111111" "no-team refusals left ENG's triage alone"
+assert_contains "$out" "#222222" "no-team refusals left OPS's triage alone"
+out=$(cd "$DATA_DIR" && env -u LLL_TEAM LLL_URL=$URL "$LIN" label delete triage --team OPS --yes)
+assert_contains "$out" "Deleted label triage" "label delete --team names the team"
+out=$(LLL_URL=$URL LLL_TEAM=ENG "$LIN" label list)
+assert_contains "$out" "triage" "deleting OPS's triage kept ENG's"
+
 # --- TASK-208: every label-create surface says check-first, reuse ---
 out=$(LLL_URL=$URL LLL_TEAM=ENG "$LIN" label --help)
 assert_contains "$out" "reuse over" "label help carries the check-first note"

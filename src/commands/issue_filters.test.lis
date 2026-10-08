@@ -79,14 +79,14 @@ fn repeated_filters_mean_the_union_and_undeclared_repeats_are_refused() {
 /// so it cannot widen the team scope around it.
 #[test]
 fn repeated_values_become_a_parenthesised_or() {
-  let one = query.filter_in("t1", ["todo"], "", "", [], "")
+  let one = query.filter_in("t1", ["todo"], "", [], [], "")
   assert one.contains("state='todo'")
   assert !one.contains("||")
-  let two = query.filter_in("t1", ["todo", "in-review"], "", "", [], "")
+  let two = query.filter_in("t1", ["todo", "in-review"], "", [], [], "")
   assert two.contains("(state='todo' || state='in-review')")
   assert two.contains("team='t1'")
-  let labels = query.filter_in("t1", [], "", "", ["l1", "l2"], "")
+  let labels = query.filter_in("t1", [], "", [], ["l1", "l2"], "")
   assert labels.contains("(labels.id ?= 'l1' || labels.id ?= 'l2')")
-  let none = query.filter_in("t1", [], "", "", [], "")
+  let none = query.filter_in("t1", [], "", [], [], "")
   assert none == "team='t1'"
 }
