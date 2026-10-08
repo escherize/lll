@@ -10,15 +10,6 @@ import "go:time"
 
 import "pb"
 
-/// A record event from a PocketBase realtime stream. `topic` is the
-/// subscription topic with any ?options= suffix stripped ("issues",
-/// "issues/RECORDID", "comments"); `data` is the raw JSON payload,
-/// {"action":"create|update|delete","record":{...}}.
-pub struct Event {
-  pub topic: string,
-  pub data: string,
-}
-
 /// One complete SSE frame: the event name and its data payload
 /// (multi-line data joined with newlines).
 pub struct Frame {
@@ -171,13 +162,7 @@ pub fn subscribe(
   start(ctx, topics, on_dead_token, false)
 }
 
-/// The topic of the event subscribe_resyncing sends after each reconnect.
-/// PocketBase does not replay what happened while the stream was down, so a
-/// consumer that renders state (the board, LLL-666) re-reads everything it
-/// shows when this arrives. Not a PocketBase topic: it carries no data.
-pub const RESYNC: string = "lll:resync"
-
-/// subscribe, plus one Event { topic: RESYNC } after every reconnect, sent
+/// subscribe, plus one Event.Resync after every reconnect, sent
 /// once the new subscriptions are accepted and before the first event they
 /// carry. The first connection sends none: there was no outage to cover.
 pub fn subscribe_resyncing(
@@ -229,7 +214,7 @@ fn reconnect(
       Ok(r) => {
         fmt.Fprintln(os.Stderr, "realtime: reconnected to the lll server (subscriptions accepted)")
         last_err = ""
-        if resync { let _ = ch.send(Event { topic: RESYNC, data: "" }) }
+        if resync { let _ = ch.send(Event.Resync) }
         pump(r, ch)
         fmt.Fprintln(os.Stderr, "realtime: lll server stream lost; reconnecting")
       },
@@ -441,8 +426,6 @@ fn pump(reader: mut Ref<bufio.Reader>, ch: Channel<Event>) {
       continue
     }
     if frame.event == "PB_CONNECT" { continue }
-    let _ = ch.send(
-      Event { topic: strip_options(frame.event), data: frame.data },
-    )
+    let _ = ch.send(Event.Record(decode(strip_options(frame.event), frame.data)))
   }
 }

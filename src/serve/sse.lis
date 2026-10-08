@@ -5,7 +5,6 @@ import "query"
 import "go:crypto/sha256"
 import "go:fmt"
 import "go:net/url"
-import "go:encoding/json"
 import "go:net/http"
 import "go:os"
 import "go:strings"
@@ -371,11 +370,12 @@ fn bridge(ctx: pb.Client, events: Channel<realtime.Event>, hub: Hub) {
   loop {
     let jobs: Slice<Refresh> = select {
       match events.receive() {
-        Some(ev) => {
-          if ev.topic == realtime.RESYNC {
+        Some(arrived) => match arrived {
+          realtime.Event.Resync => {
             fmt.Fprintln(os.Stderr, "realtime: re-rendering every open view after the reconnect")
             resync_refreshes(open_scopes(hub))
-          } else { event_refreshes(ev) }
+          },
+          realtime.Event.Record(ev) => event_refreshes(ev),
         },
         None => { return },
       },
@@ -443,33 +443,30 @@ fn run_refresh(ctx: pb.Client, job: Refresh, hub: Hub, follow: Channel<Refresh>)
   }
 }
 
-/// The refreshes one PocketBase event asks for. Decoding is the only work
-/// here; anything that reads runs on a worker.
-fn event_refreshes(ev: realtime.Event) -> Slice<Refresh> {
-  if ev.topic == "comments" {
-    let mut event = realtime.CommentEvent { .. }
-    if json.Unmarshal(ev.data.bytes(), &event).is_err() { return [] }
-    return [Refresh.Resolve(ResolveRefresh { issue_id: event.record.issue, board: false })]
-  }
-  if ev.topic == "claims" {
+/// The refreshes one PocketBase event asks for. The realtime client already
+/// decoded it; anything that reads runs on a worker.
+fn event_refreshes(ev: realtime.RecordEvent) -> Slice<Refresh> {
+  match ev.change {
+    realtime.Change.Comment(comment) => [Refresh.Resolve(ResolveRefresh { issue_id: comment.issue, board: false })],
     // Claim-only releases may not update the issue's assignee: route the
     // hold's own event by its issue id, deleted holds included.
-    let mut event = ClaimEvent { .. }
-    if json.Unmarshal(ev.data.bytes(), &event).is_err() { return [] }
-    return [Refresh.Resolve(ResolveRefresh { issue_id: event.record.issue, board: true })]
+    realtime.Change.Claim(hold) => [Refresh.Resolve(ResolveRefresh { issue_id: hold.issue, board: true })],
+    realtime.Change.Favorite => [Refresh.Favorites],
+    realtime.Change.View => [Refresh.Views],
+    realtime.Change.Issue(rec) => {
+      let team_key = rec.expand.team.key
+      // Titles and state icons in favorites are issue data too.
+      [
+        Refresh.Board(BoardRefresh { team_key, team_id: Some(rec.team), order: "", client_id: 0 }),
+        Refresh.Issue(IssueRefresh { key: f"{team_key}-{rec.number}", client_id: 0 }),
+        Refresh.Favorites,
+      ]
+    },
+    // The board subscribes to five topics by name; anything else is not
+    // its to render, and a payload that does not decode names nothing.
+    realtime.Change.Unknown(_) => [],
+    realtime.Change.Malformed(_) => [],
   }
-  if ev.topic == "favorites" { return [Refresh.Favorites] }
-  if ev.topic == "views" { return [Refresh.Views] }
-  let mut event = realtime.IssueEvent { .. }
-  if json.Unmarshal(ev.data.bytes(), &event).is_err() { return [] }
-  let rec = event.record
-  let team_key = rec.expand.team.key
-  // Titles and state icons in favorites are issue data too.
-  [
-    Refresh.Board(BoardRefresh { team_key, team_id: Some(rec.team), order: "", client_id: 0 }),
-    Refresh.Issue(IssueRefresh { key: f"{team_key}-{rec.number}", client_id: 0 }),
-    Refresh.Favorites,
-  ]
 }
 
 /// A new page's first fragment: its board or its issue, for it alone.
@@ -594,9 +591,6 @@ fn board_snapshot(hub: Hub, reader: Reader, b: BoardRefresh, orders: Slice<strin
   }
   Ok(())
 }
-
-#[json]
-struct ClaimEvent { record: models.Claim }
 
 /// A claim or comment event's issue, read fresh, then its page (and board)
 /// refreshed under their own keys, so they stay ordered with every other

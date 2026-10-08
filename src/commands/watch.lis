@@ -54,30 +54,27 @@ pub fn watch(ctx: pb.Client, args: Slice<string>) -> Result<(), pb.CliError> {
   // "changed" line.
   let mut last = Map.new<models.IssueId, Snapshot>()
   loop {
-    let Some(ev) = ch.receive() else {
+    let Some(arrived) = ch.receive() else {
       return Ok(())
     }
+    let realtime.Event.Record(ev) = arrived else { continue }
     if json_mode {
       fmt.Println(ndjson_line(ev))
       continue
     }
-    let mut event = realtime.IssueEvent { .. }
-    if let Err(e) = json.Unmarshal(ev.data.bytes(), &event) {
-      return Err(pb.failed(f"decoding realtime event: {e}"))
-    }
-    let rec = event.record
+    let rec = issue_change(ev)?
     let stamp = time.Now().Format("15:04:05")
     let key = f"{rec.expand.team.key}-{rec.number}"
-    match event.action {
-      "create" => {
+    match ev.action {
+      realtime.Action.Create => {
         last[rec.id] = snapshot(rec)
         fmt.Println(f"{stamp} {key} created: {rec.title}")
       },
-      "delete" => {
+      realtime.Action.Delete => {
         last.delete(rec.id)
         fmt.Println(f"{stamp} {key} deleted")
       },
-      "update" => {
+      realtime.Action.Update => {
         let cur = snapshot(rec)
         let mut described = false
         if let Some(prev) = last.get(rec.id) {
@@ -90,8 +87,18 @@ pub fn watch(ctx: pb.Client, args: Slice<string>) -> Result<(), pb.CliError> {
         if !described { fmt.Println(f"{stamp} {key} changed") }
         last[rec.id] = cur
       },
-      other => fmt.Println(f"{stamp} {key} {other}"),
+      realtime.Action.Other(other) => fmt.Println(f"{stamp} {key} {other}"),
     }
+  }
+}
+
+/// The issue an event on an issues subscription carries. Any other payload
+/// on it fails the watch, naming why, as an undecodable one always has.
+fn issue_change(ev: realtime.RecordEvent) -> Result<models.Issue, pb.CliError> {
+  match ev.change {
+    realtime.Change.Issue(rec) => Ok(rec),
+    realtime.Change.Malformed(why) => Err(pb.failed(f"decoding realtime event: {why}")),
+    _ => Err(pb.failed(f"decoding realtime event: an event on '{ev.topic}' is not an issue")),
   }
 }
 
@@ -260,7 +267,7 @@ fn run_issue_watch(ctx: pb.Client, id: string, json_mode: bool, until: string, u
             Ok(data) => data as string,
             Err(e) => return Err(pb.failed(f"encoding comment snapshot: {e}")),
           }
-          fmt.Println(ndjson_line(realtime.Event { topic: "comments", data }))
+          fmt.Println(ndjson_line(realtime.decode("comments", data)))
         } else {
           let author = display.member_name(c.author, c.expand.author.name, "anon")
           fmt.Println(f"already there: #{n} by {author}: {first_line(c.body)}")
@@ -280,39 +287,36 @@ fn run_issue_watch(ctx: pb.Client, id: string, json_mode: bool, until: string, u
   // renders as a transition.
   let mut prev = snapshot(issue)
   loop {
-    let Some(ev) = ch.receive() else { return Ok(()) }
+    let Some(arrived) = ch.receive() else { return Ok(()) }
+    let realtime.Event.Record(ev) = arrived else { continue }
     let stamp = time.Now().Format("15:04:05")
-    if ev.topic == "comments" {
-      let mut event = realtime.CommentEvent { .. }
-      if let Err(e) = json.Unmarshal(ev.data.bytes(), &event) {
-        return Err(pb.failed(f"decoding realtime event: {e}"))
-      }
-      let matched = comment_matches_until(until, event.action, event.record.body)
+    if let realtime.Change.Comment(comment) = ev.change {
+      let matched = comment_matches_until(until, ev.action.wire(), comment.body)
       if json_mode {
         fmt.Println(ndjson_line(ev))
-      } else if event.action == "create" || matched {
-        let author = display.member_name(event.record.author, event.record.expand.author.name, "anon")
-        fmt.Println(f"{stamp} comment by {author}: {first_line(event.record.body)}")
+      } else if ev.action == realtime.Action.Create || matched {
+        let author = display.member_name(comment.author, comment.expand.author.name, "anon")
+        fmt.Println(f"{stamp} comment by {author}: {first_line(comment.body)}")
       }
       if matched { return Ok(()) }
       continue
     }
-    let mut event = realtime.IssueEvent { .. }
-    if let Err(e) = json.Unmarshal(ev.data.bytes(), &event) {
-      return Err(pb.failed(f"decoding realtime event: {e}"))
+    if let realtime.Change.Malformed(why) = ev.change {
+      return Err(pb.failed(f"decoding realtime event: {why}"))
     }
+    let rec = issue_change(ev)?
     if json_mode {
       fmt.Println(ndjson_line(ev))
-      if event.action == "delete" { return Ok(()) }
+      if ev.action == realtime.Action.Delete { return Ok(()) }
       continue
     }
-    match event.action {
-      "delete" => {
+    match ev.action {
+      realtime.Action.Delete => {
         fmt.Println(f"{stamp} {key} deleted")
         return Ok(())
       },
-      "update" => {
-        let cur = snapshot(event.record)
+      realtime.Action.Update => {
+        let cur = snapshot(rec)
         let diff = issue_diff(prev, cur)
         if diff == "" {
           fmt.Println(f"{stamp} changed")
@@ -376,7 +380,7 @@ fn assignee_display(snap: Snapshot) -> string {
 /// The event's raw PB payload as one NDJSON line, with a "topic" field
 /// spliced in after the opening brace. Topics are collection names and
 /// record ids — no JSON escaping needed.
-fn ndjson_line(ev: realtime.Event) -> string {
+fn ndjson_line(ev: realtime.RecordEvent) -> string {
   if !ev.data.starts_with("{") { return ev.data }
   // TrimPrefix, not substring(1..length()): length() counts BYTES and substring
   // indexes RUNES, so the two agree only while the payload is pure ASCII. One
@@ -419,25 +423,23 @@ fn watch_ready(ctx: pb.Client, filters: query.Criteria, json_mode: bool) -> Resu
   let mut ready = ready_keys(issues)
   fmt.Fprintln(os.Stderr, "watch: ready (agenda subscription accepted)")
   loop {
-    let Some(ev) = ch.receive() else { return Ok(()) }
-    let mut event = realtime.IssueEvent { .. }
-    if let Err(e) = json.Unmarshal(ev.data.bytes(), &event) {
-      return Err(pb.failed(f"decoding realtime event: {e}"))
-    }
-    let rec = event.record
+    let Some(arrived) = ch.receive() else { return Ok(()) }
+    let realtime.Event.Record(ev) = arrived else { continue }
+    let rec = issue_change(ev)?
+    let deleted = ev.action == realtime.Action.Delete
     let mut kept: Slice<models.Issue> = []
     let mut known = false
     for i in issues {
       if i.id == rec.id {
         known = true
-        if event.action != "delete" { kept = kept.append(rec) }
+        if !deleted { kept = kept.append(rec) }
         continue
       }
       kept = kept.append(i)
     }
     // A create for a record the snapshot has not seen: it joins the cache
     // here, or its readiness would never be computed.
-    if !known && event.action != "delete" { kept = kept.append(rec) }
+    if !known && !deleted { kept = kept.append(rec) }
     issues = kept
     let fresh = ready_keys(issues)
     let stamp = time.Now().Format("15:04:05")
@@ -463,12 +465,12 @@ fn watch_ready(ctx: pb.Client, filters: query.Criteria, json_mode: bool) -> Resu
       }
     }
     // Ordinary events for issues that are already ready keep flowing.
-    if event.action != "delete" && ready.contains(rec.id) && !became.find(|b| b.id == rec.id).is_some() {
+    if !deleted && ready.contains(rec.id) && !became.find(|b| b.id == rec.id).is_some() {
       if json_mode {
         fmt.Println(ndjson_line(ev))
       } else {
         let key = f"{rec.expand.team.key}-{rec.number}"
-        fmt.Println(f"{stamp} {key} {event.action}: {rec.title}")
+        fmt.Println(f"{stamp} {key} {ev.action.wire()}: {rec.title}")
       }
     }
   }
