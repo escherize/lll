@@ -3,6 +3,9 @@ import "go:net/url"
 import "models"
 import "query"
 import "pb"
+import "go:encoding/json"
+import "go:regexp"
+import "go:strings"
 
 /// One team's docs for the board's docs index (LLL-643), newest first, with
 /// the author and a bot author's owner expanded. `kind` narrows to one kind
@@ -22,4 +25,127 @@ pub fn fetch_team_docs(
     f"/api/collections/docs/records?sort=-updated,id&expand=author.owner&fields={fields}&filter={url.QueryEscape(filter)}",
     "docs",
   )
+}
+
+/// Slugs are lowercase letters, digits and hyphens, starting and ending with
+/// a letter or digit — safe in URLs, unambiguous in shell commands, stable
+/// as bare words in grep.
+pub fn check_slug(val: string) -> Result<string, string> {
+  let slug = strings.TrimSpace(val)
+  if slug == "" { return Err("slug cannot be empty (e.g. port-notes)") }
+  if slug.length() > 80 {
+    return Err(f"slug must be at most 80 characters, got {slug.length()}")
+  }
+  let shaped = "^[a-z0-9]([a-z0-9-]*[a-z0-9])?$"
+  let matched = match regexp.MatchString(shaped, slug) {
+    Ok(m) => m,
+    Err(e) => return Err(f"validating slug: {e}"),
+  }
+  if !matched {
+    return Err(
+      f"invalid slug '{slug}' (use lowercase letters, digits and hyphens, starting and ending with a letter or digit, e.g. port-notes)",
+    )
+  }
+  Ok(slug)
+}
+
+pub fn doc_kinds() -> Slice<string> {
+  ["wiki", "finding", "decision", "prd"]
+}
+
+/// Fetch a doc by slug WITHIN one team and return the raw PB record JSON,
+/// with its linked issues (and their teams, for KEY-123 keys) expanded, and
+/// its author with a bot author's owner (LLL-618). PocketBase leaves out a
+/// member the caller may not read, so nobody learns an owner they cannot see.
+///
+/// A slug is unique per team, not per server (TASK-173): GRDN and LLL both
+/// get an `index`, so every lookup names the team it means. There is no
+/// cross-team form — `LLL_TEAM=GRDN lll doc view index` is how you read the
+/// other board's page.
+pub fn fetch_doc_record(
+  ctx: pb.Client,
+  team: models.Team,
+  slug: string,
+) -> Result<string, string> {
+  let Some(item) = find_doc(ctx, team, slug)? else {
+    return Err(unknown_doc(team, slug))
+  }
+  ctx.get(f"/api/collections/docs/records/{item.id}?expand=issues.team,author.owner")
+}
+
+/// fetch_doc_record, decoded.
+pub fn fetch_doc(ctx: pb.Client, team: models.Team, slug: string) -> Result<models.Doc, string> {
+  let record = fetch_doc_record(ctx, team, slug)?
+  let mut d = models.Doc { .. }
+  if let Err(e) = json.Unmarshal(record.bytes(), &d) {
+    return Err(f"decoding doc: {e}")
+  }
+  Ok(d)
+}
+
+/// One team's doc by slug, or None. Lets callers distinguish "unknown slug"
+/// from a failed write.
+pub fn find_doc(
+  ctx: pb.Client,
+  team: models.Team,
+  slug: string,
+) -> Result<Option<models.Doc>, string> {
+  let slug = check_slug(slug)?
+  let filter = url.QueryEscape(query.scoped(team.id, "slug", slug))
+  let mut docs = models.DocList { .. }
+  pb.fetch(ctx, 
+    f"/api/collections/docs/records?filter={filter}&perPage=1",
+    "docs",
+    &docs,
+  )?
+  Ok(docs.items.find(|d| d.slug == slug))
+}
+
+/// Unknown-slug message. It names the team, because the same slug may well
+/// exist on another board and "no doc with slug 'index'" would be a lie.
+pub fn unknown_doc(team: models.Team, slug: string) -> string {
+  pb.fail(pb.ErrorKind.NotFound, f"no doc with slug '{slug}' in {team.key}; see 'lll doc list'")
+}
+
+/// Complete document retrieval shared by lists, briefs and search. Callers
+/// supply domain filters before URL encoding; page size is a transport detail.
+/// A failed later page fails the read instead of returning a partial brief.
+pub fn fetch_docs(ctx: pb.Client, filter: string, sort: string, fields: string) -> Result<Slice<models.Doc>, string> {
+  let params = f"filter={url.QueryEscape(filter)}&sort={url.QueryEscape(sort + ",id")}&fields={url.QueryEscape(fields)}"
+  let mut out: Slice<models.Doc> = []
+  let mut page = 1
+  loop {
+    let mut result = models.DocList { .. }
+    pb.fetch(ctx, f"/api/collections/docs/records?{params}&perPage=200&page={page}", "docs", &result)?
+    out = out.append(result.items...)
+    if result.items.length() < 200 { break }
+    page += 1
+  }
+  Ok(out)
+}
+
+/// One team's findings, slug order. Two clauses and no more — retrieval
+/// never searches bodies or titles, it filters coordinates.
+///
+/// The team clause is not optional (TASK-173). Every project has a `src/`,
+/// so an unscoped `finding near src/` answers with another codebase's notes,
+/// formatted identically to a correct hit. Findings exist to say what is
+/// known about THIS file; confidently answering about a different repo is
+/// worse than answering nothing.
+pub fn fetch_findings(ctx: pb.Client, team_id: string) -> Result<Slice<models.Doc>, string> {
+  fetch_docs(ctx, f"kind='finding' && team={query.quote(team_id)}", "slug", "")
+}
+
+/// The findings related to one issue: every finding explicitly linked to it
+/// (the issues relation always shows), plus every finding whose `area` names
+/// one of the issue's labels. Shared by 'lll issue view' and the issue page.
+pub fn findings_for_issue(ctx: pb.Client, issue: models.Issue) -> Result<Slice<models.Doc>, string> {
+  // The ISSUE's team, not the configured one: this answers for one issue,
+  // and the board can be showing an issue from a team nobody configured.
+  let findings = fetch_findings(ctx, issue.team)?
+  Ok(findings.filter(|d| {
+    let linked = d.issues.find(|x| x == issue.id).is_some()
+    let area_hit = d.area != "" && issue.expand.labels.any(|l| l.name == d.area)
+    linked || area_hit
+  }))
 }

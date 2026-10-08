@@ -1113,7 +1113,7 @@ fn begin_issue_view_reads(
     }
   }
   task {
-    let _ = reads.findings.send(findings_for_issue(ctx, full))
+    let _ = reads.findings.send(records.findings_for_issue(ctx, full))
   }
   task {
     let _ = reads.comments.send(records.fetch_comments(ctx, full.id))
@@ -1316,7 +1316,7 @@ fn view(input: flags.CommandInput) -> Result<(), string> {
       }
       let mut area = f.area
       if area == "" { area = "-" }
-      fmt.Println(f"{f.slug} ({area}): {f.title}{confidence_suffix(f.confidence, f.confidence_note)}")
+      fmt.Println(f"{f.slug} ({area}): {f.title}{display.confidence_suffix(f.confidence, f.confidence_note)}")
     }
     if hidden > 0 {
       fmt.Println(f"... and {hidden} more by area; 'lll finding list -a AREA' lists an area, 'lll issue view --raw' prints them all")
@@ -1391,7 +1391,7 @@ fn print_findings_raw(findings: Slice<models.Doc>) -> Result<(), string> {
   for f in findings {
     let mut area = f.area
     if area == "" { area = "-" }
-    fmt.Println(f"- {f.slug} ({area}): {f.title}{confidence_suffix(f.confidence, f.confidence_note)}")
+    fmt.Println(f"- {f.slug} ({area}): {f.title}{display.confidence_suffix(f.confidence, f.confidence_note)}")
   }
   Ok(())
 }
@@ -2289,7 +2289,7 @@ fn resolve_id(ctx: pb.Client, explicit: string, usage: string) -> Result<string,
 /// one `?=` filter over docs.issues, which is the whole reason links are a
 /// relation and not a write-once reference on the issue.
 fn fetch_issue_docs(ctx: pb.Client, issue_id: string) -> Result<Slice<models.Doc>, string> {
-  fetch_docs(ctx, f"issues.id ?= {query.quote(issue_id)}", "slug", "")
+  records.fetch_docs(ctx, f"issues.id ?= {query.quote(issue_id)}", "slug", "")
 }
 
 /// Refuse a link whose two ends live in different teams (TASK-173). The doc
@@ -2324,7 +2324,7 @@ fn link_issue(ctx: pb.Client, id: string, slug: string, usage: string) -> Result
   let issue = records.fetch_issue(ctx, resolved)?
   let key = f"{issue.expand.team.key}-{issue.number}"
   let team = issue_link_team(ctx, issue)?
-  let d = fetch_doc(ctx, team, slug)?
+  let d = records.fetch_doc(ctx, team, slug)?
   cross_team_link(issue, team, d)?
 
   if d.issues.find(|x| x == issue.id).is_some() {
@@ -2351,7 +2351,7 @@ fn unlink_issue(ctx: pb.Client, id: string, slug: string, usage: string) -> Resu
   let issue = records.fetch_issue(ctx, resolved)?
   let key = f"{issue.expand.team.key}-{issue.number}"
   let team = issue_link_team(ctx, issue)?
-  let d = fetch_doc(ctx, team, slug)?
+  let d = records.fetch_doc(ctx, team, slug)?
   cross_team_link(issue, team, d)?
 
   if d.issues.find(|x| x == issue.id).is_none() {
@@ -2631,8 +2631,8 @@ fn rank_by_priority(items: Slice<models.Issue>, descending: bool) -> Slice<model
 }
 
 fn prio_before(a: models.Issue, b: models.Issue, descending: bool) -> bool {
-  let ra = prio_rank(a.priority)
-  let rb = prio_rank(b.priority)
+  let ra = display.prio_rank(a.priority)
+  let rb = display.prio_rank(b.priority)
   if ra == rb { return false }
   if ra == none_rank() || rb == none_rank() { return rb == none_rank() }
   if descending { return ra > rb }
@@ -2640,7 +2640,7 @@ fn prio_before(a: models.Issue, b: models.Issue, descending: bool) -> bool {
 }
 
 /// What prio_rank gives an issue with no priority.
-fn none_rank() -> int { prio_rank(0) }
+fn none_rank() -> int { display.prio_rank(0) }
 
 /// One --page window of a locally ordered list, the slice PB's perPage/page
 /// would have returned had it been able to produce this order itself.
@@ -2692,8 +2692,8 @@ fn rank_agenda(items: Slice<models.Issue>, unblocks: Map<string, int>) -> Slice<
 
 fn agenda_before(a: models.Issue, b: models.Issue, unblocks: Map<string, int>) -> bool {
   if (a.assignee == "") != (b.assignee == "") { return a.assignee == "" }
-  let pa = prio_rank(a.priority)
-  let qb = prio_rank(b.priority)
+  let pa = display.prio_rank(a.priority)
+  let qb = display.prio_rank(b.priority)
   if pa != qb { return pa < qb }
   let ta = parse_created(a.created)
   let tb = parse_created(b.created)

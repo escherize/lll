@@ -14,20 +14,6 @@ import "query"
 import "realtime"
 import "flags"
 
-// pub because serve.lis decodes the same event shapes; module-private
-// structs miscompile when their fields are read from another file.
-#[json]
-pub struct IssueEvent {
-  pub action: string,
-  pub record: models.Issue,
-}
-
-#[json]
-pub struct CommentEvent {
-  pub action: string,
-  pub record: models.Comment,
-}
-
 /// Dispatch `lll watch` — a live event stream for a query, one line per
 /// create/update/delete, filtered server-side with the same criteria as
 /// `lll issue list`. Runs until interrupted (Ctrl-C).
@@ -75,7 +61,7 @@ pub fn watch(ctx: pb.Client, args: Slice<string>) -> Result<(), string> {
       fmt.Println(ndjson_line(ev))
       continue
     }
-    let mut event = IssueEvent { .. }
+    let mut event = realtime.IssueEvent { .. }
     if let Err(e) = json.Unmarshal(ev.data.bytes(), &event) {
       return Err(f"decoding realtime event: {e}")
     }
@@ -270,7 +256,7 @@ fn run_issue_watch(ctx: pb.Client, id: string, json_mode: bool, until: string, u
       n += 1
       if comment_matches_until(until, "snapshot", c.body) {
         if json_mode {
-          let data = match json.Marshal(CommentEvent { action: "snapshot", record: c }) {
+          let data = match json.Marshal(realtime.CommentEvent { action: "snapshot", record: c }) {
             Ok(data) => data as string,
             Err(e) => return Err(f"encoding comment snapshot: {e}"),
           }
@@ -297,7 +283,7 @@ fn run_issue_watch(ctx: pb.Client, id: string, json_mode: bool, until: string, u
     let Some(ev) = ch.receive() else { return Ok(()) }
     let stamp = time.Now().Format("15:04:05")
     if ev.topic == "comments" {
-      let mut event = CommentEvent { .. }
+      let mut event = realtime.CommentEvent { .. }
       if let Err(e) = json.Unmarshal(ev.data.bytes(), &event) {
         return Err(f"decoding realtime event: {e}")
       }
@@ -311,7 +297,7 @@ fn run_issue_watch(ctx: pb.Client, id: string, json_mode: bool, until: string, u
       if matched { return Ok(()) }
       continue
     }
-    let mut event = IssueEvent { .. }
+    let mut event = realtime.IssueEvent { .. }
     if let Err(e) = json.Unmarshal(ev.data.bytes(), &event) {
       return Err(f"decoding realtime event: {e}")
     }
@@ -434,7 +420,7 @@ fn watch_ready(ctx: pb.Client, filters: query.Filters, json_mode: bool) -> Resul
   fmt.Fprintln(os.Stderr, "watch: ready (agenda subscription accepted)")
   loop {
     let Some(ev) = ch.receive() else { return Ok(()) }
-    let mut event = IssueEvent { .. }
+    let mut event = realtime.IssueEvent { .. }
     if let Err(e) = json.Unmarshal(ev.data.bytes(), &event) {
       return Err(f"decoding realtime event: {e}")
     }

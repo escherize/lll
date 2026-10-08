@@ -212,9 +212,9 @@ fn label_move(input: flags.CommandInput) -> Result<(), string> {
     return Err(flags.usage_error(f"usage: {usage}"))
   }
   let from = team_flag_or_current(ctx, p.one("--team"))?
-  let to = move_destination(ctx, p.one("--to"))?
+  let to = writes.move_destination(ctx, p.one("--to"))?
   let label = records.resolve_label(ctx, from.id, name)?
-  fmt.Println(move_to_team(ctx, "label", label.name, label.id, from, to)?)
+  fmt.Println(writes.move_to_team(ctx, "label", label.name, label.id, from, to)?)
   Ok(())
 }
 

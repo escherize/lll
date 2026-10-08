@@ -6,6 +6,7 @@ import "go:os/exec"
 import "go:path/filepath"
 import "go:time"
 import "go:github.com/escherize/lll/skills"
+import "tokens"
 
 // Unit cover for TASK-214's pure halves in token.lis: the expiry line printed
 // under a mint, and the refusal classifier. Both are functions of their
@@ -20,7 +21,7 @@ fn at_noon() -> time.Time {
 
 #[test]
 fn expiry_line_dates_the_default_year_out() {
-  let line = expiry_line(default_token_duration(), at_noon(), "lll token create")
+  let line = tokens.expiry_line(tokens.default_token_duration(), at_noon(), "lll token create")
   assert line.contains("expires 2027-01-15")
   assert line.contains("lll token create")
 }
@@ -28,7 +29,7 @@ fn expiry_line_dates_the_default_year_out() {
 #[test]
 fn expiry_line_dates_a_short_duration() {
   // An hour still lands on the same day; the seconds are what disambiguate.
-  let line = expiry_line(3600, at_noon(), "lll bot rotate bot-x")
+  let line = tokens.expiry_line(3600, at_noon(), "lll bot rotate bot-x")
   assert line.contains("expires 2026-01-15")
   assert line.contains("3600s from now")
   // LLL-625: a bot's owner re-mints with bot rotate; token create is
@@ -39,14 +40,14 @@ fn expiry_line_dates_a_short_duration() {
 
 #[test]
 fn expiry_line_refuses_to_guess_for_the_collection_default() {
-  let line = expiry_line(0, at_noon(), "lll token create")
+  let line = tokens.expiry_line(0, at_noon(), "lll token create")
   assert !line.contains("2026-")
   assert line.contains("--duration")
 }
 
 #[test]
 fn default_token_duration_is_a_year_of_seconds() {
-  assert default_token_duration() == 31536000
+  assert tokens.default_token_duration() == 31536000
 }
 
 // ------------------------------------------------------- impersonate_error
@@ -91,7 +92,7 @@ fn status_classification_ignores_url_and_body_digits() {
 
 #[test]
 fn agent_prompt_is_the_design_doc_prompt() {
-  let got = agent_prompt("https://lll.example.com", "ALPHA", "aaa.bbb-c_d.eee")
+  let got = tokens.agent_prompt("https://lll.example.com", "ALPHA", "aaa.bbb-c_d.eee")
   // The doc's text, reshaped into a script every shell runs harmlessly
   // (LLL-546 F1): prose is the no-op `true` with one quoted word, never `#`.
   let want = "true 'You are joining lll team ALPHA at https://lll.example.com.'
@@ -111,7 +112,7 @@ fn agent_prompt_points_at_a_skill_the_binary_ships() {
   // The prompt is pasted into an agent in some other repo, so the skill it
   // names must be one `lll skill get` serves there, and that skill must be
   // repo-neutral (LLL-647; skills_test.go checks the bodies).
-  let got = agent_prompt("https://lll.example.com", "ALPHA", "aaa.bbb-c_d.eee")
+  let got = tokens.agent_prompt("https://lll.example.com", "ALPHA", "aaa.bbb-c_d.eee")
   let named = skills.Names().filter(|n| got.contains(f"\nlll skill get {n}\n"))
   assert named.length() == 1
 }
@@ -152,7 +153,7 @@ fn run_prompt_in(t: TestContext, shell: Slice<string>, url: string, team: string
   let assert Ok(_) = os.Mkdir(bin, 0o755)
   let stub = "#!/bin/sh\nfor a in \"$@\"; do printf '%s\\n' \"$a\" >> \"$PROMPT_LOG\"; done\n"
   let assert Ok(_) = os.WriteFile(filepath.Join(bin, "lll"), stub.bytes(), 0o755)
-  let prompt = agent_prompt(url, team, "aaa.bbb-c_d.eee")
+  let prompt = tokens.agent_prompt(url, team, "aaa.bbb-c_d.eee")
   let assert Ok(_) = os.WriteFile(filepath.Join(dir, "prompt.txt"), prompt.bytes(), 0o644)
   let mut cmd = exec.Command(shell[0], shell[1..]...)
   cmd.Dir = dir
@@ -211,22 +212,22 @@ fn hostile_teams() -> Slice<string> {
 #[test]
 fn prompt_values_outside_the_allowlist_are_refused_naming_the_field() {
   for url in hostile_urls() {
-    let assert Err(e) = check_prompt_values(url, "ALPHA", "bot-x")
+    let assert Err(e) = tokens.check_prompt_values(url, "ALPHA", "bot-x")
     assert e.contains("server url") && e.contains("cannot paste safely")
     // Quoted in the message, so a CR or ESC cannot repaint the terminal.
     assert !e.contains("\r") && !e.contains("\u{1b}")
   }
   for team in hostile_teams() {
-    let assert Err(e) = check_prompt_values("http://127.0.0.1:8090", team, "bot-x")
+    let assert Err(e) = tokens.check_prompt_values("http://127.0.0.1:8090", team, "bot-x")
     assert e.contains("team key") && e.contains("rename the team")
     assert !e.contains("\r") && !e.contains("\u{1b}")
   }
   for name in ["bot-", "bot-a b", "bot-a'b", "bot-$(id)", "bot-\u{1b}x", "x"] {
-    let assert Err(e) = check_prompt_values("http://127.0.0.1:8090", "ALPHA", name)
+    let assert Err(e) = tokens.check_prompt_values("http://127.0.0.1:8090", "ALPHA", name)
     assert e.contains("bot name")
   }
   // --env prints no team, so it checks none.
-  assert check_prompt_values("http://127.0.0.1:8090", "", "bot-x").is_ok()
+  assert tokens.check_prompt_values("http://127.0.0.1:8090", "", "bot-x").is_ok()
 }
 
 #[test]
@@ -236,7 +237,7 @@ fn every_allowed_prompt_is_a_harmless_script_in_every_shell(t: TestContext) {
   let shells = prompt_shells()
   for url in urls {
     for team in teams {
-      let assert Ok(_) = check_prompt_values(url, team, "bot-x.y_z")
+      let assert Ok(_) = tokens.check_prompt_values(url, team, "bot-x.y_z")
       for shell in shells {
         let (names, log) = run_prompt_in(t, shell, url, team)
         assert names.equals(["args.log", "bin", "prompt.txt"])
@@ -249,19 +250,19 @@ fn every_allowed_prompt_is_a_harmless_script_in_every_shell(t: TestContext) {
 
 #[test]
 fn agent_env_is_only_the_two_export_lines() {
-  let got = agent_env("http://127.0.0.1:8090", "aaa.bbb.ccc")
+  let got = tokens.agent_env("http://127.0.0.1:8090", "aaa.bbb.ccc")
   assert got == "export LLL_URL=http://127.0.0.1:8090\nexport LLL_TOKEN=aaa.bbb.ccc\n"
 }
 
 #[test]
 fn shell_word_quotes_anything_a_shell_would_interpret() {
-  assert shell_word("https://h.example:8090/x") == "https://h.example:8090/x"
+  assert tokens.shell_word("https://h.example:8090/x") == "https://h.example:8090/x"
   // A url from LLL_URL is pasted into the agent's shell: no command
   // substitution, word splitting or quote breakout survives it.
-  assert shell_word("http://h/$(touch pwned)") == "'http://h/$(touch pwned)'"
-  assert shell_word("http://h/a b") == "'http://h/a b'"
-  assert shell_word("http://h/x';id;'") == "'http://h/x'\\'';id;'\\'''"
-  assert shell_word("") == "''"
-  let prompt = agent_prompt("http://h/`id`", "ALPHA", "t")
+  assert tokens.shell_word("http://h/$(touch pwned)") == "'http://h/$(touch pwned)'"
+  assert tokens.shell_word("http://h/a b") == "'http://h/a b'"
+  assert tokens.shell_word("http://h/x';id;'") == "'http://h/x'\\'';id;'\\'''"
+  assert tokens.shell_word("") == "''"
+  let prompt = tokens.agent_prompt("http://h/`id`", "ALPHA", "t")
   assert prompt.contains("export LLL_URL='http://h/`id`'\n")
 }

@@ -17,6 +17,7 @@ import "pb"
 import "query"
 import "records"
 import "writes"
+import "tokens"
 
 /// Dispatch `lll member <verb>` through the noun's Command table (TASK-307).
 /// The table is the one place a verb is declared: dispatch, `lll member
@@ -382,7 +383,7 @@ fn member_remove(input: flags.CommandInput) -> Result<(), string> {
   if !usable {
     return Err(
       "removing a member needs the server's admin credentials
-" + admin_hint(),
+" + tokens.admin_hint(),
     )
   }
   let su = superuser_auth(ctx, login)?
@@ -482,7 +483,7 @@ fn member_password_error(name: string, e: string) -> string {
   if status == 403 || status == 401 || (status == 400 &&
   strings.Contains(pb.classify(e).message, "oldPassword")) {
     return pb.fail(pb.ErrorKind.Refused, "setting another member's password is superuser-only and the configured token is not one
-" + admin_hint() + f"
+" + tokens.admin_hint() + f"
 if {name} is you, change your own password with: lll member set-password {name} --old-password <current>")
   }
   f"setting {name}'s password: {e}"
@@ -807,7 +808,7 @@ fn member_passes(input: flags.CommandInput) -> Result<(), string> {
     ),
   }
   defer file.Close()
-  let header = f"Team: {cfg.team}\nAPI: {cfg.url}\nBoard login: {login_url}\n\nSend only one person's block to that person. Browser access uses the board link; CLI/API access uses that person's LLL_TOKEN.\n{expiry_line(duration, time.Now(), "lll token create")}\n\n"
+  let header = f"Team: {cfg.team}\nAPI: {cfg.url}\nBoard login: {login_url}\n\nSend only one person's block to that person. Browser access uses the board link; CLI/API access uses that person's LLL_TOKEN.\n{tokens.expiry_line(duration, time.Now(), "lll token create")}\n\n"
   match file.WriteString(header) {
     Partial.Ok(n) => if n != header.bytes().length() {
       return Err(f"short write to handoff file {out}")
@@ -1310,7 +1311,7 @@ fn member_access_cmd(input: flags.CommandInput) -> Result<(), string> {
     let status = pb.classify(e).status
     if status == 400 || status == 403 || status == 404 {
       return Err(
-        pb.fail(pb.ErrorKind.Refused, "changing access needs administrator credentials: " + admin_hint() + ". A member or bot token cannot change anyone's access, its own included."),
+        pb.fail(pb.ErrorKind.Refused, "changing access needs administrator credentials: " + tokens.admin_hint() + ". A member or bot token cannot change anyone's access, its own included."),
       )
     }
     return Err(e)

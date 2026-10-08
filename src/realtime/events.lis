@@ -1,0 +1,16 @@
+import "models"
+
+// The record payloads of issue and comment events, decoded by `lll watch`
+// and by the board's live stream alike.
+
+#[json]
+pub struct IssueEvent {
+  pub action: string,
+  pub record: models.Issue,
+}
+
+#[json]
+pub struct CommentEvent {
+  pub action: string,
+  pub record: models.Comment,
+}

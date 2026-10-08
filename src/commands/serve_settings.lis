@@ -11,6 +11,7 @@ import "pb"
 import "query"
 import "theme"
 import "writes"
+import "tokens"
 
 // /settings - the workspace records the web can edit, and the one handler
 // that writes them.
@@ -410,10 +411,10 @@ fn move_scope_if_asked(
 ) -> Result<string, string> {
   let wanted = strings.TrimSpace(r.PostFormValue("team"))
   if id == "" || wanted == "" { return Ok(team_id) }
-  let to = move_destination(ctx, wanted)?
+  let to = writes.move_destination(ctx, wanted)?
   if to.id == team_id { return Ok(team_id) }
   let from = shell_team(ctx, team_id)
-  let _ = move_to_team(ctx, kind, name, id, from, to)?
+  let _ = writes.move_to_team(ctx, kind, name, id, from, to)?
   Ok(to.id)
 }
 
@@ -471,7 +472,7 @@ fn verify_admin(ctx: pb.Client, pass: string) -> Result<string, string> {
     Ok(b) => b,
     Err(e) => return Err(admin_verification_error(ctx, e)),
   }
-  decode_auth(body, "the superuser auth response")
+  tokens.decode_auth(body, "the superuser auth response")
 }
 
 /// Authentication failures have a specific recovery; other errors retain
@@ -514,7 +515,7 @@ fn access_token_write(ctx: pb.Client, _v: Viewing, r: mut Ref<http.Request>) -> 
     mint_payload()?,
     su,
   )?
-  let tok = decode_auth(body, "the impersonate response")?
+  let tok = tokens.decode_auth(body, "the impersonate response")?
   let html = render(
     "access-token-result",
     AccessTokenVM { name: member.name, token: tok },
@@ -527,7 +528,7 @@ fn access_token_write(ctx: pb.Client, _v: Viewing, r: mut Ref<http.Request>) -> 
 /// read the number that actually reaches PocketBase — the whole bug was a
 /// duration nobody could see without watching the wire.
 fn mint_payload() -> Result<string, string> {
-  marshal(models.ImpersonateRequest { duration: default_token_duration() })
+  marshal(models.ImpersonateRequest { duration: tokens.default_token_duration() })
 }
 
 /// The expiry the mint says out loud, as the flash that rides after the token
@@ -536,7 +537,7 @@ fn mint_payload() -> Result<string, string> {
 /// sees it, since impersonate tokens are stateless and nothing records a mint.
 /// `now` is a parameter so the wording is a function of its arguments alone.
 fn mint_expiry_event(now: time.Time) -> string {
-  flash_ok_event(expiry_line(default_token_duration(), now, "lll token create"))
+  flash_ok_event(tokens.expiry_line(tokens.default_token_duration(), now, "lll token create"))
 }
 
 /// Give a member a login credential (email + password) — the admin

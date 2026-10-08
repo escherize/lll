@@ -1,6 +1,7 @@
 import "go:io/fs"
 import "go:github.com/escherize/lll/web"
 import "go:time"
+import "tokens"
 
 // Unit cover for TASK-219: the Access panel's mint used to send
 // `duration: 0`, which is not "no expiry" but "whatever the members
@@ -22,7 +23,7 @@ fn the_web_mint_asks_for_the_cli_s_default_duration() {
   // shared default moves, this fails loudly rather than the board quietly
   // handing out a different lifetime than `lll token create` does.
   assert minted() == "{\"duration\":31536000}"
-  assert default_token_duration() == 31536000
+  assert tokens.default_token_duration() == 31536000
 }
 
 #[test]

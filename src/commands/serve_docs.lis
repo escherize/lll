@@ -39,7 +39,7 @@ fn doc_page(
   // fetch_doc is `lll doc view`'s own read, expands included, so the page and
   // the command cannot answer differently. Its error already names the team
   // and points at `lll doc list`, which is the right 404 body.
-  let doc = match fetch_doc(ctx, team, slug) {
+  let doc = match records.fetch_doc(ctx, team, slug) {
     Ok(d) => d,
     Err(e) => {
       http.Error(w, pb.plain(e), 404)
@@ -157,7 +157,7 @@ fn docs_page(
     docs: docs
       .filter(|d| doc_matches(d, q))
       .map(|d| doc_row_vm(shown.doc(d), team.key)),
-    kinds: doc_kinds().map(|k| StateOpt { value: k, label: doc_kind_label(k) }),
+    kinds: records.doc_kinds().map(|k| StateOpt { value: k, label: doc_kind_label(k) }),
     kind,
     q,
     error,
@@ -177,8 +177,8 @@ fn docs_page(
 fn docs_kind(raw: string) -> (string, string) {
   let kind = strings.TrimSpace(strings.ToLower(raw))
   if kind == "" { return ("", "") }
-  if doc_kinds().contains(kind) { return (kind, "") }
-  ("", f"unknown kind '{kind}' (use one of: {strings.Join(doc_kinds(), ", ")})")
+  if records.doc_kinds().contains(kind) { return (kind, "") }
+  ("", f"unknown kind '{kind}' (use one of: {strings.Join(records.doc_kinds(), ", ")})")
 }
 
 /// Whether a doc matches the text filter: its slug or title contains it,

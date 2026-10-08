@@ -11,6 +11,7 @@ import "models"
 import "pb"
 import "query"
 import "theme"
+import "buildinfo"
 
 // The app shell and the two board pages: the rail every page wears, GET / and
 // GET /issue/{key}.
@@ -29,7 +30,7 @@ fn shell_rail(ctx: pb.Client, active: string, me: string, team: models.Team) -> 
     team_key: team.key,
     active,
     me,
-    version: version(),
+    version: buildinfo.version(),
     accent_css: theme.accent_css(hex),
     favicon: theme.favicon_url(hex, theme.mark_for(team.key, team.emoji)),
     board_base: board_base(team.key),
@@ -475,7 +476,7 @@ fn issue_page(ctx: pb.Client, w: http.ResponseWriter, r: Ref<http.Request>, team
   // star and emoji catalogue: the raw form carries them too — "everything
   // is curl-able" includes the unprompted part. A failed fetch renders no
   // section rather than a 500 (same bargain as the rail's groups).
-  page.findings = findings_for_issue(ctx, issue).map_or([], |f| f.map(|d| finding_vm(d, team.key)))
+  page.findings = records.findings_for_issue(ctx, issue).map_or([], |f| f.map(|d| finding_vm(d, team.key)))
   // A scoped viewer claims as itself, or not at all (LLL-545): `ctx` reads
   // as the viewer, so issue_vm already named it as the claim actor.
   if !viewer_writes(viewer) { page.claim_read_only = true }

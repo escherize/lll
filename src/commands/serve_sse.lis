@@ -591,7 +591,7 @@ fn run_refresh(ctx: pb.Client, job: Refresh, hub: Hub, follow: Channel<Refresh>)
 /// here; anything that reads runs on a worker.
 fn event_refreshes(ev: realtime.Event) -> Slice<Refresh> {
   if ev.topic == "comments" {
-    let mut event = CommentEvent { .. }
+    let mut event = realtime.CommentEvent { .. }
     if json.Unmarshal(ev.data.bytes(), &event).is_err() { return [] }
     return [Refresh.Resolve(ResolveRefresh { issue_id: event.record.issue, board: false })]
   }
@@ -604,7 +604,7 @@ fn event_refreshes(ev: realtime.Event) -> Slice<Refresh> {
   }
   if ev.topic == "favorites" { return [Refresh.Favorites] }
   if ev.topic == "views" { return [Refresh.Views] }
-  let mut event = IssueEvent { .. }
+  let mut event = realtime.IssueEvent { .. }
   if json.Unmarshal(ev.data.bytes(), &event).is_err() { return [] }
   let rec = event.record
   let team_key = rec.expand.team.key

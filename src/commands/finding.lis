@@ -7,6 +7,7 @@ import "models"
 import "pb"
 import "query"
 import "writes"
+import "records"
 
 /// `lll finding` (TASK-103) — the retrieval side of docs. A finding is a doc
 /// with kind=finding; `lll finding create` files one, and
@@ -149,18 +150,6 @@ fn finding_list_spec() -> Slice<flags.Flag> {
 
 // ----------------------------------------------------------------- shared
 
-/// One team's findings, slug order. Two clauses and no more — retrieval
-/// never searches bodies or titles, it filters coordinates.
-///
-/// The team clause is not optional (TASK-173). Every project has a `src/`,
-/// so an unscoped `finding near src/` answers with another codebase's notes,
-/// formatted identically to a correct hit. Findings exist to say what is
-/// known about THIS file; confidently answering about a different repo is
-/// worse than answering nothing.
-pub fn fetch_findings(ctx: pb.Client, team_id: string) -> Result<Slice<models.Doc>, string> {
-  fetch_docs(ctx, f"kind='finding' && team={query.quote(team_id)}", "slug", "")
-}
-
 /// Does the doc's stored paths list touch the path being asked about?
 fn doc_paths_touch(d: models.Doc, path: string) -> bool {
   d.paths.split(",").any(|entry| path_touches(entry, path))
@@ -183,20 +172,6 @@ fn findings_near(findings: Slice<models.Doc>, path: string) -> Slice<models.Doc>
   exact.append(nearby...)
 }
 
-/// The findings related to one issue: every finding explicitly linked to it
-/// (the issues relation always shows), plus every finding whose `area` names
-/// one of the issue's labels. Shared by 'lll issue view' and the issue page.
-pub fn findings_for_issue(ctx: pb.Client, issue: models.Issue) -> Result<Slice<models.Doc>, string> {
-  // The ISSUE's team, not the configured one: this answers for one issue,
-  // and the board can be showing an issue from a team nobody configured.
-  let findings = fetch_findings(ctx, issue.team)?
-  Ok(findings.filter(|d| {
-    let linked = d.issues.find(|x| x == issue.id).is_some()
-    let area_hit = d.area != "" && issue.expand.labels.any(|l| l.name == d.area)
-    linked || area_hit
-  }))
-}
-
 // ------------------------------------------------------------------ verbs
 
 fn finding_near(input: flags.CommandInput) -> Result<(), string> {
@@ -204,7 +179,7 @@ fn finding_near(input: flags.CommandInput) -> Result<(), string> {
   let p = input.parsed
   let path = p.first()
   if path == "" { return Err(flags.usage_error("usage: lll finding near <path>")) }
-  let findings = fetch_findings(ctx, current_team(ctx)?.id)?
+  let findings = records.fetch_findings(ctx, current_team(ctx)?.id)?
   let hits = findings_near(findings, path)
   if p.given("--json") { return print_list_json(hits, whole_list(hits.length()), "findings") }
   if hits.is_empty() {
@@ -226,7 +201,7 @@ fn finding_list(input: flags.CommandInput) -> Result<(), string> {
   // Issue list's --limit validation, run before any server call; the slice
   // itself happens after the filters below (LLL-313).
   let limit = limit_flag(p)?
-  let mut findings = fetch_findings(ctx, current_team(ctx)?.id)?
+  let mut findings = records.fetch_findings(ctx, current_team(ctx)?.id)?
   if area != "" {
     findings = findings.filter(|d| strings.TrimSpace(d.area) == area)
   }
@@ -253,22 +228,8 @@ fn print_finding_lines(docs: Slice<models.Doc>) {
   for d in docs {
     let mut area = d.area
     if area == "" { area = "-" }
-    fmt.Println(f"{d.slug}\t{display.table_cell(area)}\t{display.table_cell(d.title)}{display.table_cell(confidence_suffix(d.confidence, d.confidence_note))}")
+    fmt.Println(f"{d.slug}\t{display.table_cell(area)}\t{display.table_cell(d.title)}{display.table_cell(display.confidence_suffix(d.confidence, d.confidence_note))}")
   }
-}
-
-/// The marker that keeps a guess from reading as fact (LLL-396): confirmed
-/// findings — which is everything written before the field existed — print
-/// unmarked, so the noise lands only where judgement changed the meaning.
-/// Takes the two fields rather than the record so the board's finding view
-/// model and the CLI's Doc share one rule.
-pub fn confidence_suffix(confidence: string, note: string) -> string {
-  if confidence == "suspected" { return " [suspected]" }
-  if confidence == "refuted" {
-    if note != "" { return f" [refuted: {note}]" }
-    return " [refuted]"
-  }
-  ""
 }
 
 /// Finding creation shares the parsed document input and supplies a domain
@@ -310,8 +271,8 @@ fn finding_confirm(input: flags.CommandInput) -> Result<(), string> {
   let slug = p.first()
   if slug == "" { return Err(flags.usage_error("usage: lll finding confirm SLUG")) }
   let team = current_team(ctx)?
-  let Some(d) = find_doc(ctx, team, slug)? else {
-    return Err(unknown_doc(team, slug))
+  let Some(d) = records.find_doc(ctx, team, slug)? else {
+    return Err(records.unknown_doc(team, slug))
   }
   patch_confidence(ctx, d, "confirmed", "")?
   fmt.Println(f"Confirmed {d.slug}")
@@ -331,8 +292,8 @@ fn finding_refute(input: flags.CommandInput) -> Result<(), string> {
     return Err("a refutation needs the why: 'lll finding refute SLUG -b why' ('-b -' reads it from stdin)")
   }
   let team = current_team(ctx)?
-  let Some(d) = find_doc(ctx, team, slug)? else {
-    return Err(unknown_doc(team, slug))
+  let Some(d) = records.find_doc(ctx, team, slug)? else {
+    return Err(records.unknown_doc(team, slug))
   }
   patch_confidence(ctx, d, "refuted", why)?
   fmt.Println(f"Refuted {d.slug}")

@@ -11,6 +11,7 @@ import "models"
 import "pb"
 import "query"
 import "writes"
+import "records"
 
 /// Dispatch `lll doc <verb>` through the noun's Command table (TASK-307).
 /// The table is the one place a verb is declared: dispatch, `lll doc --help`
@@ -97,40 +98,14 @@ labels (see 'lll finding --help')."
 
 // ------------------------------------------------------------- validation
 
-/// Slugs are lowercase letters, digits and hyphens, starting and ending with
-/// a letter or digit — safe in URLs, unambiguous in shell commands, stable
-/// as bare words in grep.
-pub fn check_slug(val: string) -> Result<string, string> {
-  let slug = strings.TrimSpace(val)
-  if slug == "" { return Err("slug cannot be empty (e.g. port-notes)") }
-  if slug.length() > 80 {
-    return Err(f"slug must be at most 80 characters, got {slug.length()}")
-  }
-  let shaped = "^[a-z0-9]([a-z0-9-]*[a-z0-9])?$"
-  let matched = match regexp.MatchString(shaped, slug) {
-    Ok(m) => m,
-    Err(e) => return Err(f"validating slug: {e}"),
-  }
-  if !matched {
-    return Err(
-      f"invalid slug '{slug}' (use lowercase letters, digits and hyphens, starting and ending with a letter or digit, e.g. port-notes)",
-    )
-  }
-  Ok(slug)
-}
-
-fn doc_kinds() -> Slice<string> {
-  ["wiki", "finding", "decision", "prd"]
-}
-
 /// An empty kind defaults to wiki, the reading-room kind; anything else
 /// must be one of the four words.
 pub fn check_kind(val: string) -> Result<string, string> {
   let kind = strings.TrimSpace(strings.ToLower(val))
   if kind == "" { return Ok("wiki") }
-  if doc_kinds().find(|k| k == kind).is_none() {
+  if records.doc_kinds().find(|k| k == kind).is_none() {
     return Err(
-      f"unknown kind '{kind}' (use one of: {strings.Join(doc_kinds(), ", ")})",
+      f"unknown kind '{kind}' (use one of: {strings.Join(records.doc_kinds(), ", ")})",
     )
   }
   Ok(kind)
@@ -339,7 +314,6 @@ fn doc_delete_spec() -> Slice<flags.Flag> {
   flags.with_team([flags.Flag { name: "--yes", help: "skip the delete confirmation", .. }])
 }
 
-
 /// Every flag across the doc verbs, deduplicated by canonical name, in the
 /// order the verbs declare them. This is the Flags: block `lll doc --help`
 /// renders.
@@ -361,7 +335,7 @@ fn doc_new(input: flags.CommandInput) -> Result<(), string> {
 }
 
 fn create_doc(ctx: pb.Client, p: flags.Parsed, default_kind: string, slug: string) -> Result<(), string> {
-  let slug = check_slug(slug)?
+  let slug = records.check_slug(slug)?
   let title = p.one("-t")
   let requested_kind = if p.given("-k") { p.one("-k") } else { default_kind }
   let kind = check_kind(requested_kind)?
@@ -377,7 +351,7 @@ fn create_doc(ctx: pb.Client, p: flags.Parsed, default_kind: string, slug: strin
   // The unique index would catch this too, but the fix belongs in the
   // message, not a raw 400. It is UNIQUE (team, slug) now, so the clash is
   // only ever with this team's own docs.
-  if let Some(_) = find_doc(ctx, team, slug)? {
+  if let Some(_) = records.find_doc(ctx, team, slug)? {
     return Err(
       f"{team.key} already has a doc with slug '{slug}'; see 'lll doc view {slug}' or 'lll doc list'",
     )
@@ -461,7 +435,7 @@ fn doc_list(input: flags.CommandInput) -> Result<(), string> {
   let search = strings.ToLower(strings.TrimSpace(p.one("--search")))
   let mut filter = query.filter(team.id, "", "", "", "", "")
   if kind != "" { filter = f"{filter} && kind={query.quote(kind)}" }
-  let mut items = fetch_docs(ctx, filter, "kind,slug", "")?
+  let mut items = records.fetch_docs(ctx, filter, "kind,slug", "")?
   if search != "" {
     items = items.filter(|d| strings.Contains(strings.ToLower(d.slug), search) || strings.Contains(strings.ToLower(d.title), search))
   }
@@ -486,7 +460,7 @@ fn doc_view(input: flags.CommandInput) -> Result<(), string> {
   let json_mode = p.given("--json")
   let raw_mode = p.given("--raw")
 
-  let record = fetch_doc_record(ctx, current_team(ctx)?, slug)?
+  let record = records.fetch_doc_record(ctx, current_team(ctx)?, slug)?
   if json_mode {
     fmt.Println(contract_json(record.bytes() as json.RawMessage, 0) as string)
     return Ok(())
@@ -504,7 +478,7 @@ fn doc_view(input: flags.CommandInput) -> Result<(), string> {
     return Ok(())
   }
 
-  fmt.Println(f"{d.slug} {display.table_cell(d.title)}{display.table_cell(confidence_suffix(d.confidence, d.confidence_note))}")
+  fmt.Println(f"{d.slug} {display.table_cell(d.title)}{display.table_cell(display.confidence_suffix(d.confidence, d.confidence_note))}")
   fmt.Println("")
   fmt.Println(f"Kind:      {d.kind}")
   if let Some(author) = d.expand.author {
@@ -550,7 +524,7 @@ fn doc_edit(input: flags.CommandInput) -> Result<(), string> {
     return Err(flags.usage_error(f"nothing to edit: pass at least one flag\nusage: {usage}"))
   }
 
-  let d = fetch_doc(ctx, current_team(ctx)?, slug)?
+  let d = records.fetch_doc(ctx, current_team(ctx)?, slug)?
   // `-b -` replaces the whole body; there is deliberately no append mode.
   let mut patch = writes.DocPatch { .. }
   if body_set { patch.body = Some(body) }
@@ -569,7 +543,7 @@ fn doc_delete(input: flags.CommandInput) -> Result<(), string> {
   let slug = p.first()
   if slug == "" { return Err(flags.usage_error("usage: lll doc delete SLUG [--yes]")) }
 
-  let d = fetch_doc(ctx, current_team(ctx)?, slug)?
+  let d = records.fetch_doc(ctx, current_team(ctx)?, slug)?
   if !p.given("--yes") && !confirmed(f"delete doc {d.slug}?") {
     return Err(aborted())
   }
@@ -580,56 +554,3 @@ fn doc_delete(input: flags.CommandInput) -> Result<(), string> {
 
 // --------------------------------------------------------------- lookups
 
-/// Fetch a doc by slug WITHIN one team and return the raw PB record JSON,
-/// with its linked issues (and their teams, for KEY-123 keys) expanded, and
-/// its author with a bot author's owner (LLL-618). PocketBase leaves out a
-/// member the caller may not read, so nobody learns an owner they cannot see.
-///
-/// A slug is unique per team, not per server (TASK-173): GRDN and LLL both
-/// get an `index`, so every lookup names the team it means. There is no
-/// cross-team form — `LLL_TEAM=GRDN lll doc view index` is how you read the
-/// other board's page.
-pub fn fetch_doc_record(
-  ctx: pb.Client,
-  team: models.Team,
-  slug: string,
-) -> Result<string, string> {
-  let Some(item) = find_doc(ctx, team, slug)? else {
-    return Err(unknown_doc(team, slug))
-  }
-  ctx.get(f"/api/collections/docs/records/{item.id}?expand=issues.team,author.owner")
-}
-
-/// fetch_doc_record, decoded.
-pub fn fetch_doc(ctx: pb.Client, team: models.Team, slug: string) -> Result<models.Doc, string> {
-  let record = fetch_doc_record(ctx, team, slug)?
-  let mut d = models.Doc { .. }
-  if let Err(e) = json.Unmarshal(record.bytes(), &d) {
-    return Err(f"decoding doc: {e}")
-  }
-  Ok(d)
-}
-
-/// One team's doc by slug, or None. Lets callers distinguish "unknown slug"
-/// from a failed write.
-pub fn find_doc(
-  ctx: pb.Client,
-  team: models.Team,
-  slug: string,
-) -> Result<Option<models.Doc>, string> {
-  let slug = check_slug(slug)?
-  let filter = url.QueryEscape(query.scoped(team.id, "slug", slug))
-  let mut docs = models.DocList { .. }
-  pb.fetch(ctx, 
-    f"/api/collections/docs/records?filter={filter}&perPage=1",
-    "docs",
-    &docs,
-  )?
-  Ok(docs.items.find(|d| d.slug == slug))
-}
-
-/// Unknown-slug message. It names the team, because the same slug may well
-/// exist on another board and "no doc with slug 'index'" would be a lie.
-fn unknown_doc(team: models.Team, slug: string) -> string {
-  pb.fail(pb.ErrorKind.NotFound, f"no doc with slug '{slug}' in {team.key}; see 'lll doc list'")
-}

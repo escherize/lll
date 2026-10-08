@@ -5,6 +5,7 @@ import "models"
 import "pb"
 import "query"
 import "search"
+import "records"
 
 // GET /search - a search over every issue in the team, served as a page or as
 // results and title fragments.
@@ -90,8 +91,8 @@ fn search_page(
 /// (LLL-405): until then a doc hit was a result you could not click, which is
 /// why this searched issues and comments only (LLL-398).
 fn search_hits(ctx: pb.Client, team: models.Team, q: string, scoped: bool) -> Result<Slice<SearchHitVM>, string> {
-  let issues = fetch_team_issues_where(ctx, team.id, candidate_clause(q, ["title", "description"]))?
-  let comments = fetch_team_comments_where(ctx, team.id, candidate_clause(q, ["body"]))?
+  let issues = records.fetch_team_issues_where(ctx, team.id, records.candidate_clause(q, ["title", "description"]))?
+  let comments = records.fetch_team_comments_where(ctx, team.id, records.candidate_clause(q, ["body"]))?
   // A comment's issue must be in the candidate set for the hit to have a
   // card; fetch the parents the comment filter found that the issue one did not.
   let mut have = Map.new<string, bool>()
@@ -102,7 +103,7 @@ fn search_hits(ctx: pb.Client, team: models.Team, q: string, scoped: bool) -> Re
   if !extra_ids.is_empty() {
     let mut ors: Slice<string> = []
     for id in extra_ids { ors = ors.append(f"id={query.quote(id)}") }
-    all = all.append(fetch_team_issues_where(ctx, team.id, "(" + strings.Join(ors, " || ") + ")")?...)
+    all = all.append(records.fetch_team_issues_where(ctx, team.id, "(" + strings.Join(ors, " || ") + ")")?...)
   }
   // `ctx` reads as the viewer (LLL-658), so another team's labels never
   // expand and cannot be matched, and a member outside its roster renders
@@ -111,8 +112,8 @@ fn search_hits(ctx: pb.Client, team: models.Team, q: string, scoped: bool) -> Re
   let shown = read_roster(ctx)?
   let issues = issues_for(scoped, all).map(|i| shown.issue(i))
   let comments = comments.map(|c| shown.comment(c))
-  let docs = fetch_team_docs_light(ctx, team.id, candidate_clause(q, ["title", "body"]))?
-  let mut corpus = issue_documents(team.key, issues, comments)
+  let docs = records.fetch_team_docs_light(ctx, team.id, records.candidate_clause(q, ["title", "body"]))?
+  let mut corpus = search.issue_documents(team.key, issues, comments)
   let mut by_slug = Map.new<string, models.Doc>()
   for d in docs {
     by_slug[d.slug] = d

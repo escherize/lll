@@ -200,9 +200,9 @@ fn project_move(input: flags.CommandInput) -> Result<(), string> {
     return Err(flags.usage_error(f"usage: {usage}"))
   }
   let from = team_flag_or_current(ctx, p.one("--team"))?
-  let to = move_destination(ctx, p.one("--to"))?
+  let to = writes.move_destination(ctx, p.one("--to"))?
   let project = records.resolve_project(ctx, from.id, name)?
-  fmt.Println(move_to_team(ctx, "project", project.name, project.id, from, to)?)
+  fmt.Println(writes.move_to_team(ctx, "project", project.name, project.id, from, to)?)
   Ok(())
 }
 

@@ -1,0 +1,184 @@
+import "go:crypto/rand"
+import "go:encoding/json"
+import "go:regexp"
+import "go:strconv"
+import "go:strings"
+import "go:time"
+import "models"
+import "pb"
+import "records"
+import "writes"
+/// The lifetime a mint gets when --duration is not given: one year in
+/// seconds. Long on purpose. An agent credential has no refresh path and no
+/// human watching it, so the only thing a short life buys is an outage
+/// nobody can attribute; rotation is a deliberate re-mint, not an expiry.
+pub fn default_token_duration() -> int {
+  365 * 24 * 60 * 60
+}
+
+/// The "expires ..." line printed under a freshly minted token. `now` is
+/// passed in so the formatting is a function of its arguments alone.
+///
+/// A 0 duration hands the decision to the members collection, which this
+/// process cannot read the value of, so the line says that instead of
+/// guessing a date.
+pub fn expiry_line(duration: int, now: time.Time, remint: string) -> string {
+  if duration == 0 {
+    return "expires: whenever the members collection's token duration says; pass --duration to pin it"
+  }
+  let at = now.Add(time.Duration(duration as int64) * time.Second)
+  let day = at.Format("2006-01-02")
+  f"expires {day} ({duration}s from now); re-mint with '{remint}'"
+}
+
+/// The words every superuser refusal ends with: how to supply the
+/// administrator credentials under the D7 precedence.
+pub fn admin_hint() -> string {
+  "pass --admin-email and --admin-password (LLL_ADMIN_EMAIL/LLL_ADMIN_PASSWORD are read only when no token is configured)"
+}
+
+/// Pull the token out of an auth-with-password / impersonate response body
+/// (both answer {token, record}; verified in v0.40.1 apis/record_helpers.go).
+pub fn decode_auth(body: string, what: string) -> Result<string, string> {
+  let mut auth = models.AuthResponse { .. }
+  if let Err(e) = json.Unmarshal(body.bytes(), &auth) {
+    return Err(f"decoding {what}: {e}")
+  }
+  if auth.token == "" {
+    return Err(f"{what} carried no token")
+  }
+  Ok(auth.token)
+}
+
+/// The export lines an agent's shell needs, newline-terminated.
+pub fn agent_env(url: string, tok: string) -> string {
+  f"export LLL_URL={shell_word(url)}\nexport LLL_TOKEN={shell_word(tok)}\n"
+}
+
+/// The values a prompt may carry, checked before any bot is created or
+/// token minted (LLL-546 review). Quoting arbitrary input for every shell a
+/// prompt gets pasted into cannot be done (fish reads backslashes inside
+/// single quotes, zsh expands a leading `=`, a terminal renders CR and ESC),
+/// so the safety is an allowlist: a value outside it is refused, naming the
+/// field, and no prompt is printed. `team` is "" for --env, which prints
+/// none. The root fix for hostile team keys is server-side (LLL-628).
+pub fn check_prompt_values(url: string, team: string, name: string) -> Result<(), string> {
+  let url_ok = regexp.MustCompile(
+    r"^https?://(\[[0-9A-Fa-f:.]+\]|[A-Za-z0-9.-]+)(:[0-9]{1,5})?(/[A-Za-z0-9._/-]*)?$",
+  )
+  if !url_ok.MatchString(url) {
+    return Err(
+      f"the server url {strconv.Quote(url)} contains characters lll cannot paste safely into a shell; use a plain http(s)://host[:port][/path] url (no user, query or fragment)",
+    )
+  }
+  if team != "" && !regexp.MustCompile("^[A-Z0-9][A-Z0-9-]*$").MatchString(team) {
+    return Err(
+      f"team key {strconv.Quote(team)} contains characters lll cannot paste safely into a shell; rename the team",
+    )
+  }
+  if !regexp.MustCompile("^bot-[A-Za-z0-9][A-Za-z0-9._-]*$").MatchString(name) {
+    return Err(
+      f"bot name {strconv.Quote(name)} contains characters lll cannot paste safely into a shell; use letters, digits, '.', '_' and '-' after bot-",
+    )
+  }
+  Ok(())
+}
+
+/// The copyable agent prompt, newline-terminated. It is the design doc's
+/// prompt (scoped-access-invites, Decision step 3) reshaped so the whole
+/// text is also a harmless shell script. Its values have passed
+/// check_prompt_values; that allowlist is the safety, and the quoting below
+/// is belt and braces. No line relies on `#`: interactive zsh without
+/// interactive_comments (the macOS default) runs a `#` line as a command.
+/// Prose lines are the no-op `true` with the sentence as one
+/// single-quoted word. The doc's "You're" is "You are".
+pub fn agent_prompt(url: string, team: string, tok: string) -> string {
+  prose(f"You are joining lll team {team} at {url}.") +
+  agent_env(url, tok) +
+  f"lll attach --key {shell_word(team)}\n" +
+  prose("Read the workflow:") +
+  "lll skill get software-factory\n" +
+  prose("Claim an issue before you edit code; record findings on the board.")
+}
+
+/// A prose line that every shell runs as a no-op: `true '<text>'`. `true`
+/// rather than `:`, which fish lacks. `text` is a constant sentence or
+/// allowlisted values, so it holds no quote or backslash to escape.
+pub fn prose(text: string) -> string {
+  "true '" + text + "'\n"
+}
+
+/// `s` as one shell word. The prompt is pasted into a shell, and the url
+/// comes from configuration or the environment, so anything outside a plain
+/// url/token alphabet is single-quoted rather than trusted.
+pub fn shell_word(s: string) -> string {
+  if s != "" && regexp.MustCompile("^[A-Za-z0-9_./:@%+=,~-]+$").MatchString(s) {
+    return s
+  }
+  "'" + strings.ReplaceAll(s, "'", "'\\''") + "'"
+}
+
+/// Create the bot-kind member record: a random password nobody knows (the
+/// login door is closed server-side regardless), the synthesized email every
+/// record-only member gets, kind = bot, and `owner` pointing at the calling
+/// member when there is one.
+pub fn create_bot_member_as(ctx: pb.Client, tok: string, name: string, owner: string) -> Result<models.Member, string> {
+  let password = rand.Text()
+  let new_bot = models.NewMember {
+    name,
+    email: records.synthesize_email(name),
+    password,
+    password_confirm: password,
+    email_visibility: true,
+    kind: "bot",
+    owner,
+    scope: "",
+    teams: [],
+    mode: "",
+  }
+  let body = writes.create_member(ctx, pb.Caller.Member(tok), new_bot)?
+  let mut created = models.Member { .. }
+  if let Err(e) = json.Unmarshal(body.bytes(), &created) {
+    return Err(f"decoding created bot member: {e}")
+  }
+  Ok(created)
+}
+
+/// Mint the bot's token through the rotate route: it re-mints and — by
+/// refreshing the record's tokenKey — strands every earlier token at its
+/// next request. The server checks owner or superuser; the response is the
+/// same {token, record} shape impersonate answers with. The caller prints
+/// it, once (print_bot_credential).
+pub fn bot_mint(ctx: pb.Client, tok: string, name: string, duration: int) -> Result<string, string> {
+  let payload = match json.Marshal(models.BotRotate { name, duration }) {
+    Ok(b) => b,
+    Err(e) => return Err(f"encoding the rotation request: {e}"),
+  }
+  let body = match ctx.post_as("/api/lll/bots/rotate", payload as string, tok) {
+    Ok(b) => b,
+    Err(e) => return Err(bot_mint_error(name, e)),
+  }
+  let mut auth = models.AuthResponse { .. }
+  if let Err(e) = json.Unmarshal(body.bytes(), &auth) {
+    return Err(f"decoding the rotation response: {e}")
+  }
+  if auth.token == "" { return Err("the rotation response carried no token") }
+  Ok(auth.token)
+}
+
+/// What to say when the rotate route refuses. 403 is the owner check — the
+/// configured credential neither owns the bot nor is a superuser; 401 is a
+/// dead token, the same shape token create's refusal names. Anything else
+/// keeps the raw error.
+pub fn bot_mint_error(name: string, e: string) -> string {
+  let status = pb.classify(e).status
+  if status == 403 {
+    return pb.fail(pb.ErrorKind.Refused, f"rotating {name}'s token: only the bot's owner or a superuser can do that
+the configured token does not own this bot; pass --admin-email and --admin-password to rotate as the superuser")
+  }
+  if status == 401 {
+    return pb.fail(pb.ErrorKind.Auth, "the token this ran with was rejected (401) - most likely it expired
+log in again with 'lll login', or " + admin_hint())
+  }
+  f"rotating {name}'s token: {e}"
+}

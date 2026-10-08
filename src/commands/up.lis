@@ -16,6 +16,8 @@ import "flags"
 import "models"
 import "pb"
 import "records"
+import "tokens"
+import "buildinfo"
 
 #[json]
 struct LocalShareAdmin { url: string, email: string, password: string }
@@ -208,7 +210,7 @@ check what is configured with 'lll config list'",
         f"{ctx.settings.bind()}:{db_port}",
         email,
         pass,
-        version(),
+        buildinfo.version(),
         ctx.settings.env.allowed_origins,
         ctx.settings.env.web_url,
       ) {
@@ -361,7 +363,7 @@ password in its own data directory's .lll-admin.json.",
   if chosen != web_port {
     fmt.Println(f"port {web_port} taken; board moving to {chosen}")
   }
-  fmt.Println(f"lll    {version()}")
+  fmt.Println(f"lll    {buildinfo.version()}")
   fmt.Println(api_line)
   fmt.Println(f"team   {team}")
   fmt.Println(f"member {member.name}")
@@ -943,7 +945,7 @@ fn board_identity(
     base,
     ctx.token(),
     member.id,
-    default_token_duration(),
+    tokens.default_token_duration(),
   )?
   // The board runs as that member from here on, and it alone may renew
   // that token from the administrator pair (TASK-255): the grant is part of
@@ -956,7 +958,7 @@ fn board_identity(
   let id = member.id
   let refresh: fn() -> Result<string, string> = || {
     let su = superuser_token(base, email, pass)?
-    pb.impersonate_member(base, su, id, default_token_duration())
+    pb.impersonate_member(base, su, id, tokens.default_token_duration())
   }
   fmt.Println(
     f"auth   board signed in as {name}; token renewal keeps this member",
