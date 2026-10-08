@@ -1521,7 +1521,7 @@ PY
 "$LIN" completions bash > "$DATA_DIR/comp.bash"
 bash -n "$DATA_DIR/comp.bash" || fail "bash completions do not parse"
 out=$(cat "$DATA_DIR/comp.bash")
-assert_contains "$out" "create new list next view show update close start claim release delete comment watch url id title branch-name pr ref link unlink" "bash completions list issue verbs"
+assert_contains "$out" "create new list next view show update edit close start claim release delete comment watch url id title branch-name pr ref link unlink" "bash completions list issue verbs"
 assert_contains "$out" "--limit" "bash completions know --limit"
 assert_contains "$out" "complete -F _lll lll" "bash completions register"
 "$LIN" completions zsh > "$DATA_DIR/comp.zsh"
@@ -1580,7 +1580,7 @@ done
 # a flag in the completions entry but not the parser would make this error
 # impossible — the two are one table now, so assert both surfaces agree on
 # the flag that once drifted.
-assert_contains "$(cat "$DATA_DIR/comp.bash")" "issue,create) words='-t --title -d --description --emoji" \
+assert_contains "$(cat "$DATA_DIR/comp.bash")" "issue,create) words='-t --title -b --body -d --description --emoji" \
   "completions offer the parser's own issue create flags"
 
 # TASK-177: create --json joined the spec, so its completions entry carries
