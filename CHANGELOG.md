@@ -92,6 +92,15 @@ that close, release, delete or create bots.
   Otherwise it prints the API url as before. An explicit `--url` still wins
   (LLL-649).
 - Help and messages no longer cite internal ticket keys (LLL-649).
+- Help, messages, the board's pages, the shipped skills and the landing page
+  no longer use em-dashes. Each became a colon, semicolon, comma,
+  parentheses or a new sentence. Scripts that match message text may need
+  updating: `issue view` now prints `Blocked by: ENG-1 (todo); 1 open, not
+  ready`, the projects page's `?raw` rows read `- Name: status · N issues ·
+  URL`, and the board shows `-` in an empty cell. `scripts/test_no_emdash.py`
+  keeps em-dashes out (LLL-650).
+- The boot log line about a team key that breaks the key rule no longer
+  starts with an internal ticket key (LLL-650).
 - README: Homebrew first, a quickstart that runs as written from a fresh
   machine, separate Upgrade and Share sections, canonical verbs, and no
   references to docs that exist only on lll's own board. The landing page's

@@ -25,6 +25,12 @@ class API(http.server.BaseHTTPRequestHandler):
     def do_GET(self):
         parsed = urllib.parse.urlsplit(self.path)
         q = urllib.parse.parse_qs(parsed.query, keep_blank_values=True)
+        if not parsed.path.startswith('/api/collections/'):
+            # The CLI's version-skew probe asks /.well-known/lll; no answer is
+            # a server too old to say, which is what this stub is.
+            self.send_response(404)
+            self.end_headers()
+            return
         collection = parsed.path.split('/')[3]
         page = int(q.get('page', ['1'])[0])
         limit = int(q.get('perPage', ['30'])[0])

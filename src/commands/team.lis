@@ -106,7 +106,7 @@ fn team_intro() -> string {
   "Renaming the key rewrites nothing else, because issue keys are derived from it
 (team key + number), so every key on the board and in the CLI follows at once.
 Three things do NOT follow:
-  - the 'team =' line in .lll.toml, and LLL_TEAM — rerun 'lll attach --key NEW'
+  - the 'team =' line in .lll.toml, and LLL_TEAM: rerun 'lll attach --key NEW'
   - git branches already named eng-12-slug keep the old key
   - OLD-1 mentions inside descriptions and comment bodies are stored text
 
@@ -230,7 +230,7 @@ fn team_rename(input: flags.CommandInput) -> Result<(), string> {
   let new_key = records.normalize_team_key(p.one("--key"))
   let new_name = p.one("-n")
   if new_key == "" && new_name == "" {
-    return Err(flags.usage_error(f"nothing to rename — give --key, -n, or both\nusage: {usage}"))
+    return Err(flags.usage_error(f"nothing to rename: give --key, -n, or both\nusage: {usage}"))
   }
   let Some(t) = records.find_team(key)? else {
     return Err(unknown_team(key))
@@ -242,7 +242,7 @@ fn team_rename(input: flags.CommandInput) -> Result<(), string> {
     if let Some(problem) = records.team_key_problem(new_key) { return Err(problem) }
     let taken = records.find_team(new_key)?
     if taken.is_some() {
-      return Err(f"a team with key '{new_key}' already exists — see 'lll team list'")
+      return Err(f"a team with key '{new_key}' already exists; see 'lll team list'")
     }
   }
 
@@ -253,7 +253,7 @@ fn team_rename(input: flags.CommandInput) -> Result<(), string> {
   if new_key != "" { final_key = new_key }
   let mut final_name = t.name
   if new_name != "" { final_name = new_name }
-  fmt.Println(f"Renamed team {t.key}: {final_key} — {final_name}")
+  fmt.Println(f"Renamed team {t.key}: {final_key} ({final_name})")
   for line in team_rename_collateral(t.key, final_key) {
     fmt.Println(line)
   }
@@ -285,7 +285,7 @@ fn team_rename_collateral(old_key: string, new_key: string) -> Slice<string> {
   if old_key == new_key { return [] }
   [
     f"Issue keys follow immediately ({old_key}-1 is now {new_key}-1). These do not:",
-    f"  - .lll.toml / LLL_TEAM still say {old_key} — 'lll attach --key {new_key}'",
+    f"  - .lll.toml / LLL_TEAM still say {old_key}; run 'lll attach --key {new_key}'",
     f"  - git branches already named {strings.ToLower(old_key)}-12-slug keep the old key",
     f"  - {old_key}-1 mentions inside descriptions and comment bodies are stored text",
   ]
@@ -312,7 +312,7 @@ fn team_set_accent(input: flags.CommandInput) -> Result<(), string> {
   }
   let _ = pb.patch(f"/api/collections/teams/records/{t.id}", payload)?
   if hex == "" {
-    fmt.Println(f"Cleared the accent for {t.key} — back to the canonical orange")
+    fmt.Println(f"Cleared the accent for {t.key}; it uses the canonical orange again")
   } else {
     fmt.Println(f"Accent for {t.key} is now {hex}")
   }
@@ -360,7 +360,7 @@ fn team_set_emoji(input: flags.CommandInput) -> Result<(), string> {
   }
   let _ = pb.patch(f"/api/collections/teams/records/{t.id}", payload)?
   if glyph == "" {
-    fmt.Println(f"Cleared the emoji for {t.key} — back to the letter from its key")
+    fmt.Println(f"Cleared the emoji for {t.key}; it shows the letter from its key again")
   } else {
     fmt.Println(f"{t.key} is now {glyph}")
   }
@@ -452,7 +452,7 @@ fn unknown_configured_team(key: string, origin: string) -> string {
   } else {
     ""
   }
-  pb.fail(pb.ErrorKind.NotFound, f"no team with key '{key}'{from} on the server — 'lll team list' shows the keys; 'lll attach --key KEY' points this directory at one, 'lll config list' shows every value and the file it came from, or create it with 'lll team create {key} -n \"Name\"'")
+  pb.fail(pb.ErrorKind.NotFound, f"no team with key '{key}'{from} on the server. 'lll team list' shows the keys; 'lll attach --key KEY' points this directory at one, 'lll config list' shows every value and the file it came from, or create it with 'lll team create {key} -n \"Name\"'")
 }
 
 /// The configured team, insisted upon. Docs, findings, labels and projects
@@ -509,7 +509,7 @@ fn team_delete(input: flags.CommandInput) -> Result<(), string> {
   let issues_held = issue_count(f"team={query.quote(t.id)}")?
   if issues_held > 0 {
     return Err(
-      f"team {t.key} holds {issues_held} issue(s) — deleting it would orphan them
+      f"team {t.key} holds {issues_held} issue(s); deleting it would orphan them
 'lll team archive {t.key}' hides it and keeps their ids working",
     )
   }
@@ -568,7 +568,7 @@ fn unknown_team_scoped(key: string) -> Option<string> {
 /// to write into an archived team (same package: src/commands): the CLI's
 /// attach and issue create, and the web board's write endpoints.
 fn archived_hint(key: string) -> string {
-  f"team {key} is archived — 'lll team unarchive {key}' first"
+  f"team {key} is archived; run 'lll team unarchive {key}' first"
 }
 
 /// The one PATCH body the archive lifecycle needs: PocketBase replaces every
@@ -606,7 +606,7 @@ fn team_set_archived(p: flags.Parsed, archived: bool) -> Result<(), string> {
   let _ = pb.patch(f"/api/collections/teams/records/{t.id}", payload)?
   if archived {
     fmt.Println(
-      f"Archived team {t.key} — hidden from team lists and the board rail; /t/{t.key}/ stays readable. 'lll team unarchive {t.key}' brings it back.",
+      f"Archived team {t.key}: hidden from team lists and the board rail; /t/{t.key}/ stays readable. 'lll team unarchive {t.key}' brings it back.",
     )
   } else {
     fmt.Println(f"Unarchived team {t.key}")

@@ -38,8 +38,8 @@ its team: remove that member from the team and its deliveries stop, with a
 recorded creators, or by a superuser, have no creator and deliver while their
 team exists.
 
-A failed delivery is retried with backoff — three attempts, 1s then 4s
-apart — and every failed attempt is printed to the server's log with a
+A failed delivery is retried with backoff (three attempts, 1s then 4s
+apart), and every failed attempt is printed to the server's log with a
 'webhook:' prefix, the last one final. Deliveries are not queued: one still
 waiting to be sent or retried when the server stops is lost."
 }
@@ -116,7 +116,7 @@ fn webhook_add(input: flags.CommandInput) -> Result<(), string> {
     &existing,
   )?
   if existing.items.length() > 0 {
-    return Err(f"webhook {target} is already registered for {scope} — remove it first: 'lll webhook remove {target}'")
+    return Err(f"webhook {target} is already registered for {scope}; remove it first: 'lll webhook remove {target}'")
   }
 
   let new_hook = models.NewWebhook { team: team.id, project: project_id, url: target, secret }
@@ -132,12 +132,12 @@ fn webhook_add(input: flags.CommandInput) -> Result<(), string> {
   // `generated` is checked first: a server older than LLL-661 returns no
   // secret_set, and the generated secret must still be shown once.
   if generated {
-    fmt.Println(f"Registered webhook {target} ({scope}) — deliveries carry X-LLL-Secret: {secret}")
+    fmt.Println(f"Registered webhook {target} ({scope}); deliveries carry X-LLL-Secret: {secret}")
     fmt.Println("Save this secret now: lll will not show it again.")
   } else if secret == "" {
     fmt.Println(f"Registered webhook {target} ({scope})")
   } else {
-    fmt.Println(f"Registered webhook {target} ({scope}) — deliveries carry X-LLL-Secret")
+    fmt.Println(f"Registered webhook {target} ({scope}); deliveries carry X-LLL-Secret")
   }
   Ok(())
 }
@@ -181,12 +181,12 @@ fn webhook_remove(input: flags.CommandInput) -> Result<(), string> {
     &matches,
   )?
   if matches.items.is_empty() {
-    return Err(pb.fail(pb.ErrorKind.NotFound, f"no webhook {target} registered for {scope} — see 'lll webhook list'"))
+    return Err(pb.fail(pb.ErrorKind.NotFound, f"no webhook {target} registered for {scope}; see 'lll webhook list'"))
   }
   if matches.items.length() > 1 {
     let mut ids: Slice<string> = []
     for h in matches.items { ids = ids.append(h.id) }
-    return Err(f"webhook {target} is registered more than once — pass --project, or remove by id: one of {strings.Join(ids, ", ")}\nusage: {usage}")
+    return Err(f"webhook {target} is registered more than once; pass --project, or remove by id: one of {strings.Join(ids, ", ")}\nusage: {usage}")
   }
   let victim = matches.items[0]
   let _ = pb.delete(f"/api/collections/webhooks/records/{victim.id}")?
@@ -211,10 +211,10 @@ fn validate_target(raw: string) -> Result<string, string> {
     return Err("a webhook needs a target URL: 'lll webhook add URL'")
   }
   let Ok(parsed) = url.Parse(raw) else {
-    return Err(f"'{raw}' is not a URL — webhook targets are http(s) URLs")
+    return Err(f"'{raw}' is not a URL; webhook targets are http(s) URLs")
   }
   if (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Host == "" {
-    return Err(f"'{raw}' is not an http(s) URL with a host — webhook targets are http(s) URLs")
+    return Err(f"'{raw}' is not an http(s) URL with a host; webhook targets are http(s) URLs")
   }
   Ok(raw)
 }

@@ -46,7 +46,7 @@ pub fn attach(args: Slice<string>) -> Result<(), string> {
     Some(r) => (r, true),
     None => {
       let Ok(cwd) = os.Getwd() else {
-        return Err("no working directory to attach — could not read it")
+        return Err("no working directory to attach: could not read it")
       }
       (cwd, false)
     },
@@ -69,7 +69,7 @@ pub fn attach(args: Slice<string>) -> Result<(), string> {
     derive_key_from_server(name)?
   }
   if key == "" {
-    return Err(f"no team key in '{name}' to derive one from — pass it: lll attach --key KEY")
+    return Err(f"no team key in '{name}' to derive one from; pass it: lll attach --key KEY")
   }
   if p.given("-k") {
     if let Some(problem) = records.team_key_problem(key) { return Err(problem) }
@@ -91,11 +91,11 @@ pub fn attach(args: Slice<string>) -> Result<(), string> {
   // a directory git does not track.
   if in_repo {
     fmt.Println(
-      "commit .lll.toml — every clone and worktree of this repo is attached from then on",
+      "commit .lll.toml: every clone and worktree of this repo is attached from then on",
     )
   } else {
     fmt.Println(
-      f"not a git repository — wrote {path}; every subdirectory of it inherits this team",
+      f"not a git repository, so wrote {path}; every subdirectory of it inherits this team",
     )
   }
   Ok(())
@@ -112,13 +112,13 @@ fn derive_key_from_server(dir_name: string) -> Result<string, string> {
     let key = live[0].key
     // "you can see": a team-scoped member is shown only its own teams, so
     // "the server has" was false for it (fleet case 12, LLL-552).
-    fmt.Println(f"you can see one team, {key} — attaching to it")
+    fmt.Println(f"you can see one team, {key}; attaching to it")
     return Ok(key)
   }
   if live.length() > 1 {
     let keys = live.map(|t| t.key).join(", ")
     return Err(
-      f"you can see {live.length()} teams ({keys}) — say which: lll attach --key KEY",
+      f"you can see {live.length()} teams ({keys}); say which: lll attach --key KEY",
     )
   }
   Ok(clean_key(dir_name))
@@ -138,7 +138,7 @@ fn ensure_attached_team(key: string) -> string {
     Ok(created) => created,
     Err(e) => return f"saved local attachment only; could not create team {key} on the configured server:\n{pb.plain(e)}\nResolve the server error, then reconcile this attachment:\n  {retry}",
   }
-  f"created team {created.key} — issues will be {created.key}-1, {created.key}-2, ..."
+  f"created team {created.key}; issues will be {created.key}-1, {created.key}-2, ..."
 }
 
 fn print_attach_usage() {

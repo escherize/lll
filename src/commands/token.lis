@@ -110,7 +110,7 @@ fn token_create(input: flags.CommandInput) -> Result<(), string> {
   let su = superuser_auth(given_admin_login(p)?)?
   let found = records.find_member_as(su, name)?
   let Some(member) = found else {
-    return Err(pb.fail(pb.ErrorKind.NotFound, f"no member named '{name}' — see 'lll member create'"))
+    return Err(pb.fail(pb.ErrorKind.NotFound, f"no member named '{name}'; see 'lll member create'"))
   }
   let payload = match json.Marshal(models.ImpersonateRequest { duration }) {
     Ok(b) => b,
@@ -131,7 +131,7 @@ fn token_create(input: flags.CommandInput) -> Result<(), string> {
   // surface — login, config list, the board — redacts it.
   fmt.Println(f"LLL_TOKEN={tok}")
   fmt.Println(
-    f"one-time agent token for {member.name} — shown only here; to persist it, put token = \"...\" in ~/.config/lll/lll.toml (never .lll.toml, which is committed)",
+    f"one-time agent token for {member.name}, shown only here; to persist it, put token = \"...\" in ~/.config/lll/lll.toml (never .lll.toml, which is committed)",
   )
   // The expiry belongs next to the token because it is the only moment
   // anyone will ever see it: impersonate tokens are stateless, so nothing
@@ -148,11 +148,11 @@ fn token_create(input: flags.CommandInput) -> Result<(), string> {
 /// guessing a date.
 fn expiry_line(duration: int, now: time.Time, remint: string) -> string {
   if duration == 0 {
-    return "expires: whenever the members collection's token duration says — pass --duration to pin it"
+    return "expires: whenever the members collection's token duration says; pass --duration to pin it"
   }
   let at = now.Add(time.Duration(duration as int64) * time.Second)
   let day = at.Format("2006-01-02")
-  f"expires {day} ({duration}s from now) — re-mint with '{remint}'"
+  f"expires {day} ({duration}s from now); re-mint with '{remint}'"
 }
 
 /// What to say when the impersonate call is refused. `e` is the pb client's
@@ -323,7 +323,7 @@ fn superuser_auth_failed(e: string) -> string {
 if the administrator credentials are right, check the server: --url names another one"
   }
   msg + "
-that url is the built-in default — nothing here configured one, so the credentials
+that url is the built-in default: nothing here configured one, so the credentials
 were almost certainly sent to the wrong server. Name it: --url <your server url>"
 }
 
@@ -361,7 +361,7 @@ later command can tell you when it dies. When it does, the 401 says so and the
 fix is another 'lll token create'.
 
 The token is printed exactly once. Agents persist it with
-token = \"...\" in ~/.config/lll/lll.toml — never .lll.toml, which is committed.
+token = \"...\" in ~/.config/lll/lll.toml, never .lll.toml, which is committed.
 On the receiving machine, save the API endpoint with 'lll config set url URL', or supply LLL_URL." + flags.section(spec)
 }
 
@@ -404,7 +404,7 @@ fn bot_create(args: Slice<string>, start: int, command: string) -> Result<(), st
   let name = strings.TrimSpace(p.first())
   if name == "" {
     return Err(
-      flags.usage_error(f"usage: {usage}\n  bot-NAME is the agent's member name, e.g. bot-myrepo — bot names are reserved to the bot- prefix"),
+      flags.usage_error(f"usage: {usage}\n  bot-NAME is the agent's member name, e.g. bot-myrepo; bot names are reserved to the bot- prefix"),
     )
   }
   require_bot_prefix("lll bot create", name)?
@@ -548,11 +548,11 @@ fn print_bot_credential(
   let expiry = expiry_line(duration, time.Now(), f"lll bot rotate {name}")
   if env_only {
     fmt.Print(agent_env(url, tok))
-    fmt.Fprintln(os.Stderr, f"one-time bot token for {name} — shown only here")
+    fmt.Fprintln(os.Stderr, f"one-time bot token for {name}, shown only here")
     fmt.Fprintln(os.Stderr, expiry)
     return Ok(())
   }
-  fmt.Println(f"one-time bot token for {name} — shown only here; {expiry}")
+  fmt.Println(f"one-time bot token for {name}, shown only here; {expiry}")
   fmt.Println("paste this into the agent:")
   fmt.Println("")
   fmt.Print(agent_prompt(url, team, tok))
@@ -783,7 +783,7 @@ fn bot_mint_error(name: string, e: string) -> string {
   let status = pb.classify(e).status
   if status == 403 {
     return pb.fail(pb.ErrorKind.Refused, f"rotating {name}'s token: only the bot's owner or a superuser can do that
-the configured token does not own this bot — pass --admin-email and --admin-password to rotate as the superuser")
+the configured token does not own this bot; pass --admin-email and --admin-password to rotate as the superuser")
   }
   if status == 401 {
     return pb.fail(pb.ErrorKind.Auth, "the token this ran with was rejected (401) - most likely it expired

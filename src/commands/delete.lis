@@ -40,7 +40,7 @@ fn issue_count(filter: string) -> Result<int, string> {
 /// command that overrides it, so the user never has to guess the flag.
 fn refuse_delete(kind: string, name: string, used: int) -> string {
   let argument = cli_argument(name)
-  pb.fail(pb.ErrorKind.Refused, f"{used} issue(s) still reference the {kind} '{name}' — deleting it drops the {kind} off them.\nTo delete it anyway, run:\n  lll {kind} delete {argument} --force\nOr reassign those issues first.")
+  pb.fail(pb.ErrorKind.Refused, f"{used} issue(s) still reference the {kind} '{name}'; deleting it drops the {kind} off them.\nTo delete it anyway, run:\n  lll {kind} delete {argument} --force\nOr reassign those issues first.")
 }
 
 /// What a completed delete prints. The count rides along even on the forced

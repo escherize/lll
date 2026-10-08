@@ -127,7 +127,7 @@ one timestamped line per event, until interrupted:
 Updates are shown as field transitions (state, priority, title, assignee) by
 diffing against the last event seen for that record; a record's first update
 prints as 'changed'. Note: an update that moves a record out of the filter
-(e.g. state todo -> done under --state todo) emits nothing — the server only
+(e.g. state todo -> done under --state todo) emits nothing: the server only
 delivers events for records matching the filter after the change.
 
 An update that changes none of those four fields prints only the key:
@@ -145,7 +145,7 @@ you already hold, and 'lll issue claim --renew' print nothing.
 Status lines go to stderr, never stdout, in text and --json mode alike:
 
   watch: ready (query subscription accepted)
-  realtime: lll server stream lost — reconnecting
+  realtime: lll server stream lost; reconnecting
   realtime: reconnect failed: <error>
   realtime: reconnected to the lll server (subscriptions accepted)
 
@@ -177,8 +177,8 @@ With --ready, the stream shows only the ready agenda: open issues
 (todo or backlog) whose blockers are all done or cancelled. Readiness is
 computed client-side against a snapshot of the team's issues taken at startup
 and refreshed from every event, so an issue becomes ready when its LAST open
-blocker is closed — an event that arrives on the blocker, not on the blocked
-issue — and that transition is announced as:
+blocker is closed (an event that arrives on the blocker, not on the blocked
+issue), and that transition is announced as:
 
   10:43:00 ENG-12 ready: Fix login flow
 

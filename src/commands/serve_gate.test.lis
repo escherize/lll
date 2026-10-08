@@ -43,7 +43,7 @@ fn scoped_viewer_allowlist() {
     ScopedVerdict.Hidden(m) => m,
     _ => "",
   }
-  assert hidden == "no team with key 'BBB' on this server — see the rail's team switcher"
+  assert hidden == "no team with key 'BBB' on this server; see the rail's team switcher"
   // Read-only: no write is admitted, even on its own team.
   assert route_kind(scoped_route("POST", "/t/AAA/settings/label", "", "", "", link, false)) == "closed"
   assert route_kind(scoped_route("POST", "/state", "", "", "", link, false)) == "closed"

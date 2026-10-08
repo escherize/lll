@@ -21,7 +21,7 @@
   },
   "rich/view": {
     "code": 0,
-    "stdout": "VIEW-1 Read fixture\n\nState:     ○ todo\nPriority:  urgent\nAssignee:  viewer\nClaimed:   viewer (<age>)\nProject:   none\nLabels:    runtime\nAttachments:\n  fixture.txt\nDocs:      linked\nBlocks:    VIEW-2\nEmoji:     🔧\nCreated:   <age>\nUpdated:   <age>\n\nA description.\nSecond line.\n\nRelated findings:\n\nruntime-note (runtime) — Runtime finding\n\nComments:\n\n#1 viewer (<age>)\n  A comment.\n",
+    "stdout": "VIEW-1 Read fixture\n\nState:     ○ todo\nPriority:  urgent\nAssignee:  viewer\nClaimed:   viewer (<age>)\nProject:   none\nLabels:    runtime\nAttachments:\n  fixture.txt\nDocs:      linked\nBlocks:    VIEW-2\nEmoji:     🔧\nCreated:   <age>\nUpdated:   <age>\n\nA description.\nSecond line.\n\nRelated findings:\n\nruntime-note (runtime): Runtime finding\n\nComments:\n\n#1 viewer (<age>)\n  A comment.\n",
     "stderr": ""
   },
   "rich/raw": {

@@ -24,7 +24,7 @@
            rather than "toggle", so the button and the server cannot disagree.
            The rail's group updates from the server over SSE; this one control
            flips locally so the click feels immediate. -->
-      <button type="button" id="fav-star" class="fav-star" aria-label="Favorite for the workspace" data-signals:fav="{{if .Page.Favorited}}true{{else}}false{{end}}" data-class:on="$fav" data-attr:aria-pressed="$fav ? 'true' : 'false'" data-attr:title="$fav ? 'Starred for the whole workspace — click to unstar' : 'Star for the whole workspace'" data-on:click="$fav = !$fav; @post('/favorite?key={{.Page.Key}}&on=' + $fav)"><svg width="14" height="14"><use href="#ic-star"/></svg></button>
+      <button type="button" id="fav-star" class="fav-star" aria-label="Favorite for the workspace" data-signals:fav="{{if .Page.Favorited}}true{{else}}false{{end}}" data-class:on="$fav" data-attr:aria-pressed="$fav ? 'true' : 'false'" data-attr:title="$fav ? 'Starred for the whole workspace; click to unstar' : 'Star for the whole workspace'" data-on:click="$fav = !$fav; @post('/favorite?key={{.Page.Key}}&on=' + $fav)"><svg width="14" height="14"><use href="#ic-star"/></svg></button>
     </header>
     <div id="flash" class="flash" hidden></div>
     <!-- Title-edit state lives here, OUTSIDE #issue-detail (the SSE morph
@@ -91,7 +91,7 @@
      Rendered ONCE per page load and deliberately outside #issue-detail: the
      catalogue is 241 candidates, and inside the morph boundary every issue
      event would re-send all of them to every open copy of this page. Being
-     position:fixed, its place in the DOM costs nothing — the trigger measures
+     position:fixed, its place in the DOM costs nothing: the trigger measures
      itself and drops the panel under itself, exactly as .card-pop escapes the
      column's clipping.
 
@@ -102,7 +102,7 @@
      reads the glyph off the button's own text, which is what holds the
      rendered markup to ~138 bytes a cell (33KB for the grid).
 
-     The picker's own chrome obeys the Drawn Icon Rule — sprite magnifier,
+     The picker's own chrome obeys the Drawn Icon Rule: sprite magnifier,
      sprite close, sprite remove. Only the candidates are glyphs, which is the
      one exception DESIGN.md carves out (the author's per-issue marker).
 
@@ -130,7 +130,7 @@
 {{/* Related findings (TASK-103): docs of kind=finding whose area names one
      of the issue's labels, plus every finding explicitly linked to the
      issue. Filled by the page handler only and rendered OUTSIDE the
-     #issue-detail morph boundary — like the emoji picker — so an SSE
+     #issue-detail morph boundary, like the emoji picker, so an SSE
      broadcast re-renders #issue-detail and #comments and never this
      section. No matches, no section: an empty RELATED FINDINGS heading
      would be exactly the clutter this block exists to avoid. */}}
@@ -194,8 +194,8 @@
 <div class="prop"><span class="k">Labels</span>
   <!-- The scalable picker (TASK-207). The row shows only the labels the
        issue carries, as removable chips, plus one "+" affordance. Every
-       candidate still renders on every pass — so each #issue-detail morph
-       re-carries the list with fresh checked state — but the panel stays
+       candidate still renders on every pass (so each #issue-detail morph
+       re-carries the list with fresh checked state), but the panel stays
        hidden until $lab_open, and typing narrows it client-side via each
        candidate's own data-show ($lab_open/$lab_q/$lab_lc live on
        .issue-wrap, outside the morph boundary, so an SSE morph under an
@@ -209,7 +209,7 @@
   <span class="lab-search"><svg width="14" height="14"><use href="#ic-search"/></svg><input type="text" placeholder="Filter labels" autocomplete="off" aria-label="Filter labels" data-bind:lab_q data-effect="$lab_open && setTimeout(() => el.focus(), 0)" data-on:keydown="evt.key === 'Enter' && (evt.preventDefault(), [...el.closest('.lab-pick').querySelectorAll('.lab-cands label')].find(l => l.style.display !== 'none')?.querySelector('input').click())"></span>
   {{/* Every chip and candidate wears a stable id: idiomorph matches by id,
        so a morph that moves a label between the two sets cannot shift
-       content under its neighbours — a shifted candidate would keep the
+       content under its neighbours: a shifted candidate would keep the
        display its OLD data-show computed (no signal changed, so nothing
        re-evaluates) and the filter would go visibly stale. */}}
   <div class="lab-cands">{{range .LabelOpts}}{{if not .On}}<label class="lab" id="lab-c-{{.Id}}" data-n="{{.Terms}}" data-show="!$lab_lc || el.dataset.n.includes($lab_lc)"><input type="checkbox" value="{{.Id}}" data-on:change="@post('/labels?label=' + el.value + '&amp;on=' + el.checked, {contentType: 'form'})"><span class="chip"><span class="dot" style="background:{{if .Color}}{{.Color}}{{else}}var(--text-3){{end}}"></span>{{.Name}}</span></label>{{end}}{{end}}</div>

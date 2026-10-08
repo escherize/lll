@@ -39,7 +39,7 @@ fn settings_page(
   if settings_sections().find(|s| s == section).is_none() {
     http.Error(
       w,
-      f"no settings section '{section}' — try {strings.Join(settings_sections(), ", ")}",
+      f"no settings section '{section}'; try {strings.Join(settings_sections(), ", ")}",
       404,
     )
     return
@@ -361,7 +361,7 @@ fn settings_apply(
       let known = records.fetch_members()?
       let Some(existing) = known.find(|m| m.id == id) else {
         return Err(
-          f"unknown member '{id}' — reload the page for the current list",
+          f"unknown member '{id}'; reload the page for the current list",
         )
       }
       // Email is the member's login identity now (TASK-180): PocketBase
@@ -370,7 +370,7 @@ fn settings_apply(
       let posted_email = strings.TrimSpace(email)
       if posted_email != "" && posted_email != existing.email {
         return Err(
-          f"'{existing.name}'s email is their login identity — change it under Access → Member sign-in. No changes saved.",
+          f"'{existing.name}'s email is their login identity; change it under Access → Member sign-in. No changes saved.",
         )
       }
       save_record("members", id, MemberPatch { name })
@@ -512,7 +512,7 @@ fn verify_admin(pass: string) -> Result<string, string> {
 /// their actual server status and transport details.
 fn admin_verification_error(e: string) -> string {
   if pb.classify(e).status == 400 {
-    return f"wrong admin password for {admin_email()} — use the administrator credentials supplied through LLL_ADMIN_EMAIL and LLL_ADMIN_PASSWORD in the server's own environment"
+    return f"wrong admin password for {admin_email()}; use the administrator credentials supplied through LLL_ADMIN_EMAIL and LLL_ADMIN_PASSWORD in the server's own environment"
   }
   f"verifying the admin password: {e}"
 }
@@ -524,7 +524,7 @@ fn access_member(r: mut Ref<http.Request>) -> Result<models.Member, string> {
   if id == "" { return Err("pick a member") }
   let known = records.fetch_members()?
   let Some(member) = known.find(|m| m.id == id) else {
-    return Err(f"unknown member '{id}' — reload the page for the current list")
+    return Err(f"unknown member '{id}'; reload the page for the current list")
   }
   Ok(member)
 }
@@ -639,7 +639,7 @@ fn teams_archive_write(
   if id == "" { return Err("pick a team") }
   let known = records.list_teams()?
   let Some(t) = known.items.find(|x| x.id == id) else {
-    return Err("unknown team — reload the page for the current list")
+    return Err("unknown team; reload the page for the current list")
   }
   let archived = r.PostFormValue("archived") == "1"
   let su = verify_admin(r.PostFormValue("admin_password"))?
@@ -651,7 +651,7 @@ fn teams_archive_write(
   if let Ok(vm) = settings_vm(shell_team(team_id), "teams") {
     if let Ok(html) = render("settings", vm) { extra += patch_event(html) }
   }
-  let mut msg = f"team {t.key} archived — its board stays readable at /t/{t.key}/"
+  let mut msg = f"team {t.key} archived; its board stays readable at /t/{t.key}/"
   if !archived { msg = f"team {t.key} unarchived" }
   extra += flash_ok_event(msg)
   Ok(extra)

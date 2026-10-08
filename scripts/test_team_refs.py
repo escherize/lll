@@ -353,7 +353,7 @@ with tempfile.TemporaryDirectory(prefix='lll-631-') as directory:
         endpoint = wait_for_endpoints(log)
         api = endpoint['db_url']
         text = log.read_text()
-        assert f'LLL-628: team {legacy["id"]} has key "BAD KEY$(X)"' in text, text[-2000:]
+        assert f'team {legacy["id"]} has key "BAD KEY$(X)"' in text and 'LLL-628' not in text, text[-2000:]
         su = call(api, '/api/collections/_superusers/auth-with-password',
                   {'identity': env['LLL_ADMIN_EMAIL'], 'password': env['LLL_ADMIN_PASSWORD']})[1]['token']
         code, body = call(api, f"/api/collections/teams/records/{legacy['id']}", {'name': 'renamed only'}, su, 'PATCH')

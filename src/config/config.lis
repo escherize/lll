@@ -121,7 +121,7 @@ fn config_root() -> Result<string, string> {
   if xdg != "" { return Ok(xdg) }
   let Ok(home) = os.UserHomeDir() else {
     return Err(
-      "no home directory to read config from — $HOME is unset; set LLL_CONFIG_HOME to a directory this process can write",
+      "no home directory to read config from: $HOME is unset; set LLL_CONFIG_HOME to a directory this process can write",
     )
   }
   Ok(filepath.Join(home, ".config"))

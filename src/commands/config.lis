@@ -355,7 +355,7 @@ fn config_init(_input: flags.CommandInput) -> Result<(), string> {
 # from the home config. 'lll config list' shows every effective value and
 # the file it came from.
 #
-# Committed at a repo root this file should carry 'team' and nothing else —
+# Committed at a repo root this file should carry 'team' and nothing else.
 # 'lll attach' writes exactly that. 'url' and 'token' are facts about a machine
 # and its login: set them once in ~/.config/lll/lll.toml.
 
@@ -373,7 +373,7 @@ fn config_init(_input: flags.CommandInput) -> Result<(), string> {
 # web_url = \"http://127.0.0.1:8100\"
 
 # Server auth token, sent as Authorization: Bearer on every request.
-# A secret: set it in ~/.config/lll/lll.toml or LLL_TOKEN, never here —
+# A secret: set it in ~/.config/lll/lll.toml or LLL_TOKEN, never here:
 # this file gets committed.
 # token = \"\"
 "

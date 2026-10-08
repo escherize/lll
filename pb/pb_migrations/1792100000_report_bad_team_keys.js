@@ -18,7 +18,7 @@ migrate(
       .filter((t) => !shape.test(t.getString("key")));
     for (const team of bad) {
       console.log(
-        `LLL-628: team ${team.id} has key ${JSON.stringify(team.getString("key"))}, which breaks the team key rule ` +
+        `team ${team.id} has key ${JSON.stringify(team.getString("key"))}, which breaks the team key rule ` +
           `^[A-Z][A-Z0-9_-]{0,15}$; rename it with 'lll team rename' (left unchanged)`,
       );
     }

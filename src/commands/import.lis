@@ -255,7 +255,7 @@ fn gh_issue_list(repo: string) -> Result<Slice<GithubIssue>, string> {
   match exec.LookPath("gh") {
     Partial.Ok(path) => gh = path,
     _ => return Err(
-      "gh not found on PATH — install the GitHub CLI (brew install gh)",
+      "gh not found on PATH; install the GitHub CLI (brew install gh)",
     ),
   }
   let mut cmd = exec.Command(

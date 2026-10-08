@@ -105,7 +105,7 @@ fn transact(caller: pb.Caller, issue_id: string, action: string, request: Unknow
   let path = f"/api/lll/issues/{url.PathEscape(issue_id)}/{action}"
   let response = pb.send_as(caller, "POST", path, body as string, "application/json").map_err(|e| {
     if pb.classify(e).status == 404 {
-      "server does not support atomic claim operations — update the server before changing claims or assignments; no legacy claim writes were attempted"
+      "server does not support atomic claim operations; update the server before changing claims or assignments; no legacy claim writes were attempted"
     } else { e }
   })?
   let mut transition = Transition { .. }

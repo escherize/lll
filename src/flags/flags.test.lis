@@ -496,7 +496,7 @@ fn unknown_flag_names_a_near_miss_and_only_a_near_miss() {
     Flag { name: "--label", value: true, hint: "name", repeat: true, help: "label", .. },
     Flag { name: "--team", value: true, hint: "KEY", help: "team", .. },
   ]
-  assert unknown_flag("--labels", "lll x", spec).starts_with("unknown flag: '--labels' — did you mean '--label'?")
+  assert unknown_flag("--labels", "lll x", spec).starts_with("unknown flag: '--labels'; did you mean '--label'?")
   assert unknown_flag("--teams=ALPHA", "lll x", spec).contains("did you mean '--team'?")
   assert !unknown_flag("--zzzzzz", "lll x", spec).contains("did you mean")
   assert edit_distance("--teams", "--team") == 1
@@ -524,7 +524,7 @@ fn retired_spellings_name_the_replacement_the_verb_declares() {
     },
   ]
   assert unknown_flag("-p", "lll login", login).starts_with(
-    "unknown flag: '-p' — did you mean '--password'?",
+    "unknown flag: '-p'; did you mean '--password'?",
   )
   assert unknown_flag("-p", "lll doc create", doc).contains(
     "did you mean '--paths'?",

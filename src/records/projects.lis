@@ -23,9 +23,9 @@ pub fn resolve_project(team_id: string, name: string) -> Result<models.Project, 
     // the command already, so the flag they wanted was no flag at all.
     let team_key = config.load()?.team
     if team_key != "" && strings.EqualFold(name, team_key) {
-      return Err(f"'{name}' is the team, not a project — the team scopes every command already, so drop --project, or pick one from 'lll project list'")
+      return Err(f"'{name}' is the team, not a project. The team scopes every command already, so drop --project, or pick one from 'lll project list'")
     }
-    return Err(pb.fail(pb.ErrorKind.NotFound, f"no project named '{name}' — see 'lll project list'"))
+    return Err(pb.fail(pb.ErrorKind.NotFound, f"no project named '{name}'; see 'lll project list'"))
   }
   Ok(p)
 }
@@ -39,7 +39,7 @@ pub fn project_ids(scope: TeamScope, name: string) -> Result<Slice<string>, stri
       let filter = url.QueryEscape(f"name={query.quote(name)}")
       let found = fetch_all_records<models.Project>(f"/api/collections/projects/records?sort=id&filter={filter}", "projects")?
       let ids = found.filter(|p| p.name == name).map(|p| p.id)
-      if ids.is_empty() { return Err(f"no project named '{name}' — see 'lll project list'") }
+      if ids.is_empty() { return Err(f"no project named '{name}'; see 'lll project list'") }
       Ok(ids)
     },
   }

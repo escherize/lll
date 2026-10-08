@@ -108,7 +108,7 @@ pub fn run_server(
   let board_tok = resolve_board_token()
   let cfg = config.load()?
   let Some(board_member) = actor()? else {
-    return Err("the board needs a member token — start it with lll up")
+    return Err("the board needs a member token; start it with lll up")
   }
   // The BOOT team (TASK-198): the server hosts every team — the board views
   // one per URL under /t/KEY/ — and the configured team is only where the
@@ -572,7 +572,7 @@ fn routed_team(
     Ok(None) => {
       http.Error(
         w,
-        f"no team with key '{key}' on this server — see the rail's team switcher",
+        f"no team with key '{key}' on this server; see the rail's team switcher",
         404,
       )
       None

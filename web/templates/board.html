@@ -1,10 +1,10 @@
 {{define "board-page"}}<!DOCTYPE html>
 <html lang="en">
 <!--
-THESIS: a live team board that reads like an instrument panel — every issue's
+THESIS: a live team board that reads like an instrument panel: every issue's
 state legible in one glance, refusing the airy marketing-card board of generic
 kanban tools.
-OWN-WORLD: Linear's grammar with lll's own orange — near-black #0e0f11 ground,
+OWN-WORLD: Linear's grammar with lll's own orange: near-black #0e0f11 ground,
 hairline rgba borders, 13px Inter Variable, muted grays, orange #f0883e accent
 reserved for interactive + urgent, semantic state colors (yellow progress,
 violet review, green done), drawn circle state icons, bar priority icons,
@@ -14,7 +14,7 @@ morphs land without disturbing the reading.
 FIRST VIEWPORT: 220px rail left (workspace, Board active), 46px topbar with
 breadcrumb + create form + orange New issue button, six state columns filling
 the rest, cards dense with key/priority/title/labels/avatar.
-FORM: brief-pinned direction (Linear clone, user-directed); no concept roll —
+FORM: brief-pinned direction (Linear clone, user-directed); no concept roll;
 seed key: none/pinned.
 FINISH: unreviewed and undocumented is unfinished; this build ends with the
 finish review, the verdict, DESIGN.md, and every shipping raster carrying its
@@ -48,7 +48,7 @@ provenance.
        data-init below reads localStorage ONLY to migrate a browser still
        holding the old lllView key, and only when the server saw neither
        cookie nor params. $vhide (the current hidden list) and $vck (this
-       team's cookie name) are seeded here — outside the #board morph —
+       team's cookie name) are seeded here, outside the #board morph,
        because the hide/unhide buttons are re-rendered by broadcasts that
        know nothing of this request's view. -->
   <div class="main{{range .Page.Hidden}} hc-{{.}}{{end}}" data-signals:vhide="'{{.Page.HideCsv}}'" data-signals:vck="'{{.Page.ViewCookieName}}'" data-init="{{if and (eq .Page.QueryStr "") (not .Page.ViewRestored)}}const v = localStorage.getItem('lllView'); if (v) { const h = new URLSearchParams(v).get('hide') || ''; if (h) location.replace(location.pathname + '?hide=' + encodeURIComponent(h)); else localStorage.removeItem('lllView'); } {{end}}{{.Page.HideSeed}}" data-class="{ {{range $i, $c := .Page.Columns}}{{if $i}}, {{end}}'hc-{{$c.State}}': $hide_{{$c.Sig}}{{end}} }">
@@ -74,10 +74,10 @@ provenance.
     </header>
     <div id="flash" class="flash"{{if not .Page.Error}} hidden{{end}}>{{if .Page.Error}}{{.Page.Error}}{{end}}</div>
     {{/* The archive banner (TASK-210): an archived team's board still renders
-         — reads are preserved, data untouched — but every write refuses, so
+         (reads are preserved, data untouched) but every write refuses, so
          the banner says both halves and names the way back. Outside every
          morph boundary, like the rail: no broadcast re-renders it. */}}
-    {{if .Page.TeamArchived}}<div id="archived-banner" class="archived-banner">This team is archived — the board is read-only. <code>lll team unarchive {{.Page.TeamKey}}</code> brings it back.</div>
+    {{if .Page.TeamArchived}}<div id="archived-banner" class="archived-banner">This team is archived, so the board is read-only. <code>lll team unarchive {{.Page.TeamKey}}</code> brings it back.</div>
     {{end}}{{template "filterbar" .Page}}
     {{template "new-issue-dialog" .Page}}
     {{template "board" .Page}}
@@ -90,7 +90,7 @@ provenance.
 {{range .Columns}}{{template "column" .}}
 {{end}}{{/* LLL-383: each entry rewrites lllView BEFORE navigating, the way the
      Clear button already does. Unhiding the last hidden column leaves no
-     query string — so it also clears the saved-view cookie (LLL-375), the
+     query string, so it also clears the saved-view cookie (LLL-375), the
      thing that would otherwise put the hide straight back on the bare board
      the navigation lands on. Setting lllView to the new (possibly empty)
      search keeps the store from resurrecting a setting just removed. */}}
@@ -101,15 +101,15 @@ provenance.
 </main>{{end}}
 
 {{/* Drop-position indicator: dragover marks the card the drop would land
-     before with .drop-before (or the column with .drop-end for end-of-column)
-     — transient classes, cleared on dragleave/drop/dragend and harmlessly
+     before with .drop-before (or the column with .drop-end for end-of-column):
+     transient classes, cleared on dragleave/drop/dragend and harmlessly
      wiped by any mid-drag #board morph. The drop posts that card's record id
      as `before` so the server can compute a fractional sort.
 
      Under a non-manual ordering (TASK-209) positional drops are DISABLED,
      like Linear: the column's rendered order belongs to the ordering, not to
-     the drag. A drop still changes state — it posts /state with no `before`,
-     appending per manual order — and the dragover feedback is the whole
+     the drag. A drop still changes state (it posts /state with no `before`,
+     appending per manual order), and the dragover feedback is the whole
      column (.drop-append), never an indicator line, so the difference is
      visible mid-drag. */}}
 {{define "column"}}<section class="column" id="col-{{.State}}"{{if .Manual}} data-on:dragover="evt.preventDefault(); const t = [...el.querySelectorAll('.card')].find(c => c.offsetParent && evt.clientY < c.getBoundingClientRect().top + c.getBoundingClientRect().height / 2); el.querySelectorAll('.card.drop-before').forEach(c => c !== t && c.classList.remove('drop-before')); t && t.classList.add('drop-before'); el.classList.toggle('drop-end', !t)" data-on:dragleave="!el.contains(evt.relatedTarget) && (el.classList.remove('drop-end'), el.querySelectorAll('.card.drop-before').forEach(c => c.classList.remove('drop-before')))" data-on:drop="evt.preventDefault(); const t = el.querySelector('.card.drop-before'); el.classList.remove('drop-end'); t && t.classList.remove('drop-before'); @post('/state?key=' + evt.dataTransfer.getData('text/plain') + '&state={{.State}}' + (t ? '&before=' + t.id.slice(6) : ''))"{{else}} data-on:dragover="evt.preventDefault(); el.classList.add('drop-append')" data-on:dragleave="!el.contains(evt.relatedTarget) && el.classList.remove('drop-append')" data-on:drop="evt.preventDefault(); el.classList.remove('drop-append'); @post('/state?key=' + evt.dataTransfer.getData('text/plain') + '&state={{.State}}')"{{end}}>
@@ -122,7 +122,7 @@ provenance.
 <span class="title">{{.Title}}</span>
 {{if .Labels}}<span class="row3">{{range .Labels}}<span class="chip"><span class="dot" style="background:{{if .Color}}{{.Color}}{{else}}var(--text-3){{end}}"></span>{{.Name}}</span>{{end}}</span>{{end}}
 <span class="row4"><span class="age">{{.Created}}</span>{{if .ClaimHolder}}<span class="card-claim" title="Claimed by {{.ClaimHolder}}">Claimed: {{.ClaimHolder}}</span>{{end}}{{if .AttachmentCount}}<span class="attachment-count" aria-label="{{.AttachmentCount}} attachments"><svg width="14" height="14" aria-hidden="true"><use href="#ic-paperclip"/></svg>{{.AttachmentCount}}</span>{{end}}{{if .Assignee}}{{template "avatar" .Avatar}}{{end}}</span>
-{{/* Hover preview: pure CSS (:hover + transition-delay), no data-show — the
+{{/* Hover preview: pure CSS (:hover + transition-delay), no data-show: the
      card's data-show is taken by search/filters. Docked position:fixed
      escapes the column's overflow clipping; pointer-events:none keeps
      click and drag on the card itself. */}}<span class="card-pop" aria-hidden="true">
@@ -134,9 +134,9 @@ provenance.
 </span>
 </a>{{end}}
 
-{{/* Filter bar: the URL is the API. Chips and menu entries are NAVIGATIONS
-     — each is the current URL with one value toggled, server-rendered from
-     the query params — so the back button walks between filter states and a
+{{/* Filter bar: the URL is the API. Chips and menu entries are NAVIGATIONS:
+     each is the current URL with one value toggled, server-rendered from
+     the query params, so the back button walks between filter states and a
      filtered URL is shareable (TASK-94). The bar lives outside #board so a
      broadcast never re-renders it with someone else's view state.
 
@@ -184,8 +184,8 @@ provenance.
   <button type="submit" title="Pin this view into the rail for the whole workspace">Save</button>
 </form>{{end}}
 {{/* Ordering picker (TASK-209): per-column card order, right-docked in the
-     same bar. Options are NAVIGATIONS like the chips — each href is the
-     current URL with ?order= swapped — so an ordering is shareable, rides
+     same bar. Options are NAVIGATIONS like the chips: each href is the
+     current URL with ?order= swapped, so an ordering is shareable, rides
      saved views, and the data-effect above persists it with the rest of the
      view. Manual is the default and carries no param. */}}
 <nav class="order-picker" aria-label="Card ordering"><span class="op-label">Order</span>
@@ -195,7 +195,7 @@ provenance.
 
 {{/* The full create form: a modal over the board, not a page, so nothing is
      lost behind it. It posts to the SAME POST /create as the topbar's
-     one-line composer — one server path, one broadcast, no double update —
+     one-line composer (one server path, one broadcast, no double update),
      and every field past the title is optional there.
 
      $ni_open lives here, outside #board (the SSE morph target), so a repaint
@@ -206,15 +206,15 @@ provenance.
      Opening resets the form and copies the topbar's title over, so the two
      composers are one flow rather than two drafts.
      Create more (TASK-159) is a checkbox beside the submit. The server
-     still closes the dialog on success — one write path, no special case —
+     still closes the dialog on success (one write path, no special case),
      so with the toggle on the client awaits the POST and, only when the
      server did close it, raises $ni_reopen and flips $ni_open back: the
      open effect then takes the reopen branch, clearing title and
      description, leaving the scoping fields and labels standing, and
      returning focus to the title. A rejected create never closes the
      dialog, so the await finds $ni_open still true and keeps every
-     keystroke. $ni_more and $ni_reopen live on #ni-modal — outside the
-     #board morph and outside el.reset() — so the preference survives both
+     keystroke. $ni_more and $ni_reopen live on #ni-modal, outside the
+     #board morph and outside el.reset(), so the preference survives both
      dialog opens and board repaints.
 
      Class names are ni-* on purpose. Template define names AND CSS class
@@ -229,7 +229,7 @@ provenance.
 <input type="hidden" name="flash_target" value="ni-flash">
 <input type="hidden" name="team" value="{{.TeamKey}}">
 <input id="ni-title" name="title" placeholder="Issue title" autocomplete="off" aria-label="Issue title" data-on:keydown="evt.key === 'Enter' && (evt.preventDefault(), el.value.trim() && document.getElementById('ni-create').click())">
-<textarea id="ni-desc" class="ni-desc" name="description" aria-label="Description" placeholder="Description — markdown, code fences and mermaid all render"></textarea>
+<textarea id="ni-desc" class="ni-desc" name="description" aria-label="Description" placeholder="Description: markdown, code fences and mermaid all render"></textarea>
 <div class="ni-props">
   <select name="state" aria-label="State">{{range .States}}<option value="{{.Value}}"{{if eq .Value "todo"}} selected{{end}}>{{.Label}}</option>{{end}}</select>
   <select name="priority" aria-label="Priority">{{range .Compose.Prios}}<option value="{{.Value}}">{{.Label}}</option>{{end}}</select>

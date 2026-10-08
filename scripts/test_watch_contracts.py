@@ -315,8 +315,8 @@ dead_line = ("realtime: the server rejected this token (401 Unauthorized): it wa
              "or set a fresh LLL_TOKEN ('lll bot rotate bot-NAME' or 'lll token create NAME'), "
              "then start the watch again")
 assert lines == ['watch: ready (query subscription accepted)',
-                 'realtime: lll server stream lost — reconnecting', reconnected,
-                 'realtime: lll server stream lost — reconnecting', dead_line], lines
+                 'realtime: lll server stream lost; reconnecting', reconnected,
+                 'realtime: lll server stream lost; reconnecting', dead_line], lines
 assert process.stdout.read() == '', 'the dead stream printed an event'
 process.stdout.close()
 
@@ -383,7 +383,7 @@ assert [json.loads(l)['record']['id'] for l in stdout] == ['r1', 'r4'], stdout
 assert rest == '', rest
 assert stderr.splitlines() == [
     'watch: ready (query subscription accepted)',
-    'realtime: lll server stream lost — reconnecting',
+    'realtime: lll server stream lost; reconnecting',
     'realtime: reconnect failed: GET /api/realtime: 503 Service Unavailable',
     'realtime: reconnected to the lll server (subscriptions accepted)',
 ], stderr

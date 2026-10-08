@@ -231,7 +231,7 @@ assert_contains "$out" "Created team LOW: Lowercase Asked" "a lowercase position
 if out=$(LLL_URL=$URL "$LIN" team create -k NOPE -n "Short key" 2>&1); then
   fail "team create -k must refuse the removed spelling"
 fi
-assert_contains "$out" "unknown flag: '-k' — did you mean '--key'?" "team create -k names --key"
+assert_contains "$out" "unknown flag: '-k'; did you mean '--key'?" "team create -k names --key"
 if out=$(LLL_URL=$URL "$LIN" team create BOTH --key BOTH -n "Both" 2>&1); then
   fail "team create must refuse the key in both forms"
 fi
@@ -275,7 +275,7 @@ assert_contains "$out" "Archived: yes" "team view says the team is archived"
 # Archived teams take no new work: create and attach refuse with the fix.
 out=$(LLL_URL=$URL LLL_TEAM=QA "$LIN" issue create -t "never created" 2>&1) \
   && fail "issue create in an archived team should exit non-zero"
-assert_contains "$out" "team QA is archived — 'lll team unarchive QA' first" \
+assert_contains "$out" "team QA is archived; run 'lll team unarchive QA' first" \
   "create against an archived team names the fix"
 ARCHDIR="$DATA_DIR/attach-archived"
 LLL_HERE="$LIN"
@@ -1510,7 +1510,7 @@ out=$(env LLL_URL=$URL "$LIN" issue block "$DA" "$DA" 2>&1)
 set -e
 assert_contains "$out" "cannot block itself" "self-block is refused"
 out=$(env LLL_URL=$URL "$LIN" issue view "$DB")
-assert_contains "$out" "Blocked by: $DA (todo) — 1 open, not ready" "view names the blocker, its state and readiness"
+assert_contains "$out" "Blocked by: $DA (todo); 1 open, not ready" "view names the blocker, its state and readiness"
 assert_contains "$out" "Blocks:    $DC" "view names what this issue blocks"
 out=$(env LLL_URL=$URL LLL_TEAM=ENG "$LIN" issue list --ready)
 assert_contains "$out" "$DA" "--ready lists the unblocked issue"
@@ -1521,7 +1521,7 @@ assert_contains "$out" "$DB" "--blocked lists the blocked issue"
 assert_not_contains "$out" "$DA" "--blocked omits the free one"
 out=$(env LLL_URL=$URL "$LIN" issue close "$DA")
 out=$(env LLL_URL=$URL "$LIN" issue view "$DB")
-assert_contains "$out" "Blocked by: $DA (done) — all done, ready" "a done blocker reads as ready"
+assert_contains "$out" "Blocked by: $DA (done); all done, ready" "a done blocker reads as ready"
 out=$(env LLL_URL=$URL LLL_TEAM=ENG "$LIN" issue list --ready)
 assert_contains "$out" "$DB" "--ready admits the issue once its blocker is done"
 assert_not_contains "$out" "$DC" "but not the one behind it"
@@ -2026,12 +2026,12 @@ assert_contains "$out" "--limit must be a positive integer" "finding limit abc m
 env LLL_URL=$URL LLL_TEAM=ENG "$LIN" issue link ENG-1 race-found >/dev/null
 out=$(LLL_URL=$URL "$LIN" issue view ENG-1)
 assert_contains "$out" "Related findings:" "issue view has a related findings section"
-assert_contains "$out" "race-found (-) — Race found" "a linked finding always shows"
+assert_contains "$out" "race-found (-): Race found" "a linked finding always shows"
 
 LLL_URL=$URL LLL_TEAM=ENG "$LIN" label create -n pb >/dev/null
 env LLL_URL=$URL "$LIN" issue update ENG-1 --label pb >/dev/null
 out=$(LLL_URL=$URL "$LIN" issue view ENG-1)
-assert_contains "$out" "migration-hazard (pb) — Migration collisions" "an area-matched finding surfaces by label"
+assert_contains "$out" "migration-hazard (pb): Migration collisions" "an area-matched finding surfaces by label"
 out=$(LLL_URL=$URL "$LIN" issue view ENG-1 --json)
 printf '%s' "$out" | jq -e '
   (.docs | any(.slug == "race-found")) and
@@ -2660,7 +2660,7 @@ for args, message in [
 
 # The old pair was removed at 1.0 (LLL-644); each half names the replacement.
 for flag in ["--description-replace-old", "--description-replace-new"]:
-    refuse([flag, "a"], f"unknown flag: '{flag}' — did you mean '--description-replace old=new'?")
+    refuse([flag, "a"], f"unknown flag: '{flag}'; did you mean '--description-replace old=new'?")
 
 reset("before")
 result = update("--description-replace", "before=after")
