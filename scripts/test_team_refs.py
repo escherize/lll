@@ -153,7 +153,8 @@ with tempfile.TemporaryDirectory(prefix='lll-631-') as directory:
 
         def board_post(path, fields):
             req = urllib.request.Request(board + path, data=urllib.parse.urlencode(fields, doseq=True).encode(),
-                                         headers={'Cookie': 'lll_board=' + env['LLL_BOARD_TOKEN']})
+                                         headers={'Cookie': 'lll_board=' + env['LLL_BOARD_TOKEN'],
+                                                  'Origin': board.rstrip('/')})
             with urllib.request.urlopen(req, timeout=15) as resp:
                 return resp.read().decode()
 
