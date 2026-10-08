@@ -570,7 +570,11 @@ pub fn renew_login_token() {
   let Ok((cfg, src)) = config.load_traced() else { return }
   let Ok(home) = config.home_path() else { return }
   let Ok(saved) = config.load_home() else { return }
-  if !renews_home_login(src, home, saved.url) { return }
+  // The url compared and the token sent must come from one read of the home
+  // file: a login rewriting it between the two reads would otherwise pair
+  // the old token with the new url.
+  if saved.token != cfg.token { return }
+  if !renews_home_login(src, home, saved.url, cfg.url) { return }
   if !pb.token_needs_refresh(cfg.token, time.Now().Unix() as int) { return }
   match pb.refresh_token(cfg.url, cfg.token) {
     Ok(fresh) => {
@@ -582,15 +586,22 @@ pub fn renew_login_token() {
   }
 }
 
-/// Whether the effective token AND url both come from the home config at
-/// `home` (or the url is the default and the home config names none). The
-/// refresh request carries the token, so it must go to the server that issued
-/// it: an LLL_URL or a repo url would send the saved login elsewhere, and the
-/// answer would be written back as the login.
-fn renews_home_login(src: config.Sources, home: string, home_url: string) -> bool {
-  let from_home = f"file:{home}"
-  if src.token != from_home { return false }
-  src.url == from_home || (src.url == "default" && home_url == "")
+/// Whether the effective token comes from the home config at `home` and the
+/// effective `url` is exactly the home config's url, whatever set it (or the
+/// url is the default and the home config names none). The refresh request
+/// carries the token, so it must go to the server that issued it: an LLL_URL
+/// or a repo url naming any other server would send the saved login there,
+/// and the answer would be written back as the login. LLL-653: automation
+/// that sets LLL_URL to the home url on every call still renews.
+///
+/// The comparison is byte-exact on purpose. Normalising (a trailing slash,
+/// case, localhost for 127.0.0.1) could only widen the set of urls that
+/// receive the token; a near-miss skips one renewal, which is the safe way
+/// to be wrong.
+fn renews_home_login(src: config.Sources, home: string, home_url: string, url: string) -> bool {
+  if src.token != f"file:{home}" { return false }
+  if home_url == "" { return src.url == "default" }
+  url == home_url
 }
 
 /// Dispatch `lll logout`: forget the token the home config holds. Env vars

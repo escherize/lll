@@ -39,7 +39,7 @@ var recordsPath = regexp.MustCompile(`^/api/collections/[^/]+/records(/|$)`)
 
 const anonMessage = "authentication required: send a member token as 'Authorization: Bearer ...' - 'lll login' for a person, 'lll token create' for an agent"
 
-func Serve(dataDir, addr, adminEmail, adminPassword string) error {
+func Serve(dataDir, addr, adminEmail, adminPassword, version string) error {
 	migrationsDir, err := materializeMigrations(dataDir)
 	if err != nil {
 		return err
@@ -117,15 +117,8 @@ func Serve(dataDir, addr, adminEmail, adminPassword string) error {
 		registerAccessRoute(e.Router)
 		registerInviteRoutes(e.Router)
 		registerReferenceRoutes(e.Router, &issueUpdates)
-		// A direct API listener cannot infer the public board origin. Operators
-		// may advertise it explicitly; the combined board listener advertises
-		// its own origin independently, without trusting forwarded headers.
 		e.Router.GET("/.well-known/lll", func(re *core.RequestEvent) error {
-			boardURL := os.Getenv("LLL_WEB_URL")
-			if boardURL == "" {
-				return re.NotFoundError("board URL is not advertised", nil)
-			}
-			return re.JSON(http.StatusOK, map[string]string{"service": "lll", "web_url": boardURL})
+			return re.JSON(http.StatusOK, apiDiscovery(version, os.Getenv("LLL_WEB_URL")))
 		})
 		if err := upsertSuperuser(e.App, adminEmail, adminPassword); err != nil {
 			return err
@@ -282,4 +275,18 @@ func upsertSuperuser(app core.App, email, password string) error {
 	record.SetPassword(password)
 
 	return app.Save(record)
+}
+
+// apiDiscovery is the API listener's public /.well-known/lll document. It
+// always names the service and version, so a CLI pointed at this port still
+// notices version skew (LLL-652). A direct API listener cannot infer the
+// public board origin, so web_url appears only when the operator advertises
+// it; the combined board listener advertises its own origin independently,
+// without trusting forwarded headers.
+func apiDiscovery(version, boardURL string) map[string]string {
+	doc := map[string]string{"service": "lll", "version": version}
+	if boardURL != "" {
+		doc["web_url"] = boardURL
+	}
+	return doc
 }
