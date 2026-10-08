@@ -33,7 +33,7 @@ pub fn project_commands() -> Slice<flags.Command> {
     flags.Command {
       name: "view",
       summary: "show a project and its issues",
-      spec: flags.with_team([]),
+      spec: flags.with_team([flags.Flag { name: "--json", help: "print the project record as JSON, with its issues as issues", .. }]),
       positional: "NAME",
       run: project_view,
       ..
@@ -90,7 +90,8 @@ fn project_list(input: flags.CommandInput) -> Result<(), string> {
   // Scoped when a team is configured, every team's when not: a project
   // belongs to one team (TASK-173), so the unscoped list is an admin's view.
   let projects = models.ProjectList { items: records.fetch_projects(configured_team_id()?)? }
-  if p.given("--json") { return print_json(projects, "project list") }
+  if p.given("--json") { return print_list_json(projects.items, whole_list(projects.items.length()), "project list") }
+  if projects.items.is_empty() { return say_empty("projects") }
   for p in projects.items {
     let mut team = p.expand.team.key
     if team == "" { team = "workspace" }
@@ -240,15 +241,18 @@ fn project_view(input: flags.CommandInput) -> Result<(), string> {
   }
   let p = records.resolve_project(configured_team_id()?, name)?
 
+  let json_mode = input.parsed.given("--json")
   let mut team = p.expand.team.key
   if team == "" { team = "workspace" }
 
-  fmt.Println(f"Name:    {p.name}")
-  fmt.Println(f"Status:  {p.status}")
-  fmt.Println(f"Team:    {team}")
-  if p.description != "" {
-    fmt.Println("")
-    fmt.Println(p.description)
+  if !json_mode {
+    fmt.Println(f"Name:    {p.name}")
+    fmt.Println(f"Status:  {p.status}")
+    fmt.Println(f"Team:    {team}")
+    if p.description != "" {
+      fmt.Println("")
+      fmt.Println(p.description)
+    }
   }
 
   let filter = url.QueryEscape(f"project={query.quote(p.id)}")
@@ -258,11 +262,18 @@ fn project_view(input: flags.CommandInput) -> Result<(), string> {
     "issues",
     &issues,
   )?
+  if json_mode {
+    let mut fields = Map.new<string, json.RawMessage>()
+    if let Err(e) = json.Unmarshal(encode_json(p, "project")?, &fields) { return Err(f"decoding project: {e}") }
+    let listed = if issues.items.is_empty() { "[]".bytes() as json.RawMessage } else { encode_json(issues.items, "issues")? }
+    fields["issues"] = listed
+    return print_json(fields, "project")
+  }
   if issues.items.length() > 0 {
     fmt.Println("")
     fmt.Println("Issues:")
     fmt.Println("")
-    print_issue_table(issues.items)?
+    print_issue_table(issues.items, Map.new<string, models.Claim>())?
   }
   Ok(())
 }

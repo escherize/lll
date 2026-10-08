@@ -166,6 +166,11 @@ Usage:
   lll --version, -v       print the version
   lll --help              show this help
 
+Exit codes: 0 ok, 1 error, 2 usage, 3 not found, 4 refused or conflict,
+5 nothing to do, 6 not authenticated. They and the --json fields scripts may
+rely on are the CLI contract:
+https://github.com/escherize/lll/blob/main/docs/cli-contract.md
+
 Scoped commands (issue, project, label, doc, finding, import, export, watch,
 search, webhook) accept --team KEY.
 It overrides LLL_TEAM for this invocation and never writes configuration.

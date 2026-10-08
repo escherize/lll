@@ -144,8 +144,9 @@ fn member_list(input: flags.CommandInput) -> Result<(), string> {
       withkeys.team_keys = m.teams.filter(|id| keys.get(id).is_some()).map(|id| keys.get(id).unwrap_or(""))
       items = items.append(withkeys)
     }
-    return print_json(models.MemberList { items }, "member list")
+    return print_list_json(items, whole_list(items.length()), "member list")
   }
+  if members.items.is_empty() { return say_empty("members") }
   for listed in members.items {
     // A bot shows what it can do now: within its owner's access (LLL-543).
     let (m, cap) = records.effective_access_in(listed, members.items)
@@ -466,8 +467,8 @@ fn member_password_error(name: string, e: string) -> string {
   let status = pb.classify(e).status
   if status == 403 || status == 401 || (status == 400 &&
   strings.Contains(pb.classify(e).message, "oldPassword")) {
-    return "member set-password is superuser-only and the configured token is not one
-set LLL_ADMIN_EMAIL/LLL_ADMIN_PASSWORD to this server's administrator credentials"
+    return pb.fail(pb.ErrorKind.Refused, "member set-password is superuser-only and the configured token is not one
+set LLL_ADMIN_EMAIL/LLL_ADMIN_PASSWORD to this server's administrator credentials")
   }
   f"setting {name}'s password: {e}"
 }
@@ -962,13 +963,13 @@ fn member_create_error(e: string) -> string {
   // 10 got nothing more). A validation failure carries field data, and a
   // gopb refusal (the bot- prefix) its own message; both pass through.
   if pb.classify(e).status == 400 && pb.classify(e).message == "Failed to create record." {
-    return "your token cannot add members: only a member with read-write access to every team, or administrator credentials ('lll member invite NAME --email E' with LLL_ADMIN_EMAIL/LLL_ADMIN_PASSWORD), can
-for your own agent, a read-write member runs 'lll bot bot-NAME' (a bot it owns); a read-only member cannot, so ask whoever invited you"
+    return pb.fail(pb.ErrorKind.Refused, "your token cannot add members: only a member with read-write access to every team, or administrator credentials ('lll member invite NAME --email E' with LLL_ADMIN_EMAIL/LLL_ADMIN_PASSWORD), can
+for your own agent, a read-write member runs 'lll bot bot-NAME' (a bot it owns); a read-only member cannot, so ask whoever invited you")
   }
   if pb.classify(e).status == 401 {
-    return "creating a member needs a member token: the one configured here is missing or was refused
+    return pb.fail(pb.ErrorKind.Auth, "creating a member needs a member token: the one configured here is missing or was refused
 administrator credentials (LLL_ADMIN_EMAIL/LLL_ADMIN_PASSWORD) do not authenticate member creation
-paths forward: 'lll login --create' makes a first member login with the admin credentials; 'lll member invite NAME --email EMAIL' creates the member from the admin side; 'lll token create NAME' mints an agent token for an existing member"
+paths forward: 'lll login --create' makes a first member login with the admin credentials; 'lll member invite NAME --email EMAIL' creates the member from the admin side; 'lll token create NAME' mints an agent token for an existing member")
   }
   e
 }
@@ -1267,7 +1268,7 @@ fn member_access_cmd(input: flags.CommandInput) -> Result<(), string> {
     let status = pb.classify(e).status
     if status == 400 || status == 403 || status == 404 {
       return Err(
-        "changing access needs administrator credentials: pass --admin-email and --admin-password, or set LLL_ADMIN_EMAIL/LLL_ADMIN_PASSWORD. A member or bot token cannot change anyone's access, its own included.",
+        pb.fail(pb.ErrorKind.Refused, "changing access needs administrator credentials: pass --admin-email and --admin-password, or set LLL_ADMIN_EMAIL/LLL_ADMIN_PASSWORD. A member or bot token cannot change anyone's access, its own included."),
       )
     }
     return Err(e)

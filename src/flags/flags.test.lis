@@ -1,3 +1,5 @@
+import "pb"
+
 // Unit cover for the shared flag parser, usage/section generators and the
 // completion token emitter — the three surfaces that used to be maintained
 // by hand in three places (TASK-127).
@@ -49,7 +51,7 @@ fn end_of_options_keeps_arity_required_flags_and_literal_values() {
   assert p.first() == "--help"
   assert parse(spec(), argv(["--"]), 3, false, "usage").is_ok()
   let assert Err(extra) = parse(spec(), argv(["--", "--json"]), 3, false, "usage")
-  assert extra == "unexpected argument: '--json'"
+  assert pb.plain(extra) == "unexpected argument: '--json'"
   assert parse(spec(), argv(["one", "--", "two"]), 3, true, "usage").is_err()
   let required = [Flag { name: "--name", value: true, required: true, .. }]
   assert parse(required, argv(["--", "--name"]), 3, true, "usage").is_err()
@@ -101,7 +103,9 @@ fn parse_repeats_accumulate_and_undeclared_repeats_are_refused() {
 #[test]
 fn parse_errors_on_unknown_flags() {
   let assert Err(msg) = parse(spec(), argv(["--nope"]), 3, false, "")
-  assert msg == "unknown flag: '--nope'"
+  assert pb.plain(msg) == "unknown flag: '--nope'"
+  // A bad command line exits 2 (LLL-645).
+  assert pb.exit_code(pb.classify(msg).kind) == 2
   // A bad flag after a good one is still an error.
   let assert Err(later) = parse(spec(), argv(["--json", "--nope"]), 3, false, "")
   assert later.contains("unknown flag: '--nope'")
@@ -110,10 +114,10 @@ fn parse_errors_on_unknown_flags() {
 #[test]
 fn parse_errors_on_a_missing_value() {
   let assert Err(msg) = parse(spec(), argv(["-t"]), 3, false, "")
-  assert msg == "-t requires a value"
+  assert pb.plain(msg) == "-t requires a value"
   // The error names the spelling the user typed, not the canonical name.
   let assert Err(alias) = parse(spec(), argv(["--description"]), 3, false, "")
-  assert alias == "--description requires a value"
+  assert pb.plain(alias) == "--description requires a value"
 }
 
 #[test]
@@ -123,14 +127,14 @@ fn parse_appends_the_usage_line_to_unknown_flag_errors() {
   assert msg.contains("usage: lll issue list")
   // No usage line given: the message stays bare.
   let assert Err(bare) = parse(spec(), argv(["--nope"]), 3, false, "")
-  assert bare == "unknown flag: '--nope'"
+  assert pb.plain(bare) == "unknown flag: '--nope'"
 }
 
 #[test]
 fn parse_errors_when_a_required_flag_is_missing() {
   let required = [Flag { name: "-t", value: true, hint: "\"title\"", required: true, help: "title", .. }]
   let assert Err(msg) = parse(required, argv([]), 3, false, "lll issue create -t \"title\"")
-  assert msg == "usage: lll issue create -t \"title\""
+  assert pb.plain(msg) == "usage: lll issue create -t \"title\""
   // A bad flag is reported before the missing requirement.
   let assert Err(bad) = parse(required, argv(["--nope"]), 3, false, "usage")
   assert bad.contains("unknown flag")
@@ -144,7 +148,7 @@ fn parse_collects_a_single_positional_when_allowed() {
   assert p.first() == "ENG-6"
   // A second positional is rejected, naming the stray argument.
   let assert Err(msg) = parse(spec(), argv(["ENG-6", "ENG-7"]), 3, true, "")
-  assert msg == "unexpected argument: 'ENG-7'"
+  assert pb.plain(msg) == "unexpected argument: 'ENG-7'"
 }
 
 #[test]
@@ -152,13 +156,13 @@ fn parse_rejects_positionals_when_disallowed() {
   let assert Err(msg) = parse(spec(), argv(["stray"]), 3, false, "usage line")
   // The flag table rides along (fleet task 8): the usage line alone was
   // the message agents rated least helpful.
-  assert msg.starts_with("unexpected argument: 'stray'\nusage: usage line\nFlags:")
+  assert pb.plain(msg).starts_with("unexpected argument: 'stray'\nusage: usage line\nFlags:")
 }
 
 #[test]
 fn parse_treats_a_bare_dash_as_an_unknown_flag() {
   let assert Err(msg) = parse(spec(), argv(["-"]), 3, true, "")
-  assert msg == "unknown flag: '-'"
+  assert pb.plain(msg) == "unknown flag: '-'"
 }
 
 #[test]
@@ -213,9 +217,9 @@ fn parse_accepts_an_empty_inline_value() {
 fn parse_rejects_an_inline_value_on_a_boolean_flag() {
   // `--json=1` is a mistake, not a truthy string, so it must not pass silently.
   let assert Err(msg) = parse(spec(), argv(["--json=1"]), 3, false, "")
-  assert msg == "--json takes no value"
+  assert pb.plain(msg) == "--json takes no value"
   let assert Err(zero) = parse(spec(), argv(["--json=0"]), 3, false, "")
-  assert zero == "--json takes no value"
+  assert pb.plain(zero) == "--json takes no value"
 }
 
 #[test]
@@ -432,7 +436,7 @@ fn parse_n_keeps_two_positionals_in_order_around_a_flag() {
   assert p.given("--json")
   // A third bare word is still refused, so a stray token cannot become a body.
   let assert Err(msg) = parse_n(spec(), argv(["DEMO-1", "the body", "extra"]), 3, 2, "")
-  assert msg == "unexpected argument: 'extra'"
+  assert pb.plain(msg) == "unexpected argument: 'extra'"
   // Absent second positional reads as empty, not as an error.
   let assert Ok(q) = parse_n(spec(), argv(["DEMO-1"]), 3, 2, "")
   assert q.nth(1) == ""

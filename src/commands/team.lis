@@ -43,7 +43,7 @@ pub fn team_commands() -> Slice<flags.Command> {
     flags.Command {
       name: "view",
       summary: "show a team, its accent and its issue count",
-      spec: [],
+      spec: [flags.Flag { name: "--json", help: "print the team record as JSON, with its issue count as issues", .. }],
       positional: "KEY",
       run: team_view,
       ..
@@ -127,7 +127,8 @@ fn team_list(input: flags.CommandInput) -> Result<(), string> {
   if !p.given("--archived") {
     teams.items = teams.items.filter(|t| !t.archived)
   }
-  if p.given("--json") { return print_json(teams, "team list") }
+  if p.given("--json") { return print_list_json(teams.items, whole_list(teams.items.length()), "team list") }
+  if teams.items.is_empty() { return say_empty("teams") }
   for t in teams.items {
     let mut mark = ""
     if t.archived { mark = "\t(archived)" }
@@ -161,6 +162,7 @@ fn team_create_spec() -> Slice<flags.Flag> {
       help: "team name",
       ..
     },
+    flags.Flag { name: "--json", help: "print the created team as JSON", .. },
   ]
 }
 
@@ -194,6 +196,7 @@ fn team_create(input: flags.CommandInput) -> Result<(), string> {
   let name = p.one("-n")
 
   let created = create_team(key, name)?
+  if p.given("--json") { return print_json(created, "team") }
   fmt.Println(f"Created team {created.key}: {created.name}")
   Ok(())
 }
@@ -614,6 +617,12 @@ fn team_view(input: flags.CommandInput) -> Result<(), string> {
   }
 
   let issues_held = issue_count(f"team={query.quote(t.id)}")?
+  if input.parsed.given("--json") {
+    let mut fields = Map.new<string, json.RawMessage>()
+    if let Err(e) = json.Unmarshal(encode_json(t, "team")?, &fields) { return Err(f"decoding team: {e}") }
+    fields["issues"] = encode_json(issues_held, "team")?
+    return print_json(fields, "team")
+  }
 
   fmt.Println(f"Key:    {t.key}")
   fmt.Println(f"Name:   {t.name}")

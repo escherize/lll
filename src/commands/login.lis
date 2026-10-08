@@ -333,7 +333,10 @@ Someone else deployed it? Ask them for 'lll member invite <name> --email <you>'.
 
 #[json]
 struct WhoamiIdentity {
+  id: string,
   name: string,
+  // "person" or "bot" for a member; "" for an administrator (LLL-407).
+  kind: string,
   email: string,
   #[json("collectionName")]
   collection: string,
@@ -368,6 +371,22 @@ fn access_line(me: WhoamiIdentity, body: string) -> Result<Option<string>, strin
   Ok(Some(f"{describe_access(eff.scope, eff.mode, keys)} (capped by its owner, {owner.name})"))
 }
 
+/// `lll whoami --json` (LLL-645): the facts the text prints, by name.
+/// `access` is the text's access line, "" when the server reports none.
+#[json]
+struct WhoamiJson {
+  id: string,
+  name: string,
+  email: string,
+  kind: string,
+  server: string,
+  team: string,
+  token_source: string,
+  scope: string,
+  mode: string,
+  access: string,
+}
+
 /// The refusal for an argument `lll whoami` does not take. A `--team` here is
 /// a guess about how context works (LLL-493, fleet case 05): the answer names
 /// the bare invocation that DOES report context, and the house one-command
@@ -398,7 +417,9 @@ pub fn whoami(args: Slice<string>) -> Result<(), string> {
         "lll whoami - show which member or administrator, server and team this machine is acting as
 
 Usage:
-  lll whoami
+  lll whoami [--json]
+
+--json prints the same facts as one JSON object.
 
 Confirms the stored token against the server, including administrator tokens.
 'lll config list' shows where each value came from; 'lll login' replaces the
@@ -406,8 +427,10 @@ token with a member session, and 'lll bot bot-NAME' provisions a bot identity.",
       )
       return Ok(())
     }
-    return Err(whoami_arg_error(flag, args))
+    if flag != "--json" { return Err(whoami_arg_error(flag, args)) }
+    if let Some(extra) = args.get(3) { return Err(whoami_arg_error(extra, args)) }
   }
+  let json_mode = args.get(2) == Some("--json")
   let (cfg, src) = config.load_traced()?
   // NOT auth-refresh, which this used to POST. A refresh is refused for every
   // non-refreshable token - and `lll token create` mints exactly those, the
@@ -441,6 +464,14 @@ token with a member session, and 'lll bot bot-NAME' provisions a bot identity.",
   }
   let administrator = me.collection == "_superusers"
   let name = if administrator { "superuser" } else { me.name }
+  if json_mode {
+    let kind = if administrator { "administrator" } else { me.kind }
+    let access = access_line(me, body)?.unwrap_or("")
+    return print_json(WhoamiJson {
+      id: me.id, name, email: me.email, kind, server: cfg.url, team: cfg.team,
+      token_source: src.token, scope: me.scope, mode: me.mode, access,
+    }, "whoami")
+  }
   fmt.Println(f"{name} <{me.email}>")
   fmt.Println(f"server  {cfg.url}")
   let team = if cfg.team == "" { "(none — run 'lll attach')" } else { cfg.team }

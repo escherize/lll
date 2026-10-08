@@ -290,6 +290,9 @@ is required before an older deployment can accept attachments.
 
 Use `--help` for command syntax. Issue lists and views support `--json`;
 scalar reads such as `branch-name` print a single value for shell composition.
+Scripts can rely on the exit codes and the `--json` fields listed in the
+[CLI contract](docs/cli-contract.md): 2 usage, 3 not found, 4 refused,
+5 nothing to do, 6 not authenticated.
 
 ```sh
 lll issue create -t "Fix login" --priority 1 --assignee bryan --label bug

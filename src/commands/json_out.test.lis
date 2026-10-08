@@ -1,0 +1,56 @@
+import "go:encoding/json"
+
+import "models"
+
+// Unit cover for the 1.0 JSON contract (LLL-645, docs/cli-contract.md): the
+// list envelope's page arithmetic, RFC3339 timestamps at any depth, and the
+// issue object's key and claim.
+
+#[test]
+fn a_whole_list_is_one_page_and_an_empty_one_has_none() {
+  let three = whole_list(3)
+  assert three.page == 1 && three.per_page == 3 && three.total_items == 3 && three.total_pages == 1
+  let none = whole_list(0)
+  assert none.total_items == 0 && none.total_pages == 0
+  let paged = page_of_total(2, 2, 5)
+  assert paged.page == 2 && paged.per_page == 2 && paged.total_items == 5 && paged.total_pages == 3
+}
+
+#[test]
+fn timestamps_become_rfc3339_at_any_depth_and_nothing_else_moves() {
+  let raw = "{\"created\":\"2026-10-08 03:02:11.982Z\",\"title\":\"2026-10-08 03:02:11.982Z\",\"expand\":{\"team\":{\"updated\":\"2026-10-08 03:02:11.900Z\"}},\"items\":[{\"expires\":\"2026-10-15 00:00:00.000Z\"}],\"note\":null,\"empty\":\"\"}"
+  let out = contract_json(raw.bytes() as json.RawMessage, 0) as string
+  assert out.contains("\"created\":\"2026-10-08T03:02:11.982Z\"")
+  assert out.contains("\"updated\":\"2026-10-08T03:02:11.900Z\"")
+  assert out.contains("\"expires\":\"2026-10-15T00:00:00.000Z\"")
+  // A title that looks like a stamp is content, not a timestamp field.
+  assert out.contains("\"title\":\"2026-10-08 03:02:11.982Z\"")
+  assert out.contains("\"note\":null")
+  assert out.contains("\"empty\":\"\"")
+  assert contract_json("null".bytes() as json.RawMessage, 0) as string == "null"
+  assert contract_json("[]".bytes() as json.RawMessage, 0) as string == "[]"
+}
+
+#[test]
+fn an_issue_carries_its_key_and_claim() {
+  let record = "{\"id\":\"i1\",\"number\":12,\"title\":\"t\",\"created\":\"2026-10-08 03:02:11.982Z\",\"expand\":{\"team\":{\"key\":\"ENG\"}}}"
+  let unclaimed = issue_json(record.bytes() as json.RawMessage, None).unwrap_or(Map.new<string, json.RawMessage>())
+  assert unclaimed.get("key").map_or("", |v| v as string) == "\"ENG-12\""
+  assert unclaimed.get("claim").map_or("", |v| v as string) == "null"
+  assert unclaimed.get("created").map_or("", |v| v as string) == "\"2026-10-08T03:02:11.982Z\""
+  let held = models.Claim {
+    id: "c1",
+    issue: "i1",
+    member: "m1",
+    agent: "wt-a",
+    created: "2026-10-08 03:00:00.000Z",
+    updated: "2026-10-08 04:00:00.000Z",
+    expand: models.ClaimExpand { member: models.Member { name: "Alpha", .. } },
+  }
+  let claimed = issue_json(record.bytes() as json.RawMessage, Some(held)).unwrap_or(Map.new<string, json.RawMessage>())
+  let claim = claimed.get("claim").map_or("", |v| v as string)
+  assert claim.contains("\"holder\":\"Alpha\"")
+  assert claim.contains("\"agent\":\"wt-a\"")
+  assert claim.contains("\"claimed\":\"2026-10-08T03:00:00.000Z\"")
+  assert claim.contains("\"renewed\":\"2026-10-08T04:00:00.000Z\"")
+}

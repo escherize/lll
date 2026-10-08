@@ -130,7 +130,7 @@ fn issue_create_spec() -> Slice<flags.Flag> {
     },
     flags.Flag {
       name: "--json",
-      help: "raw record JSON (team, assignee, labels, project\nexpanded), pipe-friendly",
+      help: "the created issue as JSON: the record with key and claim\n(docs/cli-contract.md)",
       ..,
     },
     flags.Flag {
@@ -184,7 +184,7 @@ fn issue_list_spec() -> Slice<flags.Flag> {
     },
     flags.Flag {
       name: "--json",
-      help: "raw record JSON (team, assignee, labels, project\nexpanded), pipe-friendly",
+      help: "the list envelope {items, page, perPage, totalItems, totalPages};\neach item the issue record with key and claim (docs/cli-contract.md)",
       ..,
     },
     flags.Flag { name: "--ready", help: "only open issues whose blockers are all done (LLL-175): what an agent can pick up now", .. },
@@ -196,7 +196,7 @@ fn issue_view_spec() -> Slice<flags.Flag> {
   flags.with_team([
     flags.Flag {
       name: "--json",
-      help: "issue JSON with expanded relations, comments (oldest first,\nauthor expanded), and claim (member expanded, or null)",
+      help: "the issue as JSON: the record with key, claim (null when unclaimed),\nexpanded relations, comments (oldest first), docs and findings",
       ..,
     },
     flags.Flag {
@@ -299,6 +299,7 @@ fn issue_update_spec() -> Slice<flags.Flag> {
       help: "self-asserted session label, for agents sharing one member token\n(default: LLL_AGENT)",
       ..,
     },
+    flags.Flag { name: "--json", help: "print the issue afterwards as JSON: the object 'lll issue list --json' prints per item", .. },
   ]...))
 }
 
@@ -309,6 +310,7 @@ fn issue_delete_spec() -> Slice<flags.Flag> {
 fn issue_claim_spec() -> Slice<flags.Flag> {
   flags.with_team([
     flags.Flag { name: "--renew", help: "restart the expiry clock on a claim you hold (a hold unrenewed for 24h is released)", .. },
+    flags.Flag { name: "--json", help: "print the issue afterwards as JSON: the object 'lll issue list --json' prints per item", .. },
     flags.Flag {
       name: "--agent",
       value: true,
@@ -351,6 +353,7 @@ fn issue_comment_spec() -> Slice<flags.Flag> {
       ..,
     },
     flags.Flag { name: "--force", help: "with edit/delete: change a comment that is not yours", .. },
+    flags.Flag { name: "--json", help: "without a body: print the comments as a JSON list", .. },
     flags.Flag {
       name: "--agent",
       value: true,
@@ -508,7 +511,7 @@ pub fn issue_commands() -> Slice<flags.Command> {
     flags.Command {
       name: "close",
       summary: "set state done; retain any claim",
-      spec: flags.with_team([]),
+      spec: flags.with_team([flags.Flag { name: "--json", help: "print the issue afterwards as JSON: the object 'lll issue list --json' prints per item", .. }]),
       positional: "[KEY-123]",
       run: close_issue,
       ..
@@ -786,8 +789,7 @@ fn create(input: flags.CommandInput) -> Result<(), string> {
   // PocketBase expands the create response itself. A later read must not
   // turn a successful write into an apparent failure and invite retries.
   if p.given("--json") {
-    fmt.Println(body)
-    return Ok(())
+    return print_issue_json(body, None)
   }
   let mut reuse = CreationReuse { .. }
   if let Err(e) = json.Unmarshal(body.bytes(), &reuse) {
@@ -869,23 +871,25 @@ fn list(input: flags.CommandInput) -> Result<(), string> {
   // one page of the raw numeric order holds the wrong issues, not merely the
   // right ones in the wrong order, and urgent work past the page falls off.
   let by_priority = strings.TrimPrefix(sort_spec, "-") == "priority"
-  let mut items: Slice<models.Issue> = []
-  if by_priority {
-    let all = fetch_all_issues(f"&sort=priority,id{tail}")?
-    items = page_of(rank_by_priority(all, strings.HasPrefix(sort_spec, "-")), page, per_page)
-  } else {
-    let path = f"/api/collections/issues/records?perPage={per_page}{tail}&sort={url.QueryEscape(sort + ",id")}&page={page}"
-    let body = pb.get(path)?
-    if json_mode && !ready_only && !blocked_only {
-      fmt.Println(body)
-      return Ok(())
-    }
-    let mut issues = models.IssueList { .. }
-    if let Err(e) = json.Unmarshal(body.bytes(), &issues) {
-      return Err(f"decoding issues: {e}")
-    }
-    items = issues.items
+  // LLL-673: --ready and --blocked are decided here, after the fetch, so like
+  // priority order they need the WHOLE result: filtering one page dropped
+  // ready issues past it and reported the page's count as the total.
+  let mode = if by_priority || ready_only || blocked_only { ListMode.Whole } else { ListMode.Page }
+  let (fetched, raw_records, served) = match mode {
+    ListMode.Whole => {
+      let order = if by_priority { "&sort=priority,id" } else { f"&sort={url.QueryEscape(sort + ",id")}" }
+      let (all, raw) = fetch_all_listed(f"{order}{tail}")?
+      let ordered = if by_priority { rank_by_priority(all, strings.HasPrefix(sort_spec, "-")) } else { all }
+      (ordered, raw, page_of_total(page, per_page, 0))
+    },
+    ListMode.Page => {
+      let path = f"/api/collections/issues/records?perPage={per_page}{tail}&sort={url.QueryEscape(sort + ",id")}&page={page}"
+      let listed = fetch_listed_page(path)?
+      (listed.issues, listed.raw, page_of_total(page, per_page, listed.total_items))
+    },
   }
+  let mut items = fetched
+  let mut at = served
   // LLL-175: --ready is what an agent can pick up now - open, and every
   // blocker done or cancelled; --blocked is the complement with at least
   // one open blocker. Decided here, after the fetch, because PocketBase
@@ -896,13 +900,18 @@ fn list(input: flags.CommandInput) -> Result<(), string> {
   if blocked_only {
     items = items.filter(|i| !open_blockers(i).is_empty())
   }
+  if let ListMode.Whole = mode {
+    at = page_of_total(page, per_page, items.length())
+    items = page_of(items, page, per_page)
+  }
+  // LLL-651: the claim rides the list, so automation need not view each card.
+  let held = if items.is_empty() { Map.new<string, models.Claim>() } else { claims_by_issue(team_id)? }
   if json_mode {
-    let out = match json.Marshal(models.IssueList { items, total_items: items.length() }) {
-      Ok(b) => b as string,
-      Err(e) => return Err(f"encoding issues: {e}"),
+    let mut out: Slice<Map<string, json.RawMessage>> = []
+    for i in items {
+      out = out.append(issue_json(raw_records.get(i.id).unwrap_or("null".bytes() as json.RawMessage), held.get(i.id))?)
     }
-    fmt.Println(out)
-    return Ok(())
+    return print_list_json(out, at, "issues")
   }
   // LLL-484 (fleet case 01): --search matches TITLES, and seven of ten fresh
   // workers read the bare "no issues" as "the term is nowhere on the board"
@@ -914,7 +923,79 @@ fn list(input: flags.CommandInput) -> Result<(), string> {
     let _ = fmt.Fprintln(os.Stderr, empty_search_hint(filters.search))
     return Ok(())
   }
-  print_issue_table(items)
+  print_issue_table(items, held)
+}
+
+/// How `issue list` reads: one server page, or every page when the order or
+/// the filter is decided here and a page of the server's answer would hold
+/// the wrong issues (LLL-382 priority, LLL-673 ready and blocked).
+enum ListMode {
+  Page,
+  Whole,
+}
+
+/// One page of issues, decoded for filtering and kept raw for --json, which
+/// prints the server's record (plus key and claim), not the decoded subset.
+struct ListedPage {
+  issues: Slice<models.Issue>,
+  raw: Map<string, json.RawMessage>,
+  total_items: int,
+  total_pages: int,
+}
+
+#[json]
+struct RawIssuePage {
+  items: Slice<json.RawMessage>,
+  #[json("totalItems")]
+  total_items: int,
+  #[json("totalPages")]
+  total_pages: int,
+}
+
+fn fetch_listed_page(path: string) -> Result<ListedPage, string> {
+  let mut page = RawIssuePage { .. }
+  pb.fetch(path, "issues", &page)?
+  let mut issues: Slice<models.Issue> = []
+  let mut by_id = Map.new<string, json.RawMessage>()
+  for record in page.items {
+    let mut issue = models.Issue { .. }
+    if let Err(e) = json.Unmarshal(record, &issue) { return Err(f"decoding issues: {e}") }
+    issues = issues.append(issue)
+    by_id[issue.id] = record
+  }
+  Ok(ListedPage { issues, raw: by_id, total_items: page.total_items, total_pages: page.total_pages })
+}
+
+/// Every page of an issues query, decoded and raw (fetch_all_issues, for a
+/// list that prints records).
+fn fetch_all_listed(tail: string) -> Result<(Slice<models.Issue>, Map<string, json.RawMessage>), string> {
+  let mut issues: Slice<models.Issue> = []
+  let mut by_id = Map.new<string, json.RawMessage>()
+  let mut page = 1
+  loop {
+    let listed = fetch_listed_page(f"/api/collections/issues/records?perPage=500&page={page}{tail}")?
+    issues = issues.append(listed.issues...)
+    for (id, record) in listed.raw { by_id[id] = record }
+    if page >= listed.total_pages || listed.issues.is_empty() { break }
+    page += 1
+  }
+  Ok((issues, by_id))
+}
+
+/// Every claim on the team's issues (every visible team's when `team_id` is
+/// ""), by issue id. Claims are one per issue in progress, so this is small.
+fn claims_by_issue(team_id: string) -> Result<Map<string, models.Claim>, string> {
+  let filter = if team_id == "" { "" } else { f"&filter={url.QueryEscape(f"issue.team={query.quote(team_id)}")}" }
+  let mut out = Map.new<string, models.Claim>()
+  let mut page = 1
+  loop {
+    let mut list = models.ClaimList { .. }
+    pb.fetch(f"/api/collections/claims/records?expand=member&sort=id&perPage=500&page={page}{filter}", "claims", &list)?
+    for c in list.items { out[c.issue] = c }
+    if page >= list.total_pages || list.items.is_empty() { break }
+    page += 1
+  }
+  Ok(out)
 }
 
 /// Normalize an inclusive bound to the server's millisecond UTC stamps.
@@ -968,8 +1049,10 @@ fn unchanged_since_stamp(given: string) -> Result<string, string> {
 }
 
 /// The standard issue table (ID, state, priority, title, assignee, age),
-/// shared by `issue list` and `project view`.
-fn print_issue_table(issues: Slice<models.Issue>) -> Result<(), string> {
+/// shared by `issue list` and `project view`. `held` is the claims by issue
+/// id: a claimed issue names its holder, agent label and claim age where the
+/// assignee goes (LLL-651).
+fn print_issue_table(issues: Slice<models.Issue>, held: Map<string, models.Claim>) -> Result<(), string> {
   // An empty board printed zero bytes, which a newcomer cannot tell apart
   // from a silently broken read — the exact doubt the not-logged-in refusal
   // warns about, landing one command later. Says so on STDERR: stdout stays
@@ -982,7 +1065,11 @@ fn print_issue_table(issues: Slice<models.Issue>) -> Result<(), string> {
   let mut rows: Slice<Slice<string>> = []
   for item in issues {
     let key = item.expand.team.key
-    let mut row = [f"{key}-{item.number}", f"{display.glyph(item.state)} {item.state}", display.priority_marker(item.priority), item.title, display.member_name(item.assignee, item.expand.assignee.name, ""), display.relative(item.updated)]
+    let assignee = match held.get(item.id) {
+      Some(c) => f"{display.byline(display.member_name(c.member, c.expand.member.name, ""), c.agent)}, claimed {display.relative(c.updated)}",
+      None => display.member_name(item.assignee, item.expand.assignee.name, ""),
+    }
+    let mut row = [f"{key}-{item.number}", f"{display.glyph(item.state)} {item.state}", display.priority_marker(item.priority), item.title, assignee, display.relative(item.updated)]
     if item.emoji != "" { row = row.append(item.emoji) }
     rows = rows.append(row)
   }
@@ -1012,10 +1099,11 @@ fn begin_issue_view_reads(
     findings: Channel.buffered<Result<Slice<models.Doc>, string>>(1),
     comments: Channel.buffered<Result<Slice<models.Comment>, string>>(1),
   }
+  // Every mode shows the claim; --raw too since LLL-638.
+  task {
+    let _ = reads.claim.send(fetch_claim(full.id))
+  }
   if json_mode || !raw_mode {
-    task {
-      let _ = reads.claim.send(fetch_claim(full.id))
-    }
     task {
       let _ = reads.docs.send(fetch_issue_docs(full.id))
     }
@@ -1084,9 +1172,19 @@ fn view(input: flags.CommandInput) -> Result<(), string> {
   if raw_mode {
     fmt.Println(f"# {full.expand.team.key}-{full.number}: {full.title}")
     let source = provenance.fields(full)
-    if !source.is_empty() {
+    // LLL-638: an agent reading --raw must see who holds the issue. Absolute
+    // times, like the comments below: --raw output is stored and re-read.
+    let claim_line = match await_issue_view(reads.claim, "claim")? {
+      Some(held) => {
+        let holder = display.byline(display.member_name(held.member, held.expand.member.name, "an unknown member"), held.agent)
+        Some(f"- **Claimed:** {holder} (since {display.absolute(held.created)}, renewed {display.absolute(held.updated)})")
+      },
+      None => None,
+    }
+    if !source.is_empty() || claim_line.is_some() {
       fmt.Println("")
       for field in source { fmt.Println(f"- **{field.label}:** {field.value}") }
+      if let Some(line) = claim_line { fmt.Println(line) }
     }
     if full.description != "" {
       fmt.Println("")
@@ -1234,26 +1332,29 @@ fn issue_view_json(
   docs: Slice<models.Doc>,
   findings: Slice<models.Doc>,
 ) -> Result<string, string> {
-  let mut fields = Map.new<string, json.RawMessage>()
-  if let Err(e) = json.Unmarshal(record.bytes(), &fields) { return Err(f"decoding issue JSON: {e}") }
+  // The list's issue object (key, claim, RFC3339 timestamps) plus what only
+  // the view carries, so one parser reads every issue --json (LLL-645).
+  let mut fields = issue_json(record.bytes() as json.RawMessage, claim)?.clone()
   let comments_json = match json.Marshal(comments) {
-    Ok(data) => data as json.RawMessage,
+    Ok(data) => contract_json(data as json.RawMessage, 0),
     Err(e) => return Err(f"encoding comments: {e}"),
   }
   fields["comments"] = if comments.is_empty() { "[]".bytes() as json.RawMessage } else { comments_json }
-  fields["docs"] = doc_context_json(docs)?
-  fields["findings"] = doc_context_json(findings)?
-  fields["claim"] = match claim {
-    Some(held) => match json.Marshal(held) {
-      Ok(data) => data as json.RawMessage,
-      Err(e) => return Err(f"encoding claim: {e}"),
-    },
-    None => "null".bytes() as json.RawMessage,
-  }
+  fields["docs"] = contract_json(doc_context_json(docs)?, 0)
+  fields["findings"] = contract_json(doc_context_json(findings)?, 0)
   match json.Marshal(fields) {
     Ok(data) => Ok(data as string),
     Err(e) => Err(f"encoding issue JSON: {e}"),
   }
+}
+
+/// `--json` on the verbs that change an issue (update, close, start, claim):
+/// the issue as it is after the write, in the list's per-item shape.
+fn print_issue_after(key: string) -> Result<(), string> {
+  let record = records.fetch_issue_record(key)?
+  let mut full = models.Issue { .. }
+  if let Err(e) = json.Unmarshal(record.bytes(), &full) { return Err(f"decoding issue: {e}") }
+  print_issue_json(record, fetch_claim(full.id)?)
 }
 
 fn doc_context_json(docs: Slice<models.Doc>) -> Result<json.RawMessage, string> {
@@ -1486,6 +1587,7 @@ fn update(input: flags.CommandInput) -> Result<(), string> {
       return Err(e)
     }
   }
+  if p.given("--json") { return print_issue_after(key) }
   fmt.Println(f"Updated {issue.expand.team.key}-{issue.number}: {strings.Join(changed, ", ")}{released}")
   Ok(())
 }
@@ -1500,6 +1602,7 @@ fn close_issue(input: flags.CommandInput) -> Result<(), string> {
     f"/api/collections/issues/records/{issue.id}",
     "{\"state\":\"done\"}",
   )?
+  if input.parsed.given("--json") { return print_issue_after(f"{issue.expand.team.key}-{issue.number}") }
   fmt.Println(f"Closed {issue.expand.team.key}-{issue.number} ● done")
   if let Some(held) = claim {
     let holder = display.member_name(held.member, held.expand.member.name, "an unknown member")
@@ -1521,6 +1624,7 @@ fn issue_start_spec() -> Slice<flags.Flag> {
       help: "also git switch -c key-number-slug in the current repo and\nrecord the work site (branch, host, path) on the issue",
       ..,
     },
+    flags.Flag { name: "--json", help: "print the issue afterwards as JSON: the object 'lll issue list --json' prints per item", .. },
   ])
 }
 
@@ -1543,11 +1647,13 @@ fn start(input: flags.CommandInput) -> Result<(), string> {
       Ok(created) => created,
       Err(reason) => return Err(f"{reason}\nIssue {key} state unchanged; branch setup failed."),
     }
-    fmt.Println(f"Branch: {branch}")
+    // Under --json stdout is the issue alone; the Git lines move to stderr.
+    let out = if p.given("--json") { os.Stderr } else { os.Stdout }
+    fmt.Fprintln(out, f"Branch: {branch}")
     if created {
-      fmt.Println(f"Created and switched to branch '{branch}'")
+      fmt.Fprintln(out, f"Created and switched to branch '{branch}'")
     } else {
-      fmt.Println(f"Switched to existing branch '{branch}'")
+      fmt.Fprintln(out, f"Switched to existing branch '{branch}'")
     }
   }
   if let Err(reason) = pb.patch(
@@ -1562,12 +1668,13 @@ fn start(input: flags.CommandInput) -> Result<(), string> {
     }
     return Err(reason)
   }
-  fmt.Println(f"Started {key}: {issue.title} (◐ in-progress)")
+  if !p.given("--json") { fmt.Println(f"Started {key}: {issue.title} (◐ in-progress)") }
   if with_branch {
     if let Err(reason) = record_work_site(issue, branch) {
       return Err(f"{key} is in-progress and Git is on '{branch}', but recording the work site could not be confirmed: {reason}\nInspect with 'lll issue view {key}' before retrying.")
     }
   }
+  if p.given("--json") { return print_issue_after(key) }
   Ok(())
 }
 
@@ -1696,6 +1803,7 @@ fn claim(input: flags.CommandInput) -> Result<(), string> {
       return Err(pb.fail(pb.ErrorKind.Refused, f"{key} is not claimed; 'lll issue claim {key}' takes it"))
     };
     let renewed = claims.renew(issue.id, held.id, agent).map_err(|e| f"{key}: {e}")?
+    if input.parsed.given("--json") { return print_issue_after(key) }
     fmt.Println(f"Renewed {key} for {display.byline(renewed.member_name, renewed.agent)}; the expiry clock restarts now (held since {display.relative(renewed.created)})")
     return Ok(())
   }
@@ -1705,6 +1813,7 @@ fn claim(input: flags.CommandInput) -> Result<(), string> {
       f"{key}: {e} — {held_elsewhere_hint(key)}"
     } else { e }
   })?
+  if input.parsed.given("--json") { return print_issue_after(key) }
   if result.already_owned {
     fmt.Println(f"Claimed {key} for {display.byline(result.member_name, result.agent)} (already yours since {display.relative(result.created)})")
   } else {
@@ -1787,10 +1896,8 @@ fn comment(input: flags.CommandInput) -> Result<(), string> {
 
   if !body_set {
     let comments = records.fetch_comments(issue.id)?
-    if comments.is_empty() {
-      fmt.Println("No comments.")
-      return Ok(())
-    }
+    if p.given("--json") { return print_list_json(comments, whole_list(comments.length()), "comments") }
+    if comments.is_empty() { return say_empty("comments") }
     print_comments(comments)
     // Fleet tasks 4 and 5: every waiting agent re-read this list five times
     // ten seconds apart. The verb that blocks instead is named where the
@@ -2347,7 +2454,7 @@ fn issue_next_spec() -> Slice<flags.Flag> {
     },
     flags.Flag {
       name: "--json",
-      help: "print the chosen issue's full record instead of just its key;\nwith --claim, the 'lll issue view --json' object: the record with\nexpand.blocked_by (blockers), comments, claim, docs and findings",
+      help: "print the chosen issue as the 'lll issue view --json' object instead\nof just its key: the record with key, claim, expand.blocked_by (blockers),\ncomments, docs and findings",
       ..,
     },
     flags.Flag {
@@ -2407,9 +2514,10 @@ fn issue_next(input: flags.CommandInput) -> Result<(), string> {
     })?
     fmt.Fprintln(os.Stderr, f"Claimed {key} for {result.member_name}")
   }
-  if p.given("--json") && p.given("--claim") {
-    // One packet replaces claim-then-view: re-read after the claim so the
-    // record carries the new assignee, then add what view --json adds.
+  if p.given("--json") {
+    // One packet replaces next-then-view: the 'lll issue view --json' object,
+    // read after any claim so the record carries the new assignee. One shape
+    // with or without --claim (LLL-645).
     let record = records.fetch_issue_record(key)?
     let mut full = models.Issue { .. }
     if let Err(e) = json.Unmarshal(record.bytes(), &full) {
@@ -2423,14 +2531,6 @@ fn issue_next(input: flags.CommandInput) -> Result<(), string> {
       await_issue_view(reads.docs, "docs")?,
       await_issue_view(reads.findings, "findings")?,
     )?)
-    return Ok(())
-  }
-  if p.given("--json") {
-    let out = match json.Marshal(best) {
-      Ok(b) => b as string,
-      Err(e) => return Err(f"encoding issue: {e}"),
-    }
-    fmt.Println(out)
     return Ok(())
   }
   fmt.Println(key)

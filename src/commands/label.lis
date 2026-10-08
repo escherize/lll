@@ -71,7 +71,8 @@ fn label_list(input: flags.CommandInput) -> Result<(), string> {
   // to one team (TASK-173), so the unscoped list is an admin's view, not a
   // working one.
   let labels = models.LabelList { items: records.fetch_labels(configured_team_id()?)? }
-  if p.given("--json") { return print_json(labels, "label list") }
+  if p.given("--json") { return print_list_json(labels.items, whole_list(labels.items.length()), "label list") }
+  if labels.items.is_empty() { return say_empty("labels") }
   for l in labels.items {
     let mut team = l.expand.team.key
     if team == "" { team = "workspace" }
@@ -89,6 +90,7 @@ fn label_create_spec() -> Slice<flags.Flag> {
     flags.Flag { name: "-n", alias: "--name", value: true, hint: "\"name\"", help: "label name", .. },
     flags.Flag { name: "-c", alias: "--color", value: true, hint: "\"#5e6ad2\"", help: "hex color for the label", .. },
     flags.Flag { name: "--team", value: true, hint: "KEY", help: "team key the label belongs to (defaults to LLL_TEAM)", .. },
+    flags.Flag { name: "--json", help: "print the created label record as JSON", .. },
   ])
 }
 
@@ -150,6 +152,10 @@ fn label_create(input: flags.CommandInput) -> Result<(), string> {
   let mut created = models.Label { .. }
   if let Err(e) = json.Unmarshal(body.bytes(), &created) {
     return Err(f"decoding created label: {e}")
+  }
+  if p.given("--json") {
+    fmt.Println(contract_json(body.bytes() as json.RawMessage, 0) as string)
+    return Ok(())
   }
   fmt.Println(f"Created label {created.name}")
   Ok(())

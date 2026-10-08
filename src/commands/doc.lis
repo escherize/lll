@@ -242,6 +242,7 @@ fn doc_new_spec() -> Slice<flags.Flag> {
       help: "comma-separated file/directory paths the doc is about, e.g.\nsrc/pb, pb/pb_migrations ('lll finding near' matches by them)",
       ..,
     },
+    flags.Flag { name: "--json", help: "print the created doc record as JSON", .. },
   ])
 }
 
@@ -402,6 +403,10 @@ fn create_doc(p: flags.Parsed, default_kind: string, slug: string) -> Result<(),
   if let Err(e) = json.Unmarshal(resp.bytes(), &created) {
     return Err(f"decoding created doc: {e}")
   }
+  if p.given("--json") {
+    fmt.Println(contract_json(resp.bytes() as json.RawMessage, 0) as string)
+    return Ok(())
+  }
   fmt.Println(f"Created doc {created.slug}")
   Ok(())
 }
@@ -463,7 +468,8 @@ fn doc_list(input: flags.CommandInput) -> Result<(), string> {
   }
   if limit > 0 && items.length() > limit { items = items[..limit] }
   let docs = models.DocList { items }
-  if p.given("--json") { return print_json(docs, "docs") }
+  if p.given("--json") { return print_list_json(docs.items, whole_list(docs.items.length()), "docs") }
+  if docs.items.is_empty() { return say_empty("docs") }
   for d in docs.items {
     let mut kind = d.kind
     if kind == "" { kind = "-" }
@@ -482,7 +488,7 @@ fn doc_view(input: flags.CommandInput) -> Result<(), string> {
 
   let record = fetch_doc_record(current_team()?, slug)?
   if json_mode {
-    fmt.Println(record)
+    fmt.Println(contract_json(record.bytes() as json.RawMessage, 0) as string)
     return Ok(())
   }
 

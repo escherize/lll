@@ -167,13 +167,13 @@ fn expiry_line(duration: int, now: time.Time) -> string {
 fn impersonate_error(name: string, e: string) -> string {
   let status = pb.classify(e).status
   if status == 401 {
-    return "the token this ran with was rejected (401) - most likely it expired
+    return pb.fail(pb.ErrorKind.Auth, "the token this ran with was rejected (401) - most likely it expired
 mint a new one with 'lll token create', or set LLL_ADMIN_EMAIL/LLL_ADMIN_PASSWORD
-to this server's administrator credentials"
+to this server's administrator credentials")
   }
   if status == 403 {
-    return "token create is superuser-only and the configured token is not one
-set LLL_ADMIN_EMAIL/LLL_ADMIN_PASSWORD to this server's administrator credentials"
+    return pb.fail(pb.ErrorKind.Refused, "token create is superuser-only and the configured token is not one
+set LLL_ADMIN_EMAIL/LLL_ADMIN_PASSWORD to this server's administrator credentials")
   }
   f"impersonating {name}: {e}"
 }
@@ -725,13 +725,13 @@ fn bot_mint(tok: string, name: string, duration: int) -> Result<string, string> 
 fn bot_mint_error(name: string, e: string) -> string {
   let status = pb.classify(e).status
   if status == 403 {
-    return f"rotating {name}'s token: only the bot's owner or a superuser can do that
-the configured token does not own this bot — pass --admin-email/--admin-password (or set LLL_ADMIN_EMAIL/LLL_ADMIN_PASSWORD) to rotate as the superuser"
+    return pb.fail(pb.ErrorKind.Refused, f"rotating {name}'s token: only the bot's owner or a superuser can do that
+the configured token does not own this bot — pass --admin-email/--admin-password (or set LLL_ADMIN_EMAIL/LLL_ADMIN_PASSWORD) to rotate as the superuser")
   }
   if status == 401 {
-    return "the token this ran with was rejected (401) - most likely it expired
+    return pb.fail(pb.ErrorKind.Auth, "the token this ran with was rejected (401) - most likely it expired
 mint a new one with 'lll token create', or set LLL_ADMIN_EMAIL/LLL_ADMIN_PASSWORD
-to this server's administrator credentials"
+to this server's administrator credentials")
   }
   f"rotating {name}'s token: {e}"
 }
