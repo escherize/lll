@@ -110,6 +110,15 @@ pub fn up(ctx: pb.Client, args: Slice<string>) -> Result<(), string> {
   } else {
     ("", ctx)
   }
+  // LLL-680: a scratch boot writes only inside its own directory. Checked
+  // before anything is written, so no later change to setup_scratch or to how
+  // the config root resolves can point it at the user's home config.
+  if scratch {
+    let home = ctx.settings.home_path()?
+    if !strings.HasPrefix(home, scratch_dir + "/") {
+      return Err(f"refusing a scratch boot whose config path {home} is outside {scratch_dir}")
+    }
+  }
   let ctx = if share_bind != "" { ctx.with_settings(ctx.settings.with_bind(share_bind)) } else { ctx }
   let mut web_port = if scratch { available_port()? } else { 8100 }
   let raw_port = p.one("--port")
@@ -397,14 +406,33 @@ password in its own data directory's .lll-admin.json.",
   // The board binds in microseconds; a browser takes far longer to launch,
   // so opening before run_server blocks is not a race worth guarding.
   let board_url = advertised_board_url(ctx.settings, chosen)
-  let _ = set_home_key(ctx.settings, "web_url", board_url)?
+  // The board token, settled once: the link saved below, the browser opened
+  // below and the gate run_server builds all read it from these settings.
+  let ctx = ctx.with_settings(ctx.settings.with_board_token(resolve_board_token(ctx.settings)))
+  if share_bind != "" {
+    let _ = set_home_key(ctx.settings, "url", board_url)?
+    let _ = set_home_key(ctx.settings, "team", team)?
+    let _ = set_home_key(ctx.settings, "token", ctx.token())?
+  }
+  // LLL-680: web_url is saved only into a home config whose url names this
+  // board's server, or no server. A boot run beside another server's login (a
+  // hosted url and its token) once replaced that file's web_url with this
+  // board's address, so url and web_url named two different servers.
+  let home = ctx.settings.load_home()?
+  // Writing web_url also creates the config directory the login link below
+  // goes into; a kept web_url means the home config already exists.
+  if home_names_board(home.url, db_url, board_url) {
+    let _ = set_home_key(ctx.settings, "web_url", board_url)?
+  } else {
+    fmt.Println(
+      f"board  web_url unchanged: the home config's url is {home.url}, not this board's server",
+    )
+  }
   // Every boot, loopback included (LLL-648): 'lll board' and 'lll member
   // invite --team' read the login link from here, so the machine running the
   // board prints links that open it. Private (0600) and rewritten each boot,
-  // so it follows a per-boot token.
-  // The board token, settled once: the link saved here, the browser opened
-  // below and the gate run_server builds all read it from these settings.
-  let ctx = ctx.with_settings(ctx.settings.with_board_token(resolve_board_token(ctx.settings)))
+  // so it follows a per-boot token. It names its own board url, and readers
+  // use it only for that url, so it is written even when web_url is kept.
   let login_file = filepath.Join(
     filepath.Dir(ctx.settings.home_path()?),
     "board-login-url",
@@ -414,9 +442,6 @@ password in its own data directory's .lll-admin.json.",
     f"{board_url}/?board_token={ctx.settings.board_token()}\n",
   )?
   if share_bind != "" {
-    let _ = set_home_key(ctx.settings, "url", board_url)?
-    let _ = set_home_key(ctx.settings, "team", team)?
-    let _ = set_home_key(ctx.settings, "token", ctx.token())?
     let admin_file = filepath.Join(
       filepath.Dir(ctx.settings.home_path()?),
       "local-admin.json",
@@ -467,6 +492,37 @@ fn admin_line(
   Some(
     f"admin  {email}; generated password in {path} (set LLL_ADMIN_EMAIL and LLL_ADMIN_PASSWORD to choose your own)",
   )
+}
+
+/// Pure. Whether a home config whose url is `home_url` may hold this board's
+/// address as its web_url (LLL-680): only when that url names no server, or
+/// names this board's API (`db_url`) or the board itself, which serves the
+/// same API under /api/. Any other url is another server's login, and the
+/// web_url beside it stays that server's.
+fn home_names_board(home_url: string, db_url: string, board_url: string) -> bool {
+  strings.TrimSpace(home_url) == "" || same_server_url(home_url, db_url) ||
+  same_server_url(home_url, board_url)
+}
+
+/// Pure. Whether two base urls name one server: equal after trimming
+/// trailing slashes, with the loopback spellings (localhost, 127.0.0.1,
+/// [::1]) counted as one host.
+fn same_server_url(a: string, b: string) -> bool {
+  server_key(a) == server_key(b)
+}
+
+fn server_key(url: string) -> string {
+  let mut u = strings.TrimRight(strings.TrimSpace(url), "/")
+  for alias in ["://localhost", "://[::1]"] {
+    for scheme in ["http", "https"] {
+      if let Some(rest) = strings.CutPrefix(u, scheme + alias) {
+        if rest == "" || rest.starts_with(":") || rest.starts_with("/") {
+          u = scheme + "://127.0.0.1" + rest
+        }
+      }
+    }
+  }
+  u
 }
 
 fn loopback_bind(settings: config.Settings) -> bool {
