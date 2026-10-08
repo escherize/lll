@@ -1481,7 +1481,7 @@ fn update(input: flags.CommandInput) -> Result<(), string> {
   if replace_set {
     let n = strings.Count(issue.description, replace_old)
     if n != 1 {
-      return Err(flags.usage_error(f"--description-replace matched {n} times in {key}'s description; it must match exactly once - widen the text"))
+      return Err(f"--description-replace matched {n} times in {key}'s description; it must match exactly once - widen the text")
     }
     description = strings.Replace(issue.description, replace_old, replace_new, 1)
     description_set = true

@@ -186,7 +186,7 @@ fn webhook_remove(input: flags.CommandInput) -> Result<(), string> {
   if matches.items.length() > 1 {
     let mut ids: Slice<string> = []
     for h in matches.items { ids = ids.append(h.id) }
-    return Err(flags.usage_error(f"webhook {target} is registered more than once — pass --project, or remove by id: one of {strings.Join(ids, ", ")}\nusage: {usage}"))
+    return Err(f"webhook {target} is registered more than once — pass --project, or remove by id: one of {strings.Join(ids, ", ")}\nusage: {usage}")
   }
   let victim = matches.items[0]
   let _ = pb.delete(f"/api/collections/webhooks/records/{victim.id}")?

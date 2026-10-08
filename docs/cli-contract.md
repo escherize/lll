@@ -27,7 +27,7 @@ code, not on the error text.
 |---|---|---|
 | 0 | Success | |
 | 1 | Error | server failure (5xx), server unreachable, a rejected value |
-| 2 | Usage | unknown noun, verb or flag; a missing or malformed argument (`'nope' is not an issue ID`) |
+| 2 | Usage: the command line, or a setting that stands in for a flag (`LLL_SORT`, `LLL_AGENT`) | unknown noun, verb or flag; a missing or malformed argument (`'nope' is not an issue ID`) |
 | 3 | Not found | no such issue, doc, team, label, project, member or webhook; an issue outside your teams |
 | 4 | Refused or conflict | the claim is held by someone else; release or renew without the claim; a read-only member writing; an `--if-unchanged-since` mismatch; a declined delete confirmation |
 | 5 | Nothing to do | `lll issue next` with an empty agenda |
@@ -37,8 +37,10 @@ code, not on the error text.
 
 `lll api` exits 0 on any HTTP answer, so a script can read the status line on
 stderr and the body on stdout. With `--fail`, an answer of 400 or above exits
-with the code its status maps to: 401 is 6, 403, 409 and 412 are 4, 404 is 3,
-anything else is 1. The body still prints.
+with the code its status maps to when the body is the API's own error (it
+names its `status`): 401 is 6, 403, 409 and 412 are 4, 404 is 3, anything
+else is 1. Any other error body, such as a proxy's or gateway's, exits 1. The
+body still prints.
 
 Errors print on stderr as `Error: ` and a message. The message is for people:
 it names the cause and the fix, and it can change in any release.

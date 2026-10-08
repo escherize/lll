@@ -718,7 +718,7 @@ fn member_passes(input: flags.CommandInput) -> Result<(), string> {
   // LLL_URL or LLL_WEB_URL must not redirect credential creation elsewhere.
   let requested_url = p.one("--url")
   if requested_url != "" && strings.TrimSuffix(requested_url, "/") != local.url {
-    return Err(flags.usage_error("--url disagrees with the saved local board URL"))
+    return Err("--url disagrees with the saved local board URL")
   }
   point_at_url(local.url)?
   if let Err(e) = os.Setenv("LLL_WEB_URL", local.url) {

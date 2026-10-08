@@ -33,7 +33,7 @@ class API(http.server.BaseHTTPRequestHandler):
     def do_POST(self):
         if self.path == '/api/collections/teams/records':
             type(self).creates += 1
-            self.reply(self.status, {'message': 'fixture team creation refused'})
+            self.reply(self.status, {'message': 'fixture team creation refused', 'data': {}, 'status': self.status})
         else:
             self.reply(404, {'message': 'not found'})
 
@@ -72,7 +72,13 @@ with tempfile.TemporaryDirectory() as directory:
                     output = result.stdout + result.stderr
                     assert result.returncode != 0, output
                     assert API.creates == 1, output
-                    assert str(status) in output and 'fixture team creation refused' in output, output
+                    assert 'fixture team creation refused' in output, output
+                    # A 4xx prints the server's message and says its kind by exit
+                    # code; a 5xx keeps the status line (LLL-645).
+                    if status >= 500:
+                        assert str(status) in output, output
+                    else:
+                        assert result.returncode == {401: 6, 403: 4}[status], (result.returncode, output)
                     assert origin in output, output
                     assert 'none exists to reuse' not in output, output
                     assert 'fixture-opaque-token' not in output, output
