@@ -119,11 +119,8 @@ func registerRosterScope(app core.App) {
 	})
 
 	app.OnRealtimeSubscribeRequest().BindFunc(func(e *core.RealtimeSubscribeRequestEvent) error {
-		if !narrowCaller(e.App, e.Auth) {
-			return e.Next()
-		}
 		for _, topic := range e.Subscriptions {
-			if why := topicRefusal(e.App, topic); why != "" {
+			if why := topicRefusal(e.App, e.Auth, topic); why != "" {
 				return e.ForbiddenError(why, nil)
 			}
 		}
@@ -157,23 +154,27 @@ func dropRefusedSubscriptions(app core.App, memberID string) {
 			continue
 		}
 		auth, err := app.FindRecordById("members", cached.Id)
-		if err != nil || (auth.Id != memberID && auth.GetString("owner") != memberID) || !narrowCaller(app, auth) {
+		if err != nil || (auth.Id != memberID && auth.GetString("owner") != memberID) {
 			continue
 		}
 		for topic := range client.Subscriptions() {
-			if topicRefusal(app, topic) != "" {
+			if topicRefusal(app, auth, topic) != "" {
 				client.Unsubscribe(topic)
 			}
 		}
 	}
 }
 
-// topicRefusal is why a narrow caller may not hold a realtime subscription
-// to topic, or "". It reads the options exactly as PocketBase will
+// topicRefusal is why auth may not hold a realtime subscription to topic,
+// or "". It reads the options exactly as PocketBase will
 // (tools/subscriptions/client.go Subscribe): url.Parse, then the "options"
-// query value however it is spelled or placed. A string cut on "?options="
-// missed "?x=1&options=" and "?opt%69ons=" (LLL-551 review F1).
-func topicRefusal(app core.App, topic string) string {
+// query value however it is spelled or placed (a string cut on "?options="
+// missed "?x=1&options=" and "?opt%69ons=", LLL-551 review F1), decoded into
+// the same struct with the error IGNORED, because PocketBase keeps whatever
+// decoded before the error. {"query":{"filter":...},"query":1} decodes the
+// filter and then fails on the second key; skipping such options let the
+// filter through unchecked (LLL-634 review round 2 F1).
+func topicRefusal(app core.App, auth *core.Record, topic string) string {
 	u, err := url.Parse(topic)
 	if err != nil {
 		return "" // PocketBase ignores the options too
@@ -183,11 +184,10 @@ func topicRefusal(app core.App, topic string) string {
 		return ""
 	}
 	var options struct {
-		Query map[string]any `json:"query"`
+		Query   map[string]any `json:"query"`
+		Headers map[string]any `json:"headers"`
 	}
-	if err := json.Unmarshal([]byte(raw), &options); err != nil {
-		return "" // PocketBase ignores options that do not decode
-	}
+	_ = json.Unmarshal([]byte(raw), &options)
 	filter, sort := cast.ToString(options.Query[search.FilterQueryParam]), cast.ToString(options.Query[search.SortQueryParam])
 	if filter == "" && sort == "" {
 		return ""
@@ -197,13 +197,70 @@ func topicRefusal(app core.App, topic string) string {
 	if err != nil {
 		return rosterProbeRefusal
 	}
-	return probeRefusal(app, collection, filter, sort)
+	return callerRefusal(app, auth, collection, filter, sort)
 }
 
-// narrowCaller is true for a member whose effective access is narrower than
-// every team: the callers the roster rule limits.
-func narrowCaller(app core.App, auth *core.Record) bool {
-	return auth != nil && !auth.IsSuperuser() && auth.Collection().Name == "members" && !effectiveAccess(app, auth).all
+// callerRefusal is why auth may not run filter and sort on base, or "". A
+// narrow caller gets every check (probeRefusal). A caller that sees every
+// team but cannot write sees no other member's favorites or saved views
+// (their rules ask for all + rw), so it gets the member-scoped check
+// (review round 2 F2). A superuser or an all + rw member sees every row
+// these checks protect.
+func callerRefusal(app core.App, auth *core.Record, base *core.Collection, filter, sort string) string {
+	if auth == nil || auth.IsSuperuser() || auth.Collection().Name != "members" {
+		return ""
+	}
+	acc := effectiveAccess(app, auth)
+	if !acc.all {
+		return probeRefusal(app, base, filter, sort)
+	}
+	if acc.rw {
+		return ""
+	}
+	ops, ok := operands(filter, sort)
+	if !ok {
+		return ""
+	}
+	for _, o := range ops {
+		if hopsIntoMemberScoped(app, base, o.path) {
+			return memberScopedRefusal
+		}
+	}
+	return ""
+}
+
+const memberScopedRefusal = "a read-only member cannot filter or sort through favorites or saved views (favorites_via_issue, views_via_member): " +
+	"they hold other members' rows it cannot see"
+
+// hopsIntoMemberScoped reports whether path walks a relation or a
+// back-relation into a memberScoped collection.
+func hopsIntoMemberScoped(app core.App, base *core.Collection, path string) bool {
+	current := base
+	if strings.HasPrefix(path, "@request.auth.") {
+		members, err := app.FindCachedCollectionByNameOrId("members")
+		if err != nil {
+			return false
+		}
+		current, path = members, strings.TrimPrefix(path, "@request.auth.")
+	}
+	props := strings.Split(path, ".")
+	for _, raw := range props[:len(props)-1] {
+		prop, _, _ := strings.Cut(raw, ":")
+		var next *core.Collection
+		if field, ok := current.Fields.GetByName(prop).(*core.RelationField); ok {
+			next, _ = app.FindCachedCollectionByNameOrId(field.CollectionId)
+		} else if parts := viaProp.FindStringSubmatch(prop); parts != nil {
+			next, _ = app.FindCachedCollectionByNameOrId(parts[1])
+		}
+		if next == nil {
+			return false
+		}
+		if memberScoped[next.Name] {
+			return true
+		}
+		current = next
+	}
+	return false
 }
 
 const rosterProbeRefusal = "a member limited to some teams cannot filter or sort through a relation to or from members " +
@@ -218,7 +275,7 @@ var recordsCollection = regexp.MustCompile(`^/api/collections/([^/]+)/records/?$
 // Content-Length still tells one result from none.
 func refuseRosterProbes(re *core.RequestEvent) error {
 	match := recordsCollection.FindStringSubmatch(re.Request.URL.Path)
-	if match == nil || !narrowCaller(re.App, re.Auth) {
+	if match == nil || re.Auth == nil {
 		return re.Next()
 	}
 	collection, err := re.App.FindCachedCollectionByNameOrId(match[1])
@@ -226,7 +283,7 @@ func refuseRosterProbes(re *core.RequestEvent) error {
 		return re.Next()
 	}
 	q := re.Request.URL.Query()
-	if why := probeRefusal(re.App, collection, q.Get(search.FilterQueryParam), q.Get(search.SortQueryParam)); why != "" {
+	if why := callerRefusal(re.App, re.Auth, collection, q.Get(search.FilterQueryParam), q.Get(search.SortQueryParam)); why != "" {
 		return re.ForbiddenError(why, nil)
 	}
 	return re.Next()
@@ -291,15 +348,25 @@ func filterOperands(filter string) (ops []operand, ok bool) {
 	return ops, true
 }
 
-// probeRefusal is why a narrow caller may not run filter and sort on base,
-// or "" when it may.
-func probeRefusal(app core.App, base *core.Collection, filter, sort string) string {
+// operands is every path filter and sort name; ok is false for a filter
+// that does not parse.
+func operands(filter, sort string) ([]operand, bool) {
 	ops, ok := filterOperands(filter)
 	if !ok {
-		return ""
+		return nil, false
 	}
 	for _, f := range search.ParseSortFromString(sort) {
 		ops = append(ops, operand{path: f.Name})
+	}
+	return ops, true
+}
+
+// probeRefusal is why a narrow caller may not run filter and sort on base,
+// or "" when it may.
+func probeRefusal(app core.App, base *core.Collection, filter, sort string) string {
+	ops, ok := operands(filter, sort)
+	if !ok {
+		return ""
 	}
 	for _, o := range ops {
 		if pathCrossesRoster(app, base, o.path) {

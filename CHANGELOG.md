@@ -31,8 +31,9 @@ minors. Issue keys are on the project's own board (`lll issue view KEY`).
   a back-relation or `@collection`, a filter needs an any-match operator
   (`labels.name ?~ 'x'`, `blocked_by.id ?= 'ID'`). A stored relation id may
   only be matched exactly. Neither can be sorted on. A filter through
-  favorites or saved views is refused with any operator, since it would show
-  which issues other members favorited. This applies to record lists (all
+  favorites or saved views is refused with any operator, for team-scoped and
+  read-only members alike, since it would show which issues other members
+  favorited. This applies to record lists (all
   methods, including HEAD) and realtime subscription options. Narrowing a
   member drops the realtime subscriptions it could no longer make
   (LLL-634).

@@ -2,6 +2,7 @@ package gopb
 
 import (
 	"encoding/json"
+	"net/url"
 	"testing"
 
 	"github.com/pocketbase/pocketbase/core"
@@ -162,6 +163,37 @@ func TestRosterProbePaths(t *testing.T) {
 	} {
 		if got := probeRefusal(app, c.base, c.filter, c.sort) == rosterProbeRefusal; got != c.crosses {
 			t.Errorf("%s filter=%q sort=%q: crosses=%v, want %v", c.base.Name, c.filter, c.sort, got, c.crosses)
+		}
+	}
+}
+
+// LLL-634 review round 2: options are decoded the way PocketBase decodes
+// them, so a trailing duplicate key cannot hide the filter; and an all-scope
+// read-only member is kept out of other members' favorites and views.
+func TestCallerRefusalByAccess(t *testing.T) {
+	f := newTeamRefFixture(t)
+	narrow := f.rec(t, "members", map[string]any{"name": "narrow", "scope": "teams", "mode": "rw", "teams": []string{f.alpha.Id}})
+	allro := f.rec(t, "members", map[string]any{"name": "allro", "scope": "all", "mode": "ro"})
+	allrw := f.rec(t, "members", map[string]any{"name": "allrw", "scope": "all", "mode": "rw"})
+	topic := func(options string) string { return "issues/*?options=" + url.QueryEscape(options) }
+	for _, c := range []struct {
+		who     *core.Record
+		topic   string
+		refused bool
+	}{
+		{narrow, topic(`{"query":{"filter":"labels.name ~ \"%e%\""}}`), true},
+		{narrow, topic(`{"query":{"filter":"labels.name ~ \"%e%\""},"query":1}`), true},
+		{narrow, topic(`{"query":{"filter":"labels.name ~ \"%e%\""},"QUERY":1}`), true},
+		{narrow, topic(`{"query":{"filter":"labels.name ~ \"%e%\""},"headers":1}`), true},
+		{narrow, topic(`{"query":{"filter":"state = \"todo\""},"query":1}`), false},
+		{narrow, "issues/*", false},
+		{allrw, topic(`{"query":{"filter":"labels.name ~ \"%e%\""}}`), false},
+		{allro, topic(`{"query":{"filter":"favorites_via_issue.id ?!= \"x\" || id != \"\""}}`), true},
+		{allrw, topic(`{"query":{"filter":"favorites_via_issue.id ?!= \"x\" || id != \"\""}}`), false},
+		{allro, topic(`{"query":{"filter":"labels.name ~ \"%e%\""}}`), false},
+	} {
+		if got := topicRefusal(f.app, c.who, c.topic) != ""; got != c.refused {
+			t.Errorf("%s %s: refused=%v, want %v", c.who.GetString("name"), c.topic, got, c.refused)
 		}
 	}
 }

@@ -44,6 +44,10 @@ func newTeamRefFixture(t *testing.T) teamRefFixture {
 	save(issues)
 	issues.Fields.Add(&core.RelationField{Name: "blocked_by", CollectionId: issues.Id, MaxSelect: 99})
 	save(issues)
+	members := core.NewBaseCollection("members")
+	members.Fields.Add(&core.TextField{Name: "name"}, &core.TextField{Name: "scope"}, &core.TextField{Name: "mode"},
+		&core.TextField{Name: "owner"}, &core.RelationField{Name: "teams", CollectionId: teams.Id, MaxSelect: 99})
+	save(members)
 	favorites := core.NewBaseCollection("favorites")
 	favorites.Fields.Add(&core.RelationField{Name: "issue", CollectionId: issues.Id, MaxSelect: 1}, &core.TextField{Name: "member"})
 	save(favorites)

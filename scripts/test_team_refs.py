@@ -106,6 +106,7 @@ with tempfile.TemporaryDirectory(prefix='lll-631-') as directory:
         member('guest', scope='teams', teams=[alpha['id']], mode='rw')
         member('full', scope='all', mode='rw')
         member('mover', scope='all', mode='rw')
+        member('allro', scope='all', mode='ro')
 
         def create(collection, who='su', **data):
             code, rec = call(api, f'/api/collections/{collection}/records', data, toks[who])
@@ -263,7 +264,12 @@ with tempfile.TemporaryDirectory(prefix='lll-631-') as directory:
             return code, body
 
         options = q(json.dumps({'query': {'filter': 'labels.name ~ "%e%"'}}))
-        for topic in [f'issues/*?options={options}', f'issues/*?x=1&opt%69ons={options}', f"issues/{issue['id']}?options={options}"]:
+        # Review round 2 F1: PocketBase keeps what decoded before a JSON error,
+        # so a trailing duplicate key must not hide the filter from the check.
+        dup = q('{"query":{"filter":"labels.name ~ \\"%e%\\""},"query":1}')
+        dup_upper = q('{"query":{"filter":"labels.name ~ \\"%e%\\""},"QUERY":1}')
+        for topic in [f'issues/*?options={options}', f'issues/*?x=1&opt%69ons={options}', f"issues/{issue['id']}?options={options}",
+                      f'issues/*?options={dup}', f'issues/*?options={dup_upper}']:
             assert realtime_subscribe(toks['guest'], topic)[0] == 403, topic
         assert realtime_subscribe(toks['full'], f'issues/*?options={options}')[0] == 204
         ok = q(json.dumps({'query': {'filter': f'team = "{alpha["id"]}"'}}))
@@ -308,6 +314,10 @@ with tempfile.TemporaryDirectory(prefix='lll-631-') as directory:
         create('favorites', who='full', issue=issue['id'], member=ids['full'])
         for probe in ["favorites_via_issue.id ?!= 'zz' || id != ''", "favorites_via_issue.member ?= 'x'"]:
             assert listing('guest', probe)[0] == 403, probe
+            # Review round 2 F2: all-scope but read-only sees no other
+            # member's favorites either.
+            assert listing('allro', probe)[0] == 403, probe
+            assert listing('full', probe)[0] == 200, ('control: all + rw sees every favorite', probe)
 
         # Detach the legacy references; the audit comes back clean.
         assert patch('issues', issue['id'], 'full', **{'labels-': [secret['id']], 'blocked_by-': [hidden['id']]})[0] == 200
