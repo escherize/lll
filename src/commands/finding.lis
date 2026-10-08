@@ -98,14 +98,14 @@ Read a finding with 'lll doc view SLUG'; --raw and --json are available.
 
 Author findings with 'lll finding create SLUG -t \"title\" -a <area> --paths \"<paths>\"'.
 `area` is conventionally the NAME of an existing label: an issue whose labels
-contain the area surfaces the finding — on its web page and in
+contain the area surfaces the finding, on its web page and in
 'lll issue view'. `paths` is comma-separated file or directory paths, the
 coordinates 'lll finding near' matches by.
 
 A finding is asserted (confirmed) unless you say otherwise: file a guess with
 '--confidence suspected', and settle it later with 'lll finding confirm SLUG'
 or 'lll finding refute SLUG -b why'. Suspected and refuted findings say so
-wherever they print — a guess must not read as fact."
+wherever they print: a guess must not read as fact."
 }
 
 // ------------------------------------------------------------------ specs
@@ -292,7 +292,7 @@ fn finding_refute_spec() -> Slice<flags.Flag> {
       value: true,
       required: true,
       hint: "\"why\"",
-      help: "the why it failed — what a later reader was wrong to trust\n('-b -' reads it from stdin)",
+      help: "the why it failed: what a later reader was wrong to trust\n('-b -' reads it from stdin)",
       ..,
     },
   ])

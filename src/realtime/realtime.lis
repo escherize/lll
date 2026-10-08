@@ -223,7 +223,7 @@ fn reconnect(
   ch: Channel<Event>,
   resync: bool,
 ) {
-  fmt.Fprintln(os.Stderr, "realtime: lll server stream lost — reconnecting")
+  fmt.Fprintln(os.Stderr, "realtime: lll server stream lost; reconnecting")
   let mut last_err = ""
   loop {
     time.Sleep(time.Second)
@@ -233,7 +233,7 @@ fn reconnect(
         last_err = ""
         if resync { let _ = ch.send(Event { topic: RESYNC, data: "" }) }
         pump(r, ch)
-        fmt.Fprintln(os.Stderr, "realtime: lll server stream lost — reconnecting")
+        fmt.Fprintln(os.Stderr, "realtime: lll server stream lost; reconnecting")
       },
       Err(e) => {
         let dead = auth_failure(e)

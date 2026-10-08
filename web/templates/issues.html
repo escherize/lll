@@ -1,4 +1,4 @@
-{{/* The issues table — every issue in one sortable, filterable list.
+{{/* The issues table: every issue in one sortable, filterable list.
 
      ZERO JavaScript, deliberately. Column headers are plain <a> tags carrying
      ?sort=, the filter chooser is a plain GET <form>, and navigation is a full
@@ -55,13 +55,13 @@
 </body>
 </html>{{end}}
 
-{{/* #issues is this page's stable id, matching the board's #board — it is not
+{{/* #issues is this page's stable id, matching the board's #board. It is not
      a morph target (nothing morphs here), but agents read the markup and the
      Stable Id Rule holds for every surface.
 
      .Cols and the row cells below share one column order, and the empty
      state's colspan is that same count a third time. Nothing here can be
-     derived from .Cols — each cell has its own markup — so the link is an
+     derived from .Cols (each cell has its own markup), so the link is an
      assertion instead (TASK-164): serve_issues.test.lis reads THIS FILE out
      of the embedded FS, counts the <td>s in the row-range block below, reads
      the colspan number off the empty state, and pins both to
@@ -77,7 +77,7 @@
 <td class="c-state">{{template "state-icon" .State}}<span>{{.StateLabel}}</span></td>
 <td class="c-prio"><span class="pri-slot">{{template "priority-icon" .Prio}}</span><span>{{.PrioLabel}}</span></td>
 <td class="c-labels">{{range .Labels}}<span class="chip"><span class="dot" style="background:{{if .Color}}{{.Color}}{{else}}var(--text-3){{end}}"></span>{{.Name}}</span>{{end}}</td>
-<td class="c-assignee">{{if .Assignee}}{{template "avatar" .Avatar}}<span>{{.Assignee}}</span>{{else}}<span class="none">—</span>{{end}}</td>
+<td class="c-assignee">{{if .Assignee}}{{template "avatar" .Avatar}}<span>{{.Assignee}}</span>{{else}}<span class="none">-</span>{{end}}</td>
 <td class="c-age">{{.Created}}</td>
 <td class="c-age">{{.Updated}}</td>
 </tr>

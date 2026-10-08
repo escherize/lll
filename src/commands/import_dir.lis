@@ -41,7 +41,7 @@ fn import_dir(input: flags.CommandInput) -> Result<(), string> {
   let parsed = read_mirror(dir)?
   let parsed_docs = read_mirror_docs(dir)?
   if parsed.is_empty() {
-    return Err(f"no issue files in {filepath.Join(dir, "issues")} — is this a directory 'lll export' wrote?")
+    return Err(f"no issue files in {filepath.Join(dir, "issues")}; is this a directory 'lll export' wrote?")
   }
 
   let existing = records.fetch_board_issues(team.id)?
@@ -342,7 +342,7 @@ fn read_mirror_docs(dir: string) -> Result<Slice<(mirror.DocFront, string)>, str
 /// that needs repairing too.
 fn partial(dir: string, cause: string, deleted: int, created: int) -> string {
   f"{cause}
-{team_state(deleted, created)} — {dir} is unchanged, so fix the cause and run 'lll import dir {dir} --replace' again to rebuild from scratch"
+{team_state(deleted, created)}. {dir} is unchanged, so fix the cause and run 'lll import dir {dir} --replace' again to rebuild from scratch"
 }
 
 fn team_state(deleted: int, created: int) -> string {

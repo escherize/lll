@@ -42,7 +42,7 @@
      be one scroll with a sentence at the top claiming as much, which is not
      something anyone reads before editing a member.
 
-     Server-wide sections are still addressed under /t/KEY/ — their scope is
+     Server-wide sections are still addressed under /t/KEY/. Their scope is
      the server, but the page still wears a rail, and a rail that silently
      switched teams is the bug LLL-426 fixed. */}}
 {{define "settings-nav"}}<nav id="set-nav" class="set-nav" aria-label="Settings sections">
@@ -116,7 +116,7 @@
 <button type="button" class="btn" data-on:click="@post('label', {contentType: 'form'})">Save</button>
 {{template "set-del" "label"}}
 </form></div>
-{{end}}{{if not .Labels}}<p class="set-empty">No labels yet. The first one is worth naming carefully — every later label gets compared to it.</p>
+{{end}}{{if not .Labels}}<p class="set-empty">No labels yet. The first one is worth naming carefully: every later label gets compared to it.</p>
 {{end}}</div>
 <form class="set-row set-new">
 <input name="color" type="color" class="set-swatch" value="#828994" aria-label="Colour for the new label">
@@ -127,7 +127,7 @@
 
 {{define "set-projects"}}<section class="set-sec">
 <h2>Projects <span class="count">{{len .Projects}}</span></h2>
-<p class="set-note">A project names a destination — Release 1, multi-project server mode — not a wave of work. Descriptions are long-form, so they stay with <code>lll project create -b</code>.</p>
+<p class="set-note">A project names a destination (Release 1, multi-project server mode), not a wave of work. Descriptions are long-form, so they stay with <code>lll project create -b</code>.</p>
 <div class="set-rows">
 {{range $p := .Projects}}<div id="set-project-{{$p.Id}}"><form class="set-row" data-name="{{$p.Name}}">
 <input type="hidden" name="id" value="{{$p.Id}}">
@@ -153,7 +153,7 @@
 {{define "set-members"}}<section class="set-sec">
 <h2>Members <span class="count">{{len .Members}}</span></h2>
 <p class="set-scope">Shared by every team on this server: a rename here changes who <code>{{.TeamKey}}</code> and every other board attributes work to.</p>
-<p class="set-note">A member is an account: who a comment is attributed to, who an issue is assigned to, and who can sign in. Added here, a member has no password yet &mdash; give them one under Access, or run <code>lll member invite NAME --email them@example.com</code>, which creates and credentials in one step.</p>
+<p class="set-note">A member is an account: who a comment is attributed to, who an issue is assigned to, and who can sign in. Added here, a member has no password yet: give them one under Access, or run <code>lll member invite NAME --email them@example.com</code>, which creates and credentials in one step.</p>
 <div class="set-rows">
 {{range .Members}}<div id="set-member-{{.Id}}"><form class="set-row" data-name="{{.Name}}">
 <input type="hidden" name="id" value="{{.Id}}">
@@ -171,7 +171,7 @@
 </form>
 </section>{{end}}
 
-{{/* Teams (TASK-210): every team on the server — the one web surface where
+{{/* Teams (TASK-210): every team on the server, the one web surface where
      an archived team stays visible, which is what makes unarchiving from
      here possible. Archive/unarchive run the Access section's per-action
      admin re-auth: settings is board-token-reachable, and removing a team
@@ -181,7 +181,7 @@
 {{define "set-teams"}}<section class="set-sec" id="set-teams">
 <h2>Teams <span class="count">{{len .Teams}}</span></h2>
 <p class="set-scope">Every team on this server, archived ones included.</p>
-<p class="set-note">Archiving hides a team from the rail's switcher and default lists; its board stays readable at <code>/t/KEY/</code> and nothing is deleted. It asks for the admin password — the credentials supplied through the server’s <code>LLL_ADMIN_EMAIL</code> and <code>LLL_ADMIN_PASSWORD</code> — verified per action and never stored. New teams come from <code>lll team create</code> or <code>lll attach</code>.</p>
+<p class="set-note">Archiving hides a team from the rail's switcher and default lists; its board stays readable at <code>/t/KEY/</code> and nothing is deleted. It asks for the admin password (the credentials supplied through the server’s <code>LLL_ADMIN_EMAIL</code> and <code>LLL_ADMIN_PASSWORD</code>), verified per action and never stored. New teams come from <code>lll team create</code> or <code>lll attach</code>.</p>
 <div class="set-rows">
 {{range .Teams}}<div id="set-team-{{.Id}}"><form class="set-row" data-name="{{.Key}}">
 <input type="hidden" name="id" value="{{.Id}}">
@@ -202,7 +202,7 @@
 
 {{/* Access (TASK-204): superuser-power actions behind per-action re-auth.
      Every form here carries the admin password; the server verifies it
-     against the superuser per request and never stores it — the board token
+     against the superuser per request and never stores it: the board token
      alone must not grant these. The minted token answers in the response
      patch (#access-token-result) and is shown exactly once: impersonate
      tokens are stateless, so no list of minted tokens exists to render.
@@ -211,7 +211,7 @@
 {{define "set-access"}}<section class="set-sec" id="access">
 <h2>Access</h2>
 <p class="set-scope">Server-wide, and superuser-only.</p>
-<p class="set-note">Each action asks for the admin password — the credentials supplied through the server’s <code>LLL_ADMIN_EMAIL</code> and <code>LLL_ADMIN_PASSWORD</code> — verified per action and never stored. The board token alone does not grant these.</p>
+<p class="set-note">Each action asks for the admin password (the credentials supplied through the server’s <code>LLL_ADMIN_EMAIL</code> and <code>LLL_ADMIN_PASSWORD</code>), verified per action and never stored. The board token alone does not grant these.</p>
 
 <h3 class="access-h">Agent token</h3>
 <p class="set-note">The web face of <code>lll token create</code>: a static member token that authenticates as the member. It is shown exactly once, below; tokens are stateless, so nothing can list them afterwards. Setting the member's password cuts old tokens off.</p>
@@ -242,7 +242,7 @@
      Any later #settings morph redraws the empty placeholder over it, which
      is the show-it-once bargain, not a bug. */}}
 {{define "access-token-result"}}<div id="access-token-result" class="access-token">
-<p class="set-note">One-time agent token for <strong>{{.Name}}</strong> — shown only here. Use it as <code>LLL_TOKEN=…</code>, or persist it as <code>token = "…"</code> in <code>~/.config/lll/lll.toml</code> (never the committed <code>.lll.toml</code>).</p>
+<p class="set-note">One-time agent token for <strong>{{.Name}}</strong>, shown only here. Use it as <code>LLL_TOKEN=…</code>, or persist it as <code>token = "…"</code> in <code>~/.config/lll/lll.toml</code> (never the committed <code>.lll.toml</code>).</p>
 <code class="access-token-value">{{.Token}}</code>
 </div>{{end}}
 

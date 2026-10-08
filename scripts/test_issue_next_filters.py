@@ -65,9 +65,9 @@ chosen(['--label', 'ops', '--label', 'hold', '--exclude-label', 'agent'], ops)
 chosen(['--exclude-label', 'ops', '--exclude-label', 'hold', '--label', 'ops', '--label', 'agent'], agent)
 
 # Unknown names fail before any fetch, naming the command that lists the real ones.
-refused(['--project', 'Nope'], "no project named 'Nope' — see 'lll project list'")
-refused(['--label', 'nope'], "no label named 'nope' — see 'lll label list'")
-refused(['--exclude-label', 'nope'], "no label named 'nope' — see 'lll label list'")
+refused(['--project', 'Nope'], "no project named 'Nope'; see 'lll project list'")
+refused(['--label', 'nope'], "no label named 'nope'; see 'lll label list'")
+refused(['--exclude-label', 'nope'], "no label named 'nope'; see 'lll label list'")
 
 # The packet: one call that claims and returns record, blockers and comments.
 blocker = create('Finished foundation', 'none')

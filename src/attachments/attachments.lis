@@ -22,7 +22,7 @@ pub fn read_upload(reader: io.Reader) -> Result<Slice<byte>, string> {
 }
 
 pub fn upload(caller: pb.Caller, issue: models.Issue, name: string, data: Slice<byte>) -> Result<string, string> {
-  if issue.expand.team.archived { return Err(f"team {issue.expand.team.key} is archived — run 'lll team unarchive {issue.expand.team.key}' first") }
+  if issue.expand.team.archived { return Err(f"team {issue.expand.team.key} is archived; run 'lll team unarchive {issue.expand.team.key}' first") }
   let filename = filepath.Base(strings.ReplaceAll(name, "\\", "/"))
   if filename == "" || filename == "." || filename == "/" { return Err("attachment needs a filename") }
   let mut buffer = bytes.Buffer { .. }
@@ -39,7 +39,7 @@ pub fn upload(caller: pb.Caller, issue: models.Issue, name: string, data: Slice<
   // Native append keeps the uploaded file last. Comparing every filename
   // against the caller's earlier read would also report concurrent uploads.
   let Some(stored) = saved.attachments.get(saved.attachments.length() - 1) else {
-    return Err("server did not save the attachment — update the server to a version with issue attachments")
+    return Err("server did not save the attachment; update the server to a version with issue attachments")
   }
   if issue.attachments.contains(stored) { return Err("server did not append an attachment") }
   Ok(stored)
@@ -54,7 +54,7 @@ pub fn require_file(issue: models.Issue, filename: string) -> Result<(), string>
 struct RemoveFiles { #[json("attachments-")] files: Slice<string> }
 
 pub fn remove(caller: pb.Caller, issue: models.Issue, filename: string) -> Result<(), string> {
-  if issue.expand.team.archived { return Err(f"team {issue.expand.team.key} is archived — run 'lll team unarchive {issue.expand.team.key}' first") }
+  if issue.expand.team.archived { return Err(f"team {issue.expand.team.key} is archived; run 'lll team unarchive {issue.expand.team.key}' first") }
   require_file(issue, filename)?
   let payload = match json.Marshal(RemoveFiles { files: [filename] }) {
     Ok(b) => b as string,

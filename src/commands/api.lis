@@ -50,7 +50,7 @@ pub fn api(args: Slice<string>) -> Result<(), string> {
     return Ok(())
   }
   if !strings.HasPrefix(path, "/") {
-    return Err(flags.usage_error(f"path must start with '/': got '{path}' — the path is joined to the configured board url ('lll config list' shows it)"))
+    return Err(flags.usage_error(f"path must start with '/': got '{path}'. The path is joined to the configured board url ('lll config list' shows it)"))
   }
   send(method, path, p.one("--body"), p.given("--fail"))
 }

@@ -59,5 +59,5 @@ func checkUnmodified(record *core.Record, stamp string) error {
 	}
 	return router.NewApiError(http.StatusPreconditionFailed,
 		"the record changed since "+stamp+": its 'updated' is now "+current.String()+
-			" — read it again and retry with that stamp", nil)
+			"; read it again and retry with that stamp", nil)
 }

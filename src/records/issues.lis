@@ -40,7 +40,7 @@ fn records_team_key(key: string) -> string {
 /// The answer for an issue key that names no issue. The board gives a
 /// scoped viewer the same words for an issue it may not see (LLL-545).
 pub fn issue_not_found(id: string) -> string {
-  f"issue {id} not found — check 'lll issue list' or LLL_TEAM"
+  f"issue {id} not found; check 'lll issue list' or LLL_TEAM"
 }
 
 /// Fetch an issue by KEY-123 and return the raw PB record JSON (team,

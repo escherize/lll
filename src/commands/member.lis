@@ -384,7 +384,7 @@ fn member_remove(input: flags.CommandInput) -> Result<(), string> {
   }
   let su = superuser_auth(login)?
   let Some(member) = records.find_member_as(su, name)? else {
-    return Err(pb.fail(pb.ErrorKind.NotFound, f"no member named '{name}' — see 'lll member list'"))
+    return Err(pb.fail(pb.ErrorKind.NotFound, f"no member named '{name}'; see 'lll member list'"))
   }
 
   let references = member_references(member.id, su)?
@@ -506,7 +506,7 @@ fn member_set_password(input: flags.CommandInput) -> Result<(), string> {
   let su = superuser_auth(given_admin_login(p)?)?
   let found = records.find_member_as(su, name)?
   let Some(member) = found else {
-    return Err(pb.fail(pb.ErrorKind.NotFound, f"no member named '{name}' — see 'lll member create'"))
+    return Err(pb.fail(pb.ErrorKind.NotFound, f"no member named '{name}'; see 'lll member create'"))
   }
 
   // The email IS the login identity. A member carrying only the synthesized
@@ -534,7 +534,7 @@ rerun with --email <email> to set one alongside the password",
     typed
   }
   if password == "" {
-    return Err("no password — pass --password <pw>, or answer the two prompts")
+    return Err("no password: pass --password <pw>, or answer the two prompts")
   }
   if password.length() < 8 {
     return Err(
@@ -603,7 +603,7 @@ fn member_invite(input: flags.CommandInput) -> Result<(), string> {
   let su = superuser_auth(given_admin_login(p)?)?
   if let Some(existing) = records.find_member_as(su, name)? {
     return Err(
-      f"member '{name}' already exists ({existing.email}) — run 'lll member set-password {name} --email {email} --password PASSWORD' with administrator credentials to enable login; existing credentials are unchanged",
+      f"member '{name}' already exists ({existing.email}); run 'lll member set-password {name} --email {email} --password PASSWORD' with administrator credentials to enable login; existing credentials are unchanged",
     )
   }
 
@@ -624,7 +624,7 @@ fn member_invite(input: flags.CommandInput) -> Result<(), string> {
   if keys.is_empty() {
     let created = create_member_as(su, name, email, password, [], "")?
     status(f"invited {created.name} <{email}>: {describe_access("all", "rw", [])}")
-    status("send them this (below, on stdout) — the password is shown once and stored nowhere")
+    status("send them this (below, on stdout); the password is shown once and stored nowhere")
     for line in invite_lines(created.name, email, password, base, cfg.team) {
       fmt.Println(line)
     }
@@ -643,7 +643,7 @@ fn member_invite(input: flags.CommandInput) -> Result<(), string> {
   }
   let created = create_member_as(su, name, email, password, team_ids, mode)?
   status(f"invited {created.name} <{email}>: {describe_access("teams", mode, keys)}")
-  status("send them this (below, on stdout) — the password is shown once and stored nowhere")
+  status("send them this (below, on stdout); the password is shown once and stored nowhere")
   for line in invite_lines(created.name, email, password, base, keys[0]) {
     fmt.Println(line)
   }
@@ -938,7 +938,7 @@ finds both the board and its API; --url names a different one. The
 password is stored nowhere else: lose it and reissue with
 'lll member set-password NAME'.
 
---email is required and must be a real address — it is the identity
+--email is required and must be a real address: it is the identity
 'lll login' asks for, so the synthesized @members.invalid placeholder
 'lll member create' falls back to would be a dead door.
 
@@ -1080,7 +1080,7 @@ a read-write member creates it with 'lll bot create {name}' (owned by you, never
   }
   if let Some(existing) = found {
     return Err(
-      f"a member named '{name}' already exists <{existing.email}> — pick another name",
+      f"a member named '{name}' already exists <{existing.email}>; pick another name",
     )
   }
   let password = p.one("--password")
@@ -1269,7 +1269,7 @@ fn member_access_cmd(input: flags.CommandInput) -> Result<(), string> {
   let name = p.first()
   if name == "" { return Err(flags.usage_error("usage: lll member access NAME [--team KEY]... [--add-team KEY] [--remove-team KEY] [--all-teams|--no-teams] [--read-only|--read-write]")) }
   let Some(m) = records.find_member(name)? else {
-    return Err(pb.fail(pb.ErrorKind.NotFound, f"no member named '{name}' — see 'lll member list'"))
+    return Err(pb.fail(pb.ErrorKind.NotFound, f"no member named '{name}'; see 'lll member list'"))
   }
   let teams = records.list_teams()?.items
   let key_of = |id: string| teams.find(|t| t.id == id).map_or(id, |t| t.key)

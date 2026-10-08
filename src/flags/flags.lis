@@ -258,7 +258,7 @@ fn unknown_flag(arg: string, usage: string, spec: Slice<Flag>) -> string {
     Some(new) => Some(new),
     None => nearest_flag(arg, spec),
   }
-  if let Some(near) = near { head = f"{head} — did you mean '{near}'?" }
+  if let Some(near) = near { head = f"{head}; did you mean '{near}'?" }
   if usage == "" { return head }
   f"{head}\nusage: {usage}{section(spec)}"
 }

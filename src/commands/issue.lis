@@ -264,7 +264,7 @@ fn issue_update_spec() -> Slice<flags.Flag> {
       name: "--if-unchanged-since",
       value: true,
       hint: "stamp",
-      help: "refuse unless the issue's 'updated' is still this instant (from 'issue view --json';\nRFC3339 or the space form) —\nenforced at the write by the server, so an edit cannot land on a record\nsomeone changed under you, even mid-flight",
+      help: "refuse unless the issue's 'updated' is still this instant (from 'issue view --json';\nRFC3339 or the space form);\nenforced at the write by the server, so an edit cannot land on a record\nsomeone changed under you, even mid-flight",
       ..,
     },
     flags.Flag {
@@ -465,7 +465,7 @@ fn issue_synonym(verb: string) -> Option<string> {
     _ => "",
   }
   if hint == "" { return None }
-  Some(f"unknown issue command: '{verb}' — {hint} (see 'lll issue -h')")
+  Some(f"unknown issue command: '{verb}'; {hint} (see 'lll issue -h')")
 }
 
 /// Every issue verb, as a value. `page` is the hand-written help `issue
@@ -735,7 +735,7 @@ fn create(input: flags.CommandInput) -> Result<(), string> {
   }
   let title = if p.one("-t") != "" { p.one("-t") } else { p.first() }
   if title == "" {
-    return Err(f"no title — give it as the bare argument or with -t\n{usage}")
+    return Err(f"no title: give it as the bare argument or with -t\n{usage}")
   }
   let mut description = ""
   if p.given("-b") { description = value_or_stdin(p.one("-b"), "-b")? }
@@ -1299,11 +1299,11 @@ fn view(input: flags.CommandInput) -> Result<(), string> {
     let blockers = blockers_of(full, full.expand.blocked_by)
     let open = blockers.open.length()
     // is_ready's archived rule (LLL-679): an archived team's issue is not ready.
-    let done = if full.expand.team.archived { " — all done, but the team is archived" } else { " — all done, ready" }
-    let mut tail = if open == 0 { done } else { f" — {open} open, not ready" }
+    let done = if full.expand.team.archived { "; all done, but the team is archived" } else { "; all done, ready" }
+    let mut tail = if open == 0 { done } else { f"; {open} open, not ready" }
     if blockers.hidden > 0 {
       let counted = if open == 0 { "" } else { f"{open} open, " }
-      tail = f" — {counted}{blockers.hidden} you cannot see, not ready"
+      tail = f"; {counted}{blockers.hidden} you cannot see, not ready"
     }
     fmt.Println(f"Blocked by: {strings.Join(parts, ", ")}{tail}")
   }
@@ -1345,10 +1345,10 @@ fn view(input: flags.CommandInput) -> Result<(), string> {
       }
       let mut area = f.area
       if area == "" { area = "-" }
-      fmt.Println(f"{f.slug} ({area}) — {f.title}{confidence_suffix(f.confidence, f.confidence_note)}")
+      fmt.Println(f"{f.slug} ({area}): {f.title}{confidence_suffix(f.confidence, f.confidence_note)}")
     }
     if hidden > 0 {
-      fmt.Println(f"... and {hidden} more by area — 'lll finding list -a AREA' lists an area, 'lll issue view --raw' prints them all")
+      fmt.Println(f"... and {hidden} more by area; 'lll finding list -a AREA' lists an area, 'lll issue view --raw' prints them all")
     }
   }
 
@@ -1495,15 +1495,15 @@ fn update(input: flags.CommandInput) -> Result<(), string> {
   // flag there would mean a guard that silently stops guarding. The claims
   // route arbitrates with its own observed-claim stamp instead.
   if since != "" && assignee_name != "" {
-    return Err(flags.usage_error("--if-unchanged-since cannot be combined with --assignee: assignment writes go through the claim route, which arbitrates with its own claim stamp — run them as two updates"))
+    return Err(flags.usage_error("--if-unchanged-since cannot be combined with --assignee: assignment writes go through the claim route, which arbitrates with its own claim stamp. Run them as two updates"))
   }
   // LLL-513: --label writes the whole set, the other two edit it. Together
   // there is no single answer to what the set should be.
   if !label_names.is_empty() && (!add_label_names.is_empty() || !remove_label_names.is_empty()) {
-    return Err(flags.usage_error("--label replaces the whole label set, so it cannot be combined with --add-label/--remove-label — use --add-label/--remove-label to change some labels and keep the rest, or --label alone to set the exact list"))
+    return Err(flags.usage_error("--label replaces the whole label set, so it cannot be combined with --add-label/--remove-label. Use --add-label/--remove-label to change some labels and keep the rest, or --label alone to set the exact list"))
   }
   if state == "" && priority < 0 && assignee_name == "" && label_names.is_empty() && add_label_names.is_empty() && remove_label_names.is_empty() && !project_set && !title_set && !description_set && !replace_set && !append_set && !emoji_set {
-    return Err(flags.usage_error(f"nothing to update — pass at least one flag\nusage: {usage}"))
+    return Err(flags.usage_error(f"nothing to update: pass at least one flag\nusage: {usage}"))
   }
 
   let resolved = resolve_id(id, usage)?
@@ -1519,7 +1519,7 @@ fn update(input: flags.CommandInput) -> Result<(), string> {
   // — a write landing between this read and the PATCH — is held at the
   // server and answers 412 instead of clobbering.
   if since != "" && issue.updated != since {
-    return Err(pb.fail(pb.ErrorKind.Refused, f"{key} changed since {display.rfc3339(since)}: its 'updated' is now {display.rfc3339(issue.updated)} — read it again ('lll issue view {key} --json' carries updated) and retry with that stamp"))
+    return Err(pb.fail(pb.ErrorKind.Refused, f"{key} changed since {display.rfc3339(since)}: its 'updated' is now {display.rfc3339(issue.updated)}; read it again ('lll issue view {key} --json' carries updated) and retry with that stamp"))
   }
   // Surgical description edits (LLL-391, after veans): a replace must match
   // exactly once, or the caller is told how many times it matched, so a
@@ -1586,7 +1586,7 @@ fn update(input: flags.CommandInput) -> Result<(), string> {
   for name in remove_label_names {
     let id = records.resolve_label(issue.team, name)?.id
     if add_ids.contains(id) {
-      return Err(flags.usage_error(f"--add-label and --remove-label both name '{name}' — pass it to only one of them"))
+      return Err(flags.usage_error(f"--add-label and --remove-label both name '{name}'; pass it to only one of them"))
     }
     remove_ids = remove_ids.append(id)
   }
@@ -1612,9 +1612,9 @@ fn update(input: flags.CommandInput) -> Result<(), string> {
     let observed = claims.observed_id(issue.id)?
     let result = claims.update_assignment(pb.Caller.Process, issue.id, observed, payload, agent, force, reason).map_err(|e| {
       if pb.classify(e).code == "claim_held" {
-        f"{key}: {e} — {held_elsewhere_hint(key)}"
+        f"{key}: {e}; {held_elsewhere_hint(key)}"
       } else if pb.classify(e).code == "needs_force" {
-        f"{key}: {pb.display_error(e).summary} — 'lll issue update {key} --assignee none --force --reason \"why\"' clears it anyway and comments on the issue"
+        f"{key}: {pb.display_error(e).summary}; 'lll issue update {key} --assignee none --force --reason \"why\"' clears it anyway and comments on the issue"
       } else { f"{key}: {e}" }
     })?
     if result.claim_id != "" {
@@ -1862,7 +1862,7 @@ fn claim(input: flags.CommandInput) -> Result<(), string> {
   let resolved = resolve_id(id, usage)?
   let Some(member) = actor()? else {
     return Err(
-      "claiming needs a member token — 'lll login' as a person, or 'lll token create <member>' with admin credentials",
+      "claiming needs a member token: 'lll login' as a person, or 'lll token create <member>' with admin credentials",
     )
   }
   let issue = records.fetch_issue(resolved)?
@@ -1880,7 +1880,7 @@ fn claim(input: flags.CommandInput) -> Result<(), string> {
 
   let result = claims.acquire(pb.Caller.Process, issue.id, member.id, agent).map_err(|e| {
     if pb.classify(e).code == "claim_held" {
-      f"{key}: {e} — {held_elsewhere_hint(key)}"
+      f"{key}: {e}; {held_elsewhere_hint(key)}"
     } else { e }
   })?
   if input.parsed.given("--json") { return print_issue_after(key) }
@@ -1907,7 +1907,7 @@ fn release(input: flags.CommandInput) -> Result<(), string> {
   let Some(held) = claims.fetch(issue.id)? else { return Err(pb.fail(pb.ErrorKind.Refused, f"{key} is not claimed")) };
   let result = claims.release(pb.Caller.Process, issue.id, held.id, agent, force, reason).map_err(|e| {
     if pb.classify(e).code == "needs_force" {
-      f"{key}: {e} — 'lll issue release {key} --force --reason \"why\"' takes it anyway and comments on the issue"
+      f"{key}: {e}; 'lll issue release {key} --force --reason \"why\"' takes it anyway and comments on the issue"
     } else { e }
   })?
   let assignment = if result.cleared_assignee { "cleared assignee" } else { "assignment unchanged" }
@@ -2018,7 +2018,7 @@ fn comment(input: flags.CommandInput) -> Result<(), string> {
     return Ok(())
   }
   // Show the authenticated author at the write, so token switches are visible.
-  let as_who = if author_name == "" { "with no author — use a member token from 'lll login' or 'lll token create'" } else { f"as {display.byline(author_name, agent)}" }
+  let as_who = if author_name == "" { "with no author; use a member token from 'lll login' or 'lll token create'" } else { f"as {display.byline(author_name, agent)}" }
   fmt.Println(f"Commented on {issue.expand.team.key}-{issue.number} {as_who}")
   Ok(())
 }
@@ -2074,7 +2074,7 @@ fn pr_cmd(input: flags.CommandInput) -> Result<(), string> {
   match exec.LookPath("gh") {
     Partial.Ok(path) => gh = path,
     _ => return Err(
-      "gh not found on PATH — install the GitHub CLI (brew install gh)",
+      "gh not found on PATH; install the GitHub CLI (brew install gh)",
     ),
   }
 
@@ -2203,11 +2203,11 @@ fn comment_mutate(verb: string, p: flags.Parsed) -> Result<(), string> {
   let issue = records.fetch_issue(resolved)?
   let key = f"{issue.expand.team.key}-{issue.number}"
   let Ok(n) = strconv.Atoi(p.nth(1)) else {
-    return Err(f"'{p.nth(1)}' is not a comment number — 'lll issue comment {key}' numbers them")
+    return Err(f"'{p.nth(1)}' is not a comment number; 'lll issue comment {key}' numbers them")
   }
   let comments = records.fetch_comments(issue.id)?
   if n < 1 || n > comments.length() {
-    return Err(f"{key} has {comments.length()} comments; there is no #{n} — 'lll issue comment {key}' numbers them")
+    return Err(f"{key} has {comments.length()} comments; there is no #{n}; 'lll issue comment {key}' numbers them")
   }
   let c = comments[n - 1]
   let whose = display.member_name(c.author, c.expand.author.name, "anon")
@@ -2376,7 +2376,7 @@ fn cross_team_link(
   if d.team == issue.team { return Ok(()) }
   let key = f"{issue.expand.team.key}-{issue.number}"
   Err(
-    f"{key} is in {issue.expand.team.key} and doc '{d.slug}' is in {team.key} — a link stays inside one team",
+    f"{key} is in {issue.expand.team.key} and doc '{d.slug}' is in {team.key}; a link stays inside one team",
   )
 }
 
@@ -2425,7 +2425,7 @@ fn unlink_issue(id: string, slug: string, usage: string) -> Result<(), string> {
   cross_team_link(issue, team, d)?
 
   if d.issues.find(|x| x == issue.id).is_none() {
-    return Err(f"{key} is not linked to {d.slug} — see 'lll doc view {d.slug}'")
+    return Err(f"{key} is not linked to {d.slug}; see 'lll doc view {d.slug}'")
   }
   modify_doc_issues(d, "issues-", issue.id)?
   fmt.Println(f"Unlinked {key} from {d.slug}")
@@ -2633,21 +2633,21 @@ fn issue_next(input: flags.CommandInput) -> Result<(), string> {
   let held = claims.for_team(scope.filter_team())?.map(|c| c.issue)
   let agenda = rank_agenda(candidates, unblocks).filter(|i| i.assignee == "" && !held.contains(i.id))
   if agenda.is_empty() {
-    return Err(pb.fail(pb.ErrorKind.NothingToDo, "no unclaimed ready issues — the agenda is empty; 'lll issue list --ready' shows what is claimed, 'lll issue create' makes new work"))
+    return Err(pb.fail(pb.ErrorKind.NothingToDo, "no unclaimed ready issues: the agenda is empty; 'lll issue list --ready' shows what is claimed, 'lll issue create' makes new work"))
   }
   let best = agenda[0]
   let key = f"{best.expand.team.key}-{best.number}"
   if p.given("--claim") {
     let Some(member) = actor()? else {
       return Err(
-        "claiming needs a member token — 'lll login' as a person, or 'lll token create <member>' with admin credentials",
+        "claiming needs a member token: 'lll login' as a person, or 'lll token create <member>' with admin credentials",
       )
     }
     // Acquire before printing: a key this command did not secure is a lie to
     // the shell loop that composed it. A lost race exits non-zero, keyless.
     let result = claims.acquire(pb.Caller.Process, best.id, member.id, agent).map_err(|e| {
       if pb.classify(e).code == "claim_held" {
-        f"{key}: {e} — {held_elsewhere_hint(key)}"
+        f"{key}: {e}; {held_elsewhere_hint(key)}"
       } else { e }
     })?
     fmt.Fprintln(os.Stderr, f"Claimed {key} for {result.member_name}")

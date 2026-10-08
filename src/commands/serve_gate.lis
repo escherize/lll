@@ -169,7 +169,7 @@ fn confirm_login(w: http.ResponseWriter, r: Ref<http.Request>, tok: string, who:
   let next = html.EscapeString(without_board_token(r))
   let page = f"<!doctype html>
 <html lang='en'>
-<head><meta charset='utf-8'><meta name='viewport' content='width=device-width, initial-scale=1'><title>lll board — sign in</title></head>
+<head><meta charset='utf-8'><meta name='viewport' content='width=device-width, initial-scale=1'><title>lll board: sign in</title></head>
 <body style='font-family: ui-sans-serif, system-ui, sans-serif; max-width: 42rem; margin: 4rem auto; padding: 0 1rem; color: #1c1c1e; line-height: 1.5;'>
 <h1 style='font-size: 1.4rem;'>Sign in to this board?</h1>
 <p>This link signs this browser in to the lll board as <strong>{html.EscapeString(who)}</strong>. Continue only if you opened it yourself and that is you.</p>
@@ -536,7 +536,7 @@ fn issue_route(v: ScopedViewer, issue: string) -> ScopedVerdict {
 
 /// The 404 body a team that does not exist gets (routed_team's words).
 fn hidden_team(key: string) -> string {
-  f"no team with key '{key}' on this server — see the rail's team switcher"
+  f"no team with key '{key}' on this server; see the rail's team switcher"
 }
 
 /// True when an issue key such as "ABC-12" belongs to team "ABC". The rest
@@ -639,10 +639,10 @@ fn refused(w: http.ResponseWriter, r: Ref<http.Request>) {
 <head>
 <meta charset='utf-8'>
 <meta name='viewport' content='width=device-width, initial-scale=1'>
-<title>lll board — 401</title>
+<title>lll board: 401</title>
 </head>
 <body style='font-family: ui-sans-serif, system-ui, sans-serif; max-width: 42rem; margin: 4rem auto; padding: 0 1rem; color: #1c1c1e; line-height: 1.5;'>
-<h1 style='font-size: 1.4rem;'>401 &mdash; this board is gated</h1>
+<h1 style='font-size: 1.4rem;'>401: this board is gated</h1>
 <p>The lll board only answers requests that carry its board token.</p>
 {wrong}
 <form method='get' style='margin: 1.5rem 0; display: flex; gap: .6rem; flex-wrap: wrap; align-items: flex-end;'>

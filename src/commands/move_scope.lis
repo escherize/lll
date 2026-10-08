@@ -106,7 +106,7 @@ fn move_destination(key: string) -> Result<models.Team, string> {
     return Err(unknown_team(key))
   }
   if team.archived {
-    return Err(f"team {team.key} is archived — 'lll team unarchive {team.key}' first")
+    return Err(f"team {team.key} is archived; run 'lll team unarchive {team.key}' first")
   }
   Ok(team)
 }

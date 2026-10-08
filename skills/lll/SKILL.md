@@ -232,7 +232,7 @@ because Y needs a reconciler and two writable copies" is worth the file.
 
 ## Side projects: attach, work, archive
 
-A team is cheap — give every side project its own instead of piling issues
+A team is cheap. Give every side project its own instead of piling issues
 into a shared one. It does not have to be a repo: `lll attach --key KEY` in a plain
 directory writes `.lll.toml` there and every subdirectory inherits it, so a
 folder of notes gets tracked without a `git init`.
@@ -250,7 +250,7 @@ Archiving hides, never deletes: `/t/KEY/` still renders with an "archived"
 banner and everything stays readable, but new writes refuse and name the fix
 (`lll team unarchive KEY`). `lll team list --archived` lists every team and
 marks the archived ones.
-Archive rather than abandon — a board that lists only live teams is one you
+Archive rather than abandon: a board that lists only live teams is one you
 can actually scan.
 
 ## Conventions that keep a parallel backlog honest

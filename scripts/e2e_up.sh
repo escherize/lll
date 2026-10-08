@@ -57,14 +57,37 @@ LLL="$REPO_ROOT"/target/.lisette/bin/lll
 LLL_ABS="$LLL"
 
 # Occupy the configured db port and the web port so both must auto-increment.
+# free_port only probed them, so another process may have taken one since:
+# on EADDRINUSE the holder takes a fresh port from the same range and reports
+# the pair it actually holds, which the rest of the suite then uses.
+BLOCKED="$DATA_DIR/blocked-ports"
 python3 -c "
-import socket, time
-s1 = socket.socket(); s1.bind(('127.0.0.1', $DB_PORT)); s1.listen(1)
-s2 = socket.socket(); s2.bind(('127.0.0.1', $WEB_PORT)); s2.listen(1)
+import errno, os, random, socket, sys, time
+def hold(port, lo, hi):
+    for _ in range(200):
+        s = socket.socket()
+        try:
+            s.bind(('127.0.0.1', port))
+        except OSError as e:
+            s.close()
+            if e.errno != errno.EADDRINUSE:
+                raise
+            port = random.randint(lo, hi)
+            continue
+        s.listen(1)
+        return s, port
+    sys.exit('no free port to occupy in %d-%d' % (lo, hi))
+s1, db = hold($DB_PORT, 20000, 39999)
+s2, web = hold($WEB_PORT, 40000, 59999)
+with open('$BLOCKED.tmp', 'w') as f:
+    f.write('%d %d\n' % (db, web))
+os.rename('$BLOCKED.tmp', '$BLOCKED')
 time.sleep(60)
 " &
 BLOCK_PID=$!
-sleep 0.5
+for _ in $(seq 50); do [ -s "$BLOCKED" ] && break; sleep 0.1; done
+[ -s "$BLOCKED" ] || fail "could not occupy the preferred ports"
+read -r DB_PORT WEB_PORT <"$BLOCKED"
 
 # --- own path: skips occupied preferred ports, default creds ---
 set -m

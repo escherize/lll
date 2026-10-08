@@ -13,7 +13,7 @@ pub struct Outcome { pub refs: string, pub added: bool }
 pub fn append(issue_id: string, reference: string) -> Result<Outcome, string> {
   let body = json.Marshal(AppendRequest { reference }).map_err(|e| f"encoding reference: {e}")?
   let response = pb.post(f"/api/lll/issues/{url.PathEscape(issue_id)}/refs", body as string).map_err(|e| {
-    if pb.classify(e).status == 404 { "server does not support atomic reference appends — update the server before adding refs" } else { e }
+    if pb.classify(e).status == 404 { "server does not support atomic reference appends; update the server before adding refs" } else { e }
   })?
   let mut outcome = Outcome { .. }
   json.Unmarshal(response.bytes(), &outcome).map_err(|e| f"decoding reference response: {e}")?

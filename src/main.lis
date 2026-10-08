@@ -153,7 +153,7 @@ Usage:
   lll config <command>    manage configuration (see 'lll config --help')
   lll login [--url URL]   authenticate as a member; the token goes to
                           ~/.config/lll/lll.toml, and --url persists the
-                          server url too — the one-command machine setup
+                          server url too: the one-command machine setup
                           (see 'lll login --help')
   lll logout              clear the stored token (see 'lll logout --help')
   lll whoami              which member, server and team you are acting as
@@ -195,7 +195,7 @@ Examples:
                           priority, age, unblocks; add --claim to take it
 
 Configuration (env > the repo's .lll.toml > ~/.config/lll/lll.toml; the files
-layer, each supplying the keys it names — 'lll config list' shows which won):
+layer, each supplying the keys it names; 'lll config list' shows which won):
   LLL_URL      lll server base URL (default http://127.0.0.1:8090)
   LLL_TEAM     default team key (e.g. ENG); scopes 'issue list', used by 'issue create'
   LLL_SORT     default sort for 'issue list': {strings.Join(query.sort_fields(), ", ")}; prefix - to descend
@@ -216,7 +216,7 @@ fn unknown_command(noun: string, verb: string) -> string {
   for n in ["issue", "team", "member", "project", "label", "doc", "finding", "token"] {
     if singular == n && noun != n {
       let rest = if verb == "" || verb.starts_with("-") { "" } else { f" {verb}" }
-      return f"unknown command: '{noun}' — did you mean 'lll {n}{rest}'? (see 'lll {n} -h')"
+      return f"unknown command: '{noun}'; did you mean 'lll {n}{rest}'? (see 'lll {n} -h')"
     }
   }
   for c in commands.issue_commands() {
@@ -225,14 +225,14 @@ fn unknown_command(noun: string, verb: string) -> string {
       // the typed verb here, as the plural branch once did, hid the half
       // the user had right. So the verb rides along (LLL-313).
       let rest = if verb == "" || verb.starts_with("-") { "" } else { f" {verb}" }
-      return f"unknown command: '{noun}{rest}' — it is an issue verb: 'lll issue {noun} ...' (see 'lll issue {noun} -h')"
+      return f"unknown command: '{noun}{rest}'; it is an issue verb: 'lll issue {noun} ...' (see 'lll issue {noun} -h')"
     }
   }
   // A member verb typed as a noun, the same mistake shape (fleet case 11 was
   // 'lll invite', which is now its own noun and points back at member invite).
   for c in commands.member_commands() {
     if c.name == noun {
-      return f"unknown command: '{noun}' — it is a member verb: 'lll member {noun} ...' (see 'lll member {noun} -h')"
+      return f"unknown command: '{noun}'; it is a member verb: 'lll member {noun} ...' (see 'lll member {noun} -h')"
     }
   }
   f"unknown command: '{noun}' (see 'lll --help')"

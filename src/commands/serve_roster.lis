@@ -53,7 +53,7 @@ fn roster_for(r: Ref<http.Request>, team_id: string) -> Result<Roster, string> {
 /// cannot probe who exists.
 fn roster_member(roster: Roster, name: string) -> Result<models.Member, string> {
   let Some(m) = roster.members.find(|m| m.name == name) else {
-    return Err(f"no member named '{name}' — see 'lll member list'")
+    return Err(f"no member named '{name}'; see 'lll member list'")
   }
   Ok(m)
 }

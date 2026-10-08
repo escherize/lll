@@ -49,7 +49,7 @@ pub fn seed_demo(team_key: string, me: string, db_url: string, keep_cli_token: b
   let existing = records.fetch_board_issues(team.id)?
   if !existing.is_empty() {
     fmt.Println(
-      f"demo   {team_key} already has {existing.length()} issues — not seeding over them",
+      f"demo   {team_key} already has {existing.length()} issues; not seeding over them",
     )
     return Ok(())
   }
@@ -74,7 +74,7 @@ pub fn seed_demo(team_key: string, me: string, db_url: string, keep_cli_token: b
   }
 
   fmt.Println(
-    f"demo   seeded {team_key} with 10 issues and 4 docs — start at 'lll doc view start-here'",
+    f"demo   seeded {team_key} with 10 issues and 4 docs; start at 'lll doc view start-here'",
   )
   point_cli_at_demo(db_url, team_key, me, keep_cli_token)?
   fmt.Println(f"demo   done with it? 'lll team archive {team_key}'")
@@ -97,7 +97,7 @@ fn point_cli_at_demo(db_url: string, team_key: string, me: string, keep_cli_toke
   // an existing CLI credential from a file.
   if keep_cli_token {
     fmt.Println(
-      f"demo   your CLI keeps its configured token — to drive this board instead:
+      f"demo   your CLI keeps its configured token. To drive this board instead:
 demo     LLL_URL={db_url} LLL_TEAM={team_key} lll issue list",
     )
     return Ok(())
@@ -106,7 +106,7 @@ demo     LLL_URL={db_url} LLL_TEAM={team_key} lll issue list",
   let _ = set_home_key("url", db_url)?
   let _ = set_home_key("token", cfg.token)?
   let _ = set_home_key("team", team_key)?
-  fmt.Println(f"demo   your CLI is pointed at this board as {me} — try 'lll issue next'")
+  fmt.Println(f"demo   your CLI is pointed at this board as {me}; try 'lll issue next'")
   Ok(())
 }
 

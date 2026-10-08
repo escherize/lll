@@ -33,7 +33,7 @@ fn settings_delete(r: mut Ref<http.Request>, team_id: string) -> Result<Option<s
     (project.name, project.team)
   }
   if team_id == "" || owner != team_id {
-    return Err(f"the {kind} is not in this team — reload settings")
+    return Err(f"the {kind} is not in this team; reload settings")
   }
   let used = entity_issue_count(kind, id)?
   let confirmed = r.PostFormValue("confirmed") == "1"

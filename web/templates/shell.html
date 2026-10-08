@@ -7,7 +7,7 @@
      a broadcast from constructing a rail it must never render.
 
      #rail sits outside every morph boundary (#board, #issue-detail and
-     #comments all live inside .main), so no morph disturbs it — and the id
+     #comments all live inside .main), so no morph disturbs it, and the id
      is here for the day favorites patch a group into it.
 
      Rows exist only where a destination does. "My issues" is the board
@@ -151,14 +151,14 @@
      colour draws the tab icon. Both carry ids because they sit OUTSIDE every
      morph boundary but still have to change: /settings patches #accent and
      #favicon in the response to its own save, so picking a colour recolors
-     the open page. An empty AccentCss means nobody chose one — the <style>
+     the open page. An empty AccentCss means nobody chose one: the <style>
      stays empty and theme.css's canonical orange is left byte-identical. */}}
 {{define "team-title-prefix"}}lll - {{if .TeamKey}}{{.TeamKey}} {{end}}{{end}}
 {{define "accent-head"}}<meta name="viewport" content="width=device-width, initial-scale=1"><script src="/static/navigation.js" defer></script><style id="accent">{{.AccentCss}}</style><link id="favicon" rel="icon" href="{{.Favicon}}">{{end}}
 
 {{/* The team switcher (TASK-198): every team on the server, this page's own
      marked. One server hosts every team now, so the rail is where a browser
-     reaches the others — each row is a plain navigation to that team's board
+     reaches the others: each row is a plain navigation to that team's board
      URL (/t/KEY/), which is also what makes a team's board shareable.
      Server-rendered per page load like the rest of the rail: the rail sits
      outside every morph boundary, so no broadcast ever re-renders it. */}}
@@ -168,7 +168,7 @@
 {{else}}<p class="rg-empty">No teams on this server yet.</p>
 {{end}}</div>{{end}}
 
-{{/* The favorites group — the one live region of the rail, and the reason
+{{/* The favorites group: the one live region of the rail, and the reason
      #rail carries an id. It is its OWN morph boundary (#rail-favorites), so
      favorite and issue events patch this group alone on realtime pages; the rail around it is still
      never rendered into a broadcast. Its dot is the Slice<FavVM> the bridge
@@ -184,7 +184,7 @@
 {{else}}<p class="rg-empty">Star an issue to pin it here for the whole workspace.</p>
 {{end}}</div>{{end}}
 
-{{/* The SAVED VIEWS group — the rail's second live region, with its own
+{{/* The SAVED VIEWS group: the rail's second live region, with its own
      morph boundary id so a views event patches this group alone (same
      bargain as rail-favorites). Its dot is the Slice<ViewVM> the bridge
      re-renders it from.

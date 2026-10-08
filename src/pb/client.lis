@@ -33,7 +33,7 @@ is the lll server running? start everything with 'lll up', or point LLL_URL (or 
 fn unreachable_hint(base: string, defaulted: bool, e: error) -> string {
   let msg = unreachable(base, e)
   if !defaulted { return msg }
-  msg + "\nno url is configured on this machine — connect with: lll login --url https://your-server"
+  msg + "\nno url is configured on this machine; connect with: lll login --url https://your-server"
 }
 
 /// GET a path (joined to base_url) and return the response body.
@@ -639,7 +639,7 @@ fn expired_token(tok: string, origin: string) -> string {
   let exp = token_expiry(tok).unwrap_or(0)
   let when = time.Unix(exp as int64, 0).UTC().Format("2006-01-02 15:04:05 UTC")
   let ago = time.Now().Unix() as int - exp
-  fail(ErrorKind.Auth, f"{from} expired at {when} ({ago}s ago) — every read comes back empty and every write is refused until it is replaced: 'lll token create <member>' (an agent's, minted by a superuser) or 'lll login --email <your email>' (a person)")
+  fail(ErrorKind.Auth, f"{from} expired at {when} ({ago}s ago). Every read comes back empty and every write is refused until it is replaced: 'lll token create <member>' (an agent's, minted by a superuser) or 'lll login --email <your email>' (a person)")
 }
 
 pub fn expired_token_message() -> string {
@@ -686,7 +686,7 @@ fn not_logged_in(base: string, defaulted: bool) -> string {
   // copy-pastes into the same failure — all three second-round usability runs
   // called that out, and it is the only line here that actively wasted them.
   let (where_, url_arg) = if defaulted {
-    (f"{base} (the default — nothing here configured a url)", "<your server url>")
+    (f"{base} (the default; nothing here configured a url)", "<your server url>")
   } else {
     (base, base)
   }
@@ -694,11 +694,11 @@ fn not_logged_in(base: string, defaulted: bool) -> string {
 every collection is authenticated-only, so reads would come back empty and writes refused
 log in with: lll login --url {url_arg} --email <your email>
 no account yet?
-  you hold the server's admin credentials — one command, paste it whole:
+  you hold the server's admin credentials? One command, paste it whole:
     LLL_ADMIN_EMAIL=<admin email> LLL_ADMIN_PASSWORD=<admin password> \\
       lll login --url {url_arg} --email <your email> --create --password <pick one>
     (add --name <name> unless the part of your email before @ is the name you want)
-  somebody else deployed it — ask them to run:
+  somebody else deployed it? Ask them to run:
     lll member invite <name> --email <your email>")
 }
 

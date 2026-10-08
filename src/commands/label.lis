@@ -30,7 +30,7 @@ pub fn label_commands() -> Slice<flags.Command> {
     },
     flags.Command {
       name: "create",
-      summary: "create a label (--team defaults to LLL_TEAM); check 'lll label list' first — reuse over near-duplicates (bug/bugs/defect)",
+      summary: "create a label (--team defaults to LLL_TEAM); check 'lll label list' first and reuse over near-duplicates (bug/bugs/defect)",
       page: label_create_page(),
       spec: label_create_spec(),
       positional: "[NAME]",
@@ -168,7 +168,7 @@ fn label_edit(input: flags.CommandInput) -> Result<(), string> {
     return Err(flags.usage_error(f"usage: {usage}"))
   }
   if !p.given("-n") && !p.given("-c") {
-    return Err(flags.usage_error(f"nothing to update — pass -n or -c\nusage: {usage}"))
+    return Err(flags.usage_error(f"nothing to update: pass -n or -c\nusage: {usage}"))
   }
   if p.given("-n") { check_filter_name("label", p.one("-n"))? }
   let label = records.resolve_label(current_team()?.id, name)?

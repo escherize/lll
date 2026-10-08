@@ -154,7 +154,7 @@ or run against the remote deliberately, with no --pb-dir",
     // --scratch (LLL-487) is the whole answer in one command.
     return Err(
       f"the configured url is {db_url}, which is not this machine
-'lll up' serves and seeds a database — pointed at a remote one it writes there
+'lll up' serves and seeds a database; pointed at a remote one it writes there
 for a throwaway board: lll up --scratch
 to serve this directory instead: LLL_CONFIG_HOME=$(mktemp -d) LLL_URL=http://127.0.0.1:8090 lll up
 check what is configured with 'lll config list'",
@@ -221,7 +221,7 @@ check what is configured with 'lll config list'",
     }
     if !ok {
       return Err(
-        f"lll server did not come up on {db_url} — check its output above",
+        f"lll server did not come up on {db_url}; check its output above",
       )
     }
     api_line = f"api    {db_url}"
@@ -339,7 +339,7 @@ password in its own data directory's .lll-admin.json.",
   }
   let chosen = free_port(web_port)
   if chosen != web_port {
-    fmt.Println(f"port {web_port} taken — board moving to {chosen}")
+    fmt.Println(f"port {web_port} taken; board moving to {chosen}")
   }
   fmt.Println(f"lll    {version()}")
   fmt.Println(api_line)
@@ -783,7 +783,7 @@ LLL_TEAM and no prompt.
 The board is gated: it answers only requests carrying its board token.
 LLL_BOARD_TOKEN sets that token; otherwise a loopback boot generates one
 per boot (a non-loopback LLL_BIND refuses to start without it) and prints it
-in the banner as a login URL — open it once and the browser keeps
+in the banner as a login URL. Open it once and the browser keeps
 access in a cookie. 'lll board' prints the same link on this machine. From a
 terminal, send the same cookie: curl
 -H 'Cookie: lll_board=<token>' http://127.0.0.1:<port>/.
@@ -858,7 +858,7 @@ fn ensure_team(
     match create_team(key, key) {
       Ok(created) => {
         let _ = fmt.Println(
-          f"created team {created.key} — issues will be {created.key}-1, {created.key}-2, ...",
+          f"created team {created.key}; issues will be {created.key}-1, {created.key}-2, ...",
         )
       },
       Err(e) => {
@@ -946,12 +946,12 @@ fn board_identity(
 /// Ask for a team key on stdin, defaulting to `suggested`. Errs when stdin
 /// has no answer to give (scripts, agents, CI).
 fn ask_team(suggested: string) -> Result<string, string> {
-  fmt.Print(f"no team configured — team key [{suggested}]: ")
+  fmt.Print(f"no team configured. Team key [{suggested}]: ")
   let newline = 10 as byte
   let Partial.Ok(line) = bufio.NewReader(os.Stdin).ReadString(newline) else {
     fmt.Println("")
     return Err(
-      f"no team configured and no answer on stdin — set LLL_TEAM={suggested}, or add team = \"{suggested}\" to .lll.toml (see 'lll config init')",
+      f"no team configured and no answer on stdin; set LLL_TEAM={suggested}, or add team = \"{suggested}\" to .lll.toml (see 'lll config init')",
     )
   }
   // Only directory-derived suggestions are shortened/normalized. Explicit
