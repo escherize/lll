@@ -262,7 +262,7 @@ check what is configured with 'lll config list'",
           )
         } else if cfg.token != "" {
           fmt.Println(
-            f"auth   the token from {src.token} is not valid for {db_url} — booting on the superuser credentials instead; 'lll login' once the board is up replaces it",
+            f"auth   the token from {src.token} is not valid for {db_url} — booting on the superuser credentials instead; the cli line below says what the CLI does",
           )
         }
         let _ = os.Setenv("LLL_TOKEN", tok)

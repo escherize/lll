@@ -81,9 +81,10 @@ lll issue close DEMO-1
 lll board -w        # opens the board, signed in
 ```
 
-To track a repository on the same board, run `lll attach` inside it. It
-creates a team named after the directory and writes `team = "KEY"` to the
-repo's `.lll.toml`; commit that file.
+To track a repository on the same board, run `lll attach --key KEY` inside
+it. It creates team KEY if it is missing and writes `team = "KEY"` to the
+repo's `.lll.toml`; commit that file. Plain `lll attach` picks the board's
+only team when there is one.
 
 To bring in another person, mint a single-use invite link:
 
