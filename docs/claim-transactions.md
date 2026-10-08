@@ -28,7 +28,10 @@ The expiry announcement, the one comment the server writes on its own,
 carries `author_kind: "system"` (LLL-654); every other comment has `""`. No
 request may set the field or edit a system comment, and a member's comment
 is always authored by that member, so neither kind of record can be planted
-by hand. Comments written before this are not relabelled. The forced-release
+by hand. Comments written before this are not relabelled. Only a comment's
+author may edit or delete it (a superuser still moderates), and every comment
+the server writes, the forced-release record included, carries
+`server_record`: no request may edit it and no member may delete it. The forced-release
 comment is not system: it embeds the releaser's reason, so it stays the
 releaser's, attributed and labelled like any comment. Both bodies name a
 member only when everyone who sees the issue's team may see that member;

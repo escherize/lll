@@ -371,7 +371,7 @@ fn issue_comment_spec() -> Slice<flags.Flag> {
       help: "comment body ('-b -' reads it from stdin)",
       ..,
     },
-    flags.Flag { name: "--force", help: "with edit/delete: change a comment that is not yours", .. },
+    flags.Flag { name: "--force", help: "with edit/delete and a superuser token: change a comment that is not yours", .. },
     flags.Flag {
       name: "--agent",
       value: true,
@@ -2066,7 +2066,7 @@ fn comment_mutate(verb: string, p: flags.Parsed) -> Result<(), string> {
   if !p.given("--force") {
     if let Some(a) = actor()? {
       if c.author != a.id {
-        return Err(f"comment #{n} on {key} is {whose}'s, not yours — --force changes it anyway")
+        return Err(f"comment #{n} on {key} is {whose}'s, not yours; only its author changes it (a superuser token can, with --force)")
       }
     }
   }
@@ -2101,7 +2101,7 @@ fn comment_mutate(verb: string, p: flags.Parsed) -> Result<(), string> {
 
 fn comment_mutate_spec(verb: string) -> Slice<flags.Flag> {
   let mut spec = [
-    flags.Flag { name: "--force", help: "change a comment that is not yours", .. },
+    flags.Flag { name: "--force", help: "with a superuser token: change a comment that is not yours (the server refuses members)", .. },
   ]
   if verb == "delete" {
     spec = spec.append(

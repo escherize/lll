@@ -119,7 +119,7 @@ func TestExpiredClaimIsAnnouncedOnAnOpenIssue(t *testing.T) {
 		t.Fatal("the sweep attributed its comment to a member")
 	}
 	// LLL-654: authorless is not "the human's"; the kind says who wrote it.
-	if comments[0].GetString("author_kind") != "system" {
+	if comments[0].GetString("author_kind") != "system" || !comments[0].GetBool("server_record") {
 		t.Fatal("the sweep's comment is not marked as the server's")
 	}
 	if comments[0].GetString("issue") != issueID {

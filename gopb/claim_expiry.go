@@ -155,6 +155,7 @@ func announceExpiry(app core.App, issue *core.Record, claim *core.Record, now ti
 	comment := core.NewRecord(comments)
 	comment.Set("issue", issue.Id)
 	comment.Set("author_kind", systemAuthorKind)
+	comment.Set("server_record", true)
 	comment.Set("body", fmt.Sprintf(
 		"Claim released automatically: %s had held it for %s with no activity on the board. "+
 			"`lll issue claim` takes it again.",

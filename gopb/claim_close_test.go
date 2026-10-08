@@ -157,6 +157,11 @@ func TestForcedReleaseWithAHostileReasonIsTheReleasers(t *testing.T) {
 	if records[0].GetString("author") != beta || records[0].GetString("author_kind") != "" {
 		t.Fatalf("forced-release comment author %q kind %q", records[0].GetString("author"), records[0].GetString("author_kind"))
 	}
+	// It is still the server's record of the release: locked against edits
+	// and member deletes (registerSystemCommentGuard).
+	if !records[0].GetBool("server_record") {
+		t.Fatal("the forced-release comment is not marked as a server record")
+	}
 }
 
 // No stored comment proves the server wrote it (members could post authorless

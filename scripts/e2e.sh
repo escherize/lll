@@ -1045,8 +1045,21 @@ set -e
 [ "$rc" -ne 0 ] || fail "deleting someone else's comment: expected nonzero exit"
 assert_contains "$out" "is bryan's, not yours" "another member's comment is refused and named"
 assert_contains "$out" "--force" "the refusal names the override"
-out=$(LLL_URL=$URL LLL_TOKEN="$CAROL_TOK" LLL_ME=carol "$LIN" issue comment delete ENG-7 1 --force)
-assert_contains "$out" "Deleted comment #1 on ENG-7 (was bryan's)" "--force deletes and says whose it was"
+# LLL-646 review: only a comment's author changes it, enforced by the server,
+# so a member's --force is refused too and nothing changes.
+set +e
+out=$(LLL_URL=$URL LLL_TOKEN="$CAROL_TOK" LLL_ME=carol "$LIN" issue comment delete ENG-7 1 --force 2>&1)
+rc=$?
+out_edit=$(LLL_URL=$URL LLL_TOKEN="$CAROL_TOK" LLL_ME=carol "$LIN" issue comment edit ENG-7 1 --force -b "carol's words" 2>&1)
+rc_edit=$?
+set -e
+[ "$rc" -ne 0 ] && [ "$rc_edit" -ne 0 ] || fail "a member's --force changed another member's comment"
+assert_contains "$out" "comment's author can change or delete it" "the server refuses another member's delete"
+assert_contains "$out_edit" "comment's author can change or delete it" "the server refuses another member's edit"
+out=$(LLL_URL=$URL "$LIN" issue comment ENG-7)
+assert_contains "$out" "Looks good to me, edited" "the refused change left the comment"
+out=$(LLL_URL=$URL LLL_TOKEN="$BRYAN_TOK" LLL_ME=bryan "$LIN" issue comment delete ENG-7 1)
+assert_contains "$out" "Deleted comment #1 on ENG-7 (was bryan's)" "the author deletes and it says whose it was"
 out=$(LLL_URL=$URL "$LIN" issue comment ENG-7)
 assert_not_contains "$out" "Looks good to me, edited" "the deleted comment is gone"
 set +e

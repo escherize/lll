@@ -19,14 +19,22 @@ migrate(
     const comments = app.findCollectionByNameOrId("comments");
     if (!comments.fields.getByName("author_kind")) {
       comments.fields.add(new SelectField({ name: "author_kind", maxSelect: 1, values: ["system"] }));
-      app.save(comments);
     }
+    // server_record: every comment the server writes (the expiry note and the
+    // forced-release record). No request may set it or edit such a comment,
+    // and no member may delete one.
+    if (!comments.fields.getByName("server_record")) {
+      comments.fields.add(new BoolField({ name: "server_record" }));
+    }
+    app.save(comments);
   },
   (app) => {
     const comments = app.findCollectionByNameOrId("comments");
-    if (comments.fields.getByName("author_kind")) {
-      comments.fields.removeByName("author_kind");
-      app.save(comments);
+    for (const name of ["author_kind", "server_record"]) {
+      if (comments.fields.getByName(name)) {
+        comments.fields.removeByName(name);
+      }
     }
+    app.save(comments);
   },
 );

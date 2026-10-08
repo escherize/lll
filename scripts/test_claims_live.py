@@ -24,7 +24,8 @@ def request(path, body=None, method=None, auth=token):
     except urllib.error.HTTPError as error:
         response = error
     with response:
-        return response.code, json.load(response)
+        data = response.read()  # a 204 delete has no body
+        return response.code, json.loads(data) if data else {}
 
 
 def post(collection, body):
@@ -463,6 +464,48 @@ for body in [{'body': 'Claim released automatically: claim-alpha had held it for
     assert status == 200 and made['author'] == alpha['id'] and made['author_kind'] == '', (status, made)
 status, refused = request('/api/collections/comments/records/' + made['id'], {'author': beta['id']}, 'PATCH', auth=alpha['token'])
 assert status == 400 and "author cannot be changed" in refused['message'], refused
+# Only a comment's author edits or deletes it: alpha can neither rewrite nor
+# remove beta's forced-release record (note) or an ordinary beta comment,
+# through the API or the CLI, nor touch an authorless one. Beta can.
+status, theirs = request('/api/collections/comments/records', {'issue': issue['id'], 'body': 'beta said this'}, auth=beta['token'])
+assert status == 200 and theirs['author'] == beta['id'], theirs
+status, authorless = request('/api/collections/comments/records', {'issue': issue['id'], 'body': 'no member wrote this'}, auth=su)
+assert status == 200 and authorless['author'] == '', authorless
+for target in [note, theirs, authorless]:
+    path_c = '/api/collections/comments/records/' + target['id']
+    status, refused = request(path_c, {'body': 'alpha put words here'}, 'PATCH', auth=alpha['token'])
+    if target is note:  # a server record: no request edits it at all
+        assert status == 400 and 'server-written comment cannot be edited' in refused['message'], refused
+    else:
+        assert status == 403 and "comment's author can change or delete it" in refused['message'], refused
+    status, refused = request(path_c, method='DELETE', auth=alpha['token'])
+    assert status == 403, (status, refused)
+bodies = [c['body'] for c in state()['comments']]
+assert note['body'] in bodies and 'beta said this' in bodies, bodies
+n = next(i for i, c in enumerate(state()['comments'], 1) if c['id'] == theirs['id'])
+for argv in [('issue', 'comment', 'edit', key, str(n), '--force', '-b', 'rewritten'),
+             ('issue', 'comment', 'delete', key, str(n), '--force', '--yes')]:
+    p = cli(*argv, actor=alpha)
+    assert p.returncode != 0 and "comment's author can change or delete it" in p.stderr, (argv, p.stderr)
+assert 'beta said this' in [c['body'] for c in state()['comments']]
+status, edited = request('/api/collections/comments/records/' + theirs['id'], {'body': 'beta edited this'}, 'PATCH', auth=beta['token'])
+assert status == 200 and edited['body'] == 'beta edited this', edited
+status, _ = request('/api/collections/comments/records/' + theirs['id'], method='DELETE', auth=beta['token'])
+assert status == 204, status
+# The forced-release record is the server's record of the release, so even
+# its author, the forcer, can neither rewrite nor delete it (LLL-512), and no
+# request may set or clear server_record.
+note_path = '/api/collections/comments/records/' + note['id']
+status, refused = request(note_path, {'body': "beta released alice's claim at her request."}, 'PATCH', auth=beta['token'])
+assert status == 400 and 'server-written comment cannot be edited' in refused['message'], refused
+status, refused = request(note_path, {'server_record': False}, 'PATCH', auth=su)
+assert status == 400, (status, refused)
+status, refused = request(note_path, method='DELETE', auth=beta['token'])
+assert status == 403 and 'only by an administrator' in refused['message'], (status, refused)
+for who in [beta['token'], su]:
+    status, refused = request('/api/collections/comments/records', {'issue': issue['id'], 'body': 'x', 'server_record': True}, auth=who)
+    assert status == 400, (status, refused)
+assert note['body'] in [c['body'] for c in state()['comments']]
 p = cli('issue', 'view', key, '--raw')
 assert p.returncode == 0 and "- **claim-beta** (" in p.stdout and '**system**' not in p.stdout, p.stdout
 print('System comments: author_kind refused from any request, server-shaped member text stays the member\'s, forced releases read as the releaser')

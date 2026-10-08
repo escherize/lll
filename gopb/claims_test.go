@@ -58,6 +58,7 @@ func claimFixture(t *testing.T) (core.App, string, string, string) {
 		&core.TextField{Name: "body", Required: true},
 		// LLL-654: "system" on the comments the server writes.
 		&core.TextField{Name: "author_kind"},
+		&core.BoolField{Name: "server_record"},
 		&core.AutodateField{Name: "created", OnCreate: true},
 	)
 	if err := app.Save(comments); err != nil {

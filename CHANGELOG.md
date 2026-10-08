@@ -219,6 +219,14 @@ create bots.
   Before this, any team writer could post a comment with no author or in
   another member's name, so a fake expiry note or forced-release record read
   as real. A superuser still chooses the author.
+- Only a comment's author may edit or delete it; a superuser still moderates.
+  Before this, any team writer could rewrite another member's comment under
+  that member's name, or delete it. `lll issue comment edit/delete --force`
+  now works only with a superuser token.
+- Comments the server writes (the forced-release record and the expiry note)
+  carry `server_record`: no request may edit one, and no member may delete
+  one, the releaser included, so a forced release cannot be made silent
+  after the fact (LLL-512).
 - A forced-release or expiry comment names a member only when everyone who sees the
   issue's team may see that member; otherwise it says "a member outside this
   team" (LLL-633).

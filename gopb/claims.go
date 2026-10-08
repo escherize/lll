@@ -336,6 +336,7 @@ func recordForcedRelease(tx core.App, issue, held *core.Record, by releaser) err
 	comment := core.NewRecord(comments)
 	comment.Set("issue", issue.Id)
 	comment.Set("author", by.memberID)
+	comment.Set("server_record", true)
 	comment.Set("body", body)
 	return tx.Save(comment)
 }
@@ -415,8 +416,15 @@ func registerClaimedIssueDeleteGuard(app core.App) {
 
 // registerSystemCommentGuard keeps author_kind the server's word (LLL-654):
 // no request may set it, and no request may edit a comment the server wrote,
-// so "system" on a comment always means the words are the server's. Deleting
-// one stays allowed, as for any comment.
+// so "system" on a comment always means the words are the server's. Only a
+// superuser may delete one (ownComment).
+//
+// server_record marks every comment the server writes, the forced-release
+// record as well as the expiry note. A forced release is attributed to its
+// releaser and carries the releaser's reason, so it is not system, but it is
+// the record LLL-512 requires: no request may edit it, and no member, the
+// releaser included, may delete it, or the forcer could make the release
+// silent after the fact.
 //
 // It also binds a member's comment to that member, the way issue creators
 // and doc authors are bound (provenance.go). The comments rules check only
@@ -428,8 +436,8 @@ func registerClaimedIssueDeleteGuard(app core.App) {
 // choosing the author, as imports need.
 func registerSystemCommentGuard(app core.App) {
 	app.OnRecordCreateRequest("comments").BindFunc(func(e *core.RecordRequestEvent) error {
-		if e.Record.GetString("author_kind") != "" {
-			return e.BadRequestError("author_kind is set by the server only", nil)
+		if e.Record.GetString("author_kind") != "" || e.Record.GetBool("server_record") {
+			return e.BadRequestError("author_kind and server_record are set by the server only", nil)
 		}
 		if e.Auth != nil && e.Auth.Collection().Name == "members" {
 			e.Record.Set("author", e.Auth.Id)
@@ -437,16 +445,45 @@ func registerSystemCommentGuard(app core.App) {
 		return e.Next()
 	})
 	app.OnRecordUpdateRequest("comments").BindFunc(func(e *core.RecordRequestEvent) error {
-		if e.Record.Original().GetString("author_kind") == systemAuthorKind {
+		if e.Record.Original().GetString("author_kind") == systemAuthorKind || e.Record.Original().GetBool("server_record") {
 			return e.BadRequestError("a server-written comment cannot be edited", nil)
 		}
-		if e.Record.GetString("author_kind") != "" {
-			return e.BadRequestError("author_kind is set by the server only", nil)
+		if e.Record.GetString("author_kind") != "" || e.Record.GetBool("server_record") {
+			return e.BadRequestError("author_kind and server_record are set by the server only", nil)
 		}
 		if e.Auth != nil && e.Auth.Collection().Name == "members" &&
 			e.Record.GetString("author") != e.Record.Original().GetString("author") {
 			return e.BadRequestError("a comment's author cannot be changed", nil)
 		}
+		if err := ownComment(e); err != nil {
+			return err
+		}
 		return e.Next()
 	})
+	app.OnRecordDeleteRequest("comments").BindFunc(func(e *core.RecordRequestEvent) error {
+		if e.Auth != nil && e.Auth.Collection().Name == "members" && e.Record.GetBool("server_record") {
+			return e.ForbiddenError("a server-written comment can be deleted only by an administrator", nil)
+		}
+		if err := ownComment(e); err != nil {
+			return err
+		}
+		return e.Next()
+	})
+}
+
+// ownComment is the rule for changing a comment: a member edits or deletes
+// only a comment it authored. The comments rules check only team write
+// access, so before this any team writer could rewrite another member's words
+// under that member's name, a forced-release record included, or delete
+// them. A bot and its owner are different authors. An authorless comment (the
+// expiry note, a superuser's) is no member's. A superuser names no member and
+// keeps moderating.
+func ownComment(e *core.RecordRequestEvent) error {
+	if e.Auth == nil || e.Auth.Collection().Name != "members" {
+		return nil
+	}
+	if e.Record.Original().GetString("author") == e.Auth.Id {
+		return nil
+	}
+	return e.ForbiddenError("only a comment's author can change or delete it", nil)
 }
