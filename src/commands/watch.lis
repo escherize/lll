@@ -493,7 +493,7 @@ fn ready_keys(issues: Slice<models.Issue>) -> Slice<string> {
   for issue in issues { seen = seen.append(issue.expand.blocked_by...) }
   let mut out: Slice<string> = []
   for issue in issues {
-    if is_ready(issue, seen) { out = out.append(issue.id) }
+    if records.is_ready(issue, seen) { out = out.append(issue.id) }
   }
   out
 }

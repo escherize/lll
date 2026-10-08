@@ -893,10 +893,10 @@ fn list(input: flags.CommandInput) -> Result<(), string> {
   // one open blocker. Decided here, after the fetch, because PocketBase
   // cannot filter on an expanded relation's state.
   if ready_only {
-    items = items.filter(|i| is_ready(i, i.expand.blocked_by))
+    items = items.filter(|i| records.is_ready(i, i.expand.blocked_by))
   }
   if blocked_only {
-    items = items.filter(|i| blockers_of(i, i.expand.blocked_by).any())
+    items = items.filter(|i| records.blockers_of(i, i.expand.blocked_by).any())
   }
   if let ListMode.Whole = mode {
     at = page_of_total(page, per_page, items.length())
@@ -1267,7 +1267,7 @@ fn view(input: flags.CommandInput) -> Result<(), string> {
         None => { parts = parts.append("a hidden issue") },
       }
     }
-    let blockers = blockers_of(full, full.expand.blocked_by)
+    let blockers = records.blockers_of(full, full.expand.blocked_by)
     let open = blockers.open.length()
     // is_ready's archived rule (LLL-679): an archived team's issue is not ready.
     let done = if full.expand.team.archived { "; all done, but the team is archived" } else { "; all done, ready" }
@@ -2444,50 +2444,6 @@ fn fetch_issue_by_id(ctx: pb.Client, id: string) -> Result<models.Issue, string>
   Ok(full)
 }
 
-/// What stands between an issue and "ready" for this reader (LLL-672).
-struct Blockers {
-  /// Blockers the reader can see that are not done or cancelled.
-  open: Slice<models.Issue>,
-  /// Blocker ids with no record the reader can see: another team's issue,
-  /// hidden from a team-scoped member. Counted as open, because nothing
-  /// proves them finished, and their state is not this reader's to learn.
-  hidden: int,
-}
-
-impl Blockers {
-  fn any(self) -> bool {
-    !self.open.is_empty() || self.hidden > 0
-  }
-}
-
-/// The one blocker rule, for list --ready and --blocked, issue next, issue
-/// view and watch --ready (LLL-672). Decided from the `blocked_by` ids, not
-/// from the expanded records: PocketBase drops a blocker the reader may not
-/// see from the expand, and deciding from the expand called that issue ready
-/// while watch, deciding from the ids, did not. `seen` is every blocker record
-/// the caller has, freshest first: the expand, or watch's snapshot.
-fn blockers_of(issue: models.Issue, seen: Slice<models.Issue>) -> Blockers {
-  let mut open: Slice<models.Issue> = []
-  let mut hidden = 0
-  for id in issue.blocked_by {
-    match seen.find(|s| s.id == id) {
-      Some(b) => { if b.state != "done" && b.state != "cancelled" { open = open.append(b) } },
-      None => { hidden += 1 },
-    }
-  }
-  Blockers { open, hidden }
-}
-
-/// Ready: open (todo or backlog), in a team that is not archived, and no
-/// blocker that is open or hidden. An archived team is read-only (LLL-660),
-/// so its open issues are not work anyone can pick up; with no team
-/// configured, `issue next` offered them (LLL-679).
-fn is_ready(issue: models.Issue, seen: Slice<models.Issue>) -> bool {
-  (issue.state == "todo" || issue.state == "backlog")
-    && !issue.expand.team.archived
-    && !blockers_of(issue, seen).any()
-}
-
 /// Issues that name `issue` as a blocker, for the "Blocks:" line.
 fn fetch_blocks(ctx: pb.Client, issue_id: string) -> Result<Slice<models.Issue>, string> {
   let filter = url.QueryEscape(f"blocked_by.id ?= {query.quote(issue_id)}")
@@ -2607,7 +2563,7 @@ fn issue_next(input: flags.CommandInput) -> Result<(), string> {
 fn ready_issues(ctx: pb.Client, scope: string) -> Result<Slice<models.Issue>, string> {
   let filter = url.QueryEscape(scope)
   let items = records.fetch_all_issues(ctx, f"&sort=created,id&expand=team,assignee,labels,blocked_by,project&filter={filter}")?
-  Ok(items.filter(|i| is_ready(i, i.expand.blocked_by)))
+  Ok(items.filter(|i| records.is_ready(i, i.expand.blocked_by)))
 }
 
 /// Triage order (LLL-382). prio_rank is the house answer to "how urgent is

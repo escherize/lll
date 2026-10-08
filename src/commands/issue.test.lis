@@ -561,11 +561,11 @@ fn blocked(id: string, state: string, blocked_by: Slice<string>) -> models.Issue
 #[test]
 fn a_hidden_blocker_is_not_ready() {
   let issue = blocked("a", "todo", ["hidden"])
-  let b = blockers_of(issue, [])
+  let b = records.blockers_of(issue, [])
   assert b.hidden == 1
   assert b.open.is_empty()
   assert b.any()
-  assert !is_ready(issue, [])
+  assert !records.is_ready(issue, [])
 }
 
 #[test]
@@ -573,14 +573,14 @@ fn readiness_counts_visible_open_blockers_and_ignores_finished_ones() {
   let done = blocked("d", "done", [])
   let cancelled = blocked("c", "cancelled", [])
   let open = blocked("o", "in-progress", [])
-  assert is_ready(blocked("a", "todo", ["d", "c"]), [done, cancelled])
-  assert is_ready(blocked("a", "backlog", []), [])
+  assert records.is_ready(blocked("a", "todo", ["d", "c"]), [done, cancelled])
+  assert records.is_ready(blocked("a", "backlog", []), [])
   let stuck = blocked("a", "todo", ["d", "o"])
-  assert !is_ready(stuck, [done, open])
-  assert blockers_of(stuck, [done, open]).open.length() == 1
-  assert blockers_of(stuck, [done, open]).hidden == 0
+  assert !records.is_ready(stuck, [done, open])
+  assert records.blockers_of(stuck, [done, open]).open.length() == 1
+  assert records.blockers_of(stuck, [done, open]).hidden == 0
   // Not open itself: blockers or no, it is not work to pick up.
-  assert !is_ready(blocked("a", "in-review", []), [])
+  assert !records.is_ready(blocked("a", "in-review", []), [])
 }
 
 /// LLL-679: an archived team is read-only, so its open issues are not ready.
@@ -588,9 +588,9 @@ fn readiness_counts_visible_open_blockers_and_ignores_finished_ones() {
 #[test]
 fn an_issue_in_an_archived_team_is_not_ready() {
   let mut issue = blocked("a", "todo", [])
-  assert is_ready(issue, [])
+  assert records.is_ready(issue, [])
   issue.expand.team = models.Team { key: "OLD", archived: true, .. }
-  assert !is_ready(issue, [])
+  assert !records.is_ready(issue, [])
 }
 
 /// watch --ready reads the same rule: the cache first, then the issue's

@@ -1,0 +1,49 @@
+import "models"
+
+/// What stands between an issue and "ready" for this reader (LLL-672).
+pub struct Blockers {
+  /// Blockers the reader can see that are not done or cancelled.
+  pub open: Slice<models.Issue>,
+  /// Blocker ids with no record the reader can see: another team's issue,
+  /// hidden from a team-scoped member. Counted as open, because nothing
+  /// proves them finished, and their state is not this reader's to learn.
+  pub hidden: int,
+}
+
+impl Blockers {
+  pub fn any(self) -> bool {
+    !self.open.is_empty() || self.hidden > 0
+  }
+}
+
+/// The one blocker rule, for list --ready and --blocked, issue next, issue
+/// view and watch --ready (LLL-672). Decided from the `blocked_by` ids, not
+/// from the expanded records: PocketBase drops a blocker the reader may not
+/// see from the expand, and deciding from the expand called that issue ready
+/// while watch, deciding from the ids, did not. `seen` is every blocker record
+/// the caller has, freshest first: the expand, or watch's snapshot.
+pub fn blockers_of(issue: models.Issue, seen: Slice<models.Issue>) -> Blockers {
+  let mut open: Slice<models.Issue> = []
+  let mut hidden = 0
+  for id in issue.blocked_by {
+    match seen.find(|s| s.id == id) {
+      Some(b) => {
+        if b.state != "done" && b.state != "cancelled" { open = open.append(b) }
+      },
+      None => {
+        hidden += 1
+      },
+    }
+  }
+  Blockers { open, hidden }
+}
+
+/// Ready: open (todo or backlog), in a team that is not archived, and no
+/// blocker that is open or hidden. An archived team is read-only (LLL-660),
+/// so its open issues are not work anyone can pick up; with no team
+/// configured, `issue next` offered them (LLL-679).
+pub fn is_ready(issue: models.Issue, seen: Slice<models.Issue>) -> bool {
+  (issue.state == "todo" || issue.state == "backlog") &&
+  !issue.expand.team.archived &&
+  !blockers_of(issue, seen).any()
+}
