@@ -1,33 +1,31 @@
 ---
 name: lll
-description: Use lll as the tracker and record for software work - claim a task before writing code, keep the board honest while you work, and leave a trail others can read. Covers the CLI (issues, comments, search, --raw, stdin bodies), the board, and the conventions that make a multi-agent backlog survive contact with parallel work. Use when working on lll itself or when exercising the lll board, and for the claim-before-code / record-what-you-learned conventions. Triggers on "lll issue", "claim a task", "file an issue", "what's on the board", "why did we", "record this decision", "log friction", "audit trail".
+description: Use lll as the tracker and record for software work - claim a task before writing code, keep the board honest while you work, and leave a trail others can read. Covers the CLI (issues, comments, search, --raw, stdin bodies), the board, and the conventions that make a multi-agent backlog survive contact with parallel work. Use in any repo whose work is tracked on an lll board, and for the claim-before-code / record-what-you-learned conventions. Triggers on "lll issue", "claim a task", "file an issue", "what's on the board", "why did we", "record this decision", "log friction", "audit trail".
 ---
 
 # Working through lll
 
-> One stage of the loop in [software-factory](../software-factory/SKILL.md), which maps all six
-> and says what hands to what.
+> One stage of the loop in `lll skill get software-factory`, which maps all
+> six and says what hands to what.
 
 lll is the tracker AND the record. The point is not project management: it is
 that six months from now, someone (probably an agent) can ask *why is this like
 this* and get an answer instead of a guess.
 
-## One tracker: this project runs on its own board
+## Your team and your board
 
-This skill covers the lll CLI, which is the product under development, and
-the lll board is also where THIS project's work is tracked: team `LLL` on
-the hosted instance named in `.lll.toml`. `lll issue list` from the checkout
-is this project's real work list. (A seeded demo board - `mise run seed` -
-is the fixture for exercising the tool; it is a different url and team.)
+Every command works against one team on one server. `.lll.toml` (written by
+`lll attach`, inherited by every subdirectory) names the team; `lll whoami`
+shows who you are, which server you reach and what you can do. `--team KEY`
+overrides the team for one command without rewriting configuration.
 
-The sidecar notes repo that used to hold the backlog, findings and decisions
-was imported here and archived; its url is in `.private-remote`, read-only.
-If a local `.private` is retained, run `mise run archive-protect` once to remove
-write permissions; the gate verifies protection. This changes permissions,
-not historical contents. See `docs/archive-history.md`. Fresh checkouts need
-not clone an archive.
-Findings are `lll finding list` / `lll finding near PATH`, decisions are
-`lll doc list` (kind decision), the backlog is the issue list.
+`lll issue list` from the checkout is the project's real work list. Findings
+are `lll finding list` / `lll finding near PATH`, decisions are `lll doc list`
+(kind decision), the backlog is the issue list.
+
+Your repository's own instructions (AGENTS.md, CLAUDE.md, a repo skill) may
+add specifics: the gate command, local skills, a scratch board. Where they are
+more specific than this skill, they win.
 
 ## The loop
 
@@ -49,8 +47,7 @@ Claiming your own issue again succeeds and says it is already yours.
 **The claim is exclusive per member, not per agent, unless agents label
 themselves.** Agents that share one member token share every claim: each
 one's `claim` succeeds with "already yours" and exits 0, so the claim does not
-stop two of them working the same issue (finding
-`shared-member-claims-do-not-isolate-sessions`). Give each session a label with
+stop two of them working the same issue. Give each session a label with
 `--agent NAME` or `LLL_AGENT` (on `issue claim`, `issue next --claim`, `issue
 comment`): a claim by the same member under a different label exits nonzero
 and names the holder's label, and so do `--renew` and `issue release`
@@ -68,23 +65,23 @@ already on.
 releases it first, or you force-release a dead hold (below). `--assignee none`
 releases the claim, so it follows the release rule: only the holder clears it
 without `--force`, and `lll issue update KEY-12 --assignee none --force -b "why"`
-leaves the same comment a forced release does (LLL-516).
+leaves the same comment a forced release does.
 `lll whoami` shows the authenticated identity. `lll issue release KEY-12`
 gives your claim back and clears the assignee when it still matches the holder.
 Releasing another member's claim, or a hold under a different agent label on
-your own token, is refused unless you add `--force` (LLL-512, LLL-521); a
+your own token, is refused unless you add `--force`; a
 forced release leaves a comment on the issue naming both members and labels,
 with the reason from `-b "why"` if you give one. Force only a hold you know is
 dead: its holder may still be editing.
 
-**A claim not renewed for 24 hours is released for you** (LLL-183): the
+**A claim not renewed for 24 hours is released for you**: the
 server sweeps hourly and frees holds that outlived the agent that took them,
 leaving the issue exactly as a deliberate release would. On an issue that is
 not done or cancelled, the sweep leaves a comment naming the holder and how
-long they held it (LLL-452); read the comments if a claim you were relying on
+long they held it; read the comments if a claim you were relying on
 has vanished. The 24 hours is fixed on the server, not configurable. To hold
 an issue longer, renew before it lapses: `lll issue claim KEY-12 --renew`
-restarts the clock on a claim you hold (LLL-535). Plain `claim` on your own
+restarts the clock on a claim you hold. Plain `claim` on your own
 issue does not renew it.
 
 `lll issue start KEY-12` sets in-progress without changing Git. To create a
@@ -93,6 +90,33 @@ For separate Git commands, `lll issue branch-name KEY-12` only prints a suggeste
 name; it changes nothing. Once you
 are on an issue branch, commands can infer the issue from it:
 `lll issue view` with no argument is the issue you are on.
+
+## Record it
+
+The commands an agent reaches for most, in the 0.8 spellings. Each has
+`--help` with the full flag list.
+
+```sh
+lll issue next --claim             # take the next ready, unclaimed issue (prints its key)
+lll search "claim expiry"          # issues, comments and docs, ranked
+lll finding near src/api           # traps already recorded for these paths
+
+# a trap, the moment it costs you time; 'suspected' until you have proof
+printf '%s' "$what_happened" | lll finding create port-probe-races \
+  -t "Port probe races a sibling server" -a ci -p scripts/e2e.sh \
+  --confidence suspected -b -
+lll finding confirm port-probe-races   # once you have proved it
+
+# a choice that constrains future work, written when you make it
+printf '%s' "$options_and_why" | lll doc create -k decision \
+  -s cache-in-process -t "Cache widgets in process, not in Redis" -b -
+
+lll bot bot-myrepo                 # a member for an agent: prints a paste-ready prompt with its token, once
+```
+
+`-a` (area) is conventionally a label's name, so issues carrying that label
+surface the doc. `-p` takes comma-separated paths; `lll finding near` matches
+by them in both directions.
 
 ## What agents specifically need
 
@@ -157,15 +181,14 @@ the CLI checks support before writing. Unkeyed creates remain independent.
 
 **This is not optional and it is not a nicety.** Every agent hits the same walls,
 and the ones that go unrecorded get hit again by the next agent, at full cost.
-Real examples from this project: a shell-working-directory trap was recorded
-after two occurrences and happened twice more; a byte-offset versus rune-index
-bug was in a finding before it panicked in five places.
+Real examples from lll's own development: a shell-working-directory trap was
+recorded after two occurrences and happened twice more; a byte-offset versus
+rune-index bug was in a finding before it panicked in five places.
 
-File work on this project in team `LLL` on the hosted board, using the CLI:
-`lll issue create -t "Title" --emoji 🐛 -d -`. The old `.private/` sidecar is
-read-only history. Do not write new tasks there. When using another project's
-board, file in that project's team. Keep scratch/demo fixtures separate from
-these real work records.
+File work in your project's team, using the CLI:
+`lll issue create -t "Title" --emoji 🐛 -d -`. When a tool you use is tracked
+on another board, file its problems in that board's team. Keep scratch and
+demo boards separate from your real work records.
 
 File it **when you hit it**, not at the end. Two kinds both count:
 
@@ -248,52 +271,23 @@ mode. A parallel wave is a scheduling record, not automatically a project.
 Before closing scoped work, check its project association against the outcome;
 leave explicitly deferred or unrelated work outside a release commitment.
 Read live counts with `lll project view NAME`. Closed-item counts do not prove
-release readiness. Policy and the historical backfill are recorded in
-`lll doc view projects-name-outcomes-not-waves` and
-`lll doc view historical-wave-project-audit`.
+release readiness.
 
 ## Verification, before you claim anything works
 
-Run what the user runs, not what you built. The gate is:
-
-```sh
-mise run gate     # build + unit tests + full e2e
-```
+Run what the user runs, not what you built. Your project's gate (the command
+that must pass before a change lands) says you broke nothing; it does not say
+you fixed anything. Reproduce the issue's failure, fix it, and reproduce the
+fix under the issue's conditions. If you do not know the gate, your repo's
+AGENTS.md, CONTRIBUTING or CI workflow names it; ask before guessing.
 
 If a failure looks unrelated to your change, **re-run the same tree two or three
-times before concluding you caused it.** A flaky assertion here once caused
-finished work to be parked as broken.
-
-If you run a server by hand while others might be running one too, do not
-hand-roll the isolation — `mise run scratch` is it:
-
-```sh
-mise run scratch              # free ports, a temp --pb-dir, safe in parallel
-mise run scratch -- --no-open # extra flags pass straight through to lll up
-```
-
-It picks both ports by BINDING them (a liveness probe cannot tell a free port
-from a stranger's server), and runs on loopback with a fresh database, home
-and working directory. Inherited `LLL_*` settings are cleared except an
-explicit `LLL_TEAM`; the default team is SCRAT. The banner prints the board
-login URL and isolated config path. The banner prints administrator credentials
-once: `admin@local.invalid` / a generated password. CLI access to
-this database needs its own local authentication; a hosted login token does
-not authenticate against the scratch database. The temporary directory is
-kept after shutdown; the banner shows the `rm -rf` to run when finished.
-
-`mise run dev` is the OTHER thing: it hardcodes port 8100 and `pb/pb_data`, so
-it is the shared local board and two of them collide. Use it when you want the
-persistent one, `scratch` when you want a board to poke at.
-
-Never `pkill -f "bin/lll up"` — the pattern matches every worktree's identical
-binary path and kills every sibling agent's server. Kill only PIDs you started.
+times before concluding you caused it.** A flaky assertion once caused finished
+work to be parked as broken.
 
 ## The board
 
-`lll up` runs PocketBase and the board together; `mise run dev` builds first.
-Board at :8100; the administration UI on the board’s `/_/` path is disabled
-by default and requires `lll up --admin-ui`. The separate API listener at
-:8090 retains its own administration routes. Changes made anywhere (CLI, web,
-another agent) appear in every open browser without a reload, over one SSE
-stream, so the CLI and the board are never out of sync.
+`lll up` runs the server and the board together. Changes made anywhere (CLI,
+web, another agent) appear in every open browser without a reload, over one
+SSE stream, so the CLI and the board are never out of sync. `lll board -w` opens
+the current team's board; `lll issue view KEY-12 -w` opens one issue.
