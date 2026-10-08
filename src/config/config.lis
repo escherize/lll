@@ -85,6 +85,9 @@ pub struct Overrides {
   pub team: Option<string>,
   /// --url on the commands that take one, or `lll up`'s chosen API.
   pub url: Option<string>,
+  /// The board url a command was pointed at (`lll member passes` uses the
+  /// saved local share's).
+  pub web_url: Option<string>,
   /// The administrator pair `lll up` started its server with.
   pub admin: Option<AdminCreds>,
   /// The board token `lll up` resolved for this boot.
@@ -124,6 +127,14 @@ impl Settings {
   pub fn with_url(self, url: string) -> Settings {
     let mut out = self
     out.overrides.url = Some(url)
+    out.loaded = apply_overrides(self.loaded, out.overrides)
+    out
+  }
+
+  /// These settings with the board url a command was pointed at.
+  pub fn with_web_url(self, web_url: string) -> Settings {
+    let mut out = self
+    out.overrides.web_url = Some(web_url)
     out.loaded = apply_overrides(self.loaded, out.overrides)
     out
   }
@@ -233,7 +244,7 @@ pub fn read_env() -> Env {
 
 /// No flag overrides anything.
 pub fn no_overrides() -> Overrides {
-  Overrides { team: None, url: None, admin: None, board_token: None, bind: None }
+  Overrides { .. }
 }
 
 /// Resolve settings: the files layered (home, then the repo's), the
@@ -309,6 +320,10 @@ fn apply_overrides(
   if let Some(url) = overrides.url {
     cfg.url = url
     src.url = "flag:--url"
+  }
+  if let Some(web_url) = overrides.web_url {
+    cfg.web_url = web_url
+    src.web_url = "flag:--web-url"
   }
   Ok((cfg, src))
 }
@@ -478,26 +493,4 @@ fn read_config(path: string, initial: Config) -> Result<Config, string> {
     return Err(f"parsing {path}: {e}\nfix the TOML syntax in {path}, or remove it and rerun 'lll config init'")
   }
   Ok(cfg)
-}
-
-// Transitional (LLL-486): the ambient readers, kept only until every caller
-// takes Settings. Removed in the same branch.
-pub fn load() -> Result<Config, string> {
-  resolve(read_env(), no_overrides()).config()
-}
-
-pub fn load_traced() -> Result<(Config, Sources), string> {
-  resolve(read_env(), no_overrides()).traced()
-}
-
-pub fn load_home() -> Result<Config, string> {
-  resolve(read_env(), no_overrides()).load_home()
-}
-
-pub fn home_path() -> Result<string, string> {
-  home_path_in(read_env())
-}
-
-pub fn repo_path() -> string {
-  resolve(read_env(), no_overrides()).repo_path()
 }

@@ -1,6 +1,10 @@
 import "go:errors"
-import "go:os"
+import "go:github.com/escherize/lll/gopb"
+import "go:net/http"
+import "go:net/http/httptest"
 import "go:strings"
+
+import "config"
 
 #[test]
 fn empty_list_detection_uses_json_metadata() {
@@ -100,28 +104,67 @@ fn only_404s_at_an_api_path_are_suspected() {
 // what triggers it. `lll issue view` on an issue with no linked docs, no
 // blockers and no comments hit three empty lists and paid for the identical
 // probe three times in one process. These pin the memo that stopped that.
+// LLL-486: the memo lives in the client's session, not in the environment.
+
+/// A live (exp 2100) member token naming abc123def456ghi.
+fn live_token() -> string {
+  "eyJhbGciOiJIUzI1NiJ9.eyJjb2xsZWN0aW9uSWQiOiJwYmNfMzU3MjczOTM0OSIsImV4cCI6NDEwMjQ0NDgwMCwiaWQiOiJhYmMxMjNkZWY0NTZnaGkiLCJyZWZyZXNoYWJsZSI6ZmFsc2UsInR5cGUiOiJhdXRoIn0.sig"
+}
 
 #[test]
-fn the_identity_probe_is_remembered_once_per_server_and_token() {
-  let tok = "eyJhbGciOiJIUzI1NiJ9.eyJjb2xsZWN0aW9uSWQiOiJwYmNfMzU3MjczOTM0OSIsImV4cCI6MSwiaWQiOiJhYmMxMjNkZWY0NTZnaGkiLCJyZWZyZXNoYWJsZSI6ZmFsc2UsInR5cGUiOiJhdXRoIn0.sig"
-  let _ = os.Setenv("LLL_TOKEN_PROBED", "")
-  assert !probe_remembered("https://a.example", tok)
-  remember_probe("https://a.example", tok)
-  assert probe_remembered("https://a.example", tok)
+fn the_identity_probe_is_remembered_once_per_session_server_and_token() {
+  let hits = Channel.buffered<string>(64)
+  let mut server = httptest.NewServer(http.HandlerFunc(|w, r| {
+    if let Some(u) = r.URL { let _ = hits.send(u.Path) }
+    let _ = w.Write("{\"id\":\"abc123def456ghi\"}".bytes())
+  }))
+  defer server.Close()
+  let tok = live_token()
+  let session = gopb.NewSession(tok)
+  assert verdict(server.URL, tok, session) == "valid"
+  assert verdict(server.URL, tok, session) == "valid"
+  // One request for two verdicts: the second was remembered.
+  let assert Some(_) = hits.receive()
+  assert session.Probed() == probe_key(server.URL, tok)
+  // A different server, or a re-minted token, is a different question.
+  assert session.Probed() != probe_key("https://b.example", tok)
+  assert session.Probed() != probe_key(server.URL, tok + "x")
+  // A fresh session has remembered nothing.
+  assert gopb.NewSession(tok).Probed() == ""
+}
 
-  // A different server is a different question, even with the same token.
-  assert !probe_remembered("https://b.example", tok)
-  // And a re-mint changes the token, so the memo invalidates itself rather
-  // than needing to be cleared: this is why the key is (server, token).
-  assert !probe_remembered("https://a.example", tok + "x")
-  let _ = os.Setenv("LLL_TOKEN_PROBED", "")
+#[test]
+fn a_renewed_token_reaches_every_copy_of_the_client() {
+  // The board hands copies of its client to every handler; a renewal must
+  // reach all of them, which is why the token lives in a shared session.
+  let c = Client.new(config.given(config.Config { url: "http://127.0.0.1:1", token: "old", .. }, config.Sources { .. }, config.Env { .. }))
+  let copy = c
+  c.renew_to("new")
+  assert copy.token() == "new"
+  // with_token starts a separate session: the original keeps its own.
+  let other = c.with_token("other", "")
+  assert other.token() == "other"
+  assert c.token() == "new"
+}
+
+#[test]
+fn only_a_granted_client_renews() {
+  // LLL_REMINT=1 with the admin pair grants renewal (the e2e seam); the pair
+  // alone does not, and neither does LLL_REMINT alone.
+  let pair = config.Env { admin_email: "a@x", admin_password: "pw", .. }
+  let plain = Client.new(config.resolve(pair, config.no_overrides()))
+  assert plain.renewal.is_none()
+  let granted_env = config.Env { admin_email: "a@x", admin_password: "pw", remint: true, remint_member: "m1", .. }
+  let granted = Client.new(config.resolve(granted_env, config.no_overrides()))
+  let assert Some(r) = granted.renewal
+  assert r.member == "m1"
+  let flag_only = Client.new(config.resolve(config.Env { remint: true, .. }, config.no_overrides()))
+  assert flag_only.renewal.is_none()
 }
 
 #[test]
 fn the_probe_key_never_carries_the_token_itself() {
-  // The memo lives in the environment, which every child process lll starts
-  // (gh, git) inherits. A token that lives only in a config file must not
-  // start leaking into them, so the key is a digest and nothing else.
+  // The memo is a digest, never a usable credential.
   let tok = "eyJhbGciOiJIUzI1NiJ9.eyJpZCI6InNlY3JldCJ9.sig"
   let key = probe_key("https://a.example", tok)
   assert !strings.Contains(key, tok)

@@ -5,7 +5,6 @@ import "go:encoding/hex"
 import "go:encoding/json"
 import "go:io"
 import "go:net/http"
-import "go:os"
 import "go:sort"
 import "go:strings"
 import "go:time"
@@ -13,10 +12,398 @@ import "go:github.com/escherize/lll/gopb"
 
 import "config"
 
-/// Base URL of the PocketBase server, from config (LLL_URL > config files).
-pub fn base_url() -> Result<string, string> {
-  let cfg = config.load()?
-  Ok(cfg.url)
+/// The board's right to renew its own token from the administrator pair
+/// (TASK-255, LLL-388). Only a process given this may re-mint silently;
+/// everyone else is told their token is dead, which is the honest answer
+/// for a person. `member` keeps the renewed token that member's ("" renews
+/// as the superuser).
+pub struct Renewal {
+  pub admin: config.AdminCreds,
+  pub member: string,
+}
+
+/// How lll talks to its server (LLL-486): the settings main resolved, the
+/// live credential, and whether that credential may renew itself. Built once
+/// from Settings and passed to everything that makes a request; no request
+/// re-reads configuration or the environment.
+///
+/// The credential lives in a Session because it changes after construction
+/// and must be shared by every copy of this value: `lll up` hands its board
+/// a member token, and a renewal replaces it while requests are in flight.
+pub struct Client {
+  pub settings: config.Settings,
+  session: gopb.Session,
+  /// Where the session's token came from, as config's Sources.token names
+  /// it: the refusal messages say which variable or file to fix.
+  token_source: string,
+  renewal: Option<Renewal>,
+}
+
+impl Client {
+  /// The client for `settings`: their url, their token. A process started
+  /// with LLL_REMINT=1 and the administrator pair renews its own token;
+  /// `lll up` grants its board that explicitly instead (`renewing`).
+  pub fn new(settings: config.Settings) -> Client {
+    let (token, source) = match settings.traced() {
+      Ok((cfg, src)) => (cfg.token, src.token),
+      Err(_) => ("", ""),
+    }
+    let renewal = if settings.env.remint {
+      settings.admin().map(|admin| Renewal { admin, member: settings.env.remint_member })
+    } else {
+      None
+    }
+    Client { settings, session: gopb.NewSession(token), token_source: source, renewal }
+  }
+
+  /// Base URL of the server (a flag > LLL_URL > config files > default).
+  pub fn url(self) -> Result<string, string> {
+    let cfg = self.settings.config()?
+    Ok(cfg.url)
+  }
+
+  /// The credential every request sends, "" for none.
+  pub fn token(self) -> string {
+    self.session.Token()
+  }
+
+  /// Replace the credential in place, for every copy of this client: a
+  /// renewal after the server refused the old one.
+  pub fn renew_to(self, token: string) {
+    self.session.SetToken(token)
+  }
+
+  /// This client against another server (`--url`, `lll up`'s own API),
+  /// keeping the credential.
+  pub fn with_url(self, url: string) -> Client {
+    Client {
+      settings: self.settings.with_url(url),
+      session: gopb.NewSession(self.token()),
+      token_source: self.token_source,
+      renewal: self.renewal,
+    }
+  }
+
+  /// This client with other settings: the same credential, renewal and
+  /// session. For a value that changes what a request means (the team), not
+  /// whom it is sent as.
+  pub fn with_settings(self, settings: config.Settings) -> Client {
+    let mut out = self
+    out.settings = settings
+    out
+  }
+
+  /// This client sending `token`, from `source` ("" when no config key or
+  /// variable supplied it). A fresh session: nothing was probed yet.
+  pub fn with_token(self, token: string, source: string) -> Client {
+    Client {
+      settings: self.settings,
+      session: gopb.NewSession(token),
+      token_source: source,
+      renewal: self.renewal,
+    }
+  }
+
+  /// Re-read the config files and send their token from now on: a token
+  /// rotated in a file while a long-running process (a board on a caller's
+  /// token) keeps going. An environment token never changes this way.
+  pub fn reload_token(self) {
+    let Ok(cfg) = self.settings.reload().config() else { return }
+    if cfg.token != "" && cfg.token != self.token() { self.renew_to(cfg.token) }
+  }
+
+  /// This client renewing its own token as `renewal` says (the board).
+  pub fn renewing(self, renewal: Option<Renewal>) -> Client {
+    let mut out = self
+    out.renewal = renewal
+    out
+  }
+
+  /// The realtime subscription a renewal must re-authenticate (LLL-445),
+  /// recorded only for a client that renews.
+  pub fn remember_subscription(self, payload: string) {
+    if self.renewal.is_some() { self.session.SetSubscription(payload) }
+  }
+
+  /// GET a path (joined to the url) and return the response body.
+  pub fn get(self, path: string) -> Result<string, string> {
+    self.send("GET", path, "")
+  }
+
+  /// POST a JSON payload to a path and return the response body.
+  pub fn post(self, path: string, payload: string) -> Result<string, string> {
+    self.send("POST", path, payload)
+  }
+
+  /// Replayable JSON creation carrying the same key through token renewal.
+  pub fn post_idempotent(self, path: string, payload: string, key: string) -> Result<string, string> {
+    self.send_content_options("POST", path, payload, "application/json", "", key)
+  }
+
+  /// PATCH a JSON payload to a path and return the response body.
+  pub fn patch(self, path: string, payload: string) -> Result<string, string> {
+    self.send("PATCH", path, payload)
+  }
+
+  /// PATCH carrying If-Unmodified-Since: LLL-399's optimistic-write stamp.
+  /// The server (a gopb hook on issues) answers 412 when the stamp does not
+  /// name the record's current 'updated', so the precondition holds at the
+  /// write, not at the caller's earlier read. "" sends no header — callers can
+  /// pass the flag through untouched.
+  pub fn patch_with_stamp(self, path: string, payload: string, stamp: string) -> Result<string, string> {
+    self.send_content_options("PATCH", path, payload, "application/json", stamp, "")
+  }
+
+  /// DELETE a path and return the (usually empty) response body.
+  pub fn delete(self, path: string) -> Result<string, string> {
+    self.send("DELETE", path, "")
+  }
+
+  /// POST without the configured token — for the auth endpoints themselves
+  /// (member login, superuser auth), where the request must stand on the
+  /// credentials in its body and a stale or unrelated token must not ride along.
+  pub fn post_anon(self, path: string, payload: string) -> Result<string, string> {
+    let (cfg, src) = self.settings.traced()?
+    request(cfg.url, "POST", path, payload, "", src.url == "default")
+  }
+
+  /// GET riding `tok` instead of the configured token — for flows that act as
+  /// a specific actor (token create's superuser-gated member lookup).
+  pub fn get_as(self, path: string, tok: string) -> Result<string, string> {
+    let (cfg, src) = self.settings.traced()?
+    request(cfg.url, "GET", path, "", bearer(tok), src.url == "default")
+  }
+
+  /// POST riding `tok` instead of the configured token (impersonation).
+  pub fn post_as(self, path: string, payload: string, tok: string) -> Result<string, string> {
+    let (cfg, src) = self.settings.traced()?
+    request(cfg.url, "POST", path, payload, bearer(tok), src.url == "default")
+  }
+
+  /// PATCH riding `tok` instead of the configured token — writes that must
+  /// stand on a just-verified credential (member set-password, the settings
+  /// Access section's re-auth), not whatever identity the process holds.
+  pub fn patch_as(self, path: string, payload: string, tok: string) -> Result<string, string> {
+    let (cfg, src) = self.settings.traced()?
+    request(cfg.url, "PATCH", path, payload, bearer(tok), src.url == "default")
+  }
+
+  /// DELETE riding `tok` instead of the configured token — superuser-gated
+  /// removals (member remove), which a member token must not be able to make.
+  pub fn delete_as(self, path: string, tok: string) -> Result<string, string> {
+    let (cfg, src) = self.settings.traced()?
+    request(cfg.url, "DELETE", path, "", bearer(tok), src.url == "default")
+  }
+
+  /// One request as `caller`, with an explicit content type.
+  pub fn send_as(
+    self,
+    caller: Caller,
+    method: string,
+    path: string,
+    payload: string,
+    content_type: string,
+  ) -> Result<string, string> {
+    match caller {
+      Caller.Process => self.send_content_options(method, path, payload, content_type, "", ""),
+      Caller.Member(tok) => {
+        let (cfg, src) = self.settings.traced()?
+        request_content(cfg.url, method, path, payload, bearer(tok), src.url == "default", content_type, "")
+      },
+    }
+  }
+
+  /// Every verb's single path to the wire. One place decides the headers, so
+  /// the configured token reaches PocketBase on every request — GET included,
+  /// which is why `get` does not call http.Get.
+  fn send(self, method: string, path: string, payload: string) -> Result<string, string> {
+    self.send_content_options(method, path, payload, "application/json", "", "")
+  }
+
+  /// The whole authenticated path — token check, 401 re-mint, empty-list
+  /// probe — with an optional If-Unmodified-Since stamp and idempotency key,
+  /// "" for none.
+  fn send_content_options(
+    self,
+    method: string, path: string, payload: string, content_type: string,
+    stamp: string, key: string,
+  ) -> Result<string, string> {
+    let (cfg, src) = self.settings.traced()?
+    let token = self.token()
+    if token == "" && (strings.HasPrefix(path, "/api/collections/") || strings.HasPrefix(path, "/api/lll/")) {
+      return Err(not_logged_in(cfg.url, src.url == "default"))
+    }
+    let wire = Wire { base: cfg.url, defaulted: src.url == "default", method, path, payload, content_type, stamp, key }
+    // TASK-319: the server answers 401 to a record request whose token it
+    // could not load, which is how an expired, corrupted or disowned token now
+    // arrives - one step earlier than the empty list below, same verdicts.
+    let body = match request_options(cfg.url, method, path, payload, bearer(token), wire.defaulted, content_type, stamp, key) {
+      Ok(b) => b,
+      Err(e) => {
+        if token != "" && classify(e).status == 401 {
+          // A server refusal invalidates the earlier successful identity probe.
+          // Member tokens are revoked by password changes; the board must renew
+          // as its member even after it previously read an empty list (LLL-445).
+          self.forget_probe()
+          if let Some(refused) = self.refused_token(token, wire) {
+            return refused
+          }
+        }
+        return Err(e)
+      },
+    }
+    // TASK-247: the same filter-not-gate semantics that hid a MISSING token also
+    // hide a DEAD one. PocketBase rotates a record's tokenKey on every password
+    // change, so a token issued before a reset stops matching — and the list rule
+    // then filters everything out, answering 200 with an empty array. The reads
+    // just go quiet, exactly as they did before anyone logged in.
+    //
+    // An empty list is the only case worth paying for, and it costs one extra
+    // request in the case where the command was about to print nothing anyway.
+    if is_empty_list(method, body) && token != "" {
+      if let Some(refused) = self.refused_token(token, wire) {
+        return refused
+      }
+    }
+    Ok(body)
+  }
+
+  /// The answer for a token the server did not honour, by verdict: corrupted
+  /// and expired are named from the token itself; rejected re-mints and
+  /// repeats when this client may renew (the board, TASK-255) and is named
+  /// otherwise. None when the token is valid after all - an empty list that
+  /// really is empty.
+  fn refused_token(self, token: string, wire: Wire) -> Option<Result<string, string>> {
+    let verdict = self.token_verdict(wire.base, token)
+    if verdict == "corrupted" { return Some(Err(corrupted_token(self.token_source))) }
+    // An expired token is a refusal the board can heal exactly like a
+    // rejected one (LLL-388): the expiry verdict used to return here before
+    // the re-mint below, so the one process allowed to re-mint never did,
+    // and the hosted board served empty pages from the moment its boot token
+    // aged out until someone restarted the machine.
+    if verdict == "expired" && self.renewal.is_none() {
+      return Some(Err(expired_token(token, self.token_source)))
+    }
+    if verdict == "rejected" || verdict == "expired" {
+      // A process holding the server's admin credentials can fix this itself.
+      // That is the board (TASK-255): `lll up` bootstraps its member token
+      // and re-mints it "if refused", but a stale token was never refused on a
+      // read, so the board silently saw an empty database and told everyone its
+      // own configured team did not exist. Re-mint once and repeat the request;
+      // a plain CLI user has no admin credentials and gets the message instead.
+      if let Some(fresh) = self.remint(wire.base) {
+        self.renew_to(fresh)
+        let subscription = self.session.Subscription()
+        if subscription != "" {
+          // PocketBase revocation clears a realtime client's auth but keeps its
+          // stream alive. Restore that client's existing subscriptions as the
+          // renewed member so reads and live updates recover together (LLL-445).
+          let _ = request(wire.base, "POST", "/api/realtime", subscription, bearer(fresh), false)
+        }
+        return Some(request_options(
+          wire.base, wire.method, wire.path, wire.payload, bearer(fresh), wire.defaulted,
+          wire.content_type, wire.stamp, wire.key,
+        ))
+      }
+      if verdict == "expired" { return Some(Err(expired_token(token, self.token_source))) }
+      return Some(Err(stale_token(wire.base, self.token_source)))
+    }
+    None
+  }
+
+  /// Renew from the administrator pair, keeping the renewal's member when the
+  /// board has selected one. None when this client may not renew.
+  ///
+  /// Deliberately narrow: only a process that was given the server's own
+  /// credentials AND told to renew may re-authenticate silently. Anyone else
+  /// holding the admin pair - a fleet, the e2e suite, a developer shell -
+  /// gets the honest refusal instead of a silent superuser upgrade.
+  fn remint(self, base: string) -> Option<string> {
+    let Some(renewal) = self.renewal else { return None }
+    let Ok(payload) = json.Marshal(AdminAuth { identity: renewal.admin.email, password: renewal.admin.password }) else {
+      return None
+    }
+    let Ok(body) = request(
+      base,
+      "POST",
+      "/api/collections/_superusers/auth-with-password",
+      payload as string,
+      "",
+      false,
+    ) else { return None }
+    let mut auth = TokenOnly { .. }
+    if let Err(_e) = json.Unmarshal(body.bytes(), &auth) { return None }
+    if auth.token == "" { return None }
+    if renewal.member != "" {
+      return impersonate_member(base, auth.token, renewal.member, 31536000).ok()
+    }
+    Some(auth.token)
+  }
+
+  /// token_verdict, remembering a confirmed token for this session.
+  fn token_verdict(self, base: string, tok: string) -> string {
+    // Empty independent reads may arrive together. Coalesce the cold probe,
+    // and check expiry after waiting rather than trusting an ageing answer.
+    self.session.LockProbe()
+    defer self.session.UnlockProbe()
+    verdict(base, tok, self.session)
+  }
+
+  fn forget_probe(self) {
+    self.session.LockProbe()
+    defer self.session.UnlockProbe()
+    self.session.SetProbed("")
+  }
+
+  /// not_logged_in, with the url and its origin, for callers outside the
+  /// request path's error handling (whoami).
+  pub fn not_logged_in_message(self) -> string {
+    let Ok((cfg, src)) = self.settings.traced() else { return not_logged_in("", true) }
+    not_logged_in(cfg.url, src.url == "default")
+  }
+
+  /// corrupted_token, with the origin, for whoami.
+  pub fn corrupted_token_message(self) -> string {
+    corrupted_token(self.token_source)
+  }
+
+  /// expired_token, for whoami.
+  pub fn expired_token_message(self) -> string {
+    expired_token(self.token(), self.token_source)
+  }
+}
+
+/// GET a path and decode the JSON body into `out`, naming `what` in the
+/// decode error ("decoding issues: ...").
+///
+/// The out-parameter is forced, not chosen. Lisette (still true in 0.12.0) has generic
+/// functions, but a type parameter cannot be *constructed*: `T { .. }` inside
+/// a generic body fails to resolve. So the tidier `fetch<T>(path) ->
+/// Result<T, string>` is not expressible, and the caller declares the zero
+/// value it wants filled.
+pub fn fetch<T>(
+  c: Client,
+  path: string,
+  what: string,
+  out: mut Ref<T>,
+) -> Result<(), string> {
+  let body = c.get(path)?
+  if let Err(e) = json.Unmarshal(body.bytes(), out) {
+    return Err(fail(ErrorKind.Server, f"decoding {what}: {e}"))
+  }
+  Ok(())
+}
+
+/// One authenticated request, kept whole so a renewal can repeat it.
+struct Wire {
+  base: string,
+  defaulted: bool,
+  method: string,
+  path: string,
+  payload: string,
+  content_type: string,
+  stamp: string,
+  key: string,
 }
 
 /// Connection-failure message that names the fix. Shared by every request
@@ -36,68 +423,6 @@ fn unreachable_hint(base: string, defaulted: bool, e: error) -> string {
   msg + "\nno url is configured on this machine; connect with: lll login --url https://your-server"
 }
 
-/// GET a path (joined to base_url) and return the response body.
-pub fn get(path: string) -> Result<string, string> {
-  send("GET", path, "")
-}
-
-/// GET a path and decode the JSON body into `out`, naming `what` in the
-/// decode error ("decoding issues: ...").
-///
-/// The out-parameter is forced, not chosen. Lisette (still true in 0.12.0) has generic
-/// functions, but a type parameter cannot be *constructed*: `T { .. }` inside
-/// a generic body fails to resolve. So the tidier `fetch<T>(path) ->
-/// Result<T, string>` is not expressible, and the caller declares the zero
-/// value it wants filled.
-pub fn fetch<T>(
-  path: string,
-  what: string,
-  out: mut Ref<T>,
-) -> Result<(), string> {
-  let body = get(path)?
-  if let Err(e) = json.Unmarshal(body.bytes(), out) {
-    return Err(fail(ErrorKind.Server, f"decoding {what}: {e}"))
-  }
-  Ok(())
-}
-
-/// POST a JSON payload to a path and return the response body.
-pub fn post(path: string, payload: string) -> Result<string, string> {
-  send("POST", path, payload)
-}
-
-/// Replayable JSON creation carrying the same key through token renewal.
-pub fn post_idempotent(path: string, payload: string, key: string) -> Result<string, string> {
-  send_content_options("POST", path, payload, "application/json", "", key)
-}
-
-/// PATCH a JSON payload to a path and return the response body.
-pub fn patch(path: string, payload: string) -> Result<string, string> {
-  send("PATCH", path, payload)
-}
-
-/// PATCH carrying If-Unmodified-Since: LLL-399's optimistic-write stamp.
-/// The server (a gopb hook on issues) answers 412 when the stamp does not
-/// name the record's current 'updated', so the precondition holds at the
-/// write, not at the caller's earlier read. "" sends no header — callers can
-/// pass the flag through untouched.
-pub fn patch_with_stamp(path: string, payload: string, stamp: string) -> Result<string, string> {
-  send_stamp("PATCH", path, payload, stamp)
-}
-
-/// DELETE a path and return the (usually empty) response body.
-pub fn delete(path: string) -> Result<string, string> {
-  send("DELETE", path, "")
-}
-
-/// POST without the configured token — for the auth endpoints themselves
-/// (member login, superuser auth), where the request must stand on the
-/// credentials in its body and a stale or unrelated token must not ride along.
-pub fn post_anon(path: string, payload: string) -> Result<string, string> {
-  let (cfg, src) = config.load_traced()?
-  request(cfg.url, "POST", path, payload, "", src.url == "default")
-}
-
 /// POST without any token to an explicit base — `lll login --url`, which must
 /// authenticate against the url it was handed, never whatever is configured.
 pub fn post_anon_to(
@@ -108,42 +433,6 @@ pub fn post_anon_to(
   request(base, "POST", path, payload, "", false)
 }
 
-/// GET riding `tok` instead of the configured token — for flows that act as
-/// a specific actor (token create's superuser-gated member lookup).
-pub fn get_as(path: string, tok: string) -> Result<string, string> {
-  let (cfg, src) = config.load_traced()?
-  request(cfg.url, "GET", path, "", bearer(tok), src.url == "default")
-}
-
-/// POST riding `tok` instead of the configured token (impersonation).
-pub fn post_as(
-  path: string,
-  payload: string,
-  tok: string,
-) -> Result<string, string> {
-  let (cfg, src) = config.load_traced()?
-  request(cfg.url, "POST", path, payload, bearer(tok), src.url == "default")
-}
-
-/// PATCH riding `tok` instead of the configured token — writes that must
-/// stand on a just-verified credential (member set-password, the settings
-/// Access section's re-auth), not whatever identity the process holds.
-pub fn patch_as(
-  path: string,
-  payload: string,
-  tok: string,
-) -> Result<string, string> {
-  let (cfg, src) = config.load_traced()?
-  request(cfg.url, "PATCH", path, payload, bearer(tok), src.url == "default")
-}
-
-/// DELETE riding `tok` instead of the configured token — superuser-gated
-/// removals (member remove), which a member token must not be able to make.
-pub fn delete_as(path: string, tok: string) -> Result<string, string> {
-  let (cfg, src) = config.load_traced()?
-  request(cfg.url, "DELETE", path, "", bearer(tok), src.url == "default")
-}
-
 /// The value of an Authorization header for `tok`, or "" when there is no
 /// token to send. Pure so the decision is testable without the network: every
 /// verb asks it, and an empty answer means today's request, untouched.
@@ -152,7 +441,7 @@ pub fn bearer(tok: string) -> string {
   f"Bearer {tok}"
 }
 
-/// Whom a request runs as (LLL-545). `Process` is the configured token, with
+/// Whom a request runs as (LLL-545). `Process` is the client's token, with
 /// the renewal and refusal handling every command gets. `Member` is a board
 /// viewer's own member token: PocketBase checks that member's teams and mode
 /// and records it as the author. A viewer's token is never re-minted here;
@@ -160,182 +449,6 @@ pub fn bearer(tok: string) -> string {
 pub enum Caller {
   Process,
   Member(string),
-}
-
-/// One request as `caller`, with an explicit content type.
-pub fn send_as(
-  caller: Caller,
-  method: string,
-  path: string,
-  payload: string,
-  content_type: string,
-) -> Result<string, string> {
-  match caller {
-    Caller.Process => send_content(method, path, payload, content_type),
-    Caller.Member(tok) => {
-      let (cfg, src) = config.load_traced()?
-      request_content(cfg.url, method, path, payload, bearer(tok), src.url == "default", content_type, "")
-    },
-  }
-}
-
-/// Every verb's single path to the wire. One place decides the headers, so a
-/// token configured anywhere in the layering reaches PocketBase on every
-/// request — GET included, which is why `get` no longer calls http.Get.
-fn send(method: string, path: string, payload: string) -> Result<string, string> {
-  send_content(method, path, payload, "application/json")
-}
-
-/// send_content with an optional If-Unmodified-Since stamp ("" sends none).
-/// LLL-399: the one write that must carry a caller-provided precondition.
-pub fn send_stamp(method: string, path: string, payload: string, stamp: string) -> Result<string, string> {
-  send_content_extra(method, path, payload, "application/json", stamp)
-}
-
-/// Authenticated replayable body, shared by JSON and multipart writes.
-pub fn send_content(method: string, path: string, payload: string, content_type: string) -> Result<string, string> {
-  send_content_extra(method, path, payload, content_type, "")
-}
-
-/// The whole authenticated path — token check, 401 re-mint, empty-list
-/// probe — with an optional If-Unmodified-Since stamp, "" for none.
-pub fn send_content_extra(
-  method: string,
-  path: string,
-  payload: string,
-  content_type: string,
-  stamp: string,
-) -> Result<string, string> {
-  send_content_options(method, path, payload, content_type, stamp, "")
-}
-
-fn send_content_options(
-  method: string, path: string, payload: string, content_type: string,
-  stamp: string, key: string,
-) -> Result<string, string> {
-  let (cfg, src) = config.load_traced()?
-  if cfg.token == "" && (strings.HasPrefix(path, "/api/collections/") || strings.HasPrefix(path, "/api/lll/")) {
-    return Err(not_logged_in(cfg.url, src.url == "default"))
-  }
-  // TASK-319: the server answers 401 to a record request whose token it
-  // could not load, which is how an expired, corrupted or disowned token now
-  // arrives - one step earlier than the empty list below, same verdicts.
-  let body = match request_options(cfg.url, method, path, payload, bearer(cfg.token), src.url == "default", content_type, stamp, key) {
-    Ok(b) => b,
-    Err(e) => {
-      if cfg.token != "" && classify(e).status == 401 {
-        // A server refusal invalidates the earlier successful identity probe.
-        // Member tokens are revoked by password changes; the board must renew
-        // as its member even after it previously read an empty list (LLL-445).
-        forget_probe()
-        if let Some(refused) = refused_token(cfg, src, method, path, payload, content_type, stamp, key) {
-          return refused
-        }
-      }
-      return Err(e)
-    },
-  }
-  // TASK-247: the same filter-not-gate semantics that hid a MISSING token also
-  // hide a DEAD one. PocketBase rotates a record's tokenKey on every password
-  // change, so a token issued before a reset stops matching — and the list rule
-  // then filters everything out, answering 200 with an empty array. The reads
-  // just go quiet, exactly as they did before anyone logged in.
-  //
-  // An empty list is the only case worth paying for, and it costs one extra
-  // request in the case where the command was about to print nothing anyway.
-  if is_empty_list(method, body) && cfg.token != "" {
-    if let Some(refused) = refused_token(cfg, src, method, path, payload, content_type, stamp, key) {
-      return refused
-    }
-  }
-  Ok(body)
-}
-
-/// The answer for a token the server did not honour, by verdict: corrupted
-/// and expired are named from the token itself; rejected re-mints and
-/// repeats when this process holds the admin credentials (the board,
-/// TASK-255) and is named otherwise. None when the token is valid after
-/// all - an empty list that really is empty.
-fn refused_token(
-  cfg: config.Config,
-  src: config.Sources,
-  method: string,
-  path: string,
-  payload: string,
-  content_type: string,
-  stamp: string,
-  key: string,
-) -> Option<Result<string, string>> {
-  let verdict = token_verdict(cfg.url, cfg.token)
-  if verdict == "corrupted" { return Some(Err(corrupted_token(src.token))) }
-  // An expired token is a refusal the board can heal exactly like a
-  // rejected one (LLL-388): the expiry verdict used to return here before
-  // the re-mint below, so the one process allowed to re-mint never did,
-  // and the hosted board served empty pages from the moment its boot token
-  // aged out until someone restarted the machine.
-  if verdict == "expired" && os.Getenv("LLL_REMINT") != "1" {
-    return Some(Err(expired_token(cfg.token, src.token)))
-  }
-  if verdict == "rejected" || verdict == "expired" {
-    // A process holding the server's admin credentials can fix this itself.
-    // That is the board (TASK-255): `lll up` bootstraps its member token
-    // and re-mints it "if refused", but a stale token was never refused on a
-    // read, so the board silently saw an empty database and told everyone its
-    // own configured team did not exist. Re-mint once and repeat the request;
-    // a plain CLI user has no admin credentials and gets the message instead.
-    if let Some(fresh) = remint_from_admin_credentials(cfg.url) {
-      let _ = os.Setenv("LLL_TOKEN", fresh)
-      let subscription = os.Getenv("LLL_REALTIME_SUBSCRIPTION")
-      if subscription != "" {
-        // PocketBase revocation clears a realtime client's auth but keeps its
-        // stream alive. Restore that client's existing subscriptions as the
-        // renewed member so reads and live updates recover together (LLL-445).
-        let _ = request(cfg.url, "POST", "/api/realtime", subscription, bearer(fresh), false)
-      }
-      return Some(request_options(
-        cfg.url, method, path, payload, bearer(fresh), src.url == "default", content_type, stamp, key,
-      ))
-    }
-    if verdict == "expired" { return Some(Err(expired_token(cfg.token, src.token))) }
-    return Some(Err(stale_token(cfg.url, src.token)))
-  }
-  None
-}
-
-/// Renew from LLL_ADMIN_EMAIL/LLL_ADMIN_PASSWORD, keeping LLL_REMINT_MEMBER
-/// when the board has selected its member. None
-/// when this process holds no admin credentials.
-///
-/// Deliberately narrow: only a process that was given the server's own
-/// credentials may re-authenticate silently. Everyone else is told their
-/// token is dead, which is the honest answer for a person.
-fn remint_from_admin_credentials(base: string) -> Option<string> {
-  // The board sets LLL_REMINT for itself at boot (up.lis). Anyone else
-  // holding the admin pair - a fleet, the e2e suite, a developer shell -
-  // gets the honest refusal instead of a silent superuser upgrade.
-  if os.Getenv("LLL_REMINT") != "1" { return None }
-  let email = os.Getenv("LLL_ADMIN_EMAIL")
-  let pass = os.Getenv("LLL_ADMIN_PASSWORD")
-  if email == "" || pass == "" { return None }
-  let Ok(payload) = json.Marshal(AdminAuth { identity: email, password: pass }) else {
-    return None
-  }
-  let Ok(body) = request(
-    base,
-    "POST",
-    "/api/collections/_superusers/auth-with-password",
-    payload as string,
-    "",
-    false,
-  ) else { return None }
-  let mut auth = TokenOnly { .. }
-  if let Err(_e) = json.Unmarshal(body.bytes(), &auth) { return None }
-  if auth.token == "" { return None }
-  let member = os.Getenv("LLL_REMINT_MEMBER")
-  if member != "" {
-    return impersonate_member(base, auth.token, member, 31536000).ok()
-  }
-  Some(auth.token)
 }
 
 /// PocketBase's impersonation endpoint, shared by boot and token renewal.
@@ -386,11 +499,16 @@ struct ListMetadata {
 /// old rule treated that as valid ("a token this cannot read is not accused"),
 /// which meant every one of those agents got silence on their first command
 /// instead of the one word that would have sent them back to the file.
-fn token_verdict(base: string, tok: string) -> string {
-  // Empty independent reads may arrive together. Coalesce the cold probe,
-  // and check expiry after waiting rather than trusting an ageing answer.
-  gopb.LockTokenProbe()
-  defer gopb.UnlockTokenProbe()
+///
+/// `session` remembers a confirmed token. The probe is one round trip, and an
+/// empty list is what triggers it - so `lll issue view` on an issue with no
+/// linked docs, no blockers and no comments paid for it THREE times,
+/// byte-identically, inside one process (LLL-436). A re-mint changes the
+/// fingerprint. Expiry is checked locally on every call, and an explicit
+/// server 401 clears a successful probe after token revocation. The caller
+/// holds the session's probe lock, so a concurrent empty result cannot
+/// duplicate the check or race invalidation.
+fn verdict(base: string, tok: string, session: gopb.Session) -> string {
   let parts = strings.Split(tok, ".")
   if parts.length() != 3 { return "opaque" }
   let Some(id) = token_subject(tok) else { return "corrupted" }
@@ -398,7 +516,8 @@ fn token_verdict(base: string, tok: string) -> string {
   // process must keep noticing when its own token ages out mid-run, which is
   // the whole of LLL-388. Never cached.
   if token_expired(tok) { return "expired" }
-  if probe_remembered(base, tok) { return "valid" }
+  let key = probe_key(base, tok)
+  if session.Probed() == key { return "valid" }
   for coll in ["members", "_superusers"] {
     let found = request(
       base,
@@ -409,46 +528,15 @@ fn token_verdict(base: string, tok: string) -> string {
       false,
     )
     if found.is_ok() {
-      remember_probe(base, tok)
+      session.SetProbed(key)
       return "valid"
     }
   }
   "rejected"
 }
 
-/// Whether this process has already asked the server to identify this token.
-///
-/// The probe is one round trip, and an empty list is what triggers it - so
-/// `lll issue view` on an issue with no linked docs, no blockers and no
-/// comments paid for it THREE times, byte-identically, inside one process
-/// (LLL-436). The comment above the empty-list check says it "costs one extra
-/// request"; it costs one per empty list.
-///
-/// A re-mint changes the key. Expiry is checked locally on every call, and
-/// an explicit server 401 clears a successful probe after token revocation.
-/// token_verdict and forget_probe hold the Go adapter's process lock so a
-/// concurrent empty result cannot duplicate the check or race invalidation.
-///
-/// Kept in the environment because package-level `let` is rejected by this
-/// compiler and LLL_REMINT / LLL_TOKEN already make the environment this
-/// process's state (see the lisette-interop skill). A FINGERPRINT rather than
-/// the token: this variable is inherited by every child process lll starts
-/// (gh, git), and a token that currently lives only in a config file must not
-/// start leaking into them.
-fn probe_remembered(base: string, tok: string) -> bool {
-  os.Getenv("LLL_TOKEN_PROBED") == probe_key(base, tok)
-}
-
-fn remember_probe(base: string, tok: string) {
-  let _ = os.Setenv("LLL_TOKEN_PROBED", probe_key(base, tok))
-}
-
-fn forget_probe() {
-  gopb.LockTokenProbe()
-  defer gopb.UnlockTokenProbe()
-  let _ = os.Unsetenv("LLL_TOKEN_PROBED")
-}
-
+/// A fingerprint rather than the token, so the remembered value is never a
+/// usable credential.
 fn probe_key(base: string, tok: string) -> string {
   let sum = sha256.Sum256(f"{base}\n{tok}".bytes())
   // Sum256 gives a fixed Array<byte, 32>; range indexing needs a slice.
@@ -460,13 +548,13 @@ fn probe_key(base: string, tok: string) -> string {
 /// this one - `lll up`, which owns the superuser pair (LLL-443). Everything
 /// else wants `refused_token`'s verdict, which names WHY and can re-mint.
 ///
-/// An opaque token counts as usable, matching the policy in `token_verdict`:
+/// An opaque token counts as usable, matching the policy in `verdict`:
 /// a credential this client cannot model is left alone rather than accused,
 /// so an unreadable-but-working token is not silently traded for another.
 pub fn token_usable(base: string, tok: string) -> bool {
   if tok == "" { return false }
-  let verdict = token_verdict(base, tok)
-  verdict == "valid" || verdict == "opaque"
+  let v = verdict(base, tok, gopb.NewSession(""))
+  v == "valid" || v == "opaque"
 }
 
 /// The record id a PocketBase auth JWT names, from its payload. None when the
@@ -601,19 +689,6 @@ it was almost certainly altered in copying - re-read it from its source into the
 rather than typing it (a token is ~200 characters and one wrong one is enough)")
 }
 
-/// not_logged_in, with the url and its origin looked up, for callers outside
-/// send()'s error path (whoami).
-pub fn not_logged_in_message() -> string {
-  let Ok((cfg, src)) = config.load_traced() else { return not_logged_in("", true) }
-  not_logged_in(cfg.url, src.url == "default")
-}
-
-/// corrupted_token, with the origin looked up, for callers that are not in
-/// send()'s error path (whoami).
-pub fn corrupted_token_message() -> string {
-  let Ok((_, src)) = config.load_traced() else { return corrupted_token("") }
-  corrupted_token(src.token)
-}
 
 /// The refusal when a well-formed token is disowned by the server. `origin`
 /// is where the token came from (config's Sources.token: "env:LLL_TOKEN" or
@@ -640,11 +715,6 @@ fn expired_token(tok: string, origin: string) -> string {
   let when = time.Unix(exp as int64, 0).UTC().Format("2006-01-02 15:04:05 UTC")
   let ago = time.Now().Unix() as int - exp
   fail(ErrorKind.Auth, f"{from} expired at {when} ({ago}s ago). Every read comes back empty and every write is refused until it is replaced: 'lll token create <member>' (an agent's, minted by a superuser) or 'lll login --email <your email>' (a person)")
-}
-
-pub fn expired_token_message() -> string {
-  let (cfg, src) = config.load_traced().unwrap_or((config.Config { .. }, config.Sources { .. }))
-  expired_token(cfg.token, src.token)
 }
 
 fn stale_token(base: string, origin: string) -> string {

@@ -411,6 +411,8 @@ impl Parsed {
 /// One invocation parsed at dispatch. Handlers consume `parsed`; raw `args`
 /// remain available for diagnostic spelling, never as a second parser input.
 pub struct CommandInput {
+  /// The client and settings main built (LLL-486): what the verb talks to.
+  pub ctx: pb.Client,
   pub args: Slice<string>,
   pub parsed: Parsed,
   /// Canonical usage generated from the resolved command declaration.
@@ -458,6 +460,7 @@ pub struct Command {
 /// rename collateral under `lll team --help`, the precedence paragraph under
 /// `lll config --help`. Printed after the verb table; "" prints nothing.
 pub fn dispatch(
+  ctx: pb.Client,
   noun: string,
   tagline: string,
   intro: string,
@@ -491,7 +494,7 @@ pub fn dispatch(
   let arity = words.length()
   let usage = usage(cmd, c.spec, c.positional)
   let parsed = parse_n(c.spec, args, 3, arity, usage)?
-  (c.run)(CommandInput { args, parsed, usage })
+  (c.run)(CommandInput { ctx, args, parsed, usage })
 }
 
 /// `lll <noun> --help`: every verb's usage line and summary, aligned, then the
@@ -608,6 +611,7 @@ pub fn with_team(spec: Slice<Flag>) -> Slice<Flag> {
 pub fn extract_team(args: Slice<string>, start: int, spec: Slice<Flag>) -> Result<(Slice<string>, Option<string>), string> {
   let mut cleaned = args[..start].clone()
   let mut team: Option<string> = None
+  let mut given = 0
   let mut i = start
   while let Some(arg) = args.get(i) {
     if arg == "--" {
@@ -624,6 +628,7 @@ pub fn extract_team(args: Slice<string>, start: int, spec: Slice<Flag>) -> Resul
       }
       if strings.TrimSpace(value) == "" { return Err(usage_error("--team requires a nonempty team key")) }
       team = Some(value)
+      given += 1
     } else {
       cleaned = cleaned.append(arg)
       if spec.find(|f| f.value && spells(f, arg)).is_some() {
@@ -634,6 +639,11 @@ pub fn extract_team(args: Slice<string>, start: int, spec: Slice<Flag>) -> Resul
       }
     }
     i += 1
+  }
+  // A second --team used to win silently (T7, the LLL-381 drop for --team):
+  // refused like every other single-value flag.
+  if given > 1 {
+    return Err(usage_error(f"--team may only be given once (got {given}); it takes a single value"))
   }
   Ok((cleaned, team))
 }
