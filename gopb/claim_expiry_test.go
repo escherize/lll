@@ -241,6 +241,43 @@ func TestUnrenewedClaimExpiresOnSchedule(t *testing.T) {
 	}
 }
 
+// LLL-663: the sweep lists stale claims, then expires each in its own
+// transaction. A renewal that lands between the two must win: the claim is
+// kept, still assigned, and no expiry comment is written.
+func TestRenewBetweenSweepListAndDeleteKeepsTheClaim(t *testing.T) {
+	app, issueID, alpha, _ := claimFixture(t)
+	held, err := acquireClaim(app, issueID, alpha, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	backdateClaim(t, app, held.ClaimID, claimMaxAge+time.Hour)
+	now := time.Now()
+	cutoff := now.Add(-claimMaxAge)
+
+	stale, err := staleClaims(app, cutoff)
+	if err != nil || len(stale) != 1 || stale[0].Id != held.ClaimID {
+		t.Fatalf("expected the backdated claim in the stale list: %v %v", stale, err)
+	}
+	if _, err := renewClaim(app, issueID, held.ClaimID, alpha, ""); err != nil {
+		t.Fatal(err)
+	}
+	if expireClaim(app, stale[0], cutoff, now) {
+		t.Fatal("the sweep expired a claim renewed after it listed it")
+	}
+	assertClaimState(t, app, issueID, alpha, alpha)
+	comments, err := app.FindRecordsByFilter("comments", "issue = {:issue}", "", 0, 0, dbx.Params{"issue": issueID})
+	if err != nil || len(comments) != 0 {
+		t.Fatalf("a kept claim must not be announced as released: %d %v", len(comments), err)
+	}
+
+	// The control: the same snapshot without a renewal still expires.
+	backdateClaim(t, app, held.ClaimID, claimMaxAge+time.Hour)
+	if !expireClaim(app, stale[0], cutoff, now) {
+		t.Fatal("an unrenewed stale claim was kept")
+	}
+	assertClaimState(t, app, issueID, "", "")
+}
+
 // Only the holder renews, only the hold it observed, and only a hold that
 // exists. Each refusal changes nothing.
 func TestRenewRefusesAllButTheHolder(t *testing.T) {
