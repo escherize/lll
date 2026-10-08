@@ -1,4 +1,10 @@
+import "config"
 import "pb"
+
+/// A client from literal settings (LLL-486): dispatch hands it to the verb.
+fn test_ctx() -> pb.Client {
+  pb.Client.new(config.given(config.Config { .. }, config.Sources { .. }, config.Env { .. }))
+}
 
 // Unit cover for the shared flag parser, usage/section generators and the
 // completion token emitter — the three surfaces that used to be maintained
@@ -407,9 +413,13 @@ fn a_command_that_declares_url_still_parses_it() {
 
 #[test]
 fn team_extraction_preserves_literal_values_and_accepts_both_spellings() {
-  let input = ["lll", "issue", "create", "-t", "--team", "-d", "--team=literal", "--team", "DX", "--team=OPS"]
+  let input = ["lll", "issue", "create", "-t", "--team", "-d", "--team=literal", "--team=OPS"]
   let assert Ok((cleaned, team)) = extract_team(input, 3, with_team(spec()))
   assert team == Some("OPS")
+  // A second selection is refused rather than winning silently (T7).
+  let twice = ["lll", "issue", "list", "--team", "DX", "--team=OPS"]
+  let assert Err(e) = extract_team(twice, 3, with_team(spec()))
+  assert e.contains("--team may only be given once (got 2)")
   assert cleaned.equals(["lll", "issue", "create", "-t", "--team", "-d", "--team=literal"])
   let assert Ok((ended, absent)) = extract_team(["lll", "issue", "create", "--", "--team", "DX"], 3, with_team(spec()))
   assert absent.is_none()
@@ -454,8 +464,8 @@ fn dispatch_preserves_help_as_an_alias_value_and_stops_real_help() {
     ..
   }]
   for alias in ["-b", "--body", "-m", "--message"] {
-    assert dispatch("doc", "", "", commands, ["lll", "doc", "create", alias, "--help"]).is_ok()
-    let assert Err(help) = dispatch("doc", "", "", commands, ["lll", "doc", "create", alias, "--help", "-h"])
+    assert dispatch(test_ctx(), "doc", "", "", commands, ["lll", "doc", "create", alias, "--help"]).is_ok()
+    let assert Err(help) = dispatch(test_ctx(), "doc", "", "", commands, ["lll", "doc", "create", alias, "--help", "-h"])
     assert help == help_marker() + "create help"
   }
 }
@@ -481,10 +491,10 @@ fn dispatch_hands_over_unicode_and_empty_positionals_without_reinterpreting_them
     },
     ..
   }]
-  assert dispatch("test", "", "", commands, ["lll", "test", "set", "ÉNG-12", ""]).is_ok()
-  let assert Err(extra) = dispatch("test", "", "", commands, ["lll", "test", "set", "ÉNG-12", "", "extra"])
+  assert dispatch(test_ctx(), "test", "", "", commands, ["lll", "test", "set", "ÉNG-12", ""]).is_ok()
+  let assert Err(extra) = dispatch(test_ctx(), "test", "", "", commands, ["lll", "test", "set", "ÉNG-12", "", "extra"])
   assert extra.contains("unexpected argument: 'extra'")
-  let assert Err(flag) = dispatch("test", "", "", commands, ["lll", "test", "set", "--unknown"])
+  let assert Err(flag) = dispatch(test_ctx(), "test", "", "", commands, ["lll", "test", "set", "--unknown"])
   assert flag.contains("unknown flag: '--unknown'")
 }
 
@@ -553,7 +563,7 @@ fn retired_verb_names_its_replacement_only_where_it_exists() {
       ..,
     },
   ]
-  let assert Err(hinted) = dispatch("issue", "", "", commands, [
+  let assert Err(hinted) = dispatch(test_ctx(), "issue", "", "", commands, [
     "lll",
     "issue",
     "read",
@@ -563,7 +573,7 @@ fn retired_verb_names_its_replacement_only_where_it_exists() {
     "unknown issue command: 'read' - did you mean 'lll issue view'?",
   )
   let without = [Command { name: "list", summary: "list", run: |_| Ok(()), .. }]
-  let assert Err(plain) = dispatch("team", "", "", without, [
+  let assert Err(plain) = dispatch(test_ctx(), "team", "", "", without, [
     "lll",
     "team",
     "read",
@@ -581,8 +591,8 @@ fn command_alias_dispatch_uses_canonical_help_and_parser() {
     },
     ..
   }]
-  assert dispatch("issue", "", "", commands, ["lll", "issue", "show", "DEMO-1"]).is_ok()
-  let assert Err(help) = dispatch("issue", "", "", commands, ["lll", "issue", "show", "--help"])
+  assert dispatch(test_ctx(), "issue", "", "", commands, ["lll", "issue", "show", "DEMO-1"]).is_ok()
+  let assert Err(help) = dispatch(test_ctx(), "issue", "", "", commands, ["lll", "issue", "show", "--help"])
   assert help.contains("lll issue view KEY")
   assert !help.contains("lll issue show")
   assert command_names(commands).equals(["view", "show"])
@@ -604,9 +614,9 @@ fn hidden_command_dispatches_without_help_row_or_completion() {
       ..
     },
   ]
-  assert dispatch("finding", "", "", commands, ["lll", "finding", "view", "a-slug"]).is_ok()
-  assert dispatch("finding", "", "", commands, ["lll", "finding", "read", "a-slug"]).is_ok()
-  let assert Err(help) = dispatch("finding", "", "", commands, ["lll", "finding", "--help"])
+  assert dispatch(test_ctx(), "finding", "", "", commands, ["lll", "finding", "view", "a-slug"]).is_ok()
+  assert dispatch(test_ctx(), "finding", "", "", commands, ["lll", "finding", "read", "a-slug"]).is_ok()
+  let assert Err(help) = dispatch(test_ctx(), "finding", "", "", commands, ["lll", "finding", "--help"])
   assert help.contains("lll finding near")
   assert !help.contains("view")
   assert !help.contains("read")

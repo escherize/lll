@@ -30,6 +30,7 @@ struct ScopePatch { team: string }
 /// nothing the user did not ask for. The way through is to unassign the
 /// references and run it again.
 fn move_to_team(
+  ctx: pb.Client,
   kind: string,
   name: string,
   id: string,
@@ -39,7 +40,7 @@ fn move_to_team(
   if from.id == to.id {
     return Ok(f"{kind} {name} is already in {to.key}")
   }
-  let blocking = referencing_issue_keys(kind, id, to.id)?
+  let blocking = referencing_issue_keys(ctx, kind, id, to.id)?
   if !blocking.is_empty() {
     return Err(refuse_move(kind, name, from, to, blocking))
   }
@@ -47,7 +48,7 @@ fn move_to_team(
     Ok(p) => p as string,
     Err(e) => return Err(f"encoding {kind}: {e}"),
   }
-  let _ = pb.patch(f"/api/collections/{kind}s/records/{id}", payload)?
+  let _ = ctx.patch(f"/api/collections/{kind}s/records/{id}", payload)?
   Ok(f"Moved {kind} {name}: {from.key} -> {to.key}")
 }
 
@@ -58,6 +59,7 @@ fn move_to_team(
 /// Keys, not a count: "3 issues reference it" sends you looking, and the fix is
 /// per-issue.
 fn referencing_issue_keys(
+  ctx: pb.Client,
   kind: string,
   id: string,
   to_team_id: string,
@@ -67,7 +69,7 @@ fn referencing_issue_keys(
     "project" => query.filter("", "", "", id, "", ""),
     _ => return Err(f"cannot move a '{kind}'"),
   }
-  let issues = fetch_all_issues(
+  let issues = fetch_all_issues(ctx,
     f"&expand=team&sort=created,id&filter={url.QueryEscape(filter)}",
   )?
   Ok(
@@ -98,12 +100,12 @@ fn refuse_move(
 }
 
 /// The destination team a `--to KEY` names.
-fn move_destination(key: string) -> Result<models.Team, string> {
+fn move_destination(ctx: pb.Client, key: string) -> Result<models.Team, string> {
   if strings.TrimSpace(key) == "" {
     return Err(flags.usage_error("--to requires a team key (see 'lll team list')"))
   }
-  let Some(team) = records.find_team(key)? else {
-    return Err(unknown_team(key))
+  let Some(team) = records.find_team(ctx, key)? else {
+    return Err(unknown_team(ctx, key))
   }
   if team.archived {
     return Err(f"team {team.key} is archived; run 'lll team unarchive {team.key}' first")

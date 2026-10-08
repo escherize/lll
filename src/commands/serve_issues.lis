@@ -64,6 +64,7 @@ fn table_page_size() -> int {
 /// One page of the issues table: at most `table_page_size()` rows plus PB's
 /// total for the same filter, so the count can be honest about the ceiling.
 fn fetch_issue_rows(
+  ctx: pb.Client,
   team_id: string,
   state: string,
   assignee_id: string,
@@ -75,7 +76,7 @@ fn fetch_issue_rows(
   let filter = query.filter(team_id, state, assignee_id, project_id, label_id, "")
   if filter != "" { path = f"{path}&filter={url.QueryEscape(filter)}" }
   let mut issues = models.IssueList { .. }
-  pb.fetch(path, "issues", &issues)?
+  pb.fetch(ctx, path, "issues", &issues)?
   Ok(issues)
 }
 
@@ -89,14 +90,14 @@ fn fetch_issue_rows(
 /// Shares the settings page's request, which also asks for expand=team. The
 /// expand is wasted here, but one label query beats two that drift apart —
 /// the same trade fetch_project_names already makes.
-fn fetch_label_names(team_id: string) -> Result<Slice<string>, string> {
-  Ok(records.fetch_labels(team_id)?.map(|l| l.name))
+fn fetch_label_names(ctx: pb.Client, team_id: string) -> Result<Slice<string>, string> {
+  Ok(records.fetch_labels(ctx, team_id)?.map(|l| l.name))
 }
 
 /// This team's project names, for the project chooser. Scoped for the same
 /// reason labels are, and paired with the same scoped resolve_project.
-fn fetch_project_names(team_id: string) -> Result<Slice<string>, string> {
-  Ok(records.fetch_projects(team_id)?.map(|p| p.name))
+fn fetch_project_names(ctx: pb.Client, team_id: string) -> Result<Slice<string>, string> {
+  Ok(records.fetch_projects(ctx, team_id)?.map(|p| p.name))
 }
 
 /// The issues table: one sortable, filterable, bookmarkable list.
@@ -114,7 +115,7 @@ fn fetch_project_names(team_id: string) -> Result<Slice<string>, string> {
 ///
 /// A rejected query param is said out loud in the flash strip and dropped,
 /// never served as a 500: a stale bookmark should still show issues.
-fn issues_page(w: http.ResponseWriter, r: Ref<http.Request>, team_id: string, me: string) {
+fn issues_page(ctx: pb.Client, w: http.ResponseWriter, r: Ref<http.Request>, team_id: string, me: string) {
   let mut err = ""
   let raw = view_query(r)
 
@@ -133,7 +134,7 @@ fn issues_page(w: http.ResponseWriter, r: Ref<http.Request>, team_id: string, me
   let state = filters.one_state()
   // Who this viewer may name on this team (LLL-551): the chooser offers
   // only them, and a hidden name answers like one nobody has.
-  let roster = match roster_for(r, team_id) {
+  let roster = match roster_for(ctx, r, team_id) {
     Ok(found) => found,
     Err(e) => {
       http.Error(w, pb.plain(e), 500)
@@ -155,7 +156,7 @@ fn issues_page(w: http.ResponseWriter, r: Ref<http.Request>, team_id: string, me
   let mut label = filters.one_label()
   let mut label_id = ""
   if label != "" {
-    match records.resolve_label(team_id, label) {
+    match records.resolve_label(ctx, team_id, label) {
       Ok(l) => { label_id = l.id },
       Err(e) => {
         err = pb.plain(e)
@@ -167,7 +168,7 @@ fn issues_page(w: http.ResponseWriter, r: Ref<http.Request>, team_id: string, me
   let mut project = filters.project
   let mut project_id = ""
   if project != "" {
-    match records.resolve_project(team_id, project) {
+    match records.resolve_project(ctx, team_id, project) {
       Ok(p) => { project_id = p.id },
       Err(e) => {
         err = pb.plain(e)
@@ -177,10 +178,10 @@ fn issues_page(w: http.ResponseWriter, r: Ref<http.Request>, team_id: string, me
   }
 
   let q = ViewQuery { state, assignee, label, project, sort, .. }
-  let team = shell_team(team_id)
+  let team = shell_team(ctx, team_id)
   let base = issues_base(team.key)
-  let list = match fetch_issue_rows(team_id, state, assignee_id, label_id, project_id, sort) {
-    Ok(l) => models.IssueList { items: issues_for(r, l.items).map(|x| roster.issue(x)), ..l },
+  let list = match fetch_issue_rows(ctx, team_id, state, assignee_id, label_id, project_id, sort) {
+    Ok(l) => models.IssueList { items: issues_for(ctx, r, l.items).map(|x| roster.issue(x)), ..l },
     Err(e) => {
       http.Error(w, pb.plain(e), 500)
       return
@@ -190,8 +191,8 @@ fn issues_page(w: http.ResponseWriter, r: Ref<http.Request>, team_id: string, me
   // filter you cannot widen out of is a dead end. The whole TEAM, though —
   // another project's labels would only ever filter this board to nothing.
   let members = roster.members.map(|m| m.name)
-  let label_names = fetch_label_names(team_id).unwrap_or([])
-  let project_names = fetch_project_names(team_id).unwrap_or([])
+  let label_names = fetch_label_names(ctx, team_id).unwrap_or([])
+  let project_names = fetch_project_names(ctx, team_id).unwrap_or([])
 
   let rows = list.items.map(card_vm)
   let vm = IssuesVM {
@@ -220,5 +221,5 @@ fn issues_page(w: http.ResponseWriter, r: Ref<http.Request>, team_id: string, me
     write_raw(w, issues_raw(vm))
     return
   }
-  render_html(w, "issues-page", PageVM { rail: rail_for(r, "issues", me, team), page: vm })
+  render_html(w, "issues-page", PageVM { rail: rail_for(ctx, r, "issues", me, team), page: vm })
 }

@@ -154,8 +154,8 @@ fn has_foreign_refs(issue: models.Issue) -> bool {
 
 /// The issues as this request's viewer may see them: unchanged for the
 /// board token, foreign labels and projects dropped for a scoped viewer.
-fn issues_for(r: Ref<http.Request>, issues: Slice<models.Issue>) -> Slice<models.Issue> {
-  if is_scoped(r) { issues.map(without_foreign_refs) } else { issues }
+fn issues_for(ctx: pb.Client, r: Ref<http.Request>, issues: Slice<models.Issue>) -> Slice<models.Issue> {
+  if is_scoped(ctx, r) { issues.map(without_foreign_refs) } else { issues }
 }
 
 fn card_vm(issue: models.Issue) -> CardVM {
@@ -409,9 +409,9 @@ fn board_card(issue: models.Issue, claimed: Slice<models.Claim>) -> CardVM {
 /// The issue the dialog creates lands in that same team, so a picker
 /// offering another team's label would build a record PocketBase is happy to
 /// store and no view can explain.
-fn compose_vm(team_id: string, roster: Roster) -> Result<ComposeVM, string> {
-  let projects = records.fetch_projects(team_id)?
-  let labels = records.fetch_labels(team_id)?
+fn compose_vm(ctx: pb.Client, team_id: string, roster: Roster) -> Result<ComposeVM, string> {
+  let projects = records.fetch_projects(ctx, team_id)?
+  let labels = records.fetch_labels(ctx, team_id)?
   Ok(ComposeVM {
     prios: prio_opts(),
     members: roster.picks(),
@@ -456,14 +456,14 @@ fn comment_vm(c: models.Comment) -> CommentVM {
 /// project) — shared by the issue page and broadcast re-renders. `roster`
 /// is who the rendering may name (LLL-551): hidden members render as
 /// "hidden member" and drop out of the assignee picker.
-fn issue_vm(issue: models.Issue, comments: Slice<models.Comment>, roster: Roster) -> Result<IssueVM, string> {
-  let mut vm = issue_fields_vm(issue, comments, roster)?
+fn issue_vm(ctx: pb.Client, issue: models.Issue, comments: Slice<models.Comment>, roster: Roster) -> Result<IssueVM, string> {
+  let mut vm = issue_fields_vm(ctx, issue, comments, roster)?
   vm.description = markdown.md_html(issue.description)
   Ok(vm)
 }
 
 /// Metadata can refresh without parsing or transmitting the description.
-fn issue_fields_vm(raw: models.Issue, comments: Slice<models.Comment>, roster: Roster) -> Result<IssueVM, string> {
+fn issue_fields_vm(ctx: pb.Client, raw: models.Issue, comments: Slice<models.Comment>, roster: Roster) -> Result<IssueVM, string> {
   let issue = roster.issue(raw)
   let assignee = issue.expand.assignee.name
   let mut project = issue.expand.project.name
@@ -474,7 +474,7 @@ fn issue_fields_vm(raw: models.Issue, comments: Slice<models.Comment>, roster: R
     project_href = f"{issues_base(issue.expand.team.key)}?project={url.QueryEscape(project)}"
   }
   if project == "" { project = "none" }
-  let held = claims.fetch(issue.id)?.map(|c| roster.claim(c))
+  let held = claims.fetch(ctx, issue.id)?.map(|c| roster.claim(c))
   let mut claim_id = ""
   let mut claim_holder = ""
   let mut claim_age = ""
@@ -488,7 +488,7 @@ fn issue_fields_vm(raw: models.Issue, comments: Slice<models.Comment>, roster: R
   let mut claim_actor_id = ""
   let mut claim_actor = ""
   let mut claim_error = ""
-  match actor() {
+  match actor(ctx) {
     Ok(Some(a)) => { claim_actor = a.name; claim_actor_id = a.id },
     Ok(None) => claim_error = "No member is configured for this board.",
     Err(e) => claim_error = pb.plain(e),
@@ -529,8 +529,8 @@ fn issue_fields_vm(raw: models.Issue, comments: Slice<models.Comment>, roster: R
     // renders for whatever issue arrives, including one from a team the
     // board is not scoped to (TASK-173).
     member_opts: roster.picks(),
-    project_opts: records.fetch_projects(issue.team)?.map(|p| PickVM { id: p.id, name: p.name, bot: false }),
-    label_opts: records.fetch_labels(issue.team)?.map(|l| LabelPickVM {
+    project_opts: records.fetch_projects(ctx, issue.team)?.map(|p| PickVM { id: p.id, name: p.name, bot: false }),
+    label_opts: records.fetch_labels(ctx, issue.team)?.map(|l| LabelPickVM {
       id: l.id,
       name: l.name,
       color: theme.normalize_hex(l.color),

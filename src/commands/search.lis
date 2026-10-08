@@ -19,7 +19,7 @@ import "search"
 /// lines around the match (LLL-96). `lll issue list --search` stays the
 /// cheap title filter; this is the one that finds a word buried in a
 /// comment from last month.
-pub fn search_cmd(args: Slice<string>) -> Result<(), string> {
+pub fn search_cmd(ctx: pb.Client, args: Slice<string>) -> Result<(), string> {
   let spec = search_spec()
   let usage = flags.usage("lll search", spec, "TEXT...")
   let p = flags.parse_n(spec, args, 2, 64, usage)?
@@ -38,8 +38,8 @@ pub fn search_cmd(args: Slice<string>) -> Result<(), string> {
   }
   let only_issues = p.given("--issues")
   let only_docs = p.given("--docs")
-  let team = current_team()?
-  let corpus = cached_corpus(team.id, team.key, p.given("--refresh"), !only_docs, !only_issues)?
+  let team = current_team(ctx)?
+  let corpus = cached_corpus(ctx, team.id, team.key, p.given("--refresh"), !only_docs, !only_issues)?
   let hits = search.rank(corpus, q, limit)
   if p.given("--json") { return print_list_json(hits, whole_list(hits.length()), "hits") }
   if hits.is_empty() { return say_empty(f"match for '{q}' in {team.key}'s issues, comments or docs") }
@@ -72,13 +72,13 @@ pub fn candidate_clause(q: string, fields: Slice<string>) -> string {
 }
 
 /// Every doc of a team with only the fields the ranker reads, paged.
-fn fetch_team_docs_light(team_id: string, where: string) -> Result<Slice<models.Doc>, string> {
+fn fetch_team_docs_light(ctx: pb.Client, team_id: string, where: string) -> Result<Slice<models.Doc>, string> {
   let mut clause = f"team={query.quote(team_id)}"
   if where != "" { clause = f"{clause} && {where}" }
-  fetch_docs(clause, "slug", "id,slug,kind,title,body,updated")
+  fetch_docs(ctx, clause, "slug", "id,slug,kind,title,body,updated")
 }
 
-pub fn fetch_team_issues_where(team_id: string, where: string) -> Result<Slice<models.Issue>, string> {
+pub fn fetch_team_issues_where(ctx: pb.Client, team_id: string, where: string) -> Result<Slice<models.Issue>, string> {
   let mut clause = query.filter(team_id, "", "", "", "", "")
   if where != "" { clause = f"{clause} && {where}" }
   let filter = url.QueryEscape(clause)
@@ -86,7 +86,7 @@ pub fn fetch_team_issues_where(team_id: string, where: string) -> Result<Slice<m
   let mut page = 1
   loop {
     let mut list = models.IssueList { .. }
-    pb.fetch(f"/api/collections/issues/records?perPage=500&page={page}&sort=number&expand=team,assignee,labels&filter={filter}", "issues", &list)?
+    pb.fetch(ctx, f"/api/collections/issues/records?perPage=500&page={page}&sort=number&expand=team,assignee,labels&filter={filter}", "issues", &list)?
     out = out.append(list.items...)
     if list.items.length() < 500 { break }
     page += 1
@@ -96,7 +96,7 @@ pub fn fetch_team_issues_where(team_id: string, where: string) -> Result<Slice<m
 
 /// The same issues with only the fields the ranker reads: the CLI has no
 /// card to draw, and the expansions were most of the bytes on the wire.
-fn fetch_team_issues_light(team_id: string, where: string) -> Result<Slice<models.Issue>, string> {
+fn fetch_team_issues_light(ctx: pb.Client, team_id: string, where: string) -> Result<Slice<models.Issue>, string> {
   let mut clause = query.filter(team_id, "", "", "", "", "")
   if where != "" { clause = f"{clause} && {where}" }
   let filter = url.QueryEscape(clause)
@@ -104,7 +104,7 @@ fn fetch_team_issues_light(team_id: string, where: string) -> Result<Slice<model
   let mut page = 1
   loop {
     let mut list = models.IssueList { .. }
-    pb.fetch(f"/api/collections/issues/records?perPage=500&page={page}&sort=number&fields=id,number,title,description,state,updated&filter={filter}", "issues", &list)?
+    pb.fetch(ctx, f"/api/collections/issues/records?perPage=500&page={page}&sort=number&fields=id,number,title,description,state,updated&filter={filter}", "issues", &list)?
     out = out.append(list.items...)
     if list.items.length() < 500 { break }
     page += 1
@@ -112,7 +112,7 @@ fn fetch_team_issues_light(team_id: string, where: string) -> Result<Slice<model
   Ok(out)
 }
 
-fn fetch_team_comments_where(team_id: string, where: string) -> Result<Slice<models.Comment>, string> {
+fn fetch_team_comments_where(ctx: pb.Client, team_id: string, where: string) -> Result<Slice<models.Comment>, string> {
   let mut clause = f"issue.team={query.quote(team_id)}"
   if where != "" { clause = f"{clause} && {where}" }
   let cfilter = url.QueryEscape(clause)
@@ -120,7 +120,7 @@ fn fetch_team_comments_where(team_id: string, where: string) -> Result<Slice<mod
   let mut page = 1
   loop {
     let mut list = models.CommentList { .. }
-    pb.fetch(f"/api/collections/comments/records?perPage=500&page={page}&sort=created,id&expand=author&fields=id,issue,author,body,updated,expand.author.name&filter={cfilter}", "comments", &list)?
+    pb.fetch(ctx, f"/api/collections/comments/records?perPage=500&page={page}&sort=created,id&expand=author&fields=id,issue,author,body,updated,expand.author.name&filter={cfilter}", "comments", &list)?
     out = out.append(list.items...)
     if list.items.length() < 500 { break }
     page += 1
@@ -202,9 +202,10 @@ struct Cache {
   docs: Slice<models.Doc>,
 }
 
-fn cache_path(team_id: string) -> Result<string, string> {
-  let cfg = config.load()?
-  let Ok(home) = os.UserHomeDir() else { return Err("no home directory for the search cache") }
+fn cache_path(ctx: pb.Client, team_id: string) -> Result<string, string> {
+  let cfg = ctx.settings.config()?
+  let home = ctx.settings.env.home
+  if home == "" { return Err("no home directory for the search cache") }
   let dir = filepath.Join(home, ".cache", "lll")
   if let Err(e) = os.MkdirAll(dir, 0o755) { return Err(f"creating {dir}: {e}") }
   let host = strings.NewReplacer("https://", "", "http://", "", "/", "_", ":", "_").Replace(cfg.url)
@@ -228,10 +229,10 @@ fn save_cache(path: string, c: Cache) -> Result<(), string> {
 }
 
 /// Documents for the team from the cache, refreshed first.
-fn cached_corpus(team_id: string, team_key: string, refresh: bool, issues: bool, docs: bool) -> Result<Slice<search.Document>, string> {
-  let path = cache_path(team_id)?
+fn cached_corpus(ctx: pb.Client, team_id: string, team_key: string, refresh: bool, issues: bool, docs: bool) -> Result<Slice<search.Document>, string> {
+  let path = cache_path(ctx, team_id)?
   let mut c = if refresh { Cache { .. } } else { load_cache(path) }
-  c = sync_cache(c, team_id)?
+  c = sync_cache(ctx, c, team_id)?
   save_cache(path, c)?
   let mut out: Slice<search.Document> = []
   if issues { out = out.append(issue_documents(team_key, c.issues, c.comments)...) }
@@ -247,14 +248,14 @@ fn cached_corpus(team_id: string, team_key: string, refresh: bool, issues: bool,
 /// id listings and the three "updated since" fetches run at once; records
 /// whose id is gone are dropped, changed and new ones replace their old
 /// selves, and `synced` moves to the newest `updated` seen.
-fn sync_cache(c: Cache, team_id: string) -> Result<Cache, string> {
+fn sync_cache(ctx: pb.Client, c: Cache, team_id: string) -> Result<Cache, string> {
   if c.synced == "" {
     let issues_ch = Channel.new<Result<Slice<models.Issue>, string>>()
     let comments_ch = Channel.new<Result<Slice<models.Comment>, string>>()
     let docs_ch = Channel.new<Result<Slice<models.Doc>, string>>()
-    task { let _ = issues_ch.send(fetch_team_issues_light(team_id, "")) }
-    task { let _ = comments_ch.send(fetch_team_comments_where(team_id, "")) }
-    task { let _ = docs_ch.send(fetch_team_docs_light(team_id, "")) }
+    task { let _ = issues_ch.send(fetch_team_issues_light(ctx, team_id, "")) }
+    task { let _ = comments_ch.send(fetch_team_comments_where(ctx, team_id, "")) }
+    task { let _ = docs_ch.send(fetch_team_docs_light(ctx, team_id, "")) }
     let Some(issues) = issues_ch.receive() else { return Err("issue fetch ended without an answer") }
     let Some(comments) = comments_ch.receive() else { return Err("comment fetch ended without an answer") }
     let Some(docs) = docs_ch.receive() else { return Err("doc fetch ended without an answer") }
@@ -278,9 +279,9 @@ fn sync_cache(c: Cache, team_id: string) -> Result<Cache, string> {
   let pi = Channel.new<Result<Probe, string>>()
   let pc = Channel.new<Result<Probe, string>>()
   let pd = Channel.new<Result<Probe, string>>()
-  task { let _ = pi.send(probe("issues", f"team={query.quote(team_id)}")) }
-  task { let _ = pc.send(probe("comments", f"issue.team={query.quote(team_id)}")) }
-  task { let _ = pd.send(probe("docs", f"team={query.quote(team_id)}")) }
+  task { let _ = pi.send(probe(ctx, "issues", f"team={query.quote(team_id)}")) }
+  task { let _ = pc.send(probe(ctx, "comments", f"issue.team={query.quote(team_id)}")) }
+  task { let _ = pd.send(probe(ctx, "docs", f"team={query.quote(team_id)}")) }
   let Some(ri) = pi.receive() else { return Err("probe ended without an answer") }
   let Some(rc) = pc.receive() else { return Err("probe ended without an answer") }
   let Some(rd) = pd.receive() else { return Err("probe ended without an answer") }
@@ -297,8 +298,8 @@ fn sync_cache(c: Cache, team_id: string) -> Result<Cache, string> {
   let mut comments = c.comments
   let mut docs = c.docs
   if moved_i {
-    let keep = as_set(fetch_ids("issues", f"team={query.quote(team_id)}")?)
-    let changed = fetch_team_issues_light(team_id, since)?
+    let keep = as_set(fetch_ids(ctx, "issues", f"team={query.quote(team_id)}")?)
+    let changed = fetch_team_issues_light(ctx, team_id, since)?
     let mut seen = Map.new<string, bool>()
     let mut next: Slice<models.Issue> = []
     for i in changed { seen[i.id] = true; next = next.append(i) }
@@ -306,8 +307,8 @@ fn sync_cache(c: Cache, team_id: string) -> Result<Cache, string> {
     issues = next
   }
   if moved_c {
-    let keep = as_set(fetch_ids("comments", f"issue.team={query.quote(team_id)}")?)
-    let changed = fetch_team_comments_where(team_id, since)?
+    let keep = as_set(fetch_ids(ctx, "comments", f"issue.team={query.quote(team_id)}")?)
+    let changed = fetch_team_comments_where(ctx, team_id, since)?
     let mut seen = Map.new<string, bool>()
     let mut next: Slice<models.Comment> = []
     for x in changed { seen[x.id] = true; next = next.append(x) }
@@ -315,8 +316,8 @@ fn sync_cache(c: Cache, team_id: string) -> Result<Cache, string> {
     comments = next
   }
   if moved_d {
-    let keep = as_set(fetch_ids("docs", f"team={query.quote(team_id)}")?)
-    let changed = fetch_team_docs_light(team_id, since)?
+    let keep = as_set(fetch_ids(ctx, "docs", f"team={query.quote(team_id)}")?)
+    let changed = fetch_team_docs_light(ctx, team_id, since)?
     let mut seen = Map.new<string, bool>()
     let mut next: Slice<models.Doc> = []
     for x in changed { seen[x.id] = true; next = next.append(x) }
@@ -345,10 +346,10 @@ struct ProbeItem {
   updated: string,
 }
 
-fn probe(collection: string, where: string) -> Result<Probe, string> {
+fn probe(ctx: pb.Client, collection: string, where: string) -> Result<Probe, string> {
   let filter = url.QueryEscape(where)
   let mut list = ProbeList { .. }
-  pb.fetch(f"/api/collections/{collection}/records?perPage=1&sort=-updated&fields=updated&filter={filter}", collection, &list)?
+  pb.fetch(ctx, f"/api/collections/{collection}/records?perPage=1&sort=-updated&fields=updated&filter={filter}", collection, &list)?
   let newest = if list.items.is_empty() { "" } else { list.items[0].updated }
   Ok(Probe { newest, total: list.total_items })
 }
@@ -381,13 +382,13 @@ struct IdOnly {
 
 /// Every record id of a collection matching `where`: a few kilobytes even
 /// for a big team, which is what makes the delta sync cheap.
-fn fetch_ids(collection: string, where: string) -> Result<Slice<string>, string> {
+fn fetch_ids(ctx: pb.Client, collection: string, where: string) -> Result<Slice<string>, string> {
   let filter = url.QueryEscape(where)
   let mut out: Slice<string> = []
   let mut page = 1
   loop {
     let mut list = IdList { .. }
-    pb.fetch(f"/api/collections/{collection}/records?perPage=500&page={page}&fields=id&filter={filter}", collection, &list)?
+    pb.fetch(ctx, f"/api/collections/{collection}/records?perPage=500&page={page}&fields=id&filter={filter}", collection, &list)?
     for x in list.items { out = out.append(x.id) }
     if list.items.length() < 500 { break }
     page += 1

@@ -28,6 +28,7 @@ import "records"
 /// broadcasts one unfiltered #board fragment to every board-scoped client, so
 /// a page that subscribed would be morphed into the board.
 fn doc_page(
+  ctx: pb.Client,
   w: http.ResponseWriter,
   r: Ref<http.Request>,
   team: models.Team,
@@ -37,7 +38,7 @@ fn doc_page(
   // fetch_doc is `lll doc view`'s own read, expands included, so the page and
   // the command cannot answer differently. Its error already names the team
   // and points at `lll doc list`, which is the right 404 body.
-  let doc = match fetch_doc(team, slug) {
+  let doc = match fetch_doc(ctx, team, slug) {
     Ok(d) => d,
     Err(e) => {
       http.Error(w, pb.plain(e), 404)
@@ -45,7 +46,7 @@ fn doc_page(
     },
   }
   // The author, and a bot author's owner, follow the viewer's roster (LLL-551).
-  let shown = match roster_for(r, team.id) {
+  let shown = match roster_for(ctx, r, team.id) {
     Ok(found) => found,
     Err(e) => {
       http.Error(w, pb.plain(e), 500)
@@ -55,14 +56,14 @@ fn doc_page(
   let mut vm = doc_vm(shown.doc(doc), team.key)
   // The board reads as its own member, so a doc linking another team's issue
   // would show that issue to a viewer scoped to this team.
-  if let Viewer.Scoped(v) = board_viewer(r) {
+  if let Viewer.Scoped(v) = board_viewer(ctx, r) {
     vm.issues = vm.issues.filter(|i| v.sees_issue(i.key))
   }
   if wants_raw(r) {
     write_raw(w, doc_raw(vm))
     return
   }
-  let page = PageVM { rail: rail_for(r, "doc", me, team), page: vm }
+  let page = PageVM { rail: rail_for(ctx, r, "doc", me, team), page: vm }
   render_html(w, "doc-page", page)
 }
 
@@ -129,6 +130,7 @@ fn doc_raw(vm: DocVM) -> string {
 ///
 /// No SSE, for the reason /projects and /issues have none.
 fn docs_page(
+  ctx: pb.Client,
   w: http.ResponseWriter,
   r: Ref<http.Request>,
   team: models.Team,
@@ -138,14 +140,14 @@ fn docs_page(
   // An unknown kind flashes and lists every kind, as an unknown /issues
   // filter does: a stale link must still show a page.
   let (kind, error) = docs_kind(query_param(r, "kind"))
-  let shown = match roster_for(r, team.id) {
+  let shown = match roster_for(ctx, r, team.id) {
     Ok(found) => found,
     Err(e) => {
       http.Error(w, pb.plain(e), 500)
       return
     },
   }
-  let docs = match records.fetch_team_docs(team.id, kind) {
+  let docs = match records.fetch_team_docs(ctx, team.id, kind) {
     Ok(found) => found,
     Err(e) => {
       http.Error(w, pb.plain(e), 500)
@@ -167,7 +169,7 @@ fn docs_page(
     write_raw(w, docs_raw(vm))
     return
   }
-  let page = PageVM { rail: rail_for(r, "docs", me, team), page: vm }
+  let page = PageVM { rail: rail_for(ctx, r, "docs", me, team), page: vm }
   render_html(w, "docs-page", page)
 }
 

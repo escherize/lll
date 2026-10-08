@@ -12,8 +12,8 @@ import "query"
 
 /// Dispatch `lll webhook <verb>` through the noun's Command table (TASK-307):
 /// dispatch, `lll webhook --help` and shell completions all read the table.
-pub fn webhook(args: Slice<string>) -> Result<(), string> {
-  flags.dispatch(
+pub fn webhook(ctx: pb.Client, args: Slice<string>) -> Result<(), string> {
+  flags.dispatch(ctx,
     "webhook",
     "outbound webhooks for issue events",
     webhook_intro(),
@@ -90,15 +90,16 @@ fn webhook_remove_spec() -> Slice<flags.Flag> {
 }
 
 fn webhook_add(input: flags.CommandInput) -> Result<(), string> {
+  let ctx = input.ctx
   let p = input.parsed
   let raw = p.first()
   let target = validate_target(raw)?
-  let team = team_flag_or_current(p.one("--team"))?
+  let team = team_flag_or_current(ctx, p.one("--team"))?
 
   let mut project_id = ""
   let mut scope = f"team {team.key}"
   if p.given("--project") {
-    let proj = records.resolve_project(team.id, p.one("--project"))?
+    let proj = records.resolve_project(ctx, team.id, p.one("--project"))?
     project_id = proj.id
     scope = f"project {proj.name}"
   }
@@ -110,7 +111,7 @@ fn webhook_add(input: flags.CommandInput) -> Result<(), string> {
   // One registration per scope and URL: a duplicate would double every
   // delivery, which reads downstream as a server bug rather than a mistake.
   let mut existing = models.WebhookList { .. }
-  pb.fetch(
+  pb.fetch(ctx, 
     f"/api/collections/webhooks/records?filter={url.QueryEscape(dup_filter(team.id, project_id, target))}",
     "webhooks",
     &existing,
@@ -124,7 +125,7 @@ fn webhook_add(input: flags.CommandInput) -> Result<(), string> {
     Ok(p) => p,
     Err(e) => return Err(f"encoding webhook: {e}"),
   }
-  let body = pb.post("/api/collections/webhooks/records", payload as string)?
+  let body = ctx.post("/api/collections/webhooks/records", payload as string)?
   let mut created = models.Webhook { .. }
   if let Err(e) = json.Unmarshal(body.bytes(), &created) {
     return Err(f"decoding created webhook: {e}")
@@ -143,10 +144,11 @@ fn webhook_add(input: flags.CommandInput) -> Result<(), string> {
 }
 
 fn webhook_list(input: flags.CommandInput) -> Result<(), string> {
+  let ctx = input.ctx
   let p = input.parsed
-  let team = team_flag_or_current(p.one("--team"))?
+  let team = team_flag_or_current(ctx, p.one("--team"))?
   let mut hooks = models.WebhookList { .. }
-  pb.fetch(
+  pb.fetch(ctx, 
     f"/api/collections/webhooks/records?perPage=200&sort=-created&expand=team,project&filter={url.QueryEscape(f"team={query.quote(team.id)}")}",
     "webhooks",
     &hooks,
@@ -160,22 +162,23 @@ fn webhook_list(input: flags.CommandInput) -> Result<(), string> {
 }
 
 fn webhook_remove(input: flags.CommandInput) -> Result<(), string> {
+  let ctx = input.ctx
   let usage = input.usage
   let p = input.parsed
   let raw = p.first()
   let target = validate_target(raw)?
-  let team = team_flag_or_current(p.one("--team"))?
+  let team = team_flag_or_current(ctx, p.one("--team"))?
 
   let mut project_id = ""
   let mut scope = f"team {team.key}"
   if p.given("--project") {
-    let proj = records.resolve_project(team.id, p.one("--project"))?
+    let proj = records.resolve_project(ctx, team.id, p.one("--project"))?
     project_id = proj.id
     scope = f"project {proj.name}"
   }
 
   let mut matches = models.WebhookList { .. }
-  pb.fetch(
+  pb.fetch(ctx, 
     f"/api/collections/webhooks/records?filter={url.QueryEscape(dup_filter(team.id, project_id, target))}",
     "webhooks",
     &matches,
@@ -189,7 +192,7 @@ fn webhook_remove(input: flags.CommandInput) -> Result<(), string> {
     return Err(f"webhook {target} is registered more than once; pass --project, or remove by id: one of {strings.Join(ids, ", ")}\nusage: {usage}")
   }
   let victim = matches.items[0]
-  let _ = pb.delete(f"/api/collections/webhooks/records/{victim.id}")?
+  let _ = ctx.delete(f"/api/collections/webhooks/records/{victim.id}")?
   fmt.Println(f"Removed webhook {target} ({scope})")
   Ok(())
 }

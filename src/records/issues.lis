@@ -7,13 +7,13 @@ import "query"
 /// An issue's comments, oldest first, author and a bot author's owner
 /// expanded (LLL-610). PocketBase leaves the owner out when the caller may
 /// not read it, so nobody learns an owner they cannot see.
-pub fn fetch_comments(issue_id: string) -> Result<Slice<models.Comment>, string> {
+pub fn fetch_comments(ctx: pb.Client, issue_id: string) -> Result<Slice<models.Comment>, string> {
   let filter = url.QueryEscape(f"issue={query.quote(issue_id)}")
   let mut result: Slice<models.Comment> = []
   let mut page = 1
   loop {
     let mut comments = models.CommentList { .. }
-    pb.fetch(
+    pb.fetch(ctx, 
       f"/api/collections/comments/records?filter={filter}&sort=created,id&expand=author.owner&perPage=200&page={page}",
       "comments",
       &comments,
@@ -45,7 +45,7 @@ pub fn issue_not_found(id: string) -> string {
 
 /// Fetch an issue by KEY-123 and return the raw PB record JSON (team,
 /// assignee, labels, project expanded).
-pub fn fetch_issue_record(id: string) -> Result<string, string> {
+pub fn fetch_issue_record(ctx: pb.Client, id: string) -> Result<string, string> {
   let (team_key, number) = split_issue_key(id)?
 
   let not_found = issue_not_found(id)
@@ -59,7 +59,7 @@ pub fn fetch_issue_record(id: string) -> Result<string, string> {
     f"team.key={query.quote(records_team_key(team_key))} && number={number}",
   )
   let mut issues = models.IssueList { .. }
-  pb.fetch(
+  pb.fetch(ctx, 
     f"/api/collections/issues/records?filter={filter}&perPage=1",
     "issues",
     &issues,
@@ -70,14 +70,14 @@ pub fn fetch_issue_record(id: string) -> Result<string, string> {
 
   // blocked_by.team: a blocker's key is ITS team's key, not this issue's
   // (LLL-674).
-  pb.get(
+  ctx.get(
     f"/api/collections/issues/records/{item.id}?expand=team,assignee,labels,project,blocked_by,blocked_by.team,creator",
   )
 }
 
 /// fetch_issue_record, decoded.
-pub fn fetch_issue(id: string) -> Result<models.Issue, string> {
-  let record = fetch_issue_record(id)?
+pub fn fetch_issue(ctx: pb.Client, id: string) -> Result<models.Issue, string> {
+  let record = fetch_issue_record(ctx, id)?
   let mut full = models.Issue { .. }
   if let Err(e) = json.Unmarshal(record.bytes(), &full) {
     return Err(f"decoding issue: {e}")
@@ -96,10 +96,10 @@ struct BoardPage {
 
 /// Complete board input, in deterministic manual order. Failed or inconsistent
 /// pages never escape as a partial board; callers retain their prior view.
-pub fn fetch_board_issues(team_id: string) -> Result<Slice<models.Issue>, string> {
+pub fn fetch_board_issues(ctx: pb.Client, team_id: string) -> Result<Slice<models.Issue>, string> {
   collect_board_issues(team_id, BOARD_EXPAND, |path| {
     let mut page = BoardPage { .. }
-    pb.fetch(path, "board issues", &page)?
+    pb.fetch(ctx, path, "board issues", &page)?
     Ok(page)
   })
 }
@@ -119,10 +119,10 @@ const BOARD_EXPAND: string = "team,assignee,labels,project"
 const FULL_EXPAND: string = "team,assignee,labels,project"
 
 /// fetch_board_issues with every named relation expanded.
-pub fn fetch_full_issues(team_id: string) -> Result<Slice<models.Issue>, string> {
+pub fn fetch_full_issues(ctx: pb.Client, team_id: string) -> Result<Slice<models.Issue>, string> {
   collect_board_issues(team_id, FULL_EXPAND, |path| {
     let mut page = BoardPage { .. }
-    pb.fetch(path, "issues", &page)?
+    pb.fetch(ctx, path, "issues", &page)?
     Ok(page)
   })
 }
@@ -159,10 +159,10 @@ fn collect_board_issues(
 /// One column's issues in board order: the input a reorder needs, not the
 /// team. fetch_board_issues here made every card move re-read every issue
 /// the team ever had, expanded, to find two sorts (LLL-428).
-pub fn fetch_column_issues(team_id: string, state: string) -> Result<Slice<models.Issue>, string> {
+pub fn fetch_column_issues(ctx: pb.Client, team_id: string, state: string) -> Result<Slice<models.Issue>, string> {
   collect_column_issues(team_id, state, |path| {
     let mut page = BoardPage { .. }
-    pb.fetch(path, "column issues", &page)?
+    pb.fetch(ctx, path, "column issues", &page)?
     Ok(page)
   })
 }

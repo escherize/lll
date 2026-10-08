@@ -2,7 +2,6 @@ import "go:encoding/json"
 import "go:html/template"
 import "go:net/http"
 import "go:net/url"
-import "go:os"
 import "go:strings"
 import "go:time"
 
@@ -30,18 +29,18 @@ import "pb"
 
 /// The name form. It never looks the code up: a GET must not be a way to
 /// test codes, and the POST gives the real answer anyway.
-pub fn join_page(w: http.ResponseWriter, r: Ref<http.Request>) {
-  join_respond(w, 200, join_html("", true, signed_in_as(r)))
+pub fn join_page(ctx: pb.Client, w: http.ResponseWriter, r: Ref<http.Request>) {
+  join_respond(w, 200, join_html("", true, signed_in_as(ctx, r)))
 }
 
 /// Who this browser is signed in to the board as, in words, or "" when it
 /// holds no board cookie that still resolves (LLL-632). Joining replaces
 /// that cookie, so the form warns before it does.
-fn signed_in_as(r: Ref<http.Request>) -> string {
-  let want = os.Getenv("LLL_BOARD_TOKEN")
+fn signed_in_as(ctx: pb.Client, r: Ref<http.Request>) -> string {
+  let want = ctx.settings.board_token()
   let Some(cookie) = cookie_named(r, "lll_board") else { return "" }
   if is_board_token(cookie, want) { return "the board token, which opens every team" }
-  let Some(viewer) = cookie_viewer(cookie, want) else { return "" }
+  let Some(viewer) = cookie_viewer(ctx, cookie, want) else { return "" }
   viewer_words(viewer)
 }
 
@@ -62,7 +61,7 @@ struct JoinRequest { code: string, name: string }
 struct JoinResponse { token: string, teams: Slice<string> }
 
 /// Redeem the code in the path for the name in the form.
-pub fn join_redeem(w: http.ResponseWriter, r: Ref<http.Request>) {
+pub fn join_redeem(ctx: pb.Client, w: http.ResponseWriter, r: Ref<http.Request>) {
   // Another site must not be able to submit this form: it would replace the
   // visitor's board cookie with a member of the attacker's choosing. Go's
   // check reads Sec-Fetch-Site, then Origin against Host; a request with
@@ -97,7 +96,7 @@ pub fn join_redeem(w: http.ResponseWriter, r: Ref<http.Request>) {
       return
     },
   }
-  let body = match pb.post_anon("/api/lll/invites/redeem", payload as string) {
+  let body = match ctx.post_anon("/api/lll/invites/redeem", payload as string) {
     Ok(b) => b,
     Err(e) => {
       let status = pb.classify(e).status
@@ -105,7 +104,7 @@ pub fn join_redeem(w: http.ResponseWriter, r: Ref<http.Request>) {
       // server failure, which rolled the redemption back. Every other
       // refusal (unknown, used, expired, void) is final for this link.
       if status >= 400 && status < 500 {
-        let current = if status == 400 { signed_in_as(r) } else { "" }
+        let current = if status == 400 { signed_in_as(ctx, r) } else { "" }
         join_respond(
           w,
           status,
@@ -251,15 +250,15 @@ style='padding: .5rem .6rem; font: inherit; color: inherit; border: 1px solid #b
 
 /// GET /me: who this browser is signed in as, its boards, and the offer of
 /// a CLI login. Never the token itself.
-pub fn me_page(w: http.ResponseWriter, r: Ref<http.Request>) {
-  join_respond(w, 200, me_html(board_viewer(r), "", ""))
+pub fn me_page(ctx: pb.Client, w: http.ResponseWriter, r: Ref<http.Request>) {
+  join_respond(w, 200, me_html(board_viewer(ctx, r), "", ""))
 }
 
 /// POST /me: the same page, plus the member's CLI login. Only a member
 /// cookie has one: the board token and a view-only link name no member.
 /// The board's origin guard has already refused a POST from another page.
-pub fn me_cli(w: http.ResponseWriter, r: Ref<http.Request>) {
-  let viewer = board_viewer(r)
+pub fn me_cli(ctx: pb.Client, w: http.ResponseWriter, r: Ref<http.Request>) {
+  let viewer = board_viewer(ctx, r)
   let token = match viewer {
     Viewer.Scoped(v) => v.member.map_or("", |m| m.token),
     Viewer.Full => "",

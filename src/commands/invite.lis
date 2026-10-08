@@ -12,8 +12,8 @@ import "records"
 // superuser (LLL-629), and its refusal names who can; this command only
 // resolves team keys and prints the link.
 
-pub fn invite(args: Slice<string>) -> Result<(), string> {
-  flags.dispatch(
+pub fn invite(ctx: pb.Client, args: Slice<string>) -> Result<(), string> {
+  flags.dispatch(ctx,
     "invite",
     "single-use join links",
     invite_intro(),
@@ -86,14 +86,15 @@ struct InviteResponse { code: string, expires: string }
 struct InviteJson { url: string, code: string, expires: string, mode: string, teams: Slice<string> }
 
 fn invite_create(input: flags.CommandInput) -> Result<(), string> {
+  let ctx = input.ctx
   let p = input.parsed
   let keys = p.all("--team").map(records.normalize_team_key).filter(|k| k != "")
   if keys.is_empty() { return Err(flags.usage_error(f"usage: {input.usage}")) }
-  let base = web_base()?
+  let base = web_base(ctx)?
   let mut ids: Slice<string> = []
   for key in keys {
-    let Some(team) = records.find_team(key)? else {
-      return Err(unknown_team(key))
+    let Some(team) = records.find_team(ctx, key)? else {
+      return Err(unknown_team(ctx, key))
     }
     ids = ids.append(team.id)
   }
@@ -102,7 +103,7 @@ fn invite_create(input: flags.CommandInput) -> Result<(), string> {
     Ok(b) => b,
     Err(e) => return Err(f"encoding the invite: {e}"),
   }
-  let body = pb.post("/api/lll/invites", payload as string)?
+  let body = ctx.post("/api/lll/invites", payload as string)?
   let mut made = InviteResponse { .. }
   if let Err(e) = json.Unmarshal(body.bytes(), &made) {
     return Err(f"decoding the invite: {e}")

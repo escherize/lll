@@ -193,13 +193,13 @@ fn doc_commands_declares_every_verb_once_with_a_summary() {
   let names = doc_commands().map(|c| c.name)
   assert strings.Join(names, " ") == "create list view edit delete"
   assert strings.Join(flags.command_names(doc_commands()), " ") == "create new list view show edit update delete"
-  let assert Err(help) = doc(["lll", "doc", "--help"])
+  let assert Err(help) = doc(test_client("http://127.0.0.1:1", "", ""), ["lll", "doc", "--help"])
   assert !help.contains("lll doc link")
   assert !help.contains("lll doc unlink")
   assert help.contains("lll issue link KEY-123 SLUG")
   // LLL-644 (D5): doc link/unlink were removed; each names the issue verb.
   for verb in ["link", "unlink"] {
-    let assert Err(refused) = doc(["lll", "doc", verb, "port-notes", "ENG-2"])
+    let assert Err(refused) = doc(test_client("http://127.0.0.1:1", "", ""), ["lll", "doc", verb, "port-notes", "ENG-2"])
     assert refused.contains(f"did you mean 'lll issue {verb} KEY-123 SLUG'?")
   }
   for c in doc_commands() {

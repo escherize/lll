@@ -82,7 +82,7 @@ pub fn up_spec() -> Slice<flags.Flag> {
   ]
 }
 
-pub fn up(args: Slice<string>) -> Result<(), string> {
+pub fn up(ctx: pb.Client, args: Slice<string>) -> Result<(), string> {
   let spec = up_spec()
   let p = flags.parse(spec, args, 2, false, flags.usage("lll up", spec, ""))?
   if p.given("--help") {
@@ -102,8 +102,15 @@ pub fn up(args: Slice<string>) -> Result<(), string> {
   if scratch && p.one("--pb-dir") != "" {
     return Err(flags.usage_error("--scratch owns its temporary data directory; omit --pb-dir"))
   }
-  let scratch_dir = if scratch { setup_scratch()? } else { "" }
-  if share_bind != "" { let _ = os.Setenv("LLL_BIND", share_bind) }
+  // A scratch boot runs on settings of its own, built from nothing it
+  // inherited (setup_scratch); a shared one listens on the address it named.
+  let (scratch_dir, ctx) = if scratch {
+    let (dir, settings) = setup_scratch()?
+    (dir, pb.Client.new(settings))
+  } else {
+    ("", ctx)
+  }
+  let ctx = if share_bind != "" { ctx.with_settings(ctx.settings.with_bind(share_bind)) } else { ctx }
   let mut web_port = if scratch { available_port()? } else { 8100 }
   let raw_port = p.one("--port")
   if raw_port != "" {
@@ -122,7 +129,7 @@ pub fn up(args: Slice<string>) -> Result<(), string> {
   // configured but where it came from. A team already written in a config file
   // needs no persisting; one that came from LLL_TEAM (or from the prompt) does,
   // or the next boot in this directory asks the same question again.
-  let (cfg, src) = config.load_traced()?
+  let (cfg, src) = ctx.settings.traced()?
   // A shareable local boot is explicit intent to use THIS machine even when
   // the home config still points at a hosted board. Give its embedded API a
   // fresh local port; the public board port proxies /api/ for teammates.
@@ -161,26 +168,31 @@ check what is configured with 'lll config list'",
     )
   }
 
-  if share_bind != "" { pin_local_board_token(pb_dir)? }
-  require_board_token_off_loopback()?
+  let ctx = if share_bind != "" {
+    ctx.with_settings(ctx.settings.with_board_token(pin_local_board_token(ctx.settings, pb_dir)?))
+  } else {
+    ctx
+  }
+  require_board_token_off_loopback(ctx.settings)?
   // The superuser identity: upserted on a fresh boot, and used for the
   // process token further down. LLL-676: with no LLL_ADMIN_* pair it is a
   // random password kept 0600 in the data directory, never a well-known
   // one: PocketBase is reachable from any web page the user visits.
-  let generated_admin = os.Getenv("LLL_ADMIN_EMAIL") == "" ||
-  os.Getenv("LLL_ADMIN_PASSWORD") == ""
+  let generated_admin = ctx.settings.admin().is_none()
   // Only a boot that starts the server generates a password: a boot that
   // reuses a running one would leave a file matching no server in this
   // directory, so it only reads a pair that is already there.
   let starting = !healthy(db_url)
-  if share_bind != "" || generated_admin {
-    pin_local_admin(pb_dir, starting)?
+  let ctx = if share_bind != "" || generated_admin {
+    pin_local_admin(ctx.settings, pb_dir, starting)?
+      .map_or(ctx, |admin| ctx.with_settings(ctx.settings.with_admin(admin)))
+  } else {
+    ctx
   }
 
   let mut api_line = f"api    {db_url} (already running)"
 
-  let email = os.Getenv("LLL_ADMIN_EMAIL")
-  let pass = os.Getenv("LLL_ADMIN_PASSWORD")
+  let (email, pass) = ctx.settings.admin().map_or(("", ""), |admin| (admin.email, admin.password))
   // Whether this boot proved the administrator pair works: it upserted the
   // pair into the server it started, or signed in with it. The banner names
   // the pair only then (LLL-648).
@@ -188,10 +200,18 @@ check what is configured with 'lll config list'",
 
   if starting {
     let db_port = free_port(port_of(db_url, 8090))
-    db_url = f"http://{bind_addr()}:{db_port}"
+    db_url = f"http://{ctx.settings.bind()}:{db_port}"
 
     task {
-      match gopb.Serve(pb_dir, f"{bind_addr()}:{db_port}", email, pass, version()) {
+      match gopb.Serve(
+        pb_dir,
+        f"{ctx.settings.bind()}:{db_port}",
+        email,
+        pass,
+        version(),
+        ctx.settings.env.allowed_origins,
+        ctx.settings.env.web_url,
+      ) {
         Err(e) => {
           fmt.Println(f"lll server failed to start: {e}")
           // A bad LLL_ALLOWED_ORIGINS is the caller's input (exit 2), not
@@ -251,14 +271,17 @@ check what is configured with 'lll config list'",
   // next reports honestly. (Caught by the gate: an e2e boot reusing a running
   // PocketBase has a valid member token and default admin creds that do not
   // match that server, and refusing it was a regression this change caused.)
-  let _ = os.Unsetenv("LLL_REMINT")
-  let _ = os.Unsetenv("LLL_REMINT_MEMBER")
-  let _ = os.Unsetenv("LLL_REALTIME_SUBSCRIPTION")
+  //
+  // The boot decides for itself whether its board may renew its token
+  // (board_identity): a renewal inherited from LLL_REMINT is dropped here.
+  let ctx = ctx.renewing(None)
   // An explicit local share boot owns a new database, so an opaque token from
   // the user's hosted config cannot be allowed to win by the normal
   // conservative "maybe usable" rule.
   let mut using_token = share_bind == "" && cfg.token != "" &&
   pb.token_usable(db_url, cfg.token)
+  // The in-process board (and its PB client) must talk to the db we chose.
+  let mut ctx = ctx.with_url(db_url)
   if !using_token {
     match superuser_token(db_url, email, pass) {
       Ok(tok) => {
@@ -272,7 +295,7 @@ check what is configured with 'lll config list'",
             f"auth   the token from {src.token} is not valid for {db_url}; booting on the superuser credentials instead; the cli line below says what the CLI does",
           )
         }
-        let _ = os.Setenv("LLL_TOKEN", tok)
+        ctx = ctx.with_token(tok, "")
         fmt.Println(
           "auth   rules are authenticated-only; bootstrapping with superuser credentials before signing in the board as a member",
         )
@@ -294,9 +317,6 @@ password in its own data directory's .lll-admin.json.",
   }
   let member_token_ok = using_token
 
-  // The in-process board (and its PB client) must talk to the db we chose.
-  let _ = os.Setenv("LLL_URL", db_url)
-
   // An unscoped board cannot create issues, and a configured-but-missing
   // team is fatal further down, so settle the team here: `lll up` on a fresh
   // data dir must just work.
@@ -310,7 +330,7 @@ password in its own data directory's .lll-admin.json.",
   // whole request. DEMO unless the caller already chose something.
   let demo = p.given("--demo")
   let want_team = if demo && cfg.team == "" { "DEMO" } else { cfg.team }
-  let team = match ensure_team(want_team, src.team, throwaway) {
+  let team = match ensure_team(ctx, want_team, src.team, throwaway) {
     Ok(team) => team,
     Err(e) => {
       let credential = if member_token_ok {
@@ -321,12 +341,12 @@ password in its own data directory's .lll-admin.json.",
       return Err(f"{e}\nstartup credential: {credential}")
     },
   }
-  let _ = os.Setenv("LLL_TEAM", team)
-  let (member, refresh) = board_identity(db_url, email, pass)?
+  let ctx = ctx.with_settings(ctx.settings.with_team(team))
+  let (member, refresh, ctx) = board_identity(ctx, db_url, email, pass)?
   if scratch {
-    let _ = set_home_key("url", db_url)?
-    let _ = set_home_key("team", team)?
-    let _ = set_home_key("token", os.Getenv("LLL_TOKEN"))?
+    let _ = set_home_key(ctx.settings, "url", db_url)?
+    let _ = set_home_key(ctx.settings, "team", team)?
+    let _ = set_home_key(ctx.settings, "token", ctx.token())?
     fmt.Println(f"scratch data   {scratch_dir}")
     fmt.Println(f"scratch config {filepath.Join(scratch_dir, "config")}")
     fmt.Println(f"scratch admin  {email} / {pass} (shown once)")
@@ -335,7 +355,7 @@ password in its own data directory's .lll-admin.json.",
     )
   }
   if demo {
-    seed_demo(team, member.name, db_url, strings.HasPrefix(src.token, "file:"))?
+    seed_demo(ctx, team, member.name, db_url, strings.HasPrefix(src.token, "file:"))?
   }
   let chosen = free_port(web_port)
   if chosen != web_port {
@@ -357,45 +377,48 @@ password in its own data directory's .lll-admin.json.",
   // A demo boot points the CLI at itself (demo.lis), and scratch and shared
   // boots write their own CLI config.
   if !scratch && share_bind == "" && !demo {
-    let home = config.load_home()?
+    let home = ctx.settings.load_home()?
     let plan = cli_login_plan(
       CliState {
         rides: member_token_ok,
         throwaway,
-        loopback: loopback_bind(),
+        loopback: loopback_bind(ctx.settings),
         token_source: src.token,
         home_token: home.token,
         home_url: home.url,
-        home_path: config.home_path()?,
+        home_path: ctx.settings.home_path()?,
         db_url,
       },
     )
-    for line in log_cli_in(member.name, db_url, plan, src.token)? {
+    for line in log_cli_in(ctx, member.name, db_url, plan, src.token)? {
       fmt.Println(line)
     }
   }
   // The board binds in microseconds; a browser takes far longer to launch,
   // so opening before run_server blocks is not a race worth guarding.
-  let board_url = advertised_board_url(chosen)
-  let _ = set_home_key("web_url", board_url)?
+  let board_url = advertised_board_url(ctx.settings, chosen)
+  let _ = set_home_key(ctx.settings, "web_url", board_url)?
   // Every boot, loopback included (LLL-648): 'lll board' and 'lll member
   // invite --team' read the login link from here, so the machine running the
   // board prints links that open it. Private (0600) and rewritten each boot,
   // so it follows a per-boot token.
+  // The board token, settled once: the link saved here, the browser opened
+  // below and the gate run_server builds all read it from these settings.
+  let ctx = ctx.with_settings(ctx.settings.with_board_token(resolve_board_token(ctx.settings)))
   let login_file = filepath.Join(
-    filepath.Dir(config.home_path()?),
+    filepath.Dir(ctx.settings.home_path()?),
     "board-login-url",
   )
   write_home_config(
     login_file,
-    f"{board_url}/?board_token={resolve_board_token()}\n",
+    f"{board_url}/?board_token={ctx.settings.board_token()}\n",
   )?
   if share_bind != "" {
-    let _ = set_home_key("url", board_url)?
-    let _ = set_home_key("team", team)?
-    let _ = set_home_key("token", os.Getenv("LLL_TOKEN"))?
+    let _ = set_home_key(ctx.settings, "url", board_url)?
+    let _ = set_home_key(ctx.settings, "team", team)?
+    let _ = set_home_key(ctx.settings, "token", ctx.token())?
     let admin_file = filepath.Join(
-      filepath.Dir(config.home_path()?),
+      filepath.Dir(ctx.settings.home_path()?),
       "local-admin.json",
     )
     let admin_json = match json.Marshal(
@@ -416,14 +439,13 @@ password in its own data directory's .lll-admin.json.",
     // terminal to copy a token by hand — the whole of "i just want my
     // localhost, it's me, let me in". The gate sets the cookie and redirects
     // to the clean url, so the token never lingers in the address bar.
-    // resolve_board_token pins its answer into the environment, so the
-    // run_server below resolves the same token rather than a second one.
-    let login_url = f"{board_url}/?board_token={resolve_board_token()}"
+    // The same token run_server's gate checks: both read these settings.
+    let login_url = f"{board_url}/?board_token={ctx.settings.board_token()}"
     if let Err(e) = open_url(login_url) {
       fmt.Println(f"could not open a browser: {e}")
     }
   }
-  run_server(chosen, refresh, p.given("--admin-ui"))
+  run_server(ctx, chosen, refresh, p.given("--admin-ui"))
 }
 
 /// The banner's administrator line (LLL-648), or None. A boot with no
@@ -447,8 +469,8 @@ fn admin_line(
   )
 }
 
-fn loopback_bind() -> bool {
-  let bind = bind_addr()
+fn loopback_bind(settings: config.Settings) -> bool {
+  let bind = settings.bind()
   bind == "localhost" || net.ParseIP(bind).IsLoopback()
 }
 
@@ -531,8 +553,9 @@ fn cli_login_plan(s: CliState) -> CliLogin {
 }
 
 /// Carry out the plan and return the banner lines. The member token to save
-/// is the one board_identity left in LLL_TOKEN.
+/// is the one board_identity handed `ctx`.
 fn log_cli_in(
+  ctx: pb.Client,
   name: string,
   db_url: string,
   plan: CliLogin,
@@ -543,8 +566,8 @@ fn log_cli_in(
     CliLogin.Untouched(why) => Ok([f"cli    unchanged: {why}"]),
     CliLogin.Keep(how) => Ok([f"cli    not logged in to this board: {how}"]),
     CliLogin.Save => {
-      let _ = set_home_key("url", db_url)?
-      let path = set_home_key("token", os.Getenv("LLL_TOKEN"))?
+      let _ = set_home_key(ctx.settings, "url", db_url)?
+      let path = set_home_key(ctx.settings, "token", ctx.token())?
       let mut lines = [f"cli    logged in as {name}; url and token saved to {path}"]
       if token_source == "env:LLL_TOKEN" {
         lines = lines.append(
@@ -556,19 +579,17 @@ fn log_cli_in(
   }
 }
 
-/// Scratch is a PROCESS boundary: clear the inherited LLL_* values and move
-/// away from any repo before the first config load. Only this lll process is
-/// changed; the invoking shell and its real tracker stay untouched.
-fn setup_scratch() -> Result<string, string> {
+/// Scratch is its own configuration: settings built from nothing this
+/// process inherited (no LLL_* value, no XDG_CONFIG_HOME, no home or repo
+/// config), with the working directory moved away from any repo first. Only
+/// this lll process is affected: its environment is untouched, so the
+/// invoking shell, its real tracker and every child process stay as they
+/// were.
+fn setup_scratch() -> Result<(string, config.Settings), string> {
   let root = match os.MkdirTemp("", "lll-scratch-") {
     Ok(path) => path,
     Err(e) => return Err(f"creating scratch directory: {e}"),
   }
-  for entry in os.Environ() {
-    let key = strings.SplitN(entry, "=", 2)[0]
-    if key.starts_with("LLL_") { let _ = os.Unsetenv(key) }
-  }
-  let _ = os.Unsetenv("XDG_CONFIG_HOME")
   if let Err(e) = os.Chdir(root) {
     return Err(f"entering scratch directory {root}: {e}")
   }
@@ -577,25 +598,29 @@ fn setup_scratch() -> Result<string, string> {
     return Err(f"creating scratch home {home}: {e}")
   }
   let db_port = available_port()?
-  let _ = os.Setenv("HOME", home)
-  let _ = os.Setenv("USER", "scratch")
-  let _ = os.Setenv("LLL_CONFIG_HOME", filepath.Join(root, "config"))
-  let _ = os.Setenv("LLL_URL", f"http://127.0.0.1:{db_port}")
-  let _ = os.Setenv("LLL_TEAM", "SCRAT")
-  let _ = os.Setenv("LLL_BIND", "127.0.0.1")
-  let _ = os.Setenv("LLL_ADMIN_EMAIL", "admin@local.invalid")
-  let _ = os.Setenv("LLL_ADMIN_PASSWORD", rand.Text() + rand.Text())
-  Ok(root)
+  let env = config.Env {
+    home,
+    user: "scratch",
+    config_home: filepath.Join(root, "config"),
+    url: f"http://127.0.0.1:{db_port}",
+    team: "SCRAT",
+    bind: "127.0.0.1",
+    admin_email: "admin@local.invalid",
+    admin_password: rand.Text() + rand.Text(),
+    ..
+  }
+  Ok((root, config.resolve(env, config.no_overrides())))
 }
 
 /// The local data directory owns the browser gate secret. A restart with the
 /// same --bind and --pb-dir preserves every link already sent to teammates.
-fn pin_local_board_token(pb_dir: string) -> Result<(), string> {
+/// Returns the token: LLL_BOARD_TOKEN, else the saved one, else a new one.
+fn pin_local_board_token(settings: config.Settings, pb_dir: string) -> Result<string, string> {
   if let Err(e) = os.MkdirAll(pb_dir, 0o700) {
     return Err(f"creating local board data directory {pb_dir}: {e}")
   }
   let path = filepath.Join(pb_dir, ".lll-board-token")
-  let provided = os.Getenv("LLL_BOARD_TOKEN")
+  let provided = settings.board_token()
   let saved = match os.ReadFile(path) {
     Ok(b) => strings.TrimSpace(b as string),
     Err(e) => {
@@ -609,19 +634,16 @@ fn pin_local_board_token(pb_dir: string) -> Result<(), string> {
     provided
   } else if saved != "" { saved } else { rand.Text() }
   if saved != token { write_home_config(path, token + "\n")? }
-  if let Err(e) = os.Setenv("LLL_BOARD_TOKEN", token) {
-    return Err(f"using local board token: {e}")
-  }
-  Ok(())
+  Ok(token)
 }
 
 /// LLL-450: a board other machines can reach must not sit behind a token
 /// nobody chose, that rotates every boot and lives only in the logs. Runs
 /// before anything listens. `--bind` has already pinned a token by now.
-fn require_board_token_off_loopback() -> Result<(), string> {
-  let bind = bind_addr()
+fn require_board_token_off_loopback(settings: config.Settings) -> Result<(), string> {
+  let bind = settings.bind()
   let loopback = bind == "localhost" || net.ParseIP(bind).IsLoopback()
-  if loopback || os.Getenv("LLL_BOARD_TOKEN") != "" { return Ok(()) }
+  if loopback || settings.board_token() != "" { return Ok(()) }
   Err(
     f"LLL_BIND={bind} serves the board beyond this machine, but no LLL_BOARD_TOKEN is set
 a generated token would change on every restart and appear only in this process's logs
@@ -642,9 +664,16 @@ fn local_admin_path(pb_dir: string) -> string {
 /// pins a supplied pair, and copies it to the machine's private config after
 /// startup for later member-pass minting. `write` is false when this boot
 /// reuses a running server: an existing pair is used, nothing is created.
-fn pin_local_admin(pb_dir: string, write: bool) -> Result<(), string> {
-  let supplied_email = os.Getenv("LLL_ADMIN_EMAIL")
-  let supplied_pass = os.Getenv("LLL_ADMIN_PASSWORD")
+///
+/// Returns the pair the boot runs with, or None when it keeps whatever the
+/// settings already carry.
+fn pin_local_admin(
+  settings: config.Settings,
+  pb_dir: string,
+  write: bool,
+) -> Result<Option<config.AdminCreds>, string> {
+  let supplied_email = settings.env.admin_email
+  let supplied_pass = settings.env.admin_password
   if (supplied_email == "") != (supplied_pass == "") {
     return Err(
       flags.usage_error(
@@ -669,14 +698,8 @@ fn pin_local_admin(pb_dir: string, write: bool) -> Result<(), string> {
     },
   }
   if !write {
-    if saved.email == "" || supplied_email != "" { return Ok(()) }
-    if let Err(e) = os.Setenv("LLL_ADMIN_EMAIL", saved.email) {
-      return Err(f"using local admin email: {e}")
-    }
-    if let Err(e) = os.Setenv("LLL_ADMIN_PASSWORD", saved.password) {
-      return Err(f"using local admin password: {e}")
-    }
-    return Ok(())
+    if saved.email == "" || supplied_email != "" { return Ok(None) }
+    return Ok(Some(config.AdminCreds { email: saved.email, password: saved.password }))
   }
   if let Err(e) = os.MkdirAll(pb_dir, 0o700) {
     return Err(f"creating local board data directory {pb_dir}: {e}")
@@ -700,13 +723,7 @@ fn pin_local_admin(pb_dir: string, write: bool) -> Result<(), string> {
     }
     write_home_config(path, encoded as string)?
   }
-  if let Err(e) = os.Setenv("LLL_ADMIN_EMAIL", email) {
-    return Err(f"using local admin email: {e}")
-  }
-  if let Err(e) = os.Setenv("LLL_ADMIN_PASSWORD", pass) {
-    return Err(f"using local admin password: {e}")
-  }
-  Ok(())
+  Ok(Some(config.AdminCreds { email, password: pass }))
 }
 
 /// The kernel chooses a free port while the listener is bound. The normal up
@@ -838,31 +855,32 @@ Environment:
 ///     directory. It is also the one kind of boot that runs in directories
 ///     nobody attached on purpose, which is where a stray .lll.toml hurts.
 fn ensure_team(
+  ctx: pb.Client,
   want: string,
   source: string,
   throwaway: bool,
 ) -> Result<string, string> {
   if want != "" {
-    let key = resolve_team(want)?
-    if should_save_team(source, throwaway) { save_team(key)? }
+    let key = resolve_team(ctx, want)?
+    if should_save_team(source, throwaway) { save_team(ctx, key)? }
     return Ok(key)
   }
 
-  let teams = records.list_teams()?
+  let teams = records.list_teams(ctx)?
   let mut suggested = default_team_key()
   if let Some(t) = teams.items.get(0) { suggested = t.key }
 
   let key = ask_team(suggested)?
-  let existing = records.find_team(key)?
+  let existing = records.find_team(ctx, key)?
   if existing.is_none() {
-    match create_team(key, key) {
+    match create_team(ctx, key, key) {
       Ok(created) => {
         let _ = fmt.Println(
           f"created team {created.key}; issues will be {created.key}-1, {created.key}-2, ...",
         )
       },
       Err(e) => {
-        let existing = records.find_team(key)?
+        let existing = records.find_team(ctx, key)?
         if existing.is_none() { return Err(f"creating team '{key}': {e}") }
       },
     }
@@ -870,7 +888,7 @@ fn ensure_team(
   // Same bargain as the configured branch above. The source is "" here — the
   // key was just typed, so no file supplies it yet and it is worth writing
   // unless this is a scratch board (TASK-143).
-  if should_save_team("", throwaway) { save_team(key)? }
+  if should_save_team("", throwaway) { save_team(ctx, key)? }
   Ok(key)
 }
 
@@ -891,15 +909,15 @@ fn should_save_team(source: string, throwaway: bool) -> bool {
 /// find and our create; the unique index rejects the loser, and the loser
 /// re-looks-up whoever won rather than failing the boot (the same bargain
 /// e2e.sh's seed_team runs on).
-fn resolve_team(want: string) -> Result<string, string> {
-  if let Some(t) = records.find_team(want)? { return Ok(t.key) }
-  match create_team(want, want) {
+fn resolve_team(ctx: pb.Client, want: string) -> Result<string, string> {
+  if let Some(t) = records.find_team(ctx, want)? { return Ok(t.key) }
+  match create_team(ctx, want, want) {
     Ok(created) => {
       fmt.Println(f"created team {created.key}")
       Ok(created.key)
     },
     Err(e) => {
-      if let Some(t) = records.find_team(want)? { return Ok(t.key) }
+      if let Some(t) = records.find_team(ctx, want)? { return Ok(t.key) }
       Err(f"creating team '{want}': {e}")
     },
   }
@@ -908,39 +926,42 @@ fn resolve_team(want: string) -> Result<string, string> {
 /// Bootstrap with admin authority, then serve as an actual member. Renewals
 /// keep that same identity rather than upgrading normal board calls to admin.
 fn board_identity(
+  ctx: pb.Client,
   base: string,
   email: string,
   pass: string,
-) -> Result<(Actor, Option<fn() -> Result<string, string>>), string> {
-  if let Some(member) = actor()? { return Ok((member, None)) }
-  let cfg = config.load()?
-  let guessed = strings.TrimSpace(os.Getenv("USER"))
+) -> Result<(Actor, Option<fn() -> Result<string, string>>, pb.Client), string> {
+  if let Some(member) = actor(ctx)? { return Ok((member, None, ctx)) }
+  let guessed = strings.TrimSpace(ctx.settings.env.user)
   let name = if guessed == "" { "local" } else { guessed }
-  let created = ensure_member(name)?
+  let created = ensure_member(ctx, name)?
   if created { fmt.Println(f"created member {name}") }
-  let Some(member) = records.find_member(name)? else {
+  let Some(member) = records.find_member(ctx, name)? else {
     return Err(f"could not resolve the board member {name}")
   }
   let token = pb.impersonate_member(
     base,
-    cfg.token,
+    ctx.token(),
     member.id,
     default_token_duration(),
   )?
-  let _ = os.Setenv("LLL_TOKEN", token)
-  let _ = os.Setenv("LLL_ADMIN_EMAIL", email)
-  let _ = os.Setenv("LLL_ADMIN_PASSWORD", pass)
-  let _ = os.Setenv("LLL_REMINT", "1")
-  let _ = os.Setenv("LLL_REMINT_MEMBER", member.id)
+  // The board runs as that member from here on, and it alone may renew
+  // that token from the administrator pair (TASK-255): the grant is part of
+  // the client it is handed, not of any environment a child could inherit.
+  let admin = config.AdminCreds { email, password: pass }
+  let board = ctx
+    .with_settings(ctx.settings.with_admin(admin))
+    .with_token(token, "")
+    .renewing(Some(pb.Renewal { admin, member: member.id }))
   let id = member.id
   let refresh: fn() -> Result<string, string> = || {
-    let admin = superuser_token(base, email, pass)?
-    pb.impersonate_member(base, admin, id, default_token_duration())
+    let su = superuser_token(base, email, pass)?
+    pb.impersonate_member(base, su, id, default_token_duration())
   }
   fmt.Println(
     f"auth   board signed in as {name}; token renewal keeps this member",
   )
-  Ok((Actor { id: member.id, name }, Some(refresh)))
+  Ok((Actor { id: member.id, name }, Some(refresh), board))
 }
 
 /// Ask for a team key on stdin, defaulting to `suggested`. Errs when stdin
@@ -963,8 +984,8 @@ fn ask_team(suggested: string) -> Result<string, string> {
 /// Persist the team to the repo's .lll.toml so the next boot and the CLI
 /// agree. The team is the one key that belongs in the repo — `lll attach`
 /// writes the same line, deliberately.
-fn save_team(key: string) -> Result<(), string> {
-  let path = set_repo_key("team", key)?
+fn save_team(ctx: pb.Client, key: string) -> Result<(), string> {
+  let path = set_repo_key(ctx.settings, "team", key)?
   fmt.Println(f"wrote team = \"{key}\" to {path}")
   Ok(())
 }

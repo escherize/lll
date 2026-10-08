@@ -12,11 +12,11 @@ struct MemberReferences {
 
 /// Both deletion surfaces count assignments and authorship under the identity
 /// that will perform the deletion, including references outside the current team.
-fn member_references(id: string, token: string) -> Result<MemberReferences, string> {
+fn member_references(ctx: pb.Client, id: string, token: string) -> Result<MemberReferences, string> {
   Ok(MemberReferences {
-    assigned: member_reference_count("issues", "assignee", id, token)?,
-    authored: member_reference_count("comments", "author", id, token)?,
-    created: member_reference_count("issues", "creator", id, token)?,
+    assigned: member_reference_count(ctx, "issues", "assignee", id, token)?,
+    authored: member_reference_count(ctx, "comments", "author", id, token)?,
+    created: member_reference_count(ctx, "issues", "creator", id, token)?,
   })
 }
 
@@ -28,9 +28,9 @@ struct MemberReferenceCount {
 
 /// All reads and the deletion use the same administrative identity, so a
 /// missing or stale configured member token cannot hide references.
-fn member_reference_count(collection: string, field: string, id: string, token: string) -> Result<int, string> {
+fn member_reference_count(ctx: pb.Client, collection: string, field: string, id: string, token: string) -> Result<int, string> {
   let filter = url.QueryEscape(f"{field}={query.quote(id)}")
-  let body = pb.get_as(f"/api/collections/{collection}/records?filter={filter}&perPage=1&fields=id", token)?
+  let body = ctx.get_as(f"/api/collections/{collection}/records?filter={filter}&perPage=1&fields=id", token)?
   let mut count = MemberReferenceCount { .. }
   if let Err(e) = json.Unmarshal(body.bytes(), &count) {
     return Err(f"counting member {collection}: {e}")

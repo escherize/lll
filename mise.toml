@@ -82,10 +82,9 @@ dir = "{{config_root}}"
 # repo_file_supplies_team_without_losing_the_home_url_and_me fail against a tree
 # with nothing wrong with it. That cost a false alarm on 2026-09-15.
 #
-# Cleared here rather than inside the tests: config.load reads the process
-# environment, so a test that unset these would be mutating shared state while
-# its neighbours run. Same bargain e2e_begin already makes - unset every LLL_*
-# the suite does not set itself, so it starts from a KNOWN environment.
+# Since LLL-486 the unit tests build their configuration as values and do not
+# read the process environment (scripts/test_no_ambient_env.py holds that);
+# the clearing stays as belt and braces, the same bargain e2e_begin makes.
 run = """
 unset XDG_CONFIG_HOME LLL_CONFIG_HOME
 command -v lis >/dev/null || { echo "lis not found. Install it:" >&2; echo "  curl -LsSf https://github.com/ivov/lisette/releases/latest/download/lisette-installer.sh | sh" >&2; exit 1; }
@@ -107,6 +106,7 @@ python3 -m unittest discover -s scripts -p 'test_protect_archive.py'
 python3 -m unittest discover -s scripts -p 'test_prepare_deploy_context.py'
 python3 -m unittest discover -s scripts -p 'test_release_check.py'
 python3 -m unittest discover -s scripts -p 'test_no_emdash.py'
+python3 -m unittest discover -s scripts -p 'test_no_ambient_env.py'
 python3 scripts/check_assets.py
 """
 

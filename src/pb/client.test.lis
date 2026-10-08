@@ -1,6 +1,12 @@
 import "go:errors"
+import "go:github.com/escherize/lll/gopb"
+import "go:net/http"
+import "go:net/http/httptest"
 import "go:os"
+import "go:path/filepath"
 import "go:strings"
+
+import "config"
 
 #[test]
 fn empty_list_detection_uses_json_metadata() {
@@ -100,28 +106,67 @@ fn only_404s_at_an_api_path_are_suspected() {
 // what triggers it. `lll issue view` on an issue with no linked docs, no
 // blockers and no comments hit three empty lists and paid for the identical
 // probe three times in one process. These pin the memo that stopped that.
+// LLL-486: the memo lives in the client's session, not in the environment.
+
+/// A live (exp 2100) member token naming abc123def456ghi.
+fn live_token() -> string {
+  "eyJhbGciOiJIUzI1NiJ9.eyJjb2xsZWN0aW9uSWQiOiJwYmNfMzU3MjczOTM0OSIsImV4cCI6NDEwMjQ0NDgwMCwiaWQiOiJhYmMxMjNkZWY0NTZnaGkiLCJyZWZyZXNoYWJsZSI6ZmFsc2UsInR5cGUiOiJhdXRoIn0.sig"
+}
 
 #[test]
-fn the_identity_probe_is_remembered_once_per_server_and_token() {
-  let tok = "eyJhbGciOiJIUzI1NiJ9.eyJjb2xsZWN0aW9uSWQiOiJwYmNfMzU3MjczOTM0OSIsImV4cCI6MSwiaWQiOiJhYmMxMjNkZWY0NTZnaGkiLCJyZWZyZXNoYWJsZSI6ZmFsc2UsInR5cGUiOiJhdXRoIn0.sig"
-  let _ = os.Setenv("LLL_TOKEN_PROBED", "")
-  assert !probe_remembered("https://a.example", tok)
-  remember_probe("https://a.example", tok)
-  assert probe_remembered("https://a.example", tok)
+fn the_identity_probe_is_remembered_once_per_session_server_and_token() {
+  let hits = Channel.buffered<string>(64)
+  let mut server = httptest.NewServer(http.HandlerFunc(|w, r| {
+    if let Some(u) = r.URL { let _ = hits.send(u.Path) }
+    let _ = w.Write("{\"id\":\"abc123def456ghi\"}".bytes())
+  }))
+  defer server.Close()
+  let tok = live_token()
+  let session = gopb.NewSession(tok)
+  assert verdict(server.URL, tok, session) == "valid"
+  assert verdict(server.URL, tok, session) == "valid"
+  // One request for two verdicts: the second was remembered.
+  let assert Some(_) = hits.receive()
+  assert session.Probed() == probe_key(server.URL, tok)
+  // A different server, or a re-minted token, is a different question.
+  assert session.Probed() != probe_key("https://b.example", tok)
+  assert session.Probed() != probe_key(server.URL, tok + "x")
+  // A fresh session has remembered nothing.
+  assert gopb.NewSession(tok).Probed() == ""
+}
 
-  // A different server is a different question, even with the same token.
-  assert !probe_remembered("https://b.example", tok)
-  // And a re-mint changes the token, so the memo invalidates itself rather
-  // than needing to be cleared: this is why the key is (server, token).
-  assert !probe_remembered("https://a.example", tok + "x")
-  let _ = os.Setenv("LLL_TOKEN_PROBED", "")
+#[test]
+fn a_renewed_token_reaches_every_copy_of_the_client() {
+  // The board hands copies of its client to every handler; a renewal must
+  // reach all of them, which is why the token lives in a shared session.
+  let c = Client.new(config.given(config.Config { url: "http://127.0.0.1:1", token: "old", .. }, config.Sources { .. }, config.Env { .. }))
+  let copy = c
+  c.renew_to("new")
+  assert copy.token() == "new"
+  // with_token starts a separate session: the original keeps its own.
+  let other = c.with_token("other", "")
+  assert other.token() == "other"
+  assert c.token() == "new"
+}
+
+#[test]
+fn only_a_granted_client_renews() {
+  // LLL_REMINT=1 with the admin pair grants renewal (the e2e seam); the pair
+  // alone does not, and neither does LLL_REMINT alone.
+  let pair = config.Env { admin_email: "a@x", admin_password: "pw", .. }
+  let plain = Client.new(config.resolve(pair, config.no_overrides()))
+  assert plain.renewal.is_none()
+  let granted_env = config.Env { admin_email: "a@x", admin_password: "pw", remint: true, remint_member: "m1", .. }
+  let granted = Client.new(config.resolve(granted_env, config.no_overrides()))
+  let assert Some(r) = granted.renewal
+  assert r.member == "m1"
+  let flag_only = Client.new(config.resolve(config.Env { remint: true, .. }, config.no_overrides()))
+  assert flag_only.renewal.is_none()
 }
 
 #[test]
 fn the_probe_key_never_carries_the_token_itself() {
-  // The memo lives in the environment, which every child process lll starts
-  // (gh, git) inherits. A token that lives only in a config file must not
-  // start leaking into them, so the key is a digest and nothing else.
+  // The memo is a digest, never a usable credential.
   let tok = "eyJhbGciOiJIUzI1NiJ9.eyJpZCI6InNlY3JldCJ9.sig"
   let key = probe_key("https://a.example", tok)
   assert !strings.Contains(key, tok)
@@ -207,4 +252,73 @@ fn token_subject_declines_a_three_segment_token_with_a_broken_payload() {
   let broken = "eyJhbGciOiJIUzI1NiJ9.eyJjb2xsZWN0aW9uSWQiOiJwYmNfMzU3MjczOTM0OSIsImV4cCI6MSwiaWQiOiJhYmMxMjNkZWY0NTZnaGkiLCJyZWZyZXNoYWJsZSI6ZmFsc2UsInR5cGUiOiJhdXRoIn0!.sig"
   assert token_subject(broken).is_none()
   assert strings.Split(broken, ".").length() == 3
+}
+
+#[test]
+fn a_refused_file_token_is_replaced_by_the_one_the_file_holds_now() {
+  // v0.9 re-read the config on every request, so a long-running process on
+  // a file token (a board on the caller's token, a watch) healed when the
+  // file was rewritten. The client re-reads once, on refusal, instead.
+  let old = live_token()
+  let fresh = "eyJhbGciOiJIUzI1NiJ9.eyJjb2xsZWN0aW9uSWQiOiJwYmNfMzU3MjczOTM0OSIsImV4cCI6NDEwMjQ0NDgwMCwiaWQiOiJ6enoxMjNkZWY0NTZnaGkiLCJyZWZyZXNoYWJsZSI6ZmFsc2UsInR5cGUiOiJhdXRoIn0.sig"
+  let mut server = httptest.NewServer(http.HandlerFunc(|w, r| {
+    let auth = r.Header.map_or("", |h| h.Get("Authorization"))
+    if auth != f"Bearer {fresh}" {
+      w.WriteHeader(401)
+      let _ = w.Write("{\"data\":{},\"message\":\"The request requires valid record authorization token.\",\"status\":401}".bytes())
+      return
+    }
+    let _ = w.Write("{\"page\":1,\"perPage\":30,\"totalItems\":1,\"totalPages\":1,\"items\":[{\"id\":\"t1\"}]}".bytes())
+  }))
+  defer server.Close()
+  let assert Ok(root) = os.MkdirTemp("", "lll-reload")
+  // Out of this checkout: its committed .lll.toml names the hosted server.
+  let assert Ok(prev) = os.Getwd()
+  defer { let _ = os.Chdir(prev) }
+  let assert Ok(_) = os.Chdir(root)
+  let file = filepath.Join(root, "lll", "lll.toml")
+  let assert Ok(_) = os.MkdirAll(filepath.Dir(file), 0o700)
+  let assert Ok(_) = os.WriteFile(file, f"url = \"{server.URL}\"\ntoken = \"{old}\"\n".bytes(), 0o600)
+  let c = Client.new(config.resolve(config.Env { config_home: root, .. }, config.no_overrides()))
+  assert c.token() == old
+  let assert Ok(_) = os.WriteFile(file, f"url = \"{server.URL}\"\ntoken = \"{fresh}\"\n".bytes(), 0o600)
+  let assert Ok(body) = c.get("/api/collections/teams/records")
+  assert body.contains("\"t1\"")
+  assert c.token() == fresh
+  // A token a boot handed over is never traded for a file's.
+  let handed = c.with_token(old, "")
+  let assert Err(_) = handed.get("/api/collections/teams/records")
+  assert handed.token() == old
+}
+
+#[test]
+fn another_servers_token_in_the_file_is_never_sent_here() {
+  // Review N1: 'lll login --url B' elsewhere rewrites url and token together.
+  // A process still talking to A must not try B's token on A, and its
+  // refusal keeps the classified wording (N2).
+  let old = live_token()
+  let other = "eyJhbGciOiJIUzI1NiJ9.eyJjb2xsZWN0aW9uSWQiOiJwYmNfMzU3MjczOTM0OSIsImV4cCI6NDEwMjQ0NDgwMCwiaWQiOiJ6enoxMjNkZWY0NTZnaGkiLCJyZWZyZXNoYWJsZSI6ZmFsc2UsInR5cGUiOiJhdXRoIn0.BBBB"
+  let seen = Channel.buffered<string>(64)
+  let mut server = httptest.NewServer(http.HandlerFunc(|w, r| {
+    let _ = seen.send(r.Header.map_or("", |h| h.Get("Authorization")))
+    w.WriteHeader(401)
+    let _ = w.Write("{\"data\":{},\"message\":\"The request requires valid record authorization token.\",\"status\":401}".bytes())
+  }))
+  defer server.Close()
+  let assert Ok(root) = os.MkdirTemp("", "lll-reload-b")
+  let assert Ok(prev) = os.Getwd()
+  defer { let _ = os.Chdir(prev) }
+  let assert Ok(_) = os.Chdir(root)
+  let file = filepath.Join(root, "lll", "lll.toml")
+  let assert Ok(_) = os.MkdirAll(filepath.Dir(file), 0o700)
+  let assert Ok(_) = os.WriteFile(file, f"url = \"{server.URL}\"\ntoken = \"{old}\"\n".bytes(), 0o600)
+  let c = Client.new(config.resolve(config.Env { config_home: root, .. }, config.no_overrides()))
+  let assert Ok(_) = os.WriteFile(file, f"url = \"https://server-b.example\"\ntoken = \"{other}\"\n".bytes(), 0o600)
+  let assert Err(e) = c.get("/api/collections/teams/records")
+  assert e.contains("was rejected by")
+  assert c.token() == old
+  seen.close()
+  for auth in seen {
+    assert !auth.contains("BBBB")
+  }
 }

@@ -21,7 +21,7 @@ pub fn read_upload(reader: io.Reader) -> Result<Slice<byte>, string> {
   Ok(data)
 }
 
-pub fn upload(caller: pb.Caller, issue: models.Issue, name: string, data: Slice<byte>) -> Result<string, string> {
+pub fn upload(ctx: pb.Client, caller: pb.Caller, issue: models.Issue, name: string, data: Slice<byte>) -> Result<string, string> {
   if issue.expand.team.archived { return Err(f"team {issue.expand.team.key} is archived; run 'lll team unarchive {issue.expand.team.key}' first") }
   let filename = filepath.Base(strings.ReplaceAll(name, "\\", "/"))
   if filename == "" || filename == "." || filename == "/" { return Err("attachment needs a filename") }
@@ -33,7 +33,7 @@ pub fn upload(caller: pb.Caller, issue: models.Issue, name: string, data: Slice<
   }
   let Partial.Ok(_) = part.Write(data) else { return Err("encoding attachment bytes failed") }
   if let Err(e) = writer.Close() { return Err(f"encoding attachment: {e}") }
-  let response = pb.send_as(caller, "PATCH", f"/api/collections/issues/records/{issue.id}", buffer.String(), writer.FormDataContentType())?
+  let response = ctx.send_as(caller, "PATCH", f"/api/collections/issues/records/{issue.id}", buffer.String(), writer.FormDataContentType())?
   let mut saved = models.Issue { .. }
   if let Err(e) = json.Unmarshal(response.bytes(), &saved) { return Err(f"decoding uploaded issue: {e}") }
   // Native append keeps the uploaded file last. Comparing every filename
@@ -53,14 +53,14 @@ pub fn require_file(issue: models.Issue, filename: string) -> Result<(), string>
 #[json]
 struct RemoveFiles { #[json("attachments-")] files: Slice<string> }
 
-pub fn remove(caller: pb.Caller, issue: models.Issue, filename: string) -> Result<(), string> {
+pub fn remove(ctx: pb.Client, caller: pb.Caller, issue: models.Issue, filename: string) -> Result<(), string> {
   if issue.expand.team.archived { return Err(f"team {issue.expand.team.key} is archived; run 'lll team unarchive {issue.expand.team.key}' first") }
   require_file(issue, filename)?
   let payload = match json.Marshal(RemoveFiles { files: [filename] }) {
     Ok(b) => b as string,
     Err(e) => return Err(f"encoding attachment removal: {e}"),
   }
-  let _ = pb.send_as(caller, "PATCH", f"/api/collections/issues/records/{issue.id}", payload, "application/json")?
+  let _ = ctx.send_as(caller, "PATCH", f"/api/collections/issues/records/{issue.id}", payload, "application/json")?
   Ok(())
 }
 
@@ -69,13 +69,13 @@ struct FileToken { token: string }
 
 /// Fetch with a short-lived PocketBase file token. Keep that token on the
 /// server; browser links name only the issue and its attachment.
-pub fn read_file(issue: models.Issue, filename: string) -> Result<string, string> {
+pub fn read_file(ctx: pb.Client, issue: models.Issue, filename: string) -> Result<string, string> {
   require_file(issue, filename)?
-  let response = pb.post("/api/files/token", "{}")?
+  let response = ctx.post("/api/files/token", "{}")?
   let mut token = FileToken { .. }
   if let Err(e) = json.Unmarshal(response.bytes(), &token) { return Err(f"decoding file access: {e}") }
   if token.token == "" { return Err("server did not provide file access") }
   let path = f"/api/files/issues/{issue.id}/{url.PathEscape(filename)}?token={url.QueryEscape(token.token)}"
   // Do not include a token-bearing upstream URL in any user-facing error.
-  pb.get(path).map_err(|_| "could not read the attachment from storage")
+  ctx.get(path).map_err(|_| "could not read the attachment from storage")
 }

@@ -3,6 +3,7 @@ import "go:net/http"
 
 import "display"
 import "models"
+import "pb"
 
 // Who a board page may name (LLL-551).
 //
@@ -38,14 +39,14 @@ struct Roster {
 
 /// The roster for one team's rendering. A failed members read leaves a
 /// scoped roster empty, so a page names nobody rather than everybody.
-fn roster(scoped: bool, team_id: string) -> Result<Roster, string> {
-  if !scoped { return Ok(Roster { scoped, members: records.fetch_members()? }) }
-  Ok(Roster { scoped, members: team_roster(records.fetch_members().unwrap_or([]), team_id) })
+fn roster(ctx: pb.Client, scoped: bool, team_id: string) -> Result<Roster, string> {
+  if !scoped { return Ok(Roster { scoped, members: records.fetch_members(ctx)? }) }
+  Ok(Roster { scoped, members: team_roster(records.fetch_members(ctx).unwrap_or([]), team_id) })
 }
 
 /// This request's viewer's roster for team `team_id`.
-fn roster_for(r: Ref<http.Request>, team_id: string) -> Result<Roster, string> {
-  roster(is_scoped(r), team_id)
+fn roster_for(ctx: pb.Client, r: Ref<http.Request>, team_id: string) -> Result<Roster, string> {
+  roster(ctx, is_scoped(ctx, r), team_id)
 }
 
 /// The roster member with this exact name. A hidden member answers exactly

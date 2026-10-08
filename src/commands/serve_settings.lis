@@ -2,7 +2,6 @@ import "records"
 import "go:crypto/rand"
 import "go:html/template"
 import "go:net/http"
-import "go:os"
 import "go:strings"
 import "go:time"
 
@@ -30,6 +29,7 @@ pub fn settings_sections() -> Slice<string> {
 /// open — the server-wide sections are still addressed under /t/KEY/ for
 /// exactly that reason (LLL-426 fixed the reverse of this bug).
 fn settings_page(
+  ctx: pb.Client,
   w: http.ResponseWriter,
   r: Ref<http.Request>,
   team_id: string,
@@ -44,8 +44,8 @@ fn settings_page(
     )
     return
   }
-  let team = shell_team(team_id)
-  let vm = match settings_vm(team, section) {
+  let team = shell_team(ctx, team_id)
+  let vm = match settings_vm(ctx, team, section) {
     Ok(v) => v,
     Err(e) => {
       http.Error(w, pb.plain(e), 500)
@@ -56,7 +56,7 @@ fn settings_page(
     write_raw(w, settings_raw(vm))
     return
   }
-  let page = PageVM { rail: rail_vm("settings", me, team), page: vm }
+  let page = PageVM { rail: rail_vm(ctx, "settings", me, team), page: vm }
   render_html(w, "settings-page", page)
 }
 
@@ -66,7 +66,7 @@ fn settings_page(
 /// label AND one per team, plus members and projects, to draw a page that
 /// shows one of them at a time. A section pays for itself now: opening
 /// Identity costs nothing beyond the team already in hand.
-fn settings_vm(team: models.Team, section: string) -> Result<SettingsVM, string> {
+fn settings_vm(ctx: pb.Client, team: models.Team, section: string) -> Result<SettingsVM, string> {
   let hex = theme.normalize_hex(team.accent)
   let mut accent = hex
   if accent == "" { accent = "#f0883e" }
@@ -84,11 +84,11 @@ fn settings_vm(team: models.Team, section: string) -> Result<SettingsVM, string>
     // Identity is the team record itself, which shell_team already fetched.
     "identity" => (),
     "labels" => {
-      vm.labels = label_rows(team.id)?
-      vm.teams = scope_rows()?
+      vm.labels = label_rows(ctx, team.id)?
+      vm.teams = scope_rows(ctx)?
     },
     "projects" => {
-      vm.projects = records.fetch_projects(team.id)?.map(|p| SetProjectVM {
+      vm.projects = records.fetch_projects(ctx, team.id)?.map(|p| SetProjectVM {
         id: p.id,
         name: p.name,
         status: p.status,
@@ -97,22 +97,22 @@ fn settings_vm(team: models.Team, section: string) -> Result<SettingsVM, string>
         value: s,
         label: state_label(s),
       })
-      vm.teams = scope_rows()?
+      vm.teams = scope_rows(ctx)?
     },
-    "teams" => vm.teams = team_rows()?,
+    "teams" => vm.teams = team_rows(ctx)?,
     // Members stay unscoped on purpose: one person or agent works across many
     // projects, which is what makes a member meaningful on every board. Access
     // shows the same list because both its forms pick a member.
-    "members" => vm.members = member_rows()?,
-    "access" => vm.members = member_rows()?,
+    "members" => vm.members = member_rows(ctx)?,
+    "access" => vm.members = member_rows(ctx)?,
     other => return Err(f"unknown settings section '{other}'"),
   }
   Ok(vm)
 }
 
-fn member_rows() -> Result<Slice<SetMemberVM>, string> {
+fn member_rows(ctx: pb.Client) -> Result<Slice<SetMemberVM>, string> {
   Ok(
-    records.fetch_members()?.map(|m| SetMemberVM {
+    records.fetch_members(ctx)?.map(|m| SetMemberVM {
       id: m.id,
       name: m.name,
       email: m.email,
@@ -124,9 +124,9 @@ fn member_rows() -> Result<Slice<SetMemberVM>, string> {
 /// key and archived flag only. Deliberately not `team_rows`: that one counts
 /// issues per team, and a select showing six keys has no use for six count
 /// queries.
-fn scope_rows() -> Result<Slice<SetTeamVM>, string> {
+fn scope_rows(ctx: pb.Client) -> Result<Slice<SetTeamVM>, string> {
   Ok(
-    records.list_teams()?.items.map(|t| SetTeamVM {
+    records.list_teams(ctx)?.items.map(|t| SetTeamVM {
       id: t.id,
       key: t.key,
       name: t.name,
@@ -141,10 +141,10 @@ fn scope_rows() -> Result<Slice<SetTeamVM>, string> {
 /// visible on, which is what makes unarchiving from here possible. One
 /// perPage=1 count fetch per team, paid per settings render like the
 /// section's other fetches.
-fn team_rows() -> Result<Slice<SetTeamVM>, string> {
+fn team_rows(ctx: pb.Client) -> Result<Slice<SetTeamVM>, string> {
   let mut rows: Slice<SetTeamVM> = []
-  for t in records.list_teams()?.items {
-    let held = issue_count(f"team={query.quote(t.id)}")?
+  for t in records.list_teams(ctx)?.items {
+    let held = issue_count(ctx, f"team={query.quote(t.id)}")?
     rows = rows.append(
       SetTeamVM {
         id: t.id,
@@ -166,12 +166,12 @@ fn team_rows() -> Result<Slice<SetTeamVM>, string> {
 /// order is what makes the inventory readable as "what this team actually
 /// uses", so a near-duplicate (bug/bugs/defect) is visible next to the label
 /// it duplicates before someone creates another one.
-fn label_rows(team_id: string) -> Result<Slice<SetLabelVM>, string> {
+fn label_rows(ctx: pb.Client, team_id: string) -> Result<Slice<SetLabelVM>, string> {
   let mut rows: Slice<SetLabelVM> = []
   // fetch_labels answers name-sorted; the strict > below keeps equal-usage
   // rows in that order, so ties stay alphabetical.
-  for l in records.fetch_labels(team_id)? {
-    let used = entity_issue_count("label", l.id)?
+  for l in records.fetch_labels(ctx, team_id)? {
+    let used = entity_issue_count(ctx, "label", l.id)?
     let row = SetLabelVM {
       id: l.id,
       name: l.name,
@@ -246,6 +246,7 @@ struct ProjectPatch { name: string, status: string, team: string }
 /// the record is already written, and a flash saying otherwise would be a
 /// lie about the database.
 fn settings_write(
+  ctx: pb.Client,
   r: mut Ref<http.Request>,
   team_id: string,
   me: string,
@@ -253,25 +254,25 @@ fn settings_write(
   if r.FormValue("cancel") != "" {
     // Restore the row after a deletion review without writing a record.
   } else if r.FormValue("del") != "" {
-    if let Some(review) = settings_delete(r, team_id)? { return Ok(review) }
+    if let Some(review) = settings_delete(ctx, r, team_id)? { return Ok(review) }
   } else {
-    settings_apply(r, team_id)?
+    settings_apply(ctx, r, team_id)?
   }
-  let team = shell_team(team_id)
+  let team = shell_team(ctx, team_id)
   let mut extra = ""
   let mut nav = ""
   // The reply redraws the section the row belongs to, which is the section
   // the browser is looking at: #settings is the section wrapper now, so the
   // patch id is unchanged and a label save still cannot redraw the members
   // list it is not showing.
-  if let Ok(vm) = settings_vm(team, section_of(r.PathValue("kind"))) {
+  if let Ok(vm) = settings_vm(ctx, team, section_of(r.PathValue("kind"))) {
     if let Ok(html) = render("settings", vm) { extra += patch_event(html) }
     if let Ok(html) = render("settings-nav", vm) { nav = patch_event(html) }
   }
   // The accent lives in <head> and the team's mark on the section nav, both
   // outside #settings: patch them by id too, so a new colour or emoji lands
   // on the open page instead of waiting for a reload.
-  if let Ok(html) = render("accent-head", rail_vm("settings", me, team)) {
+  if let Ok(html) = render("accent-head", rail_vm(ctx, "settings", me, team)) {
     extra += patch_event(html)
   }
   extra += nav
@@ -294,6 +295,7 @@ fn section_of(kind: string) -> string {
 
 /// Create or update the record this request names.
 fn settings_apply(
+  ctx: pb.Client,
   r: mut Ref<http.Request>,
   team_id: string,
 ) -> Result<(), string> {
@@ -315,7 +317,7 @@ fn settings_apply(
       // writes.
       let emoji = team_emoji_value(r.PostFormValue("emoji"))?
       let payload = marshal(TeamPatch { name, accent, emoji })?
-      let _ = pb.patch(f"/api/collections/teams/records/{team_id}", payload)?
+      let _ = ctx.patch(f"/api/collections/teams/records/{team_id}", payload)?
       Ok(())
     },
     "label" => {
@@ -326,8 +328,8 @@ fn settings_apply(
       // so a rejected move leaves the name and colour untouched too - one
       // submit is one outcome. `owner` is where the record ends up, so the
       // patch below cannot drag it back to the page's team.
-      let owner = move_scope_if_asked(r, "label", name, id, team_id)?
-      save_record("labels", id, LabelPatch { name, color, team: owner })
+      let owner = move_scope_if_asked(ctx, r, "label", name, id, team_id)?
+      save_record(ctx, "labels", id, LabelPatch { name, color, team: owner })
     },
     "member" => {
       if name == "" { return Err("member name is required") }
@@ -345,7 +347,7 @@ fn settings_apply(
         // One value for both password fields: two rand.Text() calls would
         // disagree with each other and fail PB's confirm check.
         let password = rand.Text()
-        save_record(
+        save_record(ctx,
           "members",
           id,
           MemberCreate {
@@ -358,7 +360,7 @@ fn settings_apply(
         )?
         return Ok(())
       }
-      let known = records.fetch_members()?
+      let known = records.fetch_members(ctx)?
       let Some(existing) = known.find(|m| m.id == id) else {
         return Err(
           f"unknown member '{id}'; reload the page for the current list",
@@ -373,7 +375,7 @@ fn settings_apply(
           f"'{existing.name}'s email is their login identity; change it under Access → Member sign-in. No changes saved.",
         )
       }
-      save_record("members", id, MemberPatch { name })
+      save_record(ctx, "members", id, MemberPatch { name })
     },
     "project" => {
       if name == "" { return Err("project name is required") }
@@ -382,8 +384,8 @@ fn settings_apply(
       if project_statuses().find(|s| s == status).is_none() {
         return Err(f"unknown project status '{status}'")
       }
-      let owner = move_scope_if_asked(r, "project", name, id, team_id)?
-      save_record("projects", id, ProjectPatch { name, status, team: owner })
+      let owner = move_scope_if_asked(ctx, r, "project", name, id, team_id)?
+      save_record(ctx, "projects", id, ProjectPatch { name, status, team: owner })
     },
     other => Err(f"unknown settings section '{other}'"),
   }
@@ -425,6 +427,7 @@ fn settings_collection(kind: string) -> Result<string, string> {
 /// The refusal rule lives in move_scope.lis and is the CLI's, so the board and
 /// `lll label move` cannot answer differently - one rule, two doors.
 fn move_scope_if_asked(
+  ctx: pb.Client,
   r: mut Ref<http.Request>,
   kind: string,
   name: string,
@@ -433,19 +436,19 @@ fn move_scope_if_asked(
 ) -> Result<string, string> {
   let wanted = strings.TrimSpace(r.PostFormValue("team"))
   if id == "" || wanted == "" { return Ok(team_id) }
-  let to = move_destination(wanted)?
+  let to = move_destination(ctx, wanted)?
   if to.id == team_id { return Ok(team_id) }
-  let from = shell_team(team_id)
-  let _ = move_to_team(kind, name, id, from, to)?
+  let from = shell_team(ctx, team_id)
+  let _ = move_to_team(ctx, kind, name, id, from, to)?
   Ok(to.id)
 }
 
-fn save_record(coll: string, id: string, value: Unknown) -> Result<(), string> {
+fn save_record(ctx: pb.Client, coll: string, id: string, value: Unknown) -> Result<(), string> {
   let payload = marshal(value)?
   if id == "" {
-    let _ = pb.post(f"/api/collections/{coll}/records", payload)?
+    let _ = ctx.post(f"/api/collections/{coll}/records", payload)?
   } else {
-    let _ = pb.patch(f"/api/collections/{coll}/records/{id}", payload)?
+    let _ = ctx.patch(f"/api/collections/{coll}/records/{id}", payload)?
   }
   Ok(())
 }
@@ -481,9 +484,8 @@ struct MemberCredentialPatch {
 
 /// The superuser identity Access actions verify against: LLL_ADMIN_EMAIL, or
 /// the same printed default `lll up` upserts when the env is unset.
-fn admin_email() -> string {
-  let e = os.Getenv("LLL_ADMIN_EMAIL")
-  if e == "" { "admin@local.dev" } else { e }
+fn admin_email(ctx: pb.Client) -> string {
+  ctx.settings.admin().map_or("admin@local.dev", |admin| admin.email)
 }
 
 /// Verify the form's admin password against the superuser and return the
@@ -491,38 +493,38 @@ fn admin_email() -> string {
 /// own write rides, so board token + admin password suffices no matter what
 /// identity the process holds. The password is checked per action through
 /// PocketBase's own endpoint and never stored.
-fn verify_admin(pass: string) -> Result<string, string> {
+fn verify_admin(ctx: pb.Client, pass: string) -> Result<string, string> {
   if pass == "" {
     return Err(
       "the admin password is required: this is a superuser action, and the board token alone must not grant it",
     )
   }
-  let payload = marshal(models.AuthRequest { identity: admin_email(), password: pass })?
-  let body = match pb.post_anon(
+  let payload = marshal(models.AuthRequest { identity: admin_email(ctx), password: pass })?
+  let body = match ctx.post_anon(
     "/api/collections/_superusers/auth-with-password",
     payload,
   ) {
     Ok(b) => b,
-    Err(e) => return Err(admin_verification_error(e)),
+    Err(e) => return Err(admin_verification_error(ctx, e)),
   }
   decode_auth(body, "the superuser auth response")
 }
 
 /// Authentication failures have a specific recovery; other errors retain
 /// their actual server status and transport details.
-fn admin_verification_error(e: string) -> string {
+fn admin_verification_error(ctx: pb.Client, e: string) -> string {
   if pb.classify(e).status == 400 {
-    return f"wrong admin password for {admin_email()}; use the administrator credentials supplied through LLL_ADMIN_EMAIL and LLL_ADMIN_PASSWORD in the server's own environment"
+    return f"wrong admin password for {admin_email(ctx)}; use the administrator credentials supplied through LLL_ADMIN_EMAIL and LLL_ADMIN_PASSWORD in the server's own environment"
   }
   f"verifying the admin password: {e}"
 }
 
 /// The named member, from the current list — so the flash can say "reload"
 /// instead of relaying a PB 404.
-fn access_member(r: mut Ref<http.Request>) -> Result<models.Member, string> {
+fn access_member(ctx: pb.Client, r: mut Ref<http.Request>) -> Result<models.Member, string> {
   let id = strings.TrimSpace(r.PostFormValue("member"))
   if id == "" { return Err("pick a member") }
-  let known = records.fetch_members()?
+  let known = records.fetch_members(ctx)?
   let Some(member) = known.find(|m| m.id == id) else {
     return Err(f"unknown member '{id}'; reload the page for the current list")
   }
@@ -540,10 +542,10 @@ fn access_member(r: mut Ref<http.Request>) -> Result<models.Member, string> {
 /// so a token minted from the board still died in under a week, silently. It
 /// borrows the CLI's `default_token_duration` rather than restating a year in
 /// seconds: two doors onto one mint should not be able to drift apart.
-fn access_token_write(r: mut Ref<http.Request>) -> Result<string, string> {
-  let member = access_member(r)?
-  let su = verify_admin(r.PostFormValue("admin_password"))?
-  let body = pb.post_as(
+fn access_token_write(ctx: pb.Client, r: mut Ref<http.Request>) -> Result<string, string> {
+  let member = access_member(ctx, r)?
+  let su = verify_admin(ctx, r.PostFormValue("admin_password"))?
+  let body = ctx.post_as(
     f"/api/collections/members/impersonate/{member.id}",
     mint_payload()?,
     su,
@@ -579,16 +581,17 @@ fn mint_expiry_event(now: time.Time) -> string {
 /// the just-verified superuser token, which is exactly the authority the
 /// settings row's rename lacks.
 fn access_credential_write(
+  ctx: pb.Client,
   r: mut Ref<http.Request>,
   team_id: string,
 ) -> Result<string, string> {
-  let member = access_member(r)?
+  let member = access_member(ctx, r)?
   let password = r.PostFormValue("password")
   if password == "" { return Err("a password is required") }
   if password != r.PostFormValue("password_confirm") {
     return Err("the two passwords do not match")
   }
-  let su = verify_admin(r.PostFormValue("admin_password"))?
+  let su = verify_admin(ctx, r.PostFormValue("admin_password"))?
   // A blank email keeps the member's current identity (often the
   // synthesized @members.invalid one) and just sets the password.
   let mut email = strings.TrimSpace(r.PostFormValue("email"))
@@ -596,7 +599,7 @@ fn access_credential_write(
   let payload = marshal(
     MemberCredentialPatch { email, password, password_confirm: password },
   )?
-  let _ = pb.patch_as(
+  let _ = ctx.patch_as(
     f"/api/collections/members/records/{member.id}",
     payload,
     su,
@@ -605,7 +608,7 @@ fn access_credential_write(
   // — and say the success out loud in the flash strip, after the redraw, so
   // the morph cannot swallow it.
   let mut extra = ""
-  if let Ok(vm) = settings_vm(shell_team(team_id), "access") {
+  if let Ok(vm) = settings_vm(ctx, shell_team(ctx, team_id), "access") {
     if let Ok(html) = render("settings", vm) { extra += patch_event(html) }
   }
   extra += flash_ok_event(f"{member.name} can now sign in as {email}")
@@ -632,23 +635,24 @@ fn flash_ok_event(msg: string) -> string {
 /// archives, anything else unarchives — the row's form posts the state it
 /// wants, so a stale page converges instead of toggling blind.
 fn teams_archive_write(
+  ctx: pb.Client,
   r: mut Ref<http.Request>,
   team_id: string,
 ) -> Result<string, string> {
   let id = strings.TrimSpace(r.PostFormValue("id"))
   if id == "" { return Err("pick a team") }
-  let known = records.list_teams()?
+  let known = records.list_teams(ctx)?
   let Some(t) = known.items.find(|x| x.id == id) else {
     return Err("unknown team; reload the page for the current list")
   }
   let archived = r.PostFormValue("archived") == "1"
-  let su = verify_admin(r.PostFormValue("admin_password"))?
+  let su = verify_admin(ctx, r.PostFormValue("admin_password"))?
   let payload = marshal(TeamArchivedPatch { archived })?
-  let _ = pb.patch_as(f"/api/collections/teams/records/{id}", payload, su)?
+  let _ = ctx.patch_as(f"/api/collections/teams/records/{id}", payload, su)?
   // The page shows the row's state, so patch the Teams section back and say
   // the success out loud — same shape as access_credential_write.
   let mut extra = ""
-  if let Ok(vm) = settings_vm(shell_team(team_id), "teams") {
+  if let Ok(vm) = settings_vm(ctx, shell_team(ctx, team_id), "teams") {
     if let Ok(html) = render("settings", vm) { extra += patch_event(html) }
   }
   let mut msg = f"team {t.key} archived; its board stays readable at /t/{t.key}/"

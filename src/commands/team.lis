@@ -2,7 +2,6 @@ import "display"
 import "records"
 import "go:encoding/json"
 import "go:fmt"
-import "go:os"
 import "go:strings"
 
 import "config"
@@ -15,8 +14,8 @@ import "theme"
 /// Dispatch `lll team <verb>` through the noun's Command table (TASK-307).
 /// The table is the one place a verb is declared: dispatch, `lll team --help`
 /// and shell completions all read it, so none of the three can drift.
-pub fn team(args: Slice<string>) -> Result<(), string> {
-  flags.dispatch("team", "work with teams", team_intro(), team_commands(), args)
+pub fn team(ctx: pb.Client, args: Slice<string>) -> Result<(), string> {
+  flags.dispatch(ctx, "team", "work with teams", team_intro(), team_commands(), args)
 }
 
 /// Every team verb, as a value. `page` is the hand-written help `team delete`
@@ -119,8 +118,9 @@ shows your access."
 }
 
 fn team_list(input: flags.CommandInput) -> Result<(), string> {
+  let ctx = input.ctx
   let p = input.parsed
-  let mut teams = records.list_teams()?
+  let mut teams = records.list_teams(ctx)?
   // Archived teams are hidden by default — everywhere a team list renders
   // (here, the rail switcher) an archived team is finished work, not a
   // choice. --archived includes them, marked.
@@ -187,6 +187,7 @@ fn team_rename_spec() -> Slice<flags.Flag> {
 }
 
 fn team_create(input: flags.CommandInput) -> Result<(), string> {
+  let ctx = input.ctx
   let p = input.parsed
   if p.first() != "" && p.given("--key") {
     return Err(flags.usage_error(f"give the team key as the bare argument or --key, not both\nusage: {input.usage}"))
@@ -195,7 +196,7 @@ fn team_create(input: flags.CommandInput) -> Result<(), string> {
   if strings.TrimSpace(key) == "" { return Err(flags.usage_error(f"a team key is required (e.g. ENG)\nusage: {input.usage}")) }
   let name = p.one("-n")
 
-  let created = create_team(key, name)?
+  let created = create_team(ctx, key, name)?
   if p.given("--json") { return print_json(created, "team") }
   fmt.Println(f"Created team {created.key}: {created.name}")
   Ok(())
@@ -221,6 +222,7 @@ struct TeamRenamePatch { key: string, name: string }
 /// does not follow is stored text, and the caller has to be told which
 /// (see team_rename_collateral).
 fn team_rename(input: flags.CommandInput) -> Result<(), string> {
+  let ctx = input.ctx
   let usage = input.usage
   let p = input.parsed
   let key = p.first()
@@ -232,22 +234,22 @@ fn team_rename(input: flags.CommandInput) -> Result<(), string> {
   if new_key == "" && new_name == "" {
     return Err(flags.usage_error(f"nothing to rename: give --key, -n, or both\nusage: {usage}"))
   }
-  let Some(t) = records.find_team(key)? else {
-    return Err(unknown_team(key))
+  let Some(t) = records.find_team(ctx, key)? else {
+    return Err(unknown_team(ctx, key))
   }
   // teams.key carries a unique index, so a collision would otherwise surface
   // as a raw PocketBase validation error. Saying which key is taken is the
   // more useful answer: the fix is a different key, not a retry.
   if new_key != "" && new_key != t.key {
     if let Some(problem) = records.team_key_problem(new_key) { return Err(problem) }
-    let taken = records.find_team(new_key)?
+    let taken = records.find_team(ctx, new_key)?
     if taken.is_some() {
       return Err(f"a team with key '{new_key}' already exists; see 'lll team list'")
     }
   }
 
   let payload = rename_payload(new_key, new_name)?
-  let _ = pb.patch(f"/api/collections/teams/records/{t.id}", payload)?
+  let _ = ctx.patch(f"/api/collections/teams/records/{t.id}", payload)?
 
   let mut final_key = t.key
   if new_key != "" { final_key = new_key }
@@ -295,6 +297,7 @@ fn team_rename_collateral(old_key: string, new_key: string) -> Slice<string> {
 /// shared field only the web could write (TASK-83's colour picker), which
 /// inverts the rule TASK-83 was built on.
 fn team_set_accent(input: flags.CommandInput) -> Result<(), string> {
+  let ctx = input.ctx
   if input.parsed.positional_count() != 2 {
     return Err(flags.usage_error("usage: lll team set-accent KEY #rrggbb (empty '' clears it)"))
   }
@@ -303,14 +306,14 @@ fn team_set_accent(input: flags.CommandInput) -> Result<(), string> {
   // The colour is checked before the lookup: a typo is the likelier mistake
   // of the two, and it should not cost a round trip to hear about.
   let hex = accent_value(raw)?
-  let Some(t) = records.find_team(key)? else {
-    return Err(unknown_team(key))
+  let Some(t) = records.find_team(ctx, key)? else {
+    return Err(unknown_team(ctx, key))
   }
   let payload = match json.Marshal(TeamAccentPatch { accent: hex }) {
     Ok(p) => p as string,
     Err(e) => return Err(f"encoding team patch: {e}"),
   }
-  let _ = pb.patch(f"/api/collections/teams/records/{t.id}", payload)?
+  let _ = ctx.patch(f"/api/collections/teams/records/{t.id}", payload)?
   if hex == "" {
     fmt.Println(f"Cleared the accent for {t.key}; it uses the canonical orange again")
   } else {
@@ -346,19 +349,20 @@ struct TeamAccentPatch { accent: string }
 /// initial differed only in hue. Settable from the CLI for the same reason
 /// the accent is: a shared field only the web can write inverts the rule.
 fn team_set_emoji(input: flags.CommandInput) -> Result<(), string> {
+  let ctx = input.ctx
   if input.parsed.positional_count() != 2 {
     return Err(flags.usage_error("usage: lll team set-emoji KEY EMOJI (empty '' clears it)"))
   }
   let key = input.parsed.first()
   let glyph = team_emoji_value(input.parsed.nth(1))?
-  let Some(t) = records.find_team(key)? else {
-    return Err(unknown_team(key))
+  let Some(t) = records.find_team(ctx, key)? else {
+    return Err(unknown_team(ctx, key))
   }
   let payload = match json.Marshal(TeamEmojiPatch { emoji: glyph }) {
     Ok(p) => p as string,
     Err(e) => return Err(f"encoding team patch: {e}"),
   }
-  let _ = pb.patch(f"/api/collections/teams/records/{t.id}", payload)?
+  let _ = ctx.patch(f"/api/collections/teams/records/{t.id}", payload)?
   if glyph == "" {
     fmt.Println(f"Cleared the emoji for {t.key}; it shows the letter from its key again")
   } else {
@@ -403,7 +407,7 @@ fn view_accent(stored: string) -> string {
 
 /// Create a team. Shared by `lll team create` and `lll up`'s first-boot
 /// bootstrap.
-pub fn create_team(key: string, name: string) -> Result<models.Team, string> {
+pub fn create_team(ctx: pb.Client, key: string, name: string) -> Result<models.Team, string> {
   // LLL-235: uppercase here as well as in gopb, so the message this prints
   // and the .lll.toml `lll attach` writes say what was actually stored.
   let new_team = models.NewTeam { key: records.normalize_team_key(key), name }
@@ -412,7 +416,7 @@ pub fn create_team(key: string, name: string) -> Result<models.Team, string> {
     Ok(p) => p,
     Err(e) => return Err(f"encoding team: {e}"),
   }
-  let body = pb.post("/api/collections/teams/records", payload as string)?
+  let body = ctx.post("/api/collections/teams/records", payload as string)?
 
   let mut created = models.Team { .. }
   if let Err(e) = json.Unmarshal(body.bytes(), &created) {
@@ -426,11 +430,11 @@ pub fn create_team(key: string, name: string) -> Result<models.Team, string> {
 /// is set. A key naming a team the server does not have is an error either
 /// way — silently falling back to "every team" is how a scoped command ends
 /// up answering for all of them.
-fn configured_team() -> Result<Option<models.Team>, string> {
-  let (cfg, src) = config.load_traced()?
+fn configured_team(ctx: pb.Client) -> Result<Option<models.Team>, string> {
+  let (cfg, src) = ctx.settings.traced()?
   if cfg.team == "" { return Ok(None) }
-  let Some(t) = records.find_team(cfg.team)? else {
-    return Err(unknown_configured_team(cfg.team, src.team))
+  let Some(t) = records.find_team(ctx, cfg.team)? else {
+    return Err(unknown_configured_team(ctx, cfg.team, src.team))
   }
   Ok(Some(t))
 }
@@ -441,9 +445,9 @@ fn configured_team() -> Result<Option<models.Team>, string> {
 /// and got "no team with key 'LLL'" - true, and useless, because it had never
 /// typed LLL and did not know which file had. `config list` knows; so does
 /// this message now.
-fn unknown_configured_team(key: string, origin: string) -> string {
-  if let Some(scoped) = unknown_team_scoped(key) { return scoped }
-  let from = if origin == "env:LLL_TEAM" && os.Getenv("LLL_TEAM_FROM_FLAG") == "1" {
+fn unknown_configured_team(ctx: pb.Client, key: string, origin: string) -> string {
+  if let Some(scoped) = unknown_team_scoped(ctx, key) { return scoped }
+  let from = if origin == "flag:--team" {
     " (from --team)"
   } else if strings.HasPrefix(origin, "env:") {
     f" (from {strings.TrimPrefix(origin, "env:")})"
@@ -458,8 +462,8 @@ fn unknown_configured_team(key: string, origin: string) -> string {
 /// The configured team, insisted upon. Docs, findings, labels and projects
 /// each belong to exactly one team (TASK-173), so the verbs that write or
 /// read them cannot proceed without a key and must not guess one.
-fn current_team() -> Result<models.Team, string> {
-  let Some(t) = configured_team()? else {
+fn current_team(ctx: pb.Client) -> Result<models.Team, string> {
+  let Some(t) = configured_team(ctx)? else {
     return Err(no_team())
   }
   Ok(t)
@@ -468,10 +472,10 @@ fn current_team() -> Result<models.Team, string> {
 /// The team a `--team KEY` flag names, or the configured one when the flag
 /// is absent. Labels and projects each belong to exactly one team, so
 /// neither `create` may leave it unset.
-fn team_flag_or_current(key: string) -> Result<models.Team, string> {
-  if key == "" { return current_team() }
-  let Some(t) = records.find_team(key)? else {
-    return Err(unknown_team(key))
+fn team_flag_or_current(ctx: pb.Client, key: string) -> Result<models.Team, string> {
+  if key == "" { return current_team(ctx) }
+  let Some(t) = records.find_team(ctx, key)? else {
+    return Err(unknown_team(ctx, key))
   }
   Ok(t)
 }
@@ -480,8 +484,8 @@ fn team_flag_or_current(key: string) -> Result<models.Team, string> {
 /// is configured. Only the list verbs and their filters take this; anything
 /// that writes, views or resolves a team-owned record by name uses
 /// current_team, because a name is unique only within a team (LLL-671).
-fn configured_scope() -> Result<records.TeamScope, string> {
-  match configured_team()? {
+fn configured_scope(ctx: pb.Client) -> Result<records.TeamScope, string> {
+  match configured_team(ctx)? {
     Some(t) => Ok(records.TeamScope.Only(t.id)),
     None => Ok(records.TeamScope.Every),
   }
@@ -499,14 +503,15 @@ fn configured_scope() -> Result<records.TeamScope, string> {
 /// not what "delete the team I just made by mistake" means, and PocketBase
 /// would happily orphan them.
 fn team_delete(input: flags.CommandInput) -> Result<(), string> {
+  let ctx = input.ctx
   let key = input.parsed.first()
   if key == "" {
     return Err(flags.usage_error("usage: lll team delete KEY"))
   }
-  let Some(t) = records.find_team(key)? else {
-    return Err(unknown_team(key))
+  let Some(t) = records.find_team(ctx, key)? else {
+    return Err(unknown_team(ctx, key))
   }
-  let issues_held = issue_count(f"team={query.quote(t.id)}")?
+  let issues_held = issue_count(ctx, f"team={query.quote(t.id)}")?
   if issues_held > 0 {
     return Err(
       f"team {t.key} holds {issues_held} issue(s); deleting it would orphan them
@@ -516,7 +521,7 @@ fn team_delete(input: flags.CommandInput) -> Result<(), string> {
   if !confirmed_on_terminal(input.parsed.given("--yes"), f"delete team {t.key}?") {
     return Err(aborted())
   }
-  let _ = pb.delete(f"/api/collections/teams/records/{t.id}")?
+  let _ = ctx.delete(f"/api/collections/teams/records/{t.id}")?
   fmt.Println(f"deleted team {t.key}")
   Ok(())
 }
@@ -548,16 +553,16 @@ fn no_team() -> string {
 
 /// Unknown-team message naming the fix. Shared by every command that
 /// resolves a team key (same package: src/commands).
-fn unknown_team(key: string) -> string {
-  if let Some(scoped) = unknown_team_scoped(key) { return scoped }
+fn unknown_team(ctx: pb.Client, key: string) -> string {
+  if let Some(scoped) = unknown_team_scoped(ctx, key) { return scoped }
   pb.fail(pb.ErrorKind.NotFound, f"no team with key '{key}' on the server. First inspect 'lll team list --archived'; the team may have been renamed.\nFor an existing team, use 'lll attach --key EXISTING_KEY' to update the attachment, or prefix one command with LLL_TEAM=EXISTING_KEY.\nOnly if you intend a new team, create it with 'lll team create {key} -n \"Name\"'.")
 }
 
 /// For a team-scoped caller, a missing key usually means "not yours", and
 /// 'lll team create' is a dead end it cannot run (fleet case 03). The wording
 /// does not say whether the team exists.
-fn unknown_team_scoped(key: string) -> Option<string> {
-  let Some(keys) = records.scoped_team_keys() else { return None }
+fn unknown_team_scoped(ctx: pb.Client, key: string) -> Option<string> {
+  let Some(keys) = records.scoped_team_keys(ctx) else { return None }
   let mine = if keys.is_empty() { "none" } else { strings.Join(keys, ", ") }
   Some(
     pb.fail(pb.ErrorKind.NotFound, f"no team '{key}' among the teams you can see ({mine}). 'lll whoami' shows your access; ask the person who invited you if you need another team."),
@@ -579,31 +584,33 @@ struct TeamArchivedPatch { archived: bool }
 /// The archive verbs share parsed inputs; each fixes its lifecycle direction
 /// before entering the common implementation.
 fn team_archive(input: flags.CommandInput) -> Result<(), string> {
-  team_set_archived(input.parsed, true)
+  let ctx = input.ctx
+  team_set_archived(ctx, input.parsed, true)
 }
 
 fn team_unarchive(input: flags.CommandInput) -> Result<(), string> {
-  team_set_archived(input.parsed, false)
+  let ctx = input.ctx
+  team_set_archived(ctx, input.parsed, false)
 }
 
 /// `lll team archive KEY` / `lll team unarchive KEY` — the team lifecycle.
 /// Archiving hides, never deletes: issues, comments and the /t/KEY/ board
 /// all stay, so the command can afford to be one word with no confirm.
-fn team_set_archived(p: flags.Parsed, archived: bool) -> Result<(), string> {
+fn team_set_archived(ctx: pb.Client, p: flags.Parsed, archived: bool) -> Result<(), string> {
   let mut verb = "archive"
   if !archived { verb = "unarchive" }
   let key = p.first()
   if key == "" {
     return Err(flags.usage_error(f"usage: lll team {verb} KEY"))
   }
-  let Some(t) = records.find_team(key)? else {
-    return Err(unknown_team(key))
+  let Some(t) = records.find_team(ctx, key)? else {
+    return Err(unknown_team(ctx, key))
   }
   let payload = match json.Marshal(TeamArchivedPatch { archived }) {
     Ok(p) => p as string,
     Err(e) => return Err(f"encoding team patch: {e}"),
   }
-  let _ = pb.patch(f"/api/collections/teams/records/{t.id}", payload)?
+  let _ = ctx.patch(f"/api/collections/teams/records/{t.id}", payload)?
   if archived {
     fmt.Println(
       f"Archived team {t.key}: hidden from team lists and the board rail; /t/{t.key}/ stays readable. 'lll team unarchive {t.key}' brings it back.",
@@ -615,15 +622,16 @@ fn team_set_archived(p: flags.Parsed, archived: bool) -> Result<(), string> {
 }
 
 fn team_view(input: flags.CommandInput) -> Result<(), string> {
+  let ctx = input.ctx
   let key = input.parsed.first()
   if key == "" {
     return Err(flags.usage_error("usage: lll team view KEY"))
   }
-  let Some(t) = records.find_team(key)? else {
-    return Err(unknown_team(key))
+  let Some(t) = records.find_team(ctx, key)? else {
+    return Err(unknown_team(ctx, key))
   }
 
-  let issues_held = issue_count(f"team={query.quote(t.id)}")?
+  let issues_held = issue_count(ctx, f"team={query.quote(t.id)}")?
   if input.parsed.given("--json") {
     let mut fields = Map.new<string, json.RawMessage>()
     if let Err(e) = json.Unmarshal(encode_json(t, "team")?, &fields) { return Err(f"decoding team: {e}") }

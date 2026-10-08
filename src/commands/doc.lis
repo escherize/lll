@@ -14,13 +14,13 @@ import "query"
 /// Dispatch `lll doc <verb>` through the noun's Command table (TASK-307).
 /// The table is the one place a verb is declared: dispatch, `lll doc --help`
 /// and shell completions all read it, so none of the three can drift.
-pub fn doc(args: Slice<string>) -> Result<(), string> {
+pub fn doc(ctx: pb.Client, args: Slice<string>) -> Result<(), string> {
   // Removed at 1.0 (D5): the link lives on the issue noun.
   let verb = args.get(2).unwrap_or("")
   if verb == "link" || verb == "unlink" {
     return Err(f"unknown doc command: '{verb}' - did you mean 'lll issue {verb} KEY-123 SLUG'? (see 'lll issue {verb} --help')")
   }
-  flags.dispatch("doc", "work with docs (wiki pages, findings, decisions, PRDs)", doc_intro(), doc_commands(), args)
+  flags.dispatch(ctx, "doc", "work with docs (wiki pages, findings, decisions, PRDs)", doc_intro(), doc_commands(), args)
 }
 
 /// Every doc verb, as a value. No verb has a hand-written page, so `page` is
@@ -355,10 +355,11 @@ fn doc_union_spec() -> Slice<flags.Flag> {
 // ----------------------------------------------------------------- verbs
 
 fn doc_new(input: flags.CommandInput) -> Result<(), string> {
-  create_doc(input.parsed, "wiki", input.parsed.one("-s"))
+  let ctx = input.ctx
+  create_doc(ctx, input.parsed, "wiki", input.parsed.one("-s"))
 }
 
-fn create_doc(p: flags.Parsed, default_kind: string, slug: string) -> Result<(), string> {
+fn create_doc(ctx: pb.Client, p: flags.Parsed, default_kind: string, slug: string) -> Result<(), string> {
   let slug = check_slug(slug)?
   let title = p.one("-t")
   let requested_kind = if p.given("-k") { p.one("-k") } else { default_kind }
@@ -370,12 +371,12 @@ fn create_doc(p: flags.Parsed, default_kind: string, slug: string) -> Result<(),
   let mut body = ""
   if p.given("-b") { body = value_or_stdin(p.one("-b"), "-b")? }
 
-  let team = current_team()?
+  let team = current_team(ctx)?
 
   // The unique index would catch this too, but the fix belongs in the
   // message, not a raw 400. It is UNIQUE (team, slug) now, so the clash is
   // only ever with this team's own docs.
-  if let Some(_) = find_doc(team, slug)? {
+  if let Some(_) = find_doc(ctx, team, slug)? {
     return Err(
       f"{team.key} already has a doc with slug '{slug}'; see 'lll doc view {slug}' or 'lll doc list'",
     )
@@ -397,7 +398,7 @@ fn create_doc(p: flags.Parsed, default_kind: string, slug: string) -> Result<(),
     Ok(p) => p,
     Err(e) => return Err(f"encoding doc: {e}"),
   }
-  let resp = pb.post("/api/collections/docs/records", payload as string)?
+  let resp = ctx.post("/api/collections/docs/records", payload as string)?
 
   let mut created = models.Doc { .. }
   if let Err(e) = json.Unmarshal(resp.bytes(), &created) {
@@ -455,14 +456,15 @@ fn limit_flag(p: flags.Parsed) -> Result<int, string> {
 }
 
 fn doc_list(input: flags.CommandInput) -> Result<(), string> {
+  let ctx = input.ctx
   let p = input.parsed
   let kind = if p.given("-k") { check_kind(p.one("-k"))? } else { "" }
   let limit = limit_flag(p)?
-  let team = current_team()?
+  let team = current_team(ctx)?
   let search = strings.ToLower(strings.TrimSpace(p.one("--search")))
   let mut filter = query.filter(team.id, "", "", "", "", "")
   if kind != "" { filter = f"{filter} && kind={query.quote(kind)}" }
-  let mut items = fetch_docs(filter, "kind,slug", "")?
+  let mut items = fetch_docs(ctx, filter, "kind,slug", "")?
   if search != "" {
     items = items.filter(|d| strings.Contains(strings.ToLower(d.slug), search) || strings.Contains(strings.ToLower(d.title), search))
   }
@@ -479,6 +481,7 @@ fn doc_list(input: flags.CommandInput) -> Result<(), string> {
 }
 
 fn doc_view(input: flags.CommandInput) -> Result<(), string> {
+  let ctx = input.ctx
   let p = input.parsed
   let slug = p.first()
   let usage = input.usage
@@ -486,7 +489,7 @@ fn doc_view(input: flags.CommandInput) -> Result<(), string> {
   let json_mode = p.given("--json")
   let raw_mode = p.given("--raw")
 
-  let record = fetch_doc_record(current_team()?, slug)?
+  let record = fetch_doc_record(ctx, current_team(ctx)?, slug)?
   if json_mode {
     fmt.Println(contract_json(record.bytes() as json.RawMessage, 0) as string)
     return Ok(())
@@ -530,6 +533,7 @@ fn doc_view(input: flags.CommandInput) -> Result<(), string> {
 }
 
 fn doc_edit(input: flags.CommandInput) -> Result<(), string> {
+  let ctx = input.ctx
   let usage = input.usage
   let p = input.parsed
   let slug = p.first()
@@ -549,7 +553,7 @@ fn doc_edit(input: flags.CommandInput) -> Result<(), string> {
     return Err(flags.usage_error(f"nothing to edit: pass at least one flag\nusage: {usage}"))
   }
 
-  let d = fetch_doc(current_team()?, slug)?
+  let d = fetch_doc(ctx, current_team(ctx)?, slug)?
   let mut fields: Slice<string> = []
   // `-b -` replaces the whole body; there is deliberately no append mode.
   if body_set { fields = fields.append("\"body\":" + json_quote(body)?) }
@@ -566,7 +570,7 @@ fn doc_edit(input: flags.CommandInput) -> Result<(), string> {
     let paths = parse_paths(paths_raw)
     fields = fields.append("\"paths\":" + json_quote(paths)?)
   }
-  let _ = pb.patch(
+  let _ = ctx.patch(
     f"/api/collections/docs/records/{d.id}",
     "{" + strings.Join(fields, ",") + "}",
   )?
@@ -575,15 +579,16 @@ fn doc_edit(input: flags.CommandInput) -> Result<(), string> {
 }
 
 fn doc_delete(input: flags.CommandInput) -> Result<(), string> {
+  let ctx = input.ctx
   let p = input.parsed
   let slug = p.first()
   if slug == "" { return Err(flags.usage_error("usage: lll doc delete SLUG [--yes]")) }
 
-  let d = fetch_doc(current_team()?, slug)?
+  let d = fetch_doc(ctx, current_team(ctx)?, slug)?
   if !p.given("--yes") && !confirmed(f"delete doc {d.slug}?") {
     return Err(aborted())
   }
-  let _ = pb.delete(f"/api/collections/docs/records/{d.id}")?
+  let _ = ctx.delete(f"/api/collections/docs/records/{d.id}")?
   fmt.Println(f"Deleted doc {d.slug}")
   Ok(())
 }
@@ -600,18 +605,19 @@ fn doc_delete(input: flags.CommandInput) -> Result<(), string> {
 /// cross-team form — `LLL_TEAM=GRDN lll doc view index` is how you read the
 /// other board's page.
 pub fn fetch_doc_record(
+  ctx: pb.Client,
   team: models.Team,
   slug: string,
 ) -> Result<string, string> {
-  let Some(item) = find_doc(team, slug)? else {
+  let Some(item) = find_doc(ctx, team, slug)? else {
     return Err(unknown_doc(team, slug))
   }
-  pb.get(f"/api/collections/docs/records/{item.id}?expand=issues.team,author.owner")
+  ctx.get(f"/api/collections/docs/records/{item.id}?expand=issues.team,author.owner")
 }
 
 /// fetch_doc_record, decoded.
-pub fn fetch_doc(team: models.Team, slug: string) -> Result<models.Doc, string> {
-  let record = fetch_doc_record(team, slug)?
+pub fn fetch_doc(ctx: pb.Client, team: models.Team, slug: string) -> Result<models.Doc, string> {
+  let record = fetch_doc_record(ctx, team, slug)?
   let mut d = models.Doc { .. }
   if let Err(e) = json.Unmarshal(record.bytes(), &d) {
     return Err(f"decoding doc: {e}")
@@ -622,13 +628,14 @@ pub fn fetch_doc(team: models.Team, slug: string) -> Result<models.Doc, string> 
 /// One team's doc by slug, or None. Lets callers distinguish "unknown slug"
 /// from a failed write.
 pub fn find_doc(
+  ctx: pb.Client,
   team: models.Team,
   slug: string,
 ) -> Result<Option<models.Doc>, string> {
   let slug = check_slug(slug)?
   let filter = url.QueryEscape(query.scoped(team.id, "slug", slug))
   let mut docs = models.DocList { .. }
-  pb.fetch(
+  pb.fetch(ctx, 
     f"/api/collections/docs/records?filter={filter}&perPage=1",
     "docs",
     &docs,

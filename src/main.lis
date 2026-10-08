@@ -3,25 +3,40 @@ import "go:os"
 import "go:strings"
 
 import "commands"
+import "config"
 import "flags"
 import "pb"
 import "query"
 
 fn main() {
+  // LLL-486: the environment is read here, once, and everything below gets
+  // its configuration as a value. Nothing sets an environment variable to
+  // carry state, so a child process sees only what lll's parent gave it.
+  let env = config.read_env()
   let Some(noun) = os.Args.get(1) else {
-    print_usage()
+    print_usage(pb.Client.new(config.resolve(env, config.no_overrides())))
     return
   }
 
+  // --team is taken off the arguments before the settings are built, so the
+  // team it names is a flag override like any other. Its usage errors are
+  // reported where they always were, after renewal.
+  let scoped = commands.scoped_args(os.Args)
+  let team_flag = match scoped {
+    Ok((_, team)) => team,
+    Err(_) => None,
+  }
+  let mut settings = config.resolve(env, config.Overrides { team: team_flag, .. })
   // LLL-441: before anything reads the token, renew a login token near
   // expiry - only for nouns that talk to the server anyway, so --help,
   // version and completions never wait on the network.
   if commands.talks_to_server(noun) {
-    commands.renew_login_token()
+    settings = commands.renew_login_token(settings)
   }
-  let skew = commands.version_skew_check(noun)
-  let result = match commands.scoped_args(os.Args) {
-    Ok(args) => dispatch(noun, args),
+  let ctx = pb.Client.new(settings)
+  let skew = commands.version_skew_check(ctx, noun)
+  let result = match scoped {
+    Ok((args, _)) => dispatch(ctx, noun, args),
     Err(msg) => Err(msg),
   }
   if let Some(Some(line)) = skew.receive() {
@@ -45,44 +60,44 @@ fn main() {
   }
 }
 
-fn dispatch(noun: string, args: Slice<string>) -> Result<(), string> {
+fn dispatch(ctx: pb.Client, noun: string, args: Slice<string>) -> Result<(), string> {
   match noun {
-    "issue" => commands.issue(args),
-    "team" => commands.team(args),
-    "member" => commands.member(args),
-    "invite" => commands.invite(args),
-    "project" => commands.project(args),
-    "api" => commands.api(args),
-    "label" => commands.label(args),
-    "doc" => commands.doc(args),
-    "finding" => commands.finding(args),
-    "import" => commands.import_cmd(args),
-    "export" => commands.export_cmd(args),
-    "config" => commands.config_cmd(args),
-    "login" => commands.login(args),
-    "logout" => commands.logout(args),
-    "whoami" => commands.whoami(args),
-    "token" => commands.token(args),
-    "bot" => commands.bot(args),
-    "attach" => commands.attach(args),
-    "watch" => commands.watch(args),
-    "webhook" => commands.webhook(args),
-    "search" => commands.search_cmd(args),
-    "up" => commands.up(args),
-    "board" => commands.board(args),
+    "issue" => commands.issue(ctx, args),
+    "team" => commands.team(ctx, args),
+    "member" => commands.member(ctx, args),
+    "invite" => commands.invite(ctx, args),
+    "project" => commands.project(ctx, args),
+    "api" => commands.api(ctx, args),
+    "label" => commands.label(ctx, args),
+    "doc" => commands.doc(ctx, args),
+    "finding" => commands.finding(ctx, args),
+    "import" => commands.import_cmd(ctx, args),
+    "export" => commands.export_cmd(ctx, args),
+    "config" => commands.config_cmd(ctx, args),
+    "login" => commands.login(ctx, args),
+    "logout" => commands.logout(ctx, args),
+    "whoami" => commands.whoami(ctx, args),
+    "token" => commands.token(ctx, args),
+    "bot" => commands.bot(ctx, args),
+    "attach" => commands.attach(ctx, args),
+    "watch" => commands.watch(ctx, args),
+    "webhook" => commands.webhook(ctx, args),
+    "search" => commands.search_cmd(ctx, args),
+    "up" => commands.up(ctx, args),
+    "board" => commands.board(ctx, args),
     "skill" => commands.skill(args),
     "completions" => commands.completions(args),
     "upgrade" => commands.upgrade(args),
     "--help" => {
-      print_usage()
+      print_usage(ctx)
       Ok(())
     },
     "-h" => {
-      print_usage()
+      print_usage(ctx)
       Ok(())
     },
     "help" => {
-      print_usage()
+      print_usage(ctx)
       Ok(())
     },
     "--version" => {
@@ -101,7 +116,7 @@ fn dispatch(noun: string, args: Slice<string>) -> Result<(), string> {
   }
 }
 
-fn print_usage() {
+fn print_usage(ctx: pb.Client) {
   fmt.Println(
     f"lll - a Linear-style issue tracker
 
@@ -201,7 +216,7 @@ layer, each supplying the keys it names; 'lll config list' shows which won):
   LLL_SORT     default sort for 'issue list': {strings.Join(query.sort_fields(), ", ")}; prefix - to descend
   LLL_WEB_URL  web board base URL for 'board', 'issue url', 'view -w' (set with 'lll config set web_url URL')",
   )
-  let hint = commands.setup_hint()
+  let hint = commands.setup_hint(ctx)
   if hint != "" { fmt.Println(hint) }
 }
 

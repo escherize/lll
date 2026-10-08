@@ -32,23 +32,24 @@ pub fn team_key_problem(key: string) -> Option<string> {
   )
 }
 
-pub fn find_team(key: string) -> Result<Option<models.Team>, string> {
+pub fn find_team(ctx: pb.Client, key: string) -> Result<Option<models.Team>, string> {
   let wanted = normalize_team_key(key)
   let filter = url.QueryEscape(f"key={query.quote(wanted)}")
   let mut result = models.TeamList { .. }
-  pb.fetch(f"/api/collections/teams/records?filter={filter}", "teams", &result)?
+  pb.fetch(ctx, f"/api/collections/teams/records?filter={filter}", "teams", &result)?
   Ok(result.items.find(|t| t.key == wanted))
 }
 
 /// find_team, riding `tok` instead of the configured token: `lll bot` asks
 /// whether the credential that will own the bot can see the team it names.
 pub fn find_team_as(
+  ctx: pb.Client,
   tok: string,
   key: string,
 ) -> Result<Option<models.Team>, string> {
   let wanted = normalize_team_key(key)
   let filter = url.QueryEscape(f"key={query.quote(wanted)}")
-  let body = pb.get_as(f"/api/collections/teams/records?filter={filter}", tok)?
+  let body = ctx.get_as(f"/api/collections/teams/records?filter={filter}", tok)?
   let mut result = models.TeamList { .. }
   if let Err(e) = json.Unmarshal(body.bytes(), &result) {
     return Err(f"decoding teams: {e}")
@@ -57,7 +58,7 @@ pub fn find_team_as(
 }
 
 /// Every team, key-sorted. Shared by `lll team list` and `lll up`.
-pub fn list_teams() -> Result<models.TeamList, string> {
-  let items = fetch_all_records<models.Team>("/api/collections/teams/records?sort=key,id", "teams")?
+pub fn list_teams(ctx: pb.Client) -> Result<models.TeamList, string> {
+  let items = fetch_all_records<models.Team>(ctx, "/api/collections/teams/records?sort=key,id", "teams")?
   Ok(models.TeamList { items })
 }

@@ -15,12 +15,12 @@ import "query"
 ///
 /// Dispatched through the noun's Command table (TASK-307): dispatch, `lll
 /// finding --help` and shell completions all read it, so none can drift.
-pub fn finding(args: Slice<string>) -> Result<(), string> {
+pub fn finding(ctx: pb.Client, args: Slice<string>) -> Result<(), string> {
   // Removed at 1.0 (D5); a finding is a doc, and 'doc view' is the read.
   if args.get(2) == Some("read") {
     return Err("unknown finding command: 'read' - did you mean 'lll doc view SLUG'? (see 'lll doc view --help')")
   }
-  flags.dispatch("finding", "retrieve findings near a path", finding_intro(), finding_commands(), args)
+  flags.dispatch(ctx, "finding", "retrieve findings near a path", finding_intro(), finding_commands(), args)
 }
 
 /// Every finding verb, as a value. Neither verb had a hand-written page, so
@@ -157,8 +157,8 @@ fn finding_list_spec() -> Slice<flags.Flag> {
 /// formatted identically to a correct hit. Findings exist to say what is
 /// known about THIS file; confidently answering about a different repo is
 /// worse than answering nothing.
-pub fn fetch_findings(team_id: string) -> Result<Slice<models.Doc>, string> {
-  fetch_docs(f"kind='finding' && team={query.quote(team_id)}", "slug", "")
+pub fn fetch_findings(ctx: pb.Client, team_id: string) -> Result<Slice<models.Doc>, string> {
+  fetch_docs(ctx, f"kind='finding' && team={query.quote(team_id)}", "slug", "")
 }
 
 /// Does the doc's stored paths list touch the path being asked about?
@@ -186,10 +186,10 @@ fn findings_near(findings: Slice<models.Doc>, path: string) -> Slice<models.Doc>
 /// The findings related to one issue: every finding explicitly linked to it
 /// (the issues relation always shows), plus every finding whose `area` names
 /// one of the issue's labels. Shared by 'lll issue view' and the issue page.
-pub fn findings_for_issue(issue: models.Issue) -> Result<Slice<models.Doc>, string> {
+pub fn findings_for_issue(ctx: pb.Client, issue: models.Issue) -> Result<Slice<models.Doc>, string> {
   // The ISSUE's team, not the configured one: this answers for one issue,
   // and the board can be showing an issue from a team nobody configured.
-  let findings = fetch_findings(issue.team)?
+  let findings = fetch_findings(ctx, issue.team)?
   Ok(findings.filter(|d| {
     let linked = d.issues.find(|x| x == issue.id).is_some()
     let area_hit = d.area != "" && issue.expand.labels.any(|l| l.name == d.area)
@@ -200,10 +200,11 @@ pub fn findings_for_issue(issue: models.Issue) -> Result<Slice<models.Doc>, stri
 // ------------------------------------------------------------------ verbs
 
 fn finding_near(input: flags.CommandInput) -> Result<(), string> {
+  let ctx = input.ctx
   let p = input.parsed
   let path = p.first()
   if path == "" { return Err(flags.usage_error("usage: lll finding near <path>")) }
-  let findings = fetch_findings(current_team()?.id)?
+  let findings = fetch_findings(ctx, current_team(ctx)?.id)?
   let hits = findings_near(findings, path)
   if p.given("--json") { return print_list_json(hits, whole_list(hits.length()), "findings") }
   if hits.is_empty() {
@@ -215,6 +216,7 @@ fn finding_near(input: flags.CommandInput) -> Result<(), string> {
 }
 
 fn finding_list(input: flags.CommandInput) -> Result<(), string> {
+  let ctx = input.ctx
   let p = input.parsed
   let area = strings.TrimSpace(p.one("-a"))
   // --search and --path exist because eight of thirty fleet agents asked
@@ -224,7 +226,7 @@ fn finding_list(input: flags.CommandInput) -> Result<(), string> {
   // Issue list's --limit validation, run before any server call; the slice
   // itself happens after the filters below (LLL-313).
   let limit = limit_flag(p)?
-  let mut findings = fetch_findings(current_team()?.id)?
+  let mut findings = fetch_findings(ctx, current_team(ctx)?.id)?
   if area != "" {
     findings = findings.filter(|d| strings.TrimSpace(d.area) == area)
   }
@@ -275,11 +277,12 @@ pub fn confidence_suffix(confidence: string, note: string) -> string {
 /// a positional name and finding is where the guess happened), so it is
 /// resolved here, positional-or-flag, and handed to create_doc.
 fn finding_new(input: flags.CommandInput) -> Result<(), string> {
+  let ctx = input.ctx
   let p = input.parsed
   let verb = input.args.get(2).unwrap_or("new")
   let usage = flags.usage(f"lll finding {verb}", finding_new_spec(), "[\"slug\"]")
   let slug = flags.entity_name(p, "-s", usage)?
-  create_doc(p, "finding", slug)
+  create_doc(ctx, p, "finding", slug)
 }
 
 // ------------------------------------------------------------------ LLL-396
@@ -302,14 +305,15 @@ fn finding_refute_spec() -> Slice<flags.Flag> {
 /// the note is the point: a confirmation carrying a refutation's reason
 /// would contradict itself.
 fn finding_confirm(input: flags.CommandInput) -> Result<(), string> {
+  let ctx = input.ctx
   let p = input.parsed
   let slug = p.first()
   if slug == "" { return Err(flags.usage_error("usage: lll finding confirm SLUG")) }
-  let team = current_team()?
-  let Some(d) = find_doc(team, slug)? else {
+  let team = current_team(ctx)?
+  let Some(d) = find_doc(ctx, team, slug)? else {
     return Err(unknown_doc(team, slug))
   }
-  patch_confidence(d, "confirmed", "")?
+  patch_confidence(ctx, d, "confirmed", "")?
   fmt.Println(f"Confirmed {d.slug}")
   Ok(())
 }
@@ -318,6 +322,7 @@ fn finding_confirm(input: flags.CommandInput) -> Result<(), string> {
 /// sets 'refuted': a refutation is a later agent's judgement with a reason,
 /// not a creation option.
 fn finding_refute(input: flags.CommandInput) -> Result<(), string> {
+  let ctx = input.ctx
   let p = input.parsed
   let slug = p.first()
   if slug == "" { return Err(flags.usage_error("usage: lll finding refute SLUG -b why")) }
@@ -325,22 +330,22 @@ fn finding_refute(input: flags.CommandInput) -> Result<(), string> {
   if why == "" {
     return Err("a refutation needs the why: 'lll finding refute SLUG -b why' ('-b -' reads it from stdin)")
   }
-  let team = current_team()?
-  let Some(d) = find_doc(team, slug)? else {
+  let team = current_team(ctx)?
+  let Some(d) = find_doc(ctx, team, slug)? else {
     return Err(unknown_doc(team, slug))
   }
-  patch_confidence(d, "refuted", why)?
+  patch_confidence(ctx, d, "refuted", why)?
   fmt.Println(f"Refuted {d.slug}")
   Ok(())
 }
 
 /// One PATCH, two fields, on purpose nothing else: confirm/refute is a
 /// judgement about the finding, never an edit of it.
-fn patch_confidence(d: models.Doc, confidence: string, note: string) -> Result<(), string> {
+fn patch_confidence(ctx: pb.Client, d: models.Doc, confidence: string, note: string) -> Result<(), string> {
   let payload = match json.Marshal(models.ConfidencePatch { confidence, confidence_note: note }) {
     Ok(p) => p,
     Err(e) => return Err(f"encoding confidence patch: {e}"),
   }
-  let _ = pb.patch(f"/api/collections/docs/records/{d.id}", payload as string)?
+  let _ = ctx.patch(f"/api/collections/docs/records/{d.id}", payload as string)?
   Ok(())
 }

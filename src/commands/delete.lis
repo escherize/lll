@@ -11,10 +11,10 @@ import "query"
 
 /// Count every issue affected by removing one shared classification record.
 /// CLI deletion, web review and label inventory use the same relation filters.
-fn entity_issue_count(kind: string, id: string) -> Result<int, string> {
+fn entity_issue_count(ctx: pb.Client, kind: string, id: string) -> Result<int, string> {
   match kind {
-    "label" => issue_count(query.filter("", "", "", "", id, "")),
-    "project" => issue_count(query.filter("", "", "", id, "", "")),
+    "label" => issue_count(ctx, query.filter("", "", "", "", id, "")),
+    "project" => issue_count(ctx, query.filter("", "", "", id, "", "")),
     _ => Err(f"cannot count issue references for '{kind}'"),
   }
 }
@@ -26,9 +26,9 @@ fn entity_issue_count(kind: string, id: string) -> Result<int, string> {
 /// projects page all counted issues by spelling this request out again, four
 /// times, one of them twice. Takes the filter UNESCAPED and escapes it here,
 /// so no caller has to remember which side of the escape it is on.
-fn issue_count(filter: string) -> Result<int, string> {
+fn issue_count(ctx: pb.Client, filter: string) -> Result<int, string> {
   let mut list = models.IssueList { .. }
-  pb.fetch(
+  pb.fetch(ctx, 
     f"/api/collections/issues/records?perPage=1&fields=id&filter={url.QueryEscape(filter)}",
     "issues",
     &list,
