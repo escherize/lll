@@ -6,6 +6,23 @@ minors. Issue keys are on the project's own board (`lll issue view KEY`).
 
 ## [Unreleased]
 
+### Changed
+
+- `--team` given twice on one command is refused with exit 2 (usage).
+  It used to keep the last value silently. (LLL-486)
+- An unknown team key is attributed to `--team` only when `--team` was
+  typed. An inherited `LLL_TEAM` is now reported as `LLL_TEAM`. (LLL-486)
+
+### Security
+
+- lll no longer writes its environment. `--team`, tokens, the board
+  token and the administrator pair used to be set as environment variables
+  for the rest of the process, so child processes (`gh` for
+  `issue pr`, `git`, the browser opener) inherited values that their
+  parent shell never had. Configuration is now built once from flags, the
+  environment and the config files, and passed down as a value. A child
+  process sees only what lll's own parent gave it. (LLL-486)
+
 ## [0.9.0] - 2026-10-08
 
 0.9 is the release candidate for the 1.0 surface. `docs/cli-contract.md` now

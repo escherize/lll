@@ -37,7 +37,8 @@ Three from lll's repo, as calibration:
   someone types an accented character, then a goroutine panics and the server
   dies.
 - Package-level `let` is rejected by this compiler, so "cache it in a variable"
-  is not available and the environment is where process state lives.
+  is not available: state is a value its owner builds and passes down, never
+  an environment variable that every child process would inherit.
 
 Nobody guesses those. Nobody reads them in a manual either.
 
