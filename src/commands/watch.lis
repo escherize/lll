@@ -497,7 +497,9 @@ fn watch_ready(filters: query.Filters, json_mode: bool) -> Result<(), string> {
 /// Known limit: the subscription is filtered to the configured team, so a
 /// cross-team blocker changing state sends no event, and its expanded state
 /// is as old as the dependent's last event. The dependent's next event
-/// catches up; `issue list --ready` sees the change at once.
+/// catches up; `issue list --ready` sees the change at once. The same holds
+/// for archiving a team: it sends no issue event, so its issues change
+/// readiness on their next event.
 fn ready_keys(issues: Slice<models.Issue>) -> Slice<string> {
   // Built once per call: the cache first, so its fresher record wins.
   let mut seen = issues

@@ -7,6 +7,7 @@ and saves the board login link, so the next commands work with no login step.
 An invited member then replaces its temporary password itself, with no
 administrator. A second home holding another server's url keeps it.
 """
+import json
 import os
 from pathlib import Path
 import re
@@ -15,6 +16,7 @@ import subprocess
 import sys
 import tempfile
 import time
+import urllib.request
 
 binary = str(Path(sys.argv[1]).resolve())
 
@@ -93,8 +95,25 @@ with tempfile.TemporaryDirectory(prefix='lll-first-run-') as tmp:
         assert out.returncode != 0 and 'not firstrun' in out.stderr, out.stdout + out.stderr
         out = run(kim_dir, kim, 'member', 'set-password', 'kim', '--old-password', 'wrong-password', '--password', 'x' * 12)
         assert out.returncode != 0 and 'nothing changed' in out.stderr, out.stdout + out.stderr
+        kim_config = root / 'kim-home' / '.config' / 'lll' / 'lll.toml'
+        old_token = re.search(r'token = "([^"]+)"', kim_config.read_text()).group(1)
         out = run(kim_dir, kim, 'member', 'set-password', 'kim', '--old-password', temp, '--password', 'kims-own-pw')
         assert out.returncode == 0 and 'new token saved' in out.stdout, out.stdout + out.stderr
+        # LLL-679: the change revoked the old token. Using it is not
+        # authenticated (exit 6), not "an administrator token" at exit 1.
+        out = run(kim_dir, dict(kim, LLL_TOKEN=old_token),
+                  'member', 'set-password', 'kim', '--old-password', 'kims-own-pw', '--password', 'y' * 12)
+        assert out.returncode == 6 and 'was rejected' in out.stderr, (out.returncode, out.stderr)
+        assert 'administrator' not in out.stderr, out.stderr
+        # An administrator's token still gets the --old-password advice.
+        req = urllib.request.Request(f'{api}/api/collections/_superusers/auth-with-password',
+                                     data=json.dumps({'identity': 'admin@local.dev',
+                                                      'password': 'admin-local-123'}).encode(),
+                                     headers={'Content-Type': 'application/json'})
+        admin_token = json.load(urllib.request.urlopen(req))['token']
+        out = run(kim_dir, dict(kim, LLL_TOKEN=admin_token),
+                  'member', 'set-password', 'kim', '--old-password', 'kims-own-pw', '--password', 'y' * 12)
+        assert out.returncode == 1 and "is an administrator's" in out.stderr, (out.returncode, out.stderr)
         out = run(kim_dir, kim, 'whoami')
         assert out.returncode == 0 and 'kim' in out.stdout, out.stdout + out.stderr
         out = run(kim_dir, kim, 'login', '--email', 'kim@example.com', '--password', temp)

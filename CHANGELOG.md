@@ -148,7 +148,8 @@ that close, release, delete or create bots.
   team-scoped member could take any claim with no reason (LLL-662).
 - `lll issue delete` refuses a claimed issue (exit 4); `--force` releases the
   claim first, under the release rule, then deletes. On an unclaimed issue
-  `--force` is still refused in favour of `--yes` (LLL-662).
+  `--force` is unneeded and the delete goes ahead; it never skips the
+  confirmation, which `--yes` does (LLL-662, LLL-679).
 - `-b`/`--body` is the long-text flag everywhere. On `issue create`,
   `project create` and `project edit` it sets the description, and
   `-d`/`--description` stay as aliases there.
@@ -192,6 +193,10 @@ that close, release, delete or create bots.
   upgrade, and it still takes unrelated edits (LLL-628).
 - A key derived from a directory name (`lll up`, `lll attach`) now keeps
   only ASCII letters and digits and starts with a letter.
+- A command that needs a team and has none (the "no team configured"
+  refusal, and `bot create`/`bot rotate`) exits 2 (usage), not 1, and names
+  `--team KEY` as the fix; the "no team configured" refusal also names
+  `lll attach` (LLL-679).
 
 ### Removed
 
@@ -386,6 +391,13 @@ that close, release, delete or create bots.
   RFC3339 in any offset and the space form, and compare instants. Copying
   `updated` from `--json` into `--if-unchanged-since` with a `T` failed with
   a misleading "changed since" (LLL-645).
+- With no team configured, `issue next`, `issue list --ready` and
+  `watch --ready` offered open issues from archived teams. An archived team
+  is read-only, so its issues are not ready (LLL-679).
+- `member set-password --old-password` with a revoked or expired token
+  exits 6 with the not-authenticated message. It said the token was "not a
+  member's (an administrator token?)" and exited 1; that advice now appears
+  only for an administrator's token (LLL-679).
 
 ## [0.8.0] - 2026-10-07
 

@@ -509,10 +509,11 @@ fn prompt_team(
   let key = if flag != "" { flag } else { config.load()?.team }
   let wanted = records.normalize_team_key(key)
   if wanted == "" {
-    return Err(
+    // Usage, exit 2, like every no-team refusal that --team fixes (LLL-679).
+    return Err(flags.usage_error(
       "name the team the agent joins: --team KEY (no team is configured here)
 or pass --env to print only the LLL_URL and LLL_TOKEN export lines",
-    )
+    ))
   }
   let Some(team) = records.find_team_as(tok, wanted)? else {
     return Err(

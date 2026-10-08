@@ -531,8 +531,10 @@ p = cli('issue', 'delete', key, '--yes', actor=beta)
 assert p.returncode != 0 and "'lll issue delete " + key + " --force'" in p.stderr, p.stderr
 assert state()['claim'] is not None
 spare = post('issues', {'team': team['id'], 'title': 'Unclaimed delete', 'state': 'todo'})
+# LLL-679: --force on an unclaimed issue is unneeded, not a usage error.
 p = cli('issue', 'delete', 'CLTX-' + str(spare['number']), '--force', '--yes', actor=beta)
-assert p.returncode != 0 and 'skipped by --yes' in p.stderr, p.stderr
+assert p.returncode == 0 and 'Deleted CLTX-' in p.stdout, (p.returncode, p.stdout, p.stderr)
+assert request('/api/collections/issues/records/' + spare['id'])[0] == 404
 p = cli('issue', 'delete', key, '--force', '--yes', actor=beta)
 assert p.returncode == 0 and 'Deleted ' + key in p.stdout, (p.stdout, p.stderr)
 assert request('/api/collections/issues/records/' + issue['id'])[0] == 404
