@@ -946,6 +946,11 @@ pub fn is_loopback(base_url: string) -> bool {
   let after_scheme = strings.SplitN(base_url, "://", 2)
   let mut host = after_scheme[after_scheme.length() - 1]
   host = strings.SplitN(host, "/", 2)[0]
+  // Userinfo hides the real host: "http://localhost:1@evil.example" goes to
+  // evil.example. Any "@" (or a backslash, which some clients read as a
+  // slash) means not loopback; `lll board` sends a board token to whatever
+  // this approves (LLL-648 review).
+  if strings.ContainsAny(host, "@\\") { return false }
   // An IPv6 literal wears brackets: "[::1]:8090".
   if host.starts_with("[") {
     let inner = strings.SplitN(strings.TrimPrefix(host, "["), "]", 2)[0]

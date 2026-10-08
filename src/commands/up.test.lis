@@ -34,6 +34,12 @@ fn loopback_is_not_fooled_by_a_hostname_that_merely_starts_local() {
   // and comparing whole names does not.
   assert !is_loopback("http://localhost.evil.example:8090")
   assert !is_loopback("http://127.0.0.1.evil.example")
+  // Userinfo: the host is after the "@" (LLL-648 review).
+  assert !is_loopback("http://localhost:1@evil.example")
+  assert !is_loopback("http://127.0.0.1:1@evil.example/")
+  assert !is_loopback("http://:80@evil.example")
+  assert !is_loopback("http://localhost?x@evil.example")
+  assert !is_loopback("http://evil.example\\@localhost")
 }
 
 // LLL-648: a loopback boot logs the CLI in, but only into an empty slot. A
