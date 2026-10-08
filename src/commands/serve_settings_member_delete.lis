@@ -3,7 +3,6 @@ import "go:net/http"
 import "go:net/url"
 import "go:strconv"
 
-import "config"
 import "models"
 import "pb"
 
@@ -19,21 +18,21 @@ pub struct MemberDeleteVM {
 /// Reading impact is available to the board; deletion always reauthenticates
 /// the administrator and recounts under that same identity. No password or
 /// admin token is persisted or included in the rendered review.
-fn settings_member_delete(r: mut Ref<http.Request>, id: string) -> Result<Option<string>, string> {
+fn settings_member_delete(ctx: pb.Client, r: mut Ref<http.Request>, id: string) -> Result<Option<string>, string> {
   let confirmed = r.PostFormValue("confirmed") == "1"
   let token = if confirmed {
-    verify_admin(r.PostFormValue("admin_password"))?
+    verify_admin(ctx, r.PostFormValue("admin_password"))?
   } else {
-    config.load()?.token
+    ctx.settings.config()?.token
   }
   let path = f"/api/collections/members/records/{url.PathEscape(id)}"
-  let body = pb.get_as(path, token)?
+  let body = ctx.get_as(path, token)?
   let mut member = models.Member { .. }
   if let Err(e) = json.Unmarshal(body.bytes(), &member) {
     return Err(f"decoding member: {e}")
   }
   if member.id != id { return Err("unknown member; reload settings") }
-  let references = member_references(id, token)?
+  let references = member_references(ctx, id, token)?
   if !confirmed || r.PostFormValue("expected_assigned") != strconv.Itoa(references.assigned) || r.PostFormValue("expected_authored") != strconv.Itoa(references.authored) || r.PostFormValue("expected_created") != strconv.Itoa(references.created) {
     let vm = MemberDeleteVM {
       id, name: member.name,
@@ -44,6 +43,6 @@ fn settings_member_delete(r: mut Ref<http.Request>, id: string) -> Result<Option
     }
     return Ok(Some(patch_event(render("set-member-delete-review", vm)?)))
   }
-  let _ = pb.delete_as(path, token)?
+  let _ = ctx.delete_as(path, token)?
   Ok(None)
 }

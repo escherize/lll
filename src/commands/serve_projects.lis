@@ -23,14 +23,15 @@ import "query"
 /// that subscribed would be morphed into the board. Nothing here changes
 /// often enough to pay for a second scope.
 fn projects_page(
+  ctx: pb.Client,
   w: http.ResponseWriter,
   // The server scopes this page to its selected team.
   r: Ref<http.Request>,
   team_id: string,
   me: string,
 ) {
-  let team = shell_team(team_id)
-  let vm = match projects_vm(team_id, team.key) {
+  let team = shell_team(ctx, team_id)
+  let vm = match projects_vm(ctx, team_id, team.key) {
     Ok(v) => v,
     Err(e) => {
       http.Error(w, pb.plain(e), 500)
@@ -41,12 +42,12 @@ fn projects_page(
     write_raw(w, projects_raw(vm, team.key))
     return
   }
-  let page = PageVM { rail: rail_for(r, "projects", me, team), page: vm }
+  let page = PageVM { rail: rail_for(ctx, r, "projects", me, team), page: vm }
   render_html(w, "projects-page", page)
 }
 
-fn projects_vm(team_id: string, team_key: string) -> Result<ProjectsVM, string> {
-  let projects = records.fetch_projects(team_id)?
+fn projects_vm(ctx: pb.Client, team_id: string, team_key: string) -> Result<ProjectsVM, string> {
+  let projects = records.fetch_projects(ctx, team_id)?
   // LLL-426: into THIS team's table, not the configured team's.
   let base = issues_base(team_key)
   Ok(ProjectsVM {
@@ -56,7 +57,7 @@ fn projects_vm(team_id: string, team_key: string) -> Result<ProjectsVM, string> 
       status: p.status,
       status_label: state_label(p.status),
       tone: project_tone(p.status),
-      count: project_count(team_id, p.id),
+      count: project_count(ctx, team_id, p.id),
       href: f"{base}?project={url.QueryEscape(p.name)}",
     }),
   })
@@ -81,6 +82,6 @@ fn project_tone(status: string) -> string {
 ///
 /// A project's issue count, or 0 when the count cannot be had: the projects
 /// page would rather render with a zero than not render.
-fn project_count(team_id: string, project_id: string) -> int {
-  issue_count(query.filter(team_id, "", "", project_id, "", "")).unwrap_or(0)
+fn project_count(ctx: pb.Client, team_id: string, project_id: string) -> int {
+  issue_count(ctx, query.filter(team_id, "", "", project_id, "", "")).unwrap_or(0)
 }

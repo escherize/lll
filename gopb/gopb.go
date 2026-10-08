@@ -47,8 +47,11 @@ const teamKeyRule = "a team key is a letter followed by up to 15 letters, digits
 
 const anonMessage = "authentication required: send a member token as 'Authorization: Bearer ...' - 'lll login' for a person, 'lll token create' for an agent"
 
-func Serve(dataDir, addr, adminEmail, adminPassword, version string) error {
-	origins, err := allowedOrigins(os.Getenv("LLL_ALLOWED_ORIGINS"))
+// allowedOriginsSpec and webURL are LLL_ALLOWED_ORIGINS and LLL_WEB_URL as the
+// caller's settings carry them (LLL-486): the server reads no environment, so
+// a scratch boot that ignores its inherited LLL_* values really does.
+func Serve(dataDir, addr, adminEmail, adminPassword, version, allowedOriginsSpec, webURL string) error {
+	origins, err := allowedOrigins(allowedOriginsSpec)
 	if err != nil {
 		return err
 	}
@@ -150,7 +153,7 @@ func Serve(dataDir, addr, adminEmail, adminPassword, version string) error {
 		registerInviteRoutes(e.Router)
 		registerReferenceRoutes(e.Router, &issueUpdates)
 		e.Router.GET("/.well-known/lll", func(re *core.RequestEvent) error {
-			return re.JSON(http.StatusOK, apiDiscovery(version, os.Getenv("LLL_WEB_URL")))
+			return re.JSON(http.StatusOK, apiDiscovery(version, webURL))
 		})
 		// LLL-676: no "*" CORS, no rebinding Host on loopback, no
 		// well-known administrator password (browser_guard.go).

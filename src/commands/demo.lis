@@ -1,7 +1,6 @@
 import "go:encoding/json"
 import "go:fmt"
 
-import "config"
 import "models"
 import "pb"
 import "provenance"
@@ -42,11 +41,11 @@ struct DemoDoc {
 /// Seed `team_key` when it holds no issues. Never touches a team that has any:
 /// the demo is for a board nobody has used yet, and duplicating ten issues into
 /// real work would be a worse bug than the empty board it fixes.
-pub fn seed_demo(team_key: string, me: string, db_url: string, keep_cli_token: bool) -> Result<(), string> {
-  let Some(team) = records.find_team(team_key)? else {
+pub fn seed_demo(ctx: pb.Client, team_key: string, me: string, db_url: string, keep_cli_token: bool) -> Result<(), string> {
+  let Some(team) = records.find_team(ctx, team_key)? else {
     return Err(pb.fail(pb.ErrorKind.NotFound, f"--demo: no team {team_key} to seed"))
   };
-  let existing = records.fetch_board_issues(team.id)?
+  let existing = records.fetch_board_issues(ctx, team.id)?
   if !existing.is_empty() {
     fmt.Println(
       f"demo   {team_key} already has {existing.length()} issues; not seeding over them",
@@ -56,27 +55,27 @@ pub fn seed_demo(team_key: string, me: string, db_url: string, keep_cli_token: b
 
   // Issue numbers are assigned in creation order, and this only runs on an
   // empty team, so the cross-references below (DEMO-5 from DEMO-6) are stable.
-  let creator = records.find_member(me)?.map_or("", |m| m.id)
+  let creator = records.find_member(ctx, me)?.map_or("", |m| m.id)
 
   let mut label_ids = Map.new<string, string>()
   for (name, color) in demo_labels() {
-    let id = make_label(team.id, name, color)?
+    let id = make_label(ctx, team.id, name, color)?
     label_ids[name] = id
   }
-  let project = make_project(team.id)?
+  let project = make_project(ctx, team.id)?
 
   for spec in demo_issues(team_key) {
     let labels: Slice<string> = label_ids.get(spec.label).map_or([], |id| [id])
-    make_issue(team.id, creator, project, labels, spec)?
+    make_issue(ctx, team.id, creator, project, labels, spec)?
   }
   for doc in demo_docs(team_key) {
-    make_doc(team.id, doc)?
+    make_doc(ctx, team.id, doc)?
   }
 
   fmt.Println(
     f"demo   seeded {team_key} with 10 issues and 4 docs; start at 'lll doc view start-here'",
   )
-  point_cli_at_demo(db_url, team_key, me, keep_cli_token)?
+  point_cli_at_demo(ctx, db_url, team_key, me, keep_cli_token)?
   fmt.Println(f"demo   done with it? 'lll team archive {team_key}'")
   Ok(())
 }
@@ -91,10 +90,9 @@ pub fn seed_demo(team_key: string, me: string, db_url: string, keep_cli_token: b
 /// Only ever into an EMPTY slot. A configured token belongs to somebody's real
 /// server, and overwriting it to make a toy board convenient would be the worst
 /// trade in this file.
-fn point_cli_at_demo(db_url: string, team_key: string, me: string, keep_cli_token: bool) -> Result<(), string> {
-  // Capture the original token source before up installs its process token.
-  // Reading winning config here would always see env:LLL_TOKEN and overlook
-  // an existing CLI credential from a file.
+fn point_cli_at_demo(ctx: pb.Client, db_url: string, team_key: string, me: string, keep_cli_token: bool) -> Result<(), string> {
+  // `keep_cli_token` was decided from the token source up started with:
+  // the client here already carries the board's own member token.
   if keep_cli_token {
     fmt.Println(
       f"demo   your CLI keeps its configured token. To drive this board instead:
@@ -102,10 +100,9 @@ demo     LLL_URL={db_url} LLL_TEAM={team_key} lll issue list",
     )
     return Ok(())
   }
-  let cfg = config.load()?
-  let _ = set_home_key("url", db_url)?
-  let _ = set_home_key("token", cfg.token)?
-  let _ = set_home_key("team", team_key)?
+  let _ = set_home_key(ctx.settings, "url", db_url)?
+  let _ = set_home_key(ctx.settings, "token", ctx.token())?
+  let _ = set_home_key(ctx.settings, "team", team_key)?
   fmt.Println(f"demo   your CLI is pointed at this board as {me}; try 'lll issue next'")
   Ok(())
 }
@@ -120,12 +117,12 @@ fn demo_labels() -> Slice<(string, string)> {
   ]
 }
 
-fn make_label(team_id: string, name: string, color: string) -> Result<string, string> {
+fn make_label(ctx: pb.Client, team_id: string, name: string, color: string) -> Result<string, string> {
   let payload = match json.Marshal(models.NewLabel { name, color, team: team_id }) {
     Ok(p) => p,
     Err(e) => return Err(f"demo: encoding label {name}: {e}"),
   }
-  let body = pb.post("/api/collections/labels/records", payload as string)?
+  let body = ctx.post("/api/collections/labels/records", payload as string)?
   let mut created = models.Label { .. }
   if let Err(e) = json.Unmarshal(body.bytes(), &created) {
     return Err(f"demo: decoding label {name}: {e}")
@@ -133,7 +130,7 @@ fn make_label(team_id: string, name: string, color: string) -> Result<string, st
   Ok(created.id)
 }
 
-fn make_project(team_id: string) -> Result<string, string> {
+fn make_project(ctx: pb.Client, team_id: string) -> Result<string, string> {
   let new_project = models.NewProject {
     name: "First hour",
     description: "The ten things worth trying before you decide anything.",
@@ -144,7 +141,7 @@ fn make_project(team_id: string) -> Result<string, string> {
     Ok(p) => p,
     Err(e) => return Err(f"demo: encoding project: {e}"),
   }
-  let body = pb.post("/api/collections/projects/records", payload as string)?
+  let body = ctx.post("/api/collections/projects/records", payload as string)?
   let mut created = models.Project { .. }
   if let Err(e) = json.Unmarshal(body.bytes(), &created) {
     return Err(f"demo: decoding project: {e}")
@@ -153,6 +150,7 @@ fn make_project(team_id: string) -> Result<string, string> {
 }
 
 fn make_issue(
+  ctx: pb.Client,
   team_id: string,
   creator: string,
   project: string,
@@ -161,7 +159,7 @@ fn make_issue(
 ) -> Result<(), string> {
   let new_issue = models.NewIssue {
     creator,
-    origin: provenance.capture(),
+    origin: provenance.capture(ctx.settings.env.agent),
     team: team_id,
     title: spec.title,
     state: spec.state,
@@ -176,11 +174,11 @@ fn make_issue(
     Ok(p) => p,
     Err(e) => return Err(f"demo: encoding '{spec.title}': {e}"),
   }
-  let _ = pb.post("/api/collections/issues/records", payload as string)?
+  let _ = ctx.post("/api/collections/issues/records", payload as string)?
   Ok(())
 }
 
-fn make_doc(team_id: string, doc: DemoDoc) -> Result<(), string> {
+fn make_doc(ctx: pb.Client, team_id: string, doc: DemoDoc) -> Result<(), string> {
   let new_doc = models.NewDoc {
     team: team_id,
     slug: doc.slug,
@@ -193,7 +191,7 @@ fn make_doc(team_id: string, doc: DemoDoc) -> Result<(), string> {
     Ok(p) => p,
     Err(e) => return Err(f"demo: encoding doc {doc.slug}: {e}"),
   }
-  let _ = pb.post("/api/collections/docs/records", payload as string)?
+  let _ = ctx.post("/api/collections/docs/records", payload as string)?
   Ok(())
 }
 

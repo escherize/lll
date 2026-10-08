@@ -7,11 +7,11 @@ import "go:encoding/json"
 import "go:html"
 import "go:net/http"
 import "go:net/url"
-import "go:os"
 import "go:strings"
 
 import "pb"
 import "records"
+import "config"
 
 // The board gate (TASK-182): every route the board serves — pages, POSTs,
 // /events, /static — answers only requests that carry the board token.
@@ -31,27 +31,27 @@ import "records"
 // handoff, and a GET that logs in with it is redirected to the same URL
 // without the token so it does not linger in the address bar.
 
-/// The board token, resolved once per process: LLL_BOARD_TOKEN wins, else a
-/// fresh random token is generated and pinned into the environment so every
-/// later read — the gate's checks and the banner's login URL — agrees.
-pub fn resolve_board_token() -> string {
-  let set = os.Getenv("LLL_BOARD_TOKEN")
+/// The board token, resolved once per boot: the one the settings carry
+/// (LLL_BOARD_TOKEN, or a --bind boot's pinned token) wins, else a fresh
+/// random one. `lll up` puts the answer into the settings it hands the
+/// board, so the gate's checks and the banner's login URL agree.
+pub fn resolve_board_token(settings: config.Settings) -> string {
+  let set = settings.board_token()
   if set != "" { return set }
   // crypto/rand.Text: 26 base32 characters, ~130 bits. A board token is
   // compared against every anonymous request that arrives, so it must not be
   // guessable.
-  let made = rand.Text()
-  let _ = os.Setenv("LLL_BOARD_TOKEN", made)
-  made
+  rand.Text()
 }
 
 /// Wrap a page handler with the gate: admit(w, r) decides, and when it says
 /// no it has already written the response (401 page or login redirect).
 pub fn gated(
+  ctx: pb.Client,
   page: fn(http.ResponseWriter, Ref<http.Request>),
 ) -> fn(http.ResponseWriter, Ref<http.Request>) {
   |w: http.ResponseWriter, r: Ref<http.Request>| {
-    if admit(w, r) { page(w, r) }
+    if admit(ctx, w, r) { page(w, r) }
   }
 }
 
@@ -63,8 +63,8 @@ pub fn gated(
 ///
 /// Resolution order (LLL-545): the board token, then a team-scoped link
 /// ("KEY.MAC"), then a member's own token. Anything else is refused.
-fn admit(w: http.ResponseWriter, r: Ref<http.Request>) -> bool {
-  let want = os.Getenv("LLL_BOARD_TOKEN")
+fn admit(ctx: pb.Client, w: http.ResponseWriter, r: Ref<http.Request>) -> bool {
+  let want = ctx.settings.board_token()
   let mut cookie = ""
   if let Some(c) = cookie_named(r, "lll_board") { cookie = c }
   let query = query_param(r, "board_token")
@@ -94,7 +94,7 @@ fn admit(w: http.ResponseWriter, r: Ref<http.Request>) -> bool {
   // revoking it is deleting or narrowing the member, read on every request.
   if query != "" {
     let is_link = team_scope(query, want).is_some()
-    let is_member = !is_link && member_viewer(query).is_some()
+    let is_member = !is_link && member_viewer(ctx, query).is_some()
     if is_link || is_member {
       if r.Method != "GET" {
         refused(w, r)
@@ -104,7 +104,7 @@ fn admit(w: http.ResponseWriter, r: Ref<http.Request>) -> bool {
       // link from any page could swap a signed-in browser onto another
       // member and collect its writes. A query login never replaces a
       // cookie that still resolves to a viewer: the browser stays who it is.
-      if cookie != query && cookie_viewer(cookie, want).is_some() {
+      if cookie != query && cookie_viewer(ctx, cookie, want).is_some() {
         http.Redirect(w, r, without_board_token(r), 303)
         return false
       }
@@ -114,7 +114,7 @@ fn admit(w: http.ResponseWriter, r: Ref<http.Request>) -> bool {
       // is what browsers send to a plain-HTTP LAN or Tailscale board, gets
       // a confirm page whose same-origin POST to /login sets the cookie.
       if !direct_navigation(r) {
-        confirm_login(w, r, query, login_identity(query, want))
+        confirm_login(w, r, query, login_identity(ctx, query, want))
         return false
       }
       let age = if is_link { 7 * 24 * 3600 } else { 365 * 24 * 3600 }
@@ -123,7 +123,7 @@ fn admit(w: http.ResponseWriter, r: Ref<http.Request>) -> bool {
       return false
     }
   }
-  let Some(viewer) = cookie_viewer(cookie, want) else {
+  let Some(viewer) = cookie_viewer(ctx, cookie, want) else {
     refused(w, r)
     return false
   }
@@ -144,9 +144,9 @@ fn direct_navigation(r: Ref<http.Request>) -> bool {
 
 /// Who a sign-in link would make this browser, in words for the confirm
 /// page, so someone who opened another person's link can notice.
-fn login_identity(tok: string, want: string) -> string {
+fn login_identity(ctx: pb.Client, tok: string, want: string) -> string {
   if let Some(key) = team_scope(tok, want) { return f"a read-only viewer of team {key}" }
-  let Some(v) = member_viewer(tok) else { return "an unknown login" }
+  let Some(v) = member_viewer(ctx, tok) else { return "an unknown login" }
   let Some(m) = v.member else { return "an unknown login" }
   let mode = if m.rw { "read-write" } else { "read-only" }
   let teams = if v.teams.is_empty() { "no teams" } else { strings.Join(v.teams, ", ") }
@@ -189,7 +189,7 @@ fn confirm_login(w: http.ResponseWriter, r: Ref<http.Request>, tok: string, who:
 /// plain HTTP included), so only the board's own page can set a cookie
 /// here. The cookie-replace rule holds: a scoped login never replaces a
 /// cookie that still resolves to a viewer.
-pub fn board_login(w: http.ResponseWriter, r: Ref<http.Request>) {
+pub fn board_login(ctx: pb.Client, w: http.ResponseWriter, r: Ref<http.Request>) {
   let mut rc = r.Clone(r.Context())
   if !same_origin_post(rc) {
     http.Error(w, "sign-in must come from this board's own page; open the link again", 403)
@@ -197,7 +197,7 @@ pub fn board_login(w: http.ResponseWriter, r: Ref<http.Request>) {
   }
   let tok = rc.PostFormValue("board_token")
   let next = local_path(rc.PostFormValue("next"))
-  let want = os.Getenv("LLL_BOARD_TOKEN")
+  let want = ctx.settings.board_token()
   let cookie = cookie_named(rc, "lll_board").unwrap_or("")
   if is_board_token(tok, want) {
     set_board_cookie(w, tok, 7 * 24 * 3600)
@@ -206,13 +206,13 @@ pub fn board_login(w: http.ResponseWriter, r: Ref<http.Request>) {
   }
   let age = if team_scope(tok, want).is_some() {
     7 * 24 * 3600
-  } else if member_viewer(tok).is_some() {
+  } else if member_viewer(ctx, tok).is_some() {
     365 * 24 * 3600
   } else {
     refused(w, rc)
     return
   }
-  let signed_in = is_board_token(cookie, want) || cookie_viewer(cookie, want).is_some()
+  let signed_in = is_board_token(cookie, want) || cookie_viewer(ctx, cookie, want).is_some()
   if cookie == tok || !signed_in { set_board_cookie(w, tok, age) }
   http.Redirect(w, rc, next, 303)
 }
@@ -349,22 +349,22 @@ impl ScopedViewer {
 /// after the gate admitted the request, so a credential that stopped
 /// resolving in between (the member was deleted) sees nothing rather than
 /// everything.
-pub fn board_viewer(r: Ref<http.Request>) -> Viewer {
-  let want = os.Getenv("LLL_BOARD_TOKEN")
+pub fn board_viewer(ctx: pb.Client, r: Ref<http.Request>) -> Viewer {
+  let want = ctx.settings.board_token()
   let cookie = cookie_named(r, "lll_board").unwrap_or("")
   if is_board_token(query_param(r, "board_token"), want) || is_board_token(cookie, want) {
     return Viewer.Full
   }
   let none = ScopedViewer { teams: [], member: None }
-  Viewer.Scoped(cookie_viewer(cookie, want).unwrap_or(none))
+  Viewer.Scoped(cookie_viewer(ctx, cookie, want).unwrap_or(none))
 }
 
 /// True unless this request's viewer sees every team: the board token, or
 /// a member cookie whose effective access is every team (LLL-551). Pages use
 /// it to decide whether to withhold other teams' labels and projects and
 /// members outside the roster.
-pub fn is_scoped(r: Ref<http.Request>) -> bool {
-  viewer_is_scoped(board_viewer(r))
+pub fn is_scoped(ctx: pb.Client, r: Ref<http.Request>) -> bool {
+  viewer_is_scoped(board_viewer(ctx, r))
 }
 
 /// is_scoped for a viewer already resolved.
@@ -376,11 +376,11 @@ pub fn viewer_is_scoped(v: Viewer) -> bool {
 }
 
 /// A cookie that is a team-scoped link or a member token, as its viewer.
-fn cookie_viewer(cookie: string, want: string) -> Option<ScopedViewer> {
+fn cookie_viewer(ctx: pb.Client, cookie: string, want: string) -> Option<ScopedViewer> {
   if let Some(key) = team_scope(cookie, want) {
     return Some(ScopedViewer { teams: [key], member: None })
   }
-  member_viewer(cookie)
+  member_viewer(ctx, cookie)
 }
 
 #[json]
@@ -394,9 +394,9 @@ struct AccessReply { id: string, name: string, rw: bool, all: bool, teams: Slice
 /// fails), and /api/lll/access answers the member's effective access, so a
 /// bot token used as a cookie gets its owner's intersection. Only something
 /// shaped like an unexpired auth JWT costs the round trip.
-fn member_viewer(tok: string) -> Option<ScopedViewer> {
+fn member_viewer(ctx: pb.Client, tok: string) -> Option<ScopedViewer> {
   if pb.token_subject(tok).is_none() || pb.token_expired(tok) { return None }
-  let Ok(body) = pb.get_as("/api/lll/access", tok) else { return None }
+  let Ok(body) = ctx.get_as("/api/lll/access", tok) else { return None }
   let mut reply = AccessReply { .. }
   if json.Unmarshal(body.bytes(), &reply).is_err() { return None }
   if reply.id == "" { return None }
