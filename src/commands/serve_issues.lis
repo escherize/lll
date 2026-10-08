@@ -121,13 +121,13 @@ fn issues_page(w: http.ResponseWriter, r: Ref<http.Request>, team_id: string, me
   let mut sort = raw.sort
   if sort == "" { sort = "-updated" }
   if let Err(e) = query.sort(sort) {
-    err = e
+    err = pb.plain(e)
     sort = "-updated"
   }
 
   let mut filters = view_filters(raw)
   if let Err(e) = filters.validate() {
-    err = e
+    err = pb.plain(e)
     filters.state = []
   }
   let state = filters.one_state()
@@ -136,7 +136,7 @@ fn issues_page(w: http.ResponseWriter, r: Ref<http.Request>, team_id: string, me
   let roster = match roster_for(r, team_id) {
     Ok(found) => found,
     Err(e) => {
-      http.Error(w, e, 500)
+      http.Error(w, pb.plain(e), 500)
       return
     },
   }
@@ -146,7 +146,7 @@ fn issues_page(w: http.ResponseWriter, r: Ref<http.Request>, team_id: string, me
     match roster_member(roster, assignee) {
       Ok(m) => { assignee_id = m.id },
       Err(e) => {
-        err = e
+        err = pb.plain(e)
         assignee = ""
       },
     }
@@ -158,7 +158,7 @@ fn issues_page(w: http.ResponseWriter, r: Ref<http.Request>, team_id: string, me
     match records.resolve_label(team_id, label) {
       Ok(l) => { label_id = l.id },
       Err(e) => {
-        err = e
+        err = pb.plain(e)
         label = ""
       },
     }
@@ -170,7 +170,7 @@ fn issues_page(w: http.ResponseWriter, r: Ref<http.Request>, team_id: string, me
     match records.resolve_project(team_id, project) {
       Ok(p) => { project_id = p.id },
       Err(e) => {
-        err = e
+        err = pb.plain(e)
         project = ""
       },
     }
@@ -182,7 +182,7 @@ fn issues_page(w: http.ResponseWriter, r: Ref<http.Request>, team_id: string, me
   let list = match fetch_issue_rows(team_id, state, assignee_id, label_id, project_id, sort) {
     Ok(l) => models.IssueList { items: issues_for(r, l.items).map(|x| roster.issue(x)), ..l },
     Err(e) => {
-      http.Error(w, e, 500)
+      http.Error(w, pb.plain(e), 500)
       return
     },
   }

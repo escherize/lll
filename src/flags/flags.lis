@@ -1,5 +1,7 @@
 import "go:strings"
 
+import "pb"
+
 /// One source of truth for a CLI flag (TASK-127). The verb's parser loop,
 /// its --help output and the shell completions all read this table, so a
 /// flag is declared exactly once and the three surfaces cannot drift.
@@ -53,7 +55,7 @@ pub struct Parsed {
 fn repeat_ok(fl: Flag, existing: Slice<string>) -> Result<(), string> {
   if fl.repeat || existing.is_empty() { return Ok(()) }
   Err(
-    f"{fl.name} may only be given once (got {existing.length() + 1}); it takes a single value",
+    usage_error(f"{fl.name} may only be given once (got {existing.length() + 1}); it takes a single value"),
   )
 }
 
@@ -114,7 +116,7 @@ pub fn parse_n(
   while i < args.length() {
     let arg = args[i]
     if options_ended {
-      if pos.length() >= max_positional { return Err(f"unexpected argument: '{arg}'") }
+      if pos.length() >= max_positional { return Err(usage_error(f"unexpected argument: '{arg}'")) }
       pos = pos.append(arg)
       i += 1
       continue
@@ -132,14 +134,14 @@ pub fn parse_n(
       let parts = strings.SplitN(arg, "=", 2)
       let spelling = parts[0]
       let Some(fl) = spec.find(|f| spells(f, spelling)) else {
-        if spelling == "--team" { return Err(team_scope_error(arg, parts[1], usage)) }
-        if spelling == "--url" { return Err(url_scope_error(arg, parts[1], usage)) }
-        return Err(unknown_flag(arg, usage, spec))
+        if spelling == "--team" { return Err(usage_error(team_scope_error(arg, parts[1], usage))) }
+        if spelling == "--url" { return Err(usage_error(url_scope_error(arg, parts[1], usage))) }
+        return Err(usage_error(unknown_flag(arg, usage, spec)))
       }
       // A boolean given a value is a mistake, not a truthy string: `--json=0`
       // would otherwise read as "json on". Reject it naming the flag.
       if !fl.value {
-        return Err(f"{spelling} takes no value")
+        return Err(usage_error(f"{spelling} takes no value"))
       }
       repeat_ok(fl, vals.get(fl.name).unwrap_or([]))?
       vals[fl.name] = vals.get(fl.name).unwrap_or([]).append(parts[1])
@@ -147,13 +149,13 @@ pub fn parse_n(
       continue
     }
     let Some(fl) = spec.find(|f| spells(f, arg)) else {
-      if arg == "--team" { return Err(team_scope_error(arg, args.get(i + 1).unwrap_or("KEY"), usage)) }
-      if arg == "--url" { return Err(url_scope_error(arg, args.get(i + 1).unwrap_or("URL"), usage)) }
+      if arg == "--team" { return Err(usage_error(team_scope_error(arg, args.get(i + 1).unwrap_or("KEY"), usage))) }
+      if arg == "--url" { return Err(usage_error(url_scope_error(arg, args.get(i + 1).unwrap_or("URL"), usage))) }
       if arg.starts_with("-") || max_positional == 0 {
-        return Err(unknown_flag(arg, usage, spec))
+        return Err(usage_error(unknown_flag(arg, usage, spec)))
       }
       if pos.length() >= max_positional {
-        return Err(f"unexpected argument: '{arg}'")
+        return Err(usage_error(f"unexpected argument: '{arg}'"))
       }
       pos = pos.append(arg)
       i += 1
@@ -161,7 +163,7 @@ pub fn parse_n(
     }
     if fl.value {
       let Some(val) = args.get(i + 1) else {
-        return Err(f"{arg} requires a value")
+        return Err(usage_error(f"{arg} requires a value"))
       }
       repeat_ok(fl, vals.get(fl.name).unwrap_or([]))?
       vals[fl.name] = vals.get(fl.name).unwrap_or([]).append(val)
@@ -173,7 +175,7 @@ pub fn parse_n(
   }
   for fl in spec {
     if fl.required && vals.get(fl.name).is_none() {
-      return Err(f"usage: {usage}")
+      return Err(usage_error(f"usage: {usage}"))
     }
   }
   Ok(Parsed { spec, vals, pos })
@@ -219,6 +221,12 @@ fn url_scope_error(arg: string, url: string, usage: string) -> string {
 /// collide with it and no user can type it.
 pub fn help_marker() -> string {
   "\u{1}help\u{1}"
+}
+
+/// A bad command line: exit 2 (LLL-645). Commands that refuse their own
+/// arguments after parsing use it too.
+pub fn usage_error(message: string) -> string {
+  pb.fail(pb.ErrorKind.Usage, message)
 }
 
 /// The help text for a verb: its usage line, then the flags block the spec
@@ -466,11 +474,11 @@ pub fn dispatch(
     for (old, new) in retired_verbs() {
       if old == verb && resolve_command(cmds, new).is_some() {
         return Err(
-          f"unknown {noun} command: '{verb}' - did you mean 'lll {noun} {new}'? (see 'lll {noun} --help')",
+          usage_error(f"unknown {noun} command: '{verb}' - did you mean 'lll {noun} {new}'? (see 'lll {noun} --help')"),
         )
       }
     }
-    return Err(f"unknown {noun} command: '{verb}' (see 'lll {noun} --help')")
+    return Err(usage_error(f"unknown {noun} command: '{verb}' (see 'lll {noun} --help')"))
   }
   // A verb with its own page answers --help with it; the generic parse-time
   // help would otherwise replace a written page with a bare flags block.
@@ -581,10 +589,10 @@ pub fn tokens(spec: Slice<Flag>) -> Slice<string> {
 /// One entity name, supplied positionally or by its named flag.
 pub fn entity_name(p: Parsed, flag: string, usage: string) -> Result<string, string> {
   if p.first() != "" && p.given(flag) {
-    return Err(f"give the name as a positional argument or {flag}, not both\nusage: {usage}")
+    return Err(usage_error(f"give the name as a positional argument or {flag}, not both\nusage: {usage}"))
   }
   let value = if p.given(flag) { p.one(flag) } else { p.first() }
-  if strings.TrimSpace(value) == "" { return Err(f"a name is required\nusage: {usage}") }
+  if strings.TrimSpace(value) == "" { return Err(usage_error(f"a name is required\nusage: {usage}")) }
   Ok(value)
 }
 
@@ -608,13 +616,13 @@ pub fn extract_team(args: Slice<string>, start: int, spec: Slice<Flag>) -> Resul
     }
     if arg == "--team" || arg.starts_with("--team=") {
       let value = if arg == "--team" {
-        let Some(value) = args.get(i + 1) else { return Err("--team requires a team key") }
+        let Some(value) = args.get(i + 1) else { return Err(usage_error("--team requires a team key")) }
         i += 1
         value
       } else {
         strings.TrimPrefix(arg, "--team=")
       }
-      if strings.TrimSpace(value) == "" { return Err("--team requires a nonempty team key") }
+      if strings.TrimSpace(value) == "" { return Err(usage_error("--team requires a nonempty team key")) }
       team = Some(value)
     } else {
       cleaned = cleaned.append(arg)

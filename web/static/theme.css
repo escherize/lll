@@ -1775,6 +1775,8 @@ input:focus, textarea:focus, select:focus {
 .card-claim { margin-left: 8px; font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
 .claim-controls { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; min-width: 0; }
 .claim-controls button { max-width: 100%; white-space: normal; overflow-wrap: anywhere; }
+#release-form { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; max-width: 100%; }
+.claim-reason { width: 100%; font-size: 12px; }
 .claim-age { color: var(--text-2); font-size: 11px; }
 
 .error-summary { white-space: pre-line; }

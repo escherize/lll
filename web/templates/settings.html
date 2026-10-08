@@ -194,8 +194,8 @@
 <span class="rg-title">{{.Name}}</span>
 <span class="set-usage">{{.IssuesText}}{{if .Archived}} · archived{{end}}</span>
 <input name="admin_password" type="password" placeholder="Admin password" autocomplete="off" aria-label="Admin password" class="set-second">
-{{if .Archived}}<input type="hidden" name="archived" value="0"><button type="button" class="btn" data-on:click="@post('/settings/teams/archive', {contentType: 'form'})">Unarchive</button>
-{{else}}<input type="hidden" name="archived" value="1"><button type="button" class="btn" data-on:click="confirm('Archive ' + el.form.dataset.name + '? Lists and the rail hide it; its board stays readable.') && @post('/settings/teams/archive', {contentType: 'form'})">Archive</button>
+{{if .Archived}}<input type="hidden" name="archived" value="0"><button type="button" class="btn" data-on:click="@post('/t/{{$.TeamKey}}/settings/teams/archive', {contentType: 'form'})">Unarchive</button>
+{{else}}<input type="hidden" name="archived" value="1"><button type="button" class="btn" data-on:click="confirm('Archive ' + el.form.dataset.name + '? Lists and the rail hide it; its board stays readable.') && @post('/t/{{$.TeamKey}}/settings/teams/archive', {contentType: 'form'})">Archive</button>
 {{end}}</form></div>
 {{end}}</div>
 </section>{{end}}
@@ -234,7 +234,7 @@
 <input name="password" type="password" placeholder="Password" autocomplete="new-password" aria-label="New password" class="set-second">
 <input name="password_confirm" type="password" placeholder="Confirm" autocomplete="new-password" aria-label="Confirm the new password" class="set-second">
 <input name="admin_password" type="password" placeholder="Admin password" autocomplete="off" aria-label="Admin password" class="set-second">
-<button type="button" class="btn" data-on:click="@post('/settings/access/member', {contentType: 'form'})">Set credential</button>
+<button type="button" class="btn" data-on:click="@post('/t/{{$.TeamKey}}/settings/access/member', {contentType: 'form'})">Set credential</button>
 </form>
 </section>{{end}}
 

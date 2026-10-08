@@ -31,7 +31,7 @@ pub fn finding_commands() -> Slice<flags.Command> {
     flags.Command {
       name: "near",
       summary: "findings about a file or directory, exact path matches first",
-      spec: flags.with_team([]),
+      spec: flags.with_team([flags.Flag { name: "--json", help: "print the findings as a JSON list", .. }]),
       positional: "<path>",
       run: finding_near,
       ..
@@ -202,9 +202,10 @@ pub fn findings_for_issue(issue: models.Issue) -> Result<Slice<models.Doc>, stri
 fn finding_near(input: flags.CommandInput) -> Result<(), string> {
   let p = input.parsed
   let path = p.first()
-  if path == "" { return Err("usage: lll finding near <path>") }
+  if path == "" { return Err(flags.usage_error("usage: lll finding near <path>")) }
   let findings = fetch_findings(current_team()?.id)?
   let hits = findings_near(findings, path)
+  if p.given("--json") { return print_list_json(hits, whole_list(hits.length()), "findings") }
   if hits.is_empty() {
     fmt.Println(f"No findings for {path}.")
     return Ok(())
@@ -237,11 +238,8 @@ fn finding_list(input: flags.CommandInput) -> Result<(), string> {
   // so a limit is a post-filter slice — honest here because there is no
   // server-side page to ask for.
   if limit > 0 { findings = findings[..limit] }
-  if p.given("--json") { return print_json(findings, "findings") }
-  if findings.is_empty() {
-    fmt.Println("No findings.")
-    return Ok(())
-  }
+  if p.given("--json") { return print_list_json(findings, whole_list(findings.length()), "findings") }
+  if findings.is_empty() { return say_empty("findings") }
   print_finding_lines(findings)
   Ok(())
 }
@@ -306,7 +304,7 @@ fn finding_refute_spec() -> Slice<flags.Flag> {
 fn finding_confirm(input: flags.CommandInput) -> Result<(), string> {
   let p = input.parsed
   let slug = p.first()
-  if slug == "" { return Err("usage: lll finding confirm SLUG") }
+  if slug == "" { return Err(flags.usage_error("usage: lll finding confirm SLUG")) }
   let team = current_team()?
   let Some(d) = find_doc(team, slug)? else {
     return Err(unknown_doc(team, slug))
@@ -322,7 +320,7 @@ fn finding_confirm(input: flags.CommandInput) -> Result<(), string> {
 fn finding_refute(input: flags.CommandInput) -> Result<(), string> {
   let p = input.parsed
   let slug = p.first()
-  if slug == "" { return Err("usage: lll finding refute SLUG -b why") }
+  if slug == "" { return Err(flags.usage_error("usage: lll finding refute SLUG -b why")) }
   let why = strings.TrimSpace(value_or_stdin(p.one("-b"), "-b")?)
   if why == "" {
     return Err("a refutation needs the why: 'lll finding refute SLUG -b why' ('-b -' reads it from stdin)")

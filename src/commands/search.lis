@@ -28,11 +28,11 @@ pub fn search_cmd(args: Slice<string>) -> Result<(), string> {
     words = words.append(p.nth(i))
   }
   let q = strings.TrimSpace(strings.Join(words, " "))
-  if q == "" { return Err(f"what to search for?\nusage: {usage}") }
+  if q == "" { return Err(flags.usage_error(f"what to search for?\nusage: {usage}")) }
   let mut limit = 10
   if p.given("--limit") {
     let Ok(n) = strconv.Atoi(p.one("--limit")) else {
-      return Err(f"--limit takes a number, got '{p.one("--limit")}'")
+      return Err(flags.usage_error(f"--limit takes a number, got '{p.one("--limit")}'"))
     }
     limit = n
   }
@@ -41,11 +41,8 @@ pub fn search_cmd(args: Slice<string>) -> Result<(), string> {
   let team = current_team()?
   let corpus = cached_corpus(team.id, team.key, p.given("--refresh"), !only_docs, !only_issues)?
   let hits = search.rank(corpus, q, limit)
-  if p.given("--json") { return print_json(hits, "hits") }
-  if hits.is_empty() {
-    fmt.Println(f"No match for '{q}' in {team.key}'s issues, comments or docs.")
-    return Ok(())
-  }
+  if p.given("--json") { return print_list_json(hits, whole_list(hits.length()), "hits") }
+  if hits.is_empty() { return say_empty(f"match for '{q}' in {team.key}'s issues, comments or docs") }
   print_hits(hits)
   Ok(())
 }

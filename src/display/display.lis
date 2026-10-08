@@ -57,6 +57,15 @@ pub fn absolute(timestamp: string) -> string {
     .map_or(timestamp, |t| t.UTC().Format("2006-01-02 15:04 UTC"))
 }
 
+/// A PocketBase timestamp ("2026-08-28 18:20:00.123Z") in RFC3339 with
+/// milliseconds ("2026-08-28T18:20:00.123Z"), the form every --json output
+/// prints (LLL-645). Unparseable input, "" included, is returned as-is.
+pub fn rfc3339(timestamp: string) -> string {
+  time
+    .Parse("2006-01-02 15:04:05.999Z", timestamp)
+    .map_or(timestamp, |t| t.UTC().Format("2006-01-02T15:04:05.000Z07:00"))
+}
+
 /// Render a PocketBase timestamp ("2026-08-28 18:20:00.123Z") as a relative
 /// age like "3h ago". Unparseable input is returned as-is.
 pub fn relative(timestamp: string) -> string {
@@ -87,6 +96,14 @@ pub fn member_name(id: string, name: string, empty: string) -> string {
   if name != "" { return name }
   if id != "" { return hidden_member() }
   empty
+}
+
+/// A comment's byline: "system" when the server wrote it on its own (LLL-654:
+/// the claim-expiry note, whose body names the holder), else the
+/// author as member_name reads it, with its session label.
+pub fn comment_byline(kind: string, id: string, name: string, agent: string, empty: string) -> string {
+  if kind == "system" { return "system" }
+  byline(member_name(id, name, empty), agent)
 }
 
 /// Pure core of relative(): seconds-ago -> "3h ago".

@@ -100,7 +100,7 @@ pub fn join_redeem(w: http.ResponseWriter, r: Ref<http.Request>) {
   let body = match pb.post_anon("/api/lll/invites/redeem", payload as string) {
     Ok(b) => b,
     Err(e) => {
-      let status = pb.response_status(e)
+      let status = pb.classify(e).status
       // A bad name keeps the form: the code is still alive. So does a
       // server failure, which rolled the redemption back. Every other
       // refusal (unknown, used, expired, void) is final for this link.

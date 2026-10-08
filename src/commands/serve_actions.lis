@@ -170,10 +170,7 @@ fn respond_flash(w: http.ResponseWriter, html: string) {
 /// unchecked: the form only ever offers ids that exist, and PB rejects a
 /// bogus one with a message the flash strip already knows how to show.
 /// Re-validating here would mean three more fetches per create.
-fn create_write(
-  r: mut Ref<http.Request>,
-  team_id: string,
-) -> Result<string, string> {
+fn create_write(r: mut Ref<http.Request>) -> Result<string, string> {
   let title = strings.TrimSpace(r.PostFormValue("title"))
   if title == "" { return Err("title is required") }
   // Absent state means todo, the same default `lll issue create` uses, so
@@ -181,31 +178,26 @@ fn create_write(
   let mut state = r.PostFormValue("state")
   if state == "" { state = "todo" }
   let _ = query.state(state)?
-  // The board posts the team it is viewing (TASK-198); a request naming
-  // none — a bare `curl -d title=...` — keeps landing in the boot team.
-  let mut team = team_id
+  // The board posts the team it is viewing (TASK-198). A request naming
+  // none is refused (LLL-664): it used to land in whatever team the server
+  // started with, which is nobody's choice.
   let team_key = strings.TrimSpace(r.PostFormValue("team"))
+  if team_key == "" {
+    return Err("a new issue names its team: the board's form sends it, so reload the page")
+  }
   let who = acting_as(r)?
-  // A scoped viewer names one of its own teams; the boot-team fallback is
-  // not its to use, and a hidden team answers like a missing one.
+  // A scoped viewer names one of its own teams; a hidden team answers like
+  // a missing one.
   if let Some(v) = who.scope {
     if !v.sees(team_key) { return Err(unknown_team(team_key)) }
   }
-  if team_key != "" {
-    let Some(t) = records.find_team(team_key)? else {
-      return Err(unknown_team(team_key))
-    }
-    // New issues do not land in an archived team (TASK-210), same refusal as
-    // `lll issue create`. The boot-team fallback is checked fresh too: teams
-    // archive from /settings while the server runs.
-    require_active_team(t)?
-    team = t.id
-  } else {
-    require_active_team(shell_team(team))?
+  let Some(t) = records.find_team(team_key)? else {
+    return Err(unknown_team(team_key))
   }
-  if team == "" {
-    return Err("no team configured: set LLL_TEAM or 'team' in .lll.toml")
-  }
+  // New issues do not land in an archived team (TASK-210), same refusal as
+  // `lll issue create`.
+  require_active_team(t)?
+  let team = t.id
   let mut priority = 0
   let prio_slug = r.PostFormValue("priority")
   if prio_slug != "" {
@@ -343,19 +335,33 @@ fn reorder_sort(
 /// double click or a stale page converges on what the user sees instead of
 /// flipping the row out from under them. Both directions are idempotent.
 fn favorite_write(r: mut Ref<http.Request>) -> Result<string, string> {
+  let caller = workspace_writer(r)?
   let key = r.FormValue("key")
   let on = r.FormValue("on") == "true"
   let issue = records.fetch_issue(key)?
   let existing = fetch_favorite(issue.id)?
   if on {
     if existing.is_some() { return Ok("") }
-    // member stays empty: workspace-wide until auth (task-32) lands.
+    // member stays empty: a star belongs to the workspace.
     let payload = marshal(models.NewFavorite { issue: issue.id, .. })?
-    let _ = pb.post("/api/collections/favorites/records", payload)?
+    let _ = pb.send_as(caller, "POST", "/api/collections/favorites/records", payload, "application/json")?
   } else if let Some(fav) = existing {
-    let _ = pb.delete(f"/api/collections/favorites/records/{fav.id}")?
+    let _ = pb.send_as(caller, "DELETE", f"/api/collections/favorites/records/{fav.id}", "", "application/json")?
   }
   Ok("")
+}
+
+/// Who writes a workspace row: a favorite or a saved view (LLL-664). Both
+/// carry no member, so they belong to the whole workspace, and only the
+/// board login, which sees every team, changes them; its writes are the
+/// board member's. Any other login is refused here, not written as the
+/// process: the gate closes both routes to it already, and this keeps that
+/// true if the gate's allowlist ever opens them.
+fn workspace_writer(r: Ref<http.Request>) -> Result<pb.Caller, string> {
+  match board_viewer(r) {
+    Viewer.Full => Ok(pb.Caller.Process),
+    Viewer.Scoped(_) => Err("favorites and saved views belong to the whole workspace; only the board login changes them"),
+  }
 }
 
 fn priority_write(r: mut Ref<http.Request>) -> Result<string, string> {
@@ -435,10 +441,14 @@ fn assignee_write(r: mut Ref<http.Request>) -> Result<string, string> {
   }
   require_active_team(issue.expand.team)?
   let observed = claims.observed_id(issue.id)?
-  // Force, as the Release button sends it (LLL-516): a person who picks a new
-  // assignee on a page that names the holder has decided to take the hold.
-  // A forced clear comments on the issue, naming the board's member.
-  let _ = claims.update_assignment(who.caller, issue.id, observed, marshal(IssueAssigneePatch { assignee: id })?, "", true, "")?
+  // Never forced (LLL-662): clearing the assignee releases the claim, so the
+  // picker clears only the viewer's own hold. Taking anyone else's goes
+  // through the Release form, which asks for a reason.
+  let _ = claims.update_assignment(who.caller, issue.id, observed, marshal(IssueAssigneePatch { assignee: id })?, "", false, "").map_err(|e| {
+    if pb.classify(e).code == "needs_force" {
+      f"{strings.TrimSuffix(pb.display_error(e).summary, ".")} - release it with a reason first (the Release form on the issue)"
+    } else { e }
+  })?
   Ok("")
 }
 
@@ -500,8 +510,7 @@ fn comment_write(r: mut Ref<http.Request>) -> Result<string, string> {
   // leaves the draft exactly where it was. `mode replace` rather than a morph
   // because a morph retains the live value, which is the thing being cleared.
   let html = render("comment-composer", f"{issue.expand.team.key}-{issue.number}")?
-  let lines = html.split("\n").map(|line| f"data: elements {line}")
-  Ok(f"event: datastar-patch-elements\ndata: mode replace\ndata: selector #comment-form\n{strings.Join(lines, "\n")}\n\n")
+  Ok(replace_event("#comment-form", html))
 }
 
 /// Save the board's current view under a name (TASK-94, half two): one row
@@ -514,6 +523,7 @@ fn comment_write(r: mut Ref<http.Request>) -> Result<string, string> {
 /// the endpoint is curl-able like every other, and a view must always be
 /// exactly the URL it will navigate to.
 fn views_save(w: http.ResponseWriter, r: mut Ref<http.Request>) -> Result<string, string> {
+  let caller = workspace_writer(r)?
   let name = strings.TrimSpace(r.PostFormValue("name"))
   if name == "" { return Err("a view needs a name") }
   if name.length() > 80 { return Err("view names are capped at 80 characters") }
@@ -529,11 +539,11 @@ fn views_save(w: http.ResponseWriter, r: mut Ref<http.Request>) -> Result<string
   if existing.items.any(|v| v.name == name) {
     return Err(f"a view named '{name}' already exists")
   }
-  // member stays empty: workspace-wide until auth (task-32) lands.
+  // member stays empty: a saved view belongs to the workspace.
   let payload = marshal(
     models.NewView { name, query: strings.TrimPrefix(query_str, "?"), .. },
   )?
-  let _ = pb.post("/api/collections/views/records", payload)?
+  let _ = pb.send_as(caller, "POST", "/api/collections/views/records", payload, "application/json")?
   // LLL-375: saving a view makes it this browser's view — the same cookie a
   // board GET would write, so a bare reload honors what was just saved even
   // if the page's own cookie went stale. The team key rides the form (the
@@ -564,16 +574,23 @@ fn claim_write(r: mut Ref<http.Request>) -> Result<string, string> {
   Ok("")
 }
 
-/// Always forced (LLL-512): the button names whose claim it releases, so a
-/// person clicking it has said so. The server skips the comment when the
-/// board's own member is the holder, and otherwise records the release under
-/// that member - the board login does not identify the person clicking.
+/// The viewer releases as itself (LLL-662): a member login as that member,
+/// the board token as the board's member. The holder's release needs nothing
+/// more. Anyone else's is forced, and force comes only with a reason typed
+/// into the form, which the server records in its comment; without one the
+/// server's refusal is the answer. The live fragment is shared by every
+/// viewer, so the form cannot know who is looking; the server decides.
 fn release_write(r: mut Ref<http.Request>) -> Result<string, string> {
   let who = acting_as(r)?
   let issue = who.issue(r.FormValue("key"))?
   require_active_team(issue.expand.team)?
   let observed = r.FormValue("claim_id")
   if observed == "" { return Err("The claim changed; refresh before releasing it.") }
-  let _ = claims.release(who.caller, issue.id, observed, "", true, "")?
+  let reason = strings.TrimSpace(r.FormValue("reason"))
+  let _ = claims.release(who.caller, issue.id, observed, "", reason != "", reason).map_err(|e| {
+    if pb.classify(e).code == "needs_force" {
+      f"{strings.TrimSuffix(pb.display_error(e).summary, ".")} - type a reason to release it anyway; it is recorded in a comment on the issue"
+    } else { e }
+  })?
   Ok("")
 }

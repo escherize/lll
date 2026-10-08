@@ -103,10 +103,11 @@ pub fn login(args: Slice<string>) -> Result<(), string> {
   // --url is the fresh-machine path (TASK-195): authenticate against the url
   // given, then persist it next to the token, so machine setup is exactly one
   // command. Without it, login rides whatever url is already configured.
-  // Applied for the whole command, not just --create: login_failed reads
-  // LLL_ADMIN_EMAIL to recognise the admin identity, and it has to see the
+  // Read for the whole command, not just --create: login_failed compares
+  // the admin email to recognise the admin identity, and it has to see the
   // flags too or the flag-users get the generic advice.
-  apply_admin_flags(p.one("--admin-email"), p.one("--admin-password"))?
+  let admin = given_admin_login(p)?
+  let admin_email = admin_login_email(admin)
   let target = strings.TrimSuffix(strings.TrimSpace(p.one("--url")), "/")
   if p.given("--url") && !strings.HasPrefix(target, "http://") && !strings.HasPrefix(target, "https://") {
     return Err(
@@ -183,7 +184,7 @@ pub fn login(args: Slice<string>) -> Result<(), string> {
     // superuser — same address, and whatever password it typed. Nothing in
     // the flow objected. Refuse it: this is the one email --create must not
     // take, and the person running it already has a real one.
-    if email == os.Getenv("LLL_ADMIN_EMAIL") {
+    if email == admin_email && admin_email != "" {
       return Err(
         f"{email} is the server's admin identity, not a member — creating a member with it
 would put a second account on that address. --create makes YOUR login: pass
@@ -194,7 +195,7 @@ would put a second account on that address. --create makes YOUR login: pass
     // sentence rather than a raw validation blob from the create round trip.
     if password.length() < 8 {
       return Err(
-        f"--create needs a password of at least 8 characters (got {password.length()})",
+        flags.usage_error(f"--create needs a password of at least 8 characters (got {password.length()})"),
       )
     }
     let name = if p.one("--name") != "" {
@@ -202,7 +203,7 @@ would put a second account on that address. --create makes YOUR login: pass
     } else {
       strings.Split(email, "@")[0]
     }
-    create_for_login(name, email, password, target)?
+    create_for_login(name, email, password, target, admin)?
     fmt.Println(f"created member {name} <{email}>")
   }
 
@@ -222,7 +223,7 @@ would put a second account on that address. --create makes YOUR login: pass
   }
   let body = match sent {
     Ok(b) => b,
-    Err(e) => return Err(login_failed(e, email, target)),
+    Err(e) => return Err(login_failed(e, email, target, admin_email)),
   }
   let mut auth = models.AuthResponse { .. }
   if let Err(e) = json.Unmarshal(body.bytes(), &auth) {
@@ -256,11 +257,12 @@ fn token_identity(target: string, tok: string) -> Result<(string, bool), string>
   let body = match pb.get_as("/api/lll/access", tok) {
     Ok(b) => b,
     Err(e) => {
-      let status = pb.response_status(e)
+      let status = pb.classify(e).status
       if status == 401 || status == 403 {
-        return Err(
+        return Err(pb.fail(
+          pb.ErrorKind.Auth,
           "the server did not accept that token as a member token (expired, revoked, mistyped, or an administrator token); get a fresh one from the board's /me page ('Show my CLI login') or 'lll token create NAME'",
-        )
+        ))
       }
       return Err(e)
     },
@@ -348,7 +350,7 @@ fn settle_team(read_only: bool) {
   let teams = match records.list_teams() {
     Ok(teams) => teams,
     Err(e) => {
-      fmt.Println(f"authenticated, but could not verify team setup: {e}\nnext: lll team list, then lll attach --key KEY")
+      fmt.Println(f"authenticated, but could not verify team setup: {pb.plain(e)}\nnext: lll team list, then lll attach --key KEY")
       return
     },
   }
@@ -411,7 +413,10 @@ Someone else deployed it? Ask them for 'lll member invite <name> --email <you>'.
 
 #[json]
 struct WhoamiIdentity {
+  id: string,
   name: string,
+  // "person" or "bot" for a member; "" for an administrator (LLL-407).
+  kind: string,
   email: string,
   #[json("collectionName")]
   collection: string,
@@ -446,6 +451,22 @@ fn access_line(me: WhoamiIdentity, body: string) -> Result<Option<string>, strin
   Ok(Some(f"{describe_access(eff.scope, eff.mode, keys)} (capped by its owner, {owner.name})"))
 }
 
+/// `lll whoami --json` (LLL-645): the facts the text prints, by name.
+/// `access` is the text's access line, "" when the server reports none.
+#[json]
+struct WhoamiJson {
+  id: string,
+  name: string,
+  email: string,
+  kind: string,
+  server: string,
+  team: string,
+  token_source: string,
+  scope: string,
+  mode: string,
+  access: string,
+}
+
 /// The refusal for an argument `lll whoami` does not take. A `--team` here is
 /// a guess about how context works (LLL-493, fleet case 05): the answer names
 /// the bare invocation that DOES report context, and the house one-command
@@ -476,16 +497,20 @@ pub fn whoami(args: Slice<string>) -> Result<(), string> {
         "lll whoami - show which member or administrator, server and team this machine is acting as
 
 Usage:
-  lll whoami
+  lll whoami [--json]
+
+--json prints the same facts as one JSON object.
 
 Confirms the stored token against the server, including administrator tokens.
 'lll config list' shows where each value came from; 'lll login' replaces the
-token with a member session, and 'lll bot bot-NAME' provisions a bot identity.",
+token with a member session, and 'lll bot create bot-NAME' provisions a bot identity.",
       )
       return Ok(())
     }
-    return Err(whoami_arg_error(flag, args))
+    if flag != "--json" { return Err(whoami_arg_error(flag, args)) }
+    if let Some(extra) = args.get(3) { return Err(whoami_arg_error(extra, args)) }
   }
+  let json_mode = args.get(2) == Some("--json")
   let (cfg, src) = config.load_traced()?
   // NOT auth-refresh, which this used to POST. A refresh is refused for every
   // non-refreshable token - and `lll token create` mints exactly those, the
@@ -519,6 +544,14 @@ token with a member session, and 'lll bot bot-NAME' provisions a bot identity.",
   }
   let administrator = me.collection == "_superusers"
   let name = if administrator { "superuser" } else { me.name }
+  if json_mode {
+    let kind = if administrator { "administrator" } else { me.kind }
+    let access = access_line(me, body)?.unwrap_or("")
+    return print_json(WhoamiJson {
+      id: me.id, name, email: me.email, kind, server: cfg.url, team: cfg.team,
+      token_source: src.token, scope: me.scope, mode: me.mode, access,
+    }, "whoami")
+  }
   fmt.Println(f"{name} <{me.email}>")
   fmt.Println(f"server  {cfg.url}")
   let team = if cfg.team == "" { "(none — run 'lll attach')" } else { cfg.team }
@@ -528,7 +561,7 @@ token with a member session, and 'lll bot bot-NAME' provisions a bot identity.",
     fmt.Println(f"access  {access}")
   }
   if administrator {
-    fmt.Println("Administrator tokens do not name a member. Use 'lll login' for a member session or 'lll bot bot-NAME' for a bot identity.")
+    fmt.Println("Administrator tokens do not name a member. Use 'lll login' for a member session or 'lll bot create bot-NAME' for a bot identity.")
   }
   Ok(())
 }
@@ -536,7 +569,7 @@ token with a member session, and 'lll bot bot-NAME' provisions a bot identity.",
 /// Provision the member `lll login --create` is about to authenticate as.
 ///
 /// Rides the same superuser gate as 'lll member invite' and 'lll token
-/// create' — LLL_ADMIN_EMAIL/LLL_ADMIN_PASSWORD, the credentials 'lll up'
+/// create' - --admin-email/--admin-password, the credentials 'lll up'
 /// prints and a deployment sets as secrets. The password is the caller's, not
 /// a generated one, because unlike invite there is nobody to hand it to: the
 /// person creating this account is the person about to log into it.
@@ -550,6 +583,7 @@ fn create_for_login(
   email: string,
   password: string,
   base: string,
+  admin: AdminLogin,
 ) -> Result<(), string> {
   let restore = os.Getenv("LLL_URL")
   if base != "" {
@@ -557,7 +591,7 @@ fn create_for_login(
       return Err(f"pointing at {base}: {e}")
     }
   }
-  let out = create_as_superuser(name, email, password)
+  let out = create_as_superuser(name, email, password, admin)
   if base != "" { let _ = os.Setenv("LLL_URL", restore) }
   out
 }
@@ -568,8 +602,9 @@ fn create_as_superuser(
   name: string,
   email: string,
   password: string,
+  admin: AdminLogin,
 ) -> Result<(), string> {
-  let su = superuser_auth()?
+  let su = superuser_auth(admin)?
   if let Some(existing) = records.find_member_as(su, name)? {
     return Err(
       f"member '{name}' already exists ({existing.email}) — drop --create and log in, or reset it with 'lll member set-password {name}'",
@@ -585,8 +620,8 @@ fn create_as_superuser(
 /// the account had never existed, and none of them found 'member invite' or
 /// --create from it. Both branches are named here because the server does not
 /// tell us which one it is.
-fn login_failed(e: string, email: string, target: string) -> string {
-  let status = pb.response_status(e)
+fn login_failed(e: string, email: string, target: string, admin_email: string) -> string {
+  let status = pb.classify(e).status
   // A 403 whose body is a PocketBase envelope is the server refusing this
   // identity by name — a bot member at a password door (LLL-407) — and its
   // own wording is the answer. A bare 403 (or any other non-400) keeps the
@@ -619,7 +654,7 @@ fn login_failed(e: string, email: string, target: string) -> string {
   // whatever address had just failed, the admin's included. The guard in
   // login() then refused it — catching a mistake this text had handed them.
   // A superuser is not a member, so say that instead of the generic advice.
-  if email == os.Getenv("LLL_ADMIN_EMAIL") && email != "" {
+  if email == admin_email && email != "" {
     return f"login failed at {base}: {email} is the server's admin identity, not a member
 'lll login' authenticates MEMBERS; the superuser has no board account to log into.
 log in as yourself, and let the admin credentials create that account:
@@ -627,12 +662,12 @@ log in as yourself, and let the admin credentials create that account:
 they ride the environment (LLL_ADMIN_EMAIL/LLL_ADMIN_PASSWORD) or the flags
 --admin-email/--admin-password."
   }
-  f"login failed at {base}: no member with email {email}, or the password is wrong
+  pb.fail(pb.ErrorKind.Auth, f"login failed at {base}: no member with email {email}, or the password is wrong
 if the account exists, check the password — a superuser can reset it:
   lll member set-password <name> --email {email}
 if it does not exist yet, and you hold the server's admin credentials
 (LLL_ADMIN_EMAIL/LLL_ADMIN_PASSWORD), create it as you log in:
-  lll login{url_flag} --email {email} --create"
+  lll login{url_flag} --email {email} --create")
 }
 
 /// Renew a `lll login` token in the home config before it lapses (LLL-441).
@@ -656,10 +691,10 @@ pub fn renew_login_token() {
   match pb.refresh_token(cfg.url, cfg.token) {
     Ok(fresh) => {
       if let Err(e) = set_home_key("token", fresh) {
-        fmt.Fprintln(os.Stderr, f"note: could not save the renewed login token: {e}")
+        fmt.Fprintln(os.Stderr, f"note: could not save the renewed login token: {pb.plain(e)}")
       }
     },
-    Err(e) => fmt.Fprintln(os.Stderr, f"note: could not renew the login token in {home}: {e}"),
+    Err(e) => fmt.Fprintln(os.Stderr, f"note: could not renew the login token in {home}: {pb.plain(e)}"),
   }
 }
 

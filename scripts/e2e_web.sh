@@ -507,7 +507,7 @@ assert_contains "$(wcurl -sf "$WEB/search?fragment=1")" "Searches every issue" \
 
 # --- actions persist to PB and show via the CLI ---
 out=$(wcurl -s -w '\n%{http_code}' -X POST \
-  -d "title=Created from the board&state=todo" "$WEB/create")
+  -d "title=Created from the board&state=todo" -d team=ENG "$WEB/create")
 printf '%s' "$out" | tail -1 | grep -q 200 || fail "/create should return 200"
 assert_contains "$out" 'id="flash" class="flash" hidden' "/create success clears flash"
 out=$("$LIN" issue list)
@@ -715,7 +715,7 @@ labels519=$("$LIN" issue view ENG-3 --json | jq -r '[.expand.labels[]?.name] | s
 # Restore the fixtures: ENG-3 back to no labels, the extra label gone.
 wcurl -s -o /dev/null -X POST --data-urlencode "key=ENG-3" --data-urlencode "label=$PANEL_LABEL" "$WEB/labels"
 "$LIN" issue update ENG-3 --remove-label Picker-Extra >/dev/null
-web_post "POST settings/label" "$WEB/settings/label?del=1" -d "id=$PICKER_EXTRA" -d confirmed=1 -d expected=0 >/dev/null
+web_post "POST settings/label" "$WEB/t/ENG/settings/label?del=1" -d "id=$PICKER_EXTRA" -d confirmed=1 -d expected=0 >/dev/null
 
 # --- related findings on the issue page (TASK-103): unprompted, server-
 # rendered with the page. A finding whose area names a label the issue
@@ -1551,7 +1551,7 @@ if command -v playwright-cli >/dev/null 2>&1; then
     suffix=A
     [ "$prefix" = "Unsaved" ] && suffix=B
     "$LIN" label delete "$prefix label $suffix" >/dev/null
-    "$LIN" member remove "$prefix member $suffix" >/dev/null
+    "$LIN" member remove "$prefix member $suffix" --admin-email "$LLL_ADMIN_EMAIL" --admin-password "$LLL_ADMIN_PASSWORD" >/dev/null
     "$LIN" project delete "$prefix project $suffix" >/dev/null
   done
 
@@ -2016,23 +2016,23 @@ assert_not_contains "$settings" "pb-dir" "settings does not offer config the run
 assert_not_contains "$settings" "$WEB" "settings does not offer the port it is served on"
 
 # Labels, members and projects are creatable and editable from the page.
-web_post "POST settings/label" "$WEB/settings/label" -d 'name=web-made' -d 'color=#4cb782' >/dev/null
+web_post "POST settings/label" "$WEB/t/ENG/settings/label" -d 'name=web-made' -d 'color=#4cb782' >/dev/null
 assert_cli_contains "creating a label from /settings did not reach PocketBase" '^web-made	#4cb782' "$LIN" label list
 LABEL_ID=$(row_id "$(wcurl -sf "$WEB/settings/labels")" label web-made)
 [ -n "$LABEL_ID" ] || fail "/settings did not render the label it just created"
-web_post "POST settings/label" "$WEB/settings/label" -d "id=$LABEL_ID" -d 'name=web-renamed' -d 'color=#8d7ce6' >/dev/null
+web_post "POST settings/label" "$WEB/t/ENG/settings/label" -d "id=$LABEL_ID" -d 'name=web-renamed' -d 'color=#8d7ce6' >/dev/null
 assert_cli_contains "renaming and recoloring a label from /settings did not persist" '^web-renamed	#8d7ce6' "$LIN" label list
-web_post "POST settings/label" "$WEB/settings/label?del=1" -d "id=$LABEL_ID" -d confirmed=1 -d expected=0 >/dev/null
+web_post "POST settings/label" "$WEB/t/ENG/settings/label?del=1" -d "id=$LABEL_ID" -d confirmed=1 -d expected=0 >/dev/null
 assert_cli_lacks "deleting a label from /settings did not persist" 'web-renamed' "$LIN" label list
 
-web_post "POST settings/member" "$WEB/settings/member" -d 'name=Web Member' -d 'email=web@example.com' >/dev/null
+web_post "POST settings/member" "$WEB/t/ENG/settings/member" -d 'name=Web Member' -d 'email=web@example.com' >/dev/null
 assert_cli_contains "creating a member from /settings did not persist" '^Web Member	web@example.com' "$LIN" member list
 MEMBER_ID=$(row_id "$(wcurl -sf "$WEB/settings/members")" member "Web Member")
 # The name is the settings-editable half; the email is the member's login
 # identity (task-180) and the page says so when a row tries to move it.
-web_post "POST settings/member" "$WEB/settings/member" -d "id=$MEMBER_ID" -d 'name=Web Member Renamed' -d 'email=web@example.com' >/dev/null
+web_post "POST settings/member" "$WEB/t/ENG/settings/member" -d "id=$MEMBER_ID" -d 'name=Web Member Renamed' -d 'email=web@example.com' >/dev/null
 assert_cli_contains "editing a member from /settings did not persist" '^Web Member Renamed	web@example.com' "$LIN" member list
-rejected_member=$(wcurl -sf -X POST "$WEB/settings/member" -d "id=$MEMBER_ID" -d 'name=Rejected member name' -d 'email=moved@example.com')
+rejected_member=$(wcurl -sf -X POST "$WEB/t/ENG/settings/member" -d "id=$MEMBER_ID" -d 'name=Rejected member name' -d 'email=moved@example.com')
 assert_contains "$rejected_member" 'login identity' "moving a member email is refused with the reason"
 assert_contains "$rejected_member" 'Access → Member sign-in' "the refusal names the supported email-change surface"
 assert_contains "$rejected_member" 'No changes saved.' "combined name/email rejection reports no write"
@@ -2042,18 +2042,18 @@ assert_cli_contains "rejected combined edit changed the stored member name or em
 assert_cli_lacks "rejected combined edit still saved its name" \
   '^Rejected member name	' "$LIN" member list
 
-web_post "POST settings/project" "$WEB/settings/project" -d 'name=Web Project' -d 'status=planned' >/dev/null
+web_post "POST settings/project" "$WEB/t/ENG/settings/project" -d 'name=Web Project' -d 'status=planned' >/dev/null
 assert_cli_contains "creating a project from /settings did not persist" '^Web Project	planned' "$LIN" project list
 PROJECT_ID=$(row_id "$(wcurl -sf "$WEB/settings/projects")" project "Web Project")
-web_post "POST settings/project" "$WEB/settings/project" -d "id=$PROJECT_ID" -d 'name=Web Project' -d 'status=started' >/dev/null
+web_post "POST settings/project" "$WEB/t/ENG/settings/project" -d "id=$PROJECT_ID" -d 'name=Web Project' -d 'status=started' >/dev/null
 assert_cli_contains "changing a project status from /settings did not persist" '^Web Project	started' "$LIN" project list
 
 # Validation speaks through the one flash strip, and writes nothing.
-assert_contains "$(wcurl -sf -X POST "$WEB/settings/label" -d 'name=   ')" \
+assert_contains "$(wcurl -sf -X POST "$WEB/t/ENG/settings/label" -d 'name=   ')" \
   'id="flash"' "an empty label name answers with the flash strip"
-assert_contains "$(wcurl -sf -X POST "$WEB/settings/label" -d 'name=x' -d 'color=nope')" \
+assert_contains "$(wcurl -sf -X POST "$WEB/t/ENG/settings/label" -d 'name=x' -d 'color=nope')" \
   'not a #rrggbb colour' "a malformed colour is refused"
-assert_contains "$(wcurl -sf -X POST "$WEB/settings/project" -d "id=$PROJECT_ID" -d 'name=Web Project' -d 'status=bogus')" \
+assert_contains "$(wcurl -sf -X POST "$WEB/t/ENG/settings/project" -d "id=$PROJECT_ID" -d 'name=Web Project' -d 'status=bogus')" \
   "unknown project status" "an unknown project status is refused"
 assert_cli_lacks "a refused label write still created a record" '^x	' "$LIN" label list
 
@@ -2112,7 +2112,7 @@ curl -sf -H "Authorization: Bearer $MINTED" "$LLL_URL/api/collections/members/re
 
 # Credential a member. Without the admin password: refused, and the login it
 # tried to set must not work.
-out=$(wcurl -sf -X POST "$WEB/settings/access/member" -d "member=$MEMBER_ID" \
+out=$(wcurl -sf -X POST "$WEB/t/ENG/settings/access/member" -d "member=$MEMBER_ID" \
   -d 'email=cred@example.com' -d 'password=cred-pass-12345' -d 'password_confirm=cred-pass-12345')
 assert_contains "$out" "admin password is required" "credentialing without the admin password is refused"
 curl -s "$LLL_URL/api/collections/members/auth-with-password" -H 'Content-Type: application/json' \
@@ -2120,13 +2120,13 @@ curl -s "$LLL_URL/api/collections/members/auth-with-password" -H 'Content-Type: 
   && fail "a refused credential still changed the member's login" || true
 
 # Mismatched passwords are refused before anything is verified or written.
-out=$(wcurl -sf -X POST "$WEB/settings/access/member" -d "member=$MEMBER_ID" \
+out=$(wcurl -sf -X POST "$WEB/t/ENG/settings/access/member" -d "member=$MEMBER_ID" \
   -d 'password=cred-pass-12345' -d 'password_confirm=other' -d "admin_password=$ADMIN_PASS")
 assert_contains "$out" "do not match" "mismatched passwords are refused"
 
 # The right admin password credentials the member: the settings patch and the
 # success flash ride back, and the member auth round-trip answers a token.
-out=$(wcurl -sf -X POST "$WEB/settings/access/member" -d "member=$MEMBER_ID" \
+out=$(wcurl -sf -X POST "$WEB/t/ENG/settings/access/member" -d "member=$MEMBER_ID" \
   -d 'email=cred@example.com' -d 'password=cred-pass-12345' -d 'password_confirm=cred-pass-12345' \
   -d "admin_password=$ADMIN_PASS")
 assert_contains "$out" 'id="settings"' "a credential patches the settings body back"
@@ -2144,7 +2144,7 @@ assert_contains "$(wcurl -sf "$WEB/")" '<style id="accent"></style>' \
   "an unset accent overrides nothing"
 assert_contains "$(wcurl -sf "$WEB/")" 'id="favicon"' "the board carries a generated favicon"
 
-web_post "POST settings/team" "$WEB/settings/team" -d 'name=Engineering' -d 'accent=#3ea0f0' >/dev/null
+web_post "POST settings/team" "$WEB/t/ENG/settings/team" -d 'name=Engineering' -d 'accent=#3ea0f0' >/dev/null
 for page in "/" "/issue/ENG-1" "/settings/identity" "/issues" "/search" "/projects"; do
   html=$(wcurl -sf "$WEB$page")
   assert_contains "$html" '--accent:#3ea0f0' "$page wears the team accent"
@@ -2183,7 +2183,7 @@ fi
 
 # A save answers with the head fragment too, so an open page recolors without
 # a reload.
-saved=$(wcurl -sf -X POST "$WEB/settings/team" -d 'name=Engineering' -d 'accent=#3ea0f0')
+saved=$(wcurl -sf -X POST "$WEB/t/ENG/settings/team" -d 'name=Engineering' -d 'accent=#3ea0f0')
 assert_contains "$saved" 'id="settings"' "a settings save patches the page body back"
 assert_contains "$saved" 'id="accent"' "a settings save patches the head's accent rule"
 
@@ -2198,7 +2198,7 @@ assert_contains "$(wcurl -sf "$WEB/")" '<style id="accent"></style>' \
   "an unparseable stored accent falls back to the canonical orange"
 
 # Choosing the canonical orange back stores nothing, so theme.css decides again.
-web_post "POST settings/team" "$WEB/settings/team" -d 'name=Engineering' -d 'accent=#f0883e' >/dev/null
+web_post "POST settings/team" "$WEB/t/ENG/settings/team" -d 'name=Engineering' -d 'accent=#f0883e' >/dev/null
 assert_contains "$(wcurl -sf "$WEB/")" '<style id="accent"></style>' \
   "picking the default orange clears the stored accent"
 
@@ -2384,16 +2384,16 @@ assert_contains "$(wcurl -s -X POST --data-urlencode "key=ENG-1" \
 
 # Labels and projects are required to name a team, so the settings writes
 # have to supply one — and an update must not blank it.
-web_post "POST settings/label" "$WEB/settings/label" -d 'name=scoped-label' -d 'color=#4cb782' >/dev/null
+web_post "POST settings/label" "$WEB/t/ENG/settings/label" -d 'name=scoped-label' -d 'color=#4cb782' >/dev/null
 SCOPED=$(curl -sf -H "$AUTH_HDR" "$LLL_URL/api/collections/labels/records?perPage=200&expand=team" \
   | jq -r '.items[] | select(.name=="scoped-label") | .expand.team.key')
 [ "$SCOPED" = "ENG" ] || fail "a web-created label landed on team '$SCOPED', want ENG"
 SCOPED_ID=$(curl -sf -H "$AUTH_HDR" "$LLL_URL/api/collections/labels/records?perPage=200" \
   | jq -r '.items[] | select(.name=="scoped-label") | .id')
-web_post "POST settings/label" "$WEB/settings/label" -d "id=$SCOPED_ID" -d 'name=scoped-label' -d 'color=#8d7ce6' >/dev/null
+web_post "POST settings/label" "$WEB/t/ENG/settings/label" -d "id=$SCOPED_ID" -d 'name=scoped-label' -d 'color=#8d7ce6' >/dev/null
 KEPT=$(curl -sf -H "$AUTH_HDR" "$LLL_URL/api/collections/labels/records/$SCOPED_ID?expand=team" | jq -r '.expand.team.key')
 [ "$KEPT" = "ENG" ] || fail "a settings update blanked the label's team (got '$KEPT')"
-web_post "POST settings/label" "$WEB/settings/label?del=1" -d "id=$SCOPED_ID" >/dev/null
+web_post "POST settings/label" "$WEB/t/ENG/settings/label?del=1" -d "id=$SCOPED_ID" >/dev/null
 
 
 # --- task-114: /create takes everything `lll issue create` does ------------
@@ -2427,7 +2427,7 @@ out=$(wcurl -s -w '\n%{http_code}' -X POST \
   --data-urlencode "description=A **real** description." \
   -d "state=in-progress" -d "priority=high" \
   -d "assignee=$DL_MEMBER" -d "project=$DL_PROJECT" -d "labels=$DL_LABEL" \
-  "$WEB/create")
+  -d team=ENG "$WEB/create")
 printf '%s' "$out" | tail -1 | grep -q 200 || fail "/create with every field should return 200"
 assert_contains "$out" 'id="flash" class="flash" hidden' "a full create clears the flash"
 # Only a success closes the dialog, and the server is what says so.
@@ -2445,8 +2445,10 @@ assert_contains "$view" "Web Project" "project reached PocketBase"
 assert_contains "$view" "dialog-label" "labels reached PocketBase"
 
 # The fast path is the point of not making everyone pay for the full form:
-# a title on its own is a complete request, and lands in todo like the CLI's.
-out=$(wcurl -s -w '\n%{http_code}' -X POST -d "title=Title and nothing else" "$WEB/create")
+# a title and the team it goes to are a complete request, and it lands in
+# todo like the CLI's. A request naming no team is refused (LLL-664): it
+# used to land in whatever team the server started with.
+out=$(wcurl -s -w '\n%{http_code}' -X POST -d "title=Title and nothing else" -d team=ENG "$WEB/create")
 printf '%s' "$out" | tail -1 | grep -q 200 || fail "/create with only a title should return 200"
 FAST_KEY=$("$LIN" issue list --json \
   | jq -r '.items[] | select(.title=="Title and nothing else") | "ENG-" + (.number|tostring)')
@@ -2454,7 +2456,7 @@ assert_contains "$("$LIN" issue view "$FAST_KEY")" "todo" "a title-only create d
 
 # A rejected create writes nothing AND leaves the dialog open, so a typed
 # description survives the failure.
-out=$(wcurl -s -X POST -d "title=Never written" -d "priority=bogus" "$WEB/create")
+out=$(wcurl -s -X POST -d "title=Never written" -d "priority=bogus" -d team=ENG "$WEB/create")
 assert_contains "$out" "unknown priority &#39;bogus&#39;" "a bad priority answers through the flash"
 assert_not_contains "$out" "ni_open" "a failed create does not close the dialog"
 assert_cli_lacks "a refused create still wrote a record" "Never written" "$LIN" issue list
@@ -2462,7 +2464,7 @@ assert_cli_lacks "a refused create still wrote a record" "Never written" "$LIN" 
 # task-159: the handler is stateless — two creates back to back both land,
 # each on its own closing the dialog (the same one write path, unchanged).
 for n in 1 2; do
-  out=$(wcurl -s -w '\n%{http_code}' -X POST -d "title=Create more curl $n" "$WEB/create")
+  out=$(wcurl -s -w '\n%{http_code}' -X POST -d "title=Create more curl $n" -d team=ENG "$WEB/create")
   printf '%s' "$out" | tail -1 | grep -q 200 || fail "/create number $n of two back-to-back should return 200"
   assert_contains "$out" 'signals {"ni_open": false' "create number $n of two back-to-back closes the dialog"
 done
@@ -2600,7 +2602,7 @@ assert_contains "$redir" "303 $WEB/t/OPS/settings/identity" "a team's bare setti
 # that referenced it. The move is refused while issues OUTSIDE the destination
 # still reference the record, the LLL-341 precedent, and the row's select is
 # the same rule as `lll label move` because both call one function.
-web_post "POST settings/label" "$WEB/settings/label" -d 'name=movable' -d 'color=#4cb782' >/dev/null
+web_post "POST settings/label" "$WEB/t/ENG/settings/label" -d 'name=movable' -d 'color=#4cb782' >/dev/null
 MOVE_ID=$(row_id "$(wcurl -sf "$WEB/t/ENG/settings/labels")" label movable)
 [ -n "$MOVE_ID" ] || fail "/settings did not render the label to move"
 assert_contains "$(wcurl -sf "$WEB/t/ENG/settings/labels")" '<select name="team"' "each row carries a team select"
@@ -2704,6 +2706,27 @@ out=$(wcurl -s -X POST -d "key=$ARCH_KEY" -d "body=nope" "$WEB/comment")
 assert_contains "$out" "team OPS is archived" \
   "a comment on an archived team's issue is refused"
 
+# LLL-660: the server refuses too, on the records API and the claim routes,
+# so a writer that skips the CLI's and the board's own checks still fails.
+set +e
+out=$(env LLL_TEAM=OPS "$LIN" issue comment "$ARCH_KEY" -b "nope" 2>&1)
+rc=$?
+set -e
+[ "$rc" -ne 0 ] || fail "a CLI comment on an archived team's issue succeeded"
+assert_contains "$out" "OPS is archived" "the server refuses a comment on an archived team"
+assert_contains "$out" "'lll team unarchive OPS'" "the server's refusal names the way back"
+set +e
+out=$(env LLL_TEAM=OPS "$LIN" issue claim "$ARCH_KEY" 2>&1)
+rc=$?
+set -e
+[ "$rc" -ne 0 ] || fail "claiming an archived team's issue succeeded"
+assert_contains "$out" "OPS is archived" "the claim route refuses an archived team"
+ARCH_ID=$(env LLL_TEAM=OPS "$LIN" issue view "$ARCH_KEY" --json | jq -r .id)
+code=$(curl -s -o /dev/null -w '%{http_code}' -X PATCH -H "$AUTH_HDR" -H 'Content-Type: application/json' \
+  -d '{"title":"raw write"}' "$LLL_URL/api/collections/issues/records/$ARCH_ID")
+[ "$code" = 403 ] || fail "a raw PATCH to an archived team's issue answered $code, want 403"
+assert_cli_lacks "the refused raw PATCH still landed" "raw write" env LLL_TEAM=OPS "$LIN" issue view "$ARCH_KEY"
+
 # The Settings Teams section: every team, archived marked, counts shown.
 settings=$(wcurl -sf "$WEB/settings/teams")
 assert_contains "$settings" 'id="set-teams"' "settings page carries the Teams section"
@@ -2713,15 +2736,15 @@ OPS_TEAM_ID=$(row_id "$settings" team OPS)
 
 # Unarchive from settings runs the Access re-auth: no admin password and a
 # wrong one both refuse and change nothing; the right one unarchives.
-out=$(wcurl -sf -X POST "$WEB/settings/teams/archive" -d "id=$OPS_TEAM_ID" -d 'archived=0')
+out=$(wcurl -sf -X POST "$WEB/t/ENG/settings/teams/archive" -d "id=$OPS_TEAM_ID" -d 'archived=0')
 assert_contains "$out" "admin password is required" \
   "unarchiving without the admin password is refused"
-out=$(wcurl -sf -X POST "$WEB/settings/teams/archive" -d "id=$OPS_TEAM_ID" -d 'archived=0' \
+out=$(wcurl -sf -X POST "$WEB/t/ENG/settings/teams/archive" -d "id=$OPS_TEAM_ID" -d 'archived=0' \
   -d 'admin_password=not-the-password')
 assert_contains "$out" "wrong admin password" \
   "unarchiving with a wrong admin password is refused"
 assert_cli_lacks "a refused unarchive still unarchived" "OPS" "$LIN" team list
-out=$(wcurl -sf -X POST "$WEB/settings/teams/archive" -d "id=$OPS_TEAM_ID" -d 'archived=0' \
+out=$(wcurl -sf -X POST "$WEB/t/ENG/settings/teams/archive" -d "id=$OPS_TEAM_ID" -d 'archived=0' \
   -d "admin_password=$ADMIN_PASS")
 assert_contains "$out" 'flash-ok' "an unarchive says its success in the flash strip"
 assert_contains "$out" 'role="status"' "success confirmation exposes status semantics"
@@ -2730,7 +2753,7 @@ assert_contains "$out" 'id="settings"' "an unarchive patches the settings body b
 assert_cli_contains "unarchiving from settings did not persist" "OPS" "$LIN" team list
 
 # And archive from settings, the same gate.
-out=$(wcurl -sf -X POST "$WEB/settings/teams/archive" -d "id=$OPS_TEAM_ID" -d 'archived=1' \
+out=$(wcurl -sf -X POST "$WEB/t/ENG/settings/teams/archive" -d "id=$OPS_TEAM_ID" -d 'archived=1' \
   -d "admin_password=$ADMIN_PASS")
 assert_contains "$out" 'flash-ok' "an archive says its success in the flash strip"
 assert_contains "$out" 'role="status"' "success confirmation exposes status semantics"
@@ -2738,6 +2761,21 @@ assert_contains "$out" 'aria-atomic="true"' "success confirmation is atomic"
 assert_cli_lacks "archiving from settings did not persist" "OPS" "$LIN" team list
 assert_cli_contains "the settings-archived team is gone entirely" "OPS" "$LIN" team list --archived
 env LLL_TEAM=OPS "$LIN" team unarchive OPS >/dev/null   # leave the suite as it found OPS
+
+# LLL-664: an issue renders only under its own team's route, with its
+# canonical key; a write that names no team is refused, not sent to the boot
+# team.
+redir=$(curl -s -o /dev/null -w '%{http_code} %{redirect_url}' -H "$BOARD_COOKIE" "$WEB/t/OPS/issue/ENG-1?raw")
+assert_contains "$redir" "303" "another team's issue under /t/OPS/ redirects"
+assert_contains "$redir" "/t/ENG/issue/ENG-1?raw" "the redirect lands on the issue's own team, query kept"
+redir=$(curl -s -o /dev/null -w '%{redirect_url}' -H "$BOARD_COOKIE" "$WEB/t/ENG/issue/eng-001")
+assert_contains "$redir" "/t/ENG/issue/ENG-1" "a non-canonical key redirects to the canonical one"
+out=$(wcurl -s -X POST -d "title=Nobody's team" "$WEB/create")
+assert_contains "$out" "names its team" "a create naming no team is refused"
+assert_cli_lacks "a teamless create still landed" "Nobody's team" "$LIN" issue list
+out=$(wcurl -s -X POST -d 'name=bare-write' -d 'color=#4cb782' "$WEB/settings/label")
+assert_contains "$out" "names no team" "a bare settings write is refused"
+assert_cli_lacks "a bare settings write still created a label" "bare-write" "$LIN" label list
 
 # --- TASK-208: the Labels section is an inventory — usage counts, busiest ---
 # first, and the create form says check-first. Fresh fixtures with distinct

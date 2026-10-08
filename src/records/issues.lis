@@ -65,11 +65,13 @@ pub fn fetch_issue_record(id: string) -> Result<string, string> {
     &issues,
   )?
   let Some(item) = issues.items.get(0) else {
-    return Err(not_found)
+    return Err(pb.fail(pb.ErrorKind.NotFound, not_found))
   }
 
+  // blocked_by.team: a blocker's key is ITS team's key, not this issue's
+  // (LLL-674).
   pb.get(
-    f"/api/collections/issues/records/{item.id}?expand=team,assignee,labels,project,blocked_by,creator",
+    f"/api/collections/issues/records/{item.id}?expand=team,assignee,labels,project,blocked_by,blocked_by.team,creator",
   )
 }
 

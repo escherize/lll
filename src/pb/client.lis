@@ -6,6 +6,7 @@ import "go:encoding/json"
 import "go:io"
 import "go:net/http"
 import "go:os"
+import "go:sort"
 import "go:strings"
 import "go:time"
 import "go:github.com/escherize/lll/gopb"
@@ -21,8 +22,8 @@ pub fn base_url() -> Result<string, string> {
 /// Connection-failure message that names the fix. Shared by every request
 /// path here and by the realtime client.
 pub fn unreachable(base: string, e: error) -> string {
-  f"cannot reach the lll server at {base}: {e}
-is the lll server running? start everything with 'lll up', or point LLL_URL (or 'url' in .lll.toml) at your server"
+  fail(ErrorKind.Network, f"cannot reach the lll server at {base}: {e}
+is the lll server running? start everything with 'lll up', or point LLL_URL (or 'url' in .lll.toml) at your server")
 }
 
 /// unreachable(), plus — when the url that refused was nobody's choice but
@@ -55,7 +56,7 @@ pub fn fetch<T>(
 ) -> Result<(), string> {
   let body = get(path)?
   if let Err(e) = json.Unmarshal(body.bytes(), out) {
-    return Err(f"decoding {what}: {e}")
+    return Err(fail(ErrorKind.Server, f"decoding {what}: {e}"))
   }
   Ok(())
 }
@@ -222,7 +223,7 @@ fn send_content_options(
   let body = match request_options(cfg.url, method, path, payload, bearer(cfg.token), src.url == "default", content_type, stamp, key) {
     Ok(b) => b,
     Err(e) => {
-      if cfg.token != "" && response_status(e) == 401 {
+      if cfg.token != "" && classify(e).status == 401 {
         // A server refusal invalidates the earlier successful identity probe.
         // Member tokens are revoked by password changes; the board must renew
         // as its member even after it previously read an empty list (LLL-445).
@@ -595,9 +596,9 @@ fn corrupted_token(origin: string) -> string {
   } else {
     "the configured token"
   }
-  f"the token in {from} is corrupted: it is shaped like a token but its payload does not decode
+  fail(ErrorKind.Auth, f"the token in {from} is corrupted: it is shaped like a token but its payload does not decode
 it was almost certainly altered in copying - re-read it from its source into the variable
-rather than typing it (a token is ~200 characters and one wrong one is enough)"
+rather than typing it (a token is ~200 characters and one wrong one is enough)")
 }
 
 /// not_logged_in, with the url and its origin looked up, for callers outside
@@ -638,7 +639,7 @@ fn expired_token(tok: string, origin: string) -> string {
   let exp = token_expiry(tok).unwrap_or(0)
   let when = time.Unix(exp as int64, 0).UTC().Format("2006-01-02 15:04:05 UTC")
   let ago = time.Now().Unix() as int - exp
-  f"{from} expired at {when} ({ago}s ago) — every read comes back empty and every write is refused until it is replaced: 'lll token create <member>' (an agent's, minted by a superuser) or 'lll login --email <your email>' (a person)"
+  fail(ErrorKind.Auth, f"{from} expired at {when} ({ago}s ago) — every read comes back empty and every write is refused until it is replaced: 'lll token create <member>' (an agent's, minted by a superuser) or 'lll login --email <your email>' (a person)")
 }
 
 pub fn expired_token_message() -> string {
@@ -654,7 +655,7 @@ fn stale_token(base: string, origin: string) -> string {
   } else {
     "your token"
   }
-  f"{from} was rejected by {base}
+  fail(ErrorKind.Auth, f"{from} was rejected by {base}
 it is well-formed, but the server does not recognise it. In order of
 likelihood:
   1. it was copied wrong - compare it byte-for-byte with where it came from
@@ -662,7 +663,7 @@ likelihood:
   3. the member was removed, or its token revoked - ask whoever invited you
   4. it expired
 a fresh one: 'lll login --email <your email>' (a person) or 'lll token create'
-(an agent's, minted by a superuser)"
+(an agent's, minted by a superuser)")
 }
 
 /// Refusal for a collection request with no token anywhere in the layering.
@@ -689,7 +690,7 @@ fn not_logged_in(base: string, defaulted: bool) -> string {
   } else {
     (base, base)
   }
-  f"not logged in to {where_}
+  fail(ErrorKind.Auth, f"not logged in to {where_}
 every collection is authenticated-only, so reads would come back empty and writes refused
 log in with: lll login --url {url_arg} --email <your email>
 no account yet?
@@ -698,7 +699,7 @@ no account yet?
       lll login --url {url_arg} --email <your email> --create --password <pick one>
     (add --name <name> unless the part of your email before @ is the name you want)
   somebody else deployed it — ask them to run:
-    lll member invite <name> --email <your email>"
+    lll member invite <name> --email <your email>")
 }
 
 /// The request every verb here shares; `auth` is the Authorization header
@@ -733,7 +734,7 @@ fn request_options(
     bytes.NewReader(payload.bytes()),
   ) {
     Ok(r) => r,
-    Err(e) => return Err(f"{method} {base}{path}: {e}"),
+    Err(e) => return Err(fail(ErrorKind.Network, f"{method} {base}{path}: {e}")),
   }
   // http.NewRequest always populates Header, so None cannot happen; the
   // unwrap is the Option<Header> field type's toll, not a real branch.
@@ -754,21 +755,45 @@ fn request_options(
 
 fn read_body(resp: Ref<http.Response>, what: string) -> Result<string, string> {
   let Some(stream) = resp.Body else {
-    return Err(f"{what}: empty response body")
+    return Err(fail(ErrorKind.Network, f"{what}: empty response body"))
   }
   defer stream.Close()
   let body = match io.ReadAll(stream) {
     Partial.Ok(b) => b,
     // A complete JSON prefix does not make an incomplete HTTP body valid.
-    Partial.Both(_, e) | Partial.Err(e) => return Err(f"{what}: reading response: {e}"),
+    Partial.Both(_, e) | Partial.Err(e) => return Err(fail(ErrorKind.Network, f"{what}: reading response: {e}")),
   }
   if resp.StatusCode >= 300 {
-    return Err(
-      f"{what}: {resp.Status}: {body as string}" +
-        wrong_port_hint(what, resp.StatusCode, body as string),
-    )
+    return Err(tag(http_error(what, resp.StatusCode, resp.Status, body as string)))
   }
   Ok(body as string)
+}
+
+/// An HTTP error answer, parsed once (LLL-645). The API's JSON envelope is
+/// unwrapped to its message, any field errors and its stable code: the
+/// method, url and raw body are transport, not the answer. A 5xx keeps the
+/// request it failed, and a body that is not the envelope keeps everything,
+/// because then the listener is not the API and the detail is the diagnosis.
+pub fn http_error(what: string, status: int, status_line: string, body: string) -> CliError {
+  let mut envelope = ErrorEnvelope { .. }
+  let parsed = json.Unmarshal(body.bytes(), &envelope).is_ok()
+  // The API's envelope names its own status; a gateway's bare
+  // {"message": ...} does not, and its 404 is not a missing record.
+  if !parsed || envelope.message == "" || envelope.status != status {
+    return CliError {
+      kind: kind_of_status(status, "", false),
+      status,
+      code: "",
+      message: untagged(f"{what}: {status_line}: {body}") + wrong_port_hint(what, status, body),
+    }
+  }
+  let code = envelope_code(envelope.data)
+  let mut fields = field_errors(envelope.data, "", 0).clone()
+  sort.Strings(fields)
+  let mut message = envelope.message
+  for field in fields { message += f"\n{field}" }
+  if status >= 500 { message = f"{what}: {status_line}: {message}" }
+  CliError { kind: kind_of_status(status, code, true), status, code, message: untagged(message) }
 }
 
 /// The suffix for a 404 that came from something other than PocketBase's API.

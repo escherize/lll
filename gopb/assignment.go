@@ -104,7 +104,7 @@ func (fields assignmentFields) apply(issue *core.Record) {
 func updateAssignment(app core.App, issueID, expectedClaimID string, fields assignmentFields, by releaser) (ClaimOutcome, error) {
 	var outcome ClaimOutcome
 	if fields.Assignee == nil {
-		return outcome, &claimRejection{"assignment update requires an assignee"}
+		return outcome, &claimRejection{"", "assignment update requires an assignee"}
 	}
 	err := app.RunInTransaction(func(tx core.App) error {
 		issue, err := tx.FindRecordById("issues", issueID)
@@ -120,16 +120,16 @@ func updateAssignment(app core.App, issueID, expectedClaimID string, fields assi
 			currentID = held.Id
 		}
 		if currentID != expectedClaimID {
-			return &claimRejection{"the claim changed; refresh before updating assignment"}
+			return &claimRejection{"claim_changed", "the claim changed; refresh before updating assignment"}
 		}
 		if held != nil {
 			memberID := held.GetString("member")
 			name := rosterName(tx, by.memberID, memberID, "someone else")
 			if *fields.Assignee != "" && *fields.Assignee != memberID {
-				return &claimRejection{fmt.Sprintf("issue is claimed by %s; release the claim before assigning another member", name)}
+				return &claimRejection{"claim_held", fmt.Sprintf("issue is claimed by %s; release the claim before assigning another member", name)}
 			}
 			if *fields.Assignee == "" {
-				name, holder, forced, err := releaseAuthority(tx, held, by)
+				name, forced, err := releaseAuthority(tx, held, by)
 				if err != nil {
 					return err
 				}
@@ -137,7 +137,7 @@ func updateAssignment(app core.App, issueID, expectedClaimID string, fields assi
 					return err
 				}
 				if forced {
-					if err := recordForcedRelease(tx, issueID, holder, by); err != nil {
+					if err := recordForcedRelease(tx, issue, held, by); err != nil {
 						return err
 					}
 				}
@@ -188,7 +188,7 @@ func registerClaimedAssigneeGuard(app core.App) {
 			viewerID = e.Auth.Id
 		}
 		name := rosterName(e.App, viewerID, held.GetString("member"), "an unknown member")
-		return e.BadRequestError(fmt.Sprintf("the claim is held by %s; changing the assignee of another member's claimed issue needs force: clear it through /api/lll/issues/{id}/assignment with force, which releases the claim and comments on the issue",
-			byline(name, held.GetString("agent"))), nil)
+		return withCode(e.BadRequestError(fmt.Sprintf("the claim is held by %s; changing the assignee of another member's claimed issue needs force: clear it through /api/lll/issues/{id}/assignment with force, which releases the claim and comments on the issue",
+			byline(name, held.GetString("agent"))), nil), "needs_force")
 	})
 }

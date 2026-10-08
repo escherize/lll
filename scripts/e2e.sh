@@ -829,9 +829,14 @@ assert_contains "$out" "issue ZZZ-9 not found" "close unknown ID message"
 out=$(LLL_URL=$URL LLL_TEAM=ENG "$LIN" issue create -t "Delete me")
 assert_contains "$out" "Created ENG-7" "delete target created"
 
-out=$(printf 'n\n' | LLL_URL=$URL "$LIN" issue delete ENG-7)
+# A declined confirmation is a refusal: exit 4 (LLL-645).
+set +e
+out=$(printf 'n\n' | LLL_URL=$URL "$LIN" issue delete ENG-7 2>&1)
+rc=$?
+set -e
+[ "$rc" -eq 4 ] || fail "declined delete: expected exit 4, got $rc"
 assert_contains "$out" "delete ENG-7? [y/N]" "delete prompts"
-assert_contains "$out" "Aborted." "delete declined"
+assert_contains "$out" "aborted: nothing was deleted" "delete declined"
 out=$(LLL_URL=$URL LLL_TEAM=ENG "$LIN" issue list)
 assert_contains "$out" "ENG-7" "declined delete keeps the issue"
 
@@ -843,10 +848,12 @@ set -e
 assert_contains "$out" "lll issue delete KEY-123" "delete requires explicit ID"
 
 # LLL-644 (D6): --force no longer skips a confirmation; the refusal names --yes.
+# Since LLL-662 --force releases a claim before deleting, so on an unclaimed
+# issue it is refused the same way.
 if out=$(LLL_URL=$URL "$LIN" issue delete ENG-7 --force 2>&1); then
   fail "issue delete --force must refuse the removed spelling"
 fi
-assert_contains "$out" "unknown flag: '--force' — did you mean '--yes'?" "delete --force names --yes"
+assert_contains "$out" "the confirmation is skipped by --yes" "delete --force names --yes"
 out=$(LLL_URL=$URL "$LIN" issue delete ENG-7 --yes)
 assert_contains "$out" "Deleted ENG-7" "forced delete output"
 out=$(LLL_URL=$URL LLL_TEAM=ENG "$LIN" issue list)
@@ -891,7 +898,7 @@ members=$(LLL_URL=$URL "$LIN" member list --json)
 if out=$(LLL_URL=$URL "$LIN" member add -n "Invalid Email Probe" -e invalid-address 2>&1); then
   fail "invalid member email should be refused"
 fi
-assert_contains "$out" '"email"' "rejected member creation identifies the email field"
+assert_contains "$out" 'email: Must be a valid email address.' "rejected member creation identifies the email field"
 assert_contains "$out" 'valid email address' "rejected member creation includes the field reason"
 out=$(LLL_URL=$URL "$LIN" member list)
 assert_contains "$out" "bryan" "member list has bryan"
@@ -1043,8 +1050,21 @@ set -e
 [ "$rc" -ne 0 ] || fail "deleting someone else's comment: expected nonzero exit"
 assert_contains "$out" "is bryan's, not yours" "another member's comment is refused and named"
 assert_contains "$out" "--force" "the refusal names the override"
-out=$(LLL_URL=$URL LLL_TOKEN="$CAROL_TOK" LLL_ME=carol "$LIN" issue comment delete ENG-7 1 --force)
-assert_contains "$out" "Deleted comment #1 on ENG-7 (was bryan's)" "--force deletes and says whose it was"
+# LLL-646 review: only a comment's author changes it, enforced by the server,
+# so a member's --force is refused too and nothing changes.
+set +e
+out=$(LLL_URL=$URL LLL_TOKEN="$CAROL_TOK" LLL_ME=carol "$LIN" issue comment delete ENG-7 1 --force 2>&1)
+rc=$?
+out_edit=$(LLL_URL=$URL LLL_TOKEN="$CAROL_TOK" LLL_ME=carol "$LIN" issue comment edit ENG-7 1 --force -b "carol's words" 2>&1)
+rc_edit=$?
+set -e
+[ "$rc" -ne 0 ] && [ "$rc_edit" -ne 0 ] || fail "a member's --force changed another member's comment"
+assert_contains "$out" "comment's author can change or delete it" "the server refuses another member's delete"
+assert_contains "$out_edit" "comment's author can change or delete it" "the server refuses another member's edit"
+out=$(LLL_URL=$URL "$LIN" issue comment ENG-7)
+assert_contains "$out" "Looks good to me, edited" "the refused change left the comment"
+out=$(LLL_URL=$URL LLL_TOKEN="$BRYAN_TOK" LLL_ME=bryan "$LIN" issue comment delete ENG-7 1)
+assert_contains "$out" "Deleted comment #1 on ENG-7 (was bryan's)" "the author deletes and it says whose it was"
 out=$(LLL_URL=$URL "$LIN" issue comment ENG-7)
 assert_not_contains "$out" "Looks good to me, edited" "the deleted comment is gone"
 set +e
@@ -1092,8 +1112,8 @@ out=$(cd "$REPO" && LLL_URL=$URL "$LLL_ABS" issue comment)
 assert_contains "$out" "From the branch" "inferred comment list"
 
 # --- no comments ---
-out=$(LLL_URL=$URL "$LIN" issue comment ENG-1)
-assert_contains "$out" "No comments." "empty comment list message"
+out=$(LLL_URL=$URL "$LIN" issue comment ENG-1 2>&1)
+assert_contains "$out" "no comments" "empty comment list message"
 
 # --- projects: create + list ---
 out=$(LLL_URL=$URL LLL_TEAM=ENG "$LIN" project create -n "Auth Revamp" -b "Rework the login flow" --team ENG)
@@ -1128,6 +1148,32 @@ assert_contains "$out" "chore" "label list has chore"
 # Labels are team-owned too, so the other team's list is empty of ours.
 out=$(LLL_URL=$URL LLL_TEAM=OPS "$LIN" label list)
 assert_not_contains "$out" "chore" "label list is scoped to the configured team"
+
+# --- LLL-671: with no team, a name is ambiguous, so writers refuse ---
+# Both teams hold a 'triage'. A writer used to act on the first match.
+LLL_URL=$URL LLL_TEAM=ENG "$LIN" label create -n triage --color "#111111" >/dev/null
+LLL_URL=$URL LLL_TEAM=OPS "$LIN" label create -n triage --color "#222222" >/dev/null
+set +e
+out=$(cd "$DATA_DIR" && env -u LLL_TEAM LLL_URL=$URL "$LIN" label delete triage --yes 2>&1); rc=$?
+set -e
+[ "$rc" -ne 0 ] || fail "label delete with no team: expected nonzero exit"
+assert_contains "$out" "no team configured" "label delete with no team refuses rather than guess"
+set +e
+out=$(cd "$DATA_DIR" && env -u LLL_TEAM LLL_URL=$URL "$LIN" label edit triage --color "#333333" 2>&1); rc=$?
+set -e
+[ "$rc" -ne 0 ] || fail "label edit with no team: expected nonzero exit"
+out=$(cd "$DATA_DIR" && env -u LLL_TEAM LLL_URL=$URL "$LIN" label list)
+assert_contains "$out" "#111111" "no-team refusals left ENG's triage alone"
+assert_contains "$out" "#222222" "no-team refusals left OPS's triage alone"
+out=$(cd "$DATA_DIR" && env -u LLL_TEAM LLL_URL=$URL "$LIN" label delete triage --team OPS --yes)
+assert_contains "$out" "Deleted label triage" "label delete --team names the team"
+out=$(LLL_URL=$URL LLL_TEAM=ENG "$LIN" label list)
+assert_contains "$out" "triage" "deleting OPS's triage kept ENG's"
+set +e
+out=$(cd "$DATA_DIR" && env -u LLL_TEAM LLL_URL=$URL "$LIN" project view "Auth Revamp" 2>&1); rc=$?
+set -e
+[ "$rc" -ne 0 ] || fail "project view with no team: expected nonzero exit"
+assert_contains "$out" "no team configured" "project view with no team refuses rather than guess"
 
 # --- TASK-208: every label-create surface says check-first, reuse ---
 out=$(LLL_URL=$URL LLL_TEAM=ENG "$LIN" label --help)
@@ -1357,8 +1403,12 @@ for bot_help in --help -h; do
 done
 # --- lll search: full text over issues, comments and docs, ranked, with context (LLL-96) ---
 python3 "$REPO_ROOT"/scripts/test_search_team.py "$LLL_ABS"
+# --- the 1.0 CLI contract: exit codes, list envelope, issue JSON, time flags (LLL-645) ---
+python3 "$REPO_ROOT"/scripts/test_cli_contract.py "$LLL_ABS"
 # --- member invite --team: one team over the API and the board ---
 python3 "$REPO_ROOT"/scripts/test_team_scope.py "$LLL_ABS"
+# --- an archived team is read-only on the server, every collection classified (LLL-660) ---
+python3 "$REPO_ROOT"/scripts/test_archived_guard.py "$LLL_ABS"
 # --- a member token in the board cookie scopes pages, search and the stream (LLL-545) ---
 python3 "$REPO_ROOT"/scripts/test_board_viewer_scope.py "$LLL_ABS"
 # --- every registered non-GET board route refuses another origin (LLL-630) ---
@@ -1406,9 +1456,9 @@ done
 out=$(env LLL_URL=$URL LLL_TEAM=ENG "$LIN" search "" "" 2>&1) && fail "blank-only search should refuse"
 assert_contains "$out" "what to search for" "blank-only search still names the usage"
 out=$(env LLL_URL=$URL LLL_TEAM=ENG "$LIN" search zebra --json)
-printf '%s' "$out" | jq -e '.[0].group and .[0].snippets[0].lines[0]' >/dev/null || fail "search --json: not the hit shape: $out"
-out=$(env LLL_URL=$URL LLL_TEAM=ENG "$LIN" search "no-such-word-anywhere-xq")
-assert_contains "$out" "No match for" "no hits says so"
+printf '%s' "$out" | jq -e '.items[0].group and .items[0].snippets[0].lines[0]' >/dev/null || fail "search --json: not the hit shape: $out"
+out=$(env LLL_URL=$URL LLL_TEAM=ENG "$LIN" search "no-such-word-anywhere-xq" 2>&1)
+assert_contains "$out" "no match for" "no hits says so"
 set +e
 out=$(env LLL_URL=$URL LLL_TEAM=ENG "$LIN" search 2>&1)
 set -e
@@ -1419,9 +1469,9 @@ assert_contains "$out" "what to search for" "search without a query names the us
 UKEY=$(env LLL_URL=$URL LLL_TEAM=ENG "$LIN" issue create -t "日本語クイックスタートを公開する" -d "日本語の説明を追加する" | sed -n 's/^Created \([A-Z]*-[0-9]*\).*/\1/p')
 [ -n "$UKEY" ] || fail "Unicode search fodder create did not print a key"
 out=$(env LLL_URL=$URL LLL_TEAM=ENG "$LIN" search 日本語 --json --refresh)
-printf '%s' "$out" | jq -e --arg key "$UKEY" 'any(.[]; .group == $key)' >/dev/null || fail "Japanese substring query missed its issue: $out"
+printf '%s' "$out" | jq -e --arg key "$UKEY" 'any(.items[]; .group == $key)' >/dev/null || fail "Japanese substring query missed its issue: $out"
 out=$(env LLL_URL=$URL LLL_TEAM=ENG "$LIN" search 日本語クイックスタートを公開する --json)
-printf '%s' "$out" | jq -e --arg key "$UKEY" '.[0].group == $key' >/dev/null || fail "Japanese full-title query missed its issue: $out"
+printf '%s' "$out" | jq -e --arg key "$UKEY" '.items[0].group == $key' >/dev/null || fail "Japanese full-title query missed its issue: $out"
 
 # --- dependencies: block / unblock, Blocked by / Blocks, --ready / --blocked (LLL-175) ---
 DA=$(env LLL_URL=$URL LLL_TEAM=ENG "$LIN" issue create -t "Dep: the foundation" | sed -n 's/^Created \([A-Z]*-[0-9]*\).*/\1/p')
@@ -1926,15 +1976,15 @@ out=$(LLL_URL=$URL LLL_TEAM=ENG "$LIN" finding near ./rank-probe/file.lis)
 [ "$(printf '%s\n' "$out" | cut -f1 | paste -sd, -)" = 'z-ranking-exact,a-ranking-directory' ] \
   || fail "finding near did not rank exact before directory: $out"
 out=$(LLL_URL=$URL LLL_TEAM=ENG "$LIN" finding list --path rank-probe/file.lis --json)
-[ "$(jq -r 'map(.slug) | join(",")' <<<"$out")" = 'z-ranking-exact,a-ranking-directory' ] \
+[ "$(jq -r '.items | map(.slug) | join(",")' <<<"$out")" = 'z-ranking-exact,a-ranking-directory' ] \
   || fail "finding list JSON did not share path ranking: $out"
 
 out=$(LLL_URL=$URL LLL_TEAM=ENG "$LIN" finding list)
 assert_contains "$out" "migration-hazard	pb	Migration collisions" "finding list prints slug, area, title"
 out=$(LLL_URL=$URL LLL_TEAM=ENG "$LIN" finding list --area pb)
 assert_contains "$out" "migration-hazard" "finding list --area matches"
-out=$(LLL_URL=$URL LLL_TEAM=ENG "$LIN" finding list --area nothing)
-assert_contains "$out" "No findings." "finding list --area without a match"
+out=$(LLL_URL=$URL LLL_TEAM=ENG "$LIN" finding list --area nothing 2>&1)
+assert_contains "$out" "no findings" "finding list --area without a match"
 
 # --- finding list --limit (LLL-313): post-filter slice, issue list's validation ---
 out=$(LLL_URL=$URL LLL_TEAM=ENG "$LIN" finding list --limit 2)
@@ -2459,12 +2509,27 @@ assert_contains "$out" "Claimed $CKEY for bryan" "claim output"
 out=$(env $E "$LIN" issue view "$CKEY")
 assert_contains "$out" "Claimed:   bryan" "issue view shows the holder"
 assert_contains "$out" "Assignee:  bryan" "claiming assigns the issue"
-env $E "$LIN" issue view "$CKEY" --json | python3 -c 'import json,sys; d=json.load(sys.stdin); assert d["claim"]["expand"]["member"]["name"] == "bryan"; assert d["comments"] == []'
-out=$(env $E "$LIN" issue close "$CKEY")
-assert_contains "$out" "Claim retained by bryan" "close reports the live claim"
-assert_contains "$out" "lll issue release $CKEY" "close supplies explicit release command"
-assert_contains "$out" "if it still matches" "close explains conditional release assignment effect"
-env $E "$LIN" issue view "$CKEY" --json | python3 -c 'import json,sys; d=json.load(sys.stdin); assert d["state"] == "done"; assert d["claim"]["expand"]["member"]["name"] == "bryan"'
+env $E "$LIN" issue view "$CKEY" --json | python3 -c 'import json,sys; d=json.load(sys.stdin); assert d["claim"]["holder"] == "bryan"; assert d["comments"] == []'
+# D3 (LLL-640): close releases the closer's claim. Closing an issue someone
+# else holds is the release rule's case: refused without --force, nothing
+# changes, and the hint names --force --reason.
+set +e
+out=$(env $E "$LIN" issue close "$CKEY" 2>&1)
+rc=$?
+set -e
+[ "$rc" -ne 0 ] || fail "closing another member's claimed issue without --force: expected nonzero exit"
+assert_contains "$out" "needs force" "non-holder close names force"
+assert_contains "$out" "lll issue close $CKEY --force --reason" "non-holder close names the forced spelling"
+env $E "$LIN" issue view "$CKEY" --json | python3 -c 'import json,sys; d=json.load(sys.stdin); assert d["state"] != "done"; assert d["claim"]["holder"] == "bryan"'
+out=$(env $E LLL_TOKEN="$BRYAN_TOK" LLL_ME=bryan "$LIN" issue close "$CKEY" --keep-claim)
+assert_contains "$out" "Closed $CKEY" "holder close with --keep-claim closes"
+assert_contains "$out" "Claim kept by bryan" "--keep-claim keeps the holder's claim"
+env $E "$LIN" issue view "$CKEY" --json | python3 -c 'import json,sys; d=json.load(sys.stdin); assert d["state"] == "done"; assert d["claim"]["holder"] == "bryan"'
+CK2=$(env $E "$LIN" issue create -t "Close releases" | sed -n 's/^Created \([A-Z]*-[0-9]*\).*/\1/p')
+env $E LLL_TOKEN="$BRYAN_TOK" LLL_ME=bryan "$LIN" issue claim "$CK2" --agent wt-a >/dev/null
+out=$(env $E LLL_TOKEN="$BRYAN_TOK" LLL_ME=bryan "$LIN" issue close "$CK2" --agent wt-a)
+assert_contains "$out" "Released bryan (agent wt-a)'s claim; assignee unchanged." "holder close releases the claim"
+env $E "$LIN" issue view "$CK2" --json | python3 -c 'import json,sys; d=json.load(sys.stdin); assert d["state"] == "done"; assert d["claim"] is None; assert d["expand"]["assignee"]["name"] == "bryan"; assert d["comments"] == []'
 env $E LLL_TOKEN="$BRYAN_TOK" LLL_ME=bryan "$LIN" issue comment "$CKEY" -b 'handoff for carol' >/dev/null
 env $E LLL_TOKEN="$CAROL_TOK" LLL_ME=carol "$LIN" issue comment "$CKEY" -b 'acknowledged' >/dev/null
 env $E "$LIN" issue view "$CKEY" --json | python3 -c 'import json,sys; d=json.load(sys.stdin); assert [(c["body"],c["expand"]["author"]["name"]) for c in d["comments"]] == [("handoff for carol","bryan"),("acknowledged","carol")]'
@@ -2531,7 +2596,9 @@ binary, key = sys.argv[1:]
 
 def run(*args, code=0):
     result = subprocess.run([binary, *args], text=True, capture_output=True)
-    assert result.returncode == code, (args, result.returncode, result.stdout, result.stderr)
+    # None: any refusal; usage errors exit 2, others 1 (LLL-645).
+    ok = result.returncode != 0 if code is None else result.returncode == code
+    assert ok, (args, result.returncode, result.stdout, result.stderr)
     return result
 
 def record():
@@ -2545,7 +2612,7 @@ def reset(text):
 
 def refuse(args, message):
     before = record()
-    result = update(*args, "--title", "must not land", code=1)
+    result = update(*args, "--title", "must not land", code=None)
     assert message in result.stderr, result.stderr
     assert record() == before, (args, before, record())
     return result
@@ -2569,8 +2636,8 @@ refuse(["--description-replace", "missing=b"], "--description-replace matched 0 
 for args, message in [
     (["--description-replace", "missing-equals"], "requires old=new"),
     (["--description-replace", "a=b", "--description-replace", "b=c"], "may only be given once"),
-    (["-d", "whole", "--description-replace", "a=b"], "--description replaces the whole text"),
-    (["-d", "whole", "--description-append", "tail"], "--description replaces the whole text"),
+    (["-d", "whole", "--description-replace", "a=b"], "-b replaces the whole description"),
+    (["-d", "whole", "--description-append", "tail"], "-b replaces the whole description"),
 ]:
     refuse(args, message)
 
@@ -2612,7 +2679,8 @@ pre412=$(curl -s -X PATCH -H "$AUTH_HDR" -H "Content-Type: application/json" \
   -d '{"title":"clobbered"}' "$URL/api/collections/issues/records/$iid")
 assert_contains "$pre412" '"status":412' "a server-side precondition answers 412"
 assert_contains "$pre412" "record changed since 2000-01-01 00:00:00.000Z" "the refusal names the stamp that was passed"
-now=$(env $E "$LIN" issue view "$CKEY" --json | jq -r '.updated')
+# --json prints RFC3339; the server's header and message use the stored space form.
+now=$(env $E "$LIN" issue view "$CKEY" --json | jq -r '.updated' | tr T ' ')
 assert_contains "$pre412" "$now" "and the current stamp to retry with"
 [ "$(env $E "$LIN" issue view "$CKEY" --json | jq -r '.title')" != "clobbered" ] || fail "a 412 precondition patch must not land"
 cur=$(curl -s -X PATCH -H "$AUTH_HDR" -H "Content-Type: application/json" \
@@ -2822,8 +2890,9 @@ assert_contains "$out" \
   "work moved: $WBRANCH @ site-a:$WROOT_A -> $WBRANCH @ site-b:$WROOT_B" \
   "displacement leaves the auto-comment trail"
 
-# close clears nothing; the site renders as history
-out=$(env $E "$LIN" issue close "$WKEY")
+# close clears nothing; the site renders as history. The holder keeps its
+# claim (--keep-claim, D3) so the reopen below is still claimed.
+out=$(env $E LLL_TOKEN="$BRYAN_TOK" LLL_ME=bryan "$LIN" issue close "$WKEY" --keep-claim)
 out=$(env $E "$LIN" issue view "$WKEY")
 assert_contains "$out" "Work:      $WBRANCH @ site-b:$WROOT_B (last seen)" \
   "a done issue keeps the slot, dimmed to last seen"
@@ -2896,7 +2965,7 @@ WHOAMI_ADMIN=$(pb_superuser_token "$URL") || fail "minting whoami administrator 
 out=$(LLL_TOKEN="$WHOAMI_ADMIN" LLL_URL=$URL "$LIN" whoami) || fail "whoami refused a valid administrator token: $out"
 assert_contains "$out" "superuser <admin@local.dev>" "whoami identifies administrator authentication"
 assert_contains "$out" "token   env:LLL_TOKEN" "administrator whoami names the token source"
-assert_contains "$out" "lll bot bot-NAME" "administrator whoami names the bot bootstrap command"
+assert_contains "$out" "lll bot create bot-NAME" "administrator whoami names the bot bootstrap command"
 assert_contains "$out" "$URL" "administrator whoami names the server"
 out=$(env -u LLL_TOKEN -u LLL_URL HOME="$DATA_DIR/nowhere" "$LIN" whoami 2>&1) \
   && fail "whoami without a token should fail"
@@ -2999,13 +3068,23 @@ BOT_TOK=$(printf '%s\n' "$bot_out" | sed -n 's/^export LLL_TOKEN=//p')
   || fail "lll bot printed the token more than once"
 out=$(LLL_TOKEN="$BOT_TOK" HOME="$E2E_HOME" LLL_URL=$URL "$LIN" whoami)
 assert_contains "$out" "bot-e2e <" "the bot's token is the bot's"
+# D7 (LLL-646): create refuses an existing bot and leaves its token working;
+# rotation is only 'lll bot rotate'.
+out=$(env -u LLL_TOKEN HOME="$E2E_HOME" LLL_URL=$URL \
+  LLL_ADMIN_EMAIL=admin@local.dev LLL_ADMIN_PASSWORD=admin-local-123 \
+  "$LIN" bot create bot-e2e --team ENG 2>&1) && fail "lll bot create rotated an existing bot: $out"
+assert_contains "$out" "bot bot-e2e already exists" "create refuses an existing bot"
+assert_contains "$out" "lll bot rotate bot-e2e" "the refusal names bot rotate"
+out=$(LLL_TOKEN="$BOT_TOK" HOME="$E2E_HOME" LLL_URL=$URL "$LIN" whoami)
+assert_contains "$out" "bot-e2e <" "a refused create does not rotate the token"
 # --env: stdout is exactly the two export lines, so it sources cleanly;
 # the progress lines go to stderr.
 bot_err="$DATA_DIR/bot-env.err"
 bot_out=$(env -u LLL_TOKEN -u LLL_TEAM HOME="$E2E_HOME" LLL_URL=$URL \
   LLL_ADMIN_EMAIL=admin@local.dev LLL_ADMIN_PASSWORD=admin-local-123 \
-  "$LIN" bot bot-e2e --env --duration 3600 2>"$bot_err") || fail "lll bot --env (second run) exited nonzero"
-assert_contains "$(cat "$bot_err")" "member bot-e2e exists; rotated its token" "a second run rotates without a second member"
+  "$LIN" bot rotate bot-e2e --env --duration 3600 2>"$bot_err") || fail "lll bot rotate --env exited nonzero"
+assert_contains "$(cat "$bot_err")" "one-time bot token for bot-e2e" "rotate --env reports on stderr"
+assert_contains "$(cat "$bot_err")" "re-mint with 'lll bot rotate bot-e2e'" "the bot expiry line names bot rotate (LLL-625)"
 [ "$(printf '%s\n' "$bot_out" | wc -l | tr -d ' ')" = 2 ] || fail "lll bot --env printed more than the export lines: $bot_out"
 BOT_TOK=$( (eval "$bot_out"; printf '%s' "$LLL_TOKEN") )
 out=$(LLL_TOKEN="$BOT_TOK" HOME="$E2E_HOME" LLL_URL=$URL "$LIN" whoami)
@@ -3035,7 +3114,7 @@ out=$(env -u LLL_TOKEN HOME="$E2E_HOME" LLL_URL=$URL \
   LLL_ADMIN_EMAIL=admin@local.dev LLL_ADMIN_PASSWORD=admin-local-123 \
   "$LIN" bot claude-main 2>&1) && fail "lll bot accepted a name without the bot- prefix: $out"
 assert_contains "$out" "reserved" "the bot-kind prefix refusal names the reservation"
-assert_contains "$out" "try 'lll bot bot-claude-main'" "the prefix refusal names the working spelling (LLL-539)"
+assert_contains "$out" "try 'lll bot create bot-claude-main'" "the prefix refusal names the working spelling (LLL-539)"
 # The CLI refuses that name before any server call (LLL-539), so the server's
 # own guard is exercised directly: a bot-kind member without the prefix.
 SU_TOK=$(pb_superuser_token "$URL") || fail "superuser token for the server prefix guard"
@@ -3046,7 +3125,7 @@ assert_contains "$out" "reserved to the 'bot-' prefix" "the server refuses a bot
 out=$(env LLL_TOKEN="$BRYAN_TOK" HOME="$E2E_HOME" LLL_URL=$URL \
   "$LIN" member add -n bot-impersonator 2>&1) && fail "member add took the reserved bot- prefix: $out"
 assert_contains "$out" "reserved" "person signups cannot take the bot- prefix"
-assert_contains "$out" "creates it with 'lll bot bot-impersonator'" "member add names the bot command (LLL-546)"
+assert_contains "$out" "creates it with 'lll bot create bot-impersonator'" "member add names the bot command (LLL-546)"
 # The CLI refuses that before any server call (LLL-546), so the server's
 # person-side guard is exercised directly with the same member token.
 out=$(curl -s -X POST "$URL/api/collections/members/records" \
@@ -3056,12 +3135,12 @@ assert_contains "$out" "reserved" "the server refuses a person member with the b
 
 # The bot records its creating member as owner when the command rides a
 # member token — bryan's, minted fresh above because the configured one may
-# outlive its duration. The admin pair rides this suite's environment
-# (e2e_begin exports it), and `lll bot` rightly treats that as the superuser
-# speaking, so it is unset here to name the member path.
-bot_out=$(env -u LLL_ADMIN_EMAIL -u LLL_ADMIN_PASSWORD LLL_TOKEN="$BRYAN_TOK" \
+# outlive its duration. The admin pair stays in the environment on purpose
+# (D7, LLL-646): inherited LLL_ADMIN_* must not outrank a configured member
+# token, which used to make this bot ownerless.
+bot_out=$(env LLL_ADMIN_EMAIL=admin@local.dev LLL_ADMIN_PASSWORD=admin-local-123 LLL_TOKEN="$BRYAN_TOK" \
   HOME="$E2E_HOME" LLL_URL=$URL \
-  "$LIN" bot bot-owned --env --duration 3600) || fail "member-token lll bot exited nonzero: $bot_out"
+  "$LIN" bot create bot-owned --env --duration 3600) || fail "member-token lll bot exited nonzero: $bot_out"
 
 # A bot member cannot authenticate interactively, whatever password is typed.
 out=$(env -u LLL_TOKEN HOME="$E2E_HOME" LLL_URL=$URL \
@@ -3205,12 +3284,13 @@ assert_contains "$comp_token" "create" "token completions offer create"
 LLL_URL=$URL LLL_TOKEN="$REFUSE_TOK" HOME="$E2E_HOME" "$LIN" member add -n onboard >/dev/null \
   || fail "adding the onboard member"
 
+# Administrator credentials ride --admin-* here: a token is stored in this HOME,
+# and LLL_ADMIN_* never outranks a configured token (D7, LLL-646).
 # Without --email it refuses: the synthesized @members.invalid identity is not
 # something a human logs in with, and a password alone would leave login broken.
 set +e
 out=$(printf 'irrelevant\nirrelevant\n' | env HOME="$E2E_HOME" LLL_URL=$URL \
-  LLL_ADMIN_EMAIL=admin@local.dev LLL_ADMIN_PASSWORD=admin-local-123 \
-  "$LIN" member set-password onboard 2>&1)
+  "$LIN" member set-password onboard --admin-email admin@local.dev --admin-password admin-local-123 2>&1)
 rc=$?
 set -e
 [ "$rc" -ne 0 ] || fail "set-password without --email on a synthesized-email member: expected refusal"
@@ -3220,8 +3300,7 @@ assert_contains "$out" "--email" "the email refusal names the flag to pass"
 ONBOARD_PASS="onboard-pass-12345"
 set +e
 out=$(printf 'aaaaaaaaaa\nbbbbbbbbbb\n' | env HOME="$E2E_HOME" LLL_URL=$URL \
-  LLL_ADMIN_EMAIL=admin@local.dev LLL_ADMIN_PASSWORD=admin-local-123 \
-  "$LIN" member set-password onboard --email onboard@lll.test 2>&1)
+  "$LIN" member set-password onboard --email onboard@lll.test --admin-email admin@local.dev --admin-password admin-local-123 2>&1)
 rc=$?
 set -e
 [ "$rc" -ne 0 ] || fail "set-password with mismatched confirmation: expected refusal"
@@ -3230,8 +3309,7 @@ assert_contains "$out" "do not match" "the mismatch refusal says what happened"
 # The success path: two echo-off prompts (two lines when piped), email +
 # password PATCHed as the superuser, and the password echoed nowhere.
 out=$(printf '%s\n%s\n' "$ONBOARD_PASS" "$ONBOARD_PASS" | env HOME="$E2E_HOME" LLL_URL=$URL \
-  LLL_ADMIN_EMAIL=admin@local.dev LLL_ADMIN_PASSWORD=admin-local-123 \
-  "$LIN" member set-password onboard --email onboard@lll.test) \
+  "$LIN" member set-password onboard --email onboard@lll.test --admin-email admin@local.dev --admin-password admin-local-123) \
   || fail "member set-password exited nonzero: $out"
 assert_contains "$out" "email set to onboard@lll.test" "set-password reports the email"
 assert_contains "$out" "password set for onboard" "set-password reports success"
@@ -3458,7 +3536,13 @@ commenter=$(LLL_URL=$URL "$LIN" member list --json | jq -r '.items[] | select(.n
 curl -sf -H "Authorization: Bearer $REMOVE_ADMIN" -H 'Content-Type: application/json' \
   -d "$(jq -nc --arg issue "$busy_issue_id" --arg author "$commenter" '{issue:$issue,author:$author,body:"Comment only history"}')" \
   "$URL/api/collections/comments/records" >/dev/null || fail "creating comment-only reference"
+# D7 (LLL-646): with a member token configured, only the flags act as the
+# administrator; the LLL_ADMIN_* pair this suite exports does not.
 out=$(LLL_URL=$URL "$LIN" member delete "Comment Only Person" 2>&1) \
+  && fail "member delete with only inherited LLL_ADMIN_* should refuse"
+assert_contains "$out" "needs the server's admin credentials" "inherited admin env does not outrank the member token"
+out=$(LLL_URL=$URL "$LIN" member delete "Comment Only Person" \
+  --admin-email admin@local.dev --admin-password admin-local-123 2>&1) \
   && fail "comment-only member deletion should refuse"
 assert_contains "$out" '0 issue(s) assigned and 1 comment(s) authored' "comments alone block deletion"
 curl -sf -H "Authorization: Bearer $REMOVE_ADMIN" "$URL/api/collections/members/records/$commenter" >/dev/null \

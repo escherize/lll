@@ -164,7 +164,7 @@ pub fn run_server(
     realtime.DeadToken.Retry,
     |mint| realtime.DeadToken.Remint(mint),
   )
-  let events = realtime.subscribe(
+  let events = realtime.subscribe_resyncing(
     pb.base_url()?,
     [issues_topic, comments_topic, "claims", "favorites", "views"],
     on_dead_token,
@@ -213,7 +213,6 @@ fn board_mux(
   admin_ui: bool,
 ) -> Result<http.Handler, string> {
   let mut mux: mut Ref<http.ServeMux> = http.NewServeMux()
-  let team_id = boot.id
   let boot_key = boot.key
   // TASK-241: the API answers here too, so there is ONE address. The hosted
   // deployment used to split them - the board on 443, PocketBase on :8091 -
@@ -347,16 +346,29 @@ fn board_mux(
   )
   // The team-scoped writes ride the same path as the page that made them, so
   // a form on team B's settings cannot write team A. The server-wide actions
-  // below (access, team archiving) stay bare: they are not a team's business.
+  // (member sign-in, team archiving) ride it too (LLL-664): what they write
+  // is the server's, but the section they redraw is the page's team.
   mux.HandleFunc(
     "POST /t/{team}/settings/{kind}",
-    gated(flashing(|r: mut Ref<http.Request>| {
-      let key = r.PathValue("team")
-      let Some(t) = records.find_team(key)? else {
-        return Err(f"no team with key '{key}' on this server")
-      }
-      settings_write(r, t.id, board_member.name)
-    })),
+    gated(flashing(|r: mut Ref<http.Request>| settings_write(
+      r,
+      routed_team_id(r)?,
+      board_member.name,
+    ))),
+  )
+  mux.HandleFunc(
+    "POST /t/{team}/settings/access/member",
+    gated(flashing(|r: mut Ref<http.Request>| access_credential_write(
+      r,
+      routed_team_id(r)?,
+    ))),
+  )
+  mux.HandleFunc(
+    "POST /t/{team}/settings/teams/archive",
+    gated(flashing(|r: mut Ref<http.Request>| teams_archive_write(
+      r,
+      routed_team_id(r)?,
+    ))),
   )
   // The bare paths stay as redirects onto the configured team, the same
   // compatibility `/` and `/issue/{key}` make: bookmarks, printed URLs and
@@ -371,11 +383,12 @@ fn board_mux(
     "GET /issue/{key}",
     gated(|w: http.ResponseWriter, r: Ref<http.Request>| {
       // The issue key names its own team (ENG-3 -> ENG), so the canonical
-      // team-routed URL needs no lookup; an unknown key 404s over there.
+      // team-routed URL needs no lookup; an unknown key 404s over there. A
+      // key that does not parse 404s here instead of borrowing the boot team.
       let key = r.PathValue("key")
-      let mut tk = boot_key
-      if let Some(i) = strings.LastIndex(key, "-") {
-        if i > 0 { tk = key.substring(0..i) }
+      let Ok((tk, _)) = records.split_issue_key(key) else {
+        http.Error(w, records.issue_not_found(key), 404)
+        return
       }
       redirect_with_query(w, r, f"/t/{tk}/issue/{key}")
     }),
@@ -422,34 +435,22 @@ fn board_mux(
   )
   // Every POST is a write returning Result; `flashing` (serve_actions.lis) is
   // the one place an Err becomes the flash strip.
-  mux.HandleFunc(
-    "POST /settings/{kind}",
-    gated(flashing(|r: mut Ref<http.Request>| settings_write(
-      r,
-      team_id,
-      board_member.name,
-    ))),
-  )
+  //
+  // The bare settings writes are refused, not redirected (LLL-664): they
+  // used to write the team the server started with, whichever team's page
+  // posted them. The board's own forms post the /t/{team}/ paths above.
+  mux.HandleFunc("POST /settings/{kind}", gated(flashing(bare_settings_write)))
+  mux.HandleFunc("POST /settings/access/member", gated(flashing(bare_settings_write)))
+  mux.HandleFunc("POST /settings/teams/archive", gated(flashing(bare_settings_write)))
   // The Access section's superuser-power actions (TASK-204). Their own
   // routes, not a {kind}: each verifies the form's admin password against
   // the superuser before writing — the board token alone must not suffice.
+  // Minting a token redraws nothing team-shaped, so it stays bare. Member
+  // sign-in and the Teams section's archive lifecycle (TASK-210) run the
+  // same re-auth on their team-routed paths above.
   mux.HandleFunc(
     "POST /settings/access/token",
     gated(flashing(access_token_write)),
-  )
-  mux.HandleFunc(
-    "POST /settings/access/member",
-    gated(flashing(|r: mut Ref<http.Request>| access_credential_write(
-      r,
-      team_id,
-    ))),
-  )
-  // The Teams section's archive lifecycle (TASK-210): its own route, not a
-  // {kind}, because it runs the Access sections' per-action admin re-auth —
-  // the board token alone must not archive a team.
-  mux.HandleFunc(
-    "POST /settings/teams/archive",
-    gated(flashing(|r: mut Ref<http.Request>| teams_archive_write(r, team_id))),
   )
   mux.HandleFunc(
     "GET /search",
@@ -465,7 +466,7 @@ fn board_mux(
   )
   mux.HandleFunc(
     "POST /create",
-    gated(flashing(|r: mut Ref<http.Request>| create_write(r, team_id))),
+    gated(flashing(create_write)),
   )
   mux.HandleFunc("POST /state", gated(flashing(state_write)))
   mux.HandleFunc("POST /attachments/upload", gated(flashing(attachment_upload)))
@@ -542,6 +543,21 @@ fn redirect_with_query(
   http.Redirect(w, r, target, 303)
 }
 
+/// The id of the team a /t/{team}/... write names; an unknown key refuses
+/// the write.
+fn routed_team_id(r: Ref<http.Request>) -> Result<string, string> {
+  let key = r.PathValue("team")
+  let Some(t) = records.find_team(key)? else {
+    return Err(f"no team with key '{key}' on this server")
+  }
+  Ok(t.id)
+}
+
+/// A settings write on a path that names no team (LLL-664).
+fn bare_settings_write(_r: mut Ref<http.Request>) -> Result<string, string> {
+  Err("this settings form names no team; reload the page to get one that does")
+}
+
 /// The team a /t/{team}/... URL names, freshly fetched (the accent it
 /// carries can change under /settings at any moment — shell_team's bargain).
 /// None means the response is already written: a 404 naming the key, or a
@@ -562,7 +578,7 @@ fn routed_team(
       None
     },
     Err(e) => {
-      http.Error(w, e, 500)
+      http.Error(w, pb.plain(e), 500)
       None
     },
   }

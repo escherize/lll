@@ -9,7 +9,7 @@ import "query"
 /// Resolve a member by name; unknown names error with the fix.
 pub fn resolve_member(name: string) -> Result<models.Member, string> {
   let Some(m) = find_member(name)? else {
-    return Err(f"no member named '{name}' — see 'lll member list'")
+    return Err(pb.fail(pb.ErrorKind.NotFound, f"no member named '{name}' — see 'lll member list'"))
   }
   Ok(m)
 }

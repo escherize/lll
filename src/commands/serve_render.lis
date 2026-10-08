@@ -10,6 +10,7 @@ import "go:unicode/utf8"
 import "display"
 import "markdown"
 import "models"
+import "pb"
 import "provenance"
 import "query"
 import "theme"
@@ -28,7 +29,7 @@ fn render_html(w: http.ResponseWriter, name: string, data: Unknown) {
   let html = match render(name, data) {
     Ok(h) => h,
     Err(e) => {
-      http.Error(w, e, 500)
+      http.Error(w, pb.plain(e), 500)
       return
     },
   }
@@ -41,8 +42,20 @@ fn render_html(w: http.ResponseWriter, name: string, data: Unknown) {
 /// line of HTML becomes its own `data: elements` line; Datastar morphs the
 /// fragment into the DOM by element id (default mode `outer`).
 fn patch_event(html: string) -> string {
-  let lines = html.split("\n").map(|l| f"data: elements {l}")
-  f"event: datastar-patch-elements\n{strings.Join(lines, "\n")}\n\n"
+  f"event: datastar-patch-elements\n{elements_data(html)}\n\n"
+}
+
+/// The same event in `mode replace` for the element `selector` names: the
+/// fragment replaces it instead of morphing into it. For a control whose
+/// live value must go (a sent comment's draft, an uploaded file's input, an
+/// unsaved selection), which a morph would keep.
+fn replace_event(selector: string, html: string) -> string {
+  f"event: datastar-patch-elements\ndata: mode replace\ndata: selector {selector}\n{elements_data(html)}\n\n"
+}
+
+/// Each line of HTML as its own `data: elements` line.
+fn elements_data(html: string) -> string {
+  strings.Join(html.split("\n").map(|l| f"data: elements {l}"), "\n")
 }
 
 /// Wrap a signal update as a datastar-patch-signals SSE event. `json_text` is
@@ -414,7 +427,9 @@ fn compose_vm(team_id: string, roster: Roster) -> Result<ComposeVM, string> {
 }
 
 fn comment_vm(c: models.Comment) -> CommentVM {
-  let mut author = c.expand.author.name
+  // A comment the server wrote reads "system" (LLL-654), whoever triggered it.
+  let system = c.author_kind == "system"
+  let mut author = if system { "system" } else { c.expand.author.name }
   if author == "" { author = "anon" }
   // The avatar follows the name SHOWN, not the record (LLL-452). An
   // authorless comment - an import that carried no member, or the claim sweep,
@@ -423,12 +438,14 @@ fn comment_vm(c: models.Comment) -> CommentVM {
   // with every other comment. Built from the record where there is one, so a
   // real member keeps its colour and its bot glyph.
   let mut avatar = avatar_vm(c.expand.author)
-  if c.expand.author.name == "" { avatar = avatar_vm(models.Member { name: author, .. }) }
+  if system || c.expand.author.name == "" { avatar = avatar_vm(models.Member { name: author, .. }) }
+  let byline = if system { author } else { display.byline(author, c.agent) }
+  let via = if system { "" } else { c.expand.author.owner_name() }
   CommentVM {
     id: c.id,
-    author: display.byline(author, c.agent),
+    author: byline,
     avatar,
-    via: c.expand.author.owner_name(),
+    via,
     age: display.relative(c.created),
     body: markdown.md_html(c.body),
     body_md: c.body,
@@ -474,7 +491,7 @@ fn issue_fields_vm(raw: models.Issue, comments: Slice<models.Comment>, roster: R
   match actor() {
     Ok(Some(a)) => { claim_actor = a.name; claim_actor_id = a.id },
     Ok(None) => claim_error = "No member is configured for this board.",
-    Err(e) => claim_error = e,
+    Err(e) => claim_error = pb.plain(e),
   }
   let mut work = ""
   if issue.work_branch != "" { work = f"{issue.work_branch} @ {issue.work_host}:{issue.work_path}" }

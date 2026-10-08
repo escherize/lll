@@ -1,5 +1,6 @@
 import "attachments"
 import "models"
+import "pb"
 import "records"
 import "go:bytes"
 import "go:io"
@@ -40,8 +41,7 @@ fn attachment_upload(r: mut Ref<http.Request>) -> Result<string, string> {
   // Replace just the upload form to clear its file input after success.
   // It lives outside the issue morph boundary, preserving pending choices
   // and the separate comment draft during unrelated realtime updates.
-  let lines = html.split("\n").map(|line| f"data: elements {line}")
-  Ok(f"event: datastar-patch-elements\ndata: mode replace\ndata: selector #attachment-upload\n{strings.Join(lines, "\n")}\n\n")
+  Ok(replace_event("#attachment-upload", html))
 }
 
 fn attachment_remove(r: mut Ref<http.Request>) -> Result<string, string> {
@@ -66,7 +66,7 @@ fn attachment_download(w: http.ResponseWriter, r: Ref<http.Request>) {
   let result = records.fetch_issue(key).and_then(|issue| attachments.read_file(issue, filename))
   let data = match result {
     Ok(data) => data,
-    Err(e) => { http.Error(w, e, 404); return },
+    Err(e) => { http.Error(w, pb.plain(e), 404); return },
   }
   let content_type = http.DetectContentType(data.bytes())
   let raster = ["image/png", "image/jpeg", "image/gif", "image/webp"].contains(content_type)

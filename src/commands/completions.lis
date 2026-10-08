@@ -104,7 +104,7 @@ fn verbs(noun: string) -> Slice<string> {
   // added to a table is completed with no edit here. This was a fourth
   // hand-kept list of the same verbs, and it drifted twice in one wave.
   match noun {
-    "bot" => ["rotate"],
+    "bot" => ["create", "rotate"],
     "skill" => ["list", "get"],
     "completions" => ["bash", "zsh", "fish"],
     _ => [],

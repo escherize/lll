@@ -44,7 +44,7 @@ struct DemoDoc {
 /// real work would be a worse bug than the empty board it fixes.
 pub fn seed_demo(team_key: string, me: string, db_url: string, keep_cli_token: bool) -> Result<(), string> {
   let Some(team) = records.find_team(team_key)? else {
-    return Err(f"--demo: no team {team_key} to seed")
+    return Err(pb.fail(pb.ErrorKind.NotFound, f"--demo: no team {team_key} to seed"))
   };
   let existing = records.fetch_board_issues(team.id)?
   if !existing.is_empty() {
@@ -228,7 +228,7 @@ Give it back with 'lll issue release {k}-1'.",
 in, is owned by the person who made it, and its token rotates without touching
 yours.
 
-  lll bot bot-demo
+  lll bot create bot-demo
 
 Works if: the board badges bot-demo as a bot, and the token it prints once
 authenticates that agent alone.",

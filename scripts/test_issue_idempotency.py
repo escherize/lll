@@ -61,7 +61,8 @@ assert second['expand']['team']['key'] == 'IDEMA'
 assert second['expand']['creator']['id'] == first['creator']
 assert cli(*args).stdout.startswith(f'Reused IDEMA-{first["number"]}:')
 conflict = cli('issue', 'create', '-t', 'Changed body', '--idempotency-key', 'sequential', success=False)
-assert '409' in conflict.stderr and 'different creation payload' in conflict.stderr
+# A 409 is a conflict: exit 4 (LLL-645).
+assert conflict.returncode == 4 and 'different creation payload' in conflict.stderr, conflict
 other = json.loads(cli(*args, '--json', LLL_TEAM='IDEMB').stdout)
 assert other['id'] != first['id'] and other['number'] == 1
 
@@ -84,7 +85,8 @@ status, edited = request(path + '/' + first['id'], {'title': 'Edited after creat
 assert status == 200
 after_edit = json.loads(cli(*args, '--json').stdout)
 assert after_edit['id'] == first['id'] and after_edit['title'] == 'Edited after creation'
-assert after_edit['updated'] == edited['updated'] and after_edit['reused']
+# --json prints RFC3339; the API answers the stored space form (LLL-645).
+assert after_edit['updated'] == edited['updated'].replace(' ', 'T') and after_edit['reused']
 
 # Concurrent CLI retries exercise the capability check, JSON transport,
 # transaction and issue-number allocator together.

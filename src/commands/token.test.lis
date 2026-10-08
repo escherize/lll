@@ -1,3 +1,5 @@
+import "pb"
+
 import "go:fmt"
 import "go:os"
 import "go:os/exec"
@@ -18,7 +20,7 @@ fn at_noon() -> time.Time {
 
 #[test]
 fn expiry_line_dates_the_default_year_out() {
-  let line = expiry_line(default_token_duration(), at_noon())
+  let line = expiry_line(default_token_duration(), at_noon(), "lll token create")
   assert line.contains("expires 2027-01-15")
   assert line.contains("lll token create")
 }
@@ -26,14 +28,18 @@ fn expiry_line_dates_the_default_year_out() {
 #[test]
 fn expiry_line_dates_a_short_duration() {
   // An hour still lands on the same day; the seconds are what disambiguate.
-  let line = expiry_line(3600, at_noon())
+  let line = expiry_line(3600, at_noon(), "lll bot rotate bot-x")
   assert line.contains("expires 2026-01-15")
   assert line.contains("3600s from now")
+  // LLL-625: a bot's owner re-mints with bot rotate; token create is
+  // superuser-only.
+  assert line.contains("re-mint with 'lll bot rotate bot-x'")
+  assert !line.contains("token create")
 }
 
 #[test]
 fn expiry_line_refuses_to_guess_for_the_collection_default() {
-  let line = expiry_line(0, at_noon())
+  let line = expiry_line(0, at_noon(), "lll token create")
   assert !line.contains("2026-")
   assert line.contains("--duration")
 }
@@ -47,14 +53,14 @@ fn default_token_duration_is_a_year_of_seconds() {
 
 #[test]
 fn a_401_blames_expiry_and_names_the_re_mint() {
-  let msg = impersonate_error("bryan", "POST http://h/api/...: 401 Unauthorized: {}")
+  let msg = impersonate_error("bryan", pb.tag(pb.http_error("POST http://h/api/...", 401, "401 Unauthorized", "{}")))
   assert msg.contains("expired")
   assert msg.contains("lll token create")
 }
 
 #[test]
 fn a_403_still_names_the_superuser_gate() {
-  let msg = impersonate_error("bryan", "POST http://h/api/...: 403 Forbidden: {}")
+  let msg = impersonate_error("bryan", pb.tag(pb.http_error("POST http://h/api/...", 403, "403 Forbidden", "{}")))
   assert msg.contains("superuser-only")
   assert msg.contains("LLL_ADMIN_EMAIL")
   // 403 is authenticated-but-unauthorized; blaming expiry here would send a
@@ -64,19 +70,19 @@ fn a_403_still_names_the_superuser_gate() {
 
 #[test]
 fn any_other_failure_keeps_the_raw_error() {
-  let msg = impersonate_error("bryan", "POST http://h/api/...: 500 Internal Server Error: {}")
+  let msg = impersonate_error("bryan", pb.tag(pb.http_error("POST http://h/api/...", 500, "500 Internal Server Error", "{}")))
   assert msg.contains("impersonating bryan")
   assert msg.contains("500")
 }
 
 #[test]
 fn status_classification_ignores_url_and_body_digits() {
-  let forbidden = impersonate_error("bryan", "POST http://127.0.0.1:34015/api/401: 403 Forbidden: {}")
+  let forbidden = impersonate_error("bryan", pb.tag(pb.http_error("POST http://127.0.0.1:34015/api/401", 403, "403 Forbidden", "{}")))
   assert forbidden.contains("superuser-only")
   assert !forbidden.contains("expired")
-  let unauthorized = impersonate_error("bryan", "POST http://127.0.0.1:34035/api/403: 401 Unauthorized: {}")
+  let unauthorized = impersonate_error("bryan", pb.tag(pb.http_error("POST http://127.0.0.1:34035/api/403", 401, "401 Unauthorized", "{}")))
   assert unauthorized.contains("expired")
-  let failed = impersonate_error("bryan", "POST http://127.0.0.1:34015/api/403: 500 Internal Server Error: previous status: 401 Unauthorized")
+  let failed = impersonate_error("bryan", pb.tag(pb.http_error("POST http://127.0.0.1:34015/api/403", 500, "500 Internal Server Error", "previous status: 401 Unauthorized")))
   assert failed.contains("impersonating bryan")
   assert failed.contains("500 Internal Server Error")
 }

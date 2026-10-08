@@ -195,8 +195,7 @@ nothing.
 While the PR is open the issue is genuinely in progress. When it lands:
 
 ```sh
-lll issue close KEY-123
-lll issue release KEY-123      # or the board still reads as busy
+lll issue close KEY-123        # also releases your claim, or the board reads as busy
 ```
 
 Comment with the evidence you actually ran before closing - the before and after,

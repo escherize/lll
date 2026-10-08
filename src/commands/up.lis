@@ -92,7 +92,7 @@ pub fn up(args: Slice<string>) -> Result<(), string> {
   let scratch = p.given("--scratch")
   let share_bind = p.one("--bind")
   if scratch && share_bind != "" {
-    return Err("--scratch is loopback-only; omit --bind for a throwaway board")
+    return Err(flags.usage_error("--scratch is loopback-only; omit --bind for a throwaway board"))
   }
   if share_bind == "0.0.0.0" || share_bind == "::" {
     return Err(
@@ -100,7 +100,7 @@ pub fn up(args: Slice<string>) -> Result<(), string> {
     )
   }
   if scratch && p.one("--pb-dir") != "" {
-    return Err("--scratch owns its temporary data directory; omit --pb-dir")
+    return Err(flags.usage_error("--scratch owns its temporary data directory; omit --pb-dir"))
   }
   let scratch_dir = if scratch { setup_scratch()? } else { "" }
   if share_bind != "" { let _ = os.Setenv("LLL_BIND", share_bind) }
@@ -108,7 +108,7 @@ pub fn up(args: Slice<string>) -> Result<(), string> {
   let raw_port = p.one("--port")
   if raw_port != "" {
     let Ok(pn) = strconv.Atoi(raw_port) else {
-      return Err(f"--port must be a number, got '{raw_port}'")
+      return Err(flags.usage_error(f"--port must be a number, got '{raw_port}'"))
     }
     web_port = pn
   }
@@ -194,12 +194,15 @@ check what is configured with 'lll config list'",
       match gopb.Serve(pb_dir, f"{bind_addr()}:{db_port}", email, pass, version()) {
         Err(e) => {
           fmt.Println(f"lll server failed to start: {e}")
-          if !f"{e}".starts_with("LLL_ALLOWED_ORIGINS") {
-            fmt.Println(
-              f"check that the data dir '{pb_dir}' is writable, or pick another with --pb-dir",
-            )
+          // A bad LLL_ALLOWED_ORIGINS is the caller's input (exit 2), not
+          // a server or data-dir failure.
+          if f"{e}".starts_with("LLL_ALLOWED_ORIGINS") {
+            os.Exit(pb.exit_code(pb.ErrorKind.Usage))
           }
-          os.Exit(1)
+          fmt.Println(
+            f"check that the data dir '{pb_dir}' is writable, or pick another with --pb-dir",
+          )
+          os.Exit(pb.exit_code(pb.ErrorKind.Server))
         },
         // Graceful shutdown (Ctrl-C / SIGTERM caught by PocketBase) — take
         // the board down with us; PocketBase's signal handler suppressed the
@@ -634,7 +637,9 @@ fn pin_local_admin(pb_dir: string, write: bool) -> Result<(), string> {
   let supplied_pass = os.Getenv("LLL_ADMIN_PASSWORD")
   if (supplied_email == "") != (supplied_pass == "") {
     return Err(
-      "lll up needs both LLL_ADMIN_EMAIL and LLL_ADMIN_PASSWORD, or neither (then it generates a password and keeps it in the data directory)",
+      flags.usage_error(
+        "lll up needs both LLL_ADMIN_EMAIL and LLL_ADMIN_PASSWORD, or neither (then it generates a password and keeps it in the data directory)",
+      ),
     )
   }
   let path = local_admin_path(pb_dir)

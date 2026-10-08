@@ -169,19 +169,45 @@ pub fn subscribe(
   topics: Slice<string>,
   on_dead_token: DeadToken,
 ) -> Result<Channel<Event>, string> {
+  start(base_url, topics, on_dead_token, false)
+}
+
+/// The topic of the event subscribe_resyncing sends after each reconnect.
+/// PocketBase does not replay what happened while the stream was down, so a
+/// consumer that renders state (the board, LLL-666) re-reads everything it
+/// shows when this arrives. Not a PocketBase topic: it carries no data.
+pub const RESYNC: string = "lll:resync"
+
+/// subscribe, plus one Event { topic: RESYNC } after every reconnect, sent
+/// once the new subscriptions are accepted and before the first event they
+/// carry. The first connection sends none: there was no outage to cover.
+pub fn subscribe_resyncing(
+  base_url: string,
+  topics: Slice<string>,
+  on_dead_token: DeadToken,
+) -> Result<Channel<Event>, string> {
+  start(base_url, topics, on_dead_token, true)
+}
+
+fn start(
+  base_url: string,
+  topics: Slice<string>,
+  on_dead_token: DeadToken,
+  resync: bool,
+) -> Result<Channel<Event>, string> {
   let ch = Channel.new<Event>()
   let mut reader = match connect(base_url, topics) {
     Ok(r) => r,
     Err(e) => {
       if auth_failure(e) {
-        if let DeadToken.Exit = on_dead_token { return Err(dead_token_fix(e)) }
+        if let DeadToken.Exit = on_dead_token { return Err(pb.fail(pb.ErrorKind.Auth, dead_token_fix(e))) }
       }
       return Err(e)
     },
   }
   task {
     pump(reader, ch)
-    reconnect(base_url, topics, on_dead_token, ch)
+    reconnect(base_url, topics, on_dead_token, ch, resync)
   }
   Ok(ch)
 }
@@ -195,6 +221,7 @@ fn reconnect(
   topics: Slice<string>,
   on_dead_token: DeadToken,
   ch: Channel<Event>,
+  resync: bool,
 ) {
   fmt.Fprintln(os.Stderr, "realtime: lll server stream lost — reconnecting")
   let mut last_err = ""
@@ -204,6 +231,7 @@ fn reconnect(
       Ok(r) => {
         fmt.Fprintln(os.Stderr, "realtime: reconnected to the lll server (subscriptions accepted)")
         last_err = ""
+        if resync { let _ = ch.send(Event { topic: RESYNC, data: "" }) }
         pump(r, ch)
         fmt.Fprintln(os.Stderr, "realtime: lll server stream lost — reconnecting")
       },
@@ -212,11 +240,11 @@ fn reconnect(
         if dead {
           if let DeadToken.Exit = on_dead_token {
             fmt.Fprintln(os.Stderr, f"realtime: {dead_token_fix(e)}")
-            os.Exit(1)
+            os.Exit(pb.exit_code(pb.ErrorKind.Auth))
           }
         }
         if e != last_err {
-          fmt.Fprintln(os.Stderr, f"realtime: reconnect failed: {e}")
+          fmt.Fprintln(os.Stderr, f"realtime: reconnect failed: {pb.plain(e)}")
           last_err = e
         }
         if dead {
@@ -249,7 +277,7 @@ const TOKEN_REJECTED: string = "the server rejected this token"
 /// The auth failure with the fix a person or agent can act on, for a
 /// caller that cannot renew its own token.
 fn dead_token_fix(e: string) -> string {
-  f"{e}; run 'lll login', or set a fresh LLL_TOKEN ('lll bot rotate bot-NAME' or 'lll token create NAME'), then start the watch again"
+  f"{pb.plain(e)}; run 'lll login', or set a fresh LLL_TOKEN ('lll bot rotate bot-NAME' or 'lll token create NAME'), then start the watch again"
 }
 
 /// Open the SSE stream, wait for PB_CONNECT, and POST the subscriptions.
