@@ -27,6 +27,8 @@
 {{template "rail-views" .Views}}
 <a href="{{.BoardBase}}settings"{{if eq .Active "settings"}} class="active"{{end}}><svg width="14" height="14"><use href="#ic-settings"/></svg> Settings</a>{{end}}
 {{if .BotOwner}}{{template "rail-bot" .}}{{end}}
+{{/* /me is open to every viewer, scoped or not: who this browser is, and
+     the member's CLI login. Root-relative, like the page itself. */}}<a href="/me" title="Who this browser is signed in as, and your CLI login"><svg width="14" height="14"><use href="#ic-me"/></svg> Your login</a>
 <div class="rail-foot">v{{.Version}}</div>
 </nav>
 {{template "cmdk" .}}

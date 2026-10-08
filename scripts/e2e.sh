@@ -1605,6 +1605,8 @@ fi
 assert_contains "$(cat "$DATA_DIR/comp.fish")" "complete -c lll" "fish completions complete lll"
 python3 "$REPO_ROOT"/scripts/test_completion_commands.py "$LIN"
 python3 "$REPO_ROOT"/scripts/test_flag_policy.py "$LIN"
+python3 "$REPO_ROOT"/scripts/test_help_ticket_keys.py "$LIN"
+python3 "$REPO_ROOT"/scripts/test_doc_examples.py "$LIN"
 
 # task-127: help, completions and the parser read ONE table, so the gate
 for shell in bash zsh fish; do

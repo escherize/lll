@@ -615,6 +615,7 @@ fn member_invite(input: flags.CommandInput) -> Result<(), string> {
   // password nobody knows — the exact dead record set-password exists to fix.
   let password = rand.Text()
   let cfg = config.load()?
+  let base = invite_base(p.one("--url"), cfg.url, same_server_board(cfg.web_url, su))
   let keys = p.all("--team").map(records.normalize_team_key).filter(|k| k != "")
   let mode = if p.given("--read-only") { "ro" } else { "rw" }
   if keys.is_empty() && mode == "ro" {
@@ -624,7 +625,7 @@ fn member_invite(input: flags.CommandInput) -> Result<(), string> {
     let created = create_member_as(su, name, email, password, [], "")?
     status(f"invited {created.name} <{email}>: {describe_access("all", "rw", [])}")
     status("send them this (below, on stdout) — the password is shown once and stored nowhere")
-    for line in invite_lines(created.name, email, password, cfg.url, cfg.team) {
+    for line in invite_lines(created.name, email, password, base, cfg.team) {
       fmt.Println(line)
     }
     return Ok(())
@@ -643,7 +644,7 @@ fn member_invite(input: flags.CommandInput) -> Result<(), string> {
   let created = create_member_as(su, name, email, password, team_ids, mode)?
   status(f"invited {created.name} <{email}>: {describe_access("teams", mode, keys)}")
   status("send them this (below, on stdout) — the password is shown once and stored nowhere")
-  for line in invite_lines(created.name, email, password, cfg.url, keys[0]) {
+  for line in invite_lines(created.name, email, password, base, keys[0]) {
     fmt.Println(line)
   }
   fmt.Println("")
@@ -890,6 +891,30 @@ fn invite_lines(
   ]
 }
 
+/// The configured board url, or "" unless it fronts the server this invite
+/// runs against. url and web_url resolve independently (env, repo file, home
+/// file), and 'lll up' saves web_url beside another server's url, so the
+/// board must prove it: the invite's own token, asked through the board's
+/// /api/, identifies itself only on the server that signed it. The probe
+/// sends that token to the configured web_url, a host the user chose.
+fn same_server_board(web_url: string, tok: string) -> string {
+  let board = strings.TrimRight(strings.TrimSpace(web_url), "/")
+  if board == "" || !pb.token_usable(board, tok) { return "" }
+  board
+}
+
+/// The url the colleague's 'lll login --url' names. The board's address
+/// when this machine knows it: the board serves the API under /api/ and
+/// advertises itself at /.well-known/lll, so a login against it saves both
+/// endpoints, where a login against the API listener finds no board. An
+/// explicit --url is the inviter naming the server, and wins.
+fn invite_base(given: string, api_url: string, web_url: string) -> string {
+  let explicit = strings.TrimRight(strings.TrimSpace(given), "/")
+  if explicit != "" { return explicit }
+  let board = strings.TrimRight(web_url, "/")
+  if board != "" { board } else { api_url }
+}
+
 /// True for an email a human can log in with — anything but empty and the
 /// synthesized @members.invalid placeholder.
 fn real_email(email: string) -> bool {
@@ -906,7 +931,10 @@ Usage:
 
 One command for you, two for them. Creates NAME as a member with the email
 given, sets a generated temporary password, and prints that password once
-together with the exact 'lll login --url ...' line the colleague runs. The
+together with the exact 'lll login --url ...' line the colleague runs. That
+url is the board's when this machine knows it (web_url, which 'lll up' and
+'lll login' save) and that board serves this same server, so their login
+finds both the board and its API; --url names a different one. The
 password is stored nowhere else: lose it and reissue with
 'lll member set-password NAME'.
 

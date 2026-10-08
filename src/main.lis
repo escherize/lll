@@ -108,6 +108,17 @@ fn print_usage() {
 Every verb lives under a noun: 'lll issue list', 'lll issue comment KEY \"body\"',
 'lll doc view SLUG'. There is no 'lll list' or 'lll comment'.
 
+A team is one tracker on the server: its key (ENG) prefixes every issue id
+(ENG-12), and each repo or directory attaches to one team.
+
+Start here, with no server yet:
+  lll up                  start a server and web board on this machine; keep it
+                          running (on this machine it also logs the CLI in)
+  lll login --url URL     from another machine, or for a hosted server: log the
+                          CLI in (see 'lll login --help' for a first account)
+  lll attach              in your repo: point it at a team (--key KEY to pick one)
+  lll issue create -t \"First issue\"
+
 Usage:
   lll issue <command>     work with issues (see 'lll issue --help')
   lll search <text>       full-text search: issues, comments, docs, ranked, with context

@@ -582,7 +582,7 @@ pub fn check_prompt_values(url: string, team: string, name: string) -> Result<()
   }
   if team != "" && !regexp.MustCompile("^[A-Z0-9][A-Z0-9-]*$").MatchString(team) {
     return Err(
-      f"team key {strconv.Quote(team)} contains characters lll cannot paste safely into a shell; rename the team (server-side key validation is LLL-628)",
+      f"team key {strconv.Quote(team)} contains characters lll cannot paste safely into a shell; rename the team",
     )
   }
   if !regexp.MustCompile("^bot-[A-Za-z0-9][A-Za-z0-9._-]*$").MatchString(name) {
@@ -642,7 +642,7 @@ Who may rotate: a superuser, or the bot's owner while the owner's access
 covers the bot's. The owner is the member whose token ran 'lll bot create'
 to create it; a bot created with administrator credentials has none. Other
 members and the bot itself are refused, unless they first make themselves the
-owner, which the server does not yet prevent (LLL-616).
+owner, which the server does not yet prevent.
 
 What rotation strands: every earlier token for the bot, including ones from
 'lll token create', at its next request. This is the only command that

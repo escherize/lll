@@ -218,7 +218,7 @@ fn prompt_values_outside_the_allowlist_are_refused_naming_the_field() {
   }
   for team in hostile_teams() {
     let assert Err(e) = check_prompt_values("http://127.0.0.1:8090", team, "bot-x")
-    assert e.contains("team key") && e.contains("rename the team") && e.contains("LLL-628")
+    assert e.contains("team key") && e.contains("rename the team")
     assert !e.contains("\r") && !e.contains("\u{1b}")
   }
   for name in ["bot-", "bot-a b", "bot-a'b", "bot-$(id)", "bot-\u{1b}x", "x"] {

@@ -27,8 +27,8 @@ eagerly" is a count you can assert. "Make the board cleaner" is not - it has no
 failing state, so it has no passing one either.
 
 **2. Is every acceptance criterion checkable without a person?**
-Read them literally. "The dedicated IPv4 is released" is not checkable by you -
-releasing it is irreversible and outward-facing. An issue can be 80% automatable
+Read them literally. "The old public address is released" is not checkable by
+you - releasing it is irreversible and outward-facing. An issue can be 80% automatable
 and still have one criterion that ends the run.
 
 **3. Is the work reversible?**
@@ -39,9 +39,9 @@ makes an unattended mistake cheap.
 **4. Does it contain an unmade decision?**
 This is the one that catches people. An issue saying "either A or B is fine"
 contains a decision, and a decision is not yours unless the issue names a
-default and says why. Real examples from lll's own board: what 115 issues assigned to
-dead run-identities should be reassigned TO; whether a repo link belongs to the
-team or the project; whether repeated `--state` should union or refuse. All
+default and says why. Typical examples: who the issues assigned to departed
+members should be reassigned to; whether a repo link belongs to the team or the
+project; whether a repeated filter flag should union or refuse. All
 well-specified. None automatable.
 
 The exception, and it is worth looking for: **the codebase may have already
@@ -189,8 +189,6 @@ Stopping is a result. Report it as one.
 - **Suites encode old behaviour twice.** Changing one asserted behaviour broke a
   second assertion further down that depended on the first as a side effect.
   Grep for the old behaviour, not just the old string.
-- **Deploy context archives HEAD.** Uncommitted changes do not deploy, and a
-  context built before committing silently carries the previous version.
 - **Isolate before editing.** Work in a worktree; a second agent in one checkout
   overwrites your edits rather than conflicting with them. Branch from the
   commit you mean, not whatever the worktree defaulted to. Never stash: that
@@ -201,16 +199,7 @@ Stopping is a result. Report it as one.
   MEMBERS only: a re-claim by the holder succeeds, so agents sharing one token
   get no exclusion from it unless each sets its own `--agent NAME` label. Give
   each agent a label or its own member.
-- **Do not point test agents at your real board.** Give them a pinned wrapper
-  against a throwaway board. Ephemeral identities that name themselves leave
-  permanent auth records behind.
-
-## What this does not decide
-
-Whether any of this belongs inside `lll` itself rather than in a skill. The
-selection filter is judgement and reads well as prose. The mechanical half -
-finding candidates, recording that an issue was considered and rejected, and why
-- is board state, and board state belongs in lll. A label like `needs-decision`
-applied by the loop would make the filter's output durable and queryable instead
-of living in one agent's head. Worth deciding before the loop runs often enough
-for its rejections to matter.
+- **Do not point test agents at your real board.** Give them a throwaway one:
+  `lll up --scratch` starts a board that ignores your configuration and prints
+  the exact command for its CLI. Ephemeral identities that name themselves
+  leave permanent auth records behind.

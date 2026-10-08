@@ -58,6 +58,7 @@ fn state(rides: bool, source: string, home_token: string, home_url: string) -> C
     token_source: source,
     home_token,
     home_url,
+    home_path: "/h/lll.toml",
     db_url: "http://127.0.0.1:8090",
   }
 }
@@ -83,6 +84,10 @@ fn the_cli_login_is_written_only_into_an_empty_slot() {
   assert env.contains("unset it") && !env.contains("logout")
   let repo = plan_kind(cli_login_plan(state(false, "file:/repo/.lll.toml", "", "")))
   assert repo.contains("/repo/.lll.toml") && !repo.contains("logout")
+  // A repo token over a home token: logout alone would leave the repo one
+  // winning, so the repo line comes first and logout second.
+  let both = plan_kind(cli_login_plan(state(false, "file:/repo/.lll.toml", "tok", "")))
+  assert both.contains("/repo/.lll.toml is not valid for this server: remove that line") && both.contains("also run 'lll logout'")
   // A logged-out home pointed at a hosted board keeps its url.
   let hosted = plan_kind(cli_login_plan(state(false, "", "", "https://lll.example.com")))
   assert hosted.contains("lll config set url http://127.0.0.1:8090")

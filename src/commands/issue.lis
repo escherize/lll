@@ -194,7 +194,7 @@ fn issue_list_spec() -> Slice<flags.Flag> {
       help: "the list envelope {items, page, perPage, totalItems, totalPages};\neach item the issue record with key and claim (docs/cli-contract.md)",
       ..,
     },
-    flags.Flag { name: "--ready", help: "only open issues whose blockers are all done (LLL-175): what an agent can pick up now", .. },
+    flags.Flag { name: "--ready", help: "only open issues whose blockers are all done: what an agent can pick up now", .. },
     flags.Flag { name: "--blocked", help: "only issues with an open blocker", .. },
   ]...))
 }
@@ -264,7 +264,7 @@ fn issue_update_spec() -> Slice<flags.Flag> {
       name: "--if-unchanged-since",
       value: true,
       hint: "stamp",
-      help: "refuse unless the issue's 'updated' is still this instant (from 'issue view --json';\nRFC3339 or the space form) —\nenforced at the write by the server (LLL-399), so an edit cannot land on a record\nsomeone changed under you, even mid-flight",
+      help: "refuse unless the issue's 'updated' is still this instant (from 'issue view --json';\nRFC3339 or the space form) —\nenforced at the write by the server, so an edit cannot land on a record\nsomeone changed under you, even mid-flight",
       ..,
     },
     flags.Flag {
@@ -508,7 +508,7 @@ pub fn issue_commands() -> Slice<flags.Command> {
     },
     flags.Command {
       name: "next",
-      summary: "print the key of the one issue to work next - ready and unclaimed, then priority (urgent first), then oldest, then most-unblocking; --claim takes it (LLL-395)",
+      summary: "print the key of the one issue to work next - ready and unclaimed, then priority (urgent first), then oldest, then most-unblocking; --claim takes it",
       spec: issue_next_spec(),
       run: issue_next,
       ..
@@ -642,7 +642,7 @@ pub fn issue_commands() -> Slice<flags.Command> {
     },
     flags.Command {
       name: "block",
-      summary: "record that KEY-123 cannot start until BLOCKER is done (LLL-175); view shows it, list --ready honours it",
+      summary: "record that KEY-123 cannot start until BLOCKER is done; view shows it, list --ready honours it",
       spec: flags.with_team([]),
       positional: "KEY-123 BLOCKER",
       run: block,
