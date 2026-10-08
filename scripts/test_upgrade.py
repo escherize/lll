@@ -15,8 +15,9 @@ import sys
 import tempfile
 
 binary = Path(sys.argv[1]).resolve()
-# Printed after every plan (LLL-655).
-NOTES = ("if this machine runs the server ('lll up'): stop it and back up its data directory first; "
+# Printed before every plan (LLL-655).
+NOTES = ("if this machine runs the server ('lll up'): stop it and back up its data directory first "
+         "(with Homebrew, run 'lll upgrade --dry-run' until that is done); "
          "the new version migrates the database on its first start, and the backup is the way back\n"
          "upgrade the server and its clients together: a client older than its server may lack commands "
          "the server expects\n")
@@ -47,18 +48,18 @@ with tempfile.TemporaryDirectory(prefix='lll-upgrade-') as directory:
     brew = root / 'brew-bin' / 'lll'
     brew.symlink_to(cellar)
     out = upgrade(brew, '--dry-run')
-    assert out == 'lll was installed with Homebrew; would run: brew upgrade lll\n' + NOTES, out
+    assert out == NOTES + 'lll was installed with Homebrew; would run: brew upgrade lll\n', out
     assert not record.exists(), 'dry run ran brew'
     out = upgrade(brew)
-    assert out == 'lll was installed with Homebrew; running: brew upgrade lll\n' + NOTES, out
+    assert out == NOTES + 'lll was installed with Homebrew; running: brew upgrade lll\n', out
     assert record.read_text() == 'upgrade lll\n', record.read_text()
     record.unlink()
 
     checkout = place('repo/target/.lisette/bin/lll')
     for args in [('--dry-run',), ()]:
         out = upgrade(checkout, *args)
-        assert out == (f'lll was built from the checkout at {root}/repo; lll does not rebuild itself. Run:\n'
-                       f'  cd {root}/repo && git pull && mise run build\n' + NOTES), out
+        assert out == NOTES + (f'lll was built from the checkout at {root}/repo; lll does not rebuild itself. Run:\n'
+                       f'  cd {root}/repo && git pull && mise run build\n'), out
 
     release = place('home/bin/lll')
     goos = platform.system().lower()
@@ -66,9 +67,9 @@ with tempfile.TemporaryDirectory(prefix='lll-upgrade-') as directory:
     url = f'https://github.com/escherize/lll/releases/latest/download/lll-{goos}-{goarch}'
     for args in [('--dry-run',), ()]:
         out = upgrade(release, *args)
-        assert out == ('lll was installed from a release download; lll does not replace its own binary. Run:\n'
+        assert out == NOTES + ('lll was installed from a release download; lll does not replace its own binary. Run:\n'
                        f'  curl -LsSf -o {release}.new {url} && chmod +x {release}.new'
-                       f' && mv {release}.new {release}\n' + NOTES), out
+                       f' && mv {release}.new {release}\n'), out
     assert release.read_bytes() == binary.read_bytes(), 'the binary replaced itself'
     assert not record.exists(), 'a non-Homebrew install ran brew'
 

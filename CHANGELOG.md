@@ -27,7 +27,8 @@ scripts. A removed spelling fails and names its replacement (LLL-644).
   and comment deletes now ask on a terminal; scripts are not asked.
 - `lll watch --label` may be repeated, matching any of the labels.
 - A loopback `lll up` logs the CLI in as its member when the home config
-  holds no token, so `lll issue list` works straight after the first boot.
+  holds no token and no other server's url, so `lll issue list` works
+  straight after the first boot.
   It never replaces an existing token; when the server refuses that token,
   the banner's `cli` line says how to switch. A `--pb-dir` boot leaves the
   CLI's login alone, as it does the team (LLL-648).
@@ -47,10 +48,11 @@ scripts. A removed spelling fails and names its replacement (LLL-644).
 
 - The `lll up` banner prints the administrator pair on a loopback boot that
   uses the built-in fallback (`admin@local.dev` / `admin-local-123`). A pair
-  from the environment is named, never printed. `lll up --help`,
+  from the environment is never printed. `lll up --help`,
   `lll login --help`, the README and the landing page now agree (LLL-648).
-- `lll board` prints the board's login link (`?board_token=...`) on the
-  machine running `lll up`, because the bare URL answers 401. Every boot,
+- `lll board` prints the board's login link (`?board_token=...`) for a
+  loopback board on the machine running it, because the bare URL answers
+  401. Scripts that parse its output see the token; do not log it. Every boot,
   loopback included, saves that link privately beside the home config, so
   `lll member invite --team` prints a board link on a loopback boot too. The
   401 page names `lll board` instead of a banner line that no longer exists

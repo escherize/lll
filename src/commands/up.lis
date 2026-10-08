@@ -262,7 +262,7 @@ check what is configured with 'lll config list'",
           )
         } else if cfg.token != "" {
           fmt.Println(
-            f"auth   the token from {src.token} is not valid for {db_url} — booting on the superuser credentials instead; the cli line below says what the CLI does",
+            f"auth   the token from {src.token} is not valid for {db_url}; booting on the superuser credentials instead; the cli line below says what the CLI does",
           )
         }
         let _ = os.Setenv("LLL_TOKEN", tok)
@@ -342,7 +342,18 @@ superuser credentials, or set LLL_TOKEN to a member token valid for this server.
   // A demo boot points the CLI at itself (demo.lis), and scratch and shared
   // boots write their own CLI config.
   if !scratch && share_bind == "" && !demo {
-    let plan = cli_login_plan(member_token_ok, throwaway, src.token, config.load_home()?.token)
+    let home = config.load_home()?
+    let plan = cli_login_plan(
+      CliState {
+        rides: member_token_ok,
+        throwaway,
+        loopback: loopback_bind(),
+        token_source: src.token,
+        home_token: home.token,
+        home_url: home.url,
+        db_url,
+      },
+    )
     for line in log_cli_in(member.name, db_url, plan, src.token)? {
       fmt.Println(line)
     }
@@ -402,17 +413,15 @@ superuser credentials, or set LLL_TOKEN to a member token valid for this server.
 /// The banner's administrator line (LLL-648), or None. A loopback boot on
 /// the built-in fallback prints the pair: it is the documented local default,
 /// and 'lll member invite' and the board's admin forms ask for it. A pair
-/// from the environment is the deployer's secret: named, never printed.
+/// from the environment is the deployer's secret and is never printed.
 /// Scratch and shared boots print or store their own random pair, and a
-/// non-loopback bind never prints one.
+/// non-loopback bind never prints one. The tag is "admin", which the
+/// --admin-ui line also uses; that line carries a URL, this one an email.
 fn admin_line(fallback: bool, proved: bool, own_pair: bool, loopback: bool) -> Option<string> {
-  if !proved || own_pair || !loopback { return None }
-  if fallback {
-    return Some(
-      "admin  admin@local.dev / admin-local-123 (loopback fallback; set LLL_ADMIN_EMAIL and LLL_ADMIN_PASSWORD to choose your own)",
-    )
-  }
-  Some("admin  the LLL_ADMIN_EMAIL / LLL_ADMIN_PASSWORD pair from the environment (not printed)")
+  if !fallback || !proved || own_pair || !loopback { return None }
+  Some(
+    "admin  admin@local.dev / admin-local-123 (loopback fallback; set LLL_ADMIN_EMAIL and LLL_ADMIN_PASSWORD to choose your own)",
+  )
 }
 
 fn loopback_bind() -> bool {
@@ -420,32 +429,71 @@ fn loopback_bind() -> bool {
   bind == "localhost" || net.ParseIP(bind).IsLoopback()
 }
 
-/// What a loopback boot does about the CLI's own login (LLL-648).
+/// What the boot knows when it decides about the CLI's login (LLL-648).
+struct CliState {
+  /// The board rides the CLI's configured token.
+  rides: bool,
+  /// A --pb-dir boot.
+  throwaway: bool,
+  /// The board listens on loopback only.
+  loopback: bool,
+  /// Where the configured token came from (config.Sources.token).
+  token_source: string,
+  /// The token and url in the home config file, "" when absent.
+  home_token: string,
+  home_url: string,
+  /// This boot's API url.
+  db_url: string,
+}
+
+/// What a boot does about the CLI's own login (LLL-648).
 enum CliLogin {
   /// The board already rides the CLI's configured token.
   Already,
-  /// No token in any config file: save this board's url and member token to
-  /// the home config, so the next 'lll' command works.
+  /// The home config holds neither a token nor another server's url: save
+  /// this board's url and member token there, so the next command works.
   Save,
-  /// A token from a file that this server does not accept. url and token
-  /// layer independently, so it may be another server's login: kept.
-  Keep,
-  /// A --pb-dir boot is a throwaway, like its team (ensure_team): the CLI's
-  /// config is left as it was.
-  Untouched,
+  /// This kind of boot never touches the CLI's login; the payload says why.
+  Untouched(string),
+  /// Configuration that may belong to another server stands in the way. It
+  /// is kept; the payload is how to switch.
+  Keep(string),
 }
 
-/// Only an empty slot is written, the rule the demo boot follows too.
-fn cli_login_plan(
-  rides_config_token: bool,
-  throwaway: bool,
-  token_source: string,
-  home_token: string,
-) -> CliLogin {
-  if rides_config_token { return CliLogin.Already }
-  if throwaway { return CliLogin.Untouched }
-  if home_token != "" || strings.HasPrefix(token_source, "file:") {
-    return CliLogin.Keep
+/// Pure. Only an empty slot is written, the rule the demo boot follows too:
+/// url and token layer independently, so a token or a url this server does
+/// not recognise may be another server's login.
+fn cli_login_plan(s: CliState) -> CliLogin {
+  if s.rides { return CliLogin.Already }
+  if s.throwaway {
+    return CliLogin.Untouched(
+      "a --pb-dir boot leaves the CLI's login and team alone; boot without --pb-dir to log the CLI in",
+    )
+  }
+  if !s.loopback {
+    return CliLogin.Untouched(
+      "a board bound beyond this machine leaves the CLI's login alone",
+    )
+  }
+  if s.token_source == "env:LLL_TOKEN" && s.home_token != "" {
+    return CliLogin.Keep(
+      "LLL_TOKEN in this shell is not valid for this server: unset it (the home config keeps its own token)",
+    )
+  }
+  if s.home_token != "" {
+    return CliLogin.Keep(
+      "the token in the home config is not valid for this server: to log in here instead, run 'lll logout', then restart lll up",
+    )
+  }
+  if let Some(path) = strings.CutPrefix(s.token_source, "file:") {
+    return CliLogin.Keep(
+      f"the token in {path} is not valid for this server: remove that line, then restart lll up",
+    )
+  }
+  if s.home_url != "" && !is_loopback(s.home_url) {
+    return CliLogin.Keep(
+      f"the home config points the CLI at {s.home_url}: to use this board instead, run 'lll config set url {s.db_url}', then restart lll up",
+    )
   }
   CliLogin.Save
 }
@@ -459,14 +507,9 @@ fn log_cli_in(
   token_source: string,
 ) -> Result<Slice<string>, string> {
   match plan {
-    CliLogin.Already => Ok([f"cli    logged in as {name} (token from {token_source})"]),
-    CliLogin.Keep => Ok([
-      f"cli    not logged in to this board: the CLI keeps its token from {strings.TrimPrefix(token_source, "file:")}, which this server does not accept",
-      f"cli    to log the CLI in as {name} instead: lll logout, then restart lll up",
-    ]),
-    CliLogin.Untouched => Ok([
-      "cli    unchanged: a --pb-dir boot leaves the CLI's login and team alone ('lll whoami' shows them); boot without --pb-dir to log the CLI in",
-    ]),
+    CliLogin.Already => Ok([f"cli    unchanged: the CLI uses its token from {token_source}"]),
+    CliLogin.Untouched(why) => Ok([f"cli    unchanged: {why}"]),
+    CliLogin.Keep(how) => Ok([f"cli    not logged in to this board: {how}"]),
     CliLogin.Save => {
       let _ = set_home_key("url", db_url)?
       let path = set_home_key("token", os.Getenv("LLL_TOKEN"))?

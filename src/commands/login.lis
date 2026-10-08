@@ -259,7 +259,7 @@ fn token_identity(target: string, tok: string) -> Result<(string, bool), string>
       let status = pb.response_status(e)
       if status == 401 || status == 403 {
         return Err(
-          "the server did not accept that token as a member token (expired, revoked, mistyped, or an administrator token); get a fresh one from the board's 'Use the CLI' page or 'lll token create NAME'",
+          "the server did not accept that token as a member token (expired, revoked, mistyped, or an administrator token); get a fresh one from the board's /me page ('Show my CLI login') or 'lll token create NAME'",
         )
       }
       return Err(e)
@@ -358,7 +358,7 @@ fn settle_team(read_only: bool) {
         if team.archived {
           fmt.Println(f"authenticated, but team {cfg.team} is archived; run 'lll team unarchive {cfg.team}' to restore it, or attach to another team")
         } else {
-          fmt.Println(f"team {cfg.team} — {ready}")
+          fmt.Println(f"team {cfg.team}: {ready}")
         }
       },
       None => fmt.Println(f"authenticated, but team {cfg.team} is missing on this server. Check 'lll team list --archived' and reattach with 'lll attach --key EXISTING_KEY'. Only if you intend a new team, run 'lll attach --key {cfg.team}'."),
@@ -771,7 +771,7 @@ remaining setup, such as a missing team or board endpoint. 'lll attach'
 writes the team to the directory's .lll.toml.
 
 --token logs in with a member token instead of an email and password: the
-one the board's 'Use the CLI' page shows a member who joined by invite link,
+one the board's /me page ('Show my CLI login') shows a member who joined by invite link,
 or one from 'lll token create NAME'. --token - prompts for it with echo off
 (or reads one line from a pipe), which keeps it out of shell history:
 

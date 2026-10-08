@@ -67,7 +67,7 @@ fn upgrade_plan(
 /// Printed with every plan (LLL-655): what an upgrade changes beyond the
 /// binary, for a machine that also runs the server.
 fn upgrade_notes() -> string {
-  "if this machine runs the server ('lll up'): stop it and back up its data directory first; the new version migrates the database on its first start, and the backup is the way back
+  "if this machine runs the server ('lll up'): stop it and back up its data directory first (with Homebrew, run 'lll upgrade --dry-run' until that is done); the new version migrates the database on its first start, and the backup is the way back
 upgrade the server and its clients together: a client older than its server may lack commands the server expects"
 }
 
@@ -113,8 +113,10 @@ backup is the way back. Upgrade the server and its clients together.",
   let resolved = filepath.EvalSymlinks(exe).unwrap_or(exe)
   let install = install_of(resolved)
   let dry_run = p.given("--dry-run")
-  fmt.Println(upgrade_plan(install, dry_run, runtime.GOOS, runtime.GOARCH))
+  // Notes first: Homebrew runs straight after the plan, so advice printed
+  // after it could not be followed in time.
   fmt.Println(upgrade_notes())
+  fmt.Println(upgrade_plan(install, dry_run, runtime.GOOS, runtime.GOARCH))
   let Some(argv) = upgrade_argv(install) else {
     return Ok(())
   }

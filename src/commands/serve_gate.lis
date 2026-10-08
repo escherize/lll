@@ -491,7 +491,9 @@ pub fn scoped_route(
 ) -> ScopedVerdict {
   // A viewer's own page (LLL-648): it shows only this viewer's own login,
   // so read-only viewers get it too, the POST that reveals it included.
-  if path == "/me" && (method == "GET" || method == "POST") { return ScopedVerdict.Open }
+  if path == "/me" && (method == "GET" || method == "HEAD" || method == "POST") {
+    return ScopedVerdict.Open
+  }
   if method == "POST" && scoped_writes().contains(path) {
     if writes { return ScopedVerdict.Open }
     return ScopedVerdict.Closed("read-only board login: it can read its teams but not change them")

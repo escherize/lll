@@ -40,6 +40,7 @@ python3 "$REPO_ROOT"/scripts/test_up_port_ownership.py "$REPO_ROOT"/target/.lise
 python3 "$REPO_ROOT"/scripts/test_up_port_ownership.py "$REPO_ROOT"/target/.lisette/bin/lll --neighbor-board-race
 python3 "$REPO_ROOT"/scripts/test_up_errors.py "$REPO_ROOT"/target/.lisette/bin/lll
 python3 "$REPO_ROOT"/scripts/test_server_surface.py "$REPO_ROOT"/target/.lisette/bin/lll
+python3 "$REPO_ROOT"/scripts/test_first_run.py "$REPO_ROOT"/target/.lisette/bin/lll
 python3 "$REPO_ROOT"/scripts/test_board_identity.py "$REPO_ROOT"/target/.lisette/bin/lll
 python3 "$REPO_ROOT"/scripts/test_scratch.py
 python3 "$REPO_ROOT"/scripts/test_demo.py

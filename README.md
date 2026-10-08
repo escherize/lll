@@ -64,9 +64,9 @@ everything. The banner lines:
   `LLL_ADMIN_PASSWORD` unset, a loopback boot uses `admin@local.dev` /
   `admin-local-123` and prints that pair. A pair from the environment is
   never printed.
-- `cli`: when your home config holds no token, `lll up` logs the CLI in as
-  your member. It never replaces an existing token; when this server does not
-  accept that token, the line says how to switch.
+- `cli`: when your home config holds no token and no other server's url,
+  `lll up` logs the CLI in as your member. It never replaces an existing
+  login; when one is in the way, the line says how to switch.
 - `board  login`: a link that signs your browser in to the board. On this
   machine, `lll board` prints it again.
 

@@ -270,7 +270,15 @@ pub fn me_cli(w: http.ResponseWriter, r: Ref<http.Request>) {
   }
   match request_origin(r) {
     Ok(origin) => join_respond(w, 200, me_html(viewer, origin, token)),
-    Err(e) => join_respond(w, 400, join_html(e, false, "")),
+    Err(_) => join_respond(
+      w,
+      400,
+      join_html(
+        "This board cannot tell its own address from the request, so it cannot write the login command. Open the board by its usual address and try again.",
+        false,
+        "",
+      ),
+    ),
   }
 }
 
