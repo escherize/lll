@@ -32,8 +32,7 @@ fn import_dir(input: flags.CommandInput) -> Result<(), pb.CliError> {
   let dir = p.first()
   if dir == "" { return Err(flags.usage_error(f"which directory?\nusage: {usage}")) }
 
-  let team = current_team(ctx)?
-  if team.archived { return Err(pb.failed(records.archived_hint(team.key))) }
+  let team = records.active_team(current_team(ctx)?)?.team()
 
   // Read and parse the WHOLE set before writing anything. A mirror with one
   // malformed file must fail with nothing created, not leave a team half

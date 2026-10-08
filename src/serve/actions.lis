@@ -76,8 +76,8 @@ fn finish_action(
 
 /// One issue edit from a board control, as the viewer, through the write
 /// layer. Each endpoint sets exactly the field its control edits.
-fn patch_issue(who: Acting, issue: models.Issue, patch: writes.IssuePatch) -> Result<string, pb.CliError> {
-  match writes.update_issue(who.reads, issue, patch, writes.UpdateOptions.as_caller(who.caller)) {
+fn patch_issue(who: Acting, active: records.WritableIssue, patch: writes.IssuePatch) -> Result<string, pb.CliError> {
+  match writes.update_issue(who.reads, active.issue(), patch, writes.UpdateOptions.as_caller(who.caller)) {
     Ok(_) => Ok(""),
     Err(writes.UpdateFailure.Failed(e)) => Err(e),
     Err(writes.UpdateFailure.Changed(e)) => Err(e),
@@ -128,15 +128,6 @@ impl Acting {
   }
 }
 
-/// An archived team's board is read-only (TASK-210): every write that
-/// mutates its records — creates and the issue editors alike — refuses with
-/// the flash naming the way back. Free at the issue endpoints: each already
-/// fetches the issue with its team expanded.
-fn require_active_team(t: models.Team) -> Result<(), pb.CliError> {
-  if t.archived { return Err(pb.failed(records.archived_hint(t.key))) }
-  Ok(())
-}
-
 /// One escaped alert response for the page strip and dialog-local errors.
 /// Actions use 200/SSE for both outcomes; an empty message clears the alert.
 fn action_flash(w: http.ResponseWriter, target: string, failure: Option<pb.CliError>) {
@@ -184,8 +175,7 @@ fn create_write(ctx: pb.Client, v: Viewing, r: mut Ref<http.Request>) -> Result<
   }
   // New issues do not land in an archived team (TASK-210), same refusal as
   // `lll issue create`.
-  require_active_team(t)?
-  let team = t.id
+  let team = records.active_team(t)?.id()
   let mut priority = models.Priority.None
   let prio_slug = r.PostFormValue("priority")
   if prio_slug != "" {
@@ -245,12 +235,14 @@ fn state_write(_ctx: pb.Client, v: Viewing, r: mut Ref<http.Request>) -> Result<
   let before = r.FormValue("before")
   let who = acting_as(v)?
   let issue = who.issue(key)?
-  require_active_team(issue.expand.team)?
+  // An archived team's board is read-only (TASK-210): the edit is handed
+  // only an issue whose team takes writes.
+  let active = records.active_issue(issue)?
   // The issue's OWN team scopes the reorder (TASK-198): a drop on any
   // team's board must compute the midpoint against that team's column, not
   // the boot team's.
   let sort = reorder_sort(who.reads, issue, state, before, issue.team)?
-  patch_issue(who, issue, writes.IssuePatch { state: Some(state), sort: Some(sort), ..writes.IssuePatch.unchanged() })
+  patch_issue(who, active, writes.IssuePatch { state: Some(state), sort: Some(sort), ..writes.IssuePatch.unchanged() })
 }
 
 /// New manual position for `issue` landing in `state` before the record id
@@ -326,8 +318,10 @@ fn priority_write(_ctx: pb.Client, v: Viewing, r: mut Ref<http.Request>) -> Resu
   }
   let who = acting_as(v)?
   let issue = who.issue(key)?
-  require_active_team(issue.expand.team)?
-  patch_issue(who, issue, writes.IssuePatch { priority: Some(prio), ..writes.IssuePatch.unchanged() })
+  // An archived team's board is read-only (TASK-210): the edit is handed
+  // only an issue whose team takes writes.
+  let active = records.active_issue(issue)?
+  patch_issue(who, active, writes.IssuePatch { priority: Some(prio), ..writes.IssuePatch.unchanged() })
 }
 
 /// Set or clear the issue's marker from the web picker.
@@ -344,8 +338,10 @@ fn emoji_write(_ctx: pb.Client, v: Viewing, r: mut Ref<http.Request>) -> Result<
   }
   let who = acting_as(v)?
   let issue = who.issue(key)?
-  require_active_team(issue.expand.team)?
-  patch_issue(who, issue, writes.IssuePatch { emoji: Some(emoji), ..writes.IssuePatch.unchanged() })
+  // An archived team's board is read-only (TASK-210): the edit is handed
+  // only an issue whose team takes writes.
+  let active = records.active_issue(issue)?
+  patch_issue(who, active, writes.IssuePatch { emoji: Some(emoji), ..writes.IssuePatch.unchanged() })
 }
 
 fn title_write(_ctx: pb.Client, v: Viewing, r: mut Ref<http.Request>) -> Result<string, pb.CliError> {
@@ -354,8 +350,10 @@ fn title_write(_ctx: pb.Client, v: Viewing, r: mut Ref<http.Request>) -> Result<
   if title == "" { return Err(pb.failed("title is required")) }
   let who = acting_as(v)?
   let issue = who.issue(key)?
-  require_active_team(issue.expand.team)?
-  patch_issue(who, issue, writes.IssuePatch { title: Some(title), ..writes.IssuePatch.unchanged() })
+  // An archived team's board is read-only (TASK-210): the edit is handed
+  // only an issue whose team takes writes.
+  let active = records.active_issue(issue)?
+  patch_issue(who, active, writes.IssuePatch { title: Some(title), ..writes.IssuePatch.unchanged() })
 }
 
 fn project_write(_ctx: pb.Client, v: Viewing, r: mut Ref<http.Request>) -> Result<string, pb.CliError> {
@@ -366,13 +364,15 @@ fn project_write(_ctx: pb.Client, v: Viewing, r: mut Ref<http.Request>) -> Resul
   // (TASK-173).
   let who = acting_as(v)?
   let issue = who.issue(key)?
-  require_active_team(issue.expand.team)?
+  // An archived team's board is read-only (TASK-210): the edit is handed
+  // only an issue whose team takes writes.
+  let active = records.active_issue(issue)?
   let project = if id == "" {
     writes.Relation.Clear
   } else {
     writes.Relation.Set(picked_project(records.fetch_projects(who.reads, query.TeamScope.Only(issue.team))?, id)?.id)
   }
-  patch_issue(who, issue, writes.IssuePatch { project, ..writes.IssuePatch.unchanged() })
+  patch_issue(who, active, writes.IssuePatch { project, ..writes.IssuePatch.unchanged() })
 }
 
 fn assignee_write(_ctx: pb.Client, v: Viewing, r: mut Ref<http.Request>) -> Result<string, pb.CliError> {
@@ -383,7 +383,9 @@ fn assignee_write(_ctx: pb.Client, v: Viewing, r: mut Ref<http.Request>) -> Resu
   // The picker offers the viewer's roster for the issue's team (LLL-551); a
   // posted id outside it is as unknown as a deleted one.
   let picked = if id == "" { None } else { Some(picked_member(read_roster(who.reads)?, id)?.id) }
-  require_active_team(issue.expand.team)?
+  // An archived team's board is read-only (TASK-210): the edit is handed
+  // only an issue whose team takes writes.
+  let active = records.active_issue(issue)?
   // Never forced (LLL-662): clearing the assignee releases the claim, so the
   // picker clears only the viewer's own hold. Taking anyone else's goes
   // through the Release form, which asks for a reason. The write layer reads
@@ -392,7 +394,7 @@ fn assignee_write(_ctx: pb.Client, v: Viewing, r: mut Ref<http.Request>) -> Resu
     None => writes.Relation.Clear,
     Some(member) => writes.Relation.Set(member),
   }
-  let _ = patch_issue(who, issue, writes.IssuePatch { assignee, ..writes.IssuePatch.unchanged() }).map_err(|e| {
+  let _ = patch_issue(who, active, writes.IssuePatch { assignee, ..writes.IssuePatch.unchanged() }).map_err(|e| {
     if e.has_code(pb.ServerCode.NeedsForce) {
       e.with_message(f"{strings.TrimSuffix(pb.display_error(e).summary, ".")} - release it with a reason first (the Release form on the issue)")
     } else { e }
@@ -426,14 +428,16 @@ fn labels_write(_ctx: pb.Client, v: Viewing, r: mut Ref<http.Request>) -> Result
   // however the checkbox got its id (TASK-173).
   let who = acting_as(v)?
   let issue = who.issue(key)?
-  require_active_team(issue.expand.team)?
+  // An archived team's board is read-only (TASK-210): the edit is handed
+  // only an issue whose team takes writes.
+  let active = records.active_issue(issue)?
   let label = picked_label(records.fetch_labels(who.reads, query.TeamScope.Only(issue.team))?, id)?.id
   let labels = if r.FormValue("on") == "true" {
     writes.LabelEdit.Delta { add: [label], remove: [] }
   } else {
     writes.LabelEdit.Delta { add: [], remove: [label] }
   }
-  patch_issue(who, issue, writes.IssuePatch { labels, ..writes.IssuePatch.unchanged() })
+  patch_issue(who, active, writes.IssuePatch { labels, ..writes.IssuePatch.unchanged() })
 }
 
 fn comment_write(ctx: pb.Client, v: Viewing, r: mut Ref<http.Request>) -> Result<string, pb.CliError> {
@@ -441,8 +445,7 @@ fn comment_write(ctx: pb.Client, v: Viewing, r: mut Ref<http.Request>) -> Result
   let body = strings.TrimSpace(r.PostFormValue("body"))
   if body == "" { return Err(pb.failed("comment body is required")) }
   let who = acting_as(v)?
-  let issue = who.issue(key)?
-  require_active_team(issue.expand.team)?
+  let issue = records.active_issue(who.issue(key)?)?.issue()
   let Some(author) = who.member_id(ctx)? else {
     return Err(pb.failed("commenting needs a member token; start the board with lll up"))
   };
@@ -502,8 +505,7 @@ fn views_save(_ctx: pb.Client, v: Viewing, w: http.ResponseWriter, r: mut Ref<ht
 /// The board uses its process identity; the button names it explicitly.
 fn claim_write(ctx: pb.Client, v: Viewing, r: mut Ref<http.Request>) -> Result<string, pb.CliError> {
   let who = acting_as(v)?
-  let issue = who.issue(r.FormValue("key"))?
-  require_active_team(issue.expand.team)?
+  let issue = records.active_issue(who.issue(r.FormValue("key"))?)?.issue()
   // A member viewer claims as itself, whatever name the shared live
   // fragment last rendered on the button (LLL-545).
   if let Some(m) = who.member {
@@ -524,8 +526,7 @@ fn claim_write(ctx: pb.Client, v: Viewing, r: mut Ref<http.Request>) -> Result<s
 /// viewer, so the form cannot know who is looking; the server decides.
 fn release_write(_ctx: pb.Client, v: Viewing, r: mut Ref<http.Request>) -> Result<string, pb.CliError> {
   let who = acting_as(v)?
-  let issue = who.issue(r.FormValue("key"))?
-  require_active_team(issue.expand.team)?
+  let issue = records.active_issue(who.issue(r.FormValue("key"))?)?.issue()
   let posted = r.FormValue("claim_id")
   if posted == "" { return Err(pb.failed("The claim changed; refresh before releasing it.")) }
   let observed = writes.observed_claim(posted)

@@ -54,10 +54,9 @@ fn create(input: flags.CommandInput) -> Result<(), pb.CliError> {
 
   // The team first: it scopes the label and project names below, which are
   // unique per team and not across them (TASK-173).
-  let team = current_team(ctx)?
   // New issues do not land in an archived team (TASK-210): archived is the
   // lifecycle's end, and reviving it is a deliberate one-command act.
-  if team.archived { return Err(pb.failed(records.archived_hint(team.key))) }
+  let team = records.active_team(current_team(ctx)?)?.team()
 
   let mut assignee = None
   if assignee_name != "" { assignee = Some(records.resolve_member(ctx, assignee_name)?.id) }
@@ -529,7 +528,7 @@ fn pr_cmd(input: flags.CommandInput) -> Result<(), pb.CliError> {
   let issue = records.fetch_issue(ctx, resolved)?
   let key = f"{issue.expand.team.key}-{issue.number}"
   let (body, linked_only) = pr_body(issue_url(ctx, issue)?, issue.description)?
-  if issue.expand.team.archived { return Err(pb.failed(records.archived_hint(issue.expand.team.key))) }
+  let _ = records.active_issue(issue)?
   if linked_only {
     let _ = fmt.Fprintln(os.Stderr, "issue description exceeds the PR body limit; linking to the full description instead")
   }

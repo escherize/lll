@@ -67,8 +67,7 @@ fn import_github(input: flags.CommandInput) -> Result<(), pb.CliError> {
   let emoji = records.check_emoji(input.parsed.one("--emoji"))?
   // The team first: it scopes the labels below, which are unique per team
   // (TASK-173), the same order 'issue create' resolves things in.
-  let team = current_team(ctx)?
-  if team.archived { return Err(pb.failed(records.archived_hint(team.key))) }
+  let team = records.active_team(current_team(ctx)?)?.team()
 
   let issues = sort_by_number(gh_issue_list(repo)?)
   // The idempotency set: every ref already recorded on a team issue. A gh#N

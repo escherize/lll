@@ -135,3 +135,36 @@ pub fn unknown_team_scoped(ctx: pb.Client, key: string) -> Option<pb.CliError> {
 pub fn archived_hint(key: string) -> string {
   f"team {key} is archived; run 'lll team unarchive {key}' first"
 }
+
+/// A team that is not archived (TASK-210): what a write that lands in a
+/// team is handed, so it cannot forget to ask. Only active_team makes one.
+pub struct WritableTeam {
+  active: models.Team,
+}
+
+impl WritableTeam {
+  pub fn team(self) -> models.Team { self.active }
+  pub fn id(self) -> models.TeamId { self.active.id }
+}
+
+/// `t`, if writes may land in it; the archived refusal otherwise.
+pub fn active_team(t: models.Team) -> Result<WritableTeam, pb.CliError> {
+  if t.archived { return Err(pb.failed(archived_hint(t.key))) }
+  Ok(WritableTeam { active: t })
+}
+
+/// An issue in a team that is not archived: what an issue edit is handed.
+/// Only active_issue makes one, from an issue read with its team expanded.
+pub struct WritableIssue {
+  active: models.Issue,
+}
+
+impl WritableIssue {
+  pub fn issue(self) -> models.Issue { self.active }
+}
+
+/// `issue`, if its team takes writes; the archived refusal otherwise.
+pub fn active_issue(issue: models.Issue) -> Result<WritableIssue, pb.CliError> {
+  let _ = active_team(issue.expand.team)?
+  Ok(WritableIssue { active: issue })
+}

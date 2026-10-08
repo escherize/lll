@@ -245,17 +245,36 @@ fn settings_write(
   Ok(extra)
 }
 
+/// The record a settings write names in its route's {kind}, parsed once.
+enum SettingsRow {
+  Team,
+  Label,
+  Project,
+  Member,
+}
+
+/// The row a route's {kind} names; None for any other.
+fn settings_row(kind: string) -> Option<SettingsRow> {
+  match kind {
+    "team" => Some(SettingsRow.Team),
+    "label" => Some(SettingsRow.Label),
+    "project" => Some(SettingsRow.Project),
+    "member" => Some(SettingsRow.Member),
+    _ => None,
+  }
+}
+
 /// The section a written row lives in — the write's `kind` is singular and
 /// the section plural, and this is the only place that translation happens.
 fn section_of(kind: string) -> string {
-  match kind {
-    "team" => "identity",
-    "label" => "labels",
-    "project" => "projects",
-    "member" => "members",
+  match settings_row(kind) {
+    Some(SettingsRow.Team) => "identity",
+    Some(SettingsRow.Label) => "labels",
+    Some(SettingsRow.Project) => "projects",
+    Some(SettingsRow.Member) => "members",
     // A write whose kind is not a section has already failed in
     // settings_apply; redrawing identity costs one render of data in hand.
-    _ => "identity",
+    None => "identity",
   }
 }
 
@@ -266,11 +285,12 @@ fn settings_apply(
   team_id: models.TeamId,
 ) -> Result<(), pb.CliError> {
   let kind = r.PathValue("kind")
+  let Some(row) = settings_row(kind) else { return Err(pb.failed(f"unknown settings section '{kind}'")) }
   let id = strings.TrimSpace(r.PostFormValue("id"))
   let name = strings.TrimSpace(r.PostFormValue("name"))
 
-  match kind {
-    "team" => {
+  match row {
+    SettingsRow.Team => {
       if name == "" { return Err(pb.failed("team name is required")) }
       let accent = form_hex(r, "accent")?
       // Validated with the CLI's rule, not the browser's: a maxlength on the
@@ -284,7 +304,7 @@ fn settings_apply(
         ..
       })
     },
-    "label" => {
+    SettingsRow.Label => {
       if name == "" { return Err(pb.failed("label name is required")) }
       records.check_filter_name("label", name)?
       let color = form_hex(r, "color")?
@@ -302,7 +322,7 @@ fn settings_apply(
       let owner = move_scope_if_asked(ctx, r, records.Classifier.Label(label.id), name, team_id)?
       writes.update_label(ctx, label.id, writes.LabelPatch { name: Some(name), color: Some(color), team: Some(owner) })
     },
-    "member" => {
+    SettingsRow.Member => {
       if name == "" { return Err(pb.failed("member name is required")) }
       let email = strings.TrimSpace(r.PostFormValue("email"))
       if id == "" {
@@ -345,7 +365,7 @@ fn settings_apply(
       }
       writes.update_member(ctx, pb.Caller.Process, existing.id, writes.MemberPatch { name: Some(name), .. })
     },
-    "project" => {
+    SettingsRow.Project => {
       if name == "" { return Err(pb.failed("project name is required")) }
       records.check_filter_name("project", name)?
       let status = r.PostFormValue("status")
@@ -361,7 +381,6 @@ fn settings_apply(
       let owner = move_scope_if_asked(ctx, r, records.Classifier.Project(project.id), name, team_id)?
       writes.update_project(ctx, project.id, writes.ProjectPatch { name: Some(name), description: None, status: Some(status), team: Some(owner) })
     },
-    other => Err(pb.failed(f"unknown settings section '{other}'")),
   }
 }
 
@@ -379,14 +398,14 @@ fn form_hex(r: mut Ref<http.Request>, field: string) -> Result<string, pb.CliErr
   Ok(hex)
 }
 
-/// Sections whose rows can be deleted. The team is not one: it owns every
-/// issue's key, and `lll team` has no delete either.
-fn settings_collection(kind: string) -> Result<string, pb.CliError> {
-  match kind {
-    "label" => Ok("labels"),
-    "member" => Ok("members"),
-    "project" => Ok("projects"),
-    other => Err(pb.failed(f"cannot delete from '{other}'")),
+/// Sections whose rows can be deleted, and their collections. The team is
+/// not one: it owns every issue's key, and `lll team` has no delete either.
+fn settings_collection(kind: string) -> Result<(SettingsRow, string), pb.CliError> {
+  match settings_row(kind) {
+    Some(SettingsRow.Label) => Ok((SettingsRow.Label, "labels")),
+    Some(SettingsRow.Member) => Ok((SettingsRow.Member, "members")),
+    Some(SettingsRow.Project) => Ok((SettingsRow.Project, "projects")),
+    Some(SettingsRow.Team) | None => Err(pb.failed(f"cannot delete from '{kind}'")),
   }
 }
 

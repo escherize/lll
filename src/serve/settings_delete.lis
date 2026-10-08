@@ -20,12 +20,12 @@ pub struct SettingsDeleteVM {
 /// beside the record. Recount on submission; stale counts require a new review.
 fn settings_delete(ctx: pb.Client, r: mut Ref<http.Request>, team_id: models.TeamId) -> Result<Option<string>, pb.CliError> {
   let kind = r.PathValue("kind")
-  let coll = settings_collection(kind)?
+  let (row, coll) = settings_collection(kind)?
   let id = strings.TrimSpace(r.PostFormValue("id"))
   if id == "" { return Err(pb.failed("nothing to delete")) }
   let path = f"/api/collections/{coll}/records/{url.PathEscape(id)}"
-  if kind == "member" { return settings_member_delete(ctx, r, id) }
-  let (name, owner, what) = if kind == "label" {
+  if row == SettingsRow.Member { return settings_member_delete(ctx, r, id) }
+  let (name, owner, what) = if row == SettingsRow.Label {
     let mut label = models.Label { .. }
     pb.fetch(ctx, path, "label", &label)?
     (label.name, label.team, records.Classifier.Label(label.id))
