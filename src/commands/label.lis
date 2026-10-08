@@ -141,7 +141,7 @@ fn label_create(input: flags.CommandInput) -> Result<(), string> {
   "\n       (check 'lll label list' first; reuse over near-duplicates like bug/bugs/defect)"
   let p = input.parsed
   let name = flags.entity_name(p, "-n", usage)?
-  check_filter_name("label", name)?
+  records.check_filter_name("label", name)?
   let color = p.one("-c")
   let team = team_flag_or_current(ctx, p.one("--team"))?
 
@@ -169,7 +169,7 @@ fn label_edit(input: flags.CommandInput) -> Result<(), string> {
   if !p.given("-n") && !p.given("-c") {
     return Err(flags.usage_error(f"nothing to update: pass -n or -c\nusage: {usage}"))
   }
-  if p.given("-n") { check_filter_name("label", p.one("-n"))? }
+  if p.given("-n") { records.check_filter_name("label", p.one("-n"))? }
   let label = records.resolve_label(ctx, current_team(ctx)?.id, name)?
 
   let mut patch = writes.LabelPatch { .. }
@@ -189,7 +189,7 @@ fn label_delete(input: flags.CommandInput) -> Result<(), string> {
     return Err(flags.usage_error(f"usage: {usage}"))
   }
   let label = records.resolve_label(ctx, current_team(ctx)?.id, name)?
-  let used = entity_issue_count(ctx, "label", label.id)?
+  let used = records.entity_issue_count(ctx, "label", label.id)?
   if used > 0 && !p.given("--force") {
     return Err(refuse_delete("label", name, used))
   }

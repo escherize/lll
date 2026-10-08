@@ -5,6 +5,7 @@ import "go:strings"
 import "models"
 import "pb"
 import "query"
+import "flags"
 
 /// A team key as it is stored: uppercase, trimmed (LLL-235).
 ///
@@ -61,4 +62,76 @@ pub fn find_team_as(
 pub fn list_teams(ctx: pb.Client) -> Result<models.TeamList, string> {
   let items = fetch_all_records<models.Team>(ctx, "/api/collections/teams/records?sort=key,id", "teams")?
   Ok(models.TeamList { items })
+}
+
+/// The team `LLL_TEAM` (or `team` in .lll.toml) names, or None when no key
+/// is set. A key naming a team the server does not have is an error either
+/// way — silently falling back to "every team" is how a scoped command ends
+/// up answering for all of them.
+pub fn configured_team(ctx: pb.Client) -> Result<Option<models.Team>, string> {
+  let (cfg, src) = ctx.settings.traced()?
+  if cfg.team == "" { return Ok(None) }
+  let Some(t) = find_team(ctx, cfg.team)? else {
+    return Err(unknown_configured_team(ctx, cfg.team, src.team))
+  }
+  Ok(Some(t))
+}
+
+/// unknown_team, for the CONFIGURED key: says where the key came from. A
+/// fleet agent (TASK-309, task 4) ran `lll` from inside a checkout whose
+/// committed .lll.toml said team = LLL, against a server with no such team,
+/// and got "no team with key 'LLL'" - true, and useless, because it had never
+/// typed LLL and did not know which file had. `config list` knows; so does
+/// this message now.
+pub fn unknown_configured_team(ctx: pb.Client, key: string, origin: string) -> string {
+  if let Some(scoped) = unknown_team_scoped(ctx, key) { return scoped }
+  let from = if origin == "flag:--team" {
+    " (from --team)"
+  } else if strings.HasPrefix(origin, "env:") {
+    f" (from {strings.TrimPrefix(origin, "env:")})"
+  } else if strings.HasPrefix(origin, "file:") {
+    f" (from {strings.TrimPrefix(origin, "file:")})"
+  } else {
+    ""
+  }
+  pb.fail(pb.ErrorKind.NotFound, f"no team with key '{key}'{from} on the server. 'lll team list' shows the keys; 'lll attach --key KEY' points this directory at one, 'lll config list' shows every value and the file it came from, or create it with 'lll team create {key} -n \"Name\"'")
+}
+
+/// Missing-team message naming the fix. Shared by every command that needs a
+/// team and was given none (same package: src/commands).
+pub fn no_team() -> string {
+  // Names the command, not just the file. Every usability run read the old
+  // wording as "go hand-edit a file", and none of them found 'lll attach' —
+  // the command whose whole job is writing this key — from it. It follows
+  // unknown_team's shape for the same reason: say the fix, not the setting.
+  //
+  // Usage, exit 2 (LLL-679): the fix is on the command line or in the
+  // configuration that stands in for it, not on the server.
+  flags.usage_error("no team configured: pass --team KEY for this command, or run 'lll attach' to write the team to .lll.toml
+'lll team list' shows the keys; 'lll attach --key KEY' takes one directly")
+}
+
+/// Unknown-team message naming the fix. Shared by every command that
+/// resolves a team key (same package: src/commands).
+pub fn unknown_team(ctx: pb.Client, key: string) -> string {
+  if let Some(scoped) = unknown_team_scoped(ctx, key) { return scoped }
+  pb.fail(pb.ErrorKind.NotFound, f"no team with key '{key}' on the server. First inspect 'lll team list --archived'; the team may have been renamed.\nFor an existing team, use 'lll attach --key EXISTING_KEY' to update the attachment, or prefix one command with LLL_TEAM=EXISTING_KEY.\nOnly if you intend a new team, create it with 'lll team create {key} -n \"Name\"'.")
+}
+
+/// For a team-scoped caller, a missing key usually means "not yours", and
+/// 'lll team create' is a dead end it cannot run (fleet case 03). The wording
+/// does not say whether the team exists.
+pub fn unknown_team_scoped(ctx: pb.Client, key: string) -> Option<string> {
+  let Some(keys) = scoped_team_keys(ctx) else { return None }
+  let mine = if keys.is_empty() { "none" } else { strings.Join(keys, ", ") }
+  Some(
+    pb.fail(pb.ErrorKind.NotFound, f"no team '{key}' among the teams you can see ({mine}). 'lll whoami' shows your access; ask the person who invited you if you need another team."),
+  )
+}
+
+/// Archived-team refusal naming the fix. Shared by everything that refuses
+/// to write into an archived team (same package: src/commands): the CLI's
+/// attach and issue create, and the web board's write endpoints.
+pub fn archived_hint(key: string) -> string {
+  f"team {key} is archived; run 'lll team unarchive {key}' first"
 }

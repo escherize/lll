@@ -79,7 +79,7 @@ pub fn attach(ctx: pb.Client, args: Slice<string>) -> Result<(), string> {
   // is a deliberate lifecycle act, and unarchive is one command (TASK-210).
   // A server that is down still attaches — same bargain as the create below.
   if let Ok(Some(t)) = records.find_team(ctx, key) {
-    if t.archived { return Err(archived_hint(key)) }
+    if t.archived { return Err(records.archived_hint(key)) }
   }
 
   let path = filepath.Join(root, ".lll.toml")

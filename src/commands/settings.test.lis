@@ -5,6 +5,7 @@ import "go:strings"
 import "config"
 import "flags"
 import "pb"
+import "records"
 
 // LLL-486: commands take their configuration as a value. These build that
 // value from literals - no config file, no environment variable - and hand
@@ -39,7 +40,7 @@ fn a_command_reads_the_team_and_token_from_the_value_it_is_given() {
   let mut server = httptest.NewServer(teams_handler(["ENG"], seen))
   defer server.Close()
   let ctx = test_client(server.URL, "tok-from-value", "ENG")
-  let assert Ok(Some(team)) = configured_team(ctx)
+  let assert Ok(Some(team)) = records.configured_team(ctx)
   assert team.key == "ENG"
   let assert Some(auth) = seen.receive()
   assert auth == "Bearer tok-from-value"
@@ -55,11 +56,11 @@ fn a_team_flag_is_named_as_the_flag_in_an_unknown_team_refusal() {
   defer server.Close()
   let base = test_client(server.URL, "tok", "")
   let flagged = base.with_settings(base.settings.with_team("OPS"))
-  let assert Err(e) = configured_team(flagged)
+  let assert Err(e) = records.configured_team(flagged)
   assert e.contains("no team with key 'OPS' (from --team)")
   let env = config.Env { url: server.URL, token: "tok", team: "NOPE", .. }
   let inherited = pb.Client.new(config.resolve(env, config.no_overrides()))
-  let assert Err(e2) = configured_team(inherited)
+  let assert Err(e2) = records.configured_team(inherited)
   assert e2.contains("no team with key 'NOPE' (from LLL_TEAM)")
 }
 

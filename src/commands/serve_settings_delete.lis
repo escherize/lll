@@ -6,6 +6,7 @@ import "go:strings"
 import "models"
 import "pb"
 import "writes"
+import "records"
 
 pub struct SettingsDeleteVM {
   pub kind: string,
@@ -36,7 +37,7 @@ fn settings_delete(ctx: pb.Client, r: mut Ref<http.Request>, team_id: string) ->
   if team_id == "" || owner != team_id {
     return Err(f"the {kind} is not in this team; reload settings")
   }
-  let used = entity_issue_count(ctx, kind, id)?
+  let used = records.entity_issue_count(ctx, kind, id)?
   let confirmed = r.PostFormValue("confirmed") == "1"
   if !confirmed || r.PostFormValue("expected") != strconv.Itoa(used) {
     let vm = SettingsDeleteVM { kind, id, name, used, changed: confirmed }

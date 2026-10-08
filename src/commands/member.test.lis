@@ -3,6 +3,7 @@ import "pb"
 import "go:strings"
 
 import "flags"
+import "records"
 
 // Unit cover for the pure helpers in member.lis. Everything here is a
 // function of its arguments alone — no PocketBase, no config.
@@ -78,7 +79,7 @@ fn invite_lines_are_two_commands_and_the_optional_password_change() {
 
 #[test]
 fn real_email_rejects_the_synthesized_placeholder() {
-  assert !real_email(synthesize_email("Kim Ng"))
+  assert !real_email(records.synthesize_email("Kim Ng"))
   assert !real_email("")
   assert real_email("kim@example.com")
 }

@@ -100,7 +100,7 @@ pub fn run_server(
   // settings before any request could arrive, so the handlers and the
   // banner below agree.
   let board_tok = ctx.settings.board_token()
-  let Some(board_member) = actor(ctx)? else {
+  let Some(board_member) = records.find_actor(ctx)? else {
     return Err("the board needs a member token; start it with lll up")
   }
   // The BOOT team (TASK-198): the server hosts every team — the board views
@@ -108,8 +108,8 @@ pub fn run_server(
   // bare / redirect and the compatibility routes land. `lll up` (the one
   // caller) has already settled a team, so a missing one here is a real
   // misconfiguration, not the old "unscoped board".
-  let Some(boot) = configured_team(ctx)? else {
-    return Err(no_team())
+  let Some(boot) = records.configured_team(ctx)? else {
+    return Err(records.no_team())
   }
 
   // Fail fast on broken templates before accepting connections — both
@@ -202,7 +202,7 @@ fn board_mux(
   ctx: pb.Client,
   boot: models.Team,
   hub: Hub,
-  board_member: Actor,
+  board_member: records.Actor,
   admin_ui: bool,
 ) -> Result<http.Handler, string> {
   let mut mux: mut Ref<http.ServeMux> = http.NewServeMux()

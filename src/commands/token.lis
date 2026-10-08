@@ -728,7 +728,7 @@ fn create_bot_member_as(ctx: pb.Client, tok: string, name: string, owner: string
   let password = rand.Text()
   let new_bot = models.NewMember {
     name,
-    email: synthesize_email(name),
+    email: records.synthesize_email(name),
     password,
     password_confirm: password,
     email_visibility: true,

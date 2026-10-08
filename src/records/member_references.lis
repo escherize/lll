@@ -4,15 +4,15 @@ import "go:net/url"
 import "pb"
 import "query"
 
-struct MemberReferences {
-  assigned: int,
-  authored: int,
-  created: int,
+pub struct MemberReferences {
+  pub assigned: int,
+  pub authored: int,
+  pub created: int,
 }
 
 /// Both deletion surfaces count assignments and authorship under the identity
 /// that will perform the deletion, including references outside the current team.
-fn member_references(ctx: pb.Client, id: string, token: string) -> Result<MemberReferences, string> {
+pub fn count_member_references(ctx: pb.Client, id: string, token: string) -> Result<MemberReferences, string> {
   Ok(MemberReferences {
     assigned: member_reference_count(ctx, "issues", "assignee", id, token)?,
     authored: member_reference_count(ctx, "comments", "author", id, token)?,

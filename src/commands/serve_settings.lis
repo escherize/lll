@@ -95,7 +95,7 @@ fn settings_vm(ctx: pb.Client, team: models.Team, section: string) -> Result<Set
         name: p.name,
         status: p.status,
       })
-      vm.statuses = project_statuses().map(|s| StateOpt {
+      vm.statuses = records.project_statuses().map(|s| StateOpt {
         value: s,
         label: state_label(s),
       })
@@ -146,7 +146,7 @@ fn scope_rows(ctx: pb.Client) -> Result<Slice<SetTeamVM>, string> {
 fn team_rows(ctx: pb.Client) -> Result<Slice<SetTeamVM>, string> {
   let mut rows: Slice<SetTeamVM> = []
   for t in records.list_teams(ctx)?.items {
-    let held = issue_count(ctx, f"team={query.quote(t.id)}")?
+    let held = records.issue_count(ctx, f"team={query.quote(t.id)}")?
     rows = rows.append(
       SetTeamVM {
         id: t.id,
@@ -173,7 +173,7 @@ fn label_rows(ctx: pb.Client, team_id: string) -> Result<Slice<SetLabelVM>, stri
   // fetch_labels answers name-sorted; the strict > below keeps equal-usage
   // rows in that order, so ties stay alphabetical.
   for l in records.fetch_labels(ctx, team_id)? {
-    let used = entity_issue_count(ctx, "label", l.id)?
+    let used = records.entity_issue_count(ctx, "label", l.id)?
     let row = SetLabelVM {
       id: l.id,
       name: l.name,
@@ -280,7 +280,7 @@ fn settings_apply(
       // Validated with the CLI's rule, not the browser's: a maxlength on the
       // input is a hint, and this is the same field `lll team set-emoji`
       // writes.
-      let emoji = team_emoji_value(r.PostFormValue("emoji"))?
+      let emoji = records.team_emoji_value(r.PostFormValue("emoji"))?
       writes.update_team(ctx, pb.Caller.Process, team_id, writes.TeamPatch {
         name: Some(name),
         accent: Some(accent),
@@ -290,7 +290,7 @@ fn settings_apply(
     },
     "label" => {
       if name == "" { return Err("label name is required") }
-      check_filter_name("label", name)?
+      records.check_filter_name("label", name)?
       let color = form_hex(r, "color")?
       // LLL-100: the row's team select. The move runs FIRST and may refuse,
       // so a rejected move leaves the name and colour untouched too - one
@@ -312,7 +312,7 @@ fn settings_apply(
         // never-shown password are the same bargain the CLI's member add
         // runs; nobody can log in as one until a password is set.
         let member_email = if email == "" {
-          synthesize_email(name)
+          records.synthesize_email(name)
         } else {
           email
         }
@@ -348,9 +348,9 @@ fn settings_apply(
     },
     "project" => {
       if name == "" { return Err("project name is required") }
-      check_filter_name("project", name)?
+      records.check_filter_name("project", name)?
       let status = r.PostFormValue("status")
-      if project_statuses().find(|s| s == status).is_none() {
+      if records.project_statuses().find(|s| s == status).is_none() {
         return Err(f"unknown project status '{status}'")
       }
       let owner = move_scope_if_asked(ctx, r, "project", name, id, team_id)?

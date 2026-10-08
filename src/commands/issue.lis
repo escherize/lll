@@ -49,19 +49,6 @@ fn value_or_stdin(val: string, flag: string) -> Result<string, string> {
   Ok(text)
 }
 
-/// One marker per issue, so anything sentence-shaped is a mistake. Graphemes
-/// need x/text; rune count is the lazy stand-in that still passes the longest
-/// single emoji anyone types (the 7-rune ZWJ family) and stops "in progress".
-fn check_emoji(val: string) -> Result<string, string> {
-  let trimmed = strings.TrimSpace(val)
-  if utf8.RuneCountInString(trimmed) > 8 {
-    return Err(
-      flags.usage_error(f"--emoji takes one emoji, got '{trimmed}' (pass \"\" to clear it)"),
-    )
-  }
-  Ok(trimmed)
-}
-
 fn check_priority(val: string) -> Result<int, string> {
   let named = strings.ToLower(val)
   match named {
@@ -741,7 +728,7 @@ fn create(input: flags.CommandInput) -> Result<(), string> {
   }
   let mut description = ""
   if p.given("-b") { description = value_or_stdin(p.one("-b"), "-b")? }
-  let emoji = check_emoji(p.one("--emoji"))?
+  let emoji = records.check_emoji(p.one("--emoji"))?
   let mut priority = 0
   if p.given("--priority") { priority = check_priority(p.one("--priority"))? }
   // Same validator update calls, so create and update cannot disagree about
@@ -757,7 +744,7 @@ fn create(input: flags.CommandInput) -> Result<(), string> {
   let team = current_team(ctx)?
   // New issues do not land in an archived team (TASK-210): archived is the
   // lifecycle's end, and reviving it is a deliberate one-command act.
-  if team.archived { return Err(archived_hint(team.key)) }
+  if team.archived { return Err(records.archived_hint(team.key)) }
 
   let mut assignee = ""
   if assignee_name != "" { assignee = records.resolve_member(ctx, assignee_name)?.id }
@@ -775,7 +762,7 @@ fn create(input: flags.CommandInput) -> Result<(), string> {
   let mut origin = provenance.capture(ctx.settings.env.agent)
   if p.given("--agent") { origin.tool = agent_label(ctx, p)? }
   let new_issue = models.NewIssue {
-    creator: actor(ctx)?.map_or("", |member| member.id),
+    creator: records.find_actor(ctx)?.map_or("", |member| member.id),
     origin,
     team: team.id,
     title,
@@ -1253,7 +1240,7 @@ fn view(input: flags.CommandInput) -> Result<(), string> {
   // who, this says where. "(last seen)" once the work is over.
   if full.work_branch != "" {
     let mut work = f"{full.work_branch} @ {full.work_host}:{full.work_path}"
-    if work_site_stale(full.state, claim.is_some()) {
+    if records.work_site_stale(full.state, claim.is_some()) {
       work = f"{work} (last seen)"
     }
     fmt.Println(f"Work:      {work}")
@@ -1471,7 +1458,7 @@ fn update(input: flags.CommandInput) -> Result<(), string> {
     },
   }
   let since = if p.given("--if-unchanged-since") { Some(unchanged_since_stamp(p.one("--if-unchanged-since"))?) } else { None }
-  let emoji = check_emoji(p.one("--emoji"))?
+  let emoji = records.check_emoji(p.one("--emoji"))?
   let emoji_set = p.given("--emoji")
   // An empty --assignee is the natural guess for "clear it" (two of thirty
   // fleet agents); the word is 'none', and this is where to say so.
@@ -1793,46 +1780,11 @@ fn record_work_site(ctx: pb.Client, issue: models.Issue, branch: string, agent: 
     // authorless for a superuser credential. Member identity is not duplicated
     // into the slot; this comment (and the claim holder) carry the who.
     let mut author = ""
-    if let Some(a) = actor(ctx)? { author = a.id }
+    if let Some(a) = records.find_actor(ctx)? { author = a.id }
     let moved = f"work moved: {issue.work_branch} @ {issue.work_host}:{issue.work_path} -> {branch} @ {host}:{path}"
     let _ = writes.create_comment(ctx, pb.Caller.Process, models.NewComment { issue: issue.id, author, agent, body: moved })?
   }
   writes.set_work_site(ctx, issue.id, writes.WorkSite { branch, host, path })
-}
-
-/// TASK-205's presentation rule: a work site is only "current" while the
-/// issue is being worked — once the state is done/cancelled or the claim is
-/// gone, the site renders as "(last seen)". A read, never a write: the slot
-/// itself is not cleared.
-fn work_site_stale(state: string, claimed: bool) -> bool {
-  state == "done" || state == "cancelled" || !claimed
-}
-
-/// The member named by the current token. A superuser credential has no
-/// member identity and leaves optional authorship empty.
-struct Actor {
-  id: string,
-  name: string,
-}
-
-fn actor(ctx: pb.Client) -> Result<Option<Actor>, string> {
-  let token = ctx.token()
-  if token == "" { return Ok(None) }
-  let Some(id) = pb.token_subject(token) else { return Ok(None) }
-  // Use the configured request path so the board can renew an expired token
-  // before resolving its member. Explicit-token calls deliberately cannot heal.
-  match ctx.get(f"/api/collections/members/records/{id}") {
-    Ok(body) => {
-      let mut member = models.Member { .. }
-      if let Err(e) = json.Unmarshal(body.bytes(), &member) {
-        return Err(f"decoding the actor: {e}")
-      }
-      Ok(Some(Actor { id: member.id, name: member.name }))
-    },
-    Err(e) => {
-      if pb.classify(e).status == 404 { Ok(None) } else { Err(e) }
-    },
-  }
 }
 
 /// The session label for claims and comments (LLL-521): --agent, else
@@ -1867,7 +1819,7 @@ fn claim(input: flags.CommandInput) -> Result<(), string> {
   let agent = agent_label(ctx, input.parsed)?
   let id = input.parsed.first()
   let resolved = resolve_id(ctx, id, usage)?
-  let Some(member) = actor(ctx)? else {
+  let Some(member) = records.find_actor(ctx)? else {
     return Err(
       "claiming needs a member token: 'lll login' as a person, or 'lll token create <member>' with admin credentials",
     )
@@ -2014,7 +1966,7 @@ fn comment(input: flags.CommandInput) -> Result<(), string> {
   // Authorship follows the authenticated member. Superuser comments are authorless.
   let mut author = ""
   let mut author_name = ""
-  if let Some(a) = actor(ctx)? {
+  if let Some(a) = records.find_actor(ctx)? {
     author = a.id
     author_name = a.name
   }
@@ -2093,7 +2045,7 @@ fn pr_cmd(input: flags.CommandInput) -> Result<(), string> {
   let issue = records.fetch_issue(ctx, resolved)?
   let key = f"{issue.expand.team.key}-{issue.number}"
   let (body, linked_only) = pr_body(issue_url(ctx, issue)?, issue.description)?
-  if issue.expand.team.archived { return Err(archived_hint(issue.expand.team.key)) }
+  if issue.expand.team.archived { return Err(records.archived_hint(issue.expand.team.key)) }
   if linked_only {
     let _ = fmt.Fprintln(os.Stderr, "issue description exceeds the PR body limit; linking to the full description instead")
   }
@@ -2182,7 +2134,6 @@ fn issue_url(ctx: pb.Client, issue: models.Issue) -> Result<string, string> {
   Ok(f"{base}/issue/{issue.expand.team.key}-{issue.number}")
 }
 
-
 /// Print comments as "author (3h ago)", or "author [bot via OWNER] (3h ago)",
 /// then the indented body.
 fn print_comments(comments: Slice<models.Comment>) {
@@ -2225,7 +2176,7 @@ fn comment_mutate(ctx: pb.Client, verb: string, p: flags.Parsed) -> Result<(), s
   let c = comments[n - 1]
   let whose = display.member_name(c.author, c.expand.author.name, "anon")
   if !p.given("--force") {
-    if let Some(a) = actor(ctx)? {
+    if let Some(a) = records.find_actor(ctx)? {
       if c.author != a.id {
         return Err(pb.fail(pb.ErrorKind.Refused, f"comment #{n} on {key} is {whose}'s, not yours; only its author changes it (a superuser token can, with --force)"))
       }
@@ -2277,7 +2228,6 @@ fn comment_mutate_spec(verb: string) -> Slice<flags.Flag> {
   }
   spec
 }
-
 
 fn deslug(arg: string) -> string {
   // All splitting, no index arithmetic: byte offsets and rune indices disagree
@@ -2332,11 +2282,6 @@ fn resolve_id(ctx: pb.Client, explicit: string, usage: string) -> Result<string,
   }
   Ok(id)
 }
-
-
-
-
-
 
 // ------------------------------------------------------------- doc links
 
@@ -2420,7 +2365,7 @@ fn unlink_issue(ctx: pb.Client, id: string, slug: string, usage: string) -> Resu
 /// An explicit issue identifies its document namespace outside an attached
 /// directory. Configured scope remains authoritative, including a mismatch.
 fn issue_link_team(ctx: pb.Client, issue: models.Issue) -> Result<models.Team, string> {
-  Ok(configured_team(ctx)?.unwrap_or(issue.expand.team))
+  Ok(records.configured_team(ctx)?.unwrap_or(issue.expand.team))
 }
 
 /// `lll issue block KEY BLOCKER`: KEY cannot start until BLOCKER is done.
@@ -2617,7 +2562,7 @@ fn issue_next(input: flags.CommandInput) -> Result<(), string> {
   let best = agenda[0]
   let key = f"{best.expand.team.key}-{best.number}"
   if p.given("--claim") {
-    let Some(member) = actor(ctx)? else {
+    let Some(member) = records.find_actor(ctx)? else {
       return Err(
         "claiming needs a member token: 'lll login' as a person, or 'lll token create <member>' with admin credentials",
       )
@@ -2661,28 +2606,8 @@ fn issue_next(input: flags.CommandInput) -> Result<(), string> {
 /// after the fetch.
 fn ready_issues(ctx: pb.Client, scope: string) -> Result<Slice<models.Issue>, string> {
   let filter = url.QueryEscape(scope)
-  let items = fetch_all_issues(ctx, f"&sort=created,id&expand=team,assignee,labels,blocked_by,project&filter={filter}")?
+  let items = records.fetch_all_issues(ctx, f"&sort=created,id&expand=team,assignee,labels,blocked_by,project&filter={filter}")?
   Ok(items.filter(|i| is_ready(i, i.expand.blocked_by)))
-}
-
-/// Every page of an issues query, for the callers that must see the whole set
-/// before they can order or filter it: readiness (PB cannot filter on an
-/// expanded relation) and priority order (PB cannot express "none last").
-/// `tail` carries the sort, expand and filter parameters, already escaped.
-fn fetch_all_issues(ctx: pb.Client, tail: string) -> Result<Slice<models.Issue>, string> {
-  let mut items: Slice<models.Issue> = []
-  let mut page = 1
-  loop {
-    let body = ctx.get(f"/api/collections/issues/records?perPage=500&page={page}{tail}")?
-    let mut issues = NextPage { .. }
-    if let Err(e) = json.Unmarshal(body.bytes(), &issues) {
-      return Err(f"decoding issues: {e}")
-    }
-    for i in issues.items { items = items.append(i) }
-    if page >= issues.total_pages || issues.items.is_empty() { break }
-    page += 1
-  }
-  Ok(items)
 }
 
 /// Triage order (LLL-382). prio_rank is the house answer to "how urgent is
@@ -2737,7 +2662,7 @@ fn unblocks_map(ctx: pb.Client, team_id: string, candidates: Slice<models.Issue>
   let open = "state != 'done' && state != 'cancelled'"
   let clause = if scope == "" { open } else { f"{scope} && {open}" }
   let filter = url.QueryEscape(clause)
-  let issues = fetch_all_issues(ctx, f"&sort=created,id&fields=id,blocked_by&filter={filter}")?
+  let issues = records.fetch_all_issues(ctx, f"&sort=created,id&fields=id,blocked_by&filter={filter}")?
   for i in issues {
     for b in i.blocked_by {
       if let Some(n) = out.get(b) { out[b] = n + 1 }

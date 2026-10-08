@@ -66,7 +66,7 @@ fn referencing_issue_keys(
     "project" => query.filter("", "", "", id, "", ""),
     _ => return Err(f"cannot move a '{kind}'"),
   }
-  let issues = fetch_all_issues(ctx,
+  let issues = records.fetch_all_issues(ctx,
     f"&expand=team&sort=created,id&filter={url.QueryEscape(filter)}",
   )?
   Ok(
@@ -102,7 +102,7 @@ fn move_destination(ctx: pb.Client, key: string) -> Result<models.Team, string> 
     return Err(flags.usage_error("--to requires a team key (see 'lll team list')"))
   }
   let Some(team) = records.find_team(ctx, key)? else {
-    return Err(unknown_team(ctx, key))
+    return Err(records.unknown_team(ctx, key))
   }
   if team.archived {
     return Err(f"team {team.key} is archived; run 'lll team unarchive {team.key}' first")

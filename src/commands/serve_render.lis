@@ -164,7 +164,7 @@ fn card_vm(issue: models.Issue) -> CardVM {
     project_id: issue.project,
     // The state half of the staleness rule; board_card ORs in the claim
     // half. Rows built straight from card_vm never show the site anyway.
-    work_stale: work_site_stale(issue.state, true),
+    work_stale: records.work_site_stale(issue.state, true),
   }
 }
 
@@ -471,14 +471,14 @@ fn issue_fields_vm(ctx: pb.Client, raw: models.Issue, comments: Slice<models.Com
   let mut claim_actor_id = ""
   let mut claim_actor = ""
   let mut claim_error = ""
-  match actor(ctx) {
+  match records.find_actor(ctx) {
     Ok(Some(a)) => { claim_actor = a.name; claim_actor_id = a.id },
     Ok(None) => claim_error = "No member is configured for this board.",
     Err(e) => claim_error = pb.plain(e),
   }
   let mut work = ""
   if issue.work_branch != "" { work = f"{issue.work_branch} @ {issue.work_host}:{issue.work_path}" }
-  let work_stale = work_site_stale(issue.state, held.is_some())
+  let work_stale = records.work_site_stale(issue.state, held.is_some())
   Ok(IssueVM {
     provenance: provenance.fields(issue),
     claim_id, claim_holder, claim_age, claim_actor, claim_actor_id, claim_error,

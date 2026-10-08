@@ -390,7 +390,7 @@ fn member_remove(input: flags.CommandInput) -> Result<(), string> {
     return Err(pb.fail(pb.ErrorKind.NotFound, f"no member named '{name}'; see 'lll member list'"))
   }
 
-  let references = member_references(ctx, member.id, su)?
+  let references = records.count_member_references(ctx, member.id, su)?
   let assigned = references.assigned
   let authored = references.authored
   let created = references.created
@@ -1134,7 +1134,7 @@ fn create_member_as(
   teams: Slice<string>,
   mode: string,
 ) -> Result<models.Member, string> {
-  let member_email = if email == "" { synthesize_email(name) } else { email }
+  let member_email = if email == "" { records.synthesize_email(name) } else { email }
   // Unscoped creates send no scope and get the creator's ("all").
   let scope = if teams.is_empty() { "" } else { "teams" }
   let new_member = models.NewMember {
@@ -1158,13 +1158,6 @@ fn create_member_as(
     return Err(f"decoding created member: {e}")
   }
   Ok(created)
-}
-
-/// The deterministic identity a member without an email gets. Same rule as
-/// the TASK-180 migration's backfill, so both paths agree on one shape.
-pub fn synthesize_email(name: string) -> string {
-  let slug = strings.ReplaceAll(strings.ToLower(name), " ", "-")
-  f"{slug}@members.invalid"
 }
 
 /// True when the server already has a member by that name.
@@ -1270,7 +1263,7 @@ fn member_access_cmd(input: flags.CommandInput) -> Result<(), string> {
   }
   let id_of = |key: string| -> Result<string, string> {
     let k = records.normalize_team_key(key)
-    let Some(t) = teams.find(|t| t.key == k) else { return Err(unknown_team(ctx, k)) }
+    let Some(t) = teams.find(|t| t.key == k) else { return Err(records.unknown_team(ctx, k)) }
     Ok(t.id)
   }
   // Administrator credentials only: the members rules refuse every member

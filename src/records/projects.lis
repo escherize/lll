@@ -51,3 +51,8 @@ pub fn fetch_projects(ctx: pb.Client, team_id: string) -> Result<Slice<models.Pr
     "projects",
   )
 }
+
+/// Project statuses, in lifecycle order.
+pub fn project_statuses() -> Slice<string> {
+  ["planned", "started", "paused", "completed", "cancelled"]
+}

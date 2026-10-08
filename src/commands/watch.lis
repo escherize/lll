@@ -429,7 +429,7 @@ fn watch_ready(ctx: pb.Client, filters: query.Filters, json_mode: bool) -> Resul
   // blocked_by expanded on every page, so readiness can be decided locally.
   let mut tail = "&expand=team,assignee,blocked_by,labels&sort=created,id"
   if filter != "" { tail = f"{tail}&filter={url.QueryEscape(filter)}" }
-  let mut issues = fetch_all_issues(ctx, tail)?
+  let mut issues = records.fetch_all_issues(ctx, tail)?
   let mut ready = ready_keys(issues)
   fmt.Fprintln(os.Stderr, "watch: ready (agenda subscription accepted)")
   loop {
@@ -510,15 +510,6 @@ fn ready_keys(issues: Slice<models.Issue>) -> Slice<string> {
     if is_ready(issue, seen) { out = out.append(issue.id) }
   }
   out
-}
-
-/// One page of the issues collection with the page count, so the snapshot
-/// can walk past 500 issues. models.IssueList has no totalPages.
-#[json]
-struct NextPage {
-  items: Slice<models.Issue>,
-  #[json("totalPages")]
-  total_pages: int,
 }
 
 /// A ready transition as NDJSON, topic included so the line matches the

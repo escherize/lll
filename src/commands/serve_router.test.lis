@@ -4,6 +4,7 @@ import "go:net/http/httptest"
 import "go:strings"
 
 import "models"
+import "records"
 
 #[test]
 fn board_routers_are_independent_and_leave_default_mux_untouched() {
@@ -11,8 +12,8 @@ fn board_routers_are_independent_and_leave_default_mux_untouched() {
   defer upstream_a.Close()
   let mut upstream_b = httptest.NewServer(http.HandlerFunc(|w, _r| { let _ = w.Write("upstream-b".bytes()) }))
   defer upstream_b.Close()
-  let Ok(router_a) = board_mux(test_client(upstream_a.URL, "", ""), models.Team { key: "AAA", .. }, router_test_hub(), Actor { .. }, false) else { panic("first router failed") };
-  let Ok(router_b) = board_mux(test_client(upstream_b.URL, "", ""), models.Team { key: "BBB", .. }, router_test_hub(), Actor { .. }, false) else { panic("second router failed") };
+  let Ok(router_a) = board_mux(test_client(upstream_a.URL, "", ""), models.Team { key: "AAA", .. }, router_test_hub(), records.Actor { .. }, false) else { panic("first router failed") };
+  let Ok(router_b) = board_mux(test_client(upstream_b.URL, "", ""), models.Team { key: "BBB", .. }, router_test_hub(), records.Actor { .. }, false) else { panic("second router failed") };
   let mut board_a = httptest.NewServer(router_a)
   defer board_a.Close()
   let mut board_b = httptest.NewServer(router_b)
@@ -47,7 +48,7 @@ fn administration_ui_requires_explicit_router_opt_in(t: TestContext) {
 }
 
 fn check_admin_router(t: TestContext, upstream: string, enabled: bool) {
-  let Ok(router) = board_mux(test_client(upstream, "", ""), models.Team { key: "ADM", .. }, router_test_hub(), Actor { .. }, enabled) else { panic("router failed") };
+  let Ok(router) = board_mux(test_client(upstream, "", ""), models.Team { key: "ADM", .. }, router_test_hub(), records.Actor { .. }, enabled) else { panic("router failed") };
   let mut board = httptest.NewServer(router)
   defer board.Close()
   for path in ["/_", "/_/", "/_/assets/app.js"] {
@@ -118,7 +119,7 @@ fn every_non_get_request_must_come_from_the_boards_own_origin() {
     test_client(upstream.URL, "", ""),
     models.Team { key: "AAA", .. },
     router_test_hub(),
-    Actor { .. },
+    records.Actor { .. },
     false,
   ) else {
     panic("router failed")

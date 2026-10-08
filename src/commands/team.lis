@@ -224,7 +224,7 @@ fn team_rename(input: flags.CommandInput) -> Result<(), string> {
     return Err(flags.usage_error(f"nothing to rename: give --key, -n, or both\nusage: {usage}"))
   }
   let Some(t) = records.find_team(ctx, key)? else {
-    return Err(unknown_team(ctx, key))
+    return Err(records.unknown_team(ctx, key))
   }
   // teams.key carries a unique index, so a collision would otherwise surface
   // as a raw PocketBase validation error. Saying which key is taken is the
@@ -290,7 +290,7 @@ fn team_set_accent(input: flags.CommandInput) -> Result<(), string> {
   // of the two, and it should not cost a round trip to hear about.
   let hex = accent_value(raw)?
   let Some(t) = records.find_team(ctx, key)? else {
-    return Err(unknown_team(ctx, key))
+    return Err(records.unknown_team(ctx, key))
   }
   writes.update_team(ctx, pb.Caller.Process, t.id, writes.TeamPatch { accent: Some(hex), .. })?
   if hex == "" {
@@ -328,9 +328,9 @@ fn team_set_emoji(input: flags.CommandInput) -> Result<(), string> {
     return Err(flags.usage_error("usage: lll team set-emoji KEY EMOJI (empty '' clears it)"))
   }
   let key = input.parsed.first()
-  let glyph = team_emoji_value(input.parsed.nth(1))?
+  let glyph = records.team_emoji_value(input.parsed.nth(1))?
   let Some(t) = records.find_team(ctx, key)? else {
-    return Err(unknown_team(ctx, key))
+    return Err(records.unknown_team(ctx, key))
   }
   writes.update_team(ctx, pb.Caller.Process, t.id, writes.TeamPatch { emoji: Some(glyph), .. })?
   if glyph == "" {
@@ -339,18 +339,6 @@ fn team_set_emoji(input: flags.CommandInput) -> Result<(), string> {
     fmt.Println(f"{t.key} is now {glyph}")
   }
   Ok(())
-}
-
-/// One glyph, or empty to clear. The rule lives in check_emoji, which is what
-/// `issue create --emoji` already enforces; calling it rather than counting
-/// runes again here is what stops the two from drifting apart.
-fn team_emoji_value(raw: string) -> Result<string, string> {
-  match check_emoji(raw) {
-    Ok(glyph) => Ok(glyph),
-    Err(_) => Err(
-      f"'{strings.TrimSpace(raw)}' is not one emoji (pass '' to clear it)",
-    ),
-  }
 }
 
 /// The emoji line for `team view`: what the rail and the tab icon will show,
@@ -388,46 +376,12 @@ pub fn create_team(ctx: pb.Client, key: string, name: string) -> Result<models.T
   Ok(created)
 }
 
-
-/// The team `LLL_TEAM` (or `team` in .lll.toml) names, or None when no key
-/// is set. A key naming a team the server does not have is an error either
-/// way — silently falling back to "every team" is how a scoped command ends
-/// up answering for all of them.
-fn configured_team(ctx: pb.Client) -> Result<Option<models.Team>, string> {
-  let (cfg, src) = ctx.settings.traced()?
-  if cfg.team == "" { return Ok(None) }
-  let Some(t) = records.find_team(ctx, cfg.team)? else {
-    return Err(unknown_configured_team(ctx, cfg.team, src.team))
-  }
-  Ok(Some(t))
-}
-
-/// unknown_team, for the CONFIGURED key: says where the key came from. A
-/// fleet agent (TASK-309, task 4) ran `lll` from inside a checkout whose
-/// committed .lll.toml said team = LLL, against a server with no such team,
-/// and got "no team with key 'LLL'" - true, and useless, because it had never
-/// typed LLL and did not know which file had. `config list` knows; so does
-/// this message now.
-fn unknown_configured_team(ctx: pb.Client, key: string, origin: string) -> string {
-  if let Some(scoped) = unknown_team_scoped(ctx, key) { return scoped }
-  let from = if origin == "flag:--team" {
-    " (from --team)"
-  } else if strings.HasPrefix(origin, "env:") {
-    f" (from {strings.TrimPrefix(origin, "env:")})"
-  } else if strings.HasPrefix(origin, "file:") {
-    f" (from {strings.TrimPrefix(origin, "file:")})"
-  } else {
-    ""
-  }
-  pb.fail(pb.ErrorKind.NotFound, f"no team with key '{key}'{from} on the server. 'lll team list' shows the keys; 'lll attach --key KEY' points this directory at one, 'lll config list' shows every value and the file it came from, or create it with 'lll team create {key} -n \"Name\"'")
-}
-
 /// The configured team, insisted upon. Docs, findings, labels and projects
 /// each belong to exactly one team (TASK-173), so the verbs that write or
 /// read them cannot proceed without a key and must not guess one.
 fn current_team(ctx: pb.Client) -> Result<models.Team, string> {
-  let Some(t) = configured_team(ctx)? else {
-    return Err(no_team())
+  let Some(t) = records.configured_team(ctx)? else {
+    return Err(records.no_team())
   }
   Ok(t)
 }
@@ -438,7 +392,7 @@ fn current_team(ctx: pb.Client) -> Result<models.Team, string> {
 fn team_flag_or_current(ctx: pb.Client, key: string) -> Result<models.Team, string> {
   if key == "" { return current_team(ctx) }
   let Some(t) = records.find_team(ctx, key)? else {
-    return Err(unknown_team(ctx, key))
+    return Err(records.unknown_team(ctx, key))
   }
   Ok(t)
 }
@@ -448,7 +402,7 @@ fn team_flag_or_current(ctx: pb.Client, key: string) -> Result<models.Team, stri
 /// that writes, views or resolves a team-owned record by name uses
 /// current_team, because a name is unique only within a team (LLL-671).
 fn configured_scope(ctx: pb.Client) -> Result<records.TeamScope, string> {
-  match configured_team(ctx)? {
+  match records.configured_team(ctx)? {
     Some(t) => Ok(records.TeamScope.Only(t.id)),
     None => Ok(records.TeamScope.Every),
   }
@@ -472,9 +426,9 @@ fn team_delete(input: flags.CommandInput) -> Result<(), string> {
     return Err(flags.usage_error("usage: lll team delete KEY"))
   }
   let Some(t) = records.find_team(ctx, key)? else {
-    return Err(unknown_team(ctx, key))
+    return Err(records.unknown_team(ctx, key))
   }
-  let issues_held = issue_count(ctx, f"team={query.quote(t.id)}")?
+  let issues_held = records.issue_count(ctx, f"team={query.quote(t.id)}")?
   if issues_held > 0 {
     return Err(
       f"team {t.key} holds {issues_held} issue(s); deleting it would orphan them
@@ -500,45 +454,6 @@ and it keeps the issue ids resolvable. Deleting is for a team created by
 mistake. On a terminal it asks first; --yes skips the question."
 }
 
-/// Missing-team message naming the fix. Shared by every command that needs a
-/// team and was given none (same package: src/commands).
-fn no_team() -> string {
-  // Names the command, not just the file. Every usability run read the old
-  // wording as "go hand-edit a file", and none of them found 'lll attach' —
-  // the command whose whole job is writing this key — from it. It follows
-  // unknown_team's shape for the same reason: say the fix, not the setting.
-  //
-  // Usage, exit 2 (LLL-679): the fix is on the command line or in the
-  // configuration that stands in for it, not on the server.
-  flags.usage_error("no team configured: pass --team KEY for this command, or run 'lll attach' to write the team to .lll.toml
-'lll team list' shows the keys; 'lll attach --key KEY' takes one directly")
-}
-
-/// Unknown-team message naming the fix. Shared by every command that
-/// resolves a team key (same package: src/commands).
-fn unknown_team(ctx: pb.Client, key: string) -> string {
-  if let Some(scoped) = unknown_team_scoped(ctx, key) { return scoped }
-  pb.fail(pb.ErrorKind.NotFound, f"no team with key '{key}' on the server. First inspect 'lll team list --archived'; the team may have been renamed.\nFor an existing team, use 'lll attach --key EXISTING_KEY' to update the attachment, or prefix one command with LLL_TEAM=EXISTING_KEY.\nOnly if you intend a new team, create it with 'lll team create {key} -n \"Name\"'.")
-}
-
-/// For a team-scoped caller, a missing key usually means "not yours", and
-/// 'lll team create' is a dead end it cannot run (fleet case 03). The wording
-/// does not say whether the team exists.
-fn unknown_team_scoped(ctx: pb.Client, key: string) -> Option<string> {
-  let Some(keys) = records.scoped_team_keys(ctx) else { return None }
-  let mine = if keys.is_empty() { "none" } else { strings.Join(keys, ", ") }
-  Some(
-    pb.fail(pb.ErrorKind.NotFound, f"no team '{key}' among the teams you can see ({mine}). 'lll whoami' shows your access; ask the person who invited you if you need another team."),
-  )
-}
-
-/// Archived-team refusal naming the fix. Shared by everything that refuses
-/// to write into an archived team (same package: src/commands): the CLI's
-/// attach and issue create, and the web board's write endpoints.
-fn archived_hint(key: string) -> string {
-  f"team {key} is archived; run 'lll team unarchive {key}' first"
-}
-
 /// The archive verbs share parsed inputs; each fixes its lifecycle direction
 /// before entering the common implementation.
 fn team_archive(input: flags.CommandInput) -> Result<(), string> {
@@ -562,7 +477,7 @@ fn team_set_archived(ctx: pb.Client, p: flags.Parsed, archived: bool) -> Result<
     return Err(flags.usage_error(f"usage: lll team {verb} KEY"))
   }
   let Some(t) = records.find_team(ctx, key)? else {
-    return Err(unknown_team(ctx, key))
+    return Err(records.unknown_team(ctx, key))
   }
   writes.update_team(ctx, pb.Caller.Process, t.id, writes.TeamPatch { archived: Some(archived), .. })?
   if archived {
@@ -582,10 +497,10 @@ fn team_view(input: flags.CommandInput) -> Result<(), string> {
     return Err(flags.usage_error("usage: lll team view KEY"))
   }
   let Some(t) = records.find_team(ctx, key)? else {
-    return Err(unknown_team(ctx, key))
+    return Err(records.unknown_team(ctx, key))
   }
 
-  let issues_held = issue_count(ctx, f"team={query.quote(t.id)}")?
+  let issues_held = records.issue_count(ctx, f"team={query.quote(t.id)}")?
   if input.parsed.given("--json") {
     let mut fields = Map.new<string, json.RawMessage>()
     if let Err(e) = json.Unmarshal(encode_json(t, "team")?, &fields) { return Err(f"decoding team: {e}") }

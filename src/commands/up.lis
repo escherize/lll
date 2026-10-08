@@ -930,8 +930,8 @@ fn board_identity(
   base: string,
   email: string,
   pass: string,
-) -> Result<(Actor, Option<fn() -> Result<string, string>>, pb.Client), string> {
-  if let Some(member) = actor(ctx)? { return Ok((member, None, ctx)) }
+) -> Result<(records.Actor, Option<fn() -> Result<string, string>>, pb.Client), string> {
+  if let Some(member) = records.find_actor(ctx)? { return Ok((member, None, ctx)) }
   let guessed = strings.TrimSpace(ctx.settings.env.user)
   let name = if guessed == "" { "local" } else { guessed }
   let created = ensure_member(ctx, name)?
@@ -961,7 +961,7 @@ fn board_identity(
   fmt.Println(
     f"auth   board signed in as {name}; token renewal keeps this member",
   )
-  Ok((Actor { id: member.id, name }, Some(refresh), board))
+  Ok((records.Actor { id: member.id, name }, Some(refresh), board))
 }
 
 /// Ask for a team key on stdin, defaulting to `suggested`. Errs when stdin

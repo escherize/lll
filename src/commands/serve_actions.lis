@@ -125,7 +125,7 @@ impl Acting {
   /// board's own member for the board token.
   fn member_id(self, ctx: pb.Client) -> Result<Option<string>, string> {
     if let Some(m) = self.member { return Ok(Some(m.id)) }
-    Ok(actor(ctx)?.map(|a| a.id))
+    Ok(records.find_actor(ctx)?.map(|a| a.id))
   }
 }
 
@@ -134,7 +134,7 @@ impl Acting {
 /// the flash naming the way back. Free at the issue endpoints: each already
 /// fetches the issue with its team expanded.
 fn require_active_team(t: models.Team) -> Result<(), string> {
-  if t.archived { return Err(archived_hint(t.key)) }
+  if t.archived { return Err(records.archived_hint(t.key)) }
   Ok(())
 }
 
@@ -182,7 +182,7 @@ fn create_write(ctx: pb.Client, v: Viewing, r: mut Ref<http.Request>) -> Result<
   let who = acting_as(v)?
   // Read as the viewer: a hidden team answers like a missing one.
   let Some(t) = records.find_team(who.reads, team_key)? else {
-    return Err(unknown_team(who.reads, team_key))
+    return Err(records.unknown_team(who.reads, team_key))
   }
   // New issues do not land in an archived team (TASK-210), same refusal as
   // `lll issue create`.
@@ -336,7 +336,7 @@ fn priority_write(_ctx: pb.Client, v: Viewing, r: mut Ref<http.Request>) -> Resu
 /// its own candidates, but the endpoint is curl-able like every other.
 fn emoji_write(_ctx: pb.Client, v: Viewing, r: mut Ref<http.Request>) -> Result<string, string> {
   let key = r.FormValue("key")
-  let Ok(emoji) = check_emoji(r.FormValue("emoji")) else {
+  let Ok(emoji) = records.check_emoji(r.FormValue("emoji")) else {
     return Err("an issue takes one emoji, or none")
   }
   let who = acting_as(v)?
@@ -518,7 +518,7 @@ fn claim_write(ctx: pb.Client, v: Viewing, r: mut Ref<http.Request>) -> Result<s
     let _ = writes.acquire_claim(who.reads, who.caller, issue.id, m.id, "")?
     return Ok("")
   }
-  let Some(member) = actor(ctx)? else { return Err("No member is configured for this board.") };
+  let Some(member) = records.find_actor(ctx)? else { return Err("No member is configured for this board.") };
   if r.FormValue("member_id") != member.id { return Err("The board identity changed; refresh before claiming.") }
   let _ = writes.acquire_claim(who.reads, who.caller, issue.id, member.id, "")?
   Ok("")
