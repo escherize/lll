@@ -326,10 +326,12 @@ fn merge_refresh(prev: Refresh, next: Refresh) -> Refresh {
   match prev {
     Refresh.Board(a) => match next {
       Refresh.Board(b) => {
-        let team_id = if a.team_id != "" { a.team_id } else { b.team_id }
+        // The key and the id come from the same job: a snapshot's key is the
+        // URL's spelling, an event's is the stored one.
+        let named = if a.team_id != "" { a } else { b }
         let order = if a.order == b.order { a.order } else { "" }
         let client_id = if a.client_id == b.client_id { a.client_id } else { 0 }
-        Refresh.Board(BoardRefresh { team_key: a.team_key, team_id, order, client_id })
+        Refresh.Board(BoardRefresh { team_key: named.team_key, team_id: named.team_id, order, client_id })
       },
       other => other,
     },
@@ -545,7 +547,7 @@ fn snapshot_refresh(snapshot: PageSnapshot) -> Refresh {
   if snapshot.key != "" {
     return Refresh.Issue(IssueRefresh { key: snapshot.key, client_id: snapshot.client_id })
   }
-  Refresh.Board(BoardRefresh { team_key: snapshot.team, team_id: "", order: snapshot.order, client_id: snapshot.client_id })
+  Refresh.Board(BoardRefresh { team_key: records.normalize_team_key(snapshot.team), team_id: "", order: snapshot.order, client_id: snapshot.client_id })
 }
 
 /// After a reconnect (LLL-666), everything an open page shows: PocketBase
@@ -558,7 +560,7 @@ fn resync_refreshes(scopes: Slice<string>) -> Slice<Refresh> {
       jobs = jobs.append(Refresh.Issue(IssueRefresh { key, client_id: 0 }))
     } else if let Some(rest) = strings.CutPrefix(scope, "board:") {
       let (team, order, _) = strings.Cut(rest, ":")
-      jobs = jobs.append(Refresh.Board(BoardRefresh { team_key: team, team_id: "", order, client_id: 0 }))
+      jobs = jobs.append(Refresh.Board(BoardRefresh { team_key: records.normalize_team_key(team), team_id: "", order, client_id: 0 }))
     }
   }
   jobs

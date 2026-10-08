@@ -446,7 +446,7 @@ fn issue_page(w: http.ResponseWriter, r: Ref<http.Request>, team: models.Team, m
     }
   }
   let canonical = f"{own}-{fetched.number}"
-  if own != team.key || key != canonical {
+  if r.PathValue("team") != own || key != canonical {
     redirect_with_query(w, r, f"/t/{own}/issue/{canonical}")
     return
   }

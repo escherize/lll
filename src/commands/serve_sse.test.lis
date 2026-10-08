@@ -127,6 +127,25 @@ fn refresh_queue_frees_the_worker_of_an_overdue_run_once() {
 }
 
 #[test]
+fn merging_board_refreshes_keeps_the_key_with_its_id_and_widens() {
+  // A snapshot's key is the URL's spelling; an event's is the stored one.
+  let snapshot = Refresh.Board(BoardRefresh { team_key: "live", team_id: "", order: "manual", client_id: 4 })
+  let event = Refresh.Board(BoardRefresh { team_key: "LIVE", team_id: "t1", order: "", client_id: 0 })
+  let assert Refresh.Board(merged) = merge_refresh(snapshot, event)
+  assert merged.team_key == "LIVE"
+  assert merged.team_id == "t1"
+  assert merged.order == ""
+  assert merged.client_id == 0
+  let assert Refresh.Resolve(r) = merge_refresh(
+    Refresh.Resolve(ResolveRefresh { issue_id: "i", board: false }),
+    Refresh.Resolve(ResolveRefresh { issue_id: "i", board: true }),
+  )
+  assert r.board
+  let assert Refresh.Board(snap) = snapshot_refresh(PageSnapshot { team: "live", order: "manual", client_id: 4, .. })
+  assert snap.team_key == "LIVE"
+}
+
+#[test]
 fn a_reconnect_rereads_every_open_view_and_the_rail() {
   let jobs = resync_refreshes(["board:ENG:manual", "issue:ENG-3", "board:OPS-2:updated", "something:else"])
   let keys = jobs.map(refresh_key)
