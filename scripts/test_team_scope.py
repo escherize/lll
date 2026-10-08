@@ -10,6 +10,7 @@ import subprocess
 import sys
 import tempfile
 import urllib.error
+import urllib.parse
 import urllib.request
 from board_startup import wait_for_endpoints
 
@@ -176,7 +177,25 @@ with tempfile.TemporaryDirectory(prefix='lll-team-scope-') as directory:
             assert call(api, f"/api/collections/issues/records/{target}", token=ro, method='DELETE')[0] == 403
         assert call(api, f"/api/collections/members/records/{ro_rec['id']}", {'name': 'reader2'}, ro, 'PATCH')[0] == 200, \
             'ro may still edit its own profile'
-        cli_ro = {k: v for k, v in cli.items() if not k.startswith('LLL_ADMIN_')}
+        # LLL-661: a webhook secret is write-only. The rw guest sets one; no
+        # read, expansion, filter or sort returns or tests it, and the guest
+        # cannot repoint the URL to have the secret delivered to itself.
+        code, hook, _ = call(api, '/api/collections/webhooks/records',
+                             {'team': alpha['id'], 'url': 'https://example.test/w', 'secret': 'wh-secret-661',
+                              'creator': ro_rec['id']}, tok)
+        assert code == 200 and hook['creator'] == me and hook['secret_set'] is True and 'secret' not in hook, hook
+        for path in ['/api/collections/webhooks/records', f"/api/collections/webhooks/records/{hook['id']}",
+                     '/api/collections/teams/records?expand=webhooks_via_team']:
+            for viewer in (ro, su):
+                code, body, _ = call(api, path, token=viewer)
+                assert code == 200 and 'wh-secret-661' not in json.dumps(body) and '"secret"' not in json.dumps(body), body
+        for path in ['/api/collections/webhooks/records?filter=' + urllib.parse.quote('secret ~ "wh%"'),
+                     '/api/collections/webhooks/records?sort=secret',
+                     '/api/collections/teams/records?filter=' + urllib.parse.quote('webhooks_via_team.secret ~ "wh%"')]:
+            assert call(api, path, token=ro)[0] == 400, path
+        assert call(api, f"/api/collections/webhooks/records/{hook['id']}", {'url': 'https://evil.test/'}, tok, 'PATCH')[0] == 403
+        assert call(api, f"/api/collections/webhooks/records/{hook['id']}", token=tok, method='DELETE')[0] == 204
+        cli_ro ={k: v for k, v in cli.items() if not k.startswith('LLL_ADMIN_')}
         cli_ro.update(LLL_URL=api, LLL_TOKEN=ro, LLL_TEAM='ALPHA')
         who = subprocess.run([binary, 'whoami'], cwd=root, env=cli_ro, text=True, capture_output=True, timeout=30)
         assert 'access  read-only, team ALPHA' in who.stdout, who.stdout + who.stderr

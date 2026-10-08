@@ -39,7 +39,12 @@ func webhookFixtureApp(t *testing.T) webhookFixture {
 		t.Fatal(err)
 	}
 	members := core.NewBaseCollection("members")
-	members.Fields.Add(&core.TextField{Name: "name", Required: true})
+	members.Fields.Add(
+		&core.TextField{Name: "name", Required: true},
+		&core.TextField{Name: "scope"},
+		&core.RelationField{Name: "teams", CollectionId: teams.Id, MaxSelect: 999},
+		&core.TextField{Name: "mode"},
+	)
 	if err := app.Save(members); err != nil {
 		t.Fatal(err)
 	}
@@ -64,6 +69,7 @@ func webhookFixtureApp(t *testing.T) webhookFixture {
 		&core.RelationField{Name: "project", CollectionId: projects.Id, MaxSelect: 1},
 		&core.TextField{Name: "url", Required: true},
 		&core.TextField{Name: "secret"},
+		&core.RelationField{Name: "creator", CollectionId: members.Id, MaxSelect: 1},
 		&core.AutodateField{Name: "created", OnCreate: true},
 	)
 	if err := app.Save(webhooks); err != nil {
@@ -243,6 +249,65 @@ func TestWebhookDeliversCreateUpdateDelete(t *testing.T) {
 	if payload.Action != "delete" {
 		t.Errorf("delete payload action = %q, want delete", payload.Action)
 	}
+}
+
+// LLL-661: a webhook delivers only while its creator still reads the
+// webhook's team. Removing the creator from the team stops deliveries, with
+// a log line; a webhook with no creator delivers while its team exists.
+func TestWebhookStopsWhenCreatorLosesTheTeam(t *testing.T) {
+	f := webhookFixtureApp(t)
+	var logs syncBuffer
+	prev := log.Writer()
+	log.SetOutput(&logs)
+	defer log.SetOutput(prev)
+
+	members, err := f.app.FindCachedCollectionByNameOrId("members")
+	if err != nil {
+		t.Fatal(err)
+	}
+	guest := core.NewRecord(members)
+	guest.Set("name", "guest")
+	guest.Set("scope", "teams")
+	guest.Set("teams", []string{f.team.Id})
+	guest.Set("mode", "rw")
+	if err := f.app.Save(guest); err != nil {
+		t.Fatal(err)
+	}
+	server, ch := webhookReceiver(t)
+	hook := f.register(t, server.URL+"/guest", "", false)
+	hook.Set("creator", guest.Id)
+	if err := f.app.Save(hook); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := f.app.Save(f.newIssue("before removal", false)); err != nil {
+		t.Fatal(err)
+	}
+	if d := waitDelivery(t, ch); d.path != "/guest" {
+		t.Fatalf("delivery path = %q, want /guest", d.path)
+	}
+
+	guest.Set("teams", []string{f.otherTeam.Id})
+	if err := f.app.Save(guest); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.app.Save(f.newIssue("after removal", false)); err != nil {
+		t.Fatal(err)
+	}
+	assertNoDelivery(t, ch)
+	if !strings.Contains(logs.String(), "webhook: skipped delivery to "+server.URL+"/guest") {
+		t.Errorf("a skipped delivery must be logged, got %q", logs.String())
+	}
+
+	// No creator: delivered while the team exists.
+	hook.Set("creator", "")
+	if err := f.app.Save(hook); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.app.Save(f.newIssue("legacy row", false)); err != nil {
+		t.Fatal(err)
+	}
+	waitDelivery(t, ch)
 }
 
 func TestWebhookScopeFiltersDeliveries(t *testing.T) {

@@ -1,4 +1,5 @@
 import "records"
+import "go:crypto/rand"
 import "go:encoding/json"
 import "go:fmt"
 import "go:net/url"
@@ -25,11 +26,22 @@ fn webhook_intro() -> string {
   "The server POSTs one JSON object per issue create/update/delete to every
 registered URL whose scope matches, shaped like an `lll watch --json` event
 ({\"topic\":\"issues\",\"action\":...,\"record\":{...}}). A registration's
-secret, when set, rides every delivery as the X-LLL-Secret header, so a
-receiver can tell the server from anyone who found the URL. A failed delivery
-is retried with backoff — three attempts, 1s then 4s apart — and every failed
-attempt is printed to the server's log with a 'webhook:' prefix, the last one
-final; nothing is dropped silently."
+secret rides every delivery as the X-LLL-Secret header, so a receiver can tell
+the server from anyone who found the URL. The secret is write-only: 'add'
+prints a generated one once, or takes yours with --secret, and nothing shows
+it again; 'list' says only whether one is set. A registration cannot be
+edited; remove it and add it again.
+
+A registration delivers only while the member who added it can still read
+its team: remove that member from the team and its deliveries stop, with a
+'webhook: skipped' line in the server's log. Registrations added before lll
+recorded creators, or by a superuser, have no creator and deliver while their
+team exists.
+
+A failed delivery is retried with backoff — three attempts, 1s then 4s
+apart — and every failed attempt is printed to the server's log with a
+'webhook:' prefix, the last one final. Deliveries are not queued: one still
+waiting to be sent or retried when the server stops is lost."
 }
 
 pub fn webhook_commands() -> Slice<flags.Command> {
@@ -63,7 +75,7 @@ pub fn webhook_commands() -> Slice<flags.Command> {
 fn webhook_add_spec() -> Slice<flags.Flag> {
   flags.with_team([
     flags.Flag { name: "--project", value: true, hint: "NAME", help: "scope deliveries to one project instead of the whole team", .. },
-    flags.Flag { name: "--secret", value: true, hint: "SECRET", help: "sent on every delivery as the X-LLL-Secret header", .. },
+    flags.Flag { name: "--secret", value: true, hint: "SECRET", help: "sent on every delivery as the X-LLL-Secret header (default: generated and printed once)", .. },
   ])
 }
 
@@ -90,7 +102,10 @@ fn webhook_add(input: flags.CommandInput) -> Result<(), string> {
     project_id = proj.id
     scope = f"project {proj.name}"
   }
-  let secret = p.one("--secret")
+  // The server never returns the secret (LLL-661), so one the caller did
+  // not choose is generated here and printed once, below.
+  let generated = !p.given("--secret")
+  let secret = if generated { rand.Text() } else { p.one("--secret") }
 
   // One registration per scope and URL: a duplicate would double every
   // delivery, which reads downstream as a server bug rather than a mistake.
@@ -114,8 +129,11 @@ fn webhook_add(input: flags.CommandInput) -> Result<(), string> {
   if let Err(e) = json.Unmarshal(body.bytes(), &created) {
     return Err(f"decoding created webhook: {e}")
   }
-  if secret == "" {
+  if !created.secret_set {
     fmt.Println(f"Registered webhook {target} ({scope})")
+  } else if generated {
+    fmt.Println(f"Registered webhook {target} ({scope}) — deliveries carry X-LLL-Secret: {secret}")
+    fmt.Println("Save this secret now: lll will not show it again.")
   } else {
     fmt.Println(f"Registered webhook {target} ({scope}) — deliveries carry X-LLL-Secret")
   }
@@ -133,7 +151,7 @@ fn webhook_list(input: flags.CommandInput) -> Result<(), string> {
   )?
   if p.given("--json") { return print_json(hooks, "webhook list") }
   for h in hooks.items {
-    fmt.Println(f"{scope_label(h)}\t{h.url}\t{secret_state(h.secret)}")
+    fmt.Println(f"{scope_label(h)}\t{h.url}\t{secret_state(h.secret_set)}")
   }
   Ok(())
 }
@@ -206,8 +224,8 @@ fn scope_label(h: models.Webhook) -> string {
   "team ?"
 }
 
-/// A registration's secret is shown as set or not, never as its value: list
-/// output is pasted into boards and screenshots.
-fn secret_state(secret: string) -> string {
-  if secret == "" { "-" } else { "secret set" }
+/// A registration's secret is shown as set or not, never as its value: the
+/// server returns only whether one is set (LLL-661).
+fn secret_state(secret_set: bool) -> string {
+  if secret_set { "secret set" } else { "secret not set" }
 }

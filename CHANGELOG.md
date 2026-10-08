@@ -6,6 +6,27 @@ minors. Issue keys are on the project's own board (`lll issue view KEY`).
 
 ## [Unreleased]
 
+### Security
+
+- A webhook's secret is write-only. The API, realtime and the CLI no longer
+  return it to anyone, read-only guests included, and a filter or sort on it
+  is refused. `lll webhook add` prints a generated secret once, or takes
+  yours with `--secret`. `lll webhook list` shows only "secret set" or
+  "secret not set" (LLL-661).
+- A webhook records the member who created it and delivers only while that
+  member can read the webhook's team. Removing someone from a team stops
+  their webhooks; each skipped delivery is logged. Webhooks created before
+  this change have no creator and deliver while their team exists. Webhooks
+  can no longer be edited through the API; remove and add them again.
+  Deliveries are not queued, so one in flight when the server stops is lost;
+  `lll webhook --help` and `docs/api.md` now say so (LLL-661).
+
+### Fixed
+
+- The hourly claim-expiry sweep re-checks each claim inside its transaction,
+  so a renewal that lands between the sweep's list and its delete keeps the
+  claim (LLL-663).
+
 ## [0.8.0] - 2026-10-07
 
 Scoped access is complete for teams: a single-use link invites a person to
