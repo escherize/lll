@@ -296,7 +296,7 @@ with tempfile.TemporaryDirectory(prefix='lll-545-') as directory:
             assert code == 200 and 'Set-Cookie' not in headers, (what, code, dict(headers))
             assert "action='/login'" in body and headers['Cache-Control'] == 'no-store', what
             assert "frame-ancestors 'none'" in headers['Content-Security-Policy'], what
-            assert headers['Referrer-Policy'] == 'no-referrer', what
+            assert headers['Referrer-Policy'] == 'same-origin', what
         # /login sets the cookie only for a POST from the board's own origin.
         login = {'board_token': both_tok, 'next': '/t/ALPHA/'}
         for hdrs, what in [({}, 'no Origin'), ({'Origin': 'http://evil.example'}, 'Origin mismatch'),

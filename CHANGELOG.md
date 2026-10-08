@@ -16,7 +16,11 @@ minors. Issue keys are on the project's own board (`lll issue view KEY`).
   `Origin`, `Origin: null`, or `Sec-Fetch-Site` other than `same-origin` is
   refused too. The API under `/api/`, which the CLI uses, is unchanged.
   Scripts that POST to board pages with `curl` must now send
-  `-H "Origin: <board url>"` (LLL-630).
+  `-H "Origin: <board url>"`. The invite name form and the sign-in confirm
+  page now send `Referrer-Policy: same-origin` instead of `no-referrer`.
+  Under `no-referrer`, browsers sent `Origin: null` on their own form POST.
+  This also fixes the confirm page's "Sign in" button, which this check
+  had always refused (LLL-630).
 - Only a person with read-write access to every team, or a superuser, can
   create an invite. A team-scoped or read-only member, a bot or a member with
   an owner is refused with a message that names who can. A joined member

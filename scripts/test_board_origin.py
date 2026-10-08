@@ -10,11 +10,14 @@ route added later is covered without anyone remembering this file. Each
 probe carries a valid board cookie and must get 403 from another port, with
 no Origin, with Origin null and with only a Referer. The board's own page
 (with or without Sec-Fetch-Site, as over plain-HTTP LAN) still writes, and
-the CLI, which talks to /api/ through the same address, is unaffected."""
+the CLI, which talks to /api/ through the same address, is unaffected. A
+real browser still submits the invite name form and the sign-in confirm
+page, the two forms served outside the gate."""
 import json
 import os
 from pathlib import Path
 import re
+import shutil
 import socket
 import subprocess
 import sys
@@ -23,6 +26,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 from board_startup import wait_for_endpoints
+from browser_session import new_session, open_session, require_result
 
 binary = str(Path(sys.argv[1]).resolve())
 source = Path(__file__).resolve().parent.parent / 'src' / 'commands'
@@ -169,7 +173,27 @@ with tempfile.TemporaryDirectory(prefix='lll-630-') as directory:
         code, text = call(board, '/api/collections/issues/records', {'team': alpha['id'], 'title': 'api', 'state': 'todo'},
                           member_tok, headers={'Origin': other, 'Sec-Fetch-Site': 'same-site'})
         assert code == 200, (code, text)
-        print(f'board origin: ok ({len(unsafe)} unsafe routes, {probes} refused probes)')
+
+        # A real browser still submits the two forms served outside the gate:
+        # the sign-in confirm page and an invite's name form. Under
+        # Referrer-Policy no-referrer their POSTs carried Origin: null.
+        browser = 'skipped (no playwright-cli)'
+        if shutil.which('playwright-cli'):
+            code, minted = call(api, '/api/lll/invites', {'teams': [alpha['id']], 'mode': 'ro'}, member_tok)
+            assert code == 200, minted
+            script = (Path(__file__).resolve().parent / 'browser_join_login.js').read_text()
+            script = script.replace('__CONFIRM_LINK__', f'{board}/t/ALPHA/?board_token={member_tok}')
+            script = script.replace('__JOIN_URL__', f"{board}/join/{minted['code']}")
+            session = new_session()
+            try:
+                open_session(session, 'about:blank')
+                result = subprocess.run(['playwright-cli', '-s=' + session, 'run-code', script], text=True,
+                                        capture_output=True, timeout=90)
+                require_result(result, 'join and confirm passed', board)
+            finally:
+                subprocess.run(['playwright-cli', '-s=' + session, 'close'], capture_output=True, timeout=15)
+            browser = 'browser join and sign-in confirm ok'
+        print(f'board origin: {browser}; ok ({len(unsafe)} unsafe routes, {probes} refused probes)')
     finally:
         child.terminate()
         child.wait(timeout=15)

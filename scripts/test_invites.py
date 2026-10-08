@@ -108,7 +108,7 @@ with tempfile.TemporaryDirectory(prefix='lll-invites-') as directory:
         path = invite('--team', 'ALPHA', '--ro')
         code, page, headers = call(board, path)
         assert code == 200 and "<form method='post'" in page, page
-        assert headers['Referrer-Policy'] == 'no-referrer' and headers['Cache-Control'] == 'no-store', headers
+        assert headers['Referrer-Policy'] == 'same-origin' and headers['Cache-Control'] == 'no-store', headers
         assert "frame-ancestors 'none'" in headers['Content-Security-Policy'], headers
 
         # Another site cannot submit the form, and trying does not spend the code.

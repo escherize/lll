@@ -159,7 +159,10 @@ fn login_identity(tok: string, want: string) -> string {
 fn confirm_login(w: http.ResponseWriter, r: Ref<http.Request>, tok: string, who: string) {
   w.Header().Set("Content-Type", "text/html; charset=utf-8")
   w.Header().Set("Cache-Control", "no-store")
-  w.Header().Set("Referrer-Policy", "no-referrer")
+  // same-origin, not no-referrer: the token in this URL stays off every
+  // other origin, and the form's POST carries a real Origin. Under
+  // no-referrer browsers send `Origin: null`, which /login refuses.
+  w.Header().Set("Referrer-Policy", "same-origin")
   w.Header().Set("Content-Security-Policy", "frame-ancestors 'none'")
   w.Header().Set("X-Frame-Options", "DENY")
   let token = html.EscapeString(tok)
