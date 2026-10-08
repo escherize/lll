@@ -43,6 +43,12 @@ needed to test a gopb change. The old public pseudo-version loop is retired.
 
 Add a migration file under `pb/pb_migrations/`, named `<unix-ts>_<what>.js`,
 matching the style of `1756400000_init.js`. It applies on the next `lll up`.
+Use a timestamp no other file has, and never rename a shipped one: PocketBase
+records applied migrations by file name (LLL-657,
+`scripts/test_migration_names.py`). To change a collection rule, add or
+remove one clause with `pb/pb_migrations/lib/rules.js` (see `pb/README.md`)
+rather than assigning the whole string; `scripts/fixtures/collection_rules.json`
+pins every final rule.
 
 **Migrations are a merge hazard between concurrent agents.** Filenames are
 timestamp-ordered and two agents both minting one for the same feature area will

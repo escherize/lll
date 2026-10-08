@@ -108,6 +108,7 @@ python3 -m unittest discover -s scripts -p 'test_release_check.py'
 python3 -m unittest discover -s scripts -p 'test_no_emdash.py'
 python3 -m unittest discover -s scripts -p 'test_no_ambient_env.py'
 python3 -m unittest discover -s scripts -p 'test_write_layer.py'
+python3 -m unittest discover -s scripts -p 'test_migration_names.py'
 python3 scripts/check_assets.py
 """
 
@@ -150,11 +151,11 @@ env = { LC_ALL = "C", PYTHONUTF8 = "1" }
 run = "python3 scripts/release_check.py"
 
 # Regenerates src/commands/api_schema.lis - the reference `lll api --schema`
-# prints - from a throwaway board booted off the embedded migrations. Run it
-# whenever pb/pb_migrations changes what a collection or field looks like;
-# docs/api.md points readers here.
+# prints - and scripts/fixtures/collection_rules.json from a throwaway board
+# booted off the embedded migrations. Run it whenever pb/pb_migrations changes
+# a collection, field or rule; docs/api.md points readers here.
 [tasks.api-schema]
-description = "Regenerate the `lll api --schema` reference from the migrations"
+description = "Regenerate the `lll api --schema` reference and the rules snapshot from the migrations"
 depends = ["build"]
 dir = "{{config_root}}"
 env = { LC_ALL = "C", PYTHONUTF8 = "1" }

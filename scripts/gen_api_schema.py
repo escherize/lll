@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""Generate src/commands/api_schema.lis from the real schema the migrations build.
+"""Generate src/commands/api_schema.lis and scripts/fixtures/collection_rules.json
+from the real schema the migrations build.
 
 Boots a throwaway board from the migrations embedded in the binary (same
 isolation as scripts/scratch.sh: free ports, temp dir, scoped HOME, every LLL_*
@@ -16,6 +17,11 @@ Run with `mise run api-schema` (which builds first) or
 lines when the committed reference no longer matches the migrations. The gate
 runs it beside test_seed.py (LLL-435) — the reference described a schema the
 server does not have through two releases because nothing compared the two.
+
+collection_rules.json is every collection's final rules, one rule per line
+(LLL-657). A rule migration that assigns a whole rule string and forgets a
+clause an earlier migration added drops that clause silently; here it shows
+as a changed line that a reviewer has to accept by regenerating.
 """
 
 import difflib
@@ -34,6 +40,8 @@ import urllib.request
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 BINARY = os.path.join(ROOT, "target", ".lisette", "bin", "lll")
 OUT = os.path.join(ROOT, "src", "commands", "api_schema.lis")
+RULES_OUT = os.path.join(ROOT, "scripts", "fixtures", "collection_rules.json")
+RULE_NAMES = ("listRule", "viewRule", "createRule", "updateRule", "deleteRule", "authRule", "manageRule")
 
 ADMIN_EMAIL = "admin@local.dev"
 ADMIN_PASSWORD = "admin-local-123"  # the same pair scripts/scratch.sh prints
@@ -61,9 +69,11 @@ def get(url, token=None):
         return json.load(response)
 
 
-def wait_healthy(url, deadline_s=30):
+def wait_healthy(url, deadline_s=30, proc=None):
     end = time.monotonic() + deadline_s
     while time.monotonic() < end:
+        if proc is not None and proc.poll() is not None:
+            raise SystemExit(f"board exited with {proc.returncode} before it became healthy at {url}")
         try:
             get(url + "/api/health")
             return
@@ -103,14 +113,22 @@ def boot_board():
         LLL_ADMIN_EMAIL=ADMIN_EMAIL,
         LLL_ADMIN_PASSWORD=ADMIN_PASSWORD,
     )
-    proc = subprocess.Popen(
-        [BINARY, "up", "--port", str(web_port), "--pb-dir", os.path.join(scratch, "pb_data")],
-        cwd=home, env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-    )
+    # The boot log is printed if the board never comes up: a migration that
+    # throws (pb_migrations/lib/rules.js does, by design) names itself there.
+    log_path = os.path.join(scratch, "boot.log")
+    with open(log_path, "w") as log:
+        proc = subprocess.Popen(
+            [BINARY, "up", "--port", str(web_port), "--pb-dir", os.path.join(scratch, "pb_data")],
+            cwd=home, env=env, stdout=log, stderr=subprocess.STDOUT,
+        )
     try:
-        wait_healthy(url)
+        wait_healthy(url, proc=proc)
     except BaseException:
         proc.terminate()
+        proc.wait(timeout=10)
+        with open(log_path) as log:
+            sys.stderr.write(log.read())
+        shutil.rmtree(scratch, ignore_errors=True)
         raise
     return proc, url, scratch
 
@@ -207,6 +225,17 @@ def render(collections_json):
     return "\n".join(out).rstrip() + "\n"
 
 
+def rules_snapshot(collections_json):
+    """Every collection's rules, PocketBase's own collections (`_*`) aside.
+    `users` stays in: lll does not use it, and its rules must stay null."""
+    rules = {
+        c["name"]: {r: c[r] for r in RULE_NAMES if r in c}
+        for c in collections_json
+        if not c["name"].startswith("_")
+    }
+    return json.dumps(rules, indent=2, sort_keys=True) + "\n"
+
+
 def lisette_constant(markdown):
     """Escape for a Lisette multiline string. It processes backslash escapes,
     and a bare quote ANYWHERE terminates the literal - a mid-line `"` ends the
@@ -225,21 +254,20 @@ def lisette_constant(markdown):
     )
 
 
-def verify(generated):
-    """--check: the committed reference must match what the migrations build.
-    A drifted line is a collection header or a field row, so printing the
-    unified diff's body names the drift — the migration that moved — rather
-    than just 'files differ'."""
-    rel = os.path.relpath(OUT, ROOT)
-    if not os.path.exists(OUT):
-        raise SystemExit(
-            f"api schema check FAILED: {rel} does not exist — generate it with `mise run api-schema`"
-        )
-    with open(OUT) as f:
+def verify(out, generated):
+    """--check: the committed file must match what the migrations build.
+    A drifted line is a collection header, a field row or a rule, so printing
+    the unified diff's body names the drift — the migration that moved —
+    rather than just 'files differ'. Returns whether it matched."""
+    rel = os.path.relpath(out, ROOT)
+    if not os.path.exists(out):
+        print(f"api schema check FAILED: {rel} does not exist — generate it with `mise run api-schema`", file=sys.stderr)
+        return False
+    with open(out) as f:
         committed = f.read()
     if committed == generated:
         print(f"api schema check passed: {rel} matches what pb/pb_migrations builds")
-        return
+        return True
     diff = list(difflib.unified_diff(
         committed.splitlines(), generated.splitlines(),
         fromfile=f"a/{rel} (committed)",
@@ -255,12 +283,12 @@ def verify(generated):
         # first run of this check reported a useless 'lacks 0, carries 0'
         # for exactly this case (a merge resolution's trailing newline).
         print("  the difference is outside any line diff (trailing newline or encoding) — regenerate with `mise run api-schema`", file=sys.stderr)
-        sys.exit(1)
+        return False
     print(f"  the committed reference lacks {len(added)} line(s) and carries {len(removed)} the migrations no longer produce:", file=sys.stderr)
     for line in added + removed:
         print(f"  {line}", file=sys.stderr)
     print("  regenerate with: mise run api-schema", file=sys.stderr)
-    sys.exit(1)
+    return False
 
 
 def main():
@@ -270,7 +298,8 @@ def main():
     proc, url, scratch = boot_board()
     try:
         token = superuser_token(url)
-        markdown = render(collections(url, token))
+        collections_json = collections(url, token)
+        markdown = render(collections_json)
     finally:
         proc.send_signal(signal.SIGTERM)
         try:
@@ -278,13 +307,17 @@ def main():
         except subprocess.TimeoutExpired:
             proc.kill()
         shutil.rmtree(scratch, ignore_errors=True)
-    generated = lisette_constant(markdown)
+    outputs = {OUT: lisette_constant(markdown), RULES_OUT: rules_snapshot(collections_json)}
     if check:
-        verify(generated)
+        # Both, so one run names every drifted file.
+        results = [verify(out, generated) for out, generated in outputs.items()]
+        if not all(results):
+            sys.exit(1)
         return
-    with open(OUT, "w") as f:
-        f.write(generated)
-    print(f"wrote {os.path.relpath(OUT, ROOT)} ({len(markdown.splitlines())} lines)")
+    for out, generated in outputs.items():
+        with open(out, "w") as f:
+            f.write(generated)
+        print(f"wrote {os.path.relpath(out, ROOT)} ({len(generated.splitlines())} lines)")
 
 
 if __name__ == "__main__":
