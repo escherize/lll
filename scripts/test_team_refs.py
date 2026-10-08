@@ -330,13 +330,13 @@ with tempfile.TemporaryDirectory(prefix='lll-631-') as directory:
         assert code == 400 and RULE in json.dumps(body), (code, body)
         for bad in ['2ENG', 'A' * 17, 'a b', 'ÉQUIPE', '']:
             assert call(api, '/api/collections/teams/records', {'key': bad}, su)[0] == 400, bad
-        code, out = lll('team', 'create', '-k', 'q"<b>$(id)', '-n', 'x')
+        code, out = lll('team', 'create', '--key', 'q"<b>$(id)', '-n', 'x')
         assert code != 0 and RULE in out and '$(ID)' not in out, out
-        code, out = lll('team', 'rename', 'BETA', '-k', 'be ta')
+        code, out = lll('team', 'rename', 'BETA', '--key', 'be ta')
         assert code != 0 and RULE in out, out
         code, body = call(api, f"/api/collections/teams/records/{beta['id']}", {'key': 'x y'}, su, 'PATCH')
         assert code == 400 and RULE in json.dumps(body), body
-        code, out = lll('team', 'create', '-k', 'web-2', '-n', 'Web')
+        code, out = lll('team', 'create', '--key', 'web-2', '-n', 'Web')
         assert code == 0 and 'WEB-2' in out, out
         code, body = call(api, '/api/collections/teams/records', {'key': 'ops_1'}, toks['full'])
         assert code == 200 and body['key'] == 'OPS_1', body
