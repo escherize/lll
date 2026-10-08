@@ -94,20 +94,37 @@ anon=$(curl -s -o /dev/null -w '%{http_code}' "http://127.0.0.1:$WEB2/")
 anon_page=$(curl -s "http://127.0.0.1:$WEB2/")
 printf '%s' "$anon_page" | grep -q "board_token" || fail "401 page does not say how to get in"
 curl -sf -H "$BOARD_COOKIE" "http://127.0.0.1:$WEB2/" >/dev/null || fail "board not on incremented port $WEB2"
-# LLL-648: one truth about the administrator pair. A loopback boot on the
-# fallback prints it (help, README and the landing page say so); the
-# administration UI address appears only with --admin-ui.
-grep -q '^admin  admin@local.dev / admin-local-123 ' "$UP_LOG" || fail "loopback fallback admin pair not in the banner"
+# LLL-648, LLL-676: one truth about the administrator pair. A boot with no
+# LLL_ADMIN_* generates a password, keeps it 0600 in the data directory and
+# names that file, never the password (help, README and the landing page say
+# so); the administration UI address appears only with --admin-ui.
+ADMIN_FILE="$(cd "$DATA_DIR/pb_data" && pwd)/.lll-admin.json"
+grep -qF "admin  admin@local.dev; generated password in $ADMIN_FILE " "$UP_LOG" || fail "generated admin line not in the banner"
+grep -q 'admin-local-123' "$UP_LOG" && fail "banner still names the well-known fallback password"
+[ "$(stat -f '%Lp' "$ADMIN_FILE" 2>/dev/null || stat -c '%a' "$ADMIN_FILE")" = "600" ] || fail "generated admin file is not 0600"
+ADMIN_PASS=$(jq -r .password "$ADMIN_FILE")
+[ "${#ADMIN_PASS}" -ge 40 ] || fail "generated admin password is short"
 grep -q '/_/' "$UP_LOG" && fail "default banner advertised administration UI"
 grep -q "port $WEB_PORT taken" "$UP_LOG" || fail "web port move not printed"
 # LLL-648: on this machine 'lll board' prints a link that signs the browser in.
 resolved_board=$(env -u LLL_WEB_URL -u LLL_BOARD_TOKEN HOME="$E2E_HOME" "$LLL" board)
 [ "$resolved_board" = "http://127.0.0.1:$WEB2/?board_token=$BOARD_TOKEN" ] || fail "lll board did not print the login link for the actual board port: $resolved_board"
 
-curl -sf -X POST "http://127.0.0.1:$DB2/api/collections/_superusers/auth-with-password" \
-  -H 'Content-Type: application/json' \
-  -d '{"identity":"admin@local.dev","password":"admin-local-123"}' >/dev/null \
-  || fail "default admin creds do not authenticate"
+jq -n --arg p "$ADMIN_PASS" '{identity: "admin@local.dev", password: $p}' \
+  | curl -sf -X POST "http://127.0.0.1:$DB2/api/collections/_superusers/auth-with-password" \
+      -H 'Content-Type: application/json' -d @- >/dev/null \
+  || fail "generated admin creds do not authenticate"
+fallback=$(curl -s -o /dev/null -w '%{http_code}' -X POST "http://127.0.0.1:$DB2/api/collections/_superusers/auth-with-password" \
+  -H 'Content-Type: application/json' -d '{"identity":"admin@local.dev","password":"admin-local-123"}')
+[ "$fallback" = "400" ] || fail "the well-known fallback admin pair answered $fallback"
+# LLL-676: no "*" CORS on the API or the board's /api/ proxy, and a loopback
+# listener refuses a DNS-rebinding Host.
+for port in "$DB2" "$WEB2"; do
+  acao=$(curl -s -D - -o /dev/null -H 'Origin: http://evil.example' "http://127.0.0.1:$port/api/health" | tr -d '\r' | grep -i '^access-control-allow-origin' || true)
+  [ -z "$acao" ] || fail "port $port answered a foreign origin: $acao"
+  rebind=$(curl -s -o /dev/null -w '%{http_code}' -H "Host: rebind.attacker.example:$port" "http://127.0.0.1:$port/api/health")
+  [ "$rebind" = "403" ] || fail "port $port answered a rebinding Host with $rebind"
+done
 
 # TASK-181: the rules are authenticated-only, and the boot says so: up
 # applied the superuser token to its own process (seeding + the board's
@@ -117,13 +134,13 @@ grep -q "auth   rules are authenticated-only" "$UP_LOG" \
   || fail "lll up did not apply the superuser token to its own process"
 # The boot seeds e2euser and authenticates as that member. Wait for it before
 # minting the suite's CLI token, or the helper loses the race on the name.
-_su=$(pb_superuser_token "http://127.0.0.1:$DB2")
+_su=$(pb_superuser_token "http://127.0.0.1:$DB2" "$ADMIN_PASS")
 for _ in $(seq 1 100); do
   curl -sf -G "http://127.0.0.1:$DB2/api/collections/members/records" --data-urlencode "filter=(name='e2euser')" \
     -H "Authorization: Bearer $_su" | jq -e '.items | length > 0' >/dev/null && break
   sleep 0.1
 done
-E2E_TOKEN=$(pb_member_token "http://127.0.0.1:$DB2" e2euser e2euser@members.invalid e2e-up-pass-123) \
+E2E_TOKEN=$(pb_member_token "http://127.0.0.1:$DB2" e2euser e2euser@members.invalid e2e-up-pass-123 "$ADMIN_PASS") \
   || fail "bootstrapping the e2e_up member token"
 export LLL_TOKEN="$E2E_TOKEN"
 AUTH_HDR="Authorization: Bearer $E2E_TOKEN"

@@ -1,8 +1,8 @@
 import "go:fmt"
+import "go:github.com/escherize/lll/gopb"
 import "go:github.com/escherize/lll/web"
 import "go:net"
 import "go:net/http"
-import "go:net/http/httputil"
 import "go:net/url"
 import "go:os"
 import "go:strconv"
@@ -81,7 +81,9 @@ fn api_proxy(
   let Ok(target) = url.Parse(base) else {
     return Err(f"cannot proxy the API: '{base}' is not a url")
   }
-  let proxy = httputil.NewSingleHostReverseProxy(target)
+  // LLL-676: the proxy presents the API's own host upstream, so a loopback
+  // API answers what a LAN board forwards (gopb.NewAPIProxy).
+  let proxy = gopb.NewAPIProxy(target)
   // /api/ is the REST surface every client speaks. The administration UI
   // shares that upstream only when the operator explicitly enables it.
   mux.HandleFunc("GET /.well-known/lll", board_discovery)
@@ -193,7 +195,9 @@ pub fn run_server(
   fmt.Println(
     f"board  login {board_url}/?board_token={board_tok} (sets a cookie; LLL_BOARD_TOKEN pins it)",
   )
-  match http.Serve(listener, mux) {
+  // LLL-676: a loopback board answers only loopback Host names, which
+  // refuses DNS-rebinding pages (the API listener checks the same).
+  match http.Serve(listener, gopb.LoopbackHostGuard(bind, mux)) {
     Ok(_) => Ok(()),
     Err(e) => Err(f"server: {e}"),
   }

@@ -154,15 +154,15 @@ $1" || true
 # same auth-with-password round trip a human login does: find-or-create a
 # member whose password the suite knows, then exchange identity+password for
 # the member token the CLI itself sends as LLL_TOKEN.
-pb_superuser_token() { # url
-  curl -sf -X POST "$1/api/collections/_superusers/auth-with-password" \
-    -H 'Content-Type: application/json' \
-    -d '{"identity":"admin@local.dev","password":"admin-local-123"}' | jq -r '.token'
+pb_superuser_token() { # url [password]; a boot with no LLL_ADMIN_* generates its own (LLL-676)
+  jq -n --arg p "${2:-admin-local-123}" '{identity: "admin@local.dev", password: $p}' \
+    | curl -sf -X POST "$1/api/collections/_superusers/auth-with-password" \
+        -H 'Content-Type: application/json' -d @- | jq -r '.token'
 }
 
-pb_member_token() { # url name email password -> prints the member token
+pb_member_token() { # url name email password [admin password] -> prints the member token
   local url=$1 name=$2 email=$3 pass=$4 atok id
-  atok=$(pb_superuser_token "$url")
+  atok=$(pb_superuser_token "$url" "${5:-}")
   [ -n "$atok" ] && [ "$atok" != "null" ] || return 1
   id=$(curl -sf -G "$url/api/collections/members/records" \
     --data-urlencode "filter=(name='$name')" -H "Authorization: Bearer $atok" \

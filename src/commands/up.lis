@@ -161,24 +161,20 @@ check what is configured with 'lll config list'",
     )
   }
 
-  if share_bind != "" {
-    pin_local_board_token(pb_dir)?
-    pin_local_admin(pb_dir)?
-  }
+  if share_bind != "" { pin_local_board_token(pb_dir)? }
   require_board_token_off_loopback()?
+  // The superuser identity: upserted on a fresh boot, and used for the
+  // process token further down. LLL-676: with no LLL_ADMIN_* pair it is a
+  // random password kept 0600 in the data directory, never a well-known
+  // one: PocketBase is reachable from any web page the user visits.
+  let generated_admin = os.Getenv("LLL_ADMIN_EMAIL") == "" ||
+  os.Getenv("LLL_ADMIN_PASSWORD") == ""
+  if share_bind != "" || generated_admin { pin_local_admin(pb_dir)? }
 
   let mut api_line = f"api    {db_url} (already running)"
 
-  // The superuser identity: upserted on a fresh boot, and used for the
-  // process token further down. The local fallback initializes the server
-  // before it can show an install wizard; credentials stay off the banner.
-  let mut email = os.Getenv("LLL_ADMIN_EMAIL")
-  let mut pass = os.Getenv("LLL_ADMIN_PASSWORD")
-  let fallback_admin = email == "" || pass == ""
-  if fallback_admin {
-    email = "admin@local.dev"
-    pass = "admin-local-123"
-  }
+  let email = os.Getenv("LLL_ADMIN_EMAIL")
+  let pass = os.Getenv("LLL_ADMIN_PASSWORD")
   // Whether this boot proved the administrator pair works: it upserted the
   // pair into the server it started, or signed in with it. The banner names
   // the pair only then (LLL-648).
@@ -336,7 +332,13 @@ superuser credentials, or set LLL_TOKEN to a member token valid for this server.
   fmt.Println(api_line)
   fmt.Println(f"team   {team}")
   fmt.Println(f"member {member.name}")
-  if let Some(line) = admin_line(fallback_admin, admin_ok, scratch || share_bind != "", loopback_bind()) {
+  if let Some(line) = admin_line(
+    generated_admin,
+    admin_ok,
+    scratch || share_bind != "",
+    email,
+    local_admin_path(pb_dir),
+  ) {
     fmt.Println(line)
   }
   // A demo boot points the CLI at itself (demo.lis), and scratch and shared
@@ -410,17 +412,24 @@ superuser credentials, or set LLL_TOKEN to a member token valid for this server.
   run_server(chosen, refresh, p.given("--admin-ui"))
 }
 
-/// The banner's administrator line (LLL-648), or None. A loopback boot on
-/// the built-in fallback prints the pair: it is the documented local default,
-/// and 'lll member invite' and the board's admin forms ask for it. A pair
-/// from the environment is the deployer's secret and is never printed.
-/// Scratch and shared boots print or store their own random pair, and a
-/// non-loopback bind never prints one. The tag is "admin", which the
-/// --admin-ui line also uses; that line carries a URL, this one an email.
-fn admin_line(fallback: bool, proved: bool, own_pair: bool, loopback: bool) -> Option<string> {
-  if !fallback || !proved || own_pair || !loopback { return None }
+/// The banner's administrator line (LLL-648), or None. A boot with no
+/// LLL_ADMIN_* pair names the generated administrator and the 0600 file that
+/// holds its password (LLL-676): 'lll member invite' and the board's admin
+/// forms ask for it. The password itself stays off the banner, and a pair
+/// from the environment is the deployer's secret and is never named.
+/// Scratch and shared boots print or store their own random pair. The tag
+/// is "admin", which the --admin-ui line also uses; that line carries a URL,
+/// this one an email.
+fn admin_line(
+  generated: bool,
+  proved: bool,
+  own_pair: bool,
+  email: string,
+  path: string,
+) -> Option<string> {
+  if !generated || !proved || own_pair { return None }
   Some(
-    "admin  admin@local.dev / admin-local-123 (loopback fallback; set LLL_ADMIN_EMAIL and LLL_ADMIN_PASSWORD to choose your own)",
+    f"admin  {email}; generated password in {path} (set LLL_ADMIN_EMAIL and LLL_ADMIN_PASSWORD to choose your own)",
   )
 }
 
@@ -598,18 +607,29 @@ to keep it private: LLL_BIND=127.0.0.1",
   )
 }
 
-/// A LAN board must never expose the loopback-only fallback administrator
-/// password. Keep one random pair with its data directory, and copy it to the
-/// machine's private config after startup for later member-pass minting.
+/// Where a data directory keeps its generated administrator pair.
+fn local_admin_path(pb_dir: string) -> string {
+  let abs = filepath.Abs(pb_dir).unwrap_or(pb_dir)
+  filepath.Join(abs, ".lll-admin.json")
+}
+
+/// LLL-676: no board uses a well-known administrator password. With no
+/// LLL_ADMIN_* pair, keep one random pair with the data directory (0600),
+/// so a restart signs in with the same one. A shared (--bind) board also
+/// pins a supplied pair, and copies it to the machine's private config after
+/// startup for later member-pass minting.
 fn pin_local_admin(pb_dir: string) -> Result<(), string> {
-  let path = filepath.Join(pb_dir, ".lll-admin.json")
   let supplied_email = os.Getenv("LLL_ADMIN_EMAIL")
   let supplied_pass = os.Getenv("LLL_ADMIN_PASSWORD")
   if (supplied_email == "") != (supplied_pass == "") {
     return Err(
-      "a shareable board needs both LLL_ADMIN_EMAIL and LLL_ADMIN_PASSWORD, or neither",
+      "lll up needs both LLL_ADMIN_EMAIL and LLL_ADMIN_PASSWORD, or neither (then it generates a password and keeps it in the data directory)",
     )
   }
+  if let Err(e) = os.MkdirAll(pb_dir, 0o700) {
+    return Err(f"creating local board data directory {pb_dir}: {e}")
+  }
+  let path = local_admin_path(pb_dir)
   let mut saved = LocalShareAdmin { .. }
   match os.ReadFile(path) {
     Ok(b) => {
@@ -626,7 +646,7 @@ fn pin_local_admin(pb_dir: string) -> Result<(), string> {
   }
   let email = if supplied_email != "" {
     supplied_email
-  } else if saved.email != "" { saved.email } else { "admin@local.invalid" }
+  } else if saved.email != "" { saved.email } else { "admin@local.dev" }
   let pass = if supplied_pass != "" {
     supplied_pass
   } else if saved.password != "" {
@@ -680,17 +700,26 @@ Usage:
 
 Reuses a server API already running at the configured URL; otherwise runs one
 in-process (first free port from the configured port up) after upserting the
-administrator from LLL_ADMIN_EMAIL/LLL_ADMIN_PASSWORD (a local fallback is used
-when unset). The board opens in your browser unless --no-open. Taken ports
+administrator from LLL_ADMIN_EMAIL/LLL_ADMIN_PASSWORD (a generated password is
+used when unset). The board opens in your browser unless --no-open. Taken ports
 auto-increment. Ctrl-C stops everything lll up started; an externally-started
 server API is left running.
 
 The administration UI at the board's /_/ path is disabled by default.
 --admin-ui enables it and prints its address. Sign in with the server's
 administrator credentials; LLL_ADMIN_EMAIL/LLL_ADMIN_PASSWORD set them when
-starting a local API. With neither set, a loopback boot uses the fallback
-admin@local.dev / admin-local-123 and prints it in the banner's admin line.
-A pair from the environment is never printed.
+starting a local API. With neither set, the administrator is admin@local.dev
+with a random password generated on the first boot and kept in the data
+directory's .lll-admin.json (0600); the banner's admin line names that file.
+A data directory that still had the old well-known password admin-local-123
+loses it on the next boot, with a warning. A pair from the environment is
+never printed.
+
+The API answers browsers from other origins only when LLL_ALLOWED_ORIGINS
+lists them (exact origins, comma-separated, e.g. http://localhost:5173). The
+board itself needs none: its pages call the API through its own /api/. On a
+loopback bind, the board and the API answer only loopback host names
+(localhost, 127.0.0.1, [::1]).
 
 The board needs a team. A configured team (LLL_TEAM or 'team' in .lll.toml)
 is created on the server if it is missing. With none configured lll up asks
@@ -741,8 +770,9 @@ Environment:
   LLL_TOKEN         member token selecting the board's identity
   LLL_BIND          address the board and API listen on (default 127.0.0.1)
   LLL_BOARD_TOKEN   pins the board's access token instead of generating one
-  LLL_ADMIN_EMAIL   superuser used to start a local API
-  LLL_ADMIN_PASSWORD
+  LLL_ADMIN_EMAIL   superuser used to start a local API (both or neither;
+  LLL_ADMIN_PASSWORD  neither generates one, kept in the data directory)
+  LLL_ALLOWED_ORIGINS  browser origins, besides the board, the API answers
 
 --scratch ignores every one of these.",
   )

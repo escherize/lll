@@ -185,11 +185,13 @@ with tempfile.TemporaryDirectory(prefix='lll-546-') as directory:
         for name in ['', '../x', 'Agent', 'a b', "x'y", 'a' * 41]:
             refused(rw_tok, {'name': name, 'team': 'ALPHA'}, 200, 'lowercase letters, digits and dashes')
         # A Host the prompt refuses to echo is refused before anything is
-        # created: no orphan bot without a prompt.
+        # created: no orphan bot without a prompt. This board is loopback, so
+        # the loopback Host guard (LLL-676) refuses it first; serve_bot's own
+        # check, which a LAN board relies on, is pinned by serve_bot.test.lis.
         code, body = call(board, '/bot', {'name': 'orphan1', 'team': 'ALPHA'}, form=True,
                           headers={'Cookie': 'lll_board=' + rw_tok, 'Host': 'a_b.example:1',
                                    'Origin': 'http://a_b.example:1'})
-        assert code == 200 and "cannot tell this board's address" in html.unescape(str(body)), (code, body)
+        assert code == 403 and 'answers only loopback host names' in str(body), (code, body)
         # The minted bot cannot mint bots from its own cookie.
         assert 'Add a bot' not in page('/t/ALPHA/', bot_tok)[1]
         code, body = post(bot_tok, {'name': 'grandchild', 'team': 'ALPHA'})
