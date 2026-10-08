@@ -70,6 +70,9 @@ pub fn attach(args: Slice<string>) -> Result<(), string> {
   if key == "" {
     return Err(f"no team key in '{name}' to derive one from — pass it: lll attach -k KEY")
   }
+  if p.given("-k") {
+    if let Some(problem) = records.team_key_problem(key) { return Err(problem) }
+  }
 
   // Attaching to an archived team is refused, not silently revived: archive
   // is a deliberate lifecycle act, and unarchive is one command (TASK-210).

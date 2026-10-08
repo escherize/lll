@@ -18,6 +18,7 @@ import (
 
 	"github.com/escherize/lll/pb"
 	"github.com/pocketbase/dbx"
+	validation "github.com/pocketbase/ozzo-validation/v4"
 	"github.com/pocketbase/pocketbase"
 	"github.com/pocketbase/pocketbase/core"
 	"github.com/pocketbase/pocketbase/plugins/jsvm"
@@ -36,6 +37,13 @@ import (
 // passes a migrations path.
 // recordsPath is every record CRUD route: list, view, create, update, delete.
 var recordsPath = regexp.MustCompile(`^/api/collections/[^/]+/records(/|$)`)
+
+// teamKeyShape is the one team key rule (LLL-628): an uppercase letter, then
+// up to 15 uppercase letters, digits, '_' or '-'. The CLI checks the same
+// pattern before it writes (records.team_key_problem).
+var teamKeyShape = regexp.MustCompile(`^[A-Z][A-Z0-9_-]{0,15}$`)
+
+const teamKeyRule = "a team key is a letter followed by up to 15 letters, digits, '_' or '-' (^[A-Z][A-Z0-9_-]{0,15}$ after uppercasing), e.g. ENG or WEB-2"
 
 const anonMessage = "authentication required: send a member token as 'Authorization: Bearer ...' - 'lll login' for a person, 'lll token create' for an agent"
 
@@ -81,9 +89,19 @@ func Serve(dataDir, addr, adminEmail, adminPassword string) error {
 	// derived issue key, the rail, the docs - assumes uppercase. Normalising
 	// here rather than in the CLI makes it true for the raw API and any
 	// future writer too, which is what "one rule" has to mean.
+	//
+	// LLL-628: and it has a shape. Keys reach URLs, filenames, shell-pasted
+	// bot prompts and HTML, and a full member could create Q"<B>$(ID). A new
+	// key, or a changed one, must match teamKeyShape; an unchanged legacy key
+	// still takes unrelated edits (archiving, renaming the display name), and
+	// 1792100000_report_bad_team_keys.js logs any that exist.
 	normalizeTeamKey := func(e *core.RecordEvent) error {
-		if key := e.Record.GetString("key"); key != "" {
-			e.Record.Set("key", strings.ToUpper(key))
+		key := strings.ToUpper(e.Record.GetString("key"))
+		e.Record.Set("key", key)
+		if e.Record.IsNew() || key != strings.ToUpper(e.Record.Original().GetString("key")) {
+			if !teamKeyShape.MatchString(key) {
+				return validation.Errors{"key": validation.NewError("validation_team_key", teamKeyRule)}
+			}
 		}
 		return e.Next()
 	}

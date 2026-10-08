@@ -185,3 +185,15 @@ func TestATeamMoveIsRefusedWhileReferencesWouldCrossTeams(t *testing.T) {
 		t.Fatalf("a move with no references left: %v", err)
 	}
 }
+
+func TestTeamKeyShape(t *testing.T) {
+	for key, ok := range map[string]bool{
+		"ENG": true, "WEB-2": true, "A_B": true, "A": true, "ABCDEFGHIJKLMNOP": true,
+		"ABCDEFGHIJKLMNOPQ": false, "2ENG": false, "": false, "-A": false, `Q"<B>$(ID)`: false,
+		"A B": false, "ÉQUIPE": false, "eng": false, "A\nB": false,
+	} {
+		if teamKeyShape.MatchString(key) != ok {
+			t.Errorf("%q: match=%v, want %v", key, !ok, ok)
+		}
+	}
+}
