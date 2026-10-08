@@ -191,9 +191,12 @@ create bots.
 
 - `--agent NAME` on `issue create` (recorded as the origin tool), `issue
   close` and `issue start` (labels the moved-work-site comment).
-- Comments carry `author_kind`: `"system"` on the comments the server writes
-  (a forced release, an expired claim), `""` on every other. The CLI, the
+- Comments carry `author_kind`: `"system"` on the claim-expiry note the
+  server writes on its own, `""` on every other (omitted from `issue view --json`). The forced-release comment
+  is the releaser's, since it carries the releaser's reason. The CLI, the
   board and exports show a system comment's author as `system` (LLL-654).
+  Existing comments are not relabelled: no stored row proves the server
+  wrote it.
 - `lll member create --help` names `lll bot create` for agents (LLL-636).
 
 ### Fixed (claims and bots)
@@ -208,9 +211,15 @@ create bots.
 
 - An API delete of a claimed issue is refused for every caller; the claim
   cascaded away silently before (LLL-662).
-- `author_kind` cannot be set or changed by any request, and a server-written
-  comment cannot be edited, so `system` cannot be forged (LLL-654).
-- A server-written comment names a member only when everyone who sees the
+- `author_kind` cannot be set or changed by any request, a system comment
+  cannot be edited, and no system comment carries caller-supplied text, so
+  `system` cannot be forged or made to say what a member chose (LLL-654).
+- A member's comment is authored by that member: a create names the caller
+  whatever the body says, and no member can change a comment's author.
+  Before this, any team writer could post a comment with no author or in
+  another member's name, so a fake expiry note or forced-release record read
+  as real. A superuser still chooses the author.
+- A forced-release or expiry comment names a member only when everyone who sees the
   issue's team may see that member; otherwise it says "a member outside this
   team" (LLL-633).
 - `--admin-password` and `--admin-email` are no longer copied into the

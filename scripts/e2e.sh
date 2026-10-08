@@ -2839,8 +2839,9 @@ assert_contains "$out" \
   "work moved: $WBRANCH @ site-a:$WROOT_A -> $WBRANCH @ site-b:$WROOT_B" \
   "displacement leaves the auto-comment trail"
 
-# close clears nothing; the site renders as history
-out=$(env $E "$LIN" issue close "$WKEY")
+# close clears nothing; the site renders as history. The holder keeps its
+# claim (--keep-claim, D3) so the reopen below is still claimed.
+out=$(env $E LLL_TOKEN="$BRYAN_TOK" LLL_ME=bryan "$LIN" issue close "$WKEY" --keep-claim)
 out=$(env $E "$LIN" issue view "$WKEY")
 assert_contains "$out" "Work:      $WBRANCH @ site-b:$WROOT_B (last seen)" \
   "a done issue keeps the slot, dimmed to last seen"
@@ -3232,12 +3233,13 @@ assert_contains "$comp_token" "create" "token completions offer create"
 LLL_URL=$URL LLL_TOKEN="$REFUSE_TOK" HOME="$E2E_HOME" "$LIN" member add -n onboard >/dev/null \
   || fail "adding the onboard member"
 
+# Administrator credentials ride --admin-* here: a token is stored in this HOME,
+# and LLL_ADMIN_* never outranks a configured token (D7, LLL-646).
 # Without --email it refuses: the synthesized @members.invalid identity is not
 # something a human logs in with, and a password alone would leave login broken.
 set +e
 out=$(printf 'irrelevant\nirrelevant\n' | env HOME="$E2E_HOME" LLL_URL=$URL \
-  LLL_ADMIN_EMAIL=admin@local.dev LLL_ADMIN_PASSWORD=admin-local-123 \
-  "$LIN" member set-password onboard 2>&1)
+  "$LIN" member set-password onboard --admin-email admin@local.dev --admin-password admin-local-123 2>&1)
 rc=$?
 set -e
 [ "$rc" -ne 0 ] || fail "set-password without --email on a synthesized-email member: expected refusal"
@@ -3247,8 +3249,7 @@ assert_contains "$out" "--email" "the email refusal names the flag to pass"
 ONBOARD_PASS="onboard-pass-12345"
 set +e
 out=$(printf 'aaaaaaaaaa\nbbbbbbbbbb\n' | env HOME="$E2E_HOME" LLL_URL=$URL \
-  LLL_ADMIN_EMAIL=admin@local.dev LLL_ADMIN_PASSWORD=admin-local-123 \
-  "$LIN" member set-password onboard --email onboard@lll.test 2>&1)
+  "$LIN" member set-password onboard --email onboard@lll.test --admin-email admin@local.dev --admin-password admin-local-123 2>&1)
 rc=$?
 set -e
 [ "$rc" -ne 0 ] || fail "set-password with mismatched confirmation: expected refusal"
@@ -3257,8 +3258,7 @@ assert_contains "$out" "do not match" "the mismatch refusal says what happened"
 # The success path: two echo-off prompts (two lines when piped), email +
 # password PATCHed as the superuser, and the password echoed nowhere.
 out=$(printf '%s\n%s\n' "$ONBOARD_PASS" "$ONBOARD_PASS" | env HOME="$E2E_HOME" LLL_URL=$URL \
-  LLL_ADMIN_EMAIL=admin@local.dev LLL_ADMIN_PASSWORD=admin-local-123 \
-  "$LIN" member set-password onboard --email onboard@lll.test) \
+  "$LIN" member set-password onboard --email onboard@lll.test --admin-email admin@local.dev --admin-password admin-local-123) \
   || fail "member set-password exited nonzero: $out"
 assert_contains "$out" "email set to onboard@lll.test" "set-password reports the email"
 assert_contains "$out" "password set for onboard" "set-password reports success"
@@ -3485,7 +3485,13 @@ commenter=$(LLL_URL=$URL "$LIN" member list --json | jq -r '.items[] | select(.n
 curl -sf -H "Authorization: Bearer $REMOVE_ADMIN" -H 'Content-Type: application/json' \
   -d "$(jq -nc --arg issue "$busy_issue_id" --arg author "$commenter" '{issue:$issue,author:$author,body:"Comment only history"}')" \
   "$URL/api/collections/comments/records" >/dev/null || fail "creating comment-only reference"
+# D7 (LLL-646): with a member token configured, only the flags act as the
+# administrator; the LLL_ADMIN_* pair this suite exports does not.
 out=$(LLL_URL=$URL "$LIN" member delete "Comment Only Person" 2>&1) \
+  && fail "member delete with only inherited LLL_ADMIN_* should refuse"
+assert_contains "$out" "needs the server's admin credentials" "inherited admin env does not outrank the member token"
+out=$(LLL_URL=$URL "$LIN" member delete "Comment Only Person" \
+  --admin-email admin@local.dev --admin-password admin-local-123 2>&1) \
   && fail "comment-only member deletion should refuse"
 assert_contains "$out" '0 issue(s) assigned and 1 comment(s) authored' "comments alone block deletion"
 curl -sf -H "Authorization: Bearer $REMOVE_ADMIN" "$URL/api/collections/members/records/$commenter" >/dev/null \

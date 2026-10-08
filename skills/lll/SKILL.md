@@ -74,8 +74,9 @@ assignee, so the done issue still says who did it; `--keep-claim` keeps the
 claim. Releasing or closing over another member's claim, or a hold under a
 different agent label on your own token, is refused unless you add `--force`;
 a forced release leaves a comment on the issue naming both members and labels,
-with the reason from `--reason "why"` if you give one. Comments the server
-writes (a forced release, an expired claim) carry author kind `system`. Force
+with the reason from `--reason "why"` if you give one; it is the releaser's
+comment. The note the server leaves when a claim expires carries author kind
+`system`. Force
 only a hold you know is dead: its holder may still be editing. A claimed issue
 cannot be deleted until its claim is released: `lll issue delete KEY-12
 --force` releases it first.

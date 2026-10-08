@@ -133,7 +133,8 @@ lll login --url https://your-host --email you@example.com \
 
 `--create` makes the member and logs into it in the same call. The admin
 credentials can ride `LLL_ADMIN_EMAIL`/`LLL_ADMIN_PASSWORD` instead of the
-flags. The member is named after the part of your email before `@`, unless `--name`
+flags, but only when no token is configured: a configured token always
+outranks them, and only the flags act as the administrator over it. The member is named after the part of your email before `@`, unless `--name`
 says otherwise. If the server has exactly one team, `login` settles that too, so
 `lll issue create "a title"` works immediately.
 

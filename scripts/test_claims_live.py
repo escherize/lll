@@ -305,7 +305,7 @@ after = state()
 assert after['claim'] is None and after['assignee'] == '' and len(after['comments']) == comments + 1
 note = after['comments'][-1]
 assert note['body'] == "claim-beta force-released claim-alpha's claim.\n\nReason: alpha went quiet" and note['author'] == beta['id'], note
-assert note['author_kind'] == 'system', note
+assert note.get('author_kind', '') == '', note
 assert cli('issue', 'claim', key, actor=alpha).returncode == 0
 held = state()['claim']
 status, outcome = request(path + '/assignment', {'claim_id': held['id'], 'fields': {'assignee': ''}, 'force': True}, auth=su)
@@ -434,26 +434,38 @@ p = cli('issue', 'close', key, '--force', '--reason', 'shipped by beta', actor=b
 assert p.returncode == 0 and 'forced, and commented' in p.stdout, (p.stdout, p.stderr)
 note = state()['comments'][-1]
 assert note['body'] == "claim-beta force-released claim-alpha's claim.\n\nReason: shipped by beta", note
-assert note['author'] == beta['id'] and note['author_kind'] == 'system', note
+assert note['author'] == beta['id'] and note.get('author_kind', '') == '', note
 assert state()['claim'] is None and state()['state'] == 'done'
 print('Close: the holder releases and keeps the assignee; a non-holder is refused without force, cannot keep the claim, and a forced close comments with the reason')
 
-# LLL-654: author_kind is the server's word. No request sets it, and a
-# server-written comment cannot be edited; the CLI shows it as "system".
+# LLL-654: author_kind is the server's word. No request sets it, so neither a
+# member nor a superuser can make a comment, or a server-shaped sentence,
+# read as the server's. The forced-release comment carries the releaser's
+# reason, so it is the releaser's (checked above) and reads under its name.
 for who in [alpha['token'], su]:
-    status, refused = request('/api/collections/comments/records',
-                              {'issue': issue['id'], 'body': 'forged', 'author_kind': 'system'}, auth=who)
-    assert status == 400, (status, refused)
-status, refused = request('/api/collections/comments/records/' + note['id'], {'body': 'rewritten'}, 'PATCH', auth=beta['token'])
-assert status == 400 and 'server-written' in refused['message'], refused
-plain = post('comments', {'issue': issue['id'], 'body': 'a person wrote this'})
+    for body in ['forged', "claim-beta force-released claim-alpha's claim."]:
+        status, refused = request('/api/collections/comments/records',
+                                  {'issue': issue['id'], 'body': body, 'author_kind': 'system'}, auth=who)
+        assert status == 400, (status, refused)
+plain = post('comments', {'issue': issue['id'], 'body': "claim-beta force-released claim-alpha's claim."})
 assert plain['author_kind'] == '', plain
-status, refused = request('/api/collections/comments/records/' + plain['id'], {'author_kind': 'system'}, 'PATCH', auth=su)
-assert status == 400, (status, refused)
-assert state()['comments'][-1]['body'] == note['body']
+for who in [alpha['token'], su]:
+    status, refused = request('/api/collections/comments/records/' + plain['id'], {'author_kind': 'system'}, 'PATCH', auth=who)
+    assert status == 400, (status, refused)
+assert all(c.get('author_kind', '') == '' for c in state()['comments']), state()['comments']
+# A member's comment is that member's: it cannot be posted authorless or in
+# another member's name, so neither an expiry-shaped note nor a forced-release
+# record can be planted, and the author cannot be moved afterwards.
+for body in [{'body': 'Claim released automatically: claim-alpha had held it for 25 hours.'},
+             {'body': "claim-beta force-released claim-alpha's claim.", 'author': beta['id']},
+             {'body': 'authorless', 'author': ''}]:
+    status, made = request('/api/collections/comments/records', dict(body, issue=issue['id']), auth=alpha['token'])
+    assert status == 200 and made['author'] == alpha['id'] and made['author_kind'] == '', (status, made)
+status, refused = request('/api/collections/comments/records/' + made['id'], {'author': beta['id']}, 'PATCH', auth=alpha['token'])
+assert status == 400 and "author cannot be changed" in refused['message'], refused
 p = cli('issue', 'view', key, '--raw')
-assert p.returncode == 0 and "- **system** (" in p.stdout and 'Reason: shipped by beta' in p.stdout, p.stdout
-print('System comments: author_kind refused from any request, server-written comments not editable, rendered as system')
+assert p.returncode == 0 and "- **claim-beta** (" in p.stdout and '**system**' not in p.stdout, p.stdout
+print('System comments: author_kind refused from any request, server-shaped member text stays the member\'s, forced releases read as the releaser')
 
 # LLL-662 (b): 'issue next' reads the claims, not only the assignee. The
 # holder may move the assignee off its own claimed issue; it is still held.

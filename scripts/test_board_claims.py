@@ -139,7 +139,7 @@ page = request('/issue/' + key, web=True).decode()
 actor = page.split('>Claim as ', 1)[1].split('</button>', 1)[0]
 note = after['comments'][-1]
 assert note['body'] == actor + " force-released Board claim holder's claim.\n\nReason: holder is on leave", note
-assert note['author_kind'] == 'system', note
+assert note.get('author_kind', '') == '', note
 print('Board claims: the Release button refuses another member\'s claim without a reason and forces it with one; the comment names the board member (' + actor + ') and the reason')
 
 if shutil.which('playwright-cli'):

@@ -283,6 +283,7 @@ pub fn superuser_auth(login: AdminLogin) -> Result<string, string> {
       Err(
         "this command is superuser-only and nothing here can authenticate as one
 pass --admin-email and --admin-password (the credentials used to start the server),
+or set LLL_ADMIN_EMAIL/LLL_ADMIN_PASSWORD (read only when no token is configured),
 or put a superuser token in LLL_TOKEN - and name the server with --url if it is
 not the configured one",
       )

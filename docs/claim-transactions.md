@@ -24,11 +24,15 @@ anyone else, and its comment has no author and names "An administrator". The
 response's `forced` field is true when a comment was written. The CLI spelling
 is `lll issue release KEY --force [--reason "why"]`.
 
-Comments the server writes, the forced-release comment and the expiry
-announcement, carry `author_kind: "system"` (LLL-654); every other comment has
-`""`. No request may set the field or edit a system comment. Their bodies
-name a member only when everyone who sees the issue's team may see that
-member; otherwise they say "a member outside this team" (LLL-633).
+The expiry announcement, the one comment the server writes on its own,
+carries `author_kind: "system"` (LLL-654); every other comment has `""`. No
+request may set the field or edit a system comment, and a member's comment
+is always authored by that member, so neither kind of record can be planted
+by hand. Comments written before this are not relabelled. The forced-release
+comment is not system: it embeds the releaser's reason, so it stays the
+releaser's, attributed and labelled like any comment. Both bodies name a
+member only when everyone who sees the issue's team may see that member;
+otherwise they say "a member outside this team" (LLL-633).
 
 Close releases the claim (D3, LLL-640). `lll issue close KEY` posts the hold
 it observed to `/close`: the holder's close releases it and leaves no

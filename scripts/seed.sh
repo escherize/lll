@@ -155,7 +155,7 @@ done
 # The boot already created demo as a member. Use the product's own token mint
 # instead of resetting its password and assuming a fixture email; its existing
 # email may be synthesized or come from an older --keep database (LLL-445).
-LLL_TOKEN=$("$LLL" token create demo --url "$URL" --duration 31536000 | sed -n 's/^LLL_TOKEN=//p') \
+LLL_TOKEN=$("$LLL" token create demo --url "$URL" --duration 31536000 --admin-email "$LLL_ADMIN_EMAIL" --admin-password "$LLL_ADMIN_PASSWORD" | sed -n 's/^LLL_TOKEN=//p') \
   || fail "could not mint demo's member token against $URL"
 [ -n "$LLL_TOKEN" ] || fail "demo token mint returned no credential"
 export LLL_TOKEN
@@ -344,7 +344,7 @@ echo "to drive the CLI against it in another shell:"
 echo "  export LLL_URL=$URL LLL_TEAM=DEMO LLL_TOKEN=$LLL_TOKEN"
 echo "that token is the member 'demo'; writes go out as the token's member (TASK-317),"
 echo "so an agent that should write as shard-NN needs its own:"
-echo "  LLL_ADMIN_EMAIL=$LLL_ADMIN_EMAIL LLL_ADMIN_PASSWORD=$LLL_ADMIN_PASSWORD lll token create shard-NN"
+echo "  lll token create shard-NN --admin-email $LLL_ADMIN_EMAIL --admin-password $LLL_ADMIN_PASSWORD"
 echo
 
 # Hand the terminal to the server: Ctrl-C then stops the board, which is what

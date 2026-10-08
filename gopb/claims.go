@@ -269,11 +269,13 @@ func releaseAuthority(tx core.App, held *core.Record, by releaser) (name string,
 	return name, forced, nil
 }
 
-// systemAuthorKind marks a comment the server wrote rather than a person or
-// agent (LLL-654): a forced release and a claim expiry. Tools that treated
-// every authorless comment as the human's read this instead of guessing.
-// Only the server sets it; registerSystemCommentGuard refuses it from any
-// request.
+// systemAuthorKind marks a comment the server wrote on its own, with no
+// member behind it (LLL-654): today only the claim-expiry note. Tools that
+// treated every authorless comment as the human's read this instead of
+// guessing. Only the server sets it; registerSystemCommentGuard refuses it
+// from any request. A system comment never carries caller-supplied text, so
+// the label cannot vouch for words a member chose: the forced-release
+// comment, which embeds the releaser's reason, stays the releaser's.
 const systemAuthorKind = "system"
 
 // outsideTeam is how a server-written comment names a member that not every
@@ -306,9 +308,10 @@ func storedName(app core.App, issue *core.Record, memberID, fallback string) str
 // release this issue exists to stop.
 //
 // The releaser is the author, so the comment is attributed like any other,
-// and its author kind is system (LLL-654): the server wrote the words. A
-// superuser has no member record and the comment goes authorless. The body
-// names both parties as storedName allows (LLL-633).
+// and its author kind stays a member's: the reason is the releaser's own
+// words, so marking it system would let any member put prose in the server's
+// voice. A superuser has no member record and the comment goes authorless.
+// The body names both parties as storedName allows (LLL-633).
 func recordForcedRelease(tx core.App, issue, held *core.Record, by releaser) error {
 	actor := "An administrator"
 	if by.memberID != "" {
@@ -333,7 +336,6 @@ func recordForcedRelease(tx core.App, issue, held *core.Record, by releaser) err
 	comment := core.NewRecord(comments)
 	comment.Set("issue", issue.Id)
 	comment.Set("author", by.memberID)
-	comment.Set("author_kind", systemAuthorKind)
 	comment.Set("body", body)
 	return tx.Save(comment)
 }
@@ -415,10 +417,22 @@ func registerClaimedIssueDeleteGuard(app core.App) {
 // no request may set it, and no request may edit a comment the server wrote,
 // so "system" on a comment always means the words are the server's. Deleting
 // one stays allowed, as for any comment.
+//
+// It also binds a member's comment to that member, the way issue creators
+// and doc authors are bound (provenance.go). The comments rules check only
+// team write access, so a member could post as anyone, or as no one, and an
+// authorless comment shaped like the expiry note, or one in another member's
+// name shaped like a forced release, read as the real record. A member's
+// create is authored by that member, whatever the body says, and no member
+// may move a comment's author. A superuser names no member and keeps
+// choosing the author, as imports need.
 func registerSystemCommentGuard(app core.App) {
 	app.OnRecordCreateRequest("comments").BindFunc(func(e *core.RecordRequestEvent) error {
 		if e.Record.GetString("author_kind") != "" {
 			return e.BadRequestError("author_kind is set by the server only", nil)
+		}
+		if e.Auth != nil && e.Auth.Collection().Name == "members" {
+			e.Record.Set("author", e.Auth.Id)
 		}
 		return e.Next()
 	})
@@ -428,6 +442,10 @@ func registerSystemCommentGuard(app core.App) {
 		}
 		if e.Record.GetString("author_kind") != "" {
 			return e.BadRequestError("author_kind is set by the server only", nil)
+		}
+		if e.Auth != nil && e.Auth.Collection().Name == "members" &&
+			e.Record.GetString("author") != e.Record.Original().GetString("author") {
+			return e.BadRequestError("a comment's author cannot be changed", nil)
 		}
 		return e.Next()
 	})

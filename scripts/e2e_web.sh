@@ -1551,7 +1551,7 @@ if command -v playwright-cli >/dev/null 2>&1; then
     suffix=A
     [ "$prefix" = "Unsaved" ] && suffix=B
     "$LIN" label delete "$prefix label $suffix" >/dev/null
-    "$LIN" member remove "$prefix member $suffix" >/dev/null
+    "$LIN" member remove "$prefix member $suffix" --admin-email "$LLL_ADMIN_EMAIL" --admin-password "$LLL_ADMIN_PASSWORD" >/dev/null
     "$LIN" project delete "$prefix project $suffix" >/dev/null
   done
 

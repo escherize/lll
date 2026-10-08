@@ -359,8 +359,16 @@ fn member_remove(input: flags.CommandInput) -> Result<(), string> {
   // Require an explicit admin login before lookup/counting. The backend also
   // restricts member deletion to superusers (LLL-341), so direct API clients
   // cannot bypass the same account boundary.
+  // Env credentials count only when no token is configured (D7): otherwise
+  // superuser_auth would use the member token and the server would answer a
+  // bare 403.
   let login = given_admin_login(p)?
-  if admin_login_email(login) == "" {
+  let usable = match login {
+    AdminLogin.Explicit(_) => true,
+    AdminLogin.Env(_) => config.load()?.token == "",
+    AdminLogin.Absent => false,
+  }
+  if !usable {
     return Err(
       "removing a member needs the server's admin credentials
 " + admin_hint(),
@@ -882,8 +890,8 @@ password is stored nowhere else: lose it and reissue with
 'lll member create' falls back to would be a dead door.
 
 Uses the configured member token to create a new colleague, or administrator
-credentials from --admin-email/--admin-password or LLL_ADMIN_EMAIL and
-LLL_ADMIN_PASSWORD when supplied. An existing member is refused rather than
+credentials from --admin-email/--admin-password (LLL_ADMIN_EMAIL and
+LLL_ADMIN_PASSWORD only when no token is configured). An existing member is refused rather than
 overwritten; resetting an existing password with 'lll member set-password'
 requires administrator credentials.
 
@@ -909,7 +917,8 @@ Usage:
   {usage}
 
 Authenticates as the server administrator using --admin-email/--admin-password,
-LLL_ADMIN_EMAIL/LLL_ADMIN_PASSWORD, or a configured superuser token.
+else a configured superuser token, else LLL_ADMIN_EMAIL/LLL_ADMIN_PASSWORD
+when no token is configured.
 Sets NAME's password to --password when supplied. Otherwise prompts
 twice with echo off when stdin is a terminal, or reads two lines when piped.
 The replacement password must contain at least 8 characters.
@@ -1176,7 +1185,7 @@ Usage:
 
 Showing access works with any token. Changing it needs administrator
 credentials (--admin-email/--admin-password, or LLL_ADMIN_EMAIL and
-LLL_ADMIN_PASSWORD), the same gate as 'lll member invite': no member or bot
+LLL_ADMIN_PASSWORD when no token is configured), the same gate as 'lll member invite': no member or bot
 token can change anyone's access, its own included. Revoking keeps the member
 and everything they wrote; 'lll member delete' deletes the member instead.
 " + flags.section(member_access_spec())

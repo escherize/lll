@@ -201,7 +201,11 @@ assert not authenticates(second) and authenticates(third)
 fourth = minted(ok('bot', 'rotate', 'bot-watch-contract', '--duration', '3600', as_token=superuser))
 assert not authenticates(third) and authenticates(fourth)
 if os.environ.get('LLL_ADMIN_EMAIL'):
-    result = subprocess.run([binary, 'token', 'create', 'bot-watch-contract', '--duration', '3600'],
+    # D7 (LLL-646): a member token is configured here, so the administrator
+    # rides the flags; the inherited LLL_ADMIN_* pair no longer outranks it.
+    result = subprocess.run([binary, 'token', 'create', 'bot-watch-contract', '--duration', '3600',
+                             '--admin-email', os.environ['LLL_ADMIN_EMAIL'],
+                             '--admin-password', os.environ['LLL_ADMIN_PASSWORD']],
         env=dict(os.environ, LLL_URL=api), capture_output=True, text=True, timeout=30)
     assert result.returncode == 0, result.stderr
     assert authenticates(minted(result.stdout)) and authenticates(fourth)

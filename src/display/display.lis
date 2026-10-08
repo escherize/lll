@@ -89,8 +89,8 @@ pub fn member_name(id: string, name: string, empty: string) -> string {
   empty
 }
 
-/// A comment's byline: "system" when the server wrote it (LLL-654: a forced
-/// release or a claim expiry, whose body names who did what), else the
+/// A comment's byline: "system" when the server wrote it on its own (LLL-654:
+/// the claim-expiry note, whose body names the holder), else the
 /// author as member_name reads it, with its session label.
 pub fn comment_byline(kind: string, id: string, name: string, agent: string, empty: string) -> string {
   if kind == "system" { return "system" }
