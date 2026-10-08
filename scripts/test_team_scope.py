@@ -344,6 +344,24 @@ with tempfile.TemporaryDirectory(prefix='lll-team-scope-') as directory:
         assert code == 400 and 'reference stays inside one team' in json.dumps(body), (code, body)
         assert status(f"/api/collections/issues/records/{ia['id']}", {'title': 'alpha edited'}, 'PATCH') == 200
 
+        # LLL-670: an issue's assignee can see its team, whoever assigns and
+        # by whichever route.
+        beta_only, _ = member('beta-only', scope='teams', teams=[beta['id']])
+        _, a670, _ = call(api, '/api/collections/issues/records', {'team': alpha['id'], 'title': 'assign probe', 'state': 'todo'}, su)
+        _, b670, _ = call(api, '/api/collections/issues/records', {'team': beta['id'], 'title': 'assign probe', 'state': 'todo'}, su)
+        for code, body, _ in [
+            call(api, f"/api/collections/issues/records/{a670['id']}", {'assignee': beta_only['id']}, su, 'PATCH'),
+            call(api, f"/api/collections/issues/records/{a670['id']}", {'assignee': beta_only['id']}, tok, 'PATCH'),
+            call(api, '/api/collections/issues/records',
+                 {'team': alpha['id'], 'title': 'assign probe 2', 'state': 'todo', 'assignee': beta_only['id']}, su),
+            call(api, f"/api/lll/issues/{a670['id']}/assignment", {'claim_id': '', 'fields': {'assignee': beta_only['id']}}, su),
+            call(api, f"/api/lll/issues/{a670['id']}/claim", {'member': beta_only['id']}, su),
+        ]:
+            assert code == 400 and 'cannot see team' in json.dumps(body) and 'beta-only' not in json.dumps(body), (code, body)
+        assert call(api, f"/api/collections/issues/records/{a670['id']}", token=su)[1]['assignee'] == ''
+        assert call(api, f"/api/collections/issues/records/{b670['id']}", {'assignee': beta_only['id']}, su, 'PATCH')[0] == 200, \
+            'control: assigning inside the member\'s team'
+
         # Scope "teams" with no teams sees nothing: empty never means every team.
         _, none = member('nobody', scope='teams', teams=[])
         assert call(api, '/api/collections/issues/records', token=none)[1]['items'] == []

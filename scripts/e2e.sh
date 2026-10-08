@@ -1385,6 +1385,8 @@ done
 python3 "$REPO_ROOT"/scripts/test_search_team.py "$LLL_ABS"
 # --- member invite --team: one team over the API and the board ---
 python3 "$REPO_ROOT"/scripts/test_team_scope.py "$LLL_ABS"
+# --- an archived team is read-only on the server, every collection classified (LLL-660) ---
+python3 "$REPO_ROOT"/scripts/test_archived_guard.py "$LLL_ABS"
 # --- a member token in the board cookie scopes pages, search and the stream (LLL-545) ---
 python3 "$REPO_ROOT"/scripts/test_board_viewer_scope.py "$LLL_ABS"
 # --- every registered non-GET board route refuses another origin (LLL-630) ---

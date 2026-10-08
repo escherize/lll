@@ -43,6 +43,11 @@ scripts. A removed spelling fails and names its replacement (LLL-644).
   every flag; `lll import dir` shows `--team`; `lll skill --help` prints its
   page once; `lll up --help` no longer mentions `--local`; `lll finding --help`
   teaches `lll finding create`.
+- The board's bare write paths no longer fall back to the team the server
+  started with. `POST /create` needs a `team` field, and the settings writes
+  live under `/t/KEY/settings/...`; a bare `POST /settings/label`,
+  `/settings/access/member` or `/settings/teams/archive` is refused. Scripts
+  that post to these paths with `curl` must name the team (LLL-664).
 
 ### Removed
 
@@ -63,6 +68,23 @@ scripts. A removed spelling fails and names its replacement (LLL-644).
 
 ### Security
 
+- An archived team is read-only on the server, for every writer. Before
+  this, only adding a reference checked it: a raw API write, a new comment,
+  `lll issue update`, a superuser and the claim, release, renew and
+  assignment routes all wrote to an archived team. Writes to its issues,
+  comments, claims, docs, labels, projects and webhooks, and moves into or
+  out of it, now answer 403 naming the team and `lll team unarchive KEY`. A claim held when the team is archived cannot be released or
+  renewed until the team is unarchived; the hourly claim sweep still frees
+  it, and member deletion still clears assignments (LLL-660).
+- An issue can be assigned only to a member who can see its team, by every
+  route: the records API, `/claim`, `/assignment` and the board. A move into
+  a team the assignee cannot see is refused too. A member narrowed later
+  keeps the issues already assigned to them (LLL-670).
+- The board renders an issue only under its own team's route:
+  `/t/LLL/issue/ENG-3` and `/t/ENG/issue/ENG-003` redirect to
+  `/t/ENG/issue/ENG-3`, and a scoped viewer who cannot see the issue's team
+  gets 404. Favorites and saved views are written only by the board login,
+  as itself; any other login is refused (LLL-664).
 - The web board refuses every request other than GET or HEAD unless its
   `Origin` is the board's own address. Before this, a page served on another
   port of the same host (for example `127.0.0.1:9999` beside the default
@@ -113,6 +135,13 @@ scripts. A removed spelling fails and names its replacement (LLL-644).
 - `issue view` prints each blocker under its own team's key. A blocker in
   another team was printed with the viewed issue's team key, which named a
   different issue (LLL-674).
+- Live board updates no longer go stale after the board's realtime stream
+  to the lll server reconnects: every open board and issue page, and the
+  rail's favorites and saved views, are re-rendered from a fresh read.
+  Refreshes run on four workers, and refreshes of the same view never
+  overlap, so one slow read no longer holds up every viewer. A refresh that
+  fails or runs past 10 seconds is logged instead of dropped silently
+  (LLL-666).
 
 ### Changed
 

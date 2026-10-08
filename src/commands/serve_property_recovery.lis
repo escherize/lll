@@ -1,5 +1,4 @@
 import "records"
-import "go:strings"
 
 /// A failed immediate-save control must not keep its unsaved selection.
 /// Reuse the normal property template, but replace this panel: a morph
@@ -10,8 +9,7 @@ fn property_recovery(key: string, viewer: Viewer) -> string {
     render("issue-properties-unavailable", "").unwrap_or("")
   })
   if html == "" { return "" }
-  let lines = html.split("\n").map(|line| f"data: elements {line}")
-  f"event: datastar-patch-elements\ndata: mode replace\ndata: selector #issue-properties\n{strings.Join(lines, "\n")}\n\n"
+  replace_event("#issue-properties", html)
 }
 
 /// The board reads as its own member, so a scoped viewer gets the panel only

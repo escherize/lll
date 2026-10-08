@@ -424,19 +424,33 @@ fn hide_seed_js(hidden: Slice<string>) -> template.JS {
   strings.Join(parts, " ") as template.JS
 }
 
-/// `team` is the ROUTED team (TASK-198), carried by the rail (accent, links)
-/// only: the issue itself renders from its own record, whichever team owns
-/// it, and the canonical URL — the bare /issue/{key} redirect builds it —
-/// routes through the issue's own team.
+/// `team` is the ROUTED team (TASK-198). An issue renders only under its own
+/// team's route, with its canonical key (LLL-664): /t/LLL/issue/ENG-3 and
+/// /t/ENG/issue/ENG-003 redirect to /t/ENG/issue/ENG-3, so the rail, the
+/// accent and every link on the page belong to the issue's team. A scoped
+/// viewer who cannot see that team gets the 404 a missing issue gets.
 fn issue_page(w: http.ResponseWriter, r: Ref<http.Request>, team: models.Team, me: string) {
   let key = r.PathValue("key")
-  let issue = match records.fetch_issue(key) {
-    Ok(i) => issues_for(r, [i])[0],
+  let fetched = match records.fetch_issue(key) {
+    Ok(i) => i,
     Err(e) => {
       http.Error(w, e, 404)
       return
     },
   }
+  let own = fetched.expand.team.key
+  if let Viewer.Scoped(v) = board_viewer(r) {
+    if !v.sees(own) {
+      http.Error(w, records.issue_not_found(key), 404)
+      return
+    }
+  }
+  let canonical = f"{own}-{fetched.number}"
+  if r.PathValue("team") != own || key != canonical {
+    redirect_with_query(w, r, f"/t/{own}/issue/{canonical}")
+    return
+  }
+  let issue = issues_for(r, [fetched])[0]
   let comments = match records.fetch_comments(issue.id) {
     Ok(c) => c,
     Err(e) => {
