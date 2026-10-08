@@ -36,7 +36,8 @@ lll issue claim KEY-12                 # exits non-zero if someone got there fir
 lll issue update KEY-12 --state in-progress
 # ... work ...
 lll issue comment KEY-12 -b "what changed and why"
-lll issue close KEY-12
+lll issue close KEY-12                 # when the change is on main, not when the PR opens
+lll issue release KEY-12               # close keeps the claim; release it
 ```
 
 `claim` atomically acquires an issue for the member authenticated by your token.
@@ -225,15 +226,18 @@ because Y needs a reconciler and two writable copies" is worth the file.
 ## Side projects: attach, work, archive
 
 A team is cheap — give every side project its own instead of piling issues
-into a shared one. It does not have to be a repo: `lll attach` in a plain
+into a shared one. It does not have to be a repo: `lll attach -k KEY` in a plain
 directory writes `.lll.toml` there and every subdirectory inherits it, so a
 folder of notes gets tracked without a `git init`.
 
 ```sh
-lll attach                 # once, repo or plain dir: creates KEY, writes .lll.toml
+lll attach -k KEY          # once, repo or plain dir: creates team KEY if missing, writes .lll.toml
 lll issue create -t "..."  # work, tracked as KEY-1, KEY-2, ...
 lll team archive KEY       # done: leaves team lists and the board rail
 ```
+
+Pass `-k`: without it, `attach` picks the one team you can already see (or
+asks which), so a side project's issues land in your main team.
 
 Archiving hides, never deletes: `/t/KEY/` still renders with an "archived"
 banner and everything stays readable, but new writes refuse and name the fix
@@ -287,7 +291,9 @@ work to be parked as broken.
 
 ## The board
 
-`lll up` runs the server and the board together. Changes made anywhere (CLI,
+The board is the web view of the same server the CLI talks to; `lll board`
+prints its URL. (`lll up` runs a server and board locally, for when you host
+your own; on someone else's server you never need it.) Changes made anywhere (CLI,
 web, another agent) appear in every open browser without a reload, over one
 SSE stream, so the CLI and the board are never out of sync. `lll board -w` opens
 the current team's board; `lll issue view KEY-12 -w` opens one issue.

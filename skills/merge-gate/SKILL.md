@@ -171,7 +171,7 @@ change combined with everyone else's.
 Order is load-bearing and each constraint below was discovered by violating it:
 
 1. **The version bump lands before the tag.** If the release workflow asserts
-   that the tag matches a manifest (`lisette.toml`, `package.json`, `Cargo.toml`),
+   that the tag matches a manifest (`package.json`, `Cargo.toml`, `pyproject.toml`),
    a tag pushed against the old version fails immediately.
 2. **The changelog is written last.** PRs keep landing while you write it. Four
    landed between the entry and the tag in one session; the entry had to be

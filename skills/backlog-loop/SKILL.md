@@ -86,7 +86,7 @@ lll issue view KEY --raw                    # read it FULLY, including comments
 ```
 
 `lll issue next --claim` picks and claims in one step. Use it only when you
-will apply the filter below to whatever it hands you, and release the issue
+will apply the filter above to whatever it hands you, and release the issue
 with a comment if it fails.
 
 Comments carry the reasons an issue is harder than its title. One issue on lll's
@@ -104,7 +104,8 @@ Then, per issue:
 4. **Verify.** See below. Not "tests pass".
 5. **Record.** Comment with the evidence you actually ran, and what you did NOT
    do.
-6. **Close** - or return it to todo with what is missing.
+6. **Hand it on** - a pushed branch and an open PR, or back to todo with
+   what is missing. Close it only once it is on main (below).
 
 Work one issue per commit. A commit that fixes three issues cannot be reverted
 when one of them was wrong.
@@ -157,6 +158,8 @@ board that lies is worse than no board.
 - Partly done → back to todo, with a comment naming precisely what remains.
   Do not close "most of it".
 - Blocked on a human → back to todo, with the question stated in one sentence.
+- Either way, `lll issue release KEY` so the next agent can take it; a held
+  issue reads as busy.
 - Cannot reproduce → say so with what you tried, and close only if the issue was
   about a symptom that demonstrably no longer occurs. Name it as
   "not reproducible", never as "fixed".
