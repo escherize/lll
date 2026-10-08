@@ -23,7 +23,9 @@ fn settings_member_delete(ctx: pb.Client, r: mut Ref<http.Request>, id: string) 
   let token = if confirmed {
     verify_admin(ctx, r.PostFormValue("admin_password"))?
   } else {
-    ctx.settings.config()?.token
+    // The board's own live token, not the configured one: lll up hands
+    // its board a member token the config files never held.
+    ctx.token()
   }
   let path = f"/api/collections/members/records/{url.PathEscape(id)}"
   let body = ctx.get_as(path, token)?
