@@ -45,7 +45,9 @@ ROOT = Path(__file__).resolve().parents[1]
 SKIP = re.compile(r'<!--\s*example-check:\s*skip:\s*(.+?)\s*-->')
 # An lll command anywhere a command can start: the line's head, or after
 # a shell operator, with any VAR=value prefix.
-LLL_LINE = re.compile(r'(?:^|&&|\|\||;|\||\$\()\s*(?:[A-Z_][A-Z0-9_]*=\S+\s+)*lll(?:\s|$)')
+# A '$ ' prompt prefix counts too, so such a block runs (and fails) rather
+# than being passed over.
+LLL_LINE = re.compile(r'(?:^|^\$|&&|\|\||;|\||\$\(|\b(?:then|do|else))\s*(?:[A-Z_][A-Z0-9_]*=\S+\s+)*lll(?:\s|$)')
 UP_LINE = re.compile(r'^(?:[A-Z_][A-Z0-9_]*=\S+\s+)*lll up(?:\s|$)')
 
 
@@ -175,7 +177,7 @@ def run_document(label, blocks):
             except subprocess.TimeoutExpired:
                 returncode = None
             finally:
-                stop_group(proc.pid)
+                stop_group(proc)
         output = log.read_text()
         if returncode != 0:
             print(output)
@@ -185,17 +187,21 @@ def run_document(label, blocks):
         print(f'{label}: {count} example lines ran, {skipped} blocks skipped with a reason')
 
 
-def stop_group(pgid):
-    """Stop the run's process group: bash, and every `lll up` it started."""
+def stop_group(proc):
+    """Stop the run's process group: bash, and every `lll up` it started.
+
+    bash is reaped as it goes: on macOS a group holding only an unreaped
+    zombie answers EPERM rather than ESRCH."""
     for sig in (signal.SIGTERM, signal.SIGKILL):
         try:
-            os.killpg(pgid, sig)
-        except ProcessLookupError:
+            os.killpg(proc.pid, sig)
+        except (ProcessLookupError, PermissionError):
             return
         for _ in range(40):
+            proc.poll()
             try:
-                os.killpg(pgid, 0)
-            except ProcessLookupError:
+                os.killpg(proc.pid, 0)
+            except (ProcessLookupError, PermissionError):
                 return
             time.sleep(0.25)
 

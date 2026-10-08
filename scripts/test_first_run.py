@@ -105,10 +105,13 @@ with tempfile.TemporaryDirectory(prefix='lll-first-run-') as tmp:
                   'member', 'set-password', 'kim', '--old-password', 'kims-own-pw', '--password', 'y' * 12)
         assert out.returncode == 6 and 'was rejected' in out.stderr, (out.returncode, out.stderr)
         assert 'administrator' not in out.stderr, out.stderr
-        # An administrator's token still gets the --old-password advice.
+        # An administrator's token still gets the --old-password advice. The
+        # password is the generated one the banner names (LLL-676).
+        admin_file = re.search(r'generated password in (\S+/\.lll-admin\.json) ', banner).group(1)
+        admin_pw = json.loads(Path(admin_file).read_text())['password']
         req = urllib.request.Request(f'{api}/api/collections/_superusers/auth-with-password',
                                      data=json.dumps({'identity': 'admin@local.dev',
-                                                      'password': 'admin-local-123'}).encode(),
+                                                      'password': admin_pw}).encode(),
                                      headers={'Content-Type': 'application/json'})
         admin_token = json.load(urllib.request.urlopen(req))['token']
         out = run(kim_dir, dict(kim, LLL_TOKEN=admin_token),

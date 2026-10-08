@@ -895,7 +895,8 @@ fn invite_lines(
 /// runs against. url and web_url resolve independently (env, repo file, home
 /// file), and 'lll up' saves web_url beside another server's url, so the
 /// board must prove it: the invite's own token, asked through the board's
-/// /api/, identifies itself only on the server that signed it.
+/// /api/, identifies itself only on the server that signed it. The probe
+/// sends that token to the configured web_url, a host the user chose.
 fn same_server_board(web_url: string, tok: string) -> string {
   let board = strings.TrimRight(strings.TrimSpace(web_url), "/")
   if board == "" || !pb.token_usable(board, tok) { return "" }
