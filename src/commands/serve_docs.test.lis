@@ -36,8 +36,8 @@ fn a_doc_with_no_kind_is_a_row_with_a_dash() {
   assert raw.contains("- [untyped](/t/TST/doc/untyped) | Untyped | - | - | - |")
 }
 
-// LLL-551: a scoped viewer's row names a hidden author as "hidden member",
-// with no kind or owner; a full viewer's row names the bot and its owner.
+// LLL-551: a viewer whose read of the roster lacks the author sees "hidden
+// member", with no kind or owner; a full viewer's row names the bot and its owner.
 #[test]
 fn a_doc_row_follows_the_viewers_roster() {
   let owner = models.MemberOwner { id: "bob", name: "bob" }
@@ -66,16 +66,14 @@ fn a_doc_row_follows_the_viewers_roster() {
     ..,
   }
 
-  let scoped = Roster {
-    scoped: true,
-    members: team_roster([alice, bot], "t-a"),
-  }
+  // The viewer's own read of the members collection did not return the bot.
+  let scoped = Roster { members: [alice] }
   let hidden = doc_row_vm(scoped.doc(d), "TST")
   assert hidden.author == "hidden member" && hidden.author_kind == "" &&
   hidden.author_via == ""
 
   let full = doc_row_vm(
-    Roster { scoped: false, members: [alice, bot] }.doc(d),
+    Roster { members: [alice, bot, models.Member { id: "bob", name: "bob", .. }] }.doc(d),
     "TST",
   )
   assert full.author == "bot-garden" && full.author_kind == "bot" &&

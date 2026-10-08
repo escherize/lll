@@ -29,6 +29,7 @@ EXEMPT = {
     'members': 'access lists name teams; who may see a team must stay changeable while it is archived',
     'invites': 'grant access to teams; account administration, independent of archiving',
     'favorites': "a bookmark of an issue, not the team's data; starring changes nothing in the team",
+    'link_viewers': "a team link's read-only reader (LLL-658); only gopb writes it, and it never writes a team",
 }
 
 

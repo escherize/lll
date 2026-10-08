@@ -1,13 +1,16 @@
+import "config"
+import "pb"
+
 #[test]
 fn description_delivery_tracks_each_connection_and_retries_after_backpressure() {
   let ready = Channel.buffered<string>(4)
   let slow = Channel.buffered<string>(1)
   let _ = slow.send("occupied")
   let clients = [
-    SseClient { id: 1, scope: "issue:T-1", ch: ready, .. },
-    SseClient { id: 2, scope: "issue:T-1", ch: slow, .. },
+    SseClient { id: 1, scope: "issue:T-1", ch: ready, reader: reader("board"), .. },
+    SseClient { id: 2, scope: "issue:T-1", ch: slow, reader: reader("board"), .. },
   ]
-  let msg = Broadcast { scope: "issue:T-1", payload: "metadata", description: Some("unique description"), .. }
+  let msg = Broadcast { scope: "issue:T-1", reader: "board", payload: "metadata", description: Some("unique description"), .. }
   let delivered = deliver(clients, msg)
   assert delivered[0].description_hash != ""
   assert delivered[1].description_hash == ""
@@ -28,10 +31,10 @@ fn fresh_description_snapshots_are_targeted_and_scope_is_respected() {
   let a = Channel.buffered<string>(4)
   let b = Channel.buffered<string>(4)
   let clients = [
-    SseClient { id: 1, scope: "issue:T-1", ch: a, .. },
-    SseClient { id: 2, scope: "issue:T-1", ch: b, .. },
+    SseClient { id: 1, scope: "issue:T-1", ch: a, reader: reader("board"), .. },
+    SseClient { id: 2, scope: "issue:T-1", ch: b, reader: reader("board"), .. },
   ]
-  let msg = Broadcast { scope: "issue:T-1", payload: "metadata", description: Some("fresh"), client_id: 2, .. }
+  let msg = Broadcast { scope: "issue:T-1", reader: "board", payload: "metadata", description: Some("fresh"), client_id: 2, .. }
   let delivered = deliver(clients, msg)
   assert delivered[0].description_hash == ""
   assert delivered[1].description_hash != ""
@@ -44,29 +47,60 @@ fn fresh_description_snapshots_are_targeted_and_scope_is_respected() {
   assert !leaked
 }
 
+/// A reader that never reaches a server: delivery and the hub's books do
+/// not read.
+fn reader(key: string) -> Reader {
+  let settings = config.given(config.Config { url: "http://127.0.0.1:1", .. }, config.Sources { .. }, config.Env { .. })
+  Reader { key, client: pb.Client.new(settings), scoped: key != "board", writes: true }
+}
+
+// LLL-658: a client gets only what was read as its own reader, whatever
+// its scope string says.
 #[test]
-fn scoped_clients_receive_only_their_teams_data() {
+fn clients_receive_only_what_was_read_as_them() {
   let full = Channel.buffered<string>(4)
-  let scoped = Channel.buffered<string>(4)
+  let member = Channel.buffered<string>(4)
   let clients = [
-    SseClient { id: 1, scope: "board:BBB:manual", ch: full, .. },
-    SseClient { id: 2, scope: "board:BBB:manual", ch: scoped, teams: Some(["AAA"]), .. },
+    SseClient { id: 1, scope: "board:BBB:manual", ch: full, reader: reader("board"), .. },
+    SseClient { id: 2, scope: "board:BBB:manual", ch: member, reader: reader("member:tok"), .. },
   ]
-  // Even with a matching scope string, another team's data is dropped.
-  let delivered = deliver(clients, Broadcast { scope: "board:BBB:manual", team: "BBB", payload: "bbb", .. })
+  let delivered = deliver(clients, Broadcast { scope: "board:BBB:manual", reader: "board", payload: "bbb", .. })
   assert full.receive().unwrap_or("") == "bbb"
   let mut leaked = false
-  select { scoped.receive() => { leaked = true }, _ => () }
+  select { member.receive() => { leaked = true }, _ => () }
   assert !leaked
-  // Workspace-wide rows carry no team, so no scoped client gets them.
-  let _ = deliver(delivered, Broadcast { scope: "*", payload: "favorites", .. })
+  // Workspace-wide rows are the board login's alone.
+  let _ = deliver(delivered, Broadcast { scope: "*", reader: "board", payload: "favorites", .. })
   assert full.receive().unwrap_or("") == "favorites"
-  select { scoped.receive() => { leaked = true }, _ => () }
+  select { member.receive() => { leaked = true }, _ => () }
   assert !leaked
-  // Its own team's data arrives.
-  let own = [SseClient { id: 3, scope: "board:AAA:manual", ch: scoped, teams: Some(["AAA"]), .. }]
-  let _ = deliver(own, Broadcast { scope: "board:AAA:manual", team: "AAA", payload: "aaa", .. })
-  assert scoped.receive().unwrap_or("") == "aaa"
+  // Its own read arrives, and only to it.
+  let _ = deliver(delivered, Broadcast { scope: "board:BBB:manual", reader: "member:tok", payload: "mine", .. })
+  assert member.receive().unwrap_or("") == "mine"
+  select { full.receive() => { leaked = true }, _ => () }
+  assert !leaked
+}
+
+// One read per (view, reader): two tabs of one member share a read, and an
+// issue's exact scope does not match its longer-numbered sibling.
+#[test]
+fn open_views_are_counted_once_per_reader() {
+  let ch = Channel.buffered<string>(1)
+  let clients = [
+    SseClient { id: 1, scope: "board:AAA:manual", ch, reader: reader("member:a"), .. },
+    SseClient { id: 2, scope: "board:AAA:manual", ch, reader: reader("member:a"), .. },
+    SseClient { id: 3, scope: "board:AAA:updated", ch, reader: reader("member:a"), .. },
+    SseClient { id: 4, scope: "board:AAA:manual", ch, reader: reader("board"), .. },
+    SseClient { id: 5, scope: "board:AAAB:manual", ch, reader: reader("board"), .. },
+    SseClient { id: 6, scope: "issue:AAA-10", ch, reader: reader("link:AAA"), .. },
+  ]
+  let board = watches(clients, WatchQuery { scope: "board:AAA:", exact: false, client_id: 0, reply: Channel.new<Slice<OpenView>>() })
+  assert board.length() == 3
+  assert readers_of(board).map(|r| r.key).equals(["member:a", "board"])
+  let one = watches(clients, WatchQuery { scope: "board:AAA:", exact: false, client_id: 4, reply: Channel.new<Slice<OpenView>>() })
+  assert readers_of(one).map(|r| r.key).equals(["board"])
+  let issue = watches(clients, WatchQuery { scope: "issue:AAA-1", exact: true, client_id: 0, reply: Channel.new<Slice<OpenView>>() })
+  assert issue.is_empty()
 }
 
 fn board_job(team: string, order: string, client_id: int) -> Refresh {

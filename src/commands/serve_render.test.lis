@@ -5,26 +5,27 @@ import "models"
 // The web's two priority orders are derived from display.priorities() rather
 // than written out, so these pin the order and the labels a reader sees.
 
+// LLL-658: a scoped viewer's read returns another team's label or project
+// as a bare id with no expanded record; the id is dropped, what expanded
+// stays.
 #[test]
-fn scoped_rendering_drops_other_teams_labels_and_project() {
+fn scoped_rendering_drops_ids_its_read_could_not_expand() {
   let mut issue = models.Issue { team: "t-a", labels: ["l-a", "l-z"], project: "p-z", .. }
-  issue.expand.labels = [models.Label { id: "l-a", team: "t-a", name: "own", .. },
-                         models.Label { id: "l-z", team: "t-z", name: "zlabelhidden", .. }]
-  issue.expand.project = models.Project { id: "p-z", team: "t-z", name: "zprojhidden", .. }
-  assert has_foreign_refs(issue)
-  let seen = without_foreign_refs(issue)
+  issue.expand.labels = [models.Label { id: "l-a", team: "t-a", name: "own", .. }]
+  let seen = shown_refs(issue)
   assert seen.labels.equals(["l-a"]) && seen.expand.labels.map(|l| l.name).equals(["own"])
   assert seen.project == "" && seen.expand.project.name == ""
-  assert !has_foreign_refs(seen)
-  // The issue's own team's project stays.
-  let mut own = models.Issue { team: "t-a", project: "p-a", .. }
-  own.expand.project = models.Project { id: "p-a", team: "t-a", name: "mine", .. }
-  assert !has_foreign_refs(own) && without_foreign_refs(own).expand.project.name == "mine"
-  // Fail closed: an id with no expanded record cannot be shown to be own.
+  // A project that expanded stays, whichever team the viewer saw it in.
+  let mut own = models.Issue { team: "t-a", project: "p-c", labels: ["l-c"], .. }
+  own.expand.project = models.Project { id: "p-c", team: "t-c", name: "seen", .. }
+  own.expand.labels = [models.Label { id: "l-c", team: "t-c", name: "also seen", .. }]
+  let kept = shown_refs(own)
+  assert kept.expand.project.name == "seen" && kept.project == "p-c" && kept.labels.equals(["l-c"])
+  // Only a scoped viewer's issues are trimmed: a full read expands
+  // everything it asked for.
   let bare = models.Issue { team: "t-a", labels: ["l-?"], project: "p-?", .. }
-  assert has_foreign_refs(bare)
-  let cleared = without_foreign_refs(bare)
-  assert cleared.project == "" && cleared.labels.is_empty()
+  assert issues_for(true, [bare])[0].project == "" && issues_for(true, [bare])[0].labels.is_empty()
+  assert issues_for(false, [bare])[0].project == "p-?"
 }
 
 #[test]

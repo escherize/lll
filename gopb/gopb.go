@@ -150,6 +150,7 @@ func Serve(dataDir, addr, adminEmail, adminPassword, version, allowedOriginsSpec
 		registerClaimRoutes(e.Router, &issueUpdates)
 		registerBotRoutes(e.Router)
 		registerAccessRoute(e.Router)
+		registerLinkTokenRoute(e.Router)
 		registerInviteRoutes(e.Router)
 		registerReferenceRoutes(e.Router, &issueUpdates)
 		e.Router.GET("/.well-known/lll", func(re *core.RequestEvent) error {

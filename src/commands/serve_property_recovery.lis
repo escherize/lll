@@ -5,25 +5,19 @@ import "pb"
 /// Reuse the normal property template, but replace this panel: a morph
 /// preserves selected/checked DOM properties when server attributes have
 /// not changed. Title and comment drafts live outside this boundary.
-fn property_recovery(ctx: pb.Client, key: string, viewer: Viewer) -> string {
-  let html = current_properties(ctx, key, viewer).unwrap_or_else(|_| {
+fn property_recovery(ctx: pb.Client, key: string) -> string {
+  let html = current_properties(ctx, key).unwrap_or_else(|_| {
     render("issue-properties-unavailable", "").unwrap_or("")
   })
   if html == "" { return "" }
   replace_event("#issue-properties", html)
 }
 
-/// The board reads as its own member, so a scoped viewer gets the panel only
-/// for an issue it may see, without other teams' labels or project (LLL-545).
-fn current_properties(ctx: pb.Client, key: string, viewer: Viewer) -> Result<string, string> {
-  let fetched = records.fetch_issue(ctx, key)?
-  let issue = match viewer {
-    Viewer.Full => fetched,
-    Viewer.Scoped(v) => {
-      if !v.sees(fetched.expand.team.key) { return Err(records.issue_not_found(key)) }
-      without_foreign_refs(fetched)
-    },
-  }
-  let vm = issue_fields_vm(ctx, issue, [], roster(ctx, viewer_is_scoped(viewer), issue.team)?)?
+/// `ctx` is the viewer's read client (LLL-658), so an issue the viewer may
+/// not see is missing, and its labels, project and members arrive only as
+/// far as the viewer may see them.
+fn current_properties(ctx: pb.Client, key: string) -> Result<string, string> {
+  let issue = shown_refs(records.fetch_issue(ctx, key)?)
+  let vm = issue_fields_vm(ctx, issue, [], read_roster(ctx)?)?
   render("issue-properties", vm)
 }

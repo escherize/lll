@@ -2,10 +2,9 @@ import "go:net/http/httptest"
 
 // LLL-546: the board's "Add a bot" route, name and address rules.
 
-fn bot_route(v: ScopedViewer, method: string, writes: bool) -> string {
-  match scoped_route(method, "/bot", "", "", "", v, writes) {
+fn bot_route(_v: ScopedViewer, method: string, writes: bool) -> string {
+  match scoped_route(method, "/bot", writes) {
     ScopedVerdict.Open => "open",
-    ScopedVerdict.Hidden(_) => "hidden",
     ScopedVerdict.Closed(_) => "closed",
   }
 }

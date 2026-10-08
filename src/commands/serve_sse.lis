@@ -18,31 +18,39 @@ import "realtime"
 // Realtime: the fan-out hub, the /events endpoint each browser holds open, and
 // the bridge that turns PocketBase events into broadcast fragments.
 
-/// One connected browser: its scope ("board:KEY:ORDER" for a team's board
-/// view in one card ordering, or "issue:KEY-1") and the channel its /events
-/// handler drains. `teams` is a scoped viewer's team keys (LLL-545), None for
-/// the board token: deliver drops every broadcast whose team is not among
-/// them, including the workspace-wide "*" fragments (favorites, views).
-/// `full` marks a member viewer whose effective access is every team: it is
-/// fenced by `teams` like any member, but gets the full payload, roster
-/// included (LLL-551).
-struct SseClient { id: int, scope: string, ch: Channel<string>, description_hash: string, teams: Option<Slice<string>>, full: bool }
+/// Who a client's fragments are read and rendered as (LLL-658). The shared
+/// PocketBase subscription runs as the board's member and only says WHAT
+/// changed; each refresh then reads the changed views once per reader, with
+/// that reader's own client, so PocketBase's rules decide what each one
+/// sees. `key` names the credential: clients holding the same one (two tabs
+/// of one member, every board-token tab) share one read and one rendering.
+/// The board login's key is "board": only its rail carries the workspace's
+/// favorites and saved views. `scoped` and `writes` are presentation
+/// (shown_refs, the claim button).
+struct Reader { key: string, client: pb.Client, scoped: bool, writes: bool }
 
-/// A rendered SSE payload for every client with a matching scope. `team` is
-/// the key of the team whose data it carries, "" for workspace-wide rows.
+/// One connected browser: its scope ("board:KEY:ORDER" for a team's board
+/// view in one card ordering, or "issue:KEY-1"), who it reads as, and the
+/// channel its /events handler drains.
+struct SseClient { id: int, scope: string, ch: Channel<string>, description_hash: string, reader: Reader }
+
+/// A rendered SSE payload for every client with a matching scope that reads
+/// as `reader` (a Reader's key).
 struct Broadcast {
   scope: string,
-  team: string,
+  reader: string,
   payload: string,
-  /// What a scoped client gets instead of `payload` when the fragment names
-  /// another team's labels or project (LLL-545) or a member outside the
-  /// team's roster (LLL-551); None when they are equal.
-  scoped_payload: Option<string>,
   description: Option<string>,
   client_id: int,
 }
 
-struct ScopeQuery { scope: string, client_id: int, reply: Channel<bool> }
+/// One open view: a client's scope and who it reads as.
+struct OpenView { scope: string, reader: Reader }
+
+/// Which views are open: those whose scope is `scope` (`exact`) or starts
+/// with it, for one client or all (0). The reply has one entry per distinct
+/// (scope, reader).
+struct WatchQuery { scope: string, exact: bool, client_id: int, reply: Channel<Slice<OpenView>> }
 struct PageSnapshot { key: string, team: string, order: string, client_id: int }
 
 /// Fan-out hub. A single owner task holds the client registry and is fed
@@ -52,7 +60,7 @@ struct Hub {
   unregister: Channel<int>,
   broadcast: Channel<Broadcast>,
   ids: Channel<int>,
-  observers: Channel<ScopeQuery>,
+  watchers: Channel<WatchQuery>,
   snapshots: Channel<PageSnapshot>,
   /// Asks for every connected client's scope (LLL-666): a reconnect
   /// re-renders exactly the views that are open.
@@ -65,7 +73,7 @@ fn new_hub() -> Hub {
     unregister: Channel.new<int>(),
     broadcast: Channel.new<Broadcast>(),
     ids: Channel.new<int>(),
-    observers: Channel.new<ScopeQuery>(),
+    watchers: Channel.new<WatchQuery>(),
     snapshots: Channel.new<PageSnapshot>(),
     scopes: Channel.new<Channel<Slice<string>>>(),
   }
@@ -91,11 +99,8 @@ fn new_hub() -> Hub {
           Some(id) => clients = clients.filter(|c| c.id != id),
           None => running = false,
         },
-        match hub.observers.receive() {
-          Some(q) => {
-            let found = clients.find(|c| c.scope == q.scope && (q.client_id == 0 || c.id == q.client_id)).is_some()
-            let _ = q.reply.send(found)
-          },
+        match hub.watchers.receive() {
+          Some(q) => { let _ = q.reply.send(watches(clients, q)) },
           None => running = false,
         },
         match hub.broadcast.receive() {
@@ -117,6 +122,7 @@ fn new_hub() -> Hub {
 ///
 /// Scope "*" matches every client. The rail is on every page, so its
 /// favorites group is the one fragment with no single scope to belong to.
+/// A client gets only what was read as its own reader (LLL-658).
 fn deliver(clients: Slice<SseClient>, msg: Broadcast) -> Slice<SseClient> {
   let mut result = clients.clone()
   let mut hash = ""
@@ -127,15 +133,10 @@ fn deliver(clients: Slice<SseClient>, msg: Broadcast) -> Slice<SseClient> {
   for i in 0..result.length() {
     let c = result[i]
     if msg.scope != "*" && c.scope != msg.scope { continue }
-    // The second fence: the gate already kept a scoped client's stream on
-    // its own teams, and this drops anything carrying another team's data
-    // even if a scope string ever matched across teams.
-    if let Some(teams) = c.teams {
-      if !teams.contains(msg.team) { continue }
-    }
+    if c.reader.key != msg.reader { continue }
     if msg.client_id != 0 && c.id != msg.client_id { continue }
     let changed = msg.description.is_some() && c.description_hash != hash
-    let mut payload = if c.teams.is_some() && !c.full { msg.scoped_payload.unwrap_or(msg.payload) } else { msg.payload }
+    let mut payload = msg.payload
     if changed {
       if description_patch.is_none() {
         let Ok(html) = render("issue-description", markdown.md_html(msg.description.unwrap_or(""))) else {
@@ -157,10 +158,49 @@ fn deliver(clients: Slice<SseClient>, msg: Broadcast) -> Slice<SseClient> {
   result
 }
 
-fn has_issue_observer(hub: Hub, key: string, client_id: int) -> bool {
-  let reply = Channel.new<bool>()
-  let _ = hub.observers.send(ScopeQuery { scope: f"issue:{key}", client_id, reply })
-  reply.receive().unwrap_or(false)
+/// The open views a query names, one per distinct (scope, reader).
+fn watches(clients: Slice<SseClient>, q: WatchQuery) -> Slice<OpenView> {
+  let mut out: Slice<OpenView> = []
+  for c in clients {
+    let named = if q.exact { c.scope == q.scope } else { strings.HasPrefix(c.scope, q.scope) }
+    if !named || (q.client_id != 0 && c.id != q.client_id) { continue }
+    if out.any(|w| w.scope == c.scope && w.reader.key == c.reader.key) { continue }
+    out = out.append(OpenView { scope: c.scope, reader: c.reader })
+  }
+  out
+}
+
+/// The open views for `scope`, asked of the hub.
+fn watching(hub: Hub, scope: string, exact: bool, client_id: int) -> Slice<OpenView> {
+  let reply = Channel.buffered<Slice<OpenView>>(1)
+  if !hub.watchers.send(WatchQuery { scope, exact, client_id, reply }) { return [] }
+  reply.receive().unwrap_or([])
+}
+
+/// Each distinct reader among these views, once.
+fn readers_of(views: Slice<OpenView>) -> Slice<Reader> {
+  let mut out: Slice<Reader> = []
+  for w in views {
+    if !out.any(|r| r.key == w.reader.key) { out = out.append(w.reader) }
+  }
+  out
+}
+
+/// Who a viewer's live fragments are read as: one key per credential.
+fn reader_of(v: Viewing) -> Reader {
+  let key = match v.viewer {
+    Viewer.Full => "board",
+    Viewer.Scoped(s) => s.member.map_or_else(
+      || f"link:{records.normalize_team_key(s.teams.get(0).unwrap_or(""))}",
+      |m| f"member:{m.token}",
+    ),
+  }
+  Reader {
+    key,
+    client: v.reads,
+    scoped: viewer_is_scoped(v.viewer),
+    writes: viewer_writes(v.viewer),
+  }
 }
 
 /// SSE endpoint: register with the hub under the page's scope and forward
@@ -181,6 +221,7 @@ fn events_stream(
   r: Ref<http.Request>,
   hub: Hub,
   boot_key: string,
+  v: Viewing,
 ) {
   let mut page = ""
   let mut key = ""
@@ -197,6 +238,30 @@ fn events_stream(
   if board_orders().find(|o| o == order).is_none() { order = "manual" }
   let mut scope = f"board:{team}:{order}"
   if page == "issue" && key != "" { scope = f"issue:{key}" }
+  // A scoped viewer streams only what it can read (LLL-658): its own read of
+  // the issue or team answers, and one it cannot see is a 404 in a missing
+  // one's words.
+  let scoped = match v.viewer {
+    Viewer.Full => false,
+    Viewer.Scoped(_) => true,
+  }
+  if scoped {
+    if page == "issue" && key != "" {
+      if records.fetch_issue(v.reads, key).is_err() {
+        http.Error(w, records.issue_not_found(key), 404)
+        return
+      }
+    } else {
+      let visible = match records.find_team(v.reads, team) {
+        Ok(Some(_)) => true,
+        _ => false,
+      }
+      if !visible {
+        http.Error(w, hidden_team(team), 404)
+        return
+      }
+    }
+  }
 
   let Some(flusher) = assert_type<http.Flusher>(w) else {
     http.Error(w, "streaming unsupported", 500)
@@ -208,13 +273,7 @@ fn events_stream(
     return
   }
   let ch = Channel.buffered<string>(64)
-  let viewer = board_viewer(ctx, r)
-  let full = !viewer_is_scoped(viewer)
-  let teams = match viewer {
-    Viewer.Full => None,
-    Viewer.Scoped(v) => Some(v.teams),
-  }
-  let _ = hub.register.send(SseClient { id, scope, ch, teams, full, .. })
+  let _ = hub.register.send(SseClient { id, scope, ch, reader: reader_of(v), .. })
   // Response headers acknowledge registration, so a client that has opened
   // the stream cannot miss an immediately following issue mutation.
   w.WriteHeader(200)
@@ -229,10 +288,11 @@ fn events_stream(
   // payload and on a timer while idle; the stream closes as soon as its
   // credential stops resolving or no longer covers what it streams. The
   // board token is fixed for the process, so a full viewer is not re-read.
-  let scoped = teams.is_some()
+  // Every payload was read as this viewer already; this check is what closes
+  // the stream, not what keeps data out of it.
   let still_allowed = || match board_viewer(ctx, r) {
     Viewer.Full => true,
-    Viewer.Scoped(v) => if page == "issue" && key != "" { v.sees_issue(key) } else { v.teams.contains(team) },
+    Viewer.Scoped(now) => if page == "issue" && key != "" { now.sees_issue(key) } else { now.teams.contains(team) },
   }
   let ticker = time.NewTicker(revalidate_every())
   defer ticker.Stop()
@@ -506,8 +566,8 @@ fn launch(ctx: pb.Client, run: RefreshRun, hub: Hub, done: Channel<RunEnd>, slow
 
 fn run_refresh(ctx: pb.Client, job: Refresh, hub: Hub, follow: Channel<Refresh>) -> Result<(), string> {
   match job {
-    Refresh.Board(b) => board_refresh(ctx, hub, b),
-    Refresh.Issue(i) => issue_snapshot(ctx, hub, i.key, i.client_id),
+    Refresh.Board(b) => board_refresh(hub, b),
+    Refresh.Issue(i) => issue_snapshot(hub, i.key, i.client_id),
     Refresh.Resolve(r) => resolve_issue(ctx, r, follow),
     Refresh.Favorites => favorites_broadcast(ctx, hub),
     Refresh.Views => views_broadcast(ctx, hub),
@@ -574,40 +634,80 @@ fn open_scopes(hub: Hub) -> Slice<string> {
   reply.receive().unwrap_or([])
 }
 
-fn board_refresh(ctx: pb.Client, hub: Hub, b: BoardRefresh) -> Result<(), string> {
-  if b.team_id != "" { return board_snapshot(ctx, hub, b.team_id, b.team_key, b.order, b.client_id) }
-  // A team deleted since the page opened has no board to refresh.
-  let Some(team) = records.find_team(ctx, b.team_key)? else { return Ok(()) }
-  board_snapshot(ctx, hub, team.id, team.key, b.order, b.client_id)
+/// Re-render a team's #board for every reader that has it open (LLL-658):
+/// one read per reader, with that reader's own client, then one render per
+/// ordering its clients asked for. A reader whose read fails is skipped, so
+/// one revoked credential cannot stall the others; the first failure is
+/// reported.
+fn board_refresh(hub: Hub, b: BoardRefresh) -> Result<(), string> {
+  let open = watching(hub, f"board:{b.team_key}:", false, b.client_id)
+  for_readers(readers_of(open), |reader: Reader| {
+    let orders = open.filter(|w| w.reader.key == reader.key).map(|w| strings.TrimPrefix(w.scope, f"board:{b.team_key}:"))
+    board_snapshot(hub, reader, b, orders)
+  })
+}
+
+/// How many readers one refresh reads for at once (LLL-658). Every viewer's
+/// read comes from the board's one address, and PocketBase answers a burst
+/// of empty filtered lists from one address with a randomized delay of up
+/// to half a second (its timing-attack throttle), so readers read side by
+/// side rather than queueing those delays one after another.
+fn reader_workers() -> int {
+  16
+}
+
+/// Run `each` for every reader, at most reader_workers() at once; the first
+/// failure is the answer, and a failed reader never stops the others.
+fn for_readers(readers: Slice<Reader>, each: fn(Reader) -> Result<(), string>) -> Result<(), string> {
+  let slots = Channel.buffered<bool>(reader_workers())
+  let results = Channel.buffered<Result<(), string>>(readers.length() + 1)
+  for reader in readers {
+    let _ = slots.send(true)
+    task {
+      let _ = results.send(each(reader))
+      let _ = slots.receive()
+    }
+  }
+  let mut failed: Result<(), string> = Ok(())
+  for _ in 0..readers.length() {
+    if let Some(Err(e)) = results.receive() {
+      if failed.is_ok() { failed = Err(e) }
+    }
+  }
+  failed
 }
 
 /// Re-render the whole board fragment from a fresh fetch (laziest correct —
 /// a state change moves a card between two columns, and one #board morph
-/// covers create/update/delete alike).
+/// covers create/update/delete alike), as one reader.
 ///
 /// The subscription is UNSCOPED (TASK-198): the server hosts every team, so
 /// each event re-renders the board of the team the record belongs to and
 /// lands only on clients scoped to that team ("board:KEY:ORDER").
 ///
-/// One FETCH per refresh, one render per ordering (TASK-209): a client's
-/// scope names the card order its URL asked for, so the board is sorted and
-/// rendered once for each of the four orderings and each variant lands only
-/// on the clients that requested it. Four renders over one in-memory issue
-/// list beat teaching the hub to inventory its clients' scopes.
-fn board_snapshot(ctx: pb.Client, hub: Hub, team_id: string, team_key: string, only_order: string, client_id: int) -> Result<(), string> {
-  let issues = records.fetch_board_issues(ctx, team_id)?
-  let claimed = claims.for_team(ctx, team_id)?
-  // Scoped clients get a second rendering only when a card carries another
-  // team's labels or project (LLL-545), or an assignee or claim holder
-  // outside the team's roster (LLL-551).
-  let shown = roster(ctx, true, team_id)?
-  let scoped_claimed = claimed.map(|c| shown.claim(c))
-  let hides = issues.any(|i| !shown.sees(i.assignee)) || claimed.any(|c| !shown.sees(c.member))
-  let scoped_issues = if hides || issues.any(has_foreign_refs) {
-    Some(issues.map(|i| shown.issue(without_foreign_refs(i))))
-  } else { None }
+/// One FETCH per reader, one render per ordering (TASK-209): a client's
+/// scope names the card order its URL asked for, so each variant lands only
+/// on the clients that requested it.
+fn board_snapshot(hub: Hub, reader: Reader, b: BoardRefresh, orders: Slice<string>) -> Result<(), string> {
+  let ctx = reader.client
+  let mut team_id = b.team_id
+  if team_id == "" {
+    // A team deleted since the page opened, or one this reader no longer
+    // sees, has no board to refresh.
+    let Some(team) = records.find_team(ctx, b.team_key)? else { return Ok(()) }
+    team_id = team.id
+  }
+  // The three reads side by side: see reader_workers on why each may wait.
+  let held = Channel.buffered<Result<Slice<models.Claim>, string>>(1)
+  task { let _ = held.send(claims.for_team(ctx, team_id)) }
+  let roster = Channel.buffered<Result<Roster, string>>(1)
+  task { let _ = roster.send(read_roster(ctx)) }
+  let fetched = records.fetch_board_issues(ctx, team_id)
+  let shown = roster.receive().unwrap_or(Err("reading the roster stopped"))?
+  let issues = issues_for(reader.scoped, fetched?).map(|i| shown.issue(i))
+  let claimed = held.receive().unwrap_or(Err("reading the claims stopped"))?.map(|c| shown.claim(c))
   for order in board_orders() {
-    if only_order != "" && only_order != order { continue }
+    if !orders.contains(order) { continue }
     // UNFILTERED on purpose: /events sends one #board per (team, order) to
     // every matching client, so the per-URL filter is applied by the page
     // handler and guarded client-side by the cards' data-show, never here.
@@ -616,14 +716,9 @@ fn board_snapshot(ctx: pb.Client, hub: Hub, team_id: string, team_key: string, o
       columns: board_columns(issues, BoardFilter { .. }, claimed, order),
       ..
     }
-    let mut scoped_payload: Option<string> = None
-    if let Some(scoped) = scoped_issues {
-      let scoped_vm = BoardVM { columns: board_columns(scoped, BoardFilter { .. }, scoped_claimed, order), ..vm }
-      scoped_payload = Some(patch_event(render("board", scoped_vm)?))
-    }
     let html = render("board", vm)?
     let _ = hub.broadcast.send(
-      Broadcast { scope: f"board:{team_key}:{order}", team: team_key, payload: patch_event(html), scoped_payload, client_id, .. },
+      Broadcast { scope: f"board:{b.team_key}:{order}", reader: reader.key, payload: patch_event(html), client_id: b.client_id, .. },
     )
   }
   Ok(())
@@ -648,14 +743,23 @@ fn resolve_issue(ctx: pb.Client, r: ResolveRefresh, follow: Channel<Refresh>) ->
   Ok(())
 }
 
-/// An issue page's live fragments from a fresh read: #issue-detail and the
-/// comments. No observers means no fetch, catalogues or markdown rendering.
-fn issue_snapshot(ctx: pb.Client, hub: Hub, key: string, client_id: int) -> Result<(), string> {
-  if !has_issue_observer(hub, key, client_id) { return Ok(()) }
+/// An issue page's live fragments for every reader that has it open
+/// (LLL-658), each read with that reader's own client. No observers means
+/// no fetch, catalogues or markdown rendering.
+fn issue_snapshot(hub: Hub, key: string, client_id: int) -> Result<(), string> {
+  for_readers(readers_of(watching(hub, f"issue:{key}", true, client_id)), |reader: Reader| {
+    issue_for_reader(hub, reader, key, client_id)
+  })
+}
+
+/// #issue-detail and the comments from a fresh read as `reader`. An issue
+/// the reader cannot read is, for it, deleted.
+fn issue_for_reader(hub: Hub, reader: Reader, key: string, client_id: int) -> Result<(), string> {
+  let ctx = reader.client
   let (team, number) = records.split_issue_key(key)?
   let filter = url.QueryEscape(f"team.key={query.quote(team)} && number={number}")
   let mut issues = models.IssueList { .. }
-  pb.fetch(ctx, 
+  pb.fetch(ctx,
     f"/api/collections/issues/records?filter={filter}&perPage=1&expand=team,assignee,labels,project,creator",
     "issue snapshot", &issues,
   )?
@@ -663,41 +767,33 @@ fn issue_snapshot(ctx: pb.Client, hub: Hub, key: string, client_id: int) -> Resu
   // the page. Every new stream starts without a known description revision.
   let mut description = ""
   let mut vm = IssueVM { deleted: true, key, .. }
-  let mut scoped_payload: Option<string> = None
-  let found = issues.items.get(0)
+  let found = issues.items.get(0).map(|i| issues_for(reader.scoped, [i])[0])
+  // The comments are read beside the detail: see reader_workers on why each
+  // read may wait.
+  let thread = Channel.buffered<Result<Slice<models.Comment>, string>>(1)
+  if let Some(issue) = found {
+    task { let _ = thread.send(records.fetch_comments(ctx, issue.id)) }
+  }
+  let shown = read_roster(ctx)?
   if let Some(issue) = found {
     description = issue.description
-    vm = issue_fields_vm(ctx, issue, [], roster(ctx, false, issue.team)?)?
-    // Scoped observers never see another team's labels or project (LLL-545),
-    // and their assignee picker and names follow the team's roster
-    // (LLL-551), so they always get their own rendering.
-    let shown = roster(ctx, true, issue.team)?
-    let scoped = issue_fields_vm(ctx, without_foreign_refs(issue), [], shown)?
-    scoped_payload = Some(patch_event(render("issue-detail", scoped)?))
+    vm = issue_fields_vm(ctx, issue, [], shown)?
+    // A reader that cannot write never gets a claim button (LLL-545).
+    if !reader.writes { vm.claim_read_only = true }
   }
   let html = render("issue-detail", vm)?
   let _ = hub.broadcast.send(Broadcast {
-    scope: f"issue:{key}", team: records.normalize_team_key(team), payload: patch_event(html),
-    scoped_payload, description: Some(description), client_id,
+    scope: f"issue:{key}", reader: reader.key, payload: patch_event(html),
+    description: Some(description), client_id,
   })
-  if let Some(issue) = found { comments_snapshot(ctx, hub, issue, key, client_id)? }
-  Ok(())
-}
-
-/// The comments fragment for an issue page. The board shows no comments, so
-/// only the issue's own page gets it.
-fn comments_snapshot(ctx: pb.Client, hub: Hub, issue: models.Issue, key: string, client_id: int) -> Result<(), string> {
-  let comments = records.fetch_comments(ctx, issue.id)?
-  // Scoped observers see authors through the team's roster (LLL-551).
-  let shown = roster(ctx, true, issue.team)?
-  let scoped = render("comments", CommentsVM { comments: comments.map(|c| comment_vm(shown.comment(c))) })?
-  let html = render("comments", CommentsVM { comments: comments.map(comment_vm) })?
-  let _ = hub.broadcast.send(
-    Broadcast {
-      scope: f"issue:{key}", team: issue.expand.team.key, payload: patch_event(html),
-      scoped_payload: Some(patch_event(scoped)), client_id, ..
-    },
-  )
+  if found.is_some() {
+    // The board shows no comments, so only the issue's own page gets them.
+    let comments = thread.receive().unwrap_or(Err("reading the comments stopped"))?
+    let html = render("comments", CommentsVM { comments: comments.map(|c| comment_vm(shown.comment(c))) })?
+    let _ = hub.broadcast.send(
+      Broadcast { scope: f"issue:{key}", reader: reader.key, payload: patch_event(html), client_id, .. },
+    )
+  }
   Ok(())
 }
 
@@ -712,10 +808,12 @@ fn comments_snapshot(ctx: pb.Client, hub: Hub, issue: models.Issue, key: string,
 ///
 /// The event's own record is ignored — the group is the whole list, and one
 /// fetch is cheaper than reconciling a create against a delete. A failed
-/// read leaves the visible group as it was.
+/// read leaves the visible group as it was. Only the board login's rail
+/// carries the group, so it is read as the board and goes to the "board"
+/// reader alone.
 fn favorites_broadcast(ctx: pb.Client, hub: Hub) -> Result<(), string> {
   let html = render("rail-favorites", favorite_rows(fetch_favorites(ctx)?))?
-  let _ = hub.broadcast.send(Broadcast { scope: "*", payload: patch_event(html), .. })
+  let _ = hub.broadcast.send(Broadcast { scope: "*", reader: "board", payload: patch_event(html), .. })
   Ok(())
 }
 
@@ -724,6 +822,6 @@ fn favorites_broadcast(ctx: pb.Client, hub: Hub) -> Result<(), string> {
 /// the workspace's like a star is.
 fn views_broadcast(ctx: pb.Client, hub: Hub) -> Result<(), string> {
   let html = render("rail-views", fetch_view_vms(ctx)?)?
-  let _ = hub.broadcast.send(Broadcast { scope: "*", payload: patch_event(html), .. })
+  let _ = hub.broadcast.send(Broadcast { scope: "*", reader: "board", payload: patch_event(html), .. })
   Ok(())
 }

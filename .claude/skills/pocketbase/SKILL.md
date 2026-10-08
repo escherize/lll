@@ -120,8 +120,15 @@ full-access callers and strips hidden team ids. Two traps came out of it:
   `scripts/test_archived_guard.py`, which fails on an unclassified one.
 - **An assignee can see the issue's team** (LLL-670, same file), checked on
   every save that sets the assignee or moves the issue.
-- **The board reads as an all-scope member.** Rules do nothing for its pages;
-  `src/commands/serve_roster.lis` applies the roster before rendering.
+- **The board reads as its viewer** (LLL-658). Every page, raw view, search
+  and live fragment is fetched with the viewer's own credential, so the
+  collection rules are the only owner of what a scoped viewer sees: a member
+  reads with its token, a `KEY.MAC` team link with its team's
+  `link_viewers` record (`gopb/link_viewers.go`, a read-only scoped identity
+  only gopb mints tokens for), the board token as the board's member. Board
+  code keeps only presentation: an id that did not expand renders as
+  "hidden member" or is dropped. A board read must never use the process
+  client for a scoped viewer.
 
 ## Auth (shipped)
 

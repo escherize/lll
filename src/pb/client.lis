@@ -104,6 +104,14 @@ impl Client {
     }
   }
 
+  /// This client sending `token`, held on someone else's behalf: a board
+  /// viewer's member token or a team link's reader (LLL-658). It never renews
+  /// and never re-reads a config file, so a refused token fails its request
+  /// instead of retrying as this process's own identity.
+  pub fn reading_as(self, token: string) -> Client {
+    Client { settings: self.settings, session: gopb.NewSession(token), token_source: "", renewal: None }
+  }
+
   /// Re-read the config files and send their token from now on: a token
   /// rotated in a file while a long-running process (a board on a caller's
   /// token, a watch) keeps going. Only a token that came from a file is
@@ -552,7 +560,9 @@ fn verdict(base: string, tok: string, session: gopb.Session) -> string {
   if token_expired(tok) { return "expired" }
   let key = probe_key(base, tok)
   if session.Probed() == key { return "valid" }
-  for coll in ["members", "_superusers"] {
+  // link_viewers: the board's reader for a team link (LLL-658), which may
+  // read its own record and nothing else there.
+  for coll in ["members", "_superusers", "link_viewers"] {
     let found = request(
       base,
       "GET",

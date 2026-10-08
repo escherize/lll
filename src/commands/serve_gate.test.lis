@@ -14,53 +14,30 @@ fn scoped_board_token_opens_only_its_team() {
 fn route_kind(route: ScopedVerdict) -> string {
   match route {
     ScopedVerdict.Open => "open",
-    ScopedVerdict.Hidden(_) => "hidden",
     ScopedVerdict.Closed(_) => "closed",
   }
 }
 
+// The allowlist decides routes, never teams (LLL-658): a page reads as its
+// viewer, so another team's address is open here and answers 404 from the
+// viewer's own read.
 #[test]
 fn scoped_viewer_allowlist() {
-  let link = ScopedViewer { teams: ["AAA"], member: None }
-  let get = |path: string| route_kind(scoped_route("GET", path, "", "", "", link, false))
+  let get = |path: string| route_kind(scoped_route("GET", path, false))
   for path in ["/t/AAA", "/t/AAA/", "/t/AAA/issues", "/t/AAA/projects", "/t/AAA/docs", "/t/AAA/search",
                "/t/AAA/issue/AAA-3", "/t/AAA/issue/aaa-3", "/t/AAA/doc/index", "/t/aaa/", "/static/app.js",
-               "/issue/AAA-3", "/issue/aaa-3"] {
+               "/issue/AAA-3", "/issue/aaa-3", "/t/BBB/", "/t/BBB/issue/BBB-1", "/events", "/attachments/file"] {
     assert get(path) == "open"
   }
-  // Another team, or another team's issue, answers like a missing one.
-  for path in ["/t/BBB/", "/t/BBB", "/t/AAAB/", "/t/BBB/docs", "/t/BBB/issue/BBB-1", "/t/BBB/settings/identity",
-               "/t/AAA/issue/BBB-3", "/t/AAA/issue/AAAB-3", "/attachments/file",
-               "/issue/BBB-1", "/issue/AAA-X-1"] {
-    assert get(path) == "hidden"
-  }
-  for path in ["/", "/t/AAA/settings", "/t/AAA/settings/access", "/t/AAA/doc/", "/t/AAA/doc/a/b", "/t/AAA/docs/x",
-               "/issue/AAA-3/x", "/search", "/settings/access", "/issues"] {
+  for path in ["/", "/t/AAA/settings", "/t/AAA/settings/access", "/t/BBB/settings/identity", "/t/AAA/doc/",
+               "/t/AAA/doc/a/b", "/t/AAA/docs/x", "/t/AAA/issue/", "/issue/", "/issue/AAA-3/x", "/search",
+               "/settings/access", "/issues"] {
     assert get(path) == "closed"
   }
-  // The hidden answer is the missing team's own words, naming no other team.
-  let hidden = match scoped_route("GET", "/t/BBB/", "", "", "", link, false) {
-    ScopedVerdict.Hidden(m) => m,
-    _ => "",
-  }
-  assert hidden == "no team with key 'BBB' on this server; see the rail's team switcher"
-  // Read-only: no write is admitted, even on its own team.
-  assert route_kind(scoped_route("POST", "/t/AAA/settings/label", "", "", "", link, false)) == "closed"
-  assert route_kind(scoped_route("POST", "/state", "", "", "", link, false)) == "closed"
-  // /events: only its own board or one of its own issues.
-  let events = |page: string, issue: string, team: string| route_kind(scoped_route("GET", "/events", page, issue, team, link, false))
-  assert events("", "", "AAA") == "open"
-  assert events("issue", "AAA-1", "") == "open"
-  assert events("", "", "") == "hidden"
-  assert events("", "", "BBB") == "hidden"
-  assert events("issue", "BBB-1", "AAA") == "hidden"
-  // Hyphenated team keys: AAA-X-1 is team AAA-X's issue, not AAA's.
-  assert get("/t/AAA/issue/AAA-X-1") == "hidden"
-  assert events("issue", "AAA-X-1", "") == "hidden"
-  assert get("/t/AAA/issue/AAA-") == "hidden"
-  // Attachments download names its issue by key.
-  assert route_kind(scoped_route("GET", "/attachments/file", "", "AAA-1", "", link, false)) == "open"
-  assert route_kind(scoped_route("GET", "/attachments/file", "", "BBB-1", "", link, false)) == "hidden"
+  // Read-only: no write is admitted.
+  assert route_kind(scoped_route("POST", "/t/AAA/settings/label", false)) == "closed"
+  assert route_kind(scoped_route("POST", "/state", false)) == "closed"
+  assert route_kind(scoped_route("HEAD", "/t/AAA/", false)) == "closed"
 }
 
 #[test]
@@ -75,23 +52,35 @@ fn login_redirect_stays_on_the_board() {
 
 #[test]
 fn member_viewer_writes_only_when_read_write() {
-  let m = ViewerMember { id: "m1", name: "ann", token: "t", rw: true, all: false }
-  let v = ScopedViewer { teams: ["AAA", "CCC"], member: Some(m) }
   for path in ["/create", "/state", "/title", "/comment", "/claim", "/release", "/attachments/upload"] {
-    assert route_kind(scoped_route("POST", path, "", "", "", v, true)) == "open"
-    assert route_kind(scoped_route("POST", path, "", "", "", v, false)) == "closed"
+    assert route_kind(scoped_route("POST", path, true)) == "open"
+    assert route_kind(scoped_route("POST", path, false)) == "closed"
   }
   // Workspace-wide rows and settings stay closed even to a writer.
   for path in ["/favorite", "/views/save", "/settings/label", "/t/AAA/settings/label",
                "/settings/access/token", "/settings/access/member", "/settings/teams/archive"] {
-    assert route_kind(scoped_route("POST", path, "", "", "", v, true)) == "closed"
+    assert route_kind(scoped_route("POST", path, true)) == "closed"
   }
-  // Two granted teams: both open, a third hidden.
-  assert route_kind(scoped_route("GET", "/t/CCC/", "", "", "", v, true)) == "open"
-  assert route_kind(scoped_route("GET", "/t/BBB/", "", "", "", v, true)) == "hidden"
+  let m = ViewerMember { id: "m1", name: "ann", token: "t", rw: true, all: false }
+  let v = ScopedViewer { teams: ["AAA", "CCC"], member: Some(m) }
+  // The stream's revocation check (LLL-626) reads these.
   assert v.sees("ccc") && !v.sees("BBB") && v.sees_issue("CCC-2") && !v.sees_issue("BBB-2")
+  assert !v.sees_issue("AAA-X-1") && !v.sees_issue("AAA-")
   // No teams sees nothing: empty never means every team.
   let none = ScopedViewer { teams: [], member: Some(m) }
-  assert route_kind(scoped_route("GET", "/t/AAA/", "", "", "", none, true)) == "hidden"
   assert !none.sees("AAA")
+}
+
+// What a viewer may do follows its access and nothing else (LLL-658).
+#[test]
+fn a_viewer_writes_and_sees_everything_only_as_its_access_says() {
+  let rw = ViewerMember { id: "m1", name: "ann", token: "t", rw: true, all: false }
+  let ro = ViewerMember { rw: false, ..rw }
+  let all = ViewerMember { all: true, ..rw }
+  assert viewer_writes(Viewer.Full) && !viewer_is_scoped(Viewer.Full)
+  assert viewer_writes(Viewer.Scoped(ScopedViewer { teams: ["AAA"], member: Some(rw) }))
+  assert !viewer_writes(Viewer.Scoped(ScopedViewer { teams: ["AAA"], member: Some(ro) }))
+  let link = Viewer.Scoped(ScopedViewer { teams: ["AAA"], member: None })
+  assert !viewer_writes(link) && viewer_is_scoped(link)
+  assert !viewer_is_scoped(Viewer.Scoped(ScopedViewer { teams: ["AAA"], member: Some(all) }))
 }
