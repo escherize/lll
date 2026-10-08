@@ -289,6 +289,10 @@ pub struct Comment {
   pub author: string,
   #[json(omitempty)]
   pub agent: string,
+  // "system" when the server wrote the comment on its own (the claim-expiry
+  // note; LLL-654), "" (omitted from JSON) for a person's or an agent's.
+  #[json(omitempty)]
+  pub author_kind: string,
   pub body: string,
   pub created: string,
   pub updated: string,

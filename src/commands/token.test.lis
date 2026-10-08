@@ -18,7 +18,7 @@ fn at_noon() -> time.Time {
 
 #[test]
 fn expiry_line_dates_the_default_year_out() {
-  let line = expiry_line(default_token_duration(), at_noon())
+  let line = expiry_line(default_token_duration(), at_noon(), "lll token create")
   assert line.contains("expires 2027-01-15")
   assert line.contains("lll token create")
 }
@@ -26,14 +26,18 @@ fn expiry_line_dates_the_default_year_out() {
 #[test]
 fn expiry_line_dates_a_short_duration() {
   // An hour still lands on the same day; the seconds are what disambiguate.
-  let line = expiry_line(3600, at_noon())
+  let line = expiry_line(3600, at_noon(), "lll bot rotate bot-x")
   assert line.contains("expires 2026-01-15")
   assert line.contains("3600s from now")
+  // LLL-625: a bot's owner re-mints with bot rotate; token create is
+  // superuser-only.
+  assert line.contains("re-mint with 'lll bot rotate bot-x'")
+  assert !line.contains("token create")
 }
 
 #[test]
 fn expiry_line_refuses_to_guess_for_the_collection_default() {
-  let line = expiry_line(0, at_noon())
+  let line = expiry_line(0, at_noon(), "lll token create")
   assert !line.contains("2026-")
   assert line.contains("--duration")
 }

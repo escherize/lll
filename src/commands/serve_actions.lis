@@ -441,10 +441,14 @@ fn assignee_write(r: mut Ref<http.Request>) -> Result<string, string> {
   }
   require_active_team(issue.expand.team)?
   let observed = claims.observed_id(issue.id)?
-  // Force, as the Release button sends it (LLL-516): a person who picks a new
-  // assignee on a page that names the holder has decided to take the hold.
-  // A forced clear comments on the issue, naming the board's member.
-  let _ = claims.update_assignment(who.caller, issue.id, observed, marshal(IssueAssigneePatch { assignee: id })?, "", true, "")?
+  // Never forced (LLL-662): clearing the assignee releases the claim, so the
+  // picker clears only the viewer's own hold. Taking anyone else's goes
+  // through the Release form, which asks for a reason.
+  let _ = claims.update_assignment(who.caller, issue.id, observed, marshal(IssueAssigneePatch { assignee: id })?, "", false, "").map_err(|e| {
+    if strings.Contains(e, "needs force") {
+      f"{strings.TrimSuffix(pb.display_error(e).summary, ".")} - release it with a reason first (the Release form on the issue)"
+    } else { e }
+  })?
   Ok("")
 }
 
@@ -570,16 +574,23 @@ fn claim_write(r: mut Ref<http.Request>) -> Result<string, string> {
   Ok("")
 }
 
-/// Always forced (LLL-512): the button names whose claim it releases, so a
-/// person clicking it has said so. The server skips the comment when the
-/// board's own member is the holder, and otherwise records the release under
-/// that member - the board login does not identify the person clicking.
+/// The viewer releases as itself (LLL-662): a member login as that member,
+/// the board token as the board's member. The holder's release needs nothing
+/// more. Anyone else's is forced, and force comes only with a reason typed
+/// into the form, which the server records in its comment; without one the
+/// server's refusal is the answer. The live fragment is shared by every
+/// viewer, so the form cannot know who is looking; the server decides.
 fn release_write(r: mut Ref<http.Request>) -> Result<string, string> {
   let who = acting_as(r)?
   let issue = who.issue(r.FormValue("key"))?
   require_active_team(issue.expand.team)?
   let observed = r.FormValue("claim_id")
   if observed == "" { return Err("The claim changed; refresh before releasing it.") }
-  let _ = claims.release(who.caller, issue.id, observed, "", true, "")?
+  let reason = strings.TrimSpace(r.FormValue("reason"))
+  let _ = claims.release(who.caller, issue.id, observed, "", reason != "", reason).map_err(|e| {
+    if strings.Contains(e, "needs force") {
+      f"{strings.TrimSuffix(pb.display_error(e).summary, ".")} - type a reason to release it anyway; it is recorded in a comment on the issue"
+    } else { e }
+  })?
   Ok("")
 }

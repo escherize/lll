@@ -101,7 +101,7 @@ def main() -> None:
         # DEMO-1: a second claim is refused and names the holder.
         assert cli('issue', 'claim', 'DEMO-1').returncode == 0, 'first claim failed'
         cli('member', 'add', '-n', 'alex')
-        mint = cli('token', 'create', 'alex', '--duration', '3600',
+        mint = cli('token', 'create', 'alex', '--duration', '3600', '--admin-email', 'admin@local.dev', '--admin-password', 'admin-local-123',
                    extra={'LLL_TOKEN': ''})
         token = re.search(r'^LLL_TOKEN=(\S+)$', mint.stdout, re.M)
         assert token, f'could not mint a second identity:\n{mint.stdout}{mint.stderr}'

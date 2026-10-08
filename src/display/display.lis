@@ -89,6 +89,14 @@ pub fn member_name(id: string, name: string, empty: string) -> string {
   empty
 }
 
+/// A comment's byline: "system" when the server wrote it on its own (LLL-654:
+/// the claim-expiry note, whose body names the holder), else the
+/// author as member_name reads it, with its session label.
+pub fn comment_byline(kind: string, id: string, name: string, agent: string, empty: string) -> string {
+  if kind == "system" { return "system" }
+  byline(member_name(id, name, empty), agent)
+}
+
 /// Pure core of relative(): seconds-ago -> "3h ago".
 pub fn relative_seconds(seconds: int64) -> string {
   if seconds < 60 { return "just now" }

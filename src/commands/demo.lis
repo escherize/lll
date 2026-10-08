@@ -228,7 +228,7 @@ Give it back with 'lll issue release {k}-1'.",
 in, is owned by the person who made it, and its token rotates without touching
 yours.
 
-  lll bot bot-demo
+  lll bot create bot-demo
 
 Works if: the board badges bot-demo as a bot, and the token it prints once
 authenticates that agent alone.",

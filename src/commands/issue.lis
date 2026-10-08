@@ -129,6 +129,13 @@ fn issue_create_spec() -> Slice<flags.Flag> {
       ..,
     },
     flags.Flag {
+      name: "--agent",
+      value: true,
+      hint: "NAME",
+      help: "self-asserted session label, recorded as the issue's origin tool\n(default: LLL_AGENT)",
+      ..,
+    },
+    flags.Flag {
       name: "--json",
       help: "raw record JSON (team, assignee, labels, project\nexpanded), pipe-friendly",
       ..,
@@ -232,11 +239,11 @@ fn issue_update_spec() -> Slice<flags.Flag> {
       ..,
     },
     flags.Flag {
-      name: "--description",
-      alias: "-d",
+      name: "-b",
+      alias: "--body -d --description",
       value: true,
-      hint: "d",
-      help: "new description (update; '--description -' reads it from stdin)",
+      hint: "desc",
+      help: "new description, as on create ('-b -' reads it from stdin)",
       ..,
     },
     flags.Flag {
@@ -284,60 +291,74 @@ fn issue_update_spec() -> Slice<flags.Flag> {
       ..,
     },
     flags.Flag { name: "--force", help: "with --assignee none: clear a claim another member, or another agent label on your token, holds; leaves a comment on the issue", .. },
-    flags.Flag {
-      name: "-b",
-      alias: "--body",
-      value: true,
-      hint: "\"why\"",
-      help: "with --force: the reason, recorded in the comment ('-b -' reads stdin)",
-      ..,
-    },
-    flags.Flag {
-      name: "--agent",
-      value: true,
-      hint: "NAME",
-      help: "self-asserted session label, for agents sharing one member token\n(default: LLL_AGENT)",
-      ..,
-    },
+    reason_flag("update"),
+    agent_flag(),
   ]...))
 }
 
 fn issue_delete_spec() -> Slice<flags.Flag> {
-  flags.with_team([flags.Flag { name: "--yes", help: "skip the delete confirmation", .. }])
+  flags.with_team([
+    flags.Flag { name: "--yes", help: "skip the delete confirmation", .. },
+    flags.Flag { name: "--force", help: "delete a claimed issue: release the claim first (another member's, or another\nagent label's, is a forced release)", .. },
+    agent_flag(),
+  ])
+}
+
+fn issue_close_spec() -> Slice<flags.Flag> {
+  flags.with_team([
+    flags.Flag { name: "--keep-claim", help: "keep your claim on the closed issue (close releases it by default)", .. },
+    flags.Flag { name: "--force", help: "close an issue another member, or another agent label on your token, holds:\nreleases that claim and leaves a comment on the issue", .. },
+    reason_flag("close"),
+    agent_flag(),
+  ])
 }
 
 fn issue_claim_spec() -> Slice<flags.Flag> {
   flags.with_team([
     flags.Flag { name: "--renew", help: "restart the expiry clock on a claim you hold (a hold unrenewed for 24h is released)", .. },
-    flags.Flag {
-      name: "--agent",
-      value: true,
-      hint: "NAME",
-      help: "self-asserted session label, for agents sharing one member token\n(default: LLL_AGENT)",
-      ..,
-    },
+    agent_flag(),
   ])
 }
 
 fn issue_release_spec() -> Slice<flags.Flag> {
   flags.with_team([
     flags.Flag { name: "--force", help: "release a claim another member, or another agent label on your token, holds; leaves a comment on the issue", .. },
-    flags.Flag {
-      name: "-b",
-      alias: "--body",
-      value: true,
-      hint: "\"why\"",
-      help: "with --force: the reason, recorded in the comment ('-b -' reads stdin)",
-      ..,
-    },
-    flags.Flag {
-      name: "--agent",
-      value: true,
-      hint: "NAME",
-      help: "self-asserted session label, for agents sharing one member token\n(default: LLL_AGENT)",
-      ..,
-    },
+    reason_flag("release"),
+    agent_flag(),
   ])
+}
+
+/// `--reason` is the one spelling for why a forced action was taken (LLL-646
+/// decision): it goes into the comment the server leaves. `-b` stays an
+/// alias only on release, which has no other body.
+fn reason_flag(verb: string) -> flags.Flag {
+  let alias = if verb == "release" { "-b" } else { "" }
+  flags.Flag {
+    name: "--reason",
+    alias,
+    value: true,
+    hint: "\"why\"",
+    help: "with --force: the reason, recorded in the comment ('--reason -' reads stdin)",
+    ..,
+  }
+}
+
+fn agent_flag() -> flags.Flag {
+  flags.Flag {
+    name: "--agent",
+    value: true,
+    hint: "NAME",
+    help: "self-asserted session label, for agents sharing one member token\n(default: LLL_AGENT)",
+    ..,
+  }
+}
+
+/// The --reason text, read from stdin for '-'. Only a forced action records
+/// one, so it is refused without --force rather than silently dropped.
+fn forced_reason(p: flags.Parsed, force: bool, what: string) -> Result<string, string> {
+  if !p.given("--reason") { return Ok("") }
+  if !force { return Err(f"--reason is the reason for {what}; add --force") }
+  value_or_stdin(p.one("--reason"), "--reason")
 }
 
 fn issue_comment_spec() -> Slice<flags.Flag> {
@@ -350,7 +371,7 @@ fn issue_comment_spec() -> Slice<flags.Flag> {
       help: "comment body ('-b -' reads it from stdin)",
       ..,
     },
-    flags.Flag { name: "--force", help: "with edit/delete: change a comment that is not yours", .. },
+    flags.Flag { name: "--force", help: "with edit/delete and a superuser token: change a comment that is not yours", .. },
     flags.Flag {
       name: "--agent",
       value: true,
@@ -507,8 +528,8 @@ pub fn issue_commands() -> Slice<flags.Command> {
     },
     flags.Command {
       name: "close",
-      summary: "set state done; retain any claim",
-      spec: flags.with_team([]),
+      summary: "set state done and release your claim (--keep-claim keeps it); another member's claimed issue needs --force, which comments why",
+      spec: issue_close_spec(),
       positional: "[KEY-123]",
       run: close_issue,
       ..
@@ -539,7 +560,7 @@ pub fn issue_commands() -> Slice<flags.Command> {
     },
     flags.Command {
       name: "delete",
-      summary: "delete; asks [y/N] unless --yes",
+      summary: "delete; asks [y/N] unless --yes; a claimed issue needs --force, which releases the claim first",
       spec: issue_delete_spec(),
       positional: "KEY-123",
       run: delete_issue,
@@ -641,8 +662,8 @@ fn issue_union_spec() -> Slice<flags.Flag> {
   let mut out: Slice<flags.Flag> = []
   for c in issue_commands() {
     for fl in c.spec {
-      // Keyed by name AND aliases: -b is the description on create and the
-      // forced-clear reason on update/release, and both rows belong here.
+      // Keyed by name AND aliases: -b is the description on create and
+      // update, an alias of --reason on release, and every row belongs here.
       if out.find(|f| f.name == fl.name && f.alias == fl.alias).is_none() { out = out.append(fl) }
     }
   }
@@ -666,8 +687,11 @@ author expanded; a bot author's owner under author.expand.owner when you can
 read it), claim (member expanded, or null when unclaimed), docs
 (explicit links), and findings (linked or label-area matches). Docs and findings
 include their bodies and use slug order; empty collections are [].
-State changes (including review and close) retain claims. Release explicitly
-ends the hold; an assignment to someone other than the holder is preserved.
+Close releases the closer's own claim and keeps the assignee; --keep-claim
+keeps the claim. Other state changes (including review) retain claims.
+Release ends the hold; an assignment to someone other than the holder is
+preserved. Forcing another holder's claim takes --force, with --reason for
+the comment it leaves.
 
 When KEY-123 is omitted (except for delete), it is inferred from the current
 git branch: eng-12-fix-login resolves to ENG-12.
@@ -740,9 +764,13 @@ fn create(input: flags.CommandInput) -> Result<(), string> {
     labels = labels.append(records.resolve_label(team.id, name)?.id)
   }
 
+  // --agent names the session as the other claim verbs do; without it the
+  // origin tool stays LLL_AGENT, as capture() reads it.
+  let mut origin = provenance.capture()
+  if p.given("--agent") { origin.tool = agent_label(p)? }
   let new_issue = models.NewIssue {
     creator: actor()?.map_or("", |member| member.id),
-    origin: provenance.capture(),
+    origin,
     team: team.id,
     title,
     description,
@@ -1080,12 +1108,11 @@ fn view(input: flags.CommandInput) -> Result<(), string> {
       fmt.Println("")
       fmt.Println("## Comments")
       for cm in comments {
-        let mut author = display.member_name(cm.author, cm.expand.author.name, "ghost")
-        author = display.byline(author, cm.agent)
+        let author = display.comment_byline(cm.author_kind, cm.author, cm.expand.author.name, cm.agent, "ghost")
         // Absolute, not relative: --raw is machine output that gets stored
         // and re-read (an agent's brief, an exported mirror in Git), where
         // "5d ago" silently becomes a different string tomorrow.
-        let tag = display.author_tag(cm.expand.author.kind == "bot", cm.expand.author.owner_name())
+        let tag = if cm.author_kind == "system" { "" } else { display.author_tag(cm.expand.author.kind == "bot", cm.expand.author.owner_name()) }
         fmt.Println(
           f"- **{author}**{tag} ({display.absolute(cm.created)}): {cm.body}",
         )
@@ -1298,11 +1325,19 @@ fn update(input: flags.CommandInput) -> Result<(), string> {
   let title = p.one("--title")
   let project_set = p.given("--project")
   let title_set = p.given("--title")
-  let mut description = ""
-  if p.given("--description") {
-    description = value_or_stdin(p.one("--description"), "--description")?
+  // LLL-646: -b is the description, as on create. It used to be the reason
+  // for a forced clear, so '--assignee none --force -b why' would now quietly
+  // overwrite the description with the reason; that combination is refused
+  // naming --reason instead.
+  let force = p.given("--force")
+  if force && p.given("-b") && !p.given("--reason") {
+    return Err("-b is the new description, as on create; the reason for a forced clear is --reason \"why\"")
   }
-  let mut description_set = p.given("--description")
+  let mut description = ""
+  if p.given("-b") {
+    description = value_or_stdin(p.one("-b"), "-b")?
+  }
+  let mut description_set = p.given("-b")
   let replace_set = p.given("--description-replace")
   let (replace_old, replace_new) = if replace_set {
     parse_description_replacement(p.one("--description-replace"))?
@@ -1312,7 +1347,7 @@ fn update(input: flags.CommandInput) -> Result<(), string> {
   let append_text = p.one("--description-append")
   let append_set = p.given("--description-append")
   if description_set && (replace_set || append_set) {
-    return Err("--description replaces the whole text; it cannot be combined with --description-replace or --description-append")
+    return Err("-b replaces the whole description; it cannot be combined with --description-replace or --description-append")
   }
   let since = p.one("--if-unchanged-since")
   let emoji = check_emoji(p.one("--emoji"))?
@@ -1323,16 +1358,11 @@ fn update(input: flags.CommandInput) -> Result<(), string> {
     return Err("--assignee needs a member name, or 'none' to clear it")
   }
   // LLL-516: clearing the assignee releases the claim, so it takes release's
-  // --force, reason and agent label, and nothing else does.
-  let force = p.given("--force")
+  // --force, --reason and agent label, and nothing else does.
   if force && assignee_name != "none" {
     return Err("--force clears another holder's claim; it goes with --assignee none")
   }
-  let mut reason = ""
-  if p.given("-b") {
-    if !force { return Err("-b is the reason for a forced clear; add --force (the new description is --description)") }
-    reason = value_or_stdin(p.one("-b"), "-b")?
-  }
+  let reason = forced_reason(p, force, "a forced clear")?
   let agent = if assignee_name != "" { agent_label(p)? } else { "" }
   // LLL-399: the stamp rides the direct PATCH. Assignment writes go through
   // the claim route, which carries no precondition header — honouring the
@@ -1458,7 +1488,7 @@ fn update(input: flags.CommandInput) -> Result<(), string> {
       if strings.Contains(e, "is claimed by") {
         f"{key}: {e} — {held_elsewhere_hint(key)}"
       } else if strings.Contains(e, "needs force") {
-        f"{key}: {pb.display_error(e).summary} — 'lll issue update {key} --assignee none --force -b \"why\"' clears it anyway and comments on the issue"
+        f"{key}: {pb.display_error(e).summary} — 'lll issue update {key} --assignee none --force --reason \"why\"' clears it anyway and comments on the issue"
       } else { f"{key}: {e}" }
     })?
     if result.claim_id != "" {
@@ -1482,22 +1512,37 @@ fn update(input: flags.CommandInput) -> Result<(), string> {
   Ok(())
 }
 
+/// D3 (LLL-640): close releases the closer's claim in the same server
+/// transaction that sets the state, and keeps the assignee. --keep-claim
+/// keeps the holder's hold. Closing an issue someone else holds follows the
+/// release rule: refused without --force, and a forced close comments with
+/// --reason.
 fn close_issue(input: flags.CommandInput) -> Result<(), string> {
-  let usage = "lll issue close [KEY-123]"
-  let id = input.parsed.first()
-  let resolved = resolve_id(id, usage)?
+  let usage = "lll issue close [KEY-123] [--keep-claim] [--force [--reason \"why\"]]"
+  let p = input.parsed
+  let agent = agent_label(p)?
+  let force = p.given("--force")
+  let reason = forced_reason(p, force, "closing another holder's claimed issue")?
+  let keep = p.given("--keep-claim")
+  let resolved = resolve_id(p.first(), usage)?
   let issue = records.fetch_issue(resolved)?
-  let claim = fetch_claim(issue.id)?
-  let _ = pb.patch(
-    f"/api/collections/issues/records/{issue.id}",
-    "{\"state\":\"done\"}",
-  )?
-  fmt.Println(f"Closed {issue.expand.team.key}-{issue.number} ● done")
-  if let Some(held) = claim {
-    let holder = display.member_name(held.member, held.expand.member.name, "an unknown member")
-    fmt.Println(f"Claim retained by {holder}. To release it explicitly:")
-    fmt.Println(f"  lll issue release {issue.expand.team.key}-{issue.number}")
-    fmt.Println("Release also clears the assignee if it still matches the claim holder.")
+  let key = f"{issue.expand.team.key}-{issue.number}"
+  let observed = claims.observed_id(issue.id)?
+  let result = claims.close(pb.Caller.Process, issue.id, observed, agent, force, reason, keep).map_err(|e| {
+    if strings.Contains(e, "needs force") {
+      f"{key}: {e} - 'lll issue close {key} --force --reason \"why\"' closes it anyway, releasing that claim and commenting on the issue"
+    } else { f"{key}: {e}" }
+  })?
+  fmt.Println(f"Closed {key} ● done")
+  if result.claim_id != "" {
+    let holder = display.byline(result.member_name, result.agent)
+    if keep {
+      fmt.Println(f"Claim kept by {holder}; 'lll issue release {key}' gives it back.")
+    } else if result.forced {
+      fmt.Println(f"Released {holder}'s claim; forced, and commented on the issue.")
+    } else {
+      fmt.Println(f"Released {holder}'s claim; assignee unchanged.")
+    }
   }
   Ok(())
 }
@@ -1513,12 +1558,20 @@ fn issue_start_spec() -> Slice<flags.Flag> {
       help: "also git switch -c key-number-slug in the current repo and\nrecord the work site (branch, host, path) on the issue",
       ..,
     },
+    flags.Flag {
+      name: "--agent",
+      value: true,
+      hint: "NAME",
+      help: "self-asserted session label, on the comment a moved work site leaves\n(default: LLL_AGENT)",
+      ..,
+    },
   ])
 }
 
 fn start(input: flags.CommandInput) -> Result<(), string> {
   let usage = input.usage
   let p = input.parsed
+  let agent = agent_label(p)?
   let with_branch = p.given("--branch")
   if with_branch && !gitctx.in_repo() {
     return Err("--branch needs a git repository: run it from inside the one the work happens in; issue state unchanged")
@@ -1556,7 +1609,7 @@ fn start(input: flags.CommandInput) -> Result<(), string> {
   }
   fmt.Println(f"Started {key}: {issue.title} (◐ in-progress)")
   if with_branch {
-    if let Err(reason) = record_work_site(issue, branch) {
+    if let Err(reason) = record_work_site(issue, branch, agent) {
       return Err(f"{key} is in-progress and Git is on '{branch}', but recording the work site could not be confirmed: {reason}\nInspect with 'lll issue view {key}' before retrying.")
     }
   }
@@ -1573,7 +1626,7 @@ fn start(input: flags.CommandInput) -> Result<(), string> {
 /// Host comes from os.Hostname; LLL_WORK_HOST overrides it (a test seam —
 /// e2e fakes a second machine without owning one). Path is the worktree
 /// root, so multiple worktrees of one branch on one host stay distinct.
-fn record_work_site(issue: models.Issue, branch: string) -> Result<(), string> {
+fn record_work_site(issue: models.Issue, branch: string, agent: string) -> Result<(), string> {
   let mut host = os.Getenv("LLL_WORK_HOST")
   if host == "" { host = os.Hostname().unwrap_or("") }
   let Some(path) = gitctx.repo_root() else {
@@ -1590,7 +1643,7 @@ fn record_work_site(issue: models.Issue, branch: string) -> Result<(), string> {
     if let Some(a) = actor()? { author = a.id }
     let moved = f"work moved: {issue.work_branch} @ {issue.work_host}:{issue.work_path} -> {branch} @ {host}:{path}"
     let payload = match json.Marshal(
-      models.NewComment { issue: issue.id, author, agent: "", body: moved },
+      models.NewComment { issue: issue.id, author, agent, body: moved },
     ) {
       Ok(p) => p as string,
       Err(e) => return Err(f"encoding work-moved comment: {e}"),
@@ -1662,7 +1715,7 @@ fn agent_label(p: flags.Parsed) -> Result<string, string> {
 /// whose agent is gone. On `update --assignee` the caller may be the holder,
 /// which is why the plain release is still named.
 fn held_elsewhere_hint(key: string) -> string {
-  f"the holder releases it with 'lll issue release {key}'; ask them, or if the hold is dead, 'lll issue release {key} --force -b \"why\"' takes it and comments on the issue"
+  f"the holder releases it with 'lll issue release {key}'; ask them, or if the hold is dead, 'lll issue release {key} --force --reason \"why\"' takes it and comments on the issue"
 }
 
 /// Resolve the actor and delegate acquisition to the shared claims client.
@@ -1709,22 +1762,18 @@ fn claim(input: flags.CommandInput) -> Result<(), string> {
 /// server records a forced release as a comment on the issue (LLL-512). The
 /// server atomically removes that exact claim and clears only its assignment.
 fn release(input: flags.CommandInput) -> Result<(), string> {
-  let usage = "lll issue release [KEY-123] [--force [-b \"why\"]]"
+  let usage = "lll issue release [KEY-123] [--force [--reason \"why\"]]"
   let p = input.parsed
   let agent = agent_label(p)?
   let resolved = resolve_id(p.first(), usage)?
   let force = p.given("--force")
-  let mut reason = ""
-  if p.given("-b") {
-    if !force { return Err("-b is the reason for a forced release; add --force") }
-    reason = value_or_stdin(p.one("-b"), "-b")?
-  }
+  let reason = forced_reason(p, force, "a forced release")?
   let issue = records.fetch_issue(resolved)?
   let key = f"{issue.expand.team.key}-{issue.number}"
   let Some(held) = claims.fetch(issue.id)? else { return Err(f"{key} is not claimed") };
   let result = claims.release(pb.Caller.Process, issue.id, held.id, agent, force, reason).map_err(|e| {
     if strings.Contains(e, "needs force") {
-      f"{key}: {e} — 'lll issue release {key} --force -b \"why\"' takes it anyway and comments on the issue"
+      f"{key}: {e} — 'lll issue release {key} --force --reason \"why\"' takes it anyway and comments on the issue"
     } else { e }
   })?
   let assignment = if result.cleared_assignee { "cleared assignee" } else { "assignment unchanged" }
@@ -1742,15 +1791,40 @@ fn delete_issue(input: flags.CommandInput) -> Result<(), string> {
   let p = input.parsed
   let id = p.first()
   // Deleting by inferred branch is too dangerous; the ID must be explicit.
-  if id == "" { return Err("usage: lll issue delete KEY-123 [--yes]") }
+  if id == "" { return Err("usage: lll issue delete KEY-123 [--yes] [--force]") }
 
   let issue = records.fetch_issue(id)?
   let label = f"{issue.expand.team.key}-{issue.number}"
+  // LLL-662: the server refuses to delete a claimed issue, because the
+  // claim would go with it and nobody would be told. --force releases it
+  // first, under the release rule, then deletes.
+  let held = claims.fetch(issue.id)?
+  match held {
+    Some(h) => {
+      if !p.given("--force") {
+        let holder = display.byline(display.member_name(h.member, h.expand.member.name, "an unknown member"), h.agent)
+        return Err(f"{label} is claimed by {holder}; 'lll issue delete {label} --force' releases the claim and deletes it")
+      }
+    },
+    // D6: --force overrides ownership and never skips the confirmation, so
+    // on an unclaimed issue it is a mistaken spelling of --yes.
+    None => {
+      if p.given("--force") {
+        return Err(f"--force releases a claim, and {label} is not claimed; the confirmation is skipped by --yes")
+      }
+    },
+  }
   if !p.given("--yes") && !confirmed(f"delete {label}?") {
     fmt.Println("Aborted.")
     return Ok(())
   }
-  let _ = pb.delete(f"/api/collections/issues/records/{issue.id}")?
+  if let Some(h) = held {
+    let agent = agent_label(p)?
+    let _ = claims.release(pb.Caller.Process, issue.id, h.id, agent, true, "deleting the issue").map_err(|e| f"{label}: {e}")?
+  }
+  let _ = pb.delete(f"/api/collections/issues/records/{issue.id}").map_err(|e| {
+    if held.is_some() { f"{e}\nthe claim on {label} was released, but the issue was not deleted" } else { e }
+  })?
   fmt.Println(f"Deleted {label}")
   Ok(())
 }
@@ -1969,8 +2043,8 @@ fn print_comments(comments: Slice<models.Comment>) {
   let mut n = 0
   for c in comments {
     n += 1
-    let author = display.byline(display.member_name(c.author, c.expand.author.name, "anon"), c.agent)
-    let tag = display.author_tag(c.expand.author.kind == "bot", c.expand.author.owner_name())
+    let author = display.comment_byline(c.author_kind, c.author, c.expand.author.name, c.agent, "anon")
+    let tag = if c.author_kind == "system" { "" } else { display.author_tag(c.expand.author.kind == "bot", c.expand.author.owner_name()) }
     fmt.Println(f"#{n} {author}{tag} ({display.relative(c.created)})")
     fmt.Println(f"  {c.body}")
   }
@@ -2005,7 +2079,7 @@ fn comment_mutate(verb: string, p: flags.Parsed) -> Result<(), string> {
   if !p.given("--force") {
     if let Some(a) = actor()? {
       if c.author != a.id {
-        return Err(f"comment #{n} on {key} is {whose}'s, not yours — --force changes it anyway")
+        return Err(f"comment #{n} on {key} is {whose}'s, not yours; only its author changes it (a superuser token can, with --force)")
       }
     }
   }
@@ -2040,7 +2114,7 @@ fn comment_mutate(verb: string, p: flags.Parsed) -> Result<(), string> {
 
 fn comment_mutate_spec(verb: string) -> Slice<flags.Flag> {
   let mut spec = [
-    flags.Flag { name: "--force", help: "change a comment that is not yours", .. },
+    flags.Flag { name: "--force", help: "with a superuser token: change a comment that is not yours (the server refuses members)", .. },
   ]
   if verb == "delete" {
     spec = spec.append(
@@ -2414,7 +2488,11 @@ fn issue_next(input: flags.CommandInput) -> Result<(), string> {
   let unblocks = unblocks_map(scope.filter_team(), candidates)?
   // A claimed ready issue is someone's work in progress, not an invitation -
   // including my own claims. The agenda is what an agent can pick up NOW.
-  let agenda = rank_agenda(candidates, unblocks).filter(|i| i.assignee == "")
+  // The claims themselves are read, not only the assignee (LLL-662): the
+  // holder may set the assignee to someone else or clear it, and an issue
+  // offered here that 'claim' then refuses is a lie to the loop.
+  let held = claims.for_team(scope.filter_team())?.map(|c| c.issue)
+  let agenda = rank_agenda(candidates, unblocks).filter(|i| i.assignee == "" && !held.contains(i.id))
   if agenda.is_empty() {
     return Err("no unclaimed ready issues — the agenda is empty; 'lll issue list --ready' shows what is claimed, 'lll issue create' makes new work")
   }

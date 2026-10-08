@@ -570,7 +570,7 @@ fn mint_payload() -> Result<string, string> {
 /// sees it, since impersonate tokens are stateless and nothing records a mint.
 /// `now` is a parameter so the wording is a function of its arguments alone.
 fn mint_expiry_event(now: time.Time) -> string {
-  flash_ok_event(expiry_line(default_token_duration(), now))
+  flash_ok_event(expiry_line(default_token_duration(), now, "lll token create"))
 }
 
 /// Give a member a login credential (email + password) — the admin

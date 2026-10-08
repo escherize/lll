@@ -6,6 +6,7 @@ Claim acquisition and release use authenticated server operations:
 | --- | --- | --- |
 | `POST /api/lll/issues/{issue-id}/claim` | `{"member":"member-id","agent":"optional-label"}` | Acquire the exclusive claim and assign its holder in one transaction. |
 | `POST /api/lll/issues/{issue-id}/release` | `{"claim_id":"observed-claim-id","agent":"","force":false,"reason":""}` | Remove that exact claim and clear assignment only if it still names the holder, in one transaction. `agent`, `force` and `reason` are optional. |
+| `POST /api/lll/issues/{issue-id}/close` | `{"claim_id":"observed-claim-id or empty","agent":"","force":false,"reason":"","keep_claim":false}` | Set the issue done and release its claim under the release rule, in one transaction; the assignee is kept. `keep_claim` keeps the holder's own claim. `claim_id` is required (`""` for none); the rest are optional. |
 | `POST /api/lll/issues/{issue-id}/renew` | `{"claim_id":"observed-claim-id","agent":"optional-label"}` | Restart that exact claim's expiry clock. Only the holder may renew, and a differing agent label is refused. The claim keeps its id and `created`. |
 | `POST /api/lll/issues/{issue-id}/assignment` | `{"claim_id":"observed-claim-id","fields":{"assignee":"member-id"},"agent":"","force":false,"reason":""}` | Update assignment and accompanying issue fields, releasing the observed claim if assignment is cleared. `agent`, `force` and `reason` are optional and apply only to that release. |
 
@@ -21,7 +22,33 @@ the trimmed `reason` if one was given. The releaser is the comment's author. A
 superuser token names no member, so it is never the holder: it needs force like
 anyone else, and its comment has no author and names "An administrator". The
 response's `forced` field is true when a comment was written. The CLI spelling
-is `lll issue release KEY --force [-b "why"]`.
+is `lll issue release KEY --force [--reason "why"]`.
+
+The expiry announcement, the one comment the server writes on its own,
+carries `author_kind: "system"` (LLL-654); every other comment has `""`. No
+request may set the field or edit a system comment, and a member's comment
+is always authored by that member, so neither kind of record can be planted
+by hand. Comments written before this are not relabelled. Only a comment's
+author may edit or delete it (a superuser still moderates), and every comment
+the server writes, the forced-release record included, carries
+`server_record`: no request may edit it and no member may delete it. The forced-release
+comment is not system: it embeds the releaser's reason, so it stays the
+releaser's, attributed and labelled like any comment. Both bodies name a
+member only when everyone who sees the issue's team may see that member;
+otherwise they say "a member outside this team" (LLL-633).
+
+Close releases the claim (D3, LLL-640). `lll issue close KEY` posts the hold
+it observed to `/close`: the holder's close releases it and leaves no
+comment, `--keep-claim` keeps it, and anyone else needs `--force` (CLI
+spelling `lll issue close KEY --force [--reason "why"]`) and leaves the
+forced-release comment. Only the holder may keep a claim while closing. The
+assignee is kept, so a done issue still names who did it.
+
+A claimed issue cannot be deleted (LLL-662). The issues DELETE request is
+refused while a claim exists, for every caller, because the claim relation
+cascades and the hold would vanish with no record. `lll issue delete KEY
+--force` releases the claim first, under the release rule, then deletes. A
+team deletion still cascades through its issues and claims.
 
 A claim expires when it has not been renewed for 24 hours. The hourly sweep
 ages a claim by its `updated` time, and only a renewal moves `updated`
@@ -44,9 +71,11 @@ The board displays holders on cards and issue pages. Its **Claim as NAME**
 button names the member used by the board process; the shared board login
 cookie does not identify an individual member. **Release NAME's claim** submits
 the claim ID rendered on that page, so an old form cannot release a replacement.
-The button always sends force: a person clicking a button that names the
-holder has decided to release it. When the board's member is not the holder,
-the comment names the board's member, not the person who clicked.
+The button sends force only when the form's reason field is filled in
+(LLL-662): the viewer's own claim releases without one, and anyone else's is
+refused, with the refusal asking for a reason. A member login acts as that
+member; the board login acts as the board's member, which the comment names,
+not the person who clicked.
 Archived teams show claim state without writable controls.
 
 Claim events refresh the affected issue and team board independently of issue
@@ -88,9 +117,9 @@ as `/release` (LLL-516): the holder clears it freely; another member, a
 superuser, or another agent label on the holder's token is refused naming the
 holder unless the request sends `"force": true`, and a forced clear writes the
 same comment a forced release writes, in the same transaction. The CLI
-spelling is `lll issue update KEY --assignee none --force [-b "why"]`. The
-board's assignee editor always sends force, as its Release button does, so
-its comment names the board's member. The optional accompanying
+spelling is `lll issue update KEY --assignee none --force [--reason "why"]`.
+The board's assignee editor never sends force (LLL-662): it clears only the
+viewer's own hold. The optional accompanying
 fields are `title`, `description`, `state`, `priority`, `emoji`, `project`, and
 `labels`. Omitted fields stay unchanged; explicit empty values and zero priority
 are applied. Field validation and claim release belong to the same transaction,

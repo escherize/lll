@@ -235,6 +235,88 @@ scripts. A removed spelling fails and names its replacement (LLL-644).
   so a renewal that lands between the sweep's list and its delete keeps the
   claim (LLL-663).
 
+### Changed (claims and bots, LLL-646)
+
+Breaking. Read this before upgrading scripts that close, release, delete or
+create bots.
+
+- `lll issue close` releases the closer's claim in the same step, under the
+  release rule, and keeps the assignee. `--keep-claim` keeps the claim.
+  Closing an issue someone else holds is refused unless `--force`, which
+  leaves the forced-release comment; only the holder may keep a claim while
+  closing. Before this, close kept every claim and agents that forgot
+  `issue release` left finished work held (D3, LLL-640). The server has a
+  new `/close` route; an older server refuses with "update the server".
+- `--reason` is the reason for a forced action: `issue release --force`,
+  `issue update --assignee none --force` and `issue close --force`. On
+  `issue update`, `-b`/`--body` is now the new description, as on create,
+  with `-d`/`--description` as aliases; `update --force -b "why"` is
+  refused naming `--reason`. `issue release` keeps `-b` as an alias of
+  `--reason`.
+- `lll bot create bot-NAME` refuses a bot that already exists and names
+  `lll bot rotate`, which is now the only way to rotate a bot's token.
+  `lll bot bot-NAME` is an alias of `lll bot create` (D7).
+- Administrator credentials never outrank a configured token. Only
+  `--admin-email`/`--admin-password` act as the administrator when a token is
+  configured; `LLL_ADMIN_EMAIL`/`LLL_ADMIN_PASSWORD` are read only when no
+  token is configured. Before this, inherited admin variables made
+  `lll bot` authenticate as the superuser instead of the member, and the bot
+  came out with no owner (D7).
+- The board's Release button forces only with a reason typed into the form:
+  the viewer's own claim releases without one, anyone else's is refused. The
+  board's assignee picker never forces. Before this, both always forced, so a
+  team-scoped member could take any claim with no reason (LLL-662).
+- `lll issue delete` refuses a claimed issue; `--force` releases the claim
+  first, under the release rule, then deletes. On an unclaimed issue
+  `--force` is still refused in favour of `--yes` (LLL-662).
+
+### Added (claims and bots)
+
+- `--agent NAME` on `issue create` (recorded as the origin tool), `issue
+  close` and `issue start` (labels the moved-work-site comment).
+- Comments carry `author_kind`: `"system"` on the claim-expiry note the
+  server writes on its own, `""` on every other (omitted from `issue view --json`). The forced-release comment
+  is the releaser's, since it carries the releaser's reason. The CLI, the
+  board and exports show a system comment's author as `system` (LLL-654).
+  Existing comments are not relabelled: no stored row proves the server
+  wrote it.
+- `lll member create --help` names `lll bot create` for agents (LLL-636).
+
+### Fixed (claims and bots)
+
+- `lll issue next` skips an issue that is claimed even when its assignee was
+  moved or cleared (LLL-662).
+- The expiry line under a bot token says to re-mint with
+  `lll bot rotate bot-NAME`, not the superuser-only `lll token create`
+  (LLL-625).
+
+### Security (claims and bots)
+
+- An API delete of a claimed issue is refused for every caller; the claim
+  cascaded away silently before (LLL-662).
+- `author_kind` cannot be set or changed by any request, a system comment
+  cannot be edited, and no system comment carries caller-supplied text, so
+  `system` cannot be forged or made to say what a member chose (LLL-654).
+- A member's comment is authored by that member: a create names the caller
+  whatever the body says, and no member can change a comment's author.
+  Before this, any team writer could post a comment with no author or in
+  another member's name, so a fake expiry note or forced-release record read
+  as real. A superuser still chooses the author.
+- Only a comment's author may edit or delete it; a superuser still moderates.
+  Before this, any team writer could rewrite another member's comment under
+  that member's name, or delete it. `lll issue comment edit/delete --force`
+  now works only with a superuser token.
+- Comments the server writes (the forced-release record and the expiry note)
+  carry `server_record`: no request may edit one, and no member may delete
+  one, the releaser included, so a forced release cannot be made silent
+  after the fact (LLL-512).
+- A forced-release or expiry comment names a member only when everyone who sees the
+  issue's team may see that member; otherwise it says "a member outside this
+  team" (LLL-633).
+- `--admin-password` and `--admin-email` are no longer copied into the
+  process environment, where child processes (git, gh, a browser opener)
+  inherited them (LLL-646).
+
 ## [0.8.0] - 2026-10-07
 
 Scoped access is complete for teams: a single-use link invites a person to

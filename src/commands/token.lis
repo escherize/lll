@@ -107,8 +107,7 @@ fn token_create(input: flags.CommandInput) -> Result<(), string> {
   let duration = parse_token_duration(p.one("--duration"))?
 
   point_at_url(p.one("--url"))?
-  apply_admin_flags(p.one("--admin-email"), p.one("--admin-password"))?
-  let su = superuser_auth()?
+  let su = superuser_auth(given_admin_login(p)?)?
   let found = records.find_member_as(su, name)?
   let Some(member) = found else {
     return Err(f"no member named '{name}' — see 'lll member create'")
@@ -137,7 +136,7 @@ fn token_create(input: flags.CommandInput) -> Result<(), string> {
   // The expiry belongs next to the token because it is the only moment
   // anyone will ever see it: impersonate tokens are stateless, so nothing
   // records the mint and no later command can answer "when does this die?".
-  fmt.Println(expiry_line(duration, time.Now()))
+  fmt.Println(expiry_line(duration, time.Now(), "lll token create"))
   Ok(())
 }
 
@@ -147,13 +146,13 @@ fn token_create(input: flags.CommandInput) -> Result<(), string> {
 /// A 0 duration hands the decision to the members collection, which this
 /// process cannot read the value of, so the line says that instead of
 /// guessing a date.
-fn expiry_line(duration: int, now: time.Time) -> string {
+fn expiry_line(duration: int, now: time.Time, remint: string) -> string {
   if duration == 0 {
     return "expires: whenever the members collection's token duration says — pass --duration to pin it"
   }
   let at = now.Add(time.Duration(duration as int64) * time.Second)
   let day = at.Format("2006-01-02")
-  f"expires {day} ({duration}s from now) — re-mint with 'lll token create'"
+  f"expires {day} ({duration}s from now) — re-mint with '{remint}'"
 }
 
 /// What to say when the impersonate call is refused. `e` is the pb client's
@@ -168,12 +167,11 @@ fn impersonate_error(name: string, e: string) -> string {
   let status = pb.response_status(e)
   if status == 401 {
     return "the token this ran with was rejected (401) - most likely it expired
-mint a new one with 'lll token create', or set LLL_ADMIN_EMAIL/LLL_ADMIN_PASSWORD
-to this server's administrator credentials"
+mint a new one with 'lll token create', or " + admin_hint()
   }
   if status == 403 {
     return "token create is superuser-only and the configured token is not one
-set LLL_ADMIN_EMAIL/LLL_ADMIN_PASSWORD to this server's administrator credentials"
+" + admin_hint()
   }
   f"impersonating {name}: {e}"
 }
@@ -192,14 +190,14 @@ pub fn admin_flags() -> Slice<flags.Flag> {
       name: "--admin-email",
       value: true,
       hint: "email",
-      help: "superuser email (else LLL_ADMIN_EMAIL)",
+      help: "superuser email (else LLL_ADMIN_EMAIL, only when no token is configured)",
       ..,
     },
     flags.Flag {
       name: "--admin-password",
       value: true,
       hint: "pw",
-      help: "superuser password (else LLL_ADMIN_PASSWORD)",
+      help: "superuser password (else LLL_ADMIN_PASSWORD, only when no token is configured)",
       ..,
     },
   ]
@@ -213,50 +211,99 @@ pub fn with_admin_flags(spec: Slice<flags.Flag>) -> Slice<flags.Flag> {
   out
 }
 
-/// Apply --admin-email/--admin-password for the rest of this process, so
-/// superuser_auth and everything under it see them the same way they see the
-/// environment. Same shape and same reason as member.lis's point_at_url.
-pub fn apply_admin_flags(email: string, pass: string) -> Result<(), string> {
-  if email != "" {
-    if let Err(e) = os.Setenv("LLL_ADMIN_EMAIL", email) {
-      return Err(f"reading --admin-email: {e}")
-    }
-  }
-  if pass != "" {
-    if let Err(e) = os.Setenv("LLL_ADMIN_PASSWORD", pass) {
-      return Err(f"reading --admin-password: {e}")
-    }
-  }
-  Ok(())
+pub struct AdminCreds {
+  pub email: string,
+  pub password: string,
 }
 
-fn superuser_auth() -> Result<string, string> {
-  let email = os.Getenv("LLL_ADMIN_EMAIL")
-  let pass = os.Getenv("LLL_ADMIN_PASSWORD")
-  if email != "" && pass != "" {
-    let payload = match json.Marshal(models.AuthRequest { identity: email, password: pass }) {
-      Ok(b) => b,
-      Err(e) => return Err(f"encoding credentials: {e}"),
-    }
-    let body = match pb.post_anon(
-      "/api/collections/_superusers/auth-with-password",
-      payload as string,
-    ) {
-      Ok(b) => b,
-      Err(e) => return Err(superuser_auth_failed(e)),
-    }
-    return decode_auth(body, "the superuser auth response")
+/// Administrator credentials and where they came from (D7, LLL-646). They
+/// are passed to the call that uses them and never written to the
+/// environment, which every child process (gh, git, a browser opener) would
+/// inherit.
+pub enum AdminLogin {
+  /// --admin-email/--admin-password, or a saved local share: the superuser,
+  /// whatever token is configured. The only way a command with a member
+  /// token configured acts as the administrator.
+  Explicit(AdminCreds),
+  /// LLL_ADMIN_EMAIL/LLL_ADMIN_PASSWORD: used only when no token is
+  /// configured. A configured member token outranks them, so an inherited
+  /// environment cannot silently turn a member's command into an ownerless
+  /// administrator one.
+  Env(AdminCreds),
+  Absent,
+}
+
+/// The admin login a command was given: both --admin-* flags, else both
+/// LLL_ADMIN_* variables, else none. One flag without the other is refused.
+pub fn given_admin_login(p: flags.Parsed) -> Result<AdminLogin, string> {
+  let email = p.one("--admin-email")
+  let pass = p.one("--admin-password")
+  if (email == "") != (pass == "") {
+    return Err("--admin-email and --admin-password go together; give both")
   }
+  if email != "" { return Ok(AdminLogin.Explicit(AdminCreds { email, password: pass })) }
+  let env_email = os.Getenv("LLL_ADMIN_EMAIL")
+  let env_pass = os.Getenv("LLL_ADMIN_PASSWORD")
+  if env_email != "" && env_pass != "" {
+    return Ok(AdminLogin.Env(AdminCreds { email: env_email, password: env_pass }))
+  }
+  Ok(AdminLogin.Absent)
+}
+
+/// The administrator email a login carries, "" for none.
+pub fn admin_login_email(login: AdminLogin) -> string {
+  match login {
+    AdminLogin.Explicit(creds) => creds.email,
+    AdminLogin.Env(creds) => creds.email,
+    AdminLogin.Absent => "",
+  }
+}
+
+/// The words every superuser refusal ends with: how to supply the
+/// administrator credentials under the D7 precedence.
+pub fn admin_hint() -> string {
+  "pass --admin-email and --admin-password (LLL_ADMIN_EMAIL/LLL_ADMIN_PASSWORD are read only when no token is configured)"
+}
+
+/// A token for a superuser-gated command (token create, member set-password
+/// and the rest). Explicit credentials authenticate fresh through
+/// PocketBase's own endpoint. Otherwise the configured token is used as-is -
+/// if it is not a superuser token, the gated call itself refuses and the
+/// caller's error names the flags. Env credentials authenticate only when no
+/// token is configured.
+pub fn superuser_auth(login: AdminLogin) -> Result<string, string> {
   let cfg = config.load()?
-  if cfg.token != "" {
-    return Ok(cfg.token)
+  match login {
+    AdminLogin.Explicit(creds) => superuser_login(creds),
+    AdminLogin.Env(creds) => {
+      if cfg.token != "" { Ok(cfg.token) } else { superuser_login(creds) }
+    },
+    AdminLogin.Absent => {
+      if cfg.token != "" { return Ok(cfg.token) }
+      Err(
+        "this command is superuser-only and nothing here can authenticate as one
+pass --admin-email and --admin-password (the credentials used to start the server),
+or set LLL_ADMIN_EMAIL/LLL_ADMIN_PASSWORD (read only when no token is configured),
+or put a superuser token in LLL_TOKEN - and name the server with --url if it is
+not the configured one",
+      )
+    },
   }
-  Err(
-    "this command is superuser-only and nothing here can authenticate as one
-pass --admin-email and --admin-password, or set LLL_ADMIN_EMAIL/LLL_ADMIN_PASSWORD
-(the credentials used to start the server), or put a superuser token in LLL_TOKEN — and name the server with
---url if it is not the configured one",
-  )
+}
+
+fn superuser_login(creds: AdminCreds) -> Result<string, string> {
+  let payload = match json.Marshal(models.AuthRequest { identity: creds.email, password: creds.password }) {
+    Ok(b) => b,
+    Err(e) => return Err(f"encoding credentials: {e}"),
+  }
+  let body = match pb.post_anon(
+    "/api/collections/_superusers/auth-with-password",
+    payload as string,
+  ) {
+    Ok(b) => b,
+    Err(e) => return Err(superuser_auth_failed(e)),
+  }
+  decode_auth(body, "the superuser auth response")
 }
 
 /// A failed superuser auth, with the wrong-server reading spelled out.
@@ -273,7 +320,7 @@ fn superuser_auth_failed(e: string) -> string {
   let Ok((_, src)) = config.load_traced() else { return msg }
   if src.url != "default" {
     return msg + "
-if LLL_ADMIN_EMAIL/LLL_ADMIN_PASSWORD are right, check the server: --url names another one"
+if the administrator credentials are right, check the server: --url names another one"
   }
   msg + "
 that url is the built-in default — nothing here configured one, so the credentials
@@ -301,9 +348,10 @@ fn token_create_page() -> string {
 Usage:
   {usage}
 
-Authenticates as the server administrator — from --admin-email/--admin-password,
-LLL_ADMIN_EMAIL/LLL_ADMIN_PASSWORD, or the configured token
-when it already is one — and asks the server to impersonate <member>: a
+Authenticates as the server administrator - from --admin-email/--admin-password,
+else the configured token when it already is one, else
+LLL_ADMIN_EMAIL/LLL_ADMIN_PASSWORD when no token is configured - and asks the
+server to impersonate <member>: a
 non-refreshable token sent as LLL_TOKEN. It does expire. --duration sets the
 lifetime in seconds and defaults to one year; 0 hands the decision to the
 members collection's own duration (5 days out of the box).
@@ -317,30 +365,38 @@ token = \"...\" in ~/.config/lll/lll.toml — never .lll.toml, which is committe
 On the receiving machine, save the API endpoint with 'lll config set url URL', or supply LLL_URL." + flags.section(spec)
 }
 
-/// `lll bot bot-NAME [--duration s]`: an agent identity in one command (LLL-392,
-/// after veans init; LLL-407 made bots a member kind). Creates a bot-kind
-/// member named NAME — the bot- prefix is reserved for bots and enforced
-/// server-side — records the calling member as its owner, and prints its
-/// token once. The human's own session is never the agent's credential: the
-/// bot's token is scoped to the bot, and both this command and `lll bot
-/// rotate NAME` re-mint it while invalidating the previous token, which
-/// stops working at its next request.
+/// `lll bot create bot-NAME [--duration s]`: an agent identity in one command
+/// (LLL-392, after veans init; LLL-407 made bots a member kind). Creates a
+/// bot-kind member named NAME - the bot- prefix is reserved for bots and
+/// enforced server-side - records the calling member as its owner, and
+/// prints its token once. The human's own session is never the agent's
+/// credential: the bot's token is scoped to the bot. `lll bot rotate NAME`
+/// re-mints it while invalidating the previous token, which stops working at
+/// its next request.
+///
+/// Create refuses a bot that already exists (D7, LLL-646): rerunning a setup
+/// script used to rotate silently and strand the running agent's token.
+/// Rotation is only ever `lll bot rotate`. Bare `lll bot bot-NAME` is create.
 ///
 /// Creation rides the calling member's own token when there is one, so the
 /// bot is owned by whoever ran the command. Administrator credentials name
 /// no member, so a bot created with them has no owner.
 pub fn bot(args: Slice<string>) -> Result<(), string> {
   // `args` is the full argv ("lll", "bot", ...), so the verb rides index 2
-  // — where a bot's NAME would sit. A bot cannot be named "rotate": the
-  // server reserves bot- * names, so the two forms cannot collide.
-  if args.get(2).unwrap_or("") == "rotate" { return bot_rotate(args) }
-  bot_create(args)
+  // - where a bare create's NAME would sit. A bot cannot be named "rotate"
+  // or "create": the server reserves bot- * names, so the forms cannot
+  // collide.
+  match args.get(2).unwrap_or("") {
+    "rotate" => bot_rotate(args),
+    "create" => bot_create(args, 3, "lll bot create"),
+    _ => bot_create(args, 2, "lll bot"),
+  }
 }
 
-fn bot_create(args: Slice<string>) -> Result<(), string> {
+fn bot_create(args: Slice<string>, start: int, command: string) -> Result<(), string> {
   let spec = bot_spec()
-  let usage = flags.usage("lll bot", spec, "bot-NAME")
-  let p = flags.parse_n(spec, args, 2, 1, usage)?
+  let usage = flags.usage(command, spec, "bot-NAME")
+  let p = flags.parse_n(spec, args, start, 1, usage)?
   if p.given("--help") {
     fmt.Println(bot_page(false))
     return Ok(())
@@ -351,10 +407,9 @@ fn bot_create(args: Slice<string>) -> Result<(), string> {
       f"usage: {usage}\n  bot-NAME is the agent's member name, e.g. bot-myrepo — bot names are reserved to the bot- prefix",
     )
   }
-  require_bot_prefix("lll bot", name)?
+  require_bot_prefix("lll bot create", name)?
   point_at_url(p.one("--url"))?
-  apply_admin_flags(p.one("--admin-email"), p.one("--admin-password"))?
-  let (tok, caller) = bot_caller()?
+  let (tok, caller) = bot_caller(given_admin_login(p)?)?
   let duration = parse_token_duration(p.one("--duration"))?
   let env_only = p.given("--env")
   // Resolved before anything is created or minted, so a refusal leaves the
@@ -367,29 +422,24 @@ fn bot_create(args: Slice<string>) -> Result<(), string> {
     if member.kind != "bot" {
       return Err(
         f"member '{name}' exists and is not a bot member
-'lll bot' only provisions bot members; use 'lll token create {name}' to mint its token directly",
+'lll bot create' only provisions bot members; use 'lll token create {name}' to mint its token directly",
       )
     }
-    // Said only after the server accepts the rotation: a refused one (not
-    // the owner) leaves the previous token working.
-    let minted = bot_mint(tok, name, duration)?
-    bot_status(
-      env_only,
-      f"member {name} exists; rotated its token (the previous one stops working)",
-    )
-    return print_bot_credential(name, minted, url, team, duration, env_only)
-  } else {
-    let owner = caller.map_or("", |me| me.id)
-    let created = create_bot_member_as(tok, name, owner)?
-    let owned = caller.map_or(
-      "no owner (the superuser created it)",
-      |me| f"owned by {me.name}",
-    )
-    bot_status(
-      env_only,
-      f"created bot member {created.name} (kind=bot, {owned})",
+    return Err(
+      f"bot {name} already exists; nothing was changed
+'lll bot rotate {name}' mints a new token (the previous one stops working)",
     )
   }
+  let owner = caller.map_or("", |me| me.id)
+  let created = create_bot_member_as(tok, name, owner)?
+  let owned = caller.map_or(
+    "no owner (administrator credentials created it)",
+    |me| f"owned by {me.name}",
+  )
+  bot_status(
+    env_only,
+    f"created bot member {created.name} (kind=bot, {owned})",
+  )
   let minted = bot_mint(tok, name, duration)?
   print_bot_credential(name, minted, url, team, duration, env_only)
 }
@@ -413,8 +463,7 @@ fn bot_rotate(args: Slice<string>) -> Result<(), string> {
   }
   require_bot_prefix("lll bot rotate", name)?
   point_at_url(p.one("--url"))?
-  apply_admin_flags(p.one("--admin-email"), p.one("--admin-password"))?
-  let (tok, _) = bot_caller()?
+  let (tok, _) = bot_caller(given_admin_login(p)?)?
   let duration = parse_token_duration(p.one("--duration"))?
   let env_only = p.given("--env")
   let team = prompt_team(tok, env_only, p.one("--team"))?
@@ -494,7 +543,7 @@ fn print_bot_credential(
   if !regexp.MustCompile("^[A-Za-z0-9._-]+$").MatchString(tok) {
     return Err("the minted token contains characters lll cannot paste safely into a shell; nothing was printed")
   }
-  let expiry = expiry_line(duration, time.Now())
+  let expiry = expiry_line(duration, time.Now(), f"lll bot rotate {name}")
   if env_only {
     fmt.Print(agent_env(url, tok))
     fmt.Fprintln(os.Stderr, f"one-time bot token for {name} — shown only here")
@@ -577,25 +626,26 @@ fn shell_word(s: string) -> string {
 }
 
 fn bot_page(rotating: bool) -> string {
-  let command = if rotating { "lll bot rotate" } else { "lll bot" }
+  let command = if rotating { "lll bot rotate" } else { "lll bot create" }
   let spec = bot_spec()
   let description = if rotating {
     "Rotate a bot's token; the previous token stops working. Requires the bot's owner or administrator credentials."
   } else {
-    "Create a bot member and print its token once. An existing bot's token is rotated. Uses your member token or administrator credentials."
+    "Create a bot member and print its token once. An existing bot is refused; 'lll bot rotate' re-mints its token. Uses your configured token; administrator credentials only through --admin-email and --admin-password. 'lll bot bot-NAME' is the same command."
   }
   let see_rotate = if rotating {
     "
 
 Who may rotate: a superuser, or the bot's owner while the owner's access
-covers the bot's. The owner is the member whose token ran 'lll bot' to create
-it; a bot created with administrator credentials has none. Other members and
-the bot itself are refused, unless they first make themselves the owner, which
-the server does not yet prevent (LLL-616).
+covers the bot's. The owner is the member whose token ran 'lll bot create'
+to create it; a bot created with administrator credentials has none. Other
+members and the bot itself are refused, unless they first make themselves the
+owner, which the server does not yet prevent (LLL-616).
 
 What rotation strands: every earlier token for the bot, including ones from
-'lll token create', at its next request. 'lll bot bot-NAME' on an existing bot
-rotates too. 'lll token create bot-NAME' adds a token and strands none."
+'lll token create', at its next request. This is the only command that
+rotates; 'lll bot create' refuses an existing bot. 'lll token create bot-NAME'
+adds a token and strands none."
   } else {
     "
 
@@ -630,17 +680,22 @@ fn require_bot_prefix(command: string, name: string) -> Result<(), string> {
   Err(f"bot names are reserved to the bot- prefix - got '{name}'; try '{command} bot-{name}'")
 }
 
-/// creates. Administrator credentials authenticate as the superuser, which
-/// names no member; a configured member token creates on the caller's own
-/// behalf (the members create rule is authenticated-only, TASK-181); a
-/// configured superuser token falls back to that, ownerless.
-fn bot_caller() -> Result<(string, Option<models.Member>), string> {
-  if os.Getenv("LLL_ADMIN_EMAIL") != "" && os.Getenv("LLL_ADMIN_PASSWORD") != "" {
-    return Ok((superuser_auth()?, None))
-  }
+/// The credential `lll bot` creates and rotates with, and the member it
+/// names. The configured token comes first (D7, LLL-646): a member token
+/// creates on the caller's own behalf, so the caller owns the bot (the
+/// members create rule is authenticated-only, TASK-181), and a configured
+/// superuser token creates ownerless. Only explicit --admin-* flags act as
+/// the administrator over a configured token; LLL_ADMIN_* is read only when
+/// no token is configured. Before this, inherited admin variables silently
+/// outranked a member's token and the bot came out ownerless.
+fn bot_caller(login: AdminLogin) -> Result<(string, Option<models.Member>), string> {
   let cfg = config.load()?
-  if cfg.token == "" {
-    return Ok((superuser_auth()?, None))
+  let explicit = match login {
+    AdminLogin.Explicit(_) => true,
+    _ => false,
+  }
+  if explicit || cfg.token == "" {
+    return Ok((superuser_auth(login)?, None))
   }
   let me = token_member(cfg.token)?
   Ok((cfg.token, me))
@@ -726,12 +781,11 @@ fn bot_mint_error(name: string, e: string) -> string {
   let status = pb.response_status(e)
   if status == 403 {
     return f"rotating {name}'s token: only the bot's owner or a superuser can do that
-the configured token does not own this bot — pass --admin-email/--admin-password (or set LLL_ADMIN_EMAIL/LLL_ADMIN_PASSWORD) to rotate as the superuser"
+the configured token does not own this bot — pass --admin-email and --admin-password to rotate as the superuser"
   }
   if status == 401 {
     return "the token this ran with was rejected (401) - most likely it expired
-mint a new one with 'lll token create', or set LLL_ADMIN_EMAIL/LLL_ADMIN_PASSWORD
-to this server's administrator credentials"
+log in again with 'lll login', or " + admin_hint()
   }
   f"rotating {name}'s token: {e}"
 }
