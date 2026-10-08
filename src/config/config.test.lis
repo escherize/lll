@@ -5,7 +5,7 @@ import "go:path/filepath"
 // Cover for the two rules TASK-168 turns on: config files LAYER, and the
 // search for the repo file stops at the git root.
 //
-// These tests touch the filesystem, $HOME and the working directory, because
+// These tests touch the filesystem and the working directory, because
 // that is exactly what they are about — a pure test of load() would prove
 // nothing about which file it reads.
 
@@ -71,82 +71,33 @@ fn write(path: string, text: string) -> Result<(), string> {
   Ok(())
 }
 
-/// One saved environment variable, remembering whether it was set at all: an
-/// unset variable must be restored unset, not set to "".
-struct EnvVar {
-  name: string,
-  value: Option<string>,
+/// The environment a test hands resolution: `home` as $HOME and nothing
+/// else set. The real process environment never reaches `resolve` (LLL-486),
+/// so a developer's exported LLL_* or XDG_CONFIG_HOME cannot fail these.
+fn env_at(home: string) -> Env {
+  Env { home, .. }
 }
 
-/// Every variable config resolution consults — the config root (config.lis
-/// `config_root`) and the per-key overrides (`load_traced`).
-fn config_env_names() -> Slice<string> {
-  [
-    "HOME",
-    "LLL_CONFIG_HOME",
-    "XDG_CONFIG_HOME",
-    "LLL_URL",
-    "LLL_TEAM",
-    "LLL_ME",
-    "LLL_SORT",
-    "LLL_WEB_URL",
-    "LLL_TOKEN",
-  ]
-}
-
-/// Save every variable above and clear it. Setting $HOME is not enough: the
-/// reader honours LLL_CONFIG_HOME and XDG_CONFIG_HOME first, and the per-key
-/// LLL_* variables override files outright — so a developer's own config and
-/// exported token reached these tests and failed eight of them (LLL-449).
-fn isolate_config_env() -> Slice<EnvVar> {
-  let saved = config_env_names().map(|name| EnvVar {
-    name,
-    value: os.LookupEnv(name),
-  })
-  for v in saved {
-    let _ = os.Unsetenv(v.name)
-  }
-  saved
-}
-
-fn restore_config_env(saved: Slice<EnvVar>) {
-  for v in saved {
-    match v.value {
-      Some(text) => {
-        let _ = os.Setenv(v.name, text)
-      },
-      None => {
-        let _ = os.Unsetenv(v.name)
-      },
-    }
-  }
-}
-
-/// Run `load_traced()` from `dir` with `home` as $HOME and nothing else the
-/// reader consults left set, restoring the working directory and the whole
-/// environment after. `token`, when given, is exported as LLL_TOKEN.
-fn traced_in(
-  dir: string,
-  home: string,
-  token: Option<string>,
-) -> Result<(Config, Sources), string> {
+/// Resolve settings from `dir` with `env`, restoring the working directory
+/// after. The working directory is the one ambient input left: the repo file
+/// is found from it.
+fn settings_in(dir: string, env: Env, overrides: Overrides) -> Result<Settings, string> {
   let Ok(prev_dir) = os.Getwd() else {
     return Err("reading the working directory")
   }
-  let saved = isolate_config_env()
-  defer restore(prev_dir, saved)
+  defer { let _ = os.Chdir(prev_dir) }
   if let Err(e) = os.Chdir(dir) {
     return Err(f"entering {dir}: {e}")
   }
-  let _ = os.Setenv("HOME", home)
-  if let Some(text) = token {
-    let _ = os.Setenv("LLL_TOKEN", text)
-  }
-  load_traced()
+  Ok(resolve(env, overrides))
+}
+
+fn traced_with(dir: string, env: Env) -> Result<(Config, Sources), string> {
+  settings_in(dir, env, no_overrides())?.traced()
 }
 
 fn traced_from(dir: string, home: string) -> Result<(Config, Sources), string> {
-  traced_in(dir, home, None)
+  traced_with(dir, env_at(home))
 }
 
 fn load_from(dir: string, home: string) -> Result<Config, string> {
@@ -154,10 +105,6 @@ fn load_from(dir: string, home: string) -> Result<Config, string> {
   Ok(cfg)
 }
 
-fn restore(dir: string, saved: Slice<EnvVar>) {
-  let _ = os.Chdir(dir)
-  restore_config_env(saved)
-}
 
 // ---------------------------------------------------------------- layering
 
@@ -347,53 +294,205 @@ fn lll_token_beats_both_files_and_is_traced_to_the_env() {
     "token = \"repo-token\"\n",
     "token = \"home-token\"\n",
   )
-  let assert Ok((cfg, src)) = traced_with_token(root, home, "env-token")
+  let assert Ok((cfg, src)) = traced_with(root, Env { home, token: "env-token", .. })
   assert cfg.token == "env-token"
   assert src.token == "env:LLL_TOKEN"
 }
 
-fn traced_with_token(
-  dir: string,
-  home: string,
-  token: string,
-) -> Result<(Config, Sources), string> {
-  traced_in(dir, home, Some(token))
-}
-
-// ------------------------------------------------------------- isolation
+// ------------------------------------------------- precedence (LLL-486)
+//
+// Precedence is computed in one place, `resolve`, from values: flags >
+// env > the repo's .lll.toml > the home config > the default url. These pin
+// it one key at a time, because the env override is written out per field
+// and a forgotten key would otherwise go unnoticed.
 
 #[test]
-fn a_real_home_config_and_exported_env_cannot_reach_these_tests() {
-  // The guard for LLL-449. Eight tests above read the developer's own
-  // ~/.config/lll/lll.toml and exported LLL_* instead of the fixture, because
-  // setting $HOME does not cover LLL_CONFIG_HOME, XDG_CONFIG_HOME or the
-  // per-key overrides. Poison every one of them; the fixture must still win.
+fn every_env_var_overrides_its_file_key_and_is_traced_to_the_env() {
   let assert Ok((root, home)) = fixture(
     "team = \"REPO\"\n",
-    "url = \"http://home:9999\"\nme = \"homer\"\nsort = \"-updated\"\n",
+    "url = \"http://home:9999\"\nsort = \"-updated\"\nweb_url = \"http://home:8080\"\n",
   )
+  let env = Env {
+    home,
+    url: "http://env:1111",
+    team: "ENVTEAM",
+    sort: "priority",
+    web_url: "http://env:2222",
+    ..
+  }
+  let assert Ok((cfg, src)) = traced_with(root, env)
+  assert cfg.url == "http://env:1111"
+  assert cfg.team == "ENVTEAM"
+  assert cfg.sort == "priority"
+  assert cfg.web_url == "http://env:2222"
+  assert src.url == "env:LLL_URL"
+  assert src.team == "env:LLL_TEAM"
+  assert src.sort == "env:LLL_SORT"
+  assert src.web_url == "env:LLL_WEB_URL"
+}
+
+#[test]
+fn an_empty_env_var_cannot_clear_a_file_value() {
+  // Each override is gated on != "", so an exported-but-empty variable is
+  // indistinguishable from an unset one and the file still wins.
+  let assert Ok((root, home)) = fixture(
+    "team = \"REPO\"\n",
+    "url = \"http://home:9999\"\ntoken = \"home-token\"\n",
+  )
+  let assert Ok((cfg, src)) = traced_from(root, home)
+  assert cfg.token == "home-token"
+  assert cfg.url == "http://home:9999"
+  assert cfg.team == "REPO"
+  assert src.token != "env:LLL_TOKEN"
+  assert src.url != "env:LLL_URL"
+  assert src.team != "env:LLL_TEAM"
+}
+
+#[test]
+fn the_default_url_applies_only_when_nothing_supplied_one() {
+  let assert Ok((root, home)) = fixture("team = \"REPO\"\n", "")
+  let assert Ok((cfg, src)) = traced_from(root, home)
+  assert cfg.url == "http://127.0.0.1:8090"
+  assert src.url == "default"
+  let assert Ok((root2, home2)) = fixture("team = \"REPO\"\n", "url = \"http://home:9999\"\n")
+  let assert Ok((cfg2, src2)) = traced_from(root2, home2)
+  assert cfg2.url == "http://home:9999"
+  assert src2.url != "default"
+}
+
+#[test]
+fn a_team_flag_beats_lll_team_and_is_attributed_to_the_flag() {
+  // T7: the attribution comes from the value. LLL_TEAM_FROM_FLAG is gone,
+  // so an inherited environment cannot claim a --team nobody typed.
+  let assert Ok((root, home)) = fixture("team = \"REPO\"\n", "")
+  let env = Env { home, team: "ENVTEAM", .. }
+  let flagged = Overrides { team: Some("FLAG"), ..no_overrides() }
+  let assert Ok(s) = settings_in(root, env, flagged)
+  let assert Ok((cfg, src)) = s.traced()
+  assert cfg.team == "FLAG"
+  assert src.team == "flag:--team"
+  // Without the flag, the same environment is attributed to LLL_TEAM.
+  let assert Ok((cfg2, src2)) = traced_with(root, env)
+  assert cfg2.team == "ENVTEAM"
+  assert src2.team == "env:LLL_TEAM"
+}
+
+#[test]
+fn a_url_flag_beats_lll_url() {
+  let assert Ok((root, home)) = fixture("", "url = \"http://home:9999\"\n")
+  let env = Env { home, url: "http://env:1111", .. }
+  let assert Ok(s) = settings_in(root, env, no_overrides())
+  let assert Ok((cfg, src)) = s.with_url("http://flag:3333").traced()
+  assert cfg.url == "http://flag:3333"
+  assert src.url == "flag:--url"
+  // The token and the other keys are untouched by the url override.
+  let assert Ok((plain, _)) = s.traced()
+  assert plain.url == "http://env:1111"
+}
+
+#[test]
+fn the_config_root_is_lll_config_home_then_xdg_then_home() {
+  let env = Env { home: "/h", .. }
+  let assert Ok(home_only) = resolve(env, no_overrides()).home_path()
+  assert home_only == "/h/.config/lll/lll.toml"
+  let xdg = Env { home: "/h", xdg_config_home: "/x", .. }
+  let assert Ok(from_xdg) = resolve(xdg, no_overrides()).home_path()
+  assert from_xdg == "/x/lll/lll.toml"
+  let both = Env { home: "/h", xdg_config_home: "/x", config_home: " /c ", .. }
+  let assert Ok(from_lll) = resolve(both, no_overrides()).home_path()
+  assert from_lll == "/c/lll/lll.toml"
+  let assert Err(_) = resolve(Env { .. }, no_overrides()).home_path()
+}
+
+#[test]
+fn lll_config_home_reaches_a_config_outside_home() {
+  // LLL-400's harness case, as a value: a config root that is not $HOME.
+  let assert Ok((root, home)) = fixture("team = \"REPO\"\n", "url = \"http://home:9999\"\n")
   let assert Ok(elsewhere) = os.MkdirTemp("", "lll-elsewhere")
   let assert Ok(_) = write(
     filepath.Join(elsewhere, "lll", "lll.toml"),
-    "url = \"http://elsewhere:1\"\nme = \"stranger\"\ntoken = \"real-token\"\n",
+    "url = \"http://elsewhere:1\"\ntoken = \"elsewhere-token\"\n",
   )
-
-  let saved = isolate_config_env()
-  defer restore_config_env(saved)
-  let _ = os.Setenv("LLL_CONFIG_HOME", elsewhere)
-  let _ = os.Setenv("XDG_CONFIG_HOME", elsewhere)
-  let _ = os.Setenv("LLL_URL", "http://exported:2")
-  let _ = os.Setenv("LLL_TEAM", "EXPORTED")
-  let _ = os.Setenv("LLL_ME", "exported")
-  let _ = os.Setenv("LLL_SORT", "-exported")
-  let _ = os.Setenv("LLL_WEB_URL", "http://exported-board:3")
-  let _ = os.Setenv("LLL_TOKEN", "exported-token")
-
-  let assert Ok(cfg) = load_from(root, home)
+  let assert Ok((cfg, src)) = traced_with(root, Env { home, config_home: elsewhere, .. })
+  assert cfg.url == "http://elsewhere:1"
+  assert cfg.token == "elsewhere-token"
+  assert src.url.contains(elsewhere)
   assert cfg.team == "REPO"
+}
+
+#[test]
+fn load_home_reads_the_machine_file_alone() {
+  // The one reader that deliberately ignores the repo file and the
+  // environment: login compares the saved pair to detect a server switch.
+  let assert Ok((root, home)) = fixture(
+    "team = \"REPO\"\nurl = \"http://repo:7777\"\n",
+    "url = \"http://home:9999\"\nteam = \"HOME\"\n",
+  )
+  let env = Env { home, url: "http://env:1111", .. }
+  let assert Ok(s) = settings_in(root, env, no_overrides())
+  let assert Ok(cfg) = s.load_home()
   assert cfg.url == "http://home:9999"
-  assert cfg.sort == "-updated"
-  assert cfg.web_url == ""
-  // The one that printed a real hosted token into a failure message.
-  assert cfg.token == ""
+  assert cfg.team == "HOME"
+}
+
+#[test]
+fn a_broken_file_fails_the_reads_not_the_settings() {
+  // `lll --help` and `lll config init` must still work beside a file that
+  // does not parse; the error is returned where configuration is read.
+  let assert Ok((root, home)) = fixture("team = \n", "")
+  let assert Ok(s) = settings_in(root, env_at(home), no_overrides())
+  let assert Err(e) = s.traced()
+  assert e.contains("parsing")
+  let assert Err(_) = s.config()
+  let assert Ok(_) = s.home_path()
+}
+
+#[test]
+fn the_admin_pair_counts_only_whole() {
+  let half = resolve(Env { admin_email: "a@x", .. }, no_overrides())
+  assert half.admin().is_none()
+  let whole = resolve(Env { admin_email: "a@x", admin_password: "pw", .. }, no_overrides())
+  let assert Some(pair) = whole.admin()
+  assert pair.email == "a@x"
+  // What lll up started its server with outranks the environment's pair.
+  let boot = whole.with_admin(AdminCreds { email: "boot@x", password: "b" })
+  let assert Some(booted) = boot.admin()
+  assert booted.email == "boot@x"
+}
+
+#[test]
+fn bind_and_board_token_default_from_the_environment() {
+  let s = resolve(Env { .. }, no_overrides())
+  assert s.bind() == "127.0.0.1"
+  assert s.board_token() == ""
+  let env = resolve(Env { bind: "10.0.0.2", board_token: "envtok", .. }, no_overrides())
+  assert env.bind() == "10.0.0.2"
+  assert env.board_token() == "envtok"
+  let boot = env.with_bind("10.0.0.3").with_board_token("boottok")
+  assert boot.bind() == "10.0.0.3"
+  assert boot.board_token() == "boottok"
+}
+
+#[test]
+fn given_settings_read_no_file_and_no_environment() {
+  // What command tests build: exactly the configuration they name.
+  let s = given(Config { url: "http://t:1", team: "T", .. }, Sources { url: "test", .. }, Env { .. })
+  let assert Ok((cfg, src)) = s.traced()
+  assert cfg.url == "http://t:1"
+  assert cfg.team == "T"
+  assert src.url == "test"
+  let assert Ok((cfg2, src2)) = s.with_team("OTHER").traced()
+  assert cfg2.team == "OTHER"
+  assert src2.team == "flag:--team"
+}
+
+#[test]
+fn repeated_resolution_from_one_directory_agrees() {
+  let assert Ok((root, home)) = fixture("team = \"REPO\"\n", "url = \"http://home:9999\"\ntoken = \"t\"\n")
+  let assert Ok(a) = load_from(root, home)
+  let assert Ok(b) = load_from(filepath.Join(root, "src"), home)
+  let assert Ok(c) = load_from(root, home)
+  assert a.team == b.team && b.team == c.team
+  assert a.url == b.url && b.url == c.url
+  assert a.token == b.token && b.token == c.token
 }
