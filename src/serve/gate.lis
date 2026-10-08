@@ -369,7 +369,7 @@ impl ScopedViewer {
 
   /// Whether this viewer may see the issue with this key ("ABC-12").
   pub fn sees_issue(self, issue: string) -> bool {
-    self.teams.any(|key| issue_of_team(issue, key))
+    self.teams.any(|key| records.issue_of_team(issue, key))
   }
 }
 
@@ -581,13 +581,6 @@ fn hidden_team(key: string) -> string {
   f"no team with key '{key}' on this server; see the rail's team switcher"
 }
 
-/// True when an issue key such as "ABC-12" belongs to team "ABC". The rest
-/// must be the number alone: team keys may contain hyphens, so "ABC-X-1"
-/// belongs to team "ABC-X", not "ABC".
-pub fn issue_of_team(issue: string, key: string) -> bool {
-  let Some(number) = strings.CutPrefix(strings.ToUpper(issue), key + "-") else { return false }
-  number != "" && strings.Trim(number, "0123456789") == ""
-}
 /// The named cookie's value, or None when absent.
 fn cookie_named(r: Ref<http.Request>, name: string) -> Option<string> {
   for c in r.Cookies() {

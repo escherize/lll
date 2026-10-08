@@ -3,9 +3,16 @@ import "go:strings"
 
 import "pb"
 
+// The one issue-key parser (LLL-659). The CLI's fetch and the board's gate
+// each had their own: the fetch took whatever strconv.Atoi accepts, so
+// "ENG-+3" read as ENG-3, while the gate wanted digits alone and said that
+// key belonged to no team. Every reader of a key goes through
+// split_issue_key now; issue_of_team is a question asked of its answer.
+
 /// Split a KEY-123 identifier into its team key and issue number. The key may
 /// itself contain hyphens (`ENG-DEV-12` is team `ENG-DEV`, issue 12), so the
-/// number is the last segment and the key is everything before it.
+/// number is the last segment and the key is everything before it. The
+/// number is ASCII digits alone: no sign.
 pub fn split_issue_key(id: string) -> Result<(string, int), string> {
   // Names the shape AND the position: three of thirty fleet agents typed
   // 'lll issue comment add KEY ...' and read this as the key being wrong.
@@ -17,8 +24,17 @@ pub fn split_issue_key(id: string) -> Result<(string, int), string> {
   let number_part = parts[parts.length() - 1]
   let team_key = strings.TrimSuffix(id, f"-{number_part}")
   if team_key == "" || number_part == "" { return Err(bad_id) }
+  if strings.Trim(number_part, "0123456789") != "" { return Err(bad_id) }
   let Ok(number) = strconv.Atoi(number_part) else {
     return Err(bad_id)
   }
   Ok((team_key, number))
+}
+
+/// True when an issue key such as "ABC-12" belongs to team "ABC" (a stored,
+/// uppercase key). Team keys may contain hyphens, so "ABC-X-1" belongs to
+/// team "ABC-X", not "ABC"; a key that does not parse belongs to no team.
+pub fn issue_of_team(issue: string, key: string) -> bool {
+  let Ok((team, _)) = split_issue_key(issue) else { return false }
+  normalize_team_key(team) == key
 }
