@@ -110,6 +110,7 @@ fn login_refuses_to_save_beside_another_servers_url() {
   assert login_target_conflict("", hosted, hosted).is_none()
   assert login_target_conflict("", hosted + "/", hosted).is_none()
   assert login_target_conflict("", "", local).is_none()
+  assert login_target_conflict("", "http://localhost:8090", local).is_none()
   // --url names the server, and saves its url too.
   assert login_target_conflict(local, hosted, local).is_none()
   let why = login_target_conflict("", hosted, local).unwrap_or("")

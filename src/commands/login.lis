@@ -285,7 +285,7 @@ fn login_target_conflict(target: string, home_url: string, effective_url: string
   if target != "" { return None }
   let home = strings.TrimRight(strings.TrimSpace(home_url), "/")
   let effective = strings.TrimRight(strings.TrimSpace(effective_url), "/")
-  if home == "" || home == effective { return None }
+  if home == "" || same_server_url(home, effective) { return None }
   Some(
     f"this login would authenticate at {effective}, but the home config's url is {home}; saving the token there would pair it with the other server
 to switch the home config to this server: lll login --url {effective} ...

@@ -419,25 +419,28 @@ password in its own data directory's .lll-admin.json.",
   // hosted url and its token) once replaced that file's web_url with this
   // board's address, so url and web_url named two different servers.
   let home = ctx.settings.load_home()?
+  // Writing web_url also creates the config directory the login link below
+  // goes into; a kept web_url means the home config already exists.
   if home_names_board(home.url, db_url, board_url) {
     let _ = set_home_key(ctx.settings, "web_url", board_url)?
-    // Every boot, loopback included (LLL-648): 'lll board' and 'lll member
-    // invite --team' read the login link from here, so the machine running
-    // the board prints links that open it. Private (0600) and rewritten each
-    // boot, so it follows a per-boot token.
-    let login_file = filepath.Join(
-      filepath.Dir(ctx.settings.home_path()?),
-      "board-login-url",
-    )
-    write_home_config(
-      login_file,
-      f"{board_url}/?board_token={ctx.settings.board_token()}\n",
-    )?
   } else {
     fmt.Println(
       f"board  web_url unchanged: the home config's url is {home.url}, not this board's server",
     )
   }
+  // Every boot, loopback included (LLL-648): 'lll board' and 'lll member
+  // invite --team' read the login link from here, so the machine running the
+  // board prints links that open it. Private (0600) and rewritten each boot,
+  // so it follows a per-boot token. It names its own board url, and readers
+  // use it only for that url, so it is written even when web_url is kept.
+  let login_file = filepath.Join(
+    filepath.Dir(ctx.settings.home_path()?),
+    "board-login-url",
+  )
+  write_home_config(
+    login_file,
+    f"{board_url}/?board_token={ctx.settings.board_token()}\n",
+  )?
   if share_bind != "" {
     let admin_file = filepath.Join(
       filepath.Dir(ctx.settings.home_path()?),
@@ -497,8 +500,29 @@ fn admin_line(
 /// same API under /api/. Any other url is another server's login, and the
 /// web_url beside it stays that server's.
 fn home_names_board(home_url: string, db_url: string, board_url: string) -> bool {
-  let named = strings.TrimRight(strings.TrimSpace(home_url), "/")
-  named == "" || named == strings.TrimRight(db_url, "/") || named == strings.TrimRight(board_url, "/")
+  strings.TrimSpace(home_url) == "" || same_server_url(home_url, db_url) ||
+  same_server_url(home_url, board_url)
+}
+
+/// Pure. Whether two base urls name one server: equal after trimming
+/// trailing slashes, with the loopback spellings (localhost, 127.0.0.1,
+/// [::1]) counted as one host.
+fn same_server_url(a: string, b: string) -> bool {
+  server_key(a) == server_key(b)
+}
+
+fn server_key(url: string) -> string {
+  let mut u = strings.TrimRight(strings.TrimSpace(url), "/")
+  for alias in ["://localhost", "://[::1]"] {
+    for scheme in ["http", "https"] {
+      if let Some(rest) = strings.CutPrefix(u, scheme + alias) {
+        if rest == "" || rest.starts_with(":") || rest.starts_with("/") {
+          u = scheme + "://127.0.0.1" + rest
+        }
+      }
+    }
+  }
+  u
 }
 
 fn loopback_bind(settings: config.Settings) -> bool {

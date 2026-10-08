@@ -36,7 +36,14 @@ def reaches_real_config(env):
     real_root = os.path.realpath(os.path.join(real_home(), '.config'))
 
     def is_real(path):
-        return bool(path) and os.path.realpath(path) == real_root
+        if not path:
+            return False
+        # samefile, not string equality: macOS volumes ignore case, so
+        # /USERS/me/.config is the real directory under another spelling.
+        try:
+            return os.path.samefile(path, real_root)
+        except OSError:
+            return os.path.realpath(path) == real_root
 
     hits = []
     for name in ('LLL_CONFIG_HOME', 'XDG_CONFIG_HOME'):

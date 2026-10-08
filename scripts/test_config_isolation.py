@@ -115,6 +115,10 @@ with tempfile.TemporaryDirectory(prefix='lll-680-') as directory:
         # A shadowed real HOME is what the e2e suites run with before the pin.
         assert reaches({'HOME': str(fake_real), 'LLL_CONFIG_HOME': str(other)}) == []
         assert reaches({'HOME': str(other)}) == []
+        # Another spelling of the same directory (case on macOS, here a
+        # symlinked HOME) is still the real config.
+        (base / 'home-link').symlink_to(fake_real)
+        assert reaches({'HOME': str(base / 'home-link')})
 
         # The agent-dx fleet wrapper's environment: its config root is the
         # worker's home/config, here the fake real home's .config by symlink.

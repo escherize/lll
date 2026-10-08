@@ -132,4 +132,8 @@ fn web_url_is_saved_only_beside_this_boards_url() {
   assert home_names_board(board, db, board)
   assert !home_names_board("https://lll.example.com", db, board)
   assert !home_names_board("http://127.0.0.1:8091", db, board)
+  // Loopback spellings name one server.
+  assert home_names_board("http://localhost:8090", db, board)
+  assert home_names_board("http://[::1]:8100/", db, board)
+  assert !home_names_board("http://localhost.example.com:8090", db, board)
 }
