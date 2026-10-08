@@ -10,9 +10,9 @@ struct AppendRequest { #[json("ref")] reference: string }
 #[json]
 pub struct Outcome { pub refs: string, pub added: bool }
 
-pub fn append(issue_id: string, reference: string) -> Result<Outcome, string> {
+pub fn append(ctx: pb.Client, issue_id: string, reference: string) -> Result<Outcome, string> {
   let body = json.Marshal(AppendRequest { reference }).map_err(|e| f"encoding reference: {e}")?
-  let response = pb.post(f"/api/lll/issues/{url.PathEscape(issue_id)}/refs", body as string).map_err(|e| {
+  let response = ctx.post(f"/api/lll/issues/{url.PathEscape(issue_id)}/refs", body as string).map_err(|e| {
     if pb.classify(e).status == 404 { "server does not support atomic reference appends; update the server before adding refs" } else { e }
   })?
   let mut outcome = Outcome { .. }

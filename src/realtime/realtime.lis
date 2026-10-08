@@ -8,7 +8,6 @@ import "go:os"
 import "go:strings"
 import "go:time"
 
-import "config"
 import "pb"
 
 /// A record event from a PocketBase realtime stream. `topic` is the
@@ -128,7 +127,7 @@ struct SubscribeMsg {
 /// What the reconnect loop does when the server refuses the token
 /// (`auth_failure`). Each caller picks one; there is no default.
 pub enum DeadToken {
-  /// Re-mint with this function, put the result in LLL_TOKEN and retry:
+  /// Re-mint with this function, renew the client's token to it and retry:
   /// `lll up` passes its superuser credentials' minter when it minted the
   /// process token itself, so an expired token heals instead of wedging
   /// the board.
@@ -154,10 +153,10 @@ pub enum DeadToken {
 /// and every distinct reconnect error are printed, and a recovery is too.
 ///
 /// `on_dead_token` decides what an auth-shaped failure (401/403, including
-/// connect's token check) does; see DeadToken. Every attempt re-reads the
-/// config, so a token rotated in a config file is picked up without a
-/// restart — an env token is frozen for the process's life, which only a
-/// re-mint can unlock.
+/// connect's token check) does; see DeadToken. Under Retry each refused
+/// attempt re-reads the config files, so a token rotated in a config file is
+/// picked up without a restart — an env token is frozen for the process's
+/// life, which only a re-mint can unlock.
 ///
 /// The protocol (verified live against PB 0.40.1): GET /api/realtime opens an
 /// SSE stream whose first event is PB_CONNECT carrying {"clientId":...};
@@ -165,11 +164,11 @@ pub enum DeadToken {
 /// activates the topics; record events then arrive named by topic, verbatim
 /// including any options suffix.
 pub fn subscribe(
-  base_url: string,
+  ctx: pb.Client,
   topics: Slice<string>,
   on_dead_token: DeadToken,
 ) -> Result<Channel<Event>, string> {
-  start(base_url, topics, on_dead_token, false)
+  start(ctx, topics, on_dead_token, false)
 }
 
 /// The topic of the event subscribe_resyncing sends after each reconnect.
@@ -182,21 +181,21 @@ pub const RESYNC: string = "lll:resync"
 /// once the new subscriptions are accepted and before the first event they
 /// carry. The first connection sends none: there was no outage to cover.
 pub fn subscribe_resyncing(
-  base_url: string,
+  ctx: pb.Client,
   topics: Slice<string>,
   on_dead_token: DeadToken,
 ) -> Result<Channel<Event>, string> {
-  start(base_url, topics, on_dead_token, true)
+  start(ctx, topics, on_dead_token, true)
 }
 
 fn start(
-  base_url: string,
+  ctx: pb.Client,
   topics: Slice<string>,
   on_dead_token: DeadToken,
   resync: bool,
 ) -> Result<Channel<Event>, string> {
   let ch = Channel.new<Event>()
-  let mut reader = match connect(base_url, topics) {
+  let mut reader = match connect(ctx, topics) {
     Ok(r) => r,
     Err(e) => {
       if auth_failure(e) {
@@ -207,7 +206,7 @@ fn start(
   }
   task {
     pump(reader, ch)
-    reconnect(base_url, topics, on_dead_token, ch, resync)
+    reconnect(ctx, topics, on_dead_token, ch, resync)
   }
   Ok(ch)
 }
@@ -217,7 +216,7 @@ fn start(
 /// log with a line a second, but a board whose subscription died is never
 /// indistinguishable from a live one.
 fn reconnect(
-  base_url: string,
+  ctx: pb.Client,
   topics: Slice<string>,
   on_dead_token: DeadToken,
   ch: Channel<Event>,
@@ -227,7 +226,7 @@ fn reconnect(
   let mut last_err = ""
   loop {
     time.Sleep(time.Second)
-    match connect(base_url, topics) {
+    match connect(ctx, topics) {
       Ok(r) => {
         fmt.Fprintln(os.Stderr, "realtime: reconnected to the lll server (subscriptions accepted)")
         last_err = ""
@@ -250,12 +249,13 @@ fn reconnect(
         if dead {
           if let DeadToken.Remint(mint) = on_dead_token {
             if let Ok(tok) = mint() {
-              let _ = os.Setenv("LLL_TOKEN", tok)
+              ctx.renew_to(tok)
               fmt.Fprintln(os.Stderr,
                 "realtime: renewed the server auth token after an auth failure",
               )
             }
           }
+          if let DeadToken.Retry = on_dead_token { ctx.reload_token() }
         }
       },
     }
@@ -289,11 +289,11 @@ fn dead_token_fix(e: string) -> string {
 /// Authorization header), and the subscription POST must present the same
 /// identity or the upgrade from guest is refused.
 fn connect(
-  base_url: string,
+  ctx: pb.Client,
   topics: Slice<string>,
 ) -> Result<mut Ref<bufio.Reader>, string> {
-  let cfg = config.load()?
-  let auth = pb.bearer(cfg.token)
+  let base_url = ctx.url()?
+  let auth = pb.bearer(ctx.token())
   let mut req = match http.NewRequest(
     "GET",
     base_url + "/api/realtime",
@@ -375,9 +375,7 @@ fn connect(
   // The board owns one subscription. Keep its accepted request so a member
   // token renewal can reauthenticate that same client using PocketBase's own
   // subscription endpoint; token-key rotation clears auth without closing SSE.
-  if os.Getenv("LLL_REMINT") == "1" {
-    let _ = os.Setenv("LLL_REALTIME_SUBSCRIPTION", payload as string)
-  }
+  ctx.remember_subscription(payload as string)
   Ok(reader)
 }
 

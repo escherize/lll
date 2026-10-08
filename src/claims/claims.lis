@@ -58,19 +58,19 @@ struct AssignmentRequest {
 /// Clearing the assignee releases the observed claim, so it follows the
 /// release rule (LLL-516): only the holder clears it without force, and a
 /// forced clear leaves a comment on the issue, with `reason` if given.
-pub fn update_assignment(caller: pb.Caller, issue_id: string, claim_id: string, fields: string, agent: string, force: bool, reason: string) -> Result<Transition, string> {
-  transact(caller, issue_id, "assignment", AssignmentRequest { claim_id, fields: fields.bytes() as json.RawMessage, agent, force, reason })
+pub fn update_assignment(ctx: pb.Client, caller: pb.Caller, issue_id: string, claim_id: string, fields: string, agent: string, force: bool, reason: string) -> Result<Transition, string> {
+  transact(ctx, caller, issue_id, "assignment", AssignmentRequest { claim_id, fields: fields.bytes() as json.RawMessage, agent, force, reason })
 }
 
-pub fn observed_id(issue_id: string) -> Result<string, string> {
-  Ok(fetch(issue_id)?.map_or("", |held| held.id))
+pub fn observed_id(ctx: pb.Client, issue_id: string) -> Result<string, string> {
+  Ok(fetch(ctx, issue_id)?.map_or("", |held| held.id))
 }
 
 /// Claims and their assignment are one server-owned transaction. Callers
 /// resolve the actor through normal identity handling; the server verifies it.
 /// `agent` is the optional self-asserted session label (LLL-521); "" for none.
-pub fn acquire(caller: pb.Caller, issue_id: string, member_id: string, agent: string) -> Result<Transition, string> {
-  transact(caller, issue_id, "claim", AcquireRequest { member: member_id, agent })
+pub fn acquire(ctx: pb.Client, caller: pb.Caller, issue_id: string, member_id: string, agent: string) -> Result<Transition, string> {
+  transact(ctx, caller, issue_id, "claim", AcquireRequest { member: member_id, agent })
 }
 
 /// Only the holder releases without force. With force, the server releases
@@ -78,8 +78,8 @@ pub fn acquire(caller: pb.Caller, issue_id: string, member_id: string, agent: st
 /// the reason when one is given (LLL-512). The same member under a different
 /// non-empty `agent` than the holder's is another session and needs force too
 /// (LLL-521).
-pub fn release(caller: pb.Caller, issue_id: string, claim_id: string, agent: string, force: bool, reason: string) -> Result<Transition, string> {
-  transact(caller, issue_id, "release", ReleaseRequest { claim_id, agent, force, reason })
+pub fn release(ctx: pb.Client, caller: pb.Caller, issue_id: string, claim_id: string, agent: string, force: bool, reason: string) -> Result<Transition, string> {
+  transact(ctx, caller, issue_id, "release", ReleaseRequest { claim_id, agent, force, reason })
 }
 
 /// Set the issue done and release its claim in one server transaction (D3,
@@ -87,23 +87,23 @@ pub fn release(caller: pb.Caller, issue_id: string, claim_id: string, agent: str
 /// release rule is release's: the holder freely, anyone else with force,
 /// which comments. `keep_claim` keeps the holder's own hold; the server
 /// refuses it for anyone else. The assignee is kept.
-pub fn close(caller: pb.Caller, issue_id: string, claim_id: string, agent: string, force: bool, reason: string, keep_claim: bool) -> Result<Transition, string> {
-  transact(caller, issue_id, "close", CloseRequest { claim_id, agent, force, reason, keep_claim })
+pub fn close(ctx: pb.Client, caller: pb.Caller, issue_id: string, claim_id: string, agent: string, force: bool, reason: string, keep_claim: bool) -> Result<Transition, string> {
+  transact(ctx, caller, issue_id, "close", CloseRequest { claim_id, agent, force, reason, keep_claim })
 }
 
 /// Only the holder renews its observed hold. The server restarts the expiry
 /// clock and keeps the claim's id and creation time (LLL-535). A different
 /// non-empty `agent` than the holder's is refused, as on acquire (LLL-521).
-pub fn renew(issue_id: string, claim_id: string, agent: string) -> Result<Transition, string> {
-  transact(pb.Caller.Process, issue_id, "renew", RenewRequest { claim_id, agent })
+pub fn renew(ctx: pb.Client, issue_id: string, claim_id: string, agent: string) -> Result<Transition, string> {
+  transact(ctx, pb.Caller.Process, issue_id, "renew", RenewRequest { claim_id, agent })
 }
 
 /// `caller` is whom the server authenticates as the actor (LLL-545): the
 /// board passes a member viewer's own token.
-fn transact(caller: pb.Caller, issue_id: string, action: string, request: Unknown) -> Result<Transition, string> {
+fn transact(ctx: pb.Client, caller: pb.Caller, issue_id: string, action: string, request: Unknown) -> Result<Transition, string> {
   let body = json.Marshal(request).map_err(|e| f"encoding claim request: {e}")?
   let path = f"/api/lll/issues/{url.PathEscape(issue_id)}/{action}"
-  let response = pb.send_as(caller, "POST", path, body as string, "application/json").map_err(|e| {
+  let response = ctx.send_as(caller, "POST", path, body as string, "application/json").map_err(|e| {
     if pb.classify(e).status == 404 {
       "server does not support atomic claim operations; update the server before changing claims or assignments; no legacy claim writes were attempted"
     } else { e }
@@ -113,10 +113,10 @@ fn transact(caller: pb.Caller, issue_id: string, action: string, request: Unknow
   Ok(transition)
 }
 
-pub fn fetch(issue_id: string) -> Result<Option<models.Claim>, string> {
+pub fn fetch(ctx: pb.Client, issue_id: string) -> Result<Option<models.Claim>, string> {
   let filter = url.QueryEscape(f"issue={query.quote(issue_id)}")
   let mut list = models.ClaimList { .. }
-  pb.fetch(
+  pb.fetch(ctx, 
     f"/api/collections/claims/records?perPage=1&filter={filter}&expand=member",
     "claims", &list,
   )?
@@ -126,13 +126,13 @@ pub fn fetch(issue_id: string) -> Result<Option<models.Claim>, string> {
 /// Expanded holds for one team, shared by initial boards and live refreshes.
 /// A team_id of "" (records.TeamScope.Every's filter_team) reads the holds in
 /// every team the token can see.
-pub fn for_team(team_id: string) -> Result<Slice<models.Claim>, string> {
+pub fn for_team(ctx: pb.Client, team_id: string) -> Result<Slice<models.Claim>, string> {
   let filter = if team_id == "" { "" } else { url.QueryEscape(f"issue.team={query.quote(team_id)}") }
   let mut result: Slice<models.Claim> = []
   let mut page = 1
   loop {
     let mut list = models.ClaimList { .. }
-    pb.fetch(f"/api/collections/claims/records?filter={filter}&expand=member&sort=id&perPage=200&page={page}", "team claims", &list)?
+    pb.fetch(ctx, f"/api/collections/claims/records?filter={filter}&expand=member&sort=id&perPage=200&page={page}", "team claims", &list)?
     result = result.append(list.items...)
     if page >= list.total_pages { break }
     page += 1

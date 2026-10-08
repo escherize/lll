@@ -1,36 +1,34 @@
 import "go:encoding/json"
 import "go:net/url"
 import "go:strings"
-import "config"
 import "models"
 import "pb"
 import "query"
 
 /// Resolve a member by name; unknown names error with the fix.
-pub fn resolve_member(name: string) -> Result<models.Member, string> {
-  let Some(m) = find_member(name)? else {
+pub fn resolve_member(ctx: pb.Client, name: string) -> Result<models.Member, string> {
+  let Some(m) = find_member(ctx, name)? else {
     return Err(pb.fail(pb.ErrorKind.NotFound, f"no member named '{name}'; see 'lll member list'"))
   }
   Ok(m)
 }
 
 /// Find a member by exact name, riding the configured token.
-pub fn find_member(name: string) -> Result<Option<models.Member>, string> {
-  let cfg = config.load()?
-  find_member_as(cfg.token, name)
+pub fn find_member(ctx: pb.Client, name: string) -> Result<Option<models.Member>, string> {
+  find_member_as(ctx, ctx.token(), name)
 }
 
 /// Find a member by exact name, riding `tok` instead of the configured
 /// token — token create looks its member up as the superuser it has just
 /// authenticated, not as whoever happens to be configured.
-pub fn find_member_as(tok: string, name: string) -> Result<Option<models.Member>, string> {
+pub fn find_member_as(ctx: pb.Client, tok: string, name: string) -> Result<Option<models.Member>, string> {
   // `name` arrives unsanitized from the board's `/issues?assignee=` query
   // parameter, so it goes through `quote` and not into the filter raw: the
   // QueryEscape below makes it safe in a URL, which is a different layer and
   // does nothing about a `'` closing the clause early (TASK-134).
   let filter = url.QueryEscape(f"name={query.quote(name)}")
   let mut result = models.MemberList { .. }
-  let body = pb.get_as(
+  let body = ctx.get_as(
     f"/api/collections/members/records?filter={filter}",
     tok,
   )?
@@ -40,13 +38,13 @@ pub fn find_member_as(tok: string, name: string) -> Result<Option<models.Member>
   Ok(result.items.find(|m| m.name == name))
 }
 
-pub fn fetch_members() -> Result<Slice<models.Member>, string> {
-  fetch_all_records<models.Member>("/api/collections/members/records?sort=name,id", "members")
+pub fn fetch_members(ctx: pb.Client) -> Result<Slice<models.Member>, string> {
+  fetch_all_records<models.Member>(ctx, "/api/collections/members/records?sort=name,id", "members")
 }
 
 /// The member `id` names, by record id.
-pub fn member_by_id(id: string) -> Result<models.Member, string> {
-  let body = pb.get(f"/api/collections/members/records/{id}")?
+pub fn member_by_id(ctx: pb.Client, id: string) -> Result<models.Member, string> {
+  let body = ctx.get(f"/api/collections/members/records/{id}")?
   let mut m = models.Member { .. }
   if let Err(e) = json.Unmarshal(body.bytes(), &m) {
     return Err(f"decoding member {id}: {e}")
@@ -58,9 +56,9 @@ pub fn member_by_id(id: string) -> Result<models.Member, string> {
 /// holds its own access within its owner's current access. The second value
 /// is the owner when that cap is narrower than the bot's own access, so the
 /// caller can say why.
-pub fn effective_access(m: models.Member) -> Result<(models.Member, Option<models.Member>), string> {
+pub fn effective_access(ctx: pb.Client, m: models.Member) -> Result<(models.Member, Option<models.Member>), string> {
   if m.owner == "" || m.scope == "" { return Ok((m, None)) }
-  let owner = member_by_id(m.owner)?
+  let owner = member_by_id(ctx, m.owner)?
   let eff = m.within(owner)
   if access_equal(eff, m) { return Ok((m, None)) }
   Ok((eff, Some(owner)))
@@ -87,12 +85,11 @@ fn access_equal(a: models.Member, b: models.Member) -> bool {
 /// effort: any failure answers None, because callers only use it to word an
 /// error better. A scoped caller can read exactly its own teams, so the
 /// teams it can list are its keys.
-pub fn scoped_team_keys() -> Option<Slice<string>> {
-  let Ok(cfg) = config.load() else { return None }
-  let Some(id) = pb.token_subject(cfg.token) else { return None }
-  let Ok(me) = member_by_id(id) else { return None }
-  let Ok((eff, _)) = effective_access(me) else { return None }
+pub fn scoped_team_keys(ctx: pb.Client) -> Option<Slice<string>> {
+  let Some(id) = pb.token_subject(ctx.token()) else { return None }
+  let Ok(me) = member_by_id(ctx, id) else { return None }
+  let Ok((eff, _)) = effective_access(ctx, me) else { return None }
   if eff.scope != "teams" { return None }
-  let Ok(teams) = list_teams() else { return None }
+  let Ok(teams) = list_teams(ctx) else { return None }
   Some(teams.items.map(|t| t.key))
 }

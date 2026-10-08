@@ -6,7 +6,8 @@ import "gitctx"
 import "models"
 
 /// Ambient creation context is optional: filing must also work outside Git.
-pub fn capture() -> models.IssueOrigin {
+/// `agent` is LLL_AGENT as the caller's settings carry it.
+pub fn capture(agent: string) -> models.IssueOrigin {
   let sha = exec.Command("git", "rev-parse", "--short", "HEAD").Output()
     .map_or("", |value| strings.TrimSpace(value as string))
   models.IssueOrigin {
@@ -14,7 +15,7 @@ pub fn capture() -> models.IssueOrigin {
     cwd: os.Getwd().unwrap_or(""),
     branch: gitctx.current_branch().unwrap_or(""),
     sha,
-    tool: os.Getenv("LLL_AGENT"),
+    tool: agent,
   }
 }
 
