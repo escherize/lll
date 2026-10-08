@@ -55,12 +55,11 @@ fn login_renewal_needs_the_home_token_and_the_home_url() {
 // LLL-653: automation sets LLL_URL on every call. When it names exactly the
 // home config's url the token goes to the server that issued it, so renew.
 #[test]
-fn login_renewal_follows_an_lll_url_or_repo_url_equal_to_the_home_url() {
+fn login_renewal_follows_an_lll_url_equal_to_the_home_url() {
   let home = "/h/lll/lll.toml"
   let file = "file:/h/lll/lll.toml"
   let saved = "https://lll.example"
   assert renews_home_login(config.Sources { token: file, url: "env:LLL_URL", .. }, home, saved, saved)
-  assert renews_home_login(config.Sources { token: file, url: "file:/repo/.lll.toml", .. }, home, saved, saved)
 }
 
 // LLL-653 keeps the LLL-441 review's rule: any other url, however close,

@@ -570,6 +570,10 @@ pub fn renew_login_token() {
   let Ok((cfg, src)) = config.load_traced() else { return }
   let Ok(home) = config.home_path() else { return }
   let Ok(saved) = config.load_home() else { return }
+  // The url compared and the token sent must come from one read of the home
+  // file: a login rewriting it between the two reads would otherwise pair
+  // the old token with the new url.
+  if saved.token != cfg.token { return }
   if !renews_home_login(src, home, saved.url, cfg.url) { return }
   if !pb.token_needs_refresh(cfg.token, time.Now().Unix() as int) { return }
   match pb.refresh_token(cfg.url, cfg.token) {
