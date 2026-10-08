@@ -4,45 +4,37 @@ import "models"
 // Glyph legend (one per state, workflow order):
 //   ◌ backlog   ○ todo   ◐ in-progress   ◉ in-review   ● done   ⊗ cancelled
 
-/// Glyph for an issue state.
-pub fn glyph(state: string) -> string {
+/// Glyph for an issue state; "?" for a record with none lll knows.
+pub fn glyph(state: Option<models.IssueState>) -> string {
   match state {
-    "backlog" => "◌",
-    "todo" => "○",
-    "in-progress" => "◐",
-    "in-review" => "◉",
-    "done" => "●",
-    "cancelled" => "⊗",
-    _ => "?",
+    Some(models.IssueState.Backlog) => "◌",
+    Some(models.IssueState.Todo) => "○",
+    Some(models.IssueState.InProgress) => "◐",
+    Some(models.IssueState.InReview) => "◉",
+    Some(models.IssueState.Done) => "●",
+    Some(models.IssueState.Cancelled) => "⊗",
+    None => "?",
   }
 }
 
-/// The priority scale, in Linear order: the index is the stored value and a
-/// lower value is more urgent. This is the only place the scale is written
-/// down — priority_name, priority_value, and the web's <option> lists all
-/// derive from it, so adding or renaming a level is a one-line edit here.
-pub fn priorities() -> Slice<string> {
-  ["none", "urgent", "high", "medium", "low"]
+/// A record's state as printed: its wire spelling, "" for none.
+pub fn state_name(state: Option<models.IssueState>) -> string {
+  state.map_or("", |s| s.wire())
 }
 
-/// Marker for a priority, one per priorities() entry: 1 urgent !!!, 2 high !!,
-/// 3 medium !, 4 low ·, 0 none blank. Off-scale values are blank too.
-pub fn priority_marker(priority: int) -> string {
-  ["", "!!!", "!!", "!", "·"].get(priority).unwrap_or("")
+/// The priority names in Linear order: what the web's <option> lists offer.
+pub fn priorities() -> Slice<string> {
+  models.Priority.all().map(|p| p.name())
+}
+
+/// Marker for a priority; blank for none and for an off-scale value.
+pub fn priority_marker(priority: Option<models.Priority>) -> string {
+  priority.map_or("", |p| p.marker())
 }
 
 /// Human name for a priority (Linear scale); "?" for an off-scale value.
-pub fn priority_name(priority: int) -> string {
-  priorities().get(priority).unwrap_or("?")
-}
-
-/// Priority name -> Linear value, the inverse of priority_name; None for a
-/// name that is not on the scale. Five entries, so the scan is a formality.
-pub fn priority_value(name: string) -> Option<int> {
-  for (value, slug) in priorities().enumerate() {
-    if slug == name { return Some(value) }
-  }
-  None
+pub fn priority_name(priority: Option<models.Priority>) -> string {
+  priority.map_or("?", |p| p.name())
 }
 
 /// Render a PocketBase timestamp ("2026-08-28 18:20:00.123Z") as an absolute
@@ -123,11 +115,11 @@ pub fn author_tag(bot: bool, owner: string) -> string {
   f" [bot via {owner}]"
 }
 
-/// Priority value -> urgency rank: 1 urgent .. 4 low, with none (0) last —
-/// the same rotation prios_by_urgency makes for the filter chooser.
-pub fn prio_rank(priority: int) -> int {
-  if priority == 0 { return 5 }
-  priority
+/// Urgency rank: 1 urgent .. 4 low, with none last, the rotation
+/// prios_by_urgency makes for the filter chooser. An off-scale value ranks
+/// after none.
+pub fn prio_rank(priority: Option<models.Priority>) -> int {
+  priority.map_or(6, |p| p.rank())
 }
 
 /// The marker that keeps a guess from reading as fact (LLL-396): confirmed

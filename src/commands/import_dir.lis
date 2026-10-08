@@ -5,7 +5,6 @@ import "go:path/filepath"
 import "go:sort"
 import "go:strings"
 
-import "display"
 import "attachments"
 import "flags"
 import "mirror"
@@ -129,7 +128,7 @@ To import somewhere harmless instead: lll attach --key NEWKEY in another directo
       sort: front.sort,
       title: front.title,
       state: front.state,
-      priority: priority_value_or_none(front.priority),
+      priority: priority_value_or_none(front.priority).wire(),
       description: body,
       emoji: front.emoji,
       assignee,
@@ -389,6 +388,6 @@ fn label_names(parsed: Slice<(mirror.Front, string)>) -> Slice<string> {
 /// A priority name back to its stored value. An unknown name imports as
 /// 'none' rather than failing: the scale can gain a level between an export
 /// and its restore, and losing one field beats losing the issue.
-fn priority_value_or_none(name: string) -> int {
-  display.priority_value(name).unwrap_or(0)
+fn priority_value_or_none(name: string) -> models.Priority {
+  models.Priority.named(name).unwrap_or(models.Priority.None)
 }

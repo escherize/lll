@@ -28,7 +28,7 @@ pub fn blockers_of(issue: models.Issue, seen: Slice<models.Issue>) -> Blockers {
   for id in issue.blocked_by {
     match seen.find(|s| s.id == id) {
       Some(b) => {
-        if b.state != "done" && b.state != "cancelled" { open = open.append(b) }
+        if !b.state().map_or(false, |s| s.is_terminal()) { open = open.append(b) }
       },
       None => {
         hidden += 1
@@ -38,12 +38,12 @@ pub fn blockers_of(issue: models.Issue, seen: Slice<models.Issue>) -> Blockers {
   Blockers { open, hidden }
 }
 
-/// Ready: open (todo or backlog), in a team that is not archived, and no
-/// blocker that is open or hidden. An archived team is read-only (LLL-660),
+/// Ready: open (IssueState.is_open: todo or backlog), in a team that is not
+/// archived, and no blocker that is open or hidden. An archived team is read-only (LLL-660),
 /// so its open issues are not work anyone can pick up; with no team
 /// configured, `issue next` offered them (LLL-679).
 pub fn is_ready(issue: models.Issue, seen: Slice<models.Issue>) -> bool {
-  (issue.state == "todo" || issue.state == "backlog") &&
+  issue.state().map_or(false, |s| s.is_open()) &&
   !issue.expand.team.archived &&
   !blockers_of(issue, seen).any()
 }

@@ -86,7 +86,7 @@ fn import_github(input: flags.CommandInput) -> Result<(), pb.CliError> {
       skipped += 1
       continue
     }
-    let state = imported_state(g.state)
+    let state = imported_state(g.state).wire()
     let mut labels: Slice<models.LabelId> = []
     for label in g.labels {
       if let Some(id) = label_ids.get(label.name) { labels = labels.append(id) }
@@ -156,8 +156,8 @@ fn sort_by_number(issues: Slice<GithubIssue>) -> Slice<GithubIssue> {
 /// OPEN -> todo, CLOSED -> done - the only two states gh reports for issues
 /// under --state all. Anything else reads as open: an import errs toward
 /// work remaining, never toward done.
-fn imported_state(state: string) -> string {
-  if state == "CLOSED" { "done" } else { "todo" }
+fn imported_state(state: string) -> models.IssueState {
+  if state == "CLOSED" { models.IssueState.Done } else { models.IssueState.Todo }
 }
 
 /// gh label colors are bare hex ("d73a4a"); the board's are "#rrggbb".

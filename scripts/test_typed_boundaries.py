@@ -13,6 +13,9 @@ keeps the strings from coming back, reading the sources of every non-test
   src/writes, never minted from a string in a command or a board handler;
 - no parameter is a bare `team_id: string`: a team is a models.TeamId, and
   "every team" is query.TeamScope.Every, written out;
+- an issue's state and priority are models.IssueState and models.Priority:
+  the wire fields (state_wire, priority_wire) are read only where records
+  are decoded and written, and no code compares a state to a string literal;
 - the error tag machinery stays gone.
 
 Boundaries that keep string errors: config (it reads files before pb
@@ -29,6 +32,7 @@ STRING_ERROR_BOUNDARIES = {'config', 'gitctx', 'markdown', 'models', 'references
                            'search', 'display', 'provenance'}
 ID_MAKERS = {'models', 'records', 'writes'}
 ID = r'(?:Team|Issue|Label|Project|Member|Claim)Id'
+STATES = r'"(?:backlog|todo|in-progress|in-review|done|cancelled)"'
 
 
 def module_of(rel):
@@ -83,6 +87,13 @@ def violations(files):
                 found.append(f'{rel}: {m.group(0)}: ids are decoded, or made in records/ or writes/')
         for m in re.finditer(r'\bteam_id: string\b', code):
             found.append(f'{rel}: team_id: string: a team is models.TeamId; every team is query.TeamScope.Every')
+        if module not in ID_MAKERS:
+            for m in re.finditer(r'\b(?:state|priority)_wire\b', code):
+                found.append(f'{rel}: {m.group(0)}: read the state and priority through Issue.state() and Issue.priority()')
+        for m in re.finditer(r'(?:==|!=)\s*' + STATES + r'|' + STATES + r'\s*(?:==|!=)', code):
+            if module == 'models':
+                continue
+            found.append(f'{rel}: {m.group(0)}: a state is a models.IssueState; its rules are methods on it')
         for marker in ['pb.tag(', 'pb.classify(', 'pb.plain(', 'help_marker', 'filter_team(']:
             if marker in code:
                 found.append(f'{rel}: {marker}: the string-tag and sentinel machinery is gone')
@@ -102,6 +113,9 @@ class TypedBoundariesTest(unittest.TestCase):
             ('src/commands/x.lis', 'commands', 'let id = raw as models.TeamId'),
             ('src/records/x.lis', 'records', 'fn fetch(ctx: pb.Client, team_id: string) {}'),
             ('src/commands/x.lis', 'commands', 'let t = scope.filter_team()'),
+            ('src/serve/x.lis', 'serve', 'if issue.state_wire == x {}'),
+            ('src/records/x.lis', 'records', 'if s == "done" {}'),
+            ('src/serve/x.lis', 'serve', 'if "in-review" != s {}'),
         ]
         for case in planted:
             self.assertTrue(violations([case]), case)
@@ -111,6 +125,8 @@ class TypedBoundariesTest(unittest.TestCase):
             ('src/records/x.lis', 'records', 'Some(models.MemberId(id))'),
             ('src/commands/x.lis', 'commands', '// a comment may say Result<int, string>'),
             ('src/serve/x.lis', 'serve', 'fn f(team_id: models.TeamId) {}'),
+            ('src/records/x.lis', 'records', 'models.Issue { state_wire: s, .. }'),
+            ('src/commands/x.lis', 'commands', 'f"{state.wire()} is done"'),
         ]
         self.assertEqual(violations(clean), [])
 

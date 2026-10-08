@@ -2,7 +2,7 @@ import "models"
 
 #[test]
 fn column_fetch_scopes_the_query_to_one_column_in_board_order() {
-  let result = collect_column_issues("team", "todo", |path| {
+  let result = collect_column_issues("team", models.IssueState.Todo, |path| {
     assert path.contains("filter=team")
     // the state clause rides the filter, URL-escaped: state='todo'
     assert path.contains("state%3D%27todo%27")
@@ -20,7 +20,7 @@ fn column_fetch_scopes_the_query_to_one_column_in_board_order() {
 fn column_fetch_reads_every_page_of_a_large_column() {
   // 200 items per page: the loop must keep asking while a full page returns.
   let mut seen_pages: Slice<string> = []
-  let result = collect_column_issues("team", "done", |path| {
+  let result = collect_column_issues("team", models.IssueState.Done, |path| {
     if path.contains("page=1&") {
       let mut items: Slice<models.Issue> = []
       for i in 0..200 { items = items.append(models.Issue { id: models.IssueId(f"p1-{i}"), .. }) }
@@ -40,7 +40,7 @@ fn column_fetch_reads_every_page_of_a_large_column() {
 
 #[test]
 fn column_fetch_accepts_an_empty_column() {
-  let result = collect_column_issues("team", "blocked", |_path| Ok(BoardPage { .. }))
+  let result = collect_column_issues("team", models.IssueState.Backlog, |_path| Ok(BoardPage { .. }))
   let Ok(issues) = result else { panic("empty column failed") };
   assert issues.is_empty()
 }

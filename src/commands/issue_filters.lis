@@ -29,7 +29,7 @@ fn filter_spec(use: FilterUse) -> Slice<flags.Flag> {
   ]
 }
 
-fn filters_from(p: flags.Parsed) -> Result<query.Filters, pb.CliError> {
+fn filters_from(p: flags.Parsed) -> Result<query.Criteria, pb.CliError> {
   // Explicit --state "" is a mistake; absence is an unrestricted filter.
   if p.given("--state") && p.one("--state") == "" { let _ = query.state("")? }
   // `all`, not `one` (LLL-381). The parser had been collecting every value all
@@ -38,7 +38,7 @@ fn filters_from(p: flags.Parsed) -> Result<query.Filters, pb.CliError> {
   query.Filters {
     state: p.all("--state"), assignee: p.one("--assignee"),
     label: p.all("--label"), project: p.one("--project"), search: p.one("--search"),
-  }.validate()
+  }.parse()
 }
 
 /// CLI lookups fail before subscribing/fetching. Browser adapters may instead
@@ -46,7 +46,7 @@ fn filters_from(p: flags.Parsed) -> Result<query.Filters, pb.CliError> {
 ///
 /// With no team (TeamScope.Every) a name means that name in every team the
 /// token sees, so `--label bug` matches each team's `bug` (LLL-671).
-fn resolve_filter_query(ctx: pb.Client, scope: query.TeamScope, filters: query.Filters) -> Result<string, pb.CliError> {
+fn resolve_filter_query(ctx: pb.Client, scope: query.TeamScope, filters: query.Criteria) -> Result<string, pb.CliError> {
   let assignee = if filters.assignee == "" { None } else { Some(records.resolve_member(ctx, filters.assignee)?.id) }
   // Every label resolves, so a typo in the second one is still reported rather
   // than quietly widening the result to whatever the first one matched.
@@ -57,7 +57,7 @@ fn resolve_filter_query(ctx: pb.Client, scope: query.TeamScope, filters: query.F
   let projects = if filters.project == "" { [] } else { records.project_ids(ctx, scope, filters.project)? }
   Ok(query.filter(query.IssueFilter {
     scope,
-    states: filters.state,
+    states: filters.states,
     assignee,
     projects,
     labels: label_ids,

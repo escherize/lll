@@ -329,8 +329,8 @@ fn run_issue_watch(ctx: pb.Client, id: string, json_mode: bool, until: string, u
 /// The narrated fields of an issue, copied out to plain scalars so cached
 /// values own their data (whole records alias their slices/expand).
 struct Snapshot {
-  state: string,
-  priority: int,
+  state: Option<models.IssueState>,
+  priority: Option<models.Priority>,
   title: string,
   assignee: models.MemberId,
   assignee_name: string,
@@ -338,8 +338,8 @@ struct Snapshot {
 
 fn snapshot(issue: models.Issue) -> Snapshot {
   Snapshot { 
-    state: issue.state,
-    priority: issue.priority,
+    state: issue.state(),
+    priority: issue.priority(),
     title: issue.title,
     assignee: issue.assignee,
     assignee_name: display.member_name(issue.assignee, issue.expand.assignee.name, ""),
@@ -351,7 +351,7 @@ fn snapshot(issue: models.Issue) -> Snapshot {
 fn issue_diff(prev: Snapshot, cur: Snapshot) -> string {
   let mut parts: Slice<string> = []
   if prev.state != cur.state {
-    parts = parts.append(f"state: {prev.state} -> {cur.state}")
+    parts = parts.append(f"state: {display.state_name(prev.state)} -> {display.state_name(cur.state)}")
   }
   if prev.priority != cur.priority {
     parts = parts.append(
@@ -406,7 +406,7 @@ fn comment_matches_until(text: string, action: string, body: string) -> bool {
 /// does NOT exit: the stream stays alive and announces the first issue that
 /// becomes ready. Events for issues that are ready keep streaming, as the
 /// plain query watch does.
-fn watch_ready(ctx: pb.Client, filters: query.Filters, json_mode: bool) -> Result<(), pb.CliError> {
+fn watch_ready(ctx: pb.Client, filters: query.Criteria, json_mode: bool) -> Result<(), pb.CliError> {
   let scope = configured_scope(ctx)?
   let filter = resolve_filter_query(ctx, scope, filters)?
   // blocked_by expand, so each event record carries its blockers' states.

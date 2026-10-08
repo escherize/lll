@@ -22,8 +22,8 @@ fn an_unchanged_patch_is_empty_and_sends_nothing() {
 #[test]
 fn only_the_given_fields_are_sent() {
   let patch = IssuePatch {
-    state: Some("done"),
-    priority: Some(0),
+    state: Some(models.IssueState.Done),
+    priority: Some(models.Priority.None),
     ..IssuePatch.unchanged(),
   }
   assert !patch.is_empty()

@@ -1,3 +1,5 @@
+import "models"
+
 #[test]
 fn repo_shape_requires_owner_and_repo() {
   assert repo_shape_ok("octocat/Hello-World")
@@ -26,10 +28,10 @@ fn imports_run_in_ascending_gh_number_order() {
 
 #[test]
 fn gh_states_map_toward_work_remaining() {
-  assert imported_state("OPEN") == "todo"
-  assert imported_state("CLOSED") == "done"
-  assert imported_state("") == "todo"
-  assert imported_state("UNEXPECTED") == "todo"
+  assert imported_state("OPEN") == models.IssueState.Todo
+  assert imported_state("CLOSED") == models.IssueState.Done
+  assert imported_state("") == models.IssueState.Todo
+  assert imported_state("UNEXPECTED") == models.IssueState.Todo
 }
 
 #[test]

@@ -26,8 +26,8 @@ import "writes"
 struct DemoIssue {
   title: string,
   emoji: string,
-  state: string,
-  priority: int,
+  state: models.IssueState,
+  priority: models.Priority,
   label: string,
   body: string,
 }
@@ -155,8 +155,8 @@ fn make_issue(
     origin: provenance.capture(ctx.settings.env.agent),
     team: team_id,
     title: spec.title,
-    state: spec.state,
-    priority: spec.priority,
+    state: spec.state.wire(),
+    priority: spec.priority.wire(),
     description: spec.body,
     emoji: spec.emoji,
     project: Some(project),
@@ -187,8 +187,8 @@ fn demo_issues(k: string) -> Slice<DemoIssue> {
     DemoIssue {
       title: "Claim me, then try to claim me again",
       emoji: "\u{1F512}",
-      state: "todo",
-      priority: 2,
+      state: models.IssueState.Todo,
+      priority: models.Priority.High,
       label: "agents",
       body: f"A claim is the lock. Git will let two agents edit the same thing
 happily; the board refuses.
@@ -204,8 +204,8 @@ Give it back with 'lll issue release {k}-1'.",
     DemoIssue {
       title: "Give an agent its own identity",
       emoji: "\u{1F916}",
-      state: "todo",
-      priority: 2,
+      state: models.IssueState.Todo,
+      priority: models.Priority.High,
       label: "agents",
       body: "An agent should not borrow your account. A bot member cannot log
 in, is owned by the person who made it, and its token rotates without touching
@@ -219,8 +219,8 @@ authenticates that agent alone.",
     DemoIssue {
       title: "Ask the board what to work on",
       emoji: "\u{1F3AF}",
-      state: "todo",
-      priority: 1,
+      state: models.IssueState.Todo,
+      priority: models.Priority.Urgent,
       label: "agents",
       body: "The question an agent has is not 'list everything', it is 'what
 now'. Ready, unclaimed, highest priority, oldest.
@@ -234,8 +234,8 @@ into the next command while you still see what happened.",
     DemoIssue {
       title: "Watch the board from your terminal",
       emoji: "\u{1F4E1}",
-      state: "backlog",
-      priority: 3,
+      state: models.IssueState.Backlog,
+      priority: models.Priority.Medium,
       label: "cli",
       body: "Run this, then drag a card in the browser.
 
@@ -247,8 +247,8 @@ reload, one SSE connection.",
     DemoIssue {
       title: "Move me on the board, then read me from the CLI",
       emoji: "\u{2194}",
-      state: "todo",
-      priority: 2,
+      state: models.IssueState.Todo,
+      priority: models.Priority.High,
       label: "board",
       body: f"Drag this card into another column, then:
 
@@ -260,8 +260,8 @@ are one database, not two views kept in step.",
     DemoIssue {
       title: "Block me until the card above is done",
       emoji: "\u{26D3}",
-      state: "backlog",
-      priority: 3,
+      state: models.IssueState.Backlog,
+      priority: models.Priority.Medium,
       label: "cli",
       body: f"  lll issue block {k}-6 {k}-5
   lll issue list --ready
@@ -272,8 +272,8 @@ stops offering it. Dependencies decide the agenda, not just the display.",
     DemoIssue {
       title: "Write down why, not just what",
       emoji: "\u{1F4DD}",
-      state: "backlog",
-      priority: 3,
+      state: models.IssueState.Backlog,
+      priority: models.Priority.Medium,
       label: "docs",
       body: "Issues record what changed. Decisions and findings record why, and
 what was rejected, which is the half that is gone in six months.
@@ -288,8 +288,8 @@ from its body rather than its title.",
     DemoIssue {
       title: "Attach a repo to this team",
       emoji: "\u{1F517}",
-      state: "todo",
-      priority: 2,
+      state: models.IssueState.Todo,
+      priority: models.Priority.High,
       label: "setup",
       body: "  cd ~/any/git/repo && lll attach
 
@@ -299,8 +299,8 @@ flags. Commit it and every clone and worktree arrives configured.",
     DemoIssue {
       title: "Hand work to someone else",
       emoji: "\u{1F91D}",
-      state: "in-review",
-      priority: 2,
+      state: models.IssueState.InReview,
+      priority: models.Priority.High,
       label: "setup",
       body: f"  lll member create -n alex
   lll issue update {k}-9 --assignee alex
@@ -312,8 +312,8 @@ they started.",
     DemoIssue {
       title: "Throw this board away when you are done",
       emoji: "\u{1F9F9}",
-      state: "backlog",
-      priority: 4,
+      state: models.IssueState.Backlog,
+      priority: models.Priority.Low,
       label: "setup",
       body: f"The demo is a real team, so get rid of it the way you would any
 other.

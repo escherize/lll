@@ -2,6 +2,7 @@ import "records"
 import "go:net/http"
 import "go:net/url"
 
+import "display"
 import "models"
 import "pb"
 import "query"
@@ -122,10 +123,13 @@ fn issues_page(ctx: pb.Client, w: http.ResponseWriter, r: Ref<http.Request>, tea
     sort = "-updated"
   }
 
-  let mut filters = view_filters(raw)
-  if let Err(e) = filters.validate() {
-    err = e.message
-    filters.state = []
+  let typed = view_filters(raw)
+  let filters = match typed.parse() {
+    Ok(parsed) => parsed,
+    Err(e) => {
+      err = e.message
+      typed.without_states()
+    },
   }
   let state = filters.one_state()
   // Who this viewer may name on this team (LLL-551): the chooser offers
@@ -138,7 +142,7 @@ fn issues_page(ctx: pb.Client, w: http.ResponseWriter, r: Ref<http.Request>, tea
     },
   }
   let mut rows = query.IssueFilter.over(query.TeamScope.Only(team_id))
-  if state != "" { rows.states = [state] }
+  if let Some(s) = state { rows.states = [s] }
   let mut assignee = filters.assignee
   if assignee != "" {
     match roster_member(roster, assignee) {
@@ -172,7 +176,7 @@ fn issues_page(ctx: pb.Client, w: http.ResponseWriter, r: Ref<http.Request>, tea
     }
   }
 
-  let q = ViewQuery { state, assignee, label, project, sort, .. }
+  let q = ViewQuery { state: display.state_name(state), assignee, label, project, sort, .. }
   let team = shell_team(ctx, team_id)
   let base = issues_base(team.key)
   let list = match fetch_issue_rows(ctx, rows, sort) {
@@ -202,7 +206,7 @@ fn issues_page(ctx: pb.Client, w: http.ResponseWriter, r: Ref<http.Request>, tea
     members,
     label_names,
     project_names,
-    state,
+    state: display.state_name(state),
     assignee,
     label,
     project,

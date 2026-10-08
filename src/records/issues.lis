@@ -159,7 +159,7 @@ fn collect_board_issues(
 /// One column's issues in board order: the input a reorder needs, not the
 /// team. fetch_board_issues here made every card move re-read every issue
 /// the team ever had, expanded, to find two sorts (LLL-428).
-pub fn fetch_column_issues(ctx: pb.Client, team_id: models.TeamId, state: string) -> Result<Slice<models.Issue>, pb.CliError> {
+pub fn fetch_column_issues(ctx: pb.Client, team_id: models.TeamId, state: models.IssueState) -> Result<Slice<models.Issue>, pb.CliError> {
   collect_column_issues(team_id, state, |path| {
     let mut page = BoardPage { .. }
     pb.fetch(ctx, path, "column issues", &page)?
@@ -175,12 +175,11 @@ pub fn fetch_column_issues(ctx: pb.Client, team_id: models.TeamId, state: string
 /// read, so no expansions ride along.
 fn collect_column_issues(
   team_id: models.TeamId,
-  state: string,
+  state: models.IssueState,
   fetch: fn(string) -> Result<BoardPage, pb.CliError>,
 ) -> Result<Slice<models.Issue>, pb.CliError> {
-  let filter = url.QueryEscape(
-    f"{query.filter(query.IssueFilter.over(query.TeamScope.Only(team_id)))} && state={query.quote(state)}",
-  )
+  let column = query.IssueFilter { states: [state], ..query.IssueFilter.over(query.TeamScope.Only(team_id)) }
+  let filter = url.QueryEscape(query.filter(column))
   let mut result: Slice<models.Issue> = []
   let mut page = 1
   loop {
@@ -205,8 +204,8 @@ struct NextPage {
 /// issue is being worked — once the state is done/cancelled or the claim is
 /// gone, the site renders as "(last seen)". A read, never a write: the slot
 /// itself is not cleared.
-pub fn work_site_stale(state: string, claimed: bool) -> bool {
-  state == "done" || state == "cancelled" || !claimed
+pub fn work_site_stale(state: Option<models.IssueState>, claimed: bool) -> bool {
+  state.map_or(false, |s| s.is_terminal()) || !claimed
 }
 
 /// Every page of an issues query, for the callers that must see the whole set

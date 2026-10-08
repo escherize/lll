@@ -8,6 +8,7 @@ import "models"
 import "pb"
 import "query"
 import "writes"
+import "display"
 
 // Links from an issue: linked docs (link, unlink) and blockers (block,
 // unblock).
@@ -120,7 +121,7 @@ fn block(input: flags.CommandInput) -> Result<(), pb.CliError> {
   }
   writes.set_blocked_by(ctx, issue.id, issue.blocked_by.append(blocker.id))?
   let mut note = ""
-  if blocker.state == "done" || blocker.state == "cancelled" { note = f" ({bkey} is already {blocker.state}, so this does not hold {key} back)" }
+  if blocker.state().map_or(false, |s| s.is_terminal()) { note = f" ({bkey} is already {display.state_name(blocker.state())}, so this does not hold {key} back)" }
   fmt.Println(f"{key} is blocked by {bkey}{note}")
   Ok(())
 }

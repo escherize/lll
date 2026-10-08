@@ -42,11 +42,11 @@ fn create(input: flags.CommandInput) -> Result<(), pb.CliError> {
   let mut description = ""
   if p.given("-b") { description = value_or_stdin(p.one("-b"), "-b")? }
   let emoji = records.check_emoji(p.one("--emoji"))?
-  let mut priority = 0
+  let mut priority = models.Priority.None
   if p.given("--priority") { priority = check_priority(p.one("--priority"))? }
-  // Same validator update calls, so create and update cannot disagree about
-  // what a state is; the list itself lives once in query.states().
-  let mut state = "todo"
+  // Same parser update calls, so create and update cannot disagree about
+  // what a state is; the states live once, in models.IssueState.
+  let mut state = models.IssueState.Todo
   if p.given("--state") { state = query.state(p.one("--state"))? }
   let assignee_name = p.one("--assignee")
   let label_names = p.all("--label")
@@ -81,8 +81,8 @@ fn create(input: flags.CommandInput) -> Result<(), pb.CliError> {
     title,
     description,
     emoji,
-    state,
-    priority,
+    state: state.wire(),
+    priority: priority.wire(),
     assignee,
     project,
     labels,
@@ -141,9 +141,9 @@ fn update(input: flags.CommandInput) -> Result<(), pb.CliError> {
   let usage = input.usage
   let p = input.parsed
   let id = p.first()
-  let mut state: Option<string> = None
+  let mut state: Option<models.IssueState> = None
   if p.given("--state") { state = Some(query.state(p.one("--state"))?) }
-  let mut priority: Option<int> = None
+  let mut priority: Option<models.Priority> = None
   if p.given("--priority") { priority = Some(check_priority(p.one("--priority"))?) }
   let assignee_name = p.one("--assignee")
   let label_names = p.all("--label")
@@ -251,8 +251,8 @@ fn update(input: flags.CommandInput) -> Result<(), pb.CliError> {
   // What this update set, for the success line: two fleet agents read
   // the issue back after 'Updated KEY' because it said nothing else.
   let mut changed: Slice<string> = []
-  if let Some(s) = state { changed = changed.append(f"state={s}") }
-  if let Some(n) = priority { changed = changed.append(f"priority={n}") }
+  if let Some(s) = state { changed = changed.append(f"state={s.wire()}") }
+  if let Some(n) = priority { changed = changed.append(f"priority={n.wire()}") }
   let mut assignee = writes.Relation.Keep
   if assignee_name == "none" {
     // 'none' is what view prints for no assignee; the same word clears it.

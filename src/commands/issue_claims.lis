@@ -68,7 +68,7 @@ fn start(input: flags.CommandInput) -> Result<(), pb.CliError> {
     }
   }
   let started = writes.update_issue(ctx, issue,
-    writes.IssuePatch { state: Some("in-progress"), ..writes.IssuePatch.unchanged() },
+    writes.IssuePatch { state: Some(models.IssueState.InProgress), ..writes.IssuePatch.unchanged() },
     writes.UpdateOptions.as_caller(pb.Caller.Process),
   )
   if let Err(failure) = started {

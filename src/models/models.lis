@@ -256,8 +256,12 @@ pub struct Issue {
   pub number: int,
   pub title: string,
   pub description: string,
-  pub state: string,
-  pub priority: int,
+  // The server's spellings (LLL-675). Read them through state() and
+  // priority(); only records/ and writes/ handle the wire forms.
+  #[json("state")]
+  pub state_wire: string,
+  #[json("priority")]
+  pub priority_wire: int,
   pub sort: float64,
   // One author-chosen marker. Empty for most issues.
   pub emoji: string,
@@ -276,6 +280,19 @@ pub struct Issue {
   pub created: string,
   pub updated: string,
   pub expand: IssueExpand,
+}
+
+impl Issue {
+  /// The issue's state; None when the record does not carry one (a read
+  /// that asked for other fields only) or names a state lll does not know.
+  pub fn state(self) -> Option<IssueState> {
+    IssueState.parse(self.state_wire)
+  }
+
+  /// The issue's priority; None off the scale.
+  pub fn priority(self) -> Option<Priority> {
+    Priority.from_wire(self.priority_wire)
+  }
 }
 
 #[json]

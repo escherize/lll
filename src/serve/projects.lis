@@ -68,13 +68,14 @@ fn projects_vm(ctx: pb.Client, team_id: models.TeamId, team_key: string) -> Resu
 /// --st-* tokens rather than minting five more: a project lifecycle is the
 /// issue lifecycle at a coarser grain, and DESIGN.md rations colour hard.
 fn project_tone(status: string) -> string {
-  match status {
-    "started" => "in-progress",
-    "completed" => "done",
-    "cancelled" => "cancelled",
-    "paused" => "backlog",
-    _ => "todo",
+  let tone = match status {
+    "started" => models.IssueState.InProgress,
+    "completed" => models.IssueState.Done,
+    "cancelled" => models.IssueState.Cancelled,
+    "paused" => models.IssueState.Backlog,
+    _ => models.IssueState.Todo,
   }
+  tone.wire()
 }
 
 /// How many issues point at one project. Scoped by the same team the table

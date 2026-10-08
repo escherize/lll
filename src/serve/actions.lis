@@ -3,7 +3,6 @@ import "go:html/template"
 import "go:net/http"
 import "go:strings"
 
-import "display"
 import "models"
 import "pb"
 import "query"
@@ -169,9 +168,8 @@ fn create_write(ctx: pb.Client, v: Viewing, r: mut Ref<http.Request>) -> Result<
   if title == "" { return Err(pb.failed("title is required")) }
   // Absent state means todo, the same default `lll issue create` uses, so
   // `curl -d title=...` is a complete request.
-  let mut state = r.PostFormValue("state")
-  if state == "" { state = "todo" }
-  let _ = query.state(state)?
+  let posted_state = r.PostFormValue("state")
+  let state = if posted_state == "" { models.IssueState.Todo } else { query.state(posted_state)? }
   // The board posts the team it is viewing (TASK-198). A request naming
   // none is refused (LLL-664): it used to land in whatever team the server
   // started with, which is nobody's choice.
@@ -188,10 +186,10 @@ fn create_write(ctx: pb.Client, v: Viewing, r: mut Ref<http.Request>) -> Result<
   // `lll issue create`.
   require_active_team(t)?
   let team = t.id
-  let mut priority = 0
+  let mut priority = models.Priority.None
   let prio_slug = r.PostFormValue("priority")
   if prio_slug != "" {
-    let Some(p) = display.priority_value(prio_slug) else {
+    let Some(p) = models.Priority.named(prio_slug) else {
       return Err(pb.failed(f"unknown priority '{prio_slug}'"))
     }
     priority = p
@@ -221,8 +219,8 @@ fn create_write(ctx: pb.Client, v: Viewing, r: mut Ref<http.Request>) -> Result<
     origin: models.IssueOrigin { tool: "web", .. },
     team,
     title,
-    state,
-    priority,
+    state: state.wire(),
+    priority: priority.wire(),
     description: r.PostFormValue("description"),
     assignee,
     project,
@@ -242,10 +240,9 @@ fn create_write(ctx: pb.Client, v: Viewing, r: mut Ref<http.Request>) -> Result<
 fn state_write(_ctx: pb.Client, v: Viewing, r: mut Ref<http.Request>) -> Result<string, pb.CliError> {
   // FormValue, not PostFormValue: drag-and-drop posts key/state as query params.
   let key = r.FormValue("key")
-  let state = r.FormValue("state")
+  let state = query.state(r.FormValue("state"))?
   // Record id of the card the drop lands before; "" means end of column.
   let before = r.FormValue("before")
-  let _ = query.state(state)?
   let who = acting_as(v)?
   let issue = who.issue(key)?
   require_active_team(issue.expand.team)?
@@ -262,7 +259,7 @@ fn state_write(_ctx: pb.Client, v: Viewing, r: mut Ref<http.Request>) -> Result<
 fn reorder_sort(
   ctx: pb.Client,
   issue: models.Issue,
-  state: string,
+  state: models.IssueState,
   before: string,
   team_id: models.TeamId,
 ) -> Result<float64, pb.CliError> {
@@ -324,7 +321,7 @@ fn workspace_writer(v: Viewing) -> Result<pb.Caller, pb.CliError> {
 fn priority_write(_ctx: pb.Client, v: Viewing, r: mut Ref<http.Request>) -> Result<string, pb.CliError> {
   let key = r.FormValue("key")
   let slug = r.FormValue("priority")
-  let Some(prio) = display.priority_value(slug) else {
+  let Some(prio) = models.Priority.named(slug) else {
     return Err(pb.failed(f"unknown priority '{slug}'"))
   }
   let who = acting_as(v)?

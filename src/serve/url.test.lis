@@ -14,25 +14,25 @@ fn web_filters_share_values_and_validation_with_the_cli() {
       project: "Release 2",
       ..,
     },
-  ).validate()
+  ).parse()
   let assert Ok(cli) = query.Filters {
     state: ["in-review"],
     assignee: "Alice O'Neil",
     label: ["needs review"],
     project: "Release 2",
     ..,
-  }.validate()
+  }.parse()
   assert web.one_state() == cli.one_state()
   assert web.assignee == cli.assignee
   assert web.one_label() == cli.one_label()
   assert web.project == cli.project
-  let assert Err(web_error) = view_filters(ViewQuery { state: "bogus", .. }).validate()
-  let assert Err(cli_error) = query.Filters { state: ["bogus"], .. }.validate()
+  let assert Err(web_error) = view_filters(ViewQuery { state: "bogus", .. }).parse()
+  let assert Err(cli_error) = query.Filters { state: ["bogus"], .. }.parse()
   assert web_error == cli_error
   assert pb.exit_code(web_error.kind) == 2
 }
 
 #[test]
 fn a_view_without_a_state_filters_nothing() {
-  assert view_filters(ViewQuery { .. }).validate().is_ok()
+  assert view_filters(ViewQuery { .. }).parse().is_ok()
 }

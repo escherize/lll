@@ -162,8 +162,8 @@ fn view(input: flags.CommandInput) -> Result<(), pb.CliError> {
 
   fmt.Println(f"{full.expand.team.key}-{full.number} {full.title}")
   fmt.Println("")
-  fmt.Println(f"State:     {display.glyph(full.state)} {full.state}")
-  fmt.Println(f"Priority:  {display.priority_name(full.priority)}")
+  fmt.Println(f"State:     {display.glyph(full.state())} {display.state_name(full.state())}")
+  fmt.Println(f"Priority:  {display.priority_name(full.priority())}")
   fmt.Println(f"Assignee:  {assignee}")
   for field in provenance.fields(full) { fmt.Println(f"{field.label}: {field.value}") }
   // The one place the second collection is read on a plain view: assignee says
@@ -178,7 +178,7 @@ fn view(input: flags.CommandInput) -> Result<(), pb.CliError> {
   // who, this says where. "(last seen)" once the work is over.
   if full.work_branch != "" {
     let mut work = f"{full.work_branch} @ {full.work_host}:{full.work_path}"
-    if records.work_site_stale(full.state, claim.is_some()) {
+    if records.work_site_stale(full.state(), claim.is_some()) {
       work = f"{work} (last seen)"
     }
     fmt.Println(f"Work:      {work}")
@@ -201,7 +201,7 @@ fn view(input: flags.CommandInput) -> Result<(), pb.CliError> {
     let mut parts: Slice<string> = []
     for id in full.blocked_by {
       match full.expand.blocked_by.find(|b| b.id == id) {
-        Some(b) => { parts = parts.append(f"{b.expand.team.key}-{b.number} ({b.state})") },
+        Some(b) => { parts = parts.append(f"{b.expand.team.key}-{b.number} ({display.state_name(b.state())})") },
         None => { parts = parts.append("a hidden issue") },
       }
     }

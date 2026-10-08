@@ -51,10 +51,10 @@ pub struct Replacement {
 
 /// One edit of one issue, from the CLI or the board.
 pub struct IssuePatch {
-  pub state: Option<string>,
+  pub state: Option<models.IssueState>,
   // The board's manual position; only a card move sets it.
   pub sort: Option<float64>,
-  pub priority: Option<int>,
+  pub priority: Option<models.Priority>,
   pub assignee: Relation<models.MemberId>,
   pub project: Relation<models.ProjectId>,
   pub labels: LabelEdit,
@@ -324,9 +324,9 @@ fn issue_fields(
   }
   Ok((
     IssueFields {
-      state: patch.state,
+      state: patch.state.map(|s| s.wire()),
       sort: patch.sort,
-      priority: patch.priority,
+      priority: patch.priority.map(|p| p.wire()),
       assignee: relation_value(patch.assignee, |id| id.string()),
       project: relation_value(patch.project, |id| id.string()),
       labels,

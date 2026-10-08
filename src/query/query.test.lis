@@ -20,7 +20,7 @@ fn filter_team_only() {
 
 #[test]
 fn filter_state_only() {
-  assert filter(IssueFilter { states: ["todo"], ..every() }) == "state='todo'"
+  assert filter(IssueFilter { states: [models.IssueState.Todo], ..every() }) == "state='todo'"
 }
 
 #[test]
@@ -45,9 +45,9 @@ fn filter_search_matches_title_substring() {
 
 #[test]
 fn filter_combines_criteria_with_and() {
-  assert filter(IssueFilter { states: ["in-progress"], ..team("abc123") }) ==
+  assert filter(IssueFilter { states: [models.IssueState.InProgress], ..team("abc123") }) ==
   "team='abc123' && state='in-progress'"
-  assert filter(IssueFilter { states: ["todo"], assignee: Some(models.MemberId("mem456")), ..team("abc123") }) ==
+  assert filter(IssueFilter { states: [models.IssueState.Todo], assignee: Some(models.MemberId("mem456")), ..team("abc123") }) ==
   "team='abc123' && state='todo' && assignee='mem456'"
   assert filter(IssueFilter { projects: [models.ProjectId("prj789")], labels: [models.LabelId("lbl321")], search: "fix", ..team("abc123") }) ==
   "team='abc123' && project='prj789' && labels.id ?= 'lbl321' && title ~ 'fix'"

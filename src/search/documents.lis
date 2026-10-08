@@ -19,7 +19,7 @@ pub fn issue_documents(
     let key = f"{team_key}-{i.number}"
     titles[i.id] = i.title
     keys[i.id] = key
-    states[i.id] = i.state
+    states[i.id] = display.state_name(i.state())
     out = out.append(
       Document {
         group: key,
@@ -27,7 +27,7 @@ pub fn issue_documents(
         label: "description",
         title: i.title,
         body: indexable(i.description),
-        state: i.state,
+        state: display.state_name(i.state()),
       },
     )
   }

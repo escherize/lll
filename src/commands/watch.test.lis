@@ -1,7 +1,8 @@
 import "realtime"
+import "models"
 
 fn snap(state: string, priority: int, title: string) -> Snapshot {
-  Snapshot { state, priority, title, assignee: "", assignee_name: "" }
+  Snapshot { state: models.IssueState.parse(state), priority: models.Priority.from_wire(priority), title, assignee: "", assignee_name: "" }
 }
 
 #[test]
@@ -23,10 +24,10 @@ fn issue_diff_priority_uses_names() {
 
 #[test]
 fn issue_diff_assignee_uses_names_with_none_fallback() {
-  let prev = Snapshot { state: "todo", title: "t", .. }
+  let prev = Snapshot { state: Some(models.IssueState.Todo), title: "t", .. }
   let cur = Snapshot { 
-    state: "todo",
-    priority: 0,
+    state: Some(models.IssueState.Todo),
+    priority: None,
     title: "t",
     assignee: "mem1",
     assignee_name: "bryan",

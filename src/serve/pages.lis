@@ -125,7 +125,7 @@ fn favorite_rows(favs: Slice<models.Favorite>) -> Slice<FavVM> {
     FavVM {
       key: f"{issue.expand.team.key}-{issue.number}",
       title: issue.title,
-      state: issue.state,
+      state: display.state_name(issue.state()),
     }
   })
 }
@@ -188,7 +188,7 @@ fn board_page(ctx: pb.Client, w: http.ResponseWriter, r: Ref<http.Request>, team
   let raw = view_query(r)
 
   // Validate every value against the catalogue before it filters anything.
-  let mut states: Slice<string> = []
+  let mut states: Slice<models.IssueState> = []
   for s in csv(raw.state) {
     match query.state(s) {
       Ok(valid) => { states = states.append(valid) },
@@ -236,7 +236,7 @@ fn board_page(ctx: pb.Client, w: http.ResponseWriter, r: Ref<http.Request>, team
   }
   let mut prios: Slice<string> = []
   for p in csv(raw.prio) {
-    if display.priority_value(p).is_some() {
+    if models.Priority.named(p).is_some() {
       prios = prios.append(p)
     } else if err == "" {
       err = f"unknown priority '{p}'"
@@ -245,7 +245,7 @@ fn board_page(ctx: pb.Client, w: http.ResponseWriter, r: Ref<http.Request>, team
   let mut hidden: Slice<string> = []
   for h in csv(raw.hide) {
     match query.state(h) {
-      Ok(valid) => { hidden = hidden.append(valid) },
+      Ok(valid) => { hidden = hidden.append(valid.wire()) },
       Err(e) => { if err == "" { err = f"{e.message} (hide)" } },
     }
   }
@@ -277,7 +277,7 @@ fn board_page(ctx: pb.Client, w: http.ResponseWriter, r: Ref<http.Request>, team
       let mut decoded = cv
       if let Ok(d) = url.QueryUnescape(cv) { decoded = d }
       for h in csv(decoded) {
-        if let Ok(valid) = query.state(h) { hidden = hidden.append(valid) }
+        if let Ok(valid) = query.state(h) { hidden = hidden.append(valid.wire()) }
       }
     }
   }
@@ -296,7 +296,7 @@ fn board_page(ctx: pb.Client, w: http.ResponseWriter, r: Ref<http.Request>, team
   if order == "manual" { order_param = "" }
 
   let q = ViewQuery {
-    state: join_csv(states),
+    state: join_csv(states.map(|s| s.wire())),
     assignee: join_csv(assignees),
     label: join_csv(labels),
     prio: join_csv(prios),
@@ -336,7 +336,7 @@ fn board_page(ctx: pb.Client, w: http.ResponseWriter, r: Ref<http.Request>, team
   }
 
   let mut pairs: Slice<string> = []
-  for s in states { pairs = pairs.append(f"state:{s}") }
+  for s in states { pairs = pairs.append(f"state:{s.wire()}") }
   for a in assignees { pairs = pairs.append(f"assignee:{a}") }
   for l in labels { pairs = pairs.append(f"label:{l}") }
   for p in prios { pairs = pairs.append(f"prio:{p}") }

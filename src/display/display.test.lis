@@ -2,6 +2,7 @@ import "go:io/fs"
 import "go:github.com/escherize/lll/web"
 
 import "query"
+import "models"
 
 // TASK-158: the SVG symbols in web/templates/icons.html are coupled to the two
 // scales - display.priorities() and query.states() - by string, through
@@ -92,45 +93,39 @@ fn relative_minutes_hours_days() {
 
 #[test]
 fn every_state_has_a_distinct_glyph() {
-  let glyphs = [
-      "backlog",
-      "todo",
-      "in-progress",
-      "in-review",
-      "done",
-      "cancelled",
-    ].map(
-    glyph,
-  )
+  let glyphs = models.IssueState.all().map(|s| glyph(Some(s)))
+  assert glyphs.length() == 6
   for (i, g) in glyphs.enumerate() {
     assert g != "?"
     for (j, other) in glyphs.enumerate() {
       assert i == j || g != other
     }
   }
-  assert glyph("bogus") == "?"
+  assert glyph(None) == "?"
 }
 
 #[test]
 fn priority_markers_follow_linear_scale() {
-  assert priority_marker(0) == ""
-  assert priority_marker(1) == "!!!"
-  assert priority_marker(2) == "!!"
-  assert priority_marker(3) == "!"
-  assert priority_marker(4) == "·"
-  assert priority_marker(5) == ""
-  assert priority_marker(-1) == ""
+  let marker = |value: int| priority_marker(models.Priority.from_wire(value))
+  assert marker(0) == ""
+  assert marker(1) == "!!!"
+  assert marker(2) == "!!"
+  assert marker(3) == "!"
+  assert marker(4) == "·"
+  assert marker(5) == ""
+  assert marker(-1) == ""
 }
 
 #[test]
 fn priority_names_follow_linear_scale() {
-  assert priority_name(0) == "none"
-  assert priority_name(1) == "urgent"
-  assert priority_name(2) == "high"
-  assert priority_name(3) == "medium"
-  assert priority_name(4) == "low"
-  assert priority_name(5) == "?"
-  assert priority_name(-1) == "?"
+  let name = |value: int| priority_name(models.Priority.from_wire(value))
+  assert name(0) == "none"
+  assert name(1) == "urgent"
+  assert name(2) == "high"
+  assert name(3) == "medium"
+  assert name(4) == "low"
+  assert name(5) == "?"
+  assert name(-1) == "?"
 }
 
 // The scale is one table now, so what needs guarding is that the derived
@@ -139,23 +134,23 @@ fn priority_names_follow_linear_scale() {
 fn priority_round_trips_value_to_name_to_value() {
   assert priorities().length() == 5
   for (value, name) in priorities().enumerate() {
-    assert priority_name(value) == name
-    assert priority_value(name).unwrap_or(-1) == value
+    assert priority_name(models.Priority.from_wire(value)) == name
+    assert models.Priority.named(name).map_or(-1, |p| p.wire()) == value
   }
 }
 
 #[test]
 fn priority_round_trips_name_to_value_to_name() {
   for name in priorities() {
-    assert priority_name(priority_value(name).unwrap_or(-1)) == name
+    assert priority_name(models.Priority.named(name)) == name
   }
 }
 
 #[test]
 fn priority_value_rejects_names_off_the_scale() {
-  assert priority_value("critical").is_none()
-  assert priority_value("Urgent").is_none()
-  assert priority_value("").is_none()
+  assert models.Priority.named("critical").is_none()
+  assert models.Priority.named("Urgent").is_none()
+  assert models.Priority.named("").is_none()
 }
 
 #[test]

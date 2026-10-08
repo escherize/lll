@@ -10,6 +10,7 @@ import "flags"
 import "gitctx"
 import "pb"
 import "query"
+import "models"
 
 /// A flag value of `-` means "read it from stdin", the convention `gh gist` and
 /// mb-shares' `share -f` use. Reading from a terminal would hang until Ctrl-D,
@@ -35,22 +36,15 @@ fn value_or_stdin(val: string, flag: string) -> Result<string, pb.CliError> {
   Ok(text)
 }
 
-fn check_priority(val: string) -> Result<int, pb.CliError> {
-  let named = strings.ToLower(val)
-  match named {
-    "none" => return Ok(0),
-    "urgent" => return Ok(1),
-    "high" => return Ok(2),
-    "medium" => return Ok(3),
-    "low" => return Ok(4),
-    _ => (),
-  }
-  let Ok(p) = strconv.Atoi(val) else {
+/// A --priority value: a name on the scale (any case) or its number.
+fn check_priority(val: string) -> Result<models.Priority, pb.CliError> {
+  if let Some(p) = models.Priority.named(strings.ToLower(val)) { return Ok(p) }
+  let Ok(n) = strconv.Atoi(val) else {
     return Err(flags.usage_error(f"unknown priority '{val}' (use none, urgent, high, medium, low, or 0-4)"))
   }
-  if p < 0 || p > 4 {
+  let Some(p) = models.Priority.from_wire(n) else {
     return Err(
-      flags.usage_error(f"--priority must be 0-4 (0 none, 1 urgent, 2 high, 3 medium, 4 low), got {p}"),
+      flags.usage_error(f"--priority must be 0-4 (0 none, 1 urgent, 2 high, 3 medium, 4 low), got {n}"),
     )
   }
   Ok(p)

@@ -142,15 +142,15 @@ fn issues_for(scoped: bool, issues: Slice<models.Issue>) -> Slice<models.Issue> 
 }
 
 fn card_vm(issue: models.Issue) -> CardVM {
-  let prio = display.priority_name(issue.priority)
+  let prio = display.priority_name(issue.priority())
   CardVM {
     claim_holder: "",
     attachment_count: issue.attachments.length(),
     id: issue.id.string(),
     key: f"{issue.expand.team.key}-{issue.number}",
     title: issue.title,
-    state: issue.state,
-    state_label: state_label(issue.state),
+    state: display.state_name(issue.state()),
+    state_label: state_label(display.state_name(issue.state())),
     prio,
     prio_label: prio_label(prio),
     assignee: issue.expand.assignee.name,
@@ -164,7 +164,7 @@ fn card_vm(issue: models.Issue) -> CardVM {
     project_id: issue.project.string(),
     // The state half of the staleness rule; board_card ORs in the claim
     // half. Rows built straight from card_vm never show the site anyway.
-    work_stale: records.work_site_stale(issue.state, true),
+    work_stale: records.work_site_stale(issue.state(), true),
   }
 }
 
@@ -187,7 +187,7 @@ fn snippet(desc: string) -> string {
 /// The board's resolved filter: values the page handler already validated
 /// against the catalogue. An empty dimension does not filter.
 struct BoardFilter {
-  states: Slice<string>,
+  states: Slice<models.IssueState>,
   assignees: Slice<string>,
   labels: Slice<string>,
   prios: Slice<string>,
@@ -200,10 +200,10 @@ struct BoardFilter {
 /// Does one issue pass the board's current filter? Every dimension ANDs;
 /// an empty dimension lets everything through.
 fn issue_matches(i: models.Issue, f: BoardFilter) -> bool {
-  (f.states.is_empty() || f.states.contains(i.state))
+  (f.states.is_empty() || i.state().map_or(false, |s| f.states.contains(s)))
     && (f.assignees.is_empty() || f.assignees.contains(i.expand.assignee.name))
     && (f.labels.is_empty() || issue_has_any_label(i, f.labels))
-    && (f.prios.is_empty() || f.prios.contains(display.priority_name(i.priority)))
+    && (f.prios.is_empty() || f.prios.contains(display.priority_name(i.priority())))
     && (f.projects.is_empty() || f.projects.contains(i.project))
 }
 
@@ -283,9 +283,9 @@ fn filter_groups(
     opt_group(base, "project", "Project", project_names, issues, q,
       |i, v| project_ids.get(v).map_or(false, |id| id == i.project), |v| v),
     opt_group(base, "prio", "Priority", prios, issues, q,
-      |i, v| display.priority_name(i.priority) == v, prio_label),
+      |i, v| display.priority_name(i.priority()) == v, prio_label),
     opt_group(base, "state", "State", query.states(), issues, q,
-      |i, v| i.state == v, state_label),
+      |i, v| display.state_name(i.state()) == v, state_label),
   ]
   groups.filter(|g| g.opts.length() > 0)
 }
@@ -306,7 +306,7 @@ fn order_issues(issues: Slice<models.Issue>, order: string) -> Slice<models.Issu
   match order {
     "created" => sort_issues(issues, |a, b| strings.Compare(a.created, b.created) > 0),
     "updated" => sort_issues(issues, |a, b| strings.Compare(a.updated, b.updated) > 0),
-    "priority" => sort_issues(issues, |a, b| display.prio_rank(a.priority) < display.prio_rank(b.priority)),
+    "priority" => sort_issues(issues, |a, b| display.prio_rank(a.priority()) < display.prio_rank(b.priority())),
     _ => issues,
   }
 }
@@ -351,17 +351,17 @@ fn board_columns(
   order: string,
 ) -> Slice<ColumnVM> {
   let ordered = order_issues(issues, order)
-  query
-    .states()
+  models.IssueState
+    .all()
     .map(|s| ColumnVM {
-      state: s,
-      label: state_label(s),
-      glyph: display.glyph(s),
-      sig: strings.ReplaceAll(s, "-", "_") as template.JS,
+      state: s.wire(),
+      label: state_label(s.wire()),
+      glyph: display.glyph(Some(s)),
+      sig: strings.ReplaceAll(s.wire(), "-", "_") as template.JS,
       cards: ordered
-        .filter(|i| i.state == s && issue_matches(i, flt))
+        .filter(|i| i.state() == Some(s) && issue_matches(i, flt))
         .map(|i| board_card(i, claimed)),
-      total: issues.filter(|i| i.state == s).length(),
+      total: issues.filter(|i| i.state() == Some(s)).length(),
       manual: order == "manual",
     })
 }
@@ -471,7 +471,7 @@ fn issue_fields_vm(ctx: pb.Client, raw: models.Issue, comments: Slice<models.Com
   }
   let mut work = ""
   if issue.work_branch != "" { work = f"{issue.work_branch} @ {issue.work_host}:{issue.work_path}" }
-  let work_stale = records.work_site_stale(issue.state, held.is_some())
+  let work_stale = records.work_site_stale(issue.state(), held.is_some())
   Ok(IssueVM {
     provenance: provenance.fields(issue),
     claim_id, claim_holder, claim_age, claim_actor, claim_actor_id, claim_error,
@@ -481,8 +481,8 @@ fn issue_fields_vm(ctx: pb.Client, raw: models.Issue, comments: Slice<models.Com
     id: issue.id.string(),
     key: f"{issue.expand.team.key}-{issue.number}",
     title: issue.title,
-    state: issue.state,
-    prio: display.priority_name(issue.priority),
+    state: display.state_name(issue.state()),
+    prio: display.priority_name(issue.priority()),
     assignee,
     avatar: avatar_vm(issue.expand.assignee),
     project,
