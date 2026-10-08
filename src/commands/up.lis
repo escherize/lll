@@ -18,6 +18,7 @@ import "pb"
 import "records"
 import "tokens"
 import "buildinfo"
+import "serve"
 
 #[json]
 struct LocalShareAdmin { url: string, email: string, password: string }
@@ -254,7 +255,7 @@ check what is configured with 'lll config list'",
   // both need a token. A caller-provided LLL_TOKEN — a member token — wins;
   // otherwise this process bootstraps with a superuser token, then mints
   // a member token for the board. Renewals keep that member identity.
-  // The board's BROWSER side is gated separately (serve_gate.lis): a board
+  // The board's BROWSER side is gated separately (serve/gate.lis): a board
   // token admits a browser, but web writes still author as this process's
   // identity until browser sessions exist (TASK-182's ADR).
   //
@@ -398,7 +399,7 @@ password in its own data directory's .lll-admin.json.",
   }
   // The board binds in microseconds; a browser takes far longer to launch,
   // so opening before run_server blocks is not a race worth guarding.
-  let board_url = advertised_board_url(ctx.settings, chosen)
+  let board_url = serve.advertised_board_url(ctx.settings, chosen)
   let _ = set_home_key(ctx.settings, "web_url", board_url)?
   // Every boot, loopback included (LLL-648): 'lll board' and 'lll member
   // invite --team' read the login link from here, so the machine running the
@@ -406,7 +407,7 @@ password in its own data directory's .lll-admin.json.",
   // so it follows a per-boot token.
   // The board token, settled once: the link saved here, the browser opened
   // below and the gate run_server builds all read it from these settings.
-  let ctx = ctx.with_settings(ctx.settings.with_board_token(resolve_board_token(ctx.settings)))
+  let ctx = ctx.with_settings(ctx.settings.with_board_token(serve.resolve_board_token(ctx.settings)))
   let login_file = filepath.Join(
     filepath.Dir(ctx.settings.home_path()?),
     "board-login-url",
@@ -447,7 +448,7 @@ password in its own data directory's .lll-admin.json.",
       fmt.Println(f"could not open a browser: {e}")
     }
   }
-  run_server(ctx, chosen, refresh, p.given("--admin-ui"))
+  serve.run_server(ctx, chosen, refresh, p.given("--admin-ui"))
 }
 
 /// The banner's administrator line (LLL-648), or None. A boot with no

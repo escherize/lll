@@ -538,3 +538,12 @@ pub struct BotRotate {
   pub name: string,
   pub duration: int,
 }
+
+/// One team in an /api/lll/access answer.
+#[json]
+pub struct AccessTeam { pub id: string, pub key: string }
+
+/// /api/lll/access: the calling member's effective access (a bot's within
+/// its owner's), read by `lll login` and the board's gate.
+#[json]
+pub struct AccessReply { pub id: string, pub name: string, pub rw: bool, pub all: bool, pub teams: Slice<AccessTeam> }

@@ -1,13 +1,10 @@
 import "go:bufio"
 import "go:fmt"
 import "go:golang.org/x/term"
-import "go:net/url"
 import "go:os"
 import "go:strings"
 
-import "models"
 import "pb"
-import "query"
 
 /// The refusal a guarded delete answers with. Names the count and the exact
 /// command that overrides it, so the user never has to guess the flag.

@@ -7,7 +7,7 @@ import "flags"
 // asserted here is the part that decides whether a delete happens at all.
 //
 // The guard IS the feature. `/settings` deletes a label with a bare pb.delete
-// and no reference check (serve_settings.lis:282), so issues carrying it lose
+// and no reference check (serve/settings.lis:282), so issues carrying it lose
 // it silently. Parity with the web means the same capability, not the same
 // unsafety, and only an assertion on the refusal keeps it that way.
 

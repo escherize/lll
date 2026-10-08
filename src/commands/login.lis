@@ -265,7 +265,7 @@ fn token_identity(ctx: pb.Client, tok: string) -> Result<(string, bool), string>
       return Err(e)
     },
   }
-  let mut reply = AccessReply { .. }
+  let mut reply = models.AccessReply { .. }
   let decoded = json.Unmarshal(body.bytes(), &reply)
   if decoded.is_err() || reply.name == "" {
     return Err("the server answered, but not with a member: is --url this board's address?")

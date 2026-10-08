@@ -1,0 +1,18 @@
+import "config"
+import "pb"
+
+/// A client for `url` sending `token`, scoped to `team`, from values alone:
+/// no config file, no environment variable (LLL-486). The board's copy of
+/// the commands tests' helper; test files do not cross modules.
+fn test_client(url: string, token: string, team: string) -> pb.Client {
+  pb.Client.new(config.given(
+    config.Config { url, token, team, .. },
+    config.Sources {
+      url: "test",
+      token: "test",
+      team: "file:/test/.lll.toml",
+      ..,
+    },
+    config.Env { .. },
+  ))
+}

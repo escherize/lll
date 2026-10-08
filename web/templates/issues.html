@@ -62,7 +62,7 @@
      .Cols and the row cells below share one column order, and the empty
      state's colspan is that same count a third time. Nothing here can be
      derived from .Cols (each cell has its own markup), so the link is an
-     assertion instead (TASK-164): serve_issues.test.lis reads THIS FILE out
+     assertion instead (TASK-164): serve/issues.test.lis reads THIS FILE out
      of the embedded FS, counts the <td>s in the row-range block below, reads
      the colspan number off the empty state, and pins both to
      issue_cols().length(). Add a ninth column and that test goes red rather

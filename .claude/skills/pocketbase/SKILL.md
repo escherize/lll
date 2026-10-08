@@ -158,7 +158,7 @@ member id — "my issues" is one filter, and authorship stops being a convention
 ## Realtime
 
 The board holds **one** PocketBase subscription for everything, bridged to
-browsers over a single SSE stream (`run_server` in `src/commands/serve.lis`).
+browsers over a single SSE stream (`run_server` in `src/serve/serve.lis`).
 
 Issue subscriptions are team-scoped at most and **never state-filtered**:
 PocketBase emits nothing when an update moves a record *out* of a subscription

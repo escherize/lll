@@ -14,6 +14,7 @@ import "go:strings"
 import "pb"
 import "records"
 import "config"
+import "models"
 
 // The board gate (TASK-182): every route the board serves — pages, POSTs,
 // /events, /static — answers only requests that carry the board token.
@@ -460,12 +461,6 @@ fn cookie_viewer(ctx: pb.Client, cookie: string, want: string) -> Option<ScopedV
   member_viewer(ctx, cookie)
 }
 
-#[json]
-struct AccessTeam { id: string, key: string }
-
-#[json]
-struct AccessReply { id: string, name: string, rw: bool, all: bool, teams: Slice<AccessTeam> }
-
 /// A member token's viewer, or None when the server does not accept it.
 /// PocketBase checks the token (signature, expiry, a deleted member's token
 /// fails), and /api/lll/access answers the member's effective access, so a
@@ -474,7 +469,7 @@ struct AccessReply { id: string, name: string, rw: bool, all: bool, teams: Slice
 fn member_viewer(ctx: pb.Client, tok: string) -> Option<ScopedViewer> {
   if pb.token_subject(tok).is_none() || pb.token_expired(tok) { return None }
   let Ok(body) = ctx.get_as("/api/lll/access", tok) else { return None }
-  let mut reply = AccessReply { .. }
+  let mut reply = models.AccessReply { .. }
   if json.Unmarshal(body.bytes(), &reply).is_err() { return None }
   if reply.id == "" { return None }
   Some(ScopedViewer {
@@ -601,7 +596,7 @@ fn cookie_named(r: Ref<http.Request>, name: string) -> Option<string> {
   None
 }
 
-/// One query parameter: the helper lives in serve_pages.lis; the gate shares
+/// One query parameter: the helper lives in serve/pages.lis; the gate shares
 /// it rather than growing a second dialect.
 /// Hand the browser its board cookie, `max_age` seconds long: a week for the
 /// board token and team links, a year for a member's token. HttpOnly: the

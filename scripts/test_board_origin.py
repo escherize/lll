@@ -29,7 +29,7 @@ from board_startup import wait_for_endpoints
 from browser_session import new_session, open_session, require_result
 
 binary = str(Path(sys.argv[1]).resolve())
-source = Path(__file__).resolve().parent.parent / 'src' / 'commands'
+source = Path(__file__).resolve().parent.parent / 'src' / 'serve'
 
 
 def port():

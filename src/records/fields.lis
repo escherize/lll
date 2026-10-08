@@ -12,9 +12,9 @@ import "flags"
 pub fn check_emoji(val: string) -> Result<string, string> {
   let trimmed = strings.TrimSpace(val)
   if utf8.RuneCountInString(trimmed) > 8 {
-    return Err(
-      flags.usage_error(f"--emoji takes one emoji, got '{trimmed}' (pass \"\" to clear it)"),
-    )
+    return Err(flags.usage_error(
+      f"--emoji takes one emoji, got '{trimmed}' (pass \"\" to clear it)",
+    ))
   }
   Ok(trimmed)
 }

@@ -45,7 +45,7 @@ fn accent_value_treats_an_empty_argument_as_clear() {
 
 /// The canonical orange is stored as "no choice" so a team that picks it back
 /// renders theme.css's exact tokens instead of a derived copy of them — the
-/// same rule serve_settings.lis form_hex applies.
+/// same rule serve/settings.lis form_hex applies.
 #[test]
 fn accent_value_stores_the_canonical_orange_as_no_choice() {
   let assert Ok(v) = accent_value("#f0883e")

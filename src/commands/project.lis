@@ -190,7 +190,7 @@ fn project_edit(input: flags.CommandInput) -> Result<(), string> {
 }
 
 /// Count shared references before deleting; force explicitly accepts their loss.
-/// `lll project move NAME --to KEY` (LLL-100). See move_scope.lis for why the
+/// `lll project move NAME --to KEY` (LLL-100). See writes/moves.lis for why the
 /// refusal is the right answer rather than dragging the references along.
 fn project_move(input: flags.CommandInput) -> Result<(), string> {
   let ctx = input.ctx

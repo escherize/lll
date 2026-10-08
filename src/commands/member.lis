@@ -18,6 +18,7 @@ import "query"
 import "records"
 import "writes"
 import "tokens"
+import "serve"
 
 /// Dispatch `lll member <verb>` through the noun's Command table (TASK-307).
 /// The table is the one place a verb is declared: dispatch, `lll member
@@ -679,7 +680,7 @@ fn find_team_as(ctx: pb.Client, tok: string, key: string) -> Result<Option<model
 fn scoped_board_link(ctx: pb.Client, web_url: string, key: string) -> Option<string> {
   let base = strings.TrimRight(web_url, "/")
   let Some(board_token) = known_board_token(ctx, base) else { return None }
-  Some(f"{base}/t/{key}/?board_token={scoped_board_token(board_token, key)}")
+  Some(f"{base}/t/{key}/?board_token={serve.scoped_board_token(board_token, key)}")
 }
 
 /// The board token for the board at `base`, when this machine knows it:

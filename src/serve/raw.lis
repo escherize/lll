@@ -84,7 +84,7 @@ fn board_raw(vm: BoardVM) -> string {
 /// derived from vm.cols; these cells are written by hand, so a ninth column
 /// added to issue_cols() would give a 9-cell header over 8-cell bodies — a
 /// malformed table emitted silently, from the surface whose whole promise is
-/// that an agent can parse it. serve_issues.test.lis pins the two lengths
+/// that an agent can parse it. serve/issues.test.lis pins the two lengths
 /// equal, so the drift fails a test instead of a parser.
 fn issue_row_cells(r: CardVM) -> Slice<string> {
   let labels = strings.Join(r.labels.map(|l| l.name), ", ")

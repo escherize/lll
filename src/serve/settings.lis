@@ -399,7 +399,7 @@ fn settings_collection(kind: string) -> Result<string, string> {
 /// A create (no id) has nothing to move: the row's team select is the team the
 /// new record is born in, which `team_id` already is.
 ///
-/// The refusal rule lives in move_scope.lis and is the CLI's, so the board and
+/// The refusal rule lives in writes/moves.lis and is the CLI's, so the board and
 /// `lll label move` cannot answer differently - one rule, two doors.
 fn move_scope_if_asked(
   ctx: pb.Client,
@@ -477,7 +477,7 @@ fn verify_admin(ctx: pb.Client, pass: string) -> Result<string, string> {
 
 /// Authentication failures have a specific recovery; other errors retain
 /// their actual server status and transport details.
-fn admin_verification_error(ctx: pb.Client, e: string) -> string {
+pub fn admin_verification_error(ctx: pb.Client, e: string) -> string {
   if pb.classify(e).status == 400 {
     return f"wrong admin password for {admin_email(ctx)}; use the administrator credentials supplied through LLL_ADMIN_EMAIL and LLL_ADMIN_PASSWORD in the server's own environment"
   }

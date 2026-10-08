@@ -1,7 +1,5 @@
 import "go:encoding/json"
 import "go:fmt"
-import "go:net/url"
-import "go:regexp"
 import "go:strconv"
 import "go:strings"
 

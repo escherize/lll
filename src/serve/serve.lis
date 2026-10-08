@@ -55,7 +55,7 @@ pub fn advertised_board_url(settings: config.Settings, port: int) -> string {
 /// were both about.
 ///
 /// UNGATED, deliberately. Every other route requires the board-token cookie
-/// (serve_gate.lis); these do not, because PocketBase's per-collection rules
+/// (serve/gate.lis); these do not, because PocketBase's per-collection rules
 /// are the authorization here and they are the same rules that answered on
 /// :8091 before this existed. So this is a MOVE, not a widening: the same
 /// requests reach the same checks at a different address, and an agent's
@@ -218,7 +218,7 @@ fn board_mux(
   // Registered FIRST so the board's own routes cannot shadow /api/.
   api_proxy(mux, ctx.url()?, admin_ui)?
   // Invite links (LLL-544) sit outside the gate: the visitor has no board
-  // credential until the redemption hands it one (serve_join.lis).
+  // credential until the redemption hands it one (serve/join.lis).
   mux.HandleFunc("GET /join/{code}", |w: http.ResponseWriter, r: Ref<http.Request>| join_page(ctx, w, r))
   mux.HandleFunc("POST /join/{code}", |w: http.ResponseWriter, r: Ref<http.Request>| join_redeem(ctx, w, r))
   // A member's own page and CLI login (LLL-648), where a join lands. Gated:
@@ -226,7 +226,7 @@ fn board_mux(
   mux.HandleFunc("GET /me", gated(ctx, |w: http.ResponseWriter, r: Ref<http.Request>, v: Viewing| me_page(ctx, w, r, v.viewer)))
   mux.HandleFunc("POST /me", gated(ctx, |w: http.ResponseWriter, r: Ref<http.Request>, v: Viewing| me_cli(ctx, w, r, v.viewer)))
   //
-  // Every BOARD route sits behind the board gate (serve_gate.lis): pages,
+  // Every BOARD route sits behind the board gate (serve/gate.lis): pages,
   // writes, the SSE stream and static assets alike answer only board-token
   // requests. /api/ stays outside that cookie gate for remote clients.
   // /_/ is registered only with --admin-ui and keeps upstream admin auth.
@@ -437,7 +437,7 @@ fn board_mux(
       )
     }),
   )
-  // Every POST is a write returning Result; `flashing` (serve_actions.lis) is
+  // Every POST is a write returning Result; `flashing` (serve/actions.lis) is
   // the one place an Err becomes the flash strip.
   //
   // The bare settings writes are refused, not redirected (LLL-664): they
@@ -528,7 +528,7 @@ fn board_mux(
   )
 
   // LLL-630: every non-GET request, on every route but /api/, must come
-  // from the board's own origin (serve_gate.lis).
+  // from the board's own origin (serve/gate.lis).
   Ok(same_origin_writes(mux))
 }
 

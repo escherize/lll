@@ -187,7 +187,7 @@ with tempfile.TemporaryDirectory(prefix='lll-546-') as directory:
         # A Host the prompt refuses to echo is refused before anything is
         # created: no orphan bot without a prompt. This board is loopback, so
         # the loopback Host guard (LLL-676) refuses it first; serve_bot's own
-        # check, which a LAN board relies on, is pinned by serve_bot.test.lis.
+        # check, which a LAN board relies on, is pinned by serve/bot.test.lis.
         code, body = call(board, '/bot', {'name': 'orphan1', 'team': 'ALPHA'}, form=True,
                           headers={'Cookie': 'lll_board=' + rw_tok, 'Host': 'a_b.example:1',
                                    'Origin': 'http://a_b.example:1'})

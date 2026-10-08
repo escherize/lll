@@ -302,7 +302,7 @@ fn team_set_accent(input: flags.CommandInput) -> Result<(), string> {
 }
 
 /// The accent to store for a typed argument, matching what /settings stores
-/// (serve_settings.lis form_hex): "" clears, an unparseable colour is a user
+/// (serve/settings.lis form_hex): "" clears, an unparseable colour is a user
 /// error rather than a silent fallback, and the canonical orange is stored as
 /// "no choice" so a team that picks it back gets theme.css's exact tokens.
 /// Validation is theme.normalize_hex, the same one the board renders with —

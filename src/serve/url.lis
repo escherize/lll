@@ -1,6 +1,7 @@
 import "go:net/http"
 import "go:net/url"
 import "go:strings"
+import "query"
 
 // The one query-param encoding for view state, shared by the board (GET /)
 // and the /issues table (TASK-94 AC#3). One param per dimension, values are
@@ -162,4 +163,11 @@ fn toggle_csv(list: string, value: string) -> string {
     return join_csv(vals.filter(|v| v != value))
   }
   join_csv(vals.append(value))
+}
+
+fn view_filters(q: ViewQuery) -> query.Filters {
+  // The board's URL carries one of each; the slices are how the CLI says more.
+  let states = if q.state == "" { [] } else { [q.state] }
+  let labels = if q.label == "" { [] } else { [q.label] }
+  query.Filters { state: states, assignee: q.assignee, label: labels, project: q.project, .. }
 }

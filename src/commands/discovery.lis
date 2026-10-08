@@ -2,7 +2,6 @@ import "go:encoding/json"
 import "go:io"
 import "go:net/http"
 import "go:time"
-import "buildinfo"
 
 #[json]
 struct BoardDiscovery {
@@ -36,9 +35,3 @@ fn discover_board_url(base: string) -> Option<string> {
   discovered_board_url(base, bytes as string)
 }
 
-/// Public metadata carries no credential and is useful before board login.
-/// `version` lets an older CLI notice it is behind (LLL-607).
-fn board_discovery(w: http.ResponseWriter, _r: Ref<http.Request>) {
-  w.Header().Set("Content-Type", "application/json")
-  let _ = w.Write(("{\"service\":\"lll\",\"web_url\":\".\",\"version\":\"" + buildinfo.version() + "\"}").bytes())
-}

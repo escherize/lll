@@ -1,19 +1,22 @@
 import "flags"
 import "query"
 
+/// The CLI half of the shared-filter contract: flags parse into the same
+/// query.Filters, and fail the same validation, that the board's URL
+/// adapter produces (its half is in src/serve/url.test.lis).
 #[test]
 fn cli_and_web_filters_share_values_and_validation() {
   let spec = issue_list_spec()
   let assert Ok(p) = flags.parse(spec, ["lll", "issue", "list", "--state", "in-review", "--assignee", "Alice O'Neil", "--label", "needs review", "--project", "Release 2"], 3, false, "")
   let assert Ok(cli) = filters_from(p)
-  let assert Ok(web) = view_filters(ViewQuery { state: "in-review", assignee: "Alice O'Neil", label: "needs review", project: "Release 2", .. }).validate()
+  let assert Ok(web) = query.Filters { state: ["in-review"], assignee: "Alice O'Neil", label: ["needs review"], project: "Release 2", .. }.validate()
   assert cli.one_state() == web.one_state()
   assert cli.assignee == web.assignee
   assert cli.one_label() == web.one_label()
   assert cli.project == web.project
   let assert Ok(bad) = flags.parse(spec, ["lll", "issue", "list", "--state", "bogus"], 3, false, "")
   let assert Err(cli_error) = filters_from(bad)
-  let assert Err(web_error) = view_filters(ViewQuery { state: "bogus", .. }).validate()
+  let assert Err(web_error) = query.Filters { state: ["bogus"], .. }.validate()
   assert cli_error == web_error
 }
 
@@ -23,7 +26,6 @@ fn missing_filter_state_is_optional_but_explicit_empty_cli_state_is_invalid() {
   let assert Ok(p) = flags.parse(spec, ["lll", "issue", "list"], 3, false, "")
   let assert Ok(empty) = filters_from(p)
   assert empty.state.is_empty()
-  assert view_filters(ViewQuery { .. }).validate().is_ok()
   let assert Ok(explicit) = flags.parse(spec, ["lll", "issue", "list", "--state", ""], 3, false, "")
   assert filters_from(explicit).is_err()
   assert query.state("").is_err()
