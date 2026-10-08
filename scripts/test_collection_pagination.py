@@ -97,8 +97,10 @@ with tempfile.TemporaryDirectory(prefix='lll-collection-pages-') as directory:
                 result = run(noun, 'list', '--json')
                 assert result.returncode == 0, result.stderr
                 response = json.loads(result.stdout)
-                assert set(response) == {'items'}, response.keys()
-                rows = response['items'] or []
+                # The one list envelope (LLL-645); items is never null.
+                assert set(response) == {'items', 'page', 'perPage', 'totalItems', 'totalPages'}, response.keys()
+                assert response['totalItems'] == size and isinstance(response['items'], list), response
+                rows = response['items']
                 assert len(rows) == size, (noun, size, len(rows))
                 assert [r['id'] for r in rows] == [f'{i:015}' for i in range(size)]
                 pages = [p for c, p, _ in API.calls if c == collection]

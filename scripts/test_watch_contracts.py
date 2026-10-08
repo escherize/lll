@@ -183,14 +183,14 @@ first = minted(out)
 refused = "rotating bot-watch-contract's token: only the bot's owner or a superuser can do that"
 for who in [other_token, first]:  # another full member; the bot itself
     result = cli('bot', 'rotate', 'bot-watch-contract', as_token=who)
-    assert result.returncode == 1 and refused in result.stderr, result
+    assert result.returncode == 4 and refused in result.stderr, result
     assert authenticates(first), 'a refused rotation stranded the token'
 # D7 (LLL-646): create refuses an existing bot, for its owner and anyone
 # else alike, and mints nothing; rotation is only 'lll bot rotate'.
 for who in [other_token, owner_token]:
     for args in [('bot', 'bot-watch-contract'), ('bot', 'create', 'bot-watch-contract')]:
         result = cli(*args, as_token=who)
-        assert result.returncode == 1 and 'bot bot-watch-contract already exists' in result.stderr, result
+        assert result.returncode == 4 and 'bot bot-watch-contract already exists' in result.stderr, result
         assert "'lll bot rotate bot-watch-contract'" in result.stderr and 'LLL_TOKEN' not in result.stdout, result
         assert authenticates(first), 'a refused create stranded the token'
 second = minted(ok('bot', 'rotate', 'bot-watch-contract', '--duration', '3600', as_token=owner_token))
@@ -309,7 +309,7 @@ finally:
     process.wait()
     proxy.close()
 time.sleep(0.2)  # the reader thread drains the last line
-assert code == 1, (code, lines)
+assert code == 6, (code, lines)  # not authenticated (LLL-645)
 dead_line = ("realtime: the server rejected this token (401 Unauthorized): it was rotated, "
              "revoked or has expired, so the stream would carry no events; run 'lll login', "
              "or set a fresh LLL_TOKEN ('lll bot rotate bot-NAME' or 'lll token create NAME'), "

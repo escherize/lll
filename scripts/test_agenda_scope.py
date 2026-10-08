@@ -43,6 +43,12 @@ class API(http.server.BaseHTTPRequestHandler):
         q = urllib.parse.parse_qs(parsed.query, keep_blank_values=True)
         if '/members/records/' in parsed.path:
             return self.answer(actor)
+        if parsed.path.startswith('/api/collections/issues/records/'):
+            # 'issue next --json' re-reads the chosen record (LLL-645).
+            wanted = parsed.path.rsplit('/', 1)[1]
+            row = next(r for r in self.rows if r['id'] == wanted)
+            team = alpha if row['team'] == alpha['id'] else beta
+            return self.answer({**row, 'expand': {'team': team}})
         page = int(q.get('page', ['1'])[0])
         limit = int(q.get('perPage', ['30'])[0])
         f = q.get('filter', [''])[0]
@@ -109,7 +115,8 @@ with tempfile.TemporaryDirectory(prefix='lll-agenda-scope-') as directory:
         assert repo_config.read_text() == 'team = "ALPHA"\n'
         assert home_config.read_text() == 'team = "BETA"\n'
         value = run('--json')
-        assert value.returncode == 0 and json.loads(value.stdout)['team'] == alpha['id'], value
+        picked = json.loads(value.stdout) if value.returncode == 0 else {}
+        assert picked.get('team') == alpha['id'] and picked.get('key') == 'ALPHA-1', value
         chosen(run('--claim'), 'ALPHA-1')
         assert API.claims == [('/api/lll/issues/alpha0000000001/claim', {'member': actor['id']})], API.claims
         API.deny_claim = True

@@ -242,6 +242,7 @@ fn doc_new_spec() -> Slice<flags.Flag> {
       help: "comma-separated file/directory paths the doc is about, e.g.\nsrc/pb, pb/pb_migrations ('lll finding near' matches by them)",
       ..,
     },
+    flags.Flag { name: "--json", help: "print the created doc record as JSON", .. },
   ])
 }
 
@@ -283,7 +284,7 @@ fn doc_view_spec() -> Slice<flags.Flag> {
     flags.Flag { name: "--raw", help: "print only the body, no chrome", .. },
     flags.Flag {
       name: "--json",
-      help: "raw record JSON (linked issues and author expanded), pipe-friendly",
+      help: "the doc record as JSON (linked issues and author expanded), timestamps in RFC3339",
       ..,
     },
   ])
@@ -402,6 +403,10 @@ fn create_doc(p: flags.Parsed, default_kind: string, slug: string) -> Result<(),
   if let Err(e) = json.Unmarshal(resp.bytes(), &created) {
     return Err(f"decoding created doc: {e}")
   }
+  if p.given("--json") {
+    fmt.Println(contract_json(resp.bytes() as json.RawMessage, 0) as string)
+    return Ok(())
+  }
   fmt.Println(f"Created doc {created.slug}")
   Ok(())
 }
@@ -443,9 +448,9 @@ fn limit_flag(p: flags.Parsed) -> Result<int, string> {
   if !p.given("--limit") { return Ok(0) }
   let raw = p.one("--limit")
   let Ok(n) = strconv.Atoi(raw) else {
-    return Err(f"--limit must be a positive integer, got '{raw}'")
+    return Err(flags.usage_error(f"--limit must be a positive integer, got '{raw}'"))
   }
-  if n < 1 { return Err(f"--limit must be a positive integer, got {n}") }
+  if n < 1 { return Err(flags.usage_error(f"--limit must be a positive integer, got {n}")) }
   Ok(n)
 }
 
@@ -463,7 +468,8 @@ fn doc_list(input: flags.CommandInput) -> Result<(), string> {
   }
   if limit > 0 && items.length() > limit { items = items[..limit] }
   let docs = models.DocList { items }
-  if p.given("--json") { return print_json(docs, "docs") }
+  if p.given("--json") { return print_list_json(docs.items, whole_list(docs.items.length()), "docs") }
+  if docs.items.is_empty() { return say_empty("docs") }
   for d in docs.items {
     let mut kind = d.kind
     if kind == "" { kind = "-" }
@@ -476,13 +482,13 @@ fn doc_view(input: flags.CommandInput) -> Result<(), string> {
   let p = input.parsed
   let slug = p.first()
   let usage = input.usage
-  if slug == "" { return Err(f"usage: {usage}") }
+  if slug == "" { return Err(flags.usage_error(f"usage: {usage}")) }
   let json_mode = p.given("--json")
   let raw_mode = p.given("--raw")
 
   let record = fetch_doc_record(current_team()?, slug)?
   if json_mode {
-    fmt.Println(record)
+    fmt.Println(contract_json(record.bytes() as json.RawMessage, 0) as string)
     return Ok(())
   }
 
@@ -527,7 +533,7 @@ fn doc_edit(input: flags.CommandInput) -> Result<(), string> {
   let usage = input.usage
   let p = input.parsed
   let slug = p.first()
-  if slug == "" { return Err(f"usage: {usage}") }
+  if slug == "" { return Err(flags.usage_error(f"usage: {usage}")) }
   let mut body = ""
   if p.given("-b") { body = value_or_stdin(p.one("-b"), "-b")? }
   let body_set = p.given("-b")
@@ -540,7 +546,7 @@ fn doc_edit(input: flags.CommandInput) -> Result<(), string> {
   let paths_raw = p.one("--paths")
   let paths_set = p.given("--paths")
   if !body_set && !title_set && !kind_set && !area_set && !paths_set {
-    return Err(f"nothing to edit — pass at least one flag\nusage: {usage}")
+    return Err(flags.usage_error(f"nothing to edit — pass at least one flag\nusage: {usage}"))
   }
 
   let d = fetch_doc(current_team()?, slug)?
@@ -571,12 +577,11 @@ fn doc_edit(input: flags.CommandInput) -> Result<(), string> {
 fn doc_delete(input: flags.CommandInput) -> Result<(), string> {
   let p = input.parsed
   let slug = p.first()
-  if slug == "" { return Err("usage: lll doc delete SLUG [--yes]") }
+  if slug == "" { return Err(flags.usage_error("usage: lll doc delete SLUG [--yes]")) }
 
   let d = fetch_doc(current_team()?, slug)?
   if !p.given("--yes") && !confirmed(f"delete doc {d.slug}?") {
-    fmt.Println("Aborted.")
-    return Ok(())
+    return Err(aborted())
   }
   let _ = pb.delete(f"/api/collections/docs/records/{d.id}")?
   fmt.Println(f"Deleted doc {d.slug}")
@@ -634,5 +639,5 @@ pub fn find_doc(
 /// Unknown-slug message. It names the team, because the same slug may well
 /// exist on another board and "no doc with slug 'index'" would be a lie.
 fn unknown_doc(team: models.Team, slug: string) -> string {
-  f"no doc with slug '{slug}' in {team.key} — see 'lll doc list'"
+  pb.fail(pb.ErrorKind.NotFound, f"no doc with slug '{slug}' in {team.key} — see 'lll doc list'")
 }

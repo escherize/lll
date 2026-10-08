@@ -60,7 +60,7 @@ fn import_github(input: flags.CommandInput) -> Result<(), string> {
   let usage = input.usage
   let repo = input.parsed.first()
   if !repo_shape_ok(repo) {
-    return Err(f"expected OWNER/REPO, got '{repo}'\nusage: {usage}")
+    return Err(flags.usage_error(f"expected OWNER/REPO, got '{repo}'\nusage: {usage}"))
   }
   let emoji = check_emoji(input.parsed.one("--emoji"))?
   // The team first: it scopes the labels below, which are unique per team

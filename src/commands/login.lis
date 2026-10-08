@@ -195,7 +195,7 @@ would put a second account on that address. --create makes YOUR login: pass
     // sentence rather than a raw validation blob from the create round trip.
     if password.length() < 8 {
       return Err(
-        f"--create needs a password of at least 8 characters (got {password.length()})",
+        flags.usage_error(f"--create needs a password of at least 8 characters (got {password.length()})"),
       )
     }
     let name = if p.one("--name") != "" {
@@ -257,11 +257,12 @@ fn token_identity(target: string, tok: string) -> Result<(string, bool), string>
   let body = match pb.get_as("/api/lll/access", tok) {
     Ok(b) => b,
     Err(e) => {
-      let status = pb.response_status(e)
+      let status = pb.classify(e).status
       if status == 401 || status == 403 {
-        return Err(
+        return Err(pb.fail(
+          pb.ErrorKind.Auth,
           "the server did not accept that token as a member token (expired, revoked, mistyped, or an administrator token); get a fresh one from the board's /me page ('Show my CLI login') or 'lll token create NAME'",
-        )
+        ))
       }
       return Err(e)
     },
@@ -349,7 +350,7 @@ fn settle_team(read_only: bool) {
   let teams = match records.list_teams() {
     Ok(teams) => teams,
     Err(e) => {
-      fmt.Println(f"authenticated, but could not verify team setup: {e}\nnext: lll team list, then lll attach --key KEY")
+      fmt.Println(f"authenticated, but could not verify team setup: {pb.plain(e)}\nnext: lll team list, then lll attach --key KEY")
       return
     },
   }
@@ -412,7 +413,10 @@ Someone else deployed it? Ask them for 'lll member invite <name> --email <you>'.
 
 #[json]
 struct WhoamiIdentity {
+  id: string,
   name: string,
+  // "person" or "bot" for a member; "" for an administrator (LLL-407).
+  kind: string,
   email: string,
   #[json("collectionName")]
   collection: string,
@@ -447,6 +451,22 @@ fn access_line(me: WhoamiIdentity, body: string) -> Result<Option<string>, strin
   Ok(Some(f"{describe_access(eff.scope, eff.mode, keys)} (capped by its owner, {owner.name})"))
 }
 
+/// `lll whoami --json` (LLL-645): the facts the text prints, by name.
+/// `access` is the text's access line, "" when the server reports none.
+#[json]
+struct WhoamiJson {
+  id: string,
+  name: string,
+  email: string,
+  kind: string,
+  server: string,
+  team: string,
+  token_source: string,
+  scope: string,
+  mode: string,
+  access: string,
+}
+
 /// The refusal for an argument `lll whoami` does not take. A `--team` here is
 /// a guess about how context works (LLL-493, fleet case 05): the answer names
 /// the bare invocation that DOES report context, and the house one-command
@@ -477,7 +497,9 @@ pub fn whoami(args: Slice<string>) -> Result<(), string> {
         "lll whoami - show which member or administrator, server and team this machine is acting as
 
 Usage:
-  lll whoami
+  lll whoami [--json]
+
+--json prints the same facts as one JSON object.
 
 Confirms the stored token against the server, including administrator tokens.
 'lll config list' shows where each value came from; 'lll login' replaces the
@@ -485,8 +507,10 @@ token with a member session, and 'lll bot create bot-NAME' provisions a bot iden
       )
       return Ok(())
     }
-    return Err(whoami_arg_error(flag, args))
+    if flag != "--json" { return Err(whoami_arg_error(flag, args)) }
+    if let Some(extra) = args.get(3) { return Err(whoami_arg_error(extra, args)) }
   }
+  let json_mode = args.get(2) == Some("--json")
   let (cfg, src) = config.load_traced()?
   // NOT auth-refresh, which this used to POST. A refresh is refused for every
   // non-refreshable token - and `lll token create` mints exactly those, the
@@ -520,6 +544,14 @@ token with a member session, and 'lll bot create bot-NAME' provisions a bot iden
   }
   let administrator = me.collection == "_superusers"
   let name = if administrator { "superuser" } else { me.name }
+  if json_mode {
+    let kind = if administrator { "administrator" } else { me.kind }
+    let access = access_line(me, body)?.unwrap_or("")
+    return print_json(WhoamiJson {
+      id: me.id, name, email: me.email, kind, server: cfg.url, team: cfg.team,
+      token_source: src.token, scope: me.scope, mode: me.mode, access,
+    }, "whoami")
+  }
   fmt.Println(f"{name} <{me.email}>")
   fmt.Println(f"server  {cfg.url}")
   let team = if cfg.team == "" { "(none — run 'lll attach')" } else { cfg.team }
@@ -589,7 +621,7 @@ fn create_as_superuser(
 /// --create from it. Both branches are named here because the server does not
 /// tell us which one it is.
 fn login_failed(e: string, email: string, target: string, admin_email: string) -> string {
-  let status = pb.response_status(e)
+  let status = pb.classify(e).status
   // A 403 whose body is a PocketBase envelope is the server refusing this
   // identity by name — a bot member at a password door (LLL-407) — and its
   // own wording is the answer. A bare 403 (or any other non-400) keeps the
@@ -630,12 +662,12 @@ log in as yourself, and let the admin credentials create that account:
 they ride the environment (LLL_ADMIN_EMAIL/LLL_ADMIN_PASSWORD) or the flags
 --admin-email/--admin-password."
   }
-  f"login failed at {base}: no member with email {email}, or the password is wrong
+  pb.fail(pb.ErrorKind.Auth, f"login failed at {base}: no member with email {email}, or the password is wrong
 if the account exists, check the password — a superuser can reset it:
   lll member set-password <name> --email {email}
 if it does not exist yet, and you hold the server's admin credentials
 (LLL_ADMIN_EMAIL/LLL_ADMIN_PASSWORD), create it as you log in:
-  lll login{url_flag} --email {email} --create"
+  lll login{url_flag} --email {email} --create")
 }
 
 /// Renew a `lll login` token in the home config before it lapses (LLL-441).
@@ -659,10 +691,10 @@ pub fn renew_login_token() {
   match pb.refresh_token(cfg.url, cfg.token) {
     Ok(fresh) => {
       if let Err(e) = set_home_key("token", fresh) {
-        fmt.Fprintln(os.Stderr, f"note: could not save the renewed login token: {e}")
+        fmt.Fprintln(os.Stderr, f"note: could not save the renewed login token: {pb.plain(e)}")
       }
     },
-    Err(e) => fmt.Fprintln(os.Stderr, f"note: could not renew the login token in {home}: {e}"),
+    Err(e) => fmt.Fprintln(os.Stderr, f"note: could not renew the login token in {home}: {pb.plain(e)}"),
   }
 }
 

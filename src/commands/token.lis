@@ -86,10 +86,10 @@ fn token_create_spec() -> Slice<flags.Flag> {
 fn parse_token_duration(raw: string) -> Result<int, string> {
   if raw == "" { return Ok(default_token_duration()) }
   let Ok(d) = strconv.Atoi(raw) else {
-    return Err(f"--duration must be a number of seconds, got '{raw}'")
+    return Err(flags.usage_error(f"--duration must be a number of seconds, got '{raw}'"))
   }
   if d < 0 {
-    return Err("--duration must be 0 or more; 0 uses the members collection's duration")
+    return Err(flags.usage_error("--duration must be 0 or more; 0 uses the members collection's duration"))
   }
   Ok(d)
 }
@@ -99,7 +99,7 @@ fn token_create(input: flags.CommandInput) -> Result<(), string> {
   let p = input.parsed
   let name = p.first()
   if name == "" {
-    return Err(f"usage: {usage}")
+    return Err(flags.usage_error(f"usage: {usage}"))
   }
   // Absent --duration means the explicit default, not PocketBase's: leaving
   // it at 0 is what silently handed out 5-day tokens. 0 stays reachable, but
@@ -110,7 +110,7 @@ fn token_create(input: flags.CommandInput) -> Result<(), string> {
   let su = superuser_auth(given_admin_login(p)?)?
   let found = records.find_member_as(su, name)?
   let Some(member) = found else {
-    return Err(f"no member named '{name}' — see 'lll member create'")
+    return Err(pb.fail(pb.ErrorKind.NotFound, f"no member named '{name}' — see 'lll member create'"))
   }
   let payload = match json.Marshal(models.ImpersonateRequest { duration }) {
     Ok(b) => b,
@@ -164,14 +164,14 @@ fn expiry_line(duration: int, now: time.Time, remint: string) -> string {
 /// happens to someone who was working yesterday is expiry, which the old
 /// shared wording never named (TASK-214). Anything else keeps the raw error.
 fn impersonate_error(name: string, e: string) -> string {
-  let status = pb.response_status(e)
+  let status = pb.classify(e).status
   if status == 401 {
-    return "the token this ran with was rejected (401) - most likely it expired
-mint a new one with 'lll token create', or " + admin_hint()
+    return pb.fail(pb.ErrorKind.Auth, "the token this ran with was rejected (401) - most likely it expired
+mint a new one with 'lll token create', or " + admin_hint())
   }
   if status == 403 {
-    return "token create is superuser-only and the configured token is not one
-" + admin_hint()
+    return pb.fail(pb.ErrorKind.Refused, "token create is superuser-only and the configured token is not one
+" + admin_hint())
   }
   f"impersonating {name}: {e}"
 }
@@ -239,7 +239,7 @@ pub fn given_admin_login(p: flags.Parsed) -> Result<AdminLogin, string> {
   let email = p.one("--admin-email")
   let pass = p.one("--admin-password")
   if (email == "") != (pass == "") {
-    return Err("--admin-email and --admin-password go together; give both")
+    return Err(flags.usage_error("--admin-email and --admin-password go together; give both"))
   }
   if email != "" { return Ok(AdminLogin.Explicit(AdminCreds { email, password: pass })) }
   let env_email = os.Getenv("LLL_ADMIN_EMAIL")
@@ -316,7 +316,7 @@ fn superuser_login(creds: AdminCreds) -> Result<string, string> {
 /// nobody's choice, say that first.
 fn superuser_auth_failed(e: string) -> string {
   let msg = f"authenticating as the superuser: {e}"
-  if pb.response_status(e) != 400 { return msg }
+  if pb.classify(e).status != 400 { return msg }
   let Ok((_, src)) = config.load_traced() else { return msg }
   if src.url != "default" {
     return msg + "
@@ -404,7 +404,7 @@ fn bot_create(args: Slice<string>, start: int, command: string) -> Result<(), st
   let name = strings.TrimSpace(p.first())
   if name == "" {
     return Err(
-      f"usage: {usage}\n  bot-NAME is the agent's member name, e.g. bot-myrepo — bot names are reserved to the bot- prefix",
+      flags.usage_error(f"usage: {usage}\n  bot-NAME is the agent's member name, e.g. bot-myrepo — bot names are reserved to the bot- prefix"),
     )
   }
   require_bot_prefix("lll bot create", name)?
@@ -425,9 +425,10 @@ fn bot_create(args: Slice<string>, start: int, command: string) -> Result<(), st
 'lll bot create' only provisions bot members; use 'lll token create {name}' to mint its token directly",
       )
     }
-    return Err(
+    return Err(pb.fail(
+      pb.ErrorKind.Refused,
       f"bot {name} already exists; nothing was changed
-'lll bot rotate {name}' mints a new token (the previous one stops working)",
+'lll bot rotate {name}' mints a new token (the previous one stops working)"),
     )
   }
   let owner = caller.map_or("", |me| me.id)
@@ -458,7 +459,7 @@ fn bot_rotate(args: Slice<string>) -> Result<(), string> {
   let name = strings.TrimSpace(p.first())
   if name == "" {
     return Err(
-      f"usage: {usage}\n  bot-NAME is the bot member's name, e.g. bot-myrepo",
+      flags.usage_error(f"usage: {usage}\n  bot-NAME is the bot member's name, e.g. bot-myrepo"),
     )
   }
   require_bot_prefix("lll bot rotate", name)?
@@ -715,7 +716,7 @@ fn token_member(tok: string) -> Result<Option<models.Member>, string> {
       Ok(Some(me))
     },
     Err(e) => {
-      if pb.response_status(e) == 404 { return Ok(None) }
+      if pb.classify(e).status == 404 { return Ok(None) }
       Err(e)
     },
   }
@@ -778,14 +779,14 @@ fn bot_mint(tok: string, name: string, duration: int) -> Result<string, string> 
 /// dead token, the same shape token create's refusal names. Anything else
 /// keeps the raw error.
 fn bot_mint_error(name: string, e: string) -> string {
-  let status = pb.response_status(e)
+  let status = pb.classify(e).status
   if status == 403 {
-    return f"rotating {name}'s token: only the bot's owner or a superuser can do that
-the configured token does not own this bot — pass --admin-email and --admin-password to rotate as the superuser"
+    return pb.fail(pb.ErrorKind.Refused, f"rotating {name}'s token: only the bot's owner or a superuser can do that
+the configured token does not own this bot — pass --admin-email and --admin-password to rotate as the superuser")
   }
   if status == 401 {
-    return "the token this ran with was rejected (401) - most likely it expired
-log in again with 'lll login', or " + admin_hint()
+    return pb.fail(pb.ErrorKind.Auth, "the token this ran with was rejected (401) - most likely it expired
+log in again with 'lll login', or " + admin_hint())
   }
   f"rotating {name}'s token: {e}"
 }

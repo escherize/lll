@@ -43,7 +43,7 @@ pub fn team_commands() -> Slice<flags.Command> {
     flags.Command {
       name: "view",
       summary: "show a team, its accent and its issue count",
-      spec: [],
+      spec: [flags.Flag { name: "--json", help: "print the team record as JSON, with its issue count as issues", .. }],
       positional: "KEY",
       run: team_view,
       ..
@@ -127,7 +127,8 @@ fn team_list(input: flags.CommandInput) -> Result<(), string> {
   if !p.given("--archived") {
     teams.items = teams.items.filter(|t| !t.archived)
   }
-  if p.given("--json") { return print_json(teams, "team list") }
+  if p.given("--json") { return print_list_json(teams.items, whole_list(teams.items.length()), "team list") }
+  if teams.items.is_empty() { return say_empty("teams") }
   for t in teams.items {
     let mut mark = ""
     if t.archived { mark = "\t(archived)" }
@@ -161,6 +162,7 @@ fn team_create_spec() -> Slice<flags.Flag> {
       help: "team name",
       ..
     },
+    flags.Flag { name: "--json", help: "print the created team as JSON", .. },
   ]
 }
 
@@ -187,13 +189,14 @@ fn team_rename_spec() -> Slice<flags.Flag> {
 fn team_create(input: flags.CommandInput) -> Result<(), string> {
   let p = input.parsed
   if p.first() != "" && p.given("--key") {
-    return Err(f"give the team key as the bare argument or --key, not both\nusage: {input.usage}")
+    return Err(flags.usage_error(f"give the team key as the bare argument or --key, not both\nusage: {input.usage}"))
   }
   let key = if p.given("--key") { p.one("--key") } else { p.first() }
-  if strings.TrimSpace(key) == "" { return Err(f"a team key is required (e.g. ENG)\nusage: {input.usage}") }
+  if strings.TrimSpace(key) == "" { return Err(flags.usage_error(f"a team key is required (e.g. ENG)\nusage: {input.usage}")) }
   let name = p.one("-n")
 
   let created = create_team(key, name)?
+  if p.given("--json") { return print_json(created, "team") }
   fmt.Println(f"Created team {created.key}: {created.name}")
   Ok(())
 }
@@ -222,12 +225,12 @@ fn team_rename(input: flags.CommandInput) -> Result<(), string> {
   let p = input.parsed
   let key = p.first()
   if key == "" {
-    return Err(f"usage: {usage}")
+    return Err(flags.usage_error(f"usage: {usage}"))
   }
   let new_key = records.normalize_team_key(p.one("--key"))
   let new_name = p.one("-n")
   if new_key == "" && new_name == "" {
-    return Err(f"nothing to rename — give --key, -n, or both\nusage: {usage}")
+    return Err(flags.usage_error(f"nothing to rename — give --key, -n, or both\nusage: {usage}"))
   }
   let Some(t) = records.find_team(key)? else {
     return Err(unknown_team(key))
@@ -293,7 +296,7 @@ fn team_rename_collateral(old_key: string, new_key: string) -> Slice<string> {
 /// inverts the rule TASK-83 was built on.
 fn team_set_accent(input: flags.CommandInput) -> Result<(), string> {
   if input.parsed.positional_count() != 2 {
-    return Err("usage: lll team set-accent KEY #rrggbb (empty '' clears it)")
+    return Err(flags.usage_error("usage: lll team set-accent KEY #rrggbb (empty '' clears it)"))
   }
   let key = input.parsed.first()
   let raw = input.parsed.nth(1)
@@ -344,7 +347,7 @@ struct TeamAccentPatch { accent: string }
 /// the accent is: a shared field only the web can write inverts the rule.
 fn team_set_emoji(input: flags.CommandInput) -> Result<(), string> {
   if input.parsed.positional_count() != 2 {
-    return Err("usage: lll team set-emoji KEY EMOJI (empty '' clears it)")
+    return Err(flags.usage_error("usage: lll team set-emoji KEY EMOJI (empty '' clears it)"))
   }
   let key = input.parsed.first()
   let glyph = team_emoji_value(input.parsed.nth(1))?
@@ -449,7 +452,7 @@ fn unknown_configured_team(key: string, origin: string) -> string {
   } else {
     ""
   }
-  f"no team with key '{key}'{from} on the server — 'lll team list' shows the keys; 'lll attach --key KEY' points this directory at one, 'lll config list' shows every value and the file it came from, or create it with 'lll team create {key} -n \"Name\"'"
+  pb.fail(pb.ErrorKind.NotFound, f"no team with key '{key}'{from} on the server — 'lll team list' shows the keys; 'lll attach --key KEY' points this directory at one, 'lll config list' shows every value and the file it came from, or create it with 'lll team create {key} -n \"Name\"'")
 }
 
 /// The configured team, insisted upon. Docs, findings, labels and projects
@@ -498,7 +501,7 @@ fn configured_scope() -> Result<records.TeamScope, string> {
 fn team_delete(input: flags.CommandInput) -> Result<(), string> {
   let key = input.parsed.first()
   if key == "" {
-    return Err("usage: lll team delete KEY")
+    return Err(flags.usage_error("usage: lll team delete KEY"))
   }
   let Some(t) = records.find_team(key)? else {
     return Err(unknown_team(key))
@@ -511,8 +514,7 @@ fn team_delete(input: flags.CommandInput) -> Result<(), string> {
     )
   }
   if !confirmed_on_terminal(input.parsed.given("--yes"), f"delete team {t.key}?") {
-    fmt.Println("Aborted.")
-    return Ok(())
+    return Err(aborted())
   }
   let _ = pb.delete(f"/api/collections/teams/records/{t.id}")?
   fmt.Println(f"deleted team {t.key}")
@@ -545,7 +547,7 @@ fn no_team() -> string {
 /// resolves a team key (same package: src/commands).
 fn unknown_team(key: string) -> string {
   if let Some(scoped) = unknown_team_scoped(key) { return scoped }
-  f"no team with key '{key}' on the server. First inspect 'lll team list --archived'; the team may have been renamed.\nFor an existing team, use 'lll attach --key EXISTING_KEY' to update the attachment, or prefix one command with LLL_TEAM=EXISTING_KEY.\nOnly if you intend a new team, create it with 'lll team create {key} -n \"Name\"'."
+  pb.fail(pb.ErrorKind.NotFound, f"no team with key '{key}' on the server. First inspect 'lll team list --archived'; the team may have been renamed.\nFor an existing team, use 'lll attach --key EXISTING_KEY' to update the attachment, or prefix one command with LLL_TEAM=EXISTING_KEY.\nOnly if you intend a new team, create it with 'lll team create {key} -n \"Name\"'.")
 }
 
 /// For a team-scoped caller, a missing key usually means "not yours", and
@@ -555,7 +557,7 @@ fn unknown_team_scoped(key: string) -> Option<string> {
   let Some(keys) = records.scoped_team_keys() else { return None }
   let mine = if keys.is_empty() { "none" } else { strings.Join(keys, ", ") }
   Some(
-    f"no team '{key}' among the teams you can see ({mine}). 'lll whoami' shows your access; ask the person who invited you if you need another team.",
+    pb.fail(pb.ErrorKind.NotFound, f"no team '{key}' among the teams you can see ({mine}). 'lll whoami' shows your access; ask the person who invited you if you need another team."),
   )
 }
 
@@ -589,7 +591,7 @@ fn team_set_archived(p: flags.Parsed, archived: bool) -> Result<(), string> {
   if !archived { verb = "unarchive" }
   let key = p.first()
   if key == "" {
-    return Err(f"usage: lll team {verb} KEY")
+    return Err(flags.usage_error(f"usage: lll team {verb} KEY"))
   }
   let Some(t) = records.find_team(key)? else {
     return Err(unknown_team(key))
@@ -612,13 +614,19 @@ fn team_set_archived(p: flags.Parsed, archived: bool) -> Result<(), string> {
 fn team_view(input: flags.CommandInput) -> Result<(), string> {
   let key = input.parsed.first()
   if key == "" {
-    return Err("usage: lll team view KEY")
+    return Err(flags.usage_error("usage: lll team view KEY"))
   }
   let Some(t) = records.find_team(key)? else {
     return Err(unknown_team(key))
   }
 
   let issues_held = issue_count(f"team={query.quote(t.id)}")?
+  if input.parsed.given("--json") {
+    let mut fields = Map.new<string, json.RawMessage>()
+    if let Err(e) = json.Unmarshal(encode_json(t, "team")?, &fields) { return Err(f"decoding team: {e}") }
+    fields["issues"] = encode_json(issues_held, "team")?
+    return print_json(fields, "team")
+  }
 
   fmt.Println(f"Key:    {t.key}")
   fmt.Println(f"Name:   {t.name}")

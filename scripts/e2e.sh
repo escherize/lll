@@ -829,9 +829,14 @@ assert_contains "$out" "issue ZZZ-9 not found" "close unknown ID message"
 out=$(LLL_URL=$URL LLL_TEAM=ENG "$LIN" issue create -t "Delete me")
 assert_contains "$out" "Created ENG-7" "delete target created"
 
-out=$(printf 'n\n' | LLL_URL=$URL "$LIN" issue delete ENG-7)
+# A declined confirmation is a refusal: exit 4 (LLL-645).
+set +e
+out=$(printf 'n\n' | LLL_URL=$URL "$LIN" issue delete ENG-7 2>&1)
+rc=$?
+set -e
+[ "$rc" -eq 4 ] || fail "declined delete: expected exit 4, got $rc"
 assert_contains "$out" "delete ENG-7? [y/N]" "delete prompts"
-assert_contains "$out" "Aborted." "delete declined"
+assert_contains "$out" "aborted: nothing was deleted" "delete declined"
 out=$(LLL_URL=$URL LLL_TEAM=ENG "$LIN" issue list)
 assert_contains "$out" "ENG-7" "declined delete keeps the issue"
 
@@ -893,7 +898,7 @@ members=$(LLL_URL=$URL "$LIN" member list --json)
 if out=$(LLL_URL=$URL "$LIN" member add -n "Invalid Email Probe" -e invalid-address 2>&1); then
   fail "invalid member email should be refused"
 fi
-assert_contains "$out" '"email"' "rejected member creation identifies the email field"
+assert_contains "$out" 'email: Must be a valid email address.' "rejected member creation identifies the email field"
 assert_contains "$out" 'valid email address' "rejected member creation includes the field reason"
 out=$(LLL_URL=$URL "$LIN" member list)
 assert_contains "$out" "bryan" "member list has bryan"
@@ -1107,8 +1112,8 @@ out=$(cd "$REPO" && LLL_URL=$URL "$LLL_ABS" issue comment)
 assert_contains "$out" "From the branch" "inferred comment list"
 
 # --- no comments ---
-out=$(LLL_URL=$URL "$LIN" issue comment ENG-1)
-assert_contains "$out" "No comments." "empty comment list message"
+out=$(LLL_URL=$URL "$LIN" issue comment ENG-1 2>&1)
+assert_contains "$out" "no comments" "empty comment list message"
 
 # --- projects: create + list ---
 out=$(LLL_URL=$URL LLL_TEAM=ENG "$LIN" project create -n "Auth Revamp" -b "Rework the login flow" --team ENG)
@@ -1398,6 +1403,8 @@ for bot_help in --help -h; do
 done
 # --- lll search: full text over issues, comments and docs, ranked, with context (LLL-96) ---
 python3 "$REPO_ROOT"/scripts/test_search_team.py "$LLL_ABS"
+# --- the 1.0 CLI contract: exit codes, list envelope, issue JSON, time flags (LLL-645) ---
+python3 "$REPO_ROOT"/scripts/test_cli_contract.py "$LLL_ABS"
 # --- member invite --team: one team over the API and the board ---
 python3 "$REPO_ROOT"/scripts/test_team_scope.py "$LLL_ABS"
 # --- an archived team is read-only on the server, every collection classified (LLL-660) ---
@@ -1449,9 +1456,9 @@ done
 out=$(env LLL_URL=$URL LLL_TEAM=ENG "$LIN" search "" "" 2>&1) && fail "blank-only search should refuse"
 assert_contains "$out" "what to search for" "blank-only search still names the usage"
 out=$(env LLL_URL=$URL LLL_TEAM=ENG "$LIN" search zebra --json)
-printf '%s' "$out" | jq -e '.[0].group and .[0].snippets[0].lines[0]' >/dev/null || fail "search --json: not the hit shape: $out"
-out=$(env LLL_URL=$URL LLL_TEAM=ENG "$LIN" search "no-such-word-anywhere-xq")
-assert_contains "$out" "No match for" "no hits says so"
+printf '%s' "$out" | jq -e '.items[0].group and .items[0].snippets[0].lines[0]' >/dev/null || fail "search --json: not the hit shape: $out"
+out=$(env LLL_URL=$URL LLL_TEAM=ENG "$LIN" search "no-such-word-anywhere-xq" 2>&1)
+assert_contains "$out" "no match for" "no hits says so"
 set +e
 out=$(env LLL_URL=$URL LLL_TEAM=ENG "$LIN" search 2>&1)
 set -e
@@ -1462,9 +1469,9 @@ assert_contains "$out" "what to search for" "search without a query names the us
 UKEY=$(env LLL_URL=$URL LLL_TEAM=ENG "$LIN" issue create -t "日本語クイックスタートを公開する" -d "日本語の説明を追加する" | sed -n 's/^Created \([A-Z]*-[0-9]*\).*/\1/p')
 [ -n "$UKEY" ] || fail "Unicode search fodder create did not print a key"
 out=$(env LLL_URL=$URL LLL_TEAM=ENG "$LIN" search 日本語 --json --refresh)
-printf '%s' "$out" | jq -e --arg key "$UKEY" 'any(.[]; .group == $key)' >/dev/null || fail "Japanese substring query missed its issue: $out"
+printf '%s' "$out" | jq -e --arg key "$UKEY" 'any(.items[]; .group == $key)' >/dev/null || fail "Japanese substring query missed its issue: $out"
 out=$(env LLL_URL=$URL LLL_TEAM=ENG "$LIN" search 日本語クイックスタートを公開する --json)
-printf '%s' "$out" | jq -e --arg key "$UKEY" '.[0].group == $key' >/dev/null || fail "Japanese full-title query missed its issue: $out"
+printf '%s' "$out" | jq -e --arg key "$UKEY" '.items[0].group == $key' >/dev/null || fail "Japanese full-title query missed its issue: $out"
 
 # --- dependencies: block / unblock, Blocked by / Blocks, --ready / --blocked (LLL-175) ---
 DA=$(env LLL_URL=$URL LLL_TEAM=ENG "$LIN" issue create -t "Dep: the foundation" | sed -n 's/^Created \([A-Z]*-[0-9]*\).*/\1/p')
@@ -1969,15 +1976,15 @@ out=$(LLL_URL=$URL LLL_TEAM=ENG "$LIN" finding near ./rank-probe/file.lis)
 [ "$(printf '%s\n' "$out" | cut -f1 | paste -sd, -)" = 'z-ranking-exact,a-ranking-directory' ] \
   || fail "finding near did not rank exact before directory: $out"
 out=$(LLL_URL=$URL LLL_TEAM=ENG "$LIN" finding list --path rank-probe/file.lis --json)
-[ "$(jq -r 'map(.slug) | join(",")' <<<"$out")" = 'z-ranking-exact,a-ranking-directory' ] \
+[ "$(jq -r '.items | map(.slug) | join(",")' <<<"$out")" = 'z-ranking-exact,a-ranking-directory' ] \
   || fail "finding list JSON did not share path ranking: $out"
 
 out=$(LLL_URL=$URL LLL_TEAM=ENG "$LIN" finding list)
 assert_contains "$out" "migration-hazard	pb	Migration collisions" "finding list prints slug, area, title"
 out=$(LLL_URL=$URL LLL_TEAM=ENG "$LIN" finding list --area pb)
 assert_contains "$out" "migration-hazard" "finding list --area matches"
-out=$(LLL_URL=$URL LLL_TEAM=ENG "$LIN" finding list --area nothing)
-assert_contains "$out" "No findings." "finding list --area without a match"
+out=$(LLL_URL=$URL LLL_TEAM=ENG "$LIN" finding list --area nothing 2>&1)
+assert_contains "$out" "no findings" "finding list --area without a match"
 
 # --- finding list --limit (LLL-313): post-filter slice, issue list's validation ---
 out=$(LLL_URL=$URL LLL_TEAM=ENG "$LIN" finding list --limit 2)
@@ -2502,7 +2509,7 @@ assert_contains "$out" "Claimed $CKEY for bryan" "claim output"
 out=$(env $E "$LIN" issue view "$CKEY")
 assert_contains "$out" "Claimed:   bryan" "issue view shows the holder"
 assert_contains "$out" "Assignee:  bryan" "claiming assigns the issue"
-env $E "$LIN" issue view "$CKEY" --json | python3 -c 'import json,sys; d=json.load(sys.stdin); assert d["claim"]["expand"]["member"]["name"] == "bryan"; assert d["comments"] == []'
+env $E "$LIN" issue view "$CKEY" --json | python3 -c 'import json,sys; d=json.load(sys.stdin); assert d["claim"]["holder"] == "bryan"; assert d["comments"] == []'
 # D3 (LLL-640): close releases the closer's claim. Closing an issue someone
 # else holds is the release rule's case: refused without --force, nothing
 # changes, and the hint names --force --reason.
@@ -2513,11 +2520,11 @@ set -e
 [ "$rc" -ne 0 ] || fail "closing another member's claimed issue without --force: expected nonzero exit"
 assert_contains "$out" "needs force" "non-holder close names force"
 assert_contains "$out" "lll issue close $CKEY --force --reason" "non-holder close names the forced spelling"
-env $E "$LIN" issue view "$CKEY" --json | python3 -c 'import json,sys; d=json.load(sys.stdin); assert d["state"] != "done"; assert d["claim"]["expand"]["member"]["name"] == "bryan"'
+env $E "$LIN" issue view "$CKEY" --json | python3 -c 'import json,sys; d=json.load(sys.stdin); assert d["state"] != "done"; assert d["claim"]["holder"] == "bryan"'
 out=$(env $E LLL_TOKEN="$BRYAN_TOK" LLL_ME=bryan "$LIN" issue close "$CKEY" --keep-claim)
 assert_contains "$out" "Closed $CKEY" "holder close with --keep-claim closes"
 assert_contains "$out" "Claim kept by bryan" "--keep-claim keeps the holder's claim"
-env $E "$LIN" issue view "$CKEY" --json | python3 -c 'import json,sys; d=json.load(sys.stdin); assert d["state"] == "done"; assert d["claim"]["expand"]["member"]["name"] == "bryan"'
+env $E "$LIN" issue view "$CKEY" --json | python3 -c 'import json,sys; d=json.load(sys.stdin); assert d["state"] == "done"; assert d["claim"]["holder"] == "bryan"'
 CK2=$(env $E "$LIN" issue create -t "Close releases" | sed -n 's/^Created \([A-Z]*-[0-9]*\).*/\1/p')
 env $E LLL_TOKEN="$BRYAN_TOK" LLL_ME=bryan "$LIN" issue claim "$CK2" --agent wt-a >/dev/null
 out=$(env $E LLL_TOKEN="$BRYAN_TOK" LLL_ME=bryan "$LIN" issue close "$CK2" --agent wt-a)
@@ -2589,7 +2596,9 @@ binary, key = sys.argv[1:]
 
 def run(*args, code=0):
     result = subprocess.run([binary, *args], text=True, capture_output=True)
-    assert result.returncode == code, (args, result.returncode, result.stdout, result.stderr)
+    # None: any refusal; usage errors exit 2, others 1 (LLL-645).
+    ok = result.returncode != 0 if code is None else result.returncode == code
+    assert ok, (args, result.returncode, result.stdout, result.stderr)
     return result
 
 def record():
@@ -2603,7 +2612,7 @@ def reset(text):
 
 def refuse(args, message):
     before = record()
-    result = update(*args, "--title", "must not land", code=1)
+    result = update(*args, "--title", "must not land", code=None)
     assert message in result.stderr, result.stderr
     assert record() == before, (args, before, record())
     return result
@@ -2670,7 +2679,8 @@ pre412=$(curl -s -X PATCH -H "$AUTH_HDR" -H "Content-Type: application/json" \
   -d '{"title":"clobbered"}' "$URL/api/collections/issues/records/$iid")
 assert_contains "$pre412" '"status":412' "a server-side precondition answers 412"
 assert_contains "$pre412" "record changed since 2000-01-01 00:00:00.000Z" "the refusal names the stamp that was passed"
-now=$(env $E "$LIN" issue view "$CKEY" --json | jq -r '.updated')
+# --json prints RFC3339; the server's header and message use the stored space form.
+now=$(env $E "$LIN" issue view "$CKEY" --json | jq -r '.updated' | tr T ' ')
 assert_contains "$pre412" "$now" "and the current stamp to retry with"
 [ "$(env $E "$LIN" issue view "$CKEY" --json | jq -r '.title')" != "clobbered" ] || fail "a 412 precondition patch must not land"
 cur=$(curl -s -X PATCH -H "$AUTH_HDR" -H "Content-Type: application/json" \

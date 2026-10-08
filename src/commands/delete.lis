@@ -40,7 +40,7 @@ fn issue_count(filter: string) -> Result<int, string> {
 /// command that overrides it, so the user never has to guess the flag.
 fn refuse_delete(kind: string, name: string, used: int) -> string {
   let argument = cli_argument(name)
-  f"{used} issue(s) still reference the {kind} '{name}' — deleting it drops the {kind} off them.\nTo delete it anyway, run:\n  lll {kind} delete {argument} --force\nOr reassign those issues first."
+  pb.fail(pb.ErrorKind.Refused, f"{used} issue(s) still reference the {kind} '{name}' — deleting it drops the {kind} off them.\nTo delete it anyway, run:\n  lll {kind} delete {argument} --force\nOr reassign those issues first.")
 }
 
 /// What a completed delete prints. The count rides along even on the forced
@@ -59,6 +59,13 @@ fn confirmed(question: string) -> bool {
   if scanner.Scan() { answer = strings.TrimSpace(scanner.Text()) }
   let a = strings.ToLower(answer)
   a == "y" || a == "yes"
+}
+
+/// A declined confirmation: exit 4, refused (LLL-645). It used to print
+/// "Aborted." and exit 0, so a script could not tell a skipped delete from a
+/// done one.
+fn aborted() -> string {
+  pb.fail(pb.ErrorKind.Refused, "aborted: nothing was deleted")
 }
 
 /// The confirmation for deletes that never prompted before 1.0 (team, label,

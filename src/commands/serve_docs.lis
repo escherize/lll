@@ -5,6 +5,7 @@ import "go:strings"
 import "display"
 import "markdown"
 import "models"
+import "pb"
 import "records"
 
 // GET /t/{team}/doc/{slug} - a decision, finding, PRD or wiki page at an
@@ -39,7 +40,7 @@ fn doc_page(
   let doc = match fetch_doc(team, slug) {
     Ok(d) => d,
     Err(e) => {
-      http.Error(w, e, 404)
+      http.Error(w, pb.plain(e), 404)
       return
     },
   }
@@ -47,7 +48,7 @@ fn doc_page(
   let shown = match roster_for(r, team.id) {
     Ok(found) => found,
     Err(e) => {
-      http.Error(w, e, 500)
+      http.Error(w, pb.plain(e), 500)
       return
     },
   }
@@ -140,14 +141,14 @@ fn docs_page(
   let shown = match roster_for(r, team.id) {
     Ok(found) => found,
     Err(e) => {
-      http.Error(w, e, 500)
+      http.Error(w, pb.plain(e), 500)
       return
     },
   }
   let docs = match records.fetch_team_docs(team.id, kind) {
     Ok(found) => found,
     Err(e) => {
-      http.Error(w, e, 500)
+      http.Error(w, pb.plain(e), 500)
       return
     },
   }

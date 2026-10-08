@@ -48,7 +48,7 @@ fn settings_page(
   let vm = match settings_vm(team, section) {
     Ok(v) => v,
     Err(e) => {
-      http.Error(w, e, 500)
+      http.Error(w, pb.plain(e), 500)
       return
     },
   }
@@ -511,7 +511,7 @@ fn verify_admin(pass: string) -> Result<string, string> {
 /// Authentication failures have a specific recovery; other errors retain
 /// their actual server status and transport details.
 fn admin_verification_error(e: string) -> string {
-  if pb.response_status(e) == 400 {
+  if pb.classify(e).status == 400 {
     return f"wrong admin password for {admin_email()} — use the administrator credentials supplied through LLL_ADMIN_EMAIL and LLL_ADMIN_PASSWORD in the server's own environment"
   }
   f"verifying the admin password: {e}"

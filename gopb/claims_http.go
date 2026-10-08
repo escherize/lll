@@ -203,9 +203,18 @@ func respondClaim(re *core.RequestEvent, outcome ClaimOutcome, err error) error 
 	// below it is the shared shape.
 	var rejected *claimRejection
 	if errors.As(err, &rejected) {
-		return re.BadRequestError(rejected.Error(), nil)
+		return withCode(re.BadRequestError(rejected.Error(), nil), rejected.code)
 	}
 	return writeFailure(re, err, "issue or member no longer exists", "invalid issue fields", "claim transaction failed")
+}
+
+// withCode puts an lll refusal's stable code at data.code (LLL-645). "" adds
+// nothing, leaving PocketBase's empty data object.
+func withCode(apiErr *router.ApiError, code string) *router.ApiError {
+	if code != "" {
+		apiErr.Data = map[string]any{"code": code}
+	}
+	return apiErr
 }
 
 // writeFailure maps a failed transaction onto a response. The lll routes that

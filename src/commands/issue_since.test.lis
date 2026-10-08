@@ -1,3 +1,5 @@
+import "pb"
+
 #[test]
 fn since_normalizes_offsets_and_preserves_inclusive_milliseconds() {
   assert issue_since_stamp("2026-09-18T07:00:00Z") ==
@@ -40,4 +42,30 @@ fn since_rejects_invalid_or_incomplete_timestamps_with_layout_guidance() {
     assert message.contains("RFC3339")
     assert message.contains("2026-09-18T00:00:00Z")
   }
+}
+
+// LLL-645: time flags take the space form PocketBase stores, which --json
+// printed before 1.0, and compare instants.
+#[test]
+fn since_accepts_the_space_form_older_output_printed() {
+  assert issue_since_stamp("2026-09-18 07:00:00.123Z") ==
+  Ok("2026-09-18 07:00:00.123Z")
+  assert issue_since_stamp("2026-09-18 07:00:00Z") ==
+  Ok("2026-09-18 07:00:00.000Z")
+  let assert Err(bad) = issue_since_stamp("2026-09-18 07:00:00")
+  assert pb.exit_code(pb.classify(bad).kind) == 2
+}
+
+#[test]
+fn unchanged_since_names_one_instant_in_every_form() {
+  for value in [
+    "2026-10-08T03:02:11.982Z",
+    "2026-10-08 03:02:11.982Z",
+    "2026-10-08T05:02:11.982+02:00",
+    "2026-10-08T03:02:11.982400Z",
+  ] {
+    assert unchanged_since_stamp(value) == Ok("2026-10-08 03:02:11.982Z")
+  }
+  let assert Err(bad) = unchanged_since_stamp("yesterday")
+  assert pb.exit_code(pb.classify(bad).kind) == 2
 }

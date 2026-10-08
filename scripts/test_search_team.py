@@ -62,7 +62,7 @@ with tempfile.TemporaryDirectory(prefix='lll-search-team-') as directory:
         def hits(args,expected,team=None):
             result=run(['search','--json',*args],team)
             assert result.returncode==0,result.stderr
-            data=json.loads(result.stdout)
+            data=json.loads(result.stdout)['items']
             assert len(data)==1 and data[0]['group']==expected,(args,data)
         hits(['scope needle'],'ALPHA-1')
         hits(['scope needle'],'BETA-1',team='BETA')

@@ -363,6 +363,8 @@ pub struct Claim {
   #[json(omitempty)]
   pub agent: string,
   pub created: string,
+  // When the holder last renewed the hold (LLL-535); `created` on a fresh one.
+  pub updated: string,
   pub expand: ClaimExpand,
 }
 

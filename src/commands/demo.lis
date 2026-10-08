@@ -44,7 +44,7 @@ struct DemoDoc {
 /// real work would be a worse bug than the empty board it fixes.
 pub fn seed_demo(team_key: string, me: string, db_url: string, keep_cli_token: bool) -> Result<(), string> {
   let Some(team) = records.find_team(team_key)? else {
-    return Err(f"--demo: no team {team_key} to seed")
+    return Err(pb.fail(pb.ErrorKind.NotFound, f"--demo: no team {team_key} to seed"))
   };
   let existing = records.fetch_board_issues(team.id)?
   if !existing.is_empty() {

@@ -144,8 +144,9 @@ fn member_list(input: flags.CommandInput) -> Result<(), string> {
       withkeys.team_keys = m.teams.filter(|id| keys.get(id).is_some()).map(|id| keys.get(id).unwrap_or(""))
       items = items.append(withkeys)
     }
-    return print_json(models.MemberList { items }, "member list")
+    return print_list_json(items, whole_list(items.length()), "member list")
   }
+  if members.items.is_empty() { return say_empty("members") }
   for listed in members.items {
     // A bot shows what it can do now: within its owner's access (LLL-543).
     let (m, cap) = records.effective_access_in(listed, members.items)
@@ -360,7 +361,7 @@ fn member_remove(input: flags.CommandInput) -> Result<(), string> {
   let usage = input.usage
   let p = input.parsed
   let name = p.first()
-  if name == "" { return Err(f"usage: {usage}") }
+  if name == "" { return Err(flags.usage_error(f"usage: {usage}")) }
 
   point_at_url(p.one("--url"))?
   // Require an explicit admin login before lookup/counting. The backend also
@@ -383,7 +384,7 @@ fn member_remove(input: flags.CommandInput) -> Result<(), string> {
   }
   let su = superuser_auth(login)?
   let Some(member) = records.find_member_as(su, name)? else {
-    return Err(f"no member named '{name}' — see 'lll member list'")
+    return Err(pb.fail(pb.ErrorKind.NotFound, f"no member named '{name}' — see 'lll member list'"))
   }
 
   let references = member_references(member.id, su)?
@@ -399,8 +400,7 @@ or use --force to clear assignments, comment authorship and issue creator refere
   }
 
   if !confirmed_on_terminal(p.given("--yes"), f"delete member {member.name}?") {
-    fmt.Println("Aborted.")
-    return Ok(())
+    return Err(aborted())
   }
   let _ = pb.delete_as(f"/api/collections/members/records/{member.id}", su)?
   fmt.Println(f"removed member {member.name}")
@@ -462,7 +462,7 @@ fn point_at_url(given: string) -> Result<(), string> {
   if base == "" { return Ok(()) }
   if !strings.HasPrefix(base, "http://") && !strings.HasPrefix(base, "https://") {
     return Err(
-      f"--url must be a full base url starting with http:// or https:// (got '{base}')",
+      flags.usage_error(f"--url must be a full base url starting with http:// or https:// (got '{base}')"),
     )
   }
   if let Err(e) = os.Setenv("LLL_URL", base) {
@@ -479,12 +479,12 @@ fn point_at_url(given: string) -> Result<(), string> {
 /// Keep unrelated validation and server failures intact; only actual auth
 /// refusals should advise the caller to change administrative credentials.
 fn member_password_error(name: string, e: string) -> string {
-  let status = pb.response_status(e)
+  let status = pb.classify(e).status
   if status == 403 || status == 401 || (status == 400 &&
-  strings.Contains(pb.response_body(e), "oldPassword")) {
-    return "setting another member's password is superuser-only and the configured token is not one
+  strings.Contains(pb.classify(e).message, "oldPassword")) {
+    return pb.fail(pb.ErrorKind.Refused, "setting another member's password is superuser-only and the configured token is not one
 " + admin_hint() + f"
-if {name} is you, change your own password with: lll member set-password {name} --old-password <current>"
+if {name} is you, change your own password with: lll member set-password {name} --old-password <current>")
   }
   f"setting {name}'s password: {e}"
 }
@@ -493,7 +493,7 @@ fn member_set_password(input: flags.CommandInput) -> Result<(), string> {
   let usage = input.usage
   let p = input.parsed
   let name = p.first()
-  if name == "" { return Err(f"usage: {usage}") }
+  if name == "" { return Err(flags.usage_error(f"usage: {usage}")) }
 
   point_at_url(p.one("--url"))?
   if p.given("--old-password") {
@@ -506,7 +506,7 @@ fn member_set_password(input: flags.CommandInput) -> Result<(), string> {
   let su = superuser_auth(given_admin_login(p)?)?
   let found = records.find_member_as(su, name)?
   let Some(member) = found else {
-    return Err(f"no member named '{name}' — see 'lll member create'")
+    return Err(pb.fail(pb.ErrorKind.NotFound, f"no member named '{name}' — see 'lll member create'"))
   }
 
   // The email IS the login identity. A member carrying only the synthesized
@@ -584,11 +584,11 @@ fn member_invite(input: flags.CommandInput) -> Result<(), string> {
   let usage = input.usage
   let p = input.parsed
   let name = p.first()
-  if name == "" { return Err(f"usage: {usage}") }
+  if name == "" { return Err(flags.usage_error(f"usage: {usage}")) }
   let email = strings.TrimSpace(p.one("--email"))
   if !real_email(email) {
     return Err(
-      f"--email must be a real address the colleague can type into 'lll login', not '{email}'",
+      flags.usage_error(f"--email must be a real address the colleague can type into 'lll login', not '{email}'"),
     )
   }
 
@@ -618,7 +618,7 @@ fn member_invite(input: flags.CommandInput) -> Result<(), string> {
   let keys = p.all("--team").map(records.normalize_team_key).filter(|k| k != "")
   let mode = if p.given("--read-only") { "ro" } else { "rw" }
   if keys.is_empty() && mode == "ro" {
-    return Err("--read-only needs --team KEY: say which teams they may read")
+    return Err(flags.usage_error("--read-only needs --team KEY: say which teams they may read"))
   }
   if keys.is_empty() {
     let created = create_member_as(su, name, email, password, [], "")?
@@ -713,18 +713,18 @@ fn member_passes(input: flags.CommandInput) -> Result<(), string> {
   } else {
     let Ok(value) = strconv.Atoi(p.one("--count")) else {
       return Err(
-        f"--count must be a number from 1 to 50, got '{p.one("--count")}'",
+        flags.usage_error(f"--count must be a number from 1 to 50, got '{p.one("--count")}'"),
       )
     }
     value
   }
-  if count < 1 || count > 50 { return Err("--count must be from 1 to 50") }
+  if count < 1 || count > 50 { return Err(flags.usage_error("--count must be from 1 to 50")) }
   let prefix = if p.one("--prefix") == "" {
     "guest"
   } else {
     strings.TrimSpace(p.one("--prefix"))
   }
-  if prefix == "" { return Err("--prefix cannot be blank") }
+  if prefix == "" { return Err(flags.usage_error("--prefix cannot be blank")) }
   let duration = parse_token_duration(p.one("--duration"))?
   let admin_file = filepath.Join(
     filepath.Dir(config.home_path()?),
@@ -1008,14 +1008,14 @@ fn member_create_error(e: string) -> string {
   // PocketBase answers with a bare 400 (scoped-access fleet case 09: 4 of
   // 10 got nothing more). A validation failure carries field data, and a
   // gopb refusal (the bot- prefix) its own message; both pass through.
-  if pb.response_status(e) == 400 && e.contains("\"data\":{}") && e.contains("Failed to create record.") {
-    return "your token cannot add members: only a member with read-write access to every team, or administrator credentials ('lll member invite NAME --email E' with LLL_ADMIN_EMAIL/LLL_ADMIN_PASSWORD), can
-for your own agent, a read-write member runs 'lll bot create bot-NAME' (a bot it owns); a read-only member cannot, so ask whoever invited you"
+  if pb.classify(e).status == 400 && pb.classify(e).message == "Failed to create record." {
+    return pb.fail(pb.ErrorKind.Refused, "your token cannot add members: only a member with read-write access to every team, or administrator credentials ('lll member invite NAME --email E' with LLL_ADMIN_EMAIL/LLL_ADMIN_PASSWORD), can
+for your own agent, a read-write member runs 'lll bot create bot-NAME' (a bot it owns); a read-only member cannot, so ask whoever invited you")
   }
-  if pb.response_status(e) == 401 {
-    return "creating a member needs a member token: the one configured here is missing or was refused
+  if pb.classify(e).status == 401 {
+    return pb.fail(pb.ErrorKind.Auth, "creating a member needs a member token: the one configured here is missing or was refused
 administrator credentials (LLL_ADMIN_EMAIL/LLL_ADMIN_PASSWORD) do not authenticate member creation
-paths forward: 'lll login --create' makes a first member login with the admin credentials; 'lll member invite NAME --email EMAIL' creates the member from the admin side; 'lll token create NAME' mints an agent token for an existing member"
+paths forward: 'lll login --create' makes a first member login with the admin credentials; 'lll member invite NAME --email EMAIL' creates the member from the admin side; 'lll token create NAME' mints an agent token for an existing member")
   }
   e
 }
@@ -1239,9 +1239,9 @@ struct AccessPatch {
 fn member_access_cmd(input: flags.CommandInput) -> Result<(), string> {
   let p = input.parsed
   let name = p.first()
-  if name == "" { return Err("usage: lll member access NAME [--team KEY]... [--add-team KEY] [--remove-team KEY] [--all-teams|--no-teams] [--read-only|--read-write]") }
+  if name == "" { return Err(flags.usage_error("usage: lll member access NAME [--team KEY]... [--add-team KEY] [--remove-team KEY] [--all-teams|--no-teams] [--read-only|--read-write]")) }
   let Some(m) = records.find_member(name)? else {
-    return Err(f"no member named '{name}' — see 'lll member list'")
+    return Err(pb.fail(pb.ErrorKind.NotFound, f"no member named '{name}' — see 'lll member list'"))
   }
   let teams = records.list_teams()?.items
   let key_of = |id: string| teams.find(|t| t.id == id).map_or(id, |t| t.key)
@@ -1310,10 +1310,10 @@ fn member_access_cmd(input: flags.CommandInput) -> Result<(), string> {
   if let Err(e) = pb.patch_as(f"/api/collections/members/records/{m.id}", payload, su) {
     // gopb checkOwner's refusal names its own fix (LLL-543).
     if strings.Contains(e, "bot never exceeds its owner") { return Err(e) }
-    let status = pb.response_status(e)
+    let status = pb.classify(e).status
     if status == 400 || status == 403 || status == 404 {
       return Err(
-        "changing access needs administrator credentials: " + admin_hint() + ". A member or bot token cannot change anyone's access, its own included.",
+        pb.fail(pb.ErrorKind.Refused, "changing access needs administrator credentials: " + admin_hint() + ". A member or bot token cannot change anyone's access, its own included."),
       )
     }
     return Err(e)
@@ -1339,7 +1339,7 @@ fn print_owner_cap(m: models.Member, key_of: fn(string) -> string) -> Result<(),
   let (eff, cap) = match records.effective_access(m) {
     Ok(found) => found,
     Err(e) => {
-      if pb.response_status(e) == 404 { return Ok(()) }
+      if pb.classify(e).status == 404 { return Ok(()) }
       return Err(e)
     },
   }

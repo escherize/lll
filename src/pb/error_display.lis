@@ -1,5 +1,4 @@
 import "go:encoding/json"
-import "go:sort"
 
 pub struct ErrorDisplay { pub summary: string, pub details: string }
 
@@ -7,36 +6,40 @@ pub struct ErrorDisplay { pub summary: string, pub details: string }
 struct ErrorEnvelope {
   message: string,
   data: json.RawMessage,
+  status: int,
 }
 
-/// Presentation is separate from the original error protocol: status-sensitive
-/// callers and CLI diagnostics retain the exact request error they received.
-pub fn display_error(message: string) -> ErrorDisplay {
-  let status = response_status(message)
-  if status >= 400 && status < 500 {
-    let mut envelope = ErrorEnvelope { .. }
-    let decoded = json.Unmarshal(response_body(message).bytes(), &envelope).is_ok()
-    if decoded && envelope.message != "" {
-      let mut fields = field_errors(envelope.data, "", 0).clone()
-      sort.Strings(fields)
-      let mut summary = envelope.message
-      for field in fields { summary += f"\n{field}" }
-      return ErrorDisplay { summary, details: "" }
-    }
+#[json]
+struct EnvelopeCode {
+  code: string,
+}
+
+/// The board's presentation of an error: a sentence for the person, and the
+/// diagnostics apart from it. Decided by the error's kind, never its wording.
+pub fn display_error(text: string) -> ErrorDisplay {
+  let err = classify(text)
+  match err.kind {
+    ErrorKind.Server => {
+      let summary = if err.status >= 500 {
+        f"The server could not complete this request (HTTP {err.status}). Try again."
+      } else if err.status != 0 {
+        f"The server rejected this request (HTTP {err.status})."
+      } else { "The server returned an unreadable response. Try again." }
+      ErrorDisplay { summary, details: err.message }
+    },
+    ErrorKind.Network => ErrorDisplay {
+      summary: "The board could not communicate with its server. Try again.",
+      details: err.message,
+    },
+    _ => ErrorDisplay { summary: err.message, details: "" },
   }
-  if status != 0 {
-    let summary = if status >= 500 {
-      f"The server could not complete this request (HTTP {status}). Try again."
-    } else { f"The server rejected this request (HTTP {status})." }
-    return ErrorDisplay { summary, details: message }
-  }
-  if message.starts_with("cannot reach the lll server at ") || ["GET http", "POST http", "PATCH http", "DELETE http", "PUT http", "HEAD http", "OPTIONS http"].any(|prefix| message.starts_with(prefix)) {
-    return ErrorDisplay { summary: "The board could not communicate with its server. Try again.", details: message }
-  }
-  if message.starts_with("decoding ") {
-    return ErrorDisplay { summary: "The server returned an unreadable response. Try again.", details: message }
-  }
-  ErrorDisplay { summary: message, details: "" }
+}
+
+/// The stable code an lll refusal carries at data.code (gopb), "" for none.
+fn envelope_code(raw: json.RawMessage) -> string {
+  let mut data = EnvelopeCode { .. }
+  if json.Unmarshal(raw, &data).is_err() { return "" }
+  data.code
 }
 
 fn field_errors(raw: json.RawMessage, path: string, depth: int) -> Slice<string> {
