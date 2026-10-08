@@ -35,7 +35,7 @@ code, not on the error text.
 
 `--help` and `-h` exit 0 and print to stdout.
 
-A code never depends on server state the command line cannot see. So
+A usage error (2) never depends on server state the command line cannot see. So
 `--force` on `issue delete` means "even if claimed": on an unclaimed issue it
 is unneeded, and the delete goes ahead. `--force` never skips the
 confirmation; without `--yes`, a declined confirmation exits 4.

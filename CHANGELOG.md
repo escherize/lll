@@ -193,8 +193,9 @@ that close, release, delete or create bots.
   upgrade, and it still takes unrelated edits (LLL-628).
 - A key derived from a directory name (`lll up`, `lll attach`) now keeps
   only ASCII letters and digits and starts with a letter.
-- "no team configured" exits 2 (usage), not 1, and names both fixes:
-  `--team KEY` for one command, or `lll attach` (LLL-679).
+- A command that needs a team and has none (the "no team configured"
+  refusal, and `bot create`/`bot rotate`) exits 2 (usage), not 1, and names
+  the fix: `--team KEY` for one command, or `lll attach` (LLL-679).
 
 ### Removed
 

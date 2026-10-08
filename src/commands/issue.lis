@@ -1298,7 +1298,9 @@ fn view(input: flags.CommandInput) -> Result<(), string> {
     }
     let blockers = blockers_of(full, full.expand.blocked_by)
     let open = blockers.open.length()
-    let mut tail = if open == 0 { " — all done, ready" } else { f" — {open} open, not ready" }
+    // is_ready's archived rule (LLL-679): an archived team's issue is not ready.
+    let done = if full.expand.team.archived { " — all done, but the team is archived" } else { " — all done, ready" }
+    let mut tail = if open == 0 { done } else { f" — {open} open, not ready" }
     if blockers.hidden > 0 {
       let counted = if open == 0 { "" } else { f"{open} open, " }
       tail = f" — {counted}{blockers.hidden} you cannot see, not ready"

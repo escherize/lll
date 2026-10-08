@@ -299,6 +299,8 @@ assert_contains "$out" "Created QA-1" "an unarchived team takes new issues again
 LLL_URL=$URL "$LIN" team archive QA >/dev/null
 out=$(cd "$DATA_DIR" && env -u LLL_TEAM LLL_URL=$URL "$LIN" issue list --ready)
 assert_not_contains "$out" "QA-1" "list --ready with no team skips an archived team"
+out=$(cd "$DATA_DIR" && env -u LLL_TEAM LLL_URL=$URL "$LIN" issue next 2>&1 || true)
+assert_not_contains "$out" "QA-" "issue next with no team never offers an archived team's issue"
 set +e
 out=$(cd "$DATA_DIR" && env -u LLL_TEAM LLL_URL=$URL "$LIN" issue next --team QA 2>&1); rc=$?
 set -e
