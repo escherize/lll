@@ -1096,7 +1096,7 @@ out=$(LLL_URL=$URL "$LIN" issue comment ENG-1)
 assert_contains "$out" "No comments." "empty comment list message"
 
 # --- projects: create + list ---
-out=$(LLL_URL=$URL LLL_TEAM=ENG "$LIN" project create -n "Auth Revamp" -d "Rework the login flow" --team ENG)
+out=$(LLL_URL=$URL LLL_TEAM=ENG "$LIN" project create -n "Auth Revamp" -b "Rework the login flow" --team ENG)
 assert_contains "$out" "Created project Auth Revamp (planned)" "project create output"
 out=$(LLL_URL=$URL LLL_TEAM=ENG "$LIN" project create -n "Perf Push" --status started)
 assert_contains "$out" "Created project Perf Push (started)" "project create with --status"
@@ -2022,12 +2022,16 @@ for pair in 'issue show view' 'issue new create' 'doc new create' 'doc show view
   alias_help=$("$LIN" "$noun" "$alias" --help)
   [ "$alias_help" = "$canonical_help" ] || fail "$noun $alias must show canonical help"
 done
-for noun in issue doc finding; do
+for noun in issue doc; do
   if "$LIN" "$noun" read --help >"$DATA_DIR/retired.out" 2>&1; then
     fail "$noun read must refuse the retired spelling"
   fi
   assert_contains "$(cat "$DATA_DIR/retired.out")" "unknown $noun command: 'read' - did you mean 'lll $noun view'?" "retired verb names view"
 done
+if "$LIN" finding read migration-hazard >"$DATA_DIR/retired.out" 2>&1; then
+  fail "finding read must refuse the removed spelling"
+fi
+assert_contains "$(cat "$DATA_DIR/retired.out")" "did you mean 'lll doc view SLUG'?" "finding read names doc view"
 for noun in issue doc finding member; do
   assert_not_contains "$("$LIN" "$noun" --help)" "the same command as" "canonical help has no duplicate alias rows"
 done
@@ -3555,7 +3559,7 @@ assert_contains "$out" 'saved local attachment only' 'offline attach distinguish
 assert_contains "$out" 'lll attach --key OFFLINE' 'offline attach gives explicit reconciliation'
 assert_not_contains "$out" 'lll up' 'offline client recovery does not start a server'
 [ "$(cat "$ORACLE_REPO/.lll.toml")" = 'team = "OFFLINE"' ] || fail 'explicit long key was changed'
-out=$(cd "$ORACLE_REPO" && HOME="$ORACLE_HOME" "$LLL_ABS" attach --key'' 2>&1) && fail 'empty explicit attachment accepted'
+out=$(cd "$ORACLE_REPO" && HOME="$ORACLE_HOME" "$LLL_ABS" attach --key '' 2>&1) && fail 'empty explicit attachment accepted'
 assert_contains "$out" 'nonempty team key' 'empty key rejected before config mutation'
 [ "$(cat "$ORACLE_REPO/.lll.toml")" = 'team = "OFFLINE"' ] || fail 'empty key changed attachment'
 out=$(cd "$ORACLE_REPO" && env -u LLL_TOKEN -u LLL_TEAM -u LLL_URL HOME="$ORACLE_HOME" "$LLL_ABS" login --url "$URL" --email e2e-agent@lll.test --password e2e-agent-pass-123)

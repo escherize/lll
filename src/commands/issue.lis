@@ -641,7 +641,9 @@ fn issue_union_spec() -> Slice<flags.Flag> {
   let mut out: Slice<flags.Flag> = []
   for c in issue_commands() {
     for fl in c.spec {
-      if out.find(|f| f.name == fl.name).is_none() { out = out.append(fl) }
+      // Keyed by name AND aliases: -b is the description on create and the
+      // forced-clear reason on update/release, and both rows belong here.
+      if out.find(|f| f.name == fl.name && f.alias == fl.alias).is_none() { out = out.append(fl) }
     }
   }
   out
@@ -1315,7 +1317,7 @@ fn update(input: flags.CommandInput) -> Result<(), string> {
   }
   let mut reason = ""
   if p.given("-b") {
-    if !force { return Err("-b is the reason for a forced clear; add --force") }
+    if !force { return Err("-b is the reason for a forced clear; add --force (the new description is --description)") }
     reason = value_or_stdin(p.one("-b"), "-b")?
   }
   let agent = if assignee_name != "" { agent_label(p)? } else { "" }

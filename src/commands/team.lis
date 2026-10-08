@@ -186,7 +186,11 @@ fn team_rename_spec() -> Slice<flags.Flag> {
 
 fn team_create(input: flags.CommandInput) -> Result<(), string> {
   let p = input.parsed
-  let key = flags.entity_name(p, "--key", input.usage)?
+  if p.first() != "" && p.given("--key") {
+    return Err(f"give the team key as the bare argument or --key, not both\nusage: {input.usage}")
+  }
+  let key = if p.given("--key") { p.one("--key") } else { p.first() }
+  if strings.TrimSpace(key) == "" { return Err(f"a team key is required (e.g. ENG)\nusage: {input.usage}") }
   let name = p.one("-n")
 
   let created = create_team(key, name)?

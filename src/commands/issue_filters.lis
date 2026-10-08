@@ -12,18 +12,17 @@ fn filter_spec(use: FilterUse) -> Slice<flags.Flag> {
   let state_hint = if use == FilterUse.Create { "\n(create defaults to todo)" } else { "" }
   let assignee_hint = if use == FilterUse.Update { "; 'none' clears it (update)" } else { "" }
   let project_hint = if use == FilterUse.Update { "; pass \"\" to clear it" } else { "" }
-  let repeat_label = true
   // Repeatable only where it filters: on create/update a state is the one the
   // issue moves to, and two would be a contradiction rather than a union.
   let repeat_state = use == FilterUse.List || use == FilterUse.Watch
   let state_repeat_hint = if repeat_state { "; repeatable, matching any of them" } else { "" }
   // LLL-381: say what a repeat MEANS on each side, since it differs - on a
   // mutation the last set wins, on a filter they union.
-  let label_hint = if repeat_label { "; repeatable\n(update replaces the set - --add-label/--remove-label edit it;\na filter matches any of them)" } else { "" }
+  let label_hint = if use == FilterUse.Watch { "; repeatable, matching any of them" } else { "; repeatable\n(update replaces the set - --add-label/--remove-label edit it;\na filter matches any of them)" }
   [
     flags.Flag { name: "--state", value: true, hint: "s", repeat: repeat_state, help: f"one of: {strings.Join(query.states(), ", ")}{state_hint}{state_repeat_hint}", .. },
     flags.Flag { name: "--assignee", value: true, hint: "name", help: f"member name (see 'lll member list'){assignee_hint}", .. },
-    flags.Flag { name: "--label", value: true, hint: "name", repeat: repeat_label, help: f"label name (see 'lll label list'){label_hint}", .. },
+    flags.Flag { name: "--label", value: true, hint: "name", repeat: true, help: f"label name (see 'lll label list'){label_hint}", .. },
     flags.Flag { name: "--project", value: true, hint: "name", help: f"project name (see 'lll project list'){project_hint}", .. },
   ]
 }
