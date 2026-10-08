@@ -42,7 +42,7 @@ struct DemoDoc {
 /// Seed `team_key` when it holds no issues. Never touches a team that has any:
 /// the demo is for a board nobody has used yet, and duplicating ten issues into
 /// real work would be a worse bug than the empty board it fixes.
-pub fn seed_demo(ctx: pb.Client, team_key: string, me: string, db_url: string, keep_cli_token: bool) -> Result<(), string> {
+pub fn seed_demo(ctx: pb.Client, team_key: string, me: string, db_url: string, keep_cli_token: bool) -> Result<(), pb.CliError> {
   let Some(team) = records.find_team(ctx, team_key)? else {
     return Err(pb.fail(pb.ErrorKind.NotFound, f"--demo: no team {team_key} to seed"))
   };
@@ -91,7 +91,7 @@ pub fn seed_demo(ctx: pb.Client, team_key: string, me: string, db_url: string, k
 /// Only ever into an EMPTY slot. A configured token belongs to somebody's real
 /// server, and overwriting it to make a toy board convenient would be the worst
 /// trade in this file.
-fn point_cli_at_demo(ctx: pb.Client, db_url: string, team_key: string, me: string, keep_cli_token: bool) -> Result<(), string> {
+fn point_cli_at_demo(ctx: pb.Client, db_url: string, team_key: string, me: string, keep_cli_token: bool) -> Result<(), pb.CliError> {
   // `keep_cli_token` was decided from the token source up started with:
   // the client here already carries the board's own member token.
   if keep_cli_token {
@@ -118,16 +118,16 @@ fn demo_labels() -> Slice<(string, string)> {
   ]
 }
 
-fn make_label(ctx: pb.Client, team_id: string, name: string, color: string) -> Result<string, string> {
+fn make_label(ctx: pb.Client, team_id: string, name: string, color: string) -> Result<string, pb.CliError> {
   let body = writes.create_label(ctx, models.NewLabel { name, color, team: team_id })?
   let mut created = models.Label { .. }
   if let Err(e) = json.Unmarshal(body.bytes(), &created) {
-    return Err(f"demo: decoding label {name}: {e}")
+    return Err(pb.failed(f"demo: decoding label {name}: {e}"))
   }
   Ok(created.id)
 }
 
-fn make_project(ctx: pb.Client, team_id: string) -> Result<string, string> {
+fn make_project(ctx: pb.Client, team_id: string) -> Result<string, pb.CliError> {
   let new_project = models.NewProject {
     name: "First hour",
     description: "The ten things worth trying before you decide anything.",
@@ -137,7 +137,7 @@ fn make_project(ctx: pb.Client, team_id: string) -> Result<string, string> {
   let body = writes.create_project(ctx, new_project)?
   let mut created = models.Project { .. }
   if let Err(e) = json.Unmarshal(body.bytes(), &created) {
-    return Err(f"demo: decoding project: {e}")
+    return Err(pb.failed(f"demo: decoding project: {e}"))
   }
   Ok(created.id)
 }
@@ -149,7 +149,7 @@ fn make_issue(
   project: string,
   labels: Slice<string>,
   spec: DemoIssue,
-) -> Result<(), string> {
+) -> Result<(), pb.CliError> {
   let new_issue = models.NewIssue {
     creator,
     origin: provenance.capture(ctx.settings.env.agent),
@@ -167,7 +167,7 @@ fn make_issue(
   Ok(())
 }
 
-fn make_doc(ctx: pb.Client, team_id: string, doc: DemoDoc) -> Result<(), string> {
+fn make_doc(ctx: pb.Client, team_id: string, doc: DemoDoc) -> Result<(), pb.CliError> {
   let new_doc = models.NewDoc {
     team: team_id,
     slug: doc.slug,

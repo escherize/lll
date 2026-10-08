@@ -15,10 +15,10 @@ import "pb"
 // module.
 
 /// A request body from a `#[json]` value. `what` names it in the error.
-fn encode(value: Unknown, what: string) -> Result<string, string> {
+fn encode(value: Unknown, what: string) -> Result<string, pb.CliError> {
   match json.Marshal(value) {
     Ok(b) => Ok(b as string),
-    Err(e) => Err(f"encoding {what}: {e}"),
+    Err(e) => Err(pb.failed(f"encoding {what}: {e}")),
   }
 }
 
@@ -37,7 +37,7 @@ fn create(
   path: string,
   value: Unknown,
   what: string,
-) -> Result<string, string> {
+) -> Result<string, pb.CliError> {
   let body = encode(value, what)?
   ctx.send_as(caller, "POST", path, body, "application/json")
 }
@@ -50,7 +50,7 @@ fn update(
   id: string,
   value: Unknown,
   what: string,
-) -> Result<string, string> {
+) -> Result<string, pb.CliError> {
   let body = encode(value, what)?
   ctx.send_as(
     caller,
@@ -66,7 +66,7 @@ fn remove(
   caller: pb.Caller,
   collection: string,
   id: string,
-) -> Result<(), string> {
+) -> Result<(), pb.CliError> {
   let _ = ctx.send_as(
     caller,
     "DELETE",

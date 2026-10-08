@@ -28,7 +28,7 @@ fn validate_target_rejects_non_http_schemes_and_hostless_urls() {
       Err(m) => m,
       Ok(kept) => panic(f"validate_target accepted '{kept}'"),
     }
-    assert strings.Contains(msg, "http(s) URL")
+    assert strings.Contains(msg.message, "http(s) URL")
   }
 }
 
@@ -40,7 +40,7 @@ fn validate_target_rejects_blank_with_the_command_name() {
     Err(m) => m,
     Ok(kept) => panic(f"validate_target accepted '{kept}'"),
   }
-  assert strings.Contains(msg, "lll webhook add URL")
+  assert strings.Contains(msg.message, "lll webhook add URL")
 }
 
 // ------------------------------------------------------------------ scope

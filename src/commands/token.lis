@@ -28,7 +28,7 @@ import "tokens"
 /// Dispatch `lll token <verb>` through the noun's Command table (TASK-307).
 /// The table is the one place a verb is declared: dispatch, `lll token --help`
 /// and shell completions all read it, so none of the three can drift.
-pub fn token(ctx: pb.Client, args: Slice<string>) -> Result<(), string> {
+pub fn token(ctx: pb.Client, args: Slice<string>) -> Result<(), pb.CliError> {
   flags.dispatch(ctx, "token", "work with agent tokens", token_intro(), token_commands(), args)
 }
 
@@ -75,7 +75,7 @@ fn token_create_spec() -> Slice<flags.Flag> {
 /// collection duration, and a negative is refused here rather than
 /// round-tripped into a 400 (PocketBase validates duration >= 0,
 /// v0.40.1 impersonateForm).
-fn parse_token_duration(raw: string) -> Result<int, string> {
+fn parse_token_duration(raw: string) -> Result<int, pb.CliError> {
   if raw == "" { return Ok(tokens.default_token_duration()) }
   let Ok(d) = strconv.Atoi(raw) else {
     return Err(flags.usage_error(f"--duration must be a number of seconds, got '{raw}'"))
@@ -86,7 +86,7 @@ fn parse_token_duration(raw: string) -> Result<int, string> {
   Ok(d)
 }
 
-fn token_create(input: flags.CommandInput) -> Result<(), string> {
+fn token_create(input: flags.CommandInput) -> Result<(), pb.CliError> {
   let ctx = input.ctx
   let usage = input.usage
   let p = input.parsed
@@ -107,7 +107,7 @@ fn token_create(input: flags.CommandInput) -> Result<(), string> {
   }
   let payload = match json.Marshal(models.ImpersonateRequest { duration }) {
     Ok(b) => b,
-    Err(e) => return Err(f"encoding the request: {e}"),
+    Err(e) => return Err(pb.failed(f"encoding the request: {e}")),
   }
   let body = match ctx.post_as(
     f"/api/collections/members/impersonate/{member.id}",
@@ -141,8 +141,8 @@ fn token_create(input: flags.CommandInput) -> Result<(), string> {
 /// the gate. 401 is the token being rejected outright, and the way that
 /// happens to someone who was working yesterday is expiry, which the old
 /// shared wording never named (TASK-214). Anything else keeps the raw error.
-fn impersonate_error(name: string, e: string) -> string {
-  let status = pb.classify(e).status
+fn impersonate_error(name: string, e: pb.CliError) -> pb.CliError {
+  let status = e.status
   if status == 401 {
     return pb.fail(pb.ErrorKind.Auth, "the token this ran with was rejected (401) - most likely it expired
 mint a new one with 'lll token create', or " + tokens.admin_hint())
@@ -151,7 +151,7 @@ mint a new one with 'lll token create', or " + tokens.admin_hint())
     return pb.fail(pb.ErrorKind.Refused, "token create is superuser-only and the configured token is not one
 " + tokens.admin_hint())
   }
-  f"impersonating {name}: {e}"
+  e.with_message(f"impersonating {name}: {e.message}")
 }
 
 /// A superuser token for the superuser-gated commands (token create, member
@@ -209,7 +209,7 @@ pub enum AdminLogin {
 /// The admin login a command was given: both --admin-* flags, else both
 /// LLL_ADMIN_* variables (as the settings carry them), else none. One flag
 /// without the other is refused.
-pub fn given_admin_login(settings: config.Settings, p: flags.Parsed) -> Result<AdminLogin, string> {
+pub fn given_admin_login(settings: config.Settings, p: flags.Parsed) -> Result<AdminLogin, pb.CliError> {
   let email = p.one("--admin-email")
   let pass = p.one("--admin-password")
   if (email == "") != (pass == "") {
@@ -237,8 +237,8 @@ pub fn admin_login_email(login: AdminLogin) -> string {
 /// if it is not a superuser token, the gated call itself refuses and the
 /// caller's error names the flags. Env credentials authenticate only when no
 /// token is configured.
-pub fn superuser_auth(ctx: pb.Client, login: AdminLogin) -> Result<string, string> {
-  let cfg = ctx.settings.config()?
+pub fn superuser_auth(ctx: pb.Client, login: AdminLogin) -> Result<string, pb.CliError> {
+  let cfg = ctx.settings.config().map_err(pb.failed)?
   match login {
     AdminLogin.Explicit(creds) => superuser_login(ctx, creds),
     AdminLogin.Env(creds) => {
@@ -247,20 +247,20 @@ pub fn superuser_auth(ctx: pb.Client, login: AdminLogin) -> Result<string, strin
     AdminLogin.Absent => {
       if cfg.token != "" { return Ok(cfg.token) }
       Err(
-        "this command is superuser-only and nothing here can authenticate as one
+        pb.failed("this command is superuser-only and nothing here can authenticate as one
 pass --admin-email and --admin-password (the credentials used to start the server),
 or set LLL_ADMIN_EMAIL/LLL_ADMIN_PASSWORD (read only when no token is configured),
 or put a superuser token in LLL_TOKEN - and name the server with --url if it is
-not the configured one",
+not the configured one"),
       )
     },
   }
 }
 
-fn superuser_login(ctx: pb.Client, creds: config.AdminCreds) -> Result<string, string> {
+fn superuser_login(ctx: pb.Client, creds: config.AdminCreds) -> Result<string, pb.CliError> {
   let payload = match json.Marshal(models.AuthRequest { identity: creds.email, password: creds.password }) {
     Ok(b) => b,
-    Err(e) => return Err(f"encoding credentials: {e}"),
+    Err(e) => return Err(pb.failed(f"encoding credentials: {e}")),
   }
   let body = match ctx.post_anon(
     "/api/collections/_superusers/auth-with-password",
@@ -280,17 +280,17 @@ fn superuser_login(ctx: pb.Client, creds: config.AdminCreds) -> Result<string, s
 /// was perfectly good, and lost commands — the real fault was the default
 /// url, printed mid-line as incidental request detail. So when the url was
 /// nobody's choice, say that first.
-fn superuser_auth_failed(ctx: pb.Client, e: string) -> string {
-  let msg = f"authenticating as the superuser: {e}"
-  if pb.classify(e).status != 400 { return msg }
-  let Ok((_, src)) = ctx.settings.traced() else { return msg }
+fn superuser_auth_failed(ctx: pb.Client, e: pb.CliError) -> pb.CliError {
+  let msg = f"authenticating as the superuser: {e.message}"
+  if e.status != 400 { return e.with_message(msg) }
+  let Ok((_, src)) = ctx.settings.traced() else { return e.with_message(msg) }
   if src.url != "default" {
-    return msg + "
-if the administrator credentials are right, check the server: --url names another one"
+    return e.with_message(msg + "
+if the administrator credentials are right, check the server: --url names another one")
   }
-  msg + "
+  e.with_message(msg + "
 that url is the built-in default: nothing here configured one, so the credentials
-were almost certainly sent to the wrong server. Name it: --url <your server url>"
+were almost certainly sent to the wrong server. Name it: --url <your server url>")
 }
 
 fn token_create_page() -> string {
@@ -334,7 +334,7 @@ On the receiving machine, save the API endpoint with 'lll config set url URL', o
 /// Creation rides the calling member's own token when there is one, so the
 /// bot is owned by whoever ran the command. Administrator credentials name
 /// no member, so a bot created with them has no owner.
-pub fn bot(ctx: pb.Client, args: Slice<string>) -> Result<(), string> {
+pub fn bot(ctx: pb.Client, args: Slice<string>) -> Result<(), pb.CliError> {
   // `args` is the full argv ("lll", "bot", ...), so the verb rides index 2
   // - where a bare create's NAME would sit. A bot cannot be named "rotate"
   // or "create": the server reserves bot- * names, so the forms cannot
@@ -346,7 +346,7 @@ pub fn bot(ctx: pb.Client, args: Slice<string>) -> Result<(), string> {
   }
 }
 
-fn bot_create(ctx: pb.Client, args: Slice<string>, start: int, command: string) -> Result<(), string> {
+fn bot_create(ctx: pb.Client, args: Slice<string>, start: int, command: string) -> Result<(), pb.CliError> {
   let spec = bot_spec()
   let usage = flags.usage(command, spec, "bot-NAME")
   let p = flags.parse_n(spec, args, start, 1, usage)?
@@ -368,14 +368,14 @@ fn bot_create(ctx: pb.Client, args: Slice<string>, start: int, command: string) 
   // Resolved before anything is created or minted, so a refusal leaves the
   // bot and its current token as they were.
   let team = prompt_team(ctx, tok, env_only, p.one("--team"))?
-  let url = ctx.settings.config()?.url
+  let url = ctx.settings.config().map_err(pb.failed)?.url
   tokens.check_prompt_values(url, team, name)?
   let existing = records.find_member_as(ctx, tok, name)?
   if let Some(member) = existing {
     if member.kind != "bot" {
       return Err(
-        f"member '{name}' exists and is not a bot member
-'lll bot create' only provisions bot members; use 'lll token create {name}' to mint its token directly",
+        pb.failed(f"member '{name}' exists and is not a bot member
+'lll bot create' only provisions bot members; use 'lll token create {name}' to mint its token directly"),
       )
     }
     return Err(pb.fail(
@@ -401,7 +401,7 @@ fn bot_create(ctx: pb.Client, args: Slice<string>, start: int, command: string) 
 /// `lll bot rotate bot-NAME [--duration s]`: re-mint the bot's token and strand
 /// the previous one. The server admits the superuser or the bot's owner —
 /// the human who created it is the one who sees a token leak.
-fn bot_rotate(ctx: pb.Client, args: Slice<string>) -> Result<(), string> {
+fn bot_rotate(ctx: pb.Client, args: Slice<string>) -> Result<(), pb.CliError> {
   let spec = bot_spec()
   let usage = flags.usage("lll bot rotate", spec, "bot-NAME")
   let p = flags.parse_n(spec, args, 3, 1, usage)?
@@ -421,7 +421,7 @@ fn bot_rotate(ctx: pb.Client, args: Slice<string>) -> Result<(), string> {
   let duration = parse_token_duration(p.one("--duration"))?
   let env_only = p.given("--env")
   let team = prompt_team(ctx, tok, env_only, p.one("--team"))?
-  let url = ctx.settings.config()?.url
+  let url = ctx.settings.config().map_err(pb.failed)?.url
   tokens.check_prompt_values(url, team, name)?
   let minted = tokens.bot_mint(ctx, tok, name, duration)?
   print_bot_credential(name, minted, url, team, duration, env_only)
@@ -458,9 +458,9 @@ fn prompt_team(
   tok: string,
   env_only: bool,
   flag: string,
-) -> Result<string, string> {
+) -> Result<string, pb.CliError> {
   if env_only { return Ok("") }
-  let key = if flag != "" { flag } else { ctx.settings.config()?.team }
+  let key = if flag != "" { flag } else { ctx.settings.config().map_err(pb.failed)?.team }
   let wanted = records.normalize_team_key(key)
   if wanted == "" {
     // Usage, exit 2, like every no-team refusal that --team fixes (LLL-679).
@@ -471,8 +471,8 @@ or pass --env to print only the LLL_URL and LLL_TOKEN export lines",
   }
   let Some(team) = records.find_team_as(ctx, tok, wanted)? else {
     return Err(
-      f"no team '{wanted}' among the teams this credential can see - a bot gets no more access than its owner, so the agent could not open it
-'lll team list' shows the teams you can see",
+      pb.failed(f"no team '{wanted}' among the teams this credential can see - a bot gets no more access than its owner, so the agent could not open it
+'lll team list' shows the teams you can see"),
     )
   }
   Ok(team.key)
@@ -494,10 +494,10 @@ fn print_bot_credential(
   team: string,
   duration: int,
   env_only: bool,
-) -> Result<(), string> {
+) -> Result<(), pb.CliError> {
   // The server minted it, but it is printed into a shell all the same.
   if !regexp.MustCompile("^[A-Za-z0-9._-]+$").MatchString(tok) {
-    return Err("the minted token contains characters lll cannot paste safely into a shell; nothing was printed")
+    return Err(pb.failed("the minted token contains characters lll cannot paste safely into a shell; nothing was printed"))
   }
   let expiry = tokens.expiry_line(duration, time.Now(), f"lll bot rotate {name}")
   if env_only {
@@ -563,9 +563,9 @@ workflow. --env prints only the two export lines on stdout:
 /// The server reserves bot- names to bots (gopb checkMemberKind), so a name
 /// without the prefix can never be a bot. Refuse it here, before any
 /// credential or server call, with the spelling that would work.
-fn require_bot_prefix(command: string, name: string) -> Result<(), string> {
+fn require_bot_prefix(command: string, name: string) -> Result<(), pb.CliError> {
   if strings.HasPrefix(name, "bot-") { return Ok(()) }
-  Err(f"bot names are reserved to the bot- prefix - got '{name}'; try '{command} bot-{name}'")
+  Err(pb.failed(f"bot names are reserved to the bot- prefix - got '{name}'; try '{command} bot-{name}'"))
 }
 
 /// The credential `lll bot` creates and rotates with, and the member it
@@ -576,8 +576,8 @@ fn require_bot_prefix(command: string, name: string) -> Result<(), string> {
 /// the administrator over a configured token; LLL_ADMIN_* is read only when
 /// no token is configured. Before this, inherited admin variables silently
 /// outranked a member's token and the bot came out ownerless.
-fn bot_caller(ctx: pb.Client, login: AdminLogin) -> Result<(string, Option<models.Member>), string> {
-  let cfg = ctx.settings.config()?
+fn bot_caller(ctx: pb.Client, login: AdminLogin) -> Result<(string, Option<models.Member>), pb.CliError> {
+  let cfg = ctx.settings.config().map_err(pb.failed)?
   let explicit = match login {
     AdminLogin.Explicit(_) => true,
     _ => false,
@@ -592,18 +592,18 @@ fn bot_caller(ctx: pb.Client, login: AdminLogin) -> Result<(string, Option<model
 /// The member a token names, or None when it names nobody: a superuser
 /// token's JWT id has no members record, and PocketBase answers 404. The
 /// same probe `lll whoami` makes — the id out of the JWT, then that record.
-fn token_member(ctx: pb.Client, tok: string) -> Result<Option<models.Member>, string> {
+fn token_member(ctx: pb.Client, tok: string) -> Result<Option<models.Member>, pb.CliError> {
   let Some(id) = pb.token_subject(tok) else { return Ok(None) }
   match ctx.get_as(f"/api/collections/members/records/{id}", tok) {
     Ok(body) => {
       let mut me = models.Member { .. }
       if let Err(e) = json.Unmarshal(body.bytes(), &me) {
-        return Err(f"decoding the identity response: {e}")
+        return Err(pb.failed(f"decoding the identity response: {e}"))
       }
       Ok(Some(me))
     },
     Err(e) => {
-      if pb.classify(e).status == 404 { return Ok(None) }
+      if e.status == 404 { return Ok(None) }
       Err(e)
     },
   }

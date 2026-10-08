@@ -19,8 +19,8 @@ import "theme"
 // record -> view model mappers that every page and every broadcast shares.
 
 /// Render a named template from the embedded web/templates/ tree.
-fn render(name: string, data: Unknown) -> Result<string, string> {
-  web.Render(name, data).map_err(|e| e.Error())
+fn render(name: string, data: Unknown) -> Result<string, pb.CliError> {
+  web.Render(name, data).map_err(|e| pb.failed(e.Error()))
 }
 
 /// Render an HTML response completely before writing headers or body.
@@ -29,7 +29,7 @@ fn render_html(w: http.ResponseWriter, name: string, data: Unknown) {
   let html = match render(name, data) {
     Ok(h) => h,
     Err(e) => {
-      http.Error(w, pb.plain(e), 500)
+      http.Error(w, e.message, 500)
       return
     },
   }
@@ -385,7 +385,7 @@ fn board_card(issue: models.Issue, claimed: Slice<models.Claim>) -> CardVM {
 /// The issue the dialog creates lands in that same team, so a picker
 /// offering another team's label would build a record PocketBase is happy to
 /// store and no view can explain.
-fn compose_vm(ctx: pb.Client, team_id: string, roster: Roster) -> Result<ComposeVM, string> {
+fn compose_vm(ctx: pb.Client, team_id: string, roster: Roster) -> Result<ComposeVM, pb.CliError> {
   let projects = records.fetch_projects(ctx, team_id)?
   let labels = records.fetch_labels(ctx, team_id)?
   Ok(ComposeVM {
@@ -432,14 +432,14 @@ fn comment_vm(c: models.Comment) -> CommentVM {
 /// project) — shared by the issue page and broadcast re-renders. `roster`
 /// is who the rendering may name (LLL-551): hidden members render as
 /// "hidden member" and drop out of the assignee picker.
-fn issue_vm(ctx: pb.Client, issue: models.Issue, comments: Slice<models.Comment>, roster: Roster) -> Result<IssueVM, string> {
+fn issue_vm(ctx: pb.Client, issue: models.Issue, comments: Slice<models.Comment>, roster: Roster) -> Result<IssueVM, pb.CliError> {
   let mut vm = issue_fields_vm(ctx, issue, comments, roster)?
   vm.description = markdown.md_html(issue.description)
   Ok(vm)
 }
 
 /// Metadata can refresh without parsing or transmitting the description.
-fn issue_fields_vm(ctx: pb.Client, raw: models.Issue, comments: Slice<models.Comment>, roster: Roster) -> Result<IssueVM, string> {
+fn issue_fields_vm(ctx: pb.Client, raw: models.Issue, comments: Slice<models.Comment>, roster: Roster) -> Result<IssueVM, pb.CliError> {
   let issue = roster.issue(raw)
   let assignee = issue.expand.assignee.name
   let mut project = issue.expand.project.name
@@ -467,7 +467,7 @@ fn issue_fields_vm(ctx: pb.Client, raw: models.Issue, comments: Slice<models.Com
   match records.find_actor(ctx) {
     Ok(Some(a)) => { claim_actor = a.name; claim_actor_id = a.id },
     Ok(None) => claim_error = "No member is configured for this board.",
-    Err(e) => claim_error = pb.plain(e),
+    Err(e) => claim_error = e.message,
   }
   let mut work = ""
   if issue.work_branch != "" { work = f"{issue.work_branch} @ {issue.work_host}:{issue.work_path}" }

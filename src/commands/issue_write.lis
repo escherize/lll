@@ -23,7 +23,7 @@ import "writes"
 // The verbs that change an issue: create, update, close, delete, comment
 // (and comment edit/delete), pr and ref.
 
-fn create(input: flags.CommandInput) -> Result<(), string> {
+fn create(input: flags.CommandInput) -> Result<(), pb.CliError> {
   let ctx = input.ctx
   let usage = input.usage
   // A bare title is accepted alongside -t: `gh issue create`, `linear` and
@@ -37,7 +37,7 @@ fn create(input: flags.CommandInput) -> Result<(), string> {
   }
   let title = if p.one("-t") != "" { p.one("-t") } else { p.first() }
   if title == "" {
-    return Err(f"no title: give it as the bare argument or with -t\n{usage}")
+    return Err(pb.failed(f"no title: give it as the bare argument or with -t\n{usage}"))
   }
   let mut description = ""
   if p.given("-b") { description = value_or_stdin(p.one("-b"), "-b")? }
@@ -57,7 +57,7 @@ fn create(input: flags.CommandInput) -> Result<(), string> {
   let team = current_team(ctx)?
   // New issues do not land in an archived team (TASK-210): archived is the
   // lifecycle's end, and reviving it is a deliberate one-command act.
-  if team.archived { return Err(records.archived_hint(team.key)) }
+  if team.archived { return Err(pb.failed(records.archived_hint(team.key))) }
 
   let mut assignee = ""
   if assignee_name != "" { assignee = records.resolve_member(ctx, assignee_name)?.id }
@@ -97,7 +97,7 @@ fn create(input: flags.CommandInput) -> Result<(), string> {
 
   let mut created = models.Issue { .. }
   if let Err(e) = json.Unmarshal(body.bytes(), &created) {
-    return Err(f"decoding created issue: {e}")
+    return Err(pb.failed(f"decoding created issue: {e}"))
   }
   // PocketBase expands the create response itself. A later read must not
   // turn a successful write into an apparent failure and invite retries.
@@ -106,7 +106,7 @@ fn create(input: flags.CommandInput) -> Result<(), string> {
   }
   let mut reuse = CreationReuse { .. }
   if let Err(e) = json.Unmarshal(body.bytes(), &reuse) {
-    return Err(f"decoding creation reuse: {e}")
+    return Err(pb.failed(f"decoding creation reuse: {e}"))
   }
   let action = if reuse.reused { "Reused" } else { "Created" }
   fmt.Println(f"{action} {team.key}-{created.number}: {created.title}")
@@ -119,7 +119,7 @@ struct CreationReuse { reused: bool }
 /// --if-unchanged-since as the server's stamp. The instant is what matters:
 /// RFC3339 in any offset and the space form name the same 'updated' when
 /// they name the same millisecond, the precision the server stores.
-fn unchanged_since_stamp(given: string) -> Result<string, string> {
+fn unchanged_since_stamp(given: string) -> Result<string, pb.CliError> {
   let Ok(parsed) = time.Parse(time.RFC3339Nano, rfc3339_of(given)) else {
     return Err(flags.usage_error(f"--if-unchanged-since takes the issue's 'updated' from 'lll issue view KEY --json' (RFC3339, or the space form older output printed); got '{given}'"))
   }
@@ -128,7 +128,7 @@ fn unchanged_since_stamp(given: string) -> Result<string, string> {
 
 fn parse_description_replacement(
   value: string,
-) -> Result<(string, string), string> {
+) -> Result<(string, string), pb.CliError> {
   let parts = strings.SplitN(value, "=", 2)
   if parts.length() != 2 {
     return Err(flags.usage_error("--description-replace requires old=new"))
@@ -136,7 +136,7 @@ fn parse_description_replacement(
   Ok((parts[0], parts[1]))
 }
 
-fn update(input: flags.CommandInput) -> Result<(), string> {
+fn update(input: flags.CommandInput) -> Result<(), pb.CliError> {
   let ctx = input.ctx
   let usage = input.usage
   let p = input.parsed
@@ -331,13 +331,13 @@ fn update(input: flags.CommandInput) -> Result<(), string> {
     Ok(t) => t,
     Err(writes.UpdateFailure.Failed(e)) => {
       if !assigning { return Err(e) }
-      if pb.classify(e).code == "claim_held" {
-        return Err(f"{key}: {e}; {held_elsewhere_hint(key)}")
+      if e.has_code(pb.ServerCode.ClaimHeld) {
+        return Err(e.with_message(f"{key}: {e.message}; {held_elsewhere_hint(key)}"))
       }
-      if pb.classify(e).code == "needs_force" {
-        return Err(f"{key}: {pb.display_error(e).summary}; 'lll issue update {key} --assignee none --force --reason \"why\"' clears it anyway and comments on the issue")
+      if e.has_code(pb.ServerCode.NeedsForce) {
+        return Err(e.with_message(f"{key}: {pb.display_error(e).summary}; 'lll issue update {key} --assignee none --force --reason \"why\"' clears it anyway and comments on the issue"))
       }
-      return Err(f"{key}: {e}")
+      return Err(e.with_message(f"{key}: {e.message}"))
     },
     Err(failure) => return Err(update_failure(key, failure, since.is_some())),
   }
@@ -357,10 +357,10 @@ fn update(input: flags.CommandInput) -> Result<(), string> {
 /// `stamped` is whether the caller gave --if-unchanged-since: its stale
 /// stamp is the caller's to refresh, while a derived edit that kept losing
 /// the race (LLL-665) wrote nothing and can simply run again.
-fn update_failure(key: string, failure: writes.UpdateFailure, stamped: bool) -> string {
+fn update_failure(key: string, failure: writes.UpdateFailure, stamped: bool) -> pb.CliError {
   match failure {
     writes.UpdateFailure.Failed(e) => e,
-    writes.UpdateFailure.ReplaceMatched(n) => f"--description-replace matched {n} times in {key}'s description; it must match exactly once - widen the text",
+    writes.UpdateFailure.ReplaceMatched(n) => pb.failed(f"--description-replace matched {n} times in {key}'s description; it must match exactly once - widen the text"),
     writes.UpdateFailure.Changed(e) => {
       let presented = pb.display_error(e)
       if stamped {
@@ -377,7 +377,7 @@ fn update_failure(key: string, failure: writes.UpdateFailure, stamped: bool) -> 
 /// keeps the holder's hold. Closing an issue someone else holds follows the
 /// release rule: refused without --force, and a forced close comments with
 /// --reason.
-fn close_issue(input: flags.CommandInput) -> Result<(), string> {
+fn close_issue(input: flags.CommandInput) -> Result<(), pb.CliError> {
   let ctx = input.ctx
   let usage = "lll issue close [KEY-123] [--keep-claim] [--force [--reason \"why\"]]"
   let p = input.parsed
@@ -391,9 +391,9 @@ fn close_issue(input: flags.CommandInput) -> Result<(), string> {
   let observed = claims.observed_id(ctx, issue.id)?
   let by = writes.ClaimAs { caller: pb.Caller.Process, agent, force, reason }
   let result = writes.close_issue(ctx, issue.id, observed, by, keep).map_err(|e| {
-    if pb.classify(e).code == "needs_force" {
-      f"{key}: {e} - 'lll issue close {key} --force --reason \"why\"' closes it anyway, releasing that claim and commenting on the issue"
-    } else { f"{key}: {e}" }
+    if e.has_code(pb.ServerCode.NeedsForce) {
+      e.with_message(f"{key}: {e.message} - 'lll issue close {key} --force --reason \"why\"' closes it anyway, releasing that claim and commenting on the issue")
+    } else { e.with_message(f"{key}: {e.message}") }
   })?
   if p.given("--json") { return print_issue_after(ctx, key) }
   fmt.Println(f"Closed {key} ● done")
@@ -410,7 +410,7 @@ fn close_issue(input: flags.CommandInput) -> Result<(), string> {
   Ok(())
 }
 
-fn delete_issue(input: flags.CommandInput) -> Result<(), string> {
+fn delete_issue(input: flags.CommandInput) -> Result<(), pb.CliError> {
   let ctx = input.ctx
   let p = input.parsed
   let id = p.first()
@@ -444,16 +444,16 @@ fn delete_issue(input: flags.CommandInput) -> Result<(), string> {
   if let Some(h) = held {
     let agent = agent_label(ctx, p)?
     let by = writes.ClaimAs { caller: pb.Caller.Process, agent, force: true, reason: "deleting the issue" }
-    let _ = writes.release_claim(ctx, issue.id, h.id, by).map_err(|e| f"{label}: {e}")?
+    let _ = writes.release_claim(ctx, issue.id, h.id, by).map_err(|e| e.with_message(f"{label}: {e.message}"))?
   }
   writes.delete_issue(ctx, issue.id).map_err(|e| {
-    if held.is_some() { f"{e}\nthe claim on {label} was released, but the issue was not deleted" } else { e }
+    if held.is_some() { e.with_message(f"{e.message}\nthe claim on {label} was released, but the issue was not deleted") } else { e }
   })?
   fmt.Println(f"Deleted {label}")
   Ok(())
 }
 
-fn comment(input: flags.CommandInput) -> Result<(), string> {
+fn comment(input: flags.CommandInput) -> Result<(), pb.CliError> {
   let ctx = input.ctx
   let usage = input.usage
   let p = input.parsed
@@ -512,7 +512,7 @@ fn comment(input: flags.CommandInput) -> Result<(), string> {
 
 /// Thin wrapper over the GitHub CLI: gh owns pushing checks, prompts, and
 /// errors. Record the returned PR only after gh confirms successful creation.
-fn pr_cmd(input: flags.CommandInput) -> Result<(), string> {
+fn pr_cmd(input: flags.CommandInput) -> Result<(), pb.CliError> {
   let ctx = input.ctx
   let usage = "lll issue pr [KEY-123]"
   let id = input.parsed.first()
@@ -522,14 +522,14 @@ fn pr_cmd(input: flags.CommandInput) -> Result<(), string> {
   match exec.LookPath("gh") {
     Partial.Ok(path) => gh = path,
     _ => return Err(
-      "gh not found on PATH; install the GitHub CLI (brew install gh)",
+      pb.failed("gh not found on PATH; install the GitHub CLI (brew install gh)"),
     ),
   }
 
   let issue = records.fetch_issue(ctx, resolved)?
   let key = f"{issue.expand.team.key}-{issue.number}"
   let (body, linked_only) = pr_body(issue_url(ctx, issue)?, issue.description)?
-  if issue.expand.team.archived { return Err(records.archived_hint(issue.expand.team.key)) }
+  if issue.expand.team.archived { return Err(pb.failed(records.archived_hint(issue.expand.team.key))) }
   if linked_only {
     let _ = fmt.Fprintln(os.Stderr, "issue description exceeds the PR body limit; linking to the full description instead")
   }
@@ -564,21 +564,21 @@ fn pr_cmd(input: flags.CommandInput) -> Result<(), string> {
     // recorded for a PR that was never opened. If gh ever changes the wording
     // this falls back to the old error, which is the safe direction.
     let combined = captured_err.String() + "\n" + captured.String()
-    if !strings.Contains(combined, "already exists") { return Err(f"gh pr create: {e}") }
+    if !strings.Contains(combined, "already exists") { return Err(pb.failed(f"gh pr create: {e}")) }
     let Some((existing_url, existing_ref)) = references.from_pr_output(combined) else {
-      return Err(f"gh pr create: {e}")
+      return Err(pb.failed(f"gh pr create: {e}"))
     };
     if let Err(save) = writes.append_ref(ctx, issue.id, existing_ref) {
-      return Err(f"A pull request already exists: {existing_url}\nCould not confirm {existing_ref} on {key}: {save}\nRetry only the reference save: lll issue ref {key} {existing_ref}")
+      return Err(save.with_message(f"A pull request already exists: {existing_url}\nCould not confirm {existing_ref} on {key}: {save.message}\nRetry only the reference save: lll issue ref {key} {existing_ref}"))
     }
     let _ = fmt.Fprintln(os.Stderr, f"a pull request already existed for this branch; recorded {existing_ref} on {key}")
     return Ok(())
   }
   let Some((pr_url, reference)) = references.from_pr_output(captured.String()) else {
-    return Err("gh pr create succeeded but did not report one unambiguous PR URL; the issue was not changed. Inspect the gh output before retrying; do not create a duplicate PR.")
+    return Err(pb.failed("gh pr create succeeded but did not report one unambiguous PR URL; the issue was not changed. Inspect the gh output before retrying; do not create a duplicate PR."))
   };
   if let Err(e) = writes.append_ref(ctx, issue.id, reference) {
-    return Err(f"PR created: {pr_url}\nCould not confirm {reference} on {key}: {e}\nRetry only the reference save: lll issue ref {key} {reference}")
+    return Err(e.with_message(f"PR created: {pr_url}\nCould not confirm {reference} on {key}: {e.message}\nRetry only the reference save: lll issue ref {key} {reference}"))
   }
   Ok(())
 }
@@ -586,7 +586,7 @@ fn pr_cmd(input: flags.CommandInput) -> Result<(), string> {
 /// Both positionals are required, unlike the verbs that infer the issue from the
 /// branch: a lone `ref linear:ENG-118` is shaped exactly like a KEY, so guessing
 /// which one it is would silently append a wrong ref, and there is no unref.
-fn ref_cmd(input: flags.CommandInput) -> Result<(), string> {
+fn ref_cmd(input: flags.CommandInput) -> Result<(), pb.CliError> {
   let ctx = input.ctx
   let usage = "lll issue ref KEY-123 REF"
   let p = input.parsed
@@ -602,12 +602,12 @@ fn ref_cmd(input: flags.CommandInput) -> Result<(), string> {
 
 /// Keep the issue as the authoritative full text when its description is
 /// larger than GitHub accepts. Never silently publish a truncated excerpt.
-fn pr_body(link: string, description: string) -> Result<(string, bool), string> {
+fn pr_body(link: string, description: string) -> Result<(string, bool), pb.CliError> {
   let body = if description == "" { link } else { f"{link}\n\n{description}" }
   if utf8.RuneCountInString(body) <= 65536 { return Ok((body, false)) }
   let fallback = f"{link}\n\nThe full description is on the linked issue; it exceeds the pull request body limit."
   if utf8.RuneCountInString(fallback) > 65536 {
-    return Err("the issue URL exceeds the PR body limit; check the configured web_url")
+    return Err(pb.failed("the issue URL exceeds the PR body limit; check the configured web_url"))
   }
   Ok((fallback, true))
 }
@@ -637,7 +637,7 @@ fn comment_commands() -> Slice<flags.Command> {
   ]
 }
 
-fn comment_mutate(ctx: pb.Client, verb: string, p: flags.Parsed) -> Result<(), string> {
+fn comment_mutate(ctx: pb.Client, verb: string, p: flags.Parsed) -> Result<(), pb.CliError> {
   let spec = comment_mutate_spec(verb)
   let usage = flags.usage(f"lll issue comment {verb}", spec, "KEY-123 N")
   if p.first() == "" || p.nth(1) == "" { return Err(flags.usage_error(f"usage: {usage}")) }
@@ -645,11 +645,11 @@ fn comment_mutate(ctx: pb.Client, verb: string, p: flags.Parsed) -> Result<(), s
   let issue = records.fetch_issue(ctx, resolved)?
   let key = f"{issue.expand.team.key}-{issue.number}"
   let Ok(n) = strconv.Atoi(p.nth(1)) else {
-    return Err(f"'{p.nth(1)}' is not a comment number; 'lll issue comment {key}' numbers them")
+    return Err(pb.failed(f"'{p.nth(1)}' is not a comment number; 'lll issue comment {key}' numbers them"))
   }
   let comments = records.fetch_comments(ctx, issue.id)?
   if n < 1 || n > comments.length() {
-    return Err(f"{key} has {comments.length()} comments; there is no #{n}; 'lll issue comment {key}' numbers them")
+    return Err(pb.failed(f"{key} has {comments.length()} comments; there is no #{n}; 'lll issue comment {key}' numbers them"))
   }
   let c = comments[n - 1]
   let whose = display.member_name(c.author, c.expand.author.name, "anon")

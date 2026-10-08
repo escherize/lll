@@ -51,7 +51,7 @@ fn settings_page(
   let vm = match settings_vm(ctx, team, section) {
     Ok(v) => v,
     Err(e) => {
-      http.Error(w, pb.plain(e), 500)
+      http.Error(w, e.message, 500)
       return
     },
   }
@@ -69,7 +69,7 @@ fn settings_page(
 /// label AND one per team, plus members and projects, to draw a page that
 /// shows one of them at a time. A section pays for itself now: opening
 /// Identity costs nothing beyond the team already in hand.
-fn settings_vm(ctx: pb.Client, team: models.Team, section: string) -> Result<SettingsVM, string> {
+fn settings_vm(ctx: pb.Client, team: models.Team, section: string) -> Result<SettingsVM, pb.CliError> {
   let hex = theme.normalize_hex(team.accent)
   let mut accent = hex
   if accent == "" { accent = "#f0883e" }
@@ -108,12 +108,12 @@ fn settings_vm(ctx: pb.Client, team: models.Team, section: string) -> Result<Set
     // shows the same list because both its forms pick a member.
     "members" => vm.members = member_rows(ctx)?,
     "access" => vm.members = member_rows(ctx)?,
-    other => return Err(f"unknown settings section '{other}'"),
+    other => return Err(pb.failed(f"unknown settings section '{other}'")),
   }
   Ok(vm)
 }
 
-fn member_rows(ctx: pb.Client) -> Result<Slice<SetMemberVM>, string> {
+fn member_rows(ctx: pb.Client) -> Result<Slice<SetMemberVM>, pb.CliError> {
   Ok(
     records.fetch_members(ctx)?.map(|m| SetMemberVM {
       id: m.id,
@@ -127,7 +127,7 @@ fn member_rows(ctx: pb.Client) -> Result<Slice<SetMemberVM>, string> {
 /// key and archived flag only. Deliberately not `team_rows`: that one counts
 /// issues per team, and a select showing six keys has no use for six count
 /// queries.
-fn scope_rows(ctx: pb.Client) -> Result<Slice<SetTeamVM>, string> {
+fn scope_rows(ctx: pb.Client) -> Result<Slice<SetTeamVM>, pb.CliError> {
   Ok(
     records.list_teams(ctx)?.items.map(|t| SetTeamVM {
       id: t.id,
@@ -144,7 +144,7 @@ fn scope_rows(ctx: pb.Client) -> Result<Slice<SetTeamVM>, string> {
 /// visible on, which is what makes unarchiving from here possible. One
 /// perPage=1 count fetch per team, paid per settings render like the
 /// section's other fetches.
-fn team_rows(ctx: pb.Client) -> Result<Slice<SetTeamVM>, string> {
+fn team_rows(ctx: pb.Client) -> Result<Slice<SetTeamVM>, pb.CliError> {
   let mut rows: Slice<SetTeamVM> = []
   for t in records.list_teams(ctx)?.items {
     let held = records.issue_count(ctx, f"team={query.quote(t.id)}")?
@@ -169,7 +169,7 @@ fn team_rows(ctx: pb.Client) -> Result<Slice<SetTeamVM>, string> {
 /// order is what makes the inventory readable as "what this team actually
 /// uses", so a near-duplicate (bug/bugs/defect) is visible next to the label
 /// it duplicates before someone creates another one.
-fn label_rows(ctx: pb.Client, team_id: string) -> Result<Slice<SetLabelVM>, string> {
+fn label_rows(ctx: pb.Client, team_id: string) -> Result<Slice<SetLabelVM>, pb.CliError> {
   let mut rows: Slice<SetLabelVM> = []
   // fetch_labels answers name-sorted; the strict > below keeps equal-usage
   // rows in that order, so ties stay alphabetical.
@@ -216,7 +216,7 @@ fn settings_write(
   r: mut Ref<http.Request>,
   team_id: string,
   me: string,
-) -> Result<string, string> {
+) -> Result<string, pb.CliError> {
   if r.FormValue("cancel") != "" {
     // Restore the row after a deletion review without writing a record.
   } else if r.FormValue("del") != "" {
@@ -264,19 +264,19 @@ fn settings_apply(
   ctx: pb.Client,
   r: mut Ref<http.Request>,
   team_id: string,
-) -> Result<(), string> {
+) -> Result<(), pb.CliError> {
   let kind = r.PathValue("kind")
   let id = strings.TrimSpace(r.PostFormValue("id"))
   let name = strings.TrimSpace(r.PostFormValue("name"))
 
   // Labels and projects are team-owned, just like the team section.
   if team_id == "" {
-    return Err("no team configured: set LLL_TEAM or 'team' in .lll.toml")
+    return Err(pb.failed("no team configured: set LLL_TEAM or 'team' in .lll.toml"))
   }
 
   match kind {
     "team" => {
-      if name == "" { return Err("team name is required") }
+      if name == "" { return Err(pb.failed("team name is required")) }
       let accent = form_hex(r, "accent")?
       // Validated with the CLI's rule, not the browser's: a maxlength on the
       // input is a hint, and this is the same field `lll team set-emoji`
@@ -290,7 +290,7 @@ fn settings_apply(
       })
     },
     "label" => {
-      if name == "" { return Err("label name is required") }
+      if name == "" { return Err(pb.failed("label name is required")) }
       records.check_filter_name("label", name)?
       let color = form_hex(r, "color")?
       // LLL-100: the row's team select. The move runs FIRST and may refuse,
@@ -305,7 +305,7 @@ fn settings_apply(
       writes.update_label(ctx, id, writes.LabelPatch { name: Some(name), color: Some(color), team: Some(owner) })
     },
     "member" => {
-      if name == "" { return Err("member name is required") }
+      if name == "" { return Err(pb.failed("member name is required")) }
       let email = strings.TrimSpace(r.PostFormValue("email"))
       if id == "" {
         // members is an auth collection (TASK-180): a create needs an email
@@ -333,7 +333,7 @@ fn settings_apply(
       let known = records.fetch_members(ctx)?
       let Some(existing) = known.find(|m| m.id == id) else {
         return Err(
-          f"unknown member '{id}'; reload the page for the current list",
+          pb.failed(f"unknown member '{id}'; reload the page for the current list"),
         )
       }
       // Email is the member's login identity now (TASK-180): PocketBase
@@ -342,17 +342,17 @@ fn settings_apply(
       let posted_email = strings.TrimSpace(email)
       if posted_email != "" && posted_email != existing.email {
         return Err(
-          f"'{existing.name}'s email is their login identity; change it under Access → Member sign-in. No changes saved.",
+          pb.failed(f"'{existing.name}'s email is their login identity; change it under Access → Member sign-in. No changes saved."),
         )
       }
       writes.update_member(ctx, pb.Caller.Process, id, writes.MemberPatch { name: Some(name), .. })
     },
     "project" => {
-      if name == "" { return Err("project name is required") }
+      if name == "" { return Err(pb.failed("project name is required")) }
       records.check_filter_name("project", name)?
       let status = r.PostFormValue("status")
       if records.project_statuses().find(|s| s == status).is_none() {
-        return Err(f"unknown project status '{status}'")
+        return Err(pb.failed(f"unknown project status '{status}'"))
       }
       let owner = move_scope_if_asked(ctx, r, "project", name, id, team_id)?
       if id == "" {
@@ -362,18 +362,18 @@ fn settings_apply(
       }
       writes.update_project(ctx, id, writes.ProjectPatch { name: Some(name), description: None, status: Some(status), team: Some(owner) })
     },
-    other => Err(f"unknown settings section '{other}'"),
+    other => Err(pb.failed(f"unknown settings section '{other}'")),
   }
 }
 
 /// A "#rrggbb" form field: "" clears the colour, anything unparseable is a
 /// user error rather than a silent fallback — a typed hex that quietly did
 /// nothing would be the worst of both.
-fn form_hex(r: mut Ref<http.Request>, field: string) -> Result<string, string> {
+fn form_hex(r: mut Ref<http.Request>, field: string) -> Result<string, pb.CliError> {
   let raw = strings.TrimSpace(r.PostFormValue(field))
   if raw == "" { return Ok("") }
   let hex = theme.normalize_hex(raw)
-  if hex == "" { return Err(f"'{raw}' is not a #rrggbb colour") }
+  if hex == "" { return Err(pb.failed(f"'{raw}' is not a #rrggbb colour")) }
   // The canonical orange is stored as "no choice", so a team that picks it
   // back gets theme.css's exact tokens instead of a derived copy of them.
   if field == "accent" && hex == "#f0883e" { return Ok("") }
@@ -382,12 +382,12 @@ fn form_hex(r: mut Ref<http.Request>, field: string) -> Result<string, string> {
 
 /// Sections whose rows can be deleted. The team is not one: it owns every
 /// issue's key, and `lll team` has no delete either.
-fn settings_collection(kind: string) -> Result<string, string> {
+fn settings_collection(kind: string) -> Result<string, pb.CliError> {
   match kind {
     "label" => Ok("labels"),
     "member" => Ok("members"),
     "project" => Ok("projects"),
-    other => Err(f"cannot delete from '{other}'"),
+    other => Err(pb.failed(f"cannot delete from '{other}'")),
   }
 }
 
@@ -408,7 +408,7 @@ fn move_scope_if_asked(
   name: string,
   id: string,
   team_id: string,
-) -> Result<string, string> {
+) -> Result<string, pb.CliError> {
   let wanted = strings.TrimSpace(r.PostFormValue("team"))
   if id == "" || wanted == "" { return Ok(team_id) }
   let to = writes.move_destination(ctx, wanted)?
@@ -419,10 +419,10 @@ fn move_scope_if_asked(
 }
 
 /// A request body for the Access actions' credential endpoints.
-fn marshal(value: Unknown) -> Result<string, string> {
+fn marshal(value: Unknown) -> Result<string, pb.CliError> {
   match json.Marshal(value) {
     Ok(p) => Ok(p as string),
-    Err(e) => Err(f"encoding request: {e}"),
+    Err(e) => Err(pb.failed(f"encoding request: {e}")),
   }
 }
 
@@ -458,10 +458,10 @@ fn admin_email(ctx: pb.Client) -> string {
 /// own write rides, so board token + admin password suffices no matter what
 /// identity the process holds. The password is checked per action through
 /// PocketBase's own endpoint and never stored.
-fn verify_admin(ctx: pb.Client, pass: string) -> Result<string, string> {
+fn verify_admin(ctx: pb.Client, pass: string) -> Result<string, pb.CliError> {
   if pass == "" {
     return Err(
-      "the admin password is required: this is a superuser action, and the board token alone must not grant it",
+      pb.failed("the admin password is required: this is a superuser action, and the board token alone must not grant it"),
     )
   }
   let payload = marshal(models.AuthRequest { identity: admin_email(ctx), password: pass })?
@@ -477,21 +477,21 @@ fn verify_admin(ctx: pb.Client, pass: string) -> Result<string, string> {
 
 /// Authentication failures have a specific recovery; other errors retain
 /// their actual server status and transport details.
-pub fn admin_verification_error(ctx: pb.Client, e: string) -> string {
-  if pb.classify(e).status == 400 {
-    return f"wrong admin password for {admin_email(ctx)}; use the administrator credentials supplied through LLL_ADMIN_EMAIL and LLL_ADMIN_PASSWORD in the server's own environment"
+pub fn admin_verification_error(ctx: pb.Client, e: pb.CliError) -> pb.CliError {
+  if e.status == 400 {
+    return pb.failed(f"wrong admin password for {admin_email(ctx)}; use the administrator credentials supplied through LLL_ADMIN_EMAIL and LLL_ADMIN_PASSWORD in the server's own environment")
   }
-  f"verifying the admin password: {e}"
+  e.with_message(f"verifying the admin password: {e.message}")
 }
 
 /// The named member, from the current list — so the flash can say "reload"
 /// instead of relaying a PB 404.
-fn access_member(ctx: pb.Client, r: mut Ref<http.Request>) -> Result<models.Member, string> {
+fn access_member(ctx: pb.Client, r: mut Ref<http.Request>) -> Result<models.Member, pb.CliError> {
   let id = strings.TrimSpace(r.PostFormValue("member"))
-  if id == "" { return Err("pick a member") }
+  if id == "" { return Err(pb.failed("pick a member")) }
   let known = records.fetch_members(ctx)?
   let Some(member) = known.find(|m| m.id == id) else {
-    return Err(f"unknown member '{id}'; reload the page for the current list")
+    return Err(pb.failed(f"unknown member '{id}'; reload the page for the current list"))
   }
   Ok(member)
 }
@@ -507,7 +507,7 @@ fn access_member(ctx: pb.Client, r: mut Ref<http.Request>) -> Result<models.Memb
 /// so a token minted from the board still died in under a week, silently. It
 /// borrows the CLI's `default_token_duration` rather than restating a year in
 /// seconds: two doors onto one mint should not be able to drift apart.
-fn access_token_write(ctx: pb.Client, _v: Viewing, r: mut Ref<http.Request>) -> Result<string, string> {
+fn access_token_write(ctx: pb.Client, _v: Viewing, r: mut Ref<http.Request>) -> Result<string, pb.CliError> {
   let member = access_member(ctx, r)?
   let su = verify_admin(ctx, r.PostFormValue("admin_password"))?
   let body = ctx.post_as(
@@ -527,7 +527,7 @@ fn access_token_write(ctx: pb.Client, _v: Viewing, r: mut Ref<http.Request>) -> 
 /// The lifetime is chosen here rather than at the call site so a test can
 /// read the number that actually reaches PocketBase — the whole bug was a
 /// duration nobody could see without watching the wire.
-fn mint_payload() -> Result<string, string> {
+fn mint_payload() -> Result<string, pb.CliError> {
   marshal(models.ImpersonateRequest { duration: tokens.default_token_duration() })
 }
 
@@ -549,12 +549,12 @@ fn access_credential_write(
   ctx: pb.Client,
   r: mut Ref<http.Request>,
   team_id: string,
-) -> Result<string, string> {
+) -> Result<string, pb.CliError> {
   let member = access_member(ctx, r)?
   let password = r.PostFormValue("password")
-  if password == "" { return Err("a password is required") }
+  if password == "" { return Err(pb.failed("a password is required")) }
   if password != r.PostFormValue("password_confirm") {
-    return Err("the two passwords do not match")
+    return Err(pb.failed("the two passwords do not match"))
   }
   let su = verify_admin(ctx, r.PostFormValue("admin_password"))?
   // A blank email keeps the member's current identity (often the
@@ -602,12 +602,12 @@ fn teams_archive_write(
   ctx: pb.Client,
   r: mut Ref<http.Request>,
   team_id: string,
-) -> Result<string, string> {
+) -> Result<string, pb.CliError> {
   let id = strings.TrimSpace(r.PostFormValue("id"))
-  if id == "" { return Err("pick a team") }
+  if id == "" { return Err(pb.failed("pick a team")) }
   let known = records.list_teams(ctx)?
   let Some(t) = known.items.find(|x| x.id == id) else {
-    return Err("unknown team; reload the page for the current list")
+    return Err(pb.failed("unknown team; reload the page for the current list"))
   }
   let archived = r.PostFormValue("archived") == "1"
   let su = verify_admin(ctx, r.PostFormValue("admin_password"))?

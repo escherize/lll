@@ -27,7 +27,7 @@ pub fn fetch_team_docs_light(
   ctx: pb.Client,
   team_id: string,
   where: string,
-) -> Result<Slice<models.Doc>, string> {
+) -> Result<Slice<models.Doc>, pb.CliError> {
   let mut clause = f"team={query.quote(team_id)}"
   if where != "" { clause = f"{clause} && {where}" }
   fetch_docs(ctx, clause, "slug", "id,slug,kind,title,body,updated")
@@ -37,7 +37,7 @@ pub fn fetch_team_issues_where(
   ctx: pb.Client,
   team_id: string,
   where: string,
-) -> Result<Slice<models.Issue>, string> {
+) -> Result<Slice<models.Issue>, pb.CliError> {
   let mut clause = query.filter(team_id, "", "", "", "", "")
   if where != "" { clause = f"{clause} && {where}" }
   let filter = url.QueryEscape(clause)
@@ -62,7 +62,7 @@ pub fn fetch_team_comments_where(
   ctx: pb.Client,
   team_id: string,
   where: string,
-) -> Result<Slice<models.Comment>, string> {
+) -> Result<Slice<models.Comment>, pb.CliError> {
   let mut clause = f"issue.team={query.quote(team_id)}"
   if where != "" { clause = f"{clause} && {where}" }
   let cfilter = url.QueryEscape(clause)

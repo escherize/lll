@@ -1,3 +1,4 @@
+import "pb"
 import "query"
 
 /// The board half of the shared-filter contract: a URL's view state becomes
@@ -28,6 +29,7 @@ fn web_filters_share_values_and_validation_with_the_cli() {
   let assert Err(web_error) = view_filters(ViewQuery { state: "bogus", .. }).validate()
   let assert Err(cli_error) = query.Filters { state: ["bogus"], .. }.validate()
   assert web_error == cli_error
+  assert pb.exit_code(web_error.kind) == 2
 }
 
 #[test]

@@ -97,7 +97,7 @@ fn view_vms(ctx: pb.Client) -> Slice<ViewVM> {
 }
 
 /// A refresh must distinguish a failed read from an actually empty group.
-fn fetch_view_vms(ctx: pb.Client) -> Result<Slice<ViewVM>, string> {
+fn fetch_view_vms(ctx: pb.Client) -> Result<Slice<ViewVM>, pb.CliError> {
   let mut list = models.ViewList { .. }
   pb.fetch(ctx, "/api/collections/views/records?perPage=200&sort=-created", "views", &list)?
   // A view is a name plus a query string, nothing more: the rail row is the
@@ -135,7 +135,7 @@ fn favorite_rows(favs: Slice<models.Favorite>) -> Slice<FavVM> {
 /// Unscoped by member on purpose: auth is deferred (task-32), so every row
 /// carries member="" and a star belongs to the workspace. When members
 /// arrive this grows a filter, not a new shape.
-fn fetch_favorites(ctx: pb.Client) -> Result<Slice<models.Favorite>, string> {
+fn fetch_favorites(ctx: pb.Client) -> Result<Slice<models.Favorite>, pb.CliError> {
   let mut list = models.FavoriteList { .. }
   pb.fetch(ctx, 
     "/api/collections/favorites/records?perPage=200&sort=-created,id&expand=issue.team&fields=id,issue,expand.issue.id,expand.issue.number,expand.issue.title,expand.issue.state,expand.issue.expand.team.key",
@@ -148,7 +148,7 @@ fn fetch_favorites(ctx: pb.Client) -> Result<Slice<models.Favorite>, string> {
 }
 
 /// The workspace's favorite row for one issue, if it has one.
-fn fetch_favorite(ctx: pb.Client, issue_id: string) -> Result<Option<models.Favorite>, string> {
+fn fetch_favorite(ctx: pb.Client, issue_id: string) -> Result<Option<models.Favorite>, pb.CliError> {
   let filter = url.QueryEscape(f"issue={query.quote(issue_id)} && member=''")
   let mut list = models.FavoriteList { .. }
   pb.fetch(ctx, 
@@ -192,7 +192,7 @@ fn board_page(ctx: pb.Client, w: http.ResponseWriter, r: Ref<http.Request>, team
   for s in csv(raw.state) {
     match query.state(s) {
       Ok(valid) => { states = states.append(valid) },
-      Err(e) => { if err == "" { err = pb.plain(e) } },
+      Err(e) => { if err == "" { err = e.message } },
     }
   }
   // Who this viewer may name on this team (LLL-551). An assignee filter
@@ -200,7 +200,7 @@ fn board_page(ctx: pb.Client, w: http.ResponseWriter, r: Ref<http.Request>, team
   let roster = match read_roster(ctx) {
     Ok(found) => found,
     Err(e) => {
-      http.Error(w, pb.plain(e), 500)
+      http.Error(w, e.message, 500)
       return
     },
   }
@@ -208,14 +208,14 @@ fn board_page(ctx: pb.Client, w: http.ResponseWriter, r: Ref<http.Request>, team
   for a in csv(raw.assignee) {
     match roster_member(roster, a) {
       Ok(_) => assignees = assignees.append(a),
-      Err(e) => { if err == "" { err = pb.plain(e) } },
+      Err(e) => { if err == "" { err = e.message } },
     }
   }
   let mut labels: Slice<string> = []
   for l in csv(raw.label) {
     match records.resolve_label(ctx, team_id, l) {
       Ok(_) => labels = labels.append(l),
-      Err(e) => { if err == "" { err = pb.plain(e) } },
+      Err(e) => { if err == "" { err = e.message } },
     }
   }
   // Projects filter by id (LLL-523): the URL speaks names, as /issues does,
@@ -231,7 +231,7 @@ fn board_page(ctx: pb.Client, w: http.ResponseWriter, r: Ref<http.Request>, team
         projects = projects.append(p)
         project_ids = project_ids.append(found.id)
       },
-      Err(e) => { if err == "" { err = pb.plain(e) } },
+      Err(e) => { if err == "" { err = e.message } },
     }
   }
   let mut prios: Slice<string> = []
@@ -246,7 +246,7 @@ fn board_page(ctx: pb.Client, w: http.ResponseWriter, r: Ref<http.Request>, team
   for h in csv(raw.hide) {
     match query.state(h) {
       Ok(valid) => { hidden = hidden.append(valid) },
-      Err(e) => { if err == "" { err = f"{pb.plain(e)} (hide)" } },
+      Err(e) => { if err == "" { err = f"{e.message} (hide)" } },
     }
   }
   // The saved view (LLL-375): on a URL that says nothing about hide — the
@@ -322,7 +322,7 @@ fn board_page(ctx: pb.Client, w: http.ResponseWriter, r: Ref<http.Request>, team
   let issues = match records.fetch_board_issues(ctx, team_id) {
     Ok(i) => issues_for(viewer_is_scoped(viewer), i).map(|x| roster.issue(x)),
     Err(e) => {
-      http.Error(w, pb.plain(e), 500)
+      http.Error(w, e.message, 500)
       return
     },
   }
@@ -330,7 +330,7 @@ fn board_page(ctx: pb.Client, w: http.ResponseWriter, r: Ref<http.Request>, team
   let compose = match compose_vm(ctx, team_id, roster) {
     Ok(c) => c,
     Err(e) => {
-      http.Error(w, pb.plain(e), 500)
+      http.Error(w, e.message, 500)
       return
     },
   }
@@ -347,7 +347,7 @@ fn board_page(ctx: pb.Client, w: http.ResponseWriter, r: Ref<http.Request>, team
 
   let held = match claims.for_team(ctx, team.id) {
     Ok(found) => found.map(|c| roster.claim(c)),
-    Err(e) => { http.Error(w, pb.plain(e), 500); return },
+    Err(e) => { http.Error(w, e.message, 500); return },
   }
   let vm = BoardVM {
     states: state_opts(),
@@ -438,7 +438,7 @@ fn issue_page(ctx: pb.Client, w: http.ResponseWriter, r: Ref<http.Request>, team
   let fetched = match records.fetch_issue(ctx, key) {
     Ok(i) => i,
     Err(e) => {
-      http.Error(w, pb.plain(e), 404)
+      http.Error(w, e.message, 404)
       return
     },
   }
@@ -452,7 +452,7 @@ fn issue_page(ctx: pb.Client, w: http.ResponseWriter, r: Ref<http.Request>, team
   let comments = match records.fetch_comments(ctx, issue.id) {
     Ok(c) => c,
     Err(e) => {
-      http.Error(w, pb.plain(e), 500)
+      http.Error(w, e.message, 500)
       return
     },
   }
@@ -461,14 +461,14 @@ fn issue_page(ctx: pb.Client, w: http.ResponseWriter, r: Ref<http.Request>, team
   let roster = match read_roster(ctx) {
     Ok(found) => found,
     Err(e) => {
-      http.Error(w, pb.plain(e), 500)
+      http.Error(w, e.message, 500)
       return
     },
   }
   let mut page = match issue_vm(ctx, issue, comments, roster) {
     Ok(p) => p,
     Err(e) => {
-      http.Error(w, pb.plain(e), 500)
+      http.Error(w, e.message, 500)
       return
     },
   }

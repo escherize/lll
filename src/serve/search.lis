@@ -41,7 +41,7 @@ fn search_page(
     match search_hits(ctx, team, q, viewer_is_scoped(viewer)) {
       Ok(hits) => results = hits,
       Err(e) => {
-        http.Error(w, pb.plain(e), 500)
+        http.Error(w, e.message, 500)
         return
       },
     }
@@ -72,7 +72,7 @@ fn search_page(
     let frag = match render("search-update", page) {
       Ok(h) => h,
       Err(e) => {
-        http.Error(w, pb.plain(e), 500)
+        http.Error(w, e.message, 500)
         return
       },
     }
@@ -90,7 +90,7 @@ fn search_page(
 /// is and why. Docs joined the page when they got one of their own to link to
 /// (LLL-405): until then a doc hit was a result you could not click, which is
 /// why this searched issues and comments only (LLL-398).
-fn search_hits(ctx: pb.Client, team: models.Team, q: string, scoped: bool) -> Result<Slice<SearchHitVM>, string> {
+fn search_hits(ctx: pb.Client, team: models.Team, q: string, scoped: bool) -> Result<Slice<SearchHitVM>, pb.CliError> {
   let issues = records.fetch_team_issues_where(ctx, team.id, records.candidate_clause(q, ["title", "description"]))?
   let comments = records.fetch_team_comments_where(ctx, team.id, records.candidate_clause(q, ["body"]))?
   // A comment's issue must be in the candidate set for the hit to have a

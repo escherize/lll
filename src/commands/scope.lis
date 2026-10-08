@@ -1,11 +1,12 @@
 import "flags"
+import "pb"
 
 /// --team selects this invocation's default scope. It is returned, not
 /// applied: main puts it in the Settings it builds (LLL-486), so it reaches
 /// every command as a value and no child process inherits it. No
 /// configuration file is rewritten, and explicit issue identifiers still
 /// resolve their own team.
-pub fn scoped_args(args: Slice<string>) -> Result<(Slice<string>, Option<string>), string> {
+pub fn scoped_args(args: Slice<string>) -> Result<(Slice<string>, Option<string>), pb.CliError> {
   let noun = args.get(1).unwrap_or("")
   let verb = args.get(2).unwrap_or("")
   let (start, spec) = match noun {

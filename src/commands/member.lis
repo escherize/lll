@@ -16,7 +16,7 @@ import "tokens"
 /// Dispatch `lll member <verb>` through the noun's Command table (TASK-307).
 /// The table is the one place a verb is declared: dispatch, `lll member
 /// --help` and shell completions all read it, so none of the three can drift.
-pub fn member(ctx: pb.Client, args: Slice<string>) -> Result<(), string> {
+pub fn member(ctx: pb.Client, args: Slice<string>) -> Result<(), pb.CliError> {
   flags.dispatch(ctx,
     "member",
     "work with members",
@@ -124,7 +124,7 @@ member can tell that wider access exists; it cannot tell which other teams
 exist ('lll team --help')."
 }
 
-fn member_list(input: flags.CommandInput) -> Result<(), string> {
+fn member_list(input: flags.CommandInput) -> Result<(), pb.CliError> {
   let ctx = input.ctx
   let p = input.parsed
   let members = models.MemberList { items: records.fetch_members(ctx)? }
@@ -228,7 +228,7 @@ fn member_add_spec() -> Slice<flags.Flag> {
 /// Superuser-gated like set-password, because it is destructive and because
 /// deleting an auth record is not something one member should do to another
 /// on a shared board.
-fn member_remove(input: flags.CommandInput) -> Result<(), string> {
+fn member_remove(input: flags.CommandInput) -> Result<(), pb.CliError> {
   let ctx = input.ctx
   let usage = input.usage
   let p = input.parsed
@@ -245,13 +245,13 @@ fn member_remove(input: flags.CommandInput) -> Result<(), string> {
   let login = given_admin_login(ctx.settings, p)?
   let usable = match login {
     AdminLogin.Explicit(_) => true,
-    AdminLogin.Env(_) => ctx.settings.config()?.token == "",
+    AdminLogin.Env(_) => ctx.settings.config().map_err(pb.failed)?.token == "",
     AdminLogin.Absent => false,
   }
   if !usable {
     return Err(
-      "removing a member needs the server's admin credentials
-" + tokens.admin_hint(),
+      pb.failed("removing a member needs the server's admin credentials
+" + tokens.admin_hint()),
     )
   }
   let su = superuser_auth(ctx, login)?
@@ -265,9 +265,9 @@ fn member_remove(input: flags.CommandInput) -> Result<(), string> {
   let created = references.created
   if (assigned > 0 || authored > 0 || created > 0) && !p.given("--force") {
     return Err(
-      f"{member.name} has {assigned} issue(s) assigned and {authored} comment(s) authored, and created {created} issue(s)
+      pb.failed(f"{member.name} has {assigned} issue(s) assigned and {authored} comment(s) authored, and created {created} issue(s)
 reassign first: lll issue update <KEY> --assignee <somebody>
-or use --force to clear assignments, comment authorship and issue creator references; issue and comment bodies are kept",
+or use --force to clear assignments, comment authorship and issue creator references; issue and comment bodies are kept"),
     )
   }
 
@@ -359,16 +359,16 @@ agents sharing one bot tell their sessions apart with --agent NAME." +
 /// that hit this hold only the admin bootstrap pair: name the requirement,
 /// then the two paths that actually work from there. The boundary is
 /// PocketBase's; this only says what it is.
-fn member_create_error(e: string) -> string {
+fn member_create_error(e: pb.CliError) -> pb.CliError {
   // Scoped and read-only members fail the members create rule, which
   // PocketBase answers with a bare 400 (scoped-access fleet case 09: 4 of
   // 10 got nothing more). A validation failure carries field data, and a
   // gopb refusal (the bot- prefix) its own message; both pass through.
-  if pb.classify(e).status == 400 && pb.classify(e).message == "Failed to create record." {
+  if e.status == 400 && e.message == "Failed to create record." {
     return pb.fail(pb.ErrorKind.Refused, "your token cannot add members: only a member with read-write access to every team, or administrator credentials ('lll member invite NAME --email E' with LLL_ADMIN_EMAIL/LLL_ADMIN_PASSWORD), can
 for your own agent, a read-write member runs 'lll bot create bot-NAME' (a bot it owns); a read-only member cannot, so ask whoever invited you")
   }
-  if pb.classify(e).status == 401 {
+  if e.status == 401 {
     return pb.fail(pb.ErrorKind.Auth, "creating a member needs a member token: the one configured here is missing or was refused
 administrator credentials (LLL_ADMIN_EMAIL/LLL_ADMIN_PASSWORD) do not authenticate member creation
 paths forward: 'lll login --create' makes a first member login with the admin credentials; 'lll member invite NAME --email EMAIL' creates the member from the admin side; 'lll token create NAME' mints an agent token for an existing member")
@@ -376,7 +376,7 @@ paths forward: 'lll login --create' makes a first member login with the admin cr
   e
 }
 
-fn member_add(input: flags.CommandInput) -> Result<(), string> {
+fn member_add(input: flags.CommandInput) -> Result<(), pb.CliError> {
   let ctx = input.ctx
   let args = input.args
   let spec = member_add_spec()
@@ -393,8 +393,8 @@ fn member_add(input: flags.CommandInput) -> Result<(), string> {
   // command that makes one before any server call.
   if strings.HasPrefix(name, "bot-") {
     return Err(
-      f"'{name}' is a bot name: the bot- prefix is reserved to bot members
-a read-write member creates it with 'lll bot create {name}' (owned by you, never more access than you have); a read-only member cannot create bots, so ask whoever invited you",
+      pb.failed(f"'{name}' is a bot name: the bot- prefix is reserved to bot members
+a read-write member creates it with 'lll bot create {name}' (owned by you, never more access than you have); a read-only member cannot create bots, so ask whoever invited you"),
     )
   }
 
@@ -409,13 +409,13 @@ a read-write member creates it with 'lll bot create {name}' (owned by you, never
   }
   if let Some(existing) = found {
     return Err(
-      f"a member named '{name}' already exists <{existing.email}>; pick another name",
+      pb.failed(f"a member named '{name}' already exists <{existing.email}>; pick another name"),
     )
   }
   let password = p.one("--password")
   if p.given("--password") && (password == "" || !real_email(email)) {
     return Err(
-      "--password requires a nonempty password and a real --email; use 'lll member invite NAME --email EMAIL' for a generated login handoff",
+      pb.failed("--password requires a nonempty password and a real --email; use 'lll member invite NAME --email EMAIL' for a generated login handoff"),
     )
   }
   let created = if p.given("--password") {
@@ -432,7 +432,7 @@ a read-write member creates it with 'lll bot create {name}' (owned by you, never
   fmt.Println(f"Added member {created.name}")
   if p.given("--password") {
     fmt.Println(
-      f"login enabled: lll login --email {email} --url {(ctx.settings.config()?).url} (use the supplied password)",
+      f"login enabled: lll login --email {email} --url {(ctx.settings.config().map_err(pb.failed)?).url} (use the supplied password)",
     )
   } else {
     fmt.Println(
@@ -451,7 +451,7 @@ pub fn create_member(
   ctx: pb.Client,
   name: string,
   email: string,
-) -> Result<models.Member, string> {
+) -> Result<models.Member, pb.CliError> {
   create_member_as(ctx, ctx.token(), name, email, rand.Text(), [], "")
 }
 
@@ -469,7 +469,7 @@ fn create_member_as(
   password: string,
   teams: Slice<string>,
   mode: string,
-) -> Result<models.Member, string> {
+) -> Result<models.Member, pb.CliError> {
   let member_email = if email == "" { records.synthesize_email(name) } else { email }
   // Unscoped creates send no scope and get the creator's ("all").
   let scope = if teams.is_empty() { "" } else { "teams" }
@@ -491,13 +491,13 @@ fn create_member_as(
 
   let mut created = models.Member { .. }
   if let Err(e) = json.Unmarshal(body.bytes(), &created) {
-    return Err(f"decoding created member: {e}")
+    return Err(pb.failed(f"decoding created member: {e}"))
   }
   Ok(created)
 }
 
 /// True when the server already has a member by that name.
-pub fn member_exists(ctx: pb.Client, name: string) -> Result<bool, string> {
+pub fn member_exists(ctx: pb.Client, name: string) -> Result<bool, pb.CliError> {
   Ok(records.find_member(ctx, name)?.is_some())
 }
 
@@ -506,7 +506,7 @@ pub fn member_exists(ctx: pb.Client, name: string) -> Result<bool, string> {
 ///
 /// Used by up while it still holds superuser authority. Normal configuration
 /// never creates a member. The board receives a member token after this step.
-pub fn ensure_member(ctx: pb.Client, name: string) -> Result<bool, string> {
+pub fn ensure_member(ctx: pb.Client, name: string) -> Result<bool, pb.CliError> {
   if name == "" { return Ok(false) }
   let existing = records.find_member(ctx, name)?
   if existing.is_some() { return Ok(false) }
@@ -519,7 +519,7 @@ pub fn ensure_member(ctx: pb.Client, name: string) -> Result<bool, string> {
     Err(_) => {
       let raced = records.find_member(ctx, name)?
       if raced.is_some() { return Ok(false) }
-      Err(f"could not create member '{name}' and none exists to reuse")
+      Err(pb.failed(f"could not create member '{name}' and none exists to reuse"))
     },
   }
 }
@@ -571,7 +571,7 @@ and everything they wrote; 'lll member delete' deletes the member instead.
 /// not make a member read-only with any lll command, and 7 patched the
 /// record through 'lll api' instead. Cases 06-08 (narrow, widen, revoke)
 /// need the same verb.
-fn member_access_cmd(input: flags.CommandInput) -> Result<(), string> {
+fn member_access_cmd(input: flags.CommandInput) -> Result<(), pb.CliError> {
   let ctx = input.ctx
   let p = input.parsed
   let name = p.first()
@@ -592,12 +592,12 @@ fn member_access_cmd(input: flags.CommandInput) -> Result<(), string> {
   }
   let given = [p.given("--team"), p.given("--all-teams"), p.given("--no-teams"), edit_teams].filter(|g| g)
   if given.length() > 1 {
-    return Err("give one of --team, --all-teams, --no-teams, or --add-team/--remove-team")
+    return Err(pb.failed("give one of --team, --all-teams, --no-teams, or --add-team/--remove-team"))
   }
   if p.given("--read-only") && p.given("--read-write") {
-    return Err("give --read-only or --read-write, not both")
+    return Err(pb.failed("give --read-only or --read-write, not both"))
   }
-  let id_of = |key: string| -> Result<string, string> {
+  let id_of = |key: string| -> Result<string, pb.CliError> {
     let k = records.normalize_team_key(key)
     let Some(t) = teams.find(|t| t.key == k) else { return Err(records.unknown_team(ctx, k)) }
     Ok(t.id)
@@ -625,7 +625,7 @@ fn member_access_cmd(input: flags.CommandInput) -> Result<(), string> {
     for k in p.all("--team") { ids = ids.append(id_of(k)?) }
   } else if edit_teams {
     if m.scope == "all" {
-      return Err(f"{m.name} sees every team; limit them first with --team KEY, then add or remove")
+      return Err(pb.failed(f"{m.name} sees every team; limit them first with --team KEY, then add or remove"))
     }
     for k in p.all("--add-team") {
       let id = id_of(k)?
@@ -642,8 +642,8 @@ fn member_access_cmd(input: flags.CommandInput) -> Result<(), string> {
   let patch = writes.MemberPatch { scope: Some(scope), teams: Some(ids), mode: Some(mode), .. }
   if let Err(e) = writes.update_member(ctx, pb.Caller.Member(su), m.id, patch) {
     // gopb checkOwner's refusal names its own fix (LLL-543).
-    if strings.Contains(e, "bot never exceeds its owner") { return Err(e) }
-    let status = pb.classify(e).status
+    if e.has_code(pb.ServerCode.BotExceedsOwner) { return Err(e) }
+    let status = e.status
     if status == 400 || status == 403 || status == 404 {
       return Err(
         pb.fail(pb.ErrorKind.Refused, "changing access needs administrator credentials: " + tokens.admin_hint() + ". A member or bot token cannot change anyone's access, its own included."),
@@ -668,11 +668,11 @@ fn member_access_cmd(input: flags.CommandInput) -> Result<(), string> {
 /// actually has and why (LLL-543). Prints nothing otherwise.
 /// A team-scoped caller may see a bot but not its owner (LLL-551): the owner
 /// then reads as missing, and the cap is not this caller's to know.
-fn print_owner_cap(ctx: pb.Client, m: models.Member, key_of: fn(string) -> string) -> Result<(), string> {
+fn print_owner_cap(ctx: pb.Client, m: models.Member, key_of: fn(string) -> string) -> Result<(), pb.CliError> {
   let (eff, cap) = match records.effective_access(ctx, m) {
     Ok(found) => found,
     Err(e) => {
-      if pb.classify(e).status == 404 { return Ok(()) }
+      if e.status == 404 { return Ok(()) }
       return Err(e)
     },
   }

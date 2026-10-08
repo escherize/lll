@@ -14,7 +14,7 @@ import "query"
 /// Dispatch parses args against the verb's spec BEFORE calling it, which is
 /// what stops `lll config check -h` from RUNNING the check - a network call -
 /// the way the old `match verb` did when it handed a zero-arg fn nothing.
-pub fn config_cmd(ctx: pb.Client, args: Slice<string>) -> Result<(), string> {
+pub fn config_cmd(ctx: pb.Client, args: Slice<string>) -> Result<(), pb.CliError> {
   flags.dispatch(ctx, "config", "manage configuration", config_intro(), config_commands(), args)
 }
 
@@ -83,19 +83,19 @@ repo file."
 }
 
 /// Set a machine-level endpoint, without changing repo config.
-fn config_set(input: flags.CommandInput) -> Result<(), string> {
+fn config_set(input: flags.CommandInput) -> Result<(), pb.CliError> {
   let ctx = input.ctx
   let usage = "usage: lll config set <url|web_url> VALUE"
-  if input.parsed.positional_count() != 2 { return Err(usage) }
+  if input.parsed.positional_count() != 2 { return Err(pb.failed(usage)) }
   let key = input.parsed.first()
   let value = strings.TrimSpace(input.parsed.nth(1))
-  if value == "" { return Err(usage) }
+  if value == "" { return Err(pb.failed(usage)) }
   if key == "url" || key == "web_url" {
     let endpoint = checked_endpoint(key, value)?
     let path = set_home_key(ctx.settings, key, endpoint)?
     fmt.Println(f"{key} = {endpoint} in {path}")
     // Re-read: the file just changed, and the note is about what wins now.
-    let (cfg, src) = ctx.settings.reload().traced()?
+    let (cfg, src) = ctx.settings.reload().traced().map_err(pb.failed)?
     let effective = if key == "url" { cfg.url } else { cfg.web_url }
     let origin = if key == "url" { src.url } else { src.web_url }
     if effective != endpoint {
@@ -103,14 +103,14 @@ fn config_set(input: flags.CommandInput) -> Result<(), string> {
     }
     return Ok(())
   }
-  Err(f"cannot set '{key}'; supported keys: url, web_url")
+  Err(pb.failed(f"cannot set '{key}'; supported keys: url, web_url"))
 }
 
 /// Set a repo-level key in the repo's .lll.toml — the one already in play,
 /// else a new one at the git root. Returns the path written. `team` is the
 /// only key that belongs here: it is a fact about the repo, and so the only
 /// one worth committing.
-pub fn set_repo_key(settings: config.Settings, key: string, value: string) -> Result<string, string> {
+pub fn set_repo_key(settings: config.Settings, key: string, value: string) -> Result<string, pb.CliError> {
   let path = settings.repo_path()
   set_key_in(path, key, value, false)?
   Ok(path)
@@ -119,11 +119,11 @@ pub fn set_repo_key(settings: config.Settings, key: string, value: string) -> Re
 /// Set a machine-level key in ~/.config/lll/lll.toml, creating the directory
 /// if needed. Returns the path written. `url` and `token` belong here: the repo
 /// file is committed, and neither of those travels.
-pub fn set_home_key(settings: config.Settings, key: string, value: string) -> Result<string, string> {
-  let path = settings.home_path()?
+pub fn set_home_key(settings: config.Settings, key: string, value: string) -> Result<string, pb.CliError> {
+  let path = settings.home_path().map_err(pb.failed)?
   let dir = filepath.Dir(path)
   if let Err(e) = os.MkdirAll(dir, 0o755) {
-    return Err(f"creating {dir}: {e}")
+    return Err(pb.failed(f"creating {dir}: {e}"))
   }
   set_key_in(path, key, value, true)?
   Ok(path)
@@ -134,11 +134,11 @@ pub fn set_home_key(settings: config.Settings, key: string, value: string) -> Re
 /// unsets nothing else. Returns true when a line was removed. Only the home
 /// file is touched — the repo's .lll.toml is committed and must never hold a
 /// token, and an env var is not ours to unset.
-pub fn clear_home_key(settings: config.Settings, key: string) -> Result<bool, string> {
-  let path = settings.home_path()?
+pub fn clear_home_key(settings: config.Settings, key: string) -> Result<bool, pb.CliError> {
+  let path = settings.home_path().map_err(pb.failed)?
   if !os.Stat(path).is_ok() { return Ok(false) }
   let Ok(data) = os.ReadFile(path) else {
-    return Err(f"reading {path}")
+    return Err(pb.failed(f"reading {path}"))
   }
   let mut lines: Slice<string> = []
   let mut removed = false
@@ -159,13 +159,13 @@ pub fn clear_home_key(settings: config.Settings, key: string) -> Result<bool, st
 /// existing assignment instead of appending a second one — duplicate keys
 /// make the file unparseable, and the whole point of these keys is that they
 /// get edited more than once.
-fn set_key_in(path: string, key: string, value: string, private: bool) -> Result<(), string> {
-  let Ok(encoded) = json.Marshal(value) else { return Err("could not encode config value") }
+fn set_key_in(path: string, key: string, value: string, private: bool) -> Result<(), pb.CliError> {
+  let Ok(encoded) = json.Marshal(value) else { return Err(pb.failed("could not encode config value")) }
   let line = f"{key} = {encoded as string}"
   let mut text = ""
   if os.Stat(path).is_ok() {
     let Ok(data) = os.ReadFile(path) else {
-      return Err(f"reading {path}")
+      return Err(pb.failed(f"reading {path}"))
     }
     text = data as string
   }
@@ -188,7 +188,7 @@ fn set_key_in(path: string, key: string, value: string, private: bool) -> Result
   if private {
     write_home_config(path, out)?
   } else if let Err(e) = os.WriteFile(path, out.bytes(), 0o644) {
-    return Err(f"writing {path}: {e}")
+    return Err(pb.failed(f"writing {path}: {e}"))
   }
   Ok(())
 }
@@ -203,11 +203,11 @@ fn set_key_in(path: string, key: string, value: string, private: bool) -> Result
 /// A symlinked config (stow, chezmoi) is written through: the rename targets
 /// the link's resolved file, so the link survives and its target gets the
 /// new contents. A path that does not exist yet resolves to itself.
-fn write_home_config(link: string, out: string) -> Result<(), string> {
+fn write_home_config(link: string, out: string) -> Result<(), pb.CliError> {
   let path = filepath.EvalSymlinks(link).unwrap_or(link)
   let file = match os.CreateTemp(filepath.Dir(path), ".lll.toml.*") {
     Ok(file) => file,
-    Err(e) => return Err(f"creating a temp file beside {path}: {e}"),
+    Err(e) => return Err(pb.failed(f"creating a temp file beside {path}: {e}")),
   }
   let tmp = file.Name()
   // After a successful rename there is nothing at tmp, so this only cleans
@@ -215,17 +215,17 @@ fn write_home_config(link: string, out: string) -> Result<(), string> {
   defer { let _ = os.Remove(tmp) }
   defer file.Close()
   if let Err(e) = file.Chmod(0o600) {
-    return Err(f"restricting permissions on {tmp}: {e}")
+    return Err(pb.failed(f"restricting permissions on {tmp}: {e}"))
   }
   match file.WriteString(out) {
     Partial.Ok(_) => (),
-    Partial.Err(e) | Partial.Both(_, e) => return Err(f"writing {tmp}: {e}"),
+    Partial.Err(e) | Partial.Both(_, e) => return Err(pb.failed(f"writing {tmp}: {e}")),
   }
   if let Err(e) = file.Close() {
-    return Err(f"closing {tmp}: {e}")
+    return Err(pb.failed(f"closing {tmp}: {e}"))
   }
   if let Err(e) = os.Rename(tmp, path) {
-    return Err(f"replacing {path}: {e}")
+    return Err(pb.failed(f"replacing {path}: {e}"))
   }
   Ok(())
 }
@@ -234,9 +234,9 @@ fn write_home_config(link: string, out: string) -> Result<(), string> {
 /// `git config --list --show-origin`. The failure this answers is silent: a
 /// repo reading the wrong team lists the wrong issues and reports nothing, so
 /// being able to ask which file won is the whole debugging affordance.
-fn config_list(input: flags.CommandInput) -> Result<(), string> {
+fn config_list(input: flags.CommandInput) -> Result<(), pb.CliError> {
   let ctx = input.ctx
-  let (cfg, src) = ctx.settings.traced()?
+  let (cfg, src) = ctx.settings.traced().map_err(pb.failed)?
   if input.parsed.given("--json") {
     // The token's value is a secret here too: only whether it is set.
     let tok = if cfg.token == "" { "" } else { "set" }
@@ -270,24 +270,24 @@ struct ConfigValue { key: string, value: string, source: string }
 
 /// `lll config get KEY` — the effective value alone, for a script to read.
 /// The token is a secret, so it is refused here as in `config list`.
-fn config_get(input: flags.CommandInput) -> Result<(), string> {
+fn config_get(input: flags.CommandInput) -> Result<(), pb.CliError> {
   let ctx = input.ctx
   let key = input.parsed.first()
   if key == "" { return Err(flags.usage_error(f"usage: {input.usage}")) }
-  let (cfg, src) = ctx.settings.traced()?
+  let (cfg, src) = ctx.settings.traced().map_err(pb.failed)?
   let (value, origin) = match key {
     "url" => (cfg.url, src.url),
     "web_url" => (cfg.web_url, src.web_url),
     "team" => (cfg.team, src.team),
     "sort" => (cfg.sort, src.sort),
     "token" => return Err(
-      "the token is a secret and is not printed; 'lll config list' shows where it comes from",
+      pb.failed("the token is a secret and is not printed; 'lll config list' shows where it comes from"),
     ),
     other => return Err(
-      f"unknown config key '{other}'; keys: url, web_url, team, sort",
+      pb.failed(f"unknown config key '{other}'; keys: url, web_url, team, sort"),
     ),
   }
-  if origin == "" { return Err(f"{key} is not set (see 'lll config list')") }
+  if origin == "" { return Err(pb.failed(f"{key} is not set (see 'lll config list')")) }
   fmt.Println(value)
   Ok(())
 }
@@ -299,14 +299,14 @@ fn config_get(input: flags.CommandInput) -> Result<(), string> {
 /// /api/health is the endpoint because it needs no auth and no collection, so
 /// a failure here is about reachability alone.
 /// `_args` is unread: dispatch already parsed it (TASK-307).
-fn config_check(input: flags.CommandInput) -> Result<(), string> {
+fn config_check(input: flags.CommandInput) -> Result<(), pb.CliError> {
   let ctx = input.ctx
-  let (cfg, src) = ctx.settings.traced()?
+  let (cfg, src) = ctx.settings.traced().map_err(pb.failed)?
   match ctx.get("/api/health") {
     Ok(_) => fmt.Println(f"ok\t{cfg.url} answers as an lll server"),
     // The error already names the url, the status, and (for a board-shaped
     // 404) the port hint from pb.read_body. Prefixing it is all that is left.
-    Err(e) => return Err(f"{cfg.url} is not a reachable lll server API: {e}"),
+    Err(e) => return Err(e.with_message(f"{cfg.url} is not a reachable lll server API: {e.message}")),
   }
   if let Some(warning) = committed_token_warning(ctx, src.token) {
     fmt.Println(warning)
@@ -349,9 +349,9 @@ fn assigns(line: string, key: string) -> bool {
 }
 
 /// `lll config init`. `_args` is unread: dispatch already parsed it (TASK-307).
-fn config_init(_input: flags.CommandInput) -> Result<(), string> {
+fn config_init(_input: flags.CommandInput) -> Result<(), pb.CliError> {
   if os.Stat(".lll.toml").is_ok() {
-    return Err(".lll.toml already exists; not overwriting")
+    return Err(pb.failed(".lll.toml already exists; not overwriting"))
   }
   let template = f"# lll configuration
 # Precedence: env vars (LLL_URL, LLL_TEAM, LLL_SORT, LLL_WEB_URL,
@@ -383,22 +383,22 @@ fn config_init(_input: flags.CommandInput) -> Result<(), string> {
 # token = \"\"
 "
   if let Err(e) = os.WriteFile(".lll.toml", template.bytes(), 0o644) {
-    return Err(f"writing .lll.toml: {e}")
+    return Err(pb.failed(f"writing .lll.toml: {e}"))
   }
   fmt.Println("Wrote .lll.toml")
   Ok(())
 }
 
 /// API and board base URLs must be explicit HTTP(S) endpoints, with no credentials.
-fn checked_web_url(value: string) -> Result<string, string> {
+fn checked_web_url(value: string) -> Result<string, pb.CliError> {
   checked_endpoint("web_url", value)
 }
 
-fn checked_endpoint(key: string, value: string) -> Result<string, string> {
+fn checked_endpoint(key: string, value: string) -> Result<string, pb.CliError> {
   let parsed = url.Parse(value)
-  let Ok(u) = parsed else { return Err(f"{key} must be an absolute http:// or https:// URL") }
+  let Ok(u) = parsed else { return Err(pb.failed(f"{key} must be an absolute http:// or https:// URL")) }
   if (u.Scheme != "http" && u.Scheme != "https") || u.Hostname() == "" || u.User.is_some() || u.RawQuery != "" || u.Fragment != "" {
-    return Err(f"{key} must be an absolute http:// or https:// URL without credentials, query or fragment")
+    return Err(pb.failed(f"{key} must be an absolute http:// or https:// URL without credentials, query or fragment"))
   }
   Ok(strings.TrimRight(value, "/"))
 }

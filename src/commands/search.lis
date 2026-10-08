@@ -20,7 +20,7 @@ import "records"
 /// lines around the match (LLL-96). `lll issue list --search` stays the
 /// cheap title filter; this is the one that finds a word buried in a
 /// comment from last month.
-pub fn search_cmd(ctx: pb.Client, args: Slice<string>) -> Result<(), string> {
+pub fn search_cmd(ctx: pb.Client, args: Slice<string>) -> Result<(), pb.CliError> {
   let spec = search_spec()
   let usage = flags.usage("lll search", spec, "TEXT...")
   let p = flags.parse_n(spec, args, 2, 64, usage)?
@@ -60,7 +60,7 @@ pub fn search_spec() -> Slice<flags.Flag> {
 
 /// The same issues with only the fields the ranker reads: the CLI has no
 /// card to draw, and the expansions were most of the bytes on the wire.
-fn fetch_team_issues_light(ctx: pb.Client, team_id: string, where: string) -> Result<Slice<models.Issue>, string> {
+fn fetch_team_issues_light(ctx: pb.Client, team_id: string, where: string) -> Result<Slice<models.Issue>, pb.CliError> {
   let mut clause = query.filter(team_id, "", "", "", "", "")
   if where != "" { clause = f"{clause} && {where}" }
   let filter = url.QueryEscape(clause)
@@ -108,12 +108,12 @@ struct Cache {
   docs: Slice<models.Doc>,
 }
 
-fn cache_path(ctx: pb.Client, team_id: string) -> Result<string, string> {
-  let cfg = ctx.settings.config()?
+fn cache_path(ctx: pb.Client, team_id: string) -> Result<string, pb.CliError> {
+  let cfg = ctx.settings.config().map_err(pb.failed)?
   let home = ctx.settings.env.home
-  if home == "" { return Err("no home directory for the search cache") }
+  if home == "" { return Err(pb.failed("no home directory for the search cache")) }
   let dir = filepath.Join(home, ".cache", "lll")
-  if let Err(e) = os.MkdirAll(dir, 0o755) { return Err(f"creating {dir}: {e}") }
+  if let Err(e) = os.MkdirAll(dir, 0o755) { return Err(pb.failed(f"creating {dir}: {e}")) }
   let host = strings.NewReplacer("https://", "", "http://", "", "/", "_", ":", "_").Replace(cfg.url)
   Ok(filepath.Join(dir, f"search-{host}-{team_id}.json"))
 }
@@ -125,17 +125,17 @@ fn load_cache(path: string) -> Cache {
   c
 }
 
-fn save_cache(path: string, c: Cache) -> Result<(), string> {
+fn save_cache(path: string, c: Cache) -> Result<(), pb.CliError> {
   let body = match json.Marshal(c) {
     Ok(b) => b,
-    Err(e) => return Err(f"encoding the search cache: {e}"),
+    Err(e) => return Err(pb.failed(f"encoding the search cache: {e}")),
   }
-  if let Err(e) = os.WriteFile(path, body, 0o600) { return Err(f"writing {path}: {e}") }
+  if let Err(e) = os.WriteFile(path, body, 0o600) { return Err(pb.failed(f"writing {path}: {e}")) }
   Ok(())
 }
 
 /// Documents for the team from the cache, refreshed first.
-fn cached_corpus(ctx: pb.Client, team_id: string, team_key: string, refresh: bool, issues: bool, docs: bool) -> Result<Slice<search.Document>, string> {
+fn cached_corpus(ctx: pb.Client, team_id: string, team_key: string, refresh: bool, issues: bool, docs: bool) -> Result<Slice<search.Document>, pb.CliError> {
   let path = cache_path(ctx, team_id)?
   let mut c = if refresh { Cache { .. } } else { load_cache(path) }
   c = sync_cache(ctx, c, team_id)?
@@ -154,17 +154,17 @@ fn cached_corpus(ctx: pb.Client, team_id: string, team_key: string, refresh: boo
 /// id listings and the three "updated since" fetches run at once; records
 /// whose id is gone are dropped, changed and new ones replace their old
 /// selves, and `synced` moves to the newest `updated` seen.
-fn sync_cache(ctx: pb.Client, c: Cache, team_id: string) -> Result<Cache, string> {
+fn sync_cache(ctx: pb.Client, c: Cache, team_id: string) -> Result<Cache, pb.CliError> {
   if c.synced == "" {
-    let issues_ch = Channel.new<Result<Slice<models.Issue>, string>>()
-    let comments_ch = Channel.new<Result<Slice<models.Comment>, string>>()
-    let docs_ch = Channel.new<Result<Slice<models.Doc>, string>>()
+    let issues_ch = Channel.new<Result<Slice<models.Issue>, pb.CliError>>()
+    let comments_ch = Channel.new<Result<Slice<models.Comment>, pb.CliError>>()
+    let docs_ch = Channel.new<Result<Slice<models.Doc>, pb.CliError>>()
     task { let _ = issues_ch.send(fetch_team_issues_light(ctx, team_id, "")) }
     task { let _ = comments_ch.send(records.fetch_team_comments_where(ctx, team_id, "")) }
     task { let _ = docs_ch.send(records.fetch_team_docs_light(ctx, team_id, "")) }
-    let Some(issues) = issues_ch.receive() else { return Err("issue fetch ended without an answer") }
-    let Some(comments) = comments_ch.receive() else { return Err("comment fetch ended without an answer") }
-    let Some(docs) = docs_ch.receive() else { return Err("doc fetch ended without an answer") }
+    let Some(issues) = issues_ch.receive() else { return Err(pb.failed("issue fetch ended without an answer")) }
+    let Some(comments) = comments_ch.receive() else { return Err(pb.failed("comment fetch ended without an answer")) }
+    let Some(docs) = docs_ch.receive() else { return Err(pb.failed("doc fetch ended without an answer")) }
     let full = Cache { synced: "1970-01-01 00:00:00.000Z", issues: issues?, comments: comments?, docs: docs? }
     return Ok(Cache { synced: newest(full), issues: full.issues, comments: full.comments, docs: full.docs })
   }
@@ -182,15 +182,15 @@ fn sync_cache(ctx: pb.Client, c: Cache, team_id: string) -> Result<Cache, string
   //
   // It would take a create whose `updated` is NOT newer than the mark to slip
   // past both, which the server does not produce.
-  let pi = Channel.new<Result<Probe, string>>()
-  let pc = Channel.new<Result<Probe, string>>()
-  let pd = Channel.new<Result<Probe, string>>()
+  let pi = Channel.new<Result<Probe, pb.CliError>>()
+  let pc = Channel.new<Result<Probe, pb.CliError>>()
+  let pd = Channel.new<Result<Probe, pb.CliError>>()
   task { let _ = pi.send(probe(ctx, "issues", f"team={query.quote(team_id)}")) }
   task { let _ = pc.send(probe(ctx, "comments", f"issue.team={query.quote(team_id)}")) }
   task { let _ = pd.send(probe(ctx, "docs", f"team={query.quote(team_id)}")) }
-  let Some(ri) = pi.receive() else { return Err("probe ended without an answer") }
-  let Some(rc) = pc.receive() else { return Err("probe ended without an answer") }
-  let Some(rd) = pd.receive() else { return Err("probe ended without an answer") }
+  let Some(ri) = pi.receive() else { return Err(pb.failed("probe ended without an answer")) }
+  let Some(rc) = pc.receive() else { return Err(pb.failed("probe ended without an answer")) }
+  let Some(rd) = pd.receive() else { return Err(pb.failed("probe ended without an answer")) }
   let prob_i = ri?
   let prob_c = rc?
   let prob_d = rd?
@@ -252,7 +252,7 @@ struct ProbeItem {
   updated: string,
 }
 
-fn probe(ctx: pb.Client, collection: string, where: string) -> Result<Probe, string> {
+fn probe(ctx: pb.Client, collection: string, where: string) -> Result<Probe, pb.CliError> {
   let filter = url.QueryEscape(where)
   let mut list = ProbeList { .. }
   pb.fetch(ctx, f"/api/collections/{collection}/records?perPage=1&sort=-updated&fields=updated&filter={filter}", collection, &list)?
@@ -288,7 +288,7 @@ struct IdOnly {
 
 /// Every record id of a collection matching `where`: a few kilobytes even
 /// for a big team, which is what makes the delta sync cheap.
-fn fetch_ids(ctx: pb.Client, collection: string, where: string) -> Result<Slice<string>, string> {
+fn fetch_ids(ctx: pb.Client, collection: string, where: string) -> Result<Slice<string>, pb.CliError> {
   let filter = url.QueryEscape(where)
   let mut out: Slice<string> = []
   let mut page = 1

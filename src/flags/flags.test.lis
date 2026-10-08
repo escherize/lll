@@ -31,6 +31,13 @@ fn spec() -> Slice<Flag> {
   ]
 }
 
+fn is_help(e: pb.CliError) -> bool {
+  match e.kind {
+    pb.ErrorKind.Help => true,
+    _ => false,
+  }
+}
+
 fn argv(rest: Slice<string>) -> Slice<string> {
   ["lll", "issue", "list"].append(rest...)
 }
@@ -57,7 +64,7 @@ fn end_of_options_keeps_arity_required_flags_and_literal_values() {
   assert p.first() == "--help"
   assert parse(spec(), argv(["--"]), 3, false, "usage").is_ok()
   let assert Err(extra) = parse(spec(), argv(["--", "--json"]), 3, false, "usage")
-  assert pb.plain(extra) == "unexpected argument: '--json'"
+  assert extra.message == "unexpected argument: '--json'"
   assert parse(spec(), argv(["one", "--", "two"]), 3, true, "usage").is_err()
   let required = [Flag { name: "--name", value: true, required: true, .. }]
   assert parse(required, argv(["--", "--name"]), 3, true, "usage").is_err()
@@ -103,47 +110,47 @@ fn parse_repeats_accumulate_and_undeclared_repeats_are_refused() {
   // to a question they did not ask. The table says whether a flag may repeat,
   // and now the parser enforces it.
   let assert Err(msg) = parse(spec(), argv(["-t", "one", "-t", "two"]), 3, false, "")
-  assert msg.contains("may only be given once")
+  assert msg.message.contains("may only be given once")
 }
 
 #[test]
 fn parse_errors_on_unknown_flags() {
   let assert Err(msg) = parse(spec(), argv(["--nope"]), 3, false, "")
-  assert pb.plain(msg) == "unknown flag: '--nope'"
+  assert msg.message == "unknown flag: '--nope'"
   // A bad command line exits 2 (LLL-645).
-  assert pb.exit_code(pb.classify(msg).kind) == 2
+  assert pb.exit_code(msg.kind) == 2
   // A bad flag after a good one is still an error.
   let assert Err(later) = parse(spec(), argv(["--json", "--nope"]), 3, false, "")
-  assert later.contains("unknown flag: '--nope'")
+  assert later.message.contains("unknown flag: '--nope'")
 }
 
 #[test]
 fn parse_errors_on_a_missing_value() {
   let assert Err(msg) = parse(spec(), argv(["-t"]), 3, false, "")
-  assert pb.plain(msg) == "-t requires a value"
+  assert msg.message == "-t requires a value"
   // The error names the spelling the user typed, not the canonical name.
   let assert Err(alias) = parse(spec(), argv(["--description"]), 3, false, "")
-  assert pb.plain(alias) == "--description requires a value"
+  assert alias.message == "--description requires a value"
 }
 
 #[test]
 fn parse_appends_the_usage_line_to_unknown_flag_errors() {
   let assert Err(msg) = parse(spec(), argv(["--nope"]), 3, false, "lll issue list")
-  assert msg.contains("unknown flag: '--nope'")
-  assert msg.contains("usage: lll issue list")
+  assert msg.message.contains("unknown flag: '--nope'")
+  assert msg.message.contains("usage: lll issue list")
   // No usage line given: the message stays bare.
   let assert Err(bare) = parse(spec(), argv(["--nope"]), 3, false, "")
-  assert pb.plain(bare) == "unknown flag: '--nope'"
+  assert bare.message == "unknown flag: '--nope'"
 }
 
 #[test]
 fn parse_errors_when_a_required_flag_is_missing() {
   let required = [Flag { name: "-t", value: true, hint: "\"title\"", required: true, help: "title", .. }]
   let assert Err(msg) = parse(required, argv([]), 3, false, "lll issue create -t \"title\"")
-  assert pb.plain(msg) == "usage: lll issue create -t \"title\""
+  assert msg.message == "usage: lll issue create -t \"title\""
   // A bad flag is reported before the missing requirement.
   let assert Err(bad) = parse(required, argv(["--nope"]), 3, false, "usage")
-  assert bad.contains("unknown flag")
+  assert bad.message.contains("unknown flag")
   let assert Ok(p) = parse(required, argv(["-t", "hi"]), 3, false, "usage")
   assert p.given("-t")
 }
@@ -154,7 +161,7 @@ fn parse_collects_a_single_positional_when_allowed() {
   assert p.first() == "ENG-6"
   // A second positional is rejected, naming the stray argument.
   let assert Err(msg) = parse(spec(), argv(["ENG-6", "ENG-7"]), 3, true, "")
-  assert pb.plain(msg) == "unexpected argument: 'ENG-7'"
+  assert msg.message == "unexpected argument: 'ENG-7'"
 }
 
 #[test]
@@ -162,13 +169,13 @@ fn parse_rejects_positionals_when_disallowed() {
   let assert Err(msg) = parse(spec(), argv(["stray"]), 3, false, "usage line")
   // The flag table rides along (fleet task 8): the usage line alone was
   // the message agents rated least helpful.
-  assert pb.plain(msg).starts_with("unexpected argument: 'stray'\nusage: usage line\nFlags:")
+  assert msg.message.starts_with("unexpected argument: 'stray'\nusage: usage line\nFlags:")
 }
 
 #[test]
 fn parse_treats_a_bare_dash_as_an_unknown_flag() {
   let assert Err(msg) = parse(spec(), argv(["-"]), 3, true, "")
-  assert pb.plain(msg) == "unknown flag: '-'"
+  assert msg.message == "unknown flag: '-'"
 }
 
 #[test]
@@ -223,16 +230,16 @@ fn parse_accepts_an_empty_inline_value() {
 fn parse_rejects_an_inline_value_on_a_boolean_flag() {
   // `--json=1` is a mistake, not a truthy string, so it must not pass silently.
   let assert Err(msg) = parse(spec(), argv(["--json=1"]), 3, false, "")
-  assert pb.plain(msg) == "--json takes no value"
+  assert msg.message == "--json takes no value"
   let assert Err(zero) = parse(spec(), argv(["--json=0"]), 3, false, "")
-  assert pb.plain(zero) == "--json takes no value"
+  assert zero.message == "--json takes no value"
 }
 
 #[test]
 fn parse_reports_the_whole_argument_for_an_unknown_inline_flag() {
   let assert Err(msg) = parse(spec(), argv(["--nope=5"]), 3, false, "lll issue list")
-  assert msg.contains("unknown flag: '--nope=5'")
-  assert msg.contains("usage: lll issue list")
+  assert msg.message.contains("unknown flag: '--nope=5'")
+  assert msg.message.contains("usage: lll issue list")
 }
 
 #[test]
@@ -315,11 +322,11 @@ fn tokens_list_every_spelling_and_skip_hidden_flags() {
 fn help_is_answered_even_when_the_spec_never_declares_it() {
   // spec() has no --help entry; this is the case that was broken.
   let assert Err(msg) = parse(bare_spec(), argv(["-h"]), 3, false, "lll issue list")
-  assert msg.starts_with(help_marker())
-  assert msg.contains("usage: lll issue list")
-  assert msg.contains("--state")
+  assert is_help(msg)
+  assert msg.message.contains("usage: lll issue list")
+  assert msg.message.contains("--state")
   let assert Err(long) = parse(bare_spec(), argv(["--help"]), 3, false, "lll issue list")
-  assert long.starts_with(help_marker())
+  assert is_help(long)
 }
 
 #[test]
@@ -330,11 +337,11 @@ fn help_wins_over_the_errors_that_used_to_pre_empt_it() {
     Flag { name: "-t", value: true, hint: "title", required: true, help: "title", .. },
   ]
   let assert Err(msg) = parse(req, argv(["--help"]), 3, false, "lll issue create")
-  assert msg.starts_with(help_marker())
+  assert is_help(msg)
   // And an unknown flag alongside help: the help still wins, because someone
   // typing both is asking what the right spelling is.
   let assert Err(both) = parse(bare_spec(), argv(["--nope", "-h"]), 3, false, "u")
-  assert both.starts_with(help_marker())
+  assert is_help(both)
 }
 
 #[test]
@@ -350,7 +357,8 @@ fn help_never_returns_ok_so_a_verb_body_cannot_run() {
 #[test]
 fn help_for_a_verb_with_no_flags_says_so_instead_of_printing_nothing() {
   let assert Err(msg) = parse([], argv(["-h"]), 3, false, "")
-  assert msg == f"{help_marker()}this command takes no flags (see 'lll --help')"
+  assert is_help(msg)
+  assert msg.message == "this command takes no flags (see 'lll --help')"
 }
 
 #[test]
@@ -372,12 +380,12 @@ fn implicit_help_does_not_consume_a_literal_flag_value() {
 #[test]
 fn unsupported_team_flag_supplies_the_requested_environment_override() {
   let assert Err(separate) = parse([], argv(["--team", "OPS2"]), 3, false, "lll project list")
-  assert separate.contains("LLL_TEAM=OPS2")
-  assert separate.contains("saved attachment unchanged")
+  assert separate.message.contains("LLL_TEAM=OPS2")
+  assert separate.message.contains("saved attachment unchanged")
   let assert Err(inline) = parse([], argv(["--team=OPS2"]), 3, false, "lll label list")
-  assert inline.contains("LLL_TEAM=OPS2")
+  assert inline.message.contains("LLL_TEAM=OPS2")
   let assert Err(quoted) = parse([], argv(["--team", "owner's team"]), 3, false, "test")
-  assert quoted.contains("LLL_TEAM='owner'\\''s team'")
+  assert quoted.message.contains("LLL_TEAM='owner'\\''s team'")
 }
 
 // LLL-501, fleet case B05: `lll api GET /api/health --url <lan>` was refused
@@ -390,16 +398,16 @@ fn a_guessed_url_flag_names_the_configured_endpoint_paths() {
   // The typed url rides the same shell_argument quoting team_scope_error
   // uses, so the hint is paste-safe.
   let assert Err(inline) = parse([], argv(["--url=http://127.0.0.1:8090"]), 3, false, "lll api GET /api/health")
-  assert inline.contains("unknown flag: '--url=http://127.0.0.1:8090'")
-  assert inline.contains("This command takes no --url")
-  assert inline.contains("LLL_URL='http://127.0.0.1:8090'")
-  assert inline.contains("lll config set url URL")
+  assert inline.message.contains("unknown flag: '--url=http://127.0.0.1:8090'")
+  assert inline.message.contains("This command takes no --url")
+  assert inline.message.contains("LLL_URL='http://127.0.0.1:8090'")
+  assert inline.message.contains("lll config set url URL")
   let assert Err(bare) = parse([], argv(["--url", "http://127.0.0.1:8090"]), 3, false, "lll api GET /api/health")
-  assert bare.contains("unknown flag: '--url'")
-  assert bare.contains("LLL_URL='http://127.0.0.1:8090'")
+  assert bare.message.contains("unknown flag: '--url'")
+  assert bare.message.contains("LLL_URL='http://127.0.0.1:8090'")
   // No value typed: the hint still names both paths, unquoted.
   let assert Err(valueless) = parse([], argv(["--url"]), 3, false, "lll api GET /api/health")
-  assert valueless.contains("LLL_URL=URL")
+  assert valueless.message.contains("LLL_URL=URL")
 }
 
 #[test]
@@ -419,7 +427,7 @@ fn team_extraction_preserves_literal_values_and_accepts_both_spellings() {
   // A second selection is refused rather than winning silently (T7).
   let twice = ["lll", "issue", "list", "--team", "DX", "--team=OPS"]
   let assert Err(e) = extract_team(twice, 3, with_team(spec()))
-  assert e.contains("--team may only be given once (got 2)")
+  assert e.message.contains("--team may only be given once (got 2)")
   assert cleaned.equals(["lll", "issue", "create", "-t", "--team", "-d", "--team=literal"])
   let assert Ok((ended, absent)) = extract_team(["lll", "issue", "create", "--", "--team", "DX"], 3, with_team(spec()))
   assert absent.is_none()
@@ -446,7 +454,7 @@ fn parse_n_keeps_two_positionals_in_order_around_a_flag() {
   assert p.given("--json")
   // A third bare word is still refused, so a stray token cannot become a body.
   let assert Err(msg) = parse_n(spec(), argv(["DEMO-1", "the body", "extra"]), 3, 2, "")
-  assert pb.plain(msg) == "unexpected argument: 'extra'"
+  assert msg.message == "unexpected argument: 'extra'"
   // Absent second positional reads as empty, not as an error.
   let assert Ok(q) = parse_n(spec(), argv(["DEMO-1"]), 3, 2, "")
   assert q.nth(1) == ""
@@ -458,7 +466,7 @@ fn dispatch_preserves_help_as_an_alias_value_and_stops_real_help() {
     name: "create", summary: "create", page: "create help",
     spec: [Flag { name: "-b", alias: "--body -m --message", value: true, .. }],
     positional: "", run: |input| {
-      if input.parsed.one("-b") != "--help" { return Err("wrong body") }
+      if input.parsed.one("-b") != "--help" { return Err(pb.failed("wrong body")) }
       Ok(())
     },
     ..
@@ -466,7 +474,8 @@ fn dispatch_preserves_help_as_an_alias_value_and_stops_real_help() {
   for alias in ["-b", "--body", "-m", "--message"] {
     assert dispatch(test_ctx(), "doc", "", "", commands, ["lll", "doc", "create", alias, "--help"]).is_ok()
     let assert Err(help) = dispatch(test_ctx(), "doc", "", "", commands, ["lll", "doc", "create", alias, "--help", "-h"])
-    assert help == help_marker() + "create help"
+    assert is_help(help)
+    assert help.message == "create help"
   }
 }
 
@@ -485,17 +494,17 @@ fn dispatch_hands_over_unicode_and_empty_positionals_without_reinterpreting_them
   let commands = [Command {
     name: "set", summary: "set", page: "", spec: [], positional: "KEY VALUE",
     run: |input| {
-      if input.parsed.positional_count() != 2 { return Err("missing positional") }
-      if input.parsed.first() != "ÉNG-12" || input.parsed.nth(1) != "" { return Err("changed positional") }
+      if input.parsed.positional_count() != 2 { return Err(pb.failed("missing positional")) }
+      if input.parsed.first() != "ÉNG-12" || input.parsed.nth(1) != "" { return Err(pb.failed("changed positional")) }
       Ok(())
     },
     ..
   }]
   assert dispatch(test_ctx(), "test", "", "", commands, ["lll", "test", "set", "ÉNG-12", ""]).is_ok()
   let assert Err(extra) = dispatch(test_ctx(), "test", "", "", commands, ["lll", "test", "set", "ÉNG-12", "", "extra"])
-  assert extra.contains("unexpected argument: 'extra'")
+  assert extra.message.contains("unexpected argument: 'extra'")
   let assert Err(flag) = dispatch(test_ctx(), "test", "", "", commands, ["lll", "test", "set", "--unknown"])
-  assert flag.contains("unknown flag: '--unknown'")
+  assert flag.message.contains("unknown flag: '--unknown'")
 }
 
 /// Fleet (scoped-access, case 10): 3 of 10 agents typed '--teams' for
@@ -569,7 +578,7 @@ fn retired_verb_names_its_replacement_only_where_it_exists() {
     "read",
     "DEMO-1",
   ])
-  assert hinted.contains(
+  assert hinted.message.contains(
     "unknown issue command: 'read' - did you mean 'lll issue view'?",
   )
   let without = [Command { name: "list", summary: "list", run: |_| Ok(()), .. }]
@@ -578,7 +587,7 @@ fn retired_verb_names_its_replacement_only_where_it_exists() {
     "team",
     "read",
   ])
-  assert !plain.contains("did you mean")
+  assert !plain.message.contains("did you mean")
 }
 
 #[test]
@@ -586,15 +595,15 @@ fn command_alias_dispatch_uses_canonical_help_and_parser() {
   let commands = [Command {
     name: "view", alias: "show", summary: "view", page: "", spec: [],
     positional: "KEY", run: |input| {
-      if input.parsed.first() != "DEMO-1" { return Err("wrong key") }
+      if input.parsed.first() != "DEMO-1" { return Err(pb.failed("wrong key")) }
       Ok(())
     },
     ..
   }]
   assert dispatch(test_ctx(), "issue", "", "", commands, ["lll", "issue", "show", "DEMO-1"]).is_ok()
   let assert Err(help) = dispatch(test_ctx(), "issue", "", "", commands, ["lll", "issue", "show", "--help"])
-  assert help.contains("lll issue view KEY")
-  assert !help.contains("lll issue show")
+  assert help.message.contains("lll issue view KEY")
+  assert !help.message.contains("lll issue show")
   assert command_names(commands).equals(["view", "show"])
   assert resolve_command(commands, "read").is_none()
 }
@@ -608,7 +617,7 @@ fn hidden_command_dispatches_without_help_row_or_completion() {
     Command {
       name: "view", alias: "read", hidden: true, summary: "view", positional: "SLUG",
       run: |input| {
-        if input.parsed.first() != "a-slug" { return Err("wrong slug") }
+        if input.parsed.first() != "a-slug" { return Err(pb.failed("wrong slug")) }
         Ok(())
       },
       ..
@@ -617,9 +626,9 @@ fn hidden_command_dispatches_without_help_row_or_completion() {
   assert dispatch(test_ctx(), "finding", "", "", commands, ["lll", "finding", "view", "a-slug"]).is_ok()
   assert dispatch(test_ctx(), "finding", "", "", commands, ["lll", "finding", "read", "a-slug"]).is_ok()
   let assert Err(help) = dispatch(test_ctx(), "finding", "", "", commands, ["lll", "finding", "--help"])
-  assert help.contains("lll finding near")
-  assert !help.contains("view")
-  assert !help.contains("read")
+  assert help.message.contains("lll finding near")
+  assert !help.message.contains("view")
+  assert !help.message.contains("read")
   assert command_names(commands).equals(["near"])
 }
 

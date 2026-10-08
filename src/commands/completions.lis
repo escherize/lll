@@ -2,11 +2,12 @@ import "go:fmt"
 import "go:strings"
 
 import "flags"
+import "pb"
 
 // `lll completions <shell>` — static completion scripts, all generated from
 // the one command table below (nouns, verbs per noun, flags per verb).
 
-pub fn completions(args: Slice<string>) -> Result<(), string> {
+pub fn completions(args: Slice<string>) -> Result<(), pb.CliError> {
   let parsed = flags.parse([], args, 2, true, completions_usage())?
   let shell = parsed.first()
   if shell == "" {
@@ -26,7 +27,7 @@ pub fn completions(args: Slice<string>) -> Result<(), string> {
       fmt.Print(fish_script())
       Ok(())
     },
-    other => Err(f"unknown shell: '{other}' (expected bash, zsh, or fish)"),
+    other => Err(pb.failed(f"unknown shell: '{other}' (expected bash, zsh, or fish)")),
   }
 }
 

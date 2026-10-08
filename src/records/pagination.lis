@@ -11,7 +11,7 @@ struct CollectionPage<T> {
 /// that walks pages goes through here, with this one stop rule. The URL owns
 /// scope, sort and expansions and must already carry a `?`; every page keeps
 /// them. A failed page fails the read before callers print.
-pub fn fetch_all_records<T>(ctx: pb.Client, path: string, thing: string) -> Result<Slice<T>, string> {
+pub fn fetch_all_records<T>(ctx: pb.Client, path: string, thing: string) -> Result<Slice<T>, pb.CliError> {
   let mut out: Slice<T> = []
   let mut page = 1
   loop {

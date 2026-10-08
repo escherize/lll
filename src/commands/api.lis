@@ -28,7 +28,7 @@ pub fn api_spec() -> Slice<flags.Flag> {
   ]
 }
 
-pub fn api(ctx: pb.Client, args: Slice<string>) -> Result<(), string> {
+pub fn api(ctx: pb.Client, args: Slice<string>) -> Result<(), pb.CliError> {
   let spec = api_spec()
   // Two bare words: METHOD and PATH, like `veans api` and curl.
   let p = flags.parse_n(spec, args, 2, 2, "lll api METHOD PATH [--body TEXT] [--fail]")?
@@ -60,12 +60,12 @@ pub fn api(ctx: pb.Client, args: Slice<string>) -> Result<(), string> {
 /// right for the verbs and wrong for a passthrough whose whole job is to show
 /// the API as it answered. Transport failures still get the client's
 /// "cannot reach PocketBase" message, because that failure is the same one.
-fn send(ctx: pb.Client, method: string, path: string, payload: string, fail: bool) -> Result<(), string> {
-  let (cfg, _src) = ctx.settings.traced()?
+fn send(ctx: pb.Client, method: string, path: string, payload: string, fail: bool) -> Result<(), pb.CliError> {
+  let (cfg, _src) = ctx.settings.traced().map_err(pb.failed)?
   let base = strings.TrimRight(cfg.url, "/")
   let mut req = match http.NewRequest(method, base + path, bytes.NewReader(payload.bytes())) {
     Ok(r) => r,
-    Err(e) => return Err(f"{method} {path}: {e}"),
+    Err(e) => return Err(pb.failed(f"{method} {path}: {e}")),
   }
   // http.NewRequest always populates Header, so None cannot happen; the
   // unwrap is the Option<Header> field type's toll, not a real branch.
@@ -79,12 +79,12 @@ fn send(ctx: pb.Client, method: string, path: string, payload: string, fail: boo
     Err(e) => return Err(pb.unreachable(cfg.url, e)),
   }
   let Some(stream) = resp.Body else {
-    return Err(f"{method} {path}: empty response body")
+    return Err(pb.failed(f"{method} {path}: empty response body"))
   }
   defer stream.Close()
   let body = match io.ReadAll(stream) {
     Partial.Ok(b) => b,
-    Partial.Both(_, e) | Partial.Err(e) => return Err(f"{method} {path}: reading response: {e}"),
+    Partial.Both(_, e) | Partial.Err(e) => return Err(pb.failed(f"{method} {path}: reading response: {e}")),
   }
   // Status to stderr, body to stdout: a human sees both, a script pipes the
   // body to jq and reads the status from stderr when it wants it.
@@ -93,7 +93,7 @@ fn send(ctx: pb.Client, method: string, path: string, payload: string, fail: boo
   // --fail (LLL-645): an error answer exits with the code its status maps
   // to, as every other command's would. Without it any answer is exit 0.
   if fail && resp.StatusCode >= 400 {
-    return Err(pb.tag(pb.http_error(f"{method} {path}", resp.StatusCode, resp.Status, body as string)))
+    return Err(pb.http_error(f"{method} {path}", resp.StatusCode, resp.Status, body as string))
   }
   Ok(())
 }

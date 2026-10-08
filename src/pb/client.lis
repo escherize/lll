@@ -57,8 +57,8 @@ impl Client {
   }
 
   /// Base URL of the server (a flag > LLL_URL > config files > default).
-  pub fn url(self) -> Result<string, string> {
-    let cfg = self.settings.config()?
+  pub fn url(self) -> Result<string, CliError> {
+    let cfg = self.settings.config().map_err(failed)?
     Ok(cfg.url)
   }
 
@@ -146,22 +146,22 @@ impl Client {
   }
 
   /// GET a path (joined to the url) and return the response body.
-  pub fn get(self, path: string) -> Result<string, string> {
+  pub fn get(self, path: string) -> Result<string, CliError> {
     self.send("GET", path, "")
   }
 
   /// POST a JSON payload to a path and return the response body.
-  pub fn post(self, path: string, payload: string) -> Result<string, string> {
+  pub fn post(self, path: string, payload: string) -> Result<string, CliError> {
     self.send("POST", path, payload)
   }
 
   /// Replayable JSON creation carrying the same key through token renewal.
-  pub fn post_idempotent(self, path: string, payload: string, key: string) -> Result<string, string> {
+  pub fn post_idempotent(self, path: string, payload: string, key: string) -> Result<string, CliError> {
     self.send_content_options("POST", path, payload, "application/json", "", key)
   }
 
   /// PATCH a JSON payload to a path and return the response body.
-  pub fn patch(self, path: string, payload: string) -> Result<string, string> {
+  pub fn patch(self, path: string, payload: string) -> Result<string, CliError> {
     self.send("PATCH", path, payload)
   }
 
@@ -170,60 +170,60 @@ impl Client {
   /// name the record's current 'updated', so the precondition holds at the
   /// write, not at the caller's earlier read. "" sends no header — callers can
   /// pass the flag through untouched.
-  pub fn patch_with_stamp(self, path: string, payload: string, stamp: string) -> Result<string, string> {
+  pub fn patch_with_stamp(self, path: string, payload: string, stamp: string) -> Result<string, CliError> {
     self.send_content_options("PATCH", path, payload, "application/json", stamp, "")
   }
 
   /// patch_with_stamp as `caller` (LLL-665): a stamped edit from a board
   /// viewer rides the viewer's token, as every other board write does.
-  pub fn patch_with_stamp_as(self, caller: Caller, path: string, payload: string, stamp: string) -> Result<string, string> {
+  pub fn patch_with_stamp_as(self, caller: Caller, path: string, payload: string, stamp: string) -> Result<string, CliError> {
     match caller {
       Caller.Process => self.patch_with_stamp(path, payload, stamp),
       Caller.Member(tok) => {
-        let (cfg, src) = self.settings.traced()?
+        let (cfg, src) = self.settings.traced().map_err(failed)?
         request_content(cfg.url, "PATCH", path, payload, bearer(tok), src.url == "default", "application/json", stamp)
       },
     }
   }
 
   /// DELETE a path and return the (usually empty) response body.
-  pub fn delete(self, path: string) -> Result<string, string> {
+  pub fn delete(self, path: string) -> Result<string, CliError> {
     self.send("DELETE", path, "")
   }
 
   /// POST without the configured token — for the auth endpoints themselves
   /// (member login, superuser auth), where the request must stand on the
   /// credentials in its body and a stale or unrelated token must not ride along.
-  pub fn post_anon(self, path: string, payload: string) -> Result<string, string> {
-    let (cfg, src) = self.settings.traced()?
+  pub fn post_anon(self, path: string, payload: string) -> Result<string, CliError> {
+    let (cfg, src) = self.settings.traced().map_err(failed)?
     request(cfg.url, "POST", path, payload, "", src.url == "default")
   }
 
   /// GET riding `tok` instead of the configured token — for flows that act as
   /// a specific actor (token create's superuser-gated member lookup).
-  pub fn get_as(self, path: string, tok: string) -> Result<string, string> {
-    let (cfg, src) = self.settings.traced()?
+  pub fn get_as(self, path: string, tok: string) -> Result<string, CliError> {
+    let (cfg, src) = self.settings.traced().map_err(failed)?
     request(cfg.url, "GET", path, "", bearer(tok), src.url == "default")
   }
 
   /// POST riding `tok` instead of the configured token (impersonation).
-  pub fn post_as(self, path: string, payload: string, tok: string) -> Result<string, string> {
-    let (cfg, src) = self.settings.traced()?
+  pub fn post_as(self, path: string, payload: string, tok: string) -> Result<string, CliError> {
+    let (cfg, src) = self.settings.traced().map_err(failed)?
     request(cfg.url, "POST", path, payload, bearer(tok), src.url == "default")
   }
 
   /// PATCH riding `tok` instead of the configured token — writes that must
   /// stand on a just-verified credential (member set-password, the settings
   /// Access section's re-auth), not whatever identity the process holds.
-  pub fn patch_as(self, path: string, payload: string, tok: string) -> Result<string, string> {
-    let (cfg, src) = self.settings.traced()?
+  pub fn patch_as(self, path: string, payload: string, tok: string) -> Result<string, CliError> {
+    let (cfg, src) = self.settings.traced().map_err(failed)?
     request(cfg.url, "PATCH", path, payload, bearer(tok), src.url == "default")
   }
 
   /// DELETE riding `tok` instead of the configured token — superuser-gated
   /// removals (member remove), which a member token must not be able to make.
-  pub fn delete_as(self, path: string, tok: string) -> Result<string, string> {
-    let (cfg, src) = self.settings.traced()?
+  pub fn delete_as(self, path: string, tok: string) -> Result<string, CliError> {
+    let (cfg, src) = self.settings.traced().map_err(failed)?
     request(cfg.url, "DELETE", path, "", bearer(tok), src.url == "default")
   }
 
@@ -235,11 +235,11 @@ impl Client {
     path: string,
     payload: string,
     content_type: string,
-  ) -> Result<string, string> {
+  ) -> Result<string, CliError> {
     match caller {
       Caller.Process => self.send_content_options(method, path, payload, content_type, "", ""),
       Caller.Member(tok) => {
-        let (cfg, src) = self.settings.traced()?
+        let (cfg, src) = self.settings.traced().map_err(failed)?
         request_content(cfg.url, method, path, payload, bearer(tok), src.url == "default", content_type, "")
       },
     }
@@ -248,7 +248,7 @@ impl Client {
   /// Every verb's single path to the wire. One place decides the headers, so
   /// the configured token reaches PocketBase on every request — GET included,
   /// which is why `get` does not call http.Get.
-  fn send(self, method: string, path: string, payload: string) -> Result<string, string> {
+  fn send(self, method: string, path: string, payload: string) -> Result<string, CliError> {
     self.send_content_options(method, path, payload, "application/json", "", "")
   }
 
@@ -259,8 +259,8 @@ impl Client {
     self,
     method: string, path: string, payload: string, content_type: string,
     stamp: string, key: string,
-  ) -> Result<string, string> {
-    let (cfg, src) = self.settings.traced()?
+  ) -> Result<string, CliError> {
+    let (cfg, src) = self.settings.traced().map_err(failed)?
     let token = self.token()
     if token == "" && (strings.HasPrefix(path, "/api/collections/") || strings.HasPrefix(path, "/api/lll/")) {
       return Err(not_logged_in(cfg.url, src.url == "default"))
@@ -272,7 +272,7 @@ impl Client {
     let body = match request_options(cfg.url, method, path, payload, bearer(token), wire.defaulted, content_type, stamp, key) {
       Ok(b) => b,
       Err(e) => {
-        if token != "" && classify(e).status == 401 {
+        if token != "" && e.status == 401 {
           // A server refusal invalidates the earlier successful identity probe.
           // Member tokens are revoked by password changes; the board must renew
           // as its member even after it previously read an empty list (LLL-445).
@@ -305,7 +305,7 @@ impl Client {
   /// repeats when this client may renew (the board, TASK-255) and is named
   /// otherwise. None when the token is valid after all - an empty list that
   /// really is empty.
-  fn refused_token(self, token: string, wire: Wire) -> Option<Result<string, string>> {
+  fn refused_token(self, token: string, wire: Wire) -> Option<Result<string, CliError>> {
     let verdict = self.token_verdict(wire.base, token)
     // A process that cannot re-mint (anything but a granted board) heals
     // the way it did when every request re-read the config: a token
@@ -321,7 +321,7 @@ impl Client {
       ) {
         Ok(body) => return Some(Ok(body)),
         Err(e) => {
-          if classify(e).status != 401 { return Some(Err(e)) }
+          if e.status != 401 { return Some(Err(e)) }
           // The file's token is refused too: name it the way the first
           // refusal would have been named.
           token = fresh
@@ -411,18 +411,18 @@ impl Client {
 
   /// not_logged_in, with the url and its origin, for callers outside the
   /// request path's error handling (whoami).
-  pub fn not_logged_in_message(self) -> string {
+  pub fn not_logged_in_message(self) -> CliError {
     let Ok((cfg, src)) = self.settings.traced() else { return not_logged_in("", true) }
     not_logged_in(cfg.url, src.url == "default")
   }
 
   /// corrupted_token, with the origin, for whoami.
-  pub fn corrupted_token_message(self) -> string {
+  pub fn corrupted_token_message(self) -> CliError {
     corrupted_token(self.token_source)
   }
 
   /// expired_token, for whoami.
-  pub fn expired_token_message(self) -> string {
+  pub fn expired_token_message(self) -> CliError {
     expired_token(self.token(), self.token_source)
   }
 }
@@ -433,14 +433,14 @@ impl Client {
 /// The out-parameter is forced, not chosen. Lisette (still true in 0.12.0) has generic
 /// functions, but a type parameter cannot be *constructed*: `T { .. }` inside
 /// a generic body fails to resolve. So the tidier `fetch<T>(path) ->
-/// Result<T, string>` is not expressible, and the caller declares the zero
+/// Result<T, CliError>` is not expressible, and the caller declares the zero
 /// value it wants filled.
 pub fn fetch<T>(
   c: Client,
   path: string,
   what: string,
   out: mut Ref<T>,
-) -> Result<(), string> {
+) -> Result<(), CliError> {
   let body = c.get(path)?
   if let Err(e) = json.Unmarshal(body.bytes(), out) {
     return Err(fail(ErrorKind.Server, f"decoding {what}: {e}"))
@@ -462,7 +462,7 @@ struct Wire {
 
 /// Connection-failure message that names the fix. Shared by every request
 /// path here and by the realtime client.
-pub fn unreachable(base: string, e: error) -> string {
+pub fn unreachable(base: string, e: error) -> CliError {
   fail(ErrorKind.Network, f"cannot reach the lll server at {base}: {e}
 is the lll server running? start everything with 'lll up', or point LLL_URL (or 'url' in .lll.toml) at your server")
 }
@@ -471,10 +471,10 @@ is the lll server running? start everything with 'lll up', or point LLL_URL (or 
 /// the built-in default — the pointer a fresh machine needs. The transcript
 /// failure this exists for: a new machine with no config runs any command,
 /// the default 127.0.0.1:8090 refuses, and nothing says how to connect.
-fn unreachable_hint(base: string, defaulted: bool, e: error) -> string {
-  let msg = unreachable(base, e)
-  if !defaulted { return msg }
-  msg + "\nno url is configured on this machine; connect with: lll login --url https://your-server"
+fn unreachable_hint(base: string, defaulted: bool, e: error) -> CliError {
+  let err = unreachable(base, e)
+  if !defaulted { return err }
+  err.with_message(err.message + "\nno url is configured on this machine; connect with: lll login --url https://your-server")
 }
 
 /// POST without any token to an explicit base — `lll login --url`, which must
@@ -483,7 +483,7 @@ pub fn post_anon_to(
   base: string,
   path: string,
   payload: string,
-) -> Result<string, string> {
+) -> Result<string, CliError> {
   request(base, "POST", path, payload, "", false)
 }
 
@@ -512,13 +512,13 @@ pub fn impersonate_member(
   admin: string,
   member: string,
   duration: int,
-) -> Result<string, string> {
+) -> Result<string, CliError> {
   let body = request(base, "POST", f"/api/collections/members/impersonate/{member}", f"{{\"duration\":{duration}}}", bearer(admin), false)?
   let mut auth = TokenOnly { .. }
   if let Err(e) = json.Unmarshal(body.bytes(), &auth) {
-    return Err(f"decoding the member token: {e}")
+    return Err(failed(f"decoding the member token: {e}"))
   }
-  if auth.token == "" { return Err("the member token response carried no token") }
+  if auth.token == "" { return Err(failed("the member token response carried no token")) }
   Ok(auth.token)
 }
 
@@ -697,14 +697,14 @@ pub fn same_login(old: string, fresh: string) -> bool {
 /// Its own 2-second client, not request(): this runs before ordinary commands,
 /// and http.DefaultClient has no timeout, so a server that accepts and never
 /// answers would hang the command indefinitely (version_skew uses 1s, discovery 2s).
-pub fn refresh_token(base: string, tok: string) -> Result<string, string> {
+pub fn refresh_token(base: string, tok: string) -> Result<string, CliError> {
   let Some(collection) = token_collection(tok) else {
-    return Err("the token names no collection")
+    return Err(failed("the token names no collection"))
   }
   let what = f"POST {base}/api/collections/{collection}/auth-refresh"
   let mut req = match http.NewRequest("POST", f"{base}/api/collections/{collection}/auth-refresh", bytes.NewReader([])) {
     Ok(r) => r,
-    Err(e) => return Err(f"{what}: {e}"),
+    Err(e) => return Err(failed(f"{what}: {e}")),
   }
   if let Some(h) = req.Header {
     let mut h = h
@@ -713,15 +713,15 @@ pub fn refresh_token(base: string, tok: string) -> Result<string, string> {
   let client = http.Client { Timeout: 2 * time.Second, .. }
   let resp = match client.Do(req) {
     Ok(r) => r,
-    Err(e) => return Err(f"{what}: {e}"),
+    Err(e) => return Err(failed(f"{what}: {e}")),
   }
   let body = read_body(resp, what)?
   let mut auth = TokenOnly { .. }
   if let Err(e) = json.Unmarshal(body.bytes(), &auth) {
-    return Err(f"decoding the refreshed token: {e}")
+    return Err(failed(f"decoding the refreshed token: {e}"))
   }
   if !same_login(tok, auth.token) {
-    return Err("the refresh response is not a later token for the same member")
+    return Err(failed("the refresh response is not a later token for the same member"))
   }
   Ok(auth.token)
 }
@@ -732,7 +732,7 @@ pub fn refresh_token(base: string, tok: string) -> Result<string, string> {
 /// separately from a rejected token because the fix is different and local -
 /// nobody reset anything; go back to where the token came from and copy it
 /// again, by machine this time.
-fn corrupted_token(origin: string) -> string {
+fn corrupted_token(origin: string) -> CliError {
   let from = if strings.HasPrefix(origin, "env:") {
     "LLL_TOKEN"
   } else if strings.HasPrefix(origin, "file:") {
@@ -759,7 +759,7 @@ rather than typing it (a token is ~200 characters and one wrong one is enough)")
 /// The refusal for a token whose own payload says it has expired: exact,
 /// because the payload is. Fleet shard 24 reported expired tokens keep
 /// working; the probe said otherwise, and this is what it says now.
-fn expired_token(tok: string, origin: string) -> string {
+fn expired_token(tok: string, origin: string) -> CliError {
   let from = if strings.HasPrefix(origin, "env:") {
     "the token in LLL_TOKEN"
   } else if strings.HasPrefix(origin, "file:") {
@@ -773,7 +773,7 @@ fn expired_token(tok: string, origin: string) -> string {
   fail(ErrorKind.Auth, f"{from} expired at {when} ({ago}s ago). Every read comes back empty and every write is refused until it is replaced: 'lll token create <member>' (an agent's, minted by a superuser) or 'lll login --email <your email>' (a person)")
 }
 
-fn stale_token(base: string, origin: string) -> string {
+fn stale_token(base: string, origin: string) -> CliError {
   let from = if strings.HasPrefix(origin, "env:") {
     "the token in LLL_TOKEN"
   } else if strings.HasPrefix(origin, "file:") {
@@ -806,7 +806,7 @@ a fresh one: 'lll login --email <your email>' (a person) or 'lll token create'
 /// thing once for every verb. `defaulted` matters because a default url is
 /// the other half of that transcript: nothing was configured, and the
 /// request was about to go to whatever happens to be on 127.0.0.1:8090.
-fn not_logged_in(base: string, defaulted: bool) -> string {
+fn not_logged_in(base: string, defaulted: bool) -> CliError {
   // The url in the remedy is a PLACEHOLDER when nothing configured one. It
   // used to be the default itself, which reads as a discovered fact and
   // copy-pastes into the same failure — all three second-round usability runs
@@ -839,21 +839,21 @@ fn request(
   payload: string,
   auth: string,
   defaulted: bool,
-) -> Result<string, string> {
+) -> Result<string, CliError> {
   request_content(base, method, path, payload, auth, defaulted, "application/json", "")
 }
 
 fn request_content(
   base: string, method: string, path: string, payload: string,
   auth: string, defaulted: bool, content_type: string, stamp: string,
-) -> Result<string, string> {
+) -> Result<string, CliError> {
   request_options(base, method, path, payload, auth, defaulted, content_type, stamp, "")
 }
 
 fn request_options(
   base: string, method: string, path: string, payload: string,
   auth: string, defaulted: bool, content_type: string, stamp: string, key: string,
-) -> Result<string, string> {
+) -> Result<string, CliError> {
   let mut req = match http.NewRequest(
     method,
     base + path,
@@ -879,7 +879,7 @@ fn request_options(
   read_body(resp, f"{method} {base}{path}")
 }
 
-fn read_body(resp: Ref<http.Response>, what: string) -> Result<string, string> {
+fn read_body(resp: Ref<http.Response>, what: string) -> Result<string, CliError> {
   let Some(stream) = resp.Body else {
     return Err(fail(ErrorKind.Network, f"{what}: empty response body"))
   }
@@ -890,7 +890,7 @@ fn read_body(resp: Ref<http.Response>, what: string) -> Result<string, string> {
     Partial.Both(_, e) | Partial.Err(e) => return Err(fail(ErrorKind.Network, f"{what}: reading response: {e}")),
   }
   if resp.StatusCode >= 300 {
-    return Err(tag(http_error(what, resp.StatusCode, resp.Status, body as string)))
+    return Err(http_error(what, resp.StatusCode, resp.Status, body as string))
   }
   Ok(body as string)
 }
@@ -907,9 +907,9 @@ pub fn http_error(what: string, status: int, status_line: string, body: string) 
   // {"message": ...} does not, and its 404 is not a missing record.
   if !parsed || envelope.message == "" || envelope.status != status {
     return CliError {
-      kind: kind_of_status(status, "", false),
+      kind: kind_of_status(status, None, false),
       status,
-      code: "",
+      code: None,
       message: untagged(f"{what}: {status_line}: {body}") + wrong_port_hint(what, status, body),
     }
   }

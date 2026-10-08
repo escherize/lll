@@ -14,11 +14,11 @@ import "records"
 /// Dispatch `lll doc <verb>` through the noun's Command table (TASK-307).
 /// The table is the one place a verb is declared: dispatch, `lll doc --help`
 /// and shell completions all read it, so none of the three can drift.
-pub fn doc(ctx: pb.Client, args: Slice<string>) -> Result<(), string> {
+pub fn doc(ctx: pb.Client, args: Slice<string>) -> Result<(), pb.CliError> {
   // Removed at 1.0 (D5): the link lives on the issue noun.
   let verb = args.get(2).unwrap_or("")
   if verb == "link" || verb == "unlink" {
-    return Err(f"unknown doc command: '{verb}' - did you mean 'lll issue {verb} KEY-123 SLUG'? (see 'lll issue {verb} --help')")
+    return Err(pb.failed(f"unknown doc command: '{verb}' - did you mean 'lll issue {verb} KEY-123 SLUG'? (see 'lll issue {verb} --help')"))
   }
   flags.dispatch(ctx, "doc", "work with docs (wiki pages, findings, decisions, PRDs)", doc_intro(), doc_commands(), args)
 }
@@ -98,12 +98,12 @@ labels (see 'lll finding --help')."
 
 /// An empty kind defaults to wiki, the reading-room kind; anything else
 /// must be one of the four words.
-pub fn check_kind(val: string) -> Result<string, string> {
+pub fn check_kind(val: string) -> Result<string, pb.CliError> {
   let kind = strings.TrimSpace(strings.ToLower(val))
   if kind == "" { return Ok("wiki") }
   if records.doc_kinds().find(|k| k == kind).is_none() {
     return Err(
-      f"unknown kind '{kind}' (use one of: {strings.Join(records.doc_kinds(), ", ")})",
+      pb.failed(f"unknown kind '{kind}' (use one of: {strings.Join(records.doc_kinds(), ", ")})"),
     )
   }
   Ok(kind)
@@ -113,11 +113,11 @@ pub fn check_kind(val: string) -> Result<string, string> {
 /// absent: a refutation is a later agent's judgement with a reason, and it
 /// only exists once something was asserted first — 'finding refute' is the
 /// only path that sets it.
-pub fn check_confidence(val: string) -> Result<string, string> {
+pub fn check_confidence(val: string) -> Result<string, pb.CliError> {
   let c = strings.TrimSpace(strings.ToLower(val))
   if c == "" { return Ok("confirmed") }
   if c != "suspected" && c != "confirmed" {
-    return Err(f"unknown confidence '{c}' (use: suspected, confirmed; 'finding refute SLUG -b why' is how a finding becomes refuted)")
+    return Err(pb.failed(f"unknown confidence '{c}' (use: suspected, confirmed; 'finding refute SLUG -b why' is how a finding becomes refuted)"))
   }
   Ok(c)
 }
@@ -327,12 +327,12 @@ fn doc_union_spec() -> Slice<flags.Flag> {
 
 // ----------------------------------------------------------------- verbs
 
-fn doc_new(input: flags.CommandInput) -> Result<(), string> {
+fn doc_new(input: flags.CommandInput) -> Result<(), pb.CliError> {
   let ctx = input.ctx
   create_doc(ctx, input.parsed, "wiki", input.parsed.one("-s"))
 }
 
-fn create_doc(ctx: pb.Client, p: flags.Parsed, default_kind: string, slug: string) -> Result<(), string> {
+fn create_doc(ctx: pb.Client, p: flags.Parsed, default_kind: string, slug: string) -> Result<(), pb.CliError> {
   let slug = records.check_slug(slug)?
   let title = p.one("-t")
   let requested_kind = if p.given("-k") { p.one("-k") } else { default_kind }
@@ -351,7 +351,7 @@ fn create_doc(ctx: pb.Client, p: flags.Parsed, default_kind: string, slug: strin
   // only ever with this team's own docs.
   if let Some(_) = records.find_doc(ctx, team, slug)? {
     return Err(
-      f"{team.key} already has a doc with slug '{slug}'; see 'lll doc view {slug}' or 'lll doc list'",
+      pb.failed(f"{team.key} already has a doc with slug '{slug}'; see 'lll doc view {slug}' or 'lll doc list'"),
     )
   }
 
@@ -371,7 +371,7 @@ fn create_doc(ctx: pb.Client, p: flags.Parsed, default_kind: string, slug: strin
 
   let mut created = models.Doc { .. }
   if let Err(e) = json.Unmarshal(resp.bytes(), &created) {
-    return Err(f"decoding created doc: {e}")
+    return Err(pb.failed(f"decoding created doc: {e}"))
   }
   if p.given("--json") {
     fmt.Println(contract_json(resp.bytes() as json.RawMessage, 0) as string)
@@ -414,7 +414,7 @@ fn doc_list_spec() -> Slice<flags.Flag> {
 }
 
 /// `--limit N`, validated before any server call; 0 when not given.
-fn limit_flag(p: flags.Parsed) -> Result<int, string> {
+fn limit_flag(p: flags.Parsed) -> Result<int, pb.CliError> {
   if !p.given("--limit") { return Ok(0) }
   let raw = p.one("--limit")
   let Ok(n) = strconv.Atoi(raw) else {
@@ -424,7 +424,7 @@ fn limit_flag(p: flags.Parsed) -> Result<int, string> {
   Ok(n)
 }
 
-fn doc_list(input: flags.CommandInput) -> Result<(), string> {
+fn doc_list(input: flags.CommandInput) -> Result<(), pb.CliError> {
   let ctx = input.ctx
   let p = input.parsed
   let kind = if p.given("-k") { check_kind(p.one("-k"))? } else { "" }
@@ -449,7 +449,7 @@ fn doc_list(input: flags.CommandInput) -> Result<(), string> {
   Ok(())
 }
 
-fn doc_view(input: flags.CommandInput) -> Result<(), string> {
+fn doc_view(input: flags.CommandInput) -> Result<(), pb.CliError> {
   let ctx = input.ctx
   let p = input.parsed
   let slug = p.first()
@@ -466,7 +466,7 @@ fn doc_view(input: flags.CommandInput) -> Result<(), string> {
 
   let mut d = models.Doc { .. }
   if let Err(e) = json.Unmarshal(record.bytes(), &d) {
-    return Err(f"decoding doc: {e}")
+    return Err(pb.failed(f"decoding doc: {e}"))
   }
 
   // --raw: the body and nothing else. For piping, and for an agent that
@@ -501,7 +501,7 @@ fn doc_view(input: flags.CommandInput) -> Result<(), string> {
   Ok(())
 }
 
-fn doc_edit(input: flags.CommandInput) -> Result<(), string> {
+fn doc_edit(input: flags.CommandInput) -> Result<(), pb.CliError> {
   let ctx = input.ctx
   let usage = input.usage
   let p = input.parsed
@@ -535,7 +535,7 @@ fn doc_edit(input: flags.CommandInput) -> Result<(), string> {
   Ok(())
 }
 
-fn doc_delete(input: flags.CommandInput) -> Result<(), string> {
+fn doc_delete(input: flags.CommandInput) -> Result<(), pb.CliError> {
   let ctx = input.ctx
   let p = input.parsed
   let slug = p.first()

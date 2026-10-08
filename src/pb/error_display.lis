@@ -16,8 +16,7 @@ struct EnvelopeCode {
 
 /// The board's presentation of an error: a sentence for the person, and the
 /// diagnostics apart from it. Decided by the error's kind, never its wording.
-pub fn display_error(text: string) -> ErrorDisplay {
-  let err = classify(text)
+pub fn display_error(err: CliError) -> ErrorDisplay {
   match err.kind {
     ErrorKind.Server => {
       let summary = if err.status >= 500 {
@@ -35,11 +34,11 @@ pub fn display_error(text: string) -> ErrorDisplay {
   }
 }
 
-/// The stable code an lll refusal carries at data.code (gopb), "" for none.
-fn envelope_code(raw: json.RawMessage) -> string {
+/// The stable code an lll refusal carries at data.code (gopb), None for none.
+fn envelope_code(raw: json.RawMessage) -> Option<ServerCode> {
   let mut data = EnvelopeCode { .. }
-  if json.Unmarshal(raw, &data).is_err() { return "" }
-  data.code
+  if json.Unmarshal(raw, &data).is_err() { return None }
+  code_named(data.code)
 }
 
 fn field_errors(raw: json.RawMessage, path: string, depth: int) -> Slice<string> {

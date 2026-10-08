@@ -15,7 +15,7 @@ import "writes"
 /// Dispatch `lll team <verb>` through the noun's Command table (TASK-307).
 /// The table is the one place a verb is declared: dispatch, `lll team --help`
 /// and shell completions all read it, so none of the three can drift.
-pub fn team(ctx: pb.Client, args: Slice<string>) -> Result<(), string> {
+pub fn team(ctx: pb.Client, args: Slice<string>) -> Result<(), pb.CliError> {
   flags.dispatch(ctx, "team", "work with teams", team_intro(), team_commands(), args)
 }
 
@@ -118,7 +118,7 @@ and no other team's members, keys or ids ('lll member --help'). 'lll whoami'
 shows your access."
 }
 
-fn team_list(input: flags.CommandInput) -> Result<(), string> {
+fn team_list(input: flags.CommandInput) -> Result<(), pb.CliError> {
   let ctx = input.ctx
   let p = input.parsed
   let mut teams = records.list_teams(ctx)?
@@ -187,7 +187,7 @@ fn team_rename_spec() -> Slice<flags.Flag> {
   ]
 }
 
-fn team_create(input: flags.CommandInput) -> Result<(), string> {
+fn team_create(input: flags.CommandInput) -> Result<(), pb.CliError> {
   let ctx = input.ctx
   let p = input.parsed
   if p.first() != "" && p.given("--key") {
@@ -210,7 +210,7 @@ fn team_create(input: flags.CommandInput) -> Result<(), string> {
 /// board, in `issue list` and in every URL the moment the PATCH lands. What
 /// does not follow is stored text, and the caller has to be told which
 /// (see team_rename_collateral).
-fn team_rename(input: flags.CommandInput) -> Result<(), string> {
+fn team_rename(input: flags.CommandInput) -> Result<(), pb.CliError> {
   let ctx = input.ctx
   let usage = input.usage
   let p = input.parsed
@@ -230,10 +230,10 @@ fn team_rename(input: flags.CommandInput) -> Result<(), string> {
   // as a raw PocketBase validation error. Saying which key is taken is the
   // more useful answer: the fix is a different key, not a retry.
   if new_key != "" && new_key != t.key {
-    if let Some(problem) = records.team_key_problem(new_key) { return Err(problem) }
+    if let Some(problem) = records.team_key_problem(new_key) { return Err(pb.failed(problem)) }
     let taken = records.find_team(ctx, new_key)?
     if taken.is_some() {
-      return Err(f"a team with key '{new_key}' already exists; see 'lll team list'")
+      return Err(pb.failed(f"a team with key '{new_key}' already exists; see 'lll team list'"))
     }
   }
 
@@ -279,7 +279,7 @@ fn team_rename_collateral(old_key: string, new_key: string) -> Slice<string> {
 /// `lll team set-accent KEY #rrggbb` — TASK-100. The accent was the one
 /// shared field only the web could write (TASK-83's colour picker), which
 /// inverts the rule TASK-83 was built on.
-fn team_set_accent(input: flags.CommandInput) -> Result<(), string> {
+fn team_set_accent(input: flags.CommandInput) -> Result<(), pb.CliError> {
   let ctx = input.ctx
   if input.parsed.positional_count() != 2 {
     return Err(flags.usage_error("usage: lll team set-accent KEY #rrggbb (empty '' clears it)"))
@@ -307,12 +307,12 @@ fn team_set_accent(input: flags.CommandInput) -> Result<(), string> {
 /// "no choice" so a team that picks it back gets theme.css's exact tokens.
 /// Validation is theme.normalize_hex, the same one the board renders with —
 /// a second hex parser here is how the two surfaces would come to disagree.
-fn accent_value(raw: string) -> Result<string, string> {
+fn accent_value(raw: string) -> Result<string, pb.CliError> {
   let trimmed = strings.TrimSpace(raw)
   if trimmed == "" { return Ok("") }
   let hex = theme.normalize_hex(trimmed)
   if hex == "" {
-    return Err(f"'{raw}' is not a #rrggbb colour (e.g. #f0883e)")
+    return Err(pb.failed(f"'{raw}' is not a #rrggbb colour (e.g. #f0883e)"))
   }
   if hex == "#f0883e" { return Ok("") }
   Ok(hex)
@@ -322,7 +322,7 @@ fn accent_value(raw: string) -> Result<string, string> {
 /// plus a letter derived from the key, so two teams whose keys share an
 /// initial differed only in hue. Settable from the CLI for the same reason
 /// the accent is: a shared field only the web can write inverts the rule.
-fn team_set_emoji(input: flags.CommandInput) -> Result<(), string> {
+fn team_set_emoji(input: flags.CommandInput) -> Result<(), pb.CliError> {
   let ctx = input.ctx
   if input.parsed.positional_count() != 2 {
     return Err(flags.usage_error("usage: lll team set-emoji KEY EMOJI (empty '' clears it)"))
@@ -362,16 +362,16 @@ fn view_accent(stored: string) -> string {
 
 /// Create a team. Shared by `lll team create` and `lll up`'s first-boot
 /// bootstrap.
-pub fn create_team(ctx: pb.Client, key: string, name: string) -> Result<models.Team, string> {
+pub fn create_team(ctx: pb.Client, key: string, name: string) -> Result<models.Team, pb.CliError> {
   // LLL-235: uppercase here as well as in gopb, so the message this prints
   // and the .lll.toml `lll attach` writes say what was actually stored.
   let new_team = models.NewTeam { key: records.normalize_team_key(key), name }
-  if let Some(problem) = records.team_key_problem(new_team.key) { return Err(problem) }
+  if let Some(problem) = records.team_key_problem(new_team.key) { return Err(pb.failed(problem)) }
   let body = writes.create_team(ctx, new_team)?
 
   let mut created = models.Team { .. }
   if let Err(e) = json.Unmarshal(body.bytes(), &created) {
-    return Err(f"decoding created team: {e}")
+    return Err(pb.failed(f"decoding created team: {e}"))
   }
   Ok(created)
 }
@@ -379,7 +379,7 @@ pub fn create_team(ctx: pb.Client, key: string, name: string) -> Result<models.T
 /// The configured team, insisted upon. Docs, findings, labels and projects
 /// each belong to exactly one team (TASK-173), so the verbs that write or
 /// read them cannot proceed without a key and must not guess one.
-fn current_team(ctx: pb.Client) -> Result<models.Team, string> {
+fn current_team(ctx: pb.Client) -> Result<models.Team, pb.CliError> {
   let Some(t) = records.configured_team(ctx)? else {
     return Err(records.no_team())
   }
@@ -389,7 +389,7 @@ fn current_team(ctx: pb.Client) -> Result<models.Team, string> {
 /// The team a `--team KEY` flag names, or the configured one when the flag
 /// is absent. Labels and projects each belong to exactly one team, so
 /// neither `create` may leave it unset.
-fn team_flag_or_current(ctx: pb.Client, key: string) -> Result<models.Team, string> {
+fn team_flag_or_current(ctx: pb.Client, key: string) -> Result<models.Team, pb.CliError> {
   if key == "" { return current_team(ctx) }
   let Some(t) = records.find_team(ctx, key)? else {
     return Err(records.unknown_team(ctx, key))
@@ -401,7 +401,7 @@ fn team_flag_or_current(ctx: pb.Client, key: string) -> Result<models.Team, stri
 /// is configured. Only the list verbs and their filters take this; anything
 /// that writes, views or resolves a team-owned record by name uses
 /// current_team, because a name is unique only within a team (LLL-671).
-fn configured_scope(ctx: pb.Client) -> Result<records.TeamScope, string> {
+fn configured_scope(ctx: pb.Client) -> Result<records.TeamScope, pb.CliError> {
   match records.configured_team(ctx)? {
     Some(t) => Ok(records.TeamScope.Only(t.id)),
     None => Ok(records.TeamScope.Every),
@@ -419,7 +419,7 @@ fn configured_scope(ctx: pb.Client) -> Result<records.TeamScope, string> {
 /// Refuses a team holding issues rather than cascading: deleting issues is
 /// not what "delete the team I just made by mistake" means, and PocketBase
 /// would happily orphan them.
-fn team_delete(input: flags.CommandInput) -> Result<(), string> {
+fn team_delete(input: flags.CommandInput) -> Result<(), pb.CliError> {
   let ctx = input.ctx
   let key = input.parsed.first()
   if key == "" {
@@ -431,8 +431,8 @@ fn team_delete(input: flags.CommandInput) -> Result<(), string> {
   let issues_held = records.issue_count(ctx, f"team={query.quote(t.id)}")?
   if issues_held > 0 {
     return Err(
-      f"team {t.key} holds {issues_held} issue(s); deleting it would orphan them
-'lll team archive {t.key}' hides it and keeps their ids working",
+      pb.failed(f"team {t.key} holds {issues_held} issue(s); deleting it would orphan them
+'lll team archive {t.key}' hides it and keeps their ids working"),
     )
   }
   if !confirmed_on_terminal(input.parsed.given("--yes"), f"delete team {t.key}?") {
@@ -456,12 +456,12 @@ mistake. On a terminal it asks first; --yes skips the question."
 
 /// The archive verbs share parsed inputs; each fixes its lifecycle direction
 /// before entering the common implementation.
-fn team_archive(input: flags.CommandInput) -> Result<(), string> {
+fn team_archive(input: flags.CommandInput) -> Result<(), pb.CliError> {
   let ctx = input.ctx
   team_set_archived(ctx, input.parsed, true)
 }
 
-fn team_unarchive(input: flags.CommandInput) -> Result<(), string> {
+fn team_unarchive(input: flags.CommandInput) -> Result<(), pb.CliError> {
   let ctx = input.ctx
   team_set_archived(ctx, input.parsed, false)
 }
@@ -469,7 +469,7 @@ fn team_unarchive(input: flags.CommandInput) -> Result<(), string> {
 /// `lll team archive KEY` / `lll team unarchive KEY` — the team lifecycle.
 /// Archiving hides, never deletes: issues, comments and the /t/KEY/ board
 /// all stay, so the command can afford to be one word with no confirm.
-fn team_set_archived(ctx: pb.Client, p: flags.Parsed, archived: bool) -> Result<(), string> {
+fn team_set_archived(ctx: pb.Client, p: flags.Parsed, archived: bool) -> Result<(), pb.CliError> {
   let mut verb = "archive"
   if !archived { verb = "unarchive" }
   let key = p.first()
@@ -490,7 +490,7 @@ fn team_set_archived(ctx: pb.Client, p: flags.Parsed, archived: bool) -> Result<
   Ok(())
 }
 
-fn team_view(input: flags.CommandInput) -> Result<(), string> {
+fn team_view(input: flags.CommandInput) -> Result<(), pb.CliError> {
   let ctx = input.ctx
   let key = input.parsed.first()
   if key == "" {
@@ -503,7 +503,7 @@ fn team_view(input: flags.CommandInput) -> Result<(), string> {
   let issues_held = records.issue_count(ctx, f"team={query.quote(t.id)}")?
   if input.parsed.given("--json") {
     let mut fields = Map.new<string, json.RawMessage>()
-    if let Err(e) = json.Unmarshal(encode_json(t, "team")?, &fields) { return Err(f"decoding team: {e}") }
+    if let Err(e) = json.Unmarshal(encode_json(t, "team")?, &fields) { return Err(pb.failed(f"decoding team: {e}")) }
     fields["issues"] = encode_json(issues_held, "team")?
     return print_json(fields, "team")
   }

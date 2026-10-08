@@ -6,7 +6,7 @@ import "pb"
 import "query"
 
 /// Resolve a member by name; unknown names error with the fix.
-pub fn resolve_member(ctx: pb.Client, name: string) -> Result<models.Member, string> {
+pub fn resolve_member(ctx: pb.Client, name: string) -> Result<models.Member, pb.CliError> {
   let Some(m) = find_member(ctx, name)? else {
     return Err(pb.fail(pb.ErrorKind.NotFound, f"no member named '{name}'; see 'lll member list'"))
   }
@@ -14,14 +14,14 @@ pub fn resolve_member(ctx: pb.Client, name: string) -> Result<models.Member, str
 }
 
 /// Find a member by exact name, riding the configured token.
-pub fn find_member(ctx: pb.Client, name: string) -> Result<Option<models.Member>, string> {
+pub fn find_member(ctx: pb.Client, name: string) -> Result<Option<models.Member>, pb.CliError> {
   find_member_as(ctx, ctx.token(), name)
 }
 
 /// Find a member by exact name, riding `tok` instead of the configured
 /// token — token create looks its member up as the superuser it has just
 /// authenticated, not as whoever happens to be configured.
-pub fn find_member_as(ctx: pb.Client, tok: string, name: string) -> Result<Option<models.Member>, string> {
+pub fn find_member_as(ctx: pb.Client, tok: string, name: string) -> Result<Option<models.Member>, pb.CliError> {
   // `name` arrives unsanitized from the board's `/issues?assignee=` query
   // parameter, so it goes through `quote` and not into the filter raw: the
   // QueryEscape below makes it safe in a URL, which is a different layer and
@@ -33,21 +33,21 @@ pub fn find_member_as(ctx: pb.Client, tok: string, name: string) -> Result<Optio
     tok,
   )?
   if let Err(e) = json.Unmarshal(body.bytes(), &result) {
-    return Err(f"decoding members: {e}")
+    return Err(pb.failed(f"decoding members: {e}"))
   }
   Ok(result.items.find(|m| m.name == name))
 }
 
-pub fn fetch_members(ctx: pb.Client) -> Result<Slice<models.Member>, string> {
+pub fn fetch_members(ctx: pb.Client) -> Result<Slice<models.Member>, pb.CliError> {
   fetch_all_records<models.Member>(ctx, "/api/collections/members/records?sort=name,id", "members")
 }
 
 /// The member `id` names, by record id.
-pub fn member_by_id(ctx: pb.Client, id: string) -> Result<models.Member, string> {
+pub fn member_by_id(ctx: pb.Client, id: string) -> Result<models.Member, pb.CliError> {
   let body = ctx.get(f"/api/collections/members/records/{id}")?
   let mut m = models.Member { .. }
   if let Err(e) = json.Unmarshal(body.bytes(), &m) {
-    return Err(f"decoding member {id}: {e}")
+    return Err(pb.failed(f"decoding member {id}: {e}"))
   }
   Ok(m)
 }
@@ -56,7 +56,7 @@ pub fn member_by_id(ctx: pb.Client, id: string) -> Result<models.Member, string>
 /// holds its own access within its owner's current access. The second value
 /// is the owner when that cap is narrower than the bot's own access, so the
 /// caller can say why.
-pub fn effective_access(ctx: pb.Client, m: models.Member) -> Result<(models.Member, Option<models.Member>), string> {
+pub fn effective_access(ctx: pb.Client, m: models.Member) -> Result<(models.Member, Option<models.Member>), pb.CliError> {
   if m.owner == "" || m.scope == "" { return Ok((m, None)) }
   let owner = member_by_id(ctx, m.owner)?
   let eff = m.within(owner)
@@ -101,7 +101,7 @@ pub struct Actor {
   pub name: string,
 }
 
-pub fn find_actor(ctx: pb.Client) -> Result<Option<Actor>, string> {
+pub fn find_actor(ctx: pb.Client) -> Result<Option<Actor>, pb.CliError> {
   let token = ctx.token()
   if token == "" { return Ok(None) }
   let Some(id) = pb.token_subject(token) else { return Ok(None) }
@@ -111,12 +111,12 @@ pub fn find_actor(ctx: pb.Client) -> Result<Option<Actor>, string> {
     Ok(body) => {
       let mut member = models.Member { .. }
       if let Err(e) = json.Unmarshal(body.bytes(), &member) {
-        return Err(f"decoding the actor: {e}")
+        return Err(pb.failed(f"decoding the actor: {e}"))
       }
       Ok(Some(Actor { id: member.id, name: member.name }))
     },
     Err(e) => {
-      if pb.classify(e).status == 404 { Ok(None) } else { Err(e) }
+      if e.status == 404 { Ok(None) } else { Err(e) }
     },
   }
 }

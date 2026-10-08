@@ -51,16 +51,16 @@ fn only_an_empty_token_means_absent() {
 fn a_refused_default_url_points_at_login_url() {
   let e = errors.New("connection refused")
   let msg = unreachable_hint("http://127.0.0.1:8090", true, e)
-  assert msg.contains("127.0.0.1:8090")
-  assert msg.contains("lll login --url")
+  assert msg.message.contains("127.0.0.1:8090")
+  assert msg.message.contains("lll login --url")
 }
 
 #[test]
 fn a_refused_configured_url_is_named_without_the_fresh_machine_hint() {
   let e = errors.New("connection refused")
   let msg = unreachable_hint("http://tracker.example.com:8091", false, e)
-  assert msg.contains("tracker.example.com:8091")
-  assert !msg.contains("lll login --url")
+  assert msg.message.contains("tracker.example.com:8091")
+  assert !msg.message.contains("lll login --url")
 }
 
 // The third pure seam (TASK-213): which 404s get told about the port. The
@@ -315,7 +315,7 @@ fn another_servers_token_in_the_file_is_never_sent_here() {
   let c = Client.new(config.resolve(config.Env { config_home: root, .. }, config.no_overrides()))
   let assert Ok(_) = os.WriteFile(file, f"url = \"https://server-b.example\"\ntoken = \"{other}\"\n".bytes(), 0o600)
   let assert Err(e) = c.get("/api/collections/teams/records")
-  assert e.contains("was rejected by")
+  assert e.message.contains("was rejected by")
   assert c.token() == old
   seen.close()
   for auth in seen {

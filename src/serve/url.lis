@@ -2,6 +2,7 @@ import "go:net/http"
 import "go:net/url"
 import "go:strings"
 import "query"
+import "pb"
 
 // The one query-param encoding for view state, shared by the board (GET /)
 // and the /issues table (TASK-94 AC#3). One param per dimension, values are
@@ -48,7 +49,7 @@ fn view_query(r: Ref<http.Request>) -> ViewQuery {
 /// Parse a raw query string (with or without the leading "?") into view
 /// state. Unknown keys are ignored — the encoder decides what a URL can say.
 /// A malformed escape is an error, which the caller turns into the flash.
-fn view_query_parse_raw(raw: string) -> Result<ViewQuery, string> {
+fn view_query_parse_raw(raw: string) -> Result<ViewQuery, pb.CliError> {
   let mut q = ViewQuery { .. }
   for pair in strings.Split(strings.TrimPrefix(raw, "?"), "&") {
     if pair == "" { continue }
@@ -58,7 +59,7 @@ fn view_query_parse_raw(raw: string) -> Result<ViewQuery, string> {
       key = pair.substring(0..i)
       value = pair.substring(i + 1..)
     }
-    let v = url.QueryUnescape(value).map_err(|e| f"bad query escape: {e}")?
+    let v = url.QueryUnescape(value).map_err(|e| f"bad query escape: {e}").map_err(pb.failed)?
     match key {
       "state" => q.state = v,
       "assignee" => q.assignee = v,

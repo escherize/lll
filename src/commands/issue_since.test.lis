@@ -39,8 +39,8 @@ fn since_rejects_invalid_or_incomplete_timestamps_with_layout_guidance() {
     "2026-09-18T07:00:00Z' || true",
   ] {
     let assert Err(message) = issue_since_stamp(value)
-    assert message.contains("RFC3339")
-    assert message.contains("2026-09-18T00:00:00Z")
+    assert message.message.contains("RFC3339")
+    assert message.message.contains("2026-09-18T00:00:00Z")
   }
 }
 
@@ -53,7 +53,7 @@ fn since_accepts_the_space_form_older_output_printed() {
   assert issue_since_stamp("2026-09-18 07:00:00Z") ==
   Ok("2026-09-18 07:00:00.000Z")
   let assert Err(bad) = issue_since_stamp("2026-09-18 07:00:00")
-  assert pb.exit_code(pb.classify(bad).kind) == 2
+  assert pb.exit_code(bad.kind) == 2
 }
 
 #[test]
@@ -67,5 +67,5 @@ fn unchanged_since_names_one_instant_in_every_form() {
     assert unchanged_since_stamp(value) == Ok("2026-10-08 03:02:11.982Z")
   }
   let assert Err(bad) = unchanged_since_stamp("yesterday")
-  assert pb.exit_code(pb.classify(bad).kind) == 2
+  assert pb.exit_code(bad.kind) == 2
 }

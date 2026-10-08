@@ -3,6 +3,7 @@ import "go:github.com/escherize/lll/skills"
 import "go:strings"
 
 import "flags"
+import "pb"
 
 // `lll skill list|get` — the operating instructions, from inside the binary
 // (LLL-404).
@@ -18,7 +19,7 @@ import "flags"
 // .claude/skills/; scripts/sync_skills.py owns that list and the gate fails
 // when the mirror drifts from it.
 
-pub fn skill(args: Slice<string>) -> Result<(), string> {
+pub fn skill(args: Slice<string>) -> Result<(), pb.CliError> {
   // The page already carries its own Usage: block, so --help prints it alone
   // rather than under the generic "usage:" prefix.
   if flags.help_requested([], args, 2) {
@@ -52,11 +53,11 @@ pub fn skill(args: Slice<string>) -> Result<(), string> {
       let name = parsed.nth(1)
       if name == "" { return Err(flags.usage_error(f"usage: lll skill get NAME\n\n{known()}")) }
       let body = skills.Body(name)
-      if body == "" { return Err(f"no skill named '{name}'\n\n{known()}") }
+      if body == "" { return Err(pb.failed(f"no skill named '{name}'\n\n{known()}")) }
       fmt.Print(body)
       Ok(())
     },
-    other => Err(f"unknown command: 'lll skill {other}' (expected list or get)"),
+    other => Err(pb.failed(f"unknown command: 'lll skill {other}' (expected list or get)")),
   }
 }
 

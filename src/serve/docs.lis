@@ -42,7 +42,7 @@ fn doc_page(
   let doc = match records.fetch_doc(ctx, team, slug) {
     Ok(d) => d,
     Err(e) => {
-      http.Error(w, pb.plain(e), 404)
+      http.Error(w, e.message, 404)
       return
     },
   }
@@ -50,7 +50,7 @@ fn doc_page(
   let shown = match read_roster(ctx) {
     Ok(found) => found,
     Err(e) => {
-      http.Error(w, pb.plain(e), 500)
+      http.Error(w, e.message, 500)
       return
     },
   }
@@ -142,14 +142,14 @@ fn docs_page(
   let shown = match read_roster(ctx) {
     Ok(found) => found,
     Err(e) => {
-      http.Error(w, pb.plain(e), 500)
+      http.Error(w, e.message, 500)
       return
     },
   }
   let docs = match records.fetch_team_docs(ctx, team.id, kind) {
     Ok(found) => found,
     Err(e) => {
-      http.Error(w, pb.plain(e), 500)
+      http.Error(w, e.message, 500)
       return
     },
   }

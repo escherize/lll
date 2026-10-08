@@ -9,7 +9,7 @@ pub fn states() -> Slice<string> {
 
 /// A supplied state must be in the workflow vocabulary. Empty is not a
 /// state; filter adapters decide whether absence means no restriction.
-pub fn state(value: string) -> Result<string, string> {
+pub fn state(value: string) -> Result<string, pb.CliError> {
   if !states().contains(value) {
     return Err(pb.fail(pb.ErrorKind.Usage, f"unknown state '{value}' (use one of: {strings.Join(states(), ", ")})"))
   }
@@ -31,7 +31,7 @@ pub struct Filters {
 }
 
 impl Filters {
-  pub fn validate(self) -> Result<Filters, string> {
+  pub fn validate(self) -> Result<Filters, pb.CliError> {
     for s in self.state { let _ = state(s)? }
     Ok(self)
   }
@@ -122,7 +122,7 @@ fn any_of(lhs: string, values: Slice<string>) -> Option<string> {
 
 /// Validate a sort spec ("field" or "-field" for descending) and return it
 /// in PB sort syntax, which is the same shape.
-pub fn sort(spec: string) -> Result<string, string> {
+pub fn sort(spec: string) -> Result<string, pb.CliError> {
   let field = strings.TrimPrefix(spec, "-")
   if sort_fields().find(|f| f == field).is_none() {
     return Err(

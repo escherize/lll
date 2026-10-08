@@ -71,7 +71,7 @@ fn fetch_issue_rows(
   label_id: string,
   project_id: string,
   sort: string,
-) -> Result<models.IssueList, string> {
+) -> Result<models.IssueList, pb.CliError> {
   let mut path = f"/api/collections/issues/records?perPage={table_page_size()}&expand=team,assignee,labels&sort={url.QueryEscape(sort)}"
   let filter = query.filter(team_id, state, assignee_id, project_id, label_id, "")
   if filter != "" { path = f"{path}&filter={url.QueryEscape(filter)}" }
@@ -90,13 +90,13 @@ fn fetch_issue_rows(
 /// Shares the settings page's request, which also asks for expand=team. The
 /// expand is wasted here, but one label query beats two that drift apart —
 /// the same trade fetch_project_names already makes.
-fn fetch_label_names(ctx: pb.Client, team_id: string) -> Result<Slice<string>, string> {
+fn fetch_label_names(ctx: pb.Client, team_id: string) -> Result<Slice<string>, pb.CliError> {
   Ok(records.fetch_labels(ctx, team_id)?.map(|l| l.name))
 }
 
 /// This team's project names, for the project chooser. Scoped for the same
 /// reason labels are, and paired with the same scoped resolve_project.
-fn fetch_project_names(ctx: pb.Client, team_id: string) -> Result<Slice<string>, string> {
+fn fetch_project_names(ctx: pb.Client, team_id: string) -> Result<Slice<string>, pb.CliError> {
   Ok(records.fetch_projects(ctx, team_id)?.map(|p| p.name))
 }
 
@@ -122,13 +122,13 @@ fn issues_page(ctx: pb.Client, w: http.ResponseWriter, r: Ref<http.Request>, tea
   let mut sort = raw.sort
   if sort == "" { sort = "-updated" }
   if let Err(e) = query.sort(sort) {
-    err = pb.plain(e)
+    err = e.message
     sort = "-updated"
   }
 
   let mut filters = view_filters(raw)
   if let Err(e) = filters.validate() {
-    err = pb.plain(e)
+    err = e.message
     filters.state = []
   }
   let state = filters.one_state()
@@ -137,7 +137,7 @@ fn issues_page(ctx: pb.Client, w: http.ResponseWriter, r: Ref<http.Request>, tea
   let roster = match read_roster(ctx) {
     Ok(found) => found,
     Err(e) => {
-      http.Error(w, pb.plain(e), 500)
+      http.Error(w, e.message, 500)
       return
     },
   }
@@ -147,7 +147,7 @@ fn issues_page(ctx: pb.Client, w: http.ResponseWriter, r: Ref<http.Request>, tea
     match roster_member(roster, assignee) {
       Ok(m) => { assignee_id = m.id },
       Err(e) => {
-        err = pb.plain(e)
+        err = e.message
         assignee = ""
       },
     }
@@ -159,7 +159,7 @@ fn issues_page(ctx: pb.Client, w: http.ResponseWriter, r: Ref<http.Request>, tea
     match records.resolve_label(ctx, team_id, label) {
       Ok(l) => { label_id = l.id },
       Err(e) => {
-        err = pb.plain(e)
+        err = e.message
         label = ""
       },
     }
@@ -171,7 +171,7 @@ fn issues_page(ctx: pb.Client, w: http.ResponseWriter, r: Ref<http.Request>, tea
     match records.resolve_project(ctx, team_id, project) {
       Ok(p) => { project_id = p.id },
       Err(e) => {
-        err = pb.plain(e)
+        err = e.message
         project = ""
       },
     }
@@ -183,7 +183,7 @@ fn issues_page(ctx: pb.Client, w: http.ResponseWriter, r: Ref<http.Request>, tea
   let list = match fetch_issue_rows(ctx, team_id, state, assignee_id, label_id, project_id, sort) {
     Ok(l) => models.IssueList { items: issues_for(viewer_is_scoped(viewer), l.items).map(|x| roster.issue(x)), ..l },
     Err(e) => {
-      http.Error(w, pb.plain(e), 500)
+      http.Error(w, e.message, 500)
       return
     },
   }

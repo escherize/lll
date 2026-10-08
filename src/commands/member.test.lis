@@ -183,15 +183,15 @@ fn member_add_page_names_the_member_token_prerequisite() {
 
 #[test]
 fn member_create_error_names_the_requirement_and_the_paths() {
-  let e = pb.tag(pb.http_error("GET http://x/api/collections/members/records", 401, "401 Unauthorized", "nope"))
+  let e = pb.http_error("GET http://x/api/collections/members/records", 401, "401 Unauthorized", "nope")
   let msg = member_create_error(e)
-  assert msg.contains("creating a member needs a member token")
-  assert msg.contains("do not authenticate member creation")
-  assert msg.contains("'lll login --create'")
-  assert msg.contains("'lll member invite NAME --email EMAIL'")
-  assert msg.contains("'lll token create NAME'")
+  assert msg.message.contains("creating a member needs a member token")
+  assert msg.message.contains("do not authenticate member creation")
+  assert msg.message.contains("'lll login --create'")
+  assert msg.message.contains("'lll member invite NAME --email EMAIL'")
+  assert msg.message.contains("'lll token create NAME'")
   // A non-401 failure keeps its original message: only auth is reclassified.
-  let other = pb.tag(pb.http_error("POST http://x", 400, "400 Bad Request", "validation"))
+  let other = pb.http_error("POST http://x", 400, "400 Bad Request", "validation")
   assert member_create_error(other) == other
 }
 
@@ -201,5 +201,5 @@ fn member_create_error_names_the_requirement_and_the_paths() {
 fn own_password_change_passes_auth_failures_through() {
   assert is_auth_failure(pb.fail(pb.ErrorKind.Auth, "the token in LLL_TOKEN was rejected"))
   assert !is_auth_failure(pb.fail(pb.ErrorKind.NotFound, "no such record"))
-  assert !is_auth_failure("dial tcp: connection refused")
+  assert !is_auth_failure(pb.failed("dial tcp: connection refused"))
 }

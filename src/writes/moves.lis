@@ -30,20 +30,20 @@ pub fn move_to_team(
   id: string,
   from: models.Team,
   to: models.Team,
-) -> Result<string, string> {
+) -> Result<string, pb.CliError> {
   if from.id == to.id {
     return Ok(f"{kind} {name} is already in {to.key}")
   }
   let blocking = referencing_issue_keys(ctx, kind, id, to.id)?
   if !blocking.is_empty() {
-    return Err(refuse_move(kind, name, from, to, blocking))
+    return Err(pb.failed(refuse_move(kind, name, from, to, blocking)))
   }
   // Only the relation moves; name, colour, description and status are not
   // this verb's business.
   match kind {
     "label" => update_label(ctx, id, LabelPatch { team: Some(to.id), .. })?,
     "project" => update_project(ctx, id, ProjectPatch { team: Some(to.id), .. })?,
-    _ => return Err(f"cannot move a '{kind}'"),
+    _ => return Err(pb.failed(f"cannot move a '{kind}'")),
   }
   Ok(f"Moved {kind} {name}: {from.key} -> {to.key}")
 }
@@ -59,11 +59,11 @@ fn referencing_issue_keys(
   kind: string,
   id: string,
   to_team_id: string,
-) -> Result<Slice<string>, string> {
+) -> Result<Slice<string>, pb.CliError> {
   let filter = match kind {
     "label" => query.filter("", "", "", "", id, ""),
     "project" => query.filter("", "", "", id, "", ""),
-    _ => return Err(f"cannot move a '{kind}'"),
+    _ => return Err(pb.failed(f"cannot move a '{kind}'")),
   }
   let issues = records.fetch_all_issues(ctx,
     f"&expand=team&sort=created,id&filter={url.QueryEscape(filter)}",
@@ -96,7 +96,7 @@ fn refuse_move(
 }
 
 /// The destination team a `--to KEY` names.
-pub fn move_destination(ctx: pb.Client, key: string) -> Result<models.Team, string> {
+pub fn move_destination(ctx: pb.Client, key: string) -> Result<models.Team, pb.CliError> {
   if strings.TrimSpace(key) == "" {
     return Err(flags.usage_error("--to requires a team key (see 'lll team list')"))
   }
@@ -104,7 +104,7 @@ pub fn move_destination(ctx: pb.Client, key: string) -> Result<models.Team, stri
     return Err(records.unknown_team(ctx, key))
   }
   if team.archived {
-    return Err(f"team {team.key} is archived; run 'lll team unarchive {team.key}' first")
+    return Err(pb.failed(f"team {team.key} is archived; run 'lll team unarchive {team.key}' first"))
   }
   Ok(team)
 }

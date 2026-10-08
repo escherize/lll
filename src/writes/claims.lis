@@ -80,7 +80,7 @@ pub fn acquire_claim(
   issue_id: string,
   member_id: string,
   agent: string,
-) -> Result<Transition, string> {
+) -> Result<Transition, pb.CliError> {
   transact(
     ctx,
     caller,
@@ -100,7 +100,7 @@ pub fn release_claim(
   issue_id: string,
   claim_id: string,
   by: ClaimAs,
-) -> Result<Transition, string> {
+) -> Result<Transition, pb.CliError> {
   transact(
     ctx,
     by.caller,
@@ -126,7 +126,7 @@ pub fn close_issue(
   claim_id: string,
   by: ClaimAs,
   keep_claim: bool,
-) -> Result<Transition, string> {
+) -> Result<Transition, pb.CliError> {
   transact(
     ctx,
     by.caller,
@@ -150,7 +150,7 @@ pub fn renew_claim(
   issue_id: string,
   claim_id: string,
   agent: string,
-) -> Result<Transition, string> {
+) -> Result<Transition, pb.CliError> {
   transact(
     ctx,
     pb.Caller.Process,
@@ -170,7 +170,7 @@ fn update_assignment(
   claim_id: string,
   fields: string,
   by: ClaimAs,
-) -> Result<Transition, string> {
+) -> Result<Transition, pb.CliError> {
   transact(
     ctx,
     by.caller,
@@ -194,14 +194,14 @@ fn transact(
   issue_id: string,
   action: string,
   request: Unknown,
-) -> Result<Transition, string> {
-  let body = json.Marshal(request).map_err(|e| f"encoding claim request: {e}")?
+) -> Result<Transition, pb.CliError> {
+  let body = json.Marshal(request).map_err(|e| f"encoding claim request: {e}").map_err(pb.failed)?
   let path = f"/api/lll/issues/{url.PathEscape(issue_id)}/{action}"
   let response = ctx
     .send_as(caller, "POST", path, body as string, "application/json")
     .map_err(|e| {
-      if pb.classify(e).status == 404 {
-        "server does not support atomic claim operations; update the server before changing claims or assignments; no legacy claim writes were attempted"
+      if e.status == 404 {
+        pb.failed("server does not support atomic claim operations; update the server before changing claims or assignments; no legacy claim writes were attempted")
       } else {
         e
       }
@@ -209,6 +209,6 @@ fn transact(
   let mut transition = Transition { .. }
   json
     .Unmarshal(response.bytes(), &transition)
-    .map_err(|e| f"decoding claim response: {e}")?
+    .map_err(|e| pb.failed(f"decoding claim response: {e}"))?
   Ok(transition)
 }

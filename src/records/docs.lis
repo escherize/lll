@@ -17,7 +17,7 @@ pub fn fetch_team_docs(
   ctx: pb.Client,
   team_id: string,
   kind: string,
-) -> Result<Slice<models.Doc>, string> {
+) -> Result<Slice<models.Doc>, pb.CliError> {
   let mut filter = f"team={query.quote(team_id)}"
   if kind != "" { filter = f"{filter} && kind={query.quote(kind)}" }
   let fields = "id,team,slug,title,kind,area,author,created,updated,expand"
@@ -30,20 +30,20 @@ pub fn fetch_team_docs(
 /// Slugs are lowercase letters, digits and hyphens, starting and ending with
 /// a letter or digit — safe in URLs, unambiguous in shell commands, stable
 /// as bare words in grep.
-pub fn check_slug(val: string) -> Result<string, string> {
+pub fn check_slug(val: string) -> Result<string, pb.CliError> {
   let slug = strings.TrimSpace(val)
-  if slug == "" { return Err("slug cannot be empty (e.g. port-notes)") }
+  if slug == "" { return Err(pb.failed("slug cannot be empty (e.g. port-notes)")) }
   if slug.length() > 80 {
-    return Err(f"slug must be at most 80 characters, got {slug.length()}")
+    return Err(pb.failed(f"slug must be at most 80 characters, got {slug.length()}"))
   }
   let shaped = "^[a-z0-9]([a-z0-9-]*[a-z0-9])?$"
   let matched = match regexp.MatchString(shaped, slug) {
     Ok(m) => m,
-    Err(e) => return Err(f"validating slug: {e}"),
+    Err(e) => return Err(pb.failed(f"validating slug: {e}")),
   }
   if !matched {
     return Err(
-      f"invalid slug '{slug}' (use lowercase letters, digits and hyphens, starting and ending with a letter or digit, e.g. port-notes)",
+      pb.failed(f"invalid slug '{slug}' (use lowercase letters, digits and hyphens, starting and ending with a letter or digit, e.g. port-notes)"),
     )
   }
   Ok(slug)
@@ -66,7 +66,7 @@ pub fn fetch_doc_record(
   ctx: pb.Client,
   team: models.Team,
   slug: string,
-) -> Result<string, string> {
+) -> Result<string, pb.CliError> {
   let Some(item) = find_doc(ctx, team, slug)? else {
     return Err(unknown_doc(team, slug))
   }
@@ -74,11 +74,11 @@ pub fn fetch_doc_record(
 }
 
 /// fetch_doc_record, decoded.
-pub fn fetch_doc(ctx: pb.Client, team: models.Team, slug: string) -> Result<models.Doc, string> {
+pub fn fetch_doc(ctx: pb.Client, team: models.Team, slug: string) -> Result<models.Doc, pb.CliError> {
   let record = fetch_doc_record(ctx, team, slug)?
   let mut d = models.Doc { .. }
   if let Err(e) = json.Unmarshal(record.bytes(), &d) {
-    return Err(f"decoding doc: {e}")
+    return Err(pb.failed(f"decoding doc: {e}"))
   }
   Ok(d)
 }
@@ -89,7 +89,7 @@ pub fn find_doc(
   ctx: pb.Client,
   team: models.Team,
   slug: string,
-) -> Result<Option<models.Doc>, string> {
+) -> Result<Option<models.Doc>, pb.CliError> {
   let slug = check_slug(slug)?
   let filter = url.QueryEscape(query.scoped(team.id, "slug", slug))
   let mut docs = models.DocList { .. }
@@ -103,14 +103,14 @@ pub fn find_doc(
 
 /// Unknown-slug message. It names the team, because the same slug may well
 /// exist on another board and "no doc with slug 'index'" would be a lie.
-pub fn unknown_doc(team: models.Team, slug: string) -> string {
+pub fn unknown_doc(team: models.Team, slug: string) -> pb.CliError {
   pb.fail(pb.ErrorKind.NotFound, f"no doc with slug '{slug}' in {team.key}; see 'lll doc list'")
 }
 
 /// Complete document retrieval shared by lists, briefs and search. Callers
 /// supply domain filters before URL encoding; page size is a transport detail.
 /// A failed later page fails the read instead of returning a partial brief.
-pub fn fetch_docs(ctx: pb.Client, filter: string, sort: string, fields: string) -> Result<Slice<models.Doc>, string> {
+pub fn fetch_docs(ctx: pb.Client, filter: string, sort: string, fields: string) -> Result<Slice<models.Doc>, pb.CliError> {
   let params = f"filter={url.QueryEscape(filter)}&sort={url.QueryEscape(sort + ",id")}&fields={url.QueryEscape(fields)}"
   let mut out: Slice<models.Doc> = []
   let mut page = 1
@@ -132,14 +132,14 @@ pub fn fetch_docs(ctx: pb.Client, filter: string, sort: string, fields: string) 
 /// formatted identically to a correct hit. Findings exist to say what is
 /// known about THIS file; confidently answering about a different repo is
 /// worse than answering nothing.
-pub fn fetch_findings(ctx: pb.Client, team_id: string) -> Result<Slice<models.Doc>, string> {
+pub fn fetch_findings(ctx: pb.Client, team_id: string) -> Result<Slice<models.Doc>, pb.CliError> {
   fetch_docs(ctx, f"kind='finding' && team={query.quote(team_id)}", "slug", "")
 }
 
 /// The findings related to one issue: every finding explicitly linked to it
 /// (the issues relation always shows), plus every finding whose `area` names
 /// one of the issue's labels. Shared by 'lll issue view' and the issue page.
-pub fn findings_for_issue(ctx: pb.Client, issue: models.Issue) -> Result<Slice<models.Doc>, string> {
+pub fn findings_for_issue(ctx: pb.Client, issue: models.Issue) -> Result<Slice<models.Doc>, pb.CliError> {
   // The ISSUE's team, not the configured one: this answers for one issue,
   // and the board can be showing an issue from a team nobody configured.
   let findings = fetch_findings(ctx, issue.team)?

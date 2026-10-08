@@ -18,9 +18,9 @@ import "flags"
 #[test]
 fn refuse_delete_names_the_count_the_noun_and_the_override() {
   let msg = refuse_delete("label", "bug", 7)
-  assert strings.Contains(msg, "7 issue(s)")
-  assert strings.Contains(msg, "'bug'")
-  assert strings.Contains(msg, "lll label delete bug --force")
+  assert strings.Contains(msg.message, "7 issue(s)")
+  assert strings.Contains(msg.message, "'bug'")
+  assert strings.Contains(msg.message, "lll label delete bug --force")
 }
 
 /// The same helper serves projects, so the command it prints must follow the
@@ -29,14 +29,14 @@ fn refuse_delete_names_the_count_the_noun_and_the_override() {
 #[test]
 fn refuse_delete_follows_the_noun() {
   let msg = refuse_delete("project", "Apollo", 2)
-  assert strings.Contains(msg, "lll project delete Apollo --force")
-  assert !strings.Contains(msg, "lll label")
+  assert strings.Contains(msg.message, "lll project delete Apollo --force")
+  assert !strings.Contains(msg.message, "lll label")
 }
 
 #[test]
 fn refuse_delete_quotes_multiword_and_apostrophe_names() {
-  assert refuse_delete("project", "Current release", 2).contains("\n  lll project delete 'Current release' --force\n")
-  assert refuse_delete("label", "owner's queue", 1).contains("\n  lll label delete 'owner'\\''s queue' --force\n")
+  assert refuse_delete("project", "Current release", 2).message.contains("\n  lll project delete 'Current release' --force\n")
+  assert refuse_delete("label", "owner's queue", 1).message.contains("\n  lll label delete 'owner'\\''s queue' --force\n")
 }
 
 /// A forced delete still reports what it cost. Silence here would be the

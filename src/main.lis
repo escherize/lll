@@ -4,7 +4,6 @@ import "go:strings"
 
 import "commands"
 import "config"
-import "flags"
 import "pb"
 import "query"
 import "buildinfo"
@@ -44,24 +43,22 @@ fn main() {
     fmt.Fprintln(os.Stderr, line)
   }
 
-  if let Err(msg) = result {
+  if let Err(err) = result {
     // A help request travels as an error so it short-circuits the verb before
     // it can act (flags.parse, TASK-237). It is not a failure: print it bare
     // and exit 0, or `lll issue list -h` in a script reads as a broken command.
-    let marker = flags.help_marker()
-    if strings.HasPrefix(msg, marker) {
-      fmt.Println(strings.TrimPrefix(msg, marker))
+    if let pb.ErrorKind.Help = err.kind {
+      fmt.Println(err.message)
       return
     }
     // Every failing exit is decided here, by the error's kind (LLL-645,
     // docs/cli-contract.md): scripts branch on the code, not the text.
-    let err = pb.classify(msg)
     fmt.Fprintln(os.Stderr, f"Error: {err.message}")
     os.Exit(pb.exit_code(err.kind))
   }
 }
 
-fn dispatch(ctx: pb.Client, noun: string, args: Slice<string>) -> Result<(), string> {
+fn dispatch(ctx: pb.Client, noun: string, args: Slice<string>) -> Result<(), pb.CliError> {
   match noun {
     "issue" => commands.issue(ctx, args),
     "team" => commands.team(ctx, args),

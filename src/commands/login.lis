@@ -86,7 +86,7 @@ pub fn login_spec() -> Slice<flags.Flag> {
 }
 
 /// Dispatch `lll login`.
-pub fn login(ctx: pb.Client, args: Slice<string>) -> Result<(), string> {
+pub fn login(ctx: pb.Client, args: Slice<string>) -> Result<(), pb.CliError> {
   let spec = login_spec()
   let usage = flags.usage("lll login", spec, "")
   let p = flags.parse(spec, args, 2, false, usage)?
@@ -96,8 +96,8 @@ pub fn login(ctx: pb.Client, args: Slice<string>) -> Result<(), string> {
     return Ok(())
   }
 
-  let before_login = ctx.settings.config()?
-  let saved_before_login = ctx.settings.load_home()?
+  let before_login = ctx.settings.config().map_err(pb.failed)?
+  let saved_before_login = ctx.settings.load_home().map_err(pb.failed)?
   let board_endpoint = if p.given("--web-url") { checked_web_url(p.one("--web-url"))? } else { "" }
 
   // --url is the fresh-machine path (TASK-195): authenticate against the url
@@ -111,11 +111,11 @@ pub fn login(ctx: pb.Client, args: Slice<string>) -> Result<(), string> {
   let target = strings.TrimSuffix(strings.TrimSpace(p.one("--url")), "/")
   if p.given("--url") && !strings.HasPrefix(target, "http://") && !strings.HasPrefix(target, "https://") {
     return Err(
-      "--url must be a full base url starting with http:// or https:// (e.g. https://tracker.example.com)",
+      pb.failed("--url must be a full base url starting with http:// or https:// (e.g. https://tracker.example.com)"),
     )
   }
   if let Some(why) = login_target_conflict(target, saved_before_login.url, before_login.url) {
-    return Err(why)
+    return Err(pb.failed(why))
   }
 
   // One reader for the whole flow: a second bufio.Reader would race the
@@ -123,7 +123,7 @@ pub fn login(ctx: pb.Client, args: Slice<string>) -> Result<(), string> {
   let mut input = bufio.NewReader(os.Stdin)
   if p.given("--token") {
     if p.given("--email") || p.given("--password") || p.given("--create") {
-      return Err("--token logs in with a member token: drop --email, --password and --create")
+      return Err(pb.failed("--token logs in with a member token: drop --email, --password and --create"))
     }
     let raw = p.one("--token")
     let given = if raw == "-" { read_password(input, "Token: ")? } else { raw }
@@ -140,8 +140,8 @@ pub fn login(ctx: pb.Client, args: Slice<string>) -> Result<(), string> {
   let interactive = term.IsTerminal(os.Stdin.Fd() as int)
   if !interactive && p.one("--email") == "" && !p.given("--password") {
     return Err(
-      "no email and no password, and no terminal to prompt at; pass both:
-  lll login --url <server> --email <your email> --password <pw>",
+      pb.failed("no email and no password, and no terminal to prompt at; pass both:
+  lll login --url <server> --email <your email> --password <pw>"),
     )
   }
   let mut email = p.one("--email")
@@ -151,7 +151,7 @@ pub fn login(ctx: pb.Client, args: Slice<string>) -> Result<(), string> {
   }
   email = strings.TrimSpace(email)
   if email == "" {
-    return Err("no email: pass --email <email> or answer the prompt")
+    return Err(pb.failed("no email: pass --email <email> or answer the prompt"))
   }
   // A flag, not only a prompt: setting up an agent or a CI machine is exactly
   // the case with no terminal to type into, and every usability run reached
@@ -173,7 +173,7 @@ pub fn login(ctx: pb.Client, args: Slice<string>) -> Result<(), string> {
       "no password"
     }
     return Err(
-      f"{whose}; pass --password <pw>, or pipe it: printf '%s\\n' \"$PW\" | lll login ...",
+      pb.failed(f"{whose}; pass --password <pw>, or pipe it: printf '%s\\n' \"$PW\" | lll login ..."),
     )
   }
 
@@ -192,9 +192,9 @@ pub fn login(ctx: pb.Client, args: Slice<string>) -> Result<(), string> {
     // take, and the person running it already has a real one.
     if email == admin_email && admin_email != "" {
       return Err(
-        f"{email} is the server's admin identity, not a member. Creating a member with it
+        pb.failed(f"{email} is the server's admin identity, not a member. Creating a member with it
 would put a second account on that address. --create makes YOUR login: pass
---email <your own address>. The admin credentials stay in the environment.",
+--email <your own address>. The admin credentials stay in the environment."),
       )
     }
     // PocketBase's own minimum, checked here so a too-short password is one
@@ -217,7 +217,7 @@ would put a second account on that address. --create makes YOUR login: pass
     models.AuthRequest { identity: email, password },
   ) {
     Ok(b) => b,
-    Err(e) => return Err(f"encoding credentials: {e}"),
+    Err(e) => return Err(pb.failed(f"encoding credentials: {e}")),
   }
   // post_anon, not post: a stale token in the config must not ride on a
   // request whose whole job is to mint a fresh one.
@@ -233,9 +233,9 @@ would put a second account on that address. --create makes YOUR login: pass
   }
   let mut auth = models.AuthResponse { .. }
   if let Err(e) = json.Unmarshal(body.bytes(), &auth) {
-    return Err(f"decoding the auth response: {e}")
+    return Err(pb.failed(f"decoding the auth response: {e}"))
   }
-  if auth.token == "" { return Err("the response carried no token") }
+  if auth.token == "" { return Err(pb.failed("the response carried no token")) }
   finish_login(ctx,
     target,
     before_login,
@@ -251,14 +251,14 @@ would put a second account on that address. --create makes YOUR login: pass
 /// server it will be saved for (`ctx` is pointed at --url when one was
 /// given). The access route answers only a valid member token, so a
 /// superuser token, a revoked one or a typo stops here instead of being saved.
-fn token_identity(ctx: pb.Client, tok: string) -> Result<(string, bool), string> {
+fn token_identity(ctx: pb.Client, tok: string) -> Result<(string, bool), pb.CliError> {
   if tok == "" {
-    return Err("--token needs a member token: paste it after --token, or pass --token - and pipe it in")
+    return Err(pb.failed("--token needs a member token: paste it after --token, or pass --token - and pipe it in"))
   }
   let body = match ctx.get_as("/api/lll/access", tok) {
     Ok(b) => b,
     Err(e) => {
-      let status = pb.classify(e).status
+      let status = e.status
       if status == 401 || status == 403 {
         return Err(pb.fail(
           pb.ErrorKind.Auth,
@@ -271,7 +271,7 @@ fn token_identity(ctx: pb.Client, tok: string) -> Result<(string, bool), string>
   let mut reply = models.AccessReply { .. }
   let decoded = json.Unmarshal(body.bytes(), &reply)
   if decoded.is_err() || reply.name == "" {
-    return Err("the server answered, but not with a member: is --url this board's address?")
+    return Err(pb.failed("the server answered, but not with a member: is --url this board's address?"))
   }
   Ok((reply.name, !reply.rw))
 }
@@ -304,7 +304,7 @@ fn finish_login(
   token: string,
   name: string,
   read_only: bool,
-) -> Result<(), string> {
+) -> Result<(), pb.CliError> {
   // The home config, never the repo's: .lll.toml is committed (TASK-168) and
   // a token must not travel with it. The value is written here and printed
   // nowhere — even success output names the member and the file, not the key.
@@ -321,7 +321,7 @@ fn finish_login(
     let _ = set_home_key(ctx.settings, "web_url", board_endpoint)?
   } else {
     // Re-read: the url and web_url lines above may have just changed.
-    let cfg = ctx.settings.reload().config()?
+    let cfg = ctx.settings.reload().config().map_err(pb.failed)?
     if cfg.web_url == "" {
       let discovery_base = if target != "" { target } else { cfg.url }
       if let Some(endpoint) = discover_board_url(discovery_base) {
@@ -350,7 +350,7 @@ fn finish_login(
   // Both on the configuration as this login just saved it: the new token
   // is the one the team lookup must send.
   settle_team(pb.Client.new(ctx.settings.reload()), read_only)
-  let saved_cfg = ctx.settings.reload().config()?
+  let saved_cfg = ctx.settings.reload().config().map_err(pb.failed)?
   if saved_cfg.web_url == "" {
     fmt.Println("board endpoint: run 'lll config set web_url URL' with the board address supplied by your deployer")
   }
@@ -372,7 +372,7 @@ fn settle_team(ctx: pb.Client, read_only: bool) {
   let teams = match records.list_teams(ctx) {
     Ok(teams) => teams,
     Err(e) => {
-      fmt.Println(f"authenticated, but could not verify team setup: {pb.plain(e)}\nnext: lll team list, then lll attach --key KEY")
+      fmt.Println(f"authenticated, but could not verify team setup: {e.message}\nnext: lll team list, then lll attach --key KEY")
       return
     },
   }
@@ -450,7 +450,7 @@ fn create_for_login(
   password: string,
   base: string,
   admin: AdminLogin,
-) -> Result<(), string> {
+) -> Result<(), pb.CliError> {
   let ctx = if base != "" { ctx.with_url(base) } else { ctx }
   create_as_superuser(ctx, name, email, password, admin)
 }
@@ -462,11 +462,11 @@ fn create_as_superuser(
   email: string,
   password: string,
   admin: AdminLogin,
-) -> Result<(), string> {
+) -> Result<(), pb.CliError> {
   let su = superuser_auth(ctx, admin)?
   if let Some(existing) = records.find_member_as(ctx, su, name)? {
     return Err(
-      f"member '{name}' already exists ({existing.email}); drop --create and log in, or reset it with 'lll member set-password {name}'",
+      pb.failed(f"member '{name}' already exists ({existing.email}); drop --create and log in, or reset it with 'lll member set-password {name}'"),
     )
   }
   let _ = create_member_as(ctx, su, name, email, password, [], "")?
@@ -479,8 +479,8 @@ fn create_as_superuser(
 /// the account had never existed, and none of them found 'member invite' or
 /// --create from it. Both branches are named here because the server does not
 /// tell us which one it is.
-fn login_failed(ctx: pb.Client, e: string, email: string, target: string, admin_email: string) -> string {
-  let status = pb.classify(e).status
+fn login_failed(ctx: pb.Client, e: pb.CliError, email: string, target: string, admin_email: string) -> pb.CliError {
+  let status = e.status
   // A 403 whose body is a PocketBase envelope is the server refusing this
   // identity by name — a bot member at a password door (LLL-407) — and its
   // own wording is the answer. A bare 403 (or any other non-400) keeps the
@@ -493,11 +493,11 @@ fn login_failed(ctx: pb.Client, e: string, email: string, target: string, admin_
       } else {
         ctx.url().unwrap_or("the configured server")
       }
-      return f"login failed at {base}: {presented.summary}"
+      return pb.failed(f"login failed at {base}: {presented.summary}")
     }
   }
   if status != 400 {
-    return f"login failed: {e}"
+    return e.with_message(f"login failed: {e.message}")
   }
   // The server is named on every failure (TASK-203 AC#4): "wrong password"
   // against the wrong host is the transcript that rule exists for, and it is
@@ -514,12 +514,12 @@ fn login_failed(ctx: pb.Client, e: string, email: string, target: string, admin_
   // login() then refused it — catching a mistake this text had handed them.
   // A superuser is not a member, so say that instead of the generic advice.
   if email == admin_email && email != "" {
-    return f"login failed at {base}: {email} is the server's admin identity, not a member
+    return pb.failed(f"login failed at {base}: {email} is the server's admin identity, not a member
 'lll login' authenticates MEMBERS; the superuser has no board account to log into.
 log in as yourself, and let the admin credentials create that account:
   lll login{url_flag} --email <your own address> --create --password <pick one>
 they ride the environment (LLL_ADMIN_EMAIL/LLL_ADMIN_PASSWORD) or the flags
---admin-email/--admin-password."
+--admin-email/--admin-password.")
   }
   pb.fail(pb.ErrorKind.Auth, f"login failed at {base}: no member with email {email}, or the password is wrong
 if the account exists, check the password; a superuser can reset it:
@@ -553,13 +553,13 @@ pub fn renew_login_token(settings: config.Settings) -> config.Settings {
   match pb.refresh_token(cfg.url, cfg.token) {
     Ok(fresh) => {
       if let Err(e) = set_home_key(settings, "token", fresh) {
-        fmt.Fprintln(os.Stderr, f"note: could not save the renewed login token: {pb.plain(e)}")
+        fmt.Fprintln(os.Stderr, f"note: could not save the renewed login token: {e.message}")
         return settings
       }
       settings.reload()
     },
     Err(e) => {
-      fmt.Fprintln(os.Stderr, f"note: could not renew the login token in {home}: {pb.plain(e)}")
+      fmt.Fprintln(os.Stderr, f"note: could not renew the login token in {home}: {e.message}")
       settings
     },
   }
@@ -585,15 +585,15 @@ fn renews_home_login(src: config.Sources, home: string, home_url: string, url: s
 
 /// Dispatch `lll logout`: forget the token the home config holds. Env vars
 /// and the repo file are not ours to touch, and nothing else gets unset.
-pub fn logout(ctx: pb.Client, args: Slice<string>) -> Result<(), string> {
+pub fn logout(ctx: pb.Client, args: Slice<string>) -> Result<(), pb.CliError> {
   if let Some(verb) = args.get(2) {
     if verb == "--help" || verb == "-h" {
       print_logout_usage()
       return Ok(())
     }
-    return Err(f"unknown logout command: '{verb}' (see 'lll logout --help')")
+    return Err(pb.failed(f"unknown logout command: '{verb}' (see 'lll logout --help')"))
   }
-  let path = ctx.settings.home_path()?
+  let path = ctx.settings.home_path().map_err(pb.failed)?
   let cleared = clear_home_key(ctx.settings, "token")?
   if cleared {
     fmt.Println(f"token cleared from {path}")
@@ -608,13 +608,13 @@ pub fn logout(ctx: pb.Client, args: Slice<string>) -> Result<(), string> {
 /// otherwise, because piped input (scripts, agents, e2e) has nothing to hide
 /// it from. The newline is not part of the password on either path. Shared
 /// with `lll member set-password`, which prompts twice.
-fn read_password(input: mut Ref<bufio.Reader>, prompt: string) -> Result<string, string> {
+fn read_password(input: mut Ref<bufio.Reader>, prompt: string) -> Result<string, pb.CliError> {
   fmt.Print(prompt)
   let fd = os.Stdin.Fd() as int
   if term.IsTerminal(fd) {
     let bytes = match term.ReadPassword(fd) {
       Ok(b) => b,
-      Err(e) => return Err(f"reading the password: {e}"),
+      Err(e) => return Err(pb.failed(f"reading the password: {e}")),
     }
     fmt.Println("")
     return Ok(bytes as string)
@@ -626,12 +626,12 @@ fn read_password(input: mut Ref<bufio.Reader>, prompt: string) -> Result<string,
 
 /// One line from stdin, EOL stripped. Partial.Both (data, then EOF with no
 /// newline) is an answer too — `printf 'pw' | lll login` ships one.
-fn read_line(input: mut Ref<bufio.Reader>) -> Result<string, string> {
+fn read_line(input: mut Ref<bufio.Reader>) -> Result<string, pb.CliError> {
   let newline = 10 as byte
   match input.ReadString(newline) {
     Partial.Ok(line) => Ok(strip_eol(line)),
     Partial.Both(line, _) => Ok(strip_eol(line)),
-    Partial.Err(_) => Err("no answer on stdin"),
+    Partial.Err(_) => Err(pb.failed("no answer on stdin")),
   }
 }
 

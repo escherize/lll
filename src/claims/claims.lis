@@ -3,11 +3,11 @@ import "models"
 import "pb"
 import "query"
 
-pub fn observed_id(ctx: pb.Client, issue_id: string) -> Result<string, string> {
+pub fn observed_id(ctx: pb.Client, issue_id: string) -> Result<string, pb.CliError> {
   Ok(fetch(ctx, issue_id)?.map_or("", |held| held.id))
 }
 
-pub fn fetch(ctx: pb.Client, issue_id: string) -> Result<Option<models.Claim>, string> {
+pub fn fetch(ctx: pb.Client, issue_id: string) -> Result<Option<models.Claim>, pb.CliError> {
   let filter = url.QueryEscape(f"issue={query.quote(issue_id)}")
   let mut list = models.ClaimList { .. }
   pb.fetch(ctx, 
@@ -20,7 +20,7 @@ pub fn fetch(ctx: pb.Client, issue_id: string) -> Result<Option<models.Claim>, s
 /// Expanded holds for one team, shared by initial boards and live refreshes.
 /// A team_id of "" (records.TeamScope.Every's filter_team) reads the holds in
 /// every team the token can see.
-pub fn for_team(ctx: pb.Client, team_id: string) -> Result<Slice<models.Claim>, string> {
+pub fn for_team(ctx: pb.Client, team_id: string) -> Result<Slice<models.Claim>, pb.CliError> {
   let filter = if team_id == "" { "" } else { url.QueryEscape(f"issue.team={query.quote(team_id)}") }
   let mut result: Slice<models.Claim> = []
   let mut page = 1

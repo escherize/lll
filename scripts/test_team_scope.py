@@ -473,6 +473,7 @@ with tempfile.TemporaryDirectory(prefix='lll-team-scope-') as directory:
         bot_body = {'email': 'b@example.test', 'password': 'pw12345678', 'passwordConfirm': 'pw12345678', 'kind': 'bot'}
         wide = call(api, '/api/collections/members/records', dict(bot_body, name='bot-wide', owner=boss['id'], scope='all'), boss_tok)
         assert wide[0] == 400 and 'bot never exceeds its owner' in wide[1]['message'], wide[:2]
+        assert wide[1]['data'].get('code') == 'bot_exceeds_owner', wide[:2]
         assert call(api, '/api/collections/members/records', dict(bot_body, name='bot-theirs', owner=plain['id']), boss_tok)[0] == 400
         sub = call(api, '/api/collections/members/records', dict(bot_body, name='bot-sub', owner=made['id']), su)
         assert sub[0] == 400 and 'bot cannot own a bot' in sub[1]['message'], sub[:2]

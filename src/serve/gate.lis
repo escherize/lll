@@ -412,7 +412,7 @@ fn viewing(ctx: pb.Client, w: http.ResponseWriter, viewer: Viewer) -> Option<Vie
   match reader_for(ctx, viewer) {
     Ok(reads) => Some(Viewing { viewer, reads }),
     Err(e) => {
-      if pb.classify(e).status == 404 {
+      if e.status == 404 {
         let key = match viewer {
           Viewer.Scoped(v) => v.teams.get(0).unwrap_or(""),
           Viewer.Full => "",
@@ -421,7 +421,7 @@ fn viewing(ctx: pb.Client, w: http.ResponseWriter, viewer: Viewer) -> Option<Vie
       } else {
         // The cause names the internal API address (review N2): the log
         // gets it, the page does not.
-        fmt.Fprintln(os.Stderr, f"board: a team link's reader could not be had: {pb.plain(e)}")
+        fmt.Fprintln(os.Stderr, f"board: a team link's reader could not be had: {e.message}")
         http.Error(w, "this board cannot open that team link right now; try again, or ask the person who sent it", 503)
       }
       None
@@ -433,16 +433,16 @@ fn viewing(ctx: pb.Client, w: http.ResponseWriter, viewer: Viewer) -> Option<Vie
 /// token, the member's own token for a member, and for a team link the
 /// token of that team's link viewer, which gopb mints for the board's
 /// member and the board keeps server-side.
-pub fn reader_for(ctx: pb.Client, viewer: Viewer) -> Result<pb.Client, string> {
+pub fn reader_for(ctx: pb.Client, viewer: Viewer) -> Result<pb.Client, pb.CliError> {
   let Viewer.Scoped(v) = viewer else { return Ok(ctx) }
   if let Some(m) = v.member { return Ok(ctx.reading_as(m.token)) }
   let key = records.normalize_team_key(v.teams.get(0).unwrap_or(""))
-  let Ok(payload) = json.Marshal(LinkTeam { team: key }) else { return Err("encoding the team link") }
+  let Ok(payload) = json.Marshal(LinkTeam { team: key }) else { return Err(pb.failed("encoding the team link")) }
   let body = ctx.post("/api/lll/link-token", payload as string)?
   let mut reply = LinkToken { .. }
   let decoded = json.Unmarshal(body.bytes(), &reply)
   if decoded.is_err() || reply.token == "" {
-    return Err("the server did not hand over the team link's reader")
+    return Err(pb.failed("the server did not hand over the team link's reader"))
   }
   Ok(ctx.reading_as(reply.token))
 }

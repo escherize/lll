@@ -95,12 +95,12 @@ pub fn topic_with_options(
   topic: string,
   filter: string,
   expand: string,
-) -> Result<string, string> {
+) -> Result<string, pb.CliError> {
   if filter == "" && expand == "" { return Ok(topic) }
   let options = TopicOptions { query: OptionsQuery { filter, expand } }
   let encoded = match json.Marshal(options) {
     Ok(b) => b as string,
-    Err(e) => return Err(f"encoding topic options: {e}"),
+    Err(e) => return Err(pb.failed(f"encoding topic options: {e}")),
   }
   Ok(f"{topic}?options={url.QueryEscape(encoded)}")
 }
@@ -131,7 +131,7 @@ pub enum DeadToken {
   /// `lll up` passes its superuser credentials' minter when it minted the
   /// process token itself, so an expired token heals instead of wedging
   /// the board.
-  Remint(fn() -> Result<string, string>),
+  Remint(fn() -> Result<string, pb.CliError>),
   /// Keep retrying, printing the failure once. For a caller-provided token
   /// the process cannot renew; a token fixed in a config file is picked up
   /// on the next attempt.
@@ -167,7 +167,7 @@ pub fn subscribe(
   ctx: pb.Client,
   topics: Slice<string>,
   on_dead_token: DeadToken,
-) -> Result<Channel<Event>, string> {
+) -> Result<Channel<Event>, pb.CliError> {
   start(ctx, topics, on_dead_token, false)
 }
 
@@ -184,7 +184,7 @@ pub fn subscribe_resyncing(
   ctx: pb.Client,
   topics: Slice<string>,
   on_dead_token: DeadToken,
-) -> Result<Channel<Event>, string> {
+) -> Result<Channel<Event>, pb.CliError> {
   start(ctx, topics, on_dead_token, true)
 }
 
@@ -193,16 +193,15 @@ fn start(
   topics: Slice<string>,
   on_dead_token: DeadToken,
   resync: bool,
-) -> Result<Channel<Event>, string> {
+) -> Result<Channel<Event>, pb.CliError> {
   let ch = Channel.new<Event>()
   let mut reader = match connect(ctx, topics) {
     Ok(r) => r,
-    Err(e) => {
-      if auth_failure(e) {
-        if let DeadToken.Exit = on_dead_token { return Err(pb.fail(pb.ErrorKind.Auth, dead_token_fix(e))) }
-      }
+    Err(ConnectFailure.TokenRefused(e)) => {
+      if let DeadToken.Exit = on_dead_token { return Err(pb.fail(pb.ErrorKind.Auth, dead_token_fix(e))) }
       return Err(e)
     },
+    Err(ConnectFailure.Other(e)) => return Err(e),
   }
   task {
     pump(reader, ch)
@@ -234,17 +233,20 @@ fn reconnect(
         pump(r, ch)
         fmt.Fprintln(os.Stderr, "realtime: lll server stream lost; reconnecting")
       },
-      Err(e) => {
-        let dead = auth_failure(e)
+      Err(failure) => {
+        let (e, dead) = match failure {
+          ConnectFailure.TokenRefused(e) => (e, true),
+          ConnectFailure.Other(e) => (e, false),
+        }
         if dead {
           if let DeadToken.Exit = on_dead_token {
             fmt.Fprintln(os.Stderr, f"realtime: {dead_token_fix(e)}")
             os.Exit(pb.exit_code(pb.ErrorKind.Auth))
           }
         }
-        if e != last_err {
-          fmt.Fprintln(os.Stderr, f"realtime: reconnect failed: {pb.plain(e)}")
-          last_err = e
+        if e.message != last_err {
+          fmt.Fprintln(os.Stderr, f"realtime: reconnect failed: {e.message}")
+          last_err = e.message
         }
         if dead {
           if let DeadToken.Remint(mint) = on_dead_token {
@@ -262,22 +264,24 @@ fn reconnect(
   }
 }
 
-/// Does a connect error name an authorization refusal? connect's status
-/// errors are "GET|POST /api/realtime: <status>", so matching the path plus
-/// code cannot confuse a port number for a status; the token check's
-/// refusal starts with TOKEN_REJECTED.
-fn auth_failure(e: string) -> bool {
-  strings.Contains(e, "/api/realtime: 401") ||
-  strings.Contains(e, "/api/realtime: 403") ||
-  e.starts_with(TOKEN_REJECTED)
+/// Why a connect failed: the server refused this token (a 401 or 403 from
+/// the realtime endpoint, or the token check's 401), or anything else. The
+/// reconnect loop renews or exits on the first and retries the second.
+enum ConnectFailure {
+  TokenRefused(pb.CliError),
+  Other(pb.CliError),
 }
 
-const TOKEN_REJECTED: string = "the server rejected this token"
+/// A realtime request's failure for an answer with `status`.
+fn status_failure(what: string, status: int, line: string) -> ConnectFailure {
+  let e = pb.failed(f"{what}: {line}")
+  if status == 401 || status == 403 { ConnectFailure.TokenRefused(e) } else { ConnectFailure.Other(e) }
+}
 
 /// The auth failure with the fix a person or agent can act on, for a
 /// caller that cannot renew its own token.
-fn dead_token_fix(e: string) -> string {
-  f"{pb.plain(e)}; run 'lll login', or set a fresh LLL_TOKEN ('lll bot rotate bot-NAME' or 'lll token create NAME'), then start the watch again"
+fn dead_token_fix(e: pb.CliError) -> string {
+  f"{e.message}; run 'lll login', or set a fresh LLL_TOKEN ('lll bot rotate bot-NAME' or 'lll token create NAME'), then start the watch again"
 }
 
 /// Open the SSE stream, wait for PB_CONNECT, and POST the subscriptions.
@@ -291,8 +295,8 @@ fn dead_token_fix(e: string) -> string {
 fn connect(
   ctx: pb.Client,
   topics: Slice<string>,
-) -> Result<mut Ref<bufio.Reader>, string> {
-  let base_url = ctx.url()?
+) -> Result<mut Ref<bufio.Reader>, ConnectFailure> {
+  let base_url = ctx.url().map_err(ConnectFailure.Other)?
   let auth = pb.bearer(ctx.token())
   let mut req = match http.NewRequest(
     "GET",
@@ -300,7 +304,7 @@ fn connect(
     bytes.NewReader("".bytes()),
   ) {
     Ok(r) => r,
-    Err(e) => return Err(f"GET /api/realtime: {e}"),
+    Err(e) => return Err(ConnectFailure.Other(pb.failed(f"GET /api/realtime: {e}"))),
   }
   if auth != "" {
     // NewRequest always populates Header; the unwrap is the Option field's toll.
@@ -311,14 +315,14 @@ fn connect(
   }
   let resp = match http.DefaultClient.Do(req) {
     Ok(r) => r,
-    Err(e) => return Err(pb.unreachable(base_url, e)),
+    Err(e) => return Err(ConnectFailure.Other(pb.unreachable(base_url, e))),
   }
   let Some(stream) = resp.Body else {
-    return Err("GET /api/realtime: empty response body")
+    return Err(ConnectFailure.Other(pb.failed("GET /api/realtime: empty response body")))
   }
   if resp.StatusCode >= 300 {
     let _ = stream.Close()
-    return Err(f"GET /api/realtime: {resp.Status}")
+    return Err(status_failure("GET /api/realtime", resp.StatusCode, resp.Status))
   }
 
   let mut reader = bufio.NewReader(stream)
@@ -327,8 +331,8 @@ fn connect(
   while client_id == "" {
     let line = match reader.ReadString('\n') {
       Partial.Ok(l) => l,
-      Partial.Both(_, e) => return Err(f"realtime handshake interrupted: {e}"),
-      Partial.Err(e) => return Err(f"realtime handshake interrupted: {e}"),
+      Partial.Both(_, e) => return Err(ConnectFailure.Other(pb.failed(f"realtime handshake interrupted: {e}"))),
+      Partial.Err(e) => return Err(ConnectFailure.Other(pb.failed(f"realtime handshake interrupted: {e}"))),
     }
     let Some(frame) = parser.push_line(strings.TrimSuffix(line, "\n")) else {
       continue
@@ -336,7 +340,7 @@ fn connect(
     if frame.event != "PB_CONNECT" { continue }
     let mut msg = ConnectMsg { .. }
     if let Err(e) = json.Unmarshal(frame.data.bytes(), &msg) {
-      return Err(f"decoding PB_CONNECT: {e}")
+      return Err(ConnectFailure.Other(pb.failed(f"decoding PB_CONNECT: {e}")))
     }
     client_id = msg.client_id
   }
@@ -344,7 +348,7 @@ fn connect(
   let sub = SubscribeMsg { client_id, subscriptions: topics }
   let payload = match json.Marshal(sub) {
     Ok(b) => b,
-    Err(e) => return Err(f"encoding subscription: {e}"),
+    Err(e) => return Err(ConnectFailure.Other(pb.failed(f"encoding subscription: {e}"))),
   }
   let mut sub_req = match http.NewRequest(
     "POST",
@@ -352,7 +356,7 @@ fn connect(
     bytes.NewReader(payload),
   ) {
     Ok(r) => r,
-    Err(e) => return Err(f"POST /api/realtime: {e}"),
+    Err(e) => return Err(ConnectFailure.Other(pb.failed(f"POST /api/realtime: {e}"))),
   }
   // NewRequest always populates Header; the unwrap is the Option field's toll.
   if let Some(h) = sub_req.Header {
@@ -362,11 +366,11 @@ fn connect(
   }
   let sub_resp = match http.DefaultClient.Do(sub_req) {
     Ok(r) => r,
-    Err(e) => return Err(pb.unreachable(base_url, e)),
+    Err(e) => return Err(ConnectFailure.Other(pb.unreachable(base_url, e))),
   }
   if let Some(body) = sub_resp.Body { let _ = body.Close() }
   if sub_resp.StatusCode >= 300 {
-    return Err(f"POST /api/realtime: {sub_resp.Status}")
+    return Err(status_failure("POST /api/realtime", sub_resp.StatusCode, sub_resp.Status))
   }
   if let Err(e) = check_token(base_url, auth) {
     let _ = stream.Close()
@@ -388,14 +392,14 @@ fn connect(
 /// Not auth-refresh: bot and `lll token create` tokens are non-refreshable
 /// (TASK-309). A token rotated after this check goes unnoticed until the
 /// next reconnect, which an idle stream reaches within five minutes.
-fn check_token(base_url: string, auth: string) -> Result<(), string> {
+fn check_token(base_url: string, auth: string) -> Result<(), ConnectFailure> {
   let mut req = match http.NewRequest(
     "GET",
     base_url + "/api/collections/teams/records?perPage=1&fields=id&skipTotal=1",
     bytes.NewReader("".bytes()),
   ) {
     Ok(r) => r,
-    Err(e) => return Err(f"token check: {e}"),
+    Err(e) => return Err(ConnectFailure.Other(pb.failed(f"token check: {e}"))),
   }
   if auth != "" {
     // NewRequest always populates Header; the unwrap is the Option field's toll.
@@ -406,14 +410,14 @@ fn check_token(base_url: string, auth: string) -> Result<(), string> {
   }
   let resp = match http.DefaultClient.Do(req) {
     Ok(r) => r,
-    Err(e) => return Err(pb.unreachable(base_url, e)),
+    Err(e) => return Err(ConnectFailure.Other(pb.unreachable(base_url, e))),
   }
   if let Some(body) = resp.Body { let _ = body.Close() }
   if resp.StatusCode == 401 {
-    return Err(f"{TOKEN_REJECTED} ({resp.Status}): it was rotated, revoked or has expired, so the stream would carry no events")
+    return Err(ConnectFailure.TokenRefused(pb.failed(f"the server rejected this token ({resp.Status}): it was rotated, revoked or has expired, so the stream would carry no events")))
   }
   if resp.StatusCode >= 300 {
-    return Err(f"token check: {resp.Status}")
+    return Err(ConnectFailure.Other(pb.failed(f"token check: {resp.Status}")))
   }
   Ok(())
 }

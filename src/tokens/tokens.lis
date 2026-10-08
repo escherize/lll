@@ -46,12 +46,12 @@ pub fn admin_hint() -> string {
 
 /// Pull the token out of an auth-with-password / impersonate response body
 /// (both answer {token, record}; verified in v0.40.1 apis/record_helpers.go).
-pub fn decode_auth(body: string, what: string) -> Result<string, string> {
+pub fn decode_auth(body: string, what: string) -> Result<string, pb.CliError> {
   let mut auth = models.AuthResponse { .. }
   if let Err(e) = json.Unmarshal(body.bytes(), &auth) {
-    return Err(f"decoding {what}: {e}")
+    return Err(pb.failed(f"decoding {what}: {e}"))
   }
-  if auth.token == "" { return Err(f"{what} carried no token") }
+  if auth.token == "" { return Err(pb.failed(f"{what} carried no token")) }
   Ok(auth.token)
 }
 
@@ -71,23 +71,23 @@ pub fn check_prompt_values(
   url: string,
   team: string,
   name: string,
-) -> Result<(), string> {
+) -> Result<(), pb.CliError> {
   let url_ok = regexp.MustCompile(
     r"^https?://(\[[0-9A-Fa-f:.]+\]|[A-Za-z0-9.-]+)(:[0-9]{1,5})?(/[A-Za-z0-9._/-]*)?$",
   )
   if !url_ok.MatchString(url) {
     return Err(
-      f"the server url {strconv.Quote(url)} contains characters lll cannot paste safely into a shell; use a plain http(s)://host[:port][/path] url (no user, query or fragment)",
+      pb.failed(f"the server url {strconv.Quote(url)} contains characters lll cannot paste safely into a shell; use a plain http(s)://host[:port][/path] url (no user, query or fragment)"),
     )
   }
   if team != "" && !regexp.MustCompile("^[A-Z0-9][A-Z0-9-]*$").MatchString(team) {
     return Err(
-      f"team key {strconv.Quote(team)} contains characters lll cannot paste safely into a shell; rename the team",
+      pb.failed(f"team key {strconv.Quote(team)} contains characters lll cannot paste safely into a shell; rename the team"),
     )
   }
   if !regexp.MustCompile("^bot-[A-Za-z0-9][A-Za-z0-9._-]*$").MatchString(name) {
     return Err(
-      f"bot name {strconv.Quote(name)} contains characters lll cannot paste safely into a shell; use letters, digits, '.', '_' and '-' after bot-",
+      pb.failed(f"bot name {strconv.Quote(name)} contains characters lll cannot paste safely into a shell; use letters, digits, '.', '_' and '-' after bot-"),
     )
   }
   Ok(())
@@ -135,7 +135,7 @@ pub fn create_bot_member_as(
   tok: string,
   name: string,
   owner: string,
-) -> Result<models.Member, string> {
+) -> Result<models.Member, pb.CliError> {
   let password = rand.Text()
   let new_bot = models.NewMember {
     name,
@@ -152,7 +152,7 @@ pub fn create_bot_member_as(
   let body = writes.create_member(ctx, pb.Caller.Member(tok), new_bot)?
   let mut created = models.Member { .. }
   if let Err(e) = json.Unmarshal(body.bytes(), &created) {
-    return Err(f"decoding created bot member: {e}")
+    return Err(pb.failed(f"decoding created bot member: {e}"))
   }
   Ok(created)
 }
@@ -167,10 +167,10 @@ pub fn bot_mint(
   tok: string,
   name: string,
   duration: int,
-) -> Result<string, string> {
+) -> Result<string, pb.CliError> {
   let payload = match json.Marshal(models.BotRotate { name, duration }) {
     Ok(b) => b,
-    Err(e) => return Err(f"encoding the rotation request: {e}"),
+    Err(e) => return Err(pb.failed(f"encoding the rotation request: {e}")),
   }
   let body = match ctx.post_as("/api/lll/bots/rotate", payload as string, tok) {
     Ok(b) => b,
@@ -178,9 +178,9 @@ pub fn bot_mint(
   }
   let mut auth = models.AuthResponse { .. }
   if let Err(e) = json.Unmarshal(body.bytes(), &auth) {
-    return Err(f"decoding the rotation response: {e}")
+    return Err(pb.failed(f"decoding the rotation response: {e}"))
   }
-  if auth.token == "" { return Err("the rotation response carried no token") }
+  if auth.token == "" { return Err(pb.failed("the rotation response carried no token")) }
   Ok(auth.token)
 }
 
@@ -188,8 +188,8 @@ pub fn bot_mint(
 /// configured credential neither owns the bot nor is a superuser; 401 is a
 /// dead token, the same shape token create's refusal names. Anything else
 /// keeps the raw error.
-pub fn bot_mint_error(name: string, e: string) -> string {
-  let status = pb.classify(e).status
+pub fn bot_mint_error(name: string, e: pb.CliError) -> pb.CliError {
+  let status = e.status
   if status == 403 {
     return pb.fail(
       pb.ErrorKind.Refused,
@@ -205,5 +205,5 @@ log in again with 'lll login', or " +
       admin_hint(),
     )
   }
-  f"rotating {name}'s token: {e}"
+  e.with_message(f"rotating {name}'s token: {e.message}")
 }

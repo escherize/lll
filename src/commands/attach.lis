@@ -28,7 +28,7 @@ pub fn attach_spec() -> Slice<flags.Flag> {
   ]
 }
 
-pub fn attach(ctx: pb.Client, args: Slice<string>) -> Result<(), string> {
+pub fn attach(ctx: pb.Client, args: Slice<string>) -> Result<(), pb.CliError> {
   let spec = attach_spec()
   let p = flags.parse(spec, args, 2, false, flags.usage("lll attach", spec, ""))?
   if p.given("--help") {
@@ -46,7 +46,7 @@ pub fn attach(ctx: pb.Client, args: Slice<string>) -> Result<(), string> {
     Some(r) => (r, true),
     None => {
       let Ok(cwd) = os.Getwd() else {
-        return Err("no working directory to attach: could not read it")
+        return Err(pb.failed("no working directory to attach: could not read it"))
       }
       (cwd, false)
     },
@@ -69,17 +69,17 @@ pub fn attach(ctx: pb.Client, args: Slice<string>) -> Result<(), string> {
     derive_key_from_server(ctx, name)?
   }
   if key == "" {
-    return Err(f"no team key in '{name}' to derive one from; pass it: lll attach --key KEY")
+    return Err(pb.failed(f"no team key in '{name}' to derive one from; pass it: lll attach --key KEY"))
   }
   if p.given("-k") {
-    if let Some(problem) = records.team_key_problem(key) { return Err(problem) }
+    if let Some(problem) = records.team_key_problem(key) { return Err(pb.failed(problem)) }
   }
 
   // Attaching to an archived team is refused, not silently revived: archive
   // is a deliberate lifecycle act, and unarchive is one command (TASK-210).
   // A server that is down still attaches — same bargain as the create below.
   if let Ok(Some(t)) = records.find_team(ctx, key) {
-    if t.archived { return Err(records.archived_hint(key)) }
+    if t.archived { return Err(pb.failed(records.archived_hint(key))) }
   }
 
   let path = filepath.Join(root, ".lll.toml")
@@ -105,7 +105,7 @@ pub fn attach(ctx: pb.Client, args: Slice<string>) -> Result<(), string> {
 /// One team is the answer; several is a choice only the operator can make;
 /// none (or a server that cannot be reached) falls back to the directory
 /// name, which is the empty-server bootstrap this command was written for.
-fn derive_key_from_server(ctx: pb.Client, dir_name: string) -> Result<string, string> {
+fn derive_key_from_server(ctx: pb.Client, dir_name: string) -> Result<string, pb.CliError> {
   let Ok(teams) = records.list_teams(ctx) else { return Ok(clean_key(dir_name)) }
   let live = teams.items.filter(|t| !t.archived)
   if live.length() == 1 {
@@ -118,7 +118,7 @@ fn derive_key_from_server(ctx: pb.Client, dir_name: string) -> Result<string, st
   if live.length() > 1 {
     let keys = live.map(|t| t.key).join(", ")
     return Err(
-      f"you can see {live.length()} teams ({keys}); say which: lll attach --key KEY",
+      pb.failed(f"you can see {live.length()} teams ({keys}); say which: lll attach --key KEY"),
     )
   }
   Ok(clean_key(dir_name))
@@ -131,12 +131,12 @@ fn ensure_attached_team(ctx: pb.Client, key: string) -> string {
   let retry = f"lll attach --key {flags.shell_argument(key)}"
   let found = match records.find_team(ctx, key) {
     Ok(found) => found,
-    Err(e) => return f"saved local attachment only; could not verify team {key} on the configured server:\n{pb.plain(e)}\nRestore server access, then reconcile this attachment:\n  {retry}",
+    Err(e) => return f"saved local attachment only; could not verify team {key} on the configured server:\n{e.message}\nRestore server access, then reconcile this attachment:\n  {retry}",
   }
   if found.is_some() { return f"team {key} already exists" }
   let created = match create_team(ctx, key, key) {
     Ok(created) => created,
-    Err(e) => return f"saved local attachment only; could not create team {key} on the configured server:\n{pb.plain(e)}\nResolve the server error, then reconcile this attachment:\n  {retry}",
+    Err(e) => return f"saved local attachment only; could not create team {key} on the configured server:\n{e.message}\nResolve the server error, then reconcile this attachment:\n  {retry}",
   }
   f"created team {created.key}; issues will be {created.key}-1, {created.key}-2, ..."
 }

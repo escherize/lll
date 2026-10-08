@@ -52,8 +52,8 @@ fn split_issue_key_rejects_a_non_numeric_tail() {
 #[test]
 fn split_issue_key_error_quotes_the_input_and_the_expected_shape() {
   let assert Err(msg) = split_issue_key("héllo")
-  assert msg.contains("'héllo' is not an issue ID")
-  assert msg.contains("expected KEY-123")
+  assert msg.message.contains("'héllo' is not an issue ID")
+  assert msg.message.contains("expected KEY-123")
 }
 
 #[test]

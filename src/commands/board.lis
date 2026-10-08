@@ -15,7 +15,7 @@ pub fn board_spec() -> Slice<flags.Flag> {
   ]
 }
 
-pub fn board(ctx: pb.Client, args: Slice<string>) -> Result<(), string> {
+pub fn board(ctx: pb.Client, args: Slice<string>) -> Result<(), pb.CliError> {
   let spec = board_spec()
   let p = flags.parse(spec, args, 2, false, "lll board [-w] [--team KEY] (prints the URL; no subcommand is needed)")?
   if p.given("--help") {
@@ -71,27 +71,27 @@ The API URL alone does not identify a board URL.",
 }
 
 /// Web board base URL (env > config > default), without a trailing slash.
-fn web_base(ctx: pb.Client) -> Result<string, string> {
-  let cfg = ctx.settings.config()?
+fn web_base(ctx: pb.Client) -> Result<string, pb.CliError> {
+  let cfg = ctx.settings.config().map_err(pb.failed)?
   if cfg.web_url == "" {
-    return Err("board URL is not configured; run 'lll config set web_url URL' with the board address supplied by your deployer (or set LLL_WEB_URL)")
+    return Err(pb.failed("board URL is not configured; run 'lll config set web_url URL' with the board address supplied by your deployer (or set LLL_WEB_URL)"))
   }
   Ok(strings.TrimRight(cfg.web_url, "/"))
 }
 
 /// Open a URL in the default browser (macOS `open`, else `xdg-open`).
 /// Shared with `lll up`.
-pub fn open_url(url: string) -> Result<(), string> {
+pub fn open_url(url: string) -> Result<(), pb.CliError> {
   let mut opener = ""
   if let Partial.Ok(path) = exec.LookPath("open") { opener = path }
   if opener == "" {
     if let Partial.Ok(path) = exec.LookPath("xdg-open") { opener = path }
   }
   if opener == "" {
-    return Err("no browser opener found (need 'open' or 'xdg-open')")
+    return Err(pb.failed("no browser opener found (need 'open' or 'xdg-open')"))
   }
   if let Err(e) = exec.Command(opener, url).Start() {
-    return Err(f"opening {url}: {e}")
+    return Err(pb.failed(f"opening {url}: {e}"))
   }
   Ok(())
 }
@@ -99,7 +99,7 @@ pub fn open_url(url: string) -> Result<(), string> {
 /// The view-only link for team `key` (fleet case 05: 10 of 10 agents asked
 /// for a client's board link had to create a member through 'lll member
 /// invite' to get one).
-fn team_link(ctx: pb.Client, base: string, key: string) -> Result<string, string> {
+fn team_link(ctx: pb.Client, base: string, key: string) -> Result<string, pb.CliError> {
   let wanted = records.normalize_team_key(key)
   let found = records.find_team(ctx, wanted)?
   if found.is_none() {
@@ -107,7 +107,7 @@ fn team_link(ctx: pb.Client, base: string, key: string) -> Result<string, string
   }
   let Some(link) = scoped_board_link(ctx, base, wanted) else {
     return Err(
-      "no board token on this machine: run this where 'lll up' runs, or set LLL_BOARD_TOKEN to the server's board token",
+      pb.failed("no board token on this machine: run this where 'lll up' runs, or set LLL_BOARD_TOKEN to the server's board token"),
     )
   }
   Ok(link)

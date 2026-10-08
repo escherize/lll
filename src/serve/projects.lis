@@ -35,7 +35,7 @@ fn projects_page(
   let vm = match projects_vm(ctx, team_id, team.key) {
     Ok(v) => v,
     Err(e) => {
-      http.Error(w, pb.plain(e), 500)
+      http.Error(w, e.message, 500)
       return
     },
   }
@@ -47,7 +47,7 @@ fn projects_page(
   render_html(w, "projects-page", page)
 }
 
-fn projects_vm(ctx: pb.Client, team_id: string, team_key: string) -> Result<ProjectsVM, string> {
+fn projects_vm(ctx: pb.Client, team_id: string, team_key: string) -> Result<ProjectsVM, pb.CliError> {
   let projects = records.fetch_projects(ctx, team_id)?
   // LLL-426: into THIS team's table, not the configured team's.
   let base = issues_base(team_key)

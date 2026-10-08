@@ -33,7 +33,7 @@ pub fn team_key_problem(key: string) -> Option<string> {
   )
 }
 
-pub fn find_team(ctx: pb.Client, key: string) -> Result<Option<models.Team>, string> {
+pub fn find_team(ctx: pb.Client, key: string) -> Result<Option<models.Team>, pb.CliError> {
   let wanted = normalize_team_key(key)
   let filter = url.QueryEscape(f"key={query.quote(wanted)}")
   let mut result = models.TeamList { .. }
@@ -47,19 +47,19 @@ pub fn find_team_as(
   ctx: pb.Client,
   tok: string,
   key: string,
-) -> Result<Option<models.Team>, string> {
+) -> Result<Option<models.Team>, pb.CliError> {
   let wanted = normalize_team_key(key)
   let filter = url.QueryEscape(f"key={query.quote(wanted)}")
   let body = ctx.get_as(f"/api/collections/teams/records?filter={filter}", tok)?
   let mut result = models.TeamList { .. }
   if let Err(e) = json.Unmarshal(body.bytes(), &result) {
-    return Err(f"decoding teams: {e}")
+    return Err(pb.failed(f"decoding teams: {e}"))
   }
   Ok(result.items.find(|t| t.key == wanted))
 }
 
 /// Every team, key-sorted. Shared by `lll team list` and `lll up`.
-pub fn list_teams(ctx: pb.Client) -> Result<models.TeamList, string> {
+pub fn list_teams(ctx: pb.Client) -> Result<models.TeamList, pb.CliError> {
   let items = fetch_all_records<models.Team>(ctx, "/api/collections/teams/records?sort=key,id", "teams")?
   Ok(models.TeamList { items })
 }
@@ -68,8 +68,8 @@ pub fn list_teams(ctx: pb.Client) -> Result<models.TeamList, string> {
 /// is set. A key naming a team the server does not have is an error either
 /// way — silently falling back to "every team" is how a scoped command ends
 /// up answering for all of them.
-pub fn configured_team(ctx: pb.Client) -> Result<Option<models.Team>, string> {
-  let (cfg, src) = ctx.settings.traced()?
+pub fn configured_team(ctx: pb.Client) -> Result<Option<models.Team>, pb.CliError> {
+  let (cfg, src) = ctx.settings.traced().map_err(pb.failed)?
   if cfg.team == "" { return Ok(None) }
   let Some(t) = find_team(ctx, cfg.team)? else {
     return Err(unknown_configured_team(ctx, cfg.team, src.team))
@@ -83,7 +83,7 @@ pub fn configured_team(ctx: pb.Client) -> Result<Option<models.Team>, string> {
 /// and got "no team with key 'LLL'" - true, and useless, because it had never
 /// typed LLL and did not know which file had. `config list` knows; so does
 /// this message now.
-pub fn unknown_configured_team(ctx: pb.Client, key: string, origin: string) -> string {
+pub fn unknown_configured_team(ctx: pb.Client, key: string, origin: string) -> pb.CliError {
   if let Some(scoped) = unknown_team_scoped(ctx, key) { return scoped }
   let from = if origin == "flag:--team" {
     " (from --team)"
@@ -99,7 +99,7 @@ pub fn unknown_configured_team(ctx: pb.Client, key: string, origin: string) -> s
 
 /// Missing-team message naming the fix. Shared by every command that needs a
 /// team and was given none (same package: src/commands).
-pub fn no_team() -> string {
+pub fn no_team() -> pb.CliError {
   // Names the command, not just the file. Every usability run read the old
   // wording as "go hand-edit a file", and none of them found 'lll attach' —
   // the command whose whole job is writing this key — from it. It follows
@@ -113,7 +113,7 @@ pub fn no_team() -> string {
 
 /// Unknown-team message naming the fix. Shared by every command that
 /// resolves a team key (same package: src/commands).
-pub fn unknown_team(ctx: pb.Client, key: string) -> string {
+pub fn unknown_team(ctx: pb.Client, key: string) -> pb.CliError {
   if let Some(scoped) = unknown_team_scoped(ctx, key) { return scoped }
   pb.fail(pb.ErrorKind.NotFound, f"no team with key '{key}' on the server. First inspect 'lll team list --archived'; the team may have been renamed.\nFor an existing team, use 'lll attach --key EXISTING_KEY' to update the attachment, or prefix one command with LLL_TEAM=EXISTING_KEY.\nOnly if you intend a new team, create it with 'lll team create {key} -n \"Name\"'.")
 }
@@ -121,7 +121,7 @@ pub fn unknown_team(ctx: pb.Client, key: string) -> string {
 /// For a team-scoped caller, a missing key usually means "not yours", and
 /// 'lll team create' is a dead end it cannot run (fleet case 03). The wording
 /// does not say whether the team exists.
-pub fn unknown_team_scoped(ctx: pb.Client, key: string) -> Option<string> {
+pub fn unknown_team_scoped(ctx: pb.Client, key: string) -> Option<pb.CliError> {
   let Some(keys) = scoped_team_keys(ctx) else { return None }
   let mine = if keys.is_empty() { "none" } else { strings.Join(keys, ", ") }
   Some(

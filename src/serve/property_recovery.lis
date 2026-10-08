@@ -16,7 +16,7 @@ fn property_recovery(ctx: pb.Client, key: string) -> string {
 /// `ctx` is the viewer's read client (LLL-658), so an issue the viewer may
 /// not see is missing, and its labels, project and members arrive only as
 /// far as the viewer may see them.
-fn current_properties(ctx: pb.Client, key: string) -> Result<string, string> {
+fn current_properties(ctx: pb.Client, key: string) -> Result<string, pb.CliError> {
   let issue = shown_refs(records.fetch_issue(ctx, key)?)
   let vm = issue_fields_vm(ctx, issue, [], read_roster(ctx)?)?
   render("issue-properties", vm)

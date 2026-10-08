@@ -21,16 +21,16 @@ struct Roster {
 }
 
 /// The roster `ctx`'s credential may see.
-fn read_roster(ctx: pb.Client) -> Result<Roster, string> {
+fn read_roster(ctx: pb.Client) -> Result<Roster, pb.CliError> {
   Ok(Roster { members: records.fetch_members(ctx)? })
 }
 
 /// The roster member with this exact name. A hidden member answers exactly
 /// like a name nobody has (records.resolve_member's words), so a filter
 /// cannot probe who exists.
-fn roster_member(roster: Roster, name: string) -> Result<models.Member, string> {
+fn roster_member(roster: Roster, name: string) -> Result<models.Member, pb.CliError> {
   let Some(m) = roster.members.find(|m| m.name == name) else {
-    return Err(f"no member named '{name}'; see 'lll member list'")
+    return Err(pb.failed(f"no member named '{name}'; see 'lll member list'"))
   }
   Ok(m)
 }

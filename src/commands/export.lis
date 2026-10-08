@@ -26,7 +26,7 @@ import "records"
 /// flock. Under Git none of it is needed — `git status` reports an edit,
 /// `git checkout` undoes one, and the commit is the atomic unit. What is
 /// kept is the part Git cannot do: refusing to publish an incomplete read.
-pub fn export_cmd(ctx: pb.Client, args: Slice<string>) -> Result<(), string> {
+pub fn export_cmd(ctx: pb.Client, args: Slice<string>) -> Result<(), pb.CliError> {
   let spec = export_spec()
   let usage = flags.usage("lll export", spec, "[DIR]")
   let p = flags.parse_n(spec, args, 2, 1, usage)?
@@ -38,10 +38,10 @@ pub fn export_cmd(ctx: pb.Client, args: Slice<string>) -> Result<(), string> {
   let docs = fetch_team_docs(ctx, team.id)?
 
   if let Err(e) = os.MkdirAll(filepath.Join(dir, "issues"), 0o755 as fs.FileMode) {
-    return Err(f"creating {dir}/issues: {e}")
+    return Err(pb.failed(f"creating {dir}/issues: {e}"))
   }
   if let Err(e) = os.MkdirAll(filepath.Join(dir, "docs"), 0o755 as fs.FileMode) {
-    return Err(f"creating {dir}/docs: {e}")
+    return Err(pb.failed(f"creating {dir}/docs: {e}"))
   }
 
   // Issue KEYS, not record ids, for every relation that points at an issue —
@@ -77,7 +77,7 @@ pub fn export_cmd(ctx: pb.Client, args: Slice<string>) -> Result<(), string> {
       let data = attachments.read_file(ctx, issue, name)?
       let holder = filepath.Join(dir, "issues", key)
       if let Err(e) = os.MkdirAll(holder, 0o755 as fs.FileMode) {
-        return Err(f"creating {holder}: {e}")
+        return Err(pb.failed(f"creating {holder}: {e}"))
       }
       write_file(filepath.Join(holder, name), data)?
       blobs += 1
@@ -100,9 +100,9 @@ pub fn export_spec() -> Slice<flags.Flag> {
   flags.with_team([])
 }
 
-fn write_file(path: string, body: string) -> Result<(), string> {
+fn write_file(path: string, body: string) -> Result<(), pb.CliError> {
   if let Err(e) = os.WriteFile(path, body.bytes(), 0o644 as fs.FileMode) {
-    return Err(f"writing {path}: {e}")
+    return Err(pb.failed(f"writing {path}: {e}"))
   }
   Ok(())
 }
@@ -122,7 +122,7 @@ struct DocPage {
 /// Every doc on the team, walked to completion. Same refusal as the board
 /// walk: a page that disagrees with the first one's totals means the set
 /// moved underneath, and half a mirror is worse than none.
-fn fetch_team_docs(ctx: pb.Client, team_id: string) -> Result<Slice<models.Doc>, string> {
+fn fetch_team_docs(ctx: pb.Client, team_id: string) -> Result<Slice<models.Doc>, pb.CliError> {
   let filter = url.QueryEscape(f"team={query.quote(team_id)}")
   let mut result: Slice<models.Doc> = []
   let mut expected = -1
@@ -136,14 +136,14 @@ fn fetch_team_docs(ctx: pb.Client, team_id: string) -> Result<Slice<models.Doc>,
     )?
     if page == 1 { expected = batch.total_items }
     if batch.total_items != expected {
-      return Err("the document set changed while exporting; run the export again")
+      return Err(pb.failed("the document set changed while exporting; run the export again"))
     }
     for doc in batch.items { result = result.append(doc) }
     if page >= batch.total_pages { break }
     page += 1
   }
   if result.length() != expected {
-    return Err("the document response was incomplete; run the export again")
+    return Err(pb.failed("the document response was incomplete; run the export again"))
   }
   Ok(result)
 }
@@ -167,7 +167,7 @@ struct CommentPage {
 /// with nothing printed until the end, so the export read as a hang
 /// (LLL-540). The relation filter fetches the same comments in five
 /// requests. Order within an issue is the sort, so grouping preserves it.
-fn fetch_team_comments(ctx: pb.Client, team_id: string) -> Result<Map<string, Slice<models.Comment>>, string> {
+fn fetch_team_comments(ctx: pb.Client, team_id: string) -> Result<Map<string, Slice<models.Comment>>, pb.CliError> {
   let filter = url.QueryEscape(f"issue.team={query.quote(team_id)}")
   let mut by_issue = Map.new<string, Slice<models.Comment>>()
   let mut seen = 0
@@ -182,7 +182,7 @@ fn fetch_team_comments(ctx: pb.Client, team_id: string) -> Result<Map<string, Sl
     )?
     if page == 1 { expected = batch.total_items }
     if batch.total_items != expected {
-      return Err("the comment set changed while exporting; run the export again")
+      return Err(pb.failed("the comment set changed while exporting; run the export again"))
     }
     for comment in batch.items {
       by_issue[comment.issue] = by_issue.get(comment.issue).unwrap_or([]).append(comment)
@@ -192,7 +192,7 @@ fn fetch_team_comments(ctx: pb.Client, team_id: string) -> Result<Map<string, Sl
     page += 1
   }
   if seen != expected {
-    return Err("the comment response was incomplete; run the export again")
+    return Err(pb.failed("the comment response was incomplete; run the export again"))
   }
   Ok(by_issue)
 }

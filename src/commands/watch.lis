@@ -30,7 +30,7 @@ pub fn watch_spec() -> Slice<flags.Flag> {
   ]...))
 }
 
-pub fn watch(ctx: pb.Client, args: Slice<string>) -> Result<(), string> {
+pub fn watch(ctx: pb.Client, args: Slice<string>) -> Result<(), pb.CliError> {
   let spec = watch_spec()
   let p = flags.parse(spec, args, 2, false, flags.usage("lll watch", spec, ""))?
   if p.given("--help") {
@@ -63,7 +63,7 @@ pub fn watch(ctx: pb.Client, args: Slice<string>) -> Result<(), string> {
     }
     let mut event = realtime.IssueEvent { .. }
     if let Err(e) = json.Unmarshal(ev.data.bytes(), &event) {
-      return Err(f"decoding realtime event: {e}")
+      return Err(pb.failed(f"decoding realtime event: {e}"))
     }
     let rec = event.record
     let stamp = time.Now().Format("15:04:05")
@@ -180,7 +180,7 @@ with action 'ready' and the full issue record.
 
 /// Dispatch `lll issue watch [KEY-123]` — a live event stream for one issue
 /// and its comments. Runs until interrupted or the issue is deleted.
-pub fn issue_watch(input: flags.CommandInput) -> Result<(), string> {
+pub fn issue_watch(input: flags.CommandInput) -> Result<(), pb.CliError> {
   let ctx = input.ctx
   let usage = "lll issue watch [KEY-123] [--until text] [--timeout seconds] [--json]"
   let p = input.parsed
@@ -205,7 +205,7 @@ pub fn issue_watch(input: flags.CommandInput) -> Result<(), string> {
   // The CLI owns this worker's lifetime. A deadline covers reads and the
   // subscription handshake too, not just the final receive loop. Returning
   // ends the one-command process, closing its stream and pending requests.
-  let completed = Channel.new<Result<(), string>>()
+  let completed = Channel.new<Result<(), pb.CliError>>()
   let deadline = Channel.new<bool>()
   task { let _ = completed.send(run_issue_watch(ctx, id, json_mode, until, usage)) }
   task {
@@ -213,7 +213,7 @@ pub fn issue_watch(input: flags.CommandInput) -> Result<(), string> {
     let _ = deadline.send(true)
   }
   let target = if id == "" { "the inferred issue" } else { id }
-  let mut outcome: Result<(), string> = Err(f"no comment containing '{until}' on {target} within {timeout}s")
+  let mut outcome: Result<(), pb.CliError> = Err(pb.failed(f"no comment containing '{until}' on {target} within {timeout}s"))
   select {
     match completed.receive() {
       Some(result) => outcome = result,
@@ -227,7 +227,7 @@ pub fn issue_watch(input: flags.CommandInput) -> Result<(), string> {
   outcome
 }
 
-fn run_issue_watch(ctx: pb.Client, id: string, json_mode: bool, until: string, usage: string) -> Result<(), string> {
+fn run_issue_watch(ctx: pb.Client, id: string, json_mode: bool, until: string, usage: string) -> Result<(), pb.CliError> {
   let resolved = resolve_id(ctx, id, usage)?
   let issue = records.fetch_issue(ctx, resolved)?
   let key = f"{issue.expand.team.key}-{issue.number}"
@@ -258,7 +258,7 @@ fn run_issue_watch(ctx: pb.Client, id: string, json_mode: bool, until: string, u
         if json_mode {
           let data = match json.Marshal(realtime.CommentEvent { action: "snapshot", record: c }) {
             Ok(data) => data as string,
-            Err(e) => return Err(f"encoding comment snapshot: {e}"),
+            Err(e) => return Err(pb.failed(f"encoding comment snapshot: {e}")),
           }
           fmt.Println(ndjson_line(realtime.Event { topic: "comments", data }))
         } else {
@@ -285,7 +285,7 @@ fn run_issue_watch(ctx: pb.Client, id: string, json_mode: bool, until: string, u
     if ev.topic == "comments" {
       let mut event = realtime.CommentEvent { .. }
       if let Err(e) = json.Unmarshal(ev.data.bytes(), &event) {
-        return Err(f"decoding realtime event: {e}")
+        return Err(pb.failed(f"decoding realtime event: {e}"))
       }
       let matched = comment_matches_until(until, event.action, event.record.body)
       if json_mode {
@@ -299,7 +299,7 @@ fn run_issue_watch(ctx: pb.Client, id: string, json_mode: bool, until: string, u
     }
     let mut event = realtime.IssueEvent { .. }
     if let Err(e) = json.Unmarshal(ev.data.bytes(), &event) {
-      return Err(f"decoding realtime event: {e}")
+      return Err(pb.failed(f"decoding realtime event: {e}"))
     }
     if json_mode {
       fmt.Println(ndjson_line(ev))
@@ -406,7 +406,7 @@ fn comment_matches_until(text: string, action: string, body: string) -> bool {
 /// does NOT exit: the stream stays alive and announces the first issue that
 /// becomes ready. Events for issues that are ready keep streaming, as the
 /// plain query watch does.
-fn watch_ready(ctx: pb.Client, filters: query.Filters, json_mode: bool) -> Result<(), string> {
+fn watch_ready(ctx: pb.Client, filters: query.Filters, json_mode: bool) -> Result<(), pb.CliError> {
   let scope = configured_scope(ctx)?
   let filter = resolve_filter_query(ctx, scope, filters)?
   // blocked_by expand, so each event record carries its blockers' states.
@@ -422,7 +422,7 @@ fn watch_ready(ctx: pb.Client, filters: query.Filters, json_mode: bool) -> Resul
     let Some(ev) = ch.receive() else { return Ok(()) }
     let mut event = realtime.IssueEvent { .. }
     if let Err(e) = json.Unmarshal(ev.data.bytes(), &event) {
-      return Err(f"decoding realtime event: {e}")
+      return Err(pb.failed(f"decoding realtime event: {e}"))
     }
     let rec = event.record
     let mut kept: Slice<models.Issue> = []
@@ -455,7 +455,7 @@ fn watch_ready(ctx: pb.Client, filters: query.Filters, json_mode: bool) -> Resul
         // multi-byte byte in the record (LLL-417).
         let data = match json.Marshal(ReadyEvent { topic: "issues", action: "ready", record: issue }) {
           Ok(data) => data as string,
-          Err(e) => return Err(f"encoding ready event: {e}"),
+          Err(e) => return Err(pb.failed(f"encoding ready event: {e}")),
         }
         fmt.Println(contract_json(data.bytes() as json.RawMessage, 0) as string)
       } else {

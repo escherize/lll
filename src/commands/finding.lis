@@ -15,10 +15,10 @@ import "records"
 ///
 /// Dispatched through the noun's Command table (TASK-307): dispatch, `lll
 /// finding --help` and shell completions all read it, so none can drift.
-pub fn finding(ctx: pb.Client, args: Slice<string>) -> Result<(), string> {
+pub fn finding(ctx: pb.Client, args: Slice<string>) -> Result<(), pb.CliError> {
   // Removed at 1.0 (D5); a finding is a doc, and 'doc view' is the read.
   if args.get(2) == Some("read") {
-    return Err("unknown finding command: 'read' - did you mean 'lll doc view SLUG'? (see 'lll doc view --help')")
+    return Err(pb.failed("unknown finding command: 'read' - did you mean 'lll doc view SLUG'? (see 'lll doc view --help')"))
   }
   flags.dispatch(ctx, "finding", "retrieve findings near a path", finding_intro(), finding_commands(), args)
 }
@@ -173,7 +173,7 @@ fn findings_near(findings: Slice<models.Doc>, path: string) -> Slice<models.Doc>
 
 // ------------------------------------------------------------------ verbs
 
-fn finding_near(input: flags.CommandInput) -> Result<(), string> {
+fn finding_near(input: flags.CommandInput) -> Result<(), pb.CliError> {
   let ctx = input.ctx
   let p = input.parsed
   let path = p.first()
@@ -189,7 +189,7 @@ fn finding_near(input: flags.CommandInput) -> Result<(), string> {
   Ok(())
 }
 
-fn finding_list(input: flags.CommandInput) -> Result<(), string> {
+fn finding_list(input: flags.CommandInput) -> Result<(), pb.CliError> {
   let ctx = input.ctx
   let p = input.parsed
   let area = strings.TrimSpace(p.one("-a"))
@@ -236,7 +236,7 @@ fn print_finding_lines(docs: Slice<models.Doc>) {
 /// again. The slug may arrive as the bare argument (four create verbs take
 /// a positional name and finding is where the guess happened), so it is
 /// resolved here, positional-or-flag, and handed to create_doc.
-fn finding_new(input: flags.CommandInput) -> Result<(), string> {
+fn finding_new(input: flags.CommandInput) -> Result<(), pb.CliError> {
   let ctx = input.ctx
   let p = input.parsed
   let verb = input.args.get(2).unwrap_or("new")
@@ -264,7 +264,7 @@ fn finding_refute_spec() -> Slice<flags.Flag> {
 /// 'finding confirm SLUG' — a later agent asserts a guess is fact. Clearing
 /// the note is the point: a confirmation carrying a refutation's reason
 /// would contradict itself.
-fn finding_confirm(input: flags.CommandInput) -> Result<(), string> {
+fn finding_confirm(input: flags.CommandInput) -> Result<(), pb.CliError> {
   let ctx = input.ctx
   let p = input.parsed
   let slug = p.first()
@@ -281,14 +281,14 @@ fn finding_confirm(input: flags.CommandInput) -> Result<(), string> {
 /// 'finding refute SLUG -b why' — the counterpart, and the only path that
 /// sets 'refuted': a refutation is a later agent's judgement with a reason,
 /// not a creation option.
-fn finding_refute(input: flags.CommandInput) -> Result<(), string> {
+fn finding_refute(input: flags.CommandInput) -> Result<(), pb.CliError> {
   let ctx = input.ctx
   let p = input.parsed
   let slug = p.first()
   if slug == "" { return Err(flags.usage_error("usage: lll finding refute SLUG -b why")) }
   let why = strings.TrimSpace(value_or_stdin(p.one("-b"), "-b")?)
   if why == "" {
-    return Err("a refutation needs the why: 'lll finding refute SLUG -b why' ('-b -' reads it from stdin)")
+    return Err(pb.failed("a refutation needs the why: 'lll finding refute SLUG -b why' ('-b -' reads it from stdin)"))
   }
   let team = current_team(ctx)?
   let Some(d) = records.find_doc(ctx, team, slug)? else {
@@ -301,7 +301,7 @@ fn finding_refute(input: flags.CommandInput) -> Result<(), string> {
 
 /// One PATCH, two fields, on purpose nothing else: confirm/refute is a
 /// judgement about the finding, never an edit of it.
-fn patch_confidence(ctx: pb.Client, d: models.Doc, confidence: string, note: string) -> Result<(), string> {
+fn patch_confidence(ctx: pb.Client, d: models.Doc, confidence: string, note: string) -> Result<(), pb.CliError> {
   writes.update_doc(ctx, d.id, writes.DocPatch {
     confidence: Some(confidence),
     confidence_note: Some(note),

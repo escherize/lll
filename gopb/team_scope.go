@@ -223,10 +223,12 @@ func checkOwner(app core.App, m *core.Record) error {
 			" has an owner itself, so it cannot own "+name+". Give "+name+" that member's owner instead", nil)
 	}
 	if !accessCovers(owner, m) {
-		return router.NewBadRequestError(
+		// A stable code (LLL-675): `lll member access` relays this refusal
+		// as it is, and decides so on the code, not on the wording.
+		return withCode(router.NewBadRequestError(
 			"a bot never exceeds its owner: "+name+" would have wider access than "+
 				owner.GetString("name")+". Give it only teams and a mode its owner has, or widen the owner first with 'lll member access "+
-				owner.GetString("name")+"'", nil)
+				owner.GetString("name")+"'", nil), "bot_exceeds_owner")
 	}
 	return nil
 }

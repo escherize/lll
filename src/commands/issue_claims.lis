@@ -37,14 +37,14 @@ fn issue_start_spec() -> Slice<flags.Flag> {
   ])
 }
 
-fn start(input: flags.CommandInput) -> Result<(), string> {
+fn start(input: flags.CommandInput) -> Result<(), pb.CliError> {
   let ctx = input.ctx
   let usage = input.usage
   let p = input.parsed
   let agent = agent_label(ctx, p)?
   let with_branch = p.given("--branch")
   if with_branch && !gitctx.in_repo() {
-    return Err("--branch needs a git repository: run it from inside the one the work happens in; issue state unchanged")
+    return Err(pb.failed("--branch needs a git repository: run it from inside the one the work happens in; issue state unchanged"))
   }
   let resolved = resolve_id(ctx, p.first(), usage)?
   let issue = records.fetch_issue(ctx, resolved)?
@@ -56,7 +56,7 @@ fn start(input: flags.CommandInput) -> Result<(), string> {
   if with_branch {
     let created = match gitctx.switch_branch(branch) {
       Ok(created) => created,
-      Err(reason) => return Err(f"{reason}\nIssue {key} state unchanged; branch setup failed."),
+      Err(reason) => return Err(pb.failed(f"{reason}\nIssue {key} state unchanged; branch setup failed.")),
     }
     // Under --json stdout is the issue alone; the Git lines move to stderr.
     let out = if p.given("--json") { os.Stderr } else { os.Stdout }
@@ -77,14 +77,14 @@ fn start(input: flags.CommandInput) -> Result<(), string> {
       // A lost response does not prove the server rejected the write. Never
       // undo Git automatically: report the known local outcome and how to
       // inspect the remote state before retrying.
-      return Err(f"Git is on branch '{branch}', but starting {key} could not be confirmed: {reason}\nInspect with 'lll issue view {key}' before retrying.")
+      return Err(reason.with_message(f"Git is on branch '{branch}', but starting {key} could not be confirmed: {reason.message}\nInspect with 'lll issue view {key}' before retrying."))
     }
     return Err(reason)
   }
   if !p.given("--json") { fmt.Println(f"Started {key}: {issue.title} (◐ in-progress)") }
   if with_branch {
     if let Err(reason) = record_work_site(ctx, issue, branch, agent) {
-      return Err(f"{key} is in-progress and Git is on '{branch}', but recording the work site could not be confirmed: {reason}\nInspect with 'lll issue view {key}' before retrying.")
+      return Err(reason.with_message(f"{key} is in-progress and Git is on '{branch}', but recording the work site could not be confirmed: {reason.message}\nInspect with 'lll issue view {key}' before retrying."))
     }
   }
   if p.given("--json") { return print_issue_after(ctx, key) }
@@ -101,7 +101,7 @@ fn start(input: flags.CommandInput) -> Result<(), string> {
 /// Host comes from os.Hostname; LLL_WORK_HOST overrides it (a test seam —
 /// e2e fakes a second machine without owning one). Path is the worktree
 /// root, so multiple worktrees of one branch on one host stay distinct.
-fn record_work_site(ctx: pb.Client, issue: models.Issue, branch: string, agent: string) -> Result<(), string> {
+fn record_work_site(ctx: pb.Client, issue: models.Issue, branch: string, agent: string) -> Result<(), pb.CliError> {
   let mut host = ctx.settings.env.work_host
   if host == "" { host = os.Hostname().unwrap_or("") }
   let Some(path) = gitctx.repo_root() else {
@@ -127,7 +127,7 @@ fn record_work_site(ctx: pb.Client, issue: models.Issue, branch: string, agent: 
 /// proves nothing about who they are. The server renders it into comments, so
 /// it is refused here, before any request, unless it has the server's shape:
 /// at most 64 of A-Z, a-z, 0-9, '.', '_' and '-'; empty means no label.
-fn agent_label(ctx: pb.Client, p: flags.Parsed) -> Result<string, string> {
+fn agent_label(ctx: pb.Client, p: flags.Parsed) -> Result<string, pb.CliError> {
   let label = if p.given("--agent") { p.one("--agent") } else { ctx.settings.env.agent }
   if !regexp.MustCompile(r"^[A-Za-z0-9._-]{0,64}$").MatchString(label) {
     return Err(flags.usage_error(f"invalid agent label {strconv.Quote(label)} (from --agent or LLL_AGENT): use at most 64 characters from A-Z, a-z, 0-9, '.', '_' and '-'"))
@@ -148,7 +148,7 @@ fn held_elsewhere_hint(key: string) -> string {
 /// together; the unique issue index also protects against duplicate hold rows.
 /// Assignment edits use their own observed-claim transaction and cannot replace
 /// another holder. See gopb/claims.go and gopb/assignment.go for that policy.
-fn claim(input: flags.CommandInput) -> Result<(), string> {
+fn claim(input: flags.CommandInput) -> Result<(), pb.CliError> {
   let ctx = input.ctx
   let usage = "lll issue claim [KEY-123] [--renew]"
   let agent = agent_label(ctx, input.parsed)?
@@ -156,7 +156,7 @@ fn claim(input: flags.CommandInput) -> Result<(), string> {
   let resolved = resolve_id(ctx, id, usage)?
   let Some(member) = records.find_actor(ctx)? else {
     return Err(
-      "claiming needs a member token: 'lll login' as a person, or 'lll token create <member>' with admin credentials",
+      pb.failed("claiming needs a member token: 'lll login' as a person, or 'lll token create <member>' with admin credentials"),
     )
   }
   let issue = records.fetch_issue(ctx, resolved)?
@@ -166,15 +166,15 @@ fn claim(input: flags.CommandInput) -> Result<(), string> {
     let Some(held) = claims.fetch(ctx, issue.id)? else {
       return Err(pb.fail(pb.ErrorKind.Refused, f"{key} is not claimed; 'lll issue claim {key}' takes it"))
     };
-    let renewed = writes.renew_claim(ctx, issue.id, held.id, agent).map_err(|e| f"{key}: {e}")?
+    let renewed = writes.renew_claim(ctx, issue.id, held.id, agent).map_err(|e| e.with_message(f"{key}: {e.message}"))?
     if input.parsed.given("--json") { return print_issue_after(ctx, key) }
     fmt.Println(f"Renewed {key} for {display.byline(renewed.member_name, renewed.agent)}; the expiry clock restarts now (held since {display.relative(renewed.created)})")
     return Ok(())
   }
 
   let result = writes.acquire_claim(ctx, pb.Caller.Process, issue.id, member.id, agent).map_err(|e| {
-    if pb.classify(e).code == "claim_held" {
-      f"{key}: {e}; {held_elsewhere_hint(key)}"
+    if e.has_code(pb.ServerCode.ClaimHeld) {
+      e.with_message(f"{key}: {e.message}; {held_elsewhere_hint(key)}")
     } else { e }
   })?
   if input.parsed.given("--json") { return print_issue_after(ctx, key) }
@@ -189,7 +189,7 @@ fn claim(input: flags.CommandInput) -> Result<(), string> {
 /// The holder releases an observed hold; anyone else needs --force, and the
 /// server records a forced release as a comment on the issue (LLL-512). The
 /// server atomically removes that exact claim and clears only its assignment.
-fn release(input: flags.CommandInput) -> Result<(), string> {
+fn release(input: flags.CommandInput) -> Result<(), pb.CliError> {
   let ctx = input.ctx
   let usage = "lll issue release [KEY-123] [--force [--reason \"why\"]]"
   let p = input.parsed
@@ -202,8 +202,8 @@ fn release(input: flags.CommandInput) -> Result<(), string> {
   let Some(held) = claims.fetch(ctx, issue.id)? else { return Err(pb.fail(pb.ErrorKind.Refused, f"{key} is not claimed")) };
   let by = writes.ClaimAs { caller: pb.Caller.Process, agent, force, reason }
   let result = writes.release_claim(ctx, issue.id, held.id, by).map_err(|e| {
-    if pb.classify(e).code == "needs_force" {
-      f"{key}: {e}; 'lll issue release {key} --force --reason \"why\"' takes it anyway and comments on the issue"
+    if e.has_code(pb.ServerCode.NeedsForce) {
+      e.with_message(f"{key}: {e.message}; 'lll issue release {key} --force --reason \"why\"' takes it anyway and comments on the issue")
     } else { e }
   })?
   let assignment = if result.cleared_assignee { "cleared assignee" } else { "assignment unchanged" }
@@ -213,6 +213,6 @@ fn release(input: flags.CommandInput) -> Result<(), string> {
 }
 
 /// Compatibility name for command/page reads; storage ownership is in claims.
-fn fetch_claim(ctx: pb.Client, issue_id: string) -> Result<Option<models.Claim>, string> {
+fn fetch_claim(ctx: pb.Client, issue_id: string) -> Result<Option<models.Claim>, pb.CliError> {
   claims.fetch(ctx, issue_id)
 }

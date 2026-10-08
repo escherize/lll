@@ -159,8 +159,8 @@ fn check_emoji_counts_runes_not_bytes() {
 #[test]
 fn check_emoji_rejects_more_than_eight_runes() {
   let assert Err(msg) = records.check_emoji("abcdefghi")
-  assert msg.contains("--emoji takes one emoji")
-  assert msg.contains("abcdefghi")
+  assert msg.message.contains("--emoji takes one emoji")
+  assert msg.message.contains("abcdefghi")
   let assert Err(_) = records.check_emoji("in progress")
   // 9 runes of non-ASCII is over the line too, bytes notwithstanding.
   let assert Err(_) = records.check_emoji("🐛🐛🐛🐛🐛🐛🐛🐛🐛")
@@ -169,7 +169,7 @@ fn check_emoji_rejects_more_than_eight_runes() {
 #[test]
 fn check_emoji_reports_the_trimmed_value() {
   let assert Err(msg) = records.check_emoji("  in progress  ")
-  assert msg.contains("'in progress'")
+  assert msg.message.contains("'in progress'")
 }
 
 // -------------------------------------------------------- value_or_stdin
@@ -221,11 +221,11 @@ fn create_and_update_share_one_state_validator() {
   let assert Ok(ok) = query.state("in-review")
   assert ok == "in-review"
   let assert Err(msg) = query.state("nope")
-  assert msg.contains("unknown state 'nope'")
+  assert msg.message.contains("unknown state 'nope'")
   // The message enumerates query.states() rather than a second hand-written
   // list, so adding a state cannot leave create behind.
   for s in query.states() {
-    assert msg.contains(s)
+    assert msg.message.contains(s)
     let assert Ok(accepted) = query.state(s)
     assert accepted == s
   }

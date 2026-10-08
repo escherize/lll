@@ -15,9 +15,9 @@ fn check_status_rejects_a_typo_and_lists_the_real_ones() {
     assert false
     return
   }
-  assert strings.Contains(msg, "unknown status 'stated'")
-  assert strings.Contains(msg, "planned")
-  assert strings.Contains(msg, "cancelled")
+  assert strings.Contains(msg.message, "unknown status 'stated'")
+  assert strings.Contains(msg.message, "planned")
+  assert strings.Contains(msg.message, "cancelled")
 }
 
 #[test]
