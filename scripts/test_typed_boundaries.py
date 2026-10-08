@@ -38,6 +38,9 @@ TEXT_CLASSIFIERS = {
     # A server older than LLL-665 says only 'invalid assignment update
     # fields'; a current server never sends it, so no code can replace it.
     'src/writes/issues.lis',
+    # PocketBase answers a member create its rules refuse with a bare 400,
+    # 'Failed to create record.', and no field or code to tell it apart.
+    'src/commands/member.lis',
 }
 STATES = r'"(?:backlog|todo|in-progress|in-review|done|cancelled)"'
 
@@ -101,7 +104,7 @@ def violations(files):
             if module == 'models':
                 continue
             found.append(f'{rel}: {m.group(0)}: a state is a models.IssueState; its rules are methods on it')
-        for m in re.finditer(r'(?:Contains|HasPrefix|starts_with|contains)\(\s*(?:strings\.ToLower\()?\w+\.message\b', code):
+        for m in re.finditer(r'(?:Contains|HasPrefix|starts_with|contains)\(\s*(?:strings\.ToLower\()?\w+\.message\b|\b\w+\.message\s*(?:==|!=)\s*"[^"]', code):
             if rel in TEXT_CLASSIFIERS:
                 continue
             found.append(f'{rel}: {m.group(0)}: decide on the error\'s kind, status or code, not its wording')
@@ -125,6 +128,7 @@ class TypedBoundariesTest(unittest.TestCase):
             ('src/records/x.lis', 'records', 'fn fetch(ctx: pb.Client, team_id: string) {}'),
             ('src/commands/x.lis', 'commands', 'let t = scope.filter_team()'),
             ('src/commands/x.lis', 'commands', 'if strings.Contains(e.message, "oldPassword") {}'),
+            ('src/serve/x.lis', 'serve', 'if e.message == "Failed to create record." {}'),
             ('src/pb/x.lis', 'pb', 'fn tag_end() -> string { "\\u{1d}" }'),
             ('src/serve/x.lis', 'serve', 'if issue.state_wire == x {}'),
             ('src/commands/x.lis', 'commands', 'if m.mode_wire == "rw" {}'),

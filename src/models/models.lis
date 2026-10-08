@@ -2,7 +2,7 @@
 /// PocketBase id as the server sent it, so a team's id cannot be passed where
 /// an issue's is wanted, and none can be passed as a plain string. Values are
 /// made by decoding a record (here, from JSON) or in records/ and writes/;
-/// scripts/test_typed_ids.py holds that. A relation PocketBase reports as
+/// scripts/test_typed_boundaries.py holds that. A relation PocketBase reports as
 /// unset decodes to the empty id: `is_empty` says so.
 ///
 /// `string()` makes each a Stringer, so an id interpolates as itself into a

@@ -455,9 +455,11 @@ fn event_refreshes(ev: realtime.RecordEvent) -> Slice<Refresh> {
     realtime.Change.View => [Refresh.Views],
     realtime.Change.Issue(rec) => {
       let team_key = rec.expand.team.key
+      // A record without a team id is looked up by its key, as before.
+      let team_id = if rec.team.is_empty() { None } else { Some(rec.team) }
       // Titles and state icons in favorites are issue data too.
       [
-        Refresh.Board(BoardRefresh { team_key, team_id: Some(rec.team), order: "", client_id: 0 }),
+        Refresh.Board(BoardRefresh { team_key, team_id, order: "", client_id: 0 }),
         Refresh.Issue(IssueRefresh { key: f"{team_key}-{rec.number}", client_id: 0 }),
         Refresh.Favorites,
       ]

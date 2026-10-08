@@ -146,9 +146,10 @@ with tempfile.TemporaryDirectory(prefix='lll-631-') as directory:
                           {'claim_id': '', 'fields': {'assignee': '', 'labels': [secret['id']]}}, toks['full'], 'POST')
         assert code == 400 and 'reference stays inside one team' in json.dumps(body), (code, body)
 
-        # The board writes as its own full-access member, and create_write
-        # hands label and project ids to PocketBase unchecked: the server
-        # rule is what refuses them (coordinator's architecture review).
+        # The board writes as its own full-access member. create_write parses
+        # posted label and project ids against the team's own (LLL-675), so
+        # a foreign id is refused by name before the server rule (exercised
+        # above) is reached.
         board = endpoint['board_url']
 
         def board_post(path, fields):
@@ -164,9 +165,9 @@ with tempfile.TemporaryDirectory(prefix='lll-631-') as directory:
 
         text = board_post('/create', {'team': 'ALPHA', 'title': 'board foreign refs', 'project': bproj['id'],
                                       'labels': [secret['id']]})
-        assert 'reference stays inside one team' in text and titled('board foreign refs') == 0, text[:500]
+        assert 'unknown ' in text and titled('board foreign refs') == 0, text[:500]
         text = board_post('/create', {'team': 'ALPHA', 'title': 'board foreign label', 'labels': [secret['id']]})
-        assert 'reference stays inside one team' in text and titled('board foreign label') == 0, text[:500]
+        assert 'unknown ' in text and titled('board foreign label') == 0, text[:500]
         board_post('/create', {'team': 'ALPHA', 'title': 'board own refs', 'project': aproj['id'], 'labels': [ae['id']]})
         assert titled('board own refs') == 1, 'control: a board create with same-team refs works'
         own = call(api, '/api/collections/issues/records?filter=' + q('title = "board own refs"'), token=su)[1]['items'][0]

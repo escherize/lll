@@ -38,7 +38,9 @@ minors. Issue keys are on the project's own board (`lll issue view KEY`).
 - The server's refusal of a bot wider than its owner carries the stable
   code `bot_exceeds_owner`, and `lll member access` relays it by that code;
   a wrong `--old-password` is read from PocketBase's `oldPassword` field.
-  Both used to be found by matching the message text. (LLL-675)
+  Both used to be found by matching the message text. Upgrade the server
+  with the CLI: an older server's bot-owner refusal has no code, and the
+  new CLI reports it as an administrator-credentials refusal. (LLL-675)
 - Board forms refuse a label, project or member id outside what the viewer
   may pick for the issue's team (create, and the settings rows' label and
   project updates, included), naming it, instead of handing the raw id to
