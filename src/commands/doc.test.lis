@@ -191,16 +191,17 @@ fn path_touches_is_false_when_either_side_is_empty() {
 #[test]
 fn doc_commands_declares_every_verb_once_with_a_summary() {
   let names = doc_commands().map(|c| c.name)
-  assert strings.Join(names, " ") == "create list view edit delete link unlink"
-  // LLL-505: link and unlink are hidden aliases of 'lll issue link/unlink'.
-  // They dispatch, but neither help nor completions advertise them.
-  assert strings.Join(flags.command_names(doc_commands()), " ") == "create new list view show edit delete"
+  assert strings.Join(names, " ") == "create list view edit delete"
+  assert strings.Join(flags.command_names(doc_commands()), " ") == "create new list view show edit update delete"
   let assert Err(help) = doc(["lll", "doc", "--help"])
   assert !help.contains("lll doc link")
   assert !help.contains("lll doc unlink")
   assert help.contains("lll issue link KEY-123 SLUG")
-  assert flags.resolve_command(doc_commands(), "link").is_some()
-  assert flags.resolve_command(doc_commands(), "unlink").is_some()
+  // LLL-644 (D5): doc link/unlink were removed; each names the issue verb.
+  for verb in ["link", "unlink"] {
+    let assert Err(refused) = doc(["lll", "doc", verb, "port-notes", "ENG-2"])
+    assert refused.contains(f"did you mean 'lll issue {verb} KEY-123 SLUG'?")
+  }
   for c in doc_commands() {
     assert c.summary != ""
     // No doc verb has a hand-written page; help is generated from spec.
@@ -217,23 +218,29 @@ fn doc_commands_slug_verbs_take_a_positional() {
 }
 
 #[test]
-fn doc_commands_link_verbs_take_slug_then_key() {
-  // The doc-first spelling: the doc's slug comes first, the issue key
-  // second — the reverse of 'lll issue link KEY-123 SLUG' (LLL-313).
-  for c in doc_commands() {
-    let links = c.name == "link" || c.name == "unlink"
-    assert (c.positional == "SLUG KEY-123") == links
-  }
-}
-
-#[test]
 fn doc_list_spec_searches_slug_and_title() {
   // finding list --search exists for fleet reasons its source records; doc
   // list gained the identical flag for the same reason (LLL-313).
   let spec = doc_list_spec()
   let assert Ok(p) = flags.parse(spec, ["lll", "doc", "list", "--search", "port"], 3, false, "")
   assert p.one("--search") == "port"
-  assert flags.parse(spec, ["lll", "doc", "list", "--query", "port"], 3, false, "").is_err()
+  let assert Err(refused) = flags.parse(spec, ["lll", "doc", "list", "--query", "port"], 3, false, "lll doc list")
+  assert refused.contains("did you mean '--search'?")
+}
+
+#[test]
+fn doc_list_takes_a_limit_and_doc_paths_lose_their_short_flag() {
+  let assert Ok(p) = flags.parse(doc_list_spec(), ["lll", "doc", "list", "--limit", "2"], 3, false, "")
+  let assert Ok(n) = limit_flag(p)
+  assert n == 2
+  let assert Ok(short) = flags.parse(doc_list_spec(), ["lll", "doc", "list", "-l", "3"], 3, false, "")
+  let assert Ok(m) = limit_flag(short)
+  assert m == 3
+  let assert Ok(zero) = flags.parse(doc_list_spec(), ["lll", "doc", "list", "--limit", "0"], 3, false, "")
+  assert limit_flag(zero).is_err()
+  // D6: -p is priority, so paths are --paths only; the refusal names it.
+  let assert Err(refused) = flags.parse(doc_new_spec(), ["lll", "doc", "create", "-p", "src"], 3, false, "lll doc create")
+  assert refused.contains("did you mean '--paths'?")
 }
 
 #[test]

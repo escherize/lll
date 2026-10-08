@@ -33,7 +33,7 @@ def request(url, data=None, headers=None):
         return error.code, error.headers, error.read()
 
 
-cli('team', 'create', '-k', 'ATT35', '-n', 'Attachment verification')
+cli('team', 'create', '--key', 'ATT35', '-n', 'Attachment verification')
 issue = json.loads(cli('issue', 'create', 'Attachment lifecycle', '--description', 'Preserve description', '--json'))
 key = f"ATT35-{issue['number']}"
 

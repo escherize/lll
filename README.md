@@ -169,7 +169,7 @@ On a local `lll up`, plain `lll login` (the url default is
 
 Clones and git worktrees of an attached repo need no step at all; env beats
 files, repo file beats home file, and each key resolves independently
-(`lll config --list` shows every winner and its origin).
+(`lll config list` shows every winner and its origin).
 
 ## Attaching a repo, or any directory
 
@@ -177,7 +177,7 @@ files, repo file beats home file, and each key resolves independently
 `.lll.toml`. Inside a git repository that file goes at the repo root; commit
 it. Outside one it goes in the working directory, and every subdirectory
 inherits it. A scratch project needs no `git init` to be tracked. The key
-defaults to the directory name; `-k KEY` overrides it.
+defaults to the directory name; `--key KEY` overrides it.
 
 That is the whole attachment. The two halves of the config live in different
 places:
@@ -227,7 +227,7 @@ home directory **exclusive**. A `.lll.toml` sitting directly in `$HOME` is
 never read, because `~/.config/lll/lll.toml` is how you set machine-wide
 defaults on purpose.
 
-`lll config --list` prints every effective value and the file it came from,
+`lll config list` prints every effective value and the file it came from,
 after `git config --list --show-origin`:
 
 ```
@@ -312,9 +312,10 @@ lll issue watch ENG-12        # one issue + its comments, until Ctrl-C
 lll team|member|project|label list      # the other nouns: list/create/view/add
 lll team archive KEY          # park a finished team; unarchive brings it back
 lll team delete KEY           # delete a team holding no issues (archive keeps ids working)
-lll member remove NAME        # remove a member with nothing assigned (superuser only)
-lll attach                    # the server's team if it has one, else -k KEY
-lll config --list             # every value and the file it came from
+lll member delete NAME        # delete a member with nothing assigned (superuser only)
+lll attach                    # the server's team if it has one, else --key KEY
+lll config list               # every value and the file it came from
+lll config get team           # one effective value, for scripts
 lll config check              # does the configured url answer as a PocketBase API?
 lll login --url https://host --email you@x.com --create --password <pw>
                               # one command: make the member, log in, settle the team
@@ -330,6 +331,13 @@ lll logout                    # clear the stored token
 lll board -w                  # open the web board
 lll completions zsh           # bash, zsh, fish
 ```
+
+Each flag and verb has one canonical spelling, and help, messages and docs use
+only that one. A few others are accepted permanently as aliases: `new` for
+`create`, `show` for `view`, `add` and `remove` for member `create` and
+`delete`, `edit` and `update` for each other, `-d`/`--description` for `-b`
+where the text is a description, `--ro` for `--read-only`, and `--list` for
+`config list`. A removed spelling fails and names its replacement.
 
 Scripts that read `lll watch` should start from `lll watch --help`. It lists
 the exact status lines (all on stderr), what a label-only update prints, and

@@ -48,6 +48,7 @@ pub fn project_commands() -> Slice<flags.Command> {
     },
     flags.Command {
       name: "edit",
+      alias: "update",
       summary: "rename, re-describe or re-status a project; it keeps its issues",
       spec: project_edit_spec(),
       positional: "NAME",
@@ -105,7 +106,7 @@ fn project_list_spec() -> Slice<flags.Flag> {
 fn project_create_spec() -> Slice<flags.Flag> {
   flags.with_team([
     flags.Flag { name: "-n", alias: "--name", value: true, hint: "\"name\"", help: "project name", .. },
-    flags.Flag { name: "-d", value: true, hint: "desc", help: "project description", .. },
+    flags.Flag { name: "-b", alias: "--body -d --description", value: true, hint: "desc", help: "project description", .. },
     flags.Flag { name: "--status", value: true, hint: "s", help: "planned, started, paused, completed, or cancelled\n(defaults to planned)", .. },
     flags.Flag { name: "--team", value: true, hint: "KEY", help: "team key the project belongs to (defaults to LLL_TEAM)", .. },
   ])
@@ -113,8 +114,8 @@ fn project_create_spec() -> Slice<flags.Flag> {
 
 fn project_edit_spec() -> Slice<flags.Flag> {
   flags.with_team([
-    flags.Flag { name: "-n", value: true, hint: "\"new name\"", help: "new project name", .. },
-    flags.Flag { name: "-d", value: true, hint: "desc", help: "new project description", .. },
+    flags.Flag { name: "-n", alias: "--name", value: true, hint: "\"new name\"", help: "new project name", .. },
+    flags.Flag { name: "-b", alias: "--body -d --description", value: true, hint: "desc", help: "new project description", .. },
     flags.Flag { name: "--status", value: true, hint: "s", help: "planned, started, paused, completed, or cancelled", .. },
   ])
 }
@@ -128,6 +129,7 @@ fn project_move_spec() -> Slice<flags.Flag> {
 fn project_delete_spec() -> Slice<flags.Flag> {
   flags.with_team([
     flags.Flag { name: "--force", help: "delete even while issues belong to the project", .. },
+    flags.Flag { name: "--yes", help: "skip the delete confirmation (asked only on a terminal)", .. },
   ])
 }
 
@@ -146,7 +148,7 @@ fn project_create(input: flags.CommandInput) -> Result<(), string> {
   let p = input.parsed
   let name = flags.entity_name(p, "-n", usage)?
   check_filter_name("project", name)?
-  let description = p.one("-d")
+  let description = p.one("-b")
   let mut status = "planned"
   if p.given("--status") {
     status = check_status(p.one("--status"))?
@@ -174,8 +176,8 @@ fn project_edit(input: flags.CommandInput) -> Result<(), string> {
   let Some(name) = nonempty(p.first()) else {
     return Err(f"usage: {usage}")
   }
-  if !p.given("-n") && !p.given("-d") && !p.given("--status") {
-    return Err(f"nothing to update — pass -n, -d or --status\nusage: {usage}")
+  if !p.given("-n") && !p.given("-b") && !p.given("--status") {
+    return Err(f"nothing to update — pass -n, -b or --status\nusage: {usage}")
   }
   // Validate before the lookup: a typo'd status should cost no round trip and
   // must not leave a half-applied patch behind.
@@ -186,7 +188,7 @@ fn project_edit(input: flags.CommandInput) -> Result<(), string> {
 
   let mut fields: Slice<string> = []
   if p.given("-n") { fields = fields.append("\"name\":" + json_quote(p.one("-n"))?) }
-  if p.given("-d") { fields = fields.append("\"description\":" + json_quote(p.one("-d"))?) }
+  if p.given("-b") { fields = fields.append("\"description\":" + json_quote(p.one("-b"))?) }
   if status != "" { fields = fields.append("\"status\":" + json_quote(status)?) }
   let _ = pb.patch(
     f"/api/collections/projects/records/{project.id}",
@@ -222,6 +224,10 @@ fn project_delete(input: flags.CommandInput) -> Result<(), string> {
   let used = entity_issue_count("project", project.id)?
   if used > 0 && !p.given("--force") {
     return Err(refuse_delete("project", name, used))
+  }
+  if !confirmed_on_terminal(p.given("--yes"), f"delete project {name}?") {
+    fmt.Println("Aborted.")
+    return Ok(())
   }
   let _ = pb.delete(f"/api/collections/projects/records/{project.id}")?
   fmt.Println(deleted_line("project", name, used))

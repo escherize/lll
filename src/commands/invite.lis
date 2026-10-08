@@ -50,7 +50,6 @@ fn invite_create_spec() -> Slice<flags.Flag> {
   [
     flags.Flag {
       name: "--team",
-      alias: "-t",
       value: true,
       hint: "KEY",
       repeat: true,
@@ -59,7 +58,8 @@ fn invite_create_spec() -> Slice<flags.Flag> {
       ..,
     },
     flags.Flag {
-      name: "--ro",
+      name: "--read-only",
+      alias: "--ro",
       help: "they can read but not change anything (default: read-write)",
       ..,
     },
@@ -91,7 +91,7 @@ fn invite_create(input: flags.CommandInput) -> Result<(), string> {
     }
     ids = ids.append(team.id)
   }
-  let mode = if p.given("--ro") { "ro" } else { "rw" }
+  let mode = if p.given("--read-only") { "ro" } else { "rw" }
   let payload = match json.Marshal(InviteRequest { teams: ids, mode }) {
     Ok(b) => b,
     Err(e) => return Err(f"encoding the invite: {e}"),

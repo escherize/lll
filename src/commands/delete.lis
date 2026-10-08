@@ -1,4 +1,9 @@
+import "go:bufio"
+import "go:fmt"
+import "go:golang.org/x/term"
 import "go:net/url"
+import "go:os"
+import "go:strings"
 
 import "models"
 import "pb"
@@ -45,3 +50,21 @@ fn deleted_line(kind: string, name: string, used: int) -> string {
   f"Deleted {kind} {name} (dropped from {used} issue(s))"
 }
 
+/// Ask `question [y/N]` on stdout and read one answer from stdin; only y or
+/// yes confirms. `--yes` is how a caller skips this (D6 in doc v1-0-plan).
+fn confirmed(question: string) -> bool {
+  fmt.Print(f"{question} [y/N] ")
+  let mut scanner = bufio.NewScanner(os.Stdin)
+  let mut answer = ""
+  if scanner.Scan() { answer = strings.TrimSpace(scanner.Text()) }
+  let a = strings.ToLower(answer)
+  a == "y" || a == "yes"
+}
+
+/// The confirmation for deletes that never prompted before 1.0 (team, label,
+/// project, member, comment): a person at a terminal is asked, and a script
+/// is not, so no existing script starts blocking on stdin.
+fn confirmed_on_terminal(yes: bool, question: string) -> bool {
+  if yes || !term.IsTerminal(os.Stdin.Fd() as int) { return true }
+  confirmed(question)
+}

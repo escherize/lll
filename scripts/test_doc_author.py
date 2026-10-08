@@ -62,7 +62,7 @@ def record(slug):
     return json.loads(cli('doc', 'view', slug, '--json'))
 
 
-cli('team', 'create', '-k', TEAM, '-n', 'Doc authors')
+cli('team', 'create', '--key', TEAM, '-n', 'Doc authors')
 team_id = ok('GET', "/api/collections/teams/records?filter=key%3D'" + TEAM + "'", su)['items'][0]['id']
 owner = member('da-owner', kind='person')
 bot = member('bot-da', kind='bot', owner=owner['id'])

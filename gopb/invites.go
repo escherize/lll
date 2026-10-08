@@ -410,7 +410,7 @@ func registerInviteRoutes(routes *router.Router[*core.RequestEvent]) {
 // A person may not take the bot- prefix; a bot keeps it (checkMemberKind).
 // Superusers are not held to it, and person creates are not checked: only a
 // full member or a superuser creates a person, and
-// 'lll member add -n "Tim O'Brien"' is supported (e2e.sh).
+// 'lll member create -n "Tim O'Brien"' is supported (e2e.sh).
 func registerMemberNameGuard(app core.App) {
 	app.OnRecordUpdateRequest("members").BindFunc(func(e *core.RecordRequestEvent) error {
 		if e.HasSuperuserAuth() || e.Record.GetString("name") == e.Record.Original().GetString("name") {

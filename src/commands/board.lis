@@ -8,7 +8,7 @@ import "records"
 /// `lll board` — print the web board URL; `-w` opens it in the browser.
 pub fn board_spec() -> Slice<flags.Flag> {
   [
-    flags.Flag { name: "-w", help: "open the board in the browser", .. },
+    flags.Flag { name: "-w", alias: "--web", help: "open the board in the browser", .. },
     flags.Flag { name: "--team", value: true, hint: "KEY", help: "print a view-only link to one team's board, for someone without an account", .. },
     flags.Flag { name: "--help", alias: "-h", hidden: true, help: "show this help", .. },
   ]

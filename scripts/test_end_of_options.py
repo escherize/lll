@@ -15,7 +15,7 @@ def run(*args, success=True):
     return result.stdout if success else result.stderr
 
 
-run('team', 'create', '-k', 'EOO', '-n', 'End of options')
+run('team', 'create', '--key', 'EOO', '-n', 'End of options')
 run('label', 'create', '--team', 'EOO', '--', '--team')
 run('project', 'create', '--', '--help')
 issue = json.loads(run('issue', 'create', '--json', '--team', 'EOO', '--', '--help'))

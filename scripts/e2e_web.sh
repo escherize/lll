@@ -721,8 +721,8 @@ web_post "POST settings/label" "$WEB/settings/label?del=1" -d "id=$PICKER_EXTRA"
 # to the issue always shows; an issue with no matches renders no section at
 # all — no empty-heading clutter.
 printf 'Migrations collide when two agents mint one.' | "$LIN" doc new \
-  -s web-migrations -t "Migration collisions" -k finding -a props -p "pb/pb_migrations" -b - >/dev/null
-printf 'Bindgen needs darwin.' | "$LIN" doc new -s darwin-only -t "Gate is darwin-only" -k finding -p "gopb" -b - >/dev/null
+  -s web-migrations -t "Migration collisions" -k finding -a props --paths "pb/pb_migrations" -b - >/dev/null
+printf 'Bindgen needs darwin.' | "$LIN" doc new -s darwin-only -t "Gate is darwin-only" -k finding --paths "gopb" -b - >/dev/null
 "$LIN" issue link ENG-2 darwin-only >/dev/null
 "$LIN" label create -n props >/dev/null
 "$LIN" issue update ENG-1 --label props >/dev/null
@@ -915,7 +915,7 @@ got=$("$LIN" issue list --json | jq -r '[.items[] | select(.state=="todo")] | so
 # A stale drop target (deleted between drop and request) falls back to column end.
 "$LIN" issue create -t "Doomed" >/dev/null # ENG-7
 DOOMED_ID=$(issue_id "Doomed")
-"$LIN" issue delete ENG-7 --force >/dev/null
+"$LIN" issue delete ENG-7 --yes >/dev/null
 code=$(wcurl -s -o /dev/null -w '%{http_code}' -X POST "$WEB/state?key=ENG-6&state=todo&before=$DOOMED_ID")
 [ "$code" = 200 ] || fail "/state with stale before returned $code, want 200"
 got=$(col_order "$(wcurl -sf "$WEB/")" todo)
@@ -1483,7 +1483,7 @@ if command -v playwright-cli >/dev/null 2>&1; then
   [ "$("$LIN" issue view "$key206" --json | jq -r '.state')" = "$state_before" ] \
     || fail "browser rejected state action changed persisted state"
   # The probe issue would skew the count-sensitive table sections below.
-  "$LIN" issue delete "$key206" --force >/dev/null
+  "$LIN" issue delete "$key206" --yes >/dev/null
 
   # LLL-519: a chip toggle on a page rendered before another writer added a
   # label must keep that label. /events is aborted so the live morph cannot
@@ -1522,11 +1522,11 @@ if command -v playwright-cli >/dev/null 2>&1; then
   labels519=$("$LIN" issue view "$key519" --json | jq -r '[.expand.labels[]?.name] | sort | join(",")')
   [ "$labels519" = "race-a,race-b" ] \
     || fail "LLL-519: board toggle dropped the label the CLI added after the page rendered: got '$labels519'"
-  "$LIN" issue delete "$key519" --force >/dev/null
+  "$LIN" issue delete "$key519" --yes >/dev/null
   "$LIN" label delete race-a >/dev/null
   "$LIN" label delete race-b >/dev/null
 
-  "$LIN" team create -k ASGN -n "Assignment browser" >/dev/null
+  "$LIN" team create --key ASGN -n "Assignment browser" >/dev/null
   "$LIN" issue create --team ASGN -t "Claimed assignment browser" >/dev/null
   "$LIN" issue claim ASGN-1 >/dev/null
   assignment_browser=$(playwright-cli -s="$BROWSER_SESSION" run-code "$(cat "$REPO_ROOT"/scripts/browser_assignment.js)" 2>&1)
@@ -1563,7 +1563,7 @@ if command -v playwright-cli >/dev/null 2>&1; then
   assert_contains "$deletion_browser" 'settings deletion browser passed' "browser: settings deletion review and cancellation"
   "$LIN" issue view "$DELETE_KEY" --json | jq -e '.project == "" and .assignee == ""' >/dev/null \
     || fail "browser deletion should preserve issue and clear project and assignee"
-  "$LIN" issue delete "$DELETE_KEY" --force >/dev/null
+  "$LIN" issue delete "$DELETE_KEY" --yes >/dev/null
 
   # LLL-447: the ⌘K palette, on every page, ranked by the search engine.
   CMDK_PROBE=$("$LIN" issue create -t "Palette landing probe" --json)
@@ -1572,7 +1572,7 @@ if command -v playwright-cli >/dev/null 2>&1; then
     "$REPO_ROOT"/scripts/browser_cmdk.js)
   cmdk_browser=$(playwright-cli -s="$BROWSER_SESSION" run-code "$cmdk_js" 2>&1)
   assert_contains "$cmdk_browser" 'cmdk palette browser passed' "browser: the cmd+K palette opens, filters, searches and lands"
-  "$LIN" issue delete "$CMDK_KEY" --force >/dev/null
+  "$LIN" issue delete "$CMDK_KEY" --yes >/dev/null
 
   # LLL-531/532: '?' sheet, '/' search and g-chords, including the keys that must not act.
   shortcuts_js=$(sed -e "s|__WEB__|$WEB|" "$REPO_ROOT"/scripts/browser_shortcuts.js)
@@ -1596,7 +1596,7 @@ if command -v playwright-cli >/dev/null 2>&1; then
     assert_contains "$fav_live" '"navs":1' "browser: favorite update needs no reload"
   done
   playwright-cli -s="$BROWSER_SESSION" run-code "async page => { await page.locator('#rail-favorites').scrollIntoViewIfNeeded(); await page.screenshot({path:'/tmp/lll-94-favorites.png'}); }" >/dev/null 2>&1
-  "$LIN" issue delete "$FAV_KEY" --force >/dev/null
+  "$LIN" issue delete "$FAV_KEY" --yes >/dev/null
   fav_deleted=$(page_until "$fav_js" '"title":""')
   assert_contains "$fav_deleted" '"title":""' "browser: deleted favorite leaves the open rail"
   assert_contains "$fav_deleted" '"rail":"favorite-rail-kept"' "browser: favorite deletion preserves outer rail"
@@ -2274,7 +2274,7 @@ assert_not_contains "$events" 'id="rail"' "the favorites patch carries no shell"
 STARRED_KEY=$("$LIN" issue list --json | jq -r '.items[] | select(.title=="Starred then deleted") | "ENG-" + (.number|tostring)')
 wcurl -s -o /dev/null -X POST "$WEB/favorite?key=$STARRED_KEY&on=true"
 assert_contains "$(favgroup "$(wcurl -sf "$WEB/")")" "Starred then deleted" "second star pinned"
-"$LIN" issue delete "$STARRED_KEY" --force >/dev/null
+"$LIN" issue delete "$STARRED_KEY" --yes >/dev/null
 assert_not_contains "$(favgroup "$(wcurl -sf "$WEB/")")" "Starred then deleted" \
   "deleting an issue cascades its star out of the rail"
 # ...and it is really gone from PB, not merely filtered out of the render:
@@ -2356,7 +2356,7 @@ assert_not_contains "$events" 'id="rail"' "the views patch carries no shell"
 # OPS is the second project sharing this server. A chooser, a chip list or a
 # settings row that offered its records would either filter this board to
 # nothing or write a record no view can explain.
-env LLL_TEAM=OPS "$LIN" team create -k OPS -n Operations >/dev/null 2>&1 || true
+env LLL_TEAM=OPS "$LIN" team create --key OPS -n Operations >/dev/null 2>&1 || true
 env LLL_TEAM=OPS "$LIN" label create -n foreign-label -c '#ff0000' >/dev/null
 env LLL_TEAM=OPS "$LIN" project create -n "Foreign Project" >/dev/null
 
@@ -2485,7 +2485,7 @@ back_to_back_written 2 || fail "the second back-to-back create wrote nothing"
 # #board morph to the clients viewing that record's team. OPS exists from
 # the TASK-173 section above; the create-or-ignore keeps this section
 # standalone-ordered anyway.
-env LLL_TEAM=OPS "$LIN" team create -k OPS -n Operations >/dev/null 2>&1 || true
+env LLL_TEAM=OPS "$LIN" team create --key OPS -n Operations >/dev/null 2>&1 || true
 env LLL_TEAM=OPS "$LIN" issue create -t "Ops only card" >/dev/null
 
 # Bare paths are 303s to their team-routed twins, query string kept. Plain

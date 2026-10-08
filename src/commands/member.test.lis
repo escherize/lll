@@ -38,10 +38,10 @@ fn invite_lines_do_not_rewrite_the_configured_url() {
 #[test]
 fn invite_lines_name_the_team_when_the_inviter_has_one() {
   let out = joined("kim@example.com", "pw", "http://127.0.0.1:8090", "ENG")
-  assert strings.Contains(out, "lll attach -k ENG")
+  assert strings.Contains(out, "lll attach --key ENG")
 }
 
-/// An unattached inviter must not paste a blank key: 'lll attach -k ' is a
+/// An unattached inviter must not paste a blank key: 'lll attach --key ' is a
 /// command the colleague would run and be confused by.
 #[test]
 fn invite_lines_omit_the_key_when_no_team_is_configured() {

@@ -49,7 +49,7 @@ fn import_dir(input: flags.CommandInput) -> Result<(), string> {
     return Err(
       f"{team.key} already has {existing.length()} issues, and importing into a team that is not empty would mix two sets of numbering.
 To rebuild {team.key} from {dir}, deleting all {existing.length()} first: lll import dir {dir} --replace
-To import somewhere harmless instead: lll attach -k NEWKEY in another directory, then run this there",
+To import somewhere harmless instead: lll attach --key NEWKEY in another directory, then run this there",
     )
   }
 

@@ -6,6 +6,61 @@ minors. Issue keys are on the project's own board (`lll issue view KEY`).
 
 ## [Unreleased]
 
+Every short flag now has one meaning, and help, messages and docs use one
+canonical spelling. Several spellings are gone; read Removed before upgrading
+scripts. A removed spelling fails and names its replacement (LLL-644).
+
+### Added
+
+- `lll config list` and `lll config get KEY` (url, web_url, team or sort).
+  `lll config --list` still works as an alias of `list`.
+- `lll team create KEY -n "Name"` takes the key as the bare argument, like
+  `project create` and `label create`.
+- Long forms: `--key` and `--name` on `team create` and `team rename`,
+  `--name` on `project edit` and `label edit`, `--color` on `label edit`,
+  `--web` for `-w` on `issue view` and `lll board`, `-b` for `--body` on
+  `lll api`.
+- `lll doc list --limit N`.
+- `edit` and `update` are aliases of each other on `issue`, `doc`, `project`
+  and `label`.
+- `--yes` skips a delete confirmation. `team`, `label`, `project`, `member`
+  and comment deletes now ask on a terminal; scripts are not asked.
+- `lll watch --label` may be repeated, matching any of the labels.
+
+### Changed
+
+- `-b`/`--body` is the long-text flag everywhere. On `issue create`,
+  `project create` and `project edit` it sets the description, and
+  `-d`/`--description` stay as aliases there.
+- `--read-only` is the canonical spelling on `lll invite create`; `--ro` stays
+  as an alias, and `member invite` and `member access` accept it too.
+- `--force` only overrides ownership or references (a claim, another member's
+  comment, issues still using a label, project or member).
+- `lll issue comment list KEY` and similar guesses name the real forms
+  instead of reporting that 'list' is not an issue ID.
+- Help fixes: `lll --help` lists `lll bot rotate` and every noun that takes
+  `--team`; `lll bot --help` shows the rotate usage; `lll login --help` shows
+  every flag; `lll import dir` shows `--team`; `lll skill --help` prints its
+  page once; `lll up --help` no longer mentions `--local`; `lll finding --help`
+  teaches `lll finding create`.
+
+### Removed
+
+- `-t` for a team on `invite create` and `member invite`: use `--team`.
+  `-t` is the title.
+- `-k` for a team key on `team create`, `team rename` and `lll attach`: use
+  `--key` (or the bare argument on `team create`). `-k` is the doc kind.
+- `-p` for a password on `lll login` and `member set-password`: use
+  `--password`. `-p` for paths on `doc create`, `doc edit` and
+  `finding create`: use `--paths`; on `finding list`: use `--path`. `-p` is
+  the priority.
+- `--force` on `issue delete` and `doc delete`: use `--yes`.
+- `--description-replace-old` and `--description-replace-new`: use
+  `--description-replace old=new`.
+- `lll doc link` and `lll doc unlink`: use `lll issue link KEY-123 SLUG` and
+  `lll issue unlink KEY-123 SLUG`.
+- `lll finding read`: use `lll doc view SLUG`.
+
 ## [0.8.0] - 2026-10-07
 
 Scoped access is complete for teams: a single-use link invites a person to

@@ -140,7 +140,7 @@ with tempfile.TemporaryDirectory(prefix='lll-546-') as directory:
         assert found, text
         bot_tok = found.group(1)
         assert text.count(bot_tok) == 1, 'the response printed the token more than once'
-        assert f'export LLL_URL={board}\n' in text and '\nlll attach -k ALPHA\n' in text, text
+        assert f'export LLL_URL={board}\n' in text and '\nlll attach --key ALPHA\n' in text, text
         assert "true 'You are joining lll team ALPHA at " + board + ".'" in text, text
         assert '#' not in text[text.index("<pre"):text.index('</pre>')], 'the prompt relies on #'
         bot = members()['bot-agent1']

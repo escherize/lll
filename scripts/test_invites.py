@@ -256,7 +256,7 @@ with tempfile.TemporaryDirectory(prefix='lll-invites-') as directory:
         assert 'send each create or rename on its own' in json.dumps(body), body
         started = time.monotonic()
         assert call(api, f'/api/collections/members/records/{me}', {'name': 'After Batch'}, token, method='PATCH')[0] == 200
-        assert redeem(invite('--team', 'ALPHA', '--ro'), 'After Batch Joiner')[0] == 303
+        assert redeem(invite('--team', 'ALPHA', '--read-only'), 'After Batch Joiner')[0] == 303
         assert time.monotonic() - started < 3, 'a name write waited on a lock a batch left held'
         assert call(api, '/api/settings', {'batch': {'enabled': False}}, su, method='PATCH')[0] == 200
 

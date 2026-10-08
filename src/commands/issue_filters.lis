@@ -12,7 +12,7 @@ fn filter_spec(use: FilterUse) -> Slice<flags.Flag> {
   let state_hint = if use == FilterUse.Create { "\n(create defaults to todo)" } else { "" }
   let assignee_hint = if use == FilterUse.Update { "; 'none' clears it (update)" } else { "" }
   let project_hint = if use == FilterUse.Update { "; pass \"\" to clear it" } else { "" }
-  let repeat_label = use != FilterUse.Watch
+  let repeat_label = true
   // Repeatable only where it filters: on create/update a state is the one the
   // issue moves to, and two would be a contradiction rather than a union.
   let repeat_state = use == FilterUse.List || use == FilterUse.Watch

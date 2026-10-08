@@ -17,7 +17,7 @@ import "flags"
 pub fn attach_spec() -> Slice<flags.Flag> {
   [
     flags.Flag {
-      name: "-k",
+      name: "--key",
       value: true,
       hint: "KEY",
       help: "team key to attach to (default: the server's team, if it has exactly one)",
@@ -52,9 +52,9 @@ pub fn attach(args: Slice<string>) -> Result<(), string> {
   }
 
   let name = filepath.Base(root)
-  let given = p.one("-k")
-  let key = if p.given("-k") {
-    if given == "" { return Err("-k requires a nonempty team key") }
+  let given = p.one("--key")
+  let key = if p.given("--key") {
+    if given == "" { return Err("--key requires a nonempty team key") }
     // LLL-235: what lands in .lll.toml is what the server stores.
     records.normalize_team_key(given)
   } else {
@@ -68,7 +68,7 @@ pub fn attach(args: Slice<string>) -> Result<(), string> {
     derive_key_from_server(name)?
   }
   if key == "" {
-    return Err(f"no team key in '{name}' to derive one from — pass it: lll attach -k KEY")
+    return Err(f"no team key in '{name}' to derive one from — pass it: lll attach --key KEY")
   }
 
   // Attaching to an archived team is refused, not silently revived: archive
@@ -114,7 +114,7 @@ fn derive_key_from_server(dir_name: string) -> Result<string, string> {
   if live.length() > 1 {
     let keys = live.map(|t| t.key).join(", ")
     return Err(
-      f"you can see {live.length()} teams ({keys}) — say which: lll attach -k KEY",
+      f"you can see {live.length()} teams ({keys}) — say which: lll attach --key KEY",
     )
   }
   Ok(clean_key(dir_name))
@@ -124,7 +124,7 @@ fn derive_key_from_server(dir_name: string) -> Result<string, string> {
 /// A server that is down is not a reason to undo the local attachment.
 /// Reconciliation is explicit once access to the configured server returns.
 fn ensure_attached_team(key: string) -> string {
-  let retry = f"lll attach -k {flags.shell_argument(key)}"
+  let retry = f"lll attach --key {flags.shell_argument(key)}"
   let found = match records.find_team(key) {
     Ok(found) => found,
     Err(e) => return f"saved local attachment only; could not verify team {key} on the configured server:\n{e}\nRestore server access, then reconcile this attachment:\n  {retry}",
@@ -142,20 +142,20 @@ fn print_attach_usage() {
     "lll attach - point this directory at a team, once
 
 Usage:
-  lll attach [-k KEY]
+  lll attach [--key KEY]
 
 Writes team = \"KEY\" to .lll.toml and creates the team on the server if it is
 missing. Inside a git repository that file goes at the repo root; outside one
 it goes in the working directory, and every subdirectory inherits it.
 
-An explicit -k KEY is saved exactly as supplied, without shortening it.
-Without -k, the server decides: one team means that team, several means you
+An explicit --key KEY is saved exactly as supplied, without shortening it.
+Without --key, the server decides: one team means that team, several means you
 have to say which. When the server has no teams or cannot be reached, the
 suggested key comes from the directory name, reduced to letters and digits,
 uppercased, at most 5 characters.
 
 If server access or team creation fails, only the local attachment is saved.
-Restore access or resolve the reported error, then rerun lll attach -k KEY
+Restore access or resolve the reported error, then rerun lll attach --key KEY
 to reconcile it with the configured server.
 
 In a repo, commit that file. Clones and worktrees inherit its team attachment.
@@ -167,6 +167,6 @@ Use --web-url URL with login when an explicit board address is needed.
 Keep credentials in the home config or environment, never the committed
 .lll.toml. An inherited attachment does not need another 'lll attach'.
 
-'lll config --list' shows every effective value and the file it came from.",
+'lll config list' shows every effective value and the file it came from.",
   )
 }

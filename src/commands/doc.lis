@@ -1,9 +1,8 @@
-import "go:bufio"
 import "go:encoding/json"
 import "go:fmt"
 import "go:net/url"
-import "go:os"
 import "go:regexp"
+import "go:strconv"
 import "go:strings"
 
 import "display"
@@ -16,6 +15,11 @@ import "query"
 /// The table is the one place a verb is declared: dispatch, `lll doc --help`
 /// and shell completions all read it, so none of the three can drift.
 pub fn doc(args: Slice<string>) -> Result<(), string> {
+  // Removed at 1.0 (D5): the link lives on the issue noun.
+  let verb = args.get(2).unwrap_or("")
+  if verb == "link" || verb == "unlink" {
+    return Err(f"unknown doc command: '{verb}' - did you mean 'lll issue {verb} KEY-123 SLUG'? (see 'lll issue {verb} --help')")
+  }
   flags.dispatch("doc", "work with docs (wiki pages, findings, decisions, PRDs)", doc_intro(), doc_commands(), args)
 }
 
@@ -49,6 +53,7 @@ pub fn doc_commands() -> Slice<flags.Command> {
     },
     flags.Command {
       name: "edit",
+      alias: "update",
       summary: "replace fields (at least one flag); -b - reads the whole body from stdin",
       spec: doc_edit_spec(),
       positional: "SLUG",
@@ -57,28 +62,10 @@ pub fn doc_commands() -> Slice<flags.Command> {
     },
     flags.Command {
       name: "delete",
-      summary: "delete; asks [y/N] unless --force",
+      summary: "delete; asks [y/N] unless --yes",
       spec: doc_delete_spec(),
       positional: "SLUG",
       run: doc_delete,
-      ..
-    },
-    // Hidden (LLL-505): 'lll issue link/unlink KEY-123 SLUG' is the
-    // documented spelling. The doc-first one keeps working for muscle memory.
-    flags.Command {
-      name: "link", hidden: true,
-      summary: "link the doc to an issue — 'lll issue link KEY-123 SLUG' does the same",
-      spec: flags.with_team([]),
-      positional: "SLUG KEY-123",
-      run: doc_link,
-      ..
-    },
-    flags.Command {
-      name: "unlink", hidden: true,
-      summary: "remove that link — 'lll issue unlink KEY-123 SLUG' does the same",
-      spec: flags.with_team([]),
-      positional: "SLUG KEY-123",
-      run: doc_unlink,
       ..
     },
   ]
@@ -102,7 +89,7 @@ Docs link to issues with 'lll issue link KEY-123 SLUG' and unlink with
 the issue must belong to the same one.
 
 Findings surface by area and path, not by search: 'lll finding near <path>'
-lists what is filed about a file or directory, 'lll finding list [--area X]'
+lists what is filed about a file or directory, 'lll finding list [-a AREA]'
 lists one area. An issue page shows the findings whose area names one of its
 labels (see 'lll finding --help')."
 }
@@ -249,8 +236,7 @@ fn doc_new_spec() -> Slice<flags.Flag> {
       ..,
     },
     flags.Flag {
-      name: "-p",
-      alias: "--paths",
+      name: "--paths",
       value: true,
       hint: "paths",
       help: "comma-separated file/directory paths the doc is about, e.g.\nsrc/pb, pb/pb_migrations ('lll finding near' matches by them)",
@@ -338,8 +324,7 @@ fn doc_edit_spec() -> Slice<flags.Flag> {
       ..,
     },
     flags.Flag {
-      name: "-p",
-      alias: "--paths",
+      name: "--paths",
       value: true,
       hint: "paths",
       help: "replacement comma-separated paths — the WHOLE set\n(pass \"\" to clear it)",
@@ -349,7 +334,7 @@ fn doc_edit_spec() -> Slice<flags.Flag> {
 }
 
 fn doc_delete_spec() -> Slice<flags.Flag> {
-  flags.with_team([flags.Flag { name: "--force", help: "skip the delete confirmation", .. }])
+  flags.with_team([flags.Flag { name: "--yes", help: "skip the delete confirmation", .. }])
 }
 
 
@@ -378,7 +363,7 @@ fn create_doc(p: flags.Parsed, default_kind: string, slug: string) -> Result<(),
   let requested_kind = if p.given("-k") { p.one("-k") } else { default_kind }
   let kind = check_kind(requested_kind)?
   let area = strings.TrimSpace(p.one("-a"))
-  let paths = parse_paths(p.one("-p"))
+  let paths = parse_paths(p.one("--paths"))
   let confidence_raw = if p.given("--confidence") { p.one("--confidence") } else { "" }
   let confidence = check_confidence(confidence_raw)?
   let mut body = ""
@@ -441,13 +426,33 @@ fn doc_list_spec() -> Slice<flags.Flag> {
       help: "only docs whose slug or title contains text",
       ..,
     },
+    flags.Flag {
+      name: "--limit",
+      alias: "-l",
+      value: true,
+      hint: "N",
+      help: "list at most N docs (positive integer)",
+      ..,
+    },
     flags.Flag { name: "--json", help: "print the raw record list as JSON", .. },
   ])
+}
+
+/// `--limit N`, validated before any server call; 0 when not given.
+fn limit_flag(p: flags.Parsed) -> Result<int, string> {
+  if !p.given("--limit") { return Ok(0) }
+  let raw = p.one("--limit")
+  let Ok(n) = strconv.Atoi(raw) else {
+    return Err(f"--limit must be a positive integer, got '{raw}'")
+  }
+  if n < 1 { return Err(f"--limit must be a positive integer, got {n}") }
+  Ok(n)
 }
 
 fn doc_list(input: flags.CommandInput) -> Result<(), string> {
   let p = input.parsed
   let kind = if p.given("-k") { check_kind(p.one("-k"))? } else { "" }
+  let limit = limit_flag(p)?
   let team = current_team()?
   let search = strings.ToLower(strings.TrimSpace(p.one("--search")))
   let mut filter = query.filter(team.id, "", "", "", "", "")
@@ -456,6 +461,7 @@ fn doc_list(input: flags.CommandInput) -> Result<(), string> {
   if search != "" {
     items = items.filter(|d| strings.Contains(strings.ToLower(d.slug), search) || strings.Contains(strings.ToLower(d.title), search))
   }
+  if limit > 0 && items.length() > limit { items = items[..limit] }
   let docs = models.DocList { items }
   if p.given("--json") { return print_json(docs, "docs") }
   for d in docs.items {
@@ -531,8 +537,8 @@ fn doc_edit(input: flags.CommandInput) -> Result<(), string> {
   let kind_set = p.given("-k")
   let area_raw = p.one("-a")
   let area_set = p.given("-a")
-  let paths_raw = p.one("-p")
-  let paths_set = p.given("-p")
+  let paths_raw = p.one("--paths")
+  let paths_set = p.given("--paths")
   if !body_set && !title_set && !kind_set && !area_set && !paths_set {
     return Err(f"nothing to edit — pass at least one flag\nusage: {usage}")
   }
@@ -565,45 +571,16 @@ fn doc_edit(input: flags.CommandInput) -> Result<(), string> {
 fn doc_delete(input: flags.CommandInput) -> Result<(), string> {
   let p = input.parsed
   let slug = p.first()
-  let force = p.given("--force")
-  if slug == "" { return Err("usage: lll doc delete SLUG [--force]") }
+  if slug == "" { return Err("usage: lll doc delete SLUG [--yes]") }
 
   let d = fetch_doc(current_team()?, slug)?
-  if !force {
-    fmt.Print(f"delete doc {d.slug}? [y/N] ")
-    let mut scanner = bufio.NewScanner(os.Stdin)
-    let mut answer = ""
-    if scanner.Scan() { answer = strings.TrimSpace(scanner.Text()) }
-    let a = strings.ToLower(answer)
-    if a != "y" && a != "yes" {
-      fmt.Println("Aborted.")
-      return Ok(())
-    }
+  if !p.given("--yes") && !confirmed(f"delete doc {d.slug}?") {
+    fmt.Println("Aborted.")
+    return Ok(())
   }
   let _ = pb.delete(f"/api/collections/docs/records/{d.id}")?
   fmt.Println(f"Deleted doc {d.slug}")
   Ok(())
-}
-
-/// 'lll doc link SLUG KEY-123': the doc-first spelling of the issue link.
-/// It swaps the two positionals and delegates to the same write path
-/// (link_issue in issue.lis), so both nouns answer identically — the
-/// relation is stored once on docs.issues, and one way to write it.
-fn doc_link(input: flags.CommandInput) -> Result<(), string> {
-  let usage = "lll doc link SLUG KEY-123"
-  let slug = input.parsed.first()
-  let id = input.parsed.nth(1)
-  if slug == "" || id == "" { return Err(f"usage: {usage}") }
-  link_issue(id, slug, usage)
-}
-
-/// 'lll doc unlink SLUG KEY-123', the doc-first spelling of the unlink.
-fn doc_unlink(input: flags.CommandInput) -> Result<(), string> {
-  let usage = "lll doc unlink SLUG KEY-123"
-  let slug = input.parsed.first()
-  let id = input.parsed.nth(1)
-  if slug == "" || id == "" { return Err(f"usage: {usage}") }
-  unlink_issue(id, slug, usage)
 }
 
 // --------------------------------------------------------------- lookups

@@ -62,7 +62,7 @@ class Stream:
         raise AssertionError('missing claim stream transition')
 
 
-cli('team', 'create', '-k', 'CL185', '-n', 'Live claims')
+cli('team', 'create', '--key', 'CL185', '-n', 'Live claims')
 record = json.loads(cli('issue', 'create', 'Live claim controls', '--json'))
 key = 'CL185-1'
 record_path = '/api/collections/issues/records/' + record['id']

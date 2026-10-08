@@ -63,7 +63,6 @@ pub fn up_spec() -> Slice<flags.Flag> {
     },
     flags.Flag {
       name: "--scratch",
-      alias: "",
       help: "start a throwaway local board, ignoring inherited config and LLL_* values",
       ..,
     },
@@ -86,7 +85,7 @@ pub fn up_spec() -> Slice<flags.Flag> {
 
 pub fn up(args: Slice<string>) -> Result<(), string> {
   let spec = up_spec()
-  let p = flags.parse(spec, args, 2, false, "")?
+  let p = flags.parse(spec, args, 2, false, flags.usage("lll up", spec, ""))?
   if p.given("--help") {
     print_up_usage()
     return Ok(())
@@ -159,7 +158,7 @@ or run against the remote deliberately, with no --pb-dir",
 'lll up' serves and seeds a database — pointed at a remote one it writes there
 for a throwaway board: lll up --scratch
 to serve this directory instead: LLL_CONFIG_HOME=$(mktemp -d) LLL_URL=http://127.0.0.1:8090 lll up
-check what is configured with 'lll config --list'",
+check what is configured with 'lll config list'",
     )
   }
 
@@ -530,7 +529,7 @@ fn print_up_usage() {
 
 Usage:
   lll up [--port 8100] [--pb-dir pb/pb_data] [--no-open] [--demo] [--admin-ui]
-  lll up --scratch [--no-open]   (--local is an alias)
+  lll up --scratch [--no-open]
   lll up --bind LAN_OR_TAILSCALE_IP [--no-open]
 
 Reuses a server API already running at the configured URL; otherwise runs one
@@ -734,7 +733,7 @@ fn ask_team(suggested: string) -> Result<string, string> {
     )
   }
   // Only directory-derived suggestions are shortened/normalized. Explicit
-  // input follows team create and attach -k: preserve the identifier.
+  // input follows team create and attach --key: preserve the identifier.
   let typed = strings.TrimSpace(line)
   if typed == "" { Ok(suggested) } else { Ok(typed) }
 }

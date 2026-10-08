@@ -49,10 +49,12 @@ fn repeated_filters_mean_the_union_and_undeclared_repeats_are_refused() {
   assert list_filters.label.length() == 2
   assert list_filters.label.get(0) == Some("first")
 
-  // Watch does not declare --label repeatable, so the second one is refused
-  // by name instead of silently discarded.
-  let assert Err(refused) = flags.parse(filter_spec(FilterUse.Watch), args, 0, false, "")
-  assert refused.contains("--label may only be given once")
+  // Watch takes repeated --label too since LLL-644: the stream matches any.
+  let assert Ok(watched) = flags.parse(filter_spec(FilterUse.Watch), args, 0, false, "")
+  assert watched.all("--label").length() == 2
+  // A flag that is not repeatable is still refused by name.
+  let assert Err(refused) = flags.parse(filter_spec(FilterUse.Watch), ["--assignee", "a", "--assignee", "b"], 0, false, "")
+  assert refused.contains("--assignee may only be given once")
 
   // Repeated --state is the case the issue was filed about.
   let assert Ok(states) = flags.parse(

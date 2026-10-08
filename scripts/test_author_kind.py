@@ -39,7 +39,7 @@ def member(name, **extra):
         passwordConfirm='author-kind-123', **extra))
 
 
-cli('team', 'create', '-k', 'AK610', '-n', 'Author kinds')
+cli('team', 'create', '--key', 'AK610', '-n', 'Author kinds')
 issue = json.loads(cli('issue', 'create', 'Who wrote this', '--json'))
 key = 'AK610-1'
 owner = member('ak-owner', kind='person')

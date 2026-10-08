@@ -127,7 +127,7 @@
 
 {{define "set-projects"}}<section class="set-sec">
 <h2>Projects <span class="count">{{len .Projects}}</span></h2>
-<p class="set-note">A project names a destination — Release 1, multi-project server mode — not a wave of work. Descriptions are long-form, so they stay with <code>lll project create -d</code>.</p>
+<p class="set-note">A project names a destination — Release 1, multi-project server mode — not a wave of work. Descriptions are long-form, so they stay with <code>lll project create -b</code>.</p>
 <div class="set-rows">
 {{range $p := .Projects}}<div id="set-project-{{$p.Id}}"><form class="set-row" data-name="{{$p.Name}}">
 <input type="hidden" name="id" value="{{$p.Id}}">

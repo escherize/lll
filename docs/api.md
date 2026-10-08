@@ -2,7 +2,7 @@
 
 The board's data API is PocketBase REST, served at the board's address — the
 same url the CLI is configured against (`LLL_URL`, or `url` in
-`~/.config/lll/lll.toml`; `lll config --list` shows which value won and where
+`~/.config/lll/lll.toml`; `lll config list` shows which value won and where
 it came from). There is no separate API host to point at.
 
 ## Auth

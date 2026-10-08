@@ -32,7 +32,7 @@ pub fn import_commands() -> Slice<flags.Command> {
     flags.Command {
       name: "dir",
       summary: "rebuild the configured team from a directory 'lll export' wrote; refuses a team that already has issues unless --replace deletes them first",
-      spec: dir_spec(),
+      spec: flags.with_team(dir_spec()),
       positional: "DIR",
       run: import_dir,
       ..

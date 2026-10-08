@@ -101,11 +101,11 @@ board URL. `lll issue view KEY-12 --raw` prints the issue as plain markdown,
 which is what you want in a prompt or a pipe. `--json` gives the raw record with
 relations expanded.
 
-**Pipe bodies in.** `-d -` and `-b -` read from stdin, so generated text never
+**Pipe bodies in.** `-b -` reads from stdin, so generated text never
 needs a temp file:
 
 ```sh
-printf '%s' "$analysis" | lll issue create -t "Title" -d -
+printf '%s' "$analysis" | lll issue create -t "Title" -b -
 git log --oneline -20 | lll issue comment KEY-12 -b -
 ```
 
@@ -162,7 +162,7 @@ after two occurrences and happened twice more; a byte-offset versus rune-index
 bug was in a finding before it panicked in five places.
 
 File work on this project in team `LLL` on the hosted board, using the CLI:
-`lll issue create -t "Title" --emoji 🐛 -d -`. The old `.private/` sidecar is
+`lll issue create -t "Title" --emoji 🐛 -b -`. The old `.private/` sidecar is
 read-only history. Do not write new tasks there. When using another project's
 board, file in that project's team. Keep scratch/demo fixtures separate from
 these real work records.

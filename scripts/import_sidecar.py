@@ -270,7 +270,7 @@ def main():
     if teams:
         note("teams", 1, 0, 1)
     else:
-        lll.run(["team", "create", "-k", TEAM_KEY, "-n", "lisette-linear-like"])
+        lll.run(["team", "create", "--key", TEAM_KEY, "-n", "lisette-linear-like"])
         note("teams", 1, 1, 0)
 
     tasks = load_tasks(private)
