@@ -445,7 +445,7 @@ fn assignee_write(r: mut Ref<http.Request>) -> Result<string, string> {
   // picker clears only the viewer's own hold. Taking anyone else's goes
   // through the Release form, which asks for a reason.
   let _ = claims.update_assignment(who.caller, issue.id, observed, marshal(IssueAssigneePatch { assignee: id })?, "", false, "").map_err(|e| {
-    if strings.Contains(e, "needs force") {
+    if pb.classify(e).code == "needs_force" {
       f"{strings.TrimSuffix(pb.display_error(e).summary, ".")} - release it with a reason first (the Release form on the issue)"
     } else { e }
   })?
@@ -588,7 +588,7 @@ fn release_write(r: mut Ref<http.Request>) -> Result<string, string> {
   if observed == "" { return Err("The claim changed; refresh before releasing it.") }
   let reason = strings.TrimSpace(r.FormValue("reason"))
   let _ = claims.release(who.caller, issue.id, observed, "", reason != "", reason).map_err(|e| {
-    if strings.Contains(e, "needs force") {
+    if pb.classify(e).code == "needs_force" {
       f"{strings.TrimSuffix(pb.display_error(e).summary, ".")} - type a reason to release it anyway; it is recorded in a comment on the issue"
     } else { e }
   })?
