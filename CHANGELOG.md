@@ -6,6 +6,36 @@ minors. Issue keys are on the project's own board (`lll issue view KEY`).
 
 ## [Unreleased]
 
+### Changed
+
+- A team key must be a letter followed by up to 15 letters, digits, `_` or
+  `-` (`^[A-Z][A-Z0-9_-]{0,15}$` after uppercasing). The server refuses
+  any other key on create and on rename, and the CLI names the rule. Existing
+  keys are not rewritten: the server logs each non-conforming key once at
+  upgrade, and it still takes unrelated edits (LLL-628).
+- A key derived from a directory name (`lll up`, `lll attach`) now keeps
+  only ASCII letters and digits and starts with a letter.
+
+### Security
+
+- A reference stays inside one team for every writer. An issue's labels,
+  project and blockers, a doc's issues and a webhook's project must belong
+  to the record's own team. Full-access members and superusers were not
+  checked before. Moving a record to another team is refused while it, or a
+  record pointing at it, would reference across teams, and the refusal names
+  what to detach. References made before this change remain and do not block
+  unrelated edits; `scripts/audit_cross_team_refs.py` lists them (read-only)
+  (LLL-631).
+- A team-scoped member can no longer read another team's label names or
+  issue titles through a relation filter. Through a multi-valued relation,
+  a back-relation or `@collection`, a filter needs an any-match operator
+  (`labels.name ?~ 'x'`, `blocked_by.id ?= 'ID'`). A stored relation id may
+  only be matched exactly. Neither can be sorted on. This applies to record
+  lists (all methods, including HEAD) and realtime subscription options
+  (LLL-634).
+- Team keys can no longer carry quotes, `$( )`, spaces or control characters
+  into URLs, filenames and shell-pasted bot prompts (LLL-628).
+
 ## [0.8.0] - 2026-10-07
 
 Scoped access is complete for teams: a single-use link invites a person to
