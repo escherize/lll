@@ -64,7 +64,7 @@ e2e_pin_home
 skill_list=$(cd "$DATA_DIR" && "$LIN" skill list)
 assert_contains "$skill_list" "software-factory" "skill list works outside the checkout"
 skill_body=$(cd "$DATA_DIR" && "$LIN" skill get software-factory)
-assert_contains "$skill_body" "# How work moves through this repo" "skill get reads the embedded body"
+assert_contains "$skill_body" "# How work moves through a repo tracked on lll" "skill get reads the embedded body"
 if skill_extra=$(cd "$DATA_DIR" && "$LIN" skill list software-factory 2>&1); then
   fail "skill list silently ignored an extra argument"
 fi

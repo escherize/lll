@@ -5,20 +5,20 @@ description: Interview a maintainer and write the codebase-specific skills for a
 
 # Building stage 3 for a repo that has none
 
-> One stage of the loop in [software-factory](../software-factory/SKILL.md), which maps all six
-> and says what hands to what.
+> One stage of the loop in `lll skill get software-factory`, which maps all
+> six and says what hands to what.
 
 Stage 3 can never ship, because it is made of things that are only true in
-one repo. In the lll repo it is `lisette-interop`, `datastar-fragments` and
-`pocketbase`. In yours it is different things, and nobody but you knows what
-they are yet.
+one repo. In lll's own repo it is three skills: one for the Lisette-to-Go
+boundary, one for the live board's server-sent fragments, one for PocketBase.
+In yours it is different things, and nobody but you knows what they are yet.
 
 This skill is how to find out: read first, then interview, then write, then
 check that it would have caught something.
 
 ## What a stage-3 skill actually is
 
-Look at the three above and the shape is the same every time. Each one owns a
+Those three do not ship, but their shape is the same every time. Each one owns a
 **boundary** - Lisette against Go, Datastar against the server, PocketBase
 against lll - and each is a **catalogue of traps at that boundary**.
 
@@ -30,7 +30,7 @@ The test for whether something belongs: **did it cost somebody hours, and would
 the next person pay the same hours?** If yes, it is a stage-3 line. If it is in
 the dependency's own README, it is not.
 
-Three from this repo, as calibration:
+Three from lll's repo, as calibration:
 
 - An empty-string collection rule means PUBLIC, and reads like the opposite.
 - `length()` counts BYTES and `substring()` indexes RUNES; they agree until
@@ -62,7 +62,7 @@ ls .github/workflows/           # what CI actually enforces
 Two searches earn their keep every time:
 
 ```sh
-rg -n "do not|don't|never|careful|gotcha|trap|WARNING|HACK|workaround" --type-add 'src:*.{go,py,ts,rs,js,lis}' -tsrc
+rg -n "do not|don't|never|careful|gotcha|trap|WARNING|HACK|workaround" --type-add 'src:*.{go,py,ts,rs,js}' -tsrc
 rg -n "because|the reason|this used to" -g '!*test*' | head -40
 ```
 
@@ -76,7 +76,7 @@ they are the two the maintainer is tired of.
 ## Step 2: interview, with evidence in hand
 
 Ask few questions, and make each one about something reading could not settle.
-Use the question tool rather than a wall of prose, and lead with what you found
+Ask through your harness's question tool if it has one, rather than a wall of prose, and lead with what you found
 so the maintainer is correcting a draft rather than composing an essay.
 
 The five that produce the most per minute asked:

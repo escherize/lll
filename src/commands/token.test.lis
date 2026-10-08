@@ -3,6 +3,7 @@ import "go:os"
 import "go:os/exec"
 import "go:path/filepath"
 import "go:time"
+import "go:github.com/escherize/lll/skills"
 
 // Unit cover for TASK-214's pure halves in token.lis: the expiry line printed
 // under a mint, and the refusal classifier. Both are functions of their
@@ -97,6 +98,16 @@ true 'Claim an issue before you edit code; record findings on the board.'
 "
   assert got == want
   assert !got.contains("#")
+}
+
+#[test]
+fn agent_prompt_points_at_a_skill_the_binary_ships() {
+  // The prompt is pasted into an agent in some other repo, so the skill it
+  // names must be one `lll skill get` serves there, and that skill must be
+  // repo-neutral (LLL-647; skills_test.go checks the bodies).
+  let got = agent_prompt("https://lll.example.com", "ALPHA", "aaa.bbb-c_d.eee")
+  let named = skills.Names().filter(|n| got.contains(f"\nlll skill get {n}\n"))
+  assert named.length() == 1
 }
 
 /// The shells a pasted prompt meets, each skipped (saying so) only where it

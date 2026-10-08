@@ -1,32 +1,35 @@
 ---
 name: software-factory
-description: Start here. The map of how work moves through this repo end to end - pick an issue, isolate, build, verify, merge, record - and which skill owns each stage. Use when you are starting work and do not know which skill applies, when you have finished one stage and need the next, when onboarding to this repo, or when asked "how do I work on this" / "what skill do I use". Triggers on "where do I start", "what next", "which skill", "how does this repo work", "software factory", "the loop", "onboard".
+description: Start here. The map of how work moves through a repo tracked on lll, end to end - pick an issue, isolate, build, verify, merge, record - and which skill owns each stage. Use when you are starting work and do not know which skill applies, when you have finished one stage and need the next, when onboarding to a repo, or when asked "how do I work on this" / "what skill do I use". Triggers on "where do I start", "what next", "which skill", "how do we work here", "software factory", "the loop", "onboard".
 ---
 
-# How work moves through this repo
+# How work moves through a repo tracked on lll
 
-Six stages. Each has a skill that owns it. This page is the map: it says what
-each stage is for, when you are in it, and what you hand to the next one.
+Six stages. This page is the map: it says what each stage is for, when you are
+in it, and what you hand to the next one. Four stages have a skill that ships
+with lll; read one with `lll skill get NAME`. Stages 2 to 4 depend on your
+repo, so this page carries the general guidance and your repo may add its own
+skills for them. Where your repo's instructions (AGENTS.md, CLAUDE.md, a repo
+skill) are more specific than this page, they win.
 
 **Open the stage skill when you get there.** This page deliberately does not
 repeat their contents. A map that reproduces the territory gets followed
 instead of the territory, and then it rots while the territory moves.
 
 ```
-  1 intake      backlog-loop     which issue may I take?
-  2 isolate     parallel-work    where do I work without colliding?
-  3 build       (this codebase)  lisette-interop, datastar-fragments, pocketbase
-                                 codebase-skills builds this stage for a new repo
-  4 verify      verify-gate      mise run gate, and the path the issue describes
-  5 merge       merge-gate       land it, confirm it reached the artifact
-  6 record      lll              the claim, the evidence, the decision
+  1 intake      backlog-loop        which issue may I take?
+  2 isolate     (this page)         where do I work without colliding?
+  3 build       your repo's skills  codebase-skills writes them if there are none
+  4 verify      (this page)         your project's gate, and the path the issue describes
+  5 merge       merge-gate          land it, confirm it reached the artifact
+  6 record      lll                 the claim, the evidence, the decision
 ```
 
 Stage 6 is not last. It runs through all of them.
 
 ## 1. Intake - what may I take?
 
-[backlog-loop](../backlog-loop/SKILL.md)
+`lll skill get backlog-loop`
 
 Most issues on a mature board are NOT safely automatable, and the failure that
 costs a night is not getting stuck. It is confidently finishing the wrong thing
@@ -48,9 +51,6 @@ Hands to stage 2: one issue, claimed.
 
 ## 2. Isolate - where do I work?
 
-`parallel-work`, in the lll repo only. It does not ship with the binary; in
-another repo, this section is the guidance.
-
 Two agents in one checkout is not a merge problem, it is a corruption problem.
 Take a worktree before the first edit.
 
@@ -59,7 +59,8 @@ refs, and the remote are shared. Never `git stash` here.
 
 Hands to stage 3: a worktree, a branch cut from the commit you meant, and a
 claim on the board that is the actual lock - between members. Agents sharing
-one token are one member; parallel-work says what to do instead.
+one token are one member; `lll skill get lll` says what to do instead (an
+`--agent` label per session, or a member per worker).
 
 ## 3. Build - the codebase itself
 
@@ -68,18 +69,9 @@ speculatively; they are reference, not process.
 
 **This stage can never be shipped**, because it is made of things that are
 only true in one repo. A repo adopting this loop starts with an empty stage 3
-and builds its own: [codebase-skills](../codebase-skills/SKILL.md) is the
-interview that does it.
-
-In the lll repo (none of these ship with the binary):
-
-- `lisette-interop` - Lisette and Go crossing:
-  text offsets, partial I/O, package-level state (there is none; the compiler
-  rejects it), embedded resources.
-- `datastar-fragments` - the live board: SSE
-  routing, fragment ownership, drafts a broadcast must not clear.
-- `pocketbase` - anything under `pb/` or `gopb/`:
-  migrations, collection rules (empty string means PUBLIC), realtime, auth.
+and builds its own: `lll skill get codebase-skills` is the interview that does
+it. Each such skill owns one boundary (a language crossing, a framework, a
+database) and catalogues the traps there.
 
 One issue per change. Found a second problem? File it and carry on.
 
@@ -90,34 +82,30 @@ the stack reads as an argument instead of asking a reviewer to trust you.
 
 ## 4. Verify - is it actually true?
 
-`verify-gate`, in the lll repo only. It does not ship with the binary; in
-another repo, this section is the guidance.
+Your project's gate is the one command that must pass before a change lands:
+build, tests, whatever CI enforces. Your repo's AGENTS.md, CONTRIBUTING or CI
+workflow names it.
 
-The gate is one command:
-
-```sh
-mise run gate     # build + unit tests + full e2e
-```
-
-**`mise run gate` is necessary and not sufficient.** It says you broke nothing.
+**The gate is necessary and not sufficient.** It says you broke nothing.
 It does not say you fixed anything. Reproduce the failure the issue describes,
 fix it, then reproduce the fix under the issue's conditions rather than the
-gate's. That skill is how: an isolated board, a health check before you trust
-it, the driver that already covers your feature, and where the evidence lives.
+gate's: a throwaway environment, a health check before you trust it, and the
+evidence recorded on the issue.
 
-Two rules that have each cost this repo real time:
+Two rules that have each cost real time:
 
 - **Read the exit code you actually care about.** A pipeline's status is its
-  LAST command, so `mise run gate | tail` reports `tail`. Append
+  LAST command, so `GATE | tail` reports `tail`. Append
   `echo "GATE_EXIT=$?"` and grep the log for it.
-- **The gate cannot see everything.** seed, scratch and the release workflow run
-  outside it. Ask what your change touches and whether the gate looks there.
+- **The gate cannot see everything.** Demo-seeding scripts, scratch
+  environments and the release workflow often run outside it. Ask what your
+  change touches and whether the gate looks there.
 
 Hands to stage 5: a green gate, and evidence from the path a user takes.
 
 ## 5. Merge - land it
 
-[merge-gate](../merge-gate/SKILL.md)
+`lll skill get merge-gate`
 
 The stage that decides whether this is a factory or a pull request generator,
 and the one nobody writes down. Published numbers put fully autonomous PRs at a
@@ -131,7 +119,7 @@ Hands to stage 6: the change on main, confirmed in the artifact people install.
 
 ## 6. Record - the part that survives
 
-[lll](../lll/SKILL.md)
+`lll skill get lll`
 
 Runs through every stage, not after them. Claim before code. Comment with the
 evidence you ran. Write the decision when you make it, not when you ship it,
@@ -159,18 +147,18 @@ immediately before it. Create the three once per team with `lll label create`;
 run `lll label list` first and reuse rather than minting near-duplicates.
 
 **Use `--add-label`, not `--label`.** `--label` REPLACES the set: `lll issue
-update LLL-123 --label outcome:clean` writes that one label and drops every
+update KEY-123 --label outcome:clean` writes that one label and drops every
 other label the issue was carrying. `--add-label` adds one label and keeps the
 rest:
 
 ```sh
-lll issue update LLL-123 --add-label outcome:clean
-lll issue close LLL-123
+lll issue update KEY-123 --add-label outcome:clean
+lll issue close KEY-123
 ```
 
 `--add-label` and `--remove-label` repeat. Each changes only the labels it
 names, so a label another agent adds at the same time with `--add-label` is
-kept (LLL-513). `--label` and the board's label picker still write the whole
+kept. `--label` and the board's label picker still write the whole
 set from an earlier read, so either can drop a concurrent add. The two flags
 cannot be combined with `--label`.
 
