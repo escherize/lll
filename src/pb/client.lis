@@ -109,10 +109,19 @@ impl Client {
   /// token, a watch) keeps going. Only a token that came from a file is
   /// replaced: an environment token never changes this way, and a token a
   /// boot handed over (with_token) is not traded for whatever a file says.
-  pub fn reload_token(self) {
-    if !strings.HasPrefix(self.token_source, "file:") { return }
-    let Ok(cfg) = self.settings.reload().config() else { return }
-    if cfg.token != "" && cfg.token != self.token() { self.renew_to(cfg.token) }
+  ///
+  /// The token is adopted only when the configuration as it is now, without
+  /// any url flag, names the server this client talks to: a 'lll login
+  /// --url B' elsewhere rewrites url and token together, and B's token must
+  /// never be sent to this client's server. True when the token changed.
+  pub fn reload_token(self) -> bool {
+    if !strings.HasPrefix(self.token_source, "file:") { return false }
+    let Ok(base) = self.url() else { return false }
+    let unflagged = config.Overrides { url: None, ..self.settings.overrides }
+    let Ok(now) = config.resolve(self.settings.env, unflagged).config() else { return false }
+    if now.url != base || now.token == "" || now.token == self.token() { return false }
+    self.renew_to(now.token)
+    true
   }
 
   /// This client renewing its own token as `renewal` says (the board).
@@ -282,14 +291,22 @@ impl Client {
     // the way it did when every request re-read the config: a token
     // rewritten in a config file since this client was built ('lll login'
     // elsewhere, a rotated bot token) is tried once before the refusal.
-    if verdict != "valid" && verdict != "opaque" && self.renewal.is_none() {
-      self.reload_token()
+    let mut token = token
+    let mut verdict = verdict
+    if verdict != "valid" && verdict != "opaque" && self.renewal.is_none() && self.reload_token() {
       let fresh = self.token()
-      if fresh != token {
-        return Some(request_options(
-          wire.base, wire.method, wire.path, wire.payload, bearer(fresh), wire.defaulted,
-          wire.content_type, wire.stamp, wire.key,
-        ))
+      match request_options(
+        wire.base, wire.method, wire.path, wire.payload, bearer(fresh), wire.defaulted,
+        wire.content_type, wire.stamp, wire.key,
+      ) {
+        Ok(body) => return Some(Ok(body)),
+        Err(e) => {
+          if classify(e).status != 401 { return Some(Err(e)) }
+          // The file's token is refused too: name it the way the first
+          // refusal would have been named.
+          token = fresh
+          verdict = self.token_verdict(wire.base, fresh)
+        },
       }
     }
     if verdict == "corrupted" { return Some(Err(corrupted_token(self.token_source))) }

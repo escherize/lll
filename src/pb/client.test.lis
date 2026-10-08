@@ -290,3 +290,35 @@ fn a_refused_file_token_is_replaced_by_the_one_the_file_holds_now() {
   let assert Err(_) = handed.get("/api/collections/teams/records")
   assert handed.token() == old
 }
+
+#[test]
+fn another_servers_token_in_the_file_is_never_sent_here() {
+  // Review N1: 'lll login --url B' elsewhere rewrites url and token together.
+  // A process still talking to A must not try B's token on A, and its
+  // refusal keeps the classified wording (N2).
+  let old = live_token()
+  let other = "eyJhbGciOiJIUzI1NiJ9.eyJjb2xsZWN0aW9uSWQiOiJwYmNfMzU3MjczOTM0OSIsImV4cCI6NDEwMjQ0NDgwMCwiaWQiOiJ6enoxMjNkZWY0NTZnaGkiLCJyZWZyZXNoYWJsZSI6ZmFsc2UsInR5cGUiOiJhdXRoIn0.BBBB"
+  let seen = Channel.buffered<string>(64)
+  let mut server = httptest.NewServer(http.HandlerFunc(|w, r| {
+    let _ = seen.send(r.Header.map_or("", |h| h.Get("Authorization")))
+    w.WriteHeader(401)
+    let _ = w.Write("{\"data\":{},\"message\":\"The request requires valid record authorization token.\",\"status\":401}".bytes())
+  }))
+  defer server.Close()
+  let assert Ok(root) = os.MkdirTemp("", "lll-reload-b")
+  let assert Ok(prev) = os.Getwd()
+  defer { let _ = os.Chdir(prev) }
+  let assert Ok(_) = os.Chdir(root)
+  let file = filepath.Join(root, "lll", "lll.toml")
+  let assert Ok(_) = os.MkdirAll(filepath.Dir(file), 0o700)
+  let assert Ok(_) = os.WriteFile(file, f"url = \"{server.URL}\"\ntoken = \"{old}\"\n".bytes(), 0o600)
+  let c = Client.new(config.resolve(config.Env { config_home: root, .. }, config.no_overrides()))
+  let assert Ok(_) = os.WriteFile(file, f"url = \"https://server-b.example\"\ntoken = \"{other}\"\n".bytes(), 0o600)
+  let assert Err(e) = c.get("/api/collections/teams/records")
+  assert e.contains("was rejected by")
+  assert c.token() == old
+  seen.close()
+  for auth in seen {
+    assert !auth.contains("BBBB")
+  }
+}

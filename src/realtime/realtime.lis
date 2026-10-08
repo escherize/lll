@@ -255,7 +255,7 @@ fn reconnect(
               )
             }
           }
-          if let DeadToken.Retry = on_dead_token { ctx.reload_token() }
+          if let DeadToken.Retry = on_dead_token { let _ = ctx.reload_token() }
         }
       },
     }
