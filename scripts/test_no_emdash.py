@@ -45,13 +45,21 @@ def lis_literals(source):
             i = read_lis_string(source, i, out)
             continue
         if source[i] == "'":
-            # A char literal such as '"' must not open a string.
+            # A char literal such as '"' must not open a string, but its
+            # text still counts: '@' prints as surely as "@".
             end = source.find("'", i + 2)
             if 0 < end - i <= 4:
+                out.append((source.count('\n', 0, i) + 1, source[i + 1:end]))
                 i = end + 1
                 continue
         i += 1
     return out
+
+
+def is_prefixed(source, i, prefix):
+    """Is the quote at source[i] preceded by the literal prefix, not an identifier?"""
+    before = source[i - 2:i - 1]
+    return source[i - 1:i] == prefix and not (before.isalnum() or before == '_')
 
 
 def read_lis_string(source, i, out):
@@ -61,8 +69,13 @@ def read_lis_string(source, i, out):
     nested string rather than close this one.
     """
     line = source.count('\n', 0, i) + 1
-    before = source[i - 2:i - 1]
-    fstring = source[i - 1:i] == 'f' and not (before.isalnum() or before == '_')
+    if is_prefixed(source, i, 'r'):
+        # A raw string has no escapes: r"\" is one backslash, then the close.
+        end = source.find('"', i + 1)
+        end = len(source) if end < 0 else end
+        out.append((line, source[i + 1:end]))
+        return end + 1
+    fstring = is_prefixed(source, i, 'f')
     i += 1
     text = []
     depth = 0
@@ -109,6 +122,7 @@ def go_literals(source):
             j = i + 1
             while j < n and source[j] != "'":
                 j += 2 if source[j] == '\\' else 1
+            out.append((source.count('\n', 0, i) + 1, source[i + 1:j]))
             i = j + 1
             continue
         if ch in '"`':
@@ -176,10 +190,17 @@ class NoEmDash(unittest.TestCase):
         found = [t for _, t in lis_literals(lis) if DASHES.search(t)]
         self.assertEqual(found, dashed('a@b|@}|ok @').split('|'))
 
+    def test_lis_scanner_raw_strings_and_chars(self):
+        # r"\" ends at its second quote; reading \" as an escape would put
+        # every later literal in the file inside out.
+        lis = dashed('let b = r"\\"\nlet s = f"\'{x}\' @ y"\nlet c = \'@\'\n')
+        found = [(n, t) for n, t in lis_literals(lis) if DASHES.search(t)]
+        self.assertEqual(found, [(2, dashed("'{x}' @ y")), (3, dashed('@'))])
+
     def test_go_scanner_reads_literals_and_skips_comments(self):
-        go = dashed('x := "a @" // b @\n/* c @ */ y := `d\n@`\nr := \'"\'\n')
+        go = dashed('x := "a @" // b @\n/* c @ */ y := `d\n@`\nr := \'"\'\nq := \'@\'\n')
         found = [(n, t) for n, t in go_literals(go) if DASHES.search(t)]
-        self.assertEqual(found, [(1, dashed('a @')), (2, dashed('d\n@'))])
+        self.assertEqual(found, [(1, dashed('a @')), (2, dashed('d\n@')), (5, dashed('@'))])
 
     def test_entities_and_escapes_count_as_dashes(self):
         for text in ('401 &mdash; gated', '&#8212;', '&#X2014;', 'a \\u2014 b', '\\u{2014}'):

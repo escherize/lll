@@ -264,7 +264,7 @@ fn issue_update_spec() -> Slice<flags.Flag> {
       name: "--if-unchanged-since",
       value: true,
       hint: "stamp",
-      help: "refuse unless the issue's 'updated' is still this instant (from 'issue view --json';\nRFC3339 or the space form);\nenforced at the write by the server, so an edit cannot land on a record\nsomeone changed under you, even mid-flight",
+      help: "refuse unless the issue's 'updated' is still this instant (from 'issue view --json';\nRFC3339 or the space form).\nThe server enforces it at the write, so an edit cannot land on a record\nsomeone changed under you, even mid-flight",
       ..,
     },
     flags.Flag {

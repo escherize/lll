@@ -312,7 +312,7 @@ fn team_set_accent(input: flags.CommandInput) -> Result<(), string> {
   }
   let _ = pb.patch(f"/api/collections/teams/records/{t.id}", payload)?
   if hex == "" {
-    fmt.Println(f"Cleared the accent for {t.key}; back to the canonical orange")
+    fmt.Println(f"Cleared the accent for {t.key}; it uses the canonical orange again")
   } else {
     fmt.Println(f"Accent for {t.key} is now {hex}")
   }
@@ -360,7 +360,7 @@ fn team_set_emoji(input: flags.CommandInput) -> Result<(), string> {
   }
   let _ = pb.patch(f"/api/collections/teams/records/{t.id}", payload)?
   if glyph == "" {
-    fmt.Println(f"Cleared the emoji for {t.key}; back to the letter from its key")
+    fmt.Println(f"Cleared the emoji for {t.key}; it shows the letter from its key again")
   } else {
     fmt.Println(f"{t.key} is now {glyph}")
   }
