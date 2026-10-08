@@ -27,13 +27,18 @@ code, not on the error text.
 |---|---|---|
 | 0 | Success | |
 | 1 | Error | server failure (5xx), server unreachable, a rejected value |
-| 2 | Usage: the command line, or a setting that stands in for a flag (`LLL_SORT`, `LLL_AGENT`) | unknown noun, verb or flag; a missing or malformed argument (`'nope' is not an issue ID`) |
+| 2 | Usage: the command line, or a setting that stands in for a flag (`LLL_SORT`, `LLL_AGENT`, `LLL_TEAM`) | unknown noun, verb or flag; a missing or malformed argument (`'nope' is not an issue ID`); no team configured for a command that needs one (fix: `--team KEY` or `lll attach`) |
 | 3 | Not found | no such issue, doc, team, label, project, member or webhook; an issue outside your teams |
 | 4 | Refused or conflict | the claim is held by someone else; release or renew without the claim; closing or deleting a claimed issue without `--force`; creating a bot that exists; a read-only member writing; an `--if-unchanged-since` mismatch; a declined delete confirmation |
 | 5 | Nothing to do | `lll issue next` with an empty agenda |
 | 6 | Not authenticated | no token, or an expired, revoked or corrupted token |
 
 `--help` and `-h` exit 0 and print to stdout.
+
+A code never depends on server state the command line cannot see. So
+`--force` on `issue delete` means "even if claimed": on an unclaimed issue it
+is unneeded, and the delete goes ahead. `--force` never skips the
+confirmation; without `--yes`, a declined confirmation exits 4.
 
 `lll api` exits 0 on any HTTP answer, so a script can read the status line on
 stderr and the body on stdout. With `--fail`, an answer of 400 or above exits

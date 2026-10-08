@@ -294,6 +294,17 @@ assert_contains "$out" "QA" "an unarchived team is back in the default list"
 out=$(LLL_URL=$URL LLL_TEAM=QA "$LIN" issue create -t "QA lives again")
 assert_contains "$out" "Created QA-1" "an unarchived team takes new issues again"
 
+# LLL-679: an archived team is read-only, so its open issues are not ready:
+# not in list --ready across every team, and never offered by issue next.
+LLL_URL=$URL "$LIN" team archive QA >/dev/null
+out=$(cd "$DATA_DIR" && env -u LLL_TEAM LLL_URL=$URL "$LIN" issue list --ready)
+assert_not_contains "$out" "QA-1" "list --ready with no team skips an archived team"
+set +e
+out=$(cd "$DATA_DIR" && env -u LLL_TEAM LLL_URL=$URL "$LIN" issue next --team QA 2>&1); rc=$?
+set -e
+[ "$rc" -eq 5 ] || fail "issue next in an archived team: expected exit 5, got $rc: $out"
+LLL_URL=$URL "$LIN" team unarchive QA >/dev/null
+
 # --- LLL_TEAM scopes issue list by default ---
 out=$(LLL_URL=$URL LLL_TEAM=ENG "$LIN" issue list)
 assert_contains "$out" "ENG-1" "scoped list has ENG-1"
@@ -847,13 +858,14 @@ set -e
 [ "$rc" -ne 0 ] || fail "delete without ID: expected nonzero exit"
 assert_contains "$out" "lll issue delete KEY-123" "delete requires explicit ID"
 
-# LLL-644 (D6): --force no longer skips a confirmation; the refusal names --yes.
-# Since LLL-662 --force releases a claim before deleting, so on an unclaimed
-# issue it is refused the same way.
-if out=$(LLL_URL=$URL "$LIN" issue delete ENG-7 --force 2>&1); then
-  fail "issue delete --force must refuse the removed spelling"
-fi
-assert_contains "$out" "the confirmation is skipped by --yes" "delete --force names --yes"
+# LLL-644 (D6): --force no longer skips a confirmation; the declined
+# confirmation (exit 4) names --yes. Since LLL-679 --force on an unclaimed
+# issue is unneeded rather than a usage error.
+set +e
+out=$(LLL_URL=$URL "$LIN" issue delete ENG-7 --force 2>&1 </dev/null); rc=$?
+set -e
+[ "$rc" -eq 4 ] || fail "issue delete --force without --yes: expected exit 4, got $rc: $out"
+assert_contains "$out" "skipped by --yes" "delete --force names --yes"
 out=$(LLL_URL=$URL "$LIN" issue delete ENG-7 --yes)
 assert_contains "$out" "Deleted ENG-7" "forced delete output"
 out=$(LLL_URL=$URL LLL_TEAM=ENG "$LIN" issue list)
@@ -1156,8 +1168,9 @@ LLL_URL=$URL LLL_TEAM=OPS "$LIN" label create -n triage --color "#222222" >/dev/
 set +e
 out=$(cd "$DATA_DIR" && env -u LLL_TEAM LLL_URL=$URL "$LIN" label delete triage --yes 2>&1); rc=$?
 set -e
-[ "$rc" -ne 0 ] || fail "label delete with no team: expected nonzero exit"
+[ "$rc" -eq 2 ] || fail "label delete with no team: expected exit 2 (usage), got $rc"
 assert_contains "$out" "no team configured" "label delete with no team refuses rather than guess"
+assert_contains "$out" "--team KEY" "the no-team refusal names --team"
 set +e
 out=$(cd "$DATA_DIR" && env -u LLL_TEAM LLL_URL=$URL "$LIN" label edit triage --color "#333333" 2>&1); rc=$?
 set -e
@@ -1172,7 +1185,7 @@ assert_contains "$out" "triage" "deleting OPS's triage kept ENG's"
 set +e
 out=$(cd "$DATA_DIR" && env -u LLL_TEAM LLL_URL=$URL "$LIN" project view "Auth Revamp" 2>&1); rc=$?
 set -e
-[ "$rc" -ne 0 ] || fail "project view with no team: expected nonzero exit"
+[ "$rc" -eq 2 ] || fail "project view with no team: expected exit 2 (usage), got $rc"
 assert_contains "$out" "no team configured" "project view with no team refuses rather than guess"
 
 # --- TASK-208: every label-create surface says check-first, reuse ---
