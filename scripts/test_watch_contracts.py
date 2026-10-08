@@ -305,7 +305,7 @@ finally:
     process.wait()
     proxy.close()
 time.sleep(0.2)  # the reader thread drains the last line
-assert code == 1, (code, lines)
+assert code == 6, (code, lines)  # not authenticated (LLL-645)
 dead_line = ("realtime: the server rejected this token (401 Unauthorized): it was rotated, "
              "revoked or has expired, so the stream would carry no events; run 'lll login', "
              "or set a fresh LLL_TOKEN ('lll bot rotate bot-NAME' or 'lll token create NAME'), "
