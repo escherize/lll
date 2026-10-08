@@ -6,435 +6,355 @@ minors. Issue keys are on the project's own board (`lll issue view KEY`).
 
 ## [Unreleased]
 
-Every short flag now has one meaning, and help, messages and docs use one
-canonical spelling. Several spellings are gone; read Removed before upgrading
-scripts. A removed spelling fails and names its replacement (LLL-644).
+## [1.0.0] - 2026-10-08
 
-Scripts can now rely on exit codes and `--json` fields; both are listed in
-`docs/cli-contract.md` and covered by SemVer from 1.0 (LLL-645). Closing an
-issue now releases its claim, and `-b` on `issue update` is the description
-(LLL-646). Read Changed before upgrading scripts that parse lll output or
-that close, release, delete or create bots.
+1.0 is a promise to scripts. From this release, lll follows SemVer for the
+surface that `docs/cli-contract.md` lists: exit codes, the `--json` fields it
+names, the list envelope, and command, verb and flag spellings with their
+permanent aliases. A change that breaks one of these needs 2.0. Message
+wording and help text are not covered and can change in any release.
+
+### Upgrading from 0.8
+
+Read this list before you upgrade a server, a script or an agent prompt.
+Details are in the sections below.
+
+**Deploy the server before the clients.** The 1.0 CLI calls a new route
+(`POST /api/lll/issues/{issue}/close`), and the server runs three migrations
+on its first boot: comment authorship, webhook creators, and a one-time log
+of team keys that break the new key rule. A 1.0 `lll issue close` against a
+0.8 server is refused with "update the server". Back up the server's data
+directory first.
+
+Flags and commands. A removed spelling fails with exit 2 and names its
+replacement.
+
+- `-t` is the title everywhere. For a team on `invite create` and
+  `member invite`, use `--team`.
+- `-k` is the doc kind. For a team key on `team create`, `team rename` and
+  `lll attach`, use `--key` (or the bare argument on `team create`).
+- `-p` is the priority. For a password on `lll login` and
+  `member set-password`, use `--password`. For paths, use `--paths` on
+  `doc create`, `doc edit` and `finding create`, and `--path` on
+  `finding list`.
+- `--yes` skips a delete confirmation; `--force` on `issue delete` and
+  `doc delete` no longer does. `--force` now only overrides ownership or
+  references, and `issue delete --force` releases a claim first. `team`,
+  `label`, `project`, `member` and comment deletes now ask on a terminal.
+- `issue update -b` is the new description, as on `issue create`. The reason
+  for a forced action is `--reason`, on `issue release --force`,
+  `issue update --assignee none --force` and `issue close --force`.
+  `issue update --force -b "why"` is refused and names `--reason`.
+  `issue release -b` still works.
+- `--description-replace-old` and `--description-replace-new` are now one
+  flag: `--description-replace old=new`.
+- `lll doc link` and `lll doc unlink` are now `lll issue link KEY SLUG` and
+  `lll issue unlink KEY SLUG`. `lll finding read` is now `lll doc view SLUG`.
+
+Exit codes. Every failure exited 1. Now: 0 ok, 1 error, 2 usage, 3 not
+found, 4 refused or conflict, 5 nothing to do, 6 not authenticated.
+
+- A declined delete confirmation exits 4. It printed `Aborted.` and exited 0.
+- An empty `lll issue next` exits 5.
+- A command that needs a team and has none exits 2.
+- A missing, expired or revoked token exits 6.
+- `lll api` still exits 0 on any HTTP answer; add `--fail` to map the status.
+
+JSON and output.
+
+- Every `list --json` prints `{items, page, perPage, totalItems,
+  totalPages}`. `finding list` and `search` printed a bare array, several
+  lists printed `{items}`, and `items` is now `[]` when empty, never `null`.
+- Every `--json` timestamp is RFC3339 with milliseconds
+  (`2026-10-08T03:02:11.982Z`), not `2026-10-08 03:02:11.982Z`.
+- Every issue object carries `key` (`ENG-12`) and `claim`. `claim` is
+  `{id, member, holder, agent, claimed, renewed}` or `null`, not the raw
+  claim record with `expand.member`. `issue next --json` prints the
+  `issue view --json` object.
+- Errors print the server's message, not the method, URL and JSON body.
+- An empty list prints `no labels` (or similar) on stderr and nothing on
+  stdout.
+- Messages no longer contain em-dashes. A script that matches message text
+  may need updating: for example `issue view` prints
+  `Blocked by: ENG-1 (todo); 1 open, not ready`. Message text was never
+  covered and is not covered by 1.0 either.
+
+Behavior.
+
+- `lll issue close` releases your claim. `--keep-claim` keeps it. Closing an
+  issue that someone else holds needs `--force`. Agents no longer need
+  `lll issue release` after a close.
+- `lll bot create bot-NAME` refuses a bot that already exists (exit 4). To
+  re-mint a bot's token, use `lll bot rotate bot-NAME`. `lll bot bot-NAME` is
+  an alias of `create`, so a script that used it to rotate must switch.
+- A configured token always outranks `LLL_ADMIN_EMAIL` and
+  `LLL_ADMIN_PASSWORD`. Only the `--admin-email` and `--admin-password` flags
+  act as the administrator when a token is configured.
+- With no team configured, `label edit`, `label delete`, `project edit`,
+  `project delete`, `project view`, `bot create` and `bot rotate` refuse
+  (exit 2). Pass `--team KEY` or run `lll attach`.
+- An archived team is read-only for every writer, superusers included. Its
+  issues are never ready. Run `lll team unarchive KEY` to write to it.
+- The web board refuses every non-GET request whose `Origin` is not the
+  board's own address. A `curl` POST to a board page must send
+  `-H "Origin: <board url>"`. `POST /create` needs a `team` field, and the
+  settings writes live under `/t/KEY/settings/...`.
+- The API no longer answers `Access-Control-Allow-Origin: *`. A browser app
+  that reads the API from another origin must be listed in
+  `LLL_ALLOWED_ORIGINS` (exact `scheme://host[:port]`, comma-separated). On a
+  loopback bind, the server answers only loopback host names.
+- `lll up` no longer uses the well-known password `admin-local-123`. With
+  `LLL_ADMIN_EMAIL` and `LLL_ADMIN_PASSWORD` unset, the first boot generates
+  a password for `admin@local.dev` and keeps it in the data directory's
+  `.lll-admin.json` (0600). An existing local board that still has
+  `admin-local-123` loses it on the next boot; read the new password from
+  that file. Setting only one of the two variables is refused.
+- Permissions are tighter. Only a member with read-write access to every
+  team can create an invite. Only a comment's author can edit or delete it.
+  A webhook's secret is never returned, and webhooks cannot be edited
+  through the API (remove and add them). See Security.
 
 ### Added
 
+- `docs/cli-contract.md`: exit codes, covered JSON fields, the list
+  envelope, permanent aliases, and what `lll api` does and does not cover.
+  `lll --help` and the README link it (LLL-645).
 - `lll --help` opens with a "Start here" block (`lll up`, `lll login`,
   `lll attach`, `lll issue create`) and defines a team in one line (LLL-649).
-- The board's rail links to `/me` ("Your login") on every page (LLL-649).
-- The README and the landing page are checked: `scripts/test_doc_examples.py`
-  runs every `lll` example in README.md and docs/index.html against a scratch
-  board, in a fresh HOME; a block that cannot run there carries a skip
-  marker with its reason. `scripts/test_help_ticket_keys.py` fails on an
-  internal ticket key in any help page or message. Both run in e2e (LLL-649).
+- The board has a docs index at `/t/KEY/docs`: a team's docs newest first,
+  filtered by `?kind=` and `?q=`, with a Docs row in the rail, the jump
+  palette and `g d`. Bare `/docs` redirects to it (LLL-643).
+- `/me` on the board: a member's boards and a "Show my CLI login" button.
+  The token shows only after that same-origin POST, never on a GET. An
+  invite link lands there after joining. The rail links to `/me` on every
+  page (LLL-648, LLL-649).
+- A loopback `lll up` logs the CLI in as its member when the home config
+  holds no token and no other server's url, so `lll issue list` works
+  straight after the first boot. It never replaces an existing token. A
+  `--pb-dir` boot leaves the CLI's login alone (LLL-648).
+- `lll login --token TOKEN` (or `--token -` to be prompted) logs in with a
+  member token (LLL-648).
+- `lll member set-password NAME --old-password CURRENT` lets a member change
+  its own password. It logs in again and saves the new token, because the
+  change revokes the old one. `lll member invite` prints this line with the
+  temporary password (LLL-648).
+- `--json` on `whoami`, `team view`, `team create`, `project view`,
+  `finding near`, `config list`, `doc create`, `label create`,
+  `invite create`, `issue update`, `issue close`, `issue start`,
+  `issue claim`, and `issue comment KEY` (LLL-645).
+- `lll api --fail`: an HTTP answer of 400 or above exits with the code its
+  status maps to (LLL-645).
+- `issue list` shows the claim: the text list names the holder, agent label
+  and claim age, and `--json` carries `claim` on every item (LLL-651).
+- `issue view --raw` prints a `Claimed:` line with the holder, agent label,
+  and when the claim was taken and last renewed (LLL-638).
+- Claim refusals carry a stable code in the error's `data.code`:
+  `claim_held`, `needs_force`, `claim_changed` or `not_claimed`.
+- `--agent NAME` on `issue create` (recorded as the origin tool), `issue
+  close` and `issue start` (labels the moved-work-site comment).
+- Comments carry `author_kind`: `"system"` on the claim-expiry note that the
+  server writes on its own, omitted otherwise. The CLI, the board and
+  exports show a system comment's author as `system`. Existing comments are
+  not relabelled (LLL-654).
 - `lll config list` and `lll config get KEY` (url, web_url, team or sort).
-  `lll config --list` still works as an alias of `list`.
+  `lll config --list` still works.
 - `lll team create KEY -n "Name"` takes the key as the bare argument, like
   `project create` and `label create`.
 - Long forms: `--key` and `--name` on `team create` and `team rename`,
   `--name` on `project edit` and `label edit`, `--color` on `label edit`,
   `--web` for `-w` on `issue view` and `lll board`, `-b` for `--body` on
   `lll api`.
-- `lll doc list --limit N`.
 - `edit` and `update` are aliases of each other on `issue`, `doc`, `project`
   and `label`.
-- `--yes` skips a delete confirmation. `team`, `label`, `project`, `member`
-  and comment deletes now ask on a terminal; scripts are not asked.
+- `lll doc list --limit N`.
 - `lll watch --label` may be repeated, matching any of the labels.
-- A loopback `lll up` logs the CLI in as its member when the home config
-  holds no token and no other server's url, so `lll issue list` works
-  straight after the first boot.
-  It never replaces an existing token; when the server refuses that token,
-  the banner's `cli` line says how to switch. A `--pb-dir` boot leaves the
-  CLI's login alone, as it does the team (LLL-648).
-- `lll login --token TOKEN` (or `--token -` to be prompted) logs in with a
-  member token instead of a password (LLL-648).
-- A member changes its own password without an administrator:
-  `lll member set-password NAME --old-password CURRENT`. The command logs in
-  again and saves the new token, because the change revokes the old one.
-  `lll member invite` prints this line with the temporary password (LLL-648).
-- `/me` on the board: a member's boards and a "Show my CLI login" button. The
-  token shows only after that same-origin POST, never on a GET. An invite
-  link now lands there after joining (LLL-648).
 - The invite page warns when the browser is already signed in, because
   joining replaces that login in this browser (LLL-632).
-- `--json` on `whoami`, `team view`, `team create`, `project view`,
-  `finding near`, `config list`, `doc create`, `label create`,
-  `invite create`, `issue update`, `issue close`, `issue start`,
-  `issue claim`, and `issue comment KEY` (the comment list, or with a body
-  the new comment) (LLL-645).
-- `lll api --fail`: an HTTP answer of 400 or above exits with the code its
-  status maps to; without it, any answer still exits 0 (LLL-645).
-- `issue list` shows the claim: the text list names the holder, agent label
-  and claim age where the assignee goes, and `--json` carries `claim` on
-  every item, so automation no longer views each issue to learn who holds
-  it (LLL-651).
-- `issue view --raw` prints a `Claimed:` line with the holder, agent label,
-  and when the claim was taken and last renewed (LLL-638).
-- `docs/cli-contract.md`: exit codes, covered JSON fields, the list
-  envelope, permanent aliases, and what `lll api` does and does not cover.
-  `lll --help` and the README link it.
-- `--agent NAME` on `issue create` (recorded as the origin tool), `issue
-  close` and `issue start` (labels the moved-work-site comment).
-- Comments carry `author_kind`: `"system"` on the claim-expiry note the
-  server writes on its own, `""` on every other (omitted from `--json`).
-  The forced-release comment is the releaser's, since it carries the
-  releaser's reason. The CLI, the board and exports show a system comment's
-  author as `system` (LLL-654). Existing comments are not relabelled: no
-  stored row proves the server wrote it.
 - `lll member create --help` names `lll bot create` for agents (LLL-636).
 
 ### Changed
 
+- Every short flag has one meaning, and help, messages and docs use one
+  canonical spelling: `-b`/`--body` is the long text everywhere (with
+  `-d`/`--description` as aliases on `issue`, `project create` and
+  `project edit`), and `--read-only` is canonical on `invite create`, with
+  `--ro` as an alias that `member invite` and `member access` accept too.
+  See Upgrading for the removed meanings (LLL-644).
+- `lll issue close` releases the closer's claim under the release rule and
+  keeps the assignee. Before, close kept every claim, and agents that forgot
+  `issue release` left finished work held (LLL-640, LLL-646).
+- `lll bot create` refuses an existing bot and `lll bot rotate` is the only
+  way to rotate a bot's token (D7).
+- Administrator credentials never outrank a configured token. Before,
+  inherited admin variables made `lll bot` authenticate as the superuser,
+  and the bot came out with no owner (D7).
+- Exit codes, the list envelope, RFC3339 timestamps, the issue `key` and
+  `claim` fields, error text and empty-list lines follow
+  `docs/cli-contract.md`; see Upgrading. `doc view --json` and
+  `lll watch --json` use RFC3339 too. An HTTP error body counts as the API's
+  error only when it names its own `status`; a gateway's
+  `{"message": ...}` keeps the request and exits 1 (LLL-645).
+- `issue list --since` and `issue update --if-unchanged-since` accept
+  RFC3339 in any offset and the space form, and compare instants (LLL-645).
+- `lll issue delete` refuses a claimed issue (exit 4). `--force` releases the
+  claim first; on an unclaimed issue the delete goes ahead without it
+  (LLL-662, LLL-679).
+- The board's Release button forces only with a reason typed into the form,
+  and its assignee picker never forces. Before, both always forced, so a
+  team-scoped member could take any claim without a reason (LLL-662).
+- The board's bare write paths no longer fall back to the team the server
+  started with (LLL-664).
+- `lll board` prints the board's login link (`?board_token=...`) for a
+  loopback board on the same machine, because the bare URL answers 401. Do
+  not log its output. Every boot saves that link privately beside the home
+  config, so `lll member invite --team` prints a board link on a loopback
+  boot too (LLL-648).
 - `lll member invite` prints the board's address in the colleague's
-  `lll login --url` line when this machine knows the board (`web_url`) and
-  the board proves it serves the same server (the invite's token is accepted
-  through its `/api/`), so their login saves both the board and its API.
-  Otherwise it prints the API url as before. An explicit `--url` still wins
+  `lll login --url` line when the board proves it serves the same server
   (LLL-649).
-- Help and messages no longer cite internal ticket keys (LLL-649).
-- Help, messages, the board's pages, the shipped skills and the landing page
-  no longer use em-dashes. Each became a colon, semicolon, comma,
-  parentheses or a new sentence. Scripts that match message text may need
-  updating: `issue view` now prints `Blocked by: ENG-1 (todo); 1 open, not
-  ready`, the projects page's `?raw` rows read `- Name: status · N issues ·
-  URL`, and the board shows `-` in an empty cell. `scripts/test_no_emdash.py`
-  keeps em-dashes out (LLL-650).
-- The boot log line about a team key that breaks the key rule no longer
-  starts with an internal ticket key (LLL-650).
-- README: Homebrew first, a quickstart that runs as written from a fresh
-  machine, separate Upgrade and Share sections, canonical verbs, and no
-  references to docs that exist only on lll's own board. The landing page's
-  samples are regenerated from a real run (LLL-649).
-- Shipped skills: `team list --archived` is described as listing every team
-  with archived ones marked; backlog-loop names `lll up --scratch` as the
-  throwaway board; project-specific anecdotes are gone from backlog-loop and
-  merge-gate, which now notes that its REST fallback needs `python3`
-  (LLL-649).
-- Exit codes follow D1: 0 ok, 1 error, 2 usage, 3 not found, 4 refused or
-  conflict, 5 nothing to do, 6 not authenticated. Before, every failure
-  exited 1. Unknown flags, verbs and nouns and a malformed issue key now
-  exit 2; a missing issue, doc, team, label, project, member or webhook 3; a
-  claim held by someone else, a read-only write, an `--if-unchanged-since`
-  mismatch or `release` without the claim 4; an empty `issue next` 5; a
-  missing, expired, revoked or corrupted token 6 (LLL-645).
-- A declined delete confirmation (`[y/N]`, or no answer on stdin) exits 4
-  with `Error: aborted: nothing was deleted` on stderr. It printed
-  `Aborted.` and exited 0.
-- Errors print the server's message, not the request: `Error: ENG-1: Issue
-  is already claimed by alice.` instead of the method, URL, status line and
-  JSON body. A 5xx answer, or an answer that is not the API's JSON, still
-  names the request.
-- Every `list --json` prints one envelope, `{items, page, perPage,
-  totalItems, totalPages}`, whatever its flags. `finding list` and `search`
-  printed a bare array; `doc`, `team`, `member`, `label`, `project` and
-  `webhook list` printed `{items}`; `issue list --ready`, `--blocked` and
-  `--sort priority` printed `{items, totalItems}`. `items` is `[]` when
-  empty, never `null`.
-- Every timestamp in `--json` output is RFC3339 with milliseconds
-  (`2026-10-08T03:02:11.982Z`), not PocketBase's `2026-10-08 03:02:11.982Z`.
-- Every issue `--json` carries `key` (`ENG-12`) and `claim`. In
-  `issue view --json` and `issue next --json`, `claim` is now
-  `{id, member, holder, agent, claimed, renewed}` or `null`, not the raw
-  claim record with `expand.member`.
-- `issue next --json` prints the `issue view --json` object with or without
-  `--claim`. Without `--claim` it printed the decoded record only.
-- `doc view --json` prints RFC3339 timestamps; the record is otherwise
-  unchanged.
-- `lll watch --json` events print RFC3339 timestamps too.
-- An HTTP error body counts as the API's error only when it names its own
-  `status`; a gateway's `{"message": ...}` keeps the request and exits 1.
-- Empty lists print one line on stderr: `no labels`, `no projects`,
-  `no docs`, `no teams`, `no members`, `no webhooks`, `no findings`,
-  `no comments`, `no match for ...`. `label list` and `project list` printed
-  nothing; `finding list` printed `No findings.`, `issue comment KEY`
-  printed `No comments.` and `search` printed `No match for ...`, all on
-  stdout.
-- Claim refusals carry a stable code in the error's `data.code`:
-  `claim_held`, `needs_force`, `claim_changed` or `not_claimed`, on the
-  claim, release, renew, assignment and close routes. The CLI branches on
-  the code instead of the English message.
-- `lll issue close` releases the closer's claim in the same step, under the
-  release rule, and keeps the assignee. `--keep-claim` keeps the claim.
-  Closing an issue someone else holds is refused unless `--force`, which
-  leaves the forced-release comment; only the holder may keep a claim while
-  closing. Before this, close kept every claim and agents that forgot
-  `issue release` left finished work held (D3, LLL-640). The server has a
-  new `/close` route; an older server refuses with "update the server".
-- `--reason` is the reason for a forced action: `issue release --force`,
-  `issue update --assignee none --force` and `issue close --force`. On
-  `issue update`, `-b`/`--body` is now the new description, as on create,
-  with `-d`/`--description` as aliases; `update --force -b "why"` is
-  refused naming `--reason`. `issue release` keeps `-b` as an alias of
-  `--reason`.
-- `lll bot create bot-NAME` refuses a bot that already exists (exit 4) and
-  names `lll bot rotate`, which is now the only way to rotate a bot's token.
-  `lll bot bot-NAME` is an alias of `lll bot create` (D7).
-- Administrator credentials never outrank a configured token. Only
-  `--admin-email`/`--admin-password` act as the administrator when a token is
-  configured; `LLL_ADMIN_EMAIL`/`LLL_ADMIN_PASSWORD` are read only when no
-  token is configured. Before this, inherited admin variables made
-  `lll bot` authenticate as the superuser instead of the member, and the bot
-  came out with no owner (D7).
-- The board's Release button forces only with a reason typed into the form:
-  the viewer's own claim releases without one, anyone else's is refused. The
-  board's assignee picker never forces. Before this, both always forced, so a
-  team-scoped member could take any claim with no reason (LLL-662).
-- `lll issue delete` refuses a claimed issue (exit 4); `--force` releases the
-  claim first, under the release rule, then deletes. On an unclaimed issue
-  `--force` is unneeded and the delete goes ahead; it never skips the
-  confirmation, which `--yes` does (LLL-662, LLL-679).
-- `-b`/`--body` is the long-text flag everywhere. On `issue create`,
-  `project create` and `project edit` it sets the description, and
-  `-d`/`--description` stay as aliases there.
-- `--read-only` is the canonical spelling on `lll invite create`; `--ro` stays
-  as an alias, and `member invite` and `member access` accept it too.
-- `--force` only overrides ownership or references (a claim, another member's
-  comment, issues still using a label, project or member).
-- `lll issue comment list KEY` and similar guesses name the real forms
-  instead of reporting that 'list' is not an issue ID.
+- `lll login` names a read in its ready line for a read-only member (LLL-648).
+- `lll upgrade` installs the download as a new file moved into place, which
+  leaves running `lll up` and `lll watch` processes alive. It says to back up
+  a server's data directory first and to upgrade the server and its clients
+  together (LLL-655).
+- A team key is a letter followed by up to 15 letters, digits, `_` or `-`
+  (`^[A-Z][A-Z0-9_-]{0,15}$` after uppercasing), on create and rename.
+  Existing keys are not rewritten; the server logs each non-conforming key
+  once. A key derived from a directory name keeps only ASCII letters and
+  digits and starts with a letter (LLL-628).
+- Help, messages, the board, the shipped skills and the landing page no
+  longer use em-dashes or cite internal ticket keys. The board shows `-` in
+  an empty cell (LLL-649, LLL-650).
+- The skills shipped in the binary read correctly for any team in any repo:
+  no references to lll's own team, board, gate or repo-only skills, and the
+  `lll` skill gains a "Record it" block (LLL-647).
 - Help fixes: `lll --help` lists `lll bot rotate` and every noun that takes
   `--team`; `lll bot --help` shows the rotate usage; `lll login --help` shows
   every flag; `lll import dir` shows `--team`; `lll skill --help` prints its
-  page once; `lll up --help` no longer mentions `--local`; `lll finding --help`
-  teaches `lll finding create`.
-- The board's bare write paths no longer fall back to the team the server
-  started with. `POST /create` needs a `team` field, and the settings writes
-  live under `/t/KEY/settings/...`; a bare `POST /settings/label`,
-  `/settings/access/member` or `/settings/teams/archive` is refused. Scripts
-  that post to these paths with `curl` must name the team (LLL-664).
-- The `lll up` banner prints the administrator pair on a loopback boot that
-  uses the built-in fallback (`admin@local.dev` / `admin-local-123`). A pair
-  from the environment is never printed. `lll up --help`,
-  `lll login --help`, the README and the landing page now agree (LLL-648).
-- `lll board` prints the board's login link (`?board_token=...`) for a
-  loopback board on the machine running it, because the bare URL answers
-  401. Scripts that parse its output see the token; do not log it. Every boot,
-  loopback included, saves that link privately beside the home config, so
-  `lll member invite --team` prints a board link on a loopback boot too. The
-  401 page names `lll board` instead of a banner line that no longer exists
-  (LLL-648).
-- `lll login` names a read in its ready line for a read-only member, not
-  `issue create` (LLL-648).
-- `lll upgrade` prints the release download as a new file moved into place,
-  which leaves running `lll up` and `lll watch` processes alive, and says to
-  back up a server's data directory first and to upgrade the server and its
-  clients together (LLL-655).
-- A team key must be a letter followed by up to 15 letters, digits, `_` or
-  `-` (`^[A-Z][A-Z0-9_-]{0,15}$` after uppercasing). The server refuses
-  any other key on create and on rename, and the CLI names the rule. Existing
-  keys are not rewritten: the server logs each non-conforming key once at
-  upgrade, and it still takes unrelated edits (LLL-628).
-- A key derived from a directory name (`lll up`, `lll attach`) now keeps
-  only ASCII letters and digits and starts with a letter.
-- A command that needs a team and has none (the "no team configured"
-  refusal, and `bot create`/`bot rotate`) exits 2 (usage), not 1, and names
-  `--team KEY` as the fix; the "no team configured" refusal also names
-  `lll attach` (LLL-679).
+  page once; `lll up --help` no longer mentions `--local`;
+  `lll finding --help` teaches `lll finding create`.
+- `lll issue comment list KEY` and similar guesses name the real forms.
+- README: Homebrew first, a quickstart that runs as written on a fresh
+  machine, and separate Upgrade and Share sections. README and landing page
+  examples are run against a scratch board in CI (LLL-649).
 
 ### Removed
 
-- `-t` for a team on `invite create` and `member invite`: use `--team`.
-  `-t` is the title.
-- `-k` for a team key on `team create`, `team rename` and `lll attach`: use
-  `--key` (or the bare argument on `team create`). `-k` is the doc kind.
-- `-p` for a password on `lll login` and `member set-password`: use
-  `--password`. `-p` for paths on `doc create`, `doc edit` and
-  `finding create`: use `--paths`; on `finding list`: use `--path`. `-p` is
-  the priority.
-- `--force` on `issue delete` and `doc delete`: use `--yes`.
-- `--description-replace-old` and `--description-replace-new`: use
-  `--description-replace old=new`.
-- `lll doc link` and `lll doc unlink`: use `lll issue link KEY-123 SLUG` and
-  `lll issue unlink KEY-123 SLUG`.
-- `lll finding read`: use `lll doc view SLUG`.
+- `-t` for a team, `-k` for a team key, `-p` for a password or paths.
+- `--force` as the confirmation skip on `issue delete` and `doc delete`.
+- `--description-replace-old` and `--description-replace-new`.
+- `lll doc link`, `lll doc unlink` and `lll finding read`.
+
+Upgrading names the replacement for each.
 
 ### Security
 
-- An archived team is read-only on the server, for every writer. Before
-  this, only adding a reference checked it: a raw API write, a new comment,
-  `lll issue update`, a superuser and the claim, release, renew and
-  assignment routes all wrote to an archived team. Writes to its issues,
-  comments, claims, docs, labels, projects and webhooks, and moves into or
-  out of it, now answer 403 naming the team and `lll team unarchive KEY`.
-  The new close route refuses the same way. A claim held when the team is
-  archived cannot be released or renewed until the team is unarchived; the
-  hourly claim sweep still frees it, and member deletion still clears
-  assignments (LLL-660).
-- An issue can be assigned only to a member who can see its team, by every
-  route: the records API, `/claim`, `/assignment` and the board. A move into
-  a team the assignee cannot see is refused too. A member narrowed later
-  keeps the issues already assigned to them (LLL-670).
-- The board renders an issue only under its own team's route:
-  `/t/LLL/issue/ENG-3` and `/t/ENG/issue/ENG-003` redirect to
-  `/t/ENG/issue/ENG-3`, and a scoped viewer who cannot see the issue's team
-  gets 404. Favorites and saved views are written only by the board login,
-  as itself; any other login is refused (LLL-664).
-- The web board refuses every request other than GET or HEAD unless its
-  `Origin` is the board's own address. Before this, a page served on another
-  port of the same host (for example `127.0.0.1:9999` beside the default
-  `lll up` bind) counted as the same site, so it could change issues,
-  settings and bots with the viewer's board cookie. A request with no
-  `Origin`, `Origin: null`, or `Sec-Fetch-Site` other than `same-origin` is
-  refused too. The API under `/api/`, which the CLI uses, is unchanged.
-  Scripts that POST to board pages with `curl` must now send
-  `-H "Origin: <board url>"`. The invite name form and the sign-in confirm
-  page now send `Referrer-Policy: same-origin` instead of `no-referrer`.
-  Under `no-referrer`, browsers sent `Origin: null` on their own form POST.
-  This also fixes the confirm page's "Sign in" button, which this check
-  had always refused (LLL-630).
-- Only a person with read-write access to every team, or a superuser, can
-  create an invite. A team-scoped or read-only member, a bot or a member with
-  an owner is refused with a message that names who can. A joined member
-  does not depend on its inviter, so a scoped guest could otherwise keep
-  access after removal through members it invited itself. Invites that such
-  a member made earlier and nobody has used no longer redeem, and narrowing a
-  full member voids its unused invites (LLL-629).
 - The API no longer answers `Access-Control-Allow-Origin: *`, and `lll up`
   no longer uses the well-known administrator pair `admin@local.dev` /
-  `admin-local-123`. Together they let any web page the user visited log in
-  to a local board as the superuser and read the token (LLL-676).
+  `admin-local-123`. Together they let any web page that the user visited
+  log in to a local board as the superuser and read the token (LLL-676).
   - Cross-origin browser reads of the API, direct or through the board's
-    `/api/`, are refused unless `LLL_ALLOWED_ORIGINS` lists the origin
-    (exact `scheme://host[:port]`, comma-separated). The board, `/join`,
-    `/me` and the CLI need none.
-  - On a loopback bind, the board and the API answer only loopback host
-    names (`localhost`, `127.0.0.1`, `[::1]`), so a DNS-rebinding page is
-    refused with 403.
-  - With `LLL_ADMIN_EMAIL` and `LLL_ADMIN_PASSWORD` unset, the first boot
-    generates a random password for `admin@local.dev` and keeps it 0600 in
-    the data directory's `.lll-admin.json`. The banner names the file, not
-    the password. Setting only one of the two variables is refused.
-  - Existing local boards: on the next boot, a superuser that still has
-    `admin-local-123` loses it, with a warning. Read the new password from
-    `.lll-admin.json`. A boot that sets `LLL_ADMIN_PASSWORD=admin-local-123`
-    explicitly keeps it and is warned on every boot. A server that `lll up`
-    reuses rather than starts keeps its old password until `lll up` starts
-    it; a reusing boot writes no password file. Rotation does not revoke
-    what a page may already have done with the old password: review the
+    `/api/`, are refused unless `LLL_ALLOWED_ORIGINS` lists the origin. The
+    board, `/join`, `/me` and the CLI need none.
+  - On a loopback bind, the board and the API answer only `localhost`,
+    `127.0.0.1` and `[::1]`, so a DNS-rebinding page gets 403.
+  - The first boot generates the administrator password into
+    `.lll-admin.json`, and the banner names the file, not the password. A
+    boot that sets `LLL_ADMIN_PASSWORD=admin-local-123` explicitly keeps it
+    and is warned on every boot. A server that `lll up` reuses rather than
+    starts keeps its old password until `lll up` starts it. Rotation does not
+    undo what a page may already have done with the old password: review the
     superusers, members and tokens of a board that ran on it.
-- A reference stays inside one team for every writer. An issue's labels,
-  project and blockers, a doc's issues and a webhook's project must belong
-  to the record's own team. Full-access members and superusers were not
-  checked before. Moving a record to another team is refused while it, or a
-  record pointing at it, would reference across teams, and the refusal names
-  what to detach. References made before this change remain and do not block
-  unrelated edits; `scripts/audit_cross_team_refs.py` lists them (read-only)
+- The web board refuses every request other than GET or HEAD unless its
+  `Origin` is the board's own address. Before, a page on another port of the
+  same host counted as the same site and could change issues, settings and
+  bots with the viewer's board cookie. A request with no `Origin`,
+  `Origin: null`, or `Sec-Fetch-Site` other than `same-origin` is refused.
+  The API under `/api/` is unchanged. The invite name form and the sign-in
+  confirm page send `Referrer-Policy: same-origin`, which also fixes the
+  confirm page's "Sign in" button (LLL-630).
+- An archived team is read-only on the server for every writer. Writes to
+  its issues, comments, claims, docs, labels, projects and webhooks, and
+  moves into or out of it, answer 403 naming `lll team unarchive KEY`. A
+  claim held when the team is archived cannot be released or renewed until
+  it is unarchived; the hourly sweep still frees it (LLL-660).
+- An issue can be assigned only to a member who can see its team, by every
+  route. A member narrowed later keeps the issues already assigned (LLL-670).
+- The board renders an issue only under its own team's route; other paths
+  redirect, and a scoped viewer who cannot see the team gets 404. Favorites
+  and saved views are written only by the board login, as itself (LLL-664).
+- Only a person with read-write access to every team, or a superuser, can
+  create an invite. Invites that a narrower member made earlier and nobody
+  has used no longer redeem, and narrowing a full member voids its unused
+  invites (LLL-629).
+- A reference stays inside one team for every writer: an issue's labels,
+  project and blockers, a doc's issues and a webhook's project. Moving a
+  record to another team is refused while it would reference across teams.
+  Older references remain; `scripts/audit_cross_team_refs.py` lists them
   (LLL-631).
 - A team-scoped member can no longer read another team's label names or
-  issue titles through a relation filter. Through a multi-valued relation,
-  a back-relation or `@collection`, a filter needs an any-match operator
-  (`labels.name ?~ 'x'`, `blocked_by.id ?= 'ID'`). A stored relation id may
-  only be matched exactly. Neither can be sorted on. A filter through
-  favorites or saved views is refused with any operator, for team-scoped and
-  read-only members alike, since it would show which issues other members
-  favorited. This applies to record lists (all
-  methods, including HEAD) and realtime subscription options. Narrowing a
-  member drops the realtime subscriptions it could no longer make
-  (LLL-634).
-- Team keys can no longer carry quotes, `$( )`, spaces or control characters
-  into URLs, filenames and shell-pasted bot prompts (LLL-628).
-- A webhook's secret is write-only. The API, realtime and the CLI no longer
-  return it to anyone, read-only guests included, and a filter or sort on it
-  is refused. `lll webhook add` prints a generated secret once, or takes
-  yours with `--secret`. `lll webhook list` shows only "secret set" or
-  "secret not set" (LLL-661). Upgrading hides existing secrets but does not
-  rotate them: a secret a guest could read before is still valid, so remove
-  and add those webhooks again.
-- A webhook records the member who created it and delivers only while that
-  member can read the webhook's team. Removing someone from a team stops
-  their webhooks; each skipped delivery is logged. Webhooks created before
-  this change have no creator and deliver while their team exists. Webhooks
-  can no longer be edited through the API; remove and add them again.
-  Deliveries are not queued, so one in flight when the server stops is lost;
-  `lll webhook --help` and `docs/api.md` now say so (LLL-661).
-- An API delete of a claimed issue is refused for every caller; the claim
-  cascaded away silently before (LLL-662).
-- `author_kind` cannot be set or changed by any request, a system comment
-  cannot be edited, and no system comment carries caller-supplied text, so
-  `system` cannot be forged or made to say what a member chose (LLL-654).
-- A member's comment is authored by that member: a create names the caller
-  whatever the body says, and no member can change a comment's author.
-  Before this, any team writer could post a comment with no author or in
-  another member's name, so a fake expiry note or forced-release record read
-  as real. A superuser still chooses the author.
-- Only a comment's author may edit or delete it; a superuser still moderates.
-  Before this, any team writer could rewrite another member's comment under
-  that member's name, or delete it. `lll issue comment edit/delete --force`
-  now works only with a superuser token.
+  issue titles through a relation filter. Through a multi-valued relation, a
+  back-relation or `@collection`, a filter needs an any-match operator
+  (`labels.name ?~ 'x'`); a stored relation id may only be matched exactly;
+  neither can be sorted on. A filter through favorites or saved views is
+  refused for team-scoped and read-only members. This covers record lists
+  and realtime subscriptions (LLL-634).
+- Team keys can no longer carry quotes, `$( )`, spaces or control
+  characters into URLs, filenames and shell-pasted bot prompts (LLL-628).
+- A webhook's secret is write-only: the API, realtime and the CLI never
+  return it. `lll webhook add` prints a generated secret once, or takes
+  yours with `--secret`. Upgrading hides existing secrets but does not
+  rotate them, so remove and add any webhook whose secret a guest could read
+  (LLL-661).
+- A webhook records its creator and delivers only while that member can read
+  the webhook's team. Webhooks created before this change deliver while their
+  team exists. Deliveries are not queued (LLL-661).
+- A member's comment is authored by that member, and only its author may
+  edit or delete it; a superuser still moderates.
+  `lll issue comment edit/delete --force` works only with a superuser token.
 - Comments the server writes (the forced-release record and the expiry note)
-  carry `server_record`: no request may edit one, and no member may delete
-  one, the releaser included, so a forced release cannot be made silent
-  after the fact (LLL-512).
-- A forced-release or expiry comment names a member only when everyone who sees the
-  issue's team may see that member; otherwise it says "a member outside this
-  team" (LLL-633).
+  are locked: no request may edit one, and no member may delete one
+  (LLL-512). `author_kind` cannot be set by any request (LLL-654).
+- A forced-release or expiry comment names a member only when everyone who
+  sees the issue's team may see that member (LLL-633).
+- An API delete of a claimed issue is refused for every caller (LLL-662).
 - `--admin-password` and `--admin-email` are no longer copied into the
-  process environment, where child processes (git, gh, a browser opener)
-  inherited them (LLL-646).
+  process environment, where child processes inherited them (LLL-646).
 
 ### Fixed
 
-- `lll up` no longer advises only `lll logout` when a repo's `.lll.toml`
-  token is the one refused: logout clears only the home config's token, so
-  the advice now names the repo line first, then logout if the home token is
-  stale too (LLL-649).
-- The API port's `/.well-known/lll` always answers `service` and `version`,
-  instead of 404 when no board is advertised, so a CLI pointed at the API
-  port warns about version skew too. `web_url` still appears only when
-  `LLL_WEB_URL` is set. The board port already published the same version
-  (LLL-652).
-- Login token renewal now runs when `LLL_URL` names exactly the home
-  config's url. It still needs the token from the home config and never
-  renews against any other url, however close the spelling (LLL-653).
 - With no team configured, `label edit`, `label delete`, `project edit`,
-  `project delete` and `project view` refuse with "no team configured".
-  Before this, they acted on the first team's record with that name, so
-  `lll label delete bug` could delete another team's label. Pass `--team KEY`
-  or configure a team with `lll attach`. The list verbs still span every team, and their name
-  filters now match the name in every team: `issue list --label bug`,
-  `--project`, `watch --label` and `issue next --exclude-label bug` used
-  only the first team's `bug` (LLL-671).
+  `project delete` and `project view` acted on the first team's record with
+  that name, so `lll label delete bug` could delete another team's label.
+  The list verbs' name filters (`issue list --label`, `--project`,
+  `watch --label`, `issue next --exclude-label`) now match in every team
+  (LLL-671).
 - `issue list --ready`, `--blocked`, `issue next` and `watch --ready` use one
-  readiness rule. A blocker the reader cannot see (another team's issue,
-  hidden from a team-scoped member) counts as open, so `issue next` no longer
-  hands out an issue blocked by one. `issue view` shows it as "a hidden
-  issue" without naming it. Such links come only from before LLL-631, which
-  refuses new cross-team references (LLL-672). `watch --ready` still learns
-  of a visible cross-team blocker's change only on the dependent issue's
-  next event, because its subscription is filtered to the team.
-- `issue view` prints each blocker under its own team's key. A blocker in
-  another team was printed with the viewed issue's team key, which named a
-  different issue (LLL-674).
+  readiness rule. A blocker that the reader cannot see counts as open, and
+  `issue view` shows it as "a hidden issue" (LLL-672). Issues in archived
+  teams are never ready (LLL-679).
+- `issue list --ready` and `--blocked` read every page before filtering,
+  instead of only the first 200 issues (LLL-673).
+- `issue view` prints each blocker under its own team's key (LLL-674).
+- `lll issue next` skips a claimed issue even when its assignee was moved or
+  cleared (LLL-662).
 - Live board updates no longer go stale after the board's realtime stream
-  to the lll server reconnects: every open board and issue page, and the
-  rail's favorites and saved views, are re-rendered from a fresh read.
-  Refreshes run on four workers, and refreshes of the same view never
-  overlap, so one slow read no longer holds up every viewer. A refresh that
-  fails or runs past 10 seconds is logged instead of dropped silently
+  reconnects, and one slow refresh no longer holds up every viewer
   (LLL-666).
 - The hourly claim-expiry sweep re-checks each claim inside its transaction,
-  so a renewal that lands between the sweep's list and its delete keeps the
-  claim (LLL-663).
-- `lll issue next` skips an issue that is claimed even when its assignee was
-  moved or cleared, with or without a configured team (LLL-662).
-- The expiry line under a bot token says to re-mint with
-  `lll bot rotate bot-NAME`, not the superuser-only `lll token create`
-  (LLL-625).
-- `issue list --ready` and `--blocked` read every page before filtering.
-  They filtered one page (200 issues, or `--limit`), so a ready issue past
-  it was missing and `--json` reported the page's count as the total
-  (LLL-673).
-- `issue list --since` and `issue update --if-unchanged-since` accept
-  RFC3339 in any offset and the space form, and compare instants. Copying
-  `updated` from `--json` into `--if-unchanged-since` with a `T` failed with
-  a misleading "changed since" (LLL-645).
-- With no team configured, `issue next`, `issue list --ready` and
-  `watch --ready` offered open issues from archived teams. An archived team
-  is read-only, so its issues are not ready (LLL-679).
-- `member set-password --old-password` with a revoked or expired token
-  exits 6 with the not-authenticated message. It said the token was "not a
-  member's (an administrator token?)" and exited 1; that advice now appears
-  only for an administrator's token (LLL-679).
+  so a renewal that lands mid-sweep keeps the claim (LLL-663).
+- A doc stored with no kind renders on the board instead of failing
+  (LLL-635).
+- The API port's `/.well-known/lll` always answers `service` and `version`,
+  so a CLI pointed at the API port warns about version skew too (LLL-652).
+- Login token renewal runs when `LLL_URL` names exactly the home config's
+  url (LLL-653).
+- `lll up` names the repo's `.lll.toml` token first when that is the one
+  refused, instead of only `lll logout` (LLL-649).
+- The expiry line under a bot token names `lll bot rotate bot-NAME`, not the
+  superuser-only `lll token create` (LLL-625).
+- `member set-password --old-password` with a revoked or expired token exits
+  6 with the not-authenticated message (LLL-679).
 
 ## [0.8.0] - 2026-10-07
 
