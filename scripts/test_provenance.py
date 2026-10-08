@@ -64,11 +64,17 @@ with tempfile.TemporaryDirectory(prefix='lll-provenance-') as directory:
     request(prefix + '/' + created['id'], {'refs': refs}, 'PATCH')
     for invalid in ['not an object', [], {'host': 42}]:
         try:
-            request(prefix + '/' + created['id'], {'origin': invalid}, 'PATCH')
+            request(prefix, {'team': team['id'], 'title': 'Bad origin', 'state': 'todo', 'origin': invalid})
             raise AssertionError('malformed origin was accepted')
         except urllib.error.HTTPError as error:
             assert error.code == 400
             assert 'origin' in json.load(error)['data']
+        # A member never changes an issue's origin, valid or not (LLL-681).
+        try:
+            request(prefix + '/' + created['id'], {'origin': invalid}, 'PATCH')
+            raise AssertionError('a member changed an origin')
+        except urllib.error.HTTPError as error:
+            assert error.code == 404
         assert request(prefix + '/' + created['id'])['origin'] == created['origin']
     for mode in [[], ['--raw']]:
         output = cli('issue', 'view', key, *mode)
