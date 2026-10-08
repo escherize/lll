@@ -59,7 +59,8 @@ with tempfile.TemporaryDirectory(prefix='lll-first-run-') as tmp:
     api = f'http://127.0.0.1:{port()}'
     child, banner = boot(board_dir, dict(env, LLL_TEAM='FIRST', LLL_URL=api), root / 'up.log')
     try:
-        assert re.search(r'^admin  admin@local\.dev / admin-local-123 ', banner, re.M), banner
+        assert re.search(r'^admin  admin@local\.dev; generated password in \S+/\.lll-admin\.json ', banner, re.M), banner
+        assert 'admin-local-123' not in banner, banner
         config = home / '.config' / 'lll' / 'lll.toml'
         assert f'\ncli    logged in as firstrun; url and token saved to {config}\n' in banner, banner
         saved = config.read_text()

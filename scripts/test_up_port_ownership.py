@@ -104,17 +104,19 @@ with tempfile.TemporaryDirectory(prefix='lll-up-owned-') as directory:
         assert int(owned['board_url'].rsplit(':', 1)[1]) >= web + 2
         assert owned['board_url'] != neighbor['board_url']
 
-        def token(url):
+        def token(url, data_dir):
+            # LLL-676: the generated administrator is kept with its data.
+            admin = json.loads((data_dir / '.lll-admin.json').read_text())
             return api(url, '/api/collections/_superusers/auth-with-password',
-                {'identity': 'admin@local.dev', 'password': 'admin-local-123'})['token']
+                {'identity': admin['email'], 'password': admin['password']})['token']
 
-        neighbor_token = token(neighbor['db_url'])
+        neighbor_token = token(neighbor['db_url'], base / 'neighbor' / 'data')
         env.update(LLL_URL=neighbor['db_url'], LLL_TOKEN=neighbor_token)
         wrong = subprocess.run([binary, 'issue', 'create', '-t', 'port ownership'],
             cwd=home, env=env, capture_output=True, text=True, timeout=15)
         assert wrong.returncode != 0 and "no team with key 'E2E'" in wrong.stderr, wrong.stderr
 
-        env.update(LLL_URL=owned['db_url'], LLL_TOKEN=token(owned['db_url']))
+        env.update(LLL_URL=owned['db_url'], LLL_TOKEN=token(owned['db_url'], base / 'owned' / 'data'))
         correct = subprocess.run([binary, 'issue', 'create', '-t', 'port ownership'],
             cwd=home, env=env, capture_output=True, text=True, timeout=15)
         assert correct.returncode == 0 and 'Created E2E-1' in correct.stdout, correct.stderr

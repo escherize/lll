@@ -816,9 +816,9 @@ On the machine running a loopback 'lll up', no login is needed: the boot logs
 the CLI in as the board's member when no token is configured.
 
 No account on the server yet? If you hold the admin credentials
-(LLL_ADMIN_EMAIL/LLL_ADMIN_PASSWORD as a deployment sets them; a loopback
-'lll up' without them uses admin@local.dev / admin-local-123 and prints that
-pair in its banner), --create makes the member and logs into it in one
+(LLL_ADMIN_EMAIL/LLL_ADMIN_PASSWORD as a deployment sets them; an 'lll up'
+without them uses admin@local.dev with a generated password, kept in the data
+directory's .lll-admin.json, which its banner names), --create makes the member and logs into it in one
 command:
 
   lll login --url https://tracker.example.com --email you@example.com --create \\

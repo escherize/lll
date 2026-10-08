@@ -251,6 +251,29 @@ that close, release, delete or create bots.
   access after removal through members it invited itself. Invites that such
   a member made earlier and nobody has used no longer redeem, and narrowing a
   full member voids its unused invites (LLL-629).
+- The API no longer answers `Access-Control-Allow-Origin: *`, and `lll up`
+  no longer uses the well-known administrator pair `admin@local.dev` /
+  `admin-local-123`. Together they let any web page the user visited log in
+  to a local board as the superuser and read the token (LLL-676).
+  - Cross-origin browser reads of the API, direct or through the board's
+    `/api/`, are refused unless `LLL_ALLOWED_ORIGINS` lists the origin
+    (exact `scheme://host[:port]`, comma-separated). The board, `/join`,
+    `/me` and the CLI need none.
+  - On a loopback bind, the board and the API answer only loopback host
+    names (`localhost`, `127.0.0.1`, `[::1]`), so a DNS-rebinding page is
+    refused with 403.
+  - With `LLL_ADMIN_EMAIL` and `LLL_ADMIN_PASSWORD` unset, the first boot
+    generates a random password for `admin@local.dev` and keeps it 0600 in
+    the data directory's `.lll-admin.json`. The banner names the file, not
+    the password. Setting only one of the two variables is refused.
+  - Existing local boards: on the next boot, a superuser that still has
+    `admin-local-123` loses it, with a warning. Read the new password from
+    `.lll-admin.json`. A boot that sets `LLL_ADMIN_PASSWORD=admin-local-123`
+    explicitly keeps it and is warned on every boot. A server that `lll up`
+    reuses rather than starts keeps its old password until `lll up` starts
+    it; a reusing boot writes no password file. Rotation does not revoke
+    what a page may already have done with the old password: review the
+    superusers, members and tokens of a board that ran on it.
 - A reference stays inside one team for every writer. An issue's labels,
   project and blockers, a doc's issues and a webhook's project must belong
   to the record's own team. Full-access members and superusers were not

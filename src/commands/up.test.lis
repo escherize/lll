@@ -91,17 +91,26 @@ fn the_cli_login_is_written_only_into_an_empty_slot() {
   assert plan_kind(cli_login_plan(CliState { loopback: false, ..state(false, "", "", "") })) == "untouched"
 }
 
-// LLL-648: one truth about the administrator pair. Only the proven loopback
-// fallback is printed; an environment pair never is.
+// LLL-648, LLL-676: the banner names a proven generated administrator and
+// the file holding its password, never the password; an environment pair
+// is never named.
 #[test]
-fn the_banner_prints_only_the_proven_loopback_fallback() {
-  let Some(line) = admin_line(true, true, false, true) else {
+fn the_banner_names_only_the_proven_generated_admin() {
+  let Some(line) = admin_line(
+    true,
+    true,
+    false,
+    "admin@local.dev",
+    "/d/.lll-admin.json",
+  ) else {
     assert false
     return
   }
-  assert line.starts_with("admin  admin@local.dev / admin-local-123 ")
-  assert admin_line(false, true, false, true).is_none()
-  assert admin_line(true, false, false, true).is_none()
-  assert admin_line(true, true, true, true).is_none()
-  assert admin_line(true, true, false, false).is_none()
+  assert line.starts_with(
+    "admin  admin@local.dev; generated password in /d/.lll-admin.json ",
+  )
+  assert !line.contains("admin-local-123")
+  assert admin_line(false, true, false, "e", "p").is_none()
+  assert admin_line(true, false, false, "e", "p").is_none()
+  assert admin_line(true, true, true, "e", "p").is_none()
 }
