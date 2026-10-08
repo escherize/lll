@@ -1,0 +1,233 @@
+import "go:bufio"
+import "go:encoding/json"
+import "go:fmt"
+import "go:os"
+import "go:path/filepath"
+import "go:strings"
+
+import "config"
+import "models"
+import "pb"
+import "records"
+import "tokens"
+
+// Which team `lll up` boots on, and the member the board runs as: a
+// configured team is created when missing, an unconfigured one is asked
+// for and saved to the repo's .lll.toml.
+
+/// The team the board writes to. A team the config names is created if the
+/// server lacks it. With none configured we ask and write the answer to
+/// .lll.toml — the board and the CLI must not disagree about the team, so a
+/// team that lives only in this process is not an option. No one to ask
+/// (stdin is not a terminal: scripts, agents, CI) means no boot.
+///
+/// `source` is where `want` came from, as `config.load_traced` reports it;
+/// `throwaway` is true when the boot named its own --pb-dir.
+///
+/// TASK-115: a boot that settles a team must leave it settled. `LLL_TEAM=X
+/// lll up` used to create the team, boot happily and persist NOTHING - the
+/// env var satisfied the config, so the code that writes .lll.toml was never
+/// reached, and the next boot without that env var failed with "no team
+/// configured" all over again. Persisting closes that loop, under two
+/// conditions that keep it from becoming TASK-143's stray-file bug:
+///
+///   - a `file:` source has persisted it already, so there is nothing to do
+///     and rewriting a committed .lll.toml on every boot would be churn;
+///   - a --pb-dir boot is a throwaway or a scratch board, and the team it
+///     settled is a fact about that database rather than about this
+///     directory. It is also the one kind of boot that runs in directories
+///     nobody attached on purpose, which is where a stray .lll.toml hurts.
+fn ensure_team(
+  ctx: pb.Client,
+  want: string,
+  source: string,
+  throwaway: bool,
+) -> Result<string, string> {
+  if want != "" {
+    let key = resolve_team(ctx, want)?
+    if should_save_team(source, throwaway) { save_team(ctx, key)? }
+    return Ok(key)
+  }
+
+  let teams = records.list_teams(ctx)?
+  let mut suggested = default_team_key()
+  if let Some(t) = teams.items.get(0) { suggested = t.key }
+
+  let key = ask_team(suggested)?
+  let existing = records.find_team(ctx, key)?
+  if existing.is_none() {
+    match create_team(ctx, key, key) {
+      Ok(created) => {
+        let _ = fmt.Println(
+          f"created team {created.key}; issues will be {created.key}-1, {created.key}-2, ...",
+        )
+      },
+      Err(e) => {
+        let existing = records.find_team(ctx, key)?
+        if existing.is_none() { return Err(f"creating team '{key}': {e}") }
+      },
+    }
+  }
+  // Same bargain as the configured branch above. The source is "" here — the
+  // key was just typed, so no file supplies it yet and it is worth writing
+  // unless this is a scratch board (TASK-143).
+  if should_save_team("", throwaway) { save_team(ctx, key)? }
+  Ok(key)
+}
+
+/// Whether a settled team key is worth writing to .lll.toml (TASK-115).
+/// Pure, and split out from ensure_team because it is the whole of the
+/// TASK-143 guard: a wrong answer here is a config file appearing in a
+/// directory nobody attached, which is a bug that shows up hours later
+/// somewhere else entirely.
+fn should_save_team(source: string, throwaway: bool) -> bool {
+  // A --pb-dir boot's team belongs to that database, not to this directory.
+  if throwaway { return false }
+  // A file already carries it; rewriting it every boot is churn.
+  !strings.HasPrefix(source, "file:")
+}
+
+/// A configured team key, created on the server if it is missing. Another
+/// lll up pointed at the same fresh server may create the team between our
+/// find and our create; the unique index rejects the loser, and the loser
+/// re-looks-up whoever won rather than failing the boot (the same bargain
+/// e2e.sh's seed_team runs on).
+fn resolve_team(ctx: pb.Client, want: string) -> Result<string, string> {
+  if let Some(t) = records.find_team(ctx, want)? { return Ok(t.key) }
+  match create_team(ctx, want, want) {
+    Ok(created) => {
+      fmt.Println(f"created team {created.key}")
+      Ok(created.key)
+    },
+    Err(e) => {
+      if let Some(t) = records.find_team(ctx, want)? { return Ok(t.key) }
+      Err(f"creating team '{want}': {e}")
+    },
+  }
+}
+
+/// Bootstrap with admin authority, then serve as an actual member. Renewals
+/// keep that same identity rather than upgrading normal board calls to admin.
+fn board_identity(
+  ctx: pb.Client,
+  base: string,
+  email: string,
+  pass: string,
+) -> Result<(records.Actor, Option<fn() -> Result<string, string>>, pb.Client), string> {
+  if let Some(member) = records.find_actor(ctx)? { return Ok((member, None, ctx)) }
+  let guessed = strings.TrimSpace(ctx.settings.env.user)
+  let name = if guessed == "" { "local" } else { guessed }
+  let created = ensure_member(ctx, name)?
+  if created { fmt.Println(f"created member {name}") }
+  let Some(member) = records.find_member(ctx, name)? else {
+    return Err(f"could not resolve the board member {name}")
+  }
+  let token = pb.impersonate_member(
+    base,
+    ctx.token(),
+    member.id,
+    tokens.default_token_duration(),
+  )?
+  // The board runs as that member from here on, and it alone may renew
+  // that token from the administrator pair (TASK-255): the grant is part of
+  // the client it is handed, not of any environment a child could inherit.
+  let admin = config.AdminCreds { email, password: pass }
+  let board = ctx
+    .with_settings(ctx.settings.with_admin(admin))
+    .with_token(token, "")
+    .renewing(Some(pb.Renewal { admin, member: member.id }))
+  let id = member.id
+  let refresh: fn() -> Result<string, string> = || {
+    let su = superuser_token(base, email, pass)?
+    pb.impersonate_member(base, su, id, tokens.default_token_duration())
+  }
+  fmt.Println(
+    f"auth   board signed in as {name}; token renewal keeps this member",
+  )
+  Ok((records.Actor { id: member.id, name }, Some(refresh), board))
+}
+
+/// Ask for a team key on stdin, defaulting to `suggested`. Errs when stdin
+/// has no answer to give (scripts, agents, CI).
+fn ask_team(suggested: string) -> Result<string, string> {
+  fmt.Print(f"no team configured. Team key [{suggested}]: ")
+  let newline = 10 as byte
+  let Partial.Ok(line) = bufio.NewReader(os.Stdin).ReadString(newline) else {
+    fmt.Println("")
+    return Err(
+      f"no team configured and no answer on stdin; set LLL_TEAM={suggested}, or add team = \"{suggested}\" to .lll.toml (see 'lll config init')",
+    )
+  }
+  // Only directory-derived suggestions are shortened/normalized. Explicit
+  // input follows team create and attach --key: preserve the identifier.
+  let typed = strings.TrimSpace(line)
+  if typed == "" { Ok(suggested) } else { Ok(typed) }
+}
+
+/// Persist the team to the repo's .lll.toml so the next boot and the CLI
+/// agree. The team is the one key that belongs in the repo — `lll attach`
+/// writes the same line, deliberately.
+fn save_team(ctx: pb.Client, key: string) -> Result<(), string> {
+  let path = set_repo_key(ctx.settings, "team", key)?
+  fmt.Println(f"wrote team = \"{key}\" to {path}")
+  Ok(())
+}
+
+/// Team key for a first boot: the working directory's name, letters and
+/// digits only, uppercased, at most 5 characters.
+fn default_team_key() -> string {
+  let Ok(dir) = os.Getwd() else {
+    return "TEAM"
+  }
+  let key = clean_key(filepath.Base(dir))
+  if key == "" { "TEAM" } else { key }
+}
+
+/// A team key: ASCII letters and digits only, uppercased, starting with a
+/// letter, at most 5 characters, so it always passes the key rule (LLL-628).
+fn clean_key(raw: string) -> string {
+  let mut key = ""
+  for r in strings.ToUpper(raw).runes() {
+    let letter = r >= 'A' && r <= 'Z'
+    let digit = r >= '0' && r <= '9'
+    if letter || (digit && key != "") {
+      key += r as string
+    }
+    if key.length() == 5 { break }
+  }
+  key
+}
+
+/// Authenticate as the PocketBase superuser and return the auth token.
+/// The same credentials Serve upserted, through PocketBase's own
+/// auth-with-password endpoint — the admin API, not a shortcut past the
+/// rules, so what the boot does is exactly what a member with a token does.
+///
+/// Through pb.post_anon_to, which is this exact request: POST to an explicit
+/// base, no Authorization header, body read and non-2xx turned into an error.
+/// This function used to spell all of that out again, down to repeating
+/// client.lis's comment about Header being an Option. Going through the shared
+/// path also picks up its unreachable-server hint, which the copy did not have.
+fn superuser_token(
+  base: string,
+  email: string,
+  pass: string,
+) -> Result<string, string> {
+  let payload = match json.Marshal(
+    models.AuthRequest { identity: email, password: pass },
+  ) {
+    Ok(b) => b as string,
+    Err(e) => return Err(f"encoding credentials: {e}"),
+  }
+  let body = pb.post_anon_to(
+    base,
+    "/api/collections/_superusers/auth-with-password",
+    payload,
+  )?
+  let mut out = models.AuthResponse { .. }
+  if let Err(e) = json.Unmarshal(body.bytes(), &out) {
+    return Err(f"decoding the auth response: {e}")
+  }
+  if out.token == "" { return Err("the response carried no token") }
+  Ok(out.token)
+}

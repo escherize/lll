@@ -1,0 +1,239 @@
+import "go:crypto/rand"
+import "go:encoding/json"
+import "go:net"
+import "go:net/http"
+import "go:os"
+import "go:path/filepath"
+import "go:strconv"
+import "go:strings"
+import "go:time"
+
+import "config"
+import "flags"
+
+// The local server `lll up` runs: scratch directories, the pinned board token
+// and administrator, and the ports it binds.
+
+/// Scratch is its own configuration: settings built from nothing this
+/// process inherited (no LLL_* value, no XDG_CONFIG_HOME, no home or repo
+/// config), with the working directory moved away from any repo first. Only
+/// this lll process is affected: its environment is untouched, so the
+/// invoking shell, its real tracker and every child process stay as they
+/// were.
+fn setup_scratch() -> Result<(string, config.Settings), string> {
+  let root = match os.MkdirTemp("", "lll-scratch-") {
+    Ok(path) => path,
+    Err(e) => return Err(f"creating scratch directory: {e}"),
+  }
+  if let Err(e) = os.Chdir(root) {
+    return Err(f"entering scratch directory {root}: {e}")
+  }
+  let home = filepath.Join(root, "home")
+  if let Err(e) = os.MkdirAll(home, 0o700) {
+    return Err(f"creating scratch home {home}: {e}")
+  }
+  let db_port = available_port()?
+  let env = config.Env {
+    home,
+    user: "scratch",
+    config_home: filepath.Join(root, "config"),
+    url: f"http://127.0.0.1:{db_port}",
+    team: "SCRAT",
+    bind: "127.0.0.1",
+    admin_email: "admin@local.invalid",
+    admin_password: rand.Text() + rand.Text(),
+    ..
+  }
+  Ok((root, config.resolve(env, config.no_overrides())))
+}
+
+/// The local data directory owns the browser gate secret. A restart with the
+/// same --bind and --pb-dir preserves every link already sent to teammates.
+/// Returns the token: LLL_BOARD_TOKEN, else the saved one, else a new one.
+fn pin_local_board_token(settings: config.Settings, pb_dir: string) -> Result<string, string> {
+  if let Err(e) = os.MkdirAll(pb_dir, 0o700) {
+    return Err(f"creating local board data directory {pb_dir}: {e}")
+  }
+  let path = filepath.Join(pb_dir, ".lll-board-token")
+  let provided = settings.board_token()
+  let saved = match os.ReadFile(path) {
+    Ok(b) => strings.TrimSpace(b as string),
+    Err(e) => {
+      if !os.IsNotExist(e) {
+        return Err(f"reading local board token {path}: {e}")
+      }
+      ""
+    },
+  }
+  let token = if provided != "" {
+    provided
+  } else if saved != "" { saved } else { rand.Text() }
+  if saved != token { write_home_config(path, token + "\n")? }
+  Ok(token)
+}
+
+/// LLL-450: a board other machines can reach must not sit behind a token
+/// nobody chose, that rotates every boot and lives only in the logs. Runs
+/// before anything listens. `--bind` has already pinned a token by now.
+fn require_board_token_off_loopback(settings: config.Settings) -> Result<(), string> {
+  let bind = settings.bind()
+  let loopback = bind == "localhost" || net.ParseIP(bind).IsLoopback()
+  if loopback || settings.board_token() != "" { return Ok(()) }
+  Err(
+    f"LLL_BIND={bind} serves the board beyond this machine, but no LLL_BOARD_TOKEN is set
+a generated token would change on every restart and appear only in this process's logs
+to share the board: set LLL_BOARD_TOKEN to a secret you choose (or use lll up --bind LAN_IP, which keeps one with --pb-dir)
+to keep it private: LLL_BIND=127.0.0.1",
+  )
+}
+
+/// Where a data directory keeps its generated administrator pair.
+fn local_admin_path(pb_dir: string) -> string {
+  let abs = filepath.Abs(pb_dir).unwrap_or(pb_dir)
+  filepath.Join(abs, ".lll-admin.json")
+}
+
+/// LLL-676: no board uses a well-known administrator password. With no
+/// LLL_ADMIN_* pair, keep one random pair with the data directory (0600),
+/// so a restart signs in with the same one. A shared (--bind) board also
+/// pins a supplied pair, and copies it to the machine's private config after
+/// startup for later member-pass minting. `write` is false when this boot
+/// reuses a running server: an existing pair is used, nothing is created.
+///
+/// Returns the pair the boot runs with, or None when it keeps whatever the
+/// settings already carry.
+fn pin_local_admin(
+  settings: config.Settings,
+  pb_dir: string,
+  write: bool,
+) -> Result<Option<config.AdminCreds>, string> {
+  let supplied_email = settings.env.admin_email
+  let supplied_pass = settings.env.admin_password
+  if (supplied_email == "") != (supplied_pass == "") {
+    return Err(
+      flags.usage_error(
+        "lll up needs both LLL_ADMIN_EMAIL and LLL_ADMIN_PASSWORD, or neither (then it generates a password and keeps it in the data directory)",
+      ),
+    )
+  }
+  let path = local_admin_path(pb_dir)
+  let unreadable = f"delete {path} and restart lll up to generate a new administrator password"
+  let mut saved = LocalShareAdmin { .. }
+  match os.ReadFile(path) {
+    Ok(b) => {
+      if let Err(e) = json.Unmarshal(b, &saved) {
+        return Err(f"decoding local admin credentials in {path}: {e}\n{unreadable}")
+      }
+      if saved.email == "" || saved.password == "" {
+        return Err(f"local admin credentials in {path} are incomplete\n{unreadable}")
+      }
+    },
+    Err(e) => if !os.IsNotExist(e) {
+      return Err(f"reading local admin credentials in {path}: {e}")
+    },
+  }
+  if !write {
+    if saved.email == "" || supplied_email != "" { return Ok(None) }
+    return Ok(Some(config.AdminCreds { email: saved.email, password: saved.password }))
+  }
+  if let Err(e) = os.MkdirAll(pb_dir, 0o700) {
+    return Err(f"creating local board data directory {pb_dir}: {e}")
+  }
+  let email = if supplied_email != "" {
+    supplied_email
+  } else if saved.email != "" { saved.email } else { "admin@local.dev" }
+  let pass = if supplied_pass != "" {
+    supplied_pass
+  } else if saved.password != "" {
+    saved.password
+  } else {
+    rand.Text() + rand.Text()
+  }
+  if saved.email != email || saved.password != pass {
+    let encoded = match json.Marshal(
+      LocalShareAdmin { url: "", email, password: pass },
+    ) {
+      Ok(b) => b,
+      Err(e) => return Err(f"encoding local admin credentials: {e}"),
+    }
+    write_home_config(path, encoded as string)?
+  }
+  Ok(Some(config.AdminCreds { email, password: pass }))
+}
+
+/// The kernel chooses a free port while the listener is bound. The normal up
+/// path still checks it again before serving, including a collision fallback.
+fn available_port() -> Result<int, string> {
+  let listener = match net.Listen("tcp", "127.0.0.1:0") {
+    Ok(l) => l,
+    Err(e) => return Err(f"selecting a scratch port: {e}"),
+  }
+  let Some(addr) = listener.Addr() else {
+    let _ = listener.Close()
+    return Err("the scratch listener did not report an address")
+  }
+  let port = port_of(addr.String(), 0)
+  let _ = listener.Close()
+  if port == 0 { return Err("the scratch listener did not report its port") }
+  Ok(port)
+}
+
+fn healthy(base_url: string) -> bool {
+  // Bounded: a non-PB listener on the port must fail fast, not hang us.
+  let client = http.Client { Timeout: 2 * time.Second, .. }
+  let Ok(resp) = client.Get(f"{base_url}/api/health") else {
+    return false
+  }
+  if let Some(body) = resp.Body { let _ = body.Close() }
+  resp.StatusCode == 200
+}
+
+/// Whether `base_url` names this machine. The question `healthy()` cannot
+/// answer: production answers /api/health perfectly, which is exactly why an
+/// already-configured remote url gets adopted by a boot that meant to be local.
+pub fn is_loopback(base_url: string) -> bool {
+  // SplitN throughout, not Index + substring: strings.Index returns a BYTE
+  // offset while substring takes rune indices (see realtime.split_field).
+  let after_scheme = strings.SplitN(base_url, "://", 2)
+  let mut host = after_scheme[after_scheme.length() - 1]
+  // "http:///evil.example": browsers skip the extra slashes and go to
+  // evil.example, so an empty authority is not loopback (LLL-648 review).
+  if host.starts_with("/") || host.starts_with("\\") { return false }
+  host = strings.SplitN(host, "/", 2)[0]
+  // Userinfo hides the real host: "http://localhost:1@evil.example" goes to
+  // evil.example. Any "@" (or a backslash, which some clients read as a
+  // slash) means not loopback; `lll board` sends a board token to whatever
+  // this approves (LLL-648 review).
+  if strings.ContainsAny(host, "@\\") { return false }
+  // An IPv6 literal wears brackets: "[::1]:8090".
+  if host.starts_with("[") {
+    let inner = strings.SplitN(strings.TrimPrefix(host, "["), "]", 2)[0]
+    return inner == "::1"
+  }
+  let name = strings.SplitN(host, ":", 2)[0]
+  name == "127.0.0.1" || name == "localhost" || name == "::1"
+}
+
+/// First free TCP port at or above `start`.
+fn free_port(start: int) -> int {
+  let mut p = start
+  loop {
+    match net.Listen("tcp", f"127.0.0.1:{p}") {
+      Ok(l) => {
+        let _ = l.Close()
+        return p
+      },
+      Err(_) => p += 1,
+    }
+  }
+}
+
+/// Port from "http://127.0.0.1:8090", or `fallback`.
+fn port_of(base_url: string, fallback: int) -> int {
+  // Split, not LastIndex + substring; see realtime.split_field.
+  let parts = strings.Split(base_url, ":")
+  let Ok(p) = strconv.Atoi(parts[parts.length() - 1]) else {
+    return fallback
+  }
+  p
+}
