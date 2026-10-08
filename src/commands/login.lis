@@ -86,7 +86,7 @@ pub fn login_spec() -> Slice<flags.Flag> {
 }
 
 /// Dispatch `lll login`.
-pub fn login(args: Slice<string>) -> Result<(), string> {
+pub fn login(ctx: pb.Client, args: Slice<string>) -> Result<(), string> {
   let spec = login_spec()
   let usage = flags.usage("lll login", spec, "")
   let p = flags.parse(spec, args, 2, false, usage)?
@@ -96,8 +96,8 @@ pub fn login(args: Slice<string>) -> Result<(), string> {
     return Ok(())
   }
 
-  let before_login = config.load()?
-  let saved_before_login = config.load_home()?
+  let before_login = ctx.settings.config()?
+  let saved_before_login = ctx.settings.load_home()?
   let board_endpoint = if p.given("--web-url") { checked_web_url(p.one("--web-url"))? } else { "" }
 
   // --url is the fresh-machine path (TASK-195): authenticate against the url
@@ -106,7 +106,7 @@ pub fn login(args: Slice<string>) -> Result<(), string> {
   // Read for the whole command, not just --create: login_failed compares
   // the admin email to recognise the admin identity, and it has to see the
   // flags too or the flag-users get the generic advice.
-  let admin = given_admin_login(p)?
+  let admin = given_admin_login(ctx.settings, p)?
   let admin_email = admin_login_email(admin)
   let target = strings.TrimSuffix(strings.TrimSpace(p.one("--url")), "/")
   if p.given("--url") && !strings.HasPrefix(target, "http://") && !strings.HasPrefix(target, "https://") {
@@ -125,8 +125,11 @@ pub fn login(args: Slice<string>) -> Result<(), string> {
     let raw = p.one("--token")
     let given = if raw == "-" { read_password(input, "Token: ")? } else { raw }
     let tok = strings.TrimSpace(given)
-    let (name, read_only) = token_identity(target, tok)?
-    return finish_login(target, before_login, saved_before_login, board_endpoint, tok, name, read_only)
+    // The rest of a --url login talks to that server: --url is a flag
+    // override of the configured one for this command.
+    let ctx = if target != "" { ctx.with_url(target) } else { ctx }
+    let (name, read_only) = token_identity(ctx, tok)?
+    return finish_login(ctx, target, before_login, saved_before_login, board_endpoint, tok, name, read_only)
   }
   // Nothing to prompt at: say what is missing in one go rather than one
   // refusal per flag. Scripts, CI and agents are exactly the callers with no
@@ -203,7 +206,7 @@ would put a second account on that address. --create makes YOUR login: pass
     } else {
       strings.Split(email, "@")[0]
     }
-    create_for_login(name, email, password, target, admin)?
+    create_for_login(ctx, name, email, password, target, admin)?
     fmt.Println(f"created member {name} <{email}>")
   }
 
@@ -217,20 +220,20 @@ would put a second account on that address. --create makes YOUR login: pass
   // request whose whole job is to mint a fresh one.
   let auth_path = "/api/collections/members/auth-with-password"
   let sent = if target == "" {
-    pb.post_anon(auth_path, payload as string)
+    ctx.post_anon(auth_path, payload as string)
   } else {
     pb.post_anon_to(target, auth_path, payload as string)
   }
   let body = match sent {
     Ok(b) => b,
-    Err(e) => return Err(login_failed(e, email, target, admin_email)),
+    Err(e) => return Err(login_failed(ctx, e, email, target, admin_email)),
   }
   let mut auth = models.AuthResponse { .. }
   if let Err(e) = json.Unmarshal(body.bytes(), &auth) {
     return Err(f"decoding the auth response: {e}")
   }
   if auth.token == "" { return Err("the response carried no token") }
-  finish_login(
+  finish_login(ctx,
     target,
     before_login,
     saved_before_login,
@@ -242,19 +245,14 @@ would put a second account on that address. --create makes YOUR login: pass
 }
 
 /// The member a token names and whether it is read-only, asked of the
-/// server it will be saved for (`target`, else the configured url). The
-/// access route answers only a valid member token, so a superuser token,
-/// a revoked one or a typo stops here instead of being saved.
-fn token_identity(target: string, tok: string) -> Result<(string, bool), string> {
+/// server it will be saved for (`ctx` is pointed at --url when one was
+/// given). The access route answers only a valid member token, so a
+/// superuser token, a revoked one or a typo stops here instead of being saved.
+fn token_identity(ctx: pb.Client, tok: string) -> Result<(string, bool), string> {
   if tok == "" {
     return Err("--token needs a member token: paste it after --token, or pass --token - and pipe it in")
   }
-  if target != "" {
-    if let Err(e) = os.Setenv("LLL_URL", target) {
-      return Err(f"pointing at {target}: {e}")
-    }
-  }
-  let body = match pb.get_as("/api/lll/access", tok) {
+  let body = match ctx.get_as("/api/lll/access", tok) {
     Ok(b) => b,
     Err(e) => {
       let status = pb.classify(e).status
@@ -278,6 +276,7 @@ fn token_identity(target: string, tok: string) -> Result<(string, bool), string>
 /// Save a login that just authenticated: url, board endpoint, token, then
 /// the team when the server leaves no choice.
 fn finish_login(
+  ctx: pb.Client,
   target: string,
   before_login: config.Config,
   saved_before_login: config.Config,
@@ -290,30 +289,31 @@ fn finish_login(
   // a token must not travel with it. The value is written here and printed
   // nowhere — even success output names the member and the file, not the key.
   if target != "" {
-    let url_path = set_home_key("url", target)?
+    let url_path = set_home_key(ctx.settings, "url", target)?
     fmt.Println(f"url = \"{target}\" in {url_path}")
   }
   let authenticated_url = if target != "" { target } else { before_login.url }
   let previous_url = if saved_before_login.url != "" { saved_before_login.url } else { before_login.url }
   if strings.TrimRight(authenticated_url, "/") != strings.TrimRight(previous_url, "/") && board_endpoint == "" {
-    let _ = clear_home_key("web_url")?
+    let _ = clear_home_key(ctx.settings, "web_url")?
   }
   if board_endpoint != "" {
-    let _ = set_home_key("web_url", board_endpoint)?
+    let _ = set_home_key(ctx.settings, "web_url", board_endpoint)?
   } else {
-    let cfg = config.load()?
+    // Re-read: the url and web_url lines above may have just changed.
+    let cfg = ctx.settings.reload().config()?
     if cfg.web_url == "" {
       let discovery_base = if target != "" { target } else { cfg.url }
       if let Some(endpoint) = discover_board_url(discovery_base) {
-        let _ = set_home_key("web_url", endpoint)?
+        let _ = set_home_key(ctx.settings, "web_url", endpoint)?
         fmt.Println(f"board endpoint discovered: {endpoint}")
       }
     }
   }
-  let path = set_home_key("token", token)?
+  let path = set_home_key(ctx.settings, "token", token)?
   fmt.Println(f"logged in as {name}")
   fmt.Println(f"token saved to {path}")
-  if os.Getenv("LLL_TOKEN") != "" {
+  if ctx.settings.env.token != "" {
     fmt.Println(
       "note: LLL_TOKEN is set in this shell and overrides the saved token until it is unset",
     )
@@ -327,8 +327,10 @@ fn finish_login(
   // belongs to 'lll attach'. Config layers rather than shadows (TASK-179), so
   // a home 'team' is a machine-wide default that any attached repo overrides
   // — which is what the layering documents it for.
-  settle_team(read_only)
-  let saved_cfg = config.load()?
+  // Both on the configuration as this login just saved it: the new token
+  // is the one the team lookup must send.
+  settle_team(pb.Client.new(ctx.settings.reload()), read_only)
+  let saved_cfg = ctx.settings.reload().config()?
   if saved_cfg.web_url == "" {
     fmt.Println("board endpoint: run 'lll config set web_url URL' with the board address supplied by your deployer")
   }
@@ -338,7 +340,7 @@ fn finish_login(
 /// Settle a team on the home config when there is nothing to decide, and say
 /// what to run when there is. Never an error: the login itself succeeded, and
 /// a server that cannot answer about teams does not un-log-you-in.
-fn settle_team(read_only: bool) {
+fn settle_team(ctx: pb.Client, read_only: bool) {
   // A read-only member's first write answers 403, so its ready line names a
   // read (LLL-648).
   let ready = if read_only {
@@ -346,8 +348,8 @@ fn settle_team(read_only: bool) {
   } else {
     "ready: lll issue create \"a title\""
   }
-  let Ok(cfg) = config.load() else { return }
-  let teams = match records.list_teams() {
+  let Ok(cfg) = ctx.settings.config() else { return }
+  let teams = match records.list_teams(ctx) {
     Ok(teams) => teams,
     Err(e) => {
       fmt.Println(f"authenticated, but could not verify team setup: {pb.plain(e)}\nnext: lll team list, then lll attach --key KEY")
@@ -370,7 +372,7 @@ fn settle_team(read_only: bool) {
   let live = teams.items.filter(|t| !t.archived)
   if live.length() == 1 {
     let key = live[0].key
-    let Ok(path) = set_home_key("team", key) else {
+    let Ok(path) = set_home_key(ctx.settings, "team", key) else {
       fmt.Println(f"next: lll attach --key {key} (the only team you can see)")
       return
     }
@@ -394,8 +396,8 @@ fn settle_team(read_only: bool) {
 /// `lll --help` or `lll --version` rather than a real command, so they never
 /// saw the refusal that carries the setup recipe. Help is where they looked;
 /// the recipe belongs there too.
-pub fn setup_hint() -> string {
-  let Ok((cfg, src)) = config.load_traced() else { return "" }
+pub fn setup_hint(ctx: pb.Client) -> string {
+  let Ok((cfg, src)) = ctx.settings.traced() else { return "" }
   if cfg.token != "" { return "" }
   // A defaulted url is not an answer, it is the absence of one. Printing it
   // into a runnable line is the same mistake three usability rounds caught in
@@ -436,7 +438,7 @@ struct WhoamiExpand {
 /// None when the server does not report access (older server, superuser).
 /// A bot with an owner shows its access within the owner's (LLL-543), and
 /// names the owner when that is narrower than the bot's own.
-fn access_line(me: WhoamiIdentity, body: string) -> Result<Option<string>, string> {
+fn access_line(ctx: pb.Client, me: WhoamiIdentity, body: string) -> Result<Option<string>, string> {
   if me.scope == "" { return Ok(None) }
   let own_keys = me.expand.teams.map(|t| t.key)
   let mut record = models.Member { .. }
@@ -444,10 +446,10 @@ fn access_line(me: WhoamiIdentity, body: string) -> Result<Option<string>, strin
   if decoded.is_err() || record.owner == "" {
     return Ok(Some(describe_access(me.scope, me.mode, own_keys)))
   }
-  let (eff, cap) = records.effective_access(record)?
+  let (eff, cap) = records.effective_access(ctx, record)?
   let Some(owner) = cap else { return Ok(Some(describe_access(me.scope, me.mode, own_keys))) }
   // A scoped caller lists exactly the teams it can see.
-  let keys = if eff.scope == "all" { [] } else { records.list_teams()?.items.map(|t| t.key) }
+  let keys = if eff.scope == "all" { [] } else { records.list_teams(ctx)?.items.map(|t| t.key) }
   Ok(Some(f"{describe_access(eff.scope, eff.mode, keys)} (capped by its owner, {owner.name})"))
 }
 
@@ -490,7 +492,7 @@ This leaves the saved attachment unchanged (see 'lll config --help')."
 
 /// `lll whoami` — the member or administrator identity, confirmed by a
 /// record lookup against the server rather than read off the config.
-pub fn whoami(args: Slice<string>) -> Result<(), string> {
+pub fn whoami(ctx: pb.Client, args: Slice<string>) -> Result<(), string> {
   if let Some(flag) = args.get(2) {
     if flag == "--help" || flag == "-h" {
       fmt.Println(
@@ -511,7 +513,7 @@ token with a member session, and 'lll bot create bot-NAME' provisions a bot iden
     if let Some(extra) = args.get(3) { return Err(whoami_arg_error(extra, args)) }
   }
   let json_mode = args.get(2) == Some("--json")
-  let (cfg, src) = config.load_traced()?
+  let (cfg, src) = ctx.settings.traced()?
   // NOT auth-refresh, which this used to POST. A refresh is refused for every
   // non-refreshable token - and `lll token create` mints exactly those, the
   // whole agent credential - so `lll whoami` answered "401 Unauthorized" to
@@ -523,21 +525,21 @@ token with a member session, and 'lll bot create bot-NAME' provisions a bot iden
   // No token at all is its own answer, the same one every read gives; the
   // classification below is for a token that IS set but cannot be read.
   if cfg.token == "" {
-    return Err(pb.not_logged_in_message())
+    return Err(ctx.not_logged_in_message())
   }
   // Same classification the reads use, so a corrupted token gets the same
   // words here as everywhere else, instead of a third phrasing.
   let Some(id) = pb.token_subject(cfg.token) else {
     if strings.Split(cfg.token, ".").length() == 3 {
-      return Err(pb.corrupted_token_message())
+      return Err(ctx.corrupted_token_message())
     }
     return Err("the configured token is not an lll auth token; use 'lll login', or 'lll token create' for an agent")
   }
   if pb.token_expired(cfg.token) {
-    return Err(pb.expired_token_message())
+    return Err(ctx.expired_token_message())
   }
   let collection = pb.token_collection(cfg.token).unwrap_or("members")
-  let body = pb.get(f"/api/collections/{collection}/records/{id}?expand=teams")?
+  let body = ctx.get(f"/api/collections/{collection}/records/{id}?expand=teams")?
   let mut me = WhoamiIdentity { .. }
   if let Err(e) = json.Unmarshal(body.bytes(), &me) {
     return Err(f"decoding the identity response: {e}")
@@ -546,7 +548,7 @@ token with a member session, and 'lll bot create bot-NAME' provisions a bot iden
   let name = if administrator { "superuser" } else { me.name }
   if json_mode {
     let kind = if administrator { "administrator" } else { me.kind }
-    let access = access_line(me, body)?.unwrap_or("")
+    let access = access_line(ctx, me, body)?.unwrap_or("")
     return print_json(WhoamiJson {
       id: me.id, name, email: me.email, kind, server: cfg.url, team: cfg.team,
       token_source: src.token, scope: me.scope, mode: me.mode, access,
@@ -557,7 +559,7 @@ token with a member session, and 'lll bot create bot-NAME' provisions a bot iden
   let team = if cfg.team == "" { "(none; run 'lll attach')" } else { cfg.team }
   fmt.Println(f"team    {team}")
   fmt.Println(f"token   {src.token}")
-  if let Some(access) = access_line(me, body)? {
+  if let Some(access) = access_line(ctx, me, body)? {
     fmt.Println(f"access  {access}")
   }
   if administrator {
@@ -575,42 +577,34 @@ token with a member session, and 'lll bot create bot-NAME' provisions a bot iden
 /// person creating this account is the person about to log into it.
 ///
 /// `base` is --url's server when given, so --create works on a machine that
-/// has never been configured. superuser_auth reads the configured url, which
-/// is why LLL_URL is set for the duration rather than passed down: the gate is
-/// shared with two other commands and neither needs a base argument.
+/// has never been configured: the client it runs on is pointed there.
 fn create_for_login(
+  ctx: pb.Client,
   name: string,
   email: string,
   password: string,
   base: string,
   admin: AdminLogin,
 ) -> Result<(), string> {
-  let restore = os.Getenv("LLL_URL")
-  if base != "" {
-    if let Err(e) = os.Setenv("LLL_URL", base) {
-      return Err(f"pointing at {base}: {e}")
-    }
-  }
-  let out = create_as_superuser(name, email, password, admin)
-  if base != "" { let _ = os.Setenv("LLL_URL", restore) }
-  out
+  let ctx = if base != "" { ctx.with_url(base) } else { ctx }
+  create_as_superuser(ctx, name, email, password, admin)
 }
 
-/// The superuser-gated half, split out so the LLL_URL above is restored on
-/// every path including the failures.
+/// The superuser-gated half.
 fn create_as_superuser(
+  ctx: pb.Client,
   name: string,
   email: string,
   password: string,
   admin: AdminLogin,
 ) -> Result<(), string> {
-  let su = superuser_auth(admin)?
-  if let Some(existing) = records.find_member_as(su, name)? {
+  let su = superuser_auth(ctx, admin)?
+  if let Some(existing) = records.find_member_as(ctx, su, name)? {
     return Err(
       f"member '{name}' already exists ({existing.email}); drop --create and log in, or reset it with 'lll member set-password {name}'",
     )
   }
-  let _ = create_member_as(su, name, email, password, [], "")?
+  let _ = create_member_as(ctx, su, name, email, password, [], "")?
   Ok(())
 }
 
@@ -620,7 +614,7 @@ fn create_as_superuser(
 /// the account had never existed, and none of them found 'member invite' or
 /// --create from it. Both branches are named here because the server does not
 /// tell us which one it is.
-fn login_failed(e: string, email: string, target: string, admin_email: string) -> string {
+fn login_failed(ctx: pb.Client, e: string, email: string, target: string, admin_email: string) -> string {
   let status = pb.classify(e).status
   // A 403 whose body is a PocketBase envelope is the server refusing this
   // identity by name — a bot member at a password door (LLL-407) — and its
@@ -632,7 +626,7 @@ fn login_failed(e: string, email: string, target: string, admin_email: string) -
       let base = if target != "" {
         target
       } else {
-        pb.base_url().unwrap_or("the configured server")
+        ctx.url().unwrap_or("the configured server")
       }
       return f"login failed at {base}: {presented.summary}"
     }
@@ -646,7 +640,7 @@ fn login_failed(e: string, email: string, target: string, admin_email: string) -
   let base = if target != "" {
     target
   } else {
-    pb.base_url().unwrap_or("the configured server")
+    ctx.url().unwrap_or("the configured server")
   }
   let url_flag = if target == "" { "" } else { f" --url {target}" }
   // 29 of 50 agents in the fleet run wasted a command putting the ADMIN email
@@ -678,23 +672,31 @@ if it does not exist yet, and you hold the server's admin credentials
 /// persist, and a repo file must never hold a token. No request is made
 /// unless the token's own payload says it is inside the refresh window. A
 /// failed refresh leaves the command to run on the old token and says why.
-pub fn renew_login_token() {
-  let Ok((cfg, src)) = config.load_traced() else { return }
-  let Ok(home) = config.home_path() else { return }
-  let Ok(saved) = config.load_home() else { return }
+///
+/// Returns the settings the command runs with: re-resolved after a renewal,
+/// so the command sends the token it just saved.
+pub fn renew_login_token(settings: config.Settings) -> config.Settings {
+  let Ok((cfg, src)) = settings.traced() else { return settings }
+  let Ok(home) = settings.home_path() else { return settings }
+  let Ok(saved) = settings.load_home() else { return settings }
   // The url compared and the token sent must come from one read of the home
   // file: a login rewriting it between the two reads would otherwise pair
   // the old token with the new url.
-  if saved.token != cfg.token { return }
-  if !renews_home_login(src, home, saved.url, cfg.url) { return }
-  if !pb.token_needs_refresh(cfg.token, time.Now().Unix() as int) { return }
+  if saved.token != cfg.token { return settings }
+  if !renews_home_login(src, home, saved.url, cfg.url) { return settings }
+  if !pb.token_needs_refresh(cfg.token, time.Now().Unix() as int) { return settings }
   match pb.refresh_token(cfg.url, cfg.token) {
     Ok(fresh) => {
-      if let Err(e) = set_home_key("token", fresh) {
+      if let Err(e) = set_home_key(settings, "token", fresh) {
         fmt.Fprintln(os.Stderr, f"note: could not save the renewed login token: {pb.plain(e)}")
+        return settings
       }
+      settings.reload()
     },
-    Err(e) => fmt.Fprintln(os.Stderr, f"note: could not renew the login token in {home}: {pb.plain(e)}"),
+    Err(e) => {
+      fmt.Fprintln(os.Stderr, f"note: could not renew the login token in {home}: {pb.plain(e)}")
+      settings
+    },
   }
 }
 
@@ -718,7 +720,7 @@ fn renews_home_login(src: config.Sources, home: string, home_url: string, url: s
 
 /// Dispatch `lll logout`: forget the token the home config holds. Env vars
 /// and the repo file are not ours to touch, and nothing else gets unset.
-pub fn logout(args: Slice<string>) -> Result<(), string> {
+pub fn logout(ctx: pb.Client, args: Slice<string>) -> Result<(), string> {
   if let Some(verb) = args.get(2) {
     if verb == "--help" || verb == "-h" {
       print_logout_usage()
@@ -726,8 +728,8 @@ pub fn logout(args: Slice<string>) -> Result<(), string> {
     }
     return Err(f"unknown logout command: '{verb}' (see 'lll logout --help')")
   }
-  let path = config.home_path()?
-  let cleared = clear_home_key("token")?
+  let path = ctx.settings.home_path()?
+  let cleared = clear_home_key(ctx.settings, "token")?
   if cleared {
     fmt.Println(f"token cleared from {path}")
   } else {

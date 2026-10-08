@@ -414,21 +414,21 @@ pub fn issue_watch_spec() -> Slice<flags.Flag> {
 /// Dispatch `lll issue <verb>` through the noun's Command table (TASK-307).
 /// The table is the one place a verb is declared: dispatch, `lll issue --help`
 /// and shell completions all read it, so none of the three can drift.
-pub fn issue(args: Slice<string>) -> Result<(), string> {
+pub fn issue(ctx: pb.Client, args: Slice<string>) -> Result<(), string> {
   let cmds = issue_commands()
   if let Some(hint) = issue_synonym(args.get(2).unwrap_or("")) {
     return Err(flags.usage_error(hint))
   }
   if args.get(2) == Some("comment") && ["edit", "delete"].contains(args.get(3).unwrap_or("")) {
     let subargs = args[..2].append(args[3..]...)
-    return flags.dispatch("issue comment", "change a comment", "", comment_commands(), subargs)
+    return flags.dispatch(ctx, "issue comment", "change a comment", "", comment_commands(), subargs)
   }
   if args.get(2) == Some("comment") {
     if let Some(hint) = comment_verb_hint(args.get(3).unwrap_or("")) {
       return Err(flags.usage_error(hint))
     }
   }
-  flags.dispatch("issue", "work with issues", issue_intro(), cmds, args)
+  flags.dispatch(ctx, "issue", "work with issues", issue_intro(), cmds, args)
 }
 
 /// `lll issue comment list KEY` and its kin: the only sub-verbs are edit and
@@ -723,6 +723,7 @@ Without --state the issue starts in todo; --label may be repeated."
 }
 
 fn create(input: flags.CommandInput) -> Result<(), string> {
+  let ctx = input.ctx
   let usage = input.usage
   // A bare title is accepted alongside -t: `gh issue create`, `linear` and
   // `jira` all take one, and every usability run reached for it first and got
@@ -752,28 +753,28 @@ fn create(input: flags.CommandInput) -> Result<(), string> {
 
   // The team first: it scopes the label and project names below, which are
   // unique per team and not across them (TASK-173).
-  let team = current_team()?
+  let team = current_team(ctx)?
   // New issues do not land in an archived team (TASK-210): archived is the
   // lifecycle's end, and reviving it is a deliberate one-command act.
   if team.archived { return Err(archived_hint(team.key)) }
 
   let mut assignee = ""
-  if assignee_name != "" { assignee = records.resolve_member(assignee_name)?.id }
+  if assignee_name != "" { assignee = records.resolve_member(ctx, assignee_name)?.id }
 
   let mut project = ""
-  if project_name != "" { project = records.resolve_project(team.id, project_name)?.id }
+  if project_name != "" { project = records.resolve_project(ctx, team.id, project_name)?.id }
 
   let mut labels: Slice<string> = []
   for name in label_names {
-    labels = labels.append(records.resolve_label(team.id, name)?.id)
+    labels = labels.append(records.resolve_label(ctx, team.id, name)?.id)
   }
 
   // --agent names the session as the other claim verbs do; without it the
   // origin tool stays LLL_AGENT, as capture() reads it.
-  let mut origin = provenance.capture()
-  if p.given("--agent") { origin.tool = agent_label(p)? }
+  let mut origin = provenance.capture(ctx.settings.env.agent)
+  if p.given("--agent") { origin.tool = agent_label(ctx, p)? }
   let new_issue = models.NewIssue {
-    creator: actor()?.map_or("", |member| member.id),
+    creator: actor(ctx)?.map_or("", |member| member.id),
     origin,
     team: team.id,
     title,
@@ -796,9 +797,9 @@ fn create(input: flags.CommandInput) -> Result<(), string> {
     "/api/collections/issues/records"
   }
   let body = if key == "" {
-    pb.post(path, payload as string)?
+    ctx.post(path, payload as string)?
   } else {
-    let supported = pb.get("/api/lll/issues/idempotency").map_err(|e| {
+    let supported = ctx.get("/api/lll/issues/idempotency").map_err(|e| {
       if pb.classify(e).status == 404 {
         "this server does not support --idempotency-key; upgrade the server before retrying this creation"
       } else { e }
@@ -808,7 +809,7 @@ fn create(input: flags.CommandInput) -> Result<(), string> {
       return Err(f"decoding creation support: {e}")
     }
     if !support.supported { return Err("this server does not support --idempotency-key; upgrade the server before retrying this creation") }
-    pb.post_idempotent(path, payload as string, key)?
+    ctx.post_idempotent(path, payload as string, key)?
   }
 
   let mut created = models.Issue { .. }
@@ -844,6 +845,7 @@ fn empty_search_hint(search: string) -> string {
 struct CreationReuse { reused: bool }
 
 fn list(input: flags.CommandInput) -> Result<(), string> {
+  let ctx = input.ctx
   let p = input.parsed
   let filters = filters_from(p)?
   let since = if p.given("--since") { issue_since_stamp(p.one("--since"))? } else { "" }
@@ -871,11 +873,11 @@ fn list(input: flags.CommandInput) -> Result<(), string> {
   let blocked_only = p.given("--blocked")
   if ready_only && blocked_only { return Err(flags.usage_error("--ready and --blocked exclude each other")) }
 
-  let cfg = config.load()?
+  let cfg = ctx.settings.config()?
 
   // A configured team (LLL_TEAM or .lll.toml) scopes the list by default,
   // and with it the label and project names the list filters by.
-  let scope = configured_scope()?
+  let scope = configured_scope(ctx)?
 
   let mut sort_spec = sort_flag
   if sort_spec == "" { sort_spec = cfg.sort }
@@ -885,7 +887,7 @@ fn list(input: flags.CommandInput) -> Result<(), string> {
   // --limit applies server-side via PB's perPage (capped by PB at 500).
   let mut per_page = 200
   if limit > 0 { per_page = limit }
-  let mut filter = resolve_filter_query(scope, filters)?
+  let mut filter = resolve_filter_query(ctx, scope, filters)?
   if since != "" {
     let clause = f"updated >= {query.quote(since)}"
     filter = if filter == "" { clause } else { f"{filter} && {clause}" }
@@ -907,13 +909,13 @@ fn list(input: flags.CommandInput) -> Result<(), string> {
   let (fetched, raw_records, served) = match mode {
     ListMode.Whole => {
       let order = if by_priority { "&sort=priority,id" } else { f"&sort={url.QueryEscape(sort + ",id")}" }
-      let (all, raw) = fetch_all_listed(f"{order}{tail}")?
+      let (all, raw) = fetch_all_listed(ctx, f"{order}{tail}")?
       let ordered = if by_priority { rank_by_priority(all, strings.HasPrefix(sort_spec, "-")) } else { all }
       (ordered, raw, page_of_total(page, per_page, 0))
     },
     ListMode.Page => {
       let path = f"/api/collections/issues/records?perPage={per_page}{tail}&sort={url.QueryEscape(sort + ",id")}&page={page}"
-      let listed = fetch_listed_page(path)?
+      let listed = fetch_listed_page(ctx, path)?
       (listed.issues, listed.raw, page_of_total(page, per_page, listed.total_items))
     },
   }
@@ -934,7 +936,7 @@ fn list(input: flags.CommandInput) -> Result<(), string> {
     items = page_of(items, page, per_page)
   }
   // LLL-651: the claim rides the list, so automation need not view each card.
-  let held = if items.is_empty() { Map.new<string, models.Claim>() } else { claims_by_issue(scope.filter_team())? }
+  let held = if items.is_empty() { Map.new<string, models.Claim>() } else { claims_by_issue(ctx, scope.filter_team())? }
   if json_mode {
     let mut out: Slice<Map<string, json.RawMessage>> = []
     for i in items {
@@ -981,9 +983,9 @@ struct RawIssuePage {
   total_pages: int,
 }
 
-fn fetch_listed_page(path: string) -> Result<ListedPage, string> {
+fn fetch_listed_page(ctx: pb.Client, path: string) -> Result<ListedPage, string> {
   let mut page = RawIssuePage { .. }
-  pb.fetch(path, "issues", &page)?
+  pb.fetch(ctx, path, "issues", &page)?
   let mut issues: Slice<models.Issue> = []
   let mut by_id = Map.new<string, json.RawMessage>()
   for record in page.items {
@@ -997,12 +999,12 @@ fn fetch_listed_page(path: string) -> Result<ListedPage, string> {
 
 /// Every page of an issues query, decoded and raw (fetch_all_issues, for a
 /// list that prints records).
-fn fetch_all_listed(tail: string) -> Result<(Slice<models.Issue>, Map<string, json.RawMessage>), string> {
+fn fetch_all_listed(ctx: pb.Client, tail: string) -> Result<(Slice<models.Issue>, Map<string, json.RawMessage>), string> {
   let mut issues: Slice<models.Issue> = []
   let mut by_id = Map.new<string, json.RawMessage>()
   let mut page = 1
   loop {
-    let listed = fetch_listed_page(f"/api/collections/issues/records?perPage=500&page={page}{tail}")?
+    let listed = fetch_listed_page(ctx, f"/api/collections/issues/records?perPage=500&page={page}{tail}")?
     issues = issues.append(listed.issues...)
     for (id, record) in listed.raw { by_id[id] = record }
     if page >= listed.total_pages || listed.issues.is_empty() { break }
@@ -1013,13 +1015,13 @@ fn fetch_all_listed(tail: string) -> Result<(Slice<models.Issue>, Map<string, js
 
 /// Every claim on the team's issues (every visible team's when `team_id` is
 /// ""), by issue id. Claims are one per issue in progress, so this is small.
-fn claims_by_issue(team_id: string) -> Result<Map<string, models.Claim>, string> {
+fn claims_by_issue(ctx: pb.Client, team_id: string) -> Result<Map<string, models.Claim>, string> {
   let filter = if team_id == "" { "" } else { f"&filter={url.QueryEscape(f"issue.team={query.quote(team_id)}")}" }
   let mut out = Map.new<string, models.Claim>()
   let mut page = 1
   loop {
     let mut list = models.ClaimList { .. }
-    pb.fetch(f"/api/collections/claims/records?expand=member&sort=id&perPage=500&page={page}{filter}", "claims", &list)?
+    pb.fetch(ctx, f"/api/collections/claims/records?expand=member&sort=id&perPage=500&page={page}{filter}", "claims", &list)?
     for c in list.items { out[c.issue] = c }
     if page >= list.total_pages || list.items.is_empty() { break }
     page += 1
@@ -1117,6 +1119,7 @@ struct IssueViewReads {
 /// Start only the reads this output mode already uses. Each result has room
 /// to finish even when an earlier error makes the caller stop receiving.
 fn begin_issue_view_reads(
+  ctx: pb.Client,
   full: models.Issue,
   json_mode: bool,
   raw_mode: bool,
@@ -1130,23 +1133,23 @@ fn begin_issue_view_reads(
   }
   // Every mode shows the claim; --raw too since LLL-638.
   task {
-    let _ = reads.claim.send(fetch_claim(full.id))
+    let _ = reads.claim.send(fetch_claim(ctx, full.id))
   }
   if json_mode || !raw_mode {
     task {
-      let _ = reads.docs.send(fetch_issue_docs(full.id))
+      let _ = reads.docs.send(fetch_issue_docs(ctx, full.id))
     }
   }
   if !json_mode && !raw_mode {
     task {
-      let _ = reads.blocks.send(fetch_blocks(full.id))
+      let _ = reads.blocks.send(fetch_blocks(ctx, full.id))
     }
   }
   task {
-    let _ = reads.findings.send(findings_for_issue(full))
+    let _ = reads.findings.send(findings_for_issue(ctx, full))
   }
   task {
-    let _ = reads.comments.send(records.fetch_comments(full.id))
+    let _ = reads.comments.send(records.fetch_comments(ctx, full.id))
   }
   reads
 }
@@ -1162,29 +1165,30 @@ fn await_issue_view<T>(
 }
 
 fn view(input: flags.CommandInput) -> Result<(), string> {
+  let ctx = input.ctx
   let spec = issue_view_spec()
   let p = input.parsed
   let id = p.first()
   let json_mode = p.given("--json")
   let raw_mode = p.given("--raw")
   let open_web = p.given("-w")
-  let resolved = resolve_id(
+  let resolved = resolve_id(ctx,
     id,
     flags.usage("lll issue view", spec, "[KEY-123]"),
   )?
 
   if open_web {
-    let target = issue_url(records.fetch_issue(resolved)?)?
+    let target = issue_url(ctx, records.fetch_issue(ctx, resolved)?)?
     fmt.Println(f"Opening {target}")
     return open_url(target)
   }
 
-  let record = records.fetch_issue_record(resolved)?
+  let record = records.fetch_issue_record(ctx, resolved)?
   let mut full = models.Issue { .. }
   if let Err(e) = json.Unmarshal(record.bytes(), &full) {
     return Err(f"decoding issue: {e}")
   }
-  let reads = begin_issue_view_reads(full, json_mode, raw_mode)
+  let reads = begin_issue_view_reads(ctx, full, json_mode, raw_mode)
   if json_mode {
     fmt.Println(issue_view_json(
       record,
@@ -1394,11 +1398,11 @@ fn issue_view_json(
 
 /// `--json` on the verbs that change an issue (update, close, start, claim):
 /// the issue as it is after the write, in the list's per-item shape.
-fn print_issue_after(key: string) -> Result<(), string> {
-  let record = records.fetch_issue_record(key)?
+fn print_issue_after(ctx: pb.Client, key: string) -> Result<(), string> {
+  let record = records.fetch_issue_record(ctx, key)?
   let mut full = models.Issue { .. }
   if let Err(e) = json.Unmarshal(record.bytes(), &full) { return Err(f"decoding issue: {e}") }
-  print_issue_json(record, fetch_claim(full.id)?)
+  print_issue_json(record, fetch_claim(ctx, full.id)?)
 }
 
 fn doc_context_json(docs: Slice<models.Doc>) -> Result<json.RawMessage, string> {
@@ -1436,6 +1440,7 @@ fn parse_description_replacement(
 }
 
 fn update(input: flags.CommandInput) -> Result<(), string> {
+  let ctx = input.ctx
   let usage = input.usage
   let p = input.parsed
   let id = p.first()
@@ -1489,7 +1494,7 @@ fn update(input: flags.CommandInput) -> Result<(), string> {
     return Err(flags.usage_error("--force clears another holder's claim; it goes with --assignee none"))
   }
   let reason = forced_reason(p, force, "a forced clear")?
-  let agent = if assignee_name != "" { agent_label(p)? } else { "" }
+  let agent = if assignee_name != "" { agent_label(ctx, p)? } else { "" }
   // LLL-399: the stamp rides the direct PATCH. Assignment writes go through
   // the claim route, which carries no precondition header — honouring the
   // flag there would mean a guard that silently stops guarding. The claims
@@ -1506,8 +1511,8 @@ fn update(input: flags.CommandInput) -> Result<(), string> {
     return Err(flags.usage_error(f"nothing to update: pass at least one flag\nusage: {usage}"))
   }
 
-  let resolved = resolve_id(id, usage)?
-  let issue = records.fetch_issue(resolved)?
+  let resolved = resolve_id(ctx, id, usage)?
+  let issue = records.fetch_issue(ctx, resolved)?
   let key = f"{issue.expand.team.key}-{issue.number}"
 
   // LLL-391: optimistic concurrency for the fields nobody owns. The caller
@@ -1550,7 +1555,7 @@ fn update(input: flags.CommandInput) -> Result<(), string> {
     fields = fields.append("\"assignee\":\"\"")
     changed = changed.append("assignee=none")
   } else if assignee_name != "" {
-    let member = records.resolve_member(assignee_name)?
+    let member = records.resolve_member(ctx, assignee_name)?
     fields = fields.append("\"assignee\":" + json_quote(member.id)?)
     changed = changed.append(f"assignee={member.name}")
   }
@@ -1558,7 +1563,7 @@ fn update(input: flags.CommandInput) -> Result<(), string> {
   // `lll issue update GRDN-4 --label bug` must mean GRDN's bug even when
   // LLL_TEAM says otherwise.
   if project_set {
-    let project_id = if project_name == "" { "" } else { records.resolve_project(issue.team, project_name)?.id }
+    let project_id = if project_name == "" { "" } else { records.resolve_project(ctx, issue.team, project_name)?.id }
     fields = fields.append("\"project\":" + json_quote(project_id)?)
     let project_change = if project_name == "" { "project=none" } else { f"project={project_name}" }
     changed = changed.append(project_change)
@@ -1566,7 +1571,7 @@ fn update(input: flags.CommandInput) -> Result<(), string> {
   if !label_names.is_empty() {
     let mut label_ids: Slice<string> = []
     for name in label_names {
-      label_ids = label_ids.append(records.resolve_label(issue.team, name)?.id)
+      label_ids = label_ids.append(records.resolve_label(ctx, issue.team, name)?.id)
     }
     let encoded = match json.Marshal(label_ids) {
       Ok(b) => b as string,
@@ -1580,11 +1585,11 @@ fn update(input: flags.CommandInput) -> Result<(), string> {
   // issue's lock across the request.
   let mut add_ids: Slice<string> = []
   for name in add_label_names {
-    add_ids = add_ids.append(records.resolve_label(issue.team, name)?.id)
+    add_ids = add_ids.append(records.resolve_label(ctx, issue.team, name)?.id)
   }
   let mut remove_ids: Slice<string> = []
   for name in remove_label_names {
-    let id = records.resolve_label(issue.team, name)?.id
+    let id = records.resolve_label(ctx, issue.team, name)?.id
     if add_ids.contains(id) {
       return Err(flags.usage_error(f"--add-label and --remove-label both name '{name}'; pass it to only one of them"))
     }
@@ -1609,8 +1614,8 @@ fn update(input: flags.CommandInput) -> Result<(), string> {
   let payload = "{" + strings.Join(fields, ",") + "}"
   let mut released = ""
   if assignee_name != "" {
-    let observed = claims.observed_id(issue.id)?
-    let result = claims.update_assignment(pb.Caller.Process, issue.id, observed, payload, agent, force, reason).map_err(|e| {
+    let observed = claims.observed_id(ctx, issue.id)?
+    let result = claims.update_assignment(ctx, pb.Caller.Process, issue.id, observed, payload, agent, force, reason).map_err(|e| {
       if pb.classify(e).code == "claim_held" {
         f"{key}: {e}; {held_elsewhere_hint(key)}"
       } else if pb.classify(e).code == "needs_force" {
@@ -1625,7 +1630,7 @@ fn update(input: flags.CommandInput) -> Result<(), string> {
     // The stamp rides the write (LLL-399): the precondition holds at the
     // server, so a write landing between this process's read and its PATCH
     // answers 412 instead of being clobbered.
-    let patched = pb.patch_with_stamp(f"/api/collections/issues/records/{issue.id}", payload, since)
+    let patched = ctx.patch_with_stamp(f"/api/collections/issues/records/{issue.id}", payload, since)
     if let Err(e) = patched {
       if pb.classify(e).status == 412 {
         let presented = pb.display_error(e)
@@ -1634,7 +1639,7 @@ fn update(input: flags.CommandInput) -> Result<(), string> {
       return Err(e)
     }
   }
-  if p.given("--json") { return print_issue_after(key) }
+  if p.given("--json") { return print_issue_after(ctx, key) }
   fmt.Println(f"Updated {issue.expand.team.key}-{issue.number}: {strings.Join(changed, ", ")}{released}")
   Ok(())
 }
@@ -1645,22 +1650,23 @@ fn update(input: flags.CommandInput) -> Result<(), string> {
 /// release rule: refused without --force, and a forced close comments with
 /// --reason.
 fn close_issue(input: flags.CommandInput) -> Result<(), string> {
+  let ctx = input.ctx
   let usage = "lll issue close [KEY-123] [--keep-claim] [--force [--reason \"why\"]]"
   let p = input.parsed
-  let agent = agent_label(p)?
+  let agent = agent_label(ctx, p)?
   let force = p.given("--force")
   let reason = forced_reason(p, force, "closing another holder's claimed issue")?
   let keep = p.given("--keep-claim")
-  let resolved = resolve_id(p.first(), usage)?
-  let issue = records.fetch_issue(resolved)?
+  let resolved = resolve_id(ctx, p.first(), usage)?
+  let issue = records.fetch_issue(ctx, resolved)?
   let key = f"{issue.expand.team.key}-{issue.number}"
-  let observed = claims.observed_id(issue.id)?
-  let result = claims.close(pb.Caller.Process, issue.id, observed, agent, force, reason, keep).map_err(|e| {
+  let observed = claims.observed_id(ctx, issue.id)?
+  let result = claims.close(ctx, pb.Caller.Process, issue.id, observed, agent, force, reason, keep).map_err(|e| {
     if pb.classify(e).code == "needs_force" {
       f"{key}: {e} - 'lll issue close {key} --force --reason \"why\"' closes it anyway, releasing that claim and commenting on the issue"
     } else { f"{key}: {e}" }
   })?
-  if p.given("--json") { return print_issue_after(key) }
+  if p.given("--json") { return print_issue_after(ctx, key) }
   fmt.Println(f"Closed {key} ● done")
   if result.claim_id != "" {
     let holder = display.byline(result.member_name, result.agent)
@@ -1698,15 +1704,16 @@ fn issue_start_spec() -> Slice<flags.Flag> {
 }
 
 fn start(input: flags.CommandInput) -> Result<(), string> {
+  let ctx = input.ctx
   let usage = input.usage
   let p = input.parsed
-  let agent = agent_label(p)?
+  let agent = agent_label(ctx, p)?
   let with_branch = p.given("--branch")
   if with_branch && !gitctx.in_repo() {
     return Err("--branch needs a git repository: run it from inside the one the work happens in; issue state unchanged")
   }
-  let resolved = resolve_id(p.first(), usage)?
-  let issue = records.fetch_issue(resolved)?
+  let resolved = resolve_id(ctx, p.first(), usage)?
+  let issue = records.fetch_issue(ctx, resolved)?
   let key = f"{issue.expand.team.key}-{issue.number}"
   let branch = gitctx.branch_name(issue.expand.team.key, issue.number, issue.title)
 
@@ -1726,7 +1733,7 @@ fn start(input: flags.CommandInput) -> Result<(), string> {
       fmt.Fprintln(out, f"Switched to existing branch '{branch}'")
     }
   }
-  if let Err(reason) = pb.patch(
+  if let Err(reason) = ctx.patch(
     f"/api/collections/issues/records/{issue.id}",
     "{\"state\":\"in-progress\"}",
   ) {
@@ -1740,11 +1747,11 @@ fn start(input: flags.CommandInput) -> Result<(), string> {
   }
   if !p.given("--json") { fmt.Println(f"Started {key}: {issue.title} (◐ in-progress)") }
   if with_branch {
-    if let Err(reason) = record_work_site(issue, branch, agent) {
+    if let Err(reason) = record_work_site(ctx, issue, branch, agent) {
       return Err(f"{key} is in-progress and Git is on '{branch}', but recording the work site could not be confirmed: {reason}\nInspect with 'lll issue view {key}' before retrying.")
     }
   }
-  if p.given("--json") { return print_issue_after(key) }
+  if p.given("--json") { return print_issue_after(ctx, key) }
   Ok(())
 }
 
@@ -1758,8 +1765,8 @@ fn start(input: flags.CommandInput) -> Result<(), string> {
 /// Host comes from os.Hostname; LLL_WORK_HOST overrides it (a test seam —
 /// e2e fakes a second machine without owning one). Path is the worktree
 /// root, so multiple worktrees of one branch on one host stay distinct.
-fn record_work_site(issue: models.Issue, branch: string, agent: string) -> Result<(), string> {
-  let mut host = os.Getenv("LLL_WORK_HOST")
+fn record_work_site(ctx: pb.Client, issue: models.Issue, branch: string, agent: string) -> Result<(), string> {
+  let mut host = ctx.settings.env.work_host
   if host == "" { host = os.Hostname().unwrap_or("") }
   let Some(path) = gitctx.repo_root() else {
     return Ok(())
@@ -1772,7 +1779,7 @@ fn record_work_site(issue: models.Issue, branch: string, agent: string) -> Resul
     // authorless for a superuser credential. Member identity is not duplicated
     // into the slot; this comment (and the claim holder) carry the who.
     let mut author = ""
-    if let Some(a) = actor()? { author = a.id }
+    if let Some(a) = actor(ctx)? { author = a.id }
     let moved = f"work moved: {issue.work_branch} @ {issue.work_host}:{issue.work_path} -> {branch} @ {host}:{path}"
     let payload = match json.Marshal(
       models.NewComment { issue: issue.id, author, agent, body: moved },
@@ -1780,14 +1787,14 @@ fn record_work_site(issue: models.Issue, branch: string, agent: string) -> Resul
       Ok(p) => p as string,
       Err(e) => return Err(f"encoding work-moved comment: {e}"),
     }
-    let _ = pb.post("/api/collections/comments/records", payload)?
+    let _ = ctx.post("/api/collections/comments/records", payload)?
   }
   let fields = [
     "\"work_branch\":" + json_quote(branch)?,
     "\"work_host\":" + json_quote(host)?,
     "\"work_path\":" + json_quote(path)?,
   ]
-  let _ = pb.patch(
+  let _ = ctx.patch(
     f"/api/collections/issues/records/{issue.id}",
     "{" + strings.Join(fields, ",") + "}",
   )?
@@ -1809,13 +1816,13 @@ struct Actor {
   name: string,
 }
 
-fn actor() -> Result<Option<Actor>, string> {
-  let cfg = config.load()?
-  if cfg.token == "" { return Ok(None) }
-  let Some(id) = pb.token_subject(cfg.token) else { return Ok(None) }
+fn actor(ctx: pb.Client) -> Result<Option<Actor>, string> {
+  let token = ctx.token()
+  if token == "" { return Ok(None) }
+  let Some(id) = pb.token_subject(token) else { return Ok(None) }
   // Use the configured request path so the board can renew an expired token
   // before resolving its member. Explicit-token calls deliberately cannot heal.
-  match pb.get(f"/api/collections/members/records/{id}") {
+  match ctx.get(f"/api/collections/members/records/{id}") {
     Ok(body) => {
       let mut member = models.Member { .. }
       if let Err(e) = json.Unmarshal(body.bytes(), &member) {
@@ -1834,8 +1841,8 @@ fn actor() -> Result<Option<Actor>, string> {
 /// proves nothing about who they are. The server renders it into comments, so
 /// it is refused here, before any request, unless it has the server's shape:
 /// at most 64 of A-Z, a-z, 0-9, '.', '_' and '-'; empty means no label.
-fn agent_label(p: flags.Parsed) -> Result<string, string> {
-  let label = if p.given("--agent") { p.one("--agent") } else { os.Getenv("LLL_AGENT") }
+fn agent_label(ctx: pb.Client, p: flags.Parsed) -> Result<string, string> {
+  let label = if p.given("--agent") { p.one("--agent") } else { ctx.settings.env.agent }
   if !regexp.MustCompile(r"^[A-Za-z0-9._-]{0,64}$").MatchString(label) {
     return Err(flags.usage_error(f"invalid agent label {strconv.Quote(label)} (from --agent or LLL_AGENT): use at most 64 characters from A-Z, a-z, 0-9, '.', '_' and '-'"))
   }
@@ -1856,34 +1863,35 @@ fn held_elsewhere_hint(key: string) -> string {
 /// Assignment edits use their own observed-claim transaction and cannot replace
 /// another holder. See gopb/claims.go and gopb/assignment.go for that policy.
 fn claim(input: flags.CommandInput) -> Result<(), string> {
+  let ctx = input.ctx
   let usage = "lll issue claim [KEY-123] [--renew]"
-  let agent = agent_label(input.parsed)?
+  let agent = agent_label(ctx, input.parsed)?
   let id = input.parsed.first()
-  let resolved = resolve_id(id, usage)?
-  let Some(member) = actor()? else {
+  let resolved = resolve_id(ctx, id, usage)?
+  let Some(member) = actor(ctx)? else {
     return Err(
       "claiming needs a member token: 'lll login' as a person, or 'lll token create <member>' with admin credentials",
     )
   }
-  let issue = records.fetch_issue(resolved)?
+  let issue = records.fetch_issue(ctx, resolved)?
   let key = f"{issue.expand.team.key}-{issue.number}"
 
   if input.parsed.given("--renew") {
-    let Some(held) = claims.fetch(issue.id)? else {
+    let Some(held) = claims.fetch(ctx, issue.id)? else {
       return Err(pb.fail(pb.ErrorKind.Refused, f"{key} is not claimed; 'lll issue claim {key}' takes it"))
     };
-    let renewed = claims.renew(issue.id, held.id, agent).map_err(|e| f"{key}: {e}")?
-    if input.parsed.given("--json") { return print_issue_after(key) }
+    let renewed = claims.renew(ctx, issue.id, held.id, agent).map_err(|e| f"{key}: {e}")?
+    if input.parsed.given("--json") { return print_issue_after(ctx, key) }
     fmt.Println(f"Renewed {key} for {display.byline(renewed.member_name, renewed.agent)}; the expiry clock restarts now (held since {display.relative(renewed.created)})")
     return Ok(())
   }
 
-  let result = claims.acquire(pb.Caller.Process, issue.id, member.id, agent).map_err(|e| {
+  let result = claims.acquire(ctx, pb.Caller.Process, issue.id, member.id, agent).map_err(|e| {
     if pb.classify(e).code == "claim_held" {
       f"{key}: {e}; {held_elsewhere_hint(key)}"
     } else { e }
   })?
-  if input.parsed.given("--json") { return print_issue_after(key) }
+  if input.parsed.given("--json") { return print_issue_after(ctx, key) }
   if result.already_owned {
     fmt.Println(f"Claimed {key} for {display.byline(result.member_name, result.agent)} (already yours since {display.relative(result.created)})")
   } else {
@@ -1896,16 +1904,17 @@ fn claim(input: flags.CommandInput) -> Result<(), string> {
 /// server records a forced release as a comment on the issue (LLL-512). The
 /// server atomically removes that exact claim and clears only its assignment.
 fn release(input: flags.CommandInput) -> Result<(), string> {
+  let ctx = input.ctx
   let usage = "lll issue release [KEY-123] [--force [--reason \"why\"]]"
   let p = input.parsed
-  let agent = agent_label(p)?
-  let resolved = resolve_id(p.first(), usage)?
+  let agent = agent_label(ctx, p)?
+  let resolved = resolve_id(ctx, p.first(), usage)?
   let force = p.given("--force")
   let reason = forced_reason(p, force, "a forced release")?
-  let issue = records.fetch_issue(resolved)?
+  let issue = records.fetch_issue(ctx, resolved)?
   let key = f"{issue.expand.team.key}-{issue.number}"
-  let Some(held) = claims.fetch(issue.id)? else { return Err(pb.fail(pb.ErrorKind.Refused, f"{key} is not claimed")) };
-  let result = claims.release(pb.Caller.Process, issue.id, held.id, agent, force, reason).map_err(|e| {
+  let Some(held) = claims.fetch(ctx, issue.id)? else { return Err(pb.fail(pb.ErrorKind.Refused, f"{key} is not claimed")) };
+  let result = claims.release(ctx, pb.Caller.Process, issue.id, held.id, agent, force, reason).map_err(|e| {
     if pb.classify(e).code == "needs_force" {
       f"{key}: {e}; 'lll issue release {key} --force --reason \"why\"' takes it anyway and comments on the issue"
     } else { e }
@@ -1917,17 +1926,18 @@ fn release(input: flags.CommandInput) -> Result<(), string> {
 }
 
 /// Compatibility name for command/page reads; storage ownership is in claims.
-fn fetch_claim(issue_id: string) -> Result<Option<models.Claim>, string> {
-  claims.fetch(issue_id)
+fn fetch_claim(ctx: pb.Client, issue_id: string) -> Result<Option<models.Claim>, string> {
+  claims.fetch(ctx, issue_id)
 }
 
 fn delete_issue(input: flags.CommandInput) -> Result<(), string> {
+  let ctx = input.ctx
   let p = input.parsed
   let id = p.first()
   // Deleting by inferred branch is too dangerous; the ID must be explicit.
   if id == "" { return Err(flags.usage_error("usage: lll issue delete KEY-123 [--yes] [--force]")) }
 
-  let issue = records.fetch_issue(id)?
+  let issue = records.fetch_issue(ctx, id)?
   let label = f"{issue.expand.team.key}-{issue.number}"
   // LLL-662: the server refuses to delete a claimed issue, because the
   // claim would go with it and nobody would be told. --force releases it
@@ -1936,7 +1946,7 @@ fn delete_issue(input: flags.CommandInput) -> Result<(), string> {
   // unneeded, not wrong: whether a claim exists is server state the caller
   // may not know (a hold can lapse between two commands), and a usage error
   // that depends on it is not a usage error (LLL-679).
-  let held = claims.fetch(issue.id)?
+  let held = claims.fetch(ctx, issue.id)?
   if let Some(h) = held {
     if !p.given("--force") {
       let holder = display.byline(display.member_name(h.member, h.expand.member.name, "an unknown member"), h.agent)
@@ -1952,10 +1962,10 @@ fn delete_issue(input: flags.CommandInput) -> Result<(), string> {
     return Err(aborted())
   }
   if let Some(h) = held {
-    let agent = agent_label(p)?
-    let _ = claims.release(pb.Caller.Process, issue.id, h.id, agent, true, "deleting the issue").map_err(|e| f"{label}: {e}")?
+    let agent = agent_label(ctx, p)?
+    let _ = claims.release(ctx, pb.Caller.Process, issue.id, h.id, agent, true, "deleting the issue").map_err(|e| f"{label}: {e}")?
   }
-  let _ = pb.delete(f"/api/collections/issues/records/{issue.id}").map_err(|e| {
+  let _ = ctx.delete(f"/api/collections/issues/records/{issue.id}").map_err(|e| {
     if held.is_some() { f"{e}\nthe claim on {label} was released, but the issue was not deleted" } else { e }
   })?
   fmt.Println(f"Deleted {label}")
@@ -1963,6 +1973,7 @@ fn delete_issue(input: flags.CommandInput) -> Result<(), string> {
 }
 
 fn comment(input: flags.CommandInput) -> Result<(), string> {
+  let ctx = input.ctx
   let usage = input.usage
   let p = input.parsed
   let id = p.first()
@@ -1980,13 +1991,13 @@ fn comment(input: flags.CommandInput) -> Result<(), string> {
     body = p.nth(1)
     body_set = true
   }
-  let agent = if body_set { agent_label(p)? } else { "" }
+  let agent = if body_set { agent_label(ctx, p)? } else { "" }
 
-  let resolved = resolve_id(id, usage)?
-  let issue = records.fetch_issue(resolved)?
+  let resolved = resolve_id(ctx, id, usage)?
+  let issue = records.fetch_issue(ctx, resolved)?
 
   if !body_set {
-    let comments = records.fetch_comments(issue.id)?
+    let comments = records.fetch_comments(ctx, issue.id)?
     if p.given("--json") { return print_list_json(comments, whole_list(comments.length()), "comments") }
     if comments.is_empty() { return say_empty("comments") }
     print_comments(comments)
@@ -2002,7 +2013,7 @@ fn comment(input: flags.CommandInput) -> Result<(), string> {
   // Authorship follows the authenticated member. Superuser comments are authorless.
   let mut author = ""
   let mut author_name = ""
-  if let Some(a) = actor()? {
+  if let Some(a) = actor(ctx)? {
     author = a.id
     author_name = a.name
   }
@@ -2012,7 +2023,7 @@ fn comment(input: flags.CommandInput) -> Result<(), string> {
     Ok(p) => p,
     Err(e) => return Err(f"encoding comment: {e}"),
   }
-  let created = pb.post("/api/collections/comments/records", payload as string)?
+  let created = ctx.post("/api/collections/comments/records", payload as string)?
   if p.given("--json") {
     fmt.Println(contract_json(created.bytes() as json.RawMessage, 0) as string)
     return Ok(())
@@ -2024,37 +2035,41 @@ fn comment(input: flags.CommandInput) -> Result<(), string> {
 }
 
 fn url_cmd(input: flags.CommandInput) -> Result<(), string> {
+  let ctx = input.ctx
   let usage = "lll issue url [KEY-123]"
   let id = input.parsed.first()
-  let resolved = resolve_id(id, usage)?
-  let target = issue_url(records.fetch_issue(resolved)?)?
+  let resolved = resolve_id(ctx, id, usage)?
+  let target = issue_url(ctx, records.fetch_issue(ctx, resolved)?)?
   fmt.Println(target)
   Ok(())
 }
 
 fn id_cmd(input: flags.CommandInput) -> Result<(), string> {
+  let ctx = input.ctx
   let usage = "lll issue id [KEY-123]"
   let id = input.parsed.first()
-  let resolved = resolve_id(id, usage)?
-  let issue = records.fetch_issue(resolved)?
+  let resolved = resolve_id(ctx, id, usage)?
+  let issue = records.fetch_issue(ctx, resolved)?
   fmt.Println(f"{issue.expand.team.key}-{issue.number}")
   Ok(())
 }
 
 fn title_cmd(input: flags.CommandInput) -> Result<(), string> {
+  let ctx = input.ctx
   let usage = "lll issue title [KEY-123]"
   let id = input.parsed.first()
-  let resolved = resolve_id(id, usage)?
-  let issue = records.fetch_issue(resolved)?
+  let resolved = resolve_id(ctx, id, usage)?
+  let issue = records.fetch_issue(ctx, resolved)?
   fmt.Println(issue.title)
   Ok(())
 }
 
 fn branch_name_cmd(input: flags.CommandInput) -> Result<(), string> {
+  let ctx = input.ctx
   let usage = "lll issue branch-name [KEY-123]"
   let p = input.parsed
-  let resolved = resolve_id(p.first(), usage)?
-  let issue = records.fetch_issue(resolved)?
+  let resolved = resolve_id(ctx, p.first(), usage)?
+  let issue = records.fetch_issue(ctx, resolved)?
   fmt.Println(gitctx.branch_name(
     issue.expand.team.key,
     issue.number,
@@ -2066,9 +2081,10 @@ fn branch_name_cmd(input: flags.CommandInput) -> Result<(), string> {
 /// Thin wrapper over the GitHub CLI: gh owns pushing checks, prompts, and
 /// errors. Record the returned PR only after gh confirms successful creation.
 fn pr_cmd(input: flags.CommandInput) -> Result<(), string> {
+  let ctx = input.ctx
   let usage = "lll issue pr [KEY-123]"
   let id = input.parsed.first()
-  let resolved = resolve_id(id, usage)?
+  let resolved = resolve_id(ctx, id, usage)?
 
   let mut gh = ""
   match exec.LookPath("gh") {
@@ -2078,9 +2094,9 @@ fn pr_cmd(input: flags.CommandInput) -> Result<(), string> {
     ),
   }
 
-  let issue = records.fetch_issue(resolved)?
+  let issue = records.fetch_issue(ctx, resolved)?
   let key = f"{issue.expand.team.key}-{issue.number}"
-  let (body, linked_only) = pr_body(issue_url(issue)?, issue.description)?
+  let (body, linked_only) = pr_body(issue_url(ctx, issue)?, issue.description)?
   if issue.expand.team.archived { return Err(archived_hint(issue.expand.team.key)) }
   if linked_only {
     let _ = fmt.Fprintln(os.Stderr, "issue description exceeds the PR body limit; linking to the full description instead")
@@ -2120,7 +2136,7 @@ fn pr_cmd(input: flags.CommandInput) -> Result<(), string> {
     let Some((existing_url, existing_ref)) = references.from_pr_output(combined) else {
       return Err(f"gh pr create: {e}")
     };
-    if let Err(save) = references.append(issue.id, existing_ref) {
+    if let Err(save) = references.append(ctx, issue.id, existing_ref) {
       return Err(f"A pull request already exists: {existing_url}\nCould not confirm {existing_ref} on {key}: {save}\nRetry only the reference save: lll issue ref {key} {existing_ref}")
     }
     let _ = fmt.Fprintln(os.Stderr, f"a pull request already existed for this branch; recorded {existing_ref} on {key}")
@@ -2129,7 +2145,7 @@ fn pr_cmd(input: flags.CommandInput) -> Result<(), string> {
   let Some((pr_url, reference)) = references.from_pr_output(captured.String()) else {
     return Err("gh pr create succeeded but did not report one unambiguous PR URL; the issue was not changed. Inspect the gh output before retrying; do not create a duplicate PR.")
   };
-  if let Err(e) = references.append(issue.id, reference) {
+  if let Err(e) = references.append(ctx, issue.id, reference) {
     return Err(f"PR created: {pr_url}\nCould not confirm {reference} on {key}: {e}\nRetry only the reference save: lll issue ref {key} {reference}")
   }
   Ok(())
@@ -2139,13 +2155,14 @@ fn pr_cmd(input: flags.CommandInput) -> Result<(), string> {
 /// branch: a lone `ref linear:ENG-118` is shaped exactly like a KEY, so guessing
 /// which one it is would silently append a wrong ref, and there is no unref.
 fn ref_cmd(input: flags.CommandInput) -> Result<(), string> {
+  let ctx = input.ctx
   let usage = "lll issue ref KEY-123 REF"
   let p = input.parsed
   let reference = p.nth(1)
   if p.first() == "" || reference == "" { return Err(flags.usage_error(f"usage: {usage}")) }
-  let resolved = resolve_id(p.first(), usage)?
-  let issue = records.fetch_issue(resolved)?
-  let outcome = references.append(issue.id, reference)?
+  let resolved = resolve_id(ctx, p.first(), usage)?
+  let issue = records.fetch_issue(ctx, resolved)?
+  let outcome = references.append(ctx, issue.id, reference)?
   let action = if outcome.added { "Added" } else { "Already recorded" }
   fmt.Println(f"{action} {reference} on {issue.expand.team.key}-{issue.number}")
   Ok(())
@@ -2164,8 +2181,8 @@ fn pr_body(link: string, description: string) -> Result<(string, bool), string> 
 }
 
 /// Web page URL for an issue: <web_url>/issue/KEY-123.
-fn issue_url(issue: models.Issue) -> Result<string, string> {
-  let base = web_base()?
+fn issue_url(ctx: pb.Client, issue: models.Issue) -> Result<string, string> {
+  let base = web_base(ctx)?
   Ok(f"{base}/issue/{issue.expand.team.key}-{issue.number}")
 }
 
@@ -2190,29 +2207,29 @@ fn print_comments(comments: Slice<models.Comment>) {
 /// the author is the token's member. A superuser token may change anything.
 fn comment_commands() -> Slice<flags.Command> {
   [
-    flags.Command { name: "edit", summary: "edit a numbered comment", spec: comment_mutate_spec("edit"), positional: "KEY N", run: |input| comment_mutate("edit", input.parsed), .. },
-    flags.Command { name: "delete", summary: "delete a numbered comment", spec: comment_mutate_spec("delete"), positional: "KEY N", run: |input| comment_mutate("delete", input.parsed), .. },
+    flags.Command { name: "edit", summary: "edit a numbered comment", spec: comment_mutate_spec("edit"), positional: "KEY N", run: |input| comment_mutate(input.ctx, "edit", input.parsed), .. },
+    flags.Command { name: "delete", summary: "delete a numbered comment", spec: comment_mutate_spec("delete"), positional: "KEY N", run: |input| comment_mutate(input.ctx, "delete", input.parsed), .. },
   ]
 }
 
-fn comment_mutate(verb: string, p: flags.Parsed) -> Result<(), string> {
+fn comment_mutate(ctx: pb.Client, verb: string, p: flags.Parsed) -> Result<(), string> {
   let spec = comment_mutate_spec(verb)
   let usage = flags.usage(f"lll issue comment {verb}", spec, "KEY-123 N")
   if p.first() == "" || p.nth(1) == "" { return Err(flags.usage_error(f"usage: {usage}")) }
-  let resolved = resolve_id(p.first(), usage)?
-  let issue = records.fetch_issue(resolved)?
+  let resolved = resolve_id(ctx, p.first(), usage)?
+  let issue = records.fetch_issue(ctx, resolved)?
   let key = f"{issue.expand.team.key}-{issue.number}"
   let Ok(n) = strconv.Atoi(p.nth(1)) else {
     return Err(f"'{p.nth(1)}' is not a comment number; 'lll issue comment {key}' numbers them")
   }
-  let comments = records.fetch_comments(issue.id)?
+  let comments = records.fetch_comments(ctx, issue.id)?
   if n < 1 || n > comments.length() {
     return Err(f"{key} has {comments.length()} comments; there is no #{n}; 'lll issue comment {key}' numbers them")
   }
   let c = comments[n - 1]
   let whose = display.member_name(c.author, c.expand.author.name, "anon")
   if !p.given("--force") {
-    if let Some(a) = actor()? {
+    if let Some(a) = actor(ctx)? {
       if c.author != a.id {
         return Err(pb.fail(pb.ErrorKind.Refused, f"comment #{n} on {key} is {whose}'s, not yours; only its author changes it (a superuser token can, with --force)"))
       }
@@ -2225,7 +2242,7 @@ fn comment_mutate(verb: string, p: flags.Parsed) -> Result<(), string> {
     ) {
       return Err(aborted())
     }
-    let _ = pb.delete(f"/api/collections/comments/records/{c.id}")?
+    let _ = ctx.delete(f"/api/collections/comments/records/{c.id}")?
     fmt.Println(f"Deleted comment #{n} on {key} (was {whose}'s)")
     return Ok(())
   }
@@ -2238,7 +2255,7 @@ fn comment_mutate(verb: string, p: flags.Parsed) -> Result<(), string> {
   if strings.TrimSpace(body) == "" {
     return Err(flags.usage_error(f"comment edit needs the new body: -b \"...\" (or '-b -' from stdin)\nusage: {usage}"))
   }
-  let _ = pb.patch(
+  let _ = ctx.patch(
     f"/api/collections/comments/records/{c.id}",
     "{\"body\":" + json_quote(body)? + "}",
   )?
@@ -2299,14 +2316,14 @@ fn deslug(arg: string) -> string {
   a
 }
 
-fn resolve_id(explicit: string, usage: string) -> Result<string, string> {
+fn resolve_id(ctx: pb.Client, explicit: string, usage: string) -> Result<string, string> {
   if explicit != "" { return Ok(deslug(explicit)) }
   let Some(branch) = gitctx.current_branch() else {
     return Err(
       f"no issue ID given and no git branch to infer one from\nusage: {usage}",
     )
   }
-  let teams = records.list_teams()?
+  let teams = records.list_teams(ctx)?
   let mut matches: Slice<string> = []
   for team in teams.items {
     if let Some(id) = gitctx.issue_id_for_team(branch, team.key) { matches = matches.append(id) }
@@ -2348,16 +2365,16 @@ fn json_ids(ids: Slice<string>) -> Result<string, string> {
 /// Docs linked to an issue. The issue -> doc direction is not stored: it is
 /// one `?=` filter over docs.issues, which is the whole reason links are a
 /// relation and not a write-once reference on the issue.
-fn fetch_issue_docs(issue_id: string) -> Result<Slice<models.Doc>, string> {
-  fetch_docs(f"issues.id ?= {query.quote(issue_id)}", "slug", "")
+fn fetch_issue_docs(ctx: pb.Client, issue_id: string) -> Result<Slice<models.Doc>, string> {
+  fetch_docs(ctx, f"issues.id ?= {query.quote(issue_id)}", "slug", "")
 }
 
 /// Send one edge as a relation modifier ("issues+" or "issues-"), never the
 /// whole array (LLL-513). Writing back a locally edited copy of the array let
 /// two concurrent links to one doc drop an edge. The server applies the
 /// modifier under a per-record lock (gopb serializeRecordUpdates).
-fn modify_doc_issues(doc: models.Doc, modifier: string, issue_id: string) -> Result<(), string> {
-  let _ = pb.patch(
+fn modify_doc_issues(ctx: pb.Client, doc: models.Doc, modifier: string, issue_id: string) -> Result<(), string> {
+  let _ = ctx.patch(
     f"/api/collections/docs/records/{doc.id}",
     "{" + json_quote(modifier)? + ":[" + json_quote(issue_id)? + "]}",
   )?
@@ -2381,61 +2398,63 @@ fn cross_team_link(
 }
 
 fn link(input: flags.CommandInput) -> Result<(), string> {
+  let ctx = input.ctx
   let usage = "lll issue link KEY-123 SLUG"
   let id = input.parsed.first()
   let slug = input.parsed.nth(1)
   if id == "" || slug == "" { return Err(flags.usage_error(f"usage: {usage}")) }
-  link_issue(id, slug, usage)
+  link_issue(ctx, id, slug, usage)
 }
 
 /// The write path behind 'lll issue link KEY-123 SLUG'. The relation is
 /// stored once on docs.issues. 'lll doc link' was removed at 1.0 (D5).
-fn link_issue(id: string, slug: string, usage: string) -> Result<(), string> {
-  let resolved = resolve_id(id, usage)?
-  let issue = records.fetch_issue(resolved)?
+fn link_issue(ctx: pb.Client, id: string, slug: string, usage: string) -> Result<(), string> {
+  let resolved = resolve_id(ctx, id, usage)?
+  let issue = records.fetch_issue(ctx, resolved)?
   let key = f"{issue.expand.team.key}-{issue.number}"
-  let team = issue_link_team(issue)?
-  let d = fetch_doc(team, slug)?
+  let team = issue_link_team(ctx, issue)?
+  let d = fetch_doc(ctx, team, slug)?
   cross_team_link(issue, team, d)?
 
   if d.issues.find(|x| x == issue.id).is_some() {
     fmt.Println(f"{key} is already linked to {d.slug}")
     return Ok(())
   }
-  modify_doc_issues(d, "issues+", issue.id)?
+  modify_doc_issues(ctx, d, "issues+", issue.id)?
   fmt.Println(f"Linked {key} -> {d.slug}")
   Ok(())
 }
 
 fn unlink(input: flags.CommandInput) -> Result<(), string> {
+  let ctx = input.ctx
   let usage = "lll issue unlink KEY-123 SLUG"
   let id = input.parsed.first()
   let slug = input.parsed.nth(1)
   if id == "" || slug == "" { return Err(flags.usage_error(f"usage: {usage}")) }
-  unlink_issue(id, slug, usage)
+  unlink_issue(ctx, id, slug, usage)
 }
 
 /// The write path behind 'lll issue unlink KEY-123 SLUG'.
-fn unlink_issue(id: string, slug: string, usage: string) -> Result<(), string> {
-  let resolved = resolve_id(id, usage)?
-  let issue = records.fetch_issue(resolved)?
+fn unlink_issue(ctx: pb.Client, id: string, slug: string, usage: string) -> Result<(), string> {
+  let resolved = resolve_id(ctx, id, usage)?
+  let issue = records.fetch_issue(ctx, resolved)?
   let key = f"{issue.expand.team.key}-{issue.number}"
-  let team = issue_link_team(issue)?
-  let d = fetch_doc(team, slug)?
+  let team = issue_link_team(ctx, issue)?
+  let d = fetch_doc(ctx, team, slug)?
   cross_team_link(issue, team, d)?
 
   if d.issues.find(|x| x == issue.id).is_none() {
     return Err(f"{key} is not linked to {d.slug}; see 'lll doc view {d.slug}'")
   }
-  modify_doc_issues(d, "issues-", issue.id)?
+  modify_doc_issues(ctx, d, "issues-", issue.id)?
   fmt.Println(f"Unlinked {key} from {d.slug}")
   Ok(())
 }
 
 /// An explicit issue identifies its document namespace outside an attached
 /// directory. Configured scope remains authoritative, including a mismatch.
-fn issue_link_team(issue: models.Issue) -> Result<models.Team, string> {
-  Ok(configured_team()?.unwrap_or(issue.expand.team))
+fn issue_link_team(ctx: pb.Client, issue: models.Issue) -> Result<models.Team, string> {
+  Ok(configured_team(ctx)?.unwrap_or(issue.expand.team))
 }
 
 /// `lll issue block KEY BLOCKER`: KEY cannot start until BLOCKER is done.
@@ -2443,12 +2462,13 @@ fn issue_link_team(issue: models.Issue) -> Result<models.Team, string> {
 /// depth), since a cycle would make both un-ready forever. The dependency
 /// lives on the blocked issue: one relation field, no second collection.
 fn block(input: flags.CommandInput) -> Result<(), string> {
+  let ctx = input.ctx
   let usage = "lll issue block KEY-123 BLOCKER"
   let id = input.parsed.first()
   let blocker_id = input.parsed.nth(1)
   if id == "" || blocker_id == "" { return Err(flags.usage_error(f"usage: {usage}")) }
-  let issue = records.fetch_issue(resolve_id(id, usage)?)?
-  let blocker = records.fetch_issue(resolve_id(blocker_id, usage)?)?
+  let issue = records.fetch_issue(ctx, resolve_id(ctx, id, usage)?)?
+  let blocker = records.fetch_issue(ctx, resolve_id(ctx, blocker_id, usage)?)?
   let key = f"{issue.expand.team.key}-{issue.number}"
   let bkey = f"{blocker.expand.team.key}-{blocker.number}"
   if issue.id == blocker.id { return Err(f"{key} cannot block itself") }
@@ -2456,11 +2476,11 @@ fn block(input: flags.CommandInput) -> Result<(), string> {
     fmt.Println(f"{key} is already blocked by {bkey}")
     return Ok(())
   }
-  let cyclic = depends_on(blocker, issue.id, 0)?
+  let cyclic = depends_on(ctx, blocker, issue.id, 0)?
   if cyclic {
     return Err(f"{bkey} already waits on {key} (directly or through others); blocking {key} by {bkey} would be a cycle")
   }
-  set_blocked_by(issue, issue.blocked_by.append(blocker.id))?
+  set_blocked_by(ctx, issue, issue.blocked_by.append(blocker.id))?
   let mut note = ""
   if blocker.state == "done" || blocker.state == "cancelled" { note = f" ({bkey} is already {blocker.state}, so this does not hold {key} back)" }
   fmt.Println(f"{key} is blocked by {bkey}{note}")
@@ -2468,12 +2488,13 @@ fn block(input: flags.CommandInput) -> Result<(), string> {
 }
 
 fn unblock(input: flags.CommandInput) -> Result<(), string> {
+  let ctx = input.ctx
   let usage = "lll issue unblock KEY-123 BLOCKER"
   let id = input.parsed.first()
   let blocker_id = input.parsed.nth(1)
   if id == "" || blocker_id == "" { return Err(flags.usage_error(f"usage: {usage}")) }
-  let issue = records.fetch_issue(resolve_id(id, usage)?)?
-  let blocker = records.fetch_issue(resolve_id(blocker_id, usage)?)?
+  let issue = records.fetch_issue(ctx, resolve_id(ctx, id, usage)?)?
+  let blocker = records.fetch_issue(ctx, resolve_id(ctx, blocker_id, usage)?)?
   let key = f"{issue.expand.team.key}-{issue.number}"
   let bkey = f"{blocker.expand.team.key}-{blocker.number}"
   let mut remaining: Slice<string> = []
@@ -2485,35 +2506,35 @@ fn unblock(input: flags.CommandInput) -> Result<(), string> {
     fmt.Println(f"{key} was not blocked by {bkey}")
     return Ok(())
   }
-  set_blocked_by(issue, remaining)?
+  set_blocked_by(ctx, issue, remaining)?
   fmt.Println(f"{key} is no longer blocked by {bkey}")
   Ok(())
 }
 
-fn set_blocked_by(issue: models.Issue, ids: Slice<string>) -> Result<(), string> {
+fn set_blocked_by(ctx: pb.Client, issue: models.Issue, ids: Slice<string>) -> Result<(), string> {
   let encoded = match json.Marshal(ids) {
     Ok(b) => b as string,
     Err(e) => return Err(f"encoding blockers: {e}"),
   }
-  let _ = pb.patch(f"/api/collections/issues/records/{issue.id}", f"{{\"blocked_by\":{encoded}}}")?
+  let _ = ctx.patch(f"/api/collections/issues/records/{issue.id}", f"{{\"blocked_by\":{encoded}}}")?
   Ok(())
 }
 
 /// True when `issue` waits on `target` at any depth. Bounded at eight
 /// levels: deeper chains are not a thing a tracker should have.
-fn depends_on(issue: models.Issue, target: string, depth: int) -> Result<bool, string> {
+fn depends_on(ctx: pb.Client, issue: models.Issue, target: string, depth: int) -> Result<bool, string> {
   if depth > 8 { return Ok(false) }
   for b in issue.expand.blocked_by {
     if b.id == target { return Ok(true) }
-    let full = fetch_issue_by_id(b.id)?
-    let deeper = depends_on(full, target, depth + 1)?
+    let full = fetch_issue_by_id(ctx, b.id)?
+    let deeper = depends_on(ctx, full, target, depth + 1)?
     if deeper { return Ok(true) }
   }
   Ok(false)
 }
 
-fn fetch_issue_by_id(id: string) -> Result<models.Issue, string> {
-  let body = pb.get(f"/api/collections/issues/records/{id}?expand=team,blocked_by")?
+fn fetch_issue_by_id(ctx: pb.Client, id: string) -> Result<models.Issue, string> {
+  let body = ctx.get(f"/api/collections/issues/records/{id}?expand=team,blocked_by")?
   let mut full = models.Issue { .. }
   if let Err(e) = json.Unmarshal(body.bytes(), &full) {
     return Err(f"decoding issue: {e}")
@@ -2566,10 +2587,10 @@ fn is_ready(issue: models.Issue, seen: Slice<models.Issue>) -> bool {
 }
 
 /// Issues that name `issue` as a blocker, for the "Blocks:" line.
-fn fetch_blocks(issue_id: string) -> Result<Slice<models.Issue>, string> {
+fn fetch_blocks(ctx: pb.Client, issue_id: string) -> Result<Slice<models.Issue>, string> {
   let filter = url.QueryEscape(f"blocked_by.id ?= {query.quote(issue_id)}")
   let mut list = models.IssueList { .. }
-  pb.fetch(f"/api/collections/issues/records?perPage=200&sort=number&expand=team&filter={filter}", "issues", &list)?
+  pb.fetch(ctx, f"/api/collections/issues/records?perPage=200&sort=number&expand=team&filter={filter}", "issues", &list)?
   Ok(list.items)
 }
 
@@ -2612,25 +2633,26 @@ fn issue_next_spec() -> Slice<flags.Flag> {
 /// bargain `claim` makes: the command either hands out work or says there is
 /// none. With --claim the printed key is always secured first.
 fn issue_next(input: flags.CommandInput) -> Result<(), string> {
+  let ctx = input.ctx
   let p = input.parsed
-  let agent = if p.given("--claim") { agent_label(p)? } else { "" }
+  let agent = if p.given("--claim") { agent_label(ctx, p)? } else { "" }
   let filters = filters_from(p)?
-  let scope = configured_scope()?
+  let scope = configured_scope(ctx)?
   // Names resolve before any fetch, so a typo fails naming the fix instead of
   // reporting an empty agenda.
   let mut excluded: Slice<string> = []
   for name in p.all("--exclude-label") {
-    excluded = excluded.append(records.label_ids(scope, name)?...)
+    excluded = excluded.append(records.label_ids(ctx, scope, name)?...)
   }
-  let candidates = ready_issues(resolve_filter_query(scope, filters)?)?
+  let candidates = ready_issues(ctx, resolve_filter_query(ctx, scope, filters)?)?
     .filter(|i| !i.labels.any(|l| excluded.contains(l)))
-  let unblocks = unblocks_map(scope.filter_team(), candidates)?
+  let unblocks = unblocks_map(ctx, scope.filter_team(), candidates)?
   // A claimed ready issue is someone's work in progress, not an invitation -
   // including my own claims. The agenda is what an agent can pick up NOW.
   // The claims themselves are read, not only the assignee (LLL-662): the
   // holder may set the assignee to someone else or clear it, and an issue
   // offered here that 'claim' then refuses is a lie to the loop.
-  let held = claims.for_team(scope.filter_team())?.map(|c| c.issue)
+  let held = claims.for_team(ctx, scope.filter_team())?.map(|c| c.issue)
   let agenda = rank_agenda(candidates, unblocks).filter(|i| i.assignee == "" && !held.contains(i.id))
   if agenda.is_empty() {
     return Err(pb.fail(pb.ErrorKind.NothingToDo, "no unclaimed ready issues: the agenda is empty; 'lll issue list --ready' shows what is claimed, 'lll issue create' makes new work"))
@@ -2638,14 +2660,14 @@ fn issue_next(input: flags.CommandInput) -> Result<(), string> {
   let best = agenda[0]
   let key = f"{best.expand.team.key}-{best.number}"
   if p.given("--claim") {
-    let Some(member) = actor()? else {
+    let Some(member) = actor(ctx)? else {
       return Err(
         "claiming needs a member token: 'lll login' as a person, or 'lll token create <member>' with admin credentials",
       )
     }
     // Acquire before printing: a key this command did not secure is a lie to
     // the shell loop that composed it. A lost race exits non-zero, keyless.
-    let result = claims.acquire(pb.Caller.Process, best.id, member.id, agent).map_err(|e| {
+    let result = claims.acquire(ctx, pb.Caller.Process, best.id, member.id, agent).map_err(|e| {
       if pb.classify(e).code == "claim_held" {
         f"{key}: {e}; {held_elsewhere_hint(key)}"
       } else { e }
@@ -2656,12 +2678,12 @@ fn issue_next(input: flags.CommandInput) -> Result<(), string> {
     // One packet replaces next-then-view: the 'lll issue view --json' object,
     // read after any claim so the record carries the new assignee. One shape
     // with or without --claim (LLL-645).
-    let record = records.fetch_issue_record(key)?
+    let record = records.fetch_issue_record(ctx, key)?
     let mut full = models.Issue { .. }
     if let Err(e) = json.Unmarshal(record.bytes(), &full) {
       return Err(f"decoding issue: {e}")
     }
-    let reads = begin_issue_view_reads(full, true, false)
+    let reads = begin_issue_view_reads(ctx, full, true, false)
     fmt.Println(issue_view_json(
       record,
       await_issue_view(reads.comments, "comments")?,
@@ -2680,9 +2702,9 @@ fn issue_next(input: flags.CommandInput) -> Result<(), string> {
 /// filter: the configured team plus any --project/--label). PocketBase cannot
 /// filter on an expanded relation's state, so readiness is decided here,
 /// after the fetch.
-fn ready_issues(scope: string) -> Result<Slice<models.Issue>, string> {
+fn ready_issues(ctx: pb.Client, scope: string) -> Result<Slice<models.Issue>, string> {
   let filter = url.QueryEscape(scope)
-  let items = fetch_all_issues(f"&sort=created,id&expand=team,assignee,labels,blocked_by,project&filter={filter}")?
+  let items = fetch_all_issues(ctx, f"&sort=created,id&expand=team,assignee,labels,blocked_by,project&filter={filter}")?
   Ok(items.filter(|i| is_ready(i, i.expand.blocked_by)))
 }
 
@@ -2690,11 +2712,11 @@ fn ready_issues(scope: string) -> Result<Slice<models.Issue>, string> {
 /// before they can order or filter it: readiness (PB cannot filter on an
 /// expanded relation) and priority order (PB cannot express "none last").
 /// `tail` carries the sort, expand and filter parameters, already escaped.
-fn fetch_all_issues(tail: string) -> Result<Slice<models.Issue>, string> {
+fn fetch_all_issues(ctx: pb.Client, tail: string) -> Result<Slice<models.Issue>, string> {
   let mut items: Slice<models.Issue> = []
   let mut page = 1
   loop {
-    let body = pb.get(f"/api/collections/issues/records?perPage=500&page={page}{tail}")?
+    let body = ctx.get(f"/api/collections/issues/records?perPage=500&page={page}{tail}")?
     let mut issues = NextPage { .. }
     if let Err(e) = json.Unmarshal(body.bytes(), &issues) {
       return Err(f"decoding issues: {e}")
@@ -2751,14 +2773,14 @@ fn page_of(items: Slice<models.Issue>, page: int, per_page: int) -> Slice<models
 /// How many issues each candidate unblocks: the open issues that name it as
 /// a blocker. A tie-break, not a goal — the more work one issue frees, the
 /// sooner it should go.
-fn unblocks_map(team_id: string, candidates: Slice<models.Issue>) -> Result<Map<string, int>, string> {
+fn unblocks_map(ctx: pb.Client, team_id: string, candidates: Slice<models.Issue>) -> Result<Map<string, int>, string> {
   let mut out = Map.new<string, int>()
   for c in candidates { out[c.id] = 0 }
   let scope = query.filter(team_id, "", "", "", "", "")
   let open = "state != 'done' && state != 'cancelled'"
   let clause = if scope == "" { open } else { f"{scope} && {open}" }
   let filter = url.QueryEscape(clause)
-  let issues = fetch_all_issues(f"&sort=created,id&fields=id,blocked_by&filter={filter}")?
+  let issues = fetch_all_issues(ctx, f"&sort=created,id&fields=id,blocked_by&filter={filter}")?
   for i in issues {
     for b in i.blocked_by {
       if let Some(n) = out.get(b) { out[b] = n + 1 }

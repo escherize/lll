@@ -10,6 +10,7 @@ import "go:strings"
 import "go:time"
 
 import "config"
+import "pb"
 
 #[json]
 struct AdvertisedVersion { service: string, version: string }
@@ -23,10 +24,10 @@ struct AdvertisedVersion { service: string, version: string }
 /// day per server, only for nouns that already talk to the server, and every
 /// failure (no config, no network, an old server without `version`) is
 /// silent. The line goes to stderr only, so stdout and JSON stay byte-identical.
-pub fn version_skew_check(noun: string) -> Channel<Option<string>> {
+pub fn version_skew_check(ctx: pb.Client, noun: string) -> Channel<Option<string>> {
   let line = Channel.buffered<Option<string>>(1)
   task {
-    let _ = line.send(skew_line(noun))
+    let _ = line.send(skew_line(ctx, noun))
   }
   line
 }
@@ -56,9 +57,9 @@ pub fn talks_to_server(noun: string) -> bool {
     .contains(noun)
 }
 
-fn skew_line(noun: string) -> Option<string> {
+fn skew_line(ctx: pb.Client, noun: string) -> Option<string> {
   if !talks_to_server(noun) { return None }
-  let Ok(cfg) = config.load() else {
+  let Ok(cfg) = ctx.settings.config() else {
     return None
   }
   // Without a token the command is refused before it reaches the server.
@@ -66,7 +67,7 @@ fn skew_line(noun: string) -> Option<string> {
   let Ok(base) = checked_web_url(cfg.url) else {
     return None
   }
-  let Ok(home) = config.home_path() else {
+  let Ok(home) = ctx.settings.home_path() else {
     return None
   }
   let sum = sha256.Sum256(base.bytes())

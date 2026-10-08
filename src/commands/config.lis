@@ -14,8 +14,8 @@ import "query"
 /// Dispatch parses args against the verb's spec BEFORE calling it, which is
 /// what stops `lll config check -h` from RUNNING the check - a network call -
 /// the way the old `match verb` did when it handed a zero-arg fn nothing.
-pub fn config_cmd(args: Slice<string>) -> Result<(), string> {
-  flags.dispatch("config", "manage configuration", config_intro(), config_commands(), args)
+pub fn config_cmd(ctx: pb.Client, args: Slice<string>) -> Result<(), string> {
+  flags.dispatch(ctx, "config", "manage configuration", config_intro(), config_commands(), args)
 }
 
 /// Every config verb, as a value. `list` keeps `--list` as an alias: it was
@@ -84,6 +84,7 @@ repo file."
 
 /// Set a machine-level endpoint, without changing repo config.
 fn config_set(input: flags.CommandInput) -> Result<(), string> {
+  let ctx = input.ctx
   let usage = "usage: lll config set <url|web_url> VALUE"
   if input.parsed.positional_count() != 2 { return Err(usage) }
   let key = input.parsed.first()
@@ -91,9 +92,10 @@ fn config_set(input: flags.CommandInput) -> Result<(), string> {
   if value == "" { return Err(usage) }
   if key == "url" || key == "web_url" {
     let endpoint = checked_endpoint(key, value)?
-    let path = set_home_key(key, endpoint)?
+    let path = set_home_key(ctx.settings, key, endpoint)?
     fmt.Println(f"{key} = {endpoint} in {path}")
-    let (cfg, src) = config.load_traced()?
+    // Re-read: the file just changed, and the note is about what wins now.
+    let (cfg, src) = ctx.settings.reload().traced()?
     let effective = if key == "url" { cfg.url } else { cfg.web_url }
     let origin = if key == "url" { src.url } else { src.web_url }
     if effective != endpoint {
@@ -108,8 +110,8 @@ fn config_set(input: flags.CommandInput) -> Result<(), string> {
 /// else a new one at the git root. Returns the path written. `team` is the
 /// only key that belongs here: it is a fact about the repo, and so the only
 /// one worth committing.
-pub fn set_repo_key(key: string, value: string) -> Result<string, string> {
-  let path = config.repo_path()
+pub fn set_repo_key(settings: config.Settings, key: string, value: string) -> Result<string, string> {
+  let path = settings.repo_path()
   set_key_in(path, key, value, false)?
   Ok(path)
 }
@@ -117,8 +119,8 @@ pub fn set_repo_key(key: string, value: string) -> Result<string, string> {
 /// Set a machine-level key in ~/.config/lll/lll.toml, creating the directory
 /// if needed. Returns the path written. `url` and `token` belong here: the repo
 /// file is committed, and neither of those travels.
-pub fn set_home_key(key: string, value: string) -> Result<string, string> {
-  let path = config.home_path()?
+pub fn set_home_key(settings: config.Settings, key: string, value: string) -> Result<string, string> {
+  let path = settings.home_path()?
   let dir = filepath.Dir(path)
   if let Err(e) = os.MkdirAll(dir, 0o755) {
     return Err(f"creating {dir}: {e}")
@@ -132,8 +134,8 @@ pub fn set_home_key(key: string, value: string) -> Result<string, string> {
 /// unsets nothing else. Returns true when a line was removed. Only the home
 /// file is touched — the repo's .lll.toml is committed and must never hold a
 /// token, and an env var is not ours to unset.
-pub fn clear_home_key(key: string) -> Result<bool, string> {
-  let path = config.home_path()?
+pub fn clear_home_key(settings: config.Settings, key: string) -> Result<bool, string> {
+  let path = settings.home_path()?
   if !os.Stat(path).is_ok() { return Ok(false) }
   let Ok(data) = os.ReadFile(path) else {
     return Err(f"reading {path}")
@@ -233,7 +235,8 @@ fn write_home_config(link: string, out: string) -> Result<(), string> {
 /// repo reading the wrong team lists the wrong issues and reports nothing, so
 /// being able to ask which file won is the whole debugging affordance.
 fn config_list(input: flags.CommandInput) -> Result<(), string> {
-  let (cfg, src) = config.load_traced()?
+  let ctx = input.ctx
+  let (cfg, src) = ctx.settings.traced()?
   if input.parsed.given("--json") {
     // The token's value is a secret here too: only whether it is set.
     let tok = if cfg.token == "" { "" } else { "set" }
@@ -255,7 +258,7 @@ fn config_list(input: flags.CommandInput) -> Result<(), string> {
   // only leak into terminals and scrollback.
   let tok = if cfg.token == "" { "" } else { "••••" }
   print_origin(src.token, "token", tok)
-  if let Some(warning) = committed_token_warning(src.token) {
+  if let Some(warning) = committed_token_warning(ctx, src.token) {
     fmt.Println(warning)
   }
   Ok(())
@@ -268,9 +271,10 @@ struct ConfigValue { key: string, value: string, source: string }
 /// `lll config get KEY` — the effective value alone, for a script to read.
 /// The token is a secret, so it is refused here as in `config list`.
 fn config_get(input: flags.CommandInput) -> Result<(), string> {
+  let ctx = input.ctx
   let key = input.parsed.first()
   if key == "" { return Err(flags.usage_error(f"usage: {input.usage}")) }
-  let (cfg, src) = config.load_traced()?
+  let (cfg, src) = ctx.settings.traced()?
   let (value, origin) = match key {
     "url" => (cfg.url, src.url),
     "web_url" => (cfg.web_url, src.web_url),
@@ -295,15 +299,16 @@ fn config_get(input: flags.CommandInput) -> Result<(), string> {
 /// /api/health is the endpoint because it needs no auth and no collection, so
 /// a failure here is about reachability alone.
 /// `_args` is unread: dispatch already parsed it (TASK-307).
-fn config_check(_input: flags.CommandInput) -> Result<(), string> {
-  let (cfg, src) = config.load_traced()?
-  match pb.get("/api/health") {
+fn config_check(input: flags.CommandInput) -> Result<(), string> {
+  let ctx = input.ctx
+  let (cfg, src) = ctx.settings.traced()?
+  match ctx.get("/api/health") {
     Ok(_) => fmt.Println(f"ok\t{cfg.url} answers as an lll server"),
     // The error already names the url, the status, and (for a board-shaped
     // 404) the port hint from pb.read_body. Prefixing it is all that is left.
     Err(e) => return Err(f"{cfg.url} is not a reachable lll server API: {e}"),
   }
-  if let Some(warning) = committed_token_warning(src.token) {
+  if let Some(warning) = committed_token_warning(ctx, src.token) {
     fmt.Println(warning)
   }
   Ok(())
@@ -313,10 +318,10 @@ fn config_check(_input: flags.CommandInput) -> Result<(), string> {
 /// That file is committed, so a token in it is a secret in everyone's clone
 /// and in every future checkout of the history. Naming the home config makes
 /// the warning actionable rather than a scold.
-fn committed_token_warning(source: string) -> Option<string> {
+fn committed_token_warning(ctx: pb.Client, source: string) -> Option<string> {
   if !strings.HasPrefix(source, "file:") { return None }
   let path = strings.TrimPrefix(source, "file:")
-  let Ok(home) = config.home_path() else {
+  let Ok(home) = ctx.settings.home_path() else {
     return None
   }
   if path == home { return None }

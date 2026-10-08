@@ -13,8 +13,8 @@ import "query"
 /// Dispatch `lll project <verb>` through the noun's Command table (TASK-307).
 /// The table is the one place a verb is declared: dispatch, `lll project
 /// --help` and shell completions all read it, so none of the three can drift.
-pub fn project(args: Slice<string>) -> Result<(), string> {
-  flags.dispatch("project", "work with projects", project_intro(), project_commands(), args)
+pub fn project(ctx: pb.Client, args: Slice<string>) -> Result<(), string> {
+  flags.dispatch(ctx, "project", "work with projects", project_intro(), project_commands(), args)
 }
 
 /// Every project verb, as a value. No verb has a hand-written page, so every
@@ -86,10 +86,11 @@ fn project_statuses() -> Slice<string> {
 }
 
 fn project_list(input: flags.CommandInput) -> Result<(), string> {
+  let ctx = input.ctx
   let p = input.parsed
   // Scoped when a team is configured, every team's when not: a project
   // belongs to one team (TASK-173), so the unscoped list is an admin's view.
-  let projects = models.ProjectList { items: records.fetch_projects(configured_scope()?.filter_team())? }
+  let projects = models.ProjectList { items: records.fetch_projects(ctx, configured_scope(ctx)?.filter_team())? }
   if p.given("--json") { return print_list_json(projects.items, whole_list(projects.items.length()), "project list") }
   if projects.items.is_empty() { return say_empty("projects") }
   for p in projects.items {
@@ -145,6 +146,7 @@ fn check_status(val: string) -> Result<string, string> {
 }
 
 fn project_create(input: flags.CommandInput) -> Result<(), string> {
+  let ctx = input.ctx
   let usage = input.usage
   let p = input.parsed
   let name = flags.entity_name(p, "-n", usage)?
@@ -154,14 +156,14 @@ fn project_create(input: flags.CommandInput) -> Result<(), string> {
   if p.given("--status") {
     status = check_status(p.one("--status"))?
   }
-  let team = team_flag_or_current(p.one("--team"))?
+  let team = team_flag_or_current(ctx, p.one("--team"))?
 
   let new_project = models.NewProject { name, description, status, team: team.id }
   let payload = match json.Marshal(new_project) {
     Ok(p) => p,
     Err(e) => return Err(f"encoding project: {e}"),
   }
-  let body = pb.post("/api/collections/projects/records", payload as string)?
+  let body = ctx.post("/api/collections/projects/records", payload as string)?
 
   let mut created = models.Project { .. }
   if let Err(e) = json.Unmarshal(body.bytes(), &created) {
@@ -172,6 +174,7 @@ fn project_create(input: flags.CommandInput) -> Result<(), string> {
 }
 
 fn project_edit(input: flags.CommandInput) -> Result<(), string> {
+  let ctx = input.ctx
   let usage = input.usage
   let p = input.parsed
   let Some(name) = nonempty(p.first()) else {
@@ -185,13 +188,13 @@ fn project_edit(input: flags.CommandInput) -> Result<(), string> {
   let mut status = ""
   if p.given("-n") { check_filter_name("project", p.one("-n"))? }
   if p.given("--status") { status = check_status(p.one("--status"))? }
-  let project = records.resolve_project(current_team()?.id, name)?
+  let project = records.resolve_project(ctx, current_team(ctx)?.id, name)?
 
   let mut fields: Slice<string> = []
   if p.given("-n") { fields = fields.append("\"name\":" + json_quote(p.one("-n"))?) }
   if p.given("-b") { fields = fields.append("\"description\":" + json_quote(p.one("-b"))?) }
   if status != "" { fields = fields.append("\"status\":" + json_quote(status)?) }
-  let _ = pb.patch(
+  let _ = ctx.patch(
     f"/api/collections/projects/records/{project.id}",
     "{" + strings.Join(fields, ",") + "}",
   )?
@@ -203,43 +206,46 @@ fn project_edit(input: flags.CommandInput) -> Result<(), string> {
 /// `lll project move NAME --to KEY` (LLL-100). See move_scope.lis for why the
 /// refusal is the right answer rather than dragging the references along.
 fn project_move(input: flags.CommandInput) -> Result<(), string> {
+  let ctx = input.ctx
   let usage = input.usage
   let p = input.parsed
   let Some(name) = nonempty(p.first()) else {
     return Err(flags.usage_error(f"usage: {usage}"))
   }
-  let from = team_flag_or_current(p.one("--team"))?
-  let to = move_destination(p.one("--to"))?
-  let project = records.resolve_project(from.id, name)?
-  fmt.Println(move_to_team("project", project.name, project.id, from, to)?)
+  let from = team_flag_or_current(ctx, p.one("--team"))?
+  let to = move_destination(ctx, p.one("--to"))?
+  let project = records.resolve_project(ctx, from.id, name)?
+  fmt.Println(move_to_team(ctx, "project", project.name, project.id, from, to)?)
   Ok(())
 }
 
 fn project_delete(input: flags.CommandInput) -> Result<(), string> {
+  let ctx = input.ctx
   let usage = input.usage
   let p = input.parsed
   let Some(name) = nonempty(p.first()) else {
     return Err(flags.usage_error(f"usage: {usage}"))
   }
-  let project = records.resolve_project(current_team()?.id, name)?
-  let used = entity_issue_count("project", project.id)?
+  let project = records.resolve_project(ctx, current_team(ctx)?.id, name)?
+  let used = entity_issue_count(ctx, "project", project.id)?
   if used > 0 && !p.given("--force") {
     return Err(refuse_delete("project", name, used))
   }
   if !confirmed_on_terminal(p.given("--yes"), f"delete project {name}?") {
     return Err(aborted())
   }
-  let _ = pb.delete(f"/api/collections/projects/records/{project.id}")?
+  let _ = ctx.delete(f"/api/collections/projects/records/{project.id}")?
   fmt.Println(deleted_line("project", name, used))
   Ok(())
 }
 
 fn project_view(input: flags.CommandInput) -> Result<(), string> {
+  let ctx = input.ctx
   let name = input.parsed.first()
   if name == "" {
     return Err(flags.usage_error("usage: lll project view NAME"))
   }
-  let p = records.resolve_project(current_team()?.id, name)?
+  let p = records.resolve_project(ctx, current_team(ctx)?.id, name)?
 
   let json_mode = input.parsed.given("--json")
   let mut team = p.expand.team.key
@@ -257,7 +263,7 @@ fn project_view(input: flags.CommandInput) -> Result<(), string> {
 
   let filter = url.QueryEscape(f"project={query.quote(p.id)}")
   let mut issues = models.IssueList { .. }
-  pb.fetch(
+  pb.fetch(ctx, 
     f"/api/collections/issues/records?filter={filter}&perPage=200&sort=created&expand=team,assignee",
     "issues",
     &issues,

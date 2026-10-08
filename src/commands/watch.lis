@@ -44,7 +44,7 @@ pub fn watch_spec() -> Slice<flags.Flag> {
   ]...))
 }
 
-pub fn watch(args: Slice<string>) -> Result<(), string> {
+pub fn watch(ctx: pb.Client, args: Slice<string>) -> Result<(), string> {
   let spec = watch_spec()
   let p = flags.parse(spec, args, 2, false, flags.usage("lll watch", spec, ""))?
   if p.given("--help") {
@@ -53,14 +53,14 @@ pub fn watch(args: Slice<string>) -> Result<(), string> {
   }
   let filters = filters_from(p)?
   let json_mode = p.given("--json")
-  if p.given("--ready") { return watch_ready(filters, p.given("--json")) }
+  if p.given("--ready") { return watch_ready(ctx, filters, p.given("--json")) }
   // A configured team (LLL_TEAM or .lll.toml) scopes the stream by default,
   // same as `issue list`, and with it the label and project names.
-  let scope = configured_scope()?
+  let scope = configured_scope(ctx)?
 
-  let filter = resolve_filter_query(scope, filters)?
+  let filter = resolve_filter_query(ctx, scope, filters)?
   let topic = realtime.topic_with_options("issues", filter, "team,assignee")?
-  let ch = realtime.subscribe(pb.base_url()?, [topic], realtime.DeadToken.Exit)?
+  let ch = realtime.subscribe(ctx, [topic], realtime.DeadToken.Exit)?
   fmt.Fprintln(os.Stderr, "watch: ready (query subscription accepted)")
 
   // Last-seen records, keyed by record id, for rendering updates as field
@@ -195,6 +195,7 @@ with action 'ready' and the full issue record.
 /// Dispatch `lll issue watch [KEY-123]` — a live event stream for one issue
 /// and its comments. Runs until interrupted or the issue is deleted.
 pub fn issue_watch(input: flags.CommandInput) -> Result<(), string> {
+  let ctx = input.ctx
   let usage = "lll issue watch [KEY-123] [--until text] [--timeout seconds] [--json]"
   let p = input.parsed
   let id = p.first()
@@ -213,14 +214,14 @@ pub fn issue_watch(input: flags.CommandInput) -> Result<(), string> {
   if timeout > 0 && until == "" {
     return Err(flags.usage_error("--timeout only means something with --until"))
   }
-  if timeout == 0 { return run_issue_watch(id, json_mode, until, usage) }
+  if timeout == 0 { return run_issue_watch(ctx, id, json_mode, until, usage) }
 
   // The CLI owns this worker's lifetime. A deadline covers reads and the
   // subscription handshake too, not just the final receive loop. Returning
   // ends the one-command process, closing its stream and pending requests.
   let completed = Channel.new<Result<(), string>>()
   let deadline = Channel.new<bool>()
-  task { let _ = completed.send(run_issue_watch(id, json_mode, until, usage)) }
+  task { let _ = completed.send(run_issue_watch(ctx, id, json_mode, until, usage)) }
   task {
     time.Sleep(time.Duration(timeout as int64) * time.Second)
     let _ = deadline.send(true)
@@ -240,9 +241,9 @@ pub fn issue_watch(input: flags.CommandInput) -> Result<(), string> {
   outcome
 }
 
-fn run_issue_watch(id: string, json_mode: bool, until: string, usage: string) -> Result<(), string> {
-  let resolved = resolve_id(id, usage)?
-  let issue = records.fetch_issue(resolved)?
+fn run_issue_watch(ctx: pb.Client, id: string, json_mode: bool, until: string, usage: string) -> Result<(), string> {
+  let resolved = resolve_id(ctx, id, usage)?
+  let issue = records.fetch_issue(ctx, resolved)?
   let key = f"{issue.expand.team.key}-{issue.number}"
 
   let issue_topic = realtime.topic_with_options(
@@ -259,11 +260,11 @@ fn run_issue_watch(id: string, json_mode: bool, until: string, usage: string) ->
   )?
   // Watch rides the operator's LLL_TOKEN and cannot re-mint anything, so a
   // rejected token ends it with the fix instead of a silent stream (LLL-617).
-  let ch = realtime.subscribe(pb.base_url()?, [issue_topic, comments_topic], realtime.DeadToken.Exit)?
+  let ch = realtime.subscribe(ctx, [issue_topic, comments_topic], realtime.DeadToken.Exit)?
   // Subscribe before reading the initial snapshot: comments created during
   // setup are either in this snapshot or queued on the accepted stream.
   if until != "" {
-    let existing = records.fetch_comments(issue.id)?
+    let existing = records.fetch_comments(ctx, issue.id)?
     let mut n = 0
     for c in existing {
       n += 1
@@ -419,16 +420,16 @@ fn comment_matches_until(text: string, action: string, body: string) -> bool {
 /// does NOT exit: the stream stays alive and announces the first issue that
 /// becomes ready. Events for issues that are ready keep streaming, as the
 /// plain query watch does.
-fn watch_ready(filters: query.Filters, json_mode: bool) -> Result<(), string> {
-  let scope = configured_scope()?
-  let filter = resolve_filter_query(scope, filters)?
+fn watch_ready(ctx: pb.Client, filters: query.Filters, json_mode: bool) -> Result<(), string> {
+  let scope = configured_scope(ctx)?
+  let filter = resolve_filter_query(ctx, scope, filters)?
   // blocked_by expand, so each event record carries its blockers' states.
   let topic = realtime.topic_with_options("issues", filter, "team,assignee,blocked_by")?
-  let ch = realtime.subscribe(pb.base_url()?, [topic], realtime.DeadToken.Exit)?
+  let ch = realtime.subscribe(ctx, [topic], realtime.DeadToken.Exit)?
   // blocked_by expanded on every page, so readiness can be decided locally.
   let mut tail = "&expand=team,assignee,blocked_by,labels&sort=created,id"
   if filter != "" { tail = f"{tail}&filter={url.QueryEscape(filter)}" }
-  let mut issues = fetch_all_issues(tail)?
+  let mut issues = fetch_all_issues(ctx, tail)?
   let mut ready = ready_keys(issues)
   fmt.Fprintln(os.Stderr, "watch: ready (agenda subscription accepted)")
   loop {

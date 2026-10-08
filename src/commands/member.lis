@@ -20,8 +20,8 @@ import "records"
 /// Dispatch `lll member <verb>` through the noun's Command table (TASK-307).
 /// The table is the one place a verb is declared: dispatch, `lll member
 /// --help` and shell completions all read it, so none of the three can drift.
-pub fn member(args: Slice<string>) -> Result<(), string> {
-  flags.dispatch(
+pub fn member(ctx: pb.Client, args: Slice<string>) -> Result<(), string> {
+  flags.dispatch(ctx,
     "member",
     "work with members",
     member_intro(),
@@ -129,12 +129,13 @@ exist ('lll team --help')."
 }
 
 fn member_list(input: flags.CommandInput) -> Result<(), string> {
+  let ctx = input.ctx
   let p = input.parsed
-  let members = models.MemberList { items: records.fetch_members()? }
+  let members = models.MemberList { items: records.fetch_members(ctx)? }
   // Team ids become keys. Ids of teams the caller cannot see stay hidden
   // and are only counted.
   let keys: mut Map<string, string> = Map.new()
-  for team in records.list_teams()?.items { keys[team.id] = team.key }
+  for team in records.list_teams(ctx)?.items { keys[team.id] = team.key }
   if p.given("--json") {
     // team_keys beside the ids, for the teams the caller can see
     // (fleet case 12, LLL-552); the ids stay as PocketBase sent them.
@@ -358,22 +359,23 @@ fn set_password_spec() -> Slice<flags.Flag> {
 /// deleting an auth record is not something one member should do to another
 /// on a shared board.
 fn member_remove(input: flags.CommandInput) -> Result<(), string> {
+  let ctx = input.ctx
   let usage = input.usage
   let p = input.parsed
   let name = p.first()
   if name == "" { return Err(flags.usage_error(f"usage: {usage}")) }
 
-  point_at_url(p.one("--url"))?
+  let ctx = point_at_url(ctx, p.one("--url"))?
   // Require an explicit admin login before lookup/counting. The backend also
   // restricts member deletion to superusers (LLL-341), so direct API clients
   // cannot bypass the same account boundary.
   // Env credentials count only when no token is configured (D7): otherwise
   // superuser_auth would use the member token and the server would answer a
   // bare 403.
-  let login = given_admin_login(p)?
+  let login = given_admin_login(ctx.settings, p)?
   let usable = match login {
     AdminLogin.Explicit(_) => true,
-    AdminLogin.Env(_) => config.load()?.token == "",
+    AdminLogin.Env(_) => ctx.settings.config()?.token == "",
     AdminLogin.Absent => false,
   }
   if !usable {
@@ -382,12 +384,12 @@ fn member_remove(input: flags.CommandInput) -> Result<(), string> {
 " + admin_hint(),
     )
   }
-  let su = superuser_auth(login)?
-  let Some(member) = records.find_member_as(su, name)? else {
+  let su = superuser_auth(ctx, login)?
+  let Some(member) = records.find_member_as(ctx, su, name)? else {
     return Err(pb.fail(pb.ErrorKind.NotFound, f"no member named '{name}'; see 'lll member list'"))
   }
 
-  let references = member_references(member.id, su)?
+  let references = member_references(ctx, member.id, su)?
   let assigned = references.assigned
   let authored = references.authored
   let created = references.created
@@ -402,7 +404,7 @@ or use --force to clear assignments, comment authorship and issue creator refere
   if !confirmed_on_terminal(p.given("--yes"), f"delete member {member.name}?") {
     return Err(aborted())
   }
-  let _ = pb.delete_as(f"/api/collections/members/records/{member.id}", su)?
+  let _ = ctx.delete_as(f"/api/collections/members/records/{member.id}", su)?
   fmt.Println(f"removed member {member.name}")
   if assigned > 0 || authored > 0 || created > 0 {
     fmt.Println(
@@ -453,22 +455,18 @@ Authenticates as the superuser, exactly like 'lll member set-password'." +
   flags.section(member_remove_spec())
 }
 
-/// Point this process at `url` for the rest of the command, when one was
-/// given. The gated helpers all read the configured url; setting the env var
-/// is how a flag reaches them without threading a base argument through
-/// superuser_auth, find_member_as and create_member_as.
-fn point_at_url(given: string) -> Result<(), string> {
+/// The client for the rest of the command: pointed at `given` when a --url
+/// was given (a flag override in its settings), else unchanged. The token is
+/// kept, as LLL_URL kept it.
+fn point_at_url(ctx: pb.Client, given: string) -> Result<pb.Client, string> {
   let base = strings.TrimSuffix(strings.TrimSpace(given), "/")
-  if base == "" { return Ok(()) }
+  if base == "" { return Ok(ctx) }
   if !strings.HasPrefix(base, "http://") && !strings.HasPrefix(base, "https://") {
     return Err(
       flags.usage_error(f"--url must be a full base url starting with http:// or https:// (got '{base}')"),
     )
   }
-  if let Err(e) = os.Setenv("LLL_URL", base) {
-    return Err(f"pointing at {base}: {e}")
-  }
-  Ok(())
+  Ok(ctx.with_url(base))
 }
 
 /// `lll member set-password NAME` — the superuser gives a member login
@@ -490,21 +488,22 @@ if {name} is you, change your own password with: lll member set-password {name} 
 }
 
 fn member_set_password(input: flags.CommandInput) -> Result<(), string> {
+  let ctx = input.ctx
   let usage = input.usage
   let p = input.parsed
   let name = p.first()
   if name == "" { return Err(flags.usage_error(f"usage: {usage}")) }
 
-  point_at_url(p.one("--url"))?
+  let ctx = point_at_url(ctx, p.one("--url"))?
   if p.given("--old-password") {
     if p.given("--email") || p.given("--admin-email") || p.given("--admin-password") {
       return Err(flags.usage_error("--old-password changes your own password with your own login: drop --email, --admin-email and --admin-password"))
     }
     let given = if p.given("--password") { Some(p.one("--password")) } else { None }
-    return change_own_password(name, p.one("--old-password"), given)
+    return change_own_password(ctx, name, p.one("--old-password"), given)
   }
-  let su = superuser_auth(given_admin_login(p)?)?
-  let found = records.find_member_as(su, name)?
+  let su = superuser_auth(ctx, given_admin_login(ctx.settings, p)?)?
+  let found = records.find_member_as(ctx, su, name)?
   let Some(member) = found else {
     return Err(pb.fail(pb.ErrorKind.NotFound, f"no member named '{name}'; see 'lll member create'"))
   }
@@ -548,7 +547,7 @@ rerun with --email <email> to set one alongside the password",
     Ok(b) => b,
     Err(e) => return Err(f"encoding the patch: {e}"),
   }
-  if let Err(e) = pb.patch_as(
+  if let Err(e) = ctx.patch_as(
     f"/api/collections/members/records/{member.id}",
     payload as string,
     su,
@@ -581,6 +580,7 @@ rerun with --email <email> to set one alongside the password",
 /// superuser gate set-password runs, plus the part that actually got skipped —
 /// telling the inviter the literal lines to paste to the colleague.
 fn member_invite(input: flags.CommandInput) -> Result<(), string> {
+  let ctx = input.ctx
   let usage = input.usage
   let p = input.parsed
   let name = p.first()
@@ -597,11 +597,11 @@ fn member_invite(input: flags.CommandInput) -> Result<(), string> {
   // the default and answered "Failed to authenticate" for credentials that
   // were perfectly good. Four of the six usability runs lost commands to
   // exactly that, and half of them guessed LLL_URL rather than being told.
-  point_at_url(p.one("--url"))?
+  let ctx = point_at_url(ctx, p.one("--url"))?
   // Superuser first: the create rides it, and an existing name is caught here
   // rather than as PocketBase's bare 400 on the unique index.
-  let su = superuser_auth(given_admin_login(p)?)?
-  if let Some(existing) = records.find_member_as(su, name)? {
+  let su = superuser_auth(ctx, given_admin_login(ctx.settings, p)?)?
+  if let Some(existing) = records.find_member_as(ctx, su, name)? {
     return Err(
       f"member '{name}' already exists ({existing.email}); run 'lll member set-password {name} --email {email} --password PASSWORD' with administrator credentials to enable login; existing credentials are unchanged",
     )
@@ -614,7 +614,7 @@ fn member_invite(input: flags.CommandInput) -> Result<(), string> {
   // than as a follow-up patch, so a failure leaves no member behind holding a
   // password nobody knows — the exact dead record set-password exists to fix.
   let password = rand.Text()
-  let cfg = config.load()?
+  let cfg = ctx.settings.config()?
   let base = invite_base(p.one("--url"), cfg.url, same_server_board(cfg.web_url, su))
   let keys = p.all("--team").map(records.normalize_team_key).filter(|k| k != "")
   let mode = if p.given("--read-only") { "ro" } else { "rw" }
@@ -622,7 +622,7 @@ fn member_invite(input: flags.CommandInput) -> Result<(), string> {
     return Err(flags.usage_error("--read-only needs --team KEY: say which teams they may read"))
   }
   if keys.is_empty() {
-    let created = create_member_as(su, name, email, password, [], "")?
+    let created = create_member_as(ctx, su, name, email, password, [], "")?
     status(f"invited {created.name} <{email}>: {describe_access("all", "rw", [])}")
     status("send them this (below, on stdout); the password is shown once and stored nowhere")
     for line in invite_lines(created.name, email, password, base, cfg.team) {
@@ -636,12 +636,12 @@ fn member_invite(input: flags.CommandInput) -> Result<(), string> {
   // each board link opens only one team's board.
   let mut team_ids: Slice<string> = []
   for key in keys {
-    let Some(team) = find_team_as(su, key)? else {
-      return Err(f"no team with key '{key}' on this server; teams: {team_keys_as(su)} (see 'lll team list')")
+    let Some(team) = find_team_as(ctx, su, key)? else {
+      return Err(f"no team with key '{key}' on this server; teams: {team_keys_as(ctx, su)} (see 'lll team list')")
     }
     team_ids = team_ids.append(team.id)
   }
-  let created = create_member_as(su, name, email, password, team_ids, mode)?
+  let created = create_member_as(ctx, su, name, email, password, team_ids, mode)?
   status(f"invited {created.name} <{email}>: {describe_access("teams", mode, keys)}")
   status("send them this (below, on stdout); the password is shown once and stored nowhere")
   for line in invite_lines(created.name, email, password, base, keys[0]) {
@@ -649,7 +649,7 @@ fn member_invite(input: flags.CommandInput) -> Result<(), string> {
   }
   fmt.Println("")
   for key in keys {
-    match scoped_board_link(cfg.web_url, key) {
+    match scoped_board_link(ctx, cfg.web_url, key) {
       Some(link) => fmt.Println(f"  view-only web board for {key} (separate from their CLI access; stops working when the server's LLL_BOARD_TOKEN changes): {link}"),
       None => status(f"no web board link for {key}: run this invite on the machine running 'lll up' to print one"),
     }
@@ -660,8 +660,8 @@ fn member_invite(input: flags.CommandInput) -> Result<(), string> {
 /// Every team key, comma-joined, for an unknown-team refusal (fleet case
 /// 10: 8 of 10 agents ranked "no team with key 'NOPE'" the least helpful
 /// error because it named no valid team). Best effort: "?" on failure.
-fn team_keys_as(tok: string) -> string {
-  let Ok(body) = pb.get_as("/api/collections/teams/records?perPage=200&sort=key", tok) else { return "?" }
+fn team_keys_as(ctx: pb.Client, tok: string) -> string {
+  let Ok(body) = ctx.get_as("/api/collections/teams/records?perPage=200&sort=key", tok) else { return "?" }
   let mut result = models.TeamList { .. }
   if json.Unmarshal(body.bytes(), &result).is_err() { return "?" }
   strings.Join(result.items.map(|t| t.key), ", ")
@@ -669,9 +669,9 @@ fn team_keys_as(tok: string) -> string {
 
 /// The team by key, read with `tok` rather than the configured token: an
 /// invite may run on administrator credentials alone.
-fn find_team_as(tok: string, key: string) -> Result<Option<models.Team>, string> {
+fn find_team_as(ctx: pb.Client, tok: string, key: string) -> Result<Option<models.Team>, string> {
   let filter = url.QueryEscape(f"key={query.quote(key)}")
-  let body = pb.get_as(f"/api/collections/teams/records?filter={filter}", tok)?
+  let body = ctx.get_as(f"/api/collections/teams/records?filter={filter}", tok)?
   let mut result = models.TeamList { .. }
   if let Err(e) = json.Unmarshal(body.bytes(), &result) {
     return Err(f"decoding teams: {e}")
@@ -682,20 +682,20 @@ fn find_team_as(tok: string, key: string) -> Result<Option<models.Team>, string>
 /// A board link that opens only team `key`, or None when this machine does
 /// not know the board token: LLL_BOARD_TOKEN, else the login link `lll up`
 /// saved beside the home config.
-fn scoped_board_link(web_url: string, key: string) -> Option<string> {
+fn scoped_board_link(ctx: pb.Client, web_url: string, key: string) -> Option<string> {
   let base = strings.TrimRight(web_url, "/")
-  let Some(board_token) = known_board_token(base) else { return None }
+  let Some(board_token) = known_board_token(ctx, base) else { return None }
   Some(f"{base}/t/{key}/?board_token={scoped_board_token(board_token, key)}")
 }
 
 /// The board token for the board at `base`, when this machine knows it:
 /// LLL_BOARD_TOKEN, else the login link `lll up` saved beside the home
 /// config for that same board url. Shared with `lll board`.
-fn known_board_token(base: string) -> Option<string> {
+fn known_board_token(ctx: pb.Client, base: string) -> Option<string> {
   if base == "" { return None }
-  let mut board_token = os.Getenv("LLL_BOARD_TOKEN")
+  let mut board_token = ctx.settings.board_token()
   if board_token == "" {
-    let Ok(home) = config.home_path() else { return None }
+    let Ok(home) = ctx.settings.home_path() else { return None }
     let Ok(saved) = os.ReadFile(filepath.Join(filepath.Dir(home), "board-login-url")) else { return None }
     let Some(tok) = strings.CutPrefix(strings.TrimSpace(saved as string), base + "/?board_token=") else { return None }
     board_token = tok
@@ -708,6 +708,7 @@ fn known_board_token(base: string) -> Option<string> {
 /// first member is created, then each minted credential is appended. A failed
 /// later step leaves the exact completed subset in that file for recovery.
 fn member_passes(input: flags.CommandInput) -> Result<(), string> {
+  let ctx = input.ctx
   let p = input.parsed
   let count = if p.one("--count") == "" {
     10
@@ -728,7 +729,7 @@ fn member_passes(input: flags.CommandInput) -> Result<(), string> {
   if prefix == "" { return Err(flags.usage_error("--prefix cannot be blank")) }
   let duration = parse_token_duration(p.one("--duration"))?
   let admin_file = filepath.Join(
-    filepath.Dir(config.home_path()?),
+    filepath.Dir(ctx.settings.home_path()?),
     "local-admin.json",
   )
   let bytes = match os.ReadFile(admin_file) {
@@ -750,12 +751,10 @@ fn member_passes(input: flags.CommandInput) -> Result<(), string> {
   if requested_url != "" && strings.TrimSuffix(requested_url, "/") != local.url {
     return Err("--url disagrees with the saved local board URL")
   }
-  point_at_url(local.url)?
-  if let Err(e) = os.Setenv("LLL_WEB_URL", local.url) {
-    return Err(f"pointing at the local board: {e}")
-  }
-  let given = given_admin_login(p)?
-  let cfg = config.load()?
+  let ctx = point_at_url(ctx, local.url)?
+  let ctx = ctx.with_settings(ctx.settings.with_web_url(local.url))
+  let given = given_admin_login(ctx.settings, p)?
+  let cfg = ctx.settings.config()?
   if cfg.team == "" {
     return Err(
       "no team is configured; run 'lll up --bind LAN_OR_TAILSCALE_IP' from the team directory",
@@ -767,7 +766,7 @@ fn member_passes(input: flags.CommandInput) -> Result<(), string> {
     )
   }
   let login_file = filepath.Join(
-    filepath.Dir(config.home_path()?),
+    filepath.Dir(ctx.settings.home_path()?),
     "board-login-url",
   )
   let login_bytes = match os.ReadFile(login_file) {
@@ -792,14 +791,14 @@ fn member_passes(input: flags.CommandInput) -> Result<(), string> {
   // flags name one: an inherited LLL_ADMIN_* or configured token is ignored.
   let login = match given {
     AdminLogin.Explicit(creds) => AdminLogin.Explicit(creds),
-    _ => AdminLogin.Explicit(AdminCreds { email: local.email, password: local.password }),
+    _ => AdminLogin.Explicit(config.AdminCreds { email: local.email, password: local.password }),
   }
-  let su = superuser_auth(login)?
+  let su = superuser_auth(ctx, login)?
   let run_id = strings.ToLower(rand.Text())
   let out = if p.one("--out") != "" {
     p.one("--out")
   } else {
-    filepath.Join(filepath.Dir(config.home_path()?), f"handoffs-{run_id}.txt")
+    filepath.Join(filepath.Dir(ctx.settings.home_path()?), f"handoffs-{run_id}.txt")
   }
   if let Err(e) = os.MkdirAll(filepath.Dir(out), 0o700) {
     return Err(f"creating handoff directory: {e}")
@@ -827,7 +826,7 @@ fn member_passes(input: flags.CommandInput) -> Result<(), string> {
   let mut completed = 0
   for i in 0..count {
     let name = f"{prefix}-{run_id}-{i + 1}"
-    let member = match create_member_as(su, name, "", rand.Text(), [], "") {
+    let member = match create_member_as(ctx, su, name, "", rand.Text(), [], "") {
       Ok(m) => m,
       Err(e) => return Err(
         f"created {completed} of {count} credentials in {out}; creating {name} failed: {e}",
@@ -1049,6 +1048,7 @@ paths forward: 'lll login --create' makes a first member login with the admin cr
 }
 
 fn member_add(input: flags.CommandInput) -> Result<(), string> {
+  let ctx = input.ctx
   let args = input.args
   let spec = member_add_spec()
   // The usage line echoes the verb the user actually typed, so somebody who
@@ -1074,7 +1074,7 @@ a read-write member creates it with 'lll bot create {name}' (owned by you, never
   // a raw PocketBase dump that never said member creation authenticates as a
   // MEMBER. Classify here, where the verb is known; the boundary itself is
   // unchanged, only the message.
-  let found = match records.find_member(name) {
+  let found = match records.find_member(ctx, name) {
     Ok(found) => found,
     Err(e) => return Err(member_create_error(e)),
   }
@@ -1090,13 +1090,12 @@ a read-write member creates it with 'lll bot create {name}' (owned by you, never
     )
   }
   let created = if p.given("--password") {
-    let cfg = config.load()?
-    match create_member_as(cfg.token, name, email, password, [], "") {
+    match create_member_as(ctx, ctx.token(), name, email, password, [], "") {
       Ok(created) => created,
       Err(e) => return Err(member_create_error(e)),
     }
   } else {
-    match create_member(name, email) {
+    match create_member(ctx, name, email) {
       Ok(created) => created,
       Err(e) => return Err(member_create_error(e)),
     }
@@ -1104,7 +1103,7 @@ a read-write member creates it with 'lll bot create {name}' (owned by you, never
   fmt.Println(f"Added member {created.name}")
   if p.given("--password") {
     fmt.Println(
-      f"login enabled: lll login --email {email} --url {(config.load()?).url} (use the supplied password)",
+      f"login enabled: lll login --email {email} --url {(ctx.settings.config()?).url} (use the supplied password)",
     )
   } else {
     fmt.Println(
@@ -1120,11 +1119,11 @@ a read-write member creates it with 'lll bot create {name}' (owned by you, never
 /// @members.invalid rule the TASK-180 migration used to backfill. The random
 /// password satisfies PB's create validation; it is never shown or reused.
 pub fn create_member(
+  ctx: pb.Client,
   name: string,
   email: string,
 ) -> Result<models.Member, string> {
-  let cfg = config.load()?
-  create_member_as(cfg.token, name, email, rand.Text(), [], "")
+  create_member_as(ctx, ctx.token(), name, email, rand.Text(), [], "")
 }
 
 /// create_member, riding `tok` and a caller-chosen password. Invite needs
@@ -1134,6 +1133,7 @@ pub fn create_member(
 /// get a bare 400), and the password it hands the colleague has to be the one
 /// the record is created with.
 fn create_member_as(
+  ctx: pb.Client,
   tok: string,
   name: string,
   email: string,
@@ -1162,7 +1162,7 @@ fn create_member_as(
     Ok(p) => p,
     Err(e) => return Err(f"encoding member: {e}"),
   }
-  let body = pb.post_as(
+  let body = ctx.post_as(
     "/api/collections/members/records",
     payload as string,
     tok,
@@ -1183,8 +1183,8 @@ pub fn synthesize_email(name: string) -> string {
 }
 
 /// True when the server already has a member by that name.
-pub fn member_exists(name: string) -> Result<bool, string> {
-  Ok(records.find_member(name)?.is_some())
+pub fn member_exists(ctx: pb.Client, name: string) -> Result<bool, string> {
+  Ok(records.find_member(ctx, name)?.is_some())
 }
 
 /// Create the member if the server does not have one by that name. Returns
@@ -1192,18 +1192,18 @@ pub fn member_exists(name: string) -> Result<bool, string> {
 ///
 /// Used by up while it still holds superuser authority. Normal configuration
 /// never creates a member. The board receives a member token after this step.
-pub fn ensure_member(name: string) -> Result<bool, string> {
+pub fn ensure_member(ctx: pb.Client, name: string) -> Result<bool, string> {
   if name == "" { return Ok(false) }
-  let existing = records.find_member(name)?
+  let existing = records.find_member(ctx, name)?
   if existing.is_some() { return Ok(false) }
   // Two actors seeding the same fresh server race here: both find nothing,
   // both POST. The unique name (and now email) indexes admit one and reject
   // the other, and the loser re-looks-up whoever won instead of failing the
   // boot — the same bargain ensure_team and e2e.sh's seed_team run.
-  match create_member(name, "") {
+  match create_member(ctx, name, "") {
     Ok(_) => Ok(true),
     Err(_) => {
-      let raced = records.find_member(name)?
+      let raced = records.find_member(ctx, name)?
       if raced.is_some() { return Ok(false) }
       Err(f"could not create member '{name}' and none exists to reuse")
     },
@@ -1265,13 +1265,14 @@ struct AccessPatch {
 /// record through 'lll api' instead. Cases 06-08 (narrow, widen, revoke)
 /// need the same verb.
 fn member_access_cmd(input: flags.CommandInput) -> Result<(), string> {
+  let ctx = input.ctx
   let p = input.parsed
   let name = p.first()
   if name == "" { return Err(flags.usage_error("usage: lll member access NAME [--team KEY]... [--add-team KEY] [--remove-team KEY] [--all-teams|--no-teams] [--read-only|--read-write]")) }
-  let Some(m) = records.find_member(name)? else {
+  let Some(m) = records.find_member(ctx, name)? else {
     return Err(pb.fail(pb.ErrorKind.NotFound, f"no member named '{name}'; see 'lll member list'"))
   }
-  let teams = records.list_teams()?.items
+  let teams = records.list_teams(ctx)?.items
   let key_of = |id: string| teams.find(|t| t.id == id).map_or(id, |t| t.key)
   let before = describe_access(m.scope, m.mode, m.teams.map(key_of))
   let set_teams = p.given("--team") || p.given("--all-teams") || p.given("--no-teams")
@@ -1279,7 +1280,7 @@ fn member_access_cmd(input: flags.CommandInput) -> Result<(), string> {
   let set_mode = p.given("--read-only") || p.given("--read-write")
   if !set_teams && !edit_teams && !set_mode {
     fmt.Println(f"{m.name}: {before}")
-    print_owner_cap(m, key_of)?
+    print_owner_cap(ctx, m, key_of)?
     return Ok(())
   }
   let given = [p.given("--team"), p.given("--all-teams"), p.given("--no-teams"), edit_teams].filter(|g| g)
@@ -1291,17 +1292,17 @@ fn member_access_cmd(input: flags.CommandInput) -> Result<(), string> {
   }
   let id_of = |key: string| -> Result<string, string> {
     let k = records.normalize_team_key(key)
-    let Some(t) = teams.find(|t| t.key == k) else { return Err(unknown_team(k)) }
+    let Some(t) = teams.find(|t| t.key == k) else { return Err(unknown_team(ctx, k)) }
     Ok(t.id)
   }
   // Administrator credentials only: the members rules refuse every member
   // and bot token, so an agent on someone's token cannot widen a guest or
   // narrow its owner.
-  let su = superuser_auth(given_admin_login(p)?)?
+  let su = superuser_auth(ctx, given_admin_login(ctx.settings, p)?)?
   // The record as the administrator reads it: a team-scoped configured token
   // reads a member without the teams it cannot see (LLL-551), and editing
   // that copy would drop them.
-  let m = records.find_member_as(su, name)?.unwrap_or(m)
+  let m = records.find_member_as(ctx, su, name)?.unwrap_or(m)
   let before = describe_access(m.scope, m.mode, m.teams.map(key_of))
   let mut scope = m.scope
   let mut ids = m.teams
@@ -1335,7 +1336,7 @@ fn member_access_cmd(input: flags.CommandInput) -> Result<(), string> {
     Ok(b) => b as string,
     Err(e) => return Err(f"encoding access: {e}"),
   }
-  if let Err(e) = pb.patch_as(f"/api/collections/members/records/{m.id}", payload, su) {
+  if let Err(e) = ctx.patch_as(f"/api/collections/members/records/{m.id}", payload, su) {
     // gopb checkOwner's refusal names its own fix (LLL-543).
     if strings.Contains(e, "bot never exceeds its owner") { return Err(e) }
     let status = pb.classify(e).status
@@ -1356,15 +1357,15 @@ fn member_access_cmd(input: flags.CommandInput) -> Result<(), string> {
   now.scope = scope
   now.teams = ids
   now.mode = mode
-  print_owner_cap(now, key_of)
+  print_owner_cap(ctx, now, key_of)
 }
 
 /// For a bot whose owner's access is narrower than its own, the access it
 /// actually has and why (LLL-543). Prints nothing otherwise.
 /// A team-scoped caller may see a bot but not its owner (LLL-551): the owner
 /// then reads as missing, and the cap is not this caller's to know.
-fn print_owner_cap(m: models.Member, key_of: fn(string) -> string) -> Result<(), string> {
-  let (eff, cap) = match records.effective_access(m) {
+fn print_owner_cap(ctx: pb.Client, m: models.Member, key_of: fn(string) -> string) -> Result<(), string> {
+  let (eff, cap) = match records.effective_access(ctx, m) {
     Ok(found) => found,
     Err(e) => {
       if pb.classify(e).status == 404 { return Ok(()) }

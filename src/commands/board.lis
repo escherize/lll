@@ -4,6 +4,7 @@ import "go:strings"
 import "config"
 import "flags"
 import "records"
+import "pb"
 
 /// `lll board` — print the web board URL; `-w` opens it in the browser.
 pub fn board_spec() -> Slice<flags.Flag> {
@@ -14,7 +15,7 @@ pub fn board_spec() -> Slice<flags.Flag> {
   ]
 }
 
-pub fn board(args: Slice<string>) -> Result<(), string> {
+pub fn board(ctx: pb.Client, args: Slice<string>) -> Result<(), string> {
   let spec = board_spec()
   let p = flags.parse(spec, args, 2, false, "lll board [-w] [--team KEY] (prints the URL; no subcommand is needed)")?
   if p.given("--help") {
@@ -22,15 +23,15 @@ pub fn board(args: Slice<string>) -> Result<(), string> {
     return Ok(())
   }
   let open = p.given("-w")
-  let mut base = web_base()?
+  let mut base = web_base(ctx)?
   if p.given("--team") {
-    base = team_link(base, p.one("--team"))?
+    base = team_link(ctx, base, p.one("--team"))?
   } else if (base.starts_with("http://") || base.starts_with("https://")) && is_loopback(base) {
     // The board is gated: a bare url answers 401 (LLL-648). On the machine
     // serving a loopback board, the printed link signs the browser in. Only
     // loopback: an LLL_BOARD_TOKEN must never ride to whatever other host
     // web_url names.
-    if let Some(tok) = known_board_token(base) { base = f"{base}/?board_token={tok}" }
+    if let Some(tok) = known_board_token(ctx, base) { base = f"{base}/?board_token={tok}" }
   }
   if open {
     fmt.Println(f"Opening {base}")
@@ -69,8 +70,8 @@ actual local endpoint. The API URL alone does not identify a board URL.",
 }
 
 /// Web board base URL (env > config > default), without a trailing slash.
-fn web_base() -> Result<string, string> {
-  let cfg = config.load()?
+fn web_base(ctx: pb.Client) -> Result<string, string> {
+  let cfg = ctx.settings.config()?
   if cfg.web_url == "" {
     return Err("board URL is not configured; run 'lll config set web_url URL' with the board address supplied by your deployer (or set LLL_WEB_URL)")
   }
@@ -97,13 +98,13 @@ pub fn open_url(url: string) -> Result<(), string> {
 /// The view-only link for team `key` (fleet case 05: 10 of 10 agents asked
 /// for a client's board link had to create a member through 'lll member
 /// invite' to get one).
-fn team_link(base: string, key: string) -> Result<string, string> {
+fn team_link(ctx: pb.Client, base: string, key: string) -> Result<string, string> {
   let wanted = records.normalize_team_key(key)
-  let found = records.find_team(wanted)?
+  let found = records.find_team(ctx, wanted)?
   if found.is_none() {
-    return Err(unknown_team(wanted))
+    return Err(unknown_team(ctx, wanted))
   }
-  let Some(link) = scoped_board_link(base, wanted) else {
+  let Some(link) = scoped_board_link(ctx, base, wanted) else {
     return Err(
       "no board token on this machine: run this where 'lll up' runs, or set LLL_BOARD_TOKEN to the server's board token",
     )

@@ -27,12 +27,13 @@ import "references"
 /// Comments and members are not imported. Nothing here can forge another
 /// member's authorship, so `KEY-N.comments.md` is export-only.
 fn import_dir(input: flags.CommandInput) -> Result<(), string> {
+  let ctx = input.ctx
   let p = input.parsed
   let usage = input.usage
   let dir = p.first()
   if dir == "" { return Err(flags.usage_error(f"which directory?\nusage: {usage}")) }
 
-  let team = current_team()?
+  let team = current_team(ctx)?
   if team.archived { return Err(archived_hint(team.key)) }
 
   // Read and parse the WHOLE set before writing anything. A mirror with one
@@ -44,7 +45,7 @@ fn import_dir(input: flags.CommandInput) -> Result<(), string> {
     return Err(f"no issue files in {filepath.Join(dir, "issues")}; is this a directory 'lll export' wrote?")
   }
 
-  let existing = records.fetch_board_issues(team.id)?
+  let existing = records.fetch_board_issues(ctx, team.id)?
   if !existing.is_empty() && !p.given("--replace") {
     return Err(
       f"{team.key} already has {existing.length()} issues, and importing into a team that is not empty would mix two sets of numbering.
@@ -53,8 +54,8 @@ To import somewhere harmless instead: lll attach --key NEWKEY in another directo
     )
   }
 
-  let (label_ids, _) = ensure_labels(team, label_names(parsed), Map.new<string, string>())?
-  let creator = actor()?.map_or("", |member| member.id)
+  let (label_ids, _) = ensure_labels(ctx, team, label_names(parsed), Map.new<string, string>())?
+  let creator = actor(ctx)?.map_or("", |member| member.id)
 
   // From here the team is being rebuilt, and a failure leaves it partly
   // done. Nothing can make that atomic over HTTP, so every error past this
@@ -62,7 +63,7 @@ To import somewhere harmless instead: lll attach --key NEWKEY in another directo
   // and re-running --replace starts from a clean team again.
   let mut deleted = 0
   for issue in existing {
-    if let Err(e) = pb.delete(f"/api/collections/issues/records/{issue.id}") {
+    if let Err(e) = ctx.delete(f"/api/collections/issues/records/{issue.id}") {
       return Err(partial(dir, f"deleting {team.key}-{issue.number}: {e}", deleted, 0))
     }
     deleted += 1
@@ -75,7 +76,7 @@ To import somewhere harmless instead: lll attach --key NEWKEY in another directo
     let (front, body) = front_and_body
     let mut assignee = ""
     if front.assignee != "" {
-      match records.find_member(front.assignee)? {
+      match records.find_member(ctx, front.assignee)? {
         Some(member) => assignee = member.id,
         // A member cannot be conjured from a name, and refusing the whole
         // import over an account that left would make the mirror
@@ -85,7 +86,7 @@ To import somewhere harmless instead: lll attach --key NEWKEY in another directo
     }
     let mut project = ""
     if front.project != "" {
-      project = records.resolve_project(team.id, front.project)?.id
+      project = records.resolve_project(ctx, team.id, front.project)?.id
     }
     let mut labels: Slice<string> = []
     for name in front.labels {
@@ -96,7 +97,7 @@ To import somewhere harmless instead: lll attach --key NEWKEY in another directo
     // mirror to say it was filed by whoever ran the restore, on their box.
     let mut filed_by = creator
     if front.creator != "" {
-      if let Some(member) = records.find_member(front.creator)? {
+      if let Some(member) = records.find_member(ctx, front.creator)? {
         filed_by = member.id
       }
     }
@@ -127,7 +128,7 @@ To import somewhere harmless instead: lll attach --key NEWKEY in another directo
     }
     // expand=team because attachments.upload checks the team's archived flag
     // on the record it is handed.
-    let body_json = match pb.post(
+    let body_json = match ctx.post(
       "/api/collections/issues/records?expand=team",
       payload as string,
     ) {
@@ -146,7 +147,7 @@ To import somewhere harmless instead: lll attach --key NEWKEY in another directo
       // skips an issue whose gh#N the team already carries, so losing these
       // turns a later re-import into a duplicate import.
       for reference in strings.Fields(front.refs) {
-        if let Err(e) = references.append(issue_for_refs.id, reference) {
+        if let Err(e) = references.append(ctx, issue_for_refs.id, reference) {
           return Err(partial(dir, f"recording ref {reference} on {front.key}: {e}", deleted, created))
         }
       }
@@ -167,7 +168,7 @@ To import somewhere harmless instead: lll attach --key NEWKEY in another directo
       // come back and the NAME does not: a restored shot_ab12.png becomes
       // shot_ab12_cd34.png. Nothing downstream keys off the name, and
       // inventing one would mean fighting the file field's own uniqueness.
-      if let Err(e) = attachments.upload(pb.Caller.Process, issue, name, data) {
+      if let Err(e) = attachments.upload(ctx, pb.Caller.Process, issue, name, data) {
         return Err(partial(dir, f"attaching {name} to {front.key}: {e}", deleted, created))
       }
       restored_blobs += 1
@@ -178,7 +179,7 @@ To import somewhere harmless instead: lll attach --key NEWKEY in another directo
   // because a forward reference is normal: ENG-3 can be blocked by ENG-7,
   // and a doc can be filed against an issue created after it.
   let mut id_of = Map.new<string, string>()
-  for issue in records.fetch_board_issues(team.id)? {
+  for issue in records.fetch_board_issues(ctx, team.id)? {
     id_of[f"{team.key}-{issue.number}"] = issue.id
   }
 
@@ -196,7 +197,7 @@ To import somewhere harmless instead: lll attach --key NEWKEY in another directo
       Ok(payload) => payload,
       Err(e) => return Err(partial(dir, f"encoding blockers for {front.key}: {e}", deleted, created)),
     }
-    if let Err(e) = pb.patch(f"/api/collections/issues/records/{issue_id}", payload as string) {
+    if let Err(e) = ctx.patch(f"/api/collections/issues/records/{issue_id}", payload as string) {
       return Err(partial(dir, f"linking blockers on {front.key}: {e}", deleted, created))
     }
     linked_blocks += 1
@@ -204,8 +205,8 @@ To import somewhere harmless instead: lll attach --key NEWKEY in another directo
 
   let mut restored_docs = 0
   if !parsed_docs.is_empty() {
-    for existing_doc in fetch_team_docs(team.id)? {
-      if let Err(e) = pb.delete(f"/api/collections/docs/records/{existing_doc.id}") {
+    for existing_doc in fetch_team_docs(ctx, team.id)? {
+      if let Err(e) = ctx.delete(f"/api/collections/docs/records/{existing_doc.id}") {
         return Err(partial(dir, f"deleting doc {existing_doc.slug}: {e}", deleted, created))
       }
     }
@@ -233,7 +234,7 @@ To import somewhere harmless instead: lll attach --key NEWKEY in another directo
         Ok(payload) => payload,
         Err(e) => return Err(partial(dir, f"encoding doc {front.slug}: {e}", deleted, created)),
       }
-      if let Err(e) = pb.post("/api/collections/docs/records", payload as string) {
+      if let Err(e) = ctx.post("/api/collections/docs/records", payload as string) {
         return Err(partial(dir, f"creating doc {front.slug}: {e}", deleted, created))
       }
       restored_docs += 1

@@ -11,8 +11,8 @@ import "flags"
 /// Dispatch `lll label <verb>` through the noun's Command table (TASK-307).
 /// The table is the one place a verb is declared: dispatch, `lll label --help`
 /// and shell completions all read it, so none of the three can drift.
-pub fn label(args: Slice<string>) -> Result<(), string> {
-  flags.dispatch("label", "work with labels", "", label_commands(), args)
+pub fn label(ctx: pb.Client, args: Slice<string>) -> Result<(), string> {
+  flags.dispatch(ctx, "label", "work with labels", "", label_commands(), args)
 }
 
 /// Every label verb, as a value. Dispatch parses args against `spec` before
@@ -66,11 +66,12 @@ pub fn label_commands() -> Slice<flags.Command> {
 }
 
 fn label_list(input: flags.CommandInput) -> Result<(), string> {
+  let ctx = input.ctx
   let p = input.parsed
   // Scoped when a team is configured, every team's when not: a label belongs
   // to one team (TASK-173), so the unscoped list is an admin's view, not a
   // working one.
-  let labels = models.LabelList { items: records.fetch_labels(configured_scope()?.filter_team())? }
+  let labels = models.LabelList { items: records.fetch_labels(ctx, configured_scope(ctx)?.filter_team())? }
   if p.given("--json") { return print_list_json(labels.items, whole_list(labels.items.length()), "label list") }
   if labels.items.is_empty() { return say_empty("labels") }
   for l in labels.items {
@@ -131,6 +132,7 @@ fn label_create_page() -> string {
 }
 
 fn label_create(input: flags.CommandInput) -> Result<(), string> {
+  let ctx = input.ctx
   let spec = label_create_spec()
   // The check-first note rides the usage string (TASK-208), so every surface
   // that prints it — --help included — says to reuse before creating.
@@ -140,14 +142,14 @@ fn label_create(input: flags.CommandInput) -> Result<(), string> {
   let name = flags.entity_name(p, "-n", usage)?
   check_filter_name("label", name)?
   let color = p.one("-c")
-  let team = team_flag_or_current(p.one("--team"))?
+  let team = team_flag_or_current(ctx, p.one("--team"))?
 
   let new_label = models.NewLabel { name, color, team: team.id }
   let payload = match json.Marshal(new_label) {
     Ok(p) => p,
     Err(e) => return Err(f"encoding label: {e}"),
   }
-  let body = pb.post("/api/collections/labels/records", payload as string)?
+  let body = ctx.post("/api/collections/labels/records", payload as string)?
 
   let mut created = models.Label { .. }
   if let Err(e) = json.Unmarshal(body.bytes(), &created) {
@@ -162,6 +164,7 @@ fn label_create(input: flags.CommandInput) -> Result<(), string> {
 }
 
 fn label_edit(input: flags.CommandInput) -> Result<(), string> {
+  let ctx = input.ctx
   let usage = input.usage
   let p = input.parsed
   let Some(name) = nonempty(p.first()) else {
@@ -171,12 +174,12 @@ fn label_edit(input: flags.CommandInput) -> Result<(), string> {
     return Err(flags.usage_error(f"nothing to update: pass -n or -c\nusage: {usage}"))
   }
   if p.given("-n") { check_filter_name("label", p.one("-n"))? }
-  let label = records.resolve_label(current_team()?.id, name)?
+  let label = records.resolve_label(ctx, current_team(ctx)?.id, name)?
 
   let mut fields: Slice<string> = []
   if p.given("-n") { fields = fields.append("\"name\":" + json_quote(p.one("-n"))?) }
   if p.given("-c") { fields = fields.append("\"color\":" + json_quote(p.one("-c"))?) }
-  let _ = pb.patch(
+  let _ = ctx.patch(
     f"/api/collections/labels/records/{label.id}",
     "{" + strings.Join(fields, ",") + "}",
   )?
@@ -186,20 +189,21 @@ fn label_edit(input: flags.CommandInput) -> Result<(), string> {
 
 /// Delete only after counting references; the web shares the same count policy.
 fn label_delete(input: flags.CommandInput) -> Result<(), string> {
+  let ctx = input.ctx
   let usage = input.usage
   let p = input.parsed
   let Some(name) = nonempty(p.first()) else {
     return Err(flags.usage_error(f"usage: {usage}"))
   }
-  let label = records.resolve_label(current_team()?.id, name)?
-  let used = entity_issue_count("label", label.id)?
+  let label = records.resolve_label(ctx, current_team(ctx)?.id, name)?
+  let used = entity_issue_count(ctx, "label", label.id)?
   if used > 0 && !p.given("--force") {
     return Err(refuse_delete("label", name, used))
   }
   if !confirmed_on_terminal(p.given("--yes"), f"delete label {name}?") {
     return Err(aborted())
   }
-  let _ = pb.delete(f"/api/collections/labels/records/{label.id}")?
+  let _ = ctx.delete(f"/api/collections/labels/records/{label.id}")?
   fmt.Println(deleted_line("label", name, used))
   Ok(())
 }
@@ -208,15 +212,16 @@ fn label_delete(input: flags.CommandInput) -> Result<(), string> {
 /// team could only be deleted and remade before this, which loses every issue
 /// that carried it.
 fn label_move(input: flags.CommandInput) -> Result<(), string> {
+  let ctx = input.ctx
   let usage = input.usage
   let p = input.parsed
   let Some(name) = nonempty(p.first()) else {
     return Err(flags.usage_error(f"usage: {usage}"))
   }
-  let from = team_flag_or_current(p.one("--team"))?
-  let to = move_destination(p.one("--to"))?
-  let label = records.resolve_label(from.id, name)?
-  fmt.Println(move_to_team("label", label.name, label.id, from, to)?)
+  let from = team_flag_or_current(ctx, p.one("--team"))?
+  let to = move_destination(ctx, p.one("--to"))?
+  let label = records.resolve_label(ctx, from.id, name)?
+  fmt.Println(move_to_team(ctx, "label", label.name, label.id, from, to)?)
   Ok(())
 }
 
