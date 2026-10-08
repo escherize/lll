@@ -174,10 +174,15 @@ check what is configured with 'lll config list'",
   // before it can show an install wizard; credentials stay off the banner.
   let mut email = os.Getenv("LLL_ADMIN_EMAIL")
   let mut pass = os.Getenv("LLL_ADMIN_PASSWORD")
-  if email == "" || pass == "" {
+  let fallback_admin = email == "" || pass == ""
+  if fallback_admin {
     email = "admin@local.dev"
     pass = "admin-local-123"
   }
+  // Whether this boot proved the administrator pair works: it upserted the
+  // pair into the server it started, or signed in with it. The banner names
+  // the pair only then (LLL-648).
+  let mut admin_ok = false
 
   if !healthy(db_url) {
     let db_port = free_port(port_of(db_url, 8090))
@@ -213,6 +218,7 @@ check what is configured with 'lll config list'",
       )
     }
     api_line = f"api    {db_url}"
+    admin_ok = true
   }
   // TASK-181: PocketBase's collection rules refuse unauthenticated requests
   // now, so the boot's seeding (team, member) and the board's own writes
@@ -249,6 +255,7 @@ check what is configured with 'lll config list'",
   if !using_token {
     match superuser_token(db_url, email, pass) {
       Ok(tok) => {
+        admin_ok = true
         if cfg.token != "" && share_bind != "" {
           fmt.Println(
             "auth   ignoring the inherited token for this new local board",
@@ -329,22 +336,37 @@ superuser credentials, or set LLL_TOKEN to a member token valid for this server.
   fmt.Println(api_line)
   fmt.Println(f"team   {team}")
   fmt.Println(f"member {member.name}")
+  if let Some(line) = admin_line(fallback_admin, admin_ok, scratch || share_bind != "", loopback_bind()) {
+    fmt.Println(line)
+  }
+  // A demo boot points the CLI at itself (demo.lis), and scratch and shared
+  // boots write their own CLI config.
+  if !scratch && share_bind == "" && !demo {
+    let plan = cli_login_plan(member_token_ok, src.token, config.load_home()?.token)
+    for line in log_cli_in(member.name, db_url, plan, src.token)? {
+      fmt.Println(line)
+    }
+  }
   // The board binds in microseconds; a browser takes far longer to launch,
   // so opening before run_server blocks is not a race worth guarding.
   let board_url = advertised_board_url(chosen)
   let _ = set_home_key("web_url", board_url)?
+  // Every boot, loopback included (LLL-648): 'lll board' and 'lll member
+  // invite --team' read the login link from here, so the machine running the
+  // board prints links that open it. Private (0600) and rewritten each boot,
+  // so it follows a per-boot token.
+  let login_file = filepath.Join(
+    filepath.Dir(config.home_path()?),
+    "board-login-url",
+  )
+  write_home_config(
+    login_file,
+    f"{board_url}/?board_token={resolve_board_token()}\n",
+  )?
   if share_bind != "" {
     let _ = set_home_key("url", board_url)?
     let _ = set_home_key("team", team)?
     let _ = set_home_key("token", os.Getenv("LLL_TOKEN"))?
-    let login_file = filepath.Join(
-      filepath.Dir(config.home_path()?),
-      "board-login-url",
-    )
-    write_home_config(
-      login_file,
-      f"{board_url}/?board_token={resolve_board_token()}\n",
-    )?
     let admin_file = filepath.Join(
       filepath.Dir(config.home_path()?),
       "local-admin.json",
@@ -375,6 +397,76 @@ superuser credentials, or set LLL_TOKEN to a member token valid for this server.
     }
   }
   run_server(chosen, refresh, p.given("--admin-ui"))
+}
+
+/// The banner's administrator line (LLL-648), or None. A loopback boot on
+/// the built-in fallback prints the pair: it is the documented local default,
+/// and 'lll member invite' and the board's admin forms ask for it. A pair
+/// from the environment is the deployer's secret: named, never printed.
+/// Scratch and shared boots print or store their own random pair, and a
+/// non-loopback bind never prints one.
+fn admin_line(fallback: bool, proved: bool, own_pair: bool, loopback: bool) -> Option<string> {
+  if !proved || own_pair || !loopback { return None }
+  if fallback {
+    return Some(
+      "admin  admin@local.dev / admin-local-123 (loopback fallback; set LLL_ADMIN_EMAIL and LLL_ADMIN_PASSWORD to choose your own)",
+    )
+  }
+  Some("admin  the LLL_ADMIN_EMAIL / LLL_ADMIN_PASSWORD pair from the environment (not printed)")
+}
+
+fn loopback_bind() -> bool {
+  let bind = bind_addr()
+  bind == "localhost" || net.ParseIP(bind).IsLoopback()
+}
+
+/// What a loopback boot does about the CLI's own login (LLL-648).
+enum CliLogin {
+  /// The board already rides the CLI's configured token.
+  Already,
+  /// No token in any config file: save this board's url and member token to
+  /// the home config, so the next 'lll' command works.
+  Save,
+  /// A token from a file that this server does not accept. url and token
+  /// layer independently, so it may be another server's login: kept.
+  Keep,
+}
+
+/// Only an empty slot is written, the rule the demo boot follows too.
+fn cli_login_plan(rides_config_token: bool, token_source: string, home_token: string) -> CliLogin {
+  if rides_config_token { return CliLogin.Already }
+  if home_token != "" || strings.HasPrefix(token_source, "file:") {
+    return CliLogin.Keep
+  }
+  CliLogin.Save
+}
+
+/// Carry out the plan and return the banner lines. The member token to save
+/// is the one board_identity left in LLL_TOKEN.
+fn log_cli_in(
+  name: string,
+  db_url: string,
+  plan: CliLogin,
+  token_source: string,
+) -> Result<Slice<string>, string> {
+  match plan {
+    CliLogin.Already => Ok([f"cli    logged in as {name} (token from {token_source})"]),
+    CliLogin.Keep => Ok([
+      f"cli    not logged in to this board: the CLI keeps its token from {strings.TrimPrefix(token_source, "file:")}, which this server does not accept",
+      f"cli    to log the CLI in as {name} instead: lll logout, then restart lll up",
+    ]),
+    CliLogin.Save => {
+      let _ = set_home_key("url", db_url)?
+      let path = set_home_key("token", os.Getenv("LLL_TOKEN"))?
+      let mut lines = [f"cli    logged in as {name}; url and token saved to {path}"]
+      if token_source == "env:LLL_TOKEN" {
+        lines = lines.append(
+          "cli    LLL_TOKEN in this shell overrides that login, and this server does not accept it: unset LLL_TOKEN",
+        )
+      }
+      Ok(lines)
+    },
+  }
 }
 
 /// Scratch is a PROCESS boundary: clear the inherited LLL_* values and move
@@ -541,7 +633,9 @@ server API is left running.
 The administration UI at the board's /_/ path is disabled by default.
 --admin-ui enables it and prints its address. Sign in with the server's
 administrator credentials; LLL_ADMIN_EMAIL/LLL_ADMIN_PASSWORD set them when
-starting a local API. Administrator credentials are never printed.
+starting a local API. With neither set, a loopback boot uses the fallback
+admin@local.dev / admin-local-123 and prints it in the banner's admin line.
+A pair from the environment is never printed.
 
 The board needs a team. A configured team (LLL_TEAM or 'team' in .lll.toml)
 is created on the server if it is missing. With none configured lll up asks
@@ -569,14 +663,20 @@ The board is gated: it answers only requests carrying its board token.
 LLL_BOARD_TOKEN sets that token; otherwise a loopback boot generates one
 per boot (a non-loopback LLL_BIND refuses to start without it) and prints it
 in the banner as a login URL — open it once and the browser keeps
-access in a cookie. From a terminal, send the same cookie: curl
+access in a cookie. 'lll board' prints the same link on this machine. From a
+terminal, send the same cookie: curl
 -H 'Cookie: lll_board=<token>' http://127.0.0.1:<port>/.
 
 A valid member token selects the board's identity. Otherwise the superuser
 credentials bootstrap a member from $USER (local when absent), then mint a
 member token for this process. Board writes and token renewal use that member.
 Use LLL_TOKEN to run the board as another authenticated member; 'lll whoami'
-shows the CLI's login. Existing CLI credentials are left alone.
+shows the CLI's login.
+
+On a loopback boot whose home config holds no token, lll up logs the CLI in
+as the board's member: it saves url and token to the home config, so the next
+'lll issue list' works. An existing token is never replaced; when this server
+does not accept it, the banner's cli line says how to switch.
 
 Environment:
   LLL_URL           server API to serve or reuse; a remote one is refused

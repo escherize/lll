@@ -11,9 +11,42 @@ fn a_new_member_lands_on_its_first_team_and_never_on_the_code() {
 
 #[test]
 fn the_join_page_escapes_its_message() {
-  let page = join_html("<script>x</script>", false)
+  let page = join_html("<script>x</script>", false, "")
   assert !strings.Contains(page, "<script>")
   assert strings.Contains(page, "&lt;script&gt;")
   assert !strings.Contains(page, "<form")
-  assert strings.Contains(join_html("", true), "<form method='post'")
+  assert strings.Contains(join_html("", true, ""), "<form method='post'")
+}
+
+// LLL-632: the form warns a browser that already holds a login, and escapes
+// the words it names that login with.
+#[test]
+fn the_join_form_warns_before_replacing_a_login() {
+  let page = join_html("", true, "Ada <b> (read-only, ALPHA)")
+  assert strings.Contains(
+    page,
+    "signed in to this board as <strong>Ada &lt;b&gt; (read-only, ALPHA)</strong>",
+  )
+  assert !strings.Contains(join_html("", true, ""), "signed in to this board")
+  // A refusal page has no form to warn about.
+  assert !strings.Contains(join_html("gone", false, "Ada"), "signed in to this board")
+}
+
+// LLL-648: /me shows a member's token only when asked (the POST), and never
+// to a credential that names no member.
+#[test]
+fn the_me_page_shows_a_token_only_after_the_post() {
+  let ada = ViewerMember { id: "m1", name: "Ada", token: "tok.en.x", rw: false, all: false }
+  let viewer = Viewer.Scoped(ScopedViewer { teams: ["ALPHA"], member: Some(ada) })
+  let offer = me_html(viewer, "", "")
+  assert !strings.Contains(offer, "tok.en.x")
+  assert strings.Contains(offer, "action='/me'")
+  assert strings.Contains(offer, "href='/t/ALPHA/'")
+  let shown = me_html(viewer, "http://127.0.0.1:8100", "tok.en.x")
+  assert strings.Contains(shown, "lll login --url http://127.0.0.1:8100 --token -")
+  assert strings.Contains(shown, "lll attach --key ALPHA")
+  assert strings.Contains(shown, "reads as you")
+  let link = Viewer.Scoped(ScopedViewer { teams: ["ALPHA"], member: None })
+  assert strings.Contains(me_html(link, "", ""), "names no member")
+  assert !strings.Contains(me_html(Viewer.Full, "", ""), "action='/me'")
 }

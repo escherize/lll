@@ -14,7 +14,7 @@ import "flags"
 // ---------------------------------------------------------- invite_lines
 
 fn joined(email: string, password: string, base: string, team: string) -> string {
-  strings.Join(invite_lines(email, password, base, team), "\n")
+  strings.Join(invite_lines("kim", email, password, base, team), "\n")
 }
 
 #[test]
@@ -50,13 +50,15 @@ fn invite_lines_omit_the_key_when_no_team_is_configured() {
   assert strings.Contains(out, "lll attach")
 }
 
-/// The whole handoff is two commands for the colleague. Counting them is how
-/// that promise stays true if the text is edited later.
+/// The whole handoff is two commands for the colleague, plus the optional
+/// password change (LLL-648). Counting them is how that promise stays true
+/// if the text is edited later.
 #[test]
-fn invite_lines_are_exactly_two_commands_for_the_colleague() {
-  let lines = invite_lines("kim@example.com", "pw", "http://127.0.0.1:8090", "ENG")
+fn invite_lines_are_two_commands_and_the_optional_password_change() {
+  let lines = invite_lines("kim", "kim@example.com", "pw", "http://127.0.0.1:8090", "ENG")
   let commands = lines.filter(|l| strings.Contains(l, "lll "))
-  assert commands.length() == 2
+  assert commands.length() == 3
+  assert lines[lines.length() - 1] == "  # to choose your own password: lll member set-password kim --old-password pw"
 }
 
 // ------------------------------------------------------------- real_email
