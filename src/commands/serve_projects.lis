@@ -29,6 +29,7 @@ fn projects_page(
   r: Ref<http.Request>,
   team_id: string,
   me: string,
+  viewer: Viewer,
 ) {
   let team = shell_team(ctx, team_id)
   let vm = match projects_vm(ctx, team_id, team.key) {
@@ -42,7 +43,7 @@ fn projects_page(
     write_raw(w, projects_raw(vm, team.key))
     return
   }
-  let page = PageVM { rail: rail_for(ctx, r, "projects", me, team), page: vm }
+  let page = PageVM { rail: rail_for(ctx, viewer, "projects", me, team), page: vm }
   render_html(w, "projects-page", page)
 }
 

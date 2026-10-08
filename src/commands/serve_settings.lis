@@ -506,7 +506,7 @@ fn access_member(ctx: pb.Client, r: mut Ref<http.Request>) -> Result<models.Memb
 /// so a token minted from the board still died in under a week, silently. It
 /// borrows the CLI's `default_token_duration` rather than restating a year in
 /// seconds: two doors onto one mint should not be able to drift apart.
-fn access_token_write(ctx: pb.Client, r: mut Ref<http.Request>) -> Result<string, string> {
+fn access_token_write(ctx: pb.Client, _v: Viewing, r: mut Ref<http.Request>) -> Result<string, string> {
   let member = access_member(ctx, r)?
   let su = verify_admin(ctx, r.PostFormValue("admin_password"))?
   let body = ctx.post_as(

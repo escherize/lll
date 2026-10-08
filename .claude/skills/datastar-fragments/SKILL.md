@@ -22,7 +22,10 @@ source subscription into the boot team's or one column's view.
 
 A board connection is scoped by team and ordering; an issue connection is
 scoped by key. Board membership/order changes render the board from a fresh
-read. Issue streams obtain a fresh initial snapshot. The bridge runs each
+read. The shared subscription runs as the board's member and only says what
+changed: each refresh reads the changed view once per distinct viewer
+credential with that viewer's own client, and a client receives only what
+was read as it (LLL-658). Never broadcast one rendering to every viewer. Issue streams obtain a fresh initial snapshot. The bridge runs each
 refresh on one of a few workers, and two refreshes of the same views (one
 team's board, one issue page) never overlap, so a slow read stalls only its
 own views and an older read cannot land after a newer one. PocketBase does

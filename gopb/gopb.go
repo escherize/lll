@@ -150,6 +150,7 @@ func Serve(dataDir, addr, adminEmail, adminPassword, version, allowedOriginsSpec
 		registerClaimRoutes(e.Router, &issueUpdates)
 		registerBotRoutes(e.Router)
 		registerAccessRoute(e.Router)
+		registerLinkTokenRoute(e.Router)
 		registerInviteRoutes(e.Router)
 		registerReferenceRoutes(e.Router, &issueUpdates)
 		registerIssueCounterRoutes(e.Router)

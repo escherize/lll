@@ -20,7 +20,7 @@ fn attachment_vms(issue: models.Issue) -> Slice<AttachmentVM> {
   })
 }
 
-fn attachment_upload(ctx: pb.Client, r: mut Ref<http.Request>) -> Result<string, string> {
+fn attachment_upload(_ctx: pb.Client, v: Viewing, r: mut Ref<http.Request>) -> Result<string, string> {
   // Bound the multipart stream before parsing; temporary spill files are
   // removed on every outcome. The schema enforces its smaller file limit.
   let Some(body) = r.Body else { return Err("choose a file to upload") }
@@ -28,15 +28,15 @@ fn attachment_upload(ctx: pb.Client, r: mut Ref<http.Request>) -> Result<string,
   let parsed = r.ParseMultipartForm((1024 * 1024) as int64)
   if let Some(form) = r.MultipartForm { defer { let _ = form.RemoveAll() } }
   if let Err(e) = parsed { return Err(f"reading upload form: {e}") }
-  let who = acting_as(ctx, r)?
-  let issue = who.issue(ctx, r.FormValue("key"))?
+  let who = acting_as(v)?
+  let issue = who.issue(r.FormValue("key"))?
   let (file, header) = match r.FormFile("file") {
     Ok(pair) => pair,
     Err(_) => return Err("choose a file to upload"),
   }
   defer file.Close()
   let data = attachments.read_upload(file)?
-  let _ = attachments.upload(ctx, who.caller, issue, header.Filename, data)?
+  let _ = attachments.upload(who.reads, who.caller, issue, header.Filename, data)?
   let html = render("attachment-upload", f"{issue.expand.team.key}-{issue.number}")?
   // Replace just the upload form to clear its file input after success.
   // It lives outside the issue morph boundary, preserving pending choices
@@ -44,10 +44,10 @@ fn attachment_upload(ctx: pb.Client, r: mut Ref<http.Request>) -> Result<string,
   Ok(replace_event("#attachment-upload", html))
 }
 
-fn attachment_remove(ctx: pb.Client, r: mut Ref<http.Request>) -> Result<string, string> {
-  let who = acting_as(ctx, r)?
-  let issue = who.issue(ctx, r.FormValue("key"))?
-  attachments.remove(ctx, who.caller, issue, r.FormValue("file"))?
+fn attachment_remove(_ctx: pb.Client, v: Viewing, r: mut Ref<http.Request>) -> Result<string, string> {
+  let who = acting_as(v)?
+  let issue = who.issue(r.FormValue("key"))?
+  attachments.remove(who.reads, who.caller, issue, r.FormValue("file"))?
   Ok("")
 }
 
@@ -55,14 +55,9 @@ fn attachment_download(ctx: pb.Client, w: http.ResponseWriter, r: Ref<http.Reque
   let mut request = r.Clone(r.Context())
   let filename = request.FormValue("file")
   let key = request.FormValue("key")
-  // The gate checked the key already; a scoped viewer is checked again here,
-  // because the file is read as the board's own member (LLL-545).
-  if let Viewer.Scoped(v) = board_viewer(ctx, r) {
-    if !v.sees_issue(key) {
-      http.Error(w, records.issue_not_found(key), 404)
-      return
-    }
-  }
+  // `ctx` is the viewer's read client (LLL-658): the issue, the file token
+  // and the file are all read as the viewer, so PocketBase refuses another
+  // team's attachment the way it refuses the issue.
   let result = records.fetch_issue(ctx, key).and_then(|issue| attachments.read_file(ctx, issue, filename))
   let data = match result {
     Ok(data) => data,

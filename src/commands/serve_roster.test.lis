@@ -1,27 +1,19 @@
 import "models"
 
-// LLL-551: on team T's pages a scoped viewer sees the members of T and the
-// full-access people; everyone else on a record renders as "hidden member".
+// LLL-551, LLL-658: a page names the members its viewer's own read of the
+// roster returned; any other member on a record renders as "hidden member".
 
 fn people() -> Slice<models.Member> {
   [
     models.Member { id: "alice", name: "alice", kind: "person", scope: "teams", teams: ["t-a"], .. },
-    models.Member { id: "bob", name: "bob", kind: "person", scope: "teams", teams: ["t-b"], .. },
     models.Member { id: "carol", name: "carol", kind: "person", scope: "all", .. },
-    models.Member { id: "garden", name: "bot-garden", kind: "bot", scope: "all", .. },
     models.Member { id: "abot", name: "bot-alpha", kind: "bot", scope: "teams", teams: ["t-a"], .. },
   ]
 }
 
 #[test]
-fn a_teams_roster_is_its_members_and_full_access_people_not_full_access_bots() {
-  let names = team_roster(people(), "t-a").map(|m| m.name)
-  assert names.equals(["alice", "carol", "bot-alpha"])
-}
-
-#[test]
-fn a_scoped_rendering_hides_assignee_creator_author_owner_and_holder_by_id() {
-  let shown = Roster { scoped: true, members: team_roster(people(), "t-a") }
+fn a_rendering_hides_assignee_creator_author_owner_and_holder_outside_the_roster() {
+  let shown = Roster { members: people() }
   let mut issue = models.Issue { team: "t-a", assignee: "garden", creator: "bob", .. }
   issue.expand.assignee = models.Member { id: "garden", name: "bot-garden", kind: "bot", .. }
   issue.expand.creator = models.Member { id: "bob", name: "bob", .. }
@@ -29,6 +21,9 @@ fn a_scoped_rendering_hides_assignee_creator_author_owner_and_holder_by_id() {
   assert seen.expand.assignee.name == "hidden member" && seen.expand.assignee.kind == ""
   assert seen.expand.creator.name == "hidden member"
   assert seen.assignee == "garden"
+  // An id that did not expand (what a scoped read returns) is hidden too.
+  let bare = shown.issue(models.Issue { team: "t-a", assignee: "garden", .. })
+  assert bare.expand.assignee.name == "hidden member"
 
   // A visible bot author keeps its name but not an owner outside the roster.
   let owner = models.MemberOwner { id: "bob", name: "bob" }
@@ -47,10 +42,11 @@ fn a_scoped_rendering_hides_assignee_creator_author_owner_and_holder_by_id() {
 }
 
 #[test]
-fn a_full_rendering_names_everyone() {
-  let shown = Roster { scoped: false, members: people() }
+fn a_full_roster_names_everyone_on_the_record() {
+  let garden = models.Member { id: "garden", name: "bot-garden", kind: "bot", scope: "all", .. }
+  let shown = Roster { members: people().append(garden) }
   let mut issue = models.Issue { assignee: "garden", .. }
-  issue.expand.assignee = models.Member { id: "garden", name: "bot-garden", .. }
+  issue.expand.assignee = garden
   assert shown.issue(issue).expand.assignee.name == "bot-garden"
-  assert shown.sees("anyone")
+  assert shown.sees("garden") && shown.sees("")
 }

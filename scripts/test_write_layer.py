@@ -39,6 +39,7 @@ NOT_RECORD_WRITES = {
     r'/api/lll/bots/rotate': 'mints a new token for an existing bot',
     r'/api/lll/invites(/redeem)?': 'mints or redeems an invite code (gopb owns the record)',
     r'/api/files/token': 'a short-lived file-read token',
+    r'/api/lll/link-token': "hands the board a team link's reader token (LLL-658; gopb owns the record)",
     r'/api/realtime': 'a realtime subscription',
 }
 # (path, variable) -> reason, for a path held in a variable.

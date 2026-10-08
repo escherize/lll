@@ -144,6 +144,23 @@ Rules: list @request.auth.id != \"\" && (@request.auth.scope = \"all\" || @reque
 | created | autodate |  | set on create |
 | updated | autodate |  | set on create; refreshed on update |
 
+## link_viewers (auth)
+
+Rules: list @request.auth.id != \"\" && id = @request.auth.id view @request.auth.id != \"\" && id = @request.auth.id create (superuser only) update (superuser only) delete (superuser only)
+
+| field | type | required | notes |
+|-------|------|----------|-------|
+| teams | relation |  | maxSelect: 999; relation to teams |
+| scope | select | yes | values: all, teams |
+| mode | select | yes | values: rw, ro |
+| owner | relation |  | relation to members |
+| link_team | text | yes |  |
+| password | password | yes |  |
+| tokenKey | text | yes |  |
+| email | email | yes |  |
+| emailVisibility | bool |  |  |
+| verified | bool |  |  |
+
 ## members (auth)
 
 Rules: list @request.auth.id != \"\" && ((@request.auth.scope = \"all\" && (@request.auth.owner = \"\" || @request.auth.owner.scope = \"all\")) || id = @request.auth.id || (scope = \"all\" && kind != \"bot\") || ((@request.auth.scope = \"all\" || teams.id ?= @request.auth.teams.id) && (@request.auth.owner = \"\" || @request.auth.owner.scope = \"all\" || teams.id ?= @request.auth.owner.teams.id))) view @request.auth.id != \"\" && ((@request.auth.scope = \"all\" && (@request.auth.owner = \"\" || @request.auth.owner.scope = \"all\")) || id = @request.auth.id || (scope = \"all\" && kind != \"bot\") || ((@request.auth.scope = \"all\" || teams.id ?= @request.auth.teams.id) && (@request.auth.owner = \"\" || @request.auth.owner.scope = \"all\" || teams.id ?= @request.auth.owner.teams.id))) create @request.auth.id != \"\" && (((@request.auth.scope = \"all\" && (@request.auth.owner = \"\" || @request.auth.owner.scope = \"all\")) && (@request.auth.mode = \"rw\" && (@request.auth.owner = \"\" || @request.auth.owner.mode = \"rw\"))) || (@request.body.kind = \"bot\" && @request.body.owner = @request.auth.id && (@request.auth.mode = \"rw\" && (@request.auth.owner = \"\" || @request.auth.owner.mode = \"rw\")))) update @request.auth.id != \"\" && @request.body.teams:isset = false && @request.body.scope:isset = false && @request.body.mode:isset = false && @request.body.owner:isset = false && @request.body.kind:isset = false && (((@request.auth.scope = \"all\" && (@request.auth.owner = \"\" || @request.auth.owner.scope = \"all\")) && (@request.auth.mode = \"rw\" && (@request.auth.owner = \"\" || @request.auth.owner.mode = \"rw\"))) || id = @request.auth.id) delete (superuser only)

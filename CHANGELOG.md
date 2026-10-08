@@ -74,6 +74,19 @@ minors. Issue keys are on the project's own board (`lll issue view KEY`).
   parent shell never had. Configuration is now built once from flags, the
   environment and the config files, and passed down as a value. A child
   process sees only what lll's own parent gave it. (LLL-486)
+- The web board reads as its viewer. Pages, raw views, search, docs and live
+  updates used to be read as the board's own member and then filtered by
+  hand for a team-scoped viewer, so one missed filter showed another team's
+  data. They are now fetched with the viewer's own credential: a member's
+  token, or for a view-only team link a read-only server-side identity for
+  that one team (the new `link_viewers` collection; only the server mints
+  its tokens, and they never leave it). PocketBase's collection rules are
+  the only thing deciding what a scoped viewer sees, and the hand-written
+  filters are gone. A page load asks the server for the viewer's access once
+  instead of about five times. Nothing a viewer sees changes, with one
+  exception: a member with access to every team now gets the redirect the
+  board token gets for an issue under another team's address, instead of a
+  404. (LLL-658)
 
 ## [0.9.0] - 2026-10-08
 

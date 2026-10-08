@@ -30,6 +30,7 @@ EXEMPT = {
     'invites': 'grant access to teams; account administration, independent of archiving',
     'favorites': "a bookmark of an issue, not the team's data; starring changes nothing in the team",
     'issue_counters': 'server-kept numbering (LLL-678): no request writes it, and an archived team creates no issues',
+    'link_viewers': "a team link's read-only reader (LLL-658); only gopb writes it, and it never writes a team",
 }
 
 

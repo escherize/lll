@@ -250,15 +250,14 @@ style='padding: .5rem .6rem; font: inherit; color: inherit; border: 1px solid #b
 
 /// GET /me: who this browser is signed in as, its boards, and the offer of
 /// a CLI login. Never the token itself.
-pub fn me_page(ctx: pb.Client, w: http.ResponseWriter, r: Ref<http.Request>) {
-  join_respond(w, 200, me_html(board_viewer(ctx, r), "", ""))
+pub fn me_page(_ctx: pb.Client, w: http.ResponseWriter, _r: Ref<http.Request>, viewer: Viewer) {
+  join_respond(w, 200, me_html(viewer, "", ""))
 }
 
 /// POST /me: the same page, plus the member's CLI login. Only a member
 /// cookie has one: the board token and a view-only link name no member.
 /// The board's origin guard has already refused a POST from another page.
-pub fn me_cli(ctx: pb.Client, w: http.ResponseWriter, r: Ref<http.Request>) {
-  let viewer = board_viewer(ctx, r)
+pub fn me_cli(_ctx: pb.Client, w: http.ResponseWriter, r: Ref<http.Request>, viewer: Viewer) {
   let token = match viewer {
     Viewer.Scoped(v) => v.member.map_or("", |m| m.token),
     Viewer.Full => "",

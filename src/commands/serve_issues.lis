@@ -115,7 +115,7 @@ fn fetch_project_names(ctx: pb.Client, team_id: string) -> Result<Slice<string>,
 ///
 /// A rejected query param is said out loud in the flash strip and dropped,
 /// never served as a 500: a stale bookmark should still show issues.
-fn issues_page(ctx: pb.Client, w: http.ResponseWriter, r: Ref<http.Request>, team_id: string, me: string) {
+fn issues_page(ctx: pb.Client, w: http.ResponseWriter, r: Ref<http.Request>, team_id: string, me: string, viewer: Viewer) {
   let mut err = ""
   let raw = view_query(r)
 
@@ -134,7 +134,7 @@ fn issues_page(ctx: pb.Client, w: http.ResponseWriter, r: Ref<http.Request>, tea
   let state = filters.one_state()
   // Who this viewer may name on this team (LLL-551): the chooser offers
   // only them, and a hidden name answers like one nobody has.
-  let roster = match roster_for(ctx, r, team_id) {
+  let roster = match read_roster(ctx) {
     Ok(found) => found,
     Err(e) => {
       http.Error(w, pb.plain(e), 500)
@@ -181,7 +181,7 @@ fn issues_page(ctx: pb.Client, w: http.ResponseWriter, r: Ref<http.Request>, tea
   let team = shell_team(ctx, team_id)
   let base = issues_base(team.key)
   let list = match fetch_issue_rows(ctx, team_id, state, assignee_id, label_id, project_id, sort) {
-    Ok(l) => models.IssueList { items: issues_for(ctx, r, l.items).map(|x| roster.issue(x)), ..l },
+    Ok(l) => models.IssueList { items: issues_for(viewer_is_scoped(viewer), l.items).map(|x| roster.issue(x)), ..l },
     Err(e) => {
       http.Error(w, pb.plain(e), 500)
       return
@@ -221,5 +221,5 @@ fn issues_page(ctx: pb.Client, w: http.ResponseWriter, r: Ref<http.Request>, tea
     write_raw(w, issues_raw(vm))
     return
   }
-  render_html(w, "issues-page", PageVM { rail: rail_for(ctx, r, "issues", me, team), page: vm })
+  render_html(w, "issues-page", PageVM { rail: rail_for(ctx, viewer, "issues", me, team), page: vm })
 }
