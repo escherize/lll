@@ -115,9 +115,13 @@ function written(clause, where) {
 }
 
 function clausesOf(collection, ruleName) {
-  const rule = collection[ruleName];
   const where = `${collection.name}.${ruleName}`;
-  if (rule === null || rule === undefined) throw new Error(`${where} is null (superuser only); set it whole`);
+  if (collection[ruleName] === null || collection[ruleName] === undefined) {
+    throw new Error(`${where} is null (superuser only); set it whole`);
+  }
+  // A PocketBase collection hands a rule over as a Go *string, which JS sees
+  // as an object: indexing it yields nothing, so read it as text (LLL-681).
+  const rule = String(collection[ruleName]);
   if (rule.trim() === "") throw new Error(`${where} is "" (anyone); set it whole`);
   const { ands, hasOr } = scan(rule, where);
   if (hasOr) throw new Error(`${where} has a top-level ||: ${rule}`);

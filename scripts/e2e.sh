@@ -1426,6 +1426,8 @@ python3 "$REPO_ROOT"/scripts/test_search_team.py "$LLL_ABS"
 python3 "$REPO_ROOT"/scripts/test_cli_contract.py "$LLL_ABS"
 # --- member invite --team: one team over the API and the board ---
 python3 "$REPO_ROOT"/scripts/test_team_scope.py "$LLL_ABS"
+# --- who made or owns a record is the server's word, not a member's (LLL-681) ---
+python3 "$REPO_ROOT"/scripts/test_identity_fields.py "$LLL_ABS"
 # --- an archived team is read-only on the server, every collection classified (LLL-660) ---
 python3 "$REPO_ROOT"/scripts/test_archived_guard.py "$LLL_ABS"
 # --- a member token in the board cookie scopes pages, search and the stream (LLL-545) ---

@@ -114,6 +114,26 @@ minors. Issue keys are on the project's own board (`lll issue view KEY`).
   exception: a member with access to every team now gets the redirect the
   board token gets for an issue under another team's address, instead of a
   404. (LLL-658)
+- Fields that say who made or owns a record can no longer be forged by a
+  member. Superusers still set them, to repair attribution and to import.
+  (LLL-681)
+  - An issue's `creator` and `origin` cannot be changed after it is
+    created. Any read-write member could re-attribute an issue to another
+    member or rewrite where it came from. A PATCH naming either field now
+    answers 404.
+  - A member a member creates is a bot it owns or a person with no owner. A
+    full member could create a bot owned by another member, an ownerless
+    bot, or a person with an owner, which signs in with a password and
+    shows as that owner's.
+  - A favorite or saved view is created for its own member or for the
+    workspace (no member), and its member cannot be changed. A full member
+    could star an issue or save a view in another member's name, or move
+    one between members.
+- `pb/pb_migrations/lib/rules.js` read a collection's rule as one opaque
+  clause, because PocketBase hands a rule to a migration as a Go string
+  pointer. Removing a clause failed, and adding one skipped the duplicate
+  and top-level `||` checks. No shipped migration was affected: this is the
+  first to call it. (LLL-681)
 
 ## [0.9.0] - 2026-10-08
 
