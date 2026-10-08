@@ -945,6 +945,9 @@ pub fn is_loopback(base_url: string) -> bool {
   // offset while substring takes rune indices (see realtime.split_field).
   let after_scheme = strings.SplitN(base_url, "://", 2)
   let mut host = after_scheme[after_scheme.length() - 1]
+  // "http:///evil.example": browsers skip the extra slashes and go to
+  // evil.example, so an empty authority is not loopback (LLL-648 review).
+  if host.starts_with("/") || host.starts_with("\\") { return false }
   host = strings.SplitN(host, "/", 2)[0]
   // Userinfo hides the real host: "http://localhost:1@evil.example" goes to
   // evil.example. Any "@" (or a backslash, which some clients read as a
@@ -957,7 +960,7 @@ pub fn is_loopback(base_url: string) -> bool {
     return inner == "::1"
   }
   let name = strings.SplitN(host, ":", 2)[0]
-  name == "127.0.0.1" || name == "localhost" || name == "::1" || name == ""
+  name == "127.0.0.1" || name == "localhost" || name == "::1"
 }
 
 /// First free TCP port at or above `start`.

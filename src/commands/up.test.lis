@@ -40,6 +40,11 @@ fn loopback_is_not_fooled_by_a_hostname_that_merely_starts_local() {
   assert !is_loopback("http://:80@evil.example")
   assert !is_loopback("http://localhost?x@evil.example")
   assert !is_loopback("http://evil.example\\@localhost")
+  // An empty authority: browsers skip the slashes to the next name.
+  assert !is_loopback("http:///evil.example")
+  assert !is_loopback("http:////evil.example")
+  assert !is_loopback("http://\\evil.example")
+  assert !is_loopback("http://:8090")
 }
 
 // LLL-648: a loopback boot logs the CLI in, but only into an empty slot. A
