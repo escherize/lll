@@ -145,6 +145,37 @@ with tempfile.TemporaryDirectory(prefix='lll-631-') as directory:
                           {'claim_id': '', 'fields': {'assignee': '', 'labels': [secret['id']]}}, toks['full'], 'POST')
         assert code == 400 and 'reference stays inside one team' in json.dumps(body), (code, body)
 
+        # The board writes as its own full-access member, and create_write
+        # hands label and project ids to PocketBase unchecked: the server
+        # rule is what refuses them (coordinator's architecture review).
+        board = endpoint['board_url']
+
+        def board_post(path, fields):
+            req = urllib.request.Request(board + path, data=urllib.parse.urlencode(fields, doseq=True).encode(),
+                                         headers={'Cookie': 'lll_board=' + env['LLL_BOARD_TOKEN']})
+            with urllib.request.urlopen(req, timeout=15) as resp:
+                return resp.read().decode()
+
+        def titled(title):
+            found = call(api, '/api/collections/issues/records?filter=' + q(f'title = "{title}"'), token=su)[1]
+            return found['totalItems']
+
+        text = board_post('/create', {'team': 'ALPHA', 'title': 'board foreign refs', 'project': bproj['id'],
+                                      'labels': [secret['id']]})
+        assert 'reference stays inside one team' in text and titled('board foreign refs') == 0, text[:500]
+        text = board_post('/create', {'team': 'ALPHA', 'title': 'board foreign label', 'labels': [secret['id']]})
+        assert 'reference stays inside one team' in text and titled('board foreign label') == 0, text[:500]
+        board_post('/create', {'team': 'ALPHA', 'title': 'board own refs', 'project': aproj['id'], 'labels': [ae['id']]})
+        assert titled('board own refs') == 1, 'control: a board create with same-team refs works'
+        own = call(api, '/api/collections/issues/records?filter=' + q('title = "board own refs"'), token=su)[1]['items'][0]
+        assert call(api, f"/api/collections/issues/records/{own['id']}", token=su, method='DELETE')[0] == 204
+        # The board's edit paths check the issue's team themselves.
+        text = board_post('/project', {'key': 'ALPHA-1', 'project': bproj['id']})
+        assert 'unknown project' in text, text[:500]
+        text = board_post('/labels', {'key': 'ALPHA-1', 'label': secret['id'], 'on': 'true'})
+        assert 'unknown label' in text, text[:500]
+        assert call(api, f"/api/collections/issues/records/{issue['id']}", token=su)[1]['labels'] == [ae['id']]
+
         # Same-team work still works: labels, project, blockers, docs, a move.
         assert patch('issues', issue['id'], 'guest', project=aproj['id'])[0] == 200
         assert patch('issues', issue['id'], 'guest', **{'blocked_by+': [visible['id']]})[0] == 200
