@@ -14,7 +14,8 @@ minors. Issue keys are on the project's own board (`lll issue view KEY`).
   `lll finding view` print `Edited by:`, and the board's doc page and docs
   index show it, with a bot's owner and "hidden member" as for the author.
   `doc view --json` has a `last_editor` field. Existing docs get their
-  author as last editor. Docs stay shared team pages. (LLL-682)
+  author as last editor. Docs stay shared team pages. The docs index's
+  `?raw` author column reads `alice, edited by bob` for such a doc. (LLL-682)
 
 ### Changed
 
