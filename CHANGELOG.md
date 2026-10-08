@@ -29,7 +29,8 @@ scripts. A removed spelling fails and names its replacement (LLL-644).
 - A loopback `lll up` logs the CLI in as its member when the home config
   holds no token, so `lll issue list` works straight after the first boot.
   It never replaces an existing token; when the server refuses that token,
-  the banner's `cli` line says how to switch (LLL-648).
+  the banner's `cli` line says how to switch. A `--pb-dir` boot leaves the
+  CLI's login alone, as it does the team (LLL-648).
 - `lll login --token TOKEN` (or `--token -` to be prompted) logs in with a
   member token instead of a password (LLL-648).
 - A member changes its own password without an administrator:

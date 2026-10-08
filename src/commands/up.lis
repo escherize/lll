@@ -342,7 +342,7 @@ superuser credentials, or set LLL_TOKEN to a member token valid for this server.
   // A demo boot points the CLI at itself (demo.lis), and scratch and shared
   // boots write their own CLI config.
   if !scratch && share_bind == "" && !demo {
-    let plan = cli_login_plan(member_token_ok, src.token, config.load_home()?.token)
+    let plan = cli_login_plan(member_token_ok, throwaway, src.token, config.load_home()?.token)
     for line in log_cli_in(member.name, db_url, plan, src.token)? {
       fmt.Println(line)
     }
@@ -430,11 +430,20 @@ enum CliLogin {
   /// A token from a file that this server does not accept. url and token
   /// layer independently, so it may be another server's login: kept.
   Keep,
+  /// A --pb-dir boot is a throwaway, like its team (ensure_team): the CLI's
+  /// config is left as it was.
+  Untouched,
 }
 
 /// Only an empty slot is written, the rule the demo boot follows too.
-fn cli_login_plan(rides_config_token: bool, token_source: string, home_token: string) -> CliLogin {
+fn cli_login_plan(
+  rides_config_token: bool,
+  throwaway: bool,
+  token_source: string,
+  home_token: string,
+) -> CliLogin {
   if rides_config_token { return CliLogin.Already }
+  if throwaway { return CliLogin.Untouched }
   if home_token != "" || strings.HasPrefix(token_source, "file:") {
     return CliLogin.Keep
   }
@@ -454,6 +463,9 @@ fn log_cli_in(
     CliLogin.Keep => Ok([
       f"cli    not logged in to this board: the CLI keeps its token from {strings.TrimPrefix(token_source, "file:")}, which this server does not accept",
       f"cli    to log the CLI in as {name} instead: lll logout, then restart lll up",
+    ]),
+    CliLogin.Untouched => Ok([
+      "cli    unchanged: a --pb-dir boot leaves the CLI's login and team alone ('lll whoami' shows them); boot without --pb-dir to log the CLI in",
     ]),
     CliLogin.Save => {
       let _ = set_home_key("url", db_url)?
@@ -676,7 +688,8 @@ shows the CLI's login.
 On a loopback boot whose home config holds no token, lll up logs the CLI in
 as the board's member: it saves url and token to the home config, so the next
 'lll issue list' works. An existing token is never replaced; when this server
-does not accept it, the banner's cli line says how to switch.
+does not accept it, the banner's cli line says how to switch. A --pb-dir boot
+is a throwaway and leaves the CLI's login alone, as it does the team.
 
 Environment:
   LLL_URL           server API to serve or reuse; a remote one is refused

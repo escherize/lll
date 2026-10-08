@@ -41,12 +41,15 @@ fn loopback_is_not_fooled_by_a_hostname_that_merely_starts_local() {
 // independently), so it is never replaced.
 #[test]
 fn the_cli_login_is_written_only_into_an_empty_slot() {
-  assert cli_login_plan(true, "file:/h/lll.toml", "tok") == CliLogin.Already
-  assert cli_login_plan(false, "", "") == CliLogin.Save
-  assert cli_login_plan(false, "env:LLL_TOKEN", "") == CliLogin.Save
-  assert cli_login_plan(false, "file:/h/lll.toml", "tok") == CliLogin.Keep
-  assert cli_login_plan(false, "env:LLL_TOKEN", "tok") == CliLogin.Keep
-  assert cli_login_plan(false, "file:/repo/.lll.toml", "") == CliLogin.Keep
+  assert cli_login_plan(true, false, "file:/h/lll.toml", "tok") == CliLogin.Already
+  assert cli_login_plan(false, false, "", "") == CliLogin.Save
+  assert cli_login_plan(false, false, "env:LLL_TOKEN", "") == CliLogin.Save
+  assert cli_login_plan(false, false, "file:/h/lll.toml", "tok") == CliLogin.Keep
+  assert cli_login_plan(false, false, "env:LLL_TOKEN", "tok") == CliLogin.Keep
+  assert cli_login_plan(false, false, "file:/repo/.lll.toml", "") == CliLogin.Keep
+  // A --pb-dir boot is a throwaway: its login is a fact about that database.
+  assert cli_login_plan(false, true, "", "") == CliLogin.Untouched
+  assert cli_login_plan(true, true, "env:LLL_TOKEN", "") == CliLogin.Already
 }
 
 // LLL-648: one truth about the administrator pair. The fallback is printed
