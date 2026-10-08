@@ -236,6 +236,7 @@ fn team_rename(input: flags.CommandInput) -> Result<(), string> {
   // as a raw PocketBase validation error. Saying which key is taken is the
   // more useful answer: the fix is a different key, not a retry.
   if new_key != "" && new_key != t.key {
+    if let Some(problem) = records.team_key_problem(new_key) { return Err(problem) }
     let taken = records.find_team(new_key)?
     if taken.is_some() {
       return Err(f"a team with key '{new_key}' already exists — see 'lll team list'")
@@ -403,6 +404,7 @@ pub fn create_team(key: string, name: string) -> Result<models.Team, string> {
   // LLL-235: uppercase here as well as in gopb, so the message this prints
   // and the .lll.toml `lll attach` writes say what was actually stored.
   let new_team = models.NewTeam { key: records.normalize_team_key(key), name }
+  if let Some(problem) = records.team_key_problem(new_team.key) { return Err(problem) }
   let payload = match json.Marshal(new_team) {
     Ok(p) => p,
     Err(e) => return Err(f"encoding team: {e}"),

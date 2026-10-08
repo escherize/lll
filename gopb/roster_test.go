@@ -2,6 +2,7 @@ package gopb
 
 import (
 	"encoding/json"
+	"net/url"
 	"testing"
 
 	"github.com/pocketbase/pocketbase/core"
@@ -160,8 +161,104 @@ func TestRosterProbePaths(t *testing.T) {
 		{issues, `team = "x"`, "", false},
 		{issues, `(title = "a" || (state = "todo" && assignee.kind = "bot"))`, "", true},
 	} {
-		if got := crossesRoster(app, c.base, c.filter, c.sort); got != c.crosses {
+		if got := probeRefusal(app, c.base, c.filter, c.sort) == rosterProbeRefusal; got != c.crosses {
 			t.Errorf("%s filter=%q sort=%q: crosses=%v, want %v", c.base.Name, c.filter, c.sort, got, c.crosses)
+		}
+	}
+}
+
+// LLL-634 review round 2: options are decoded the way PocketBase decodes
+// them, so a trailing duplicate key cannot hide the filter; and an all-scope
+// read-only member is kept out of other members' favorites and views.
+func TestCallerRefusalByAccess(t *testing.T) {
+	f := newTeamRefFixture(t)
+	narrow := f.rec(t, "members", map[string]any{"name": "narrow", "scope": "teams", "mode": "rw", "teams": []string{f.alpha.Id}})
+	allro := f.rec(t, "members", map[string]any{"name": "allro", "scope": "all", "mode": "ro"})
+	allrw := f.rec(t, "members", map[string]any{"name": "allrw", "scope": "all", "mode": "rw"})
+	topic := func(options string) string { return "issues/*?options=" + url.QueryEscape(options) }
+	for _, c := range []struct {
+		who     *core.Record
+		topic   string
+		refused bool
+	}{
+		{narrow, topic(`{"query":{"filter":"labels.name ~ \"%e%\""}}`), true},
+		{narrow, topic(`{"query":{"filter":"labels.name ~ \"%e%\""},"query":1}`), true},
+		{narrow, topic(`{"query":{"filter":"labels.name ~ \"%e%\""},"QUERY":1}`), true},
+		{narrow, topic(`{"query":{"filter":"labels.name ~ \"%e%\""},"headers":1}`), true},
+		{narrow, topic(`{"query":{"filter":"state = \"todo\""},"query":1}`), false},
+		{narrow, "issues/*", false},
+		{allrw, topic(`{"query":{"filter":"labels.name ~ \"%e%\""}}`), false},
+		{allro, topic(`{"query":{"filter":"favorites_via_issue.id ?!= \"x\" || id != \"\""}}`), true},
+		{allrw, topic(`{"query":{"filter":"favorites_via_issue.id ?!= \"x\" || id != \"\""}}`), false},
+		{allro, topic(`{"query":{"filter":"labels.name ~ \"%e%\""}}`), false},
+	} {
+		if got := topicRefusal(f.app, c.who, c.topic) != ""; got != c.refused {
+			t.Errorf("%s %s: refused=%v, want %v", c.who.GetString("name"), c.topic, got, c.refused)
+		}
+	}
+}
+
+// LLL-634: a narrow caller may not read rows of another team through a
+// multi-match subquery. ?-operators, ids matched exactly and single-relation
+// hops use the joined, rule-checked row and stay allowed.
+func TestRelationProbePaths(t *testing.T) {
+	f := newTeamRefFixture(t)
+	issues, _ := f.app.FindCollectionByNameOrId("issues")
+	labels, _ := f.app.FindCollectionByNameOrId("labels")
+	for _, c := range []struct {
+		base         *core.Collection
+		filter, sort string
+		refused      bool
+	}{
+		// The audit repros.
+		{issues, `labels.name ~ "%e%"`, "", true},
+		{issues, `blocked_by.title ~ "%i%"`, "", true},
+		// Every plain operator, modifiers, negations, nesting, functions.
+		{issues, `labels.name = "x"`, "", true},
+		{issues, `labels.name != "x"`, "", true},
+		{issues, `labels.name !~ "x"`, "", true},
+		{issues, `labels.name > "m"`, "", true},
+		{issues, `labels.name:lower = "x"`, "", true},
+		{issues, `labels.name:each ~ "x"`, "", true},
+		{issues, `"x" = labels.name`, "", true},
+		{issues, `state = "todo" && (title = "a" || blocked_by.labels.name ?~ "x" || blocked_by.title = "y")`, "", true},
+		{issues, `strftime('%Y', blocked_by.created) = "2026"`, "", true},
+		{issues, `@collection.labels.name != "secret"`, "", true},
+		{issues, `@collection.issues:other.title ~ "x"`, "", true},
+		{labels, `issues_via_labels.title ~ "x"`, "", true},
+		{issues, `docs_via_issues.slug = "x"`, "", true},
+		// Review F1: a member-scoped collection, with any operator.
+		{issues, `favorites_via_issue.id ?!= "zz" || id != ""`, "", true},
+		{issues, `favorites_via_issue.member ?= "x"`, "", true},
+		{issues, "", "favorites_via_issue.id", true},
+		// Stored ids: exact matches only, no modifiers, no sort.
+		{issues, `labels ~ "a"`, "", true},
+		{issues, `labels = "id"`, "", true},
+		{issues, `labels:length > 1`, "", true},
+		{issues, `labels:each ?= "x"`, "", true},
+		{issues, `project ~ "a"`, "", true},
+		{issues, `project > "m"`, "", true},
+		{issues, "", "labels", true},
+		{issues, "", "-project", true},
+		{issues, "", "labels.name", true},
+		{issues, "", "@collection.labels.name", true},
+		// Allowed.
+		{issues, `labels.name ?~ "%e%"`, "", false},
+		{issues, `labels.id ?= "id" || labels.id ?= "id2"`, "", false},
+		{issues, `blocked_by.id ?= "id"`, "", false},
+		{issues, `blocked_by.title ?!~ "x"`, "", false},
+		{issues, `labels ?= "id"`, "", false},
+		{issues, `labels ?!= "id"`, "", false},
+		{issues, `project = "id" && team = "t" && project != ""`, "", false},
+		{issues, `project.name ~ "x"`, "project.name", false},
+		{issues, `@collection.labels.name ?= "x"`, "", false},
+		{issues, `state = "todo" && title ~ "x" && number > 3`, "-created,number", false},
+		{issues, `@request.auth.id != ""`, "", false},
+		{labels, `issues_via_labels.title ?~ "x"`, "", false},
+	} {
+		got := probeRefusal(f.app, c.base, c.filter, c.sort) == relationProbeRefusal
+		if got != c.refused {
+			t.Errorf("%s filter=%q sort=%q: refused=%v, want %v", c.base.Name, c.filter, c.sort, got, c.refused)
 		}
 	}
 }

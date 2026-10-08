@@ -43,7 +43,7 @@ func parseAssignmentFields(raw json.RawMessage) (assignmentFields, error) {
 // refsInScope applies the scoped-reference rule (team_scope.go) to the
 // project and labels this update would set or add.
 func (fields assignmentFields) refsInScope(re *core.RequestEvent) error {
-	if re.Auth == nil || effectiveAccess(re.App, re.Auth).all {
+	if re.Auth == nil {
 		return nil
 	}
 	var labels []string

@@ -11,6 +11,7 @@ import os
 from pathlib import Path
 import re
 import socket
+import sqlite3
 import subprocess
 import sys
 import tempfile
@@ -198,13 +199,17 @@ with tempfile.TemporaryDirectory(prefix='lll-546-') as directory:
             'a refused re-mint rotated the existing bot token'
 
         # A team key or url outside the prompt allowlist is refused on both
-        # paths before any bot exists (LLL-546 review; the server does not
-        # validate keys yet, LLL-628).
+        # paths before any bot exists (LLL-546 review; the server never
+        # validated keys before LLL-628, so a legacy board can hold these).
         evil_keys = ["Q\r\x1b[KTOUCH PWNCR;: '", "Q\\';TOUCH PWNE2E;ECHO '"]
         evil_ids = []
-        for key in evil_keys:
+        for i, key in enumerate(evil_keys):
             code, team = call(api, '/api/collections/teams/records', {'key': key, 'name': 'evil'}, su)
+            assert code == 400, ('LLL-628: the server refuses the key', team)
+            code, team = call(api, '/api/collections/teams/records', {'key': f'EVIL{i}', 'name': 'evil'}, su)
             assert code == 200, team
+            with sqlite3.connect(root / 'data' / 'data.db', timeout=30) as conn:
+                conn.execute('UPDATE teams SET key = ? WHERE id = ?', (key, team['id']))
             evil_ids.append(team['id'])
         call(api, f"/api/collections/members/records/{writer['id']}", {'teams': [alpha['id']] + evil_ids}, su, 'PATCH')
         cli_env = {k: v for k, v in env.items() if not k.startswith('LLL_')}

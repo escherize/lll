@@ -15,3 +15,19 @@ fn a_team_key_normalises_to_uppercase() {
   assert normalize_team_key("t2") == "T2"
   assert normalize_team_key("") == ""
 }
+
+// LLL-628: the CLI refuses what the server would, and says the rule.
+#[test]
+fn a_team_key_must_match_the_key_rule() {
+  assert team_key_problem("ENG").is_none()
+  assert team_key_problem("WEB-2").is_none()
+  assert team_key_problem("A_B").is_none()
+  assert team_key_problem("ABCDEFGHIJKLMNOP").is_none()
+  assert team_key_problem("ABCDEFGHIJKLMNOPQ").is_some()
+  assert team_key_problem("2ENG").is_some()
+  assert team_key_problem("Q\"<B>$(ID)").is_some()
+  assert team_key_problem("").is_some()
+  assert team_key_problem("ÉQUIPE").is_some()
+  let Some(msg) = team_key_problem("A B") else { return }
+  assert msg.contains("^[A-Z][A-Z0-9_-]{0,15}$")
+}

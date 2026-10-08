@@ -10,7 +10,6 @@ import "go:path/filepath"
 import "go:strconv"
 import "go:strings"
 import "go:time"
-import "go:unicode"
 
 import "config"
 import "flags"
@@ -757,12 +756,15 @@ fn default_team_key() -> string {
   if key == "" { "TEAM" } else { key }
 }
 
-/// A team key: letters and digits only, uppercased, at most 5 characters.
+/// A team key: ASCII letters and digits only, uppercased, starting with a
+/// letter, at most 5 characters, so it always passes the key rule (LLL-628).
 fn clean_key(raw: string) -> string {
   let mut key = ""
-  for r in raw.runes() {
-    if unicode.IsLetter(r) || unicode.IsDigit(r) {
-      key += strings.ToUpper(r as string)
+  for r in strings.ToUpper(raw).runes() {
+    let letter = r >= 'A' && r <= 'Z'
+    let digit = r >= '0' && r <= '9'
+    if letter || (digit && key != "") {
+      key += r as string
     }
     if key.length() == 5 { break }
   }
