@@ -1,18 +1,44 @@
 # PocketBase
 
-Stock PocketBase, pinned at **v0.40.1**. Running lll needs no PocketBase
-install — `lll up` embeds it in-process (see `gopb/`). Only `scripts/e2e.sh`
-uses an external binary: install with `brew install pocketbase`, or download
-the v0.40.1 release from
-https://github.com/pocketbase/pocketbase/releases and place it here as
-`pb/pocketbase` (gitignored).
+lll embeds PocketBase v0.40.1 in-process; `lll up` starts it. There is no
+separate PocketBase binary to install or run.
 
-- `pb_migrations/` — schema as code, applied automatically on `serve`.
-- `pb_hooks/main.pb.js` — per-team issue numbering.
+- `pb_migrations/*.js` - the schema: collections, fields, indexes and
+  collection rules. `embed.go` compiles them into the binary. On every boot
+  gopb unpacks them to `<pb-dir>/pb_migrations` and PocketBase applies the
+  ones it has not applied yet, before the server listens.
+- `pb_migrations/lib/rules.js` - helpers to add or remove one clause of a
+  collection rule. Not a migration: PocketBase loads only the top-level
+  files.
+- `../gopb/` - every runtime hook, in Go: issue numbering, write guards,
+  claims, roster scoping, webhooks. There are no JS hooks.
+- `pb_data/` - the local database of `mise run dev`. Gitignored.
 
-Run locally:
+## Adding a migration
 
-```sh
-pocketbase serve --dir pb/pb_data \
-  --migrationsDir pb/pb_migrations --hooksDir pb/pb_hooks
+Name it `<unix time>_<what>.js` with a timestamp no other file uses.
+PocketBase records each applied migration by file name, so:
+
+- Never rename or delete a migration that has shipped. A renamed file runs
+  again on every existing database.
+- Files apply in name order. The three timestamps that two files share
+  (1789500000, 1789700000, 1789900000) stay as they are;
+  `scripts/test_migration_names.py` fails on a new one.
+
+To change a rule, add or remove one clause instead of assigning the whole
+string:
+
+```js
+const rules = require(`${__migrations}/lib/rules.js`);
+const NO_AUTHOR = "@request.body.author:isset = false";
+migrate(
+  (app) => rules.addClause(app, "docs", "createRule", NO_AUTHOR),
+  (app) => rules.removeClause(app, "docs", "createRule", NO_AUTHOR),
+);
 ```
+
+Then run `mise run api-schema`. It boots a fresh database through every
+migration and rewrites `src/commands/api_schema.lis` and
+`scripts/fixtures/collection_rules.json`. The gate fails when either differs
+from what the migrations build, so a dropped rule clause shows up as a changed
+line in the snapshot. Review that diff.
