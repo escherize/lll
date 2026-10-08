@@ -517,12 +517,13 @@ pub struct WebhookExpand {
 }
 
 /// An outbound webhook registration (LLL-409): one URL that receives issue
-/// events for its team, narrowed to one project when `project` is set.
+/// events for its team, narrowed to one project when `project` is set. The
+/// secret itself is write-only (LLL-661): a read says only whether one is set.
 #[json]
 pub struct Webhook {
   pub id: string,
   pub url: string,
-  pub secret: string,
+  pub secret_set: bool,
   pub team: string,
   pub project: string,
   pub expand: WebhookExpand,

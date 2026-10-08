@@ -44,51 +44,79 @@ func registerClaimExpiry(app core.App) {
 //
 // `now` is a parameter so the test does not have to wait a day.
 func expireClaims(app core.App, now time.Time, maxAge time.Duration) (int, error) {
-	cutoff := now.Add(-maxAge).UTC().Format("2006-01-02 15:04:05.000Z")
-	stale, err := app.FindRecordsByFilter(
-		// `updated`, not `created`: renewal (LLL-535) moves it, and nothing
-		// else writes a claim, so it is when the holder last vouched for it.
-		"claims", "updated < {:cutoff}", "updated", 0, 0,
-		dbx.Params{"cutoff": cutoff},
-	)
+	cutoff := now.Add(-maxAge)
+	stale, err := staleClaims(app, cutoff)
 	if err != nil {
 		return 0, err
 	}
-
 	expired := 0
 	for _, claim := range stale {
-		var announce *core.Record
-		// One transaction per claim, not one for the sweep: an issue that has
-		// been deleted under its claim must not strand every later claim in a
-		// rolled-back batch.
-		err := app.RunInTransaction(func(tx core.App) error {
-			memberID := claim.GetString("member")
-			// claims.issue is a REQUIRED relation, so PocketBase refuses to
-			// delete an issue out from under its claim and this lookup cannot
-			// miss today. Tolerated anyway: a sweep that errored on one
-			// orphan would keep erroring on it every hour.
-			if issue, err := tx.FindRecordById("issues", claim.GetString("issue")); err == nil {
-				if issue.GetString("assignee") == memberID {
-					issue.Set("assignee", "")
-					if err := tx.Save(issue); err != nil {
-						return err
-					}
-				}
-				announce = issue
-			}
-			return tx.Delete(claim)
-		})
-		if err != nil {
-			app.Logger().Error("expiring a stale claim", "claim", claim.Id, "error", err)
-			continue
+		if expireClaim(app, claim, cutoff, now) {
+			expired++
 		}
-		expired++
-		// After the release commits, never inside it (LLL-452): the claim is
-		// already gone, so a comment that cannot be written must not roll the
-		// release back and hand the same claim to the next sweep forever.
-		announceExpiry(app, announce, claim, now)
 	}
 	return expired, nil
+}
+
+// staleClaims lists the claims last vouched for before cutoff. The list is a
+// snapshot read outside any transaction; expireClaim re-reads each claim.
+func staleClaims(app core.App, cutoff time.Time) ([]*core.Record, error) {
+	return app.FindRecordsByFilter(
+		// `updated`, not `created`: renewal (LLL-535) moves it, and nothing
+		// else writes a claim, so it is when the holder last vouched for it.
+		"claims", "updated < {:cutoff}", "updated", 0, 0,
+		dbx.Params{"cutoff": cutoff.UTC().Format("2006-01-02 15:04:05.000Z")},
+	)
+}
+
+// expireClaim releases one claim from the stale snapshot and reports whether
+// it went.
+//
+// The snapshot may be out of date (LLL-663): a renewal or a release that
+// commits between the list and this transaction must win. So the claim is
+// read again inside the transaction, and kept when it is gone or was renewed
+// at or after cutoff. Writes serialize on PocketBase's single write
+// connection, so a renewal commits either before that read, which then sees
+// it, or after the delete, and then finds no claim to renew.
+func expireClaim(app core.App, snapshot *core.Record, cutoff, now time.Time) bool {
+	var claim, announce *core.Record
+	// One transaction per claim, not one for the sweep: an issue that has
+	// been deleted under its claim must not strand every later claim in a
+	// rolled-back batch.
+	err := app.RunInTransaction(func(tx core.App) error {
+		current, err := tx.FindRecordById("claims", snapshot.Id)
+		if err != nil || !current.GetDateTime("updated").Time().Before(cutoff) {
+			return nil // released or renewed since the snapshot
+		}
+		claim = current
+		memberID := claim.GetString("member")
+		// claims.issue is a REQUIRED relation, so PocketBase refuses to
+		// delete an issue out from under its claim and this lookup cannot
+		// miss today. Tolerated anyway: a sweep that errored on one
+		// orphan would keep erroring on it every hour.
+		if issue, err := tx.FindRecordById("issues", claim.GetString("issue")); err == nil {
+			if issue.GetString("assignee") == memberID {
+				issue.Set("assignee", "")
+				if err := tx.Save(issue); err != nil {
+					return err
+				}
+			}
+			announce = issue
+		}
+		return tx.Delete(claim)
+	})
+	if err != nil {
+		app.Logger().Error("expiring a stale claim", "claim", snapshot.Id, "error", err)
+		return false
+	}
+	if claim == nil {
+		return false
+	}
+	// After the release commits, never inside it (LLL-452): the claim is
+	// already gone, so a comment that cannot be written must not roll the
+	// release back and hand the same claim to the next sweep forever.
+	announceExpiry(app, announce, claim, now)
+	return true
 }
 
 // announceExpiry leaves the record of a release on the issue itself (LLL-452).

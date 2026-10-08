@@ -71,9 +71,66 @@ func registerWebhookDelivery(app core.App) {
 	})
 }
 
+// registerWebhookRecords keeps a webhook's secret write-only and stamps its
+// creator (LLL-661, 1792200000_webhook_secret_creator.js).
+//
+//   - Create: PocketBase drops a hidden field from a member's request body,
+//     so the secret is read from the body here. The creator is the calling
+//     member; a body value is ignored. A superuser is not a member and
+//     leaves the body's creator, usually none.
+//   - Every save derives secret_set, the only thing a reader learns about
+//     the secret.
+//   - Enrich hides the secret from every response, a superuser's included.
+//     It runs after e.Next(), because PocketBase unhides every field for a
+//     superuser at the end of the enrich chain.
+func registerWebhookRecords(app core.App) {
+	app.OnRecordCreateRequest("webhooks").BindFunc(func(e *core.RecordRequestEvent) error {
+		var body struct {
+			Secret string `json:"secret" form:"secret"`
+		}
+		if err := e.BindBody(&body); err != nil {
+			return e.BadRequestError("Failed to read the submitted data.", err)
+		}
+		e.Record.Set("secret", body.Secret)
+		if e.Auth != nil && e.Auth.Collection().Name == "members" {
+			e.Record.Set("creator", e.Auth.Id)
+		}
+		return e.Next()
+	})
+	secretSet := func(e *core.RecordEvent) error {
+		e.Record.Set("secret_set", e.Record.GetString("secret") != "")
+		return e.Next()
+	}
+	app.OnRecordCreate("webhooks").BindFunc(secretSet)
+	app.OnRecordUpdate("webhooks").BindFunc(secretSet)
+	app.OnRecordEnrich("webhooks").BindFunc(func(e *core.RecordEnrichEvent) error {
+		record := e.Record
+		err := e.Next()
+		record.Hide("secret")
+		return err
+	})
+}
+
+// webhookCreatorReads reports whether a registration may still receive its
+// team's events (LLL-661): its creator still reads the team, by the access
+// the collection rules compute. A registration with no creator predates the
+// field or was made by a superuser; it delivers while its team exists.
+func webhookCreatorReads(app core.App, hook *core.Record) bool {
+	team := hook.GetString("team")
+	creatorID := hook.GetString("creator")
+	if creatorID == "" {
+		_, err := app.FindRecordById("teams", team)
+		return err == nil
+	}
+	creator, err := app.FindRecordById("members", creatorID)
+	return err == nil && effectiveAccess(app, creator).sees(team)
+}
+
 // webhookDeliver finds every registration matching the issue's scope and
 // hands each one the event. Scope: a registration's team must be the issue's
 // team; a project on the registration narrows it to that project's issues.
+// A registration whose creator lost read access to the team is skipped and
+// logged.
 func webhookDeliver(app core.App, action string, issue *core.Record) {
 	hooks, err := app.FindRecordsByFilter(
 		"webhooks",
@@ -97,6 +154,10 @@ func webhookDeliver(app core.App, action string, issue *core.Record) {
 		return
 	}
 	for _, hook := range hooks {
+		if !webhookCreatorReads(app, hook) {
+			log.Printf("webhook: skipped delivery to %s: its creator no longer reads team %s", hook.GetString("url"), hook.GetString("team"))
+			continue
+		}
 		go webhookPostWithRetries(hook.GetString("url"), hook.GetString("secret"), payload, webhookRetryDelays[:])
 	}
 }

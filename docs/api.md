@@ -54,6 +54,24 @@ unknown headers. `lll issue create --idempotency-key KEY` checks this before
 writing and reports `Reused` for matching retries. The lll skill gives a recipe
 for deriving a stable key.
 
+## Webhooks
+
+`POST /api/collections/webhooks/records` registers a URL that receives the
+team's issue events. `lll webhook --help` describes the payload and retries.
+
+- **The secret is write-only.** Send it in the create body as `secret`. No
+  response, realtime event or expansion returns it, and a filter or sort on
+  it is refused. Reads carry `secret_set` instead.
+- **The creator is the caller.** The server sets `creator` to the member who
+  sent the create and ignores a body value. A webhook delivers only while its
+  creator can read the webhook's team. Webhooks created before this field
+  existed, or by a superuser, have no creator; they deliver while their team
+  exists. Deleting the creator deletes its webhooks.
+- **Webhooks cannot be edited.** `PATCH` is superuser-only. Delete the
+  webhook and create it again.
+- **Deliveries are not queued.** A delivery waiting to be sent or retried
+  when the server stops is lost.
+
 ## The schema
 
 `lll api --schema` prints the collection/field reference: every collection
