@@ -1,5 +1,4 @@
 import "records"
-import "go:encoding/json"
 import "go:net/url"
 import "go:strings"
 
@@ -7,6 +6,7 @@ import "flags"
 import "models"
 import "pb"
 import "query"
+import "writes"
 
 // LLL-100: moving a label or project from one team to another.
 //
@@ -14,11 +14,6 @@ import "query"
 // write-once: `--team` at creation, read-only text on /settings. One created in
 // the wrong team could only be deleted and remade, which loses every issue that
 // referenced it — the relation is the thing you were trying to keep.
-
-/// The PATCH body. Only the relation moves; name, colour, description and
-/// status are not this verb's business.
-#[json]
-struct ScopePatch { team: string }
 
 /// Move one team-owned record to another team, refusing while another team's
 /// issues still reference it.
@@ -44,11 +39,13 @@ fn move_to_team(
   if !blocking.is_empty() {
     return Err(refuse_move(kind, name, from, to, blocking))
   }
-  let payload = match json.Marshal(ScopePatch { team: to.id }) {
-    Ok(p) => p as string,
-    Err(e) => return Err(f"encoding {kind}: {e}"),
+  // Only the relation moves; name, colour, description and status are not
+  // this verb's business.
+  match kind {
+    "label" => writes.update_label(ctx, id, writes.LabelPatch { team: Some(to.id), .. })?,
+    "project" => writes.update_project(ctx, id, writes.ProjectPatch { team: Some(to.id), .. })?,
+    _ => return Err(f"cannot move a '{kind}'"),
   }
-  let _ = ctx.patch(f"/api/collections/{kind}s/records/{id}", payload)?
   Ok(f"Moved {kind} {name}: {from.key} -> {to.key}")
 }
 

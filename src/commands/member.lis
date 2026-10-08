@@ -16,6 +16,7 @@ import "models"
 import "pb"
 import "query"
 import "records"
+import "writes"
 
 /// Dispatch `lll member <verb>` through the noun's Command table (TASK-307).
 /// The table is the one place a verb is declared: dispatch, `lll member
@@ -404,7 +405,7 @@ or use --force to clear assignments, comment authorship and issue creator refere
   if !confirmed_on_terminal(p.given("--yes"), f"delete member {member.name}?") {
     return Err(aborted())
   }
-  let _ = ctx.delete_as(f"/api/collections/members/records/{member.id}", su)?
+  writes.delete_member(ctx, pb.Caller.Member(su), member.id)?
   fmt.Println(f"removed member {member.name}")
   if assigned > 0 || authored > 0 || created > 0 {
     fmt.Println(
@@ -541,17 +542,9 @@ rerun with --email <email> to set one alongside the password",
     )
   }
 
-  let payload = match json.Marshal(
-    models.PasswordPatch { password, password_confirm: password, email },
-  ) {
-    Ok(b) => b,
-    Err(e) => return Err(f"encoding the patch: {e}"),
-  }
-  if let Err(e) = ctx.patch_as(
-    f"/api/collections/members/records/{member.id}",
-    payload as string,
-    su,
-  ) {
+  let mut patch = writes.MemberPatch { password: Some(password), password_confirm: Some(password), .. }
+  if email != "" { patch.email = Some(email) }
+  if let Err(e) = writes.update_member(ctx, pb.Caller.Member(su), member.id, patch) {
     return Err(member_password_error(name, e))
   }
 
@@ -1158,15 +1151,7 @@ fn create_member_as(
     teams,
     mode,
   }
-  let payload = match json.Marshal(new_member) {
-    Ok(p) => p,
-    Err(e) => return Err(f"encoding member: {e}"),
-  }
-  let body = ctx.post_as(
-    "/api/collections/members/records",
-    payload as string,
-    tok,
-  )?
+  let body = writes.create_member(ctx, pb.Caller.Member(tok), new_member)?
 
   let mut created = models.Member { .. }
   if let Err(e) = json.Unmarshal(body.bytes(), &created) {
@@ -1253,13 +1238,6 @@ and everything they wrote; 'lll member delete' deletes the member instead.
 " + flags.section(member_access_spec())
 }
 
-#[json]
-struct AccessPatch {
-  scope: string,
-  teams: Slice<string>,
-  mode: string,
-}
-
 /// `lll member access NAME [changes]`. Fleet case 04: 10 of 10 agents could
 /// not make a member read-only with any lll command, and 7 patched the
 /// record through 'lll api' instead. Cases 06-08 (narrow, widen, revoke)
@@ -1332,11 +1310,8 @@ fn member_access_cmd(input: flags.CommandInput) -> Result<(), string> {
   let mut mode = m.mode
   if p.given("--read-only") { mode = "ro" }
   if p.given("--read-write") { mode = "rw" }
-  let payload = match json.Marshal(AccessPatch { scope, teams: ids, mode }) {
-    Ok(b) => b as string,
-    Err(e) => return Err(f"encoding access: {e}"),
-  }
-  if let Err(e) = ctx.patch_as(f"/api/collections/members/records/{m.id}", payload, su) {
+  let patch = writes.MemberPatch { scope: Some(scope), teams: Some(ids), mode: Some(mode), .. }
+  if let Err(e) = writes.update_member(ctx, pb.Caller.Member(su), m.id, patch) {
     // gopb checkOwner's refusal names its own fix (LLL-543).
     if strings.Contains(e, "bot never exceeds its owner") { return Err(e) }
     let status = pb.classify(e).status

@@ -7,6 +7,7 @@ import "go:path/filepath"
 import "go:strings"
 import "models"
 import "pb"
+import "writes"
 
 /// Transport memory bound, deliberately above the schema's per-file limit.
 /// PocketBase's file field is the authority for size and count acceptance.
@@ -33,7 +34,7 @@ pub fn upload(ctx: pb.Client, caller: pb.Caller, issue: models.Issue, name: stri
   }
   let Partial.Ok(_) = part.Write(data) else { return Err("encoding attachment bytes failed") }
   if let Err(e) = writer.Close() { return Err(f"encoding attachment: {e}") }
-  let response = ctx.send_as(caller, "PATCH", f"/api/collections/issues/records/{issue.id}", buffer.String(), writer.FormDataContentType())?
+  let response = writes.upload_attachments(ctx, caller, issue.id, buffer.String(), writer.FormDataContentType())?
   let mut saved = models.Issue { .. }
   if let Err(e) = json.Unmarshal(response.bytes(), &saved) { return Err(f"decoding uploaded issue: {e}") }
   // Native append keeps the uploaded file last. Comparing every filename
@@ -50,18 +51,10 @@ pub fn require_file(issue: models.Issue, filename: string) -> Result<(), string>
   Ok(())
 }
 
-#[json]
-struct RemoveFiles { #[json("attachments-")] files: Slice<string> }
-
 pub fn remove(ctx: pb.Client, caller: pb.Caller, issue: models.Issue, filename: string) -> Result<(), string> {
   if issue.expand.team.archived { return Err(f"team {issue.expand.team.key} is archived; run 'lll team unarchive {issue.expand.team.key}' first") }
   require_file(issue, filename)?
-  let payload = match json.Marshal(RemoveFiles { files: [filename] }) {
-    Ok(b) => b as string,
-    Err(e) => return Err(f"encoding attachment removal: {e}"),
-  }
-  let _ = ctx.send_as(caller, "PATCH", f"/api/collections/issues/records/{issue.id}", payload, "application/json")?
-  Ok(())
+  writes.remove_attachment(ctx, caller, issue.id, filename)
 }
 
 #[json]

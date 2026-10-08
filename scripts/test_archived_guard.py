@@ -29,6 +29,7 @@ EXEMPT = {
     'members': 'access lists name teams; who may see a team must stay changeable while it is archived',
     'invites': 'grant access to teams; account administration, independent of archiving',
     'favorites': "a bookmark of an issue, not the team's data; starring changes nothing in the team",
+    'issue_counters': 'server-kept numbering (LLL-678): no request writes it, and an archived team creates no issues',
 }
 
 

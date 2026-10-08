@@ -10,6 +10,7 @@ import "flags"
 import "models"
 import "pb"
 import "query"
+import "writes"
 
 /// Dispatch `lll doc <verb>` through the noun's Command table (TASK-307).
 /// The table is the one place a verb is declared: dispatch, `lll doc --help`
@@ -394,11 +395,7 @@ fn create_doc(ctx: pb.Client, p: flags.Parsed, default_kind: string, slug: strin
     paths,
     issues: [],
   }
-  let payload = match json.Marshal(new_doc) {
-    Ok(p) => p,
-    Err(e) => return Err(f"encoding doc: {e}"),
-  }
-  let resp = ctx.post("/api/collections/docs/records", payload as string)?
+  let resp = writes.create_doc(ctx, new_doc)?
 
   let mut created = models.Doc { .. }
   if let Err(e) = json.Unmarshal(resp.bytes(), &created) {
@@ -554,26 +551,14 @@ fn doc_edit(input: flags.CommandInput) -> Result<(), string> {
   }
 
   let d = fetch_doc(ctx, current_team(ctx)?, slug)?
-  let mut fields: Slice<string> = []
   // `-b -` replaces the whole body; there is deliberately no append mode.
-  if body_set { fields = fields.append("\"body\":" + json_quote(body)?) }
-  if title_set { fields = fields.append("\"title\":" + json_quote(title)?) }
-  if kind_set {
-    let kind = check_kind(kind_raw)?
-    fields = fields.append("\"kind\":" + json_quote(kind)?)
-  }
-  if area_set {
-    let area = strings.TrimSpace(area_raw)
-    fields = fields.append("\"area\":" + json_quote(area)?)
-  }
-  if paths_set {
-    let paths = parse_paths(paths_raw)
-    fields = fields.append("\"paths\":" + json_quote(paths)?)
-  }
-  let _ = ctx.patch(
-    f"/api/collections/docs/records/{d.id}",
-    "{" + strings.Join(fields, ",") + "}",
-  )?
+  let mut patch = writes.DocPatch { .. }
+  if body_set { patch.body = Some(body) }
+  if title_set { patch.title = Some(title) }
+  if kind_set { patch.kind = Some(check_kind(kind_raw)?) }
+  if area_set { patch.area = Some(strings.TrimSpace(area_raw)) }
+  if paths_set { patch.paths = Some(parse_paths(paths_raw)) }
+  writes.update_doc(ctx, d.id, patch)?
   fmt.Println(f"Updated doc {d.slug}")
   Ok(())
 }
@@ -588,7 +573,7 @@ fn doc_delete(input: flags.CommandInput) -> Result<(), string> {
   if !p.given("--yes") && !confirmed(f"delete doc {d.slug}?") {
     return Err(aborted())
   }
-  let _ = ctx.delete(f"/api/collections/docs/records/{d.id}")?
+  writes.delete_doc(ctx, d.id)?
   fmt.Println(f"Deleted doc {d.slug}")
   Ok(())
 }

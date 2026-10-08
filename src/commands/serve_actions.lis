@@ -1,6 +1,4 @@
 import "records"
-import "claims"
-import "go:encoding/json"
 import "go:html/template"
 import "go:net/http"
 import "go:strings"
@@ -9,6 +7,7 @@ import "display"
 import "models"
 import "pb"
 import "query"
+import "writes"
 
 // Actions: the endpoints the board posts to. Each writes to PocketBase and
 // answers with a flash; the data itself comes back through the broadcast, the
@@ -76,20 +75,15 @@ fn finish_action(
   }
 }
 
-/// A PocketBase request body, from a `#[json]` struct. Every write goes
-/// through here, so no endpoint has to spell JSON by hand to save a line.
-fn marshal(value: Unknown) -> Result<string, string> {
-  match json.Marshal(value) {
-    Ok(p) => Ok(p as string),
-    Err(e) => Err(f"encoding request: {e}"),
+/// One issue edit from a board control, as `caller`. Each endpoint sets
+/// exactly the field its control edits; the write layer leaves the rest.
+fn patch_issue(ctx: pb.Client, caller: pb.Caller, issue: models.Issue, patch: writes.IssuePatch) -> Result<string, string> {
+  match writes.update_issue(ctx, issue, patch, writes.UpdateOptions.as_caller(caller)) {
+    Ok(_) => Ok(""),
+    Err(writes.UpdateFailure.Failed(e)) => Err(e),
+    Err(writes.UpdateFailure.Changed(e)) => Err(e),
+    Err(writes.UpdateFailure.ReplaceMatched(n)) => Err(f"the description edit matched {n} times"),
   }
-}
-
-/// PATCH one field group onto an issue. Every caller knows the record id, so
-/// this is a plain update, not a create-or-update.
-fn patch_issue(ctx: pb.Client, caller: pb.Caller, id: string, value: Unknown) -> Result<string, string> {
-  let _ = ctx.send_as(caller, "PATCH", f"/api/collections/issues/records/{id}", marshal(value)?, "application/json")?
-  Ok("")
 }
 
 /// Who a board write runs as (LLL-545). The board token writes as the
@@ -236,7 +230,7 @@ fn create_write(ctx: pb.Client, r: mut Ref<http.Request>) -> Result<string, stri
     labels,
     ..,
   }
-  let _ = ctx.send_as(who.caller, "POST", "/api/collections/issues/records", marshal(new_issue)?, "application/json")?
+  let _ = writes.create_issue(ctx, who.caller, new_issue, "")?
   // Only a success closes the dialog and empties the composers, and the
   // server is what says so. If the client cleared optimistically, a rejected
   // create would take a typed description down with it — the field this whole
@@ -244,45 +238,6 @@ fn create_write(ctx: pb.Client, r: mut Ref<http.Request>) -> Result<string, stri
   // carrying the topbar's text: leaving it behind would arm a duplicate the
   // next time someone pressed Enter up there.
   Ok(signals_event("{\"ni_open\": false, \"new_title\": \"\"}"))
-}
-
-/// Patch bodies, one per editable field group. PocketBase replaces every
-/// field it is handed, so each carries exactly what its endpoint edits and no
-/// more. Going through a struct is also what keeps a quote, a backslash or a
-/// multi-rune glyph in a title from having to be escaped by hand.
-#[json]
-struct StatePatch { state: string, sort: float64 }
-
-#[json]
-struct PriorityPatch { priority: int }
-
-#[json]
-struct EmojiPatch { emoji: string }
-
-#[json]
-struct TitlePatch { title: string }
-
-/// Patch bodies for the issue page's Properties editors. `Issue` prefixed:
-/// serve_settings.lis already owns ProjectPatch and friends for /settings.
-#[json]
-struct IssueProjectPatch { project: string }
-
-#[json]
-struct IssueAssigneePatch { assignee: string }
-
-/// One label in, or one label out (LLL-519). PocketBase's relation
-/// modifiers change only the named id, so a label another writer added after
-/// the page rendered is kept.
-#[json]
-struct IssueLabelAddPatch {
-  #[json("labels+")]
-  add: Slice<string>,
-}
-
-#[json]
-struct IssueLabelRemovePatch {
-  #[json("labels-")]
-  remove: Slice<string>,
 }
 
 fn state_write(ctx: pb.Client, r: mut Ref<http.Request>) -> Result<string, string> {
@@ -299,7 +254,7 @@ fn state_write(ctx: pb.Client, r: mut Ref<http.Request>) -> Result<string, strin
   // team's board must compute the midpoint against that team's column, not
   // the boot team's.
   let sort = reorder_sort(ctx, issue, state, before, issue.team)?
-  patch_issue(ctx, who.caller, issue.id, StatePatch { state, sort })
+  patch_issue(ctx, who.caller, issue, writes.IssuePatch { state: Some(state), sort: Some(sort), ..writes.IssuePatch.unchanged() })
 }
 
 /// New manual position for `issue` landing in `state` before the record id
@@ -347,10 +302,9 @@ fn favorite_write(ctx: pb.Client, r: mut Ref<http.Request>) -> Result<string, st
   if on {
     if existing.is_some() { return Ok("") }
     // member stays empty: a star belongs to the workspace.
-    let payload = marshal(models.NewFavorite { issue: issue.id, .. })?
-    let _ = ctx.send_as(caller, "POST", "/api/collections/favorites/records", payload, "application/json")?
+    writes.create_favorite(ctx, caller, models.NewFavorite { issue: issue.id, .. })?
   } else if let Some(fav) = existing {
-    let _ = ctx.send_as(caller, "DELETE", f"/api/collections/favorites/records/{fav.id}", "", "application/json")?
+    writes.delete_favorite(ctx, caller, fav.id)?
   }
   Ok("")
 }
@@ -377,7 +331,7 @@ fn priority_write(ctx: pb.Client, r: mut Ref<http.Request>) -> Result<string, st
   let who = acting_as(ctx, r)?
   let issue = who.issue(ctx, key)?
   require_active_team(issue.expand.team)?
-  patch_issue(ctx, who.caller, issue.id, PriorityPatch { priority: prio })
+  patch_issue(ctx, who.caller, issue, writes.IssuePatch { priority: Some(prio), ..writes.IssuePatch.unchanged() })
 }
 
 /// Set or clear the issue's marker from the web picker.
@@ -395,7 +349,7 @@ fn emoji_write(ctx: pb.Client, r: mut Ref<http.Request>) -> Result<string, strin
   let who = acting_as(ctx, r)?
   let issue = who.issue(ctx, key)?
   require_active_team(issue.expand.team)?
-  patch_issue(ctx, who.caller, issue.id, EmojiPatch { emoji })
+  patch_issue(ctx, who.caller, issue, writes.IssuePatch { emoji: Some(emoji), ..writes.IssuePatch.unchanged() })
 }
 
 fn title_write(ctx: pb.Client, r: mut Ref<http.Request>) -> Result<string, string> {
@@ -405,7 +359,7 @@ fn title_write(ctx: pb.Client, r: mut Ref<http.Request>) -> Result<string, strin
   let who = acting_as(ctx, r)?
   let issue = who.issue(ctx, key)?
   require_active_team(issue.expand.team)?
-  patch_issue(ctx, who.caller, issue.id, TitlePatch { title })
+  patch_issue(ctx, who.caller, issue, writes.IssuePatch { title: Some(title), ..writes.IssuePatch.unchanged() })
 }
 
 fn project_write(ctx: pb.Client, r: mut Ref<http.Request>) -> Result<string, string> {
@@ -425,7 +379,8 @@ fn project_write(ctx: pb.Client, r: mut Ref<http.Request>) -> Result<string, str
       )
     }
   }
-  patch_issue(ctx, who.caller, issue.id, IssueProjectPatch { project: id })
+  let project = if id == "" { writes.Relation.Clear } else { writes.Relation.Set(id) }
+  patch_issue(ctx, who.caller, issue, writes.IssuePatch { project, ..writes.IssuePatch.unchanged() })
 }
 
 fn assignee_write(ctx: pb.Client, r: mut Ref<http.Request>) -> Result<string, string> {
@@ -444,11 +399,11 @@ fn assignee_write(ctx: pb.Client, r: mut Ref<http.Request>) -> Result<string, st
     }
   }
   require_active_team(issue.expand.team)?
-  let observed = claims.observed_id(ctx, issue.id)?
   // Never forced (LLL-662): clearing the assignee releases the claim, so the
   // picker clears only the viewer's own hold. Taking anyone else's goes
   // through the Release form, which asks for a reason.
-  let _ = claims.update_assignment(ctx, who.caller, issue.id, observed, marshal(IssueAssigneePatch { assignee: id })?, "", false, "").map_err(|e| {
+  let assignee = if id == "" { writes.Relation.Clear } else { writes.Relation.Set(id) }
+  let _ = patch_issue(ctx, who.caller, issue, writes.IssuePatch { assignee, ..writes.IssuePatch.unchanged() }).map_err(|e| {
     if pb.classify(e).code == "needs_force" {
       f"{strings.TrimSuffix(pb.display_error(e).summary, ".")} - release it with a reason first (the Release form on the issue)"
     } else { e }
@@ -487,11 +442,12 @@ fn labels_write(ctx: pb.Client, r: mut Ref<http.Request>) -> Result<string, stri
   if known.find(|l| l.id == id).is_none() {
     return Err(f"unknown label '{id}'; reload the page for the current list")
   }
-  if r.FormValue("on") == "true" {
-    patch_issue(ctx, who.caller, issue.id, IssueLabelAddPatch { add: [id] })
+  let labels = if r.FormValue("on") == "true" {
+    writes.LabelEdit.Delta { add: [id], remove: [] }
   } else {
-    patch_issue(ctx, who.caller, issue.id, IssueLabelRemovePatch { remove: [id] })
+    writes.LabelEdit.Delta { add: [], remove: [id] }
   }
+  patch_issue(ctx, who.caller, issue, writes.IssuePatch { labels, ..writes.IssuePatch.unchanged() })
 }
 
 fn comment_write(ctx: pb.Client, r: mut Ref<http.Request>) -> Result<string, string> {
@@ -504,8 +460,7 @@ fn comment_write(ctx: pb.Client, r: mut Ref<http.Request>) -> Result<string, str
   let Some(author) = who.member_id(ctx)? else {
     return Err("commenting needs a member token; start the board with lll up")
   };
-  let payload = marshal(models.NewComment { issue: issue.id, author, agent: "", body })?
-  let _ = ctx.send_as(who.caller, "POST", "/api/collections/comments/records", payload, "application/json")?
+  let _ = writes.create_comment(ctx, who.caller, models.NewComment { issue: issue.id, author, agent: "", body })?
   // LLL-386/LLL-384: the comment arrives through the live stream, so the
   // composer was never told the write landed and kept the text - which reads
   // as "it did not send" and invites a second identical comment.
@@ -538,16 +493,13 @@ fn views_save(ctx: pb.Client, w: http.ResponseWriter, r: mut Ref<http.Request>) 
   }
   // The unique index is the backstop; this pre-check is what makes the
   // flash strip say something a human can read.
-  let mut existing = models.ViewList { .. }
-  pb.fetch(ctx, "/api/collections/views/records?perPage=200", "views", &existing)?
-  if existing.items.any(|v| v.name == name) {
+  // Every page (LLL-659): one page of 200 missed a duplicate past it.
+  let existing = records.fetch_all_records<models.View>(ctx, "/api/collections/views/records?sort=id", "views")?
+  if existing.any(|v| v.name == name) {
     return Err(f"a view named '{name}' already exists")
   }
   // member stays empty: a saved view belongs to the workspace.
-  let payload = marshal(
-    models.NewView { name, query: strings.TrimPrefix(query_str, "?"), .. },
-  )?
-  let _ = ctx.send_as(caller, "POST", "/api/collections/views/records", payload, "application/json")?
+  writes.create_view(ctx, caller, models.NewView { name, query: strings.TrimPrefix(query_str, "?"), .. })?
   // LLL-375: saving a view makes it this browser's view — the same cookie a
   // board GET would write, so a bare reload honors what was just saved even
   // if the page's own cookie went stale. The team key rides the form (the
@@ -569,12 +521,12 @@ fn claim_write(ctx: pb.Client, r: mut Ref<http.Request>) -> Result<string, strin
   // A member viewer claims as itself, whatever name the shared live
   // fragment last rendered on the button (LLL-545).
   if let Some(m) = who.member {
-    let _ = claims.acquire(ctx, who.caller, issue.id, m.id, "")?
+    let _ = writes.acquire_claim(ctx, who.caller, issue.id, m.id, "")?
     return Ok("")
   }
   let Some(member) = actor(ctx)? else { return Err("No member is configured for this board.") };
   if r.FormValue("member_id") != member.id { return Err("The board identity changed; refresh before claiming.") }
-  let _ = claims.acquire(ctx, who.caller, issue.id, member.id, "")?
+  let _ = writes.acquire_claim(ctx, who.caller, issue.id, member.id, "")?
   Ok("")
 }
 
@@ -591,7 +543,8 @@ fn release_write(ctx: pb.Client, r: mut Ref<http.Request>) -> Result<string, str
   let observed = r.FormValue("claim_id")
   if observed == "" { return Err("The claim changed; refresh before releasing it.") }
   let reason = strings.TrimSpace(r.FormValue("reason"))
-  let _ = claims.release(ctx, who.caller, issue.id, observed, "", reason != "", reason).map_err(|e| {
+  let by = writes.ClaimAs { caller: who.caller, agent: "", force: reason != "", reason }
+  let _ = writes.release_claim(ctx, issue.id, observed, by).map_err(|e| {
     if pb.classify(e).code == "needs_force" {
       f"{strings.TrimSuffix(pb.display_error(e).summary, ".")} - type a reason to release it anyway; it is recorded in a comment on the issue"
     } else { e }

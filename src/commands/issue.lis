@@ -23,6 +23,7 @@ import "models"
 import "pb"
 import "provenance"
 import "query"
+import "writes"
 
 /// A flag value of `-` means "read it from stdin", the convention `gh gist` and
 /// mb-shares' `share -f` use. Reading from a terminal would hang until Ctrl-D,
@@ -787,29 +788,11 @@ fn create(input: flags.CommandInput) -> Result<(), string> {
     labels,
     ..
   }
-  let payload = match json.Marshal(new_issue) {
-    Ok(p) => p,
-    Err(e) => return Err(f"encoding issue: {e}"),
-  }
-  let path = if p.given("--json") {
-    "/api/collections/issues/records?expand=team,assignee,labels,project,creator"
-  } else {
-    "/api/collections/issues/records"
-  }
+  let expand = if p.given("--json") { "?expand=team,assignee,labels,project,creator" } else { "" }
   let body = if key == "" {
-    ctx.post(path, payload as string)?
+    writes.create_issue(ctx, pb.Caller.Process, new_issue, expand)?
   } else {
-    let supported = ctx.get("/api/lll/issues/idempotency").map_err(|e| {
-      if pb.classify(e).status == 404 {
-        "this server does not support --idempotency-key; upgrade the server before retrying this creation"
-      } else { e }
-    })?
-    let mut support = IdempotencySupport { .. }
-    if let Err(e) = json.Unmarshal(supported.bytes(), &support) {
-      return Err(f"decoding creation support: {e}")
-    }
-    if !support.supported { return Err("this server does not support --idempotency-key; upgrade the server before retrying this creation") }
-    ctx.post_idempotent(path, payload as string, key)?
+    writes.create_issue_once(ctx, new_issue, expand, key)?
   }
 
   let mut created = models.Issue { .. }
@@ -829,9 +812,6 @@ fn create(input: flags.CommandInput) -> Result<(), string> {
   fmt.Println(f"{action} {team.key}-{created.number}: {created.title}")
   Ok(())
 }
-
-#[json]
-struct IdempotencySupport { supported: bool }
 
 /// The hint a title-only search prints when nothing matched (LLL-484). The
 /// contract ("titles only") is the part a fresh reader cannot see from an
@@ -1444,10 +1424,10 @@ fn update(input: flags.CommandInput) -> Result<(), string> {
   let usage = input.usage
   let p = input.parsed
   let id = p.first()
-  let mut state = ""
-  if p.given("--state") { state = query.state(p.one("--state"))? }
-  let mut priority = -1
-  if p.given("--priority") { priority = check_priority(p.one("--priority"))? }
+  let mut state: Option<string> = None
+  if p.given("--state") { state = Some(query.state(p.one("--state"))?) }
+  let mut priority: Option<int> = None
+  if p.given("--priority") { priority = Some(check_priority(p.one("--priority"))?) }
   let assignee_name = p.one("--assignee")
   let label_names = p.all("--label")
   let add_label_names = p.all("--add-label")
@@ -1464,23 +1444,33 @@ fn update(input: flags.CommandInput) -> Result<(), string> {
   if force && p.given("-b") && !p.given("--reason") {
     return Err(flags.usage_error("-b is the new description, as on create; the reason for a forced clear is --reason \"why\""))
   }
-  let mut description = ""
-  if p.given("-b") {
-    description = value_or_stdin(p.one("-b"), "-b")?
-  }
-  let mut description_set = p.given("-b")
+  let mut whole: Option<string> = None
+  if p.given("-b") { whole = Some(value_or_stdin(p.one("-b"), "-b")?) }
   let replace_set = p.given("--description-replace")
-  let (replace_old, replace_new) = if replace_set {
-    parse_description_replacement(p.one("--description-replace"))?
+  let replace = if replace_set {
+    let (old, new) = parse_description_replacement(p.one("--description-replace"))?
+    Some(writes.Replacement { old, new })
   } else {
-    ("", "")
+    None
   }
-  let append_text = p.one("--description-append")
   let append_set = p.given("--description-append")
-  if description_set && (replace_set || append_set) {
-    return Err(flags.usage_error("-b replaces the whole description; it cannot be combined with --description-replace or --description-append"))
+  let append = if append_set { Some(p.one("--description-append")) } else { None }
+  // One description edit: the whole text, or one derived from the text the
+  // server holds. Both at once has no meaning, and no constructor.
+  let description = match whole {
+    Some(text) => {
+      if replace_set || append_set {
+        return Err(flags.usage_error("-b replaces the whole description; it cannot be combined with --description-replace or --description-append"))
+      }
+      writes.DescriptionEdit.Whole(text)
+    },
+    None => if replace_set || append_set {
+      writes.DescriptionEdit.Derived(writes.Derivation { replace, append })
+    } else {
+      writes.DescriptionEdit.Keep
+    },
   }
-  let since = if p.given("--if-unchanged-since") { unchanged_since_stamp(p.one("--if-unchanged-since"))? } else { "" }
+  let since = if p.given("--if-unchanged-since") { Some(unchanged_since_stamp(p.one("--if-unchanged-since"))?) } else { None }
   let emoji = check_emoji(p.one("--emoji"))?
   let emoji_set = p.given("--emoji")
   // An empty --assignee is the natural guess for "clear it" (two of thirty
@@ -1496,10 +1486,10 @@ fn update(input: flags.CommandInput) -> Result<(), string> {
   let reason = forced_reason(p, force, "a forced clear")?
   let agent = if assignee_name != "" { agent_label(ctx, p)? } else { "" }
   // LLL-399: the stamp rides the direct PATCH. Assignment writes go through
-  // the claim route, which carries no precondition header — honouring the
+  // the claim route, which carries no caller's precondition — honouring the
   // flag there would mean a guard that silently stops guarding. The claims
   // route arbitrates with its own observed-claim stamp instead.
-  if since != "" && assignee_name != "" {
+  if since.is_some() && assignee_name != "" {
     return Err(flags.usage_error("--if-unchanged-since cannot be combined with --assignee: assignment writes go through the claim route, which arbitrates with its own claim stamp. Run them as two updates"))
   }
   // LLL-513: --label writes the whole set, the other two edit it. Together
@@ -1507,7 +1497,9 @@ fn update(input: flags.CommandInput) -> Result<(), string> {
   if !label_names.is_empty() && (!add_label_names.is_empty() || !remove_label_names.is_empty()) {
     return Err(flags.usage_error("--label replaces the whole label set, so it cannot be combined with --add-label/--remove-label. Use --add-label/--remove-label to change some labels and keep the rest, or --label alone to set the exact list"))
   }
-  if state == "" && priority < 0 && assignee_name == "" && label_names.is_empty() && add_label_names.is_empty() && remove_label_names.is_empty() && !project_set && !title_set && !description_set && !replace_set && !append_set && !emoji_set {
+  let labelling = !label_names.is_empty() || !add_label_names.is_empty() || !remove_label_names.is_empty()
+  let describing = match description { writes.DescriptionEdit.Keep => false, _ => true }
+  if state.is_none() && priority.is_none() && assignee_name == "" && !labelling && !project_set && !title_set && !describing && !emoji_set {
     return Err(flags.usage_error(f"nothing to update: pass at least one flag\nusage: {usage}"))
   }
 
@@ -1523,61 +1515,58 @@ fn update(input: flags.CommandInput) -> Result<(), string> {
   // the PATCH as If-Unmodified-Since, so the window this check cannot close
   // — a write landing between this read and the PATCH — is held at the
   // server and answers 412 instead of clobbering.
-  if since != "" && issue.updated != since {
-    return Err(pb.fail(pb.ErrorKind.Refused, f"{key} changed since {display.rfc3339(since)}: its 'updated' is now {display.rfc3339(issue.updated)}; read it again ('lll issue view {key} --json' carries updated) and retry with that stamp"))
+  if let Some(stamp) = since {
+    if issue.updated != stamp {
+      return Err(pb.fail(pb.ErrorKind.Refused, f"{key} changed since {display.rfc3339(stamp)}: its 'updated' is now {display.rfc3339(issue.updated)}; read it again ('lll issue view {key} --json' carries updated) and retry with that stamp"))
+    }
   }
   // Surgical description edits (LLL-391, after veans): a replace must match
   // exactly once, or the caller is told how many times it matched, so a
-  // common phrase never silently rewrites the wrong place.
-  if replace_set {
-    let n = strings.Count(issue.description, replace_old)
-    if n != 1 {
-      return Err(f"--description-replace matched {n} times in {key}'s description; it must match exactly once - widen the text")
+  // common phrase never silently rewrites the wrong place. Checked against
+  // this read before any name is resolved; the write layer derives it again
+  // against the text it writes over (LLL-665).
+  if let writes.DescriptionEdit.Derived(d) = description {
+    if let Err(failure) = writes.derive_description(issue.description, d) {
+      return Err(update_failure(key, failure, since.is_some()))
     }
-    description = strings.Replace(issue.description, replace_old, replace_new, 1)
-    description_set = true
-  }
-  if append_set {
-    let base = if replace_set { description } else { issue.description }
-    description = if strings.TrimSpace(base) == "" { append_text } else { strings.TrimRight(base, "\n") + "\n" + append_text }
-    description_set = true
   }
 
-  let mut fields: Slice<string> = []
   // What this update set, for the success line: two fleet agents read
   // the issue back after 'Updated KEY' because it said nothing else.
   let mut changed: Slice<string> = []
-  if state != "" { fields = fields.append("\"state\":" + json_quote(state)?); changed = changed.append(f"state={state}") }
-  if priority >= 0 { fields = fields.append(f"\"priority\":{priority}"); changed = changed.append(f"priority={priority}") }
+  if let Some(s) = state { changed = changed.append(f"state={s}") }
+  if let Some(n) = priority { changed = changed.append(f"priority={n}") }
+  let mut assignee = writes.Relation.Keep
   if assignee_name == "none" {
     // 'none' is what view prints for no assignee; the same word clears it.
     // Nothing else could: an empty --assignee reads as the flag not given.
-    fields = fields.append("\"assignee\":\"\"")
+    assignee = writes.Relation.Clear
     changed = changed.append("assignee=none")
   } else if assignee_name != "" {
     let member = records.resolve_member(ctx, assignee_name)?
-    fields = fields.append("\"assignee\":" + json_quote(member.id)?)
+    assignee = writes.Relation.Set(member.id)
     changed = changed.append(f"assignee={member.name}")
   }
   // The ISSUE's team scopes both name lookups, not the configured one:
   // `lll issue update GRDN-4 --label bug` must mean GRDN's bug even when
   // LLL_TEAM says otherwise.
+  let mut project = writes.Relation.Keep
   if project_set {
-    let project_id = if project_name == "" { "" } else { records.resolve_project(ctx, issue.team, project_name)?.id }
-    fields = fields.append("\"project\":" + json_quote(project_id)?)
-    let project_change = if project_name == "" { "project=none" } else { f"project={project_name}" }
-    changed = changed.append(project_change)
+    if project_name == "" {
+      project = writes.Relation.Clear
+      changed = changed.append("project=none")
+    } else {
+      project = writes.Relation.Set(records.resolve_project(ctx, issue.team, project_name)?.id)
+      changed = changed.append(f"project={project_name}")
+    }
   }
+  let mut labels = writes.LabelEdit.Keep
   if !label_names.is_empty() {
     let mut label_ids: Slice<string> = []
     for name in label_names {
       label_ids = label_ids.append(records.resolve_label(ctx, issue.team, name)?.id)
     }
-    let encoded = match json.Marshal(label_ids) {
-      Ok(b) => b as string,
-      Err(e) => return Err(f"encoding labels: {e}"),
-    }
-    fields = fields.append(f"\"labels\":{encoded}")
+    labels = writes.LabelEdit.Replace(label_ids)
     changed = changed.append(f"labels={strings.Join(label_names, "+")}")
   }
   // LLL-513: relation modifiers change only the named labels, so a label
@@ -1595,53 +1584,75 @@ fn update(input: flags.CommandInput) -> Result<(), string> {
     }
     remove_ids = remove_ids.append(id)
   }
-  if !add_ids.is_empty() {
-    fields = fields.append("\"labels+\":" + json_ids(add_ids)?)
-    changed = changed.append(f"labels+={strings.Join(add_label_names, "+")}")
+  if !add_ids.is_empty() || !remove_ids.is_empty() {
+    labels = writes.LabelEdit.Delta { add: add_ids, remove: remove_ids }
   }
-  if !remove_ids.is_empty() {
-    fields = fields.append("\"labels-\":" + json_ids(remove_ids)?)
-    changed = changed.append(f"labels-={strings.Join(remove_label_names, "+")}")
-  }
-  if title_set { fields = fields.append("\"title\":" + json_quote(title)?); changed = changed.append("title") }
-  if description_set {
-    fields = fields.append("\"description\":" + json_quote(description)?)
-    let how = if replace_set && append_set { "description (replaced, appended)" } else if replace_set { "description (replaced)" } else if append_set { "description (appended)" } else { "description" }
-    changed = changed.append(how)
+  if !add_ids.is_empty() { changed = changed.append(f"labels+={strings.Join(add_label_names, "+")}") }
+  if !remove_ids.is_empty() { changed = changed.append(f"labels-={strings.Join(remove_label_names, "+")}") }
+  if title_set { changed = changed.append("title") }
+  if replace_set && append_set {
+    changed = changed.append("description (replaced, appended)")
+  } else if replace_set {
+    changed = changed.append("description (replaced)")
+  } else if append_set {
+    changed = changed.append("description (appended)")
+  } else if whole.is_some() {
+    changed = changed.append("description")
   }
   // `--emoji ""` clears the marker, so this one keys off the flag, not the value.
-  if emoji_set { fields = fields.append("\"emoji\":" + json_quote(emoji)?); changed = changed.append(f"emoji={emoji}") }
-  let payload = "{" + strings.Join(fields, ",") + "}"
-  let mut released = ""
-  if assignee_name != "" {
-    let observed = claims.observed_id(ctx, issue.id)?
-    let result = claims.update_assignment(ctx, pb.Caller.Process, issue.id, observed, payload, agent, force, reason).map_err(|e| {
+  if emoji_set { changed = changed.append(f"emoji={emoji}") }
+
+  let mut patch = writes.IssuePatch { state, priority, assignee, project, labels, description, .. }
+  if title_set { patch.title = Some(title) }
+  if emoji_set { patch.emoji = Some(emoji) }
+  let opts = writes.UpdateOptions {
+    stamp: since,
+    claim: writes.ClaimAs { caller: pb.Caller.Process, agent, force, reason },
+  }
+  let assigning = assignee_name != ""
+  let result = match writes.update_issue(ctx, issue, patch, opts) {
+    Ok(t) => t,
+    Err(writes.UpdateFailure.Failed(e)) => {
+      if !assigning { return Err(e) }
       if pb.classify(e).code == "claim_held" {
-        f"{key}: {e}; {held_elsewhere_hint(key)}"
-      } else if pb.classify(e).code == "needs_force" {
-        f"{key}: {pb.display_error(e).summary}; 'lll issue update {key} --assignee none --force --reason \"why\"' clears it anyway and comments on the issue"
-      } else { f"{key}: {e}" }
-    })?
-    if result.claim_id != "" {
-      let forced = if result.forced { "; forced, and commented on the issue" } else { "" }
-      released = f" (released {result.member_name}'s claim{forced})"
-    }
-  } else {
-    // The stamp rides the write (LLL-399): the precondition holds at the
-    // server, so a write landing between this process's read and its PATCH
-    // answers 412 instead of being clobbered.
-    let patched = ctx.patch_with_stamp(f"/api/collections/issues/records/{issue.id}", payload, since)
-    if let Err(e) = patched {
-      if pb.classify(e).status == 412 {
-        let presented = pb.display_error(e)
-        return Err(pb.fail(pb.ErrorKind.Refused, f"{key} changed under you: {presented.summary}\nread it again ('lll issue view {key} --json' carries updated) and retry with that stamp"))
+        return Err(f"{key}: {e}; {held_elsewhere_hint(key)}")
       }
-      return Err(e)
+      if pb.classify(e).code == "needs_force" {
+        return Err(f"{key}: {pb.display_error(e).summary}; 'lll issue update {key} --assignee none --force --reason \"why\"' clears it anyway and comments on the issue")
+      }
+      return Err(f"{key}: {e}")
+    },
+    Err(failure) => return Err(update_failure(key, failure, since.is_some())),
+  }
+  let mut released = ""
+  if let Some(t) = result {
+    if t.claim_id != "" {
+      let forced = if t.forced { "; forced, and commented on the issue" } else { "" }
+      released = f" (released {t.member_name}'s claim{forced})"
     }
   }
   if p.given("--json") { return print_issue_after(ctx, key) }
   fmt.Println(f"Updated {issue.expand.team.key}-{issue.number}: {strings.Join(changed, ", ")}{released}")
   Ok(())
+}
+
+/// The refusal for an update the write layer could not land on `key`.
+/// `stamped` is whether the caller gave --if-unchanged-since: its stale
+/// stamp is the caller's to refresh, while a derived edit that kept losing
+/// the race (LLL-665) wrote nothing and can simply run again.
+fn update_failure(key: string, failure: writes.UpdateFailure, stamped: bool) -> string {
+  match failure {
+    writes.UpdateFailure.Failed(e) => e,
+    writes.UpdateFailure.ReplaceMatched(n) => f"--description-replace matched {n} times in {key}'s description; it must match exactly once - widen the text",
+    writes.UpdateFailure.Changed(e) => {
+      let presented = pb.display_error(e)
+      if stamped {
+        pb.fail(pb.ErrorKind.Refused, f"{key} changed under you: {presented.summary}\nread it again ('lll issue view {key} --json' carries updated) and retry with that stamp")
+      } else {
+        pb.fail(pb.ErrorKind.Refused, f"{key} kept changing while its description was edited, so nothing was written; run the update again")
+      }
+    },
+  }
 }
 
 /// D3 (LLL-640): close releases the closer's claim in the same server
@@ -1661,7 +1672,8 @@ fn close_issue(input: flags.CommandInput) -> Result<(), string> {
   let issue = records.fetch_issue(ctx, resolved)?
   let key = f"{issue.expand.team.key}-{issue.number}"
   let observed = claims.observed_id(ctx, issue.id)?
-  let result = claims.close(ctx, pb.Caller.Process, issue.id, observed, agent, force, reason, keep).map_err(|e| {
+  let by = writes.ClaimAs { caller: pb.Caller.Process, agent, force, reason }
+  let result = writes.close_issue(ctx, issue.id, observed, by, keep).map_err(|e| {
     if pb.classify(e).code == "needs_force" {
       f"{key}: {e} - 'lll issue close {key} --force --reason \"why\"' closes it anyway, releasing that claim and commenting on the issue"
     } else { f"{key}: {e}" }
@@ -1733,10 +1745,12 @@ fn start(input: flags.CommandInput) -> Result<(), string> {
       fmt.Fprintln(out, f"Switched to existing branch '{branch}'")
     }
   }
-  if let Err(reason) = ctx.patch(
-    f"/api/collections/issues/records/{issue.id}",
-    "{\"state\":\"in-progress\"}",
-  ) {
+  let started = writes.update_issue(ctx, issue,
+    writes.IssuePatch { state: Some("in-progress"), ..writes.IssuePatch.unchanged() },
+    writes.UpdateOptions.as_caller(pb.Caller.Process),
+  )
+  if let Err(failure) = started {
+    let reason = update_failure(key, failure, false)
     if with_branch {
       // A lost response does not prove the server rejected the write. Never
       // undo Git automatically: report the known local outcome and how to
@@ -1781,24 +1795,9 @@ fn record_work_site(ctx: pb.Client, issue: models.Issue, branch: string, agent: 
     let mut author = ""
     if let Some(a) = actor(ctx)? { author = a.id }
     let moved = f"work moved: {issue.work_branch} @ {issue.work_host}:{issue.work_path} -> {branch} @ {host}:{path}"
-    let payload = match json.Marshal(
-      models.NewComment { issue: issue.id, author, agent, body: moved },
-    ) {
-      Ok(p) => p as string,
-      Err(e) => return Err(f"encoding work-moved comment: {e}"),
-    }
-    let _ = ctx.post("/api/collections/comments/records", payload)?
+    let _ = writes.create_comment(ctx, pb.Caller.Process, models.NewComment { issue: issue.id, author, agent, body: moved })?
   }
-  let fields = [
-    "\"work_branch\":" + json_quote(branch)?,
-    "\"work_host\":" + json_quote(host)?,
-    "\"work_path\":" + json_quote(path)?,
-  ]
-  let _ = ctx.patch(
-    f"/api/collections/issues/records/{issue.id}",
-    "{" + strings.Join(fields, ",") + "}",
-  )?
-  Ok(())
+  writes.set_work_site(ctx, issue.id, writes.WorkSite { branch, host, path })
 }
 
 /// TASK-205's presentation rule: a work site is only "current" while the
@@ -1880,13 +1879,13 @@ fn claim(input: flags.CommandInput) -> Result<(), string> {
     let Some(held) = claims.fetch(ctx, issue.id)? else {
       return Err(pb.fail(pb.ErrorKind.Refused, f"{key} is not claimed; 'lll issue claim {key}' takes it"))
     };
-    let renewed = claims.renew(ctx, issue.id, held.id, agent).map_err(|e| f"{key}: {e}")?
+    let renewed = writes.renew_claim(ctx, issue.id, held.id, agent).map_err(|e| f"{key}: {e}")?
     if input.parsed.given("--json") { return print_issue_after(ctx, key) }
     fmt.Println(f"Renewed {key} for {display.byline(renewed.member_name, renewed.agent)}; the expiry clock restarts now (held since {display.relative(renewed.created)})")
     return Ok(())
   }
 
-  let result = claims.acquire(ctx, pb.Caller.Process, issue.id, member.id, agent).map_err(|e| {
+  let result = writes.acquire_claim(ctx, pb.Caller.Process, issue.id, member.id, agent).map_err(|e| {
     if pb.classify(e).code == "claim_held" {
       f"{key}: {e}; {held_elsewhere_hint(key)}"
     } else { e }
@@ -1914,7 +1913,8 @@ fn release(input: flags.CommandInput) -> Result<(), string> {
   let issue = records.fetch_issue(ctx, resolved)?
   let key = f"{issue.expand.team.key}-{issue.number}"
   let Some(held) = claims.fetch(ctx, issue.id)? else { return Err(pb.fail(pb.ErrorKind.Refused, f"{key} is not claimed")) };
-  let result = claims.release(ctx, pb.Caller.Process, issue.id, held.id, agent, force, reason).map_err(|e| {
+  let by = writes.ClaimAs { caller: pb.Caller.Process, agent, force, reason }
+  let result = writes.release_claim(ctx, issue.id, held.id, by).map_err(|e| {
     if pb.classify(e).code == "needs_force" {
       f"{key}: {e}; 'lll issue release {key} --force --reason \"why\"' takes it anyway and comments on the issue"
     } else { e }
@@ -1963,9 +1963,10 @@ fn delete_issue(input: flags.CommandInput) -> Result<(), string> {
   }
   if let Some(h) = held {
     let agent = agent_label(ctx, p)?
-    let _ = claims.release(ctx, pb.Caller.Process, issue.id, h.id, agent, true, "deleting the issue").map_err(|e| f"{label}: {e}")?
+    let by = writes.ClaimAs { caller: pb.Caller.Process, agent, force: true, reason: "deleting the issue" }
+    let _ = writes.release_claim(ctx, issue.id, h.id, by).map_err(|e| f"{label}: {e}")?
   }
-  let _ = ctx.delete(f"/api/collections/issues/records/{issue.id}").map_err(|e| {
+  writes.delete_issue(ctx, issue.id).map_err(|e| {
     if held.is_some() { f"{e}\nthe claim on {label} was released, but the issue was not deleted" } else { e }
   })?
   fmt.Println(f"Deleted {label}")
@@ -2018,12 +2019,7 @@ fn comment(input: flags.CommandInput) -> Result<(), string> {
     author_name = a.name
   }
 
-  let new_comment = models.NewComment { issue: issue.id, author, agent, body }
-  let payload = match json.Marshal(new_comment) {
-    Ok(p) => p,
-    Err(e) => return Err(f"encoding comment: {e}"),
-  }
-  let created = ctx.post("/api/collections/comments/records", payload as string)?
+  let created = writes.create_comment(ctx, pb.Caller.Process, models.NewComment { issue: issue.id, author, agent, body })?
   if p.given("--json") {
     fmt.Println(contract_json(created.bytes() as json.RawMessage, 0) as string)
     return Ok(())
@@ -2136,7 +2132,7 @@ fn pr_cmd(input: flags.CommandInput) -> Result<(), string> {
     let Some((existing_url, existing_ref)) = references.from_pr_output(combined) else {
       return Err(f"gh pr create: {e}")
     };
-    if let Err(save) = references.append(ctx, issue.id, existing_ref) {
+    if let Err(save) = writes.append_ref(ctx, issue.id, existing_ref) {
       return Err(f"A pull request already exists: {existing_url}\nCould not confirm {existing_ref} on {key}: {save}\nRetry only the reference save: lll issue ref {key} {existing_ref}")
     }
     let _ = fmt.Fprintln(os.Stderr, f"a pull request already existed for this branch; recorded {existing_ref} on {key}")
@@ -2145,7 +2141,7 @@ fn pr_cmd(input: flags.CommandInput) -> Result<(), string> {
   let Some((pr_url, reference)) = references.from_pr_output(captured.String()) else {
     return Err("gh pr create succeeded but did not report one unambiguous PR URL; the issue was not changed. Inspect the gh output before retrying; do not create a duplicate PR.")
   };
-  if let Err(e) = references.append(ctx, issue.id, reference) {
+  if let Err(e) = writes.append_ref(ctx, issue.id, reference) {
     return Err(f"PR created: {pr_url}\nCould not confirm {reference} on {key}: {e}\nRetry only the reference save: lll issue ref {key} {reference}")
   }
   Ok(())
@@ -2162,7 +2158,7 @@ fn ref_cmd(input: flags.CommandInput) -> Result<(), string> {
   if p.first() == "" || reference == "" { return Err(flags.usage_error(f"usage: {usage}")) }
   let resolved = resolve_id(ctx, p.first(), usage)?
   let issue = records.fetch_issue(ctx, resolved)?
-  let outcome = references.append(ctx, issue.id, reference)?
+  let outcome = writes.append_ref(ctx, issue.id, reference)?
   let action = if outcome.added { "Added" } else { "Already recorded" }
   fmt.Println(f"{action} {reference} on {issue.expand.team.key}-{issue.number}")
   Ok(())
@@ -2242,7 +2238,7 @@ fn comment_mutate(ctx: pb.Client, verb: string, p: flags.Parsed) -> Result<(), s
     ) {
       return Err(aborted())
     }
-    let _ = ctx.delete(f"/api/collections/comments/records/{c.id}")?
+    writes.delete_comment(ctx, c.id)?
     fmt.Println(f"Deleted comment #{n} on {key} (was {whose}'s)")
     return Ok(())
   }
@@ -2255,10 +2251,7 @@ fn comment_mutate(ctx: pb.Client, verb: string, p: flags.Parsed) -> Result<(), s
   if strings.TrimSpace(body) == "" {
     return Err(flags.usage_error(f"comment edit needs the new body: -b \"...\" (or '-b -' from stdin)\nusage: {usage}"))
   }
-  let _ = ctx.patch(
-    f"/api/collections/comments/records/{c.id}",
-    "{\"body\":" + json_quote(body)? + "}",
-  )?
+  writes.edit_comment(ctx, c.id, body)?
   fmt.Println(f"Edited comment #{n} on {key}")
   Ok(())
 }
@@ -2343,21 +2336,6 @@ fn resolve_id(ctx: pb.Client, explicit: string, usage: string) -> Result<string,
 
 
 
-/// JSON-encode a string value (quotes + escaping).
-fn json_quote(value: string) -> Result<string, string> {
-  match json.Marshal(value) {
-    Ok(b) => Ok(b as string),
-    Err(e) => Err(f"encoding value: {e}"),
-  }
-}
-
-/// JSON-encode a list of record ids.
-fn json_ids(ids: Slice<string>) -> Result<string, string> {
-  match json.Marshal(ids) {
-    Ok(b) => Ok(b as string),
-    Err(e) => Err(f"encoding ids: {e}"),
-  }
-}
 
 
 // ------------------------------------------------------------- doc links
@@ -2367,18 +2345,6 @@ fn json_ids(ids: Slice<string>) -> Result<string, string> {
 /// relation and not a write-once reference on the issue.
 fn fetch_issue_docs(ctx: pb.Client, issue_id: string) -> Result<Slice<models.Doc>, string> {
   fetch_docs(ctx, f"issues.id ?= {query.quote(issue_id)}", "slug", "")
-}
-
-/// Send one edge as a relation modifier ("issues+" or "issues-"), never the
-/// whole array (LLL-513). Writing back a locally edited copy of the array let
-/// two concurrent links to one doc drop an edge. The server applies the
-/// modifier under a per-record lock (gopb serializeRecordUpdates).
-fn modify_doc_issues(ctx: pb.Client, doc: models.Doc, modifier: string, issue_id: string) -> Result<(), string> {
-  let _ = ctx.patch(
-    f"/api/collections/docs/records/{doc.id}",
-    "{" + json_quote(modifier)? + ":[" + json_quote(issue_id)? + "]}",
-  )?
-  Ok(())
 }
 
 /// Refuse a link whose two ends live in different teams (TASK-173). The doc
@@ -2420,7 +2386,7 @@ fn link_issue(ctx: pb.Client, id: string, slug: string, usage: string) -> Result
     fmt.Println(f"{key} is already linked to {d.slug}")
     return Ok(())
   }
-  modify_doc_issues(ctx, d, "issues+", issue.id)?
+  writes.link_doc_issue(ctx, d.id, issue.id)?
   fmt.Println(f"Linked {key} -> {d.slug}")
   Ok(())
 }
@@ -2446,7 +2412,7 @@ fn unlink_issue(ctx: pb.Client, id: string, slug: string, usage: string) -> Resu
   if d.issues.find(|x| x == issue.id).is_none() {
     return Err(f"{key} is not linked to {d.slug}; see 'lll doc view {d.slug}'")
   }
-  modify_doc_issues(ctx, d, "issues-", issue.id)?
+  writes.unlink_doc_issue(ctx, d.id, issue.id)?
   fmt.Println(f"Unlinked {key} from {d.slug}")
   Ok(())
 }
@@ -2480,7 +2446,7 @@ fn block(input: flags.CommandInput) -> Result<(), string> {
   if cyclic {
     return Err(f"{bkey} already waits on {key} (directly or through others); blocking {key} by {bkey} would be a cycle")
   }
-  set_blocked_by(ctx, issue, issue.blocked_by.append(blocker.id))?
+  writes.set_blocked_by(ctx, issue.id, issue.blocked_by.append(blocker.id))?
   let mut note = ""
   if blocker.state == "done" || blocker.state == "cancelled" { note = f" ({bkey} is already {blocker.state}, so this does not hold {key} back)" }
   fmt.Println(f"{key} is blocked by {bkey}{note}")
@@ -2506,17 +2472,8 @@ fn unblock(input: flags.CommandInput) -> Result<(), string> {
     fmt.Println(f"{key} was not blocked by {bkey}")
     return Ok(())
   }
-  set_blocked_by(ctx, issue, remaining)?
+  writes.set_blocked_by(ctx, issue.id, remaining)?
   fmt.Println(f"{key} is no longer blocked by {bkey}")
-  Ok(())
-}
-
-fn set_blocked_by(ctx: pb.Client, issue: models.Issue, ids: Slice<string>) -> Result<(), string> {
-  let encoded = match json.Marshal(ids) {
-    Ok(b) => b as string,
-    Err(e) => return Err(f"encoding blockers: {e}"),
-  }
-  let _ = ctx.patch(f"/api/collections/issues/records/{issue.id}", f"{{\"blocked_by\":{encoded}}}")?
   Ok(())
 }
 
@@ -2667,7 +2624,7 @@ fn issue_next(input: flags.CommandInput) -> Result<(), string> {
     }
     // Acquire before printing: a key this command did not secure is a lie to
     // the shell loop that composed it. A lost race exits non-zero, keyless.
-    let result = claims.acquire(ctx, pb.Caller.Process, best.id, member.id, agent).map_err(|e| {
+    let result = writes.acquire_claim(ctx, pb.Caller.Process, best.id, member.id, agent).map_err(|e| {
       if pb.classify(e).code == "claim_held" {
         f"{key}: {e}; {held_elsewhere_hint(key)}"
       } else { e }

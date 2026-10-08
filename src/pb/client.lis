@@ -166,6 +166,18 @@ impl Client {
     self.send_content_options("PATCH", path, payload, "application/json", stamp, "")
   }
 
+  /// patch_with_stamp as `caller` (LLL-665): a stamped edit from a board
+  /// viewer rides the viewer's token, as every other board write does.
+  pub fn patch_with_stamp_as(self, caller: Caller, path: string, payload: string, stamp: string) -> Result<string, string> {
+    match caller {
+      Caller.Process => self.patch_with_stamp(path, payload, stamp),
+      Caller.Member(tok) => {
+        let (cfg, src) = self.settings.traced()?
+        request_content(cfg.url, "PATCH", path, payload, bearer(tok), src.url == "default", "application/json", stamp)
+      },
+    }
+  }
+
   /// DELETE a path and return the (usually empty) response body.
   pub fn delete(self, path: string) -> Result<string, string> {
     self.send("DELETE", path, "")

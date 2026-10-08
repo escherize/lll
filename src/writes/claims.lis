@@ -1,0 +1,214 @@
+import "go:encoding/json"
+import "go:net/url"
+
+import "pb"
+
+// The claim routes (gopb claims_http.go). A claim and the assignment it
+// implies are one server transaction; these only name the request.
+
+#[json]
+pub struct Transition {
+  pub claim_id: string,
+  pub member_id: string,
+  pub member_name: string,
+  pub agent: string,
+  pub created: string,
+  pub already_owned: bool,
+  pub cleared_assignee: bool,
+  pub forced: bool,
+}
+
+#[json]
+struct AcquireRequest {
+  member: string,
+  #[json(omitempty)]
+  agent: string,
+}
+
+#[json]
+struct ReleaseRequest {
+  claim_id: string,
+  #[json(omitempty)]
+  agent: string,
+  force: bool,
+  reason: string,
+}
+
+#[json]
+struct CloseRequest {
+  claim_id: string,
+  #[json(omitempty)]
+  agent: string,
+  force: bool,
+  reason: string,
+  keep_claim: bool,
+}
+
+#[json]
+struct RenewRequest {
+  claim_id: string,
+  #[json(omitempty)]
+  agent: string,
+}
+
+#[json]
+struct AssignmentRequest {
+  claim_id: string,
+  fields: json.RawMessage,
+  #[json(omitempty)]
+  agent: string,
+  force: bool,
+  reason: string,
+}
+
+/// Who a claim-route write runs as, and the session label it carries.
+/// `agent` is the optional self-asserted label (LLL-521); "" for none.
+/// `force` and `reason` apply to the routes that release another holder's
+/// claim (release, close, an assignee clear).
+pub struct ClaimAs {
+  pub caller: pb.Caller,
+  pub agent: string,
+  pub force: bool,
+  pub reason: string,
+}
+
+/// Claims and their assignment are one server-owned transaction. Callers
+/// resolve the actor through normal identity handling; the server verifies it.
+pub fn acquire_claim(
+  ctx: pb.Client,
+  caller: pb.Caller,
+  issue_id: string,
+  member_id: string,
+  agent: string,
+) -> Result<Transition, string> {
+  transact(
+    ctx,
+    caller,
+    issue_id,
+    "claim",
+    AcquireRequest { member: member_id, agent },
+  )
+}
+
+/// Only the holder releases without force. With force, the server releases
+/// another member's claim and comments on the issue, naming both members and
+/// the reason when one is given (LLL-512). The same member under a different
+/// non-empty agent than the holder's is another session and needs force too
+/// (LLL-521).
+pub fn release_claim(
+  ctx: pb.Client,
+  issue_id: string,
+  claim_id: string,
+  by: ClaimAs,
+) -> Result<Transition, string> {
+  transact(
+    ctx,
+    by.caller,
+    issue_id,
+    "release",
+    ReleaseRequest {
+      claim_id,
+      agent: by.agent,
+      force: by.force,
+      reason: by.reason,
+    },
+  )
+}
+
+/// Set the issue done and release its claim in one server transaction (D3,
+/// LLL-640). `claim_id` is the hold the caller observed, "" for none. The
+/// release rule is release's: the holder freely, anyone else with force,
+/// which comments. `keep_claim` keeps the holder's own hold; the server
+/// refuses it for anyone else. The assignee is kept.
+pub fn close_issue(
+  ctx: pb.Client,
+  issue_id: string,
+  claim_id: string,
+  by: ClaimAs,
+  keep_claim: bool,
+) -> Result<Transition, string> {
+  transact(
+    ctx,
+    by.caller,
+    issue_id,
+    "close",
+    CloseRequest {
+      claim_id,
+      agent: by.agent,
+      force: by.force,
+      reason: by.reason,
+      keep_claim,
+    },
+  )
+}
+
+/// Only the holder renews its observed hold. The server restarts the expiry
+/// clock and keeps the claim's id and creation time (LLL-535). A different
+/// non-empty `agent` than the holder's is refused, as on acquire (LLL-521).
+pub fn renew_claim(
+  ctx: pb.Client,
+  issue_id: string,
+  claim_id: string,
+  agent: string,
+) -> Result<Transition, string> {
+  transact(
+    ctx,
+    pb.Caller.Process,
+    issue_id,
+    "renew",
+    RenewRequest { claim_id, agent },
+  )
+}
+
+/// An issue edit that sets or clears the assignee (update_issue's route for
+/// it). Clearing the assignee releases the observed claim, so it follows the
+/// release rule (LLL-516): only the holder clears it without force, and a
+/// forced clear leaves a comment on the issue, with `reason` if given.
+fn update_assignment(
+  ctx: pb.Client,
+  issue_id: string,
+  claim_id: string,
+  fields: string,
+  by: ClaimAs,
+) -> Result<Transition, string> {
+  transact(
+    ctx,
+    by.caller,
+    issue_id,
+    "assignment",
+    AssignmentRequest {
+      claim_id,
+      fields: fields.bytes() as json.RawMessage,
+      agent: by.agent,
+      force: by.force,
+      reason: by.reason,
+    },
+  )
+}
+
+/// `caller` is whom the server authenticates as the actor (LLL-545): the
+/// board passes a member viewer's own token.
+fn transact(
+  ctx: pb.Client,
+  caller: pb.Caller,
+  issue_id: string,
+  action: string,
+  request: Unknown,
+) -> Result<Transition, string> {
+  let body = json.Marshal(request).map_err(|e| f"encoding claim request: {e}")?
+  let path = f"/api/lll/issues/{url.PathEscape(issue_id)}/{action}"
+  let response = ctx
+    .send_as(caller, "POST", path, body as string, "application/json")
+    .map_err(|e| {
+      if pb.classify(e).status == 404 {
+        "server does not support atomic claim operations; update the server before changing claims or assignments; no legacy claim writes were attempted"
+      } else {
+        e
+      }
+    })?
+  let mut transition = Transition { .. }
+  json
+    .Unmarshal(response.bytes(), &transition)
+    .map_err(|e| f"decoding claim response: {e}")?
+  Ok(transition)
+}

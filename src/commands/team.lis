@@ -10,6 +10,7 @@ import "models"
 import "pb"
 import "query"
 import "theme"
+import "writes"
 
 /// Dispatch `lll team <verb>` through the noun's Command table (TASK-307).
 /// The table is the one place a verb is declared: dispatch, `lll team --help`
@@ -202,18 +203,6 @@ fn team_create(input: flags.CommandInput) -> Result<(), string> {
   Ok(())
 }
 
-/// The rename PATCH body. PocketBase replaces every field it is handed, so
-/// each rename sends only the fields it was asked to change: a `-n`-only
-/// rename must not carry `key` and blank it.
-#[json]
-struct TeamKeyPatch { key: string }
-
-#[json]
-struct TeamNamePatch { name: string }
-
-#[json]
-struct TeamRenamePatch { key: string, name: string }
-
 /// `lll team rename KEY [--key NEW] [-n "Name"]` — TASK-87.
 ///
 /// The rename itself is one PATCH to one record: issue keys are DERIVED
@@ -248,8 +237,7 @@ fn team_rename(input: flags.CommandInput) -> Result<(), string> {
     }
   }
 
-  let payload = rename_payload(new_key, new_name)?
-  let _ = ctx.patch(f"/api/collections/teams/records/{t.id}", payload)?
+  writes.update_team(ctx, pb.Caller.Process, t.id, rename_patch(new_key, new_name))?
 
   let mut final_key = t.key
   if new_key != "" { final_key = new_key }
@@ -262,21 +250,16 @@ fn team_rename(input: flags.CommandInput) -> Result<(), string> {
   Ok(())
 }
 
-/// The PATCH body for whichever of key/name was given. "" means "not given",
-/// which is why neither field can be cleared by rename: a team with no key
-/// has no issue keys, and a nameless team is a blank row in the rail.
-fn rename_payload(new_key: string, new_name: string) -> Result<string, string> {
-  let marshalled = if new_key != "" && new_name != "" {
-    json.Marshal(TeamRenamePatch { key: new_key, name: new_name })
-  } else if new_key != "" {
-    json.Marshal(TeamKeyPatch { key: new_key })
-  } else {
-    json.Marshal(TeamNamePatch { name: new_name })
-  }
-  match marshalled {
-    Ok(p) => Ok(p as string),
-    Err(e) => Err(f"encoding team patch: {e}"),
-  }
+/// The edit for whichever of key/name was given. An empty flag is "not
+/// given", which is why neither field can be cleared by rename: a team with
+/// no key has no issue keys, and a nameless team is a blank row in the rail.
+/// PocketBase replaces every field it is handed, so a `-n`-only rename must
+/// not carry `key` and blank it.
+fn rename_patch(new_key: string, new_name: string) -> writes.TeamPatch {
+  let mut patch = writes.TeamPatch { .. }
+  if new_key != "" { patch.key = Some(new_key) }
+  if new_name != "" { patch.name = Some(new_name) }
+  patch
 }
 
 /// What a KEY change does NOT rewrite (TASK-87). Derived issue keys follow
@@ -309,11 +292,7 @@ fn team_set_accent(input: flags.CommandInput) -> Result<(), string> {
   let Some(t) = records.find_team(ctx, key)? else {
     return Err(unknown_team(ctx, key))
   }
-  let payload = match json.Marshal(TeamAccentPatch { accent: hex }) {
-    Ok(p) => p as string,
-    Err(e) => return Err(f"encoding team patch: {e}"),
-  }
-  let _ = ctx.patch(f"/api/collections/teams/records/{t.id}", payload)?
+  writes.update_team(ctx, pb.Caller.Process, t.id, writes.TeamPatch { accent: Some(hex), .. })?
   if hex == "" {
     fmt.Println(f"Cleared the accent for {t.key}; it uses the canonical orange again")
   } else {
@@ -339,11 +318,6 @@ fn accent_value(raw: string) -> Result<string, string> {
   Ok(hex)
 }
 
-/// The one PATCH body set-accent needs: PocketBase replaces every field it is
-/// handed, so the patch carries `accent` and nothing else.
-#[json]
-struct TeamAccentPatch { accent: string }
-
 /// `lll team set-emoji KEY 🚀` (LLL-427). A team's identity was its accent
 /// plus a letter derived from the key, so two teams whose keys share an
 /// initial differed only in hue. Settable from the CLI for the same reason
@@ -358,11 +332,7 @@ fn team_set_emoji(input: flags.CommandInput) -> Result<(), string> {
   let Some(t) = records.find_team(ctx, key)? else {
     return Err(unknown_team(ctx, key))
   }
-  let payload = match json.Marshal(TeamEmojiPatch { emoji: glyph }) {
-    Ok(p) => p as string,
-    Err(e) => return Err(f"encoding team patch: {e}"),
-  }
-  let _ = ctx.patch(f"/api/collections/teams/records/{t.id}", payload)?
+  writes.update_team(ctx, pb.Caller.Process, t.id, writes.TeamPatch { emoji: Some(glyph), .. })?
   if glyph == "" {
     fmt.Println(f"Cleared the emoji for {t.key}; it shows the letter from its key again")
   } else {
@@ -382,9 +352,6 @@ fn team_emoji_value(raw: string) -> Result<string, string> {
     ),
   }
 }
-
-#[json]
-struct TeamEmojiPatch { emoji: string }
 
 /// The emoji line for `team view`: what the rail and the tab icon will show,
 /// including the derived letter when no emoji is set, so the line answers
@@ -412,11 +379,7 @@ pub fn create_team(ctx: pb.Client, key: string, name: string) -> Result<models.T
   // and the .lll.toml `lll attach` writes say what was actually stored.
   let new_team = models.NewTeam { key: records.normalize_team_key(key), name }
   if let Some(problem) = records.team_key_problem(new_team.key) { return Err(problem) }
-  let payload = match json.Marshal(new_team) {
-    Ok(p) => p,
-    Err(e) => return Err(f"encoding team: {e}"),
-  }
-  let body = ctx.post("/api/collections/teams/records", payload as string)?
+  let body = writes.create_team(ctx, new_team)?
 
   let mut created = models.Team { .. }
   if let Err(e) = json.Unmarshal(body.bytes(), &created) {
@@ -521,7 +484,7 @@ fn team_delete(input: flags.CommandInput) -> Result<(), string> {
   if !confirmed_on_terminal(input.parsed.given("--yes"), f"delete team {t.key}?") {
     return Err(aborted())
   }
-  let _ = ctx.delete(f"/api/collections/teams/records/{t.id}")?
+  writes.delete_team(ctx, t.id)?
   fmt.Println(f"deleted team {t.key}")
   Ok(())
 }
@@ -576,11 +539,6 @@ fn archived_hint(key: string) -> string {
   f"team {key} is archived; run 'lll team unarchive {key}' first"
 }
 
-/// The one PATCH body the archive lifecycle needs: PocketBase replaces every
-/// field it is handed, so the patch carries `archived` and nothing else.
-#[json]
-struct TeamArchivedPatch { archived: bool }
-
 /// The archive verbs share parsed inputs; each fixes its lifecycle direction
 /// before entering the common implementation.
 fn team_archive(input: flags.CommandInput) -> Result<(), string> {
@@ -606,11 +564,7 @@ fn team_set_archived(ctx: pb.Client, p: flags.Parsed, archived: bool) -> Result<
   let Some(t) = records.find_team(ctx, key)? else {
     return Err(unknown_team(ctx, key))
   }
-  let payload = match json.Marshal(TeamArchivedPatch { archived }) {
-    Ok(p) => p as string,
-    Err(e) => return Err(f"encoding team patch: {e}"),
-  }
-  let _ = ctx.patch(f"/api/collections/teams/records/{t.id}", payload)?
+  writes.update_team(ctx, pb.Caller.Process, t.id, writes.TeamPatch { archived: Some(archived), .. })?
   if archived {
     fmt.Println(
       f"Archived team {t.key}: hidden from team lists and the board rail; /t/{t.key}/ stays readable. 'lll team unarchive {t.key}' brings it back.",
