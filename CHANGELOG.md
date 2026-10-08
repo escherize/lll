@@ -86,9 +86,11 @@ that close, release, delete or create bots.
 ### Changed
 
 - `lll member invite` prints the board's address in the colleague's
-  `lll login --url` line when this machine knows the board (`web_url`), so
-  their login saves both the board and its API. An explicit `--url` still
-  wins (LLL-649).
+  `lll login --url` line when this machine knows the board (`web_url`) and
+  the board proves it serves the same server (the invite's token is accepted
+  through its `/api/`), so their login saves both the board and its API.
+  Otherwise it prints the API url as before. An explicit `--url` still wins
+  (LLL-649).
 - Help and messages no longer cite internal ticket keys (LLL-649).
 - README: Homebrew first, a quickstart that runs as written from a fresh
   machine, separate Upgrade and Share sections, canonical verbs, and no

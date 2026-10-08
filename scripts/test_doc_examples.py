@@ -6,12 +6,14 @@ to bottom, as one newcomer would: a fresh HOME, no LLL_* settings from the
 calling shell, the binary under test on PATH as `lll`, and a scratch board
 that the document's own `lll up` line starts.
 
-What runs: README.md's fenced `sh` blocks and docs/index.html's terminal
+What runs: README.md's fenced `sh`/`bash` blocks and docs/index.html's terminal
 panes (`<span class="cmd">`), every line of each block that has at least one
-line starting with `lll` (after any VAR=value prefix). Lines run in order in
+line running `lll` (after any VAR=value prefix, or a shell operator). Lines run in order in
 one bash process, so a `cd` carries into later blocks the way it does for a
-reader. Each must exit 0. A line running `lll up` starts in the background
-and the check waits for its banner; every server started is stopped by PID.
+reader. Each must exit 0, pipelines included. A line running `lll up` starts
+in the background and the check waits for its banner. The run is its own
+process group, stopped as a whole afterwards, so no server outlives it.
+`brew`, `curl`, `wget` and `sudo` are stubs that refuse.
 Prose mentions (`lll attach --key KEY` inside a sentence) are not run.
 
 A block that cannot run here (a hosted url, administrator credentials, a
@@ -31,15 +33,19 @@ import os
 from pathlib import Path
 import re
 import shlex
+import signal
 import socket
 import subprocess
 import sys
 import tempfile
+import time
 
 binary = str(Path(sys.argv[1]).resolve())
 ROOT = Path(__file__).resolve().parents[1]
 SKIP = re.compile(r'<!--\s*example-check:\s*skip:\s*(.+?)\s*-->')
-LLL_LINE = re.compile(r'^(?:[A-Z_][A-Z0-9_]*=\S+\s+)*lll(?:\s|$)')
+# An lll command anywhere a command can start: the line's head, or after
+# a shell operator, with any VAR=value prefix.
+LLL_LINE = re.compile(r'(?:^|&&|\|\||;|\||\$\()\s*(?:[A-Z_][A-Z0-9_]*=\S+\s+)*lll(?:\s|$)')
 UP_LINE = re.compile(r'^(?:[A-Z_][A-Z0-9_]*=\S+\s+)*lll up(?:\s|$)')
 
 
@@ -60,7 +66,7 @@ def logical_lines(text):
 def readme_blocks(text):
     """(name, lines, skip reason or None) per fenced sh block."""
     blocks = []
-    for match in re.finditer(r'^```sh\n(.*?)^```', text, re.M | re.S):
+    for match in re.finditer(r'^```(?:sh|bash|shell|console)\n(.*?)^```', text, re.M | re.S):
         before = text[:match.start()].rstrip().splitlines()
         reason = SKIP.search(before[-1]) if before else None
         line_no = text[:match.start()].count('\n') + 1
@@ -72,7 +78,7 @@ def readme_blocks(text):
 def landing_blocks(text):
     """(name, lines, skip reason or None) per terminal pane; `lll up` panes first."""
     blocks = []
-    for match in re.finditer(r'<div class="term">(.*?)</pre></div>', text, re.S):
+    for match in re.finditer(r'<div class="term(?: [^"]*)?">(.*?)</pre></div>', text, re.S):
         before = text[:match.start()].rstrip().splitlines()
         reason = SKIP.search(before[-1]) if before else None
         cmds = [html.unescape(re.sub(r'<[^>]+>', '', c))
@@ -91,15 +97,13 @@ def free_port():
 
 def script_for(blocks, work):
     """One bash script running every runnable line, reporting each failure."""
-    out = [
-        'fails=0',
-        f'pids={shlex.quote(str(work / "pids"))}',
-        'stop() { [ -f "$pids" ] && while read -r p; do kill "$p" 2>/dev/null; done < "$pids"; }',
-        'trap stop EXIT',
-    ]
+    # pipefail: 'lll issue view NOPE-1 | cat' must fail like the lll in it.
+    # Every process here, servers included, is in the run's own process
+    # group, which run_document stops as a whole.
+    out = ['set -o pipefail', 'fails=0']
     n = 0
     for name, lines, reason in blocks:
-        if not any(LLL_LINE.match(l) for l in lines):
+        if not any(LLL_LINE.search(l) for l in lines):
             continue
         if reason:
             out.append(f'echo {shlex.quote(f"skip {name}: {reason}")}')
@@ -113,7 +117,6 @@ def script_for(blocks, work):
                 out += [
                     # Braces, so a trailing '# comment' cannot swallow the '&'.
                     '{', line, f'}} > {log} 2>&1 &',
-                    'echo $! >> "$pids"',
                     'up_ok=0',
                     'for _ in $(seq 1 120); do',
                     f'  if grep -q "^board  login" {log}; then up_ok=1; break; fi',
@@ -127,7 +130,7 @@ def script_for(blocks, work):
                 line,
                 f'rc=$?; if [ $rc -ne 0 ]; then echo "FAIL rc=$rc: "{shown}; fails=$((fails+1)); fi',
             ]
-    out.append('exit $fails')
+    out.append('echo "$fails failed"; [ $fails -eq 0 ]')
     return '\n'.join(out) + '\n', n
 
 
@@ -144,12 +147,17 @@ def run_document(label, blocks):
             stub = stubs / opener
             stub.write_text('#!/bin/sh\necho "(would open $1)"\n')
             stub.chmod(0o755)
+        # Installers never run on the host, whatever a document grows.
+        for refused in ('brew', 'curl', 'wget', 'sudo'):
+            stub = stubs / refused
+            stub.write_text(f'#!/bin/sh\necho "doc check: refusing to run {refused}" >&2\nexit 97\n')
+            stub.chmod(0o755)
         script, count = script_for(blocks, work)
         (work / 'examples.sh').write_text(script)
         env = {
             'HOME': str(home),
             'USER': 'newbie',
-            'PATH': f'{stubs}:/usr/bin:/bin:/usr/sbin:/sbin:/opt/homebrew/bin:/usr/local/bin',
+            'PATH': f'{stubs}:/usr/bin:/bin:/usr/sbin:/sbin',
             'LANG': os.environ.get('LANG', 'en_US.UTF-8'),
             'TMPDIR': str(work),
             'LLL_URL': f'http://127.0.0.1:{free_port()}',
@@ -159,19 +167,37 @@ def run_document(label, blocks):
         }
         log = work / 'examples.log'
         with open(log, 'w') as sink:
+            proc = subprocess.Popen(['bash', str(work / 'examples.sh')], cwd=start, env=env,
+                                    stdin=subprocess.DEVNULL, stdout=sink, stderr=subprocess.STDOUT,
+                                    start_new_session=True)
             try:
-                done = subprocess.run(['bash', str(work / 'examples.sh')], cwd=start, env=env,
-                                      stdin=subprocess.DEVNULL, stdout=sink, stderr=subprocess.STDOUT,
-                                      timeout=300)
+                returncode = proc.wait(timeout=300)
             except subprocess.TimeoutExpired:
-                print(log.read_text())
-                raise
+                returncode = None
+            finally:
+                stop_group(proc.pid)
         output = log.read_text()
-        if done.returncode != 0:
+        if returncode != 0:
             print(output)
-        assert done.returncode == 0, f'{label}: {done.returncode} example lines failed (output above)'
+        assert returncode is not None, f'{label}: timed out after 300s (output above)'
+        assert returncode == 0, f'{label}: example lines failed (output above)'
         skipped = output.count('\nskip ') + output.startswith('skip ')
         print(f'{label}: {count} example lines ran, {skipped} blocks skipped with a reason')
+
+
+def stop_group(pgid):
+    """Stop the run's process group: bash, and every `lll up` it started."""
+    for sig in (signal.SIGTERM, signal.SIGKILL):
+        try:
+            os.killpg(pgid, sig)
+        except ProcessLookupError:
+            return
+        for _ in range(40):
+            try:
+                os.killpg(pgid, 0)
+            except ProcessLookupError:
+                return
+            time.sleep(0.25)
 
 
 def main():

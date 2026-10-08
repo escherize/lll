@@ -51,8 +51,9 @@ LLL_TEAM=DEMO lll up           # lll server (:8090) + web board (:8100)
 ```
 
 The first boot creates the team, writes `.lll.toml` in this directory, and
-creates a member named after `$USER`. Taken ports auto-increment; Ctrl-C stops
-everything. The banner lines:
+creates a member named after `$USER`. Taken ports auto-increment, except
+that an lll server already answering at the API url (`:8090`) is reused, not
+replaced; Ctrl-C stops everything. The banner lines:
 
 - `api` and `board`: the actual endpoints.
 - `admin`: the administrator. With `LLL_ADMIN_EMAIL` and
@@ -225,8 +226,8 @@ lll member invite NAME --email their@email --url https://your-host
 
 That creates the member, generates a temporary password, and prints the exact
 lines they run. Their `lll login --url` names the board's address when the
-inviting machine knows it (`web_url`, which `lll up` and `lll login` save), so
-their login finds both the board and its API; `--url` names another. The password is shown once and stored nowhere, so send it
+inviting machine knows it (`web_url`, which `lll up` and `lll login` save) and
+that board serves the same server, so their login finds both the board and its API; `--url` names another. The password is shown once and stored nowhere, so send it
 before you close the terminal. A member who has lost their password gets a new
 one from `lll member set-password NAME --password <pw>` (superuser only:
 pass `--admin-email` and `--admin-password`, or set them in the environment).

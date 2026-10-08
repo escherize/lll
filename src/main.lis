@@ -114,7 +114,8 @@ A team is one tracker on the server: its key (ENG) prefixes every issue id
 Start here, with no server yet:
   lll up                  start a server and web board on this machine; keep it
                           running (on this machine it also logs the CLI in)
-  lll login               log the CLI in as your member, if lll up did not
+  lll login --url URL     from another machine, or for a hosted server: log the
+                          CLI in (see 'lll login --help' for a first account)
   lll attach              in your repo: point it at a team (--key KEY to pick one)
   lll issue create -t \"First issue\"
 
