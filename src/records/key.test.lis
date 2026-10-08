@@ -72,4 +72,6 @@ fn issue_of_team_asks_the_parser() {
   assert !issue_of_team("ABC-", "ABC")
   assert !issue_of_team("ABC-+1", "ABC")
   assert !issue_of_team("ABC-1x", "ABC")
+  assert !issue_of_team(" ABC-1", "ABC")
+  assert !issue_of_team("ABC -1", "ABC")
 }

@@ -36,5 +36,6 @@ pub fn split_issue_key(id: string) -> Result<(string, int), string> {
 /// team "ABC-X", not "ABC"; a key that does not parse belongs to no team.
 pub fn issue_of_team(issue: string, key: string) -> bool {
   let Ok((team, _)) = split_issue_key(issue) else { return false }
-  normalize_team_key(team) == key
+  // ToUpper, not normalize_team_key: a key with stray spaces names no team.
+  strings.ToUpper(team) == key
 }
