@@ -91,6 +91,15 @@ minors. Issue keys are on the project's own board (`lll issue view KEY`).
   contradictory combinations have no constructor.
   `scripts/test_write_layer.py` fails on a record write outside the layer.
   (LLL-659)
+- Migrations: `scripts/fixtures/collection_rules.json` pins every
+  collection's final rules, and the gate fails when the migrations build
+  anything else, so a rule migration that drops an earlier clause no longer
+  passes unseen. `pb/pb_migrations/lib/rules.js` adds or removes one rule
+  clause, so a new migration need not restate the whole rule.
+  `scripts/test_migration_names.py` refuses a new shared timestamp and a
+  renamed shipped migration; the three existing shared timestamps keep their
+  names, because PocketBase tracks applied migrations by file name.
+  `pb/README.md` describes the current layout. (LLL-657)
 
 ### Security
 

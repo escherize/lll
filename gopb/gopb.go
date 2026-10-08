@@ -8,7 +8,6 @@ package gopb
 
 import (
 	"fmt"
-	"io/fs"
 	"math"
 	"net/http"
 	"os"
@@ -16,6 +15,7 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/dop251/goja"
 	"github.com/escherize/lll/pb"
 	validation "github.com/pocketbase/ozzo-validation/v4"
 	"github.com/pocketbase/pocketbase"
@@ -76,6 +76,7 @@ func Serve(dataDir, addr, adminEmail, adminPassword, version, allowedOriginsSpec
 	// takes no fs.FS.
 	jsvm.MustRegister(app, jsvm.Config{
 		MigrationsDir: migrationsDir,
+		OnInit:        bindMigrationsDir(migrationsDir),
 	})
 
 	registerIssueProvenance(app)
@@ -235,7 +236,11 @@ func Serve(dataDir, addr, adminEmail, adminPassword, version, allowedOriginsSpec
 // are small and there are 15 of them; the write cost is not worth reasoning
 // about, the drift is.
 func materializeMigrations(dataDir string) (string, error) {
-	dir := filepath.Join(dataDir, "pb_migrations")
+	// Absolute, because bindMigrationsDir hands it to require.
+	dir, err := filepath.Abs(filepath.Join(dataDir, "pb_migrations"))
+	if err != nil {
+		return "", fmt.Errorf("resolving the migrations directory: %w", err)
+	}
 	if err := os.RemoveAll(dir); err != nil {
 		return "", fmt.Errorf("clearing the migrations directory %s: %w", dir, err)
 	}
@@ -243,24 +248,24 @@ func materializeMigrations(dataDir string) (string, error) {
 		return "", fmt.Errorf("creating the migrations directory %s: %w", dir, err)
 	}
 
-	entries, err := fs.ReadDir(pb.Migrations(), ".")
-	if err != nil {
-		return "", fmt.Errorf("reading the embedded migrations: %w", err)
-	}
-	for _, entry := range entries {
-		if entry.IsDir() {
-			continue
-		}
-		content, err := fs.ReadFile(pb.Migrations(), entry.Name())
-		if err != nil {
-			return "", fmt.Errorf("reading the embedded migration %s: %w", entry.Name(), err)
-		}
-		if err := os.WriteFile(filepath.Join(dir, entry.Name()), content, 0o644); err != nil {
-			return "", fmt.Errorf("writing the migration %s: %w", entry.Name(), err)
-		}
+	// The whole tree, so lib/rules.js comes along. jsvm loads only the
+	// top-level files as migrations; a subdirectory is for require.
+	if err := os.CopyFS(dir, pb.Migrations()); err != nil {
+		return "", fmt.Errorf("writing the embedded migrations to %s: %w", dir, err)
 	}
 
 	return dir, nil
+}
+
+// bindMigrationsDir gives every migration `__migrations`, the absolute path
+// of the unpacked migrations directory, so a migration can
+// require(`${__migrations}/lib/rules.js`) (LLL-657). jsvm runs each migration
+// as a script at <cwd>/pb.js, so a relative require resolves against the
+// process working directory, which `lll up` does not fix.
+func bindMigrationsDir(dir string) func(*goja.Runtime) {
+	return func(vm *goja.Runtime) {
+		vm.Set("__migrations", dir)
+	}
 }
 
 // issueDefaults assigns the per-team issue number (issue_numbers.go) and the
