@@ -2,7 +2,9 @@ import "go:encoding/json"
 import "go:html/template"
 import "go:net/http"
 import "go:net/url"
+import "go:os"
 import "go:strings"
+import "go:time"
 
 import "pb"
 
@@ -15,14 +17,42 @@ import "pb"
 // GET shows the name form. POST redeems: gopb kills the code and creates the
 // member in one transaction and returns the member's token, which becomes
 // the `lll_board` cookie (the board cookie contract shared with LLL-545:
-// HttpOnly, Path=/, SameSite=Lax, one year). The redirect that follows names
-// a team page, never the code. Admitting that cookie at the gate is LLL-545's
-// part; until it lands the gate refuses it, which fails closed.
+// HttpOnly, Path=/, SameSite=Lax, one year). The redirect that follows goes
+// to /me (below), never to a URL carrying the code. The gate admits that
+// cookie as a member viewer (LLL-545).
+//
+// /me (LLL-648) is a member's own page: its board links and its CLI login.
+// A member who joined here has no password (its email is synthesized), so
+// the token in its cookie is its only credential. /me shows that token only
+// in answer to a same-origin POST, so a reload or a GET never displays it,
+// and with the commands that log the CLI in with it. Minting a second token
+// would add nothing: PocketBase revokes a member's tokens together.
 
 /// The name form. It never looks the code up: a GET must not be a way to
 /// test codes, and the POST gives the real answer anyway.
-pub fn join_page(w: http.ResponseWriter, _r: Ref<http.Request>) {
-  join_respond(w, 200, join_html("", true))
+pub fn join_page(w: http.ResponseWriter, r: Ref<http.Request>) {
+  join_respond(w, 200, join_html("", true, signed_in_as(r)))
+}
+
+/// Who this browser is signed in to the board as, in words, or "" when it
+/// holds no board cookie that still resolves (LLL-632). Joining replaces
+/// that cookie, so the form warns before it does.
+fn signed_in_as(r: Ref<http.Request>) -> string {
+  let want = os.Getenv("LLL_BOARD_TOKEN")
+  let Some(cookie) = cookie_named(r, "lll_board") else { return "" }
+  if is_board_token(cookie, want) { return "the board token, which opens every team" }
+  let Some(viewer) = cookie_viewer(cookie, want) else { return "" }
+  viewer_words(viewer)
+}
+
+/// A scoped viewer in words: a member's name, mode and teams, or the team a
+/// view-only link opens.
+fn viewer_words(v: ScopedViewer) -> string {
+  let teams = if v.teams.is_empty() { "no teams" } else { strings.Join(v.teams, ", ") }
+  let Some(m) = v.member else { return f"a view-only link for {teams}" }
+  let mode = if m.rw { "read-write" } else { "read-only" }
+  let reach = if m.all { "every team" } else { teams }
+  f"{m.name} ({mode}, {reach})"
 }
 
 #[json]
@@ -44,6 +74,7 @@ pub fn join_redeem(w: http.ResponseWriter, r: Ref<http.Request>) {
       join_html(
         "This form can only be submitted from the invite page itself. Open your invite link again.",
         false,
+        "",
       ),
     )
     return
@@ -61,7 +92,7 @@ pub fn join_redeem(w: http.ResponseWriter, r: Ref<http.Request>) {
       join_respond(
         w,
         500,
-        join_html("The board could not read your request. Try again.", true),
+        join_html("The board could not read your request. Try again.", true, ""),
       )
       return
     },
@@ -74,10 +105,11 @@ pub fn join_redeem(w: http.ResponseWriter, r: Ref<http.Request>) {
       // server failure, which rolled the redemption back. Every other
       // refusal (unknown, used, expired, void) is final for this link.
       if status >= 400 && status < 500 {
+        let current = if status == 400 { signed_in_as(r) } else { "" }
         join_respond(
           w,
           status,
-          join_html(pb.display_error(e).summary, status == 400),
+          join_html(pb.display_error(e).summary, status == 400, current),
         )
       } else {
         join_respond(
@@ -86,6 +118,7 @@ pub fn join_redeem(w: http.ResponseWriter, r: Ref<http.Request>) {
           join_html(
             "The board could not complete this. Your invite link may still work: try again in a moment.",
             true,
+            "",
           ),
         )
       }
@@ -101,6 +134,7 @@ pub fn join_redeem(w: http.ResponseWriter, r: Ref<http.Request>) {
       join_html(
         "You joined, but the board could not read the answer. Ask whoever invited you to check 'lll member list'.",
         false,
+        "",
       ),
     )
     return
@@ -122,7 +156,9 @@ pub fn join_redeem(w: http.ResponseWriter, r: Ref<http.Request>) {
     ..,
   }
   http.SetCookie(w, &cookie)
-  http.Redirect(w, r, join_target(joined.teams), 303)
+  // The member's page first (LLL-648): it links the board and offers the
+  // CLI login, which a member who joined here has no other way to get.
+  http.Redirect(w, r, "/me", 303)
 }
 
 /// Where a new member lands: its first team's board. Built from the team key
@@ -157,11 +193,18 @@ fn join_respond(w: http.ResponseWriter, status: int, page: string) {
 
 /// The page: a message (escaped here) and, when `form`, the name form. The
 /// form has no action, so it posts back to this same /join/<code> URL.
-pub fn join_html(message: string, form: bool) -> string {
+/// `signed_in` names the login this browser already holds ("" for none):
+/// joining replaces it, so the form says so first (LLL-632).
+pub fn join_html(message: string, form: bool, signed_in: string) -> string {
   let note = if message == "" {
     ""
   } else {
     f"<p role='alert' style='margin: 1.5rem 0 0; padding: .6rem .8rem; border-left: 3px solid #b3261e; background: #fdeded; color: #7f1d1b;'>{template.HTMLEscapeString(message)}</p>"
+  }
+  let replaces = if !form || signed_in == "" {
+    ""
+  } else {
+    f"<p role='status' style='margin: 1.5rem 0 0; padding: .6rem .8rem; border-left: 3px solid #b26a00; background: #fff4e0; color: #5c3700;'>This browser is signed in to this board as <strong>{template.HTMLEscapeString(signed_in)}</strong>. Joining signs it in as the new member instead: that login keeps working elsewhere, but this browser stops using it. To keep it here, open this invite link in a private window or another browser.</p>"
   }
   let fields = if !form {
     ""
@@ -196,6 +239,7 @@ style='padding: .5rem .6rem; font: inherit; color: inherit; border: 1px solid #b
 <h1 style='font-size: 1.4rem;'>Join this lll board</h1>",
       lead,
       note,
+      replaces,
       fields,
       "</body>
 </html>
@@ -203,4 +247,119 @@ style='padding: .5rem .6rem; font: inherit; color: inherit; border: 1px solid #b
     ],
     "\n",
   )
+}
+
+/// GET /me: who this browser is signed in as, its boards, and the offer of
+/// a CLI login. Never the token itself.
+pub fn me_page(w: http.ResponseWriter, r: Ref<http.Request>) {
+  join_respond(w, 200, me_html(board_viewer(r), "", ""))
+}
+
+/// POST /me: the same page, plus the member's CLI login. Only a member
+/// cookie has one: the board token and a view-only link name no member.
+/// The board's origin guard has already refused a POST from another page.
+pub fn me_cli(w: http.ResponseWriter, r: Ref<http.Request>) {
+  let viewer = board_viewer(r)
+  let token = match viewer {
+    Viewer.Scoped(v) => v.member.map_or("", |m| m.token),
+    Viewer.Full => "",
+  }
+  if token == "" {
+    join_respond(w, 403, me_html(viewer, "", ""))
+    return
+  }
+  match request_origin(r) {
+    Ok(origin) => join_respond(w, 200, me_html(viewer, origin, token)),
+    Err(_) => join_respond(
+      w,
+      400,
+      join_html(
+        "This board cannot tell its own address from the request, so it cannot write the login command. Open the board by its usual address and try again.",
+        false,
+        "",
+      ),
+    ),
+  }
+}
+
+/// The /me page. `token` is "" until the member asks for its CLI login;
+/// `origin` is the address the browser reached the board at, which serves
+/// the API too, so it is the CLI's --url.
+pub fn me_html(viewer: Viewer, origin: string, token: string) -> string {
+  let body = match viewer {
+    Viewer.Full => "<p>This browser is signed in with the board token. It opens every team and names no member, so there is no CLI login to show here.</p>
+<p>On the machine running <code>lll up</code>, the CLI is already logged in: <code>lll whoami</code> says as whom. To give someone else a login, run <code>lll invite create --team KEY</code> and send them the link.</p>
+<p><a href='/'>Open the board</a></p>",
+    Viewer.Scoped(v) => match v.member {
+      None => f"<p>This browser holds {template.HTMLEscapeString(viewer_words(v))}. It names no member, so there is no CLI login to show. Ask whoever sent it for an invite link.</p>
+{board_links(v.teams)}",
+      Some(m) => f"<p>Signed in as <strong>{template.HTMLEscapeString(viewer_words(v))}</strong>.</p>
+{board_links(v.teams)}
+<h2 style='font-size: 1.1rem; margin-top: 2rem;'>Use lll from your terminal</h2>
+{cli_steps(m, v.teams, origin, token)}",
+    },
+  }
+  strings.Join(
+    [
+      "<!doctype html>
+<html lang='en'>
+<head>
+<meta charset='utf-8'>
+<meta name='viewport' content='width=device-width, initial-scale=1'>
+<meta name='referrer' content='same-origin'>
+<title>Your lll board login</title>
+</head>
+<body style='font-family: ui-sans-serif, system-ui, sans-serif; max-width: 42rem; margin: 4rem auto; padding: 0 1rem; color: #1c1c1e; line-height: 1.5;'>
+<h1 style='font-size: 1.4rem;'>Your lll board login</h1>",
+      body,
+      "</body>
+</html>
+",
+    ],
+    "\n",
+  )
+}
+
+/// One link per team this viewer opens.
+fn board_links(teams: Slice<string>) -> string {
+  if teams.is_empty() { return "<p>This login opens no teams yet.</p>" }
+  let items = teams.map(|key| {
+    let k = template.HTMLEscapeString(key)
+    f"<li><a href='{join_target([key])}'>Open the {k} board</a></li>"
+  })
+  f"<ul>{strings.Join(items, "")}</ul>"
+}
+
+/// The offer (a button) or, after the POST, the commands and the token.
+fn cli_steps(
+  m: ViewerMember,
+  teams: Slice<string>,
+  origin: string,
+  token: string,
+) -> string {
+  let pre = "style='padding: .6rem .8rem; background: #f4f4f5; border-radius: .35rem; white-space: pre-wrap; word-break: break-all;'"
+  let power = if m.rw { "acts as you" } else { "reads as you" }
+  if token == "" {
+    return f"<p>Install lll first: see <a href='https://github.com/escherize/lll#install'>Install</a> in the README. Then show your CLI login: the token this browser signs in with. Anyone holding it {power}, so it is shown only when you ask, never on a reload.</p>
+<form method='post' action='/me'>
+<button type='submit' style='padding: .55rem 1rem; font: inherit; border: 1px solid #1c1c1e; border-radius: .35rem; background: #1c1c1e; color: #fff; cursor: pointer;'>Show my CLI login</button>
+</form>"
+  }
+  let attach = match teams.get(0) {
+    Some(key) => f"<li>In your repository, attach it to the team:<pre {pre}>lll attach --key {template.HTMLEscapeString(key)}</pre></li>",
+    None => "",
+  }
+  let expiry = match pb.token_expiry(token) {
+    Some(exp) => {
+      let day = time.Unix(exp as int64, 0).UTC().Format("2006-01-02")
+      f" It expires on {day}."
+    },
+    None => "",
+  }
+  f"<ol>
+<li>Log in. The command prompts for the token:<pre {pre}>lll login --url {template.HTMLEscapeString(origin)} --token -</pre></li>
+<li>Paste this token at the prompt and press Enter:<pre {pre}>{template.HTMLEscapeString(token)}</pre></li>
+{attach}
+</ol>
+<p>Keep the token private: anyone holding it {power}.{expiry} If it leaks, ask whoever invited you to remove this member.</p>"
 }

@@ -43,6 +43,13 @@ pub fn login_spec() -> Slice<flags.Flag> {
       ..,
     },
     flags.Flag {
+      name: "--token",
+      value: true,
+      hint: "token",
+      help: "log in with a member token instead of a password; - prompts for it",
+      ..,
+    },
+    flags.Flag {
       name: "--admin-email",
       value: true,
       hint: "email",
@@ -110,6 +117,16 @@ pub fn login(args: Slice<string>) -> Result<(), string> {
   // One reader for the whole flow: a second bufio.Reader would race the
   // first's read-ahead and could lose the password line behind the email.
   let mut input = bufio.NewReader(os.Stdin)
+  if p.given("--token") {
+    if p.given("--email") || p.given("--password") || p.given("--create") {
+      return Err("--token logs in with a member token: drop --email, --password and --create")
+    }
+    let raw = p.one("--token")
+    let given = if raw == "-" { read_password(input, "Token: ")? } else { raw }
+    let tok = strings.TrimSpace(given)
+    let (name, read_only) = token_identity(target, tok)?
+    return finish_login(target, before_login, saved_before_login, board_endpoint, tok, name, read_only)
+  }
   // Nothing to prompt at: say what is missing in one go rather than one
   // refusal per flag. Scripts, CI and agents are exactly the callers with no
   // terminal, and they are the ones who cannot answer a prompt.
@@ -212,7 +229,61 @@ would put a second account on that address. --create makes YOUR login: pass
     return Err(f"decoding the auth response: {e}")
   }
   if auth.token == "" { return Err("the response carried no token") }
+  finish_login(
+    target,
+    before_login,
+    saved_before_login,
+    board_endpoint,
+    auth.token,
+    auth.record.name,
+    auth.record.mode == "ro",
+  )
+}
 
+/// The member a token names and whether it is read-only, asked of the
+/// server it will be saved for (`target`, else the configured url). The
+/// access route answers only a valid member token, so a superuser token,
+/// a revoked one or a typo stops here instead of being saved.
+fn token_identity(target: string, tok: string) -> Result<(string, bool), string> {
+  if tok == "" {
+    return Err("--token needs a member token: paste it after --token, or pass --token - and pipe it in")
+  }
+  if target != "" {
+    if let Err(e) = os.Setenv("LLL_URL", target) {
+      return Err(f"pointing at {target}: {e}")
+    }
+  }
+  let body = match pb.get_as("/api/lll/access", tok) {
+    Ok(b) => b,
+    Err(e) => {
+      let status = pb.response_status(e)
+      if status == 401 || status == 403 {
+        return Err(
+          "the server did not accept that token as a member token (expired, revoked, mistyped, or an administrator token); get a fresh one from the board's /me page ('Show my CLI login') or 'lll token create NAME'",
+        )
+      }
+      return Err(e)
+    },
+  }
+  let mut reply = AccessReply { .. }
+  let decoded = json.Unmarshal(body.bytes(), &reply)
+  if decoded.is_err() || reply.name == "" {
+    return Err("the server answered, but not with a member: is --url this board's address?")
+  }
+  Ok((reply.name, !reply.rw))
+}
+
+/// Save a login that just authenticated: url, board endpoint, token, then
+/// the team when the server leaves no choice.
+fn finish_login(
+  target: string,
+  before_login: config.Config,
+  saved_before_login: config.Config,
+  board_endpoint: string,
+  token: string,
+  name: string,
+  read_only: bool,
+) -> Result<(), string> {
   // The home config, never the repo's: .lll.toml is committed (TASK-168) and
   // a token must not travel with it. The value is written here and printed
   // nowhere — even success output names the member and the file, not the key.
@@ -237,8 +308,8 @@ would put a second account on that address. --create makes YOUR login: pass
       }
     }
   }
-  let path = set_home_key("token", auth.token)?
-  fmt.Println(f"logged in as {auth.record.name}")
+  let path = set_home_key("token", token)?
+  fmt.Println(f"logged in as {name}")
   fmt.Println(f"token saved to {path}")
   if os.Getenv("LLL_TOKEN") != "" {
     fmt.Println(
@@ -254,7 +325,7 @@ would put a second account on that address. --create makes YOUR login: pass
   // belongs to 'lll attach'. Config layers rather than shadows (TASK-179), so
   // a home 'team' is a machine-wide default that any attached repo overrides
   // — which is what the layering documents it for.
-  settle_team()
+  settle_team(read_only)
   let saved_cfg = config.load()?
   if saved_cfg.web_url == "" {
     fmt.Println("board endpoint: run 'lll config set web_url URL' with the board address supplied by your deployer")
@@ -265,7 +336,14 @@ would put a second account on that address. --create makes YOUR login: pass
 /// Settle a team on the home config when there is nothing to decide, and say
 /// what to run when there is. Never an error: the login itself succeeded, and
 /// a server that cannot answer about teams does not un-log-you-in.
-fn settle_team() {
+fn settle_team(read_only: bool) {
+  // A read-only member's first write answers 403, so its ready line names a
+  // read (LLL-648).
+  let ready = if read_only {
+    "ready (read-only): lll issue list"
+  } else {
+    "ready: lll issue create \"a title\""
+  }
   let Ok(cfg) = config.load() else { return }
   let teams = match records.list_teams() {
     Ok(teams) => teams,
@@ -280,7 +358,7 @@ fn settle_team() {
         if team.archived {
           fmt.Println(f"authenticated, but team {cfg.team} is archived; run 'lll team unarchive {cfg.team}' to restore it, or attach to another team")
         } else {
-          fmt.Println(f"team {cfg.team} — ready: lll issue create \"a title\"")
+          fmt.Println(f"team {cfg.team}: {ready}")
         }
       },
       None => fmt.Println(f"authenticated, but team {cfg.team} is missing on this server. Check 'lll team list --archived' and reattach with 'lll attach --key EXISTING_KEY'. Only if you intend a new team, run 'lll attach --key {cfg.team}'."),
@@ -297,7 +375,7 @@ fn settle_team() {
     // "you can see": a team-scoped member is shown only its teams, so "the
     // server's only team" was false for it (verification fleet, LLL-552).
     fmt.Println(f"team = \"{key}\" in {path} (the only team you can see)")
-    fmt.Println("ready: lll issue create \"a title\"")
+    fmt.Println(ready)
     fmt.Println("in a shared repo, 'lll attach' writes .lll.toml; commit that file with Git if clones should inherit the team")
     return
   }
@@ -692,10 +770,21 @@ different address, or use 'lll config set web_url URL'. Login reports any
 remaining setup, such as a missing team or board endpoint. 'lll attach'
 writes the team to the directory's .lll.toml.
 
+--token logs in with a member token instead of an email and password: the
+one the board's /me page ('Show my CLI login') shows a member who joined by invite link,
+or one from 'lll token create NAME'. --token - prompts for it with echo off
+(or reads one line from a pipe), which keeps it out of shell history:
+
+  lll login --url https://tracker.example.com --token -
+
+On the machine running a loopback 'lll up', no login is needed: the boot logs
+the CLI in as the board's member when no token is configured.
+
 No account on the server yet? If you hold the admin credentials
-(LLL_ADMIN_EMAIL/LLL_ADMIN_PASSWORD, the ones 'lll up' prints and a
-deployment sets as secrets), --create makes the member and logs into it in
-one command:
+(LLL_ADMIN_EMAIL/LLL_ADMIN_PASSWORD as a deployment sets them; a loopback
+'lll up' without them uses admin@local.dev / admin-local-123 and prints that
+pair in its banner), --create makes the member and logs into it in one
+command:
 
   lll login --url https://tracker.example.com --email you@example.com --create \\
     --password <pick one>
@@ -706,8 +795,9 @@ not the admin password.
 
 Otherwise ask whoever deployed the server for an account; they run
 'lll member invite <name> --email <you>' and send you what it prints. An
-existing account whose password is lost is reset with
-'lll member set-password <name>'.
+existing account whose password is lost is reset by a superuser with
+'lll member set-password <name>'. To change your own password, run
+'lll member set-password <your name> --old-password <current>'.
 
 'lll logout' clears the token again.",
   )

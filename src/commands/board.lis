@@ -23,7 +23,15 @@ pub fn board(args: Slice<string>) -> Result<(), string> {
   }
   let open = p.given("-w")
   let mut base = web_base()?
-  if p.given("--team") { base = team_link(base, p.one("--team"))? }
+  if p.given("--team") {
+    base = team_link(base, p.one("--team"))?
+  } else if (base.starts_with("http://") || base.starts_with("https://")) && is_loopback(base) {
+    // The board is gated: a bare url answers 401 (LLL-648). On the machine
+    // serving a loopback board, the printed link signs the browser in. Only
+    // loopback: an LLL_BOARD_TOKEN must never ride to whatever other host
+    // web_url names.
+    if let Some(tok) = known_board_token(base) { base = f"{base}/?board_token={tok}" }
+  }
   if open {
     fmt.Println(f"Opening {base}")
     return open_url(base)
@@ -40,6 +48,12 @@ Usage:
   lll board              print the board URL
   lll board -w           open the board in the browser
   lll board --team KEY   print a view-only link to one team's board
+
+The board answers only browsers that carry its board token. On the machine
+running a loopback 'lll up', the printed URL carries the token as
+?board_token=..., and opening it once signs the browser in with a cookie.
+That link opens every team: do not share it. Elsewhere the URL is bare; sign
+in with the link your deployer or an invite gave you.
 
 --team is how you share one team with someone who has no account: the link
 opens only that team's board, read-only, and creates no member. It works on

@@ -119,14 +119,60 @@ with tempfile.TemporaryDirectory(prefix='lll-invites-') as directory:
             code, page, headers = redeem(path, taken)
             assert code == 400 and "<form method='post'" in page and 'Set-Cookie' not in headers, (taken, code, page)
 
-        # Redeeming once works: a 303 that names a team page, never the code.
+        # Redeeming once works: a 303 to the member's own page, never the code.
         code, _, headers = redeem(path, 'Ada Reader')
-        assert code == 303 and headers['Location'] == '/t/ALPHA/', (code, dict(headers))
+        assert code == 303 and headers['Location'] == '/me', (code, dict(headers))
         assert path.rsplit('/', 1)[1] not in headers['Location']
         cookie = headers['Set-Cookie']
         for attr in ['lll_board=', 'Path=/', 'Max-Age=31536000', 'HttpOnly', 'SameSite=Lax']:
             assert attr in cookie, cookie
         token = cookie.split('lll_board=', 1)[1].split(';', 1)[0]
+
+        # LLL-648: /me links the member's boards and offers its CLI login. A
+        # GET never shows the token; the board's own form POST does.
+        ada = {'Cookie': f'lll_board={token}'}
+        code, page, headers = call(board, '/me', headers=ada)
+        assert code == 200 and 'Ada Reader (read-only, ALPHA)' in page and "href='/t/ALPHA/'" in page, page
+        assert token not in page and "action='/me'" in page, page
+        assert headers['Cache-Control'] == 'no-store' and "default-src 'none'" in headers['Content-Security-Policy']
+        code, page, headers = call(board, '/me', {}, method='POST', headers=dict(ada, Origin=board), form=True)
+        assert code == 200 and token in page and f'lll login --url {board} --token -' in page, page
+        assert 'lll attach --key ALPHA' in page and headers['Cache-Control'] == 'no-store', page
+        # Another page cannot make the board show it, nor can a request with no Origin.
+        for hostile in [dict(ada, Origin='https://evil.example'), dict(ada, Origin=board, **{'Sec-Fetch-Site': 'same-site'}), ada]:
+            code, page, _ = call(board, '/me', {}, method='POST', headers=hostile, form=True)
+            assert code == 403 and token not in str(page), (hostile, code, page)
+        # No cookie: the gate's 401. The board token names no member: nothing to show.
+        assert call(board, '/me')[0] == 401
+        code, page, _ = call(board, '/me', {}, method='POST', form=True,
+                             headers={'Cookie': f"lll_board={env['LLL_BOARD_TOKEN']}", 'Origin': board})
+        assert code == 403 and 'names no member' in page and 'eyJ' not in page, (code, page)
+        # The token it shows logs a fresh machine's CLI in; a read-only member's
+        # ready line names a read, not a write.
+        ada_home = root / 'ada-home'
+        ada_home.mkdir()
+        ada_env = {k: v for k, v in env.items() if not k.startswith('LLL_')}
+        ada_env.update(HOME=str(ada_home), LC_ALL='C')
+        out = subprocess.run([binary, 'login', '--url', board, '--token', '-'], input=token + '\n', cwd=ada_home,
+                             env=ada_env, text=True, capture_output=True, timeout=30)
+        assert out.returncode == 0 and 'logged in as Ada Reader' in out.stdout, out.stdout + out.stderr
+        assert 'ready (read-only): lll issue list' in out.stdout and 'issue create' not in out.stdout, out.stdout
+        out = subprocess.run([binary, 'issue', 'list'], cwd=ada_home, env=ada_env, text=True, capture_output=True,
+                             timeout=30)
+        assert out.returncode == 0 and 'alpha work' in out.stdout and 'beta' not in out.stdout, out.stdout + out.stderr
+        out = subprocess.run([binary, 'login', '--url', board, '--token', '-'], input=su + '\n', cwd=ada_home,
+                             env=ada_env, text=True, capture_output=True, timeout=30)
+        assert out.returncode != 0 and 'not accept that token' in out.stderr, out.stdout + out.stderr
+
+        # LLL-632: a browser already signed in is told, before it joins, that
+        # joining replaces that login in this browser.
+        warned = invite('--team', 'ALPHA', '--ro')
+        code, page, _ = call(board, warned, headers=ada)
+        assert code == 200 and 'signed in to this board as <strong>Ada Reader (read-only, ALPHA)</strong>' in page, page
+        code, page, _ = call(board, warned, headers={'Cookie': f"lll_board={env['LLL_BOARD_TOKEN']}"})
+        assert 'signed in to this board as <strong>the board token' in page, page
+        code, page, _ = call(board, warned)
+        assert code == 200 and 'signed in to this board' not in page, page
 
         # The member holds exactly the invite's grants and nothing it chose.
         rec = next(m for m in call(api, '/api/collections/members/records?perPage=200', token=su)[1]['items']
@@ -275,7 +321,7 @@ with tempfile.TemporaryDirectory(prefix='lll-invites-') as directory:
                         token=tok)[0] in (400, 403)
             assert call(api, '/api/collections/invites/records', {'code_hash': 'a' * 64, 'mode': 'rw'}, tok)[0] == 403
         # Control: a superuser does see them, so the 403s above are the rules.
-        assert call(api, '/api/collections/invites/records', token=su)[1]['totalItems'] == 4
+        assert call(api, '/api/collections/invites/records', token=su)[1]['totalItems'] == 5  # four, plus LLL-632's warned link
         print('invites: ok')
     finally:
         child.terminate()

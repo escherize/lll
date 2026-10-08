@@ -224,6 +224,10 @@ fn board_mux(
   // credential until the redemption hands it one (serve_join.lis).
   mux.HandleFunc("GET /join/{code}", join_page)
   mux.HandleFunc("POST /join/{code}", join_redeem)
+  // A member's own page and CLI login (LLL-648), where a join lands. Gated:
+  // it answers the cookie the join just set.
+  mux.HandleFunc("GET /me", gated(me_page))
+  mux.HandleFunc("POST /me", gated(me_cli))
   //
   // Every BOARD route sits behind the board gate (serve_gate.lis): pages,
   // writes, the SSE stream and static assets alike answer only board-token

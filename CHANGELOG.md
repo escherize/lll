@@ -26,8 +26,43 @@ scripts. A removed spelling fails and names its replacement (LLL-644).
 - `--yes` skips a delete confirmation. `team`, `label`, `project`, `member`
   and comment deletes now ask on a terminal; scripts are not asked.
 - `lll watch --label` may be repeated, matching any of the labels.
+- A loopback `lll up` logs the CLI in as its member when the home config
+  holds no token and no other server's url, so `lll issue list` works
+  straight after the first boot.
+  It never replaces an existing token; when the server refuses that token,
+  the banner's `cli` line says how to switch. A `--pb-dir` boot leaves the
+  CLI's login alone, as it does the team (LLL-648).
+- `lll login --token TOKEN` (or `--token -` to be prompted) logs in with a
+  member token instead of a password (LLL-648).
+- A member changes its own password without an administrator:
+  `lll member set-password NAME --old-password CURRENT`. The command logs in
+  again and saves the new token, because the change revokes the old one.
+  `lll member invite` prints this line with the temporary password (LLL-648).
+- `/me` on the board: a member's boards and a "Show my CLI login" button. The
+  token shows only after that same-origin POST, never on a GET. An invite
+  link now lands there after joining (LLL-648).
+- The invite page warns when the browser is already signed in, because
+  joining replaces that login in this browser (LLL-632).
 
 ### Changed
+
+- The `lll up` banner prints the administrator pair on a loopback boot that
+  uses the built-in fallback (`admin@local.dev` / `admin-local-123`). A pair
+  from the environment is never printed. `lll up --help`,
+  `lll login --help`, the README and the landing page now agree (LLL-648).
+- `lll board` prints the board's login link (`?board_token=...`) for a
+  loopback board on the machine running it, because the bare URL answers
+  401. Scripts that parse its output see the token; do not log it. Every boot,
+  loopback included, saves that link privately beside the home config, so
+  `lll member invite --team` prints a board link on a loopback boot too. The
+  401 page names `lll board` instead of a banner line that no longer exists
+  (LLL-648).
+- `lll login` names a read in its ready line for a read-only member, not
+  `issue create` (LLL-648).
+- `lll upgrade` prints the release download as a new file moved into place,
+  which leaves running `lll up` and `lll watch` processes alive, and says to
+  back up a server's data directory first and to upgrade the server and its
+  clients together (LLL-655).
 
 - `-b`/`--body` is the long-text flag everywhere. On `issue create`,
   `project create` and `project edit` it sets the description, and

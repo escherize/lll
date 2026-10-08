@@ -92,7 +92,7 @@ pub fn member_commands() -> Slice<flags.Command> {
     },
     flags.Command {
       name: "set-password",
-      summary: "set a member's login password (superuser only)",
+      summary: "set a member's login password (superuser), or your own with --old-password",
       page: member_set_password_page(),
       spec: set_password_spec(),
       positional: "NAME",
@@ -321,6 +321,13 @@ fn set_password_spec() -> Slice<flags.Flag> {
       ..,
     },
     flags.Flag {
+      name: "--old-password",
+      value: true,
+      hint: "pw",
+      help: "change your own password: your current one (no administrator needed)",
+      ..,
+    },
+    flags.Flag {
       name: "--url",
       value: true,
       hint: "url",
@@ -467,8 +474,9 @@ fn member_password_error(name: string, e: string) -> string {
   let status = pb.response_status(e)
   if status == 403 || status == 401 || (status == 400 &&
   strings.Contains(pb.response_body(e), "oldPassword")) {
-    return "member set-password is superuser-only and the configured token is not one
-set LLL_ADMIN_EMAIL/LLL_ADMIN_PASSWORD to this server's administrator credentials"
+    return f"setting another member's password is superuser-only and the configured token is not one
+set LLL_ADMIN_EMAIL/LLL_ADMIN_PASSWORD to this server's administrator credentials
+if {name} is you, change your own password with: lll member set-password {name} --old-password <current>"
   }
   f"setting {name}'s password: {e}"
 }
@@ -480,6 +488,13 @@ fn member_set_password(input: flags.CommandInput) -> Result<(), string> {
   if name == "" { return Err(f"usage: {usage}") }
 
   point_at_url(p.one("--url"))?
+  if p.given("--old-password") {
+    if p.given("--email") || p.given("--admin-email") || p.given("--admin-password") {
+      return Err("--old-password changes your own password with your own login: drop --email, --admin-email and --admin-password")
+    }
+    let given = if p.given("--password") { Some(p.one("--password")) } else { None }
+    return change_own_password(name, p.one("--old-password"), given)
+  }
   apply_admin_flags(p.one("--admin-email"), p.one("--admin-password"))?
   let su = superuser_auth()?
   let found = records.find_member_as(su, name)?
@@ -603,7 +618,7 @@ fn member_invite(input: flags.CommandInput) -> Result<(), string> {
     let created = create_member_as(su, name, email, password, [], "")?
     status(f"invited {created.name} <{email}>: {describe_access("all", "rw", [])}")
     status("send them this (below, on stdout) — the password is shown once and stored nowhere")
-    for line in invite_lines(email, password, cfg.url, cfg.team) {
+    for line in invite_lines(created.name, email, password, cfg.url, cfg.team) {
       fmt.Println(line)
     }
     return Ok(())
@@ -622,7 +637,7 @@ fn member_invite(input: flags.CommandInput) -> Result<(), string> {
   let created = create_member_as(su, name, email, password, team_ids, mode)?
   status(f"invited {created.name} <{email}>: {describe_access("teams", mode, keys)}")
   status("send them this (below, on stdout) — the password is shown once and stored nowhere")
-  for line in invite_lines(email, password, cfg.url, keys[0]) {
+  for line in invite_lines(created.name, email, password, cfg.url, keys[0]) {
     fmt.Println(line)
   }
   fmt.Println("")
@@ -662,6 +677,14 @@ fn find_team_as(tok: string, key: string) -> Result<Option<models.Team>, string>
 /// saved beside the home config.
 fn scoped_board_link(web_url: string, key: string) -> Option<string> {
   let base = strings.TrimRight(web_url, "/")
+  let Some(board_token) = known_board_token(base) else { return None }
+  Some(f"{base}/t/{key}/?board_token={scoped_board_token(board_token, key)}")
+}
+
+/// The board token for the board at `base`, when this machine knows it:
+/// LLL_BOARD_TOKEN, else the login link `lll up` saved beside the home
+/// config for that same board url. Shared with `lll board`.
+fn known_board_token(base: string) -> Option<string> {
   if base == "" { return None }
   let mut board_token = os.Getenv("LLL_BOARD_TOKEN")
   if board_token == "" {
@@ -671,7 +694,7 @@ fn scoped_board_link(web_url: string, key: string) -> Option<string> {
     board_token = tok
   }
   if board_token == "" { return None }
-  Some(f"{base}/t/{key}/?board_token={scoped_board_token(board_token, key)}")
+  Some(board_token)
 }
 
 /// A single private handoff for a group. The file is reserved before the
@@ -841,6 +864,7 @@ fn member_passes(input: flags.CommandInput) -> Result<(), string> {
 /// `team` is "" when the inviter is not attached to one; the attach line then
 /// says so rather than printing a blank key.
 fn invite_lines(
+  name: string,
   email: string,
   password: string,
   base: string,
@@ -856,6 +880,7 @@ fn invite_lines(
     "",
     f"  lll login --url {base} --email {email}",
     attach,
+    f"  # to choose your own password: lll member set-password {cli_argument(name)} --old-password {password}",
   ]
 }
 
@@ -905,12 +930,21 @@ Only need someone to watch a team's board, with no login of their own?
 fn member_set_password_page() -> string {
   let spec = set_password_spec()
   let usage = flags.usage("lll member set-password", spec, "NAME")
-  f"lll member set-password - set a member's login password (superuser only)
+  f"lll member set-password - set a member's login password
 
 Usage:
   {usage}
 
-Authenticates as the server administrator using --admin-email/--admin-password,
+Your own password needs no administrator: pass your name and your current
+password, logged in as yourself.
+
+  lll member set-password NAME --old-password <current> --password <new>
+
+The change revokes your earlier tokens; the command logs in again and saves
+the new token where the old one was, when that was the home config.
+
+Anyone else's password is superuser only. The command authenticates as the
+server administrator using --admin-email/--admin-password,
 LLL_ADMIN_EMAIL/LLL_ADMIN_PASSWORD, or a configured superuser token.
 Sets NAME's password to --password when supplied. Otherwise prompts
 twice with echo off when stdin is a terminal, or reads two lines when piped.

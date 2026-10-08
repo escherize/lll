@@ -489,6 +489,11 @@ pub fn scoped_route(
   v: ScopedViewer,
   writes: bool,
 ) -> ScopedVerdict {
+  // A viewer's own page (LLL-648): it shows only this viewer's own login,
+  // so read-only viewers get it too, the POST that reveals it included.
+  if path == "/me" && (method == "GET" || method == "HEAD" || method == "POST") {
+    return ScopedVerdict.Open
+  }
   if method == "POST" && scoped_writes().contains(path) {
     if writes { return ScopedVerdict.Open }
     return ScopedVerdict.Closed("read-only board login: it can read its teams but not change them")
@@ -649,11 +654,12 @@ style='padding: .5rem .6rem; font: inherit; color: inherit; border: 1px solid #b
 </label>
 <button type='submit' style='padding: .55rem 1rem; font: inherit; border: 1px solid #1c1c1e; border-radius: .35rem; background: #1c1c1e; color: #fff; cursor: pointer;'>Open the board</button>
 </form>
-<p>Where to find it: the board URL <code>lll up</code> printed in its banner
-carries <code>?board_token=&hellip;</code>, and opening that hands your browser
-a cookie instead. The token comes from <code>LLL_BOARD_TOKEN</code>, or
-<code>lll up</code> generates one each boot and prints it next to the admin
-line.</p>
+<p>Where to find it: on the machine running <code>lll up</code>, run
+<code>lll board</code>, or copy the <code>board  login</code> line from the
+banner. Both print a link carrying <code>?board_token=&hellip;</code>, and
+opening it hands your browser a cookie instead. The token comes from
+<code>LLL_BOARD_TOKEN</code>, or <code>lll up</code> generates one each boot.
+Invited? Open the invite or board link you were sent.</p>
 <p style='color: #666;'>From a terminal:
 <code>curl -H 'Cookie: lll_board=&lt;token&gt;' &lt;board-url&gt;</code></p>
 </body>
