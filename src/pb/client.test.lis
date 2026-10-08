@@ -2,6 +2,8 @@ import "go:errors"
 import "go:github.com/escherize/lll/gopb"
 import "go:net/http"
 import "go:net/http/httptest"
+import "go:os"
+import "go:path/filepath"
 import "go:strings"
 
 import "config"
@@ -250,4 +252,41 @@ fn token_subject_declines_a_three_segment_token_with_a_broken_payload() {
   let broken = "eyJhbGciOiJIUzI1NiJ9.eyJjb2xsZWN0aW9uSWQiOiJwYmNfMzU3MjczOTM0OSIsImV4cCI6MSwiaWQiOiJhYmMxMjNkZWY0NTZnaGkiLCJyZWZyZXNoYWJsZSI6ZmFsc2UsInR5cGUiOiJhdXRoIn0!.sig"
   assert token_subject(broken).is_none()
   assert strings.Split(broken, ".").length() == 3
+}
+
+#[test]
+fn a_refused_file_token_is_replaced_by_the_one_the_file_holds_now() {
+  // v0.9 re-read the config on every request, so a long-running process on
+  // a file token (a board on the caller's token, a watch) healed when the
+  // file was rewritten. The client re-reads once, on refusal, instead.
+  let old = live_token()
+  let fresh = "eyJhbGciOiJIUzI1NiJ9.eyJjb2xsZWN0aW9uSWQiOiJwYmNfMzU3MjczOTM0OSIsImV4cCI6NDEwMjQ0NDgwMCwiaWQiOiJ6enoxMjNkZWY0NTZnaGkiLCJyZWZyZXNoYWJsZSI6ZmFsc2UsInR5cGUiOiJhdXRoIn0.sig"
+  let mut server = httptest.NewServer(http.HandlerFunc(|w, r| {
+    let auth = r.Header.map_or("", |h| h.Get("Authorization"))
+    if auth != f"Bearer {fresh}" {
+      w.WriteHeader(401)
+      let _ = w.Write("{\"data\":{},\"message\":\"The request requires valid record authorization token.\",\"status\":401}".bytes())
+      return
+    }
+    let _ = w.Write("{\"page\":1,\"perPage\":30,\"totalItems\":1,\"totalPages\":1,\"items\":[{\"id\":\"t1\"}]}".bytes())
+  }))
+  defer server.Close()
+  let assert Ok(root) = os.MkdirTemp("", "lll-reload")
+  // Out of this checkout: its committed .lll.toml names the hosted server.
+  let assert Ok(prev) = os.Getwd()
+  defer { let _ = os.Chdir(prev) }
+  let assert Ok(_) = os.Chdir(root)
+  let file = filepath.Join(root, "lll", "lll.toml")
+  let assert Ok(_) = os.MkdirAll(filepath.Dir(file), 0o700)
+  let assert Ok(_) = os.WriteFile(file, f"url = \"{server.URL}\"\ntoken = \"{old}\"\n".bytes(), 0o600)
+  let c = Client.new(config.resolve(config.Env { config_home: root, .. }, config.no_overrides()))
+  assert c.token() == old
+  let assert Ok(_) = os.WriteFile(file, f"url = \"{server.URL}\"\ntoken = \"{fresh}\"\n".bytes(), 0o600)
+  let assert Ok(body) = c.get("/api/collections/teams/records")
+  assert body.contains("\"t1\"")
+  assert c.token() == fresh
+  // A token a boot handed over is never traded for a file's.
+  let handed = c.with_token(old, "")
+  let assert Err(_) = handed.get("/api/collections/teams/records")
+  assert handed.token() == old
 }

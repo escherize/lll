@@ -106,8 +106,11 @@ impl Client {
 
   /// Re-read the config files and send their token from now on: a token
   /// rotated in a file while a long-running process (a board on a caller's
-  /// token) keeps going. An environment token never changes this way.
+  /// token, a watch) keeps going. Only a token that came from a file is
+  /// replaced: an environment token never changes this way, and a token a
+  /// boot handed over (with_token) is not traded for whatever a file says.
   pub fn reload_token(self) {
+    if !strings.HasPrefix(self.token_source, "file:") { return }
     let Ok(cfg) = self.settings.reload().config() else { return }
     if cfg.token != "" && cfg.token != self.token() { self.renew_to(cfg.token) }
   }
@@ -275,6 +278,20 @@ impl Client {
   /// really is empty.
   fn refused_token(self, token: string, wire: Wire) -> Option<Result<string, string>> {
     let verdict = self.token_verdict(wire.base, token)
+    // A process that cannot re-mint (anything but a granted board) heals
+    // the way it did when every request re-read the config: a token
+    // rewritten in a config file since this client was built ('lll login'
+    // elsewhere, a rotated bot token) is tried once before the refusal.
+    if verdict != "valid" && verdict != "opaque" && self.renewal.is_none() {
+      self.reload_token()
+      let fresh = self.token()
+      if fresh != token {
+        return Some(request_options(
+          wire.base, wire.method, wire.path, wire.payload, bearer(fresh), wire.defaulted,
+          wire.content_type, wire.stamp, wire.key,
+        ))
+      }
+    }
     if verdict == "corrupted" { return Some(Err(corrupted_token(self.token_source))) }
     // An expired token is a refusal the board can heal exactly like a
     // rejected one (LLL-388): the expiry verdict used to return here before
