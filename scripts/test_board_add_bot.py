@@ -105,7 +105,7 @@ with tempfile.TemporaryDirectory(prefix='lll-546-') as directory:
             return call(board, path, headers={'Cookie': 'lll_board=' + tok})
 
         def post(tok, body):
-            return call(board, '/bot', body, headers={'Cookie': 'lll_board=' + tok}, form=True)
+            return call(board, '/bot', body, headers={'Cookie': 'lll_board=' + tok, 'Origin': board}, form=True)
 
         # --- only a read-write member viewer is offered the button ---
         assert 'Add a bot' in page('/t/ALPHA/', rw_tok)[1], 'rw member viewer has no Add a bot'
@@ -186,7 +186,8 @@ with tempfile.TemporaryDirectory(prefix='lll-546-') as directory:
         # A Host the prompt refuses to echo is refused before anything is
         # created: no orphan bot without a prompt.
         code, body = call(board, '/bot', {'name': 'orphan1', 'team': 'ALPHA'}, form=True,
-                          headers={'Cookie': 'lll_board=' + rw_tok, 'Host': 'a_b.example:1'})
+                          headers={'Cookie': 'lll_board=' + rw_tok, 'Host': 'a_b.example:1',
+                                   'Origin': 'http://a_b.example:1'})
         assert code == 200 and "cannot tell this board's address" in html.unescape(str(body)), (code, body)
         # The minted bot cannot mint bots from its own cookie.
         assert 'Add a bot' not in page('/t/ALPHA/', bot_tok)[1]

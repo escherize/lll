@@ -159,7 +159,10 @@ fn login_identity(tok: string, want: string) -> string {
 fn confirm_login(w: http.ResponseWriter, r: Ref<http.Request>, tok: string, who: string) {
   w.Header().Set("Content-Type", "text/html; charset=utf-8")
   w.Header().Set("Cache-Control", "no-store")
-  w.Header().Set("Referrer-Policy", "no-referrer")
+  // same-origin, not no-referrer: the token in this URL stays off every
+  // other origin, and the form's POST carries a real Origin. Under
+  // no-referrer browsers send `Origin: null`, which /login refuses.
+  w.Header().Set("Referrer-Policy", "same-origin")
   w.Header().Set("Content-Security-Policy", "frame-ancestors 'none'")
   w.Header().Set("X-Frame-Options", "DENY")
   let token = html.EscapeString(tok)
@@ -214,14 +217,59 @@ pub fn board_login(w: http.ResponseWriter, r: Ref<http.Request>) {
   http.Redirect(w, rc, next, 303)
 }
 
-/// True when the POST's Origin is this request's own scheme-less host and
-/// the browser does not call it cross-origin.
+/// The board's cross-origin guard (LLL-630): every request that is not a
+/// GET or HEAD must name the board itself as its Origin, or it is refused
+/// with 403 before any route, gate or handler sees it. It wraps the whole
+/// router, so a route added later is covered without opting in.
+///
+/// The lll_board cookie is SameSite=Lax, which stops only cross-SITE
+/// requests. Another port on the same host (127.0.0.1:9999, beside the
+/// default `lll up` bind) or a sibling subdomain is the same site, so a
+/// page it serves could otherwise POST to the board with the viewer's
+/// cookie. Sec-Fetch-Site "same-site" is therefore refused too.
+///
+/// A request with no Origin is refused, although Go's
+/// CrossOriginProtection would pass it as a non-browser client: board
+/// writes are a browser surface, browsers always send Origin on them, and
+/// scripts and the CLI use /api/ instead.
+///
+/// The one exemption is the route matched by /api/, the PocketBase API.
+/// It authenticates by an Authorization header, never a cookie, so another
+/// page cannot borrow the viewer's credential there.
+pub fn same_origin_writes(mux: Ref<http.ServeMux>) -> http.Handler {
+  http.HandlerFunc(|w: http.ResponseWriter, r: Ref<http.Request>| {
+    let mut rc = r.Clone(r.Context())
+    let safe = r.Method == "GET" || r.Method == "HEAD"
+    if !safe && !api_route(mux, rc) && !same_origin_post(r) {
+      http.Error(w, foreign_origin(), 403)
+      return
+    }
+    mux.ServeHTTP(w, rc)
+  })
+}
+
+fn foreign_origin() -> string {
+  "this board accepts changes only from its own pages (the request's Origin is not this board); reload the board and try again"
+}
+
+/// True when the router sends this request to the /api/ reverse proxy.
+/// Asked of the router itself, not of the path's prefix, so an unclean path
+/// such as /api/../state is judged by where it actually lands.
+fn api_route(mux: Ref<http.ServeMux>, r: Ref<http.Request>) -> bool {
+  let (_, pattern) = mux.Handler(r)
+  pattern == "/api/"
+}
+
+/// True when the POST's Origin is exactly this request's own host over http
+/// or https, and the browser does not call it cross-origin. A browser
+/// serializes Origin as scheme://host[:port] with nothing after it, so any
+/// other spelling (a path, a trailing slash, userinfo) is refused.
 fn same_origin_post(r: Ref<http.Request>) -> bool {
   let origin = r.Header.map_or("", |h| h.Get("Origin"))
   let site = r.Header.map_or("", |h| h.Get("Sec-Fetch-Site"))
   if site != "" && site != "same-origin" { return false }
-  let Ok(u) = url.Parse(origin) else { return false }
-  origin != "" && u.Host != "" && u.Host == r.Host && (u.Scheme == "http" || u.Scheme == "https")
+  r.Host != "" &&
+  (origin == "http://" + r.Host || origin == "https://" + r.Host)
 }
 
 /// A redirect target that stays on this board: a path, never another host.

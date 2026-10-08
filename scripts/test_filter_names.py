@@ -66,7 +66,7 @@ for kind, collection, extra in [('label', 'labels', {'color': '#123456'}),
     for ident in ('', entity['id']):
         req = urllib.request.Request(board + '/t/NAMES/settings/' + kind,
             data=urllib.parse.urlencode(dict(id=ident, name=invalid, **extra)).encode(),
-            headers={'Cookie': 'lll_board=' + os.environ['LLL_TEST_BOARD_TOKEN']})
+            headers={'Cookie': 'lll_board=' + os.environ['LLL_TEST_BOARD_TOKEN'], 'Origin': board})
         with urllib.request.urlopen(req, timeout=20) as response:
             reply = html.unescape(response.read().decode())
         refused(reply)

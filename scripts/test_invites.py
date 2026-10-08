@@ -101,13 +101,14 @@ with tempfile.TemporaryDirectory(prefix='lll-invites-') as directory:
             return link[len(board):]
 
         def redeem(path, name, headers=None):
-            return call(board, path, {'name': name}, method='POST', headers=headers, form=True)
+            # The board's own form sends its Origin; every board POST needs it (LLL-630).
+            return call(board, path, {'name': name}, method='POST', headers=headers or {'Origin': board}, form=True)
 
         # The form: outside the gate, and nothing about it leaks the code.
         path = invite('--team', 'ALPHA', '--ro')
         code, page, headers = call(board, path)
         assert code == 200 and "<form method='post'" in page, page
-        assert headers['Referrer-Policy'] == 'no-referrer' and headers['Cache-Control'] == 'no-store', headers
+        assert headers['Referrer-Policy'] == 'same-origin' and headers['Cache-Control'] == 'no-store', headers
         assert "frame-ancestors 'none'" in headers['Content-Security-Policy'], headers
 
         # Another site cannot submit the form, and trying does not spend the code.
@@ -154,17 +155,20 @@ with tempfile.TemporaryDirectory(prefix='lll-invites-') as directory:
         assert not any(m['name'] in ('Second Person', 'Nobody', 'Late Person')
                        for m in call(api, '/api/collections/members/records?perPage=200', token=su)[1]['items'])
 
-        # An invite cannot grant more than its creator holds.
+        # Only a full read-write person (or a superuser) mints (LLL-629): a
+        # scoped guest's own invites would outlive its removal.
+        WHO = 'only a person with read-write access to every team, or a superuser, can create invites'
         guest = member('guest', scope='teams', teams=[alpha['id']], mode='rw')
         reader = member('reader', scope='teams', teams=[alpha['id']], mode='ro')
-        out = lll('invite', 'create', '--team', 'ALPHA', '--ro', token=reader)
-        assert out.returncode != 0 and 'cannot invite anyone' in out.stderr, out.stdout + out.stderr
-        code, body, _ = call(api, '/api/lll/invites', {'teams': [beta['id']], 'mode': 'ro'}, guest)
-        assert code == 400 and 'that you can see' in body['message'], body
-        code, body, _ = call(api, '/api/lll/invites', {'teams': [alpha['id'], beta['id']], 'mode': 'ro'}, guest)
-        assert code == 400, body
+        for tok in [reader, guest]:
+            out = lll('invite', 'create', '--team', 'ALPHA', '--ro', token=tok)
+            assert out.returncode != 0 and WHO in out.stderr.lower(), out.stdout + out.stderr
+            code, body, _ = call(api, '/api/lll/invites', {'teams': [alpha['id']], 'mode': 'rw'}, tok)
+            assert code == 403 and WHO in body['message'].lower(), body
         code, body, _ = call(api, '/api/lll/invites', {'teams': [], 'mode': 'rw'}, owner)
         assert code == 400, body
+        code, body, _ = call(api, '/api/lll/invites', {'teams': ['nosuchteam00001'], 'mode': 'rw'}, owner)
+        assert code == 400 and 'that you can see' in body['message'], body
         # The name rule holds after joining too: a member renaming itself
         # through the API gets the redeemer's rule. Its other fields stay editable.
         me = rec_id = next(m for m in call(api, '/api/collections/members/records?perPage=200', token=su)[1]['items']
@@ -189,15 +193,15 @@ with tempfile.TemporaryDirectory(prefix='lll-invites-') as directory:
         ownedp_tok = call(api, '/api/collections/members/auth-with-password',
                           {'identity': 'ownedp@example.test', 'password': 'pw12345678'})[1]['token']
         code, body, _ = call(api, '/api/lll/invites', {'teams': [alpha['id']], 'mode': 'rw'}, ownedp_tok)
-        assert code == 403 and 'owned members cannot invite' in body['message'].lower(), body
+        assert code == 403 and WHO in body['message'].lower(), body
         # A bot does not invite people, even one owned by a full member.
         out = lll('bot', 'bot-inviter')
         assert out.returncode == 0, out.stdout + out.stderr
         # 'lll bot' prints an agent prompt whose token line is an export (LLL-546).
         bot = next(l for l in out.stdout.splitlines() if l.startswith('export LLL_TOKEN='))[len('export LLL_TOKEN='):]
         code, body, _ = call(api, '/api/lll/invites', {'teams': [alpha['id']], 'mode': 'ro'}, bot)
-        assert code == 403 and 'bots and owned members cannot invite' in body['message'].lower(), body
-        rw = invite('--team', 'ALPHA', token=guest)
+        assert code == 403 and WHO in body['message'].lower(), body
+        rw = invite('--team', 'ALPHA', token=owner)
         code, _, headers = redeem(rw, 'Rae Writer')
         assert code == 303, code
         rae = headers['Set-Cookie'].split('lll_board=', 1)[1].split(';', 1)[0]

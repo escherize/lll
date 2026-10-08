@@ -12,9 +12,9 @@ async page => {
     await page.locator('.issue-main h1').click();
     await page.locator('#title-form input[name=title]').fill('Keep my claim review title');
     const memberID = await page.locator('#claim-form input[name=member_id]').inputValue();
-    const forged = await page.request.post(`${base}/claim`, {form: {key: 'CL185-1', member_id: 'stale-actor'}});
+    const forged = await page.request.post(`${base}/claim`, {headers: {Origin: base}, form: {key: 'CL185-1', member_id: 'stale-actor'}});
     if (!(await forged.text()).includes('identity changed')) throw new Error('stale board actor accepted');
-    await page.request.post(`${base}/claim`, {form: {key: 'CL185-1', member_id: memberID}});
+    await page.request.post(`${base}/claim`, {headers: {Origin: base}, form: {key: 'CL185-1', member_id: memberID}});
     await page.locator('#release-form button').waitFor();
     if (!await page.locator('#title-form input[name=title]').isVisible()) throw new Error('remote claim closed title draft');
     if (await page.locator('#title-form input[name=title]').inputValue() !== 'Keep my claim review title') throw new Error('remote claim lost title draft');
@@ -29,7 +29,7 @@ async page => {
     await page.locator('#release-form button').waitFor();
     const replacement = await page.locator('#release-form input[name=claim_id]').inputValue();
     if (replacement === oldClaim) throw new Error('replacement reused a claim ID');
-    const stale = await page.request.post(`${base}/release`, {form: {key: 'CL185-1', claim_id: oldClaim}});
+    const stale = await page.request.post(`${base}/release`, {headers: {Origin: base}, form: {key: 'CL185-1', claim_id: oldClaim}});
     if (!(await stale.text()).includes('claim changed')) throw new Error('stale release was not rejected');
     if (await page.locator('#comment-form textarea').inputValue() !== 'Keep my claim review comment') throw new Error('lost comment draft');
     if (await page.locator('#title-form input[name=title]').inputValue() !== 'Keep my claim review title') throw new Error('lost title draft');

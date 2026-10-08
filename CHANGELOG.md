@@ -61,6 +61,29 @@ scripts. A removed spelling fails and names its replacement (LLL-644).
   `lll issue unlink KEY-123 SLUG`.
 - `lll finding read`: use `lll doc view SLUG`.
 
+### Security
+
+- The web board refuses every request other than GET or HEAD unless its
+  `Origin` is the board's own address. Before this, a page served on another
+  port of the same host (for example `127.0.0.1:9999` beside the default
+  `lll up` bind) counted as the same site, so it could change issues,
+  settings and bots with the viewer's board cookie. A request with no
+  `Origin`, `Origin: null`, or `Sec-Fetch-Site` other than `same-origin` is
+  refused too. The API under `/api/`, which the CLI uses, is unchanged.
+  Scripts that POST to board pages with `curl` must now send
+  `-H "Origin: <board url>"`. The invite name form and the sign-in confirm
+  page now send `Referrer-Policy: same-origin` instead of `no-referrer`.
+  Under `no-referrer`, browsers sent `Origin: null` on their own form POST.
+  This also fixes the confirm page's "Sign in" button, which this check
+  had always refused (LLL-630).
+- Only a person with read-write access to every team, or a superuser, can
+  create an invite. A team-scoped or read-only member, a bot or a member with
+  an owner is refused with a message that names who can. A joined member
+  does not depend on its inviter, so a scoped guest could otherwise keep
+  access after removal through members it invited itself. Invites that such
+  a member made earlier and nobody has used no longer redeem, and narrowing a
+  full member voids its unused invites (LLL-629).
+
 ### Fixed
 
 - The API port's `/.well-known/lll` always answers `service` and `version`,

@@ -34,7 +34,7 @@ def api_request(path, body=None, method=None):
 
 def web_request(base, path, body=None):
     req = urllib.request.Request(base + path, data=None if body is None else urllib.parse.urlencode(body).encode(),
-        headers={'Cookie': cookie, 'Content-Type': 'application/x-www-form-urlencoded'})
+        headers={'Cookie': cookie, 'Origin': base, 'Content-Type': 'application/x-www-form-urlencoded'})
     try:
         response = urllib.request.urlopen(req, timeout=30)
     except urllib.error.HTTPError as error:

@@ -28,7 +28,7 @@ def delete(kind, ident, **fields):
     req = urllib.request.Request(
         f'{board}/settings/{kind}?del=1',
         data=urllib.parse.urlencode(dict(id=ident, **fields)).encode(),
-        headers={'Cookie': f'lll_board={os.environ["LLL_TEST_BOARD_TOKEN"]}'})
+        headers={'Cookie': f'lll_board={os.environ["LLL_TEST_BOARD_TOKEN"]}', 'Origin': board})
     with urllib.request.urlopen(req, timeout=10) as response:
         return html.unescape(response.read().decode())
 

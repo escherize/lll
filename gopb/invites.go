@@ -25,10 +25,9 @@ import (
 // collection is superuser-only (1791810544_invites.js); these two routes are
 // the only way in or out.
 //
-//   - POST /api/lll/invites mints one. The caller's effective access bounds
-//     what it may grant: every team must be one it sees, and only a
-//     read-write caller may mint at all ("an invite can only grant teams and
-//     modes its creator holds").
+//   - POST /api/lll/invites mints one. Only a superuser or a full member (a
+//     person with read-write access to every team) may mint (mayInvite,
+//     LLL-629). The grant is still checked against the caller's access.
 //   - POST /api/lll/invites/redeem spends one. It needs no auth: the code is
 //     the credential, and the visitor has nothing else yet. One transaction
 //     kills the code and creates the person member; the member's token comes
@@ -95,12 +94,25 @@ type inviteGrant struct {
 	rw    bool
 }
 
-// mayInvite is false for a bot or any member with an owner. A person
-// joined through an invite has no owner, so nothing would keep it within
-// the owner's access: narrowing or deleting the owner, or rotating a leaked
-// bot token, would leave the people it invited untouched.
+// mayInvite is true only for a full member: a person with no owner and
+// read-write access to every team (LLL-629). A person joined through an
+// invite is independent of whoever invited it, so deleting or narrowing the
+// inviter does not reach it. Minting is therefore a way to outlive a
+// revocation: a scoped guest about to be removed could redeem its own
+// invites as extra members. Bots and owned members are refused for the same
+// reason: the people they invited would escape their owner's narrowing.
+// Redemption asks again, so narrowing a full member voids its unredeemed
+// invites.
 func mayInvite(creator *core.Record) bool {
-	return creator.GetString("kind") != botKind && creator.GetString("owner") == ""
+	own := ownAccess(creator)
+	return creator.GetString("kind") != botKind && creator.GetString("owner") == "" && own.all && own.rw
+}
+
+// mayNotInvite is the refusal for a caller mayInvite rejects. It names who
+// can mint, so the caller knows whom to ask.
+func mayNotInvite(name string) string {
+	return "only a person with read-write access to every team, or a superuser, can create invites; " + name +
+		" cannot. Ask one of them to run 'lll invite create'; 'lll whoami' shows your access"
 }
 
 // grantAllowed reports whether a creator with access acc may grant g.
@@ -325,12 +337,9 @@ func registerInviteRoutes(routes *router.Router[*core.RequestEvent]) {
 		if !re.HasSuperuserAuth() {
 			creator = re.Auth
 			if !mayInvite(creator) {
-				return re.ForbiddenError("bots and owned members cannot invite people: run 'lll invite create' with your own token", nil)
+				return re.ForbiddenError(mayNotInvite(creator.GetString("name")), nil)
 			}
 			acc = effectiveAccess(re.App, creator)
-			if !acc.rw {
-				return re.ForbiddenError("read-only access: "+creator.GetString("name")+" cannot invite anyone. 'lll whoami' shows your access; ask the person who invited you for read-write", nil)
-			}
 		}
 		teams, err := inviteTeamIDs(re.App, acc, body.Teams)
 		if err != nil {

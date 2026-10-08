@@ -12,7 +12,7 @@ async page => {
   await page.locator('#issue-description svg').waitFor();
   if (await stateControl.inputValue() !== 'in-progress') throw new Error('named State selection did not persist');
   // Establish a metadata barrier after the initial stream snapshot.
-  await page.request.post(`${base}/title`, {form: {key, title: 'Stream browser ready'}});
+  await page.request.post(`${base}/title`, {headers: {Origin: base}, form: {key, title: 'Stream browser ready'}});
   await page.locator('.issue-main h1').getByText('Stream browser ready', {exact: true}).waitFor();
   await page.locator('#issue-description svg').waitFor();
   await page.evaluate(() => {
@@ -48,7 +48,7 @@ async page => {
   await page.waitForFunction(() => document.activeElement?.classList.contains('title-edit-trigger'));
   await editTitle.press('Space');
   await page.locator('#title-form input[name=title]').fill('Unfinished title');
-  await page.request.post(`${base}/priority`, {form: {key, priority: 'urgent'}});
+  await page.request.post(`${base}/priority`, {headers: {Origin: base}, form: {key, priority: 'urgent'}});
   await page.waitForFunction(() => document.querySelector('#prio-form select').value === 'urgent');
   if (!await page.evaluate(() => window.keptDescription === document.querySelector('#issue-description') && window.keptDiagram === document.querySelector('#issue-description svg'))) throw new Error('metadata replaced description or diagram');
   if (await page.locator('#comment-form textarea').inputValue() !== 'Unfinished comment') throw new Error('lost comment draft');

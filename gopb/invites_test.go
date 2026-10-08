@@ -161,7 +161,7 @@ func TestAnInviteCannotGrantMoreThanItsCreatorHolds(t *testing.T) {
 func TestRedeemingCreatesAMemberWithExactlyTheInvitesGrants(t *testing.T) {
 	f := newInviteFixture(t)
 	now := time.Now()
-	code := f.mint(t, f.scoped, inviteGrant{teams: []string{f.alpha}}, now)
+	code := f.mint(t, f.full, inviteGrant{teams: []string{f.alpha}}, now)
 	m, err := redeemInvite(f.app, code, "  Visitor ", now)
 	if err != nil {
 		t.Fatal(err)
@@ -282,13 +282,34 @@ func TestConcurrentRedemptionsYieldExactlyOneMember(t *testing.T) {
 func TestNarrowingTheCreatorVoidsItsUnredeemedInvites(t *testing.T) {
 	f := newInviteFixture(t)
 	now := time.Now()
-	code := f.mint(t, f.scoped, inviteGrant{teams: []string{f.alpha}, rw: true}, now)
-	setAccess(f.scoped, access{teams: []string{f.alpha}})
-	if err := f.app.Save(f.scoped); err != nil {
+	code := f.mint(t, f.full, inviteGrant{teams: []string{f.alpha}, rw: true}, now)
+	// Narrowed to one team, still read-write: no longer a full member.
+	setAccess(f.full, access{teams: []string{f.alpha}, rw: true})
+	if err := f.app.Save(f.full); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := redeemInvite(f.app, code, "late", now); !errors.Is(err, errInviteVoid) {
 		t.Fatalf("got %v, want the void refusal", err)
+	}
+}
+
+// LLL-629: a scoped read-write guest may not mint, and an invite it holds
+// from before the rule (minted directly here) redeems to nothing.
+func TestAScopedReadWriteMemberCannotInvitePeople(t *testing.T) {
+	f := newInviteFixture(t)
+	now := time.Now()
+	if mayInvite(f.scoped) || mayInvite(f.reader) || !mayInvite(f.full) {
+		t.Fatal("mayInvite must admit exactly a full read-write person")
+	}
+	code := f.mint(t, f.scoped, inviteGrant{teams: []string{f.alpha}, rw: true}, now)
+	if _, err := redeemInvite(f.app, code, "sockpuppet", now); !errors.Is(err, errInviteVoid) {
+		t.Fatalf("got %v, want the void refusal", err)
+	}
+	if _, err := f.app.FindFirstRecordByData("members", "name", "sockpuppet"); err == nil {
+		t.Fatal("a scoped member's invite created a member")
+	}
+	if msg := mayNotInvite("guest"); !strings.Contains(msg, "read-write access to every team, or a superuser") {
+		t.Fatalf("the refusal does not name who can invite: %q", msg)
 	}
 }
 
@@ -352,8 +373,8 @@ func TestAnOwnedPersonCannotInvitePeople(t *testing.T) {
 	if err := f.app.Save(owned); err != nil {
 		t.Fatal(err)
 	}
-	if mayInvite(owned) || !mayInvite(f.scoped) {
-		t.Fatal("mayInvite must refuse exactly members with an owner or of kind bot")
+	if mayInvite(owned) || !mayInvite(f.full) {
+		t.Fatal("mayInvite must refuse members with an owner")
 	}
 	code := f.mint(t, owned, inviteGrant{teams: []string{f.alpha}, rw: true}, now)
 	if _, err := redeemInvite(f.app, code, "via-owned", now); !errors.Is(err, errInviteVoid) {

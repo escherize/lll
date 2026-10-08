@@ -123,7 +123,9 @@ with tempfile.TemporaryDirectory(prefix='lll-545-') as directory:
             return {'Cookie': 'lll_board=' + tok}
 
         def page(path, tok, body=None, method=None):
-            return call(board, path, body, method=method, headers=as_cookie(tok), form=body is not None)
+            # A board write carries the board's own Origin (LLL-630).
+            hdrs = as_cookie(tok) if body is None else dict(as_cookie(tok), Origin=board)
+            return call(board, path, body, method=method, headers=hdrs, form=body is not None)
 
         # --- reads: ALPHA renders, BETA answers like a missing team ---
         for tok in [rw_tok, ro_tok]:
@@ -294,7 +296,7 @@ with tempfile.TemporaryDirectory(prefix='lll-545-') as directory:
             assert code == 200 and 'Set-Cookie' not in headers, (what, code, dict(headers))
             assert "action='/login'" in body and headers['Cache-Control'] == 'no-store', what
             assert "frame-ancestors 'none'" in headers['Content-Security-Policy'], what
-            assert headers['Referrer-Policy'] == 'no-referrer', what
+            assert headers['Referrer-Policy'] == 'same-origin', what
         # /login sets the cookie only for a POST from the board's own origin.
         login = {'board_token': both_tok, 'next': '/t/ALPHA/'}
         for hdrs, what in [({}, 'no Origin'), ({'Origin': 'http://evil.example'}, 'Origin mismatch'),
