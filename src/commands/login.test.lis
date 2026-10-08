@@ -99,3 +99,20 @@ fn renewal_and_the_skew_probe_stay_off_the_network_for_local_nouns() {
     assert !talks_to_server(noun)
   }
 }
+
+// LLL-680: a login without --url saves into the home config, so it refuses
+// when LLL_URL or a repo file points it at a server other than the one that
+// file's url names.
+#[test]
+fn login_refuses_to_save_beside_another_servers_url() {
+  let hosted = "https://lll.example.com"
+  let local = "http://127.0.0.1:8090"
+  assert login_target_conflict("", hosted, hosted).is_none()
+  assert login_target_conflict("", hosted + "/", hosted).is_none()
+  assert login_target_conflict("", "", local).is_none()
+  // --url names the server, and saves its url too.
+  assert login_target_conflict(local, hosted, local).is_none()
+  let why = login_target_conflict("", hosted, local).unwrap_or("")
+  assert why.contains("lll login --url http://127.0.0.1:8090")
+  assert why.contains("LLL_CONFIG_HOME")
+}

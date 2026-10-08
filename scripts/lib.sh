@@ -243,6 +243,7 @@ e2e_begin() {
   # the pin, then HOME does (e2e_pin_home unsets this again, because the config
   # assertions choose their own HOME and test XDG_CONFIG_HOME's precedence).
   export LLL_CONFIG_HOME="$E2E_HOME/.config"
+  e2e_refuse_real_config e2e_begin
   # LLL-369: the suite runs from a temp directory OUTSIDE the checkout, which is
   # what makes it hermetic. The config walk goes up from the cwd and stops at a
   # repository root, so from here it finds neither the repo's .lll.toml nor
@@ -392,6 +393,13 @@ e2e_pin_home() {
   export HOME="$E2E_HOME"
   # Same root e2e_begin named, now reached through HOME (LLL-619).
   unset LLL_CONFIG_HOME
+  e2e_refuse_real_config e2e_pin_home
+}
+
+# LLL-680: stop the suite if the environment its lll processes get reaches the
+# developer's real config. Called wherever lib.sh settles that environment.
+e2e_refuse_real_config() { # who
+  python3 "$REPO_ROOT/scripts/real_config_guard.py" "$1" || exit 1
 }
 
 # The tail of every suite's EXIT trap. The checkout needs no repair here: the run

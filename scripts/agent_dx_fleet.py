@@ -17,6 +17,7 @@ import urllib.parse
 import urllib.request
 
 from board_startup import wait_for_endpoints
+from real_config_guard import refuse_real_config
 
 COLLECTIONS = ('teams', 'members', 'labels', 'projects', 'issues', 'comments',
                'docs', 'claims', 'views', 'favorites', 'webhooks')
@@ -55,6 +56,7 @@ def clean_env(home):
            if not k.startswith(('LLL_', 'XDG_')) and k != 'HOME'}
     env.update(HOME=str(home), LLL_CONFIG_HOME=str(home / 'config'),
                XDG_CONFIG_HOME=str(home / 'config'), LC_ALL='C')
+    refuse_real_config(env, 'agent_dx_fleet')
     return env
 
 
@@ -284,7 +286,7 @@ def serve(args):
         raise ValueError('pinned binary hash mismatch')
     harness = root / 'controller' / 'harness'
     private_dir(harness)
-    for name in ('agent_dx_fleet.py', 'board_startup.py'):
+    for name in ('agent_dx_fleet.py', 'board_startup.py', 'real_config_guard.py'):
         shutil.copy2(Path(__file__).resolve().parent / name, harness / name)
     (root / 'fingerprint.json').write_text(json.dumps({
         'commit': args.commit, 'binary_sha256': digest,

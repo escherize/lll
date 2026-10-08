@@ -12,6 +12,23 @@ minors. Issue keys are on the project's own board (`lll issue view KEY`).
   It used to keep the last value silently. (LLL-486)
 - An unknown team key is attributed to `--team` only when `--team` was
   typed. An inherited `LLL_TEAM` is now reported as `LLL_TEAM`. (LLL-486)
+- `lll login` without `--url` refuses when `LLL_URL` or a repo file points
+  it at a server other than the one the home config's url names. It used to
+  save that server's token, and the board endpoint it discovered, beside the
+  other server's url. Pass `--url` to switch the home config. (LLL-680)
+
+### Fixed
+
+- `lll up` saves its board address as `web_url` only into a home config
+  whose url names that board's server, or names no server. A boot run beside
+  a hosted login replaced that login's `web_url` with the local board's
+  address. Such a boot now leaves `web_url` and `board-login-url` alone and
+  says so. `lll up --scratch` also refuses to start if its config path is
+  outside its own directory. (LLL-680)
+- The e2e suites, the doc-examples check and the agent-dx fleet wrapper
+  refuse to run when the environment they give lll reaches the developer's
+  real config. The real home comes from the password database, not from
+  `HOME`. (LLL-680)
 
 ### Security
 

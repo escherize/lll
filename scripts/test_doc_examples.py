@@ -40,6 +40,8 @@ import sys
 import tempfile
 import time
 
+from real_config_guard import refuse_real_config
+
 binary = str(Path(sys.argv[1]).resolve())
 ROOT = Path(__file__).resolve().parents[1]
 SKIP = re.compile(r'<!--\s*example-check:\s*skip:\s*(.+?)\s*-->')
@@ -167,6 +169,7 @@ def run_document(label, blocks):
             'GIT_AUTHOR_NAME': 'newbie', 'GIT_AUTHOR_EMAIL': 'newbie@example.com',
             'GIT_COMMITTER_NAME': 'newbie', 'GIT_COMMITTER_EMAIL': 'newbie@example.com',
         }
+        refuse_real_config(env, 'test_doc_examples')
         log = work / 'examples.log'
         with open(log, 'w') as sink:
             proc = subprocess.Popen(['bash', str(work / 'examples.sh')], cwd=start, env=env,
