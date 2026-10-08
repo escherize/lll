@@ -118,8 +118,39 @@ func TestExpiredClaimIsAnnouncedOnAnOpenIssue(t *testing.T) {
 	if comments[0].GetString("author") != "" {
 		t.Fatal("the sweep attributed its comment to a member")
 	}
+	// LLL-654: authorless is not "the human's"; the kind says who wrote it.
+	if comments[0].GetString("author_kind") != "system" {
+		t.Fatal("the sweep's comment is not marked as the server's")
+	}
 	if comments[0].GetString("issue") != issueID {
 		t.Fatal("the comment landed on the wrong issue")
+	}
+}
+
+// LLL-633: a holder not every reader of the issue may see is not named.
+func TestExpiredClaimOfAHiddenHolderIsAnnouncedWithoutTheName(t *testing.T) {
+	app, issueID, _, beta := claimFixture(t)
+	hidden, err := app.FindRecordById("members", beta)
+	if err != nil {
+		t.Fatal(err)
+	}
+	hidden.Set("scope", "")
+	if err := app.Save(hidden); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := acquireClaim(app, issueID, beta, ""); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := expireClaims(app, time.Now().Add(claimMaxAge+time.Minute), claimMaxAge); err != nil {
+		t.Fatal(err)
+	}
+	comments, err := app.FindAllRecords("comments")
+	if err != nil || len(comments) != 1 {
+		t.Fatalf("comments: %d %v", len(comments), err)
+	}
+	body := comments[0].GetString("body")
+	if strings.Contains(body, "Beta") || !strings.Contains(body, "a member outside this team had held it") {
+		t.Fatalf("the comment names a hidden holder: %s", body)
 	}
 }
 

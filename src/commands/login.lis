@@ -96,10 +96,11 @@ pub fn login(args: Slice<string>) -> Result<(), string> {
   // --url is the fresh-machine path (TASK-195): authenticate against the url
   // given, then persist it next to the token, so machine setup is exactly one
   // command. Without it, login rides whatever url is already configured.
-  // Applied for the whole command, not just --create: login_failed reads
-  // LLL_ADMIN_EMAIL to recognise the admin identity, and it has to see the
+  // Read for the whole command, not just --create: login_failed compares
+  // the admin email to recognise the admin identity, and it has to see the
   // flags too or the flag-users get the generic advice.
-  apply_admin_flags(p.one("--admin-email"), p.one("--admin-password"))?
+  let admin = given_admin_login(p)?
+  let admin_email = admin_login_email(admin)
   let target = strings.TrimSuffix(strings.TrimSpace(p.one("--url")), "/")
   if p.given("--url") && !strings.HasPrefix(target, "http://") && !strings.HasPrefix(target, "https://") {
     return Err(
@@ -166,7 +167,7 @@ pub fn login(args: Slice<string>) -> Result<(), string> {
     // superuser — same address, and whatever password it typed. Nothing in
     // the flow objected. Refuse it: this is the one email --create must not
     // take, and the person running it already has a real one.
-    if email == os.Getenv("LLL_ADMIN_EMAIL") {
+    if email == admin_email && admin_email != "" {
       return Err(
         f"{email} is the server's admin identity, not a member — creating a member with it
 would put a second account on that address. --create makes YOUR login: pass
@@ -185,7 +186,7 @@ would put a second account on that address. --create makes YOUR login: pass
     } else {
       strings.Split(email, "@")[0]
     }
-    create_for_login(name, email, password, target)?
+    create_for_login(name, email, password, target, admin)?
     fmt.Println(f"created member {name} <{email}>")
   }
 
@@ -205,7 +206,7 @@ would put a second account on that address. --create makes YOUR login: pass
   }
   let body = match sent {
     Ok(b) => b,
-    Err(e) => return Err(login_failed(e, email, target)),
+    Err(e) => return Err(login_failed(e, email, target, admin_email)),
   }
   let mut auth = models.AuthResponse { .. }
   if let Err(e) = json.Unmarshal(body.bytes(), &auth) {
@@ -402,7 +403,7 @@ Usage:
 
 Confirms the stored token against the server, including administrator tokens.
 'lll config list' shows where each value came from; 'lll login' replaces the
-token with a member session, and 'lll bot bot-NAME' provisions a bot identity.",
+token with a member session, and 'lll bot create bot-NAME' provisions a bot identity.",
       )
       return Ok(())
     }
@@ -450,7 +451,7 @@ token with a member session, and 'lll bot bot-NAME' provisions a bot identity.",
     fmt.Println(f"access  {access}")
   }
   if administrator {
-    fmt.Println("Administrator tokens do not name a member. Use 'lll login' for a member session or 'lll bot bot-NAME' for a bot identity.")
+    fmt.Println("Administrator tokens do not name a member. Use 'lll login' for a member session or 'lll bot create bot-NAME' for a bot identity.")
   }
   Ok(())
 }
@@ -458,7 +459,7 @@ token with a member session, and 'lll bot bot-NAME' provisions a bot identity.",
 /// Provision the member `lll login --create` is about to authenticate as.
 ///
 /// Rides the same superuser gate as 'lll member invite' and 'lll token
-/// create' — LLL_ADMIN_EMAIL/LLL_ADMIN_PASSWORD, the credentials 'lll up'
+/// create' - --admin-email/--admin-password, the credentials 'lll up'
 /// prints and a deployment sets as secrets. The password is the caller's, not
 /// a generated one, because unlike invite there is nobody to hand it to: the
 /// person creating this account is the person about to log into it.
@@ -472,6 +473,7 @@ fn create_for_login(
   email: string,
   password: string,
   base: string,
+  admin: AdminLogin,
 ) -> Result<(), string> {
   let restore = os.Getenv("LLL_URL")
   if base != "" {
@@ -479,7 +481,7 @@ fn create_for_login(
       return Err(f"pointing at {base}: {e}")
     }
   }
-  let out = create_as_superuser(name, email, password)
+  let out = create_as_superuser(name, email, password, admin)
   if base != "" { let _ = os.Setenv("LLL_URL", restore) }
   out
 }
@@ -490,8 +492,9 @@ fn create_as_superuser(
   name: string,
   email: string,
   password: string,
+  admin: AdminLogin,
 ) -> Result<(), string> {
-  let su = superuser_auth()?
+  let su = superuser_auth(admin)?
   if let Some(existing) = records.find_member_as(su, name)? {
     return Err(
       f"member '{name}' already exists ({existing.email}) — drop --create and log in, or reset it with 'lll member set-password {name}'",
@@ -507,7 +510,7 @@ fn create_as_superuser(
 /// the account had never existed, and none of them found 'member invite' or
 /// --create from it. Both branches are named here because the server does not
 /// tell us which one it is.
-fn login_failed(e: string, email: string, target: string) -> string {
+fn login_failed(e: string, email: string, target: string, admin_email: string) -> string {
   let status = pb.response_status(e)
   // A 403 whose body is a PocketBase envelope is the server refusing this
   // identity by name — a bot member at a password door (LLL-407) — and its
@@ -541,7 +544,7 @@ fn login_failed(e: string, email: string, target: string) -> string {
   // whatever address had just failed, the admin's included. The guard in
   // login() then refused it — catching a mistake this text had handed them.
   // A superuser is not a member, so say that instead of the generic advice.
-  if email == os.Getenv("LLL_ADMIN_EMAIL") && email != "" {
+  if email == admin_email && email != "" {
     return f"login failed at {base}: {email} is the server's admin identity, not a member
 'lll login' authenticates MEMBERS; the superuser has no board account to log into.
 log in as yourself, and let the admin credentials create that account:

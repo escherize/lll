@@ -414,7 +414,9 @@ fn compose_vm(team_id: string, roster: Roster) -> Result<ComposeVM, string> {
 }
 
 fn comment_vm(c: models.Comment) -> CommentVM {
-  let mut author = c.expand.author.name
+  // A comment the server wrote reads "system" (LLL-654), whoever triggered it.
+  let system = c.author_kind == "system"
+  let mut author = if system { "system" } else { c.expand.author.name }
   if author == "" { author = "anon" }
   // The avatar follows the name SHOWN, not the record (LLL-452). An
   // authorless comment - an import that carried no member, or the claim sweep,
@@ -423,12 +425,14 @@ fn comment_vm(c: models.Comment) -> CommentVM {
   // with every other comment. Built from the record where there is one, so a
   // real member keeps its colour and its bot glyph.
   let mut avatar = avatar_vm(c.expand.author)
-  if c.expand.author.name == "" { avatar = avatar_vm(models.Member { name: author, .. }) }
+  if system || c.expand.author.name == "" { avatar = avatar_vm(models.Member { name: author, .. }) }
+  let byline = if system { author } else { display.byline(author, c.agent) }
+  let via = if system { "" } else { c.expand.author.owner_name() }
   CommentVM {
     id: c.id,
-    author: display.byline(author, c.agent),
+    author: byline,
     avatar,
-    via: c.expand.author.owner_name(),
+    via,
     age: display.relative(c.created),
     body: markdown.md_html(c.body),
     body_md: c.body,

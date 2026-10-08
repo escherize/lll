@@ -31,6 +31,15 @@ struct ReleaseRequest {
   reason: string,
 }
 #[json]
+struct CloseRequest {
+  claim_id: string,
+  #[json(omitempty)]
+  agent: string,
+  force: bool,
+  reason: string,
+  keep_claim: bool,
+}
+#[json]
 struct RenewRequest {
   claim_id: string,
   #[json(omitempty)]
@@ -71,6 +80,15 @@ pub fn acquire(caller: pb.Caller, issue_id: string, member_id: string, agent: st
 /// (LLL-521).
 pub fn release(caller: pb.Caller, issue_id: string, claim_id: string, agent: string, force: bool, reason: string) -> Result<Transition, string> {
   transact(caller, issue_id, "release", ReleaseRequest { claim_id, agent, force, reason })
+}
+
+/// Set the issue done and release its claim in one server transaction (D3,
+/// LLL-640). `claim_id` is the hold the caller observed, "" for none. The
+/// release rule is release's: the holder freely, anyone else with force,
+/// which comments. `keep_claim` keeps the holder's own hold; the server
+/// refuses it for anyone else. The assignee is kept.
+pub fn close(caller: pb.Caller, issue_id: string, claim_id: string, agent: string, force: bool, reason: string, keep_claim: bool) -> Result<Transition, string> {
+  transact(caller, issue_id, "close", CloseRequest { claim_id, agent, force, reason, keep_claim })
 }
 
 /// Only the holder renews its observed hold. The server restarts the expiry

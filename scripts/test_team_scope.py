@@ -233,6 +233,9 @@ with tempfile.TemporaryDirectory(prefix='lll-team-scope-') as directory:
         plain_rec, plain_tok = member_login('plain')
         full_env = dict(cli_ro, LLL_TOKEN=plain_tok)
         admin_env = dict(full_env, LLL_ADMIN_EMAIL=env['LLL_ADMIN_EMAIL'], LLL_ADMIN_PASSWORD=env['LLL_ADMIN_PASSWORD'])
+        # D7 (LLL-646): with a member token configured, only the flags act as
+        # the administrator; the LLL_ADMIN_* pair in admin_env does not.
+        admin_args = ['--admin-email', env['LLL_ADMIN_EMAIL'], '--admin-password', env['LLL_ADMIN_PASSWORD']]
 
         def lll(*argv, env=full_env):
             return subprocess.run([binary, *argv], cwd=root, env=env, text=True, capture_output=True, timeout=30)
@@ -258,10 +261,13 @@ with tempfile.TemporaryDirectory(prefix='lll-team-scope-') as directory:
             (['--read-only'], 'viewer: read-only, every team (server-wide) (unchanged)'),
         ]
         for flags_, want in steps:
-            out = lll('member', 'access', 'viewer', *flags_, env=admin_env)
+            out = lll('member', 'access', 'viewer', *flags_, *admin_args, env=admin_env)
             assert out.returncode == 0 and want in out.stdout, (flags_, out.stdout, out.stderr)
+            if flags_ == ['--add-team', 'BETA']:
+                ignored = lll('member', 'access', 'viewer', '--remove-team', 'BETA', env=admin_env)
+                assert ignored.returncode != 0 and '--admin-email' in ignored.stderr, ignored.stdout + ignored.stderr
         for bad in [['--team', 'ALPHA', '--all-teams'], ['--read-only', '--read-write'], ['--add-team', 'ALPHA']]:
-            out = lll('member', 'access', 'viewer', *bad, env=admin_env)
+            out = lll('member', 'access', 'viewer', *bad, *admin_args, env=admin_env)
             assert out.returncode != 0, (bad, out.stdout)
         out = lll('member', 'access', 'viewer', '--read-write', env=guest_env)
         assert out.returncode != 0, 'a scoped member changed someone else\'s access'
@@ -452,7 +458,7 @@ with tempfile.TemporaryDirectory(prefix='lll-team-scope-') as directory:
         assert call(api, '/api/collections/members/records', dict(bot_body, name='bot-theirs', owner=plain['id']), boss_tok)[0] == 400
         sub = call(api, '/api/collections/members/records', dict(bot_body, name='bot-sub', owner=made['id']), su)
         assert sub[0] == 400 and 'bot cannot own a bot' in sub[1]['message'], sub[:2]
-        out = lll('member', 'access', 'bot-boss', '--all-teams', env=admin_env)
+        out = lll('member', 'access', 'bot-boss', '--all-teams', *admin_args, env=admin_env)
         assert out.returncode != 0 and "lll member access boss" in out.stderr, out.stdout + out.stderr
         # Narrowing the owner narrows the bot at once; the bot record is untouched.
         call(api, f"/api/collections/members/records/{boss['id']}", {'teams': [alpha['id']]}, su, 'PATCH')
@@ -491,7 +497,7 @@ with tempfile.TemporaryDirectory(prefix='lll-team-scope-') as directory:
         assert "no team 'BETA'" in listed.stderr, listed.stderr
         # A bot- name through 'member add' names the command that makes one.
         out = lll('member', 'add', 'bot-boss-add', env=boss_env)
-        assert out.returncode != 0 and "creates it with 'lll bot bot-boss-add'" in out.stderr, out.stdout + out.stderr
+        assert out.returncode != 0 and "creates it with 'lll bot create bot-boss-add'" in out.stderr, out.stdout + out.stderr
         # Docs carry both the owner cap and LLL-618's author clause: this
         # migration rewrites the docs rules after 1791600000_doc_author.js.
         doc = {'slug': 'bot-doc', 'title': 't', 'kind': 'note', 'body': 'b'}

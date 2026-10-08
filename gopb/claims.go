@@ -151,7 +151,7 @@ func releaseClaim(app core.App, issueID, expectedClaimID string, by releaser) (C
 			return &claimRejection{"the claim changed; refresh before releasing it"}
 		}
 		memberID := held.GetString("member")
-		name, holder, forced, err := releaseAuthority(tx, held, by)
+		name, forced, err := releaseAuthority(tx, held, by)
 		if err != nil {
 			return err
 		}
@@ -166,7 +166,7 @@ func releaseClaim(app core.App, issueID, expectedClaimID string, by releaser) (C
 			}
 		}
 		if forced {
-			if err := recordForcedRelease(tx, issueID, holder, by); err != nil {
+			if err := recordForcedRelease(tx, issue, held, by); err != nil {
 				return err
 			}
 		}
@@ -179,34 +179,121 @@ func releaseClaim(app core.App, issueID, expectedClaimID string, by releaser) (C
 	return outcome, nil
 }
 
-// releaseAuthority is the one release rule (LLL-512, LLL-521), shared by
-// /release and an assignment edit that clears the assignee (LLL-516): the
-// holder releases freely; another member, a superuser, or the holder's member
-// under a different agent label needs force. It returns the holder's name and
-// byline, and whether the release is forced and so owes a comment. Without
-// force, a forced release is refused naming the holder.
+// closeIssue sets an issue done and, by default, releases its claim in the
+// same transaction (D3 of the 1.0 plan, LLL-640). Closing used to keep the
+// hold, and agents that forgot the separate release left finished work
+// claimed until the 24-hour sweep.
 //
-// `name` is for the caller and follows the roster (LLL-551): a holder the
-// caller may not see is "a hidden member". `holder` is the real byline for
-// the forced-release comment, which every reader of the issue sees.
-func releaseAuthority(tx core.App, held *core.Record, by releaser) (name, holder string, forced bool, err error) {
-	memberID := held.GetString("member")
-	real := "an unknown member"
-	if member, err := tx.FindRecordById("members", memberID); err == nil {
-		real = member.GetString("name")
+// The release follows the one release rule (releaseAuthority): the holder's
+// close releases freely; anyone else, a superuser included, needs force, and
+// a forced close leaves the forced-release comment. keepClaim keeps the hold,
+// and only the holder may: closing another member's claimed issue takes it
+// from them, so it releases or is refused. The assignee is kept: a done
+// issue still says who did it, and with the claim gone nothing offers it as
+// work.
+//
+// expectedClaimID is the hold the caller observed, "" for none, as on
+// /assignment: a claim taken or replaced since the caller looked refuses the
+// close rather than closing over it.
+func closeIssue(app core.App, issueID, expectedClaimID string, by releaser, keepClaim bool) (ClaimOutcome, error) {
+	var outcome ClaimOutcome
+	err := app.RunInTransaction(func(tx core.App) error {
+		issue, err := tx.FindRecordById("issues", issueID)
+		if err != nil {
+			return err
+		}
+		held, err := currentClaim(tx, issueID)
+		if err != nil {
+			return err
+		}
+		currentID := ""
+		if held != nil {
+			currentID = held.Id
+		}
+		if currentID != expectedClaimID {
+			return &claimRejection{"the claim changed; refresh before closing"}
+		}
+		if held != nil {
+			name, forced, err := releaseAuthority(tx, held, by)
+			if err != nil {
+				return err
+			}
+			if forced && keepClaim {
+				return &claimRejection{fmt.Sprintf("the claim is held by %s; only the holder keeps a claim while closing, and closing anyone else's claimed issue releases it",
+					byline(name, held.GetString("agent")))}
+			}
+			outcome = ClaimOutcome{ClaimID: held.Id, MemberID: held.GetString("member"), MemberName: name,
+				Agent: held.GetString("agent"), Created: held.GetString("created"), AlreadyOwned: keepClaim, Forced: forced}
+			if !keepClaim {
+				if err := tx.Delete(held); err != nil {
+					return err
+				}
+				if forced {
+					if err := recordForcedRelease(tx, issue, held, by); err != nil {
+						return err
+					}
+				}
+			}
+		}
+		issue.Set("state", "done")
+		return tx.Save(issue)
+	})
+	if err != nil {
+		return ClaimOutcome{}, err
 	}
-	holder = byline(real, held.GetString("agent"))
+	return outcome, nil
+}
+
+// releaseAuthority is the one release rule (LLL-512, LLL-521), shared by
+// /release, /close and an assignment edit that clears the assignee
+// (LLL-516): the holder releases freely; another member, a superuser, or the
+// holder's member under a different agent label needs force. It returns the
+// holder's name as the caller may see it, and whether the release is forced
+// and so owes a comment. Without force, a forced release is refused naming
+// the holder.
+//
+// `name` follows the roster (LLL-551): a holder the caller may not see is "a
+// hidden member".
+func releaseAuthority(tx core.App, held *core.Record, by releaser) (name string, forced bool, err error) {
+	memberID := held.GetString("member")
 	name = rosterName(tx, by.memberID, memberID, "an unknown member")
 	shown := byline(name, held.GetString("agent"))
 	otherSession := memberID == by.memberID && agentsDiffer(held, by.agent)
 	forced = memberID != by.memberID || otherSession
 	if forced && !by.force {
 		if otherSession {
-			return name, holder, forced, &claimRejection{fmt.Sprintf("the claim is held by %s; releasing another session's claim needs force", shown)}
+			return name, forced, &claimRejection{fmt.Sprintf("the claim is held by %s; releasing another session's claim needs force", shown)}
 		}
-		return name, holder, forced, &claimRejection{fmt.Sprintf("the claim is held by %s; releasing another member's claim needs force", shown)}
+		return name, forced, &claimRejection{fmt.Sprintf("the claim is held by %s; releasing another member's claim needs force", shown)}
 	}
-	return name, holder, forced, nil
+	return name, forced, nil
+}
+
+// systemAuthorKind marks a comment the server wrote rather than a person or
+// agent (LLL-654): a forced release and a claim expiry. Tools that treated
+// every authorless comment as the human's read this instead of guessing.
+// Only the server sets it; registerSystemCommentGuard refuses it from any
+// request.
+const systemAuthorKind = "system"
+
+// outsideTeam is how a server-written comment names a member that not every
+// reader of the issue may see (LLL-633). The body is stored text, so it
+// cannot be masked per reader the way relation fields are.
+const outsideTeam = "a member outside this team"
+
+// storedName is a member's name as a comment on issue may store it: the name
+// when every member who sees the issue's team may see the member
+// (onTeamRoster), else outsideTeam (LLL-633). Fallback is for a member that
+// no longer exists.
+func storedName(app core.App, issue *core.Record, memberID, fallback string) string {
+	m, err := app.FindRecordById("members", memberID)
+	if err != nil {
+		return fallback
+	}
+	if !onTeamRoster(m, issue.GetString("team")) {
+		return outsideTeam
+	}
+	return m.GetString("name")
 }
 
 // recordForcedRelease writes the comment a forced release owes the holder
@@ -218,18 +305,23 @@ func releaseAuthority(tx core.App, held *core.Record, by releaser) (name, holder
 // force, not a courtesy - a forced release with no record is the silent
 // release this issue exists to stop.
 //
-// The releaser is the author, so the comment is attributed like any other. A
-// superuser has no member record and the comment goes authorless, which the
-// web renders as "anon"; the body names the actor either way.
-func recordForcedRelease(tx core.App, issueID, holder string, by releaser) error {
+// The releaser is the author, so the comment is attributed like any other,
+// and its author kind is system (LLL-654): the server wrote the words. A
+// superuser has no member record and the comment goes authorless. The body
+// names both parties as storedName allows (LLL-633).
+func recordForcedRelease(tx core.App, issue, held *core.Record, by releaser) error {
 	actor := "An administrator"
 	if by.memberID != "" {
-		member, err := tx.FindRecordById("members", by.memberID)
-		if err != nil {
+		if _, err := tx.FindRecordById("members", by.memberID); err != nil {
 			return err
 		}
-		actor = byline(member.GetString("name"), by.agent)
+		name := storedName(tx, issue, by.memberID, "")
+		if name == outsideTeam {
+			name = "A member outside this team"
+		}
+		actor = byline(name, by.agent)
 	}
+	holder := byline(storedName(tx, issue, held.GetString("member"), "an unknown member"), held.GetString("agent"))
 	body := fmt.Sprintf("%s force-released %s's claim.", actor, holder)
 	if by.reason != "" {
 		body += "\n\nReason: " + by.reason
@@ -239,8 +331,9 @@ func recordForcedRelease(tx core.App, issueID, holder string, by releaser) error
 		return err
 	}
 	comment := core.NewRecord(comments)
-	comment.Set("issue", issueID)
+	comment.Set("issue", issue.Id)
 	comment.Set("author", by.memberID)
+	comment.Set("author_kind", systemAuthorKind)
 	comment.Set("body", body)
 	return tx.Save(comment)
 }
@@ -288,4 +381,54 @@ func renewClaim(app core.App, issueID, expectedClaimID, memberID, agent string) 
 		return ClaimOutcome{}, err
 	}
 	return outcome, nil
+}
+
+// registerClaimedIssueDeleteGuard refuses an API delete of a claimed issue
+// (LLL-662). claims.issue cascades, so the delete used to drop the hold with
+// no force and no record: the silent release LLL-512 forbids. The claim goes
+// first, through /release and its rule (the holder freely, anyone else with
+// force and a comment), then the issue; 'lll issue delete --force' does both.
+// A cascade from deleting a team or member is not a request on issues and is
+// unaffected. serializeRecordUpdates holds the issue's lock across the
+// request, the same lock the claim routes take, so no claim lands between
+// this check and the delete.
+func registerClaimedIssueDeleteGuard(app core.App) {
+	app.OnRecordDeleteRequest("issues").BindFunc(func(e *core.RecordRequestEvent) error {
+		held, err := currentClaim(e.App, e.Record.Id)
+		if err != nil {
+			return err
+		}
+		if held == nil {
+			return e.Next()
+		}
+		viewerID := ""
+		if e.Auth != nil && !e.Auth.IsSuperuser() {
+			viewerID = e.Auth.Id
+		}
+		name := rosterName(e.App, viewerID, held.GetString("member"), "an unknown member")
+		return e.BadRequestError(fmt.Sprintf("the issue is claimed by %s; release the claim before deleting the issue (another member's claim needs force)",
+			byline(name, held.GetString("agent"))), nil)
+	})
+}
+
+// registerSystemCommentGuard keeps author_kind the server's word (LLL-654):
+// no request may set it, and no request may edit a comment the server wrote,
+// so "system" on a comment always means the words are the server's. Deleting
+// one stays allowed, as for any comment.
+func registerSystemCommentGuard(app core.App) {
+	app.OnRecordCreateRequest("comments").BindFunc(func(e *core.RecordRequestEvent) error {
+		if e.Record.GetString("author_kind") != "" {
+			return e.BadRequestError("author_kind is set by the server only", nil)
+		}
+		return e.Next()
+	})
+	app.OnRecordUpdateRequest("comments").BindFunc(func(e *core.RecordRequestEvent) error {
+		if e.Record.Original().GetString("author_kind") == systemAuthorKind {
+			return e.BadRequestError("a server-written comment cannot be edited", nil)
+		}
+		if e.Record.GetString("author_kind") != "" {
+			return e.BadRequestError("author_kind is set by the server only", nil)
+		}
+		return e.Next()
+	})
 }

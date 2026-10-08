@@ -843,10 +843,12 @@ set -e
 assert_contains "$out" "lll issue delete KEY-123" "delete requires explicit ID"
 
 # LLL-644 (D6): --force no longer skips a confirmation; the refusal names --yes.
+# Since LLL-662 --force releases a claim before deleting, so on an unclaimed
+# issue it is refused the same way.
 if out=$(LLL_URL=$URL "$LIN" issue delete ENG-7 --force 2>&1); then
   fail "issue delete --force must refuse the removed spelling"
 fi
-assert_contains "$out" "unknown flag: '--force' — did you mean '--yes'?" "delete --force names --yes"
+assert_contains "$out" "the confirmation is skipped by --yes" "delete --force names --yes"
 out=$(LLL_URL=$URL "$LIN" issue delete ENG-7 --yes)
 assert_contains "$out" "Deleted ENG-7" "forced delete output"
 out=$(LLL_URL=$URL LLL_TEAM=ENG "$LIN" issue list)
@@ -2460,11 +2462,26 @@ out=$(env $E "$LIN" issue view "$CKEY")
 assert_contains "$out" "Claimed:   bryan" "issue view shows the holder"
 assert_contains "$out" "Assignee:  bryan" "claiming assigns the issue"
 env $E "$LIN" issue view "$CKEY" --json | python3 -c 'import json,sys; d=json.load(sys.stdin); assert d["claim"]["expand"]["member"]["name"] == "bryan"; assert d["comments"] == []'
-out=$(env $E "$LIN" issue close "$CKEY")
-assert_contains "$out" "Claim retained by bryan" "close reports the live claim"
-assert_contains "$out" "lll issue release $CKEY" "close supplies explicit release command"
-assert_contains "$out" "if it still matches" "close explains conditional release assignment effect"
+# D3 (LLL-640): close releases the closer's claim. Closing an issue someone
+# else holds is the release rule's case: refused without --force, nothing
+# changes, and the hint names --force --reason.
+set +e
+out=$(env $E "$LIN" issue close "$CKEY" 2>&1)
+rc=$?
+set -e
+[ "$rc" -ne 0 ] || fail "closing another member's claimed issue without --force: expected nonzero exit"
+assert_contains "$out" "needs force" "non-holder close names force"
+assert_contains "$out" "lll issue close $CKEY --force --reason" "non-holder close names the forced spelling"
+env $E "$LIN" issue view "$CKEY" --json | python3 -c 'import json,sys; d=json.load(sys.stdin); assert d["state"] != "done"; assert d["claim"]["expand"]["member"]["name"] == "bryan"'
+out=$(env $E LLL_TOKEN="$BRYAN_TOK" LLL_ME=bryan "$LIN" issue close "$CKEY" --keep-claim)
+assert_contains "$out" "Closed $CKEY" "holder close with --keep-claim closes"
+assert_contains "$out" "Claim kept by bryan" "--keep-claim keeps the holder's claim"
 env $E "$LIN" issue view "$CKEY" --json | python3 -c 'import json,sys; d=json.load(sys.stdin); assert d["state"] == "done"; assert d["claim"]["expand"]["member"]["name"] == "bryan"'
+CK2=$(env $E "$LIN" issue create -t "Close releases" | sed -n 's/^Created \([A-Z]*-[0-9]*\).*/\1/p')
+env $E LLL_TOKEN="$BRYAN_TOK" LLL_ME=bryan "$LIN" issue claim "$CK2" --agent wt-a >/dev/null
+out=$(env $E LLL_TOKEN="$BRYAN_TOK" LLL_ME=bryan "$LIN" issue close "$CK2" --agent wt-a)
+assert_contains "$out" "Released bryan (agent wt-a)'s claim; assignee unchanged." "holder close releases the claim"
+env $E "$LIN" issue view "$CK2" --json | python3 -c 'import json,sys; d=json.load(sys.stdin); assert d["state"] == "done"; assert d["claim"] is None; assert d["expand"]["assignee"]["name"] == "bryan"; assert d["comments"] == []'
 env $E LLL_TOKEN="$BRYAN_TOK" LLL_ME=bryan "$LIN" issue comment "$CKEY" -b 'handoff for carol' >/dev/null
 env $E LLL_TOKEN="$CAROL_TOK" LLL_ME=carol "$LIN" issue comment "$CKEY" -b 'acknowledged' >/dev/null
 env $E "$LIN" issue view "$CKEY" --json | python3 -c 'import json,sys; d=json.load(sys.stdin); assert [(c["body"],c["expand"]["author"]["name"]) for c in d["comments"]] == [("handoff for carol","bryan"),("acknowledged","carol")]'
@@ -2569,8 +2586,8 @@ refuse(["--description-replace", "missing=b"], "--description-replace matched 0 
 for args, message in [
     (["--description-replace", "missing-equals"], "requires old=new"),
     (["--description-replace", "a=b", "--description-replace", "b=c"], "may only be given once"),
-    (["-d", "whole", "--description-replace", "a=b"], "--description replaces the whole text"),
-    (["-d", "whole", "--description-append", "tail"], "--description replaces the whole text"),
+    (["-d", "whole", "--description-replace", "a=b"], "-b replaces the whole description"),
+    (["-d", "whole", "--description-append", "tail"], "-b replaces the whole description"),
 ]:
     refuse(args, message)
 
@@ -2896,7 +2913,7 @@ WHOAMI_ADMIN=$(pb_superuser_token "$URL") || fail "minting whoami administrator 
 out=$(LLL_TOKEN="$WHOAMI_ADMIN" LLL_URL=$URL "$LIN" whoami) || fail "whoami refused a valid administrator token: $out"
 assert_contains "$out" "superuser <admin@local.dev>" "whoami identifies administrator authentication"
 assert_contains "$out" "token   env:LLL_TOKEN" "administrator whoami names the token source"
-assert_contains "$out" "lll bot bot-NAME" "administrator whoami names the bot bootstrap command"
+assert_contains "$out" "lll bot create bot-NAME" "administrator whoami names the bot bootstrap command"
 assert_contains "$out" "$URL" "administrator whoami names the server"
 out=$(env -u LLL_TOKEN -u LLL_URL HOME="$DATA_DIR/nowhere" "$LIN" whoami 2>&1) \
   && fail "whoami without a token should fail"
@@ -2999,13 +3016,23 @@ BOT_TOK=$(printf '%s\n' "$bot_out" | sed -n 's/^export LLL_TOKEN=//p')
   || fail "lll bot printed the token more than once"
 out=$(LLL_TOKEN="$BOT_TOK" HOME="$E2E_HOME" LLL_URL=$URL "$LIN" whoami)
 assert_contains "$out" "bot-e2e <" "the bot's token is the bot's"
+# D7 (LLL-646): create refuses an existing bot and leaves its token working;
+# rotation is only 'lll bot rotate'.
+out=$(env -u LLL_TOKEN HOME="$E2E_HOME" LLL_URL=$URL \
+  LLL_ADMIN_EMAIL=admin@local.dev LLL_ADMIN_PASSWORD=admin-local-123 \
+  "$LIN" bot create bot-e2e --team ENG 2>&1) && fail "lll bot create rotated an existing bot: $out"
+assert_contains "$out" "bot bot-e2e already exists" "create refuses an existing bot"
+assert_contains "$out" "lll bot rotate bot-e2e" "the refusal names bot rotate"
+out=$(LLL_TOKEN="$BOT_TOK" HOME="$E2E_HOME" LLL_URL=$URL "$LIN" whoami)
+assert_contains "$out" "bot-e2e <" "a refused create does not rotate the token"
 # --env: stdout is exactly the two export lines, so it sources cleanly;
 # the progress lines go to stderr.
 bot_err="$DATA_DIR/bot-env.err"
 bot_out=$(env -u LLL_TOKEN -u LLL_TEAM HOME="$E2E_HOME" LLL_URL=$URL \
   LLL_ADMIN_EMAIL=admin@local.dev LLL_ADMIN_PASSWORD=admin-local-123 \
-  "$LIN" bot bot-e2e --env --duration 3600 2>"$bot_err") || fail "lll bot --env (second run) exited nonzero"
-assert_contains "$(cat "$bot_err")" "member bot-e2e exists; rotated its token" "a second run rotates without a second member"
+  "$LIN" bot rotate bot-e2e --env --duration 3600 2>"$bot_err") || fail "lll bot rotate --env exited nonzero"
+assert_contains "$(cat "$bot_err")" "one-time bot token for bot-e2e" "rotate --env reports on stderr"
+assert_contains "$(cat "$bot_err")" "re-mint with 'lll bot rotate bot-e2e'" "the bot expiry line names bot rotate (LLL-625)"
 [ "$(printf '%s\n' "$bot_out" | wc -l | tr -d ' ')" = 2 ] || fail "lll bot --env printed more than the export lines: $bot_out"
 BOT_TOK=$( (eval "$bot_out"; printf '%s' "$LLL_TOKEN") )
 out=$(LLL_TOKEN="$BOT_TOK" HOME="$E2E_HOME" LLL_URL=$URL "$LIN" whoami)
@@ -3035,7 +3062,7 @@ out=$(env -u LLL_TOKEN HOME="$E2E_HOME" LLL_URL=$URL \
   LLL_ADMIN_EMAIL=admin@local.dev LLL_ADMIN_PASSWORD=admin-local-123 \
   "$LIN" bot claude-main 2>&1) && fail "lll bot accepted a name without the bot- prefix: $out"
 assert_contains "$out" "reserved" "the bot-kind prefix refusal names the reservation"
-assert_contains "$out" "try 'lll bot bot-claude-main'" "the prefix refusal names the working spelling (LLL-539)"
+assert_contains "$out" "try 'lll bot create bot-claude-main'" "the prefix refusal names the working spelling (LLL-539)"
 # The CLI refuses that name before any server call (LLL-539), so the server's
 # own guard is exercised directly: a bot-kind member without the prefix.
 SU_TOK=$(pb_superuser_token "$URL") || fail "superuser token for the server prefix guard"
@@ -3046,7 +3073,7 @@ assert_contains "$out" "reserved to the 'bot-' prefix" "the server refuses a bot
 out=$(env LLL_TOKEN="$BRYAN_TOK" HOME="$E2E_HOME" LLL_URL=$URL \
   "$LIN" member add -n bot-impersonator 2>&1) && fail "member add took the reserved bot- prefix: $out"
 assert_contains "$out" "reserved" "person signups cannot take the bot- prefix"
-assert_contains "$out" "creates it with 'lll bot bot-impersonator'" "member add names the bot command (LLL-546)"
+assert_contains "$out" "creates it with 'lll bot create bot-impersonator'" "member add names the bot command (LLL-546)"
 # The CLI refuses that before any server call (LLL-546), so the server's
 # person-side guard is exercised directly with the same member token.
 out=$(curl -s -X POST "$URL/api/collections/members/records" \
@@ -3056,12 +3083,12 @@ assert_contains "$out" "reserved" "the server refuses a person member with the b
 
 # The bot records its creating member as owner when the command rides a
 # member token — bryan's, minted fresh above because the configured one may
-# outlive its duration. The admin pair rides this suite's environment
-# (e2e_begin exports it), and `lll bot` rightly treats that as the superuser
-# speaking, so it is unset here to name the member path.
-bot_out=$(env -u LLL_ADMIN_EMAIL -u LLL_ADMIN_PASSWORD LLL_TOKEN="$BRYAN_TOK" \
+# outlive its duration. The admin pair stays in the environment on purpose
+# (D7, LLL-646): inherited LLL_ADMIN_* must not outrank a configured member
+# token, which used to make this bot ownerless.
+bot_out=$(env LLL_ADMIN_EMAIL=admin@local.dev LLL_ADMIN_PASSWORD=admin-local-123 LLL_TOKEN="$BRYAN_TOK" \
   HOME="$E2E_HOME" LLL_URL=$URL \
-  "$LIN" bot bot-owned --env --duration 3600) || fail "member-token lll bot exited nonzero: $bot_out"
+  "$LIN" bot create bot-owned --env --duration 3600) || fail "member-token lll bot exited nonzero: $bot_out"
 
 # A bot member cannot authenticate interactively, whatever password is typed.
 out=$(env -u LLL_TOKEN HOME="$E2E_HOME" LLL_URL=$URL \

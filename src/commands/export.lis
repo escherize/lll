@@ -206,7 +206,7 @@ fn render_comments(
 ) -> string {
   let mut lines = [f"# {key}: {title} — comments", ""]
   for cm in comments {
-    let author = display.member_name(cm.author, cm.expand.author.name, "ghost")
+    let author = if cm.author_kind == "system" { "system" } else { display.member_name(cm.author, cm.expand.author.name, "ghost") }
     lines = lines.append(f"## {author} ({display.absolute(cm.created)})")
     lines = lines.append("")
     lines = lines.append(strings.TrimRight(cm.body, "\n"))

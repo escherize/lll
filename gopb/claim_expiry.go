@@ -90,10 +90,12 @@ func expireClaim(app core.App, snapshot *core.Record, cutoff, now time.Time) boo
 		}
 		claim = current
 		memberID := claim.GetString("member")
-		// claims.issue is a REQUIRED relation, so PocketBase refuses to
-		// delete an issue out from under its claim and this lookup cannot
-		// miss today. Tolerated anyway: a sweep that errored on one
-		// orphan would keep erroring on it every hour.
+		// claims.issue cascades: deleting an issue deletes its claim with
+		// it, so this lookup should not miss. An API delete of a claimed
+		// issue is refused (registerClaimedIssueDeleteGuard, LLL-662); a
+		// team delete still cascades through. A miss is tolerated anyway:
+		// a sweep that errored on one orphan would keep erroring on it
+		// every hour.
 		if issue, err := tx.FindRecordById("issues", claim.GetString("issue")); err == nil {
 			if issue.GetString("assignee") == memberID {
 				issue.Set("assignee", "")
@@ -128,9 +130,9 @@ func expireClaim(app core.App, snapshot *core.Record, cutoff, now time.Time) boo
 // noise on an issue nobody is reading.
 //
 // The comment has no author. The sweep is not a member and must not mint one -
-// LLL-374 is the board with 68 synthetic identities on it - so the body names
-// the holder instead, and reads correctly under the "anon" the web renders for
-// an authorless comment.
+// LLL-374 is the board with 68 synthetic identities on it - so its author
+// kind is system (LLL-654), and the body names the holder as storedName
+// allows (LLL-633).
 func announceExpiry(app core.App, issue *core.Record, claim *core.Record, now time.Time) {
 	if issue == nil {
 		return
@@ -140,11 +142,9 @@ func announceExpiry(app core.App, issue *core.Record, claim *core.Record, now ti
 		return
 	}
 
-	holder := "an unknown member"
-	if member, err := app.FindRecordById("members", claim.GetString("member")); err == nil {
-		if name := member.GetString("name"); name != "" {
-			holder = name
-		}
+	holder := storedName(app, issue, claim.GetString("member"), "an unknown member")
+	if holder == "" {
+		holder = "an unknown member"
 	}
 
 	comments, err := app.FindCollectionByNameOrId("comments")
@@ -154,6 +154,7 @@ func announceExpiry(app core.App, issue *core.Record, claim *core.Record, now ti
 	}
 	comment := core.NewRecord(comments)
 	comment.Set("issue", issue.Id)
+	comment.Set("author_kind", systemAuthorKind)
 	comment.Set("body", fmt.Sprintf(
 		"Claim released automatically: %s had held it for %s with no activity on the board. "+
 			"`lll issue claim` takes it again.",

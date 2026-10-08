@@ -129,7 +129,7 @@ func updateAssignment(app core.App, issueID, expectedClaimID string, fields assi
 				return &claimRejection{fmt.Sprintf("issue is claimed by %s; release the claim before assigning another member", name)}
 			}
 			if *fields.Assignee == "" {
-				name, holder, forced, err := releaseAuthority(tx, held, by)
+				name, forced, err := releaseAuthority(tx, held, by)
 				if err != nil {
 					return err
 				}
@@ -137,7 +137,7 @@ func updateAssignment(app core.App, issueID, expectedClaimID string, fields assi
 					return err
 				}
 				if forced {
-					if err := recordForcedRelease(tx, issueID, holder, by); err != nil {
+					if err := recordForcedRelease(tx, issue, held, by); err != nil {
 						return err
 					}
 				}

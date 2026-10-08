@@ -154,7 +154,7 @@ To give someone one team and nothing else, add `--team KEY` (repeat it for more
 teams). Their token then sees only those teams' issues, comments, docs and
 claims, and they cannot widen their own scope or create members. Add
 `--read-only` for someone who should look but not change anything. A
-read-write member can still run `lll bot bot-NAME` for its own agents: the bot
+read-write member can still run `lll bot create bot-NAME` for its own agents: the bot
 starts with the member's teams and mode and never gets more than its owner
 has, so narrowing the member narrows its bots too. Run on the
 machine serving the board, the invite also prints a view-only web board link
@@ -325,8 +325,8 @@ lll member invite NAME --email e@x.com  # add a colleague + temp password, in on
 lll member passes --count 10 --prefix hack  # private LAN/Tailscale teammate handoffs
 lll member set-password NAME --password <pw>  # superuser gives a member credentials
 lll token create bryan        # a one-year agent token (superuser only), printed once
-lll bot bot-myrepo            # a bot member you own, and an agent prompt with its token; rerunning rotates it
-lll bot bot-myrepo --env > agent.env  # the same, printing only the LLL_URL/LLL_TOKEN exports
+lll bot create bot-myrepo     # a bot member you own, and an agent prompt with its token; refuses an existing bot
+lll bot rotate bot-myrepo --env > agent.env  # a new token (the old one stops working), printing only the LLL_URL/LLL_TOKEN exports
 lll logout                    # clear the stored token
 lll board -w                  # open the web board
 lll completions zsh           # bash, zsh, fish

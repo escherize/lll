@@ -71,7 +71,7 @@ fn bot_write(
 }
 
 fn board_token_bot_refusal() -> string {
-  "Add a bot needs a member board login (an invite link); this board login names no person to own the bot. From a terminal, run 'lll bot bot-NAME'"
+  "Add a bot needs a member board login (an invite link); this board login names no person to own the bot. From a terminal, run 'lll bot create bot-NAME'"
 }
 
 /// The bot's member name from the form: "name" or "bot-name", lowercase
@@ -96,7 +96,7 @@ fn request_origin(r: Ref<http.Request>) -> Result<string, string> {
   )
   if !plain.MatchString(host) {
     return Err(
-      "cannot tell this board's address from the request; run 'lll bot bot-NAME' from a terminal",
+      "cannot tell this board's address from the request; run 'lll bot create bot-NAME' from a terminal",
     )
   }
   let forwarded = r.Header.map_or("", |h| h.Get("X-Forwarded-Proto"))

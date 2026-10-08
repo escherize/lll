@@ -209,8 +209,12 @@ assert p.returncode != 0 and 'held by claim-alpha' in p.stderr and 'needs force'
 assert 'lll issue update ' + key + ' --assignee none --force' in p.stderr, p.stderr
 status, refused = request(path + '/assignment', {'claim_id': held['id'], 'fields': {'assignee': ''}}, auth=su)
 assert status == 400 and 'needs force' in refused['message'], refused
-p = cli('issue', 'update', key, '--assignee', 'none', '-b', 'no force', actor=beta)
+p = cli('issue', 'update', key, '--assignee', 'none', '--reason', 'no force', actor=beta)
 assert p.returncode != 0 and 'add --force' in p.stderr, p.stderr
+# LLL-646: -b is the description on update now, so the old forced-clear
+# spelling is refused naming --reason rather than overwriting the description.
+p = cli('issue', 'update', key, '--assignee', 'none', '--force', '-b', 'alpha went quiet', actor=beta)
+assert p.returncode != 0 and '--reason' in p.stderr and 'description' in p.stderr, p.stderr
 p = cli('issue', 'update', key, '--title', 'x', '--force')
 assert p.returncode != 0 and 'goes with --assignee none' in p.stderr, p.stderr
 assert state() == before
@@ -295,12 +299,13 @@ finally:
 # forced release leaves, with the reason; a superuser's has no author.
 assert cli('issue', 'claim', key, actor=alpha).returncode == 0
 comments = len(state()['comments'])
-p = cli('issue', 'update', key, '--assignee', 'none', '--force', '-b', 'alpha went quiet', actor=beta)
+p = cli('issue', 'update', key, '--assignee', 'none', '--force', '--reason', 'alpha went quiet', actor=beta)
 assert p.returncode == 0 and "released claim-alpha's claim; forced, and commented" in p.stdout, (p.stdout, p.stderr)
 after = state()
 assert after['claim'] is None and after['assignee'] == '' and len(after['comments']) == comments + 1
 note = after['comments'][-1]
 assert note['body'] == "claim-beta force-released claim-alpha's claim.\n\nReason: alpha went quiet" and note['author'] == beta['id'], note
+assert note['author_kind'] == 'system', note
 assert cli('issue', 'claim', key, actor=alpha).returncode == 0
 held = state()['claim']
 status, outcome = request(path + '/assignment', {'claim_id': held['id'], 'fields': {'assignee': ''}, 'force': True}, auth=su)
@@ -389,7 +394,7 @@ for good in ['wt-a', 'A.b_c-9', 'a' * 64]:
 # The CLI refuses before any request: an unreachable endpoint still yields the
 # label error, not a connection error.
 dead = 'http://127.0.0.1:1'
-for argv in [['issue', 'claim', key], ['issue', 'claim', key, '--renew'], ['issue', 'release', key],
+for argv in [['issue', 'claim', key], ['issue', 'claim', key, '--renew'], ['issue', 'release', key], ['issue', 'close', key],
              ['issue', 'next', '--claim'], ['issue', 'comment', key, '-b', 'x']]:
     p = cli(*argv, '--agent', bad_labels[0], actor=alpha, endpoint=dead)
     assert p.returncode != 0 and 'invalid agent label' in p.stderr and '127.0.0.1:1' not in p.stderr, (argv, p.stderr)
@@ -399,3 +404,81 @@ assert p.returncode != 0 and 'from --agent or LLL_AGENT' in p.stderr, p.stderr
 assert cli('issue', 'release', key, actor=alpha).returncode == 0
 
 print('Agent labels: claim, renew, release and comment create refuse a malformed label with no side effect; the CLI refuses before sending')
+
+
+def set_state(value):
+    status, record = request('/api/collections/issues/records/' + issue['id'], {'state': value}, 'PATCH', auth=su)
+    assert status == 200, record
+
+
+# D3 (LLL-640): close releases the closer's claim and keeps the assignee.
+# Closing an issue another member holds is the release rule's case.
+set_state('todo')
+assert cli('issue', 'claim', key, actor=alpha).returncode == 0
+before = state()
+p = cli('issue', 'close', key, actor=beta)
+assert p.returncode != 0 and 'needs force' in p.stderr and "'lll issue close " + key + " --force --reason" in p.stderr, p.stderr
+p = cli('issue', 'close', key, '--keep-claim', '--force', actor=beta)
+assert p.returncode != 0 and 'only the holder keeps a claim' in p.stderr, p.stderr
+p = cli('issue', 'close', key, '--reason', 'no force', actor=beta)
+assert p.returncode != 0 and 'add --force' in p.stderr, p.stderr
+assert state() == before
+p = cli('issue', 'close', key, actor=alpha)
+assert p.returncode == 0 and "Released claim-alpha's claim; assignee unchanged." in p.stdout, (p.stdout, p.stderr)
+after = state()
+assert after['state'] == 'done' and after['claim'] is None and after['assignee'] == alpha['id'], after
+assert len(after['comments']) == len(before['comments'])
+set_state('todo')
+assert cli('issue', 'claim', key, actor=alpha).returncode == 0
+p = cli('issue', 'close', key, '--force', '--reason', 'shipped by beta', actor=beta)
+assert p.returncode == 0 and 'forced, and commented' in p.stdout, (p.stdout, p.stderr)
+note = state()['comments'][-1]
+assert note['body'] == "claim-beta force-released claim-alpha's claim.\n\nReason: shipped by beta", note
+assert note['author'] == beta['id'] and note['author_kind'] == 'system', note
+assert state()['claim'] is None and state()['state'] == 'done'
+print('Close: the holder releases and keeps the assignee; a non-holder is refused without force, cannot keep the claim, and a forced close comments with the reason')
+
+# LLL-654: author_kind is the server's word. No request sets it, and a
+# server-written comment cannot be edited; the CLI shows it as "system".
+for who in [alpha['token'], su]:
+    status, refused = request('/api/collections/comments/records',
+                              {'issue': issue['id'], 'body': 'forged', 'author_kind': 'system'}, auth=who)
+    assert status == 400, (status, refused)
+status, refused = request('/api/collections/comments/records/' + note['id'], {'body': 'rewritten'}, 'PATCH', auth=beta['token'])
+assert status == 400 and 'server-written' in refused['message'], refused
+plain = post('comments', {'issue': issue['id'], 'body': 'a person wrote this'})
+assert plain['author_kind'] == '', plain
+status, refused = request('/api/collections/comments/records/' + plain['id'], {'author_kind': 'system'}, 'PATCH', auth=su)
+assert status == 400, (status, refused)
+assert state()['comments'][-1]['body'] == note['body']
+p = cli('issue', 'view', key, '--raw')
+assert p.returncode == 0 and "- **system** (" in p.stdout and 'Reason: shipped by beta' in p.stdout, p.stdout
+print('System comments: author_kind refused from any request, server-written comments not editable, rendered as system')
+
+# LLL-662 (b): 'issue next' reads the claims, not only the assignee. The
+# holder may move the assignee off its own claimed issue; it is still held.
+set_state('todo')
+assert cli('issue', 'claim', key, actor=alpha).returncode == 0
+status, moved = request('/api/collections/issues/records/' + issue['id'], {'assignee': ''}, 'PATCH', auth=alpha['token'])
+assert status == 200 and state()['claim'] is not None and state()['assignee'] == '', moved
+p = cli('issue', 'next')
+assert key not in p.stdout, (p.stdout, p.stderr)
+print('Next: a claimed issue with no assignee is not offered')
+
+# LLL-662 (a): deleting an issue cascades its claim away, so a claimed issue
+# is refused at the API for everyone, holder and superuser included, and the
+# CLI's --force releases it first under the release rule.
+for who in [alpha['token'], beta['token'], su]:
+    status, refused = request('/api/collections/issues/records/' + issue['id'], method='DELETE', auth=who)
+    assert status == 400 and 'claimed by' in refused['message'], (status, refused)
+assert state()['claim'] is not None
+p = cli('issue', 'delete', key, '--yes', actor=beta)
+assert p.returncode != 0 and "'lll issue delete " + key + " --force'" in p.stderr, p.stderr
+assert state()['claim'] is not None
+spare = post('issues', {'team': team['id'], 'title': 'Unclaimed delete', 'state': 'todo'})
+p = cli('issue', 'delete', 'CLTX-' + str(spare['number']), '--force', '--yes', actor=beta)
+assert p.returncode != 0 and 'skipped by --yes' in p.stderr, p.stderr
+p = cli('issue', 'delete', key, '--force', '--yes', actor=beta)
+assert p.returncode == 0 and 'Deleted ' + key in p.stdout, (p.stdout, p.stderr)
+assert request('/api/collections/issues/records/' + issue['id'])[0] == 404
+print('Delete: a claimed issue is refused at the API and by the CLI without --force; --force releases, then deletes')

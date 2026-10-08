@@ -356,17 +356,17 @@ fn member_remove(input: flags.CommandInput) -> Result<(), string> {
   if name == "" { return Err(f"usage: {usage}") }
 
   point_at_url(p.one("--url"))?
-  apply_admin_flags(p.one("--admin-email"), p.one("--admin-password"))?
   // Require an explicit admin login before lookup/counting. The backend also
   // restricts member deletion to superusers (LLL-341), so direct API clients
   // cannot bypass the same account boundary.
-  if os.Getenv("LLL_ADMIN_EMAIL") == "" || os.Getenv("LLL_ADMIN_PASSWORD") == "" {
+  let login = given_admin_login(p)?
+  if admin_login_email(login) == "" {
     return Err(
       "removing a member needs the server's admin credentials
-pass --admin-email and --admin-password, or set LLL_ADMIN_EMAIL/LLL_ADMIN_PASSWORD",
+" + admin_hint(),
     )
   }
-  let su = superuser_auth()?
+  let su = superuser_auth(login)?
   let Some(member) = records.find_member_as(su, name)? else {
     return Err(f"no member named '{name}' — see 'lll member list'")
   }
@@ -459,7 +459,7 @@ fn point_at_url(given: string) -> Result<(), string> {
 /// `lll member set-password NAME` — the superuser gives a member login
 /// credentials (TASK-203). Needed because created and imported members carry
 /// a random password nobody knows, so 'lll login' is a dead door until this
-/// runs. Gated exactly like token create: LLL_ADMIN_* env credentials, or a
+/// runs. Gated exactly like token create: --admin-email/--admin-password, or a
 /// configured superuser token.
 /// Keep unrelated validation and server failures intact; only actual auth
 /// refusals should advise the caller to change administrative credentials.
@@ -468,7 +468,7 @@ fn member_password_error(name: string, e: string) -> string {
   if status == 403 || status == 401 || (status == 400 &&
   strings.Contains(pb.response_body(e), "oldPassword")) {
     return "member set-password is superuser-only and the configured token is not one
-set LLL_ADMIN_EMAIL/LLL_ADMIN_PASSWORD to this server's administrator credentials"
+" + admin_hint()
   }
   f"setting {name}'s password: {e}"
 }
@@ -480,8 +480,7 @@ fn member_set_password(input: flags.CommandInput) -> Result<(), string> {
   if name == "" { return Err(f"usage: {usage}") }
 
   point_at_url(p.one("--url"))?
-  apply_admin_flags(p.one("--admin-email"), p.one("--admin-password"))?
-  let su = superuser_auth()?
+  let su = superuser_auth(given_admin_login(p)?)?
   let found = records.find_member_as(su, name)?
   let Some(member) = found else {
     return Err(f"no member named '{name}' — see 'lll member create'")
@@ -576,10 +575,9 @@ fn member_invite(input: flags.CommandInput) -> Result<(), string> {
   // were perfectly good. Four of the six usability runs lost commands to
   // exactly that, and half of them guessed LLL_URL rather than being told.
   point_at_url(p.one("--url"))?
-  apply_admin_flags(p.one("--admin-email"), p.one("--admin-password"))?
   // Superuser first: the create rides it, and an existing name is caught here
   // rather than as PocketBase's bare 400 on the unique index.
-  let su = superuser_auth()?
+  let su = superuser_auth(given_admin_login(p)?)?
   if let Some(existing) = records.find_member_as(su, name)? {
     return Err(
       f"member '{name}' already exists ({existing.email}) — run 'lll member set-password {name} --email {email} --password PASSWORD' with administrator credentials to enable login; existing credentials are unchanged",
@@ -724,7 +722,7 @@ fn member_passes(input: flags.CommandInput) -> Result<(), string> {
   if let Err(e) = os.Setenv("LLL_WEB_URL", local.url) {
     return Err(f"pointing at the local board: {e}")
   }
-  apply_admin_flags(p.one("--admin-email"), p.one("--admin-password"))?
+  let given = given_admin_login(p)?
   let cfg = config.load()?
   if cfg.team == "" {
     return Err(
@@ -758,13 +756,13 @@ fn member_passes(input: flags.CommandInput) -> Result<(), string> {
   if local.url != cfg.url {
     return Err("saved local board admin connection disagrees with this API URL")
   }
-  if (os.Getenv("LLL_ADMIN_EMAIL") == "") != (os.Getenv("LLL_ADMIN_PASSWORD") == "") {
-    return Err("provide both administrator credentials, or neither")
+  // The saved local share's administrator is authoritative here, unless the
+  // flags name one: an inherited LLL_ADMIN_* or configured token is ignored.
+  let login = match given {
+    AdminLogin.Explicit(creds) => AdminLogin.Explicit(creds),
+    _ => AdminLogin.Explicit(AdminCreds { email: local.email, password: local.password }),
   }
-  if os.Getenv("LLL_ADMIN_EMAIL") == "" {
-    apply_admin_flags(local.email, local.password)?
-  }
-  let su = superuser_auth()?
+  let su = superuser_auth(login)?
   let run_id = strings.ToLower(rand.Text())
   let out = if p.one("--out") != "" {
     p.one("--out")
@@ -785,7 +783,7 @@ fn member_passes(input: flags.CommandInput) -> Result<(), string> {
     ),
   }
   defer file.Close()
-  let header = f"Team: {cfg.team}\nAPI: {cfg.url}\nBoard login: {login_url}\n\nSend only one person's block to that person. Browser access uses the board link; CLI/API access uses that person's LLL_TOKEN.\n{expiry_line(duration, time.Now())}\n\n"
+  let header = f"Team: {cfg.team}\nAPI: {cfg.url}\nBoard login: {login_url}\n\nSend only one person's block to that person. Browser access uses the board link; CLI/API access uses that person's LLL_TOKEN.\n{expiry_line(duration, time.Now(), "lll token create")}\n\n"
   match file.WriteString(header) {
     Partial.Ok(n) => if n != header.bytes().length() {
       return Err(f"short write to handoff file {out}")
@@ -948,7 +946,12 @@ LLL_ADMIN_PASSWORD) do not authenticate it. From an administrator-only
 machine, use 'lll member invite NAME --email EMAIL' (it accepts
 --admin-email/--admin-password), or make a first member login with
 'lll login --create'. With --password the member can log in at once;
-otherwise an administrator enables login later with 'lll member set-password'." +
+otherwise an administrator enables login later with 'lll member set-password'.
+
+This makes people, not bots: the bot- prefix is reserved. For an agent, run
+'lll bot create bot-NAME', which makes a bot member you own and prints its
+token once in a prompt to paste into the agent. A bot cannot create bots;
+agents sharing one bot tell their sessions apart with --agent NAME." +
   flags.section(spec)
 }
 
@@ -964,7 +967,7 @@ fn member_create_error(e: string) -> string {
   // gopb refusal (the bot- prefix) its own message; both pass through.
   if pb.response_status(e) == 400 && e.contains("\"data\":{}") && e.contains("Failed to create record.") {
     return "your token cannot add members: only a member with read-write access to every team, or administrator credentials ('lll member invite NAME --email E' with LLL_ADMIN_EMAIL/LLL_ADMIN_PASSWORD), can
-for your own agent, a read-write member runs 'lll bot bot-NAME' (a bot it owns); a read-only member cannot, so ask whoever invited you"
+for your own agent, a read-write member runs 'lll bot create bot-NAME' (a bot it owns); a read-only member cannot, so ask whoever invited you"
   }
   if pb.response_status(e) == 401 {
     return "creating a member needs a member token: the one configured here is missing or was refused
@@ -991,7 +994,7 @@ fn member_add(input: flags.CommandInput) -> Result<(), string> {
   if strings.HasPrefix(name, "bot-") {
     return Err(
       f"'{name}' is a bot name: the bot- prefix is reserved to bot members
-a read-write member creates it with 'lll bot {name}' (owned by you, never more access than you have); a read-only member cannot create bots, so ask whoever invited you",
+a read-write member creates it with 'lll bot create {name}' (owned by you, never more access than you have); a read-only member cannot create bots, so ask whoever invited you",
     )
   }
 
@@ -1223,8 +1226,7 @@ fn member_access_cmd(input: flags.CommandInput) -> Result<(), string> {
   // Administrator credentials only: the members rules refuse every member
   // and bot token, so an agent on someone's token cannot widen a guest or
   // narrow its owner.
-  apply_admin_flags(p.one("--admin-email"), p.one("--admin-password"))?
-  let su = superuser_auth()?
+  let su = superuser_auth(given_admin_login(p)?)?
   // The record as the administrator reads it: a team-scoped configured token
   // reads a member without the teams it cannot see (LLL-551), and editing
   // that copy would drop them.
@@ -1268,7 +1270,7 @@ fn member_access_cmd(input: flags.CommandInput) -> Result<(), string> {
     let status = pb.response_status(e)
     if status == 400 || status == 403 || status == 404 {
       return Err(
-        "changing access needs administrator credentials: pass --admin-email and --admin-password, or set LLL_ADMIN_EMAIL/LLL_ADMIN_PASSWORD. A member or bot token cannot change anyone's access, its own included.",
+        "changing access needs administrator credentials: " + admin_hint() + ". A member or bot token cannot change anyone's access, its own included.",
       )
     }
     return Err(e)

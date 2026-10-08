@@ -100,9 +100,10 @@ Stream('page=board&team=CL185').until(lambda e: b'class="card-claim"' in e)
 cli('issue', 'release', key)
 print('Board claims: claim-only release updates issue/card/work-site, unrelated assignment preserved, reconnect snapshots and raw holder passed')
 
-# LLL-512: the board's Release button always forces, because the person
-# clicking it has read whose claim it names. Another member's claim goes, and
-# the comment names the board's member, the identity the board acts as.
+# LLL-662: the board's Release button forces only with a reason. Without one,
+# another member's claim is refused and stays; with one, it goes, and the
+# comment names the board's member (the identity the board acts as) and the
+# reason.
 password = 'board-claim-holder-123'
 holder = json.loads(request('/api/collections/members/records', {'name': 'Board claim holder',
     'email': 'board-claim-holder@lll.test', 'password': password, 'passwordConfirm': password}))
@@ -114,18 +115,32 @@ assert p.returncode == 0, p.stderr
 held = json.loads(cli('issue', 'view', key, '--json'))['claim']
 assert held['member'] == holder['id'], held
 comments = len(json.loads(cli('issue', 'view', key, '--json'))['comments'])
-data = urllib.parse.urlencode({'key': key, 'claim_id': held['id']}).encode()
-req = urllib.request.Request(board + '/release', data=data,
-    headers={'Cookie': cookie, 'Origin': board, 'Content-Type': 'application/x-www-form-urlencoded'})
-with urllib.request.urlopen(req, timeout=20) as response:
-    assert b'error-summary"></span>' in response.read()
+
+
+def board_release(reason):
+    form = {'key': key, 'claim_id': held['id']}
+    if reason is not None:
+        form['reason'] = reason
+    req = urllib.request.Request(board + '/release', data=urllib.parse.urlencode(form).encode(),
+        headers={'Cookie': cookie, 'Origin': board, 'Content-Type': 'application/x-www-form-urlencoded'})
+    with urllib.request.urlopen(req, timeout=20) as response:
+        return response.read().decode()
+
+
+for reason in [None, '   ']:
+    flash = board_release(reason)
+    assert 'needs force' in flash and 'type a reason' in flash, flash
+    unchanged = json.loads(cli('issue', 'view', key, '--json'))
+    assert unchanged['claim']['id'] == held['id'] and len(unchanged['comments']) == comments, unchanged
+assert 'error-summary"></span>' in board_release('holder is on leave')
 after = json.loads(cli('issue', 'view', key, '--json'))
 assert after['claim'] is None and len(after['comments']) == comments + 1, after
 page = request('/issue/' + key, web=True).decode()
 actor = page.split('>Claim as ', 1)[1].split('</button>', 1)[0]
 note = after['comments'][-1]
-assert note['body'] == actor + " force-released Board claim holder's claim.", note
-print('Board claims: the Release button forces another member\'s claim off and the comment names the board member (' + actor + ')')
+assert note['body'] == actor + " force-released Board claim holder's claim.\n\nReason: holder is on leave", note
+assert note['author_kind'] == 'system', note
+print('Board claims: the Release button refuses another member\'s claim without a reason and forces it with one; the comment names the board member (' + actor + ') and the reason')
 
 if shutil.which('playwright-cli'):
     session = new_session()
