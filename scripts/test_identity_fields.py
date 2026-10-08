@@ -152,6 +152,23 @@ with tempfile.TemporaryDirectory(prefix='lll-identity-') as directory:
         assert ok(f"{views}/{bobs_view['id']}")['query'] == 'state=todo'
         assert ok(f"{favorites}/{shared['id']}", {'issue': other['id']}, a_tok, 'PATCH')['member'] == ''
 
+        # --- members.name: a superuser or the member itself renames (LLL-682) ----
+        # A full member renaming another one and then taking the freed name
+        # was the squat the LLL-681 review found. A bot is renamed by a
+        # superuser only, neither by its owner nor with its own token.
+        bot_alice = ok(members + "?filter=(name='bot-alice')")['items'][0]
+        b_tok = token(bot_alice)
+        for target, token_ in ((bob, a_tok), (bob, g_tok), (bot_alice, a_tok), (bot_alice, b_tok), (alice, g_tok)):
+            refused(f"{members}/{target['id']}", {'name': 'squatted'}, token_, 'PATCH')
+        assert ok(f"{members}/{bob['id']}")['name'] == 'bob'
+        assert ok(f"{members}/{bot_alice['id']}")['name'] == 'bot-alice'
+        refused(f"{members}/{alice['id']}", {'name': 'BOB'}, a_tok, 'PATCH')  # taken, regardless of case
+        # Resending the current name is not a rename.
+        assert ok(f"{members}/{bob['id']}", {'name': 'bob'}, a_tok, 'PATCH')['name'] == 'bob'
+        assert ok(f"{members}/{alice['id']}", {'name': 'alice2'}, a_tok, 'PATCH')['name'] == 'alice2'
+        assert ok(f"{members}/{bob['id']}", {'name': 'bob2'}, su, 'PATCH')['name'] == 'bob2'
+        assert ok(f"{members}/{bot_alice['id']}", {'name': 'bot-alice2'}, su, 'PATCH')['name'] == 'bot-alice2'
+
         # --- guards that already held stay held -----------------------------------
         comment = ok('/api/collections/comments/records',
                      {'issue': issue['id'], 'body': 'hi', 'author': bob['id']}, a_tok)

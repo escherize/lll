@@ -8,6 +8,11 @@ minors. Issue keys are on the project's own board (`lll issue view KEY`).
 
 ### Changed
 
+- Only a superuser or the member itself renames a member. A full member can
+  no longer rename another member, which let it rename someone and take the
+  freed name. A bot is renamed by a superuser only, not by its owner or with
+  its own token. The board's Members settings row refuses with that reason.
+  (LLL-682)
 - `--team` given twice on one command is refused with exit 2 (usage).
   It used to keep the last value silently. (LLL-486)
 - An unknown team key is attributed to `--team` only when `--team` was

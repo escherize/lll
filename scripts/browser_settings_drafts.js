@@ -7,9 +7,13 @@
 // answers with its own section, and the other sections are not on screen to
 // lose anything. What is left is the property that still exists — drafts
 // within the section being written survive the write.
+//
+// LLL-682: members are not in the loop. The board writes as its own member,
+// which may rename only itself, so a member row's rename is refused
+// (e2e_web.sh asserts the refusal).
 async page => {
   const section = name => page.url().replace(/\/settings\/[^/?#]*.*$/, '/settings/' + name);
-  for (const [kind, plural] of [['label', 'labels'], ['member', 'members'], ['project', 'projects']]) {
+  for (const [kind, plural] of [['label', 'labels'], ['project', 'projects']]) {
     await page.goto(section(plural));
     const row = name => page.locator('form.set-row').filter({
       has: page.locator(`input[name="name"][value="${name}"]`)
@@ -22,7 +26,7 @@ async page => {
     await otherInput.fill(`Unsaved ${kind} B`);
     if (kind === 'label') await other.getByLabel('Colour', {exact: true}).fill('#123456');
     if (kind === 'project') await other.getByLabel('Project status').selectOption('paused');
-    const newName = {label: 'New label name', member: 'New member name', project: 'New project name'}[kind];
+    const newName = {label: 'New label name', project: 'New project name'}[kind];
     await page.getByLabel(newName, {exact: true}).fill(`Unsaved new ${kind}`);
     if (kind === 'project') await page.getByLabel('Status for the new project').selectOption('started');
     // The rename moves this row past its neighbour in the server's sort.
@@ -140,5 +144,5 @@ async page => {
   await page.setViewportSize(viewport);
   await page.goto(previous);
   await page.screenshot({path: '/tmp/lll-101-settings.png'});
-  return 'settings drafts survive reordered label, member and project saves';
+  return 'settings drafts survive reordered label and project saves';
 }
