@@ -1,5 +1,4 @@
 import "records"
-import "references"
 import "go:bytes"
 import "go:encoding/json"
 import "go:fmt"
@@ -11,6 +10,7 @@ import "flags"
 import "models"
 import "pb"
 import "provenance"
+import "writes"
 
 /// Dispatch `lll import <verb>` through the noun's Command table (TASK-307):
 /// dispatch, `lll import --help` and shell completions all read it, so none
@@ -101,11 +101,7 @@ fn import_github(input: flags.CommandInput) -> Result<(), string> {
       labels,
       ..
     }
-    let payload = match json.Marshal(new_issue) {
-      Ok(p) => p,
-      Err(e) => return Err(f"encoding issue for {reference}: {e}"),
-    }
-    let body = ctx.post("/api/collections/issues/records", payload as string)?
+    let body = writes.create_issue(ctx, pb.Caller.Process, new_issue, "")?
     let mut issue = models.Issue { .. }
     if let Err(e) = json.Unmarshal(body.bytes(), &issue) {
       return Err(f"decoding created issue for {reference}: {e}")
@@ -115,7 +111,7 @@ fn import_github(input: flags.CommandInput) -> Result<(), string> {
     // for its PR. A failed append is retried alone, and the message names
     // it, because re-import skips on a saved ref and nothing else - an
     // issue without its ref would import twice.
-    if let Err(e) = references.append(ctx, issue.id, reference) {
+    if let Err(e) = writes.append_ref(ctx, issue.id, reference) {
       return Err(f"{key} created from {reference}, but the ref was not saved: {e}\nRetry only the reference save: lll issue ref {key} {reference}")
     }
     created += 1
@@ -216,12 +212,7 @@ fn ensure_labels(
     if ids.get(name).is_some() { continue }
     let mut color = ""
     if let Some(c) = colors.get(name) { color = gh_color(c) }
-    let new_label = models.NewLabel { name, color, team: team.id }
-    let payload = match json.Marshal(new_label) {
-      Ok(p) => p,
-      Err(e) => return Err(f"encoding label '{name}': {e}"),
-    }
-    let body = ctx.post("/api/collections/labels/records", payload as string)?
+    let body = writes.create_label(ctx, models.NewLabel { name, color, team: team.id })?
     let mut label = models.Label { .. }
     if let Err(e) = json.Unmarshal(body.bytes(), &label) {
       return Err(f"decoding created label '{name}': {e}")

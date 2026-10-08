@@ -1,0 +1,150 @@
+import "go:encoding/json"
+
+/// The wire body for `patch` against `current`, as update_issue sends it.
+fn wire(patch: IssuePatch, current: string) -> string {
+  let Ok((fields, _)) = issue_fields(patch, current) else {
+    panic("issue_fields failed")
+  }
+  let Ok(body) = json.Marshal(fields) else {
+    panic("encoding failed")
+  }
+  body as string
+}
+
+#[test]
+fn an_unchanged_patch_is_empty_and_sends_nothing() {
+  assert IssuePatch.unchanged().is_empty()
+  assert wire(IssuePatch.unchanged(), "text") == "{}"
+}
+
+#[test]
+fn only_the_given_fields_are_sent() {
+  let patch = IssuePatch {
+    state: Some("done"),
+    priority: Some(0),
+    ..IssuePatch.unchanged(),
+  }
+  assert !patch.is_empty()
+  // priority 0 is "none", a value, not an omission.
+  assert wire(patch, "") == "{\"state\":\"done\",\"priority\":0}"
+}
+
+#[test]
+fn clearing_a_relation_sends_an_empty_id() {
+  let patch = IssuePatch {
+    assignee: Relation.Clear,
+    project: Relation.Set("p1"),
+    ..IssuePatch.unchanged(),
+  }
+  assert wire(patch, "") == "{\"assignee\":\"\",\"project\":\"p1\"}"
+}
+
+#[test]
+fn an_empty_emoji_clears_it() {
+  let patch = IssuePatch { emoji: Some(""), ..IssuePatch.unchanged() }
+  assert wire(patch, "") == "{\"emoji\":\"\"}"
+}
+
+#[test]
+fn a_label_delta_rides_the_relation_modifiers() {
+  let both = IssuePatch {
+    labels: LabelEdit.Delta { add: ["a"], remove: ["b"] },
+    ..IssuePatch.unchanged(),
+  }
+  assert wire(both, "") == "{\"labels+\":[\"a\"],\"labels-\":[\"b\"]}"
+  // An empty side is not sent: an empty modifier is not a no-op to rely on.
+  let add = IssuePatch {
+    labels: LabelEdit.Delta { add: ["a"], remove: [] },
+    ..IssuePatch.unchanged(),
+  }
+  assert wire(add, "") == "{\"labels+\":[\"a\"]}"
+  let whole = IssuePatch {
+    labels: LabelEdit.Replace(["a", "b"]),
+    ..IssuePatch.unchanged(),
+  }
+  assert wire(whole, "") == "{\"labels\":[\"a\",\"b\"]}"
+}
+
+#[test]
+fn text_is_encoded_not_spliced() {
+  // A quote, a backslash, a newline and HTML delimiters survive as data.
+  let patch = IssuePatch {
+    title: Some("say \"hi\" \\ <b>&\nnext"),
+    ..IssuePatch.unchanged(),
+  }
+  let body = wire(patch, "")
+  let mut back = IssueFields { .. }
+  let Ok(_) = json.Unmarshal(body.bytes(), &back) else {
+    panic("not JSON")
+  }
+  assert back.title == Some("say \"hi\" \\ <b>&\nnext")
+}
+
+#[test]
+fn a_whole_description_is_not_derived() {
+  let patch = IssuePatch {
+    description: DescriptionEdit.Whole("new"),
+    ..IssuePatch.unchanged(),
+  }
+  let Ok((fields, derived)) = issue_fields(patch, "old") else {
+    panic("issue_fields failed")
+  }
+  assert !derived
+  assert fields.description == Some("new")
+}
+
+#[test]
+fn an_append_is_derived_from_the_current_text() {
+  let patch = IssuePatch {
+    description: DescriptionEdit.Derived(
+      Derivation { replace: None, append: Some("more") },
+    ),
+    ..IssuePatch.unchanged(),
+  }
+  let Ok((fields, derived)) = issue_fields(patch, "first\n\n") else {
+    panic("issue_fields failed")
+  }
+  assert derived
+  assert fields.description == Some("first\nmore")
+  // Appending to nothing is just the text.
+  let Ok((empty, _)) = issue_fields(patch, "  ") else {
+    panic("issue_fields failed")
+  }
+  assert empty.description == Some("more")
+}
+
+#[test]
+fn a_replacement_must_match_exactly_once() {
+  let d = Derivation {
+    replace: Some(Replacement { old: "a", new: "b" }),
+    append: None,
+  }
+  let Ok(once) = derive_description("xay", d) else {
+    panic("one match refused")
+  }
+  assert once == "xby"
+  match derive_description("aa", d) {
+    Err(UpdateFailure.ReplaceMatched(n)) => {
+      assert n == 2
+    },
+    _ => panic("two matches accepted"),
+  }
+  match derive_description("zzz", d) {
+    Err(UpdateFailure.ReplaceMatched(n)) => {
+      assert n == 0
+    },
+    _ => panic("no match accepted"),
+  }
+}
+
+#[test]
+fn a_replacement_then_an_append() {
+  let d = Derivation {
+    replace: Some(Replacement { old: "old", new: "new" }),
+    append: Some("tail"),
+  }
+  let Ok(text) = derive_description("the old line", d) else {
+    panic("refused")
+  }
+  assert text == "the new line\ntail"
+}

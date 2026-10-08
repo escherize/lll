@@ -450,14 +450,6 @@ pub struct DocList {
   pub items: Slice<Doc>,
 }
 
-/// LLL-396: the confirm/refute PATCH body — a judgement about a finding,
-/// never an edit of its content.
-#[json]
-pub struct ConfidencePatch {
-  pub confidence: string,
-  pub confidence_note: string,
-}
-
 #[json]
 pub struct NewDoc {
   pub team: string,
@@ -492,19 +484,6 @@ pub struct AuthRequest {
 pub struct AuthResponse {
   pub token: string,
   pub record: Member,
-}
-
-/// PATCH body for `lll member set-password` (TASK-203): the password pair
-/// PocketBase requires, plus the email when the member needs a real one to
-/// log in with (a synthesized @members.invalid identity is not typable in
-/// good conscience).
-#[json]
-pub struct PasswordPatch {
-  pub password: string,
-  #[json("passwordConfirm")]
-  pub password_confirm: string,
-  #[json(omitempty)]
-  pub email: string,
 }
 
 /// POST body for /api/collections/members/impersonate/{id} (TASK-183): a

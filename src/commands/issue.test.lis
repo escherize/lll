@@ -295,35 +295,6 @@ fn member_create_is_an_alias_for_member_add() {
   assert n.value
 }
 
-// ------------------------------------------------------------ json_quote
-
-#[test]
-fn json_quote_wraps_and_escapes() {
-  let assert Ok(plain) = json_quote("hi")
-  assert plain == "\"hi\""
-  let assert Ok(quoted) = json_quote("say \"hi\"")
-  assert quoted == "\"say \\\"hi\\\"\""
-  let assert Ok(nl) = json_quote("one\ntwo")
-  assert nl == "\"one\\ntwo\""
-  let assert Ok(bs) = json_quote("a\\b")
-  assert bs == "\"a\\\\b\""
-}
-
-/// encoding/json escapes <, > and & so a PocketBase payload can be embedded in
-/// HTML. Anything comparing issue bodies byte-for-byte has to expect it.
-#[test]
-fn json_quote_escapes_html_delimiters() {
-  let assert Ok(q) = json_quote("<b>&</b>")
-  assert q == "\"\\u003cb\\u003e\\u0026\\u003c/b\\u003e\""
-}
-
-/// Non-ASCII is NOT escaped: it stays literal UTF-8 in the request body.
-#[test]
-fn json_quote_keeps_multi_byte_text_literal() {
-  let assert Ok(q) = json_quote("café — 日本 🐛")
-  assert q == "\"café — 日本 🐛\""
-}
-
 #[test]
 fn named_priorities_round_trip_with_numeric_compatibility() {
   for name in ["none", "urgent", "high", "medium", "low"] {

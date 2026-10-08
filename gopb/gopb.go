@@ -17,7 +17,6 @@ import (
 	"strings"
 
 	"github.com/escherize/lll/pb"
-	"github.com/pocketbase/dbx"
 	validation "github.com/pocketbase/ozzo-validation/v4"
 	"github.com/pocketbase/pocketbase"
 	"github.com/pocketbase/pocketbase/core"
@@ -96,6 +95,7 @@ func Serve(dataDir, addr, adminEmail, adminPassword, version, allowedOriginsSpec
 	registerAssigneeTeamGuard(app)
 	registerClaimedIssueDeleteGuard(app)
 	registerSystemCommentGuard(app)
+	registerIssueNumbering(app)
 	registerClaimExpiry(app)
 	// LLL-235: a team key is uppercase, whoever writes it. Keys were stored
 	// as typed, so 'eng' and 'ENG' were two teams the unique index was happy
@@ -153,6 +153,7 @@ func Serve(dataDir, addr, adminEmail, adminPassword, version, allowedOriginsSpec
 		registerLinkTokenRoute(e.Router)
 		registerInviteRoutes(e.Router)
 		registerReferenceRoutes(e.Router, &issueUpdates)
+		registerIssueCounterRoutes(e.Router)
 		e.Router.GET("/.well-known/lll", func(re *core.RequestEvent) error {
 			return re.JSON(http.StatusOK, apiDiscovery(version, webURL))
 		})
@@ -262,8 +263,8 @@ func materializeMigrations(dataDir string) (string, error) {
 	return dir, nil
 }
 
-// issueDefaults assigns the per-team issue number and the default board
-// position on create. Both were JavaScript in pb_hooks/main.pb.js until the
+// issueDefaults assigns the per-team issue number (issue_numbers.go) and the
+// default board position on create. Both were JavaScript in pb_hooks/main.pb.js until the
 // gopb commit-pin loop went away and Go became the cheaper place to put them.
 //
 // Each only fires when the client sent nothing, which is load-bearing in both
@@ -271,19 +272,8 @@ func materializeMigrations(dataDir string) (string, error) {
 // rather than silently renumbering it, and it lets a drag-to-reorder PATCH keep
 // the explicit fractional sort it computed.
 func issueDefaults(app core.App, record *core.Record) error {
-	if record.GetInt("number") == 0 {
-		last, err := app.FindRecordsByFilter(
-			"issues", "team = {:team}", "-number", 1, 0,
-			dbx.Params{"team": record.GetString("team")},
-		)
-		if err != nil {
-			return err
-		}
-		next := 1
-		if len(last) > 0 {
-			next = last[0].GetInt("number") + 1
-		}
-		record.Set("number", next)
+	if err := nextIssueNumber(app, record); err != nil {
+		return err
 	}
 
 	if record.GetFloat("sort") == 0 {

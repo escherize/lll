@@ -12,6 +12,7 @@ import "config"
 import "flags"
 import "models"
 import "pb"
+import "writes"
 
 // `lll token` (TASK-183) — the agent entry point for auth. Agents do not
 // have passwords to type; a superuser mints them a non-refreshable
@@ -737,11 +738,7 @@ fn create_bot_member_as(ctx: pb.Client, tok: string, name: string, owner: string
     teams: [],
     mode: "",
   }
-  let payload = match json.Marshal(new_bot) {
-    Ok(p) => p,
-    Err(e) => return Err(f"encoding bot member: {e}"),
-  }
-  let body = ctx.post_as("/api/collections/members/records", payload as string, tok)?
+  let body = writes.create_member(ctx, pb.Caller.Member(tok), new_bot)?
   let mut created = models.Member { .. }
   if let Err(e) = json.Unmarshal(body.bytes(), &created) {
     return Err(f"decoding created bot member: {e}")

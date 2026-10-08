@@ -9,6 +9,7 @@ import "models"
 import "pb"
 import "flags"
 import "query"
+import "writes"
 
 /// Dispatch `lll webhook <verb>` through the noun's Command table (TASK-307):
 /// dispatch, `lll webhook --help` and shell completions all read the table.
@@ -120,12 +121,7 @@ fn webhook_add(input: flags.CommandInput) -> Result<(), string> {
     return Err(f"webhook {target} is already registered for {scope}; remove it first: 'lll webhook remove {target}'")
   }
 
-  let new_hook = models.NewWebhook { team: team.id, project: project_id, url: target, secret }
-  let payload = match json.Marshal(new_hook) {
-    Ok(p) => p,
-    Err(e) => return Err(f"encoding webhook: {e}"),
-  }
-  let body = ctx.post("/api/collections/webhooks/records", payload as string)?
+  let body = writes.create_webhook(ctx, models.NewWebhook { team: team.id, project: project_id, url: target, secret })?
   let mut created = models.Webhook { .. }
   if let Err(e) = json.Unmarshal(body.bytes(), &created) {
     return Err(f"decoding created webhook: {e}")
@@ -147,12 +143,14 @@ fn webhook_list(input: flags.CommandInput) -> Result<(), string> {
   let ctx = input.ctx
   let p = input.parsed
   let team = team_flag_or_current(ctx, p.one("--team"))?
-  let mut hooks = models.WebhookList { .. }
-  pb.fetch(ctx, 
-    f"/api/collections/webhooks/records?perPage=200&sort=-created&expand=team,project&filter={url.QueryEscape(f"team={query.quote(team.id)}")}",
-    "webhooks",
-    &hooks,
-  )?
+  // Every page (LLL-659): one page of 200 silently dropped the rest.
+  let hooks = models.WebhookList {
+    items: records.fetch_all_records<models.Webhook>(ctx,
+      f"/api/collections/webhooks/records?sort=-created,id&expand=team,project&filter={url.QueryEscape(f"team={query.quote(team.id)}")}",
+      "webhooks",
+    )?,
+    ..
+  }
   if p.given("--json") { return print_list_json(hooks.items, whole_list(hooks.items.length()), "webhook list") }
   if hooks.items.is_empty() { return say_empty("webhooks") }
   for h in hooks.items {
@@ -192,7 +190,7 @@ fn webhook_remove(input: flags.CommandInput) -> Result<(), string> {
     return Err(f"webhook {target} is registered more than once; pass --project, or remove by id: one of {strings.Join(ids, ", ")}\nusage: {usage}")
   }
   let victim = matches.items[0]
-  let _ = ctx.delete(f"/api/collections/webhooks/records/{victim.id}")?
+  writes.delete_webhook(ctx, victim.id)?
   fmt.Println(f"Removed webhook {target} ({scope})")
   Ok(())
 }
