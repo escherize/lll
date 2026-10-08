@@ -220,7 +220,9 @@ pub fn update_issue(
       Err(e) => {
         let status = e.status
         // A server older than LLL-665 refuses the stamp field on the claim
-        // route as unknown: say what to do rather than relay the 400.
+        // route as unknown: say what to do rather than relay the 400. Its
+        // wording is the only signal such a server gives, so this one match
+        // reads text (scripts/test_typed_boundaries.py allows it by name).
         if assigning && derived && status == 400 && strings.Contains(
           strings.ToLower(e.message),
           "invalid assignment update fields",

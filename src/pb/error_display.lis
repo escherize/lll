@@ -12,6 +12,8 @@ struct ErrorEnvelope {
 #[json]
 struct EnvelopeCode {
   code: string,
+  #[json("oldPassword", omitempty)]
+  old_password: Option<json.RawMessage>,
 }
 
 /// The board's presentation of an error: a sentence for the person, and the
@@ -34,11 +36,14 @@ pub fn display_error(err: CliError) -> ErrorDisplay {
   }
 }
 
-/// The stable code an lll refusal carries at data.code (gopb), None for none.
+/// The stable code an lll refusal carries at data.code (gopb); for
+/// PocketBase's own validation, the field it refuses. None for neither.
 fn envelope_code(raw: json.RawMessage) -> Option<ServerCode> {
   let mut data = EnvelopeCode { .. }
   if json.Unmarshal(raw, &data).is_err() { return None }
-  code_named(data.code)
+  if data.code != "" { return code_named(data.code) }
+  if data.old_password.is_some() { return Some(ServerCode.OldPasswordRejected) }
+  None
 }
 
 fn field_errors(raw: json.RawMessage, path: string, depth: int) -> Slice<string> {

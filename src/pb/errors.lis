@@ -1,5 +1,3 @@
-import "go:strings"
-
 /// What kind of failure an error is, as far as a caller deciding what to do
 /// next cares. Each kind is one exit code (exit_code), the D1 contract in
 /// docs/cli-contract.md.
@@ -71,6 +69,10 @@ pub enum ServerCode {
   NotClaimed,
   /// A member with an owner would have wider access than its owner.
   BotExceedsOwner,
+  /// PocketBase refused a password change's oldPassword field: the current
+  /// password given is not the member's. PocketBase's own validation, read
+  /// from the field it names rather than from its wording.
+  OldPasswordRejected,
 }
 
 /// The code a server's data.code names; None for "" or an unknown code.
@@ -93,6 +95,7 @@ fn is_refusal(code: Option<ServerCode>) -> bool {
     Some(ServerCode.ClaimChanged) => true,
     Some(ServerCode.NotClaimed) => true,
     Some(ServerCode.BotExceedsOwner) => false,
+    Some(ServerCode.OldPasswordRejected) => false,
     None => false,
   }
 }
@@ -137,13 +140,4 @@ pub fn failed(message: string) -> CliError {
 /// A help page, asked for with -h or --help, or a noun with no verb.
 pub fn help(page: string) -> CliError {
   fail(ErrorKind.Help, page)
-}
-
-// Removed in the last commit of LLL-675, once nothing calls them.
-fn tag_end() -> string { "\u{1d}" }
-
-/// Text from outside this process (a server's message or body) with the tag
-/// delimiter removed, so it can neither start a tag nor hide what follows.
-pub fn untagged(text: string) -> string {
-  strings.ReplaceAll(text, tag_end(), "")
 }

@@ -33,6 +33,12 @@ STRING_ERROR_BOUNDARIES = {'config', 'gitctx', 'markdown', 'models', 'references
                            'search', 'display', 'provenance'}
 ID_MAKERS = {'models', 'records', 'writes'}
 ID = r'(?:Team|Issue|Label|Project|Member|Claim)Id'
+# Files allowed one wording match, and why. Keep this list short.
+TEXT_CLASSIFIERS = {
+    # A server older than LLL-665 says only 'invalid assignment update
+    # fields'; a current server never sends it, so no code can replace it.
+    'src/writes/issues.lis',
+}
 STATES = r'"(?:backlog|todo|in-progress|in-review|done|cancelled)"'
 
 
@@ -95,7 +101,11 @@ def violations(files):
             if module == 'models':
                 continue
             found.append(f'{rel}: {m.group(0)}: a state is a models.IssueState; its rules are methods on it')
-        for marker in ['pb.tag(', 'pb.classify(', 'pb.plain(', 'help_marker', 'filter_team(']:
+        for m in re.finditer(r'(?:Contains|HasPrefix|starts_with|contains)\(\s*(?:strings\.ToLower\()?\w+\.message\b', code):
+            if rel in TEXT_CLASSIFIERS:
+                continue
+            found.append(f'{rel}: {m.group(0)}: decide on the error\'s kind, status or code, not its wording')
+        for marker in ['\\u{1d}', 'untagged(', 'pb.tag(', 'pb.classify(', 'pb.plain(', 'help_marker', 'filter_team(']:
             if marker in code:
                 found.append(f'{rel}: {marker}: the string-tag and sentinel machinery is gone')
     return found
@@ -114,6 +124,8 @@ class TypedBoundariesTest(unittest.TestCase):
             ('src/commands/x.lis', 'commands', 'let id = raw as models.TeamId'),
             ('src/records/x.lis', 'records', 'fn fetch(ctx: pb.Client, team_id: string) {}'),
             ('src/commands/x.lis', 'commands', 'let t = scope.filter_team()'),
+            ('src/commands/x.lis', 'commands', 'if strings.Contains(e.message, "oldPassword") {}'),
+            ('src/pb/x.lis', 'pb', 'fn tag_end() -> string { "\\u{1d}" }'),
             ('src/serve/x.lis', 'serve', 'if issue.state_wire == x {}'),
             ('src/commands/x.lis', 'commands', 'if m.mode_wire == "rw" {}'),
             ('src/records/x.lis', 'records', 'if s == "done" {}'),

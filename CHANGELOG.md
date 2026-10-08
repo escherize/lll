@@ -21,9 +21,30 @@ minors. Issue keys are on the project's own board (`lll issue view KEY`).
   own them (records, writes, tokens, display, realtime, buildinfo).
   `scripts/test_module_deps.py` fails if the board imports `commands`. No
   command, flag, page or output changed. (LLL-659)
+- Internals are typed (LLL-675). Errors are `pb.CliError` values with a
+  kind, status and server code instead of strings with a hidden tag; record
+  ids are one type per collection; "every team" is
+  `query.TeamScope.Every` instead of an empty team id; issue state and
+  priority, member access and kind, and realtime events are enums parsed
+  once where text arrives. `scripts/test_typed_boundaries.py` holds it. No
+  command, flag, page or output changed except as listed under Fixed.
 
 ### Fixed
 
+- `lll issue update KEY --assignee NAME` on an issue another session's
+  claim holds, refused for needing force, exits 4 (refused) like every
+  other claim refusal. It exited 1: the refusal's kind was lost when the
+  message was reworded. (LLL-675)
+- The server's refusal of a bot wider than its owner carries the stable
+  code `bot_exceeds_owner`, and `lll member access` relays it by that code;
+  a wrong `--old-password` is read from PocketBase's `oldPassword` field.
+  Both used to be found by matching the message text. (LLL-675)
+- Board forms refuse a label, project or member id outside what the viewer
+  may pick for the issue's team (create, and the settings rows' label and
+  project updates, included), naming it, instead of handing the raw id to
+  the server. (LLL-675)
+- The board's live stream ignores an event on a topic it did not subscribe
+  to by name. It used to read any unknown topic as an issue. (LLL-675)
 - An issue key with a signed number (`lll issue view ENG-+3`, the board's
   `/issue/ENG-+3`) is refused as not an issue ID (exit 2; 404 on the board).
   The CLI used to read it as ENG-3 while the board's gate said it belonged
