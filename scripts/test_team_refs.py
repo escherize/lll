@@ -16,6 +16,8 @@ import sqlite3
 import subprocess
 import sys
 import tempfile
+import threading
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -98,9 +100,12 @@ with tempfile.TemporaryDirectory(prefix='lll-631-') as directory:
             code, tok = call(api, f"/api/collections/members/impersonate/{rec['id']}", {'duration': 3600}, su)
             assert code == 200, tok
             toks[name] = tok['token']
+            ids[name] = rec['id']
 
+        ids = {}
         member('guest', scope='teams', teams=[alpha['id']], mode='rw')
         member('full', scope='all', mode='rw')
+        member('mover', scope='all', mode='rw')
 
         def create(collection, who='su', **data):
             code, rec = call(api, f'/api/collections/{collection}/records', data, toks[who])
@@ -232,6 +237,46 @@ with tempfile.TemporaryDirectory(prefix='lll-631-') as directory:
         assert realtime_subscribe(toks['full'], f'issues/*?options={options}')[0] == 204
         ok = q(json.dumps({'query': {'filter': f'team = "{alpha["id"]}"'}}))
         assert realtime_subscribe(toks['guest'], f'issues/*?options={ok}')[0] == 204
+
+        # Review F3: narrowing a member drops the subscriptions it could no
+        # longer make. 'mover' subscribes while it sees every team.
+        events = []
+        stream = urllib.request.urlopen(urllib.request.Request(api + '/api/realtime'), timeout=30)
+        client = None
+        while client is None:
+            line = stream.readline().decode()
+            if line.startswith('data:'):
+                client = json.loads(line[5:])['clientId']
+        topic = f'issues/*?options={options}'
+        assert call(api, '/api/realtime', {'clientId': client, 'subscriptions': [topic]}, toks['mover'])[0] == 204
+
+        def reader():
+            try:
+                for raw in stream:
+                    events.append(raw.decode())
+            except Exception:
+                pass
+        threading.Thread(target=reader, daemon=True).start()
+
+        def saw_event(title):
+            assert patch('issues', issue['id'], 'su', title=title)[0] == 200
+            deadline = time.monotonic() + 3
+            while time.monotonic() < deadline:
+                if any(title in e for e in events):
+                    return True
+                time.sleep(.1)
+            return False
+
+        assert saw_event('rt before narrowing'), 'control: the full-access subscription delivers'
+        assert call(api, f"/api/collections/members/records/{ids['mover']}", {'scope': 'teams', 'teams': [alpha['id']]}, su, 'PATCH')[0] == 200
+        assert not saw_event('rt after narrowing'), 'a narrowed member kept a probe subscription'
+        stream.close()
+
+        # Review F1: another member's favorite cannot be read off a visible
+        # issue by a ?-operator through favorites_via_issue.
+        create('favorites', who='full', issue=issue['id'], member=ids['full'])
+        for probe in ["favorites_via_issue.id ?!= 'zz' || id != ''", "favorites_via_issue.member ?= 'x'"]:
+            assert listing('guest', probe)[0] == 403, probe
 
         # Detach the legacy references; the audit comes back clean.
         assert patch('issues', issue['id'], 'full', **{'labels-': [secret['id']], 'blocked_by-': [hidden['id']]})[0] == 200

@@ -195,6 +195,10 @@ func TestRelationProbePaths(t *testing.T) {
 		{issues, `@collection.issues:other.title ~ "x"`, "", true},
 		{labels, `issues_via_labels.title ~ "x"`, "", true},
 		{issues, `docs_via_issues.slug = "x"`, "", true},
+		// Review F1: a member-scoped collection, with any operator.
+		{issues, `favorites_via_issue.id ?!= "zz" || id != ""`, "", true},
+		{issues, `favorites_via_issue.member ?= "x"`, "", true},
+		{issues, "", "favorites_via_issue.id", true},
 		// Stored ids: exact matches only, no modifiers, no sort.
 		{issues, `labels ~ "a"`, "", true},
 		{issues, `labels = "id"`, "", true},

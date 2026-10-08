@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/ganigeorgiev/fexpr"
+	"github.com/pocketbase/pocketbase/apis"
 	"github.com/pocketbase/pocketbase/core"
 	"github.com/pocketbase/pocketbase/tools/search"
 	"github.com/spf13/cast"
@@ -122,40 +123,81 @@ func registerRosterScope(app core.App) {
 			return e.Next()
 		}
 		for _, topic := range e.Subscriptions {
-			// Read the options exactly as PocketBase will
-			// (tools/subscriptions/client.go Subscribe): url.Parse, then the
-			// "options" query value however it is spelled or placed. A
-			// string cut on "?options=" missed "?x=1&options=" and
-			// "?opt%69ons=" (LLL-551 review F1).
-			u, err := url.Parse(topic)
-			if err != nil {
-				continue // PocketBase ignores the options too
-			}
-			raw := u.Query().Get("options")
-			if raw == "" {
-				continue
-			}
-			var options struct {
-				Query map[string]any `json:"query"`
-			}
-			if err := json.Unmarshal([]byte(raw), &options); err != nil {
-				continue // PocketBase ignores options that do not decode
-			}
-			filter, sort := cast.ToString(options.Query[search.FilterQueryParam]), cast.ToString(options.Query[search.SortQueryParam])
-			if filter == "" && sort == "" {
-				continue
-			}
-			name, _, _ := strings.Cut(u.Path, "/")
-			collection, err := e.App.FindCachedCollectionByNameOrId(name)
-			if err != nil {
-				return e.ForbiddenError(rosterProbeRefusal, nil)
-			}
-			if why := probeRefusal(e.App, collection, filter, sort); why != "" {
+			if why := topicRefusal(e.App, topic); why != "" {
 				return e.ForbiddenError(why, nil)
 			}
 		}
 		return e.Next()
 	})
+
+	// A subscription is checked when it is made, so narrowing a member
+	// afterwards (or the owner of a bot) must drop the subscriptions it could
+	// no longer make (LLL-634 review F3). PocketBase keeps a client's
+	// subscriptions across an auth record update and only refreshes the
+	// cached record.
+	app.OnRecordAfterUpdateSuccess("members").BindFunc(func(e *core.RecordEvent) error {
+		before := e.Record.Original()
+		for _, field := range []string{"scope", "teams", "owner", "mode"} {
+			if !slices.Equal(e.Record.GetStringSlice(field), before.GetStringSlice(field)) {
+				dropRefusedSubscriptions(e.App, e.Record.Id)
+				break
+			}
+		}
+		return e.Next()
+	})
+}
+
+// dropRefusedSubscriptions unsubscribes, for every realtime client
+// authenticated as memberID or as a bot it owns, each topic the subscribe
+// hook would now refuse.
+func dropRefusedSubscriptions(app core.App, memberID string) {
+	for _, client := range app.SubscriptionsBroker().Clients() {
+		cached, _ := client.Get(apis.RealtimeClientAuthKey).(*core.Record)
+		if cached == nil || cached.Collection().Name != "members" {
+			continue
+		}
+		auth, err := app.FindRecordById("members", cached.Id)
+		if err != nil || (auth.Id != memberID && auth.GetString("owner") != memberID) || !narrowCaller(app, auth) {
+			continue
+		}
+		for topic := range client.Subscriptions() {
+			if topicRefusal(app, topic) != "" {
+				client.Unsubscribe(topic)
+			}
+		}
+	}
+}
+
+// topicRefusal is why a narrow caller may not hold a realtime subscription
+// to topic, or "". It reads the options exactly as PocketBase will
+// (tools/subscriptions/client.go Subscribe): url.Parse, then the "options"
+// query value however it is spelled or placed. A string cut on "?options="
+// missed "?x=1&options=" and "?opt%69ons=" (LLL-551 review F1).
+func topicRefusal(app core.App, topic string) string {
+	u, err := url.Parse(topic)
+	if err != nil {
+		return "" // PocketBase ignores the options too
+	}
+	raw := u.Query().Get("options")
+	if raw == "" {
+		return ""
+	}
+	var options struct {
+		Query map[string]any `json:"query"`
+	}
+	if err := json.Unmarshal([]byte(raw), &options); err != nil {
+		return "" // PocketBase ignores options that do not decode
+	}
+	filter, sort := cast.ToString(options.Query[search.FilterQueryParam]), cast.ToString(options.Query[search.SortQueryParam])
+	if filter == "" && sort == "" {
+		return ""
+	}
+	name, _, _ := strings.Cut(u.Path, "/")
+	collection, err := app.FindCachedCollectionByNameOrId(name)
+	if err != nil {
+		return rosterProbeRefusal
+	}
+	return probeRefusal(app, collection, filter, sort)
 }
 
 // narrowCaller is true for a member whose effective access is narrower than
@@ -295,6 +337,14 @@ func probeRefusal(app core.App, base *core.Collection, filter, sort string) stri
 // rule-checked row: state = 'todo', title ~ 'x', project = 'ID',
 // team = 'ID', labels.id ?= 'ID', labels.name ?~ 'bug', blocked_by.id ?= 'ID',
 // project.name ~ 'x', sort=-created or sort=project.name.
+// memberScoped collections hold rows a narrow caller sees only when they are
+// its own (favorites, saved views). A hop into one is refused with any
+// operator: PocketBase ANDs the joined row's list rule at the top level, so
+// a visible issue another member favorited drops out of
+// "favorites_via_issue.id ?!= 'x' || id != ”", and the gap is the answer
+// (LLL-634 review F1).
+var memberScoped = map[string]bool{"favorites": true, "views": true}
+
 func readsHiddenRows(app core.App, base *core.Collection, o operand) bool {
 	path := o.path
 	current := base
@@ -335,6 +385,9 @@ func readsHiddenRows(app core.App, base *core.Collection, o operand) bool {
 		}
 		if next == nil {
 			return false // a plain field, a json path or an unknown name
+		}
+		if memberScoped[next.Name] {
+			return true
 		}
 		current = next
 	}

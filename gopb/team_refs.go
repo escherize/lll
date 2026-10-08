@@ -89,16 +89,26 @@ func checkTeamRefs(app core.App, record *core.Record) error {
 	team := record.GetString("team")
 	from := ""
 	moved := false
+	// Compare with the row as stored now, read inside this transaction, not
+	// with Original(): the records API loads the record before the
+	// transaction, so a save built on a stale read (label L loaded in ALPHA,
+	// moved to BETA and attached there meanwhile) would otherwise write
+	// team=ALPHA back unnoticed (LLL-631 review F2).
+	var stored *core.Record
 	if !record.IsNew() {
-		from = record.Original().GetString("team")
+		stored = record.Original()
+		if fresh, err := app.FindRecordById(collection, record.Id); err == nil {
+			stored = fresh
+		}
+		from = stored.GetString("team")
 		moved = from != team
 	}
 	var problems []string
 	for _, field := range sortedKeys(scopedRefs[collection]) {
 		target := scopedRefs[collection][field]
 		ids := record.GetStringSlice(field)
-		if !record.IsNew() && !moved {
-			ids = added(ids, record.Original().GetStringSlice(field))
+		if stored != nil && !moved {
+			ids = added(ids, stored.GetStringSlice(field))
 		}
 		for _, id := range ids {
 			ref, err := app.FindRecordById(target, id)

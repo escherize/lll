@@ -30,8 +30,11 @@ minors. Issue keys are on the project's own board (`lll issue view KEY`).
   issue titles through a relation filter. Through a multi-valued relation,
   a back-relation or `@collection`, a filter needs an any-match operator
   (`labels.name ?~ 'x'`, `blocked_by.id ?= 'ID'`). A stored relation id may
-  only be matched exactly. Neither can be sorted on. This applies to record
-  lists (all methods, including HEAD) and realtime subscription options
+  only be matched exactly. Neither can be sorted on. A filter through
+  favorites or saved views is refused with any operator, since it would show
+  which issues other members favorited. This applies to record lists (all
+  methods, including HEAD) and realtime subscription options. Narrowing a
+  member drops the realtime subscriptions it could no longer make
   (LLL-634).
 - Team keys can no longer carry quotes, `$( )`, spaces or control characters
   into URLs, filenames and shell-pasted bot prompts (LLL-628).

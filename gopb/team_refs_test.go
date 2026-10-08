@@ -44,6 +44,9 @@ func newTeamRefFixture(t *testing.T) teamRefFixture {
 	save(issues)
 	issues.Fields.Add(&core.RelationField{Name: "blocked_by", CollectionId: issues.Id, MaxSelect: 99})
 	save(issues)
+	favorites := core.NewBaseCollection("favorites")
+	favorites.Fields.Add(&core.RelationField{Name: "issue", CollectionId: issues.Id, MaxSelect: 1}, &core.TextField{Name: "member"})
+	save(favorites)
 	docs := core.NewBaseCollection("docs")
 	docs.Fields.Add(&core.TextField{Name: "slug"}, team(), &core.RelationField{Name: "issues", CollectionId: issues.Id, MaxSelect: 99})
 	save(docs)
@@ -184,6 +187,22 @@ func TestATeamMoveIsRefusedWhileReferencesWouldCrossTeams(t *testing.T) {
 	if err := f.app.Save(r); err != nil {
 		t.Fatalf("a move with no references left: %v", err)
 	}
+}
+
+// Review F2: a save built on a stale read must not write the old team back
+// under a reference made since.
+func TestAStaleSaveCannotUndoAMove(t *testing.T) {
+	f := newTeamRefFixture(t)
+	label := f.rec(t, "labels", map[string]any{"name": "bug", "team": f.alpha.Id})
+	stale := f.fresh(t, label)
+	moved := f.fresh(t, label)
+	moved.Set("team", f.beta.Id)
+	if err := f.app.Save(moved); err != nil {
+		t.Fatal(err)
+	}
+	f.rec(t, "issues", map[string]any{"title": "b", "number": 1, "team": f.beta.Id, "labels": []string{label.Id}})
+	stale.Set("name", "renamed")
+	f.refused(t, stale, "issues.labels of issue BETA-1", "from BETA to ALPHA")
 }
 
 func TestTeamKeyShape(t *testing.T) {
