@@ -392,12 +392,12 @@ fn issue_help_requested(args: Slice<string>, verb: string) -> bool {
 
 /// An agenda item with only the fields the ranking reads; `..` zeroes the rest.
 fn agenda_item(id: string, assignee: string, priority: int, created: string) -> models.Issue {
-  models.Issue { id, assignee, priority, created, .. }
+  models.Issue { id: models.IssueId(id), assignee: models.MemberId(assignee), priority, created, .. }
 }
 
-fn agenda_unblocks(pairs: Slice<(string, int)>) -> Map<string, int> {
-  let mut m = Map.new<string, int>()
-  for (id, n) in pairs { m[id] = n }
+fn agenda_unblocks(pairs: Slice<(string, int)>) -> Map<models.IssueId, int> {
+  let mut m = Map.new<models.IssueId, int>()
+  for (id, n) in pairs { m[models.IssueId(id)] = n }
   m
 }
 
@@ -552,7 +552,7 @@ fn command_tables_advertise_consistent_creation_and_deletion() {
 }
 
 fn blocked(id: string, state: string, blocked_by: Slice<string>) -> models.Issue {
-  models.Issue { id, state, blocked_by, .. }
+  models.Issue { id: models.IssueId(id), state, blocked_by: blocked_by.map(|b| models.IssueId(b)), .. }
 }
 
 /// LLL-672: PocketBase drops a blocker the reader may not see from the

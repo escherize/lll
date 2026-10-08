@@ -14,10 +14,10 @@ import "pb"
 // append; a whole label set plus a delta) have no constructor.
 
 /// A to-one relation edit: the assignee or the project.
-pub enum Relation {
+pub enum Relation<T> {
   Keep,
   Clear,
-  Set(string),
+  Set(T),
 }
 
 /// The labels edit. Replace writes the whole set; Delta adds and removes
@@ -25,8 +25,8 @@ pub enum Relation {
 /// another writer adds at the same time is kept (LLL-513).
 pub enum LabelEdit {
   Keep,
-  Replace(Slice<string>),
-  Delta { add: Slice<string>, remove: Slice<string> },
+  Replace(Slice<models.LabelId>),
+  Delta { add: Slice<models.LabelId>, remove: Slice<models.LabelId> },
 }
 
 /// The description edit. Whole is the new text as given. Derived is
@@ -55,8 +55,8 @@ pub struct IssuePatch {
   // The board's manual position; only a card move sets it.
   pub sort: Option<float64>,
   pub priority: Option<int>,
-  pub assignee: Relation,
-  pub project: Relation,
+  pub assignee: Relation<models.MemberId>,
+  pub project: Relation<models.ProjectId>,
   pub labels: LabelEdit,
   pub title: Option<string>,
   pub description: DescriptionEdit,
@@ -118,11 +118,11 @@ struct IssueFields {
   #[json(omitempty)]
   project: Option<string>,
   #[json(omitempty)]
-  labels: Option<Slice<string>>,
+  labels: Option<Slice<models.LabelId>>,
   #[json("labels+", omitempty)]
-  labels_add: Option<Slice<string>>,
+  labels_add: Option<Slice<models.LabelId>>,
   #[json("labels-", omitempty)]
-  labels_remove: Option<Slice<string>>,
+  labels_remove: Option<Slice<models.LabelId>>,
   #[json(omitempty)]
   title: Option<string>,
   #[json(omitempty)]
@@ -196,7 +196,7 @@ pub fn update_issue(
       Err(e) => return Err(UpdateFailure.Failed(e)),
     }
   } else {
-    ""
+    None
   }
   let mut current = issue
   let mut attempt = 1
@@ -252,11 +252,11 @@ pub fn update_issue(
 /// they edit the assignee, else one PATCH.
 fn send_fields(
   ctx: pb.Client,
-  id: string,
+  id: models.IssueId,
   fields: IssueFields,
   stamp: Option<string>,
   assigning: bool,
-  observed: string,
+  observed: Option<models.ClaimId>,
   by: ClaimAs,
 ) -> Result<Option<Transition>, pb.CliError> {
   if assigning {
@@ -272,7 +272,7 @@ fn send_fields(
     return Ok(Some(transition))
   }
   let body = encode(fields, "issue fields")?
-  let path = record_path("issues", id)
+  let path = record_path("issues", id.string())
   match stamp {
     Some(s) => {
       let _ = ctx.patch_with_stamp_as(by.caller, path, body, s)?
@@ -327,8 +327,8 @@ fn issue_fields(
       state: patch.state,
       sort: patch.sort,
       priority: patch.priority,
-      assignee: relation_value(patch.assignee),
-      project: relation_value(patch.project),
+      assignee: relation_value(patch.assignee, |id| id.string()),
+      project: relation_value(patch.project, |id| id.string()),
       labels,
       labels_add,
       labels_remove,
@@ -341,15 +341,16 @@ fn issue_fields(
   ))
 }
 
-fn nonempty(ids: Slice<string>) -> Option<Slice<string>> {
+fn nonempty(ids: Slice<models.LabelId>) -> Option<Slice<models.LabelId>> {
   if ids.is_empty() { None } else { Some(ids) }
 }
 
-fn relation_value(r: Relation) -> Option<string> {
+/// The wire value of a relation edit: left out, cleared (""), or the id.
+fn relation_value<T>(r: Relation<T>, wire: fn(T) -> string) -> Option<string> {
   match r {
     Relation.Keep => None,
     Relation.Clear => Some(""),
-    Relation.Set(id) => Some(id),
+    Relation.Set(id) => Some(wire(id)),
   }
 }
 
@@ -357,12 +358,12 @@ fn relation_value(r: Relation) -> Option<string> {
 fn reread(
   ctx: pb.Client,
   caller: pb.Caller,
-  id: string,
+  id: models.IssueId,
 ) -> Result<models.Issue, pb.CliError> {
   let body = ctx.send_as(
     caller,
     "GET",
-    record_path("issues", id),
+    record_path("issues", id.string()),
     "",
     "application/json",
   )?
@@ -411,24 +412,24 @@ pub fn create_issue_once(
   ctx.post_idempotent(collection_path("issues") + path_query, body, key)
 }
 
-pub fn delete_issue(ctx: pb.Client, id: string) -> Result<(), pb.CliError> {
-  remove(ctx, pb.Caller.Process, "issues", id)
+pub fn delete_issue(ctx: pb.Client, id: models.IssueId) -> Result<(), pb.CliError> {
+  remove(ctx, pb.Caller.Process, "issues", id.string())
 }
 
 #[json]
-struct BlockedFields { blocked_by: Slice<string> }
+struct BlockedFields { blocked_by: Slice<models.IssueId> }
 
 /// Replace the issues `id` waits on.
 pub fn set_blocked_by(
   ctx: pb.Client,
-  id: string,
-  blockers: Slice<string>,
+  id: models.IssueId,
+  blockers: Slice<models.IssueId>,
 ) -> Result<(), pb.CliError> {
   let _ = update(
     ctx,
     pb.Caller.Process,
     "issues",
-    id,
+    id.string(),
     BlockedFields { blocked_by: blockers },
     "blockers",
   )?
@@ -448,10 +449,10 @@ pub struct WorkSite {
 
 pub fn set_work_site(
   ctx: pb.Client,
-  id: string,
+  id: models.IssueId,
   site: WorkSite,
 ) -> Result<(), pb.CliError> {
-  let _ = update(ctx, pb.Caller.Process, "issues", id, site, "work site")?
+  let _ = update(ctx, pb.Caller.Process, "issues", id.string(), site, "work site")?
   Ok(())
 }
 
@@ -460,11 +461,11 @@ pub fn set_work_site(
 pub fn upload_attachments(
   ctx: pb.Client,
   caller: pb.Caller,
-  id: string,
+  id: models.IssueId,
   form: string,
   content_type: string,
 ) -> Result<string, pb.CliError> {
-  ctx.send_as(caller, "PATCH", record_path("issues", id), form, content_type)
+  ctx.send_as(caller, "PATCH", record_path("issues", id.string()), form, content_type)
 }
 
 #[json]
@@ -476,14 +477,14 @@ struct RemoveFiles {
 pub fn remove_attachment(
   ctx: pb.Client,
   caller: pb.Caller,
-  id: string,
+  id: models.IssueId,
   filename: string,
 ) -> Result<(), pb.CliError> {
   let _ = update(
     ctx,
     caller,
     "issues",
-    id,
+    id.string(),
     RemoveFiles { files: [filename] },
     "attachment removal",
   )?
@@ -505,12 +506,12 @@ pub struct RefOutcome {
 /// Append one external reference, once, through the server's atomic route.
 pub fn append_ref(
   ctx: pb.Client,
-  issue_id: string,
+  issue_id: models.IssueId,
   reference: string,
 ) -> Result<RefOutcome, pb.CliError> {
   let body = encode(AppendRequest { reference }, "reference")?
   let response = ctx
-    .post(f"/api/lll/issues/{url.PathEscape(issue_id)}/refs", body)
+    .post(f"/api/lll/issues/{url.PathEscape(issue_id.string())}/refs", body)
     .map_err(|e| {
       if e.status == 404 {
         pb.failed("server does not support atomic reference appends; update the server before adding refs")

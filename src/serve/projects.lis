@@ -27,7 +27,7 @@ fn projects_page(
   w: http.ResponseWriter,
   // The server scopes this page to its selected team.
   r: Ref<http.Request>,
-  team_id: string,
+  team_id: models.TeamId,
   me: string,
   viewer: Viewer,
 ) {
@@ -47,8 +47,8 @@ fn projects_page(
   render_html(w, "projects-page", page)
 }
 
-fn projects_vm(ctx: pb.Client, team_id: string, team_key: string) -> Result<ProjectsVM, pb.CliError> {
-  let projects = records.fetch_projects(ctx, team_id)?
+fn projects_vm(ctx: pb.Client, team_id: models.TeamId, team_key: string) -> Result<ProjectsVM, pb.CliError> {
+  let projects = records.fetch_projects(ctx, query.TeamScope.Only(team_id))?
   // LLL-426: into THIS team's table, not the configured team's.
   let base = issues_base(team_key)
   Ok(ProjectsVM {
@@ -83,6 +83,7 @@ fn project_tone(status: string) -> string {
 ///
 /// A project's issue count, or 0 when the count cannot be had: the projects
 /// page would rather render with a zero than not render.
-fn project_count(ctx: pb.Client, team_id: string, project_id: string) -> int {
-  records.issue_count(ctx, query.filter(team_id, "", "", project_id, "", "")).unwrap_or(0)
+fn project_count(ctx: pb.Client, team_id: models.TeamId, project_id: models.ProjectId) -> int {
+  let rows = query.IssueFilter { projects: [project_id], ..query.IssueFilter.over(query.TeamScope.Only(team_id)) }
+  records.issue_count(ctx, query.filter(rows)).unwrap_or(0)
 }

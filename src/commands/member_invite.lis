@@ -173,7 +173,7 @@ fn member_invite(input: flags.CommandInput) -> Result<(), pb.CliError> {
   // A scoped invite (--team): the member record carries the scope, so the
   // collection rules keep this colleague's own token inside its teams, and
   // each board link opens only one team's board.
-  let mut team_ids: Slice<string> = []
+  let mut team_ids: Slice<models.TeamId> = []
   for key in keys {
     let Some(team) = find_team_as(ctx, su, key)? else {
       return Err(pb.failed(f"no team with key '{key}' on this server; teams: {team_keys_as(ctx, su)} (see 'lll team list')"))
@@ -371,7 +371,7 @@ fn member_passes(input: flags.CommandInput) -> Result<(), pb.CliError> {
         e.with_message(f"created {completed} of {count} credentials in {out}; creating {name} failed: {e.message}"),
       ),
     }
-    let token = match pb.impersonate_member(cfg.url, su, member.id, duration) {
+    let token = match pb.impersonate_member(cfg.url, su, member.id.string(), duration) {
       Ok(tok) => tok,
       Err(e) => return Err(
         e.with_message(f"created person {name} but could not mint its token; {completed} complete credentials are in {out}: {e.message}"),

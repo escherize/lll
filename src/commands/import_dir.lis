@@ -63,7 +63,7 @@ To import somewhere harmless instead: lll attach --key NEWKEY in another directo
   }
 
   let (label_ids, _) = ensure_labels(ctx, team, label_names(parsed), Map.new<string, string>())?
-  let creator = records.find_actor(ctx)?.map_or("", |member| member.id)
+  let creator = records.find_actor(ctx)?.map(|member| member.id)
 
   // From here the team is being rebuilt, and a failure leaves it partly
   // done. Nothing can make that atomic over HTTP, so every error past this
@@ -84,25 +84,25 @@ To import somewhere harmless instead: lll attach --key NEWKEY in another directo
   // keys that came back under another number. The server keeps a mirror's
   // numbers only for a superuser's import (LLL-678); a member's issues are
   // numbered by the server, in the mirror's order.
-  let mut id_of = Map.new<string, string>()
+  let mut id_of = Map.new<string, models.IssueId>()
   let mut renumbered: Slice<string> = []
   for front_and_body in by_number(parsed) {
     let (front, body) = front_and_body
-    let mut assignee = ""
+    let mut assignee = None
     if front.assignee != "" {
       match records.find_member(ctx, front.assignee)? {
-        Some(member) => assignee = member.id,
+        Some(member) => assignee = Some(member.id),
         // A member cannot be conjured from a name, and refusing the whole
         // import over an account that left would make the mirror
         // unrestorable. Import the issue, name what was dropped.
         None => unassigned = unassigned.append(f"{front.key} ({front.assignee})"),
       }
     }
-    let mut project = ""
+    let mut project = None
     if front.project != "" {
-      project = records.resolve_project(ctx, team.id, front.project)?.id
+      project = Some(records.resolve_project(ctx, team.id, front.project)?.id)
     }
-    let mut labels: Slice<string> = []
+    let mut labels: Slice<models.LabelId> = []
     for name in front.labels {
       if let Some(id) = label_ids.get(name) { labels = labels.append(id) }
     }
@@ -112,7 +112,7 @@ To import somewhere harmless instead: lll attach --key NEWKEY in another directo
     let mut filed_by = creator
     if front.creator != "" {
       if let Some(member) = records.find_member(ctx, front.creator)? {
-        filed_by = member.id
+        filed_by = Some(member.id)
       }
     }
     let new_issue = models.NewIssue {
@@ -197,7 +197,7 @@ To import somewhere harmless instead: lll attach --key NEWKEY in another directo
   for front_and_body in parsed {
     let (front, _) = front_and_body
     if front.blocked.is_empty() { continue }
-    let mut ids: Slice<string> = []
+    let mut ids: Slice<models.IssueId> = []
     for key in front.blocked {
       if let Some(id) = id_of.get(key) { ids = ids.append(id) }
     }
@@ -218,7 +218,7 @@ To import somewhere harmless instead: lll attach --key NEWKEY in another directo
     }
     for front_and_body in parsed_docs {
       let (front, body) = front_and_body
-      let mut linked: Slice<string> = []
+      let mut linked: Slice<models.IssueId> = []
       for key in front.issues {
         if let Some(id) = id_of.get(key) { linked = linked.append(id) }
       }

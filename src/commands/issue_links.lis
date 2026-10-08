@@ -15,8 +15,8 @@ import "writes"
 /// Docs linked to an issue. The issue -> doc direction is not stored: it is
 /// one `?=` filter over docs.issues, which is the whole reason links are a
 /// relation and not a write-once reference on the issue.
-fn fetch_issue_docs(ctx: pb.Client, issue_id: string) -> Result<Slice<models.Doc>, pb.CliError> {
-  records.fetch_docs(ctx, f"issues.id ?= {query.quote(issue_id)}", "slug", "")
+fn fetch_issue_docs(ctx: pb.Client, issue_id: models.IssueId) -> Result<Slice<models.Doc>, pb.CliError> {
+  records.fetch_docs(ctx, f"issues.id ?= {query.quote(issue_id.string())}", "slug", "")
 }
 
 /// Refuse a link whose two ends live in different teams (TASK-173). The doc
@@ -135,7 +135,7 @@ fn unblock(input: flags.CommandInput) -> Result<(), pb.CliError> {
   let blocker = records.fetch_issue(ctx, resolve_id(ctx, blocker_id, usage)?)?
   let key = f"{issue.expand.team.key}-{issue.number}"
   let bkey = f"{blocker.expand.team.key}-{blocker.number}"
-  let mut remaining: Slice<string> = []
+  let mut remaining: Slice<models.IssueId> = []
   let mut found = false
   for x in issue.blocked_by {
     if x == blocker.id { found = true } else { remaining = remaining.append(x) }
@@ -151,7 +151,7 @@ fn unblock(input: flags.CommandInput) -> Result<(), pb.CliError> {
 
 /// True when `issue` waits on `target` at any depth. Bounded at eight
 /// levels: deeper chains are not a thing a tracker should have.
-fn depends_on(ctx: pb.Client, issue: models.Issue, target: string, depth: int) -> Result<bool, pb.CliError> {
+fn depends_on(ctx: pb.Client, issue: models.Issue, target: models.IssueId, depth: int) -> Result<bool, pb.CliError> {
   if depth > 8 { return Ok(false) }
   for b in issue.expand.blocked_by {
     if b.id == target { return Ok(true) }
@@ -162,7 +162,7 @@ fn depends_on(ctx: pb.Client, issue: models.Issue, target: string, depth: int) -
   Ok(false)
 }
 
-fn fetch_issue_by_id(ctx: pb.Client, id: string) -> Result<models.Issue, pb.CliError> {
+fn fetch_issue_by_id(ctx: pb.Client, id: models.IssueId) -> Result<models.Issue, pb.CliError> {
   let body = ctx.get(f"/api/collections/issues/records/{id}?expand=team,blocked_by")?
   let mut full = models.Issue { .. }
   if let Err(e) = json.Unmarshal(body.bytes(), &full) {
@@ -172,8 +172,8 @@ fn fetch_issue_by_id(ctx: pb.Client, id: string) -> Result<models.Issue, pb.CliE
 }
 
 /// Issues that name `issue` as a blocker, for the "Blocks:" line.
-fn fetch_blocks(ctx: pb.Client, issue_id: string) -> Result<Slice<models.Issue>, pb.CliError> {
-  let filter = url.QueryEscape(f"blocked_by.id ?= {query.quote(issue_id)}")
+fn fetch_blocks(ctx: pb.Client, issue_id: models.IssueId) -> Result<Slice<models.Issue>, pb.CliError> {
+  let filter = url.QueryEscape(f"blocked_by.id ?= {query.quote(issue_id.string())}")
   let mut list = models.IssueList { .. }
   pb.fetch(ctx, f"/api/collections/issues/records?perPage=200&sort=number&expand=team&filter={filter}", "issues", &list)?
   Ok(list.items)

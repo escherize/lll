@@ -23,7 +23,7 @@ fn column_fetch_reads_every_page_of_a_large_column() {
   let result = collect_column_issues("team", "done", |path| {
     if path.contains("page=1&") {
       let mut items: Slice<models.Issue> = []
-      for i in 0..200 { items = items.append(models.Issue { id: f"p1-{i}", .. }) }
+      for i in 0..200 { items = items.append(models.Issue { id: models.IssueId(f"p1-{i}"), .. }) }
       seen_pages = seen_pages.append("one")
       return Ok(BoardPage { items, .. })
     }

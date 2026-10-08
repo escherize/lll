@@ -350,7 +350,7 @@ pub struct ScopedViewer {
 }
 
 pub struct ViewerMember {
-  pub id: string,
+  pub id: models.MemberId,
   pub name: string,
   /// The member's own token: the credential its writes ride.
   pub token: string,

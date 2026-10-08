@@ -431,7 +431,7 @@ fn doc_list(input: flags.CommandInput) -> Result<(), pb.CliError> {
   let limit = limit_flag(p)?
   let team = current_team(ctx)?
   let search = strings.ToLower(strings.TrimSpace(p.one("--search")))
-  let mut filter = query.filter(team.id, "", "", "", "", "")
+  let mut filter = f"team={query.quote(team.id.string())}"
   if kind != "" { filter = f"{filter} && kind={query.quote(kind)}" }
   let mut items = records.fetch_docs(ctx, filter, "kind,slug", "")?
   if search != "" {

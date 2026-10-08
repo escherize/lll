@@ -95,14 +95,14 @@ fn search_hits(ctx: pb.Client, team: models.Team, q: string, scoped: bool) -> Re
   let comments = records.fetch_team_comments_where(ctx, team.id, records.candidate_clause(q, ["body"]))?
   // A comment's issue must be in the candidate set for the hit to have a
   // card; fetch the parents the comment filter found that the issue one did not.
-  let mut have = Map.new<string, bool>()
+  let mut have = Map.new<models.IssueId, bool>()
   for i in issues { have[i.id] = true }
-  let mut extra_ids: Slice<string> = []
+  let mut extra_ids: Slice<models.IssueId> = []
   for c in comments { if have.get(c.issue).is_none() { have[c.issue] = true; extra_ids = extra_ids.append(c.issue) } }
   let mut all = issues
   if !extra_ids.is_empty() {
     let mut ors: Slice<string> = []
-    for id in extra_ids { ors = ors.append(f"id={query.quote(id)}") }
+    for id in extra_ids { ors = ors.append(f"id={query.quote(id.string())}") }
     all = all.append(records.fetch_team_issues_where(ctx, team.id, "(" + strings.Join(ors, " || ") + ")")?...)
   }
   // `ctx` reads as the viewer (LLL-658), so another team's labels never

@@ -125,7 +125,7 @@ fn board_identity(
   let token = pb.impersonate_member(
     base,
     ctx.token(),
-    member.id,
+    member.id.string(),
     tokens.default_token_duration(),
   )?
   // The board runs as that member from here on, and it alone may renew
@@ -135,8 +135,8 @@ fn board_identity(
   let board = ctx
     .with_settings(ctx.settings.with_admin(admin))
     .with_token(token, "")
-    .renewing(Some(pb.Renewal { admin, member: member.id }))
-  let id = member.id
+    .renewing(Some(pb.Renewal { admin, member: member.id.string() }))
+  let id = member.id.string()
   let refresh: fn() -> Result<string, pb.CliError> = || {
     let su = superuser_token(base, email, pass)?
     pb.impersonate_member(base, su, id, tokens.default_token_duration())

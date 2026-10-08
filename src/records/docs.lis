@@ -15,10 +15,10 @@ import "go:strings"
 /// must match no doc, not every team's.
 pub fn fetch_team_docs(
   ctx: pb.Client,
-  team_id: string,
+  team_id: models.TeamId,
   kind: string,
 ) -> Result<Slice<models.Doc>, pb.CliError> {
-  let mut filter = f"team={query.quote(team_id)}"
+  let mut filter = f"team={query.quote(team_id.string())}"
   if kind != "" { filter = f"{filter} && kind={query.quote(kind)}" }
   let fields = "id,team,slug,title,kind,area,author,created,updated,expand"
   fetch_all_records<models.Doc>(ctx,
@@ -132,8 +132,8 @@ pub fn fetch_docs(ctx: pb.Client, filter: string, sort: string, fields: string) 
 /// formatted identically to a correct hit. Findings exist to say what is
 /// known about THIS file; confidently answering about a different repo is
 /// worse than answering nothing.
-pub fn fetch_findings(ctx: pb.Client, team_id: string) -> Result<Slice<models.Doc>, pb.CliError> {
-  fetch_docs(ctx, f"kind='finding' && team={query.quote(team_id)}", "slug", "")
+pub fn fetch_findings(ctx: pb.Client, team_id: models.TeamId) -> Result<Slice<models.Doc>, pb.CliError> {
+  fetch_docs(ctx, f"kind='finding' && team={query.quote(team_id.string())}", "slug", "")
 }
 
 /// The findings related to one issue: every finding explicitly linked to it

@@ -7,8 +7,8 @@ import "query"
 /// An issue's comments, oldest first, author and a bot author's owner
 /// expanded (LLL-610). PocketBase leaves the owner out when the caller may
 /// not read it, so nobody learns an owner they cannot see.
-pub fn fetch_comments(ctx: pb.Client, issue_id: string) -> Result<Slice<models.Comment>, pb.CliError> {
-  let filter = url.QueryEscape(f"issue={query.quote(issue_id)}")
+pub fn fetch_comments(ctx: pb.Client, issue_id: models.IssueId) -> Result<Slice<models.Comment>, pb.CliError> {
+  let filter = url.QueryEscape(f"issue={query.quote(issue_id.string())}")
   let mut result: Slice<models.Comment> = []
   let mut page = 1
   loop {
@@ -96,7 +96,7 @@ struct BoardPage {
 
 /// Complete board input, in deterministic manual order. Failed or inconsistent
 /// pages never escape as a partial board; callers retain their prior view.
-pub fn fetch_board_issues(ctx: pb.Client, team_id: string) -> Result<Slice<models.Issue>, pb.CliError> {
+pub fn fetch_board_issues(ctx: pb.Client, team_id: models.TeamId) -> Result<Slice<models.Issue>, pb.CliError> {
   collect_board_issues(team_id, BOARD_EXPAND, |path| {
     let mut page = BoardPage { .. }
     pb.fetch(ctx, path, "board issues", &page)?
@@ -119,7 +119,7 @@ const BOARD_EXPAND: string = "team,assignee,labels,project"
 const FULL_EXPAND: string = "team,assignee,labels,project"
 
 /// fetch_board_issues with every named relation expanded.
-pub fn fetch_full_issues(ctx: pb.Client, team_id: string) -> Result<Slice<models.Issue>, pb.CliError> {
+pub fn fetch_full_issues(ctx: pb.Client, team_id: models.TeamId) -> Result<Slice<models.Issue>, pb.CliError> {
   collect_board_issues(team_id, FULL_EXPAND, |path| {
     let mut page = BoardPage { .. }
     pb.fetch(ctx, path, "issues", &page)?
@@ -128,13 +128,13 @@ pub fn fetch_full_issues(ctx: pb.Client, team_id: string) -> Result<Slice<models
 }
 
 fn collect_board_issues(
-  team_id: string,
+  team_id: models.TeamId,
   expand: string,
   fetch: fn(string) -> Result<BoardPage, pb.CliError>,
 ) -> Result<Slice<models.Issue>, pb.CliError> {
-  let filter = url.QueryEscape(query.filter(team_id, "", "", "", "", ""))
+  let filter = url.QueryEscape(query.filter(query.IssueFilter.over(query.TeamScope.Only(team_id))))
   let mut result: Slice<models.Issue> = []
-  let mut seen = Map.new<string, bool>()
+  let mut seen = Map.new<models.IssueId, bool>()
   let mut expected = -1
   let mut pages = -1
   let mut page = 1
@@ -159,7 +159,7 @@ fn collect_board_issues(
 /// One column's issues in board order: the input a reorder needs, not the
 /// team. fetch_board_issues here made every card move re-read every issue
 /// the team ever had, expanded, to find two sorts (LLL-428).
-pub fn fetch_column_issues(ctx: pb.Client, team_id: string, state: string) -> Result<Slice<models.Issue>, pb.CliError> {
+pub fn fetch_column_issues(ctx: pb.Client, team_id: models.TeamId, state: string) -> Result<Slice<models.Issue>, pb.CliError> {
   collect_column_issues(team_id, state, |path| {
     let mut page = BoardPage { .. }
     pb.fetch(ctx, path, "column issues", &page)?
@@ -174,12 +174,12 @@ pub fn fetch_column_issues(ctx: pb.Client, team_id: string, state: string) -> Re
 /// error here would fail a drag that is otherwise fine. Only id and sort are
 /// read, so no expansions ride along.
 fn collect_column_issues(
-  team_id: string,
+  team_id: models.TeamId,
   state: string,
   fetch: fn(string) -> Result<BoardPage, pb.CliError>,
 ) -> Result<Slice<models.Issue>, pb.CliError> {
   let filter = url.QueryEscape(
-    f"{query.filter(team_id, "", "", "", "", "")} && state={query.quote(state)}",
+    f"{query.filter(query.IssueFilter.over(query.TeamScope.Only(team_id)))} && state={query.quote(state)}",
   )
   let mut result: Slice<models.Issue> = []
   let mut page = 1

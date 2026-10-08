@@ -56,9 +56,9 @@ pub fn seed_demo(ctx: pb.Client, team_key: string, me: string, db_url: string, k
 
   // Issue numbers are assigned in creation order, and this only runs on an
   // empty team, so the cross-references below (DEMO-5 from DEMO-6) are stable.
-  let creator = records.find_member(ctx, me)?.map_or("", |m| m.id)
+  let creator = records.find_member(ctx, me)?.map(|m| m.id)
 
-  let mut label_ids = Map.new<string, string>()
+  let mut label_ids = Map.new<string, models.LabelId>()
   for (name, color) in demo_labels() {
     let id = make_label(ctx, team.id, name, color)?
     label_ids[name] = id
@@ -66,7 +66,7 @@ pub fn seed_demo(ctx: pb.Client, team_key: string, me: string, db_url: string, k
   let project = make_project(ctx, team.id)?
 
   for spec in demo_issues(team_key) {
-    let labels: Slice<string> = label_ids.get(spec.label).map_or([], |id| [id])
+    let labels: Slice<models.LabelId> = label_ids.get(spec.label).map_or([], |id| [id])
     make_issue(ctx, team.id, creator, project, labels, spec)?
   }
   for doc in demo_docs(team_key) {
@@ -118,7 +118,7 @@ fn demo_labels() -> Slice<(string, string)> {
   ]
 }
 
-fn make_label(ctx: pb.Client, team_id: string, name: string, color: string) -> Result<string, pb.CliError> {
+fn make_label(ctx: pb.Client, team_id: models.TeamId, name: string, color: string) -> Result<models.LabelId, pb.CliError> {
   let body = writes.create_label(ctx, models.NewLabel { name, color, team: team_id })?
   let mut created = models.Label { .. }
   if let Err(e) = json.Unmarshal(body.bytes(), &created) {
@@ -127,7 +127,7 @@ fn make_label(ctx: pb.Client, team_id: string, name: string, color: string) -> R
   Ok(created.id)
 }
 
-fn make_project(ctx: pb.Client, team_id: string) -> Result<string, pb.CliError> {
+fn make_project(ctx: pb.Client, team_id: models.TeamId) -> Result<models.ProjectId, pb.CliError> {
   let new_project = models.NewProject {
     name: "First hour",
     description: "The ten things worth trying before you decide anything.",
@@ -144,10 +144,10 @@ fn make_project(ctx: pb.Client, team_id: string) -> Result<string, pb.CliError> 
 
 fn make_issue(
   ctx: pb.Client,
-  team_id: string,
-  creator: string,
-  project: string,
-  labels: Slice<string>,
+  team_id: models.TeamId,
+  creator: Option<models.MemberId>,
+  project: models.ProjectId,
+  labels: Slice<models.LabelId>,
   spec: DemoIssue,
 ) -> Result<(), pb.CliError> {
   let new_issue = models.NewIssue {
@@ -159,7 +159,7 @@ fn make_issue(
     priority: spec.priority,
     description: spec.body,
     emoji: spec.emoji,
-    project,
+    project: Some(project),
     labels,
     ..
   }
@@ -167,7 +167,7 @@ fn make_issue(
   Ok(())
 }
 
-fn make_doc(ctx: pb.Client, team_id: string, doc: DemoDoc) -> Result<(), pb.CliError> {
+fn make_doc(ctx: pb.Client, team_id: models.TeamId, doc: DemoDoc) -> Result<(), pb.CliError> {
   let new_doc = models.NewDoc {
     team: team_id,
     slug: doc.slug,

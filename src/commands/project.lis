@@ -86,7 +86,7 @@ fn project_list(input: flags.CommandInput) -> Result<(), pb.CliError> {
   let p = input.parsed
   // Scoped when a team is configured, every team's when not: a project
   // belongs to one team (TASK-173), so the unscoped list is an admin's view.
-  let projects = models.ProjectList { items: records.fetch_projects(ctx, configured_scope(ctx)?.filter_team())? }
+  let projects = models.ProjectList { items: records.fetch_projects(ctx, configured_scope(ctx)?)? }
   if p.given("--json") { return print_list_json(projects.items, whole_list(projects.items.length()), "project list") }
   if projects.items.is_empty() { return say_empty("projects") }
   for p in projects.items {
@@ -202,7 +202,7 @@ fn project_move(input: flags.CommandInput) -> Result<(), pb.CliError> {
   let from = team_flag_or_current(ctx, p.one("--team"))?
   let to = writes.move_destination(ctx, p.one("--to"))?
   let project = records.resolve_project(ctx, from.id, name)?
-  fmt.Println(writes.move_to_team(ctx, "project", project.name, project.id, from, to)?)
+  fmt.Println(writes.move_to_team(ctx, records.Classifier.Project(project.id), project.name, from, to)?)
   Ok(())
 }
 
@@ -214,7 +214,7 @@ fn project_delete(input: flags.CommandInput) -> Result<(), pb.CliError> {
     return Err(flags.usage_error(f"usage: {usage}"))
   }
   let project = records.resolve_project(ctx, current_team(ctx)?.id, name)?
-  let used = records.entity_issue_count(ctx, "project", project.id)?
+  let used = records.entity_issue_count(ctx, records.Classifier.Project(project.id))?
   if used > 0 && !p.given("--force") {
     return Err(refuse_delete("project", name, used))
   }
@@ -249,7 +249,7 @@ fn project_view(input: flags.CommandInput) -> Result<(), pb.CliError> {
   }
 
   // Every page (LLL-659): one page of 200 silently dropped the rest.
-  let filter = url.QueryEscape(f"project={query.quote(p.id)}")
+  let filter = url.QueryEscape(f"project={query.quote(p.id.string())}")
   let issues = models.IssueList {
     items: records.fetch_all_records<models.Issue>(ctx,
       f"/api/collections/issues/records?filter={filter}&sort=created,id&expand=team,assignee",
@@ -268,7 +268,7 @@ fn project_view(input: flags.CommandInput) -> Result<(), pb.CliError> {
     fmt.Println("")
     fmt.Println("Issues:")
     fmt.Println("")
-    print_issue_table(issues.items, Map.new<string, models.Claim>())?
+    print_issue_table(issues.items, Map.new<models.IssueId, models.Claim>())?
   }
   Ok(())
 }

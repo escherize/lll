@@ -384,7 +384,7 @@ fn bot_create(ctx: pb.Client, args: Slice<string>, start: int, command: string) 
 'lll bot rotate {name}' mints a new token (the previous one stops working)"),
     )
   }
-  let owner = caller.map_or("", |me| me.id)
+  let owner = caller.map(|me| me.id)
   let created = tokens.create_bot_member_as(ctx, tok, name, owner)?
   let owned = caller.map_or(
     "no owner (administrator credentials created it)",

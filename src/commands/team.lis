@@ -401,10 +401,10 @@ fn team_flag_or_current(ctx: pb.Client, key: string) -> Result<models.Team, pb.C
 /// is configured. Only the list verbs and their filters take this; anything
 /// that writes, views or resolves a team-owned record by name uses
 /// current_team, because a name is unique only within a team (LLL-671).
-fn configured_scope(ctx: pb.Client) -> Result<records.TeamScope, pb.CliError> {
+fn configured_scope(ctx: pb.Client) -> Result<query.TeamScope, pb.CliError> {
   match records.configured_team(ctx)? {
-    Some(t) => Ok(records.TeamScope.Only(t.id)),
-    None => Ok(records.TeamScope.Every),
+    Some(t) => Ok(query.TeamScope.Only(t.id)),
+    None => Ok(query.TeamScope.Every),
   }
 }
 
@@ -428,7 +428,7 @@ fn team_delete(input: flags.CommandInput) -> Result<(), pb.CliError> {
   let Some(t) = records.find_team(ctx, key)? else {
     return Err(records.unknown_team(ctx, key))
   }
-  let issues_held = records.issue_count(ctx, f"team={query.quote(t.id)}")?
+  let issues_held = records.issue_count(ctx, f"team={query.quote(t.id.string())}")?
   if issues_held > 0 {
     return Err(
       pb.failed(f"team {t.key} holds {issues_held} issue(s); deleting it would orphan them
@@ -500,7 +500,7 @@ fn team_view(input: flags.CommandInput) -> Result<(), pb.CliError> {
     return Err(records.unknown_team(ctx, key))
   }
 
-  let issues_held = records.issue_count(ctx, f"team={query.quote(t.id)}")?
+  let issues_held = records.issue_count(ctx, f"team={query.quote(t.id.string())}")?
   if input.parsed.given("--json") {
     let mut fields = Map.new<string, json.RawMessage>()
     if let Err(e) = json.Unmarshal(encode_json(t, "team")?, &fields) { return Err(pb.failed(f"decoding team: {e}")) }

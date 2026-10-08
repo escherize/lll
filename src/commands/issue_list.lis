@@ -119,7 +119,7 @@ fn list(input: flags.CommandInput) -> Result<(), pb.CliError> {
     items = page_of(items, page, per_page)
   }
   // LLL-651: the claim rides the list, so automation need not view each card.
-  let held = if items.is_empty() { Map.new<string, models.Claim>() } else { claims_by_issue(ctx, scope.filter_team())? }
+  let held = if items.is_empty() { Map.new<models.IssueId, models.Claim>() } else { claims_by_issue(ctx, scope)? }
   if json_mode {
     let mut out: Slice<Map<string, json.RawMessage>> = []
     for i in items {
@@ -152,7 +152,7 @@ enum ListMode {
 /// prints the server's record (plus key and claim), not the decoded subset.
 struct ListedPage {
   issues: Slice<models.Issue>,
-  raw: Map<string, json.RawMessage>,
+  raw: Map<models.IssueId, json.RawMessage>,
   total_items: int,
   total_pages: int,
 }
@@ -170,7 +170,7 @@ fn fetch_listed_page(ctx: pb.Client, path: string) -> Result<ListedPage, pb.CliE
   let mut page = RawIssuePage { .. }
   pb.fetch(ctx, path, "issues", &page)?
   let mut issues: Slice<models.Issue> = []
-  let mut by_id = Map.new<string, json.RawMessage>()
+  let mut by_id = Map.new<models.IssueId, json.RawMessage>()
   for record in page.items {
     let mut issue = models.Issue { .. }
     if let Err(e) = json.Unmarshal(record, &issue) { return Err(pb.failed(f"decoding issues: {e}")) }
@@ -182,9 +182,9 @@ fn fetch_listed_page(ctx: pb.Client, path: string) -> Result<ListedPage, pb.CliE
 
 /// Every page of an issues query, decoded and raw (fetch_all_issues, for a
 /// list that prints records).
-fn fetch_all_listed(ctx: pb.Client, tail: string) -> Result<(Slice<models.Issue>, Map<string, json.RawMessage>), pb.CliError> {
+fn fetch_all_listed(ctx: pb.Client, tail: string) -> Result<(Slice<models.Issue>, Map<models.IssueId, json.RawMessage>), pb.CliError> {
   let mut issues: Slice<models.Issue> = []
-  let mut by_id = Map.new<string, json.RawMessage>()
+  let mut by_id = Map.new<models.IssueId, json.RawMessage>()
   let mut page = 1
   loop {
     let listed = fetch_listed_page(ctx, f"/api/collections/issues/records?perPage=500&page={page}{tail}")?
@@ -196,11 +196,14 @@ fn fetch_all_listed(ctx: pb.Client, tail: string) -> Result<(Slice<models.Issue>
   Ok((issues, by_id))
 }
 
-/// Every claim on the team's issues (every visible team's when `team_id` is
-/// ""), by issue id. Claims are one per issue in progress, so this is small.
-fn claims_by_issue(ctx: pb.Client, team_id: string) -> Result<Map<string, models.Claim>, pb.CliError> {
-  let filter = if team_id == "" { "" } else { f"&filter={url.QueryEscape(f"issue.team={query.quote(team_id)}")}" }
-  let mut out = Map.new<string, models.Claim>()
+/// Every claim on the issues in `scope`, by issue id. Claims are one per
+/// issue in progress, so this is small.
+fn claims_by_issue(ctx: pb.Client, scope: query.TeamScope) -> Result<Map<models.IssueId, models.Claim>, pb.CliError> {
+  let filter = match scope {
+    query.TeamScope.Every => "",
+    query.TeamScope.Only(team) => f"&filter={url.QueryEscape(f"issue.team={query.quote(team.string())}")}",
+  }
+  let mut out = Map.new<models.IssueId, models.Claim>()
   let mut page = 1
   loop {
     let mut list = models.ClaimList { .. }
@@ -256,7 +259,7 @@ fn rfc3339_of(value: string) -> string {
 /// shared by `issue list` and `project view`. `held` is the claims by issue
 /// id: a claimed issue names its holder, agent label and claim age where the
 /// assignee goes (LLL-651).
-fn print_issue_table(issues: Slice<models.Issue>, held: Map<string, models.Claim>) -> Result<(), pb.CliError> {
+fn print_issue_table(issues: Slice<models.Issue>, held: Map<models.IssueId, models.Claim>) -> Result<(), pb.CliError> {
   // An empty board printed zero bytes, which a newcomer cannot tell apart
   // from a silently broken read — the exact doubt the not-logged-in refusal
   // warns about, landing one command later. Says so on STDERR: stdout stays
@@ -327,19 +330,19 @@ fn issue_next(input: flags.CommandInput) -> Result<(), pb.CliError> {
   let scope = configured_scope(ctx)?
   // Names resolve before any fetch, so a typo fails naming the fix instead of
   // reporting an empty agenda.
-  let mut excluded: Slice<string> = []
+  let mut excluded: Slice<models.LabelId> = []
   for name in p.all("--exclude-label") {
     excluded = excluded.append(records.label_ids(ctx, scope, name)?...)
   }
   let candidates = ready_issues(ctx, resolve_filter_query(ctx, scope, filters)?)?
     .filter(|i| !i.labels.any(|l| excluded.contains(l)))
-  let unblocks = unblocks_map(ctx, scope.filter_team(), candidates)?
+  let unblocks = unblocks_map(ctx, scope, candidates)?
   // A claimed ready issue is someone's work in progress, not an invitation -
   // including my own claims. The agenda is what an agent can pick up NOW.
   // The claims themselves are read, not only the assignee (LLL-662): the
   // holder may set the assignee to someone else or clear it, and an issue
   // offered here that 'claim' then refuses is a lie to the loop.
-  let held = claims.for_team(ctx, scope.filter_team())?.map(|c| c.issue)
+  let held = claims.for_team(ctx, scope)?.map(|c| c.issue)
   let agenda = rank_agenda(candidates, unblocks).filter(|i| i.assignee == "" && !held.contains(i.id))
   if agenda.is_empty() {
     return Err(pb.fail(pb.ErrorKind.NothingToDo, "no unclaimed ready issues: the agenda is empty; 'lll issue list --ready' shows what is claimed, 'lll issue create' makes new work"))
@@ -440,12 +443,12 @@ fn page_of(items: Slice<models.Issue>, page: int, per_page: int) -> Slice<models
 /// How many issues each candidate unblocks: the open issues that name it as
 /// a blocker. A tie-break, not a goal — the more work one issue frees, the
 /// sooner it should go.
-fn unblocks_map(ctx: pb.Client, team_id: string, candidates: Slice<models.Issue>) -> Result<Map<string, int>, pb.CliError> {
-  let mut out = Map.new<string, int>()
+fn unblocks_map(ctx: pb.Client, scope: query.TeamScope, candidates: Slice<models.Issue>) -> Result<Map<models.IssueId, int>, pb.CliError> {
+  let mut out = Map.new<models.IssueId, int>()
   for c in candidates { out[c.id] = 0 }
-  let scope = query.filter(team_id, "", "", "", "", "")
+  let team = query.filter(query.IssueFilter.over(scope))
   let open = "state != 'done' && state != 'cancelled'"
-  let clause = if scope == "" { open } else { f"{scope} && {open}" }
+  let clause = if team == "" { open } else { f"{team} && {open}" }
   let filter = url.QueryEscape(clause)
   let issues = records.fetch_all_issues(ctx, f"&sort=created,id&fields=id,blocked_by&filter={filter}")?
   for i in issues {
@@ -461,7 +464,7 @@ fn unblocks_map(ctx: pb.Client, team_id: string, candidates: Slice<models.Issue>
 /// the issue that unblocks more others. Insertion sort over a few hundred
 /// ready issues at most, stable on the four keys' ties (import.lis's
 /// sort_by_number is the house shape).
-fn rank_agenda(items: Slice<models.Issue>, unblocks: Map<string, int>) -> Slice<models.Issue> {
+fn rank_agenda(items: Slice<models.Issue>, unblocks: Map<models.IssueId, int>) -> Slice<models.Issue> {
   let mut out = items.clone()
   for i in 1..out.length() {
     let mut j = i
@@ -475,7 +478,7 @@ fn rank_agenda(items: Slice<models.Issue>, unblocks: Map<string, int>) -> Slice<
   out
 }
 
-fn agenda_before(a: models.Issue, b: models.Issue, unblocks: Map<string, int>) -> bool {
+fn agenda_before(a: models.Issue, b: models.Issue, unblocks: Map<models.IssueId, int>) -> bool {
   if (a.assignee == "") != (b.assignee == "") { return a.assignee == "" }
   let pa = display.prio_rank(a.priority)
   let qb = display.prio_rank(b.priority)

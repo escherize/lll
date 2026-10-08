@@ -1,4 +1,5 @@
 import "go:time"
+import "models"
 
 // Glyph legend (one per state, workflow order):
 //   ◌ backlog   ○ todo   ◐ in-progress   ◉ in-review   ● done   ⊗ cancelled
@@ -92,7 +93,7 @@ pub fn hidden_member() -> string {
 /// A related member's name as the reader may see it: the expanded `name`,
 /// else "hidden member" when the relation holds an id the server would not
 /// expand, else `empty` when the relation is empty.
-pub fn member_name(id: string, name: string, empty: string) -> string {
+pub fn member_name(id: models.MemberId, name: string, empty: string) -> string {
   if name != "" { return name }
   if id != "" { return hidden_member() }
   empty
@@ -101,7 +102,7 @@ pub fn member_name(id: string, name: string, empty: string) -> string {
 /// A comment's byline: "system" when the server wrote it on its own (LLL-654:
 /// the claim-expiry note, whose body names the holder), else the
 /// author as member_name reads it, with its session label.
-pub fn comment_byline(kind: string, id: string, name: string, agent: string, empty: string) -> string {
+pub fn comment_byline(kind: string, id: models.MemberId, name: string, agent: string, empty: string) -> string {
   if kind == "system" { return "system" }
   byline(member_name(id, name, empty), agent)
 }

@@ -466,7 +466,7 @@ fn event_refreshes(ev: realtime.Event) -> Slice<Refresh> {
   let team_key = rec.expand.team.key
   // Titles and state icons in favorites are issue data too.
   [
-    Refresh.Board(BoardRefresh { team_key, team_id: rec.team, order: "", client_id: 0 }),
+    Refresh.Board(BoardRefresh { team_key, team_id: Some(rec.team), order: "", client_id: 0 }),
     Refresh.Issue(IssueRefresh { key: f"{team_key}-{rec.number}", client_id: 0 }),
     Refresh.Favorites,
   ]
@@ -477,7 +477,7 @@ fn snapshot_refresh(snapshot: PageSnapshot) -> Refresh {
   if snapshot.key != "" {
     return Refresh.Issue(IssueRefresh { key: snapshot.key, client_id: snapshot.client_id })
   }
-  Refresh.Board(BoardRefresh { team_key: records.normalize_team_key(snapshot.team), team_id: "", order: snapshot.order, client_id: snapshot.client_id })
+  Refresh.Board(BoardRefresh { team_key: records.normalize_team_key(snapshot.team), team_id: None, order: snapshot.order, client_id: snapshot.client_id })
 }
 
 /// After a reconnect (LLL-666), everything an open page shows: PocketBase
@@ -490,7 +490,7 @@ fn resync_refreshes(scopes: Slice<string>) -> Slice<Refresh> {
       jobs = jobs.append(Refresh.Issue(IssueRefresh { key, client_id: 0 }))
     } else if let Some(rest) = strings.CutPrefix(scope, "board:") {
       let (team, order, _) = strings.Cut(rest, ":")
-      jobs = jobs.append(Refresh.Board(BoardRefresh { team_key: records.normalize_team_key(team), team_id: "", order, client_id: 0 }))
+      jobs = jobs.append(Refresh.Board(BoardRefresh { team_key: records.normalize_team_key(team), team_id: None, order, client_id: 0 }))
     }
   }
   jobs
@@ -559,16 +559,18 @@ fn for_readers(readers: Slice<Reader>, each: fn(Reader) -> Result<(), pb.CliErro
 /// on the clients that requested it.
 fn board_snapshot(hub: Hub, reader: Reader, b: BoardRefresh, orders: Slice<string>) -> Result<(), pb.CliError> {
   let ctx = reader.client
-  let mut team_id = b.team_id
-  if team_id == "" {
-    // A team deleted since the page opened, or one this reader no longer
-    // sees, has no board to refresh.
-    let Some(team) = records.find_team(ctx, b.team_key)? else { return Ok(()) }
-    team_id = team.id
+  let team_id = match b.team_id {
+    Some(id) => id,
+    None => {
+      // A team deleted since the page opened, or one this reader no longer
+      // sees, has no board to refresh.
+      let Some(team) = records.find_team(ctx, b.team_key)? else { return Ok(()) }
+      team.id
+    },
   }
   // The three reads side by side: see reader_workers on why each may wait.
   let held = Channel.buffered<Result<Slice<models.Claim>, pb.CliError>>(1)
-  task { let _ = held.send(claims.for_team(ctx, team_id)) }
+  task { let _ = held.send(claims.for_team(ctx, query.TeamScope.Only(team_id))) }
   let roster = Channel.buffered<Result<Roster, pb.CliError>>(1)
   task { let _ = roster.send(read_roster(ctx)) }
   let fetched = records.fetch_board_issues(ctx, team_id)
@@ -600,14 +602,14 @@ struct ClaimEvent { record: models.Claim }
 /// refreshed under their own keys, so they stay ordered with every other
 /// refresh of the same views. An issue deleted since is nothing to refresh.
 fn resolve_issue(ctx: pb.Client, r: ResolveRefresh, follow: Channel<Refresh>) -> Result<(), pb.CliError> {
-  let filter = url.QueryEscape(f"id={query.quote(r.issue_id)}")
+  let filter = url.QueryEscape(f"id={query.quote(r.issue_id.string())}")
   let mut found = models.IssueList { .. }
   pb.fetch(ctx, f"/api/collections/issues/records?filter={filter}&perPage=1&expand=team", "issue", &found)?
   let Some(issue) = found.items.get(0) else { return Ok(()) }
   let team_key = issue.expand.team.key
   let _ = follow.send(Refresh.Issue(IssueRefresh { key: f"{team_key}-{issue.number}", client_id: 0 }))
   if r.board {
-    let _ = follow.send(Refresh.Board(BoardRefresh { team_key, team_id: issue.team, order: "", client_id: 0 }))
+    let _ = follow.send(Refresh.Board(BoardRefresh { team_key, team_id: Some(issue.team), order: "", client_id: 0 }))
   }
   Ok(())
 }

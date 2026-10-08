@@ -38,7 +38,7 @@ fn roster_member(roster: Roster, name: string) -> Result<models.Member, pb.CliEr
 impl Roster {
   /// Whether this rendering may name the member with this id. An empty id
   /// is no member, which names nobody.
-  fn sees(self, id: string) -> bool {
+  fn sees(self, id: models.MemberId) -> bool {
     id == "" || self.members.any(|m| m.id == id)
   }
 
@@ -93,6 +93,6 @@ impl Roster {
 
   /// The members a picker or a filter offers.
   fn picks(self) -> Slice<PickVM> {
-    self.members.map(|m| PickVM { id: m.id, name: m.name, bot: m.kind == "bot" })
+    self.members.map(|m| PickVM { id: m.id.string(), name: m.name, bot: m.kind == "bot" })
   }
 }

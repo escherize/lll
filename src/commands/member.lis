@@ -130,7 +130,7 @@ fn member_list(input: flags.CommandInput) -> Result<(), pb.CliError> {
   let members = models.MemberList { items: records.fetch_members(ctx)? }
   // Team ids become keys. Ids of teams the caller cannot see stay hidden
   // and are only counted.
-  let keys: mut Map<string, string> = Map.new()
+  let keys: mut Map<models.TeamId, string> = Map.new()
   for team in records.list_teams(ctx)?.items { keys[team.id] = team.key }
   if p.given("--json") {
     // team_keys beside the ids, for the teams the caller can see
@@ -169,7 +169,7 @@ fn shown_email(m: models.Member) -> string {
 /// "rw every team (server-wide)", "ro ALPHA", "rw ALPHA, GAMMA +1 hidden", or "" when the
 /// server does not report access (fleet case 03: 7 of 10 agents went to
 /// 'lll api' to see a member's teams).
-fn member_access(m: models.Member, keys: Map<string, string>) -> string {
+fn member_access(m: models.Member, keys: Map<models.TeamId, string>) -> string {
   if m.scope == "" { return "" }
   if m.scope == "all" { return f"{m.mode} every team (server-wide)" }
   let mut named: Slice<string> = []
@@ -467,7 +467,7 @@ fn create_member_as(
   name: string,
   email: string,
   password: string,
-  teams: Slice<string>,
+  teams: Slice<models.TeamId>,
   mode: string,
 ) -> Result<models.Member, pb.CliError> {
   let member_email = if email == "" { records.synthesize_email(name) } else { email }
@@ -482,7 +482,7 @@ fn create_member_as(
     // PB selects have no schema-level default, so the CLI states the kind:
     // everything but `lll bot` is a person (LLL-407).
     kind: "person",
-    owner: "",
+    owner: None,
     scope,
     teams,
     mode,
@@ -580,7 +580,7 @@ fn member_access_cmd(input: flags.CommandInput) -> Result<(), pb.CliError> {
     return Err(pb.fail(pb.ErrorKind.NotFound, f"no member named '{name}'; see 'lll member list'"))
   }
   let teams = records.list_teams(ctx)?.items
-  let key_of = |id: string| teams.find(|t| t.id == id).map_or(id, |t| t.key)
+  let key_of = |id: models.TeamId| teams.find(|t| t.id == id).map_or(id.string(), |t| t.key)
   let before = describe_access(m.scope, m.mode, m.teams.map(key_of))
   let set_teams = p.given("--team") || p.given("--all-teams") || p.given("--no-teams")
   let edit_teams = p.given("--add-team") || p.given("--remove-team")
@@ -597,7 +597,7 @@ fn member_access_cmd(input: flags.CommandInput) -> Result<(), pb.CliError> {
   if p.given("--read-only") && p.given("--read-write") {
     return Err(pb.failed("give --read-only or --read-write, not both"))
   }
-  let id_of = |key: string| -> Result<string, pb.CliError> {
+  let id_of = |key: string| -> Result<models.TeamId, pb.CliError> {
     let k = records.normalize_team_key(key)
     let Some(t) = teams.find(|t| t.key == k) else { return Err(records.unknown_team(ctx, k)) }
     Ok(t.id)
@@ -668,7 +668,7 @@ fn member_access_cmd(input: flags.CommandInput) -> Result<(), pb.CliError> {
 /// actually has and why (LLL-543). Prints nothing otherwise.
 /// A team-scoped caller may see a bot but not its owner (LLL-551): the owner
 /// then reads as missing, and the cap is not this caller's to know.
-fn print_owner_cap(ctx: pb.Client, m: models.Member, key_of: fn(string) -> string) -> Result<(), pb.CliError> {
+fn print_owner_cap(ctx: pb.Client, m: models.Member, key_of: fn(models.TeamId) -> string) -> Result<(), pb.CliError> {
   let (eff, cap) = match records.effective_access(ctx, m) {
     Ok(found) => found,
     Err(e) => {

@@ -60,8 +60,8 @@ pub fn search_spec() -> Slice<flags.Flag> {
 
 /// The same issues with only the fields the ranker reads: the CLI has no
 /// card to draw, and the expansions were most of the bytes on the wire.
-fn fetch_team_issues_light(ctx: pb.Client, team_id: string, where: string) -> Result<Slice<models.Issue>, pb.CliError> {
-  let mut clause = query.filter(team_id, "", "", "", "", "")
+fn fetch_team_issues_light(ctx: pb.Client, team_id: models.TeamId, where: string) -> Result<Slice<models.Issue>, pb.CliError> {
+  let mut clause = query.filter(query.IssueFilter.over(query.TeamScope.Only(team_id)))
   if where != "" { clause = f"{clause} && {where}" }
   let filter = url.QueryEscape(clause)
   let mut out: Slice<models.Issue> = []
@@ -108,7 +108,7 @@ struct Cache {
   docs: Slice<models.Doc>,
 }
 
-fn cache_path(ctx: pb.Client, team_id: string) -> Result<string, pb.CliError> {
+fn cache_path(ctx: pb.Client, team_id: models.TeamId) -> Result<string, pb.CliError> {
   let cfg = ctx.settings.config().map_err(pb.failed)?
   let home = ctx.settings.env.home
   if home == "" { return Err(pb.failed("no home directory for the search cache")) }
@@ -135,7 +135,7 @@ fn save_cache(path: string, c: Cache) -> Result<(), pb.CliError> {
 }
 
 /// Documents for the team from the cache, refreshed first.
-fn cached_corpus(ctx: pb.Client, team_id: string, team_key: string, refresh: bool, issues: bool, docs: bool) -> Result<Slice<search.Document>, pb.CliError> {
+fn cached_corpus(ctx: pb.Client, team_id: models.TeamId, team_key: string, refresh: bool, issues: bool, docs: bool) -> Result<Slice<search.Document>, pb.CliError> {
   let path = cache_path(ctx, team_id)?
   let mut c = if refresh { Cache { .. } } else { load_cache(path) }
   c = sync_cache(ctx, c, team_id)?
@@ -154,7 +154,7 @@ fn cached_corpus(ctx: pb.Client, team_id: string, team_key: string, refresh: boo
 /// id listings and the three "updated since" fetches run at once; records
 /// whose id is gone are dropped, changed and new ones replace their old
 /// selves, and `synced` moves to the newest `updated` seen.
-fn sync_cache(ctx: pb.Client, c: Cache, team_id: string) -> Result<Cache, pb.CliError> {
+fn sync_cache(ctx: pb.Client, c: Cache, team_id: models.TeamId) -> Result<Cache, pb.CliError> {
   if c.synced == "" {
     let issues_ch = Channel.new<Result<Slice<models.Issue>, pb.CliError>>()
     let comments_ch = Channel.new<Result<Slice<models.Comment>, pb.CliError>>()
@@ -185,9 +185,9 @@ fn sync_cache(ctx: pb.Client, c: Cache, team_id: string) -> Result<Cache, pb.Cli
   let pi = Channel.new<Result<Probe, pb.CliError>>()
   let pc = Channel.new<Result<Probe, pb.CliError>>()
   let pd = Channel.new<Result<Probe, pb.CliError>>()
-  task { let _ = pi.send(probe(ctx, "issues", f"team={query.quote(team_id)}")) }
-  task { let _ = pc.send(probe(ctx, "comments", f"issue.team={query.quote(team_id)}")) }
-  task { let _ = pd.send(probe(ctx, "docs", f"team={query.quote(team_id)}")) }
+  task { let _ = pi.send(probe(ctx, "issues", f"team={query.quote(team_id.string())}")) }
+  task { let _ = pc.send(probe(ctx, "comments", f"issue.team={query.quote(team_id.string())}")) }
+  task { let _ = pd.send(probe(ctx, "docs", f"team={query.quote(team_id.string())}")) }
   let Some(ri) = pi.receive() else { return Err(pb.failed("probe ended without an answer")) }
   let Some(rc) = pc.receive() else { return Err(pb.failed("probe ended without an answer")) }
   let Some(rd) = pd.receive() else { return Err(pb.failed("probe ended without an answer")) }
@@ -204,16 +204,16 @@ fn sync_cache(ctx: pb.Client, c: Cache, team_id: string) -> Result<Cache, pb.Cli
   let mut comments = c.comments
   let mut docs = c.docs
   if moved_i {
-    let keep = as_set(fetch_ids(ctx, "issues", f"team={query.quote(team_id)}")?)
+    let keep = as_set(fetch_ids(ctx, "issues", f"team={query.quote(team_id.string())}")?)
     let changed = fetch_team_issues_light(ctx, team_id, since)?
-    let mut seen = Map.new<string, bool>()
+    let mut seen = Map.new<models.IssueId, bool>()
     let mut next: Slice<models.Issue> = []
     for i in changed { seen[i.id] = true; next = next.append(i) }
-    for i in c.issues { if keep.get(i.id).is_some() && seen.get(i.id).is_none() { next = next.append(i) } }
+    for i in c.issues { if keep.get(i.id.string()).is_some() && seen.get(i.id).is_none() { next = next.append(i) } }
     issues = next
   }
   if moved_c {
-    let keep = as_set(fetch_ids(ctx, "comments", f"issue.team={query.quote(team_id)}")?)
+    let keep = as_set(fetch_ids(ctx, "comments", f"issue.team={query.quote(team_id.string())}")?)
     let changed = records.fetch_team_comments_where(ctx, team_id, since)?
     let mut seen = Map.new<string, bool>()
     let mut next: Slice<models.Comment> = []
@@ -222,7 +222,7 @@ fn sync_cache(ctx: pb.Client, c: Cache, team_id: string) -> Result<Cache, pb.Cli
     comments = next
   }
   if moved_d {
-    let keep = as_set(fetch_ids(ctx, "docs", f"team={query.quote(team_id)}")?)
+    let keep = as_set(fetch_ids(ctx, "docs", f"team={query.quote(team_id.string())}")?)
     let changed = records.fetch_team_docs_light(ctx, team_id, since)?
     let mut seen = Map.new<string, bool>()
     let mut next: Slice<models.Doc> = []

@@ -35,7 +35,7 @@ fn settings_page(
   ctx: pb.Client,
   w: http.ResponseWriter,
   r: Ref<http.Request>,
-  team_id: string,
+  team_id: models.TeamId,
   me: string,
   section: string,
 ) {
@@ -91,8 +91,8 @@ fn settings_vm(ctx: pb.Client, team: models.Team, section: string) -> Result<Set
       vm.teams = scope_rows(ctx)?
     },
     "projects" => {
-      vm.projects = records.fetch_projects(ctx, team.id)?.map(|p| SetProjectVM {
-        id: p.id,
+      vm.projects = records.fetch_projects(ctx, query.TeamScope.Only(team.id))?.map(|p| SetProjectVM {
+        id: p.id.string(),
         name: p.name,
         status: p.status,
       })
@@ -116,7 +116,7 @@ fn settings_vm(ctx: pb.Client, team: models.Team, section: string) -> Result<Set
 fn member_rows(ctx: pb.Client) -> Result<Slice<SetMemberVM>, pb.CliError> {
   Ok(
     records.fetch_members(ctx)?.map(|m| SetMemberVM {
-      id: m.id,
+      id: m.id.string(),
       name: m.name,
       email: m.email,
     }),
@@ -130,7 +130,7 @@ fn member_rows(ctx: pb.Client) -> Result<Slice<SetMemberVM>, pb.CliError> {
 fn scope_rows(ctx: pb.Client) -> Result<Slice<SetTeamVM>, pb.CliError> {
   Ok(
     records.list_teams(ctx)?.items.map(|t| SetTeamVM {
-      id: t.id,
+      id: t.id.string(),
       key: t.key,
       name: t.name,
       archived: t.archived,
@@ -147,10 +147,10 @@ fn scope_rows(ctx: pb.Client) -> Result<Slice<SetTeamVM>, pb.CliError> {
 fn team_rows(ctx: pb.Client) -> Result<Slice<SetTeamVM>, pb.CliError> {
   let mut rows: Slice<SetTeamVM> = []
   for t in records.list_teams(ctx)?.items {
-    let held = records.issue_count(ctx, f"team={query.quote(t.id)}")?
+    let held = records.issue_count(ctx, f"team={query.quote(t.id.string())}")?
     rows = rows.append(
       SetTeamVM {
-        id: t.id,
+        id: t.id.string(),
         key: t.key,
         name: t.name,
         issues: held,
@@ -169,14 +169,14 @@ fn team_rows(ctx: pb.Client) -> Result<Slice<SetTeamVM>, pb.CliError> {
 /// order is what makes the inventory readable as "what this team actually
 /// uses", so a near-duplicate (bug/bugs/defect) is visible next to the label
 /// it duplicates before someone creates another one.
-fn label_rows(ctx: pb.Client, team_id: string) -> Result<Slice<SetLabelVM>, pb.CliError> {
+fn label_rows(ctx: pb.Client, team_id: models.TeamId) -> Result<Slice<SetLabelVM>, pb.CliError> {
   let mut rows: Slice<SetLabelVM> = []
   // fetch_labels answers name-sorted; the strict > below keeps equal-usage
   // rows in that order, so ties stay alphabetical.
-  for l in records.fetch_labels(ctx, team_id)? {
-    let used = records.entity_issue_count(ctx, "label", l.id)?
+  for l in records.fetch_labels(ctx, query.TeamScope.Only(team_id))? {
+    let used = records.entity_issue_count(ctx, records.Classifier.Label(l.id))?
     let row = SetLabelVM {
-      id: l.id,
+      id: l.id.string(),
       name: l.name,
       color: theme.normalize_hex(l.color),
       usage: used,
@@ -214,7 +214,7 @@ fn label_rows(ctx: pb.Client, team_id: string) -> Result<Slice<SetLabelVM>, pb.C
 fn settings_write(
   ctx: pb.Client,
   r: mut Ref<http.Request>,
-  team_id: string,
+  team_id: models.TeamId,
   me: string,
 ) -> Result<string, pb.CliError> {
   if r.FormValue("cancel") != "" {
@@ -263,16 +263,11 @@ fn section_of(kind: string) -> string {
 fn settings_apply(
   ctx: pb.Client,
   r: mut Ref<http.Request>,
-  team_id: string,
+  team_id: models.TeamId,
 ) -> Result<(), pb.CliError> {
   let kind = r.PathValue("kind")
   let id = strings.TrimSpace(r.PostFormValue("id"))
   let name = strings.TrimSpace(r.PostFormValue("name"))
-
-  // Labels and projects are team-owned, just like the team section.
-  if team_id == "" {
-    return Err(pb.failed("no team configured: set LLL_TEAM or 'team' in .lll.toml"))
-  }
 
   match kind {
     "team" => {
@@ -297,12 +292,15 @@ fn settings_apply(
       // so a rejected move leaves the name and colour untouched too - one
       // submit is one outcome. `owner` is where the record ends up, so the
       // patch below cannot drag it back to the page's team.
-      let owner = move_scope_if_asked(ctx, r, "label", name, id, team_id)?
       if id == "" {
-        let _ = writes.create_label(ctx, models.NewLabel { name, color, team: owner })?
+        let _ = writes.create_label(ctx, models.NewLabel { name, color, team: team_id })?
         return Ok(())
       }
-      writes.update_label(ctx, id, writes.LabelPatch { name: Some(name), color: Some(color), team: Some(owner) })
+      // The row's id names one of this team's labels (LLL-675): another
+      // team's, or a deleted one, is unknown here.
+      let label = picked_label(records.fetch_labels(ctx, query.TeamScope.Only(team_id))?, id)?
+      let owner = move_scope_if_asked(ctx, r, records.Classifier.Label(label.id), name, team_id)?
+      writes.update_label(ctx, label.id, writes.LabelPatch { name: Some(name), color: Some(color), team: Some(owner) })
     },
     "member" => {
       if name == "" { return Err(pb.failed("member name is required")) }
@@ -331,7 +329,7 @@ fn settings_apply(
         return Ok(())
       }
       let known = records.fetch_members(ctx)?
-      let Some(existing) = known.find(|m| m.id == id) else {
+      let Some(existing) = known.find(|m| m.id.string() == id) else {
         return Err(
           pb.failed(f"unknown member '{id}'; reload the page for the current list"),
         )
@@ -345,7 +343,7 @@ fn settings_apply(
           pb.failed(f"'{existing.name}'s email is their login identity; change it under Access → Member sign-in. No changes saved."),
         )
       }
-      writes.update_member(ctx, pb.Caller.Process, id, writes.MemberPatch { name: Some(name), .. })
+      writes.update_member(ctx, pb.Caller.Process, existing.id, writes.MemberPatch { name: Some(name), .. })
     },
     "project" => {
       if name == "" { return Err(pb.failed("project name is required")) }
@@ -354,13 +352,14 @@ fn settings_apply(
       if records.project_statuses().find(|s| s == status).is_none() {
         return Err(pb.failed(f"unknown project status '{status}'"))
       }
-      let owner = move_scope_if_asked(ctx, r, "project", name, id, team_id)?
       if id == "" {
-        let new_project = models.NewProject { name, description: "", status, team: owner }
+        let new_project = models.NewProject { name, description: "", status, team: team_id }
         let _ = writes.create_project(ctx, new_project)?
         return Ok(())
       }
-      writes.update_project(ctx, id, writes.ProjectPatch { name: Some(name), description: None, status: Some(status), team: Some(owner) })
+      let project = picked_project(records.fetch_projects(ctx, query.TeamScope.Only(team_id))?, id)?
+      let owner = move_scope_if_asked(ctx, r, records.Classifier.Project(project.id), name, team_id)?
+      writes.update_project(ctx, project.id, writes.ProjectPatch { name: Some(name), description: None, status: Some(status), team: Some(owner) })
     },
     other => Err(pb.failed(f"unknown settings section '{other}'")),
   }
@@ -397,24 +396,24 @@ fn settings_collection(kind: string) -> Result<string, pb.CliError> {
 /// patch writes the destination rather than dragging it back.
 ///
 /// A create (no id) has nothing to move: the row's team select is the team the
-/// new record is born in, which `team_id` already is.
+/// new record is born in, which `team_id` already is, so only an update of
+/// a record parsed as this team's asks.
 ///
 /// The refusal rule lives in writes/moves.lis and is the CLI's, so the board and
 /// `lll label move` cannot answer differently - one rule, two doors.
 fn move_scope_if_asked(
   ctx: pb.Client,
   r: mut Ref<http.Request>,
-  kind: string,
+  what: records.Classifier,
   name: string,
-  id: string,
-  team_id: string,
-) -> Result<string, pb.CliError> {
+  team_id: models.TeamId,
+) -> Result<models.TeamId, pb.CliError> {
   let wanted = strings.TrimSpace(r.PostFormValue("team"))
-  if id == "" || wanted == "" { return Ok(team_id) }
+  if wanted == "" { return Ok(team_id) }
   let to = writes.move_destination(ctx, wanted)?
   if to.id == team_id { return Ok(team_id) }
   let from = shell_team(ctx, team_id)
-  let _ = writes.move_to_team(ctx, kind, name, id, from, to)?
+  let _ = writes.move_to_team(ctx, what, name, from, to)?
   Ok(to.id)
 }
 
@@ -490,7 +489,7 @@ fn access_member(ctx: pb.Client, r: mut Ref<http.Request>) -> Result<models.Memb
   let id = strings.TrimSpace(r.PostFormValue("member"))
   if id == "" { return Err(pb.failed("pick a member")) }
   let known = records.fetch_members(ctx)?
-  let Some(member) = known.find(|m| m.id == id) else {
+  let Some(member) = known.find(|m| m.id.string() == id) else {
     return Err(pb.failed(f"unknown member '{id}'; reload the page for the current list"))
   }
   Ok(member)
@@ -548,7 +547,7 @@ fn mint_expiry_event(now: time.Time) -> string {
 fn access_credential_write(
   ctx: pb.Client,
   r: mut Ref<http.Request>,
-  team_id: string,
+  team_id: models.TeamId,
 ) -> Result<string, pb.CliError> {
   let member = access_member(ctx, r)?
   let password = r.PostFormValue("password")
@@ -601,17 +600,17 @@ fn flash_ok_event(msg: string) -> string {
 fn teams_archive_write(
   ctx: pb.Client,
   r: mut Ref<http.Request>,
-  team_id: string,
+  team_id: models.TeamId,
 ) -> Result<string, pb.CliError> {
   let id = strings.TrimSpace(r.PostFormValue("id"))
   if id == "" { return Err(pb.failed("pick a team")) }
   let known = records.list_teams(ctx)?
-  let Some(t) = known.items.find(|x| x.id == id) else {
+  let Some(t) = known.items.find(|x| x.id.string() == id) else {
     return Err(pb.failed("unknown team; reload the page for the current list"))
   }
   let archived = r.PostFormValue("archived") == "1"
   let su = verify_admin(ctx, r.PostFormValue("admin_password"))?
-  writes.update_team(ctx, pb.Caller.Member(su), id, writes.TeamPatch { archived: Some(archived), .. })?
+  writes.update_team(ctx, pb.Caller.Member(su), t.id, writes.TeamPatch { archived: Some(archived), .. })?
   // The page shows the row's state, so patch the Teams section back and say
   // the success out loud — same shape as access_credential_write.
   let mut extra = ""

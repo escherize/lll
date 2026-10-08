@@ -134,7 +134,7 @@ pub fn create_bot_member_as(
   ctx: pb.Client,
   tok: string,
   name: string,
-  owner: string,
+  owner: Option<models.MemberId>,
 ) -> Result<models.Member, pb.CliError> {
   let password = rand.Text()
   let new_bot = models.NewMember {

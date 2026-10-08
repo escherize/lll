@@ -2,6 +2,7 @@ import "go:encoding/json"
 import "go:net/url"
 
 import "pb"
+import "models"
 
 // The claim routes (gopb claims_http.go). A claim and the assignment it
 // implies are one server transaction; these only name the request.
@@ -20,14 +21,14 @@ pub struct Transition {
 
 #[json]
 struct AcquireRequest {
-  member: string,
+  member: models.MemberId,
   #[json(omitempty)]
   agent: string,
 }
 
 #[json]
 struct ReleaseRequest {
-  claim_id: string,
+  claim_id: models.ClaimId,
   #[json(omitempty)]
   agent: string,
   force: bool,
@@ -36,6 +37,7 @@ struct ReleaseRequest {
 
 #[json]
 struct CloseRequest {
+  /// The observed claim's id; "" on the wire when there was none.
   claim_id: string,
   #[json(omitempty)]
   agent: string,
@@ -46,13 +48,14 @@ struct CloseRequest {
 
 #[json]
 struct RenewRequest {
-  claim_id: string,
+  claim_id: models.ClaimId,
   #[json(omitempty)]
   agent: string,
 }
 
 #[json]
 struct AssignmentRequest {
+  /// The observed claim's id; "" on the wire when there was none.
   claim_id: string,
   fields: json.RawMessage,
   #[json(omitempty)]
@@ -77,8 +80,8 @@ pub struct ClaimAs {
 pub fn acquire_claim(
   ctx: pb.Client,
   caller: pb.Caller,
-  issue_id: string,
-  member_id: string,
+  issue_id: models.IssueId,
+  member_id: models.MemberId,
   agent: string,
 ) -> Result<Transition, pb.CliError> {
   transact(
@@ -97,8 +100,8 @@ pub fn acquire_claim(
 /// (LLL-521).
 pub fn release_claim(
   ctx: pb.Client,
-  issue_id: string,
-  claim_id: string,
+  issue_id: models.IssueId,
+  claim_id: models.ClaimId,
   by: ClaimAs,
 ) -> Result<Transition, pb.CliError> {
   transact(
@@ -115,15 +118,28 @@ pub fn release_claim(
   )
 }
 
+/// The server's spelling of an observed claim: its id, or "" for none.
+fn observed_wire(claim_id: Option<models.ClaimId>) -> string {
+  claim_id.map_or("", |c| c.string())
+}
+
+/// The claim id a board form rendered and posted back. It is carried as the
+/// claim the viewer observed, not looked up: the server refuses
+/// (claim_changed) when it is no longer the one held, which is the answer a
+/// stale page needs.
+pub fn observed_claim(posted: string) -> models.ClaimId {
+  models.ClaimId(posted)
+}
+
 /// Set the issue done and release its claim in one server transaction (D3,
-/// LLL-640). `claim_id` is the hold the caller observed, "" for none. The
+/// LLL-640). `claim_id` is the hold the caller observed, None for none. The
 /// release rule is release's: the holder freely, anyone else with force,
 /// which comments. `keep_claim` keeps the holder's own hold; the server
 /// refuses it for anyone else. The assignee is kept.
 pub fn close_issue(
   ctx: pb.Client,
-  issue_id: string,
-  claim_id: string,
+  issue_id: models.IssueId,
+  claim_id: Option<models.ClaimId>,
   by: ClaimAs,
   keep_claim: bool,
 ) -> Result<Transition, pb.CliError> {
@@ -133,7 +149,7 @@ pub fn close_issue(
     issue_id,
     "close",
     CloseRequest {
-      claim_id,
+      claim_id: observed_wire(claim_id),
       agent: by.agent,
       force: by.force,
       reason: by.reason,
@@ -147,8 +163,8 @@ pub fn close_issue(
 /// non-empty `agent` than the holder's is refused, as on acquire (LLL-521).
 pub fn renew_claim(
   ctx: pb.Client,
-  issue_id: string,
-  claim_id: string,
+  issue_id: models.IssueId,
+  claim_id: models.ClaimId,
   agent: string,
 ) -> Result<Transition, pb.CliError> {
   transact(
@@ -166,8 +182,8 @@ pub fn renew_claim(
 /// forced clear leaves a comment on the issue, with `reason` if given.
 fn update_assignment(
   ctx: pb.Client,
-  issue_id: string,
-  claim_id: string,
+  issue_id: models.IssueId,
+  claim_id: Option<models.ClaimId>,
   fields: string,
   by: ClaimAs,
 ) -> Result<Transition, pb.CliError> {
@@ -177,7 +193,7 @@ fn update_assignment(
     issue_id,
     "assignment",
     AssignmentRequest {
-      claim_id,
+      claim_id: observed_wire(claim_id),
       fields: fields.bytes() as json.RawMessage,
       agent: by.agent,
       force: by.force,
@@ -191,12 +207,12 @@ fn update_assignment(
 fn transact(
   ctx: pb.Client,
   caller: pb.Caller,
-  issue_id: string,
+  issue_id: models.IssueId,
   action: string,
   request: Unknown,
 ) -> Result<Transition, pb.CliError> {
   let body = json.Marshal(request).map_err(|e| f"encoding claim request: {e}").map_err(pb.failed)?
-  let path = f"/api/lll/issues/{url.PathEscape(issue_id)}/{action}"
+  let path = f"/api/lll/issues/{url.PathEscape(issue_id.string())}/{action}"
   let response = ctx
     .send_as(caller, "POST", path, body as string, "application/json")
     .map_err(|e| {

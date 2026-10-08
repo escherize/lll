@@ -1,6 +1,7 @@
 import "flags"
 import "pb"
 import "query"
+import "models"
 
 /// The CLI half of the shared-filter contract: flags parse into the same
 /// query.Filters, and fail the same validation, that the board's URL
@@ -83,14 +84,15 @@ fn repeated_filters_mean_the_union_and_undeclared_repeats_are_refused() {
 /// so it cannot widen the team scope around it.
 #[test]
 fn repeated_values_become_a_parenthesised_or() {
-  let one = query.filter_in("t1", ["todo"], "", [], [], "")
+  let t1 = query.IssueFilter.over(query.TeamScope.Only(models.TeamId("t1")))
+  let one = query.filter(query.IssueFilter { states: ["todo"], ..t1 })
   assert one.contains("state='todo'")
   assert !one.contains("||")
-  let two = query.filter_in("t1", ["todo", "in-review"], "", [], [], "")
+  let two = query.filter(query.IssueFilter { states: ["todo", "in-review"], ..t1 })
   assert two.contains("(state='todo' || state='in-review')")
   assert two.contains("team='t1'")
-  let labels = query.filter_in("t1", [], "", [], ["l1", "l2"], "")
+  let labels = query.filter(query.IssueFilter { labels: [models.LabelId("l1"), models.LabelId("l2")], ..t1 })
   assert labels.contains("(labels.id ?= 'l1' || labels.id ?= 'l2')")
-  let none = query.filter_in("t1", [], "", [], [], "")
+  let none = query.filter(t1)
   assert none == "team='t1'"
 }

@@ -10,7 +10,7 @@ import "pb"
 /// text a person wrote.
 /// The lookups a rendered issue needs; empty where a test does not care.
 fn no_names() -> Names {
-  Names { issues: Map.new<string, string>(), members: Map.new<string, string>() }
+  Names { issues: Map.new<models.IssueId, string>(), members: Map.new<models.MemberId, string>() }
 }
 
 fn round_trip(front: Front, body: string) -> Result<(Front, string), pb.CliError> {
@@ -352,11 +352,11 @@ fn front_of_resolves_names_from_the_maps_not_the_expansions() {
   // The regression this guards: `creator` came from issue.expand.creator,
   // which the e2e harness's identity could not expand, so every issue in
   // the mirror said it was filed by nobody — and nothing failed.
-  let mut members = Map.new<string, string>()
-  members["m1"] = "bryan.maass"
-  members["m2"] = "rtrip-bot"
-  let mut keys = Map.new<string, string>()
-  keys["i9"] = "ENG-9"
+  let mut members = Map.new<models.MemberId, string>()
+  members[models.MemberId("m1")] = "bryan.maass"
+  members[models.MemberId("m2")] = "rtrip-bot"
+  let mut keys = Map.new<models.IssueId, string>()
+  keys[models.IssueId("i9")] = "ENG-9"
   let issue = models.Issue {
     number: 4,
     title: "t",

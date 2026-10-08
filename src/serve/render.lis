@@ -146,7 +146,7 @@ fn card_vm(issue: models.Issue) -> CardVM {
   CardVM {
     claim_holder: "",
     attachment_count: issue.attachments.length(),
-    id: issue.id,
+    id: issue.id.string(),
     key: f"{issue.expand.team.key}-{issue.number}",
     title: issue.title,
     state: issue.state,
@@ -161,7 +161,7 @@ fn card_vm(issue: models.Issue) -> CardVM {
     updated: display.relative(issue.updated),
     snippet: snippet(issue.description),
     work_branch: issue.work_branch,
-    project_id: issue.project,
+    project_id: issue.project.string(),
     // The state half of the staleness rule; board_card ORs in the claim
     // half. Rows built straight from card_vm never show the site anyway.
     work_stale: records.work_site_stale(issue.state, true),
@@ -194,7 +194,7 @@ struct BoardFilter {
   // Project IDS, not names (LLL-523): the board fetch does not expand
   // `project` (each relation is another join on every load and broadcast),
   // and an issue carries its project's id either way.
-  projects: Slice<string>,
+  projects: Slice<models.ProjectId>,
 }
 
 /// Does one issue pass the board's current filter? Every dimension ANDs;
@@ -385,15 +385,15 @@ fn board_card(issue: models.Issue, claimed: Slice<models.Claim>) -> CardVM {
 /// The issue the dialog creates lands in that same team, so a picker
 /// offering another team's label would build a record PocketBase is happy to
 /// store and no view can explain.
-fn compose_vm(ctx: pb.Client, team_id: string, roster: Roster) -> Result<ComposeVM, pb.CliError> {
-  let projects = records.fetch_projects(ctx, team_id)?
-  let labels = records.fetch_labels(ctx, team_id)?
+fn compose_vm(ctx: pb.Client, team_id: models.TeamId, roster: Roster) -> Result<ComposeVM, pb.CliError> {
+  let projects = records.fetch_projects(ctx, query.TeamScope.Only(team_id))?
+  let labels = records.fetch_labels(ctx, query.TeamScope.Only(team_id))?
   Ok(ComposeVM {
     prios: prio_opts(),
     members: roster.picks(),
-    projects: projects.map(|p| PickVM { id: p.id, name: p.name, bot: false }),
+    projects: projects.map(|p| PickVM { id: p.id.string(), name: p.name, bot: false }),
     labels: labels.map(|l| LabelPickVM {
-      id: l.id,
+      id: l.id.string(),
       name: l.name,
       color: theme.normalize_hex(l.color),
       on: false,
@@ -455,7 +455,7 @@ fn issue_fields_vm(ctx: pb.Client, raw: models.Issue, comments: Slice<models.Com
   let mut claim_holder = ""
   let mut claim_age = ""
   if let Some(c) = held {
-    claim_id = c.id
+    claim_id = c.id.string()
     claim_holder = c.expand.member.name
     if claim_holder == "" { claim_holder = "unknown member" }
     claim_holder = display.byline(claim_holder, c.agent)
@@ -465,7 +465,7 @@ fn issue_fields_vm(ctx: pb.Client, raw: models.Issue, comments: Slice<models.Com
   let mut claim_actor = ""
   let mut claim_error = ""
   match records.find_actor(ctx) {
-    Ok(Some(a)) => { claim_actor = a.name; claim_actor_id = a.id },
+    Ok(Some(a)) => { claim_actor = a.name; claim_actor_id = a.id.string() },
     Ok(None) => claim_error = "No member is configured for this board.",
     Err(e) => claim_error = e.message,
   }
@@ -478,7 +478,7 @@ fn issue_fields_vm(ctx: pb.Client, raw: models.Issue, comments: Slice<models.Com
     claim_read_only: issue.expand.team.archived,
     attachments: attachment_vms(issue),
     deleted: false,
-    id: issue.id,
+    id: issue.id.string(),
     key: f"{issue.expand.team.key}-{issue.number}",
     title: issue.title,
     state: issue.state,
@@ -499,15 +499,15 @@ fn issue_fields_vm(ctx: pb.Client, raw: models.Issue, comments: Slice<models.Com
     // The three editor catalogues. Small fetches, paid per render — the
     // selects live inside the #issue-detail morph boundary, so a broadcast
     // that shipped no options would wipe the controls mid-edit.
-    project_id: issue.project,
-    assignee_id: issue.assignee,
+    project_id: issue.project.string(),
+    assignee_id: issue.assignee.string(),
     // Scoped to the ISSUE's team, not the server's configured one: this
     // renders for whatever issue arrives, including one from a team the
     // board is not scoped to (TASK-173).
     member_opts: roster.picks(),
-    project_opts: records.fetch_projects(ctx, issue.team)?.map(|p| PickVM { id: p.id, name: p.name, bot: false }),
-    label_opts: records.fetch_labels(ctx, issue.team)?.map(|l| LabelPickVM {
-      id: l.id,
+    project_opts: records.fetch_projects(ctx, query.TeamScope.Only(issue.team))?.map(|p| PickVM { id: p.id.string(), name: p.name, bot: false }),
+    label_opts: records.fetch_labels(ctx, query.TeamScope.Only(issue.team))?.map(|l| LabelPickVM {
+      id: l.id.string(),
       name: l.name,
       color: theme.normalize_hex(l.color),
       on: issue.labels.contains(l.id),

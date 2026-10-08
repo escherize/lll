@@ -123,7 +123,7 @@ impl Acting {
 
   /// The member a write names as its author or claimant: the viewer, or the
   /// board's own member for the board token.
-  fn member_id(self, ctx: pb.Client) -> Result<Option<string>, pb.CliError> {
+  fn member_id(self, ctx: pb.Client) -> Result<Option<models.MemberId>, pb.CliError> {
     if let Some(m) = self.member { return Ok(Some(m.id)) }
     Ok(records.find_actor(ctx)?.map(|a| a.id))
   }
@@ -160,10 +160,10 @@ fn respond_flash(w: http.ResponseWriter, html: string) {
 /// optional, so a request carrying only a title is byte-for-byte what it
 /// always was and the fast path pays nothing for the dialog's existence.
 ///
-/// Relation ids (assignee, project, labels) are handed to PocketBase
-/// unchecked: the form only ever offers ids that exist, and PB rejects a
-/// bogus one with a message the flash strip already knows how to show.
-/// Re-validating here would mean three more fetches per create.
+/// Relation ids (assignee, project, labels) are parsed against what the
+/// viewer may pick for this team (LLL-675): the roster, the team's projects
+/// and its labels. An id outside them is refused by name rather than handed
+/// to PocketBase, so no write carries another team's record.
 fn create_write(ctx: pb.Client, v: Viewing, r: mut Ref<http.Request>) -> Result<string, pb.CliError> {
   let title = strings.TrimSpace(r.PostFormValue("title"))
   if title == "" { return Err(pb.failed("title is required")) }
@@ -198,20 +198,26 @@ fn create_write(ctx: pb.Client, v: Viewing, r: mut Ref<http.Request>) -> Result<
   }
   // PostFormValue above has already parsed the body, so PostForm is populated;
   // labels is the one field that repeats (one checkbox per label).
-  let labels = r.PostForm.map_or([], |form| {
+  let raw_labels = r.PostForm.map_or([], |form| {
     (form as Map<string, Slice<string>>)["labels"].filter(|id| id != "")
   })
-  // A member viewer assigns only members it may see (LLL-551), the ones its
-  // picker offered.
-  let assignee = r.PostFormValue("assignee")
-  if assignee != "" && who.member.is_some() {
-    let shown = read_roster(who.reads)?
-    if !shown.sees(assignee) {
-      return Err(pb.failed(f"unknown member '{assignee}'; reload the page for the current list"))
-    }
+  let mut labels: Slice<models.LabelId> = []
+  if !raw_labels.is_empty() {
+    let known = records.fetch_labels(who.reads, query.TeamScope.Only(team))?
+    for raw in raw_labels { labels = labels.append(picked_label(known, raw)?.id) }
+  }
+  let project = match r.PostFormValue("project") {
+    "" => None,
+    raw => Some(picked_project(records.fetch_projects(who.reads, query.TeamScope.Only(team))?, raw)?.id),
+  }
+  // A viewer assigns only members it may see (LLL-551), the ones its picker
+  // offered.
+  let assignee = match r.PostFormValue("assignee") {
+    "" => None,
+    raw => Some(picked_member(read_roster(who.reads)?, raw)?.id),
   }
   let new_issue = models.NewIssue {
-    creator: who.member_id(ctx)?.unwrap_or(""),
+    creator: who.member_id(ctx)?,
     origin: models.IssueOrigin { tool: "web", .. },
     team,
     title,
@@ -219,7 +225,7 @@ fn create_write(ctx: pb.Client, v: Viewing, r: mut Ref<http.Request>) -> Result<
     priority,
     description: r.PostFormValue("description"),
     assignee,
-    project: r.PostFormValue("project"),
+    project,
     labels,
     ..,
   }
@@ -258,14 +264,14 @@ fn reorder_sort(
   issue: models.Issue,
   state: string,
   before: string,
-  team_id: string,
+  team_id: models.TeamId,
 ) -> Result<float64, pb.CliError> {
   // Dropping a card onto itself moves nothing.
-  if before == issue.id { return Ok(issue.sort) }
+  if before == issue.id.string() { return Ok(issue.sort) }
   // Column-scoped fetch (LLL-428): only this column, board order, id+sort.
   let others = records.fetch_column_issues(ctx, team_id, state)?.filter(|i| i.id != issue.id)
   if others.is_empty() { return Ok(issue.sort) }
-  let Some(target) = others.find(|i| i.id == before) else {
+  let Some(target) = others.find(|i| i.id.string() == before) else {
     // End of column — also the fallback when `before` went stale (moved or
     // deleted between the drop and this request).
     return Ok(others[others.length() - 1].sort + 1.0)
@@ -274,7 +280,7 @@ fn reorder_sort(
   // synthetic target.sort - 2 makes the midpoint land strictly first.
   let mut prev_sort = target.sort - 2.0
   for i in others {
-    if i.id == before { break }
+    if i.id.string() == before { break }
     prev_sort = i.sort
   }
   Ok((prev_sort + target.sort) / 2.0)
@@ -364,15 +370,11 @@ fn project_write(_ctx: pb.Client, v: Viewing, r: mut Ref<http.Request>) -> Resul
   let who = acting_as(v)?
   let issue = who.issue(key)?
   require_active_team(issue.expand.team)?
-  if id != "" {
-    let projects = records.fetch_projects(who.reads, issue.team)?
-    if projects.find(|p| p.id == id).is_none() {
-      return Err(
-        pb.failed(f"unknown project '{id}'; reload the page for the current list"),
-      )
-    }
+  let project = if id == "" {
+    writes.Relation.Clear
+  } else {
+    writes.Relation.Set(picked_project(records.fetch_projects(who.reads, query.TeamScope.Only(issue.team))?, id)?.id)
   }
-  let project = if id == "" { writes.Relation.Clear } else { writes.Relation.Set(id) }
   patch_issue(who, issue, writes.IssuePatch { project, ..writes.IssuePatch.unchanged() })
 }
 
@@ -383,20 +385,16 @@ fn assignee_write(_ctx: pb.Client, v: Viewing, r: mut Ref<http.Request>) -> Resu
   let issue = who.issue(key)?
   // The picker offers the viewer's roster for the issue's team (LLL-551); a
   // posted id outside it is as unknown as a deleted one.
-  if id != "" {
-    let members = read_roster(who.reads)?.members
-    if members.find(|m| m.id == id).is_none() {
-      return Err(
-        pb.failed(f"unknown member '{id}'; reload the page for the current list"),
-      )
-    }
-  }
+  let picked = if id == "" { None } else { Some(picked_member(read_roster(who.reads)?, id)?.id) }
   require_active_team(issue.expand.team)?
   // Never forced (LLL-662): clearing the assignee releases the claim, so the
   // picker clears only the viewer's own hold. Taking anyone else's goes
   // through the Release form, which asks for a reason. The write layer reads
   // the observed claim as the viewer.
-  let assignee = if id == "" { writes.Relation.Clear } else { writes.Relation.Set(id) }
+  let assignee = match picked {
+    None => writes.Relation.Clear,
+    Some(member) => writes.Relation.Set(member),
+  }
   let _ = patch_issue(who, issue, writes.IssuePatch { assignee, ..writes.IssuePatch.unchanged() }).map_err(|e| {
     if e.has_code(pb.ServerCode.NeedsForce) {
       e.with_message(f"{strings.TrimSuffix(pb.display_error(e).summary, ".")} - release it with a reason first (the Release form on the issue)")
@@ -432,14 +430,11 @@ fn labels_write(_ctx: pb.Client, v: Viewing, r: mut Ref<http.Request>) -> Result
   let who = acting_as(v)?
   let issue = who.issue(key)?
   require_active_team(issue.expand.team)?
-  let known = records.fetch_labels(who.reads, issue.team)?
-  if known.find(|l| l.id == id).is_none() {
-    return Err(pb.failed(f"unknown label '{id}'; reload the page for the current list"))
-  }
+  let label = picked_label(records.fetch_labels(who.reads, query.TeamScope.Only(issue.team))?, id)?.id
   let labels = if r.FormValue("on") == "true" {
-    writes.LabelEdit.Delta { add: [id], remove: [] }
+    writes.LabelEdit.Delta { add: [label], remove: [] }
   } else {
-    writes.LabelEdit.Delta { add: [], remove: [id] }
+    writes.LabelEdit.Delta { add: [], remove: [label] }
   }
   patch_issue(who, issue, writes.IssuePatch { labels, ..writes.IssuePatch.unchanged() })
 }
@@ -454,7 +449,7 @@ fn comment_write(ctx: pb.Client, v: Viewing, r: mut Ref<http.Request>) -> Result
   let Some(author) = who.member_id(ctx)? else {
     return Err(pb.failed("commenting needs a member token; start the board with lll up"))
   };
-  let _ = writes.create_comment(who.reads, who.caller, models.NewComment { issue: issue.id, author, agent: "", body })?
+  let _ = writes.create_comment(who.reads, who.caller, models.NewComment { issue: issue.id, author: Some(author), agent: "", body })?
   // LLL-386/LLL-384: the comment arrives through the live stream, so the
   // composer was never told the write landed and kept the text - which reads
   // as "it did not send" and invites a second identical comment.
@@ -519,7 +514,7 @@ fn claim_write(ctx: pb.Client, v: Viewing, r: mut Ref<http.Request>) -> Result<s
     return Ok("")
   }
   let Some(member) = records.find_actor(ctx)? else { return Err(pb.failed("No member is configured for this board.")) };
-  if r.FormValue("member_id") != member.id { return Err(pb.failed("The board identity changed; refresh before claiming.")) }
+  if r.FormValue("member_id") != member.id.string() { return Err(pb.failed("The board identity changed; refresh before claiming.")) }
   let _ = writes.acquire_claim(who.reads, who.caller, issue.id, member.id, "")?
   Ok("")
 }
@@ -534,8 +529,9 @@ fn release_write(_ctx: pb.Client, v: Viewing, r: mut Ref<http.Request>) -> Resul
   let who = acting_as(v)?
   let issue = who.issue(r.FormValue("key"))?
   require_active_team(issue.expand.team)?
-  let observed = r.FormValue("claim_id")
-  if observed == "" { return Err(pb.failed("The claim changed; refresh before releasing it.")) }
+  let posted = r.FormValue("claim_id")
+  if posted == "" { return Err(pb.failed("The claim changed; refresh before releasing it.")) }
+  let observed = writes.observed_claim(posted)
   let reason = strings.TrimSpace(r.FormValue("reason"))
   let by = writes.ClaimAs { caller: who.caller, agent: "", force: reason != "", reason }
   let _ = writes.release_claim(who.reads, issue.id, observed, by).map_err(|e| {
@@ -544,4 +540,29 @@ fn release_write(_ctx: pb.Client, v: Viewing, r: mut Ref<http.Request>) -> Resul
     } else { e }
   })?
   Ok("")
+}
+
+/// A label id a form posted, parsed against the team's labels: one from
+/// another team is as unknown as a deleted one (TASK-173).
+fn picked_label(known: Slice<models.Label>, raw: string) -> Result<models.Label, pb.CliError> {
+  let Some(label) = known.find(|l| l.id.string() == raw) else {
+    return Err(pb.failed(f"unknown label '{raw}'; reload the page for the current list"))
+  }
+  Ok(label)
+}
+
+/// A project id a form posted, parsed against the team's projects.
+fn picked_project(known: Slice<models.Project>, raw: string) -> Result<models.Project, pb.CliError> {
+  let Some(project) = known.find(|p| p.id.string() == raw) else {
+    return Err(pb.failed(f"unknown project '{raw}'; reload the page for the current list"))
+  }
+  Ok(project)
+}
+
+/// A member id a form posted, parsed against the viewer's roster (LLL-551).
+fn picked_member(roster: Roster, raw: string) -> Result<models.Member, pb.CliError> {
+  let Some(member) = roster.members.find(|m| m.id.string() == raw) else {
+    return Err(pb.failed(f"unknown member '{raw}'; reload the page for the current list"))
+  }
+  Ok(member)
 }

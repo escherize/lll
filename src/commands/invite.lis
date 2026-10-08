@@ -3,6 +3,7 @@ import "go:fmt"
 import "go:strings"
 
 import "flags"
+import "models"
 import "pb"
 import "records"
 
@@ -76,7 +77,7 @@ fn invite_create_spec() -> Slice<flags.Flag> {
 }
 
 #[json]
-struct InviteRequest { teams: Slice<string>, mode: string }
+struct InviteRequest { teams: Slice<models.TeamId>, mode: string }
 
 #[json]
 struct InviteResponse { code: string, expires: string }
@@ -91,7 +92,7 @@ fn invite_create(input: flags.CommandInput) -> Result<(), pb.CliError> {
   let keys = p.all("--team").map(records.normalize_team_key).filter(|k| k != "")
   if keys.is_empty() { return Err(flags.usage_error(f"usage: {input.usage}")) }
   let base = web_base(ctx)?
-  let mut ids: Slice<string> = []
+  let mut ids: Slice<models.TeamId> = []
   for key in keys {
     let Some(team) = records.find_team(ctx, key)? else {
       return Err(records.unknown_team(ctx, key))

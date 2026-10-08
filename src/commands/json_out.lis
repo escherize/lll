@@ -121,8 +121,8 @@ fn rfc3339_value(value: json.RawMessage) -> json.RawMessage {
 /// which agent label, since when, and when it was last renewed.
 #[json]
 struct ClaimJson {
-  id: string,
-  member: string,
+  id: models.ClaimId,
+  member: models.MemberId,
   holder: string,
   agent: string,
   claimed: string,

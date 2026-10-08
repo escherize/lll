@@ -52,7 +52,7 @@ fn bot_write(
   // Before anything is created: a refusal here must not leave a bot behind.
   let url = request_origin(r)?
   tokens.check_prompt_values(url, team, name)?
-  let _ = tokens.create_bot_member_as(ctx, m.token, name, m.id)?
+  let _ = tokens.create_bot_member_as(ctx, m.token, name, Some(m.id))?
   let duration = tokens.default_token_duration()
   let tok = match tokens.bot_mint(ctx, m.token, name, duration) {
     Ok(t) => t,

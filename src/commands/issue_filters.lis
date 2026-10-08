@@ -3,6 +3,7 @@ import "go:strings"
 
 import "flags"
 import "query"
+import "models"
 import "pb"
 
 enum FilterUse { Create, Update, List, Watch }
@@ -45,14 +46,21 @@ fn filters_from(p: flags.Parsed) -> Result<query.Filters, pb.CliError> {
 ///
 /// With no team (TeamScope.Every) a name means that name in every team the
 /// token sees, so `--label bug` matches each team's `bug` (LLL-671).
-fn resolve_filter_query(ctx: pb.Client, scope: records.TeamScope, filters: query.Filters) -> Result<string, pb.CliError> {
-  let assignee = if filters.assignee == "" { "" } else { records.resolve_member(ctx, filters.assignee)?.id }
+fn resolve_filter_query(ctx: pb.Client, scope: query.TeamScope, filters: query.Filters) -> Result<string, pb.CliError> {
+  let assignee = if filters.assignee == "" { None } else { Some(records.resolve_member(ctx, filters.assignee)?.id) }
   // Every label resolves, so a typo in the second one is still reported rather
   // than quietly widening the result to whatever the first one matched.
-  let mut label_ids: Slice<string> = []
+  let mut label_ids: Slice<models.LabelId> = []
   for name in filters.label {
     if name != "" { label_ids = label_ids.append(records.label_ids(ctx, scope, name)?...) }
   }
   let projects = if filters.project == "" { [] } else { records.project_ids(ctx, scope, filters.project)? }
-  Ok(query.filter_in(scope.filter_team(), filters.state, assignee, projects, label_ids, filters.search))
+  Ok(query.filter(query.IssueFilter {
+    scope,
+    states: filters.state,
+    assignee,
+    projects,
+    labels: label_ids,
+    search: filters.search,
+  }))
 }

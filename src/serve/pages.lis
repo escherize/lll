@@ -148,8 +148,8 @@ fn fetch_favorites(ctx: pb.Client) -> Result<Slice<models.Favorite>, pb.CliError
 }
 
 /// The workspace's favorite row for one issue, if it has one.
-fn fetch_favorite(ctx: pb.Client, issue_id: string) -> Result<Option<models.Favorite>, pb.CliError> {
-  let filter = url.QueryEscape(f"issue={query.quote(issue_id)} && member=''")
+fn fetch_favorite(ctx: pb.Client, issue_id: models.IssueId) -> Result<Option<models.Favorite>, pb.CliError> {
+  let filter = url.QueryEscape(f"issue={query.quote(issue_id.string())} && member=''")
   let mut list = models.FavoriteList { .. }
   pb.fetch(ctx, 
     f"/api/collections/favorites/records?perPage=1&filter={filter}",
@@ -224,7 +224,7 @@ fn board_page(ctx: pb.Client, w: http.ResponseWriter, r: Ref<http.Request>, team
   // project named "Q3, infra" cannot be filtered here, though /issues takes
   // ?project= as one value. Labels share the limit.
   let mut projects: Slice<string> = []
-  let mut project_ids: Slice<string> = []
+  let mut project_ids: Slice<models.ProjectId> = []
   for p in csv(raw.project) {
     match records.resolve_project(ctx, team_id, p) {
       Ok(found) => {
@@ -345,7 +345,7 @@ fn board_page(ctx: pb.Client, w: http.ResponseWriter, r: Ref<http.Request>, team
   let mut active = "board"
   if me != "" && assignees.contains(me) { active = "mine" }
 
-  let held = match claims.for_team(ctx, team.id) {
+  let held = match claims.for_team(ctx, query.TeamScope.Only(team.id)) {
     Ok(found) => found.map(|c| roster.claim(c)),
     Err(e) => { http.Error(w, e.message, 500); return },
   }
@@ -358,7 +358,7 @@ fn board_page(ctx: pb.Client, w: http.ResponseWriter, r: Ref<http.Request>, team
       q,
       roster.members.map(|m| m.name),
       fetch_label_names(ctx, team_id).unwrap_or([]),
-      records.fetch_projects(ctx, team_id).unwrap_or([]),
+      records.fetch_projects(ctx, query.TeamScope.Only(team_id)).unwrap_or([]),
     ),
     flt_seed: flt_seed_js(pairs),
     query_str,
@@ -499,7 +499,7 @@ fn issue_page(ctx: pb.Client, w: http.ResponseWriter, r: Ref<http.Request>, team
 /// open tab on a stale colour; this is one small GET beside the fetches the
 /// page already makes. A missing or unreadable team yields a blank record,
 /// which renders as the canonical orange.
-fn shell_team(ctx: pb.Client, team_id: string) -> models.Team {
+fn shell_team(ctx: pb.Client, team_id: models.TeamId) -> models.Team {
   let mut team = models.Team { .. }
   if team_id == "" { return team }
   let path = f"/api/collections/teams/records/{team_id}"

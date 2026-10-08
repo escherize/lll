@@ -59,13 +59,13 @@ fn create(input: flags.CommandInput) -> Result<(), pb.CliError> {
   // lifecycle's end, and reviving it is a deliberate one-command act.
   if team.archived { return Err(pb.failed(records.archived_hint(team.key))) }
 
-  let mut assignee = ""
-  if assignee_name != "" { assignee = records.resolve_member(ctx, assignee_name)?.id }
+  let mut assignee = None
+  if assignee_name != "" { assignee = Some(records.resolve_member(ctx, assignee_name)?.id) }
 
-  let mut project = ""
-  if project_name != "" { project = records.resolve_project(ctx, team.id, project_name)?.id }
+  let mut project = None
+  if project_name != "" { project = Some(records.resolve_project(ctx, team.id, project_name)?.id) }
 
-  let mut labels: Slice<string> = []
+  let mut labels: Slice<models.LabelId> = []
   for name in label_names {
     labels = labels.append(records.resolve_label(ctx, team.id, name)?.id)
   }
@@ -75,7 +75,7 @@ fn create(input: flags.CommandInput) -> Result<(), pb.CliError> {
   let mut origin = provenance.capture(ctx.settings.env.agent)
   if p.given("--agent") { origin.tool = agent_label(ctx, p)? }
   let new_issue = models.NewIssue {
-    creator: records.find_actor(ctx)?.map_or("", |member| member.id),
+    creator: records.find_actor(ctx)?.map(|member| member.id),
     origin,
     team: team.id,
     title,
@@ -279,7 +279,7 @@ fn update(input: flags.CommandInput) -> Result<(), pb.CliError> {
   }
   let mut labels = writes.LabelEdit.Keep
   if !label_names.is_empty() {
-    let mut label_ids: Slice<string> = []
+    let mut label_ids: Slice<models.LabelId> = []
     for name in label_names {
       label_ids = label_ids.append(records.resolve_label(ctx, issue.team, name)?.id)
     }
@@ -289,11 +289,11 @@ fn update(input: flags.CommandInput) -> Result<(), pb.CliError> {
   // LLL-513: relation modifiers change only the named labels, so a label
   // another writer adds at the same time is kept. The server holds the
   // issue's lock across the request.
-  let mut add_ids: Slice<string> = []
+  let mut add_ids: Slice<models.LabelId> = []
   for name in add_label_names {
     add_ids = add_ids.append(records.resolve_label(ctx, issue.team, name)?.id)
   }
-  let mut remove_ids: Slice<string> = []
+  let mut remove_ids: Slice<models.LabelId> = []
   for name in remove_label_names {
     let id = records.resolve_label(ctx, issue.team, name)?.id
     if add_ids.contains(id) {
@@ -492,10 +492,10 @@ fn comment(input: flags.CommandInput) -> Result<(), pb.CliError> {
   if body == "" { return Err(flags.usage_error(f"-b cannot be empty\nusage: {usage}")) }
 
   // Authorship follows the authenticated member. Superuser comments are authorless.
-  let mut author = ""
+  let mut author = None
   let mut author_name = ""
   if let Some(a) = records.find_actor(ctx)? {
-    author = a.id
+    author = Some(a.id)
     author_name = a.name
   }
 

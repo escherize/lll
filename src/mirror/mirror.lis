@@ -72,15 +72,15 @@ pub struct Front {
 /// where a superuser token had filled it. One members request is cheaper
 /// than a field that is silently blank for some callers and not others.
 pub struct Names {
-  pub issues: Map<string, string>,
-  pub members: Map<string, string>,
+  pub issues: Map<models.IssueId, string>,
+  pub members: Map<models.MemberId, string>,
 }
 
 impl Names {
   /// A member id the caller's roster does not include (LLL-551) exports as
   /// "hidden member": the issue is assigned, and an import names it among the
   /// members it could not resolve rather than treating it as unassigned.
-  fn member(self, id: string) -> string {
+  fn member(self, id: models.MemberId) -> string {
     display.member_name(id, self.members.get(id).unwrap_or(""), "")
   }
 }

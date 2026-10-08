@@ -549,7 +549,7 @@ fn redirect_with_query(
 
 /// The id of the team a /t/{team}/... write names; an unknown key refuses
 /// the write.
-fn routed_team_id(ctx: pb.Client, r: Ref<http.Request>) -> Result<string, pb.CliError> {
+fn routed_team_id(ctx: pb.Client, r: Ref<http.Request>) -> Result<models.TeamId, pb.CliError> {
   let key = r.PathValue("team")
   let Some(t) = records.find_team(ctx, key)? else {
     return Err(pb.failed(f"no team with key '{key}' on this server"))

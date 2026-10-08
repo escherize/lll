@@ -11,8 +11,7 @@ import "query"
 /// name a team. "" once meant "every team" here, and a writer acted on
 /// whichever team's label came back first (LLL-671); a read that spans every
 /// team goes through label_ids instead.
-pub fn resolve_label(ctx: pb.Client, team_id: string, name: string) -> Result<models.Label, pb.CliError> {
-  if team_id == "" { return Err(pb.failed(f"internal: resolve_label('{name}') without a team")) }
+pub fn resolve_label(ctx: pb.Client, team_id: models.TeamId, name: string) -> Result<models.Label, pb.CliError> {
   let filter = url.QueryEscape(query.scoped(team_id, "name", name))
   let mut result = models.LabelList { .. }
   pb.fetch(ctx, f"/api/collections/labels/records?filter={filter}", "labels", &result)?
@@ -25,10 +24,10 @@ pub fn resolve_label(ctx: pb.Client, team_id: string, name: string) -> Result<mo
 /// The ids of every label named `name` within `scope`, for a list filter.
 /// One team holds at most one. Every team may hold several, and a filter
 /// that kept only the first answered for one team (LLL-671).
-pub fn label_ids(ctx: pb.Client, scope: TeamScope, name: string) -> Result<Slice<string>, pb.CliError> {
+pub fn label_ids(ctx: pb.Client, scope: query.TeamScope, name: string) -> Result<Slice<models.LabelId>, pb.CliError> {
   match scope {
-    TeamScope.Only(team_id) => Ok([resolve_label(ctx, team_id, name)?.id]),
-    TeamScope.Every => {
+    query.TeamScope.Only(team_id) => Ok([resolve_label(ctx, team_id, name)?.id]),
+    query.TeamScope.Every => {
       let filter = url.QueryEscape(f"name={query.quote(name)}")
       let found = fetch_all_records<models.Label>(ctx, f"/api/collections/labels/records?sort=id&filter={filter}", "labels")?
       let ids = found.filter(|l| l.name == name).map(|l| l.id)
@@ -40,11 +39,11 @@ pub fn label_ids(ctx: pb.Client, scope: TeamScope, name: string) -> Result<Slice
 
 /// One team's labels. Labels belong to exactly one team (TASK-173), so
 /// every chooser, chip list and validator built on this is scoped by
-/// construction. An empty `team_id` spans every team: `lll label list` with
-/// no team configured (TeamScope.Every).
-pub fn fetch_labels(ctx: pb.Client, team_id: string) -> Result<Slice<models.Label>, pb.CliError> {
+/// construction. query.TeamScope.Every spans every team: `lll label list`
+/// with no team configured.
+pub fn fetch_labels(ctx: pb.Client, scope: query.TeamScope) -> Result<Slice<models.Label>, pb.CliError> {
   fetch_all_records<models.Label>(ctx,
-    f"/api/collections/labels/records?sort=name,id&expand=team&filter={team_param(team_id)}",
+    f"/api/collections/labels/records?sort=name,id&expand=team&filter={team_param(scope)}",
     "labels",
   )
 }

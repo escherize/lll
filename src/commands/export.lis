@@ -46,9 +46,9 @@ pub fn export_cmd(ctx: pb.Client, args: Slice<string>) -> Result<(), pb.CliError
 
   // Issue KEYS, not record ids, for every relation that points at an issue —
   // resolvable by an import because numbers round-trip.
-  let mut key_of = Map.new<string, string>()
+  let mut key_of = Map.new<models.IssueId, string>()
   for issue in issues { key_of[issue.id] = f"{team.key}-{issue.number}" }
-  let mut member_of = Map.new<string, string>()
+  let mut member_of = Map.new<models.MemberId, string>()
   for member in records.fetch_members(ctx)? { member_of[member.id] = member.name }
   let names = mirror.Names { issues: key_of, members: member_of }
 
@@ -122,8 +122,8 @@ struct DocPage {
 /// Every doc on the team, walked to completion. Same refusal as the board
 /// walk: a page that disagrees with the first one's totals means the set
 /// moved underneath, and half a mirror is worse than none.
-fn fetch_team_docs(ctx: pb.Client, team_id: string) -> Result<Slice<models.Doc>, pb.CliError> {
-  let filter = url.QueryEscape(f"team={query.quote(team_id)}")
+fn fetch_team_docs(ctx: pb.Client, team_id: models.TeamId) -> Result<Slice<models.Doc>, pb.CliError> {
+  let filter = url.QueryEscape(f"team={query.quote(team_id.string())}")
   let mut result: Slice<models.Doc> = []
   let mut expected = -1
   let mut page = 1
@@ -167,9 +167,9 @@ struct CommentPage {
 /// with nothing printed until the end, so the export read as a hang
 /// (LLL-540). The relation filter fetches the same comments in five
 /// requests. Order within an issue is the sort, so grouping preserves it.
-fn fetch_team_comments(ctx: pb.Client, team_id: string) -> Result<Map<string, Slice<models.Comment>>, pb.CliError> {
-  let filter = url.QueryEscape(f"issue.team={query.quote(team_id)}")
-  let mut by_issue = Map.new<string, Slice<models.Comment>>()
+fn fetch_team_comments(ctx: pb.Client, team_id: models.TeamId) -> Result<Map<models.IssueId, Slice<models.Comment>>, pb.CliError> {
+  let filter = url.QueryEscape(f"issue.team={query.quote(team_id.string())}")
+  let mut by_issue = Map.new<models.IssueId, Slice<models.Comment>>()
   let mut seen = 0
   let mut expected = -1
   let mut page = 1
@@ -215,7 +215,7 @@ fn render_comments(
   strings.Join(lines, "\n")
 }
 
-fn doc_front(doc: models.Doc, key_of: Map<string, string>) -> mirror.DocFront {
+fn doc_front(doc: models.Doc, key_of: Map<models.IssueId, string>) -> mirror.DocFront {
   let mut keys: Slice<string> = []
   for id in doc.issues {
     if let Some(key) = key_of.get(id) { keys = keys.append(key) }

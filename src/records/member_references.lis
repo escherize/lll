@@ -3,6 +3,7 @@ import "go:net/url"
 
 import "pb"
 import "query"
+import "models"
 
 pub struct MemberReferences {
   pub assigned: int,
@@ -14,7 +15,7 @@ pub struct MemberReferences {
 /// that will perform the deletion, including references outside the current team.
 pub fn count_member_references(
   ctx: pb.Client,
-  id: string,
+  id: models.MemberId,
   token: string,
 ) -> Result<MemberReferences, pb.CliError> {
   Ok(
@@ -38,10 +39,10 @@ fn member_reference_count(
   ctx: pb.Client,
   collection: string,
   field: string,
-  id: string,
+  id: models.MemberId,
   token: string,
 ) -> Result<int, pb.CliError> {
-  let filter = url.QueryEscape(f"{field}={query.quote(id)}")
+  let filter = url.QueryEscape(f"{field}={query.quote(id.string())}")
   let body = ctx.get_as(
     f"/api/collections/{collection}/records?filter={filter}&perPage=1&fields=id",
     token,

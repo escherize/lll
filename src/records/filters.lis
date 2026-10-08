@@ -1,33 +1,8 @@
 import "go:net/url"
 import "query"
 
-/// Which teams a READ spans (LLL-671). `Only` carries a team id.
-///
-/// "No team configured" used to travel as an empty team id, and every
-/// function that took a team id read "" as "every team". A writer that
-/// resolved a name with it acted on whichever team's record came back first:
-/// `lll label delete bug` deleted another team's label. Only the list verbs
-/// and their filters may span every team, so only they take a TeamScope.
-/// A writer and a name lookup take one team's id, never this.
-pub enum TeamScope {
-  Every,
-  Only(string),
-}
-
-impl TeamScope {
-  /// The team id a read filter is built from, "" spanning every team the
-  /// token can see. For query.filter and the fetch_* listings only: the
-  /// resolvers refuse "".
-  pub fn filter_team(self) -> string {
-    match self {
-      TeamScope.Every => "",
-      TeamScope.Only(id) => id,
-    }
-  }
-}
-
 /// A `team=<id>` filter for a records URL, URL-escaped, or "" for every
 /// team. Built through query.filter so the id is escaped once, in one place.
-fn team_param(team_id: string) -> string {
-  url.QueryEscape(query.filter(team_id, "", "", "", "", ""))
+fn team_param(scope: query.TeamScope) -> string {
+  url.QueryEscape(query.filter(query.IssueFilter.over(scope)))
 }

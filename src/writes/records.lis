@@ -51,7 +51,7 @@ pub struct LabelPatch {
   #[json(omitempty)]
   pub color: Option<string>,
   #[json(omitempty)]
-  pub team: Option<string>,
+  pub team: Option<models.TeamId>,
 }
 
 pub fn create_label(
@@ -63,15 +63,15 @@ pub fn create_label(
 
 pub fn update_label(
   ctx: pb.Client,
-  id: string,
+  id: models.LabelId,
   patch: LabelPatch,
 ) -> Result<(), pb.CliError> {
-  let _ = update(ctx, pb.Caller.Process, "labels", id, patch, "label")?
+  let _ = update(ctx, pb.Caller.Process, "labels", id.string(), patch, "label")?
   Ok(())
 }
 
-pub fn delete_label(ctx: pb.Client, id: string) -> Result<(), pb.CliError> {
-  remove(ctx, pb.Caller.Process, "labels", id)
+pub fn delete_label(ctx: pb.Client, id: models.LabelId) -> Result<(), pb.CliError> {
+  remove(ctx, pb.Caller.Process, "labels", id.string())
 }
 
 // ---------------------------------------------------------------- projects
@@ -86,7 +86,7 @@ pub struct ProjectPatch {
   #[json(omitempty)]
   pub status: Option<string>,
   #[json(omitempty)]
-  pub team: Option<string>,
+  pub team: Option<models.TeamId>,
 }
 
 pub fn create_project(
@@ -104,15 +104,15 @@ pub fn create_project(
 
 pub fn update_project(
   ctx: pb.Client,
-  id: string,
+  id: models.ProjectId,
   patch: ProjectPatch,
 ) -> Result<(), pb.CliError> {
-  let _ = update(ctx, pb.Caller.Process, "projects", id, patch, "project")?
+  let _ = update(ctx, pb.Caller.Process, "projects", id.string(), patch, "project")?
   Ok(())
 }
 
-pub fn delete_project(ctx: pb.Client, id: string) -> Result<(), pb.CliError> {
-  remove(ctx, pb.Caller.Process, "projects", id)
+pub fn delete_project(ctx: pb.Client, id: models.ProjectId) -> Result<(), pb.CliError> {
+  remove(ctx, pb.Caller.Process, "projects", id.string())
 }
 
 // -------------------------------------------------------------------- docs
@@ -157,9 +157,9 @@ pub fn delete_doc(ctx: pb.Client, id: string) -> Result<(), pb.CliError> {
 #[json]
 struct LinkIssue {
   #[json("issues+", omitempty)]
-  add: Option<Slice<string>>,
+  add: Option<Slice<models.IssueId>>,
   #[json("issues-", omitempty)]
-  remove: Option<Slice<string>>,
+  remove: Option<Slice<models.IssueId>>,
 }
 
 /// Link one issue to a doc. One edge as a relation modifier, never the whole
@@ -168,7 +168,7 @@ struct LinkIssue {
 pub fn link_doc_issue(
   ctx: pb.Client,
   doc_id: string,
-  issue_id: string,
+  issue_id: models.IssueId,
 ) -> Result<(), pb.CliError> {
   let _ = update(
     ctx,
@@ -184,7 +184,7 @@ pub fn link_doc_issue(
 pub fn unlink_doc_issue(
   ctx: pb.Client,
   doc_id: string,
-  issue_id: string,
+  issue_id: models.IssueId,
 ) -> Result<(), pb.CliError> {
   let _ = update(
     ctx,
@@ -225,15 +225,15 @@ pub fn create_team(
 pub fn update_team(
   ctx: pb.Client,
   caller: pb.Caller,
-  id: string,
+  id: models.TeamId,
   patch: TeamPatch,
 ) -> Result<(), pb.CliError> {
-  let _ = update(ctx, caller, "teams", id, patch, "team patch")?
+  let _ = update(ctx, caller, "teams", id.string(), patch, "team patch")?
   Ok(())
 }
 
-pub fn delete_team(ctx: pb.Client, id: string) -> Result<(), pb.CliError> {
-  remove(ctx, pb.Caller.Process, "teams", id)
+pub fn delete_team(ctx: pb.Client, id: models.TeamId) -> Result<(), pb.CliError> {
+  remove(ctx, pb.Caller.Process, "teams", id.string())
 }
 
 // ----------------------------------------------------------------- members
@@ -256,7 +256,7 @@ pub struct MemberPatch {
   #[json(omitempty)]
   pub scope: Option<string>,
   #[json(omitempty)]
-  pub teams: Option<Slice<string>>,
+  pub teams: Option<Slice<models.TeamId>>,
   #[json(omitempty)]
   pub mode: Option<string>,
 }
@@ -274,19 +274,19 @@ pub fn create_member(
 pub fn update_member(
   ctx: pb.Client,
   caller: pb.Caller,
-  id: string,
+  id: models.MemberId,
   patch: MemberPatch,
 ) -> Result<(), pb.CliError> {
-  let _ = update(ctx, caller, "members", id, patch, "member")?
+  let _ = update(ctx, caller, "members", id.string(), patch, "member")?
   Ok(())
 }
 
 pub fn delete_member(
   ctx: pb.Client,
   caller: pb.Caller,
-  id: string,
+  id: models.MemberId,
 ) -> Result<(), pb.CliError> {
-  remove(ctx, caller, "members", id)
+  remove(ctx, caller, "members", id.string())
 }
 
 // ---------------------------------------------------------------- webhooks

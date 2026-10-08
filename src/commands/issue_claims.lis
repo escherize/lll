@@ -114,8 +114,7 @@ fn record_work_site(ctx: pb.Client, issue: models.Issue, branch: string, agent: 
     // Author resolution mirrors `issue comment`: the token's member,
     // authorless for a superuser credential. Member identity is not duplicated
     // into the slot; this comment (and the claim holder) carry the who.
-    let mut author = ""
-    if let Some(a) = records.find_actor(ctx)? { author = a.id }
+    let author = records.find_actor(ctx)?.map(|a| a.id)
     let moved = f"work moved: {issue.work_branch} @ {issue.work_host}:{issue.work_path} -> {branch} @ {host}:{path}"
     let _ = writes.create_comment(ctx, pb.Caller.Process, models.NewComment { issue: issue.id, author, agent, body: moved })?
   }
@@ -213,6 +212,6 @@ fn release(input: flags.CommandInput) -> Result<(), pb.CliError> {
 }
 
 /// Compatibility name for command/page reads; storage ownership is in claims.
-fn fetch_claim(ctx: pb.Client, issue_id: string) -> Result<Option<models.Claim>, pb.CliError> {
+fn fetch_claim(ctx: pb.Client, issue_id: models.IssueId) -> Result<Option<models.Claim>, pb.CliError> {
   claims.fetch(ctx, issue_id)
 }

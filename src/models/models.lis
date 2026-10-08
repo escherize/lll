@@ -1,6 +1,52 @@
+/// Record identifiers, one type per collection (LLL-675). Each is the
+/// PocketBase id as the server sent it, so a team's id cannot be passed where
+/// an issue's is wanted, and none can be passed as a plain string. Values are
+/// made by decoding a record (here, from JSON) or in records/ and writes/;
+/// scripts/test_typed_ids.py holds that. A relation PocketBase reports as
+/// unset decodes to the empty id: `is_empty` says so.
+///
+/// `string()` makes each a Stringer, so an id interpolates as itself into a
+/// URL or a filter.
+pub struct TeamId(string)
+pub struct IssueId(string)
+pub struct LabelId(string)
+pub struct ProjectId(string)
+pub struct MemberId(string)
+pub struct ClaimId(string)
+
+impl TeamId {
+  pub fn string(self) -> string { self.0 }
+  pub fn is_empty(self) -> bool { self.0 == "" }
+}
+
+impl IssueId {
+  pub fn string(self) -> string { self.0 }
+  pub fn is_empty(self) -> bool { self.0 == "" }
+}
+
+impl LabelId {
+  pub fn string(self) -> string { self.0 }
+  pub fn is_empty(self) -> bool { self.0 == "" }
+}
+
+impl ProjectId {
+  pub fn string(self) -> string { self.0 }
+  pub fn is_empty(self) -> bool { self.0 == "" }
+}
+
+impl MemberId {
+  pub fn string(self) -> string { self.0 }
+  pub fn is_empty(self) -> bool { self.0 == "" }
+}
+
+impl ClaimId {
+  pub fn string(self) -> string { self.0 }
+  pub fn is_empty(self) -> bool { self.0 == "" }
+}
+
 #[json]
 pub struct Team {
-  pub id: string,
+  pub id: TeamId,
   pub key: string,
   pub name: string,
   // The team's accent colour as "#rrggbb". Empty means DESIGN.md's canonical
@@ -28,7 +74,7 @@ pub struct NewTeam {
 
 #[json]
 pub struct Member {
-  pub id: string,
+  pub id: MemberId,
   pub name: string,
   pub email: string,
   // Bot accounts (LLL-407): "person" or "bot"; "" only on servers that have
@@ -36,13 +82,13 @@ pub struct Member {
   // id, empty for people and for bots minted by the superuser.
   pub kind: string,
   #[json(omitempty)]
-  pub owner: string,
+  pub owner: MemberId,
   // Access (LLL-542): "all" | "teams", the team ids, "rw" | "ro". Empty on a
   // server that predates scoped members.
   #[json(omitempty)]
   pub scope: string,
   #[json(omitempty)]
-  pub teams: Slice<string>,
+  pub teams: Slice<TeamId>,
   #[json(omitempty)]
   pub mode: string,
   // Keys of `teams` the caller can see; filled by 'member list --json' only.
@@ -64,7 +110,7 @@ pub struct MemberExpand {
 /// The owner as a comment needs it: who, not their email or access.
 #[json]
 pub struct MemberOwner {
-  pub id: string,
+  pub id: MemberId,
   pub name: string,
 }
 
@@ -120,14 +166,14 @@ pub struct NewMember {
   #[json(omitempty)]
   pub kind: string,
   #[json(omitempty)]
-  pub owner: string,
+  pub owner: Option<MemberId>,
   // Access scope: "all" or "teams". Empty lets the server fill in the
   // creator's ("all"). With "teams", the member sees only `teams`, the ids
   // `lll member invite --team` sets; an empty list then sees nothing.
   #[json(omitempty)]
   pub scope: string,
   #[json(omitempty)]
-  pub teams: Slice<string>,
+  pub teams: Slice<TeamId>,
   // "rw" | "ro"; empty lets the server fill in the creator's ("rw").
   #[json(omitempty)]
   pub mode: string,
@@ -140,11 +186,11 @@ pub struct ProjectExpand {
 
 #[json]
 pub struct Project {
-  pub id: string,
+  pub id: ProjectId,
   pub name: string,
   pub description: string,
   pub status: string,
-  pub team: string,
+  pub team: TeamId,
   pub expand: ProjectExpand,
 }
 
@@ -159,7 +205,7 @@ pub struct NewProject {
   #[json(omitempty)]
   pub description: string,
   pub status: string,
-  pub team: string,
+  pub team: TeamId,
 }
 
 #[json]
@@ -169,10 +215,10 @@ pub struct LabelExpand {
 
 #[json]
 pub struct Label {
-  pub id: string,
+  pub id: LabelId,
   pub name: string,
   pub color: string,
-  pub team: string,
+  pub team: TeamId,
   pub expand: LabelExpand,
 }
 
@@ -186,7 +232,7 @@ pub struct NewLabel {
   pub name: string,
   #[json(omitempty)]
   pub color: string,
-  pub team: string,
+  pub team: TeamId,
 }
 
 #[json]
@@ -201,12 +247,12 @@ pub struct IssueExpand {
 
 #[json]
 pub struct Issue {
-  pub creator: string,
+  pub creator: MemberId,
   pub origin: IssueOrigin,
   pub refs: string,
   pub attachments: Slice<string>,
-  pub id: string,
-  pub team: string,
+  pub id: IssueId,
+  pub team: TeamId,
   pub number: int,
   pub title: string,
   pub description: string,
@@ -222,11 +268,11 @@ pub struct Issue {
   pub work_branch: string,
   pub work_host: string,
   pub work_path: string,
-  pub assignee: string,
-  pub project: string,
-  pub labels: Slice<string>,
+  pub assignee: MemberId,
+  pub project: ProjectId,
+  pub labels: Slice<LabelId>,
   // LLL-175: the issues that must be done before this one can start.
-  pub blocked_by: Slice<string>,
+  pub blocked_by: Slice<IssueId>,
   pub created: string,
   pub updated: string,
   pub expand: IssueExpand,
@@ -242,9 +288,9 @@ pub struct IssueList {
 #[json]
 pub struct NewIssue {
   #[json(omitempty)]
-  pub creator: string,
+  pub creator: Option<MemberId>,
   pub origin: IssueOrigin,
-  pub team: string,
+  pub team: TeamId,
   // LLL-454: normally left at zero, which is how gopb's issueDefaults knows
   // to allocate the next number and sort for the team. `lll import dir`
   // supplies them, so a restored mirror reproduces ENG-7 as ENG-7 rather
@@ -261,11 +307,11 @@ pub struct NewIssue {
   #[json(omitempty)]
   pub emoji: string,
   #[json(omitempty)]
-  pub assignee: string,
+  pub assignee: Option<MemberId>,
   #[json(omitempty)]
-  pub project: string,
+  pub project: Option<ProjectId>,
   #[json(omitempty)]
-  pub labels: Slice<string>,
+  pub labels: Slice<LabelId>,
 }
 
 #[json]
@@ -285,8 +331,8 @@ pub struct CommentExpand {
 #[json]
 pub struct Comment {
   pub id: string,
-  pub issue: string,
-  pub author: string,
+  pub issue: IssueId,
+  pub author: MemberId,
   #[json(omitempty)]
   pub agent: string,
   // "system" when the server wrote the comment on its own (the claim-expiry
@@ -308,9 +354,9 @@ pub struct CommentList {
 
 #[json]
 pub struct NewComment {
-  pub issue: string,
+  pub issue: IssueId,
   #[json(omitempty)]
-  pub author: string,
+  pub author: Option<MemberId>,
   #[json(omitempty)]
   pub agent: string,
   pub body: string,
@@ -328,8 +374,8 @@ pub struct FavoriteExpand {
 #[json]
 pub struct Favorite {
   pub id: string,
-  pub issue: string,
-  pub member: string,
+  pub issue: IssueId,
+  pub member: MemberId,
   pub created: string,
   pub expand: FavoriteExpand,
 }
@@ -341,9 +387,9 @@ pub struct FavoriteList {
 
 #[json]
 pub struct NewFavorite {
-  pub issue: string,
+  pub issue: IssueId,
   #[json(omitempty)]
-  pub member: string,
+  pub member: Option<MemberId>,
 }
 
 /// A claim's holder, fetched with `expand=member` so a refusal can name them.
@@ -357,9 +403,9 @@ pub struct ClaimExpand {
 /// `created` records when this hold was acquired, retained by an own-claim retry.
 #[json]
 pub struct Claim {
-  pub id: string,
-  pub issue: string,
-  pub member: string,
+  pub id: ClaimId,
+  pub issue: IssueId,
+  pub member: MemberId,
   #[json(omitempty)]
   pub agent: string,
   pub created: string,
@@ -383,7 +429,7 @@ pub struct View {
   pub id: string,
   pub name: string,
   pub query: string,
-  pub member: string,
+  pub member: MemberId,
   pub created: string,
 }
 
@@ -397,7 +443,7 @@ pub struct NewView {
   pub name: string,
   pub query: string,
   #[json(omitempty)]
-  pub member: string,
+  pub member: Option<MemberId>,
 }
 
 /// One doc (TASK-86): a wiki page, finding, decision or PRD. The `issues`
@@ -417,7 +463,7 @@ pub struct Doc {
   pub id: string,
   // Required (TASK-173): a doc belongs to exactly one team, and slugs are
   // unique per team, not per server — GRDN and LLL both get an `index`.
-  pub team: string,
+  pub team: TeamId,
   pub slug: string,
   pub title: string,
   pub kind: string,
@@ -429,7 +475,7 @@ pub struct Doc {
   // containment. Empty on docs that name neither.
   pub area: string,
   pub paths: string,
-  pub issues: Slice<string>,
+  pub issues: Slice<IssueId>,
   pub created: string,
   pub updated: string,
   // LLL-396: a finding is asserted by default; these mark the guesses.
@@ -441,7 +487,7 @@ pub struct Doc {
   // Empty on docs written before the field and on superuser writes.
   // omitempty keeps re-encoded authorless docs (issue view --json) as before.
   #[json(omitempty)]
-  pub author: string,
+  pub author: MemberId,
   pub expand: DocExpand,
 }
 
@@ -452,7 +498,7 @@ pub struct DocList {
 
 #[json]
 pub struct NewDoc {
-  pub team: string,
+  pub team: TeamId,
   pub slug: string,
   pub title: string,
   pub kind: string,
@@ -466,7 +512,7 @@ pub struct NewDoc {
   #[json(omitempty)]
   pub paths: string,
   #[json(omitempty)]
-  pub issues: Slice<string>,
+  pub issues: Slice<IssueId>,
 }
 
 /// POST body for PocketBase's auth-with-password (members and _superusers
@@ -509,8 +555,8 @@ pub struct Webhook {
   pub id: string,
   pub url: string,
   pub secret_set: bool,
-  pub team: string,
-  pub project: string,
+  pub team: TeamId,
+  pub project: ProjectId,
   pub expand: WebhookExpand,
 }
 
@@ -521,9 +567,9 @@ pub struct WebhookList {
 
 #[json]
 pub struct NewWebhook {
-  pub team: string,
+  pub team: TeamId,
   #[json(omitempty)]
-  pub project: string,
+  pub project: Option<ProjectId>,
   pub url: string,
   #[json(omitempty)]
   pub secret: string,
@@ -541,9 +587,9 @@ pub struct BotRotate {
 
 /// One team in an /api/lll/access answer.
 #[json]
-pub struct AccessTeam { pub id: string, pub key: string }
+pub struct AccessTeam { pub id: TeamId, pub key: string }
 
 /// /api/lll/access: the calling member's effective access (a bot's within
 /// its owner's), read by `lll login` and the board's gate.
 #[json]
-pub struct AccessReply { pub id: string, pub name: string, pub rw: bool, pub all: bool, pub teams: Slice<AccessTeam> }
+pub struct AccessReply { pub id: MemberId, pub name: string, pub rw: bool, pub all: bool, pub teams: Slice<AccessTeam> }

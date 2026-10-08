@@ -35,8 +35,8 @@ fn settings_member_delete(ctx: pb.Client, r: mut Ref<http.Request>, id: string) 
   if let Err(e) = json.Unmarshal(body.bytes(), &member) {
     return Err(pb.failed(f"decoding member: {e}"))
   }
-  if member.id != id { return Err(pb.failed("unknown member; reload settings")) }
-  let references = records.count_member_references(ctx, id, token)?
+  if member.id.string() != id { return Err(pb.failed("unknown member; reload settings")) }
+  let references = records.count_member_references(ctx, member.id, token)?
   if !confirmed || r.PostFormValue("expected_assigned") != strconv.Itoa(references.assigned) || r.PostFormValue("expected_authored") != strconv.Itoa(references.authored) || r.PostFormValue("expected_created") != strconv.Itoa(references.created) {
     let vm = MemberDeleteVM {
       id, name: member.name,
@@ -47,6 +47,6 @@ fn settings_member_delete(ctx: pb.Client, r: mut Ref<http.Request>, id: string) 
     }
     return Ok(Some(patch_event(render("set-member-delete-review", vm)?)))
   }
-  writes.delete_member(ctx, pb.Caller.Member(token), id)?
+  writes.delete_member(ctx, pb.Caller.Member(token), member.id)?
   Ok(None)
 }

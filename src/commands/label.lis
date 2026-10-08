@@ -72,7 +72,7 @@ fn label_list(input: flags.CommandInput) -> Result<(), pb.CliError> {
   // Scoped when a team is configured, every team's when not: a label belongs
   // to one team (TASK-173), so the unscoped list is an admin's view, not a
   // working one.
-  let labels = models.LabelList { items: records.fetch_labels(ctx, configured_scope(ctx)?.filter_team())? }
+  let labels = models.LabelList { items: records.fetch_labels(ctx, configured_scope(ctx)?)? }
   if p.given("--json") { return print_list_json(labels.items, whole_list(labels.items.length()), "label list") }
   if labels.items.is_empty() { return say_empty("labels") }
   for l in labels.items {
@@ -189,7 +189,7 @@ fn label_delete(input: flags.CommandInput) -> Result<(), pb.CliError> {
     return Err(flags.usage_error(f"usage: {usage}"))
   }
   let label = records.resolve_label(ctx, current_team(ctx)?.id, name)?
-  let used = records.entity_issue_count(ctx, "label", label.id)?
+  let used = records.entity_issue_count(ctx, records.Classifier.Label(label.id))?
   if used > 0 && !p.given("--force") {
     return Err(refuse_delete("label", name, used))
   }
@@ -214,7 +214,7 @@ fn label_move(input: flags.CommandInput) -> Result<(), pb.CliError> {
   let from = team_flag_or_current(ctx, p.one("--team"))?
   let to = writes.move_destination(ctx, p.one("--to"))?
   let label = records.resolve_label(ctx, from.id, name)?
-  fmt.Println(writes.move_to_team(ctx, "label", label.name, label.id, from, to)?)
+  fmt.Println(writes.move_to_team(ctx, records.Classifier.Label(label.id), label.name, from, to)?)
   Ok(())
 }
 

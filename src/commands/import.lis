@@ -9,6 +9,7 @@ import "go:strings"
 import "flags"
 import "models"
 import "pb"
+import "query"
 import "provenance"
 import "writes"
 
@@ -76,7 +77,7 @@ fn import_github(input: flags.CommandInput) -> Result<(), pb.CliError> {
   let (label_names, label_colors) = collect_labels(issues)
   let (label_ids, created_labels) = ensure_labels(ctx, team, label_names, label_colors)?
 
-  let creator = records.find_actor(ctx)?.map_or("", |member| member.id)
+  let creator = records.find_actor(ctx)?.map(|member| member.id)
   let mut created = 0
   let mut skipped = 0
   for g in issues {
@@ -86,7 +87,7 @@ fn import_github(input: flags.CommandInput) -> Result<(), pb.CliError> {
       continue
     }
     let state = imported_state(g.state)
-    let mut labels: Slice<string> = []
+    let mut labels: Slice<models.LabelId> = []
     for label in g.labels {
       if let Some(id) = label_ids.get(label.name) { labels = labels.append(id) }
     }
@@ -167,7 +168,7 @@ fn gh_color(color: string) -> string {
 /// Every ref already recorded on a team issue, as the idempotency set.
 /// Refs are space-separated (gopb/references.go mergeReference); strings.Fields
 /// is how the server itself splits them.
-fn team_refs(ctx: pb.Client, team_id: string) -> Result<Map<string, bool>, pb.CliError> {
+fn team_refs(ctx: pb.Client, team_id: models.TeamId) -> Result<Map<string, bool>, pb.CliError> {
   let issues = records.fetch_board_issues(ctx, team_id)?
   let mut refs = Map.new<string, bool>()
   for issue in issues {
@@ -202,9 +203,9 @@ fn ensure_labels(
   team: models.Team,
   names: Slice<string>,
   colors: Map<string, string>,
-) -> Result<(Map<string, string>, Slice<string>), pb.CliError> {
-  let mut ids = Map.new<string, string>()
-  for label in records.fetch_labels(ctx, team.id)? {
+) -> Result<(Map<string, models.LabelId>, Slice<string>), pb.CliError> {
+  let mut ids = Map.new<string, models.LabelId>()
+  for label in records.fetch_labels(ctx, query.TeamScope.Only(team.id))? {
     ids[label.name] = label.id
   }
   let mut created: Slice<string> = []
