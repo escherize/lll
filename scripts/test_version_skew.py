@@ -89,6 +89,10 @@ with tempfile.TemporaryDirectory(prefix='lll-version-skew-') as directory:
     assert MARK.encode() not in first.stdout
     assert json.loads(first.stdout) == json.loads(STUB_BODY)
 
+    # LLL-652: an API port answers without web_url; a newer one still warns.
+    url, (first_api, _) = against({'service': 'lll', 'version': '99.0.0'}, root, 'newer-api')
+    assert f'this lll is {mine}; {url} runs 99.0.0' in first_api.stderr.decode(), first_api.stderr
+
     # Same, older, and no-version servers say nothing.
     for name, discovery in [('same', {'service': 'lll', 'web_url': '.', 'version': mine}),
                             ('older', {'service': 'lll', 'web_url': '.', 'version': '0.0.1'}),
@@ -127,6 +131,19 @@ with tempfile.TemporaryDirectory(prefix='lll-version-skew-') as directory:
         json.loads(out.stdout)
         stamps = list((home / '.config' / 'lll' / 'version-checks').iterdir())
         assert len(stamps) == 1, 'the real server was never probed'
+
+        # LLL-652: the API port advertises its version too, with no board url
+        # because none was configured, and a CLI pointed there probes it.
+        api = endpoints['db_url']
+        with urllib.request.urlopen(api + '/.well-known/lll', timeout=10) as resp:
+            advertised = json.load(resp)
+        assert advertised == {'service': 'lll', 'version': mine}, advertised
+        out = subprocess.run([binary, 'team', 'list', '--json'], cwd=root, env=dict(env, LLL_URL=api, LLL_TOKEN=token),
+                             capture_output=True, timeout=30)
+        assert out.returncode == 0, out.stderr.decode()
+        assert MARK not in out.stderr.decode(), out.stderr.decode()
+        stamps = list((home / '.config' / 'lll' / 'version-checks').iterdir())
+        assert len(stamps) == 2, 'the API port was never probed'
     finally:
         child.terminate()
         child.wait(timeout=10)

@@ -186,7 +186,7 @@ check what is configured with 'lll config --list'",
     db_url = f"http://{bind_addr()}:{db_port}"
 
     task {
-      match gopb.Serve(pb_dir, f"{bind_addr()}:{db_port}", email, pass) {
+      match gopb.Serve(pb_dir, f"{bind_addr()}:{db_port}", email, pass, version()) {
         Err(e) => {
           fmt.Println(f"lll server failed to start: {e}")
           fmt.Println(

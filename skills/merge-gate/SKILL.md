@@ -5,10 +5,10 @@ description: Land work that is already in a pull request - merge it, confirm it 
 
 # The half after the pull request
 
-> One stage of the loop in [software-factory](../software-factory/SKILL.md), which maps all six
-> and says what hands to what.
+> One stage of the loop in `lll skill get software-factory`, which maps all
+> six and says what hands to what.
 
-Every other skill here ends at "open the PR". That is the wrong place to stop.
+Every other stage ends at "open the PR". That is the wrong place to stop.
 
 The stage that decides whether a pile of agents is a software factory or a pull
 request generator is the merge gate, and it is the stage nobody writes down.
@@ -33,9 +33,8 @@ gh pr view N --json statusCheckRollup,mergeable,mergeStateStatus
 merge commit. That is not a conflict. Read it again before concluding anything.
 
 **A red check is not automatically your fault, and not automatically a flake.**
-Classify it: see the `ci-watch` skill if it is installed (it is a global
-skill, not one of this repo's, so there is no link to it here), or the
-short version - find which STEP failed. A failure asserting something your diff
+Classify it: use a CI-triage skill if your harness has one, or the short
+version - find which STEP failed. A failure asserting something your diff
 could not have caused is a strong infrastructure signal. A failure naming your
 own change is not. Never rerun a real failure hoping it passes.
 
@@ -55,8 +54,8 @@ summary line.
 
 Older GitHub CLI versions can fail `gh pr edit --body-file` with the
 classic-project GraphQL deprecation at `repository.pullRequest.projectCards`
-(reproduced with 2.65.0; 2.95.0 succeeds). If you hit that error, use the REST
-fallback already exercised here. Do not apply it to an unrelated permission or
+(reproduced with 2.65.0; 2.95.0 succeeds). If you hit that error, use this REST
+fallback. Do not apply it to an unrelated permission or
 network failure.
 
 Keep the exact Markdown in a file and encode it as JSON; shell interpolation
@@ -111,19 +110,21 @@ may now conflict.
 
 ## The exit code you are reading is probably not the one you want
 
-This is the single most repeated mistake in this repository's history, and it
-has produced confidently wrong "it passed" claims more than once.
+This is the single most repeated mistake in lll's own development history, and
+it has produced confidently wrong "it passed" claims more than once.
 
 **A pipeline's status is its LAST command.**
 
+With `GATE` standing for your project's gate (the command that must pass):
+
 ```sh
-mise run gate | tail -5 ; echo "exit=$?"     # WRONG: that is tail's status
+GATE | tail -5 ; echo "exit=$?"     # WRONG: that is tail's status
 ```
 
 Append the marker inside the same command and grep for it:
 
 ```sh
-mise run gate > gate.log 2>&1; echo "GATE_EXIT=$?" >> gate.log
+GATE > gate.log 2>&1; echo "GATE_EXIT=$?" >> gate.log
 grep GATE_EXIT gate.log
 ```
 
@@ -135,16 +136,16 @@ directly:
 gh run view <id> --json status,conclusion
 ```
 
-**A task runner refusing to start also exits non-zero.** `mise ERROR ... are not
-trusted` and `no task e2e-web found` both look like test failures from a
-distance. Read the log, not the number.
+**A task runner refusing to start also exits non-zero.** A runner that does
+not trust the config file, or cannot find the task, looks like a test failure
+from a distance. Read the log, not the number.
 
 ## After it lands, before you believe it
 
 **A green check is evidence about CI's vantage point. It is not evidence about
 the thing people install.**
 
-The canonical failure: `v0.3.0` was tagged, built, published with three
+The canonical failure: lll's own `v0.3.0` was tagged, built, published with three
 binaries, and pushed to a Homebrew tap, with every check green. The release
 workflow asserts `lll --version` equals the tag - and runs it **inside the tag
 checkout**, the one directory on earth where the old `git describe` call gave
@@ -170,7 +171,7 @@ change combined with everyone else's.
 Order is load-bearing and each constraint below was discovered by violating it:
 
 1. **The version bump lands before the tag.** If the release workflow asserts
-   that the tag matches a manifest (`lisette.toml`, `package.json`, `Cargo.toml`),
+   that the tag matches a manifest (`package.json`, `Cargo.toml`, `pyproject.toml`),
    a tag pushed against the old version fails immediately.
 2. **The changelog is written last.** PRs keep landing while you write it. Four
    landed between the entry and the tag in one session; the entry had to be
@@ -222,8 +223,9 @@ Stopping is a result. Report which PRs landed, which did not, and why.
 ## The number worth keeping
 
 Of the PRs an agent opened, what share landed **without a human commit**? That
-single ratio is the field's one durable measure of a factory, and it cannot be
-answered here today without rereading a transcript. If you find yourself
+single ratio is the field's one durable measure of a factory. Label each
+issue's outcome before you close it (`lll skill get software-factory` says
+how) so the board answers it instead of a transcript. If you find yourself
 merging a stack, count it and write it on the issue.
 
 ## What this skill is not

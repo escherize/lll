@@ -29,6 +29,17 @@ minors. Issue keys are on the project's own board (`lll issue view KEY`).
   a member made earlier and nobody has used no longer redeem, and narrowing a
   full member voids its unused invites (LLL-629).
 
+### Fixed
+
+- The API port's `/.well-known/lll` always answers `service` and `version`,
+  instead of 404 when no board is advertised, so a CLI pointed at the API
+  port warns about version skew too. `web_url` still appears only when
+  `LLL_WEB_URL` is set. The board port already published the same version
+  (LLL-652).
+- Login token renewal now runs when `LLL_URL` names exactly the home
+  config's url. It still needs the token from the home config and never
+  renews against any other url, however close the spelling (LLL-653).
+
 ## [0.8.0] - 2026-10-07
 
 Scoped access is complete for teams: a single-use link invites a person to
