@@ -40,6 +40,7 @@ python3 "$REPO_ROOT"/scripts/test_up_port_ownership.py "$REPO_ROOT"/target/.lise
 python3 "$REPO_ROOT"/scripts/test_up_port_ownership.py "$REPO_ROOT"/target/.lisette/bin/lll --neighbor-board-race
 python3 "$REPO_ROOT"/scripts/test_up_errors.py "$REPO_ROOT"/target/.lisette/bin/lll
 python3 "$REPO_ROOT"/scripts/test_server_surface.py "$REPO_ROOT"/target/.lisette/bin/lll
+python3 "$REPO_ROOT"/scripts/test_first_run.py "$REPO_ROOT"/target/.lisette/bin/lll
 python3 "$REPO_ROOT"/scripts/test_board_identity.py "$REPO_ROOT"/target/.lisette/bin/lll
 python3 "$REPO_ROOT"/scripts/test_scratch.py
 python3 "$REPO_ROOT"/scripts/test_demo.py
@@ -93,11 +94,15 @@ anon=$(curl -s -o /dev/null -w '%{http_code}' "http://127.0.0.1:$WEB2/")
 anon_page=$(curl -s "http://127.0.0.1:$WEB2/")
 printf '%s' "$anon_page" | grep -q "board_token" || fail "401 page does not say how to get in"
 curl -sf -H "$BOARD_COOKIE" "http://127.0.0.1:$WEB2/" >/dev/null || fail "board not on incremented port $WEB2"
-grep -q "admin-local-123" "$UP_LOG" && fail "default admin password leaked in banner"
-grep -q '^admin  ' "$UP_LOG" && fail "default banner advertised administration UI"
+# LLL-648: one truth about the administrator pair. A loopback boot on the
+# fallback prints it (help, README and the landing page say so); the
+# administration UI address appears only with --admin-ui.
+grep -q '^admin  admin@local.dev / admin-local-123 ' "$UP_LOG" || fail "loopback fallback admin pair not in the banner"
+grep -q '/_/' "$UP_LOG" && fail "default banner advertised administration UI"
 grep -q "port $WEB_PORT taken" "$UP_LOG" || fail "web port move not printed"
-resolved_board=$(env -u LLL_WEB_URL HOME="$E2E_HOME" "$LLL" board)
-[ "$resolved_board" = "http://127.0.0.1:$WEB2" ] || fail "up did not save the actual board port"
+# LLL-648: on this machine 'lll board' prints a link that signs the browser in.
+resolved_board=$(env -u LLL_WEB_URL -u LLL_BOARD_TOKEN HOME="$E2E_HOME" "$LLL" board)
+[ "$resolved_board" = "http://127.0.0.1:$WEB2/?board_token=$BOARD_TOKEN" ] || fail "lll board did not print the login link for the actual board port: $resolved_board"
 
 curl -sf -X POST "http://127.0.0.1:$DB2/api/collections/_superusers/auth-with-password" \
   -H 'Content-Type: application/json' \

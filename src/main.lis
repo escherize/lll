@@ -4,6 +4,7 @@ import "go:strings"
 
 import "commands"
 import "flags"
+import "pb"
 import "query"
 
 fn main() {
@@ -36,8 +37,11 @@ fn main() {
       fmt.Println(strings.TrimPrefix(msg, marker))
       return
     }
-    fmt.Fprintln(os.Stderr, f"Error: {msg}")
-    os.Exit(1)
+    // Every failing exit is decided here, by the error's kind (LLL-645,
+    // docs/cli-contract.md): scripts branch on the code, not the text.
+    let err = pb.classify(msg)
+    fmt.Fprintln(os.Stderr, f"Error: {err.message}")
+    os.Exit(pb.exit_code(err.kind))
   }
 }
 
@@ -93,7 +97,7 @@ fn dispatch(noun: string, args: Slice<string>) -> Result<(), string> {
       fmt.Println(f"lll {commands.version()}")
       Ok(())
     },
-    other => Err(unknown_command(other, os.Args.get(2).unwrap_or(""))),
+    other => Err(pb.fail(pb.ErrorKind.Usage, unknown_command(other, os.Args.get(2).unwrap_or("")))),
   }
 }
 
@@ -107,9 +111,10 @@ Every verb lives under a noun: 'lll issue list', 'lll issue comment KEY \"body\"
 Usage:
   lll issue <command>     work with issues (see 'lll issue --help')
   lll search <text>       full-text search: issues, comments, docs, ranked, with context
-  lll bot bot-<name>      an agent identity in one command: member + token, printed
+  lll bot create bot-<name>
+                          an agent identity in one command: member + token, printed
                           once in a prompt to paste into the agent (--env: only the
-                          exports); the name must start with bot- (lll bot bot-myrepo)
+                          exports); the name must start with bot- (lll bot create bot-myrepo)
   lll bot rotate bot-<name>
                           a new token for a bot; the previous one stops working
                           (see 'lll bot rotate --help')
@@ -161,6 +166,11 @@ Usage:
                           (see 'lll upgrade --help')
   lll --version, -v       print the version
   lll --help              show this help
+
+Exit codes: 0 ok, 1 error, 2 usage, 3 not found, 4 refused or conflict,
+5 nothing to do, 6 not authenticated. They and the --json fields scripts may
+rely on are the CLI contract:
+https://github.com/escherize/lll/blob/main/docs/cli-contract.md
 
 Scoped commands (issue, project, label, doc, finding, import, export, watch,
 search, webhook) accept --team KEY.

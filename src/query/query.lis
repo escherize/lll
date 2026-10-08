@@ -1,5 +1,7 @@
 import "go:strings"
 
+import "pb"
+
 /// The six issue states, in workflow order.
 pub fn states() -> Slice<string> {
   ["backlog", "todo", "in-progress", "in-review", "done", "cancelled"]
@@ -9,7 +11,7 @@ pub fn states() -> Slice<string> {
 /// state; filter adapters decide whether absence means no restriction.
 pub fn state(value: string) -> Result<string, string> {
   if !states().contains(value) {
-    return Err(f"unknown state '{value}' (use one of: {strings.Join(states(), ", ")})")
+    return Err(pb.fail(pb.ErrorKind.Usage, f"unknown state '{value}' (use one of: {strings.Join(states(), ", ")})"))
   }
   Ok(value)
 }
@@ -69,20 +71,23 @@ pub fn filter(
 ) -> string {
   let states = if state == "" { [] } else { [state] }
   let labels = if label_id == "" { [] } else { [label_id] }
-  filter_in(team_id, states, assignee_id, project_id, labels, search)
+  let projects = if project_id == "" { [] } else { [project_id] }
+  filter_in(team_id, states, assignee_id, projects, labels, search)
 }
 
-/// `filter`, with states and labels that may repeat (LLL-381).
+/// `filter`, with states, projects and labels that may repeat (LLL-381).
 ///
 /// Several of either is an OR inside the AND: `--state todo --state in-review`
 /// becomes `(state='todo' || state='in-review')`, which is what a repeated flag
 /// means everywhere else and what makes "everything unfinished" one command.
-/// Labels do the same, so an issue carrying ANY of them matches.
+/// Labels do the same, so an issue carrying ANY of them matches. Projects
+/// repeat when a name spans every team: `--project web` with no team means
+/// each team's `web` (LLL-671).
 pub fn filter_in(
   team_id: string,
   states: Slice<string>,
   assignee_id: string,
-  project_id: string,
+  project_ids: Slice<string>,
   label_ids: Slice<string>,
   search: string,
 ) -> string {
@@ -92,9 +97,7 @@ pub fn filter_in(
   if assignee_id != "" {
     clauses = clauses.append(f"assignee={quote(assignee_id)}")
   }
-  if project_id != "" {
-    clauses = clauses.append(f"project={quote(project_id)}")
-  }
+  if let Some(c) = any_of("project=", project_ids) { clauses = clauses.append(c) }
   if let Some(c) = any_of("labels.id ?= ", label_ids) { clauses = clauses.append(c) }
   if search != "" { clauses = clauses.append(f"title ~ {quote(search)}") }
   strings.Join(clauses, " && ")
@@ -123,23 +126,22 @@ pub fn sort(spec: string) -> Result<string, string> {
   let field = strings.TrimPrefix(spec, "-")
   if sort_fields().find(|f| f == field).is_none() {
     return Err(
-      f"unknown sort field '{field}' (use one of: {strings.Join(sort_fields(), ", ")}; prefix - for descending)",
+      pb.fail(pb.ErrorKind.Usage, f"unknown sort field '{field}' (use one of: {strings.Join(sort_fields(), ", ")}; prefix - for descending)"),
     )
   }
   Ok(spec)
 }
 
 /// A PB filter for one team-owned record found by a unique-per-team field:
-/// a label or project by `name`, a doc by `slug`. An empty `team_id` means
-/// "every team" — the answer `lll label list` and an unconfigured board
-/// still need, and the only way to say it.
+/// a label or project by `name`, a doc by `slug`. The team clause is always
+/// there: an empty `team_id` matches nothing rather than every team, because
+/// a name is unique only within a team and the first match of a widened
+/// lookup is some other team's record (LLL-671).
 ///
 /// This exists so no caller ever concatenates a team key into a filter by
 /// hand: both halves go through `quote` (TASK-134).
 pub fn scoped(team_id: string, field: string, value: string) -> string {
-  let clause = f"{field}={quote(value)}"
-  if team_id == "" { return clause }
-  f"team={quote(team_id)} && {clause}"
+  f"team={quote(team_id)} && {field}={quote(value)}"
 }
 
 /// Single-quote a value for a PB filter, escaping backslashes and quotes.

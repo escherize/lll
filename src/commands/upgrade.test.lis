@@ -23,6 +23,13 @@ fn install_is_read_from_where_the_binary_lives() {
   assert upgrade_argv(release).is_none()
   assert strings.HasSuffix(
     upgrade_plan(release, false, "linux", "amd64"),
-    "\n  curl -LsSf -o /Users/me/bin/lll https://github.com/escherize/lll/releases/latest/download/lll-linux-amd64 && chmod +x /Users/me/bin/lll",
+    "\n  curl -LsSf -o /Users/me/bin/lll.new https://github.com/escherize/lll/releases/latest/download/lll-linux-amd64 && chmod +x /Users/me/bin/lll.new && mv /Users/me/bin/lll.new /Users/me/bin/lll",
   )
+}
+
+#[test]
+fn upgrade_notes_name_the_backup_and_the_lockstep() {
+  assert strings.Contains(upgrade_notes(), "back up its data directory")
+  assert strings.Contains(upgrade_notes(), "migrates the database on its first start")
+  assert strings.Contains(upgrade_notes(), "upgrade the server and its clients together")
 }

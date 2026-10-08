@@ -17,8 +17,13 @@ async page => {
   await page.context().clearCookies();
   await page.goto(joinPath);
   await page.fill('#name', 'Browser Joiner');
-  await Promise.all([page.waitForURL(/\/t\/ALPHA\/$/), page.getByRole('button', {name: 'Join'}).click()]);
-  if (!(await page.title()).includes('ALPHA')) throw new Error(`join did not land on the board: ${posts}`);
+  // LLL-648: a join lands on the member's own page, whose form shows the CLI
+  // login and whose link opens the board.
+  await Promise.all([page.waitForURL(/\/me$/), page.getByRole('button', {name: 'Join'}).click()]);
+  await page.getByRole('button', {name: 'Show my CLI login'}).click();
+  await page.getByText('--token -').waitFor();
+  await Promise.all([page.waitForURL(/\/t\/ALPHA\/$/), page.getByRole('link', {name: 'Open the ALPHA board'}).click()]);
+  if (!(await page.title()).includes('ALPHA')) throw new Error(`join did not lead to the board: ${posts}`);
   if (posts.some(p => p.startsWith('403'))) throw new Error(`a same-origin form POST was refused: ${posts}`);
   return 'join and confirm passed';
 }

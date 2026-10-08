@@ -28,7 +28,7 @@ pub fn config_commands() -> Slice<flags.Command> {
       name: "list",
       alias: "--list",
       summary: "every effective value and the file it came from",
-      spec: [],
+      spec: [flags.Flag { name: "--json", help: "print the values as a JSON list of key, value and source", .. }],
       run: config_list,
       ..
     },
@@ -232,9 +232,20 @@ fn write_home_config(link: string, out: string) -> Result<(), string> {
 /// `git config --list --show-origin`. The failure this answers is silent: a
 /// repo reading the wrong team lists the wrong issues and reports nothing, so
 /// being able to ask which file won is the whole debugging affordance.
-/// `_args` is unread: dispatch already parsed it (TASK-307).
-fn config_list(_input: flags.CommandInput) -> Result<(), string> {
+fn config_list(input: flags.CommandInput) -> Result<(), string> {
   let (cfg, src) = config.load_traced()?
+  if input.parsed.given("--json") {
+    // The token's value is a secret here too: only whether it is set.
+    let tok = if cfg.token == "" { "" } else { "set" }
+    let values = [
+      ConfigValue { key: "url", value: cfg.url, source: src.url },
+      ConfigValue { key: "team", value: cfg.team, source: src.team },
+      ConfigValue { key: "sort", value: cfg.sort, source: src.sort },
+      ConfigValue { key: "web_url", value: cfg.web_url, source: src.web_url },
+      ConfigValue { key: "token", value: tok, source: src.token },
+    ]
+    return print_list_json(values, whole_list(values.length()), "config")
+  }
   print_origin(src.url, "url", cfg.url)
   print_origin(src.team, "team", cfg.team)
   print_origin(src.sort, "sort", cfg.sort)
@@ -250,11 +261,15 @@ fn config_list(_input: flags.CommandInput) -> Result<(), string> {
   Ok(())
 }
 
+/// One `config list --json` item. `source` is "" when the key is unset.
+#[json]
+struct ConfigValue { key: string, value: string, source: string }
+
 /// `lll config get KEY` — the effective value alone, for a script to read.
 /// The token is a secret, so it is refused here as in `config list`.
 fn config_get(input: flags.CommandInput) -> Result<(), string> {
   let key = input.parsed.first()
-  if key == "" { return Err(f"usage: {input.usage}") }
+  if key == "" { return Err(flags.usage_error(f"usage: {input.usage}")) }
   let (cfg, src) = config.load_traced()?
   let (value, origin) = match key {
     "url" => (cfg.url, src.url),

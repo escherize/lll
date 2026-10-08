@@ -3,6 +3,7 @@ import "go:net/http"
 import "go:net/url"
 
 import "models"
+import "pb"
 import "query"
 
 // GET /projects - the project list, with each issue count linking to the
@@ -32,7 +33,7 @@ fn projects_page(
   let vm = match projects_vm(team_id, team.key) {
     Ok(v) => v,
     Err(e) => {
-      http.Error(w, e, 500)
+      http.Error(w, pb.plain(e), 500)
       return
     },
   }

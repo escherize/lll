@@ -70,8 +70,9 @@ fn label_list(input: flags.CommandInput) -> Result<(), string> {
   // Scoped when a team is configured, every team's when not: a label belongs
   // to one team (TASK-173), so the unscoped list is an admin's view, not a
   // working one.
-  let labels = models.LabelList { items: records.fetch_labels(configured_team_id()?)? }
-  if p.given("--json") { return print_json(labels, "label list") }
+  let labels = models.LabelList { items: records.fetch_labels(configured_scope()?.filter_team())? }
+  if p.given("--json") { return print_list_json(labels.items, whole_list(labels.items.length()), "label list") }
+  if labels.items.is_empty() { return say_empty("labels") }
   for l in labels.items {
     let mut team = l.expand.team.key
     if team == "" { team = "workspace" }
@@ -89,6 +90,7 @@ fn label_create_spec() -> Slice<flags.Flag> {
     flags.Flag { name: "-n", alias: "--name", value: true, hint: "\"name\"", help: "label name", .. },
     flags.Flag { name: "-c", alias: "--color", value: true, hint: "\"#5e6ad2\"", help: "hex color for the label", .. },
     flags.Flag { name: "--team", value: true, hint: "KEY", help: "team key the label belongs to (defaults to LLL_TEAM)", .. },
+    flags.Flag { name: "--json", help: "print the created label record as JSON", .. },
   ])
 }
 
@@ -151,6 +153,10 @@ fn label_create(input: flags.CommandInput) -> Result<(), string> {
   if let Err(e) = json.Unmarshal(body.bytes(), &created) {
     return Err(f"decoding created label: {e}")
   }
+  if p.given("--json") {
+    fmt.Println(contract_json(body.bytes() as json.RawMessage, 0) as string)
+    return Ok(())
+  }
   fmt.Println(f"Created label {created.name}")
   Ok(())
 }
@@ -159,13 +165,13 @@ fn label_edit(input: flags.CommandInput) -> Result<(), string> {
   let usage = input.usage
   let p = input.parsed
   let Some(name) = nonempty(p.first()) else {
-    return Err(f"usage: {usage}")
+    return Err(flags.usage_error(f"usage: {usage}"))
   }
   if !p.given("-n") && !p.given("-c") {
-    return Err(f"nothing to update — pass -n or -c\nusage: {usage}")
+    return Err(flags.usage_error(f"nothing to update — pass -n or -c\nusage: {usage}"))
   }
   if p.given("-n") { check_filter_name("label", p.one("-n"))? }
-  let label = records.resolve_label(configured_team_id()?, name)?
+  let label = records.resolve_label(current_team()?.id, name)?
 
   let mut fields: Slice<string> = []
   if p.given("-n") { fields = fields.append("\"name\":" + json_quote(p.one("-n"))?) }
@@ -183,16 +189,15 @@ fn label_delete(input: flags.CommandInput) -> Result<(), string> {
   let usage = input.usage
   let p = input.parsed
   let Some(name) = nonempty(p.first()) else {
-    return Err(f"usage: {usage}")
+    return Err(flags.usage_error(f"usage: {usage}"))
   }
-  let label = records.resolve_label(configured_team_id()?, name)?
+  let label = records.resolve_label(current_team()?.id, name)?
   let used = entity_issue_count("label", label.id)?
   if used > 0 && !p.given("--force") {
     return Err(refuse_delete("label", name, used))
   }
   if !confirmed_on_terminal(p.given("--yes"), f"delete label {name}?") {
-    fmt.Println("Aborted.")
-    return Ok(())
+    return Err(aborted())
   }
   let _ = pb.delete(f"/api/collections/labels/records/{label.id}")?
   fmt.Println(deleted_line("label", name, used))
@@ -206,7 +211,7 @@ fn label_move(input: flags.CommandInput) -> Result<(), string> {
   let usage = input.usage
   let p = input.parsed
   let Some(name) = nonempty(p.first()) else {
-    return Err(f"usage: {usage}")
+    return Err(flags.usage_error(f"usage: {usage}"))
   }
   let from = team_flag_or_current(p.one("--team"))?
   let to = move_destination(p.one("--to"))?

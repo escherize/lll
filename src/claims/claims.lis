@@ -31,6 +31,15 @@ struct ReleaseRequest {
   reason: string,
 }
 #[json]
+struct CloseRequest {
+  claim_id: string,
+  #[json(omitempty)]
+  agent: string,
+  force: bool,
+  reason: string,
+  keep_claim: bool,
+}
+#[json]
 struct RenewRequest {
   claim_id: string,
   #[json(omitempty)]
@@ -73,6 +82,15 @@ pub fn release(caller: pb.Caller, issue_id: string, claim_id: string, agent: str
   transact(caller, issue_id, "release", ReleaseRequest { claim_id, agent, force, reason })
 }
 
+/// Set the issue done and release its claim in one server transaction (D3,
+/// LLL-640). `claim_id` is the hold the caller observed, "" for none. The
+/// release rule is release's: the holder freely, anyone else with force,
+/// which comments. `keep_claim` keeps the holder's own hold; the server
+/// refuses it for anyone else. The assignee is kept.
+pub fn close(caller: pb.Caller, issue_id: string, claim_id: string, agent: string, force: bool, reason: string, keep_claim: bool) -> Result<Transition, string> {
+  transact(caller, issue_id, "close", CloseRequest { claim_id, agent, force, reason, keep_claim })
+}
+
 /// Only the holder renews its observed hold. The server restarts the expiry
 /// clock and keeps the claim's id and creation time (LLL-535). A different
 /// non-empty `agent` than the holder's is refused, as on acquire (LLL-521).
@@ -86,7 +104,7 @@ fn transact(caller: pb.Caller, issue_id: string, action: string, request: Unknow
   let body = json.Marshal(request).map_err(|e| f"encoding claim request: {e}")?
   let path = f"/api/lll/issues/{url.PathEscape(issue_id)}/{action}"
   let response = pb.send_as(caller, "POST", path, body as string, "application/json").map_err(|e| {
-    if pb.response_status(e) == 404 {
+    if pb.classify(e).status == 404 {
       "server does not support atomic claim operations — update the server before changing claims or assignments; no legacy claim writes were attempted"
     } else { e }
   })?
@@ -106,8 +124,10 @@ pub fn fetch(issue_id: string) -> Result<Option<models.Claim>, string> {
 }
 
 /// Expanded holds for one team, shared by initial boards and live refreshes.
+/// A team_id of "" (records.TeamScope.Every's filter_team) reads the holds in
+/// every team the token can see.
 pub fn for_team(team_id: string) -> Result<Slice<models.Claim>, string> {
-  let filter = url.QueryEscape(f"issue.team={query.quote(team_id)}")
+  let filter = if team_id == "" { "" } else { url.QueryEscape(f"issue.team={query.quote(team_id)}") }
   let mut result: Slice<models.Claim> = []
   let mut page = 1
   loop {

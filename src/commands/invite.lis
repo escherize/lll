@@ -64,6 +64,7 @@ fn invite_create_spec() -> Slice<flags.Flag> {
       help: "they can read but not change anything (default: read-write)",
       ..,
     },
+    flags.Flag { name: "--json", help: "print the invite as JSON: url, code, expires, mode, teams", .. },
     flags.Flag {
       name: "--help",
       alias: "-h",
@@ -80,10 +81,14 @@ struct InviteRequest { teams: Slice<string>, mode: string }
 #[json]
 struct InviteResponse { code: string, expires: string }
 
+/// `lll invite create --json` (LLL-645). `teams` are keys; `expires` is RFC3339.
+#[json]
+struct InviteJson { url: string, code: string, expires: string, mode: string, teams: Slice<string> }
+
 fn invite_create(input: flags.CommandInput) -> Result<(), string> {
   let p = input.parsed
   let keys = p.all("--team").map(records.normalize_team_key).filter(|k| k != "")
-  if keys.is_empty() { return Err(f"usage: {input.usage}") }
+  if keys.is_empty() { return Err(flags.usage_error(f"usage: {input.usage}")) }
   let base = web_base()?
   let mut ids: Slice<string> = []
   for key in keys {
@@ -97,15 +102,15 @@ fn invite_create(input: flags.CommandInput) -> Result<(), string> {
     Ok(b) => b,
     Err(e) => return Err(f"encoding the invite: {e}"),
   }
-  let body = match pb.post("/api/lll/invites", payload as string) {
-    Ok(b) => b,
-    Err(e) => return Err(pb.display_error(e).summary),
-  }
+  let body = pb.post("/api/lll/invites", payload as string)?
   let mut made = InviteResponse { .. }
   if let Err(e) = json.Unmarshal(body.bytes(), &made) {
     return Err(f"decoding the invite: {e}")
   }
   if made.code == "" { return Err("the server returned no invite code") }
+  if p.given("--json") {
+    return print_json(InviteJson { url: f"{base}/join/{made.code}", code: made.code, expires: made.expires, mode, teams: keys }, "invite")
+  }
   fmt.Println(f"{base}/join/{made.code}")
   let access = if mode == "ro" { "read-only" } else { "read-write" }
   status(

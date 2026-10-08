@@ -505,18 +505,21 @@ Board rail spacing</pre></div>
     <h2>Run it</h2>
     <p class="body">
       <code>lll up</code> starts PocketBase and the board together, picks free ports when the
-      ones it wants are taken, and prints the credentials it just upserted. Locally that is the
-      whole setup; on a host it is the same command with secrets in the environment and a volume
-      for the database.
+      ones it wants are taken, prints the local fallback administrator pair, and logs your CLI in
+      as your member. Locally that is the whole setup; on a host it is the same command with
+      secrets in the environment (never printed) and a volume for the database.
     </p>
     <div class="term">
       <div class="term-head"><span class="label">lll up</span></div>
-      <div class="term-body"><pre><span class="sig">$</span> <span class="cmd">lll up</span>
+      <div class="term-body"><pre><span class="sig">$</span> <span class="cmd">LLL_TEAM=ENG lll up</span>
 lll    &lt;installed version&gt;
-admin  http://127.0.0.1:8090/_/  admin@local.dev / admin-local-123
+api    http://127.0.0.1:8090
 team   ENG
 member bryan
-board  http://127.0.0.1:8100</pre></div>
+admin  admin@local.dev / admin-local-123 (loopback fallback; set LLL_ADMIN_EMAIL and LLL_ADMIN_PASSWORD to choose your own)
+cli    logged in as bryan; url and token saved to ~/.config/lll/lll.toml
+board  http://127.0.0.1:8100
+board  login http://127.0.0.1:8100/?board_token=&lt;token&gt; (sets a cookie; LLL_BOARD_TOKEN pins it)</pre></div>
     </div>
     <p class="body" style="margin-top:22px">
       All of it is in the <a class="link" href="https://github.com/escherize/lll#readme">README</a>, at length.

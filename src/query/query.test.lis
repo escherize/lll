@@ -75,9 +75,17 @@ fn sort_rejects_unknown_fields() {
 }
 
 #[test]
-fn scoped_without_a_team_is_the_bare_clause() {
-  assert scoped("", "name", "bug") == "name='bug'"
-  assert scoped("", "slug", "index") == "slug='index'"
+fn scoped_without_a_team_never_widens() {
+  // LLL-671: "" once dropped the team clause, so a name lookup answered with
+  // whichever team's record came first. Now it matches no team at all.
+  assert scoped("", "name", "bug") == "team='' && name='bug'"
+}
+
+#[test]
+fn repeated_projects_become_a_parenthesised_or() {
+  let two = filter_in("", [], "", ["p1", "p2"], [], "")
+  assert two == "(project='p1' || project='p2')"
+  assert filter("t1", "", "", "p1", "", "") == "team='t1' && project='p1'"
 }
 
 #[test]

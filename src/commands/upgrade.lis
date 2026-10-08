@@ -55,9 +55,20 @@ fn upgrade_plan(
     },
     Install.Checkout(root) => f"lll was built from the checkout at {root}; lll does not rebuild itself. Run:
   cd {root} && git pull && mise run build",
+    // A new file, then mv (LLL-655): curl writing over the binary in place
+    // rewrites the file running processes ('lll up', 'lll watch') are mapped
+    // from, which can kill them on macOS. mv swaps the name; a running
+    // process keeps the old file until it exits.
     Install.Release(exe) => f"lll was installed from a release download; lll does not replace its own binary. Run:
-  curl -LsSf -o {exe} https://github.com/escherize/lll/releases/latest/download/lll-{goos}-{goarch} && chmod +x {exe}",
+  curl -LsSf -o {exe}.new https://github.com/escherize/lll/releases/latest/download/lll-{goos}-{goarch} && chmod +x {exe}.new && mv {exe}.new {exe}",
   }
+}
+
+/// Printed with every plan (LLL-655): what an upgrade changes beyond the
+/// binary, for a machine that also runs the server.
+fn upgrade_notes() -> string {
+  "if this machine runs the server ('lll up'): stop it and back up its data directory first (with Homebrew, run 'lll upgrade --dry-run' until that is done); the new version migrates the database on its first start, and the backup is the way back
+upgrade the server and its clients together: a client older than its server may lack commands the server expects"
 }
 
 pub fn upgrade_spec() -> Slice<flags.Flag> {
@@ -88,7 +99,13 @@ Usage:
   lll upgrade --dry-run  print it only
 
 Homebrew installs run 'brew upgrade lll'. A release download or a checkout
-build prints the command to run yourself: lll never replaces its own binary.",
+build prints the command to run yourself: lll never replaces its own binary.
+The release command downloads to a new file and then moves it into place, so
+running lll processes keep working until they exit.
+
+A server ('lll up') migrates its database on the first start of a new
+version: stop it and back up its data directory before upgrading, so the
+backup is the way back. Upgrade the server and its clients together.",
     )
     return Ok(())
   }
@@ -96,6 +113,9 @@ build prints the command to run yourself: lll never replaces its own binary.",
   let resolved = filepath.EvalSymlinks(exe).unwrap_or(exe)
   let install = install_of(resolved)
   let dry_run = p.given("--dry-run")
+  // Notes first: Homebrew runs straight after the plan, so advice printed
+  // after it could not be followed in time.
+  fmt.Println(upgrade_notes())
   fmt.Println(upgrade_plan(install, dry_run, runtime.GOOS, runtime.GOARCH))
   let Some(argv) = upgrade_argv(install) else {
     return Ok(())

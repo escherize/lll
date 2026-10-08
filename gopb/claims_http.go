@@ -133,6 +133,38 @@ func registerClaimRoutes(routes *router.Router[*core.RequestEvent], writes *issu
 		return respondClaim(re, outcome, err)
 	}).Bind(apis.RequireAuth("members", core.CollectionNameSuperusers))
 
+	// Close sets the issue done and releases its claim in one transaction
+	// (D3, LLL-640), under the release rule: the holder freely, anyone else
+	// with force, which comments. keep_claim keeps the holder's own hold.
+	// claim_id is the hold the caller observed, "" for none.
+	routes.POST("/api/lll/issues/{issue}/close", func(re *core.RequestEvent) error {
+		var body struct {
+			ClaimID   *string `json:"claim_id"`
+			Agent     string  `json:"agent"`
+			Force     bool    `json:"force"`
+			Reason    string  `json:"reason"`
+			KeepClaim bool    `json:"keep_claim"`
+		}
+		re.Request.Body = http.MaxBytesReader(re.Response, re.Request.Body, 8<<10)
+		if err := re.BindBody(&body); err != nil || body.ClaimID == nil {
+			return re.BadRequestError("close requires the observed claim_id (\"\" for none)", nil)
+		}
+		if !agentLabelShape.MatchString(body.Agent) {
+			return re.BadRequestError(agentLabelRule, nil)
+		}
+		if err := issueWritable(re, re.Request.PathValue("issue")); err != nil {
+			return err
+		}
+		by := releaser{agent: body.Agent, force: body.Force, reason: strings.TrimSpace(body.Reason)}
+		if !re.HasSuperuserAuth() {
+			by.memberID = re.Auth.Id
+		}
+		unlock := writes.acquire(re.Request.PathValue("issue"))
+		defer unlock()
+		outcome, err := closeIssue(re.App, re.Request.PathValue("issue"), *body.ClaimID, by, body.KeepClaim)
+		return respondClaim(re, outcome, err)
+	}).Bind(apis.RequireAuth("members", core.CollectionNameSuperusers))
+
 	routes.POST("/api/lll/issues/{issue}/renew", func(re *core.RequestEvent) error {
 		var body struct {
 			ClaimID string `json:"claim_id"`
@@ -171,9 +203,18 @@ func respondClaim(re *core.RequestEvent, outcome ClaimOutcome, err error) error 
 	// below it is the shared shape.
 	var rejected *claimRejection
 	if errors.As(err, &rejected) {
-		return re.BadRequestError(rejected.Error(), nil)
+		return withCode(re.BadRequestError(rejected.Error(), nil), rejected.code)
 	}
 	return writeFailure(re, err, "issue or member no longer exists", "invalid issue fields", "claim transaction failed")
+}
+
+// withCode puts an lll refusal's stable code at data.code (LLL-645). "" adds
+// nothing, leaving PocketBase's empty data object.
+func withCode(apiErr *router.ApiError, code string) *router.ApiError {
+	if code != "" {
+		apiErr.Data = map[string]any{"code": code}
+	}
+	return apiErr
 }
 
 // writeFailure maps a failed transaction onto a response. The lll routes that

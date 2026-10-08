@@ -183,25 +183,29 @@ first = minted(out)
 refused = "rotating bot-watch-contract's token: only the bot's owner or a superuser can do that"
 for who in [other_token, first]:  # another full member; the bot itself
     result = cli('bot', 'rotate', 'bot-watch-contract', as_token=who)
-    assert result.returncode == 1 and refused in result.stderr, result
+    assert result.returncode == 4 and refused in result.stderr, result
     assert authenticates(first), 'a refused rotation stranded the token'
-# LLL-546 review: 'lll bot NAME' by a non-owner claims no rotation it did not do.
-result = cli('bot', 'bot-watch-contract', as_token=other_token)
-assert result.returncode == 1 and refused in result.stderr, result
-assert 'rotat' not in result.stdout and 'exists;' not in result.stderr, result
-assert authenticates(first), 'a refused rotation stranded the token'
+# D7 (LLL-646): create refuses an existing bot, for its owner and anyone
+# else alike, and mints nothing; rotation is only 'lll bot rotate'.
+for who in [other_token, owner_token]:
+    for args in [('bot', 'bot-watch-contract'), ('bot', 'create', 'bot-watch-contract')]:
+        result = cli(*args, as_token=who)
+        assert result.returncode == 4 and 'bot bot-watch-contract already exists' in result.stderr, result
+        assert "'lll bot rotate bot-watch-contract'" in result.stderr and 'LLL_TOKEN' not in result.stdout, result
+        assert authenticates(first), 'a refused create stranded the token'
 second = minted(ok('bot', 'rotate', 'bot-watch-contract', '--duration', '3600', as_token=owner_token))
 assert not authenticates(first) and authenticates(second)
-# 'lll bot NAME' on an existing bot is a rotation too.
-out = ok('bot', 'bot-watch-contract', '--duration', '3600', as_token=owner_token)
-assert 'member bot-watch-contract exists; rotated its token' in out, out
-third = minted(out)
+third = minted(ok('bot', 'rotate', 'bot-watch-contract', '--duration', '3600', as_token=owner_token))
 assert not authenticates(second) and authenticates(third)
 # A superuser rotates any bot; 'lll token create' adds a token and strands none.
 fourth = minted(ok('bot', 'rotate', 'bot-watch-contract', '--duration', '3600', as_token=superuser))
 assert not authenticates(third) and authenticates(fourth)
 if os.environ.get('LLL_ADMIN_EMAIL'):
-    result = subprocess.run([binary, 'token', 'create', 'bot-watch-contract', '--duration', '3600'],
+    # D7 (LLL-646): a member token is configured here, so the administrator
+    # rides the flags; the inherited LLL_ADMIN_* pair no longer outranks it.
+    result = subprocess.run([binary, 'token', 'create', 'bot-watch-contract', '--duration', '3600',
+                             '--admin-email', os.environ['LLL_ADMIN_EMAIL'],
+                             '--admin-password', os.environ['LLL_ADMIN_PASSWORD']],
         env=dict(os.environ, LLL_URL=api), capture_output=True, text=True, timeout=30)
     assert result.returncode == 0, result.stderr
     assert authenticates(minted(result.stdout)) and authenticates(fourth)
@@ -305,7 +309,7 @@ finally:
     process.wait()
     proxy.close()
 time.sleep(0.2)  # the reader thread drains the last line
-assert code == 1, (code, lines)
+assert code == 6, (code, lines)  # not authenticated (LLL-645)
 dead_line = ("realtime: the server rejected this token (401 Unauthorized): it was rotated, "
              "revoked or has expired, so the stream would carry no events; run 'lll login', "
              "or set a fresh LLL_TOKEN ('lll bot rotate bot-NAME' or 'lll token create NAME'), "
@@ -419,8 +423,8 @@ for text in observed + [
     assert text in watch_help, f'lll watch --help lost {text!r}'
 rotate_help = ok('bot', 'rotate', '--help')
 for text in ['Who may rotate: a superuser, or the bot\'s owner',
-             'Other members and\nthe bot itself are refused',
-             "'lll bot bot-NAME' on an existing bot\nrotates too.",
-             "'lll token create bot-NAME' adds a token and strands none."]:
+             'Other\nmembers and the bot itself are refused',
+             "This is the only command that\nrotates; 'lll bot create' refuses an existing bot.",
+             "'lll token create bot-NAME'\nadds a token and strands none."]:
     assert text in rotate_help, f'lll bot rotate --help lost {text!r}'
 print('watch contracts: claim events, label-only lines, bot rotation rules, status lines and the dead-token exit pinned')

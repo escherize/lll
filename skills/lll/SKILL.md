@@ -36,8 +36,7 @@ lll issue claim KEY-12                 # exits non-zero if someone got there fir
 lll issue update KEY-12 --state in-progress
 # ... work ...
 lll issue comment KEY-12 -b "what changed and why"
-lll issue close KEY-12                 # when the change is on main, not when the PR opens
-lll issue release KEY-12               # close keeps the claim; release it
+lll issue close KEY-12                 # when the change is on main; releases your claim too
 ```
 
 `claim` atomically acquires an issue for the member authenticated by your token.
@@ -50,9 +49,10 @@ themselves.** Agents that share one member token share every claim: each
 one's `claim` succeeds with "already yours" and exits 0, so the claim does not
 stop two of them working the same issue. Give each session a label with
 `--agent NAME` or `LLL_AGENT` (on `issue claim`, `issue next --claim`, `issue
-comment`): a claim by the same member under a different label exits nonzero
-and names the holder's label, and so do `--renew` and `issue release`
-without `--force`. An unlabelled claim or
+comment`, `issue close`, `issue start` and `issue create`): a claim by the
+same member under a different label exits nonzero and names the holder's
+label, and so do `--renew`, `issue release` and `issue close` without
+`--force`. An unlabelled claim or
 hold still matches any label, so every sharing session must set one. The label
 is self-asserted coordination, not auth, and is at most 64 characters from
 A-Z, a-z, 0-9, `.`, `_` and `-`. For a fleet, you can instead give each
@@ -65,15 +65,22 @@ already on.
 `--assignee` cannot move a claimed issue to anyone but the holder: the holder
 releases it first, or you force-release a dead hold (below). `--assignee none`
 releases the claim, so it follows the release rule: only the holder clears it
-without `--force`, and `lll issue update KEY-12 --assignee none --force -b "why"`
+without `--force`, and `lll issue update KEY-12 --assignee none --force --reason "why"`
 leaves the same comment a forced release does.
 `lll whoami` shows the authenticated identity. `lll issue release KEY-12`
 gives your claim back and clears the assignee when it still matches the holder.
-Releasing another member's claim, or a hold under a different agent label on
-your own token, is refused unless you add `--force`; a
-forced release leaves a comment on the issue naming both members and labels,
-with the reason from `-b "why"` if you give one. Force only a hold you know is
-dead: its holder may still be editing.
+`lll issue close KEY-12` releases your claim in the same step and keeps the
+assignee, so the done issue still says who did it; `--keep-claim` keeps the
+claim. Releasing or closing over another member's claim, or a hold under a
+different agent label on your own token, is refused unless you add `--force`;
+a forced release leaves a comment on the issue naming both members and labels,
+with the reason from `--reason "why"` if you give one; it is the releaser's
+comment, and the server keeps it: nobody can edit it and no member can
+delete it. The note the server leaves when a claim expires carries author kind
+`system`. Only a comment's author edits or deletes it. Force
+only a hold you know is dead: its holder may still be editing. A claimed issue
+cannot be deleted until its claim is released: `lll issue delete KEY-12
+--force` releases it first.
 
 **A claim not renewed for 24 hours is released for you**: the
 server sweeps hourly and frees holds that outlived the agent that took them,
@@ -112,7 +119,7 @@ lll finding confirm port-probe-races   # once you have proved it
 printf '%s' "$options_and_why" | lll doc create -k decision \
   -s cache-in-process -t "Cache widgets in process, not in Redis" -b -
 
-lll bot bot-myrepo                 # a member for an agent: prints a paste-ready prompt with its token, once
+lll bot create bot-myrepo          # a member for an agent: prints a paste-ready prompt with its token, once
 ```
 
 `-a` (area) is conventionally a label's name, so issues carrying that label

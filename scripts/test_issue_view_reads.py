@@ -16,7 +16,9 @@ import urllib.parse
 
 binary = os.path.abspath(sys.argv[1])
 record = sys.argv[2:] == ['--record']
-# Captured from the published v0.5.0 binary using --record. Regenerate only
+# Captured from the published v0.5.0 binary using --record, then re-recorded
+# for the 1.0 output contract (LLL-645: RFC3339, key, claim object, unwrapped
+# errors, the claim line in --raw) after reviewing every changed line. Regenerate only
 # from an independently selected reference, never the candidate under test.
 golden_path = Path(__file__).parent / 'fixtures' / 'issue_view_reads.json'
 issue_id, member_id, team_id = 'issue0000000001', 'member000000001', 'team00000000001'
@@ -180,7 +182,7 @@ try:
         for case in ('empty', 'rich', 'errors'):
             for mode, args, reads in (
                     ('view', [], {'claim', 'docs', 'blocks', 'findings', 'comments'}),
-                    ('raw', ['--raw'], {'findings', 'comments'}),
+                    ('raw', ['--raw'], {'claim', 'findings', 'comments'}),
                     ('json', ['--json'], {'claim', 'docs', 'findings', 'comments'}),
                     ('json-raw', ['--json', '--raw'], {'claim', 'docs', 'findings', 'comments'})):
                 state.reset(case, reads)

@@ -32,6 +32,9 @@ func claimFixture(t *testing.T) (core.App, string, string, string) {
 		&core.TextField{Name: "title"},
 		// LLL-452: the expiry announcement is skipped on finished work.
 		&core.TextField{Name: "state"},
+		// LLL-633: a server-written comment names only members on this
+		// team's roster.
+		&core.TextField{Name: "team"},
 	)
 	if err := app.Save(issues); err != nil {
 		t.Fatal(err)
@@ -53,6 +56,9 @@ func claimFixture(t *testing.T) (core.App, string, string, string) {
 		&core.RelationField{Name: "issue", CollectionId: issues.Id, MaxSelect: 1, Required: true},
 		&core.RelationField{Name: "author", CollectionId: members.Id, MaxSelect: 1},
 		&core.TextField{Name: "body", Required: true},
+		// LLL-654: "system" on the comments the server writes.
+		&core.TextField{Name: "author_kind"},
+		&core.BoolField{Name: "server_record"},
 		&core.AutodateField{Name: "created", OnCreate: true},
 	)
 	if err := app.Save(comments); err != nil {

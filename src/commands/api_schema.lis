@@ -43,6 +43,8 @@ Rules: list @request.auth.id != \"\" && (@request.auth.scope = \"all\" || @reque
 | created | autodate |  | set on create |
 | updated | autodate |  | set on create; refreshed on update |
 | agent | text |  |  |
+| author_kind | select |  | values: system |
+| server_record | bool |  |  |
 
 ## docs (base)
 

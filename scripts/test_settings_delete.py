@@ -26,7 +26,7 @@ def record(method, collection, data=None, ident='', token=None):
 
 def delete(kind, ident, **fields):
     req = urllib.request.Request(
-        f'{board}/settings/{kind}?del=1',
+        f'{board}/t/ENG/settings/{kind}?del=1',
         data=urllib.parse.urlencode(dict(id=ident, **fields)).encode(),
         headers={'Cookie': f'lll_board={os.environ["LLL_TEST_BOARD_TOKEN"]}', 'Origin': board})
     with urllib.request.urlopen(req, timeout=10) as response:

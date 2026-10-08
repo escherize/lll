@@ -39,6 +39,15 @@ release workflow on every `v*` tag; `lll --version` names the release. The
 binary includes PocketBase, migrations and web assets: `lll up` runs from any
 directory without a checkout or a toolchain.
 
+To upgrade, run `lll upgrade`. It runs `brew upgrade lll` for a Homebrew
+install and prints the command for any other install. For a release download
+that command downloads to a new file and then moves it into place: writing
+over a running binary can kill the `lll up` and `lll watch` processes using
+it. Before you upgrade a machine that runs `lll up`, stop it and back up its
+data directory (`pb/pb_data`, or the `--pb-dir` you gave). The new version
+migrates the database on its first start, and the backup is the way back.
+Upgrade the server and its clients together.
+
 ## Quickstart
 
 ```sh
@@ -46,10 +55,50 @@ mkdir my-board && cd my-board
 LLL_TEAM=DEMO lll up           # lll server (:8090) + web board (:8100)
 ```
 
-The first boot creates the team and writes `.lll.toml` in this directory.
-The banner prints the actual API endpoint and board login URL. Administrator
-credentials stay private. Taken ports auto-increment; Ctrl-C stops everything.
-Keep this shell running while using the CLI from another shell in the same directory.
+The first boot creates the team, writes `.lll.toml` in this directory, and
+creates a member named after `$USER`. Taken ports auto-increment; Ctrl-C stops
+everything. The banner lines:
+
+- `api` and `board`: the actual endpoints.
+- `admin`: the administrator pair. With `LLL_ADMIN_EMAIL` and
+  `LLL_ADMIN_PASSWORD` unset, a loopback boot uses `admin@local.dev` /
+  `admin-local-123` and prints that pair. A pair from the environment is
+  never printed.
+- `cli`: when your home config holds no token and no other server's url,
+  `lll up` logs the CLI in as your member. It never replaces an existing
+  login; when one is in the way, the line says how to switch.
+- `board  login`: a link that signs your browser in to the board. On this
+  machine, `lll board` prints it again.
+
+Keep that shell running. In a second shell, the CLI is ready:
+
+```sh
+lll whoami          # your member, server and team
+lll issue create -t "First issue" --priority 2 --emoji 🧪   # DEMO-1
+lll issue claim DEMO-1
+lll issue comment DEMO-1 -b "Started on it"
+lll issue close DEMO-1
+lll board -w        # opens the board, signed in
+```
+
+To track a repository on the same board, run `lll attach --key KEY` inside
+it. It creates team KEY if it is missing and writes `team = "KEY"` to the
+repo's `.lll.toml`; commit that file. Plain `lll attach` picks the board's
+only team when there is one.
+
+To bring in another person, mint a single-use invite link:
+
+```sh
+lll invite create --team DEMO    # prints <board>/join/<code>
+```
+
+They open the link, pick a name, and land on their own page at `/me`. It links
+their boards and has a "Show my CLI login" button. The token it shows logs a
+CLI in with `lll login --url <board> --token -`. A link to a loopback board
+works only on this machine; to reach teammates on other machines, use `--bind`
+(below). For an email and password login instead, `lll member invite NAME
+--email E` prints a temporary password, and the member replaces it with
+`lll member set-password NAME --old-password <temporary>`.
 
 For a throwaway board that ignores your existing hosted config and all inherited
 `LLL_*` values, run `lll up --scratch` (`--local` is an alias). Its banner gives
@@ -74,20 +123,6 @@ them to the board. Browser edits currently use the board process identity. The
 board login token and random administrator credentials are stored privately
 with the local board and survive a restart with the same data directory and
 `--bind` address. Do not publish the handoff file or local data directory.
-
-Create your member using the administrator credentials supplied through
-`LLL_ADMIN_EMAIL` and `LLL_ADMIN_PASSWORD`. For a local boot with neither set,
-the fallback is `admin@local.dev` / `admin-local-123`. A member password is
-separate from the administrator password.
-Use the banner's API endpoint for `--url` if the server chose another port:
-
-```sh
-lll login --create --email you@example.com --password '<member password>' \
-  --admin-email '<admin email>' --admin-password '<admin password>'
-lll issue create "First issue" --priority 2 --emoji 🧪
-lll issue list
-lll board -w
-```
 
 The administration UI at the board's `/_/` path returns 404 by default.
 Start with `lll up --admin-ui` to enable it and print its address; sign in with
@@ -133,7 +168,8 @@ lll login --url https://your-host --email you@example.com \
 
 `--create` makes the member and logs into it in the same call. The admin
 credentials can ride `LLL_ADMIN_EMAIL`/`LLL_ADMIN_PASSWORD` instead of the
-flags. The member is named after the part of your email before `@`, unless `--name`
+flags, but only when no token is configured: a configured token always
+outranks them, and only the flags act as the administrator over it. The member is named after the part of your email before `@`, unless `--name`
 says otherwise. If the server has exactly one team, `login` settles that too, so
 `lll issue create "a title"` works immediately.
 
@@ -154,7 +190,7 @@ To give someone one team and nothing else, add `--team KEY` (repeat it for more
 teams). Their token then sees only those teams' issues, comments, docs and
 claims, and they cannot widen their own scope or create members. Add
 `--read-only` for someone who should look but not change anything. A
-read-write member can still run `lll bot bot-NAME` for its own agents: the bot
+read-write member can still run `lll bot create bot-NAME` for its own agents: the bot
 starts with the member's teams and mode and never gets more than its owner
 has, so narrowing the member narrows its bots too. Run on the
 machine serving the board, the invite also prints a view-only web board link
@@ -290,6 +326,9 @@ is required before an older deployment can accept attachments.
 
 Use `--help` for command syntax. Issue lists and views support `--json`;
 scalar reads such as `branch-name` print a single value for shell composition.
+Scripts can rely on the exit codes and the `--json` fields listed in the
+[CLI contract](docs/cli-contract.md): 2 usage, 3 not found, 4 refused,
+5 nothing to do, 6 not authenticated.
 
 ```sh
 lll issue create -t "Fix login" --priority 1 --assignee bryan --label bug
@@ -325,8 +364,8 @@ lll member invite NAME --email e@x.com  # add a colleague + temp password, in on
 lll member passes --count 10 --prefix hack  # private LAN/Tailscale teammate handoffs
 lll member set-password NAME --password <pw>  # superuser gives a member credentials
 lll token create bryan        # a one-year agent token (superuser only), printed once
-lll bot bot-myrepo            # a bot member you own, and an agent prompt with its token; rerunning rotates it
-lll bot bot-myrepo --env > agent.env  # the same, printing only the LLL_URL/LLL_TOKEN exports
+lll bot create bot-myrepo     # a bot member you own, and an agent prompt with its token; refuses an existing bot
+lll bot rotate bot-myrepo --env > agent.env  # a new token (the old one stops working), printing only the LLL_URL/LLL_TOKEN exports
 lll logout                    # clear the stored token
 lll board -w                  # open the web board
 lll completions zsh           # bash, zsh, fish

@@ -78,7 +78,7 @@ packet = json.loads(run('issue', 'next', '--label', 'agent', '--exclude-label', 
                         '--claim', '--json'))
 assert f"NXT-{packet['number']}" == agent, packet
 assert packet['expand']['assignee']['name'] == 'e2e-agent', packet
-assert packet['claim']['expand']['member']['name'] == 'e2e-agent', packet
+assert packet['claim']['holder'] == 'e2e-agent', packet
 assert [c['body'] for c in packet['comments']] == ['context for whoever takes this'], packet
 assert [f"NXT-{b['number']}" for b in packet['expand']['blocked_by']] == [blocker], packet
 assert [l['name'] for l in packet['expand']['labels']] == ['agent'], packet

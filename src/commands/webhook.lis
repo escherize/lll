@@ -151,7 +151,8 @@ fn webhook_list(input: flags.CommandInput) -> Result<(), string> {
     "webhooks",
     &hooks,
   )?
-  if p.given("--json") { return print_json(hooks, "webhook list") }
+  if p.given("--json") { return print_list_json(hooks.items, whole_list(hooks.items.length()), "webhook list") }
+  if hooks.items.is_empty() { return say_empty("webhooks") }
   for h in hooks.items {
     fmt.Println(f"{scope_label(h)}\t{h.url}\t{secret_state(h.secret_set)}")
   }
@@ -180,7 +181,7 @@ fn webhook_remove(input: flags.CommandInput) -> Result<(), string> {
     &matches,
   )?
   if matches.items.is_empty() {
-    return Err(f"no webhook {target} registered for {scope} — see 'lll webhook list'")
+    return Err(pb.fail(pb.ErrorKind.NotFound, f"no webhook {target} registered for {scope} — see 'lll webhook list'"))
   }
   if matches.items.length() > 1 {
     let mut ids: Slice<string> = []

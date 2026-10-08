@@ -1,0 +1,150 @@
+import "go:strconv"
+import "go:strings"
+
+/// What kind of failure an error is, as far as a caller deciding what to do
+/// next cares. Each kind is one exit code (exit_code), the D1 contract in
+/// docs/cli-contract.md.
+pub enum ErrorKind {
+  /// A bad command line: unknown noun, verb or flag, or a bad argument.
+  Usage,
+  /// The named record does not exist, or the caller cannot see it.
+  NotFound,
+  /// The server or the user said no: a claim held by someone else, a
+  /// read-only member, a stale If-Unmodified-Since, an aborted confirmation.
+  Refused,
+  /// The command had nothing to do: an empty `issue next`.
+  NothingToDo,
+  /// No token, or a token the server does not accept.
+  Auth,
+  /// The server could not be reached, or its answer could not be read.
+  Network,
+  /// The server failed (5xx), or something that is not the API answered.
+  Server,
+  /// Anything else.
+  Failed,
+}
+
+/// A failure with its kind, the HTTP status behind it (0 when none) and the
+/// server's stable code (data.code, "" when none). `message` is the human
+/// text, which is not part of the contract.
+pub struct CliError {
+  pub kind: ErrorKind,
+  pub status: int,
+  pub code: string,
+  pub message: string,
+}
+
+/// The stable codes the lll server puts in an error's data.code. Each one is
+/// a refusal: the request was well formed and the answer is no.
+pub fn refusal_codes() -> Slice<string> {
+  ["claim_held", "needs_force", "claim_changed", "not_claimed"]
+}
+
+/// The exit code for a kind. The only place an exit code is decided.
+pub fn exit_code(kind: ErrorKind) -> int {
+  match kind {
+    ErrorKind.Usage => 2,
+    ErrorKind.NotFound => 3,
+    ErrorKind.Refused => 4,
+    ErrorKind.NothingToDo => 5,
+    ErrorKind.Auth => 6,
+    ErrorKind.Network | ErrorKind.Server | ErrorKind.Failed => 1,
+  }
+}
+
+/// The kind of an HTTP error answer. `envelope` says the body was the API's
+/// JSON error object; anything else came from a listener that is not the API
+/// (a proxy, the wrong port), so its 404 is not a missing record.
+pub fn kind_of_status(status: int, code: string, envelope: bool) -> ErrorKind {
+  if !envelope || status >= 500 { return ErrorKind.Server }
+  if refusal_codes().contains(code) { return ErrorKind.Refused }
+  match status {
+    401 => ErrorKind.Auth,
+    403 | 409 | 412 => ErrorKind.Refused,
+    404 => ErrorKind.NotFound,
+    _ => ErrorKind.Failed,
+  }
+}
+
+// The errors cross three hundred functions typed Result<T, string>, so the
+// kind travels inside the text as one tag that only `tag` writes and only
+// `classify` reads. A control character opens and closes it, so no message a
+// user or a server writes can forge or collide with it, and it survives the
+// "KEY: {e}" prefixes callers add on the way up.
+fn tag_mark() -> string { "\u{1d}lll:" }
+fn tag_end() -> string { "\u{1d}" }
+
+fn kind_name(kind: ErrorKind) -> string {
+  match kind {
+    ErrorKind.Usage => "usage",
+    ErrorKind.NotFound => "not-found",
+    ErrorKind.Refused => "refused",
+    ErrorKind.NothingToDo => "nothing-to-do",
+    ErrorKind.Auth => "auth",
+    ErrorKind.Network => "network",
+    ErrorKind.Server => "server",
+    ErrorKind.Failed => "failed",
+  }
+}
+
+fn kind_named(name: string) -> ErrorKind {
+  match name {
+    "usage" => ErrorKind.Usage,
+    "not-found" => ErrorKind.NotFound,
+    "refused" => ErrorKind.Refused,
+    "nothing-to-do" => ErrorKind.NothingToDo,
+    "auth" => ErrorKind.Auth,
+    "network" => ErrorKind.Network,
+    "server" => ErrorKind.Server,
+    _ => ErrorKind.Failed,
+  }
+}
+
+/// An error string carrying `err`'s kind, status and code. Display it only
+/// through `plain` or `classify`; main does.
+pub fn tag(err: CliError) -> string {
+  f"{tag_mark()}{kind_name(err.kind)}/{err.status}/{err.code}{tag_end()}{err.message}"
+}
+
+/// A command's own failure of a known kind, with no HTTP status behind it.
+pub fn fail(kind: ErrorKind, message: string) -> string {
+  tag(CliError { kind, status: 0, code: "", message })
+}
+
+/// The error a string carries. The first tag wins: it is the outermost, the
+/// last decision made on the way up. Untagged text is Failed with no status.
+pub fn classify(text: string) -> CliError {
+  let message = plain(text)
+  let parts = strings.SplitN(text, tag_mark(), 2)
+  let Some(rest) = parts.get(1) else {
+    return CliError { kind: ErrorKind.Failed, status: 0, code: "", message }
+  }
+  let header = strings.SplitN(rest, tag_end(), 2).get(0).unwrap_or("")
+  let fields = strings.SplitN(header, "/", 3)
+  let status = strconv.Atoi(fields.get(1).unwrap_or("")).unwrap_or(0)
+  CliError {
+    kind: kind_named(fields.get(0).unwrap_or("")),
+    status,
+    code: fields.get(2).unwrap_or(""),
+    message,
+  }
+}
+
+/// Text from outside this process (a server's message or body) with the tag
+/// delimiter removed, so it can neither start a tag nor hide what follows.
+pub fn untagged(text: string) -> string {
+  strings.ReplaceAll(text, tag_end(), "")
+}
+
+/// The human text of an error string, every tag removed.
+pub fn plain(text: string) -> string {
+  let mut out = ""
+  let mut rest = text
+  loop {
+    let parts = strings.SplitN(rest, tag_mark(), 2)
+    out += parts[0]
+    let Some(tagged) = parts.get(1) else { break }
+    rest = strings.SplitN(tagged, tag_end(), 2).get(1).unwrap_or("")
+  }
+  out
+}

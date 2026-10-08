@@ -3,26 +3,45 @@ import "models"
 import "pb"
 import "query"
 
-/// Resolve one team's label by name; unknown names error with the fix. An
-/// empty `team_id` searches every team, which only the unscoped board wants.
+/// Resolve one team's label by name; unknown names error with the fix.
 ///
 /// Names are unique within a team, not across them (TASK-173): two projects
 /// may both call something "bug", and attaching one team's to the other
-/// team's issue is the leak team scoping exists to stop.
+/// team's issue is the leak team scoping exists to stop. So `team_id` must
+/// name a team. "" once meant "every team" here, and a writer acted on
+/// whichever team's label came back first (LLL-671); a read that spans every
+/// team goes through label_ids instead.
 pub fn resolve_label(team_id: string, name: string) -> Result<models.Label, string> {
+  if team_id == "" { return Err(f"internal: resolve_label('{name}') without a team") }
   let filter = url.QueryEscape(query.scoped(team_id, "name", name))
   let mut result = models.LabelList { .. }
   pb.fetch(f"/api/collections/labels/records?filter={filter}", "labels", &result)?
   let Some(l) = result.items.find(|l| l.name == name) else {
-    return Err(f"no label named '{name}' — see 'lll label list'")
+    return Err(pb.fail(pb.ErrorKind.NotFound, f"no label named '{name}' — see 'lll label list'"))
   }
   Ok(l)
 }
 
+/// The ids of every label named `name` within `scope`, for a list filter.
+/// One team holds at most one. Every team may hold several, and a filter
+/// that kept only the first answered for one team (LLL-671).
+pub fn label_ids(scope: TeamScope, name: string) -> Result<Slice<string>, string> {
+  match scope {
+    TeamScope.Only(team_id) => Ok([resolve_label(team_id, name)?.id]),
+    TeamScope.Every => {
+      let filter = url.QueryEscape(f"name={query.quote(name)}")
+      let found = fetch_all_records<models.Label>(f"/api/collections/labels/records?sort=id&filter={filter}", "labels")?
+      let ids = found.filter(|l| l.name == name).map(|l| l.id)
+      if ids.is_empty() { return Err(f"no label named '{name}' — see 'lll label list'") }
+      Ok(ids)
+    },
+  }
+}
+
 /// One team's labels. Labels belong to exactly one team (TASK-173), so
 /// every chooser, chip list and validator built on this is scoped by
-/// construction. An empty `team_id` is the unscoped board, which has no team
-/// to scope to.
+/// construction. An empty `team_id` spans every team: `lll label list` with
+/// no team configured (TeamScope.Every).
 pub fn fetch_labels(team_id: string) -> Result<Slice<models.Label>, string> {
   fetch_all_records<models.Label>(
     f"/api/collections/labels/records?sort=name,id&expand=team&filter={team_param(team_id)}",

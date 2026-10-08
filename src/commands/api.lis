@@ -23,6 +23,7 @@ pub fn api_spec() -> Slice<flags.Flag> {
   [
     flags.Flag { name: "--body", alias: "-b", value: true, hint: "text", help: "request body to send (application/json)", .. },
     flags.Flag { name: "--schema", help: "print the collection/field reference instead of sending a request", .. },
+    flags.Flag { name: "--fail", help: "exit non-zero on an HTTP error answer, with the code its status maps to\n(docs/cli-contract.md); the body still goes to stdout", .. },
     flags.Flag { name: "--help", alias: "-h", hidden: true, help: "show this help", .. },
   ]
 }
@@ -30,14 +31,14 @@ pub fn api_spec() -> Slice<flags.Flag> {
 pub fn api(args: Slice<string>) -> Result<(), string> {
   let spec = api_spec()
   // Two bare words: METHOD and PATH, like `veans api` and curl.
-  let p = flags.parse_n(spec, args, 2, 2, "lll api METHOD PATH [--body TEXT]")?
+  let p = flags.parse_n(spec, args, 2, 2, "lll api METHOD PATH [--body TEXT] [--fail]")?
   if p.given("--help") {
     print_api_usage()
     return Ok(())
   }
   if p.given("--schema") {
     if p.positional_count() != 0 {
-      return Err("--schema prints the reference; it takes no METHOD PATH")
+      return Err(flags.usage_error("--schema prints the reference; it takes no METHOD PATH"))
     }
     fmt.Print(schema_reference())
     return Ok(())
@@ -49,9 +50,9 @@ pub fn api(args: Slice<string>) -> Result<(), string> {
     return Ok(())
   }
   if !strings.HasPrefix(path, "/") {
-    return Err(f"path must start with '/': got '{path}' — the path is joined to the configured board url ('lll config list' shows it)")
+    return Err(flags.usage_error(f"path must start with '/': got '{path}' — the path is joined to the configured board url ('lll config list' shows it)"))
   }
-  send(method, path, p.one("--body"))
+  send(method, path, p.one("--body"), p.given("--fail"))
 }
 
 /// One raw request, deliberately NOT through pb.send: the client classifies
@@ -59,7 +60,7 @@ pub fn api(args: Slice<string>) -> Result<(), string> {
 /// right for the verbs and wrong for a passthrough whose whole job is to show
 /// the API as it answered. Transport failures still get the client's
 /// "cannot reach PocketBase" message, because that failure is the same one.
-fn send(method: string, path: string, payload: string) -> Result<(), string> {
+fn send(method: string, path: string, payload: string, fail: bool) -> Result<(), string> {
   let (cfg, _src) = config.load_traced()?
   let base = strings.TrimRight(cfg.url, "/")
   let mut req = match http.NewRequest(method, base + path, bytes.NewReader(payload.bytes())) {
@@ -89,6 +90,11 @@ fn send(method: string, path: string, payload: string) -> Result<(), string> {
   // body to jq and reads the status from stderr when it wants it.
   fmt.Fprintln(os.Stderr, resp.Status)
   fmt.Println(body as string)
+  // --fail (LLL-645): an error answer exits with the code its status maps
+  // to, as every other command's would. Without it any answer is exit 0.
+  if fail && resp.StatusCode >= 400 {
+    return Err(pb.tag(pb.http_error(f"{method} {path}", resp.StatusCode, resp.Status, body as string)))
+  }
   Ok(())
 }
 
@@ -103,7 +109,7 @@ fn api_usage_page() -> string {
   "lll api - raw passthrough to the board's server API
 
 Usage:
-  lll api METHOD PATH [--body TEXT]
+  lll api METHOD PATH [--body TEXT] [--fail]
   lll api --schema
 
 Sends METHOD PATH to the configured board url (LLL_URL for one command, or
@@ -112,10 +118,13 @@ configured member token as `Authorization: Bearer`. The response
 body goes to stdout and the status line to stderr, so
 `lll api GET /api/collections/issues/records | jq .` works in scripts and a
 non-200 stays visible. A non-200 is not a command error: the passthrough
-shows the API as it answered.
+shows the API as it answered, and exits 0. With --fail, an answer of 400 or
+above exits with the code its status maps to (3 for 404, 4 for 403, 6 for
+401; see docs/cli-contract.md).
 
   --body TEXT    send TEXT as the request body (application/json)
   --schema       print the collection/field reference and exit
+  --fail         exit non-zero on an HTTP error answer (the body still prints)
 
 Every collection is served at /api/collections/<name>/records with
 list/view/create/update/delete and server filter expressions, e.g.
