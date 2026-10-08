@@ -13,9 +13,10 @@
 //   owner's. A member's bot is its own; a person has no owner. LLL-616 closed
 //   the update path; this closes create.
 // - favorites.member and views.member: a full member could star an issue or
-//   save a view in another member's name, and move one between members.
-//   A full member may still create one with no member, the workspace's (the
-//   board's star and saved views do), and still reads and deletes anyone's.
+//   save a view in another member's name, move one between members, or
+//   rewrite one another member owns. A full member may still create and edit
+//   one with no member, the workspace's (the board's star and saved views
+//   do), and still reads and deletes anyone's.
 //
 // A superuser bypasses every rule, so it keeps setting these: repairing
 // attribution and `lll import dir` both need it, and its credentials already
@@ -30,6 +31,10 @@ const CLAUSES = [
   ["members", "createRule", '(kind = "bot" && owner = @request.auth.id) || (kind != "bot" && owner = "")'],
   ["favorites", "createRule", 'member = "" || member = @request.auth.id'],
   ["views", "createRule", 'member = "" || member = @request.auth.id'],
+  // Editing another member's favorite or view rewrites what it says under
+  // that member's name. A full member still deletes anyone's.
+  ["favorites", "updateRule", 'member = "" || member = @request.auth.id'],
+  ["views", "updateRule", 'member = "" || member = @request.auth.id'],
 ];
 
 // The update clause a full member passed (1791700000_bot_owner_scope.js

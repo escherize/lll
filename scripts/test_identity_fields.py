@@ -144,6 +144,13 @@ with tempfile.TemporaryDirectory(prefix='lll-identity-') as directory:
         for v in (view, bobs_view):
             refused(f"{views}/{v['id']}", {'member': guest['id']}, a_tok, 'PATCH')
         assert ok(f"{views}/{view['id']}", {'name': 'v2'}, a_tok, 'PATCH')['name'] == 'v2'
+        # Nor does a full member rewrite what another member's says.
+        other = ok('/api/collections/issues/records', {'team': team['id'], 'title': 'other', 'state': 'todo'}, a_tok)
+        refused(f"{favorites}/{bobs_fav['id']}", {'issue': other['id']}, a_tok, 'PATCH')
+        refused(f"{views}/{bobs_view['id']}", {'name': 'renamed', 'query': 'assignee=alice'}, a_tok, 'PATCH')
+        assert ok(f"{favorites}/{bobs_fav['id']}")['issue'] == issue['id']
+        assert ok(f"{views}/{bobs_view['id']}")['query'] == 'state=todo'
+        assert ok(f"{favorites}/{shared['id']}", {'issue': other['id']}, a_tok, 'PATCH')['member'] == ''
 
         # --- guards that already held stay held -----------------------------------
         comment = ok('/api/collections/comments/records',

@@ -126,9 +126,10 @@ minors. Issue keys are on the project's own board (`lll issue view KEY`).
     bot, or a person with an owner, which signs in with a password and
     shows as that owner's.
   - A favorite or saved view is created for its own member or for the
-    workspace (no member), and its member cannot be changed. A full member
-    could star an issue or save a view in another member's name, or move
-    one between members.
+    workspace (no member). Its member cannot be changed, and only its own
+    member edits one that has a member. A full member could star an issue
+    or save a view in another member's name, move one between members, or
+    rewrite another member's. A full member still deletes anyone's.
 - `pb/pb_migrations/lib/rules.js` read a collection's rule as one opaque
   clause, because PocketBase hands a rule to a migration as a Go string
   pointer. Removing a clause failed, and adding one skipped the duplicate
