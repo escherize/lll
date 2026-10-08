@@ -539,8 +539,11 @@ fn no_team() -> string {
   // wording as "go hand-edit a file", and none of them found 'lll attach' —
   // the command whose whole job is writing this key — from it. It follows
   // unknown_team's shape for the same reason: say the fix, not the setting.
-  "no team configured — 'lll attach' picks the server's team and writes it to .lll.toml
-'lll team list' shows the keys; 'lll attach --key KEY' takes one directly"
+  //
+  // Usage, exit 2 (LLL-679): the fix is on the command line or in the
+  // configuration that stands in for it, not on the server.
+  flags.usage_error("no team configured: pass --team KEY for this command, or run 'lll attach' to write the team to .lll.toml
+'lll team list' shows the keys; 'lll attach --key KEY' takes one directly")
 }
 
 /// Unknown-team message naming the fix. Shared by every command that

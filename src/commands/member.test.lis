@@ -193,3 +193,12 @@ fn member_create_error_names_the_requirement_and_the_paths() {
   let other = pb.tag(pb.http_error("POST http://x", 400, "400 Bad Request", "validation"))
   assert member_create_error(other) == other
 }
+
+/// LLL-679: a token the server refuses keeps its exit-6 text through
+/// set-password --old-password; any other failure is not an auth failure.
+#[test]
+fn own_password_change_passes_auth_failures_through() {
+  assert is_auth_failure(pb.fail(pb.ErrorKind.Auth, "the token in LLL_TOKEN was rejected"))
+  assert !is_auth_failure(pb.fail(pb.ErrorKind.NotFound, "no such record"))
+  assert !is_auth_failure("dial tcp: connection refused")
+}

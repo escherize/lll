@@ -611,6 +611,16 @@ fn readiness_counts_visible_open_blockers_and_ignores_finished_ones() {
   assert !is_ready(blocked("a", "in-review", []), [])
 }
 
+/// LLL-679: an archived team is read-only, so its open issues are not ready.
+/// With no team configured, `issue next` offered one.
+#[test]
+fn an_issue_in_an_archived_team_is_not_ready() {
+  let mut issue = blocked("a", "todo", [])
+  assert is_ready(issue, [])
+  issue.expand.team = models.Team { key: "OLD", archived: true, .. }
+  assert !is_ready(issue, [])
+}
+
 /// watch --ready reads the same rule: the cache first, then the issue's
 /// expand for a blocker outside it, and an id in neither is hidden.
 #[test]

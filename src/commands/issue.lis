@@ -1298,7 +1298,9 @@ fn view(input: flags.CommandInput) -> Result<(), string> {
     }
     let blockers = blockers_of(full, full.expand.blocked_by)
     let open = blockers.open.length()
-    let mut tail = if open == 0 { " — all done, ready" } else { f" — {open} open, not ready" }
+    // is_ready's archived rule (LLL-679): an archived team's issue is not ready.
+    let done = if full.expand.team.archived { " — all done, but the team is archived" } else { " — all done, ready" }
+    let mut tail = if open == 0 { done } else { f" — {open} open, not ready" }
     if blockers.hidden > 0 {
       let counted = if open == 0 { "" } else { f"{open} open, " }
       tail = f" — {counted}{blockers.hidden} you cannot see, not ready"
@@ -1930,23 +1932,23 @@ fn delete_issue(input: flags.CommandInput) -> Result<(), string> {
   // LLL-662: the server refuses to delete a claimed issue, because the
   // claim would go with it and nobody would be told. --force releases it
   // first, under the release rule, then deletes.
+  // --force means "even if claimed", so on an unclaimed issue it is
+  // unneeded, not wrong: whether a claim exists is server state the caller
+  // may not know (a hold can lapse between two commands), and a usage error
+  // that depends on it is not a usage error (LLL-679).
   let held = claims.fetch(issue.id)?
-  match held {
-    Some(h) => {
-      if !p.given("--force") {
-        let holder = display.byline(display.member_name(h.member, h.expand.member.name, "an unknown member"), h.agent)
-        return Err(pb.fail(pb.ErrorKind.Refused, f"{label} is claimed by {holder}; 'lll issue delete {label} --force' releases the claim and deletes it"))
-      }
-    },
-    // D6: --force overrides ownership and never skips the confirmation, so
-    // on an unclaimed issue it is a mistaken spelling of --yes.
-    None => {
-      if p.given("--force") {
-        return Err(flags.usage_error(f"--force releases a claim, and {label} is not claimed; the confirmation is skipped by --yes"))
-      }
-    },
+  if let Some(h) = held {
+    if !p.given("--force") {
+      let holder = display.byline(display.member_name(h.member, h.expand.member.name, "an unknown member"), h.agent)
+      return Err(pb.fail(pb.ErrorKind.Refused, f"{label} is claimed by {holder}; 'lll issue delete {label} --force' releases the claim and deletes it"))
+    }
   }
   if !p.given("--yes") && !confirmed(f"delete {label}?") {
+    // D6: --force never skips the confirmation. A script that used it to
+    // (before 1.0) is told which flag does.
+    if p.given("--force") {
+      return Err(pb.fail(pb.ErrorKind.Refused, "aborted: nothing was deleted; --force does not skip the confirmation, which is skipped by --yes"))
+    }
     return Err(aborted())
   }
   if let Some(h) = held {
@@ -2553,9 +2555,14 @@ fn blockers_of(issue: models.Issue, seen: Slice<models.Issue>) -> Blockers {
   Blockers { open, hidden }
 }
 
-/// Ready: open (todo or backlog) and no blocker that is open or hidden.
+/// Ready: open (todo or backlog), in a team that is not archived, and no
+/// blocker that is open or hidden. An archived team is read-only (LLL-660),
+/// so its open issues are not work anyone can pick up; with no team
+/// configured, `issue next` offered them (LLL-679).
 fn is_ready(issue: models.Issue, seen: Slice<models.Issue>) -> bool {
-  (issue.state == "todo" || issue.state == "backlog") && !blockers_of(issue, seen).any()
+  (issue.state == "todo" || issue.state == "backlog")
+    && !issue.expand.team.archived
+    && !blockers_of(issue, seen).any()
 }
 
 /// Issues that name `issue` as a blocker, for the "Blocks:" line.
