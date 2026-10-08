@@ -2,6 +2,7 @@ import "go:net/http"
 import "go:strings"
 
 import "models"
+import "pb"
 import "query"
 import "search"
 
@@ -37,7 +38,7 @@ fn search_page(
     match search_hits(team, q, is_scoped(r)) {
       Ok(hits) => results = hits,
       Err(e) => {
-        http.Error(w, e, 500)
+        http.Error(w, pb.plain(e), 500)
         return
       },
     }
@@ -68,7 +69,7 @@ fn search_page(
     let frag = match render("search-update", page) {
       Ok(h) => h,
       Err(e) => {
-        http.Error(w, e, 500)
+        http.Error(w, pb.plain(e), 500)
         return
       },
     }

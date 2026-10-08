@@ -212,11 +212,11 @@ fn reconnect(
         if dead {
           if let DeadToken.Exit = on_dead_token {
             fmt.Fprintln(os.Stderr, f"realtime: {dead_token_fix(e)}")
-            os.Exit(1)
+            os.Exit(pb.exit_code(pb.ErrorKind.Auth))
           }
         }
         if e != last_err {
-          fmt.Fprintln(os.Stderr, f"realtime: reconnect failed: {e}")
+          fmt.Fprintln(os.Stderr, f"realtime: reconnect failed: {pb.plain(e)}")
           last_err = e
         }
         if dead {
@@ -249,7 +249,7 @@ const TOKEN_REJECTED: string = "the server rejected this token"
 /// The auth failure with the fix a person or agent can act on, for a
 /// caller that cannot renew its own token.
 fn dead_token_fix(e: string) -> string {
-  f"{e}; run 'lll login', or set a fresh LLL_TOKEN ('lll bot rotate bot-NAME' or 'lll token create NAME'), then start the watch again"
+  f"{pb.plain(e)}; run 'lll login', or set a fresh LLL_TOKEN ('lll bot rotate bot-NAME' or 'lll token create NAME'), then start the watch again"
 }
 
 /// Open the SSE stream, wait for PB_CONNECT, and POST the subscriptions.

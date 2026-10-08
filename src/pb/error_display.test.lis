@@ -1,28 +1,33 @@
 #[test]
 fn expected_errors_show_messages_and_sorted_field_details() {
-  let raw = "POST http://127.0.0.1:40015/api/lll/issues/id/assignment: 400 Bad Request: " +
-    "{\"message\":\"Issue is claimed by café.\",\"data\":{}}"
+  let raw = tag(http_error(
+    "POST http://127.0.0.1:40015/api/lll/issues/id/assignment", 400, "400 Bad Request",
+    "{\"message\":\"Issue is claimed by café.\",\"data\":{\"code\":\"claim_held\"}}",
+  ))
   let shown = display_error(raw)
   assert shown.summary == "Issue is claimed by café."
   assert shown.details == ""
-  assert response_status(raw) == 400
-  let fields = display_error("POST http://host: 400 Bad Request: " +
-    "{\"message\":\"Invalid fields.\",\"data\":{\"title\":{\"code\":\"required\",\"message\":\"Cannot be blank.\"},\"labels\":{\"0\":{\"message\":\"Unknown label.\"}}}}")
+  let err = classify(raw)
+  assert err.status == 400
+  assert err.code == "claim_held"
+  assert exit_code(err.kind) == 4
+  let fields = display_error(tag(http_error("POST http://host", 400, "400 Bad Request",
+    "{\"message\":\"Invalid fields.\",\"data\":{\"title\":{\"code\":\"required\",\"message\":\"Cannot be blank.\"},\"labels\":{\"0\":{\"message\":\"Unknown label.\"}}}}")))
   assert fields.summary == "Invalid fields.\nlabels.0: Unknown label.\ntitle: Cannot be blank."
 }
 
 #[test]
 fn unexpected_http_and_transport_errors_keep_diagnostics_separate() {
   for raw in [
-    "GET http://127.0.0.1:40015/400: 503 Service Unavailable: backend failure 400",
-    "POST http://host: 400 Bad Request: <html>upstream error</html>",
-    "POST http://host: 400 Bad Request: {broken json",
-    "PATCH http://host: reading response: unexpected EOF",
-    "cannot reach the lll server at http://127.0.0.1:8090: connection refused",
-    "decoding issue: unexpected EOF",
+    tag(http_error("GET http://127.0.0.1:40015/400", 503, "503 Service Unavailable", "backend failure 400")),
+    tag(http_error("POST http://host", 400, "400 Bad Request", "<html>upstream error</html>")),
+    tag(http_error("POST http://host", 400, "400 Bad Request", "{broken json")),
+    fail(ErrorKind.Network, "PATCH http://host: reading response: unexpected EOF"),
+    fail(ErrorKind.Network, "cannot reach the lll server at http://127.0.0.1:8090: connection refused"),
+    fail(ErrorKind.Server, "decoding issue: unexpected EOF"),
   ] {
     let shown = display_error(raw)
-    assert shown.details == raw
+    assert shown.details == plain(raw)
     assert !shown.summary.contains("http://")
     assert !shown.summary.contains("<html>")
   }

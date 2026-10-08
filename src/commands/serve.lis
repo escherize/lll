@@ -554,7 +554,7 @@ fn routed_team(
       None
     },
     Err(e) => {
-      http.Error(w, e, 500)
+      http.Error(w, pb.plain(e), 500)
       None
     },
   }

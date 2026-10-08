@@ -10,6 +10,7 @@ import "go:unicode/utf8"
 import "display"
 import "markdown"
 import "models"
+import "pb"
 import "provenance"
 import "query"
 import "theme"
@@ -28,7 +29,7 @@ fn render_html(w: http.ResponseWriter, name: string, data: Unknown) {
   let html = match render(name, data) {
     Ok(h) => h,
     Err(e) => {
-      http.Error(w, e, 500)
+      http.Error(w, pb.plain(e), 500)
       return
     },
   }
@@ -474,7 +475,7 @@ fn issue_fields_vm(raw: models.Issue, comments: Slice<models.Comment>, roster: R
   match actor() {
     Ok(Some(a)) => { claim_actor = a.name; claim_actor_id = a.id },
     Ok(None) => claim_error = "No member is configured for this board.",
-    Err(e) => claim_error = e,
+    Err(e) => claim_error = pb.plain(e),
   }
   let mut work = ""
   if issue.work_branch != "" { work = f"{issue.work_branch} @ {issue.work_host}:{issue.work_path}" }

@@ -164,7 +164,7 @@ fn issue_list_spec() -> Slice<flags.Flag> {
       name: "--since",
       value: true,
       hint: "rfc3339",
-      help: "issues updated at or after an RFC3339 timestamp (e.g. 2026-09-18T00:00:00Z)\ncurrent records only: no deletions or intermediate states; not exactly-once replay\noverlap the previous window by a second and deduplicate on resume",
+      help: "issues updated at or after an instant: RFC3339 (e.g. 2026-09-18T00:00:00Z),\nor the space form 2026-09-18 00:00:00.000Z\ncurrent records only: no deletions or intermediate states; not exactly-once replay\noverlap the previous window by a second and deduplicate on resume",
       ..,
     },
     flags.Flag {
@@ -257,7 +257,7 @@ fn issue_update_spec() -> Slice<flags.Flag> {
       name: "--if-unchanged-since",
       value: true,
       hint: "stamp",
-      help: "refuse unless the issue's 'updated' still equals stamp (from 'issue view --json') —\nenforced at the write by the server (LLL-399), so an edit cannot land on a record\nsomeone changed under you, even mid-flight",
+      help: "refuse unless the issue's 'updated' is still this instant (from 'issue view --json';\nRFC3339 or the space form) —\nenforced at the write by the server (LLL-399), so an edit cannot land on a record\nsomeone changed under you, even mid-flight",
       ..,
     },
     flags.Flag {
@@ -767,7 +767,7 @@ fn create(input: flags.CommandInput) -> Result<(), string> {
     pb.post(path, payload as string)?
   } else {
     let supported = pb.get("/api/lll/issues/idempotency").map_err(|e| {
-      if pb.response_status(e) == 404 {
+      if pb.classify(e).status == 404 {
         "this server does not support --idempotency-key; upgrade the server before retrying this creation"
       } else { e }
     })?
@@ -920,8 +920,9 @@ fn list(input: flags.CommandInput) -> Result<(), string> {
 /// Normalize an inclusive bound to the server's millisecond UTC stamps.
 /// Round UP when the input falls between stored milliseconds, so an issue
 /// updated just before the requested instant cannot slip into the result.
-fn issue_since_stamp(value: string) -> Result<string, string> {
-  let invalid = f"--since takes an RFC3339 timestamp, e.g. 2026-09-18T00:00:00Z or 2026-09-18T02:00:00+02:00; got '{value}'"
+fn issue_since_stamp(given: string) -> Result<string, string> {
+  let value = rfc3339_of(given)
+  let invalid = flags.usage_error(f"--since takes an RFC3339 timestamp, e.g. 2026-09-18T00:00:00Z or 2026-09-18T02:00:00+02:00, or the space form older output printed; got '{given}'")
   // Go's parser also accepts comma fractions and malformed numeric offsets.
   // Keep the advertised RFC3339 grammar, then let Parse validate the date.
   let parts = regexp
@@ -941,9 +942,29 @@ fn issue_since_stamp(value: string) -> Result<string, string> {
     stamp = stamp.Add(time.Millisecond)
   }
   if stamp.Year() < 0 || stamp.Year() > 9999 {
-    return Err("--since must fit a UTC year from 0000 to 9999")
+    return Err(flags.usage_error("--since must fit a UTC year from 0000 to 9999"))
   }
   Ok(stamp.Format("2006-01-02 15:04:05.000Z"))
+}
+
+/// A time flag's value in RFC3339 (LLL-645). Time flags take RFC3339 and the
+/// space form PocketBase stores ("2026-10-08 03:02:11.982Z"), which --json
+/// printed before 1.0, so a stamp copied from either still works. Anything
+/// else is returned unchanged for the caller's own validation.
+fn rfc3339_of(value: string) -> string {
+  let space_form = regexp.MustCompile(r"^[0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2}:[0-9]{2}(\.[0-9]+)?Z$")
+  if space_form.MatchString(value) { return strings.Replace(value, " ", "T", 1) }
+  value
+}
+
+/// --if-unchanged-since as the server's stamp. The instant is what matters:
+/// RFC3339 in any offset and the space form name the same 'updated' when
+/// they name the same millisecond, the precision the server stores.
+fn unchanged_since_stamp(given: string) -> Result<string, string> {
+  let Ok(parsed) = time.Parse(time.RFC3339Nano, rfc3339_of(given)) else {
+    return Err(flags.usage_error(f"--if-unchanged-since takes the issue's 'updated' from 'lll issue view KEY --json' (RFC3339, or the space form older output printed); got '{given}'"))
+  }
+  Ok(parsed.UTC().Truncate(time.Millisecond).Format("2006-01-02 15:04:05.000Z"))
 }
 
 /// The standard issue table (ID, state, priority, title, assignee, age),
@@ -1301,7 +1322,7 @@ fn update(input: flags.CommandInput) -> Result<(), string> {
   if description_set && (replace_set || append_set) {
     return Err("--description replaces the whole text; it cannot be combined with --description-replace or --description-append")
   }
-  let since = p.one("--if-unchanged-since")
+  let since = if p.given("--if-unchanged-since") { unchanged_since_stamp(p.one("--if-unchanged-since"))? } else { "" }
   let emoji = check_emoji(p.one("--emoji"))?
   let emoji_set = p.given("--emoji")
   // An empty --assignee is the natural guess for "clear it" (two of thirty
@@ -1350,7 +1371,7 @@ fn update(input: flags.CommandInput) -> Result<(), string> {
   // — a write landing between this read and the PATCH — is held at the
   // server and answers 412 instead of clobbering.
   if since != "" && issue.updated != since {
-    return Err(f"{key} changed since {since}: its 'updated' is now {issue.updated} — read it again ('lll issue view {key} --json' carries updated) and retry with that stamp")
+    return Err(pb.fail(pb.ErrorKind.Refused, f"{key} changed since {display.rfc3339(since)}: its 'updated' is now {display.rfc3339(issue.updated)} — read it again ('lll issue view {key} --json' carries updated) and retry with that stamp"))
   }
   // Surgical description edits (LLL-391, after veans): a replace must match
   // exactly once, or the caller is told how many times it matched, so a
@@ -1442,9 +1463,9 @@ fn update(input: flags.CommandInput) -> Result<(), string> {
   if assignee_name != "" {
     let observed = claims.observed_id(issue.id)?
     let result = claims.update_assignment(pb.Caller.Process, issue.id, observed, payload, agent, force, reason).map_err(|e| {
-      if strings.Contains(e, "is claimed by") {
+      if pb.classify(e).code == "claim_held" {
         f"{key}: {e} — {held_elsewhere_hint(key)}"
-      } else if strings.Contains(e, "needs force") {
+      } else if pb.classify(e).code == "needs_force" {
         f"{key}: {pb.display_error(e).summary} — 'lll issue update {key} --assignee none --force -b \"why\"' clears it anyway and comments on the issue"
       } else { f"{key}: {e}" }
     })?
@@ -1458,9 +1479,9 @@ fn update(input: flags.CommandInput) -> Result<(), string> {
     // answers 412 instead of being clobbered.
     let patched = pb.patch_with_stamp(f"/api/collections/issues/records/{issue.id}", payload, since)
     if let Err(e) = patched {
-      if pb.response_status(e) == 412 {
+      if pb.classify(e).status == 412 {
         let presented = pb.display_error(e)
-        return Err(f"{key} changed under you: {presented.summary}\nread it again ('lll issue view {key} --json' carries updated) and retry with that stamp")
+        return Err(pb.fail(pb.ErrorKind.Refused, f"{key} changed under you: {presented.summary}\nread it again ('lll issue view {key} --json' carries updated) and retry with that stamp"))
       }
       return Err(e)
     }
@@ -1626,7 +1647,7 @@ fn actor() -> Result<Option<Actor>, string> {
       Ok(Some(Actor { id: member.id, name: member.name }))
     },
     Err(e) => {
-      if pb.response_status(e) == 404 { Ok(None) } else { Err(e) }
+      if pb.classify(e).status == 404 { Ok(None) } else { Err(e) }
     },
   }
 }
@@ -1672,7 +1693,7 @@ fn claim(input: flags.CommandInput) -> Result<(), string> {
 
   if input.parsed.given("--renew") {
     let Some(held) = claims.fetch(issue.id)? else {
-      return Err(f"{key} is not claimed; 'lll issue claim {key}' takes it")
+      return Err(pb.fail(pb.ErrorKind.Refused, f"{key} is not claimed; 'lll issue claim {key}' takes it"))
     };
     let renewed = claims.renew(issue.id, held.id, agent).map_err(|e| f"{key}: {e}")?
     fmt.Println(f"Renewed {key} for {display.byline(renewed.member_name, renewed.agent)}; the expiry clock restarts now (held since {display.relative(renewed.created)})")
@@ -1680,7 +1701,7 @@ fn claim(input: flags.CommandInput) -> Result<(), string> {
   }
 
   let result = claims.acquire(pb.Caller.Process, issue.id, member.id, agent).map_err(|e| {
-    if strings.Contains(e, "already claimed by") {
+    if pb.classify(e).code == "claim_held" {
       f"{key}: {e} — {held_elsewhere_hint(key)}"
     } else { e }
   })?
@@ -1708,9 +1729,9 @@ fn release(input: flags.CommandInput) -> Result<(), string> {
   }
   let issue = records.fetch_issue(resolved)?
   let key = f"{issue.expand.team.key}-{issue.number}"
-  let Some(held) = claims.fetch(issue.id)? else { return Err(f"{key} is not claimed") };
+  let Some(held) = claims.fetch(issue.id)? else { return Err(pb.fail(pb.ErrorKind.Refused, f"{key} is not claimed")) };
   let result = claims.release(pb.Caller.Process, issue.id, held.id, agent, force, reason).map_err(|e| {
-    if strings.Contains(e, "needs force") {
+    if pb.classify(e).code == "needs_force" {
       f"{key}: {e} — 'lll issue release {key} --force -b \"why\"' takes it anyway and comments on the issue"
     } else { e }
   })?
@@ -1734,8 +1755,7 @@ fn delete_issue(input: flags.CommandInput) -> Result<(), string> {
   let issue = records.fetch_issue(id)?
   let label = f"{issue.expand.team.key}-{issue.number}"
   if !p.given("--yes") && !confirmed(f"delete {label}?") {
-    fmt.Println("Aborted.")
-    return Ok(())
+    return Err(aborted())
   }
   let _ = pb.delete(f"/api/collections/issues/records/{issue.id}")?
   fmt.Println(f"Deleted {label}")
@@ -2001,8 +2021,7 @@ fn comment_mutate(verb: string, p: flags.Parsed) -> Result<(), string> {
       p.given("--yes"),
       f"delete comment #{n} on {key}?",
     ) {
-      fmt.Println("Aborted.")
-      return Ok(())
+      return Err(aborted())
     }
     let _ = pb.delete(f"/api/collections/comments/records/{c.id}")?
     fmt.Println(f"Deleted comment #{n} on {key} (was {whose}'s)")
@@ -2369,7 +2388,7 @@ fn issue_next(input: flags.CommandInput) -> Result<(), string> {
   // including my own claims. The agenda is what an agent can pick up NOW.
   let agenda = rank_agenda(candidates, unblocks).filter(|i| i.assignee == "")
   if agenda.is_empty() {
-    return Err("no unclaimed ready issues — the agenda is empty; 'lll issue list --ready' shows what is claimed, 'lll issue create' makes new work")
+    return Err(pb.fail(pb.ErrorKind.NothingToDo, "no unclaimed ready issues — the agenda is empty; 'lll issue list --ready' shows what is claimed, 'lll issue create' makes new work"))
   }
   let best = agenda[0]
   let key = f"{best.expand.team.key}-{best.number}"
@@ -2382,7 +2401,7 @@ fn issue_next(input: flags.CommandInput) -> Result<(), string> {
     // Acquire before printing: a key this command did not secure is a lie to
     // the shell loop that composed it. A lost race exits non-zero, keyless.
     let result = claims.acquire(pb.Caller.Process, best.id, member.id, agent).map_err(|e| {
-      if strings.Contains(e, "already claimed by") {
+      if pb.classify(e).code == "claim_held" {
         f"{key}: {e} — {held_elsewhere_hint(key)}"
       } else { e }
     })?

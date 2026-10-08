@@ -14,7 +14,7 @@ pub fn resolve_label(team_id: string, name: string) -> Result<models.Label, stri
   let mut result = models.LabelList { .. }
   pb.fetch(f"/api/collections/labels/records?filter={filter}", "labels", &result)?
   let Some(l) = result.items.find(|l| l.name == name) else {
-    return Err(f"no label named '{name}' — see 'lll label list'")
+    return Err(pb.fail(pb.ErrorKind.NotFound, f"no label named '{name}' — see 'lll label list'"))
   }
   Ok(l)
 }

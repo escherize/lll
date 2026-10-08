@@ -180,7 +180,7 @@ fn webhook_remove(input: flags.CommandInput) -> Result<(), string> {
     &matches,
   )?
   if matches.items.is_empty() {
-    return Err(f"no webhook {target} registered for {scope} — see 'lll webhook list'")
+    return Err(pb.fail(pb.ErrorKind.NotFound, f"no webhook {target} registered for {scope} — see 'lll webhook list'"))
   }
   if matches.items.length() > 1 {
     let mut ids: Slice<string> = []

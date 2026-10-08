@@ -111,7 +111,7 @@ fn token_create(input: flags.CommandInput) -> Result<(), string> {
   let su = superuser_auth()?
   let found = records.find_member_as(su, name)?
   let Some(member) = found else {
-    return Err(f"no member named '{name}' — see 'lll member create'")
+    return Err(pb.fail(pb.ErrorKind.NotFound, f"no member named '{name}' — see 'lll member create'"))
   }
   let payload = match json.Marshal(models.ImpersonateRequest { duration }) {
     Ok(b) => b,
@@ -165,7 +165,7 @@ fn expiry_line(duration: int, now: time.Time) -> string {
 /// happens to someone who was working yesterday is expiry, which the old
 /// shared wording never named (TASK-214). Anything else keeps the raw error.
 fn impersonate_error(name: string, e: string) -> string {
-  let status = pb.response_status(e)
+  let status = pb.classify(e).status
   if status == 401 {
     return "the token this ran with was rejected (401) - most likely it expired
 mint a new one with 'lll token create', or set LLL_ADMIN_EMAIL/LLL_ADMIN_PASSWORD
@@ -269,7 +269,7 @@ pass --admin-email and --admin-password, or set LLL_ADMIN_EMAIL/LLL_ADMIN_PASSWO
 /// nobody's choice, say that first.
 fn superuser_auth_failed(e: string) -> string {
   let msg = f"authenticating as the superuser: {e}"
-  if pb.response_status(e) != 400 { return msg }
+  if pb.classify(e).status != 400 { return msg }
   let Ok((_, src)) = config.load_traced() else { return msg }
   if src.url != "default" {
     return msg + "
@@ -660,7 +660,7 @@ fn token_member(tok: string) -> Result<Option<models.Member>, string> {
       Ok(Some(me))
     },
     Err(e) => {
-      if pb.response_status(e) == 404 { return Ok(None) }
+      if pb.classify(e).status == 404 { return Ok(None) }
       Err(e)
     },
   }
@@ -723,7 +723,7 @@ fn bot_mint(tok: string, name: string, duration: int) -> Result<string, string> 
 /// dead token, the same shape token create's refusal names. Anything else
 /// keeps the raw error.
 fn bot_mint_error(name: string, e: string) -> string {
-  let status = pb.response_status(e)
+  let status = pb.classify(e).status
   if status == 403 {
     return f"rotating {name}'s token: only the bot's owner or a superuser can do that
 the configured token does not own this bot — pass --admin-email/--admin-password (or set LLL_ADMIN_EMAIL/LLL_ADMIN_PASSWORD) to rotate as the superuser"

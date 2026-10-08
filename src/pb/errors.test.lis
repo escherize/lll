@@ -1,0 +1,56 @@
+#[test]
+fn every_kind_has_its_documented_exit_code() {
+  assert exit_code(ErrorKind.Usage) == 2
+  assert exit_code(ErrorKind.NotFound) == 3
+  assert exit_code(ErrorKind.Refused) == 4
+  assert exit_code(ErrorKind.NothingToDo) == 5
+  assert exit_code(ErrorKind.Auth) == 6
+  assert exit_code(ErrorKind.Network) == 1
+  assert exit_code(ErrorKind.Server) == 1
+  assert exit_code(ErrorKind.Failed) == 1
+}
+
+#[test]
+fn a_tag_survives_prefixes_and_never_shows() {
+  let inner = tag(CliError { kind: ErrorKind.Refused, status: 412, code: "", message: "changed" })
+  let wrapped = f"ENG-1: {inner}\nread it again"
+  let err = classify(wrapped)
+  assert exit_code(err.kind) == 4
+  assert err.status == 412
+  assert err.message == "ENG-1: changed\nread it again"
+  assert plain(wrapped) == err.message
+  // The outermost decision wins.
+  let outer = fail(ErrorKind.NotFound, f"gone: {inner}")
+  assert exit_code(classify(outer).kind) == 3
+  assert plain(outer) == "gone: changed"
+}
+
+#[test]
+fn untagged_text_is_a_plain_failure() {
+  let err = classify("POST http://host/404: 404 Not Found: {}")
+  assert exit_code(err.kind) == 1
+  assert err.status == 0
+  assert err.message == "POST http://host/404: 404 Not Found: {}"
+}
+
+#[test]
+fn http_status_decides_the_kind_only_for_the_api_envelope() {
+  let envelope = "{\"message\":\"Missing.\",\"data\":{}}"
+  assert exit_code(http_error("GET u", 404, "404 Not Found", envelope).kind) == 3
+  assert exit_code(http_error("GET u", 401, "401 Unauthorized", envelope).kind) == 6
+  assert exit_code(http_error("GET u", 403, "403 Forbidden", envelope).kind) == 4
+  assert exit_code(http_error("GET u", 412, "412 Precondition Failed", envelope).kind) == 4
+  assert exit_code(http_error("GET u", 400, "400 Bad Request", envelope).kind) == 1
+  assert exit_code(http_error("GET u", 500, "500 Internal Server Error", envelope).kind) == 1
+  // A 404 that is not the API's envelope is the wrong listener, not a
+  // missing record.
+  let wrong = http_error("GET http://host/api/x", 404, "404 Not Found", "404 page not found")
+  assert exit_code(wrong.kind) == 1
+  assert wrong.message.contains("404 page not found")
+  // The envelope is unwrapped: no method, url or JSON in the message.
+  let held = http_error("POST http://host/api/lll/issues/x/claim", 400, "400 Bad Request",
+    "{\"message\":\"Issue is already claimed by scratch.\",\"data\":{\"code\":\"claim_held\"},\"status\":400}")
+  assert held.message == "Issue is already claimed by scratch."
+  assert held.code == "claim_held"
+  assert exit_code(held.kind) == 4
+}

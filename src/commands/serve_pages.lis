@@ -188,7 +188,7 @@ fn board_page(w: http.ResponseWriter, r: Ref<http.Request>, team: models.Team, m
   for s in csv(raw.state) {
     match query.state(s) {
       Ok(valid) => { states = states.append(valid) },
-      Err(e) => { if err == "" { err = e } },
+      Err(e) => { if err == "" { err = pb.plain(e) } },
     }
   }
   // Who this viewer may name on this team (LLL-551). An assignee filter
@@ -196,7 +196,7 @@ fn board_page(w: http.ResponseWriter, r: Ref<http.Request>, team: models.Team, m
   let roster = match roster_for(r, team_id) {
     Ok(found) => found,
     Err(e) => {
-      http.Error(w, e, 500)
+      http.Error(w, pb.plain(e), 500)
       return
     },
   }
@@ -204,14 +204,14 @@ fn board_page(w: http.ResponseWriter, r: Ref<http.Request>, team: models.Team, m
   for a in csv(raw.assignee) {
     match roster_member(roster, a) {
       Ok(_) => assignees = assignees.append(a),
-      Err(e) => { if err == "" { err = e } },
+      Err(e) => { if err == "" { err = pb.plain(e) } },
     }
   }
   let mut labels: Slice<string> = []
   for l in csv(raw.label) {
     match records.resolve_label(team_id, l) {
       Ok(_) => labels = labels.append(l),
-      Err(e) => { if err == "" { err = e } },
+      Err(e) => { if err == "" { err = pb.plain(e) } },
     }
   }
   // Projects filter by id (LLL-523): the URL speaks names, as /issues does,
@@ -227,7 +227,7 @@ fn board_page(w: http.ResponseWriter, r: Ref<http.Request>, team: models.Team, m
         projects = projects.append(p)
         project_ids = project_ids.append(found.id)
       },
-      Err(e) => { if err == "" { err = e } },
+      Err(e) => { if err == "" { err = pb.plain(e) } },
     }
   }
   let mut prios: Slice<string> = []
@@ -318,7 +318,7 @@ fn board_page(w: http.ResponseWriter, r: Ref<http.Request>, team: models.Team, m
   let issues = match records.fetch_board_issues(team_id) {
     Ok(i) => issues_for(r, i).map(|x| roster.issue(x)),
     Err(e) => {
-      http.Error(w, e, 500)
+      http.Error(w, pb.plain(e), 500)
       return
     },
   }
@@ -326,7 +326,7 @@ fn board_page(w: http.ResponseWriter, r: Ref<http.Request>, team: models.Team, m
   let compose = match compose_vm(team_id, roster) {
     Ok(c) => c,
     Err(e) => {
-      http.Error(w, e, 500)
+      http.Error(w, pb.plain(e), 500)
       return
     },
   }
@@ -343,7 +343,7 @@ fn board_page(w: http.ResponseWriter, r: Ref<http.Request>, team: models.Team, m
 
   let held = match claims.for_team(team.id) {
     Ok(found) => found.map(|c| roster.claim(c)),
-    Err(e) => { http.Error(w, e, 500); return },
+    Err(e) => { http.Error(w, pb.plain(e), 500); return },
   }
   let vm = BoardVM {
     states: state_opts(),
@@ -433,14 +433,14 @@ fn issue_page(w: http.ResponseWriter, r: Ref<http.Request>, team: models.Team, m
   let issue = match records.fetch_issue(key) {
     Ok(i) => issues_for(r, [i])[0],
     Err(e) => {
-      http.Error(w, e, 404)
+      http.Error(w, pb.plain(e), 404)
       return
     },
   }
   let comments = match records.fetch_comments(issue.id) {
     Ok(c) => c,
     Err(e) => {
-      http.Error(w, e, 500)
+      http.Error(w, pb.plain(e), 500)
       return
     },
   }
@@ -449,14 +449,14 @@ fn issue_page(w: http.ResponseWriter, r: Ref<http.Request>, team: models.Team, m
   let roster = match roster_for(r, issue.team) {
     Ok(found) => found,
     Err(e) => {
-      http.Error(w, e, 500)
+      http.Error(w, pb.plain(e), 500)
       return
     },
   }
   let mut page = match issue_vm(issue, comments, roster) {
     Ok(p) => p,
     Err(e) => {
-      http.Error(w, e, 500)
+      http.Error(w, pb.plain(e), 500)
       return
     },
   }

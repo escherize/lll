@@ -575,8 +575,7 @@ fn doc_delete(input: flags.CommandInput) -> Result<(), string> {
 
   let d = fetch_doc(current_team()?, slug)?
   if !p.given("--yes") && !confirmed(f"delete doc {d.slug}?") {
-    fmt.Println("Aborted.")
-    return Ok(())
+    return Err(aborted())
   }
   let _ = pb.delete(f"/api/collections/docs/records/{d.id}")?
   fmt.Println(f"Deleted doc {d.slug}")
@@ -634,5 +633,5 @@ pub fn find_doc(
 /// Unknown-slug message. It names the team, because the same slug may well
 /// exist on another board and "no doc with slug 'index'" would be a lie.
 fn unknown_doc(team: models.Team, slug: string) -> string {
-  f"no doc with slug '{slug}' in {team.key} — see 'lll doc list'"
+  pb.fail(pb.ErrorKind.NotFound, f"no doc with slug '{slug}' in {team.key} — see 'lll doc list'")
 }

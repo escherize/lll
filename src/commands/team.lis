@@ -449,7 +449,7 @@ fn unknown_configured_team(key: string, origin: string) -> string {
   } else {
     ""
   }
-  f"no team with key '{key}'{from} on the server — 'lll team list' shows the keys; 'lll attach --key KEY' points this directory at one, 'lll config list' shows every value and the file it came from, or create it with 'lll team create {key} -n \"Name\"'"
+  pb.fail(pb.ErrorKind.NotFound, f"no team with key '{key}'{from} on the server — 'lll team list' shows the keys; 'lll attach --key KEY' points this directory at one, 'lll config list' shows every value and the file it came from, or create it with 'lll team create {key} -n \"Name\"'")
 }
 
 /// The configured team, insisted upon. Docs, findings, labels and projects
@@ -507,8 +507,7 @@ fn team_delete(input: flags.CommandInput) -> Result<(), string> {
     )
   }
   if !confirmed_on_terminal(input.parsed.given("--yes"), f"delete team {t.key}?") {
-    fmt.Println("Aborted.")
-    return Ok(())
+    return Err(aborted())
   }
   let _ = pb.delete(f"/api/collections/teams/records/{t.id}")?
   fmt.Println(f"deleted team {t.key}")
@@ -541,7 +540,7 @@ fn no_team() -> string {
 /// resolves a team key (same package: src/commands).
 fn unknown_team(key: string) -> string {
   if let Some(scoped) = unknown_team_scoped(key) { return scoped }
-  f"no team with key '{key}' on the server. First inspect 'lll team list --archived'; the team may have been renamed.\nFor an existing team, use 'lll attach --key EXISTING_KEY' to update the attachment, or prefix one command with LLL_TEAM=EXISTING_KEY.\nOnly if you intend a new team, create it with 'lll team create {key} -n \"Name\"'."
+  pb.fail(pb.ErrorKind.NotFound, f"no team with key '{key}' on the server. First inspect 'lll team list --archived'; the team may have been renamed.\nFor an existing team, use 'lll attach --key EXISTING_KEY' to update the attachment, or prefix one command with LLL_TEAM=EXISTING_KEY.\nOnly if you intend a new team, create it with 'lll team create {key} -n \"Name\"'.")
 }
 
 /// For a team-scoped caller, a missing key usually means "not yours", and
@@ -551,7 +550,7 @@ fn unknown_team_scoped(key: string) -> Option<string> {
   let Some(keys) = records.scoped_team_keys() else { return None }
   let mine = if keys.is_empty() { "none" } else { strings.Join(keys, ", ") }
   Some(
-    f"no team '{key}' among the teams you can see ({mine}). 'lll whoami' shows your access; ask the person who invited you if you need another team.",
+    pb.fail(pb.ErrorKind.NotFound, f"no team '{key}' among the teams you can see ({mine}). 'lll whoami' shows your access; ask the person who invited you if you need another team."),
   )
 }
 

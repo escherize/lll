@@ -61,6 +61,13 @@ fn confirmed(question: string) -> bool {
   a == "y" || a == "yes"
 }
 
+/// A declined confirmation: exit 4, refused (LLL-645). It used to print
+/// "Aborted." and exit 0, so a script could not tell a skipped delete from a
+/// done one.
+fn aborted() -> string {
+  pb.fail(pb.ErrorKind.Refused, "aborted: nothing was deleted")
+}
+
 /// The confirmation for deletes that never prompted before 1.0 (team, label,
 /// project, member, comment): a person at a terminal is asked, and a script
 /// is not, so no existing script starts blocking on stdin.

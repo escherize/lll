@@ -270,7 +270,7 @@ fn settle_team() {
   let teams = match records.list_teams() {
     Ok(teams) => teams,
     Err(e) => {
-      fmt.Println(f"authenticated, but could not verify team setup: {e}\nnext: lll team list, then lll attach --key KEY")
+      fmt.Println(f"authenticated, but could not verify team setup: {pb.plain(e)}\nnext: lll team list, then lll attach --key KEY")
       return
     },
   }
@@ -508,7 +508,7 @@ fn create_as_superuser(
 /// --create from it. Both branches are named here because the server does not
 /// tell us which one it is.
 fn login_failed(e: string, email: string, target: string) -> string {
-  let status = pb.response_status(e)
+  let status = pb.classify(e).status
   // A 403 whose body is a PocketBase envelope is the server refusing this
   // identity by name — a bot member at a password door (LLL-407) — and its
   // own wording is the answer. A bare 403 (or any other non-400) keeps the
@@ -578,10 +578,10 @@ pub fn renew_login_token() {
   match pb.refresh_token(cfg.url, cfg.token) {
     Ok(fresh) => {
       if let Err(e) = set_home_key("token", fresh) {
-        fmt.Fprintln(os.Stderr, f"note: could not save the renewed login token: {e}")
+        fmt.Fprintln(os.Stderr, f"note: could not save the renewed login token: {pb.plain(e)}")
       }
     },
-    Err(e) => fmt.Fprintln(os.Stderr, f"note: could not renew the login token in {home}: {e}"),
+    Err(e) => fmt.Fprintln(os.Stderr, f"note: could not renew the login token in {home}: {pb.plain(e)}"),
   }
 }
 

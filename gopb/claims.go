@@ -24,7 +24,11 @@ type ClaimOutcome struct {
 	Forced bool `json:"forced"`
 }
 
-type claimRejection struct{ message string }
+// claimRejection is a refusal with a stable code (LLL-645): claim_held,
+// needs_force, claim_changed or not_claimed, or "" for a malformed request.
+// The code reaches the client at data.code, so clients branch on it rather
+// than on the English message.
+type claimRejection struct{ code, message string }
 
 func (e *claimRejection) Error() string { return e.message }
 
@@ -68,10 +72,10 @@ func acquireClaim(app core.App, issueID, memberID, agent string) (ClaimOutcome, 
 		alreadyOwned := held != nil
 		if held != nil && held.GetString("member") != memberID {
 			name := rosterName(tx, memberID, held.GetString("member"), "someone else")
-			return &claimRejection{fmt.Sprintf("issue is already claimed by %s", name)}
+			return &claimRejection{"claim_held", fmt.Sprintf("issue is already claimed by %s", name)}
 		}
 		if held != nil && agentsDiffer(held, agent) {
-			return &claimRejection{fmt.Sprintf("issue is already claimed by %s (agent %s)",
+			return &claimRejection{"claim_held", fmt.Sprintf("issue is already claimed by %s (agent %s)",
 				member.GetString("name"), held.GetString("agent"))}
 		}
 		if held == nil {
@@ -145,10 +149,10 @@ func releaseClaim(app core.App, issueID, expectedClaimID string, by releaser) (C
 			return err
 		}
 		if held == nil {
-			return &claimRejection{"is not claimed"}
+			return &claimRejection{"not_claimed", "is not claimed"}
 		}
 		if expectedClaimID == "" || held.Id != expectedClaimID {
-			return &claimRejection{"the claim changed; refresh before releasing it"}
+			return &claimRejection{"claim_changed", "the claim changed; refresh before releasing it"}
 		}
 		memberID := held.GetString("member")
 		name, holder, forced, err := releaseAuthority(tx, held, by)
@@ -202,9 +206,9 @@ func releaseAuthority(tx core.App, held *core.Record, by releaser) (name, holder
 	forced = memberID != by.memberID || otherSession
 	if forced && !by.force {
 		if otherSession {
-			return name, holder, forced, &claimRejection{fmt.Sprintf("the claim is held by %s; releasing another session's claim needs force", shown)}
+			return name, holder, forced, &claimRejection{"needs_force", fmt.Sprintf("the claim is held by %s; releasing another session's claim needs force", shown)}
 		}
-		return name, holder, forced, &claimRejection{fmt.Sprintf("the claim is held by %s; releasing another member's claim needs force", shown)}
+		return name, holder, forced, &claimRejection{"needs_force", fmt.Sprintf("the claim is held by %s; releasing another member's claim needs force", shown)}
 	}
 	return name, holder, forced, nil
 }
@@ -264,18 +268,18 @@ func renewClaim(app core.App, issueID, expectedClaimID, memberID, agent string) 
 			return err
 		}
 		if held == nil {
-			return &claimRejection{"is not claimed"}
+			return &claimRejection{"not_claimed", "is not claimed"}
 		}
 		if expectedClaimID == "" || held.Id != expectedClaimID {
-			return &claimRejection{"the claim changed; refresh before renewing it"}
+			return &claimRejection{"claim_changed", "the claim changed; refresh before renewing it"}
 		}
 		holderID := held.GetString("member")
 		name := rosterName(tx, memberID, holderID, "an unknown member")
 		if holderID != memberID {
-			return &claimRejection{fmt.Sprintf("the claim is held by %s; only the holder renews it", name)}
+			return &claimRejection{"claim_held", fmt.Sprintf("the claim is held by %s; only the holder renews it", name)}
 		}
 		if agentsDiffer(held, agent) {
-			return &claimRejection{fmt.Sprintf("the claim is held by %s (agent %s); only the holder renews it",
+			return &claimRejection{"claim_held", fmt.Sprintf("the claim is held by %s (agent %s); only the holder renews it",
 				name, held.GetString("agent"))}
 		}
 		if err := tx.Save(held); err != nil {

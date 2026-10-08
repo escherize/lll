@@ -191,8 +191,7 @@ fn label_delete(input: flags.CommandInput) -> Result<(), string> {
     return Err(refuse_delete("label", name, used))
   }
   if !confirmed_on_terminal(p.given("--yes"), f"delete label {name}?") {
-    fmt.Println("Aborted.")
-    return Ok(())
+    return Err(aborted())
   }
   let _ = pb.delete(f"/api/collections/labels/records/{label.id}")?
   fmt.Println(deleted_line("label", name, used))

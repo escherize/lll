@@ -23,7 +23,7 @@ pub fn resolve_project(team_id: string, name: string) -> Result<models.Project, 
     if team_key != "" && strings.EqualFold(name, team_key) {
       return Err(f"'{name}' is the team, not a project — the team scopes every command already, so drop --project, or pick one from 'lll project list'")
     }
-    return Err(f"no project named '{name}' — see 'lll project list'")
+    return Err(pb.fail(pb.ErrorKind.NotFound, f"no project named '{name}' — see 'lll project list'"))
   }
   Ok(p)
 }

@@ -86,7 +86,7 @@ fn transact(caller: pb.Caller, issue_id: string, action: string, request: Unknow
   let body = json.Marshal(request).map_err(|e| f"encoding claim request: {e}")?
   let path = f"/api/lll/issues/{url.PathEscape(issue_id)}/{action}"
   let response = pb.send_as(caller, "POST", path, body as string, "application/json").map_err(|e| {
-    if pb.response_status(e) == 404 {
+    if pb.classify(e).status == 404 {
       "server does not support atomic claim operations — update the server before changing claims or assignments; no legacy claim writes were attempted"
     } else { e }
   })?
