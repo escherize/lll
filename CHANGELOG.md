@@ -6,13 +6,15 @@ minors. Issue keys are on the project's own board (`lll issue view KEY`).
 
 ## [Unreleased]
 
-## [1.0.0] - 2026-10-08
+## [0.9.0] - 2026-10-08
 
-1.0 is a promise to scripts. From this release, lll follows SemVer for the
-surface that `docs/cli-contract.md` lists: exit codes, the `--json` fields it
-names, the list envelope, and command, verb and flag spellings with their
-permanent aliases. A change that breaks one of these needs 2.0. Message
-wording and help text are not covered and can change in any release.
+0.9 is the release candidate for the 1.0 surface. `docs/cli-contract.md` now
+lists what 1.0 will promise: exit codes, the `--json` fields it names, the
+list envelope, and command, verb and flag spellings with their permanent
+aliases. Scripts can build against it now. 1.0 follows once the internals
+are restructured; until then this surface can still change, but only with
+a CHANGELOG entry that says so. Message wording and help text are never
+covered.
 
 ### Upgrading from 0.8
 

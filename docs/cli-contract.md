@@ -1,8 +1,9 @@
 # The lll CLI contract
 
-From 1.0.0, lll follows SemVer for the parts of the CLI listed here. Changing
-one of them in a way that breaks a script needs a new major version. Anything
-not listed here can change in a minor release.
+This is the surface lll 1.0.0 will promise under SemVer. From 1.0.0, changing
+one of these parts in a way that breaks a script needs a new major version;
+anything not listed here can change in a minor release. Until 1.0 (0.9.x),
+these parts can still change, but only with a CHANGELOG entry that says so.
 
 Covered:
 
