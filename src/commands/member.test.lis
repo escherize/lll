@@ -13,6 +13,17 @@ import "flags"
 // round trip is the thing being prevented, and only an assertion on the text
 // prevents it.
 
+// ---------------------------------------------------------- invite_base
+
+/// The invitee's login names the board when it is known, so it discovers
+/// both endpoints; an explicit --url still wins.
+#[test]
+fn invite_base_prefers_the_board_then_the_api() {
+  assert invite_base("", "http://127.0.0.1:8090", "http://127.0.0.1:8100/") == "http://127.0.0.1:8100"
+  assert invite_base("", "http://127.0.0.1:8090", "") == "http://127.0.0.1:8090"
+  assert invite_base("https://host/", "http://127.0.0.1:8090", "http://127.0.0.1:8100") == "https://host"
+}
+
 // ---------------------------------------------------------- invite_lines
 
 fn joined(email: string, password: string, base: string, team: string) -> string {

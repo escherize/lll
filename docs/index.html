@@ -190,8 +190,7 @@
   pre .note { color: var(--text-3); }
 
   /* The Icon-Carries-Color Rule: state colour reaches the page only through
-     the drawn icon; the text beside it stays gray. */
-  .st { display: inline-block; vertical-align: -2px; margin-right: 5px; }
+     the state glyph the CLI prints; the text beside it stays gray. */
   .st-todo     { color: var(--st-todo); }
   .st-progress { color: var(--st-progress); }
   .st-done     { color: var(--st-done); }
@@ -289,20 +288,6 @@
 </style>
 </head>
 <body>
-<!-- State icons: the 14px circle grammar from DESIGN.md, drawn once and
-     referenced with <use>, currentColor throughout. -->
-<svg width="0" height="0" style="position:absolute" aria-hidden="true" focusable="false"><defs>
-  <g id="i-todo"><circle cx="7" cy="7" r="5.6" fill="none" stroke="currentColor" stroke-width="1.5"></circle></g>
-  <g id="i-progress">
-    <circle cx="7" cy="7" r="5.6" fill="none" stroke="currentColor" stroke-width="1.5"></circle>
-    <path d="M7 2.6 A4.4 4.4 0 0 1 7 11.4 Z" fill="currentColor"></path>
-  </g>
-  <g id="i-done">
-    <circle cx="7" cy="7" r="6.3" fill="currentColor"></circle>
-    <path d="M4.3 7.1 L6.2 9 L9.7 5.2" fill="none" stroke="var(--bg)" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"></path>
-  </g>
-</defs></svg>
-
 <div class="hero-band">
 <header class="top">
   <div class="wrap top-in">
@@ -372,10 +357,12 @@
     --admin-email &lt;admin&gt; --admin-password &lt;admin pw&gt;</span>
 created member you &lt;you@example.com&gt;
 url = "https://tracker.example.com" in ~/.config/lll/lll.toml
+board endpoint discovered: https://tracker.example.com
 logged in as you
 token saved to ~/.config/lll/lll.toml
-team = "ENG" in ~/.config/lll/lll.toml (the server's only team)
-ready: lll issue create "a title"</pre></div>
+team = "ENG" in ~/.config/lll/lll.toml (the only team you can see)
+ready: lll issue create "a title"
+in a shared repo, 'lll attach' writes .lll.toml; commit that file with Git if clones should inherit the team</pre></div>
         </div>
       </div>
     </div>
@@ -395,9 +382,9 @@ ready: lll issue create "a title"</pre></div>
 Created ENG-1: Fix the login flow
 
 <span class="sig">$</span> <span class="cmd">lll issue list</span>
-<span class="key">ENG-1</span>   <svg class="st st-progress" width="14" height="14" viewBox="0 0 14 14" aria-hidden="true"><use href="#i-progress"></use></svg>in-progress   <span class="key">Fix the login flow</span>    just now
-<span class="key">ENG-2</span>   <svg class="st st-todo" width="14" height="14" viewBox="0 0 14 14" aria-hidden="true"><use href="#i-todo"></use></svg>todo          <span class="key">Board rail spacing</span>    2h ago
-<span class="key">ENG-3</span>   <svg class="st st-done" width="14" height="14" viewBox="0 0 14 14" aria-hidden="true"><use href="#i-done"></use></svg>done          <span class="key">Portless url</span>          yesterday</pre></div>
+<span class="key">ENG-1</span>  <span class="st-progress">◐</span> in-progress  !!!  <span class="key">Fix the login flow</span>    just now
+<span class="key">ENG-2</span>  <span class="st-todo">○</span> todo         !    <span class="key">Board rail spacing</span>    2h ago
+<span class="key">ENG-3</span>  <span class="st-done">●</span> done         !!   <span class="key">Portless url</span>          yesterday</pre></div>
         </div>
       </div>
     </div>
@@ -414,8 +401,9 @@ Created ENG-1: Fix the login flow
         <div class="term">
           <div class="term-head"><span class="label">lll attach</span></div>
           <div class="term-body"><pre><span class="sig">$</span> <span class="cmd">lll attach</span>
-the server has one team, ENG — attaching to it
+you can see one team, ENG — attaching to it
 team = "ENG" in /work/api/.lll.toml
+team ENG already exists
 commit .lll.toml — every clone and worktree of this repo is attached from then on</pre></div>
         </div>
       </div>
@@ -470,7 +458,7 @@ commit .lll.toml — every clone and worktree of this repo is attached from then
       a convention everyone remembers.
     </p>
     <p class="body">
-      <code>lll bot</code> mints that identity in one command. A bot member cannot log in,
+      <code>lll bot create</code> mints that identity in one command. A bot member cannot log in,
       is owned by a person, and is rotatable. <code>lll issue next</code> answers the question
       an agent has: which issue now. It picks ready and unclaimed, then priority, then oldest.
       <code>--claim</code> takes it, so two agents cannot start the same work.
@@ -478,9 +466,9 @@ commit .lll.toml — every clone and worktree of this repo is attached from then
     </p>
     <div class="term">
       <div class="term-head"><span class="label">Streams and tokens</span></div>
-      <div class="term-body"><pre><span class="sig">$</span> <span class="cmd">lll bot bot-deploy</span>
+      <div class="term-body"><pre><span class="sig">$</span> <span class="cmd">lll bot create bot-deploy</span>
 created bot member bot-deploy (kind=bot, owned by bryan)
-one-time bot token for bot-deploy — shown only here; expires …
+one-time bot token for bot-deploy — shown only here; expires 2027-10-08 (31536000s from now) — re-mint with 'lll bot rotate bot-deploy'
 paste this into the agent:
 
 true 'You are joining lll team ENG at https://lll.example.com.'
@@ -512,6 +500,11 @@ Board rail spacing</pre></div>
     <div class="term">
       <div class="term-head"><span class="label">lll up</span></div>
       <div class="term-body"><pre><span class="sig">$</span> <span class="cmd">LLL_TEAM=ENG lll up</span>
+auth   rules are authenticated-only; bootstrapping with superuser credentials before signing in the board as a member
+created team ENG
+wrote team = "ENG" to .lll.toml
+created member bryan
+auth   board signed in as bryan; token renewal keeps this member
 lll    &lt;installed version&gt;
 api    http://127.0.0.1:8090
 team   ENG

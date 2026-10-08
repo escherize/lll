@@ -36,7 +36,7 @@ pub fn watch_spec() -> Slice<flags.Flag> {
     flags.Flag { name: "--search", value: true, hint: "q", help: "only issues whose title contains q", .. },
     flags.Flag {
       name: "--ready",
-      help: "stream only the ready agenda (LLL-395): open issues whose\nblockers are all done, computed client-side against the ready set\nfetched at startup and refreshed from each event; an empty agenda\nkeeps the stream alive until something becomes ready",
+      help: "stream only the ready agenda: open issues whose\nblockers are all done, computed client-side against the ready set\nfetched at startup and refreshed from each event; an empty agenda\nkeeps the stream alive until something becomes ready",
       ..,
     },
     flags.Flag { name: "--json", help: "NDJSON: one raw server event object per line, with a\n\"topic\" field added", .. },
@@ -173,7 +173,7 @@ If you need every change, note the time of the last event you handled and,
 on start and after each reconnect, catch up with
 'lll issue list --since <that time>' (see its help for overlap and limits).
 
-With --ready, the stream shows only the ready agenda (LLL-395): open issues
+With --ready, the stream shows only the ready agenda: open issues
 (todo or backlog) whose blockers are all done or cancelled. Readiness is
 computed client-side against a snapshot of the team's issues taken at startup
 and refreshed from every event, so an issue becomes ready when its LAST open

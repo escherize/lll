@@ -44,7 +44,7 @@ Two failures from one session, to calibrate:
   not created`. The diff could not touch labels. It was a transient read whose
   assertion piped a command into grep without checking the command succeeded.
 - A PR failed on a claim-refusal assertion that checked for the literal string
-  `bcm`, the author's username. CI runs as `runner`. The feature worked; the
+  of the author's own username. CI runs as `runner`. The feature worked; the
   test was machine-specific.
 
 The first is infrastructure. The second is yours. They look identical in the
@@ -56,7 +56,7 @@ Older GitHub CLI versions can fail `gh pr edit --body-file` with the
 classic-project GraphQL deprecation at `repository.pullRequest.projectCards`
 (reproduced with 2.65.0; 2.95.0 succeeds). If you hit that error, use this REST
 fallback. Do not apply it to an unrelated permission or
-network failure.
+network failure. The fallback needs `python3` for the JSON encoding.
 
 Keep the exact Markdown in a file and encode it as JSON; shell interpolation
 can change newlines or execute characters from the body. For an existing PR:
@@ -110,8 +110,8 @@ may now conflict.
 
 ## The exit code you are reading is probably not the one you want
 
-This is the single most repeated mistake in lll's own development history, and
-it has produced confidently wrong "it passed" claims more than once.
+This is the most repeated mistake in agent-driven development, and it produces
+confidently wrong "it passed" claims.
 
 **A pipeline's status is its LAST command.**
 
@@ -145,12 +145,11 @@ from a distance. Read the log, not the number.
 **A green check is evidence about CI's vantage point. It is not evidence about
 the thing people install.**
 
-The canonical failure: lll's own `v0.3.0` was tagged, built, published with three
-binaries, and pushed to a Homebrew tap, with every check green. The release
-workflow asserts `lll --version` equals the tag - and runs it **inside the tag
-checkout**, the one directory on earth where the old `git describe` call gave
-the right answer. Downloaded from the release, the binary reported `lll 0.2.0`.
-In an unrelated repository tagged `v9.9.9`, it reported `lll 9.9.9`.
+The canonical failure: a release workflow asserts `tool --version` equals the
+tag, and runs it **inside the tag checkout**. If the binary reads its version
+from `git describe` at run time, that is the one directory where it gives the
+right answer. Every check is green; downloaded, the binary reports the previous
+version, or the version of whatever repository it runs in.
 
 So: **download the artifact and run it.**
 

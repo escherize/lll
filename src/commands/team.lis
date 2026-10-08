@@ -105,7 +105,7 @@ pub fn team_commands() -> Slice<flags.Command> {
 fn team_intro() -> string {
   "Renaming the key rewrites nothing else, because issue keys are derived from it
 (team key + number), so every key on the board and in the CLI follows at once.
-Three things do NOT follow (TASK-87):
+Three things do NOT follow:
   - the 'team =' line in .lll.toml, and LLL_TEAM — rerun 'lll attach --key NEW'
   - git branches already named eng-12-slug keep the old key
   - OLD-1 mentions inside descriptions and comment bodies are stored text

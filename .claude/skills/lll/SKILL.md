@@ -19,7 +19,7 @@ Every command works against one team on one server. `.lll.toml` (written by
 shows who you are, which server you reach and what you can do. `--team KEY`
 overrides the team for one command without rewriting configuration.
 
-`lll issue list` from the checkout is the project's real work list. Findings
+`lll issue list` from a directory with `.lll.toml` is the project's real work list. Findings
 are `lll finding list` / `lll finding near PATH`, decisions are `lll doc list`
 (kind decision), the backlog is the issue list.
 
@@ -248,7 +248,8 @@ asks which), so a side project's issues land in your main team.
 
 Archiving hides, never deletes: `/t/KEY/` still renders with an "archived"
 banner and everything stays readable, but new writes refuse and name the fix
-(`lll team unarchive KEY`). `lll team list --archived` shows what is parked.
+(`lll team unarchive KEY`). `lll team list --archived` lists every team and
+marks the archived ones.
 Archive rather than abandon — a board that lists only live teams is one you
 can actually scan.
 

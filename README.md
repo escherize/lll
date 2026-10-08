@@ -18,7 +18,12 @@ issues on free ports. Nothing there is a mockup.
 
 ## Install
 
-Prebuilt binaries, no checkout and no toolchain:
+```sh
+brew install escherize/lll/lll
+```
+
+Without Homebrew, download the binary (macOS on Apple silicon shown; on Linux
+use `lll-linux-amd64` or `lll-linux-arm64`):
 
 ```sh
 mkdir -p ~/bin && curl -LsSf -o ~/bin/lll \
@@ -26,29 +31,19 @@ mkdir -p ~/bin && curl -LsSf -o ~/bin/lll \
   && chmod +x ~/bin/lll
 ```
 
-Via Homebrew (requires the `escherize/homebrew-lll` tap to exist; until it
-does, use the curl line above):
-
-```sh
-brew install escherize/lll/lll
-```
-
-Linux: swap in `lll-linux-amd64` or `lll-linux-arm64`. Binaries are attached
-to [GitHub releases](https://github.com/escherize/lll/releases) by the
-release workflow on every `v*` tag; `lll --version` names the release. The
-binary includes PocketBase, migrations and web assets: `lll up` runs from any
-directory without a checkout or a toolchain.
-
-To upgrade, run `lll upgrade`. It runs `brew upgrade lll` for a Homebrew
-install and prints the command for any other install. For a release download
-that command downloads to a new file and then moves it into place: writing
-over a running binary can kill the `lll up` and `lll watch` processes using
-it. Before you upgrade a machine that runs `lll up`, stop it and back up its
-data directory (`pb/pb_data`, or the `--pb-dir` you gave). The new version
-migrates the database on its first start, and the backup is the way back.
-Upgrade the server and its clients together.
+Binaries are attached to [GitHub releases](https://github.com/escherize/lll/releases)
+on every `v*` tag; `lll --version` names the release. The binary includes
+PocketBase, migrations and web assets: `lll up` runs from any directory
+without a checkout or a toolchain.
 
 ## Quickstart
+
+This sequence runs as written on a machine with lll installed and nothing
+else set up. It starts a board on this machine, works one issue, attaches a
+repository and invites a colleague.
+
+A **team** is one tracker on the server: its key (`DEMO`) prefixes every issue
+id (`DEMO-1`), and each repo or directory attaches to one team.
 
 ```sh
 mkdir my-board && cd my-board
@@ -70,21 +65,28 @@ everything. The banner lines:
 - `board  login`: a link that signs your browser in to the board. On this
   machine, `lll board` prints it again.
 
-Keep that shell running. In a second shell, the CLI is ready:
+Keep that shell running. In a second shell, in `my-board`, the CLI is ready:
 
 ```sh
 lll whoami          # your member, server and team
 lll issue create -t "First issue" --priority 2 --emoji 🧪   # DEMO-1
 lll issue claim DEMO-1
 lll issue comment DEMO-1 -b "Started on it"
-lll issue close DEMO-1
+lll issue close DEMO-1   # done; closing also releases your claim
 lll board -w        # opens the board, signed in
 ```
 
-To track a repository on the same board, run `lll attach --key KEY` inside
-it. It creates team KEY if it is missing and writes `team = "KEY"` to the
-repo's `.lll.toml`; commit that file. Plain `lll attach` picks the board's
-only team when there is one.
+To track a repository on the same board, attach it to the team. Here a new
+one stands in for yours:
+
+```sh
+git init -q ../my-repo && cd ../my-repo
+lll attach --key DEMO     # writes team = "DEMO" to .lll.toml; commit that file
+lll issue list            # DEMO-1, from inside the repo
+```
+
+`lll attach --key KEY` creates team KEY when it is missing. Plain `lll attach`
+picks the board's only team when there is one.
 
 To bring in another person, mint a single-use invite link:
 
@@ -92,22 +94,56 @@ To bring in another person, mint a single-use invite link:
 lll invite create --team DEMO    # prints <board>/join/<code>
 ```
 
-They open the link, pick a name, and land on their own page at `/me`. It links
-their boards and has a "Show my CLI login" button. The token it shows logs a
-CLI in with `lll login --url <board> --token -`. A link to a loopback board
-works only on this machine; to reach teammates on other machines, use `--bind`
-(below). For an email and password login instead, `lll member invite NAME
---email E` prints a temporary password, and the member replaces it with
-`lll member set-password NAME --old-password <temporary>`.
+They open the link, pick a name, and land on their own page at `/me` (the
+board's rail links to it as "Your login"). It links their boards and has a
+"Show my CLI login" button. The token it shows logs a CLI in with
+`lll login --url <board> --token -`. A link to a loopback board works only on
+this machine; to reach teammates on other machines, use `--bind` (below). For
+an email and password login instead:
+
+```sh
+lll member invite kim --email kim@example.com
+```
+
+It prints a temporary password and the `lll login --url <board> --email ...`
+line to send. Logging in at the board's address saves both the board and its
+API. The member replaces the password with
+`lll member set-password kim --old-password <temporary>`.
+
+From here:
+
+- `lll --help` starts with the same sequence; every command takes `--help`.
+- Each team's docs (wiki pages, findings, decisions) are listed on the board
+  at `/t/KEY/docs`.
+- Scripts can rely on the exit codes and `--json` fields in the
+  [CLI contract](docs/cli-contract.md).
+- `lll skill list` prints the agent instructions shipped in the binary;
+  `lll bot create bot-NAME` gives an agent its own member and token.
 
 For a throwaway board that ignores your existing hosted config and all inherited
 `LLL_*` values, run `lll up --scratch` (`--local` is an alias). Its banner gives
 the temporary data directory and the exact command for using its CLI. Delete
 that directory when finished.
 
+## Upgrade
+
+Run `lll upgrade`. It runs `brew upgrade lll` for a Homebrew install and
+prints the command for any other install. For a release download that command
+downloads to a new file and then moves it into place: writing over a running
+binary can kill the `lll up` and `lll watch` processes using it.
+
+Before you upgrade a machine that runs `lll up`, stop it and back up its data
+directory (`pb/pb_data`, or the `--pb-dir` you gave). The new version migrates
+the database on its first start, and the backup is the way back. Upgrade the
+server and its clients together. [CHANGELOG.md](CHANGELOG.md) lists what
+changed, with a note on what to read before upgrading scripts.
+
+## Share a board
+
 To share a local board with hackathon teammates over a LAN or Tailscale, use
 the address they can reach:
 
+<!-- example-check: skip: needs a LAN or Tailscale address -->
 ```sh
 mkdir hack-board && cd hack-board
 LLL_TEAM=HACK lll up --bind <your-LAN-or-Tailscale-IP>
@@ -129,8 +165,10 @@ Start with `lll up --admin-ui` to enable it and print its address; sign in with
 the server administrator credentials. This controls the board proxy; the
 separate API listener retains its own administration routes.
 
-For development from a checkout, install the Lisette toolchain and let mise
-provision Go and jq, then build and start the board:
+## Build from source
+
+Install the Lisette toolchain and let mise provision Go and jq, then build and
+start the board from a checkout:
 
 ```sh
 curl -LsSf https://github.com/ivov/lisette/releases/latest/download/lisette-installer.sh | sh
@@ -160,6 +198,7 @@ credentials alone do not establish a member session.
 **If you hold the server's admin credentials, setting up your own machine is
 one command:**
 
+<!-- example-check: skip: needs a hosted server and its administrator credentials -->
 ```sh
 lll login --url https://your-host --email you@example.com \
   --create --password <pick one> \
@@ -176,12 +215,15 @@ says otherwise. If the server has exactly one team, `login` settles that too, so
 **If somebody else deployed it**, they run one command and send you what it
 prints:
 
+<!-- example-check: skip: needs a hosted server -->
 ```sh
 lll member invite NAME --email their@email --url https://your-host
 ```
 
 That creates the member, generates a temporary password, and prints the exact
-lines they run. The password is shown once and stored nowhere, so send it
+lines they run. Their `lll login --url` names the board's address when the
+inviting machine knows it (`web_url`, which `lll up` and `lll login` save), so
+their login finds both the board and its API; `--url` names another. The password is shown once and stored nowhere, so send it
 before you close the terminal. A member who has lost their password gets a new
 one from `lll member set-password NAME --password <pw>` (superuser only:
 pass `--admin-email` and `--admin-password`, or set them in the environment).
@@ -209,11 +251,12 @@ files, repo file beats home file, and each key resolves independently
 
 ## Attaching a repo, or any directory
 
-`lll attach` creates a team and writes one line, `team = "KEY"`, to
-`.lll.toml`. Inside a git repository that file goes at the repo root; commit
-it. Outside one it goes in the working directory, and every subdirectory
-inherits it. A scratch project needs no `git init` to be tracked. The key
-defaults to the directory name; `--key KEY` overrides it.
+`lll attach --key KEY` writes one line, `team = "KEY"`, to `.lll.toml`, and
+creates team KEY on the server when it is missing. Inside a git repository
+that file goes at the repo root; commit it. Outside one it goes in the working
+directory, and every subdirectory inherits it. A scratch project needs no
+`git init` to be tracked. Without `--key`, the server decides: one team means
+that team, several means you say which.
 
 That is the whole attachment. The two halves of the config live in different
 places:
@@ -234,16 +277,18 @@ work is done. A repo is not required. A plain directory of notes attaches the
 same way, and its subdirectories inherit the team:
 
 ```sh
-lll attach                    # once, repo or plain dir: creates KEY, writes .lll.toml
-lll issue create -t "..."     # work, tracked under KEY-1, KEY-2, ...
-lll team archive KEY          # done: leaves team lists and the board rail
+mkdir ../notes && cd ../notes
+lll attach --key NOTES        # once: creates team NOTES, writes .lll.toml here
+lll issue create -t "Outline the talk"   # NOTES-1
+lll team archive NOTES        # done: leaves team lists and the board rail
+lll team list --archived      # every team, the archived ones marked
+lll team unarchive NOTES      # back, whole
 ```
 
 Archiving hides, never deletes: `/t/KEY/` still renders (with an "archived"
 banner) and every issue and comment stays readable. New writes refuse: `lll issue create`, `lll attach`, and the archived board's
 editors all answer with the fix. `lll team unarchive KEY` brings the team back
 whole.
-`lll team list --archived` shows what is parked.
 
 ## Configuration
 
@@ -330,45 +375,64 @@ Scripts can rely on the exit codes and the `--json` fields listed in the
 [CLI contract](docs/cli-contract.md): 2 usage, 3 not found, 4 refused,
 5 nothing to do, 6 not authenticated.
 
+The tour runs in `my-repo` from the quickstart, a git repository attached to
+team DEMO:
+
 ```sh
-lll issue create -t "Fix login" --priority 1 --assignee bryan --label bug
+cd ../my-repo
+lll label create bug
+lll issue create -t "Fix login" --priority 1 --assignee "$USER" --label bug   # DEMO-2
 lll issue list --state todo --sort -updated
-lll issue branch-name ENG-12  # print eng-12-fix-login; changes nothing
-git switch -c "$(lll issue branch-name ENG-12)"  # optional, explicit Git action
-lll issue start ENG-12        # state -> in-progress; leaves Git untouched
-lll issue start ENG-12 --branch  # opt in to branch creation/switch and work-site recording
-lll issue claim ENG-12        # take it exclusively; non-zero if someone holds it
-lll issue release ENG-12      # give it back
-lll issue view                # ID inferred from the git branch
+lll issue branch-name DEMO-2  # print demo-2-fix-login; changes nothing
+lll issue start DEMO-2        # state -> in-progress; leaves Git untouched
+lll issue start DEMO-2 --branch  # also create or switch to that branch, and record the work site
+lll issue claim DEMO-2        # take it exclusively; non-zero if someone holds it
+lll issue view                # DEMO-2, inferred from the git branch
 lll issue comment -b "done in abc123"   # markdown; renders on the web board
-lll issue close
-lll issue pr                  # gh pr create titled "ENG-12: Fix login"; records gh#N
-lll issue ref ENG-12 gh#42     # append once; also retries a failed PR-reference save
+lll issue ref DEMO-2 gh#42    # append once; also retries a failed PR-reference save
+lll issue release DEMO-2      # give it back
+lll issue close               # DEMO-2 again, from the branch
+```
 
+These need a GitHub remote, or stream until Ctrl-C:
+
+<!-- example-check: skip: needs a GitHub remote, or streams until Ctrl-C -->
+```sh
+lll issue pr                  # gh pr create titled "DEMO-2: Fix login"; records gh#N
 lll watch --state in-review   # live NDJSON-able event stream for a query
-lll issue watch ENG-12        # one issue + its comments, until Ctrl-C
+lll issue watch DEMO-2        # one issue + its comments, until Ctrl-C
+```
 
-lll team|member|project|label list      # the other nouns: list/create/view/add
-lll team archive KEY          # park a finished team; unarchive brings it back
-lll team delete KEY           # delete a team holding no issues (archive keeps ids working)
-lll member delete NAME        # delete a member with nothing assigned (superuser only)
-lll attach                    # the server's team if it has one, else --key KEY
+The other nouns (`team`, `member`, `project`, `label`) list, create and view
+the same way:
+
+```sh
+lll team list
+lll team create SIDE -n "Side project"
+lll team delete SIDE          # delete a team holding no issues (archive keeps ids working)
 lll config list               # every value and the file it came from
 lll config get team           # one effective value, for scripts
 lll config check              # does the configured url answer as a PocketBase API?
-lll login --url https://host --email you@x.com --create --password <pw>
-                              # one command: make the member, log in, settle the team
-lll login                     # as a member, against the configured url
 lll whoami                    # which member, server and team you are acting as
-lll member invite NAME --email e@x.com  # add a colleague + temp password, in one
-lll member passes --count 10 --prefix hack  # private LAN/Tailscale teammate handoffs
-lll member set-password NAME --password <pw>  # superuser gives a member credentials
-lll token create bryan        # a one-year agent token (superuser only), printed once
+lll member invite lee --email lee@example.com  # add a colleague + temp password, in one
 lll bot create bot-myrepo     # a bot member you own, and an agent prompt with its token; refuses an existing bot
 lll bot rotate bot-myrepo --env > agent.env  # a new token (the old one stops working), printing only the LLL_URL/LLL_TOKEN exports
-lll logout                    # clear the stored token
 lll board -w                  # open the web board
 lll completions zsh           # bash, zsh, fish
+```
+
+These need a hosted server, a LAN board or administrator credentials:
+
+<!-- example-check: skip: needs a hosted server, a LAN board or administrator credentials; logout would end the session -->
+```sh
+lll login --url https://your-host --email you@example.com --create --password <pw>
+                              # one command: make the member, log in, settle the team
+lll login                     # as a member, against the configured url
+lll member passes --count 10 --prefix hack  # private LAN/Tailscale teammate handoffs
+lll member set-password NAME --password <pw>  # superuser gives a member credentials
+lll member delete NAME        # delete a member with nothing assigned (superuser only)
+lll token create NAME         # a one-year agent token (superuser only), printed once
+lll logout                    # clear the stored token
 ```
 
 Each flag and verb has one canonical spelling, and help, messages and docs use
@@ -395,8 +459,9 @@ Use `issue branch-name` when composing your own Git commands.
 
 ## Web board
 
-Server-rendered board at `/`, issue pages at `/issue/KEY-123`, search at
-`/search?q=…`.
+Server-rendered board at `/`, one team's board at `/t/KEY/`, issue pages at
+`/issue/KEY-123`, the team's docs at `/t/KEY/docs`, search at `/search?q=…`,
+and your own login at `/me`.
 
 - Realtime: changes from the CLI, other browsers, or the board itself appear
   everywhere without reload, over one SSE connection per page.
@@ -449,8 +514,7 @@ Layout:
 - `web/`: `templates/` (html/template) and `static/` (plain CSS), compiled
   into the binary via a `//go:embed` in `web/embed.go`: edits need a rebuild.
   Mermaid stays embedded for offline, single-file delivery and loads in the
-  browser only when a diagram appears. Packaging rationale and revisit criteria:
-  `lll doc view retain-embedded-lazy-mermaid`.
+  browser only when a diagram appears.
 
 ## Architecture
 
@@ -472,8 +536,6 @@ The board uses the same PocketBase REST client for application reads and writes
 even when the server is embedded. This preserves one local/remote data contract;
 the public API proxy hides the internal listener without removing that HTTP hop.
 The board acts as its process identity, not each browser visitor's identity.
-The decision, costs, and criteria for considering direct record access are in
-`lll doc view retain-pocketbase-rest-data-path` on the LLL board.
 
 A one-way, greppable Markdown projection is available with `lll export`.
 See [export mirrors](docs/export-mirror.md) for managed destinations, pagination
