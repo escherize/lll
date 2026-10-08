@@ -195,7 +195,8 @@ that close, release, delete or create bots.
   only ASCII letters and digits and starts with a letter.
 - A command that needs a team and has none (the "no team configured"
   refusal, and `bot create`/`bot rotate`) exits 2 (usage), not 1, and names
-  the fix: `--team KEY` for one command, or `lll attach` (LLL-679).
+  `--team KEY` as the fix; the "no team configured" refusal also names
+  `lll attach` (LLL-679).
 
 ### Removed
 
