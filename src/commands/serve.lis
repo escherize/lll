@@ -223,8 +223,8 @@ fn board_mux(
   mux.HandleFunc("POST /join/{code}", |w: http.ResponseWriter, r: Ref<http.Request>| join_redeem(ctx, w, r))
   // A member's own page and CLI login (LLL-648), where a join lands. Gated:
   // it answers the cookie the join just set.
-  mux.HandleFunc("GET /me", gated(ctx, |w: http.ResponseWriter, r: Ref<http.Request>| me_page(ctx, w, r)))
-  mux.HandleFunc("POST /me", gated(ctx, |w: http.ResponseWriter, r: Ref<http.Request>| me_cli(ctx, w, r)))
+  mux.HandleFunc("GET /me", gated(ctx, |w: http.ResponseWriter, r: Ref<http.Request>, v: Viewing| me_page(ctx, w, r, v.viewer)))
+  mux.HandleFunc("POST /me", gated(ctx, |w: http.ResponseWriter, r: Ref<http.Request>, v: Viewing| me_cli(ctx, w, r, v.viewer)))
   //
   // Every BOARD route sits behind the board gate (serve_gate.lis): pages,
   // writes, the SSE stream and static assets alike answer only board-token
@@ -241,30 +241,33 @@ fn board_mux(
   mux.HandleFunc("POST /login", |w: http.ResponseWriter, r: Ref<http.Request>| board_login(ctx, w, r))
   mux.HandleFunc(
     "GET /{$}",
-    gated(ctx, |w: http.ResponseWriter, r: Ref<http.Request>| {
+    gated(ctx, |w: http.ResponseWriter, r: Ref<http.Request>, _v: Viewing| {
       redirect_with_query(w, r, f"/t/{boot_key}/")
     }),
   )
   mux.HandleFunc(
     "GET /t/{team}",
-    gated(ctx, |w: http.ResponseWriter, r: Ref<http.Request>| {
-      let key = r.PathValue("team")
-      redirect_with_query(w, r, f"/t/{key}/")
+    gated(ctx, |w: http.ResponseWriter, r: Ref<http.Request>, v: Viewing| {
+      // Read as the viewer first (LLL-658): a team it cannot see answers 404
+      // here, as a missing one does, rather than redirecting.
+      if let Some(_) = routed_team(v.reads, w, r) {
+        redirect_with_query(w, r, f"/t/{r.PathValue("team")}/")
+      }
     }),
   )
   mux.HandleFunc(
     "GET /t/{team}/{$}",
-    gated(ctx, |w: http.ResponseWriter, r: Ref<http.Request>| {
-      if let Some(t) = routed_team(ctx, w, r) {
-        board_page(ctx, w, r, t, board_member.name)
+    gated(ctx, |w: http.ResponseWriter, r: Ref<http.Request>, v: Viewing| {
+      if let Some(t) = routed_team(v.reads, w, r) {
+        board_page(v.reads, w, r, t, board_member.name, v.viewer)
       }
     }),
   )
   mux.HandleFunc(
     "GET /t/{team}/issue/{key}",
-    gated(ctx, |w: http.ResponseWriter, r: Ref<http.Request>| {
-      if let Some(t) = routed_team(ctx, w, r) {
-        issue_page(ctx, w, r, t, board_member.name)
+    gated(ctx, |w: http.ResponseWriter, r: Ref<http.Request>, v: Viewing| {
+      if let Some(t) = routed_team(v.reads, w, r) {
+        issue_page(v.reads, w, r, t, board_member.name, v.viewer)
       }
     }),
   )
@@ -273,26 +276,26 @@ fn board_mux(
   // get an `index`, so a bare /doc/SLUG cannot name one record.
   mux.HandleFunc(
     "GET /t/{team}/doc/{slug}",
-    gated(ctx, |w: http.ResponseWriter, r: Ref<http.Request>| {
-      if let Some(t) = routed_team(ctx, w, r) {
-        doc_page(ctx, w, r, t, board_member.name)
+    gated(ctx, |w: http.ResponseWriter, r: Ref<http.Request>, v: Viewing| {
+      if let Some(t) = routed_team(v.reads, w, r) {
+        doc_page(v.reads, w, r, t, board_member.name, v.viewer)
       }
     }),
   )
   // LLL-643: the team's docs, each row linking to the address above.
   mux.HandleFunc(
     "GET /t/{team}/docs",
-    gated(ctx, |w: http.ResponseWriter, r: Ref<http.Request>| {
-      if let Some(t) = routed_team(ctx, w, r) {
-        docs_page(ctx, w, r, t, board_member.name)
+    gated(ctx, |w: http.ResponseWriter, r: Ref<http.Request>, v: Viewing| {
+      if let Some(t) = routed_team(v.reads, w, r) {
+        docs_page(v.reads, w, r, t, board_member.name, v.viewer)
       }
     }),
   )
   mux.HandleFunc(
     "GET /t/{team}/search",
-    gated(ctx, |w: http.ResponseWriter, r: Ref<http.Request>| {
-      if let Some(t) = routed_team(ctx, w, r) {
-        search_page(ctx, w, r, t, board_member.name)
+    gated(ctx, |w: http.ResponseWriter, r: Ref<http.Request>, v: Viewing| {
+      if let Some(t) = routed_team(v.reads, w, r) {
+        search_page(v.reads, w, r, t, board_member.name, v.viewer)
       }
     }),
   )
@@ -303,17 +306,17 @@ fn board_mux(
   // that edits a team's name and accent, made every other team uneditable.
   mux.HandleFunc(
     "GET /t/{team}/issues",
-    gated(ctx, |w: http.ResponseWriter, r: Ref<http.Request>| {
-      if let Some(t) = routed_team(ctx, w, r) {
-        issues_page(ctx, w, r, t.id, board_member.name)
+    gated(ctx, |w: http.ResponseWriter, r: Ref<http.Request>, v: Viewing| {
+      if let Some(t) = routed_team(v.reads, w, r) {
+        issues_page(v.reads, w, r, t.id, board_member.name, v.viewer)
       }
     }),
   )
   mux.HandleFunc(
     "GET /t/{team}/projects",
-    gated(ctx, |w: http.ResponseWriter, r: Ref<http.Request>| {
-      if let Some(t) = routed_team(ctx, w, r) {
-        projects_page(ctx, w, r, t.id, board_member.name)
+    gated(ctx, |w: http.ResponseWriter, r: Ref<http.Request>, v: Viewing| {
+      if let Some(t) = routed_team(v.reads, w, r) {
+        projects_page(v.reads, w, r, t.id, board_member.name, v.viewer)
       }
     }),
   )
@@ -322,7 +325,7 @@ fn board_mux(
   // one — someone arriving from the rail wants the team they are standing in.
   mux.HandleFunc(
     "GET /t/{team}/settings",
-    gated(ctx, |w: http.ResponseWriter, r: Ref<http.Request>| {
+    gated(ctx, |w: http.ResponseWriter, r: Ref<http.Request>, _v: Viewing| {
       redirect_with_query(w, r, f"/t/{r.PathValue("team")}/settings/identity")
     }),
   )
@@ -331,9 +334,9 @@ fn board_mux(
   // and a rail that quietly switched teams is the bug LLL-426 fixed.
   mux.HandleFunc(
     "GET /t/{team}/settings/{section}",
-    gated(ctx, |w: http.ResponseWriter, r: Ref<http.Request>| {
-      if let Some(t) = routed_team(ctx, w, r) {
-        settings_page(ctx, w, r, t.id, board_member.name, r.PathValue("section"))
+    gated(ctx, |w: http.ResponseWriter, r: Ref<http.Request>, v: Viewing| {
+      if let Some(t) = routed_team(v.reads, w, r) {
+        settings_page(v.reads, w, r, t.id, board_member.name, r.PathValue("section"))
       }
     }),
   )
@@ -343,7 +346,7 @@ fn board_mux(
   // is the server's, but the section they redraw is the page's team.
   mux.HandleFunc(
     "POST /t/{team}/settings/{kind}",
-    gated(ctx, flashing(ctx, |_ctx: pb.Client, r: mut Ref<http.Request>| settings_write(ctx,
+    gated(ctx, flashing(ctx, |_ctx: pb.Client, _v: Viewing, r: mut Ref<http.Request>| settings_write(ctx,
       r,
       routed_team_id(ctx, r)?,
       board_member.name,
@@ -351,14 +354,14 @@ fn board_mux(
   )
   mux.HandleFunc(
     "POST /t/{team}/settings/access/member",
-    gated(ctx, flashing(ctx, |_ctx: pb.Client, r: mut Ref<http.Request>| access_credential_write(ctx,
+    gated(ctx, flashing(ctx, |_ctx: pb.Client, _v: Viewing, r: mut Ref<http.Request>| access_credential_write(ctx,
       r,
       routed_team_id(ctx, r)?,
     ))),
   )
   mux.HandleFunc(
     "POST /t/{team}/settings/teams/archive",
-    gated(ctx, flashing(ctx, |_ctx: pb.Client, r: mut Ref<http.Request>| teams_archive_write(ctx,
+    gated(ctx, flashing(ctx, |_ctx: pb.Client, _v: Viewing, r: mut Ref<http.Request>| teams_archive_write(ctx,
       r,
       routed_team_id(ctx, r)?,
     ))),
@@ -368,13 +371,13 @@ fn board_mux(
   // anything that learned them keep working.
   mux.HandleFunc(
     "GET /issues",
-    gated(ctx, |w: http.ResponseWriter, r: Ref<http.Request>| {
+    gated(ctx, |w: http.ResponseWriter, r: Ref<http.Request>, _v: Viewing| {
       redirect_with_query(w, r, f"/t/{boot_key}/issues")
     }),
   )
   mux.HandleFunc(
     "GET /issue/{key}",
-    gated(ctx, |w: http.ResponseWriter, r: Ref<http.Request>| {
+    gated(ctx, |w: http.ResponseWriter, r: Ref<http.Request>, v: Viewing| {
       // The issue key names its own team (ENG-3 -> ENG), so the canonical
       // team-routed URL needs no lookup; an unknown key 404s over there. A
       // key that does not parse 404s here instead of borrowing the boot team.
@@ -382,6 +385,14 @@ fn board_mux(
       let Ok((tk, _)) = records.split_issue_key(key) else {
         http.Error(w, records.issue_not_found(key), 404)
         return
+      }
+      // A scoped viewer's read decides first (LLL-658): an issue it cannot
+      // see answers 404 here, as a missing one does.
+      if let Viewer.Scoped(_) = v.viewer {
+        if records.fetch_issue(v.reads, key).is_err() {
+          http.Error(w, records.issue_not_found(key), 404)
+          return
+        }
       }
       redirect_with_query(w, r, f"/t/{tk}/issue/{key}")
     }),
@@ -391,25 +402,25 @@ fn board_mux(
   // the slug up to do better: two teams may both own it.
   mux.HandleFunc(
     "GET /doc/{slug}",
-    gated(ctx, |w: http.ResponseWriter, r: Ref<http.Request>| {
+    gated(ctx, |w: http.ResponseWriter, r: Ref<http.Request>, _v: Viewing| {
       redirect_with_query(w, r, f"/t/{boot_key}/doc/{r.PathValue("slug")}")
     }),
   )
   mux.HandleFunc(
     "GET /docs",
-    gated(ctx, |w: http.ResponseWriter, r: Ref<http.Request>| {
+    gated(ctx, |w: http.ResponseWriter, r: Ref<http.Request>, _v: Viewing| {
       redirect_with_query(w, r, f"/t/{boot_key}/docs")
     }),
   )
   mux.HandleFunc(
     "GET /projects",
-    gated(ctx, |w: http.ResponseWriter, r: Ref<http.Request>| {
+    gated(ctx, |w: http.ResponseWriter, r: Ref<http.Request>, _v: Viewing| {
       redirect_with_query(w, r, f"/t/{boot_key}/projects")
     }),
   )
   mux.HandleFunc(
     "GET /settings",
-    gated(ctx, |w: http.ResponseWriter, r: Ref<http.Request>| {
+    gated(ctx, |w: http.ResponseWriter, r: Ref<http.Request>, _v: Viewing| {
       redirect_with_query(w, r, f"/t/{boot_key}/settings/identity")
     }),
   )
@@ -418,7 +429,7 @@ fn board_mux(
   // notes and the CLI's own error messages send people.
   mux.HandleFunc(
     "GET /settings/{section}",
-    gated(ctx, |w: http.ResponseWriter, r: Ref<http.Request>| {
+    gated(ctx, |w: http.ResponseWriter, r: Ref<http.Request>, _v: Viewing| {
       redirect_with_query(
         w,
         r,
@@ -447,14 +458,14 @@ fn board_mux(
   )
   mux.HandleFunc(
     "GET /search",
-    gated(ctx, |w: http.ResponseWriter, r: Ref<http.Request>| {
+    gated(ctx, |w: http.ResponseWriter, r: Ref<http.Request>, _v: Viewing| {
       redirect_with_query(w, r, f"/t/{boot_key}/search")
     }),
   )
   mux.HandleFunc(
     "GET /events",
-    gated(ctx, |w: http.ResponseWriter, r: Ref<http.Request>| {
-      events_stream(ctx, w, r, hub, boot_key)
+    gated(ctx, |w: http.ResponseWriter, r: Ref<http.Request>, v: Viewing| {
+      events_stream(ctx, w, r, hub, boot_key, v)
     }),
   )
   mux.HandleFunc(
@@ -464,7 +475,7 @@ fn board_mux(
   mux.HandleFunc("POST /state", gated(ctx, flashing(ctx, state_write)))
   mux.HandleFunc("POST /attachments/upload", gated(ctx, flashing(ctx, attachment_upload)))
   mux.HandleFunc("POST /attachments/remove", gated(ctx, flashing(ctx, attachment_remove)))
-  mux.HandleFunc("GET /attachments/file", gated(ctx, |w: http.ResponseWriter, r: Ref<http.Request>| attachment_download(ctx, w, r)))
+  mux.HandleFunc("GET /attachments/file", gated(ctx, |w: http.ResponseWriter, r: Ref<http.Request>, v: Viewing| attachment_download(v.reads, w, r)))
   mux.HandleFunc("POST /favorite", gated(ctx, flashing(ctx, favorite_write)))
   mux.HandleFunc("POST /priority", gated(ctx, flashing(ctx, priority_write)))
   mux.HandleFunc("POST /emoji", gated(ctx, flashing(ctx, emoji_write)))
@@ -483,7 +494,7 @@ fn board_mux(
   mux.HandleFunc(
     "GET /static/",
     |w: http.ResponseWriter, r: Ref<http.Request>| {
-      if admit(ctx, w, r) {
+      if admitted(ctx, w, r) {
         // Embedded files carry a ZERO ModTime, so http.ServeContent omits
         // Last-Modified and sets no ETag. With no validator and no freshness
         // directive the browser cannot reuse anything: every load refetched
@@ -547,7 +558,7 @@ fn routed_team_id(ctx: pb.Client, r: Ref<http.Request>) -> Result<string, string
 }
 
 /// A settings write on a path that names no team (LLL-664).
-fn bare_settings_write(_ctx: pb.Client, _r: mut Ref<http.Request>) -> Result<string, string> {
+fn bare_settings_write(_ctx: pb.Client, _v: Viewing, _r: mut Ref<http.Request>) -> Result<string, string> {
   Err("this settings form names no team; reload the page to get one that does")
 }
 

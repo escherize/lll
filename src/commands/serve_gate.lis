@@ -4,9 +4,11 @@ import "go:crypto/sha256"
 import "go:crypto/subtle"
 import "go:encoding/hex"
 import "go:encoding/json"
+import "go:fmt"
 import "go:html"
 import "go:net/http"
 import "go:net/url"
+import "go:os"
 import "go:strings"
 
 import "pb"
@@ -44,26 +46,31 @@ pub fn resolve_board_token(settings: config.Settings) -> string {
   rand.Text()
 }
 
-/// Wrap a page handler with the gate: admit(w, r) decides, and when it says
-/// no it has already written the response (401 page or login redirect).
+/// Wrap a page handler with the gate. The gate resolves who is asking once
+/// per request and hands the page that answer, with the client its reads go
+/// through (LLL-658). When it says no it has already written the response:
+/// a 401 page, a login redirect, or a 403 for a scoped viewer.
 pub fn gated(
   ctx: pb.Client,
-  page: fn(http.ResponseWriter, Ref<http.Request>),
+  page: fn(http.ResponseWriter, Ref<http.Request>, Viewing),
 ) -> fn(http.ResponseWriter, Ref<http.Request>) {
   |w: http.ResponseWriter, r: Ref<http.Request>| {
-    if admit(ctx, w, r) { page(w, r) }
+    let Some(viewer) = admit(ctx, w, r) else { return }
+    if let Some(v) = viewing(ctx, w, viewer) { page(w, r, v) }
   }
 }
 
-/// True when the request may proceed. When false, the response is already
-/// written: a 401 page naming how to get in, a 404 or 403 for a scoped
-/// viewer outside its teams, or — a GET that logged in with the query param —
-/// the 303 that hands the browser its cookie and cleans the token out of the
-/// address bar.
+/// The viewer this request may proceed as, or None when the response is
+/// already written: a 401 page naming how to get in, a 403 for a route a
+/// scoped viewer does not get, or (a GET that logged in with the query
+/// param) the 303 that hands the browser its cookie and cleans the token out
+/// of the address bar.
 ///
 /// Resolution order (LLL-545): the board token, then a team-scoped link
-/// ("KEY.MAC"), then a member's own token. Anything else is refused.
-fn admit(ctx: pb.Client, w: http.ResponseWriter, r: Ref<http.Request>) -> bool {
+/// ("KEY.MAC"), then a member's own token. Anything else is refused. A
+/// member token costs one /api/lll/access round trip here, and nothing
+/// later in the request asks again.
+fn admit(ctx: pb.Client, w: http.ResponseWriter, r: Ref<http.Request>) -> Option<Viewer> {
   let want = ctx.settings.board_token()
   let mut cookie = ""
   if let Some(c) = cookie_named(r, "lll_board") { cookie = c }
@@ -76,29 +83,27 @@ fn admit(ctx: pb.Client, w: http.ResponseWriter, r: Ref<http.Request>) -> bool {
     if r.Method == "GET" {
       set_board_cookie(w, want, 7 * 24 * 3600)
       http.Redirect(w, r, without_board_token(r), 303)
-      return false
+      return None
     }
-    return true
+    return Some(Viewer.Full)
   }
   if is_board_token(cookie, want) {
     // An already signed-in browser may reopen an old login link. Strip its
     // token too, before page rendering can preserve it in a saved view.
     if r.Method == "GET" && query != "" {
       http.Redirect(w, r, without_board_token(r), 303)
-      return false
+      return None
     }
-    return true
+    return Some(Viewer.Full)
   }
   // A team-scoped link or a member token logs in the same way, then answers
   // only for its teams. A member's cookie lasts a year (the join contract);
   // revoking it is deleting or narrowing the member, read on every request.
   if query != "" {
-    let is_link = team_scope(query, want).is_some()
-    let is_member = !is_link && member_viewer(ctx, query).is_some()
-    if is_link || is_member {
+    if let Some(login) = cookie_viewer(ctx, query, want) {
       if r.Method != "GET" {
         refused(w, r)
-        return false
+        return None
       }
       // Login CSRF (LLL-545 review): Lax cookies ride cross-site GETs, so a
       // link from any page could swap a signed-in browser onto another
@@ -106,7 +111,7 @@ fn admit(ctx: pb.Client, w: http.ResponseWriter, r: Ref<http.Request>) -> bool {
       // cookie that still resolves to a viewer: the browser stays who it is.
       if cookie != query && cookie_viewer(ctx, cookie, want).is_some() {
         http.Redirect(w, r, without_board_token(r), 303)
-        return false
+        return None
       }
       // A link sets a cookie only on positive evidence that this browser's
       // user opened it: Sec-Fetch-Site "none" (typed, pasted, bookmarked)
@@ -114,24 +119,31 @@ fn admit(ctx: pb.Client, w: http.ResponseWriter, r: Ref<http.Request>) -> bool {
       // is what browsers send to a plain-HTTP LAN or Tailscale board, gets
       // a confirm page whose same-origin POST to /login sets the cookie.
       if !direct_navigation(r) {
-        confirm_login(w, r, query, login_identity(ctx, query, want))
-        return false
+        confirm_login(w, r, query, login_identity(login))
+        return None
       }
-      let age = if is_link { 7 * 24 * 3600 } else { 365 * 24 * 3600 }
+      let age = if login.member.is_none() { 7 * 24 * 3600 } else { 365 * 24 * 3600 }
       set_board_cookie(w, query, age)
       http.Redirect(w, r, without_board_token(r), 303)
-      return false
+      return None
     }
   }
   let Some(viewer) = cookie_viewer(ctx, cookie, want) else {
     refused(w, r)
-    return false
+    return None
   }
   if r.Method == "GET" && query != "" {
     http.Redirect(w, r, without_board_token(r), 303)
-    return false
+    return None
   }
-  admit_scoped(w, r, viewer)
+  if !admit_scoped(w, r, viewer) { return None }
+  Some(Viewer.Scoped(viewer))
+}
+
+/// True when the gate admits the request: for /static, which reads nothing,
+/// so a team link's reader is not minted for it.
+pub fn admitted(ctx: pb.Client, w: http.ResponseWriter, r: Ref<http.Request>) -> bool {
+  admit(ctx, w, r).is_some()
 }
 
 /// True when the browser says the user opened this URL directly or from the
@@ -144,10 +156,8 @@ fn direct_navigation(r: Ref<http.Request>) -> bool {
 
 /// Who a sign-in link would make this browser, in words for the confirm
 /// page, so someone who opened another person's link can notice.
-fn login_identity(ctx: pb.Client, tok: string, want: string) -> string {
-  if let Some(key) = team_scope(tok, want) { return f"a read-only viewer of team {key}" }
-  let Some(v) = member_viewer(ctx, tok) else { return "an unknown login" }
-  let Some(m) = v.member else { return "an unknown login" }
+fn login_identity(v: ScopedViewer) -> string {
+  let Some(m) = v.member else { return f"a read-only viewer of team {v.teams.get(0).unwrap_or("")}" }
   let mode = if m.rw { "read-write" } else { "read-only" }
   let teams = if v.teams.is_empty() { "no teams" } else { strings.Join(v.teams, ", ") }
   f"{m.name} ({mode}, {teams})"
@@ -297,12 +307,29 @@ fn is_board_token(tok: string, want: string) -> bool {
 //   the member's EFFECTIVE teams, read from the server on every request, and
 //   writes only when the member is read-write.
 //
-// The board READS as its own member: it renders pages and the one shared
-// realtime subscription as the process (design doc scoped-access-invites,
-// Realtime). So lll code keeps a scoped viewer inside its teams: the route
-// allowlist below, the rail, doc links and the SSE fan-out. A member viewer's
-// WRITES run with its own token (pb.Caller.Member), so PocketBase checks
-// its teams and mode and records it as the author.
+// The board READS as its viewer (LLL-658): every page, raw view, search and
+// live fragment is fetched with the viewer's own credential, so PocketBase's
+// collection rules (and gopb) decide what a scoped viewer sees, and records
+// it may not see never arrive. A member reads with its own token; a team
+// link reads as that team's link viewer, a server-side read-only identity
+// (gopb/link_viewers.go); the board token reads as the board's own member,
+// which sees every team. A member viewer's WRITES run with its own token too
+// (pb.Caller.Member), so PocketBase checks its teams and mode and records it
+// as the author.
+//
+// The allowlist below decides which ROUTES a scoped viewer gets (settings and
+// the workspace-wide rows stay closed, a read-only login never writes). It
+// filters no data: a hidden team or issue answers 404 because the viewer's
+// own read of it finds nothing.
+
+/// One request's viewer, resolved once by the gate and passed down
+/// (LLL-658). `reads` is the client every read for this request goes
+/// through: the viewer's own credential, never the board's for a scoped
+/// viewer.
+pub struct Viewing {
+  pub viewer: Viewer,
+  pub reads: pb.Client,
+}
 
 /// Who is looking at the board.
 pub enum Viewer {
@@ -345,10 +372,10 @@ impl ScopedViewer {
   }
 }
 
-/// The viewer this request's credentials name. Called by pages and actions
-/// after the gate admitted the request, so a credential that stopped
-/// resolving in between (the member was deleted) sees nothing rather than
-/// everything.
+/// The viewer this request's credentials name, read again: an open /events
+/// stream re-checks it (LLL-626), so a credential that stopped resolving
+/// since the stream opened (the member was deleted) sees nothing rather
+/// than everything.
 pub fn board_viewer(ctx: pb.Client, r: Ref<http.Request>) -> Viewer {
   let want = ctx.settings.board_token()
   let cookie = cookie_named(r, "lll_board").unwrap_or("")
@@ -359,21 +386,71 @@ pub fn board_viewer(ctx: pb.Client, r: Ref<http.Request>) -> Viewer {
   Viewer.Scoped(cookie_viewer(ctx, cookie, want).unwrap_or(none))
 }
 
-/// True unless this request's viewer sees every team: the board token, or
-/// a member cookie whose effective access is every team (LLL-551). Pages use
-/// it to decide whether to withhold other teams' labels and projects and
-/// members outside the roster.
-pub fn is_scoped(ctx: pb.Client, r: Ref<http.Request>) -> bool {
-  viewer_is_scoped(board_viewer(ctx, r))
-}
-
-/// is_scoped for a viewer already resolved.
+/// True unless this viewer sees every team: the board token, or a member
+/// cookie whose effective access is every team (LLL-551). Rendering uses it
+/// to drop label and project ids its reads could not expand (shown_refs).
 pub fn viewer_is_scoped(v: Viewer) -> bool {
   match v {
     Viewer.Full => false,
     Viewer.Scoped(s) => !s.member.map_or(false, |m| m.all),
   }
 }
+
+/// True when this viewer may write: the board token, or a read-write member.
+pub fn viewer_writes(v: Viewer) -> bool {
+  match v {
+    Viewer.Full => true,
+    Viewer.Scoped(s) => s.member.map_or(false, |m| m.rw),
+  }
+}
+
+/// The viewer with the client its reads go through, or None when a team
+/// link's reader cannot be had (the response is then written: the 404 a
+/// missing team gets, or a 503).
+fn viewing(ctx: pb.Client, w: http.ResponseWriter, viewer: Viewer) -> Option<Viewing> {
+  match reader_for(ctx, viewer) {
+    Ok(reads) => Some(Viewing { viewer, reads }),
+    Err(e) => {
+      if pb.classify(e).status == 404 {
+        let key = match viewer {
+          Viewer.Scoped(v) => v.teams.get(0).unwrap_or(""),
+          Viewer.Full => "",
+        }
+        http.Error(w, hidden_team(key), 404)
+      } else {
+        // The cause names the internal API address (review N2): the log
+        // gets it, the page does not.
+        fmt.Fprintln(os.Stderr, f"board: a team link's reader could not be had: {pb.plain(e)}")
+        http.Error(w, "this board cannot open that team link right now; try again, or ask the person who sent it", 503)
+      }
+      None
+    },
+  }
+}
+
+/// The client a viewer reads with (LLL-658): the board's own for the board
+/// token, the member's own token for a member, and for a team link the
+/// token of that team's link viewer, which gopb mints for the board's
+/// member and the board keeps server-side.
+pub fn reader_for(ctx: pb.Client, viewer: Viewer) -> Result<pb.Client, string> {
+  let Viewer.Scoped(v) = viewer else { return Ok(ctx) }
+  if let Some(m) = v.member { return Ok(ctx.reading_as(m.token)) }
+  let key = records.normalize_team_key(v.teams.get(0).unwrap_or(""))
+  let Ok(payload) = json.Marshal(LinkTeam { team: key }) else { return Err("encoding the team link") }
+  let body = ctx.post("/api/lll/link-token", payload as string)?
+  let mut reply = LinkToken { .. }
+  let decoded = json.Unmarshal(body.bytes(), &reply)
+  if decoded.is_err() || reply.token == "" {
+    return Err("the server did not hand over the team link's reader")
+  }
+  Ok(ctx.reading_as(reply.token))
+}
+
+#[json]
+struct LinkTeam { team: string }
+
+#[json]
+struct LinkToken { token: string }
 
 /// A cookie that is a team-scoped link or a member token, as its viewer.
 fn cookie_viewer(ctx: pb.Client, cookie: string, want: string) -> Option<ScopedViewer> {
@@ -424,9 +501,10 @@ fn team_scope(token: string, board_token: string) -> Option<string> {
   Some(key)
 }
 
-/// Admit a scoped viewer to its own teams' pages. The bare root sends it to
-/// its first team's board; a hidden team or issue answers 404 exactly like a
-/// missing one; any other route outside the allowlist is a 403.
+/// Admit a scoped viewer to the routes it gets. The bare root sends it to
+/// its first team's board; any route outside the allowlist is a 403. Which
+/// teams and issues it sees is not decided here: its pages read as the
+/// viewer, so a hidden team or issue answers 404 exactly like a missing one.
 fn admit_scoped(w: http.ResponseWriter, r: Ref<http.Request>, v: ScopedViewer) -> bool {
   let Some(u) = r.URL else {
     http.Error(w, "bad request", 400)
@@ -439,14 +517,9 @@ fn admit_scoped(w: http.ResponseWriter, r: Ref<http.Request>, v: ScopedViewer) -
     }
     return false
   }
-  let q = u.Query()
   let writes = v.member.map_or(false, |m| m.rw)
-  match scoped_route(r.Method, u.Path, q.Get("page"), q.Get("key"), q.Get("team"), v, writes) {
+  match scoped_route(r.Method, u.Path, writes) {
     ScopedVerdict.Open => true,
-    ScopedVerdict.Hidden(message) => {
-      http.Error(w, message, 404)
-      false
-    },
     ScopedVerdict.Closed(message) => {
       http.Error(w, message, 403)
       false
@@ -457,15 +530,13 @@ fn admit_scoped(w: http.ResponseWriter, r: Ref<http.Request>, v: ScopedViewer) -
 /// What the gate does with one scoped viewer's request.
 pub enum ScopedVerdict {
   Open,
-  /// 404 with the words a missing team or issue gets.
-  Hidden(string),
   /// 403: a route scoped viewers do not get (settings, workspace-wide rows,
   /// writes for a read-only viewer).
   Closed(string),
 }
 
-/// The writes a read-write member viewer may post. Each action checks the
-/// issue's team itself and writes with the viewer's token; /bot (LLL-546)
+/// The writes a read-write member viewer may post. Each action reads its
+/// issue or team with the viewer's token and writes with it; /bot (LLL-546)
 /// mints a bot owned by the viewer, with the viewer's token.
 fn scoped_writes() -> Slice<string> {
   [
@@ -477,18 +548,7 @@ fn scoped_writes() -> Slice<string> {
 
 /// Whether a scoped viewer may make this request. An allowlist, so a route
 /// added later stays closed to scoped viewers until someone opens it here.
-/// `page`, `issue` and `team` are the /events query parameters (and `issue`
-/// the attachment download's key), which pick the stream the same way
-/// events_stream does.
-pub fn scoped_route(
-  method: string,
-  path: string,
-  page: string,
-  issue: string,
-  team: string,
-  v: ScopedViewer,
-  writes: bool,
-) -> ScopedVerdict {
+pub fn scoped_route(method: string, path: string, writes: bool) -> ScopedVerdict {
   // A viewer's own page (LLL-648): it shows only this viewer's own login,
   // so read-only viewers get it too, the POST that reveals it included.
   if path == "/me" && (method == "GET" || method == "HEAD" || method == "POST") {
@@ -501,37 +561,24 @@ pub fn scoped_route(
   let closed = ScopedVerdict.Closed("this page is not open to a team-scoped board login")
   if method != "GET" { return closed }
   if strings.HasPrefix(path, "/static/") { return ScopedVerdict.Open }
-  if path == "/events" {
-    if page == "issue" && issue != "" { return issue_route(v, issue) }
-    if team != "" && v.teams.contains(team) { return ScopedVerdict.Open }
-    return ScopedVerdict.Hidden(hidden_team(team))
-  }
-  if path == "/attachments/file" { return issue_route(v, issue) }
-  // Cards, search rows and doc links use the bare /issue/KEY address, which
-  // redirects to the issue's own team path, where the gate checks again.
+  // The stream, the attachment download and the bare /issue/KEY address
+  // (cards, search rows and doc links use it) each read their issue or team
+  // as the viewer before answering.
+  if path == "/events" || path == "/attachments/file" { return ScopedVerdict.Open }
   if let Some(bare) = strings.CutPrefix(path, "/issue/") {
-    if !strings.Contains(bare, "/") { return issue_route(v, bare) }
+    if bare != "" && !strings.Contains(bare, "/") { return ScopedVerdict.Open }
   }
   let Some(routed) = strings.CutPrefix(path, "/t/") else { return closed }
-  let (raw_key, rest, slash) = strings.Cut(routed, "/")
-  let key = records.normalize_team_key(raw_key)
-  if !v.teams.contains(key) { return ScopedVerdict.Hidden(hidden_team(raw_key)) }
+  let (_, rest, slash) = strings.Cut(routed, "/")
   if !slash || rest == "" || rest == "issues" || rest == "projects" || rest == "docs" || rest == "search" {
     return ScopedVerdict.Open
   }
-  if let Some(issue_key) = strings.CutPrefix(rest, "issue/") {
-    if issue_of_team(issue_key, key) { return ScopedVerdict.Open }
-    return ScopedVerdict.Hidden(records.issue_not_found(issue_key))
-  }
-  if let Some(slug) = strings.CutPrefix(rest, "doc/") {
-    if slug != "" && !strings.Contains(slug, "/") { return ScopedVerdict.Open }
+  for prefix in ["issue/", "doc/"] {
+    if let Some(name) = strings.CutPrefix(rest, prefix) {
+      if name != "" && !strings.Contains(name, "/") { return ScopedVerdict.Open }
+    }
   }
   closed
-}
-
-fn issue_route(v: ScopedViewer, issue: string) -> ScopedVerdict {
-  if v.sees_issue(issue) { return ScopedVerdict.Open }
-  ScopedVerdict.Hidden(records.issue_not_found(issue))
 }
 
 /// The 404 body a team that does not exist gets (routed_team's words).

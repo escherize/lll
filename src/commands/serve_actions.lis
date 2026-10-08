@@ -27,14 +27,14 @@ import "query"
 /// flash. Almost none owes any and returns "".
 fn flashing(
   ctx: pb.Client,
-  write: fn(pb.Client, mut Ref<http.Request>) -> Result<string, string>,
-) -> fn(http.ResponseWriter, Ref<http.Request>) {
-  |w: http.ResponseWriter, r: Ref<http.Request>| {
+  write: fn(pb.Client, Viewing, mut Ref<http.Request>) -> Result<string, string>,
+) -> fn(http.ResponseWriter, Ref<http.Request>, Viewing) {
+  |w: http.ResponseWriter, r: Ref<http.Request>, v: Viewing| {
     // The mux hands out read-only requests; parsing a form body is a write
     // (it caches into r.Form). Clone is the sanctioned upgrade: the copy is
     // ours to parse, and it shares the one Body stream each action reads once.
     let mut wr = r.Clone(r.Context())
-    finish_action(ctx, w, wr, write(ctx, wr))
+    finish_action(v, w, wr, write(ctx, v, wr))
   }
 }
 
@@ -43,18 +43,18 @@ fn flashing(
 /// Set-Cookie has to be on the writer before the flash body is written.
 fn flashing_with(
   ctx: pb.Client,
-  write: fn(pb.Client, http.ResponseWriter, mut Ref<http.Request>) -> Result<string, string>,
-) -> fn(http.ResponseWriter, Ref<http.Request>) {
-  |w: http.ResponseWriter, r: Ref<http.Request>| {
+  write: fn(pb.Client, Viewing, http.ResponseWriter, mut Ref<http.Request>) -> Result<string, string>,
+) -> fn(http.ResponseWriter, Ref<http.Request>, Viewing) {
+  |w: http.ResponseWriter, r: Ref<http.Request>, v: Viewing| {
     let mut wr = r.Clone(r.Context())
-    finish_action(ctx, w, wr, write(ctx, w, wr))
+    finish_action(v, w, wr, write(ctx, v, w, wr))
   }
 }
 
 /// The only two answers an action can give — flash the error or clear the
 /// strip — consumed in one place instead of once per fallible step.
 fn finish_action(
-  ctx: pb.Client,
+  v: Viewing,
   w: http.ResponseWriter,
   wr: mut Ref<http.Request>,
   result: Result<string, string>,
@@ -70,7 +70,7 @@ fn finish_action(
     Err(e) => {
       action_flash(w, target, e)
       if wr.PostFormValue("property_edit") == "1" {
-        let _ = w.Write(property_recovery(ctx, wr.FormValue("key"), board_viewer(ctx, wr)).bytes())
+        let _ = w.Write(property_recovery(v.reads, wr.FormValue("key")).bytes())
       }
     },
   }
@@ -95,22 +95,23 @@ fn patch_issue(ctx: pb.Client, caller: pb.Caller, id: string, value: Unknown) ->
 /// Who a board write runs as (LLL-545). The board token writes as the
 /// board's own member, as it always has. A read-write member viewer writes
 /// with its own token, so PocketBase checks its teams and mode and records
-/// it as the author; `scope` keeps the issue lookup inside its teams.
+/// it as the author. `reads` is the viewer's own read client (LLL-658): the
+/// issue, team and catalogues a write checks are read as the viewer.
 struct Acting {
   caller: pb.Caller,
   member: Option<ViewerMember>,
-  scope: Option<ScopedViewer>,
+  reads: pb.Client,
 }
 
 /// The acting identity for this write. The gate already refused a read-only
 /// viewer's POST; this refuses again rather than fall back to the process.
-fn acting_as(ctx: pb.Client, r: Ref<http.Request>) -> Result<Acting, string> {
-  match board_viewer(ctx, r) {
-    Viewer.Full => Ok(Acting { caller: pb.Caller.Process, member: None, scope: None }),
-    Viewer.Scoped(v) => {
-      let Some(m) = v.member else { return Err(scoped_read_only()) }
+fn acting_as(v: Viewing) -> Result<Acting, string> {
+  match v.viewer {
+    Viewer.Full => Ok(Acting { caller: pb.Caller.Process, member: None, reads: v.reads }),
+    Viewer.Scoped(s) => {
+      let Some(m) = s.member else { return Err(scoped_read_only()) }
       if !m.rw { return Err(scoped_read_only()) }
-      Ok(Acting { caller: pb.Caller.Member(m.token), member: Some(m), scope: Some(v) })
+      Ok(Acting { caller: pb.Caller.Member(m.token), member: Some(m), reads: v.reads })
     },
   }
 }
@@ -120,14 +121,10 @@ fn scoped_read_only() -> string {
 }
 
 impl Acting {
-  /// The issue `key` names, when this actor may see it. One it may not see
-  /// answers exactly as a missing one does.
-  fn issue(self, ctx: pb.Client, key: string) -> Result<models.Issue, string> {
-    let issue = records.fetch_issue(ctx, key)?
-    if let Some(v) = self.scope {
-      if !v.sees(issue.expand.team.key) { return Err(records.issue_not_found(key)) }
-    }
-    Ok(issue)
+  /// The issue `key` names, read as this actor: one it may not see answers
+  /// exactly as a missing one does, because it never arrives.
+  fn issue(self, key: string) -> Result<models.Issue, string> {
+    records.fetch_issue(self.reads, key)
   }
 
   /// The member a write names as its author or claimant: the viewer, or the
@@ -173,7 +170,7 @@ fn respond_flash(w: http.ResponseWriter, html: string) {
 /// unchecked: the form only ever offers ids that exist, and PB rejects a
 /// bogus one with a message the flash strip already knows how to show.
 /// Re-validating here would mean three more fetches per create.
-fn create_write(ctx: pb.Client, r: mut Ref<http.Request>) -> Result<string, string> {
+fn create_write(ctx: pb.Client, v: Viewing, r: mut Ref<http.Request>) -> Result<string, string> {
   let title = strings.TrimSpace(r.PostFormValue("title"))
   if title == "" { return Err("title is required") }
   // Absent state means todo, the same default `lll issue create` uses, so
@@ -188,14 +185,10 @@ fn create_write(ctx: pb.Client, r: mut Ref<http.Request>) -> Result<string, stri
   if team_key == "" {
     return Err("a new issue names its team: the board's form sends it, so reload the page")
   }
-  let who = acting_as(ctx, r)?
-  // A scoped viewer names one of its own teams; a hidden team answers like
-  // a missing one.
-  if let Some(v) = who.scope {
-    if !v.sees(team_key) { return Err(unknown_team(ctx, team_key)) }
-  }
-  let Some(t) = records.find_team(ctx, team_key)? else {
-    return Err(unknown_team(ctx, team_key))
+  let who = acting_as(v)?
+  // Read as the viewer: a hidden team answers like a missing one.
+  let Some(t) = records.find_team(who.reads, team_key)? else {
+    return Err(unknown_team(who.reads, team_key))
   }
   // New issues do not land in an archived team (TASK-210), same refusal as
   // `lll issue create`.
@@ -214,11 +207,11 @@ fn create_write(ctx: pb.Client, r: mut Ref<http.Request>) -> Result<string, stri
   let labels = r.PostForm.map_or([], |form| {
     (form as Map<string, Slice<string>>)["labels"].filter(|id| id != "")
   })
-  // A scoped viewer assigns only members of its roster for the team
-  // (LLL-551), the ones its picker offered.
+  // A member viewer assigns only members it may see (LLL-551), the ones its
+  // picker offered.
   let assignee = r.PostFormValue("assignee")
-  if assignee != "" && who.scope.is_some() {
-    let shown = roster_for(ctx, r, team)?
+  if assignee != "" && who.member.is_some() {
+    let shown = read_roster(who.reads)?
     if !shown.sees(assignee) {
       return Err(f"unknown member '{assignee}'; reload the page for the current list")
     }
@@ -285,20 +278,20 @@ struct IssueLabelRemovePatch {
   remove: Slice<string>,
 }
 
-fn state_write(ctx: pb.Client, r: mut Ref<http.Request>) -> Result<string, string> {
+fn state_write(ctx: pb.Client, v: Viewing, r: mut Ref<http.Request>) -> Result<string, string> {
   // FormValue, not PostFormValue: drag-and-drop posts key/state as query params.
   let key = r.FormValue("key")
   let state = r.FormValue("state")
   // Record id of the card the drop lands before; "" means end of column.
   let before = r.FormValue("before")
   let _ = query.state(state)?
-  let who = acting_as(ctx, r)?
-  let issue = who.issue(ctx, key)?
+  let who = acting_as(v)?
+  let issue = who.issue(key)?
   require_active_team(issue.expand.team)?
   // The issue's OWN team scopes the reorder (TASK-198): a drop on any
   // team's board must compute the midpoint against that team's column, not
   // the boot team's.
-  let sort = reorder_sort(ctx, issue, state, before, issue.team)?
+  let sort = reorder_sort(who.reads, issue, state, before, issue.team)?
   patch_issue(ctx, who.caller, issue.id, StatePatch { state, sort })
 }
 
@@ -338,8 +331,8 @@ fn reorder_sort(
 /// A set, not a toggle. The button posts the state it just moved to, so a
 /// double click or a stale page converges on what the user sees instead of
 /// flipping the row out from under them. Both directions are idempotent.
-fn favorite_write(ctx: pb.Client, r: mut Ref<http.Request>) -> Result<string, string> {
-  let caller = workspace_writer(ctx, r)?
+fn favorite_write(ctx: pb.Client, v: Viewing, r: mut Ref<http.Request>) -> Result<string, string> {
+  let caller = workspace_writer(v)?
   let key = r.FormValue("key")
   let on = r.FormValue("on") == "true"
   let issue = records.fetch_issue(ctx, key)?
@@ -361,21 +354,21 @@ fn favorite_write(ctx: pb.Client, r: mut Ref<http.Request>) -> Result<string, st
 /// board member's. Any other login is refused here, not written as the
 /// process: the gate closes both routes to it already, and this keeps that
 /// true if the gate's allowlist ever opens them.
-fn workspace_writer(ctx: pb.Client, r: Ref<http.Request>) -> Result<pb.Caller, string> {
-  match board_viewer(ctx, r) {
+fn workspace_writer(v: Viewing) -> Result<pb.Caller, string> {
+  match v.viewer {
     Viewer.Full => Ok(pb.Caller.Process),
     Viewer.Scoped(_) => Err("favorites and saved views belong to the whole workspace; only the board login changes them"),
   }
 }
 
-fn priority_write(ctx: pb.Client, r: mut Ref<http.Request>) -> Result<string, string> {
+fn priority_write(ctx: pb.Client, v: Viewing, r: mut Ref<http.Request>) -> Result<string, string> {
   let key = r.FormValue("key")
   let slug = r.FormValue("priority")
   let Some(prio) = display.priority_value(slug) else {
     return Err(f"unknown priority '{slug}'")
   }
-  let who = acting_as(ctx, r)?
-  let issue = who.issue(ctx, key)?
+  let who = acting_as(v)?
+  let issue = who.issue(key)?
   require_active_team(issue.expand.team)?
   patch_issue(ctx, who.caller, issue.id, PriorityPatch { priority: prio })
 }
@@ -387,38 +380,38 @@ fn priority_write(ctx: pb.Client, r: mut Ref<http.Request>) -> Result<string, st
 /// present, exactly as `lll issue update --emoji ""` keys off the flag.
 /// Validation is the CLI's `check_emoji`: the picker only ever posts one of
 /// its own candidates, but the endpoint is curl-able like every other.
-fn emoji_write(ctx: pb.Client, r: mut Ref<http.Request>) -> Result<string, string> {
+fn emoji_write(ctx: pb.Client, v: Viewing, r: mut Ref<http.Request>) -> Result<string, string> {
   let key = r.FormValue("key")
   let Ok(emoji) = check_emoji(r.FormValue("emoji")) else {
     return Err("an issue takes one emoji, or none")
   }
-  let who = acting_as(ctx, r)?
-  let issue = who.issue(ctx, key)?
+  let who = acting_as(v)?
+  let issue = who.issue(key)?
   require_active_team(issue.expand.team)?
   patch_issue(ctx, who.caller, issue.id, EmojiPatch { emoji })
 }
 
-fn title_write(ctx: pb.Client, r: mut Ref<http.Request>) -> Result<string, string> {
+fn title_write(ctx: pb.Client, v: Viewing, r: mut Ref<http.Request>) -> Result<string, string> {
   let key = r.FormValue("key")
   let title = strings.TrimSpace(r.FormValue("title"))
   if title == "" { return Err("title is required") }
-  let who = acting_as(ctx, r)?
-  let issue = who.issue(ctx, key)?
+  let who = acting_as(v)?
+  let issue = who.issue(key)?
   require_active_team(issue.expand.team)?
   patch_issue(ctx, who.caller, issue.id, TitlePatch { title })
 }
 
-fn project_write(ctx: pb.Client, r: mut Ref<http.Request>) -> Result<string, string> {
+fn project_write(ctx: pb.Client, v: Viewing, r: mut Ref<http.Request>) -> Result<string, string> {
   let key = r.FormValue("key")
   let id = r.FormValue("project")
   // The issue first: its own team is what the posted id has to belong to,
   // and a project from another team is as unknown here as a deleted one
   // (TASK-173).
-  let who = acting_as(ctx, r)?
-  let issue = who.issue(ctx, key)?
+  let who = acting_as(v)?
+  let issue = who.issue(key)?
   require_active_team(issue.expand.team)?
   if id != "" {
-    let projects = records.fetch_projects(ctx, issue.team)?
+    let projects = records.fetch_projects(who.reads, issue.team)?
     if projects.find(|p| p.id == id).is_none() {
       return Err(
         f"unknown project '{id}'; reload the page for the current list",
@@ -428,15 +421,15 @@ fn project_write(ctx: pb.Client, r: mut Ref<http.Request>) -> Result<string, str
   patch_issue(ctx, who.caller, issue.id, IssueProjectPatch { project: id })
 }
 
-fn assignee_write(ctx: pb.Client, r: mut Ref<http.Request>) -> Result<string, string> {
+fn assignee_write(ctx: pb.Client, v: Viewing, r: mut Ref<http.Request>) -> Result<string, string> {
   let key = r.FormValue("key")
   let id = r.FormValue("assignee")
-  let who = acting_as(ctx, r)?
-  let issue = who.issue(ctx, key)?
+  let who = acting_as(v)?
+  let issue = who.issue(key)?
   // The picker offers the viewer's roster for the issue's team (LLL-551); a
   // posted id outside it is as unknown as a deleted one.
   if id != "" {
-    let members = roster_for(ctx, r, issue.team)?.members
+    let members = read_roster(who.reads)?.members
     if members.find(|m| m.id == id).is_none() {
       return Err(
         f"unknown member '{id}'; reload the page for the current list",
@@ -444,7 +437,7 @@ fn assignee_write(ctx: pb.Client, r: mut Ref<http.Request>) -> Result<string, st
     }
   }
   require_active_team(issue.expand.team)?
-  let observed = claims.observed_id(ctx, issue.id)?
+  let observed = claims.observed_id(who.reads, issue.id)?
   // Never forced (LLL-662): clearing the assignee releases the claim, so the
   // picker clears only the viewer's own hold. Taking anyone else's goes
   // through the Release form, which asks for a reason.
@@ -464,7 +457,7 @@ fn assignee_write(ctx: pb.Client, r: mut Ref<http.Request>) -> Result<string, st
 /// replaced the field from the page's earlier read, which dropped a label
 /// `lll issue update --add-label` added after the page rendered. The
 /// server's per-issue lock serializes the modifiers.
-fn labels_write(ctx: pb.Client, r: mut Ref<http.Request>) -> Result<string, string> {
+fn labels_write(ctx: pb.Client, v: Viewing, r: mut Ref<http.Request>) -> Result<string, string> {
   let key = r.FormValue("key")
   if key == "" {
     return Err(
@@ -480,10 +473,10 @@ fn labels_write(ctx: pb.Client, r: mut Ref<http.Request>) -> Result<string, stri
   // The issue first, for its team: a label from another team is as unknown
   // here as a deleted one, which is what stops a POST crossing tenancy
   // however the checkbox got its id (TASK-173).
-  let who = acting_as(ctx, r)?
-  let issue = who.issue(ctx, key)?
+  let who = acting_as(v)?
+  let issue = who.issue(key)?
   require_active_team(issue.expand.team)?
-  let known = records.fetch_labels(ctx, issue.team)?
+  let known = records.fetch_labels(who.reads, issue.team)?
   if known.find(|l| l.id == id).is_none() {
     return Err(f"unknown label '{id}'; reload the page for the current list")
   }
@@ -494,12 +487,12 @@ fn labels_write(ctx: pb.Client, r: mut Ref<http.Request>) -> Result<string, stri
   }
 }
 
-fn comment_write(ctx: pb.Client, r: mut Ref<http.Request>) -> Result<string, string> {
+fn comment_write(ctx: pb.Client, v: Viewing, r: mut Ref<http.Request>) -> Result<string, string> {
   let key = r.PostFormValue("key")
   let body = strings.TrimSpace(r.PostFormValue("body"))
   if body == "" { return Err("comment body is required") }
-  let who = acting_as(ctx, r)?
-  let issue = who.issue(ctx, key)?
+  let who = acting_as(v)?
+  let issue = who.issue(key)?
   require_active_team(issue.expand.team)?
   let Some(author) = who.member_id(ctx)? else {
     return Err("commenting needs a member token; start the board with lll up")
@@ -526,8 +519,8 @@ fn comment_write(ctx: pb.Client, r: mut Ref<http.Request>) -> Result<string, str
 /// stored — the form posts the board page's own rendering of the URL, but
 /// the endpoint is curl-able like every other, and a view must always be
 /// exactly the URL it will navigate to.
-fn views_save(ctx: pb.Client, w: http.ResponseWriter, r: mut Ref<http.Request>) -> Result<string, string> {
-  let caller = workspace_writer(ctx, r)?
+fn views_save(ctx: pb.Client, v: Viewing, w: http.ResponseWriter, r: mut Ref<http.Request>) -> Result<string, string> {
+  let caller = workspace_writer(v)?
   let name = strings.TrimSpace(r.PostFormValue("name"))
   if name == "" { return Err("a view needs a name") }
   if name.length() > 80 { return Err("view names are capped at 80 characters") }
@@ -540,7 +533,7 @@ fn views_save(ctx: pb.Client, w: http.ResponseWriter, r: mut Ref<http.Request>) 
   // flash strip say something a human can read.
   let mut existing = models.ViewList { .. }
   pb.fetch(ctx, "/api/collections/views/records?perPage=200", "views", &existing)?
-  if existing.items.any(|v| v.name == name) {
+  if existing.items.any(|view| view.name == name) {
     return Err(f"a view named '{name}' already exists")
   }
   // member stays empty: a saved view belongs to the workspace.
@@ -562,9 +555,9 @@ fn views_save(ctx: pb.Client, w: http.ResponseWriter, r: mut Ref<http.Request>) 
 }
 
 /// The board uses its process identity; the button names it explicitly.
-fn claim_write(ctx: pb.Client, r: mut Ref<http.Request>) -> Result<string, string> {
-  let who = acting_as(ctx, r)?
-  let issue = who.issue(ctx, r.FormValue("key"))?
+fn claim_write(ctx: pb.Client, v: Viewing, r: mut Ref<http.Request>) -> Result<string, string> {
+  let who = acting_as(v)?
+  let issue = who.issue(r.FormValue("key"))?
   require_active_team(issue.expand.team)?
   // A member viewer claims as itself, whatever name the shared live
   // fragment last rendered on the button (LLL-545).
@@ -584,9 +577,9 @@ fn claim_write(ctx: pb.Client, r: mut Ref<http.Request>) -> Result<string, strin
 /// into the form, which the server records in its comment; without one the
 /// server's refusal is the answer. The live fragment is shared by every
 /// viewer, so the form cannot know who is looking; the server decides.
-fn release_write(ctx: pb.Client, r: mut Ref<http.Request>) -> Result<string, string> {
-  let who = acting_as(ctx, r)?
-  let issue = who.issue(ctx, r.FormValue("key"))?
+fn release_write(ctx: pb.Client, v: Viewing, r: mut Ref<http.Request>) -> Result<string, string> {
+  let who = acting_as(v)?
+  let issue = who.issue(r.FormValue("key"))?
   require_active_team(issue.expand.team)?
   let observed = r.FormValue("claim_id")
   if observed == "" { return Err("The claim changed; refresh before releasing it.") }

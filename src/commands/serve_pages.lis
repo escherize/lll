@@ -19,6 +19,11 @@ import "theme"
 /// whether "My issues" has anywhere to point, and `team` carries the accent
 /// every page wears.
 fn rail_vm(ctx: pb.Client, active: string, me: string, team: models.Team) -> RailVM {
+  RailVM { favorites: fav_vms(ctx), views: view_vms(ctx), ..shell_rail(ctx, active, me, team) }
+}
+
+/// The rail without the workspace's favorites and saved views.
+fn shell_rail(ctx: pb.Client, active: string, me: string, team: models.Team) -> RailVM {
   let hex = theme.normalize_hex(team.accent)
   RailVM {
     team_key: team.key,
@@ -29,20 +34,21 @@ fn rail_vm(ctx: pb.Client, active: string, me: string, team: models.Team) -> Rai
     favicon: theme.favicon_url(hex, theme.mark_for(team.key, team.emoji)),
     board_base: board_base(team.key),
     teams: rail_teams(ctx, team.key),
-    favorites: fav_vms(ctx),
-    views: view_vms(ctx),
+    favorites: [],
+    views: [],
     scoped: false,
     bot_owner: "",
   }
 }
 
-/// The rail for this request's viewer. A scoped viewer sees only its own
-/// teams in the switcher and no favorites or saved views: those belong to the
-/// whole workspace and name other teams' issues. A member viewer's "My
+/// The rail for this request's viewer. `ctx` reads as the viewer
+/// (LLL-658), so the team switcher lists the teams it may see. A scoped
+/// viewer gets no favorites or saved views: those belong to the whole
+/// workspace, and only the board login writes them. A member viewer's "My
 /// issues" is its own (LLL-545).
-fn rail_for(ctx: pb.Client, r: Ref<http.Request>, active: string, me: string, team: models.Team) -> RailVM {
-  let rail = rail_vm(ctx, active, me, team)
-  let Viewer.Scoped(v) = board_viewer(ctx, r) else { return rail }
+fn rail_for(ctx: pb.Client, viewer: Viewer, active: string, me: string, team: models.Team) -> RailVM {
+  let Viewer.Scoped(v) = viewer else { return rail_vm(ctx, active, me, team) }
+  let rail = shell_rail(ctx, active, me, team)
   let mine = v.member.map_or(rail.me, |m| m.name)
   // "Add a bot" (LLL-546): a read-write person viewer owns what it mints. A
   // bot viewer cannot own bots (gopb), so it gets no button.
@@ -51,9 +57,6 @@ fn rail_for(ctx: pb.Client, r: Ref<http.Request>, active: string, me: string, te
     _ => "",
   }
   RailVM {
-    teams: rail.teams.filter(|t| v.sees(t.key)),
-    favorites: [],
-    views: [],
     me: mine,
     scoped: true,
     bot_owner,
@@ -178,7 +181,7 @@ fn query_param(r: Ref<http.Request>, name: string) -> string {
 /// card's data-show checks the $flt signal the page seeds from its own URL.
 /// `team` is the ROUTED team (TASK-198): /t/{team}/ resolved it before this
 /// handler ran, so every fetch and every generated URL below is that team's.
-fn board_page(ctx: pb.Client, w: http.ResponseWriter, r: Ref<http.Request>, team: models.Team, me: string) {
+fn board_page(ctx: pb.Client, w: http.ResponseWriter, r: Ref<http.Request>, team: models.Team, me: string, viewer: Viewer) {
   let team_id = team.id
   let mut err = ""
   let raw = view_query(r)
@@ -193,7 +196,7 @@ fn board_page(ctx: pb.Client, w: http.ResponseWriter, r: Ref<http.Request>, team
   }
   // Who this viewer may name on this team (LLL-551). An assignee filter
   // outside it answers exactly like a name nobody has.
-  let roster = match roster_for(ctx, r, team_id) {
+  let roster = match read_roster(ctx) {
     Ok(found) => found,
     Err(e) => {
       http.Error(w, pb.plain(e), 500)
@@ -316,7 +319,7 @@ fn board_page(ctx: pb.Client, w: http.ResponseWriter, r: Ref<http.Request>, team
   }
 
   let issues = match records.fetch_board_issues(ctx, team_id) {
-    Ok(i) => issues_for(ctx, r, i).map(|x| roster.issue(x)),
+    Ok(i) => issues_for(viewer_is_scoped(viewer), i).map(|x| roster.issue(x)),
     Err(e) => {
       http.Error(w, pb.plain(e), 500)
       return
@@ -375,7 +378,7 @@ fn board_page(ctx: pb.Client, w: http.ResponseWriter, r: Ref<http.Request>, team
     write_raw(w, board_raw(vm))
     return
   }
-  let rail = rail_for(ctx, r, active, me, team)
+  let rail = rail_for(ctx, viewer, active, me, team)
   render_html(w, "board-page", PageVM { rail, page: vm })
 }
 
@@ -429,7 +432,7 @@ fn hide_seed_js(hidden: Slice<string>) -> template.JS {
 /// /t/ENG/issue/ENG-003 redirect to /t/ENG/issue/ENG-3, so the rail, the
 /// accent and every link on the page belong to the issue's team. A scoped
 /// viewer who cannot see that team gets the 404 a missing issue gets.
-fn issue_page(ctx: pb.Client, w: http.ResponseWriter, r: Ref<http.Request>, team: models.Team, me: string) {
+fn issue_page(ctx: pb.Client, w: http.ResponseWriter, r: Ref<http.Request>, team: models.Team, me: string, viewer: Viewer) {
   let key = r.PathValue("key")
   let fetched = match records.fetch_issue(ctx, key) {
     Ok(i) => i,
@@ -439,18 +442,12 @@ fn issue_page(ctx: pb.Client, w: http.ResponseWriter, r: Ref<http.Request>, team
     },
   }
   let own = fetched.expand.team.key
-  if let Viewer.Scoped(v) = board_viewer(ctx, r) {
-    if !v.sees(own) {
-      http.Error(w, records.issue_not_found(key), 404)
-      return
-    }
-  }
   let canonical = f"{own}-{fetched.number}"
   if r.PathValue("team") != own || key != canonical {
     redirect_with_query(w, r, f"/t/{own}/issue/{canonical}")
     return
   }
-  let issue = issues_for(ctx, r, [fetched])[0]
+  let issue = issues_for(viewer_is_scoped(viewer), [fetched])[0]
   let comments = match records.fetch_comments(ctx, issue.id) {
     Ok(c) => c,
     Err(e) => {
@@ -460,7 +457,7 @@ fn issue_page(ctx: pb.Client, w: http.ResponseWriter, r: Ref<http.Request>, team
   }
   // An issue is a detail view under the board, so the board row stays
   // current — which also makes the rail byte-identical to the board's.
-  let roster = match roster_for(ctx, r, issue.team) {
+  let roster = match read_roster(ctx) {
     Ok(found) => found,
     Err(e) => {
       http.Error(w, pb.plain(e), 500)
@@ -479,18 +476,9 @@ fn issue_page(ctx: pb.Client, w: http.ResponseWriter, r: Ref<http.Request>, team
   // is curl-able" includes the unprompted part. A failed fetch renders no
   // section rather than a 500 (same bargain as the rail's groups).
   page.findings = findings_for_issue(ctx, issue).map_or([], |f| f.map(|d| finding_vm(d, team.key)))
-  // A scoped viewer claims as itself, or not at all (LLL-545). Live
-  // re-renders of #issue-detail are shared and still name the board's member
-  // (LLL-627); the claim action uses the viewer whatever the button said.
-  if let Viewer.Scoped(v) = board_viewer(ctx, r) {
-    match v.member {
-      Some(m) if m.rw => {
-        page.claim_actor = m.name
-        page.claim_actor_id = m.id
-      },
-      _ => page.claim_read_only = true,
-    }
-  }
+  // A scoped viewer claims as itself, or not at all (LLL-545): `ctx` reads
+  // as the viewer, so issue_vm already named it as the claim actor.
+  if !viewer_writes(viewer) { page.claim_read_only = true }
   // ?raw answers before the remaining page-only extras (star state, emoji
   // catalogue) are fetched: none of them are markdown's business. An
   // unknown key never gets here — fetch_issue already 404'd above, raw or
@@ -501,7 +489,7 @@ fn issue_page(ctx: pb.Client, w: http.ResponseWriter, r: Ref<http.Request>, team
   }
   if let Ok(Some(_)) = fetch_favorite(ctx, issue.id) { page.favorited = true }
   page.emojis = emoji_catalog()
-  let vm = PageVM { rail: rail_for(ctx, r, "board", me, team), page }
+  let vm = PageVM { rail: rail_for(ctx, viewer, "board", me, team), page }
   render_html(w, "issue-page", vm)
 }
 
