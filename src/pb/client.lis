@@ -777,12 +777,14 @@ fn read_body(resp: Ref<http.Response>, what: string) -> Result<string, string> {
 pub fn http_error(what: string, status: int, status_line: string, body: string) -> CliError {
   let mut envelope = ErrorEnvelope { .. }
   let parsed = json.Unmarshal(body.bytes(), &envelope).is_ok()
-  if !parsed || envelope.message == "" {
+  // The API's envelope names its own status; a gateway's bare
+  // {"message": ...} does not, and its 404 is not a missing record.
+  if !parsed || envelope.message == "" || envelope.status != status {
     return CliError {
       kind: kind_of_status(status, "", false),
       status,
       code: "",
-      message: f"{what}: {status_line}: {body}" + wrong_port_hint(what, status, body),
+      message: untagged(f"{what}: {status_line}: {body}") + wrong_port_hint(what, status, body),
     }
   }
   let code = envelope_code(envelope.data)
@@ -791,7 +793,7 @@ pub fn http_error(what: string, status: int, status_line: string, body: string) 
   let mut message = envelope.message
   for field in fields { message += f"\n{field}" }
   if status >= 500 { message = f"{what}: {status_line}: {message}" }
-  CliError { kind: kind_of_status(status, code, true), status, code, message }
+  CliError { kind: kind_of_status(status, code, true), status, code, message: untagged(message) }
 }
 
 /// The suffix for a 404 that came from something other than PocketBase's API.

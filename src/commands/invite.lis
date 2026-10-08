@@ -88,7 +88,7 @@ struct InviteJson { url: string, code: string, expires: string, mode: string, te
 fn invite_create(input: flags.CommandInput) -> Result<(), string> {
   let p = input.parsed
   let keys = p.all("--team").map(records.normalize_team_key).filter(|k| k != "")
-  if keys.is_empty() { return Err(f"usage: {input.usage}") }
+  if keys.is_empty() { return Err(flags.usage_error(f"usage: {input.usage}")) }
   let base = web_base()?
   let mut ids: Slice<string> = []
   for key in keys {

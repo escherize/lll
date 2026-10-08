@@ -41,7 +41,7 @@ pub fn skill(args: Slice<string>) -> Result<(), string> {
     },
     "list" => {
       if parsed.positional_count() != 1 {
-        return Err("usage: lll skill list (no arguments); use 'lll skill get NAME' to read one skill")
+        return Err(flags.usage_error("usage: lll skill list (no arguments); use 'lll skill get NAME' to read one skill"))
       }
       for name in skills.Names() {
         fmt.Println(f"{name}\t{skills.Description(name)}")
@@ -50,7 +50,7 @@ pub fn skill(args: Slice<string>) -> Result<(), string> {
     },
     "get" => {
       let name = parsed.nth(1)
-      if name == "" { return Err(f"usage: lll skill get NAME\n\n{known()}") }
+      if name == "" { return Err(flags.usage_error(f"usage: lll skill get NAME\n\n{known()}")) }
       let body = skills.Body(name)
       if body == "" { return Err(f"no skill named '{name}'\n\n{known()}") }
       fmt.Print(body)

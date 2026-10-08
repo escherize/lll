@@ -177,7 +177,7 @@ would put a second account on that address. --create makes YOUR login: pass
     // sentence rather than a raw validation blob from the create round trip.
     if password.length() < 8 {
       return Err(
-        f"--create needs a password of at least 8 characters (got {password.length()})",
+        flags.usage_error(f"--create needs a password of at least 8 characters (got {password.length()})"),
       )
     }
     let name = if p.one("--name") != "" {
@@ -580,12 +580,12 @@ log in as yourself, and let the admin credentials create that account:
 they ride the environment (LLL_ADMIN_EMAIL/LLL_ADMIN_PASSWORD) or the flags
 --admin-email/--admin-password."
   }
-  f"login failed at {base}: no member with email {email}, or the password is wrong
+  pb.fail(pb.ErrorKind.Auth, f"login failed at {base}: no member with email {email}, or the password is wrong
 if the account exists, check the password — a superuser can reset it:
   lll member set-password <name> --email {email}
 if it does not exist yet, and you hold the server's admin credentials
 (LLL_ADMIN_EMAIL/LLL_ADMIN_PASSWORD), create it as you log in:
-  lll login{url_flag} --email {email} --create"
+  lll login{url_flag} --email {email} --create")
 }
 
 /// Renew a `lll login` token in the home config before it lapses (LLL-441).

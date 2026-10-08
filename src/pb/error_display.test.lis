@@ -2,7 +2,7 @@
 fn expected_errors_show_messages_and_sorted_field_details() {
   let raw = tag(http_error(
     "POST http://127.0.0.1:40015/api/lll/issues/id/assignment", 400, "400 Bad Request",
-    "{\"message\":\"Issue is claimed by café.\",\"data\":{\"code\":\"claim_held\"}}",
+    "{\"message\":\"Issue is claimed by café.\",\"data\":{\"code\":\"claim_held\"},\"status\":400}",
   ))
   let shown = display_error(raw)
   assert shown.summary == "Issue is claimed by café."
@@ -12,7 +12,7 @@ fn expected_errors_show_messages_and_sorted_field_details() {
   assert err.code == "claim_held"
   assert exit_code(err.kind) == 4
   let fields = display_error(tag(http_error("POST http://host", 400, "400 Bad Request",
-    "{\"message\":\"Invalid fields.\",\"data\":{\"title\":{\"code\":\"required\",\"message\":\"Cannot be blank.\"},\"labels\":{\"0\":{\"message\":\"Unknown label.\"}}}}")))
+    "{\"message\":\"Invalid fields.\",\"data\":{\"title\":{\"code\":\"required\",\"message\":\"Cannot be blank.\"},\"labels\":{\"0\":{\"message\":\"Unknown label.\"}}},\"status\":400}")))
   assert fields.summary == "Invalid fields.\nlabels.0: Unknown label.\ntitle: Cannot be blank."
 }
 

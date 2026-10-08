@@ -175,10 +175,10 @@ fn project_edit(input: flags.CommandInput) -> Result<(), string> {
   let usage = input.usage
   let p = input.parsed
   let Some(name) = nonempty(p.first()) else {
-    return Err(f"usage: {usage}")
+    return Err(flags.usage_error(f"usage: {usage}"))
   }
   if !p.given("-n") && !p.given("-b") && !p.given("--status") {
-    return Err(f"nothing to update — pass -n, -b or --status\nusage: {usage}")
+    return Err(flags.usage_error(f"nothing to update — pass -n, -b or --status\nusage: {usage}"))
   }
   // Validate before the lookup: a typo'd status should cost no round trip and
   // must not leave a half-applied patch behind.
@@ -206,7 +206,7 @@ fn project_move(input: flags.CommandInput) -> Result<(), string> {
   let usage = input.usage
   let p = input.parsed
   let Some(name) = nonempty(p.first()) else {
-    return Err(f"usage: {usage}")
+    return Err(flags.usage_error(f"usage: {usage}"))
   }
   let from = team_flag_or_current(p.one("--team"))?
   let to = move_destination(p.one("--to"))?
@@ -219,7 +219,7 @@ fn project_delete(input: flags.CommandInput) -> Result<(), string> {
   let usage = input.usage
   let p = input.parsed
   let Some(name) = nonempty(p.first()) else {
-    return Err(f"usage: {usage}")
+    return Err(flags.usage_error(f"usage: {usage}"))
   }
   let project = records.resolve_project(configured_team_id()?, name)?
   let used = entity_issue_count("project", project.id)?
@@ -237,7 +237,7 @@ fn project_delete(input: flags.CommandInput) -> Result<(), string> {
 fn project_view(input: flags.CommandInput) -> Result<(), string> {
   let name = input.parsed.first()
   if name == "" {
-    return Err("usage: lll project view NAME")
+    return Err(flags.usage_error("usage: lll project view NAME"))
   }
   let p = records.resolve_project(configured_team_id()?, name)?
 

@@ -130,6 +130,12 @@ pub fn classify(text: string) -> CliError {
   }
 }
 
+/// Text from outside this process (a server's message or body) with the tag
+/// delimiter removed, so it can neither start a tag nor hide what follows.
+pub fn untagged(text: string) -> string {
+  strings.ReplaceAll(text, tag_end(), "")
+}
+
 /// The human text of an error string, every tag removed.
 pub fn plain(text: string) -> string {
   let mut out = ""

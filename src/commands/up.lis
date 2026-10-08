@@ -92,7 +92,7 @@ pub fn up(args: Slice<string>) -> Result<(), string> {
   let scratch = p.given("--scratch")
   let share_bind = p.one("--bind")
   if scratch && share_bind != "" {
-    return Err("--scratch is loopback-only; omit --bind for a throwaway board")
+    return Err(flags.usage_error("--scratch is loopback-only; omit --bind for a throwaway board"))
   }
   if share_bind == "0.0.0.0" || share_bind == "::" {
     return Err(
@@ -100,7 +100,7 @@ pub fn up(args: Slice<string>) -> Result<(), string> {
     )
   }
   if scratch && p.one("--pb-dir") != "" {
-    return Err("--scratch owns its temporary data directory; omit --pb-dir")
+    return Err(flags.usage_error("--scratch owns its temporary data directory; omit --pb-dir"))
   }
   let scratch_dir = if scratch { setup_scratch()? } else { "" }
   if share_bind != "" { let _ = os.Setenv("LLL_BIND", share_bind) }
@@ -108,7 +108,7 @@ pub fn up(args: Slice<string>) -> Result<(), string> {
   let raw_port = p.one("--port")
   if raw_port != "" {
     let Ok(pn) = strconv.Atoi(raw_port) else {
-      return Err(f"--port must be a number, got '{raw_port}'")
+      return Err(flags.usage_error(f"--port must be a number, got '{raw_port}'"))
     }
     web_port = pn
   }

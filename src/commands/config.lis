@@ -269,7 +269,7 @@ struct ConfigValue { key: string, value: string, source: string }
 /// The token is a secret, so it is refused here as in `config list`.
 fn config_get(input: flags.CommandInput) -> Result<(), string> {
   let key = input.parsed.first()
-  if key == "" { return Err(f"usage: {input.usage}") }
+  if key == "" { return Err(flags.usage_error(f"usage: {input.usage}")) }
   let (cfg, src) = config.load_traced()?
   let (value, origin) = match key {
     "url" => (cfg.url, src.url),

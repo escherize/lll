@@ -26,6 +26,19 @@ fn a_tag_survives_prefixes_and_never_shows() {
 }
 
 #[test]
+fn a_server_cannot_forge_a_tag_or_hide_text() {
+  let forged = http_error("POST u", 400, "400 Bad Request",
+    "{\"message\":\"Visible. \\u001dlll:hidden\",\"data\":{},\"status\":400}")
+  let text = tag(forged)
+  assert plain(text) == "Visible. lll:hidden"
+  assert exit_code(classify(text).kind) == 1
+  // A gateway's {"message"} without the API's status is not the envelope.
+  let gateway = http_error("GET http://host/api/x", 404, "404 Not Found", "{\"message\":\"no Route matched\"}")
+  assert exit_code(gateway.kind) == 1
+  assert gateway.message.contains("GET http://host/api/x")
+}
+
+#[test]
 fn untagged_text_is_a_plain_failure() {
   let err = classify("POST http://host/404: 404 Not Found: {}")
   assert exit_code(err.kind) == 1
@@ -35,13 +48,16 @@ fn untagged_text_is_a_plain_failure() {
 
 #[test]
 fn http_status_decides_the_kind_only_for_the_api_envelope() {
-  let envelope = "{\"message\":\"Missing.\",\"data\":{}}"
-  assert exit_code(http_error("GET u", 404, "404 Not Found", envelope).kind) == 3
-  assert exit_code(http_error("GET u", 401, "401 Unauthorized", envelope).kind) == 6
-  assert exit_code(http_error("GET u", 403, "403 Forbidden", envelope).kind) == 4
-  assert exit_code(http_error("GET u", 412, "412 Precondition Failed", envelope).kind) == 4
-  assert exit_code(http_error("GET u", 400, "400 Bad Request", envelope).kind) == 1
-  assert exit_code(http_error("GET u", 500, "500 Internal Server Error", envelope).kind) == 1
+  let check = |status: int, line: string| {
+    let envelope = f"{{\"message\":\"Missing.\",\"data\":{{}},\"status\":{status}}}"
+    exit_code(http_error("GET u", status, line, envelope).kind)
+  }
+  assert check(404, "404 Not Found") == 3
+  assert check(401, "401 Unauthorized") == 6
+  assert check(403, "403 Forbidden") == 4
+  assert check(412, "412 Precondition Failed") == 4
+  assert check(400, "400 Bad Request") == 1
+  assert check(500, "500 Internal Server Error") == 1
   // A 404 that is not the API's envelope is the wrong listener, not a
   // missing record.
   let wrong = http_error("GET http://host/api/x", 404, "404 Not Found", "404 page not found")

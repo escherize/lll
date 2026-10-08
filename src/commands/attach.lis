@@ -55,7 +55,7 @@ pub fn attach(args: Slice<string>) -> Result<(), string> {
   let name = filepath.Base(root)
   let given = p.one("--key")
   let key = if p.given("--key") {
-    if given == "" { return Err("--key requires a nonempty team key") }
+    if given == "" { return Err(flags.usage_error("--key requires a nonempty team key")) }
     // LLL-235: what lands in .lll.toml is what the server stores.
     records.normalize_team_key(given)
   } else {

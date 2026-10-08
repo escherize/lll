@@ -165,10 +165,10 @@ fn label_edit(input: flags.CommandInput) -> Result<(), string> {
   let usage = input.usage
   let p = input.parsed
   let Some(name) = nonempty(p.first()) else {
-    return Err(f"usage: {usage}")
+    return Err(flags.usage_error(f"usage: {usage}"))
   }
   if !p.given("-n") && !p.given("-c") {
-    return Err(f"nothing to update — pass -n or -c\nusage: {usage}")
+    return Err(flags.usage_error(f"nothing to update — pass -n or -c\nusage: {usage}"))
   }
   if p.given("-n") { check_filter_name("label", p.one("-n"))? }
   let label = records.resolve_label(configured_team_id()?, name)?
@@ -189,7 +189,7 @@ fn label_delete(input: flags.CommandInput) -> Result<(), string> {
   let usage = input.usage
   let p = input.parsed
   let Some(name) = nonempty(p.first()) else {
-    return Err(f"usage: {usage}")
+    return Err(flags.usage_error(f"usage: {usage}"))
   }
   let label = records.resolve_label(configured_team_id()?, name)?
   let used = entity_issue_count("label", label.id)?
@@ -211,7 +211,7 @@ fn label_move(input: flags.CommandInput) -> Result<(), string> {
   let usage = input.usage
   let p = input.parsed
   let Some(name) = nonempty(p.first()) else {
-    return Err(f"usage: {usage}")
+    return Err(flags.usage_error(f"usage: {usage}"))
   }
   let from = team_flag_or_current(p.one("--team"))?
   let to = move_destination(p.one("--to"))?

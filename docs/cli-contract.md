@@ -136,6 +136,13 @@ Every issue `--json` prints the same object: `issue list` per item,
 | webhook | `id`, `url`, `secret_set`, `team`, `project` |
 | search hit | `group`, `kind`, `title`, `state`, `score`, `snippets` (each `label`, `lines`) |
 
+A member's `owner`, `scope`, `teams`, `mode` and `team_keys` are absent when
+empty. `project view --json` lists its `issues` as records without `key` or
+`claim`; use `issue list --project NAME --json` for the issue object.
+
+`lll watch --json` prints one event per line. Its timestamps are RFC3339;
+the event shape (`topic`, `action`, `record`) is not covered yet.
+
 ## Empty lists
 
 A list with nothing to show prints one line on stderr, such as `no issues` or

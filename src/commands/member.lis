@@ -354,7 +354,7 @@ fn member_remove(input: flags.CommandInput) -> Result<(), string> {
   let usage = input.usage
   let p = input.parsed
   let name = p.first()
-  if name == "" { return Err(f"usage: {usage}") }
+  if name == "" { return Err(flags.usage_error(f"usage: {usage}")) }
 
   point_at_url(p.one("--url"))?
   apply_admin_flags(p.one("--admin-email"), p.one("--admin-password"))?
@@ -447,7 +447,7 @@ fn point_at_url(given: string) -> Result<(), string> {
   if base == "" { return Ok(()) }
   if !strings.HasPrefix(base, "http://") && !strings.HasPrefix(base, "https://") {
     return Err(
-      f"--url must be a full base url starting with http:// or https:// (got '{base}')",
+      flags.usage_error(f"--url must be a full base url starting with http:// or https:// (got '{base}')"),
     )
   }
   if let Err(e) = os.Setenv("LLL_URL", base) {
@@ -477,7 +477,7 @@ fn member_set_password(input: flags.CommandInput) -> Result<(), string> {
   let usage = input.usage
   let p = input.parsed
   let name = p.first()
-  if name == "" { return Err(f"usage: {usage}") }
+  if name == "" { return Err(flags.usage_error(f"usage: {usage}")) }
 
   point_at_url(p.one("--url"))?
   apply_admin_flags(p.one("--admin-email"), p.one("--admin-password"))?
@@ -562,11 +562,11 @@ fn member_invite(input: flags.CommandInput) -> Result<(), string> {
   let usage = input.usage
   let p = input.parsed
   let name = p.first()
-  if name == "" { return Err(f"usage: {usage}") }
+  if name == "" { return Err(flags.usage_error(f"usage: {usage}")) }
   let email = strings.TrimSpace(p.one("--email"))
   if !real_email(email) {
     return Err(
-      f"--email must be a real address the colleague can type into 'lll login', not '{email}'",
+      flags.usage_error(f"--email must be a real address the colleague can type into 'lll login', not '{email}'"),
     )
   }
 
@@ -597,7 +597,7 @@ fn member_invite(input: flags.CommandInput) -> Result<(), string> {
   let keys = p.all("--team").map(records.normalize_team_key).filter(|k| k != "")
   let mode = if p.given("--read-only") { "ro" } else { "rw" }
   if keys.is_empty() && mode == "ro" {
-    return Err("--read-only needs --team KEY: say which teams they may read")
+    return Err(flags.usage_error("--read-only needs --team KEY: say which teams they may read"))
   }
   if keys.is_empty() {
     let created = create_member_as(su, name, email, password, [], "")?
@@ -684,18 +684,18 @@ fn member_passes(input: flags.CommandInput) -> Result<(), string> {
   } else {
     let Ok(value) = strconv.Atoi(p.one("--count")) else {
       return Err(
-        f"--count must be a number from 1 to 50, got '{p.one("--count")}'",
+        flags.usage_error(f"--count must be a number from 1 to 50, got '{p.one("--count")}'"),
       )
     }
     value
   }
-  if count < 1 || count > 50 { return Err("--count must be from 1 to 50") }
+  if count < 1 || count > 50 { return Err(flags.usage_error("--count must be from 1 to 50")) }
   let prefix = if p.one("--prefix") == "" {
     "guest"
   } else {
     strings.TrimSpace(p.one("--prefix"))
   }
-  if prefix == "" { return Err("--prefix cannot be blank") }
+  if prefix == "" { return Err(flags.usage_error("--prefix cannot be blank")) }
   let duration = parse_token_duration(p.one("--duration"))?
   let admin_file = filepath.Join(
     filepath.Dir(config.home_path()?),
@@ -718,7 +718,7 @@ fn member_passes(input: flags.CommandInput) -> Result<(), string> {
   // LLL_URL or LLL_WEB_URL must not redirect credential creation elsewhere.
   let requested_url = p.one("--url")
   if requested_url != "" && strings.TrimSuffix(requested_url, "/") != local.url {
-    return Err("--url disagrees with the saved local board URL")
+    return Err(flags.usage_error("--url disagrees with the saved local board URL"))
   }
   point_at_url(local.url)?
   if let Err(e) = os.Setenv("LLL_WEB_URL", local.url) {
@@ -1193,7 +1193,7 @@ struct AccessPatch {
 fn member_access_cmd(input: flags.CommandInput) -> Result<(), string> {
   let p = input.parsed
   let name = p.first()
-  if name == "" { return Err("usage: lll member access NAME [--team KEY]... [--add-team KEY] [--remove-team KEY] [--all-teams|--no-teams] [--read-only|--read-write]") }
+  if name == "" { return Err(flags.usage_error("usage: lll member access NAME [--team KEY]... [--add-team KEY] [--remove-team KEY] [--all-teams|--no-teams] [--read-only|--read-write]")) }
   let Some(m) = records.find_member(name)? else {
     return Err(pb.fail(pb.ErrorKind.NotFound, f"no member named '{name}' — see 'lll member list'"))
   }

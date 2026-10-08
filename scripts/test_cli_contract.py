@@ -99,6 +99,11 @@ with tempfile.TemporaryDirectory(prefix='lll-cli-contract-') as directory:
         clean(code(2, 'issue', 'frob'))
         clean(code(2, 'issue', 'view', 'not-an-id'))
         clean(code(2, 'issue', 'list', '--since', 'yesterday'))
+        for bad in (['issue', 'list', '--limit', '0'], ['issue', 'list', '--ready', '--blocked'],
+                    ['issue', 'list', '--state', 'bogus'], ['issue', 'list', '--sort', 'bogus'],
+                    ['issue', 'create', 't', '--priority', '9'], ['issue', 'update', 'CON-2'],
+                    ['issue', 'assign'], ['finding', 'confirm']):
+            clean(code(2, *bad))
         clean(code(3, 'issue', 'view', 'CON-99'))
         clean(code(3, 'doc', 'view', 'no-such-doc'))
         clean(code(3, 'issue', 'list', '--label', 'no-such-label'))
@@ -156,6 +161,12 @@ with tempfile.TemporaryDirectory(prefix='lll-cli-contract-') as directory:
         assert updated['key'] == 'CON-3' and updated['title'] == 'third b'
         nxt = as_json('issue', 'next', '--json')
         assert nxt['key'] == 'CON-3' and 'comments' in nxt and 'claim' in nxt
+
+        made = as_json('issue', 'comment', 'CON-3', '-b', 'json comment', '--json')
+        assert made['body'] == 'json comment' and RFC3339.match(made['created']), made
+        code(0, 'label', 'create', 'used')
+        code(0, 'issue', 'update', 'CON-3', '--label', 'used')
+        clean(code(4, 'label', 'delete', 'used'))
 
         # --- --raw names the holder (LLL-638) ---
         raw = code(0, 'issue', 'view', 'CON-2', '--raw').stdout

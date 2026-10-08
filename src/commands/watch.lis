@@ -203,15 +203,15 @@ pub fn issue_watch(input: flags.CommandInput) -> Result<(), string> {
   let mut timeout = 0
   if p.given("--timeout") {
     let Ok(t) = strconv.Atoi(p.one("--timeout")) else {
-      return Err(f"--timeout takes seconds, got '{p.one("--timeout")}'")
+      return Err(flags.usage_error(f"--timeout takes seconds, got '{p.one("--timeout")}'"))
     }
-    if t <= 0 { return Err("--timeout must be a positive number of seconds") }
-    if time.ParseDuration(f"{t}s").is_err() { return Err("--timeout is too large") }
+    if t <= 0 { return Err(flags.usage_error("--timeout must be a positive number of seconds")) }
+    if time.ParseDuration(f"{t}s").is_err() { return Err(flags.usage_error("--timeout is too large")) }
     timeout = t
   }
-  if p.given("--until") && until == "" { return Err("--until requires nonempty text") }
+  if p.given("--until") && until == "" { return Err(flags.usage_error("--until requires nonempty text")) }
   if timeout > 0 && until == "" {
-    return Err("--timeout only means something with --until")
+    return Err(flags.usage_error("--timeout only means something with --until"))
   }
   if timeout == 0 { return run_issue_watch(id, json_mode, until, usage) }
 
@@ -395,7 +395,9 @@ fn ndjson_line(ev: realtime.Event) -> string {
   // indexes RUNES, so the two agree only while the payload is pure ASCII. One
   // emoji in a record put the end bound past the last rune and panicked the
   // whole stream (LLL-417). The prefix is the single byte "{", already checked.
-  "{\"topic\":\"" + ev.topic + "\"," + strings.TrimPrefix(ev.data, "{")
+  // RFC3339 timestamps, like every --json output (LLL-645).
+  let data = contract_json(ev.data.bytes() as json.RawMessage, 0) as string
+  "{\"topic\":\"" + ev.topic + "\"," + strings.TrimPrefix(data, "{")
 }
 
 fn first_line(body: string) -> string {
@@ -468,7 +470,7 @@ fn watch_ready(filters: query.Filters, json_mode: bool) -> Result<(), string> {
           Ok(data) => data as string,
           Err(e) => return Err(f"encoding ready event: {e}"),
         }
-        fmt.Println(data)
+        fmt.Println(contract_json(data.bytes() as json.RawMessage, 0) as string)
       } else {
         fmt.Println(f"{stamp} {key} ready: {issue.title}")
       }

@@ -202,7 +202,7 @@ pub fn findings_for_issue(issue: models.Issue) -> Result<Slice<models.Doc>, stri
 fn finding_near(input: flags.CommandInput) -> Result<(), string> {
   let p = input.parsed
   let path = p.first()
-  if path == "" { return Err("usage: lll finding near <path>") }
+  if path == "" { return Err(flags.usage_error("usage: lll finding near <path>")) }
   let findings = fetch_findings(current_team()?.id)?
   let hits = findings_near(findings, path)
   if p.given("--json") { return print_list_json(hits, whole_list(hits.length()), "findings") }
@@ -304,7 +304,7 @@ fn finding_refute_spec() -> Slice<flags.Flag> {
 fn finding_confirm(input: flags.CommandInput) -> Result<(), string> {
   let p = input.parsed
   let slug = p.first()
-  if slug == "" { return Err("usage: lll finding confirm SLUG") }
+  if slug == "" { return Err(flags.usage_error("usage: lll finding confirm SLUG")) }
   let team = current_team()?
   let Some(d) = find_doc(team, slug)? else {
     return Err(unknown_doc(team, slug))
@@ -320,7 +320,7 @@ fn finding_confirm(input: flags.CommandInput) -> Result<(), string> {
 fn finding_refute(input: flags.CommandInput) -> Result<(), string> {
   let p = input.parsed
   let slug = p.first()
-  if slug == "" { return Err("usage: lll finding refute SLUG -b why") }
+  if slug == "" { return Err(flags.usage_error("usage: lll finding refute SLUG -b why")) }
   let why = strings.TrimSpace(value_or_stdin(p.one("-b"), "-b")?)
   if why == "" {
     return Err("a refutation needs the why: 'lll finding refute SLUG -b why' ('-b -' reads it from stdin)")

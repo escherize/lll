@@ -6,6 +6,7 @@ pub struct ErrorDisplay { pub summary: string, pub details: string }
 struct ErrorEnvelope {
   message: string,
   data: json.RawMessage,
+  status: int,
 }
 
 #[json]

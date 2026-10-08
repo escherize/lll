@@ -188,6 +188,9 @@ upgrading scripts that parse lll output (LLL-645).
   `--claim`. Without `--claim` it printed the decoded record only.
 - `doc view --json` prints RFC3339 timestamps; the record is otherwise
   unchanged.
+- `lll watch --json` events print RFC3339 timestamps too.
+- An HTTP error body counts as the API's error only when it names its own
+  `status`; a gateway's `{"message": ...}` keeps the request and exits 1.
 - Empty lists print one line on stderr: `no labels`, `no projects`,
   `no docs`, `no teams`, `no members`, `no webhooks`, `no findings`,
   `no comments`, `no match for ...`. `label list` and `project list` printed
@@ -203,7 +206,8 @@ upgrading scripts that parse lll output (LLL-645).
 - `--json` on `whoami`, `team view`, `team create`, `project view`,
   `finding near`, `config list`, `doc create`, `label create`,
   `invite create`, `issue update`, `issue close`, `issue start`,
-  `issue claim`, and `issue comment KEY` without a body (LLL-645).
+  `issue claim`, and `issue comment KEY` (the comment list, or with a body
+  the new comment) (LLL-645).
 - `lll api --fail`: an HTTP answer of 400 or above exits with the code its
   status maps to; without it, any answer still exits 0 (LLL-645).
 - `issue list` shows the claim: the text list names the holder, agent label

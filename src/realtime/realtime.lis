@@ -174,7 +174,7 @@ pub fn subscribe(
     Ok(r) => r,
     Err(e) => {
       if auth_failure(e) {
-        if let DeadToken.Exit = on_dead_token { return Err(dead_token_fix(e)) }
+        if let DeadToken.Exit = on_dead_token { return Err(pb.fail(pb.ErrorKind.Auth, dead_token_fix(e))) }
       }
       return Err(e)
     },

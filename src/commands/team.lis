@@ -189,10 +189,10 @@ fn team_rename_spec() -> Slice<flags.Flag> {
 fn team_create(input: flags.CommandInput) -> Result<(), string> {
   let p = input.parsed
   if p.first() != "" && p.given("--key") {
-    return Err(f"give the team key as the bare argument or --key, not both\nusage: {input.usage}")
+    return Err(flags.usage_error(f"give the team key as the bare argument or --key, not both\nusage: {input.usage}"))
   }
   let key = if p.given("--key") { p.one("--key") } else { p.first() }
-  if strings.TrimSpace(key) == "" { return Err(f"a team key is required (e.g. ENG)\nusage: {input.usage}") }
+  if strings.TrimSpace(key) == "" { return Err(flags.usage_error(f"a team key is required (e.g. ENG)\nusage: {input.usage}")) }
   let name = p.one("-n")
 
   let created = create_team(key, name)?
@@ -225,12 +225,12 @@ fn team_rename(input: flags.CommandInput) -> Result<(), string> {
   let p = input.parsed
   let key = p.first()
   if key == "" {
-    return Err(f"usage: {usage}")
+    return Err(flags.usage_error(f"usage: {usage}"))
   }
   let new_key = records.normalize_team_key(p.one("--key"))
   let new_name = p.one("-n")
   if new_key == "" && new_name == "" {
-    return Err(f"nothing to rename — give --key, -n, or both\nusage: {usage}")
+    return Err(flags.usage_error(f"nothing to rename — give --key, -n, or both\nusage: {usage}"))
   }
   let Some(t) = records.find_team(key)? else {
     return Err(unknown_team(key))
@@ -296,7 +296,7 @@ fn team_rename_collateral(old_key: string, new_key: string) -> Slice<string> {
 /// inverts the rule TASK-83 was built on.
 fn team_set_accent(input: flags.CommandInput) -> Result<(), string> {
   if input.parsed.positional_count() != 2 {
-    return Err("usage: lll team set-accent KEY #rrggbb (empty '' clears it)")
+    return Err(flags.usage_error("usage: lll team set-accent KEY #rrggbb (empty '' clears it)"))
   }
   let key = input.parsed.first()
   let raw = input.parsed.nth(1)
@@ -347,7 +347,7 @@ struct TeamAccentPatch { accent: string }
 /// the accent is: a shared field only the web can write inverts the rule.
 fn team_set_emoji(input: flags.CommandInput) -> Result<(), string> {
   if input.parsed.positional_count() != 2 {
-    return Err("usage: lll team set-emoji KEY EMOJI (empty '' clears it)")
+    return Err(flags.usage_error("usage: lll team set-emoji KEY EMOJI (empty '' clears it)"))
   }
   let key = input.parsed.first()
   let glyph = team_emoji_value(input.parsed.nth(1))?
@@ -497,7 +497,7 @@ fn configured_team_id() -> Result<string, string> {
 fn team_delete(input: flags.CommandInput) -> Result<(), string> {
   let key = input.parsed.first()
   if key == "" {
-    return Err("usage: lll team delete KEY")
+    return Err(flags.usage_error("usage: lll team delete KEY"))
   }
   let Some(t) = records.find_team(key)? else {
     return Err(unknown_team(key))
@@ -587,7 +587,7 @@ fn team_set_archived(p: flags.Parsed, archived: bool) -> Result<(), string> {
   if !archived { verb = "unarchive" }
   let key = p.first()
   if key == "" {
-    return Err(f"usage: lll team {verb} KEY")
+    return Err(flags.usage_error(f"usage: lll team {verb} KEY"))
   }
   let Some(t) = records.find_team(key)? else {
     return Err(unknown_team(key))
@@ -610,7 +610,7 @@ fn team_set_archived(p: flags.Parsed, archived: bool) -> Result<(), string> {
 fn team_view(input: flags.CommandInput) -> Result<(), string> {
   let key = input.parsed.first()
   if key == "" {
-    return Err("usage: lll team view KEY")
+    return Err(flags.usage_error("usage: lll team view KEY"))
   }
   let Some(t) = records.find_team(key)? else {
     return Err(unknown_team(key))

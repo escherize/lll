@@ -3,6 +3,7 @@ import "go:encoding/json"
 import "go:net/url"
 import "go:strings"
 
+import "flags"
 import "models"
 import "pb"
 import "query"
@@ -99,7 +100,7 @@ fn refuse_move(
 /// The destination team a `--to KEY` names.
 fn move_destination(key: string) -> Result<models.Team, string> {
   if strings.TrimSpace(key) == "" {
-    return Err("--to requires a team key (see 'lll team list')")
+    return Err(flags.usage_error("--to requires a team key (see 'lll team list')"))
   }
   let Some(team) = records.find_team(key)? else {
     return Err(unknown_team(key))

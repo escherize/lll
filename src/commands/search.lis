@@ -28,11 +28,11 @@ pub fn search_cmd(args: Slice<string>) -> Result<(), string> {
     words = words.append(p.nth(i))
   }
   let q = strings.TrimSpace(strings.Join(words, " "))
-  if q == "" { return Err(f"what to search for?\nusage: {usage}") }
+  if q == "" { return Err(flags.usage_error(f"what to search for?\nusage: {usage}")) }
   let mut limit = 10
   if p.given("--limit") {
     let Ok(n) = strconv.Atoi(p.one("--limit")) else {
-      return Err(f"--limit takes a number, got '{p.one("--limit")}'")
+      return Err(flags.usage_error(f"--limit takes a number, got '{p.one("--limit")}'"))
     }
     limit = n
   }

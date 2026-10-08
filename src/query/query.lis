@@ -1,5 +1,7 @@
 import "go:strings"
 
+import "pb"
+
 /// The six issue states, in workflow order.
 pub fn states() -> Slice<string> {
   ["backlog", "todo", "in-progress", "in-review", "done", "cancelled"]
@@ -9,7 +11,7 @@ pub fn states() -> Slice<string> {
 /// state; filter adapters decide whether absence means no restriction.
 pub fn state(value: string) -> Result<string, string> {
   if !states().contains(value) {
-    return Err(f"unknown state '{value}' (use one of: {strings.Join(states(), ", ")})")
+    return Err(pb.fail(pb.ErrorKind.Usage, f"unknown state '{value}' (use one of: {strings.Join(states(), ", ")})"))
   }
   Ok(value)
 }
@@ -123,7 +125,7 @@ pub fn sort(spec: string) -> Result<string, string> {
   let field = strings.TrimPrefix(spec, "-")
   if sort_fields().find(|f| f == field).is_none() {
     return Err(
-      f"unknown sort field '{field}' (use one of: {strings.Join(sort_fields(), ", ")}; prefix - for descending)",
+      pb.fail(pb.ErrorKind.Usage, f"unknown sort field '{field}' (use one of: {strings.Join(sort_fields(), ", ")}; prefix - for descending)"),
     )
   }
   Ok(spec)
