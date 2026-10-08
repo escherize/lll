@@ -113,10 +113,11 @@ full-access callers and strips hidden team ids. Two traps came out of it:
   or it is unchecked.
 - **An archived team is read-only** (LLL-660, `gopb/team_writes.go`).
   Request hooks refuse records-API writes to issues, comments, claims, docs,
-  labels, projects and webhooks, and `issueWritable` refuses the `/api/lll` routes.
-  Model saves are not checked, on purpose: deleting a member clears its
-  assignments through them. A new collection holding a team's records goes in
-  `archivedGuarded`.
+  labels, projects and webhooks, and `issueWritable` refuses the `/api/lll`
+  routes. Model saves are not checked, on purpose: deleting a member clears
+  its assignments through them. A new collection relating to teams or issues
+  goes in `archivedGuarded` or in the exempt list of
+  `scripts/test_archived_guard.py`, which fails on an unclassified one.
 - **An assignee can see the issue's team** (LLL-670, same file), checked on
   every save that sets the assignee or moves the issue.
 - **The board reads as an all-scope member.** Rules do nothing for its pages;
