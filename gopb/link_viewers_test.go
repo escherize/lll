@@ -23,7 +23,7 @@ func TestLinkViewerIsOneReadOnlyRecordPerTeam(t *testing.T) {
 	}
 	viewers := core.NewAuthCollection(linkViewers)
 	viewers.Fields.Add(&core.RelationField{Name: "teams", CollectionId: teams.Id, MaxSelect: 999},
-		&core.TextField{Name: "scope"}, &core.TextField{Name: "mode"})
+		&core.TextField{Name: "scope"}, &core.TextField{Name: "mode"}, &core.TextField{Name: "link_team"})
 	if err := app.Save(viewers); err != nil {
 		t.Fatal(err)
 	}
@@ -43,8 +43,8 @@ func TestLinkViewerIsOneReadOnlyRecordPerTeam(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if first.Id != alpha.Id || again.Id != first.Id {
-		t.Fatalf("link viewer ids %q, %q; want the team's id %q", first.Id, again.Id, alpha.Id)
+	if first.Id == alpha.Id || again.Id != first.Id || again.GetString("link_team") != alpha.Id {
+		t.Fatalf("link viewer ids %q, %q for team %q; want one record, not keyed by the team id", first.Id, again.Id, alpha.Id)
 	}
 	acc := effectiveAccess(app, again)
 	if acc.all || acc.rw || !slices.Equal(acc.teams, []string{alpha.Id}) {

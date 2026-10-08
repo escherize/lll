@@ -4,9 +4,11 @@ import "go:crypto/sha256"
 import "go:crypto/subtle"
 import "go:encoding/hex"
 import "go:encoding/json"
+import "go:fmt"
 import "go:html"
 import "go:net/http"
 import "go:net/url"
+import "go:os"
 import "go:strings"
 
 import "pb"
@@ -416,7 +418,10 @@ fn viewing(ctx: pb.Client, w: http.ResponseWriter, viewer: Viewer) -> Option<Vie
         }
         http.Error(w, hidden_team(key), 404)
       } else {
-        http.Error(w, f"this board cannot read for that link right now: {pb.plain(e)}", 503)
+        // The cause names the internal API address (review N2): the log
+        // gets it, the page does not.
+        fmt.Fprintln(os.Stderr, f"board: a team link's reader could not be had: {pb.plain(e)}")
+        http.Error(w, "this board cannot open that team link right now; try again, or ask the person who sent it", 503)
       }
       None
     },

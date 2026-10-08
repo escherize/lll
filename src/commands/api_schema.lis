@@ -145,6 +145,7 @@ Rules: list @request.auth.id != \"\" && id = @request.auth.id view @request.auth
 | scope | select | yes | values: all, teams |
 | mode | select | yes | values: rw, ro |
 | owner | relation |  | relation to members |
+| link_team | text | yes |  |
 | password | password | yes |  |
 | tokenKey | text | yes |  |
 | email | email | yes |  |

@@ -18,8 +18,11 @@
 // A link viewer may read its own record and nothing else here: the client's
 // token check (pb.verdict) probes it. Every write rule is null.
 //
-// The record's id is its team's id, so there is at most one per team without
-// a lookup index. Deleting the team clears `teams`, which then sees nothing.
+// `link_team` names the team it reads for, unique, so there is at most one
+// per team. The record keeps a random id: auth ids are unique across every
+// auth collection, so an id derived from the team's could be taken first by
+// a member a read-write member creates (review N1). Deleting the team clears
+// `teams`, which then sees nothing.
 migrate(
   (app) => {
     const teams = app.findCollectionByNameOrId("teams");
@@ -49,7 +52,9 @@ migrate(
         // Always empty. The rules read @request.auth.owner, so the field
         // must exist for them to resolve against this collection.
         { name: "owner", type: "relation", collectionId: members.id, maxSelect: 1, cascadeDelete: false },
+        { name: "link_team", type: "text", required: true, min: 15, max: 15, hidden: true },
       ],
+      indexes: ["CREATE UNIQUE INDEX `idx_link_viewers_link_team` ON `link_viewers` (`link_team`)"],
     });
     app.save(viewers);
   },

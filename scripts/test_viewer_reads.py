@@ -160,6 +160,16 @@ with tempfile.TemporaryDirectory(prefix='lll-658-') as directory:
         assert call(api, '/api/collections/link_viewers/auth-with-password',
                     {'identity': f"{alpha['id']}@links.invalid", 'password': 'x'})[0] >= 400
 
+        # A member who takes a team's id for a bot cannot break the team's
+        # links (review N1): the reader's id is its own.
+        gamma = call(api, '/api/collections/teams/records', {'key': 'GAMMA', 'name': 'Gamma'}, su)[1]
+        gamma_rec, gamma_tok = member('gamma-writer', scope='teams', teams=[gamma['id']], mode='rw')
+        squat = {'id': gamma['id'], 'name': 'bot-squat', 'email': 'bot-squat@example.test', 'password': 'pw12345678',
+                 'passwordConfirm': 'pw12345678', 'kind': 'bot', 'owner': gamma_rec['id']}
+        assert call(api, '/api/collections/members/records', squat, gamma_tok)[0] == 200, 'control: the bot took the team id'
+        code, minted, _ = call(api, '/api/lll/link-token', {'team': 'GAMMA'}, su)
+        assert code == 200 and minted['token'], (code, minted)
+
         # --- one access check per page load ---
         def access_calls():
             q = urllib.parse.quote("data.url~'/api/lll/access'")

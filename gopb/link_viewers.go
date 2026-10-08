@@ -61,10 +61,14 @@ func registerLinkTokenRoute(routes *router.Router[*core.RequestEvent]) {
 }
 
 // linkViewer is team teamID's link viewer, created when it does not exist.
-// Its id is the team's id, so two concurrent first uses cannot create two:
-// the loser's save fails on the primary key and it reads the winner's.
+// link_team is unique, so two concurrent first uses cannot create two: the
+// loser's save fails on the index and it reads the winner's. The id stays
+// random (review N1: a member-chosen id could otherwise squat it).
 func linkViewer(app core.App, teamID string) (*core.Record, error) {
-	if found, err := app.FindRecordById(linkViewers, teamID); err == nil {
+	find := func() (*core.Record, error) {
+		return app.FindFirstRecordByData(linkViewers, "link_team", teamID)
+	}
+	if found, err := find(); err == nil {
 		return found, nil
 	}
 	collection, err := app.FindCollectionByNameOrId(linkViewers)
@@ -72,14 +76,14 @@ func linkViewer(app core.App, teamID string) (*core.Record, error) {
 		return nil, err
 	}
 	viewer := core.NewRecord(collection)
-	viewer.Id = teamID
+	viewer.Set("link_team", teamID)
 	viewer.Set("teams", []string{teamID})
 	viewer.Set("scope", "teams")
 	viewer.Set("mode", "ro")
 	viewer.SetEmail(teamID + "@links.invalid")
 	viewer.SetRandomPassword()
 	if err := app.Save(viewer); err != nil {
-		if found, findErr := app.FindRecordById(linkViewers, teamID); findErr == nil {
+		if found, findErr := find(); findErr == nil {
 			return found, nil
 		}
 		return nil, err
