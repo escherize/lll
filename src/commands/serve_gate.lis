@@ -257,14 +257,16 @@ fn api_route(mux: Ref<http.ServeMux>, r: Ref<http.Request>) -> bool {
   pattern == "/api/"
 }
 
-/// True when the POST's Origin is this request's own scheme-less host and
-/// the browser does not call it cross-origin.
+/// True when the POST's Origin is exactly this request's own host over http
+/// or https, and the browser does not call it cross-origin. A browser
+/// serializes Origin as scheme://host[:port] with nothing after it, so any
+/// other spelling (a path, a trailing slash, userinfo) is refused.
 fn same_origin_post(r: Ref<http.Request>) -> bool {
   let origin = r.Header.map_or("", |h| h.Get("Origin"))
   let site = r.Header.map_or("", |h| h.Get("Sec-Fetch-Site"))
   if site != "" && site != "same-origin" { return false }
-  let Ok(u) = url.Parse(origin) else { return false }
-  origin != "" && u.Host != "" && u.Host == r.Host && (u.Scheme == "http" || u.Scheme == "https")
+  r.Host != "" &&
+  (origin == "http://" + r.Host || origin == "https://" + r.Host)
 }
 
 /// A redirect target that stays on this board: a path, never another host.

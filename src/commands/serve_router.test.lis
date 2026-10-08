@@ -155,6 +155,9 @@ fn every_non_get_request_must_come_from_the_boards_own_origin() {
       "http://localhost:8100",
       "http://127.0.0.1:8100.evil.example",
       "ftp://127.0.0.1:8100",
+      "http://127.0.0.1:8100/",
+      "http://127.0.0.1:8100/t/AAA/",
+      "http://x@127.0.0.1:8100",
     ] {
       assert origin_status(router, "POST", path, origin, "same-site") == 403
       assert origin_status(router, "POST", path, origin, "") == 403
