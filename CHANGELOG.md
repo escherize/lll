@@ -138,7 +138,9 @@ scripts. A removed spelling fails and names its replacement (LLL-644).
     `.lll-admin.json`. A boot that sets `LLL_ADMIN_PASSWORD=admin-local-123`
     explicitly keeps it and is warned on every boot. A server that `lll up`
     reuses rather than starts keeps its old password until `lll up` starts
-    it.
+    it; a reusing boot writes no password file. Rotation does not revoke
+    what a page may already have done with the old password: review the
+    superusers, members and tokens of a board that ran on it.
 
 ### Fixed
 

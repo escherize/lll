@@ -169,7 +169,13 @@ check what is configured with 'lll config list'",
   // one: PocketBase is reachable from any web page the user visits.
   let generated_admin = os.Getenv("LLL_ADMIN_EMAIL") == "" ||
   os.Getenv("LLL_ADMIN_PASSWORD") == ""
-  if share_bind != "" || generated_admin { pin_local_admin(pb_dir)? }
+  // Only a boot that starts the server generates a password: a boot that
+  // reuses a running one would leave a file matching no server in this
+  // directory, so it only reads a pair that is already there.
+  let starting = !healthy(db_url)
+  if share_bind != "" || generated_admin {
+    pin_local_admin(pb_dir, starting)?
+  }
 
   let mut api_line = f"api    {db_url} (already running)"
 
@@ -180,7 +186,7 @@ check what is configured with 'lll config list'",
   // the pair only then (LLL-648).
   let mut admin_ok = false
 
-  if !healthy(db_url) {
+  if starting {
     let db_port = free_port(port_of(db_url, 8090))
     db_url = f"http://{bind_addr()}:{db_port}"
 
@@ -188,9 +194,11 @@ check what is configured with 'lll config list'",
       match gopb.Serve(pb_dir, f"{bind_addr()}:{db_port}", email, pass, version()) {
         Err(e) => {
           fmt.Println(f"lll server failed to start: {e}")
-          fmt.Println(
-            f"check that the data dir '{pb_dir}' is writable, or pick another with --pb-dir",
-          )
+          if !f"{e}".starts_with("LLL_ALLOWED_ORIGINS") {
+            fmt.Println(
+              f"check that the data dir '{pb_dir}' is writable, or pick another with --pb-dir",
+            )
+          }
           os.Exit(1)
         },
         // Graceful shutdown (Ctrl-C / SIGTERM caught by PocketBase) — take
@@ -272,7 +280,9 @@ check what is configured with 'lll config list'",
             f"could not authenticate as the server administrator at {db_url}: {e}
 collection rules now refuse unauthenticated requests, so the boot cannot even
 create its team. Point LLL_ADMIN_EMAIL/LLL_ADMIN_PASSWORD at this server's
-superuser credentials, or set LLL_TOKEN to a member token valid for this server.",
+superuser credentials, or set LLL_TOKEN to a member token valid for this server.
+An 'lll up' that started that server without LLL_ADMIN_* keeps its generated
+password in its own data directory's .lll-admin.json.",
           )
         }
         using_token = true
@@ -617,8 +627,9 @@ fn local_admin_path(pb_dir: string) -> string {
 /// LLL_ADMIN_* pair, keep one random pair with the data directory (0600),
 /// so a restart signs in with the same one. A shared (--bind) board also
 /// pins a supplied pair, and copies it to the machine's private config after
-/// startup for later member-pass minting.
-fn pin_local_admin(pb_dir: string) -> Result<(), string> {
+/// startup for later member-pass minting. `write` is false when this boot
+/// reuses a running server: an existing pair is used, nothing is created.
+fn pin_local_admin(pb_dir: string, write: bool) -> Result<(), string> {
   let supplied_email = os.Getenv("LLL_ADMIN_EMAIL")
   let supplied_pass = os.Getenv("LLL_ADMIN_PASSWORD")
   if (supplied_email == "") != (supplied_pass == "") {
@@ -626,23 +637,34 @@ fn pin_local_admin(pb_dir: string) -> Result<(), string> {
       "lll up needs both LLL_ADMIN_EMAIL and LLL_ADMIN_PASSWORD, or neither (then it generates a password and keeps it in the data directory)",
     )
   }
-  if let Err(e) = os.MkdirAll(pb_dir, 0o700) {
-    return Err(f"creating local board data directory {pb_dir}: {e}")
-  }
   let path = local_admin_path(pb_dir)
+  let unreadable = f"delete {path} and restart lll up to generate a new administrator password"
   let mut saved = LocalShareAdmin { .. }
   match os.ReadFile(path) {
     Ok(b) => {
       if let Err(e) = json.Unmarshal(b, &saved) {
-        return Err(f"decoding local admin credentials in {path}: {e}")
+        return Err(f"decoding local admin credentials in {path}: {e}\n{unreadable}")
       }
       if saved.email == "" || saved.password == "" {
-        return Err(f"local admin credentials in {path} are incomplete")
+        return Err(f"local admin credentials in {path} are incomplete\n{unreadable}")
       }
     },
     Err(e) => if !os.IsNotExist(e) {
       return Err(f"reading local admin credentials in {path}: {e}")
     },
+  }
+  if !write {
+    if saved.email == "" || supplied_email != "" { return Ok(()) }
+    if let Err(e) = os.Setenv("LLL_ADMIN_EMAIL", saved.email) {
+      return Err(f"using local admin email: {e}")
+    }
+    if let Err(e) = os.Setenv("LLL_ADMIN_PASSWORD", saved.password) {
+      return Err(f"using local admin password: {e}")
+    }
+    return Ok(())
+  }
+  if let Err(e) = os.MkdirAll(pb_dir, 0o700) {
+    return Err(f"creating local board data directory {pb_dir}: {e}")
   }
   let email = if supplied_email != "" {
     supplied_email

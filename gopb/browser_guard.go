@@ -153,12 +153,15 @@ func loopbackHostMiddleware(bind string) *hook.Handler[*core.RequestEvent] {
 // superuser still signing in with the well-known fallback password loses it:
 // when it is the configured account, the upsert that follows replaces the
 // password; otherwise it gets a random password nobody holds, and the
-// configured pair is the way in. When the configured password IS the
-// fallback (a script exporting it), it is kept and the boot warns.
+// configured pair is the way in. When the configured pair IS the fallback
+// pair (a script exporting it), it is kept and the boot warns.
 func retireFallbackAdmin(app core.App, email, password string, w io.Writer) error {
+	sameAccount := strings.EqualFold(email, fallbackAdminEmail)
 	if password == fallbackAdminPassword {
-		fmt.Fprintf(w, "admin  WARNING: LLL_ADMIN_PASSWORD is the well-known fallback 'admin-local-123'; any local process or web page that reaches this server can sign in as %s. Unset LLL_ADMIN_EMAIL and LLL_ADMIN_PASSWORD to get a generated one.\n", email)
-		return nil
+		fmt.Fprintf(w, "admin  WARNING: LLL_ADMIN_PASSWORD is the well-known fallback 'admin-local-123'; any local process that reaches this server can sign in as %s. Unset LLL_ADMIN_EMAIL and LLL_ADMIN_PASSWORD to get a generated one.\n", email)
+		if sameAccount {
+			return nil
+		}
 	}
 	superusers, err := app.FindCachedCollectionByNameOrId(core.CollectionNameSuperusers)
 	if err != nil {
@@ -169,7 +172,7 @@ func retireFallbackAdmin(app core.App, email, password string, w io.Writer) erro
 		return nil
 	}
 	fmt.Fprintf(w, "admin  WARNING: %s had the well-known fallback password 'admin-local-123', which any web page could use; it no longer works. Sign in as %s with this server's administrator password (LLL_ADMIN_PASSWORD, or the generated one the admin line below points to).\n", fallbackAdminEmail, email)
-	if strings.EqualFold(email, fallbackAdminEmail) {
+	if sameAccount {
 		return nil
 	}
 	record.SetPassword(rand.Text() + rand.Text())

@@ -193,6 +193,16 @@ func TestRetireFallbackAdmin(t *testing.T) {
 		t.Fatalf("no warning: %q", out.String())
 	}
 
+	// Another account configured with the fallback password does not
+	// shelter admin@local.dev: it is still retired, and the boot warns.
+	out.Reset()
+	if err := retireFallbackAdmin(app, "ops@example.com", fallbackAdminPassword, &out); err != nil {
+		t.Fatal(err)
+	}
+	if superuserPasswordIs(t, app, fallbackAdminEmail, fallbackAdminPassword) {
+		t.Fatal("admin@local.dev kept the fallback behind another account's fallback password")
+	}
+
 	// Nothing to retire: silent.
 	superuser(t, app, fallbackAdminEmail, "something-else")
 	out.Reset()
