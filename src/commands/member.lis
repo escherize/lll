@@ -498,7 +498,7 @@ fn member_set_password(input: flags.CommandInput) -> Result<(), string> {
   point_at_url(p.one("--url"))?
   if p.given("--old-password") {
     if p.given("--email") || p.given("--admin-email") || p.given("--admin-password") {
-      return Err("--old-password changes your own password with your own login: drop --email, --admin-email and --admin-password")
+      return Err(flags.usage_error("--old-password changes your own password with your own login: drop --email, --admin-email and --admin-password"))
     }
     let given = if p.given("--password") { Some(p.one("--password")) } else { None }
     return change_own_password(name, p.one("--old-password"), given)
