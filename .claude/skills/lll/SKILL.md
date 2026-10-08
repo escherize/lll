@@ -243,7 +243,7 @@ lll issue create -t "..."  # work, tracked as KEY-1, KEY-2, ...
 lll team archive KEY       # done: leaves team lists and the board rail
 ```
 
-Pass `-k`: without it, `attach` picks the one team you can already see (or
+Pass `--key`: without it, `attach` picks the one team you can already see (or
 asks which), so a side project's issues land in your main team.
 
 Archiving hides, never deletes: `/t/KEY/` still renders with an "archived"

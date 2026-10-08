@@ -18,6 +18,14 @@ that close, release, delete or create bots.
 
 ### Added
 
+- `lll --help` opens with a "Start here" block (`lll up`, `lll login`,
+  `lll attach`, `lll issue create`) and defines a team in one line (LLL-649).
+- The board's rail links to `/me` ("Your login") on every page (LLL-649).
+- The README and the landing page are checked: `scripts/test_doc_examples.py`
+  runs every `lll` example in README.md and docs/index.html against a scratch
+  board, in a fresh HOME; a block that cannot run there carries a skip
+  marker with its reason. `scripts/test_help_ticket_keys.py` fails on an
+  internal ticket key in any help page or message. Both run in e2e (LLL-649).
 - `lll config list` and `lll config get KEY` (url, web_url, team or sort).
   `lll config --list` still works as an alias of `list`.
 - `lll team create KEY -n "Name"` takes the key as the bare argument, like
@@ -77,6 +85,20 @@ that close, release, delete or create bots.
 
 ### Changed
 
+- `lll member invite` prints the board's address in the colleague's
+  `lll login --url` line when this machine knows the board (`web_url`), so
+  their login saves both the board and its API. An explicit `--url` still
+  wins (LLL-649).
+- Help and messages no longer cite internal ticket keys (LLL-649).
+- README: Homebrew first, a quickstart that runs as written from a fresh
+  machine, separate Upgrade and Share sections, canonical verbs, and no
+  references to docs that exist only on lll's own board. The landing page's
+  samples are regenerated from a real run (LLL-649).
+- Shipped skills: `team list --archived` is described as listing every team
+  with archived ones marked; backlog-loop names `lll up --scratch` as the
+  throwaway board; project-specific anecdotes are gone from backlog-loop and
+  merge-gate, which now notes that its REST fallback needs `python3`
+  (LLL-649).
 - Exit codes follow D1: 0 ok, 1 error, 2 usage, 3 not found, 4 refused or
   conflict, 5 nothing to do, 6 not authenticated. Before, every failure
   exited 1. Unknown flags, verbs and nouns and a malformed issue key now
@@ -336,6 +358,10 @@ that close, release, delete or create bots.
 
 ### Fixed
 
+- `lll up` no longer advises only `lll logout` when a repo's `.lll.toml`
+  token is the one refused: logout clears only the home config's token, so
+  the advice now names the repo line first, then logout if the home token is
+  stale too (LLL-649).
 - The API port's `/.well-known/lll` always answers `service` and `version`,
   instead of 404 when no board is advertised, so a CLI pointed at the API
   port warns about version skew too. `web_url` still appears only when

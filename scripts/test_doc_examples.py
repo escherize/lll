@@ -111,7 +111,8 @@ def script_for(blocks, work):
             if UP_LINE.match(line):
                 log = shlex.quote(str(work / f'up-{n}.log'))
                 out += [
-                    f'{line} > {log} 2>&1 &',
+                    # Braces, so a trailing '# comment' cannot swallow the '&'.
+                    '{', line, f'}} > {log} 2>&1 &',
                     'echo $! >> "$pids"',
                     'up_ok=0',
                     'for _ in $(seq 1 120); do',
@@ -156,9 +157,16 @@ def run_document(label, blocks):
             'GIT_AUTHOR_NAME': 'newbie', 'GIT_AUTHOR_EMAIL': 'newbie@example.com',
             'GIT_COMMITTER_NAME': 'newbie', 'GIT_COMMITTER_EMAIL': 'newbie@example.com',
         }
-        done = subprocess.run(['bash', str(work / 'examples.sh')], cwd=start, env=env,
-                              text=True, capture_output=True, timeout=300)
-        output = done.stdout + done.stderr
+        log = work / 'examples.log'
+        with open(log, 'w') as sink:
+            try:
+                done = subprocess.run(['bash', str(work / 'examples.sh')], cwd=start, env=env,
+                                      stdin=subprocess.DEVNULL, stdout=sink, stderr=subprocess.STDOUT,
+                                      timeout=300)
+            except subprocess.TimeoutExpired:
+                print(log.read_text())
+                raise
+        output = log.read_text()
         if done.returncode != 0:
             print(output)
         assert done.returncode == 0, f'{label}: {done.returncode} example lines failed (output above)'

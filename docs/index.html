@@ -313,6 +313,7 @@
       <strong>One binary, with the database compiled into it.</strong>
     </p>
 
+    <!-- example-check: skip: installs lll; the check runs the binary under test -->
     <div class="term">
       <div class="term-head"><span class="label">Install</span></div>
       <div class="term-body"><pre><span class="sig">$</span> <span class="cmd">brew install escherize/lll/lll</span>
@@ -350,6 +351,7 @@
           into it, writing the url, the token, your name, and, when the server has exactly
           one team, that too.
         </p>
+        <!-- example-check: skip: needs a hosted server and its administrator credentials -->
         <div class="term">
           <div class="term-head"><span class="label">lll login</span></div>
           <div class="term-body"><pre><span class="sig">$</span> <span class="cmd">lll login --url https://tracker.example.com --email you@example.com \
@@ -464,6 +466,7 @@ commit .lll.toml — every clone and worktree of this repo is attached from then
       <code>--claim</code> takes it, so two agents cannot start the same work.
       <code>lll skill get</code> prints the operating instructions carried in the binary.
     </p>
+    <!-- example-check: skip: its last command streams until Ctrl-C -->
     <div class="term">
       <div class="term-head"><span class="label">Streams and tokens</span></div>
       <div class="term-body"><pre><span class="sig">$</span> <span class="cmd">lll bot create bot-deploy</span>
