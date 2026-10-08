@@ -4,7 +4,7 @@ import "go:net/http/httptest"
 import "pb"
 import "serve"
 
-fn http_auth_failure(status: int) -> (string, string) {
+fn http_auth_failure(status: int) -> (pb.CliError, string) {
   let mut server = httptest.NewServer(http.HandlerFunc(|w, _r| {
     w.WriteHeader(status)
     let _ = w.Write("previous status: 400 Bad Request; 401 Unauthorized; oldPassword".bytes())
@@ -18,20 +18,29 @@ fn http_auth_failure(status: int) -> (string, string) {
 fn auth_errors_follow_live_http_status_despite_url_and_body_digits() {
   for status in [400, 401, 403, 500, 503] {
     let (e, base) = http_auth_failure(status)
-    assert pb.classify(e).status == status
+    assert e.status == status
     if status == 400 {
-      assert serve.admin_verification_error(test_client("http://127.0.0.1:1", "", ""), e).starts_with("wrong admin password")
-      assert login_failed(test_client("http://127.0.0.1:1", "", ""), e, "person@example.test", base, "").contains("or the password is wrong")
+      assert serve.admin_verification_error(test_client("http://127.0.0.1:1", "", ""), e).message.starts_with("wrong admin password")
+      assert login_failed(test_client("http://127.0.0.1:1", "", ""), e, "person@example.test", base, "").message.contains("or the password is wrong")
     } else {
-      assert serve.admin_verification_error(test_client("http://127.0.0.1:1", "", ""), e) == f"verifying the admin password: {e}"
-      assert login_failed(test_client("http://127.0.0.1:1", "", ""), e, "person@example.test", base, "") == f"login failed: {e}"
-      assert superuser_auth_failed(test_client("http://127.0.0.1:1", "", ""), e) == f"authenticating as the superuser: {e}"
+      let verifying = serve.admin_verification_error(test_client("http://127.0.0.1:1", "", ""), e)
+      assert verifying.message == f"verifying the admin password: {e.message}"
+      assert verifying.status == status
+      let login = login_failed(test_client("http://127.0.0.1:1", "", ""), e, "person@example.test", base, "")
+      assert login.message == f"login failed: {e.message}"
+      assert login.status == status
+      let superuser = superuser_auth_failed(test_client("http://127.0.0.1:1", "", ""), e)
+      assert superuser.message == f"authenticating as the superuser: {e.message}"
+      assert superuser.status == status
     }
-    if status == 400 || status == 401 || status == 403 {
-      assert member_password_error("person", e).contains("superuser-only")
+    if status == 401 || status == 403 {
+      assert member_password_error("person", e).message.contains("superuser-only")
     } else {
-      assert member_password_error("person", e) == f"setting person's password: {e}"
-      assert impersonate_error("person", e) == f"impersonating person: {e}"
+      // A body that is not the API's envelope cannot name a refused field,
+      // whatever its text says (LLL-675: no substring classifiers).
+      assert member_password_error("person", e).message == f"setting person's password: {e.message}"
+      assert impersonate_error("person", e).message == f"impersonating person: {e.message}"
+      assert impersonate_error("person", e).status == status
     }
   }
 }
@@ -48,15 +57,33 @@ fn login_403_with_a_server_message_repeats_it_verbatim() {
   defer server.Close()
   let Err(e) = pb.post_anon_to(server.URL, "/api/collections/members/auth-with-password", "{}") else { panic("expected failure") };
   let refused = login_failed(test_client("http://127.0.0.1:1", "", ""), e, "bot-e2e@members.invalid", server.URL, "")
-  assert refused.starts_with(f"login failed at {server.URL}: ")
-  assert refused.contains("bot members cannot sign in with a password")
+  assert refused.message.starts_with(f"login failed at {server.URL}: ")
+  assert refused.message.contains("bot members cannot sign in with a password")
 }
 
 #[test]
 fn non_auth_validation_and_transport_errors_keep_their_details() {
-  let validation = "PATCH http://127.0.0.1:40123/400/oldPassword: 400 Bad Request: invalid email"
-  assert member_password_error("person", validation) == f"setting person's password: {validation}"
-  let transport = "POST http://127.0.0.1:40015/401: connection refused"
-  assert serve.admin_verification_error(test_client("http://127.0.0.1:1", "", ""), transport) == f"verifying the admin password: {transport}"
-  assert login_failed(test_client("http://127.0.0.1:1", "", ""), transport, "person@example.test", "", "") == f"login failed: {transport}"
+  let validation = pb.failed("PATCH http://127.0.0.1:40123/400/oldPassword: 400 Bad Request: invalid email")
+  assert member_password_error("person", validation).message == f"setting person's password: {validation.message}"
+  let transport = pb.fail(pb.ErrorKind.Network, "POST http://127.0.0.1:40015/401: connection refused")
+  assert serve.admin_verification_error(test_client("http://127.0.0.1:1", "", ""), transport).message == f"verifying the admin password: {transport.message}"
+  let login = login_failed(test_client("http://127.0.0.1:1", "", ""), transport, "person@example.test", "", "")
+  assert login.message == f"login failed: {transport.message}"
+  assert pb.exit_code(login.kind) == 1
+}
+
+/// PocketBase refuses a wrong current password on its oldPassword field;
+/// that field, not the message's wording, is what set-password reads.
+#[test]
+fn an_old_password_refusal_is_read_from_its_field() {
+  let mut server = httptest.NewServer(http.HandlerFunc(|w, _r| {
+    w.WriteHeader(400)
+    let _ = w.Write("{\"data\":{\"oldPassword\":{\"code\":\"validation_invalid_old_password\",\"message\":\"Missing or invalid old password.\"}},\"message\":\"Failed to update record.\",\"status\":400}".bytes())
+  }))
+  defer server.Close()
+  let Err(e) = pb.post_anon_to(server.URL, "/api/collections/members/records/m1", "{}") else { panic("expected failure") };
+  assert e.has_code(pb.ServerCode.OldPasswordRejected)
+  assert member_password_error("person", e).message.contains("superuser-only")
+  let worded = pb.http_error("PATCH u", 400, "400 Bad Request", "{\"data\":{},\"message\":\"oldPassword is wrong\",\"status\":400}")
+  assert !worded.has_code(pb.ServerCode.OldPasswordRejected)
 }

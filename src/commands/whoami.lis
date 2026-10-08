@@ -34,19 +34,20 @@ struct WhoamiExpand {
 /// None when the server does not report access (older server, superuser).
 /// A bot with an owner shows its access within the owner's (LLL-543), and
 /// names the owner when that is narrower than the bot's own.
-fn access_line(ctx: pb.Client, me: WhoamiIdentity, body: string) -> Result<Option<string>, string> {
-  if me.scope == "" { return Ok(None) }
+fn access_line(ctx: pb.Client, me: WhoamiIdentity, body: string) -> Result<Option<string>, pb.CliError> {
+  let Some(own) = models.Access.parse(me.scope, [], me.mode) else { return Ok(None) }
   let own_keys = me.expand.teams.map(|t| t.key)
   let mut record = models.Member { .. }
   let decoded = json.Unmarshal(body.bytes(), &record)
   if decoded.is_err() || record.owner == "" {
-    return Ok(Some(describe_access(me.scope, me.mode, own_keys)))
+    return Ok(Some(describe_access(own, own_keys)))
   }
-  let (eff, cap) = records.effective_access(ctx, record)?
-  let Some(owner) = cap else { return Ok(Some(describe_access(me.scope, me.mode, own_keys))) }
+  let (effective, cap) = records.effective_access(ctx, record)?
+  let Some(owner) = cap else { return Ok(Some(describe_access(own, own_keys))) }
+  let Some(eff) = effective else { return Ok(Some(describe_access(own, own_keys))) }
   // A scoped caller lists exactly the teams it can see.
-  let keys = if eff.scope == "all" { [] } else { records.list_teams(ctx)?.items.map(|t| t.key) }
-  Ok(Some(f"{describe_access(eff.scope, eff.mode, keys)} (capped by its owner, {owner.name})"))
+  let keys = if eff.every_team() { [] } else { records.list_teams(ctx)?.items.map(|t| t.key) }
+  Ok(Some(f"{describe_access(eff, keys)} (capped by its owner, {owner.name})"))
 }
 
 /// `lll whoami --json` (LLL-645): the facts the text prints, by name.
@@ -88,7 +89,7 @@ This leaves the saved attachment unchanged (see 'lll config --help')."
 
 /// `lll whoami` — the member or administrator identity, confirmed by a
 /// record lookup against the server rather than read off the config.
-pub fn whoami(ctx: pb.Client, args: Slice<string>) -> Result<(), string> {
+pub fn whoami(ctx: pb.Client, args: Slice<string>) -> Result<(), pb.CliError> {
   if let Some(flag) = args.get(2) {
     if flag == "--help" || flag == "-h" {
       fmt.Println(
@@ -105,11 +106,11 @@ token with a member session, and 'lll bot create bot-NAME' provisions a bot iden
       )
       return Ok(())
     }
-    if flag != "--json" { return Err(whoami_arg_error(flag, args)) }
-    if let Some(extra) = args.get(3) { return Err(whoami_arg_error(extra, args)) }
+    if flag != "--json" { return Err(pb.failed(whoami_arg_error(flag, args))) }
+    if let Some(extra) = args.get(3) { return Err(pb.failed(whoami_arg_error(extra, args))) }
   }
   let json_mode = args.get(2) == Some("--json")
-  let (cfg, src) = ctx.settings.traced()?
+  let (cfg, src) = ctx.settings.traced().map_err(pb.failed)?
   // NOT auth-refresh, which this used to POST. A refresh is refused for every
   // non-refreshable token - and `lll token create` mints exactly those, the
   // whole agent credential - so `lll whoami` answered "401 Unauthorized" to
@@ -129,7 +130,7 @@ token with a member session, and 'lll bot create bot-NAME' provisions a bot iden
     if strings.Split(cfg.token, ".").length() == 3 {
       return Err(ctx.corrupted_token_message())
     }
-    return Err("the configured token is not an lll auth token; use 'lll login', or 'lll token create' for an agent")
+    return Err(pb.failed("the configured token is not an lll auth token; use 'lll login', or 'lll token create' for an agent"))
   }
   if pb.token_expired(cfg.token) {
     return Err(ctx.expired_token_message())
@@ -138,7 +139,7 @@ token with a member session, and 'lll bot create bot-NAME' provisions a bot iden
   let body = ctx.get(f"/api/collections/{collection}/records/{id}?expand=teams")?
   let mut me = WhoamiIdentity { .. }
   if let Err(e) = json.Unmarshal(body.bytes(), &me) {
-    return Err(f"decoding the identity response: {e}")
+    return Err(pb.failed(f"decoding the identity response: {e}"))
   }
   let administrator = me.collection == "_superusers"
   let name = if administrator { "superuser" } else { me.name }

@@ -5,7 +5,6 @@ import "go:path/filepath"
 import "go:sort"
 import "go:strings"
 
-import "display"
 import "attachments"
 import "flags"
 import "mirror"
@@ -26,15 +25,14 @@ import "writes"
 ///
 /// Comments and members are not imported. Nothing here can forge another
 /// member's authorship, so `KEY-N.comments.md` is export-only.
-fn import_dir(input: flags.CommandInput) -> Result<(), string> {
+fn import_dir(input: flags.CommandInput) -> Result<(), pb.CliError> {
   let ctx = input.ctx
   let p = input.parsed
   let usage = input.usage
   let dir = p.first()
   if dir == "" { return Err(flags.usage_error(f"which directory?\nusage: {usage}")) }
 
-  let team = current_team(ctx)?
-  if team.archived { return Err(records.archived_hint(team.key)) }
+  let team = records.active_team(current_team(ctx)?)?.team()
 
   // Read and parse the WHOLE set before writing anything. A mirror with one
   // malformed file must fail with nothing created, not leave a team half
@@ -42,28 +40,28 @@ fn import_dir(input: flags.CommandInput) -> Result<(), string> {
   let parsed = read_mirror(dir)?
   let parsed_docs = read_mirror_docs(dir)?
   if parsed.is_empty() {
-    return Err(f"no issue files in {filepath.Join(dir, "issues")}; is this a directory 'lll export' wrote?")
+    return Err(pb.failed(f"no issue files in {filepath.Join(dir, "issues")}; is this a directory 'lll export' wrote?"))
   }
   // Checked before --replace deletes anything: the server refuses a number
   // past its ceiling (LLL-678), which would leave the team emptied.
   for front_and_body in parsed {
     let (front, _) = front_and_body
     if front.number < 1 || front.number > 999999999 {
-      return Err(f"{front.key}: issue number {front.number} is outside 1-999999999; nothing was changed")
+      return Err(pb.failed(f"{front.key}: issue number {front.number} is outside 1-999999999; nothing was changed"))
     }
   }
 
   let existing = records.fetch_board_issues(ctx, team.id)?
   if !existing.is_empty() && !p.given("--replace") {
     return Err(
-      f"{team.key} already has {existing.length()} issues, and importing into a team that is not empty would mix two sets of numbering.
+      pb.failed(f"{team.key} already has {existing.length()} issues, and importing into a team that is not empty would mix two sets of numbering.
 To rebuild {team.key} from {dir}, deleting all {existing.length()} first: lll import dir {dir} --replace
-To import somewhere harmless instead: lll attach --key NEWKEY in another directory, then run this there",
+To import somewhere harmless instead: lll attach --key NEWKEY in another directory, then run this there"),
     )
   }
 
   let (label_ids, _) = ensure_labels(ctx, team, label_names(parsed), Map.new<string, string>())?
-  let creator = records.find_actor(ctx)?.map_or("", |member| member.id)
+  let creator = records.find_actor(ctx)?.map(|member| member.id)
 
   // From here the team is being rebuilt, and a failure leaves it partly
   // done. Nothing can make that atomic over HTTP, so every error past this
@@ -72,7 +70,7 @@ To import somewhere harmless instead: lll attach --key NEWKEY in another directo
   let mut deleted = 0
   for issue in existing {
     if let Err(e) = writes.delete_issue(ctx, issue.id) {
-      return Err(partial(dir, f"deleting {team.key}-{issue.number}: {e}", deleted, 0))
+      return Err(e.with_message(partial(dir, f"deleting {team.key}-{issue.number}: {e.message}", deleted, 0)))
     }
     deleted += 1
   }
@@ -84,25 +82,25 @@ To import somewhere harmless instead: lll attach --key NEWKEY in another directo
   // keys that came back under another number. The server keeps a mirror's
   // numbers only for a superuser's import (LLL-678); a member's issues are
   // numbered by the server, in the mirror's order.
-  let mut id_of = Map.new<string, string>()
+  let mut id_of = Map.new<string, models.IssueId>()
   let mut renumbered: Slice<string> = []
   for front_and_body in by_number(parsed) {
     let (front, body) = front_and_body
-    let mut assignee = ""
+    let mut assignee = None
     if front.assignee != "" {
       match records.find_member(ctx, front.assignee)? {
-        Some(member) => assignee = member.id,
+        Some(member) => assignee = Some(member.id),
         // A member cannot be conjured from a name, and refusing the whole
         // import over an account that left would make the mirror
         // unrestorable. Import the issue, name what was dropped.
         None => unassigned = unassigned.append(f"{front.key} ({front.assignee})"),
       }
     }
-    let mut project = ""
+    let mut project = None
     if front.project != "" {
-      project = records.resolve_project(ctx, team.id, front.project)?.id
+      project = Some(records.resolve_project(ctx, team.id, front.project)?.id)
     }
-    let mut labels: Slice<string> = []
+    let mut labels: Slice<models.LabelId> = []
     for name in front.labels {
       if let Some(id) = label_ids.get(name) { labels = labels.append(id) }
     }
@@ -112,7 +110,7 @@ To import somewhere harmless instead: lll attach --key NEWKEY in another directo
     let mut filed_by = creator
     if front.creator != "" {
       if let Some(member) = records.find_member(ctx, front.creator)? {
-        filed_by = member.id
+        filed_by = Some(member.id)
       }
     }
     let new_issue = models.NewIssue {
@@ -129,7 +127,7 @@ To import somewhere harmless instead: lll attach --key NEWKEY in another directo
       sort: front.sort,
       title: front.title,
       state: front.state,
-      priority: priority_value_or_none(front.priority),
+      priority: priority_value_or_none(front.priority).wire(),
       description: body,
       emoji: front.emoji,
       assignee,
@@ -140,12 +138,12 @@ To import somewhere harmless instead: lll attach --key NEWKEY in another directo
     // on the record it is handed.
     let body_json = match writes.create_issue(ctx, pb.Caller.Process, new_issue, "?expand=team") {
       Ok(body) => body,
-      Err(e) => return Err(partial(dir, f"creating {front.key}: {e}", deleted, created)),
+      Err(e) => return Err(e.with_message(partial(dir, f"creating {front.key}: {e.message}", deleted, created))),
     }
     created += 1
     let mut made = models.Issue { .. }
     if let Err(e) = json.Unmarshal(body_json.bytes(), &made) {
-      return Err(partial(dir, f"decoding created {front.key}: {e}", deleted, created))
+      return Err(pb.failed(partial(dir, f"decoding created {front.key}: {e}", deleted, created)))
     }
     id_of[front.key] = made.id
     if made.number != front.number { renumbered = renumbered.append(f"{front.key} -> {team.key}-{made.number}") }
@@ -153,7 +151,7 @@ To import somewhere harmless instead: lll attach --key NEWKEY in another directo
     if front.refs != "" {
       let mut issue_for_refs = models.Issue { .. }
       if let Err(e) = json.Unmarshal(body_json.bytes(), &issue_for_refs) {
-        return Err(partial(dir, f"decoding created {front.key}: {e}", deleted, created))
+        return Err(pb.failed(partial(dir, f"decoding created {front.key}: {e}", deleted, created)))
       }
       // One append per recorded ref, through the server's atomic endpoint —
       // the refs field is a list in one string, and `lll import github`
@@ -161,7 +159,7 @@ To import somewhere harmless instead: lll attach --key NEWKEY in another directo
       // turns a later re-import into a duplicate import.
       for reference in strings.Fields(front.refs) {
         if let Err(e) = writes.append_ref(ctx, issue_for_refs.id, reference) {
-          return Err(partial(dir, f"recording ref {reference} on {front.key}: {e}", deleted, created))
+          return Err(e.with_message(partial(dir, f"recording ref {reference} on {front.key}: {e.message}", deleted, created)))
         }
       }
     }
@@ -169,20 +167,20 @@ To import somewhere harmless instead: lll attach --key NEWKEY in another directo
     if front.attachments.is_empty() { continue }
     let mut issue = models.Issue { .. }
     if let Err(e) = json.Unmarshal(body_json.bytes(), &issue) {
-      return Err(f"decoding created {front.key}: {e}")
+      return Err(pb.failed(f"decoding created {front.key}: {e}"))
     }
     for name in front.attachments {
       let path = filepath.Join(dir, "issues", front.key, name)
       let data = match os.ReadFile(path) {
         Ok(data) => data,
-        Err(e) => return Err(f"reading attachment {path}: {e}"),
+        Err(e) => return Err(pb.failed(f"reading attachment {path}: {e}")),
       }
       // PocketBase assigns its own stored filename on upload, so the bytes
       // come back and the NAME does not: a restored shot_ab12.png becomes
       // shot_ab12_cd34.png. Nothing downstream keys off the name, and
       // inventing one would mean fighting the file field's own uniqueness.
       if let Err(e) = attachments.upload(ctx, pb.Caller.Process, issue, name, data) {
-        return Err(partial(dir, f"attaching {name} to {front.key}: {e}", deleted, created))
+        return Err(e.with_message(partial(dir, f"attaching {name} to {front.key}: {e.message}", deleted, created)))
       }
       restored_blobs += 1
     }
@@ -197,14 +195,14 @@ To import somewhere harmless instead: lll attach --key NEWKEY in another directo
   for front_and_body in parsed {
     let (front, _) = front_and_body
     if front.blocked.is_empty() { continue }
-    let mut ids: Slice<string> = []
+    let mut ids: Slice<models.IssueId> = []
     for key in front.blocked {
       if let Some(id) = id_of.get(key) { ids = ids.append(id) }
     }
     if ids.is_empty() { continue }
     let Some(issue_id) = id_of.get(front.key) else { continue }
     if let Err(e) = writes.set_blocked_by(ctx, issue_id, ids) {
-      return Err(partial(dir, f"linking blockers on {front.key}: {e}", deleted, created))
+      return Err(e.with_message(partial(dir, f"linking blockers on {front.key}: {e.message}", deleted, created)))
     }
     linked_blocks += 1
   }
@@ -213,12 +211,12 @@ To import somewhere harmless instead: lll attach --key NEWKEY in another directo
   if !parsed_docs.is_empty() {
     for existing_doc in fetch_team_docs(ctx, team.id)? {
       if let Err(e) = writes.delete_doc(ctx, existing_doc.id) {
-        return Err(partial(dir, f"deleting doc {existing_doc.slug}: {e}", deleted, created))
+        return Err(e.with_message(partial(dir, f"deleting doc {existing_doc.slug}: {e.message}", deleted, created)))
       }
     }
     for front_and_body in parsed_docs {
       let (front, body) = front_and_body
-      let mut linked: Slice<string> = []
+      let mut linked: Slice<models.IssueId> = []
       for key in front.issues {
         if let Some(id) = id_of.get(key) { linked = linked.append(id) }
       }
@@ -237,7 +235,7 @@ To import somewhere harmless instead: lll attach --key NEWKEY in another directo
         issues: linked,
       }
       if let Err(e) = writes.create_doc(ctx, new_doc) {
-        return Err(partial(dir, f"creating doc {front.slug}: {e}", deleted, created))
+        return Err(e.with_message(partial(dir, f"creating doc {front.slug}: {e.message}", deleted, created)))
       }
       restored_docs += 1
     }
@@ -295,13 +293,13 @@ pub fn dir_spec() -> Slice<flags.Flag> {
 /// Every `issues/*.md` in the mirror, parsed, in ascending file order so the
 /// created records land in a deterministic sequence. `*.comments.md` is
 /// skipped: comments are export-only.
-fn read_mirror(dir: string) -> Result<Slice<(mirror.Front, string)>, string> {
+fn read_mirror(dir: string) -> Result<Slice<(mirror.Front, string)>, pb.CliError> {
   let issues_dir = filepath.Join(dir, "issues")
   // os.ReadDir reports a partial listing alongside its error; a mirror read
   // that could not see every file must not import the subset it did see.
   let entries = match os.ReadDir(issues_dir) {
     Partial.Ok(entries) => entries,
-    Partial.Both(_, e) | Partial.Err(e) => return Err(f"reading {issues_dir}: {e}"),
+    Partial.Both(_, e) | Partial.Err(e) => return Err(pb.failed(f"reading {issues_dir}: {e}")),
   }
   let mut names: mut Slice<string> = []
   for entry in entries {
@@ -317,11 +315,11 @@ fn read_mirror(dir: string) -> Result<Slice<(mirror.Front, string)>, string> {
     let path = filepath.Join(issues_dir, name)
     let data = match os.ReadFile(path) {
       Ok(data) => data,
-      Err(e) => return Err(f"reading {path}: {e}"),
+      Err(e) => return Err(pb.failed(f"reading {path}: {e}")),
     }
     match mirror.parse(data as string) {
       Ok(pair) => out = out.append(pair),
-      Err(e) => return Err(f"{path}: {e}"),
+      Err(e) => return Err(e.with_message(f"{path}: {e.message}")),
     }
   }
   Ok(out)
@@ -329,11 +327,11 @@ fn read_mirror(dir: string) -> Result<Slice<(mirror.Front, string)>, string> {
 
 /// Every `docs/*.md` in the mirror, parsed. Absent or empty is fine — a
 /// mirror of a team with no documents is a normal mirror.
-fn read_mirror_docs(dir: string) -> Result<Slice<(mirror.DocFront, string)>, string> {
+fn read_mirror_docs(dir: string) -> Result<Slice<(mirror.DocFront, string)>, pb.CliError> {
   let docs_dir = filepath.Join(dir, "docs")
   let entries = match os.ReadDir(docs_dir) {
     Partial.Ok(entries) => entries,
-    Partial.Both(_, e) | Partial.Err(e) => return Err(f"reading {docs_dir}: {e}"),
+    Partial.Both(_, e) | Partial.Err(e) => return Err(pb.failed(f"reading {docs_dir}: {e}")),
   }
   let mut names: mut Slice<string> = []
   for entry in entries {
@@ -347,11 +345,11 @@ fn read_mirror_docs(dir: string) -> Result<Slice<(mirror.DocFront, string)>, str
     let path = filepath.Join(docs_dir, name)
     let data = match os.ReadFile(path) {
       Ok(data) => data,
-      Err(e) => return Err(f"reading {path}: {e}"),
+      Err(e) => return Err(pb.failed(f"reading {path}: {e}")),
     }
     match mirror.parse_doc(data as string) {
       Ok(pair) => out = out.append(pair),
-      Err(e) => return Err(f"{path}: {e}"),
+      Err(e) => return Err(e.with_message(f"{path}: {e.message}")),
     }
   }
   Ok(out)
@@ -389,6 +387,6 @@ fn label_names(parsed: Slice<(mirror.Front, string)>) -> Slice<string> {
 /// A priority name back to its stored value. An unknown name imports as
 /// 'none' rather than failing: the scale can gain a level between an export
 /// and its restore, and losing one field beats losing the issue.
-fn priority_value_or_none(name: string) -> int {
-  display.priority_value(name).unwrap_or(0)
+fn priority_value_or_none(name: string) -> models.Priority {
+  models.Priority.named(name).unwrap_or(models.Priority.None)
 }

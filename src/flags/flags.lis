@@ -52,7 +52,7 @@ pub struct Parsed {
 ///
 /// Now the table decides. A repeatable flag accumulates and its consumer ORs
 /// the values; anything else says so the first time it is doubled.
-fn repeat_ok(fl: Flag, existing: Slice<string>) -> Result<(), string> {
+fn repeat_ok(fl: Flag, existing: Slice<string>) -> Result<(), pb.CliError> {
   if fl.repeat || existing.is_empty() { return Ok(()) }
   Err(
     usage_error(f"{fl.name} may only be given once (got {existing.length() + 1}); it takes a single value"),
@@ -65,7 +65,7 @@ pub fn parse(
   start: int,
   allow_positional: bool,
   usage: string,
-) -> Result<Parsed, string> {
+) -> Result<Parsed, pb.CliError> {
   let limit = if allow_positional { 1 } else { 0 }
   parse_n(spec, args, start, limit, usage)
 }
@@ -83,7 +83,7 @@ pub fn parse_n(
   start: int,
   max_positional: int,
   usage: string,
-) -> Result<Parsed, string> {
+) -> Result<Parsed, pb.CliError> {
   let mut vals = Map.new<string, Slice<string>>()
   let mut pos: Slice<string> = []
   // `--help` and `-h` on every verb, before anything else can refuse them
@@ -98,7 +98,8 @@ pub fn parse_n(
   // short-circuits the verb the same way a bad flag does - it cannot fall
   // through into the command body. Recording it as a parsed value instead
   // would make `lll label create -h` PARSE happily and then run, which is a
-  // write. main.lis strips the marker, prints the rest, and exits 0.
+  // write. It is an error of kind Help (pb.help), which main prints on stdout
+  // with exit 0.
   // Only when the spec does NOT declare --help. A verb that declares it has
   // its own richer help to print and checks `p.given("--help")` after parse
   // (`lll board`, `lll issue create`); intercepting those would replace a
@@ -109,7 +110,7 @@ pub fn parse_n(
     .find(|f| spells(f, "--help") || spells(f, "-h"))
     .is_some()
   if !declares_help && help_requested(spec, args, start) {
-    return Err(f"{help_marker()}{usage_help(usage, spec)}")
+    return Err(pb.help(usage_help(usage, spec)))
   }
   let mut i = start
   let mut options_ended = false
@@ -216,16 +217,9 @@ fn url_scope_error(arg: string, url: string, usage: string) -> string {
   unknown_flag(arg, usage, []) + f"\nThis command takes no --url: the endpoint is the configured one. For one command, prefix your command with LLL_URL={value}; to change the default, run 'lll config set url URL'."
 }
 
-/// The prefix that marks a parse "error" as a help request rather than a
-/// failure (TASK-237). A control character, so no real error message can
-/// collide with it and no user can type it.
-pub fn help_marker() -> string {
-  "\u{1}help\u{1}"
-}
-
 /// A bad command line: exit 2 (LLL-645). Commands that refuse their own
 /// arguments after parsing use it too.
-pub fn usage_error(message: string) -> string {
+pub fn usage_error(message: string) -> pb.CliError {
   pb.fail(pb.ErrorKind.Usage, message)
 }
 
@@ -444,7 +438,7 @@ pub struct Command {
   pub page: string,
   pub spec: Slice<Flag>,
   pub positional: string,
-  pub run: fn(CommandInput) -> Result<(), string>,
+  pub run: fn(CommandInput) -> Result<(), pb.CliError>,
 }
 
 /// Route `lll <noun> <verb> ...` through a noun's Command table.
@@ -466,12 +460,12 @@ pub fn dispatch(
   intro: string,
   cmds: Slice<Command>,
   args: Slice<string>,
-) -> Result<(), string> {
+) -> Result<(), pb.CliError> {
   let Some(verb) = args.get(2) else {
-    return Err(f"{help_marker()}{noun_help(noun, tagline, intro, cmds)}")
+    return Err(pb.help(noun_help(noun, tagline, intro, cmds)))
   }
   if verb == "--help" || verb == "-h" {
-    return Err(f"{help_marker()}{noun_help(noun, tagline, intro, cmds)}")
+    return Err(pb.help(noun_help(noun, tagline, intro, cmds)))
   }
   let Some(c) = resolve_command(cmds, verb) else {
     for (old, new) in retired_verbs() {
@@ -486,7 +480,7 @@ pub fn dispatch(
   // A verb with its own page answers --help with it; the generic parse-time
   // help would otherwise replace a written page with a bare flags block.
   if c.page != "" && help_requested(c.spec, args, 3) {
-    return Err(f"{help_marker()}{c.page}")
+    return Err(pb.help(c.page))
   }
   let cmd = f"lll {noun} {c.name}"
   // Arity is the positional string's word count: "KEY-123 SLUG" admits two.
@@ -590,7 +584,7 @@ pub fn tokens(spec: Slice<Flag>) -> Slice<string> {
 }
 
 /// One entity name, supplied positionally or by its named flag.
-pub fn entity_name(p: Parsed, flag: string, usage: string) -> Result<string, string> {
+pub fn entity_name(p: Parsed, flag: string, usage: string) -> Result<string, pb.CliError> {
   if p.first() != "" && p.given(flag) {
     return Err(usage_error(f"give the name as a positional argument or {flag}, not both\nusage: {usage}"))
   }
@@ -608,7 +602,7 @@ pub fn with_team(spec: Slice<Flag>) -> Slice<Flag> {
 
 /// Strip only actual --team options, preserving bodies and other flag values
 /// literally. Return the selection separately so parsing has no side effects.
-pub fn extract_team(args: Slice<string>, start: int, spec: Slice<Flag>) -> Result<(Slice<string>, Option<string>), string> {
+pub fn extract_team(args: Slice<string>, start: int, spec: Slice<Flag>) -> Result<(Slice<string>, Option<string>), pb.CliError> {
   let mut cleaned = args[..start].clone()
   let mut team: Option<string> = None
   let mut given = 0

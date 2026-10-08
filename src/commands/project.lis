@@ -14,7 +14,7 @@ import "writes"
 /// Dispatch `lll project <verb>` through the noun's Command table (TASK-307).
 /// The table is the one place a verb is declared: dispatch, `lll project
 /// --help` and shell completions all read it, so none of the three can drift.
-pub fn project(ctx: pb.Client, args: Slice<string>) -> Result<(), string> {
+pub fn project(ctx: pb.Client, args: Slice<string>) -> Result<(), pb.CliError> {
   flags.dispatch(ctx, "project", "work with projects", project_intro(), project_commands(), args)
 }
 
@@ -81,12 +81,12 @@ fn project_intro() -> string {
   "Statuses: planned, started, paused, completed, cancelled"
 }
 
-fn project_list(input: flags.CommandInput) -> Result<(), string> {
+fn project_list(input: flags.CommandInput) -> Result<(), pb.CliError> {
   let ctx = input.ctx
   let p = input.parsed
   // Scoped when a team is configured, every team's when not: a project
   // belongs to one team (TASK-173), so the unscoped list is an admin's view.
-  let projects = models.ProjectList { items: records.fetch_projects(ctx, configured_scope(ctx)?.filter_team())? }
+  let projects = models.ProjectList { items: records.fetch_projects(ctx, configured_scope(ctx)?)? }
   if p.given("--json") { return print_list_json(projects.items, whole_list(projects.items.length()), "project list") }
   if projects.items.is_empty() { return say_empty("projects") }
   for p in projects.items {
@@ -131,16 +131,16 @@ fn project_delete_spec() -> Slice<flags.Flag> {
   ])
 }
 
-fn check_status(val: string) -> Result<string, string> {
+fn check_status(val: string) -> Result<string, pb.CliError> {
   if records.project_statuses().find(|s| s == val).is_none() {
     return Err(
-      f"unknown status '{val}' (use one of: {strings.Join(records.project_statuses(), ", ")})",
+      pb.failed(f"unknown status '{val}' (use one of: {strings.Join(records.project_statuses(), ", ")})"),
     )
   }
   Ok(val)
 }
 
-fn project_create(input: flags.CommandInput) -> Result<(), string> {
+fn project_create(input: flags.CommandInput) -> Result<(), pb.CliError> {
   let ctx = input.ctx
   let usage = input.usage
   let p = input.parsed
@@ -157,13 +157,13 @@ fn project_create(input: flags.CommandInput) -> Result<(), string> {
 
   let mut created = models.Project { .. }
   if let Err(e) = json.Unmarshal(body.bytes(), &created) {
-    return Err(f"decoding created project: {e}")
+    return Err(pb.failed(f"decoding created project: {e}"))
   }
   fmt.Println(f"Created project {created.name} ({created.status})")
   Ok(())
 }
 
-fn project_edit(input: flags.CommandInput) -> Result<(), string> {
+fn project_edit(input: flags.CommandInput) -> Result<(), pb.CliError> {
   let ctx = input.ctx
   let usage = input.usage
   let p = input.parsed
@@ -192,7 +192,7 @@ fn project_edit(input: flags.CommandInput) -> Result<(), string> {
 /// Count shared references before deleting; force explicitly accepts their loss.
 /// `lll project move NAME --to KEY` (LLL-100). See writes/moves.lis for why the
 /// refusal is the right answer rather than dragging the references along.
-fn project_move(input: flags.CommandInput) -> Result<(), string> {
+fn project_move(input: flags.CommandInput) -> Result<(), pb.CliError> {
   let ctx = input.ctx
   let usage = input.usage
   let p = input.parsed
@@ -202,11 +202,11 @@ fn project_move(input: flags.CommandInput) -> Result<(), string> {
   let from = team_flag_or_current(ctx, p.one("--team"))?
   let to = writes.move_destination(ctx, p.one("--to"))?
   let project = records.resolve_project(ctx, from.id, name)?
-  fmt.Println(writes.move_to_team(ctx, "project", project.name, project.id, from, to)?)
+  fmt.Println(writes.move_to_team(ctx, records.Classifier.Project(project.id), project.name, from, to)?)
   Ok(())
 }
 
-fn project_delete(input: flags.CommandInput) -> Result<(), string> {
+fn project_delete(input: flags.CommandInput) -> Result<(), pb.CliError> {
   let ctx = input.ctx
   let usage = input.usage
   let p = input.parsed
@@ -214,7 +214,7 @@ fn project_delete(input: flags.CommandInput) -> Result<(), string> {
     return Err(flags.usage_error(f"usage: {usage}"))
   }
   let project = records.resolve_project(ctx, current_team(ctx)?.id, name)?
-  let used = records.entity_issue_count(ctx, "project", project.id)?
+  let used = records.entity_issue_count(ctx, records.Classifier.Project(project.id))?
   if used > 0 && !p.given("--force") {
     return Err(refuse_delete("project", name, used))
   }
@@ -226,7 +226,7 @@ fn project_delete(input: flags.CommandInput) -> Result<(), string> {
   Ok(())
 }
 
-fn project_view(input: flags.CommandInput) -> Result<(), string> {
+fn project_view(input: flags.CommandInput) -> Result<(), pb.CliError> {
   let ctx = input.ctx
   let name = input.parsed.first()
   if name == "" {
@@ -249,7 +249,7 @@ fn project_view(input: flags.CommandInput) -> Result<(), string> {
   }
 
   // Every page (LLL-659): one page of 200 silently dropped the rest.
-  let filter = url.QueryEscape(f"project={query.quote(p.id)}")
+  let filter = url.QueryEscape(f"project={query.quote(p.id.string())}")
   let issues = models.IssueList {
     items: records.fetch_all_records<models.Issue>(ctx,
       f"/api/collections/issues/records?filter={filter}&sort=created,id&expand=team,assignee",
@@ -259,7 +259,7 @@ fn project_view(input: flags.CommandInput) -> Result<(), string> {
   }
   if json_mode {
     let mut fields = Map.new<string, json.RawMessage>()
-    if let Err(e) = json.Unmarshal(encode_json(p, "project")?, &fields) { return Err(f"decoding project: {e}") }
+    if let Err(e) = json.Unmarshal(encode_json(p, "project")?, &fields) { return Err(pb.failed(f"decoding project: {e}")) }
     let listed = if issues.items.is_empty() { "[]".bytes() as json.RawMessage } else { encode_json(issues.items, "issues")? }
     fields["issues"] = listed
     return print_json(fields, "project")
@@ -268,7 +268,7 @@ fn project_view(input: flags.CommandInput) -> Result<(), string> {
     fmt.Println("")
     fmt.Println("Issues:")
     fmt.Println("")
-    print_issue_table(issues.items, Map.new<string, models.Claim>())?
+    print_issue_table(issues.items, Map.new<models.IssueId, models.Claim>())?
   }
   Ok(())
 }

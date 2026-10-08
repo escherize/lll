@@ -19,8 +19,8 @@ import "theme"
 // record -> view model mappers that every page and every broadcast shares.
 
 /// Render a named template from the embedded web/templates/ tree.
-fn render(name: string, data: Unknown) -> Result<string, string> {
-  web.Render(name, data).map_err(|e| e.Error())
+fn render(name: string, data: Unknown) -> Result<string, pb.CliError> {
+  web.Render(name, data).map_err(|e| pb.failed(e.Error()))
 }
 
 /// Render an HTML response completely before writing headers or body.
@@ -29,7 +29,7 @@ fn render_html(w: http.ResponseWriter, name: string, data: Unknown) {
   let html = match render(name, data) {
     Ok(h) => h,
     Err(e) => {
-      http.Error(w, pb.plain(e), 500)
+      http.Error(w, e.message, 500)
       return
     },
   }
@@ -109,7 +109,7 @@ fn avatar_vm(member: models.Member) -> AvatarVM {
   AvatarVM {
     initials: strings.Join(first[..min(2, first.length())], ""),
     class: f"av-{sum % 4}",
-    bot: member.kind == "bot",
+    bot: member.is_bot(),
   }
 }
 
@@ -142,15 +142,15 @@ fn issues_for(scoped: bool, issues: Slice<models.Issue>) -> Slice<models.Issue> 
 }
 
 fn card_vm(issue: models.Issue) -> CardVM {
-  let prio = display.priority_name(issue.priority)
+  let prio = display.priority_name(issue.priority())
   CardVM {
     claim_holder: "",
     attachment_count: issue.attachments.length(),
-    id: issue.id,
+    id: issue.id.string(),
     key: f"{issue.expand.team.key}-{issue.number}",
     title: issue.title,
-    state: issue.state,
-    state_label: state_label(issue.state),
+    state: display.state_name(issue.state()),
+    state_label: state_label(display.state_name(issue.state())),
     prio,
     prio_label: prio_label(prio),
     assignee: issue.expand.assignee.name,
@@ -161,10 +161,10 @@ fn card_vm(issue: models.Issue) -> CardVM {
     updated: display.relative(issue.updated),
     snippet: snippet(issue.description),
     work_branch: issue.work_branch,
-    project_id: issue.project,
+    project_id: issue.project.string(),
     // The state half of the staleness rule; board_card ORs in the claim
     // half. Rows built straight from card_vm never show the site anyway.
-    work_stale: records.work_site_stale(issue.state, true),
+    work_stale: records.work_site_stale(issue.state(), true),
   }
 }
 
@@ -187,23 +187,23 @@ fn snippet(desc: string) -> string {
 /// The board's resolved filter: values the page handler already validated
 /// against the catalogue. An empty dimension does not filter.
 struct BoardFilter {
-  states: Slice<string>,
+  states: Slice<models.IssueState>,
   assignees: Slice<string>,
   labels: Slice<string>,
   prios: Slice<string>,
   // Project IDS, not names (LLL-523): the board fetch does not expand
   // `project` (each relation is another join on every load and broadcast),
   // and an issue carries its project's id either way.
-  projects: Slice<string>,
+  projects: Slice<models.ProjectId>,
 }
 
 /// Does one issue pass the board's current filter? Every dimension ANDs;
 /// an empty dimension lets everything through.
 fn issue_matches(i: models.Issue, f: BoardFilter) -> bool {
-  (f.states.is_empty() || f.states.contains(i.state))
+  (f.states.is_empty() || i.state().map_or(false, |s| f.states.contains(s)))
     && (f.assignees.is_empty() || f.assignees.contains(i.expand.assignee.name))
     && (f.labels.is_empty() || issue_has_any_label(i, f.labels))
-    && (f.prios.is_empty() || f.prios.contains(display.priority_name(i.priority)))
+    && (f.prios.is_empty() || f.prios.contains(display.priority_name(i.priority())))
     && (f.projects.is_empty() || f.projects.contains(i.project))
 }
 
@@ -283,9 +283,9 @@ fn filter_groups(
     opt_group(base, "project", "Project", project_names, issues, q,
       |i, v| project_ids.get(v).map_or(false, |id| id == i.project), |v| v),
     opt_group(base, "prio", "Priority", prios, issues, q,
-      |i, v| display.priority_name(i.priority) == v, prio_label),
+      |i, v| display.priority_name(i.priority()) == v, prio_label),
     opt_group(base, "state", "State", query.states(), issues, q,
-      |i, v| i.state == v, state_label),
+      |i, v| display.state_name(i.state()) == v, state_label),
   ]
   groups.filter(|g| g.opts.length() > 0)
 }
@@ -306,7 +306,7 @@ fn order_issues(issues: Slice<models.Issue>, order: string) -> Slice<models.Issu
   match order {
     "created" => sort_issues(issues, |a, b| strings.Compare(a.created, b.created) > 0),
     "updated" => sort_issues(issues, |a, b| strings.Compare(a.updated, b.updated) > 0),
-    "priority" => sort_issues(issues, |a, b| display.prio_rank(a.priority) < display.prio_rank(b.priority)),
+    "priority" => sort_issues(issues, |a, b| display.prio_rank(a.priority()) < display.prio_rank(b.priority())),
     _ => issues,
   }
 }
@@ -351,17 +351,17 @@ fn board_columns(
   order: string,
 ) -> Slice<ColumnVM> {
   let ordered = order_issues(issues, order)
-  query
-    .states()
+  models.IssueState
+    .all()
     .map(|s| ColumnVM {
-      state: s,
-      label: state_label(s),
-      glyph: display.glyph(s),
-      sig: strings.ReplaceAll(s, "-", "_") as template.JS,
+      state: s.wire(),
+      label: state_label(s.wire()),
+      glyph: display.glyph(Some(s)),
+      sig: strings.ReplaceAll(s.wire(), "-", "_") as template.JS,
       cards: ordered
-        .filter(|i| i.state == s && issue_matches(i, flt))
+        .filter(|i| i.state() == Some(s) && issue_matches(i, flt))
         .map(|i| board_card(i, claimed)),
-      total: issues.filter(|i| i.state == s).length(),
+      total: issues.filter(|i| i.state() == Some(s)).length(),
       manual: order == "manual",
     })
 }
@@ -385,15 +385,15 @@ fn board_card(issue: models.Issue, claimed: Slice<models.Claim>) -> CardVM {
 /// The issue the dialog creates lands in that same team, so a picker
 /// offering another team's label would build a record PocketBase is happy to
 /// store and no view can explain.
-fn compose_vm(ctx: pb.Client, team_id: string, roster: Roster) -> Result<ComposeVM, string> {
-  let projects = records.fetch_projects(ctx, team_id)?
-  let labels = records.fetch_labels(ctx, team_id)?
+fn compose_vm(ctx: pb.Client, team_id: models.TeamId, roster: Roster) -> Result<ComposeVM, pb.CliError> {
+  let projects = records.fetch_projects(ctx, query.TeamScope.Only(team_id))?
+  let labels = records.fetch_labels(ctx, query.TeamScope.Only(team_id))?
   Ok(ComposeVM {
     prios: prio_opts(),
     members: roster.picks(),
-    projects: projects.map(|p| PickVM { id: p.id, name: p.name, bot: false }),
+    projects: projects.map(|p| PickVM { id: p.id.string(), name: p.name, bot: false }),
     labels: labels.map(|l| LabelPickVM {
-      id: l.id,
+      id: l.id.string(),
       name: l.name,
       color: theme.normalize_hex(l.color),
       on: false,
@@ -432,14 +432,14 @@ fn comment_vm(c: models.Comment) -> CommentVM {
 /// project) — shared by the issue page and broadcast re-renders. `roster`
 /// is who the rendering may name (LLL-551): hidden members render as
 /// "hidden member" and drop out of the assignee picker.
-fn issue_vm(ctx: pb.Client, issue: models.Issue, comments: Slice<models.Comment>, roster: Roster) -> Result<IssueVM, string> {
+fn issue_vm(ctx: pb.Client, issue: models.Issue, comments: Slice<models.Comment>, roster: Roster) -> Result<IssueVM, pb.CliError> {
   let mut vm = issue_fields_vm(ctx, issue, comments, roster)?
   vm.description = markdown.md_html(issue.description)
   Ok(vm)
 }
 
 /// Metadata can refresh without parsing or transmitting the description.
-fn issue_fields_vm(ctx: pb.Client, raw: models.Issue, comments: Slice<models.Comment>, roster: Roster) -> Result<IssueVM, string> {
+fn issue_fields_vm(ctx: pb.Client, raw: models.Issue, comments: Slice<models.Comment>, roster: Roster) -> Result<IssueVM, pb.CliError> {
   let issue = roster.issue(raw)
   let assignee = issue.expand.assignee.name
   let mut project = issue.expand.project.name
@@ -455,7 +455,7 @@ fn issue_fields_vm(ctx: pb.Client, raw: models.Issue, comments: Slice<models.Com
   let mut claim_holder = ""
   let mut claim_age = ""
   if let Some(c) = held {
-    claim_id = c.id
+    claim_id = c.id.string()
     claim_holder = c.expand.member.name
     if claim_holder == "" { claim_holder = "unknown member" }
     claim_holder = display.byline(claim_holder, c.agent)
@@ -465,24 +465,24 @@ fn issue_fields_vm(ctx: pb.Client, raw: models.Issue, comments: Slice<models.Com
   let mut claim_actor = ""
   let mut claim_error = ""
   match records.find_actor(ctx) {
-    Ok(Some(a)) => { claim_actor = a.name; claim_actor_id = a.id },
+    Ok(Some(a)) => { claim_actor = a.name; claim_actor_id = a.id.string() },
     Ok(None) => claim_error = "No member is configured for this board.",
-    Err(e) => claim_error = pb.plain(e),
+    Err(e) => claim_error = e.message,
   }
   let mut work = ""
   if issue.work_branch != "" { work = f"{issue.work_branch} @ {issue.work_host}:{issue.work_path}" }
-  let work_stale = records.work_site_stale(issue.state, held.is_some())
+  let work_stale = records.work_site_stale(issue.state(), held.is_some())
   Ok(IssueVM {
     provenance: provenance.fields(issue),
     claim_id, claim_holder, claim_age, claim_actor, claim_actor_id, claim_error,
     claim_read_only: issue.expand.team.archived,
     attachments: attachment_vms(issue),
     deleted: false,
-    id: issue.id,
+    id: issue.id.string(),
     key: f"{issue.expand.team.key}-{issue.number}",
     title: issue.title,
-    state: issue.state,
-    prio: display.priority_name(issue.priority),
+    state: display.state_name(issue.state()),
+    prio: display.priority_name(issue.priority()),
     assignee,
     avatar: avatar_vm(issue.expand.assignee),
     project,
@@ -499,15 +499,15 @@ fn issue_fields_vm(ctx: pb.Client, raw: models.Issue, comments: Slice<models.Com
     // The three editor catalogues. Small fetches, paid per render — the
     // selects live inside the #issue-detail morph boundary, so a broadcast
     // that shipped no options would wipe the controls mid-edit.
-    project_id: issue.project,
-    assignee_id: issue.assignee,
+    project_id: issue.project.string(),
+    assignee_id: issue.assignee.string(),
     // Scoped to the ISSUE's team, not the server's configured one: this
     // renders for whatever issue arrives, including one from a team the
     // board is not scoped to (TASK-173).
     member_opts: roster.picks(),
-    project_opts: records.fetch_projects(ctx, issue.team)?.map(|p| PickVM { id: p.id, name: p.name, bot: false }),
-    label_opts: records.fetch_labels(ctx, issue.team)?.map(|l| LabelPickVM {
-      id: l.id,
+    project_opts: records.fetch_projects(ctx, query.TeamScope.Only(issue.team))?.map(|p| PickVM { id: p.id.string(), name: p.name, bot: false }),
+    label_opts: records.fetch_labels(ctx, query.TeamScope.Only(issue.team))?.map(|l| LabelPickVM {
+      id: l.id.string(),
       name: l.name,
       color: theme.normalize_hex(l.color),
       on: issue.labels.contains(l.id),

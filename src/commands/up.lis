@@ -79,7 +79,7 @@ pub fn up_spec() -> Slice<flags.Flag> {
   ]
 }
 
-pub fn up(ctx: pb.Client, args: Slice<string>) -> Result<(), string> {
+pub fn up(ctx: pb.Client, args: Slice<string>) -> Result<(), pb.CliError> {
   let spec = up_spec()
   let p = flags.parse(spec, args, 2, false, flags.usage("lll up", spec, ""))?
   if p.given("--help") {
@@ -93,7 +93,7 @@ pub fn up(ctx: pb.Client, args: Slice<string>) -> Result<(), string> {
   }
   if share_bind == "0.0.0.0" || share_bind == "::" {
     return Err(
-      "--bind needs the actual LAN or Tailscale IP teammates can reach, not a wildcard address",
+      pb.failed("--bind needs the actual LAN or Tailscale IP teammates can reach, not a wildcard address"),
     )
   }
   if scratch && p.one("--pb-dir") != "" {
@@ -111,9 +111,9 @@ pub fn up(ctx: pb.Client, args: Slice<string>) -> Result<(), string> {
   // before anything is written, so no later change to setup_scratch or to how
   // the config root resolves can point it at the user's home config.
   if scratch {
-    let home = ctx.settings.home_path()?
+    let home = ctx.settings.home_path().map_err(pb.failed)?
     if !strings.HasPrefix(home, scratch_dir + "/") {
-      return Err(f"refusing a scratch boot whose config path {home} is outside {scratch_dir}")
+      return Err(pb.failed(f"refusing a scratch boot whose config path {home} is outside {scratch_dir}"))
     }
   }
   let ctx = if share_bind != "" { ctx.with_settings(ctx.settings.with_bind(share_bind)) } else { ctx }
@@ -135,7 +135,7 @@ pub fn up(ctx: pb.Client, args: Slice<string>) -> Result<(), string> {
   // configured but where it came from. A team already written in a config file
   // needs no persisting; one that came from LLL_TEAM (or from the prompt) does,
   // or the next boot in this directory asks the same question again.
-  let (cfg, src) = ctx.settings.traced()?
+  let (cfg, src) = ctx.settings.traced().map_err(pb.failed)?
   // A shareable local boot is explicit intent to use THIS machine even when
   // the home config still points at a hosted board. Give its embedded API a
   // fresh local port; the public board port proxies /api/ for teammates.
@@ -153,11 +153,11 @@ pub fn up(ctx: pb.Client, args: Slice<string>) -> Result<(), string> {
   if db_url != "" && !is_loopback(db_url) {
     if p.one("--pb-dir") != "" {
       return Err(
-        f"--pb-dir asks for a local instance but the configured url is {db_url}, which is remote
+        pb.failed(f"--pb-dir asks for a local instance but the configured url is {db_url}, which is remote
 'lll up' would have served that remote database and written to it, not to '{pb_dir}'
 for a throwaway board: lll up --scratch
 to keep this data directory: LLL_CONFIG_HOME=$(mktemp -d) LLL_URL=http://127.0.0.1:8090 lll up --pb-dir {pb_dir}
-or run against the remote deliberately, with no --pb-dir",
+or run against the remote deliberately, with no --pb-dir"),
       )
     }
     // LLL-488: naming LLL_URL alone is a dead end. It is the first of three
@@ -166,11 +166,11 @@ or run against the remote deliberately, with no --pb-dir",
     // advice stalled two steps later having written a stray pb/ directory.
     // --scratch (LLL-487) is the whole answer in one command.
     return Err(
-      f"the configured url is {db_url}, which is not this machine
+      pb.failed(f"the configured url is {db_url}, which is not this machine
 'lll up' serves and seeds a database; pointed at a remote one it writes there
 for a throwaway board: lll up --scratch
 to serve this directory instead: LLL_CONFIG_HOME=$(mktemp -d) LLL_URL=http://127.0.0.1:8090 lll up
-check what is configured with 'lll config list'",
+check what is configured with 'lll config list'"),
     )
   }
 
@@ -247,7 +247,7 @@ check what is configured with 'lll config list'",
     }
     if !ok {
       return Err(
-        f"lll server did not come up on {db_url}; check its output above",
+        pb.failed(f"lll server did not come up on {db_url}; check its output above"),
       )
     }
     api_line = f"api    {db_url}"
@@ -309,12 +309,12 @@ check what is configured with 'lll config list'",
       Err(e) => {
         if cfg.token == "" || share_bind != "" {
           return Err(
-            f"could not authenticate as the server administrator at {db_url}: {e}
+            e.with_message(f"could not authenticate as the server administrator at {db_url}: {e.message}
 collection rules now refuse unauthenticated requests, so the boot cannot even
 create its team. Point LLL_ADMIN_EMAIL/LLL_ADMIN_PASSWORD at this server's
 superuser credentials, or set LLL_TOKEN to a member token valid for this server.
 An 'lll up' that started that server without LLL_ADMIN_* keeps its generated
-password in its own data directory's .lll-admin.json.",
+password in its own data directory's .lll-admin.json."),
           )
         }
         using_token = true
@@ -344,7 +344,7 @@ password in its own data directory's .lll-admin.json.",
       } else {
         "superuser token generated for this startup"
       }
-      return Err(f"{e}\nstartup credential: {credential}")
+      return Err(e.with_message(f"{e.message}\nstartup credential: {credential}"))
     },
   }
   let ctx = ctx.with_settings(ctx.settings.with_team(team))
@@ -383,7 +383,7 @@ password in its own data directory's .lll-admin.json.",
   // A demo boot points the CLI at itself (demo.lis), and scratch and shared
   // boots write their own CLI config.
   if !scratch && share_bind == "" && !demo {
-    let home = ctx.settings.load_home()?
+    let home = ctx.settings.load_home().map_err(pb.failed)?
     let plan = cli_login_plan(
       CliState {
         rides: member_token_ok,
@@ -392,7 +392,7 @@ password in its own data directory's .lll-admin.json.",
         token_source: src.token,
         home_token: home.token,
         home_url: home.url,
-        home_path: ctx.settings.home_path()?,
+        home_path: ctx.settings.home_path().map_err(pb.failed)?,
         db_url,
       },
     )
@@ -415,7 +415,7 @@ password in its own data directory's .lll-admin.json.",
   // board's server, or no server. A boot run beside another server's login (a
   // hosted url and its token) once replaced that file's web_url with this
   // board's address, so url and web_url named two different servers.
-  let home = ctx.settings.load_home()?
+  let home = ctx.settings.load_home().map_err(pb.failed)?
   // Writing web_url also creates the config directory the login link below
   // goes into; a kept web_url means the home config already exists.
   if home_names_board(home.url, db_url, board_url) {
@@ -431,7 +431,7 @@ password in its own data directory's .lll-admin.json.",
   // so it follows a per-boot token. It names its own board url, and readers
   // use it only for that url, so it is written even when web_url is kept.
   let login_file = filepath.Join(
-    filepath.Dir(ctx.settings.home_path()?),
+    filepath.Dir(ctx.settings.home_path().map_err(pb.failed)?),
     "board-login-url",
   )
   write_home_config(
@@ -440,14 +440,14 @@ password in its own data directory's .lll-admin.json.",
   )?
   if share_bind != "" {
     let admin_file = filepath.Join(
-      filepath.Dir(ctx.settings.home_path()?),
+      filepath.Dir(ctx.settings.home_path().map_err(pb.failed)?),
       "local-admin.json",
     )
     let admin_json = match json.Marshal(
       LocalShareAdmin { url: board_url, email, password: pass },
     ) {
       Ok(b) => b,
-      Err(e) => return Err(f"encoding local admin connection: {e}"),
+      Err(e) => return Err(pb.failed(f"encoding local admin connection: {e}")),
     }
     write_home_config(admin_file, admin_json as string)?
     fmt.Println(f"share  board login and member passes use {board_url}")
@@ -464,7 +464,7 @@ password in its own data directory's .lll-admin.json.",
     // The same token run_server's gate checks: both read these settings.
     let login_url = f"{board_url}/?board_token={ctx.settings.board_token()}"
     if let Err(e) = open_url(login_url) {
-      fmt.Println(f"could not open a browser: {e}")
+      fmt.Println(f"could not open a browser: {e.message}")
     }
   }
   serve.run_server(ctx, chosen, refresh, p.given("--admin-ui"))
@@ -613,7 +613,7 @@ fn log_cli_in(
   db_url: string,
   plan: CliLogin,
   token_source: string,
-) -> Result<Slice<string>, string> {
+) -> Result<Slice<string>, pb.CliError> {
   match plan {
     CliLogin.Already => Ok([f"cli    unchanged: the CLI uses its token from {token_source}"]),
     CliLogin.Untouched(why) => Ok([f"cli    unchanged: {why}"]),

@@ -8,6 +8,7 @@ import "models"
 import "pb"
 import "query"
 import "writes"
+import "display"
 
 // Links from an issue: linked docs (link, unlink) and blockers (block,
 // unblock).
@@ -15,8 +16,8 @@ import "writes"
 /// Docs linked to an issue. The issue -> doc direction is not stored: it is
 /// one `?=` filter over docs.issues, which is the whole reason links are a
 /// relation and not a write-once reference on the issue.
-fn fetch_issue_docs(ctx: pb.Client, issue_id: string) -> Result<Slice<models.Doc>, string> {
-  records.fetch_docs(ctx, f"issues.id ?= {query.quote(issue_id)}", "slug", "")
+fn fetch_issue_docs(ctx: pb.Client, issue_id: models.IssueId) -> Result<Slice<models.Doc>, pb.CliError> {
+  records.fetch_docs(ctx, f"issues.id ?= {query.quote(issue_id.string())}", "slug", "")
 }
 
 /// Refuse a link whose two ends live in different teams (TASK-173). The doc
@@ -27,15 +28,15 @@ fn cross_team_link(
   issue: models.Issue,
   team: models.Team,
   d: models.Doc,
-) -> Result<(), string> {
+) -> Result<(), pb.CliError> {
   if d.team == issue.team { return Ok(()) }
   let key = f"{issue.expand.team.key}-{issue.number}"
   Err(
-    f"{key} is in {issue.expand.team.key} and doc '{d.slug}' is in {team.key}; a link stays inside one team",
+    pb.failed(f"{key} is in {issue.expand.team.key} and doc '{d.slug}' is in {team.key}; a link stays inside one team"),
   )
 }
 
-fn link(input: flags.CommandInput) -> Result<(), string> {
+fn link(input: flags.CommandInput) -> Result<(), pb.CliError> {
   let ctx = input.ctx
   let usage = "lll issue link KEY-123 SLUG"
   let id = input.parsed.first()
@@ -46,7 +47,7 @@ fn link(input: flags.CommandInput) -> Result<(), string> {
 
 /// The write path behind 'lll issue link KEY-123 SLUG'. The relation is
 /// stored once on docs.issues. 'lll doc link' was removed at 1.0 (D5).
-fn link_issue(ctx: pb.Client, id: string, slug: string, usage: string) -> Result<(), string> {
+fn link_issue(ctx: pb.Client, id: string, slug: string, usage: string) -> Result<(), pb.CliError> {
   let resolved = resolve_id(ctx, id, usage)?
   let issue = records.fetch_issue(ctx, resolved)?
   let key = f"{issue.expand.team.key}-{issue.number}"
@@ -63,7 +64,7 @@ fn link_issue(ctx: pb.Client, id: string, slug: string, usage: string) -> Result
   Ok(())
 }
 
-fn unlink(input: flags.CommandInput) -> Result<(), string> {
+fn unlink(input: flags.CommandInput) -> Result<(), pb.CliError> {
   let ctx = input.ctx
   let usage = "lll issue unlink KEY-123 SLUG"
   let id = input.parsed.first()
@@ -73,7 +74,7 @@ fn unlink(input: flags.CommandInput) -> Result<(), string> {
 }
 
 /// The write path behind 'lll issue unlink KEY-123 SLUG'.
-fn unlink_issue(ctx: pb.Client, id: string, slug: string, usage: string) -> Result<(), string> {
+fn unlink_issue(ctx: pb.Client, id: string, slug: string, usage: string) -> Result<(), pb.CliError> {
   let resolved = resolve_id(ctx, id, usage)?
   let issue = records.fetch_issue(ctx, resolved)?
   let key = f"{issue.expand.team.key}-{issue.number}"
@@ -82,7 +83,7 @@ fn unlink_issue(ctx: pb.Client, id: string, slug: string, usage: string) -> Resu
   cross_team_link(issue, team, d)?
 
   if d.issues.find(|x| x == issue.id).is_none() {
-    return Err(f"{key} is not linked to {d.slug}; see 'lll doc view {d.slug}'")
+    return Err(pb.failed(f"{key} is not linked to {d.slug}; see 'lll doc view {d.slug}'"))
   }
   writes.unlink_doc_issue(ctx, d.id, issue.id)?
   fmt.Println(f"Unlinked {key} from {d.slug}")
@@ -91,7 +92,7 @@ fn unlink_issue(ctx: pb.Client, id: string, slug: string, usage: string) -> Resu
 
 /// An explicit issue identifies its document namespace outside an attached
 /// directory. Configured scope remains authoritative, including a mismatch.
-fn issue_link_team(ctx: pb.Client, issue: models.Issue) -> Result<models.Team, string> {
+fn issue_link_team(ctx: pb.Client, issue: models.Issue) -> Result<models.Team, pb.CliError> {
   Ok(records.configured_team(ctx)?.unwrap_or(issue.expand.team))
 }
 
@@ -99,7 +100,7 @@ fn issue_link_team(ctx: pb.Client, issue: models.Issue) -> Result<models.Team, s
 /// Refuses a self-block and a cycle (BLOCKER already waits on KEY, at any
 /// depth), since a cycle would make both un-ready forever. The dependency
 /// lives on the blocked issue: one relation field, no second collection.
-fn block(input: flags.CommandInput) -> Result<(), string> {
+fn block(input: flags.CommandInput) -> Result<(), pb.CliError> {
   let ctx = input.ctx
   let usage = "lll issue block KEY-123 BLOCKER"
   let id = input.parsed.first()
@@ -109,23 +110,23 @@ fn block(input: flags.CommandInput) -> Result<(), string> {
   let blocker = records.fetch_issue(ctx, resolve_id(ctx, blocker_id, usage)?)?
   let key = f"{issue.expand.team.key}-{issue.number}"
   let bkey = f"{blocker.expand.team.key}-{blocker.number}"
-  if issue.id == blocker.id { return Err(f"{key} cannot block itself") }
+  if issue.id == blocker.id { return Err(pb.failed(f"{key} cannot block itself")) }
   if issue.blocked_by.find(|x| x == blocker.id).is_some() {
     fmt.Println(f"{key} is already blocked by {bkey}")
     return Ok(())
   }
   let cyclic = depends_on(ctx, blocker, issue.id, 0)?
   if cyclic {
-    return Err(f"{bkey} already waits on {key} (directly or through others); blocking {key} by {bkey} would be a cycle")
+    return Err(pb.failed(f"{bkey} already waits on {key} (directly or through others); blocking {key} by {bkey} would be a cycle"))
   }
   writes.set_blocked_by(ctx, issue.id, issue.blocked_by.append(blocker.id))?
   let mut note = ""
-  if blocker.state == "done" || blocker.state == "cancelled" { note = f" ({bkey} is already {blocker.state}, so this does not hold {key} back)" }
+  if blocker.state().map_or(false, |s| s.is_terminal()) { note = f" ({bkey} is already {display.state_name(blocker.state())}, so this does not hold {key} back)" }
   fmt.Println(f"{key} is blocked by {bkey}{note}")
   Ok(())
 }
 
-fn unblock(input: flags.CommandInput) -> Result<(), string> {
+fn unblock(input: flags.CommandInput) -> Result<(), pb.CliError> {
   let ctx = input.ctx
   let usage = "lll issue unblock KEY-123 BLOCKER"
   let id = input.parsed.first()
@@ -135,7 +136,7 @@ fn unblock(input: flags.CommandInput) -> Result<(), string> {
   let blocker = records.fetch_issue(ctx, resolve_id(ctx, blocker_id, usage)?)?
   let key = f"{issue.expand.team.key}-{issue.number}"
   let bkey = f"{blocker.expand.team.key}-{blocker.number}"
-  let mut remaining: Slice<string> = []
+  let mut remaining: Slice<models.IssueId> = []
   let mut found = false
   for x in issue.blocked_by {
     if x == blocker.id { found = true } else { remaining = remaining.append(x) }
@@ -151,7 +152,7 @@ fn unblock(input: flags.CommandInput) -> Result<(), string> {
 
 /// True when `issue` waits on `target` at any depth. Bounded at eight
 /// levels: deeper chains are not a thing a tracker should have.
-fn depends_on(ctx: pb.Client, issue: models.Issue, target: string, depth: int) -> Result<bool, string> {
+fn depends_on(ctx: pb.Client, issue: models.Issue, target: models.IssueId, depth: int) -> Result<bool, pb.CliError> {
   if depth > 8 { return Ok(false) }
   for b in issue.expand.blocked_by {
     if b.id == target { return Ok(true) }
@@ -162,18 +163,18 @@ fn depends_on(ctx: pb.Client, issue: models.Issue, target: string, depth: int) -
   Ok(false)
 }
 
-fn fetch_issue_by_id(ctx: pb.Client, id: string) -> Result<models.Issue, string> {
+fn fetch_issue_by_id(ctx: pb.Client, id: models.IssueId) -> Result<models.Issue, pb.CliError> {
   let body = ctx.get(f"/api/collections/issues/records/{id}?expand=team,blocked_by")?
   let mut full = models.Issue { .. }
   if let Err(e) = json.Unmarshal(body.bytes(), &full) {
-    return Err(f"decoding issue: {e}")
+    return Err(pb.failed(f"decoding issue: {e}"))
   }
   Ok(full)
 }
 
 /// Issues that name `issue` as a blocker, for the "Blocks:" line.
-fn fetch_blocks(ctx: pb.Client, issue_id: string) -> Result<Slice<models.Issue>, string> {
-  let filter = url.QueryEscape(f"blocked_by.id ?= {query.quote(issue_id)}")
+fn fetch_blocks(ctx: pb.Client, issue_id: models.IssueId) -> Result<Slice<models.Issue>, pb.CliError> {
+  let filter = url.QueryEscape(f"blocked_by.id ?= {query.quote(issue_id.string())}")
   let mut list = models.IssueList { .. }
   pb.fetch(ctx, f"/api/collections/issues/records?perPage=200&sort=number&expand=team&filter={filter}", "issues", &list)?
   Ok(list.items)

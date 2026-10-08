@@ -1,4 +1,5 @@
 import "go:strings"
+import "models"
 
 #[test]
 fn a_new_member_lands_on_its_first_team_and_never_on_the_code() {
@@ -36,7 +37,7 @@ fn the_join_form_warns_before_replacing_a_login() {
 // to a credential that names no member.
 #[test]
 fn the_me_page_shows_a_token_only_after_the_post() {
-  let ada = ViewerMember { id: "m1", name: "Ada", token: "tok.en.x", rw: false, all: false }
+  let ada = ViewerMember { id: "m1", name: "Ada", token: "tok.en.x", access: models.Access { reach: models.Reach.Teams([]), mode: models.Mode.ReadOnly } }
   let viewer = Viewer.Scoped(ScopedViewer { teams: ["ALPHA"], member: Some(ada) })
   let offer = me_html(viewer, "", "")
   assert !strings.Contains(offer, "tok.en.x")

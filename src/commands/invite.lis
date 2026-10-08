@@ -3,6 +3,7 @@ import "go:fmt"
 import "go:strings"
 
 import "flags"
+import "models"
 import "pb"
 import "records"
 
@@ -12,7 +13,7 @@ import "records"
 // superuser (LLL-629), and its refusal names who can; this command only
 // resolves team keys and prints the link.
 
-pub fn invite(ctx: pb.Client, args: Slice<string>) -> Result<(), string> {
+pub fn invite(ctx: pb.Client, args: Slice<string>) -> Result<(), pb.CliError> {
   flags.dispatch(ctx,
     "invite",
     "single-use join links",
@@ -76,7 +77,7 @@ fn invite_create_spec() -> Slice<flags.Flag> {
 }
 
 #[json]
-struct InviteRequest { teams: Slice<string>, mode: string }
+struct InviteRequest { teams: Slice<models.TeamId>, mode: string }
 
 #[json]
 struct InviteResponse { code: string, expires: string }
@@ -85,35 +86,35 @@ struct InviteResponse { code: string, expires: string }
 #[json]
 struct InviteJson { url: string, code: string, expires: string, mode: string, teams: Slice<string> }
 
-fn invite_create(input: flags.CommandInput) -> Result<(), string> {
+fn invite_create(input: flags.CommandInput) -> Result<(), pb.CliError> {
   let ctx = input.ctx
   let p = input.parsed
   let keys = p.all("--team").map(records.normalize_team_key).filter(|k| k != "")
   if keys.is_empty() { return Err(flags.usage_error(f"usage: {input.usage}")) }
   let base = web_base(ctx)?
-  let mut ids: Slice<string> = []
+  let mut ids: Slice<models.TeamId> = []
   for key in keys {
     let Some(team) = records.find_team(ctx, key)? else {
       return Err(records.unknown_team(ctx, key))
     }
     ids = ids.append(team.id)
   }
-  let mode = if p.given("--read-only") { "ro" } else { "rw" }
-  let payload = match json.Marshal(InviteRequest { teams: ids, mode }) {
+  let mode = if p.given("--read-only") { models.Mode.ReadOnly } else { models.Mode.ReadWrite }
+  let payload = match json.Marshal(InviteRequest { teams: ids, mode: mode.wire() }) {
     Ok(b) => b,
-    Err(e) => return Err(f"encoding the invite: {e}"),
+    Err(e) => return Err(pb.failed(f"encoding the invite: {e}")),
   }
   let body = ctx.post("/api/lll/invites", payload as string)?
   let mut made = InviteResponse { .. }
   if let Err(e) = json.Unmarshal(body.bytes(), &made) {
-    return Err(f"decoding the invite: {e}")
+    return Err(pb.failed(f"decoding the invite: {e}"))
   }
-  if made.code == "" { return Err("the server returned no invite code") }
+  if made.code == "" { return Err(pb.failed("the server returned no invite code")) }
   if p.given("--json") {
-    return print_json(InviteJson { url: f"{base}/join/{made.code}", code: made.code, expires: made.expires, mode, teams: keys }, "invite")
+    return print_json(InviteJson { url: f"{base}/join/{made.code}", code: made.code, expires: made.expires, mode: mode.wire(), teams: keys }, "invite")
   }
   fmt.Println(f"{base}/join/{made.code}")
-  let access = if mode == "ro" { "read-only" } else { "read-write" }
+  let access = if mode.writes() { "read-write" } else { "read-only" }
   status(
     f"single-use invite: {access}, {strings.Join(keys, ", ")}; expires {made.expires}. Send the link to one person; it is shown only here",
   )

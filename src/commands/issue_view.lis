@@ -14,11 +14,11 @@ import "provenance"
 // `branch-name`).
 
 struct IssueViewReads {
-  claim: Channel<Result<Option<models.Claim>, string>>,
-  docs: Channel<Result<Slice<models.Doc>, string>>,
-  blocks: Channel<Result<Slice<models.Issue>, string>>,
-  findings: Channel<Result<Slice<models.Doc>, string>>,
-  comments: Channel<Result<Slice<models.Comment>, string>>,
+  claim: Channel<Result<Option<models.Claim>, pb.CliError>>,
+  docs: Channel<Result<Slice<models.Doc>, pb.CliError>>,
+  blocks: Channel<Result<Slice<models.Issue>, pb.CliError>>,
+  findings: Channel<Result<Slice<models.Doc>, pb.CliError>>,
+  comments: Channel<Result<Slice<models.Comment>, pb.CliError>>,
 }
 
 /// Start only the reads this output mode already uses. Each result has room
@@ -30,11 +30,11 @@ fn begin_issue_view_reads(
   raw_mode: bool,
 ) -> IssueViewReads {
   let reads = IssueViewReads {
-    claim: Channel.buffered<Result<Option<models.Claim>, string>>(1),
-    docs: Channel.buffered<Result<Slice<models.Doc>, string>>(1),
-    blocks: Channel.buffered<Result<Slice<models.Issue>, string>>(1),
-    findings: Channel.buffered<Result<Slice<models.Doc>, string>>(1),
-    comments: Channel.buffered<Result<Slice<models.Comment>, string>>(1),
+    claim: Channel.buffered<Result<Option<models.Claim>, pb.CliError>>(1),
+    docs: Channel.buffered<Result<Slice<models.Doc>, pb.CliError>>(1),
+    blocks: Channel.buffered<Result<Slice<models.Issue>, pb.CliError>>(1),
+    findings: Channel.buffered<Result<Slice<models.Doc>, pb.CliError>>(1),
+    comments: Channel.buffered<Result<Slice<models.Comment>, pb.CliError>>(1),
   }
   // Every mode shows the claim; --raw too since LLL-638.
   task {
@@ -60,16 +60,16 @@ fn begin_issue_view_reads(
 }
 
 fn await_issue_view<T>(
-  answer: Channel<Result<T, string>>,
+  answer: Channel<Result<T, pb.CliError>>,
   what: string,
-) -> Result<T, string> {
+) -> Result<T, pb.CliError> {
   let Some(result) = answer.receive() else {
-    return Err(f"issue {what} fetch ended without an answer")
+    return Err(pb.failed(f"issue {what} fetch ended without an answer"))
   }
   result
 }
 
-fn view(input: flags.CommandInput) -> Result<(), string> {
+fn view(input: flags.CommandInput) -> Result<(), pb.CliError> {
   let ctx = input.ctx
   let spec = issue_view_spec()
   let p = input.parsed
@@ -91,7 +91,7 @@ fn view(input: flags.CommandInput) -> Result<(), string> {
   let record = records.fetch_issue_record(ctx, resolved)?
   let mut full = models.Issue { .. }
   if let Err(e) = json.Unmarshal(record.bytes(), &full) {
-    return Err(f"decoding issue: {e}")
+    return Err(pb.failed(f"decoding issue: {e}"))
   }
   let reads = begin_issue_view_reads(ctx, full, json_mode, raw_mode)
   if json_mode {
@@ -142,7 +142,7 @@ fn view(input: flags.CommandInput) -> Result<(), string> {
         // Absolute, not relative: --raw is machine output that gets stored
         // and re-read (an agent's brief, an exported mirror in Git), where
         // "5d ago" silently becomes a different string tomorrow.
-        let tag = if cm.author_kind == "system" { "" } else { display.author_tag(cm.expand.author.kind == "bot", cm.expand.author.owner_name()) }
+        let tag = if cm.author_kind == "system" { "" } else { display.author_tag(cm.expand.author.is_bot(), cm.expand.author.owner_name()) }
         fmt.Println(
           f"- **{author}**{tag} ({display.absolute(cm.created)}): {cm.body}",
         )
@@ -162,8 +162,8 @@ fn view(input: flags.CommandInput) -> Result<(), string> {
 
   fmt.Println(f"{full.expand.team.key}-{full.number} {full.title}")
   fmt.Println("")
-  fmt.Println(f"State:     {display.glyph(full.state)} {full.state}")
-  fmt.Println(f"Priority:  {display.priority_name(full.priority)}")
+  fmt.Println(f"State:     {display.glyph(full.state())} {display.state_name(full.state())}")
+  fmt.Println(f"Priority:  {display.priority_name(full.priority())}")
   fmt.Println(f"Assignee:  {assignee}")
   for field in provenance.fields(full) { fmt.Println(f"{field.label}: {field.value}") }
   // The one place the second collection is read on a plain view: assignee says
@@ -178,7 +178,7 @@ fn view(input: flags.CommandInput) -> Result<(), string> {
   // who, this says where. "(last seen)" once the work is over.
   if full.work_branch != "" {
     let mut work = f"{full.work_branch} @ {full.work_host}:{full.work_path}"
-    if records.work_site_stale(full.state, claim.is_some()) {
+    if records.work_site_stale(full.state(), claim.is_some()) {
       work = f"{work} (last seen)"
     }
     fmt.Println(f"Work:      {work}")
@@ -201,7 +201,7 @@ fn view(input: flags.CommandInput) -> Result<(), string> {
     let mut parts: Slice<string> = []
     for id in full.blocked_by {
       match full.expand.blocked_by.find(|b| b.id == id) {
-        Some(b) => { parts = parts.append(f"{b.expand.team.key}-{b.number} ({b.state})") },
+        Some(b) => { parts = parts.append(f"{b.expand.team.key}-{b.number} ({display.state_name(b.state())})") },
         None => { parts = parts.append("a hidden issue") },
       }
     }
@@ -284,44 +284,44 @@ fn issue_view_json(
   claim: Option<models.Claim>,
   docs: Slice<models.Doc>,
   findings: Slice<models.Doc>,
-) -> Result<string, string> {
+) -> Result<string, pb.CliError> {
   // The list's issue object (key, claim, RFC3339 timestamps) plus what only
   // the view carries, so one parser reads every issue --json (LLL-645).
   let mut fields = issue_json(record.bytes() as json.RawMessage, claim)?.clone()
   let comments_json = match json.Marshal(comments) {
     Ok(data) => contract_json(data as json.RawMessage, 0),
-    Err(e) => return Err(f"encoding comments: {e}"),
+    Err(e) => return Err(pb.failed(f"encoding comments: {e}")),
   }
   fields["comments"] = if comments.is_empty() { "[]".bytes() as json.RawMessage } else { comments_json }
   fields["docs"] = contract_json(doc_context_json(docs)?, 0)
   fields["findings"] = contract_json(doc_context_json(findings)?, 0)
   match json.Marshal(fields) {
     Ok(data) => Ok(data as string),
-    Err(e) => Err(f"encoding issue JSON: {e}"),
+    Err(e) => Err(pb.failed(f"encoding issue JSON: {e}")),
   }
 }
 
 /// `--json` on the verbs that change an issue (update, close, start, claim):
 /// the issue as it is after the write, in the list's per-item shape.
-fn print_issue_after(ctx: pb.Client, key: string) -> Result<(), string> {
+fn print_issue_after(ctx: pb.Client, key: string) -> Result<(), pb.CliError> {
   let record = records.fetch_issue_record(ctx, key)?
   let mut full = models.Issue { .. }
-  if let Err(e) = json.Unmarshal(record.bytes(), &full) { return Err(f"decoding issue: {e}") }
+  if let Err(e) = json.Unmarshal(record.bytes(), &full) { return Err(pb.failed(f"decoding issue: {e}")) }
   print_issue_json(record, fetch_claim(ctx, full.id)?)
 }
 
-fn doc_context_json(docs: Slice<models.Doc>) -> Result<json.RawMessage, string> {
+fn doc_context_json(docs: Slice<models.Doc>) -> Result<json.RawMessage, pb.CliError> {
   if docs.is_empty() { return Ok("[]".bytes() as json.RawMessage) }
   match json.Marshal(docs) {
     Ok(data) => Ok(data as json.RawMessage),
-    Err(e) => Err(f"encoding document context: {e}"),
+    Err(e) => Err(pb.failed(f"encoding document context: {e}")),
   }
 }
 
 /// The '## Related findings' block of `lll issue view --raw` — same list
 /// findings_for_issue serves the rendered view, as plain markdown so an
 /// agent's piped brief carries the findings too.
-fn print_findings_raw(findings: Slice<models.Doc>) -> Result<(), string> {
+fn print_findings_raw(findings: Slice<models.Doc>) -> Result<(), pb.CliError> {
   if findings.is_empty() { return Ok(()) }
   fmt.Println("")
   fmt.Println("## Related findings")
@@ -334,7 +334,7 @@ fn print_findings_raw(findings: Slice<models.Doc>) -> Result<(), string> {
   Ok(())
 }
 
-fn url_cmd(input: flags.CommandInput) -> Result<(), string> {
+fn url_cmd(input: flags.CommandInput) -> Result<(), pb.CliError> {
   let ctx = input.ctx
   let usage = "lll issue url [KEY-123]"
   let id = input.parsed.first()
@@ -344,7 +344,7 @@ fn url_cmd(input: flags.CommandInput) -> Result<(), string> {
   Ok(())
 }
 
-fn id_cmd(input: flags.CommandInput) -> Result<(), string> {
+fn id_cmd(input: flags.CommandInput) -> Result<(), pb.CliError> {
   let ctx = input.ctx
   let usage = "lll issue id [KEY-123]"
   let id = input.parsed.first()
@@ -354,7 +354,7 @@ fn id_cmd(input: flags.CommandInput) -> Result<(), string> {
   Ok(())
 }
 
-fn title_cmd(input: flags.CommandInput) -> Result<(), string> {
+fn title_cmd(input: flags.CommandInput) -> Result<(), pb.CliError> {
   let ctx = input.ctx
   let usage = "lll issue title [KEY-123]"
   let id = input.parsed.first()
@@ -364,7 +364,7 @@ fn title_cmd(input: flags.CommandInput) -> Result<(), string> {
   Ok(())
 }
 
-fn branch_name_cmd(input: flags.CommandInput) -> Result<(), string> {
+fn branch_name_cmd(input: flags.CommandInput) -> Result<(), pb.CliError> {
   let ctx = input.ctx
   let usage = "lll issue branch-name [KEY-123]"
   let p = input.parsed
@@ -379,7 +379,7 @@ fn branch_name_cmd(input: flags.CommandInput) -> Result<(), string> {
 }
 
 /// Web page URL for an issue: <web_url>/issue/KEY-123.
-fn issue_url(ctx: pb.Client, issue: models.Issue) -> Result<string, string> {
+fn issue_url(ctx: pb.Client, issue: models.Issue) -> Result<string, pb.CliError> {
   let base = web_base(ctx)?
   Ok(f"{base}/issue/{issue.expand.team.key}-{issue.number}")
 }

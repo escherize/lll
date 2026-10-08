@@ -57,20 +57,20 @@ fn a_team_flag_is_named_as_the_flag_in_an_unknown_team_refusal() {
   let base = test_client(server.URL, "tok", "")
   let flagged = base.with_settings(base.settings.with_team("OPS"))
   let assert Err(e) = records.configured_team(flagged)
-  assert e.contains("no team with key 'OPS' (from --team)")
+  assert e.message.contains("no team with key 'OPS' (from --team)")
   let env = config.Env { url: server.URL, token: "tok", team: "NOPE", .. }
   let inherited = pb.Client.new(config.resolve(env, config.no_overrides()))
   let assert Err(e2) = records.configured_team(inherited)
-  assert e2.contains("no team with key 'NOPE' (from LLL_TEAM)")
+  assert e2.message.contains("no team with key 'NOPE' (from LLL_TEAM)")
 }
 
 #[test]
 fn team_given_twice_is_a_usage_error() {
   let assert Err(e) = scoped_args(["lll", "issue", "list", "--team", "OPS", "--team", "ENG"])
-  assert pb.exit_code(pb.classify(e).kind) == 2
-  assert e.contains("--team may only be given once (got 2)")
+  assert pb.exit_code(e.kind) == 2
+  assert e.message.contains("--team may only be given once (got 2)")
   let assert Err(e2) = scoped_args(["lll", "issue", "list", "--team=OPS", "--team", "ENG"])
-  assert e2.contains("--team may only be given once")
+  assert e2.message.contains("--team may only be given once")
 }
 
 #[test]

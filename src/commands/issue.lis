@@ -10,47 +10,41 @@ import "flags"
 import "gitctx"
 import "pb"
 import "query"
+import "models"
 
 /// A flag value of `-` means "read it from stdin", the convention `gh gist` and
 /// mb-shares' `share -f` use. Reading from a terminal would hang until Ctrl-D,
 /// so that is refused with a message instead. `< /dev/null` also reads as a
 /// character device, and an empty body is not what anyone meant either way.
-fn value_or_stdin(val: string, flag: string) -> Result<string, string> {
+fn value_or_stdin(val: string, flag: string) -> Result<string, pb.CliError> {
   if val != "-" { return Ok(val) }
 
   if let Ok(info) = os.Stdin.Stat() {
     if info.Mode() & os.ModeCharDevice != 0 {
       return Err(
-        f"{flag} - reads the body from stdin, but nothing is piped in (try: echo \"text\" | lll issue ... {flag} -)",
+        pb.failed(f"{flag} - reads the body from stdin, but nothing is piped in (try: echo \"text\" | lll issue ... {flag} -)"),
       )
     }
   }
 
   let Ok(data) = io.ReadAll(os.Stdin) else {
-    return Err(f"{flag} -: reading stdin")
+    return Err(pb.failed(f"{flag} -: reading stdin"))
   }
   // Stdin is the author's input, including any final newline or indentation.
   let text = data as string
-  if strings.TrimSpace(text) == "" { return Err(f"{flag} -: nothing on stdin") }
+  if strings.TrimSpace(text) == "" { return Err(pb.failed(f"{flag} -: nothing on stdin")) }
   Ok(text)
 }
 
-fn check_priority(val: string) -> Result<int, string> {
-  let named = strings.ToLower(val)
-  match named {
-    "none" => return Ok(0),
-    "urgent" => return Ok(1),
-    "high" => return Ok(2),
-    "medium" => return Ok(3),
-    "low" => return Ok(4),
-    _ => (),
-  }
-  let Ok(p) = strconv.Atoi(val) else {
+/// A --priority value: a name on the scale (any case) or its number.
+fn check_priority(val: string) -> Result<models.Priority, pb.CliError> {
+  if let Some(p) = models.Priority.named(strings.ToLower(val)) { return Ok(p) }
+  let Ok(n) = strconv.Atoi(val) else {
     return Err(flags.usage_error(f"unknown priority '{val}' (use none, urgent, high, medium, low, or 0-4)"))
   }
-  if p < 0 || p > 4 {
+  let Some(p) = models.Priority.from_wire(n) else {
     return Err(
-      flags.usage_error(f"--priority must be 0-4 (0 none, 1 urgent, 2 high, 3 medium, 4 low), got {p}"),
+      flags.usage_error(f"--priority must be 0-4 (0 none, 1 urgent, 2 high, 3 medium, 4 low), got {n}"),
     )
   }
   Ok(p)
@@ -332,7 +326,7 @@ fn agent_flag() -> flags.Flag {
 
 /// The --reason text, read from stdin for '-'. Only a forced action records
 /// one, so it is refused without --force rather than silently dropped.
-fn forced_reason(p: flags.Parsed, force: bool, what: string) -> Result<string, string> {
+fn forced_reason(p: flags.Parsed, force: bool, what: string) -> Result<string, pb.CliError> {
   if !p.given("--reason") { return Ok("") }
   if !force { return Err(flags.usage_error(f"--reason is the reason for {what}; add --force")) }
   value_or_stdin(p.one("--reason"), "--reason")
@@ -388,7 +382,7 @@ pub fn issue_watch_spec() -> Slice<flags.Flag> {
 /// Dispatch `lll issue <verb>` through the noun's Command table (TASK-307).
 /// The table is the one place a verb is declared: dispatch, `lll issue --help`
 /// and shell completions all read it, so none of the three can drift.
-pub fn issue(ctx: pb.Client, args: Slice<string>) -> Result<(), string> {
+pub fn issue(ctx: pb.Client, args: Slice<string>) -> Result<(), pb.CliError> {
   let cmds = issue_commands()
   if let Some(hint) = issue_synonym(args.get(2).unwrap_or("")) {
     return Err(flags.usage_error(hint))
@@ -726,11 +720,11 @@ fn deslug(arg: string) -> string {
   a
 }
 
-fn resolve_id(ctx: pb.Client, explicit: string, usage: string) -> Result<string, string> {
+fn resolve_id(ctx: pb.Client, explicit: string, usage: string) -> Result<string, pb.CliError> {
   if explicit != "" { return Ok(deslug(explicit)) }
   let Some(branch) = gitctx.current_branch() else {
     return Err(
-      f"no issue ID given and no git branch to infer one from\nusage: {usage}",
+      pb.failed(f"no issue ID given and no git branch to infer one from\nusage: {usage}"),
     )
   }
   let teams = records.list_teams(ctx)?
@@ -739,12 +733,12 @@ fn resolve_id(ctx: pb.Client, explicit: string, usage: string) -> Result<string,
     if let Some(id) = gitctx.issue_id_for_team(branch, team.key) { matches = matches.append(id) }
   }
   if matches.length() > 1 {
-    return Err(f"branch '{branch}' is ambiguous between {strings.Join(matches, ", ")}; pass the issue ID explicitly")
+    return Err(pb.failed(f"branch '{branch}' is ambiguous between {strings.Join(matches, ", ")}; pass the issue ID explicitly"))
   }
   if matches.length() == 1 { return Ok(matches[0]) }
   let Some(id) = gitctx.issue_id_from_branch(branch) else {
     return Err(
-      f"no issue ID given and current branch '{branch}' doesn't look like eng-123-...\nusage: {usage}",
+      pb.failed(f"no issue ID given and current branch '{branch}' doesn't look like eng-123-...\nusage: {usage}"),
     )
   }
   Ok(id)

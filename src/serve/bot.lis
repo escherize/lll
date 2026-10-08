@@ -30,34 +30,34 @@ fn bot_write(
   v: Viewing,
   w: http.ResponseWriter,
   r: mut Ref<http.Request>,
-) -> Result<string, string> {
+) -> Result<string, pb.CliError> {
   // The response may carry the bot's token: no cache keeps a copy.
   w.Header().Set("Cache-Control", "no-store")
   let who = acting_as(v)?
   // The board token names no person, so a bot minted from it would be owned
   // by the board's process member: refused until that is decided (LLL-546).
   let Some(m) = who.member else {
-    return Err(board_token_bot_refusal())
+    return Err(pb.failed(board_token_bot_refusal()))
   }
   // Read as the viewer: a team it cannot see answers like a missing one.
   let team = records.normalize_team_key(r.PostFormValue("team"))
   let seen = records.find_team(who.reads, team)?
-  if seen.is_none() { return Err(hidden_team(team)) }
+  if seen.is_none() { return Err(pb.failed(hidden_team(team))) }
   let name = board_bot_name(r.PostFormValue("name"))?
   if let Some(_) = records.find_member_as(ctx, m.token, name)? {
     return Err(
-      f"a member named '{name}' already exists - pick another name (to re-mint a bot you own, run 'lll bot rotate {name}')",
+      pb.failed(f"a member named '{name}' already exists - pick another name (to re-mint a bot you own, run 'lll bot rotate {name}')"),
     )
   }
   // Before anything is created: a refusal here must not leave a bot behind.
   let url = request_origin(r)?
   tokens.check_prompt_values(url, team, name)?
-  let _ = tokens.create_bot_member_as(ctx, m.token, name, m.id)?
+  let _ = tokens.create_bot_member_as(ctx, m.token, name, Some(m.id))?
   let duration = tokens.default_token_duration()
   let tok = match tokens.bot_mint(ctx, m.token, name, duration) {
     Ok(t) => t,
     Err(e) => return Err(
-      f"{e}\nthe bot {name} exists; mint its token with 'lll bot rotate {name}'",
+      e.with_message(f"{e.message}\nthe bot {name} exists; mint its token with 'lll bot rotate {name}'"),
     ),
   }
   let html = render(
@@ -82,11 +82,11 @@ fn board_token_bot_refusal() -> string {
 
 /// The bot's member name from the form: "name" or "bot-name", lowercase
 /// letters, digits and dashes. Strict on purpose: it becomes a member name.
-fn board_bot_name(raw: string) -> Result<string, string> {
+fn board_bot_name(raw: string) -> Result<string, pb.CliError> {
   let name = strings.TrimPrefix(strings.TrimSpace(raw), "bot-")
   if !regexp.MustCompile("^[a-z0-9][a-z0-9-]{0,39}$").MatchString(name) {
     return Err(
-      "name the bot with lowercase letters, digits and dashes (up to 40), e.g. myrepo - it becomes bot-myrepo",
+      pb.failed("name the bot with lowercase letters, digits and dashes (up to 40), e.g. myrepo - it becomes bot-myrepo"),
     )
   }
   Ok("bot-" + name)
@@ -95,14 +95,14 @@ fn board_bot_name(raw: string) -> Result<string, string> {
 /// The address the viewer reached this board at: the board serves the API
 /// under /api/, so it is the agent's LLL_URL. A Host outside a plain
 /// host[:port] shape is refused rather than echoed into a prompt.
-fn request_origin(r: Ref<http.Request>) -> Result<string, string> {
+fn request_origin(r: Ref<http.Request>) -> Result<string, pb.CliError> {
   let host = r.Host
   let plain = regexp.MustCompile(
     r"^([A-Za-z0-9.-]+|\[[0-9A-Fa-f:.]+\])(:[0-9]{1,5})?$",
   )
   if !plain.MatchString(host) {
     return Err(
-      "cannot tell this board's address from the request; run 'lll bot create bot-NAME' from a terminal",
+      pb.failed("cannot tell this board's address from the request; run 'lll bot create bot-NAME' from a terminal"),
     )
   }
   let forwarded = r.Header.map_or("", |h| h.Get("X-Forwarded-Proto"))

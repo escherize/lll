@@ -10,6 +10,7 @@ import "go:time"
 
 import "config"
 import "flags"
+import "pb"
 
 // The local server `lll up` runs: scratch directories, the pinned board token
 // and administrator, and the ports it binds.
@@ -20,17 +21,17 @@ import "flags"
 /// this lll process is affected: its environment is untouched, so the
 /// invoking shell, its real tracker and every child process stay as they
 /// were.
-fn setup_scratch() -> Result<(string, config.Settings), string> {
+fn setup_scratch() -> Result<(string, config.Settings), pb.CliError> {
   let root = match os.MkdirTemp("", "lll-scratch-") {
     Ok(path) => path,
-    Err(e) => return Err(f"creating scratch directory: {e}"),
+    Err(e) => return Err(pb.failed(f"creating scratch directory: {e}")),
   }
   if let Err(e) = os.Chdir(root) {
-    return Err(f"entering scratch directory {root}: {e}")
+    return Err(pb.failed(f"entering scratch directory {root}: {e}"))
   }
   let home = filepath.Join(root, "home")
   if let Err(e) = os.MkdirAll(home, 0o700) {
-    return Err(f"creating scratch home {home}: {e}")
+    return Err(pb.failed(f"creating scratch home {home}: {e}"))
   }
   let db_port = available_port()?
   let env = config.Env {
@@ -50,9 +51,9 @@ fn setup_scratch() -> Result<(string, config.Settings), string> {
 /// The local data directory owns the browser gate secret. A restart with the
 /// same --bind and --pb-dir preserves every link already sent to teammates.
 /// Returns the token: LLL_BOARD_TOKEN, else the saved one, else a new one.
-fn pin_local_board_token(settings: config.Settings, pb_dir: string) -> Result<string, string> {
+fn pin_local_board_token(settings: config.Settings, pb_dir: string) -> Result<string, pb.CliError> {
   if let Err(e) = os.MkdirAll(pb_dir, 0o700) {
-    return Err(f"creating local board data directory {pb_dir}: {e}")
+    return Err(pb.failed(f"creating local board data directory {pb_dir}: {e}"))
   }
   let path = filepath.Join(pb_dir, ".lll-board-token")
   let provided = settings.board_token()
@@ -60,7 +61,7 @@ fn pin_local_board_token(settings: config.Settings, pb_dir: string) -> Result<st
     Ok(b) => strings.TrimSpace(b as string),
     Err(e) => {
       if !os.IsNotExist(e) {
-        return Err(f"reading local board token {path}: {e}")
+        return Err(pb.failed(f"reading local board token {path}: {e}"))
       }
       ""
     },
@@ -75,15 +76,15 @@ fn pin_local_board_token(settings: config.Settings, pb_dir: string) -> Result<st
 /// LLL-450: a board other machines can reach must not sit behind a token
 /// nobody chose, that rotates every boot and lives only in the logs. Runs
 /// before anything listens. `--bind` has already pinned a token by now.
-fn require_board_token_off_loopback(settings: config.Settings) -> Result<(), string> {
+fn require_board_token_off_loopback(settings: config.Settings) -> Result<(), pb.CliError> {
   let bind = settings.bind()
   let loopback = bind == "localhost" || net.ParseIP(bind).IsLoopback()
   if loopback || settings.board_token() != "" { return Ok(()) }
   Err(
-    f"LLL_BIND={bind} serves the board beyond this machine, but no LLL_BOARD_TOKEN is set
+    pb.failed(f"LLL_BIND={bind} serves the board beyond this machine, but no LLL_BOARD_TOKEN is set
 a generated token would change on every restart and appear only in this process's logs
 to share the board: set LLL_BOARD_TOKEN to a secret you choose (or use lll up --bind LAN_IP, which keeps one with --pb-dir)
-to keep it private: LLL_BIND=127.0.0.1",
+to keep it private: LLL_BIND=127.0.0.1"),
   )
 }
 
@@ -106,7 +107,7 @@ fn pin_local_admin(
   settings: config.Settings,
   pb_dir: string,
   write: bool,
-) -> Result<Option<config.AdminCreds>, string> {
+) -> Result<Option<config.AdminCreds>, pb.CliError> {
   let supplied_email = settings.env.admin_email
   let supplied_pass = settings.env.admin_password
   if (supplied_email == "") != (supplied_pass == "") {
@@ -122,14 +123,14 @@ fn pin_local_admin(
   match os.ReadFile(path) {
     Ok(b) => {
       if let Err(e) = json.Unmarshal(b, &saved) {
-        return Err(f"decoding local admin credentials in {path}: {e}\n{unreadable}")
+        return Err(pb.failed(f"decoding local admin credentials in {path}: {e}\n{unreadable}"))
       }
       if saved.email == "" || saved.password == "" {
-        return Err(f"local admin credentials in {path} are incomplete\n{unreadable}")
+        return Err(pb.failed(f"local admin credentials in {path} are incomplete\n{unreadable}"))
       }
     },
     Err(e) => if !os.IsNotExist(e) {
-      return Err(f"reading local admin credentials in {path}: {e}")
+      return Err(pb.failed(f"reading local admin credentials in {path}: {e}"))
     },
   }
   if !write {
@@ -137,7 +138,7 @@ fn pin_local_admin(
     return Ok(Some(config.AdminCreds { email: saved.email, password: saved.password }))
   }
   if let Err(e) = os.MkdirAll(pb_dir, 0o700) {
-    return Err(f"creating local board data directory {pb_dir}: {e}")
+    return Err(pb.failed(f"creating local board data directory {pb_dir}: {e}"))
   }
   let email = if supplied_email != "" {
     supplied_email
@@ -154,7 +155,7 @@ fn pin_local_admin(
       LocalShareAdmin { url: "", email, password: pass },
     ) {
       Ok(b) => b,
-      Err(e) => return Err(f"encoding local admin credentials: {e}"),
+      Err(e) => return Err(pb.failed(f"encoding local admin credentials: {e}")),
     }
     write_home_config(path, encoded as string)?
   }
@@ -163,18 +164,18 @@ fn pin_local_admin(
 
 /// The kernel chooses a free port while the listener is bound. The normal up
 /// path still checks it again before serving, including a collision fallback.
-fn available_port() -> Result<int, string> {
+fn available_port() -> Result<int, pb.CliError> {
   let listener = match net.Listen("tcp", "127.0.0.1:0") {
     Ok(l) => l,
-    Err(e) => return Err(f"selecting a scratch port: {e}"),
+    Err(e) => return Err(pb.failed(f"selecting a scratch port: {e}")),
   }
   let Some(addr) = listener.Addr() else {
     let _ = listener.Close()
-    return Err("the scratch listener did not report an address")
+    return Err(pb.failed("the scratch listener did not report an address"))
   }
   let port = port_of(addr.String(), 0)
   let _ = listener.Close()
-  if port == 0 { return Err("the scratch listener did not report its port") }
+  if port == 0 { return Err(pb.failed("the scratch listener did not report its port")) }
   Ok(port)
 }
 

@@ -6,7 +6,7 @@ import "pb"
 import "query"
 
 /// Resolve a member by name; unknown names error with the fix.
-pub fn resolve_member(ctx: pb.Client, name: string) -> Result<models.Member, string> {
+pub fn resolve_member(ctx: pb.Client, name: string) -> Result<models.Member, pb.CliError> {
   let Some(m) = find_member(ctx, name)? else {
     return Err(pb.fail(pb.ErrorKind.NotFound, f"no member named '{name}'; see 'lll member list'"))
   }
@@ -14,14 +14,14 @@ pub fn resolve_member(ctx: pb.Client, name: string) -> Result<models.Member, str
 }
 
 /// Find a member by exact name, riding the configured token.
-pub fn find_member(ctx: pb.Client, name: string) -> Result<Option<models.Member>, string> {
+pub fn find_member(ctx: pb.Client, name: string) -> Result<Option<models.Member>, pb.CliError> {
   find_member_as(ctx, ctx.token(), name)
 }
 
 /// Find a member by exact name, riding `tok` instead of the configured
 /// token — token create looks its member up as the superuser it has just
 /// authenticated, not as whoever happens to be configured.
-pub fn find_member_as(ctx: pb.Client, tok: string, name: string) -> Result<Option<models.Member>, string> {
+pub fn find_member_as(ctx: pb.Client, tok: string, name: string) -> Result<Option<models.Member>, pb.CliError> {
   // `name` arrives unsanitized from the board's `/issues?assignee=` query
   // parameter, so it goes through `quote` and not into the filter raw: the
   // QueryEscape below makes it safe in a URL, which is a different layer and
@@ -33,21 +33,21 @@ pub fn find_member_as(ctx: pb.Client, tok: string, name: string) -> Result<Optio
     tok,
   )?
   if let Err(e) = json.Unmarshal(body.bytes(), &result) {
-    return Err(f"decoding members: {e}")
+    return Err(pb.failed(f"decoding members: {e}"))
   }
   Ok(result.items.find(|m| m.name == name))
 }
 
-pub fn fetch_members(ctx: pb.Client) -> Result<Slice<models.Member>, string> {
+pub fn fetch_members(ctx: pb.Client) -> Result<Slice<models.Member>, pb.CliError> {
   fetch_all_records<models.Member>(ctx, "/api/collections/members/records?sort=name,id", "members")
 }
 
 /// The member `id` names, by record id.
-pub fn member_by_id(ctx: pb.Client, id: string) -> Result<models.Member, string> {
+pub fn member_by_id(ctx: pb.Client, id: models.MemberId) -> Result<models.Member, pb.CliError> {
   let body = ctx.get(f"/api/collections/members/records/{id}")?
   let mut m = models.Member { .. }
   if let Err(e) = json.Unmarshal(body.bytes(), &m) {
-    return Err(f"decoding member {id}: {e}")
+    return Err(pb.failed(f"decoding member {id}: {e}"))
   }
   Ok(m)
 }
@@ -55,27 +55,28 @@ pub fn member_by_id(ctx: pb.Client, id: string) -> Result<models.Member, string>
 /// `m`'s access as the server applies it (LLL-543): a bot with an owner
 /// holds its own access within its owner's current access. The second value
 /// is the owner when that cap is narrower than the bot's own access, so the
-/// caller can say why.
-pub fn effective_access(ctx: pb.Client, m: models.Member) -> Result<(models.Member, Option<models.Member>), string> {
-  if m.owner == "" || m.scope == "" { return Ok((m, None)) }
-  let owner = member_by_id(ctx, m.owner)?
-  let eff = m.within(owner)
-  if access_equal(eff, m) { return Ok((m, None)) }
-  Ok((eff, Some(owner)))
+/// caller can say why. None access when the server reports none.
+pub fn effective_access(ctx: pb.Client, m: models.Member) -> Result<(Option<models.Access>, Option<models.Member>), pb.CliError> {
+  let Some(own) = m.access() else { return Ok((None, None)) }
+  if m.owner == "" { return Ok((Some(own), None)) }
+  Ok(capped(own, member_by_id(ctx, m.owner)?))
 }
 
 /// `m`'s effective access from `members` (all of them, as 'member list'
 /// reads them), without another request.
-pub fn effective_access_in(m: models.Member, members: Slice<models.Member>) -> (models.Member, Option<models.Member>) {
-  if m.owner == "" || m.scope == "" { return (m, None) }
-  let Some(owner) = members.find(|o| o.id == m.owner) else { return (m, None) }
-  let eff = m.within(owner)
-  if access_equal(eff, m) { return (m, None) }
-  (eff, Some(owner))
+pub fn effective_access_in(m: models.Member, members: Slice<models.Member>) -> (Option<models.Access>, Option<models.Member>) {
+  let Some(own) = m.access() else { return (None, None) }
+  if m.owner == "" { return (Some(own), None) }
+  let Some(owner) = members.find(|o| o.id == m.owner) else { return (Some(own), None) }
+  capped(own, owner)
 }
 
-fn access_equal(a: models.Member, b: models.Member) -> bool {
-  a.scope == b.scope && a.mode == b.mode && (a.scope == "all" || strings.Join(a.teams, ",") == strings.Join(b.teams, ","))
+/// `own` within `owner`'s access, and the owner when that narrows it.
+fn capped(own: models.Access, owner: models.Member) -> (Option<models.Access>, Option<models.Member>) {
+  let Some(theirs) = owner.access() else { return (Some(own), None) }
+  let eff = own.within(theirs)
+  if eff.same_as(own) { return (Some(own), None) }
+  (Some(eff), Some(owner))
 }
 
 /// The calling member's team keys when it is team-scoped (LLL-542), after
@@ -86,37 +87,45 @@ fn access_equal(a: models.Member, b: models.Member) -> bool {
 /// error better. A scoped caller can read exactly its own teams, so the
 /// teams it can list are its keys.
 pub fn scoped_team_keys(ctx: pb.Client) -> Option<Slice<string>> {
-  let Some(id) = pb.token_subject(ctx.token()) else { return None }
+  let Some(id) = token_member(ctx.token()) else { return None }
   let Ok(me) = member_by_id(ctx, id) else { return None }
-  let Ok((eff, _)) = effective_access(ctx, me) else { return None }
-  if eff.scope != "teams" { return None }
+  let Ok((Some(eff), _)) = effective_access(ctx, me) else { return None }
+  if eff.every_team() { return None }
   let Ok(teams) = list_teams(ctx) else { return None }
   Some(teams.items.map(|t| t.key))
+}
+
+/// The member id a token's payload names, read without verifying it; None
+/// for a token that is not a readable JWT. A superuser token names its
+/// _superusers record, so a members lookup of this id finds nothing: the
+/// caller decides what that means.
+pub fn token_member(tok: string) -> Option<models.MemberId> {
+  pb.token_subject(tok).map(|id| models.MemberId(id))
 }
 
 /// The member named by the current token. A superuser credential has no
 /// member identity and leaves optional authorship empty.
 pub struct Actor {
-  pub id: string,
+  pub id: models.MemberId,
   pub name: string,
 }
 
-pub fn find_actor(ctx: pb.Client) -> Result<Option<Actor>, string> {
+pub fn find_actor(ctx: pb.Client) -> Result<Option<Actor>, pb.CliError> {
   let token = ctx.token()
   if token == "" { return Ok(None) }
-  let Some(id) = pb.token_subject(token) else { return Ok(None) }
+  let Some(id) = token_member(token) else { return Ok(None) }
   // Use the configured request path so the board can renew an expired token
   // before resolving its member. Explicit-token calls deliberately cannot heal.
   match ctx.get(f"/api/collections/members/records/{id}") {
     Ok(body) => {
       let mut member = models.Member { .. }
       if let Err(e) = json.Unmarshal(body.bytes(), &member) {
-        return Err(f"decoding the actor: {e}")
+        return Err(pb.failed(f"decoding the actor: {e}"))
       }
       Ok(Some(Actor { id: member.id, name: member.name }))
     },
     Err(e) => {
-      if pb.classify(e).status == 404 { Ok(None) } else { Err(e) }
+      if e.status == 404 { Ok(None) } else { Err(e) }
     },
   }
 }

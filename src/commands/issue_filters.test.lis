@@ -1,5 +1,7 @@
 import "flags"
+import "pb"
 import "query"
+import "models"
 
 /// The CLI half of the shared-filter contract: flags parse into the same
 /// query.Filters, and fail the same validation, that the board's URL
@@ -9,14 +11,14 @@ fn cli_and_web_filters_share_values_and_validation() {
   let spec = issue_list_spec()
   let assert Ok(p) = flags.parse(spec, ["lll", "issue", "list", "--state", "in-review", "--assignee", "Alice O'Neil", "--label", "needs review", "--project", "Release 2"], 3, false, "")
   let assert Ok(cli) = filters_from(p)
-  let assert Ok(web) = query.Filters { state: ["in-review"], assignee: "Alice O'Neil", label: ["needs review"], project: "Release 2", .. }.validate()
+  let assert Ok(web) = query.Filters { state: ["in-review"], assignee: "Alice O'Neil", label: ["needs review"], project: "Release 2", .. }.parse()
   assert cli.one_state() == web.one_state()
   assert cli.assignee == web.assignee
   assert cli.one_label() == web.one_label()
   assert cli.project == web.project
   let assert Ok(bad) = flags.parse(spec, ["lll", "issue", "list", "--state", "bogus"], 3, false, "")
   let assert Err(cli_error) = filters_from(bad)
-  let assert Err(web_error) = query.Filters { state: ["bogus"], .. }.validate()
+  let assert Err(web_error) = query.Filters { state: ["bogus"], .. }.parse()
   assert cli_error == web_error
 }
 
@@ -25,7 +27,7 @@ fn missing_filter_state_is_optional_but_explicit_empty_cli_state_is_invalid() {
   let spec = issue_list_spec()
   let assert Ok(p) = flags.parse(spec, ["lll", "issue", "list"], 3, false, "")
   let assert Ok(empty) = filters_from(p)
-  assert empty.state.is_empty()
+  assert empty.states.is_empty()
   let assert Ok(explicit) = flags.parse(spec, ["lll", "issue", "list", "--state", ""], 3, false, "")
   assert filters_from(explicit).is_err()
   assert query.state("").is_err()
@@ -56,7 +58,8 @@ fn repeated_filters_mean_the_union_and_undeclared_repeats_are_refused() {
   assert watched.all("--label").length() == 2
   // A flag that is not repeatable is still refused by name.
   let assert Err(refused) = flags.parse(filter_spec(FilterUse.Watch), ["--assignee", "a", "--assignee", "b"], 0, false, "")
-  assert refused.contains("--assignee may only be given once")
+  assert refused.message.contains("--assignee may only be given once")
+  assert pb.exit_code(refused.kind) == 2
 
   // Repeated --state is the case the issue was filed about.
   let assert Ok(states) = flags.parse(
@@ -65,8 +68,8 @@ fn repeated_filters_mean_the_union_and_undeclared_repeats_are_refused() {
     0, false, "",
   )
   let assert Ok(state_filters) = filters_from(states)
-  assert state_filters.state.length() == 2
-  assert state_filters.state.get(1) == Some("in-review")
+  assert state_filters.states.length() == 2
+  assert state_filters.states.get(1) == Some(models.IssueState.InReview)
 
   // A bad value anywhere in the repetition is still caught, not just the first.
   let assert Ok(bad) = flags.parse(
@@ -81,14 +84,15 @@ fn repeated_filters_mean_the_union_and_undeclared_repeats_are_refused() {
 /// so it cannot widen the team scope around it.
 #[test]
 fn repeated_values_become_a_parenthesised_or() {
-  let one = query.filter_in("t1", ["todo"], "", [], [], "")
+  let t1 = query.IssueFilter.over(query.TeamScope.Only(models.TeamId("t1")))
+  let one = query.filter(query.IssueFilter { states: [models.IssueState.Todo], ..t1 })
   assert one.contains("state='todo'")
   assert !one.contains("||")
-  let two = query.filter_in("t1", ["todo", "in-review"], "", [], [], "")
+  let two = query.filter(query.IssueFilter { states: [models.IssueState.Todo, models.IssueState.InReview], ..t1 })
   assert two.contains("(state='todo' || state='in-review')")
   assert two.contains("team='t1'")
-  let labels = query.filter_in("t1", [], "", [], ["l1", "l2"], "")
+  let labels = query.filter(query.IssueFilter { labels: [models.LabelId("l1"), models.LabelId("l2")], ..t1 })
   assert labels.contains("(labels.id ?= 'l1' || labels.id ?= 'l2')")
-  let none = query.filter_in("t1", [], "", [], [], "")
+  let none = query.filter(t1)
   assert none == "team='t1'"
 }

@@ -1,4 +1,5 @@
 import "models"
+import "pb"
 
 #[test]
 fn complete_board_reads_all_pages_in_stable_order() {
@@ -23,7 +24,7 @@ fn complete_board_refuses_failed_or_inconsistent_pages() {
       if path.contains("page=1&") {
         return Ok(BoardPage { items: [models.Issue { id: "first", .. }], total_items: 2, total_pages: 2 })
       }
-      if mode == "failure" { return Err("page two unavailable") }
+      if mode == "failure" { return Err(pb.failed("page two unavailable")) }
       if mode == "duplicate" { return Ok(BoardPage { items: [models.Issue { id: "first", .. }], total_items: 2, total_pages: 2 }) }
       if mode == "count" { return Ok(BoardPage { items: [models.Issue { id: "last", .. }], total_items: 3, total_pages: 2 }) }
       Ok(BoardPage { items: [], total_items: 2, total_pages: 2 })

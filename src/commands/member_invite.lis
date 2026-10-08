@@ -118,7 +118,7 @@ the error names the partial file and the exact number completed." +
 /// in days. Nothing here is new machinery; it is create_member and the same
 /// superuser gate set-password runs, plus the part that actually got skipped —
 /// telling the inviter the literal lines to paste to the colleague.
-fn member_invite(input: flags.CommandInput) -> Result<(), string> {
+fn member_invite(input: flags.CommandInput) -> Result<(), pb.CliError> {
   let ctx = input.ctx
   let usage = input.usage
   let p = input.parsed
@@ -142,7 +142,7 @@ fn member_invite(input: flags.CommandInput) -> Result<(), string> {
   let su = superuser_auth(ctx, given_admin_login(ctx.settings, p)?)?
   if let Some(existing) = records.find_member_as(ctx, su, name)? {
     return Err(
-      f"member '{name}' already exists ({existing.email}); run 'lll member set-password {name} --email {email} --password PASSWORD' with administrator credentials to enable login; existing credentials are unchanged",
+      pb.failed(f"member '{name}' already exists ({existing.email}); run 'lll member set-password {name} --email {email} --password PASSWORD' with administrator credentials to enable login; existing credentials are unchanged"),
     )
   }
 
@@ -153,16 +153,16 @@ fn member_invite(input: flags.CommandInput) -> Result<(), string> {
   // than as a follow-up patch, so a failure leaves no member behind holding a
   // password nobody knows — the exact dead record set-password exists to fix.
   let password = rand.Text()
-  let cfg = ctx.settings.config()?
+  let cfg = ctx.settings.config().map_err(pb.failed)?
   let base = invite_base(p.one("--url"), cfg.url, same_server_board(cfg.web_url, su))
   let keys = p.all("--team").map(records.normalize_team_key).filter(|k| k != "")
-  let mode = if p.given("--read-only") { "ro" } else { "rw" }
-  if keys.is_empty() && mode == "ro" {
+  let mode = if p.given("--read-only") { models.Mode.ReadOnly } else { models.Mode.ReadWrite }
+  if keys.is_empty() && !mode.writes() {
     return Err(flags.usage_error("--read-only needs --team KEY: say which teams they may read"))
   }
   if keys.is_empty() {
-    let created = create_member_as(ctx, su, name, email, password, [], "")?
-    status(f"invited {created.name} <{email}>: {describe_access("all", "rw", [])}")
+    let created = create_member_as(ctx, su, name, email, password, [], None)?
+    status(f"invited {created.name} <{email}>: {describe_access(models.Access { reach: models.Reach.Every, mode: models.Mode.ReadWrite }, [])}")
     status("send them this (below, on stdout); the password is shown once and stored nowhere")
     for line in invite_lines(created.name, email, password, base, cfg.team) {
       fmt.Println(line)
@@ -173,15 +173,15 @@ fn member_invite(input: flags.CommandInput) -> Result<(), string> {
   // A scoped invite (--team): the member record carries the scope, so the
   // collection rules keep this colleague's own token inside its teams, and
   // each board link opens only one team's board.
-  let mut team_ids: Slice<string> = []
+  let mut team_ids: Slice<models.TeamId> = []
   for key in keys {
     let Some(team) = find_team_as(ctx, su, key)? else {
-      return Err(f"no team with key '{key}' on this server; teams: {team_keys_as(ctx, su)} (see 'lll team list')")
+      return Err(pb.failed(f"no team with key '{key}' on this server; teams: {team_keys_as(ctx, su)} (see 'lll team list')"))
     }
     team_ids = team_ids.append(team.id)
   }
-  let created = create_member_as(ctx, su, name, email, password, team_ids, mode)?
-  status(f"invited {created.name} <{email}>: {describe_access("teams", mode, keys)}")
+  let created = create_member_as(ctx, su, name, email, password, team_ids, Some(mode))?
+  status(f"invited {created.name} <{email}>: {describe_access(models.Access { reach: models.Reach.Teams(team_ids), mode }, keys)}")
   status("send them this (below, on stdout); the password is shown once and stored nowhere")
   for line in invite_lines(created.name, email, password, base, keys[0]) {
     fmt.Println(line)
@@ -208,12 +208,12 @@ fn team_keys_as(ctx: pb.Client, tok: string) -> string {
 
 /// The team by key, read with `tok` rather than the configured token: an
 /// invite may run on administrator credentials alone.
-fn find_team_as(ctx: pb.Client, tok: string, key: string) -> Result<Option<models.Team>, string> {
+fn find_team_as(ctx: pb.Client, tok: string, key: string) -> Result<Option<models.Team>, pb.CliError> {
   let filter = url.QueryEscape(f"key={query.quote(key)}")
   let body = ctx.get_as(f"/api/collections/teams/records?filter={filter}", tok)?
   let mut result = models.TeamList { .. }
   if let Err(e) = json.Unmarshal(body.bytes(), &result) {
-    return Err(f"decoding teams: {e}")
+    return Err(pb.failed(f"decoding teams: {e}"))
   }
   Ok(result.items.find(|t| t.key == key))
 }
@@ -246,7 +246,7 @@ fn known_board_token(ctx: pb.Client, base: string) -> Option<string> {
 /// A single private handoff for a group. The file is reserved before the
 /// first member is created, then each minted credential is appended. A failed
 /// later step leaves the exact completed subset in that file for recovery.
-fn member_passes(input: flags.CommandInput) -> Result<(), string> {
+fn member_passes(input: flags.CommandInput) -> Result<(), pb.CliError> {
   let ctx = input.ctx
   let p = input.parsed
   let count = if p.one("--count") == "" {
@@ -268,50 +268,50 @@ fn member_passes(input: flags.CommandInput) -> Result<(), string> {
   if prefix == "" { return Err(flags.usage_error("--prefix cannot be blank")) }
   let duration = parse_token_duration(p.one("--duration"))?
   let admin_file = filepath.Join(
-    filepath.Dir(ctx.settings.home_path()?),
+    filepath.Dir(ctx.settings.home_path().map_err(pb.failed)?),
     "local-admin.json",
   )
   let bytes = match os.ReadFile(admin_file) {
     Ok(b) => b,
     Err(e) => return Err(
-      f"no local board admin connection at {admin_file}: {e}\nrun 'lll up --bind LAN_OR_TAILSCALE_IP' first",
+      pb.failed(f"no local board admin connection at {admin_file}: {e}\nrun 'lll up --bind LAN_OR_TAILSCALE_IP' first"),
     ),
   }
   let mut local = LocalShareAdmin { .. }
   if let Err(e) = json.Unmarshal(bytes, &local) {
-    return Err(f"decoding local board admin connection: {e}")
+    return Err(pb.failed(f"decoding local board admin connection: {e}"))
   }
   if local.url == "" || local.email == "" || local.password == "" {
-    return Err("saved local board admin connection is incomplete")
+    return Err(pb.failed("saved local board admin connection is incomplete"))
   }
   // The saved local share is authoritative for this verb: an inherited hosted
   // LLL_URL or LLL_WEB_URL must not redirect credential creation elsewhere.
   let requested_url = p.one("--url")
   if requested_url != "" && strings.TrimSuffix(requested_url, "/") != local.url {
-    return Err("--url disagrees with the saved local board URL")
+    return Err(pb.failed("--url disagrees with the saved local board URL"))
   }
   let ctx = point_at_url(ctx, local.url)?
   let ctx = ctx.with_settings(ctx.settings.with_web_url(local.url))
   let given = given_admin_login(ctx.settings, p)?
-  let cfg = ctx.settings.config()?
+  let cfg = ctx.settings.config().map_err(pb.failed)?
   if cfg.team == "" {
     return Err(
-      "no team is configured; run 'lll up --bind LAN_OR_TAILSCALE_IP' from the team directory",
+      pb.failed("no team is configured; run 'lll up --bind LAN_OR_TAILSCALE_IP' from the team directory"),
     )
   }
   if cfg.web_url == "" {
     return Err(
-      "no board URL is configured; run 'lll up --bind LAN_OR_TAILSCALE_IP' first",
+      pb.failed("no board URL is configured; run 'lll up --bind LAN_OR_TAILSCALE_IP' first"),
     )
   }
   let login_file = filepath.Join(
-    filepath.Dir(ctx.settings.home_path()?),
+    filepath.Dir(ctx.settings.home_path().map_err(pb.failed)?),
     "board-login-url",
   )
   let login_bytes = match os.ReadFile(login_file) {
     Ok(b) => b,
     Err(e) => return Err(
-      f"no saved board login link at {login_file}: {e}\nrun 'lll up --bind LAN_OR_TAILSCALE_IP' first",
+      pb.failed(f"no saved board login link at {login_file}: {e}\nrun 'lll up --bind LAN_OR_TAILSCALE_IP' first"),
     ),
   }
   let login_url = strings.TrimSpace(login_bytes as string)
@@ -320,11 +320,11 @@ fn member_passes(input: flags.CommandInput) -> Result<(), string> {
     strings.TrimRight(cfg.web_url, "/") + "/?board_token=",
   ) {
     return Err(
-      "the saved board login link disagrees with web_url; restart with 'lll up --bind LAN_OR_TAILSCALE_IP'",
+      pb.failed("the saved board login link disagrees with web_url; restart with 'lll up --bind LAN_OR_TAILSCALE_IP'"),
     )
   }
   if local.url != cfg.url {
-    return Err("saved local board admin connection disagrees with this API URL")
+    return Err(pb.failed("saved local board admin connection disagrees with this API URL"))
   }
   // The saved local share's administrator is authoritative here, unless the
   // flags name one: an inherited LLL_ADMIN_* or configured token is ignored.
@@ -337,10 +337,10 @@ fn member_passes(input: flags.CommandInput) -> Result<(), string> {
   let out = if p.one("--out") != "" {
     p.one("--out")
   } else {
-    filepath.Join(filepath.Dir(ctx.settings.home_path()?), f"handoffs-{run_id}.txt")
+    filepath.Join(filepath.Dir(ctx.settings.home_path().map_err(pb.failed)?), f"handoffs-{run_id}.txt")
   }
   if let Err(e) = os.MkdirAll(filepath.Dir(out), 0o700) {
-    return Err(f"creating handoff directory: {e}")
+    return Err(pb.failed(f"creating handoff directory: {e}"))
   }
   let file = match os.OpenFile(
     out,
@@ -349,49 +349,49 @@ fn member_passes(input: flags.CommandInput) -> Result<(), string> {
   ) {
     Ok(f) => f,
     Err(e) => return Err(
-      f"creating private handoff file {out}: {e}; choose a new --out path",
+      pb.failed(f"creating private handoff file {out}: {e}; choose a new --out path"),
     ),
   }
   defer file.Close()
   let header = f"Team: {cfg.team}\nAPI: {cfg.url}\nBoard login: {login_url}\n\nSend only one person's block to that person. Browser access uses the board link; CLI/API access uses that person's LLL_TOKEN.\n{tokens.expiry_line(duration, time.Now(), "lll token create")}\n\n"
   match file.WriteString(header) {
     Partial.Ok(n) => if n != header.bytes().length() {
-      return Err(f"short write to handoff file {out}")
+      return Err(pb.failed(f"short write to handoff file {out}"))
     },
     Partial.Err(e) | Partial.Both(_, e) => return Err(
-      f"writing handoff file {out}: {e}",
+      pb.failed(f"writing handoff file {out}: {e}"),
     ),
   }
   let mut completed = 0
   for i in 0..count {
     let name = f"{prefix}-{run_id}-{i + 1}"
-    let member = match create_member_as(ctx, su, name, "", rand.Text(), [], "") {
+    let member = match create_member_as(ctx, su, name, "", rand.Text(), [], None) {
       Ok(m) => m,
       Err(e) => return Err(
-        f"created {completed} of {count} credentials in {out}; creating {name} failed: {e}",
+        e.with_message(f"created {completed} of {count} credentials in {out}; creating {name} failed: {e.message}"),
       ),
     }
-    let token = match pb.impersonate_member(cfg.url, su, member.id, duration) {
+    let token = match pb.impersonate_member(cfg.url, su, member.id.string(), duration) {
       Ok(tok) => tok,
       Err(e) => return Err(
-        f"created person {name} but could not mint its token; {completed} complete credentials are in {out}: {e}",
+        e.with_message(f"created person {name} but could not mint its token; {completed} complete credentials are in {out}: {e.message}"),
       ),
     }
     let block = f"Person {i + 1}: {name}\nLLL_URL={cfg.url}\nLLL_TEAM={cfg.team}\nLLL_TOKEN={token}\nBoard login: {login_url}\n\n"
     match file.WriteString(block) {
       Partial.Ok(n) => if n != block.bytes().length() {
         return Err(
-          f"created person {name} but its token was only partly written to {out}; {completed} earlier credentials are complete",
+          pb.failed(f"created person {name} but its token was only partly written to {out}; {completed} earlier credentials are complete"),
         )
       },
       Partial.Err(e) | Partial.Both(_, e) => return Err(
-        f"created person {name} but could not write its token; {completed} complete credentials are in {out}: {e}",
+        pb.failed(f"created person {name} but could not write its token; {completed} complete credentials are in {out}: {e}"),
       ),
     }
     completed += 1
   }
   if let Err(e) = file.Close() {
-    return Err(f"closing private handoff file {out}: {e}")
+    return Err(pb.failed(f"closing private handoff file {out}: {e}"))
   }
   fmt.Println(
     f"created {completed} distinct human credentials in {out} (mode 0600)",

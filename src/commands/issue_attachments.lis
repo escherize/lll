@@ -5,13 +5,13 @@ import "records"
 import "go:fmt"
 import "go:os"
 
-fn issue_attach(input: flags.CommandInput) -> Result<(), string> {
+fn issue_attach(input: flags.CommandInput) -> Result<(), pb.CliError> {
   let ctx = input.ctx
   let issue = records.fetch_issue(ctx, deslug(input.parsed.first()))?
   let path = input.parsed.nth(1)
   let file = match os.Open(path) {
     Ok(file) => file,
-    Err(e) => return Err(f"opening attachment: {e}"),
+    Err(e) => return Err(pb.failed(f"opening attachment: {e}")),
   }
   defer file.Close()
   let data = attachments.read_upload(file)?
@@ -20,7 +20,7 @@ fn issue_attach(input: flags.CommandInput) -> Result<(), string> {
   Ok(())
 }
 
-fn issue_detach(input: flags.CommandInput) -> Result<(), string> {
+fn issue_detach(input: flags.CommandInput) -> Result<(), pb.CliError> {
   let ctx = input.ctx
   let issue = records.fetch_issue(ctx, deslug(input.parsed.first()))?
   let name = input.parsed.nth(1)
@@ -29,10 +29,10 @@ fn issue_detach(input: flags.CommandInput) -> Result<(), string> {
   Ok(())
 }
 
-fn issue_download(input: flags.CommandInput) -> Result<(), string> {
+fn issue_download(input: flags.CommandInput) -> Result<(), pb.CliError> {
   let ctx = input.ctx
   let issue = records.fetch_issue(ctx, deslug(input.parsed.first()))?
   let data = attachments.read_file(ctx, issue, input.parsed.nth(1))?
-  let Partial.Ok(_) = os.Stdout.Write(data.bytes()) else { return Err("writing attachment to stdout failed") }
+  let Partial.Ok(_) = os.Stdout.Write(data.bytes()) else { return Err(pb.failed("writing attachment to stdout failed")) }
   Ok(())
 }

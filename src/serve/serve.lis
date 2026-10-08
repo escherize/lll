@@ -69,9 +69,9 @@ fn api_proxy(
   mux: mut Ref<http.ServeMux>,
   base: string,
   admin_ui: bool,
-) -> Result<(), string> {
+) -> Result<(), pb.CliError> {
   let Ok(target) = url.Parse(base) else {
-    return Err(f"cannot proxy the API: '{base}' is not a url")
+    return Err(pb.failed(f"cannot proxy the API: '{base}' is not a url"))
   }
   // LLL-676: the proxy presents the API's own host upstream, so a loopback
   // API answers what a LAN board forwards (gopb.NewAPIProxy).
@@ -93,15 +93,15 @@ fn api_proxy(
 pub fn run_server(
   ctx: pb.Client,
   port: int,
-  refresh: Option<fn() -> Result<string, string>>,
+  refresh: Option<fn() -> Result<string, pb.CliError>>,
   admin_ui: bool,
-) -> Result<(), string> {
+) -> Result<(), pb.CliError> {
   // `lll up` resolved the gate's token (generated when unset) into these
   // settings before any request could arrive, so the handlers and the
   // banner below agree.
   let board_tok = ctx.settings.board_token()
   let Some(board_member) = records.find_actor(ctx)? else {
-    return Err("the board needs a member token; start it with lll up")
+    return Err(pb.failed("the board needs a member token; start it with lll up"))
   }
   // The BOOT team (TASK-198): the server hosts every team — the board views
   // one per URL under /t/KEY/ — and the configured team is only where the
@@ -180,7 +180,7 @@ pub fn run_server(
   let bind = ctx.settings.bind()
   let listener = match net.Listen("tcp", f"{bind}:{port}") {
     Ok(l) => l,
-    Err(e) => return Err(f"server: {e}"),
+    Err(e) => return Err(pb.failed(f"server: {e}")),
   }
   let board_url = advertised_board_url(ctx.settings, port)
   fmt.Println(f"board  {board_url}")
@@ -192,7 +192,7 @@ pub fn run_server(
   // refuses DNS-rebinding pages (the API listener checks the same).
   match http.Serve(listener, gopb.LoopbackHostGuard(bind, mux)) {
     Ok(_) => Ok(()),
-    Err(e) => Err(f"server: {e}"),
+    Err(e) => Err(pb.failed(f"server: {e}")),
   }
 }
 
@@ -204,7 +204,7 @@ fn board_mux(
   hub: Hub,
   board_member: records.Actor,
   admin_ui: bool,
-) -> Result<http.Handler, string> {
+) -> Result<http.Handler, pb.CliError> {
   let mut mux: mut Ref<http.ServeMux> = http.NewServeMux()
   let boot_key = boot.key
   // TASK-241: the API answers here too, so there is ONE address. The hosted
@@ -549,17 +549,17 @@ fn redirect_with_query(
 
 /// The id of the team a /t/{team}/... write names; an unknown key refuses
 /// the write.
-fn routed_team_id(ctx: pb.Client, r: Ref<http.Request>) -> Result<string, string> {
+fn routed_team_id(ctx: pb.Client, r: Ref<http.Request>) -> Result<models.TeamId, pb.CliError> {
   let key = r.PathValue("team")
   let Some(t) = records.find_team(ctx, key)? else {
-    return Err(f"no team with key '{key}' on this server")
+    return Err(pb.failed(f"no team with key '{key}' on this server"))
   }
   Ok(t.id)
 }
 
 /// A settings write on a path that names no team (LLL-664).
-fn bare_settings_write(_ctx: pb.Client, _v: Viewing, _r: mut Ref<http.Request>) -> Result<string, string> {
-  Err("this settings form names no team; reload the page to get one that does")
+fn bare_settings_write(_ctx: pb.Client, _v: Viewing, _r: mut Ref<http.Request>) -> Result<string, pb.CliError> {
+  Err(pb.failed("this settings form names no team; reload the page to get one that does"))
 }
 
 /// The team a /t/{team}/... URL names, freshly fetched (the accent it
@@ -583,7 +583,7 @@ fn routed_team(
       None
     },
     Err(e) => {
-      http.Error(w, pb.plain(e), 500)
+      http.Error(w, e.message, 500)
       None
     },
   }

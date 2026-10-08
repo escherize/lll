@@ -25,20 +25,20 @@ pub fn candidate_clause(q: string, fields: Slice<string>) -> string {
 /// Every doc of a team with only the fields the ranker reads, paged.
 pub fn fetch_team_docs_light(
   ctx: pb.Client,
-  team_id: string,
+  team_id: models.TeamId,
   where: string,
-) -> Result<Slice<models.Doc>, string> {
-  let mut clause = f"team={query.quote(team_id)}"
+) -> Result<Slice<models.Doc>, pb.CliError> {
+  let mut clause = f"team={query.quote(team_id.string())}"
   if where != "" { clause = f"{clause} && {where}" }
   fetch_docs(ctx, clause, "slug", "id,slug,kind,title,body,updated")
 }
 
 pub fn fetch_team_issues_where(
   ctx: pb.Client,
-  team_id: string,
+  team_id: models.TeamId,
   where: string,
-) -> Result<Slice<models.Issue>, string> {
-  let mut clause = query.filter(team_id, "", "", "", "", "")
+) -> Result<Slice<models.Issue>, pb.CliError> {
+  let mut clause = query.filter(query.IssueFilter.over(query.TeamScope.Only(team_id)))
   if where != "" { clause = f"{clause} && {where}" }
   let filter = url.QueryEscape(clause)
   let mut out: Slice<models.Issue> = []
@@ -60,10 +60,10 @@ pub fn fetch_team_issues_where(
 
 pub fn fetch_team_comments_where(
   ctx: pb.Client,
-  team_id: string,
+  team_id: models.TeamId,
   where: string,
-) -> Result<Slice<models.Comment>, string> {
-  let mut clause = f"issue.team={query.quote(team_id)}"
+) -> Result<Slice<models.Comment>, pb.CliError> {
+  let mut clause = f"issue.team={query.quote(team_id.string())}"
   if where != "" { clause = f"{clause} && {where}" }
   let cfilter = url.QueryEscape(clause)
   let mut out: Slice<models.Comment> = []

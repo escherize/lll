@@ -49,8 +49,8 @@ fn signed_in_as(ctx: pb.Client, r: Ref<http.Request>) -> string {
 fn viewer_words(v: ScopedViewer) -> string {
   let teams = if v.teams.is_empty() { "no teams" } else { strings.Join(v.teams, ", ") }
   let Some(m) = v.member else { return f"a view-only link for {teams}" }
-  let mode = if m.rw { "read-write" } else { "read-only" }
-  let reach = if m.all { "every team" } else { teams }
+  let mode = if m.access.mode.writes() { "read-write" } else { "read-only" }
+  let reach = if m.access.every_team() { "every team" } else { teams }
   f"{m.name} ({mode}, {reach})"
 }
 
@@ -99,7 +99,7 @@ pub fn join_redeem(ctx: pb.Client, w: http.ResponseWriter, r: Ref<http.Request>)
   let body = match ctx.post_anon("/api/lll/invites/redeem", payload as string) {
     Ok(b) => b,
     Err(e) => {
-      let status = pb.classify(e).status
+      let status = e.status
       // A bad name keeps the form: the code is still alive. So does a
       // server failure, which rolled the redemption back. Every other
       // refusal (unknown, used, expired, void) is final for this link.
@@ -336,7 +336,7 @@ fn cli_steps(
   token: string,
 ) -> string {
   let pre = "style='padding: .6rem .8rem; background: #f4f4f5; border-radius: .35rem; white-space: pre-wrap; word-break: break-all;'"
-  let power = if m.rw { "acts as you" } else { "reads as you" }
+  let power = if m.access.mode.writes() { "acts as you" } else { "reads as you" }
   if token == "" {
     return f"<p>Install lll first: see <a href='https://github.com/escherize/lll#install'>Install</a> in the README. Then show your CLI login: the token this browser signs in with. Anyone holding it {power}, so it is shown only when you ask, never on a reload.</p>
 <form method='post' action='/me'>

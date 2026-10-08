@@ -42,7 +42,7 @@ fn ensure_team(
   want: string,
   source: string,
   throwaway: bool,
-) -> Result<string, string> {
+) -> Result<string, pb.CliError> {
   if want != "" {
     let key = resolve_team(ctx, want)?
     if should_save_team(source, throwaway) { save_team(ctx, key)? }
@@ -64,7 +64,7 @@ fn ensure_team(
       },
       Err(e) => {
         let existing = records.find_team(ctx, key)?
-        if existing.is_none() { return Err(f"creating team '{key}': {e}") }
+        if existing.is_none() { return Err(e.with_message(f"creating team '{key}': {e.message}")) }
       },
     }
   }
@@ -92,7 +92,7 @@ fn should_save_team(source: string, throwaway: bool) -> bool {
 /// find and our create; the unique index rejects the loser, and the loser
 /// re-looks-up whoever won rather than failing the boot (the same bargain
 /// e2e.sh's seed_team runs on).
-fn resolve_team(ctx: pb.Client, want: string) -> Result<string, string> {
+fn resolve_team(ctx: pb.Client, want: string) -> Result<string, pb.CliError> {
   if let Some(t) = records.find_team(ctx, want)? { return Ok(t.key) }
   match create_team(ctx, want, want) {
     Ok(created) => {
@@ -101,7 +101,7 @@ fn resolve_team(ctx: pb.Client, want: string) -> Result<string, string> {
     },
     Err(e) => {
       if let Some(t) = records.find_team(ctx, want)? { return Ok(t.key) }
-      Err(f"creating team '{want}': {e}")
+      Err(e.with_message(f"creating team '{want}': {e.message}"))
     },
   }
 }
@@ -113,19 +113,19 @@ fn board_identity(
   base: string,
   email: string,
   pass: string,
-) -> Result<(records.Actor, Option<fn() -> Result<string, string>>, pb.Client), string> {
+) -> Result<(records.Actor, Option<fn() -> Result<string, pb.CliError>>, pb.Client), pb.CliError> {
   if let Some(member) = records.find_actor(ctx)? { return Ok((member, None, ctx)) }
   let guessed = strings.TrimSpace(ctx.settings.env.user)
   let name = if guessed == "" { "local" } else { guessed }
   let created = ensure_member(ctx, name)?
   if created { fmt.Println(f"created member {name}") }
   let Some(member) = records.find_member(ctx, name)? else {
-    return Err(f"could not resolve the board member {name}")
+    return Err(pb.failed(f"could not resolve the board member {name}"))
   }
   let token = pb.impersonate_member(
     base,
     ctx.token(),
-    member.id,
+    member.id.string(),
     tokens.default_token_duration(),
   )?
   // The board runs as that member from here on, and it alone may renew
@@ -135,9 +135,9 @@ fn board_identity(
   let board = ctx
     .with_settings(ctx.settings.with_admin(admin))
     .with_token(token, "")
-    .renewing(Some(pb.Renewal { admin, member: member.id }))
-  let id = member.id
-  let refresh: fn() -> Result<string, string> = || {
+    .renewing(Some(pb.Renewal { admin, member: member.id.string() }))
+  let id = member.id.string()
+  let refresh: fn() -> Result<string, pb.CliError> = || {
     let su = superuser_token(base, email, pass)?
     pb.impersonate_member(base, su, id, tokens.default_token_duration())
   }
@@ -149,13 +149,13 @@ fn board_identity(
 
 /// Ask for a team key on stdin, defaulting to `suggested`. Errs when stdin
 /// has no answer to give (scripts, agents, CI).
-fn ask_team(suggested: string) -> Result<string, string> {
+fn ask_team(suggested: string) -> Result<string, pb.CliError> {
   fmt.Print(f"no team configured. Team key [{suggested}]: ")
   let newline = 10 as byte
   let Partial.Ok(line) = bufio.NewReader(os.Stdin).ReadString(newline) else {
     fmt.Println("")
     return Err(
-      f"no team configured and no answer on stdin; set LLL_TEAM={suggested}, or add team = \"{suggested}\" to .lll.toml (see 'lll config init')",
+      pb.failed(f"no team configured and no answer on stdin; set LLL_TEAM={suggested}, or add team = \"{suggested}\" to .lll.toml (see 'lll config init')"),
     )
   }
   // Only directory-derived suggestions are shortened/normalized. Explicit
@@ -167,7 +167,7 @@ fn ask_team(suggested: string) -> Result<string, string> {
 /// Persist the team to the repo's .lll.toml so the next boot and the CLI
 /// agree. The team is the one key that belongs in the repo — `lll attach`
 /// writes the same line, deliberately.
-fn save_team(ctx: pb.Client, key: string) -> Result<(), string> {
+fn save_team(ctx: pb.Client, key: string) -> Result<(), pb.CliError> {
   let path = set_repo_key(ctx.settings, "team", key)?
   fmt.Println(f"wrote team = \"{key}\" to {path}")
   Ok(())
@@ -212,12 +212,12 @@ fn superuser_token(
   base: string,
   email: string,
   pass: string,
-) -> Result<string, string> {
+) -> Result<string, pb.CliError> {
   let payload = match json.Marshal(
     models.AuthRequest { identity: email, password: pass },
   ) {
     Ok(b) => b as string,
-    Err(e) => return Err(f"encoding credentials: {e}"),
+    Err(e) => return Err(pb.failed(f"encoding credentials: {e}")),
   }
   let body = pb.post_anon_to(
     base,
@@ -226,8 +226,8 @@ fn superuser_token(
   )?
   let mut out = models.AuthResponse { .. }
   if let Err(e) = json.Unmarshal(body.bytes(), &out) {
-    return Err(f"decoding the auth response: {e}")
+    return Err(pb.failed(f"decoding the auth response: {e}"))
   }
-  if out.token == "" { return Err("the response carried no token") }
+  if out.token == "" { return Err(pb.failed("the response carried no token")) }
   Ok(out.token)
 }

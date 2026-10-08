@@ -4,18 +4,36 @@ import "models"
 import "pb"
 import "query"
 
+/// A team-owned record that issues point at: what deleting it drops from
+/// issues, and what moving it must not strand (LLL-675).
+pub enum Classifier {
+  Label(models.LabelId),
+  Project(models.ProjectId),
+}
+
+impl Classifier {
+  /// "label" or "project", for messages.
+  pub fn noun(self) -> string {
+    match self {
+      Classifier.Label(_) => "label",
+      Classifier.Project(_) => "project",
+    }
+  }
+
+  /// Every issue, in any team, that carries it.
+  pub fn issues(self) -> query.IssueFilter {
+    let every = query.IssueFilter.over(query.TeamScope.Every)
+    match self {
+      Classifier.Label(id) => query.IssueFilter { labels: [id], ..every },
+      Classifier.Project(id) => query.IssueFilter { projects: [id], ..every },
+    }
+  }
+}
+
 /// Count every issue affected by removing one shared classification record.
 /// CLI deletion, web review and label inventory use the same relation filters.
-pub fn entity_issue_count(
-  ctx: pb.Client,
-  kind: string,
-  id: string,
-) -> Result<int, string> {
-  match kind {
-    "label" => issue_count(ctx, query.filter("", "", "", "", id, "")),
-    "project" => issue_count(ctx, query.filter("", "", "", id, "", "")),
-    _ => Err(f"cannot count issue references for '{kind}'"),
-  }
+pub fn entity_issue_count(ctx: pb.Client, of: Classifier) -> Result<int, pb.CliError> {
+  issue_count(ctx, query.filter(of.issues()))
 }
 
 /// How many issues match a filter. perPage=1 so PocketBase answers the count
@@ -25,7 +43,7 @@ pub fn entity_issue_count(
 /// projects page all counted issues by spelling this request out again, four
 /// times, one of them twice. Takes the filter UNESCAPED and escapes it here,
 /// so no caller has to remember which side of the escape it is on.
-pub fn issue_count(ctx: pb.Client, filter: string) -> Result<int, string> {
+pub fn issue_count(ctx: pb.Client, filter: string) -> Result<int, pb.CliError> {
   let mut list = models.IssueList { .. }
   pb.fetch(
     ctx,

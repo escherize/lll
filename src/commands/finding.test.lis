@@ -50,10 +50,10 @@ fn finding_create_refuses_slug_in_both_forms_and_neither() {
   let usage = flags.usage("lll finding create", spec, "[\"slug\"]")
   let assert Ok(p) = flags.parse(spec, ["lll", "finding", "create", "my-slug", "-s", "other", "-t", "t"], 3, true, "")
   let assert Err(msg) = flags.entity_name(p, "-s", usage)
-  assert msg.contains("not both")
+  assert msg.message.contains("not both")
   let assert Ok(bare) = flags.parse(spec, ["lll", "finding", "create", "-t", "t"], 3, true, "")
   let assert Err(msg) = flags.entity_name(bare, "-s", usage)
-  assert msg.contains("a name is required")
+  assert msg.message.contains("a name is required")
 }
 
 #[test]
@@ -88,14 +88,14 @@ fn finding_view_and_read_dispatch_but_stay_out_of_help_and_completions() {
   assert c.positional == "SLUG"
   assert flags.resolve_command(finding_commands(), "read").is_none()
   let assert Err(refused) = finding(test_client("http://127.0.0.1:1", "", ""), ["lll", "finding", "read", "a-slug"])
-  assert refused.contains("did you mean 'lll doc view SLUG'?")
+  assert refused.message.contains("did you mean 'lll doc view SLUG'?")
   let names = flags.command_names(finding_commands())
   assert !names.contains("view")
   assert !names.contains("read")
   let assert Err(help) = finding(test_client("http://127.0.0.1:1", "", ""), ["lll", "finding", "--help"])
-  assert !help.contains("lll finding view")
-  assert !help.contains("lll finding read")
-  assert help.contains("lll doc view SLUG")
+  assert !help.message.contains("lll finding view")
+  assert !help.message.contains("lll finding read")
+  assert help.message.contains("lll doc view SLUG")
 }
 
 #[test]
@@ -124,9 +124,9 @@ fn check_confidence_defaults_to_confirmed_and_refuses_refuted() {
   let assert Ok(c) = check_confidence("  Suspected ")
   assert c == "suspected"
   let assert Err(msg) = check_confidence("refuted")
-  assert msg.contains("finding refute")
+  assert msg.message.contains("finding refute")
   let assert Err(msg) = check_confidence("maybe")
-  assert msg.contains("unknown confidence")
+  assert msg.message.contains("unknown confidence")
 }
 
 #[test]

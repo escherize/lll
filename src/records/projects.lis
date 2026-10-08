@@ -8,8 +8,7 @@ import "query"
 /// Names are unique within a team, not across them (TASK-173), so `team_id`
 /// must name a team, as resolve_label's must (LLL-671). A read that spans
 /// every team goes through project_ids.
-pub fn resolve_project(ctx: pb.Client, team_id: string, name: string) -> Result<models.Project, string> {
-  if team_id == "" { return Err(f"internal: resolve_project('{name}') without a team") }
+pub fn resolve_project(ctx: pb.Client, team_id: models.TeamId, name: string) -> Result<models.Project, pb.CliError> {
   let filter = url.QueryEscape(query.scoped(team_id, "name", name))
   let mut result = models.ProjectList { .. }
   pb.fetch(ctx, 
@@ -20,9 +19,9 @@ pub fn resolve_project(ctx: pb.Client, team_id: string, name: string) -> Result<
   let Some(p) = result.items.find(|p| p.name == name) else {
     // Four of thirty fleet agents passed the TEAM key here: the team scopes
     // the command already, so the flag they wanted was no flag at all.
-    let team_key = ctx.settings.config()?.team
+    let team_key = ctx.settings.config().map_err(pb.failed)?.team
     if team_key != "" && strings.EqualFold(name, team_key) {
-      return Err(f"'{name}' is the team, not a project. The team scopes every command already, so drop --project, or pick one from 'lll project list'")
+      return Err(pb.failed(f"'{name}' is the team, not a project. The team scopes every command already, so drop --project, or pick one from 'lll project list'"))
     }
     return Err(pb.fail(pb.ErrorKind.NotFound, f"no project named '{name}'; see 'lll project list'"))
   }
@@ -31,23 +30,23 @@ pub fn resolve_project(ctx: pb.Client, team_id: string, name: string) -> Result<
 
 /// The ids of every project named `name` within `scope`, for a list filter,
 /// as label_ids does for labels (LLL-671).
-pub fn project_ids(ctx: pb.Client, scope: TeamScope, name: string) -> Result<Slice<string>, string> {
+pub fn project_ids(ctx: pb.Client, scope: query.TeamScope, name: string) -> Result<Slice<models.ProjectId>, pb.CliError> {
   match scope {
-    TeamScope.Only(team_id) => Ok([resolve_project(ctx, team_id, name)?.id]),
-    TeamScope.Every => {
+    query.TeamScope.Only(team_id) => Ok([resolve_project(ctx, team_id, name)?.id]),
+    query.TeamScope.Every => {
       let filter = url.QueryEscape(f"name={query.quote(name)}")
       let found = fetch_all_records<models.Project>(ctx, f"/api/collections/projects/records?sort=id&filter={filter}", "projects")?
       let ids = found.filter(|p| p.name == name).map(|p| p.id)
-      if ids.is_empty() { return Err(f"no project named '{name}'; see 'lll project list'") }
+      if ids.is_empty() { return Err(pb.failed(f"no project named '{name}'; see 'lll project list'")) }
       Ok(ids)
     },
   }
 }
 
 /// One team's projects, scoped for the same reason labels are.
-pub fn fetch_projects(ctx: pb.Client, team_id: string) -> Result<Slice<models.Project>, string> {
+pub fn fetch_projects(ctx: pb.Client, scope: query.TeamScope) -> Result<Slice<models.Project>, pb.CliError> {
   fetch_all_records<models.Project>(ctx,
-    f"/api/collections/projects/records?sort=name,id&expand=team&filter={team_param(team_id)}",
+    f"/api/collections/projects/records?sort=name,id&expand=team&filter={team_param(scope)}",
     "projects",
   )
 }

@@ -12,12 +12,13 @@ struct ErrorEnvelope {
 #[json]
 struct EnvelopeCode {
   code: string,
+  #[json("oldPassword", omitempty)]
+  old_password: Option<json.RawMessage>,
 }
 
 /// The board's presentation of an error: a sentence for the person, and the
 /// diagnostics apart from it. Decided by the error's kind, never its wording.
-pub fn display_error(text: string) -> ErrorDisplay {
-  let err = classify(text)
+pub fn display_error(err: CliError) -> ErrorDisplay {
   match err.kind {
     ErrorKind.Server => {
       let summary = if err.status >= 500 {
@@ -35,11 +36,14 @@ pub fn display_error(text: string) -> ErrorDisplay {
   }
 }
 
-/// The stable code an lll refusal carries at data.code (gopb), "" for none.
-fn envelope_code(raw: json.RawMessage) -> string {
+/// The stable code an lll refusal carries at data.code (gopb); for
+/// PocketBase's own validation, the field it refuses. None for neither.
+fn envelope_code(raw: json.RawMessage) -> Option<ServerCode> {
   let mut data = EnvelopeCode { .. }
-  if json.Unmarshal(raw, &data).is_err() { return "" }
-  data.code
+  if json.Unmarshal(raw, &data).is_err() { return None }
+  if data.code != "" { return code_named(data.code) }
+  if data.old_password.is_some() { return Some(ServerCode.OldPasswordRejected) }
+  None
 }
 
 fn field_errors(raw: json.RawMessage, path: string, depth: int) -> Slice<string> {

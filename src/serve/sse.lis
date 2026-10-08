@@ -5,7 +5,6 @@ import "query"
 import "go:crypto/sha256"
 import "go:fmt"
 import "go:net/url"
-import "go:encoding/json"
 import "go:net/http"
 import "go:os"
 import "go:strings"
@@ -196,7 +195,7 @@ fn reader_of(v: Viewing) -> Reader {
     Viewer.Full => "board",
     Viewer.Scoped(s) => s.member.map_or_else(
       || f"link:{v.reads.token()}",
-      |m| f"member:{m.rw}:{m.all}:{m.token}",
+      |m| f"member:{m.access.mode.writes()}:{m.access.every_team()}:{m.token}",
     ),
   }
   Reader {
@@ -371,11 +370,12 @@ fn bridge(ctx: pb.Client, events: Channel<realtime.Event>, hub: Hub) {
   loop {
     let jobs: Slice<Refresh> = select {
       match events.receive() {
-        Some(ev) => {
-          if ev.topic == realtime.RESYNC {
+        Some(arrived) => match arrived {
+          realtime.Event.Resync => {
             fmt.Fprintln(os.Stderr, "realtime: re-rendering every open view after the reconnect")
             resync_refreshes(open_scopes(hub))
-          } else { event_refreshes(ev) }
+          },
+          realtime.Event.Record(ev) => event_refreshes(ev),
         },
         None => { return },
       },
@@ -417,7 +417,7 @@ fn launch(ctx: pb.Client, run: RefreshRun, hub: Hub, done: Channel<RunEnd>, slow
     let finished = Channel.buffered<bool>(1)
     task {
       if let Err(e) = run_refresh(ctx, run.job, hub, follow) {
-        fmt.Fprintln(os.Stderr, f"realtime: refreshing {run.key} failed: {e}")
+        fmt.Fprintln(os.Stderr, f"realtime: refreshing {run.key} failed: {e.message}")
       }
       let _ = finished.send(true)
     }
@@ -433,7 +433,7 @@ fn launch(ctx: pb.Client, run: RefreshRun, hub: Hub, done: Channel<RunEnd>, slow
   }
 }
 
-fn run_refresh(ctx: pb.Client, job: Refresh, hub: Hub, follow: Channel<Refresh>) -> Result<(), string> {
+fn run_refresh(ctx: pb.Client, job: Refresh, hub: Hub, follow: Channel<Refresh>) -> Result<(), pb.CliError> {
   match job {
     Refresh.Board(b) => board_refresh(hub, b),
     Refresh.Issue(i) => issue_snapshot(hub, i.key, i.client_id),
@@ -443,33 +443,32 @@ fn run_refresh(ctx: pb.Client, job: Refresh, hub: Hub, follow: Channel<Refresh>)
   }
 }
 
-/// The refreshes one PocketBase event asks for. Decoding is the only work
-/// here; anything that reads runs on a worker.
-fn event_refreshes(ev: realtime.Event) -> Slice<Refresh> {
-  if ev.topic == "comments" {
-    let mut event = realtime.CommentEvent { .. }
-    if json.Unmarshal(ev.data.bytes(), &event).is_err() { return [] }
-    return [Refresh.Resolve(ResolveRefresh { issue_id: event.record.issue, board: false })]
-  }
-  if ev.topic == "claims" {
+/// The refreshes one PocketBase event asks for. The realtime client already
+/// decoded it; anything that reads runs on a worker.
+fn event_refreshes(ev: realtime.RecordEvent) -> Slice<Refresh> {
+  match ev.change {
+    realtime.Change.Comment(comment) => [Refresh.Resolve(ResolveRefresh { issue_id: comment.issue, board: false })],
     // Claim-only releases may not update the issue's assignee: route the
     // hold's own event by its issue id, deleted holds included.
-    let mut event = ClaimEvent { .. }
-    if json.Unmarshal(ev.data.bytes(), &event).is_err() { return [] }
-    return [Refresh.Resolve(ResolveRefresh { issue_id: event.record.issue, board: true })]
+    realtime.Change.Claim(hold) => [Refresh.Resolve(ResolveRefresh { issue_id: hold.issue, board: true })],
+    realtime.Change.Favorite => [Refresh.Favorites],
+    realtime.Change.View => [Refresh.Views],
+    realtime.Change.Issue(rec) => {
+      let team_key = rec.expand.team.key
+      // A record without a team id is looked up by its key, as before.
+      let team_id = if rec.team.is_empty() { None } else { Some(rec.team) }
+      // Titles and state icons in favorites are issue data too.
+      [
+        Refresh.Board(BoardRefresh { team_key, team_id, order: "", client_id: 0 }),
+        Refresh.Issue(IssueRefresh { key: f"{team_key}-{rec.number}", client_id: 0 }),
+        Refresh.Favorites,
+      ]
+    },
+    // The board subscribes to five topics by name; anything else is not
+    // its to render, and a payload that does not decode names nothing.
+    realtime.Change.Unknown(_) => [],
+    realtime.Change.Malformed(_) => [],
   }
-  if ev.topic == "favorites" { return [Refresh.Favorites] }
-  if ev.topic == "views" { return [Refresh.Views] }
-  let mut event = realtime.IssueEvent { .. }
-  if json.Unmarshal(ev.data.bytes(), &event).is_err() { return [] }
-  let rec = event.record
-  let team_key = rec.expand.team.key
-  // Titles and state icons in favorites are issue data too.
-  [
-    Refresh.Board(BoardRefresh { team_key, team_id: rec.team, order: "", client_id: 0 }),
-    Refresh.Issue(IssueRefresh { key: f"{team_key}-{rec.number}", client_id: 0 }),
-    Refresh.Favorites,
-  ]
 }
 
 /// A new page's first fragment: its board or its issue, for it alone.
@@ -477,7 +476,7 @@ fn snapshot_refresh(snapshot: PageSnapshot) -> Refresh {
   if snapshot.key != "" {
     return Refresh.Issue(IssueRefresh { key: snapshot.key, client_id: snapshot.client_id })
   }
-  Refresh.Board(BoardRefresh { team_key: records.normalize_team_key(snapshot.team), team_id: "", order: snapshot.order, client_id: snapshot.client_id })
+  Refresh.Board(BoardRefresh { team_key: records.normalize_team_key(snapshot.team), team_id: None, order: snapshot.order, client_id: snapshot.client_id })
 }
 
 /// After a reconnect (LLL-666), everything an open page shows: PocketBase
@@ -490,7 +489,7 @@ fn resync_refreshes(scopes: Slice<string>) -> Slice<Refresh> {
       jobs = jobs.append(Refresh.Issue(IssueRefresh { key, client_id: 0 }))
     } else if let Some(rest) = strings.CutPrefix(scope, "board:") {
       let (team, order, _) = strings.Cut(rest, ":")
-      jobs = jobs.append(Refresh.Board(BoardRefresh { team_key: records.normalize_team_key(team), team_id: "", order, client_id: 0 }))
+      jobs = jobs.append(Refresh.Board(BoardRefresh { team_key: records.normalize_team_key(team), team_id: None, order, client_id: 0 }))
     }
   }
   jobs
@@ -508,7 +507,7 @@ fn open_scopes(hub: Hub) -> Slice<string> {
 /// ordering its clients asked for. A reader whose read fails is skipped, so
 /// one revoked credential cannot stall the others; the first failure is
 /// reported.
-fn board_refresh(hub: Hub, b: BoardRefresh) -> Result<(), string> {
+fn board_refresh(hub: Hub, b: BoardRefresh) -> Result<(), pb.CliError> {
   let open = watching(hub, f"board:{b.team_key}:", false, b.client_id)
   for_readers(readers_of(open), |reader: Reader| {
     let orders = open.filter(|w| w.reader.key == reader.key).map(|w| strings.TrimPrefix(w.scope, f"board:{b.team_key}:"))
@@ -527,9 +526,9 @@ fn reader_workers() -> int {
 
 /// Run `each` for every reader, at most reader_workers() at once; the first
 /// failure is the answer, and a failed reader never stops the others.
-fn for_readers(readers: Slice<Reader>, each: fn(Reader) -> Result<(), string>) -> Result<(), string> {
+fn for_readers(readers: Slice<Reader>, each: fn(Reader) -> Result<(), pb.CliError>) -> Result<(), pb.CliError> {
   let slots = Channel.buffered<bool>(reader_workers())
-  let results = Channel.buffered<Result<(), string>>(readers.length() + 1)
+  let results = Channel.buffered<Result<(), pb.CliError>>(readers.length() + 1)
   for reader in readers {
     let _ = slots.send(true)
     task {
@@ -537,7 +536,7 @@ fn for_readers(readers: Slice<Reader>, each: fn(Reader) -> Result<(), string>) -
       let _ = slots.receive()
     }
   }
-  let mut failed: Result<(), string> = Ok(())
+  let mut failed: Result<(), pb.CliError> = Ok(())
   for _ in 0..readers.length() {
     if let Some(Err(e)) = results.receive() {
       if failed.is_ok() { failed = Err(e) }
@@ -557,24 +556,26 @@ fn for_readers(readers: Slice<Reader>, each: fn(Reader) -> Result<(), string>) -
 /// One FETCH per reader, one render per ordering (TASK-209): a client's
 /// scope names the card order its URL asked for, so each variant lands only
 /// on the clients that requested it.
-fn board_snapshot(hub: Hub, reader: Reader, b: BoardRefresh, orders: Slice<string>) -> Result<(), string> {
+fn board_snapshot(hub: Hub, reader: Reader, b: BoardRefresh, orders: Slice<string>) -> Result<(), pb.CliError> {
   let ctx = reader.client
-  let mut team_id = b.team_id
-  if team_id == "" {
-    // A team deleted since the page opened, or one this reader no longer
-    // sees, has no board to refresh.
-    let Some(team) = records.find_team(ctx, b.team_key)? else { return Ok(()) }
-    team_id = team.id
+  let team_id = match b.team_id {
+    Some(id) => id,
+    None => {
+      // A team deleted since the page opened, or one this reader no longer
+      // sees, has no board to refresh.
+      let Some(team) = records.find_team(ctx, b.team_key)? else { return Ok(()) }
+      team.id
+    },
   }
   // The three reads side by side: see reader_workers on why each may wait.
-  let held = Channel.buffered<Result<Slice<models.Claim>, string>>(1)
-  task { let _ = held.send(claims.for_team(ctx, team_id)) }
-  let roster = Channel.buffered<Result<Roster, string>>(1)
+  let held = Channel.buffered<Result<Slice<models.Claim>, pb.CliError>>(1)
+  task { let _ = held.send(claims.for_team(ctx, query.TeamScope.Only(team_id))) }
+  let roster = Channel.buffered<Result<Roster, pb.CliError>>(1)
   task { let _ = roster.send(read_roster(ctx)) }
   let fetched = records.fetch_board_issues(ctx, team_id)
-  let shown = roster.receive().unwrap_or(Err("reading the roster stopped"))?
+  let shown = roster.receive().unwrap_or(Err(pb.failed("reading the roster stopped")))?
   let issues = issues_for(reader.scoped, fetched?).map(|i| shown.issue(i))
-  let claimed = held.receive().unwrap_or(Err("reading the claims stopped"))?.map(|c| shown.claim(c))
+  let claimed = held.receive().unwrap_or(Err(pb.failed("reading the claims stopped")))?.map(|c| shown.claim(c))
   for order in board_orders() {
     if !orders.contains(order) { continue }
     // UNFILTERED on purpose: /events sends one #board per (team, order) to
@@ -593,21 +594,18 @@ fn board_snapshot(hub: Hub, reader: Reader, b: BoardRefresh, orders: Slice<strin
   Ok(())
 }
 
-#[json]
-struct ClaimEvent { record: models.Claim }
-
 /// A claim or comment event's issue, read fresh, then its page (and board)
 /// refreshed under their own keys, so they stay ordered with every other
 /// refresh of the same views. An issue deleted since is nothing to refresh.
-fn resolve_issue(ctx: pb.Client, r: ResolveRefresh, follow: Channel<Refresh>) -> Result<(), string> {
-  let filter = url.QueryEscape(f"id={query.quote(r.issue_id)}")
+fn resolve_issue(ctx: pb.Client, r: ResolveRefresh, follow: Channel<Refresh>) -> Result<(), pb.CliError> {
+  let filter = url.QueryEscape(f"id={query.quote(r.issue_id.string())}")
   let mut found = models.IssueList { .. }
   pb.fetch(ctx, f"/api/collections/issues/records?filter={filter}&perPage=1&expand=team", "issue", &found)?
   let Some(issue) = found.items.get(0) else { return Ok(()) }
   let team_key = issue.expand.team.key
   let _ = follow.send(Refresh.Issue(IssueRefresh { key: f"{team_key}-{issue.number}", client_id: 0 }))
   if r.board {
-    let _ = follow.send(Refresh.Board(BoardRefresh { team_key, team_id: issue.team, order: "", client_id: 0 }))
+    let _ = follow.send(Refresh.Board(BoardRefresh { team_key, team_id: Some(issue.team), order: "", client_id: 0 }))
   }
   Ok(())
 }
@@ -615,7 +613,7 @@ fn resolve_issue(ctx: pb.Client, r: ResolveRefresh, follow: Channel<Refresh>) ->
 /// An issue page's live fragments for every reader that has it open
 /// (LLL-658), each read with that reader's own client. No observers means
 /// no fetch, catalogues or markdown rendering.
-fn issue_snapshot(hub: Hub, key: string, client_id: int) -> Result<(), string> {
+fn issue_snapshot(hub: Hub, key: string, client_id: int) -> Result<(), pb.CliError> {
   for_readers(readers_of(watching(hub, f"issue:{key}", true, client_id)), |reader: Reader| {
     issue_for_reader(hub, reader, key, client_id)
   })
@@ -623,7 +621,7 @@ fn issue_snapshot(hub: Hub, key: string, client_id: int) -> Result<(), string> {
 
 /// #issue-detail and the comments from a fresh read as `reader`. An issue
 /// the reader cannot read is, for it, deleted.
-fn issue_for_reader(hub: Hub, reader: Reader, key: string, client_id: int) -> Result<(), string> {
+fn issue_for_reader(hub: Hub, reader: Reader, key: string, client_id: int) -> Result<(), pb.CliError> {
   let ctx = reader.client
   let (team, number) = records.split_issue_key(key)?
   let filter = url.QueryEscape(f"team.key={query.quote(team)} && number={number}")
@@ -639,7 +637,7 @@ fn issue_for_reader(hub: Hub, reader: Reader, key: string, client_id: int) -> Re
   let found = issues.items.get(0).map(|i| issues_for(reader.scoped, [i])[0])
   // The comments are read beside the detail: see reader_workers on why each
   // read may wait.
-  let thread = Channel.buffered<Result<Slice<models.Comment>, string>>(1)
+  let thread = Channel.buffered<Result<Slice<models.Comment>, pb.CliError>>(1)
   if let Some(issue) = found {
     task { let _ = thread.send(records.fetch_comments(ctx, issue.id)) }
   }
@@ -657,7 +655,7 @@ fn issue_for_reader(hub: Hub, reader: Reader, key: string, client_id: int) -> Re
   })
   if found.is_some() {
     // The board shows no comments, so only the issue's own page gets them.
-    let comments = thread.receive().unwrap_or(Err("reading the comments stopped"))?
+    let comments = thread.receive().unwrap_or(Err(pb.failed("reading the comments stopped")))?
     let html = render("comments", CommentsVM { comments: comments.map(|c| comment_vm(shown.comment(c))) })?
     let _ = hub.broadcast.send(
       Broadcast { scope: f"issue:{key}", reader: reader.key, payload: patch_event(html), client_id, .. },
@@ -680,7 +678,7 @@ fn issue_for_reader(hub: Hub, reader: Reader, key: string, client_id: int) -> Re
 /// read leaves the visible group as it was. Only the board login's rail
 /// carries the group, so it is read as the board and goes to the "board"
 /// reader alone.
-fn favorites_broadcast(ctx: pb.Client, hub: Hub) -> Result<(), string> {
+fn favorites_broadcast(ctx: pb.Client, hub: Hub) -> Result<(), pb.CliError> {
   let html = render("rail-favorites", favorite_rows(fetch_favorites(ctx)?))?
   let _ = hub.broadcast.send(Broadcast { scope: "*", reader: "board", payload: patch_event(html), .. })
   Ok(())
@@ -689,7 +687,7 @@ fn favorites_broadcast(ctx: pb.Client, hub: Hub) -> Result<(), string> {
 /// Re-render the rail's SAVED VIEWS group from a fresh fetch and patch it
 /// into every open page — same shape as favorites_broadcast, since a view is
 /// the workspace's like a star is.
-fn views_broadcast(ctx: pb.Client, hub: Hub) -> Result<(), string> {
+fn views_broadcast(ctx: pb.Client, hub: Hub) -> Result<(), pb.CliError> {
   let html = render("rail-views", fetch_view_vms(ctx)?)?
   let _ = hub.broadcast.send(Broadcast { scope: "*", reader: "board", payload: patch_event(html), .. })
   Ok(())

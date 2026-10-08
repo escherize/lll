@@ -12,7 +12,7 @@ import "writes"
 /// Dispatch `lll label <verb>` through the noun's Command table (TASK-307).
 /// The table is the one place a verb is declared: dispatch, `lll label --help`
 /// and shell completions all read it, so none of the three can drift.
-pub fn label(ctx: pb.Client, args: Slice<string>) -> Result<(), string> {
+pub fn label(ctx: pb.Client, args: Slice<string>) -> Result<(), pb.CliError> {
   flags.dispatch(ctx, "label", "work with labels", "", label_commands(), args)
 }
 
@@ -66,13 +66,13 @@ pub fn label_commands() -> Slice<flags.Command> {
   ]
 }
 
-fn label_list(input: flags.CommandInput) -> Result<(), string> {
+fn label_list(input: flags.CommandInput) -> Result<(), pb.CliError> {
   let ctx = input.ctx
   let p = input.parsed
   // Scoped when a team is configured, every team's when not: a label belongs
   // to one team (TASK-173), so the unscoped list is an admin's view, not a
   // working one.
-  let labels = models.LabelList { items: records.fetch_labels(ctx, configured_scope(ctx)?.filter_team())? }
+  let labels = models.LabelList { items: records.fetch_labels(ctx, configured_scope(ctx)?)? }
   if p.given("--json") { return print_list_json(labels.items, whole_list(labels.items.length()), "label list") }
   if labels.items.is_empty() { return say_empty("labels") }
   for l in labels.items {
@@ -132,7 +132,7 @@ fn label_create_page() -> string {
   f"usage: {label_create_usage()}" + flags.section(label_create_spec())
 }
 
-fn label_create(input: flags.CommandInput) -> Result<(), string> {
+fn label_create(input: flags.CommandInput) -> Result<(), pb.CliError> {
   let ctx = input.ctx
   let spec = label_create_spec()
   // The check-first note rides the usage string (TASK-208), so every surface
@@ -149,7 +149,7 @@ fn label_create(input: flags.CommandInput) -> Result<(), string> {
 
   let mut created = models.Label { .. }
   if let Err(e) = json.Unmarshal(body.bytes(), &created) {
-    return Err(f"decoding created label: {e}")
+    return Err(pb.failed(f"decoding created label: {e}"))
   }
   if p.given("--json") {
     fmt.Println(contract_json(body.bytes() as json.RawMessage, 0) as string)
@@ -159,7 +159,7 @@ fn label_create(input: flags.CommandInput) -> Result<(), string> {
   Ok(())
 }
 
-fn label_edit(input: flags.CommandInput) -> Result<(), string> {
+fn label_edit(input: flags.CommandInput) -> Result<(), pb.CliError> {
   let ctx = input.ctx
   let usage = input.usage
   let p = input.parsed
@@ -181,7 +181,7 @@ fn label_edit(input: flags.CommandInput) -> Result<(), string> {
 }
 
 /// Delete only after counting references; the web shares the same count policy.
-fn label_delete(input: flags.CommandInput) -> Result<(), string> {
+fn label_delete(input: flags.CommandInput) -> Result<(), pb.CliError> {
   let ctx = input.ctx
   let usage = input.usage
   let p = input.parsed
@@ -189,7 +189,7 @@ fn label_delete(input: flags.CommandInput) -> Result<(), string> {
     return Err(flags.usage_error(f"usage: {usage}"))
   }
   let label = records.resolve_label(ctx, current_team(ctx)?.id, name)?
-  let used = records.entity_issue_count(ctx, "label", label.id)?
+  let used = records.entity_issue_count(ctx, records.Classifier.Label(label.id))?
   if used > 0 && !p.given("--force") {
     return Err(refuse_delete("label", name, used))
   }
@@ -204,7 +204,7 @@ fn label_delete(input: flags.CommandInput) -> Result<(), string> {
 /// `lll label move NAME --to KEY` (LLL-100). A label created in the wrong
 /// team could only be deleted and remade before this, which loses every issue
 /// that carried it.
-fn label_move(input: flags.CommandInput) -> Result<(), string> {
+fn label_move(input: flags.CommandInput) -> Result<(), pb.CliError> {
   let ctx = input.ctx
   let usage = input.usage
   let p = input.parsed
@@ -214,7 +214,7 @@ fn label_move(input: flags.CommandInput) -> Result<(), string> {
   let from = team_flag_or_current(ctx, p.one("--team"))?
   let to = writes.move_destination(ctx, p.one("--to"))?
   let label = records.resolve_label(ctx, from.id, name)?
-  fmt.Println(writes.move_to_team(ctx, "label", label.name, label.id, from, to)?)
+  fmt.Println(writes.move_to_team(ctx, records.Classifier.Label(label.id), label.name, from, to)?)
   Ok(())
 }
 

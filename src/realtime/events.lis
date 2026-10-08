@@ -1,8 +1,78 @@
+import "go:encoding/json"
+import "go:strings"
+
 import "models"
 
-// The record payloads of issue and comment events, decoded by `lll watch`
-// and by the board's live stream alike.
+// Realtime events, decoded once, here (LLL-675, T20): which topic, what
+// happened, and the record, as types. A consumer matches on them; a topic
+// lll did not ask for is its own case, never read as an issue.
 
+/// What arrives on a subscription channel.
+pub enum Event {
+  /// A record changed.
+  Record(RecordEvent),
+  /// The stream reconnected (subscribe_resyncing only). PocketBase does not
+  /// replay what happened while it was down, so a consumer that renders
+  /// state re-reads everything it shows (LLL-666). It carries no data.
+  Resync,
+}
+
+/// One record event.
+pub struct RecordEvent {
+  /// The topic as the server named it, options stripped ("issues",
+  /// "issues/RECORDID", "comments"): what `lll watch --json` prints.
+  pub topic: string,
+  pub action: Action,
+  pub change: Change,
+  /// The payload as it arrived, {"action":...,"record":{...}}, for output
+  /// that relays it.
+  pub data: string,
+}
+
+/// What happened to the record.
+pub enum Action {
+  Create,
+  Update,
+  Delete,
+  /// An action PocketBase may add; relayed by name, never guessed at.
+  Other(string),
+}
+
+impl Action {
+  pub fn parse(wire: string) -> Action {
+    match wire {
+      "create" => Action.Create,
+      "update" => Action.Update,
+      "delete" => Action.Delete,
+      other => Action.Other(other),
+    }
+  }
+
+  pub fn wire(self) -> string {
+    match self {
+      Action.Create => "create",
+      Action.Update => "update",
+      Action.Delete => "delete",
+      Action.Other(name) => name,
+    }
+  }
+}
+
+/// The record an event carries, by the collection its topic names.
+pub enum Change {
+  Issue(models.Issue),
+  Comment(models.Comment),
+  Claim(models.Claim),
+  Favorite,
+  View,
+  /// A topic lll did not subscribe to by name: the raw topic.
+  Unknown(string),
+  /// The payload did not decode as its topic's record: why.
+  Malformed(string),
+}
+
+/// The record payloads of issue and comment events: what decode reads, and
+/// what `lll watch` writes for a snapshot it relays in the same shape.
 #[json]
 pub struct IssueEvent {
   pub action: string,
@@ -13,4 +83,49 @@ pub struct IssueEvent {
 pub struct CommentEvent {
   pub action: string,
   pub record: models.Comment,
+}
+
+#[json]
+struct ClaimEvent {
+  action: string,
+  record: models.Claim,
+}
+
+#[json]
+struct ActionOnly {
+  action: string,
+}
+
+/// One frame's event: its topic (options already stripped) and payload.
+pub fn decode(topic: string, data: string) -> RecordEvent {
+  let mut head = ActionOnly { .. }
+  let _ = json.Unmarshal(data.bytes(), &head)
+  let collection = strings.SplitN(topic, "/", 2)[0]
+  let change = match collection {
+    "issues" => {
+      let mut event = IssueEvent { .. }
+      match json.Unmarshal(data.bytes(), &event) {
+        Ok(_) => Change.Issue(event.record),
+        Err(e) => Change.Malformed(f"{e}"),
+      }
+    },
+    "comments" => {
+      let mut event = CommentEvent { .. }
+      match json.Unmarshal(data.bytes(), &event) {
+        Ok(_) => Change.Comment(event.record),
+        Err(e) => Change.Malformed(f"{e}"),
+      }
+    },
+    "claims" => {
+      let mut event = ClaimEvent { .. }
+      match json.Unmarshal(data.bytes(), &event) {
+        Ok(_) => Change.Claim(event.record),
+        Err(e) => Change.Malformed(f"{e}"),
+      }
+    },
+    "favorites" => Change.Favorite,
+    "views" => Change.View,
+    _ => Change.Unknown(topic),
+  }
+  RecordEvent { topic, action: Action.parse(head.action), change, data }
 }

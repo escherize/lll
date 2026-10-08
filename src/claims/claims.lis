@@ -3,12 +3,14 @@ import "models"
 import "pb"
 import "query"
 
-pub fn observed_id(ctx: pb.Client, issue_id: string) -> Result<string, string> {
-  Ok(fetch(ctx, issue_id)?.map_or("", |held| held.id))
+/// The id of the claim held on the issue right now, None when it is not
+/// claimed: the claim a write observed, for the server to check.
+pub fn observed_id(ctx: pb.Client, issue_id: models.IssueId) -> Result<Option<models.ClaimId>, pb.CliError> {
+  Ok(fetch(ctx, issue_id)?.map(|held| held.id))
 }
 
-pub fn fetch(ctx: pb.Client, issue_id: string) -> Result<Option<models.Claim>, string> {
-  let filter = url.QueryEscape(f"issue={query.quote(issue_id)}")
+pub fn fetch(ctx: pb.Client, issue_id: models.IssueId) -> Result<Option<models.Claim>, pb.CliError> {
+  let filter = url.QueryEscape(f"issue={query.quote(issue_id.string())}")
   let mut list = models.ClaimList { .. }
   pb.fetch(ctx, 
     f"/api/collections/claims/records?perPage=1&filter={filter}&expand=member",
@@ -17,11 +19,13 @@ pub fn fetch(ctx: pb.Client, issue_id: string) -> Result<Option<models.Claim>, s
   Ok(list.items.get(0))
 }
 
-/// Expanded holds for one team, shared by initial boards and live refreshes.
-/// A team_id of "" (records.TeamScope.Every's filter_team) reads the holds in
-/// every team the token can see.
-pub fn for_team(ctx: pb.Client, team_id: string) -> Result<Slice<models.Claim>, string> {
-  let filter = if team_id == "" { "" } else { url.QueryEscape(f"issue.team={query.quote(team_id)}") }
+/// Expanded holds in `scope`, shared by initial boards and live refreshes.
+/// query.TeamScope.Every reads the holds in every team the token can see.
+pub fn for_team(ctx: pb.Client, scope: query.TeamScope) -> Result<Slice<models.Claim>, pb.CliError> {
+  let filter = match scope {
+    query.TeamScope.Every => "",
+    query.TeamScope.Only(team) => url.QueryEscape(f"issue.team={query.quote(team.string())}"),
+  }
   let mut result: Slice<models.Claim> = []
   let mut page = 1
   loop {

@@ -41,14 +41,15 @@ async page => {
   }
   // Remove the fixture-only invalid field before reopening the form.
   await form.locator('input[type="hidden"][name="state"]').evaluateAll(fields => fields.forEach(field => field.remove()));
-  // A real PocketBase relation validation error keeps its field detail.
+  // An assignee outside the viewer's roster is refused by name (LLL-675),
+  // inside the dialog, without the HTTP envelope.
   await form.evaluate(el => {
     const input = document.createElement('input');
     input.type = 'hidden'; input.name = 'assignee'; input.value = 'invalid-member';
     input.dataset.errorProbe = '1'; el.prepend(input);
   });
   await page.locator('#ni-title').press('Enter');
-  await alert.getByText('assignee:', {exact: false}).waitFor();
+  await alert.getByText("unknown member 'invalid-member'", {exact: false}).waitFor();
   const validation = await alert.innerText();
   if (validation.includes('http://') || validation.includes('Bad Request') || validation.includes('"data"')) throw new Error('validation exposed HTTP envelope');
   if (await page.locator('#ni-title').inputValue() !== title || await page.locator('#ni-desc').inputValue() !== description) throw new Error('validation lost create draft');

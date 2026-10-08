@@ -26,8 +26,8 @@ import "writes"
 struct DemoIssue {
   title: string,
   emoji: string,
-  state: string,
-  priority: int,
+  state: models.IssueState,
+  priority: models.Priority,
   label: string,
   body: string,
 }
@@ -42,7 +42,7 @@ struct DemoDoc {
 /// Seed `team_key` when it holds no issues. Never touches a team that has any:
 /// the demo is for a board nobody has used yet, and duplicating ten issues into
 /// real work would be a worse bug than the empty board it fixes.
-pub fn seed_demo(ctx: pb.Client, team_key: string, me: string, db_url: string, keep_cli_token: bool) -> Result<(), string> {
+pub fn seed_demo(ctx: pb.Client, team_key: string, me: string, db_url: string, keep_cli_token: bool) -> Result<(), pb.CliError> {
   let Some(team) = records.find_team(ctx, team_key)? else {
     return Err(pb.fail(pb.ErrorKind.NotFound, f"--demo: no team {team_key} to seed"))
   };
@@ -56,9 +56,9 @@ pub fn seed_demo(ctx: pb.Client, team_key: string, me: string, db_url: string, k
 
   // Issue numbers are assigned in creation order, and this only runs on an
   // empty team, so the cross-references below (DEMO-5 from DEMO-6) are stable.
-  let creator = records.find_member(ctx, me)?.map_or("", |m| m.id)
+  let creator = records.find_member(ctx, me)?.map(|m| m.id)
 
-  let mut label_ids = Map.new<string, string>()
+  let mut label_ids = Map.new<string, models.LabelId>()
   for (name, color) in demo_labels() {
     let id = make_label(ctx, team.id, name, color)?
     label_ids[name] = id
@@ -66,7 +66,7 @@ pub fn seed_demo(ctx: pb.Client, team_key: string, me: string, db_url: string, k
   let project = make_project(ctx, team.id)?
 
   for spec in demo_issues(team_key) {
-    let labels: Slice<string> = label_ids.get(spec.label).map_or([], |id| [id])
+    let labels: Slice<models.LabelId> = label_ids.get(spec.label).map_or([], |id| [id])
     make_issue(ctx, team.id, creator, project, labels, spec)?
   }
   for doc in demo_docs(team_key) {
@@ -91,7 +91,7 @@ pub fn seed_demo(ctx: pb.Client, team_key: string, me: string, db_url: string, k
 /// Only ever into an EMPTY slot. A configured token belongs to somebody's real
 /// server, and overwriting it to make a toy board convenient would be the worst
 /// trade in this file.
-fn point_cli_at_demo(ctx: pb.Client, db_url: string, team_key: string, me: string, keep_cli_token: bool) -> Result<(), string> {
+fn point_cli_at_demo(ctx: pb.Client, db_url: string, team_key: string, me: string, keep_cli_token: bool) -> Result<(), pb.CliError> {
   // `keep_cli_token` was decided from the token source up started with:
   // the client here already carries the board's own member token.
   if keep_cli_token {
@@ -118,16 +118,16 @@ fn demo_labels() -> Slice<(string, string)> {
   ]
 }
 
-fn make_label(ctx: pb.Client, team_id: string, name: string, color: string) -> Result<string, string> {
+fn make_label(ctx: pb.Client, team_id: models.TeamId, name: string, color: string) -> Result<models.LabelId, pb.CliError> {
   let body = writes.create_label(ctx, models.NewLabel { name, color, team: team_id })?
   let mut created = models.Label { .. }
   if let Err(e) = json.Unmarshal(body.bytes(), &created) {
-    return Err(f"demo: decoding label {name}: {e}")
+    return Err(pb.failed(f"demo: decoding label {name}: {e}"))
   }
   Ok(created.id)
 }
 
-fn make_project(ctx: pb.Client, team_id: string) -> Result<string, string> {
+fn make_project(ctx: pb.Client, team_id: models.TeamId) -> Result<models.ProjectId, pb.CliError> {
   let new_project = models.NewProject {
     name: "First hour",
     description: "The ten things worth trying before you decide anything.",
@@ -137,29 +137,29 @@ fn make_project(ctx: pb.Client, team_id: string) -> Result<string, string> {
   let body = writes.create_project(ctx, new_project)?
   let mut created = models.Project { .. }
   if let Err(e) = json.Unmarshal(body.bytes(), &created) {
-    return Err(f"demo: decoding project: {e}")
+    return Err(pb.failed(f"demo: decoding project: {e}"))
   }
   Ok(created.id)
 }
 
 fn make_issue(
   ctx: pb.Client,
-  team_id: string,
-  creator: string,
-  project: string,
-  labels: Slice<string>,
+  team_id: models.TeamId,
+  creator: Option<models.MemberId>,
+  project: models.ProjectId,
+  labels: Slice<models.LabelId>,
   spec: DemoIssue,
-) -> Result<(), string> {
+) -> Result<(), pb.CliError> {
   let new_issue = models.NewIssue {
     creator,
     origin: provenance.capture(ctx.settings.env.agent),
     team: team_id,
     title: spec.title,
-    state: spec.state,
-    priority: spec.priority,
+    state: spec.state.wire(),
+    priority: spec.priority.wire(),
     description: spec.body,
     emoji: spec.emoji,
-    project,
+    project: Some(project),
     labels,
     ..
   }
@@ -167,7 +167,7 @@ fn make_issue(
   Ok(())
 }
 
-fn make_doc(ctx: pb.Client, team_id: string, doc: DemoDoc) -> Result<(), string> {
+fn make_doc(ctx: pb.Client, team_id: models.TeamId, doc: DemoDoc) -> Result<(), pb.CliError> {
   let new_doc = models.NewDoc {
     team: team_id,
     slug: doc.slug,
@@ -187,8 +187,8 @@ fn demo_issues(k: string) -> Slice<DemoIssue> {
     DemoIssue {
       title: "Claim me, then try to claim me again",
       emoji: "\u{1F512}",
-      state: "todo",
-      priority: 2,
+      state: models.IssueState.Todo,
+      priority: models.Priority.High,
       label: "agents",
       body: f"A claim is the lock. Git will let two agents edit the same thing
 happily; the board refuses.
@@ -204,8 +204,8 @@ Give it back with 'lll issue release {k}-1'.",
     DemoIssue {
       title: "Give an agent its own identity",
       emoji: "\u{1F916}",
-      state: "todo",
-      priority: 2,
+      state: models.IssueState.Todo,
+      priority: models.Priority.High,
       label: "agents",
       body: "An agent should not borrow your account. A bot member cannot log
 in, is owned by the person who made it, and its token rotates without touching
@@ -219,8 +219,8 @@ authenticates that agent alone.",
     DemoIssue {
       title: "Ask the board what to work on",
       emoji: "\u{1F3AF}",
-      state: "todo",
-      priority: 1,
+      state: models.IssueState.Todo,
+      priority: models.Priority.Urgent,
       label: "agents",
       body: "The question an agent has is not 'list everything', it is 'what
 now'. Ready, unclaimed, highest priority, oldest.
@@ -234,8 +234,8 @@ into the next command while you still see what happened.",
     DemoIssue {
       title: "Watch the board from your terminal",
       emoji: "\u{1F4E1}",
-      state: "backlog",
-      priority: 3,
+      state: models.IssueState.Backlog,
+      priority: models.Priority.Medium,
       label: "cli",
       body: "Run this, then drag a card in the browser.
 
@@ -247,8 +247,8 @@ reload, one SSE connection.",
     DemoIssue {
       title: "Move me on the board, then read me from the CLI",
       emoji: "\u{2194}",
-      state: "todo",
-      priority: 2,
+      state: models.IssueState.Todo,
+      priority: models.Priority.High,
       label: "board",
       body: f"Drag this card into another column, then:
 
@@ -260,8 +260,8 @@ are one database, not two views kept in step.",
     DemoIssue {
       title: "Block me until the card above is done",
       emoji: "\u{26D3}",
-      state: "backlog",
-      priority: 3,
+      state: models.IssueState.Backlog,
+      priority: models.Priority.Medium,
       label: "cli",
       body: f"  lll issue block {k}-6 {k}-5
   lll issue list --ready
@@ -272,8 +272,8 @@ stops offering it. Dependencies decide the agenda, not just the display.",
     DemoIssue {
       title: "Write down why, not just what",
       emoji: "\u{1F4DD}",
-      state: "backlog",
-      priority: 3,
+      state: models.IssueState.Backlog,
+      priority: models.Priority.Medium,
       label: "docs",
       body: "Issues record what changed. Decisions and findings record why, and
 what was rejected, which is the half that is gone in six months.
@@ -288,8 +288,8 @@ from its body rather than its title.",
     DemoIssue {
       title: "Attach a repo to this team",
       emoji: "\u{1F517}",
-      state: "todo",
-      priority: 2,
+      state: models.IssueState.Todo,
+      priority: models.Priority.High,
       label: "setup",
       body: "  cd ~/any/git/repo && lll attach
 
@@ -299,8 +299,8 @@ flags. Commit it and every clone and worktree arrives configured.",
     DemoIssue {
       title: "Hand work to someone else",
       emoji: "\u{1F91D}",
-      state: "in-review",
-      priority: 2,
+      state: models.IssueState.InReview,
+      priority: models.Priority.High,
       label: "setup",
       body: f"  lll member create -n alex
   lll issue update {k}-9 --assignee alex
@@ -312,8 +312,8 @@ they started.",
     DemoIssue {
       title: "Throw this board away when you are done",
       emoji: "\u{1F9F9}",
-      state: "backlog",
-      priority: 4,
+      state: models.IssueState.Backlog,
+      priority: models.Priority.Low,
       label: "setup",
       body: f"The demo is a real team, so get rid of it the way you would any
 other.

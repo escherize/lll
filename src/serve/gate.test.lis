@@ -1,4 +1,5 @@
 import "go:strings"
+import "models"
 
 #[test]
 fn scoped_board_token_opens_only_its_team() {
@@ -61,7 +62,7 @@ fn member_viewer_writes_only_when_read_write() {
                "/settings/access/token", "/settings/access/member", "/settings/teams/archive"] {
     assert route_kind(scoped_route("POST", path, true)) == "closed"
   }
-  let m = ViewerMember { id: "m1", name: "ann", token: "t", rw: true, all: false }
+  let m = ViewerMember { id: "m1", name: "ann", token: "t", access: models.Access { reach: models.Reach.Teams([]), mode: models.Mode.ReadWrite } }
   let v = ScopedViewer { teams: ["AAA", "CCC"], member: Some(m) }
   // The stream's revocation check (LLL-626) reads these.
   assert v.sees("ccc") && !v.sees("BBB") && v.sees_issue("CCC-2") && !v.sees_issue("BBB-2")
@@ -74,9 +75,9 @@ fn member_viewer_writes_only_when_read_write() {
 // What a viewer may do follows its access and nothing else (LLL-658).
 #[test]
 fn a_viewer_writes_and_sees_everything_only_as_its_access_says() {
-  let rw = ViewerMember { id: "m1", name: "ann", token: "t", rw: true, all: false }
-  let ro = ViewerMember { rw: false, ..rw }
-  let all = ViewerMember { all: true, ..rw }
+  let rw = ViewerMember { id: "m1", name: "ann", token: "t", access: models.Access { reach: models.Reach.Teams([]), mode: models.Mode.ReadWrite } }
+  let ro = ViewerMember { access: models.Access { reach: models.Reach.Teams([]), mode: models.Mode.ReadOnly }, ..rw }
+  let all = ViewerMember { access: models.Access { reach: models.Reach.Every, mode: models.Mode.ReadWrite }, ..rw }
   assert viewer_writes(Viewer.Full) && !viewer_is_scoped(Viewer.Full)
   assert viewer_writes(Viewer.Scoped(ScopedViewer { teams: ["AAA"], member: Some(rw) }))
   assert !viewer_writes(Viewer.Scoped(ScopedViewer { teams: ["AAA"], member: Some(ro) }))

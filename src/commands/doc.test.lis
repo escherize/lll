@@ -31,7 +31,7 @@ fn check_slug_trims_surrounding_space() {
 #[test]
 fn check_slug_rejects_empty_and_blank() {
   let assert Err(msg) = records.check_slug("")
-  assert msg.contains("slug cannot be empty")
+  assert msg.message.contains("slug cannot be empty")
   let assert Err(_) = records.check_slug("   ")
 }
 
@@ -58,14 +58,14 @@ fn check_slug_rejects_over_eighty_characters() {
   let assert Ok(exactly) = records.check_slug("a" + strings.Repeat("b", 78) + "c")
   assert exactly.length() == 80
   let assert Err(msg) = records.check_slug(strings.Repeat("a", 81))
-  assert msg.contains("at most 80")
+  assert msg.message.contains("at most 80")
 }
 
 #[test]
 fn check_slug_error_quotes_the_input_and_names_the_fix() {
   let assert Err(msg) = records.check_slug("Bad Slug!")
-  assert msg.contains("'Bad Slug!'")
-  assert msg.contains("lowercase letters, digits and hyphens")
+  assert msg.message.contains("'Bad Slug!'")
+  assert msg.message.contains("lowercase letters, digits and hyphens")
 }
 
 // ------------------------------------------------------------- check_kind
@@ -92,8 +92,8 @@ fn check_kind_accepts_each_kind_case_insensitively() {
 #[test]
 fn check_kind_rejects_unknown_kinds_with_the_list() {
   let assert Err(msg) = check_kind("memo")
-  assert msg.contains("unknown kind 'memo'")
-  assert msg.contains("wiki, finding, decision, prd")
+  assert msg.message.contains("unknown kind 'memo'")
+  assert msg.message.contains("wiki, finding, decision, prd")
   let assert Err(_) = check_kind("wiki finding")
 }
 
@@ -195,13 +195,13 @@ fn doc_commands_declares_every_verb_once_with_a_summary() {
   assert strings.Join(names, " ") == "create list view edit delete"
   assert strings.Join(flags.command_names(doc_commands()), " ") == "create new list view show edit update delete"
   let assert Err(help) = doc(test_client("http://127.0.0.1:1", "", ""), ["lll", "doc", "--help"])
-  assert !help.contains("lll doc link")
-  assert !help.contains("lll doc unlink")
-  assert help.contains("lll issue link KEY-123 SLUG")
+  assert !help.message.contains("lll doc link")
+  assert !help.message.contains("lll doc unlink")
+  assert help.message.contains("lll issue link KEY-123 SLUG")
   // LLL-644 (D5): doc link/unlink were removed; each names the issue verb.
   for verb in ["link", "unlink"] {
     let assert Err(refused) = doc(test_client("http://127.0.0.1:1", "", ""), ["lll", "doc", verb, "port-notes", "ENG-2"])
-    assert refused.contains(f"did you mean 'lll issue {verb} KEY-123 SLUG'?")
+    assert refused.message.contains(f"did you mean 'lll issue {verb} KEY-123 SLUG'?")
   }
   for c in doc_commands() {
     assert c.summary != ""
@@ -226,7 +226,7 @@ fn doc_list_spec_searches_slug_and_title() {
   let assert Ok(p) = flags.parse(spec, ["lll", "doc", "list", "--search", "port"], 3, false, "")
   assert p.one("--search") == "port"
   let assert Err(refused) = flags.parse(spec, ["lll", "doc", "list", "--query", "port"], 3, false, "lll doc list")
-  assert refused.contains("did you mean '--search'?")
+  assert refused.message.contains("did you mean '--search'?")
 }
 
 #[test]
@@ -241,7 +241,7 @@ fn doc_list_takes_a_limit_and_doc_paths_lose_their_short_flag() {
   assert limit_flag(zero).is_err()
   // D6: -p is priority, so paths are --paths only; the refusal names it.
   let assert Err(refused) = flags.parse(doc_new_spec(), ["lll", "doc", "create", "-p", "src"], 3, false, "lll doc create")
-  assert refused.contains("did you mean '--paths'?")
+  assert refused.message.contains("did you mean '--paths'?")
 }
 
 #[test]

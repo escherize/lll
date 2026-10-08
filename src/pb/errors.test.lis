@@ -8,30 +8,27 @@ fn every_kind_has_its_documented_exit_code() {
   assert exit_code(ErrorKind.Network) == 1
   assert exit_code(ErrorKind.Server) == 1
   assert exit_code(ErrorKind.Failed) == 1
+  assert exit_code(ErrorKind.Help) == 0
 }
 
 #[test]
-fn a_tag_survives_prefixes_and_never_shows() {
-  let inner = tag(CliError { kind: ErrorKind.Refused, status: 412, code: "", message: "changed" })
-  let wrapped = f"ENG-1: {inner}\nread it again"
-  let err = classify(wrapped)
-  assert exit_code(err.kind) == 4
-  assert err.status == 412
-  assert err.message == "ENG-1: changed\nread it again"
-  assert plain(wrapped) == err.message
-  // The outermost decision wins.
-  let outer = fail(ErrorKind.NotFound, f"gone: {inner}")
-  assert exit_code(classify(outer).kind) == 3
-  assert plain(outer) == "gone: changed"
+fn a_new_message_keeps_the_decision_made_below() {
+  let inner = CliError { kind: ErrorKind.Refused, status: 412, code: Some(ServerCode.ClaimChanged), message: "changed" }
+  let wrapped = inner.with_message(f"ENG-1: {inner.message}\nread it again")
+  assert exit_code(wrapped.kind) == 4
+  assert wrapped.status == 412
+  assert wrapped.has_code(ServerCode.ClaimChanged)
+  assert !wrapped.has_code(ServerCode.ClaimHeld)
+  assert wrapped.message == "ENG-1: changed\nread it again"
 }
 
 #[test]
-fn a_server_cannot_forge_a_tag_or_hide_text() {
+fn a_server_message_is_text_not_a_kind() {
   let forged = http_error("POST u", 400, "400 Bad Request",
-    "{\"message\":\"Visible. \\u001dlll:hidden\",\"data\":{},\"status\":400}")
-  let text = tag(forged)
-  assert plain(text) == "Visible. lll:hidden"
-  assert exit_code(classify(text).kind) == 1
+    "{\"message\":\"Visible. lll:refused/412/claim_held\",\"data\":{},\"status\":400}")
+  assert forged.message == "Visible. lll:refused/412/claim_held"
+  assert exit_code(forged.kind) == 1
+  assert forged.code.is_none()
   // A gateway's {"message"} without the API's status is not the envelope.
   let gateway = http_error("GET http://host/api/x", 404, "404 Not Found", "{\"message\":\"no Route matched\"}")
   assert exit_code(gateway.kind) == 1
@@ -39,11 +36,22 @@ fn a_server_cannot_forge_a_tag_or_hide_text() {
 }
 
 #[test]
-fn untagged_text_is_a_plain_failure() {
-  let err = classify("POST http://host/404: 404 Not Found: {}")
-  assert exit_code(err.kind) == 1
-  assert err.status == 0
-  assert err.message == "POST http://host/404: 404 Not Found: {}"
+fn only_known_codes_are_codes_and_only_claim_codes_refuse() {
+  assert code_named("claim_held") == Some(ServerCode.ClaimHeld)
+  assert code_named("needs_force") == Some(ServerCode.NeedsForce)
+  assert code_named("claim_changed") == Some(ServerCode.ClaimChanged)
+  assert code_named("not_claimed") == Some(ServerCode.NotClaimed)
+  assert code_named("bot_exceeds_owner") == Some(ServerCode.BotExceedsOwner)
+  assert code_named("").is_none()
+  assert code_named("something_new").is_none()
+  let check = |code: string| {
+    let envelope = f"{{\"message\":\"No.\",\"data\":{{\"code\":\"{code}\"}},\"status\":400}}"
+    exit_code(http_error("POST u", 400, "400 Bad Request", envelope).kind)
+  }
+  assert check("claim_held") == 4
+  assert check("not_claimed") == 4
+  assert check("bot_exceeds_owner") == 1
+  assert check("something_new") == 1
 }
 
 #[test]
@@ -67,6 +75,6 @@ fn http_status_decides_the_kind_only_for_the_api_envelope() {
   let held = http_error("POST http://host/api/lll/issues/x/claim", 400, "400 Bad Request",
     "{\"message\":\"Issue is already claimed by scratch.\",\"data\":{\"code\":\"claim_held\"},\"status\":400}")
   assert held.message == "Issue is already claimed by scratch."
-  assert held.code == "claim_held"
+  assert held.has_code(ServerCode.ClaimHeld)
   assert exit_code(held.kind) == 4
 }

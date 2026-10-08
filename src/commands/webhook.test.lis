@@ -28,7 +28,7 @@ fn validate_target_rejects_non_http_schemes_and_hostless_urls() {
       Err(m) => m,
       Ok(kept) => panic(f"validate_target accepted '{kept}'"),
     }
-    assert strings.Contains(msg, "http(s) URL")
+    assert strings.Contains(msg.message, "http(s) URL")
   }
 }
 
@@ -40,7 +40,7 @@ fn validate_target_rejects_blank_with_the_command_name() {
     Err(m) => m,
     Ok(kept) => panic(f"validate_target accepted '{kept}'"),
   }
-  assert strings.Contains(msg, "lll webhook add URL")
+  assert strings.Contains(msg.message, "lll webhook add URL")
 }
 
 // ------------------------------------------------------------------ scope
@@ -76,14 +76,14 @@ fn secret_state_says_set_or_not_set() {
 /// or quote in a URL cannot break out of the filter (TASK-134).
 #[test]
 fn dup_filter_quotes_the_url() {
-  let filter = dup_filter("TEAMID123", "", "https://r.example.com/it's")
+  let filter = dup_filter(models.TeamId("TEAMID123"), None, "https://r.example.com/it's")
   assert filter == "team='TEAMID123' && url='https://r.example.com/it\\'s'"
 }
 
 #[test]
 fn dup_filter_adds_the_project_only_when_scoped() {
-  assert dup_filter("T1", "", "http://h/hook") == "team='T1' && url='http://h/hook'"
-  assert strings.Contains(dup_filter("T1", "P1", "http://h/hook"), "&& project='P1'")
+  assert dup_filter(models.TeamId("T1"), None, "http://h/hook") == "team='T1' && url='http://h/hook'"
+  assert strings.Contains(dup_filter(models.TeamId("T1"), Some(models.ProjectId("P1")), "http://h/hook"), "&& project='P1'")
 }
 
 // ---------------------------------------------------------------- the table

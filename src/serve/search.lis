@@ -41,7 +41,7 @@ fn search_page(
     match search_hits(ctx, team, q, viewer_is_scoped(viewer)) {
       Ok(hits) => results = hits,
       Err(e) => {
-        http.Error(w, pb.plain(e), 500)
+        http.Error(w, e.message, 500)
         return
       },
     }
@@ -72,7 +72,7 @@ fn search_page(
     let frag = match render("search-update", page) {
       Ok(h) => h,
       Err(e) => {
-        http.Error(w, pb.plain(e), 500)
+        http.Error(w, e.message, 500)
         return
       },
     }
@@ -90,19 +90,19 @@ fn search_page(
 /// is and why. Docs joined the page when they got one of their own to link to
 /// (LLL-405): until then a doc hit was a result you could not click, which is
 /// why this searched issues and comments only (LLL-398).
-fn search_hits(ctx: pb.Client, team: models.Team, q: string, scoped: bool) -> Result<Slice<SearchHitVM>, string> {
+fn search_hits(ctx: pb.Client, team: models.Team, q: string, scoped: bool) -> Result<Slice<SearchHitVM>, pb.CliError> {
   let issues = records.fetch_team_issues_where(ctx, team.id, records.candidate_clause(q, ["title", "description"]))?
   let comments = records.fetch_team_comments_where(ctx, team.id, records.candidate_clause(q, ["body"]))?
   // A comment's issue must be in the candidate set for the hit to have a
   // card; fetch the parents the comment filter found that the issue one did not.
-  let mut have = Map.new<string, bool>()
+  let mut have = Map.new<models.IssueId, bool>()
   for i in issues { have[i.id] = true }
-  let mut extra_ids: Slice<string> = []
+  let mut extra_ids: Slice<models.IssueId> = []
   for c in comments { if have.get(c.issue).is_none() { have[c.issue] = true; extra_ids = extra_ids.append(c.issue) } }
   let mut all = issues
   if !extra_ids.is_empty() {
     let mut ors: Slice<string> = []
-    for id in extra_ids { ors = ors.append(f"id={query.quote(id)}") }
+    for id in extra_ids { ors = ors.append(f"id={query.quote(id.string())}") }
     all = all.append(records.fetch_team_issues_where(ctx, team.id, "(" + strings.Join(ors, " || ") + ")")?...)
   }
   // `ctx` reads as the viewer (LLL-658), so another team's labels never

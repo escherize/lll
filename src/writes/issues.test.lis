@@ -1,5 +1,7 @@
 import "go:encoding/json"
 
+import "models"
+
 /// The wire body for `patch` against `current`, as update_issue sends it.
 fn wire(patch: IssuePatch, current: string) -> string {
   let Ok((fields, _)) = issue_fields(patch, current) else {
@@ -20,8 +22,8 @@ fn an_unchanged_patch_is_empty_and_sends_nothing() {
 #[test]
 fn only_the_given_fields_are_sent() {
   let patch = IssuePatch {
-    state: Some("done"),
-    priority: Some(0),
+    state: Some(models.IssueState.Done),
+    priority: Some(models.Priority.None),
     ..IssuePatch.unchanged(),
   }
   assert !patch.is_empty()
@@ -33,7 +35,7 @@ fn only_the_given_fields_are_sent() {
 fn clearing_a_relation_sends_an_empty_id() {
   let patch = IssuePatch {
     assignee: Relation.Clear,
-    project: Relation.Set("p1"),
+    project: Relation.Set(models.ProjectId("p1")),
     ..IssuePatch.unchanged(),
   }
   assert wire(patch, "") == "{\"assignee\":\"\",\"project\":\"p1\"}"
@@ -48,18 +50,18 @@ fn an_empty_emoji_clears_it() {
 #[test]
 fn a_label_delta_rides_the_relation_modifiers() {
   let both = IssuePatch {
-    labels: LabelEdit.Delta { add: ["a"], remove: ["b"] },
+    labels: LabelEdit.Delta { add: [models.LabelId("a")], remove: [models.LabelId("b")] },
     ..IssuePatch.unchanged(),
   }
   assert wire(both, "") == "{\"labels+\":[\"a\"],\"labels-\":[\"b\"]}"
   // An empty side is not sent: an empty modifier is not a no-op to rely on.
   let add = IssuePatch {
-    labels: LabelEdit.Delta { add: ["a"], remove: [] },
+    labels: LabelEdit.Delta { add: [models.LabelId("a")], remove: [] },
     ..IssuePatch.unchanged(),
   }
   assert wire(add, "") == "{\"labels+\":[\"a\"]}"
   let whole = IssuePatch {
-    labels: LabelEdit.Replace(["a", "b"]),
+    labels: LabelEdit.Replace([models.LabelId("a"), models.LabelId("b")]),
     ..IssuePatch.unchanged(),
   }
   assert wire(whole, "") == "{\"labels\":[\"a\",\"b\"]}"

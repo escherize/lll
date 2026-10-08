@@ -20,19 +20,19 @@ fn attachment_vms(issue: models.Issue) -> Slice<AttachmentVM> {
   })
 }
 
-fn attachment_upload(_ctx: pb.Client, v: Viewing, r: mut Ref<http.Request>) -> Result<string, string> {
+fn attachment_upload(_ctx: pb.Client, v: Viewing, r: mut Ref<http.Request>) -> Result<string, pb.CliError> {
   // Bound the multipart stream before parsing; temporary spill files are
   // removed on every outcome. The schema enforces its smaller file limit.
-  let Some(body) = r.Body else { return Err("choose a file to upload") }
+  let Some(body) = r.Body else { return Err(pb.failed("choose a file to upload")) }
   r.Body = Some(io.NopCloser(io.LimitReader(body, (33 * 1024 * 1024) as int64)))
   let parsed = r.ParseMultipartForm((1024 * 1024) as int64)
   if let Some(form) = r.MultipartForm { defer { let _ = form.RemoveAll() } }
-  if let Err(e) = parsed { return Err(f"reading upload form: {e}") }
+  if let Err(e) = parsed { return Err(pb.failed(f"reading upload form: {e}")) }
   let who = acting_as(v)?
   let issue = who.issue(r.FormValue("key"))?
   let (file, header) = match r.FormFile("file") {
     Ok(pair) => pair,
-    Err(_) => return Err("choose a file to upload"),
+    Err(_) => return Err(pb.failed("choose a file to upload")),
   }
   defer file.Close()
   let data = attachments.read_upload(file)?
@@ -44,7 +44,7 @@ fn attachment_upload(_ctx: pb.Client, v: Viewing, r: mut Ref<http.Request>) -> R
   Ok(replace_event("#attachment-upload", html))
 }
 
-fn attachment_remove(_ctx: pb.Client, v: Viewing, r: mut Ref<http.Request>) -> Result<string, string> {
+fn attachment_remove(_ctx: pb.Client, v: Viewing, r: mut Ref<http.Request>) -> Result<string, pb.CliError> {
   let who = acting_as(v)?
   let issue = who.issue(r.FormValue("key"))?
   attachments.remove(who.reads, who.caller, issue, r.FormValue("file"))?
@@ -61,7 +61,7 @@ fn attachment_download(ctx: pb.Client, w: http.ResponseWriter, r: Ref<http.Reque
   let result = records.fetch_issue(ctx, key).and_then(|issue| attachments.read_file(ctx, issue, filename))
   let data = match result {
     Ok(data) => data,
-    Err(e) => { http.Error(w, pb.plain(e), 404); return },
+    Err(e) => { http.Error(w, e.message, 404); return },
   }
   let content_type = http.DetectContentType(data.bytes())
   let raster = ["image/png", "image/jpeg", "image/gif", "image/webp"].contains(content_type)

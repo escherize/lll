@@ -8,7 +8,7 @@ import "pb"
 
 /// The refusal a guarded delete answers with. Names the count and the exact
 /// command that overrides it, so the user never has to guess the flag.
-fn refuse_delete(kind: string, name: string, used: int) -> string {
+fn refuse_delete(kind: string, name: string, used: int) -> pb.CliError {
   let argument = cli_argument(name)
   pb.fail(pb.ErrorKind.Refused, f"{used} issue(s) still reference the {kind} '{name}'; deleting it drops the {kind} off them.\nTo delete it anyway, run:\n  lll {kind} delete {argument} --force\nOr reassign those issues first.")
 }
@@ -34,7 +34,7 @@ fn confirmed(question: string) -> bool {
 /// A declined confirmation: exit 4, refused (LLL-645). It used to print
 /// "Aborted." and exit 0, so a script could not tell a skipped delete from a
 /// done one.
-fn aborted() -> string {
+fn aborted() -> pb.CliError {
   pb.fail(pb.ErrorKind.Refused, "aborted: nothing was deleted")
 }
 

@@ -13,7 +13,7 @@ import "pb"
 /// itself contain hyphens (`ENG-DEV-12` is team `ENG-DEV`, issue 12), so the
 /// number is the last segment and the key is everything before it. The
 /// number is ASCII digits alone: no sign.
-pub fn split_issue_key(id: string) -> Result<(string, int), string> {
+pub fn split_issue_key(id: string) -> Result<(string, int), pb.CliError> {
   // Names the shape AND the position: three of thirty fleet agents typed
   // 'lll issue comment add KEY ...' and read this as the key being wrong.
   let bad_id = pb.fail(pb.ErrorKind.Usage, f"'{id}' is not an issue ID (expected KEY-123, e.g. ENG-1); the ID comes right after the verb; 'lll issue <verb> -h' shows the form")

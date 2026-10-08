@@ -159,7 +159,7 @@ fn direct_navigation(r: Ref<http.Request>) -> bool {
 /// page, so someone who opened another person's link can notice.
 fn login_identity(v: ScopedViewer) -> string {
   let Some(m) = v.member else { return f"a read-only viewer of team {v.teams.get(0).unwrap_or("")}" }
-  let mode = if m.rw { "read-write" } else { "read-only" }
+  let mode = if m.access.mode.writes() { "read-write" } else { "read-only" }
   let teams = if v.teams.is_empty() { "no teams" } else { strings.Join(v.teams, ", ") }
   f"{m.name} ({mode}, {teams})"
 }
@@ -350,15 +350,14 @@ pub struct ScopedViewer {
 }
 
 pub struct ViewerMember {
-  pub id: string,
+  pub id: models.MemberId,
   pub name: string,
   /// The member's own token: the credential its writes ride.
   pub token: string,
-  /// Effective read-write (a bot's within its owner's).
-  pub rw: bool,
-  /// Effective access to every team: such a member sees the whole roster
-  /// and every page as the board token does (LLL-551).
-  pub all: bool,
+  /// Effective access (a bot's within its owner's). A member that reads
+  /// every team sees the whole roster and every page as the board token
+  /// does (LLL-551).
+  pub access: models.Access,
 }
 
 impl ScopedViewer {
@@ -393,7 +392,7 @@ pub fn board_viewer(ctx: pb.Client, r: Ref<http.Request>) -> Viewer {
 pub fn viewer_is_scoped(v: Viewer) -> bool {
   match v {
     Viewer.Full => false,
-    Viewer.Scoped(s) => !s.member.map_or(false, |m| m.all),
+    Viewer.Scoped(s) => !s.member.map_or(false, |m| m.access.every_team()),
   }
 }
 
@@ -401,7 +400,7 @@ pub fn viewer_is_scoped(v: Viewer) -> bool {
 pub fn viewer_writes(v: Viewer) -> bool {
   match v {
     Viewer.Full => true,
-    Viewer.Scoped(s) => s.member.map_or(false, |m| m.rw),
+    Viewer.Scoped(s) => s.member.map_or(false, |m| m.access.mode.writes()),
   }
 }
 
@@ -412,7 +411,7 @@ fn viewing(ctx: pb.Client, w: http.ResponseWriter, viewer: Viewer) -> Option<Vie
   match reader_for(ctx, viewer) {
     Ok(reads) => Some(Viewing { viewer, reads }),
     Err(e) => {
-      if pb.classify(e).status == 404 {
+      if e.status == 404 {
         let key = match viewer {
           Viewer.Scoped(v) => v.teams.get(0).unwrap_or(""),
           Viewer.Full => "",
@@ -421,7 +420,7 @@ fn viewing(ctx: pb.Client, w: http.ResponseWriter, viewer: Viewer) -> Option<Vie
       } else {
         // The cause names the internal API address (review N2): the log
         // gets it, the page does not.
-        fmt.Fprintln(os.Stderr, f"board: a team link's reader could not be had: {pb.plain(e)}")
+        fmt.Fprintln(os.Stderr, f"board: a team link's reader could not be had: {e.message}")
         http.Error(w, "this board cannot open that team link right now; try again, or ask the person who sent it", 503)
       }
       None
@@ -433,16 +432,16 @@ fn viewing(ctx: pb.Client, w: http.ResponseWriter, viewer: Viewer) -> Option<Vie
 /// token, the member's own token for a member, and for a team link the
 /// token of that team's link viewer, which gopb mints for the board's
 /// member and the board keeps server-side.
-pub fn reader_for(ctx: pb.Client, viewer: Viewer) -> Result<pb.Client, string> {
+pub fn reader_for(ctx: pb.Client, viewer: Viewer) -> Result<pb.Client, pb.CliError> {
   let Viewer.Scoped(v) = viewer else { return Ok(ctx) }
   if let Some(m) = v.member { return Ok(ctx.reading_as(m.token)) }
   let key = records.normalize_team_key(v.teams.get(0).unwrap_or(""))
-  let Ok(payload) = json.Marshal(LinkTeam { team: key }) else { return Err("encoding the team link") }
+  let Ok(payload) = json.Marshal(LinkTeam { team: key }) else { return Err(pb.failed("encoding the team link")) }
   let body = ctx.post("/api/lll/link-token", payload as string)?
   let mut reply = LinkToken { .. }
   let decoded = json.Unmarshal(body.bytes(), &reply)
   if decoded.is_err() || reply.token == "" {
-    return Err("the server did not hand over the team link's reader")
+    return Err(pb.failed("the server did not hand over the team link's reader"))
   }
   Ok(ctx.reading_as(reply.token))
 }
@@ -474,7 +473,7 @@ fn member_viewer(ctx: pb.Client, tok: string) -> Option<ScopedViewer> {
   if reply.id == "" { return None }
   Some(ScopedViewer {
     teams: reply.teams.map(|t| t.key),
-    member: Some(ViewerMember { id: reply.id, name: reply.name, token: tok, rw: reply.rw, all: reply.all }),
+    member: Some(ViewerMember { id: reply.id, name: reply.name, token: tok, access: reply.access() }),
   })
 }
 
@@ -512,7 +511,7 @@ fn admit_scoped(w: http.ResponseWriter, r: Ref<http.Request>, v: ScopedViewer) -
     }
     return false
   }
-  let writes = v.member.map_or(false, |m| m.rw)
+  let writes = v.member.map_or(false, |m| m.access.mode.writes())
   match scoped_route(r.Method, u.Path, writes) {
     ScopedVerdict.Open => true,
     ScopedVerdict.Closed(message) => {

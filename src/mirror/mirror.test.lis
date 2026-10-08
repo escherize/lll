@@ -2,6 +2,7 @@ import "models"
 
 import "go:math"
 import "go:strings"
+import "pb"
 
 /// The round trip is the whole contract: whatever render() writes, parse()
 /// must give back unchanged. Every test here is that property under a
@@ -9,10 +10,10 @@ import "go:strings"
 /// text a person wrote.
 /// The lookups a rendered issue needs; empty where a test does not care.
 fn no_names() -> Names {
-  Names { issues: Map.new<string, string>(), members: Map.new<string, string>() }
+  Names { issues: Map.new<models.IssueId, string>(), members: Map.new<models.MemberId, string>() }
 }
 
-fn round_trip(front: Front, body: string) -> Result<(Front, string), string> {
+fn round_trip(front: Front, body: string) -> Result<(Front, string), pb.CliError> {
   parse(render(front, body)?)
 }
 
@@ -267,13 +268,13 @@ fn crlf_input_parses_to_the_same_thing_as_lf() {
 #[test]
 fn parse_refuses_a_file_with_no_front_matter() {
   let assert Err(e) = parse("# Just markdown\n\nno fence here\n")
-  assert strings.Contains(e, "first line")
+  assert strings.Contains(e.message, "first line")
 }
 
 #[test]
 fn parse_refuses_unterminated_front_matter() {
   let assert Err(e) = parse("---\nkey: ENG-1\nstate: todo\n")
-  assert strings.Contains(e, "closing")
+  assert strings.Contains(e.message, "closing")
 }
 
 #[test]
@@ -281,13 +282,13 @@ fn parse_refuses_front_matter_with_no_key() {
   // Without a key there is nothing to import the file AS, so this must fail
   // loudly rather than create an issue named after a filename.
   let assert Err(e) = parse("---\nstate: todo\n---\n\nbody\n")
-  assert strings.Contains(e, "key")
+  assert strings.Contains(e.message, "key")
 }
 
 #[test]
 fn parse_refuses_malformed_yaml() {
   let assert Err(e) = parse("---\nkey: \"unclosed\nlabels: [a, b\n---\n\nbody\n")
-  assert strings.Contains(e, "front matter")
+  assert strings.Contains(e.message, "front matter")
 }
 
 fn doc_sample() -> DocFront {
@@ -331,7 +332,7 @@ fn a_doc_body_containing_the_fence_is_not_truncated() {
 #[test]
 fn parse_doc_refuses_front_matter_with_no_slug() {
   let assert Err(e) = parse_doc("---\nkind: decision\n---\n\nbody\n")
-  assert strings.Contains(e, "slug")
+  assert strings.Contains(e.message, "slug")
 }
 
 #[test]
@@ -351,11 +352,11 @@ fn front_of_resolves_names_from_the_maps_not_the_expansions() {
   // The regression this guards: `creator` came from issue.expand.creator,
   // which the e2e harness's identity could not expand, so every issue in
   // the mirror said it was filed by nobody — and nothing failed.
-  let mut members = Map.new<string, string>()
-  members["m1"] = "bryan.maass"
-  members["m2"] = "rtrip-bot"
-  let mut keys = Map.new<string, string>()
-  keys["i9"] = "ENG-9"
+  let mut members = Map.new<models.MemberId, string>()
+  members[models.MemberId("m1")] = "bryan.maass"
+  members[models.MemberId("m2")] = "rtrip-bot"
+  let mut keys = Map.new<models.IssueId, string>()
+  keys[models.IssueId("i9")] = "ENG-9"
   let issue = models.Issue {
     number: 4,
     title: "t",

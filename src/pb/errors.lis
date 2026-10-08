@@ -1,6 +1,3 @@
-import "go:strconv"
-import "go:strings"
-
 /// What kind of failure an error is, as far as a caller deciding what to do
 /// next cares. Each kind is one exit code (exit_code), the D1 contract in
 /// docs/cli-contract.md.
@@ -22,27 +19,91 @@ pub enum ErrorKind {
   Server,
   /// Anything else.
   Failed,
+  /// Not a failure: a help page was asked for. It travels the error path so
+  /// it short-circuits the verb before the verb can act (`lll label create
+  /// -h` must not create); main prints the message on stdout and exits 0.
+  Help,
 }
 
 /// A failure with its kind, the HTTP status behind it (0 when none) and the
-/// server's stable code (data.code, "" when none). `message` is the human
-/// text, which is not part of the contract.
+/// server's stable code (data.code; None when there is none, or lll does not
+/// know it). `message` is the human text, which is not part of the contract.
+///
+/// Every fallible function above the boundaries returns Result<T, CliError>
+/// (LLL-675), so the kind travels as a value from where it is decided to
+/// main, which turns it into the exit code.
 pub struct CliError {
   pub kind: ErrorKind,
   pub status: int,
-  pub code: string,
+  pub code: Option<ServerCode>,
   pub message: string,
 }
 
-/// The stable codes the lll server puts in an error's data.code. Each one is
-/// a refusal: the request was well formed and the answer is no.
-pub fn refusal_codes() -> Slice<string> {
-  ["claim_held", "needs_force", "claim_changed", "not_claimed"]
+impl CliError {
+  /// The same failure (kind, status and code) told differently: a caller
+  /// adding where it happened ("ENG-1: ...") keeps the decision made below.
+  pub fn with_message(self, message: string) -> CliError {
+    CliError { message, ..self }
+  }
+
+  /// True when the server refused with `code`.
+  pub fn has_code(self, code: ServerCode) -> bool {
+    match self.code {
+      Some(c) => c == code,
+      None => false,
+    }
+  }
+}
+
+/// The stable codes the lll server (gopb) puts in an error's data.code. The
+/// claim codes are refusals: the request was well formed and the answer is
+/// no. A code lll does not know is no code (None), never a guess.
+pub enum ServerCode {
+  /// Someone else holds the issue's claim.
+  ClaimHeld,
+  /// Releasing someone else's claim needs force.
+  NeedsForce,
+  /// The claim changed under the request.
+  ClaimChanged,
+  /// The issue is not claimed.
+  NotClaimed,
+  /// A member with an owner would have wider access than its owner.
+  BotExceedsOwner,
+  /// PocketBase refused a password change's oldPassword field: the current
+  /// password given is not the member's. PocketBase's own validation, read
+  /// from the field it names rather than from its wording.
+  OldPasswordRejected,
+}
+
+/// The code a server's data.code names; None for "" or an unknown code.
+pub fn code_named(code: string) -> Option<ServerCode> {
+  match code {
+    "claim_held" => Some(ServerCode.ClaimHeld),
+    "needs_force" => Some(ServerCode.NeedsForce),
+    "claim_changed" => Some(ServerCode.ClaimChanged),
+    "not_claimed" => Some(ServerCode.NotClaimed),
+    "bot_exceeds_owner" => Some(ServerCode.BotExceedsOwner),
+    _ => None,
+  }
+}
+
+/// A claim refusal: someone said no to a well-formed request.
+fn is_refusal(code: Option<ServerCode>) -> bool {
+  match code {
+    Some(ServerCode.ClaimHeld) => true,
+    Some(ServerCode.NeedsForce) => true,
+    Some(ServerCode.ClaimChanged) => true,
+    Some(ServerCode.NotClaimed) => true,
+    Some(ServerCode.BotExceedsOwner) => false,
+    Some(ServerCode.OldPasswordRejected) => false,
+    None => false,
+  }
 }
 
 /// The exit code for a kind. The only place an exit code is decided.
 pub fn exit_code(kind: ErrorKind) -> int {
   match kind {
+    ErrorKind.Help => 0,
     ErrorKind.Usage => 2,
     ErrorKind.NotFound => 3,
     ErrorKind.Refused => 4,
@@ -55,9 +116,9 @@ pub fn exit_code(kind: ErrorKind) -> int {
 /// The kind of an HTTP error answer. `envelope` says the body was the API's
 /// JSON error object; anything else came from a listener that is not the API
 /// (a proxy, the wrong port), so its 404 is not a missing record.
-pub fn kind_of_status(status: int, code: string, envelope: bool) -> ErrorKind {
+pub fn kind_of_status(status: int, code: Option<ServerCode>, envelope: bool) -> ErrorKind {
   if !envelope || status >= 500 { return ErrorKind.Server }
-  if refusal_codes().contains(code) { return ErrorKind.Refused }
+  if is_refusal(code) { return ErrorKind.Refused }
   match status {
     401 => ErrorKind.Auth,
     403 | 409 | 412 => ErrorKind.Refused,
@@ -66,85 +127,17 @@ pub fn kind_of_status(status: int, code: string, envelope: bool) -> ErrorKind {
   }
 }
 
-// The errors cross three hundred functions typed Result<T, string>, so the
-// kind travels inside the text as one tag that only `tag` writes and only
-// `classify` reads. A control character opens and closes it, so no message a
-// user or a server writes can forge or collide with it, and it survives the
-// "KEY: {e}" prefixes callers add on the way up.
-fn tag_mark() -> string { "\u{1d}lll:" }
-fn tag_end() -> string { "\u{1d}" }
-
-fn kind_name(kind: ErrorKind) -> string {
-  match kind {
-    ErrorKind.Usage => "usage",
-    ErrorKind.NotFound => "not-found",
-    ErrorKind.Refused => "refused",
-    ErrorKind.NothingToDo => "nothing-to-do",
-    ErrorKind.Auth => "auth",
-    ErrorKind.Network => "network",
-    ErrorKind.Server => "server",
-    ErrorKind.Failed => "failed",
-  }
-}
-
-fn kind_named(name: string) -> ErrorKind {
-  match name {
-    "usage" => ErrorKind.Usage,
-    "not-found" => ErrorKind.NotFound,
-    "refused" => ErrorKind.Refused,
-    "nothing-to-do" => ErrorKind.NothingToDo,
-    "auth" => ErrorKind.Auth,
-    "network" => ErrorKind.Network,
-    "server" => ErrorKind.Server,
-    _ => ErrorKind.Failed,
-  }
-}
-
-/// An error string carrying `err`'s kind, status and code. Display it only
-/// through `plain` or `classify`; main does.
-pub fn tag(err: CliError) -> string {
-  f"{tag_mark()}{kind_name(err.kind)}/{err.status}/{err.code}{tag_end()}{err.message}"
-}
-
 /// A command's own failure of a known kind, with no HTTP status behind it.
-pub fn fail(kind: ErrorKind, message: string) -> string {
-  tag(CliError { kind, status: 0, code: "", message })
+pub fn fail(kind: ErrorKind, message: string) -> CliError {
+  CliError { kind, status: 0, code: None, message }
 }
 
-/// The error a string carries. The first tag wins: it is the outermost, the
-/// last decision made on the way up. Untagged text is Failed with no status.
-pub fn classify(text: string) -> CliError {
-  let message = plain(text)
-  let parts = strings.SplitN(text, tag_mark(), 2)
-  let Some(rest) = parts.get(1) else {
-    return CliError { kind: ErrorKind.Failed, status: 0, code: "", message }
-  }
-  let header = strings.SplitN(rest, tag_end(), 2).get(0).unwrap_or("")
-  let fields = strings.SplitN(header, "/", 3)
-  let status = strconv.Atoi(fields.get(1).unwrap_or("")).unwrap_or(0)
-  CliError {
-    kind: kind_named(fields.get(0).unwrap_or("")),
-    status,
-    code: fields.get(2).unwrap_or(""),
-    message,
-  }
+/// A failure with no more specific kind: exit 1.
+pub fn failed(message: string) -> CliError {
+  fail(ErrorKind.Failed, message)
 }
 
-/// Text from outside this process (a server's message or body) with the tag
-/// delimiter removed, so it can neither start a tag nor hide what follows.
-pub fn untagged(text: string) -> string {
-  strings.ReplaceAll(text, tag_end(), "")
-}
-
-/// The human text of an error string, every tag removed.
-pub fn plain(text: string) -> string {
-  let mut out = ""
-  let mut rest = text
-  loop {
-    let parts = strings.SplitN(rest, tag_mark(), 2)
-    out += parts[0]
-    let Some(tagged) = parts.get(1) else { break }
-    rest = strings.SplitN(tagged, tag_end(), 2).get(1).unwrap_or("")
-  }
-  out
+/// A help page, asked for with -h or --help, or a noun with no verb.
+pub fn help(page: string) -> CliError {
+  fail(ErrorKind.Help, page)
 }

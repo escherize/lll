@@ -3,6 +3,7 @@ import "go:net/url"
 
 import "pb"
 import "query"
+import "models"
 
 pub struct MemberReferences {
   pub assigned: int,
@@ -14,9 +15,9 @@ pub struct MemberReferences {
 /// that will perform the deletion, including references outside the current team.
 pub fn count_member_references(
   ctx: pb.Client,
-  id: string,
+  id: models.MemberId,
   token: string,
-) -> Result<MemberReferences, string> {
+) -> Result<MemberReferences, pb.CliError> {
   Ok(
     MemberReferences {
       assigned: member_reference_count(ctx, "issues", "assignee", id, token)?,
@@ -38,23 +39,23 @@ fn member_reference_count(
   ctx: pb.Client,
   collection: string,
   field: string,
-  id: string,
+  id: models.MemberId,
   token: string,
-) -> Result<int, string> {
-  let filter = url.QueryEscape(f"{field}={query.quote(id)}")
+) -> Result<int, pb.CliError> {
+  let filter = url.QueryEscape(f"{field}={query.quote(id.string())}")
   let body = ctx.get_as(
     f"/api/collections/{collection}/records?filter={filter}&perPage=1&fields=id",
     token,
   )?
   let mut count = MemberReferenceCount { .. }
   if let Err(e) = json.Unmarshal(body.bytes(), &count) {
-    return Err(f"counting member {collection}: {e}")
+    return Err(pb.failed(f"counting member {collection}: {e}"))
   }
   let Some(total) = count.total else {
-    return Err(f"counting member {collection}: response omitted totalItems")
+    return Err(pb.failed(f"counting member {collection}: response omitted totalItems"))
   }
   if total < 0 {
-    return Err(f"counting member {collection}: invalid totalItems")
+    return Err(pb.failed(f"counting member {collection}: invalid totalItems"))
   }
   Ok(total)
 }

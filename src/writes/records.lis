@@ -12,7 +12,7 @@ pub fn create_comment(
   ctx: pb.Client,
   caller: pb.Caller,
   comment: models.NewComment,
-) -> Result<string, string> {
+) -> Result<string, pb.CliError> {
   create(ctx, caller, collection_path("comments"), comment, "comment")
 }
 
@@ -25,7 +25,7 @@ pub fn edit_comment(
   ctx: pb.Client,
   id: string,
   body: string,
-) -> Result<(), string> {
+) -> Result<(), pb.CliError> {
   let _ = update(
     ctx,
     pb.Caller.Process,
@@ -37,7 +37,7 @@ pub fn edit_comment(
   Ok(())
 }
 
-pub fn delete_comment(ctx: pb.Client, id: string) -> Result<(), string> {
+pub fn delete_comment(ctx: pb.Client, id: string) -> Result<(), pb.CliError> {
   remove(ctx, pb.Caller.Process, "comments", id)
 }
 
@@ -51,27 +51,27 @@ pub struct LabelPatch {
   #[json(omitempty)]
   pub color: Option<string>,
   #[json(omitempty)]
-  pub team: Option<string>,
+  pub team: Option<models.TeamId>,
 }
 
 pub fn create_label(
   ctx: pb.Client,
   label: models.NewLabel,
-) -> Result<string, string> {
+) -> Result<string, pb.CliError> {
   create(ctx, pb.Caller.Process, collection_path("labels"), label, "label")
 }
 
 pub fn update_label(
   ctx: pb.Client,
-  id: string,
+  id: models.LabelId,
   patch: LabelPatch,
-) -> Result<(), string> {
-  let _ = update(ctx, pb.Caller.Process, "labels", id, patch, "label")?
+) -> Result<(), pb.CliError> {
+  let _ = update(ctx, pb.Caller.Process, "labels", id.string(), patch, "label")?
   Ok(())
 }
 
-pub fn delete_label(ctx: pb.Client, id: string) -> Result<(), string> {
-  remove(ctx, pb.Caller.Process, "labels", id)
+pub fn delete_label(ctx: pb.Client, id: models.LabelId) -> Result<(), pb.CliError> {
+  remove(ctx, pb.Caller.Process, "labels", id.string())
 }
 
 // ---------------------------------------------------------------- projects
@@ -86,13 +86,13 @@ pub struct ProjectPatch {
   #[json(omitempty)]
   pub status: Option<string>,
   #[json(omitempty)]
-  pub team: Option<string>,
+  pub team: Option<models.TeamId>,
 }
 
 pub fn create_project(
   ctx: pb.Client,
   project: models.NewProject,
-) -> Result<string, string> {
+) -> Result<string, pb.CliError> {
   create(
     ctx,
     pb.Caller.Process,
@@ -104,15 +104,15 @@ pub fn create_project(
 
 pub fn update_project(
   ctx: pb.Client,
-  id: string,
+  id: models.ProjectId,
   patch: ProjectPatch,
-) -> Result<(), string> {
-  let _ = update(ctx, pb.Caller.Process, "projects", id, patch, "project")?
+) -> Result<(), pb.CliError> {
+  let _ = update(ctx, pb.Caller.Process, "projects", id.string(), patch, "project")?
   Ok(())
 }
 
-pub fn delete_project(ctx: pb.Client, id: string) -> Result<(), string> {
-  remove(ctx, pb.Caller.Process, "projects", id)
+pub fn delete_project(ctx: pb.Client, id: models.ProjectId) -> Result<(), pb.CliError> {
+  remove(ctx, pb.Caller.Process, "projects", id.string())
 }
 
 // -------------------------------------------------------------------- docs
@@ -137,7 +137,7 @@ pub struct DocPatch {
   pub confidence_note: Option<string>,
 }
 
-pub fn create_doc(ctx: pb.Client, doc: models.NewDoc) -> Result<string, string> {
+pub fn create_doc(ctx: pb.Client, doc: models.NewDoc) -> Result<string, pb.CliError> {
   create(ctx, pb.Caller.Process, collection_path("docs"), doc, "doc")
 }
 
@@ -145,21 +145,21 @@ pub fn update_doc(
   ctx: pb.Client,
   id: string,
   patch: DocPatch,
-) -> Result<(), string> {
+) -> Result<(), pb.CliError> {
   let _ = update(ctx, pb.Caller.Process, "docs", id, patch, "doc")?
   Ok(())
 }
 
-pub fn delete_doc(ctx: pb.Client, id: string) -> Result<(), string> {
+pub fn delete_doc(ctx: pb.Client, id: string) -> Result<(), pb.CliError> {
   remove(ctx, pb.Caller.Process, "docs", id)
 }
 
 #[json]
 struct LinkIssue {
   #[json("issues+", omitempty)]
-  add: Option<Slice<string>>,
+  add: Option<Slice<models.IssueId>>,
   #[json("issues-", omitempty)]
-  remove: Option<Slice<string>>,
+  remove: Option<Slice<models.IssueId>>,
 }
 
 /// Link one issue to a doc. One edge as a relation modifier, never the whole
@@ -168,8 +168,8 @@ struct LinkIssue {
 pub fn link_doc_issue(
   ctx: pb.Client,
   doc_id: string,
-  issue_id: string,
-) -> Result<(), string> {
+  issue_id: models.IssueId,
+) -> Result<(), pb.CliError> {
   let _ = update(
     ctx,
     pb.Caller.Process,
@@ -184,8 +184,8 @@ pub fn link_doc_issue(
 pub fn unlink_doc_issue(
   ctx: pb.Client,
   doc_id: string,
-  issue_id: string,
-) -> Result<(), string> {
+  issue_id: models.IssueId,
+) -> Result<(), pb.CliError> {
   let _ = update(
     ctx,
     pb.Caller.Process,
@@ -217,7 +217,7 @@ pub struct TeamPatch {
 pub fn create_team(
   ctx: pb.Client,
   team: models.NewTeam,
-) -> Result<string, string> {
+) -> Result<string, pb.CliError> {
   create(ctx, pb.Caller.Process, collection_path("teams"), team, "team")
 }
 
@@ -225,15 +225,15 @@ pub fn create_team(
 pub fn update_team(
   ctx: pb.Client,
   caller: pb.Caller,
-  id: string,
+  id: models.TeamId,
   patch: TeamPatch,
-) -> Result<(), string> {
-  let _ = update(ctx, caller, "teams", id, patch, "team patch")?
+) -> Result<(), pb.CliError> {
+  let _ = update(ctx, caller, "teams", id.string(), patch, "team patch")?
   Ok(())
 }
 
-pub fn delete_team(ctx: pb.Client, id: string) -> Result<(), string> {
-  remove(ctx, pb.Caller.Process, "teams", id)
+pub fn delete_team(ctx: pb.Client, id: models.TeamId) -> Result<(), pb.CliError> {
+  remove(ctx, pb.Caller.Process, "teams", id.string())
 }
 
 // ----------------------------------------------------------------- members
@@ -256,7 +256,7 @@ pub struct MemberPatch {
   #[json(omitempty)]
   pub scope: Option<string>,
   #[json(omitempty)]
-  pub teams: Option<Slice<string>>,
+  pub teams: Option<Slice<models.TeamId>>,
   #[json(omitempty)]
   pub mode: Option<string>,
 }
@@ -267,26 +267,26 @@ pub fn create_member(
   ctx: pb.Client,
   caller: pb.Caller,
   member: models.NewMember,
-) -> Result<string, string> {
+) -> Result<string, pb.CliError> {
   create(ctx, caller, collection_path("members"), member, "member")
 }
 
 pub fn update_member(
   ctx: pb.Client,
   caller: pb.Caller,
-  id: string,
+  id: models.MemberId,
   patch: MemberPatch,
-) -> Result<(), string> {
-  let _ = update(ctx, caller, "members", id, patch, "member")?
+) -> Result<(), pb.CliError> {
+  let _ = update(ctx, caller, "members", id.string(), patch, "member")?
   Ok(())
 }
 
 pub fn delete_member(
   ctx: pb.Client,
   caller: pb.Caller,
-  id: string,
-) -> Result<(), string> {
-  remove(ctx, caller, "members", id)
+  id: models.MemberId,
+) -> Result<(), pb.CliError> {
+  remove(ctx, caller, "members", id.string())
 }
 
 // ---------------------------------------------------------------- webhooks
@@ -294,11 +294,11 @@ pub fn delete_member(
 pub fn create_webhook(
   ctx: pb.Client,
   hook: models.NewWebhook,
-) -> Result<string, string> {
+) -> Result<string, pb.CliError> {
   create(ctx, pb.Caller.Process, collection_path("webhooks"), hook, "webhook")
 }
 
-pub fn delete_webhook(ctx: pb.Client, id: string) -> Result<(), string> {
+pub fn delete_webhook(ctx: pb.Client, id: string) -> Result<(), pb.CliError> {
   remove(ctx, pb.Caller.Process, "webhooks", id)
 }
 
@@ -308,7 +308,7 @@ pub fn create_favorite(
   ctx: pb.Client,
   caller: pb.Caller,
   favorite: models.NewFavorite,
-) -> Result<(), string> {
+) -> Result<(), pb.CliError> {
   let _ = create(ctx, caller, collection_path("favorites"), favorite, "request")?
   Ok(())
 }
@@ -317,7 +317,7 @@ pub fn delete_favorite(
   ctx: pb.Client,
   caller: pb.Caller,
   id: string,
-) -> Result<(), string> {
+) -> Result<(), pb.CliError> {
   remove(ctx, caller, "favorites", id)
 }
 
@@ -325,7 +325,7 @@ pub fn create_view(
   ctx: pb.Client,
   caller: pb.Caller,
   view: models.NewView,
-) -> Result<(), string> {
+) -> Result<(), pb.CliError> {
   let _ = create(ctx, caller, collection_path("views"), view, "request")?
   Ok(())
 }

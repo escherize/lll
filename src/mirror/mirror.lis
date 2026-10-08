@@ -3,6 +3,7 @@ import "go:strings"
 
 import "display"
 import "models"
+import "pb"
 
 /// The delimiter line. Front matter is the text between the FIRST two of
 /// these; everything after the second is the body, verbatim. A description
@@ -71,15 +72,15 @@ pub struct Front {
 /// where a superuser token had filled it. One members request is cheaper
 /// than a field that is silently blank for some callers and not others.
 pub struct Names {
-  pub issues: Map<string, string>,
-  pub members: Map<string, string>,
+  pub issues: Map<models.IssueId, string>,
+  pub members: Map<models.MemberId, string>,
 }
 
 impl Names {
   /// A member id the caller's roster does not include (LLL-551) exports as
   /// "hidden member": the issue is assigned, and an import names it among the
   /// members it could not resolve rather than treating it as unassigned.
-  fn member(self, id: string) -> string {
+  fn member(self, id: models.MemberId) -> string {
     display.member_name(id, self.members.get(id).unwrap_or(""), "")
   }
 }
@@ -96,8 +97,8 @@ pub fn front_of(issue: models.Issue, names: Names) -> Front {
     key: f"{issue.expand.team.key}-{issue.number}",
     number: issue.number,
     title: issue.title,
-    state: issue.state,
-    priority: display.priority_name(issue.priority),
+    state: display.state_name(issue.state()),
+    priority: display.priority_name(issue.priority()),
     emoji: issue.emoji,
     assignee: names.member(issue.assignee),
     project: issue.expand.project.name,
@@ -142,9 +143,9 @@ pub struct DocFront {
 
 /// Front matter + body, the file `lll export` writes and `lll import dir`
 /// reads. Byte-stable for a given input: nothing here reads the clock.
-pub fn render(front: Front, body: string) -> Result<string, string> {
+pub fn render(front: Front, body: string) -> Result<string, pb.CliError> {
   let Ok(encoded) = yaml.Marshal(front) else {
-    return Err(f"encoding front matter for {front.key}")
+    return Err(pb.failed(f"encoding front matter for {front.key}"))
   }
   let text = encoded as string
   // Exactly one blank line between the fence and the body, and a trailing
@@ -154,21 +155,21 @@ pub fn render(front: Front, body: string) -> Result<string, string> {
 }
 
 /// render, for a document.
-pub fn render_doc(front: DocFront, body: string) -> Result<string, string> {
+pub fn render_doc(front: DocFront, body: string) -> Result<string, pb.CliError> {
   let Ok(encoded) = yaml.Marshal(front) else {
-    return Err(f"encoding front matter for {front.slug}")
+    return Err(pb.failed(f"encoding front matter for {front.slug}"))
   }
   Ok(f"{FENCE}\n{encoded as string}{FENCE}\n\n{strings.TrimRight(body, "\n")}\n")
 }
 
 /// parse, for a document.
-pub fn parse_doc(text: string) -> Result<(DocFront, string), string> {
+pub fn parse_doc(text: string) -> Result<(DocFront, string), pb.CliError> {
   let (head, body) = split(text)?
   let mut front = DocFront { .. }
   if let Err(e) = yaml.Unmarshal(f"{head}\n".bytes(), &front) {
-    return Err(f"decoding front matter: {e}")
+    return Err(pb.failed(f"decoding front matter: {e}"))
   }
-  if front.slug == "" { return Err("front matter has no 'slug'") }
+  if front.slug == "" { return Err(pb.failed("front matter has no 'slug'")) }
   Ok((front, body))
 }
 
@@ -179,25 +180,25 @@ pub fn parse_doc(text: string) -> Result<(DocFront, string), string> {
 /// (AC2) matters more than a blank line nobody typed on purpose. Everything
 /// else survives, including a body that opens with a blank line — hence
 /// CutPrefix of the single separator rather than TrimLeft, which would eat it.
-pub fn parse(text: string) -> Result<(Front, string), string> {
+pub fn parse(text: string) -> Result<(Front, string), pb.CliError> {
   let (head, body) = split(text)?
   let mut front = Front { .. }
   if let Err(e) = yaml.Unmarshal(f"{head}\n".bytes(), &front) {
-    return Err(f"decoding front matter: {e}")
+    return Err(pb.failed(f"decoding front matter: {e}"))
   }
-  if front.key == "" { return Err("front matter has no 'key'") }
+  if front.key == "" { return Err(pb.failed("front matter has no 'key'")) }
   Ok((front, body))
 }
 
 /// The fence handling both parsers share: front matter text, then the body
 /// with its one separating newline and any trailing ones removed.
-fn split(text: string) -> Result<(string, string), string> {
+fn split(text: string) -> Result<(string, string), pb.CliError> {
   let normalized = strings.ReplaceAll(text, "\r\n", "\n")
   let Some(rest) = strings.CutPrefix(normalized, f"{FENCE}\n") else {
-    return Err("not a mirror file: expected '---' on the first line")
+    return Err(pb.failed("not a mirror file: expected '---' on the first line"))
   }
   let Some((head, body)) = cut(rest, f"\n{FENCE}\n") else {
-    return Err("unterminated front matter: expected a closing '---' line")
+    return Err(pb.failed("unterminated front matter: expected a closing '---' line"))
   }
   Ok((head, strings.TrimRight(strings.TrimPrefix(body, "\n"), "\n")))
 }

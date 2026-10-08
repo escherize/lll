@@ -9,13 +9,14 @@ import "go:strings"
 import "flags"
 import "models"
 import "pb"
+import "query"
 import "provenance"
 import "writes"
 
 /// Dispatch `lll import <verb>` through the noun's Command table (TASK-307):
 /// dispatch, `lll import --help` and shell completions all read it, so none
 /// can drift.
-pub fn import_cmd(ctx: pb.Client, args: Slice<string>) -> Result<(), string> {
+pub fn import_cmd(ctx: pb.Client, args: Slice<string>) -> Result<(), pb.CliError> {
   flags.dispatch(ctx, "import", "bring an external backlog in", import_intro(), import_commands(), args)
 }
 
@@ -56,7 +57,7 @@ fn github_spec() -> Slice<flags.Flag> {
   ])
 }
 
-fn import_github(input: flags.CommandInput) -> Result<(), string> {
+fn import_github(input: flags.CommandInput) -> Result<(), pb.CliError> {
   let ctx = input.ctx
   let usage = input.usage
   let repo = input.parsed.first()
@@ -66,8 +67,7 @@ fn import_github(input: flags.CommandInput) -> Result<(), string> {
   let emoji = records.check_emoji(input.parsed.one("--emoji"))?
   // The team first: it scopes the labels below, which are unique per team
   // (TASK-173), the same order 'issue create' resolves things in.
-  let team = current_team(ctx)?
-  if team.archived { return Err(records.archived_hint(team.key)) }
+  let team = records.active_team(current_team(ctx)?)?.team()
 
   let issues = sort_by_number(gh_issue_list(repo)?)
   // The idempotency set: every ref already recorded on a team issue. A gh#N
@@ -76,7 +76,7 @@ fn import_github(input: flags.CommandInput) -> Result<(), string> {
   let (label_names, label_colors) = collect_labels(issues)
   let (label_ids, created_labels) = ensure_labels(ctx, team, label_names, label_colors)?
 
-  let creator = records.find_actor(ctx)?.map_or("", |member| member.id)
+  let creator = records.find_actor(ctx)?.map(|member| member.id)
   let mut created = 0
   let mut skipped = 0
   for g in issues {
@@ -85,8 +85,8 @@ fn import_github(input: flags.CommandInput) -> Result<(), string> {
       skipped += 1
       continue
     }
-    let state = imported_state(g.state)
-    let mut labels: Slice<string> = []
+    let state = imported_state(g.state).wire()
+    let mut labels: Slice<models.LabelId> = []
     for label in g.labels {
       if let Some(id) = label_ids.get(label.name) { labels = labels.append(id) }
     }
@@ -104,7 +104,7 @@ fn import_github(input: flags.CommandInput) -> Result<(), string> {
     let body = writes.create_issue(ctx, pb.Caller.Process, new_issue, "")?
     let mut issue = models.Issue { .. }
     if let Err(e) = json.Unmarshal(body.bytes(), &issue) {
-      return Err(f"decoding created issue for {reference}: {e}")
+      return Err(pb.failed(f"decoding created issue for {reference}: {e}"))
     }
     let key = f"{team.key}-{issue.number}"
     // The ref saves only after the create is confirmed, as 'issue pr' does
@@ -112,7 +112,7 @@ fn import_github(input: flags.CommandInput) -> Result<(), string> {
     // it, because re-import skips on a saved ref and nothing else - an
     // issue without its ref would import twice.
     if let Err(e) = writes.append_ref(ctx, issue.id, reference) {
-      return Err(f"{key} created from {reference}, but the ref was not saved: {e}\nRetry only the reference save: lll issue ref {key} {reference}")
+      return Err(e.with_message(f"{key} created from {reference}, but the ref was not saved: {e.message}\nRetry only the reference save: lll issue ref {key} {reference}"))
     }
     created += 1
     fmt.Println(f"Created {key}: {g.title} ({reference}, {state})")
@@ -155,8 +155,8 @@ fn sort_by_number(issues: Slice<GithubIssue>) -> Slice<GithubIssue> {
 /// OPEN -> todo, CLOSED -> done - the only two states gh reports for issues
 /// under --state all. Anything else reads as open: an import errs toward
 /// work remaining, never toward done.
-fn imported_state(state: string) -> string {
-  if state == "CLOSED" { "done" } else { "todo" }
+fn imported_state(state: string) -> models.IssueState {
+  if state == "CLOSED" { models.IssueState.Done } else { models.IssueState.Todo }
 }
 
 /// gh label colors are bare hex ("d73a4a"); the board's are "#rrggbb".
@@ -167,7 +167,7 @@ fn gh_color(color: string) -> string {
 /// Every ref already recorded on a team issue, as the idempotency set.
 /// Refs are space-separated (gopb/references.go mergeReference); strings.Fields
 /// is how the server itself splits them.
-fn team_refs(ctx: pb.Client, team_id: string) -> Result<Map<string, bool>, string> {
+fn team_refs(ctx: pb.Client, team_id: models.TeamId) -> Result<Map<string, bool>, pb.CliError> {
   let issues = records.fetch_board_issues(ctx, team_id)?
   let mut refs = Map.new<string, bool>()
   for issue in issues {
@@ -202,9 +202,9 @@ fn ensure_labels(
   team: models.Team,
   names: Slice<string>,
   colors: Map<string, string>,
-) -> Result<(Map<string, string>, Slice<string>), string> {
-  let mut ids = Map.new<string, string>()
-  for label in records.fetch_labels(ctx, team.id)? {
+) -> Result<(Map<string, models.LabelId>, Slice<string>), pb.CliError> {
+  let mut ids = Map.new<string, models.LabelId>()
+  for label in records.fetch_labels(ctx, query.TeamScope.Only(team.id))? {
     ids[label.name] = label.id
   }
   let mut created: Slice<string> = []
@@ -215,7 +215,7 @@ fn ensure_labels(
     let body = writes.create_label(ctx, models.NewLabel { name, color, team: team.id })?
     let mut label = models.Label { .. }
     if let Err(e) = json.Unmarshal(body.bytes(), &label) {
-      return Err(f"decoding created label '{name}': {e}")
+      return Err(pb.failed(f"decoding created label '{name}': {e}"))
     }
     ids[name] = label.id
     created = created.append(name)
@@ -243,12 +243,12 @@ struct GithubIssue {
 /// `--limit 1000` because gh's default 30 would silently truncate. gh owns
 /// auth, hosts and error text, exactly as `issue pr` has it: LookPath,
 /// exec.Command, stderr passed through, stdout captured for parsing.
-fn gh_issue_list(repo: string) -> Result<Slice<GithubIssue>, string> {
+fn gh_issue_list(repo: string) -> Result<Slice<GithubIssue>, pb.CliError> {
   let mut gh = ""
   match exec.LookPath("gh") {
     Partial.Ok(path) => gh = path,
     _ => return Err(
-      "gh not found on PATH; install the GitHub CLI (brew install gh)",
+      pb.failed("gh not found on PATH; install the GitHub CLI (brew install gh)"),
     ),
   }
   let mut cmd = exec.Command(
@@ -267,10 +267,10 @@ fn gh_issue_list(repo: string) -> Result<Slice<GithubIssue>, string> {
   let mut captured = bytes.Buffer { .. }
   cmd.Stdout = Some(&captured)
   cmd.Stderr = Some(os.Stderr)
-  if let Err(e) = cmd.Run() { return Err(f"gh issue list: {e}") }
+  if let Err(e) = cmd.Run() { return Err(pb.failed(f"gh issue list: {e}")) }
   let mut issues: Slice<GithubIssue> = []
   if let Err(e) = json.Unmarshal(captured.Bytes(), &issues) {
-    return Err(f"decoding gh issue list output: {e}")
+    return Err(pb.failed(f"decoding gh issue list output: {e}"))
   }
   Ok(issues)
 }

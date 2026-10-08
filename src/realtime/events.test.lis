@@ -1,0 +1,36 @@
+#[test]
+fn an_issue_event_decodes_by_its_topic() {
+  let ev = decode("issues/abc", "{\"action\":\"update\",\"record\":{\"id\":\"abc\",\"number\":7}}")
+  assert ev.topic == "issues/abc"
+  assert ev.action == Action.Update
+  let Change.Issue(rec) = ev.change else { panic("not an issue") }
+  assert rec.id == "abc" && rec.number == 7
+}
+
+#[test]
+fn comments_claims_favorites_and_views_are_their_own_cases() {
+  let comment = decode("comments", "{\"action\":\"create\",\"record\":{\"issue\":\"i1\",\"body\":\"hi\"}}")
+  let Change.Comment(c) = comment.change else { panic("not a comment") }
+  assert c.issue == "i1" && comment.action == Action.Create
+  let claim = decode("claims", "{\"action\":\"delete\",\"record\":{\"issue\":\"i2\"}}")
+  let Change.Claim(hold) = claim.change else { panic("not a claim") }
+  assert hold.issue == "i2" && claim.action == Action.Delete
+  let Change.Favorite = decode("favorites", "{\"action\":\"create\",\"record\":{}}").change else { panic("favorite") }
+  let Change.View = decode("views", "{\"action\":\"create\",\"record\":{}}").change else { panic("view") }
+}
+
+#[test]
+fn an_unknown_topic_is_never_read_as_an_issue() {
+  let ev = decode("members", "{\"action\":\"update\",\"record\":{\"id\":\"m1\",\"number\":3}}")
+  let Change.Unknown(topic) = ev.change else { panic("an unknown topic decoded as a record") }
+  assert topic == "members"
+}
+
+#[test]
+fn a_payload_that_does_not_decode_says_so() {
+  let ev = decode("issues", "{not json")
+  let Change.Malformed(_) = ev.change else { panic("garbage decoded") }
+  let odd = decode("issues", "{\"action\":\"archive\",\"record\":{}}")
+  assert odd.action == Action.Other("archive")
+  assert odd.action.wire() == "archive"
+}

@@ -1,0 +1,141 @@
+// The issue vocabulary (LLL-675): a state and a priority are values of a
+// fixed set, so they are enums, parsed once where text arrives (a flag, a
+// board form, a server record) and matched exhaustively everywhere else.
+// The rules that hang off them (what is finished, what can be picked up,
+// what sorts first) are methods here and nowhere else.
+
+/// Where an issue is in the workflow.
+pub enum IssueState {
+  Backlog,
+  Todo,
+  InProgress,
+  InReview,
+  Done,
+  Cancelled,
+}
+
+impl IssueState {
+  /// The workflow, in order.
+  pub fn all() -> Slice<IssueState> {
+    [IssueState.Backlog, IssueState.Todo, IssueState.InProgress, IssueState.InReview, IssueState.Done, IssueState.Cancelled]
+  }
+
+  /// The state a wire value names; None for anything else.
+  pub fn parse(wire: string) -> Option<IssueState> {
+    match wire {
+      "backlog" => Some(IssueState.Backlog),
+      "todo" => Some(IssueState.Todo),
+      "in-progress" => Some(IssueState.InProgress),
+      "in-review" => Some(IssueState.InReview),
+      "done" => Some(IssueState.Done),
+      "cancelled" => Some(IssueState.Cancelled),
+      _ => None,
+    }
+  }
+
+  /// The server's spelling, which is also the CLI's and the board's.
+  pub fn wire(self) -> string {
+    match self {
+      IssueState.Backlog => "backlog",
+      IssueState.Todo => "todo",
+      IssueState.InProgress => "in-progress",
+      IssueState.InReview => "in-review",
+      IssueState.Done => "done",
+      IssueState.Cancelled => "cancelled",
+    }
+  }
+
+  /// Done or cancelled: finished, so it holds nothing back.
+  pub fn is_terminal(self) -> bool {
+    match self {
+      IssueState.Done | IssueState.Cancelled => true,
+      IssueState.Backlog | IssueState.Todo | IssueState.InProgress | IssueState.InReview => false,
+    }
+  }
+
+  /// Backlog or todo: nobody has started it, so it is work to pick up once
+  /// nothing blocks it.
+  pub fn is_open(self) -> bool {
+    match self {
+      IssueState.Backlog | IssueState.Todo => true,
+      IssueState.InProgress | IssueState.InReview | IssueState.Done | IssueState.Cancelled => false,
+    }
+  }
+}
+
+/// How urgent an issue is, on Linear's scale. The wire value is the index:
+/// 0 none, 1 urgent, 2 high, 3 medium, 4 low.
+pub enum Priority {
+  None,
+  Urgent,
+  High,
+  Medium,
+  Low,
+}
+
+impl Priority {
+  /// The scale in wire order, none first.
+  pub fn all() -> Slice<Priority> {
+    [Priority.None, Priority.Urgent, Priority.High, Priority.Medium, Priority.Low]
+  }
+
+  /// The priority a wire value names; None off the scale.
+  pub fn from_wire(value: int) -> Option<Priority> {
+    match value {
+      0 => Some(Priority.None),
+      1 => Some(Priority.Urgent),
+      2 => Some(Priority.High),
+      3 => Some(Priority.Medium),
+      4 => Some(Priority.Low),
+      _ => None,
+    }
+  }
+
+  /// The priority a name ("none", "urgent", ...) names; None for any other.
+  pub fn named(name: string) -> Option<Priority> {
+    Priority.all().find(|p| p.name() == name)
+  }
+
+  pub fn wire(self) -> int {
+    match self {
+      Priority.None => 0,
+      Priority.Urgent => 1,
+      Priority.High => 2,
+      Priority.Medium => 3,
+      Priority.Low => 4,
+    }
+  }
+
+  pub fn name(self) -> string {
+    match self {
+      Priority.None => "none",
+      Priority.Urgent => "urgent",
+      Priority.High => "high",
+      Priority.Medium => "medium",
+      Priority.Low => "low",
+    }
+  }
+
+  /// The list marker: urgent !!!, high !!, medium !, low ·, none blank.
+  pub fn marker(self) -> string {
+    match self {
+      Priority.None => "",
+      Priority.Urgent => "!!!",
+      Priority.High => "!!",
+      Priority.Medium => "!",
+      Priority.Low => "·",
+    }
+  }
+
+  /// Urgency order, most urgent first, with none after low: the order the
+  /// agenda, the priority sort and the filter chooser use.
+  pub fn rank(self) -> int {
+    match self {
+      Priority.Urgent => 1,
+      Priority.High => 2,
+      Priority.Medium => 3,
+      Priority.Low => 4,
+      Priority.None => 5,
+    }
+  }
+}

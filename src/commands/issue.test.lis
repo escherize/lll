@@ -159,8 +159,8 @@ fn check_emoji_counts_runes_not_bytes() {
 #[test]
 fn check_emoji_rejects_more_than_eight_runes() {
   let assert Err(msg) = records.check_emoji("abcdefghi")
-  assert msg.contains("--emoji takes one emoji")
-  assert msg.contains("abcdefghi")
+  assert msg.message.contains("--emoji takes one emoji")
+  assert msg.message.contains("abcdefghi")
   let assert Err(_) = records.check_emoji("in progress")
   // 9 runes of non-ASCII is over the line too, bytes notwithstanding.
   let assert Err(_) = records.check_emoji("🐛🐛🐛🐛🐛🐛🐛🐛🐛")
@@ -169,7 +169,7 @@ fn check_emoji_rejects_more_than_eight_runes() {
 #[test]
 fn check_emoji_reports_the_trimmed_value() {
   let assert Err(msg) = records.check_emoji("  in progress  ")
-  assert msg.contains("'in progress'")
+  assert msg.message.contains("'in progress'")
 }
 
 // -------------------------------------------------------- value_or_stdin
@@ -219,15 +219,15 @@ fn issue_create_spec_accepts_a_state() {
 #[test]
 fn create_and_update_share_one_state_validator() {
   let assert Ok(ok) = query.state("in-review")
-  assert ok == "in-review"
+  assert ok == models.IssueState.InReview
   let assert Err(msg) = query.state("nope")
-  assert msg.contains("unknown state 'nope'")
+  assert msg.message.contains("unknown state 'nope'")
   // The message enumerates query.states() rather than a second hand-written
   // list, so adding a state cannot leave create behind.
   for s in query.states() {
-    assert msg.contains(s)
+    assert msg.message.contains(s)
     let assert Ok(accepted) = query.state(s)
-    assert accepted == s
+    assert accepted.wire() == s
   }
 }
 
@@ -249,7 +249,7 @@ fn issue_create_spec_takes_p_as_short_for_priority() {
   // The alias lands under the canonical name, so create reads one spelling.
   assert p.one("--priority") == "2"
   let assert Ok(two) = check_priority(p.one("--priority"))
-  assert two == 2
+  assert two == models.Priority.High
 }
 
 /// LLL-313: -l on issue list --limit, the one short the audit called
@@ -300,11 +300,11 @@ fn member_create_is_an_alias_for_member_add() {
 fn named_priorities_round_trip_with_numeric_compatibility() {
   for name in ["none", "urgent", "high", "medium", "low"] {
     let assert Ok(value) = check_priority(name)
-    let assert Ok(numeric) = check_priority(f"{value}")
+    let assert Ok(numeric) = check_priority(f"{value.wire()}")
     assert numeric == value
   }
   let assert Ok(high) = check_priority("HIGH")
-  assert high == 2
+  assert high == models.Priority.High
   assert check_priority("critical").is_err()
 }
 
@@ -392,12 +392,12 @@ fn issue_help_requested(args: Slice<string>, verb: string) -> bool {
 
 /// An agenda item with only the fields the ranking reads; `..` zeroes the rest.
 fn agenda_item(id: string, assignee: string, priority: int, created: string) -> models.Issue {
-  models.Issue { id, assignee, priority, created, .. }
+  models.Issue { id: models.IssueId(id), assignee: models.MemberId(assignee), priority_wire: priority, created, .. }
 }
 
-fn agenda_unblocks(pairs: Slice<(string, int)>) -> Map<string, int> {
-  let mut m = Map.new<string, int>()
-  for (id, n) in pairs { m[id] = n }
+fn agenda_unblocks(pairs: Slice<(string, int)>) -> Map<models.IssueId, int> {
+  let mut m = Map.new<models.IssueId, int>()
+  for (id, n) in pairs { m[models.IssueId(id)] = n }
   m
 }
 
@@ -552,7 +552,7 @@ fn command_tables_advertise_consistent_creation_and_deletion() {
 }
 
 fn blocked(id: string, state: string, blocked_by: Slice<string>) -> models.Issue {
-  models.Issue { id, state, blocked_by, .. }
+  models.Issue { id: models.IssueId(id), state_wire: state, blocked_by: blocked_by.map(|b| models.IssueId(b)), .. }
 }
 
 /// LLL-672: PocketBase drops a blocker the reader may not see from the
@@ -605,6 +605,6 @@ fn watch_ready_keys_share_the_readiness_rule() {
   assert keys.contains("a")
   assert !keys.contains("h")
   // The cache is fresher than the expand: a blocker it holds as open wins.
-  outside.state = "todo"
+  outside.state_wire = "todo"
   assert !ready_keys([a, outside]).contains("a")
 }

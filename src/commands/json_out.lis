@@ -5,13 +5,14 @@ import "go:strings"
 
 import "display"
 import "models"
+import "pb"
 
 /// Print a value as JSON, the end of every `--json` command that prints one
 /// record. Timestamps come out in RFC3339 (contract_json).
 ///
 /// `what` names the value in the encoding error, the only thing that varied
 /// between the commands that used to repeat these lines.
-fn print_json(value: Unknown, what: string) -> Result<(), string> {
+fn print_json(value: Unknown, what: string) -> Result<(), pb.CliError> {
   let raw = encode_json(value, what)?
   fmt.Println(contract_json(raw, 0) as string)
   Ok(())
@@ -20,7 +21,7 @@ fn print_json(value: Unknown, what: string) -> Result<(), string> {
 /// The empty-state line every list prints when it has nothing to show
 /// (LLL-645): "no labels" on stderr, so stdout stays empty for pipes and
 /// `| wc -l`, and a person can tell an empty list from a broken read.
-fn say_empty(what: string) -> Result<(), string> {
+fn say_empty(what: string) -> Result<(), pb.CliError> {
   let _ = fmt.Fprintln(os.Stderr, f"no {what}")
   Ok(())
 }
@@ -61,7 +62,7 @@ struct ListEnvelope {
 /// Print a list in the one envelope every `list --json` uses (LLL-645, D2):
 /// {items, page, perPage, totalItems, totalPages}, whatever the flags.
 /// `items` is always an array, never null.
-fn print_list_json(items: Unknown, at: ListPage, what: string) -> Result<(), string> {
+fn print_list_json(items: Unknown, at: ListPage, what: string) -> Result<(), pb.CliError> {
   let mut encoded = encode_json(items, what)?
   if encoded as string == "null" { encoded = "[]".bytes() as json.RawMessage }
   let envelope = ListEnvelope {
@@ -75,10 +76,10 @@ fn print_list_json(items: Unknown, at: ListPage, what: string) -> Result<(), str
   Ok(())
 }
 
-fn encode_json(value: Unknown, what: string) -> Result<json.RawMessage, string> {
+fn encode_json(value: Unknown, what: string) -> Result<json.RawMessage, pb.CliError> {
   match json.Marshal(value) {
     Ok(b) => Ok(b as json.RawMessage),
-    Err(e) => Err(f"encoding {what}: {e}"),
+    Err(e) => Err(pb.failed(f"encoding {what}: {e}")),
   }
 }
 
@@ -120,8 +121,8 @@ fn rfc3339_value(value: json.RawMessage) -> json.RawMessage {
 /// which agent label, since when, and when it was last renewed.
 #[json]
 struct ClaimJson {
-  id: string,
-  member: string,
+  id: models.ClaimId,
+  member: models.MemberId,
   holder: string,
   agent: string,
   claimed: string,
@@ -142,11 +143,11 @@ fn claim_json(held: models.Claim) -> ClaimJson {
 /// One issue record as every issue --json prints it (LLL-645, D2): the
 /// server's record with `key` ("ENG-12") and `claim` (null when unclaimed)
 /// added, and timestamps in RFC3339. `record` must expand team.
-fn issue_json(record: json.RawMessage, claim: Option<models.Claim>) -> Result<Map<string, json.RawMessage>, string> {
+fn issue_json(record: json.RawMessage, claim: Option<models.Claim>) -> Result<Map<string, json.RawMessage>, pb.CliError> {
   let mut issue = models.Issue { .. }
-  if let Err(e) = json.Unmarshal(record, &issue) { return Err(f"decoding issue: {e}") }
+  if let Err(e) = json.Unmarshal(record, &issue) { return Err(pb.failed(f"decoding issue: {e}")) }
   let mut fields = Map.new<string, json.RawMessage>()
-  if let Err(e) = json.Unmarshal(contract_json(record, 0), &fields) { return Err(f"decoding issue JSON: {e}") }
+  if let Err(e) = json.Unmarshal(contract_json(record, 0), &fields) { return Err(pb.failed(f"decoding issue JSON: {e}")) }
   fields["key"] = encode_json(f"{issue.expand.team.key}-{issue.number}", "issue key")?
   fields["claim"] = match claim {
     Some(held) => encode_json(claim_json(held), "claim")?,
@@ -156,7 +157,7 @@ fn issue_json(record: json.RawMessage, claim: Option<models.Claim>) -> Result<Ma
 }
 
 /// issue_json, printed.
-fn print_issue_json(record: string, claim: Option<models.Claim>) -> Result<(), string> {
+fn print_issue_json(record: string, claim: Option<models.Claim>) -> Result<(), pb.CliError> {
   let fields = issue_json(record.bytes() as json.RawMessage, claim)?
   fmt.Println(encode_json(fields, "issue")? as string)
   Ok(())

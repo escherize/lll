@@ -13,7 +13,7 @@ import "tokens"
 fn minted() -> string {
   match mint_payload() {
     Ok(p) => p,
-    Err(e) => e,
+    Err(e) => e.message,
   }
 }
 

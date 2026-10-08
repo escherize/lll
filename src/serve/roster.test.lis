@@ -5,9 +5,9 @@ import "models"
 
 fn people() -> Slice<models.Member> {
   [
-    models.Member { id: "alice", name: "alice", kind: "person", scope: "teams", teams: ["t-a"], .. },
-    models.Member { id: "carol", name: "carol", kind: "person", scope: "all", .. },
-    models.Member { id: "abot", name: "bot-alpha", kind: "bot", scope: "teams", teams: ["t-a"], .. },
+    models.Member { id: "alice", name: "alice", kind_wire: "person", scope_wire: "teams", teams: ["t-a"], .. },
+    models.Member { id: "carol", name: "carol", kind_wire: "person", scope_wire: "all", .. },
+    models.Member { id: "abot", name: "bot-alpha", kind_wire: "bot", scope_wire: "teams", teams: ["t-a"], .. },
   ]
 }
 
@@ -15,10 +15,10 @@ fn people() -> Slice<models.Member> {
 fn a_rendering_hides_assignee_creator_author_owner_and_holder_outside_the_roster() {
   let shown = Roster { members: people() }
   let mut issue = models.Issue { team: "t-a", assignee: "garden", creator: "bob", .. }
-  issue.expand.assignee = models.Member { id: "garden", name: "bot-garden", kind: "bot", .. }
+  issue.expand.assignee = models.Member { id: "garden", name: "bot-garden", kind_wire: "bot", .. }
   issue.expand.creator = models.Member { id: "bob", name: "bob", .. }
   let seen = shown.issue(issue)
-  assert seen.expand.assignee.name == "hidden member" && seen.expand.assignee.kind == ""
+  assert seen.expand.assignee.name == "hidden member" && seen.expand.assignee.kind().is_none()
   assert seen.expand.creator.name == "hidden member"
   assert seen.assignee == "garden"
   // An id that did not expand (what a scoped read returns) is hidden too.
@@ -28,7 +28,7 @@ fn a_rendering_hides_assignee_creator_author_owner_and_holder_outside_the_roster
   // A visible bot author keeps its name but not an owner outside the roster.
   let owner = models.MemberOwner { id: "bob", name: "bob" }
   let mut c = models.Comment { author: "abot", .. }
-  c.expand.author = models.Member { id: "abot", name: "bot-alpha", kind: "bot", expand: Some(models.MemberExpand { owner: Some(owner) }), .. }
+  c.expand.author = models.Member { id: "abot", name: "bot-alpha", kind_wire: "bot", expand: Some(models.MemberExpand { owner: Some(owner) }), .. }
   let cs = shown.comment(c)
   assert cs.expand.author.name == "bot-alpha" && cs.expand.author.owner_name() == ""
 
@@ -43,7 +43,7 @@ fn a_rendering_hides_assignee_creator_author_owner_and_holder_outside_the_roster
 
 #[test]
 fn a_full_roster_names_everyone_on_the_record() {
-  let garden = models.Member { id: "garden", name: "bot-garden", kind: "bot", scope: "all", .. }
+  let garden = models.Member { id: "garden", name: "bot-garden", kind_wire: "bot", scope_wire: "all", .. }
   let shown = Roster { members: people().append(garden) }
   let mut issue = models.Issue { assignee: "garden", .. }
   issue.expand.assignee = garden

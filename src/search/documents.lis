@@ -12,14 +12,14 @@ pub fn issue_documents(
   comments: Slice<models.Comment>,
 ) -> Slice<Document> {
   let mut out: Slice<Document> = []
-  let mut titles = Map.new<string, string>()
-  let mut keys = Map.new<string, string>()
-  let mut states = Map.new<string, string>()
+  let mut titles = Map.new<models.IssueId, string>()
+  let mut keys = Map.new<models.IssueId, string>()
+  let mut states = Map.new<models.IssueId, string>()
   for i in issues {
     let key = f"{team_key}-{i.number}"
     titles[i.id] = i.title
     keys[i.id] = key
-    states[i.id] = i.state
+    states[i.id] = display.state_name(i.state())
     out = out.append(
       Document {
         group: key,
@@ -27,11 +27,11 @@ pub fn issue_documents(
         label: "description",
         title: i.title,
         body: indexable(i.description),
-        state: i.state,
+        state: display.state_name(i.state()),
       },
     )
   }
-  let mut per_issue = Map.new<string, int>()
+  let mut per_issue = Map.new<models.IssueId, int>()
   for c in comments {
     let n = per_issue.get(c.issue).unwrap_or(0) + 1
     per_issue[c.issue] = n

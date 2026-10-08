@@ -13,7 +13,7 @@ import "writes"
 
 /// Dispatch `lll webhook <verb>` through the noun's Command table (TASK-307):
 /// dispatch, `lll webhook --help` and shell completions all read the table.
-pub fn webhook(ctx: pb.Client, args: Slice<string>) -> Result<(), string> {
+pub fn webhook(ctx: pb.Client, args: Slice<string>) -> Result<(), pb.CliError> {
   flags.dispatch(ctx,
     "webhook",
     "outbound webhooks for issue events",
@@ -90,18 +90,18 @@ fn webhook_remove_spec() -> Slice<flags.Flag> {
   ])
 }
 
-fn webhook_add(input: flags.CommandInput) -> Result<(), string> {
+fn webhook_add(input: flags.CommandInput) -> Result<(), pb.CliError> {
   let ctx = input.ctx
   let p = input.parsed
   let raw = p.first()
   let target = validate_target(raw)?
   let team = team_flag_or_current(ctx, p.one("--team"))?
 
-  let mut project_id = ""
+  let mut project_id = None
   let mut scope = f"team {team.key}"
   if p.given("--project") {
     let proj = records.resolve_project(ctx, team.id, p.one("--project"))?
-    project_id = proj.id
+    project_id = Some(proj.id)
     scope = f"project {proj.name}"
   }
   // The server never returns the secret (LLL-661), so one the caller did
@@ -118,13 +118,13 @@ fn webhook_add(input: flags.CommandInput) -> Result<(), string> {
     &existing,
   )?
   if existing.items.length() > 0 {
-    return Err(f"webhook {target} is already registered for {scope}; remove it first: 'lll webhook remove {target}'")
+    return Err(pb.failed(f"webhook {target} is already registered for {scope}; remove it first: 'lll webhook remove {target}'"))
   }
 
   let body = writes.create_webhook(ctx, models.NewWebhook { team: team.id, project: project_id, url: target, secret })?
   let mut created = models.Webhook { .. }
   if let Err(e) = json.Unmarshal(body.bytes(), &created) {
-    return Err(f"decoding created webhook: {e}")
+    return Err(pb.failed(f"decoding created webhook: {e}"))
   }
   // `generated` is checked first: a server older than LLL-661 returns no
   // secret_set, and the generated secret must still be shown once.
@@ -139,14 +139,14 @@ fn webhook_add(input: flags.CommandInput) -> Result<(), string> {
   Ok(())
 }
 
-fn webhook_list(input: flags.CommandInput) -> Result<(), string> {
+fn webhook_list(input: flags.CommandInput) -> Result<(), pb.CliError> {
   let ctx = input.ctx
   let p = input.parsed
   let team = team_flag_or_current(ctx, p.one("--team"))?
   // Every page (LLL-659): one page of 200 silently dropped the rest.
   let hooks = models.WebhookList {
     items: records.fetch_all_records<models.Webhook>(ctx,
-      f"/api/collections/webhooks/records?sort=-created,id&expand=team,project&filter={url.QueryEscape(f"team={query.quote(team.id)}")}",
+      f"/api/collections/webhooks/records?sort=-created,id&expand=team,project&filter={url.QueryEscape(f"team={query.quote(team.id.string())}")}",
       "webhooks",
     )?,
     ..
@@ -159,7 +159,7 @@ fn webhook_list(input: flags.CommandInput) -> Result<(), string> {
   Ok(())
 }
 
-fn webhook_remove(input: flags.CommandInput) -> Result<(), string> {
+fn webhook_remove(input: flags.CommandInput) -> Result<(), pb.CliError> {
   let ctx = input.ctx
   let usage = input.usage
   let p = input.parsed
@@ -167,11 +167,11 @@ fn webhook_remove(input: flags.CommandInput) -> Result<(), string> {
   let target = validate_target(raw)?
   let team = team_flag_or_current(ctx, p.one("--team"))?
 
-  let mut project_id = ""
+  let mut project_id = None
   let mut scope = f"team {team.key}"
   if p.given("--project") {
     let proj = records.resolve_project(ctx, team.id, p.one("--project"))?
-    project_id = proj.id
+    project_id = Some(proj.id)
     scope = f"project {proj.name}"
   }
 
@@ -187,7 +187,7 @@ fn webhook_remove(input: flags.CommandInput) -> Result<(), string> {
   if matches.items.length() > 1 {
     let mut ids: Slice<string> = []
     for h in matches.items { ids = ids.append(h.id) }
-    return Err(f"webhook {target} is registered more than once; pass --project, or remove by id: one of {strings.Join(ids, ", ")}\nusage: {usage}")
+    return Err(pb.failed(f"webhook {target} is registered more than once; pass --project, or remove by id: one of {strings.Join(ids, ", ")}\nusage: {usage}"))
   }
   let victim = matches.items[0]
   writes.delete_webhook(ctx, victim.id)?
@@ -197,25 +197,25 @@ fn webhook_remove(input: flags.CommandInput) -> Result<(), string> {
 
 /// The filter naming one registration exactly: team, URL, and project when
 /// the caller scoped it. Both halves go through query.quote (TASK-134).
-fn dup_filter(team_id: string, project_id: string, target: string) -> string {
+fn dup_filter(team_id: models.TeamId, project_id: Option<models.ProjectId>, target: string) -> string {
   let mut filter = query.scoped(team_id, "url", target)
-  if project_id != "" {
-    filter += f" && project={query.quote(project_id)}"
+  if let Some(project) = project_id {
+    filter += f" && project={query.quote(project.string())}"
   }
   filter
 }
 
 /// An http(s) URL with a host, or the reason it is not one. Deliberately
 /// stricter than url.Parse, which happily accepts "not a url" as a path.
-fn validate_target(raw: string) -> Result<string, string> {
+fn validate_target(raw: string) -> Result<string, pb.CliError> {
   if strings.TrimSpace(raw) == "" {
-    return Err("a webhook needs a target URL: 'lll webhook add URL'")
+    return Err(pb.failed("a webhook needs a target URL: 'lll webhook add URL'"))
   }
   let Ok(parsed) = url.Parse(raw) else {
-    return Err(f"'{raw}' is not a URL; webhook targets are http(s) URLs")
+    return Err(pb.failed(f"'{raw}' is not a URL; webhook targets are http(s) URLs"))
   }
   if (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Host == "" {
-    return Err(f"'{raw}' is not an http(s) URL with a host; webhook targets are http(s) URLs")
+    return Err(pb.failed(f"'{raw}' is not an http(s) URL with a host; webhook targets are http(s) URLs"))
   }
   Ok(raw)
 }

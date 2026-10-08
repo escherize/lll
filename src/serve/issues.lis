@@ -2,6 +2,7 @@ import "records"
 import "go:net/http"
 import "go:net/url"
 
+import "display"
 import "models"
 import "pb"
 import "query"
@@ -65,15 +66,11 @@ fn table_page_size() -> int {
 /// total for the same filter, so the count can be honest about the ceiling.
 fn fetch_issue_rows(
   ctx: pb.Client,
-  team_id: string,
-  state: string,
-  assignee_id: string,
-  label_id: string,
-  project_id: string,
+  rows: query.IssueFilter,
   sort: string,
-) -> Result<models.IssueList, string> {
+) -> Result<models.IssueList, pb.CliError> {
   let mut path = f"/api/collections/issues/records?perPage={table_page_size()}&expand=team,assignee,labels&sort={url.QueryEscape(sort)}"
-  let filter = query.filter(team_id, state, assignee_id, project_id, label_id, "")
+  let filter = query.filter(rows)
   if filter != "" { path = f"{path}&filter={url.QueryEscape(filter)}" }
   let mut issues = models.IssueList { .. }
   pb.fetch(ctx, path, "issues", &issues)?
@@ -90,14 +87,14 @@ fn fetch_issue_rows(
 /// Shares the settings page's request, which also asks for expand=team. The
 /// expand is wasted here, but one label query beats two that drift apart —
 /// the same trade fetch_project_names already makes.
-fn fetch_label_names(ctx: pb.Client, team_id: string) -> Result<Slice<string>, string> {
-  Ok(records.fetch_labels(ctx, team_id)?.map(|l| l.name))
+fn fetch_label_names(ctx: pb.Client, team_id: models.TeamId) -> Result<Slice<string>, pb.CliError> {
+  Ok(records.fetch_labels(ctx, query.TeamScope.Only(team_id))?.map(|l| l.name))
 }
 
 /// This team's project names, for the project chooser. Scoped for the same
 /// reason labels are, and paired with the same scoped resolve_project.
-fn fetch_project_names(ctx: pb.Client, team_id: string) -> Result<Slice<string>, string> {
-  Ok(records.fetch_projects(ctx, team_id)?.map(|p| p.name))
+fn fetch_project_names(ctx: pb.Client, team_id: models.TeamId) -> Result<Slice<string>, pb.CliError> {
+  Ok(records.fetch_projects(ctx, query.TeamScope.Only(team_id))?.map(|p| p.name))
 }
 
 /// The issues table: one sortable, filterable, bookmarkable list.
@@ -115,21 +112,24 @@ fn fetch_project_names(ctx: pb.Client, team_id: string) -> Result<Slice<string>,
 ///
 /// A rejected query param is said out loud in the flash strip and dropped,
 /// never served as a 500: a stale bookmark should still show issues.
-fn issues_page(ctx: pb.Client, w: http.ResponseWriter, r: Ref<http.Request>, team_id: string, me: string, viewer: Viewer) {
+fn issues_page(ctx: pb.Client, w: http.ResponseWriter, r: Ref<http.Request>, team_id: models.TeamId, me: string, viewer: Viewer) {
   let mut err = ""
   let raw = view_query(r)
 
   let mut sort = raw.sort
   if sort == "" { sort = "-updated" }
   if let Err(e) = query.sort(sort) {
-    err = pb.plain(e)
+    err = e.message
     sort = "-updated"
   }
 
-  let mut filters = view_filters(raw)
-  if let Err(e) = filters.validate() {
-    err = pb.plain(e)
-    filters.state = []
+  let typed = view_filters(raw)
+  let filters = match typed.parse() {
+    Ok(parsed) => parsed,
+    Err(e) => {
+      err = e.message
+      typed.without_states()
+    },
   }
   let state = filters.one_state()
   // Who this viewer may name on this team (LLL-551): the chooser offers
@@ -137,53 +137,52 @@ fn issues_page(ctx: pb.Client, w: http.ResponseWriter, r: Ref<http.Request>, tea
   let roster = match read_roster(ctx) {
     Ok(found) => found,
     Err(e) => {
-      http.Error(w, pb.plain(e), 500)
+      http.Error(w, e.message, 500)
       return
     },
   }
+  let mut rows = query.IssueFilter.over(query.TeamScope.Only(team_id))
+  if let Some(s) = state { rows.states = [s] }
   let mut assignee = filters.assignee
-  let mut assignee_id = ""
   if assignee != "" {
     match roster_member(roster, assignee) {
-      Ok(m) => { assignee_id = m.id },
+      Ok(m) => { rows.assignee = Some(m.id) },
       Err(e) => {
-        err = pb.plain(e)
+        err = e.message
         assignee = ""
       },
     }
   }
 
   let mut label = filters.one_label()
-  let mut label_id = ""
   if label != "" {
     match records.resolve_label(ctx, team_id, label) {
-      Ok(l) => { label_id = l.id },
+      Ok(l) => { rows.labels = [l.id] },
       Err(e) => {
-        err = pb.plain(e)
+        err = e.message
         label = ""
       },
     }
   }
 
   let mut project = filters.project
-  let mut project_id = ""
   if project != "" {
     match records.resolve_project(ctx, team_id, project) {
-      Ok(p) => { project_id = p.id },
+      Ok(p) => { rows.projects = [p.id] },
       Err(e) => {
-        err = pb.plain(e)
+        err = e.message
         project = ""
       },
     }
   }
 
-  let q = ViewQuery { state, assignee, label, project, sort, .. }
+  let q = ViewQuery { state: display.state_name(state), assignee, label, project, sort, .. }
   let team = shell_team(ctx, team_id)
   let base = issues_base(team.key)
-  let list = match fetch_issue_rows(ctx, team_id, state, assignee_id, label_id, project_id, sort) {
+  let list = match fetch_issue_rows(ctx, rows, sort) {
     Ok(l) => models.IssueList { items: issues_for(viewer_is_scoped(viewer), l.items).map(|x| roster.issue(x)), ..l },
     Err(e) => {
-      http.Error(w, pb.plain(e), 500)
+      http.Error(w, e.message, 500)
       return
     },
   }
@@ -207,7 +206,7 @@ fn issues_page(ctx: pb.Client, w: http.ResponseWriter, r: Ref<http.Request>, tea
     members,
     label_names,
     project_names,
-    state,
+    state: display.state_name(state),
     assignee,
     label,
     project,

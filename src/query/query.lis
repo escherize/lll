@@ -1,23 +1,27 @@
 import "go:strings"
 
 import "pb"
+import "models"
 
-/// The six issue states, in workflow order.
+/// The six issue states' spellings, in workflow order: what help and the
+/// board's choosers offer.
 pub fn states() -> Slice<string> {
-  ["backlog", "todo", "in-progress", "in-review", "done", "cancelled"]
+  models.IssueState.all().map(|s| s.wire())
 }
 
-/// A supplied state must be in the workflow vocabulary. Empty is not a
-/// state; filter adapters decide whether absence means no restriction.
-pub fn state(value: string) -> Result<string, string> {
-  if !states().contains(value) {
+/// A state as typed on a command line or posted by the board, parsed. Empty
+/// is not a state; filter adapters decide whether absence means no
+/// restriction.
+pub fn state(value: string) -> Result<models.IssueState, pb.CliError> {
+  let Some(s) = models.IssueState.parse(value) else {
     return Err(pb.fail(pb.ErrorKind.Usage, f"unknown state '{value}' (use one of: {strings.Join(states(), ", ")})"))
   }
-  Ok(value)
+  Ok(s)
 }
 
-/// User-facing filter values, before member/label/project name resolution.
-/// Shared by CLI and web adapters; transport and database I/O stay outside.
+/// User-facing filter values as typed, before anything is parsed or
+/// resolved. Shared by CLI and web adapters; transport and database I/O stay
+/// outside.
 pub struct Filters {
   // Slices, because `--state todo --state in-review` means BOTH (LLL-381).
   // Keeping one value silently discarded the rest and answered a question
@@ -30,17 +34,37 @@ pub struct Filters {
   pub search: string,
 }
 
+/// Filters with the states parsed. Member, label and project names stay
+/// names until a resolver with a client turns them into ids.
+pub struct Criteria {
+  pub states: Slice<models.IssueState>,
+  pub assignee: string,
+  pub label: Slice<string>,
+  pub project: string,
+  pub search: string,
+}
+
 impl Filters {
-  pub fn validate(self) -> Result<Filters, string> {
-    for s in self.state { let _ = state(s)? }
-    Ok(self)
+  /// The criteria these filters mean; an unknown state is a usage error.
+  pub fn parse(self) -> Result<Criteria, pb.CliError> {
+    let mut states: Slice<models.IssueState> = []
+    for s in self.state { states = states.append(state(s)?) }
+    Ok(Criteria { states, ..self.without_states() })
   }
 
+  /// The criteria with no state restriction: what the board keeps when a
+  /// bookmarked URL names a state that no longer parses.
+  pub fn without_states(self) -> Criteria {
+    Criteria { states: [], assignee: self.assignee, label: self.label, project: self.project, search: self.search }
+  }
+}
+
+impl Criteria {
   /// The one state a single-valued surface means. The board's URL carries one
   /// of each and renders it as a chip, so it asks for that rather than
   /// learning that the CLI can mean several (LLL-381).
-  pub fn one_state(self) -> string {
-    self.state.get(0).unwrap_or("")
+  pub fn one_state(self) -> Option<models.IssueState> {
+    self.states.get(0)
   }
 
   /// The one label, for the same reason.
@@ -54,52 +78,54 @@ pub fn sort_fields() -> Slice<string> {
   ["created", "updated", "priority", "number", "title"]
 }
 
-/// Build a PocketBase filter expression from optional criteria.
-/// Empty criteria are omitted; an empty result means "no filter".
-/// `label_id` matches multi-relation membership (`labels.id ?=`); `search`
-/// is a title substring match (`title ~`).
+/// Which teams a READ spans (LLL-671). `Only` carries a team's id.
 ///
-/// The single-value door onto `filter_in`, for the callers that can only ever
-/// mean one state or one label. Repeated values arrive through `filter_in`.
-pub fn filter(
-  team_id: string,
-  state: string,
-  assignee_id: string,
-  project_id: string,
-  label_id: string,
-  search: string,
-) -> string {
-  let states = if state == "" { [] } else { [state] }
-  let labels = if label_id == "" { [] } else { [label_id] }
-  let projects = if project_id == "" { [] } else { [project_id] }
-  filter_in(team_id, states, assignee_id, projects, labels, search)
+/// "No team configured" used to travel as an empty team id, and every
+/// function that took a team id read "" as "every team". A writer that
+/// resolved a name with it acted on whichever team's record came back first:
+/// `lll label delete bug` deleted another team's label. Only the list verbs
+/// and their filters may span every team, so only they take a TeamScope.
+/// A writer and a name lookup take one team's id, never this.
+pub enum TeamScope {
+  Every,
+  Only(models.TeamId),
 }
 
-/// `filter`, with states, projects and labels that may repeat (LLL-381).
-///
-/// Several of either is an OR inside the AND: `--state todo --state in-review`
-/// becomes `(state='todo' || state='in-review')`, which is what a repeated flag
-/// means everywhere else and what makes "everything unfinished" one command.
-/// Labels do the same, so an issue carrying ANY of them matches. Projects
-/// repeat when a name spans every team: `--project web` with no team means
-/// each team's `web` (LLL-671).
-pub fn filter_in(
-  team_id: string,
-  states: Slice<string>,
-  assignee_id: string,
-  project_ids: Slice<string>,
-  label_ids: Slice<string>,
-  search: string,
-) -> string {
-  let mut clauses: Slice<string> = []
-  if team_id != "" { clauses = clauses.append(f"team={quote(team_id)}") }
-  if let Some(c) = any_of("state=", states) { clauses = clauses.append(c) }
-  if assignee_id != "" {
-    clauses = clauses.append(f"assignee={quote(assignee_id)}")
+/// The criteria of an issue list (LLL-675): the team scope, then clauses
+/// that each narrow it. An empty slice, None or "" adds no clause. Several
+/// states, projects or labels are an OR inside the AND: `--state todo
+/// --state in-review` is `(state='todo' || state='in-review')` (LLL-381),
+/// and a project or label name spanning every team means each team's
+/// (LLL-671).
+pub struct IssueFilter {
+  pub scope: TeamScope,
+  pub states: Slice<models.IssueState>,
+  pub assignee: Option<models.MemberId>,
+  pub projects: Slice<models.ProjectId>,
+  pub labels: Slice<models.LabelId>,
+  /// A title substring (`title ~`).
+  pub search: string,
+}
+
+impl IssueFilter {
+  /// Every issue in `scope`: the starting point the other clauses narrow.
+  /// The scope has no default, so widening to every team is always written.
+  pub fn over(scope: TeamScope) -> IssueFilter {
+    IssueFilter { scope, states: [], assignee: None, projects: [], labels: [], search: "" }
   }
-  if let Some(c) = any_of("project=", project_ids) { clauses = clauses.append(c) }
-  if let Some(c) = any_of("labels.id ?= ", label_ids) { clauses = clauses.append(c) }
-  if search != "" { clauses = clauses.append(f"title ~ {quote(search)}") }
+}
+
+/// The PocketBase filter expression for `f`; "" when nothing narrows it.
+pub fn filter(f: IssueFilter) -> string {
+  let mut clauses: Slice<string> = []
+  if let TeamScope.Only(team) = f.scope { clauses = clauses.append(f"team={quote(team.string())}") }
+  if let Some(c) = any_of("state=", f.states.map(|s| s.wire())) { clauses = clauses.append(c) }
+  if let Some(assignee) = f.assignee {
+    clauses = clauses.append(f"assignee={quote(assignee.string())}")
+  }
+  if let Some(c) = any_of("project=", f.projects.map(|p| p.string())) { clauses = clauses.append(c) }
+  if let Some(c) = any_of("labels.id ?= ", f.labels.map(|l| l.string())) { clauses = clauses.append(c) }
+  if f.search != "" { clauses = clauses.append(f"title ~ {quote(f.search)}") }
   strings.Join(clauses, " && ")
 }
 
@@ -122,7 +148,7 @@ fn any_of(lhs: string, values: Slice<string>) -> Option<string> {
 
 /// Validate a sort spec ("field" or "-field" for descending) and return it
 /// in PB sort syntax, which is the same shape.
-pub fn sort(spec: string) -> Result<string, string> {
+pub fn sort(spec: string) -> Result<string, pb.CliError> {
   let field = strings.TrimPrefix(spec, "-")
   if sort_fields().find(|f| f == field).is_none() {
     return Err(
@@ -134,14 +160,14 @@ pub fn sort(spec: string) -> Result<string, string> {
 
 /// A PB filter for one team-owned record found by a unique-per-team field:
 /// a label or project by `name`, a doc by `slug`. The team clause is always
-/// there: an empty `team_id` matches nothing rather than every team, because
-/// a name is unique only within a team and the first match of a widened
-/// lookup is some other team's record (LLL-671).
+/// there, and it names one team: a name is unique only within a team, and
+/// the first match of a widened lookup is some other team's record
+/// (LLL-671).
 ///
 /// This exists so no caller ever concatenates a team key into a filter by
 /// hand: both halves go through `quote` (TASK-134).
-pub fn scoped(team_id: string, field: string, value: string) -> string {
-  f"team={quote(team_id)} && {field}={quote(value)}"
+pub fn scoped(team_id: models.TeamId, field: string, value: string) -> string {
+  f"team={quote(team_id.string())} && {field}={quote(value)}"
 }
 
 /// Single-quote a value for a PB filter, escaping backslashes and quotes.
