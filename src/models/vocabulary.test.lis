@@ -1,0 +1,55 @@
+#[test]
+fn every_state_round_trips_its_wire_spelling() {
+  assert IssueState.all().length() == 6
+  for s in IssueState.all() {
+    assert IssueState.parse(s.wire()) == Some(s)
+  }
+  assert IssueState.parse("").is_none()
+  assert IssueState.parse("Done").is_none()
+}
+
+#[test]
+fn finished_and_open_are_decided_in_one_place() {
+  let terminal = IssueState.all().filter(|s| s.is_terminal()).map(|s| s.wire())
+  assert terminal.equals(["done", "cancelled"])
+  let open = IssueState.all().filter(|s| s.is_open()).map(|s| s.wire())
+  assert open.equals(["backlog", "todo"])
+}
+
+#[test]
+fn priorities_rank_urgent_first_and_none_last() {
+  for p in Priority.all() {
+    assert Priority.from_wire(p.wire()) == Some(p)
+    assert Priority.named(p.name()) == Some(p)
+  }
+  assert Priority.from_wire(5).is_none()
+  let ranked = Priority.all().map(|p| p.rank())
+  assert ranked.equals([5, 1, 2, 3, 4])
+}
+
+#[test]
+fn a_bot_reads_and_writes_only_within_its_owner() {
+  let a = TeamId("a")
+  let b = TeamId("b")
+  let every_rw = Access { reach: Reach.Every, mode: Mode.ReadWrite }
+  let a_ro = Access { reach: Reach.Teams([a]), mode: Mode.ReadOnly }
+  let ab_rw = Access { reach: Reach.Teams([a, b]), mode: Mode.ReadWrite }
+  assert every_rw.within(every_rw).same_as(every_rw)
+  assert every_rw.within(a_ro).same_as(a_ro)
+  assert ab_rw.within(every_rw).same_as(ab_rw)
+  let capped = ab_rw.within(a_ro)
+  assert capped.team_ids().equals([a]) && !capped.mode.writes()
+  assert !capped.same_as(ab_rw)
+}
+
+#[test]
+fn access_parses_only_what_the_server_spells() {
+  let Some(all) = Access.parse("all", [], "rw") else { panic("all/rw") }
+  assert all.every_team() && all.mode.writes() && all.scope_wire() == "all"
+  let Some(some) = Access.parse("teams", [TeamId("a")], "ro") else { panic("teams/ro") }
+  assert !some.every_team() && some.team_ids().equals([TeamId("a")]) && some.scope_wire() == "teams"
+  assert Access.parse("", [], "").is_none()
+  assert Access.parse("all", [], "").is_none()
+  assert MemberKind.parse("bot") == Some(MemberKind.Bot)
+  assert MemberKind.parse("").is_none()
+}

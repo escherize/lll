@@ -93,6 +93,6 @@ impl Roster {
 
   /// The members a picker or a filter offers.
   fn picks(self) -> Slice<PickVM> {
-    self.members.map(|m| PickVM { id: m.id.string(), name: m.name, bot: m.kind == "bot" })
+    self.members.map(|m| PickVM { id: m.id.string(), name: m.name, bot: m.is_bot() })
   }
 }

@@ -13,8 +13,9 @@ keeps the strings from coming back, reading the sources of every non-test
   src/writes, never minted from a string in a command or a board handler;
 - no parameter is a bare `team_id: string`: a team is a models.TeamId, and
   "every team" is query.TeamScope.Every, written out;
-- an issue's state and priority are models.IssueState and models.Priority:
-  the wire fields (state_wire, priority_wire) are read only where records
+- an issue's state and priority are models.IssueState and models.Priority,
+  and a member's access and kind are models.Access and models.MemberKind:
+  the wire fields (state_wire, scope_wire, ...) are read only where records
   are decoded and written, and no code compares a state to a string literal;
 - the error tag machinery stays gone.
 
@@ -88,8 +89,8 @@ def violations(files):
         for m in re.finditer(r'\bteam_id: string\b', code):
             found.append(f'{rel}: team_id: string: a team is models.TeamId; every team is query.TeamScope.Every')
         if module not in ID_MAKERS:
-            for m in re.finditer(r'\b(?:state|priority)_wire\b', code):
-                found.append(f'{rel}: {m.group(0)}: read the state and priority through Issue.state() and Issue.priority()')
+            for m in re.finditer(r'\b(?:state|priority|scope|mode|kind|rw|all)_wire\b(?!\()', code):
+                found.append(f'{rel}: {m.group(0)}: read a record through its typed accessors (Issue.state(), Member.access(), ...)')
         for m in re.finditer(r'(?:==|!=)\s*' + STATES + r'|' + STATES + r'\s*(?:==|!=)', code):
             if module == 'models':
                 continue
@@ -114,6 +115,7 @@ class TypedBoundariesTest(unittest.TestCase):
             ('src/records/x.lis', 'records', 'fn fetch(ctx: pb.Client, team_id: string) {}'),
             ('src/commands/x.lis', 'commands', 'let t = scope.filter_team()'),
             ('src/serve/x.lis', 'serve', 'if issue.state_wire == x {}'),
+            ('src/commands/x.lis', 'commands', 'if m.mode_wire == "rw" {}'),
             ('src/records/x.lis', 'records', 'if s == "done" {}'),
             ('src/serve/x.lis', 'serve', 'if "in-review" != s {}'),
         ]
@@ -127,6 +129,7 @@ class TypedBoundariesTest(unittest.TestCase):
             ('src/serve/x.lis', 'serve', 'fn f(team_id: models.TeamId) {}'),
             ('src/records/x.lis', 'records', 'models.Issue { state_wire: s, .. }'),
             ('src/commands/x.lis', 'commands', 'f"{state.wire()} is done"'),
+            ('src/commands/x.lis', 'commands', 'MemberPatch { scope: Some(wanted.scope_wire()) }'),
         ]
         self.assertEqual(violations(clean), [])
 

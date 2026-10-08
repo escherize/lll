@@ -54,7 +54,7 @@ fn rail_for(ctx: pb.Client, viewer: Viewer, active: string, me: string, team: mo
   // "Add a bot" (LLL-546): a read-write person viewer owns what it mints. A
   // bot viewer cannot own bots (gopb), so it gets no button.
   let bot_owner = match v.member {
-    Some(m) if m.rw && !strings.HasPrefix(m.name, "bot-") => m.name,
+    Some(m) if m.access.mode.writes() && !strings.HasPrefix(m.name, "bot-") => m.name,
     _ => "",
   }
   RailVM {

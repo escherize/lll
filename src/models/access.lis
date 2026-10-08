@@ -1,0 +1,128 @@
+// What a member may do (LLL-542, LLL-543, LLL-675). The server decides
+// access (gopb effectiveAccess and the collection rules); these types are
+// how lll reads its answer and says what it asks for, so no code passes
+// "all", "rw" and two bools around and hopes they agree.
+
+/// Whether a member can change what it reads.
+pub enum Mode {
+  ReadWrite,
+  ReadOnly,
+}
+
+impl Mode {
+  /// The mode a wire value ("rw", "ro") names; None for anything else.
+  pub fn parse(wire: string) -> Option<Mode> {
+    match wire {
+      "rw" => Some(Mode.ReadWrite),
+      "ro" => Some(Mode.ReadOnly),
+      _ => None,
+    }
+  }
+
+  pub fn wire(self) -> string {
+    match self {
+      Mode.ReadWrite => "rw",
+      Mode.ReadOnly => "ro",
+    }
+  }
+
+  pub fn writes(self) -> bool {
+    match self {
+      Mode.ReadWrite => true,
+      Mode.ReadOnly => false,
+    }
+  }
+}
+
+/// Which teams a member reads: every team on the server, or exactly these.
+pub enum Reach {
+  Every,
+  Teams(Slice<TeamId>),
+}
+
+/// A member's access: which teams it reads, and whether it writes there.
+pub struct Access {
+  pub reach: Reach,
+  pub mode: Mode,
+}
+
+impl Access {
+  /// The access a member's wire fields say; None when the server reports
+  /// none (it predates scoped members) or spells it in a way lll does not
+  /// know.
+  pub fn parse(scope: string, teams: Slice<TeamId>, mode: string) -> Option<Access> {
+    let Some(m) = Mode.parse(mode) else { return None }
+    match scope {
+      "all" => Some(Access { reach: Reach.Every, mode: m }),
+      "teams" => Some(Access { reach: Reach.Teams(teams), mode: m }),
+      _ => None,
+    }
+  }
+
+  /// This access within `owner`'s (LLL-543): a bot with an owner reads only
+  /// teams both read, and writes only if both write. The server enforces
+  /// the same (gopb effectiveAccess), reading the owner live.
+  pub fn within(self, owner: Access) -> Access {
+    let mode = if self.mode.writes() && owner.mode.writes() { Mode.ReadWrite } else { Mode.ReadOnly }
+    let reach = match (self.reach, owner.reach) {
+      (Reach.Every, Reach.Every) => Reach.Every,
+      (Reach.Every, Reach.Teams(theirs)) => Reach.Teams(theirs),
+      (Reach.Teams(mine), Reach.Every) => Reach.Teams(mine),
+      (Reach.Teams(mine), Reach.Teams(theirs)) => Reach.Teams(mine.filter(|t| theirs.contains(t))),
+    }
+    Access { reach, mode }
+  }
+
+  /// The wire scope: "all" or "teams".
+  pub fn scope_wire(self) -> string {
+    match self.reach {
+      Reach.Every => "all",
+      Reach.Teams(_) => "teams",
+    }
+  }
+
+  /// The team ids a Teams reach names; none for every team.
+  pub fn team_ids(self) -> Slice<TeamId> {
+    match self.reach {
+      Reach.Every => [],
+      Reach.Teams(ids) => ids,
+    }
+  }
+
+  pub fn every_team(self) -> bool {
+    match self.reach {
+      Reach.Every => true,
+      Reach.Teams(_) => false,
+    }
+  }
+
+  pub fn same_as(self, other: Access) -> bool {
+    self.mode == other.mode && self.every_team() == other.every_team() && self.team_ids().equals(other.team_ids())
+  }
+}
+
+/// A person, or a bot: a token-only member, usually owned by a person.
+pub enum MemberKind {
+  Person,
+  Bot,
+}
+
+impl MemberKind {
+  /// The kind a wire value ("person", "bot") names; None for "" (a server
+  /// before bot accounts, or a member the reader may not see) and anything
+  /// else.
+  pub fn parse(wire: string) -> Option<MemberKind> {
+    match wire {
+      "person" => Some(MemberKind.Person),
+      "bot" => Some(MemberKind.Bot),
+      _ => None,
+    }
+  }
+
+  pub fn wire(self) -> string {
+    match self {
+      MemberKind.Person => "person",
+      MemberKind.Bot => "bot",
+    }
+  }
+}

@@ -146,9 +146,10 @@ fn member_list(input: flags.CommandInput) -> Result<(), pb.CliError> {
   if members.items.is_empty() { return say_empty("members") }
   for listed in members.items {
     // A bot shows what it can do now: within its owner's access (LLL-543).
-    let (m, cap) = records.effective_access_in(listed, members.items)
+    let (effective, cap) = records.effective_access_in(listed, members.items)
+    let m = listed
     let capped = cap.map_or("", |o| f" (capped by its owner, {o.name})")
-    let access = member_access(m, keys)
+    let access = member_access(effective, keys)
     let access = if access == "" { access } else { access + capped }
     if access == "" {
       fmt.Println(f"{display.table_cell(m.name)}\t{display.table_cell(shown_email(m))}")
@@ -169,12 +170,12 @@ fn shown_email(m: models.Member) -> string {
 /// "rw every team (server-wide)", "ro ALPHA", "rw ALPHA, GAMMA +1 hidden", or "" when the
 /// server does not report access (fleet case 03: 7 of 10 agents went to
 /// 'lll api' to see a member's teams).
-fn member_access(m: models.Member, keys: Map<models.TeamId, string>) -> string {
-  if m.scope == "" { return "" }
-  if m.scope == "all" { return f"{m.mode} every team (server-wide)" }
+fn member_access(access: Option<models.Access>, keys: Map<models.TeamId, string>) -> string {
+  let Some(a) = access else { return "" }
+  if a.every_team() { return f"{a.mode.wire()} every team (server-wide)" }
   let mut named: Slice<string> = []
   let mut hidden = 0
-  for id in m.teams {
+  for id in a.team_ids() {
     match keys.get(id) {
       Some(k) => named = named.append(k),
       None => hidden += 1,
@@ -182,7 +183,7 @@ fn member_access(m: models.Member, keys: Map<models.TeamId, string>) -> string {
   }
   let mut shown = if named.is_empty() { "no teams" } else { strings.Join(named, ", ") }
   if hidden > 0 { shown = f"{shown} +{hidden} hidden" }
-  f"{m.mode} {shown}"
+  f"{a.mode.wire()} {shown}"
 }
 
 fn member_list_spec() -> Slice<flags.Flag> {
@@ -419,7 +420,7 @@ a read-write member creates it with 'lll bot create {name}' (owned by you, never
     )
   }
   let created = if p.given("--password") {
-    match create_member_as(ctx, ctx.token(), name, email, password, [], "") {
+    match create_member_as(ctx, ctx.token(), name, email, password, [], None) {
       Ok(created) => created,
       Err(e) => return Err(member_create_error(e)),
     }
@@ -452,7 +453,7 @@ pub fn create_member(
   name: string,
   email: string,
 ) -> Result<models.Member, pb.CliError> {
-  create_member_as(ctx, ctx.token(), name, email, rand.Text(), [], "")
+  create_member_as(ctx, ctx.token(), name, email, rand.Text(), [], None)
 }
 
 /// create_member, riding `tok` and a caller-chosen password. Invite needs
@@ -468,7 +469,7 @@ fn create_member_as(
   email: string,
   password: string,
   teams: Slice<models.TeamId>,
-  mode: string,
+  mode: Option<models.Mode>,
 ) -> Result<models.Member, pb.CliError> {
   let member_email = if email == "" { records.synthesize_email(name) } else { email }
   // Unscoped creates send no scope and get the creator's ("all").
@@ -481,11 +482,12 @@ fn create_member_as(
     email_visibility: true,
     // PB selects have no schema-level default, so the CLI states the kind:
     // everything but `lll bot` is a person (LLL-407).
-    kind: "person",
+    kind: models.MemberKind.Person.wire(),
     owner: None,
     scope,
     teams,
-    mode,
+    // None lets the server fill in the creator's ("rw").
+    mode: mode.map_or("", |m| m.wire()),
   }
   let body = writes.create_member(ctx, pb.Caller.Member(tok), new_member)?
 
@@ -527,9 +529,9 @@ pub fn ensure_member(ctx: pb.Client, name: string) -> Result<bool, pb.CliError> 
 /// "read-only, team ALPHA", "read-write, teams ALPHA, GAMMA",
 /// "read-write, every team (server-wide)", "read-only, no teams". One wording for whoami,
 /// invite and access.
-fn describe_access(scope: string, mode: string, keys: Slice<string>) -> string {
-  let m = if mode == "ro" { "read-only" } else { "read-write" }
-  if scope == "all" { return f"{m}, every team (server-wide)" }
+fn describe_access(access: models.Access, keys: Slice<string>) -> string {
+  let m = if access.mode.writes() { "read-write" } else { "read-only" }
+  if access.every_team() { return f"{m}, every team (server-wide)" }
   if keys.is_empty() { return f"{m}, no teams" }
   let noun = if keys.length() == 1 { "team" } else { "teams" }
   f"{m}, {noun} {strings.Join(keys, ", ")}"
@@ -581,7 +583,7 @@ fn member_access_cmd(input: flags.CommandInput) -> Result<(), pb.CliError> {
   }
   let teams = records.list_teams(ctx)?.items
   let key_of = |id: models.TeamId| teams.find(|t| t.id == id).map_or(id.string(), |t| t.key)
-  let before = describe_access(m.scope, m.mode, m.teams.map(key_of))
+  let before = describe_access(recorded_access(m), recorded_access(m).team_ids().map(key_of))
   let set_teams = p.given("--team") || p.given("--all-teams") || p.given("--no-teams")
   let edit_teams = p.given("--add-team") || p.given("--remove-team")
   let set_mode = p.given("--read-only") || p.given("--read-write")
@@ -610,23 +612,22 @@ fn member_access_cmd(input: flags.CommandInput) -> Result<(), pb.CliError> {
   // reads a member without the teams it cannot see (LLL-551), and editing
   // that copy would drop them.
   let m = records.find_member_as(ctx, su, name)?.unwrap_or(m)
-  let before = describe_access(m.scope, m.mode, m.teams.map(key_of))
-  let mut scope = m.scope
-  let mut ids = m.teams
+  let current = recorded_access(m)
+  let before = describe_access(current, current.team_ids().map(key_of))
+  let mut reach = current.reach
   if p.given("--all-teams") {
-    scope = "all"
-    ids = []
+    reach = models.Reach.Every
   } else if p.given("--no-teams") {
-    scope = "teams"
-    ids = []
+    reach = models.Reach.Teams([])
   } else if p.given("--team") {
-    scope = "teams"
-    ids = []
+    let mut ids: Slice<models.TeamId> = []
     for k in p.all("--team") { ids = ids.append(id_of(k)?) }
+    reach = models.Reach.Teams(ids)
   } else if edit_teams {
-    if m.scope == "all" {
+    if current.every_team() {
       return Err(pb.failed(f"{m.name} sees every team; limit them first with --team KEY, then add or remove"))
     }
+    let mut ids = current.team_ids()
     for k in p.all("--add-team") {
       let id = id_of(k)?
       if !ids.contains(id) { ids = ids.append(id) }
@@ -635,11 +636,13 @@ fn member_access_cmd(input: flags.CommandInput) -> Result<(), pb.CliError> {
       let id = id_of(k)?
       ids = ids.filter(|x| x != id)
     }
+    reach = models.Reach.Teams(ids)
   }
-  let mut mode = m.mode
-  if p.given("--read-only") { mode = "ro" }
-  if p.given("--read-write") { mode = "rw" }
-  let patch = writes.MemberPatch { scope: Some(scope), teams: Some(ids), mode: Some(mode), .. }
+  let mut mode = current.mode
+  if p.given("--read-only") { mode = models.Mode.ReadOnly }
+  if p.given("--read-write") { mode = models.Mode.ReadWrite }
+  let wanted = models.Access { reach, mode }
+  let patch = writes.MemberPatch { scope: Some(wanted.scope_wire()), teams: Some(wanted.team_ids()), mode: Some(wanted.mode.wire()), .. }
   if let Err(e) = writes.update_member(ctx, pb.Caller.Member(su), m.id, patch) {
     // gopb checkOwner's refusal names its own fix (LLL-543).
     if e.has_code(pb.ServerCode.BotExceedsOwner) { return Err(e) }
@@ -651,17 +654,20 @@ fn member_access_cmd(input: flags.CommandInput) -> Result<(), pb.CliError> {
     }
     return Err(e)
   }
-  let after = describe_access(scope, mode, ids.map(key_of))
+  let after = describe_access(wanted, wanted.team_ids().map(key_of))
   if after == before {
     fmt.Println(f"{m.name}: {after} (unchanged)")
   } else {
     fmt.Println(f"{m.name}: {after} (was {before})")
   }
-  let mut now = m
-  now.scope = scope
-  now.teams = ids
-  now.mode = mode
-  print_owner_cap(ctx, now, key_of)
+  print_owner_cap(ctx, m.with_access(wanted), key_of)
+}
+
+/// A member's recorded access. A record from a server before scoped
+/// members (LLL-542) carries none, which that server meant as read-write
+/// with no team list to show.
+fn recorded_access(m: models.Member) -> models.Access {
+  m.access().unwrap_or(models.Access { reach: models.Reach.Teams([]), mode: models.Mode.ReadWrite })
 }
 
 /// For a bot whose owner's access is narrower than its own, the access it
@@ -676,8 +682,8 @@ fn print_owner_cap(ctx: pb.Client, m: models.Member, key_of: fn(models.TeamId) -
       return Err(e)
     },
   }
-  if let Some(owner) = cap {
-    fmt.Println(f"  effective: {describe_access(eff.scope, eff.mode, eff.teams.map(key_of))} (capped by its owner, {owner.name})")
+  if let (Some(owner), Some(e)) = (cap, eff) {
+    fmt.Println(f"  effective: {describe_access(e, e.team_ids().map(key_of))} (capped by its owner, {owner.name})")
   }
   Ok(())
 }

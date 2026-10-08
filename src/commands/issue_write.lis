@@ -621,7 +621,7 @@ fn print_comments(comments: Slice<models.Comment>) {
   for c in comments {
     n += 1
     let author = display.comment_byline(c.author_kind, c.author, c.expand.author.name, c.agent, "anon")
-    let tag = if c.author_kind == "system" { "" } else { display.author_tag(c.expand.author.kind == "bot", c.expand.author.owner_name()) }
+    let tag = if c.author_kind == "system" { "" } else { display.author_tag(c.expand.author.is_bot(), c.expand.author.owner_name()) }
     fmt.Println(f"#{n} {author}{tag} ({display.relative(c.created)})")
     fmt.Println(f"  {c.body}")
   }

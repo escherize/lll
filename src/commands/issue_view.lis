@@ -142,7 +142,7 @@ fn view(input: flags.CommandInput) -> Result<(), pb.CliError> {
         // Absolute, not relative: --raw is machine output that gets stored
         // and re-read (an agent's brief, an exported mirror in Git), where
         // "5d ago" silently becomes a different string tomorrow.
-        let tag = if cm.author_kind == "system" { "" } else { display.author_tag(cm.expand.author.kind == "bot", cm.expand.author.owner_name()) }
+        let tag = if cm.author_kind == "system" { "" } else { display.author_tag(cm.expand.author.is_bot(), cm.expand.author.owner_name()) }
         fmt.Println(
           f"- **{author}**{tag} ({display.absolute(cm.created)}): {cm.body}",
         )

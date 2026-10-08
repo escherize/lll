@@ -35,18 +35,19 @@ struct WhoamiExpand {
 /// A bot with an owner shows its access within the owner's (LLL-543), and
 /// names the owner when that is narrower than the bot's own.
 fn access_line(ctx: pb.Client, me: WhoamiIdentity, body: string) -> Result<Option<string>, pb.CliError> {
-  if me.scope == "" { return Ok(None) }
+  let Some(own) = models.Access.parse(me.scope, [], me.mode) else { return Ok(None) }
   let own_keys = me.expand.teams.map(|t| t.key)
   let mut record = models.Member { .. }
   let decoded = json.Unmarshal(body.bytes(), &record)
   if decoded.is_err() || record.owner == "" {
-    return Ok(Some(describe_access(me.scope, me.mode, own_keys)))
+    return Ok(Some(describe_access(own, own_keys)))
   }
-  let (eff, cap) = records.effective_access(ctx, record)?
-  let Some(owner) = cap else { return Ok(Some(describe_access(me.scope, me.mode, own_keys))) }
+  let (effective, cap) = records.effective_access(ctx, record)?
+  let Some(owner) = cap else { return Ok(Some(describe_access(own, own_keys))) }
+  let Some(eff) = effective else { return Ok(Some(describe_access(own, own_keys))) }
   // A scoped caller lists exactly the teams it can see.
-  let keys = if eff.scope == "all" { [] } else { records.list_teams(ctx)?.items.map(|t| t.key) }
-  Ok(Some(f"{describe_access(eff.scope, eff.mode, keys)} (capped by its owner, {owner.name})"))
+  let keys = if eff.every_team() { [] } else { records.list_teams(ctx)?.items.map(|t| t.key) }
+  Ok(Some(f"{describe_access(eff, keys)} (capped by its owner, {owner.name})"))
 }
 
 /// `lll whoami --json` (LLL-645): the facts the text prints, by name.

@@ -44,8 +44,8 @@ fn a_doc_row_follows_the_viewers_roster() {
   let bot = models.Member {
     id: "garden",
     name: "bot-garden",
-    kind: "bot",
-    scope: "all",
+    kind_wire: "bot",
+    scope_wire: "all",
     expand: Some(models.MemberExpand { owner: Some(owner) }),
     ..,
   }
@@ -60,8 +60,8 @@ fn a_doc_row_follows_the_viewers_roster() {
   let alice = models.Member {
     id: "alice",
     name: "alice",
-    kind: "person",
-    scope: "teams",
+    kind_wire: "person",
+    scope_wire: "teams",
     teams: ["t-a"],
     ..,
   }

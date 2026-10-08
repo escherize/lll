@@ -159,7 +159,7 @@ fn direct_navigation(r: Ref<http.Request>) -> bool {
 /// page, so someone who opened another person's link can notice.
 fn login_identity(v: ScopedViewer) -> string {
   let Some(m) = v.member else { return f"a read-only viewer of team {v.teams.get(0).unwrap_or("")}" }
-  let mode = if m.rw { "read-write" } else { "read-only" }
+  let mode = if m.access.mode.writes() { "read-write" } else { "read-only" }
   let teams = if v.teams.is_empty() { "no teams" } else { strings.Join(v.teams, ", ") }
   f"{m.name} ({mode}, {teams})"
 }
@@ -354,11 +354,10 @@ pub struct ViewerMember {
   pub name: string,
   /// The member's own token: the credential its writes ride.
   pub token: string,
-  /// Effective read-write (a bot's within its owner's).
-  pub rw: bool,
-  /// Effective access to every team: such a member sees the whole roster
-  /// and every page as the board token does (LLL-551).
-  pub all: bool,
+  /// Effective access (a bot's within its owner's). A member that reads
+  /// every team sees the whole roster and every page as the board token
+  /// does (LLL-551).
+  pub access: models.Access,
 }
 
 impl ScopedViewer {
@@ -393,7 +392,7 @@ pub fn board_viewer(ctx: pb.Client, r: Ref<http.Request>) -> Viewer {
 pub fn viewer_is_scoped(v: Viewer) -> bool {
   match v {
     Viewer.Full => false,
-    Viewer.Scoped(s) => !s.member.map_or(false, |m| m.all),
+    Viewer.Scoped(s) => !s.member.map_or(false, |m| m.access.every_team()),
   }
 }
 
@@ -401,7 +400,7 @@ pub fn viewer_is_scoped(v: Viewer) -> bool {
 pub fn viewer_writes(v: Viewer) -> bool {
   match v {
     Viewer.Full => true,
-    Viewer.Scoped(s) => s.member.map_or(false, |m| m.rw),
+    Viewer.Scoped(s) => s.member.map_or(false, |m| m.access.mode.writes()),
   }
 }
 
@@ -474,7 +473,7 @@ fn member_viewer(ctx: pb.Client, tok: string) -> Option<ScopedViewer> {
   if reply.id == "" { return None }
   Some(ScopedViewer {
     teams: reply.teams.map(|t| t.key),
-    member: Some(ViewerMember { id: reply.id, name: reply.name, token: tok, rw: reply.rw, all: reply.all }),
+    member: Some(ViewerMember { id: reply.id, name: reply.name, token: tok, access: reply.access() }),
   })
 }
 
@@ -512,7 +511,7 @@ fn admit_scoped(w: http.ResponseWriter, r: Ref<http.Request>, v: ScopedViewer) -
     }
     return false
   }
-  let writes = v.member.map_or(false, |m| m.rw)
+  let writes = v.member.map_or(false, |m| m.access.mode.writes())
   match scoped_route(r.Method, u.Path, writes) {
     ScopedVerdict.Open => true,
     ScopedVerdict.Closed(message) => {

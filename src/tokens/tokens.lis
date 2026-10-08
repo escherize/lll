@@ -143,7 +143,7 @@ pub fn create_bot_member_as(
     password,
     password_confirm: password,
     email_visibility: true,
-    kind: "bot",
+    kind: models.MemberKind.Bot.wire(),
     owner,
     scope: "",
     teams: [],

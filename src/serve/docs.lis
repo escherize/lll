@@ -211,7 +211,7 @@ fn doc_row_vm(d: models.Doc, team_key: string) -> DocRowVM {
     area: d.area,
     author: author.name,
     author_avatar: avatar_vm(author),
-    author_kind: author.kind,
+    author_kind: author.kind().map_or("", |k| k.wire()),
     author_via: author.owner_name(),
     updated: display.relative(d.updated),
     updated_at: d.updated,

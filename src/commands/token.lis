@@ -372,7 +372,7 @@ fn bot_create(ctx: pb.Client, args: Slice<string>, start: int, command: string) 
   tokens.check_prompt_values(url, team, name)?
   let existing = records.find_member_as(ctx, tok, name)?
   if let Some(member) = existing {
-    if member.kind != "bot" {
+    if !member.is_bot() {
       return Err(
         pb.failed(f"member '{name}' exists and is not a bot member
 'lll bot create' only provisions bot members; use 'lll token create {name}' to mint its token directly"),

@@ -109,7 +109,7 @@ fn avatar_vm(member: models.Member) -> AvatarVM {
   AvatarVM {
     initials: strings.Join(first[..min(2, first.length())], ""),
     class: f"av-{sum % 4}",
-    bot: member.kind == "bot",
+    bot: member.is_bot(),
   }
 }
 

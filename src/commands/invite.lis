@@ -99,8 +99,8 @@ fn invite_create(input: flags.CommandInput) -> Result<(), pb.CliError> {
     }
     ids = ids.append(team.id)
   }
-  let mode = if p.given("--read-only") { "ro" } else { "rw" }
-  let payload = match json.Marshal(InviteRequest { teams: ids, mode }) {
+  let mode = if p.given("--read-only") { models.Mode.ReadOnly } else { models.Mode.ReadWrite }
+  let payload = match json.Marshal(InviteRequest { teams: ids, mode: mode.wire() }) {
     Ok(b) => b,
     Err(e) => return Err(pb.failed(f"encoding the invite: {e}")),
   }
@@ -111,10 +111,10 @@ fn invite_create(input: flags.CommandInput) -> Result<(), pb.CliError> {
   }
   if made.code == "" { return Err(pb.failed("the server returned no invite code")) }
   if p.given("--json") {
-    return print_json(InviteJson { url: f"{base}/join/{made.code}", code: made.code, expires: made.expires, mode, teams: keys }, "invite")
+    return print_json(InviteJson { url: f"{base}/join/{made.code}", code: made.code, expires: made.expires, mode: mode.wire(), teams: keys }, "invite")
   }
   fmt.Println(f"{base}/join/{made.code}")
-  let access = if mode == "ro" { "read-only" } else { "read-write" }
+  let access = if mode.writes() { "read-write" } else { "read-only" }
   status(
     f"single-use invite: {access}, {strings.Join(keys, ", ")}; expires {made.expires}. Send the link to one person; it is shown only here",
   )

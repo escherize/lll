@@ -196,7 +196,7 @@ fn reader_of(v: Viewing) -> Reader {
     Viewer.Full => "board",
     Viewer.Scoped(s) => s.member.map_or_else(
       || f"link:{v.reads.token()}",
-      |m| f"member:{m.rw}:{m.all}:{m.token}",
+      |m| f"member:{m.access.mode.writes()}:{m.access.every_team()}:{m.token}",
     ),
   }
   Reader {

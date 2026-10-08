@@ -78,19 +78,21 @@ pub struct Member {
   pub name: string,
   pub email: string,
   // Bot accounts (LLL-407): "person" or "bot"; "" only on servers that have
-  // not applied the kind migration. `owner` is the creating human member's
-  // id, empty for people and for bots minted by the superuser.
-  pub kind: string,
+  // not applied the kind migration. Read it through kind(). `owner` is the
+  // creating human member's id, empty for people and for bots minted by the
+  // superuser.
+  #[json("kind")]
+  pub kind_wire: string,
   #[json(omitempty)]
   pub owner: MemberId,
   // Access (LLL-542): "all" | "teams", the team ids, "rw" | "ro". Empty on a
-  // server that predates scoped members.
-  #[json(omitempty)]
-  pub scope: string,
+  // server that predates scoped members. Read it through access().
+  #[json("scope", omitempty)]
+  pub scope_wire: string,
   #[json(omitempty)]
   pub teams: Slice<TeamId>,
-  #[json(omitempty)]
-  pub mode: string,
+  #[json("mode", omitempty)]
+  pub mode_wire: string,
   // Keys of `teams` the caller can see; filled by 'member list --json' only.
   #[json(omitempty)]
   pub team_keys: Slice<string>,
@@ -120,23 +122,25 @@ impl Member {
     self.expand.and_then(|e| e.owner).map_or("", |o| o.name)
   }
 
-  /// This member's access within `owner`'s (LLL-543): a bot with an owner
-  /// sees only teams both see, and writes only if both write. The server
-  /// enforces the same (gopb effectiveAccess), reading the owner live, so
-  /// this is what the bot can do right now.
-  pub fn within(self, owner: Member) -> Member {
-    let mut out = self
-    out.mode = if self.mode == "rw" && owner.mode == "rw" { "rw" } else { "ro" }
-    if self.scope == "all" && owner.scope == "all" { return out }
-    out.scope = "teams"
-    out.teams = if self.scope == "all" {
-      owner.teams
-    } else if owner.scope == "all" {
-      self.teams
-    } else {
-      self.teams.filter(|t| owner.teams.contains(t))
-    }
-    out
+  /// This member's own access; None when the server reports none (it
+  /// predates scoped members). A bot's effective access is this within its
+  /// owner's: records.effective_access.
+  pub fn access(self) -> Option<Access> {
+    Access.parse(self.scope_wire, self.teams, self.mode_wire)
+  }
+
+  /// Person or bot; None when the server does not say.
+  pub fn kind(self) -> Option<MemberKind> {
+    MemberKind.parse(self.kind_wire)
+  }
+
+  pub fn is_bot(self) -> bool {
+    self.kind() == Some(MemberKind.Bot)
+  }
+
+  /// This member with `access` in its wire fields.
+  pub fn with_access(self, access: Access) -> Member {
+    Member { scope_wire: access.scope_wire(), teams: access.team_ids(), mode_wire: access.mode.wire(), ..self }
   }
 }
 
@@ -609,4 +613,21 @@ pub struct AccessTeam { pub id: TeamId, pub key: string }
 /// /api/lll/access: the calling member's effective access (a bot's within
 /// its owner's), read by `lll login` and the board's gate.
 #[json]
-pub struct AccessReply { pub id: MemberId, pub name: string, pub rw: bool, pub all: bool, pub teams: Slice<AccessTeam> }
+pub struct AccessReply {
+  pub id: MemberId,
+  pub name: string,
+  #[json("rw")]
+  pub rw_wire: bool,
+  #[json("all")]
+  pub all_wire: bool,
+  pub teams: Slice<AccessTeam>,
+}
+
+impl AccessReply {
+  /// The access the reply reports.
+  pub fn access(self) -> Access {
+    let reach = if self.all_wire { Reach.Every } else { Reach.Teams(self.teams.map(|t| t.id)) }
+    let mode = if self.rw_wire { Mode.ReadWrite } else { Mode.ReadOnly }
+    Access { reach, mode }
+  }
+}

@@ -103,7 +103,7 @@ fn acting_as(v: Viewing) -> Result<Acting, pb.CliError> {
     Viewer.Full => Ok(Acting { caller: pb.Caller.Process, member: None, reads: v.reads }),
     Viewer.Scoped(s) => {
       let Some(m) = s.member else { return Err(pb.failed(scoped_read_only())) }
-      if !m.rw { return Err(pb.failed(scoped_read_only())) }
+      if !m.access.mode.writes() { return Err(pb.failed(scoped_read_only())) }
       Ok(Acting { caller: pb.Caller.Member(m.token), member: Some(m), reads: v.reads })
     },
   }

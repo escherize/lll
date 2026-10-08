@@ -156,13 +156,13 @@ fn member_invite(input: flags.CommandInput) -> Result<(), pb.CliError> {
   let cfg = ctx.settings.config().map_err(pb.failed)?
   let base = invite_base(p.one("--url"), cfg.url, same_server_board(cfg.web_url, su))
   let keys = p.all("--team").map(records.normalize_team_key).filter(|k| k != "")
-  let mode = if p.given("--read-only") { "ro" } else { "rw" }
-  if keys.is_empty() && mode == "ro" {
+  let mode = if p.given("--read-only") { models.Mode.ReadOnly } else { models.Mode.ReadWrite }
+  if keys.is_empty() && !mode.writes() {
     return Err(flags.usage_error("--read-only needs --team KEY: say which teams they may read"))
   }
   if keys.is_empty() {
-    let created = create_member_as(ctx, su, name, email, password, [], "")?
-    status(f"invited {created.name} <{email}>: {describe_access("all", "rw", [])}")
+    let created = create_member_as(ctx, su, name, email, password, [], None)?
+    status(f"invited {created.name} <{email}>: {describe_access(models.Access { reach: models.Reach.Every, mode: models.Mode.ReadWrite }, [])}")
     status("send them this (below, on stdout); the password is shown once and stored nowhere")
     for line in invite_lines(created.name, email, password, base, cfg.team) {
       fmt.Println(line)
@@ -180,8 +180,8 @@ fn member_invite(input: flags.CommandInput) -> Result<(), pb.CliError> {
     }
     team_ids = team_ids.append(team.id)
   }
-  let created = create_member_as(ctx, su, name, email, password, team_ids, mode)?
-  status(f"invited {created.name} <{email}>: {describe_access("teams", mode, keys)}")
+  let created = create_member_as(ctx, su, name, email, password, team_ids, Some(mode))?
+  status(f"invited {created.name} <{email}>: {describe_access(models.Access { reach: models.Reach.Teams(team_ids), mode }, keys)}")
   status("send them this (below, on stdout); the password is shown once and stored nowhere")
   for line in invite_lines(created.name, email, password, base, keys[0]) {
     fmt.Println(line)
@@ -365,7 +365,7 @@ fn member_passes(input: flags.CommandInput) -> Result<(), pb.CliError> {
   let mut completed = 0
   for i in 0..count {
     let name = f"{prefix}-{run_id}-{i + 1}"
-    let member = match create_member_as(ctx, su, name, "", rand.Text(), [], "") {
+    let member = match create_member_as(ctx, su, name, "", rand.Text(), [], None) {
       Ok(m) => m,
       Err(e) => return Err(
         e.with_message(f"created {completed} of {count} credentials in {out}; creating {name} failed: {e.message}"),

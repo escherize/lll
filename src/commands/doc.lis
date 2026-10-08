@@ -480,7 +480,7 @@ fn doc_view(input: flags.CommandInput) -> Result<(), pb.CliError> {
   fmt.Println("")
   fmt.Println(f"Kind:      {d.kind}")
   if let Some(author) = d.expand.author {
-    let tag = display.author_tag(author.kind == "bot", author.owner_name())
+    let tag = display.author_tag(author.is_bot(), author.owner_name())
     fmt.Println(f"Author:    {display.table_cell(author.name)}{tag}")
   } else if d.author != "" {
     fmt.Println(f"Author:    {display.hidden_member()}")
