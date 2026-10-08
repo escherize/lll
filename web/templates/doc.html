@@ -57,6 +57,7 @@
 {{if .Area}}<div class="prop"><span class="k">Area</span><span class="v">{{.Area}}</span></div>
 {{end}}{{if .Paths}}<div class="prop"><span class="k">Paths</span><span class="v">{{.Paths}}</span></div>
 {{end}}{{if .Author}}<div class="prop"><span class="k">Author</span><span class="v">{{template "avatar" .AuthorAvatar}} {{.Author}}{{if .AuthorVia}} · via {{.AuthorVia}}{{end}}</span></div>
+{{end}}{{if .Editor}}<div class="prop"><span class="k">Edited by</span><span class="v">{{template "avatar" .EditorAvatar}} {{.Editor}}{{if .EditorVia}} · via {{.EditorVia}}{{end}}</span></div>
 {{end}}<div class="prop"><span class="k">Created</span><span class="v">{{.Created}}</span></div>
 <div class="prop"><span class="k">Updated</span><span class="v">{{.Updated}}</span></div>
 {{if .Issues}}<div class="prop"><span class="k">Issues</span><span class="v">{{range .Issues}}<a class="prose-link" href="{{.Href}}" title="{{.Title}}">{{.Key}}</a> {{end}}</span></div>

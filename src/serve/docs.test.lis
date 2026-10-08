@@ -82,3 +82,45 @@ fn a_doc_row_follows_the_viewers_roster() {
     "| bot-garden [bot via bob] |",
   )
 }
+
+// LLL-682: the last editor shows only when it is not the author, follows the
+// viewer's roster, and names a bot editor's owner as the author line does.
+#[test]
+fn a_doc_shows_its_last_editor_only_when_someone_else_edited() {
+  let alice = models.Member { id: "alice", name: "alice", kind_wire: "person", .. }
+  let bob = models.Member { id: "bob", name: "bob", kind_wire: "person", .. }
+  let bot = models.Member {
+    id: "garden",
+    name: "bot-garden",
+    kind_wire: "bot",
+    expand: Some(models.MemberExpand { owner: Some(models.MemberOwner { id: "bob", name: "bob" }) }),
+    ..,
+  }
+  let mut d = models.Doc { slug: "s", title: "t", author: "alice", last_editor: "alice", .. }
+  d.expand.author = Some(alice)
+  d.expand.last_editor = Some(alice)
+  let everyone = Roster { members: [alice, bob, bot] }
+  assert doc_row_vm(everyone.doc(d), "TST").editor == ""
+  assert !doc_raw(doc_vm(everyone.doc(d), "TST")).contains("Edited by")
+
+  d.last_editor = "bob"
+  d.expand.last_editor = Some(bob)
+  assert doc_vm(everyone.doc(d), "TST").editor == "bob"
+  assert doc_raw(doc_vm(everyone.doc(d), "TST")).contains("Author: alice\nEdited by: bob\n")
+  assert docs_raw(DocsVM { docs: [doc_row_vm(everyone.doc(d), "TST")], team_key: "TST", .. }).contains(
+    "| alice, edited by bob |",
+  )
+
+  // A viewer whose roster lacks bob sees the placeholder, and so does one
+  // whose read did not expand him at all.
+  let scoped = Roster { members: [alice] }
+  assert doc_row_vm(scoped.doc(d), "TST").editor == "hidden member"
+  d.expand.last_editor = None
+  assert doc_vm(scoped.doc(d), "TST").editor == "hidden member"
+
+  d.last_editor = "garden"
+  d.expand.last_editor = Some(bot)
+  let row = doc_row_vm(everyone.doc(d), "TST")
+  assert row.editor == "bot-garden" && row.editor_bot && row.editor_via == "bob"
+  assert doc_raw(doc_vm(everyone.doc(d), "TST")).contains("Edited by: bot-garden [bot via bob]\n")
+}

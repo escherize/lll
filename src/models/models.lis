@@ -477,6 +477,9 @@ pub struct DocExpand {
   // expand=author.owner and the caller may read them (LLL-618).
   #[json(omitempty)]
   pub author: Option<Member>,
+  // The last editor, and a bot editor's owner, the same way (LLL-682).
+  #[json(omitempty)]
+  pub last_editor: Option<Member>,
 }
 
 #[json]
@@ -509,6 +512,10 @@ pub struct Doc {
   // omitempty keeps re-encoded authorless docs (issue view --json) as before.
   #[json(omitempty)]
   pub author: MemberId,
+  // LLL-682: the member whose token made the latest write, set by the
+  // server; the author until someone else edits. Empty where author is.
+  #[json(omitempty)]
+  pub last_editor: MemberId,
   pub expand: DocExpand,
 }
 

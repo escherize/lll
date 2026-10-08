@@ -1546,6 +1546,7 @@ input:focus, textarea:focus, select:focus {
 }
 .dl-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .dl-akind { flex: none; color: var(--text-3); }
+.dl-edited { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-3); }
 .dl-age {
   flex: none;
   width: 62px;

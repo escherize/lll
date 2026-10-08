@@ -6,6 +6,16 @@ minors. Issue keys are on the project's own board (`lll issue view KEY`).
 
 ## [Unreleased]
 
+### Added
+
+- Docs record who last edited them. `last_editor` is set by the server from
+  the caller: the author on create, the caller on every member update. A
+  member cannot send it. When it is not the author, `lll doc view` and
+  `lll finding view` print `Edited by:`, and the board's doc page and docs
+  index show it, with a bot's owner and "hidden member" as for the author.
+  `doc view --json` has a `last_editor` field. Existing docs get their
+  author as last editor. Docs stay shared team pages. (LLL-682)
+
 ### Changed
 
 - Only a superuser or the member itself renames a member. A full member can

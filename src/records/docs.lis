@@ -8,7 +8,7 @@ import "go:regexp"
 import "go:strings"
 
 /// One team's docs for the board's docs index (LLL-643), newest first, with
-/// the author and a bot author's owner expanded. `kind` narrows to one kind
+/// the author, the last editor and a bot's owner expanded. `kind` narrows to one kind
 /// when non-empty. Bodies are left out: the index shows none, and a team's
 /// docs together can be large. The team clause is written out rather than
 /// taken from query.filter, which drops it for an empty id: an empty id here
@@ -20,9 +20,9 @@ pub fn fetch_team_docs(
 ) -> Result<Slice<models.Doc>, pb.CliError> {
   let mut filter = f"team={query.quote(team_id.string())}"
   if kind != "" { filter = f"{filter} && kind={query.quote(kind)}" }
-  let fields = "id,team,slug,title,kind,area,author,created,updated,expand"
+  let fields = "id,team,slug,title,kind,area,author,last_editor,created,updated,expand"
   fetch_all_records<models.Doc>(ctx,
-    f"/api/collections/docs/records?sort=-updated,id&expand=author.owner&fields={fields}&filter={url.QueryEscape(filter)}",
+    f"/api/collections/docs/records?sort=-updated,id&expand=author.owner,last_editor.owner&fields={fields}&filter={url.QueryEscape(filter)}",
     "docs",
   )
 }
@@ -55,7 +55,7 @@ pub fn doc_kinds() -> Slice<string> {
 
 /// Fetch a doc by slug WITHIN one team and return the raw PB record JSON,
 /// with its linked issues (and their teams, for KEY-123 keys) expanded, and
-/// its author with a bot author's owner (LLL-618). PocketBase leaves out a
+/// its author and last editor with a bot's owner (LLL-618, LLL-682). PocketBase leaves out a
 /// member the caller may not read, so nobody learns an owner they cannot see.
 ///
 /// A slug is unique per team, not per server (TASK-173): GRDN and LLL both
@@ -70,7 +70,7 @@ pub fn fetch_doc_record(
   let Some(item) = find_doc(ctx, team, slug)? else {
     return Err(unknown_doc(team, slug))
   }
-  ctx.get(f"/api/collections/docs/records/{item.id}?expand=issues.team,author.owner")
+  ctx.get(f"/api/collections/docs/records/{item.id}?expand=issues.team,author.owner,last_editor.owner")
 }
 
 /// fetch_doc_record, decoded.

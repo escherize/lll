@@ -254,7 +254,25 @@ with tempfile.TemporaryDirectory(prefix='lll-551-') as directory:
                                                            'kind': 'wiki', 'body': 'b', 'author': ids['bot-garden']}, su)[0] == 200
         assert '| hidden member |' in page('/t/ALPHA/docs?raw', 'alpha-guest')[1]
         assert '| bot-garden [bot] |' in page('/t/ALPHA/docs?raw', 'full-person')[1], 'control: full access names the author'
+        # LLL-682: and a hidden last editor the same way, on every surface.
+        code, edited = call(api, '/api/collections/docs/records', {'team': alpha['id'], 'slug': 'edited-doc', 'title': 'edited doc',
+                                                                  'kind': 'wiki', 'body': 'b'}, toks['full-person'])
+        assert code == 200, edited
+        assert call(api, f"/api/collections/docs/records/{edited['id']}", {'body': 'b2'}, toks['bot-garden'], 'PATCH')[0] == 200
+        assert '| full-person, edited by hidden member |' in page('/t/ALPHA/docs?raw', 'alpha-guest')[1]
+        assert 'Edited by: hidden member\n' in page('/t/ALPHA/doc/edited-doc?raw', 'alpha-guest')[1]
+        code, out = lll('alpha-guest', 'doc', 'view', 'edited-doc')
+        assert code == 0 and 'Author:    full-person\nEdited by: hidden member\n' in out, out
+        clean(out, 'cli doc view')
+        code, out = lll('alpha-guest', 'doc', 'view', 'edited-doc', '--json')
+        assert code == 0 and json.loads(out)['last_editor'] == ids['bot-garden'], out
+        clean(out, 'cli doc view --json')
+        assert '| full-person, edited by bot-garden [bot] |' in page('/t/ALPHA/docs?raw', 'full-person')[1], \
+            'control: full access names the editor'
+        code, out = lll('full-person', 'doc', 'view', 'edited-doc')
+        assert 'Edited by: bot-garden [bot]\n' in out, out
         for path in ['/t/ALPHA/', '/t/ALPHA/?raw', '/t/ALPHA/docs', '/t/ALPHA/docs?raw',
+                     '/t/ALPHA/doc/edited-doc', '/t/ALPHA/doc/edited-doc?raw',
                      '/t/ALPHA/issue/ALPHA-1', '/t/ALPHA/issue/ALPHA-1?raw',
                      '/t/ALPHA/issues', '/t/ALPHA/issues?raw', '/t/ALPHA/search?q=garden', '/t/ALPHA/search?q=note&raw',
                      '/t/ALPHA/search?q=note&fragment=1', '/t/ALPHA/search?q=note&palette=1']:

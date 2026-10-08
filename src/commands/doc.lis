@@ -485,6 +485,15 @@ fn doc_view(input: flags.CommandInput) -> Result<(), pb.CliError> {
   } else if d.author != "" {
     fmt.Println(f"Author:    {display.hidden_member()}")
   }
+  // LLL-682: shown only once someone other than the author has edited.
+  if d.last_editor != "" && d.last_editor != d.author {
+    if let Some(editor) = d.expand.last_editor {
+      let tag = display.author_tag(editor.is_bot(), editor.owner_name())
+      fmt.Println(f"Edited by: {display.table_cell(editor.name)}{tag}")
+    } else {
+      fmt.Println(f"Edited by: {display.hidden_member()}")
+    }
+  }
   if d.confidence_note != "" { fmt.Println(f"Note:      {display.table_cell(d.confidence_note)}") }
   if d.area != "" { fmt.Println(f"Area:      {display.table_cell(d.area)}") }
   if d.paths != "" { fmt.Println(f"Paths:     {display.table_cell(d.paths)}") }

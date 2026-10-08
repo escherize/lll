@@ -141,4 +141,52 @@ assert AUTHOR not in web(base + 'no-author')
 assert 'Author: bot-da [bot via da-owner]\n' in web(base + 'bot-finding?raw')
 assert 'Author: da-owner\n' in web(base + 'person-doc?raw')
 assert 'Author:' not in web(base + 'no-author?raw')
+
+# LLL-682: last_editor. On create it is the author; on every member update it
+# is the caller; nobody may name it. 'person-doc' was last edited by the bot
+# above, so it shows the bot and its owner wherever the author shows.
+editor = member('da-editor', kind='person')
+editor_tok = token(editor)
+assert record('bot-finding')['last_editor'] == bot['id']
+assert record('no-author')['last_editor'] == ''
+person_rec = record('person-doc')
+assert person_rec['last_editor'] == bot['id'], person_rec
+assert person_rec['expand']['last_editor']['expand']['owner']['name'] == 'da-owner', person_rec
+assert 'Author:    da-owner\nEdited by: bot-da [bot via da-owner]\n' in cli('doc', 'view', 'person-doc')
+assert 'Edited by' not in cli('doc', 'view', 'bot-finding')
+cli('doc', 'edit', 'person-doc', '-b', 'edited body', token=editor_tok)
+assert record('person-doc')['last_editor'] == editor['id']
+assert 'Edited by: da-editor\n' in cli('finding', 'view', 'person-doc')
+# The author editing again hides the line: the latest editor is the author.
+cli('doc', 'edit', 'bot-finding', '-t', 'Bot finding, edited', token=editor_tok)
+cli('doc', 'edit', 'bot-finding', '-t', 'Bot finding', token=bot_tok)
+assert record('bot-finding')['last_editor'] == bot['id']
+assert 'Edited by' not in cli('doc', 'view', 'bot-finding')
+# Spoofing: naming any last editor, the caller included, is refused on create
+# and update, by every route that takes a body, and nothing changes.
+for tok in (owner_tok, bot_tok, editor_tok):
+    for forged in (owner['id'], editor['id'], ''):
+        status, out = call('PATCH', '/api/collections/docs/records/' + person_rec['id'], tok,
+                           dict(body='spoofed', last_editor=forged))
+        assert 400 <= status < 500, ('last_editor PATCH accepted', status, out)
+    status, out = call('POST', '/api/collections/docs/records', tok,
+                       dict(team=team_id, slug='forged-editor', title='F', kind='wiki', last_editor=editor['id']))
+    assert 400 <= status < 500, ('last_editor create accepted', status, out)
+for key in ('last_editor+', '+last_editor', 'last_editor-'):
+    status, out = call('PATCH', '/api/collections/docs/records/' + person_rec['id'], owner_tok, {key: owner['id']})
+    assert 400 <= status < 500, ('last_editor modifier accepted', key, status, out)
+person_rec = record('person-doc')
+assert person_rec['last_editor'] == editor['id'] and person_rec['body'] == 'edited body', person_rec
+# A superuser keeps the stored editor unless it names one (imports, repairs).
+ok('PATCH', '/api/collections/docs/records/' + person_rec['id'], su, dict(title='Person doc, su'))
+assert record('person-doc')['last_editor'] == editor['id']
+# The board's page, its ?raw and the docs index.
+page = web(base + 'person-doc')
+prop = page.split('<span class="k">Edited by</span>', 1)[1].split('</div>', 1)[0]
+assert 'da-editor</span>' in prop, prop
+assert 'Edited by: da-editor\n' in web(base + 'person-doc?raw')
+assert 'Edited by' not in web(base + 'bot-finding')
+index = web('/t/' + TEAM + '/docs?raw')
+assert '| da-owner, edited by da-editor |' in index, index
+assert 'edited by da-editor</span>' in web('/t/' + TEAM + '/docs')
 print('Doc author: set from the token, unforgeable, immutable, shown in view, --json, --raw and the board passed')

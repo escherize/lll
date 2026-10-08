@@ -64,11 +64,16 @@ impl Roster {
     out
   }
 
-  /// A doc whose hidden author (or the author's hidden owner) is withheld.
+  /// A doc whose hidden author or last editor (or a hidden owner of
+  /// either) is withheld.
   fn doc(self, d: models.Doc) -> models.Doc {
-    if d.author == "" { return d }
     let mut out = d
-    out.expand.author = Some(self.author(d.expand.author.unwrap_or(models.Member { id: d.author, .. })))
+    if d.author != "" {
+      out.expand.author = Some(self.author(d.expand.author.unwrap_or(models.Member { id: d.author, .. })))
+    }
+    if d.last_editor != "" {
+      out.expand.last_editor = Some(self.author(d.expand.last_editor.unwrap_or(models.Member { id: d.last_editor, .. })))
+    }
     out
   }
 
