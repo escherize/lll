@@ -31,8 +31,11 @@ import (
 // The teams collection is not guarded: unarchiving is a team update.
 
 // archivedGuarded is every collection whose records belong to one team:
-// directly (team) or through their issue (issue).
-var archivedGuarded = []string{"issues", "comments", "claims", "docs", "labels", "projects"}
+// directly (team) or through their issue (issue). The collections that
+// relate to teams or issues and are left out, each on purpose, are listed
+// with the reason in scripts/test_archived_guard.py, which fails when a
+// new one appears in the schema unclassified.
+var archivedGuarded = []string{"issues", "comments", "claims", "docs", "labels", "projects", "webhooks"}
 
 // recordTeam is the id of the team record belongs to, "" when it has none
 // or its issue no longer exists.

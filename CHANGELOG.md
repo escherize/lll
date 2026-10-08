@@ -72,8 +72,8 @@ scripts. A removed spelling fails and names its replacement (LLL-644).
   this, only adding a reference checked it: a raw API write, a new comment,
   `lll issue update`, a superuser and the claim, release, renew and
   assignment routes all wrote to an archived team. Writes to its issues,
-  comments, claims, docs, labels and projects, and moves into or out of it,
-  now answer 403 naming the team and `lll team unarchive KEY`. The hourly
+  comments, claims, docs, labels, projects and webhooks, and moves into or
+  out of it, now answer 403 naming the team and `lll team unarchive KEY`. The hourly
   claim sweep and member deletion still clear what they must (LLL-660).
 - An issue can be assigned only to a member who can see its team, by every
   route: the records API, `/claim`, `/assignment` and the board. A move into

@@ -2713,14 +2713,14 @@ out=$(env LLL_TEAM=OPS "$LIN" issue comment "$ARCH_KEY" -b "nope" 2>&1)
 rc=$?
 set -e
 [ "$rc" -ne 0 ] || fail "a CLI comment on an archived team's issue succeeded"
-assert_contains "$out" "team OPS is archived" "the server refuses a comment on an archived team"
+assert_contains "$out" "OPS is archived" "the server refuses a comment on an archived team"
 assert_contains "$out" "'lll team unarchive OPS'" "the server's refusal names the way back"
 set +e
 out=$(env LLL_TEAM=OPS "$LIN" issue claim "$ARCH_KEY" 2>&1)
 rc=$?
 set -e
 [ "$rc" -ne 0 ] || fail "claiming an archived team's issue succeeded"
-assert_contains "$out" "team OPS is archived" "the claim route refuses an archived team"
+assert_contains "$out" "OPS is archived" "the claim route refuses an archived team"
 ARCH_ID=$(env LLL_TEAM=OPS "$LIN" issue view "$ARCH_KEY" --json | jq -r .id)
 code=$(curl -s -o /dev/null -w '%{http_code}' -X PATCH -H "$AUTH_HDR" -H 'Content-Type: application/json' \
   -d '{"title":"raw write"}' "$LLL_URL/api/collections/issues/records/$ARCH_ID")

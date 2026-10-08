@@ -113,7 +113,7 @@ full-access callers and strips hidden team ids. Two traps came out of it:
   or it is unchecked.
 - **An archived team is read-only** (LLL-660, `gopb/team_writes.go`).
   Request hooks refuse records-API writes to issues, comments, claims, docs,
-  labels and projects, and `issueWritable` refuses the `/api/lll` routes.
+  labels, projects and webhooks, and `issueWritable` refuses the `/api/lll` routes.
   Model saves are not checked, on purpose: deleting a member clears its
   assignments through them. A new collection holding a team's records goes in
   `archivedGuarded`.

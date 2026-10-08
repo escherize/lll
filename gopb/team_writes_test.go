@@ -47,7 +47,7 @@ func newTeamWritesFixture(t *testing.T) teamWritesFixture {
 		c.Fields.Add(&core.TextField{Name: "body"}, &core.RelationField{Name: "issue", CollectionId: issues.Id, MaxSelect: 1})
 		save(c)
 	}
-	for _, name := range []string{"docs", "labels", "projects"} {
+	for _, name := range []string{"docs", "labels", "projects", "webhooks"} {
 		c := core.NewBaseCollection(name)
 		c.Fields.Add(&core.TextField{Name: "name"}, team())
 		save(c)
@@ -125,7 +125,7 @@ func TestArchivedTeamRefusesEveryGuardedWrite(t *testing.T) {
 	for _, name := range []string{"comments", "claims"} {
 		records = append(records, f.rec(t, name, map[string]any{"issue": issue.Id}))
 	}
-	for _, name := range []string{"docs", "labels", "projects"} {
+	for _, name := range []string{"docs", "labels", "projects", "webhooks"} {
 		records = append(records, f.rec(t, name, map[string]any{"name": "x", "team": f.frozen.Id}))
 	}
 	f.archive(t, f.frozen)
