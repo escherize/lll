@@ -1540,18 +1540,16 @@ if command -v playwright-cli >/dev/null 2>&1; then
   # LLL-101: save/reorder one row while other rows have unsaved drafts.
   for suffix in A B; do
     "$LIN" label create -n "Draft label $suffix" >/dev/null
-    "$LIN" member add -n "Draft member $suffix" >/dev/null
     "$LIN" project create -n "Draft project $suffix" >/dev/null
   done
   seq_goto "$WEB/settings/labels"
   "$LIN" member create -n "A long agent member name that needs to stay inside a narrow settings form" >/dev/null
   drafts_browser=$(playwright-cli -s="$BROWSER_SESSION" run-code "$(cat "$REPO_ROOT"/scripts/browser_settings_drafts.js)" 2>&1)
-  assert_contains "$drafts_browser" 'settings drafts survive reordered label, member and project saves' "browser: settings row drafts survive saves and reordering"
+  assert_contains "$drafts_browser" 'settings drafts survive reordered label and project saves' "browser: settings row drafts survive saves and reordering"
   for prefix in "Z saved" "Unsaved"; do
     suffix=A
     [ "$prefix" = "Unsaved" ] && suffix=B
     "$LIN" label delete "$prefix label $suffix" >/dev/null
-    "$LIN" member remove "$prefix member $suffix" --admin-email "$LLL_ADMIN_EMAIL" --admin-password "$LLL_ADMIN_PASSWORD" >/dev/null
     "$LIN" project delete "$prefix project $suffix" >/dev/null
   done
 
@@ -2030,15 +2028,19 @@ assert_cli_contains "creating a member from /settings did not persist" '^Web Mem
 MEMBER_ID=$(row_id "$(wcurl -sf "$WEB/settings/members")" member "Web Member")
 # The name is the settings-editable half; the email is the member's login
 # identity (task-180) and the page says so when a row tries to move it.
-web_post "POST settings/member" "$WEB/t/ENG/settings/member" -d "id=$MEMBER_ID" -d 'name=Web Member Renamed' -d 'email=web@example.com' >/dev/null
-assert_cli_contains "editing a member from /settings did not persist" '^Web Member Renamed	web@example.com' "$LIN" member list
+# The board writes as its own member, and only a superuser or the member
+# itself renames a member (LLL-682), so the row refuses with that reason.
+refused_rename=$(wcurl -sf -X POST "$WEB/t/ENG/settings/member" -d "id=$MEMBER_ID" -d 'name=Web Member Renamed' -d 'email=web@example.com')
+assert_contains "$refused_rename" 'only a superuser or the member itself can rename a member' \
+  "renaming another member from /settings is refused with the reason"
+assert_cli_contains "a refused rename from /settings changed the member" '^Web Member	web@example.com' "$LIN" member list
 rejected_member=$(wcurl -sf -X POST "$WEB/t/ENG/settings/member" -d "id=$MEMBER_ID" -d 'name=Rejected member name' -d 'email=moved@example.com')
 assert_contains "$rejected_member" 'login identity' "moving a member email is refused with the reason"
 assert_contains "$rejected_member" 'Access → Member sign-in' "the refusal names the supported email-change surface"
 assert_contains "$rejected_member" 'No changes saved.' "combined name/email rejection reports no write"
 assert_not_contains "$rejected_member" '(name saved)' "rejection must not claim a partial save"
 assert_cli_contains "rejected combined edit changed the stored member name or email" \
-  '^Web Member Renamed	web@example.com' "$LIN" member list
+  '^Web Member	web@example.com' "$LIN" member list
 assert_cli_lacks "rejected combined edit still saved its name" \
   '^Rejected member name	' "$LIN" member list
 
@@ -2416,7 +2418,7 @@ assert_contains "$board" 'id="new-issue"' "the one-line composer is still there"
 DL_LABEL=$(curl -sf -H "$AUTH_HDR" "$LLL_URL/api/collections/labels/records?perPage=200" \
   | jq -r '.items[] | select(.name=="dialog-label") | .id')
 DL_MEMBER=$(curl -sf -H "$AUTH_HDR" "$LLL_URL/api/collections/members/records?perPage=200" \
-  | jq -r '.items[] | select(.name=="Web Member Renamed") | .id')
+  | jq -r '.items[] | select(.name=="Web Member") | .id')
 DL_PROJECT=$(curl -sf -H "$AUTH_HDR" "$LLL_URL/api/collections/projects/records?perPage=200" \
   | jq -r '.items[] | select(.name=="Web Project") | .id')
 [ -n "$DL_LABEL" ] && [ -n "$DL_MEMBER" ] && [ -n "$DL_PROJECT" ] \

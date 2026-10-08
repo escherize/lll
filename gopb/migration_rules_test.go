@@ -100,3 +100,32 @@ func TestRulesHelperRefusesWhatOneClauseCannotSay(t *testing.T) {
 		}
 	}
 }
+
+// A migration reads a rule from a PocketBase collection, which hands it to
+// JS as a Go *string: an object, not a JS string (LLL-681). Indexing that
+// object yields nothing, so unless the helper reads it as text, every check
+// sees the whole rule as one clause: removal finds nothing, and an added
+// clause skips the duplicate and top-level || checks.
+func TestRulesHelperReadsARuleFromAGoStringPointer(t *testing.T) {
+	vm := rulesHelper(t)
+	ptr := func(s string) *string { return &s }
+	cases := []struct {
+		fn     string
+		rule   *string
+		clause string
+		want   string
+		throws string
+	}{
+		{"withoutClause", ptr("a = 1 && (b = 2 || c = 3)"), "b = 2 || c = 3", "a = 1", ""},
+		{"withClause", ptr("a = 1 && b = 2"), "c = 3", "a = 1 && b = 2 && c = 3", ""},
+		{"withClause", ptr("a = 1 && b = 2"), "b = 2", "", "already has the clause"},
+		{"withClause", ptr("a = 1 || b = 2"), "c = 3", "", "top-level ||"},
+		{"withClause", ptr(""), "c = 3", "", `"" (anyone)`},
+	}
+	for _, c := range cases {
+		got, thrown := call(t, vm, c.fn, c.rule, c.clause)
+		if got != c.want || !strings.Contains(thrown, c.throws) || (c.throws == "") != (thrown == "") {
+			t.Errorf("%s(%q, %q) = %q (threw %q); want %q (throw naming %q)", c.fn, *c.rule, c.clause, got, thrown, c.want, c.throws)
+		}
+	}
+}
