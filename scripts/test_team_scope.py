@@ -6,6 +6,7 @@ import os
 from pathlib import Path
 import re
 import socket
+import sqlite3
 import subprocess
 import sys
 import tempfile
@@ -317,8 +318,9 @@ with tempfile.TemporaryDirectory(prefix='lll-team-scope-') as directory:
                       {'claim_id': '', 'fields': {'assignee': '', 'labels': [blabel['id']]}}) == 400
         assert status(f"/api/collections/issues/records/{ia['id']}", {'project': aproj['id']}, 'PATCH') == 200, \
             'control: same-team project accepted'
-        # A link an all-scope member made does not block the scoped member's edit.
-        call(api, f"/api/collections/issues/records/{ia['id']}", {'blocked_by+': [ib['id']]}, su, 'PATCH')
+        # LLL-631: a superuser is refused too; references stay inside one team.
+        code, body, _ = call(api, f"/api/collections/issues/records/{ia['id']}", {'blocked_by+': [ib['id']]}, su, 'PATCH')
+        assert code == 400 and 'reference stays inside one team' in json.dumps(body), (code, body)
         assert status(f"/api/collections/issues/records/{ia['id']}", {'title': 'alpha edited'}, 'PATCH') == 200
 
         # Scope "teams" with no teams sees nothing: empty never means every team.
@@ -371,9 +373,13 @@ with tempfile.TemporaryDirectory(prefix='lll-team-scope-') as directory:
         assert call(board, '/t/BETA/', headers=full)[0] == 200
         # A doc on ALPHA linking BETA's issue: the board renders links as its own
         # member, so a scoped viewer must not get BETA's key or title from it.
+        # LLL-631 refuses the link from every writer, so the legacy link is
+        # written straight to the database.
         _, doc, _ = call(api, '/api/collections/docs/records', {'team': alpha['id'], 'slug': 'cross', 'title': 'cross',
-                                                                'kind': 'note', 'body': 'b', 'issues': [ia['id'], ib['id']]}, su)
+                                                                'kind': 'note', 'body': 'b', 'issues': [ia['id']]}, su)
         assert doc.get('id'), doc
+        with sqlite3.connect(root / 'data' / 'data.db', timeout=30) as conn:
+            conn.execute('UPDATE docs SET issues = ? WHERE id = ?', (json.dumps([ia['id'], ib['id']]), doc['id']))
         code, body, _ = page('/t/ALPHA/doc/cross?raw')
         assert code == 200 and 'ALPHA-1' in body and 'BETA-1' not in body, body
         assert 'BETA-1' in call(board, '/t/ALPHA/doc/cross?raw', headers=full)[1]

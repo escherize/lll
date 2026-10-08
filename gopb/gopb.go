@@ -103,6 +103,9 @@ func Serve(dataDir, addr, adminEmail, adminPassword string) error {
 			return e.Next()
 		})
 	})
+	// Last, so the check and the write share one transaction with nothing
+	// bound after it.
+	registerTeamRefGuard(app)
 
 	migratecmd.MustRegister(app, app.RootCmd, migratecmd.Config{
 		Dir:          migrationsDir,
