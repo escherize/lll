@@ -1334,6 +1334,8 @@ python3 "$REPO_ROOT"/scripts/test_search_team.py "$LLL_ABS"
 python3 "$REPO_ROOT"/scripts/test_team_scope.py "$LLL_ABS"
 # --- a member token in the board cookie scopes pages, search and the stream (LLL-545) ---
 python3 "$REPO_ROOT"/scripts/test_board_viewer_scope.py "$LLL_ABS"
+# --- every registered non-GET board route refuses another origin (LLL-630) ---
+python3 "$REPO_ROOT"/scripts/test_board_origin.py "$LLL_ABS"
 # --- invite create + /join/<code>: single-use, bounded by the creator (LLL-544) ---
 python3 "$REPO_ROOT"/scripts/test_invites.py "$LLL_ABS"
 # --- the real invites migration on a board with names differing only by case ---

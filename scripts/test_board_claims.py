@@ -26,7 +26,7 @@ def cli(*args):
 
 
 def request(path, body=None, method=None, web=False, auth=None):
-    headers = {'Cookie': cookie} if web else {'Authorization': 'Bearer ' + (env['LLL_TOKEN'] if auth is None else auth)}
+    headers = {'Cookie': cookie, 'Origin': board} if web else {'Authorization': 'Bearer ' + (env['LLL_TOKEN'] if auth is None else auth)}
     if body is not None:
         headers['Content-Type'] = 'application/json'
     req = urllib.request.Request((board if web else api) + path,
@@ -116,7 +116,7 @@ assert held['member'] == holder['id'], held
 comments = len(json.loads(cli('issue', 'view', key, '--json'))['comments'])
 data = urllib.parse.urlencode({'key': key, 'claim_id': held['id']}).encode()
 req = urllib.request.Request(board + '/release', data=data,
-    headers={'Cookie': cookie, 'Content-Type': 'application/x-www-form-urlencoded'})
+    headers={'Cookie': cookie, 'Origin': board, 'Content-Type': 'application/x-www-form-urlencoded'})
 with urllib.request.urlopen(req, timeout=20) as response:
     assert b'error-summary"></span>' in response.read()
 after = json.loads(cli('issue', 'view', key, '--json'))
@@ -147,7 +147,7 @@ html = request('/issue/' + key, web=True)
 assert b'id="claim-form"' not in html and b'id="release-form"' not in html
 data = urllib.parse.urlencode({'key': key}).encode()
 req = urllib.request.Request(board + '/claim', data=data,
-    headers={'Cookie': cookie, 'Content-Type': 'application/x-www-form-urlencoded'})
+    headers={'Cookie': cookie, 'Origin': board, 'Content-Type': 'application/x-www-form-urlencoded'})
 with urllib.request.urlopen(req, timeout=20) as response:
     assert b'archived' in response.read()
 assert json.loads(cli('issue', 'view', key, '--json'))['claim'] is None

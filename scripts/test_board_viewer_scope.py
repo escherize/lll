@@ -123,7 +123,9 @@ with tempfile.TemporaryDirectory(prefix='lll-545-') as directory:
             return {'Cookie': 'lll_board=' + tok}
 
         def page(path, tok, body=None, method=None):
-            return call(board, path, body, method=method, headers=as_cookie(tok), form=body is not None)
+            # A board write carries the board's own Origin (LLL-630).
+            hdrs = as_cookie(tok) if body is None else dict(as_cookie(tok), Origin=board)
+            return call(board, path, body, method=method, headers=hdrs, form=body is not None)
 
         # --- reads: ALPHA renders, BETA answers like a missing team ---
         for tok in [rw_tok, ro_tok]:

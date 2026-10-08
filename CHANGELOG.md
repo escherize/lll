@@ -6,6 +6,25 @@ minors. Issue keys are on the project's own board (`lll issue view KEY`).
 
 ## [Unreleased]
 
+### Security
+
+- The web board refuses every request other than GET or HEAD unless its
+  `Origin` is the board's own address. Before this, a page served on another
+  port of the same host (for example `127.0.0.1:9999` beside the default
+  `lll up` bind) counted as the same site, so it could change issues,
+  settings and bots with the viewer's board cookie. A request with no
+  `Origin`, `Origin: null`, or `Sec-Fetch-Site` other than `same-origin` is
+  refused too. The API under `/api/`, which the CLI uses, is unchanged.
+  Scripts that POST to board pages with `curl` must now send
+  `-H "Origin: <board url>"` (LLL-630).
+- Only a person with read-write access to every team, or a superuser, can
+  create an invite. A team-scoped or read-only member, a bot or a member with
+  an owner is refused with a message that names who can. A joined member
+  does not depend on its inviter, so a scoped guest could otherwise keep
+  access after removal through members it invited itself. Invites that such
+  a member made earlier and nobody has used no longer redeem, and narrowing a
+  full member voids its unused invites (LLL-629).
+
 ## [0.8.0] - 2026-10-07
 
 Scoped access is complete for teams: a single-use link invites a person to

@@ -87,7 +87,7 @@ with tempfile.TemporaryDirectory(prefix='lll-provenance-') as directory:
     # Board writes use the configured actor and leave client Git/host unknown.
     req = urllib.request.Request(board + '/create',
         data=urllib.parse.urlencode({'team': 'PROV168', 'title': 'Browser context'}).encode(),
-        headers={'Cookie': 'lll_board=' + os.environ['LLL_TEST_BOARD_TOKEN']})
+        headers={'Cookie': 'lll_board=' + os.environ['LLL_TEST_BOARD_TOKEN'], 'Origin': board})
     with urllib.request.urlopen(req, timeout=15) as response:
         assert 'ni_open' in response.read().decode(), 'board create failed'
     query = urllib.parse.urlencode({'filter': 'team="' + team['id'] + '" && title="Browser context"'})

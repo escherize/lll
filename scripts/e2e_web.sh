@@ -54,7 +54,9 @@ BOARD_COOKIE="Cookie: lll_board=$BOARD_TOKEN"
 # -L: the bare board/issue/search paths 303 to their team-routed twins
 # (/t/ENG/..., TASK-198); every authenticated fetch follows the hop. The
 # redirect itself is asserted in the TASK-198 section below.
-WCURL=(curl -L -H "$BOARD_COOKIE")
+# Origin: the board refuses any non-GET without its own Origin (LLL-630),
+# as a browser on the board's page would send.
+WCURL=(curl -L -H "$BOARD_COOKIE" -H "Origin: $WEB")
 wcurl() { "${WCURL[@]}" "$@"; }
 
 # A board WRITE, judged (LLL-393). The same bargain lib.sh's seed() makes for
@@ -218,7 +220,7 @@ assert_contains "$wrong_paste" "name='board_token'" "a wrong token leaves the fo
 assert_not_contains "$anon_page" "not accepted" "an untried 401 page reports no failure"
 
 # A POST with no token is refused before any write happens.
-anon_post=$(curl -s -o /dev/null -w '%{http_code}' -X POST \
+anon_post=$(curl -s -o /dev/null -w '%{http_code}' -X POST -H "Origin: $WEB" \
   -d "key=ENG-1&body=anonymous comment" "$WEB/comment")
 [ "$anon_post" = "401" ] || fail "anonymous POST: expected 401, got $anon_post"
 
@@ -462,7 +464,7 @@ curl -s -D - -o /dev/null -H "Cookie: lll_board=$BOARD_TOKEN; lll_view_ENG=done"
   | grep -qi "^set-cookie: lll_view_ENG=;" || fail "an explicit empty ?hide= did not clear the saved view"
 # Saving a view makes it the browser's view: the POST writes the same cookie
 # a board GET would, so a bare reload honors what was just saved.
-curl -s -D - -o /dev/null -X POST "$WEB/views/save" -H "$BOARD_COOKIE" \
+curl -s -D - -o /dev/null -X POST "$WEB/views/save" -H "$BOARD_COOKIE" -H "Origin: $WEB" \
   --data-urlencode "name=Cookie probe" --data-urlencode "team=ENG" \
   --data-urlencode "query=?hide=todo" \
   | grep -qi "^set-cookie: lll_view_ENG=todo" \

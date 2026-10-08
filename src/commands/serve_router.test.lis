@@ -82,3 +82,135 @@ fn router_test_hub() -> Hub {
     snapshots: Channel.new<PageSnapshot>(),
   }
 }
+
+/// LLL-630: the status the board router gives one request from `origin`
+/// (and, when set, Sec-Fetch-Site `site`) to `path` on host 127.0.0.1:8100.
+/// No credential rides it, so 401 means the origin guard let the request
+/// through to the gate and 403 means the guard refused it.
+fn origin_status(
+  router: http.Handler,
+  method: string,
+  path: string,
+  origin: string,
+  site: string,
+) -> int {
+  let mut req = httptest.NewRequest(
+    method,
+    "http://127.0.0.1:8100" + path,
+    strings.NewReader("key=AAA-1&state=done"),
+  )
+  let mut h = req.Header.unwrap_or(http.Header { .. })
+  h.Set("Content-Type", "application/x-www-form-urlencoded")
+  if origin != "" { h.Set("Origin", origin) }
+  if site != "" { h.Set("Sec-Fetch-Site", site) }
+  let mut rec = httptest.NewRecorder()
+  router.ServeHTTP(rec, req)
+  rec.Code
+}
+
+#[test]
+fn every_non_get_request_must_come_from_the_boards_own_origin() {
+  let mut upstream = httptest.NewServer(http.HandlerFunc(|w, _r| {
+    let _ = w.Write("upstream".bytes())
+  }))
+  defer upstream.Close()
+  let Ok(router) = board_mux(
+    config.Config { url: upstream.URL, .. },
+    models.Team { key: "AAA", .. },
+    router_test_hub(),
+    Actor { .. },
+    false,
+  ) else {
+    panic("router failed")
+  }
+  let own = "http://127.0.0.1:8100"
+  for path in [
+    "/state",
+    "/t/AAA/settings/label",
+    "/settings/access/token",
+    "/bot",
+    "/comment",
+    "/create",
+    "/claim",
+    "/labels",
+    "/views/save",
+    "/login",
+    "/join/abc",
+    "/static/theme.css",
+    "/no-such-route",
+  ] {
+    // The board's own page: through to the gate (or the route's own answer).
+    assert origin_status(router, "POST", path, own, "same-origin") != 403
+    // Plain-HTTP LAN: browsers send no Sec-Fetch-Site there, only Origin.
+    assert origin_status(router, "POST", path, own, "") != 403
+    // Everything else is refused before the gate: another port on the same
+    // host even when the browser calls it same-site, no Origin at all, the
+    // opaque null origin, the port-less host, another host, a look-alike
+    // suffix and another scheme.
+    for origin in [
+      "http://127.0.0.1:9999",
+      "",
+      "null",
+      "http://127.0.0.1",
+      "http://localhost:8100",
+      "http://127.0.0.1:8100.evil.example",
+      "ftp://127.0.0.1:8100",
+    ] {
+      assert origin_status(router, "POST", path, origin, "same-site") == 403
+      assert origin_status(router, "POST", path, origin, "") == 403
+    }
+    // A matching Origin with a browser verdict other than same-origin.
+    assert origin_status(router, "POST", path, own, "same-site") == 403
+    assert origin_status(router, "POST", path, own, "cross-site") == 403
+    assert origin_status(router, "POST", path, own, "none") == 403
+    // Every unsafe method, not only POST.
+    for method in ["PUT", "PATCH", "DELETE", "OPTIONS"] {
+      assert origin_status(
+        router,
+        method,
+        path,
+        "http://127.0.0.1:9999",
+        "same-site",
+      ) ==
+      403
+      assert origin_status(router, method, path, "", "") == 403
+    }
+  }
+  // Reads pass untouched: the gate answers them.
+  assert origin_status(
+    router,
+    "GET",
+    "/t/AAA/",
+    "http://127.0.0.1:9999",
+    "same-site",
+  ) ==
+  401
+  assert origin_status(
+    router,
+    "HEAD",
+    "/static/theme.css",
+    "http://127.0.0.1:9999",
+    "cross-site",
+  ) ==
+  401
+  // The PocketBase API is exempt: it authenticates by header, and the CLI
+  // posts there without an Origin.
+  assert origin_status(
+    router,
+    "POST",
+    "/api/collections/issues/records",
+    "",
+    "",
+  ) ==
+  200
+  assert origin_status(
+    router,
+    "POST",
+    "/api/collections/issues/records",
+    "http://127.0.0.1:9999",
+    "same-site",
+  ) ==
+  200
+  // A path that only looks like the API, but lands elsewhere, is not.
+  assert origin_status(router, "POST", "/api/../state", "", "") == 403
+}

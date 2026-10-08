@@ -207,7 +207,7 @@ fn board_mux(
   hub: Hub,
   board_member: Actor,
   admin_ui: bool,
-) -> Result<mut Ref<http.ServeMux>, string> {
+) -> Result<http.Handler, string> {
   let mut mux: mut Ref<http.ServeMux> = http.NewServeMux()
   let team_id = boot.id
   let boot_key = boot.key
@@ -514,7 +514,9 @@ fn board_mux(
     },
   )
 
-  Ok(mux)
+  // LLL-630: every non-GET request, on every route but /api/, must come
+  // from the board's own origin (serve_gate.lis).
+  Ok(same_origin_writes(mux))
 }
 
 /// 303 to `path`, carrying the request's query string over — the bare board
