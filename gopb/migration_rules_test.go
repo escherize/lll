@@ -55,6 +55,9 @@ func TestRulesHelperAddsAndRemovesOneClause(t *testing.T) {
 		{"withoutClause", auth + " && c = 3", "(c = 3)", auth},
 		// && inside quotes or parentheses is not a clause boundary.
 		{"withoutClause", `x = "p && q" && (y = 1 && z = 2)`, `x = "p && q"`, "(y = 1 && z = 2)"},
+		// Whitespace outside quotes does not matter; inside quotes it does.
+		{"withoutClause", "a  =\n 1 && b = 2", "a = 1", "b = 2"},
+		{"withClause", `a = "x  y"`, `a = "x y"`, `a = "x  y" && a = "x y"`},
 	}
 	for _, c := range cases {
 		got, thrown := call(t, vm, c.fn, c.rule, c.clause)
@@ -80,6 +83,15 @@ func TestRulesHelperRefusesWhatOneClauseCannotSay(t *testing.T) {
 		{"withClause", "a = 1 && b = 2", "(b = 2)", "already has the clause b = 2"},
 		{"withoutClause", "a = 1 && b = 2", "c = 3", "has no clause c = 3"},
 		{"withoutClause", "a = 1", "a = 1", "would be empty"},
+		// A comment runs to the end of the line, so a clause after it is ignored.
+		{"withClause", "a = 1 // note", "b = 2", "// comment"},
+		{"withClause", "a = 1", "b = 2 // note", "// comment"},
+		{"withClause", "a = 1", "", "empty clause"},
+		{"withClause", "a = 1", "()", "empty clause"},
+		{"withClause", "a = 1", "b = 2) || (c = 3", `unbalanced ")"`},
+		{"withClause", "a = 1", "(b = 2", `unbalanced "("`},
+		{"withClause", "a = 1", `b = "2`, "unclosed quote"},
+		{"withoutClause", "a = 1 && (b = 2", "a = 1", `unbalanced "("`},
 	}
 	for _, c := range cases {
 		got, thrown := call(t, vm, c.fn, c.rule, c.clause)

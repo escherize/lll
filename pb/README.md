@@ -30,10 +30,10 @@ string:
 
 ```js
 const rules = require(`${__migrations}/lib/rules.js`);
-const NO_AUTHOR = "@request.body.author:isset = false";
+const NO_ASSIGNEE = "@request.body.assignee:isset = false";
 migrate(
-  (app) => rules.addClause(app, "docs", "createRule", NO_AUTHOR),
-  (app) => rules.removeClause(app, "docs", "createRule", NO_AUTHOR),
+  (app) => rules.addClause(app, "issues", "createRule", NO_ASSIGNEE),
+  (app) => rules.removeClause(app, "issues", "createRule", NO_ASSIGNEE),
 );
 ```
 

@@ -69,9 +69,11 @@ def get(url, token=None):
         return json.load(response)
 
 
-def wait_healthy(url, deadline_s=30):
+def wait_healthy(url, deadline_s=30, proc=None):
     end = time.monotonic() + deadline_s
     while time.monotonic() < end:
+        if proc is not None and proc.poll() is not None:
+            raise SystemExit(f"board exited with {proc.returncode} before it became healthy at {url}")
         try:
             get(url + "/api/health")
             return
@@ -111,14 +113,22 @@ def boot_board():
         LLL_ADMIN_EMAIL=ADMIN_EMAIL,
         LLL_ADMIN_PASSWORD=ADMIN_PASSWORD,
     )
-    proc = subprocess.Popen(
-        [BINARY, "up", "--port", str(web_port), "--pb-dir", os.path.join(scratch, "pb_data")],
-        cwd=home, env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-    )
+    # The boot log is printed if the board never comes up: a migration that
+    # throws (pb_migrations/lib/rules.js does, by design) names itself there.
+    log_path = os.path.join(scratch, "boot.log")
+    with open(log_path, "w") as log:
+        proc = subprocess.Popen(
+            [BINARY, "up", "--port", str(web_port), "--pb-dir", os.path.join(scratch, "pb_data")],
+            cwd=home, env=env, stdout=log, stderr=subprocess.STDOUT,
+        )
     try:
-        wait_healthy(url)
+        wait_healthy(url, proc=proc)
     except BaseException:
         proc.terminate()
+        proc.wait(timeout=10)
+        with open(log_path) as log:
+            sys.stderr.write(log.read())
+        shutil.rmtree(scratch, ignore_errors=True)
         raise
     return proc, url, scratch
 

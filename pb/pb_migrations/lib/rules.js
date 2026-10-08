@@ -7,10 +7,10 @@
 // the clause it changes:
 //
 //   const rules = require(`${__migrations}/lib/rules.js`);
-//   const NO_AUTHOR = "@request.body.author:isset = false";
+//   const NO_ASSIGNEE = "@request.body.assignee:isset = false";
 //   migrate(
-//     (app) => rules.addClause(app, "docs", "createRule", NO_AUTHOR),
-//     (app) => rules.removeClause(app, "docs", "createRule", NO_AUTHOR),
+//     (app) => rules.addClause(app, "issues", "createRule", NO_ASSIGNEE),
+//     (app) => rules.removeClause(app, "issues", "createRule", NO_ASSIGNEE),
 //   );
 //
 // `__migrations` is the absolute path of the migrations directory; gopb binds
@@ -21,45 +21,64 @@
 // - the rule is null (superuser only) or "" (anyone). Adding a condition to
 //   either changes who may call the verb in a way one clause cannot express.
 // - the rule has a top-level `||`, so it is not a list of `&&` clauses.
+// - the rule or clause has a `//` comment, unbalanced parentheses or an
+//   unclosed quote, or the clause is empty. A comment runs to the end of the
+//   line, so a clause appended after one would be ignored.
 // - addClause: the clause is already there.
 // - removeClause: the clause is not there, or it is the only clause.
 //
-// Clauses compare as text after trimming and removing parentheses around the
-// whole clause. A clause with its own top-level `&&` or `||` is added in
+// Clauses compare as text after removing parentheses around the whole clause
+// and collapsing whitespace outside quotes. A clause with its own top-level `&&` or `||` is added in
 // parentheses.
 //
 // Applied migrations do not run again, but a fresh database runs every
 // migration with this file as it is at that time. Do not change what an
 // exported function does; add a new function instead.
 
-// Splits `rule` at top-level `sep` ("&&" or "||"), outside quotes and
-// parentheses. Returns the trimmed parts.
-function splitTop(rule, sep) {
-  const parts = [];
+// Scans `text` outside quotes. Returns its top-level `&&` parts (trimmed),
+// whether it has a top-level `||`, and its whitespace-collapsed form. Throws
+// on a comment, unbalanced parentheses or an unclosed quote.
+function scan(text, where) {
+  const ands = [];
+  let hasOr = false;
   let depth = 0;
   let quote = "";
   let start = 0;
-  for (let i = 0; i < rule.length; i++) {
-    const c = rule[i];
+  let flat = "";
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
     if (quote) {
-      if (c === "\\") i++;
+      flat += c;
+      if (c === "\\") flat += text[++i] || "";
       else if (c === quote) quote = "";
       continue;
     }
+    if (/\s/.test(c)) {
+      if (!flat.endsWith(" ")) flat += " ";
+      continue;
+    }
+    flat += c;
     if (c === '"' || c === "'") quote = c;
     else if (c === "(") depth++;
-    else if (c === ")") depth--;
-    else if (depth === 0 && rule.startsWith(sep, i)) {
-      parts.push(rule.slice(start, i).trim());
-      start = i + sep.length;
-      i += sep.length - 1;
+    else if (c === ")" && --depth < 0) throw new Error(`${where}: unbalanced ")": ${text}`);
+    else if (text.startsWith("//", i)) throw new Error(`${where}: a // comment hides what follows it: ${text}`);
+    else if (depth === 0 && text.startsWith("&&", i)) {
+      ands.push(text.slice(start, i).trim());
+      start = i + 2;
+      i++;
+      flat += "&";
+    } else if (depth === 0 && text.startsWith("||", i)) {
+      hasOr = true;
     }
   }
-  parts.push(rule.slice(start).trim());
-  return parts;
+  if (quote) throw new Error(`${where}: unclosed quote: ${text}`);
+  if (depth !== 0) throw new Error(`${where}: unbalanced "(": ${text}`);
+  ands.push(text.slice(start).trim());
+  return { ands, hasOr, flat: flat.trim() };
 }
 
 // True when the parenthesis opening `text` closes at its last character.
+// `text` is already known to be balanced.
 function wrapped(text) {
   if (text[0] !== "(") return false;
   let depth = 0;
@@ -78,17 +97,21 @@ function wrapped(text) {
   return false;
 }
 
-// The form a clause compares in: trimmed, outer parentheses removed.
-function bare(clause) {
+// The form a clause compares in: outer parentheses removed, whitespace
+// outside quotes collapsed.
+function bare(clause, where) {
   let text = clause.trim();
+  scan(text, where);
   while (wrapped(text)) text = text.slice(1, -1).trim();
-  return text;
+  return scan(text, where).flat;
 }
 
 // The form a clause is written in: parenthesized if it has its own `&&`/`||`.
-function written(clause) {
-  const text = bare(clause);
-  return splitTop(text, "&&").length > 1 || splitTop(text, "||").length > 1 ? `(${text})` : text;
+function written(clause, where) {
+  const text = bare(clause, where);
+  if (text === "") throw new Error(`${where}: empty clause`);
+  const { ands, hasOr } = scan(text, where);
+  return ands.length > 1 || hasOr ? `(${text})` : text;
 }
 
 function clausesOf(collection, ruleName) {
@@ -96,27 +119,32 @@ function clausesOf(collection, ruleName) {
   const where = `${collection.name}.${ruleName}`;
   if (rule === null || rule === undefined) throw new Error(`${where} is null (superuser only); set it whole`);
   if (rule.trim() === "") throw new Error(`${where} is "" (anyone); set it whole`);
-  if (splitTop(rule, "||").length > 1) throw new Error(`${where} has a top-level ||: ${rule}`);
-  return splitTop(rule, "&&");
+  const { ands, hasOr } = scan(rule, where);
+  if (hasOr) throw new Error(`${where} has a top-level ||: ${rule}`);
+  return ands;
 }
 
-// Returns `rule` with `clause` appended as a top-level `&&` clause.
+// Returns the rule with `clause` appended as a top-level `&&` clause.
 function withClause(collection, ruleName, clause) {
+  const where = `${collection.name}.${ruleName}`;
   const clauses = clausesOf(collection, ruleName);
-  if (clauses.some((c) => bare(c) === bare(clause))) {
-    throw new Error(`${collection.name}.${ruleName} already has the clause ${bare(clause)}`);
+  const add = written(clause, where);
+  if (clauses.some((c) => bare(c, where) === bare(add, where))) {
+    throw new Error(`${where} already has the clause ${bare(add, where)}`);
   }
-  return clauses.concat([written(clause)]).join(" && ");
+  return clauses.concat([add]).join(" && ");
 }
 
-// Returns `rule` without the top-level `&&` clause `clause`.
+// Returns the rule without the top-level `&&` clause `clause`.
 function withoutClause(collection, ruleName, clause) {
+  const where = `${collection.name}.${ruleName}`;
   const clauses = clausesOf(collection, ruleName);
-  const kept = clauses.filter((c) => bare(c) !== bare(clause));
+  const drop = bare(clause, where);
+  const kept = clauses.filter((c) => bare(c, where) !== drop);
   if (kept.length === clauses.length) {
-    throw new Error(`${collection.name}.${ruleName} has no clause ${bare(clause)}: ${collection[ruleName]}`);
+    throw new Error(`${where} has no clause ${drop}: ${collection[ruleName]}`);
   }
-  if (kept.length === 0) throw new Error(`${collection.name}.${ruleName} would be empty, which means anyone`);
+  if (kept.length === 0) throw new Error(`${where} would be empty, which means anyone`);
   return kept.join(" && ");
 }
 

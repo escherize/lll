@@ -7,8 +7,9 @@ name is the migration's identity:
 
 - Renaming a shipped migration runs it again on every existing database, as a
   new migration, after everything that came later. 1789900000_member_teams.js
-  rewrites every collection rule, so running it again would undo every rule
-  migration after it. SHIPPED below must keep existing.
+  sets every member to scope "all" and mode "rw" and rewrites every
+  collection rule, so running it again would widen every scoped guest and
+  undo every rule migration after it. SHIPPED below must keep existing.
 - Two files with the same timestamp apply in name order. Three pairs exist
   and stay (see DUPLICATES). A new one fails here: give the file a timestamp
   of its own.
