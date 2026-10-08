@@ -193,7 +193,9 @@ with tempfile.TemporaryDirectory(prefix='lll-team-scope-') as directory:
         for path in ['/api/collections/webhooks/records?filter=' + urllib.parse.quote('secret ~ "wh%"'),
                      '/api/collections/webhooks/records?sort=secret',
                      '/api/collections/teams/records?filter=' + urllib.parse.quote('webhooks_via_team.secret ~ "wh%"')]:
-            assert call(api, path, token=ro)[0] == 400, path
+            # 400: PocketBase refuses a hidden field. 403: the LLL-634 probe
+            # guard refuses a back-relation first. Either way, no rows.
+            assert call(api, path, token=ro)[0] in (400, 403), path
         assert call(api, f"/api/collections/webhooks/records/{hook['id']}", {'url': 'https://evil.test/'}, tok, 'PATCH')[0] == 403
         assert call(api, f"/api/collections/webhooks/records/{hook['id']}", token=tok, method='DELETE')[0] == 204
         cli_ro = {k: v for k, v in cli.items() if not k.startswith('LLL_ADMIN_')}
