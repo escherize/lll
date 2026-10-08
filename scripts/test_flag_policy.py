@@ -254,8 +254,12 @@ def main():
                     problems.append(f"{where}: alias-only spelling '{token}' in: {line.strip()}")
 
     sources = sorted(p for p in (ROOT / 'src').rglob('*.lis') if not p.name.endswith('.test.lis'))
+    # Every skill: the shipped ones (mirrored into skills/) and repo-only
+    # overlays such as lll-repo.
     docs = [ROOT / 'README.md', *sorted((ROOT / 'docs').glob('*.md')),
             *sorted((ROOT / '.claude' / 'skills').glob('*/SKILL.md'))]
+    overlay = ROOT / '.claude' / 'skills' / 'lll-repo' / 'SKILL.md'
+    assert not overlay.exists() or overlay in docs, 'the lll-repo overlay must be scanned'
     corpus = [(str(p.relative_to(ROOT)), s) for p in sources for s in string_literals(p.read_text())]
     corpus += [(str(p.relative_to(ROOT)), p.read_text()) for p in docs if p.name not in SKIP_DOCS]
     # The board's copy, the landing page and the server's own messages.

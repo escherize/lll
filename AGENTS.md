@@ -13,6 +13,13 @@ Before starting, read [.claude/skills/lll/SKILL.md](.claude/skills/lll/SKILL.md)
 It is the shared source for tracking, token identity, recording findings,
 verification and the claim-before-code workflow. Read an issue fully, claim
 it before nontrivial work, record discoveries, and close it after verification.
+
+Those two, with `backlog-loop`, `merge-gate` and `codebase-skills`, ship in
+the binary and are written for any repo: they say "your team" and "your
+project's gate". This repo's answers (team `LLL`, `mise run gate`, scratch
+boards, the archive, the repo-only skills for stages 2-4) are in
+[.claude/skills/lll-repo/SKILL.md](.claude/skills/lll-repo/SKILL.md). Read it
+alongside them.
 <!-- /tracker pointer -->
 
 ## Task-specific implementation guidance

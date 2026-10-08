@@ -66,10 +66,23 @@ def main() -> None:
         for target in re.findall(r"\]\(\.\./([^/)]+)/SKILL\.md\)", text)
         if target not in PORTABLE
     ]
+    # Naming a repo-only skill in backticks reads as "go read it", and in any
+    # other repo there is nothing to read (LLL-647). Repo specifics belong in
+    # the lll-repo overlay, which does not ship.
+    repo_only = sorted(
+        d.name for d in SOURCE.iterdir()
+        if (d / "SKILL.md").is_file() and d.name not in PORTABLE
+    )
+    dead += [
+        f"{name} names `{other}`, which does not ship"
+        for name, text in want.items()
+        for other in repo_only
+        if f"`{other}`" in text
+    ]
     if dead:
         for line in dead:
             print(f"  {line}", file=sys.stderr)
-        sys.exit("shipped skills link to unshipped ones — name them in plain text")
+        sys.exit("shipped skills point at skills that do not ship; move repo specifics to .claude/skills/lll-repo")
 
     if check:
         if want == have:
