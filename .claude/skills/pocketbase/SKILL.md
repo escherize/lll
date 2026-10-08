@@ -103,7 +103,14 @@ full-access callers and strips hidden team ids. Two traps came out of it:
   back-relation compiles to. `labels.name ~ "ae%"` reads hidden labels' names
   (finding `pb-relation-filters-skip-target-rules`, LLL-634). `roster.go`
   refuses any filter or sort that walks into or out of `members` for a narrow
-  caller, on the list endpoint and on realtime subscriptions.
+  caller, on the list endpoint and on realtime subscriptions, and
+  `readsHiddenRows` refuses a plain operator through any multi-valued
+  relation, back-relation or `@collection`. A new filter a scoped caller
+  needs must use `?=`/`?~` there.
+- **A reference stays inside one team** (LLL-631, `gopb/team_refs.go`). The
+  check runs on every save, superusers included. A new relation from a
+  team-owned collection to another goes in `scopedRefs` (`team_scope.go`),
+  or it is unchecked.
 - **The board reads as an all-scope member.** Rules do nothing for its pages;
   `src/commands/serve_roster.lis` applies the roster before rendering.
 
