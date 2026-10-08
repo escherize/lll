@@ -80,6 +80,7 @@ fn router_test_hub() -> Hub {
     ids: Channel.new<int>(),
     observers: Channel.new<ScopeQuery>(),
     snapshots: Channel.new<PageSnapshot>(),
+    scopes: Channel.new<Channel<Slice<string>>>(),
   }
 }
 

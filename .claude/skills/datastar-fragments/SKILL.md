@@ -22,8 +22,12 @@ source subscription into the boot team's or one column's view.
 
 A board connection is scoped by team and ordering; an issue connection is
 scoped by key. Board membership/order changes render the board from a fresh
-read. Issue streams obtain a fresh initial snapshot, and the bridge serializes
-current-state reads so a queued old event record does not overwrite it.
+read. Issue streams obtain a fresh initial snapshot. The bridge runs each
+refresh on one of a few workers, and two refreshes of the same views (one
+team's board, one issue page) never overlap, so a slow read stalls only its
+own views and an older read cannot land after a newer one. PocketBase does
+not replay events missed while its stream was down, so after a realtime
+reconnect the bridge re-renders every open view.
 Description revisions are per connection and advance only after queue delivery;
 a global last-description value cannot represent what slow or new clients saw.
 

@@ -68,3 +68,77 @@ fn scoped_clients_receive_only_their_teams_data() {
   let _ = deliver(own, Broadcast { scope: "board:AAA:manual", team: "AAA", payload: "aaa", .. })
   assert scoped.receive().unwrap_or("") == "aaa"
 }
+
+fn board_job(team: string, order: string, client_id: int) -> Refresh {
+  Refresh.Board(BoardRefresh { team_key: team, team_id: "", order, client_id })
+}
+
+#[test]
+fn refresh_queue_bounds_workers_and_serializes_each_view() {
+  let mut q = RefreshQueue.new()
+  q.submit(board_job("AAA", "", 0))
+  q.submit(board_job("BBB", "", 0))
+  q.submit(Refresh.Favorites)
+  let started = q.start(2)
+  assert started.length() == 2
+  assert started[0].key == "board:AAA"
+  assert started[1].key == "board:BBB"
+  // A refresh of a running view waits for it, merged with the next one.
+  q.submit(board_job("AAA", "manual", 7))
+  q.submit(board_job("AAA", "updated", 7))
+  assert q.start(2).is_empty()
+  q.finished(RunEnd { key: "board:AAA", id: started[0].id })
+  let next = q.start(2)
+  assert next.length() == 1
+  assert next[0].key == "favorites"
+  q.finished(RunEnd { key: "board:BBB", id: started[1].id })
+  let again = q.start(2)
+  assert again.length() == 1
+  assert again[0].key == "board:AAA"
+  let assert Refresh.Board(merged) = again[0].job
+  assert merged.order == ""
+  assert merged.client_id == 7
+}
+
+#[test]
+fn refresh_queue_frees_the_worker_of_an_overdue_run_once() {
+  let mut q = RefreshQueue.new()
+  q.submit(board_job("SLOW", "", 0))
+  q.submit(board_job("FAST", "", 0))
+  let first = q.start(1)
+  assert first.length() == 1
+  let slow = RunEnd { key: "board:SLOW", id: first[0].id }
+  assert q.overdue(slow)
+  assert !q.overdue(slow)
+  // The worker went to the next view; the slow one's own views still wait.
+  let second = q.start(1)
+  assert second.length() == 1
+  assert second[0].key == "board:FAST"
+  q.submit(board_job("SLOW", "", 0))
+  q.finished(RunEnd { key: "board:FAST", id: second[0].id })
+  assert q.start(1).is_empty()
+  q.finished(slow)
+  let third = q.start(1)
+  assert third.length() == 1
+  assert third[0].key == "board:SLOW"
+  // A stale report about an earlier run changes nothing.
+  q.finished(slow)
+  assert !q.overdue(slow)
+}
+
+#[test]
+fn a_reconnect_rereads_every_open_view_and_the_rail() {
+  let jobs = resync_refreshes(["board:ENG:manual", "issue:ENG-3", "board:OPS-2:updated", "something:else"])
+  let keys = jobs.map(refresh_key)
+  assert keys.equals(["favorites", "views", "board:ENG", "issue:ENG-3", "board:OPS-2"])
+  let assert Refresh.Board(ops) = jobs[4]
+  assert ops.order == "updated"
+  assert ops.client_id == 0
+}
+
+#[test]
+fn replace_event_names_its_selector_and_every_line() {
+  let ev = replace_event("#comment-form", "<a>\n</a>")
+  assert ev == "event: datastar-patch-elements\ndata: mode replace\ndata: selector #comment-form\ndata: elements <a>\ndata: elements </a>\n\n"
+  assert patch_event("<a>") == "event: datastar-patch-elements\ndata: elements <a>\n\n"
+}

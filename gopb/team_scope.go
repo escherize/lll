@@ -76,7 +76,7 @@ func effectiveAccess(app core.App, auth *core.Record) access {
 
 // issueWritable answers 404 for an issue outside the caller's teams, the same
 // answer a rule gives, so the route does not reveal that the issue exists,
-// and 403 for a read-only member. An issue that does not exist is left to the
+// and 403 for a read-only member or an archived team (team_writes.go). An issue that does not exist is left to the
 // route's own handling.
 func issueWritable(re *core.RequestEvent, issueID string) error {
 	issue, err := re.App.FindRecordById("issues", issueID)
@@ -90,7 +90,7 @@ func issueWritable(re *core.RequestEvent, issueID string) error {
 	if !acc.rw {
 		return re.ForbiddenError(readOnlyRefusal(re.Auth), nil)
 	}
-	return nil
+	return archivedRefusal(re.App, re.Auth, issue.GetString("team"))
 }
 
 // registerMemberScopeDefault gives a member created without a scope or mode

@@ -111,6 +111,14 @@ full-access callers and strips hidden team ids. Two traps came out of it:
   check runs on every save, superusers included. A new relation from a
   team-owned collection to another goes in `scopedRefs` (`team_scope.go`),
   or it is unchecked.
+- **An archived team is read-only** (LLL-660, `gopb/team_writes.go`).
+  Request hooks refuse records-API writes to issues, comments, claims, docs,
+  labels and projects, and `issueWritable` refuses the `/api/lll` routes.
+  Model saves are not checked, on purpose: deleting a member clears its
+  assignments through them. A new collection holding a team's records goes in
+  `archivedGuarded`.
+- **An assignee can see the issue's team** (LLL-670, same file), checked on
+  every save that sets the assignee or moves the issue.
 - **The board reads as an all-scope member.** Rules do nothing for its pages;
   `src/commands/serve_roster.lis` applies the roster before rendering.
 

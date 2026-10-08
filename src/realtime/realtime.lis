@@ -169,6 +169,32 @@ pub fn subscribe(
   topics: Slice<string>,
   on_dead_token: DeadToken,
 ) -> Result<Channel<Event>, string> {
+  start(base_url, topics, on_dead_token, false)
+}
+
+/// The topic of the event subscribe_resyncing sends after each reconnect.
+/// PocketBase does not replay what happened while the stream was down, so a
+/// consumer that renders state (the board, LLL-666) re-reads everything it
+/// shows when this arrives. Not a PocketBase topic: it carries no data.
+pub const RESYNC: string = "lll:resync"
+
+/// subscribe, plus one Event { topic: RESYNC } after every reconnect, sent
+/// once the new subscriptions are accepted and before the first event they
+/// carry. The first connection sends none: there was no outage to cover.
+pub fn subscribe_resyncing(
+  base_url: string,
+  topics: Slice<string>,
+  on_dead_token: DeadToken,
+) -> Result<Channel<Event>, string> {
+  start(base_url, topics, on_dead_token, true)
+}
+
+fn start(
+  base_url: string,
+  topics: Slice<string>,
+  on_dead_token: DeadToken,
+  resync: bool,
+) -> Result<Channel<Event>, string> {
   let ch = Channel.new<Event>()
   let mut reader = match connect(base_url, topics) {
     Ok(r) => r,
@@ -181,7 +207,7 @@ pub fn subscribe(
   }
   task {
     pump(reader, ch)
-    reconnect(base_url, topics, on_dead_token, ch)
+    reconnect(base_url, topics, on_dead_token, ch, resync)
   }
   Ok(ch)
 }
@@ -195,6 +221,7 @@ fn reconnect(
   topics: Slice<string>,
   on_dead_token: DeadToken,
   ch: Channel<Event>,
+  resync: bool,
 ) {
   fmt.Fprintln(os.Stderr, "realtime: lll server stream lost — reconnecting")
   let mut last_err = ""
@@ -204,6 +231,7 @@ fn reconnect(
       Ok(r) => {
         fmt.Fprintln(os.Stderr, "realtime: reconnected to the lll server (subscriptions accepted)")
         last_err = ""
+        if resync { let _ = ch.send(Event { topic: RESYNC, data: "" }) }
         pump(r, ch)
         fmt.Fprintln(os.Stderr, "realtime: lll server stream lost — reconnecting")
       },
