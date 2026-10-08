@@ -205,6 +205,12 @@ func respondClaim(re *core.RequestEvent, outcome ClaimOutcome, err error) error 
 	if errors.As(err, &rejected) {
 		return withCode(re.BadRequestError(rejected.Error(), nil), rejected.code)
 	}
+	// An answer already shaped for the wire: the assignment route's
+	// precondition (412, or 400 for a malformed stamp; LLL-665).
+	var answered *router.ApiError
+	if errors.As(err, &answered) {
+		return answered
+	}
 	return writeFailure(re, err, "issue or member no longer exists", "invalid issue fields", "claim transaction failed")
 }
 

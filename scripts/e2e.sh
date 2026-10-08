@@ -205,7 +205,10 @@ assert_contains "$out" "OPS-1" "list has OPS-1"
 assert_not_contains "$out" "OPS-2" "no OPS-2"
 
 # --- forged duplicate (team, number) rejected by unique index ---
-status=$(curl -s -o "$DATA_DIR/forged.json" -w '%{http_code}' -H "$AUTH_HDR" \
+# As a superuser: a member's explicit number is the server's to replace
+# (LLL-678), so only a superuser's can collide.
+FORGE_TOK=$(pb_superuser_token "$URL") || fail "superuser token for the forged duplicate"
+status=$(curl -s -o "$DATA_DIR/forged.json" -w '%{http_code}' -H "Authorization: Bearer $FORGE_TOK" \
   -X POST "$URL/api/collections/issues/records" \
   -H 'Content-Type: application/json' \
   -d "{\"team\":\"$ENG_ID\",\"number\":1,\"title\":\"forged\",\"state\":\"todo\"}")
@@ -953,7 +956,7 @@ code=$(curl -s -o /dev/null -w '%{http_code}' -H "Authorization: Bearer $TOKEN" 
   "$URL/api/collections/issues/records?perPage=1")
 [ "$code" = 200 ] || fail "authenticated GET with the member token returned $code"
 # The assignee/author paths are asserted unchanged further below, where the
-# issues they point at exist (ENG-7: 'assignee relation' + comment author).
+# issues they point at exist (ENG-8: 'assignee relation' + comment author).
 
 # Per-member tokens (TASK-317): identity is the token's member now, so a test
 # that writes as bryan carries bryan's token rather than LLL_ME=bryan. Minted
@@ -984,17 +987,18 @@ ALICE_TOK=$(mint_tok alice)
 
 # --- --assignee on create; assignee in list and view ---
 out=$(LLL_URL=$URL LLL_TEAM=ENG "$LIN" issue create -t "Assigned issue" --assignee bryan)
-assert_contains "$out" "Created ENG-7: Assigned issue" "assigned create output"
+# LLL-678: ENG-7 was deleted above and its number is never reused.
+assert_contains "$out" "Created ENG-8: Assigned issue" "assigned create output"
 out=$(LLL_URL=$URL LLL_TEAM=ENG "$LIN" issue list)
 assert_contains "$out" "bryan" "list shows assignee column"
-out=$(LLL_URL=$URL "$LIN" issue view ENG-7)
+out=$(LLL_URL=$URL "$LIN" issue view ENG-8)
 assert_contains "$out" "Assignee:  bryan" "view shows assignee"
 out=$(LLL_URL=$URL "$LIN" issue view ENG-6)
 assert_contains "$out" "Assignee:  none" "view shows unassigned as none"
 
 # --- --assignee filter on list ---
 out=$(LLL_URL=$URL LLL_TEAM=ENG "$LIN" issue list --assignee bryan)
-assert_contains "$out" "ENG-7" "assignee filter shows assigned issue"
+assert_contains "$out" "ENG-8" "assignee filter shows assigned issue"
 assert_not_contains "$out" "ENG-6" "assignee filter hides unassigned issues"
 
 # --- --assignee on update ---
@@ -1004,7 +1008,7 @@ out=$(LLL_URL=$URL "$LIN" issue view ENG-6)
 assert_contains "$out" "Assignee:  alice" "update set assignee"
 out=$(LLL_URL=$URL LLL_TEAM=ENG "$LIN" issue list --assignee alice)
 assert_contains "$out" "ENG-6" "assignee filter finds updated issue"
-assert_not_contains "$out" "ENG-7" "assignee filter scoped to alice"
+assert_not_contains "$out" "ENG-8" "assignee filter scoped to alice"
 
 # --- unknown member errors and names the fix ---
 set +e
@@ -1030,7 +1034,7 @@ set -e
 assert_contains "$out" "no member named 'nobody'" "list unknown member message"
 
 # --- --json resolves expand.assignee ---
-aname=$(LLL_URL=$URL "$LIN" issue view ENG-7 --json | jq -r '.expand.assignee.name')
+aname=$(LLL_URL=$URL "$LIN" issue view ENG-8 --json | jq -r '.expand.assignee.name')
 [ "$aname" = "bryan" ] || fail "view --json: expected expand.assignee.name bryan, got '$aname'"
 aname=$(LLL_URL=$URL LLL_TEAM=ENG "$LIN" issue list --assignee bryan --json | \
   jq -r '.items[0].expand.assignee.name')
@@ -1038,27 +1042,27 @@ aname=$(LLL_URL=$URL LLL_TEAM=ENG "$LIN" issue list --assignee bryan --json | \
 
 # --- comment add authored by the token; shown with relative date ---
 printf 'url = "%s"\nteam = "ENG"\nme = "bryan"\n' "$URL" > "$WORK/.lll.toml"
-out=$(cd "$WORK" && env -u LLL_URL -u LLL_TEAM LLL_TOKEN="$BRYAN_TOK" LLL_ME=bryan HOME="$FAKEHOME" "$LLL_ABS" issue comment ENG-7 -b "Looks good to me")
-assert_contains "$out" "Commented on ENG-7 as bryan" "comment add output names the token's member, which 'me' agrees with"
+out=$(cd "$WORK" && env -u LLL_URL -u LLL_TEAM LLL_TOKEN="$BRYAN_TOK" LLL_ME=bryan HOME="$FAKEHOME" "$LLL_ABS" issue comment ENG-8 -b "Looks good to me")
+assert_contains "$out" "Commented on ENG-8 as bryan" "comment add output names the token's member, which 'me' agrees with"
 
-out=$(LLL_URL=$URL "$LIN" issue view ENG-7)
+out=$(LLL_URL=$URL "$LIN" issue view ENG-8)
 assert_contains "$out" "Comments:" "view has comments section"
 assert_contains "$out" "bryan (just now)" "view comment author and relative date"
 assert_contains "$out" "Looks good to me" "view comment body"
 
 # --- comment list without -b ---
-out=$(LLL_URL=$URL "$LIN" issue comment ENG-7)
+out=$(LLL_URL=$URL "$LIN" issue comment ENG-8)
 assert_contains "$out" "bryan (just now)" "comment list author"
 assert_contains "$out" "Looks good to me" "comment list body"
 assert_contains "$out" "#1 bryan (just now)" "comments are numbered (TASK-320)"
 
 # --- comment edit / delete: your own, or --force (TASK-320) ---
-out=$(LLL_URL=$URL LLL_TOKEN="$BRYAN_TOK" LLL_ME=bryan "$LIN" issue comment edit ENG-7 1 -b "Looks good to me, edited")
-assert_contains "$out" "Edited comment #1 on ENG-7" "comment edit output"
-out=$(LLL_URL=$URL "$LIN" issue comment ENG-7)
+out=$(LLL_URL=$URL LLL_TOKEN="$BRYAN_TOK" LLL_ME=bryan "$LIN" issue comment edit ENG-8 1 -b "Looks good to me, edited")
+assert_contains "$out" "Edited comment #1 on ENG-8" "comment edit output"
+out=$(LLL_URL=$URL "$LIN" issue comment ENG-8)
 assert_contains "$out" "Looks good to me, edited" "the edited body landed"
 set +e
-out=$(LLL_URL=$URL LLL_TOKEN="$CAROL_TOK" LLL_ME=carol "$LIN" issue comment delete ENG-7 1 2>&1)
+out=$(LLL_URL=$URL LLL_TOKEN="$CAROL_TOK" LLL_ME=carol "$LIN" issue comment delete ENG-8 1 2>&1)
 rc=$?
 set -e
 [ "$rc" -ne 0 ] || fail "deleting someone else's comment: expected nonzero exit"
@@ -1067,26 +1071,26 @@ assert_contains "$out" "--force" "the refusal names the override"
 # LLL-646 review: only a comment's author changes it, enforced by the server,
 # so a member's --force is refused too and nothing changes.
 set +e
-out=$(LLL_URL=$URL LLL_TOKEN="$CAROL_TOK" LLL_ME=carol "$LIN" issue comment delete ENG-7 1 --force 2>&1)
+out=$(LLL_URL=$URL LLL_TOKEN="$CAROL_TOK" LLL_ME=carol "$LIN" issue comment delete ENG-8 1 --force 2>&1)
 rc=$?
-out_edit=$(LLL_URL=$URL LLL_TOKEN="$CAROL_TOK" LLL_ME=carol "$LIN" issue comment edit ENG-7 1 --force -b "carol's words" 2>&1)
+out_edit=$(LLL_URL=$URL LLL_TOKEN="$CAROL_TOK" LLL_ME=carol "$LIN" issue comment edit ENG-8 1 --force -b "carol's words" 2>&1)
 rc_edit=$?
 set -e
 [ "$rc" -ne 0 ] && [ "$rc_edit" -ne 0 ] || fail "a member's --force changed another member's comment"
 assert_contains "$out" "comment's author can change or delete it" "the server refuses another member's delete"
 assert_contains "$out_edit" "comment's author can change or delete it" "the server refuses another member's edit"
-out=$(LLL_URL=$URL "$LIN" issue comment ENG-7)
+out=$(LLL_URL=$URL "$LIN" issue comment ENG-8)
 assert_contains "$out" "Looks good to me, edited" "the refused change left the comment"
-out=$(LLL_URL=$URL LLL_TOKEN="$BRYAN_TOK" LLL_ME=bryan "$LIN" issue comment delete ENG-7 1)
-assert_contains "$out" "Deleted comment #1 on ENG-7 (was bryan's)" "the author deletes and it says whose it was"
-out=$(LLL_URL=$URL "$LIN" issue comment ENG-7)
+out=$(LLL_URL=$URL LLL_TOKEN="$BRYAN_TOK" LLL_ME=bryan "$LIN" issue comment delete ENG-8 1)
+assert_contains "$out" "Deleted comment #1 on ENG-8 (was bryan's)" "the author deletes and it says whose it was"
+out=$(LLL_URL=$URL "$LIN" issue comment ENG-8)
 assert_not_contains "$out" "Looks good to me, edited" "the deleted comment is gone"
 set +e
-out=$(LLL_URL=$URL "$LIN" issue comment delete ENG-7 9 2>&1)
+out=$(LLL_URL=$URL "$LIN" issue comment delete ENG-8 9 2>&1)
 set -e
 assert_contains "$out" "there is no #9" "an out-of-range number is told the count"
 # put the comment back for the assertions that follow
-out=$(LLL_URL=$URL LLL_TOKEN="$BRYAN_TOK" LLL_ME=bryan "$LIN" issue comment ENG-7 -b "Looks good to me")
+out=$(LLL_URL=$URL LLL_TOKEN="$BRYAN_TOK" LLL_ME=bryan "$LIN" issue comment ENG-8 -b "Looks good to me")
 
 # --- authorless comments: a superuser token has no member identity ---
 # Use an empty home to keep the superuser-token fixture isolated from
@@ -1094,26 +1098,26 @@ out=$(LLL_URL=$URL LLL_TOKEN="$BRYAN_TOK" LLL_ME=bryan "$LIN" issue comment ENG-
 NOME_HOME="$DATA_DIR/nome_home"; mkdir -p "$NOME_HOME/.config/lll"
 # A member token always names its member (TASK-317), so "no author" needs a
 # token that names nobody: the superuser's, with no 'me' anywhere.
-out=$(env -u LLL_ME LLL_TOKEN="$SU_TOK" HOME="$NOME_HOME" LLL_URL=$URL LLL_TEAM=ENG "$LIN" issue comment ENG-7 -b "Anonymous note")
-assert_contains "$out" "Commented on ENG-7 with no author" "authorless comment (superuser token, me unset) accepted, and says so"
+out=$(env -u LLL_ME LLL_TOKEN="$SU_TOK" HOME="$NOME_HOME" LLL_URL=$URL LLL_TEAM=ENG "$LIN" issue comment ENG-8 -b "Anonymous note")
+assert_contains "$out" "Commented on ENG-8 with no author" "authorless comment (superuser token, me unset) accepted, and says so"
 
 # Legacy me cannot choose an author or block an authenticated write.
 printf 'url = "%s"\nteam = "ENG"\nme = "ghost"\n' "$URL" > "$WORK/.lll.toml"
-out=$(cd "$WORK" && env -u LLL_URL -u LLL_TEAM LLL_TOKEN="$SU_TOK" HOME="$FAKEHOME" "$LLL_ABS" issue comment ENG-7 -b "Ghost note")
+out=$(cd "$WORK" && env -u LLL_URL -u LLL_TEAM LLL_TOKEN="$SU_TOK" HOME="$FAKEHOME" "$LLL_ABS" issue comment ENG-8 -b "Ghost note")
 assert_contains "$out" "with no author" "superuser has no member despite legacy me"
 
 # TASK-317: the token decides. LLL-445: it decides SILENTLY — a disagreeing
 # 'me' used to refuse the write, which only ever told the user what the write
 # would have done anyway, while locking anyone who switched tokens out until
 # they also edited a config file. The write lands, authored by the token.
-out=$(LLL_URL=$URL LLL_TOKEN="$BRYAN_TOK" LLL_ME=carol "$LIN" issue comment ENG-7 -b "Wrong hat" 2>&1) \
+out=$(LLL_URL=$URL LLL_TOKEN="$BRYAN_TOK" LLL_ME=carol "$LIN" issue comment ENG-8 -b "Wrong hat" 2>&1) \
   || fail "a token with a disagreeing 'me' must still write, got: $out"
-out=$(LLL_URL=$URL "$LIN" issue comment ENG-7)
+out=$(LLL_URL=$URL "$LIN" issue comment ENG-8)
 assert_contains "$out" "Wrong hat" "the comment landed despite the disagreeing me"
 assert_contains "$out" "bryan" "it authored as the token's member"
 assert_not_contains "$out" "carol (just now)" "and not as the configured me"
 
-out=$(LLL_URL=$URL "$LIN" issue comment ENG-7)
+out=$(LLL_URL=$URL "$LIN" issue comment ENG-8)
 assert_contains "$out" "anon (just now)" "an unset-me comment renders as anon"
 assert_contains "$out" "Anonymous note" "authorless body listed"
 assert_contains "$out" "Ghost note" "the legacy me did not refuse the write"
@@ -1200,9 +1204,9 @@ assert_contains "$out" "check 'lll label list' first" "label create --help carri
 
 # --- issue created with labels + project ---
 out=$(LLL_URL=$URL LLL_TEAM=ENG "$LIN" issue create -t "Labeled login fix" --label bug --label chore --project "Auth Revamp")
-assert_contains "$out" "Created ENG-8: Labeled login fix" "labeled create output"
+assert_contains "$out" "Created ENG-9: Labeled login fix" "labeled create output"
 
-out=$(LLL_URL=$URL "$LIN" issue view ENG-8)
+out=$(LLL_URL=$URL "$LIN" issue view ENG-9)
 assert_contains "$out" "Project:   Auth Revamp" "view shows project"
 assert_contains "$out" "Labels:    bug, chore" "view shows labels"
 out=$(LLL_URL=$URL "$LIN" issue view ENG-6)
@@ -1211,10 +1215,10 @@ assert_contains "$out" "Labels:    none" "view shows unset labels as none"
 
 # --- --label / --project filter issue list ---
 out=$(LLL_URL=$URL LLL_TEAM=ENG "$LIN" issue list --label bug)
-assert_contains "$out" "ENG-8" "label filter shows labeled issue"
+assert_contains "$out" "ENG-9" "label filter shows labeled issue"
 assert_not_contains "$out" "ENG-6" "label filter hides unlabeled issues"
 out=$(LLL_URL=$URL LLL_TEAM=ENG "$LIN" issue list --project "Auth Revamp")
-assert_contains "$out" "ENG-8" "project filter shows project issue"
+assert_contains "$out" "ENG-9" "project filter shows project issue"
 assert_not_contains "$out" "ENG-6" "project filter hides other issues"
 
 # --- --label / --project on update ---
@@ -1225,10 +1229,10 @@ assert_contains "$out" "Project:   Perf Push" "update set project"
 assert_contains "$out" "Labels:    chore" "update set labels"
 out=$(LLL_URL=$URL LLL_TEAM=ENG "$LIN" issue list --project "Perf Push")
 assert_contains "$out" "ENG-6" "project filter finds updated issue"
-assert_not_contains "$out" "ENG-8" "project filter scoped to Perf Push"
+assert_not_contains "$out" "ENG-9" "project filter scoped to Perf Push"
 out=$(LLL_URL=$URL LLL_TEAM=ENG "$LIN" issue list --label chore)
 assert_contains "$out" "ENG-6" "label filter finds updated issue"
-assert_contains "$out" "ENG-8" "label filter matches multi-relation membership"
+assert_contains "$out" "ENG-9" "label filter matches multi-relation membership"
 
 # --- --add-label / --remove-label edit the set without replacing it (LLL-513) ---
 out=$(LLL_URL=$URL "$LIN" issue update ENG-6 --add-label bug)
@@ -1257,13 +1261,13 @@ assert_contains "$out" "Status:  planned" "project view status"
 assert_contains "$out" "Team:    ENG" "project view team"
 assert_contains "$out" "Rework the login flow" "project view description"
 assert_contains "$out" "Issues:" "project view issues section"
-assert_contains "$out" "ENG-8" "project view lists its issue"
+assert_contains "$out" "ENG-9" "project view lists its issue"
 assert_contains "$out" "Labeled login fix" "project view issue title"
 assert_not_contains "$out" "ENG-6" "project view scoped to its issues"
 
 # --- --search matches title substrings ---
 out=$(LLL_URL=$URL LLL_TEAM=ENG "$LIN" issue list --search "abeled login")
-assert_contains "$out" "ENG-8" "search matches title substring"
+assert_contains "$out" "ENG-9" "search matches title substring"
 assert_not_contains "$out" "ENG-6" "search hides non-matching titles"
 out=$(LLL_URL=$URL LLL_TEAM=ENG "$LIN" issue list --search "zz-no-such-title")
 assert_not_contains "$out" "ENG-" "non-matching search yields no issues"
@@ -1300,9 +1304,9 @@ set -e
 assert_contains "$out" "no project named 'nosuch'" "project view unknown name message"
 
 # --- --json resolves expand.project and expand.labels ---
-pname=$(LLL_URL=$URL "$LIN" issue view ENG-8 --json | jq -r '.expand.project.name')
+pname=$(LLL_URL=$URL "$LIN" issue view ENG-9 --json | jq -r '.expand.project.name')
 [ "$pname" = "Auth Revamp" ] || fail "view --json: expected expand.project.name Auth Revamp, got '$pname'"
-lname=$(LLL_URL=$URL "$LIN" issue view ENG-8 --json | jq -r '.expand.labels[0].name')
+lname=$(LLL_URL=$URL "$LIN" issue view ENG-9 --json | jq -r '.expand.labels[0].name')
 [ "$lname" = "bug" ] || fail "view --json: expected expand.labels[0].name bug, got '$lname'"
 pname=$(LLL_URL=$URL LLL_TEAM=ENG "$LIN" issue list --label bug --json | \
   jq -r '.items[0].expand.project.name')
@@ -3254,7 +3258,7 @@ out=$(LLL_TOKEN="$SHORT_TOK" HOME="$E2E_HOME" LLL_URL=$URL LLL_TEAM=ENG LLL_REMI
 assert_contains "$out" "ENG-" "an expired token is re-minted by the board and the read answers"
 
 out=$(LLL_TOKEN="$SHORT_TOK" HOME="$E2E_HOME" LLL_URL=$URL LLL_TEAM=ENG LLL_REMINT=1 LLL_REMINT_MEMBER="$AGENT_ID" \
-  LLL_ADMIN_EMAIL=admin@local.dev LLL_ADMIN_PASSWORD=admin-local-123 "$LIN" issue comment ENG-7 -b 'Renewal preserves member')
+  LLL_ADMIN_EMAIL=admin@local.dev LLL_ADMIN_PASSWORD=admin-local-123 "$LIN" issue comment ENG-8 -b 'Renewal preserves member')
 assert_contains "$out" 'as e2e-agent' 'expired board credential renews as the same member'
 
 # ...and the gate is superuser-only: a member token and no credentials at all

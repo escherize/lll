@@ -30,6 +30,59 @@ minors. Issue keys are on the project's own board (`lll issue view KEY`).
   real config. The real home comes from the password database, not from
   `HOME`. (LLL-680)
 
+- Issue numbers are never reused. Deleting a team's highest-numbered issue
+  used to hand its number, and so its key, to the next issue created; a key
+  in a commit message or PR then named a different issue. The server now
+  keeps a per-team counter that only increases (`issue_counters`, in
+  `lll api --schema`). An upgrade starts each team's counter at its highest
+  existing number, so a number deleted before the upgrade can still come
+  back once.
+- The server chooses issue numbers. A member's create that names a
+  `number` gets the next number instead, and a member cannot change an
+  issue's number. Moving an issue to another team gives it a fresh number
+  there. A superuser may still name a number.
+- **Breaking for member restores:** `lll import dir` keeps a mirror's issue
+  numbers only when it runs with a superuser token (`LLL_TOKEN` from
+  `lll token create` is a member's; use the administrator's). Run as a
+  member, it imports the issues in mirror order under new numbers, links
+  blockers and docs to the right issues anyway, and prints which keys
+  changed (`Numbered by the server, ...: ENG-5 -> ENG-9`). Before this, any
+  member could create an issue under any number, including a deleted one.
+  Issue numbers are capped at 999,999,999; a
+  team that reaches the cap is told which issue holds the highest number.
+  A superuser repairs a counter with
+  `POST /api/lll/teams/{team}/issue-counter` (`{"last": N, "reason": "..."}`);
+  the server logs who changed it, from what, and why, and refuses a value
+  below the team's highest live issue. (LLL-678)
+- A comment's issue cannot be changed after it is created. A PATCH that
+  moves a comment to another issue answers 400, for every caller including a
+  superuser. (LLL-678)
+- `lll project view` and `lll webhook list` read every page; they stopped
+  at the first 200 items. The board's saved-view name check reads every page
+  too. (LLL-659)
+
+### Fixed
+
+- `lll issue update --description-append` and `--description-replace` no
+  longer lose a concurrent edit. Both derive the new description from the
+  issue they read, and the write now lands only if the issue is still that
+  version; when it changed in between, the update reads it again and
+  re-applies the edit. Two agents appending at once both keep their text.
+  With `--assignee` as well, the edit goes through the claim route, which now
+  checks the same condition; a server older than this release refuses that
+  combination ("invalid assignment update fields") instead of risking a lost
+  edit. (LLL-665)
+
+### Internal
+
+- One write layer, `src/writes/`, makes every create, update and delete of a
+  lll record, for the CLI and the board alike. Bodies are typed values
+  encoded with encoding/json; no write builds JSON from strings. An issue
+  edit is an `IssuePatch`, where "not given" is `None` or `Keep` and the
+  contradictory combinations have no constructor.
+  `scripts/test_write_layer.py` fails on a record write outside the layer.
+  (LLL-659)
+
 ### Security
 
 - lll no longer writes its environment. `--team`, tokens, the board

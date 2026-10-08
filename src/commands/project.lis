@@ -9,6 +9,7 @@ import "models"
 import "pb"
 import "flags"
 import "query"
+import "writes"
 
 /// Dispatch `lll project <verb>` through the noun's Command table (TASK-307).
 /// The table is the one place a verb is declared: dispatch, `lll project
@@ -158,12 +159,7 @@ fn project_create(input: flags.CommandInput) -> Result<(), string> {
   }
   let team = team_flag_or_current(ctx, p.one("--team"))?
 
-  let new_project = models.NewProject { name, description, status, team: team.id }
-  let payload = match json.Marshal(new_project) {
-    Ok(p) => p,
-    Err(e) => return Err(f"encoding project: {e}"),
-  }
-  let body = ctx.post("/api/collections/projects/records", payload as string)?
+  let body = writes.create_project(ctx, models.NewProject { name, description, status, team: team.id })?
 
   let mut created = models.Project { .. }
   if let Err(e) = json.Unmarshal(body.bytes(), &created) {
@@ -190,14 +186,11 @@ fn project_edit(input: flags.CommandInput) -> Result<(), string> {
   if p.given("--status") { status = check_status(p.one("--status"))? }
   let project = records.resolve_project(ctx, current_team(ctx)?.id, name)?
 
-  let mut fields: Slice<string> = []
-  if p.given("-n") { fields = fields.append("\"name\":" + json_quote(p.one("-n"))?) }
-  if p.given("-b") { fields = fields.append("\"description\":" + json_quote(p.one("-b"))?) }
-  if status != "" { fields = fields.append("\"status\":" + json_quote(status)?) }
-  let _ = ctx.patch(
-    f"/api/collections/projects/records/{project.id}",
-    "{" + strings.Join(fields, ",") + "}",
-  )?
+  let mut patch = writes.ProjectPatch { .. }
+  if p.given("-n") { patch.name = Some(p.one("-n")) }
+  if p.given("-b") { patch.description = Some(p.one("-b")) }
+  if status != "" { patch.status = Some(status) }
+  writes.update_project(ctx, project.id, patch)?
   fmt.Println(f"Updated project {name}")
   Ok(())
 }
@@ -234,7 +227,7 @@ fn project_delete(input: flags.CommandInput) -> Result<(), string> {
   if !confirmed_on_terminal(p.given("--yes"), f"delete project {name}?") {
     return Err(aborted())
   }
-  let _ = ctx.delete(f"/api/collections/projects/records/{project.id}")?
+  writes.delete_project(ctx, project.id)?
   fmt.Println(deleted_line("project", name, used))
   Ok(())
 }
@@ -261,13 +254,15 @@ fn project_view(input: flags.CommandInput) -> Result<(), string> {
     }
   }
 
+  // Every page (LLL-659): one page of 200 silently dropped the rest.
   let filter = url.QueryEscape(f"project={query.quote(p.id)}")
-  let mut issues = models.IssueList { .. }
-  pb.fetch(ctx, 
-    f"/api/collections/issues/records?filter={filter}&perPage=200&sort=created&expand=team,assignee",
-    "issues",
-    &issues,
-  )?
+  let issues = models.IssueList {
+    items: records.fetch_all_records<models.Issue>(ctx,
+      f"/api/collections/issues/records?filter={filter}&sort=created,id&expand=team,assignee",
+      "issues",
+    )?,
+    ..
+  }
   if json_mode {
     let mut fields = Map.new<string, json.RawMessage>()
     if let Err(e) = json.Unmarshal(encode_json(p, "project")?, &fields) { return Err(f"decoding project: {e}") }

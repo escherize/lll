@@ -1,0 +1,331 @@
+import "models"
+import "pb"
+
+// Writes to the records around issues: comments, labels, projects, docs,
+// teams, members, webhooks, and the board's workspace rows (favorites and
+// saved views). A create returns the created record's body; the caller
+// decodes the fields it needs.
+
+// ---------------------------------------------------------------- comments
+
+pub fn create_comment(
+  ctx: pb.Client,
+  caller: pb.Caller,
+  comment: models.NewComment,
+) -> Result<string, string> {
+  create(ctx, caller, collection_path("comments"), comment, "comment")
+}
+
+#[json]
+struct CommentBody { body: string }
+
+/// A comment's body is the only thing an edit changes: its issue is fixed
+/// at create (LLL-678, enforced by gopb) and its author is the server's.
+pub fn edit_comment(
+  ctx: pb.Client,
+  id: string,
+  body: string,
+) -> Result<(), string> {
+  let _ = update(
+    ctx,
+    pb.Caller.Process,
+    "comments",
+    id,
+    CommentBody { body },
+    "comment",
+  )?
+  Ok(())
+}
+
+pub fn delete_comment(ctx: pb.Client, id: string) -> Result<(), string> {
+  remove(ctx, pb.Caller.Process, "comments", id)
+}
+
+// ------------------------------------------------------------------ labels
+
+/// A label edit; None leaves the field as it is.
+#[json]
+pub struct LabelPatch {
+  #[json(omitempty)]
+  pub name: Option<string>,
+  #[json(omitempty)]
+  pub color: Option<string>,
+  #[json(omitempty)]
+  pub team: Option<string>,
+}
+
+pub fn create_label(
+  ctx: pb.Client,
+  label: models.NewLabel,
+) -> Result<string, string> {
+  create(ctx, pb.Caller.Process, collection_path("labels"), label, "label")
+}
+
+pub fn update_label(
+  ctx: pb.Client,
+  id: string,
+  patch: LabelPatch,
+) -> Result<(), string> {
+  let _ = update(ctx, pb.Caller.Process, "labels", id, patch, "label")?
+  Ok(())
+}
+
+pub fn delete_label(ctx: pb.Client, id: string) -> Result<(), string> {
+  remove(ctx, pb.Caller.Process, "labels", id)
+}
+
+// ---------------------------------------------------------------- projects
+
+/// A project edit; None leaves the field as it is.
+#[json]
+pub struct ProjectPatch {
+  #[json(omitempty)]
+  pub name: Option<string>,
+  #[json(omitempty)]
+  pub description: Option<string>,
+  #[json(omitempty)]
+  pub status: Option<string>,
+  #[json(omitempty)]
+  pub team: Option<string>,
+}
+
+pub fn create_project(
+  ctx: pb.Client,
+  project: models.NewProject,
+) -> Result<string, string> {
+  create(
+    ctx,
+    pb.Caller.Process,
+    collection_path("projects"),
+    project,
+    "project",
+  )
+}
+
+pub fn update_project(
+  ctx: pb.Client,
+  id: string,
+  patch: ProjectPatch,
+) -> Result<(), string> {
+  let _ = update(ctx, pb.Caller.Process, "projects", id, patch, "project")?
+  Ok(())
+}
+
+pub fn delete_project(ctx: pb.Client, id: string) -> Result<(), string> {
+  remove(ctx, pb.Caller.Process, "projects", id)
+}
+
+// -------------------------------------------------------------------- docs
+
+/// A doc edit; None leaves the field as it is. The confidence pair is a
+/// judgement about a finding (confirm/refute), the rest its content.
+#[json]
+pub struct DocPatch {
+  #[json(omitempty)]
+  pub title: Option<string>,
+  #[json(omitempty)]
+  pub kind: Option<string>,
+  #[json(omitempty)]
+  pub body: Option<string>,
+  #[json(omitempty)]
+  pub area: Option<string>,
+  #[json(omitempty)]
+  pub paths: Option<string>,
+  #[json(omitempty)]
+  pub confidence: Option<string>,
+  #[json(omitempty)]
+  pub confidence_note: Option<string>,
+}
+
+pub fn create_doc(ctx: pb.Client, doc: models.NewDoc) -> Result<string, string> {
+  create(ctx, pb.Caller.Process, collection_path("docs"), doc, "doc")
+}
+
+pub fn update_doc(
+  ctx: pb.Client,
+  id: string,
+  patch: DocPatch,
+) -> Result<(), string> {
+  let _ = update(ctx, pb.Caller.Process, "docs", id, patch, "doc")?
+  Ok(())
+}
+
+pub fn delete_doc(ctx: pb.Client, id: string) -> Result<(), string> {
+  remove(ctx, pb.Caller.Process, "docs", id)
+}
+
+#[json]
+struct LinkIssue {
+  #[json("issues+", omitempty)]
+  add: Option<Slice<string>>,
+  #[json("issues-", omitempty)]
+  remove: Option<Slice<string>>,
+}
+
+/// Link one issue to a doc. One edge as a relation modifier, never the whole
+/// array (LLL-513): the server applies it under the doc's lock, so two
+/// concurrent links both land.
+pub fn link_doc_issue(
+  ctx: pb.Client,
+  doc_id: string,
+  issue_id: string,
+) -> Result<(), string> {
+  let _ = update(
+    ctx,
+    pb.Caller.Process,
+    "docs",
+    doc_id,
+    LinkIssue { add: Some([issue_id]), remove: None },
+    "doc link",
+  )?
+  Ok(())
+}
+
+pub fn unlink_doc_issue(
+  ctx: pb.Client,
+  doc_id: string,
+  issue_id: string,
+) -> Result<(), string> {
+  let _ = update(
+    ctx,
+    pb.Caller.Process,
+    "docs",
+    doc_id,
+    LinkIssue { add: None, remove: Some([issue_id]) },
+    "doc link",
+  )?
+  Ok(())
+}
+
+// ------------------------------------------------------------------- teams
+
+/// A team edit; None leaves the field as it is.
+#[json]
+pub struct TeamPatch {
+  #[json(omitempty)]
+  pub key: Option<string>,
+  #[json(omitempty)]
+  pub name: Option<string>,
+  #[json(omitempty)]
+  pub accent: Option<string>,
+  #[json(omitempty)]
+  pub emoji: Option<string>,
+  #[json(omitempty)]
+  pub archived: Option<bool>,
+}
+
+pub fn create_team(
+  ctx: pb.Client,
+  team: models.NewTeam,
+) -> Result<string, string> {
+  create(ctx, pb.Caller.Process, collection_path("teams"), team, "team")
+}
+
+/// `caller` is the board's verified superuser for its archive action.
+pub fn update_team(
+  ctx: pb.Client,
+  caller: pb.Caller,
+  id: string,
+  patch: TeamPatch,
+) -> Result<(), string> {
+  let _ = update(ctx, caller, "teams", id, patch, "team patch")?
+  Ok(())
+}
+
+pub fn delete_team(ctx: pb.Client, id: string) -> Result<(), string> {
+  remove(ctx, pb.Caller.Process, "teams", id)
+}
+
+// ----------------------------------------------------------------- members
+
+/// A member edit; None leaves the field as it is. Members is an auth
+/// collection: a password goes with its confirmation, and a member changing
+/// its own password names the old one.
+#[json]
+pub struct MemberPatch {
+  #[json(omitempty)]
+  pub name: Option<string>,
+  #[json(omitempty)]
+  pub email: Option<string>,
+  #[json("oldPassword", omitempty)]
+  pub old_password: Option<string>,
+  #[json(omitempty)]
+  pub password: Option<string>,
+  #[json("passwordConfirm", omitempty)]
+  pub password_confirm: Option<string>,
+  #[json(omitempty)]
+  pub scope: Option<string>,
+  #[json(omitempty)]
+  pub teams: Option<Slice<string>>,
+  #[json(omitempty)]
+  pub mode: Option<string>,
+}
+
+/// Member writes name their caller: creating a person and changing access
+/// or a password take a verified superuser token, a bot its owner's.
+pub fn create_member(
+  ctx: pb.Client,
+  caller: pb.Caller,
+  member: models.NewMember,
+) -> Result<string, string> {
+  create(ctx, caller, collection_path("members"), member, "member")
+}
+
+pub fn update_member(
+  ctx: pb.Client,
+  caller: pb.Caller,
+  id: string,
+  patch: MemberPatch,
+) -> Result<(), string> {
+  let _ = update(ctx, caller, "members", id, patch, "member")?
+  Ok(())
+}
+
+pub fn delete_member(
+  ctx: pb.Client,
+  caller: pb.Caller,
+  id: string,
+) -> Result<(), string> {
+  remove(ctx, caller, "members", id)
+}
+
+// ---------------------------------------------------------------- webhooks
+
+pub fn create_webhook(
+  ctx: pb.Client,
+  hook: models.NewWebhook,
+) -> Result<string, string> {
+  create(ctx, pb.Caller.Process, collection_path("webhooks"), hook, "webhook")
+}
+
+pub fn delete_webhook(ctx: pb.Client, id: string) -> Result<(), string> {
+  remove(ctx, pb.Caller.Process, "webhooks", id)
+}
+
+// ------------------------------------------------- favorites and saved views
+
+pub fn create_favorite(
+  ctx: pb.Client,
+  caller: pb.Caller,
+  favorite: models.NewFavorite,
+) -> Result<(), string> {
+  let _ = create(ctx, caller, collection_path("favorites"), favorite, "request")?
+  Ok(())
+}
+
+pub fn delete_favorite(
+  ctx: pb.Client,
+  caller: pb.Caller,
+  id: string,
+) -> Result<(), string> {
+  remove(ctx, caller, "favorites", id)
+}
+
+pub fn create_view(
+  ctx: pb.Client,
+  caller: pb.Caller,
+  view: models.NewView,
+) -> Result<(), string> {
+  let _ = create(ctx, caller, collection_path("views"), view, "request")?
+  Ok(())
+}

@@ -459,6 +459,13 @@ func registerSystemCommentGuard(app core.App) {
 			e.Record.GetString("author") != e.Record.Original().GetString("author") {
 			return e.BadRequestError("a comment's author cannot be changed", nil)
 		}
+		// LLL-678: a comment stays on the issue it was written on, whoever
+		// asks, a superuser included. Moving one would put words under an
+		// issue they were not written about, and across teams it would carry
+		// them out of the team that can read them.
+		if e.Record.GetString("issue") != e.Record.Original().GetString("issue") {
+			return e.BadRequestError("a comment stays on the issue it was written on; its issue cannot be changed", nil)
+		}
 		if err := ownComment(e); err != nil {
 			return err
 		}

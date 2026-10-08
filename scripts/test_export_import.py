@@ -36,8 +36,21 @@ env = dict(os.environ, LLL_URL=api, LLL_TEAM='RTRIP',
            LLL_CONFIG_HOME=_config_home.name)
 
 
-def cli(*args, check=True, team='RTRIP'):
-    run = subprocess.run([binary, *args], env=dict(env, LLL_TEAM=team),
+def superuser_token():
+    """The e2e server's administrator, as scripts/lib.sh pb_superuser_token."""
+    body = json.dumps({'identity': 'admin@local.dev',
+                       'password': os.environ.get('LLL_ADMIN_PASSWORD', 'admin-local-123')}).encode()
+    request = urllib.request.Request(api + '/api/collections/_superusers/auth-with-password', data=body,
+                                     headers={'Content-Type': 'application/json'})
+    with urllib.request.urlopen(request, timeout=30) as response:
+        return json.loads(response.read())['token']
+
+
+def cli(*args, check=True, team='RTRIP', token=None):
+    run_env = dict(env, LLL_TEAM=team)
+    if token:
+        run_env['LLL_TOKEN'] = token
+    run = subprocess.run([binary, *args], env=run_env,
                          text=True, capture_output=True, timeout=120)
     if check and run.returncode:
         raise AssertionError(f'lll {" ".join(args)} failed: {run.stderr.strip()}')
@@ -217,8 +230,10 @@ with tempfile.TemporaryDirectory() as work:
 
     # AC5 + AC3: --replace rebuilds the team, and re-exporting matches byte
     # for byte. Numbers, sort, state, priority, labels, emoji and text all
-    # ride on this one assertion.
-    cli('import', 'dir', str(first), '--replace')
+    # ride on this one assertion. As a superuser: the server keeps explicit
+    # numbers only from one (LLL-678).
+    su = superuser_token()
+    cli('import', 'dir', str(first), '--replace', token=su)
     third = work / 'third'
     cli('export', str(third))
     after = tree(third)
@@ -330,10 +345,23 @@ with tempfile.TemporaryDirectory() as work:
     broken = work / 'broken'
     subprocess.run(['cp', '-R', str(first), str(broken)], check=True)
     (broken / 'issues' / 'RTRIP-2.md').write_text('no front matter here\n')
-    cli('import', 'dir', str(broken), '--replace', check=False)
+    cli('import', 'dir', str(broken), '--replace', check=False, token=su)
     still = sorted(i['number'] for i in
                    json.loads(cli('issue', 'list', '--json').stdout)['items'])
     assert still == [1, 2, 3, 5], f'a malformed mirror half-applied: {still}'
+
+    # LLL-678: a member's import is numbered by the server, never onto a
+    # number the team has used, in the mirror's order, and says so; its
+    # dependency links still land on the right issues.
+    member_run = cli('import', 'dir', str(first), '--replace')
+    renumbered = sorted(i['number'] for i in
+                        json.loads(cli('issue', 'list', '--json').stdout)['items'])
+    assert renumbered == [6, 7, 8, 9], renumbered
+    assert 'Numbered by the server' in member_run.stdout and 'RTRIP-5 -> RTRIP-9' in member_run.stdout, member_run.stdout
+    nine = json.loads(cli('issue', 'view', 'RTRIP-9', '--json').stdout)
+    assert nine['title'] == restored_five['title'], nine['title']
+    six = json.loads(cli('issue', 'view', 'RTRIP-6', '--json').stdout)
+    assert nine['blocked_by'] == [six['id']], f"blockers lost on renumbering: {nine['blocked_by']}"
 
 print('test_export_import: round trip identical but for server-assigned '
       'stamps and blob names, non-empty team refused, blob bytes exact')

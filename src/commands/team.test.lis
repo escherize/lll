@@ -1,3 +1,4 @@
+import "go:encoding/json"
 import "go:strings"
 
 import "pb"
@@ -73,27 +74,24 @@ fn view_accent_reports_a_stored_value_the_board_cannot_use() {
   assert strings.Contains(line, "bogus")
 }
 
-// --------------------------------------------------------- rename_payload
+// ----------------------------------------------------------- rename_patch
 
 /// PocketBase replaces every field the patch carries, so a name-only rename
 /// must not send `key` and blank it — that would delete every issue key on
 /// the board. The absence of the field is the whole test.
 #[test]
-fn rename_payload_sends_only_the_field_that_was_given() {
-  let assert Ok(name_only) = rename_payload("", "Platform")
-  assert strings.Contains(name_only, "\"name\":\"Platform\"")
-  assert !strings.Contains(name_only, "key")
+fn rename_patch_sends_only_the_field_that_was_given() {
+  let assert Ok(name_only) = json.Marshal(rename_patch("", "Platform"))
+  assert (name_only as string) == "{\"name\":\"Platform\"}"
 
-  let assert Ok(key_only) = rename_payload("PLAT", "")
-  assert strings.Contains(key_only, "\"key\":\"PLAT\"")
-  assert !strings.Contains(key_only, "name")
+  let assert Ok(key_only) = json.Marshal(rename_patch("PLAT", ""))
+  assert (key_only as string) == "{\"key\":\"PLAT\"}"
 }
 
 #[test]
-fn rename_payload_sends_both_when_both_were_given() {
-  let assert Ok(both) = rename_payload("PLAT", "Platform")
-  assert strings.Contains(both, "\"key\":\"PLAT\"")
-  assert strings.Contains(both, "\"name\":\"Platform\"")
+fn rename_patch_sends_both_when_both_were_given() {
+  let assert Ok(both) = json.Marshal(rename_patch("PLAT", "Platform"))
+  assert (both as string) == "{\"key\":\"PLAT\",\"name\":\"Platform\"}"
 }
 
 // -------------------------------------------------- team_rename_collateral

@@ -5,6 +5,7 @@ import "go:strings"
 
 import "models"
 import "pb"
+import "writes"
 
 pub struct SettingsDeleteVM {
   pub kind: string,
@@ -41,6 +42,6 @@ fn settings_delete(ctx: pb.Client, r: mut Ref<http.Request>, team_id: string) ->
     let vm = SettingsDeleteVM { kind, id, name, used, changed: confirmed }
     return Ok(Some(patch_event(render("set-delete-review", vm)?)))
   }
-  let _ = ctx.delete(path)?
+  if kind == "label" { writes.delete_label(ctx, id)? } else { writes.delete_project(ctx, id)? }
   Ok(None)
 }

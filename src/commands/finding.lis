@@ -1,5 +1,4 @@
 import "display"
-import "go:encoding/json"
 import "go:fmt"
 import "go:strings"
 
@@ -7,6 +6,7 @@ import "flags"
 import "models"
 import "pb"
 import "query"
+import "writes"
 
 /// `lll finding` (TASK-103) — the retrieval side of docs. A finding is a doc
 /// with kind=finding; `lll finding create` files one, and
@@ -342,10 +342,9 @@ fn finding_refute(input: flags.CommandInput) -> Result<(), string> {
 /// One PATCH, two fields, on purpose nothing else: confirm/refute is a
 /// judgement about the finding, never an edit of it.
 fn patch_confidence(ctx: pb.Client, d: models.Doc, confidence: string, note: string) -> Result<(), string> {
-  let payload = match json.Marshal(models.ConfidencePatch { confidence, confidence_note: note }) {
-    Ok(p) => p,
-    Err(e) => return Err(f"encoding confidence patch: {e}"),
-  }
-  let _ = ctx.patch(f"/api/collections/docs/records/{d.id}", payload as string)?
-  Ok(())
+  writes.update_doc(ctx, d.id, writes.DocPatch {
+    confidence: Some(confidence),
+    confidence_note: Some(note),
+    ..
+  })
 }

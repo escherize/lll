@@ -5,6 +5,7 @@ import "go:strconv"
 
 import "models"
 import "pb"
+import "writes"
 
 pub struct MemberDeleteVM {
   pub id: string,
@@ -45,6 +46,6 @@ fn settings_member_delete(ctx: pb.Client, r: mut Ref<http.Request>, id: string) 
     }
     return Ok(Some(patch_event(render("set-member-delete-review", vm)?)))
   }
-  let _ = ctx.delete_as(path, token)?
+  writes.delete_member(ctx, pb.Caller.Member(token), id)?
   Ok(None)
 }

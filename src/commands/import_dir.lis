@@ -12,7 +12,7 @@ import "mirror"
 import "models"
 import "pb"
 import "records"
-import "references"
+import "writes"
 
 /// `lll import dir DIR`: a mirror back into a team.
 ///
@@ -44,6 +44,14 @@ fn import_dir(input: flags.CommandInput) -> Result<(), string> {
   if parsed.is_empty() {
     return Err(f"no issue files in {filepath.Join(dir, "issues")}; is this a directory 'lll export' wrote?")
   }
+  // Checked before --replace deletes anything: the server refuses a number
+  // past its ceiling (LLL-678), which would leave the team emptied.
+  for front_and_body in parsed {
+    let (front, _) = front_and_body
+    if front.number < 1 || front.number > 999999999 {
+      return Err(f"{front.key}: issue number {front.number} is outside 1-999999999; nothing was changed")
+    }
+  }
 
   let existing = records.fetch_board_issues(ctx, team.id)?
   if !existing.is_empty() && !p.given("--replace") {
@@ -63,7 +71,7 @@ To import somewhere harmless instead: lll attach --key NEWKEY in another directo
   // and re-running --replace starts from a clean team again.
   let mut deleted = 0
   for issue in existing {
-    if let Err(e) = ctx.delete(f"/api/collections/issues/records/{issue.id}") {
+    if let Err(e) = writes.delete_issue(ctx, issue.id) {
       return Err(partial(dir, f"deleting {team.key}-{issue.number}: {e}", deleted, 0))
     }
     deleted += 1
@@ -72,7 +80,13 @@ To import somewhere harmless instead: lll attach --key NEWKEY in another directo
   let mut created = 0
   let mut restored_blobs = 0
   let mut unassigned: Slice<string> = []
-  for front_and_body in parsed {
+  // Each mirror key's new record, for the links resolved below, and the
+  // keys that came back under another number. The server keeps a mirror's
+  // numbers only for a superuser's import (LLL-678); a member's issues are
+  // numbered by the server, in the mirror's order.
+  let mut id_of = Map.new<string, string>()
+  let mut renumbered: Slice<string> = []
+  for front_and_body in by_number(parsed) {
     let (front, body) = front_and_body
     let mut assignee = ""
     if front.assignee != "" {
@@ -122,20 +136,19 @@ To import somewhere harmless instead: lll attach --key NEWKEY in another directo
       project,
       labels,
     }
-    let payload = match json.Marshal(new_issue) {
-      Ok(payload) => payload,
-      Err(e) => return Err(partial(dir, f"encoding {front.key}: {e}", deleted, created)),
-    }
     // expand=team because attachments.upload checks the team's archived flag
     // on the record it is handed.
-    let body_json = match ctx.post(
-      "/api/collections/issues/records?expand=team",
-      payload as string,
-    ) {
+    let body_json = match writes.create_issue(ctx, pb.Caller.Process, new_issue, "?expand=team") {
       Ok(body) => body,
       Err(e) => return Err(partial(dir, f"creating {front.key}: {e}", deleted, created)),
     }
     created += 1
+    let mut made = models.Issue { .. }
+    if let Err(e) = json.Unmarshal(body_json.bytes(), &made) {
+      return Err(partial(dir, f"decoding created {front.key}: {e}", deleted, created))
+    }
+    id_of[front.key] = made.id
+    if made.number != front.number { renumbered = renumbered.append(f"{front.key} -> {team.key}-{made.number}") }
 
     if front.refs != "" {
       let mut issue_for_refs = models.Issue { .. }
@@ -147,7 +160,7 @@ To import somewhere harmless instead: lll attach --key NEWKEY in another directo
       // skips an issue whose gh#N the team already carries, so losing these
       // turns a later re-import into a duplicate import.
       for reference in strings.Fields(front.refs) {
-        if let Err(e) = references.append(ctx, issue_for_refs.id, reference) {
+        if let Err(e) = writes.append_ref(ctx, issue_for_refs.id, reference) {
           return Err(partial(dir, f"recording ref {reference} on {front.key}: {e}", deleted, created))
         }
       }
@@ -177,11 +190,8 @@ To import somewhere harmless instead: lll attach --key NEWKEY in another directo
 
   // Everything that points at an issue is resolved here, in a second pass,
   // because a forward reference is normal: ENG-3 can be blocked by ENG-7,
-  // and a doc can be filed against an issue created after it.
-  let mut id_of = Map.new<string, string>()
-  for issue in records.fetch_board_issues(ctx, team.id)? {
-    id_of[f"{team.key}-{issue.number}"] = issue.id
-  }
+  // and a doc can be filed against an issue created after it. Links name
+  // mirror keys, resolved through id_of whatever number each issue got.
 
   let mut linked_blocks = 0
   for front_and_body in parsed {
@@ -193,11 +203,7 @@ To import somewhere harmless instead: lll attach --key NEWKEY in another directo
     }
     if ids.is_empty() { continue }
     let Some(issue_id) = id_of.get(front.key) else { continue }
-    let payload = match json.Marshal(BlockedPatch { blocked_by: ids }) {
-      Ok(payload) => payload,
-      Err(e) => return Err(partial(dir, f"encoding blockers for {front.key}: {e}", deleted, created)),
-    }
-    if let Err(e) = ctx.patch(f"/api/collections/issues/records/{issue_id}", payload as string) {
+    if let Err(e) = writes.set_blocked_by(ctx, issue_id, ids) {
       return Err(partial(dir, f"linking blockers on {front.key}: {e}", deleted, created))
     }
     linked_blocks += 1
@@ -206,7 +212,7 @@ To import somewhere harmless instead: lll attach --key NEWKEY in another directo
   let mut restored_docs = 0
   if !parsed_docs.is_empty() {
     for existing_doc in fetch_team_docs(ctx, team.id)? {
-      if let Err(e) = ctx.delete(f"/api/collections/docs/records/{existing_doc.id}") {
+      if let Err(e) = writes.delete_doc(ctx, existing_doc.id) {
         return Err(partial(dir, f"deleting doc {existing_doc.slug}: {e}", deleted, created))
       }
     }
@@ -230,11 +236,7 @@ To import somewhere harmless instead: lll attach --key NEWKEY in another directo
         paths: front.paths,
         issues: linked,
       }
-      let payload = match json.Marshal(new_doc) {
-        Ok(payload) => payload,
-        Err(e) => return Err(partial(dir, f"encoding doc {front.slug}: {e}", deleted, created)),
-      }
-      if let Err(e) = ctx.post("/api/collections/docs/records", payload as string) {
+      if let Err(e) = writes.create_doc(ctx, new_doc) {
         return Err(partial(dir, f"creating doc {front.slug}: {e}", deleted, created))
       }
       restored_docs += 1
@@ -254,13 +256,30 @@ To import somewhere harmless instead: lll attach --key NEWKEY in another directo
       f"Left unassigned, no such member here: {strings.Join(unassigned, ", ")}",
     )
   }
+  if !renumbered.is_empty() {
+    fmt.Println(
+      f"Numbered by the server, which keeps a mirror's numbers only for a superuser's import: {strings.Join(renumbered, ", ")}",
+    )
+  }
   Ok(())
 }
 
-#[json]
-struct BlockedPatch {
-  #[json("blocked_by")]
-  blocked_by: Slice<string>,
+/// The mirror in ascending issue number, so issues the server numbers come
+/// back in their original order (file order puts KEY-10 before KEY-2).
+fn by_number(parsed: Slice<(mirror.Front, string)>) -> Slice<(mirror.Front, string)> {
+  let mut out = parsed.clone()
+  let mut i = 1
+  while i < out.length() {
+    let mut j = i
+    while j > 0 && out[j - 1].0.number > out[j].0.number {
+      let swap = out[j - 1]
+      out[j - 1] = out[j]
+      out[j] = swap
+      j -= 1
+    }
+    i += 1
+  }
+  out
 }
 
 pub fn dir_spec() -> Slice<flags.Flag> {

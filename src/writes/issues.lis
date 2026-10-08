@@ -1,0 +1,526 @@
+import "go:encoding/json"
+import "go:math/rand/v2"
+import "go:net/url"
+import "go:strings"
+import "go:time"
+
+import "claims"
+import "models"
+import "pb"
+
+// Issue writes. An edit is an IssuePatch: every field says whether it
+// changes, so "not given" is Keep or None, never a sentinel string or a -1,
+// and the combinations no edit can mean (a whole description plus an
+// append; a whole label set plus a delta) have no constructor.
+
+/// A to-one relation edit: the assignee or the project.
+pub enum Relation {
+  Keep,
+  Clear,
+  Set(string),
+}
+
+/// The labels edit. Replace writes the whole set; Delta adds and removes
+/// only the named ids through PocketBase's relation modifiers, so a label
+/// another writer adds at the same time is kept (LLL-513).
+pub enum LabelEdit {
+  Keep,
+  Replace(Slice<string>),
+  Delta { add: Slice<string>, remove: Slice<string> },
+}
+
+/// The description edit. Whole is the new text as given. Derived is
+/// computed from the text the server holds: a replacement that must match
+/// exactly once, then an append. A derived edit is written only against the
+/// text it was derived from (LLL-665): see update_issue.
+pub enum DescriptionEdit {
+  Keep,
+  Whole(string),
+  Derived(Derivation),
+}
+
+pub struct Derivation {
+  pub replace: Option<Replacement>,
+  pub append: Option<string>,
+}
+
+pub struct Replacement {
+  pub old: string,
+  pub new: string,
+}
+
+/// One edit of one issue, from the CLI or the board.
+pub struct IssuePatch {
+  pub state: Option<string>,
+  // The board's manual position; only a card move sets it.
+  pub sort: Option<float64>,
+  pub priority: Option<int>,
+  pub assignee: Relation,
+  pub project: Relation,
+  pub labels: LabelEdit,
+  pub title: Option<string>,
+  pub description: DescriptionEdit,
+  pub emoji: Option<string>,
+}
+
+impl IssuePatch {
+  /// The patch that changes nothing; set the fields an edit changes with
+  /// `IssuePatch { title: Some(t), ..IssuePatch.unchanged() }`.
+  pub fn unchanged() -> IssuePatch {
+    IssuePatch {
+      assignee: Relation.Keep,
+      project: Relation.Keep,
+      labels: LabelEdit.Keep,
+      description: DescriptionEdit.Keep,
+      ..,
+    }
+  }
+
+  pub fn is_empty(self) -> bool {
+    let assignee = match self.assignee {
+      Relation.Keep => true,
+      _ => false,
+    }
+    let project = match self.project {
+      Relation.Keep => true,
+      _ => false,
+    }
+    let labels = match self.labels {
+      LabelEdit.Keep => true,
+      _ => false,
+    }
+    let description = match self.description {
+      DescriptionEdit.Keep => true,
+      _ => false,
+    }
+    self.state.is_none() && self.sort.is_none() && self.priority.is_none() &&
+    assignee &&
+    project &&
+    labels &&
+    self.title.is_none() &&
+    description &&
+    self.emoji.is_none()
+  }
+}
+
+/// The wire form of an IssuePatch: what PocketBase (or the assignment
+/// route) is handed. A None field is left out, so the record keeps it.
+#[json]
+struct IssueFields {
+  #[json(omitempty)]
+  state: Option<string>,
+  #[json(omitempty)]
+  sort: Option<float64>,
+  #[json(omitempty)]
+  priority: Option<int>,
+  #[json(omitempty)]
+  assignee: Option<string>,
+  #[json(omitempty)]
+  project: Option<string>,
+  #[json(omitempty)]
+  labels: Option<Slice<string>>,
+  #[json("labels+", omitempty)]
+  labels_add: Option<Slice<string>>,
+  #[json("labels-", omitempty)]
+  labels_remove: Option<Slice<string>>,
+  #[json(omitempty)]
+  title: Option<string>,
+  #[json(omitempty)]
+  description: Option<string>,
+  #[json(omitempty)]
+  emoji: Option<string>,
+  // Only on the assignment route, which checks it inside its transaction.
+  // A plain PATCH carries the stamp as If-Unmodified-Since instead.
+  #[json(omitempty)]
+  if_unmodified_since: Option<string>,
+}
+
+/// Why an update did not land.
+pub enum UpdateFailure {
+  /// The server refused or failed it; pb's error text.
+  Failed(string),
+  /// The issue changed between the read and the write (HTTP 412), and the
+  /// edit cannot be re-derived: the caller's own stamp was stale, or
+  /// re-deriving lost the race too many times. pb's error text.
+  Changed(string),
+  /// --description-replace's text matched this many times, not once.
+  ReplaceMatched(int),
+}
+
+/// How an update runs. `stamp` is a stamp the caller read and insists on
+/// (--if-unchanged-since): a 412 is then the answer, never a retry.
+/// `claim` is used only when the patch edits the assignee, which goes
+/// through the claim route.
+pub struct UpdateOptions {
+  pub stamp: Option<string>,
+  pub claim: ClaimAs,
+}
+
+impl UpdateOptions {
+  /// No stamp, no label, no force: a plain edit as `caller`.
+  pub fn as_caller(caller: pb.Caller) -> UpdateOptions {
+    UpdateOptions { stamp: None, claim: ClaimAs { caller, .. } }
+  }
+}
+
+/// A derived edit re-derives this many times before giving up. Each 412 is
+/// another writer's success, so the bound only matters under a storm.
+const DERIVED_ATTEMPTS: int = 12
+
+/// Apply `patch` to `issue`, the record as the caller read it.
+///
+/// A Derived description is computed from `issue.description` and written
+/// only if the issue is still the one that was read: the write carries the
+/// read's `updated` stamp, which the server checks under the issue's lock
+/// (gopb precondition.go; the assignment route checks it in its
+/// transaction). On a 412 the issue is read again and the edit derived
+/// afresh, so two concurrent appends both land (LLL-665). Without a derived
+/// description no stamp rides unless the caller gave one.
+///
+/// An assignee edit goes through the claim route (one transaction with the
+/// claim); everything else is one PATCH. The result is the claim route's
+/// transition, None for a PATCH.
+pub fn update_issue(
+  ctx: pb.Client,
+  issue: models.Issue,
+  patch: IssuePatch,
+  opts: UpdateOptions,
+) -> Result<Option<Transition>, UpdateFailure> {
+  let assigning = match patch.assignee {
+    Relation.Keep => false,
+    _ => true,
+  }
+  let observed = if assigning {
+    match claims.observed_id(ctx, issue.id) {
+      Ok(id) => id,
+      Err(e) => return Err(UpdateFailure.Failed(e)),
+    }
+  } else {
+    ""
+  }
+  let mut current = issue
+  let mut attempt = 1
+  loop {
+    let (fields, derived) = issue_fields(patch, current.description)?
+    let stamp = match opts.stamp {
+      Some(s) => Some(s),
+      None => if derived { Some(current.updated) } else { None },
+    }
+    let result = send_fields(
+      ctx,
+      current.id,
+      fields,
+      stamp,
+      assigning,
+      observed,
+      opts.claim,
+    )
+    match result {
+      Ok(t) => return Ok(t),
+      Err(e) => {
+        let status = pb.classify(e).status
+        // A server older than LLL-665 refuses the stamp field on the claim
+        // route as unknown: say what to do rather than relay the 400.
+        if assigning && derived && status == 400 && strings.Contains(
+          strings.ToLower(e),
+          "invalid assignment update fields",
+        ) {
+          return Err(UpdateFailure.Failed(
+            f"{e}; this server is older than this lll and cannot check a description edit made with --assignee; update the server, or run the assignment and the description edit as two updates",
+          ))
+        }
+        if status != 412 { return Err(UpdateFailure.Failed(e)) }
+        if opts.stamp.is_some() || !derived || attempt >= DERIVED_ATTEMPTS {
+          return Err(UpdateFailure.Changed(e))
+        }
+        // Writers that lost the same race wait different times, so they do
+        // not all re-read and collide again together.
+        time.Sleep(
+          (rand.IntN(25 * attempt) + 5) as time.Duration * time.Millisecond,
+        )
+        current = match reread(ctx, opts.claim.caller, current.id) {
+          Ok(fresh) => fresh,
+          Err(e) => return Err(UpdateFailure.Failed(e)),
+        }
+        attempt += 1
+      },
+    }
+  }
+}
+
+/// One attempt of update_issue: the fields, through the claim route when
+/// they edit the assignee, else one PATCH.
+fn send_fields(
+  ctx: pb.Client,
+  id: string,
+  fields: IssueFields,
+  stamp: Option<string>,
+  assigning: bool,
+  observed: string,
+  by: ClaimAs,
+) -> Result<Option<Transition>, string> {
+  if assigning {
+    let mut routed = fields
+    routed.if_unmodified_since = stamp
+    let transition = update_assignment(
+      ctx,
+      id,
+      observed,
+      encode(routed, "issue fields")?,
+      by,
+    )?
+    return Ok(Some(transition))
+  }
+  let body = encode(fields, "issue fields")?
+  let path = record_path("issues", id)
+  match stamp {
+    Some(s) => {
+      let _ = ctx.patch_with_stamp_as(by.caller, path, body, s)?
+    },
+    None => {
+      let _ = ctx.send_as(by.caller, "PATCH", path, body, "application/json")?
+    },
+  }
+  Ok(None)
+}
+
+/// The text a Derived edit produces from `current`: the replacement, which
+/// must match exactly once, then the append on a line of its own.
+pub fn derive_description(
+  current: string,
+  d: Derivation,
+) -> Result<string, UpdateFailure> {
+  let mut text = current
+  if let Some(r) = d.replace {
+    let n = strings.Count(text, r.old)
+    if n != 1 { return Err(UpdateFailure.ReplaceMatched(n)) }
+    text = strings.Replace(text, r.old, r.new, 1)
+  }
+  if let Some(more) = d.append {
+    text = if strings.TrimSpace(text) == "" {
+      more
+    } else {
+      strings.TrimRight(text, "\n") + "\n" + more
+    }
+  }
+  Ok(text)
+}
+
+/// The wire fields for `patch` against the description `current`, and
+/// whether the description was derived from it.
+fn issue_fields(
+  patch: IssuePatch,
+  current: string,
+) -> Result<(IssueFields, bool), UpdateFailure> {
+  let (description, derived) = match patch.description {
+    DescriptionEdit.Keep => (None, false),
+    DescriptionEdit.Whole(text) => (Some(text), false),
+    DescriptionEdit.Derived(d) => (Some(derive_description(current, d)?), true),
+  }
+  let (labels, labels_add, labels_remove) = match patch.labels {
+    LabelEdit.Keep => (None, None, None),
+    LabelEdit.Replace(ids) => (Some(ids), None, None),
+    LabelEdit.Delta { add, remove } => (None, nonempty(add), nonempty(remove)),
+  }
+  Ok((
+    IssueFields {
+      state: patch.state,
+      sort: patch.sort,
+      priority: patch.priority,
+      assignee: relation_value(patch.assignee),
+      project: relation_value(patch.project),
+      labels,
+      labels_add,
+      labels_remove,
+      title: patch.title,
+      description,
+      emoji: patch.emoji,
+      if_unmodified_since: None,
+    },
+    derived,
+  ))
+}
+
+fn nonempty(ids: Slice<string>) -> Option<Slice<string>> {
+  if ids.is_empty() { None } else { Some(ids) }
+}
+
+fn relation_value(r: Relation) -> Option<string> {
+  match r {
+    Relation.Keep => None,
+    Relation.Clear => Some(""),
+    Relation.Set(id) => Some(id),
+  }
+}
+
+/// The issue as it is now, for re-deriving an edit after a 412.
+fn reread(
+  ctx: pb.Client,
+  caller: pb.Caller,
+  id: string,
+) -> Result<models.Issue, string> {
+  let body = ctx.send_as(
+    caller,
+    "GET",
+    record_path("issues", id),
+    "",
+    "application/json",
+  )?
+  let mut fresh = models.Issue { .. }
+  if let Err(e) = json.Unmarshal(body.bytes(), &fresh) {
+    return Err(f"decoding issue: {e}")
+  }
+  Ok(fresh)
+}
+
+/// Create an issue. `path_query` is "" or a query string such as
+/// "?expand=team" for the response the caller wants back.
+pub fn create_issue(
+  ctx: pb.Client,
+  caller: pb.Caller,
+  issue: models.NewIssue,
+  path_query: string,
+) -> Result<string, string> {
+  create(ctx, caller, collection_path("issues") + path_query, issue, "issue")
+}
+
+#[json]
+struct IdempotencySupport { supported: bool }
+
+/// create_issue with an idempotency key: a retry with the same key and body
+/// answers with the issue the first attempt created. Refused, with nothing
+/// sent, by a server that does not support keys.
+pub fn create_issue_once(
+  ctx: pb.Client,
+  issue: models.NewIssue,
+  path_query: string,
+  key: string,
+) -> Result<string, string> {
+  let unsupported = "this server does not support --idempotency-key; upgrade the server before retrying this creation"
+  let supported = ctx
+    .get("/api/lll/issues/idempotency")
+    .map_err(|e| {
+      if pb.classify(e).status == 404 { unsupported } else { e }
+    })?
+  let mut support = IdempotencySupport { .. }
+  if let Err(e) = json.Unmarshal(supported.bytes(), &support) {
+    return Err(f"decoding creation support: {e}")
+  }
+  if !support.supported { return Err(unsupported) }
+  let body = encode(issue, "issue")?
+  ctx.post_idempotent(collection_path("issues") + path_query, body, key)
+}
+
+pub fn delete_issue(ctx: pb.Client, id: string) -> Result<(), string> {
+  remove(ctx, pb.Caller.Process, "issues", id)
+}
+
+#[json]
+struct BlockedFields { blocked_by: Slice<string> }
+
+/// Replace the issues `id` waits on.
+pub fn set_blocked_by(
+  ctx: pb.Client,
+  id: string,
+  blockers: Slice<string>,
+) -> Result<(), string> {
+  let _ = update(
+    ctx,
+    pb.Caller.Process,
+    "issues",
+    id,
+    BlockedFields { blocked_by: blockers },
+    "blockers",
+  )?
+  Ok(())
+}
+
+/// Where an issue is being worked (TASK-205).
+#[json]
+pub struct WorkSite {
+  #[json("work_branch")]
+  pub branch: string,
+  #[json("work_host")]
+  pub host: string,
+  #[json("work_path")]
+  pub path: string,
+}
+
+pub fn set_work_site(
+  ctx: pb.Client,
+  id: string,
+  site: WorkSite,
+) -> Result<(), string> {
+  let _ = update(ctx, pb.Caller.Process, "issues", id, site, "work site")?
+  Ok(())
+}
+
+/// Append uploaded files: `form` is a multipart body whose file parts are
+/// named `attachments+`. The response is the saved issue.
+pub fn upload_attachments(
+  ctx: pb.Client,
+  caller: pb.Caller,
+  id: string,
+  form: string,
+  content_type: string,
+) -> Result<string, string> {
+  ctx.send_as(caller, "PATCH", record_path("issues", id), form, content_type)
+}
+
+#[json]
+struct RemoveFiles {
+  #[json("attachments-")]
+  files: Slice<string>,
+}
+
+pub fn remove_attachment(
+  ctx: pb.Client,
+  caller: pb.Caller,
+  id: string,
+  filename: string,
+) -> Result<(), string> {
+  let _ = update(
+    ctx,
+    caller,
+    "issues",
+    id,
+    RemoveFiles { files: [filename] },
+    "attachment removal",
+  )?
+  Ok(())
+}
+
+#[json]
+struct AppendRequest {
+  #[json("ref")]
+  reference: string,
+}
+
+#[json]
+pub struct RefOutcome {
+  pub refs: string,
+  pub added: bool,
+}
+
+/// Append one external reference, once, through the server's atomic route.
+pub fn append_ref(
+  ctx: pb.Client,
+  issue_id: string,
+  reference: string,
+) -> Result<RefOutcome, string> {
+  let body = encode(AppendRequest { reference }, "reference")?
+  let response = ctx
+    .post(f"/api/lll/issues/{url.PathEscape(issue_id)}/refs", body)
+    .map_err(|e| {
+      if pb.classify(e).status == 404 {
+        "server does not support atomic reference appends; update the server before adding refs"
+      } else {
+        e
+      }
+    })?
+  let mut outcome = RefOutcome { .. }
+  json
+    .Unmarshal(response.bytes(), &outcome)
+    .map_err(|e| f"decoding reference response: {e}")?
+  Ok(outcome)
+}

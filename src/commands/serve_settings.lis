@@ -1,5 +1,6 @@
 import "records"
 import "go:crypto/rand"
+import "go:encoding/json"
 import "go:html/template"
 import "go:net/http"
 import "go:strings"
@@ -9,6 +10,7 @@ import "models"
 import "pb"
 import "query"
 import "theme"
+import "writes"
 
 // /settings - the workspace records the web can edit, and the one handler
 // that writes them.
@@ -195,43 +197,6 @@ fn label_rows(ctx: pb.Client, team_id: string) -> Result<Slice<SetLabelVM>, stri
 }
 
 
-
-
-/// Patch bodies. Each carries exactly the fields the page edits and no
-/// others: PocketBase replaces every field it is handed, so a struct wide
-/// enough to include, say, a project description would blank descriptions the
-/// page never showed.
-#[json]
-struct TeamPatch { name: string, accent: string, emoji: string }
-
-// Labels and projects carry their team: it is required (TASK-173), and PB
-// replaces every field a patch hands it, so an update that omitted the team
-// would blank it. The page only ever lists this team's rows, so the value is
-// the same one going out as came in.
-#[json]
-struct LabelPatch { name: string, color: string, team: string }
-
-/// The create payload members needs now that the collection is an auth one
-/// (TASK-180): email identity, password pair, visibility. The update patch
-/// stays name+email — a password change is an admin operation, not a
-/// settings row.
-#[json]
-struct MemberCreate {
-  name: string,
-  email: string,
-  password: string,
-  #[json("passwordConfirm")]
-  password_confirm: string,
-  #[json("emailVisibility")]
-  email_visibility: bool,
-}
-
-#[json]
-struct MemberPatch { name: string }
-
-#[json]
-struct ProjectPatch { name: string, status: string, team: string }
-
 /// One write for every settings section: `kind` picks the section, an `id`
 /// picks update over create, and `?del=1` picks removal.
 ///
@@ -316,9 +281,12 @@ fn settings_apply(
       // input is a hint, and this is the same field `lll team set-emoji`
       // writes.
       let emoji = team_emoji_value(r.PostFormValue("emoji"))?
-      let payload = marshal(TeamPatch { name, accent, emoji })?
-      let _ = ctx.patch(f"/api/collections/teams/records/{team_id}", payload)?
-      Ok(())
+      writes.update_team(ctx, pb.Caller.Process, team_id, writes.TeamPatch {
+        name: Some(name),
+        accent: Some(accent),
+        emoji: Some(emoji),
+        ..
+      })
     },
     "label" => {
       if name == "" { return Err("label name is required") }
@@ -329,7 +297,11 @@ fn settings_apply(
       // submit is one outcome. `owner` is where the record ends up, so the
       // patch below cannot drag it back to the page's team.
       let owner = move_scope_if_asked(ctx, r, "label", name, id, team_id)?
-      save_record(ctx, "labels", id, LabelPatch { name, color, team: owner })
+      if id == "" {
+        let _ = writes.create_label(ctx, models.NewLabel { name, color, team: owner })?
+        return Ok(())
+      }
+      writes.update_label(ctx, id, writes.LabelPatch { name: Some(name), color: Some(color), team: Some(owner) })
     },
     "member" => {
       if name == "" { return Err("member name is required") }
@@ -347,17 +319,14 @@ fn settings_apply(
         // One value for both password fields: two rand.Text() calls would
         // disagree with each other and fail PB's confirm check.
         let password = rand.Text()
-        save_record(ctx,
-          "members",
-          id,
-          MemberCreate {
-            name,
-            email: member_email,
-            password,
-            password_confirm: password,
-            email_visibility: true,
-          },
-        )?
+        let _ = writes.create_member(ctx, pb.Caller.Process, models.NewMember {
+          name,
+          email: member_email,
+          password,
+          password_confirm: password,
+          email_visibility: true,
+          ..
+        })?
         return Ok(())
       }
       let known = records.fetch_members(ctx)?
@@ -375,7 +344,7 @@ fn settings_apply(
           f"'{existing.name}'s email is their login identity; change it under Access → Member sign-in. No changes saved.",
         )
       }
-      save_record(ctx, "members", id, MemberPatch { name })
+      writes.update_member(ctx, pb.Caller.Process, id, writes.MemberPatch { name: Some(name), .. })
     },
     "project" => {
       if name == "" { return Err("project name is required") }
@@ -385,7 +354,12 @@ fn settings_apply(
         return Err(f"unknown project status '{status}'")
       }
       let owner = move_scope_if_asked(ctx, r, "project", name, id, team_id)?
-      save_record(ctx, "projects", id, ProjectPatch { name, status, team: owner })
+      if id == "" {
+        let new_project = models.NewProject { name, description: "", status, team: owner }
+        let _ = writes.create_project(ctx, new_project)?
+        return Ok(())
+      }
+      writes.update_project(ctx, id, writes.ProjectPatch { name: Some(name), description: None, status: Some(status), team: Some(owner) })
     },
     other => Err(f"unknown settings section '{other}'"),
   }
@@ -443,14 +417,12 @@ fn move_scope_if_asked(
   Ok(to.id)
 }
 
-fn save_record(ctx: pb.Client, coll: string, id: string, value: Unknown) -> Result<(), string> {
-  let payload = marshal(value)?
-  if id == "" {
-    let _ = ctx.post(f"/api/collections/{coll}/records", payload)?
-  } else {
-    let _ = ctx.patch(f"/api/collections/{coll}/records/{id}", payload)?
+/// A request body for the Access actions' credential endpoints.
+fn marshal(value: Unknown) -> Result<string, string> {
+  match json.Marshal(value) {
+    Ok(p) => Ok(p as string),
+    Err(e) => Err(f"encoding request: {e}"),
   }
-  Ok(())
 }
 
 // ── Access (TASK-204) ────────────────────────────────────────────────────
@@ -474,14 +446,6 @@ pub struct AccessTokenVM {
 
 /// PATCH body for credentialing a member: the login identity and the
 /// password pair, nothing else — PB replaces every field it is handed.
-#[json]
-struct MemberCredentialPatch {
-  email: string,
-  password: string,
-  #[json("passwordConfirm")]
-  password_confirm: string,
-}
-
 /// The superuser identity Access actions verify against: LLL_ADMIN_EMAIL, or
 /// the same printed default `lll up` upserts when the env is unset.
 fn admin_email(ctx: pb.Client) -> string {
@@ -596,14 +560,13 @@ fn access_credential_write(
   // synthesized @members.invalid one) and just sets the password.
   let mut email = strings.TrimSpace(r.PostFormValue("email"))
   if email == "" { email = member.email }
-  let payload = marshal(
-    MemberCredentialPatch { email, password, password_confirm: password },
-  )?
-  let _ = ctx.patch_as(
-    f"/api/collections/members/records/{member.id}",
-    payload,
-    su,
-  )?
+  let credential = writes.MemberPatch {
+    email: Some(email),
+    password: Some(password),
+    password_confirm: Some(password),
+    ..
+  }
+  writes.update_member(ctx, pb.Caller.Member(su), member.id, credential)?
   // The Access section shows the member's email, so patch that section back
   // — and say the success out loud in the flash strip, after the redraw, so
   // the morph cannot swallow it.
@@ -647,8 +610,7 @@ fn teams_archive_write(
   }
   let archived = r.PostFormValue("archived") == "1"
   let su = verify_admin(ctx, r.PostFormValue("admin_password"))?
-  let payload = marshal(TeamArchivedPatch { archived })?
-  let _ = ctx.patch_as(f"/api/collections/teams/records/{id}", payload, su)?
+  writes.update_team(ctx, pb.Caller.Member(su), id, writes.TeamPatch { archived: Some(archived), .. })?
   // The page shows the row's state, so patch the Teams section back and say
   // the success out loud — same shape as access_credential_write.
   let mut extra = ""

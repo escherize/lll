@@ -7,6 +7,7 @@ import "go:strings"
 import "models"
 import "pb"
 import "flags"
+import "writes"
 
 /// Dispatch `lll label <verb>` through the noun's Command table (TASK-307).
 /// The table is the one place a verb is declared: dispatch, `lll label --help`
@@ -144,12 +145,7 @@ fn label_create(input: flags.CommandInput) -> Result<(), string> {
   let color = p.one("-c")
   let team = team_flag_or_current(ctx, p.one("--team"))?
 
-  let new_label = models.NewLabel { name, color, team: team.id }
-  let payload = match json.Marshal(new_label) {
-    Ok(p) => p,
-    Err(e) => return Err(f"encoding label: {e}"),
-  }
-  let body = ctx.post("/api/collections/labels/records", payload as string)?
+  let body = writes.create_label(ctx, models.NewLabel { name, color, team: team.id })?
 
   let mut created = models.Label { .. }
   if let Err(e) = json.Unmarshal(body.bytes(), &created) {
@@ -176,13 +172,10 @@ fn label_edit(input: flags.CommandInput) -> Result<(), string> {
   if p.given("-n") { check_filter_name("label", p.one("-n"))? }
   let label = records.resolve_label(ctx, current_team(ctx)?.id, name)?
 
-  let mut fields: Slice<string> = []
-  if p.given("-n") { fields = fields.append("\"name\":" + json_quote(p.one("-n"))?) }
-  if p.given("-c") { fields = fields.append("\"color\":" + json_quote(p.one("-c"))?) }
-  let _ = ctx.patch(
-    f"/api/collections/labels/records/{label.id}",
-    "{" + strings.Join(fields, ",") + "}",
-  )?
+  let mut patch = writes.LabelPatch { .. }
+  if p.given("-n") { patch.name = Some(p.one("-n")) }
+  if p.given("-c") { patch.color = Some(p.one("-c")) }
+  writes.update_label(ctx, label.id, patch)?
   fmt.Println(f"Updated label {name}")
   Ok(())
 }
@@ -203,7 +196,7 @@ fn label_delete(input: flags.CommandInput) -> Result<(), string> {
   if !confirmed_on_terminal(p.given("--yes"), f"delete label {name}?") {
     return Err(aborted())
   }
-  let _ = ctx.delete(f"/api/collections/labels/records/{label.id}")?
+  writes.delete_label(ctx, label.id)?
   fmt.Println(deleted_line("label", name, used))
   Ok(())
 }

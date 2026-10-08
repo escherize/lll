@@ -1,0 +1,78 @@
+import "go:encoding/json"
+import "go:net/url"
+
+import "pb"
+
+// The write layer (LLL-659). Every create, update and delete of a lll record
+// goes through this module, from the CLI and from the board alike. Each write
+// takes the caller's client and whom it runs as, and a typed value; bodies are
+// encoded here with encoding/json and nowhere else, so no caller spells JSON
+// by hand and the two surfaces cannot drift apart on what a write sends.
+//
+// Reads stay in `records` (and `claims` for holds): a write takes ids, not
+// names, so resolving a name is the caller's step and the layer never guesses
+// a team. scripts/test_write_layer.py fails on a raw write outside this
+// module.
+
+/// A request body from a `#[json]` value. `what` names it in the error.
+fn encode(value: Unknown, what: string) -> Result<string, string> {
+  match json.Marshal(value) {
+    Ok(b) => Ok(b as string),
+    Err(e) => Err(f"encoding {what}: {e}"),
+  }
+}
+
+fn collection_path(collection: string) -> string {
+  f"/api/collections/{collection}/records"
+}
+
+fn record_path(collection: string, id: string) -> string {
+  f"/api/collections/{collection}/records/{url.PathEscape(id)}"
+}
+
+/// POST a new record; the response body is the created record.
+fn create(
+  ctx: pb.Client,
+  caller: pb.Caller,
+  path: string,
+  value: Unknown,
+  what: string,
+) -> Result<string, string> {
+  let body = encode(value, what)?
+  ctx.send_as(caller, "POST", path, body, "application/json")
+}
+
+/// PATCH one record; PocketBase replaces exactly the fields the body names.
+fn update(
+  ctx: pb.Client,
+  caller: pb.Caller,
+  collection: string,
+  id: string,
+  value: Unknown,
+  what: string,
+) -> Result<string, string> {
+  let body = encode(value, what)?
+  ctx.send_as(
+    caller,
+    "PATCH",
+    record_path(collection, id),
+    body,
+    "application/json",
+  )
+}
+
+fn remove(
+  ctx: pb.Client,
+  caller: pb.Caller,
+  collection: string,
+  id: string,
+) -> Result<(), string> {
+  let _ = ctx.send_as(
+    caller,
+    "DELETE",
+    record_path(collection, id),
+    "",
+    "application/json",
+  )?
+  Ok(())
+}

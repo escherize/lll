@@ -25,6 +25,12 @@ type assignmentFields struct {
 	// read inside the transaction.
 	LabelsAdd    *[]string `json:"labels+"`
 	LabelsRemove *[]string `json:"labels-"`
+	// LLL-665: a description derived from the text the caller read rides
+	// with that read's 'updated'. The edit lands only if the issue is still
+	// that version, checked in the transaction below, as the If-Unmodified-
+	// Since header is on a PATCH (precondition.go). Not a record field: a
+	// server older than this refuses it as unknown rather than ignoring it.
+	IfUnmodifiedSince *string `json:"if_unmodified_since"`
 }
 
 func parseAssignmentFields(raw json.RawMessage) (assignmentFields, error) {
@@ -110,6 +116,11 @@ func updateAssignment(app core.App, issueID, expectedClaimID string, fields assi
 		issue, err := tx.FindRecordById("issues", issueID)
 		if err != nil {
 			return err
+		}
+		if fields.IfUnmodifiedSince != nil {
+			if err := checkUnmodified(issue, *fields.IfUnmodifiedSince); err != nil {
+				return err
+			}
 		}
 		held, err := currentClaim(tx, issueID)
 		if err != nil {
