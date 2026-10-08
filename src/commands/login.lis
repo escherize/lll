@@ -114,6 +114,9 @@ pub fn login(ctx: pb.Client, args: Slice<string>) -> Result<(), string> {
       "--url must be a full base url starting with http:// or https:// (e.g. https://tracker.example.com)",
     )
   }
+  if let Some(why) = login_target_conflict(target, saved_before_login.url, before_login.url) {
+    return Err(why)
+  }
 
   // One reader for the whole flow: a second bufio.Reader would race the
   // first's read-ahead and could lose the password line behind the email.
@@ -271,6 +274,23 @@ fn token_identity(ctx: pb.Client, tok: string) -> Result<(string, bool), string>
     return Err("the server answered, but not with a member: is --url this board's address?")
   }
   Ok((reply.name, !reply.rw))
+}
+
+/// Pure. Why a login without --url must not run, or None (LLL-680). A login
+/// saves its token, and the board endpoint it finds, into the home config.
+/// When LLL_URL or a repo file points it at a server other than the one that
+/// file's url names, those would land beside the other server's url: a token
+/// and web_url for one server under a url for another.
+fn login_target_conflict(target: string, home_url: string, effective_url: string) -> Option<string> {
+  if target != "" { return None }
+  let home = strings.TrimRight(strings.TrimSpace(home_url), "/")
+  let effective = strings.TrimRight(strings.TrimSpace(effective_url), "/")
+  if home == "" || same_server_url(home, effective) { return None }
+  Some(
+    f"this login would authenticate at {effective}, but the home config's url is {home}; saving the token there would pair it with the other server
+to switch the home config to this server: lll login --url {effective} ...
+to keep the home config and log in elsewhere: point LLL_CONFIG_HOME at another directory",
+  )
 }
 
 /// Save a login that just authenticated: url, board endpoint, token, then

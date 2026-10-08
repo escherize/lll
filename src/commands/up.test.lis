@@ -119,3 +119,21 @@ fn the_banner_names_only_the_proven_generated_admin() {
   assert admin_line(true, false, false, "e", "p").is_none()
   assert admin_line(true, true, true, "e", "p").is_none()
 }
+
+// LLL-680: a boot saves its board address as web_url only into a home config
+// whose url names this board's server, or none. A hosted url (and the token
+// beside it) keeps its own web_url.
+#[test]
+fn web_url_is_saved_only_beside_this_boards_url() {
+  let db = "http://127.0.0.1:8090"
+  let board = "http://127.0.0.1:8100"
+  assert home_names_board("", db, board)
+  assert home_names_board("http://127.0.0.1:8090/", db, board)
+  assert home_names_board(board, db, board)
+  assert !home_names_board("https://lll.example.com", db, board)
+  assert !home_names_board("http://127.0.0.1:8091", db, board)
+  // Loopback spellings name one server.
+  assert home_names_board("http://localhost:8090", db, board)
+  assert home_names_board("http://[::1]:8100/", db, board)
+  assert !home_names_board("http://localhost.example.com:8090", db, board)
+}
