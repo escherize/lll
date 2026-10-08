@@ -150,6 +150,13 @@ with tempfile.TemporaryDirectory(prefix='lll-658-') as directory:
         assert [t['key'] for t in teams] == ['ALPHA'], teams
         assert call(api, f"/api/collections/issues/records/{ib['id']}", token=reader)[0] == 404
         assert call(api, f"/api/collections/issues/records/{ia['id']}", {'title': 'x'}, reader, 'PATCH')[0] in (403, 404)
+        # The roster guards hold it like a read-only guest (review F1): no
+        # hidden team id on a visible member, and no relation probe.
+        both, _ = member('both-teams', scope='teams', teams=[alpha['id'], beta['id']], mode='rw')
+        seen = call(api, '/api/collections/members/records?perPage=200', token=reader)[1]['items']
+        assert next(m for m in seen if m['id'] == both['id'])['teams'] == [alpha['id']], 'link reader saw a hidden team id'
+        probe = urllib.parse.quote("teams.key ~ 'BE%'")
+        assert call(api, f'/api/collections/members/records?filter={probe}', token=reader)[0] == 403, 'link reader may probe'
         assert call(api, '/api/collections/link_viewers/auth-with-password',
                     {'identity': f"{alpha['id']}@links.invalid", 'password': 'x'})[0] >= 400
 

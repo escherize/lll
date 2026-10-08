@@ -104,7 +104,7 @@ func registerRosterScope(app core.App) {
 
 	app.OnRecordEnrich("members").BindFunc(func(e *core.RecordEnrichEvent) error {
 		viewer := e.RequestInfo.Auth
-		if viewer == nil || viewer.IsSuperuser() || viewer.Id == e.Record.Id || viewer.Collection().Name != "members" {
+		if viewer == nil || viewer.IsSuperuser() || viewer.Id == e.Record.Id || !holdsAccess(viewer) {
 			return e.Next()
 		}
 		acc := effectiveAccess(e.App, viewer)
@@ -207,7 +207,7 @@ func topicRefusal(app core.App, auth *core.Record, topic string) string {
 // (review round 2 F2). A superuser or an all + rw member sees every row
 // these checks protect.
 func callerRefusal(app core.App, auth *core.Record, base *core.Collection, filter, sort string) string {
-	if auth == nil || auth.IsSuperuser() || auth.Collection().Name != "members" {
+	if auth == nil || auth.IsSuperuser() || !holdsAccess(auth) {
 		return ""
 	}
 	acc := effectiveAccess(app, auth)

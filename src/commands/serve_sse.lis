@@ -186,13 +186,17 @@ fn readers_of(views: Slice<OpenView>) -> Slice<Reader> {
   out
 }
 
-/// Who a viewer's live fragments are read as: one key per credential.
+/// Who a viewer's live fragments are read as: one key per credential, and,
+/// for a member, per the access it rendered with, so two streams sharing a
+/// key always share the client and the presentation flags (review F2, F3).
+/// A team link's reader token is minted per request, so each link stream
+/// reads with its own.
 fn reader_of(v: Viewing) -> Reader {
   let key = match v.viewer {
     Viewer.Full => "board",
     Viewer.Scoped(s) => s.member.map_or_else(
-      || f"link:{records.normalize_team_key(s.teams.get(0).unwrap_or(""))}",
-      |m| f"member:{m.token}",
+      || f"link:{v.reads.token()}",
+      |m| f"member:{m.rw}:{m.all}:{m.token}",
     ),
   }
   Reader {
@@ -289,10 +293,19 @@ fn events_stream(
   // credential stops resolving or no longer covers what it streams. The
   // board token is fixed for the process, so a full viewer is not re-read.
   // Every payload was read as this viewer already; this check is what closes
-  // the stream, not what keeps data out of it.
-  let still_allowed = || match board_viewer(ctx, r) {
-    Viewer.Full => true,
-    Viewer.Scoped(now) => if page == "issue" && key != "" { now.sees_issue(key) } else { now.teams.contains(team) },
+  // the stream, not what keeps data out of it. A stream also closes when its
+  // read credential expires or the member's mode or reach changed since it
+  // opened: the browser reconnects and reads with what is current.
+  let opened_writes = viewer_writes(v.viewer)
+  let opened_scoped = viewer_is_scoped(v.viewer)
+  let still_allowed = || {
+    if pb.token_expired(v.reads.token()) { return false }
+    let current = board_viewer(ctx, r)
+    if viewer_writes(current) != opened_writes || viewer_is_scoped(current) != opened_scoped { return false }
+    match current {
+      Viewer.Full => true,
+      Viewer.Scoped(now) => if page == "issue" && key != "" { now.sees_issue(key) } else { now.teams.contains(team) },
+    }
   }
   let ticker = time.NewTicker(revalidate_every())
   defer ticker.Stop()

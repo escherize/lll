@@ -16,6 +16,15 @@ import (
 
 const linkViewers = "link_viewers"
 
+// holdsAccess reports whether auth is an identity whose reach is its access
+// fields (scope, teams, mode): a member, or a team link's reader. The roster
+// and relation-probe guards apply to both; a link reader is as narrow as a
+// read-only guest of its team, and must be held to the same checks.
+func holdsAccess(auth *core.Record) bool {
+	name := auth.Collection().Name
+	return name == "members" || name == linkViewers
+}
+
 // registerLinkTokenRoute answers POST /api/lll/link-token {"team": KEY} with
 // a token for team KEY's link viewer, creating the viewer on first use.
 //
