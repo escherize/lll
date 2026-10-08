@@ -55,10 +55,13 @@ creates a member named after `$USER`. Taken ports auto-increment; Ctrl-C stops
 everything. The banner lines:
 
 - `api` and `board`: the actual endpoints.
-- `admin`: the administrator pair. With `LLL_ADMIN_EMAIL` and
-  `LLL_ADMIN_PASSWORD` unset, a loopback boot uses `admin@local.dev` /
-  `admin-local-123` and prints that pair. A pair from the environment is
-  never printed.
+- `admin`: the administrator. With `LLL_ADMIN_EMAIL` and
+  `LLL_ADMIN_PASSWORD` unset, the first boot generates a random password for
+  `admin@local.dev` and keeps it in the data directory's `.lll-admin.json`
+  (mode 0600); the line names that file, not the password. Read it with
+  `jq -r .password pb/pb_data/.lll-admin.json`. A data directory that still
+  has the old well-known password `admin-local-123` loses it on the next
+  boot, with a warning. A pair from the environment is never printed.
 - `cli`: when your home config holds no token and no other server's url,
   `lll up` logs the CLI in as your member. It never replaces an existing
   login; when one is in the way, the line says how to switch.
@@ -343,8 +346,9 @@ set them as secrets):
 
 | Env | Meaning |
 |---|---|
-| `LLL_ADMIN_EMAIL` / `LLL_ADMIN_PASSWORD` | Server administrator, upserted at boot (a local fallback is used when unset; credentials are never printed) |
-| `LLL_BIND` | Bind address for both ports (default `127.0.0.1`; `0.0.0.0` when hosting) |
+| `LLL_ADMIN_EMAIL` / `LLL_ADMIN_PASSWORD` | Server administrator, upserted at boot. Set both or neither; with neither, a random password is generated once and kept 0600 in the data directory's `.lll-admin.json`. Credentials are never printed |
+| `LLL_ALLOWED_ORIGINS` | Browser origins, besides the board, that may read API responses (exact `scheme://host[:port]`, comma-separated). Unset: none. The board needs none; its pages call the API through its own `/api/` |
+| `LLL_BIND` | Bind address for both ports (default `127.0.0.1`; `0.0.0.0` when hosting). On a loopback bind, both ports answer only loopback host names (`localhost`, `127.0.0.1`, `[::1]`), which refuses DNS-rebinding pages |
 | `LLL_BOARD_TOKEN` | Pins the web board's access token; unset, each boot mints and prints a fresh one |
 
 `lll config init` writes a commented template. `lll up` uses a supplied member

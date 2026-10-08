@@ -48,6 +48,12 @@ const teamKeyRule = "a team key is a letter followed by up to 15 letters, digits
 const anonMessage = "authentication required: send a member token as 'Authorization: Bearer ...' - 'lll login' for a person, 'lll token create' for an agent"
 
 func Serve(dataDir, addr, adminEmail, adminPassword, version string) error {
+	origins, err := allowedOrigins(os.Getenv("LLL_ALLOWED_ORIGINS"))
+	if err != nil {
+		return err
+	}
+	bindHost := hostName(addr)
+
 	migrationsDir, err := materializeMigrations(dataDir)
 	if err != nil {
 		return err
@@ -146,6 +152,12 @@ func Serve(dataDir, addr, adminEmail, adminPassword, version string) error {
 		e.Router.GET("/.well-known/lll", func(re *core.RequestEvent) error {
 			return re.JSON(http.StatusOK, apiDiscovery(version, os.Getenv("LLL_WEB_URL")))
 		})
+		// LLL-676: no "*" CORS, no rebinding Host on loopback, no
+		// well-known administrator password (browser_guard.go).
+		guardBrowsers(e.Router, origins, bindHost)
+		if err := retireFallbackAdmin(e.App, adminEmail, adminPassword, os.Stdout); err != nil {
+			return err
+		}
 		if err := upsertSuperuser(e.App, adminEmail, adminPassword); err != nil {
 			return err
 		}

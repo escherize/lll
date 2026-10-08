@@ -493,7 +493,7 @@ Board rail spacing</pre></div>
     <h2>Run it</h2>
     <p class="body">
       <code>lll up</code> starts PocketBase and the board together, picks free ports when the
-      ones it wants are taken, prints the local fallback administrator pair, and logs your CLI in
+      ones it wants are taken, generates an administrator password and says which file keeps it, and logs your CLI in
       as your member. Locally that is the whole setup; on a host it is the same command with
       secrets in the environment (never printed) and a volume for the database.
     </p>
@@ -509,7 +509,7 @@ lll    &lt;installed version&gt;
 api    http://127.0.0.1:8090
 team   ENG
 member bryan
-admin  admin@local.dev / admin-local-123 (loopback fallback; set LLL_ADMIN_EMAIL and LLL_ADMIN_PASSWORD to choose your own)
+admin  admin@local.dev; generated password in /work/api/pb/pb_data/.lll-admin.json (set LLL_ADMIN_EMAIL and LLL_ADMIN_PASSWORD to choose your own)
 cli    logged in as bryan; url and token saved to ~/.config/lll/lll.toml
 board  http://127.0.0.1:8100
 board  login http://127.0.0.1:8100/?board_token=&lt;token&gt; (sets a cookie; LLL_BOARD_TOKEN pins it)</pre></div>
