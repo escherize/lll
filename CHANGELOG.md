@@ -12,7 +12,9 @@ minors. Issue keys are on the project's own board (`lll issue view KEY`).
   return it to anyone, read-only guests included, and a filter or sort on it
   is refused. `lll webhook add` prints a generated secret once, or takes
   yours with `--secret`. `lll webhook list` shows only "secret set" or
-  "secret not set" (LLL-661).
+  "secret not set" (LLL-661). Upgrading hides existing secrets but does not
+  rotate them: a secret a guest could read before is still valid, so remove
+  and add those webhooks again.
 - A webhook records the member who created it and delivers only while that
   member can read the webhook's team. Removing someone from a team stops
   their webhooks; each skipped delivery is logged. Webhooks created before

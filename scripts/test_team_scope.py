@@ -195,7 +195,7 @@ with tempfile.TemporaryDirectory(prefix='lll-team-scope-') as directory:
             assert call(api, path, token=ro)[0] == 400, path
         assert call(api, f"/api/collections/webhooks/records/{hook['id']}", {'url': 'https://evil.test/'}, tok, 'PATCH')[0] == 403
         assert call(api, f"/api/collections/webhooks/records/{hook['id']}", token=tok, method='DELETE')[0] == 204
-        cli_ro ={k: v for k, v in cli.items() if not k.startswith('LLL_ADMIN_')}
+        cli_ro = {k: v for k, v in cli.items() if not k.startswith('LLL_ADMIN_')}
         cli_ro.update(LLL_URL=api, LLL_TOKEN=ro, LLL_TEAM='ALPHA')
         who = subprocess.run([binary, 'whoami'], cwd=root, env=cli_ro, text=True, capture_output=True, timeout=30)
         assert 'access  read-only, team ALPHA' in who.stdout, who.stdout + who.stderr

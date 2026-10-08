@@ -129,11 +129,13 @@ fn webhook_add(input: flags.CommandInput) -> Result<(), string> {
   if let Err(e) = json.Unmarshal(body.bytes(), &created) {
     return Err(f"decoding created webhook: {e}")
   }
-  if !created.secret_set {
-    fmt.Println(f"Registered webhook {target} ({scope})")
-  } else if generated {
+  // `generated` is checked first: a server older than LLL-661 returns no
+  // secret_set, and the generated secret must still be shown once.
+  if generated {
     fmt.Println(f"Registered webhook {target} ({scope}) — deliveries carry X-LLL-Secret: {secret}")
     fmt.Println("Save this secret now: lll will not show it again.")
+  } else if secret == "" {
+    fmt.Println(f"Registered webhook {target} ({scope})")
   } else {
     fmt.Println(f"Registered webhook {target} ({scope}) — deliveries carry X-LLL-Secret")
   }
