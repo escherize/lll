@@ -95,7 +95,7 @@ for actor, p in results:
 actor = next(a for a in actors if a['id'] == holder)
 assert cli('issue', 'claim', key, actor=actor).returncode == 0
 assert state()['claim']['id'] == held['claim']['id']
-assert state()['claim']['created'] == held['claim']['created']
+assert state()['claim']['claimed'] == held['claim']['claimed']
 
 # LLL-512: the suite's own token does not hold the claim, so it is refused
 # and told about --force; the holder releases freely.

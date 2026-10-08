@@ -183,11 +183,11 @@ first = minted(out)
 refused = "rotating bot-watch-contract's token: only the bot's owner or a superuser can do that"
 for who in [other_token, first]:  # another full member; the bot itself
     result = cli('bot', 'rotate', 'bot-watch-contract', as_token=who)
-    assert result.returncode == 1 and refused in result.stderr, result
+    assert result.returncode == 4 and refused in result.stderr, result
     assert authenticates(first), 'a refused rotation stranded the token'
 # LLL-546 review: 'lll bot NAME' by a non-owner claims no rotation it did not do.
 result = cli('bot', 'bot-watch-contract', as_token=other_token)
-assert result.returncode == 1 and refused in result.stderr, result
+assert result.returncode == 4 and refused in result.stderr, result
 assert 'rotat' not in result.stdout and 'exists;' not in result.stderr, result
 assert authenticates(first), 'a refused rotation stranded the token'
 second = minted(ok('bot', 'rotate', 'bot-watch-contract', '--duration', '3600', as_token=owner_token))

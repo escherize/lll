@@ -46,7 +46,7 @@ docs = json.loads(cli('doc', 'list', '--json'))['items']
 assert [doc['slug'] for doc in docs] == expected
 filtered_docs = json.loads(cli('doc', 'list', '--kind', 'finding', '--json'))['items']
 assert [doc['slug'] for doc in filtered_docs] == expected
-findings = json.loads(cli('finding', 'list', '--json'))
+findings = json.loads(cli('finding', 'list', '--json'))['items']
 assert [doc['slug'] for doc in findings] == expected
 context = json.loads(cli('issue', 'view', key, '--json'))
 for field in ['docs', 'findings']:

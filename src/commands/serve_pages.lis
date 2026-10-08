@@ -242,7 +242,7 @@ fn board_page(w: http.ResponseWriter, r: Ref<http.Request>, team: models.Team, m
   for h in csv(raw.hide) {
     match query.state(h) {
       Ok(valid) => { hidden = hidden.append(valid) },
-      Err(e) => { if err == "" { err = f"{e} (hide)" } },
+      Err(e) => { if err == "" { err = f"{pb.plain(e)} (hide)" } },
     }
   }
   // The saved view (LLL-375): on a URL that says nothing about hide — the

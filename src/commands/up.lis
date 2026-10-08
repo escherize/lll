@@ -190,7 +190,7 @@ check what is configured with 'lll config list'",
           fmt.Println(
             f"check that the data dir '{pb_dir}' is writable, or pick another with --pb-dir",
           )
-          os.Exit(1)
+          os.Exit(pb.exit_code(pb.ErrorKind.Server))
         },
         // Graceful shutdown (Ctrl-C / SIGTERM caught by PocketBase) — take
         // the board down with us; PocketBase's signal handler suppressed the

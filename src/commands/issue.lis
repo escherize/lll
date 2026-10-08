@@ -1177,7 +1177,8 @@ fn view(input: flags.CommandInput) -> Result<(), string> {
     let claim_line = match await_issue_view(reads.claim, "claim")? {
       Some(held) => {
         let holder = display.byline(display.member_name(held.member, held.expand.member.name, "an unknown member"), held.agent)
-        Some(f"- **Claimed:** {holder} (since {display.absolute(held.created)}, renewed {display.absolute(held.updated)})")
+        let renewed = if held.updated == "" || held.updated == held.created { "" } else { f", renewed {display.absolute(held.updated)}" }
+        Some(f"- **Claimed:** {holder} (since {display.absolute(held.created)}{renewed})")
       },
       None => None,
     }

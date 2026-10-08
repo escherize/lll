@@ -152,6 +152,81 @@ scripts. A removed spelling fails and names its replacement (LLL-644).
   so a renewal that lands between the sweep's list and its delete keeps the
   claim (LLL-663).
 
+### Changed (breaking: the 1.0 output contract)
+
+Scripts can now rely on exit codes and `--json` fields; both are listed in
+`docs/cli-contract.md` and covered by SemVer from 1.0. Read this before
+upgrading scripts that parse lll output (LLL-645).
+
+- Exit codes follow D1: 0 ok, 1 error, 2 usage, 3 not found, 4 refused or
+  conflict, 5 nothing to do, 6 not authenticated. Before, every failure
+  exited 1. Unknown flags, verbs and nouns and a malformed issue key now
+  exit 2; a missing issue, doc, team, label, project, member or webhook 3; a
+  claim held by someone else, a read-only write, an `--if-unchanged-since`
+  mismatch or `release` without the claim 4; an empty `issue next` 5; a
+  missing, expired, revoked or corrupted token 6.
+- A declined delete confirmation (`[y/N]`, or no answer on stdin) exits 4
+  with `Error: aborted: nothing was deleted` on stderr. It printed
+  `Aborted.` and exited 0.
+- Errors print the server's message, not the request: `Error: ENG-1: Issue
+  is already claimed by alice.` instead of the method, URL, status line and
+  JSON body. A 5xx answer, or an answer that is not the API's JSON, still
+  names the request.
+- Every `list --json` prints one envelope, `{items, page, perPage,
+  totalItems, totalPages}`, whatever its flags. `finding list` and `search`
+  printed a bare array; `doc`, `team`, `member`, `label`, `project` and
+  `webhook list` printed `{items}`; `issue list --ready`, `--blocked` and
+  `--sort priority` printed `{items, totalItems}`. `items` is `[]` when
+  empty, never `null`.
+- Every timestamp in `--json` output is RFC3339 with milliseconds
+  (`2026-10-08T03:02:11.982Z`), not PocketBase's `2026-10-08 03:02:11.982Z`.
+- Every issue `--json` carries `key` (`ENG-12`) and `claim`. In
+  `issue view --json` and `issue next --json`, `claim` is now
+  `{id, member, holder, agent, claimed, renewed}` or `null`, not the raw
+  claim record with `expand.member`.
+- `issue next --json` prints the `issue view --json` object with or without
+  `--claim`. Without `--claim` it printed the decoded record only.
+- `doc view --json` prints RFC3339 timestamps; the record is otherwise
+  unchanged.
+- Empty lists print one line on stderr: `no labels`, `no projects`,
+  `no docs`, `no teams`, `no members`, `no webhooks`, `no findings`,
+  `no comments`, `no match for ...`. `label list` and `project list` printed
+  nothing; `finding list` printed `No findings.`, `issue comment KEY`
+  printed `No comments.` and `search` printed `No match for ...`, all on
+  stdout.
+- Claim refusals carry a stable code in the error's `data.code`:
+  `claim_held`, `needs_force`, `claim_changed` or `not_claimed`. The CLI
+  branches on the code instead of the English message.
+
+### Added
+
+- `--json` on `whoami`, `team view`, `team create`, `project view`,
+  `finding near`, `config list`, `doc create`, `label create`,
+  `invite create`, `issue update`, `issue close`, `issue start`,
+  `issue claim`, and `issue comment KEY` without a body (LLL-645).
+- `lll api --fail`: an HTTP answer of 400 or above exits with the code its
+  status maps to; without it, any answer still exits 0 (LLL-645).
+- `issue list` shows the claim: the text list names the holder, agent label
+  and claim age where the assignee goes, and `--json` carries `claim` on
+  every item, so automation no longer views each issue to learn who holds
+  it (LLL-651).
+- `issue view --raw` prints a `Claimed:` line with the holder, agent label,
+  and when the claim was taken and last renewed (LLL-638).
+- `docs/cli-contract.md`: exit codes, covered JSON fields, the list
+  envelope, permanent aliases, and what `lll api` does and does not cover.
+  `lll --help` and the README link it.
+
+### Fixed
+
+- `issue list --ready` and `--blocked` read every page before filtering.
+  They filtered one page (200 issues, or `--limit`), so a ready issue past
+  it was missing and `--json` reported the page's count as the total
+  (LLL-673).
+- `issue list --since` and `issue update --if-unchanged-since` accept
+  RFC3339 in any offset and the space form, and compare instants. Copying
+  `updated` from `--json` into `--if-unchanged-since` with a `T` failed with
+  a misleading "changed since" (LLL-645).
+
 ## [0.8.0] - 2026-10-07
 
 Scoped access is complete for teams: a single-use link invites a person to

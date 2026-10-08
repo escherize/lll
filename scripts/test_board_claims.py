@@ -78,7 +78,7 @@ cli('issue', 'claim', key)
 held = json.loads(cli('issue', 'view', key, '--json'))['claim']
 issue_stream.until(lambda e: b'id="release-form"' in e)
 board_stream.until(lambda e: b'class="card-claim"' in e)
-assert held['expand']['member']['name'].encode() in request('/issue/' + key + '?raw', web=True)
+assert held['holder'].encode() in request('/issue/' + key + '?raw', web=True)
 
 # Change assignment independently, then release only the hold. No issue PATCH
 # follows this release, so only a claims subscription can refresh the UI.
