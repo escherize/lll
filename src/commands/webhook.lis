@@ -44,6 +44,7 @@ pub fn webhook_commands() -> Slice<flags.Command> {
       summary: "register a URL that receives this team's issue events, or one project's with --project",
       spec: webhook_add_spec(),
       positional: "URL",
+      missing: "a webhook needs a target URL: 'lll webhook add URL'",
       run: webhook_add,
       ..
     },
@@ -61,6 +62,7 @@ pub fn webhook_commands() -> Slice<flags.Command> {
       summary: "delete a registration by its URL; --project picks between the same URL at both scopes",
       spec: webhook_remove_spec(),
       positional: "URL",
+      missing: "which webhook? its URL, as 'lll webhook list' prints it",
       run: webhook_remove,
       ..
     },

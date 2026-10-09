@@ -175,8 +175,8 @@ fn command(
   let (least, most) = arity(c.positional)
   let parsed = parse_n(c.spec, args, start, most, usage)?
   if parsed.positional_count() < least {
-    let more = if c.missing == "" { "" } else { f"\n{c.missing}" }
-    return Err(usage_error(f"usage: {usage}{more}"))
+    let what = if c.missing == "" { "" } else { f"{c.missing}\n" }
+    return Err(usage_error(f"{what}usage: {usage}"))
   }
   Ok(Invocation.Run(Call { command: c, args, parsed, usage }))
 }

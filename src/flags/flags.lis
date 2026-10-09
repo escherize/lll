@@ -317,8 +317,8 @@ pub struct Command {
   pub page: string,
   pub spec: Slice<Flag>,
   pub positional: string,
-  /// What the missing-argument error adds under the usage line, when the
-  /// positional needs saying more about ("" adds nothing).
+  /// What the missing-argument error says above the usage line, when the
+  /// positional needs saying more about ("" says nothing more).
   pub missing: string,
   /// Whether the verb writes or only reads; no default, so every verb says.
   pub access: Access,

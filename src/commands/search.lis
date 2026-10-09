@@ -27,6 +27,7 @@ pub fn search_command() -> flags.Command {
     summary: "full-text search: issues, comments, docs, ranked, with context",
     spec: search_spec(),
     positional: "TEXT...",
+    missing: "what to search for?",
     run: search_cmd,
     ..,
   }

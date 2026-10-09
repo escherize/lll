@@ -8,9 +8,9 @@ import "output"
 
 pub fn completions_commands() -> Slice<flags.Command> {
   [
-    flags.Command { name: "bash", access: flags.Access.Read, summary: "add to ~/.bashrc: eval \"$(lll completions bash)\"", spec: [], run: |_| Ok(output.text(bash_script())), .. },
-    flags.Command { name: "zsh", access: flags.Access.Read, summary: "add to ~/.zshrc (after compinit): eval \"$(lll completions zsh)\"", spec: [], run: |_| Ok(output.text(zsh_script())), .. },
-    flags.Command { name: "fish", access: flags.Access.Read, summary: "add to ~/.config/fish/config.fish: lll completions fish | source", spec: [], run: |_| Ok(output.text(fish_script())), .. },
+    flags.Command { name: "bash", access: flags.Access.Read, summary: "add to ~/.bashrc: eval \"$(lll completions bash)\"", page: completions_usage(), spec: [], run: |_| Ok(output.text(bash_script())), .. },
+    flags.Command { name: "zsh", access: flags.Access.Read, summary: "add to ~/.zshrc (after compinit): eval \"$(lll completions zsh)\"", page: completions_usage(), spec: [], run: |_| Ok(output.text(zsh_script())), .. },
+    flags.Command { name: "fish", access: flags.Access.Read, summary: "add to ~/.config/fish/config.fish: lll completions fish | source", page: completions_usage(), spec: [], run: |_| Ok(output.text(fish_script())), .. },
   ]
 }
 

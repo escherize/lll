@@ -58,6 +58,7 @@ pub fn team_commands() -> Slice<flags.Command> {
       summary: "set the board accent colour ('' clears it)",
       spec: [json_after_flag("the team record")],
       positional: "KEY #rrggbb",
+      missing: "the accent is a hex color; an empty '' clears it",
       run: team_set_accent,
       ..
     },

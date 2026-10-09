@@ -181,7 +181,7 @@ fn a_value_outside_a_closed_set_is_refused_with_the_set() {
 #[test]
 fn a_missing_argument_is_a_usage_error() {
   assert refusal(["lll", "issue", "attach", "FLEET-4"]).starts_with("usage: lll issue attach KEY-123 FILE")
-  assert refusal(["lll", "skill", "get"]).contains("skills: ")
+  assert refusal(["lll", "skill", "get"]).starts_with("skills: ")
   assert runs(["lll", "skill", "get", "lll"])
 }
 

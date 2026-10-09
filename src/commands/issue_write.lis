@@ -730,8 +730,8 @@ fn comments_output(comments: Slice<models.Comment>) -> output.Output {
 /// the author is the token's member. A superuser token may change anything.
 fn comment_commands() -> Slice<flags.Command> {
   [
-    flags.Command { name: "edit", access: flags.Access.Write, summary: "edit a numbered comment", spec: comment_mutate_spec("edit"), positional: "KEY N", run: |input| comment_mutate(input.ctx, "edit", input.parsed), .. },
-    flags.Command { name: "delete", access: flags.Access.Write, summary: "delete a numbered comment", spec: comment_mutate_spec("delete"), positional: "KEY N", run: |input| comment_mutate(input.ctx, "delete", input.parsed), .. },
+    flags.Command { name: "edit", access: flags.Access.Write, summary: "edit a numbered comment", spec: comment_mutate_spec("edit"), positional: "KEY-123 N", run: |input| comment_mutate(input.ctx, "edit", input.parsed), .. },
+    flags.Command { name: "delete", access: flags.Access.Write, summary: "delete a numbered comment", spec: comment_mutate_spec("delete"), positional: "KEY-123 N", run: |input| comment_mutate(input.ctx, "delete", input.parsed), .. },
   ]
 }
 
