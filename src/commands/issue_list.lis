@@ -350,8 +350,9 @@ fn issue_next(input: flags.CommandInput) -> Result<(), pb.CliError> {
   for name in p.all("--exclude-label") {
     excluded = excluded.append(records.label_ids(ctx, scope, name)?...)
   }
-  let candidates = ready_issues(ctx, resolve_filter_query(ctx, scope, filters)?)?
+  let matched = matching_issues(ctx, resolve_filter_query(ctx, scope, filters)?)?
     .filter(|i| !i.labels.any(|l| excluded.contains(l)))
+  let candidates = matched.filter(|i| records.is_ready(i, i.expand.blocked_by))
   let unblocks = unblocks_map(ctx, scope, candidates)?
   // A claimed ready issue is someone's work in progress, not an invitation -
   // including my own claims. The agenda is what an agent can pick up NOW.
@@ -363,12 +364,8 @@ fn issue_next(input: flags.CommandInput) -> Result<(), pb.CliError> {
   let ranked = rank_agenda(candidates, unblocks).filter(|i| !held.contains(i.id))
   let agenda = ranked.filter(|i| i.assignee == "")
   if agenda.is_empty() {
-    // My own holds are skipped above, so a loop that stranded one sees only
-    // "nothing to do" (two 1.0 fleet agents, case 13). Name them.
-    let me = records.token_member(ctx.token())
-    let mine = team_claims.filter(|c| me == Some(c.member)).map(|c| c.issue)
-    let stranded = candidates.filter(|i| mine.contains(i.id)).map(|i| f"{i.expand.team.key}-{i.number}")
-    return Err(pb.fail(pb.ErrorKind.NothingToDo, empty_agenda_message(ranked) + own_claims_note(stranded)))
+    let idle = nothing_to_do(matched, candidates, ranked, team_claims, records.token_member(ctx.token()))
+    return Err(pb.fail(pb.ErrorKind.NothingToDo, nothing_to_do_message(idle)))
   }
   let best = agenda[0]
   let key = f"{best.expand.team.key}-{best.number}"
@@ -411,38 +408,103 @@ fn issue_next(input: flags.CommandInput) -> Result<(), pb.CliError> {
   Ok(())
 }
 
-/// Why `issue next` has nothing. `unclaimed` is every ready, unclaimed match;
-/// when some exist they are all assigned, and an assigned issue (close keeps
-/// the assignee) is not offered. Four 1.0 fleet agents read "the agenda is
-/// empty" as "no ready issues"; one spent forty calls on it.
-fn empty_agenda_message(unclaimed: Slice<models.Issue>) -> string {
-  if unclaimed.is_empty() {
-    return "no unclaimed ready issues: the agenda is empty; 'lll issue list --ready' shows what is claimed, 'lll issue create' makes new work"
+/// Why `issue next` offers nothing (LLL-685). Four 1.0 fleet agents read
+/// "the agenda is empty" as "no ready issues" while every ready issue was
+/// assigned; one spent forty calls on it. So the reason is decided once, by
+/// nothing_to_do, and worded once, by nothing_to_do_message.
+enum Idle {
+  /// Nothing matches that anyone could pick up, now or later.
+  Empty,
+  /// Ready matches exist, but someone else holds every one.
+  AllClaimed(Slice<string>),
+  /// Ready, unclaimed matches exist, but every one is assigned: an assigned
+  /// issue (close keeps the assignee) is not offered.
+  AllAssigned(Slice<Assigned>),
+  /// Open matches exist, but every one waits on a blocker.
+  AllBlocked(Slice<string>),
+}
+
+struct Assigned {
+  key: string,
+  to: string,
+}
+
+/// The reason, and the ready matches the caller itself holds: `issue next`
+/// skips those, so a loop that stranded one would otherwise see only
+/// "nothing to do" (two 1.0 fleet agents, case 13).
+struct NothingToDo {
+  reason: Idle,
+  mine: Slice<string>,
+}
+
+/// Why the agenda is empty. `matched` is every issue the filters match,
+/// `ready` the ready ones, `unclaimed` the ready ones nobody holds, in
+/// agenda order, and `holds` every claim in scope. The first reason that applies wins: an assigned issue is
+/// the nearest to offerable, a blocked one the furthest.
+fn nothing_to_do(
+  matched: Slice<models.Issue>,
+  ready: Slice<models.Issue>,
+  unclaimed: Slice<models.Issue>,
+  holds: Slice<models.Claim>,
+  me: Option<models.MemberId>,
+) -> NothingToDo {
+  let key = |i: models.Issue| f"{i.expand.team.key}-{i.number}"
+  let held_by_me = holds.filter(|c| me == Some(c.member)).map(|c| c.issue)
+  let held_by_others = holds.filter(|c| me != Some(c.member)).map(|c| c.issue)
+  let mine = ready.filter(|i| held_by_me.contains(i.id)).map(key)
+  let claimed = ready.filter(|i| held_by_others.contains(i.id)).map(key)
+  let blocked = matched
+    .filter(|i| i.state().map_or(false, |s| s.is_open()) && !i.expand.team.archived && records.blockers_of(i, i.expand.blocked_by).any())
+    .map(key)
+  let reason = if !unclaimed.is_empty() {
+    Idle.AllAssigned(unclaimed.map(|i| Assigned { key: key(i), to: i.expand.assignee.name }))
+  } else if !claimed.is_empty() {
+    Idle.AllClaimed(claimed)
+  } else if !blocked.is_empty() {
+    Idle.AllBlocked(blocked)
+  } else {
+    Idle.Empty
   }
-  let count = if unclaimed.length() > 3 { 3 } else { unclaimed.length() }
-  let shown = unclaimed[..count]
-  let mut named = shown.map(|i| f"{i.expand.team.key}-{i.number} to {i.expand.assignee.name}")
-  if unclaimed.length() > 3 { named = named.append("...") }
-  let n = unclaimed.length()
-  let are = if n == 1 { "ready issue matches but is" } else { "ready issues match but are" }
-  f"no unassigned, unclaimed ready issues; {n} {are} assigned ({strings.Join(named, ", ")}): 'lll issue update KEY --assignee none' offers one"
+  NothingToDo { reason, mine }
 }
 
-/// The ready matches the caller itself holds, which `issue next` never offers.
-fn own_claims_note(keys: Slice<string>) -> string {
-  if keys.is_empty() { return "" }
-  f"; you hold claims on {strings.Join(keys, ", ")}: close them, or 'lll issue release KEY' to offer them"
+/// The one wording of an empty agenda.
+fn nothing_to_do_message(idle: NothingToDo) -> string {
+  let why = match idle.reason {
+    Idle.Empty => "no unclaimed ready issues: the agenda is empty; 'lll issue list --ready' shows what is claimed, 'lll issue create' makes new work",
+    Idle.AllAssigned(assigned) => {
+      let n = assigned.length()
+      let are = if n == 1 { "ready issue matches but is" } else { "ready issues match but are" }
+      f"no unassigned, unclaimed ready issues; {n} {are} assigned ({first_three(assigned.map(|a| f"{a.key} to {a.to}"))}): 'lll issue update KEY --assignee none' offers one"
+    },
+    Idle.AllClaimed(keys) => {
+      let n = keys.length()
+      let are = if n == 1 { "ready issue matches but is" } else { "ready issues match but are" }
+      f"no unclaimed ready issues; {n} {are} claimed by someone else ({first_three(keys)}): 'lll issue list --ready' shows who holds them, 'lll issue create' makes new work"
+    },
+    Idle.AllBlocked(keys) => {
+      let n = keys.length()
+      let are = if n == 1 { "open issue matches but is" } else { "open issues match but are" }
+      f"no ready issues; {n} {are} blocked ({first_three(keys)}): 'lll issue list --blocked' shows what they wait on"
+    },
+  }
+  if idle.mine.is_empty() { return why }
+  f"{why}; you hold claims on {strings.Join(idle.mine, ", ")}: close them, or 'lll issue release KEY' to offer them"
 }
 
-/// The `list --ready` candidate set (LLL-175), reused as the `issue next`
-/// agenda input: open, every blocker done or cancelled, within `scope` (a PB
-/// filter: the configured team plus any --project/--label). PocketBase cannot
-/// filter on an expanded relation's state, so readiness is decided here,
-/// after the fetch.
-fn ready_issues(ctx: pb.Client, scope: string) -> Result<Slice<models.Issue>, pb.CliError> {
+/// Up to three names, then "..." for the rest.
+fn first_three(names: Slice<string>) -> string {
+  if names.length() <= 3 { return strings.Join(names, ", ") }
+  strings.Join(names[..3].append("..."), ", ")
+}
+
+/// Every issue `scope` matches (a PB filter: the configured team plus any
+/// --project/--label), expanded for the readiness rule. `issue next` picks
+/// the `list --ready` set (LLL-175) from it with records.is_ready, after
+/// the fetch: PocketBase cannot filter on an expanded relation's state.
+fn matching_issues(ctx: pb.Client, scope: string) -> Result<Slice<models.Issue>, pb.CliError> {
   let filter = url.QueryEscape(scope)
-  let items = records.fetch_all_issues(ctx, f"&sort=created,id&expand=team,assignee,labels,blocked_by,project&filter={filter}")?
-  Ok(items.filter(|i| records.is_ready(i, i.expand.blocked_by)))
+  records.fetch_all_issues(ctx, f"&sort=created,id&expand=team,assignee,labels,blocked_by,project&filter={filter}")
 }
 
 /// Triage order (LLL-382). prio_rank is the house answer to "how urgent is

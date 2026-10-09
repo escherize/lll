@@ -621,15 +621,63 @@ fn assigned(number: int, to: string) -> models.Issue {
   }
 }
 
+fn idle(reason: Idle) -> string {
+  nothing_to_do_message(NothingToDo { reason, mine: [] })
+}
+
 /// The 1.0 fleet: four agents read "the agenda is empty" while every ready
 /// issue was assigned. The refusal names them and the way to offer one.
 #[test]
 fn an_agenda_of_assigned_issues_says_so() {
-  assert empty_agenda_message([]).contains("the agenda is empty")
-  let msg = empty_agenda_message([assigned(4, "alice"), assigned(5, "bob"), assigned(6, "cy"), assigned(7, "dee")])
+  assert idle(Idle.Empty).contains("the agenda is empty")
+  let four = [assigned(4, "alice"), assigned(5, "bob"), assigned(6, "cy"), assigned(7, "dee")]
+  let msg = nothing_to_do_message(nothing_to_do(four, four, four, [], None))
   assert msg.contains("4 ready issues match but are assigned (ENG-4 to alice, ENG-5 to bob, ENG-6 to cy, ...)")
-  assert empty_agenda_message([assigned(4, "alice")]).contains("1 ready issue matches but is assigned (ENG-4 to alice)")
+  assert idle(Idle.AllAssigned([Assigned { key: "ENG-4", to: "alice" }])).contains("1 ready issue matches but is assigned (ENG-4 to alice)")
   assert msg.contains("'lll issue update KEY --assignee none' offers one")
+}
+
+fn agenda_issue(id: string, number: int, state: string) -> models.Issue {
+  models.Issue {
+    id: models.IssueId(id),
+    number,
+    state_wire: state,
+    expand: models.IssueExpand { team: models.Team { key: "ENG", .. }, .. },
+    ..
+  }
+}
+
+fn held(issue: string, member: string) -> models.Claim {
+  models.Claim { issue: models.IssueId(issue), member: models.MemberId(member), .. }
+}
+
+/// LLL-685: an empty agenda carries its reason as a value, decided in one
+/// place: assigned before claimed before blocked, else empty.
+#[test]
+fn an_empty_agenda_names_its_reason() {
+  let me = Some(models.MemberId("me"))
+  let one = agenda_issue("i1", 1, "todo")
+  let two = agenda_issue("i2", 2, "todo")
+  // Nothing matches at all.
+  assert idle(nothing_to_do([], [], [], [], me).reason) == idle(Idle.Empty)
+  // Someone else holds every ready match; my own hold is named apart.
+  let claimed = nothing_to_do([one, two], [one, two], [], [held("i1", "bob"), held("i2", "me")], me)
+  let msg = nothing_to_do_message(claimed)
+  assert msg.starts_with("no unclaimed ready issues; 1 ready issue matches but is claimed by someone else (ENG-1): 'lll issue list --ready' shows who holds them")
+  assert msg.ends_with("; you hold claims on ENG-2: close them, or 'lll issue release KEY' to offer them")
+  // Only my own holds: the agenda is empty, and says what I hold.
+  let only_mine = nothing_to_do([one], [one], [], [held("i1", "me")], me)
+  assert nothing_to_do_message(only_mine) == idle(Idle.Empty) + "; you hold claims on ENG-1: close them, or 'lll issue release KEY' to offer them"
+  // A superuser holds nothing: every claim is someone else's.
+  assert idle(nothing_to_do([one], [one], [], [held("i1", "me")], None).reason).contains("claimed by someone else (ENG-1)")
+  // Open, but waiting on an open blocker; the blocker in progress is not ready.
+  let blocker = agenda_issue("b", 3, "in-progress")
+  let mut waiting = agenda_issue("w", 4, "todo")
+  waiting.blocked_by = [models.IssueId("b")]
+  waiting.expand.blocked_by = [blocker]
+  assert idle(nothing_to_do([blocker, waiting], [], [], [], me).reason) == "no ready issues; 1 open issue matches but is blocked (ENG-4): 'lll issue list --blocked' shows what they wait on"
+  // A finished or in-progress issue is no reason at all.
+  assert idle(nothing_to_do([blocker, agenda_issue("d", 5, "done")], [], [], [], me).reason) == idle(Idle.Empty)
 }
 
 /// `issue next --help` states the output contract; --ready is accepted but
@@ -675,8 +723,8 @@ fn an_update_field_typed_as_a_verb_names_the_flag() {
 /// "nothing to do"; the refusal names what they still hold.
 #[test]
 fn an_empty_agenda_names_my_own_held_claims() {
-  assert own_claims_note([]) == ""
-  assert own_claims_note(["FLEET-8", "FLEET-9"]).contains("you hold claims on FLEET-8, FLEET-9")
+  assert idle(Idle.Empty) == "no unclaimed ready issues: the agenda is empty; 'lll issue list --ready' shows what is claimed, 'lll issue create' makes new work"
+  assert nothing_to_do_message(NothingToDo { reason: Idle.Empty, mine: ["FLEET-8", "FLEET-9"] }).contains("; you hold claims on FLEET-8, FLEET-9")
 }
 
 /// 1.0 fleet case 20: 'issue note' and 'issue review' name the real verbs.
