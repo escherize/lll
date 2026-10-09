@@ -255,6 +255,23 @@ fn load_traced_names_the_file_each_value_came_from() {
   assert src.web_url == None
 }
 
+// LLL-687 review: a repo file naming the same url as the home config is
+// still the one that wins, so it is the source the hints name: editing the
+// home file would change nothing.
+#[test]
+fn a_repo_file_repeating_the_home_value_is_still_its_source() {
+  let assert Ok((root, home)) = fixture(
+    "url = \"http://same:1\"\ntoken = \"tok\"\n",
+    "url = \"http://same:1\"\ntoken = \"tok\"\nteam = \"HOME\"\n",
+  )
+  let assert Ok((cfg, src)) = traced_from(root, home)
+  assert cfg.url == "http://same:1"
+  let assert Some(Source.RepoFile(_)) = src.url
+  let assert Some(Source.RepoFile(_)) = src.token
+  // A key the repo file does not name stays the home file's.
+  let assert Some(Source.HomeFile(_)) = src.team
+}
+
 // ------------------------------------------------------------- web_url
 
 #[test]

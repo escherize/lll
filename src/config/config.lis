@@ -302,13 +302,18 @@ fn layered(env: Env) -> Result<(Config, Sources), string> {
 
   for (path, file) in config_files(env) {
     let was = cfg
-    cfg = read_config(path, cfg)?
+    let (next, named) = read_layer(path, cfg)?
+    cfg = next
+    // A file is the source of every key it names, even one whose value
+    // matches the layer below: it is the one that wins, so it is the one to
+    // edit (LLL-687). A changed value counts too, for a key spelled in
+    // another case, which the decoder accepts and the key list does not.
     let from = Some(file)
-    if cfg.url != was.url { src.url = from }
-    if cfg.team != was.team { src.team = from }
-    if cfg.sort != was.sort { src.sort = from }
-    if cfg.web_url != was.web_url { src.web_url = from }
-    if cfg.token != was.token { src.token = from }
+    if named.contains("url") || cfg.url != was.url { src.url = from }
+    if named.contains("team") || cfg.team != was.team { src.team = from }
+    if named.contains("sort") || cfg.sort != was.sort { src.sort = from }
+    if named.contains("web_url") || cfg.web_url != was.web_url { src.web_url = from }
+    if named.contains("token") || cfg.token != was.token { src.token = from }
   }
 
   if env.url != "" {
@@ -516,14 +521,22 @@ fn exists(path: string) -> bool {
 }
 
 fn read_config(path: string, initial: Config) -> Result<Config, string> {
+  let (cfg, _) = read_layer(path, initial)?
+  Ok(cfg)
+}
+
+/// The file at `path` over `initial`, and which of Config's keys it names.
+fn read_layer(path: string, initial: Config) -> Result<(Config, Slice<string>), string> {
   let data = match os.ReadFile(path) {
     Ok(data) => data,
     Err(e) => return Err(f"reading {path}: {e}"),
   }
   // TOML overwrites only present fields; this is also the layering policy.
   let mut cfg = initial
-  if let Err(e) = toml.Unmarshal(data, &cfg) {
-    return Err(f"parsing {path}: {e}\nfix the TOML syntax in {path}, or remove it and rerun 'lll config init'")
+  let meta = match toml.Decode(data as string, &cfg) {
+    Ok(meta) => meta,
+    Err(e) => return Err(f"parsing {path}: {e}\nfix the TOML syntax in {path}, or remove it and rerun 'lll config init'"),
   }
-  Ok(cfg)
+  let named = ["url", "team", "sort", "web_url", "token"].filter(|key| meta.IsDefined(key))
+  Ok((cfg, named))
 }
