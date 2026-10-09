@@ -399,7 +399,7 @@ password in its own data directory's .lll-admin.json."),
         db_url,
       },
     )
-    for line in log_cli_in(ctx, member.name, db_url, plan, src.token)? {
+    for line in log_cli_in(ctx, member.name, db_url, plan, src.token, (cfg.url, src.url))? {
       fmt.Println(line)
     }
   }
@@ -610,13 +610,16 @@ fn cli_login_plan(s: CliState) -> CliLogin {
 }
 
 /// Carry out the plan and return the banner lines. The member token to save
-/// is the one board_identity handed `ctx`.
+/// is the one board_identity handed `ctx`. `configured` is the url this boot
+/// started with and where it came from: one set above the home config still
+/// wins after the save (LLL-688).
 fn log_cli_in(
   ctx: pb.Client,
   name: string,
   db_url: string,
   plan: CliLogin,
   token_source: Option<config.Source>,
+  configured: (string, Option<config.Source>),
 ) -> Result<Slice<string>, pb.CliError> {
   match plan {
     CliLogin.Already => Ok([f"cli    unchanged: the CLI uses its token from {config.origin(token_source)}"]),
@@ -634,6 +637,10 @@ fn log_cli_in(
         },
         Some(config.Source.RepoFile(_)) | Some(config.Source.HomeFile(_)) | Some(config.Source.Flag(_)) |
           Some(config.Source.Default) | None => (),
+      }
+      let (url, url_source) = configured
+      if let Some(notice) = shadowed_url_notice(db_url, url, url_source) {
+        lines = lines.append(f"cli    {notice}")
       }
       Ok(lines)
     },
