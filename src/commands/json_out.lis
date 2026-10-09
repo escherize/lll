@@ -43,7 +43,7 @@ fn issue_done(ctx: pb.Client, p: flags.Parsed, key: string, line: string) -> Res
 
 /// The same for a doc: --json prints the doc record instead of `line`.
 fn doc_done(ctx: pb.Client, p: flags.Parsed, id: string, line: string) -> Result<(), pb.CliError> {
-  if p.given("--json") { return print_record_after(ctx, "docs", id) }
+  if p.given("--json") { return print_doc_after(ctx, id) }
   fmt.Println(line)
   Ok(())
 }
@@ -183,7 +183,45 @@ fn issue_json(record: json.RawMessage, claim: Option<models.Claim>) -> Result<Ma
     Some(held) => encode_json(claim_json(held), "claim")?,
     None => "null".bytes() as json.RawMessage,
   }
+  // Fleet cases 06 and 08: names beside the relation ids, so a reader can
+  // check "created by my bot" without a second lookup. A member the caller
+  // may not see is "hidden member" (the roster rule); an empty relation is "".
+  fields["creator_name"] = encode_json(display.member_name(issue.creator, issue.expand.creator.name, ""), "creator name")?
+  fields["assignee_name"] = encode_json(display.member_name(issue.assignee, issue.expand.assignee.name, ""), "assignee name")?
+  fields["project_name"] = encode_json(issue.expand.project.name, "project name")?
+  fields["label_names"] = encode_json(issue.expand.labels.map(|l| l.name), "label names")?
   Ok(fields)
+}
+
+/// One doc record as every doc --json prints it: the server's record with
+/// `author_name` and `last_editor_name` beside the ids (as issue_json names
+/// its members) and timestamps in RFC3339. `record` must expand author and
+/// last_editor, or every named member reads as hidden.
+fn doc_json(record: json.RawMessage) -> Result<Map<string, json.RawMessage>, pb.CliError> {
+  let mut d = models.Doc { .. }
+  if let Err(e) = json.Unmarshal(record, &d) { return Err(pb.failed(f"decoding doc: {e}")) }
+  let mut fields = Map.new<string, json.RawMessage>()
+  if let Err(e) = json.Unmarshal(contract_json(record, 0), &fields) { return Err(pb.failed(f"decoding doc JSON: {e}")) }
+  let author = d.expand.author.map_or("", |m| m.name)
+  let editor = d.expand.last_editor.map_or("", |m| m.name)
+  fields["author_name"] = encode_json(display.member_name(d.author, author, ""), "author name")?
+  fields["last_editor_name"] = encode_json(display.member_name(d.last_editor, editor, ""), "last editor name")?
+  Ok(fields)
+}
+
+/// doc_json for each of `docs`, for a list's items.
+fn docs_json(docs: Slice<models.Doc>) -> Result<Slice<Map<string, json.RawMessage>>, pb.CliError> {
+  let mut out: Slice<Map<string, json.RawMessage>> = []
+  for d in docs {
+    out = out.append(doc_json(encode_json(d, "doc")?)?)
+  }
+  Ok(out)
+}
+
+/// A doc write verb's --json: the doc as it now is, named as doc_json names it.
+fn print_doc_after(ctx: pb.Client, id: string) -> Result<(), pb.CliError> {
+  let record = ctx.get(f"/api/collections/docs/records/{id}?expand=issues.team,author.owner,last_editor.owner")?
+  print_json(doc_json(record.bytes() as json.RawMessage)?, "doc")
 }
 
 /// issue_json, printed.

@@ -111,7 +111,8 @@ pub fn unknown_doc(team: models.Team, slug: string) -> pb.CliError {
 /// supply domain filters before URL encoding; page size is a transport detail.
 /// A failed later page fails the read instead of returning a partial brief.
 pub fn fetch_docs(ctx: pb.Client, filter: string, sort: string, fields: string) -> Result<Slice<models.Doc>, pb.CliError> {
-  let params = f"filter={url.QueryEscape(filter)}&sort={url.QueryEscape(sort + ",id")}&fields={url.QueryEscape(fields)}"
+  // author and last_editor expand so --json can name them (fleet case 08).
+  let params = f"filter={url.QueryEscape(filter)}&sort={url.QueryEscape(sort + ",id")}&fields={url.QueryEscape(fields)}&expand=author,last_editor"
   let mut out: Slice<models.Doc> = []
   let mut page = 1
   loop {

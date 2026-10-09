@@ -214,7 +214,16 @@ fn release(input: flags.CommandInput) -> Result<(), pb.CliError> {
       e.with_message(f"{key}: {e.message}; 'lll issue release {key} --force --reason \"why\"' takes it anyway and comments on the issue")
     } else { e }
   })?
-  let assignment = if result.cleared_assignee { "cleared assignee" } else { "assignment unchanged" }
+  // On a finished issue the cleared assignee is usually the record of who
+  // did it (fleet case 07), so the line names both repairs.
+  let finished = issue.state().map_or(false, |s| s.is_terminal())
+  let assignment = if !result.cleared_assignee {
+    "assignment unchanged"
+  } else if finished {
+    f"cleared assignee; on a finished issue 'lll issue close {key}' releases and keeps it, or re-assign with 'lll issue update {key} --assignee NAME'"
+  } else {
+    "cleared assignee"
+  }
   let forced = if result.forced { "; forced, and commented on the issue" } else { "" }
   issue_done(ctx, p, key, f"Released {key} (was {result.member_name}'s); {assignment}{forced}")
 }

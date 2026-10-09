@@ -259,6 +259,7 @@ fn issue_update_spec() -> Slice<flags.Flag> {
       help: "remove a label and keep the others; repeatable (not with --label)",
       ..,
     },
+    flags.Flag { name: "--keep-claim", help: "with --state done|cancelled: keep your claim (moving your claimed issue there releases it by default)", .. },
     flags.Flag { name: "--force", help: "with --assignee none: clear a claim another member, or another agent label on your token, holds; leaves a comment on the issue", .. },
     reason_flag("update"),
     agent_flag(),
@@ -676,8 +677,10 @@ author expanded; a bot author's owner under author.expand.owner when you can
 read it), claim ({id, member, holder, agent, claimed, renewed}, or null), docs
 (explicit links), and findings (linked or label-area matches). Docs and findings
 include their bodies and use slug order; empty collections are [].
-Close releases the closer's own claim and keeps the assignee; --keep-claim
-keeps the claim. Other state changes (including review) retain claims.
+Moving your own claimed issue to done or cancelled, by close or by update
+--state, releases your claim and keeps the assignee; --keep-claim keeps the
+claim. Other state changes (including review) retain claims, and so does
+anyone else's update to done or cancelled.
 Release ends the hold; an assignment to someone other than the holder is
 preserved. Forcing another holder's claim takes --force, with --reason for
 the comment it leaves.

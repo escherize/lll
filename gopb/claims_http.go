@@ -31,6 +31,9 @@ func registerClaimRoutes(routes *router.Router[*core.RequestEvent], writes *issu
 			Agent   string          `json:"agent"`
 			Force   bool            `json:"force"`
 			Reason  string          `json:"reason"`
+			// keep_claim opts the holder out of the finish rule when the
+			// fields move the issue into done or cancelled.
+			KeepClaim bool `json:"keep_claim"`
 		}
 		re.Request.Body = http.MaxBytesReader(re.Response, re.Request.Body, 8<<20)
 		if err := re.BindBody(&body); err != nil || body.ClaimID == nil {
@@ -57,7 +60,7 @@ func registerClaimRoutes(routes *router.Router[*core.RequestEvent], writes *issu
 		}
 		unlock := writes.acquire(re.Request.PathValue("issue"))
 		defer unlock()
-		outcome, err := updateAssignment(re.App, re.Request.PathValue("issue"), *body.ClaimID, fields, by)
+		outcome, err := updateAssignment(re.App, re.Request.PathValue("issue"), *body.ClaimID, fields, by, body.KeepClaim)
 		return respondClaim(re, outcome, err)
 	}).Bind(apis.RequireAuth("members", core.CollectionNameSuperusers))
 

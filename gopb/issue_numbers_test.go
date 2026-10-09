@@ -461,7 +461,7 @@ func TestAssignmentWithAStaleDerivedDescriptionIsRefused(t *testing.T) {
 	stale := "2000-01-01 00:00:00.000Z"
 	derived := "read\nappended"
 	fields := assignmentFields{Assignee: &member, Description: &derived, IfUnmodifiedSince: &stale}
-	_, err := updateAssignment(app, issue.Id, "", fields, releaser{})
+	_, err := updateAssignment(app, issue.Id, "", fields, releaser{}, false)
 	var answered *router.ApiError
 	if !errors.As(err, &answered) || answered.Status != http.StatusPreconditionFailed {
 		t.Fatalf("expected a 412, got %v", err)
@@ -473,7 +473,7 @@ func TestAssignmentWithAStaleDerivedDescriptionIsRefused(t *testing.T) {
 
 	current := issue.GetString("updated")
 	fields.IfUnmodifiedSince = &current
-	if _, err := updateAssignment(app, issue.Id, "", fields, releaser{}); err != nil {
+	if _, err := updateAssignment(app, issue.Id, "", fields, releaser{}, false); err != nil {
 		t.Fatalf("the current stamp was refused: %v", err)
 	}
 	after, _ = app.FindRecordById("issues", issue.Id)

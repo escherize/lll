@@ -62,6 +62,9 @@ struct AssignmentRequest {
   agent: string,
   force: bool,
   reason: string,
+  /// Opts the holder out of the finish rule when the fields move the issue
+  /// into done or cancelled.
+  keep_claim: bool,
 }
 
 /// Who a claim-route write runs as, and the session label it carries.
@@ -186,6 +189,7 @@ fn update_assignment(
   claim_id: Option<models.ClaimId>,
   fields: string,
   by: ClaimAs,
+  keep_claim: bool,
 ) -> Result<Transition, pb.CliError> {
   transact(
     ctx,
@@ -198,6 +202,7 @@ fn update_assignment(
       agent: by.agent,
       force: by.force,
       reason: by.reason,
+      keep_claim,
     },
   )
 }

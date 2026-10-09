@@ -308,6 +308,13 @@ fn doc_edit_spec() -> Slice<flags.Flag> {
       help: "replacement comma-separated paths: the WHOLE set\n(pass \"\" to clear it)",
       ..,
     },
+    flags.Flag {
+      name: "--confidence",
+      value: true,
+      hint: "suspected|confirmed",
+      help: "a finding's confidence, as 'finding confirm' sets it (clears the note);\nrefuting needs a reason: 'lll finding refute SLUG -b WHY'",
+      ..,
+    },
     json_after_flag("the doc record"),
   ])
 }
@@ -381,8 +388,7 @@ fn create_doc(ctx: pb.Client, p: flags.Parsed, default_kind: string, slug: strin
     return Err(pb.failed(f"decoding created doc: {e}"))
   }
   if p.given("--json") {
-    fmt.Println(contract_json(resp.bytes() as json.RawMessage, 0) as string)
-    return Ok(())
+    return print_doc_after(ctx, created.id)
   }
   fmt.Println(f"Created doc {created.slug}")
   Ok(())
@@ -446,7 +452,7 @@ fn doc_list(input: flags.CommandInput) -> Result<(), pb.CliError> {
   }
   if limit > 0 && items.length() > limit { items = items[..limit] }
   let docs = models.DocList { items }
-  if p.given("--json") { return print_list_json(docs.items, whole_list(docs.items.length()), "docs") }
+  if p.given("--json") { return print_list_json(docs_json(docs.items)?, whole_list(docs.items.length()), "docs") }
   if docs.items.is_empty() { return say_empty("docs") }
   for d in docs.items {
     let mut kind = d.kind
@@ -466,10 +472,7 @@ fn doc_view(input: flags.CommandInput) -> Result<(), pb.CliError> {
   let raw_mode = p.given("--raw")
 
   let record = records.fetch_doc_record(ctx, current_team(ctx)?, slug)?
-  if json_mode {
-    fmt.Println(contract_json(record.bytes() as json.RawMessage, 0) as string)
-    return Ok(())
-  }
+  if json_mode { return print_json(doc_json(record.bytes() as json.RawMessage)?, "doc") }
 
   let mut d = models.Doc { .. }
   if let Err(e) = json.Unmarshal(record.bytes(), &d) {
@@ -537,18 +540,37 @@ fn doc_edit(input: flags.CommandInput) -> Result<(), pb.CliError> {
   let area_set = p.given("-a")
   let paths_raw = p.one("--paths")
   let paths_set = p.given("--paths")
-  if !body_set && !title_set && !kind_set && !area_set && !paths_set {
+  // Fleet case 08: --confidence on edit, as on create. It is the write
+  // 'finding confirm' makes (the note cleared with it); refuting keeps its
+  // own verb because it needs a reason.
+  let confidence_set = p.given("--confidence")
+  let mut confidence = ""
+  if confidence_set {
+    if strings.TrimSpace(strings.ToLower(p.one("--confidence"))) == "refuted" {
+      return Err(flags.usage_error(f"refuting needs a reason: lll finding refute {slug} -b WHY"))
+    }
+    confidence = check_confidence(p.one("--confidence"))?
+  }
+  if !body_set && !title_set && !kind_set && !area_set && !paths_set && !confidence_set {
     return Err(flags.usage_error(f"nothing to edit: pass at least one flag\nusage: {usage}"))
   }
 
   let d = records.fetch_doc(ctx, current_team(ctx)?, slug)?
+  let kind = if kind_set { check_kind(kind_raw)? } else { d.kind }
+  if confidence_set && kind != "finding" {
+    return Err(flags.usage_error(f"--confidence is a finding's; {d.slug} is a {kind} doc (add -k finding to make it one)"))
+  }
   // `-b -` replaces the whole body; there is deliberately no append mode.
   let mut patch = writes.DocPatch { .. }
   if body_set { patch.body = Some(body) }
   if title_set { patch.title = Some(title) }
-  if kind_set { patch.kind = Some(check_kind(kind_raw)?) }
+  if kind_set { patch.kind = Some(kind) }
   if area_set { patch.area = Some(strings.TrimSpace(area_raw)) }
   if paths_set { patch.paths = Some(parse_paths(paths_raw)) }
+  if confidence_set {
+    patch.confidence = Some(confidence)
+    patch.confidence_note = Some("")
+  }
   writes.update_doc(ctx, d.id, patch)?
   doc_done(ctx, p, d.id, f"Updated doc {d.slug}")
 }

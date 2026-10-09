@@ -38,7 +38,7 @@ func TestAssignmentFailureRollsBackCompleteEdit(t *testing.T) {
 				app.OnRecordUpdate("issues").BindFunc(reject)
 			}
 			none, title := "", "must not commit"
-			if _, err := updateAssignment(app, issueID, held.ClaimID, assignmentFields{Assignee: &none, Title: &title}, releaser{memberID: alpha}); err == nil {
+			if _, err := updateAssignment(app, issueID, held.ClaimID, assignmentFields{Assignee: &none, Title: &title}, releaser{memberID: alpha}, false); err == nil {
 				t.Fatal("expected injected failure")
 			}
 			assertClaimState(t, app, issueID, alpha, alpha)
@@ -49,7 +49,7 @@ func TestAssignmentFailureRollsBackCompleteEdit(t *testing.T) {
 func TestAssignmentClaimPolicy(t *testing.T) {
 	app, issueID, alpha, beta := claimFixture(t)
 	none := ""
-	if _, err := updateAssignment(app, issueID, "", assignmentFields{Assignee: &alpha}, releaser{memberID: alpha}); err != nil {
+	if _, err := updateAssignment(app, issueID, "", assignmentFields{Assignee: &alpha}, releaser{memberID: alpha}, false); err != nil {
 		t.Fatal(err)
 	}
 	assertClaimState(t, app, issueID, "", alpha)
@@ -57,14 +57,14 @@ func TestAssignmentClaimPolicy(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := updateAssignment(app, issueID, held.ClaimID, assignmentFields{Assignee: &alpha}, releaser{memberID: alpha}); err != nil {
+	if _, err := updateAssignment(app, issueID, held.ClaimID, assignmentFields{Assignee: &alpha}, releaser{memberID: alpha}, false); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := updateAssignment(app, issueID, held.ClaimID, assignmentFields{Assignee: &beta}, releaser{memberID: alpha}); err == nil {
+	if _, err := updateAssignment(app, issueID, held.ClaimID, assignmentFields{Assignee: &beta}, releaser{memberID: alpha}, false); err == nil {
 		t.Fatal("reassignment accepted under a claim")
 	}
 	assertClaimState(t, app, issueID, alpha, alpha)
-	outcome, err := updateAssignment(app, issueID, held.ClaimID, assignmentFields{Assignee: &none}, releaser{memberID: alpha})
+	outcome, err := updateAssignment(app, issueID, held.ClaimID, assignmentFields{Assignee: &none}, releaser{memberID: alpha}, false)
 	if err != nil || outcome.ClaimID != held.ClaimID || outcome.MemberName != "Alpha" {
 		t.Fatalf("clear did not release the observed claim: %#v %v", outcome, err)
 	}
@@ -79,7 +79,7 @@ func TestStaleAssignmentCannotChangeNewOrReplacementClaim(t *testing.T) {
 	}
 	title := "must not commit"
 	for _, assignee := range []string{"", alpha, beta} {
-		if _, err := updateAssignment(app, issueID, "", assignmentFields{Assignee: &assignee, Title: &title}, releaser{memberID: alpha}); err == nil {
+		if _, err := updateAssignment(app, issueID, "", assignmentFields{Assignee: &assignee, Title: &title}, releaser{memberID: alpha}, false); err == nil {
 			t.Fatal("unclaimed observation accepted after acquisition")
 		}
 		assertClaimState(t, app, issueID, alpha, alpha)
@@ -91,7 +91,7 @@ func TestStaleAssignmentCannotChangeNewOrReplacementClaim(t *testing.T) {
 		t.Fatal(err)
 	}
 	none := ""
-	if _, err := updateAssignment(app, issueID, held.ClaimID, assignmentFields{Assignee: &none, Title: &title}, releaser{memberID: alpha}); err == nil {
+	if _, err := updateAssignment(app, issueID, held.ClaimID, assignmentFields{Assignee: &none, Title: &title}, releaser{memberID: alpha}, false); err == nil {
 		t.Fatal("old identity accepted for a replacement by the same member")
 	}
 	assertClaimState(t, app, issueID, alpha, alpha)
@@ -109,7 +109,7 @@ func TestAssignmentClearRequiresHolderOrForce(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, by := range []releaser{{memberID: beta}, {}} {
-		_, err := updateAssignment(app, issueID, held.ClaimID, assignmentFields{Assignee: &none, Title: &title}, by)
+		_, err := updateAssignment(app, issueID, held.ClaimID, assignmentFields{Assignee: &none, Title: &title}, by, false)
 		if err == nil || err.Error() != "the claim is held by Alpha; releasing another member's claim needs force" {
 			t.Fatalf("non-holder %#v cleared: %v", by, err)
 		}
@@ -118,7 +118,7 @@ func TestAssignmentClearRequiresHolderOrForce(t *testing.T) {
 	assertComments(t, app, issueID)
 
 	outcome, err := updateAssignment(app, issueID, held.ClaimID, assignmentFields{Assignee: &none},
-		releaser{memberID: beta, force: true, reason: "Alpha's agent crashed"})
+		releaser{memberID: beta, force: true, reason: "Alpha's agent crashed"}, false)
 	if err != nil || !outcome.Forced || outcome.ClaimID != held.ClaimID || outcome.MemberName != "Alpha" {
 		t.Fatalf("forced clear: %#v %v", outcome, err)
 	}
@@ -130,11 +130,11 @@ func TestAssignmentClearRequiresHolderOrForce(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := updateAssignment(app, issueID, held.ClaimID, assignmentFields{Assignee: &none}, releaser{memberID: alpha, agent: "wt-b"}); err == nil ||
+	if _, err := updateAssignment(app, issueID, held.ClaimID, assignmentFields{Assignee: &none}, releaser{memberID: alpha, agent: "wt-b"}, false); err == nil ||
 		err.Error() != "the claim is held by Alpha (agent wt-a); releasing another session's claim needs force" {
 		t.Fatalf("another session cleared: %v", err)
 	}
-	outcome, err = updateAssignment(app, issueID, held.ClaimID, assignmentFields{Assignee: &none}, releaser{memberID: alpha, agent: "wt-a"})
+	outcome, err = updateAssignment(app, issueID, held.ClaimID, assignmentFields{Assignee: &none}, releaser{memberID: alpha, agent: "wt-a"}, false)
 	if err != nil || outcome.Forced || outcome.ClaimID != held.ClaimID {
 		t.Fatalf("holder clear: %#v %v", outcome, err)
 	}

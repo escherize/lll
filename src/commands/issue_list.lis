@@ -75,7 +75,7 @@ fn list(input: flags.CommandInput) -> Result<(), pb.CliError> {
     let clause = f"updated >= {query.quote(since)}"
     filter = if filter == "" { clause } else { f"{filter} && {clause}" }
   }
-  let mut tail = "&expand=team,assignee,labels,blocked_by,project"
+  let mut tail = "&expand=team,assignee,labels,blocked_by,project,creator"
   if filter != "" { tail = f"{tail}&filter={url.QueryEscape(filter)}" }
 
   // LLL-382: PocketBase can only sort priority as the number it stores, and
