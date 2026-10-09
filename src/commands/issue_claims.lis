@@ -70,8 +70,11 @@ fn start(input: flags.CommandInput) -> Result<(), pb.CliError> {
       }
     }
   }
+  // A move like every state change (LLL-685); a start is no finish, so it
+  // leaves any claim where it is.
+  let effects = models.transition(models.Ask.Move { to: models.IssueState.InProgress, keep_claim: false })
   let started = writes.update_issue(ctx, issue,
-    writes.IssuePatch { state: Some(models.IssueState.InProgress), ..writes.IssuePatch.unchanged() },
+    writes.IssuePatch { state: Some(effects), ..writes.IssuePatch.unchanged() },
     writes.UpdateOptions.as_caller(pb.Caller.Process),
   )
   if let Err(failure) = started {

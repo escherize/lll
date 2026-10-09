@@ -111,6 +111,12 @@ func (fields assignmentFields) apply(issue *core.Record) {
 // An edit that also moves the issue into done or cancelled follows the
 // finish rule (finishReleases): the holder's own move releases the claim and
 // keeps the assignee, unless keepClaim.
+//
+// Clearing the assignee is not a state transition and is not in the
+// transition table (TransitionClaim): it is the release rule, and it
+// releases whatever keepClaim says, because a claim without its assignee is
+// the state LLL-516 removed. 'lll issue update' refuses --keep-claim with
+// --assignee none for that reason.
 func updateAssignment(app core.App, issueID, expectedClaimID string, fields assignmentFields, by releaser, keepClaim bool) (ClaimOutcome, error) {
 	var outcome ClaimOutcome
 	if fields.Assignee == nil {

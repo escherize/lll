@@ -242,7 +242,10 @@ fn state_write(_ctx: pb.Client, v: Viewing, r: mut Ref<http.Request>) -> Result<
   // team's board must compute the midpoint against that team's column, not
   // the boot team's.
   let sort = reorder_sort(who.reads, issue, state, before, issue.team)?
-  patch_issue(who, active, writes.IssuePatch { state: Some(state), sort: Some(sort), ..writes.IssuePatch.unchanged() })
+  // A drag is a move (LLL-685): the server releases the viewer's own hold
+  // on a finish and leaves anyone else's.
+  let effects = models.transition(models.Ask.Move { to: state, keep_claim: false })
+  patch_issue(who, active, writes.IssuePatch { state: Some(effects), sort: Some(sort), ..writes.IssuePatch.unchanged() })
 }
 
 /// New manual position for `issue` landing in `state` before the record id
