@@ -215,12 +215,16 @@ fn release(input: flags.CommandInput) -> Result<(), pb.CliError> {
     } else { e }
   })?
   // On a finished issue the cleared assignee is usually the record of who
-  // did it (fleet case 07), so the line names both repairs.
-  let finished = issue.state().map_or(false, |s| s.is_terminal())
+  // did it (fleet case 07), so the line names the repair, and the finish
+  // that would have kept it. Close is named only on a done issue: on a
+  // cancelled one it would change the state.
+  let state = issue.state()
+  let finished = state.map_or(false, |s| s.is_terminal())
+  let finish = if state == Some(models.IssueState.Done) { f"'lll issue close {key}'" } else { f"'lll issue update {key} --state cancelled'" }
   let assignment = if !result.cleared_assignee {
     "assignment unchanged"
   } else if finished {
-    f"cleared assignee; on a finished issue 'lll issue close {key}' releases and keeps it, or re-assign with 'lll issue update {key} --assignee NAME'"
+    f"cleared assignee; re-assign with 'lll issue update {key} --assignee NAME' (on a finished issue, finishing with {finish} releases the claim and keeps the assignee)"
   } else {
     "cleared assignee"
   }

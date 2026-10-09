@@ -558,7 +558,8 @@ fn doc_edit(input: flags.CommandInput) -> Result<(), pb.CliError> {
   let d = records.fetch_doc(ctx, current_team(ctx)?, slug)?
   let kind = if kind_set { check_kind(kind_raw)? } else { d.kind }
   if confidence_set && kind != "finding" {
-    return Err(flags.usage_error(f"--confidence is a finding's; {d.slug} is a {kind} doc (add -k finding to make it one)"))
+    let why = if kind_set { f"-k {kind} would make {d.slug} a {kind} doc" } else { f"{d.slug} is a {kind} doc (add -k finding to make it one)" }
+    return Err(flags.usage_error(f"--confidence is a finding's; {why}"))
   }
   // `-b -` replaces the whole body; there is deliberately no append mode.
   let mut patch = writes.DocPatch { .. }

@@ -207,6 +207,9 @@ fn update(input: flags.CommandInput) -> Result<(), pb.CliError> {
   if keep_claim && !finishing {
     return Err(flags.usage_error("--keep-claim goes with --state done or --state cancelled: only a move there releases your claim"))
   }
+  if keep_claim && assignee_name == "none" {
+    return Err(flags.usage_error("--assignee none releases the claim, so --keep-claim cannot keep it; drop one of them"))
+  }
   let agent = if assignee_name != "" || finishing { agent_label(ctx, p)? } else { "" }
   // LLL-399: the stamp rides the direct PATCH. Assignment writes go through
   // the claim route, which carries no caller's precondition — honouring the
@@ -341,7 +344,9 @@ fn update(input: flags.CommandInput) -> Result<(), pb.CliError> {
   // Whether the caller held the claim before a finishing move: read again
   // afterwards, it says what the server did with it.
   let me = pb.token_subject(ctx.token())
-  let held_before = if finishing { fetch_claim(ctx, issue.id)? } else { None }
+  // Only a move into done or cancelled can release; re-saving the same state does not.
+  let moves = state.map_or(false, |s| s.wire() != issue.state_wire)
+  let held_before = if finishing && moves { fetch_claim(ctx, issue.id)? } else { None }
   let mine_before = held_before.map_or(false, |h| me == Some(h.member.string()))
   let assigning = assignee_name != ""
   let result = match writes.update_issue(ctx, issue, patch, opts) {
@@ -370,18 +375,27 @@ fn update(input: flags.CommandInput) -> Result<(), pb.CliError> {
     }
   }
   if p.given("--json") { return print_issue_after(ctx, key) }
-  if released == "" && mine_before {
-    let held_after = fetch_claim(ctx, issue.id)?
-    if held_after.is_none() {
-      released = "; released your claim (assignee kept)"
-    } else if keep_claim {
-      released = "; kept your claim"
+  // A finishing move says what became of the claim it found, read back
+  // from the server: released, kept on request, or left with a holder
+  // whose claim this caller's move does not release (another member, or
+  // another agent label on this token).
+  if released == "" && held_before.is_some() {
+    match fetch_claim(ctx, issue.id)? {
+      None => if mine_before { released = "; released your claim (assignee kept)" },
+      Some(h) => {
+        if keep_claim && mine_before && (h.agent == "" || agent == "" || h.agent == agent) {
+          released = "; kept your claim"
+        } else {
+          let holder = display.byline(display.member_name(h.member, h.expand.member.name, "an unknown member"), h.agent)
+          released = f"; {holder} still holds the claim: only the holder's own finish releases it"
+        }
+      },
     }
   }
   fmt.Println(f"Updated {issue.expand.team.key}-{issue.number}: {strings.Join(changed, ", ")}{released}")
   // Already claimed (by the caller, or the write would have been refused):
-  // the hint would be wrong.
-  if self_assigned {
+  // the hint would be wrong. A finish released the claim on purpose.
+  if self_assigned && !finishing {
     let held = fetch_claim(ctx, issue.id)?
     if held.is_none() {
       fmt.Println(f"assigned, not claimed: 'lll issue claim {key}' holds it against other agents")

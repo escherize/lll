@@ -58,10 +58,14 @@ minors. Issue keys are on the project's own board (`lll issue view KEY`).
   Before, only close released, so workers followed `update --state done`
   with `issue release`, which also cleared the assignee. Text output says
   so: `Updated FLEET-4: state=done; released your claim (assignee kept)`.
-  A move by anyone else leaves the claim as before.
+  A move by anyone else (another member, or another agent label on your
+  token) leaves the claim as before, and update's output now names who
+  still holds it. The board signs in as its operator's member, so a drag to
+  Done there releases a claim that member holds under any agent label.
 - `issue release` on a done or cancelled issue that clears the assignee
-  names both repairs on the same line: `issue close KEY` releases and keeps
-  it, or re-assign with `issue update KEY --assignee NAME`.
+  names the repair on the same line, `issue update KEY --assignee NAME`,
+  and the finish that would have kept it (`issue close KEY` on a done
+  issue).
 - Exit 5 (nothing to do) prints `Nothing to do: ` on stderr, not
   `Error: `. The exit code is unchanged.
 - A password flag given `-` on a terminal prompts with echo off; it read a

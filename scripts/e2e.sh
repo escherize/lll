@@ -2578,11 +2578,11 @@ out=$(env $E LLL_TOKEN="$BRYAN_TOK" LLL_ME=bryan "$LIN" issue update "$CK3" --st
 assert_contains "$out" "state=cancelled; kept your claim" "--keep-claim keeps it on update"
 env $E "$LIN" issue view "$CK3" --json | python3 -c 'import json,sys; d=json.load(sys.stdin); assert d["claim"]["holder"] == "bryan"'
 out=$(env $E LLL_TOKEN="$BRYAN_TOK" LLL_ME=bryan "$LIN" issue release "$CK3")
-assert_contains "$out" "on a finished issue 'lll issue close $CK3' releases and keeps it" "release on a finished issue names close"
+assert_contains "$out" "cleared assignee; re-assign with 'lll issue update $CK3 --assignee NAME'" "release on a finished issue names the repair"
 env $E LLL_TOKEN="$BRYAN_TOK" LLL_ME=bryan "$LIN" issue update "$CK3" --state todo >/dev/null
 env $E LLL_TOKEN="$BRYAN_TOK" LLL_ME=bryan "$LIN" issue claim "$CK3" >/dev/null
 out=$(env $E LLL_TOKEN="$CAROL_TOK" LLL_ME=carol "$LIN" issue update "$CK3" --state done)
-assert_not_contains "$out" "released" "a non-holder's update to done releases nothing"
+assert_contains "$out" "bryan still holds the claim" "a non-holder's update to done names the kept claim"
 env $E "$LIN" issue view "$CK3" --json | python3 -c 'import json,sys; d=json.load(sys.stdin); assert d["state"] == "done"; assert d["claim"]["holder"] == "bryan"'
 set +e
 out=$(env $E "$LIN" issue update "$CK3" --title x --keep-claim 2>&1)
