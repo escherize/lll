@@ -42,3 +42,12 @@ fn written_keeps_the_order_the_command_said_it_in() {
   let Part.Data(second) = parts[1] else { panic("data second") }
   assert second == "data\n"
 }
+
+#[test]
+fn what_a_failed_write_loses_rides_along() {
+  assert line("a").lost == ""
+  let minted = line("token").if_lost("rotate it")
+  assert minted.lost == "rotate it"
+  assert notice("before").then(minted).lost == "rotate it"
+  assert minted.then(line("after")).lost == "rotate it"
+}

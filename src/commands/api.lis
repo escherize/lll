@@ -1,8 +1,6 @@
 import "go:bytes"
-import "go:fmt"
 import "go:io"
 import "go:net/http"
-import "go:os"
 import "go:strings"
 
 import "config"
@@ -53,7 +51,7 @@ pub fn api(ctx: pb.Client, args: Slice<string>) -> Result<output.Output, pb.CliE
   if !strings.HasPrefix(path, "/") {
     return Err(flags.usage_error(f"path must start with '/': got '{path}'. The path is joined to the configured board url ('lll config list' shows it)"))
   }
-  streamed(send(ctx, method, path, p.one("--body"), p.given("--fail")))
+  send(ctx, method, path, p.one("--body"), p.given("--fail"))
 }
 
 /// One raw request, deliberately NOT through pb.send: the client classifies
@@ -61,11 +59,7 @@ pub fn api(ctx: pb.Client, args: Slice<string>) -> Result<output.Output, pb.CliE
 /// right for the verbs and wrong for a passthrough whose whole job is to show
 /// the API as it answered. Transport failures still get the client's
 /// "cannot reach PocketBase" message, because that failure is the same one.
-///
-/// It writes the answer itself, as a passthrough: with --fail an error
-/// answer prints its body AND exits non-zero, and an Output is only ever
-/// rendered on success.
-fn send(ctx: pb.Client, method: string, path: string, payload: string, fail: bool) -> Result<(), pb.CliError> {
+fn send(ctx: pb.Client, method: string, path: string, payload: string, fail: bool) -> Result<output.Output, pb.CliError> {
   let (cfg, _src) = ctx.settings.traced().map_err(pb.failed)?
   let base = strings.TrimRight(cfg.url, "/")
   let mut req = match http.NewRequest(method, base + path, bytes.NewReader(payload.bytes())) {
@@ -93,14 +87,14 @@ fn send(ctx: pb.Client, method: string, path: string, payload: string, fail: boo
   }
   // Status to stderr, body to stdout: a human sees both, a script pipes the
   // body to jq and reads the status from stderr when it wants it.
-  fmt.Fprintln(os.Stderr, resp.Status)
-  fmt.Println(body as string)
+  let answer = output.notice(resp.Status).line(body as string)
   // --fail (LLL-645): an error answer exits with the code its status maps
-  // to, as every other command's would. Without it any answer is exit 0.
+  // to, as every other command's would, after printing the answer. Without
+  // it any answer is exit 0.
   if fail && resp.StatusCode >= 400 {
-    return Err(pb.http_error(f"{method} {path}", resp.StatusCode, resp.Status, body as string))
+    return Err(pb.http_error(f"{method} {path}", resp.StatusCode, resp.Status, body as string).after(answer))
   }
-  Ok(())
+  Ok(answer)
 }
 
 /// The hand-written page for `lll api`, pure so its text can be asserted:

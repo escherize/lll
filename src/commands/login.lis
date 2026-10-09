@@ -179,7 +179,6 @@ pub fn login(ctx: pb.Client, args: Slice<string>) -> Result<output.Output, pb.Cl
   // minus the paperwork, and it runs BEFORE the auth below so the same
   // command that creates the account is the one that logs into it.
   let mut out = output.none()
-  let mut created: Option<string> = None
   if p.given("--create") {
     // The admin identity is not a member identity. A dumber-model run logged
     // in with the ADMIN email, hit "no member with that email", added
@@ -208,7 +207,6 @@ would put a second account on that address. --create makes YOUR login: pass
     }
     create_for_login(ctx, name, email, password, target, admin)?
     out = out.line(f"created member {name} <{email}>")
-    created = Some(name)
   }
 
   let payload = match json.Marshal(
@@ -227,19 +225,13 @@ would put a second account on that address. --create makes YOUR login: pass
   }
   let body = match sent {
     Ok(b) => b,
-    Err(e) => {
-      let failed = login_failed(ctx, e, email, target, admin_email)
-      // The member exists by now: the error says so, or it would read as
-      // though --create had done nothing.
-      let Some(name) = created else { return Err(failed) }
-      return Err(failed.with_message(f"created member {name} <{email}>, but {failed.message}"))
-    },
+    Err(e) => return Err(login_failed(ctx, e, email, target, admin_email).after(out)),
   }
   let mut auth = models.AuthResponse { .. }
   if let Err(e) = json.Unmarshal(body.bytes(), &auth) {
-    return Err(pb.failed(f"decoding the auth response: {e}"))
+    return Err(pb.failed(f"decoding the auth response: {e}").after(out))
   }
-  if auth.token == "" { return Err(pb.failed("the response carried no token")) }
+  if auth.token == "" { return Err(pb.failed("the response carried no token").after(out)) }
   Ok(out.then(finish_login(ctx,
     target,
     before_login,
@@ -248,7 +240,7 @@ would put a second account on that address. --create makes YOUR login: pass
     auth.token,
     auth.record.name,
     auth.record.access().map_or(false, |a| !a.mode.writes()),
-  )?))
+  ).map_err(|e| e.after(out))?))
 }
 
 /// The member a token names and whether it is read-only, asked of the
@@ -320,22 +312,22 @@ fn finish_login(
   let authenticated_url = if target != "" { target } else { before_login.url }
   let previous_url = if saved_before_login.url != "" { saved_before_login.url } else { before_login.url }
   if strings.TrimRight(authenticated_url, "/") != strings.TrimRight(previous_url, "/") && board_endpoint == "" {
-    let _ = clear_home_key(ctx.settings, "web_url")?
+    let _ = clear_home_key(ctx.settings, "web_url").map_err(|e| e.after(out))?
   }
   if board_endpoint != "" {
-    let _ = set_home_key(ctx.settings, "web_url", board_endpoint)?
+    let _ = set_home_key(ctx.settings, "web_url", board_endpoint).map_err(|e| e.after(out))?
   } else {
     // Re-read: the url and web_url lines above may have just changed.
-    let cfg = ctx.settings.reload().config().map_err(pb.failed)?
+    let cfg = ctx.settings.reload().config().map_err(|e| pb.failed(e).after(out))?
     if cfg.web_url == "" {
       let discovery_base = if target != "" { target } else { cfg.url }
       if let Some(endpoint) = discover_board_url(discovery_base) {
-        let _ = set_home_key(ctx.settings, "web_url", endpoint)?
+        let _ = set_home_key(ctx.settings, "web_url", endpoint).map_err(|e| e.after(out))?
         out = out.line(f"board endpoint discovered: {endpoint}")
       }
     }
   }
-  let path = set_home_key(ctx.settings, "token", token)?
+  let path = set_home_key(ctx.settings, "token", token).map_err(|e| e.after(out))?
   out = out.line(f"logged in as {name}")
   out = out.line(f"token saved to {path}")
   if ctx.settings.env.token != "" {
@@ -353,7 +345,7 @@ fn finish_login(
   // Both on the configuration as this login just saved it: the new token
   // is the one the team lookup must send.
   out = out.then(settle_team(pb.Client.new(ctx.settings.reload()), read_only))
-  let saved_cfg = ctx.settings.reload().config().map_err(pb.failed)?
+  let saved_cfg = ctx.settings.reload().config().map_err(|e| pb.failed(e).after(out))?
   if saved_cfg.web_url == "" {
     out = out.line("board endpoint: run 'lll config set web_url URL' with the board address supplied by your deployer")
   }

@@ -1,3 +1,4 @@
+import "output"
 #[test]
 fn every_kind_has_its_documented_exit_code() {
   assert exit_code(ErrorKind.Usage) == 2
@@ -13,7 +14,7 @@ fn every_kind_has_its_documented_exit_code() {
 
 #[test]
 fn a_new_message_keeps_the_decision_made_below() {
-  let inner = CliError { kind: ErrorKind.Refused, status: 412, code: Some(ServerCode.ClaimChanged), message: "changed" }
+  let inner = CliError { kind: ErrorKind.Refused, status: 412, code: Some(ServerCode.ClaimChanged), message: "changed", said: None }
   let wrapped = inner.with_message(f"ENG-1: {inner.message}\nread it again")
   assert exit_code(wrapped.kind) == 4
   assert wrapped.status == 412
@@ -77,4 +78,14 @@ fn http_status_decides_the_kind_only_for_the_api_envelope() {
   assert held.message == "Issue is already claimed by scratch."
   assert held.has_code(ServerCode.ClaimHeld)
   assert exit_code(held.kind) == 4
+}
+
+#[test]
+fn an_error_carries_what_the_command_said_before_it() {
+  // LLL-683: main prints this, then the error.
+  let err = failed("late").after(output.line("first")).after(output.line("zero"))
+  assert err.output().data() == "zero\nfirst\n"
+  assert failed("bare").output().data() == ""
+  // with_message keeps it.
+  assert err.with_message("other").output().data() == "zero\nfirst\n"
 }

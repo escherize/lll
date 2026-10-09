@@ -3253,6 +3253,26 @@ code=$(curl -s -o /dev/null -w '%{http_code}' -H "Authorization: Bearer $ROT_TOK
   "$URL/api/collections/members/records?perPage=1")
 [ "$code" = 200 ] || fail "the rotated-in token does not authenticate (got $code)"
 
+# LLL-683: a failed write is a failure, not a quiet exit 0. Stdout opened
+# read-only refuses every write, on macOS and linux alike.
+write_fails() { # label command... ; the command must exit 1 naming the write
+  local label=$1 out
+  shift
+  if out=$("$@" 2>&1 1</dev/null); then fail "$label: exited 0 with stdout unwritable"; fi
+  assert_contains "$out" "Error: writing output:" "$label"
+}
+WFKEY=$(LLL_URL=$URL LLL_TEAM=ENG LLL_TOKEN="$BRYAN_TOK" "$LIN" issue create -t "write failure" --json | jq -r .key)
+printf 'attachment bytes\n' > "$DATA_DIR/write-failure.txt"
+LLL_URL=$URL LLL_TEAM=ENG LLL_TOKEN="$BRYAN_TOK" "$LIN" issue attach "$WFKEY" "$DATA_DIR/write-failure.txt" > /dev/null
+WFATT=$(LLL_URL=$URL LLL_TEAM=ENG LLL_TOKEN="$BRYAN_TOK" "$LIN" issue view "$WFKEY" --json | jq -r '.attachments[0]')
+write_fails "issue list with stdout unwritable" env LLL_URL=$URL LLL_TEAM=ENG LLL_TOKEN="$BRYAN_TOK" "$LIN" issue list
+write_fails "issue list --json with stdout unwritable" env LLL_URL=$URL LLL_TEAM=ENG LLL_TOKEN="$BRYAN_TOK" "$LIN" issue list --json
+write_fails "issue download with stdout unwritable" env LLL_URL=$URL LLL_TEAM=ENG LLL_TOKEN="$BRYAN_TOK" "$LIN" issue download "$WFKEY" "$WFATT"
+out=$(env -u LLL_TOKEN HOME="$E2E_HOME" LLL_URL=$URL LLL_ADMIN_EMAIL=admin@local.dev LLL_ADMIN_PASSWORD=admin-local-123 \
+  "$LIN" bot create bot-lostwrite --env --duration 3600 2>&1 1</dev/null) && fail "bot create --env exited 0 with stdout unwritable"
+assert_contains "$out" "Error: writing output:" "bot create --env names the failed write"
+assert_contains "$out" "lll bot rotate bot-lostwrite" "and how to get the lost token back"
+
 # Explicit authority and endpoint flags use the same gate without persisting
 # credentials or replacing the caller's configured server.
 cp "$E2E_HOME/.config/lll/lll.toml" "$DATA_DIR/pre-token-flags.toml"

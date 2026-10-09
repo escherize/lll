@@ -40,9 +40,9 @@ ALLOW: dict[tuple[str, str], str] = {
     ('src/commands/demo.lis', 'point_cli_at_demo'): 'lll up --demo: boot banner lines',
     ('src/commands/delete.lis', 'confirmed'): 'interactive [y/N] prompt before a delete',
     ('src/commands/login.lis', 'ask_email'): 'interactive email prompt',
-    ('src/commands/api.lis', 'send'): 'lll api passthrough: with --fail an error answer prints its body and still exits non-zero',
     ('src/commands/issue_write.lis', 'pr_cmd'): 'lll issue pr: gh pr create output passes straight through',
     ('src/commands/import.lis', 'gh_issue_list'): 'lll import github: gh issue list stderr passes straight through',
+    ('src/commands/import.lis', 'progress'): 'lll import github: one line per created issue as it lands, so a long import shows progress',
     ('src/commands/upgrade.lis', 'run_upgrade'): 'lll upgrade: notes before Homebrew runs, then its output passes through',
 }
 

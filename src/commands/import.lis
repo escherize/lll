@@ -1,3 +1,4 @@
+import "go:fmt"
 import "records"
 import "go:bytes"
 import "go:encoding/json"
@@ -79,7 +80,6 @@ fn import_github(input: flags.CommandInput) -> Result<output.Output, pb.CliError
   let creator = records.find_actor(ctx)?.map(|member| member.id)
   let mut created = 0
   let mut skipped = 0
-  let mut out = output.none()
   for g in issues {
     let reference = f"gh#{g.number}"
     if known_refs.get(reference).is_some() {
@@ -102,9 +102,7 @@ fn import_github(input: flags.CommandInput) -> Result<output.Output, pb.CliError
       labels,
       ..
     }
-    // The lines for issues already created are lost with a failure, so the
-    // error counts them; re-running skips them by their refs.
-    let body = writes.create_issue(ctx, pb.Caller.Process, new_issue, "").map_err(|e| e.with_message(f"{e.message} (after creating {created} issues; re-running skips them)"))?
+    let body = writes.create_issue(ctx, pb.Caller.Process, new_issue, "")?
     let mut issue = models.Issue { .. }
     if let Err(e) = json.Unmarshal(body.bytes(), &issue) {
       return Err(pb.failed(f"decoding created issue for {reference}: {e}"))
@@ -118,14 +116,20 @@ fn import_github(input: flags.CommandInput) -> Result<output.Output, pb.CliError
       return Err(e.with_message(f"{key} created from {reference}, but the ref was not saved: {e.message}\nRetry only the reference save: lll issue ref {key} {reference}"))
     }
     created += 1
-    out = out.line(f"Created {key}: {g.title} ({reference}, {state})")
+    progress(f"Created {key}: {g.title} ({reference}, {state})")
   }
   let mut labels_note = ""
   if created_labels.length() > 0 {
     labels_note = f"; created labels: {strings.Join(created_labels, ", ")}"
   }
-  out = out.line(f"Imported {created} of {issues.length()} issues from {repo} into {team.key} (skipped {skipped} already carrying gh#N refs){labels_note}")
-  Ok(out)
+  Ok(output.line(f"Imported {created} of {issues.length()} issues from {repo} into {team.key} (skipped {skipped} already carrying gh#N refs){labels_note}"))
+}
+
+/// One line per issue as it is created, written at once: an import of a
+/// thousand issues shows its progress, and a failure partway leaves the
+/// list of what it did create above the error.
+fn progress(line: string) {
+  fmt.Println(line)
 }
 
 /// OWNER/REPO with both halves present. gh's --repo would also take

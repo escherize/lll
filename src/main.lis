@@ -51,9 +51,25 @@ fn main() {
 /// the command (a login renewal's note), then the command's data to stdout
 /// and its notices to stderr (none under --json or --env) in the order it
 /// gave them, then the version-skew line, then any error with its exit code.
+/// A failed command's output is what it had said before failing.
+///
+/// A write that fails (a full disk, a closed pipe) is an error of its own,
+/// exit 1: a truncated download or a --json document cut short must not
+/// read as success.
 fn render(before: output.Output, result: Result<output.Output, pb.CliError>, skew: Option<string>) {
-  write(before)
-  if let Ok(out) = result { write(out) }
+  let out = match result {
+    Ok(out) => out,
+    Err(err) => err.output(),
+  }
+  let wrote = match write(before) {
+    Ok(_) => write(out),
+    Err(e) => Err(e),
+  }
+  if let Err(e) = wrote {
+    let lost = if out.lost == "" { "" } else { f"\n{out.lost}" }
+    let _ = fmt.Fprintln(os.Stderr, f"Error: writing output: {e}{lost}")
+    os.Exit(pb.exit_code(pb.ErrorKind.Failed))
+  }
   if let Some(line) = skew {
     fmt.Fprintln(os.Stderr, line)
   }
@@ -76,13 +92,14 @@ fn render(before: output.Output, result: Result<output.Output, pb.CliError>, ske
   }
 }
 
-fn write(out: output.Output) {
+fn write(out: output.Output) -> Result<(), error> {
   for part in out.written() {
     match part {
-      output.Part.Data(s) => fmt.Print(s),
-      output.Part.Notice(s) => fmt.Fprintln(os.Stderr, s),
+      output.Part.Data(s) => { fmt.Print(s)?; },
+      output.Part.Notice(s) => { fmt.Fprintln(os.Stderr, s)?; },
     }
   }
+  Ok(())
 }
 
 fn dispatch(ctx: pb.Client, noun: string, args: Slice<string>) -> Result<output.Output, pb.CliError> {

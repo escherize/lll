@@ -12,6 +12,10 @@ pub struct Output {
   /// a terminal.
   pub parts: Slice<Part>,
   pub kind: Kind,
+  /// What is lost if the data cannot be written, for the error that says
+  /// so: a one-time token that was minted but never reached anyone. "" for
+  /// output a rerun can reproduce.
+  pub lost: string,
 }
 
 /// One piece of an Output.
@@ -36,7 +40,7 @@ pub enum Kind {
 
 /// Nothing to say.
 pub fn none() -> Output {
-  Output { parts: [], kind: Kind.Text }
+  Output { parts: [], kind: Kind.Text, lost: "" }
 }
 
 /// One line of text.
@@ -51,12 +55,12 @@ pub fn text(s: string) -> Output {
 
 /// A --json document: one line of JSON.
 pub fn json(doc: string) -> Output {
-  Output { parts: [Part.Data(f"{doc}\n")], kind: Kind.Json }
+  Output { parts: [Part.Data(f"{doc}\n")], kind: Kind.Json, lost: "" }
 }
 
 /// --env output: shell export lines, written as they are.
 pub fn env(exports: string) -> Output {
-  Output { parts: [Part.Data(exports)], kind: Kind.Exports }
+  Output { parts: [Part.Data(exports)], kind: Kind.Exports, lost: "" }
 }
 
 /// A notice alone, with no data: an empty list's "no labels".
@@ -87,7 +91,13 @@ impl Output {
       Kind.Text => self.kind,
       other => other,
     }
-    Output { parts: self.parts.append(next.parts...), kind }
+    let lost = if next.lost == "" { self.lost } else { next.lost }
+    Output { parts: self.parts.append(next.parts...), kind, lost }
+  }
+
+  /// This output, saying what a failed write of it loses.
+  pub fn if_lost(self, lost: string) -> Output {
+    Output { lost, ..self }
   }
 
   /// The parts the renderer writes, in order: every part of a text output,

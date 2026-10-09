@@ -130,7 +130,8 @@ fn token_create(input: flags.CommandInput) -> Result<output.Output, pb.CliError>
   // The expiry belongs next to the token because it is the only moment
   // anyone will ever see it: impersonate tokens are stateless, so nothing
   // records the mint and no later command can answer "when does this die?".
-  Ok(out.line(tokens.expiry_line(duration, time.Now(), "lll token create")))
+  let lost = f"a token for {member.name} was minted but not written anywhere; mint another with 'lll token create {member.name}'"
+  Ok(out.line(tokens.expiry_line(duration, time.Now(), "lll token create")).if_lost(lost))
 }
 
 /// What to say when the impersonate call is refused. `e` is the pb client's
@@ -431,10 +432,9 @@ fn bot_create(ctx: pb.Client, args: Slice<string>, start: int, command: string) 
     env_only,
     f"created bot member {created.name} (kind=bot, {owned})",
   )
-  // The bot exists by now: a failed mint says so, or it would read as
-  // though nothing happened.
-  let minted = tokens.bot_mint(ctx, tok, name, duration).map_err(|e| e.with_message(f"created bot member {created.name}, but {e.message}"))?
-  Ok(made.then(bot_credential(name, minted, url, team, duration, env_only)?))
+  let minted = tokens.bot_mint(ctx, tok, name, duration).map_err(|e| e.after(made))?
+  let lost = f"bot {created.name} was created, but its one-time token was not written anywhere; 'lll bot rotate {name}' mints a new one"
+  Ok(made.then(bot_credential(name, minted, url, team, duration, env_only)?).if_lost(lost))
 }
 
 /// `lll bot rotate bot-NAME [--duration s]`: re-mint the bot's token and strand
@@ -462,7 +462,8 @@ fn bot_rotate(ctx: pb.Client, args: Slice<string>) -> Result<output.Output, pb.C
   let url = ctx.settings.config().map_err(pb.failed)?.url
   tokens.check_prompt_values(url, team, name)?
   let minted = tokens.bot_mint(ctx, tok, name, duration)?
-  bot_credential(name, minted, url, team, duration, env_only)
+  let lost = f"the previous token for {name} has stopped working, and the new one was not written anywhere; 'lll bot rotate {name}' mints another"
+  Ok(bot_credential(name, minted, url, team, duration, env_only)?.if_lost(lost))
 }
 
 /// token create's flags plus the two that shape the bot's handoff.
