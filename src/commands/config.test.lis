@@ -83,3 +83,22 @@ fn a_refused_superuser_login_names_where_the_url_came_from() {
     assert superuser_auth_failed(sourced(source), refused).message == message
   }
 }
+
+// LLL-687: after a password change, the revoked token is replaced in place
+// only when it came from the home config; anything that outranks the home
+// config is named with its own fix. One row per source.
+#[test]
+fn a_revoked_token_is_replaced_where_it_came_from() {
+  let rows: Slice<(Option<config.Source>, Option<string>)> = [
+    (Some(config.Source.Flag("--token")), Some("tokens minted before this change are revoked, including the one from flag:--token; unset LLL_TOKEN if it is set, then log in again with: lll login --email a@x")),
+    (Some(config.Source.Env("LLL_TOKEN")), Some("tokens minted before this change are revoked, including the one from env:LLL_TOKEN; unset LLL_TOKEN if it is set, then log in again with: lll login --email a@x")),
+    (Some(config.Source.RepoFile(".lll.toml")), Some("tokens minted before this change are revoked, including the one in .lll.toml: remove its token line, which outranks the home config, then log in again with: lll login --email a@x")),
+    (Some(config.Source.HomeFile("/h/.config/lll/lll.toml")), None),
+    // Default and None never reach it (no token is refused first); pinned as they are.
+    (Some(config.Source.Default), Some("tokens minted before this change are revoked, including the one from default; unset LLL_TOKEN if it is set, then log in again with: lll login --email a@x")),
+    (None, Some("tokens minted before this change are revoked, including the one from ; unset LLL_TOKEN if it is set, then log in again with: lll login --email a@x")),
+  ]
+  for (source, notice) in rows {
+    assert kept_token_notice(source, "a@x") == notice
+  }
+}
