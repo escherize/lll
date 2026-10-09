@@ -8,6 +8,9 @@ minors. Issue keys are on the project's own board (`lll issue view KEY`).
 
 ### Added
 
+- `issue comments KEY` is a hidden alias of `issue comment`: it lists the
+  comments. A final-replay agent's poll loop never saw the old hint.
+
 - `read` is a permanent hidden alias of `view` on `issue`, `doc` and
   `finding`: it dispatches, but has no help row and no completion. Five of
   twenty agents in the 1.0 fleet typed `lll issue read KEY`. This reverses
@@ -48,6 +51,21 @@ minors. Issue keys are on the project's own board (`lll issue view KEY`).
   stderr, and with `--json` exactly one JSON value on stdout.
 
 ### Changed
+
+- `issue update --priority` confirms the name it set (`priority=high`), not
+  the wire number.
+- Recovery hints from the final 1.0 fleet replay name the next command:
+  - a read verb a noun lacks (`view`, `show`, `read`, `ls`) points at
+    `lll <noun> list` (`config view`);
+  - `member read/get` and `bot show/read` point at `lll member access`;
+  - a second issue key on a one-key verb says "one key per call";
+  - a title typed where the key goes points at `lll search "<title>"`;
+  - after a key typed as the command, the next word picks the verb:
+    `review`/`--status`/`mark` name `issue update KEY --state in-review`,
+    `comment`/`note` name `issue comment KEY "text"`;
+  - `issue set`, `mark` and any word containing `review` name the state
+    change; a stray `status` after `issue update KEY` names `--state`;
+  - a redirected `comment` or `update` shows its full form.
 
 - `issue next` says why it has nothing to offer when the reason is not an
   empty board (LLL-685): ready issues all claimed by someone else are named
@@ -161,6 +179,11 @@ minors. Issue keys are on the project's own board (`lll issue view KEY`).
   stdin; the answer was lost and the command said there was no password.
 
 ### Security
+
+- `member invite` printed the temporary password twice: on its own line
+  and inside the set-password hint, so redacting the first line still
+  leaked it. The hint now says `--old-password -`, which prompts with echo
+  off, and the password appears once.
 
 - A token goes only to the server it was saved for (LLL-688). The config
   layers combine key by key, so a `.lll.toml` naming only `url = B`, or
