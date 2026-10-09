@@ -28,6 +28,7 @@ Role A (odd NN):
 2. Add exactly one comment:
    `fleet-16-NN: handing off to bot-fleet-worker-PP; the queue drain is next.`
 3. Release your claim. Read back: no claim, your comment present.
+   Then you are done: set `done` true after this readback. Do not wait for B.
 
 Role B (even NN):
 1. Wait until A's comment is on the issue AND the issue has no claim. Poll
