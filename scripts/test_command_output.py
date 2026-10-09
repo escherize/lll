@@ -9,8 +9,9 @@ nothing to do), and each fix was a patch on one verb.
 
 This test keeps it that way. In every non-test .lis file under src/ it finds
 every fmt.Print*, fmt.Fprint*, log.Print*/Fatal*/Panic*, os.NewFile,
-os.Stdout and os.Stderr outside `//` comments, and fails on any not inside a
-function ALLOW names. A helper in another module that prints is the same
+syscall.Write/Syscall, os.Stdout and os.Stderr outside comments and string
+literals, and fails on any not inside a function ALLOW names. CALLERS then
+says who may call each allowed writer, so a verb cannot borrow one. A helper in another module that prints is the same
 bypass as a verb that prints, so the scan is not limited to src/commands.
 ALLOW is {(path, fn): reason} for output that cannot wait for a return value:
 a stream that runs until interrupted, progress of a long run, an interactive
@@ -31,6 +32,7 @@ WRITES = re.compile(
     r'\bfmt\.(?:Print|Println|Printf|Fprint|Fprintln|Fprintf)\s*\('
     r'|\blog\.(?:Print|Fatal|Panic)\w*\s*\('
     r'|\bos\.NewFile\s*\('
+    r'|\bsyscall\.(?:Write|Syscall\w*|RawSyscall\w*)\s*\('
     r'|\bos\.(?:Stdout|Stderr)\b'
 )
 
@@ -63,34 +65,101 @@ ALLOW: dict[tuple[str, str], str] = {
 }
 
 
-def strip_comments(source):
-    """Source with `//` comments blanked, line numbers kept. A `//` inside a
-    string literal ("http://...") is text, not a comment."""
-    out = []
-    for line in source.split('\n'):
-        in_str, i, cut = False, 0, len(line)
-        while i < len(line):
-            c = line[i]
-            if in_str:
-                if c == '\\':
-                    i += 2
+# Who may call each ALLOW function: all of src/commands is one package, so
+# without this any verb could call import's progress() or the delete prompt
+# and write into its own --json. Keyed like ALLOW; values are the functions
+# (path, fn) that may name it, by call or as a value.
+CALLERS: dict[tuple[str, str], set[tuple[str, str]]] = {
+    ('src/main.lis', 'render'): {('src/main.lis', 'main')},
+    ('src/main.lis', 'write'): {('src/main.lis', 'render')},
+    ('src/commands/watch.lis', 'watch_stream'): {('src/commands/watch.lis', 'watch')},
+    ('src/commands/watch.lis', 'run_issue_watch'): {('src/commands/watch.lis', 'issue_watch')},
+    ('src/commands/watch.lis', 'watch_ready'): {('src/commands/watch.lis', 'watch_stream')},
+    ('src/commands/up.lis', 'up'): {('src/main.lis', 'dispatch')},
+    ('src/commands/up_team.lis', 'ensure_team'): {('src/commands/up.lis', 'up')},
+    ('src/commands/up_team.lis', 'resolve_team'): {('src/commands/up_team.lis', 'ensure_team')},
+    ('src/commands/up_team.lis', 'board_identity'): {('src/commands/up.lis', 'up')},
+    ('src/commands/up_team.lis', 'ask_team'): {('src/commands/up_team.lis', 'ensure_team')},
+    ('src/commands/up_team.lis', 'save_team'): {('src/commands/up_team.lis', 'ensure_team')},
+    ('src/commands/demo.lis', 'seed_demo'): {('src/commands/up.lis', 'up')},
+    ('src/commands/demo.lis', 'point_cli_at_demo'): {('src/commands/demo.lis', 'seed_demo')},
+    ('src/commands/delete.lis', 'confirmed'): {
+        ('src/commands/delete.lis', 'confirmed_on_terminal'),
+        ('src/commands/doc.lis', 'doc_delete'),
+        ('src/commands/issue_write.lis', 'delete_issue'),
+    },
+    ('src/commands/login.lis', 'ask_email'): {('src/commands/login.lis', 'login')},
+    ('src/commands/issue_write.lis', 'pr_cmd'): {('src/commands/issue.lis', 'issue_commands')},
+    ('src/commands/import.lis', 'gh_issue_list'): {('src/commands/import.lis', 'import_github')},
+    ('src/commands/import.lis', 'progress'): {('src/commands/import.lis', 'import_github')},
+    ('src/secret/secret.lis', 'prompted'): {('src/secret/secret.lis', 'read_from'), ('src/secret/secret.lis', 'confirm_from')},
+    ('src/secret/secret.lis', 'hidden_line'): {('src/secret/secret.lis', 'prompted')},
+    ('src/realtime/realtime.lis', 'reconnect'): {('src/realtime/realtime.lis', 'start')},
+    ('src/commands/upgrade.lis', 'run_upgrade'): {('src/commands/upgrade.lis', 'upgrade')},
+}
+
+
+def module_of(rel):
+    parts = rel.split('/')
+    return parts[1] if len(parts) > 2 else 'main'
+
+
+def enclosing(code, pos):
+    fn = ''
+    for m in FN.finditer(code):
+        if m.start() > pos:
+            break
+        fn = m.group(1)
+    return fn
+
+
+def foreign_calls(files):
+    """[(rel, line, caller, writer)] for every place `files` ({rel: source},
+    tests excluded) names an ALLOW function from outside its CALLERS: by its
+    bare name in its own module, as module.fn elsewhere."""
+    found = []
+    for rel, source in files.items():
+        code = code_only(source)
+        for (path, fn), callers in CALLERS.items():
+            mod = module_of(path)
+            pattern = r'(?<![\w.])' + fn + r'\b' if module_of(rel) == mod else r'\b' + mod + r'\.' + fn + r'\b'
+            for m in re.finditer(pattern, code):
+                if code[max(0, m.start() - 3):m.start()] == 'fn ':
                     continue
-                if c == '"':
-                    in_str = False
-            elif c == '"':
-                in_str = True
-            elif line.startswith('//', i):
-                cut = i
-                break
+                caller = (rel, enclosing(code, m.start()))
+                if caller not in callers:
+                    found.append((rel, code.count('\n', 0, m.start()) + 1, caller[1], fn))
+    return found
+
+
+def code_only(source):
+    """Source with `//` comments and string literal contents blanked, line
+    numbers kept. Strings may span lines; r"..." takes no escapes."""
+    out, i, n = [], 0, len(source)
+    while i < n:
+        c = source[i]
+        if source.startswith('//', i):
+            j = source.find('\n', i)
+            j = n if j < 0 else j
+            out.append(' ' * (j - i))
+            i = j
+        elif c == '"':
+            raw = i > 0 and source[i - 1] == 'r' and (i < 2 or not (source[i - 2].isalnum() or source[i - 2] == '_'))
+            j = i + 1
+            while j < n and source[j] != '"':
+                j += 2 if source[j] == '\\' and not raw else 1
+            out.append('"' + ''.join('\n' if ch == '\n' else ' ' for ch in source[i + 1:j]) + '"')
+            i = j + 1
+        else:
+            out.append(c)
             i += 1
-        out.append(line[:cut])
-    return '\n'.join(out)
+    return ''.join(out)
 
 
 def writes(rel, source):
     """[(rel, line, fn, call)] for every direct write in `source`; `fn` is the
     top-level function it sits in ("" for none)."""
-    code = strip_comments(source)
+    code = code_only(source)
     starts = [(m.start(), m.group(1)) for m in FN.finditer(code)]
     found = []
     for m in WRITES.finditer(code):
@@ -134,6 +203,31 @@ class CommandOutputTest(unittest.TestCase):
         stale = sorted(set(ALLOW) - writers)
         self.assertEqual(stale, [], 'ALLOW entries that no longer write; remove them: ' + repr(stale))
 
+    def test_allowed_writers_are_called_only_by_their_callers(self):
+        files = {}
+        for path in sorted((ROOT / 'src').rglob('*.lis')):
+            if not path.name.endswith('.test.lis'):
+                files[path.relative_to(ROOT).as_posix()] = path.read_text(encoding='utf-8')
+        found = foreign_calls(files)
+        self.assertEqual(
+            found, [],
+            'an allowed writer is called from somewhere CALLERS does not list; a verb that '
+            'calls it writes past the renderer:\n'
+            + '\n'.join(f'  {rel}:{line}: {fn} calls {w}' for rel, line, fn, w in found),
+        )
+        self.assertEqual(set(CALLERS), set(ALLOW), 'CALLERS and ALLOW must name the same functions')
+
+    def test_the_caller_check_catches_a_borrowed_writer(self):
+        # A review bypass (LLL-683): whoami calling import's progress line.
+        planted = {'src/commands/whoami.lis': 'pub fn whoami() {\n  progress("x")\n}\n'}
+        self.assertEqual(foreign_calls(planted), [('src/commands/whoami.lis', 2, 'whoami', 'progress')])
+        # From another module it is reached as realtime.reconnect.
+        planted = {'src/display/display.lis': 'fn x() {\n  realtime.reconnect(a)\n}\n'}
+        self.assertEqual(foreign_calls(planted), [('src/display/display.lis', 2, 'x', 'reconnect')])
+        # A name in a string or comment is not a call; the listed caller may call.
+        self.assertEqual(foreign_calls({'src/commands/x.lis': 'fn a() {\n  out("progress(") // progress(\n}\n'}), [])
+        self.assertEqual(foreign_calls({'src/commands/import.lis': 'fn import_github() {\n  progress("x")\n}\n'}), [])
+
     def test_the_scanner_catches_what_it_hunts(self):
         planted = '''fn a() {
   fmt.Println("x")
@@ -153,6 +247,8 @@ pub fn b() -> int {
         self.assertEqual([c for *_, c in writes('src/commands/x.lis', 'fn a() {\n  log.Println("x")\n}\n')], ['log.Println'])
         self.assertEqual([c for *_, c in writes('src/commands/x.lis', 'fn a() {\n  log.Fatalf("%s", x)\n}\n')], ['log.Fatalf'])
         self.assertEqual([c for *_, c in writes('src/commands/x.lis', 'fn a() {\n  os.NewFile(1, "out").WriteString("x")\n}\n')], ['os.NewFile'])
+        self.assertEqual([c for *_, c in writes('src/commands/x.lis', 'fn a() {\n  syscall.Write(1, b)\n}\n')], ['syscall.Write'])
+        self.assertEqual([c for *_, c in writes('src/commands/x.lis', 'fn a() {\n  "fmt.Println(" + "x"\n}\n')], [])
         self.assertIn(ROOT / 'src' / 'display' / 'display.lis', list(sources()))
         self.assertNotIn(ROOT / 'src' / 'serve' / 'serve.lis', list(sources()))
 
