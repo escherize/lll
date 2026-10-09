@@ -57,7 +57,8 @@ with tempfile.TemporaryDirectory() as directory:
                 env['LLL_TOKEN'] = 'fixture-opaque-token'
                 origin = 'env:LLL_TOKEN'
             else:
-                config.write_text('token = "fixture-opaque-token"\n')
+                # The home token goes only to the url saved beside it (LLL-688).
+                config.write_text(f'url = "{base_env["LLL_URL"]}"\ntoken = "fixture-opaque-token"\n')
                 origin = f'file:{config}'
             for configured in (True, False):
                 for status in (401, 403, 500):

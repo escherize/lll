@@ -114,3 +114,62 @@ fn login_refuses_to_save_beside_another_servers_url() {
   assert why.contains("lll login --url http://127.0.0.1:8090")
   assert why.contains("LLL_CONFIG_HOME")
 }
+
+// LLL-688: a login fixes its server before it holds a token, and everything
+// it sends with that token goes there. A repo file or LLL_URL naming another
+// server is named in a notice, never followed.
+#[test]
+fn login_plan_keeps_the_target_whatever_outranks_the_home_url() {
+  let repo = Some(config.Source.RepoFile("/repo/.lll.toml"))
+  let a = "http://127.0.0.1:8100"
+  let b = "https://hostile.example"
+  let plan = plan_login(a, b, repo)
+  assert plan.server == a
+  let Some(notice) = plan.shadowed else { panic("expected a notice") };
+  assert notice.contains("/repo/.lll.toml sets url = https://hostile.example")
+  assert notice.contains(f"not to {a}")
+  let env = plan_login(a, b, Some(config.Source.Env("LLL_URL")))
+  assert env.server == a
+  assert env.shadowed.map_or(false, |n| n.contains("unset LLL_URL"))
+}
+
+#[test]
+fn login_plan_without_a_target_rides_the_effective_url() {
+  let repo = Some(config.Source.RepoFile("/repo/.lll.toml"))
+  let plan = plan_login("", "https://lll.example", repo)
+  assert plan.server == "https://lll.example"
+  assert plan.shadowed.is_none()
+}
+
+#[test]
+fn login_plan_owes_no_notice_when_the_home_config_decides() {
+  let a = "http://127.0.0.1:8100"
+  let home = Some(config.Source.HomeFile("/h/lll/lll.toml"))
+  // The login rewrites the home url, so later commands follow it.
+  assert plan_login(a, "https://old.example", home).shadowed.is_none()
+  assert plan_login(a, "http://127.0.0.1:8090", Some(config.Source.Default)).shadowed.is_none()
+  assert plan_login(a, "", None).shadowed.is_none()
+  // A repo url naming the same server is no shadow.
+  assert plan_login(a, "http://localhost:8100/", Some(config.Source.RepoFile("/r/.lll.toml"))).shadowed.is_none()
+}
+
+// LLL-688: a password or pasted token goes only to a server the user named.
+#[test]
+fn a_login_without_url_refuses_a_url_a_repo_or_the_environment_chose() {
+  let repo = Some(config.Source.RepoFile("/r/.lll.toml"))
+  let b = "http://127.0.0.1:9999"
+  let Some(why) = login_needs_url("", b, repo, "") else { panic("expected a refusal") };
+  assert why.contains("/r/.lll.toml sets url = http://127.0.0.1:9999")
+  assert why.contains("if you did not choose that server: remove the url line from /r/.lll.toml")
+  assert why.contains("only if you trust http://127.0.0.1:9999: lll login --url http://127.0.0.1:9999 ... (this sends your credentials to http://127.0.0.1:9999)")
+  let replacing = login_needs_url("", b, repo, "http://127.0.0.1:8100").unwrap_or("")
+  assert replacing.contains("and replaces the saved login for http://127.0.0.1:8100")
+  // A trailing slash is the same url, as login saves it.
+  assert login_needs_url("", b + "/", repo, b).is_none()
+  assert login_needs_url("", b, Some(config.Source.Env("LLL_URL")), "").is_some()
+  // --url names it; the home config chose the same url; the home url or default.
+  assert login_needs_url(b, b, repo, "").is_none()
+  assert login_needs_url("", b, repo, b).is_none()
+  assert login_needs_url("", b, Some(config.Source.HomeFile("/h/lll.toml")), b).is_none()
+  assert login_needs_url("", "http://127.0.0.1:8090", Some(config.Source.Default), "").is_none()
+}

@@ -77,7 +77,7 @@ fn send(ctx: pb.Client, method: string, path: string, payload: string, fail: boo
     if payload != "" { h.Set("Content-Type", "application/json") }
     if cfg.token != "" { h.Set("Authorization", pb.bearer(cfg.token)) }
   }
-  let resp = match http.DefaultClient.Do(req) {
+  let resp = match pb.no_redirects().Do(req) {
     Ok(r) => r,
     Err(e) => return Err(pb.unreachable(cfg.url, e)),
   }
