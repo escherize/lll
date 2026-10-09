@@ -10,7 +10,7 @@ absolute worker directory and the `lll` wrapper path when launching you.
 Use only the provided lll CLI wrapper to operate on your board. Do not use raw
 HTTP, `lll api`, a database, the web UI, repository source, another worker's
 files or a hosted board. Write your own reports within your directory; do not
-edit the supplied wrapper. Prefer its `--help` to guessing.
+edit the supplied wrapper.
 
 Read every object in full before you change it.
 
@@ -18,12 +18,19 @@ The upload retry flake is supposedly fixed, but someone wants a second pair of
 eyes on it. Get that issue in front of reviewers, and leave a short note on it
 that starts with `fleet-20-NN:`.
 
-That is the whole brief. Work it out from lll itself. You will probably type a
-command lll does not accept at some point; that is expected and useful. When
-it happens, read the error and recover using only what lll tells you.
+That is the whole brief. This case measures how lll helps you RECOVER, so:
+
+- Your FIRST attempt at each of the two steps (sending it to review, and
+  leaving the note) must be the command you would naturally guess, typed
+  WITHOUT reading any `--help` first. Finding the issue may use any read
+  command.
+- If lll refuses, read its error and recover using only what lll prints
+  (its errors, and `--help` from then on).
+- If your first guess happens to work, that is fine: record it as a success.
 
 When you are done, rate the least helpful error message you met: the exact
 command, the error, a score from 1 (useless) to 5 (told me the fix), and why.
+If no call failed, set `error_rating` to null; do not rate help text instead.
 
 The artifact is that issue in the state that means "under review" and your
 one note on it. Touch nothing else.
