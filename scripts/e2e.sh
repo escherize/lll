@@ -3442,6 +3442,60 @@ printf 'me = "zed"\n' > "$ME_HOME/.config/lll/lll.toml"
 grep -q '^me = "zed"$' "$ME_HOME/.config/lll/lll.toml" \
   || fail "login --url overwrote a configured me: $(cat "$ME_HOME/.config/lll/lll.toml")"
 
+# LLL-688: a login sends its new token only to the server it logged in to.
+# The team check after login used to re-resolve the layered config, where a
+# directory's .lll.toml url outranks the home one, so the token minted on A
+# went to whatever server that file named. B is a listener that counts every
+# request; a .lll.toml naming it sits in the directory login runs from.
+B_REC="$DATA_DIR/login-b-requests.txt"
+B_PORT=$(free_port 20000 39999)
+cat > "$DATA_DIR/count_server.py" <<'COUNT_EOF'
+import http.server, socketserver, sys
+port, rec = int(sys.argv[1]), sys.argv[2]
+class H(http.server.BaseHTTPRequestHandler):
+    def _count(self):
+        with open(rec, "a") as f:
+            f.write(f"{self.command} {self.path}\n")
+        self.send_response(200)
+        self.send_header("Content-Length", "2")
+        self.end_headers()
+        self.wfile.write(b"{}")
+    do_GET = do_POST = do_PATCH = do_DELETE = _count
+    def log_message(self, *a): pass
+socketserver.TCPServer(("127.0.0.1", port), H).serve_forever()
+COUNT_EOF
+python3 "$DATA_DIR/count_server.py" "$B_PORT" "$B_REC" >/dev/null 2>&1 &
+B_PID=$!
+SPY_PIDS="${SPY_PIDS:-} $B_PID"
+wait_ok "http://127.0.0.1:$B_PORT/" || fail "the counting listener did not start"
+: > "$B_REC"
+HOSTILE="$DATA_DIR/hostile_repo"
+mkdir -p "$HOSTILE"
+printf 'url = "http://127.0.0.1:%s"\n' "$B_PORT" > "$HOSTILE/.lll.toml"
+TWO_TOKEN=""
+for mode in password token; do
+  TWO_HOME="$DATA_DIR/two_server_home_$mode"
+  mkdir -p "$TWO_HOME"
+  if [ "$mode" = password ]; then
+    out=$(cd "$HOSTILE" && env -u LLL_URL -u LLL_TOKEN -u LLL_TEAM HOME="$TWO_HOME" \
+      "$LLL_ABS" login --url "$URL" -e onboard@lll.test --password "$ONBOARD_PASS") \
+      || fail "login --url beside another server's .lll.toml failed: $out"
+  else
+    out=$(cd "$HOSTILE" && printf '%s\n' "$TWO_TOKEN" | env -u LLL_URL -u LLL_TOKEN -u LLL_TEAM HOME="$TWO_HOME" \
+      "$LLL_ABS" login --url "$URL" --token -) \
+      || fail "login --url --token beside another server's .lll.toml failed: $out"
+  fi
+  [ -s "$B_REC" ] && fail "login --url ($mode) sent requests to the .lll.toml's server: $(cat "$B_REC")"
+  TWO_TOML="$TWO_HOME/.config/lll/lll.toml"
+  grep -q "^url = \"$URL\"\$" "$TWO_TOML" || fail "login --url ($mode) did not save A's url"
+  grep -q '^token = ' "$TWO_TOML" || fail "login --url ($mode) did not save the token"
+  TWO_TOKEN=$(sed -n 's/^token = "\(.*\)"$/\1/p' "$TWO_TOML")
+  assert_contains "$out" "ENG" "login --url ($mode) checked teams on the server it logged in to"
+  assert_contains "$out" ".lll.toml sets url = http://127.0.0.1:$B_PORT, which outranks the home config" \
+    "login --url ($mode) names the repo file whose url outranks the home config"
+done
+kill "$B_PID" 2>/dev/null || true
+
 # --url takes a base url, not a hostname; the refusal shows the shape.
 set +e
 out=$(cd "$NEUTRAL" && env -u LLL_URL -u LLL_TOKEN HOME="$LOGIN_HOME" \
