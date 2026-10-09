@@ -30,14 +30,15 @@ and BB is role B's (e.g. `workers 07 and 08`).
 Role A:
 NN and PP are always TWO digits, zero-padded: worker 9 is `09`, so A's
 comment is `fleet-18-09: watching`, never `fleet-18-9`. If a bounded wait
-times out, stop and report blocked; do not continue to the next step.
+times out, stop and report blocked (role A still stops its stream first, step
+4). This applies to BOTH roles.
 
 1. Start lll's live event stream for team FLEET in machine-readable form in
    the background, stdout to `fleet-18-NN-watch.jsonl` and stderr to
    `fleet-18-NN-watch.err` in your directory.
 2. Wait until the stream says it is ready (on stderr), then add exactly one
    comment to the shared issue: `fleet-18-NN: watching`.
-3. Wait (bounded: at most 10 minutes) until B's comment starting
+3. Wait (bounded: at most 15 minutes, longer than B's wait) until B's comment starting
    `fleet-18-PP: done` appears on the shared issue, then a few seconds more.
    While waiting, check the stream's PID is still alive (`kill -0 PID`). If it
    died, record a failure and set `done` false.
