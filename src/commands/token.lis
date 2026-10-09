@@ -295,13 +295,13 @@ fn superuser_auth_failed(ctx: pb.Client, e: pb.CliError) -> pb.CliError {
   let msg = f"authenticating as the superuser: {e.message}"
   if e.status != 400 { return e.with_message(msg) }
   let Ok((_, src)) = ctx.settings.traced() else { return e.with_message(msg) }
-  if src.url != "default" {
-    return e.with_message(msg + "
-if the administrator credentials are right, check the server: --url names another one")
+  let line = match src.url {
+    Some(config.Source.Default) => "that url is the built-in default: nothing here configured one, so the credentials
+were almost certainly sent to the wrong server. Name it: --url <your server url>",
+    Some(config.Source.Flag(_)) | Some(config.Source.Env(_)) | Some(config.Source.RepoFile(_)) |
+      Some(config.Source.HomeFile(_)) | None => "if the administrator credentials are right, check the server: --url names another one",
   }
-  e.with_message(msg + "
-that url is the built-in default: nothing here configured one, so the credentials
-were almost certainly sent to the wrong server. Name it: --url <your server url>")
+  e.with_message(f"{msg}\n{line}")
 }
 
 fn token_create_page() -> string {

@@ -236,18 +236,16 @@ fn url_scope_error(arg: string, url: string, usage: string) -> string {
   // Where the url comes from decides what changes it (the round-2 rule the
   // unreachable hint follows): 'config set url' writes the home file, which
   // LLL_URL and a repo .lll.toml both outrank.
-  let origin = config.resolve(config.read_env(), config.no_overrides()).traced().map_or("", |t| t.1.url)
+  let origin = config.resolve(config.read_env(), config.no_overrides()).traced().map_or(None, |t| t.1.url)
   unknown_flag(arg, usage, []) + f"\nThis command takes no --url: the endpoint is the configured one. For one command, prefix your command with LLL_URL={value}; {url_default_hint(origin)}."
 }
 
 /// How to change the default url, given where it came from.
-fn url_default_hint(origin: string) -> string {
-  if origin == "env:LLL_URL" {
-    "the default comes from LLL_URL in the environment; correct or unset it"
-  } else if strings.HasSuffix(origin, ".lll.toml") {
-    f"the default comes from {strings.TrimPrefix(origin, "file:")}; edit its url line"
-  } else {
-    "to change the default, run 'lll config set url URL'"
+fn url_default_hint(origin: Option<config.Source>) -> string {
+  match origin {
+    Some(config.Source.Env(name)) => f"the default comes from {name} in the environment; correct or unset it",
+    Some(config.Source.RepoFile(path)) => f"the default comes from {path}; edit its url line",
+    Some(config.Source.HomeFile(_)) | Some(config.Source.Flag(_)) | Some(config.Source.Default) | None => "to change the default, run 'lll config set url URL'",
   }
 }
 

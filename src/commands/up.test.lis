@@ -1,3 +1,5 @@
+import "config"
+
 // Unit cover for TASK-218's predicate. `is_loopback` is what stands between a
 // throwaway `lll up --pb-dir` and a write to production: the old code asked
 // `healthy()` whether something answered at the configured url, which a live
@@ -50,7 +52,7 @@ fn loopback_is_not_fooled_by_a_hostname_that_merely_starts_local() {
 // LLL-648: a loopback boot logs the CLI in, but only into an empty slot. A
 // token or url from a file may be another server's login (url and token
 // layer independently), so it is never replaced.
-fn state(rides: bool, source: string, home_token: string, home_url: string) -> CliState {
+fn state(rides: bool, source: Option<config.Source>, home_token: string, home_url: string) -> CliState {
   CliState {
     rides,
     throwaway: false,
@@ -58,7 +60,6 @@ fn state(rides: bool, source: string, home_token: string, home_url: string) -> C
     token_source: source,
     home_token,
     home_url,
-    home_path: "/h/lll.toml",
     db_url: "http://127.0.0.1:8090",
   }
 }
@@ -74,26 +75,26 @@ fn plan_kind(p: CliLogin) -> string {
 
 #[test]
 fn the_cli_login_is_written_only_into_an_empty_slot() {
-  assert plan_kind(cli_login_plan(state(true, "file:/h/lll.toml", "tok", ""))) == "already"
-  assert plan_kind(cli_login_plan(state(false, "", "", ""))) == "save"
-  assert plan_kind(cli_login_plan(state(false, "", "", "http://127.0.0.1:8090"))) == "save"
-  assert plan_kind(cli_login_plan(state(false, "env:LLL_TOKEN", "", ""))) == "save"
+  assert plan_kind(cli_login_plan(state(true, Some(config.Source.HomeFile("/h/lll.toml")), "tok", ""))) == "already"
+  assert plan_kind(cli_login_plan(state(false, None, "", ""))) == "save"
+  assert plan_kind(cli_login_plan(state(false, None, "", "http://127.0.0.1:8090"))) == "save"
+  assert plan_kind(cli_login_plan(state(false, Some(config.Source.Env("LLL_TOKEN")), "", ""))) == "save"
   // Each kept credential names its own way out.
-  assert plan_kind(cli_login_plan(state(false, "file:/h/lll.toml", "tok", ""))).contains("lll logout")
-  let env = plan_kind(cli_login_plan(state(false, "env:LLL_TOKEN", "tok", "")))
+  assert plan_kind(cli_login_plan(state(false, Some(config.Source.HomeFile("/h/lll.toml")), "tok", ""))).contains("lll logout")
+  let env = plan_kind(cli_login_plan(state(false, Some(config.Source.Env("LLL_TOKEN")), "tok", "")))
   assert env.contains("unset it") && !env.contains("logout")
-  let repo = plan_kind(cli_login_plan(state(false, "file:/repo/.lll.toml", "", "")))
+  let repo = plan_kind(cli_login_plan(state(false, Some(config.Source.RepoFile("/repo/.lll.toml")), "", "")))
   assert repo.contains("/repo/.lll.toml") && !repo.contains("logout")
   // A repo token over a home token: logout alone would leave the repo one
   // winning, so the repo line comes first and logout second.
-  let both = plan_kind(cli_login_plan(state(false, "file:/repo/.lll.toml", "tok", "")))
+  let both = plan_kind(cli_login_plan(state(false, Some(config.Source.RepoFile("/repo/.lll.toml")), "tok", "")))
   assert both.contains("/repo/.lll.toml is not valid for this server: remove that line") && both.contains("also run 'lll logout'")
   // A logged-out home pointed at a hosted board keeps its url.
-  let hosted = plan_kind(cli_login_plan(state(false, "", "", "https://lll.example.com")))
+  let hosted = plan_kind(cli_login_plan(state(false, None, "", "https://lll.example.com")))
   assert hosted.contains("lll config set url http://127.0.0.1:8090")
   // A --pb-dir boot and a non-loopback bind never touch the CLI.
-  assert plan_kind(cli_login_plan(CliState { throwaway: true, ..state(false, "", "", "") })) == "untouched"
-  assert plan_kind(cli_login_plan(CliState { loopback: false, ..state(false, "", "", "") })) == "untouched"
+  assert plan_kind(cli_login_plan(CliState { throwaway: true, ..state(false, None, "", "") })) == "untouched"
+  assert plan_kind(cli_login_plan(CliState { loopback: false, ..state(false, None, "", "") })) == "untouched"
 }
 
 // LLL-648, LLL-676: the banner names a proven generated administrator and

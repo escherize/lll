@@ -50,7 +50,7 @@ fn only_an_empty_token_means_absent() {
 #[test]
 fn a_refused_default_url_points_at_login_url() {
   let e = errors.New("connection refused")
-  let msg = unreachable_hint("http://127.0.0.1:8090", "default", e)
+  let msg = unreachable_hint("http://127.0.0.1:8090", Some(config.Source.Default), e)
   assert msg.message.contains("127.0.0.1:8090")
   assert msg.message.contains("lll login --url")
 }
@@ -58,7 +58,7 @@ fn a_refused_default_url_points_at_login_url() {
 #[test]
 fn a_refused_configured_url_is_named_without_the_fresh_machine_hint() {
   let e = errors.New("connection refused")
-  let msg = unreachable_hint("http://tracker.example.com:8091", "", e)
+  let msg = unreachable_hint("http://tracker.example.com:8091", None, e)
   assert msg.message.contains("tracker.example.com:8091")
   assert !msg.message.contains("lll login --url")
 }
@@ -67,13 +67,13 @@ fn a_refused_configured_url_is_named_without_the_fresh_machine_hint() {
 #[test]
 fn a_refused_saved_url_names_its_file_and_the_fix() {
   let e = errors.New("connection refused")
-  let msg = unreachable_hint("http://old.example.com", "file:/home/a/.config/lll/lll.toml", e)
+  let msg = unreachable_hint("http://old.example.com", Some(config.Source.HomeFile("/home/a/.config/lll/lll.toml")), e)
   assert msg.message.contains("comes from /home/a/.config/lll/lll.toml")
   assert msg.message.contains("lll config set url URL")
-  let env = unreachable_hint("http://old.example.com", "env:LLL_URL", e)
+  let env = unreachable_hint("http://old.example.com", Some(config.Source.Env("LLL_URL")), e)
   assert env.message.contains("LLL_URL in the environment")
   assert !env.message.contains("lll login --url")
-  let repo = unreachable_hint("http://old.example.com", "file:/r/.lll.toml", e)
+  let repo = unreachable_hint("http://old.example.com", Some(config.Source.RepoFile("/r/.lll.toml")), e)
   assert repo.message.contains("edit its url line")
   assert !repo.message.contains("config set url")
 }
@@ -159,7 +159,7 @@ fn a_renewed_token_reaches_every_copy_of_the_client() {
   c.renew_to("new")
   assert copy.token() == "new"
   // with_token starts a separate session: the original keeps its own.
-  let other = c.with_token("other", "")
+  let other = c.with_token("other", None)
   assert other.token() == "other"
   assert c.token() == "new"
 }
@@ -301,7 +301,7 @@ fn a_refused_file_token_is_replaced_by_the_one_the_file_holds_now() {
   assert body.contains("\"t1\"")
   assert c.token() == fresh
   // A token a boot handed over is never traded for a file's.
-  let handed = c.with_token(old, "")
+  let handed = c.with_token(old, None)
   let assert Err(_) = handed.get("/api/collections/teams/records")
   assert handed.token() == old
 }
@@ -342,11 +342,11 @@ fn another_servers_token_in_the_file_is_never_sent_here() {
 /// password paths; the holder of a valid token has one too.
 #[test]
 fn an_expired_token_names_login_token_and_config_check() {
-  let msg = expired_token("eyJhbGciOiJIUzI1NiJ9.eyJleHAiOjF9.sig", "file:/home/a/.config/lll/lll.toml")
+  let msg = expired_token("eyJhbGciOiJIUzI1NiJ9.eyJleHAiOjF9.sig", Some(config.Source.HomeFile("/home/a/.config/lll/lll.toml")))
   assert msg.message.contains("lll login --token -")
   assert msg.message.contains("lll config check")
   // LLL_TOKEN outranks a login, so the message says to fix the variable.
-  let env = expired_token("eyJhbGciOiJIUzI1NiJ9.eyJleHAiOjF9.sig", "env:LLL_TOKEN")
+  let env = expired_token("eyJhbGciOiJIUzI1NiJ9.eyJleHAiOjF9.sig", Some(config.Source.Env("LLL_TOKEN")))
   assert env.message.contains("LLL_TOKEN outranks the saved token")
   assert !env.message.contains("lll login --token -")
 }

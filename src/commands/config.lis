@@ -114,7 +114,7 @@ fn config_set(input: flags.CommandInput) -> Result<(), pb.CliError> {
     let effective = if key == "url" { cfg.url } else { cfg.web_url }
     let origin = if key == "url" { src.url } else { src.web_url }
     if effective != endpoint {
-      fmt.Println(f"note: {origin} overrides this setting; 'lll config list' shows the effective configuration")
+      fmt.Println(f"note: {config.origin(origin)} overrides this setting; 'lll config list' shows the effective configuration")
     }
     return Ok(())
   }
@@ -256,11 +256,11 @@ fn config_list(input: flags.CommandInput) -> Result<(), pb.CliError> {
     // The token's value is a secret here too: only whether it is set.
     let tok = if cfg.token == "" { "" } else { "set" }
     let values = [
-      ConfigValue { key: "url", value: cfg.url, source: src.url },
-      ConfigValue { key: "team", value: cfg.team, source: src.team },
-      ConfigValue { key: "sort", value: cfg.sort, source: src.sort },
-      ConfigValue { key: "web_url", value: cfg.web_url, source: src.web_url },
-      ConfigValue { key: "token", value: tok, source: src.token },
+      ConfigValue { key: "url", value: cfg.url, source: config.origin(src.url) },
+      ConfigValue { key: "team", value: cfg.team, source: config.origin(src.team) },
+      ConfigValue { key: "sort", value: cfg.sort, source: config.origin(src.sort) },
+      ConfigValue { key: "web_url", value: cfg.web_url, source: config.origin(src.web_url) },
+      ConfigValue { key: "token", value: tok, source: config.origin(src.token) },
     ]
     return print_list_json(values, whole_list(values.length()), "config")
   }
@@ -302,7 +302,7 @@ fn config_get(input: flags.CommandInput) -> Result<(), pb.CliError> {
       flags.usage_error(f"unknown config key '{other}'; keys: url, web_url, team, sort"),
     ),
   }
-  if origin == "" { return Err(pb.failed(f"{key} is not set (see 'lll config list')")) }
+  if origin.is_none() { return Err(pb.failed(f"{key} is not set (see 'lll config list')")) }
   fmt.Println(value)
   Ok(())
 }
@@ -333,20 +333,25 @@ fn config_check(input: flags.CommandInput) -> Result<(), pb.CliError> {
 /// That file is committed, so a token in it is a secret in everyone's clone
 /// and in every future checkout of the history. Naming the home config makes
 /// the warning actionable rather than a scold.
-fn committed_token_warning(ctx: pb.Client, source: string) -> Option<string> {
-  if !strings.HasPrefix(source, "file:") { return None }
-  let path = strings.TrimPrefix(source, "file:")
+fn committed_token_warning(ctx: pb.Client, source: Option<config.Source>) -> Option<string> {
+  let path = match source {
+    Some(config.Source.RepoFile(path)) => path,
+    Some(config.Source.HomeFile(_)) | Some(config.Source.Env(_)) | Some(config.Source.Flag(_)) |
+      Some(config.Source.Default) | None => return None,
+  }
   let Ok(home) = ctx.settings.home_path() else {
     return None
   }
-  if path == home { return None }
   Some(
     f"warning: the token comes from {path}, which is committed - move it to {home} (or LLL_TOKEN) and mint a fresh one, since this one is in the repo's history",
   )
 }
 
-fn print_origin(source: string, key: string, value: string) {
-  let from = if source == "" { "unset" } else { source }
+fn print_origin(source: Option<config.Source>, key: string, value: string) {
+  let from = match source {
+    None => "unset",
+    Some(_) => config.origin(source),
+  }
   let role = match key {
     "url" => "\tAPI base (reads and writes)",
     "web_url" => "\tboard base (browser links)",

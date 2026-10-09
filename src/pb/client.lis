@@ -35,7 +35,7 @@ pub struct Client {
   session: gopb.Session,
   /// Where the session's token came from, as config's Sources.token names
   /// it: the refusal messages say which variable or file to fix.
-  token_source: string,
+  token_source: Option<config.Source>,
   renewal: Option<Renewal>,
 }
 
@@ -46,7 +46,7 @@ impl Client {
   pub fn new(settings: config.Settings) -> Client {
     let (token, source) = match settings.traced() {
       Ok((cfg, src)) => (cfg.token, src.token),
-      Err(_) => ("", ""),
+      Err(_) => ("", None),
     }
     let renewal = if settings.env.remint {
       settings.admin().map(|admin| Renewal { admin, member: settings.env.remint_member })
@@ -93,9 +93,9 @@ impl Client {
     out
   }
 
-  /// This client sending `token`, from `source` ("" when no config key or
+  /// This client sending `token`, from `source` (None when no config key or
   /// variable supplied it). A fresh session: nothing was probed yet.
-  pub fn with_token(self, token: string, source: string) -> Client {
+  pub fn with_token(self, token: string, source: Option<config.Source>) -> Client {
     Client {
       settings: self.settings,
       session: gopb.NewSession(token),
@@ -109,7 +109,7 @@ impl Client {
   /// and never re-reads a config file, so a refused token fails its request
   /// instead of retrying as this process's own identity.
   pub fn reading_as(self, token: string) -> Client {
-    Client { settings: self.settings, session: gopb.NewSession(token), token_source: "", renewal: None }
+    Client { settings: self.settings, session: gopb.NewSession(token), token_source: None, renewal: None }
   }
 
   /// Re-read the config files and send their token from now on: a token
@@ -123,7 +123,11 @@ impl Client {
   /// --url B' elsewhere rewrites url and token together, and B's token must
   /// never be sent to this client's server. True when the token changed.
   pub fn reload_token(self) -> bool {
-    if !strings.HasPrefix(self.token_source, "file:") { return false }
+    let from_file = match self.token_source {
+      Some(config.Source.RepoFile(_)) | Some(config.Source.HomeFile(_)) => true,
+      Some(config.Source.Flag(_)) | Some(config.Source.Env(_)) | Some(config.Source.Default) | None => false,
+    }
+    if !from_file { return false }
     let Ok(base) = self.url() else { return false }
     let unflagged = config.Overrides { url: None, ..self.settings.overrides }
     let Ok(now) = config.resolve(self.settings.env, unflagged).config() else { return false }
@@ -263,7 +267,7 @@ impl Client {
     let (cfg, src) = self.settings.traced().map_err(failed)?
     let token = self.token()
     if token == "" && (strings.HasPrefix(path, "/api/collections/") || strings.HasPrefix(path, "/api/lll/")) {
-      return Err(not_logged_in(cfg.url, src.url == "default"))
+      return Err(not_logged_in(cfg.url, src.url))
     }
     let wire = Wire { base: cfg.url, url_origin: src.url, method, path, payload, content_type, stamp, key }
     // TASK-319: the server answers 401 to a record request whose token it
@@ -352,7 +356,7 @@ impl Client {
           // PocketBase revocation clears a realtime client's auth but keeps its
           // stream alive. Restore that client's existing subscriptions as the
           // renewed member so reads and live updates recover together (LLL-445).
-          let _ = request(wire.base, "POST", "/api/realtime", subscription, bearer(fresh), "")
+          let _ = request(wire.base, "POST", "/api/realtime", subscription, bearer(fresh), None)
         }
         return Some(request_options(
           wire.base, wire.method, wire.path, wire.payload, bearer(fresh), wire.url_origin,
@@ -383,7 +387,7 @@ impl Client {
       "/api/collections/_superusers/auth-with-password",
       payload as string,
       "",
-      "",
+      None,
     ) else { return None }
     let mut auth = TokenOnly { .. }
     if let Err(_e) = json.Unmarshal(body.bytes(), &auth) { return None }
@@ -412,8 +416,8 @@ impl Client {
   /// not_logged_in, with the url and its origin, for callers outside the
   /// request path's error handling (whoami).
   pub fn not_logged_in_message(self) -> CliError {
-    let Ok((cfg, src)) = self.settings.traced() else { return not_logged_in("", true) }
-    not_logged_in(cfg.url, src.url == "default")
+    let Ok((cfg, src)) = self.settings.traced() else { return not_logged_in("", Some(config.Source.Default)) }
+    not_logged_in(cfg.url, src.url)
   }
 
   /// corrupted_token, with the origin, for whoami.
@@ -451,7 +455,7 @@ pub fn fetch<T>(
 /// One authenticated request, kept whole so a renewal can repeat it.
 struct Wire {
   base: string,
-  url_origin: string,
+  url_origin: Option<config.Source>,
   method: string,
   path: string,
   payload: string,
@@ -475,21 +479,16 @@ is the lll server running? start everything with 'lll up', or point LLL_URL (or 
 /// Otherwise it names where the url came from and how to change it: four 1.0
 /// fleet agents ran 'lll login' against a stale saved url because nothing
 /// said which file held it.
-fn unreachable_hint(base: string, url_origin: string, e: error) -> CliError {
+fn unreachable_hint(base: string, url_origin: Option<config.Source>, e: error) -> CliError {
   let err = unreachable(base, e)
-  let line = if url_origin == "default" {
-    "no url is configured on this machine; connect with: lll login --url https://your-server"
-  } else if url_origin == "env:LLL_URL" {
-    "this url comes from LLL_URL in the environment; correct or unset it"
-  } else if strings.HasSuffix(url_origin, ".lll.toml") {
+  let line = match url_origin {
+    Some(config.Source.Default) => "no url is configured on this machine; connect with: lll login --url https://your-server",
+    Some(config.Source.Env(name)) => f"this url comes from {name} in the environment; correct or unset it",
     // A repo file outranks the machine's, so 'config set url' would not win.
-    f"this url comes from {strings.TrimPrefix(url_origin, "file:")}; edit its url line, or remove it to use the machine's"
-  } else if strings.HasPrefix(url_origin, "file:") {
-    f"this url comes from {strings.TrimPrefix(url_origin, "file:")}; fix with 'lll config set url URL' or 'lll login --url URL'"
-  } else if url_origin == "flag:--url" {
-    "this url comes from --url"
-  } else {
-    return err
+    Some(config.Source.RepoFile(path)) => f"this url comes from {path}; edit its url line, or remove it to use the machine's",
+    Some(config.Source.HomeFile(path)) => f"this url comes from {path}; fix with 'lll config set url URL' or 'lll login --url URL'",
+    Some(config.Source.Flag(spelling)) => f"this url comes from {spelling}",
+    None => return err,
   }
   err.with_message(err.message + f"\n{line}")
 }
@@ -501,7 +500,7 @@ pub fn post_anon_to(
   path: string,
   payload: string,
 ) -> Result<string, CliError> {
-  request(base, "POST", path, payload, "", "flag:--url")
+  request(base, "POST", path, payload, "", Some(config.Source.Flag("--url")))
 }
 
 /// The value of an Authorization header for `tok`, or "" when there is no
@@ -530,7 +529,7 @@ pub fn impersonate_member(
   member: string,
   duration: int,
 ) -> Result<string, CliError> {
-  let body = request(base, "POST", f"/api/collections/members/impersonate/{member}", f"{{\"duration\":{duration}}}", bearer(admin), "")?
+  let body = request(base, "POST", f"/api/collections/members/impersonate/{member}", f"{{\"duration\":{duration}}}", bearer(admin), None)?
   let mut auth = TokenOnly { .. }
   if let Err(e) = json.Unmarshal(body.bytes(), &auth) {
     return Err(failed(f"decoding the member token: {e}"))
@@ -598,7 +597,7 @@ fn verdict(base: string, tok: string, session: gopb.Session) -> string {
       f"/api/collections/{coll}/records/{id}?fields=id",
       "",
       bearer(tok),
-      "",
+      None,
     )
     if found.is_ok() {
       session.SetProbed(key)
@@ -749,13 +748,11 @@ pub fn refresh_token(base: string, tok: string) -> Result<string, CliError> {
 /// separately from a rejected token because the fix is different and local -
 /// nobody reset anything; go back to where the token came from and copy it
 /// again, by machine this time.
-fn corrupted_token(origin: string) -> CliError {
-  let from = if strings.HasPrefix(origin, "env:") {
-    "LLL_TOKEN"
-  } else if strings.HasPrefix(origin, "file:") {
-    strings.TrimPrefix(origin, "file:")
-  } else {
-    "the configured token"
+fn corrupted_token(origin: Option<config.Source>) -> CliError {
+  let from = match origin {
+    Some(config.Source.Env(name)) => name,
+    Some(config.Source.RepoFile(path)) | Some(config.Source.HomeFile(path)) => path,
+    Some(config.Source.Flag(_)) | Some(config.Source.Default) | None => "the configured token",
   }
   fail(ErrorKind.Auth, f"the token in {from} is corrupted: it is shaped like a token but its payload does not decode
 it was almost certainly altered in copying - re-read it from its source into the variable
@@ -764,8 +761,8 @@ rather than typing it (a token is ~200 characters and one wrong one is enough)")
 
 
 /// The refusal when a well-formed token is disowned by the server. `origin`
-/// is where the token came from (config's Sources.token: "env:LLL_TOKEN" or
-/// "file:<path>"), because the fix depends on it.
+/// is where the token came from (config's Sources.token: LLL_TOKEN or a
+/// file), because the fix depends on it.
 ///
 /// This used to open "your saved token is no longer valid" and name one
 /// cause, a password reset. Fleet run 3 (TASK-309) had ten of thirty agents
@@ -776,38 +773,35 @@ rather than typing it (a token is ~200 characters and one wrong one is enough)")
 /// The refusal for a token whose own payload says it has expired: exact,
 /// because the payload is. Fleet shard 24 reported expired tokens keep
 /// working; the probe said otherwise, and this is what it says now.
-fn expired_token(tok: string, origin: string) -> CliError {
-  let from = if strings.HasPrefix(origin, "env:") {
-    "the token in LLL_TOKEN"
-  } else if strings.HasPrefix(origin, "file:") {
-    f"the token in {strings.TrimPrefix(origin, "file:")}"
-  } else {
-    "your token"
-  }
+fn expired_token(tok: string, origin: Option<config.Source>) -> CliError {
+  let from = token_named(origin)
   let exp = token_expiry(tok).unwrap_or(0)
   let when = time.Unix(exp as int64, 0).UTC().Format("2006-01-02 15:04:05 UTC")
   let ago = time.Now().Unix() as int - exp
   fail(ErrorKind.Auth, f"{from} expired at {when} ({ago}s ago). Every read comes back empty and every write is refused until it is replaced: {token_fix(origin)}")
 }
 
+/// The token as the expiry and rejection refusals name it.
+fn token_named(origin: Option<config.Source>) -> string {
+  match origin {
+    Some(config.Source.Env(name)) => f"the token in {name}",
+    Some(config.Source.RepoFile(path)) | Some(config.Source.HomeFile(path)) => f"the token in {path}",
+    Some(config.Source.Flag(_)) | Some(config.Source.Default) | None => "your token",
+  }
+}
+
 /// How to replace a token that no longer works (1.0 fleet: four of ten were
 /// sent down the superuser and password paths first). LLL_TOKEN outranks the
 /// saved token, so a login would not take effect while it is set.
-fn token_fix(origin: string) -> string {
-  if origin == "env:LLL_TOKEN" {
-    return "LLL_TOKEN outranks the saved token: set it to a valid one ('lll token create <member>' mints an agent's), or unset it to use the saved one ('lll login' saves a new one). Then 'lll config check' to verify"
+fn token_fix(origin: Option<config.Source>) -> string {
+  match origin {
+    Some(config.Source.Env(name)) => f"{name} outranks the saved token: set it to a valid one ('lll token create <member>' mints an agent's), or unset it to use the saved one ('lll login' saves a new one). Then 'lll config check' to verify",
+    Some(config.Source.RepoFile(_)) | Some(config.Source.HomeFile(_)) | Some(config.Source.Flag(_)) | Some(config.Source.Default) | None => "'lll token create <member>' (an agent's, minted by a superuser) or 'lll login --email <your email>' (a person); or, if you hold a valid token: 'lll login --token -' (reads it from stdin). Then 'lll config check' to verify",
   }
-  "'lll token create <member>' (an agent's, minted by a superuser) or 'lll login --email <your email>' (a person); or, if you hold a valid token: 'lll login --token -' (reads it from stdin). Then 'lll config check' to verify"
 }
 
-fn stale_token(base: string, origin: string) -> CliError {
-  let from = if strings.HasPrefix(origin, "env:") {
-    "the token in LLL_TOKEN"
-  } else if strings.HasPrefix(origin, "file:") {
-    f"the token in {strings.TrimPrefix(origin, "file:")}"
-  } else {
-    "your token"
-  }
+fn stale_token(base: string, origin: Option<config.Source>) -> CliError {
+  let from = token_named(origin)
   fail(ErrorKind.Auth, f"{from} was rejected by {base}
 it is well-formed, but the server does not recognise it. In order of
 likelihood:
@@ -829,18 +823,18 @@ a fresh one: {token_fix(origin)}")
 /// bare "Failed to create record" 400, which reads as a bad payload.
 ///
 /// So the check happens here, before the wire, where it can say the true
-/// thing once for every verb. `defaulted` matters because a default url is
-/// the other half of that transcript: nothing was configured, and the
-/// request was about to go to whatever happens to be on 127.0.0.1:8090.
-fn not_logged_in(base: string, defaulted: bool) -> CliError {
+/// thing once for every verb. A default url matters because it is the other
+/// half of that transcript: nothing was configured, and the request was
+/// about to go to whatever happens to be on 127.0.0.1:8090.
+fn not_logged_in(base: string, url_origin: Option<config.Source>) -> CliError {
   // The url in the remedy is a PLACEHOLDER when nothing configured one. It
   // used to be the default itself, which reads as a discovered fact and
   // copy-pastes into the same failure — all three second-round usability runs
   // called that out, and it is the only line here that actively wasted them.
-  let (where_, url_arg) = if defaulted {
-    (f"{base} (the default; nothing here configured a url)", "<your server url>")
-  } else {
-    (base, base)
+  let (where_, url_arg) = match url_origin {
+    Some(config.Source.Default) => (f"{base} (the default; nothing here configured a url)", "<your server url>"),
+    Some(config.Source.Flag(_)) | Some(config.Source.Env(_)) | Some(config.Source.RepoFile(_)) |
+      Some(config.Source.HomeFile(_)) | None => (base, base),
   }
   fail(ErrorKind.Auth, f"not logged in to {where_}
 every collection is authenticated-only, so reads would come back empty and writes refused
@@ -856,7 +850,7 @@ no account yet?
 
 /// The request every verb here shares; `auth` is the Authorization header
 /// value ("" sends none), `url_origin` is where the url came from (config's
-/// trace: "default", "env:LLL_URL", "file:PATH", "flag:--url", or ""). Every
+/// trace, None when nothing recorded it). Every
 /// error names the base url — a bare "POST /api/...: 500" once hid which
 /// server a login was failing against.
 fn request(
@@ -865,21 +859,21 @@ fn request(
   path: string,
   payload: string,
   auth: string,
-  url_origin: string,
+  url_origin: Option<config.Source>,
 ) -> Result<string, CliError> {
   request_content(base, method, path, payload, auth, url_origin, "application/json", "")
 }
 
 fn request_content(
   base: string, method: string, path: string, payload: string,
-  auth: string, url_origin: string, content_type: string, stamp: string,
+  auth: string, url_origin: Option<config.Source>, content_type: string, stamp: string,
 ) -> Result<string, CliError> {
   request_options(base, method, path, payload, auth, url_origin, content_type, stamp, "")
 }
 
 fn request_options(
   base: string, method: string, path: string, payload: string,
-  auth: string, url_origin: string, content_type: string, stamp: string, key: string,
+  auth: string, url_origin: Option<config.Source>, content_type: string, stamp: string, key: string,
 ) -> Result<string, CliError> {
   let mut req = match http.NewRequest(
     method,

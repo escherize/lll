@@ -423,7 +423,11 @@ pub fn setup_hint(ctx: pb.Client) -> string {
   // into a runnable line is the same mistake three usability rounds caught in
   // the not-logged-in refusal: it reads as discovered fact and pastes into a
   // failure against a server nobody named.
-  let url = if src.url == "default" { "<your server url>" } else { cfg.url }
+  let url = match src.url {
+    Some(config.Source.Default) => "<your server url>",
+    Some(config.Source.Flag(_)) | Some(config.Source.Env(_)) | Some(config.Source.RepoFile(_)) |
+      Some(config.Source.HomeFile(_)) | None => cfg.url,
+  }
   f"
 Not set up on a server yet: nothing here holds a login token.
   lll login --url {url} --email <your email> --password <pw>
@@ -578,8 +582,19 @@ pub fn renew_login_token(settings: config.Settings) -> config.Settings {
 /// receive the token; a near-miss skips one renewal, which is the safe way
 /// to be wrong.
 fn renews_home_login(src: config.Sources, home: string, home_url: string, url: string) -> bool {
-  if src.token != f"file:{home}" { return false }
-  if home_url == "" { return src.url == "default" }
+  let from_home = match src.token {
+    Some(config.Source.HomeFile(path)) => path == home,
+    Some(config.Source.RepoFile(_)) | Some(config.Source.Env(_)) | Some(config.Source.Flag(_)) |
+      Some(config.Source.Default) | None => false,
+  }
+  if !from_home { return false }
+  if home_url == "" {
+    return match src.url {
+      Some(config.Source.Default) => true,
+      Some(config.Source.Flag(_)) | Some(config.Source.Env(_)) | Some(config.Source.RepoFile(_)) |
+        Some(config.Source.HomeFile(_)) | None => false,
+    }
+  }
   url == home_url
 }
 
