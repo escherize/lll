@@ -29,9 +29,8 @@ own team's `bug`. Do not create labels, teams or saved configuration.
 
 ## Environment
 
-Your instance is already running. `conn.txt` in your worker directory contains
-exactly three lines: API URL, bot token, team key. Never type, paste, print or
-quote the token. The controller-provided wrapper reads the URL and token from
+Your instance is already running. Do not open `conn.txt`: it holds your credentials, and the wrapper reads it
+for you. Never type, paste, print or quote a token. The controller-provided wrapper reads the URL and token from
 it without shell eval, clears inherited LLL/XDG settings, sets HOME/config to
 your own directory and runs the pinned binary there. In this case the wrapper
 deliberately configures NO team: every command that needs one must name it.
