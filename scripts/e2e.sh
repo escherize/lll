@@ -2563,6 +2563,32 @@ env $E LLL_TOKEN="$BRYAN_TOK" LLL_ME=bryan "$LIN" issue claim "$CK2" --agent wt-
 out=$(env $E LLL_TOKEN="$BRYAN_TOK" LLL_ME=bryan "$LIN" issue close "$CK2" --agent wt-a)
 assert_contains "$out" "Released bryan (agent wt-a)'s claim; assignee unchanged." "holder close releases the claim"
 env $E "$LIN" issue view "$CK2" --json | python3 -c 'import json,sys; d=json.load(sys.stdin); assert d["state"] == "done"; assert d["claim"] is None; assert d["expand"]["assignee"]["name"] == "bryan"; assert d["comments"] == []'
+# The finish rule (fleet case 07): update --state done|cancelled by the
+# holder releases like close and keeps the assignee; --keep-claim keeps it;
+# a non-holder's move leaves the claim alone; release on a finished issue
+# names both repairs.
+CK3=$(env $E "$LIN" issue create -t "Update finishes" | sed -n 's/^Created \([A-Z]*-[0-9]*\).*/\1/p')
+env $E LLL_TOKEN="$BRYAN_TOK" LLL_ME=bryan "$LIN" issue claim "$CK3" >/dev/null
+out=$(env $E LLL_TOKEN="$BRYAN_TOK" LLL_ME=bryan "$LIN" issue update "$CK3" --state done)
+assert_contains "$out" "Updated $CK3: state=done; released your claim (assignee kept)" "update --state done releases the holder's claim"
+env $E "$LIN" issue view "$CK3" --json | python3 -c 'import json,sys; d=json.load(sys.stdin); assert d["claim"] is None; assert d["assignee_name"] == "bryan"'
+env $E LLL_TOKEN="$BRYAN_TOK" LLL_ME=bryan "$LIN" issue update "$CK3" --state todo >/dev/null
+env $E LLL_TOKEN="$BRYAN_TOK" LLL_ME=bryan "$LIN" issue claim "$CK3" >/dev/null
+out=$(env $E LLL_TOKEN="$BRYAN_TOK" LLL_ME=bryan "$LIN" issue update "$CK3" --state cancelled --keep-claim)
+assert_contains "$out" "state=cancelled; kept your claim" "--keep-claim keeps it on update"
+env $E "$LIN" issue view "$CK3" --json | python3 -c 'import json,sys; d=json.load(sys.stdin); assert d["claim"]["holder"] == "bryan"'
+out=$(env $E LLL_TOKEN="$BRYAN_TOK" LLL_ME=bryan "$LIN" issue release "$CK3")
+assert_contains "$out" "on a finished issue 'lll issue close $CK3' releases and keeps it" "release on a finished issue names close"
+env $E LLL_TOKEN="$BRYAN_TOK" LLL_ME=bryan "$LIN" issue update "$CK3" --state todo >/dev/null
+env $E LLL_TOKEN="$BRYAN_TOK" LLL_ME=bryan "$LIN" issue claim "$CK3" >/dev/null
+out=$(env $E LLL_TOKEN="$CAROL_TOK" LLL_ME=carol "$LIN" issue update "$CK3" --state done)
+assert_not_contains "$out" "released" "a non-holder's update to done releases nothing"
+env $E "$LIN" issue view "$CK3" --json | python3 -c 'import json,sys; d=json.load(sys.stdin); assert d["state"] == "done"; assert d["claim"]["holder"] == "bryan"'
+set +e
+out=$(env $E "$LIN" issue update "$CK3" --title x --keep-claim 2>&1)
+rc=$?
+set -e
+[ "$rc" -eq 2 ] || fail "--keep-claim without a finishing --state: expected exit 2, got $rc: $out"
 env $E LLL_TOKEN="$BRYAN_TOK" LLL_ME=bryan "$LIN" issue comment "$CKEY" -b 'handoff for carol' >/dev/null
 env $E LLL_TOKEN="$CAROL_TOK" LLL_ME=carol "$LIN" issue comment "$CKEY" -b 'acknowledged' >/dev/null
 env $E "$LIN" issue view "$CKEY" --json | python3 -c 'import json,sys; d=json.load(sys.stdin); assert [(c["body"],c["expand"]["author"]["name"]) for c in d["comments"]] == [("handoff for carol","bryan"),("acknowledged","carol")]'
