@@ -1740,9 +1740,14 @@ out=$(HOME="$FAKEHOME" LLL_WEB_URL=http://127.0.0.1:8100 "$LIN" board)
 [ "$out" = "http://127.0.0.1:8100" ] || fail "board URL: got '$out'"
 out=$(LLL_WEB_URL=https://lll.example.com/ "$LIN" board)
 [ "$out" = "https://lll.example.com" ] || fail "board URL trims trailing slash: got '$out'"
+# A repo file's web_url is not a board link (LLL-688): the link can carry
+# the board token, and a cloned repo could name any host.
 printf 'url = "%s"\nweb_url = "https://cfg.example.com"\n' "$URL" > "$WORK/.lll.toml"
-out=$(cd "$WORK" && HOME="$FAKEHOME" "$LLL_ABS" board)
-[ "$out" = "https://cfg.example.com" ] || fail "board URL from config web_url: got '$out'"
+out=$(cd "$WORK" && HOME="$FAKEHOME" LLL_BOARD_TOKEN=e2e-board-token "$LLL_ABS" board 2>&1) \
+  && fail "board linked to a repo file's web_url: $out"
+assert_contains "$out" "web_url = https://cfg.example.com, which 'lll board' does not use" \
+  "board names the repo file's web_url it will not link to"
+assert_not_contains "$out" "e2e-board-token" "board never prints the board token for a repo file's host"
 
 # --- -w opens via the first opener on PATH (stubbed; no real browser) ---
 mkdir -p "$DATA_DIR/bin"
