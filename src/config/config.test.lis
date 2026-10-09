@@ -272,6 +272,28 @@ fn a_repo_file_repeating_the_home_value_is_still_its_source() {
   let assert Some(Source.HomeFile(_)) = src.team
 }
 
+// LLL-687 review: `key = ""` names nothing. Uncommenting the template's
+// `# token = ""` must not make the repo file a token's source, or `config
+// list` warns about a committed token that does not exist.
+#[test]
+fn an_empty_value_does_not_make_a_file_the_source() {
+  let assert Ok((root, home)) = fixture("sort = \"\"\ntoken = \"\"\n", "")
+  let assert Ok((cfg, src)) = traced_from(root, home)
+  assert cfg.sort == ""
+  assert cfg.token == ""
+  assert src.sort == None
+  assert src.token == None
+}
+
+// The decoder takes `URL` for url, so the source must too.
+#[test]
+fn a_key_spelled_in_another_case_still_names_its_file() {
+  let assert Ok((root, home)) = fixture("URL = \"http://same:1\"\n", "url = \"http://same:1\"\n")
+  let assert Ok((cfg, src)) = traced_from(root, home)
+  assert cfg.url == "http://same:1"
+  let assert Some(Source.RepoFile(_)) = src.url
+}
+
 // ------------------------------------------------------------- web_url
 
 #[test]

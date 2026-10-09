@@ -304,16 +304,12 @@ fn layered(env: Env) -> Result<(Config, Sources), string> {
     let was = cfg
     let (next, named) = read_layer(path, cfg)?
     cfg = next
-    // A file is the source of every key it names, even one whose value
-    // matches the layer below: it is the one that wins, so it is the one to
-    // edit (LLL-687). A changed value counts too, for a key spelled in
-    // another case, which the decoder accepts and the key list does not.
     let from = Some(file)
-    if named.contains("url") || cfg.url != was.url { src.url = from }
-    if named.contains("team") || cfg.team != was.team { src.team = from }
-    if named.contains("sort") || cfg.sort != was.sort { src.sort = from }
-    if named.contains("web_url") || cfg.web_url != was.web_url { src.web_url = from }
-    if named.contains("token") || cfg.token != was.token { src.token = from }
+    if sets(named, "url", cfg.url, was.url) { src.url = from }
+    if sets(named, "team", cfg.team, was.team) { src.team = from }
+    if sets(named, "sort", cfg.sort, was.sort) { src.sort = from }
+    if sets(named, "web_url", cfg.web_url, was.web_url) { src.web_url = from }
+    if sets(named, "token", cfg.token, was.token) { src.token = from }
   }
 
   if env.url != "" {
@@ -341,6 +337,17 @@ fn layered(env: Env) -> Result<(Config, Sources), string> {
     src.url = Some(Source.Default)
   }
   Ok((cfg, src))
+}
+
+/// Whether a file that names the keys `named` is the source of `key`, now
+/// `value` and `was` before it. A file is the source of every key it names
+/// with a value, even one that matches the layer below: it is the one that
+/// wins, so it is the one to edit (LLL-687). `key = ""` names nothing: the
+/// commented template line `# token = ""` uncommented must leave the key
+/// unset, as it was before the file named keys. A changed value counts
+/// too, so a file that clears a lower layer's value still owns the result.
+fn sets(named: Slice<string>, key: string, value: string, was: string) -> bool {
+  (named.contains(key) && value != "") || value != was
 }
 
 /// Flags over the environment and files. A failed load stays failed.
@@ -525,7 +532,7 @@ fn read_config(path: string, initial: Config) -> Result<Config, string> {
   Ok(cfg)
 }
 
-/// The file at `path` over `initial`, and which of Config's keys it names.
+/// The file at `path` over `initial`, and the keys it names, lowercased.
 fn read_layer(path: string, initial: Config) -> Result<(Config, Slice<string>), string> {
   let data = match os.ReadFile(path) {
     Ok(data) => data,
@@ -537,6 +544,8 @@ fn read_layer(path: string, initial: Config) -> Result<(Config, Slice<string>), 
     Ok(meta) => meta,
     Err(e) => return Err(f"parsing {path}: {e}\nfix the TOML syntax in {path}, or remove it and rerun 'lll config init'"),
   }
-  let named = ["url", "team", "sort", "web_url", "token"].filter(|key| meta.IsDefined(key))
+  // Lowercased because the decoder matches keys without regard to case,
+  // so `URL = ...` sets url.
+  let named = meta.Keys().map(|key| strings.ToLower(key.String()))
   Ok((cfg, named))
 }

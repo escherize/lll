@@ -416,6 +416,22 @@ if out=$(cd "$WORK" && HOME="$SET_HOME" "$LLL_ABS" config get token 2>&1); then
   fail "config get token must refuse to print the secret"
 fi
 assert_contains "$out" "the token is a secret" "config get refuses the token"
+# LLL-687 review: `key = ""` (the template's `# token = ""`, uncommented)
+# names nothing. The key stays unset: no source, no committed-token warning,
+# and 'config get' still exits 1.
+printf 'team = "ENG"\nsort = ""\ntoken = ""\n' > "$WORK/.lll.toml"
+out=$(cd "$WORK" && env -u LLL_URL -u LLL_TEAM -u LLL_SORT -u LLL_TOKEN -u LLL_WEB_URL \
+  HOME="$SET_HOME" "$LLL_ABS" config list)
+assert_contains "$out" "unset	sort=" "an empty sort in the repo file leaves sort unset"
+assert_contains "$out" "unset	token=" "an empty token in the repo file leaves the token unset"
+assert_not_contains "$out" "warning: the token" "an empty token is not a committed token"
+set +e
+out=$(cd "$WORK" && env -u LLL_SORT HOME="$SET_HOME" "$LLL_ABS" config get sort 2>&1)
+code=$?
+set -e
+[ "$code" = 1 ] || fail "config get of an empty sort exited $code, want 1"
+assert_contains "$out" "sort is not set" "config get calls an empty sort unset"
+printf 'team = "ENG"\n' > "$WORK/.lll.toml"
 
 # --- layering: repo team and home endpoint combine; legacy me is ignored ---
 # First-wins made a committed repo file impossible; this is what replaced it.
