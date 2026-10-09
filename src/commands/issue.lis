@@ -1,17 +1,17 @@
-import "records"
-import "display"
-import "claims"
 import "go:io"
 import "go:os"
 import "go:strconv"
 import "go:strings"
 
+import "claims"
 import "config"
+import "display"
 import "flags"
 import "gitctx"
+import "models"
 import "pb"
 import "query"
-import "models"
+import "records"
 
 /// A flag value of `-` means "read it from stdin", the convention `gh gist` and
 /// mb-shares' `share -f` use. Reading from a terminal would hang until Ctrl-D,
@@ -22,9 +22,9 @@ fn value_or_stdin(val: string, flag: string) -> Result<string, pb.CliError> {
 
   if let Ok(info) = os.Stdin.Stat() {
     if info.Mode() & os.ModeCharDevice != 0 {
-      return Err(
-        pb.failed(f"{flag} - reads the body from stdin, but nothing is piped in (try: echo \"text\" | lll issue ... {flag} -)"),
-      )
+      return Err(pb.failed(
+        f"{flag} - reads the body from stdin, but nothing is piped in (try: echo \"text\" | lll issue ... {flag} -)",
+      ))
     }
   }
 
@@ -33,7 +33,9 @@ fn value_or_stdin(val: string, flag: string) -> Result<string, pb.CliError> {
   }
   // Stdin is the author's input, including any final newline or indentation.
   let text = data as string
-  if strings.TrimSpace(text) == "" { return Err(pb.failed(f"{flag} -: nothing on stdin")) }
+  if strings.TrimSpace(text) == "" {
+    return Err(pb.failed(f"{flag} -: nothing on stdin"))
+  }
   Ok(text)
 }
 
@@ -41,12 +43,14 @@ fn value_or_stdin(val: string, flag: string) -> Result<string, pb.CliError> {
 fn check_priority(val: string) -> Result<models.Priority, pb.CliError> {
   if let Some(p) = models.Priority.named(strings.ToLower(val)) { return Ok(p) }
   let Ok(n) = strconv.Atoi(val) else {
-    return Err(flags.usage_error(f"unknown priority '{val}' (use none, urgent, high, medium, low, or 0-4)"))
+    return Err(flags.usage_error(
+      f"unknown priority '{val}' (use none, urgent, high, medium, low, or 0-4)",
+    ))
   }
   let Some(p) = models.Priority.from_wire(n) else {
-    return Err(
-      flags.usage_error(f"--priority must be 0-4 (0 none, 1 urgent, 2 high, 3 medium, 4 low), got {n}"),
-    )
+    return Err(flags.usage_error(
+      f"--priority must be 0-4 (0 none, 1 urgent, 2 high, 3 medium, 4 low), got {n}",
+    ))
   }
   Ok(p)
 }
@@ -89,34 +93,36 @@ fn issue_create_spec() -> Slice<flags.Flag> {
       help: "0 none, 1 urgent (!!!), 2 high (!!), 3 medium (!), 4 low (·)",
       ..,
     },
-  ].append(filter_spec(FilterUse.Create)...).append([
-    flags.Flag {
-      name: "--idempotency-key",
-      value: true,
-      hint: "key",
-      help: "retry the same creation with a stable key: reuse the issue, or refuse a changed payload\nscoped per team; requires a server supporting keyed creation",
-      ..,
-    },
-    flags.Flag {
-      name: "--agent",
-      value: true,
-      hint: "NAME",
-      help: "self-asserted session label, recorded as the issue's origin tool\n(default: LLL_AGENT)",
-      ..,
-    },
-    flags.Flag {
-      name: "--json",
-      help: "the created issue as JSON: the record with key and claim\n(docs/cli-contract.md)",
-      ..,
-    },
-    flags.Flag {
-      name: "--help",
-      alias: "-h",
-      hidden: true,
-      help: "show this help",
-      ..,
-    },
-  ]...))
+  ]
+    .append(filter_spec(FilterUse.Create)...)
+    .append([
+      flags.Flag {
+        name: "--idempotency-key",
+        value: true,
+        hint: "key",
+        help: "retry the same creation with a stable key: reuse the issue, or refuse a changed payload\nscoped per team; requires a server supporting keyed creation",
+        ..,
+      },
+      flags.Flag {
+        name: "--agent",
+        value: true,
+        hint: "NAME",
+        help: "self-asserted session label, recorded as the issue's origin tool\n(default: LLL_AGENT)",
+        ..,
+      },
+      flags.Flag {
+        name: "--json",
+        help: "the created issue as JSON: the record with key and claim\n(docs/cli-contract.md)",
+        ..,
+      },
+      flags.Flag {
+        name: "--help",
+        alias: "-h",
+        hidden: true,
+        help: "show this help",
+        ..,
+      },
+    ]...))
 }
 
 fn issue_list_spec() -> Slice<flags.Flag> {
@@ -163,8 +169,16 @@ fn issue_list_spec() -> Slice<flags.Flag> {
       help: "the list envelope {items, page, perPage, totalItems, totalPages};\neach item the issue record with key and claim (docs/cli-contract.md)",
       ..,
     },
-    flags.Flag { name: "--ready", help: "only open issues whose blockers are all done: what an agent can pick up now", .. },
-    flags.Flag { name: "--blocked", help: "only issues with an open blocker", .. },
+    flags.Flag {
+      name: "--ready",
+      help: "only open issues whose blockers are all done: what an agent can pick up now",
+      ..,
+    },
+    flags.Flag {
+      name: "--blocked",
+      help: "only issues with an open blocker",
+      ..,
+    },
   ]...))
 }
 
@@ -259,46 +273,99 @@ fn issue_update_spec() -> Slice<flags.Flag> {
       help: "remove a label and keep the others; repeatable (not with --label)",
       ..,
     },
-    flags.Flag { name: "--keep-claim", help: "with --state done|cancelled: keep your claim (moving your claimed issue there releases it by default)", .. },
-    flags.Flag { name: "--force", help: "with --assignee none: clear a claim another member, or another agent label on your token, holds; leaves a comment on the issue", .. },
+    flags.Flag {
+      name: "--keep-claim",
+      help: "with --state done|cancelled: keep your claim (moving your claimed issue there releases it by default)",
+      ..,
+    },
+    flags.Flag {
+      name: "--force",
+      help: "with --assignee none: clear a claim another member, or another agent label on your token, holds; leaves a comment on the issue",
+      ..,
+    },
     reason_flag("update"),
     agent_flag(),
-    flags.Flag { name: "--json", help: "print the issue afterwards as JSON: the object 'lll issue list --json' prints per item", .. },
+    flags.Flag {
+      name: "--json",
+      help: "print the issue afterwards as JSON: the object 'lll issue list --json' prints per item",
+      ..,
+    },
     // Hidden: declared only so update can refuse it with the verb that
     // claims (1.0 fleet: claiming by update was guessed three times).
-    flags.Flag { name: "--claim", hidden: true, help: "refused: 'lll issue claim KEY' claims", .. },
+    flags.Flag {
+      name: "--claim",
+      hidden: true,
+      help: "refused: 'lll issue claim KEY' claims",
+      ..,
+    },
   ]...))
 }
 
 fn issue_delete_spec() -> Slice<flags.Flag> {
   flags.with_team([
     flags.Flag { name: "--yes", help: "skip the delete confirmation", .. },
-    flags.Flag { name: "--force", help: "delete a claimed issue: release the claim first (another member's, or another\nagent label's, is a forced release)", .. },
+    flags.Flag {
+      name: "--force",
+      help: "delete a claimed issue: release the claim first (another member's, or another\nagent label's, is a forced release)",
+      ..,
+    },
     agent_flag(),
   ])
 }
 
 fn issue_close_spec() -> Slice<flags.Flag> {
   flags.with_team([
-    flags.Flag { name: "--keep-claim", help: "keep your claim on the closed issue (close releases it by default)", .. },
-    flags.Flag { name: "--force", help: "close an issue another member, or another agent label on your token, holds:\nreleases that claim and leaves a comment on the issue", .. },
+    flags.Flag {
+      name: "--keep-claim",
+      help: "keep your claim on the closed issue (close releases it by default)",
+      ..,
+    },
+    flags.Flag {
+      name: "--force",
+      help: "close an issue another member, or another agent label on your token, holds:\nreleases that claim and leaves a comment on the issue",
+      ..,
+    },
     reason_flag("close"),
     agent_flag(),
-    flags.Flag { name: "--json", help: "print the issue afterwards as JSON: the object 'lll issue list --json' prints per item", .. },
+    flags.Flag {
+      name: "--json",
+      help: "print the issue afterwards as JSON: the object 'lll issue list --json' prints per item",
+      ..,
+    },
   ])
 }
 
 fn issue_claim_spec() -> Slice<flags.Flag> {
   flags.with_team([
-    flags.Flag { name: "--renew", help: "restart the expiry clock on a claim you hold (a hold unrenewed for 24h is released)", .. },
-    flags.Flag { name: "--json", help: "print the issue afterwards as JSON: the object 'lll issue list --json' prints per item", .. },
+    flags.Flag {
+      name: "--renew",
+      help: "restart the expiry clock on a claim you hold (a hold unrenewed for 24h is released)",
+      ..,
+    },
+    flags.Flag {
+      name: "--json",
+      help: "print the issue afterwards as JSON: the object 'lll issue list --json' prints per item",
+      ..,
+    },
     agent_flag(),
   ])
 }
 
+/// Three 1.0 fleet agents (case 16) went looking for how to give a claim back.
+fn issue_claim_page() -> string {
+  let spec = issue_claim_spec()
+  f"usage: {flags.usage("lll issue claim", spec, "[KEY-123]")}{flags.section(spec)}
+
+Give it back without closing: lll issue release KEY. Close releases it too."
+}
+
 fn issue_release_spec() -> Slice<flags.Flag> {
   flags.with_team([
-    flags.Flag { name: "--force", help: "release a claim another member, or another agent label on your token, holds; leaves a comment on the issue", .. },
+    flags.Flag {
+      name: "--force",
+      help: "release a claim another member, or another agent label on your token, holds; leaves a comment on the issue",
+      ..,
+    },
     reason_flag("release"),
     agent_flag(),
     json_after_flag("the issue"),
@@ -338,9 +405,17 @@ fn agent_flag() -> flags.Flag {
 
 /// The --reason text, read from stdin for '-'. Only a forced action records
 /// one, so it is refused without --force rather than silently dropped.
-fn forced_reason(p: flags.Parsed, force: bool, what: string) -> Result<string, pb.CliError> {
+fn forced_reason(
+  p: flags.Parsed,
+  force: bool,
+  what: string,
+) -> Result<string, pb.CliError> {
   if !p.given("--reason") { return Ok("") }
-  if !force { return Err(flags.usage_error(f"--reason is the reason for {what}; add --force")) }
+  if !force {
+    return Err(flags.usage_error(
+      f"--reason is the reason for {what}; add --force",
+    ))
+  }
   value_or_stdin(p.one("--reason"), "--reason")
 }
 
@@ -354,8 +429,16 @@ fn issue_comment_spec() -> Slice<flags.Flag> {
       help: "comment body ('-b -' reads it from stdin)",
       ..,
     },
-    flags.Flag { name: "--force", help: "with edit/delete and a superuser token: change a comment that is not yours", .. },
-    flags.Flag { name: "--json", help: "print the comments as a JSON list, or with a body the new comment's record", .. },
+    flags.Flag {
+      name: "--force",
+      help: "with edit/delete and a superuser token: change a comment that is not yours",
+      ..,
+    },
+    flags.Flag {
+      name: "--json",
+      help: "print the comments as a JSON list, or with a body the new comment's record",
+      ..,
+    },
     flags.Flag {
       name: "--agent",
       value: true,
@@ -399,9 +482,18 @@ pub fn issue(ctx: pb.Client, args: Slice<string>) -> Result<(), pb.CliError> {
   if let Some(hint) = issue_synonym(args.get(2).unwrap_or("")) {
     return Err(flags.usage_error(hint))
   }
-  if args.get(2) == Some("comment") && ["edit", "delete"].contains(args.get(3).unwrap_or("")) {
+  if args.get(2) == Some("comment") && ["edit", "delete"].contains(args
+    .get(3)
+    .unwrap_or("")) {
     let subargs = args[..2].append(args[3..]...)
-    return flags.dispatch(ctx, "issue comment", "change a comment", "", comment_commands(), subargs)
+    return flags.dispatch(
+      ctx,
+      "issue comment",
+      "change a comment",
+      "",
+      comment_commands(),
+      subargs,
+    )
   }
   if args.get(2) == Some("comment") {
     if let Some(hint) = comment_verb_hint(args.get(3).unwrap_or("")) {
@@ -434,7 +526,9 @@ fn issue_synonym(verb: string) -> Option<string> {
   // An update field typed as a verb (1.0 fleet, case 18). 'title' is a verb
   // of its own, so it never reaches here.
   if ["priority", "state", "assignee", "label", "project"].contains(verb) {
-    return Some(f"unknown issue command '{verb}'; to change it use 'lll issue update KEY --{verb} <name>'")
+    return Some(
+      f"unknown issue command '{verb}'; to change it use 'lll issue update KEY --{verb} <name>'",
+    )
   }
   let hint = match verb {
     "assign" => "take it for yourself with 'lll issue claim KEY-123'; assign someone else with 'lll issue update KEY-123 --assignee NAME'",
@@ -461,35 +555,45 @@ fn issue_synonym(verb: string) -> Option<string> {
 pub fn issue_commands() -> Slice<flags.Command> {
   [
     flags.Command {
-      name: "attach", summary: "upload a file to an issue; appends without replacing existing attachments",
-      spec: flags.with_team([json_after_flag("the issue")]), positional: "KEY-123 FILE", run: issue_attach,
-      ..
+      name: "attach",
+      summary: "upload a file to an issue; appends without replacing existing attachments",
+      spec: flags.with_team([json_after_flag("the issue")]),
+      positional: "KEY-123 FILE",
+      run: issue_attach,
+      ..,
     },
     flags.Command {
-      name: "detach", summary: "remove an attachment by its stored filename (see issue view)",
-      spec: flags.with_team([json_after_flag("the issue")]), positional: "KEY-123 FILENAME", run: issue_detach,
-      ..
+      name: "detach",
+      summary: "remove an attachment by its stored filename (see issue view)",
+      spec: flags.with_team([json_after_flag("the issue")]),
+      positional: "KEY-123 FILENAME",
+      run: issue_detach,
+      ..,
     },
     flags.Command {
-      name: "download", summary: "write attachment bytes to stdout; redirect to a file",
-      spec: flags.with_team([]), positional: "KEY-123 FILENAME", run: issue_download,
-      ..
+      name: "download",
+      summary: "write attachment bytes to stdout; redirect to a file",
+      spec: flags.with_team([]),
+      positional: "KEY-123 FILENAME",
+      run: issue_download,
+      ..,
     },
     flags.Command {
-      name: "create", alias: "new",
+      name: "create",
+      alias: "new",
       summary: "create an issue in the configured team; -b - reads the description from stdin; without --state it starts in todo",
       page: issue_create_page(),
       spec: issue_create_spec(),
       positional: "[\"title\"]",
       run: create,
-      ..
+      ..,
     },
     flags.Command {
       name: "list",
       summary: "list issues; scoped to the configured team",
       spec: issue_list_spec(),
       run: list,
-      ..
+      ..,
     },
     flags.Command {
       name: "next",
@@ -497,15 +601,17 @@ pub fn issue_commands() -> Slice<flags.Command> {
       spec: issue_next_spec(),
       page: issue_next_page(),
       run: issue_next,
-      ..
+      ..,
     },
     flags.Command {
-      name: "view", alias: "show", hidden_alias: "read",
+      name: "view",
+      alias: "show",
+      hidden_alias: "read",
       summary: "show one issue in full, with comments; --raw prints it as plain markdown; -w opens its web page instead",
       spec: issue_view_spec(),
       positional: "[KEY-123]",
       run: view,
-      ..
+      ..,
     },
     flags.Command {
       name: "update",
@@ -514,7 +620,7 @@ pub fn issue_commands() -> Slice<flags.Command> {
       spec: issue_update_spec(),
       positional: "[KEY-123]",
       run: update,
-      ..
+      ..,
     },
     flags.Command {
       name: "close",
@@ -522,7 +628,7 @@ pub fn issue_commands() -> Slice<flags.Command> {
       spec: issue_close_spec(),
       positional: "[KEY-123]",
       run: close_issue,
-      ..
+      ..,
     },
     flags.Command {
       name: "start",
@@ -530,15 +636,16 @@ pub fn issue_commands() -> Slice<flags.Command> {
       spec: issue_start_spec(),
       positional: "[KEY-123]",
       run: start,
-      ..
+      ..,
     },
     flags.Command {
       name: "claim",
-      summary: "take it exclusively for the authenticated member and assign it; exits non-zero, changing nothing, when someone already holds it; --renew restarts your hold's 24h expiry",
+      summary: "take it exclusively for the authenticated member and assign it; exits non-zero, changing nothing, when someone already holds it; --renew restarts your hold's 24h expiry; 'lll issue release KEY' gives it back without closing",
       spec: issue_claim_spec(),
+      page: issue_claim_page(),
       positional: "[KEY-123]",
       run: claim,
-      ..
+      ..,
     },
     flags.Command {
       name: "release",
@@ -546,7 +653,7 @@ pub fn issue_commands() -> Slice<flags.Command> {
       spec: issue_release_spec(),
       positional: "[KEY-123]",
       run: release,
-      ..
+      ..,
     },
     flags.Command {
       name: "delete",
@@ -554,7 +661,7 @@ pub fn issue_commands() -> Slice<flags.Command> {
       spec: issue_delete_spec(),
       positional: "KEY-123",
       run: delete_issue,
-      ..
+      ..,
     },
     flags.Command {
       name: "comment",
@@ -562,7 +669,7 @@ pub fn issue_commands() -> Slice<flags.Command> {
       spec: issue_comment_spec(),
       positional: "[KEY-123] [\"body\"]",
       run: comment,
-      ..
+      ..,
     },
     flags.Command {
       name: "watch",
@@ -570,7 +677,7 @@ pub fn issue_commands() -> Slice<flags.Command> {
       spec: issue_watch_spec(),
       positional: "[KEY-123]",
       run: issue_watch,
-      ..
+      ..,
     },
     flags.Command {
       name: "url",
@@ -578,7 +685,7 @@ pub fn issue_commands() -> Slice<flags.Command> {
       spec: flags.with_team([]),
       positional: "[KEY-123]",
       run: url_cmd,
-      ..
+      ..,
     },
     flags.Command {
       name: "id",
@@ -586,7 +693,7 @@ pub fn issue_commands() -> Slice<flags.Command> {
       spec: flags.with_team([]),
       positional: "[KEY-123]",
       run: id_cmd,
-      ..
+      ..,
     },
     flags.Command {
       name: "title",
@@ -594,21 +701,31 @@ pub fn issue_commands() -> Slice<flags.Command> {
       spec: flags.with_team([]),
       positional: "[KEY-123]",
       run: title_cmd,
-      ..
+      ..,
     },
-    flags.Command { name: "branch-name", summary: "print a suggested Git branch name; read-only", spec: flags.with_team([]), positional: "[KEY-123]", run: branch_name_cmd, .. },
+    flags.Command {
+      name: "branch-name",
+      summary: "print a suggested Git branch name; read-only",
+      spec: flags.with_team([]),
+      positional: "[KEY-123]",
+      run: branch_name_cmd,
+      ..,
+    },
     flags.Command {
       name: "pr",
       summary: "open a GitHub PR via 'gh pr create' and record gh#N; body links the issue and includes its description when it fits",
       spec: flags.with_team([]),
       positional: "[KEY-123]",
       run: pr_cmd,
-      ..
+      ..,
     },
     flags.Command {
-      name: "ref", summary: "append an external reference once (gh#42, linear:ENG-118)",
-      spec: flags.with_team([json_after_flag("the issue")]), positional: "KEY-123 REF", run: ref_cmd,
-      ..
+      name: "ref",
+      summary: "append an external reference once (gh#42, linear:ENG-118)",
+      spec: flags.with_team([json_after_flag("the issue")]),
+      positional: "KEY-123 REF",
+      run: ref_cmd,
+      ..,
     },
     flags.Command {
       name: "link",
@@ -616,7 +733,7 @@ pub fn issue_commands() -> Slice<flags.Command> {
       spec: flags.with_team([json_after_flag("the doc")]),
       positional: "KEY-123 SLUG",
       run: link,
-      ..
+      ..,
     },
     flags.Command {
       name: "unlink",
@@ -624,7 +741,7 @@ pub fn issue_commands() -> Slice<flags.Command> {
       spec: flags.with_team([json_after_flag("the doc")]),
       positional: "KEY-123 SLUG",
       run: unlink,
-      ..
+      ..,
     },
     flags.Command {
       name: "block",
@@ -632,7 +749,7 @@ pub fn issue_commands() -> Slice<flags.Command> {
       spec: flags.with_team([json_after_flag("the issue")]),
       positional: "KEY-123 BLOCKER",
       run: block,
-      ..
+      ..,
     },
     flags.Command {
       name: "unblock",
@@ -640,7 +757,7 @@ pub fn issue_commands() -> Slice<flags.Command> {
       spec: flags.with_team([json_after_flag("the issue")]),
       positional: "KEY-123 BLOCKER",
       run: unblock,
-      ..
+      ..,
     },
   ]
 }
@@ -666,7 +783,7 @@ fn issue_union_spec() -> Slice<flags.Flag> {
 /// from the noun page.
 fn issue_intro() -> string {
   strings.TrimPrefix(flags.section(issue_union_spec()), "\n") +
-    "
+  "
 
 Web URLs come from LLL_WEB_URL, then 'web_url' in the repo or home config.
 Set the deployed board address with 'lll config set web_url URL';
@@ -698,11 +815,11 @@ fn issue_create_page() -> string {
 
 Usage:
   " +
-    flags.usage("lll issue create", issue_create_spec(), "[\"title\"]") +
-    "
+  flags.usage("lll issue create", issue_create_spec(), "[\"title\"]") +
+  "
 " +
-    flags.section(issue_create_spec()) +
-    "
+  flags.section(issue_create_spec()) +
+  "
 
 The title is the bare argument or -t; give either, not both.
 
@@ -740,26 +857,34 @@ fn deslug(arg: string) -> string {
   a
 }
 
-fn resolve_id(ctx: pb.Client, explicit: string, usage: string) -> Result<string, pb.CliError> {
+fn resolve_id(
+  ctx: pb.Client,
+  explicit: string,
+  usage: string,
+) -> Result<string, pb.CliError> {
   if explicit != "" { return Ok(deslug(explicit)) }
   let Some(branch) = gitctx.current_branch() else {
-    return Err(
-      flags.usage_error(f"no issue ID given and no git branch to infer one from\nusage: {usage}"),
-    )
+    return Err(flags.usage_error(
+      f"no issue ID given and no git branch to infer one from\nusage: {usage}",
+    ))
   }
   let teams = records.list_teams(ctx)?
   let mut matches: Slice<string> = []
   for team in teams.items {
-    if let Some(id) = gitctx.issue_id_for_team(branch, team.key) { matches = matches.append(id) }
+    if let Some(id) = gitctx.issue_id_for_team(branch, team.key) {
+      matches = matches.append(id)
+    }
   }
   if matches.length() > 1 {
-    return Err(pb.failed(f"branch '{branch}' is ambiguous between {strings.Join(matches, ", ")}; pass the issue ID explicitly"))
+    return Err(pb.failed(
+      f"branch '{branch}' is ambiguous between {strings.Join(matches, ", ")}; pass the issue ID explicitly",
+    ))
   }
   if matches.length() == 1 { return Ok(matches[0]) }
   let Some(id) = gitctx.issue_id_from_branch(branch) else {
-    return Err(
-      flags.usage_error(f"no issue ID given and current branch '{branch}' doesn't look like eng-123-...\nusage: {usage}"),
-    )
+    return Err(flags.usage_error(
+      f"no issue ID given and current branch '{branch}' doesn't look like eng-123-...\nusage: {usage}",
+    ))
   }
   Ok(id)
 }

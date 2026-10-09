@@ -371,16 +371,19 @@ fn issue_commands_lists_every_verb_once_with_a_one_line_summary() {
   }
 }
 
-/// create and next are the issue verbs with a page (new resolves to create's
-/// row); next's is its generated usage plus the stream contract. Every other
-/// verb generates usage + flags from its spec, so a page there would be invented.
+/// create, next and claim are the issue verbs with a page (new resolves to
+/// create's row); next's is its generated usage plus the stream contract,
+/// claim's the same plus the way to give it back. Every other verb generates
+/// usage + flags from its spec, so a page there would be invented.
 #[test]
-fn only_issue_create_and_next_have_a_page() {
+fn only_issue_create_next_and_claim_have_a_page() {
   for c in issue_commands() {
-    assert (c.page != "") == (c.name == "create" || c.name == "next")
+    assert (c.page != "") == (c.name == "create" || c.name == "next" || c.name == "claim")
   }
   let assert Some(create) = issue_commands().find(|c| c.name == "create")
   assert create.page.contains("The title is the bare argument or -t")
+  let assert Some(claim) = issue_commands().find(|c| c.name == "claim")
+  assert claim.page.contains("lll issue release KEY")
 }
 
 fn issue_help_requested(args: Slice<string>, verb: string) -> bool {

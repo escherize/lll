@@ -230,7 +230,8 @@ Explicit issue IDs still target their own team.
 Examples:
   lll issue list --team ENG --search checkout
   lll issue update ENG-1 --assignee alice --state in-review
-  lll issue claim ENG-1   take it so no other agent does; close releases it
+  lll issue claim ENG-1   take it so no other agent does; 'lll issue release
+                          ENG-1' gives it back, and close releases it too
   next=$(lll issue next)  the one issue to work next: ready, unclaimed,
                           priority, age, unblocks; add --claim to take it
 
