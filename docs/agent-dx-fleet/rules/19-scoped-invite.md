@@ -26,6 +26,15 @@ This board has team FLEET and another team your colleague must never see.
 3. As the colleague, list the teams. Confirm only FLEET appears.
 4. As yourself, confirm the colleague exists and is limited to FLEET.
 
+Exact forms, so the password is never displayed, typed or copied:
+
+- Invite once, stdout only: `./lll member invite colleague-NN --email
+  colleague-NN@example.com --team FLEET > invite-NN.txt`. Run it exactly
+  once; a second run cannot recover the password.
+- Log in by piping the password straight from that file, in a tiny script:
+  `sed -n 's/^ *temporary password: //p' invite-NN.txt | LLL_CONFIG_HOME="$PWD/colleague" ./lll login --email colleague-NN@example.com`
+- Never copy the password into a script, a command or your report.
+
 The artifact is one new member limited to FLEET whose own team list shows
 only FLEET. Create nothing else.
 
