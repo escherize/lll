@@ -96,7 +96,7 @@ pub fn login(ctx: pb.Client, args: Slice<string>) -> Result<(), pb.CliError> {
     return Ok(())
   }
 
-  let before_login = ctx.settings.config().map_err(pb.failed)?
+  let (before_login, before_sources) = ctx.settings.traced().map_err(pb.failed)?
   let saved_before_login = ctx.settings.load_home().map_err(pb.failed)?
   let board_endpoint = if p.given("--web-url") { checked_web_url(p.one("--web-url"))? } else { "" }
 
@@ -117,6 +117,7 @@ pub fn login(ctx: pb.Client, args: Slice<string>) -> Result<(), pb.CliError> {
   if let Some(why) = login_target_conflict(target, saved_before_login.url, before_login.url) {
     return Err(pb.failed(why))
   }
+  let plan = plan_login(target, before_login.url, before_sources.url)
 
   // One reader for the whole flow: a second bufio.Reader would race the
   // first's read-ahead and could lose the password line behind the email.
@@ -132,7 +133,7 @@ pub fn login(ctx: pb.Client, args: Slice<string>) -> Result<(), pb.CliError> {
     // override of the configured one for this command.
     let ctx = if target != "" { ctx.with_url(target) } else { ctx }
     let (name, read_only) = token_identity(ctx, tok)?
-    return finish_login(ctx, target, before_login, saved_before_login, board_endpoint, tok, name, read_only)
+    return finish_login(ctx, target, plan, before_login, saved_before_login, board_endpoint, tok, name, read_only)
   }
   // Nothing to prompt at: say what is missing in one go rather than one
   // refusal per flag. Scripts, CI and agents are exactly the callers with no
@@ -238,6 +239,7 @@ would put a second account on that address. --create makes YOUR login: pass
   if auth.token == "" { return Err(pb.failed("the response carried no token")) }
   finish_login(ctx,
     target,
+    plan,
     before_login,
     saved_before_login,
     board_endpoint,
@@ -293,11 +295,54 @@ to keep the home config and log in elsewhere: point LLL_CONFIG_HOME at another d
   )
 }
 
+/// Where a login talks once it holds a token, decided once before it
+/// authenticates (LLL-688).
+struct LoginPlan {
+  /// The server the login authenticates at: --url, else the configured url.
+  /// Every later request the login makes with the new token goes here.
+  server: string,
+  /// What to say when an LLL_URL or a repo file outranks the home config
+  /// and names another server, so later commands here will not reach the
+  /// one just logged in to.
+  shadowed: Option<string>,
+}
+
+/// Pure. The plan for a login to `target` ("" for none) made where the
+/// effective url is `url`, set by `source`.
+///
+/// The server is fixed here and threaded through: re-resolving the layered
+/// config after the token is saved let a repo file's url outrank the home
+/// one, and the fresh token went to the server that file named. A cloned
+/// repo could collect tokens that way.
+fn plan_login(target: string, url: string, source: Option<config.Source>) -> LoginPlan {
+  let server = if target != "" { target } else { url }
+  LoginPlan { server, shadowed: shadowed_url_notice(server, url, source) }
+}
+
+/// Pure. The notice for a login saved for `server` while `url`, set by
+/// `source`, stays the effective url, or None when later commands reach
+/// `server`. Only a layer above the home config keeps its url after a login.
+/// Shared with `lll up`, which saves its own server's login.
+fn shadowed_url_notice(server: string, url: string, source: Option<config.Source>) -> Option<string> {
+  if same_server_url(server, url) { return None }
+  let (what, fix) = match source {
+    Some(config.Source.Env(name)) => (f"{name} in this shell", f"unset {name}"),
+    Some(config.Source.RepoFile(path)) => (path, f"change or remove the url line in {path}"),
+    Some(config.Source.Flag(spelling)) => (spelling, f"drop {spelling}"),
+    Some(config.Source.HomeFile(_)) | Some(config.Source.Default) | None => return None,
+  }
+  Some(
+    f"note: {what} sets url = {url}, which outranks the home config: commands run here go to {url}, not to {server}
+to use this login here: {fix}",
+  )
+}
+
 /// Save a login that just authenticated: url, board endpoint, token, then
 /// the team when the server leaves no choice.
 fn finish_login(
   ctx: pb.Client,
   target: string,
+  plan: LoginPlan,
   before_login: config.Config,
   saved_before_login: config.Config,
   board_endpoint: string,
@@ -312,7 +357,7 @@ fn finish_login(
     let url_path = set_home_key(ctx.settings, "url", target)?
     fmt.Println(f"url = \"{target}\" in {url_path}")
   }
-  let authenticated_url = if target != "" { target } else { before_login.url }
+  let authenticated_url = plan.server
   let previous_url = if saved_before_login.url != "" { saved_before_login.url } else { before_login.url }
   if strings.TrimRight(authenticated_url, "/") != strings.TrimRight(previous_url, "/") && board_endpoint == "" {
     let _ = clear_home_key(ctx.settings, "web_url")?
@@ -323,8 +368,7 @@ fn finish_login(
     // Re-read: the url and web_url lines above may have just changed.
     let cfg = ctx.settings.reload().config().map_err(pb.failed)?
     if cfg.web_url == "" {
-      let discovery_base = if target != "" { target } else { cfg.url }
-      if let Some(endpoint) = discover_board_url(discovery_base) {
+      if let Some(endpoint) = discover_board_url(plan.server) {
         let _ = set_home_key(ctx.settings, "web_url", endpoint)?
         fmt.Println(f"board endpoint discovered: {endpoint}")
       }
@@ -338,6 +382,7 @@ fn finish_login(
       "note: LLL_TOKEN is set in this shell and overrides the saved token until it is unset",
     )
   }
+  if let Some(notice) = plan.shadowed { fmt.Println(notice) }
   // A team is what 'issue create' asks for next, and every usability run hit
   // it as a fresh dead end several commands after logging in. When the server
   // leaves no choice — exactly one team — settle it here so the machine is
@@ -347,9 +392,11 @@ fn finish_login(
   // belongs to 'lll attach'. Config layers rather than shadows (TASK-179), so
   // a home 'team' is a machine-wide default that any attached repo overrides
   // — which is what the layering documents it for.
-  // Both on the configuration as this login just saved it: the new token
-  // is the one the team lookup must send.
-  settle_team(pb.Client.new(ctx.settings.reload()), read_only)
+  // The new token, sent to the server that issued it and to no other: a
+  // url re-resolved from the files here would be the repo's when one
+  // outranks the home config (LLL-688).
+  let saved_from = Some(config.Source.HomeFile(path))
+  settle_team(ctx.with_url(plan.server).with_token(token, saved_from), read_only)
   let saved_cfg = ctx.settings.reload().config().map_err(pb.failed)?
   if saved_cfg.web_url == "" {
     fmt.Println("board endpoint: run 'lll config set web_url URL' with the board address supplied by your deployer")
