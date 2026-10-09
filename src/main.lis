@@ -303,15 +303,28 @@ fn unknown_command(noun: string, verb: string) -> string {
       let rest = if verb == "" || verb.starts_with("-") { "" } else { f" {verb}" }
       // Only a key is carried into the suggestion: 'lll comment add' must not
       // become 'lll issue comment add', which is refused too (case 20).
-      let carried = if regexp.MustCompile(r"^[A-Za-z][A-Za-z0-9_-]*-[0-9]+$").MatchString(verb) { f" {verb}" } else { " ..." }
+      let is_key = regexp.MustCompile(r"^[A-Za-z][A-Za-z0-9_-]*-[0-9]+$").MatchString(verb)
+      // The rest of the form rides along, so the suggestion can be run as is
+      // (six of ten final-replay agents typed `lll comment KEY "text"`).
+      let tail = if c.name == "comment" { " \"text\"" } else if c.name == "update" { " --state <name>" } else { "" }
+      let carried = if is_key { f" {verb}{tail}" } else { " ..." }
       return f"unknown command: '{noun}{rest}'; it is an issue verb: 'lll issue {c.name}{carried}' (see 'lll issue {c.name} -h')"
     }
   }
   // 'lll FLEET-4': a key where the noun goes (case 20).
   if regexp.MustCompile(r"^[A-Za-z][A-Za-z0-9_-]*-[0-9]+$").MatchString(noun) {
     // `lll FLEET-4 status review` wants a change, not a view (final replay, case 20).
-    if verb == "status" || verb == "state" {
-      return f"unknown command: '{noun}' is an issue ID; to change its state use 'lll issue update {noun} --state in-review' (states: backlog, todo, in-progress, in-review, done, cancelled)"
+    // The word after the key says what was meant (final replay, case 20).
+    let change = f"to change its state use 'lll issue update {noun} --state in-review' (states: backlog, todo, in-progress, in-review, done, cancelled)"
+    let note = f"to comment use 'lll issue comment {noun} \"text\"'"
+    if ["status", "state", "--status", "--state", "review", "move", "mark"].contains(verb) {
+      return f"unknown command: '{noun}' is an issue ID; {change}"
+    }
+    if ["comment", "note", "-m", "reply"].contains(verb) {
+      return f"unknown command: '{noun}' is an issue ID; {note}"
+    }
+    if verb != "" {
+      return f"unknown command: '{noun}' is an issue ID; put the verb first: 'lll issue view {noun}', {change}, or {note}"
     }
     return f"unknown command: '{noun}' is an issue ID; to see it use 'lll issue view {noun}'"
   }

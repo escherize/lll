@@ -55,3 +55,15 @@ fn a_key_then_status_names_update() {
   assert unknown_command("FLEET-4", "status").contains("lll issue update FLEET-4 --state in-review")
   assert unknown_command("FLEET-4", "").contains("lll issue view FLEET-4")
 }
+
+/// Final 1.0 replay, case 20 rerun: the word after a key, and the form of a
+/// redirected verb.
+#[test]
+fn a_key_first_command_names_the_meant_verb() {
+  assert unknown_command("FLEET-4", "review").contains("lll issue update FLEET-4 --state in-review")
+  assert unknown_command("FLEET-4", "comment").contains("lll issue comment FLEET-4 \"text\"")
+  assert unknown_command("FLEET-4", "frob").contains("put the verb first")
+  assert unknown_command("comment", "FLEET-4").contains("'lll issue comment FLEET-4 \"text\"'")
+  assert unknown_command("update", "FLEET-4").contains("'lll issue update FLEET-4 --state <name>'")
+  assert unknown_command("mark", "FLEET-4").contains("--state in-review")
+}
