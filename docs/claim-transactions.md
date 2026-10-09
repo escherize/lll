@@ -55,6 +55,17 @@ token, leaves the claim alone, as before: a PATCH carries no force and writes
 no comment. The CLI spells it `lll issue update KEY --state done
 [--keep-claim]`.
 
+Both rules are one table (LLL-685): the from-state, the caller's hold (none,
+its own, another session's, another member's) and the ask (a close, or a
+move to a state, with `keep_claim` and, for a close, `force`) give the
+claim's fate: untouched, released, kept, force-released or left with its
+holder, or a refusal (`needs_force`, `claim_held`). The client copy is
+`models.transition` in `src/models/transition.lis`; the CLI and the board
+plan every state change through it, and the write layer accepts only its
+result. The server copy is `TransitionClaim` in `gopb/transition.go`, read by
+`/close` and by the finish rule. `src/models/transition.test.lis` runs every
+row through both and fails when they disagree.
+
 A claimed issue cannot be deleted (LLL-662). The issues DELETE request is
 refused while a claim exists, for every caller, because the claim relation
 cascades and the hold would vanish with no record. `lll issue delete KEY
