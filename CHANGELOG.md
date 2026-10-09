@@ -159,6 +159,9 @@ minors. Issue keys are on the project's own board (`lll issue view KEY`).
   name with a comma; `lll api METHOD` without a PATH (it printed help and
   exited 0).
 - `lll skill get NAME` for an unknown skill exits 3 (not found). It exited 1.
+- An expired or rejected token from a repo `.lll.toml` says to remove that
+  file's token line. It said to run `lll login`, which saves to the home
+  config the repo file outranks (LLL-687).
 
 ## [1.0.0] - 2026-10-08
 

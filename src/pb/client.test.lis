@@ -414,7 +414,8 @@ fn the_token_fix_follows_what_outranks_a_login() {
   let rows: Slice<(Option<config.Source>, string)> = [
     (Some(config.Source.Flag("--token")), login),
     (Some(config.Source.Env("LLL_TOKEN")), "LLL_TOKEN outranks the saved token: set it to a valid one ('lll token create <member>' mints an agent's), or unset it to use the saved one ('lll login' saves a new one). Then 'lll config check' to verify"),
-    (Some(config.Source.RepoFile("/r/.lll.toml")), login),
+    // A login lands in the home file, which the repo file outranks.
+    (Some(config.Source.RepoFile("/r/.lll.toml")), "/r/.lll.toml outranks the saved token, and is committed: remove its token line ('lll login' saves a new one to the home config). Then 'lll config check' to verify"),
     (Some(config.Source.HomeFile("/h/lll/lll.toml")), login),
     (Some(config.Source.Default), login),
     (None, login),
