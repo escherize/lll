@@ -3272,6 +3272,25 @@ out=$(env -u LLL_TOKEN HOME="$E2E_HOME" LLL_URL=$URL LLL_ADMIN_EMAIL=admin@local
   "$LIN" bot create bot-lostwrite --env --duration 3600 2>&1 1</dev/null) && fail "bot create --env exited 0 with stdout unwritable"
 assert_contains "$out" "Error: writing output:" "bot create --env names the failed write"
 assert_contains "$out" "lll bot rotate bot-lostwrite" "and how to get the lost token back"
+# A broken stderr loses only notices: the data still reaches stdout and the
+# command succeeds. 'issue next --claim' holds the claim, so it must print
+# the key it holds.
+NEXT=$(LLL_URL=$URL LLL_TEAM=ENG LLL_TOKEN="$BRYAN_TOK" "$LIN" issue next --claim 2</dev/null) \
+  || fail "issue next --claim exited non-zero with stderr unwritable"
+printf '%s' "$NEXT" | grep -Eq '^ENG-[0-9]+$' || fail "issue next --claim printed no key with stderr unwritable: $NEXT"
+LLL_URL=$URL LLL_TEAM=ENG LLL_TOKEN="$BRYAN_TOK" "$LIN" issue release "$NEXT" > /dev/null 2>&1
+out=$(LLL_URL=$URL LLL_TOKEN="$BRYAN_TOK" "$LIN" api GET /api/health 2</dev/null) \
+  || fail "api GET exited non-zero with stderr unwritable"
+assert_contains "$out" '"code":200' "api GET prints the body with stderr unwritable"
+# A command that failed keeps its own message and exit code when stdout is
+# unwritable too: api --fail on a 404 exits 3 (not found), not 1.
+set +e
+out=$(LLL_URL=$URL LLL_TOKEN="$BRYAN_TOK" "$LIN" api GET /api/collections/nope/records --fail 2>&1 1</dev/null)
+rc=$?
+set -e
+[ "$rc" = 3 ] || fail "api --fail 404 with stdout unwritable: expected exit 3, got $rc: $out"
+assert_contains "$out" "Error: writing output:" "the write failure is named"
+assert_contains "$out" "Missing collection context" "and so is the original error"
 
 # Explicit authority and endpoint flags use the same gate without persisting
 # credentials or replacing the caller's configured server.

@@ -53,9 +53,11 @@ fn main() {
 /// gave them, then the version-skew line, then any error with its exit code.
 /// A failed command's output is what it had said before failing.
 ///
-/// A write that fails (a full disk, a closed pipe) is an error of its own,
-/// exit 1: a truncated download or a --json document cut short must not
-/// read as success.
+/// Data that fails to write (a full disk, stdout closed) is an error of its
+/// own, exit 1: a truncated download or a --json document cut short must not
+/// read as success. A command that had already failed keeps its own message
+/// and exit code. Notices are best effort: a broken stderr must not cost a
+/// script the data on stdout (the key 'issue next --claim' just claimed).
 fn render(before: output.Output, result: Result<output.Output, pb.CliError>, skew: Option<string>) {
   let out = match result {
     Ok(out) => out,
@@ -65,13 +67,13 @@ fn render(before: output.Output, result: Result<output.Output, pb.CliError>, ske
     Ok(_) => write(out),
     Err(e) => Err(e),
   }
+  let unwritten = wrote.is_err()
   if let Err(e) = wrote {
     let lost = if out.lost == "" { "" } else { f"\n{out.lost}" }
     let _ = fmt.Fprintln(os.Stderr, f"Error: writing output: {e}{lost}")
-    os.Exit(pb.exit_code(pb.ErrorKind.Failed))
   }
   if let Some(line) = skew {
-    fmt.Fprintln(os.Stderr, line)
+    let _ = fmt.Fprintln(os.Stderr, line)
   }
 
   if let Err(err) = result {
@@ -79,7 +81,11 @@ fn render(before: output.Output, result: Result<output.Output, pb.CliError>, ske
     // it can act (flags.parse, TASK-237). It is not a failure: print it bare
     // and exit 0, or `lll issue list -h` in a script reads as a broken command.
     if let pb.ErrorKind.Help = err.kind {
-      fmt.Println(err.message)
+      if let Err(e) = fmt.Println(err.message) {
+        let _ = fmt.Fprintln(os.Stderr, f"Error: writing output: {e}")
+        os.Exit(pb.exit_code(pb.ErrorKind.Failed))
+      }
+      if unwritten { os.Exit(pb.exit_code(pb.ErrorKind.Failed)) }
       return
     }
     // Every failing exit is decided here, by the error's kind (LLL-645,
@@ -87,16 +93,19 @@ fn render(before: output.Output, result: Result<output.Output, pb.CliError>, ske
     // Exit 5 is an outcome, not a failure (fleet case 13): "Error:" belongs
     // only to real errors.
     let prefix = if let pb.ErrorKind.NothingToDo = err.kind { "Nothing to do" } else { "Error" }
-    fmt.Fprintln(os.Stderr, f"{prefix}: {err.message}")
+    let _ = fmt.Fprintln(os.Stderr, f"{prefix}: {err.message}")
     os.Exit(pb.exit_code(err.kind))
   }
+  if unwritten { os.Exit(pb.exit_code(pb.ErrorKind.Failed)) }
 }
 
+/// Write `out`'s parts in order. Only a data write can fail it; a notice
+/// that cannot be written is dropped and the data still goes out.
 fn write(out: output.Output) -> Result<(), error> {
   for part in out.written() {
     match part {
       output.Part.Data(s) => { fmt.Print(s)?; },
-      output.Part.Notice(s) => { fmt.Fprintln(os.Stderr, s)?; },
+      output.Part.Notice(s) => { let _ = fmt.Fprintln(os.Stderr, s); },
     }
   }
   Ok(())
