@@ -1,9 +1,7 @@
 import "records"
 import "claims"
 import "go:encoding/json"
-import "go:fmt"
 import "go:net/url"
-import "go:os"
 import "go:regexp"
 import "go:strconv"
 import "go:strings"
@@ -28,7 +26,7 @@ fn empty_search_hint(search: string) -> string {
   f"no issues with '{search}' in the title; --search matches titles only: 'lll search {search}' also looks in descriptions, comments and docs"
 }
 
-fn list(input: flags.CommandInput) -> Result<(), pb.CliError> {
+fn list(input: flags.CommandInput) -> Result<output.Output, pb.CliError> {
   let ctx = input.ctx
   let p = input.parsed
   let filters = filters_from(p)?
@@ -126,7 +124,7 @@ fn list(input: flags.CommandInput) -> Result<(), pb.CliError> {
     for i in items {
       out = out.append(issue_json(raw_records.get(i.id).unwrap_or("null".bytes() as json.RawMessage), held.get(i.id))?)
     }
-    return print_list_json(out, at, "issues")
+    return list_json(out, at, "issues")
   }
   // LLL-484 (fleet case 01): --search matches TITLES, and seven of ten fresh
   // workers read the bare "no issues" as "the term is nowhere on the board"
@@ -135,10 +133,9 @@ fn list(input: flags.CommandInput) -> Result<(), pb.CliError> {
   // plain empty message, so stdout stays empty for pipes and --json is
   // untouched.
   if items.is_empty() && filters.search != "" {
-    let _ = fmt.Fprintln(os.Stderr, empty_search_hint(filters.search))
-    return Ok(())
+    return Ok(output.notice(empty_search_hint(filters.search)))
   }
-  print_issue_table(items, held)
+  Ok(issue_table(items, held))
 }
 
 /// How `issue list` reads: one server page, or every page when the order or
@@ -281,35 +278,6 @@ fn issue_table(issues: Slice<models.Issue>, held: Map<models.IssueId, models.Cla
   output.text(display.table(rows))
 }
 
-/// The standard issue table (ID, state, priority, title, assignee, age),
-/// shared by `issue list` and `project view`. `held` is the claims by issue
-/// id: a claimed issue names its holder, agent label and claim age where the
-/// assignee goes (LLL-651).
-fn print_issue_table(issues: Slice<models.Issue>, held: Map<models.IssueId, models.Claim>) -> Result<(), pb.CliError> {
-  // An empty board printed zero bytes, which a newcomer cannot tell apart
-  // from a silently broken read — the exact doubt the not-logged-in refusal
-  // warns about, landing one command later. Says so on STDERR: stdout stays
-  // empty so pipes and `| wc -l` are unchanged, and --json returns before
-  // ever reaching here.
-  if issues.is_empty() {
-    let _ = fmt.Fprintln(os.Stderr, "no issues")
-    return Ok(())
-  }
-  let mut rows: Slice<Slice<string>> = []
-  for item in issues {
-    let key = item.expand.team.key
-    let assignee = match held.get(item.id) {
-      Some(c) => f"{display.byline(display.member_name(c.member, c.expand.member.name, ""), c.agent)}, claimed {display.relative(c.updated)}",
-      None => display.member_name(item.assignee, item.expand.assignee.name, ""),
-    }
-    let mut row = [f"{key}-{item.number}", f"{display.glyph(item.state())} {display.state_name(item.state())}", display.priority_marker(item.priority()), item.title, assignee, display.relative(item.updated)]
-    if item.emoji != "" { row = row.append(item.emoji) }
-    rows = rows.append(row)
-  }
-  if let Err(e) = fmt.Fprint(os.Stdout, display.table(rows)) { return Err(pb.failed(f"writing output: {e}")) }
-  Ok(())
-}
-
 fn issue_next_spec() -> Slice<flags.Flag> {
   // The list command's --project and --label (LLL-307), so a filtered queue
   // speaks the same dialect; state and assignee are fixed by "ready, unclaimed".
@@ -364,7 +332,7 @@ Capture stdout only: key=$(lll issue next --claim)"
 /// ready issue, ranked by rank_agenda. An empty agenda is an error, the same
 /// bargain `claim` makes: the command either hands out work or says there is
 /// none. With --claim the printed key is always secured first.
-fn issue_next(input: flags.CommandInput) -> Result<(), pb.CliError> {
+fn issue_next(input: flags.CommandInput) -> Result<output.Output, pb.CliError> {
   let ctx = input.ctx
   let p = input.parsed
   let agent = if p.given("--claim") { agent_label(ctx, p)? } else { "" }
@@ -395,6 +363,7 @@ fn issue_next(input: flags.CommandInput) -> Result<(), pb.CliError> {
   }
   let best = agenda[0]
   let key = f"{best.expand.team.key}-{best.number}"
+  let mut out = output.none()
   if p.given("--claim") {
     let Some(member) = records.find_actor(ctx)? else {
       return Err(
@@ -408,8 +377,8 @@ fn issue_next(input: flags.CommandInput) -> Result<(), pb.CliError> {
         e.with_message(f"{key}: {e.message}; {held_elsewhere_hint(key)}")
       } else { e }
     })?
-    // --json carries the claim, so it prints nothing else anywhere.
-    if !p.given("--json") { fmt.Fprintln(os.Stderr, f"Claimed {key} for {result.member_name}") }
+    // --json carries the claim, so the renderer drops this notice under it.
+    out = out.notice(f"Claimed {key} for {result.member_name}")
   }
   if p.given("--json") {
     // One packet replaces next-then-view: the 'lll issue view --json' object,
@@ -421,17 +390,15 @@ fn issue_next(input: flags.CommandInput) -> Result<(), pb.CliError> {
       return Err(pb.failed(f"decoding issue: {e}"))
     }
     let reads = begin_issue_view_reads(ctx, full, true, false)
-    fmt.Println(issue_view_json(
+    return Ok(out.then(output.json(issue_view_json(
       record,
       await_issue_view(reads.comments, "comments")?,
       await_issue_view(reads.claim, "claim")?,
       await_issue_view(reads.docs, "docs")?,
       await_issue_view(reads.findings, "findings")?,
-    )?)
-    return Ok(())
+    )?)))
   }
-  fmt.Println(key)
-  Ok(())
+  Ok(out.line(key))
 }
 
 /// Why `issue next` offers nothing (LLL-685). Four 1.0 fleet agents read

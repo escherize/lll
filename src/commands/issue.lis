@@ -584,7 +584,7 @@ pub fn issue_commands() -> Slice<flags.Command> {
       summary: "upload a file to an issue; appends without replacing existing attachments",
       spec: flags.with_team([json_after_flag("the issue")]),
       positional: "KEY-123 FILE",
-      run: |i| printed(issue_attach(i)),
+      run: issue_attach,
       ..,
     },
     flags.Command {
@@ -592,7 +592,7 @@ pub fn issue_commands() -> Slice<flags.Command> {
       summary: "remove an attachment by its stored filename (see issue view)",
       spec: flags.with_team([json_after_flag("the issue")]),
       positional: "KEY-123 FILENAME",
-      run: |i| printed(issue_detach(i)),
+      run: issue_detach,
       ..,
     },
     flags.Command {
@@ -600,7 +600,7 @@ pub fn issue_commands() -> Slice<flags.Command> {
       summary: "write attachment bytes to stdout; redirect to a file",
       spec: flags.with_team([]),
       positional: "KEY-123 FILENAME",
-      run: |i| printed(issue_download(i)),
+      run: issue_download,
       ..,
     },
     flags.Command {
@@ -610,14 +610,14 @@ pub fn issue_commands() -> Slice<flags.Command> {
       page: issue_create_page(),
       spec: issue_create_spec(),
       positional: "[\"title\"]",
-      run: |i| printed(create(i)),
+      run: create,
       ..,
     },
     flags.Command {
       name: "list",
       summary: "list issues; scoped to the configured team",
       spec: issue_list_spec(),
-      run: |i| printed(list(i)),
+      run: list,
       ..,
     },
     flags.Command {
@@ -625,7 +625,7 @@ pub fn issue_commands() -> Slice<flags.Command> {
       summary: "print the key of the one issue to work next - ready and unclaimed, then priority (urgent first), then oldest, then most-unblocking; --claim takes it (key alone on stdout, notices on stderr; exit 5 when nothing is ready)",
       spec: issue_next_spec(),
       page: issue_next_page(),
-      run: |i| printed(issue_next(i)),
+      run: issue_next,
       ..,
     },
     flags.Command {
@@ -635,7 +635,7 @@ pub fn issue_commands() -> Slice<flags.Command> {
       summary: "show one issue in full, with comments; --raw prints it as plain markdown; -w opens its web page instead",
       spec: issue_view_spec(),
       positional: "[KEY-123]",
-      run: |i| printed(view(i)),
+      run: view,
       ..,
     },
     flags.Command {
@@ -644,7 +644,7 @@ pub fn issue_commands() -> Slice<flags.Command> {
       summary: "change fields (at least one flag)",
       spec: issue_update_spec(),
       positional: "[KEY-123]",
-      run: |i| printed(update(i)),
+      run: update,
       ..,
     },
     flags.Command {
@@ -652,7 +652,7 @@ pub fn issue_commands() -> Slice<flags.Command> {
       summary: "set state done and release your claim (--keep-claim keeps it); another member's claimed issue needs --force, which comments why",
       spec: issue_close_spec(),
       positional: "[KEY-123]",
-      run: |i| printed(close_issue(i)),
+      run: close_issue,
       ..,
     },
     flags.Command {
@@ -660,7 +660,7 @@ pub fn issue_commands() -> Slice<flags.Command> {
       summary: "set state in-progress; --branch also git-switches to key-number-slug and records the work site",
       spec: issue_start_spec(),
       positional: "[KEY-123]",
-      run: |i| printed(start(i)),
+      run: start,
       ..,
     },
     flags.Command {
@@ -669,7 +669,7 @@ pub fn issue_commands() -> Slice<flags.Command> {
       spec: issue_claim_spec(),
       page: issue_claim_page(),
       positional: "[KEY-123]",
-      run: |i| printed(claim(i)),
+      run: claim,
       ..,
     },
     flags.Command {
@@ -677,7 +677,7 @@ pub fn issue_commands() -> Slice<flags.Command> {
       summary: "remove your claim; clear assignee if it still matches the holder; --force takes another member's or another agent label's and comments why",
       spec: issue_release_spec(),
       positional: "[KEY-123]",
-      run: |i| printed(release(i)),
+      run: release,
       ..,
     },
     flags.Command {
@@ -685,7 +685,7 @@ pub fn issue_commands() -> Slice<flags.Command> {
       summary: "delete; asks [y/N] unless --yes; a claimed issue needs --force, which releases the claim first",
       spec: issue_delete_spec(),
       positional: "KEY-123",
-      run: |i| printed(delete_issue(i)),
+      run: delete_issue,
       ..,
     },
     flags.Command {
@@ -693,7 +693,7 @@ pub fn issue_commands() -> Slice<flags.Command> {
       summary: "add a comment (bare body or -b); 'comment KEY' lists them numbered; 'comment edit KEY N -b' and 'comment delete KEY N' change your own",
       spec: issue_comment_spec(),
       positional: "[KEY-123] [\"body\"]",
-      run: |i| printed(comment(i)),
+      run: comment,
       ..,
     },
     flags.Command {
@@ -709,7 +709,7 @@ pub fn issue_commands() -> Slice<flags.Command> {
       summary: "print the issue's web page URL",
       spec: flags.with_team([]),
       positional: "[KEY-123]",
-      run: |i| printed(url_cmd(i)),
+      run: url_cmd,
       ..,
     },
     flags.Command {
@@ -717,7 +717,7 @@ pub fn issue_commands() -> Slice<flags.Command> {
       summary: "print the issue's KEY-123 identifier",
       spec: flags.with_team([]),
       positional: "[KEY-123]",
-      run: |i| printed(id_cmd(i)),
+      run: id_cmd,
       ..,
     },
     flags.Command {
@@ -725,7 +725,7 @@ pub fn issue_commands() -> Slice<flags.Command> {
       summary: "print the issue's title",
       spec: flags.with_team([]),
       positional: "[KEY-123]",
-      run: |i| printed(title_cmd(i)),
+      run: title_cmd,
       ..,
     },
     flags.Command {
@@ -733,7 +733,7 @@ pub fn issue_commands() -> Slice<flags.Command> {
       summary: "print a suggested Git branch name; read-only",
       spec: flags.with_team([]),
       positional: "[KEY-123]",
-      run: |i| printed(branch_name_cmd(i)),
+      run: branch_name_cmd,
       ..,
     },
     flags.Command {
@@ -741,7 +741,7 @@ pub fn issue_commands() -> Slice<flags.Command> {
       summary: "open a GitHub PR via 'gh pr create' and record gh#N; body links the issue and includes its description when it fits",
       spec: flags.with_team([]),
       positional: "[KEY-123]",
-      run: |i| printed(pr_cmd(i)),
+      run: pr_cmd,
       ..,
     },
     flags.Command {
@@ -749,7 +749,7 @@ pub fn issue_commands() -> Slice<flags.Command> {
       summary: "append an external reference once (gh#42, linear:ENG-118)",
       spec: flags.with_team([json_after_flag("the issue")]),
       positional: "KEY-123 REF",
-      run: |i| printed(ref_cmd(i)),
+      run: ref_cmd,
       ..,
     },
     flags.Command {
@@ -757,7 +757,7 @@ pub fn issue_commands() -> Slice<flags.Command> {
       summary: "link the issue to a doc (see 'lll doc --help')",
       spec: flags.with_team([json_after_flag("the doc")]),
       positional: "KEY-123 SLUG",
-      run: |i| printed(link(i)),
+      run: link,
       ..,
     },
     flags.Command {
@@ -765,7 +765,7 @@ pub fn issue_commands() -> Slice<flags.Command> {
       summary: "remove that link",
       spec: flags.with_team([json_after_flag("the doc")]),
       positional: "KEY-123 SLUG",
-      run: |i| printed(unlink(i)),
+      run: unlink,
       ..,
     },
     flags.Command {
@@ -773,7 +773,7 @@ pub fn issue_commands() -> Slice<flags.Command> {
       summary: "record that KEY-123 cannot start until BLOCKER is done; view shows it, list --ready honours it",
       spec: flags.with_team([json_after_flag("the issue")]),
       positional: "KEY-123 BLOCKER",
-      run: |i| printed(block(i)),
+      run: block,
       ..,
     },
     flags.Command {
@@ -781,7 +781,7 @@ pub fn issue_commands() -> Slice<flags.Command> {
       summary: "remove BLOCKER from KEY-123's blockers",
       spec: flags.with_team([json_after_flag("the issue")]),
       positional: "KEY-123 BLOCKER",
-      run: |i| printed(unblock(i)),
+      run: unblock,
       ..,
     },
   ]

@@ -20,33 +20,9 @@ fn print_json(value: Unknown, what: string) -> Result<(), pb.CliError> {
   Ok(())
 }
 
-/// A write verb's --json (1.0 fleet: 'finding confirm SLUG --json' was an
-/// unknown flag): the record as it now is, read back by id, in the shape its
-/// create --json prints.
-fn print_record_after(ctx: pb.Client, collection: string, id: string) -> Result<(), pb.CliError> {
-  let record = ctx.get(f"/api/collections/{collection}/records/{id}")?
-  fmt.Println(contract_json(record.bytes() as json.RawMessage, 0) as string)
-  Ok(())
-}
-
 /// The --json flag of a write verb that prints `what` afterwards.
 fn json_after_flag(what: string) -> flags.Flag {
   flags.Flag { name: "--json", help: f"print {what} afterwards as JSON", .. }
-}
-
-/// The ending of a write verb that has one confirmation line: --json prints
-/// the issue as it now is instead.
-fn issue_done(ctx: pb.Client, p: flags.Parsed, key: string, line: string) -> Result<(), pb.CliError> {
-  if p.given("--json") { return print_issue_after(ctx, key) }
-  fmt.Println(line)
-  Ok(())
-}
-
-/// The same for a doc: --json prints the doc record instead of `line`.
-fn doc_done(ctx: pb.Client, p: flags.Parsed, id: string, line: string) -> Result<(), pb.CliError> {
-  if p.given("--json") { return print_doc_after(ctx, id) }
-  fmt.Println(line)
-  Ok(())
 }
 
 /// The empty-state line every list prints when it has nothing to show
@@ -217,19 +193,6 @@ fn docs_json(docs: Slice<models.Doc>) -> Result<Slice<Map<string, json.RawMessag
     out = out.append(doc_json(encode_json(d, "doc")?)?)
   }
   Ok(out)
-}
-
-/// A doc write verb's --json: the doc as it now is, named as doc_json names it.
-fn print_doc_after(ctx: pb.Client, id: string) -> Result<(), pb.CliError> {
-  let record = ctx.get(f"/api/collections/docs/records/{id}?expand=issues.team,author.owner,last_editor.owner")?
-  print_json(doc_json(record.bytes() as json.RawMessage)?, "doc")
-}
-
-/// issue_json, printed.
-fn print_issue_json(record: string, claim: Option<models.Claim>) -> Result<(), pb.CliError> {
-  let fields = issue_json(record.bytes() as json.RawMessage, claim)?
-  fmt.Println(encode_json(fields, "issue")? as string)
-  Ok(())
 }
 
 /// A value as a --json document, the end of every `--json` command that
