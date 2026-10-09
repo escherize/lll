@@ -358,11 +358,17 @@ fn issue_next(input: flags.CommandInput) -> Result<(), pb.CliError> {
   // The claims themselves are read, not only the assignee (LLL-662): the
   // holder may set the assignee to someone else or clear it, and an issue
   // offered here that 'claim' then refuses is a lie to the loop.
-  let held = claims.for_team(ctx, scope)?.map(|c| c.issue)
+  let team_claims = claims.for_team(ctx, scope)?
+  let held = team_claims.map(|c| c.issue)
   let ranked = rank_agenda(candidates, unblocks).filter(|i| !held.contains(i.id))
   let agenda = ranked.filter(|i| i.assignee == "")
   if agenda.is_empty() {
-    return Err(pb.fail(pb.ErrorKind.NothingToDo, empty_agenda_message(ranked)))
+    // My own holds are skipped above, so a loop that stranded one sees only
+    // "nothing to do" (two 1.0 fleet agents, case 13). Name them.
+    let me = records.token_member(ctx.token())
+    let mine = team_claims.filter(|c| me == Some(c.member)).map(|c| c.issue)
+    let stranded = candidates.filter(|i| mine.contains(i.id)).map(|i| f"{i.expand.team.key}-{i.number}")
+    return Err(pb.fail(pb.ErrorKind.NothingToDo, empty_agenda_message(ranked) + own_claims_note(stranded)))
   }
   let best = agenda[0]
   let key = f"{best.expand.team.key}-{best.number}"
@@ -420,6 +426,12 @@ fn empty_agenda_message(unclaimed: Slice<models.Issue>) -> string {
   let n = unclaimed.length()
   let are = if n == 1 { "ready issue matches but is" } else { "ready issues match but are" }
   f"no unassigned, unclaimed ready issues; {n} {are} assigned ({strings.Join(named, ", ")}): 'lll issue update KEY --assignee none' offers one"
+}
+
+/// The ready matches the caller itself holds, which `issue next` never offers.
+fn own_claims_note(keys: Slice<string>) -> string {
+  if keys.is_empty() { return "" }
+  f"; you hold claims on {strings.Join(keys, ", ")}: close them, or 'lll issue release KEY' to offer them"
 }
 
 /// The `list --ready` candidate set (LLL-175), reused as the `issue next`

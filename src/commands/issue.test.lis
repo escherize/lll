@@ -667,3 +667,11 @@ fn an_update_field_typed_as_a_verb_names_the_flag() {
   assert hint == "unknown issue command 'priority'; to change it use 'lll issue update KEY --priority <name>'"
   assert issue_synonym("title").is_none()
 }
+
+/// Two 1.0 fleet agents (case 13) stranded their own claims and read only
+/// "nothing to do"; the refusal names what they still hold.
+#[test]
+fn an_empty_agenda_names_my_own_held_claims() {
+  assert own_claims_note([]) == ""
+  assert own_claims_note(["FLEET-8", "FLEET-9"]).contains("you hold claims on FLEET-8, FLEET-9")
+}
