@@ -21,7 +21,7 @@ Read every object in full before you change it.
 4. Close the issue.
 5. Read it back and confirm: state done, your bot still the assignee, your
    comment present, and no claim left on it. If a claim remains, find out why
-   from lll and release it.
+   from lll and remove it without losing the assignee.
 
 The artifact is that issue done, assigned to `bot-fleet-worker-NN`, with your
 one comment and no claim. Touch no other issue.
