@@ -371,7 +371,7 @@ pub fn bot(ctx: pb.Client, args: Slice<string>) -> Result<output.Output, pb.CliE
   // verb guess, not a bot name: suggesting a bot named after it would be
   // wrong. Any other word falls through to the bot- prefix refusal.
   if verb != "rotate" && verb != "create" && is_a_verb(verb) {
-    return Err(flags.usage_error(f"unknown bot command '{verb}'; bot has create and rotate; list bots with 'lll member list'"))
+    return Err(flags.usage_error(f"unknown bot command '{verb}'; bot has create and rotate; see one bot with 'lll member access bot-NAME', all of them with 'lll member list'"))
   }
   match verb {
     "rotate" => bot_rotate(ctx, args),
