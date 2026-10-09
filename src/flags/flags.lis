@@ -120,7 +120,7 @@ pub fn parse_n(
   while i < args.length() {
     let arg = args[i]
     if options_ended {
-      if pos.length() >= max_positional { return Err(usage_error(f"unexpected argument: '{arg}'")) }
+      if pos.length() >= max_positional { return Err(usage_error(extra_argument(arg, pos))) }
       pos = pos.append(arg)
       i += 1
       continue
@@ -159,7 +159,7 @@ pub fn parse_n(
         return Err(usage_error(unknown_flag(arg, usage, spec)))
       }
       if pos.length() >= max_positional {
-        return Err(usage_error(f"unexpected argument: '{arg}'"))
+        return Err(usage_error(extra_argument(arg, pos)))
       }
       pos = pos.append(arg)
       i += 1
@@ -248,6 +248,17 @@ fn url_default_hint(origin: Option<config.Source>) -> string {
     Some(config.Source.RepoFile(path)) => f"the default comes from {path}; edit its url line",
     Some(config.Source.HomeFile(_)) | Some(config.Source.Flag(_)) | Some(config.Source.Default) | None => "to change the default, run 'lll config set url URL'",
   }
+}
+
+/// One positional too many. A second issue key after a first is the guess
+/// `issue view FLEET-4 FLEET-5` (1.0 fleet, cases 13 and 09): say each verb
+/// takes one key.
+fn extra_argument(arg: string, pos: Slice<string>) -> string {
+  let key = regexp.MustCompile(r"^[A-Za-z][A-Za-z0-9_-]*-[0-9]+$")
+  if key.MatchString(arg) && pos.any(|p| key.MatchString(p)) {
+    return f"unexpected argument: '{arg}'; this takes one issue key: run it once per key, or 'lll issue list --json' to read several"
+  }
+  f"unexpected argument: '{arg}'"
 }
 
 /// A bad command line: exit 2 (LLL-645). Commands that refuse their own

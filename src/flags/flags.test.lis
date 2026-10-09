@@ -162,7 +162,8 @@ fn parse_collects_a_single_positional_when_allowed() {
   assert p.first() == "ENG-6"
   // A second positional is rejected, naming the stray argument.
   let assert Err(msg) = parse(spec(), argv(["ENG-6", "ENG-7"]), 3, true, "")
-  assert msg.message == "unexpected argument: 'ENG-7'"
+  assert msg.message.starts_with("unexpected argument: 'ENG-7'")
+  assert msg.message.contains("this takes one issue key")
 }
 
 #[test]
@@ -688,4 +689,12 @@ fn a_read_verb_the_noun_lacks_points_at_its_list() {
   let other = [Command { name: "set", summary: "set", page: "", spec: [], run: |_| Ok(output.none()), .. }]
   let assert Err(bare) = dispatch(test_ctx(), "test", "", "", other, ["lll", "test", "view"])
   assert !bare.message.contains("did you mean")
+}
+
+/// 1.0 fleet: `issue view FLEET-4 FLEET-5 FLEET-6` (cases 13 and 09).
+#[test]
+fn a_second_issue_key_says_one_key_per_call() {
+  assert extra_argument("FLEET-5", ["FLEET-4"]).contains("this takes one issue key")
+  assert extra_argument("extra", ["FLEET-4"]) == "unexpected argument: 'extra'"
+  assert extra_argument("FLEET-5", ["title"]) == "unexpected argument: 'FLEET-5'"
 }
