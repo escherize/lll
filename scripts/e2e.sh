@@ -895,8 +895,9 @@ got=$(LLL_URL=$URL "$LIN" issue view ENG-6 --json | jq -r '.assignee')
 out=$(cd "$REPO" && LLL_URL=$URL "$LLL_ABS" issue update ENG-6 --assignee none)
 got=$(LLL_URL=$URL "$LIN" issue view ENG-6 --json | jq -r '.assignee')
 [ "$got" = "" ] || fail "update --assignee none: assignee is '$got'"
-out=$(LLL_URL=$URL "$LIN" issue update ENG-6 --assignee "" 2>&1 || true)
-assert_contains "$out" "or 'none' to clear it" "an empty --assignee names none"
+# 1.0 fleet: an empty --assignee is none.
+out=$(LLL_URL=$URL "$LIN" issue update ENG-6 --assignee "") || fail "update --assignee '' must succeed: $out"
+assert_contains "$out" "assignee=none" "an empty --assignee clears it"
 out=$(LLL_URL=$URL LLL_TEAM=ENG "$LIN" issue list --project ENG 2>&1 || true)
 assert_contains "$out" "'ENG' is the team, not a project" "the team key passed as a project is told so"
 # LLL-374: alice used to arrive for free, because `config set me alice` seeded
