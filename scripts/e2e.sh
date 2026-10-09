@@ -2999,7 +2999,7 @@ curl -sf -X PATCH "$URL/api/collections/members/records/$AGENT_ID" \
 
 # AC#1: login stores a token in the home config and prints who you are and
 # which file — never the token itself.
-login_out=$(printf '%s\n' "$LOGIN_PASS" | env -u LLL_TOKEN HOME="$E2E_HOME" LLL_URL=$URL "$LIN" login -e e2e-agent@lll.test) \
+login_out=$(printf '%s\n' "$LOGIN_PASS" | env -u LLL_TOKEN HOME="$E2E_HOME" LLL_URL=$URL "$LIN" login --url "$URL" -e e2e-agent@lll.test) \
   || fail "lll login exited nonzero: $login_out"
 assert_contains "$login_out" "logged in as e2e-agent" "login says who you are"
 assert_contains "$login_out" "token saved to" "login names the file the token landed in"
@@ -3021,7 +3021,7 @@ assert_contains "$out" "e2e-agent" "the home-config token authenticates a member
 
 # TASK-242 AC: --password is a flag, not only a prompt. Agents and CI machines
 # have no terminal to type into, and piping stdin was the undocumented answer.
-out=$(env -u LLL_TOKEN HOME="$E2E_HOME" LLL_URL=$URL "$LIN" login \
+out=$(env -u LLL_TOKEN HOME="$E2E_HOME" LLL_URL=$URL "$LIN" login --url "$URL" \
   -e e2e-agent@lll.test --password "$LOGIN_PASS") \
   || fail "login --password exited nonzero: $out"
 assert_contains "$out" "logged in as e2e-agent" "login takes the password as a flag"
@@ -3054,18 +3054,18 @@ CREATE_HOME="$DATA_DIR/createhome"
 mkdir -p "$CREATE_HOME"
 out=$(env -u LLL_TOKEN HOME="$CREATE_HOME" LLL_URL=$URL \
   LLL_ADMIN_EMAIL=admin@local.dev LLL_ADMIN_PASSWORD=admin-local-123 \
-  "$LIN" login -e newcomer@lll.test --password newcomer-pass-789 --create) \
+  "$LIN" login --url "$URL" -e newcomer@lll.test --password newcomer-pass-789 --create) \
   || fail "login --create exited nonzero: $out"
 assert_contains "$out" "created member newcomer" "--create says it made the account"
 assert_contains "$out" "logged in as newcomer" "--create logs into what it made"
 # The account is real: a second login without --create authenticates it.
-out=$(env -u LLL_TOKEN HOME="$CREATE_HOME" LLL_URL=$URL "$LIN" login \
+out=$(env -u LLL_TOKEN HOME="$CREATE_HOME" LLL_URL=$URL "$LIN" login --url "$URL" \
   -e newcomer@lll.test --password newcomer-pass-789) \
   || fail "the --create account does not log in again: $out"
 # And --create on a name that exists refuses rather than clobbering.
 out=$(env -u LLL_TOKEN HOME="$CREATE_HOME" LLL_URL=$URL \
   LLL_ADMIN_EMAIL=admin@local.dev LLL_ADMIN_PASSWORD=admin-local-123 \
-  "$LIN" login -e newcomer@lll.test --password another-pass-987 --create 2>&1) \
+  "$LIN" login --url "$URL" -e newcomer@lll.test --password another-pass-987 --create 2>&1) \
   && fail "--create on an existing member should refuse"
 assert_contains "$out" "already exists" "--create refuses an existing member"
 
@@ -3075,27 +3075,27 @@ assert_contains "$out" "already exists" "--create refuses an existing member"
 # superuser identity with whatever password it typed.
 out=$(env -u LLL_TOKEN HOME="$CREATE_HOME" LLL_URL=$URL \
   LLL_ADMIN_EMAIL=admin@local.dev LLL_ADMIN_PASSWORD=admin-local-123 \
-  "$LIN" login -e admin@local.dev --password whatever-123 --create 2>&1) \
+  "$LIN" login --url "$URL" -e admin@local.dev --password whatever-123 --create 2>&1) \
   && fail "--create with the admin email should refuse"
 assert_contains "$out" "admin identity, not a member" "--create refuses the admin's email"
 
 # Too short is one sentence, not PocketBase's raw validation blob.
 out=$(env -u LLL_TOKEN HOME="$CREATE_HOME" LLL_URL=$URL \
   LLL_ADMIN_EMAIL=admin@local.dev LLL_ADMIN_PASSWORD=admin-local-123 \
-  "$LIN" login -e shorty@lll.test --password short --create 2>&1) \
+  "$LIN" login --url "$URL" -e shorty@lll.test --password short --create 2>&1) \
   && fail "--create with a short password should refuse"
 assert_contains "$out" "at least 8 characters" "--create checks the password length"
 assert_not_contains "$out" "validation_min_text_constraint" "no raw PocketBase blob"
 
 # With no terminal to prompt at, every missing credential is named at once.
-out=$(env -u LLL_TOKEN HOME="$CREATE_HOME" LLL_URL=$URL "$LIN" login </dev/null 2>&1) \
+out=$(env -u LLL_TOKEN HOME="$CREATE_HOME" LLL_URL=$URL "$LIN" login --url "$URL" </dev/null 2>&1) \
   && fail "login with nothing on a closed stdin should refuse"
 assert_contains "$out" "no terminal to prompt at" "login names both missing credentials at once"
 
 # TASK-242 AC: the 400 that told nobody anything now names both causes and the
 # command for each. PocketBase answers the same 400 for a missing account and
 # a wrong password, so both branches are printed.
-out=$(env -u LLL_TOKEN HOME="$CREATE_HOME" LLL_URL=$URL "$LIN" login \
+out=$(env -u LLL_TOKEN HOME="$CREATE_HOME" LLL_URL=$URL "$LIN" login --url "$URL" \
   -e nobody@lll.test --password whatever 2>&1) \
   && fail "login as a nonexistent member should fail"
 assert_contains "$out" "no member with email nobody@lll.test" "login names the identity it tried"
@@ -3220,7 +3220,7 @@ bot_out=$(env LLL_ADMIN_EMAIL=admin@local.dev LLL_ADMIN_PASSWORD=admin-local-123
 
 # A bot member cannot authenticate interactively, whatever password is typed.
 out=$(env -u LLL_TOKEN HOME="$E2E_HOME" LLL_URL=$URL \
-  "$LIN" login --email bot-e2e@members.invalid --password not-the-password 2>&1) \
+  "$LIN" login --url "$URL" --email bot-e2e@members.invalid --password not-the-password 2>&1) \
   && fail "a bot member logged in with a password: $out"
 assert_contains "$out" "cannot sign in with a password" "the login refusal names the bot rule"
 
@@ -3628,14 +3628,14 @@ echo "e2e: all assertions passed"
 # not a member, so that case says so instead.
 out=$(env -u LLL_TOKEN HOME="$CREATE_HOME" LLL_URL=$URL \
   LLL_ADMIN_EMAIL=admin@local.dev LLL_ADMIN_PASSWORD=admin-local-123 \
-  "$LIN" login -e admin@local.dev --password admin-local-123 2>&1) \
+  "$LIN" login --url "$URL" -e admin@local.dev --password admin-local-123 2>&1) \
   && fail "logging in as the superuser should fail"
 assert_contains "$out" "admin identity, not a member" "the admin email is named as such on login"
 assert_not_contains "$out" "--email admin@local.dev --create" "it must not recommend --create with the admin email"
 
 # 7 agents guessed --admin-email/--admin-password on login, having seen them
 # on the sibling commands, where they existed and here they did not.
-out=$(env -u LLL_TOKEN HOME="$DATA_DIR/adminflag" LLL_URL=$URL "$LIN" login \
+out=$(env -u LLL_TOKEN HOME="$DATA_DIR/adminflag" LLL_URL=$URL "$LIN" login --url "$URL" \
   -e flagged@lll.test --password flagged-pass-123 --create \
   --admin-email admin@local.dev --admin-password admin-local-123) \
   || fail "login --create with admin flags: $out"
@@ -3745,7 +3745,7 @@ out=$(LLL_URL=$URL "$LIN" member set-password e2e-agent \
   --admin-email admin@local.dev --admin-password admin-local-123) \
   || fail "scripted set-password: $out"
 assert_contains "$out" "password set for e2e-agent" "set-password takes --password and admin flags"
-out=$(env -u LLL_TOKEN HOME="$CREATE_HOME" LLL_URL=$URL "$LIN" login \
+out=$(env -u LLL_TOKEN HOME="$CREATE_HOME" LLL_URL=$URL "$LIN" login --url "$URL" \
   -e e2e-agent@lll.test --password rotated-pass-123) \
   || fail "the rotated password does not log in: $out"
 # Too short is one sentence, not a raw PocketBase validation blob.
