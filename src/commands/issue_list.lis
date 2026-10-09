@@ -485,7 +485,9 @@ fn nothing_to_do_message(idle: NothingToDo) -> string {
     Idle.AllBlocked(keys) => {
       let n = keys.length()
       let are = if n == 1 { "open issue matches but is" } else { "open issues match but are" }
-      f"no ready issues; {n} {are} blocked ({first_three(keys)}): 'lll issue list --blocked' shows what they wait on"
+      // A ready issue the caller holds is still ready.
+      let other = if idle.mine.is_empty() { "" } else { "other " }
+      f"no {other}ready issues; {n} {are} blocked ({first_three(keys)}): 'lll issue list --blocked' shows what they wait on"
     },
   }
   if idle.mine.is_empty() { return why }

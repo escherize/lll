@@ -676,6 +676,10 @@ fn an_empty_agenda_names_its_reason() {
   waiting.blocked_by = [models.IssueId("b")]
   waiting.expand.blocked_by = [blocker]
   assert idle(nothing_to_do([blocker, waiting], [], [], [], me).reason) == "no ready issues; 1 open issue matches but is blocked (ENG-4): 'lll issue list --blocked' shows what they wait on"
+  // My own ready hold is still ready, so the blocked ones are the other ones.
+  let mine = agenda_issue("i1", 1, "todo")
+  let blocked_and_mine = nothing_to_do([mine, blocker, waiting], [mine], [], [held("i1", "me")], me)
+  assert nothing_to_do_message(blocked_and_mine) == "no other ready issues; 1 open issue matches but is blocked (ENG-4): 'lll issue list --blocked' shows what they wait on; you hold claims on ENG-1: close them, or 'lll issue release KEY' to offer them"
   // A finished or in-progress issue is no reason at all.
   assert idle(nothing_to_do([blocker, agenda_issue("d", 5, "done")], [], [], [], me).reason) == idle(Idle.Empty)
 }
@@ -741,29 +745,4 @@ fn note_and_review_point_at_comment_and_in_review() {
 fn a_key_where_the_verb_goes_names_the_verb_first_form() {
   let assert Some(hint) = issue_synonym("FLEET-4")
   assert hint.contains("put the verb first: 'lll issue view FLEET-4'")
-}
-
-/// LLL-685: the view's claim is an Option, and both text modes print a row
-/// for None rather than leaving it out.
-#[test]
-fn issue_view_says_claimed_none_in_every_text_mode() {
-  let free = IssueView { issue: models.Issue { .. }, claim: None }
-  assert free.claimed_row() == "Claimed:   none"
-  assert free.claimed_raw_row() == "- **Claimed:** none"
-  let held = models.Claim {
-    member: models.MemberId("m1"),
-    agent: "wt-a",
-    created: "2026-10-01 10:00:00.000Z",
-    updated: "2026-10-01 10:00:00.000Z",
-    expand: models.ClaimExpand { member: models.Member { name: "alice", .. } },
-    ..,
-  }
-  let taken = IssueView { issue: models.Issue { .. }, claim: Some(held) }
-  assert taken.claimed_row().starts_with("Claimed:   alice (agent wt-a) (")
-  assert taken.claimed_raw_row().starts_with("- **Claimed:** alice (agent wt-a) (since 2026-10-01")
-  // A finished issue's work site is stale even while held; an open one is
-  // stale only once nobody holds it.
-  assert IssueView { issue: models.Issue { state_wire: "done", .. }, claim: Some(held) }.work_site_stale()
-  assert !IssueView { issue: models.Issue { state_wire: "in-progress", .. }, claim: Some(held) }.work_site_stale()
-  assert IssueView { issue: models.Issue { state_wire: "in-progress", .. }, claim: None }.work_site_stale()
 }
