@@ -22,8 +22,9 @@ That is the whole brief. This case measures how lll helps you RECOVER, so:
 
 - Your FIRST attempt at each of the two steps (sending it to review, and
   leaving the note) must be the command you would naturally guess, typed
-  WITHOUT reading any `--help` first. Finding the issue may use any read
-  command.
+  WITHOUT reading any `--help` first, and that includes help printed while
+  you were finding the issue. Finding the issue may use any read command;
+  if you read help on the way, say so in the step's record.
 - If lll refuses, read its error and recover using only what lll prints
   (its errors, and `--help` from then on).
 - If your first guess happens to work, that is fine: record it as a success.
@@ -82,7 +83,7 @@ Use this JSON shape:
 }
 ```
 
-`error_rating` is required in this case: the least helpful error you met. If every call worked first time, rate the least helpful message you read and say so.
+`error_rating` is required in this case: the least helpful error you met. If no call failed it is null; never rate help output.
 
 Each failure has `command`, `error`, `expected` and boolean
 `help_would_have_told_me`. Set `done` true only after reading back the exact
