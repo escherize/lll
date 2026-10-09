@@ -1,34 +1,47 @@
 import "go:fmt"
 import "go:github.com/escherize/lll/docs"
 import "go:os"
-import "go:regexp"
 import "go:strings"
 
 import "commands"
 import "config"
+import "flags"
 import "output"
 import "pb"
 import "query"
-import "buildinfo"
 
 fn main() {
   // LLL-486: the environment is read here, once, and everything below gets
   // its configuration as a value. Nothing sets an environment variable to
   // carry state, so a child process sees only what lll's parent gave it.
   let env = config.read_env()
-  let Some(noun) = os.Args.get(1) else {
-    render(output.none(), Ok(usage(pb.Client.new(config.resolve(env, config.no_overrides())))), None)
-    return
-  }
 
   // --team is taken off the arguments before the settings are built, so the
-  // team it names is a flag override like any other. Its usage errors are
-  // reported where they always were, after renewal.
+  // team it names is a flag override like any other.
   let scoped = commands.scoped_args(os.Args)
   let team_flag = match scoped {
     Ok((_, team)) => team,
     Err(_) => None,
   }
+  // LLL-684: the whole command line is parsed against the command table
+  // before anything runs. Help is answered here, off the network; a bad
+  // command line is a usage error (exit 2) before any handler is reached.
+  let parsed = match scoped {
+    Ok((args, _)) => flags.parse_command_line(commands.nouns(), args),
+    Err(msg) => Err(msg),
+  }
+  let call = match parsed {
+    Ok(flags.Invocation.Run(call)) => call,
+    Ok(flags.Invocation.Help(topic)) => {
+      render(output.none(), Ok(help(topic, env)), None)
+      return
+    },
+    Err(e) => {
+      render(output.none(), Err(e), None)
+      return
+    },
+  }
+  let noun = os.Args.get(1).unwrap_or("")
   let resolved = config.resolve(env, config.Overrides { team: team_flag, .. })
   // LLL-441: before anything reads the token, renew a login token near
   // expiry - only for nouns that talk to the server anyway, so --help,
@@ -40,11 +53,17 @@ fn main() {
   }
   let ctx = pb.Client.new(settings)
   let skew = commands.version_skew_check(ctx, noun)
-  let result = match scoped {
-    Ok((args, _)) => dispatch(ctx, noun, args),
-    Err(msg) => Err(msg),
-  }
+  let result = flags.run_call(ctx, call)
   render(renewal, result, skew.receive().unwrap_or(None))
+}
+
+/// A help page: the top page and the contract need what only main has.
+fn help(topic: flags.Topic, env: config.Env) -> output.Output {
+  match topic {
+    flags.Topic.Usage => usage(pb.Client.new(config.resolve(env, config.no_overrides()))),
+    flags.Topic.Contract => output.text(docs.Contract() + "\n" + flags.contract_commands(commands.nouns())),
+    flags.Topic.Page(page) => output.line(page),
+  }
 }
 
 /// The one place lll writes a command's outcome (LLL-683): what came before
@@ -77,17 +96,6 @@ fn render(before: output.Output, result: Result<output.Output, pb.CliError>, ske
   }
 
   if let Err(err) = result {
-    // A help request travels as an error so it short-circuits the verb before
-    // it can act (flags.parse, TASK-237). It is not a failure: print it bare
-    // and exit 0, or `lll issue list -h` in a script reads as a broken command.
-    if let pb.ErrorKind.Help = err.kind {
-      if let Err(e) = fmt.Println(err.message) {
-        let _ = fmt.Fprintln(os.Stderr, f"Error: writing output: {e}")
-        os.Exit(pb.exit_code(pb.ErrorKind.Failed))
-      }
-      if unwritten { os.Exit(pb.exit_code(pb.ErrorKind.Failed)) }
-      return
-    }
     // Every failing exit is decided here, by the error's kind (LLL-645,
     // docs/cli-contract.md): scripts branch on the code, not the text.
     // Exit 5 is an outcome, not a failure (fleet case 13): "Error:" belongs
@@ -109,68 +117,6 @@ fn write(out: output.Output) -> Result<(), error> {
     }
   }
   Ok(())
-}
-
-fn dispatch(ctx: pb.Client, noun: string, args: Slice<string>) -> Result<output.Output, pb.CliError> {
-  match noun {
-    "issue" => commands.issue(ctx, args),
-    "team" => commands.team(ctx, args),
-    "member" => commands.member(ctx, args),
-    "invite" => commands.invite(ctx, args),
-    "project" => commands.project(ctx, args),
-    "api" => commands.api(ctx, args),
-    "label" => commands.label(ctx, args),
-    "doc" => commands.doc(ctx, args),
-    "finding" => commands.finding(ctx, args),
-    "import" => commands.import_cmd(ctx, args),
-    "export" => commands.export_cmd(ctx, args),
-    "config" => commands.config_cmd(ctx, args),
-    "login" => commands.login(ctx, args),
-    "logout" => commands.logout(ctx, args),
-    "whoami" => commands.whoami(ctx, args),
-    "token" => commands.token(ctx, args),
-    "bot" => commands.bot(ctx, args),
-    "attach" => commands.attach(ctx, args),
-    "watch" => commands.watch(ctx, args),
-    "webhook" => commands.webhook(ctx, args),
-    "search" => commands.search_cmd(ctx, args),
-    "up" => commands.up(ctx, args),
-    "board" => commands.board(ctx, args),
-    "skill" => commands.skill(args),
-    "completions" => commands.completions(args),
-    "upgrade" => commands.upgrade(args),
-    "--help" | "-h" => Ok(usage(ctx)),
-    "help" => help(ctx, args),
-    "--version" | "-v" | "version" => version(noun, args),
-    other => Err(pb.fail(pb.ErrorKind.Usage, unknown_command(other, os.Args.get(2).unwrap_or("")))),
-  }
-}
-
-/// `lll version`, `--version` and `-v`: the version, `--help` the usage, and
-/// anything else a usage error (exit 2) like every other command line.
-fn version(noun: string, args: Slice<string>) -> Result<output.Output, pb.CliError> {
-  match args.get(2) {
-    None => Ok(output.line(f"lll {buildinfo.version()}")),
-    Some("--help") | Some("-h") => Err(pb.fail(pb.ErrorKind.Help, "lll version - print the version\n\nUsage:\n  lll version    (also: lll --version, lll -v)")),
-    Some(extra) => Err(pb.fail(pb.ErrorKind.Usage, f"lll {noun} takes no arguments; got '{extra}'")),
-  }
-}
-
-/// `lll help [contract]`. The contract is a help topic rather than a noun: it
-/// is reference text, like --help, and `help` already answers with the usage
-/// page. It ships in the binary because installed users have no docs/ (1.0
-/// fleet: a worker tried 'lll skill get cli-contract').
-fn help(ctx: pb.Client, args: Slice<string>) -> Result<output.Output, pb.CliError> {
-  match (args.get(2), args.get(3)) {
-    (None, _) | (Some("--help"), None) | (Some("-h"), None) => Ok(usage(ctx)),
-    (Some("contract"), None) => Ok(output.text(docs.Contract())),
-    _ => Err(
-      pb.fail(
-        pb.ErrorKind.Usage,
-        f"unknown help topic: '{strings.Join(args[2..], " ")}'; 'lll help contract' prints the CLI contract, 'lll --help' the commands, 'lll NOUN --help' one noun",
-      ),
-    ),
-  }
 }
 
 fn usage(ctx: pb.Client) -> output.Output {
@@ -277,49 +223,4 @@ layer, each supplying the keys it names; 'lll config list' shows which won):
   )
   let hint = commands.setup_hint(ctx)
   if hint == "" { page } else { page.line(hint) }
-}
-
-/// An issue verb typed as a noun ('lll comment ...') is the most common
-/// unknown command (three of thirty fleet agents); name where it lives.
-fn unknown_command(noun: string, verb: string) -> string {
-  // 'lll issues list' for 'lll issue list': the plural is the natural guess.
-  // The verb rides along - seven of thirty fleet agents rated the bare
-  // "did you mean 'lll issue'" the least helpful message, since it dropped
-  // the half they had right.
-  let singular = strings.TrimSuffix(noun, "s")
-  for n in ["issue", "team", "member", "project", "label", "doc", "finding", "token"] {
-    if singular == n && noun != n {
-      let rest = if verb == "" || verb.starts_with("-") { "" } else { f" {verb}" }
-      return f"unknown command: '{noun}'; did you mean 'lll {n}{rest}'? (see 'lll {n} -h')"
-    }
-  }
-  for c in commands.issue_commands() {
-    // An accepted alias counts too: 'lll read KEY' (five of ten 1.0 fleet
-    // agents, case 20) names 'issue view', which also takes 'read'.
-    if c.name == noun || (noun != "" && (c.alias == noun || c.hidden_alias == noun)) {
-      // 'lll comment create' is the common shape of this mistake; dropping
-      // the typed verb here, as the plural branch once did, hid the half
-      // the user had right. So the verb rides along (LLL-313).
-      let rest = if verb == "" || verb.starts_with("-") { "" } else { f" {verb}" }
-      // Only a key is carried into the suggestion: 'lll comment add' must not
-      // become 'lll issue comment add', which is refused too (case 20).
-      let carried = if regexp.MustCompile(r"^[A-Za-z][A-Za-z0-9_-]*-[0-9]+$").MatchString(verb) { f" {verb}" } else { " ..." }
-      return f"unknown command: '{noun}{rest}'; it is an issue verb: 'lll issue {c.name}{carried}' (see 'lll issue {c.name} -h')"
-    }
-  }
-  // 'lll FLEET-4': a key where the noun goes (case 20).
-  if regexp.MustCompile(r"^[A-Za-z][A-Za-z0-9_-]*-[0-9]+$").MatchString(noun) {
-    return f"unknown command: '{noun}' is an issue ID; to see it use 'lll issue view {noun}'"
-  }
-  // A member verb typed as a noun, the same mistake shape (fleet case 11 was
-  // 'lll invite', which is now its own noun and points back at member invite).
-  for c in commands.member_commands() {
-    if c.name == noun {
-      return f"unknown command: '{noun}'; it is a member verb: 'lll member {noun} ...' (see 'lll member {noun} -h')"
-    }
-  }
-  if let Some(hint) = commands.issue_verb_hint(noun) {
-    return f"unknown command: '{noun}'; {hint} (see 'lll issue -h')"
-  }
-  f"unknown command: '{noun}' (see 'lll --help')"
 }

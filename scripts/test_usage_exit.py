@@ -20,18 +20,18 @@ PROBE = '--zz-usage-probe'
 # Spellings that dispatch but are never completed (flags.Command.hidden_alias
 # and hidden verbs); they must refuse a bad flag the same way.
 HIDDEN = [('issue', 'read'), ('doc', 'read'), ('finding', 'read'), ('finding', 'view'), ('config', 'show')]
-# dispatch arms that print the top-level usage whatever follows.
+# First words that print the top-level usage whatever follows.
 USAGE_PAGES = {'--help', '-h'}
 
 
 def dispatched_nouns():
-    """Every noun src/main.lis's dispatch match routes, as its arms spell
-    them: the real command table, which also holds the nouns completion does
-    not list (version, --version, -v)."""
-    source = (Path(__file__).resolve().parent.parent / 'src' / 'main.lis').read_text()
-    body = re.search(r'fn dispatch\(.*?\n}\n', source, re.S).group(0)
-    arms = re.findall(r'^\s+((?:"[^"]+"(?: \| )?)+) =>', body, re.M)
-    return [n for arm in arms for n in re.findall(r'"([^"]+)"', arm)]
+    """Every noun and noun spelling in the command table (LLL-684,
+    src/commands/table.lis), which also holds the nouns completion does not
+    list (version's --version and -v)."""
+    source = (Path(__file__).resolve().parent.parent / 'src' / 'commands' / 'table.lis').read_text()
+    body = re.search(r'pub fn nouns\(.*?\n}\n', source, re.S).group(0)
+    names = re.findall(r'flags\.Noun \{ name: "([^"]+)"(?:, alias: "([^"]*)")?', body)
+    return [w for name, alias in names for w in [name, *alias.split()]]
 
 
 def main():
@@ -65,6 +65,27 @@ def main():
             done = run(*args)
             if done.returncode != 2:
                 wrong.append(f"lll {' '.join(args)}: exit {done.returncode}: {(done.stderr or done.stdout).strip()[:160]}")
+        # PR #348 review: the wording these command lines get, through the real
+        # binary. (args, exit code, must contain, must not contain).
+        worded = [
+            (['issue', 'comment', 'ENG-1', '1', '--delete'], 2, "unknown flag: '--delete'", 'run: lll issue delete'),
+            (['issue', 'comment', 'ENG-1', '--edit'], 2, "unknown flag: '--edit'", 'run: lll issue'),
+            (['label', 'edit', 'bug', '--delete'], 2, "unknown flag: '--delete'", 'run: lll'),
+            (['issue', 'list', '--url', 'http://x'], 2, 'This command takes no --url', 'does not url'),
+            (['issue', 'update', 'ENG-1', '--claim'], 2, 'to claim, run: lll issue claim ENG-1', None),
+            (['whoami', '--team', 'X'], 2, 'run it bare to see the identity', None),
+            (['version', '--team', 'X'], 2, 'server-wide: no team applies', 'LLL_TEAM='),
+            (['completions', 'bash', '--url', 'http://x'], 2, "unknown flag: '--url'", 'endpoint'),
+            (['team', 'set-emoji', 'ENG'], 2, "an empty '' clears it", None),
+            (['team', 'set-accent', 'ENG'], 2, "an empty '' clears it", None),
+            (['attach', '--key', 'bad!'], 2, 'a team key is a letter', None),
+            (['issue', 'create', '-t', 'x', '--priority', '9'], 2, "unknown priority '9'", None),
+        ]
+        for args, code, want, unwanted in worded:
+            done = run(*args)
+            said = done.stderr + done.stdout
+            if done.returncode != code or want not in said or (unwanted and unwanted in said):
+                wrong.append(f"lll {' '.join(args)}: exit {done.returncode}: {said.strip()[:200]}")
         # --help is help, not the version (#340 review).
         for noun in ('version', '--version', '-v'):
             done = run(noun, '--help')

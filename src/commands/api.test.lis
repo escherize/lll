@@ -39,10 +39,10 @@ fn schema_states_the_auth_and_filter_basics() {
 // ---------------------------------------------------------------- the spec
 
 #[test]
-fn api_spec_offers_body_schema_and_help() {
+fn api_spec_offers_body_and_schema() {
   let spec = api_spec()
   // Completions read tokens(): --body and --schema are taught, --help is
-  // declared but hidden and never offered.
+  // never offered.
   let names = flags.tokens(spec)
   assert names.contains("--body")
   assert names.contains("--schema")
@@ -50,9 +50,8 @@ fn api_spec_offers_body_schema_and_help() {
   // --body takes a value; --schema does not.
   assert spec.find(|f| f.name == "--body").unwrap_or(flags.Flag { name: "", .. }).value
   assert !spec.find(|f| f.name == "--schema").unwrap_or(flags.Flag { name: "", value: true, .. }).value
-  let help = spec.find(|f| f.name == "--help")
-  assert help.is_some()
-  assert help.unwrap_or(flags.Flag { name: "", .. }).hidden
+  // --help is the table parser's, not a declared flag (LLL-684).
+  assert spec.find(|f| f.name == "--help").is_none()
 }
 
 // ---------------------------------------------------------------- the page

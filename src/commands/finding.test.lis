@@ -91,10 +91,10 @@ fn finding_view_and_read_dispatch_but_stay_out_of_help_and_completions() {
   let names = flags.command_names(finding_commands())
   assert !names.contains("view")
   assert !names.contains("read")
-  let assert Err(help) = finding(test_client("http://127.0.0.1:1", "", ""), ["lll", "finding", "--help"])
-  assert !help.message.contains("lll finding view")
-  assert !help.message.contains("lll finding read")
-  assert help.message.contains("lll doc view SLUG")
+  let help = help_page(["lll", "finding", "--help"])
+  assert !help.contains("lll finding view")
+  assert !help.contains("lll finding read")
+  assert help.contains("lll doc view SLUG")
 }
 
 #[test]

@@ -21,10 +21,6 @@ pub enum ErrorKind {
   Server,
   /// Anything else.
   Failed,
-  /// Not a failure: a help page was asked for. It travels the error path so
-  /// it short-circuits the verb before the verb can act (`lll label create
-  /// -h` must not create); main prints the message on stdout and exits 0.
-  Help,
 }
 
 /// A failure with its kind, the HTTP status behind it (0 when none) and the
@@ -124,7 +120,6 @@ fn is_refusal(code: Option<ServerCode>) -> bool {
 /// The exit code for a kind. The only place an exit code is decided.
 pub fn exit_code(kind: ErrorKind) -> int {
   match kind {
-    ErrorKind.Help => 0,
     ErrorKind.Usage => 2,
     ErrorKind.NotFound => 3,
     ErrorKind.Refused => 4,
@@ -158,7 +153,3 @@ pub fn failed(message: string) -> CliError {
   fail(ErrorKind.Failed, message)
 }
 
-/// A help page, asked for with -h or --help, or a noun with no verb.
-pub fn help(page: string) -> CliError {
-  fail(ErrorKind.Help, page)
-}

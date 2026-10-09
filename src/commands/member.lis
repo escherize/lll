@@ -4,7 +4,6 @@ import "go:encoding/json"
 import "go:os"
 import "go:strings"
 
-import "config"
 import "display"
 import "flags"
 import "models"
@@ -14,26 +13,6 @@ import "records"
 import "secret"
 import "tokens"
 import "writes"
-
-/// Dispatch `lll member <verb>` through the noun's Command table (TASK-307).
-/// The table is the one place a verb is declared: dispatch, `lll member
-/// --help` and shell completions all read it, so none of the three can drift.
-pub fn member(ctx: pb.Client, args: Slice<string>) -> Result<output.Output, pb.CliError> {
-  // 1.0 fleet: one member's details live under access.
-  if args.get(2) == Some("view") || args.get(2) == Some("show") {
-    return Err(flags.usage_error(
-      f"unknown member command: '{args.get(2).unwrap_or("")}'; did you mean 'lll member access NAME'? (it shows one member's teams and mode; 'lll member list' shows them all)",
-    ))
-  }
-  flags.dispatch(
-    ctx,
-    "member",
-    "work with members",
-    member_intro(),
-    member_commands(),
-    args,
-  )
-}
 
 /// Every member verb, as a value. `page` is the hand-written help invite,
 /// remove and set-password already had; their former pre-parse `--help`
@@ -46,6 +25,7 @@ pub fn member_commands() -> Slice<flags.Command> {
   [
     flags.Command {
       name: "list",
+      access: flags.Access.Read,
       summary: "list members (name, email, access)",
       spec: member_list_spec(),
       run: member_list,
@@ -53,6 +33,7 @@ pub fn member_commands() -> Slice<flags.Command> {
     },
     flags.Command {
       name: "create",
+      access: flags.Access.Write,
       alias: "add",
       summary: "add a member",
       page: member_add_page(),
@@ -63,6 +44,7 @@ pub fn member_commands() -> Slice<flags.Command> {
     },
     flags.Command {
       name: "invite",
+      access: flags.Access.Write,
       summary: "add + temp password + the lines they run (any member; the admin credentials work too)",
       page: member_invite_page(),
       spec: member_invite_spec(),
@@ -72,6 +54,7 @@ pub fn member_commands() -> Slice<flags.Command> {
     },
     flags.Command {
       name: "passes",
+      access: flags.Access.Write,
       summary: "make private, copyable human teammate tokens for a local board",
       page: member_passes_page(),
       spec: member_passes_spec(),
@@ -80,6 +63,7 @@ pub fn member_commands() -> Slice<flags.Command> {
     },
     flags.Command {
       name: "delete",
+      access: flags.Access.Write,
       alias: "remove",
       summary: "delete a member record ('remove' is the same command); to revoke access and keep it: member access NAME --no-teams",
       page: member_remove_page(),
@@ -90,6 +74,7 @@ pub fn member_commands() -> Slice<flags.Command> {
     },
     flags.Command {
       name: "access",
+      access: flags.Access.Write,
       summary: "show or change what a member can see and whether they can write; --no-teams revokes, deleting nothing",
       page: member_access_page(),
       spec: member_access_spec(),
@@ -99,6 +84,7 @@ pub fn member_commands() -> Slice<flags.Command> {
     },
     flags.Command {
       name: "set-password",
+      access: flags.Access.Write,
       summary: "set a member's login password (superuser), or your own with --old-password",
       page: member_set_password_page(),
       spec: set_password_spec(),
@@ -271,6 +257,7 @@ fn member_add_spec() -> Slice<flags.Flag> {
     },
     flags.Flag {
       name: "--password",
+      stdin: true,
       value: true,
       hint: "pw",
       help: "set a usable login password with a real --email ('-' reads it from stdin);\notherwise creates a record only",
@@ -663,6 +650,11 @@ fn member_access_spec() -> Slice<flags.Flag> {
       help: "they can change things in the teams they see",
       ..,
     },
+    flags.Flag {
+      name: "--json",
+      help: "the member afterwards as JSON: the object 'lll member list --json' prints per item",
+      ..,
+    },
   ])
 }
 
@@ -677,6 +669,7 @@ Usage:
   lll member access NAME --read-only           reads only
   lll member access NAME --no-teams            revoke (nothing is deleted)
   lll member access NAME --all-teams --read-write
+  lll member access NAME --json                show it as JSON
 
 Showing access works with any token. Changing it needs administrator
 credentials (--admin-email/--admin-password, or LLL_ADMIN_EMAIL and
@@ -720,6 +713,7 @@ fn member_access_cmd(input: flags.CommandInput) -> Result<output.Output, pb.CliE
   let set_mode = p.given("--read-only") || p.given("--read-write")
   let mut out = output.none()
   if !set_teams && !edit_teams && !set_mode {
+    if p.given("--json") { return json_value(with_team_keys(m, teams), "member") }
     out = out.line(f"{m.name}: {before}")
     return Ok(out.then(owner_cap(ctx, m, key_of)?))
   }
@@ -814,7 +808,21 @@ fn member_access_cmd(input: flags.CommandInput) -> Result<output.Output, pb.CliE
   } else {
     out = out.line(f"{m.name}: {after} (was {before})")
   }
+  if p.given("--json") {
+    let changed = records.find_member_as(ctx, su, name)?.unwrap_or(m.with_access(wanted))
+    return json_value(with_team_keys(changed, teams), "member")
+  }
   Ok(out.then(owner_cap(ctx, m.with_access(wanted), key_of)?))
+}
+
+/// The member object 'member list --json' prints: team_keys beside the ids,
+/// for the teams the caller can see (fleet case 12, LLL-552).
+fn with_team_keys(m: models.Member, teams: Slice<models.Team>) -> models.Member {
+  let mut withkeys = m
+  withkeys.team_keys = m.teams
+    .filter(|id| teams.any(|t| t.id == id))
+    .map(|id| teams.find(|t| t.id == id).map_or("", |t| t.key))
+  withkeys
 }
 
 /// A member's recorded access. A record from a server before scoped

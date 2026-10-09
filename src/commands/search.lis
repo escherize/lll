@@ -20,10 +20,23 @@ import "records"
 /// lines around the match (LLL-96). `lll issue list --search` stays the
 /// cheap title filter; this is the one that finds a word buried in a
 /// comment from last month.
-pub fn search_cmd(ctx: pb.Client, args: Slice<string>) -> Result<output.Output, pb.CliError> {
-  let spec = search_spec()
-  let usage = flags.usage("lll search", spec, "TEXT...")
-  let p = flags.parse_n(spec, args, 2, 64, usage)?
+pub fn search_command() -> flags.Command {
+  flags.Command {
+    name: "search",
+    access: flags.Access.Read,
+    summary: "full-text search: issues, comments, docs, ranked, with context",
+    spec: search_spec(),
+    positional: "TEXT...",
+    missing: "what to search for?",
+    run: search_cmd,
+    ..,
+  }
+}
+
+fn search_cmd(input: flags.CommandInput) -> Result<output.Output, pb.CliError> {
+  let ctx = input.ctx
+  let usage = input.usage
+  let p = input.parsed
   let mut words: Slice<string> = []
   for i in 0..p.positional_count() {
     words = words.append(p.nth(i))

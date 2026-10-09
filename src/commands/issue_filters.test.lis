@@ -10,14 +10,15 @@ import "models"
 fn cli_and_web_filters_share_values_and_validation() {
   let spec = issue_list_spec()
   let assert Ok(p) = flags.parse(spec, ["lll", "issue", "list", "--state", "in-review", "--assignee", "Alice O'Neil", "--label", "needs review", "--project", "Release 2"], 3, false, "")
-  let assert Ok(cli) = filters_from(p)
+  let assert Ok(cli) = filters_from(p, "")
   let assert Ok(web) = query.Filters { state: ["in-review"], assignee: "Alice O'Neil", label: ["needs review"], project: "Release 2", .. }.parse()
   assert cli.one_state() == web.one_state()
   assert cli.assignee == web.assignee
   assert cli.one_label() == web.one_label()
   assert cli.project == web.project
-  let assert Ok(bad) = flags.parse(spec, ["lll", "issue", "list", "--state", "bogus"], 3, false, "")
-  let assert Err(cli_error) = filters_from(bad)
+  // The parser refuses a state outside the set (LLL-684) with the words the
+  // board's parser uses.
+  let assert Err(cli_error) = flags.parse(spec, ["lll", "issue", "list", "--state", "bogus"], 3, false, "")
   let assert Err(web_error) = query.Filters { state: ["bogus"], .. }.parse()
   assert cli_error == web_error
 }
@@ -26,10 +27,10 @@ fn cli_and_web_filters_share_values_and_validation() {
 fn missing_filter_state_is_optional_but_explicit_empty_cli_state_is_invalid() {
   let spec = issue_list_spec()
   let assert Ok(p) = flags.parse(spec, ["lll", "issue", "list"], 3, false, "")
-  let assert Ok(empty) = filters_from(p)
+  let assert Ok(empty) = filters_from(p, "")
   assert empty.states.is_empty()
   let assert Ok(explicit) = flags.parse(spec, ["lll", "issue", "list", "--state", ""], 3, false, "")
-  assert filters_from(explicit).is_err()
+  assert filters_from(explicit, "").is_err()
   assert query.state("").is_err()
 }
 
@@ -49,7 +50,7 @@ fn repeated_filters_mean_the_union_and_undeclared_repeats_are_refused() {
   }
   // List KEEPS both, where it used to keep only the second.
   let assert Ok(listed) = flags.parse(filter_spec(FilterUse.List), args, 0, false, "")
-  let assert Ok(list_filters) = filters_from(listed)
+  let assert Ok(list_filters) = filters_from(listed, "")
   assert list_filters.label.length() == 2
   assert list_filters.label.get(0) == Some("first")
 
@@ -67,17 +68,16 @@ fn repeated_filters_mean_the_union_and_undeclared_repeats_are_refused() {
     ["--state", "todo", "--state", "in-review"],
     0, false, "",
   )
-  let assert Ok(state_filters) = filters_from(states)
+  let assert Ok(state_filters) = filters_from(states, "")
   assert state_filters.states.length() == 2
   assert state_filters.states.get(1) == Some(models.IssueState.InReview)
 
   // A bad value anywhere in the repetition is still caught, not just the first.
-  let assert Ok(bad) = flags.parse(
+  assert flags.parse(
     filter_spec(FilterUse.List),
     ["--state", "todo", "--state", "bogus"],
     0, false, "",
-  )
-  assert filters_from(bad).is_err()
+  ).is_err()
 }
 
 /// The clause a repeated filter produces: an OR inside the AND, parenthesised

@@ -1,6 +1,8 @@
 # The lll CLI contract
 
-`lll help contract` prints this page.
+`lll help contract` prints this page, then a command reference generated
+from the binary's command table: every verb, whether it writes, whether it
+takes `--json`, and its other spellings.
 
 This is the surface lll 1.0.0 promises under SemVer. Changing one of these
 parts in a way that breaks a script needs a new major version; anything not
@@ -195,6 +197,7 @@ These aliases are permanent:
 | `show` | `view` | `issue`, `doc` |
 | `read` | `view` | `issue`, `doc`, `finding` (hidden: no help row, no completion) |
 | `show` | `list` | `config` (hidden: no help row, no completion) |
+| `--list` | `list` | `config` (the verb before 1.0, after `git config --list`) |
 | `add` | `create` | `member` |
 | `remove` | `delete` | `member` |
 | `edit`, `update` | each other | `issue`, `doc`, `project`, `label` |

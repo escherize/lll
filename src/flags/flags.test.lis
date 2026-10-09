@@ -32,15 +32,36 @@ fn spec() -> Slice<Flag> {
   ]
 }
 
-fn is_help(e: pb.CliError) -> bool {
-  match e.kind {
-    pb.ErrorKind.Help => true,
-    _ => false,
+fn argv(rest: Slice<string>) -> Slice<string> {
+  ["lll", "issue", "list"].append(rest...)
+}
+
+/// A one-noun table, so the parser is exercised as main calls it.
+fn table(noun: string, cmds: Slice<Command>) -> Slice<Noun> {
+  [Noun { name: noun, shape: Shape.Verbs(cmds), .. }]
+}
+
+/// Parse a command line against `cmds` and run it, as main does. A help
+/// request is not run: it comes back as the error "help: PAGE".
+fn ran(noun: string, cmds: Slice<Command>, args: Slice<string>) -> Result<output.Output, pb.CliError> {
+  match parse_command_line(table(noun, cmds), args)? {
+    Invocation.Run(call) => run_call(test_ctx(), call),
+    Invocation.Help(Topic.Page(page)) => Err(pb.failed(f"help: {page}")),
+    Invocation.Help(_) => Err(pb.failed("help")),
   }
 }
 
-fn argv(rest: Slice<string>) -> Slice<string> {
-  ["lll", "issue", "list"].append(rest...)
+/// The page a command line asks for, or None when it is not a help request.
+fn help_page(noun: string, cmds: Slice<Command>, args: Slice<string>) -> Option<string> {
+  match parse_command_line(table(noun, cmds), args) {
+    Ok(Invocation.Help(Topic.Page(page))) => Some(page),
+    _ => None,
+  }
+}
+
+/// `lll issue list ARGS` against a list verb with `spec`.
+fn list_help(spec: Slice<Flag>, rest: Slice<string>) -> Option<string> {
+  help_page("issue", [Command { name: "list", access: Access.Read, spec, run: |_| Ok(output.none()), .. }], argv(rest))
 }
 
 // ------------------------------------------------------------------ parse
@@ -50,7 +71,7 @@ fn end_of_options_preserves_dash_positionals_and_disables_help_and_flags() {
   for table in [spec(), bare_spec()] {
     let assert Ok(p) = parse_n(table, argv(["--json", "--", "--help", "--state=done", "--", "-file"]), 3, 4, "usage")
     assert p.given("--json")
-    assert !p.given("--help") && !p.given("--state")
+    assert !p.given("--state")
     assert p.nth(0) == "--help"
     assert p.nth(1) == "--state=done"
     assert p.nth(2) == "--"
@@ -321,13 +342,10 @@ fn tokens_list_every_spelling_and_skip_hidden_flags() {
 
 #[test]
 fn help_is_answered_even_when_the_spec_never_declares_it() {
-  // spec() has no --help entry; this is the case that was broken.
-  let assert Err(msg) = parse(bare_spec(), argv(["-h"]), 3, false, "lll issue list")
-  assert is_help(msg)
-  assert msg.message.contains("usage: lll issue list")
-  assert msg.message.contains("--state")
-  let assert Err(long) = parse(bare_spec(), argv(["--help"]), 3, false, "lll issue list")
-  assert is_help(long)
+  let assert Some(page) = list_help(bare_spec(), ["-h"])
+  assert page.contains("usage: lll issue list")
+  assert page.contains("--state")
+  assert list_help(bare_spec(), ["--help"]).is_some()
 }
 
 #[test]
@@ -337,41 +355,43 @@ fn help_wins_over_the_errors_that_used_to_pre_empt_it() {
   let req = [
     Flag { name: "-t", value: true, hint: "title", required: true, help: "title", .. },
   ]
-  let assert Err(msg) = parse(req, argv(["--help"]), 3, false, "lll issue create")
-  assert is_help(msg)
+  assert list_help(req, ["--help"]).is_some()
   // And an unknown flag alongside help: the help still wins, because someone
   // typing both is asking what the right spelling is.
-  let assert Err(both) = parse(bare_spec(), argv(["--nope", "-h"]), 3, false, "u")
-  assert is_help(both)
+  assert list_help(bare_spec(), ["--nope", "-h"]).is_some()
 }
 
 #[test]
-fn help_never_returns_ok_so_a_verb_body_cannot_run() {
-  // The load-bearing property. Recording --help as a parsed VALUE instead
-  // would make `lll label create -h` parse happily and then execute - a
-  // write. Every caller writes `flags.parse(...)?`, so an Err short-circuits
-  // the verb the same way a bad flag does.
-  let assert Err(_) = parse(bare_spec(), argv(["-h"]), 3, false, "u")
-  let assert Err(_) = parse(bare_spec(), argv(["--help"]), 3, true, "u")
+fn help_never_reaches_the_verb_body() {
+  // The load-bearing property: `lll label create -h` must not run the
+  // create, which is a write.
+  let cmds = [Command { name: "create", access: Access.Write, positional: "[NAME]", run: |_| Err(pb.failed("ran")), .. }]
+  for args in [["lll", "label", "create", "-h"], ["lll", "label", "create", "x", "--help"]] {
+    let assert Err(e) = ran("label", cmds, args)
+    assert e.message.starts_with("help: ")
+  }
 }
 
 #[test]
 fn help_for_a_verb_with_no_flags_says_so_instead_of_printing_nothing() {
-  let assert Err(msg) = parse([], argv(["-h"]), 3, false, "")
-  assert is_help(msg)
-  assert msg.message == "this command takes no flags (see 'lll --help')"
+  let cmds = [Command { name: "list", access: Access.Read, run: |_| Ok(output.none()), .. }]
+  let assert Some(page) = help_page("team", cmds, ["lll", "team", "list", "-h"])
+  assert page == "usage: lll team list"
+  assert usage_help("", []) == "this command takes no flags (see 'lll --help')"
 }
 
 #[test]
 fn a_help_spelling_inside_a_value_is_not_a_help_request() {
   // `--state -h` means the state is literally "-h": odd, but it is a VALUE,
   // and treating it as help would refuse a legitimate parse.
+  assert list_help(bare_spec(), ["--state", "-h"]).is_none()
   let assert Ok(parsed) = parse(bare_spec(), argv(["--state", "-h"]), 3, false, "u")
   assert parsed.one("--state") == "-h"
 }
 
 #[test]
 fn implicit_help_does_not_consume_a_literal_flag_value() {
+  assert list_help(spec(), ["-t", "--help"]).is_none()
   let assert Ok(parsed) = parse(spec(), argv(["-t", "--help"]), 3, false, "test")
   assert parsed.one("-t") == "--help"
   let assert Ok(short) = parse(spec(), argv(["-t", "-h"]), 3, false, "test")
@@ -477,17 +497,15 @@ fn dispatch_preserves_help_as_an_alias_value_and_stops_real_help() {
   let commands = [Command {
     name: "create", summary: "create", page: "create help",
     spec: [Flag { name: "-b", alias: "--body -m --message", value: true, .. }],
-    positional: "", run: |input| {
+    positional: "", access: Access.Write, run: |input| {
       if input.parsed.one("-b") != "--help" { return Err(pb.failed("wrong body")) }
       Ok(output.none())
     },
     ..
   }]
   for alias in ["-b", "--body", "-m", "--message"] {
-    assert dispatch(test_ctx(), "doc", "", "", commands, ["lll", "doc", "create", alias, "--help"]).is_ok()
-    let assert Err(help) = dispatch(test_ctx(), "doc", "", "", commands, ["lll", "doc", "create", alias, "--help", "-h"])
-    assert is_help(help)
-    assert help.message == "create help"
+    assert ran("doc", commands, ["lll", "doc", "create", alias, "--help"]).is_ok()
+    assert help_page("doc", commands, ["lll", "doc", "create", alias, "--help", "-h"]) == Some("create help")
   }
 }
 
@@ -504,7 +522,7 @@ fn team_extraction_preserves_values_of_every_alias() {
 #[test]
 fn dispatch_hands_over_unicode_and_empty_positionals_without_reinterpreting_them() {
   let commands = [Command {
-    name: "set", summary: "set", page: "", spec: [], positional: "KEY VALUE",
+    name: "set", summary: "set", page: "", spec: [], positional: "KEY VALUE", access: Access.Write,
     run: |input| {
       if input.parsed.positional_count() != 2 { return Err(pb.failed("missing positional")) }
       if input.parsed.first() != "ÉNG-12" || input.parsed.nth(1) != "" { return Err(pb.failed("changed positional")) }
@@ -512,10 +530,13 @@ fn dispatch_hands_over_unicode_and_empty_positionals_without_reinterpreting_them
     },
     ..
   }]
-  assert dispatch(test_ctx(), "test", "", "", commands, ["lll", "test", "set", "ÉNG-12", ""]).is_ok()
-  let assert Err(extra) = dispatch(test_ctx(), "test", "", "", commands, ["lll", "test", "set", "ÉNG-12", "", "extra"])
+  assert ran("test", commands, ["lll", "test", "set", "ÉNG-12", ""]).is_ok()
+  let assert Err(extra) = ran("test", commands, ["lll", "test", "set", "ÉNG-12", "", "extra"])
   assert extra.message.contains("unexpected argument: 'extra'")
-  let assert Err(flag) = dispatch(test_ctx(), "test", "", "", commands, ["lll", "test", "set", "--unknown"])
+  let assert Err(missing) = ran("test", commands, ["lll", "test", "set", "ÉNG-12"])
+  assert pb.exit_code(missing.kind) == 2
+  assert missing.message == "usage: lll test set KEY VALUE"
+  let assert Err(flag) = ran("test", commands, ["lll", "test", "set", "--unknown"])
   assert flag.message.contains("unknown flag: '--unknown'")
 }
 
@@ -580,7 +601,7 @@ fn retired_spellings_name_the_replacement_the_verb_declares() {
 fn hidden_alias_dispatches_under_the_canonical_name_without_help_or_completion() {
   let commands = [
     Command {
-      name: "view", alias: "show", hidden_alias: "read", summary: "view", positional: "KEY",
+      name: "view", alias: "show", hidden_alias: "read", summary: "view", positional: "KEY", access: Access.Read,
       run: |input| {
         if input.parsed.first() != "DEMO-1" { return Err(pb.failed("wrong key")) }
         Ok(output.none())
@@ -588,32 +609,32 @@ fn hidden_alias_dispatches_under_the_canonical_name_without_help_or_completion()
       ..
     },
   ]
-  assert dispatch(test_ctx(), "issue", "", "", commands, ["lll", "issue", "read", "DEMO-1"]).is_ok()
-  let assert Err(refused) = dispatch(test_ctx(), "issue", "", "", commands, ["lll", "issue", "read", "--zz"])
+  assert ran("issue", commands, ["lll", "issue", "read", "DEMO-1"]).is_ok()
+  let assert Err(refused) = ran("issue", commands, ["lll", "issue", "read", "--zz"])
   assert pb.exit_code(refused.kind) == 2
   assert refused.message.contains("usage: lll issue view KEY")
-  let assert Err(help) = dispatch(test_ctx(), "issue", "", "", commands, ["lll", "issue", "--help"])
-  assert !help.message.contains("read")
+  let assert Some(help) = help_page("issue", commands, ["lll", "issue", "--help"])
+  assert !help.contains("read")
   assert command_names(commands).equals(["view", "show"])
-  let without = [Command { name: "list", summary: "list", run: |_| Ok(output.none()), .. }]
-  let assert Err(plain) = dispatch(test_ctx(), "team", "", "", without, ["lll", "team", "read"])
+  let without = [Command { name: "list", summary: "list", access: Access.Read, run: |_| Ok(output.none()), .. }]
+  let assert Err(plain) = ran("team", without, ["lll", "team", "read"])
   assert pb.exit_code(plain.kind) == 2
 }
 
 #[test]
 fn command_alias_dispatch_uses_canonical_help_and_parser() {
   let commands = [Command {
-    name: "view", alias: "show", summary: "view", page: "", spec: [],
+    name: "view", alias: "show", summary: "view", page: "", spec: [], access: Access.Read,
     positional: "KEY", run: |input| {
       if input.parsed.first() != "DEMO-1" { return Err(pb.failed("wrong key")) }
       Ok(output.none())
     },
     ..
   }]
-  assert dispatch(test_ctx(), "issue", "", "", commands, ["lll", "issue", "show", "DEMO-1"]).is_ok()
-  let assert Err(help) = dispatch(test_ctx(), "issue", "", "", commands, ["lll", "issue", "show", "--help"])
-  assert help.message.contains("lll issue view KEY")
-  assert !help.message.contains("lll issue show")
+  assert ran("issue", commands, ["lll", "issue", "show", "DEMO-1"]).is_ok()
+  let assert Some(help) = help_page("issue", commands, ["lll", "issue", "show", "--help"])
+  assert help.contains("lll issue view KEY")
+  assert !help.contains("lll issue show")
   assert command_names(commands).equals(["view", "show"])
   assert resolve_command(commands, "read").is_none()
 }
@@ -623,9 +644,9 @@ fn command_alias_dispatch_uses_canonical_help_and_parser() {
 #[test]
 fn hidden_command_dispatches_without_help_row_or_completion() {
   let commands = [
-    Command { name: "near", summary: "near", run: |_| Ok(output.none()), .. },
+    Command { name: "near", summary: "near", access: Access.Read, run: |_| Ok(output.none()), .. },
     Command {
-      name: "view", alias: "read", hidden: true, summary: "view", positional: "SLUG",
+      name: "view", alias: "read", hidden: true, summary: "view", positional: "SLUG", access: Access.Read,
       run: |input| {
         if input.parsed.first() != "a-slug" { return Err(pb.failed("wrong slug")) }
         Ok(output.none())
@@ -633,18 +654,18 @@ fn hidden_command_dispatches_without_help_row_or_completion() {
       ..
     },
   ]
-  assert dispatch(test_ctx(), "finding", "", "", commands, ["lll", "finding", "view", "a-slug"]).is_ok()
-  assert dispatch(test_ctx(), "finding", "", "", commands, ["lll", "finding", "read", "a-slug"]).is_ok()
-  let assert Err(help) = dispatch(test_ctx(), "finding", "", "", commands, ["lll", "finding", "--help"])
-  assert help.message.contains("lll finding near")
-  assert !help.message.contains("view")
-  assert !help.message.contains("read")
+  assert ran("finding", commands, ["lll", "finding", "view", "a-slug"]).is_ok()
+  assert ran("finding", commands, ["lll", "finding", "read", "a-slug"]).is_ok()
+  let assert Some(help) = help_page("finding", commands, ["lll", "finding", "--help"])
+  assert help.contains("lll finding near")
+  assert !help.contains("view")
+  assert !help.contains("read")
   assert command_names(commands).equals(["near"])
 }
 
 #[test]
 fn empty_command_alias_does_not_resolve_an_empty_verb() {
-  let commands = [Command { name: "list", run: |_| Ok(output.none()), .. }]
+  let commands = [Command { name: "list", access: Access.Read, run: |_| Ok(output.none()), .. }]
   assert resolve_command(commands, "").is_none()
   assert command_names(commands).equals(["list"])
 }
@@ -653,11 +674,12 @@ fn empty_command_alias_does_not_resolve_an_empty_verb() {
 /// is named back.
 #[test]
 fn a_top_level_command_typed_as_a_verb_is_suggested() {
-  let commands = [Command { name: "list", summary: "list", run: |_| Ok(output.none()), .. }]
-  let assert Err(e) = dispatch(test_ctx(), "member", "", "", commands, ["lll", "member", "whoami"])
+  let commands = [Command { name: "list", summary: "list", access: Access.Read, run: |_| Ok(output.none()), .. }]
+  let nouns = table("member", commands).append(Noun { name: "whoami", shape: Shape.Single(commands[0]), .. })
+  let assert Err(e) = parse_command_line(nouns, ["lll", "member", "whoami"])
   assert pb.exit_code(e.kind) == 2
   assert e.message.contains("unknown member command: 'whoami'; did you mean 'lll whoami'?")
-  let assert Err(plain) = dispatch(test_ctx(), "member", "", "", commands, ["lll", "member", "frob"])
+  let assert Err(plain) = ran("member", commands, ["lll", "member", "frob"])
   assert !plain.message.contains("did you mean")
 }
 
@@ -676,4 +698,31 @@ fn the_url_default_hint_follows_where_the_url_came_from() {
   for (source, want) in rows {
     assert url_default_hint(source) == want
   }
+}
+
+/// Only one flag may read stdin ('-') per command line (LLL-686): with two,
+/// which line answers which would depend on the order the command reads
+/// them. The table says which flags read it, so the parser refuses.
+#[test]
+fn two_flags_reading_stdin_are_refused() {
+  let spec = [
+    Flag { name: "--admin-password", value: true, stdin: true, .. },
+    Flag { name: "--password", value: true, stdin: true, .. },
+    Flag { name: "-b", value: true, .. },
+  ]
+  let assert Err(both) = parse_n(spec, argv(["--admin-password", "-", "--password", "-"]), 3, 0, "u")
+  assert pb.exit_code(both.kind) == 2
+  assert both.message == "only one of --admin-password and --password can read stdin ('-'); pass the other as a value"
+  assert parse_n(spec, argv(["--admin-password", "-", "--password", "pw", "-b", "-"]), 3, 0, "u").is_ok()
+}
+
+/// Reading a flag the spec does not declare is a bug in the verb (LLL-684):
+/// it stops with an internal error instead of answering "" forever.
+#[test]
+fn reading_an_undeclared_flag_is_an_internal_error() {
+  let assert Ok(p) = parse_n(bare_spec(), argv(["--json"]), 3, 0, "u")
+  assert p.given("--json")
+  let read = recover { p.one("--title") }
+  let assert Err(pv) = read
+  assert pv.message().contains("which its spec does not declare")
 }

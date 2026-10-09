@@ -79,7 +79,7 @@ CALLERS: dict[tuple[str, str], set[tuple[str, str]]] = {
     ('src/commands/watch.lis', 'watch_stream'): {('src/commands/watch.lis', 'watch')},
     ('src/commands/watch.lis', 'run_issue_watch'): {('src/commands/watch.lis', 'issue_watch')},
     ('src/commands/watch.lis', 'watch_ready'): {('src/commands/watch.lis', 'watch_stream')},
-    ('src/commands/up.lis', 'up'): {('src/main.lis', 'dispatch')},
+    ('src/commands/up.lis', 'up'): {('src/commands/up.lis', 'up_command')},
     ('src/commands/up_team.lis', 'ensure_team'): {('src/commands/up.lis', 'up')},
     ('src/commands/up_team.lis', 'resolve_team'): {('src/commands/up_team.lis', 'ensure_team')},
     ('src/commands/up_team.lis', 'board_identity'): {('src/commands/up.lis', 'up')},
