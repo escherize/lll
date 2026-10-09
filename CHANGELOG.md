@@ -70,6 +70,8 @@ minors. Issue keys are on the project's own board (`lll issue view KEY`).
 - A refused `--if-unchanged-since` update prints the same command with the
   issue's current stamp, ready to rerun. `--description-append` help says it
   applies at write time and needs no stamp beside concurrent appends.
+- `lll issue priority` (or `state`, `assignee`, `label`, `project`) names
+  `lll issue update KEY --priority <name>`.
 - `issue update --claim` exits 2 with "to claim, run: lll issue claim KEY"
   instead of the update usage.
 

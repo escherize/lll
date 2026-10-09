@@ -795,7 +795,7 @@ fn expired_token(tok: string, origin: string) -> CliError {
 /// saved token, so a login would not take effect while it is set.
 fn token_fix(origin: string) -> string {
   if origin == "env:LLL_TOKEN" {
-    return "LLL_TOKEN outranks the saved token: set it to a valid token, or unset it and use the saved one. Then 'lll config check' to verify"
+    return "LLL_TOKEN outranks the saved token: set it to a valid one ('lll token create <member>' mints an agent's), or unset it to use the saved one. Then 'lll config check' to verify"
   }
   "'lll token create <member>' (an agent's, minted by a superuser) or 'lll login --email <your email>' (a person); or, if you hold a valid token: 'lll login --token -' (reads it from stdin). Then 'lll config check' to verify"
 }

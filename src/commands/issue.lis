@@ -423,6 +423,11 @@ fn comment_verb_hint(word: string) -> Option<string> {
 /// one that is. Counts are from the fleet replay: 'assign' five times in
 /// thirty-shard runs, the rest once or twice.
 fn issue_synonym(verb: string) -> Option<string> {
+  // An update field typed as a verb (1.0 fleet, case 18). 'title' is a verb
+  // of its own, so it never reaches here.
+  if ["priority", "state", "assignee", "label", "project"].contains(verb) {
+    return Some(f"unknown issue command '{verb}'; to change it use 'lll issue update KEY --{verb} <name>'")
+  }
   let hint = match verb {
     "assign" => "take it for yourself with 'lll issue claim KEY-123'; assign someone else with 'lll issue update KEY-123 --assignee NAME'",
     "unassign" => "'lll issue release KEY-123' gives a claim back; 'lll issue update KEY-123 --assignee none' clears the assignee",

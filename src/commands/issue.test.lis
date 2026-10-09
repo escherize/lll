@@ -659,3 +659,11 @@ fn a_retry_command_swaps_in_the_current_stamp() {
   let inline = retry_command(["lll", "issue", "update", "ENG-1", "--if-unchanged-since=old"], "2026-10-09T02:55:01.501Z")
   assert inline == "lll issue update ENG-1 --if-unchanged-since='2026-10-09T02:55:01.501Z'"
 }
+
+/// An update field typed as a verb names the update flag (1.0 fleet).
+#[test]
+fn an_update_field_typed_as_a_verb_names_the_flag() {
+  let assert Some(hint) = issue_synonym("priority")
+  assert hint == "unknown issue command 'priority'; to change it use 'lll issue update KEY --priority <name>'"
+  assert issue_synonym("title").is_none()
+}
