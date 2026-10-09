@@ -126,6 +126,9 @@ Every issue `--json` prints the same object: `issue list` per item,
 | `refs` | string | external references |
 | `attachments` | array of string | stored file names |
 | `creator` | string | member record id |
+| `creator_name`, `assignee_name` | string | the member's name; `"hidden member"` when you cannot see the member; `""` when the relation is empty |
+| `project_name` | string | `""` when none |
+| `label_names` | array of string | the names of the labels in `labels` |
 | `created`, `updated` | string | RFC3339 |
 | `claim` | object or null | see below |
 
@@ -148,7 +151,7 @@ record, below), `docs` and `findings` (each a doc record, below).
 | Record | Covered fields |
 |---|---|
 | comment | `id`, `issue`, `author`, `author_kind`, `agent`, `body`, `created`, `updated` |
-| doc, finding | `id`, `team`, `slug`, `title`, `kind`, `body`, `area`, `paths`, `issues`, `confidence`, `last_editor`, `created`, `updated` |
+| doc, finding | `id`, `team`, `slug`, `title`, `kind`, `body`, `area`, `paths`, `issues`, `confidence`, `last_editor`, `author_name`, `last_editor_name`, `created`, `updated` |
 | team | `id`, `key`, `name`, `accent`, `emoji`, `archived` |
 | member | `id`, `name`, `email`, `kind`, `owner`, `scope`, `teams`, `mode`, `team_keys` |
 | label | `id`, `name`, `color`, `team` |
@@ -164,6 +167,10 @@ changed its content (`slug`, `title`, `kind`, `body`, `area` or `paths`), set
 by the server: the author until another member edits it. Linking an issue,
 confirming or refuting a finding, and a write that changes no content leave it
 unchanged. It is `""` on a doc with no author (absent in `issue view --json`).
+`author_name` and `last_editor_name` name those members as the issue object
+names its members: `"hidden member"` when you cannot see one, `""` when the
+field is empty. The docs and findings inside `issue view --json` do not carry
+them.
 `project view --json` lists its `issues` as records without `key` or
 `claim`; use `issue list --project NAME --json` for the issue object.
 

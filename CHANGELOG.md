@@ -23,6 +23,18 @@ minors. Issue keys are on the project's own board (`lll issue view KEY`).
 - `doc create -k finding` takes `--confidence suspected|confirmed`, as
   `finding create` does (LLL-641). On another kind it exits 2.
 - `--assignee ''` means `none` on `issue update`. It exited 2.
+- `doc edit --confidence suspected|confirmed` on a finding, the write
+  `finding confirm` makes (the note is cleared). `--confidence refuted` is
+  refused with the verb that refutes, `finding refute SLUG -b WHY`; on a
+  doc that is not a finding, `--confidence` exits 2.
+- Issue `--json` names its members and catalogues beside the ids:
+  `creator_name`, `assignee_name`, `project_name`, `label_names`. Doc and
+  finding `--json` add `author_name` and `last_editor_name`. A member you
+  cannot see is `"hidden member"`. The ids and `expand` are unchanged.
+- `issue view` (and `--raw`, which now lists labels) prints a label's team
+  beside a name another team you can see also uses: `Labels: bug (OPS)`.
+- `issue update --keep-claim`, with `--state done|cancelled`, keeps your
+  claim (see Changed).
 - `issue next --ready` is accepted, hidden: next only offers ready issues.
 - `lll issue next --help` states its output contract: stdout is the key (or
   one JSON object), stderr the notices, exit 5 when nothing is ready.
@@ -31,6 +43,19 @@ minors. Issue keys are on the project's own board (`lll issue view KEY`).
 
 ### Changed
 
+- Breaking, toward less surprise: one rule for finishing a claimed issue.
+  When the holder moves it to done or cancelled by any path (`issue close`,
+  `issue update --state done|cancelled`, the board's state picker, a native
+  PATCH or `/assignment`), the server releases the claim in the same
+  transaction and keeps the assignee, as close already did. `--keep-claim`
+  (`keep_claim` on the routes, `?keep_claim=true` on a PATCH) opts out.
+  Before, only close released, so workers followed `update --state done`
+  with `issue release`, which also cleared the assignee. Text output says
+  so: `Updated FLEET-4: state=done; released your claim (assignee kept)`.
+  A move by anyone else leaves the claim as before.
+- `issue release` on a done or cancelled issue that clears the assignee
+  names both repairs on the same line: `issue close KEY` releases and keeps
+  it, or re-assign with `issue update KEY --assignee NAME`.
 - `lll --help` shows `lll issue claim KEY` in its examples.
 - `issue update KEY --assignee <yourself>` adds one line to its text
   output: assigned is not claimed, and `lll issue claim KEY` holds the

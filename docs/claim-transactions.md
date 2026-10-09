@@ -8,7 +8,7 @@ Claim acquisition and release use authenticated server operations:
 | `POST /api/lll/issues/{issue-id}/release` | `{"claim_id":"observed-claim-id","agent":"","force":false,"reason":""}` | Remove that exact claim and clear assignment only if it still names the holder, in one transaction. `agent`, `force` and `reason` are optional. |
 | `POST /api/lll/issues/{issue-id}/close` | `{"claim_id":"observed-claim-id or empty","agent":"","force":false,"reason":"","keep_claim":false}` | Set the issue done and release its claim under the release rule, in one transaction; the assignee is kept. `keep_claim` keeps the holder's own claim. `claim_id` is required (`""` for none); the rest are optional. |
 | `POST /api/lll/issues/{issue-id}/renew` | `{"claim_id":"observed-claim-id","agent":"optional-label"}` | Restart that exact claim's expiry clock. Only the holder may renew, and a differing agent label is refused. The claim keeps its id and `created`. |
-| `POST /api/lll/issues/{issue-id}/assignment` | `{"claim_id":"observed-claim-id","fields":{"assignee":"member-id"},"agent":"","force":false,"reason":""}` | Update assignment and accompanying issue fields, releasing the observed claim if assignment is cleared. `agent`, `force` and `reason` are optional and apply only to that release. |
+| `POST /api/lll/issues/{issue-id}/assignment` | `{"claim_id":"observed-claim-id","fields":{"assignee":"member-id"},"agent":"","force":false,"reason":"","keep_claim":false}` | Update assignment and accompanying issue fields, releasing the observed claim if assignment is cleared, or if the holder moves the issue to done or cancelled (unless `keep_claim`). `agent`, `force`, `reason` and `keep_claim` are optional. |
 
 Members can claim only for themselves; an omitted member ID uses the
 authenticated member. Superusers must name the intended member. Naming the
@@ -43,6 +43,17 @@ comment, `--keep-claim` keeps it, and anyone else needs `--force` (CLI
 spelling `lll issue close KEY --force [--reason "why"]`) and leaves the
 forced-release comment. Only the holder may keep a claim while closing. The
 assignee is kept, so a done issue still names who did it.
+
+The same rule holds for every move into done or cancelled (the finish rule,
+fleet case 07). When the holder's own write moves the issue there, the claim
+is released in the transaction that saves the state and the assignee is
+kept: `/close`, `/assignment` with a `fields.state`, and a native PATCH of
+the issue record. Opt out with `keep_claim: true` on the claim routes, or
+`?keep_claim=true` on the PATCH; a PATCH names its session label as
+`?agent=LABEL`. A move by anyone else, or by another agent label on the same
+token, leaves the claim alone, as before: a PATCH carries no force and writes
+no comment. The CLI spells it `lll issue update KEY --state done
+[--keep-claim]`.
 
 A claimed issue cannot be deleted (LLL-662). The issues DELETE request is
 refused while a claim exists, for every caller, because the claim relation
