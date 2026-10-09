@@ -546,6 +546,12 @@ def seed_02(board):
     for t, s, l, p, hit in rows:
         if not hit:
             board.issue(t, state=s, labels=l, project=p)
+    # Another team with the same label and project names: dropping --team
+    # FLEET exports a superset (case 02 run 1 review, workers 05 and 09).
+    shop = board.create('teams', {'key': 'SHOP', 'name': 'Storefront'})['id']
+    shop_checkout = board.create('projects', {'team': shop, 'name': 'Checkout', 'status': 'started'})['id']
+    board.issue('Checkout coupon field ignores paste', state='todo', team=shop,
+                labels=[board.label('bug', team=shop)], project=shop_checkout)
 
 
 def judge_02(board, changes, after):
