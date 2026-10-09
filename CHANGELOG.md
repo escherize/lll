@@ -6,6 +6,84 @@ minors. Issue keys are on the project's own board (`lll issue view KEY`).
 
 ## [Unreleased]
 
+## [1.0.0] - 2026-10-09
+
+1.0 promises SemVer for the surface in `docs/cli-contract.md`: exit codes,
+the `--json` fields it names, the list envelope, and command, verb and flag
+spellings with their permanent aliases. A change that breaks a script built
+on them needs 2.0. Message wording and help text are not covered.
+
+The surface is the 0.9 surface with the changes listed below. The internals
+have been restructured: PocketBase's rules are the one owner of access, one
+write layer makes every record write, values are parsed into types where
+they arrive, and no credential or scope travels through the environment.
+
+### Upgrading from 0.9
+
+Read this list before you upgrade a server, a script or an agent prompt.
+Details are in the sections below.
+
+**Your saved login is now tied to its server.** The token in your home
+config is sent only to the url saved beside it. If a repo `.lll.toml`,
+`LLL_URL` or `--url` points a command at another server, the command exits 6
+and names where that url came from. `lll login` without `--url` refuses a
+url that only a repo file or `LLL_URL` chose (exit 2). Scripts that pair
+`LLL_URL` with `LLL_TOKEN` are unaffected. See Security (LLL-688).
+
+**Deploy the server before the clients.** The server runs five migrations
+on its first boot: per-team issue counters, the board's link viewers,
+identity-field rules, self-only member rename, and the doc `last_editor`
+field. Back up the server's data directory first. A 1.0 CLI against a 0.9
+server reports a bot-owner refusal as an administrator-credentials refusal,
+and refuses a description edit combined with `--assignee` ("invalid
+assignment update fields").
+
+Exit codes.
+
+- `lll issue update KEY --assignee NAME` (or `--assignee none`) on an issue
+  that another session's claim holds, refused for needing `--force`, exits 4
+  (refused). It exited 1.
+- `lll member access` recognizes the bot-owner refusal (a bot wider than
+  its owner) by its stable code `bot_exceeds_owner` and relays the server's
+  message (exit 1), as before. A 0.9 server sends no code, so against it a
+  1.0 CLI reports that refusal as needing administrator credentials (exit 4).
+
+Command line.
+
+- An issue key with a signed number (`ENG-+3`) is refused as not an issue ID
+  (exit 2). The CLI used to read it as `ENG-3`.
+- `--team` given twice on one command is refused (exit 2). It used to keep
+  the last value.
+- `lll login` without `--url` refuses when `LLL_URL` or a repo file names a
+  server other than the one in the home config. Pass `--url` to switch the
+  home config.
+
+Issue numbers.
+
+- An issue key is never reused. Deleting a team's highest-numbered issue no
+  longer hands its number to the next issue, so after such a delete the next
+  key is one higher than it would have been in 0.9.
+- **Breaking for member restores:** `lll import dir` keeps a mirror's issue
+  numbers only with a superuser token. Run as a member, it imports under new
+  numbers and prints which keys changed (`ENG-5 -> ENG-9`).
+- A member cannot choose or change an issue's number. Moving an issue to
+  another team gives it a fresh number there.
+
+Who may change what.
+
+- Only a superuser or the member itself renames a member. A bot is renamed
+  by a superuser only.
+- An issue's `creator` and `origin`, a member's owner, and a favorite's or
+  saved view's member are set when the record is created and cannot be
+  changed by a member. A comment's issue cannot be changed by anyone.
+
+Output and the board.
+
+- `lll doc view` and `lll finding view` print `Edited by:` when the last
+  editor is not the author; `doc view --json` has `last_editor`.
+- Board form posts refuse an unknown or out-of-team label, project or member
+  id by name, instead of passing the raw id to the server.
+
 ### Added
 
 - `issue comments KEY` is a hidden alias of `issue comment`: it lists the
@@ -48,6 +126,23 @@ minors. Issue keys are on the project's own board (`lll issue view KEY`).
   one JSON object), stderr the notices, exit 5 when nothing is ready.
 - The contract covers which stream carries what: data on stdout, notices on
   stderr, and with `--json` exactly one JSON value on stdout.
+- Docs record who last edited them. `last_editor` is set by the server from
+  the caller: the author on create, then the member whose update changes the
+  doc's content (slug, title, kind, body, area or paths). Linking an issue
+  and confirming or refuting a finding do not count. A member cannot send
+  it. When it is not the author, `lll doc view` and `lll finding view` print
+  `Edited by:`, and the board's doc page and docs index show it, with a
+  bot's owner and "hidden member" as for the author. `doc view --json` has a
+  `last_editor` field. Existing docs get their author as last editor. The
+  docs index's `?raw` author column reads `alice, edited by bob` for such a
+  doc. (LLL-682)
+- A per-team issue counter that only increases (`issue_counters`, in
+  `lll api --schema`). A superuser repairs one with
+  `POST /api/lll/teams/{team}/issue-counter` (`{"last": N, "reason": "..."}`);
+  the server logs who changed it, from what, and why, and refuses a value
+  below the team's highest live issue. Issue numbers are capped at
+  999,999,999; a team that reaches the cap is told which issue holds the
+  highest number. (LLL-678)
 
 ### Changed
 
@@ -175,167 +270,6 @@ minors. Issue keys are on the project's own board (`lll issue view KEY`).
   followed by a prompt (`member set-password` without `--password`, `login
   --create` without `--password`) reads the prompt's answer from the same
   stdin; the answer was lost and the command said there was no password.
-
-### Security
-
-- `member invite` printed the temporary password twice: on its own line
-  and inside the set-password hint, so redacting the first line still
-  leaked it. The hint now says `--old-password -`, which prompts with echo
-  off, and the password appears once.
-- A token goes only to the server it was saved for (LLL-688). The config
-  layers combine key by key, so a `.lll.toml` naming only `url = B`, or
-  `LLL_URL=B`, paired B with the home config's token for A: every command
-  run there, and the team check after `lll login --url A`, sent A's token
-  to B. A cloned repo could collect tokens that way. Now:
-  - the home config's token is sent only when the effective url is the
-    home config's url (a trailing slash aside; `localhost` and `127.0.0.1`
-    differ), or the default when it names none. Otherwise a command that
-    needs it exits 6, names the file, variable or flag that chose the url,
-    and leads with removing it; logging in there is offered last, with what
-    it sends and replaces. A token from `LLL_TOKEN` or a repo file still
-    goes to the url configured with it;
-  - `lll login` sends every request after it holds a token to the server it
-    logged in to, and says when a repo file or `LLL_URL` will send later
-    commands elsewhere. `lll up` says the same after it saves its CLI login;
-  - `lll login` without `--url` exits 2 when a repo file or `LLL_URL` chose
-    the url, instead of sending the password or token there;
-  - `lll member invite` sends the superuser token to, and prints, only a
-    `web_url` saved in the home config for this server, or given by flag;
-  - `lll board` (and `--team`, `-w`) no longer puts the board token in a
-    link to a repo file's `web_url`: that `web_url` counts as none;
-  - `lll up` no longer adopts a server already running at a url a repo file
-    chose, which received the administrator pair (including the generated
-    one in `./pb/pb_data`), unless the home config names the same url. It
-    exits 4, leads with removing the repo's url line, and offers
-    `LLL_URL=<url> lll up` only for a server that is yours, saying it sends
-    the admin credentials. With nothing running there it starts its own
-    server, as before;
-  - requests no longer follow redirects. Go's default client kept the
-    `Authorization` header for the same host on another port and re-sent a
-    login POST body on 307. A redirect is now an error naming its target.
-
-### Fixed
-
-- Every bad command line exits 2, as the contract says. These exited 1: an
-  unknown argument to `whoami` or `logout`; an unknown `skill` verb,
-  `completions` shell, `help` topic or `config get` key; `doc link` and
-  `doc unlink`; a `bot` name without the `bot-` prefix; `config set`
-  without its two arguments; an `issue` verb with no ID and no branch to
-  infer one from; `issue create` with no title; a malformed value: `doc
-  create -k` or `--confidence`, `project --status`, a `team set-accent`
-  colour, a `webhook add` URL, `login --url`, `--web-url` and `config set`
-  URLs, `issue comment` numbers, `up --bind 0.0.0.0`, `member create
-  --password ""`, and `member access --read-only --read-write`; `config set`
-  of an unknown key; two `member access` team selectors at once; `login
-  --token` with `--email`, or with an empty token; a malformed team key on
-  `team create` or `team rename`; a malformed doc slug; a label or project
-  name with a comma; `lll api METHOD` without a PATH (it printed help and
-  exited 0).
-- `lll skill get NAME` for an unknown skill exits 3 (not found). It exited 1.
-- An expired or rejected token from a repo `.lll.toml`, and the notice
-  after a password change, say to remove that file's token line. They said
-  to run `lll login`, which saves to the home config the repo file
-  outranks (LLL-687).
-- A refused superuser login names where the url came from (`LLL_URL`, the
-  config file, or `--url`). It said `--url` whatever set the url (LLL-687).
-- `lll config list` and the hints attribute a key to the repo `.lll.toml`
-  whenever it names that key. When it repeated the home config's value,
-  the key was attributed to the home config, whose edits the repo file
-  overrides (LLL-687).
-
-## [1.0.0] - 2026-10-08
-
-1.0 promises SemVer for the surface in `docs/cli-contract.md`: exit codes,
-the `--json` fields it names, the list envelope, and command, verb and flag
-spellings with their permanent aliases. A change that breaks a script built
-on them needs 2.0. Message wording and help text are not covered.
-
-The surface is the 0.9 surface with the changes listed below. The internals
-have been restructured: PocketBase's rules are the one owner of access, one
-write layer makes every record write, values are parsed into types where
-they arrive, and no credential or scope travels through the environment.
-
-### Upgrading from 0.9
-
-Read this list before you upgrade a server, a script or an agent prompt.
-Details are in the sections below.
-
-**Deploy the server before the clients.** The server runs five migrations
-on its first boot: per-team issue counters, the board's link viewers,
-identity-field rules, self-only member rename, and the doc `last_editor`
-field. Back up the server's data directory first. A 1.0 CLI against a 0.9
-server reports a bot-owner refusal as an administrator-credentials refusal,
-and refuses a description edit combined with `--assignee` ("invalid
-assignment update fields").
-
-Exit codes.
-
-- `lll issue update KEY --assignee NAME` (or `--assignee none`) on an issue
-  that another session's claim holds, refused for needing `--force`, exits 4
-  (refused). It exited 1.
-- `lll member access` recognizes the bot-owner refusal (a bot wider than
-  its owner) by its stable code `bot_exceeds_owner` and relays the server's
-  message (exit 1), as before. A 0.9 server sends no code, so against it a
-  1.0 CLI reports that refusal as needing administrator credentials (exit 4).
-
-Command line.
-
-- An issue key with a signed number (`ENG-+3`) is refused as not an issue ID
-  (exit 2). The CLI used to read it as `ENG-3`.
-- `--team` given twice on one command is refused (exit 2). It used to keep
-  the last value.
-- `lll login` without `--url` refuses when `LLL_URL` or a repo file names a
-  server other than the one in the home config. Pass `--url` to switch the
-  home config.
-
-Issue numbers.
-
-- An issue key is never reused. Deleting a team's highest-numbered issue no
-  longer hands its number to the next issue, so after such a delete the next
-  key is one higher than it would have been in 0.9.
-- **Breaking for member restores:** `lll import dir` keeps a mirror's issue
-  numbers only with a superuser token. Run as a member, it imports under new
-  numbers and prints which keys changed (`ENG-5 -> ENG-9`).
-- A member cannot choose or change an issue's number. Moving an issue to
-  another team gives it a fresh number there.
-
-Who may change what.
-
-- Only a superuser or the member itself renames a member. A bot is renamed
-  by a superuser only.
-- An issue's `creator` and `origin`, a member's owner, and a favorite's or
-  saved view's member are set when the record is created and cannot be
-  changed by a member. A comment's issue cannot be changed by anyone.
-
-Output and the board.
-
-- `lll doc view` and `lll finding view` print `Edited by:` when the last
-  editor is not the author; `doc view --json` has `last_editor`.
-- Board form posts refuse an unknown or out-of-team label, project or member
-  id by name, instead of passing the raw id to the server.
-
-### Added
-
-- Docs record who last edited them. `last_editor` is set by the server from
-  the caller: the author on create, then the member whose update changes the
-  doc's content (slug, title, kind, body, area or paths). Linking an issue
-  and confirming or refuting a finding do not count. A member cannot send
-  it. When it is not the author, `lll doc view` and `lll finding view` print
-  `Edited by:`, and the board's doc page and docs index show it, with a
-  bot's owner and "hidden member" as for the author. `doc view --json` has a
-  `last_editor` field. Existing docs get their author as last editor. The
-  docs index's `?raw` author column reads `alice, edited by bob` for such a
-  doc. (LLL-682)
-- A per-team issue counter that only increases (`issue_counters`, in
-  `lll api --schema`). A superuser repairs one with
-  `POST /api/lll/teams/{team}/issue-counter` (`{"last": N, "reason": "..."}`);
-  the server logs who changed it, from what, and why, and refuses a value
-  below the team's highest live issue. Issue numbers are capped at
-  999,999,999; a team that reaches the cap is told which issue holds the
-  highest number. (LLL-678)
-
-### Changed
-
 - Issue numbers are never reused. Deleting a team's highest-numbered issue
   used to hand its number, and so its key, to the next issue created; a key
   in a commit message or PR then named a different issue. An upgrade starts
@@ -376,6 +310,41 @@ Output and the board.
 
 ### Security
 
+- `member invite` printed the temporary password twice: on its own line
+  and inside the set-password hint, so redacting the first line still
+  leaked it. The hint now says `--old-password -`, which prompts with echo
+  off, and the password appears once.
+- A token goes only to the server it was saved for (LLL-688). The config
+  layers combine key by key, so a `.lll.toml` naming only `url = B`, or
+  `LLL_URL=B`, paired B with the home config's token for A: every command
+  run there, and the team check after `lll login --url A`, sent A's token
+  to B. A cloned repo could collect tokens that way. Now:
+  - the home config's token is sent only when the effective url is the
+    home config's url (a trailing slash aside; `localhost` and `127.0.0.1`
+    differ), or the default when it names none. Otherwise a command that
+    needs it exits 6, names the file, variable or flag that chose the url,
+    and leads with removing it; logging in there is offered last, with what
+    it sends and replaces. A token from `LLL_TOKEN` or a repo file still
+    goes to the url configured with it;
+  - `lll login` sends every request after it holds a token to the server it
+    logged in to, and says when a repo file or `LLL_URL` will send later
+    commands elsewhere. `lll up` says the same after it saves its CLI login;
+  - `lll login` without `--url` exits 2 when a repo file or `LLL_URL` chose
+    the url, instead of sending the password or token there;
+  - `lll member invite` sends the superuser token to, and prints, only a
+    `web_url` saved in the home config for this server, or given by flag;
+  - `lll board` (and `--team`, `-w`) no longer puts the board token in a
+    link to a repo file's `web_url`: that `web_url` counts as none;
+  - `lll up` no longer adopts a server already running at a url a repo file
+    chose, which received the administrator pair (including the generated
+    one in `./pb/pb_data`), unless the home config names the same url. It
+    exits 4, leads with removing the repo's url line, and offers
+    `LLL_URL=<url> lll up` only for a server that is yours, saying it sends
+    the admin credentials. With nothing running there it starts its own
+    server, as before;
+  - requests no longer follow redirects. Go's default client kept the
+    `Authorization` header for the same host on another port and re-sent a
+    login POST body on 307. A redirect is now an error naming its target.
 - lll no longer writes its environment. `--team`, tokens, the board
   token and the administrator pair used to be set as environment variables
   for the rest of the process, so child processes (`gh` for
@@ -422,6 +391,32 @@ Output and the board.
 
 ### Fixed
 
+- Every bad command line exits 2, as the contract says. These exited 1: an
+  unknown argument to `whoami` or `logout`; an unknown `skill` verb,
+  `completions` shell, `help` topic or `config get` key; `doc link` and
+  `doc unlink`; a `bot` name without the `bot-` prefix; `config set`
+  without its two arguments; an `issue` verb with no ID and no branch to
+  infer one from; `issue create` with no title; a malformed value: `doc
+  create -k` or `--confidence`, `project --status`, a `team set-accent`
+  colour, a `webhook add` URL, `login --url`, `--web-url` and `config set`
+  URLs, `issue comment` numbers, `up --bind 0.0.0.0`, `member create
+  --password ""`, and `member access --read-only --read-write`; `config set`
+  of an unknown key; two `member access` team selectors at once; `login
+  --token` with `--email`, or with an empty token; a malformed team key on
+  `team create` or `team rename`; a malformed doc slug; a label or project
+  name with a comma; `lll api METHOD` without a PATH (it printed help and
+  exited 0).
+- `lll skill get NAME` for an unknown skill exits 3 (not found). It exited 1.
+- An expired or rejected token from a repo `.lll.toml`, and the notice
+  after a password change, say to remove that file's token line. They said
+  to run `lll login`, which saves to the home config the repo file
+  outranks (LLL-687).
+- A refused superuser login names where the url came from (`LLL_URL`, the
+  config file, or `--url`). It said `--url` whatever set the url (LLL-687).
+- `lll config list` and the hints attribute a key to the repo `.lll.toml`
+  whenever it names that key. When it repeated the home config's value,
+  the key was attributed to the home config, whose edits the repo file
+  overrides (LLL-687).
 - `lll issue update KEY --assignee NAME` (or `--assignee none`) on an issue
   another session's claim holds, refused for needing force, exits 4
   (refused) like every other claim refusal. It exited 1: the refusal's kind
