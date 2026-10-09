@@ -80,15 +80,14 @@ fn finding_new_spec_keeps_doc_new_strict_about_the_slug_flag() {
 
 /// LLL-505: 'finding view' is a hidden alias of 'lll doc view'. Fleet task 9
 /// had 6/30 agents guess it, so it still dispatches, but neither help nor
-/// completions advertise it. 'finding read' was removed at 1.0 (LLL-644).
+/// completions advertise it. 'finding read' is its hidden alias (1.0 fleet).
 #[test]
 fn finding_view_and_read_dispatch_but_stay_out_of_help_and_completions() {
   let assert Some(c) = flags.resolve_command(finding_commands(), "view")
   assert c.hidden
   assert c.positional == "SLUG"
-  assert flags.resolve_command(finding_commands(), "read").is_none()
-  let assert Err(refused) = finding(test_client("http://127.0.0.1:1", "", ""), ["lll", "finding", "read", "a-slug"])
-  assert refused.message.contains("did you mean 'lll doc view SLUG'?")
+  let assert Some(read) = flags.resolve_command(finding_commands(), "read")
+  assert read.name == "view"
   let names = flags.command_names(finding_commands())
   assert !names.contains("view")
   assert !names.contains("read")
@@ -138,4 +137,15 @@ fn only_finding_new_offers_the_confidence_flag() {
   assert confidence.hint.contains("suspected")
   let doc_spec = doc_new_spec()
   assert doc_spec.find(|f| f.name == "--confidence").is_none()
+}
+
+/// The 1.0 fleet: list and near tag every finding, confirmed included; an
+/// empty confidence predates the field and is confirmed.
+#[test]
+fn finding_lines_always_carry_their_confidence() {
+  assert confidence_tag("confirmed", "") == " [confirmed]"
+  assert confidence_tag("", "") == " [confirmed]"
+  assert confidence_tag("suspected", "") == " [suspected]"
+  assert confidence_tag("refuted", "why") == " [refuted: why]"
+  assert confidence_word("") == "confirmed"
 }

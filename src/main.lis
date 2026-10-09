@@ -1,4 +1,5 @@
 import "go:fmt"
+import "go:github.com/escherize/lll/docs"
 import "go:os"
 import "go:strings"
 
@@ -94,10 +95,7 @@ fn dispatch(ctx: pb.Client, noun: string, args: Slice<string>) -> Result<(), pb.
       print_usage(ctx)
       Ok(())
     },
-    "help" => {
-      print_usage(ctx)
-      Ok(())
-    },
+    "help" => help(ctx, args),
     "--version" => {
       fmt.Println(f"lll {buildinfo.version()}")
       Ok(())
@@ -111,6 +109,29 @@ fn dispatch(ctx: pb.Client, noun: string, args: Slice<string>) -> Result<(), pb.
       Ok(())
     },
     other => Err(pb.fail(pb.ErrorKind.Usage, unknown_command(other, os.Args.get(2).unwrap_or("")))),
+  }
+}
+
+/// `lll help [contract]`. The contract is a help topic rather than a noun: it
+/// is reference text, like --help, and `help` already answers with the usage
+/// page. It ships in the binary because installed users have no docs/ (1.0
+/// fleet: a worker tried 'lll skill get cli-contract').
+fn help(ctx: pb.Client, args: Slice<string>) -> Result<(), pb.CliError> {
+  match (args.get(2), args.get(3)) {
+    (None, _) | (Some("--help"), None) | (Some("-h"), None) => {
+      print_usage(ctx)
+      Ok(())
+    },
+    (Some("contract"), None) => {
+      fmt.Print(docs.Contract())
+      Ok(())
+    },
+    _ => Err(
+      pb.fail(
+        pb.ErrorKind.Usage,
+        f"unknown help topic: '{strings.Join(args[2..], " ")}'; 'lll help contract' prints the CLI contract, 'lll --help' the commands, 'lll NOUN --help' one noun",
+      ),
+    ),
   }
 }
 
@@ -190,11 +211,11 @@ Usage:
                           (see 'lll upgrade --help')
   lll --version, -v       print the version
   lll --help              show this help
+  lll help contract       the CLI contract: exit codes, --json fields, spellings
 
 Exit codes: 0 ok, 1 error, 2 usage, 3 not found, 4 refused or conflict,
 5 nothing to do, 6 not authenticated. They and the --json fields scripts may
-rely on are the CLI contract:
-https://github.com/escherize/lll/blob/main/docs/cli-contract.md
+rely on are the CLI contract: 'lll help contract' prints it.
 
 Scoped commands (issue, project, label, doc, finding, import, export, watch,
 search, webhook) accept --team KEY.
@@ -204,6 +225,7 @@ Explicit issue IDs still target their own team.
 Examples:
   lll issue list --team ENG --search checkout
   lll issue update ENG-1 --assignee alice --state in-review
+  lll issue claim ENG-1   take it so no other agent does; close releases it
   next=$(lll issue next)  the one issue to work next: ready, unclaimed,
                           priority, age, unblocks; add --claim to take it
 

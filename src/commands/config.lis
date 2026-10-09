@@ -86,10 +86,10 @@ repo file."
 fn config_set(input: flags.CommandInput) -> Result<(), pb.CliError> {
   let ctx = input.ctx
   let usage = "usage: lll config set <url|web_url> VALUE"
-  if input.parsed.positional_count() != 2 { return Err(pb.failed(usage)) }
+  if input.parsed.positional_count() != 2 { return Err(flags.usage_error(usage)) }
   let key = input.parsed.first()
   let value = strings.TrimSpace(input.parsed.nth(1))
-  if value == "" { return Err(pb.failed(usage)) }
+  if value == "" { return Err(flags.usage_error(usage)) }
   if key == "url" || key == "web_url" {
     let endpoint = checked_endpoint(key, value)?
     let path = set_home_key(ctx.settings, key, endpoint)?
@@ -284,7 +284,7 @@ fn config_get(input: flags.CommandInput) -> Result<(), pb.CliError> {
       pb.failed("the token is a secret and is not printed; 'lll config list' shows where it comes from"),
     ),
     other => return Err(
-      pb.failed(f"unknown config key '{other}'; keys: url, web_url, team, sort"),
+      flags.usage_error(f"unknown config key '{other}'; keys: url, web_url, team, sort"),
     ),
   }
   if origin == "" { return Err(pb.failed(f"{key} is not set (see 'lll config list')")) }
@@ -396,9 +396,9 @@ fn checked_web_url(value: string) -> Result<string, pb.CliError> {
 
 fn checked_endpoint(key: string, value: string) -> Result<string, pb.CliError> {
   let parsed = url.Parse(value)
-  let Ok(u) = parsed else { return Err(pb.failed(f"{key} must be an absolute http:// or https:// URL")) }
+  let Ok(u) = parsed else { return Err(flags.usage_error(f"{key} must be an absolute http:// or https:// URL")) }
   if (u.Scheme != "http" && u.Scheme != "https") || u.Hostname() == "" || u.User.is_some() || u.RawQuery != "" || u.Fragment != "" {
-    return Err(pb.failed(f"{key} must be an absolute http:// or https:// URL without credentials, query or fragment"))
+    return Err(flags.usage_error(f"{key} must be an absolute http:// or https:// URL without credentials, query or fragment"))
   }
   Ok(strings.TrimRight(value, "/"))
 }

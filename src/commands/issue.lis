@@ -296,6 +296,7 @@ fn issue_release_spec() -> Slice<flags.Flag> {
     flags.Flag { name: "--force", help: "release a claim another member, or another agent label on your token, holds; leaves a comment on the issue", .. },
     reason_flag("release"),
     agent_flag(),
+    json_after_flag("the issue"),
   ])
 }
 
@@ -445,12 +446,12 @@ pub fn issue_commands() -> Slice<flags.Command> {
   [
     flags.Command {
       name: "attach", summary: "upload a file to an issue; appends without replacing existing attachments",
-      spec: flags.with_team([]), positional: "KEY-123 FILE", run: issue_attach,
+      spec: flags.with_team([json_after_flag("the issue")]), positional: "KEY-123 FILE", run: issue_attach,
       ..
     },
     flags.Command {
       name: "detach", summary: "remove an attachment by its stored filename (see issue view)",
-      spec: flags.with_team([]), positional: "KEY-123 FILENAME", run: issue_detach,
+      spec: flags.with_team([json_after_flag("the issue")]), positional: "KEY-123 FILENAME", run: issue_detach,
       ..
     },
     flags.Command {
@@ -482,7 +483,7 @@ pub fn issue_commands() -> Slice<flags.Command> {
       ..
     },
     flags.Command {
-      name: "view", alias: "show",
+      name: "view", alias: "show", hidden_alias: "read",
       summary: "show one issue in full, with comments; --raw prints it as plain markdown; -w opens its web page instead",
       spec: issue_view_spec(),
       positional: "[KEY-123]",
@@ -589,13 +590,13 @@ pub fn issue_commands() -> Slice<flags.Command> {
     },
     flags.Command {
       name: "ref", summary: "append an external reference once (gh#42, linear:ENG-118)",
-      spec: flags.with_team([]), positional: "KEY-123 REF", run: ref_cmd,
+      spec: flags.with_team([json_after_flag("the issue")]), positional: "KEY-123 REF", run: ref_cmd,
       ..
     },
     flags.Command {
       name: "link",
       summary: "link the issue to a doc (see 'lll doc --help')",
-      spec: flags.with_team([]),
+      spec: flags.with_team([json_after_flag("the doc")]),
       positional: "KEY-123 SLUG",
       run: link,
       ..
@@ -603,7 +604,7 @@ pub fn issue_commands() -> Slice<flags.Command> {
     flags.Command {
       name: "unlink",
       summary: "remove that link",
-      spec: flags.with_team([]),
+      spec: flags.with_team([json_after_flag("the doc")]),
       positional: "KEY-123 SLUG",
       run: unlink,
       ..
@@ -611,7 +612,7 @@ pub fn issue_commands() -> Slice<flags.Command> {
     flags.Command {
       name: "block",
       summary: "record that KEY-123 cannot start until BLOCKER is done; view shows it, list --ready honours it",
-      spec: flags.with_team([]),
+      spec: flags.with_team([json_after_flag("the issue")]),
       positional: "KEY-123 BLOCKER",
       run: block,
       ..
@@ -619,7 +620,7 @@ pub fn issue_commands() -> Slice<flags.Command> {
     flags.Command {
       name: "unblock",
       summary: "remove BLOCKER from KEY-123's blockers",
-      spec: flags.with_team([]),
+      spec: flags.with_team([json_after_flag("the issue")]),
       positional: "KEY-123 BLOCKER",
       run: unblock,
       ..
@@ -724,7 +725,7 @@ fn resolve_id(ctx: pb.Client, explicit: string, usage: string) -> Result<string,
   if explicit != "" { return Ok(deslug(explicit)) }
   let Some(branch) = gitctx.current_branch() else {
     return Err(
-      pb.failed(f"no issue ID given and no git branch to infer one from\nusage: {usage}"),
+      flags.usage_error(f"no issue ID given and no git branch to infer one from\nusage: {usage}"),
     )
   }
   let teams = records.list_teams(ctx)?
@@ -738,7 +739,7 @@ fn resolve_id(ctx: pb.Client, explicit: string, usage: string) -> Result<string,
   if matches.length() == 1 { return Ok(matches[0]) }
   let Some(id) = gitctx.issue_id_from_branch(branch) else {
     return Err(
-      pb.failed(f"no issue ID given and current branch '{branch}' doesn't look like eng-123-...\nusage: {usage}"),
+      flags.usage_error(f"no issue ID given and current branch '{branch}' doesn't look like eng-123-...\nusage: {usage}"),
     )
   }
   Ok(id)

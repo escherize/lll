@@ -53,11 +53,11 @@ pub fn skill(args: Slice<string>) -> Result<(), pb.CliError> {
       let name = parsed.nth(1)
       if name == "" { return Err(flags.usage_error(f"usage: lll skill get NAME\n\n{known()}")) }
       let body = skills.Body(name)
-      if body == "" { return Err(pb.failed(f"no skill named '{name}'\n\n{known()}")) }
+      if body == "" { return Err(pb.fail(pb.ErrorKind.NotFound, f"no skill named '{name}'\n\n{known()}")) }
       fmt.Print(body)
       Ok(())
     },
-    other => Err(pb.failed(f"unknown command: 'lll skill {other}' (expected list or get)")),
+    other => Err(flags.usage_error(f"unknown command: 'lll skill {other}' (expected list or get)")),
   }
 }
 

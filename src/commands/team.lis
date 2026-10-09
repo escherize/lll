@@ -59,7 +59,7 @@ pub fn team_commands() -> Slice<flags.Command> {
     flags.Command {
       name: "set-accent",
       summary: "set the board accent colour ('' clears it)",
-      spec: [],
+      spec: [json_after_flag("the team record")],
       positional: "KEY #rrggbb",
       run: team_set_accent,
       ..
@@ -67,7 +67,7 @@ pub fn team_commands() -> Slice<flags.Command> {
     flags.Command {
       name: "set-emoji",
       summary: "set the team's glyph, beside its key ('' clears it)",
-      spec: [],
+      spec: [json_after_flag("the team record")],
       positional: "KEY EMOJI",
       run: team_set_emoji,
       ..
@@ -75,7 +75,7 @@ pub fn team_commands() -> Slice<flags.Command> {
     flags.Command {
       name: "archive",
       summary: "hide the team from lists and the board rail (data kept)",
-      spec: [],
+      spec: [json_after_flag("the team record")],
       positional: "KEY",
       run: team_archive,
       ..
@@ -83,7 +83,7 @@ pub fn team_commands() -> Slice<flags.Command> {
     flags.Command {
       name: "unarchive",
       summary: "bring an archived team back",
-      spec: [],
+      spec: [json_after_flag("the team record")],
       positional: "KEY",
       run: team_unarchive,
       ..
@@ -184,6 +184,7 @@ fn team_rename_spec() -> Slice<flags.Flag> {
       ..
     },
     flags.Flag { name: "-n", alias: "--name", value: true, hint: "\"Name\"", help: "new team name", .. },
+    json_after_flag("the team record"),
   ]
 }
 
@@ -238,12 +239,20 @@ fn team_rename(input: flags.CommandInput) -> Result<(), pb.CliError> {
   }
 
   writes.update_team(ctx, pb.Caller.Process, t.id, rename_patch(new_key, new_name))?
+  if p.given("--json") { return print_record_after(ctx, "teams", t.id.string()) }
 
   let mut final_key = t.key
   if new_key != "" { final_key = new_key }
   let mut final_name = t.name
   if new_name != "" { final_name = new_name }
-  fmt.Println(f"Renamed team {t.key}: {final_key} ({final_name})")
+  // Old -> new for whatever changed (1.0 fleet, case 09).
+  let line = if final_key != t.key {
+    let named = if final_name != t.name { f"; name {t.name} -> {final_name}" } else { "" }
+    f"Renamed team {t.key} -> {final_key}{named}"
+  } else {
+    f"Renamed team {t.key}: {t.name} -> {final_name}"
+  }
+  fmt.Println(line)
   for line in team_rename_collateral(t.key, final_key) {
     fmt.Println(line)
   }
@@ -293,6 +302,7 @@ fn team_set_accent(input: flags.CommandInput) -> Result<(), pb.CliError> {
     return Err(records.unknown_team(ctx, key))
   }
   writes.update_team(ctx, pb.Caller.Process, t.id, writes.TeamPatch { accent: Some(hex), .. })?
+  if input.parsed.given("--json") { return print_record_after(ctx, "teams", t.id.string()) }
   if hex == "" {
     fmt.Println(f"Cleared the accent for {t.key}; it uses the canonical orange again")
   } else {
@@ -312,7 +322,7 @@ fn accent_value(raw: string) -> Result<string, pb.CliError> {
   if trimmed == "" { return Ok("") }
   let hex = theme.normalize_hex(trimmed)
   if hex == "" {
-    return Err(pb.failed(f"'{raw}' is not a #rrggbb colour (e.g. #f0883e)"))
+    return Err(flags.usage_error(f"'{raw}' is not a #rrggbb colour (e.g. #f0883e)"))
   }
   if hex == "#f0883e" { return Ok("") }
   Ok(hex)
@@ -333,6 +343,7 @@ fn team_set_emoji(input: flags.CommandInput) -> Result<(), pb.CliError> {
     return Err(records.unknown_team(ctx, key))
   }
   writes.update_team(ctx, pb.Caller.Process, t.id, writes.TeamPatch { emoji: Some(glyph), .. })?
+  if input.parsed.given("--json") { return print_record_after(ctx, "teams", t.id.string()) }
   if glyph == "" {
     fmt.Println(f"Cleared the emoji for {t.key}; it shows the letter from its key again")
   } else {
@@ -480,6 +491,7 @@ fn team_set_archived(ctx: pb.Client, p: flags.Parsed, archived: bool) -> Result<
     return Err(records.unknown_team(ctx, key))
   }
   writes.update_team(ctx, pb.Caller.Process, t.id, writes.TeamPatch { archived: Some(archived), .. })?
+  if p.given("--json") { return print_record_after(ctx, "teams", t.id.string()) }
   if archived {
     fmt.Println(
       f"Archived team {t.key}: hidden from team lists and the board rail; /t/{t.key}/ stays readable. 'lll team unarchive {t.key}' brings it back.",

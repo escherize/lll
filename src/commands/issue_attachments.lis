@@ -16,8 +16,8 @@ fn issue_attach(input: flags.CommandInput) -> Result<(), pb.CliError> {
   defer file.Close()
   let data = attachments.read_upload(file)?
   let name = attachments.upload(ctx, pb.Caller.Process, issue, path, data)?
-  fmt.Println(f"Attached to {issue.expand.team.key}-{issue.number}: {name}")
-  Ok(())
+  let key = f"{issue.expand.team.key}-{issue.number}"
+  issue_done(ctx, input.parsed, key, f"Attached to {key}: {name}")
 }
 
 fn issue_detach(input: flags.CommandInput) -> Result<(), pb.CliError> {
@@ -25,8 +25,7 @@ fn issue_detach(input: flags.CommandInput) -> Result<(), pb.CliError> {
   let issue = records.fetch_issue(ctx, deslug(input.parsed.first()))?
   let name = input.parsed.nth(1)
   attachments.remove(ctx, pb.Caller.Process, issue, name)?
-  fmt.Println(f"Removed attachment from {input.parsed.first()}: {name}")
-  Ok(())
+  issue_done(ctx, input.parsed, f"{issue.expand.team.key}-{issue.number}", f"Removed attachment from {input.parsed.first()}: {name}")
 }
 
 fn issue_download(input: flags.CommandInput) -> Result<(), pb.CliError> {

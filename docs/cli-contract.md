@@ -1,5 +1,7 @@
 # The lll CLI contract
 
+`lll help contract` prints this page.
+
 This is the surface lll 1.0.0 promises under SemVer. Changing one of these
 parts in a way that breaks a script needs a new major version; anything not
 listed here can change in a minor release.
@@ -171,6 +173,7 @@ These aliases are permanent:
 |---|---|---|
 | `new` | `create` | `issue`, `doc`, `finding` |
 | `show` | `view` | `issue`, `doc` |
+| `read` | `view` | `issue`, `doc`, `finding` (hidden: no help row, no completion) |
 | `add` | `create` | `member` |
 | `remove` | `delete` | `member` |
 | `edit`, `update` | each other | `issue`, `doc`, `project`, `label` |

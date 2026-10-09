@@ -27,7 +27,7 @@ pub fn completions(args: Slice<string>) -> Result<(), pb.CliError> {
       fmt.Print(fish_script())
       Ok(())
     },
-    other => Err(pb.failed(f"unknown shell: '{other}' (expected bash, zsh, or fish)")),
+    other => Err(flags.usage_error(f"unknown shell: '{other}' (expected bash, zsh, or fish)")),
   }
 }
 

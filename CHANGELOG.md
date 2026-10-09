@@ -6,6 +6,50 @@ minors. Issue keys are on the project's own board (`lll issue view KEY`).
 
 ## [Unreleased]
 
+### Added
+
+- `read` is a permanent hidden alias of `view` on `issue`, `doc` and
+  `finding`: it dispatches, but has no help row and no completion. Five of
+  twenty agents in the 1.0 fleet typed `lll issue read KEY`. This reverses
+  the 1.0 retirement of `read`.
+- `lll help contract` prints the CLI contract (docs/cli-contract.md),
+  carried in the binary. `lll --help` points at it.
+- `--json` on the write verbs that lacked it: `issue attach`, `detach`,
+  `release`, `ref`, `block`, `unblock` (the issue), `issue link` and
+  `unlink`, `doc edit`, `finding confirm` and `refute` (the doc),
+  `project create`, `edit` and `move`, `label edit` and `move`, `team
+  rename`, `set-accent`, `set-emoji`, `archive` and `unarchive` (the
+  record). A test lists every verb that still has none, with the reason.
+- `doc create -k finding` takes `--confidence suspected|confirmed`, as
+  `finding create` does (LLL-641). On another kind it exits 2.
+
+### Changed
+
+- `lll --help` shows `lll issue claim KEY` in its examples.
+- `issue update KEY --assignee <yourself>` adds one line to its text
+  output: assigned is not claimed, and `lll issue claim KEY` holds the
+  issue. `--json` output is unchanged.
+- `doc view` and `finding view` print `Confidence: <word>` for every
+  finding, confirmed included; `finding list` and `finding near` tag every
+  line with its confidence, `[confirmed]` included.
+- A rename names the old and new names: `Renamed label regresion ->
+  regression`, `Renamed project A -> B`, `Renamed team ENG -> PLAT`.
+- `finding create --help` describes `-k` as defaulting to finding.
+
+### Fixed
+
+- Every bad command line exits 2, as the contract says. These exited 1: an
+  unknown argument to `whoami` or `logout`; an unknown `skill` verb,
+  `completions` shell, `help` topic or `config get` key; `doc link` and
+  `doc unlink`; a `bot` name without the `bot-` prefix; `config set`
+  without its two arguments; an `issue` verb with no ID and no branch to
+  infer one from; `issue create` with no title; a malformed value: `doc
+  create -k` or `--confidence`, `project --status`, a `team set-accent`
+  colour, a `webhook add` URL, `login --url`, `--web-url` and `config set`
+  URLs, `issue comment` numbers, `up --bind 0.0.0.0`, `member create
+  --password ""`, and `member access --read-only --read-write`.
+- `lll skill get NAME` for an unknown skill exits 3 (not found). It exited 1.
+
 ## [1.0.0] - 2026-10-08
 
 1.0 promises SemVer for the surface in `docs/cli-contract.md`: exit codes,

@@ -37,7 +37,7 @@ fn create(input: flags.CommandInput) -> Result<(), pb.CliError> {
   }
   let title = if p.one("-t") != "" { p.one("-t") } else { p.first() }
   if title == "" {
-    return Err(pb.failed(f"no title: give it as the bare argument or with -t\n{usage}"))
+    return Err(flags.usage_error(f"no title: give it as the bare argument or with -t\n{usage}"))
   }
   let mut description = ""
   if p.given("-b") { description = value_or_stdin(p.one("-b"), "-b")? }
@@ -253,6 +253,9 @@ fn update(input: flags.CommandInput) -> Result<(), pb.CliError> {
   if let Some(s) = state { changed = changed.append(f"state={s.wire()}") }
   if let Some(n) = priority { changed = changed.append(f"priority={n.wire()}") }
   let mut assignee = writes.Relation.Keep
+  // The 1.0 fleet: a worker "claimed" with '--assignee <itself>'. Assigning
+  // is not claiming, so text output says how to hold the issue.
+  let mut self_assigned = false
   if assignee_name == "none" {
     // 'none' is what view prints for no assignee; the same word clears it.
     // Nothing else could: an empty --assignee reads as the flag not given.
@@ -260,6 +263,7 @@ fn update(input: flags.CommandInput) -> Result<(), pb.CliError> {
     changed = changed.append("assignee=none")
   } else if assignee_name != "" {
     let member = records.resolve_member(ctx, assignee_name)?
+    self_assigned = pb.token_subject(ctx.token()) == Some(member.id.string())
     assignee = writes.Relation.Set(member.id)
     changed = changed.append(f"assignee={member.name}")
   }
@@ -349,6 +353,9 @@ fn update(input: flags.CommandInput) -> Result<(), pb.CliError> {
   }
   if p.given("--json") { return print_issue_after(ctx, key) }
   fmt.Println(f"Updated {issue.expand.team.key}-{issue.number}: {strings.Join(changed, ", ")}{released}")
+  if self_assigned {
+    fmt.Println(f"assigned, not claimed: 'lll issue claim {key}' holds it against other agents")
+  }
   Ok(())
 }
 
@@ -595,8 +602,8 @@ fn ref_cmd(input: flags.CommandInput) -> Result<(), pb.CliError> {
   let issue = records.fetch_issue(ctx, resolved)?
   let outcome = writes.append_ref(ctx, issue.id, reference)?
   let action = if outcome.added { "Added" } else { "Already recorded" }
-  fmt.Println(f"{action} {reference} on {issue.expand.team.key}-{issue.number}")
-  Ok(())
+  let key = f"{issue.expand.team.key}-{issue.number}"
+  issue_done(ctx, p, key, f"{action} {reference} on {key}")
 }
 
 /// Keep the issue as the authoritative full text when its description is
@@ -644,7 +651,7 @@ fn comment_mutate(ctx: pb.Client, verb: string, p: flags.Parsed) -> Result<(), p
   let issue = records.fetch_issue(ctx, resolved)?
   let key = f"{issue.expand.team.key}-{issue.number}"
   let Ok(n) = strconv.Atoi(p.nth(1)) else {
-    return Err(pb.failed(f"'{p.nth(1)}' is not a comment number; 'lll issue comment {key}' numbers them"))
+    return Err(flags.usage_error(f"'{p.nth(1)}' is not a comment number; 'lll issue comment {key}' numbers them"))
   }
   let comments = records.fetch_comments(ctx, issue.id)?
   if n < 1 || n > comments.length() {

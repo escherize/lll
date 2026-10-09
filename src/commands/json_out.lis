@@ -4,6 +4,7 @@ import "go:os"
 import "go:strings"
 
 import "display"
+import "flags"
 import "models"
 import "pb"
 
@@ -15,6 +16,35 @@ import "pb"
 fn print_json(value: Unknown, what: string) -> Result<(), pb.CliError> {
   let raw = encode_json(value, what)?
   fmt.Println(contract_json(raw, 0) as string)
+  Ok(())
+}
+
+/// A write verb's --json (1.0 fleet: 'finding confirm SLUG --json' was an
+/// unknown flag): the record as it now is, read back by id, in the shape its
+/// create --json prints.
+fn print_record_after(ctx: pb.Client, collection: string, id: string) -> Result<(), pb.CliError> {
+  let record = ctx.get(f"/api/collections/{collection}/records/{id}")?
+  fmt.Println(contract_json(record.bytes() as json.RawMessage, 0) as string)
+  Ok(())
+}
+
+/// The --json flag of a write verb that prints `what` afterwards.
+fn json_after_flag(what: string) -> flags.Flag {
+  flags.Flag { name: "--json", help: f"print {what} afterwards as JSON", .. }
+}
+
+/// The ending of a write verb that has one confirmation line: --json prints
+/// the issue as it now is instead.
+fn issue_done(ctx: pb.Client, p: flags.Parsed, key: string, line: string) -> Result<(), pb.CliError> {
+  if p.given("--json") { return print_issue_after(ctx, key) }
+  fmt.Println(line)
+  Ok(())
+}
+
+/// The same for a doc: --json prints the doc record instead of `line`.
+fn doc_done(ctx: pb.Client, p: flags.Parsed, id: string, line: string) -> Result<(), pb.CliError> {
+  if p.given("--json") { return print_record_after(ctx, "docs", id) }
+  fmt.Println(line)
   Ok(())
 }
 

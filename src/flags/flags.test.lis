@@ -561,33 +561,31 @@ fn retired_spellings_name_the_replacement_the_verb_declares() {
   )
 }
 
+/// The 1.0 fleet: 5 of 20 workers typed 'issue read KEY'. A hidden alias
+/// dispatches to the canonical verb, whose name is the one usage and help
+/// show; the alias has no help row and no completion.
 #[test]
-fn retired_verb_names_its_replacement_only_where_it_exists() {
+fn hidden_alias_dispatches_under_the_canonical_name_without_help_or_completion() {
   let commands = [
     Command {
-      name: "view",
-      summary: "view",
-      positional: "KEY",
-      run: |_| Ok(()),
-      ..,
+      name: "view", alias: "show", hidden_alias: "read", summary: "view", positional: "KEY",
+      run: |input| {
+        if input.parsed.first() != "DEMO-1" { return Err(pb.failed("wrong key")) }
+        Ok(())
+      },
+      ..
     },
   ]
-  let assert Err(hinted) = dispatch(test_ctx(), "issue", "", "", commands, [
-    "lll",
-    "issue",
-    "read",
-    "DEMO-1",
-  ])
-  assert hinted.message.contains(
-    "unknown issue command: 'read' - did you mean 'lll issue view'?",
-  )
+  assert dispatch(test_ctx(), "issue", "", "", commands, ["lll", "issue", "read", "DEMO-1"]).is_ok()
+  let assert Err(refused) = dispatch(test_ctx(), "issue", "", "", commands, ["lll", "issue", "read", "--zz"])
+  assert pb.exit_code(refused.kind) == 2
+  assert refused.message.contains("usage: lll issue view KEY")
+  let assert Err(help) = dispatch(test_ctx(), "issue", "", "", commands, ["lll", "issue", "--help"])
+  assert !help.message.contains("read")
+  assert command_names(commands).equals(["view", "show"])
   let without = [Command { name: "list", summary: "list", run: |_| Ok(()), .. }]
-  let assert Err(plain) = dispatch(test_ctx(), "team", "", "", without, [
-    "lll",
-    "team",
-    "read",
-  ])
-  assert !plain.message.contains("did you mean")
+  let assert Err(plain) = dispatch(test_ctx(), "team", "", "", without, ["lll", "team", "read"])
+  assert pb.exit_code(plain.kind) == 2
 }
 
 #[test]

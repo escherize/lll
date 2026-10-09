@@ -416,7 +416,7 @@ a read-write member creates it with 'lll bot create {name}' (owned by you, never
   let password = p.one("--password")
   if p.given("--password") && (password == "" || !real_email(email)) {
     return Err(
-      pb.failed("--password requires a nonempty password and a real --email; use 'lll member invite NAME --email EMAIL' for a generated login handoff"),
+      flags.usage_error("--password requires a nonempty password and a real --email; use 'lll member invite NAME --email EMAIL' for a generated login handoff"),
     )
   }
   let created = if p.given("--password") {
@@ -597,7 +597,7 @@ fn member_access_cmd(input: flags.CommandInput) -> Result<(), pb.CliError> {
     return Err(pb.failed("give one of --team, --all-teams, --no-teams, or --add-team/--remove-team"))
   }
   if p.given("--read-only") && p.given("--read-write") {
-    return Err(pb.failed("give --read-only or --read-write, not both"))
+    return Err(flags.usage_error("give --read-only or --read-write, not both"))
   }
   let id_of = |key: string| -> Result<models.TeamId, pb.CliError> {
     let k = records.normalize_team_key(key)

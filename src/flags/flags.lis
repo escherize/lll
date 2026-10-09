@@ -300,11 +300,6 @@ fn retired_flag(arg: string, spec: Slice<Flag>) -> Option<string> {
   None
 }
 
-/// Verbs lll no longer accepts, each with the verb that replaced it.
-fn retired_verbs() -> Slice<(string, string)> {
-  [("read", "view")]
-}
-
 /// The declared spelling closest to an unknown flag, when it is close:
 /// '--teams' for '--team' (fleet: 3 of 10 agents typed the plural). Edit
 /// distance at most 2, so an unrelated flag is never suggested.
@@ -434,6 +429,10 @@ pub struct Command {
   /// neither does its alias (LLL-505). It keeps a spelling agents guess
   /// working when the documented operation lives under another noun.
   pub hidden: bool,
+  /// A spelling that dispatches but is never shown: no help row, no
+  /// completion, and usage lines name `name`. Empty means none. It keeps a
+  /// verb agents guess working (`read` for `view`: 5 of 20 fleet workers).
+  pub hidden_alias: string,
   pub summary: string,
   pub page: string,
   pub spec: Slice<Flag>,
@@ -468,13 +467,6 @@ pub fn dispatch(
     return Err(pb.help(noun_help(noun, tagline, intro, cmds)))
   }
   let Some(c) = resolve_command(cmds, verb) else {
-    for (old, new) in retired_verbs() {
-      if old == verb && resolve_command(cmds, new).is_some() {
-        return Err(
-          usage_error(f"unknown {noun} command: '{verb}' - did you mean 'lll {noun} {new}'? (see 'lll {noun} --help')"),
-        )
-      }
-    }
     return Err(usage_error(f"unknown {noun} command: '{verb}' (see 'lll {noun} --help')"))
   }
   // A verb with its own page answers --help with it; the generic parse-time
@@ -650,7 +642,8 @@ pub fn command_spec(cmds: Slice<Command>, verb: string) -> Slice<Flag> {
 
 /// Resolve both advertised verbs and accepted aliases to the same command.
 pub fn resolve_command(cmds: Slice<Command>, verb: string) -> Option<Command> {
-  cmds.find(|c| c.name == verb || (!c.alias.is_empty() && c.alias == verb))
+  if verb.is_empty() { return None }
+  cmds.find(|c| c.name == verb || c.alias == verb || c.hidden_alias == verb)
 }
 
 /// Shell completion offers every accepted spelling without duplicating help,

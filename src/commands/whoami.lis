@@ -106,8 +106,8 @@ token with a member session, and 'lll bot create bot-NAME' provisions a bot iden
       )
       return Ok(())
     }
-    if flag != "--json" { return Err(pb.failed(whoami_arg_error(flag, args))) }
-    if let Some(extra) = args.get(3) { return Err(pb.failed(whoami_arg_error(extra, args))) }
+    if flag != "--json" { return Err(flags.usage_error(whoami_arg_error(flag, args))) }
+    if let Some(extra) = args.get(3) { return Err(flags.usage_error(whoami_arg_error(extra, args))) }
   }
   let json_mode = args.get(2) == Some("--json")
   let (cfg, src) = ctx.settings.traced().map_err(pb.failed)?

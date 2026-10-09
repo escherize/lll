@@ -70,6 +70,11 @@ if skill_extra=$(cd "$DATA_DIR" && "$LIN" skill list software-factory 2>&1); the
 fi
 assert_contains "$skill_extra" "usage: lll skill list" "skill list extra-argument error names usage"
 assert_contains "$skill_extra" "lll skill get NAME" "skill list error names the one-skill command"
+skill_code=0
+(cd "$DATA_DIR" && "$LIN" skill get nope >/dev/null 2>&1) || skill_code=$?
+[ "$skill_code" = 3 ] || fail "skill get of an unknown skill must exit 3 (got $skill_code)"
+contract=$(cd "$DATA_DIR" && "$LIN" help contract)
+assert_contains "$contract" "# The lll CLI contract" "help contract prints the embedded contract"
 
 # PocketBase is embedded in lll (gopb), so there is no external binary to
 # install. `lll up` needs a team and refuses to start without one; ENG is the
@@ -1613,6 +1618,8 @@ fi
 assert_contains "$(cat "$DATA_DIR/comp.fish")" "complete -c lll" "fish completions complete lll"
 python3 "$REPO_ROOT"/scripts/test_completion_commands.py "$LIN"
 python3 "$REPO_ROOT"/scripts/test_flag_policy.py "$LIN"
+python3 "$REPO_ROOT"/scripts/test_usage_exit.py "$LIN"
+python3 "$REPO_ROOT"/scripts/test_write_json.py "$LIN"
 python3 "$REPO_ROOT"/scripts/test_help_ticket_keys.py "$LIN"
 python3 "$REPO_ROOT"/scripts/test_doc_examples.py "$LIN"
 
@@ -2101,16 +2108,15 @@ for pair in 'issue show view' 'issue new create' 'doc new create' 'doc show view
   alias_help=$("$LIN" "$noun" "$alias" --help)
   [ "$alias_help" = "$canonical_help" ] || fail "$noun $alias must show canonical help"
 done
-for noun in issue doc; do
-  if "$LIN" "$noun" read --help >"$DATA_DIR/retired.out" 2>&1; then
-    fail "$noun read must refuse the retired spelling"
-  fi
-  assert_contains "$(cat "$DATA_DIR/retired.out")" "unknown $noun command: 'read' - did you mean 'lll $noun view'?" "retired verb names view"
+# The 1.0 fleet: 'read' is a permanent hidden alias of view (5 of 20 workers
+# typed it). It shows view's help and dispatches like view.
+for noun in issue doc finding; do
+  [ "$("$LIN" "$noun" read --help)" = "$("$LIN" "$noun" view --help)" ] || fail "$noun read must show view's help"
+  assert_not_contains "$("$LIN" "$noun" --help)" "lll $noun read" "$noun --help omits hidden read"
+  assert_not_contains " $("$LIN" completions bash | grep -F "  $noun)" | head -1 | sed "s/.*words='//;s/'.*//") " " read " "$noun completions omit hidden read"
 done
-if "$LIN" finding read migration-hazard >"$DATA_DIR/retired.out" 2>&1; then
-  fail "finding read must refuse the removed spelling"
-fi
-assert_contains "$(cat "$DATA_DIR/retired.out")" "did you mean 'lll doc view SLUG'?" "finding read names doc view"
+out=$(env LLL_URL=$URL LLL_TEAM=ENG "$LIN" finding read migration-hazard --raw)
+assert_contains "$out" "Migrations are a merge hazard." "finding read reads a finding by slug"
 for noun in issue doc finding member; do
   assert_not_contains "$("$LIN" "$noun" --help)" "the same command as" "canonical help has no duplicate alias rows"
 done
@@ -2140,7 +2146,6 @@ assert_contains "$out" "lll finding near" "finding --help mentions near"
 assert_contains "$out" "lll finding list" "finding --help mentions list"
 # LLL-505: 'finding view' is a hidden alias of 'doc view'. Fleet task 9 had
 # 6/30 agents guess it, so it keeps working; help documents only 'doc view'.
-# 'finding read' was removed at 1.0 (LLL-644) and refuses, naming view.
 assert_not_contains "$out" "lll finding view" "finding --help omits hidden view"
 assert_not_contains "$out" "lll finding read" "finding --help omits hidden read"
 assert_contains "$out" "lll doc view SLUG" "finding --help names doc view"

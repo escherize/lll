@@ -207,8 +207,7 @@ fn release(input: flags.CommandInput) -> Result<(), pb.CliError> {
   })?
   let assignment = if result.cleared_assignee { "cleared assignee" } else { "assignment unchanged" }
   let forced = if result.forced { "; forced, and commented on the issue" } else { "" }
-  fmt.Println(f"Released {key} (was {result.member_name}'s); {assignment}{forced}")
-  Ok(())
+  issue_done(ctx, p, key, f"Released {key} (was {result.member_name}'s); {assignment}{forced}")
 }
 
 /// Compatibility name for command/page reads; storage ownership is in claims.
