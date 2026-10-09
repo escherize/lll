@@ -604,6 +604,11 @@ pub struct DocVM {
   pub author: string,
   pub author_avatar: AvatarVM,
   pub author_via: string,
+  // The last editor (LLL-682), shown the way the author is: "" unless
+  // someone other than the author made the latest edit.
+  pub editor: string,
+  pub editor_avatar: AvatarVM,
+  pub editor_via: string,
   pub created: string,
   pub updated: string,
   pub issues: Slice<DocIssueVM>,
@@ -635,6 +640,11 @@ pub struct DocRowVM {
   pub author_kind: string,
   // A bot author's owner, when the viewer may name it.
   pub author_via: string,
+  // The last editor (LLL-682): "" unless it is not the author; "hidden
+  // member" when the roster withholds it. A bot editor's owner as above.
+  pub editor: string,
+  pub editor_bot: bool,
+  pub editor_via: string,
   pub updated: string,
   pub updated_at: string,
   pub href: string,

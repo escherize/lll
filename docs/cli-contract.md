@@ -135,7 +135,7 @@ record, below), `docs` and `findings` (each a doc record, below).
 | Record | Covered fields |
 |---|---|
 | comment | `id`, `issue`, `author`, `author_kind`, `agent`, `body`, `created`, `updated` |
-| doc, finding | `id`, `team`, `slug`, `title`, `kind`, `body`, `area`, `paths`, `issues`, `confidence`, `created`, `updated` |
+| doc, finding | `id`, `team`, `slug`, `title`, `kind`, `body`, `area`, `paths`, `issues`, `confidence`, `last_editor`, `created`, `updated` |
 | team | `id`, `key`, `name`, `accent`, `emoji`, `archived` |
 | member | `id`, `name`, `email`, `kind`, `owner`, `scope`, `teams`, `mode`, `team_keys` |
 | label | `id`, `name`, `color`, `team` |
@@ -146,7 +146,12 @@ record, below), `docs` and `findings` (each a doc record, below).
 A member's `owner`, `scope`, `teams`, `mode` and `team_keys` are absent when
 empty. A comment's `author_kind` is `"system"` on a comment the server wrote on
 its own (today only the claim-expiry note, which has no `author`), and absent
-otherwise. `project view --json` lists its `issues` as records without `key` or
+otherwise. A doc's `last_editor` is the member record id of the member who last
+changed its content (`slug`, `title`, `kind`, `body`, `area` or `paths`), set
+by the server: the author until another member edits it. Linking an issue,
+confirming or refuting a finding, and a write that changes no content leave it
+unchanged. It is `""` on a doc with no author (absent in `issue view --json`).
+`project view --json` lists its `issues` as records without `key` or
 `claim`; use `issue list --project NAME --json` for the issue object.
 
 `lll watch --json` prints one event per line. Its timestamps are RFC3339;

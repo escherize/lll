@@ -50,7 +50,7 @@
 {{range .Docs}}<a class="pj-row dl-row" href="{{.Href}}">
 <span class="dl-kind">{{if .KindLabel}}{{.KindLabel}}{{else}}<span class="none">-</span>{{end}}</span>
 <span class="pj-main"><span class="pj-name">{{.Title}}</span><span class="pj-desc">{{.Slug}}{{if .Area}} · {{.Area}}{{end}}</span></span>
-<span class="dl-author">{{if .Author}}{{template "avatar" .AuthorAvatar}}<span class="dl-name">{{.Author}}</span>{{if .AuthorKind}}<span class="dl-akind">{{.AuthorKind}}{{if .AuthorVia}} via {{.AuthorVia}}{{end}}</span>{{end}}{{else}}<span class="none">-</span>{{end}}</span>
+<span class="dl-author">{{if .Author}}{{template "avatar" .AuthorAvatar}}<span class="dl-name">{{.Author}}</span>{{if .AuthorKind}}<span class="dl-akind">{{.AuthorKind}}{{if .AuthorVia}} via {{.AuthorVia}}{{end}}</span>{{end}}{{else}}<span class="none">-</span>{{end}}{{if .Editor}}<span class="dl-edited" title="last edited by {{.Editor}}">edited by {{.Editor}}{{if .EditorBot}} (bot{{if .EditorVia}} via {{.EditorVia}}{{end}}){{end}}</span>{{end}}</span>
 <span class="dl-age" title="{{.UpdatedAt}}">{{.Updated}}</span>
 </a>
 {{else}}<p class="pj-empty">{{if or .Kind .Q}}No docs match. <a class="prose-link" href="{{.Base}}">Show every doc</a>.{{else}}No docs yet. Run <code>lll doc create</code> to write one.{{end}}</p>

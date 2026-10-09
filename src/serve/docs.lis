@@ -70,6 +70,7 @@ fn doc_page(
 fn doc_vm(d: models.Doc, team_key: string) -> DocVM {
   let kind_label = doc_kind_label(d.kind)
   let author = d.expand.author.unwrap_or(models.Member { .. })
+  let editor = shown_editor(d)
   DocVM {
     slug: d.slug,
     title: d.title,
@@ -80,6 +81,9 @@ fn doc_vm(d: models.Doc, team_key: string) -> DocVM {
     author: author.name,
     author_avatar: avatar_vm(author),
     author_via: author.owner_name(),
+    editor: editor.name,
+    editor_avatar: avatar_vm(editor),
+    editor_via: editor.owner_name(),
     created: display.relative(d.created),
     updated: display.relative(d.updated),
     issues: d.expand.issues.map(|i| {
@@ -102,6 +106,10 @@ fn doc_raw(vm: DocVM) -> string {
   if vm.author != "" {
     let tag = display.author_tag(vm.author_avatar.bot, vm.author_via)
     lines = lines.append(f"Author: {line_text(vm.author + tag)}")
+  }
+  if vm.editor != "" {
+    let tag = display.author_tag(vm.editor_avatar.bot, vm.editor_via)
+    lines = lines.append(f"Edited by: {line_text(vm.editor + tag)}")
   }
   lines = lines.append(f"Created: {vm.created}")
   lines = lines.append(f"Updated: {vm.updated}")
@@ -199,10 +207,19 @@ fn doc_kind_label(kind: string) -> string {
   state_label(kind)
 }
 
+/// The last editor as the doc page and index show it (LLL-682): an empty
+/// member, which shows nothing, unless someone other than the author made
+/// the latest edit. Roster.doc has already replaced a hidden editor.
+fn shown_editor(d: models.Doc) -> models.Member {
+  if d.last_editor == "" || d.last_editor == d.author { return models.Member { .. } }
+  d.expand.last_editor.unwrap_or(models.Member { id: d.last_editor, name: display.hidden_member(), .. })
+}
+
 /// Doc record -> index row. The author is whatever the roster left on the
 /// record, so a hidden author arrives here already named "hidden member".
 fn doc_row_vm(d: models.Doc, team_key: string) -> DocRowVM {
   let author = d.expand.author.unwrap_or(models.Member { .. })
+  let editor = shown_editor(d)
   DocRowVM {
     slug: d.slug,
     title: d.title,
@@ -213,6 +230,9 @@ fn doc_row_vm(d: models.Doc, team_key: string) -> DocRowVM {
     author_avatar: avatar_vm(author),
     author_kind: author.kind().map_or("", |k| k.wire()),
     author_via: author.owner_name(),
+    editor: editor.name,
+    editor_bot: editor.is_bot(),
+    editor_via: editor.owner_name(),
     updated: display.relative(d.updated),
     updated_at: d.updated,
     href: f"/t/{team_key}/doc/{url.PathEscape(d.slug)}",
@@ -234,6 +254,9 @@ fn docs_raw(vm: DocsVM) -> string {
     let mut author = "-"
     if d.author != "" {
       author = d.author + display.author_tag(d.author_avatar.bot, d.author_via)
+    }
+    if d.editor != "" {
+      author = f"{author}, edited by {d.editor}{display.author_tag(d.editor_bot, d.editor_via)}"
     }
     lines = lines.append(
       f"- [{cell(d.slug)}]({d.href}) | {cell(d.title)} | {cell(kind)} | {cell(area)} | {cell(author)} | {d.updated}",
