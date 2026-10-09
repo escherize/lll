@@ -10,7 +10,6 @@ minors. Issue keys are on the project's own board (`lll issue view KEY`).
 
 - `issue comments KEY` is a hidden alias of `issue comment`: it lists the
   comments. A final-replay agent's poll loop never saw the old hint.
-
 - `read` is a permanent hidden alias of `view` on `issue`, `doc` and
   `finding`: it dispatches, but has no help row and no completion. Five of
   twenty agents in the 1.0 fleet typed `lll issue read KEY`. This reverses
@@ -66,7 +65,6 @@ minors. Issue keys are on the project's own board (`lll issue view KEY`).
   - `issue set`, `mark` and any word containing `review` name the state
     change; a stray `status` after `issue update KEY` names `--state`;
   - a redirected `comment` or `update` shows its full form.
-
 - `issue next` says why it has nothing to offer when the reason is not an
   empty board (LLL-685): ready issues all claimed by someone else are named
   as claimed, and open issues all waiting on blockers are named as blocked,
@@ -184,7 +182,6 @@ minors. Issue keys are on the project's own board (`lll issue view KEY`).
   and inside the set-password hint, so redacting the first line still
   leaked it. The hint now says `--old-password -`, which prompts with echo
   off, and the password appears once.
-
 - A token goes only to the server it was saved for (LLL-688). The config
   layers combine key by key, so a `.lll.toml` naming only `url = B`, or
   `LLL_URL=B`, paired B with the home config's token for A: every command
