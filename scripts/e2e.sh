@@ -2616,7 +2616,7 @@ rc=$?
 set -e
 [ "$rc" -ne 0 ] || fail "an edit with a stale stamp should be refused"
 assert_contains "$out" "changed since $stamp" "the refusal names the stale stamp"
-assert_contains "$out" "issue view $CKEY --json" "and where to read the new one"
+assert_contains "$out" "retry with the current stamp: lll issue update $CKEY --priority 4 --if-unchanged-since" "and the retry, with the current stamp"
 [ "$(env $E "$LIN" issue view "$CKEY" --json | jq -r '.priority')" = 3 ] || fail "the refused edit must not land"
 env $E python3 - "$LIN" "$CKEY" <<'PY'
 import json
