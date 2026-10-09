@@ -1,4 +1,4 @@
-"""A password flag given '-' never echoes the secret (#340 review).
+"""A secret flag given '-' never echoes the secret (#340 review, LLL-686).
 
 Under a terminal, `lll login --password -` read a plain line with echo on and
 no prompt, so the password landed in scrollback. This drives the flags that
@@ -20,8 +20,8 @@ binary = str(Path(sys.argv[1]).resolve())
 SECRET = 'tty-secret-7f3a'
 
 
-def run_on_tty(args, env, cwd):
-    """Run lll on a pty, type SECRET once a prompt appears, return all output."""
+def run_on_tty(args, env, cwd, prompt=b'assword'):
+    """Run lll on a pty, type SECRET once `prompt` appears, return all output."""
     pid, fd = pty.fork()
     if pid == 0:
         os.chdir(cwd)
@@ -39,7 +39,7 @@ def run_on_tty(args, env, cwd):
             if not chunk:
                 break
             out += chunk
-        if not typed and b'assword' in out:
+        if not typed and prompt in out:
             os.write(fd, (SECRET + '\n').encode())
             typed = True
     os.waitpid(pid, 0)
@@ -54,15 +54,17 @@ def main():
             ['login', '--email', 'a@example.com', '--password', '-'],
             ['member', 'set-password', 'alice', '--old-password', '-', '--password', 'new-password-1'],
             ['token', 'create', 'bot-x', '--admin-email', 'a@example.com', '--admin-password', '-'],
+            ['login', '--token', '-'],
         ]
         wrong = []
         for args in cases:
-            out, typed = run_on_tty(args, env, directory)
+            out, typed = run_on_tty(args, env, directory, b'Token' if '--token' in args else b'assword')
             if not typed:
                 wrong.append(f"lll {' '.join(args)}: no password prompt on a terminal: {out[:200]!r}")
             elif SECRET in out:
                 wrong.append(f"lll {' '.join(args)}: echoed the password: {out[:200]!r}")
-        for args, flag in [(cases[0], '--password'), (cases[1], '--old-password')]:
+        for args, flag in [(cases[0], '--password'), (cases[1], '--old-password'),
+                           (cases[2], '--admin-password'), (cases[3], '--token')]:
             done = subprocess.run([binary, *args], cwd=directory, env=env, text=True,
                                   capture_output=True, timeout=30, stdin=subprocess.DEVNULL)
             if done.returncode != 2 or f'{flag} -: stdin was empty' not in done.stderr:
