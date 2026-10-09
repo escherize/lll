@@ -3576,7 +3576,9 @@ set -e
 assert_contains "$out" "$URL" "an HTTP-status error names the server"
 DEAD_PORT=$(free_port 20000 39999)
 set +e
-out=$(cd "$NEUTRAL" && env -u LLL_TOKEN LLL_URL="http://127.0.0.1:$DEAD_PORT" LLL_TEAM=ENG \
+# LLL_TOKEN rides with LLL_URL: the home login is for $URL, and a home token
+# is never sent to another url (LLL-688).
+out=$(cd "$NEUTRAL" && env LLL_TOKEN=dead-url-token LLL_URL="http://127.0.0.1:$DEAD_PORT" LLL_TEAM=ENG \
   HOME="$LOGIN_HOME" "$LLL_ABS" issue list 2>&1)
 rc=$?
 set -e
