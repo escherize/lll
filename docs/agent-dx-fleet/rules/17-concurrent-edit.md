@@ -24,7 +24,8 @@ edit the supplied wrapper. Prefer its `--help` to guessing.
 Read every object in full before you change it.
 
 You and your partner each add one line to the same issue's description at the
-same time. Shared issue: `Shared release notes (workers AA and BB)`.
+same time. Shared issue: `Shared release notes (workers AA and BB)`, where AA is role A's
+number and BB is role B's (e.g. `workers 07 and 08`).
 
 Both roles:
 1. Read the issue's description.

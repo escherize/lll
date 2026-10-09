@@ -81,12 +81,15 @@ def clean_env(home):
 JWT = r'[A-Za-z0-9_-]{15,}\.[A-Za-z0-9_-]{15,}\.[A-Za-z0-9_-]{15,}'
 
 
-def redact(text, values=()):
+def redact(text, values=(), help_page=False):
     for value in values:
         if value:
             text = text.replace(value, '[REDACTED]')
     text = re.sub(JWT, '[REDACTED JWT]', text)
-    text = re.sub(r'(temporary password: |--old-password |--password[ =])\S+', r'\1[REDACTED]', text)
+    # A help page names the flag with placeholder prose ("--password pw");
+    # redacting it garbled login --help for a case 19 worker.
+    if not help_page:
+        text = re.sub(r'(temporary password: |--old-password |--password[ =])\S+', r'\1[REDACTED]', text)
     return re.sub(r'board_token=[^\s&]+', 'board_token=[REDACTED]', text)
 
 
@@ -196,10 +199,12 @@ def wrapper_main():
     captured = {'stdout': [], 'stderr': []}
 
     # The audit is always redacted.
+    help_page = '--help' in args or '-h' in args or args[:1] == ['help']
+
     def pump(source, sink, name):
         for chunk in iter(source.readline, b''):
             text = chunk.decode(errors='replace')
-            line = redact(text, hidden)
+            line = redact(text, hidden, help_page)
             captured[name].append(line)
             sink.write(text if minted and name == 'stdout' else line)
             sink.flush()
