@@ -342,11 +342,11 @@ fn another_servers_token_in_the_file_is_never_sent_here() {
 /// password paths; the holder of a valid token has one too.
 #[test]
 fn an_expired_token_names_login_token_and_config_check() {
-  let msg = expired_token("eyJhbGciOiJIUzI1NiJ9.eyJleHAiOjF9.sig", Some(config.Source.HomeFile("/home/a/.config/lll/lll.toml")))
+  let msg = expired_token("eyJhbGciOiJIUzI1NiJ9.eyJleHAiOjF9.sig", Some(config.Source.HomeFile("/home/a/.config/lll/lll.toml")), "lll login")
   assert msg.message.contains("lll login --token -")
   assert msg.message.contains("lll config check")
   // LLL_TOKEN outranks a login, so the message says to fix the variable.
-  let env = expired_token("eyJhbGciOiJIUzI1NiJ9.eyJleHAiOjF9.sig", Some(config.Source.Env("LLL_TOKEN")))
+  let env = expired_token("eyJhbGciOiJIUzI1NiJ9.eyJleHAiOjF9.sig", Some(config.Source.Env("LLL_TOKEN")), "lll login")
   assert env.message.contains("LLL_TOKEN outranks the saved token")
   assert !env.message.contains("lll login --token -")
 }
@@ -402,8 +402,8 @@ fn the_token_refusals_name_each_token_source() {
   ]
   for (source, named, corrupted) in rows {
     assert token_named(source) == named
-    assert stale_token("http://h", source).message.starts_with(f"{named} was rejected by http://h\n")
-    assert expired_token("eyJhbGciOiJIUzI1NiJ9.eyJleHAiOjF9.sig", source).message.starts_with(f"{named} expired at ")
+    assert stale_token("http://h", source, "lll login").message.starts_with(f"{named} was rejected by http://h\n")
+    assert expired_token("eyJhbGciOiJIUzI1NiJ9.eyJleHAiOjF9.sig", source, "lll login").message.starts_with(f"{named} expired at ")
     assert corrupted_token(source).message.starts_with(f"the token in {corrupted} is corrupted:")
   }
 }
@@ -421,6 +421,28 @@ fn the_token_fix_follows_what_outranks_a_login() {
     (None, login),
   ]
   for (source, fix) in rows {
-    assert token_fix(source) == fix
+    assert token_fix(source, "lll login") == fix
   }
+}
+
+// LLL-688: a hint names --url when a repo file, the environment or a flag
+// chose the url, because a plain 'lll login' refuses such a url.
+#[test]
+fn the_login_hint_names_a_url_somebody_else_chose() {
+  assert login_command("http://b", Some(config.Source.RepoFile("/r/.lll.toml"))) == "lll login --url http://b"
+  assert login_command("http://b", Some(config.Source.Env("LLL_URL"))) == "lll login --url http://b"
+  assert login_command("http://b", Some(config.Source.Flag("--url"))) == "lll login --url http://b"
+  assert login_command("http://b", Some(config.Source.HomeFile("/h/lll.toml"))) == "lll login"
+  assert login_command("http://b", Some(config.Source.Default)) == "lll login"
+  assert token_fix(Some(config.Source.HomeFile("/h/lll.toml")), "lll login --url http://b").contains("'lll login --url http://b --token -'")
+}
+
+#[test]
+fn a_withheld_login_names_the_layer_that_chose_the_url() {
+  let held = |source| config.Withheld { home_url: "http://a", url: "http://b", url_source: source }
+  let repo = withheld_login(held(Some(config.Source.RepoFile("/r/.lll.toml"))))
+  assert repo.message == "/r/.lll.toml points this command at http://b, but your saved login is for http://a: run 'lll login --url http://b' to log in there, or remove its url line"
+  assert exit_code(repo.kind) == 6
+  assert withheld_login(held(Some(config.Source.Env("LLL_URL")))).message.ends_with("or unset LLL_URL")
+  assert withheld_login(held(Some(config.Source.Flag("--url")))).message.starts_with("--url points this command at http://b")
 }

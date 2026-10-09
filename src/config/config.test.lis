@@ -558,3 +558,44 @@ fn each_source_prints_as_it_always_has() {
     assert origin(source) == shown
   }
 }
+
+// LLL-688: the home config's token is bound to the url saved beside it. A
+// repo file naming only `url` used to inherit the machine's login and send
+// it to the server the file chose.
+#[test]
+fn the_home_token_goes_only_to_the_home_url() {
+  let home = Some(Source.HomeFile("/h/lll/lll.toml"))
+  let repo = Some(Source.RepoFile("/r/.lll.toml"))
+  let a = "http://127.0.0.1:8100"
+  let b = "http://127.0.0.1:9999"
+  let cfg = |url| Config { url, token: "tok", .. }
+  // The home file supplies both, or the url is the default: sent.
+  assert withheld_token(cfg(a), Sources { url: home, token: home, .. }, a).is_none()
+  assert withheld_token(cfg("http://127.0.0.1:8090"), Sources { url: Some(Source.Default), token: home, .. }, "").is_none()
+  // Another layer names the same url byte for byte (LLL-653): sent.
+  assert withheld_token(cfg(a), Sources { url: Some(Source.Env("LLL_URL")), token: home, .. }, a).is_none()
+  // Another layer names another url: withheld, naming that layer.
+  let Some(held) = withheld_token(cfg(b), Sources { url: repo, token: home, .. }, a) else { panic("expected withheld") };
+  assert held.url == b
+  assert held.home_url == a
+  assert withheld_token(cfg(b), Sources { url: Some(Source.Env("LLL_URL")), token: home, .. }, a).is_some()
+  assert withheld_token(cfg(b), Sources { url: Some(Source.Flag("--url")), token: home, .. }, a).is_some()
+  assert withheld_token(cfg("http://localhost:8100"), Sources { url: repo, token: home, .. }, a).is_some()
+  // A token whoever chose the url also set stays with it.
+  assert withheld_token(cfg(b), Sources { url: repo, token: repo, .. }, a).is_none()
+  assert withheld_token(cfg(b), Sources { url: repo, token: Some(Source.Env("LLL_TOKEN")), .. }, a).is_none()
+}
+
+#[test]
+fn settings_hide_a_withheld_token_from_every_reader() {
+  let home = Some(Source.HomeFile("/h/lll/lll.toml"))
+  let s = given(
+    Config { url: "http://127.0.0.1:9999", token: "tok", .. },
+    Sources { url: Some(Source.RepoFile("/r/.lll.toml")), token: home, .. },
+    Env { .. },
+  )
+  let Ok((cfg, src)) = s.traced() else { panic("expected settings") };
+  assert cfg.token == ""
+  assert src.token.is_none()
+  assert s.withheld().is_some()
+}

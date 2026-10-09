@@ -74,14 +74,21 @@ impl Client {
   }
 
   /// This client against another server (`--url`, `lll up`'s own API),
-  /// keeping the credential.
+  /// keeping the credential, unless it is the home config's token and the
+  /// url is not the one it was saved with (LLL-688).
   pub fn with_url(self, url: string) -> Client {
-    Client {
-      settings: self.settings.with_url(url),
-      session: gopb.NewSession(self.token()),
-      token_source: self.token_source,
-      renewal: self.renewal,
+    let settings = self.settings.with_url(url)
+    let from_home = match self.token_source {
+      Some(config.Source.HomeFile(_)) => true,
+      Some(config.Source.Env(_)) | Some(config.Source.RepoFile(_)) | Some(config.Source.Flag(_)) |
+        Some(config.Source.Default) | None => false,
     }
+    let (token, source) = if from_home && settings.withheld().is_some() {
+      ("", None)
+    } else {
+      (self.token(), self.token_source)
+    }
+    Client { settings, session: gopb.NewSession(token), token_source: source, renewal: self.renewal }
   }
 
   /// This client with other settings: the same credential, renewal and
@@ -267,7 +274,7 @@ impl Client {
     let (cfg, src) = self.settings.traced().map_err(failed)?
     let token = self.token()
     if token == "" && (strings.HasPrefix(path, "/api/collections/") || strings.HasPrefix(path, "/api/lll/")) {
-      return Err(not_logged_in(cfg.url, src.url))
+      return Err(self.not_logged_in_message())
     }
     let wire = Wire { base: cfg.url, url_origin: src.url, method, path, payload, content_type, stamp, key }
     // TASK-319: the server answers 401 to a record request whose token it
@@ -340,7 +347,7 @@ impl Client {
     // and the hosted board served empty pages from the moment its boot token
     // aged out until someone restarted the machine.
     if verdict == "expired" && self.renewal.is_none() {
-      return Some(Err(expired_token(token, self.token_source)))
+      return Some(Err(expired_token(token, self.token_source, login_command(wire.base, wire.url_origin))))
     }
     if verdict == "rejected" || verdict == "expired" {
       // A process holding the server's admin credentials can fix this itself.
@@ -363,8 +370,9 @@ impl Client {
           wire.content_type, wire.stamp, wire.key,
         ))
       }
-      if verdict == "expired" { return Some(Err(expired_token(token, self.token_source))) }
-      return Some(Err(stale_token(wire.base, self.token_source)))
+      let login = login_command(wire.base, wire.url_origin)
+      if verdict == "expired" { return Some(Err(expired_token(token, self.token_source, login))) }
+      return Some(Err(stale_token(wire.base, self.token_source, login)))
     }
     None
   }
@@ -414,8 +422,10 @@ impl Client {
   }
 
   /// not_logged_in, with the url and its origin, for callers outside the
-  /// request path's error handling (whoami).
+  /// request path's error handling (whoami). When the home config holds a
+  /// token for another url, that is the answer instead.
   pub fn not_logged_in_message(self) -> CliError {
+    if let Some(held) = self.settings.withheld() { return withheld_login(held) }
     let Ok((cfg, src)) = self.settings.traced() else { return not_logged_in("", Some(config.Source.Default)) }
     not_logged_in(cfg.url, src.url)
   }
@@ -427,7 +437,11 @@ impl Client {
 
   /// expired_token, for whoami.
   pub fn expired_token_message(self) -> CliError {
-    expired_token(self.token(), self.token_source)
+    let login = match self.settings.traced() {
+      Ok((cfg, src)) => login_command(cfg.url, src.url),
+      Err(_) => "lll login",
+    }
+    expired_token(self.token(), self.token_source, login)
   }
 }
 
@@ -726,7 +740,7 @@ pub fn refresh_token(base: string, tok: string) -> Result<string, CliError> {
     let mut h = h
     h.Set("Authorization", bearer(tok))
   }
-  let client = http.Client { Timeout: 2 * time.Second, .. }
+  let client = http.Client { Timeout: 2 * time.Second, ..no_redirects() }
   let resp = match client.Do(req) {
     Ok(r) => r,
     Err(e) => return Err(failed(f"{what}: {e}")),
@@ -773,12 +787,12 @@ rather than typing it (a token is ~200 characters and one wrong one is enough)")
 /// The refusal for a token whose own payload says it has expired: exact,
 /// because the payload is. Fleet shard 24 reported expired tokens keep
 /// working; the probe said otherwise, and this is what it says now.
-fn expired_token(tok: string, origin: Option<config.Source>) -> CliError {
+fn expired_token(tok: string, origin: Option<config.Source>, login: string) -> CliError {
   let from = token_named(origin)
   let exp = token_expiry(tok).unwrap_or(0)
   let when = time.Unix(exp as int64, 0).UTC().Format("2006-01-02 15:04:05 UTC")
   let ago = time.Now().Unix() as int - exp
-  fail(ErrorKind.Auth, f"{from} expired at {when} ({ago}s ago). Every read comes back empty and every write is refused until it is replaced: {token_fix(origin)}")
+  fail(ErrorKind.Auth, f"{from} expired at {when} ({ago}s ago). Every read comes back empty and every write is refused until it is replaced: {token_fix(origin, login)}")
 }
 
 /// The token as the expiry and rejection refusals name it.
@@ -794,17 +808,41 @@ fn token_named(origin: Option<config.Source>) -> string {
 /// sent down the superuser and password paths first). LLL_TOKEN and a repo
 /// file both outrank the saved token, so a login would not take effect while
 /// either holds one.
-fn token_fix(origin: Option<config.Source>) -> string {
+fn token_fix(origin: Option<config.Source>, login: string) -> string {
   match origin {
-    Some(config.Source.Env(name)) => f"{name} outranks the saved token: set it to a valid one ('lll token create <member>' mints an agent's), or unset it to use the saved one ('lll login' saves a new one). Then 'lll config check' to verify",
+    Some(config.Source.Env(name)) => f"{name} outranks the saved token: set it to a valid one ('lll token create <member>' mints an agent's), or unset it to use the saved one ('{login}' saves a new one). Then 'lll config check' to verify",
     // LLL-687: this used to send a repo file's token down the login path too,
     // and the login landed in the home file the repo file outranks.
-    Some(config.Source.RepoFile(path)) => f"remove the token line from {path}, which outranks the saved token; then 'lll login' saves a new one to the home config. Then 'lll config check' to verify",
-    Some(config.Source.HomeFile(_)) | Some(config.Source.Flag(_)) | Some(config.Source.Default) | None => "'lll token create <member>' (an agent's, minted by a superuser) or 'lll login --email <your email>' (a person); or, if you hold a valid token: 'lll login --token -' (reads it from stdin). Then 'lll config check' to verify",
+    Some(config.Source.RepoFile(path)) => f"remove the token line from {path}, which outranks the saved token; then '{login}' saves a new one to the home config. Then 'lll config check' to verify",
+    Some(config.Source.HomeFile(_)) | Some(config.Source.Flag(_)) | Some(config.Source.Default) | None => f"'lll token create <member>' (an agent's, minted by a superuser) or '{login} --email <your email>' (a person); or, if you hold a valid token: '{login} --token -' (reads it from stdin). Then 'lll config check' to verify",
   }
 }
 
-fn stale_token(base: string, origin: Option<config.Source>) -> CliError {
+/// The login command a hint names for `base`. A url a repo file, the
+/// environment or a flag chose is named with --url: 'lll login' without it
+/// refuses such a url rather than send credentials there (LLL-688).
+pub fn login_command(base: string, url_origin: Option<config.Source>) -> string {
+  match url_origin {
+    Some(config.Source.Env(_)) | Some(config.Source.RepoFile(_)) | Some(config.Source.Flag(_)) => f"lll login --url {base}",
+    Some(config.Source.HomeFile(_)) | Some(config.Source.Default) | None => "lll login",
+  }
+}
+
+/// The refusal for a command whose url is not the one the home config's
+/// token was saved for (LLL-688): the token is not sent, and this names the
+/// layer that chose the url.
+pub fn withheld_login(held: config.Withheld) -> CliError {
+  let (who, other) = match held.url_source {
+    Some(config.Source.RepoFile(path)) => (path, "remove its url line"),
+    Some(config.Source.Env(name)) => (name, f"unset {name}"),
+    Some(config.Source.Flag(spelling)) => (spelling, f"drop {spelling}"),
+    Some(config.Source.HomeFile(_)) | Some(config.Source.Default) | None => ("the configured url", "fix the url"),
+  }
+  let saved = if held.home_url == "" { "the default url" } else { held.home_url }
+  fail(ErrorKind.Auth, f"{who} points this command at {held.url}, but your saved login is for {saved}: run 'lll login --url {held.url}' to log in there, or {other}")
+}
+
+fn stale_token(base: string, origin: Option<config.Source>, login: string) -> CliError {
   let from = token_named(origin)
   fail(ErrorKind.Auth, f"{from} was rejected by {base}
 it is well-formed, but the server does not recognise it. In order of
@@ -813,7 +851,7 @@ likelihood:
   2. the password behind it was reset, which retires earlier tokens
   3. the member was removed, or its token revoked - ask whoever invited you
   4. it expired
-a fresh one: {token_fix(origin)}")
+a fresh one: {token_fix(origin, login)}")
 }
 
 /// Refusal for a collection request with no token anywhere in the layering.
@@ -897,11 +935,20 @@ fn request_options(
     if stamp != "" { h.Set("If-Unmodified-Since", stamp) }
     if key != "" { h.Set("Idempotency-Key", key) }
   }
-  let resp = match http.DefaultClient.Do(req) {
+  let resp = match no_redirects().Do(req) {
     Ok(r) => r,
     Err(e) => return Err(unreachable_hint(base, url_origin, e)),
   }
   read_body(resp, f"{method} {base}{path}")
+}
+
+/// An HTTP client that never follows a redirect (LLL-688). Go's default
+/// client follows one, keeps Authorization for the same host on another
+/// port, and re-sends a POST body (a password) on 307. Every request that
+/// carries a credential goes through one of these; a 3xx answer is an error
+/// naming where it pointed (read_body).
+pub fn no_redirects() -> http.Client {
+  http.Client { CheckRedirect: Some(|_, _| Err(http.ErrUseLastResponse)), .. }
 }
 
 fn read_body(resp: Ref<http.Response>, what: string) -> Result<string, CliError> {
@@ -913,6 +960,11 @@ fn read_body(resp: Ref<http.Response>, what: string) -> Result<string, CliError>
     Partial.Ok(b) => b,
     // A complete JSON prefix does not make an incomplete HTTP body valid.
     Partial.Both(_, e) | Partial.Err(e) => return Err(fail(ErrorKind.Network, f"{what}: reading response: {e}")),
+  }
+  if resp.StatusCode >= 300 && resp.StatusCode < 400 {
+    let location = resp.Header.map_or("", |h| h.Get("Location"))
+    return Err(fail(ErrorKind.Network, f"{what}: the server answered {resp.Status}, a redirect to {location}; lll does not follow redirects, so nothing was sent there
+if that is the lll server, use its address as the url"))
   }
   if resp.StatusCode >= 300 {
     return Err(http_error(what, resp.StatusCode, resp.Status, body as string))

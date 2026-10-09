@@ -142,18 +142,33 @@ pub struct Settings {
   pub env: Env,
   pub overrides: Overrides,
   loaded: Result<(Config, Sources), string>,
+  /// The url the home config names, "" for none: the server its token was
+  /// saved for (LLL-688).
+  home_url: string,
 }
 
 impl Settings {
-  /// The effective configuration and the origin of every field.
+  /// The effective configuration and the origin of every field. A home
+  /// config token is absent when the effective url is not the one it was
+  /// saved with (`withheld`), so nothing that reads it can send it there.
   pub fn traced(self) -> Result<(Config, Sources), string> {
-    self.loaded
+    let (cfg, src) = self.loaded?
+    if withheld_token(cfg, src, self.home_url).is_some() {
+      return Ok((Config { token: "", ..cfg }, Sources { token: None, ..src }))
+    }
+    Ok((cfg, src))
   }
 
   /// The effective configuration.
   pub fn config(self) -> Result<Config, string> {
-    let (cfg, _) = self.loaded?
+    let (cfg, _) = self.traced()?
     Ok(cfg)
+  }
+
+  /// The home config's token held back from this url, or None (LLL-688).
+  pub fn withheld(self) -> Option<Withheld> {
+    let Ok((cfg, src)) = self.loaded else { return None }
+    withheld_token(cfg, src, self.home_url)
   }
 
   /// These settings with the API url chosen by a flag (or by `lll up`).
@@ -286,13 +301,44 @@ pub fn no_overrides() -> Overrides {
 /// carry `team` alone and still inherit `url` and `token` from the machine.
 pub fn resolve(env: Env, overrides: Overrides) -> Settings {
   let loaded = apply_overrides(layered(env), overrides)
-  Settings { env, overrides, loaded }
+  let home_url = home_file(env).map_or("", |path| read_config(path, Config { .. }).map_or("", |c| c.url))
+  Settings { env, overrides, loaded, home_url }
 }
 
 /// Settings from known values, reading no file and no environment: for
 /// tests, which hand a command exactly the configuration it should see.
 pub fn given(cfg: Config, src: Sources, env: Env) -> Settings {
-  Settings { env, overrides: no_overrides(), loaded: Ok((cfg, src)) }
+  Settings { env, overrides: no_overrides(), loaded: Ok((cfg, src)), home_url: "" }
+}
+
+/// A home config token not sent to the effective url (LLL-688), and why.
+pub struct Withheld {
+  /// The url the home config names: the server the token was saved for.
+  pub home_url: string,
+  /// The url this command would have sent it to.
+  pub url: string,
+  /// Where that url came from: a repo file, an environment variable or a flag.
+  pub url_source: Option<Source>,
+}
+
+/// Pure. A token is bound to the url it was saved with. The home config's
+/// token goes only to the url that file names, byte for byte, or to the
+/// default when it names none. The layers combine key by key, so a repo
+/// file naming only `url` would otherwise send the machine's login to
+/// whatever server it chose. A token from LLL_TOKEN or a repo file stays
+/// with the url configured beside it: whoever set it chose both.
+pub fn withheld_token(cfg: Config, src: Sources, home_url: string) -> Option<Withheld> {
+  if cfg.token == "" { return None }
+  match src.token {
+    Some(Source.HomeFile(_)) => (),
+    Some(Source.Env(_)) | Some(Source.RepoFile(_)) | Some(Source.Flag(_)) | Some(Source.Default) | None => return None,
+  }
+  let bound = match src.url {
+    Some(Source.HomeFile(_)) | Some(Source.Default) => true,
+    Some(Source.Env(_)) | Some(Source.RepoFile(_)) | Some(Source.Flag(_)) | None => cfg.url == home_url,
+  }
+  if bound { return None }
+  Some(Withheld { home_url, url: cfg.url, url_source: src.url })
 }
 
 /// The config files, then the environment, then the default url.

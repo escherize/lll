@@ -298,7 +298,7 @@ fn connect(
       h.Set("Authorization", auth)
     }
   }
-  let resp = match http.DefaultClient.Do(req) {
+  let resp = match pb.no_redirects().Do(req) {
     Ok(r) => r,
     Err(e) => return Err(ConnectFailure.Other(pb.unreachable(base_url, e))),
   }
@@ -349,7 +349,7 @@ fn connect(
     h.Set("Content-Type", "application/json")
     if auth != "" { h.Set("Authorization", auth) }
   }
-  let sub_resp = match http.DefaultClient.Do(sub_req) {
+  let sub_resp = match pb.no_redirects().Do(sub_req) {
     Ok(r) => r,
     Err(e) => return Err(ConnectFailure.Other(pb.unreachable(base_url, e))),
   }
@@ -393,7 +393,7 @@ fn check_token(base_url: string, auth: string) -> Result<(), ConnectFailure> {
       h.Set("Authorization", auth)
     }
   }
-  let resp = match http.DefaultClient.Do(req) {
+  let resp = match pb.no_redirects().Do(req) {
     Ok(r) => r,
     Err(e) => return Err(ConnectFailure.Other(pb.unreachable(base_url, e))),
   }
