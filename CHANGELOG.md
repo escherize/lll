@@ -82,7 +82,7 @@ minors. Issue keys are on the project's own board (`lll issue view KEY`).
 - `--team` on a server-wide command (`member`, `team`, `token`, ...) says the
   command is server-wide; it offered an LLL_TEAM override that filters
   nothing. `member list` adds that its last column shows each member's teams.
-- An unknown `--old-password` says only an administrator can reset a
+- A rejected `--old-password` says only an administrator can reset a
   password you do not know.
 - Usage lines list enum values, generated from the enums: `--state
   backlog|todo|...`, `--priority none|urgent|...|0-4`, `--sort`, project

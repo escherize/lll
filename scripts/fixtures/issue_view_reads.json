@@ -1,12 +1,12 @@
 {
   "empty/view": {
     "code": 0,
-    "stdout": "VIEW-1 Read fixture\n\nState:     ○ todo\nPriority:  urgent\nAssignee:  viewer\nProject:   none\nLabels:    runtime\nAttachments:\n  fixture.txt\nEmoji:     🔧\nCreated:   <age>\nUpdated:   <age>\n\nA description.\nSecond line.\n\nComments: none\n",
+    "stdout": "VIEW-1 Read fixture\n\nState:     ○ todo\nPriority:  urgent\nAssignee:  viewer\nClaimed:   none\nProject:   none\nLabels:    runtime\nAttachments:\n  fixture.txt\nEmoji:     🔧\nCreated:   <age>\nUpdated:   <age>\n\nA description.\nSecond line.\n\nComments: none\n",
     "stderr": ""
   },
   "empty/raw": {
     "code": 0,
-    "stdout": "# VIEW-1: Read fixture\n\nA description.\nSecond line.\n\n## Attachments\n- fixture.txt\n",
+    "stdout": "# VIEW-1: Read fixture\n\n- **Claimed:** none\n\nA description.\nSecond line.\n\n## Attachments\n- fixture.txt\n",
     "stderr": ""
   },
   "empty/json": {
