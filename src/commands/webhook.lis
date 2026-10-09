@@ -1,14 +1,17 @@
 import "records"
+import "go:bufio"
 import "go:crypto/rand"
 import "go:encoding/json"
 import "go:fmt"
 import "go:net/url"
+import "go:os"
 import "go:strings"
 
 import "models"
 import "pb"
 import "flags"
 import "query"
+import "secret"
 import "writes"
 
 /// Dispatch `lll webhook <verb>` through the noun's Command table (TASK-307):
@@ -76,7 +79,7 @@ pub fn webhook_commands() -> Slice<flags.Command> {
 fn webhook_add_spec() -> Slice<flags.Flag> {
   flags.with_team([
     flags.Flag { name: "--project", value: true, hint: "NAME", help: "scope deliveries to one project instead of the whole team", .. },
-    flags.Flag { name: "--secret", value: true, hint: "SECRET", help: "sent on every delivery as the X-LLL-Secret header (default: generated and printed once)", .. },
+    flags.Flag { name: "--secret", value: true, hint: "SECRET", help: "sent on every delivery as the X-LLL-Secret header ('-' reads it from stdin;\ndefault: generated and printed once)", .. },
   ])
 }
 
@@ -106,8 +109,12 @@ fn webhook_add(input: flags.CommandInput) -> Result<(), pb.CliError> {
   }
   // The server never returns the secret (LLL-661), so one the caller did
   // not choose is generated here and printed once, below.
-  let generated = !p.given("--secret")
-  let secret = if generated { rand.Text() } else { p.one("--secret") }
+  let chosen = if p.given("--secret") {
+    let mut input = bufio.NewReader(os.Stdin)
+    Some(secret.Secret.read(p, "--secret", "Webhook secret: ", input)?)
+  } else {
+    None
+  }
 
   // One registration per scope and URL: a duplicate would double every
   // delivery, which reads downstream as a server bug rather than a mistake.
@@ -121,17 +128,21 @@ fn webhook_add(input: flags.CommandInput) -> Result<(), pb.CliError> {
     return Err(pb.failed(f"webhook {target} is already registered for {scope}; remove it first: 'lll webhook remove {target}'"))
   }
 
-  let body = writes.create_webhook(ctx, models.NewWebhook { team: team.id, project: project_id, url: target, secret })?
+  let value = match chosen {
+    Some(s) => s.reveal(),
+    None => rand.Text(),
+  }
+  let body = writes.create_webhook(ctx, models.NewWebhook { team: team.id, project: project_id, url: target, secret: value })?
   let mut created = models.Webhook { .. }
   if let Err(e) = json.Unmarshal(body.bytes(), &created) {
     return Err(pb.failed(f"decoding created webhook: {e}"))
   }
-  // `generated` is checked first: a server older than LLL-661 returns no
-  // secret_set, and the generated secret must still be shown once.
-  if generated {
-    fmt.Println(f"Registered webhook {target} ({scope}); deliveries carry X-LLL-Secret: {secret}")
+  // The generated case is checked first: a server older than LLL-661
+  // returns no secret_set, and the generated secret must still be shown once.
+  if chosen.is_none() {
+    fmt.Println(f"Registered webhook {target} ({scope}); deliveries carry X-LLL-Secret: {value}")
     fmt.Println("Save this secret now: lll will not show it again.")
-  } else if secret == "" {
+  } else if chosen.map_or(false, |s| s.is_empty()) {
     fmt.Println(f"Registered webhook {target} ({scope})")
   } else {
     fmt.Println(f"Registered webhook {target} ({scope}); deliveries carry X-LLL-Secret")

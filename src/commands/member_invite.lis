@@ -1,3 +1,4 @@
+import "go:bufio"
 import "go:crypto/rand"
 import "go:encoding/json"
 import "go:fmt"
@@ -139,7 +140,7 @@ fn member_invite(input: flags.CommandInput) -> Result<(), pb.CliError> {
   let ctx = point_at_url(ctx, p.one("--url"))?
   // Superuser first: the create rides it, and an existing name is caught here
   // rather than as PocketBase's bare 400 on the unique index.
-  let su = superuser_auth(ctx, given_admin_login(ctx.settings, p)?)?
+  let su = superuser_auth(ctx, given_admin_login(ctx.settings, p, bufio.NewReader(os.Stdin))?)?
   if let Some(existing) = records.find_member_as(ctx, su, name)? {
     return Err(
       pb.failed(f"member '{name}' already exists ({existing.email}); run 'lll member set-password {name} --email {email} --password PASSWORD' with administrator credentials to enable login; existing credentials are unchanged"),
@@ -292,7 +293,7 @@ fn member_passes(input: flags.CommandInput) -> Result<(), pb.CliError> {
   }
   let ctx = point_at_url(ctx, local.url)?
   let ctx = ctx.with_settings(ctx.settings.with_web_url(local.url))
-  let given = given_admin_login(ctx.settings, p)?
+  let given = given_admin_login(ctx.settings, p, bufio.NewReader(os.Stdin))?
   let cfg = ctx.settings.config().map_err(pb.failed)?
   if cfg.team == "" {
     return Err(

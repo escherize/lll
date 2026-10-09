@@ -146,6 +146,19 @@ minors. Issue keys are on the project's own board (`lll issue view KEY`).
   also takes it as `-b`.
 - `issue update --claim` exits 2 with "to claim, run: lll issue claim KEY"
   instead of the update usage.
+- Every secret flag reads `-` the same way (LLL-686): `--password`,
+  `--old-password`, `--admin-password`, `--token` and `webhook add
+  --secret`. On a terminal it prompts with echo off; otherwise it reads one
+  line from stdin, and an empty one exits 2 naming the flag. `member create
+  --password -` and `webhook add --secret -` took `-` as the value.
+  `login --token -` printed `Token: ` into a pipe and, on empty stdin, said
+  the token was missing.
+- Ctrl-C at a hidden password or token prompt restores terminal echo and
+  exits 130; it left the shell with echo off. `member create --password -`
+  on a terminal asks twice and refuses a mismatch. `--admin-password -`
+  followed by a prompt (`member set-password` without `--password`, `login
+  --create` without `--password`) reads the prompt's answer from the same
+  stdin; the answer was lost and the command said there was no password.
 
 ### Fixed
 

@@ -12,6 +12,7 @@ import "config"
 import "flags"
 import "models"
 import "pb"
+import "secret"
 import "tokens"
 
 // `lll token` (TASK-183) — the agent entry point for auth. Agents do not
@@ -101,7 +102,7 @@ fn token_create(input: flags.CommandInput) -> Result<(), pb.CliError> {
   let duration = parse_token_duration(p.one("--duration"))?
 
   let ctx = point_at_url(ctx, p.one("--url"))?
-  let su = superuser_auth(ctx, given_admin_login(ctx.settings, p)?)?
+  let su = superuser_auth(ctx, given_admin_login(ctx.settings, p, bufio.NewReader(os.Stdin))?)?
   let found = records.find_member_as(ctx, su, name)?
   let Some(member) = found else {
     return Err(pb.fail(pb.ErrorKind.NotFound, f"no member named '{name}'; see 'lll member create'"))
@@ -176,7 +177,7 @@ pub fn admin_flags() -> Slice<flags.Flag> {
       name: "--admin-password",
       value: true,
       hint: "pw",
-      help: "superuser password (else LLL_ADMIN_PASSWORD, only when no token is configured)",
+      help: "superuser password (else LLL_ADMIN_PASSWORD, only when no token is configured);\n'-' reads it from stdin",
       ..,
     },
   ]
@@ -210,23 +211,29 @@ pub enum AdminLogin {
 /// The admin login a command was given: both --admin-* flags, else both
 /// LLL_ADMIN_* variables (as the settings carry them), else none. One flag
 /// without the other is refused.
-pub fn given_admin_login(settings: config.Settings, p: flags.Parsed) -> Result<AdminLogin, pb.CliError> {
+pub fn given_admin_login(
+  settings: config.Settings,
+  p: flags.Parsed,
+  input: mut Ref<bufio.Reader>,
+) -> Result<AdminLogin, pb.CliError> {
   let email = p.one("--admin-email")
-  let mut pass = p.one("--admin-password")
-  // '-' reads stdin, as every password flag does, prompting with echo off
-  // on a terminal. Only one flag can read it: a second reader would lose
-  // what the first one buffered.
-  if pass == "-" {
-    if p.one("--password") == "-" || p.one("--old-password") == "-" {
-      return Err(flags.usage_error("only one password flag can read stdin ('-'); pass the other as a value"))
-    }
-    let mut stdin = bufio.NewReader(os.Stdin)
-    pass = password_value(pass, "--admin-password", "Superuser password: ", stdin)?
+  // Only one flag can read stdin (secret.from_stdin says why).
+  if secret.from_stdin(p, "--admin-password") && (secret.from_stdin(p, "--password") || secret.from_stdin(p, "--old-password") || secret.from_stdin(p, "--token")) {
+    return Err(flags.usage_error("only one password flag can read stdin ('-'); pass the other as a value"))
   }
-  if (email == "") != (pass == "") {
+  let pass = if p.given("--admin-password") {
+    Some(secret.Secret.read(p, "--admin-password", "Superuser password: ", input)?)
+  } else {
+    None
+  }
+  let has_pass = pass.map_or(false, |s| !s.is_empty())
+  if (email == "") == has_pass {
     return Err(flags.usage_error("--admin-email and --admin-password go together; give both"))
   }
-  if email != "" { return Ok(AdminLogin.Explicit(config.AdminCreds { email, password: pass })) }
+  // Revealed into the credentials superuser_login sends.
+  if let Some(pw) = pass {
+    if email != "" { return Ok(AdminLogin.Explicit(config.AdminCreds { email, password: pw.reveal() })) }
+  }
   match settings.admin() {
     Some(creds) => Ok(AdminLogin.Env(creds)),
     None => Ok(AdminLogin.Absent),
@@ -395,7 +402,7 @@ fn bot_create(ctx: pb.Client, args: Slice<string>, start: int, command: string) 
   }
   require_bot_prefix("lll bot create", name)?
   let ctx = point_at_url(ctx, p.one("--url"))?
-  let (tok, caller) = bot_caller(ctx, given_admin_login(ctx.settings, p)?)?
+  let (tok, caller) = bot_caller(ctx, given_admin_login(ctx.settings, p, bufio.NewReader(os.Stdin))?)?
   let duration = parse_token_duration(p.one("--duration"))?
   let env_only = p.given("--env")
   // Resolved before anything is created or minted, so a refusal leaves the
@@ -450,7 +457,7 @@ fn bot_rotate(ctx: pb.Client, args: Slice<string>) -> Result<(), pb.CliError> {
   }
   require_bot_prefix("lll bot rotate", name)?
   let ctx = point_at_url(ctx, p.one("--url"))?
-  let (tok, _) = bot_caller(ctx, given_admin_login(ctx.settings, p)?)?
+  let (tok, _) = bot_caller(ctx, given_admin_login(ctx.settings, p, bufio.NewReader(os.Stdin))?)?
   let duration = parse_token_duration(p.one("--duration"))?
   let env_only = p.given("--env")
   let team = prompt_team(ctx, tok, env_only, p.one("--team"))?
