@@ -22,14 +22,16 @@ and must stay open.
    the next ready issue with that label and take it in the same call, close
    it, and repeat. It must branch on lll's EXIT CODES, not on message text: on
    "nothing to do" it stops and exits 0; on any other failure it exits with
-   that code. Read `./lll issue next --help` before writing it.
+   that code. Read `./lll issue next --help` before writing it, and capture
+   the key from stdout only (no `2>&1`).
 2. The script calls the wrapper (`./lll`, or its absolute path). It must not
    contain a token or read conn.txt; the wrapper supplies the connection.
 3. Read the script back, then rehearse: `./fleet-13-NN.sh practice` (three
    disposable issues). Fix the script and rehearse again until that run exits
    0 with every practice issue done. Read back with `./lll issue list --label
    practice`: every practice issue done and unclaimed. If a rehearsal strands a
-   claim, release it with `./lll issue release KEY` (practice only), then
+   claim, release it with `./lll issue release KEY` (practice only; the only
+   manual action allowed on a practice issue - never close one by hand), then
    rehearse again: a release is not a clean run. Only after a rehearsal exits
    0 and the read-back shows every practice issue done, run `./fleet-13-NN.sh sweep`,
    exactly once. Never claim, close, release, reopen or update a `sweep`
