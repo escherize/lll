@@ -3442,57 +3442,116 @@ printf 'me = "zed"\n' > "$ME_HOME/.config/lll/lll.toml"
 grep -q '^me = "zed"$' "$ME_HOME/.config/lll/lll.toml" \
   || fail "login --url overwrote a configured me: $(cat "$ME_HOME/.config/lll/lll.toml")"
 
-# LLL-688: a login sends its new token only to the server it logged in to.
-# The team check after login used to re-resolve the layered config, where a
-# directory's .lll.toml url outranks the home one, so the token minted on A
-# went to whatever server that file named. B is a listener that counts every
-# request; a .lll.toml naming it sits in the directory login runs from.
-B_REC="$DATA_DIR/login-b-requests.txt"
+# LLL-688: a token goes only to the server it was minted on. B is a listener
+# that logs every connection, a partial one included; a .lll.toml naming it
+# sits in the directory every command below runs from. B must see nothing:
+#   - login --url A by password, --token and --create: the team check after
+#     login used to re-resolve the layered config, where that file's url
+#     outranks the home one, and sent A's fresh token to B;
+#   - login without --url: it used to send the password to the file's url;
+#   - an ordinary command with the home login for A: the layers combine key by
+#     key, so the file's url was paired with A's token.
+B_REC="$DATA_DIR/login-b-connections.txt"
 B_PORT=$(free_port 20000 39999)
 cat > "$DATA_DIR/count_server.py" <<'COUNT_EOF'
-import http.server, socketserver, sys
+import socket, sys, threading
 port, rec = int(sys.argv[1]), sys.argv[2]
-class H(http.server.BaseHTTPRequestHandler):
-    def _count(self):
-        with open(rec, "a") as f:
-            f.write(f"{self.command} {self.path}\n")
-        self.send_response(200)
-        self.send_header("Content-Length", "2")
-        self.end_headers()
-        self.wfile.write(b"{}")
-    do_GET = do_POST = do_PATCH = do_DELETE = _count
-    def log_message(self, *a): pass
-socketserver.TCPServer(("127.0.0.1", port), H).serve_forever()
+s = socket.socket()
+s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+s.bind(("127.0.0.1", port))
+s.listen(50)
+def log(line):
+    with open(rec, "a") as f:
+        f.write(line + "\n")
+def handle(c):
+    log("CONN accepted")
+    c.settimeout(2)
+    data = b""
+    try:
+        while b"\r\n\r\n" not in data and len(data) < 65536:
+            chunk = c.recv(4096)
+            if not chunk:
+                break
+            data += chunk
+    except OSError:
+        pass
+    first = data.split(b"\r\n")[0].decode("latin1") or "<no request line>"
+    log(f"REQ {first}")
+    try:
+        c.sendall(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\n{}")
+    except OSError:
+        pass
+    c.close()
+while True:
+    conn, _ = s.accept()
+    threading.Thread(target=handle, args=(conn,), daemon=True).start()
 COUNT_EOF
 python3 "$DATA_DIR/count_server.py" "$B_PORT" "$B_REC" >/dev/null 2>&1 &
 B_PID=$!
 SPY_PIDS="${SPY_PIDS:-} $B_PID"
 wait_ok "http://127.0.0.1:$B_PORT/" || fail "the counting listener did not start"
+sleep 0.2
 : > "$B_REC"
 HOSTILE="$DATA_DIR/hostile_repo"
 mkdir -p "$HOSTILE"
 printf 'url = "http://127.0.0.1:%s"\n' "$B_PORT" > "$HOSTILE/.lll.toml"
+b_saw_nothing() { # what
+  [ -s "$B_REC" ] && fail "$1 reached the .lll.toml's server: $(cat "$B_REC")"
+  return 0
+}
 TWO_TOKEN=""
-for mode in password token; do
+for mode in password token create; do
   TWO_HOME="$DATA_DIR/two_server_home_$mode"
   mkdir -p "$TWO_HOME"
-  if [ "$mode" = password ]; then
-    out=$(cd "$HOSTILE" && env -u LLL_URL -u LLL_TOKEN -u LLL_TEAM HOME="$TWO_HOME" \
-      "$LLL_ABS" login --url "$URL" -e onboard@lll.test --password "$ONBOARD_PASS") \
-      || fail "login --url beside another server's .lll.toml failed: $out"
-  else
-    out=$(cd "$HOSTILE" && printf '%s\n' "$TWO_TOKEN" | env -u LLL_URL -u LLL_TOKEN -u LLL_TEAM HOME="$TWO_HOME" \
-      "$LLL_ABS" login --url "$URL" --token -) \
-      || fail "login --url --token beside another server's .lll.toml failed: $out"
-  fi
-  [ -s "$B_REC" ] && fail "login --url ($mode) sent requests to the .lll.toml's server: $(cat "$B_REC")"
+  case "$mode" in
+    password)
+      out=$(cd "$HOSTILE" && env -u LLL_URL -u LLL_TOKEN -u LLL_TEAM HOME="$TWO_HOME" \
+        "$LLL_ABS" login --url "$URL" -e onboard@lll.test --password "$ONBOARD_PASS") \
+        || fail "login --url beside another server's .lll.toml failed: $out" ;;
+    token)
+      out=$(cd "$HOSTILE" && printf '%s\n' "$TWO_TOKEN" | env -u LLL_URL -u LLL_TOKEN -u LLL_TEAM HOME="$TWO_HOME" \
+        "$LLL_ABS" login --url "$URL" --token -) \
+        || fail "login --url --token beside another server's .lll.toml failed: $out" ;;
+    create)
+      out=$(cd "$HOSTILE" && env -u LLL_URL -u LLL_TOKEN -u LLL_TEAM HOME="$TWO_HOME" \
+        "$LLL_ABS" login --url "$URL" -e two-create@lll.test --password two-create-pass-123 --create) \
+        || fail "login --url --create beside another server's .lll.toml failed: $out" ;;
+  esac
+  b_saw_nothing "login --url ($mode)"
   TWO_TOML="$TWO_HOME/.config/lll/lll.toml"
   grep -q "^url = \"$URL\"\$" "$TWO_TOML" || fail "login --url ($mode) did not save A's url"
   grep -q '^token = ' "$TWO_TOML" || fail "login --url ($mode) did not save the token"
-  TWO_TOKEN=$(sed -n 's/^token = "\(.*\)"$/\1/p' "$TWO_TOML")
+  [ "$mode" = password ] && TWO_TOKEN=$(sed -n 's/^token = "\(.*\)"$/\1/p' "$TWO_TOML")
   assert_contains "$out" "ENG" "login --url ($mode) checked teams on the server it logged in to"
   assert_contains "$out" ".lll.toml sets url = http://127.0.0.1:$B_PORT, which outranks the home config" \
     "login --url ($mode) names the repo file whose url outranks the home config"
+done
+
+# Without --url, login refuses the file's url (exit 2) before any credential
+# leaves the machine.
+NOURL_HOME="$DATA_DIR/two_server_home_nourl"
+mkdir -p "$NOURL_HOME"
+set +e
+out=$(cd "$HOSTILE" && env -u LLL_URL -u LLL_TOKEN -u LLL_TEAM HOME="$NOURL_HOME" \
+  "$LLL_ABS" login -e onboard@lll.test --password "$ONBOARD_PASS" 2>&1)
+rc=$?
+set -e
+[ "$rc" = 2 ] || fail "login without --url beside a .lll.toml url: expected exit 2, got $rc: $out"
+assert_contains "$out" "lll login --url http://127.0.0.1:$B_PORT" "the refusal names the --url to pass"
+b_saw_nothing "login without --url"
+
+# An ordinary command with the home login for A refuses (exit 6) and names
+# the file, instead of sending A's token to B.
+for cmd in "issue list --team ENG" "whoami"; do
+  set +e
+  out=$(cd "$HOSTILE" && env -u LLL_URL -u LLL_TOKEN -u LLL_TEAM HOME="$DATA_DIR/two_server_home_password" \
+    "$LLL_ABS" $cmd 2>&1)
+  rc=$?
+  set -e
+  [ "$rc" = 6 ] || fail "lll $cmd with a home login for another server: expected exit 6, got $rc: $out"
+  assert_contains "$out" "points this command at http://127.0.0.1:$B_PORT, but your saved login is for $URL" \
+    "lll $cmd names the url the saved login is not for"
+  b_saw_nothing "lll $cmd"
 done
 kill "$B_PID" 2>/dev/null || true
 

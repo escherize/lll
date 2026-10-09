@@ -143,18 +143,26 @@ minors. Issue keys are on the project's own board (`lll issue view KEY`).
 
 ### Security
 
-- `lll login --url A` no longer sends the token it just minted to another
-  server (LLL-688). After a password or `--create` login, the team check
-  re-read the layered config, so a `.lll.toml` or `LLL_URL` naming server B
-  received A's token. A cloned repo with a hostile `url` could collect
-  tokens that way. Every request after the login now goes to A. When a
-  repo file or `LLL_URL` names another server, login says which one, and
-  that commands run there will not reach A. `lll up` says the same after it
-  saves its CLI login.
-- `lll member set-password --old-password` saves its new token only when
-  it came from the home config's server. With `--url` or `LLL_URL` naming
-  another server, the token was saved beside the home url and later sent
-  to the wrong server; now the command prints the `lll login` to run.
+- A token goes only to the server it was saved for (LLL-688). The config
+  layers combine key by key, so a `.lll.toml` naming only `url = B`, or
+  `LLL_URL=B`, paired B with the home config's token for A: every command
+  run there, and the team check after `lll login --url A`, sent A's token
+  to B. A cloned repo could collect tokens that way. Now:
+  - the home config's token is sent only when the effective url is the
+    home config's url, byte for byte (or the default, when it names none).
+    Otherwise a command that needs it exits 6 and names the file, variable
+    or flag that chose the url. A token from `LLL_TOKEN` or a repo file
+    still goes to the url configured with it;
+  - `lll login` sends every request after it holds a token to the server it
+    logged in to, and says when a repo file or `LLL_URL` will send later
+    commands elsewhere. `lll up` says the same after it saves its CLI login;
+  - `lll login` without `--url` exits 2 when a repo file or `LLL_URL` chose
+    the url, instead of sending the password or token there;
+  - `lll member invite` sends the superuser token to, and prints, only a
+    `web_url` saved in the home config for this server, or given by flag;
+  - requests no longer follow redirects. Go's default client kept the
+    `Authorization` header for the same host on another port and re-sent a
+    login POST body on 307. A redirect is now an error naming its target.
 
 ### Fixed
 
