@@ -649,6 +649,11 @@ fn member_access_spec() -> Slice<flags.Flag> {
       help: "they can change things in the teams they see",
       ..,
     },
+    flags.Flag {
+      name: "--json",
+      help: "the member afterwards as JSON: the object 'lll member list --json' prints per item",
+      ..,
+    },
   ])
 }
 
@@ -663,6 +668,7 @@ Usage:
   lll member access NAME --read-only           reads only
   lll member access NAME --no-teams            revoke (nothing is deleted)
   lll member access NAME --all-teams --read-write
+  lll member access NAME --json                show it as JSON
 
 Showing access works with any token. Changing it needs administrator
 credentials (--admin-email/--admin-password, or LLL_ADMIN_EMAIL and
@@ -706,6 +712,7 @@ fn member_access_cmd(input: flags.CommandInput) -> Result<output.Output, pb.CliE
   let set_mode = p.given("--read-only") || p.given("--read-write")
   let mut out = output.none()
   if !set_teams && !edit_teams && !set_mode {
+    if p.given("--json") { return json_value(with_team_keys(m, teams), "member") }
     out = out.line(f"{m.name}: {before}")
     return Ok(out.then(owner_cap(ctx, m, key_of)?))
   }
@@ -800,7 +807,21 @@ fn member_access_cmd(input: flags.CommandInput) -> Result<output.Output, pb.CliE
   } else {
     out = out.line(f"{m.name}: {after} (was {before})")
   }
+  if p.given("--json") {
+    let changed = records.find_member_as(ctx, su, name)?.unwrap_or(m.with_access(wanted))
+    return json_value(with_team_keys(changed, teams), "member")
+  }
   Ok(out.then(owner_cap(ctx, m.with_access(wanted), key_of)?))
+}
+
+/// The member object 'member list --json' prints: team_keys beside the ids,
+/// for the teams the caller can see (fleet case 12, LLL-552).
+fn with_team_keys(m: models.Member, teams: Slice<models.Team>) -> models.Member {
+  let mut withkeys = m
+  withkeys.team_keys = m.teams
+    .filter(|id| teams.any(|t| t.id == id))
+    .map(|id| teams.find(|t| t.id == id).map_or("", |t| t.key))
+  withkeys
 }
 
 /// A member's recorded access. A record from a server before scoped

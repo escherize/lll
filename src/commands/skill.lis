@@ -25,8 +25,8 @@ pub fn skill_commands() -> Slice<flags.Command> {
       name: "list",
       access: flags.Access.Read,
       summary: "every shipped skill, as NAME<TAB>description",
-      spec: [],
-      run: |_| skill_list(),
+      spec: [flags.Flag { name: "--json", help: "the list envelope; each item {name, description}", .. }],
+      run: |input| skill_list(input.parsed.given("--json")),
       ..,
     },
     flags.Command {
@@ -42,7 +42,17 @@ pub fn skill_commands() -> Slice<flags.Command> {
   ]
 }
 
-fn skill_list() -> Result<output.Output, pb.CliError> {
+#[json]
+struct SkillJson {
+  name: string,
+  description: string,
+}
+
+fn skill_list(json_mode: bool) -> Result<output.Output, pb.CliError> {
+  if json_mode {
+    let items = skills.Names().map(|name| SkillJson { name, description: skills.Description(name) })
+    return list_json(items, whole_list(items.length()), "skill list")
+  }
   let mut out = output.none()
   for name in skills.Names() {
     out = out.line(f"{name}\t{skills.Description(name)}")
@@ -67,6 +77,7 @@ pub fn skill_usage() -> string {
 
 Usage:
   lll skill list          every shipped skill, as NAME<TAB>description
+                          (--json: the list envelope)
   lll skill get NAME      that skill as markdown, on stdout
 
 These describe how to WORK with an lll board, so they are the same wherever

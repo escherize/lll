@@ -222,3 +222,43 @@ pub fn is_any_verb(nouns: Slice<Noun>, word: string) -> bool {
 pub fn takes_json(c: Command) -> bool {
   c.spec.find(|f| f.name == "--json").is_some()
 }
+
+/// The command reference `lll help contract` ends with, generated from the
+/// table so it cannot drift: every noun and verb with its canonical spelling,
+/// whether it writes, whether it prints --json, and its other spellings.
+pub fn contract_commands(nouns: Slice<Noun>) -> string {
+  let mut out = "## Commands
+
+Generated from the command table. Every verb below answers `--help` with
+exit 0, and refuses an unknown flag, verb or value with exit 2.
+
+| Command | Writes | `--json` | Other spellings |
+|---|---|---|---|"
+  for n in nouns {
+    let rows = match n.shape {
+      Shape.Single(c) => [(f"lll {n.name}", c)],
+      Shape.Verbs(cmds) | Shape.VerbsOr(cmds, _) => contract_rows(f"lll {n.name}", cmds),
+      Shape.Topics => [],
+    }
+    let noun_spellings = strings.Fields(n.alias).map(|a| f"`lll {a}`")
+    for (path, c) in rows {
+      let writes = match c.access { Access.Write => "yes", Access.Read => "no" }
+      let json = if takes_json(c) { "yes" } else { "no" }
+      let mut other = if path == f"lll {n.name}" { noun_spellings } else { [] }
+      if c.alias != "" { other = other.append(f"`{c.alias}`") }
+      if c.hidden_alias != "" { other = other.append(f"`{c.hidden_alias}` (hidden)") }
+      out += f"\n| `{path}` | {writes} | {json} | {strings.Join(other, ", ")} |"
+    }
+  }
+  out + "\n"
+}
+
+/// One row per visible verb, then its sub-verbs.
+fn contract_rows(path: string, cmds: Slice<Command>) -> Slice<(string, Command)> {
+  let mut rows: Slice<(string, Command)> = []
+  for c in cmds.filter(|c| !c.hidden) {
+    rows = rows.append((f"{path} {c.name}", c))
+    rows = rows.append(contract_rows(f"{path} {c.name}", c.verbs)...)
+  }
+  rows
+}

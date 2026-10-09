@@ -1,3 +1,6 @@
+import "go:github.com/escherize/lll/docs"
+import "go:strings"
+
 import "flags"
 import "pb"
 
@@ -180,4 +183,43 @@ fn a_missing_argument_is_a_usage_error() {
   assert refusal(["lll", "issue", "attach", "FLEET-4"]).starts_with("usage: lll issue attach KEY-123 FILE")
   assert refusal(["lll", "skill", "get"]).contains("skills: ")
   assert runs(["lll", "skill", "get", "lll"])
+}
+
+/// `lll help contract` ends with a reference generated from the table, and
+/// the prose contract's permanent spellings are the table's.
+#[test]
+fn the_contract_reference_is_the_table() {
+  let reference = flags.contract_commands(nouns())
+  assert reference.contains("| `lll issue view` | no | yes | `show`, `read` (hidden) |")
+  assert reference.contains("| `lll issue comment edit` | yes | no |  |")
+  assert reference.contains("| `lll version` | no | no | `lll --version`, `lll -v` |")
+  assert !reference.contains("`lll finding view`")
+  let spellings = strings.SplitN(docs.Contract(), "## Spellings", 2).get(1).unwrap_or("")
+  for n in nouns() {
+    for c in flags.verbs_of(n) {
+      for alias in [c.alias, c.hidden_alias].filter(|a| a != "") {
+        assert strings.Contains(spellings, f"`{alias}`")
+      }
+    }
+  }
+}
+
+/// Every verb that reads and prints structured data takes --json (LLL-684);
+/// the rest print one scalar, a script, raw bytes or markdown.
+#[test]
+fn every_structured_read_takes_json() {
+  let scalar = ["lll issue download", "lll issue url", "lll issue id", "lll issue title", "lll issue branch-name", "lll board", "lll config get", "lll config check", "lll skill get", "lll completions bash", "lll completions zsh", "lll completions fish", "lll version"]
+  for n in nouns() {
+    let rows = match n.shape {
+      flags.Shape.Single(c) => [(f"lll {n.name}", c)],
+      flags.Shape.Verbs(cmds) | flags.Shape.VerbsOr(cmds, _) => cmds.map(|c| (f"lll {n.name} {c.name}", c)),
+      flags.Shape.Topics => [],
+    }
+    for (path, c) in rows {
+      let reads = match c.access { flags.Access.Read => true, flags.Access.Write => false }
+      if reads && !flags.takes_json(c) && !scalar.contains(path) {
+        assert path == "a read verb without --json"
+      }
+    }
+  }
 }

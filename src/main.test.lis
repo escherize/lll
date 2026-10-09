@@ -1,0 +1,19 @@
+import "config"
+import "flags"
+import "pb"
+
+import "commands"
+
+/// The top page is prose, written for a first read; the table keeps it
+/// honest: every noun it parses is named there (LLL-684).
+#[test]
+fn the_top_page_names_every_noun_in_the_table() {
+  let page = usage(pb.Client.new(config.given(config.Config { .. }, config.Sources { .. }, config.Env { .. }))).data()
+  for n in commands.nouns() {
+    let named = match n.shape {
+      flags.Shape.Topics => page.contains("lll help contract"),
+      _ => page.contains(f"lll {n.name}") || n.name == "version" && page.contains("lll --version"),
+    }
+    assert named
+  }
+}

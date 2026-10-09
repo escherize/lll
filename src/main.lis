@@ -61,7 +61,7 @@ fn main() {
 fn help(topic: flags.Topic, env: config.Env) -> output.Output {
   match topic {
     flags.Topic.Usage => usage(pb.Client.new(config.resolve(env, config.no_overrides()))),
-    flags.Topic.Contract => output.text(docs.Contract()),
+    flags.Topic.Contract => output.text(docs.Contract() + "\n" + flags.contract_commands(commands.nouns())),
     flags.Topic.Page(page) => output.line(page),
   }
 }
