@@ -694,3 +694,28 @@ fn a_key_where_the_verb_goes_names_the_verb_first_form() {
   let assert Some(hint) = issue_synonym("FLEET-4")
   assert hint.contains("put the verb first: 'lll issue view FLEET-4'")
 }
+
+/// LLL-685: the view's claim is an Option, and both text modes print a row
+/// for None rather than leaving it out.
+#[test]
+fn issue_view_says_claimed_none_in_every_text_mode() {
+  let free = IssueView { issue: models.Issue { .. }, claim: None }
+  assert free.claimed_row() == "Claimed:   none"
+  assert free.claimed_raw_row() == "- **Claimed:** none"
+  let held = models.Claim {
+    member: models.MemberId("m1"),
+    agent: "wt-a",
+    created: "2026-10-01 10:00:00.000Z",
+    updated: "2026-10-01 10:00:00.000Z",
+    expand: models.ClaimExpand { member: models.Member { name: "alice", .. } },
+    ..,
+  }
+  let taken = IssueView { issue: models.Issue { .. }, claim: Some(held) }
+  assert taken.claimed_row().starts_with("Claimed:   alice (agent wt-a) (")
+  assert taken.claimed_raw_row().starts_with("- **Claimed:** alice (agent wt-a) (since 2026-10-01")
+  // A finished issue's work site is stale even while held; an open one is
+  // stale only once nobody holds it.
+  assert IssueView { issue: models.Issue { state_wire: "done", .. }, claim: Some(held) }.work_site_stale()
+  assert !IssueView { issue: models.Issue { state_wire: "in-progress", .. }, claim: Some(held) }.work_site_stale()
+  assert IssueView { issue: models.Issue { state_wire: "in-progress", .. }, claim: None }.work_site_stale()
+}
