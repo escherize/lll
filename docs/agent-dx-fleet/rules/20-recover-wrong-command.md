@@ -20,7 +20,8 @@ that starts with `fleet-20-NN:`.
 
 That is the whole brief. This case measures how lll helps you RECOVER, so:
 
-- Find the issue with `./lll search "upload retry"` and nothing else.
+- Find the issue with `./lll search "upload retry"`, then read it in full
+  with `./lll issue view KEY` (required, and not a guess).
 - Then run your two first guesses BACK TO BACK, with no call between them:
   first your natural command for sending it to review, then your natural
   command for leaving the note. Type each WITHOUT reading any `--help`.
@@ -81,7 +82,8 @@ Use this JSON shape:
   "papercuts": [],
   "api_thoughts": "",
   "report": "",
-  "error_rating": {"command": "", "error": "", "rating": 0, "why": ""}
+  "error_rating": {"command": "", "error": "", "rating": 0, "why": ""},
+  "answer": {"first_guesses": ["", ""]}
 }
 ```
 
