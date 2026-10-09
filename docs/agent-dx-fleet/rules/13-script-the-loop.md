@@ -25,10 +25,11 @@ and must stay open.
 2. The script calls the wrapper (`./lll`, or its absolute path). It must not
    contain a token or read conn.txt; the wrapper supplies the connection.
 3. Read the script back, then run it once. Do NOT claim, close, release,
-   reopen or update any `sweep` issue except inside that single run. To test
-   your parsing before the run, call `./lll issue next --label sweep` WITHOUT
-   `--claim`: it is read-only. If the run goes wrong, stop and report; do not
-   repair the board by hand.
+   reopen or update any `sweep` issue except inside that single run. Read
+   `./lll issue next --help` before writing the script. To test your
+   `--claim` parsing, use `--label practice` (three disposable issues) as often
+   as you like; never test on `sweep`. If the run goes wrong, stop and report;
+   do not repair the board by hand.
 4. Confirm with lll: every ready `sweep` issue is done and unclaimed (its
    claim is empty; the assignee that close leaves behind is expected, so do
    not clear it), the

@@ -185,8 +185,12 @@ def wrapper_main():
     minted = mode == 'override' and (args[:1] == ['bot'] and '--env' in args or args[:2] == ['member', 'invite'])
     # Streams, so `lll watch` in the background writes as it goes; a signal to
     # this process (kill %1, ^C) reaches the CLI and the call is still audited.
+    # When the caller merged the streams (`2>&1`: fds 1 and 2 are one file),
+    # give the CLI one pipe for both so their order is exactly the binary's.
+    # Two pipes pumped by two threads reordered them (case 13 rerun).
+    merged = os.path.sameopenfile(1, 2)
     child = subprocess.Popen([str(binary), *args], cwd=worker, env=env,
-                             stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+                             stdout=subprocess.PIPE, stderr=subprocess.STDOUT if merged else subprocess.PIPE)
     for number in (signal.SIGINT, signal.SIGTERM, signal.SIGHUP):
         signal.signal(number, lambda sig, _frame: child.send_signal(sig))
     captured = {'stdout': [], 'stderr': []}
@@ -200,8 +204,9 @@ def wrapper_main():
             sink.write(text if minted and name == 'stdout' else line)
             sink.flush()
 
-    pumps = [threading.Thread(target=pump, args=(child.stdout, sys.stdout, 'stdout')),
-             threading.Thread(target=pump, args=(child.stderr, sys.stderr, 'stderr'))]
+    pumps = [threading.Thread(target=pump, args=(child.stdout, sys.stdout, 'stdout'))]
+    if not merged:
+        pumps.append(threading.Thread(target=pump, args=(child.stderr, sys.stderr, 'stderr')))
     for thread in pumps:
         thread.start()
     code = child.wait()
@@ -335,11 +340,8 @@ class Board:
         audit = audit_path(self.binary, seat.worker)
         private_dir(audit.parent)
         private_write(audit, '')
-        if self.case == '14':
-            target = seat.worker / 'conn.txt'
-        else:
-            private_dir(seat.worker.parent / '.conn')
-            target = seat.worker.parent / '.conn' / f'{seat.worker.name}.txt'
+        private_dir(seat.worker.parent / '.conn')
+        target = seat.worker.parent / '.conn' / f'{seat.worker.name}.txt'
         private_write(target, f'{self.api}\n{seat.token}\nFLEET\n')
         assert connection(conn_file(seat.worker))[0] == self.api
         script = self.binary.parent / 'harness' / 'agent_dx_fleet.py'
@@ -354,7 +356,7 @@ class Board:
             # sandbox refused `sed -n 2p conn.txt` for one worker).
             for name, line in (('fleet-url', 1), ('fleet-token', 2)):
                 helper = seat.worker / name
-                helper.write_text(f'#!/bin/sh\nsed -n {line}p {str(seat.worker / "conn.txt")!r}\n')
+                helper.write_text(f'#!/bin/sh\nsed -n {line}p {str(target)!r}\n')
                 helper.chmod(0o700)
 
     def close(self):
@@ -449,6 +451,13 @@ class Board:
         after = self.snapshot()
         changes = diff(self.before, after)
         errors = CASES[self.case]['judge'](self, changes, after)
+        # A report must never carry a credential (case 14 run 2: four pasted
+        # full tokens). JWTs start with eyJ; any 100+ char run of one counts.
+        for seat in self.seats:
+            for name in ('report.md', 'report.json'):
+                path = seat.worker / name
+                if path.exists() and re.search(r'eyJ[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]{20,}', path.read_text(errors='replace')):
+                    errors.append(f'{name} of worker {seat.number} contains a token')
         numbers = [s.number for s in self.seats]
         supplied = {s.number: publish_audit(self.binary, s.worker) for s in self.seats}
         result = {'workers': numbers, 'pass': not errors, 'errors': errors,
@@ -798,14 +807,25 @@ def seed_13(board):
     board.fixtures['sweep'] = [board.issue(t, labels=[sweep])['id'] for t in SWEEP_TITLES]
     board.fixtures['blocked'] = board.issue('Sweep: drop the legacy table', labels=[sweep],
                                             blocked_by=[board.decoys[0]])['id']
+    # Rehearsal issues: workers test --claim parsing here, never on sweep
+    # (case 13 rerun: four rehearsed on the real sweep issues).
+    practice = board.label('practice')
+    board.fixtures['practice'] = [board.issue(f'Practice: dry run {n}', labels=[practice])['id'] for n in (1, 2, 3)]
 
 
 def judge_13(board, changes, after):
     seat, ready = board.seats[0], board.fixtures['sweep']
-    errors = untouched(changes, changed={'issues': {i: {'state', 'assignee'} for i in ready}})
+    practice = set(board.fixtures['practice'])
+    allowed = {i: {'state', 'assignee'} for i in ready}
+    allowed.update({i: {'state', 'assignee', 'description', 'priority'} for i in practice})
+    claims = changes['claims']
+    changes = dict(changes, claims={'added': [r for r in claims['added'] if r.get('issue') not in practice],
+                                    'removed': [r for r in claims['removed'] if r.get('issue') not in practice],
+                                    'changed': claims['changed']})
+    errors = untouched(changes, changed={'issues': allowed})
     for issue in ready:
         expect(errors, row(after, 'issues', issue), f'issue {board.key(issue, after)}', state='done')
-    if after['claims']:
+    if [c for c in after['claims'] if c.get('issue') not in practice]:
         errors.append('claims remain after the sweep')
     script = seat.worker / f'fleet-13-{seat.number}.sh'
     if not script.is_file():

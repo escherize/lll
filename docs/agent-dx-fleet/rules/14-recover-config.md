@@ -24,7 +24,10 @@ Your saved lll configuration is broken in two ways. Plain `./lll whoami` fails.
    `./fleet-token` prints a valid token for that bot.
 3. Do not create members, bots or tokens, and do not use admin credentials:
    the fix must reuse your existing identity.
-4. Finish with a successful `./lll whoami`.
+4. Finish with a successful `./lll whoami`. Read the result back ONLY through
+   lll (`./lll whoami`, `./lll config list`, `./lll config check`); they mask
+   the token. Never open the saved config file, and never copy a token into
+   your report.
 
 The artifact is your saved configuration pointing at the right server with a
 working token for `bot-fleet-worker-NN`, a final successful whoami and no new
