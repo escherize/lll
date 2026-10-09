@@ -56,7 +56,7 @@ def main():
             ['login', '--url', 'http://127.0.0.1:9', '--email', 'a@example.com', '--password', '-'],
             ['member', 'set-password', 'alice', '--old-password', '-', '--password', 'new-password-1'],
             ['token', 'create', 'bot-x', '--admin-email', 'a@example.com', '--admin-password', '-'],
-            ['login', '--token', '-'],
+            ['login', '--url', 'http://127.0.0.1:9', '--token', '-'],
         ]
         wrong = []
         # SECRET is typed the moment the prompt shows. Echo must already be
