@@ -218,21 +218,24 @@ func closeIssue(app core.App, issueID, expectedClaimID string, by releaser, keep
 			return &claimRejection{"claim_changed", "the claim changed; refresh before closing"}
 		}
 		if held != nil {
+			// releaseAuthority words needs_force and names the holder; the
+			// table (TransitionClaim) decides what the close does to the hold.
 			name, forced, err := releaseAuthority(tx, held, by)
 			if err != nil {
 				return err
 			}
-			if forced && keepClaim {
+			effect, refusal := TransitionClaim(VerbClose, issue.GetString("state"), "done", holdOf(held, by), keepClaim, by.force)
+			if refusal == "claim_held" {
 				return &claimRejection{"claim_held", fmt.Sprintf("the claim is held by %s; only the holder keeps a claim while closing, and closing anyone else's claimed issue releases it",
 					byline(name, held.GetString("agent")))}
 			}
 			outcome = ClaimOutcome{ClaimID: held.Id, MemberID: held.GetString("member"), MemberName: name,
-				Agent: held.GetString("agent"), Created: held.GetString("created"), AlreadyOwned: keepClaim, Forced: forced}
-			if !keepClaim {
+				Agent: held.GetString("agent"), Created: held.GetString("created"), AlreadyOwned: effect == ClaimKept, Forced: forced}
+			if effect != ClaimKept {
 				if err := tx.Delete(held); err != nil {
 					return err
 				}
-				if forced {
+				if effect == ClaimForceReleased {
 					if err := recordForcedRelease(tx, issue, held, by); err != nil {
 						return err
 					}
@@ -248,16 +251,16 @@ func closeIssue(app core.App, issueID, expectedClaimID string, by releaser, keep
 	return outcome, nil
 }
 
-// finishReleases is the finish rule (fleet case 07): an issue moved into done
-// or cancelled by its claim's holder releases the claim and keeps the
-// assignee, as /close does, unless keepClaim. Every path that sets the state
-// uses it - /close, /assignment and a native PATCH (registerFinishRelease) -
-// so the CLI, the board and a raw API client agree. A move by anyone else
+// finishReleases is the finish rule (fleet case 07), the move rows of the
+// transition table (TransitionClaim): an issue moved into done or cancelled
+// by its claim's holder releases the claim and keeps the assignee, unless
+// keepClaim. /assignment and a native PATCH (registerFinishRelease) use it;
+// /close reads the close rows of the same table. A move by anyone else
 // leaves the claim alone: it is not their hold to give back, and a PATCH
 // carries no force and writes no comment.
 func finishReleases(held *core.Record, from, to string, by releaser, keepClaim bool) bool {
-	return held != nil && !keepClaim && from != to && (to == "done" || to == "cancelled") &&
-		by.memberID != "" && held.GetString("member") == by.memberID && !agentsDiffer(held, by.agent)
+	effect, _ := TransitionClaim(VerbMove, from, to, holdOf(held, by), keepClaim, false)
+	return effect == ClaimReleased
 }
 
 // registerFinishRelease applies the finish rule to a native PATCH of an

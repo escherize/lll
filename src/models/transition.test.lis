@@ -1,0 +1,171 @@
+import "go:github.com/escherize/lll/gopb"
+
+fn holds() -> Slice<Hold> {
+  [Hold.Unclaimed, Hold.Caller, Hold.OtherSession, Hold.OtherMember]
+}
+
+fn hold_wire(h: Hold) -> string {
+  match h {
+    Hold.Unclaimed => gopb.HoldNone,
+    Hold.Caller => gopb.HoldCaller,
+    Hold.OtherSession => gopb.HoldOtherSession,
+    Hold.OtherMember => gopb.HoldOtherMember,
+  }
+}
+
+fn effect_wire(e: ClaimEffect) -> string {
+  match e {
+    ClaimEffect.Untouched => gopb.ClaimUntouched,
+    ClaimEffect.Released => gopb.ClaimReleased,
+    ClaimEffect.Kept => gopb.ClaimKept,
+    ClaimEffect.ForceReleased => gopb.ClaimForceReleased,
+    ClaimEffect.Left => gopb.ClaimLeft,
+  }
+}
+
+fn refusal_wire(r: Refusal) -> string {
+  match r {
+    Refusal.NeedsForce => "needs_force",
+    Refusal.KeepNotHolder => "claim_held",
+  }
+}
+
+/// Every ask either side can be handed: a close with each flag pair, and a
+/// move to each state with and without --keep-claim.
+fn asks() -> Slice<Ask> {
+  let mut out = [
+    Ask.Close { keep_claim: false, force: false },
+    Ask.Close { keep_claim: true, force: false },
+    Ask.Close { keep_claim: false, force: true },
+    Ask.Close { keep_claim: true, force: true },
+  ]
+  for to in IssueState.all() {
+    out = out.append(Ask.Move { to, keep_claim: false }, Ask.Move { to, keep_claim: true })
+  }
+  out
+}
+
+/// One row as the server's copy answers it: (effect, refusal).
+fn server_row(from: Option<IssueState>, hold: Hold, asked: Ask) -> (string, string) {
+  let from_wire = from.map_or("", |s| s.wire())
+  match asked {
+    Ask.Close { keep_claim, force } => gopb.TransitionClaim(gopb.VerbClose, from_wire, "done", hold_wire(hold), keep_claim, force),
+    Ask.Move { to, keep_claim } => gopb.TransitionClaim(gopb.VerbMove, from_wire, to.wire(), hold_wire(hold), keep_claim, false),
+  }
+}
+
+/// The same row as this copy answers it.
+fn client_row(from: Option<IssueState>, hold: Hold, asked: Ask) -> (string, string) {
+  match transition(from, hold, asked) {
+    Ok(e) => (effect_wire(e.claim()), ""),
+    Err(r) => ("", refusal_wire(r)),
+  }
+}
+
+#[test]
+fn the_cli_and_the_server_agree_on_every_row() {
+  let mut froms: Slice<Option<IssueState>> = [None]
+  for s in IssueState.all() { froms = froms.append(Some(s)) }
+  let mut rows = 0
+  for from in froms {
+    for hold in holds() {
+      for asked in asks() {
+        let (ce, cr) = client_row(from, hold, asked)
+        let (se, sr) = server_row(from, hold, asked)
+        assert ce == se
+        assert cr == sr
+        rows += 1
+      }
+    }
+  }
+  // 7 froms x 4 holds x (4 closes + 12 moves).
+  assert rows == 448
+}
+
+fn effect_of(from: Option<IssueState>, hold: Hold, asked: Ask) -> string {
+  client_row(from, hold, asked).0
+}
+
+fn refusal_of(from: Option<IssueState>, hold: Hold, asked: Ask) -> string {
+  client_row(from, hold, asked).1
+}
+
+fn move_to(to: IssueState, keep: bool) -> Ask {
+  Ask.Move { to, keep_claim: keep }
+}
+
+#[test]
+fn a_finish_releases_only_the_holders_own_hold() {
+  let todo = Some(IssueState.Todo)
+  for to in [IssueState.Done, IssueState.Cancelled] {
+    assert effect_of(todo, Hold.Caller, move_to(to, false)) == "released"
+    assert effect_of(todo, Hold.Caller, move_to(to, true)) == "kept"
+    assert effect_of(todo, Hold.OtherSession, move_to(to, false)) == "left"
+    assert effect_of(todo, Hold.OtherMember, move_to(to, false)) == "left"
+    assert effect_of(todo, Hold.OtherMember, move_to(to, true)) == "left"
+    assert effect_of(todo, Hold.Unclaimed, move_to(to, false)) == "untouched"
+  }
+}
+
+#[test]
+fn a_move_that_is_not_a_finish_touches_no_hold() {
+  for to in [IssueState.Backlog, IssueState.Todo, IssueState.InProgress, IssueState.InReview] {
+    for hold in holds() {
+      assert effect_of(Some(IssueState.Done), hold, move_to(to, false)) == "untouched"
+    }
+  }
+  // Saving the state an issue already has finishes nothing.
+  assert effect_of(Some(IssueState.Done), Hold.Caller, move_to(IssueState.Done, false)) == "untouched"
+  // A state this lll cannot read is not the target, so the move is a finish.
+  assert effect_of(None, Hold.Caller, move_to(IssueState.Done, false)) == "released"
+}
+
+#[test]
+fn a_close_settles_the_hold_whatever_the_state() {
+  for from in [Some(IssueState.Todo), Some(IssueState.Done)] {
+    assert effect_of(from, Hold.Caller, Ask.Close { keep_claim: false, force: false }) == "released"
+    assert effect_of(from, Hold.Caller, Ask.Close { keep_claim: true, force: false }) == "kept"
+    assert effect_of(from, Hold.Unclaimed, Ask.Close { keep_claim: true, force: true }) == "untouched"
+    assert refusal_of(from, Hold.OtherMember, Ask.Close { keep_claim: false, force: false }) == "needs_force"
+    assert refusal_of(from, Hold.OtherSession, Ask.Close { keep_claim: false, force: false }) == "needs_force"
+    // Force is checked first: keeping another's hold without it still asks for force.
+    assert refusal_of(from, Hold.OtherMember, Ask.Close { keep_claim: true, force: false }) == "needs_force"
+    assert refusal_of(from, Hold.OtherMember, Ask.Close { keep_claim: true, force: true }) == "claim_held"
+    assert effect_of(from, Hold.OtherSession, Ask.Close { keep_claim: false, force: true }) == "force-released"
+  }
+}
+
+#[test]
+fn effects_carry_the_state_and_the_asked_opt_out() {
+  let Ok(closed) = transition(Some(IssueState.Todo), Hold.OtherMember, Ask.Close { keep_claim: false, force: true }) else {
+    assert false
+    return
+  }
+  assert closed.state() == IssueState.Done
+  assert !closed.keep_claim()
+  // The opt-out rides even when the prediction is that nothing is kept: the
+  // server decides again under its lock.
+  let Ok(moved) = transition(Some(IssueState.Todo), Hold.Unclaimed, move_to(IssueState.Cancelled, true)) else {
+    assert false
+    return
+  }
+  assert moved.state() == IssueState.Cancelled
+  assert moved.keep_claim()
+}
+
+fn claim_by(member: string, agent: string) -> Claim {
+  Claim { member: MemberId(member), agent, .. }
+}
+
+#[test]
+fn a_hold_is_read_from_the_callers_side() {
+  let me = Some(MemberId("m1"))
+  assert hold_of(None, me, "a") == Hold.Unclaimed
+  assert hold_of(Some(claim_by("m1", "")), me, "a") == Hold.Caller
+  assert hold_of(Some(claim_by("m1", "a")), me, "") == Hold.Caller
+  assert hold_of(Some(claim_by("m1", "a")), me, "a") == Hold.Caller
+  assert hold_of(Some(claim_by("m1", "a")), me, "b") == Hold.OtherSession
+  assert hold_of(Some(claim_by("m2", "")), me, "") == Hold.OtherMember
+  // A superuser has no member: every hold is someone else's.
+  assert hold_of(Some(claim_by("m1", "")), None, "") == Hold.OtherMember
+}
