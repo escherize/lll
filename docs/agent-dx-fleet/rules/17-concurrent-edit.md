@@ -7,8 +7,12 @@ worker number NN, your partner's number PP, your absolute worker directory and
 the `lll` wrapper path when launching you. You and your partner share one
 board; each of you has your own bot and your own wrapper.
 
-Your role comes from your worker number. An odd NN is role A. An even NN is
-role B. Do not change your mind about your role.
+Your role comes from your worker number:
+
+| NN | 01 | 02 | 03 | 04 | 05 | 06 | 07 | 08 | 09 | 10 |
+|----|----|----|----|----|----|----|----|----|----|----|
+| role | A | B | A | B | A | B | A | B | A | B |
+Do not change your mind about your role.
 
 ## Task
 
@@ -31,16 +35,18 @@ Both roles:
 3. Do not replace the description: your partner may be writing at the same
    moment, and a replace can erase their line. If lll refuses because the
    issue changed, read it again and retry.
+   If you appended a wrong line, fix only that line with
+   `--description-replace 'OLD=NEW'`, which swaps one substring.
 4. Read back until both lines are present (bounded: at most 10 minutes,
    every 5 seconds). Report whether your partner's line arrived.
 
-Your role is decided by your number: odd is A, even is B. Do not change your
+Your role is the one the table gives your number. Do not change your
 mind.
 
 The artifact is a description with the original first line and both
 appended lines, each exactly once. Touch nothing else.
 
-Your role is decided by your worker number: odd is role A, even is role B.
+Look your number up in the table above; 09 is role A.
 Do not change your mind about your role, even if your partner seems slow.
 
 ## Environment

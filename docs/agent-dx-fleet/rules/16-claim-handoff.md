@@ -8,8 +8,12 @@ worker number NN, your partner's number PP (always two digits: write
 the `lll` wrapper path when launching you. You and your partner share one
 board; each of you has your own bot and your own wrapper.
 
-Your role comes from your worker number. An odd NN is role A. An even NN is
-role B. Do not change your mind about your role.
+Your role comes from your worker number:
+
+| NN | 01 | 02 | 03 | 04 | 05 | 06 | 07 | 08 | 09 | 10 |
+|----|----|----|----|----|----|----|----|----|----|----|
+| role | A | B | A | B | A | B | A | B | A | B |
+Do not change your mind about your role.
 
 ## Task
 
@@ -24,14 +28,14 @@ You and your partner hand one issue from A to B. Shared issue:
 `Migrate the upload worker (workers AA and BB)`, where AA is role A's number
 and BB is role B's.
 
-Role A (odd NN):
+Role A:
 1. Read the issue, then claim it.
 2. Add exactly one comment:
    `fleet-16-NN: handing off to bot-fleet-worker-PP; the queue drain is next.`
 3. Release your claim. Read back: no claim, your comment present.
    Then you are done: set `done` true after this readback. Do not wait for B.
 
-Role B (even NN):
+Role B:
 1. Wait until A's comment is on the issue AND the issue has no claim. Poll
    with `issue view` at most every 5 seconds, for at most 10 minutes, or use
    a bounded watch. Do not take the issue early, and never force it.
@@ -39,13 +43,13 @@ Role B (even NN):
 3. Add exactly one comment: `fleet-16-NN: picked up from bot-fleet-worker-PP.`
 4. Read back: you hold the claim and are the assignee; both comments present.
 
-Your role is decided by your number: odd is A, even is B. Do not change your
+Your role is the one the table gives your number. Do not change your
 mind.
 
 The artifact is the issue held by and assigned to B, with A's comment then
 B's. Touch nothing else.
 
-Your role is decided by your worker number: odd is role A, even is role B.
+Look your number up in the table above; 09 is role A.
 Do not change your mind about your role, even if your partner seems slow.
 
 ## Environment
