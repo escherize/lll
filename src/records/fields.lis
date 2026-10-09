@@ -37,7 +37,7 @@ pub fn team_emoji_value(raw: string) -> Result<string, pb.CliError> {
 pub fn check_filter_name(kind: string, name: string) -> Result<(), pb.CliError> {
   if name.contains(",") {
     return Err(
-      pb.failed(f"{kind} names cannot contain commas; board filters use commas to separate names. Remove the commas."),
+      flags.usage_error(f"{kind} names cannot contain commas; board filters use commas to separate names. Remove the commas."),
     )
   }
   Ok(())

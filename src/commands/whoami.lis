@@ -106,8 +106,8 @@ token with a member session, and 'lll bot create bot-NAME' provisions a bot iden
       )
       return Ok(())
     }
-    if flag != "--json" { return Err(pb.failed(whoami_arg_error(flag, args))) }
-    if let Some(extra) = args.get(3) { return Err(pb.failed(whoami_arg_error(extra, args))) }
+    if flag != "--json" { return Err(flags.usage_error(whoami_arg_error(flag, args))) }
+    if let Some(extra) = args.get(3) { return Err(flags.usage_error(whoami_arg_error(extra, args))) }
   }
   let json_mode = args.get(2) == Some("--json")
   let (cfg, src) = ctx.settings.traced().map_err(pb.failed)?
@@ -133,7 +133,15 @@ token with a member session, and 'lll bot create bot-NAME' provisions a bot iden
     return Err(pb.failed("the configured token is not an lll auth token; use 'lll login', or 'lll token create' for an agent"))
   }
   if pb.token_expired(cfg.token) {
-    return Err(ctx.expired_token_message())
+    // Both faults at once (1.0 fleet): an expired token beside a dead url
+    // sent agents to log in against the url that could not answer.
+    let expired = ctx.expired_token_message()
+    if let Err(down) = ctx.get_as("/api/health", "") {
+      if let pb.ErrorKind.Network = down.kind {
+        return Err(expired.with_message(f"{expired.message}\nand the server does not answer: {down.message}"))
+      }
+    }
+    return Err(expired)
   }
   let collection = pb.token_collection(cfg.token).unwrap_or("members")
   let body = ctx.get(f"/api/collections/{collection}/records/{id}?expand=teams")?

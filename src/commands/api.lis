@@ -45,9 +45,12 @@ pub fn api(ctx: pb.Client, args: Slice<string>) -> Result<(), pb.CliError> {
   }
   let method = strings.ToUpper(p.nth(0))
   let path = p.nth(1)
-  if method == "" || path == "" {
+  if method == "" && path == "" {
     print_api_usage()
     return Ok(())
+  }
+  if path == "" {
+    return Err(flags.usage_error("lll api needs METHOD and PATH (see 'lll api --help')"))
   }
   if !strings.HasPrefix(path, "/") {
     return Err(flags.usage_error(f"path must start with '/': got '{path}'. The path is joined to the configured board url ('lll config list' shows it)"))

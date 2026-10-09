@@ -66,13 +66,6 @@ fn invite_create_spec() -> Slice<flags.Flag> {
       ..,
     },
     flags.Flag { name: "--json", help: "print the invite as JSON: url, code, expires, mode, teams", .. },
-    flags.Flag {
-      name: "--help",
-      alias: "-h",
-      hidden: true,
-      help: "show this help",
-      ..,
-    },
   ]
 }
 

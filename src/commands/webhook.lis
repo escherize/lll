@@ -209,13 +209,13 @@ fn dup_filter(team_id: models.TeamId, project_id: Option<models.ProjectId>, targ
 /// stricter than url.Parse, which happily accepts "not a url" as a path.
 fn validate_target(raw: string) -> Result<string, pb.CliError> {
   if strings.TrimSpace(raw) == "" {
-    return Err(pb.failed("a webhook needs a target URL: 'lll webhook add URL'"))
+    return Err(flags.usage_error("a webhook needs a target URL: 'lll webhook add URL'"))
   }
   let Ok(parsed) = url.Parse(raw) else {
-    return Err(pb.failed(f"'{raw}' is not a URL; webhook targets are http(s) URLs"))
+    return Err(flags.usage_error(f"'{raw}' is not a URL; webhook targets are http(s) URLs"))
   }
   if (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Host == "" {
-    return Err(pb.failed(f"'{raw}' is not an http(s) URL with a host; webhook targets are http(s) URLs"))
+    return Err(flags.usage_error(f"'{raw}' is not an http(s) URL with a host; webhook targets are http(s) URLs"))
   }
   Ok(raw)
 }

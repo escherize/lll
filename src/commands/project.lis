@@ -105,8 +105,9 @@ fn project_create_spec() -> Slice<flags.Flag> {
   flags.with_team([
     flags.Flag { name: "-n", alias: "--name", value: true, hint: "\"name\"", help: "project name", .. },
     flags.Flag { name: "-b", alias: "--body -d --description", value: true, hint: "desc", help: "project description", .. },
-    flags.Flag { name: "--status", value: true, hint: "s", help: "planned, started, paused, completed, or cancelled\n(defaults to planned)", .. },
+    flags.Flag { name: "--status", value: true, hint: strings.Join(records.project_statuses(), "|"), help: "planned, started, paused, completed, or cancelled\n(defaults to planned)", .. },
     flags.Flag { name: "--team", value: true, hint: "KEY", help: "team key the project belongs to (defaults to LLL_TEAM)", .. },
+    flags.Flag { name: "--json", help: "print the created project record as JSON", .. },
   ])
 }
 
@@ -114,13 +115,15 @@ fn project_edit_spec() -> Slice<flags.Flag> {
   flags.with_team([
     flags.Flag { name: "-n", alias: "--name", value: true, hint: "\"new name\"", help: "new project name", .. },
     flags.Flag { name: "-b", alias: "--body -d --description", value: true, hint: "desc", help: "new project description", .. },
-    flags.Flag { name: "--status", value: true, hint: "s", help: "planned, started, paused, completed, or cancelled", .. },
+    flags.Flag { name: "--status", value: true, hint: strings.Join(records.project_statuses(), "|"), help: "planned, started, paused, completed, or cancelled", .. },
+    json_after_flag("the project record"),
   ])
 }
 
 fn project_move_spec() -> Slice<flags.Flag> {
   flags.with_team([
     flags.Flag { name: "--to", value: true, hint: "KEY", help: "team key to move the project to", .. },
+    json_after_flag("the project record"),
   ])
 }
 
@@ -134,7 +137,7 @@ fn project_delete_spec() -> Slice<flags.Flag> {
 fn check_status(val: string) -> Result<string, pb.CliError> {
   if records.project_statuses().find(|s| s == val).is_none() {
     return Err(
-      pb.failed(f"unknown status '{val}' (use one of: {strings.Join(records.project_statuses(), ", ")})"),
+      flags.usage_error(f"unknown status '{val}' (use one of: {strings.Join(records.project_statuses(), ", ")})"),
     )
   }
   Ok(val)
@@ -158,6 +161,10 @@ fn project_create(input: flags.CommandInput) -> Result<(), pb.CliError> {
   let mut created = models.Project { .. }
   if let Err(e) = json.Unmarshal(body.bytes(), &created) {
     return Err(pb.failed(f"decoding created project: {e}"))
+  }
+  if p.given("--json") {
+    fmt.Println(contract_json(body.bytes() as json.RawMessage, 0) as string)
+    return Ok(())
   }
   fmt.Println(f"Created project {created.name} ({created.status})")
   Ok(())
@@ -185,7 +192,14 @@ fn project_edit(input: flags.CommandInput) -> Result<(), pb.CliError> {
   if p.given("-b") { patch.description = Some(p.one("-b")) }
   if status != "" { patch.status = Some(status) }
   writes.update_project(ctx, project.id, patch)?
-  fmt.Println(f"Updated project {name}")
+  if p.given("--json") { return print_record_after(ctx, "projects", project.id.string()) }
+  // A rename names both, so the line does not report the old name as current
+  // (1.0 fleet, case 09).
+  if p.given("-n") && p.one("-n") != project.name {
+    fmt.Println(f"Renamed project {project.name} -> {p.one("-n")}")
+  } else {
+    fmt.Println(f"Updated project {name}")
+  }
   Ok(())
 }
 
@@ -202,7 +216,9 @@ fn project_move(input: flags.CommandInput) -> Result<(), pb.CliError> {
   let from = team_flag_or_current(ctx, p.one("--team"))?
   let to = writes.move_destination(ctx, p.one("--to"))?
   let project = records.resolve_project(ctx, from.id, name)?
-  fmt.Println(writes.move_to_team(ctx, records.Classifier.Project(project.id), project.name, from, to)?)
+  let moved = writes.move_to_team(ctx, records.Classifier.Project(project.id), project.name, from, to)?
+  if p.given("--json") { return print_record_after(ctx, "projects", project.id.string()) }
+  fmt.Println(moved)
   Ok(())
 }
 

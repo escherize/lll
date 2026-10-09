@@ -69,9 +69,12 @@ without `--force`, and `lll issue update KEY-12 --assignee none --force --reason
 leaves the same comment a forced release does.
 `lll whoami` shows the authenticated identity. `lll issue release KEY-12`
 gives your claim back and clears the assignee when it still matches the holder.
-`lll issue close KEY-12` releases your claim in the same step and keeps the
-assignee, so the done issue still says who did it; `--keep-claim` keeps the
-claim. Releasing or closing over another member's claim, or a hold under a
+Moving your claimed issue to done or cancelled releases your claim in the
+same step and keeps the assignee, so the finished issue still says who did
+it. One rule covers `lll issue close KEY-12`, `lll issue update KEY-12 --state
+done|cancelled` and the board; `--keep-claim` keeps the claim on either verb.
+Do not follow a finish with `lll issue release`: it also clears the assignee.
+Releasing or closing over another member's claim, or a hold under a
 different agent label on your own token, is refused unless you add `--force`;
 a forced release leaves a comment on the issue naming both members and labels,
 with the reason from `--reason "why"` if you give one; it is the releaser's

@@ -3,6 +3,7 @@ import "pb"
 import "go:strings"
 
 import "flags"
+import "models"
 import "records"
 
 // Unit cover for the pure helpers in member.lis. Everything here is a
@@ -202,4 +203,16 @@ fn own_password_change_passes_auth_failures_through() {
   assert is_auth_failure(pb.fail(pb.ErrorKind.Auth, "the token in LLL_TOKEN was rejected"))
   assert !is_auth_failure(pb.fail(pb.ErrorKind.NotFound, "no such record"))
   assert !is_auth_failure(pb.failed("dial tcp: connection refused"))
+}
+
+/// Two 1.0 fleet agents (case 19) filtered 'member list' by --team: the
+/// filter keeps server-wide members, pre-scope members and those scoped to it.
+#[test]
+fn member_list_team_filter_keeps_who_can_reach_it() {
+  let fleet = models.TeamId("t1")
+  let ops = models.TeamId("t2")
+  assert reaches_team(None, fleet)
+  assert reaches_team(Some(models.Access { reach: models.Reach.Every, mode: models.Mode.ReadOnly }), fleet)
+  assert reaches_team(Some(models.Access { reach: models.Reach.Teams([fleet]), mode: models.Mode.ReadWrite }), fleet)
+  assert !reaches_team(Some(models.Access { reach: models.Reach.Teams([ops]), mode: models.Mode.ReadWrite }), fleet)
 }

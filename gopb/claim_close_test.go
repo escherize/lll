@@ -104,6 +104,76 @@ func TestCloseByANonHolderNeedsForce(t *testing.T) {
 	assertSystemComments(t, app, issueID, 0)
 }
 
+// The finish rule (fleet case 07): moving a claimed issue into done or
+// cancelled through /assignment releases the holder's own claim and keeps
+// the assignee, as /close does; keepClaim opts out, and anyone else's move
+// leaves the claim alone.
+func TestAssignmentToATerminalStateReleasesTheHoldersClaim(t *testing.T) {
+	app, issueID, alpha, beta := claimFixture(t)
+	held, err := acquireClaim(app, issueID, alpha, "wt-a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	done, cancelled := "done", "cancelled"
+	outcome, err := updateAssignment(app, issueID, held.ClaimID, assignmentFields{Assignee: &alpha, State: &done}, releaser{memberID: alpha, agent: "wt-a"}, true)
+	if err != nil || outcome.ClaimID != "" {
+		t.Fatalf("keep-claim finish: %#v %v", outcome, err)
+	}
+	assertClaimState(t, app, issueID, alpha, alpha)
+
+	setState(t, app, issueID, "in-progress")
+	for _, by := range []releaser{{memberID: beta}, {memberID: alpha, agent: "wt-b"}} {
+		if _, err := updateAssignment(app, issueID, held.ClaimID, assignmentFields{Assignee: &alpha, State: &done}, by, false); err != nil {
+			t.Fatalf("non-holder finish by %#v: %v", by, err)
+		}
+		assertClaimState(t, app, issueID, alpha, alpha)
+		setState(t, app, issueID, "in-progress")
+	}
+
+	outcome, err = updateAssignment(app, issueID, held.ClaimID, assignmentFields{Assignee: &alpha, State: &cancelled}, releaser{memberID: alpha, agent: "wt-a"}, false)
+	if err != nil || outcome.ClaimID != held.ClaimID || outcome.ClearedAssignee || outcome.Forced {
+		t.Fatalf("holder finish: %#v %v", outcome, err)
+	}
+	assertClaimState(t, app, issueID, "", alpha)
+	if issueState(t, app, issueID) != "cancelled" {
+		t.Fatal("holder finish did not cancel")
+	}
+	assertComments(t, app, issueID)
+}
+
+func TestFinishReleasesOnlyOnAMoveIntoATerminalState(t *testing.T) {
+	app, issueID, alpha, _ := claimFixture(t)
+	if _, err := acquireClaim(app, issueID, alpha, ""); err != nil {
+		t.Fatal(err)
+	}
+	held, err := currentClaim(app, issueID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	holder := releaser{memberID: alpha}
+	for _, c := range []struct {
+		from, to string
+		by       releaser
+		keep     bool
+		want     bool
+	}{
+		{"in-progress", "done", holder, false, true},
+		{"todo", "cancelled", holder, false, true},
+		{"done", "cancelled", holder, false, true},
+		{"done", "done", holder, false, false},
+		{"todo", "in-review", holder, false, false},
+		{"in-progress", "done", holder, true, false},
+		{"in-progress", "done", releaser{}, false, false},
+	} {
+		if got := finishReleases(held, c.from, c.to, c.by, c.keep); got != c.want {
+			t.Errorf("%s -> %s by %#v keep=%v: got %v", c.from, c.to, c.by, c.keep, got)
+		}
+	}
+	if finishReleases(nil, "todo", "done", holder, false) {
+		t.Error("released a claim that does not exist")
+	}
+}
+
 // LLL-633: a server-written comment is stored text every reader of the issue
 // sees, so it names a member only when everyone on the issue's team may see
 // that member. LLL-654: it stays the releaser's, never system.

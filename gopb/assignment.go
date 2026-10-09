@@ -107,7 +107,11 @@ func (fields assignmentFields) apply(issue *core.Record) {
 // leaves the same comment /release does, in the same transaction. Before
 // this, 'lll issue update KEY --assignee none' or the board's assignee editor
 // released anyone's hold silently, the hole LLL-512 closed on /release.
-func updateAssignment(app core.App, issueID, expectedClaimID string, fields assignmentFields, by releaser) (ClaimOutcome, error) {
+//
+// An edit that also moves the issue into done or cancelled follows the
+// finish rule (finishReleases): the holder's own move releases the claim and
+// keeps the assignee, unless keepClaim.
+func updateAssignment(app core.App, issueID, expectedClaimID string, fields assignmentFields, by releaser, keepClaim bool) (ClaimOutcome, error) {
 	var outcome ClaimOutcome
 	if fields.Assignee == nil {
 		return outcome, &claimRejection{"", "assignment update requires an assignee"}
@@ -153,6 +157,11 @@ func updateAssignment(app core.App, issueID, expectedClaimID string, fields assi
 					}
 				}
 				outcome = ClaimOutcome{ClaimID: held.Id, MemberID: memberID, MemberName: name, ClearedAssignee: true, Forced: forced}
+			} else if fields.State != nil && finishReleases(held, issue.GetString("state"), *fields.State, by, keepClaim) {
+				if err := tx.Delete(held); err != nil {
+					return err
+				}
+				outcome = ClaimOutcome{ClaimID: held.Id, MemberID: memberID, MemberName: name, Agent: held.GetString("agent")}
 			}
 		}
 		fields.apply(issue)

@@ -37,7 +37,7 @@ fn create(input: flags.CommandInput) -> Result<(), pb.CliError> {
   }
   let title = if p.one("-t") != "" { p.one("-t") } else { p.first() }
   if title == "" {
-    return Err(pb.failed(f"no title: give it as the bare argument or with -t\n{usage}"))
+    return Err(flags.usage_error(f"no title: give it as the bare argument or with -t\n{usage}"))
   }
   let mut description = ""
   if p.given("-b") { description = value_or_stdin(p.one("-b"), "-b")? }
@@ -140,11 +140,15 @@ fn update(input: flags.CommandInput) -> Result<(), pb.CliError> {
   let usage = input.usage
   let p = input.parsed
   let id = p.first()
+  if p.given("--claim") {
+    let key = if id == "" { "KEY" } else { id }
+    return Err(flags.usage_error(f"update does not claim; to claim, run: lll issue claim {key}"))
+  }
   let mut state: Option<models.IssueState> = None
   if p.given("--state") { state = Some(query.state(p.one("--state"))?) }
   let mut priority: Option<models.Priority> = None
   if p.given("--priority") { priority = Some(check_priority(p.one("--priority"))?) }
-  let assignee_name = p.one("--assignee")
+  let assignee_name = assignee_value(p)
   let label_names = p.all("--label")
   let add_label_names = p.all("--add-label")
   let remove_label_names = p.all("--remove-label")
@@ -189,18 +193,24 @@ fn update(input: flags.CommandInput) -> Result<(), pb.CliError> {
   let since = if p.given("--if-unchanged-since") { Some(unchanged_since_stamp(p.one("--if-unchanged-since"))?) } else { None }
   let emoji = records.check_emoji(p.one("--emoji"))?
   let emoji_set = p.given("--emoji")
-  // An empty --assignee is the natural guess for "clear it" (two of thirty
-  // fleet agents); the word is 'none', and this is where to say so.
-  if p.given("--assignee") && assignee_name == "" {
-    return Err(flags.usage_error("--assignee needs a member name, or 'none' to clear it"))
-  }
   // LLL-516: clearing the assignee releases the claim, so it takes release's
   // --force, --reason and agent label, and nothing else does.
   if force && assignee_name != "none" {
     return Err(flags.usage_error("--force clears another holder's claim; it goes with --assignee none"))
   }
   let reason = forced_reason(p, force, "a forced clear")?
-  let agent = if assignee_name != "" { agent_label(ctx, p)? } else { "" }
+  // The finish rule (fleet case 07): moving your own claimed issue to done
+  // or cancelled releases the claim and keeps the assignee, as close does.
+  // The server applies it on every path; --keep-claim opts out.
+  let finishing = state.map_or(false, |s| s.is_terminal())
+  let keep_claim = p.given("--keep-claim")
+  if keep_claim && !finishing {
+    return Err(flags.usage_error("--keep-claim goes with --state done or --state cancelled: only a move there releases your claim"))
+  }
+  if keep_claim && assignee_name == "none" {
+    return Err(flags.usage_error("--assignee none releases the claim, so --keep-claim cannot keep it; drop one of them"))
+  }
+  let agent = if assignee_name != "" || finishing { agent_label(ctx, p)? } else { "" }
   // LLL-399: the stamp rides the direct PATCH. Assignment writes go through
   // the claim route, which carries no caller's precondition — honouring the
   // flag there would mean a guard that silently stops guarding. The claims
@@ -233,7 +243,8 @@ fn update(input: flags.CommandInput) -> Result<(), pb.CliError> {
   // server and answers 412 instead of clobbering.
   if let Some(stamp) = since {
     if issue.updated != stamp {
-      return Err(pb.fail(pb.ErrorKind.Refused, f"{key} changed since {display.rfc3339(stamp)}: its 'updated' is now {display.rfc3339(issue.updated)}; read it again ('lll issue view {key} --json' carries updated) and retry with that stamp"))
+      let now = display.rfc3339(issue.updated)
+      return Err(pb.fail(pb.ErrorKind.Refused, f"{key} changed since {display.rfc3339(stamp)}: its 'updated' is now {now}; check what changed ('lll issue view {key}'), then\nretry with the current stamp: {retry_command(input.args, now)}"))
     }
   }
   // Surgical description edits (LLL-391, after veans): a replace must match
@@ -253,6 +264,9 @@ fn update(input: flags.CommandInput) -> Result<(), pb.CliError> {
   if let Some(s) = state { changed = changed.append(f"state={s.wire()}") }
   if let Some(n) = priority { changed = changed.append(f"priority={n.wire()}") }
   let mut assignee = writes.Relation.Keep
+  // The 1.0 fleet: a worker "claimed" with '--assignee <itself>'. Assigning
+  // is not claiming, so text output says how to hold the issue.
+  let mut self_assigned = false
   if assignee_name == "none" {
     // 'none' is what view prints for no assignee; the same word clears it.
     // Nothing else could: an empty --assignee reads as the flag not given.
@@ -260,6 +274,7 @@ fn update(input: flags.CommandInput) -> Result<(), pb.CliError> {
     changed = changed.append("assignee=none")
   } else if assignee_name != "" {
     let member = records.resolve_member(ctx, assignee_name)?
+    self_assigned = pb.token_subject(ctx.token()) == Some(member.id.string())
     assignee = writes.Relation.Set(member.id)
     changed = changed.append(f"assignee={member.name}")
   }
@@ -324,7 +339,15 @@ fn update(input: flags.CommandInput) -> Result<(), pb.CliError> {
   let opts = writes.UpdateOptions {
     stamp: since,
     claim: writes.ClaimAs { caller: pb.Caller.Process, agent, force, reason },
+    keep_claim,
   }
+  // Whether the caller held the claim before a finishing move: read again
+  // afterwards, it says what the server did with it.
+  let me = pb.token_subject(ctx.token())
+  // Only a move into done or cancelled can release; re-saving the same state does not.
+  let moves = state.is_some() && state != issue.state()
+  let held_before = if finishing && moves { fetch_claim(ctx, issue.id)? } else { None }
+  let mine_before = held_before.map_or(false, |h| me == Some(h.member.string()))
   let assigning = assignee_name != ""
   let result = match writes.update_issue(ctx, issue, patch, opts) {
     Ok(t) => t,
@@ -338,18 +361,84 @@ fn update(input: flags.CommandInput) -> Result<(), pb.CliError> {
       }
       return Err(e.with_message(f"{key}: {e.message}"))
     },
-    Err(failure) => return Err(update_failure(key, failure, since.is_some())),
+    Err(failure) => {
+      let refused = update_failure(key, failure, since.is_some())
+      if since.is_none() { return Err(refused) }
+      return Err(with_retry(ctx, key, input.args, refused))
+    },
   }
   let mut released = ""
   if let Some(t) = result {
-    if t.claim_id != "" {
+    if t.claim_id != "" && t.cleared_assignee {
       let forced = if t.forced { "; forced, and commented on the issue" } else { "" }
       released = f" (released {t.member_name}'s claim{forced})"
     }
   }
   if p.given("--json") { return print_issue_after(ctx, key) }
+  // A finishing move says what became of the claim it found, read back
+  // from the server: released, kept on request, or left with a holder
+  // whose claim this caller's move does not release (another member, or
+  // another agent label on this token).
+  if released == "" && held_before.is_some() {
+    match fetch_claim(ctx, issue.id)? {
+      None => if mine_before { released = "; released your claim (assignee kept)" },
+      Some(h) => {
+        if keep_claim && mine_before && (h.agent == "" || agent == "" || h.agent == agent) {
+          released = "; kept your claim"
+        } else {
+          let holder = display.byline(display.member_name(h.member, h.expand.member.name, "an unknown member"), h.agent)
+          released = f"; {holder} still holds the claim: only the holder's own finish releases it"
+        }
+      },
+    }
+  }
   fmt.Println(f"Updated {issue.expand.team.key}-{issue.number}: {strings.Join(changed, ", ")}{released}")
+  // Already claimed (by the caller, or the write would have been refused):
+  // the hint would be wrong. A finish released the claim on purpose.
+  if self_assigned && !finishing {
+    let held = fetch_claim(ctx, issue.id)?
+    if held.is_none() {
+      fmt.Println(f"assigned, not claimed: 'lll issue claim {key}' holds it against other agents")
+    }
+  }
   Ok(())
+}
+
+/// --assignee as given; an empty value is 'none' (the 1.0 fleet: three of ten
+/// agents typed --assignee '' to clear it).
+fn assignee_value(p: flags.Parsed) -> string {
+  if p.given("--assignee") && strings.TrimSpace(p.one("--assignee")) == "" { return "none" }
+  p.one("--assignee")
+}
+
+/// A stale --if-unchanged-since refusal, plus the same command with the
+/// issue's current stamp, so a retry needs no extra read (1.0 fleet). Other
+/// refusals, and a failed re-read, leave the message as it was.
+fn with_retry(ctx: pb.Client, key: string, args: Slice<string>, refused: pb.CliError) -> pb.CliError {
+  let pb.ErrorKind.Refused = refused.kind else { return refused }
+  let Ok(now) = records.fetch_issue(ctx, key) else { return refused }
+  refused.with_message(f"{refused.message}\nretry with the current stamp: {retry_command(args, now.updated)}")
+}
+
+/// `args` again, shell-quoted, with the --if-unchanged-since value replaced
+/// by `stamp`.
+fn retry_command(args: Slice<string>, stamp: string) -> string {
+  let mut out = ["lll"]
+  let mut i = 1
+  while let Some(arg) = args.get(i) {
+    if arg == "--if-unchanged-since" {
+      out = out.append(arg, flags.shell_argument(stamp))
+      i += 2
+      continue
+    }
+    if arg.starts_with("--if-unchanged-since=") {
+      out = out.append(f"--if-unchanged-since={flags.shell_argument(stamp)}")
+    } else {
+      out = out.append(flags.shell_argument(arg))
+    }
+    i += 1
+  }
+  strings.Join(out, " ")
 }
 
 /// The refusal for an update the write layer could not land on `key`.
@@ -595,8 +684,8 @@ fn ref_cmd(input: flags.CommandInput) -> Result<(), pb.CliError> {
   let issue = records.fetch_issue(ctx, resolved)?
   let outcome = writes.append_ref(ctx, issue.id, reference)?
   let action = if outcome.added { "Added" } else { "Already recorded" }
-  fmt.Println(f"{action} {reference} on {issue.expand.team.key}-{issue.number}")
-  Ok(())
+  let key = f"{issue.expand.team.key}-{issue.number}"
+  issue_done(ctx, p, key, f"{action} {reference} on {key}")
 }
 
 /// Keep the issue as the authoritative full text when its description is
@@ -644,7 +733,7 @@ fn comment_mutate(ctx: pb.Client, verb: string, p: flags.Parsed) -> Result<(), p
   let issue = records.fetch_issue(ctx, resolved)?
   let key = f"{issue.expand.team.key}-{issue.number}"
   let Ok(n) = strconv.Atoi(p.nth(1)) else {
-    return Err(pb.failed(f"'{p.nth(1)}' is not a comment number; 'lll issue comment {key}' numbers them"))
+    return Err(flags.usage_error(f"'{p.nth(1)}' is not a comment number; 'lll issue comment {key}' numbers them"))
   }
   let comments = records.fetch_comments(ctx, issue.id)?
   if n < 1 || n > comments.length() {

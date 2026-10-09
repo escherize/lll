@@ -248,6 +248,55 @@ func closeIssue(app core.App, issueID, expectedClaimID string, by releaser, keep
 	return outcome, nil
 }
 
+// finishReleases is the finish rule (fleet case 07): an issue moved into done
+// or cancelled by its claim's holder releases the claim and keeps the
+// assignee, as /close does, unless keepClaim. Every path that sets the state
+// uses it - /close, /assignment and a native PATCH (registerFinishRelease) -
+// so the CLI, the board and a raw API client agree. A move by anyone else
+// leaves the claim alone: it is not their hold to give back, and a PATCH
+// carries no force and writes no comment.
+func finishReleases(held *core.Record, from, to string, by releaser, keepClaim bool) bool {
+	return held != nil && !keepClaim && from != to && (to == "done" || to == "cancelled") &&
+		by.memberID != "" && held.GetString("member") == by.memberID && !agentsDiffer(held, by.agent)
+}
+
+// registerFinishRelease applies the finish rule to a native PATCH of an
+// issue's state. The PATCH names its session label and opt-out as query
+// parameters, ?agent=LABEL and ?keep_claim=true, because its body is the
+// record. The claim is deleted in the transaction that saves the issue:
+// form.Submit saves through e.App, which is swapped for the transaction.
+// serializeRecordUpdates holds the issue's lock, the one the claim routes
+// take, so the claim read here cannot change before the save.
+func registerFinishRelease(app core.App) {
+	app.OnRecordUpdateRequest("issues").BindFunc(func(e *core.RecordRequestEvent) error {
+		from, to := e.Record.Original().GetString("state"), e.Record.GetString("state")
+		if from == to || e.Auth == nil || e.Auth.Collection().Name != "members" {
+			return e.Next()
+		}
+		query := e.Request.URL.Query()
+		by := releaser{memberID: e.Auth.Id, agent: query.Get("agent")}
+		if !agentLabelShape.MatchString(by.agent) {
+			return e.BadRequestError(agentLabelRule, nil)
+		}
+		held, err := currentClaim(e.App, e.Record.Id)
+		if err != nil {
+			return err
+		}
+		if !finishReleases(held, from, to, by, query.Get("keep_claim") == "true") {
+			return e.Next()
+		}
+		original := e.App
+		defer func() { e.App = original }()
+		return original.RunInTransaction(func(tx core.App) error {
+			e.App = tx
+			if err := tx.Delete(held); err != nil {
+				return err
+			}
+			return e.Next()
+		})
+	})
+}
+
 // releaseAuthority is the one release rule (LLL-512, LLL-521), shared by
 // /release, /close and an assignment edit that clears the assignee
 // (LLL-516): the holder releases freely; another member, a superuser, or the

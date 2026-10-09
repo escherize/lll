@@ -388,6 +388,15 @@ fn unsupported_team_flag_supplies_the_requested_environment_override() {
   assert quoted.message.contains("LLL_TEAM='owner'\\''s team'")
 }
 
+/// The 1.0 fleet: on a server-wide command LLL_TEAM filters nothing, so the
+/// override is not offered.
+#[test]
+fn a_server_wide_command_does_not_offer_the_team_override() {
+  let assert Err(teams) = parse([], argv(["--team", "FLEET"]), 3, false, "lll team view KEY [--json]")
+  assert teams.message.contains("'lll team view' is server-wide")
+  assert !teams.message.contains("LLL_TEAM")
+}
+
 // LLL-501, fleet case B05: `lll api GET /api/health --url <lan>` was refused
 // as a bare unknown flag, and an operator on a fresh machine had no way to
 // learn how the endpoint IS chosen. A command that takes --url declares it,
@@ -401,7 +410,9 @@ fn a_guessed_url_flag_names_the_configured_endpoint_paths() {
   assert inline.message.contains("unknown flag: '--url=http://127.0.0.1:8090'")
   assert inline.message.contains("This command takes no --url")
   assert inline.message.contains("LLL_URL='http://127.0.0.1:8090'")
-  assert inline.message.contains("lll config set url URL")
+  // Which way to change the default depends on the caller's config, so
+  // url_default_hint is pinned on its own below.
+  assert inline.message.contains("the default")
   let assert Err(bare) = parse([], argv(["--url", "http://127.0.0.1:8090"]), 3, false, "lll api GET /api/health")
   assert bare.message.contains("unknown flag: '--url'")
   assert bare.message.contains("LLL_URL='http://127.0.0.1:8090'")
@@ -561,33 +572,31 @@ fn retired_spellings_name_the_replacement_the_verb_declares() {
   )
 }
 
+/// The 1.0 fleet: 5 of 20 workers typed 'issue read KEY'. A hidden alias
+/// dispatches to the canonical verb, whose name is the one usage and help
+/// show; the alias has no help row and no completion.
 #[test]
-fn retired_verb_names_its_replacement_only_where_it_exists() {
+fn hidden_alias_dispatches_under_the_canonical_name_without_help_or_completion() {
   let commands = [
     Command {
-      name: "view",
-      summary: "view",
-      positional: "KEY",
-      run: |_| Ok(()),
-      ..,
+      name: "view", alias: "show", hidden_alias: "read", summary: "view", positional: "KEY",
+      run: |input| {
+        if input.parsed.first() != "DEMO-1" { return Err(pb.failed("wrong key")) }
+        Ok(())
+      },
+      ..
     },
   ]
-  let assert Err(hinted) = dispatch(test_ctx(), "issue", "", "", commands, [
-    "lll",
-    "issue",
-    "read",
-    "DEMO-1",
-  ])
-  assert hinted.message.contains(
-    "unknown issue command: 'read' - did you mean 'lll issue view'?",
-  )
+  assert dispatch(test_ctx(), "issue", "", "", commands, ["lll", "issue", "read", "DEMO-1"]).is_ok()
+  let assert Err(refused) = dispatch(test_ctx(), "issue", "", "", commands, ["lll", "issue", "read", "--zz"])
+  assert pb.exit_code(refused.kind) == 2
+  assert refused.message.contains("usage: lll issue view KEY")
+  let assert Err(help) = dispatch(test_ctx(), "issue", "", "", commands, ["lll", "issue", "--help"])
+  assert !help.message.contains("read")
+  assert command_names(commands).equals(["view", "show"])
   let without = [Command { name: "list", summary: "list", run: |_| Ok(()), .. }]
-  let assert Err(plain) = dispatch(test_ctx(), "team", "", "", without, [
-    "lll",
-    "team",
-    "read",
-  ])
-  assert !plain.message.contains("did you mean")
+  let assert Err(plain) = dispatch(test_ctx(), "team", "", "", without, ["lll", "team", "read"])
+  assert pb.exit_code(plain.kind) == 2
 }
 
 #[test]
@@ -637,4 +646,23 @@ fn empty_command_alias_does_not_resolve_an_empty_verb() {
   let commands = [Command { name: "list", run: |_| Ok(()), .. }]
   assert resolve_command(commands, "").is_none()
   assert command_names(commands).equals(["list"])
+}
+
+/// The 1.0 fleet: 'lll member whoami'. A top-level command typed as a verb
+/// is named back.
+#[test]
+fn a_top_level_command_typed_as_a_verb_is_suggested() {
+  let commands = [Command { name: "list", summary: "list", run: |_| Ok(()), .. }]
+  let assert Err(e) = dispatch(test_ctx(), "member", "", "", commands, ["lll", "member", "whoami"])
+  assert pb.exit_code(e.kind) == 2
+  assert e.message.contains("unknown member command: 'whoami'; did you mean 'lll whoami'?")
+  let assert Err(plain) = dispatch(test_ctx(), "member", "", "", commands, ["lll", "member", "frob"])
+  assert !plain.message.contains("did you mean")
+}
+
+#[test]
+fn the_url_default_hint_follows_where_the_url_came_from() {
+  assert url_default_hint("env:LLL_URL").contains("LLL_URL in the environment")
+  assert url_default_hint("file:/repo/.lll.toml").contains("/repo/.lll.toml; edit its url line")
+  assert url_default_hint("file:/home/me/.config/lll/lll.toml").contains("lll config set url URL")
 }

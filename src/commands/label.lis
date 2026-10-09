@@ -100,12 +100,14 @@ fn label_edit_spec() -> Slice<flags.Flag> {
   flags.with_team([
     flags.Flag { name: "-n", alias: "--name", value: true, hint: "\"new name\"", help: "new label name", .. },
     flags.Flag { name: "-c", alias: "--color", value: true, hint: "\"#5e6ad2\"", help: "new hex color for the label", .. },
+    json_after_flag("the label record"),
   ])
 }
 
 fn label_move_spec() -> Slice<flags.Flag> {
   flags.with_team([
     flags.Flag { name: "--to", value: true, hint: "KEY", help: "team key to move the label to", .. },
+    json_after_flag("the label record"),
   ])
 }
 
@@ -176,7 +178,14 @@ fn label_edit(input: flags.CommandInput) -> Result<(), pb.CliError> {
   if p.given("-n") { patch.name = Some(p.one("-n")) }
   if p.given("-c") { patch.color = Some(p.one("-c")) }
   writes.update_label(ctx, label.id, patch)?
-  fmt.Println(f"Updated label {name}")
+  if p.given("--json") { return print_record_after(ctx, "labels", label.id.string()) }
+  // A rename names both, so the line does not report the old name as current
+  // (1.0 fleet, case 09).
+  if p.given("-n") && p.one("-n") != label.name {
+    fmt.Println(f"Renamed label {label.name} -> {p.one("-n")}")
+  } else {
+    fmt.Println(f"Updated label {name}")
+  }
   Ok(())
 }
 
@@ -214,7 +223,9 @@ fn label_move(input: flags.CommandInput) -> Result<(), pb.CliError> {
   let from = team_flag_or_current(ctx, p.one("--team"))?
   let to = writes.move_destination(ctx, p.one("--to"))?
   let label = records.resolve_label(ctx, from.id, name)?
-  fmt.Println(writes.move_to_team(ctx, records.Classifier.Label(label.id), label.name, from, to)?)
+  let moved = writes.move_to_team(ctx, records.Classifier.Label(label.id), label.name, from, to)?
+  if p.given("--json") { return print_record_after(ctx, "labels", label.id.string()) }
+  fmt.Println(moved)
   Ok(())
 }
 

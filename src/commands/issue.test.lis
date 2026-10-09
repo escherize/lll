@@ -371,16 +371,19 @@ fn issue_commands_lists_every_verb_once_with_a_one_line_summary() {
   }
 }
 
-/// create is the one issue verb with a hand-written page (new resolves to
-/// that same row); every other verb generates usage + flags from
-/// its spec, so a page there would be invented.
+/// create, next and claim are the issue verbs with a page (new resolves to
+/// create's row); next's is its generated usage plus the stream contract,
+/// claim's the same plus the way to give it back. Every other verb generates
+/// usage + flags from its spec, so a page there would be invented.
 #[test]
-fn only_issue_create_has_a_hand_written_page() {
+fn only_issue_create_next_and_claim_have_a_page() {
   for c in issue_commands() {
-    assert (c.page != "") == (c.name == "create")
+    assert (c.page != "") == (c.name == "create" || c.name == "next" || c.name == "claim")
   }
   let assert Some(create) = issue_commands().find(|c| c.name == "create")
   assert create.page.contains("The title is the bare argument or -t")
+  let assert Some(claim) = issue_commands().find(|c| c.name == "claim")
+  assert claim.page.contains("lll issue release KEY")
 }
 
 fn issue_help_requested(args: Slice<string>, verb: string) -> bool {
@@ -607,4 +610,87 @@ fn watch_ready_keys_share_the_readiness_rule() {
   // The cache is fresher than the expand: a blocker it holds as open wins.
   outside.state_wire = "todo"
   assert !ready_keys([a, outside]).contains("a")
+}
+
+fn assigned(number: int, to: string) -> models.Issue {
+  models.Issue {
+    number,
+    assignee: "m",
+    expand: models.IssueExpand { team: models.Team { key: "ENG", .. }, assignee: models.Member { name: to, .. }, .. },
+    ..
+  }
+}
+
+/// The 1.0 fleet: four agents read "the agenda is empty" while every ready
+/// issue was assigned. The refusal names them and the way to offer one.
+#[test]
+fn an_agenda_of_assigned_issues_says_so() {
+  assert empty_agenda_message([]).contains("the agenda is empty")
+  let msg = empty_agenda_message([assigned(4, "alice"), assigned(5, "bob"), assigned(6, "cy"), assigned(7, "dee")])
+  assert msg.contains("4 ready issues match but are assigned (ENG-4 to alice, ENG-5 to bob, ENG-6 to cy, ...)")
+  assert empty_agenda_message([assigned(4, "alice")]).contains("1 ready issue matches but is assigned (ENG-4 to alice)")
+  assert msg.contains("'lll issue update KEY --assignee none' offers one")
+}
+
+/// `issue next --help` states the output contract; --ready is accepted but
+/// not shown.
+#[test]
+fn issue_next_help_states_the_stream_contract() {
+  assert issue_next_page().contains("Capture stdout only: key=$(lll issue next --claim)")
+  let assert Some(ready) = issue_next_spec().find(|f| f.name == "--ready")
+  assert ready.hidden
+  assert !issue_next_page().contains("--ready")
+}
+
+/// --assignee '' is none (three 1.0 fleet agents typed it).
+#[test]
+fn an_empty_assignee_means_none() {
+  let spec = [flags.Flag { name: "--assignee", value: true, .. }]
+  let assert Ok(p) = flags.parse(spec, ["lll", "issue", "update", "--assignee", ""], 3, false, "")
+  assert assignee_value(p) == "none"
+  let assert Ok(named) = flags.parse(spec, ["lll", "issue", "update", "--assignee", "alice"], 3, false, "")
+  assert assignee_value(named) == "alice"
+  let assert Ok(absent) = flags.parse(spec, ["lll", "issue", "update"], 3, false, "")
+  assert assignee_value(absent) == ""
+}
+
+/// The 1.0 fleet: a stale stamp's refusal carries the retry, stamp swapped.
+#[test]
+fn a_retry_command_swaps_in_the_current_stamp() {
+  let cmd = retry_command(["lll", "issue", "update", "ENG-1", "--description-append", "two words", "--if-unchanged-since", "old"], "2026-10-09 02:55:01.501Z")
+  assert cmd == "lll issue update ENG-1 --description-append 'two words' --if-unchanged-since '2026-10-09 02:55:01.501Z'"
+  let inline = retry_command(["lll", "issue", "update", "ENG-1", "--if-unchanged-since=old"], "2026-10-09T02:55:01.501Z")
+  assert inline == "lll issue update ENG-1 --if-unchanged-since='2026-10-09T02:55:01.501Z'"
+}
+
+/// An update field typed as a verb names the update flag (1.0 fleet).
+#[test]
+fn an_update_field_typed_as_a_verb_names_the_flag() {
+  let assert Some(hint) = issue_synonym("priority")
+  assert hint == "unknown issue command 'priority'; to change it use 'lll issue update KEY --priority <name>'"
+  assert issue_synonym("title").is_none()
+}
+
+/// Two 1.0 fleet agents (case 13) stranded their own claims and read only
+/// "nothing to do"; the refusal names what they still hold.
+#[test]
+fn an_empty_agenda_names_my_own_held_claims() {
+  assert own_claims_note([]) == ""
+  assert own_claims_note(["FLEET-8", "FLEET-9"]).contains("you hold claims on FLEET-8, FLEET-9")
+}
+
+/// 1.0 fleet case 20: 'issue note' and 'issue review' name the real verbs.
+#[test]
+fn note_and_review_point_at_comment_and_in_review() {
+  let assert Some(note) = issue_synonym("note")
+  assert note.contains("lll issue comment KEY-123")
+  let assert Some(review) = issue_synonym("review")
+  assert review.contains("--state in-review")
+}
+
+/// 1.0 fleet case 20, run 3: a key in the verb slot names the verb-first form.
+#[test]
+fn a_key_where_the_verb_goes_names_the_verb_first_form() {
+  let assert Some(hint) = issue_synonym("FLEET-4")
+  assert hint.contains("put the verb first: 'lll issue view FLEET-4'")
 }

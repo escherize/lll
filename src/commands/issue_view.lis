@@ -69,6 +69,16 @@ fn await_issue_view<T>(
   result
 }
 
+/// The issue's label names, comma-joined; a name another visible team also
+/// uses carries the issue's team key, 'bug (OPS)' (fleet case 12). Labels
+/// belong to their issue's team, so that key is the label's.
+fn view_labels(ctx: pb.Client, full: models.Issue) -> Result<string, pb.CliError> {
+  let names = full.expand.labels.map(|l| l.name)
+  let shared = records.shared_label_names(ctx, names)?
+  let key = full.expand.team.key
+  Ok(strings.Join(names.map(|n| if shared.contains(n) { f"{n} ({key})" } else { n }), ", "))
+}
+
 fn view(input: flags.CommandInput) -> Result<(), pb.CliError> {
   let ctx = input.ctx
   let spec = issue_view_spec()
@@ -110,6 +120,8 @@ fn view(input: flags.CommandInput) -> Result<(), pb.CliError> {
   if raw_mode {
     fmt.Println(f"# {full.expand.team.key}-{full.number}: {full.title}")
     let source = provenance.fields(full)
+    // Read while the other reads are in flight, before any of them is awaited.
+    let labels = view_labels(ctx, full)?
     // LLL-638: an agent reading --raw must see who holds the issue. Absolute
     // times, like the comments below: --raw output is stored and re-read.
     let claim_line = match await_issue_view(reads.claim, "claim")? {
@@ -118,12 +130,15 @@ fn view(input: flags.CommandInput) -> Result<(), pb.CliError> {
         let renewed = if held.updated == "" || held.updated == held.created { "" } else { f", renewed {display.absolute(held.updated)}" }
         Some(f"- **Claimed:** {holder} (since {display.absolute(held.created)}{renewed})")
       },
-      None => None,
+      // Said, not omitted: two 1.0 fleet agents read a missing row as held.
+      None => Some("- **Claimed:** none"),
     }
-    if !source.is_empty() || claim_line.is_some() {
+    let labels_line = if labels == "" { None } else { Some(f"- **Labels:** {labels}") }
+    if !source.is_empty() || claim_line.is_some() || labels_line.is_some() {
       fmt.Println("")
       for field in source { fmt.Println(f"- **{field.label}:** {field.value}") }
       if let Some(line) = claim_line { fmt.Println(line) }
+      if let Some(line) = labels_line { fmt.Println(line) }
     }
     if full.description != "" {
       fmt.Println("")
@@ -157,7 +172,7 @@ fn view(input: flags.CommandInput) -> Result<(), pb.CliError> {
   let mut project = full.expand.project.name
   if project == "" { project = "none" }
 
-  let mut labels = strings.Join(full.expand.labels.map(|l| l.name), ", ")
+  let mut labels = view_labels(ctx, full)?
   if labels == "" { labels = "none" }
 
   fmt.Println(f"{full.expand.team.key}-{full.number} {full.title}")
@@ -170,9 +185,13 @@ fn view(input: flags.CommandInput) -> Result<(), pb.CliError> {
   // who it is for, Claimed says who is holding it right now, and only the
   // latter is exclusive.
   let claim = await_issue_view(reads.claim, "claim")?
-  if let Some(held) = claim {
-    let holder = display.member_name(held.member, held.expand.member.name, "an unknown member")
-    fmt.Println(f"Claimed:   {display.byline(holder, held.agent)} ({display.relative(held.created)})")
+  // Always printed: two 1.0 fleet agents read a missing row as claimed.
+  match claim {
+    Some(held) => {
+      let holder = display.member_name(held.member, held.expand.member.name, "an unknown member")
+      fmt.Println(f"Claimed:   {display.byline(holder, held.agent)} ({display.relative(held.created)})")
+    },
+    None => fmt.Println("Claimed:   none"),
   }
   // The work-site slot (TASK-205), under the claim holder: the claim says
   // who, this says where. "(last seen)" once the work is over.

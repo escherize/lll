@@ -133,3 +133,18 @@ fn quote_contains_a_filter_breakout_payload() {
   // inside the string literal; it never becomes an operator.
   assert f"name={quote(payload)}" == r"name='x\' || name!=\''"
 }
+
+/// 1.0 fleet case 20: four agents typed --state review.
+#[test]
+fn a_near_state_names_the_one_it_matches() {
+  let assert Err(e) = state("review")
+  assert e.message.contains("did you mean 'in-review'?")
+  let assert Err(far) = state("xyz")
+  assert !far.message.contains("did you mean")
+}
+
+#[test]
+fn a_longer_spelling_of_a_state_names_it_too() {
+  let assert Err(e) = state("reviewing")
+  assert e.message.contains("did you mean 'in-review'?")
+}

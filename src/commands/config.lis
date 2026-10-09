@@ -27,6 +27,8 @@ pub fn config_commands() -> Slice<flags.Command> {
     flags.Command {
       name: "list",
       alias: "--list",
+      // Fleet case 14: two workers guessed `config show`.
+      hidden_alias: "show",
       summary: "every effective value and the file it came from",
       spec: [flags.Flag { name: "--json", help: "print the values as a JSON list of key, value and source", .. }],
       run: config_list,
@@ -68,7 +70,7 @@ pub fn config_commands() -> Slice<flags.Command> {
 /// Prose that belongs to the noun rather than to any one verb; dispatch
 /// prints it under the verb table for `lll config --help`.
 fn config_intro() -> string {
-  "Your token determines the member that authors comments and holds claims.
+  f"Your token determines the member that authors comments and holds claims.
 Use 'lll whoami' to check it. Save API and board endpoints with
 'lll config set url URL' and 'lll config set web_url URL'.
 url / LLL_URL: API base for reads and writes.
@@ -79,17 +81,30 @@ Precedence: env vars (LLL_URL, LLL_TEAM, LLL_SORT, LLL_WEB_URL,
 LLL_TOKEN) > the repo's .lll.toml > ~/.config/lll/lll.toml. The files layer:
 each supplies the keys it names, so the committed repo file carries 'team' and
 nothing else while 'url' and 'token' stay per-machine. 'lll attach' writes the
-repo file."
+repo file.
+
+Save or replace the token with {token_save_hint()}."
+}
+
+/// How to save a token you already hold; named by `config --help` and by
+/// `config set token`.
+fn token_save_hint() -> string {
+  "'lll login --token -' (reads it from stdin)"
 }
 
 /// Set a machine-level endpoint, without changing repo config.
 fn config_set(input: flags.CommandInput) -> Result<(), pb.CliError> {
   let ctx = input.ctx
   let usage = "usage: lll config set <url|web_url> VALUE"
-  if input.parsed.positional_count() != 2 { return Err(pb.failed(usage)) }
+  // 1.0 fleet: three agents concluded LLL_TOKEN or a hand edit were the only
+  // ways to save a token.
+  if input.parsed.first() == "token" {
+    return Err(flags.usage_error(f"the token is saved by logging in: {token_save_hint()}"))
+  }
+  if input.parsed.positional_count() != 2 { return Err(flags.usage_error(usage)) }
   let key = input.parsed.first()
   let value = strings.TrimSpace(input.parsed.nth(1))
-  if value == "" { return Err(pb.failed(usage)) }
+  if value == "" { return Err(flags.usage_error(usage)) }
   if key == "url" || key == "web_url" {
     let endpoint = checked_endpoint(key, value)?
     let path = set_home_key(ctx.settings, key, endpoint)?
@@ -103,7 +118,7 @@ fn config_set(input: flags.CommandInput) -> Result<(), pb.CliError> {
     }
     return Ok(())
   }
-  Err(pb.failed(f"cannot set '{key}'; supported keys: url, web_url"))
+  Err(flags.usage_error(f"cannot set '{key}'; supported keys: url, web_url"))
 }
 
 /// Set a repo-level key in the repo's .lll.toml — the one already in play,
@@ -284,7 +299,7 @@ fn config_get(input: flags.CommandInput) -> Result<(), pb.CliError> {
       pb.failed("the token is a secret and is not printed; 'lll config list' shows where it comes from"),
     ),
     other => return Err(
-      pb.failed(f"unknown config key '{other}'; keys: url, web_url, team, sort"),
+      flags.usage_error(f"unknown config key '{other}'; keys: url, web_url, team, sort"),
     ),
   }
   if origin == "" { return Err(pb.failed(f"{key} is not set (see 'lll config list')")) }
@@ -396,9 +411,9 @@ fn checked_web_url(value: string) -> Result<string, pb.CliError> {
 
 fn checked_endpoint(key: string, value: string) -> Result<string, pb.CliError> {
   let parsed = url.Parse(value)
-  let Ok(u) = parsed else { return Err(pb.failed(f"{key} must be an absolute http:// or https:// URL")) }
+  let Ok(u) = parsed else { return Err(flags.usage_error(f"{key} must be an absolute http:// or https:// URL")) }
   if (u.Scheme != "http" && u.Scheme != "https") || u.Hostname() == "" || u.User.is_some() || u.RawQuery != "" || u.Fragment != "" {
-    return Err(pb.failed(f"{key} must be an absolute http:// or https:// URL without credentials, query or fragment"))
+    return Err(flags.usage_error(f"{key} must be an absolute http:// or https:// URL without credentials, query or fragment"))
   }
   Ok(strings.TrimRight(value, "/"))
 }

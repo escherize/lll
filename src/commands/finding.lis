@@ -16,10 +16,6 @@ import "records"
 /// Dispatched through the noun's Command table (TASK-307): dispatch, `lll
 /// finding --help` and shell completions all read it, so none can drift.
 pub fn finding(ctx: pb.Client, args: Slice<string>) -> Result<(), pb.CliError> {
-  // Removed at 1.0 (D5); a finding is a doc, and 'doc view' is the read.
-  if args.get(2) == Some("read") {
-    return Err(pb.failed("unknown finding command: 'read' - did you mean 'lll doc view SLUG'? (see 'lll doc view --help')"))
-  }
   flags.dispatch(ctx, "finding", "retrieve findings near a path", finding_intro(), finding_commands(), args)
 }
 
@@ -54,7 +50,7 @@ pub fn finding_commands() -> Slice<flags.Command> {
     flags.Command {
       name: "confirm",
       summary: "assert a finding is fact; clears any refutation's reason",
-      spec: flags.with_team([]),
+      spec: flags.with_team([json_after_flag("the finding")]),
       positional: "SLUG",
       run: finding_confirm,
       ..
@@ -69,10 +65,10 @@ pub fn finding_commands() -> Slice<flags.Command> {
     },
     // Hidden (LLL-505): a finding is a doc, so 'lll doc view' is the
     // documented read. Fleet task 9 had 6/30 agents guess 'finding view', so
-    // it keeps working without a help row or completion. 'read' was removed
-    // at 1.0 (D5) and answers with a hint naming 'view'.
+    // it keeps working without a help row or completion, and so does 'read'
+    // (5 of 20 workers in the 1.0 fleet typed it).
     flags.Command {
-      name: "view", hidden: true,
+      name: "view", hidden: true, hidden_alias: "read",
       summary: "show one finding by slug; the documented spelling is 'lll doc view'",
       spec: doc_view_spec(),
       positional: "SLUG",
@@ -180,7 +176,7 @@ fn finding_near(input: flags.CommandInput) -> Result<(), pb.CliError> {
   if path == "" { return Err(flags.usage_error("usage: lll finding near <path>")) }
   let findings = records.fetch_findings(ctx, current_team(ctx)?.id)?
   let hits = findings_near(findings, path)
-  if p.given("--json") { return print_list_json(hits, whole_list(hits.length()), "findings") }
+  if p.given("--json") { return print_list_json(docs_json(hits)?, whole_list(hits.length()), "findings") }
   if hits.is_empty() {
     fmt.Println(f"No findings for {path}.")
     return Ok(())
@@ -214,21 +210,36 @@ fn finding_list(input: flags.CommandInput) -> Result<(), pb.CliError> {
   // so a limit is a post-filter slice — honest here because there is no
   // server-side page to ask for.
   if limit > 0 { findings = findings[..limit] }
-  if p.given("--json") { return print_list_json(findings, whole_list(findings.length()), "findings") }
+  if p.given("--json") { return print_list_json(docs_json(findings)?, whole_list(findings.length()), "findings") }
   if findings.is_empty() { return say_empty("findings") }
   print_finding_lines(findings)
   Ok(())
 }
 
 /// One line per finding, tab-separated like 'lll doc list': slug, area,
-/// title. An empty area prints as "-" so columns stay aligned. A
-/// non-confirmed confidence rides the line so a guess cannot read as fact.
+/// title. An empty area prints as "-" so columns stay aligned. Every line
+/// carries its confidence, confirmed included (1.0 fleet), so a guess cannot
+/// read as fact and a fact is not left to be inferred from a missing tag.
 fn print_finding_lines(docs: Slice<models.Doc>) {
   for d in docs {
     let mut area = d.area
     if area == "" { area = "-" }
-    fmt.Println(f"{d.slug}\t{display.table_cell(area)}\t{display.table_cell(d.title)}{display.table_cell(display.confidence_suffix(d.confidence, d.confidence_note))}")
+    fmt.Println(f"{d.slug}\t{display.table_cell(area)}\t{display.table_cell(d.title)}{display.table_cell(confidence_tag(d.confidence, d.confidence_note))}")
   }
+}
+
+/// A finding's confidence. Empty is confirmed: every finding written before
+/// the field existed was an assertion.
+fn confidence_word(confidence: string) -> string {
+  if confidence == "" { "confirmed" } else { confidence }
+}
+
+/// The list tag: confidence_suffix, which leaves confirmed unmarked for the
+/// board and issue view, plus " [confirmed]".
+fn confidence_tag(confidence: string, note: string) -> string {
+  let suffix = display.confidence_suffix(confidence, note)
+  if suffix != "" { return suffix }
+  f" [{confidence_word(confidence)}]"
 }
 
 /// Finding creation shares the parsed document input and supplies a domain
@@ -258,6 +269,7 @@ fn finding_refute_spec() -> Slice<flags.Flag> {
       help: "the why it failed: what a later reader was wrong to trust\n('-b -' reads it from stdin)",
       ..,
     },
+    json_after_flag("the finding"),
   ])
 }
 
@@ -274,8 +286,7 @@ fn finding_confirm(input: flags.CommandInput) -> Result<(), pb.CliError> {
     return Err(records.unknown_doc(team, slug))
   }
   patch_confidence(ctx, d, "confirmed", "")?
-  fmt.Println(f"Confirmed {d.slug}")
-  Ok(())
+  doc_done(ctx, p, d.id, f"Confirmed {d.slug}")
 }
 
 /// 'finding refute SLUG -b why' — the counterpart, and the only path that
@@ -295,8 +306,7 @@ fn finding_refute(input: flags.CommandInput) -> Result<(), pb.CliError> {
     return Err(records.unknown_doc(team, slug))
   }
   patch_confidence(ctx, d, "refuted", why)?
-  fmt.Println(f"Refuted {d.slug}")
-  Ok(())
+  doc_done(ctx, p, d.id, f"Refuted {d.slug}")
 }
 
 /// One PATCH, two fields, on purpose nothing else: confirm/refute is a

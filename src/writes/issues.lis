@@ -149,17 +149,21 @@ pub enum UpdateFailure {
 
 /// How an update runs. `stamp` is a stamp the caller read and insists on
 /// (--if-unchanged-since): a 412 is then the answer, never a retry.
-/// `claim` is used only when the patch edits the assignee, which goes
-/// through the claim route.
+/// `claim` is the caller; its force and reason are used only when the patch
+/// edits the assignee, which goes through the claim route. Its agent label
+/// rides every write, because a move into done or cancelled releases the
+/// caller's own claim (the finish rule, gopb finishReleases) and the label
+/// says which session the caller is. `keep_claim` opts out of that release.
 pub struct UpdateOptions {
   pub stamp: Option<string>,
   pub claim: ClaimAs,
+  pub keep_claim: bool,
 }
 
 impl UpdateOptions {
   /// No stamp, no label, no force: a plain edit as `caller`.
   pub fn as_caller(caller: pb.Caller) -> UpdateOptions {
-    UpdateOptions { stamp: None, claim: ClaimAs { caller, .. } }
+    UpdateOptions { stamp: None, claim: ClaimAs { caller, .. }, keep_claim: false }
   }
 }
 
@@ -214,6 +218,7 @@ pub fn update_issue(
       assigning,
       observed,
       opts.claim,
+      opts.keep_claim,
     )
     match result {
       Ok(t) => return Ok(t),
@@ -260,6 +265,7 @@ fn send_fields(
   assigning: bool,
   observed: Option<models.ClaimId>,
   by: ClaimAs,
+  keep_claim: bool,
 ) -> Result<Option<Transition>, pb.CliError> {
   if assigning {
     let mut routed = fields
@@ -270,11 +276,18 @@ fn send_fields(
       observed,
       encode(routed, "issue fields")?,
       by,
+      keep_claim,
     )?
     return Ok(Some(transition))
   }
   let body = encode(fields, "issue fields")?
-  let path = record_path("issues", id.string())
+  // The PATCH body is the record, so the finish rule's session label and
+  // opt-out ride as query parameters (gopb registerFinishRelease).
+  let mut params: Slice<string> = []
+  if by.agent != "" { params = params.append(f"agent={url.QueryEscape(by.agent)}") }
+  if keep_claim { params = params.append("keep_claim=true") }
+  let mut path = record_path("issues", id.string())
+  if !params.is_empty() { path = f"{path}?{strings.Join(params, "&")}" }
   match stamp {
     Some(s) => {
       let _ = ctx.patch_with_stamp_as(by.caller, path, body, s)?

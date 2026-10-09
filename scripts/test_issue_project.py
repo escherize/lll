@@ -39,7 +39,7 @@ def view():
 def without_project(record):
     # Only the relation, its expansion and the server timestamp may change.
     record = dict(record)
-    for field in ('project', 'updated'):
+    for field in ('project', 'project_name', 'updated'):
         record.pop(field, None)
     record['expand'] = dict(record['expand'])
     record['expand'].pop('project', None)

@@ -18,7 +18,7 @@ pub fn doc(ctx: pb.Client, args: Slice<string>) -> Result<(), pb.CliError> {
   // Removed at 1.0 (D5): the link lives on the issue noun.
   let verb = args.get(2).unwrap_or("")
   if verb == "link" || verb == "unlink" {
-    return Err(pb.failed(f"unknown doc command: '{verb}' - did you mean 'lll issue {verb} KEY-123 SLUG'? (see 'lll issue {verb} --help')"))
+    return Err(flags.usage_error(f"unknown doc command: '{verb}' - did you mean 'lll issue {verb} KEY-123 SLUG'? (see 'lll issue {verb} --help')"))
   }
   flags.dispatch(ctx, "doc", "work with docs (wiki pages, findings, decisions, PRDs)", doc_intro(), doc_commands(), args)
 }
@@ -44,7 +44,7 @@ pub fn doc_commands() -> Slice<flags.Command> {
       ..
     },
     flags.Command {
-      name: "view", alias: "show",
+      name: "view", alias: "show", hidden_alias: "read",
       summary: "show one doc with its linked issues; --raw prints only the body; --json prints the raw record",
       spec: doc_view_spec(),
       positional: "SLUG",
@@ -103,7 +103,7 @@ pub fn check_kind(val: string) -> Result<string, pb.CliError> {
   if kind == "" { return Ok("wiki") }
   if records.doc_kinds().find(|k| k == kind).is_none() {
     return Err(
-      pb.failed(f"unknown kind '{kind}' (use one of: {strings.Join(records.doc_kinds(), ", ")})"),
+      flags.usage_error(f"unknown kind '{kind}' (use one of: {strings.Join(records.doc_kinds(), ", ")})"),
     )
   }
   Ok(kind)
@@ -117,7 +117,7 @@ pub fn check_confidence(val: string) -> Result<string, pb.CliError> {
   let c = strings.TrimSpace(strings.ToLower(val))
   if c == "" { return Ok("confirmed") }
   if c != "suspected" && c != "confirmed" {
-    return Err(pb.failed(f"unknown confidence '{c}' (use: suspected, confirmed; 'finding refute SLUG -b why' is how a finding becomes refuted)"))
+    return Err(flags.usage_error(f"unknown confidence '{c}' (use: suspected, confirmed; 'finding refute SLUG -b why' is how a finding becomes refuted)"))
   }
   Ok(c)
 }
@@ -189,7 +189,7 @@ fn doc_new_spec() -> Slice<flags.Flag> {
       name: "-k",
       alias: "--kind",
       value: true,
-      hint: "kind",
+      hint: strings.Join(records.doc_kinds(), "|"),
       help: "wiki (default), finding, decision, or prd",
       ..,
     },
@@ -216,6 +216,15 @@ fn doc_new_spec() -> Slice<flags.Flag> {
       help: "comma-separated file/directory paths the doc is about, e.g.\nsrc/pb, pb/pb_migrations ('lll finding near' matches by them)",
       ..,
     },
+    // LLL-396, LLL-641: a finding may be filed as a guess, from either verb
+    // that files one. Without it 'doc create -k finding' could only assert.
+    flags.Flag {
+      name: "--confidence",
+      value: true,
+      hint: "suspected|confirmed",
+      help: "a finding's confidence: 'suspected' files a guess (default\n'confirmed'); 'finding refute' is the only way a finding becomes refuted",
+      ..,
+    },
     flags.Flag { name: "--json", help: "print the created doc record as JSON", .. },
   ])
 }
@@ -237,19 +246,13 @@ fn finding_new_spec() -> Slice<flags.Flag> {
         help: "URL-safe name for the doc, e.g. port-notes (or give it as the bare argument)",
         ..,
       })
+    } else if fl.name == "-k" {
+      // The doc verb's "wiki (default)" is wrong here (LLL-641).
+      spec = spec.append(flags.Flag { help: "finding (the default here); wiki, decision or prd file another kind", ..fl })
     } else {
       spec = spec.append(fl)
     }
   }
-  // LLL-396: a finding may be filed as a guess. doc new keeps today's
-  // semantics — everything it writes is asserted (confirmed).
-  spec = spec.append(flags.Flag {
-    name: "--confidence",
-    value: true,
-    hint: "suspected|confirmed",
-    help: "file as a guess with 'suspected' (default 'confirmed'); 'finding\nrefute' is the only way a finding becomes refuted",
-    ..,
-  })
   spec
 }
 
@@ -286,7 +289,7 @@ fn doc_edit_spec() -> Slice<flags.Flag> {
       name: "-k",
       alias: "--kind",
       value: true,
-      hint: "kind",
+      hint: strings.Join(records.doc_kinds(), "|"),
       help: "wiki, finding, decision, or prd",
       ..,
     },
@@ -305,6 +308,14 @@ fn doc_edit_spec() -> Slice<flags.Flag> {
       help: "replacement comma-separated paths: the WHOLE set\n(pass \"\" to clear it)",
       ..,
     },
+    flags.Flag {
+      name: "--confidence",
+      value: true,
+      hint: "suspected|confirmed",
+      help: "a finding's confidence, as 'finding confirm' sets it (clears the note);\nrefuting needs a reason: 'lll finding refute SLUG -b WHY'",
+      ..,
+    },
+    json_after_flag("the doc record"),
   ])
 }
 
@@ -341,6 +352,9 @@ fn create_doc(ctx: pb.Client, p: flags.Parsed, default_kind: string, slug: strin
   let paths = parse_paths(p.one("--paths"))
   let confidence_raw = if p.given("--confidence") { p.one("--confidence") } else { "" }
   let confidence = check_confidence(confidence_raw)?
+  if p.given("--confidence") && kind != "finding" {
+    return Err(flags.usage_error(f"--confidence is a finding's; this doc's kind is {kind} (add -k finding, or use 'lll finding create')"))
+  }
   let mut body = ""
   if p.given("-b") { body = value_or_stdin(p.one("-b"), "-b")? }
 
@@ -374,8 +388,7 @@ fn create_doc(ctx: pb.Client, p: flags.Parsed, default_kind: string, slug: strin
     return Err(pb.failed(f"decoding created doc: {e}"))
   }
   if p.given("--json") {
-    fmt.Println(contract_json(resp.bytes() as json.RawMessage, 0) as string)
-    return Ok(())
+    return print_doc_after(ctx, created.id)
   }
   fmt.Println(f"Created doc {created.slug}")
   Ok(())
@@ -389,7 +402,7 @@ fn doc_list_spec() -> Slice<flags.Flag> {
       name: "-k",
       alias: "--kind",
       value: true,
-      hint: "kind",
+      hint: strings.Join(records.doc_kinds(), "|"),
       help: "only docs of this kind: wiki, finding, decision, or prd",
       ..,
     },
@@ -439,7 +452,7 @@ fn doc_list(input: flags.CommandInput) -> Result<(), pb.CliError> {
   }
   if limit > 0 && items.length() > limit { items = items[..limit] }
   let docs = models.DocList { items }
-  if p.given("--json") { return print_list_json(docs.items, whole_list(docs.items.length()), "docs") }
+  if p.given("--json") { return print_list_json(docs_json(docs.items)?, whole_list(docs.items.length()), "docs") }
   if docs.items.is_empty() { return say_empty("docs") }
   for d in docs.items {
     let mut kind = d.kind
@@ -459,10 +472,7 @@ fn doc_view(input: flags.CommandInput) -> Result<(), pb.CliError> {
   let raw_mode = p.given("--raw")
 
   let record = records.fetch_doc_record(ctx, current_team(ctx)?, slug)?
-  if json_mode {
-    fmt.Println(contract_json(record.bytes() as json.RawMessage, 0) as string)
-    return Ok(())
-  }
+  if json_mode { return print_json(doc_json(record.bytes() as json.RawMessage)?, "doc") }
 
   let mut d = models.Doc { .. }
   if let Err(e) = json.Unmarshal(record.bytes(), &d) {
@@ -479,6 +489,9 @@ fn doc_view(input: flags.CommandInput) -> Result<(), pb.CliError> {
   fmt.Println(f"{d.slug} {display.table_cell(d.title)}{display.table_cell(display.confidence_suffix(d.confidence, d.confidence_note))}")
   fmt.Println("")
   fmt.Println(f"Kind:      {d.kind}")
+  // Always, for a finding (1.0 fleet): an absent line read as "unknown", not
+  // as "confirmed".
+  if d.kind == "finding" { fmt.Println(f"Confidence: {confidence_word(d.confidence)}") }
   if let Some(author) = d.expand.author {
     let tag = display.author_tag(author.is_bot(), author.owner_name())
     fmt.Println(f"Author:    {display.table_cell(author.name)}{tag}")
@@ -527,21 +540,40 @@ fn doc_edit(input: flags.CommandInput) -> Result<(), pb.CliError> {
   let area_set = p.given("-a")
   let paths_raw = p.one("--paths")
   let paths_set = p.given("--paths")
-  if !body_set && !title_set && !kind_set && !area_set && !paths_set {
+  // Fleet case 08: --confidence on edit, as on create. It is the write
+  // 'finding confirm' makes (the note cleared with it); refuting keeps its
+  // own verb because it needs a reason.
+  let confidence_set = p.given("--confidence")
+  let mut confidence = ""
+  if confidence_set {
+    if strings.TrimSpace(strings.ToLower(p.one("--confidence"))) == "refuted" {
+      return Err(flags.usage_error(f"refuting needs a reason: lll finding refute {slug} -b WHY"))
+    }
+    confidence = check_confidence(p.one("--confidence"))?
+  }
+  if !body_set && !title_set && !kind_set && !area_set && !paths_set && !confidence_set {
     return Err(flags.usage_error(f"nothing to edit: pass at least one flag\nusage: {usage}"))
   }
 
   let d = records.fetch_doc(ctx, current_team(ctx)?, slug)?
+  let kind = if kind_set { check_kind(kind_raw)? } else { d.kind }
+  if confidence_set && kind != "finding" {
+    let why = if kind_set { f"-k {kind} would make {d.slug} a {kind} doc" } else { f"{d.slug} is a {kind} doc (add -k finding to make it one)" }
+    return Err(flags.usage_error(f"--confidence is a finding's; {why}"))
+  }
   // `-b -` replaces the whole body; there is deliberately no append mode.
   let mut patch = writes.DocPatch { .. }
   if body_set { patch.body = Some(body) }
   if title_set { patch.title = Some(title) }
-  if kind_set { patch.kind = Some(check_kind(kind_raw)?) }
+  if kind_set { patch.kind = Some(kind) }
   if area_set { patch.area = Some(strings.TrimSpace(area_raw)) }
   if paths_set { patch.paths = Some(parse_paths(paths_raw)) }
+  if confidence_set {
+    patch.confidence = Some(confidence)
+    patch.confidence_note = Some("")
+  }
   writes.update_doc(ctx, d.id, patch)?
-  fmt.Println(f"Updated doc {d.slug}")
-  Ok(())
+  doc_done(ctx, p, d.id, f"Updated doc {d.slug}")
 }
 
 fn doc_delete(input: flags.CommandInput) -> Result<(), pb.CliError> {

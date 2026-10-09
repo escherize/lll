@@ -75,3 +75,11 @@ fn issue_of_team_asks_the_parser() {
   assert !issue_of_team(" ABC-1", "ABC")
   assert !issue_of_team("ABC -1", "ABC")
 }
+
+#[test]
+fn split_issue_key_refuses_captured_notices() {
+  let assert Err(merged) = split_issue_key("Claimed FLEET-4 for bot-fleet-worker-06\nFLEET-4")
+  assert merged.message.contains("capture stdout only")
+  let assert Err(_) = split_issue_key("ClaimedFLEET-4forbot-fleet-worker-09FLEET-4")
+  let assert Ok(_) = split_issue_key("eng-dev-12")
+}

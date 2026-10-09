@@ -101,6 +101,9 @@ class Handler(http.server.BaseHTTPRequestHandler):
             name = 'comments'
         elif route.endswith('/members/records/' + member_id):
             name = 'member'
+        elif route.endswith('/labels/records'):
+            # The shared-name check behind 'Labels: bug (TEAM)' (fleet case 12).
+            name = 'labels'
         else:
             name = 'unexpected'
         independent = name in {'claim', 'docs', 'blocks', 'findings', 'comments'}
@@ -140,6 +143,9 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 body = envelope([finding] if rich else [])
             elif name == 'comments':
                 body = envelope([comment] if rich else [])
+            elif name == 'labels':
+                assert "name='runtime'" in filt, filt
+                body = envelope([dict(id='label000000001', name='runtime', team=team_id)])
             elif name == 'member':
                 # All empty replies reach the cold memo before this finishes.
                 time.sleep(0.08)
@@ -199,7 +205,8 @@ try:
                         assert state.arrived == reads, (key, state.arrived)
                         assert all(state.counts[name] == 1 for name in reads), state.counts
                         assert state.counts['member'] == (1 if case == 'empty' else 0), state.counts
-                        assert sum(state.counts.values()) == 2 + len(reads) + (case == 'empty'), state.counts
+                        assert state.counts['labels'] == (mode in ('view', 'raw')), state.counts
+                        assert sum(state.counts.values()) == 2 + len(reads) + (case == 'empty') + state.counts['labels'], state.counts
                 if case != 'errors':
                     assert result.returncode == 0, result.stderr
                 else:

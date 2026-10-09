@@ -93,7 +93,7 @@ pub fn up(ctx: pb.Client, args: Slice<string>) -> Result<(), pb.CliError> {
   }
   if share_bind == "0.0.0.0" || share_bind == "::" {
     return Err(
-      pb.failed("--bind needs the actual LAN or Tailscale IP teammates can reach, not a wildcard address"),
+      flags.usage_error("--bind needs the actual LAN or Tailscale IP teammates can reach, not a wildcard address"),
     )
   }
   if scratch && p.one("--pb-dir") != "" {

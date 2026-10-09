@@ -70,6 +70,11 @@ if skill_extra=$(cd "$DATA_DIR" && "$LIN" skill list software-factory 2>&1); the
 fi
 assert_contains "$skill_extra" "usage: lll skill list" "skill list extra-argument error names usage"
 assert_contains "$skill_extra" "lll skill get NAME" "skill list error names the one-skill command"
+skill_code=0
+(cd "$DATA_DIR" && "$LIN" skill get nope >/dev/null 2>&1) || skill_code=$?
+[ "$skill_code" = 3 ] || fail "skill get of an unknown skill must exit 3 (got $skill_code)"
+contract=$(cd "$DATA_DIR" && "$LIN" help contract)
+assert_contains "$contract" "# The lll CLI contract" "help contract prints the embedded contract"
 
 # PocketBase is embedded in lll (gopb), so there is no external binary to
 # install. `lll up` needs a team and refuses to start without one; ENG is the
@@ -890,8 +895,9 @@ got=$(LLL_URL=$URL "$LIN" issue view ENG-6 --json | jq -r '.assignee')
 out=$(cd "$REPO" && LLL_URL=$URL "$LLL_ABS" issue update ENG-6 --assignee none)
 got=$(LLL_URL=$URL "$LIN" issue view ENG-6 --json | jq -r '.assignee')
 [ "$got" = "" ] || fail "update --assignee none: assignee is '$got'"
-out=$(LLL_URL=$URL "$LIN" issue update ENG-6 --assignee "" 2>&1 || true)
-assert_contains "$out" "or 'none' to clear it" "an empty --assignee names none"
+# 1.0 fleet: an empty --assignee is none.
+out=$(LLL_URL=$URL "$LIN" issue update ENG-6 --assignee "") || fail "update --assignee '' must succeed: $out"
+assert_contains "$out" "assignee=none" "an empty --assignee clears it"
 out=$(LLL_URL=$URL LLL_TEAM=ENG "$LIN" issue list --project ENG 2>&1 || true)
 assert_contains "$out" "'ENG' is the team, not a project" "the team key passed as a project is told so"
 # LLL-374: alice used to arrive for free, because `config set me alice` seeded
@@ -1613,6 +1619,10 @@ fi
 assert_contains "$(cat "$DATA_DIR/comp.fish")" "complete -c lll" "fish completions complete lll"
 python3 "$REPO_ROOT"/scripts/test_completion_commands.py "$LIN"
 python3 "$REPO_ROOT"/scripts/test_flag_policy.py "$LIN"
+python3 "$REPO_ROOT"/scripts/test_usage_exit.py "$LIN"
+python3 "$REPO_ROOT"/scripts/test_password_tty.py "$LIN"
+python3 "$REPO_ROOT"/scripts/test_write_json.py "$LIN"
+python3 "$REPO_ROOT"/scripts/test_help_exit.py "$LIN"
 python3 "$REPO_ROOT"/scripts/test_help_ticket_keys.py "$LIN"
 python3 "$REPO_ROOT"/scripts/test_doc_examples.py "$LIN"
 
@@ -2101,16 +2111,15 @@ for pair in 'issue show view' 'issue new create' 'doc new create' 'doc show view
   alias_help=$("$LIN" "$noun" "$alias" --help)
   [ "$alias_help" = "$canonical_help" ] || fail "$noun $alias must show canonical help"
 done
-for noun in issue doc; do
-  if "$LIN" "$noun" read --help >"$DATA_DIR/retired.out" 2>&1; then
-    fail "$noun read must refuse the retired spelling"
-  fi
-  assert_contains "$(cat "$DATA_DIR/retired.out")" "unknown $noun command: 'read' - did you mean 'lll $noun view'?" "retired verb names view"
+# The 1.0 fleet: 'read' is a permanent hidden alias of view (5 of 20 workers
+# typed it). It shows view's help and dispatches like view.
+for noun in issue doc finding; do
+  [ "$("$LIN" "$noun" read --help)" = "$("$LIN" "$noun" view --help)" ] || fail "$noun read must show view's help"
+  assert_not_contains "$("$LIN" "$noun" --help)" "lll $noun read" "$noun --help omits hidden read"
+  assert_not_contains " $("$LIN" completions bash | grep -F "  $noun)" | head -1 | sed "s/.*words='//;s/'.*//") " " read " "$noun completions omit hidden read"
 done
-if "$LIN" finding read migration-hazard >"$DATA_DIR/retired.out" 2>&1; then
-  fail "finding read must refuse the removed spelling"
-fi
-assert_contains "$(cat "$DATA_DIR/retired.out")" "did you mean 'lll doc view SLUG'?" "finding read names doc view"
+out=$(env LLL_URL=$URL LLL_TEAM=ENG "$LIN" finding read migration-hazard --raw)
+assert_contains "$out" "Migrations are a merge hazard." "finding read reads a finding by slug"
 for noun in issue doc finding member; do
   assert_not_contains "$("$LIN" "$noun" --help)" "the same command as" "canonical help has no duplicate alias rows"
 done
@@ -2140,7 +2149,6 @@ assert_contains "$out" "lll finding near" "finding --help mentions near"
 assert_contains "$out" "lll finding list" "finding --help mentions list"
 # LLL-505: 'finding view' is a hidden alias of 'doc view'. Fleet task 9 had
 # 6/30 agents guess it, so it keeps working; help documents only 'doc view'.
-# 'finding read' was removed at 1.0 (LLL-644) and refuses, naming view.
 assert_not_contains "$out" "lll finding view" "finding --help omits hidden view"
 assert_not_contains "$out" "lll finding read" "finding --help omits hidden read"
 assert_contains "$out" "lll doc view SLUG" "finding --help names doc view"
@@ -2555,6 +2563,32 @@ env $E LLL_TOKEN="$BRYAN_TOK" LLL_ME=bryan "$LIN" issue claim "$CK2" --agent wt-
 out=$(env $E LLL_TOKEN="$BRYAN_TOK" LLL_ME=bryan "$LIN" issue close "$CK2" --agent wt-a)
 assert_contains "$out" "Released bryan (agent wt-a)'s claim; assignee unchanged." "holder close releases the claim"
 env $E "$LIN" issue view "$CK2" --json | python3 -c 'import json,sys; d=json.load(sys.stdin); assert d["state"] == "done"; assert d["claim"] is None; assert d["expand"]["assignee"]["name"] == "bryan"; assert d["comments"] == []'
+# The finish rule (fleet case 07): update --state done|cancelled by the
+# holder releases like close and keeps the assignee; --keep-claim keeps it;
+# a non-holder's move leaves the claim alone; release on a finished issue
+# names both repairs.
+CK3=$(env $E "$LIN" issue create -t "Update finishes" | sed -n 's/^Created \([A-Z]*-[0-9]*\).*/\1/p')
+env $E LLL_TOKEN="$BRYAN_TOK" LLL_ME=bryan "$LIN" issue claim "$CK3" >/dev/null
+out=$(env $E LLL_TOKEN="$BRYAN_TOK" LLL_ME=bryan "$LIN" issue update "$CK3" --state done)
+assert_contains "$out" "Updated $CK3: state=done; released your claim (assignee kept)" "update --state done releases the holder's claim"
+env $E "$LIN" issue view "$CK3" --json | python3 -c 'import json,sys; d=json.load(sys.stdin); assert d["claim"] is None; assert d["assignee_name"] == "bryan"'
+env $E LLL_TOKEN="$BRYAN_TOK" LLL_ME=bryan "$LIN" issue update "$CK3" --state todo >/dev/null
+env $E LLL_TOKEN="$BRYAN_TOK" LLL_ME=bryan "$LIN" issue claim "$CK3" >/dev/null
+out=$(env $E LLL_TOKEN="$BRYAN_TOK" LLL_ME=bryan "$LIN" issue update "$CK3" --state cancelled --keep-claim)
+assert_contains "$out" "state=cancelled; kept your claim" "--keep-claim keeps it on update"
+env $E "$LIN" issue view "$CK3" --json | python3 -c 'import json,sys; d=json.load(sys.stdin); assert d["claim"]["holder"] == "bryan"'
+out=$(env $E LLL_TOKEN="$BRYAN_TOK" LLL_ME=bryan "$LIN" issue release "$CK3")
+assert_contains "$out" "cleared assignee; re-assign with 'lll issue update $CK3 --assignee NAME'" "release on a finished issue names the repair"
+env $E LLL_TOKEN="$BRYAN_TOK" LLL_ME=bryan "$LIN" issue update "$CK3" --state todo >/dev/null
+env $E LLL_TOKEN="$BRYAN_TOK" LLL_ME=bryan "$LIN" issue claim "$CK3" >/dev/null
+out=$(env $E LLL_TOKEN="$CAROL_TOK" LLL_ME=carol "$LIN" issue update "$CK3" --state done)
+assert_contains "$out" "bryan still holds the claim" "a non-holder's update to done names the kept claim"
+env $E "$LIN" issue view "$CK3" --json | python3 -c 'import json,sys; d=json.load(sys.stdin); assert d["state"] == "done"; assert d["claim"]["holder"] == "bryan"'
+set +e
+out=$(env $E "$LIN" issue update "$CK3" --title x --keep-claim 2>&1)
+rc=$?
+set -e
+[ "$rc" -eq 2 ] || fail "--keep-claim without a finishing --state: expected exit 2, got $rc: $out"
 env $E LLL_TOKEN="$BRYAN_TOK" LLL_ME=bryan "$LIN" issue comment "$CKEY" -b 'handoff for carol' >/dev/null
 env $E LLL_TOKEN="$CAROL_TOK" LLL_ME=carol "$LIN" issue comment "$CKEY" -b 'acknowledged' >/dev/null
 env $E "$LIN" issue view "$CKEY" --json | python3 -c 'import json,sys; d=json.load(sys.stdin); assert [(c["body"],c["expand"]["author"]["name"]) for c in d["comments"]] == [("handoff for carol","bryan"),("acknowledged","carol")]'
@@ -2610,7 +2644,7 @@ rc=$?
 set -e
 [ "$rc" -ne 0 ] || fail "an edit with a stale stamp should be refused"
 assert_contains "$out" "changed since $stamp" "the refusal names the stale stamp"
-assert_contains "$out" "issue view $CKEY --json" "and where to read the new one"
+assert_contains "$out" "retry with the current stamp: lll issue update $CKEY --priority 4 --if-unchanged-since" "and the retry, with the current stamp"
 [ "$(env $E "$LIN" issue view "$CKEY" --json | jq -r '.priority')" = 3 ] || fail "the refused edit must not land"
 env $E python3 - "$LIN" "$CKEY" <<'PY'
 import json
@@ -2750,7 +2784,7 @@ out=$(env $E LLL_TOKEN="$BRYAN_TOK" LLL_ME=bryan "$LIN" issue release "$CKEY")
 assert_contains "$out" "Released $CKEY (was bryan's)" "release output"
 assert_contains "$out" "cleared assignee" "release reports assignment removal"
 out=$(env $E "$LIN" issue view "$CKEY")
-assert_not_contains "$out" "Claimed:" "release removes the hold"
+assert_contains "$out" "Claimed:   none" "release removes the hold, and view says so"
 assert_contains "$out" "Assignee:  none" "release clears the assignee the claim set"
 out=$(env $E LLL_TOKEN="$CAROL_TOK" LLL_ME=carol "$LIN" issue claim "$CKEY")
 assert_contains "$out" "Claimed $CKEY for carol" "a released issue can be claimed again"
@@ -3082,6 +3116,7 @@ bot_out=$(env -u LLL_TOKEN HOME="$E2E_HOME" LLL_URL=$URL \
   LLL_ADMIN_EMAIL=admin@local.dev LLL_ADMIN_PASSWORD=admin-local-123 \
   "$LIN" bot bot-e2e --team ENG --duration 3600) || fail "lll bot exited nonzero: $bot_out"
 assert_contains "$bot_out" "created bot member bot-e2e" "bot creates a bot-kind member when missing"
+assert_contains "$bot_out" "re-mint with 'lll bot rotate bot-e2e'" "the bot expiry line names bot rotate (LLL-625)"
 # LLL-546: the token arrives inside the design's agent prompt, once.
 assert_contains "$bot_out" "true 'You are joining lll team ENG at $URL.'" "the bot prompt names the team and server"
 assert_contains "$bot_out" "export LLL_URL=$URL" "the bot prompt exports the server"
@@ -3102,16 +3137,16 @@ assert_contains "$out" "bot bot-e2e already exists" "create refuses an existing 
 assert_contains "$out" "lll bot rotate bot-e2e" "the refusal names bot rotate"
 out=$(LLL_TOKEN="$BOT_TOK" HOME="$E2E_HOME" LLL_URL=$URL "$LIN" whoami)
 assert_contains "$out" "bot-e2e <" "a refused create does not rotate the token"
-# --env: stdout is exactly the two export lines, so it sources cleanly;
-# the progress lines go to stderr.
-bot_err="$DATA_DIR/bot-env.err"
+# --env prints the two export lines and nothing else, on either stream: the
+# 1.0 fleet captured 2>&1, and a status line there broke `source`. So this
+# captures 2>&1 and sources it.
 bot_out=$(env -u LLL_TOKEN -u LLL_TEAM HOME="$E2E_HOME" LLL_URL=$URL \
   LLL_ADMIN_EMAIL=admin@local.dev LLL_ADMIN_PASSWORD=admin-local-123 \
-  "$LIN" bot rotate bot-e2e --env --duration 3600 2>"$bot_err") || fail "lll bot rotate --env exited nonzero"
-assert_contains "$(cat "$bot_err")" "one-time bot token for bot-e2e" "rotate --env reports on stderr"
-assert_contains "$(cat "$bot_err")" "re-mint with 'lll bot rotate bot-e2e'" "the bot expiry line names bot rotate (LLL-625)"
+  "$LIN" bot rotate bot-e2e --env --duration 3600 2>&1) || fail "lll bot rotate --env exited nonzero"
 [ "$(printf '%s\n' "$bot_out" | wc -l | tr -d ' ')" = 2 ] || fail "lll bot --env printed more than the export lines: $bot_out"
-BOT_TOK=$( (eval "$bot_out"; printf '%s' "$LLL_TOKEN") )
+printf '%s\n' "$bot_out" > "$DATA_DIR/bot.env"
+BOT_TOK=$( (set -e; . "$DATA_DIR/bot.env"; printf '%s' "$LLL_TOKEN") ) || fail "the 2>&1 capture of bot --env does not source"
+[ -n "$BOT_TOK" ] || fail "sourcing bot --env set no LLL_TOKEN"
 out=$(LLL_TOKEN="$BOT_TOK" HOME="$E2E_HOME" LLL_URL=$URL "$LIN" whoami)
 assert_contains "$out" "bot-e2e <" "the --env exports carry the rotated bot token"
 # The prompt's team must exist and be visible; the refusal comes before

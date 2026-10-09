@@ -39,7 +39,7 @@ pub fn login_spec() -> Slice<flags.Flag> {
       name: "--password",
       value: true,
       hint: "pw",
-      help: "password; omit to be prompted (a terminal reads it with echo off)",
+      help: "password; '-' reads it from stdin; omit to be prompted (a terminal\nreads it with echo off)",
       ..,
     },
     flags.Flag {
@@ -111,7 +111,7 @@ pub fn login(ctx: pb.Client, args: Slice<string>) -> Result<(), pb.CliError> {
   let target = strings.TrimSuffix(strings.TrimSpace(p.one("--url")), "/")
   if p.given("--url") && !strings.HasPrefix(target, "http://") && !strings.HasPrefix(target, "https://") {
     return Err(
-      pb.failed("--url must be a full base url starting with http:// or https:// (e.g. https://tracker.example.com)"),
+      flags.usage_error("--url must be a full base url starting with http:// or https:// (e.g. https://tracker.example.com)"),
     )
   }
   if let Some(why) = login_target_conflict(target, saved_before_login.url, before_login.url) {
@@ -123,7 +123,7 @@ pub fn login(ctx: pb.Client, args: Slice<string>) -> Result<(), pb.CliError> {
   let mut input = bufio.NewReader(os.Stdin)
   if p.given("--token") {
     if p.given("--email") || p.given("--password") || p.given("--create") {
-      return Err(pb.failed("--token logs in with a member token: drop --email, --password and --create"))
+      return Err(flags.usage_error("--token logs in with a member token: drop --email, --password and --create"))
     }
     let raw = p.one("--token")
     let given = if raw == "-" { read_password(input, "Token: ")? } else { raw }
@@ -162,7 +162,7 @@ pub fn login(ctx: pb.Client, args: Slice<string>) -> Result<(), pb.CliError> {
     f"Password for {email}: "
   }
   let password = if p.given("--password") {
-    p.one("--password")
+    password_value(p.one("--password"), "--password", prompt, input)?
   } else {
     read_password(input, prompt)?
   }
@@ -253,7 +253,7 @@ would put a second account on that address. --create makes YOUR login: pass
 /// superuser token, a revoked one or a typo stops here instead of being saved.
 fn token_identity(ctx: pb.Client, tok: string) -> Result<(string, bool), pb.CliError> {
   if tok == "" {
-    return Err(pb.failed("--token needs a member token: paste it after --token, or pass --token - and pipe it in"))
+    return Err(flags.usage_error("--token needs a member token: paste it after --token, or pass --token - and pipe it in"))
   }
   let body = match ctx.get_as("/api/lll/access", tok) {
     Ok(b) => b,
@@ -591,7 +591,7 @@ pub fn logout(ctx: pb.Client, args: Slice<string>) -> Result<(), pb.CliError> {
       print_logout_usage()
       return Ok(())
     }
-    return Err(pb.failed(f"unknown logout command: '{verb}' (see 'lll logout --help')"))
+    return Err(flags.usage_error(f"unknown logout command: '{verb}' (see 'lll logout --help')"))
   }
   let path = ctx.settings.home_path().map_err(pb.failed)?
   let cleared = clear_home_key(ctx.settings, "token")?
@@ -621,6 +621,23 @@ fn read_password(input: mut Ref<bufio.Reader>, prompt: string) -> Result<string,
   }
   let line = read_line(input)?
   fmt.Println("")
+  Ok(line)
+}
+
+/// A password flag's value; '-' reads one line from stdin, the Unix
+/// convention (two 1.0 agents logged in with the literal password "-").
+/// On a terminal '-' prompts with `prompt` and echo off, as read_password
+/// does: a plain line read there echoed the secret. Piped stdin that is
+/// empty is a usage error naming `flag`, whichever command reads it.
+fn password_value(raw: string, flag: string, prompt: string, input: mut Ref<bufio.Reader>) -> Result<string, pb.CliError> {
+  if raw != "-" { return Ok(raw) }
+  if term.IsTerminal(os.Stdin.Fd() as int) { return read_password(input, prompt) }
+  let line = match input.ReadString(10 as byte) {
+    Partial.Ok(l) => strip_eol(l),
+    Partial.Both(l, _) => strip_eol(l),
+    Partial.Err(_) => "",
+  }
+  if line == "" { return Err(flags.usage_error(f"{flag} -: stdin was empty")) }
   Ok(line)
 }
 
