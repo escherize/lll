@@ -503,6 +503,11 @@ pub fn dispatch(
     if !verb.starts_with("-") && top_level_commands().contains(verb) {
       return Err(usage_error(f"unknown {noun} command: '{verb}'; did you mean 'lll {verb}'? (see 'lll {noun} --help')"))
     }
+    // A read verb this noun lacks, beside a list it has: two final-replay
+    // agents guessed `config view` (1.0 fleet case 04).
+    if ["view", "show", "read", "ls"].contains(verb) && cmds.any(|c| c.name == "list") {
+      return Err(usage_error(f"unknown {noun} command: '{verb}'; did you mean 'lll {noun} list'? (see 'lll {noun} --help')"))
+    }
     return Err(usage_error(f"unknown {noun} command: '{verb}' (see 'lll {noun} --help')"))
   }
   // A verb with its own page answers --help with it; the generic parse-time

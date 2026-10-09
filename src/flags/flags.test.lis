@@ -677,3 +677,15 @@ fn the_url_default_hint_follows_where_the_url_came_from() {
     assert url_default_hint(source) == want
   }
 }
+
+/// Final 1.0 replay, case 04: two agents guessed `config view`. A read verb a
+/// noun lacks points at its list; a noun without list gets no guess.
+#[test]
+fn a_read_verb_the_noun_lacks_points_at_its_list() {
+  let listing = [Command { name: "list", summary: "list", page: "", spec: [], run: |_| Ok(output.none()), .. }]
+  let assert Err(e) = dispatch(test_ctx(), "config", "", "", listing, ["lll", "config", "view"])
+  assert e.message.contains("did you mean 'lll config list'?")
+  let other = [Command { name: "set", summary: "set", page: "", spec: [], run: |_| Ok(output.none()), .. }]
+  let assert Err(bare) = dispatch(test_ctx(), "test", "", "", other, ["lll", "test", "view"])
+  assert !bare.message.contains("did you mean")
+}
