@@ -114,6 +114,9 @@ pub fn login(ctx: pb.Client, args: Slice<string>) -> Result<(), pb.CliError> {
       flags.usage_error("--url must be a full base url starting with http:// or https:// (e.g. https://tracker.example.com)"),
     )
   }
+  if let Some(why) = login_needs_url(target, before_login.url, before_sources.url, saved_before_login.url) {
+    return Err(flags.usage_error(why))
+  }
   if let Some(why) = login_target_conflict(target, saved_before_login.url, before_login.url) {
     return Err(pb.failed(why))
   }
@@ -276,6 +279,22 @@ fn token_identity(ctx: pb.Client, tok: string) -> Result<(string, bool), pb.CliE
     return Err(pb.failed("the server answered, but not with a member: is --url this board's address?"))
   }
   Ok((reply.name, !reply.access().mode.writes()))
+}
+
+/// Pure. Why a login without --url must name its server, or None (LLL-688).
+/// A url from a repo file or the environment was chosen by whoever wrote
+/// it, maybe a cloned repo's author: a password or token typed here would
+/// go to that server. The home config's own url, or the same url byte for
+/// byte, was the user's choice.
+fn login_needs_url(target: string, url: string, source: Option<config.Source>, home_url: string) -> Option<string> {
+  if target != "" || url == home_url { return None }
+  let who = match source {
+    Some(config.Source.RepoFile(path)) => path,
+    Some(config.Source.Env(name)) => name,
+    Some(config.Source.Flag(_)) | Some(config.Source.HomeFile(_)) | Some(config.Source.Default) | None => return None,
+  }
+  Some(f"{who} sets url = {url}; 'lll login' sends your credentials only to a server you name
+to log in there: lll login --url {url} ...")
 }
 
 /// Pure. Why a login without --url must not run, or None (LLL-680). A login
