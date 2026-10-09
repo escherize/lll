@@ -1,7 +1,6 @@
 import "display"
 import "records"
 import "go:encoding/json"
-import "go:fmt"
 import "go:strings"
 
 import "models"
@@ -27,7 +26,7 @@ pub fn label_commands() -> Slice<flags.Command> {
       name: "list",
       summary: "list labels (name, color, team); this team's, or every team's when none is configured",
       spec: label_list_spec(),
-      run: |i| printed(label_list(i)),
+      run: label_list,
       ..
     },
     flags.Command {
@@ -36,7 +35,7 @@ pub fn label_commands() -> Slice<flags.Command> {
       page: label_create_page(),
       spec: label_create_spec(),
       positional: "[NAME]",
-      run: |i| printed(label_create(i)),
+      run: label_create,
       ..
     },
     flags.Command {
@@ -45,7 +44,7 @@ pub fn label_commands() -> Slice<flags.Command> {
       summary: "rename or recolor a label; the label keeps its issues",
       spec: label_edit_spec(),
       positional: "NAME",
-      run: |i| printed(label_edit(i)),
+      run: label_edit,
       ..
     },
     flags.Command {
@@ -53,7 +52,7 @@ pub fn label_commands() -> Slice<flags.Command> {
       summary: "move a label to another team; refuses while issues outside it still carry the label",
       spec: label_move_spec(),
       positional: "NAME",
-      run: |i| printed(label_move(i)),
+      run: label_move,
       ..
     },
     flags.Command {
@@ -61,27 +60,28 @@ pub fn label_commands() -> Slice<flags.Command> {
       summary: "delete a label; refuses while issues still carry it, and --force drops it off all of them",
       spec: label_delete_spec(),
       positional: "NAME",
-      run: |i| printed(label_delete(i)),
+      run: label_delete,
       ..
     },
   ]
 }
 
-fn label_list(input: flags.CommandInput) -> Result<(), pb.CliError> {
+fn label_list(input: flags.CommandInput) -> Result<output.Output, pb.CliError> {
   let ctx = input.ctx
   let p = input.parsed
   // Scoped when a team is configured, every team's when not: a label belongs
   // to one team (TASK-173), so the unscoped list is an admin's view, not a
   // working one.
   let labels = models.LabelList { items: records.fetch_labels(ctx, configured_scope(ctx)?)? }
-  if p.given("--json") { return print_list_json(labels.items, whole_list(labels.items.length()), "label list") }
-  if labels.items.is_empty() { return say_empty("labels") }
+  if p.given("--json") { return list_json(labels.items, whole_list(labels.items.length()), "label list") }
+  if labels.items.is_empty() { return Ok(empty_list("labels")) }
+  let mut out = output.none()
   for l in labels.items {
     let mut team = l.expand.team.key
     if team == "" { team = "workspace" }
-    fmt.Println(f"{display.table_cell(l.name)}\t{display.table_cell(l.color)}\t{display.table_cell(team)}")
+    out = out.line(f"{display.table_cell(l.name)}\t{display.table_cell(l.color)}\t{display.table_cell(team)}")
   }
-  Ok(())
+  Ok(out)
 }
 
 fn label_list_spec() -> Slice<flags.Flag> {
@@ -135,7 +135,7 @@ fn label_create_page() -> string {
   f"usage: {label_create_usage()}" + flags.section(label_create_spec())
 }
 
-fn label_create(input: flags.CommandInput) -> Result<(), pb.CliError> {
+fn label_create(input: flags.CommandInput) -> Result<output.Output, pb.CliError> {
   let ctx = input.ctx
   let spec = label_create_spec()
   // The check-first note rides the usage string (TASK-208), so every surface
@@ -154,15 +154,11 @@ fn label_create(input: flags.CommandInput) -> Result<(), pb.CliError> {
   if let Err(e) = json.Unmarshal(body.bytes(), &created) {
     return Err(pb.failed(f"decoding created label: {e}"))
   }
-  if p.given("--json") {
-    fmt.Println(contract_json(body.bytes() as json.RawMessage, 0) as string)
-    return Ok(())
-  }
-  fmt.Println(f"Created label {created.name}")
-  Ok(())
+  if p.given("--json") { return Ok(json_body(body)) }
+  Ok(output.line(f"Created label {created.name}"))
 }
 
-fn label_edit(input: flags.CommandInput) -> Result<(), pb.CliError> {
+fn label_edit(input: flags.CommandInput) -> Result<output.Output, pb.CliError> {
   let ctx = input.ctx
   let usage = input.usage
   let p = input.parsed
@@ -179,19 +175,17 @@ fn label_edit(input: flags.CommandInput) -> Result<(), pb.CliError> {
   if p.given("-n") { patch.name = Some(p.one("-n")) }
   if p.given("-c") { patch.color = Some(p.one("-c")) }
   writes.update_label(ctx, label.id, patch)?
-  if p.given("--json") { return print_record_after(ctx, "labels", label.id.string()) }
+  if p.given("--json") { return record_after(ctx, "labels", label.id.string()) }
   // A rename names both, so the line does not report the old name as current
   // (1.0 fleet, case 09).
   if p.given("-n") && p.one("-n") != label.name {
-    fmt.Println(f"Renamed label {label.name} -> {p.one("-n")}")
-  } else {
-    fmt.Println(f"Updated label {name}")
+    return Ok(output.line(f"Renamed label {label.name} -> {p.one("-n")}"))
   }
-  Ok(())
+  Ok(output.line(f"Updated label {name}"))
 }
 
 /// Delete only after counting references; the web shares the same count policy.
-fn label_delete(input: flags.CommandInput) -> Result<(), pb.CliError> {
+fn label_delete(input: flags.CommandInput) -> Result<output.Output, pb.CliError> {
   let ctx = input.ctx
   let usage = input.usage
   let p = input.parsed
@@ -207,14 +201,13 @@ fn label_delete(input: flags.CommandInput) -> Result<(), pb.CliError> {
     return Err(aborted())
   }
   writes.delete_label(ctx, label.id)?
-  fmt.Println(deleted_line("label", name, used))
-  Ok(())
+  Ok(output.line(deleted_line("label", name, used)))
 }
 
 /// `lll label move NAME --to KEY` (LLL-100). A label created in the wrong
 /// team could only be deleted and remade before this, which loses every issue
 /// that carried it.
-fn label_move(input: flags.CommandInput) -> Result<(), pb.CliError> {
+fn label_move(input: flags.CommandInput) -> Result<output.Output, pb.CliError> {
   let ctx = input.ctx
   let usage = input.usage
   let p = input.parsed
@@ -225,9 +218,8 @@ fn label_move(input: flags.CommandInput) -> Result<(), pb.CliError> {
   let to = writes.move_destination(ctx, p.one("--to"))?
   let label = records.resolve_label(ctx, from.id, name)?
   let moved = writes.move_to_team(ctx, records.Classifier.Label(label.id), label.name, from, to)?
-  if p.given("--json") { return print_record_after(ctx, "labels", label.id.string()) }
-  fmt.Println(moved)
-  Ok(())
+  if p.given("--json") { return record_after(ctx, "labels", label.id.string()) }
+  Ok(output.line(moved))
 }
 
 /// The positional argument, or None when it was absent or blank. `flags`

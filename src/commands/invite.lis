@@ -1,5 +1,4 @@
 import "go:encoding/json"
-import "go:fmt"
 import "go:strings"
 
 import "flags"
@@ -30,7 +29,7 @@ pub fn invite_commands() -> Slice<flags.Command> {
       name: "create",
       summary: "print a single-use link that lets one person join with these teams",
       spec: invite_create_spec(),
-      run: |i| printed(invite_create(i)),
+      run: invite_create,
       ..,
     },
   ]
@@ -80,7 +79,7 @@ struct InviteResponse { code: string, expires: string }
 #[json]
 struct InviteJson { url: string, code: string, expires: string, mode: string, teams: Slice<string> }
 
-fn invite_create(input: flags.CommandInput) -> Result<(), pb.CliError> {
+fn invite_create(input: flags.CommandInput) -> Result<output.Output, pb.CliError> {
   let ctx = input.ctx
   let p = input.parsed
   let keys = p.all("--team").map(records.normalize_team_key).filter(|k| k != "")
@@ -105,12 +104,12 @@ fn invite_create(input: flags.CommandInput) -> Result<(), pb.CliError> {
   }
   if made.code == "" { return Err(pb.failed("the server returned no invite code")) }
   if p.given("--json") {
-    return print_json(InviteJson { url: f"{base}/join/{made.code}", code: made.code, expires: made.expires, mode: mode.wire(), teams: keys }, "invite")
+    return json_value(InviteJson { url: f"{base}/join/{made.code}", code: made.code, expires: made.expires, mode: mode.wire(), teams: keys }, "invite")
   }
-  fmt.Println(f"{base}/join/{made.code}")
   let access = if mode.writes() { "read-write" } else { "read-only" }
-  status(
-    f"single-use invite: {access}, {strings.Join(keys, ", ")}; expires {made.expires}. Send the link to one person; it is shown only here",
+  Ok(
+    output.line(f"{base}/join/{made.code}").notice(
+      f"single-use invite: {access}, {strings.Join(keys, ", ")}; expires {made.expires}. Send the link to one person; it is shown only here",
+    ),
   )
-  Ok(())
 }

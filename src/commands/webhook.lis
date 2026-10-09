@@ -2,7 +2,6 @@ import "records"
 import "go:bufio"
 import "go:crypto/rand"
 import "go:encoding/json"
-import "go:fmt"
 import "go:net/url"
 import "go:os"
 import "go:strings"
@@ -56,14 +55,14 @@ pub fn webhook_commands() -> Slice<flags.Command> {
       summary: "register a URL that receives this team's issue events, or one project's with --project",
       spec: webhook_add_spec(),
       positional: "URL",
-      run: |i| printed(webhook_add(i)),
+      run: webhook_add,
       ..
     },
     flags.Command {
       name: "list",
       summary: "list this team's registrations: scope, URL, whether a secret is set",
       spec: webhook_list_spec(),
-      run: |i| printed(webhook_list(i)),
+      run: webhook_list,
       ..
     },
     flags.Command {
@@ -71,7 +70,7 @@ pub fn webhook_commands() -> Slice<flags.Command> {
       summary: "delete a registration by its URL; --project picks between the same URL at both scopes",
       spec: webhook_remove_spec(),
       positional: "URL",
-      run: |i| printed(webhook_remove(i)),
+      run: webhook_remove,
       ..
     },
   ]
@@ -94,7 +93,7 @@ fn webhook_remove_spec() -> Slice<flags.Flag> {
   ])
 }
 
-fn webhook_add(input: flags.CommandInput) -> Result<(), pb.CliError> {
+fn webhook_add(input: flags.CommandInput) -> Result<output.Output, pb.CliError> {
   let ctx = input.ctx
   let p = input.parsed
   let raw = p.first()
@@ -138,20 +137,21 @@ fn webhook_add(input: flags.CommandInput) -> Result<(), pb.CliError> {
   if let Err(e) = json.Unmarshal(body.bytes(), &created) {
     return Err(pb.failed(f"decoding created webhook: {e}"))
   }
+  let mut out = output.none()
   // The generated case is checked first: a server older than LLL-661
   // returns no secret_set, and the generated secret must still be shown once.
   if chosen.is_none() {
-    fmt.Println(f"Registered webhook {target} ({scope}); deliveries carry X-LLL-Secret: {value}")
-    fmt.Println("Save this secret now: lll will not show it again.")
+    out = out.line(f"Registered webhook {target} ({scope}); deliveries carry X-LLL-Secret: {value}")
+    out = out.line("Save this secret now: lll will not show it again.")
   } else if chosen.map_or(false, |s| s.is_empty()) {
-    fmt.Println(f"Registered webhook {target} ({scope})")
+    out = out.line(f"Registered webhook {target} ({scope})")
   } else {
-    fmt.Println(f"Registered webhook {target} ({scope}); deliveries carry X-LLL-Secret")
+    out = out.line(f"Registered webhook {target} ({scope}); deliveries carry X-LLL-Secret")
   }
-  Ok(())
+  Ok(out)
 }
 
-fn webhook_list(input: flags.CommandInput) -> Result<(), pb.CliError> {
+fn webhook_list(input: flags.CommandInput) -> Result<output.Output, pb.CliError> {
   let ctx = input.ctx
   let p = input.parsed
   let team = team_flag_or_current(ctx, p.one("--team"))?
@@ -163,15 +163,16 @@ fn webhook_list(input: flags.CommandInput) -> Result<(), pb.CliError> {
     )?,
     ..
   }
-  if p.given("--json") { return print_list_json(hooks.items, whole_list(hooks.items.length()), "webhook list") }
-  if hooks.items.is_empty() { return say_empty("webhooks") }
+  if p.given("--json") { return list_json(hooks.items, whole_list(hooks.items.length()), "webhook list") }
+  if hooks.items.is_empty() { return Ok(empty_list("webhooks")) }
+  let mut out = output.none()
   for h in hooks.items {
-    fmt.Println(f"{scope_label(h)}\t{h.url}\t{secret_state(h.secret_set)}")
+    out = out.line(f"{scope_label(h)}\t{h.url}\t{secret_state(h.secret_set)}")
   }
-  Ok(())
+  Ok(out)
 }
 
-fn webhook_remove(input: flags.CommandInput) -> Result<(), pb.CliError> {
+fn webhook_remove(input: flags.CommandInput) -> Result<output.Output, pb.CliError> {
   let ctx = input.ctx
   let usage = input.usage
   let p = input.parsed
@@ -203,8 +204,7 @@ fn webhook_remove(input: flags.CommandInput) -> Result<(), pb.CliError> {
   }
   let victim = matches.items[0]
   writes.delete_webhook(ctx, victim.id)?
-  fmt.Println(f"Removed webhook {target} ({scope})")
-  Ok(())
+  Ok(output.line(f"Removed webhook {target} ({scope})"))
 }
 
 /// The filter naming one registration exactly: team, URL, and project when

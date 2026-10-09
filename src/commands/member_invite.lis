@@ -1,7 +1,6 @@
 import "go:bufio"
 import "go:crypto/rand"
 import "go:encoding/json"
-import "go:fmt"
 import "go:net/url"
 import "go:os"
 import "go:path/filepath"
@@ -12,6 +11,7 @@ import "go:time"
 import "config"
 import "flags"
 import "models"
+import "output"
 import "pb"
 import "query"
 import "records"
@@ -119,7 +119,7 @@ the error names the partial file and the exact number completed." +
 /// in days. Nothing here is new machinery; it is create_member and the same
 /// superuser gate set-password runs, plus the part that actually got skipped —
 /// telling the inviter the literal lines to paste to the colleague.
-fn member_invite(input: flags.CommandInput) -> Result<(), pb.CliError> {
+fn member_invite(input: flags.CommandInput) -> Result<output.Output, pb.CliError> {
   let ctx = input.ctx
   let usage = input.usage
   let p = input.parsed
@@ -161,14 +161,19 @@ fn member_invite(input: flags.CommandInput) -> Result<(), pb.CliError> {
   if keys.is_empty() && !mode.writes() {
     return Err(flags.usage_error("--read-only needs --team KEY: say which teams they may read"))
   }
+  // A line for the inviter, not the colleague, is a notice: stderr, so that
+  // 'lll member invite ... > handoff.txt' captures exactly what to send
+  // (fleet case 11: 8 of 10 agents retyped the handoff, password included,
+  // because the status lines were mixed into it).
+  let mut out = output.none()
   if keys.is_empty() {
     let created = create_member_as(ctx, su, name, email, password, [], None)?
-    status(f"invited {created.name} <{email}>: {describe_access(models.Access { reach: models.Reach.Every, mode: models.Mode.ReadWrite }, [])}")
-    status("send them this (below, on stdout); the password is shown once and stored nowhere")
+    out = out.notice(f"invited {created.name} <{email}>: {describe_access(models.Access { reach: models.Reach.Every, mode: models.Mode.ReadWrite }, [])}")
+    out = out.notice("send them this (below, on stdout); the password is shown once and stored nowhere")
     for line in invite_lines(created.name, email, password, base, cfg.team) {
-      fmt.Println(line)
+      out = out.line(line)
     }
-    return Ok(())
+    return Ok(out)
   }
 
   // A scoped invite (--team): the member record carries the scope, so the
@@ -182,19 +187,19 @@ fn member_invite(input: flags.CommandInput) -> Result<(), pb.CliError> {
     team_ids = team_ids.append(team.id)
   }
   let created = create_member_as(ctx, su, name, email, password, team_ids, Some(mode))?
-  status(f"invited {created.name} <{email}>: {describe_access(models.Access { reach: models.Reach.Teams(team_ids), mode }, keys)}")
-  status("send them this (below, on stdout); the password is shown once and stored nowhere")
+  out = out.notice(f"invited {created.name} <{email}>: {describe_access(models.Access { reach: models.Reach.Teams(team_ids), mode }, keys)}")
+  out = out.notice("send them this (below, on stdout); the password is shown once and stored nowhere")
   for line in invite_lines(created.name, email, password, base, keys[0]) {
-    fmt.Println(line)
+    out = out.line(line)
   }
-  fmt.Println("")
+  out = out.line("")
   for key in keys {
     match scoped_board_link(ctx, cfg.web_url, key) {
-      Some(link) => fmt.Println(f"  view-only web board for {key} (separate from their CLI access; stops working when the server's LLL_BOARD_TOKEN changes): {link}"),
-      None => status(f"no web board link for {key}: run this invite on the machine running 'lll up' to print one"),
+      Some(link) => out = out.line(f"  view-only web board for {key} (separate from their CLI access; stops working when the server's LLL_BOARD_TOKEN changes): {link}"),
+      None => out = out.notice(f"no web board link for {key}: run this invite on the machine running 'lll up' to print one"),
     }
   }
-  Ok(())
+  Ok(out)
 }
 
 /// Every team key, comma-joined, for an unknown-team refusal (fleet case
@@ -247,7 +252,7 @@ fn known_board_token(ctx: pb.Client, base: string) -> Option<string> {
 /// A single private handoff for a group. The file is reserved before the
 /// first member is created, then each minted credential is appended. A failed
 /// later step leaves the exact completed subset in that file for recovery.
-fn member_passes(input: flags.CommandInput) -> Result<(), pb.CliError> {
+fn member_passes(input: flags.CommandInput) -> Result<output.Output, pb.CliError> {
   let ctx = input.ctx
   let p = input.parsed
   let count = if p.one("--count") == "" {
@@ -394,13 +399,13 @@ fn member_passes(input: flags.CommandInput) -> Result<(), pb.CliError> {
   if let Err(e) = file.Close() {
     return Err(pb.failed(f"closing private handoff file {out}: {e}"))
   }
-  fmt.Println(
+  let mut out = output.line(
     f"created {completed} distinct human credentials in {out} (mode 0600)",
   )
-  fmt.Println(
+  out = out.line(
     "send each person only their block; the board login link works on the selected LAN or Tailscale IP",
   )
-  Ok(())
+  Ok(out)
 }
 
 /// The literal text the inviter forwards: the temp password, then the two

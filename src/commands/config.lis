@@ -1,4 +1,3 @@
-import "go:fmt"
 import "go:encoding/json"
 import "go:net/url"
 import "go:os"
@@ -32,7 +31,7 @@ pub fn config_commands() -> Slice<flags.Command> {
       hidden_alias: "show",
       summary: "every effective value and the file it came from",
       spec: [flags.Flag { name: "--json", help: "print the values as a JSON list of key, value and source", .. }],
-      run: |i| printed(config_list(i)),
+      run: config_list,
       ..
     },
     flags.Command {
@@ -40,21 +39,21 @@ pub fn config_commands() -> Slice<flags.Command> {
       summary: "print one effective value: url, web_url, team or sort",
       spec: [],
       positional: "KEY",
-      run: |i| printed(config_get(i)),
+      run: config_get,
       ..,
     },
     flags.Command {
       name: "check",
       summary: "check the configured lll server API",
       spec: [],
-      run: |i| printed(config_check(i)),
+      run: config_check,
       ..
     },
     flags.Command {
       name: "init",
       summary: "write a commented .lll.toml template to the current directory",
       spec: [],
-      run: |i| printed(config_init(i)),
+      run: config_init,
       ..
     },
     flags.Command {
@@ -62,7 +61,7 @@ pub fn config_commands() -> Slice<flags.Command> {
       summary: "save url or web_url in ~/.config/lll/lll.toml",
       spec: [],
       positional: "<url|web_url> VALUE",
-      run: |i| printed(config_set(i)),
+      run: config_set,
       ..
     },
   ]
@@ -94,7 +93,7 @@ fn token_save_hint() -> string {
 }
 
 /// Set a machine-level endpoint, without changing repo config.
-fn config_set(input: flags.CommandInput) -> Result<(), pb.CliError> {
+fn config_set(input: flags.CommandInput) -> Result<output.Output, pb.CliError> {
   let ctx = input.ctx
   let usage = "usage: lll config set <url|web_url> VALUE"
   // 1.0 fleet: three agents concluded LLL_TOKEN or a hand edit were the only
@@ -106,18 +105,19 @@ fn config_set(input: flags.CommandInput) -> Result<(), pb.CliError> {
   let key = input.parsed.first()
   let value = strings.TrimSpace(input.parsed.nth(1))
   if value == "" { return Err(flags.usage_error(usage)) }
+  let mut out = output.none()
   if key == "url" || key == "web_url" {
     let endpoint = checked_endpoint(key, value)?
     let path = set_home_key(ctx.settings, key, endpoint)?
-    fmt.Println(f"{key} = {endpoint} in {path}")
+    out = out.line(f"{key} = {endpoint} in {path}")
     // Re-read: the file just changed, and the note is about what wins now.
     let (cfg, src) = ctx.settings.reload().traced().map_err(pb.failed)?
     let effective = if key == "url" { cfg.url } else { cfg.web_url }
     let origin = if key == "url" { src.url } else { src.web_url }
     if effective != endpoint {
-      fmt.Println(f"note: {config.origin(origin)} overrides this setting; 'lll config list' shows the effective configuration")
+      out = out.line(f"note: {config.origin(origin)} overrides this setting; 'lll config list' shows the effective configuration")
     }
-    return Ok(())
+    return Ok(out)
   }
   Err(flags.usage_error(f"cannot set '{key}'; supported keys: url, web_url"))
 }
@@ -250,7 +250,7 @@ fn write_home_config(link: string, out: string) -> Result<(), pb.CliError> {
 /// `git config --list --show-origin`. The failure this answers is silent: a
 /// repo reading the wrong team lists the wrong issues and reports nothing, so
 /// being able to ask which file won is the whole debugging affordance.
-fn config_list(input: flags.CommandInput) -> Result<(), pb.CliError> {
+fn config_list(input: flags.CommandInput) -> Result<output.Output, pb.CliError> {
   let ctx = input.ctx
   let (cfg, src) = ctx.settings.traced().map_err(pb.failed)?
   if input.parsed.given("--json") {
@@ -263,21 +263,21 @@ fn config_list(input: flags.CommandInput) -> Result<(), pb.CliError> {
       ConfigValue { key: "web_url", value: cfg.web_url, source: config.origin(src.web_url) },
       ConfigValue { key: "token", value: tok, source: config.origin(src.token) },
     ]
-    return print_list_json(values, whole_list(values.length()), "config")
+    return list_json(values, whole_list(values.length()), "config")
   }
-  print_origin(src.url, "url", cfg.url)
-  print_origin(src.team, "team", cfg.team)
-  print_origin(src.sort, "sort", cfg.sort)
-  print_origin(src.web_url, "web_url", cfg.web_url)
+  let mut out = output.line(origin_line(src.url, "url", cfg.url))
+    .line(origin_line(src.team, "team", cfg.team))
+    .line(origin_line(src.sort, "sort", cfg.sort))
+    .line(origin_line(src.web_url, "web_url", cfg.web_url))
   // The token is a secret, so --list answers where it came from, never what
   // it is. The origin column is the debugging affordance; the value would
   // only leak into terminals and scrollback.
   let tok = if cfg.token == "" { "" } else { "••••" }
-  print_origin(src.token, "token", tok)
+  out = out.line(origin_line(src.token, "token", tok))
   if let Some(warning) = committed_token_warning(ctx, src.token) {
-    fmt.Println(warning)
+    out = out.line(warning)
   }
-  Ok(())
+  Ok(out)
 }
 
 /// One `config list --json` item. `source` is "" when the key is unset.
@@ -286,7 +286,7 @@ struct ConfigValue { key: string, value: string, source: string }
 
 /// `lll config get KEY` — the effective value alone, for a script to read.
 /// The token is a secret, so it is refused here as in `config list`.
-fn config_get(input: flags.CommandInput) -> Result<(), pb.CliError> {
+fn config_get(input: flags.CommandInput) -> Result<output.Output, pb.CliError> {
   let ctx = input.ctx
   let key = input.parsed.first()
   if key == "" { return Err(flags.usage_error(f"usage: {input.usage}")) }
@@ -304,8 +304,7 @@ fn config_get(input: flags.CommandInput) -> Result<(), pb.CliError> {
     ),
   }
   if origin.is_none() { return Err(pb.failed(f"{key} is not set (see 'lll config list')")) }
-  fmt.Println(value)
-  Ok(())
+  Ok(output.line(value))
 }
 
 /// `lll config check` — one line saying whether the configured url answers as
@@ -315,19 +314,20 @@ fn config_get(input: flags.CommandInput) -> Result<(), pb.CliError> {
 /// /api/health is the endpoint because it needs no auth and no collection, so
 /// a failure here is about reachability alone.
 /// `_args` is unread: dispatch already parsed it (TASK-307).
-fn config_check(input: flags.CommandInput) -> Result<(), pb.CliError> {
+fn config_check(input: flags.CommandInput) -> Result<output.Output, pb.CliError> {
   let ctx = input.ctx
   let (cfg, src) = ctx.settings.traced().map_err(pb.failed)?
+  let mut out = output.none()
   match ctx.get("/api/health") {
-    Ok(_) => fmt.Println(f"ok\t{cfg.url} answers as an lll server"),
+    Ok(_) => out = out.line(f"ok\t{cfg.url} answers as an lll server"),
     // The error already names the url, the status, and (for a board-shaped
     // 404) the port hint from pb.read_body. Prefixing it is all that is left.
     Err(e) => return Err(e.with_message(f"{cfg.url} is not a reachable lll server API: {e.message}")),
   }
   if let Some(warning) = committed_token_warning(ctx, src.token) {
-    fmt.Println(warning)
+    out = out.line(warning)
   }
-  Ok(())
+  Ok(out)
 }
 
 /// The warning for a token that came from a repo `.lll.toml`, else None.
@@ -348,14 +348,14 @@ fn committed_token_warning(ctx: pb.Client, source: Option<config.Source>) -> Opt
   )
 }
 
-fn print_origin(source: Option<config.Source>, key: string, value: string) {
+fn origin_line(source: Option<config.Source>, key: string, value: string) -> string {
   let from = if source.is_none() { "unset" } else { config.origin(source) }
   let role = match key {
     "url" => "\tAPI base (reads and writes)",
     "web_url" => "\tboard base (browser links)",
     _ => "",
   }
-  fmt.Println(f"{from}\t{key}={value}{role}")
+  f"{from}\t{key}={value}{role}"
 }
 
 /// True for an uncommented `key = ...` line. The commented keys the template
@@ -367,7 +367,7 @@ fn assigns(line: string, key: string) -> bool {
 }
 
 /// `lll config init`. `_args` is unread: dispatch already parsed it (TASK-307).
-fn config_init(_input: flags.CommandInput) -> Result<(), pb.CliError> {
+fn config_init(_input: flags.CommandInput) -> Result<output.Output, pb.CliError> {
   if os.Stat(".lll.toml").is_ok() {
     return Err(pb.failed(".lll.toml already exists; not overwriting"))
   }
@@ -403,8 +403,7 @@ fn config_init(_input: flags.CommandInput) -> Result<(), pb.CliError> {
   if let Err(e) = os.WriteFile(".lll.toml", template.bytes(), 0o644) {
     return Err(pb.failed(f"writing .lll.toml: {e}"))
   }
-  fmt.Println("Wrote .lll.toml")
-  Ok(())
+  Ok(output.line("Wrote .lll.toml"))
 }
 
 /// API and board base URLs must be explicit HTTP(S) endpoints, with no credentials.

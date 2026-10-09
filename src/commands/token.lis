@@ -2,7 +2,6 @@ import "records"
 import "go:bufio"
 import "go:encoding/json"
 import "go:os"
-import "go:fmt"
 import "go:regexp"
 import "go:strconv"
 import "go:strings"
@@ -47,7 +46,7 @@ pub fn token_commands() -> Slice<flags.Command> {
       page: token_create_page(),
       spec: token_create_spec(),
       positional: "<member>",
-      run: |i| printed(token_create(i)),
+      run: token_create,
       ..
     },
   ]
@@ -89,7 +88,7 @@ fn parse_token_duration(raw: string) -> Result<int, pb.CliError> {
   Ok(d)
 }
 
-fn token_create(input: flags.CommandInput) -> Result<(), pb.CliError> {
+fn token_create(input: flags.CommandInput) -> Result<output.Output, pb.CliError> {
   let ctx = input.ctx
   let usage = input.usage
   let p = input.parsed
@@ -125,15 +124,13 @@ fn token_create(input: flags.CommandInput) -> Result<(), pb.CliError> {
   // The one place a token is ever printed: it is the agent's credential,
   // delivered exactly once, in the env form it is used in. Every other
   // surface — login, config list, the board — redacts it.
-  fmt.Println(f"LLL_TOKEN={tok}")
-  fmt.Println(
+  let out = output.line(f"LLL_TOKEN={tok}").line(
     f"one-time agent token for {member.name}, shown only here; to persist it, put token = \"...\" in ~/.config/lll/lll.toml (never .lll.toml, which is committed)",
   )
   // The expiry belongs next to the token because it is the only moment
   // anyone will ever see it: impersonate tokens are stateless, so nothing
   // records the mint and no later command can answer "when does this die?".
-  fmt.Println(tokens.expiry_line(duration, time.Now(), "lll token create"))
-  Ok(())
+  Ok(out.line(tokens.expiry_line(duration, time.Now(), "lll token create")))
 }
 
 /// What to say when the impersonate call is refused. `e` is the pb client's
@@ -363,7 +360,7 @@ On the receiving machine, save the API endpoint with 'lll config set url URL', o
 /// Creation rides the calling member's own token when there is one, so the
 /// bot is owned by whoever ran the command. Administrator credentials name
 /// no member, so a bot created with them has no owner.
-pub fn bot(ctx: pb.Client, args: Slice<string>) -> Result<(), pb.CliError> {
+pub fn bot(ctx: pb.Client, args: Slice<string>) -> Result<output.Output, pb.CliError> {
   // `args` is the full argv ("lll", "bot", ...), so the verb rides index 2
   // - where a bare create's NAME would sit. A bot cannot be named "rotate"
   // or "create": the server reserves bot- * names, so the forms cannot
@@ -387,13 +384,12 @@ fn is_a_verb(word: string) -> bool {
   flags.top_level_commands().any(|noun| flags.resolve_command(command_table(noun), word).is_some())
 }
 
-fn bot_create(ctx: pb.Client, args: Slice<string>, start: int, command: string) -> Result<(), pb.CliError> {
+fn bot_create(ctx: pb.Client, args: Slice<string>, start: int, command: string) -> Result<output.Output, pb.CliError> {
   let spec = bot_spec()
   let usage = flags.usage(command, spec, "bot-NAME")
   let p = flags.parse_n(spec, args, start, 1, usage)?
   if p.given("--help") {
-    fmt.Println(bot_page(false))
-    return Ok(())
+    return Ok(output.line(bot_page(false)))
   }
   let name = strings.TrimSpace(p.first())
   if name == "" {
@@ -431,24 +427,25 @@ fn bot_create(ctx: pb.Client, args: Slice<string>, start: int, command: string) 
     "no owner (administrator credentials created it)",
     |me| f"owned by {me.name}",
   )
-  bot_status(
+  let made = bot_status(
     env_only,
     f"created bot member {created.name} (kind=bot, {owned})",
   )
-  let minted = tokens.bot_mint(ctx, tok, name, duration)?
-  print_bot_credential(name, minted, url, team, duration, env_only)
+  // The bot exists by now: a failed mint says so, or it would read as
+  // though nothing happened.
+  let minted = tokens.bot_mint(ctx, tok, name, duration).map_err(|e| e.with_message(f"created bot member {created.name}, but {e.message}"))?
+  Ok(made.then(bot_credential(name, minted, url, team, duration, env_only)?))
 }
 
 /// `lll bot rotate bot-NAME [--duration s]`: re-mint the bot's token and strand
 /// the previous one. The server admits the superuser or the bot's owner —
 /// the human who created it is the one who sees a token leak.
-fn bot_rotate(ctx: pb.Client, args: Slice<string>) -> Result<(), pb.CliError> {
+fn bot_rotate(ctx: pb.Client, args: Slice<string>) -> Result<output.Output, pb.CliError> {
   let spec = bot_spec()
   let usage = flags.usage("lll bot rotate", spec, "bot-NAME")
   let p = flags.parse_n(spec, args, 3, 1, usage)?
   if p.given("--help") {
-    fmt.Println(bot_page(true))
-    return Ok(())
+    return Ok(output.line(bot_page(true)))
   }
   let name = strings.TrimSpace(p.first())
   if name == "" {
@@ -465,7 +462,7 @@ fn bot_rotate(ctx: pb.Client, args: Slice<string>) -> Result<(), pb.CliError> {
   let url = ctx.settings.config().map_err(pb.failed)?.url
   tokens.check_prompt_values(url, team, name)?
   let minted = tokens.bot_mint(ctx, tok, name, duration)?
-  print_bot_credential(name, minted, url, team, duration, env_only)
+  bot_credential(name, minted, url, team, duration, env_only)
 }
 
 /// token create's flags plus the two that shape the bot's handoff.
@@ -530,35 +527,33 @@ or pass --env to print only the LLL_URL and LLL_TOKEN export lines",
 /// export lines is printed anywhere: agents capture `2>&1`, and a status line
 /// in that capture broke `source` (1.0 fleet: four of ten, one of whom then
 /// ran as the bot's owner without noticing).
-fn bot_status(env_only: bool, line: string) {
-  if !env_only { fmt.Println(line) }
+fn bot_status(env_only: bool, line: string) -> output.Output {
+  if env_only { output.none() } else { output.line(line) }
 }
 
-/// Print a freshly minted bot token: the one place it is ever shown. The
+/// A freshly minted bot token, printed: the one place it is ever shown. The
 /// default is the agent prompt from the design (doc scoped-access-invites,
 /// Decision step 3); --env is its two export lines alone.
-fn print_bot_credential(
+fn bot_credential(
   name: string,
   tok: string,
   url: string,
   team: string,
   duration: int,
   env_only: bool,
-) -> Result<(), pb.CliError> {
+) -> Result<output.Output, pb.CliError> {
   // The server minted it, but it is printed into a shell all the same.
   if !regexp.MustCompile("^[A-Za-z0-9._-]+$").MatchString(tok) {
     return Err(pb.failed("the minted token contains characters lll cannot paste safely into a shell; nothing was printed"))
   }
   let expiry = tokens.expiry_line(duration, time.Now(), f"lll bot rotate {name}")
-  if env_only {
-    fmt.Print(tokens.agent_env(url, tok))
-    return Ok(())
-  }
-  fmt.Println(f"one-time bot token for {name}, shown only here; {expiry}")
-  fmt.Println("paste this into the agent:")
-  fmt.Println("")
-  fmt.Print(tokens.agent_prompt(url, team, tok))
-  Ok(())
+  if env_only { return Ok(output.env(tokens.agent_env(url, tok))) }
+  Ok(
+    output.line(f"one-time bot token for {name}, shown only here; {expiry}")
+      .line("paste this into the agent:")
+      .line("")
+      .text(tokens.agent_prompt(url, team, tok)),
+  )
 }
 
 fn bot_page(rotating: bool) -> string {

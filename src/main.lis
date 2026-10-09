@@ -100,7 +100,7 @@ fn dispatch(ctx: pb.Client, noun: string, args: Slice<string>) -> Result<output.
     "logout" => commands.logout(ctx, args).map(|_| output.none()),
     "whoami" => commands.whoami(ctx, args).map(|_| output.none()),
     "token" => commands.token(ctx, args),
-    "bot" => commands.bot(ctx, args).map(|_| output.none()),
+    "bot" => commands.bot(ctx, args),
     "attach" => commands.attach(ctx, args).map(|_| output.none()),
     "watch" => commands.watch(ctx, args).map(|_| output.none()),
     "webhook" => commands.webhook(ctx, args),

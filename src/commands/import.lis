@@ -1,7 +1,6 @@
 import "records"
 import "go:bytes"
 import "go:encoding/json"
-import "go:fmt"
 import "go:os"
 import "go:os/exec"
 import "go:strings"
@@ -28,7 +27,7 @@ pub fn import_commands() -> Slice<flags.Command> {
       summary: "import a GitHub repo's issues into the configured team via gh; title, body and labels come along, open becomes todo and closed done, every import refs gh#N; re-import skips already-imported issues",
       spec: github_spec(),
       positional: "OWNER/REPO",
-      run: |i| printed(import_github(i)),
+      run: import_github,
       ..
     },
     flags.Command {
@@ -36,7 +35,7 @@ pub fn import_commands() -> Slice<flags.Command> {
       summary: "rebuild the configured team from a directory 'lll export' wrote; refuses a team that already has issues unless --replace deletes them first",
       spec: flags.with_team(dir_spec()),
       positional: "DIR",
-      run: |i| printed(import_dir(i)),
+      run: import_dir,
       ..
     },
   ]
@@ -58,7 +57,7 @@ fn github_spec() -> Slice<flags.Flag> {
   ])
 }
 
-fn import_github(input: flags.CommandInput) -> Result<(), pb.CliError> {
+fn import_github(input: flags.CommandInput) -> Result<output.Output, pb.CliError> {
   let ctx = input.ctx
   let usage = input.usage
   let repo = input.parsed.first()
@@ -80,6 +79,7 @@ fn import_github(input: flags.CommandInput) -> Result<(), pb.CliError> {
   let creator = records.find_actor(ctx)?.map(|member| member.id)
   let mut created = 0
   let mut skipped = 0
+  let mut out = output.none()
   for g in issues {
     let reference = f"gh#{g.number}"
     if known_refs.get(reference).is_some() {
@@ -102,7 +102,9 @@ fn import_github(input: flags.CommandInput) -> Result<(), pb.CliError> {
       labels,
       ..
     }
-    let body = writes.create_issue(ctx, pb.Caller.Process, new_issue, "")?
+    // The lines for issues already created are lost with a failure, so the
+    // error counts them; re-running skips them by their refs.
+    let body = writes.create_issue(ctx, pb.Caller.Process, new_issue, "").map_err(|e| e.with_message(f"{e.message} (after creating {created} issues; re-running skips them)"))?
     let mut issue = models.Issue { .. }
     if let Err(e) = json.Unmarshal(body.bytes(), &issue) {
       return Err(pb.failed(f"decoding created issue for {reference}: {e}"))
@@ -116,14 +118,14 @@ fn import_github(input: flags.CommandInput) -> Result<(), pb.CliError> {
       return Err(e.with_message(f"{key} created from {reference}, but the ref was not saved: {e.message}\nRetry only the reference save: lll issue ref {key} {reference}"))
     }
     created += 1
-    fmt.Println(f"Created {key}: {g.title} ({reference}, {state})")
+    out = out.line(f"Created {key}: {g.title} ({reference}, {state})")
   }
   let mut labels_note = ""
   if created_labels.length() > 0 {
     labels_note = f"; created labels: {strings.Join(created_labels, ", ")}"
   }
-  fmt.Println(f"Imported {created} of {issues.length()} issues from {repo} into {team.key} (skipped {skipped} already carrying gh#N refs){labels_note}")
-  Ok(())
+  out = out.line(f"Imported {created} of {issues.length()} issues from {repo} into {team.key} (skipped {skipped} already carrying gh#N refs){labels_note}")
+  Ok(out)
 }
 
 /// OWNER/REPO with both halves present. gh's --repo would also take

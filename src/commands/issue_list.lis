@@ -12,6 +12,7 @@ import "go:time"
 import "display"
 import "flags"
 import "models"
+import "output"
 import "pb"
 import "query"
 import "writes"
@@ -253,6 +254,31 @@ fn rfc3339_of(value: string) -> string {
   let space_form = regexp.MustCompile(r"^[0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2}:[0-9]{2}(\.[0-9]+)?Z$")
   if space_form.MatchString(value) { return strings.Replace(value, " ", "T", 1) }
   value
+}
+
+/// The standard issue table (ID, state, priority, title, assignee, age),
+/// shared by `issue list` and `project view`. `held` is the claims by issue
+/// id: a claimed issue names its holder, agent label and claim age where the
+/// assignee goes (LLL-651).
+fn issue_table(issues: Slice<models.Issue>, held: Map<models.IssueId, models.Claim>) -> output.Output {
+  // An empty board printed zero bytes, which a newcomer cannot tell apart
+  // from a silently broken read — the exact doubt the not-logged-in refusal
+  // warns about, landing one command later. Says so on STDERR: stdout stays
+  // empty so pipes and `| wc -l` are unchanged, and --json returns before
+  // ever reaching here.
+  if issues.is_empty() { return empty_list("issues") }
+  let mut rows: Slice<Slice<string>> = []
+  for item in issues {
+    let key = item.expand.team.key
+    let assignee = match held.get(item.id) {
+      Some(c) => f"{display.byline(display.member_name(c.member, c.expand.member.name, ""), c.agent)}, claimed {display.relative(c.updated)}",
+      None => display.member_name(item.assignee, item.expand.assignee.name, ""),
+    }
+    let mut row = [f"{key}-{item.number}", f"{display.glyph(item.state())} {display.state_name(item.state())}", display.priority_marker(item.priority()), item.title, assignee, display.relative(item.updated)]
+    if item.emoji != "" { row = row.append(item.emoji) }
+    rows = rows.append(row)
+  }
+  output.text(display.table(rows))
 }
 
 /// The standard issue table (ID, state, priority, title, assignee, age),

@@ -1,5 +1,4 @@
 import "go:encoding/json"
-import "go:fmt"
 import "go:strconv"
 import "go:strings"
 
@@ -34,14 +33,14 @@ pub fn doc_commands() -> Slice<flags.Command> {
       name: "create", alias: "new",
       summary: "create a doc; -b - reads the body from stdin",
       spec: doc_new_spec(),
-      run: |i| printed(doc_new(i)),
+      run: doc_new,
       ..
     },
     flags.Command {
       name: "list",
       summary: "list docs (slug, kind, title), one line each",
       spec: doc_list_spec(),
-      run: |i| printed(doc_list(i)),
+      run: doc_list,
       ..
     },
     flags.Command {
@@ -49,7 +48,7 @@ pub fn doc_commands() -> Slice<flags.Command> {
       summary: "show one doc with its linked issues; --raw prints only the body; --json prints the raw record",
       spec: doc_view_spec(),
       positional: "SLUG",
-      run: |i| printed(doc_view(i)),
+      run: doc_view,
       ..
     },
     flags.Command {
@@ -58,7 +57,7 @@ pub fn doc_commands() -> Slice<flags.Command> {
       summary: "replace fields (at least one flag); -b - reads the whole body from stdin",
       spec: doc_edit_spec(),
       positional: "SLUG",
-      run: |i| printed(doc_edit(i)),
+      run: doc_edit,
       ..
     },
     flags.Command {
@@ -66,7 +65,7 @@ pub fn doc_commands() -> Slice<flags.Command> {
       summary: "delete; asks [y/N] unless --yes",
       spec: doc_delete_spec(),
       positional: "SLUG",
-      run: |i| printed(doc_delete(i)),
+      run: doc_delete,
       ..
     },
   ]
@@ -339,12 +338,12 @@ fn doc_union_spec() -> Slice<flags.Flag> {
 
 // ----------------------------------------------------------------- verbs
 
-fn doc_new(input: flags.CommandInput) -> Result<(), pb.CliError> {
+fn doc_new(input: flags.CommandInput) -> Result<output.Output, pb.CliError> {
   let ctx = input.ctx
   create_doc(ctx, input.parsed, "wiki", input.parsed.one("-s"))
 }
 
-fn create_doc(ctx: pb.Client, p: flags.Parsed, default_kind: string, slug: string) -> Result<(), pb.CliError> {
+fn create_doc(ctx: pb.Client, p: flags.Parsed, default_kind: string, slug: string) -> Result<output.Output, pb.CliError> {
   let slug = records.check_slug(slug)?
   let title = p.one("-t")
   let requested_kind = if p.given("-k") { p.one("-k") } else { default_kind }
@@ -389,10 +388,9 @@ fn create_doc(ctx: pb.Client, p: flags.Parsed, default_kind: string, slug: strin
     return Err(pb.failed(f"decoding created doc: {e}"))
   }
   if p.given("--json") {
-    return print_doc_after(ctx, created.id)
+    return doc_after(ctx, created.id)
   }
-  fmt.Println(f"Created doc {created.slug}")
-  Ok(())
+  Ok(output.line(f"Created doc {created.slug}"))
 }
 
 fn doc_list_spec() -> Slice<flags.Flag> {
@@ -438,7 +436,7 @@ fn limit_flag(p: flags.Parsed) -> Result<int, pb.CliError> {
   Ok(n)
 }
 
-fn doc_list(input: flags.CommandInput) -> Result<(), pb.CliError> {
+fn doc_list(input: flags.CommandInput) -> Result<output.Output, pb.CliError> {
   let ctx = input.ctx
   let p = input.parsed
   let kind = if p.given("-k") { check_kind(p.one("-k"))? } else { "" }
@@ -453,17 +451,18 @@ fn doc_list(input: flags.CommandInput) -> Result<(), pb.CliError> {
   }
   if limit > 0 && items.length() > limit { items = items[..limit] }
   let docs = models.DocList { items }
-  if p.given("--json") { return print_list_json(docs_json(docs.items)?, whole_list(docs.items.length()), "docs") }
-  if docs.items.is_empty() { return say_empty("docs") }
+  if p.given("--json") { return list_json(docs_json(docs.items)?, whole_list(docs.items.length()), "docs") }
+  if docs.items.is_empty() { return Ok(empty_list("docs")) }
+  let mut out = output.none()
   for d in docs.items {
     let mut kind = d.kind
     if kind == "" { kind = "-" }
-    fmt.Println(f"{d.slug}\t{kind}\t{display.table_cell(d.title)}")
+    out = out.line(f"{d.slug}\t{kind}\t{display.table_cell(d.title)}")
   }
-  Ok(())
+  Ok(out)
 }
 
-fn doc_view(input: flags.CommandInput) -> Result<(), pb.CliError> {
+fn doc_view(input: flags.CommandInput) -> Result<output.Output, pb.CliError> {
   let ctx = input.ctx
   let p = input.parsed
   let slug = p.first()
@@ -473,58 +472,59 @@ fn doc_view(input: flags.CommandInput) -> Result<(), pb.CliError> {
   let raw_mode = p.given("--raw")
 
   let record = records.fetch_doc_record(ctx, current_team(ctx)?, slug)?
-  if json_mode { return print_json(doc_json(record.bytes() as json.RawMessage)?, "doc") }
+  if json_mode { return json_value(doc_json(record.bytes() as json.RawMessage)?, "doc") }
 
   let mut d = models.Doc { .. }
   if let Err(e) = json.Unmarshal(record.bytes(), &d) {
     return Err(pb.failed(f"decoding doc: {e}"))
   }
 
+  let mut out = output.none()
   // --raw: the body and nothing else. For piping, and for an agent that
   // wants the text rather than the property table.
   if raw_mode {
-    fmt.Print(d.body)
-    return Ok(())
+    out = out.text(d.body)
+    return Ok(out)
   }
 
-  fmt.Println(f"{d.slug} {display.table_cell(d.title)}{display.table_cell(display.confidence_suffix(d.confidence, d.confidence_note))}")
-  fmt.Println("")
-  fmt.Println(f"Kind:      {d.kind}")
+  out = out.line(f"{d.slug} {display.table_cell(d.title)}{display.table_cell(display.confidence_suffix(d.confidence, d.confidence_note))}")
+  out = out.line("")
+  out = out.line(f"Kind:      {d.kind}")
   // Always, for a finding (1.0 fleet): an absent line read as "unknown", not
   // as "confirmed".
-  if d.kind == "finding" { fmt.Println(f"Confidence: {confidence_word(d.confidence)}") }
+  if d.kind == "finding" { out = out.line(f"Confidence: {confidence_word(d.confidence)}") }
   if let Some(author) = d.expand.author {
     let tag = display.author_tag(author.is_bot(), author.owner_name())
-    fmt.Println(f"Author:    {display.table_cell(author.name)}{tag}")
+    out = out.line(f"Author:    {display.table_cell(author.name)}{tag}")
   } else if d.author != "" {
-    fmt.Println(f"Author:    {display.hidden_member()}")
+    out = out.line(f"Author:    {display.hidden_member()}")
   }
   // LLL-682: shown only once someone other than the author has edited.
   if d.last_editor != "" && d.last_editor != d.author {
     if let Some(editor) = d.expand.last_editor {
       let tag = display.author_tag(editor.is_bot(), editor.owner_name())
-      fmt.Println(f"Edited by: {display.table_cell(editor.name)}{tag}")
+      out = out.line(f"Edited by: {display.table_cell(editor.name)}{tag}")
     } else {
-      fmt.Println(f"Edited by: {display.hidden_member()}")
+      out = out.line(f"Edited by: {display.hidden_member()}")
     }
   }
-  if d.confidence_note != "" { fmt.Println(f"Note:      {display.table_cell(d.confidence_note)}") }
-  if d.area != "" { fmt.Println(f"Area:      {display.table_cell(d.area)}") }
-  if d.paths != "" { fmt.Println(f"Paths:     {display.table_cell(d.paths)}") }
-  fmt.Println(f"Created:   {display.relative(d.created)}")
-  fmt.Println(f"Updated:   {display.relative(d.updated)}")
+  if d.confidence_note != "" { out = out.line(f"Note:      {display.table_cell(d.confidence_note)}") }
+  if d.area != "" { out = out.line(f"Area:      {display.table_cell(d.area)}") }
+  if d.paths != "" { out = out.line(f"Paths:     {display.table_cell(d.paths)}") }
+  out = out.line(f"Created:   {display.relative(d.created)}")
+  out = out.line(f"Updated:   {display.relative(d.updated)}")
   if d.expand.issues.length() > 0 {
     let keys = d.expand.issues.map(|i| f"{i.expand.team.key}-{i.number}")
-    fmt.Println(f"Issues:    {strings.Join(keys, ", ")}")
+    out = out.line(f"Issues:    {strings.Join(keys, ", ")}")
   }
   if d.body != "" {
-    fmt.Println("")
-    fmt.Println(d.body)
+    out = out.line("")
+    out = out.line(d.body)
   }
-  Ok(())
+  Ok(out)
 }
 
-fn doc_edit(input: flags.CommandInput) -> Result<(), pb.CliError> {
+fn doc_edit(input: flags.CommandInput) -> Result<output.Output, pb.CliError> {
   let ctx = input.ctx
   let usage = input.usage
   let p = input.parsed
@@ -574,10 +574,10 @@ fn doc_edit(input: flags.CommandInput) -> Result<(), pb.CliError> {
     patch.confidence_note = Some("")
   }
   writes.update_doc(ctx, d.id, patch)?
-  doc_done(ctx, p, d.id, f"Updated doc {d.slug}")
+  doc_ending(ctx, p, d.id, f"Updated doc {d.slug}")
 }
 
-fn doc_delete(input: flags.CommandInput) -> Result<(), pb.CliError> {
+fn doc_delete(input: flags.CommandInput) -> Result<output.Output, pb.CliError> {
   let ctx = input.ctx
   let p = input.parsed
   let slug = p.first()
@@ -588,8 +588,7 @@ fn doc_delete(input: flags.CommandInput) -> Result<(), pb.CliError> {
     return Err(aborted())
   }
   writes.delete_doc(ctx, d.id)?
-  fmt.Println(f"Deleted doc {d.slug}")
-  Ok(())
+  Ok(output.line(f"Deleted doc {d.slug}"))
 }
 
 // --------------------------------------------------------------- lookups

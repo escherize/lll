@@ -7,6 +7,7 @@ import "display"
 import "flags"
 import "gitctx"
 import "models"
+import "output"
 import "pb"
 import "provenance"
 
@@ -322,6 +323,13 @@ fn issue_view_json(
 
 /// `--json` on the verbs that change an issue (update, close, start, claim):
 /// the issue as it is after the write, in the list's per-item shape.
+fn issue_after(ctx: pb.Client, key: string) -> Result<output.Output, pb.CliError> {
+  let record = records.fetch_issue_record(ctx, key)?
+  let mut full = models.Issue { .. }
+  if let Err(e) = json.Unmarshal(record.bytes(), &full) { return Err(pb.failed(f"decoding issue: {e}")) }
+  issue_document(record, fetch_claim(ctx, full.id)?)
+}
+
 fn print_issue_after(ctx: pb.Client, key: string) -> Result<(), pb.CliError> {
   let record = records.fetch_issue_record(ctx, key)?
   let mut full = models.Issue { .. }

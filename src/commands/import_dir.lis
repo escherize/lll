@@ -1,5 +1,4 @@
 import "go:encoding/json"
-import "go:fmt"
 import "go:os"
 import "go:path/filepath"
 import "go:sort"
@@ -9,6 +8,7 @@ import "attachments"
 import "flags"
 import "mirror"
 import "models"
+import "output"
 import "pb"
 import "records"
 import "writes"
@@ -25,7 +25,7 @@ import "writes"
 ///
 /// Comments and members are not imported. Nothing here can forge another
 /// member's authorship, so `KEY-N.comments.md` is export-only.
-fn import_dir(input: flags.CommandInput) -> Result<(), pb.CliError> {
+fn import_dir(input: flags.CommandInput) -> Result<output.Output, pb.CliError> {
   let ctx = input.ctx
   let p = input.parsed
   let usage = input.usage
@@ -248,18 +248,18 @@ To import somewhere harmless instead: lll attach --key NEWKEY in another directo
   let mut docs_note = ""
   if restored_docs > 0 { docs_note = f", {restored_docs} docs" }
   if linked_blocks > 0 { docs_note = f"{docs_note}, {linked_blocks} dependency links" }
-  fmt.Println(f"Imported {created} issues{blobs}{docs_note} into {team.key}{note}")
+  let mut out = output.line(f"Imported {created} issues{blobs}{docs_note} into {team.key}{note}")
   if !unassigned.is_empty() {
-    fmt.Println(
+    out = out.line(
       f"Left unassigned, no such member here: {strings.Join(unassigned, ", ")}",
     )
   }
   if !renumbered.is_empty() {
-    fmt.Println(
+    out = out.line(
       f"Numbered by the server, which keeps a mirror's numbers only for a superuser's import: {strings.Join(renumbered, ", ")}",
     )
   }
-  Ok(())
+  Ok(out)
 }
 
 /// The mirror in ascending issue number, so issues the server numbers come
