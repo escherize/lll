@@ -14,7 +14,8 @@ keeps the strings from coming back, reading every non-test .lis file:
   no string test or comparison on config.origin(...), no comparison with an
   origin literal;
 - a match that names a config.Source has no arm that catches every source
-  (`_`, a binding like `other`, or `Some(_)`), so a new layer fails to
+  (`_`, a binding like `other`, `Some(_)`, `(other)` or a tuple of those
+  such as `(_, _)`), so a new layer fails to
   compile in every hint until the hint says what fixes it;
 - no `if let` picks one Source out, and no `==`/`!=` compares one, for the
   same reason.
@@ -28,7 +29,8 @@ import unittest
 ROOT = Path(__file__).resolve().parents[1]
 ORIGIN = r'"(?:file:|env:|flag:)'
 STRING_TESTS = re.compile(
-    r'\b(?:HasPrefix|HasSuffix|TrimPrefix|TrimSuffix|CutPrefix|CutSuffix|starts_with|ends_with|contains|Contains)\(')
+    r'\b(?:HasPrefix|HasSuffix|TrimPrefix|TrimSuffix|CutPrefix|CutSuffix|Cut|starts_with|ends_with|contains|Contains'
+    r'|Index|LastIndex|Split\w*|split|Fields|EqualFold|Count|Replace\w*)\(')
 COMPARES = re.compile(
     r'(?:==|!=)\s*f?(?:' + ORIGIN + r'|"default")|f?(?:' + ORIGIN + r'[^"]*"|"default")\s*(?:==|!=)'
     # A printed origin compared with anything: compare the Source instead.
@@ -37,8 +39,6 @@ COMPARES = re.compile(
     r'|(?:==|!=)\s*(?:Some\(\s*)?(?:config\.)?Source\.|\bSource\.\w+(?:\([^()]*\))?\)?\s*(?:==|!=)')
 PICKS_ONE = re.compile(r'\bif let\b[^{]*\bSource\.')
 NAMES_SOURCE = re.compile(r'\bSource\.|\b(?:Flag|Env|RepoFile|HomeFile)\(')
-# An alternative that matches any Source: `_`, a binding, or Some of either.
-CATCH_ALL = re.compile(r'^(?:Some\(\s*)?[a-z_]\w*\s*\)?$')
 
 
 def sources(root=ROOT):
@@ -102,6 +102,16 @@ def split_top(text, sep):
     return parts
 
 
+def catches_all(alt):
+    """True for a pattern that matches every value: `_`, a binding such as
+    `other`, or Some, parentheses or a tuple holding only those."""
+    alt = alt.strip()
+    if re.fullmatch(r'[a-z_]\w*', alt):
+        return True
+    inner = re.fullmatch(r'(?:Some\s*)?\((.*)\)', alt, re.S)
+    return bool(inner) and all(catches_all(e) for e in split_top(inner.group(1), ','))
+
+
 def arm_patterns(body):
     """The pattern of each arm of a match body."""
     return [arm.split('=>')[0].strip() for arm in split_top(top_level(body), ',') if '=>' in arm]
@@ -124,7 +134,7 @@ def violations(files):
             if not any(NAMES_SOURCE.search(p) for p in patterns):
                 continue
             for p in patterns:
-                if any(CATCH_ALL.match(alt.strip()) for alt in split_top(p, '|')):
+                if any(catches_all(alt) for alt in split_top(p, '|')):
                     found.append(f'{rel}: `{p} =>` in a match on config.Source catches every source; name each one')
     return found
 
@@ -155,6 +165,10 @@ class TypedSourcesTest(unittest.TestCase):
             'if strings.HasPrefix(config.origin(src.url), "file:") {}',
             'if strings.HasSuffix(config.origin(src.url), ".lll.toml") {}',
             'if config.origin(src.url) == "default" {}',
+            'match (src.url, src.token) {\n  (Some(config.Source.Default), _) => 1,\n  (_, _) => 2,\n}',
+            'match src.url {\n  Some(config.Source.Default) => 1,\n  (other) => 2,\n}',
+            'if strings.Index(config.origin(src.url), "file:") == Some(0) {}',
+            'let parts = strings.SplitN(config.origin(src.url), ":", 2)',
         ]
         for code in planted:
             self.assertTrue(violations([('src/x/x.lis', code)]), code)
@@ -165,6 +179,7 @@ class TypedSourcesTest(unittest.TestCase):
             '// a comment may say strings.HasPrefix(origin, "file:")',
             'match src.url {\n  Some(config.Source.Default) => f"{a}, b",\n  Some(config.Source.Env(name)) | None => g(name, 1),\n}',
             'let from = if source.is_none() { "unset" } else { config.origin(source) }',
+            'match (src.url, src.token) {\n  (Some(config.Source.Default), _) => 1,\n  (Some(config.Source.Env(n)), None) => 2,\n}',
             'match kind {\n  Kind.A => { match x { _ => 1 } },\n  _ => 2,\n}',
         ]
         self.assertEqual(violations([('src/x/x.lis', c) for c in clean]), [])
