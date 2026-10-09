@@ -38,7 +38,9 @@ Role A:
 Role B:
 1. Wait until A's comment is on the issue AND the issue has no claim. Poll
    with `issue view` at most every 5 seconds, for at most 10 minutes, or use
-   a bounded watch. Do not take the issue early, and never force it.
+   a bounded watch. If you poll in a script, have it log each `issue view` call,
+   its exit code and first line to your report: one script run is not one
+   invocation. Do not take the issue early, and never force it.
 2. Claim it.
 3. Add exactly one comment: `fleet-16-NN: picked up from bot-fleet-worker-PP.`
 4. Read back: you hold the claim and are the assignee; both comments present.

@@ -23,7 +23,7 @@ and prove the old ones are dead.
    print the file.
 2. Using that file (as LLL_TOKEN for one command), run `whoami` as the
    helper and confirm the identity.
-3. Rotate the helper's token, saving the new exports to
+3. Read the bot first with `./lll member access bot-helper-NN`. Rotate the helper's token, saving the new exports to
    `helper-NN-rotated.env`.
 4. Prove the old token fails: run `whoami` with `helper-NN.env` again and
    record the exit code (it should mean "not authenticated").
