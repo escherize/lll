@@ -1,11 +1,4 @@
-import "go:strings"
 import "config"
-
-// Unit cover for the whoami argument refusal (LLL-493, fleet case 05). The
-// server half of whoami needs a live PocketBase and is covered by e2e; what
-// is asserted here is the text a fresh agent reads when it guesses a flag
-// that does not exist: the refusal must teach the bare invocation that DOES
-// report context, plus the house one-command override for another team.
 
 // LLL-441 review: the refresh carries the saved login token, so it may only
 // go to the server the home config names. An LLL_URL or a repo url pointing

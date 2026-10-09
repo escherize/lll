@@ -70,7 +70,7 @@ pub fn webhook_commands() -> Slice<flags.Command> {
 fn webhook_add_spec() -> Slice<flags.Flag> {
   flags.with_team([
     flags.Flag { name: "--project", value: true, hint: "NAME", help: "scope deliveries to one project instead of the whole team", .. },
-    flags.Flag { name: "--secret", value: true, hint: "SECRET", help: "sent on every delivery as the X-LLL-Secret header ('-' reads it from stdin;\ndefault: generated and printed once)", .. },
+    flags.Flag { name: "--secret", value: true, stdin: true, hint: "SECRET", help: "sent on every delivery as the X-LLL-Secret header ('-' reads it from stdin;\ndefault: generated and printed once)", .. },
   ])
 }
 

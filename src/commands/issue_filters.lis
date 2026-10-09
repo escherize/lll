@@ -29,7 +29,9 @@ fn filter_spec(use: FilterUse) -> Slice<flags.Flag> {
   ]
 }
 
-fn filters_from(p: flags.Parsed) -> Result<query.Criteria, pb.CliError> {
+/// `search` is the title filter's text, "" for a verb without --search
+/// ('issue next'): a verb reads only the flags it declares (LLL-684).
+fn filters_from(p: flags.Parsed, search: string) -> Result<query.Criteria, pb.CliError> {
   // Explicit --state "" is a mistake; absence is an unrestricted filter.
   if p.given("--state") && p.one("--state") == "" { let _ = query.state("")? }
   // `all`, not `one` (LLL-381). The parser had been collecting every value all
@@ -37,7 +39,7 @@ fn filters_from(p: flags.Parsed) -> Result<query.Criteria, pb.CliError> {
   // into a confident answer to a question nobody asked.
   query.Filters {
     state: p.all("--state"), assignee: p.one("--assignee"),
-    label: p.all("--label"), project: p.one("--project"), search: p.one("--search"),
+    label: p.all("--label"), project: p.one("--project"), search,
   }.parse()
 }
 

@@ -49,7 +49,7 @@ fn watch(input: flags.CommandInput) -> Result<output.Output, pb.CliError> {
 /// The stream `lll watch` writes, one line per event as it arrives, until
 /// interrupted.
 fn watch_stream(ctx: pb.Client, p: flags.Parsed) -> Result<(), pb.CliError> {
-  let filters = filters_from(p)?
+  let filters = filters_from(p, p.one("--search"))?
   let json_mode = p.given("--json")
   if p.given("--ready") { return watch_ready(ctx, filters, p.given("--json")) }
   // A configured team (LLL_TEAM or .lll.toml) scopes the stream by default,

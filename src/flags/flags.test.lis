@@ -699,3 +699,19 @@ fn the_url_default_hint_follows_where_the_url_came_from() {
     assert url_default_hint(source) == want
   }
 }
+
+/// Only one flag may read stdin ('-') per command line (LLL-686): with two,
+/// which line answers which would depend on the order the command reads
+/// them. The table says which flags read it, so the parser refuses.
+#[test]
+fn two_flags_reading_stdin_are_refused() {
+  let spec = [
+    Flag { name: "--admin-password", value: true, stdin: true, .. },
+    Flag { name: "--password", value: true, stdin: true, .. },
+    Flag { name: "-b", value: true, .. },
+  ]
+  let assert Err(both) = parse_n(spec, argv(["--admin-password", "-", "--password", "-"]), 3, 0, "u")
+  assert pb.exit_code(both.kind) == 2
+  assert both.message == "only one of --admin-password and --password can read stdin ('-'); pass the other as a value"
+  assert parse_n(spec, argv(["--admin-password", "-", "--password", "pw", "-b", "-"]), 3, 0, "u").is_ok()
+}

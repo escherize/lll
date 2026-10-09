@@ -39,6 +39,7 @@ pub fn login_spec() -> Slice<flags.Flag> {
     flags.Flag { name: "--web-url", value: true, hint: "URL", help: "board endpoint to persist separately from the API URL", .. },
     flags.Flag {
       name: "--password",
+      stdin: true,
       value: true,
       hint: "pw",
       help: "password; '-' reads it from stdin; omit to be prompted (a terminal\nreads it with echo off)",
@@ -46,6 +47,7 @@ pub fn login_spec() -> Slice<flags.Flag> {
     },
     flags.Flag {
       name: "--token",
+      stdin: true,
       value: true,
       hint: "token",
       help: "log in with a member token instead of a password; '-' reads it from stdin\n(a terminal prompts with echo off)",
@@ -60,6 +62,7 @@ pub fn login_spec() -> Slice<flags.Flag> {
     },
     flags.Flag {
       name: "--admin-password",
+      stdin: true,
       value: true,
       hint: "pw",
       help: "superuser password for --create (else LLL_ADMIN_PASSWORD); '-' reads it from stdin",

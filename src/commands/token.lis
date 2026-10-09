@@ -167,6 +167,7 @@ pub fn admin_flags() -> Slice<flags.Flag> {
     },
     flags.Flag {
       name: "--admin-password",
+      stdin: true,
       value: true,
       hint: "pw",
       help: "superuser password (else LLL_ADMIN_PASSWORD, only when no token is configured);\n'-' reads it from stdin",
@@ -209,10 +210,7 @@ pub fn given_admin_login(
   input: mut Ref<bufio.Reader>,
 ) -> Result<AdminLogin, pb.CliError> {
   let email = p.one("--admin-email")
-  // Only one flag can read stdin (secret.from_stdin says why).
-  if secret.from_stdin(p, "--admin-password") && (secret.from_stdin(p, "--password") || secret.from_stdin(p, "--old-password") || secret.from_stdin(p, "--token")) {
-    return Err(flags.usage_error("only one password flag can read stdin ('-'); pass the other as a value"))
-  }
+  // Only one flag can read stdin: the parser refuses two (Flag.stdin).
   let pass = if p.given("--admin-password") {
     Some(secret.Secret.read(p, "--admin-password", "Superuser password: ", input)?)
   } else {

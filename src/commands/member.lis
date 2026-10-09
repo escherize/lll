@@ -257,6 +257,7 @@ fn member_add_spec() -> Slice<flags.Flag> {
     },
     flags.Flag {
       name: "--password",
+      stdin: true,
       value: true,
       hint: "pw",
       help: "set a usable login password with a real --email ('-' reads it from stdin);\notherwise creates a record only",

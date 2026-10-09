@@ -25,6 +25,10 @@ pub struct Flag {
   /// shows it (unless `hint` says it better), completions offer it, and the
   /// parser refuses anything else; an empty value is left to the verb.
   pub values: Slice<string>,
+  /// The value '-' reads it from stdin. Only one such flag may say so per
+  /// command line: with two, which line answers which flag would depend on
+  /// the order the command reads them, which nothing on the line says.
+  pub stdin: bool,
 }
 
 pub struct Parsed {
@@ -169,6 +173,10 @@ pub fn parse_n(
     if fl.required && vals.get(fl.name).is_none() {
       return Err(usage_error(f"usage: {usage}"))
     }
+  }
+  let piped = spec.filter(|f| f.stdin && vals.get(f.name).unwrap_or([]).contains("-")).map(|f| f.name)
+  if piped.length() > 1 {
+    return Err(usage_error(f"only one of {strings.Join(piped, " and ")} can read stdin ('-'); pass the other as a value"))
   }
   Ok(Parsed { spec, vals, pos })
 }
