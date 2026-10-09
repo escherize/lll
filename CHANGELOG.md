@@ -141,6 +141,21 @@ minors. Issue keys are on the project's own board (`lll issue view KEY`).
 - `issue update --claim` exits 2 with "to claim, run: lll issue claim KEY"
   instead of the update usage.
 
+### Security
+
+- `lll login --url A` no longer sends the token it just minted to another
+  server (LLL-688). After a password or `--create` login, the team check
+  re-read the layered config, so a `.lll.toml` or `LLL_URL` naming server B
+  received A's token. A cloned repo with a hostile `url` could collect
+  tokens that way. Every request after the login now goes to A. When a
+  repo file or `LLL_URL` names another server, login says which one, and
+  that commands run there will not reach A. `lll up` says the same after it
+  saves its CLI login.
+- `lll member set-password --old-password` saves its new token only when
+  it came from the home config's server. With `--url` or `LLL_URL` naming
+  another server, the token was saved beside the home url and later sent
+  to the wrong server; now the command prints the `lll login` to run.
+
 ### Fixed
 
 - Every bad command line exits 2, as the contract says. These exited 1: an
