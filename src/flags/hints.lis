@@ -11,7 +11,8 @@ import "config"
 // files, each patched for the case one fleet run hit.
 
 /// A word lll does not have, and what to type instead. `path` is where it
-/// was typed ("lll issue", "lll issue comment"). The hint is the text after
+/// was typed ("lll issue", "lll issue comment"); no `words` means any word
+/// there, including a stray argument to a verb that takes none. The hint is the text after
 /// "unknown ... command: 'WORD'; ", and ends with its own "(see ...)" when
 /// the help that answers it is not the noun's.
 struct Guess {
@@ -52,12 +53,22 @@ fn guesses() -> Slice<Guess> {
     Guess { path: "lll doc", words: ["unlink"], hint: "did you mean 'lll issue unlink KEY-123 SLUG'? (see 'lll issue unlink --help')" },
     // 'lll bot list', 'lll bot read' (1.0 fleet): a verb guess, not a bot name.
     Guess { path: "lll bot", words: ["list", "ls", "view", "show", "read", "get"], hint: "bot has create and rotate; list bots with 'lll member list'" },
+    Guess { path: "lll completions", words: [], hint: "unknown shell (expected bash, zsh, or fish)" },
+    Guess { path: "lll skill list", words: [], hint: "'lll skill list' takes no arguments; use 'lll skill get NAME' to read one skill" },
   ]
 }
 
 fn guess(path: string, word: string) -> Option<string> {
   if word == "" { return None }
-  guesses().find(|g| g.path == path && g.words.contains(word)).map(|g| g.hint)
+  guesses().find(|g| g.path == path && (g.words.is_empty() || g.words.contains(word))).map(|g| g.hint)
+}
+
+/// What a stray argument to `path`, a verb that takes none, should have been.
+fn extra_argument(path: string, message: string) -> string {
+  match guesses().find(|g| g.path == path && g.words.is_empty()) {
+    Some(g) => f"{message}\n{g.hint}",
+    None => message,
+  }
 }
 
 /// "(see 'lll issue -h')" unless the hint already names the page to read.
@@ -244,7 +255,6 @@ fn url_default_hint(origin: Option<config.Source>) -> string {
     Some(config.Source.HomeFile(_)) | Some(config.Source.Flag(_)) | Some(config.Source.Default) | None => "to change the default, run 'lll config set url URL'",
   }
 }
-
 
 /// The flag table travels with the error: 26 of 30 fleet agents named the
 /// bare "unknown flag + usage line" the least helpful message lll has, since

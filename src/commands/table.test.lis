@@ -223,3 +223,12 @@ fn every_structured_read_takes_json() {
     }
   }
 }
+
+/// Wording the fleet tuned and e2e pins: a stray argument to 'skill list'
+/// names 'skill get', and an unknown shell is called one.
+#[test]
+fn a_stray_argument_or_shell_names_what_was_meant() {
+  assert refusal(["lll", "skill", "list", "lll"]).contains("use 'lll skill get NAME' to read one skill")
+  assert refusal(["lll", "completions", "tcsh"]).contains("unknown shell (expected bash, zsh, or fish)")
+  assert !refusal(["lll", "issue", "list", "x"]).contains("skill")
+}

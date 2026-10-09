@@ -173,7 +173,15 @@ fn command(
   }
   if let Some(hint) = verb_as_flag(noun, c, args, start) { return Err(usage_error(hint)) }
   let (least, most) = arity(c.positional)
-  let parsed = parse_n(c.spec, args, start, most, usage)?
+  let parsed = match parse_n(c.spec, args, start, most, usage) {
+    Ok(p) => p,
+    Err(e) => {
+      if most == 0 && e.message.starts_with("unexpected argument") {
+        return Err(e.with_message(extra_argument(path, e.message)))
+      }
+      return Err(e)
+    },
+  }
   if parsed.positional_count() < least {
     let what = if c.missing == "" { "" } else { f"{c.missing}\n" }
     return Err(usage_error(f"{what}usage: {usage}"))
