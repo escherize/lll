@@ -333,22 +333,26 @@ fn update(input: flags.CommandInput) -> Result<(), pb.CliError> {
   // `--emoji ""` clears the marker, so this one keys off the flag, not the value.
   if emoji_set { changed = changed.append(f"emoji={emoji}") }
 
-  // The claim as read plans the state change through the transition
-  // table (LLL-685), which says what the server will do with it.
-  let held_before = if state.is_some() { fetch_claim(ctx, issue.id)? } else { None }
-  let hold = models.hold_of(held_before, records.token_member(ctx.token()), agent)
-  let mut effects: Option<models.Effects> = None
-  if let Some(to) = state {
-    effects = Some(models.transition(issue.state(), hold, models.Ask.Move { to, keep_claim }).map_err(|r| claims.refused(r, hold, held_before))?)
-  }
-  let mut patch = writes.IssuePatch { state: effects, priority, assignee, project, labels, description, .. }
+  let assigning = assignee_name != ""
+  // One read of the claim before the write (LLL-685): an assignee edit
+  // names it to the claim route, and a finishing move compares it with the
+  // claim read back after the write to say what the server did. Only a move
+  // into done or cancelled can release; re-saving the same state does not.
+  let finishing_move = state.map_or(false, |to| to.is_terminal() && issue.state() != Some(to))
+  let read_claim = assigning || finishing_move
+  let held_before = if read_claim { fetch_claim(ctx, issue.id)? } else { None }
+  let observed = if read_claim { writes.ClaimRead.Read(held_before.map(|h| h.id)) } else { writes.ClaimRead.Unread }
+  let me = records.token_member(ctx.token())
+  let hold = models.hold_of(held_before, me, agent)
+  let mut patch = writes.IssuePatch { priority, assignee, project, labels, description, .. }
+  if let Some(to) = state { patch.state = Some(models.transition(models.Ask.Move { to, keep_claim })) }
   if title_set { patch.title = Some(title) }
   if emoji_set { patch.emoji = Some(emoji) }
   let opts = writes.UpdateOptions {
     stamp: since,
     claim: writes.ClaimAs { caller: pb.Caller.Process, agent, force, reason },
+    observed,
   }
-  let assigning = assignee_name != ""
   let result = match writes.update_issue(ctx, issue, patch, opts) {
     Ok(t) => t,
     Err(writes.UpdateFailure.Failed(e)) => {
@@ -375,11 +379,17 @@ fn update(input: flags.CommandInput) -> Result<(), pb.CliError> {
     }
   }
   if p.given("--json") { return print_issue_after(ctx, key) }
-  // A finishing move says what became of the claim it found: released,
-  // kept on request, or left with a holder whose claim this caller's move
-  // does not release (another member, or another agent label on this token).
+  // A finishing move says what became of the claim it found, read back
+  // from the server: released, kept on request, or left with a holder
+  // whose claim this caller's move does not release (another member, or
+  // another agent label on this token). The claim rule says when there is
+  // anything to say.
   if released == "" {
-    if let Some(e) = effects { released = finish_note(e.claim(), held_before) }
+    if let Some(to) = state {
+      if models.move_effect(issue.state(), to, hold, keep_claim) != models.ClaimEffect.Untouched {
+        released = finish_note(hold, keep_claim, fetch_claim(ctx, issue.id)?, me, agent)
+      }
+    }
   }
   fmt.Println(f"Updated {issue.expand.team.key}-{issue.number}: {strings.Join(changed, ", ")}{released}")
   // Already claimed (by the caller, or the write would have been refused):
@@ -393,19 +403,18 @@ fn update(input: flags.CommandInput) -> Result<(), pb.CliError> {
   Ok(())
 }
 
-/// The success line's word on the claim a state move found, from the
-/// effect the transition table planned.
-fn finish_note(effect: models.ClaimEffect, held: Option<models.Claim>) -> string {
-  match effect {
-    models.ClaimEffect.Released => "; released your claim (assignee kept)",
-    models.ClaimEffect.Kept => "; kept your claim",
-    models.ClaimEffect.Left => {
-      let holder = held.map_or("an unknown member", |h| display.byline(display.member_name(h.member, h.expand.member.name, "an unknown member"), h.agent))
-      f"; {holder} still holds the claim: only the holder's own finish releases it"
-    },
-    // A move carries no force, so it never force-releases.
-    models.ClaimEffect.Untouched | models.ClaimEffect.ForceReleased => "",
+/// The success line's word on what a finishing move did to the claim:
+/// `before` is the hold read before the write, `after` the claim read back.
+fn finish_note(before: models.Hold, keep_claim: bool, after: Option<models.Claim>, me: Option<models.MemberId>, agent: string) -> string {
+  let mine_before = before == models.Hold.Caller || before == models.Hold.OtherSession
+  let Some(h) = after else {
+    return if mine_before { "; released your claim (assignee kept)" } else { "" }
   }
+  if keep_claim && mine_before && models.hold_of(Some(h), me, agent) == models.Hold.Caller {
+    return "; kept your claim"
+  }
+  let holder = display.byline(display.member_name(h.member, h.expand.member.name, "an unknown member"), h.agent)
+  f"; {holder} still holds the claim: only the holder's own finish releases it"
 }
 
 /// --assignee as given; an empty value is 'none' (the 1.0 fleet: three of ten
@@ -480,33 +489,29 @@ fn close_issue(input: flags.CommandInput) -> Result<(), pb.CliError> {
   let resolved = resolve_id(ctx, p.first(), usage)?
   let issue = records.fetch_issue(ctx, resolved)?
   let key = f"{issue.expand.team.key}-{issue.number}"
-  // The close is planned through the transition table (LLL-685): a refusal
-  // is decided here, and the server, deciding again under its lock, refuses
-  // a claim that changed since this read.
-  let held = claims.fetch(ctx, issue.id)?
-  let hold = models.hold_of(held, records.token_member(ctx.token()), agent)
-  let effects = models.transition(issue.state(), hold, models.Ask.Close { keep_claim: keep, force })
-    .map_err(|r| close_refused(key, claims.refused(r, hold, held)))?
+  let observed = claims.observed_id(ctx, issue.id)?
+  // The server decides what the close does to the claim (gopb
+  // TransitionClaim), after the checks it alone makes.
+  let effects = models.transition(models.Ask.Close { keep_claim: keep, force })
   let by = writes.ClaimAs { caller: pb.Caller.Process, agent, force, reason }
-  let result = writes.close_issue(ctx, issue.id, held.map(|h| h.id), by, effects).map_err(|e| close_refused(key, e))?
+  let result = writes.close_issue(ctx, issue.id, observed, by, effects).map_err(|e| {
+    if e.has_code(pb.ServerCode.NeedsForce) {
+      e.with_message(f"{key}: {e.message} - 'lll issue close {key} --force --reason \"why\"' closes it anyway, releasing that claim and commenting on the issue")
+    } else { e.with_message(f"{key}: {e.message}") }
+  })?
   if p.given("--json") { return print_issue_after(ctx, key) }
   fmt.Println(f"Closed {key} ● done")
-  let holder = display.byline(result.member_name, result.agent)
-  match effects.claim() {
-    models.ClaimEffect.Kept => fmt.Println(f"Claim kept by {holder}; 'lll issue release {key}' gives it back."),
-    models.ClaimEffect.ForceReleased => fmt.Println(f"Released {holder}'s claim; forced, and commented on the issue."),
-    models.ClaimEffect.Released => fmt.Println(f"Released {holder}'s claim; assignee unchanged."),
-    // No hold to settle; a close never leaves one with another holder.
-    models.ClaimEffect.Untouched | models.ClaimEffect.Left => (),
+  if result.claim_id != "" {
+    let holder = display.byline(result.member_name, result.agent)
+    if keep {
+      fmt.Println(f"Claim kept by {holder}; 'lll issue release {key}' gives it back.")
+    } else if result.forced {
+      fmt.Println(f"Released {holder}'s claim; forced, and commented on the issue.")
+    } else {
+      fmt.Println(f"Released {holder}'s claim; assignee unchanged.")
+    }
   }
   Ok(())
-}
-
-/// A refused close, from the table or the server, with the way through.
-fn close_refused(key: string, e: pb.CliError) -> pb.CliError {
-  if e.has_code(pb.ServerCode.NeedsForce) {
-    e.with_message(f"{key}: {e.message} - 'lll issue close {key} --force --reason \"why\"' closes it anyway, releasing that claim and commenting on the issue")
-  } else { e.with_message(f"{key}: {e.message}") }
 }
 
 fn delete_issue(input: flags.CommandInput) -> Result<(), pb.CliError> {

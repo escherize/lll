@@ -109,8 +109,9 @@ impl IssuePatch {
 /// route) is handed. A None field is left out, so the record keeps it.
 #[json]
 struct IssueFields {
+  // Only a planned transition's write (models.Effects.write) fills it.
   #[json(omitempty)]
-  state: Option<string>,
+  state: Option<models.StateWrite>,
   #[json(omitempty)]
   sort: Option<float64>,
   #[json(omitempty)]
@@ -156,16 +157,26 @@ pub enum UpdateFailure {
 /// rides every write, because a move into done or cancelled releases the
 /// caller's own claim (the finish rule, gopb finishReleases) and the label
 /// says which session the caller is. The opt-out from that release rides
-/// with the state, in the patch's Effects.
+/// with the state, in the patch's Effects. `observed` is the claim the
+/// caller already read, which an assignee edit names to the claim route.
 pub struct UpdateOptions {
   pub stamp: Option<string>,
   pub claim: ClaimAs,
+  pub observed: ClaimRead,
+}
+
+/// Whether the caller read the issue's claim before the update: Read carries
+/// that claim's id (None for unclaimed), so the write layer does not read it
+/// a second time.
+pub enum ClaimRead {
+  Unread,
+  Read(Option<models.ClaimId>),
 }
 
 impl UpdateOptions {
   /// No stamp, no label, no force: a plain edit as `caller`.
   pub fn as_caller(caller: pb.Caller) -> UpdateOptions {
-    UpdateOptions { stamp: None, claim: ClaimAs { caller, .. } }
+    UpdateOptions { stamp: None, claim: ClaimAs { caller, .. }, observed: ClaimRead.Unread }
   }
 }
 
@@ -196,13 +207,13 @@ pub fn update_issue(
     Relation.Keep => false,
     _ => true,
   }
-  let observed = if assigning {
-    match claims.observed_id(ctx, issue.id) {
+  let observed = match (assigning, opts.observed) {
+    (false, _) => None,
+    (true, ClaimRead.Read(id)) => id,
+    (true, ClaimRead.Unread) => match claims.observed_id(ctx, issue.id) {
       Ok(id) => id,
       Err(e) => return Err(UpdateFailure.Failed(e)),
-    }
-  } else {
-    None
+    },
   }
   let keep_claim = patch.state.map_or(false, |e| e.keep_claim())
   let mut current = issue
@@ -342,7 +353,7 @@ fn issue_fields(
   }
   Ok((
     IssueFields {
-      state: patch.state.map(|e| e.state().wire()),
+      state: patch.state.map(|e| e.write()),
       sort: patch.sort,
       priority: patch.priority.map(|p| p.wire()),
       assignee: relation_value(patch.assignee, |id| id.string()),

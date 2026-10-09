@@ -1,14 +1,21 @@
-// The transition table (LLL-685): what changing an issue's state does to
-// its claim, decided in one pure function. Every path that changes a state
-// plans its write through `transition` - `issue close`, `issue update
-// --state`, `issue start` and the board's drag - and the write layer takes
-// only the Effects it returns, so no path sets a state around it.
+import "go:encoding/json"
+
+// State changes and their claim rule (LLL-685).
 //
-// The server enforces the same table in Go, because its hooks and routes run
-// there, inside the transaction that saves the issue: gopb TransitionClaim,
-// called by /close and by finishReleases (/assignment and a native PATCH).
-// transition.test.lis runs every row through both and fails when they
-// disagree, so a raw API client gets what the CLI and the board predict.
+// Every write that changes an issue's state goes through `transition`:
+// `issue close`, `issue update --state`, `issue start` and the board's drag.
+// It turns the ask into Effects, and the write layer puts a state on the
+// wire only as Effects.write(), a StateWrite nothing else can build, so no
+// path sets a state around it (scripts/test_transition_ratchet.py).
+//
+// What the change does to the claim is the server's to decide, inside the
+// transaction that saves the issue, after checks this side cannot see (the
+// agent label, a read-only member, an archived team). So the client sends
+// what was asked and reports what the server did. The rule itself is
+// stated here as a table, move_effect and close_effect, and in Go as gopb
+// TransitionClaim, which /close and finishReleases (/assignment and a native
+// PATCH) enforce; transition.test.lis runs every row through both and fails
+// when they disagree.
 //
 // A state change never edits the assignee: a finished issue keeps it as the
 // record of who did the work (fleet case 07). Only an assignee edit clears
@@ -58,28 +65,11 @@ pub enum Refusal {
   KeepNotHolder,
 }
 
-impl Refusal {
-  /// The refusal in the server's words (gopb releaseAuthority and closeIssue,
-  /// as PocketBase sentences them), so a refusal decided here before any
-  /// request reads as the one the server gives a raw API client. `holder` is
-  /// the holder's byline as the caller may see it.
-  pub fn message(self, hold: Hold, holder: string) -> string {
-    match self {
-      Refusal.NeedsForce => {
-        let whose = if hold == Hold.OtherSession { "another session's" } else { "another member's" }
-        f"The claim is held by {holder}; releasing {whose} claim needs force."
-      },
-      Refusal.KeepNotHolder => f"The claim is held by {holder}; only the holder keeps a claim while closing, and closing anyone else's claimed issue releases it.",
-    }
-  }
-}
-
-/// The writes a state change makes: the state, and what becomes of the
-/// claim. Only `transition` builds one; the fields are private so nothing
-/// else can.
+/// The write a state change makes: the state, and the claim opt-out the
+/// request carries. Only `transition` builds one; the field is private so
+/// nothing else can.
 pub struct Effects {
   asked: Ask,
-  effect: ClaimEffect,
 }
 
 impl Effects {
@@ -91,53 +81,58 @@ impl Effects {
     }
   }
 
-  pub fn claim(self) -> ClaimEffect {
-    self.effect
-  }
-
-  /// The opt-out the request carries: the server re-decides under its lock,
-  /// so it gets what was asked, not only what was predicted.
+  /// The opt-out the request carries.
   pub fn keep_claim(self) -> bool {
     match self.asked {
       Ask.Close { keep_claim, .. } => keep_claim,
       Ask.Move { keep_claim, .. } => keep_claim,
     }
   }
+
+  /// The state as a write body carries it.
+  pub fn write(self) -> StateWrite {
+    StateWrite { wire: self.state().wire() }
+  }
 }
 
-/// The table. `from` is the issue's state as read (None for a value this
-/// lll does not know). A close does not consult it.
-pub fn transition(from: Option<IssueState>, hold: Hold, asked: Ask) -> Result<Effects, Refusal> {
-  let mine = match hold {
-    Hold.Unclaimed => return Ok(Effects { asked, effect: ClaimEffect.Untouched }),
-    Hold.Caller => true,
-    Hold.OtherSession | Hold.OtherMember => false,
+/// A state on the wire. Its field is private, so the only way to put a state
+/// into a write body is Effects.write(); it encodes as the wire string.
+pub struct StateWrite {
+  wire: string,
+}
+
+impl StateWrite {
+  pub fn MarshalJSON(self) -> Result<Slice<byte>, error> {
+    json.Marshal(self.wire)
   }
-  let effect = match asked {
-    Ask.Close { keep_claim, force } => {
-      if !mine && !force { return Err(Refusal.NeedsForce) }
-      if !mine && keep_claim { return Err(Refusal.KeepNotHolder) }
-      if !mine {
-        ClaimEffect.ForceReleased
-      } else if keep_claim {
-        ClaimEffect.Kept
-      } else {
-        ClaimEffect.Released
-      }
-    },
-    Ask.Move { to, keep_claim } => {
-      if from == Some(to) || !to.is_terminal() {
-        ClaimEffect.Untouched
-      } else if !mine {
-        ClaimEffect.Left
-      } else if keep_claim {
-        ClaimEffect.Kept
-      } else {
-        ClaimEffect.Released
-      }
-    },
+}
+
+/// The one door to a state write.
+pub fn transition(asked: Ask) -> Effects {
+  Effects { asked }
+}
+
+/// The move rows of the claim rule: a move into done or cancelled by the
+/// holder releases the hold (or keeps it, asked to); by anyone else it
+/// leaves the hold; any other move touches none. `from` is the issue's state
+/// as read (None for a value this lll does not know).
+pub fn move_effect(from: Option<IssueState>, to: IssueState, hold: Hold, keep_claim: bool) -> ClaimEffect {
+  if hold == Hold.Unclaimed || from == Some(to) || !to.is_terminal() { return ClaimEffect.Untouched }
+  if hold != Hold.Caller { return ClaimEffect.Left }
+  if keep_claim { ClaimEffect.Kept } else { ClaimEffect.Released }
+}
+
+/// The close rows: a close settles any hold. The holder's is released or
+/// kept; anyone else's needs force, which releases it with a comment, and
+/// cannot be kept.
+pub fn close_effect(hold: Hold, keep_claim: bool, force: bool) -> Result<ClaimEffect, Refusal> {
+  if hold == Hold.Unclaimed { return Ok(ClaimEffect.Untouched) }
+  if hold != Hold.Caller {
+    if !force { return Err(Refusal.NeedsForce) }
+    if keep_claim { return Err(Refusal.KeepNotHolder) }
+    return Ok(ClaimEffect.ForceReleased)
   }
-  Ok(Effects { asked, effect })
+  if keep_claim { Ok(ClaimEffect.Kept) } else { Ok(ClaimEffect.Released) }
 }
 
 /// The hold `claim` is to the member `me` (None for a superuser) acting

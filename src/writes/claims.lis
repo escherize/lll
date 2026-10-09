@@ -136,8 +136,8 @@ pub fn observed_claim(posted: string) -> models.ClaimId {
 
 /// Set the issue done and release its claim in one server transaction (D3,
 /// LLL-640). `claim_id` is the hold the caller observed, None for none.
-/// `effects` is the close models.transition planned from that hold; the
-/// server decides it again from the same table under its lock. The release
+/// `effects` is the close models.transition made of the ask; the server
+/// decides what it does to the claim (gopb TransitionClaim). The release
 /// rule is release's: the holder freely, anyone else with force, which
 /// comments. Keeping the claim is the holder's alone. The assignee is kept.
 pub fn close_issue(

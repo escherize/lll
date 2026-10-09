@@ -70,12 +70,9 @@ fn start(input: flags.CommandInput) -> Result<(), pb.CliError> {
       }
     }
   }
-  // Through the transition table like every state change (LLL-685): a
-  // start is no finish, so it leaves any claim where it is.
-  let held = claims.fetch(ctx, issue.id)?
-  let hold = models.hold_of(held, records.token_member(ctx.token()), agent)
-  let effects = models.transition(issue.state(), hold, models.Ask.Move { to: models.IssueState.InProgress, keep_claim: false })
-    .map_err(|r| claims.refused(r, hold, held))?
+  // A move like every state change (LLL-685); a start is no finish, so it
+  // leaves any claim where it is.
+  let effects = models.transition(models.Ask.Move { to: models.IssueState.InProgress, keep_claim: false })
   let started = writes.update_issue(ctx, issue,
     writes.IssuePatch { state: Some(effects), ..writes.IssuePatch.unchanged() },
     writes.UpdateOptions.as_caller(pb.Caller.Process),

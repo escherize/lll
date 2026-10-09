@@ -1,3 +1,4 @@
+import "go:encoding/json"
 import "go:github.com/escherize/lll/gopb"
 
 fn holds() -> Slice<Hold> {
@@ -56,9 +57,12 @@ fn server_row(from: Option<IssueState>, hold: Hold, asked: Ask) -> (string, stri
 
 /// The same row as this copy answers it.
 fn client_row(from: Option<IssueState>, hold: Hold, asked: Ask) -> (string, string) {
-  match transition(from, hold, asked) {
-    Ok(e) => (effect_wire(e.claim()), ""),
-    Err(r) => ("", refusal_wire(r)),
+  match asked {
+    Ask.Move { to, keep_claim } => (effect_wire(move_effect(from, to, hold, keep_claim)), ""),
+    Ask.Close { keep_claim, force } => match close_effect(hold, keep_claim, force) {
+      Ok(e) => (effect_wire(e), ""),
+      Err(r) => ("", refusal_wire(r)),
+    },
   }
 }
 
@@ -137,20 +141,15 @@ fn a_close_settles_the_hold_whatever_the_state() {
 
 #[test]
 fn effects_carry_the_state_and_the_asked_opt_out() {
-  let Ok(closed) = transition(Some(IssueState.Todo), Hold.OtherMember, Ask.Close { keep_claim: false, force: true }) else {
-    assert false
-    return
-  }
+  let closed = transition(Ask.Close { keep_claim: false, force: true })
   assert closed.state() == IssueState.Done
   assert !closed.keep_claim()
-  // The opt-out rides even when the prediction is that nothing is kept: the
-  // server decides again under its lock.
-  let Ok(moved) = transition(Some(IssueState.Todo), Hold.Unclaimed, move_to(IssueState.Cancelled, true)) else {
-    assert false
-    return
-  }
+  let moved = transition(move_to(IssueState.Cancelled, true))
   assert moved.state() == IssueState.Cancelled
   assert moved.keep_claim()
+  // The write encodes as the bare wire string.
+  let assert Ok(body) = json.Marshal(moved.write())
+  assert body as string == "\"cancelled\""
 }
 
 fn claim_by(member: string, agent: string) -> Claim {
@@ -168,12 +167,4 @@ fn a_hold_is_read_from_the_callers_side() {
   assert hold_of(Some(claim_by("m2", "")), me, "") == Hold.OtherMember
   // A superuser has no member: every hold is someone else's.
   assert hold_of(Some(claim_by("m1", "")), None, "") == Hold.OtherMember
-}
-
-#[test]
-fn a_refusal_reads_as_the_servers() {
-  // gopb releaseAuthority and closeIssue, as PocketBase sentences them.
-  assert Refusal.NeedsForce.message(Hold.OtherMember, "bryan") == "The claim is held by bryan; releasing another member's claim needs force."
-  assert Refusal.NeedsForce.message(Hold.OtherSession, "bryan (agent a1)") == "The claim is held by bryan (agent a1); releasing another session's claim needs force."
-  assert Refusal.KeepNotHolder.message(Hold.OtherMember, "bryan") == "The claim is held by bryan; only the holder keeps a claim while closing, and closing anyone else's claimed issue releases it."
 }
